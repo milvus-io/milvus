@@ -109,18 +109,11 @@ const (
 	IndexFaissIVFFlat    = "IVF_FLAT"
 	IndexFaissIVFPQ      = "IVF_PQ"
 	IndexFaissIVFSQ8     = "IVF_SQ8"
-	IndexFaissIVFSQ8H    = "IVF_SQ8_HYBRID"
 	IndexFaissBinIDMap   = "BIN_FLAT"
 	IndexFaissBinIVFFlat = "BIN_IVF_FLAT"
-	IndexNsg             = "NSG"
 
-	IndexHNSW      = "HNSW"
-	IndexRHNSWFlat = "RHNSW_FLAT"
-	IndexRHNSWPQ   = "RHNSW_PQ"
-	IndexRHNSWSQ   = "RHNSW_SQ"
-	IndexANNOY     = "ANNOY"
-	IndexNGTPANNG  = "NGT_PANNG"
-	IndexNGTONNG   = "NGT_ONNG"
+	IndexHNSW  = "HNSW"
+	IndexANNOY = "ANNOY"
 
 	// metric type
 	L2       = "L2"
@@ -133,7 +126,6 @@ const (
 	m              = 4
 	nbits          = 8
 	nprobe         = 8
-	sliceSize      = 4
 	efConstruction = 200
 	ef             = 200
 	edgeSize       = 10
@@ -446,70 +438,26 @@ func genIndexParams(indexType, metricType string) (map[string]string, map[string
 	indexParams["metric_type"] = metricType
 	indexParams["index_mode"] = "cpu"
 	if indexType == IndexFaissIDMap { // float vector
-		indexParams["SLICE_SIZE"] = strconv.Itoa(sliceSize)
 	} else if indexType == IndexFaissIVFFlat {
 		indexParams["nlist"] = strconv.Itoa(nlist)
 	} else if indexType == IndexFaissIVFPQ {
 		indexParams["nlist"] = strconv.Itoa(nlist)
 		indexParams["m"] = strconv.Itoa(m)
 		indexParams["nbits"] = strconv.Itoa(nbits)
-		indexParams["SLICE_SIZE"] = strconv.Itoa(sliceSize)
 	} else if indexType == IndexFaissIVFSQ8 {
 		indexParams["nlist"] = strconv.Itoa(nlist)
 		indexParams["nbits"] = strconv.Itoa(nbits)
-		indexParams["SLICE_SIZE"] = strconv.Itoa(sliceSize)
-	} else if indexType == IndexFaissIVFSQ8H {
-		// TODO: enable gpu
-	} else if indexType == IndexNsg {
-		indexParams["nlist"] = strconv.Itoa(163)
-		indexParams["nprobe"] = strconv.Itoa(nprobe)
-		indexParams["knng"] = strconv.Itoa(20)
-		indexParams["search_length"] = strconv.Itoa(40)
-		indexParams["out_degree"] = strconv.Itoa(30)
-		indexParams["candidate_pool_size"] = strconv.Itoa(100)
 	} else if indexType == IndexHNSW {
 		indexParams["M"] = strconv.Itoa(16)
 		indexParams["efConstruction"] = strconv.Itoa(efConstruction)
 		//indexParams["ef"] = strconv.Itoa(ef)
-	} else if indexType == IndexRHNSWFlat {
-		indexParams["m"] = strconv.Itoa(16)
-		indexParams["efConstruction"] = strconv.Itoa(efConstruction)
-		indexParams["ef"] = strconv.Itoa(ef)
-		indexParams["SLICE_SIZE"] = strconv.Itoa(sliceSize)
-	} else if indexType == IndexRHNSWPQ {
-		indexParams["m"] = strconv.Itoa(16)
-		indexParams["efConstruction"] = strconv.Itoa(efConstruction)
-		indexParams["ef"] = strconv.Itoa(ef)
-		indexParams["SLICE_SIZE"] = strconv.Itoa(sliceSize)
-		indexParams["PQM"] = strconv.Itoa(8)
-	} else if indexType == IndexRHNSWSQ {
-		indexParams["m"] = strconv.Itoa(16)
-		indexParams["efConstruction"] = strconv.Itoa(efConstruction)
-		indexParams["ef"] = strconv.Itoa(ef)
-		indexParams["SLICE_SIZE"] = strconv.Itoa(sliceSize)
 	} else if indexType == IndexANNOY {
 		indexParams["n_trees"] = strconv.Itoa(4)
 		indexParams["search_k"] = strconv.Itoa(100)
-		indexParams["SLICE_SIZE"] = strconv.Itoa(sliceSize)
-	} else if indexType == IndexNGTPANNG {
-		indexParams["edge_size"] = strconv.Itoa(edgeSize)
-		indexParams["epsilon"] = fmt.Sprint(epsilon)
-		indexParams["max_search_edges"] = strconv.Itoa(maxSearchEdges)
-		indexParams["forcedly_pruned_edge_size"] = strconv.Itoa(60)
-		indexParams["selectively_pruned_edge_size"] = strconv.Itoa(30)
-		indexParams["SLICE_SIZE"] = strconv.Itoa(sliceSize)
-	} else if indexType == IndexNGTONNG {
-		indexParams["edge_size"] = strconv.Itoa(edgeSize)
-		indexParams["epsilon"] = fmt.Sprint(epsilon)
-		indexParams["max_search_edges"] = strconv.Itoa(maxSearchEdges)
-		indexParams["outgoing_edge_size"] = strconv.Itoa(5)
-		indexParams["incoming_edge_size"] = strconv.Itoa(40)
-		indexParams["SLICE_SIZE"] = strconv.Itoa(sliceSize)
 	} else if indexType == IndexFaissBinIVFFlat { // binary vector
 		indexParams["nlist"] = strconv.Itoa(nlist)
 		indexParams["m"] = strconv.Itoa(m)
 		indexParams["nbits"] = strconv.Itoa(nbits)
-		indexParams["SLICE_SIZE"] = strconv.Itoa(sliceSize)
 	} else if indexType == IndexFaissBinIDMap {
 		//indexParams["dim"] = strconv.Itoa(defaultDim)
 	} else {

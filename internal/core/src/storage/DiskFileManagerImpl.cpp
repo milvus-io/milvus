@@ -19,6 +19,7 @@
 #include <mutex>
 
 #include "common/Consts.h"
+#include "common/Slice.h"
 #include "log/Log.h"
 #include "config/ConfigKnowhere.h"
 #include "storage/DiskFileManagerImpl.h"
@@ -97,7 +98,7 @@ DiskFileManagerImpl::AddFile(const std::string& file) noexcept {
     int slice_num = 0;
     auto remotePrefix = GetRemoteIndexObjectPrefix();
     for (int64_t offset = 0; offset < fileSize; slice_num++) {
-        auto batch_size = std::min(milvus::config::KnowhereGetIndexSliceSize() << 20, int64_t(fileSize) - offset);
+        auto batch_size = std::min(index_file_slice_size << 20, int64_t(fileSize) - offset);
 
         auto fieldData = std::make_shared<FieldData>(buf.get() + offset, batch_size);
         auto indexData = std::make_shared<IndexData>(fieldData);

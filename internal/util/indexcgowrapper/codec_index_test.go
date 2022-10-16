@@ -208,7 +208,6 @@ func genFloatVecIndexCases(dtype schemapb.DataType) []indexTestCase {
 				"nlist":       strconv.Itoa(nlist),
 				"m":           strconv.Itoa(m),
 				"nbits":       strconv.Itoa(nbits),
-				"SLICE_SIZE":  strconv.Itoa(sliceSize),
 			},
 		},
 		{
@@ -219,7 +218,6 @@ func genFloatVecIndexCases(dtype schemapb.DataType) []indexTestCase {
 				"metric_type": L2,
 				"dim":         strconv.Itoa(dim),
 				"nlist":       strconv.Itoa(nlist),
-				"SLICE_SIZE":  strconv.Itoa(sliceSize),
 			},
 		},
 	}
@@ -236,7 +234,6 @@ func genBinaryVecIndexCases(dtype schemapb.DataType) []indexTestCase {
 				"dim":         strconv.Itoa(dim),
 				"nlist":       strconv.Itoa(nlist),
 				"nbits":       strconv.Itoa(nbits),
-				"SLICE_SIZE":  strconv.Itoa(sliceSize),
 			},
 		},
 	}

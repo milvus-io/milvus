@@ -15,14 +15,26 @@
 // limitations under the License.
 
 #pragma once
-#include <string>
 
-namespace milvus::config {
+#include "common/Types.h"
+
+namespace milvus {
+
+extern int64_t index_file_slice_size;
 
 void
-KnowhereInitImpl(const char*);
+SetIndexSliceSize(const int64_t size);
 
-std::string
-KnowhereSetSimdType(const char*);
+void
+Assemble(BinarySet& binarySet);
 
-}  // namespace milvus::config
+void
+Disassemble(BinarySet& binarySet);
+
+void
+AppendSliceMeta(BinarySet& binarySet, const Config& meta_info);
+
+BinaryPtr
+EraseSliceMeta(BinarySet& binarySet);
+
+}  // namespace milvus

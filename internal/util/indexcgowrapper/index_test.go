@@ -91,7 +91,6 @@ func generateParams(indexType, metricType string) (map[string]string, map[string
 	indexParams["metric_type"] = metricType
 	if indexType == IndexFaissIDMap { // float vector
 		indexParams["dim"] = strconv.Itoa(dim)
-		indexParams["SLICE_SIZE"] = strconv.Itoa(sliceSize)
 	} else if indexType == IndexFaissIVFFlat {
 		indexParams["dim"] = strconv.Itoa(dim)
 		indexParams["nlist"] = strconv.Itoa(nlist)
@@ -100,12 +99,10 @@ func generateParams(indexType, metricType string) (map[string]string, map[string
 		indexParams["nlist"] = strconv.Itoa(nlist)
 		indexParams["m"] = strconv.Itoa(m)
 		indexParams["nbits"] = strconv.Itoa(nbits)
-		indexParams["SLICE_SIZE"] = strconv.Itoa(sliceSize)
 	} else if indexType == IndexFaissIVFSQ8 {
 		indexParams["dim"] = strconv.Itoa(dim)
 		indexParams["nlist"] = strconv.Itoa(nlist)
 		indexParams["nbits"] = strconv.Itoa(nbits)
-		indexParams["SLICE_SIZE"] = strconv.Itoa(sliceSize)
 	} else if indexType == IndexHNSW {
 		indexParams["dim"] = strconv.Itoa(dim)
 		indexParams["M"] = strconv.Itoa(16)
@@ -115,13 +112,11 @@ func generateParams(indexType, metricType string) (map[string]string, map[string
 		indexParams["dim"] = strconv.Itoa(dim)
 		indexParams["n_trees"] = strconv.Itoa(4)
 		indexParams["search_k"] = strconv.Itoa(100)
-		indexParams["SLICE_SIZE"] = strconv.Itoa(sliceSize)
 	} else if indexType == IndexFaissBinIVFFlat { // binary vector
 		indexParams["dim"] = strconv.Itoa(dim)
 		indexParams["nlist"] = strconv.Itoa(nlist)
 		indexParams["m"] = strconv.Itoa(m)
 		indexParams["nbits"] = strconv.Itoa(nbits)
-		indexParams["SLICE_SIZE"] = strconv.Itoa(sliceSize)
 	} else if indexType == IndexFaissBinIDMap {
 		indexParams["dim"] = strconv.Itoa(dim)
 	} else {

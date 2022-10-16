@@ -31,7 +31,6 @@ class IndexWrapperTest : public ::testing::TestWithParam<Param> {
     void
     SetUp() override {
         knowhere::KnowhereConfig::SetStatisticsLevel(3);
-        knowhere::KnowhereConfig::SetIndexFileSliceSize(16);
         storage_config_ = get_default_storage_config();
 
         auto param = GetParam();

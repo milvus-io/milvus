@@ -26,6 +26,7 @@
 #include "index/Utils.h"
 #include "index/Index.h"
 #include "common/Utils.h"
+#include "common/Slice.h"
 
 namespace milvus::index {
 
@@ -85,14 +86,14 @@ StringIndexMarisa::Serialize(const Config& config) {
     res_set.Append(MARISA_TRIE_INDEX, index_data, size);
     res_set.Append(MARISA_STR_IDS, str_ids, str_ids_len);
 
-    knowhere::Disassemble(res_set, config);
+    milvus::Disassemble(res_set);
 
     return res_set;
 }
 
 void
 StringIndexMarisa::Load(const BinarySet& set, const Config& config) {
-    knowhere::Assemble(const_cast<BinarySet&>(set));
+    milvus::Assemble(const_cast<BinarySet&>(set));
 
     auto uuid = boost::uuids::random_generator()();
     auto uuid_string = boost::uuids::to_string(uuid);

@@ -23,6 +23,7 @@
 #include "knowhere/common/Log.h"
 #include "Meta.h"
 #include "common/Utils.h"
+#include "common/Slice.h"
 
 namespace milvus::index {
 
@@ -73,6 +74,9 @@ ScalarIndexSort<T>::Serialize(const Config& config) {
     BinarySet res_set;
     res_set.Append("index_data", index_data, index_data_size);
     res_set.Append("index_length", index_length, sizeof(size_t));
+
+    milvus::Disassemble(res_set);
+
     return res_set;
 }
 
@@ -80,6 +84,7 @@ template <typename T>
 inline void
 ScalarIndexSort<T>::Load(const BinarySet& index_binary, const Config& config) {
     size_t index_size;
+    milvus::Assemble(const_cast<BinarySet&>(index_binary));
     auto index_length = index_binary.GetByName("index_length");
     memcpy(&index_size, index_length->data.get(), (size_t)index_length->size);
 

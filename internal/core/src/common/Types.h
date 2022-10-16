@@ -116,6 +116,7 @@ using Config = nlohmann::json;
 using TargetBitmap = boost::dynamic_bitset<>;
 using TargetBitmapPtr = std::unique_ptr<TargetBitmap>;
 
+using BinaryPtr = knowhere::BinaryPtr;
 using BinarySet = knowhere::BinarySet;
 using DatasetPtr = knowhere::DatasetPtr;
 using MetricType = knowhere::MetricType;

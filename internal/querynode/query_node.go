@@ -217,7 +217,7 @@ func (node *QueryNode) InitSegcore() {
 
 	// override segcore index slice size
 	cIndexSliceSize := C.int64_t(Params.CommonCfg.IndexSliceSize)
-	C.SegcoreSetIndexSliceSize(cIndexSliceSize)
+	C.InitIndexSliceSize(cIndexSliceSize)
 
 	initcore.InitLocalStorageConfig(&Params)
 }

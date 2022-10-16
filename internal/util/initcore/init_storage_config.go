@@ -36,6 +36,6 @@ func InitLocalStorageConfig(params *paramtable.ComponentParam) {
 	b, _ := os.Getwd()
 	LocalRootPath := filepath.Dir(b) + "/" + filepath.Base(b) + "/" + "data/"
 	CLocalRootPath := C.CString(LocalRootPath)
-	C.LocalRootPathInit(CLocalRootPath)
+	C.InitLocalRootPath(CLocalRootPath)
 	C.free(unsafe.Pointer(CLocalRootPath))
 }

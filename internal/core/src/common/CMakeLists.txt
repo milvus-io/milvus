@@ -14,6 +14,7 @@ milvus_add_pkg_config("milvus_common")
 set(COMMON_SRC
         Schema.cpp
         SystemProperty.cpp
+        Slice.cpp
         binary_set_c.cpp
         init_c.cpp
         )

@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 
+#include "common/Slice.h"
 #include "storage/Event.h"
 #include "storage/LocalChunkManager.h"
 #include "storage/DiskFileManagerImpl.h"
@@ -36,7 +37,6 @@ class DiskAnnFileManagerTest : public testing::Test {
     virtual void
     SetUp() {
         ChunkMangerConfig::SetLocalRootPath("/tmp/diskann");
-        config::KnowhereSetIndexSliceSize(5);
         storage_config_ = get_default_storage_config();
     }
 
@@ -62,7 +62,7 @@ TEST_F(DiskAnnFileManagerTest, AddFilePositive) {
     FieldDataMeta filed_data_meta = {1, 2, 3, 100};
     IndexMeta index_meta = {3, 100, 1000, 1, "index"};
 
-    int64_t slice_size = config::KnowhereGetIndexSliceSize() << 20;
+    int64_t slice_size = milvus::index_file_slice_size << 20;
     auto diskAnnFileManager = std::make_shared<DiskFileManagerImpl>(filed_data_meta, index_meta, storage_config_);
     auto ok = diskAnnFileManager->AddFile(indexFilePath);
     EXPECT_EQ(ok, true);
