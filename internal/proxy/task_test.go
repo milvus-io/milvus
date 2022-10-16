@@ -2059,6 +2059,7 @@ func Test_checkTrain(t *testing.T) {
 func Test_createIndexTask_PreExecute(t *testing.T) {
 	collectionName := "test"
 	fieldName := "test"
+	Params.Init()
 
 	cit := &createIndexTask{
 		req: &milvuspb.CreateIndexRequest{
@@ -2120,6 +2121,35 @@ func Test_createIndexTask_PreExecute(t *testing.T) {
 		})
 		globalMetaCache = cache
 		assert.Error(t, cit.PreExecute(context.Background()))
+	})
+
+	t.Run("index name length exceed 255", func(t *testing.T) {
+		cache := newMockCache()
+		cache.setGetIDFunc(func(ctx context.Context, collectionName string) (typeutil.UniqueID, error) {
+			return 100, nil
+		})
+		globalMetaCache = cache
+
+		for i := 0; i < 256; i++ {
+			cit.req.IndexName += "a"
+		}
+		err := cit.PreExecute(context.Background())
+
+		assert.Error(t, err)
+	})
+
+	t.Run("index name start with number", func(t *testing.T) {
+		cit.req.IndexName = "12a"
+		err := cit.PreExecute(context.Background())
+
+		assert.Error(t, err)
+	})
+
+	t.Run("index name include special characters", func(t *testing.T) {
+		cit.req.IndexName = "ac#1"
+		err := cit.PreExecute(context.Background())
+
+		assert.Error(t, err)
 	})
 }
 

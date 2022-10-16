@@ -802,3 +802,33 @@ func translateOutputFields(outputFields []string, schema *schemapb.CollectionSch
 	}
 	return resultFieldNames, nil
 }
+
+func validateIndexName(indexName string) error {
+	indexName = strings.TrimSpace(indexName)
+
+	if indexName == "" {
+		return nil
+	}
+	invalidMsg := "Invalid index name: " + indexName + ". "
+	if int64(len(indexName)) > Params.ProxyCfg.MaxNameLength {
+		msg := invalidMsg + "The length of a index name must be less than " +
+			strconv.FormatInt(Params.ProxyCfg.MaxNameLength, 10) + " characters."
+		return errors.New(msg)
+	}
+
+	firstChar := indexName[0]
+	if firstChar != '_' && !isAlpha(firstChar) {
+		msg := invalidMsg + "The first character of a index name must be an underscore or letter."
+		return errors.New(msg)
+	}
+
+	indexNameSize := len(indexName)
+	for i := 1; i < indexNameSize; i++ {
+		c := indexName[i]
+		if c != '_' && !isAlpha(c) && !isNumber(c) {
+			msg := invalidMsg + "Index name cannot only contain numbers, letters, and underscores."
+			return errors.New(msg)
+		}
+	}
+	return nil
+}

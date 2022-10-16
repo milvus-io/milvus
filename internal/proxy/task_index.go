@@ -271,6 +271,10 @@ func (cit *createIndexTask) PreExecute(ctx context.Context) error {
 	}
 	cit.collectionID = collID
 
+	if err = validateIndexName(cit.req.GetIndexName()); err != nil {
+		return err
+	}
+
 	field, err := cit.getIndexedField(ctx)
 	if err != nil {
 		return err

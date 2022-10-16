@@ -176,8 +176,8 @@ class TestIndexParams(TestcaseBase):
                                                             "but parameters are inconsistent"})
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue 19181")
-    @pytest.mark.parametrize("get_invalid_index_name", ["1nDex", "$in4t", "12 s", None, "(中文)"])
+    # @pytest.mark.xfail(reason="issue 19181")
+    @pytest.mark.parametrize("get_invalid_index_name", ["1nDex", "$in4t", "12 s", "(中文)"])
     def test_index_name_invalid(self, get_invalid_index_name):
         """
         target: test index with error index name
@@ -188,7 +188,10 @@ class TestIndexParams(TestcaseBase):
         index_name = get_invalid_index_name
         collection_w = self.init_collection_wrap(name=c_name)
         self.index_wrap.init_index(collection_w.collection, default_field_name, default_index_params,
-                                   index_name=get_invalid_index_name)
+                                   index_name=get_invalid_index_name,
+                                   check_task=CheckTasks.err_res,
+                                   check_items={ct.err_code: 1,
+                                                ct.err_msg: "Invalid index name"})
 
 
 class TestIndexOperation(TestcaseBase):
