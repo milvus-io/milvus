@@ -948,7 +948,7 @@ func (sc *ShardCluster) segmentsOnline(segments []shardSegmentInfo) bool {
 // GetStatistics returns the statistics on the shard cluster.
 func (sc *ShardCluster) GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest, withStreaming withStreaming) ([]*internalpb.GetStatisticsResponse, error) {
 	if !sc.serviceable() {
-		return nil, fmt.Errorf("ShardCluster for %s replicaID %d is no available", sc.vchannelName, sc.replicaID)
+		return nil, fmt.Errorf("ShardCluster for %s replicaID %d is not available", sc.vchannelName, sc.replicaID)
 	}
 	if !funcutil.SliceContain(req.GetDmlChannels(), sc.vchannelName) {
 		return nil, fmt.Errorf("ShardCluster for %s does not match request channels :%v", sc.vchannelName, req.GetDmlChannels())
@@ -999,7 +999,7 @@ func (sc *ShardCluster) GetStatistics(ctx context.Context, req *querypb.GetStati
 		}
 		node, ok := sc.getNode(nodeID)
 		if !ok { // meta mismatch, report error
-			return nil, fmt.Errorf("ShardCluster for %s replicaID %d is no available", sc.vchannelName, sc.replicaID)
+			return nil, WrapErrShardNotAvailable(sc.replicaID, sc.vchannelName)
 		}
 		wg.Add(1)
 		go func() {
@@ -1031,7 +1031,15 @@ func (sc *ShardCluster) GetStatistics(ctx context.Context, req *querypb.GetStati
 // Search preforms search operation on shard cluster.
 func (sc *ShardCluster) Search(ctx context.Context, req *querypb.SearchRequest, withStreaming withStreaming) ([]*internalpb.SearchResults, error) {
 	if !sc.serviceable() {
-		return nil, fmt.Errorf("ShardCluster for %s replicaID %d is no available, state %d, version %+v", sc.vchannelName, sc.replicaID, sc.state.Load(), sc.currentVersion)
+		err := WrapErrShardNotAvailable(sc.replicaID, sc.vchannelName)
+		log.Debug("failed to search on shard",
+			zap.Int64("replicaID", sc.replicaID),
+			zap.String("channel", sc.vchannelName),
+			zap.Int32("state", sc.state.Load()),
+			zap.Any("version", sc.currentVersion),
+			zap.Error(err),
+		)
+		return nil, err
 	}
 	if !funcutil.SliceContain(req.GetDmlChannels(), sc.vchannelName) {
 		return nil, fmt.Errorf("ShardCluster for %s does not match request channels :%v", sc.vchannelName, req.GetDmlChannels())
@@ -1082,7 +1090,10 @@ func (sc *ShardCluster) Search(ctx context.Context, req *querypb.SearchRequest, 
 		}
 		node, ok := sc.getNode(nodeID)
 		if !ok { // meta dismatch, report error
-			return nil, fmt.Errorf("ShardCluster for %s replicaID %d is no available, node %d not found", sc.vchannelName, sc.replicaID, nodeID)
+			return nil, fmt.Errorf("%w, node %d not found",
+				WrapErrShardNotAvailable(sc.replicaID, sc.vchannelName),
+				nodeID,
+			)
 		}
 		wg.Add(1)
 		go func() {
@@ -1113,7 +1124,7 @@ func (sc *ShardCluster) Search(ctx context.Context, req *querypb.SearchRequest, 
 // Query performs query operation on shard cluster.
 func (sc *ShardCluster) Query(ctx context.Context, req *querypb.QueryRequest, withStreaming withStreaming) ([]*internalpb.RetrieveResults, error) {
 	if !sc.serviceable() {
-		return nil, fmt.Errorf("ShardCluster for %s replicaID %d is no available", sc.vchannelName, sc.replicaID)
+		return nil, WrapErrShardNotAvailable(sc.replicaID, sc.vchannelName)
 	}
 
 	// handles only the dml channel part, segment ids is dispatch by cluster itself
@@ -1159,7 +1170,7 @@ func (sc *ShardCluster) Query(ctx context.Context, req *querypb.QueryRequest, wi
 		}
 		node, ok := sc.getNode(nodeID)
 		if !ok { // meta dismatch, report error
-			return nil, fmt.Errorf("ShardCluster for %s replicaID %d is no available", sc.vchannelName, sc.replicaID)
+			return nil, WrapErrShardNotAvailable(sc.replicaID, sc.vchannelName)
 		}
 		wg.Add(1)
 		go func() {

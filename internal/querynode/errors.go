@@ -21,6 +21,14 @@ import (
 	"fmt"
 )
 
+var (
+	ErrShardNotAvailable = errors.New("ShardNotAvailable")
+)
+
+func WrapErrShardNotAvailable(replicaID int64, shard string) error {
+	return fmt.Errorf("%w(replica=%d, shard=%s)", ErrShardNotAvailable, replicaID, shard)
+}
+
 // msgQueryNodeIsUnhealthy is the error msg of unhealthy query node
 func msgQueryNodeIsUnhealthy(nodeID UniqueID) string {
 	return fmt.Sprintf("query node %d is not ready", nodeID)
