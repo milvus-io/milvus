@@ -651,9 +651,6 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 		flag = true
 		signal <- struct{}{}
 		s1.keepAliveCancel()
-		// directly delete the primary key to make this UT fast,
-		// or the session2 has to wait for session1 release after ttl(60s)
-		etcdCli.Delete(ctx1, s1.activeKey)
 	})
 	assert.False(t, s1.isStandby.Load().(bool))
 
@@ -670,8 +667,6 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 	})
 	assert.True(t, s2.isStandby.Load().(bool))
 
-	// sleep 20 seconds, the standby service will start watching primary key
-	time.Sleep(time.Second * 20)
 	//assert.True(t, s2.watchingPrimaryKeyLock)
 	// stop session 1, session 2 will take over primary service
 	log.Debug("Stop session 1, session 2 will take over primary service")
