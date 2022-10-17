@@ -119,7 +119,7 @@ embd-milvus: build-cpp-embd print-build-info
 		GO111MODULE=on $(GO) build -ldflags="-r /tmp/milvus/lib/ -X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)'" \
 		${APPLE_SILICON_FLAG} -buildmode=c-shared -o $(INSTALL_PATH)/embd-milvus.so $(PWD)/pkg/embedded/embedded.go 1>/dev/null
 
-update-milvus-api: download-milvus-proto update-api-version
+update-milvus-api: update-api-version download-milvus-proto
 
 download-milvus-proto:
 	@echo "Download milvus-proto repo ..."
@@ -127,7 +127,7 @@ download-milvus-proto:
 
 update-api-version:
 	@echo "Update milvus/api version ..."
-	@(env bash $(PWD)/scripts/update_milvus_api.sh)
+	@(env bash $(PWD)/scripts/update-api-version.sh)
 
 build-cpp: download-milvus-proto
 	@echo "Building Milvus cpp library ..."
