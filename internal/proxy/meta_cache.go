@@ -617,15 +617,15 @@ func (m *MetaCache) GetShards(ctx context.Context, withCache bool, collectionNam
 
 	shards := parseShardLeaderList2QueryNode(resp.GetShards())
 
-	// manipulate info in map, get map returns a copy of the information
-	m.mu.RLock()
-	info = m.collInfo[collectionName]
+	info, err = m.GetCollectionInfo(ctx, collectionName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get shards, collection %s not found", collectionName)
+	}
 	// lock leader
 	info.leaderMutex.Lock()
 	oldShards := info.shardLeaders
 	info.shardLeaders = shards
 	info.leaderMutex.Unlock()
-	m.mu.RUnlock()
 
 	// update refcnt in shardClientMgr
 	ret := info.CloneShardLeaders()
