@@ -18,12 +18,12 @@ type Backend interface {
 	Save(meta *meta.Meta) error
 	Clean() error
 	Backup(meta *meta.Meta, backupFile string) error
+	BackupV2(file string) error
 	Restore(backupFile string) error
 }
 
 func NewBackend(cfg *configs.MilvusConfig, version string) (Backend, error) {
-	switch cfg.MetaStoreCfg.MetaStoreType {
-	case util.MetaStoreTypeMysql:
+	if cfg.MetaStoreCfg.MetaStoreType != util.MetaStoreTypeEtcd {
 		return nil, fmt.Errorf("%s is not supported now", cfg.MetaStoreCfg.MetaStoreType)
 	}
 	v, err := semver.Parse(version)

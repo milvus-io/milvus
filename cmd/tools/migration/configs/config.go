@@ -17,6 +17,7 @@ const (
 type RunConfig struct {
 	base           *paramtable.BaseTable
 	Cmd            string
+	RunWithBackup  bool
 	SourceVersion  string
 	TargetVersion  string
 	BackupFilePath string
@@ -29,8 +30,19 @@ func newRunConfig(base *paramtable.BaseTable) *RunConfig {
 }
 
 func (c *RunConfig) String() string {
-	return fmt.Sprintf("Cmd: %s, SourceVersion: %s, TargetVersion: %s, BackupFilePath: %s",
-		c.Cmd, c.SourceVersion, c.TargetVersion, c.BackupFilePath)
+	switch c.Cmd {
+	case RunCmd:
+		return fmt.Sprintf("Cmd: %s, SourceVersion: %s, TargetVersion: %s, BackupFilePath: %s, RunWithBackup: %v",
+			c.Cmd, c.SourceVersion, c.TargetVersion, c.BackupFilePath, c.RunWithBackup)
+	case BackupCmd:
+		return fmt.Sprintf("Cmd: %s, SourceVersion: %s, BackupFilePath: %s",
+			c.Cmd, c.SourceVersion, c.BackupFilePath)
+	case RollbackCmd:
+		return fmt.Sprintf("Cmd: %s, SourceVersion: %s, TargetVersion: %s, BackupFilePath: %s",
+			c.Cmd, c.SourceVersion, c.TargetVersion, c.BackupFilePath)
+	default:
+		return fmt.Sprintf("invalid cmd: %s", c.Cmd)
+	}
 }
 
 func (c *RunConfig) show() {
@@ -41,6 +53,7 @@ func (c *RunConfig) init(base *paramtable.BaseTable) {
 	c.base = base
 
 	c.Cmd = c.base.LoadWithDefault("cmd.type", "")
+	c.RunWithBackup = c.base.ParseBool("cmd.runWithBackup", false)
 	c.SourceVersion = c.base.LoadWithDefault("config.sourceVersion", "")
 	c.TargetVersion = c.base.LoadWithDefault("config.targetVersion", "")
 	c.BackupFilePath = c.base.LoadWithDefault("config.backupFilePath", "")

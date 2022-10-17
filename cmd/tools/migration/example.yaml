@@ -1,6 +1,7 @@
 cmd:
   # Option: run/backup/rollback
   type: run
+  runWithBackup: false
 
 config:
   sourceVersion: 2.1.0

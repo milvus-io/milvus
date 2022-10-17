@@ -85,6 +85,30 @@ type Session struct {
 	isStandby           atomic.Value
 	enableActiveStandBy bool
 	activeKey           string
+
+	useCustomConfig   bool
+	sessionTTL        int64
+	sessionRetryTimes int64
+}
+
+type SessionOption func(session *Session)
+
+func WithCustomConfigEnable() SessionOption {
+	return func(session *Session) { session.useCustomConfig = true }
+}
+
+func WithSessionTTL(ttl int64) SessionOption {
+	return func(session *Session) { session.sessionTTL = ttl }
+}
+
+func WithSessionRetryTimes(n int64) SessionOption {
+	return func(session *Session) { session.sessionRetryTimes = n }
+}
+
+func (s *Session) apply(opts ...SessionOption) {
+	for _, opt := range opts {
+		opt(s)
+	}
 }
 
 // UnmarshalJSON unmarshal bytes to Session.
@@ -143,12 +167,17 @@ func (s *Session) MarshalJSON() ([]byte, error) {
 // ServerID, ServerName, Address, Exclusive will be assigned after Init().
 // metaRoot is a path in etcd to save session information.
 // etcdEndpoints is to init etcdCli when NewSession
-func NewSession(ctx context.Context, metaRoot string, client *clientv3.Client) *Session {
+func NewSession(ctx context.Context, metaRoot string, client *clientv3.Client, opts ...SessionOption) *Session {
 	session := &Session{
-		ctx:      ctx,
-		metaRoot: metaRoot,
-		Version:  common.Version,
+		ctx:               ctx,
+		metaRoot:          metaRoot,
+		Version:           common.Version,
+		useCustomConfig:   false,
+		sessionTTL:        60,
+		sessionRetryTimes: 30,
 	}
+
+	session.apply(opts...)
 
 	session.UpdateRegistered(false)
 
@@ -185,7 +214,9 @@ func (s *Session) Init(serverName, address string, exclusive bool, triggerKill b
 		panic(err)
 	}
 	s.ServerID = serverID
-	GlobalParams.InitOnce()
+	if !s.useCustomConfig {
+		GlobalParams.InitOnce()
+	}
 }
 
 // String makes Session struct able to be logged by zap
@@ -277,8 +308,16 @@ func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, er
 	completeKey := path.Join(s.metaRoot, DefaultServiceRoot, key)
 	var ch <-chan *clientv3.LeaseKeepAliveResponse
 	log.Debug("service begin to register to etcd", zap.String("serverName", s.ServerName), zap.Int64("ServerID", s.ServerID))
+
+	ttl := s.sessionTTL
+	retryTimes := s.sessionRetryTimes
+	if !s.useCustomConfig {
+		ttl = GlobalParams.CommonCfg.SessionTTL
+		retryTimes = GlobalParams.CommonCfg.SessionRetryTimes
+	}
+
 	registerFn := func() error {
-		resp, err := s.etcdCli.Grant(s.ctx, GlobalParams.CommonCfg.SessionTTL)
+		resp, err := s.etcdCli.Grant(s.ctx, ttl)
 		if err != nil {
 			log.Error("register service", zap.Error(err))
 			return err
@@ -317,7 +356,7 @@ func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, er
 		log.Info("Service registered successfully", zap.String("ServerName", s.ServerName), zap.Int64("serverID", s.ServerID))
 		return nil
 	}
-	err := retry.Do(s.ctx, registerFn, retry.Attempts(uint(GlobalParams.CommonCfg.SessionRetryTimes)))
+	err := retry.Do(s.ctx, registerFn, retry.Attempts(uint(retryTimes)))
 	if err != nil {
 		return nil, err
 	}

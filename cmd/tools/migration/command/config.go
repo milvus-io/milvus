@@ -15,7 +15,7 @@ func (c *commandParser) formatYaml(args []string, flags *flag.FlagSet) {
 }
 
 func (c *commandParser) parse(args []string, flags *flag.FlagSet) {
-	console.ExitIf(flags.Parse(args[1:]))
+	console.AbnormalExitIf(flags.Parse(args[1:]), false)
 }
 
 func (c *commandParser) format(args []string, flags *flag.FlagSet) {

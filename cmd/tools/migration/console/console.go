@@ -20,8 +20,7 @@ func Warning(msg string) {
 }
 
 func Exit(msg string) {
-	Error(msg)
-	os.Exit(1)
+	ExitWithOption(WithAbnormalExit(), WithMsg(msg))
 }
 
 func ExitIf(err error) {
@@ -30,25 +29,9 @@ func ExitIf(err error) {
 	}
 }
 
-func NormalExit(msg string) {
-	Success(msg)
-	os.Exit(0)
-}
-
-func NormalExitIf(success bool, msg string) {
-	if success {
-		NormalExit(msg)
-	}
-}
-
-func ErrorExit(msg string) {
-	Warning(msg)
-	os.Exit(1)
-}
-
-func ErrorExitIf(fail bool, msg string) {
+func ErrorExitIf(fail bool, backupFinished bool, msg string) {
 	if fail {
-		ErrorExit(msg)
+		AbnormalExit(backupFinished, msg)
 	}
 }
 

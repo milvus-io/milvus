@@ -6,6 +6,8 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/atomic"
+
 	"github.com/milvus-io/milvus/cmd/tools/migration/versions"
 
 	"github.com/blang/semver/v4"
@@ -22,19 +24,25 @@ import (
 )
 
 type Runner struct {
-	ctx      context.Context
-	cancel   context.CancelFunc
-	cfg      *configs.Config
-	initOnce sync.Once
-	session  *sessionutil.Session
-	address  string
-	etcdCli  *clientv3.Client
-	wg       sync.WaitGroup
+	ctx            context.Context
+	cancel         context.CancelFunc
+	cfg            *configs.Config
+	initOnce       sync.Once
+	session        *sessionutil.Session
+	address        string
+	etcdCli        *clientv3.Client
+	wg             sync.WaitGroup
+	backupFinished atomic.Bool
 }
 
 func NewRunner(ctx context.Context, cfg *configs.Config) *Runner {
 	ctx1, cancel := context.WithCancel(ctx)
-	runner := &Runner{ctx: ctx1, cancel: cancel, cfg: cfg}
+	runner := &Runner{
+		ctx:            ctx1,
+		cancel:         cancel,
+		cfg:            cfg,
+		backupFinished: *atomic.NewBool(false),
+	}
 	runner.initOnce.Do(runner.init)
 	return runner
 }
@@ -42,7 +50,7 @@ func NewRunner(ctx context.Context, cfg *configs.Config) *Runner {
 func (r *Runner) watchByPrefix(prefix string) {
 	defer r.wg.Done()
 	_, revision, err := r.session.GetSessions(prefix)
-	console.ExitIf(err)
+	console.AbnormalExitIf(err, r.backupFinished.Load())
 	eventCh := r.session.WatchServices(prefix, revision, nil)
 	for {
 		select {
@@ -50,7 +58,7 @@ func (r *Runner) watchByPrefix(prefix string) {
 			return
 		case event := <-eventCh:
 			msg := fmt.Sprintf("session up/down, exit migration, event type: %s, session: %s", event.EventType.String(), event.Session.String())
-			console.Exit(msg)
+			console.AbnormalExit(r.backupFinished.Load(), msg)
 		}
 	}
 }
@@ -64,14 +72,15 @@ func (r *Runner) WatchSessions() {
 
 func (r *Runner) initEtcdCli() {
 	cli, err := etcd.GetEtcdClient(r.cfg.EtcdCfg)
-	console.ExitIf(err)
+	console.AbnormalExitIf(err, r.backupFinished.Load())
 	r.etcdCli = cli
 }
 
 func (r *Runner) init() {
 	r.initEtcdCli()
 
-	r.session = sessionutil.NewSession(r.ctx, r.cfg.EtcdCfg.MetaRootPath, r.etcdCli)
+	r.session = sessionutil.NewSession(r.ctx, r.cfg.EtcdCfg.MetaRootPath, r.etcdCli,
+		sessionutil.WithCustomConfigEnable(), sessionutil.WithSessionTTL(60), sessionutil.WithSessionRetryTimes(30))
 	// address not important here.
 	address := time.Now().String()
 	r.address = address
@@ -152,11 +161,11 @@ func (r *Runner) Backup() error {
 	if err != nil {
 		return err
 	}
-	metas, err := source.Load()
-	if err != nil {
+	if err := source.BackupV2(r.cfg.BackupFilePath); err != nil {
 		return err
 	}
-	return source.Backup(metas, r.cfg.BackupFilePath)
+	r.backupFinished.Store(true)
+	return nil
 }
 
 func (r *Runner) Rollback() error {
@@ -188,9 +197,6 @@ func (r *Runner) Migrate() error {
 	}
 	metas, err := source.Load()
 	if err != nil {
-		return err
-	}
-	if err := source.Backup(metas, r.cfg.BackupFilePath); err != nil {
 		return err
 	}
 	if err := source.Clean(); err != nil {

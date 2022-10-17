@@ -13,12 +13,17 @@ import (
 func Run(c *configs.Config) {
 	ctx := context.Background()
 	runner := migration.NewRunner(ctx, c)
-	console.ExitIf(runner.CheckSessions())
-	console.ExitIf(runner.RegisterSession())
+	console.AbnormalExitIf(runner.CheckSessions(), false)
+	console.AbnormalExitIf(runner.RegisterSession(), false)
 	defer runner.Stop()
 	// double check.
-	console.ExitIf(runner.CheckSessions())
-	console.ExitIf(runner.Validate())
+	console.AbnormalExitIf(runner.CheckSessions(), false)
+	console.AbnormalExitIf(runner.Validate(), false)
 	console.NormalExitIf(runner.CheckCompatible(), "version compatible, no need to migrate")
-	console.ExitIf(runner.Migrate())
+	if c.RunWithBackup {
+		console.AbnormalExitIf(runner.Backup(), false)
+	} else {
+		console.Warning("run migration without backup!")
+	}
+	console.AbnormalExitIf(runner.Migrate(), true)
 }
