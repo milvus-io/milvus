@@ -148,7 +148,6 @@ func fillSubDmChannelRequest(
 	for _, vchannel := range req.GetInfos() {
 		segmentIDs.Insert(vchannel.GetFlushedSegmentIds()...)
 		segmentIDs.Insert(vchannel.GetUnflushedSegmentIds()...)
-		segmentIDs.Insert(vchannel.GetDroppedSegmentIds()...)
 	}
 
 	if segmentIDs.Len() == 0 {
