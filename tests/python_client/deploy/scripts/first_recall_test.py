@@ -2,12 +2,14 @@ import h5py
 import numpy as np
 import time
 from pathlib import Path
+import pymilvus
 from pymilvus import (
     connections,
     FieldSchema, CollectionSchema, DataType,
     Collection
 )
 
+pymilvus_version = pymilvus.__version__
 
 def read_benchmark_hdf5(file_path):
 
@@ -58,7 +60,10 @@ def milvus_recall_test(host='127.0.0.1'):
 
     t0 = time.time()
     print(f"\nGet collection entities...")
-    collection.flush()
+    if pymilvus_version >= "2.2.0":
+        collection.flush()
+    else:
+        collection.num_entities
     print(collection.num_entities)
     t1 = time.time()
     print(f"\nGet collection entities cost {t1 - t0:.4f} seconds")
