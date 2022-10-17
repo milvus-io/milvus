@@ -171,7 +171,9 @@ func testIndexCoord(t *testing.T) {
 	assert.NoError(t, err)
 
 	mockKv := NewMockEtcdKVWithReal(ic.etcdKV)
-	ic.metaTable, err = NewMetaTable(mockKv)
+	ic.metaTable.catalog = &indexcoord.Catalog{
+		Txn: mockKv,
+	}
 	assert.NoError(t, err)
 
 	err = ic.Register()
@@ -202,6 +204,7 @@ func testIndexCoord(t *testing.T) {
 			CollectionID: collID,
 			FieldID:      fieldID,
 			IndexName:    indexName,
+			Timestamp:    createTs,
 		}
 		resp, err := ic.CreateIndex(ctx, req)
 		assert.NoError(t, err)

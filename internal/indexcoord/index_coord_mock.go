@@ -294,7 +294,8 @@ type RootCoordMock struct {
 	CallStart              func() error
 	CallGetComponentStates func(ctx context.Context) (*milvuspb.ComponentStates, error)
 
-	CallAllocID func(ctx context.Context, req *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error)
+	CallAllocID        func(ctx context.Context, req *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error)
+	CallAllocTimestamp func(ctx context.Context, req *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error)
 }
 
 func (rcm *RootCoordMock) Init() error {
@@ -307,6 +308,10 @@ func (rcm *RootCoordMock) Start() error {
 
 func (rcm *RootCoordMock) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
 	return rcm.CallGetComponentStates(ctx)
+}
+
+func (rcm *RootCoordMock) AllocTimestamp(ctx context.Context, req *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error) {
+	return rcm.CallAllocTimestamp(ctx, req)
 }
 
 func (rcm *RootCoordMock) AllocID(ctx context.Context, req *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error) {
@@ -341,6 +346,15 @@ func NewRootCoordMock() *RootCoordMock {
 				},
 				ID:    rand.Int63(),
 				Count: req.Count,
+			}, nil
+		},
+		CallAllocTimestamp: func(ctx context.Context, req *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error) {
+			return &rootcoordpb.AllocTimestampResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+				},
+				Timestamp: 1,
+				Count:     req.Count,
 			}, nil
 		},
 	}

@@ -196,7 +196,7 @@ func (cit *CreateIndexTask) Execute(ctx context.Context) error {
 			PartitionID:  segmentInfo.PartitionID,
 			NumRows:      segmentInfo.NumOfRows,
 			IndexID:      cit.indexID,
-			CreateTime:   segmentInfo.StartPosition.Timestamp,
+			CreateTime:   cit.req.GetTimestamp(),
 		}
 		have, buildID, err := cit.indexCoordClient.createIndexForSegment(segIdx)
 		if err != nil {
