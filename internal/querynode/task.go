@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"runtime/debug"
 
 	"go.uber.org/zap"
@@ -319,18 +320,20 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 	)
 
 	// add excluded segments for dropped segments,
-	// dropped segments with later check point than seekPosition should be filtered out.
-	droppedCheckPointInfos := make([]*datapb.SegmentInfo, 0)
+	// exclude all msgs with dropped segment id
+	// DO NOT refer to dropped segment info, see issue https://github.com/milvus-io/milvus/issues/19704
+	var droppedCheckPointInfos []*datapb.SegmentInfo
 	for _, info := range w.req.Infos {
 		for _, droppedSegmentID := range info.GetDroppedSegmentIds() {
-			droppedSegment := w.req.SegmentInfos[droppedSegmentID]
-			for _, position := range channel2SeekPosition {
-				if droppedSegment != nil &&
-					droppedSegment.DmlPosition.ChannelName == position.ChannelName &&
-					droppedSegment.DmlPosition.Timestamp > position.Timestamp {
-					droppedCheckPointInfos = append(droppedCheckPointInfos, droppedSegment)
-				}
-			}
+			droppedCheckPointInfos = append(droppedCheckPointInfos, &datapb.SegmentInfo{
+				ID:            droppedSegmentID,
+				CollectionID:  collectionID,
+				InsertChannel: info.GetChannelName(),
+				DmlPosition: &internalpb.MsgPosition{
+					ChannelName: info.GetChannelName(),
+					Timestamp:   math.MaxUint64,
+				},
+			})
 		}
 	}
 	w.node.metaReplica.addExcludedSegments(collectionID, droppedCheckPointInfos)

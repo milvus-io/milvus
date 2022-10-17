@@ -41,6 +41,10 @@ class TestE2e(TestcaseBase):
         log.info(f"assert flush: {tt}, entities: {entities}")
 
         # search
+        _index_params = {"index_type": "IVF_SQ8", "params": {"nlist": 64}, "metric_type": "L2"}
+        index, _ = collection_w.create_index(field_name=ct.default_float_vec_field_name,
+                                             index_params=_index_params,
+                                             name=cf.gen_unique_str())
         collection_w.load()
         search_vectors = cf.gen_vectors(1, ct.default_dim)
         search_params = {"metric_type": "L2", "params": {"nprobe": 16}}

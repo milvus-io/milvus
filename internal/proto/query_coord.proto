@@ -96,6 +96,8 @@ message LoadCollectionRequest {
   int64 collectionID = 3;
   schema.CollectionSchema schema = 4;
   int32 replica_number = 5;
+  // fieldID -> indexID
+  map<int64, int64> field_indexID = 6;
 }
 
 message ReleaseCollectionRequest {
@@ -120,6 +122,8 @@ message LoadPartitionsRequest {
   repeated int64 partitionIDs = 4;
   schema.CollectionSchema schema = 5;
   int32 replica_number = 6;
+  // fieldID -> indexID
+  map<int64, int64> field_indexID = 7;
 }
 
 message ReleasePartitionsRequest {

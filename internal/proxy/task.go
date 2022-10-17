@@ -26,20 +26,19 @@ import (
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
-	"github.com/milvus-io/milvus/internal/types"
-
-	"github.com/milvus-io/milvus-proto/go-api/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -1226,6 +1225,7 @@ type loadCollectionTask struct {
 	*milvuspb.LoadCollectionRequest
 	ctx        context.Context
 	queryCoord types.QueryCoord
+	indexCoord types.IndexCoord
 	result     *commonpb.Status
 
 	collectionID UniqueID
@@ -1299,6 +1299,33 @@ func (lct *loadCollectionTask) Execute(ctx context.Context) (err error) {
 	if err != nil {
 		return err
 	}
+	// check index
+	indexResponse, err := lct.indexCoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
+		CollectionID: collID,
+		IndexName:    "",
+	})
+	if err != nil {
+		return err
+	}
+	if indexResponse.Status.ErrorCode != commonpb.ErrorCode_Success {
+		return errors.New(indexResponse.Status.Reason)
+	}
+
+	hasVecIndex := false
+	fieldIndexIDs := make(map[int64]int64)
+	for _, index := range indexResponse.IndexInfos {
+		fieldIndexIDs[index.FieldID] = index.IndexID
+		for _, field := range collSchema.Fields {
+			if index.FieldID == field.FieldID && (field.DataType == schemapb.DataType_FloatVector || field.DataType == schemapb.DataType_BinaryVector) {
+				hasVecIndex = true
+			}
+		}
+	}
+	if !hasVecIndex {
+		errMsg := fmt.Sprintf("there is no vector index on collection: %s, please create index firstly", lct.LoadCollectionRequest.CollectionName)
+		log.Ctx(ctx).Error(errMsg)
+		return errors.New(errMsg)
+	}
 	request := &querypb.LoadCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_LoadCollection,
@@ -1310,6 +1337,7 @@ func (lct *loadCollectionTask) Execute(ctx context.Context) (err error) {
 		CollectionID:  collID,
 		Schema:        collSchema,
 		ReplicaNumber: lct.ReplicaNumber,
+		FieldIndexID:  fieldIndexIDs,
 	}
 	log.Debug("send LoadCollectionRequest to query coordinator", zap.String("role", typeutil.ProxyRole),
 		zap.Int64("msgID", request.Base.MsgID), zap.Int64("collectionID", request.CollectionID),
@@ -1422,6 +1450,7 @@ type loadPartitionsTask struct {
 	*milvuspb.LoadPartitionsRequest
 	ctx        context.Context
 	queryCoord types.QueryCoord
+	indexCoord types.IndexCoord
 	result     *commonpb.Status
 
 	collectionID UniqueID
@@ -1488,6 +1517,33 @@ func (lpt *loadPartitionsTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// check index
+	indexResponse, err := lpt.indexCoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
+		CollectionID: collID,
+		IndexName:    "",
+	})
+	if err != nil {
+		return err
+	}
+	if indexResponse.Status.ErrorCode != commonpb.ErrorCode_Success {
+		return errors.New(indexResponse.Status.Reason)
+	}
+
+	hasVecIndex := false
+	fieldIndexIDs := make(map[int64]int64)
+	for _, index := range indexResponse.IndexInfos {
+		fieldIndexIDs[index.FieldID] = index.IndexID
+		for _, field := range collSchema.Fields {
+			if index.FieldID == field.FieldID && (field.DataType == schemapb.DataType_FloatVector || field.DataType == schemapb.DataType_BinaryVector) {
+				hasVecIndex = true
+			}
+		}
+	}
+	if !hasVecIndex {
+		errMsg := fmt.Sprintf("there is no vector index on collection: %s, please create index firstly", lpt.LoadPartitionsRequest.CollectionName)
+		log.Ctx(ctx).Error(errMsg)
+		return errors.New(errMsg)
+	}
 	for _, partitionName := range lpt.PartitionNames {
 		partitionID, err := globalMetaCache.GetPartitionID(ctx, lpt.CollectionName, partitionName)
 		if err != nil {
@@ -1507,6 +1563,7 @@ func (lpt *loadPartitionsTask) Execute(ctx context.Context) error {
 		PartitionIDs:  partitionIDs,
 		Schema:        collSchema,
 		ReplicaNumber: lpt.ReplicaNumber,
+		FieldIndexID:  fieldIndexIDs,
 	}
 	lpt.result, err = lpt.queryCoord.LoadPartitions(ctx, request)
 	return err

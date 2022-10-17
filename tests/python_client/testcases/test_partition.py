@@ -264,6 +264,7 @@ class TestPartitionParams(TestcaseBase):
         partition_w2 = self.init_partition_wrap(collection_w)
         partition_w1.insert(cf.gen_default_list_data())
         partition_w2.insert(cf.gen_default_list_data())
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         partition_w1.load()
         error = {ct.err_code: 5, ct.err_msg: f'load the partition after load collection is not supported'}
         partition_w2.load(check_task=CheckTasks.err_res,
@@ -283,6 +284,7 @@ class TestPartitionParams(TestcaseBase):
         partition_w1.insert(cf.gen_default_list_data())
         partition_w2.insert(cf.gen_default_list_data())
         partition_names = ["partition_w1", "partition_w2"]
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load(partition_names)
         collection_w.release(partition_names)
 
@@ -300,6 +302,7 @@ class TestPartitionParams(TestcaseBase):
         partition_w2 = self.init_partition_wrap(collection_w)
         partition_w1.insert(cf.gen_default_list_data())
         partition_w2.insert(cf.gen_default_list_data())
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         partition_w1.load()
         partition_w1.release()
         partition_w2.load()
@@ -327,6 +330,7 @@ class TestPartitionParams(TestcaseBase):
 
         # load with non-number replicas
         error = {ct.err_code: 0, ct.err_msg: f"but expected one of: int, long"}
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         partition_w.load(replica_number=get_non_number_replicas, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -344,6 +348,7 @@ class TestPartitionParams(TestcaseBase):
         partition_w.insert(cf.gen_default_list_data())
         assert partition_w.num_entities == ct.default_nb
 
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         partition_w.load(replica_number=replicas)
         p_replicas = partition_w.get_replicas()[0]
         assert len(p_replicas.groups) == 1
@@ -366,6 +371,7 @@ class TestPartitionParams(TestcaseBase):
 
         # load with 2 replicas
         error = {ct.err_code: 1, ct.err_msg: f"no enough nodes to create replicas"}
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         partition_w.load(replica_number=3, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.ClusterOnly)
@@ -464,6 +470,7 @@ class TestPartitionParams(TestcaseBase):
         # create collection
 
         collection_w = self.init_collection_wrap()
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
 
         # create two partitions
         partition_w1 = self.init_partition_wrap(collection_w)
@@ -819,6 +826,7 @@ class TestPartitionOperations(TestcaseBase):
         """
         # create collection
         collection_w = self.init_collection_wrap()
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
 
         # create partition
         partition_name = cf.gen_unique_str(prefix)

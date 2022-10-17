@@ -169,7 +169,16 @@ class TestcaseBase(Base):
                 assert collection_w.num_entities == nb
             # This condition will be removed after auto index feature
             if not is_index:
+                if is_binary:
+                    collection_w.create_index(ct.default_binary_vec_field_name, ct.default_bin_flat_index)
+                else:
+                    collection_w.create_index(ct.default_float_vec_field_name, ct.default_flat_index)
                 collection_w.load()
+        elif not is_index:
+            if is_binary:
+                collection_w.create_index(ct.default_binary_vec_field_name, ct.default_bin_flat_index)
+            else:
+                collection_w.create_index(ct.default_float_vec_field_name, ct.default_flat_index)
 
         return collection_w, vectors, binary_raw_vectors, insert_ids, time_stamp
 
@@ -190,6 +199,7 @@ class TestcaseBase(Base):
         collection_w.insert(df_default)
         # flush
         collection_w.num_entities
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load(partition_names=[partition_w.name, "_default"])
         return collection_w, partition_w, df_partition, df_default
 

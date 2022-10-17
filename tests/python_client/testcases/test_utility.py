@@ -213,6 +213,7 @@ class TestUtilityParams(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         df = cf.gen_default_dataframe_data()
         self.collection_wrap.construct_from_dataframe(c_name, df, primary_field=ct.default_int64_field_name)
+        self.collection_wrap.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         self.collection_wrap.load()
         error = {ct.err_code: 1, ct.err_msg: "Invalid collection name: {}".format(invalid_c_name)}
         self.utility_wrap.loading_progress(invalid_c_name, check_task=CheckTasks.err_res, check_items=error)
@@ -228,6 +229,7 @@ class TestUtilityParams(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         df = cf.gen_default_dataframe_data()
         self.collection_wrap.construct_from_dataframe(c_name, df, primary_field=ct.default_int64_field_name)
+        self.collection_wrap.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         self.collection_wrap.load()
         error = {ct.err_code: 1, ct.err_msg: "describe collection failed: can't find collection"}
         self.utility_wrap.loading_progress("not_existed_name", check_task=CheckTasks.err_res, check_items=error)
@@ -483,7 +485,7 @@ class TestUtilityBase(TestcaseBase):
         cw = self.init_collection_wrap(name=c_name)
         data = cf.gen_default_list_data(nb)
         cw.insert(data=data)
-        error = {ct.err_code: 25, ct.err_msg: "index not exist"}
+        error = {ct.err_code: 25, ct.err_msg: "there is no index on collection"}
         self.utility_wrap.index_building_progress(c_name, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -616,6 +618,7 @@ class TestUtilityBase(TestcaseBase):
         df = cf.gen_default_dataframe_data()
         collection_w.insert(df)
         assert collection_w.num_entities == ct.default_nb
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load(_async=True)
         res, _ = self.utility_wrap.loading_progress(collection_w.name)
         loading_int = cf.percent_to_int(res[loading_progress])
@@ -632,6 +635,7 @@ class TestUtilityBase(TestcaseBase):
         expected: 0 entities is loaded
         """
         collection_w = self.init_collection_wrap()
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
         res, _ = self.utility_wrap.loading_progress(collection_w.name)
         exp_res = {loading_progress: '100%'}
@@ -738,6 +742,7 @@ class TestUtilityBase(TestcaseBase):
         """
         self._connect()
         cw = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+        cw.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         cw.load()
         self.utility_wrap.wait_for_loading_complete(cw.name)
         res, _ = self.utility_wrap.loading_progress(cw.name)
@@ -756,6 +761,7 @@ class TestUtilityBase(TestcaseBase):
         df = cf.gen_default_dataframe_data(nb)
         collection_w.insert(df, timeout=60)
         assert collection_w.num_entities == nb
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load(_async=True)
         self.utility_wrap.wait_for_loading_complete(collection_w.name)
         res, _ = self.utility_wrap.loading_progress(collection_w.name)
@@ -883,11 +889,13 @@ class TestUtilityAdvanced(TestcaseBase):
         """
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
         res, _ = self.utility_wrap.get_query_segment_info(c_name)
         assert len(res) == 0
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip("index must created before load, but create_index will trigger flush")
     def test_get_sealed_query_segment_info(self):
         """
         target: test getting sealed query segment info of collection without index
@@ -901,6 +909,7 @@ class TestUtilityAdvanced(TestcaseBase):
         df = cf.gen_default_dataframe_data(nb)
         collection_w.insert(df)
         collection_w.num_entities
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
         res, _ = self.utility_wrap.get_query_segment_info(c_name)
         assert len(res) == 0
@@ -1000,6 +1009,7 @@ class TestUtilityAdvanced(TestcaseBase):
         collection_w.num_entities
         # get growing segments
         collection_w.insert(df)
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
         # prepare load balance params
         res, _ = self.utility_wrap.get_query_segment_info(c_name)
@@ -1037,6 +1047,7 @@ class TestUtilityAdvanced(TestcaseBase):
         collection_w.num_entities
         # get growing segments
         collection_w.insert(df)
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
         # prepare load balance params
         res, _ = self.utility_wrap.get_query_segment_info(c_name)
@@ -1150,6 +1161,7 @@ class TestUtilityAdvanced(TestcaseBase):
         collection_w.insert(df)
         # get sealed segments
         collection_w.num_entities
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load(replica_number=2)
         # get growing segments
         collection_w.insert(df)
