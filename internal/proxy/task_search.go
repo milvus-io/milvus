@@ -259,12 +259,6 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	sp, ctx := trace.StartSpanFromContextWithOperationName(t.TraceCtx(), "Proxy-Search-PreExecute")
 	defer sp.Finish()
 
-	// Check the nq is valid:
-	// https://milvus.io/docs/limitations.md
-	if err := validateLimit(t.request.GetNq()); err != nil {
-		return fmt.Errorf("%s [%d] is invalid, %w", NQKey, t.request.GetNq(), err)
-	}
-
 	if t.searchShardPolicy == nil {
 		t.searchShardPolicy = mergeRoundRobinPolicy
 	}
@@ -369,9 +363,15 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 
 	t.SearchRequest.Dsl = t.request.Dsl
 	t.SearchRequest.PlaceholderGroup = t.request.PlaceholderGroup
+	// Manually update nq if not set.
 	nq, err := getNq(t.request)
 	if err != nil {
 		return err
+	}
+	// Check if nq is valid:
+	// https://milvus.io/docs/limitations.md
+	if err := validateLimit(nq); err != nil {
+		return fmt.Errorf("%s [%d] is invalid, %w", NQKey, nq, err)
 	}
 	t.SearchRequest.Nq = nq
 
