@@ -29,10 +29,10 @@ import (
 const (
 	// defaultMax is the default unlimited rate or threshold.
 	defaultMax = float64(math.MaxFloat64)
-	// GBSize used to convert gigabytes and bytes.
-	GBSize = 1024.0 * 1024.0 * 1024.0
-	// defaultDiskQuotaInGB is the default disk quota in gigabytes.
-	defaultDiskQuotaInGB = defaultMax / GBSize
+	// MBSize used to convert megabytes and bytes.
+	MBSize = 1024.0 * 1024.0
+	// defaultDiskQuotaInMB is the default disk quota in megabytes.
+	defaultDiskQuotaInMB = defaultMax / MBSize
 	// defaultMin is the default minimal rate.
 	defaultMin = float64(0)
 	// defaultLowWaterLevel is the default memory low water level.
@@ -250,8 +250,8 @@ func (p *quotaConfig) initMaxCompactionRate() {
 	}
 }
 
-func megaBytesRate2Bytes(f float64) float64 {
-	return f * 1024 * 1024
+func megaBytes2Bytes(f float64) float64 {
+	return f * MBSize
 }
 
 func (p *quotaConfig) checkMinMaxLegal(min, max float64) bool {
@@ -274,7 +274,7 @@ func (p *quotaConfig) initDMLMaxInsertRate() {
 	}
 	p.DMLMaxInsertRate = p.Base.ParseFloatWithDefault("quotaAndLimits.dml.insertRate.max", defaultMax)
 	if math.Abs(p.DMLMaxInsertRate-defaultMax) > 0.001 { // maxRate != defaultMax
-		p.DMLMaxInsertRate = megaBytesRate2Bytes(p.DMLMaxInsertRate)
+		p.DMLMaxInsertRate = megaBytes2Bytes(p.DMLMaxInsertRate)
 	}
 	// [0, inf)
 	if p.DMLMaxInsertRate < 0 {
@@ -288,7 +288,7 @@ func (p *quotaConfig) initDMLMinInsertRate() {
 		return
 	}
 	p.DMLMinInsertRate = p.Base.ParseFloatWithDefault("quotaAndLimits.dml.insertRate.min", defaultMin)
-	p.DMLMinInsertRate = megaBytesRate2Bytes(p.DMLMinInsertRate)
+	p.DMLMinInsertRate = megaBytes2Bytes(p.DMLMinInsertRate)
 	// [0, inf)
 	if p.DMLMinInsertRate < 0 {
 		p.DMLMinInsertRate = defaultMin
@@ -306,7 +306,7 @@ func (p *quotaConfig) initDMLMaxDeleteRate() {
 	}
 	p.DMLMaxDeleteRate = p.Base.ParseFloatWithDefault("quotaAndLimits.dml.deleteRate.max", defaultMax)
 	if math.Abs(p.DMLMaxDeleteRate-defaultMax) > 0.001 { // maxRate != defaultMax
-		p.DMLMaxDeleteRate = megaBytesRate2Bytes(p.DMLMaxDeleteRate)
+		p.DMLMaxDeleteRate = megaBytes2Bytes(p.DMLMaxDeleteRate)
 	}
 	// [0, inf)
 	if p.DMLMaxDeleteRate < 0 {
@@ -320,7 +320,7 @@ func (p *quotaConfig) initDMLMinDeleteRate() {
 		return
 	}
 	p.DMLMinDeleteRate = p.Base.ParseFloatWithDefault("quotaAndLimits.dml.deleteRate.min", defaultMin)
-	p.DMLMinDeleteRate = megaBytesRate2Bytes(p.DMLMinDeleteRate)
+	p.DMLMinDeleteRate = megaBytes2Bytes(p.DMLMinDeleteRate)
 	// [0, inf)
 	if p.DMLMinDeleteRate < 0 {
 		p.DMLMinDeleteRate = defaultMin
@@ -338,7 +338,7 @@ func (p *quotaConfig) initDMLMaxBulkLoadRate() {
 	}
 	p.DMLMaxBulkLoadRate = p.Base.ParseFloatWithDefault("quotaAndLimits.dml.bulkLoadRate.max", defaultMax)
 	if math.Abs(p.DMLMaxBulkLoadRate-defaultMax) > 0.001 { // maxRate != defaultMax
-		p.DMLMaxBulkLoadRate = megaBytesRate2Bytes(p.DMLMaxBulkLoadRate)
+		p.DMLMaxBulkLoadRate = megaBytes2Bytes(p.DMLMaxBulkLoadRate)
 	}
 	// [0, inf)
 	if p.DMLMaxBulkLoadRate < 0 {
@@ -352,7 +352,7 @@ func (p *quotaConfig) initDMLMinBulkLoadRate() {
 		return
 	}
 	p.DMLMinBulkLoadRate = p.Base.ParseFloatWithDefault("quotaAndLimits.dml.bulkLoadRate.min", defaultMin)
-	p.DMLMinBulkLoadRate = megaBytesRate2Bytes(p.DMLMinBulkLoadRate)
+	p.DMLMinBulkLoadRate = megaBytes2Bytes(p.DMLMinBulkLoadRate)
 	// [0, inf)
 	if p.DMLMinBulkLoadRate < 0 {
 		p.DMLMinBulkLoadRate = defaultMin
@@ -520,14 +520,15 @@ func (p *quotaConfig) initDiskQuota() {
 		p.DiskQuota = defaultMax
 		return
 	}
-	p.DiskQuota = p.Base.ParseFloatWithDefault("quotaAndLimits.limitWriting.diskProtection.diskQuota", defaultDiskQuotaInGB)
+	p.DiskQuota = p.Base.ParseFloatWithDefault("quotaAndLimits.limitWriting.diskProtection.diskQuota", defaultDiskQuotaInMB)
 	// (0, +inf)
 	if p.DiskQuota <= 0 {
 		log.Warn("DiskQuota must in the range of `(0, +inf)`, use default +inf", zap.Float64("DiskQuota", p.DiskQuota))
-		p.DiskQuota = defaultDiskQuotaInGB
+		p.DiskQuota = defaultDiskQuotaInMB
 	}
-	// gigabytes to bytes
-	p.DiskQuota = p.DiskQuota * GBSize
+	log.Debug("init disk quota", zap.Float64("diskQuota(MB)", p.DiskQuota))
+	// megabytes to bytes
+	p.DiskQuota = megaBytes2Bytes(p.DiskQuota)
 }
 
 func (p *quotaConfig) initForceDenyReading() {
@@ -573,7 +574,7 @@ func (p *quotaConfig) initMaxReadResultRate() {
 	}
 	p.MaxReadResultRate = p.Base.ParseFloatWithDefault("quotaAndLimits.limitReading.resultProtection.maxReadResultRate", defaultMax)
 	if math.Abs(p.MaxReadResultRate-defaultMax) > 0.001 { // maxRate != defaultMax
-		p.MaxReadResultRate = megaBytesRate2Bytes(p.MaxReadResultRate)
+		p.MaxReadResultRate = megaBytes2Bytes(p.MaxReadResultRate)
 	}
 	// [0, inf)
 	if p.MaxReadResultRate < 0 {

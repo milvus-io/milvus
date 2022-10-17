@@ -250,6 +250,7 @@ func (q *QuotaCenter) syncMetrics() error {
 func (q *QuotaCenter) forceDenyWriting(reason ForceDenyTriggerReason) {
 	q.currentRates[internalpb.RateType_DMLInsert] = 0
 	q.currentRates[internalpb.RateType_DMLDelete] = 0
+	q.currentRates[internalpb.RateType_DMLBulkLoad] = 0
 	log.Warn("QuotaCenter force to deny writing", zap.String("reason", string(reason)))
 }
 
@@ -393,6 +394,8 @@ func (q *QuotaCenter) resetCurrentRates() {
 			q.currentRates[rt] = Limit(Params.QuotaConfig.DMLMaxInsertRate)
 		case internalpb.RateType_DMLDelete:
 			q.currentRates[rt] = Limit(Params.QuotaConfig.DMLMaxDeleteRate)
+		case internalpb.RateType_DMLBulkLoad:
+			q.currentRates[rt] = Limit(Params.QuotaConfig.DMLMaxBulkLoadRate)
 		case internalpb.RateType_DQLSearch:
 			q.currentRates[rt] = Limit(Params.QuotaConfig.DQLMaxSearchRate)
 		case internalpb.RateType_DQLQuery:

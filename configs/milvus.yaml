@@ -384,7 +384,7 @@ common:
 #   4. DQL result rate protection;
 # If necessary, you can also manually force to deny RW requests.
 quotaAndLimits:
-  enabled: false # `true` to enable quota and limits, `false` to disable.
+  enabled: true # `true` to enable quota and limits, `false` to disable.
 
   # quotaCenterCollectInterval is the time interval that quotaCenter
   # collects metrics from Proxies, Query cluster and Data cluster.
