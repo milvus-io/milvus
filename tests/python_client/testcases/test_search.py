@@ -1385,9 +1385,8 @@ class TestCollectionSearch(TestcaseBase):
                                          "limit": default_limit,
                                          "_async": _async})
 
-    @pytest.mark.xfail(reason="issue #19130")
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("shards_num", [1, 10, 128, 256])
+    @pytest.mark.parametrize("shards_num", [-256, 0, 1, 10, 31, 63])
     def test_search_with_non_default_shard_nums(self, auto_id, shards_num, _async):
         """
         target: test search with non_default shards_num
