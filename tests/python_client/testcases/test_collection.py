@@ -921,7 +921,7 @@ class TestCollectionParams(TestcaseBase):
         assert c_name in self.utility_wrap.list_collections()[0]
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("shards_num", [-256, 0, 1, 10, 214, 256])
+    @pytest.mark.parametrize("shards_num", [-256, 0, 1, 10, 31, 63])
     def test_collection_shards_num_with_not_default_value(self, shards_num):
         """
         target:test collection with shards_num
@@ -936,16 +936,16 @@ class TestCollectionParams(TestcaseBase):
         assert c_name in self.utility_wrap.list_collections()[0]
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("shards_num", [257])
+    @pytest.mark.parametrize("shards_num", [65, 257])
     def test_collection_shards_num_invalid(self, shards_num):
         """
         target:test collection with invalid shards_num
-        method:create collection with shards_num out of [1,256]
+        method:create collection with shards_num out of [1,64]
         expected: raise exception
         """
         self._connect()
         c_name = cf.gen_unique_str(prefix)
-        error = {ct.err_code: 1, ct.err_msg: "maximum shards's number should be limited to 256"}
+        error = {ct.err_code: 1, ct.err_msg: "shard num (%s) exceeds limit (64)" % shards_num}
         self.collection_wrap.init_collection(c_name, schema=default_schema, shards_num=shards_num,
                                              check_task=CheckTasks.err_res, check_items=error)
 
