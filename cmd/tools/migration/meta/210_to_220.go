@@ -146,7 +146,7 @@ func combineToSegmentIndexesMeta220(segmentIndexes SegmentIndexesMeta210, indexB
 				SegmentID:      segID,
 				CollectionID:   record.GetCollectionID(),
 				PartitionID:    record.GetPartitionID(),
-				NumRows:        0, // TODO: how to set this?
+				NumRows:        buildMeta.GetReq().GetNumRows(),
 				IndexID:        indexID,
 				BuildID:        record.GetBuildID(),
 				NodeID:         buildMeta.GetNodeID(),
