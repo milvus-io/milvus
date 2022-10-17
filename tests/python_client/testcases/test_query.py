@@ -94,6 +94,7 @@ class TestQueryParams(TestcaseBase):
         """
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
         res, _ = collection_w.query(default_term_expr)
         assert len(res) == 0
@@ -115,6 +116,7 @@ class TestQueryParams(TestcaseBase):
         ids = insert_res[1].primary_keys
         pos = 5
         res = df.iloc[:pos, :1].to_dict('records')
+        self.collection_wrap.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         self.collection_wrap.load()
 
         # query with all primary keys
@@ -163,6 +165,7 @@ class TestQueryParams(TestcaseBase):
         df.drop(ct.default_int64_field_name, axis=1, inplace=True)
         mutation_res, _ = collection_w.insert(data=df)
         assert collection_w.num_entities == ct.default_nb
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
         term_expr = f'{ct.default_int64_field_name} in [0, 1, 2]'
         res, _ = collection_w.query(term_expr)
@@ -250,6 +253,7 @@ class TestQueryParams(TestcaseBase):
         self.collection_wrap.construct_from_dataframe(cf.gen_unique_str(prefix), df,
                                                       primary_field=ct.default_int64_field_name)
         assert self.collection_wrap.num_entities == ct.default_nb
+        self.collection_wrap.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         self.collection_wrap.load()
 
         # query by non_primary non_vector scalar field
@@ -283,6 +287,7 @@ class TestQueryParams(TestcaseBase):
         self.collection_wrap.construct_from_dataframe(cf.gen_unique_str(prefix), df,
                                                       primary_field=ct.default_int64_field_name)
         assert self.collection_wrap.num_entities == ct.default_nb
+        self.collection_wrap.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         self.collection_wrap.load()
 
         # output bool field
@@ -327,6 +332,7 @@ class TestQueryParams(TestcaseBase):
         # int8 range [-128, 127] so when nb=1200, there are many repeated int8 values equal to 0
         for i in range(0, ct.default_nb, 256):
             res.extend(df.iloc[i:i + 1, :-1].to_dict('records'))
+        self.collection_wrap.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         self.collection_wrap.load()
         self.collection_wrap.query(term_expr, output_fields=["*"],
                                    check_task=CheckTasks.check_query_results, check_items={exp_res: res})
@@ -393,6 +399,7 @@ class TestQueryParams(TestcaseBase):
         self.collection_wrap.construct_from_dataframe(cf.gen_unique_str(prefix), df,
                                                       primary_field=ct.default_int64_field_name)
         assert self.collection_wrap.num_entities == ct.default_nb
+        self.collection_wrap.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         self.collection_wrap.load()
         values = df[field].tolist()
         pos = 100
@@ -414,6 +421,7 @@ class TestQueryParams(TestcaseBase):
         self.collection_wrap.construct_from_dataframe(cf.gen_unique_str(prefix), df,
                                                       primary_field=ct.default_int64_field_name)
         assert self.collection_wrap.num_entities == ct.default_nb
+        self.collection_wrap.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         self.collection_wrap.load()
         int64_values = df[ct.default_int64_field_name].tolist()
         term_expr = f'{ct.default_int64_field_name} not in {int64_values[pos:]}'
@@ -433,6 +441,7 @@ class TestQueryParams(TestcaseBase):
         self.collection_wrap.construct_from_dataframe(cf.gen_unique_str(prefix), df,
                                                       primary_field=ct.default_int64_field_name)
         assert self.collection_wrap.num_entities == 100
+        self.collection_wrap.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         self.collection_wrap.load()
 
         # random_values = [random.randint(0, ct.default_nb) for _ in range(4)]
@@ -454,6 +463,7 @@ class TestQueryParams(TestcaseBase):
         self.collection_wrap.construct_from_dataframe(cf.gen_unique_str(prefix), df,
                                                       primary_field=ct.default_int64_field_name)
         assert self.collection_wrap.num_entities == 50
+        self.collection_wrap.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         self.collection_wrap.load()
 
         random_values = [i for i in range(10, 50)]
@@ -575,6 +585,7 @@ class TestQueryParams(TestcaseBase):
         assert collection_w.num_entities == ct.default_nb
         fields = [[ct.default_float_vec_field_name], [ct.default_int64_field_name, ct.default_float_vec_field_name]]
         res = df.loc[:1, [ct.default_int64_field_name, ct.default_float_vec_field_name]].to_dict('records')
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
         for output_fields in fields:
             collection_w.query(default_term_expr, output_fields=output_fields,
@@ -603,6 +614,7 @@ class TestQueryParams(TestcaseBase):
         for vec_field in vec_fields:
             output_fields.append(vec_field.name)
         res = df.loc[:1, output_fields].to_dict('records')
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
         collection_w.query(default_term_expr, output_fields=output_fields,
                            check_task=CheckTasks.check_query_results,
@@ -631,6 +643,7 @@ class TestQueryParams(TestcaseBase):
         for vec_field in vec_fields:
             output_fields.append(vec_field.name)
         res = df.loc[:1, output_fields].to_dict('records')
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
         collection_w.query(default_term_expr, output_fields=output_fields,
                            check_task=CheckTasks.check_query_results,
@@ -740,6 +753,7 @@ class TestQueryParams(TestcaseBase):
 
         # query with output_fields=["*", float_vector)
         res = df.iloc[:2, :4].to_dict('records')
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
         collection_w.query(default_term_expr, output_fields=["*", ct.default_float_vec_field_name],
                            check_task=CheckTasks.check_query_results,
@@ -787,6 +801,7 @@ class TestQueryParams(TestcaseBase):
         """
         # init collection with fields: int64, float, float_vec
         collection_w = self.init_collection_general(prefix, insert_data=True, nb=100)[0]
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
 
         # query with invalid output_fields
@@ -806,6 +821,7 @@ class TestQueryParams(TestcaseBase):
         df = cf.gen_default_dataframe_data()
         partition_w.insert(df)
         assert collection_w.num_entities == ct.default_nb
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         partition_w.load()
         res = df.iloc[:2, :1].to_dict('records')
         collection_w.query(default_term_expr, partition_names=[partition_w.name],
@@ -849,6 +865,7 @@ class TestQueryParams(TestcaseBase):
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
         partition_w = self.init_partition_wrap(collection_wrap=collection_w)
         assert partition_w.is_empty
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         partition_w.load()
         res, _ = collection_w.query(default_term_expr, partition_names=[partition_w.name])
         assert len(res) == 0
@@ -861,6 +878,7 @@ class TestQueryParams(TestcaseBase):
         expected: raise exception
         """
         collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix))
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
         partition_names = cf.gen_unique_str()
         error = {ct.err_code: 1, ct.err_msg: f'PartitonName: {partition_names} not found'}
@@ -954,6 +972,7 @@ class TestQueryParams(TestcaseBase):
         df = cf.gen_default_dataframe_data()
         partition_w.insert(df)
         assert collection_w.num_entities == ct.default_nb
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         partition_w.load()
         res = df.iloc[:2, :1].to_dict('records')
         query_params = {"offset": offset, "limit": 10}
@@ -971,6 +990,7 @@ class TestQueryParams(TestcaseBase):
         df = cf.gen_default_dataframe_data()
         collection_w.insert(df)
         assert collection_w.num_entities == ct.default_nb
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
         res = df.iloc[:2, :1].to_dict('records')
         query_params = {"offset": offset, "limit": 10}
@@ -1203,6 +1223,7 @@ class TestQueryOperation(TestcaseBase):
         df[ct.default_int64_field_name] = 0
         mutation_res, _ = collection_w.insert(df)
         assert mutation_res.primary_keys == df[ct.default_int64_field_name].tolist()
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
         term_expr = f'{ct.default_int64_field_name} in {[0, 0, 0]}'
         res = df.iloc[:, :2].to_dict('records')
@@ -1218,7 +1239,7 @@ class TestQueryOperation(TestcaseBase):
                 3. query
         expected: query result is correct
         """
-        collection_w, vectors, binary_raw_vectors = self.init_collection_general(prefix, insert_data=True)[0:3]
+        collection_w, vectors, binary_raw_vectors = self.init_collection_general(prefix, insert_data=True, is_index=True)[0:3]
 
         default_field_name = ct.default_float_vec_field_name
         collection_w.create_index(default_field_name, default_index_params)
@@ -1285,10 +1306,11 @@ class TestQueryOperation(TestcaseBase):
         method: create index and specify vec field as output field
         expected: return primary field and vec field
         """
-        collection_w, vectors = self.init_collection_general(prefix, insert_data=True, is_binary=True)[0:2]
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True, is_binary=True, is_index=True)[0:2]
         fields = [ct.default_int64_field_name, ct.default_binary_vec_field_name]
         collection_w.create_index(ct.default_binary_vec_field_name, binary_index_params)
         assert collection_w.has_index()[0]
+        collection_w.load()
         res, _ = collection_w.query(default_term_expr, output_fields=[ct.default_binary_vec_field_name])
         assert res[0].keys() == set(fields)
 
@@ -1317,6 +1339,7 @@ class TestQueryOperation(TestcaseBase):
         assert collection_w.num_entities == ct.default_nb
 
         # load partition
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         partition_w.load()
 
         # query twice
@@ -1386,6 +1409,7 @@ class TestQueryOperation(TestcaseBase):
         import time
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
         # load collection
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
         tmp_nb = 100
         df = cf.gen_default_dataframe_data(tmp_nb)
@@ -1561,6 +1585,7 @@ class TestqueryString(TestcaseBase):
         assert collection_w.num_entities == ct.default_nb * thread_num
 
         #Check data consistency after parallel insert
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
         df_dict_list = []
         for df in df_list:
@@ -1585,7 +1610,7 @@ class TestqueryString(TestcaseBase):
         # 1. create a collection
         schema = cf.gen_string_pk_default_collection_schema()
         collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix), schema=schema)
-        
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
         
         nb = 3000
@@ -1612,7 +1637,7 @@ class TestqueryString(TestcaseBase):
         expected: query successfully
         """
         # 1.  create a collection
-        collection_w, vectors = self.init_collection_general(prefix, insert_data=False)[0:2]
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=False, is_index=True)[0:2]
         
         nb = 3000
         df = cf.gen_default_list_data(nb)
@@ -1620,11 +1645,10 @@ class TestqueryString(TestcaseBase):
 
         collection_w.insert(df)
         assert collection_w.num_entities == nb
-        collection_w.load()
         
         collection_w.create_index(ct.default_float_vec_field_name, default_index_params)
         assert collection_w.has_index()[0]
-
+        collection_w.load()
         
         output_fields = [default_int_field_name, default_float_field_name, default_string_field_name]
         

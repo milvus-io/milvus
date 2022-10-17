@@ -1114,6 +1114,7 @@ class TestCollectionOperation(TestcaseBase):
         collection_w = self.init_collection_wrap()
         partition_w1 = self.init_partition_wrap(collection_w)
         partition_w1.insert(cf.gen_default_list_data())
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
         error = {ct.err_code: 5, ct.err_msg: f'load the partition after load collection is not supported'}
         partition_w1.load(check_task=CheckTasks.err_res,
@@ -1130,6 +1131,7 @@ class TestCollectionOperation(TestcaseBase):
         collection_w = self.init_collection_wrap()
         partition_w1 = self.init_partition_wrap(collection_w)
         partition_w1.insert(cf.gen_default_list_data())
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
         error = {ct.err_code: 1, ct.err_msg: f'releasing the partition after load collection is not supported'}
         partition_w1.release(check_task=CheckTasks.err_res,
@@ -1147,6 +1149,7 @@ class TestCollectionOperation(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name, check_task=CheckTasks.check_collection_property,
                                                  check_items={exp_name: c_name, exp_schema: default_schema})
         collection_w.insert(cf.gen_default_list_data())
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
         collection_w.release()
 
@@ -2036,6 +2039,7 @@ class TestLoadCollection(TestcaseBase):
         """
         self._connect()
         collection_w = self.init_collection_wrap()
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
         collection_w.release()
 
@@ -2126,6 +2130,7 @@ class TestLoadCollection(TestcaseBase):
         insert_data = cf.gen_default_list_data()
         collection_w.insert(data=insert_data)
         assert collection_w.num_entities == ct.default_nb
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
         collection_w.release()
         collection_w.load()
@@ -2142,6 +2147,7 @@ class TestLoadCollection(TestcaseBase):
         insert_data = cf.gen_default_list_data()
         collection_w.insert(data=insert_data)
         assert collection_w.num_entities == ct.default_nb
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
         collection_w.load()
 
@@ -2156,6 +2162,7 @@ class TestLoadCollection(TestcaseBase):
         self._connect()
         c_name = cf.gen_unique_str()
         collection_wr = self.init_collection_wrap(name=c_name)
+        collection_wr.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_wr.load()
         collection_wr.release()
         collection_wr.drop()
@@ -2174,6 +2181,7 @@ class TestLoadCollection(TestcaseBase):
         self._connect()
         c_name = cf.gen_unique_str()
         collection_wr = self.init_collection_wrap(name=c_name)
+        collection_wr.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_wr.load()
         collection_wr.drop()
         error = {ct.err_code: 0,
@@ -2193,6 +2201,7 @@ class TestLoadCollection(TestcaseBase):
         data = cf.gen_default_list_data()
         collection_w.insert(data=data, partition_name=ct.default_tag)
         assert collection_w.num_entities == ct.default_nb
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         patition_w.load()
         collection_w.release()
 
@@ -2216,6 +2225,7 @@ class TestLoadCollection(TestcaseBase):
         df = cf.gen_default_dataframe_data()
         insert_res, _ = collection_w.insert(df)
         assert collection_w.num_entities == ct.default_nb
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
 
         # load with non-number replicas
         error = {ct.err_code: 0, ct.err_msg: f"but expected one of: int, long"}
@@ -2234,6 +2244,7 @@ class TestLoadCollection(TestcaseBase):
         df = cf.gen_default_dataframe_data()
         insert_res, _ = collection_w.insert(df)
         assert collection_w.num_entities == ct.default_nb
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
 
         collection_w.load(replica_number=replicas)
         replicas = collection_w.get_replicas()[0]
@@ -2253,6 +2264,7 @@ class TestLoadCollection(TestcaseBase):
         df = cf.gen_default_dataframe_data()
         insert_res, _ = collection_w.insert(df)
         assert collection_w.num_entities == ct.default_nb
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
 
         error = {ct.err_code: 1, ct.err_msg: f"no enough nodes to create replicas"}
         collection_w.load(replica_number=3, check_task=CheckTasks.err_res, check_items=error)
@@ -2326,6 +2338,7 @@ class TestLoadCollection(TestcaseBase):
             insert_res, _ = collection_w.insert(df)
             assert collection_w.num_entities == (i + 1) * tmp_nb
 
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load(replica_number=replica_number)
         replicas = collection_w.get_replicas()[0]
         assert len(replicas.groups) == replica_number
@@ -2356,6 +2369,7 @@ class TestLoadCollection(TestcaseBase):
         partition_w = self.init_partition_wrap(collection_w, ct.default_tag)
         partition_w.insert(df_2)
         assert collection_w.num_entities == ct.default_nb * 2
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
 
         collection_w.load([partition_w.name], replica_number=2)
         for seg in self.utility_wrap.get_query_segment_info(collection_w.name)[0]:
@@ -2390,6 +2404,7 @@ class TestLoadCollection(TestcaseBase):
         df = cf.gen_default_dataframe_data()
         collection_w.insert(df)
         assert collection_w.num_entities == ct.default_nb
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
 
         # load with multi replica and insert growing data
         collection_w.load(replica_number=2)
@@ -2439,6 +2454,7 @@ class TestLoadCollection(TestcaseBase):
         df = cf.gen_default_dataframe_data()
         collection_w.insert(df)
         assert collection_w.num_entities == ct.default_nb
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
 
         # load with multi replicas and insert growing data
         collection_w.load(replica_number=2)
@@ -2487,6 +2503,7 @@ class TestLoadCollection(TestcaseBase):
         mutation_res, _ = collection_w.insert(df)
         assert collection_w.num_entities == 5000
         total_sq_count = 20
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
 
         collection_w.load(replica_number=3)
         for i in range(total_sq_count):
@@ -2535,6 +2552,7 @@ class TestReleaseAdvanced(TestcaseBase):
         collection_wr = self.init_collection_wrap(name=c_name)
         collection_wr.insert(data=data)
         assert collection_wr.num_entities == ct.default_nb
+        collection_wr.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_wr.load()
         search_res, _ = collection_wr.search(vectors, default_search_field, default_search_params,
                                              default_limit, _async=True)
@@ -2553,6 +2571,7 @@ class TestReleaseAdvanced(TestcaseBase):
         self._connect()
         partition_num = 1
         collection_w = self.init_collection_general(prefix, True, 10, partition_num, is_index=True)[0]
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         par = collection_w.partitions
         par_name = par[partition_num].name
         par[partition_num].load()
@@ -2578,6 +2597,7 @@ class TestReleaseAdvanced(TestcaseBase):
         self._connect()
         partition_num = 1
         collection_w = self.init_collection_general(prefix, True, 10, partition_num, is_index=True)[0]
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         par = collection_w.partitions
         par_name = par[partition_num].name
         par[partition_num].load()
@@ -2640,6 +2660,7 @@ class TestLoadPartition(TestcaseBase):
                                                  'which does not match the index type: BIN_IVF_FLAT'}
             collection_w.create_index(ct.default_binary_vec_field_name, binary_index,
                                       check_task=CheckTasks.err_res, check_items=error)
+            collection_w.create_index(ct.default_binary_vec_field_name, ct.default_bin_flat_index)
         else:
             collection_w.create_index(ct.default_binary_vec_field_name, binary_index)
         par = collection_w.partitions
@@ -2662,6 +2683,7 @@ class TestLoadPartition(TestcaseBase):
                                                check_items={"name": partition_name, "description": description,
                                                             "is_empty": True, "num_entities": 0}
                                                )
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         partition_w.load()
         self.connection_wrap.remove_connection(ct.default_alias)
         res_list, _ = self.connection_wrap.list_connections()
@@ -2686,6 +2708,7 @@ class TestLoadPartition(TestcaseBase):
                                                check_items={"name": partition_name, "description": description,
                                                             "is_empty": True, "num_entities": 0}
                                                )
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         partition_w.load()
         self.connection_wrap.remove_connection(ct.default_alias)
         res_list, _ = self.connection_wrap.list_connections()
@@ -2710,6 +2733,7 @@ class TestLoadPartition(TestcaseBase):
                                                check_items={"name": partition_name, "description": description,
                                                             "is_empty": True, "num_entities": 0}
                                                )
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         partition_w.drop()
         error = {ct.err_code: 0, ct.err_msg: 'partitionID of partitionName:%s can not be find' % partition_name}
         partition_w.load(check_task=CheckTasks.err_res, check_items=error)
