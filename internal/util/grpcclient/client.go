@@ -34,28 +34,31 @@ import (
 	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/crypto"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/generic"
 	"github.com/milvus-io/milvus/internal/util/trace"
 )
 
 // GrpcClient abstracts client of grpc
-type GrpcClient interface {
+type GrpcClient[T any] interface {
 	SetRole(string)
 	GetRole() string
 	SetGetAddrFunc(func() (string, error))
 	EnableEncryption()
-	SetNewGrpcClientFunc(func(cc *grpc.ClientConn) interface{})
-	GetGrpcClient(ctx context.Context) (interface{}, error)
-	ReCall(ctx context.Context, caller func(client interface{}) (interface{}, error)) (interface{}, error)
-	Call(ctx context.Context, caller func(client interface{}) (interface{}, error)) (interface{}, error)
+	SetNewGrpcClientFunc(func(cc *grpc.ClientConn) T)
+	GetGrpcClient(ctx context.Context) (T, error)
+	ReCall(ctx context.Context, caller func(client T) (any, error)) (any, error)
+	Call(ctx context.Context, caller func(client T) (any, error)) (any, error)
 	Close() error
+	SetNodeID(int64)
+	GetNodeID() int64
 }
 
 // ClientBase is a base of grpc client
-type ClientBase struct {
+type ClientBase[T any] struct {
 	getAddrFunc   func() (string, error)
-	newGrpcClient func(cc *grpc.ClientConn) interface{}
+	newGrpcClient func(cc *grpc.ClientConn) T
 
-	grpcClient             interface{}
+	grpcClient             T
 	encryption             bool
 	conn                   *grpc.ClientConn
 	grpcClientMtx          sync.RWMutex
@@ -63,6 +66,7 @@ type ClientBase struct {
 	ClientMaxSendSize      int
 	ClientMaxRecvSize      int
 	RetryServiceNameConfig string
+	nodeID                 int64
 
 	DialTimeout      time.Duration
 	KeepAliveTime    time.Duration
@@ -75,34 +79,34 @@ type ClientBase struct {
 }
 
 // SetRole sets role of client
-func (c *ClientBase) SetRole(role string) {
+func (c *ClientBase[T]) SetRole(role string) {
 	c.role = role
 }
 
 // GetRole returns role of client
-func (c *ClientBase) GetRole() string {
+func (c *ClientBase[T]) GetRole() string {
 	return c.role
 }
 
 // SetGetAddrFunc sets getAddrFunc of client
-func (c *ClientBase) SetGetAddrFunc(f func() (string, error)) {
+func (c *ClientBase[T]) SetGetAddrFunc(f func() (string, error)) {
 	c.getAddrFunc = f
 }
 
-func (c *ClientBase) EnableEncryption() {
+func (c *ClientBase[T]) EnableEncryption() {
 	c.encryption = true
 }
 
 // SetNewGrpcClientFunc sets newGrpcClient of client
-func (c *ClientBase) SetNewGrpcClientFunc(f func(cc *grpc.ClientConn) interface{}) {
+func (c *ClientBase[T]) SetNewGrpcClientFunc(f func(cc *grpc.ClientConn) T) {
 	c.newGrpcClient = f
 }
 
 // GetGrpcClient returns grpc client
-func (c *ClientBase) GetGrpcClient(ctx context.Context) (interface{}, error) {
+func (c *ClientBase[T]) GetGrpcClient(ctx context.Context) (T, error) {
 	c.grpcClientMtx.RLock()
 
-	if c.grpcClient != nil {
+	if !generic.IsZero(c.grpcClient) {
 		defer c.grpcClientMtx.RUnlock()
 		return c.grpcClient, nil
 	}
@@ -111,36 +115,35 @@ func (c *ClientBase) GetGrpcClient(ctx context.Context) (interface{}, error) {
 	c.grpcClientMtx.Lock()
 	defer c.grpcClientMtx.Unlock()
 
-	if c.grpcClient != nil {
+	if !generic.IsZero(c.grpcClient) {
 		return c.grpcClient, nil
 	}
 
 	err := c.connect(ctx)
 	if err != nil {
-		return nil, err
+		return generic.Zero[T](), err
 	}
 
 	return c.grpcClient, nil
 }
 
-func (c *ClientBase) resetConnection(client interface{}) {
+func (c *ClientBase[T]) resetConnection(client T) {
 	c.grpcClientMtx.Lock()
 	defer c.grpcClientMtx.Unlock()
-	if c.grpcClient == nil {
+	if generic.IsZero(c.grpcClient) {
 		return
 	}
-
-	if client != c.grpcClient {
+	if !generic.Equal(client, c.grpcClient) {
 		return
 	}
 	if c.conn != nil {
 		_ = c.conn.Close()
 	}
 	c.conn = nil
-	c.grpcClient = nil
+	c.grpcClient = generic.Zero[T]()
 }
 
-func (c *ClientBase) connect(ctx context.Context) error {
+func (c *ClientBase[T]) connect(ctx context.Context) error {
 	addr, err := c.getAddrFunc()
 	if err != nil {
 		log.Error("failed to get client address", zap.Error(err))
@@ -240,10 +243,10 @@ func (c *ClientBase) connect(ctx context.Context) error {
 	return nil
 }
 
-func (c *ClientBase) callOnce(ctx context.Context, caller func(client interface{}) (interface{}, error)) (interface{}, error) {
+func (c *ClientBase[T]) callOnce(ctx context.Context, caller func(client T) (any, error)) (any, error) {
 	client, err := c.GetGrpcClient(ctx)
 	if err != nil {
-		return nil, err
+		return generic.Zero[T](), err
 	}
 
 	ret, err2 := caller(client)
@@ -252,11 +255,11 @@ func (c *ClientBase) callOnce(ctx context.Context, caller func(client interface{
 	}
 
 	if !funcutil.CheckCtxValid(ctx) {
-		return nil, err2
+		return generic.Zero[T](), err2
 	}
 	if !funcutil.IsGrpcErr(err2) {
 		log.Debug("ClientBase:isNotGrpcErr", zap.Error(err2))
-		return nil, err2
+		return generic.Zero[T](), err2
 	}
 	log.Debug(c.GetRole()+" ClientBase grpc error, start to reset connection", zap.Error(err2))
 	c.resetConnection(client)
@@ -264,24 +267,24 @@ func (c *ClientBase) callOnce(ctx context.Context, caller func(client interface{
 }
 
 // Call does a grpc call
-func (c *ClientBase) Call(ctx context.Context, caller func(client interface{}) (interface{}, error)) (interface{}, error) {
+func (c *ClientBase[T]) Call(ctx context.Context, caller func(client T) (any, error)) (any, error) {
 	if !funcutil.CheckCtxValid(ctx) {
-		return nil, ctx.Err()
+		return generic.Zero[T](), ctx.Err()
 	}
 
 	ret, err := c.callOnce(ctx, caller)
 	if err != nil {
 		traceErr := fmt.Errorf("err: %w\n, %s", err, trace.StackTrace())
 		log.Error("ClientBase Call grpc first call get error", zap.String("role", c.GetRole()), zap.Error(traceErr))
-		return nil, traceErr
+		return generic.Zero[T](), traceErr
 	}
 	return ret, err
 }
 
 // ReCall does the grpc call twice
-func (c *ClientBase) ReCall(ctx context.Context, caller func(client interface{}) (interface{}, error)) (interface{}, error) {
+func (c *ClientBase[T]) ReCall(ctx context.Context, caller func(client T) (any, error)) (any, error) {
 	if !funcutil.CheckCtxValid(ctx) {
-		return nil, ctx.Err()
+		return generic.Zero[T](), ctx.Err()
 	}
 
 	ret, err := c.callOnce(ctx, caller)
@@ -293,24 +296,32 @@ func (c *ClientBase) ReCall(ctx context.Context, caller func(client interface{})
 	log.Warn(c.GetRole()+" ClientBase ReCall grpc first call get error ", zap.Error(traceErr))
 
 	if !funcutil.CheckCtxValid(ctx) {
-		return nil, ctx.Err()
+		return generic.Zero[T](), ctx.Err()
 	}
 
 	ret, err = c.callOnce(ctx, caller)
 	if err != nil {
 		traceErr = fmt.Errorf("err: %w\n, %s", err, trace.StackTrace())
 		log.Error("ClientBase ReCall grpc second call get error", zap.String("role", c.GetRole()), zap.Error(traceErr))
-		return nil, traceErr
+		return generic.Zero[T](), traceErr
 	}
 	return ret, err
 }
 
 // Close close the client connection
-func (c *ClientBase) Close() error {
+func (c *ClientBase[T]) Close() error {
 	c.grpcClientMtx.Lock()
 	defer c.grpcClientMtx.Unlock()
 	if c.conn != nil {
 		return c.conn.Close()
 	}
 	return nil
+}
+
+func (c *ClientBase) SetNodeID(nodeID int64) {
+
+}
+
+func (c *ClientBase) GetNodeID() int64 {
+	return c.nodeID
 }

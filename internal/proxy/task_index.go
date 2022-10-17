@@ -96,7 +96,7 @@ func (cit *createIndexTask) SetTs(ts Timestamp) {
 }
 
 func (cit *createIndexTask) OnEnqueue() error {
-	cit.req.Base = &commonpb.MsgBase{}
+	cit.req.Base = common.NewMsgBase(commonpb.MsgType_Undefined, common.MsgIDNeedFill, common.GetNowTimestamp(), Params.ProxyCfg.GetNodeID())
 	return nil
 }
 
@@ -361,7 +361,7 @@ func (dit *describeIndexTask) SetTs(ts Timestamp) {
 }
 
 func (dit *describeIndexTask) OnEnqueue() error {
-	dit.Base = &commonpb.MsgBase{}
+	dit.Base = common.NewMsgBase(commonpb.MsgType_Undefined, common.MsgIDNeedFill, common.GetNowTimestamp(), Params.ProxyCfg.GetNodeID())
 	return nil
 }
 
@@ -471,7 +471,7 @@ func (dit *dropIndexTask) SetTs(ts Timestamp) {
 }
 
 func (dit *dropIndexTask) OnEnqueue() error {
-	dit.Base = &commonpb.MsgBase{}
+	dit.Base = common.NewMsgBase(commonpb.MsgType_Undefined, common.MsgIDNeedFill, common.GetNowTimestamp(), Params.ProxyCfg.GetNodeID())
 	return nil
 }
 
@@ -565,7 +565,7 @@ func (gibpt *getIndexBuildProgressTask) SetTs(ts Timestamp) {
 }
 
 func (gibpt *getIndexBuildProgressTask) OnEnqueue() error {
-	gibpt.Base = &commonpb.MsgBase{}
+	gibpt.Base = common.NewMsgBase(commonpb.MsgType_Undefined, common.MsgIDNeedFill, common.GetNowTimestamp(), Params.ProxyCfg.GetNodeID())
 	return nil
 }
 
@@ -658,7 +658,7 @@ func (gist *getIndexStateTask) SetTs(ts Timestamp) {
 }
 
 func (gist *getIndexStateTask) OnEnqueue() error {
-	gist.Base = &commonpb.MsgBase{}
+	gist.Base = common.NewMsgBase(commonpb.MsgType_Undefined, common.MsgIDNeedFill, common.GetNowTimestamp(), Params.ProxyCfg.GetNodeID())
 	return nil
 }
 

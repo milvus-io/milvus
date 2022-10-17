@@ -1666,8 +1666,8 @@ class TestUtilityAdvanced(TestcaseBase):
         dst_node_ids = all_querynodes[1:]
         # add segment ids which are not exist
         sealed_segment_ids = [sealed_segment_id
-                              for sealed_segment_id in range(max(segment_distribution[src_node_id]["sealed"]) + 1,
-                                                             max(segment_distribution[src_node_id]["sealed"]) + 3)]
+                              for sealed_segment_id in range(max(segment_distribution[src_node_id]["sealed"]) + 100,
+                                                             max(segment_distribution[src_node_id]["sealed"]) + 103)]
         # load balance
         self.utility_wrap.load_balance(collection_w.name, src_node_id, dst_node_ids, sealed_segment_ids,
                                        check_task=CheckTasks.err_res,

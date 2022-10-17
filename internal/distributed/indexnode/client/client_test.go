@@ -89,32 +89,32 @@ func Test_NewClient(t *testing.T) {
 		retCheck(retNotNil, r7, err)
 	}
 
-	client.grpcClient = &mock.GRPCClientBase{
+	client.grpcClient = &mock.GRPCClientBase[indexpb.IndexNodeClient]{
 		GetGrpcClientErr: errors.New("dummy"),
 	}
 
-	newFunc1 := func(cc *grpc.ClientConn) interface{} {
+	newFunc1 := func(cc *grpc.ClientConn) indexpb.IndexNodeClient {
 		return &mock.GrpcIndexNodeClient{Err: nil}
 	}
 	client.grpcClient.SetNewGrpcClientFunc(newFunc1)
 
 	checkFunc(false)
 
-	client.grpcClient = &mock.GRPCClientBase{
+	client.grpcClient = &mock.GRPCClientBase[indexpb.IndexNodeClient]{
 		GetGrpcClientErr: nil,
 	}
 
-	newFunc2 := func(cc *grpc.ClientConn) interface{} {
+	newFunc2 := func(cc *grpc.ClientConn) indexpb.IndexNodeClient {
 		return &mock.GrpcIndexNodeClient{Err: errors.New("dummy")}
 	}
 	client.grpcClient.SetNewGrpcClientFunc(newFunc2)
 	checkFunc(false)
 
-	client.grpcClient = &mock.GRPCClientBase{
+	client.grpcClient = &mock.GRPCClientBase[indexpb.IndexNodeClient]{
 		GetGrpcClientErr: nil,
 	}
 
-	newFunc3 := func(cc *grpc.ClientConn) interface{} {
+	newFunc3 := func(cc *grpc.ClientConn) indexpb.IndexNodeClient {
 		return &mock.GrpcIndexNodeClient{Err: nil}
 	}
 	client.grpcClient.SetNewGrpcClientFunc(newFunc3)

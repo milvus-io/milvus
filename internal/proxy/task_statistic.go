@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -88,7 +89,7 @@ func (g *getStatisticsTask) SetTs(ts Timestamp) {
 
 func (g *getStatisticsTask) OnEnqueue() error {
 	g.GetStatisticsRequest = &internalpb.GetStatisticsRequest{
-		Base: &commonpb.MsgBase{},
+		Base: common.NewMsgBase(commonpb.MsgType_Undefined, common.MsgIDNeedFill, common.GetNowTimestamp(), Params.ProxyCfg.GetNodeID()),
 	}
 	return nil
 }
@@ -231,12 +232,12 @@ func (g *getStatisticsTask) getStatisticsFromDataCoord(ctx context.Context) erro
 	partIDs := g.unloadedPartitionIDs
 
 	req := &datapb.GetPartitionStatisticsRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_GetPartitionStatistics,
-			MsgID:     g.Base.MsgID,
-			Timestamp: g.Base.Timestamp,
-			SourceID:  g.Base.SourceID,
-		},
+		Base: common.NewMsgBase(
+			commonpb.MsgType_GetPartitionStatistics,
+			g.Base.MsgID,
+			g.Base.Timestamp,
+			g.Base.SourceID,
+		),
 		CollectionID: collID,
 		PartitionIDs: partIDs,
 	}
@@ -326,10 +327,7 @@ func checkFullLoaded(ctx context.Context, qc types.QueryCoord, collectionName st
 	// If request to search partitions
 	if len(searchPartitionIDs) > 0 {
 		resp, err := qc.ShowPartitions(ctx, &querypb.ShowPartitionsRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:  commonpb.MsgType_ShowPartitions,
-				SourceID: Params.ProxyCfg.GetNodeID(),
-			},
+			Base:         common.NewMsgBase(commonpb.MsgType_ShowPartitions, common.MsgIDNeedFill, common.GetNowTimestamp(), Params.ProxyCfg.GetNodeID()),
 			CollectionID: info.collID,
 			PartitionIDs: searchPartitionIDs,
 		})
@@ -351,10 +349,7 @@ func checkFullLoaded(ctx context.Context, qc types.QueryCoord, collectionName st
 
 	// If request to search collection
 	resp, err := qc.ShowPartitions(ctx, &querypb.ShowPartitionsRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:  commonpb.MsgType_ShowPartitions,
-			SourceID: Params.ProxyCfg.GetNodeID(),
-		},
+		Base:         common.NewMsgBase(commonpb.MsgType_ShowPartitions, common.MsgIDNeedFill, common.GetNowTimestamp(), Params.ProxyCfg.GetNodeID()),
 		CollectionID: info.collID,
 	})
 	if err != nil {
@@ -628,7 +623,7 @@ func (g *getCollectionStatisticsTask) SetTs(ts Timestamp) {
 }
 
 func (g *getCollectionStatisticsTask) OnEnqueue() error {
-	g.Base = &commonpb.MsgBase{}
+	g.Base = common.NewMsgBase(commonpb.MsgType_Undefined, common.MsgIDNeedFill, common.GetNowTimestamp(), Params.ProxyCfg.GetNodeID())
 	return nil
 }
 
@@ -645,12 +640,7 @@ func (g *getCollectionStatisticsTask) Execute(ctx context.Context) error {
 	}
 	g.collectionID = collID
 	req := &datapb.GetCollectionStatisticsRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_GetCollectionStatistics,
-			MsgID:     g.Base.MsgID,
-			Timestamp: g.Base.Timestamp,
-			SourceID:  g.Base.SourceID,
-		},
+		Base:         common.NewMsgBase(commonpb.MsgType_GetCollectionStatistics, g.Base.MsgID, g.Base.Timestamp, g.Base.SourceID),
 		CollectionID: collID,
 	}
 
@@ -718,7 +708,7 @@ func (g *getPartitionStatisticsTask) SetTs(ts Timestamp) {
 }
 
 func (g *getPartitionStatisticsTask) OnEnqueue() error {
-	g.Base = &commonpb.MsgBase{}
+	g.Base = common.NewMsgBase(commonpb.MsgType_Undefined, common.MsgIDNeedFill, common.GetNowTimestamp(), Params.ProxyCfg.GetNodeID())
 	return nil
 }
 
@@ -739,12 +729,7 @@ func (g *getPartitionStatisticsTask) Execute(ctx context.Context) error {
 		return err
 	}
 	req := &datapb.GetPartitionStatisticsRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_GetPartitionStatistics,
-			MsgID:     g.Base.MsgID,
-			Timestamp: g.Base.Timestamp,
-			SourceID:  g.Base.SourceID,
-		},
+		Base:         common.NewMsgBase(commonpb.MsgType_GetPartitionStatistics, g.Base.MsgID, g.Base.Timestamp, g.Base.SourceID),
 		CollectionID: collID,
 		PartitionIDs: []int64{partitionID},
 	}

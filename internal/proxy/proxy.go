@@ -33,6 +33,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -299,12 +300,11 @@ func (node *Proxy) sendChannelsTimeTickLoop() {
 				}
 
 				req := &internalpb.ChannelTimeTickMsg{
-					Base: &commonpb.MsgBase{
-						MsgType:   commonpb.MsgType_TimeTick, // todo
-						MsgID:     0,                         // todo
-						Timestamp: 0,                         // todo
-						SourceID:  node.session.ServerID,
-					},
+					Base: common.NewMsgBase(commonpb.MsgType_TimeTick, // todo
+						0, // todo
+						0, // todo
+						node.session.ServerID,
+					),
 					ChannelNames:     channels,
 					Timestamps:       tss,
 					DefaultTimestamp: maxTs,

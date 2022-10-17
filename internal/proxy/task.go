@@ -146,7 +146,7 @@ func (cct *createCollectionTask) SetTs(ts Timestamp) {
 }
 
 func (cct *createCollectionTask) OnEnqueue() error {
-	cct.Base = &commonpb.MsgBase{}
+	cct.Base = common.NewMsgBase(commonpb.MsgType_Undefined, common.MsgIDNeedFill, common.GetNowTimestamp(), Params.ProxyCfg.GetNodeID())
 	cct.Base.MsgType = commonpb.MsgType_CreateCollection
 	cct.Base.SourceID = Params.ProxyCfg.GetNodeID()
 	return nil
@@ -283,7 +283,7 @@ func (dct *dropCollectionTask) SetTs(ts Timestamp) {
 }
 
 func (dct *dropCollectionTask) OnEnqueue() error {
-	dct.Base = &commonpb.MsgBase{}
+	dct.Base = common.NewMsgBase(commonpb.MsgType_Undefined, common.MsgIDNeedFill, common.GetNowTimestamp(), Params.ProxyCfg.GetNodeID())
 	return nil
 }
 
@@ -353,7 +353,7 @@ func (hct *hasCollectionTask) SetTs(ts Timestamp) {
 }
 
 func (hct *hasCollectionTask) OnEnqueue() error {
-	hct.Base = &commonpb.MsgBase{}
+	hct.Base = common.NewMsgBase(commonpb.MsgType_Undefined, common.MsgIDNeedFill, common.GetNowTimestamp(), Params.ProxyCfg.GetNodeID())
 	return nil
 }
 
@@ -427,7 +427,7 @@ func (dct *describeCollectionTask) SetTs(ts Timestamp) {
 }
 
 func (dct *describeCollectionTask) OnEnqueue() error {
-	dct.Base = &commonpb.MsgBase{}
+	dct.Base = common.NewMsgBase(commonpb.MsgType_Undefined, common.MsgIDNeedFill, common.GetNowTimestamp(), Params.ProxyCfg.GetNodeID())
 	return nil
 }
 
@@ -545,7 +545,7 @@ func (sct *showCollectionsTask) SetTs(ts Timestamp) {
 }
 
 func (sct *showCollectionsTask) OnEnqueue() error {
-	sct.Base = &commonpb.MsgBase{}
+	sct.Base = common.NewMsgBase(commonpb.MsgType_Undefined, common.MsgIDNeedFill, common.GetNowTimestamp(), Params.ProxyCfg.GetNodeID())
 	return nil
 }
 
@@ -597,12 +597,12 @@ func (sct *showCollectionsTask) Execute(ctx context.Context) error {
 		}
 
 		resp, err := sct.queryCoord.ShowCollections(ctx, &querypb.ShowCollectionsRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_ShowCollections,
-				MsgID:     sct.Base.MsgID,
-				Timestamp: sct.Base.Timestamp,
-				SourceID:  sct.Base.SourceID,
-			},
+			Base: common.NewMsgBase(
+				commonpb.MsgType_ShowCollections,
+				sct.Base.MsgID,
+				sct.Base.Timestamp,
+				sct.Base.SourceID,
+			),
 			//DbID: sct.ShowCollectionsRequest.DbName,
 			CollectionIDs: collectionIDs,
 		})
@@ -706,7 +706,7 @@ func (act *alterCollectionTask) SetTs(ts Timestamp) {
 }
 
 func (act *alterCollectionTask) OnEnqueue() error {
-	act.Base = &commonpb.MsgBase{}
+	act.Base = common.NewMsgBase(commonpb.MsgType_Undefined, common.MsgIDNeedFill, common.GetNowTimestamp(), Params.ProxyCfg.GetNodeID())
 	return nil
 }
 
@@ -768,7 +768,7 @@ func (cpt *createPartitionTask) SetTs(ts Timestamp) {
 }
 
 func (cpt *createPartitionTask) OnEnqueue() error {
-	cpt.Base = &commonpb.MsgBase{}
+	cpt.Base = common.NewMsgBase(commonpb.MsgType_Undefined, common.MsgIDNeedFill, common.GetNowTimestamp(), Params.ProxyCfg.GetNodeID())
 	return nil
 }
 
@@ -845,7 +845,7 @@ func (dpt *dropPartitionTask) SetTs(ts Timestamp) {
 }
 
 func (dpt *dropPartitionTask) OnEnqueue() error {
-	dpt.Base = &commonpb.MsgBase{}
+	dpt.Base = common.NewMsgBase(commonpb.MsgType_Undefined, common.MsgIDNeedFill, common.GetNowTimestamp(), Params.ProxyCfg.GetNodeID())
 	return nil
 }
 
@@ -922,7 +922,7 @@ func (hpt *hasPartitionTask) SetTs(ts Timestamp) {
 }
 
 func (hpt *hasPartitionTask) OnEnqueue() error {
-	hpt.Base = &commonpb.MsgBase{}
+	hpt.Base = common.NewMsgBase(commonpb.MsgType_Undefined, common.MsgIDNeedFill, common.GetNowTimestamp(), Params.ProxyCfg.GetNodeID())
 	return nil
 }
 
@@ -999,7 +999,7 @@ func (spt *showPartitionsTask) SetTs(ts Timestamp) {
 }
 
 func (spt *showPartitionsTask) OnEnqueue() error {
-	spt.Base = &commonpb.MsgBase{}
+	spt.Base = common.NewMsgBase(commonpb.MsgType_Undefined, common.MsgIDNeedFill, common.GetNowTimestamp(), Params.ProxyCfg.GetNodeID())
 	return nil
 }
 
@@ -1061,12 +1061,12 @@ func (spt *showPartitionsTask) Execute(ctx context.Context) error {
 			IDs2Names[partitionID] = partitionName
 		}
 		resp, err := spt.queryCoord.ShowPartitions(ctx, &querypb.ShowPartitionsRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_ShowCollections,
-				MsgID:     spt.Base.MsgID,
-				Timestamp: spt.Base.Timestamp,
-				SourceID:  spt.Base.SourceID,
-			},
+			Base: common.NewMsgBase(
+				commonpb.MsgType_ShowCollections,
+				spt.Base.MsgID,
+				spt.Base.Timestamp,
+				spt.Base.SourceID,
+			),
 			CollectionID: collectionID,
 			PartitionIDs: partitionIDs,
 		})
@@ -1163,7 +1163,7 @@ func (ft *flushTask) SetTs(ts Timestamp) {
 }
 
 func (ft *flushTask) OnEnqueue() error {
-	ft.Base = &commonpb.MsgBase{}
+	ft.Base = common.NewMsgBase(commonpb.MsgType_Undefined, common.MsgIDNeedFill, common.GetNowTimestamp(), Params.ProxyCfg.GetNodeID())
 	return nil
 }
 
@@ -1183,12 +1183,12 @@ func (ft *flushTask) Execute(ctx context.Context) error {
 			return err
 		}
 		flushReq := &datapb.FlushRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_Flush,
-				MsgID:     ft.Base.MsgID,
-				Timestamp: ft.Base.Timestamp,
-				SourceID:  ft.Base.SourceID,
-			},
+			Base: common.NewMsgBase(
+				commonpb.MsgType_Flush,
+				ft.Base.MsgID,
+				ft.Base.Timestamp,
+				ft.Base.SourceID,
+			),
 			DbID:         0,
 			CollectionID: collID,
 		}
@@ -1264,7 +1264,7 @@ func (lct *loadCollectionTask) SetTs(ts Timestamp) {
 }
 
 func (lct *loadCollectionTask) OnEnqueue() error {
-	lct.Base = &commonpb.MsgBase{}
+	lct.Base = common.NewMsgBase(commonpb.MsgType_Undefined, common.MsgIDNeedFill, common.GetNowTimestamp(), Params.ProxyCfg.GetNodeID())
 	return nil
 }
 
@@ -1327,12 +1327,12 @@ func (lct *loadCollectionTask) Execute(ctx context.Context) (err error) {
 		return errors.New(errMsg)
 	}
 	request := &querypb.LoadCollectionRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_LoadCollection,
-			MsgID:     lct.Base.MsgID,
-			Timestamp: lct.Base.Timestamp,
-			SourceID:  lct.Base.SourceID,
-		},
+		Base: common.NewMsgBase(
+			commonpb.MsgType_LoadCollection,
+			lct.Base.MsgID,
+			lct.Base.Timestamp,
+			lct.Base.SourceID,
+		),
 		DbID:          0,
 		CollectionID:  collID,
 		Schema:        collSchema,
@@ -1399,7 +1399,7 @@ func (rct *releaseCollectionTask) SetTs(ts Timestamp) {
 }
 
 func (rct *releaseCollectionTask) OnEnqueue() error {
-	rct.Base = &commonpb.MsgBase{}
+	rct.Base = common.NewMsgBase(commonpb.MsgType_Undefined, common.MsgIDNeedFill, common.GetNowTimestamp(), Params.ProxyCfg.GetNodeID())
 	return nil
 }
 
@@ -1423,12 +1423,12 @@ func (rct *releaseCollectionTask) Execute(ctx context.Context) (err error) {
 	}
 	rct.collectionID = collID
 	request := &querypb.ReleaseCollectionRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_ReleaseCollection,
-			MsgID:     rct.Base.MsgID,
-			Timestamp: rct.Base.Timestamp,
-			SourceID:  rct.Base.SourceID,
-		},
+		Base: common.NewMsgBase(
+			commonpb.MsgType_ReleaseCollection,
+			rct.Base.MsgID,
+			rct.Base.Timestamp,
+			rct.Base.SourceID,
+		),
 		DbID:         0,
 		CollectionID: collID,
 	}
@@ -1489,7 +1489,7 @@ func (lpt *loadPartitionsTask) SetTs(ts Timestamp) {
 }
 
 func (lpt *loadPartitionsTask) OnEnqueue() error {
-	lpt.Base = &commonpb.MsgBase{}
+	lpt.Base = common.NewMsgBase(commonpb.MsgType_Undefined, common.MsgIDNeedFill, common.GetNowTimestamp(), Params.ProxyCfg.GetNodeID())
 	return nil
 }
 
@@ -1552,12 +1552,12 @@ func (lpt *loadPartitionsTask) Execute(ctx context.Context) error {
 		partitionIDs = append(partitionIDs, partitionID)
 	}
 	request := &querypb.LoadPartitionsRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_LoadPartitions,
-			MsgID:     lpt.Base.MsgID,
-			Timestamp: lpt.Base.Timestamp,
-			SourceID:  lpt.Base.SourceID,
-		},
+		Base: common.NewMsgBase(
+			commonpb.MsgType_LoadPartitions,
+			lpt.Base.MsgID,
+			lpt.Base.Timestamp,
+			lpt.Base.SourceID,
+		),
 		DbID:          0,
 		CollectionID:  collID,
 		PartitionIDs:  partitionIDs,
@@ -1616,7 +1616,7 @@ func (rpt *releasePartitionsTask) SetTs(ts Timestamp) {
 }
 
 func (rpt *releasePartitionsTask) OnEnqueue() error {
-	rpt.Base = &commonpb.MsgBase{}
+	rpt.Base = common.NewMsgBase(commonpb.MsgType_Undefined, common.MsgIDNeedFill, common.GetNowTimestamp(), Params.ProxyCfg.GetNodeID())
 	return nil
 }
 
@@ -1648,12 +1648,12 @@ func (rpt *releasePartitionsTask) Execute(ctx context.Context) (err error) {
 		partitionIDs = append(partitionIDs, partitionID)
 	}
 	request := &querypb.ReleasePartitionsRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_ReleasePartitions,
-			MsgID:     rpt.Base.MsgID,
-			Timestamp: rpt.Base.Timestamp,
-			SourceID:  rpt.Base.SourceID,
-		},
+		Base: common.NewMsgBase(
+			commonpb.MsgType_ReleasePartitions,
+			rpt.Base.MsgID,
+			rpt.Base.Timestamp,
+			rpt.Base.SourceID,
+		),
 		DbID:         0,
 		CollectionID: collID,
 		PartitionIDs: partitionIDs,
@@ -1718,7 +1718,7 @@ func (dt *deleteTask) SetTs(ts Timestamp) {
 }
 
 func (dt *deleteTask) OnEnqueue() error {
-	dt.DeleteRequest.Base = &commonpb.MsgBase{}
+	dt.DeleteRequest.Base = common.NewMsgBase(commonpb.MsgType_Undefined, common.MsgIDNeedFill, common.GetNowTimestamp(), Params.ProxyCfg.GetNodeID())
 	return nil
 }
 
@@ -1912,12 +1912,12 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 		_, ok := result[key]
 		if !ok {
 			sliceRequest := internalpb.DeleteRequest{
-				Base: &commonpb.MsgBase{
-					MsgType:   commonpb.MsgType_Delete,
-					MsgID:     dt.Base.MsgID,
-					Timestamp: ts,
-					SourceID:  proxyID,
-				},
+				Base: common.NewMsgBase(
+					commonpb.MsgType_Delete,
+					dt.Base.MsgID,
+					ts,
+					proxyID,
+				),
 				CollectionID:   collectionID,
 				PartitionID:    partitionID,
 				CollectionName: collectionName,
@@ -2018,7 +2018,7 @@ func (c *CreateAliasTask) SetTs(ts Timestamp) {
 
 // OnEnqueue defines the behavior task enqueued
 func (c *CreateAliasTask) OnEnqueue() error {
-	c.Base = &commonpb.MsgBase{}
+	c.Base = common.NewMsgBase(commonpb.MsgType_Undefined, common.MsgIDNeedFill, common.GetNowTimestamp(), Params.ProxyCfg.GetNodeID())
 	return nil
 }
 
@@ -2098,7 +2098,7 @@ func (d *DropAliasTask) SetTs(ts Timestamp) {
 }
 
 func (d *DropAliasTask) OnEnqueue() error {
-	d.Base = &commonpb.MsgBase{}
+	d.Base = common.NewMsgBase(commonpb.MsgType_Undefined, common.MsgIDNeedFill, common.GetNowTimestamp(), Params.ProxyCfg.GetNodeID())
 	return nil
 }
 
@@ -2164,7 +2164,7 @@ func (a *AlterAliasTask) SetTs(ts Timestamp) {
 }
 
 func (a *AlterAliasTask) OnEnqueue() error {
-	a.Base = &commonpb.MsgBase{}
+	a.Base = common.NewMsgBase(commonpb.MsgType_Undefined, common.MsgIDNeedFill, common.GetNowTimestamp(), Params.ProxyCfg.GetNodeID())
 	return nil
 }
 

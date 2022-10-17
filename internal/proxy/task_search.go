@@ -560,10 +560,7 @@ func checkIfLoaded(ctx context.Context, qc types.QueryCoord, collectionName stri
 
 	// If request to search partitions
 	resp, err := qc.ShowPartitions(ctx, &querypb.ShowPartitionsRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:  commonpb.MsgType_ShowPartitions,
-			SourceID: Params.ProxyCfg.GetNodeID(),
-		},
+		Base:         common.NewMsgBase(commonpb.MsgType_ShowPartitions, common.MsgIDNeedFill, common.GetNowTimestamp(), Params.ProxyCfg.GetNodeID()),
 		CollectionID: info.collID,
 		PartitionIDs: searchPartitionIDs,
 	})
@@ -841,7 +838,7 @@ func (t *searchTask) SetTs(ts Timestamp) {
 }
 
 func (t *searchTask) OnEnqueue() error {
-	t.Base = &commonpb.MsgBase{}
+	t.Base = common.NewMsgBase(commonpb.MsgType_Undefined, common.MsgIDNeedFill, common.GetNowTimestamp(), Params.ProxyCfg.GetNodeID())
 	t.Base.MsgType = commonpb.MsgType_Search
 	t.Base.SourceID = Params.ProxyCfg.GetNodeID()
 	return nil

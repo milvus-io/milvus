@@ -1793,12 +1793,12 @@ func (node *Proxy) ShowPartitions(ctx context.Context, request *milvuspb.ShowPar
 
 func (node *Proxy) getCollectionProgress(ctx context.Context, request *milvuspb.GetLoadingProgressRequest, collectionID int64) (int64, error) {
 	resp, err := node.queryCoord.ShowCollections(ctx, &querypb.ShowCollectionsRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_ShowCollections,
-			MsgID:     request.Base.MsgID,
-			Timestamp: request.Base.Timestamp,
-			SourceID:  request.Base.SourceID,
-		},
+		Base: common.NewMsgBase(
+			commonpb.MsgType_ShowCollections,
+			request.Base.MsgID,
+			request.Base.Timestamp,
+			request.Base.SourceID,
+		),
 		CollectionIDs: []int64{collectionID},
 	})
 	if err != nil {
@@ -1822,12 +1822,7 @@ func (node *Proxy) getPartitionProgress(ctx context.Context, request *milvuspb.G
 		partitionIDs = append(partitionIDs, partitionID)
 	}
 	resp, err := node.queryCoord.ShowPartitions(ctx, &querypb.ShowPartitionsRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_ShowPartitions,
-			MsgID:     request.Base.MsgID,
-			Timestamp: request.Base.Timestamp,
-			SourceID:  request.Base.SourceID,
-		},
+		Base:         common.NewMsgBase(commonpb.MsgType_ShowPartitions, request.Base.MsgID, request.Base.Timestamp, request.Base.SourceID),
 		CollectionID: collectionID,
 		PartitionIDs: partitionIDs,
 	})
@@ -1877,12 +1872,7 @@ func (node *Proxy) GetLoadingProgress(ctx context.Context, request *milvuspb.Get
 	if err != nil {
 		return getErrResponse(err), nil
 	}
-	msgBase := &commonpb.MsgBase{
-		MsgType:   commonpb.MsgType_SystemInfo,
-		MsgID:     0,
-		Timestamp: 0,
-		SourceID:  Params.ProxyCfg.GetNodeID(),
-	}
+	msgBase := common.NewMsgBase(commonpb.MsgType_SystemInfo, 0, 0, Params.ProxyCfg.GetNodeID())
 	if request.Base == nil {
 		request.Base = msgBase
 	} else {
@@ -2509,11 +2499,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 				HashValues: request.HashKeys,
 			},
 			InsertRequest: internalpb.InsertRequest{
-				Base: &commonpb.MsgBase{
-					MsgType:  commonpb.MsgType_Insert,
-					MsgID:    0,
-					SourceID: Params.ProxyCfg.GetNodeID(),
-				},
+				Base:           common.NewMsgBase(commonpb.MsgType_Insert, 0, common.GetNowTimestamp(), Params.ProxyCfg.GetNodeID()),
 				CollectionName: request.CollectionName,
 				PartitionName:  request.PartitionName,
 				FieldsData:     request.FieldsData,
@@ -2639,10 +2625,7 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 				HashValues: request.HashKeys,
 			},
 			DeleteRequest: internalpb.DeleteRequest{
-				Base: &commonpb.MsgBase{
-					MsgType: commonpb.MsgType_Delete,
-					MsgID:   0,
-				},
+				Base:           common.NewMsgBase(commonpb.MsgType_Delete, 0, common.GetNowTimestamp, Params.ProxyCfg.GetNodeID()),
 				DbName:         request.DbName,
 				CollectionName: request.CollectionName,
 				PartitionName:  request.PartitionName,
@@ -2728,10 +2711,7 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
 		SearchRequest: &internalpb.SearchRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:  commonpb.MsgType_Search,
-				SourceID: Params.ProxyCfg.GetNodeID(),
-			},
+			Base:  common.NewMsgBase(commonpb.MsgType_Search, common.MsgIDNeedFill, common.GetNowTimestamp(), Params.ProxyCfg.GetNodeID()),
 			ReqID: Params.ProxyCfg.GetNodeID(),
 		},
 		request:  request,
@@ -2972,10 +2952,7 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
 		RetrieveRequest: &internalpb.RetrieveRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:  commonpb.MsgType_Retrieve,
-				SourceID: Params.ProxyCfg.GetNodeID(),
-			},
+			Base:  common.NewMsgBase(commonpb.MsgType_Retrieve, common.MsgIDNeedFill, common.GetNowTimestamp(), Params.ProxyCfg.GetNodeID()),
 			ReqID: Params.ProxyCfg.GetNodeID(),
 		},
 		request:          request,
@@ -3379,10 +3356,7 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 			ctx:       ctx,
 			Condition: NewTaskCondition(ctx),
 			RetrieveRequest: &internalpb.RetrieveRequest{
-				Base: &commonpb.MsgBase{
-					MsgType:  commonpb.MsgType_Retrieve,
-					SourceID: Params.ProxyCfg.GetNodeID(),
-				},
+				Base:  common.NewMsgBase(commonpb.MsgType_Retrieve, common.MsgIDNeedFill, common.GetNowTimestamp(), Params.ProxyCfg.GetNodeID()),
 				ReqID: Params.ProxyCfg.GetNodeID(),
 			},
 			request: queryRequest,
@@ -3473,12 +3447,7 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 		return resp, nil
 	}
 	infoResp, err := node.dataCoord.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_SegmentInfo,
-			MsgID:     0,
-			Timestamp: 0,
-			SourceID:  Params.ProxyCfg.GetNodeID(),
-		},
+		Base:       common.NewMsgBase(commonpb.MsgType_SegmentInfo, 0, 0, Params.ProxyCfg.GetNodeID()),
 		SegmentIDs: segments,
 	})
 	if err != nil {
@@ -3532,12 +3501,7 @@ func (node *Proxy) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.GetQue
 		return resp, nil
 	}
 	infoResp, err := node.queryCoord.GetSegmentInfo(ctx, &querypb.GetSegmentInfoRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_SegmentInfo,
-			MsgID:     0,
-			Timestamp: 0,
-			SourceID:  Params.ProxyCfg.GetNodeID(),
-		},
+		Base:         common.NewMsgBase(commonpb.MsgType_SegmentInfo, 0, 0, Params.ProxyCfg.GetNodeID()),
 		CollectionID: collID,
 	})
 	if err != nil {
@@ -3573,12 +3537,7 @@ func (node *Proxy) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.GetQue
 
 func (node *Proxy) getSegmentsOfCollection(ctx context.Context, dbName string, collectionName string) ([]UniqueID, error) {
 	describeCollectionResponse, err := node.rootCoord.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_DescribeCollection,
-			MsgID:     0,
-			Timestamp: 0,
-			SourceID:  Params.ProxyCfg.GetNodeID(),
-		},
+		Base:           common.NewMsgBase(commonpb.MsgType_DescribeCollection, 0, 0, Params.ProxyCfg.GetNodeID()),
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})
@@ -3590,12 +3549,7 @@ func (node *Proxy) getSegmentsOfCollection(ctx context.Context, dbName string, c
 	}
 	collectionID := describeCollectionResponse.CollectionID
 	showPartitionsResp, err := node.rootCoord.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_ShowPartitions,
-			MsgID:     0,
-			Timestamp: 0,
-			SourceID:  Params.ProxyCfg.GetNodeID(),
-		},
+		Base:           common.NewMsgBase(commonpb.MsgType_ShowPartitions, 0, 0, Params.ProxyCfg.GetNodeID()),
 		DbName:         dbName,
 		CollectionName: collectionName,
 		CollectionID:   collectionID,
@@ -3734,12 +3688,7 @@ func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReque
 	log.Debug("Proxy.GetMetrics",
 		zap.String("metric_type", metricType))
 
-	req.Base = &commonpb.MsgBase{
-		MsgType:   commonpb.MsgType_SystemInfo,
-		MsgID:     0,
-		Timestamp: 0,
-		SourceID:  Params.ProxyCfg.GetNodeID(),
-	}
+	req.Base = common.NewMsgBase(commonpb.MsgType_SystemInfo, 0, 0, Params.ProxyCfg.GetNodeID())
 
 	if metricType == metricsinfo.SystemInfoMetrics {
 		ret, err := node.metricsCacheManager.GetSystemInfoMetrics()
@@ -3816,12 +3765,7 @@ func (node *Proxy) GetProxyMetrics(ctx context.Context, req *milvuspb.GetMetrics
 	log.Debug("Proxy.GetProxyMetrics",
 		zap.String("metric_type", metricType))
 
-	req.Base = &commonpb.MsgBase{
-		MsgType:   commonpb.MsgType_SystemInfo,
-		MsgID:     0,
-		Timestamp: 0,
-		SourceID:  Params.ProxyCfg.GetNodeID(),
-	}
+	req.Base = common.NewMsgBase(commonpb.MsgType_SystemInfo, 0, 0, Params.ProxyCfg.GetNodeID())
 
 	if metricType == metricsinfo.SystemInfoMetrics {
 		proxyMetrics, err := getProxyMetrics(ctx, req, node)
@@ -3882,12 +3826,7 @@ func (node *Proxy) LoadBalance(ctx context.Context, req *milvuspb.LoadBalanceReq
 		return status, nil
 	}
 	infoResp, err := node.queryCoord.LoadBalance(ctx, &querypb.LoadBalanceRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_LoadBalanceSegments,
-			MsgID:     0,
-			Timestamp: 0,
-			SourceID:  Params.ProxyCfg.GetNodeID(),
-		},
+		Base:             common.NewMsgBase(commonpb.MsgType_LoadBalanceSegments, 0, 0, Params.ProxyCfg.GetNodeID()),
 		SourceNodeIDs:    []int64{req.SrcNodeID},
 		DstNodeIDs:       req.DstNodeIDs,
 		BalanceReason:    querypb.TriggerCondition_GrpcRequest,
@@ -3910,7 +3849,7 @@ func (node *Proxy) LoadBalance(ctx context.Context, req *milvuspb.LoadBalanceReq
 	return status, nil
 }
 
-//GetCompactionState gets the compaction state of multiple segments
+// GetCompactionState gets the compaction state of multiple segments
 func (node *Proxy) GetCompactionState(ctx context.Context, req *milvuspb.GetCompactionStateRequest) (*milvuspb.GetCompactionStateResponse, error) {
 	log.Info("received GetCompactionState request", zap.Int64("compactionID", req.GetCompactionID()))
 	resp := &milvuspb.GetCompactionStateResponse{}
@@ -3983,7 +3922,7 @@ func (node *Proxy) checkHealthyAndReturnCode() (commonpb.StateCode, bool) {
 	return code, code == commonpb.StateCode_Healthy
 }
 
-//unhealthyStatus returns the proxy not healthy status
+// unhealthyStatus returns the proxy not healthy status
 func unhealthyStatus() *commonpb.Status {
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -4054,10 +3993,7 @@ func (node *Proxy) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasReq
 		return resp, nil
 	}
 
-	req.Base = &commonpb.MsgBase{
-		MsgType:  commonpb.MsgType_GetReplicas,
-		SourceID: Params.ProxyCfg.GetNodeID(),
-	}
+	req.Base = common.NewMsgBase(commonpb.MsgType_GetReplicas, common.MsgIDNeedFill, common.GetNowTimestamp, Params.ProxyCfg.GetNodeID())
 
 	resp, err := node.queryCoord.GetReplicas(ctx, req)
 	log.Info("received get replicas response", zap.Any("resp", resp), zap.Error(err))
@@ -4258,9 +4194,7 @@ func (node *Proxy) ListCredUsers(ctx context.Context, req *milvuspb.ListCredUser
 		return &milvuspb.ListCredUsersResponse{Status: unhealthyStatus()}, nil
 	}
 	rootCoordReq := &milvuspb.ListCredUsersRequest{
-		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_ListCredUsernames,
-		},
+		Base: common.NewMsgBase(commonpb.MsgType_ListCredUsernames, common.MsgIDNeedFill, common.GetNowTimestamp, Params.ProxyCfg.GetNodeID()),
 	}
 	resp, err := node.rootCoord.ListCredUsers(ctx, rootCoordReq)
 	if err != nil {
