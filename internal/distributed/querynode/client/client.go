@@ -36,7 +36,7 @@ var ClientParams paramtable.GrpcClientConfig
 
 // Client is the grpc client of QueryNode.
 type Client struct {
-	grpcClient grpcclient.GrpcClient
+	grpcClient grpcclient.GrpcClient[querypb.QueryNodeClient]
 	addr       string
 }
 
@@ -48,7 +48,7 @@ func NewClient(ctx context.Context, addr string) (*Client, error) {
 	ClientParams.InitOnce(typeutil.QueryNodeRole)
 	client := &Client{
 		addr: addr,
-		grpcClient: &grpcclient.ClientBase{
+		grpcClient: &grpcclient.ClientBase[querypb.QueryNodeClient]{
 			ClientMaxRecvSize:      ClientParams.ClientMaxRecvSize,
 			ClientMaxSendSize:      ClientParams.ClientMaxSendSize,
 			DialTimeout:            ClientParams.DialTimeout,
@@ -88,7 +88,7 @@ func (c *Client) Register() error {
 	return nil
 }
 
-func (c *Client) newGrpcClient(cc *grpc.ClientConn) interface{} {
+func (c *Client) newGrpcClient(cc *grpc.ClientConn) querypb.QueryNodeClient {
 	return querypb.NewQueryNodeClient(cc)
 }
 
@@ -98,11 +98,11 @@ func (c *Client) getAddr() (string, error) {
 
 // GetComponentStates gets the component states of QueryNode.
 func (c *Client) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(querypb.QueryNodeClient).GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
+		return client.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -112,11 +112,11 @@ func (c *Client) GetComponentStates(ctx context.Context) (*milvuspb.ComponentSta
 
 // GetTimeTickChannel gets the time tick channel of QueryNode.
 func (c *Client) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(querypb.QueryNodeClient).GetTimeTickChannel(ctx, &internalpb.GetTimeTickChannelRequest{})
+		return client.GetTimeTickChannel(ctx, &internalpb.GetTimeTickChannelRequest{})
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -126,11 +126,11 @@ func (c *Client) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringRespon
 
 // GetStatisticsChannel gets the statistics channel of QueryNode.
 func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(querypb.QueryNodeClient).GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
+		return client.GetStatisticsChannel(ctx, &internalpb.GetStatisticsChannelRequest{})
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -140,11 +140,11 @@ func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResp
 
 // WatchDmChannels watches the channels about data manipulation.
 func (c *Client) WatchDmChannels(ctx context.Context, req *querypb.WatchDmChannelsRequest) (*commonpb.Status, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(querypb.QueryNodeClient).WatchDmChannels(ctx, req)
+		return client.WatchDmChannels(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -154,11 +154,11 @@ func (c *Client) WatchDmChannels(ctx context.Context, req *querypb.WatchDmChanne
 
 // UnsubDmChannel unsubscribes the channels about data manipulation.
 func (c *Client) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmChannelRequest) (*commonpb.Status, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(querypb.QueryNodeClient).UnsubDmChannel(ctx, req)
+		return client.UnsubDmChannel(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -168,11 +168,11 @@ func (c *Client) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmChannel
 
 // LoadSegments loads the segments to search.
 func (c *Client) LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) (*commonpb.Status, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(querypb.QueryNodeClient).LoadSegments(ctx, req)
+		return client.LoadSegments(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -182,11 +182,11 @@ func (c *Client) LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequ
 
 // ReleaseCollection releases the data of the specified collection in QueryNode.
 func (c *Client) ReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(querypb.QueryNodeClient).ReleaseCollection(ctx, req)
+		return client.ReleaseCollection(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -196,11 +196,11 @@ func (c *Client) ReleaseCollection(ctx context.Context, req *querypb.ReleaseColl
 
 // ReleasePartitions releases the data of the specified partitions in QueryNode.
 func (c *Client) ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(querypb.QueryNodeClient).ReleasePartitions(ctx, req)
+		return client.ReleasePartitions(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -210,11 +210,11 @@ func (c *Client) ReleasePartitions(ctx context.Context, req *querypb.ReleasePart
 
 // ReleaseSegments releases the data of the specified segments in QueryNode.
 func (c *Client) ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmentsRequest) (*commonpb.Status, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(querypb.QueryNodeClient).ReleaseSegments(ctx, req)
+		return client.ReleaseSegments(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -224,11 +224,11 @@ func (c *Client) ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmen
 
 // Search performs replica search tasks in QueryNode.
 func (c *Client) Search(ctx context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error) {
-	ret, err := c.grpcClient.Call(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.Call(ctx, func(client querypb.QueryNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(querypb.QueryNodeClient).Search(ctx, req)
+		return client.Search(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -238,11 +238,11 @@ func (c *Client) Search(ctx context.Context, req *querypb.SearchRequest) (*inter
 
 // Query performs replica query tasks in QueryNode.
 func (c *Client) Query(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
-	ret, err := c.grpcClient.Call(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.Call(ctx, func(client querypb.QueryNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(querypb.QueryNodeClient).Query(ctx, req)
+		return client.Query(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -252,11 +252,11 @@ func (c *Client) Query(ctx context.Context, req *querypb.QueryRequest) (*interna
 
 // GetSegmentInfo gets the information of the specified segments in QueryNode.
 func (c *Client) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(querypb.QueryNodeClient).GetSegmentInfo(ctx, req)
+		return client.GetSegmentInfo(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -266,11 +266,11 @@ func (c *Client) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfo
 
 // SyncReplicaSegments syncs replica node segments information to shard leaders.
 func (c *Client) SyncReplicaSegments(ctx context.Context, req *querypb.SyncReplicaSegmentsRequest) (*commonpb.Status, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(querypb.QueryNodeClient).SyncReplicaSegments(ctx, req)
+		return client.SyncReplicaSegments(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -280,11 +280,11 @@ func (c *Client) SyncReplicaSegments(ctx context.Context, req *querypb.SyncRepli
 
 // ShowConfigurations gets specified configurations para of QueryNode
 func (c *Client) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(querypb.QueryNodeClient).ShowConfigurations(ctx, req)
+		return client.ShowConfigurations(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -295,11 +295,11 @@ func (c *Client) ShowConfigurations(ctx context.Context, req *internalpb.ShowCon
 
 // GetMetrics gets the metrics information of QueryNode.
 func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	ret, err := c.grpcClient.ReCall(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(querypb.QueryNodeClient).GetMetrics(ctx, req)
+		return client.GetMetrics(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -308,11 +308,11 @@ func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 }
 
 func (c *Client) GetStatistics(ctx context.Context, request *querypb.GetStatisticsRequest) (*internalpb.GetStatisticsResponse, error) {
-	ret, err := c.grpcClient.Call(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.Call(ctx, func(client querypb.QueryNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(querypb.QueryNodeClient).GetStatistics(ctx, request)
+		return client.GetStatistics(ctx, request)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -321,11 +321,11 @@ func (c *Client) GetStatistics(ctx context.Context, request *querypb.GetStatisti
 }
 
 func (c *Client) GetDataDistribution(ctx context.Context, req *querypb.GetDataDistributionRequest) (*querypb.GetDataDistributionResponse, error) {
-	ret, err := c.grpcClient.Call(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.Call(ctx, func(client querypb.QueryNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(querypb.QueryNodeClient).GetDataDistribution(ctx, req)
+		return client.GetDataDistribution(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err
@@ -334,11 +334,11 @@ func (c *Client) GetDataDistribution(ctx context.Context, req *querypb.GetDataDi
 }
 
 func (c *Client) SyncDistribution(ctx context.Context, req *querypb.SyncDistributionRequest) (*commonpb.Status, error) {
-	ret, err := c.grpcClient.Call(ctx, func(client interface{}) (interface{}, error) {
+	ret, err := c.grpcClient.Call(ctx, func(client querypb.QueryNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
 		}
-		return client.(querypb.QueryNodeClient).SyncDistribution(ctx, req)
+		return client.SyncDistribution(ctx, req)
 	})
 	if err != nil || ret == nil {
 		return nil, err

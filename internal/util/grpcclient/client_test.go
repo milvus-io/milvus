@@ -40,20 +40,20 @@ import (
 )
 
 func TestClientBase_SetRole(t *testing.T) {
-	base := ClientBase{}
+	base := ClientBase[any]{}
 	expect := "abc"
 	base.SetRole("abc")
 	assert.Equal(t, expect, base.GetRole())
 }
 
 func TestClientBase_GetRole(t *testing.T) {
-	base := ClientBase{}
+	base := ClientBase[any]{}
 	assert.Equal(t, "", base.GetRole())
 }
 
 func TestClientBase_connect(t *testing.T) {
 	t.Run("failed to connect", func(t *testing.T) {
-		base := ClientBase{
+		base := ClientBase[any]{
 			getAddrFunc: func() (string, error) {
 				return "", nil
 			},
@@ -66,7 +66,7 @@ func TestClientBase_connect(t *testing.T) {
 
 	t.Run("failed to get addr", func(t *testing.T) {
 		errMock := errors.New("mocked")
-		base := ClientBase{
+		base := ClientBase[any]{
 			getAddrFunc: func() (string, error) {
 				return "", errMock
 			},
@@ -80,13 +80,13 @@ func TestClientBase_connect(t *testing.T) {
 
 func TestClientBase_Call(t *testing.T) {
 	// mock client with nothing
-	base := ClientBase{}
+	base := ClientBase[any]{}
 	base.grpcClientMtx.Lock()
 	base.grpcClient = struct{}{}
 	base.grpcClientMtx.Unlock()
 
 	t.Run("Call normal return", func(t *testing.T) {
-		_, err := base.Call(context.Background(), func(client interface{}) (interface{}, error) {
+		_, err := base.Call(context.Background(), func(client any) (any, error) {
 			return struct{}{}, nil
 		})
 		assert.NoError(t, err)
@@ -95,7 +95,7 @@ func TestClientBase_Call(t *testing.T) {
 	t.Run("Call with canceled context", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		_, err := base.Call(ctx, func(client interface{}) (interface{}, error) {
+		_, err := base.Call(ctx, func(client any) (any, error) {
 			return struct{}{}, nil
 		})
 		assert.Error(t, err)
@@ -105,7 +105,7 @@ func TestClientBase_Call(t *testing.T) {
 	t.Run("Call canceled in caller func", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		errMock := errors.New("mocked")
-		_, err := base.Call(ctx, func(client interface{}) (interface{}, error) {
+		_, err := base.Call(ctx, func(client any) (any, error) {
 			cancel()
 			return nil, errMock
 		})
@@ -121,7 +121,7 @@ func TestClientBase_Call(t *testing.T) {
 	t.Run("Call canceled in caller func", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		errMock := errors.New("mocked")
-		_, err := base.Call(ctx, func(client interface{}) (interface{}, error) {
+		_, err := base.Call(ctx, func(client any) (any, error) {
 			cancel()
 			return nil, errMock
 		})
@@ -138,7 +138,7 @@ func TestClientBase_Call(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		errMock := errors.New("mocked")
-		_, err := base.Call(ctx, func(client interface{}) (interface{}, error) {
+		_, err := base.Call(ctx, func(client any) (any, error) {
 			return nil, errMock
 		})
 
@@ -154,7 +154,7 @@ func TestClientBase_Call(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		errGrpc := status.Error(codes.Unknown, "mocked")
-		_, err := base.Call(ctx, func(client interface{}) (interface{}, error) {
+		_, err := base.Call(ctx, func(client any) (any, error) {
 			return nil, errGrpc
 		})
 
@@ -175,7 +175,7 @@ func TestClientBase_Call(t *testing.T) {
 	t.Run("Call with connect failure", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		_, err := base.Call(ctx, func(client interface{}) (interface{}, error) {
+		_, err := base.Call(ctx, func(client any) (any, error) {
 			return struct{}{}, nil
 		})
 		assert.Error(t, err)
@@ -185,13 +185,13 @@ func TestClientBase_Call(t *testing.T) {
 
 func TestClientBase_Recall(t *testing.T) {
 	// mock client with nothing
-	base := ClientBase{}
+	base := ClientBase[any]{}
 	base.grpcClientMtx.Lock()
 	base.grpcClient = struct{}{}
 	base.grpcClientMtx.Unlock()
 
 	t.Run("Recall normal return", func(t *testing.T) {
-		_, err := base.ReCall(context.Background(), func(client interface{}) (interface{}, error) {
+		_, err := base.ReCall(context.Background(), func(client any) (any, error) {
 			return struct{}{}, nil
 		})
 		assert.NoError(t, err)
@@ -200,7 +200,7 @@ func TestClientBase_Recall(t *testing.T) {
 	t.Run("ReCall with canceled context", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		_, err := base.ReCall(ctx, func(client interface{}) (interface{}, error) {
+		_, err := base.ReCall(ctx, func(client any) (any, error) {
 			return struct{}{}, nil
 		})
 		assert.Error(t, err)
@@ -212,7 +212,7 @@ func TestClientBase_Recall(t *testing.T) {
 		defer cancel()
 		flag := false
 		var mut sync.Mutex
-		_, err := base.ReCall(ctx, func(client interface{}) (interface{}, error) {
+		_, err := base.ReCall(ctx, func(client any) (any, error) {
 			mut.Lock()
 			defer mut.Unlock()
 			if flag {
@@ -227,7 +227,7 @@ func TestClientBase_Recall(t *testing.T) {
 	t.Run("ReCall canceled in caller func", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		errMock := errors.New("mocked")
-		_, err := base.ReCall(ctx, func(client interface{}) (interface{}, error) {
+		_, err := base.ReCall(ctx, func(client any) (any, error) {
 			cancel()
 			return nil, errMock
 		})
@@ -248,7 +248,7 @@ func TestClientBase_Recall(t *testing.T) {
 	t.Run("ReCall with connect failure", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		_, err := base.ReCall(ctx, func(client interface{}) (interface{}, error) {
+		_, err := base.ReCall(ctx, func(client any) (any, error) {
 			return struct{}{}, nil
 		})
 		assert.Error(t, err)
@@ -304,7 +304,7 @@ func TestClientBase_RetryPolicy(t *testing.T) {
 	}()
 	defer s.Stop()
 
-	clientBase := ClientBase{
+	clientBase := ClientBase[helloworld.GreeterClient]{
 		ClientMaxRecvSize:      1 * 1024 * 1024,
 		ClientMaxSendSize:      1 * 1024 * 1024,
 		DialTimeout:            60 * time.Second,
@@ -320,17 +320,16 @@ func TestClientBase_RetryPolicy(t *testing.T) {
 	clientBase.SetGetAddrFunc(func() (string, error) {
 		return address, nil
 	})
-	clientBase.SetNewGrpcClientFunc(func(cc *grpc.ClientConn) interface{} {
+	clientBase.SetNewGrpcClientFunc(func(cc *grpc.ClientConn) helloworld.GreeterClient {
 		return helloworld.NewGreeterClient(cc)
 	})
 	defer clientBase.Close()
 
 	ctx := context.Background()
 	name := fmt.Sprintf("hello world %d", time.Now().Second())
-	res, err := clientBase.Call(ctx, func(client interface{}) (interface{}, error) {
-		c := client.(helloworld.GreeterClient)
+	res, err := clientBase.Call(ctx, func(client helloworld.GreeterClient) (any, error) {
 		fmt.Println("client base...")
-		return c.SayHello(ctx, &helloworld.HelloRequest{Name: name})
+		return client.SayHello(ctx, &helloworld.HelloRequest{Name: name})
 	})
 	assert.Nil(t, err)
 	assert.Equal(t, res.(*helloworld.HelloReply).Message, strings.ToUpper(name))
