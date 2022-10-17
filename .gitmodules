@@ -1,0 +1,3 @@
+[submodule "cmake_build/thirdparty/milvus-proto"]
+	path = cmake_build/thirdparty/milvus-proto
+	url = https://github.com/milvus-io/milvus-proto.git

@@ -8,6 +8,9 @@
 **/cmake-build-release/*
 **/cmake_build_release/*
 **/cmake_build/*
+!cmake_build/thirdparty
+**/cmake_build/thirdparty/*
+!cmake_build/thirdparty/milvus-proto
 .cache
 
 internal/core/output/*
