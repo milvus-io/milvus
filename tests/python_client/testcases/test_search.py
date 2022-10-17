@@ -1352,7 +1352,6 @@ class TestCollectionSearch(TestcaseBase):
                                          "limit": nq,
                                          "_async": _async})
 
-    @pytest.mark.xfail(reason="issue #19129")
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_max_nq(self, auto_id, dim, _async):
         """
@@ -1361,7 +1360,7 @@ class TestCollectionSearch(TestcaseBase):
         expected: search successfully with max nq
         """
         self._connect()
-        nq = 17000
+        nq = 16384
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True,
                                                                       auto_id=auto_id,
                                                                       dim=dim)[0:4]

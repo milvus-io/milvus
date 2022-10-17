@@ -71,15 +71,15 @@ class TestImport(TestcaseBase):
         self.collection_wrap.init_collection(c_name, schema=schema)
         # import data
         t0 = time.time()
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  partition_name='',
-                                                  row_based=row_based,
-                                                  files=files)
-        logging.info(f"bulk load task ids:{task_ids}")
-        completed, _ = self.utility_wrap.wait_for_bulk_load_tasks_completed(task_ids=task_ids,
-                                                                            timeout=30)
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    partition_name='',
+                                                    row_based=row_based,
+                                                    files=files)
+        logging.info(f"bulk insert task ids:{task_ids}")
+        completed, _ = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=task_ids,
+                                                                              timeout=30)
         tt = time.time() - t0
-        log.info(f"bulk load state:{completed} in {tt}")
+        log.info(f"bulk insert state:{completed} in {tt}")
         assert completed
 
         # TODO: assert num entities
@@ -134,15 +134,15 @@ class TestImport(TestcaseBase):
 
         # import data into the partition
         t0 = time.time()
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  partition_name=p_name,
-                                                  row_based=row_based,
-                                                  files=files)
-        logging.info(f"bulk load task ids:{task_ids}")
-        success, _ = self.utility_wrap.wait_for_bulk_load_tasks_completed(task_ids=task_ids,
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    partition_name=p_name,
+                                                    row_based=row_based,
+                                                    files=files)
+        logging.info(f"bulk insert task ids:{task_ids}")
+        success, _ = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=task_ids,
                                                                             timeout=30)
         tt = time.time() - t0
-        log.info(f"bulk load state:{success} in {tt}")
+        log.info(f"bulk insert state:{success} in {tt}")
         assert success
 
         assert m_partition.num_entities == entities
@@ -195,12 +195,12 @@ class TestImport(TestcaseBase):
 
         # import data
         t0 = time.time()
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  partition_name='',
-                                                  row_based=row_based,
-                                                  files=files)
-        logging.info(f"bulk load task ids:{task_ids}")
-        completed, _ = self.utility_wrap.wait_for_bulk_load_tasks_completed(task_ids=task_ids, timeout=30)
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    partition_name='',
+                                                    row_based=row_based,
+                                                    files=files)
+        logging.info(f"bulk insert task ids:{task_ids}")
+        completed, _ = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=task_ids, timeout=30)
         tt = time.time() - t0
         log.info(f"bulk load state:{completed} in {tt}")
         assert completed
@@ -271,15 +271,15 @@ class TestImport(TestcaseBase):
         self.collection_wrap.load()
         # import data
         t0 = time.time()
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  partition_name='',
-                                                  row_based=row_based,
-                                                  files=files)
-        logging.info(f"bulk load task ids:{task_ids}")
-        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(task_ids=task_ids,
-                                                                          timeout=30)
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    partition_name='',
+                                                    row_based=row_based,
+                                                    files=files)
+        logging.info(f"bulk insert task ids:{task_ids}")
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=task_ids,
+                                                                                 timeout=30)
         tt = time.time() - t0
-        log.info(f"bulk load state:{success} in {tt}")
+        log.info(f"bulk insert state:{success} in {tt}")
         if fields_num_in_file == "less":
             assert not success    # TODO: check error msg
             if row_based:
@@ -378,15 +378,15 @@ class TestImport(TestcaseBase):
         self.collection_wrap.load()
         # import data
         t0 = time.time()
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  partition_name='',
-                                                  row_based=row_based,
-                                                  files=files)
-        logging.info(f"bulk load task ids:{task_ids}")
-        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(task_ids=task_ids,
-                                                                          timeout=300)
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    partition_name='',
+                                                    row_based=row_based,
+                                                    files=files)
+        logging.info(f"bulk insert task ids:{task_ids}")
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=task_ids,
+                                                                                 timeout=300)
         tt = time.time() - t0
-        log.info(f"bulk load state:{success} in {tt}")
+        log.info(f"bulk insert state:{success} in {tt}")
         if not row_based:
             assert not success
             failed_reason = "is duplicated"  #  "the field xxx is duplicated"
@@ -463,14 +463,14 @@ class TestImport(TestcaseBase):
             else:
                 files.append(f"col_multi_scalars_{dim}d_{entities}.json")
         t0 = time.time()
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  row_based=row_based,
-                                                  files=files)
-        logging.info(f"bulk load task ids:{task_ids}")
-        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(task_ids=task_ids,
-                                                                            timeout=30)
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    row_based=row_based,
+                                                    files=files)
+        logging.info(f"bulk insert task ids:{task_ids}")
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=task_ids,
+                                                                                 timeout=30)
         tt = time.time() - t0
-        log.info(f"bulk load state:{success} in {tt}")
+        log.info(f"bulk insert state:{success} in {tt}")
 
         if row_based:
             assert not success
@@ -531,14 +531,14 @@ class TestImport(TestcaseBase):
         schema = cf.gen_collection_schema(fields=fields, auto_id=False)
         self.collection_wrap.init_collection(c_name, schema=schema)
         # import data
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  row_based=row_based,
-                                                  files=files)
-        logging.info(f"bulk load task ids:{task_ids}")
-        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    row_based=row_based,
+                                                    files=files)
+        logging.info(f"bulk insert task ids:{task_ids}")
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
             task_ids=task_ids,
             timeout=30)
-        log.info(f"bulk load state:{success}")
+        log.info(f"bulk insert state:{success}")
         assert success
         assert self.collection_wrap.num_entities == entities
 
@@ -580,14 +580,14 @@ class TestImport(TestcaseBase):
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
         self.collection_wrap.init_collection(c_name, schema=schema)
         # import data
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  row_based=row_based,
-                                                  files=files)
-        logging.info(f"bulk load task ids:{task_ids}")
-        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    row_based=row_based,
+                                                    files=files)
+        logging.info(f"bulk insert task ids:{task_ids}")
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
             task_ids=task_ids,
             timeout=30)
-        log.info(f"bulk load state:{success}")
+        log.info(f"bulk insert state:{success}")
         assert success
         assert self.collection_wrap.num_entities == entities
 
@@ -633,14 +633,14 @@ class TestImport(TestcaseBase):
             if not auto_id:
                 files.append(f"/{i}/{pk_field}.npy")
             t0 = time.time()
-            task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                      row_based=False,
-                                                      files=files)
-            logging.info(f"bulk load task ids:{task_ids}")
-        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(task_ids=task_ids,
-                                                                               timeout=30)
+            task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                        row_based=False,
+                                                        files=files)
+            logging.info(f"bulk insert task ids:{task_ids}")
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=task_ids,
+                                                                                 timeout=30)
         tt = time.time() - t0
-        log.info(f"bulk load state:{success} in {tt}")
+        log.info(f"bulk insert state:{success} in {tt}")
 
         assert success
         log.info(f" collection entities: {self.collection_wrap.num_entities}")
@@ -760,13 +760,13 @@ class TestImportInvalidParams(TestcaseBase):
 
         # import data
         t0 = time.time()
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  partition_name='',
-                                                  row_based=row_based,
-                                                  files=files)
-        logging.info(f"bulk load task ids:{task_ids}")
-        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(task_ids=task_ids,
-                                                                               timeout=30)
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    partition_name='',
+                                                    row_based=row_based,
+                                                    files=files)
+        logging.info(f"bulk insert task ids:{task_ids}")
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=task_ids,
+                                                                                 timeout=30)
         assert not success
         failed_reason = "minio file manage cannot be found"
         for state in states.values():
@@ -796,13 +796,13 @@ class TestImportInvalidParams(TestcaseBase):
         self.collection_wrap.init_collection(c_name, schema=schema)
 
         # import data
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  partition_name='',
-                                                  row_based=row_based,
-                                                  files=files)
-        logging.info(f"bulk load task ids:{task_ids}")
-        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(task_ids=task_ids,
-                                                                               timeout=30)
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    partition_name='',
+                                                    row_based=row_based,
+                                                    files=files)
+        logging.info(f"bulk insert task ids:{task_ids}")
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=task_ids,
+                                                                                 timeout=30)
         if row_based:
             assert success
         else:
@@ -846,15 +846,15 @@ class TestImportInvalidParams(TestcaseBase):
         self.collection_wrap.init_collection(c_name, schema=schema)
         # import data
         t0 = time.time()
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  partition_name='',
-                                                  row_based=row_based,
-                                                  files=files)
-        logging.info(f"bulk load task ids:{task_ids}")
-        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(task_ids=task_ids,
-                                                                            timeout=30)
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    partition_name='',
+                                                    row_based=row_based,
+                                                    files=files)
+        logging.info(f"bulk insert task ids:{task_ids}")
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=task_ids,
+                                                                                 timeout=30)
         tt = time.time() - t0
-        log.info(f"bulk load state:{success} in {tt}")
+        log.info(f"bulk insert state:{success} in {tt}")
         assert not success
         failed_reason = "unsupported file type"
         if not row_based and auto_id:
@@ -888,13 +888,13 @@ class TestImportInvalidParams(TestcaseBase):
         self.collection_wrap.init_collection(c_name, schema=schema)
 
         # import data
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  partition_name='',
-                                                  row_based=row_based,
-                                                  files=files)
-        logging.info(f"bulk load task ids:{task_ids}")
-        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(task_ids=task_ids,
-                                                                               timeout=30)
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    partition_name='',
+                                                    row_based=row_based,
+                                                    files=files)
+        logging.info(f"bulk insert task ids:{task_ids}")
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=task_ids,
+                                                                                 timeout=30)
         assert not success
         if row_based:
             failed_reason = "invalid row-based JSON format, the key vectors is not found"
@@ -930,15 +930,15 @@ class TestImportInvalidParams(TestcaseBase):
         self.collection_wrap.init_collection(c_name, schema=schema)
         # import data
         t0 = time.time()
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  partition_name='',
-                                                  row_based=row_based,
-                                                  files=files)
-        logging.info(f"bulk load task ids:{task_ids}")
-        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(task_ids=task_ids,
-                                                                               timeout=30)
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    partition_name='',
+                                                    row_based=row_based,
+                                                    files=files)
+        logging.info(f"bulk insert task ids:{task_ids}")
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=task_ids,
+                                                                                 timeout=30)
         tt = time.time() - t0
-        log.info(f"bulk load state:{success} in {tt}")
+        log.info(f"bulk insert state:{success} in {tt}")
         if auto_id:
             assert success
         else:
@@ -977,15 +977,15 @@ class TestImportInvalidParams(TestcaseBase):
         self.collection_wrap.init_collection(c_name, schema=schema)
         # import data
         t0 = time.time()
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  partition_name='',
-                                                  row_based=row_based,
-                                                  files=files)
-        logging.info(f"bulk load task ids:{task_ids}")
-        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(task_ids=task_ids,
-                                                                               timeout=30)
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    partition_name='',
+                                                    row_based=row_based,
+                                                    files=files)
+        logging.info(f"bulk insert task ids:{task_ids}")
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=task_ids,
+                                                                                 timeout=30)
         tt = time.time() - t0
-        log.info(f"bulk load state:{success} in {tt}")
+        log.info(f"bulk insert state:{success} in {tt}")
 
         assert not success
         if row_based:
@@ -1026,16 +1026,16 @@ class TestImportInvalidParams(TestcaseBase):
 
         # import data
         t0 = time.time()
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  partition_name="",
-                                                  row_based=row_based,
-                                                  files=files)
-        logging.info(f"bulk load task ids:{task_ids}")
-        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
-                            task_ids=task_ids,
-                            timeout=30)
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    partition_name="",
+                                                    row_based=row_based,
+                                                    files=files)
+        logging.info(f"bulk insert task ids:{task_ids}")
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
+            task_ids=task_ids,
+            timeout=30)
         tt = time.time() - t0
-        log.info(f"bulk load state:{success} in {tt}")
+        log.info(f"bulk insert state:{success} in {tt}")
         assert not success
         if row_based:
             failed_reason = f"field {scalar_field} missed at the row 0"
@@ -1069,14 +1069,14 @@ class TestImportInvalidParams(TestcaseBase):
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
         self.collection_wrap.init_collection(c_name, schema=schema)
         # import data
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  row_based=row_based,
-                                                  files=files)
-        logging.info(f"bulk load task ids:{task_ids}")
-        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    row_based=row_based,
+                                                    files=files)
+        logging.info(f"bulk insert task ids:{task_ids}")
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
             task_ids=task_ids,
             timeout=30)
-        log.info(f"bulk load state:{success}")
+        log.info(f"bulk insert state:{success}")
         assert not success
         failed_reason = f"array size {dim} doesn't equal to vector dimension {wrong_dim} of field vectors at the row "
         for state in states.values():
@@ -1100,13 +1100,13 @@ class TestImportInvalidParams(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         # import data into a non existing collection
         err_msg = f"can't find collection: {c_name}"
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  row_based=row_based,
-                                                  files=files,
-                                                  check_task=CheckTasks.err_res,
-                                                  check_items={"err_code": 1,
-                                                               "err_msg": err_msg}
-                                                  )
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    row_based=row_based,
+                                                    files=files,
+                                                    check_task=CheckTasks.err_res,
+                                                    check_items={"err_code": 1,
+                                                                 "err_msg": err_msg}
+                                                    )
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("row_based", [True, False])
@@ -1131,14 +1131,14 @@ class TestImportInvalidParams(TestcaseBase):
         # import data into a non existing partition
         p_name = "non_existing"
         err_msg = f" partition {p_name} does not exist"
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  partition_name=p_name,
-                                                  row_based=row_based,
-                                                  files=files,
-                                                  check_task=CheckTasks.err_res,
-                                                  check_items={"err_code": 11,
-                                                               "err_msg": err_msg}
-                                                  )
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    partition_name=p_name,
+                                                    row_based=row_based,
+                                                    files=files,
+                                                    check_task=CheckTasks.err_res,
+                                                    check_items={"err_code": 11,
+                                                                 "err_msg": err_msg}
+                                                    )
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("row_based", [True, False])
@@ -1163,14 +1163,14 @@ class TestImportInvalidParams(TestcaseBase):
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
         self.collection_wrap.init_collection(c_name, schema=schema)
         # import data
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  row_based=row_based,
-                                                  files=files)
-        logging.info(f"bulk load task ids:{task_ids}")
-        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    row_based=row_based,
+                                                    files=files)
+        logging.info(f"bulk insert task ids:{task_ids}")
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
             task_ids=task_ids,
             timeout=30)
-        log.info(f"bulk load state:{success}")
+        log.info(f"bulk insert state:{success}")
         assert not success
         failed_reason = f"doesn't equal to vector dimension {dim} of field vectors at the row"
         for state in states.values():
@@ -1213,15 +1213,15 @@ class TestImportInvalidParams(TestcaseBase):
 
         # import data
         t0 = time.time()
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  partition_name='',
-                                                  row_based=row_based,
-                                                  files=files)
-        logging.info(f"bulk load task ids:{task_ids}")
-        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(task_ids=task_ids,
-                                                                               timeout=300)
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    partition_name='',
+                                                    row_based=row_based,
+                                                    files=files)
+        logging.info(f"bulk insert task ids:{task_ids}")
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=task_ids,
+                                                                                 timeout=300)
         tt = time.time() - t0
-        log.info(f"bulk load state:{success} in {tt}")
+        log.info(f"bulk insert state:{success} in {tt}")
         assert not success
         if row_based:
             # all correct files shall be imported successfully
@@ -1263,14 +1263,14 @@ class TestImportInvalidParams(TestcaseBase):
             files.append(f"col_uid_only_{dim}d_{entities}.json")
 
         # import data
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  row_based=False,
-                                                  files=files)
-        logging.info(f"bulk load task ids:{task_ids}")
-        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    row_based=False,
+                                                    files=files)
+        logging.info(f"bulk insert task ids:{task_ids}")
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
             task_ids=task_ids,
             timeout=30)
-        log.info(f"bulk load state:{success}")
+        log.info(f"bulk insert state:{success}")
         assert not success
         failed_reason = f"Numpy parse: illegal data type"
         for state in states.values():
@@ -1308,14 +1308,14 @@ class TestImportInvalidParams(TestcaseBase):
         if not auto_id:
             files.append(f"col_uid_only_{dim}d_{entities}.json")
         t0 = time.time()
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  row_based=False,
-                                                  files=files)
-        logging.info(f"bulk load task ids:{task_ids}")
-        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(task_ids=task_ids,
-                                                                               timeout=30)
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    row_based=False,
+                                                    files=files)
+        logging.info(f"bulk insert task ids:{task_ids}")
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=task_ids,
+                                                                                 timeout=30)
         tt = time.time() - t0
-        log.info(f"bulk load state:{success} in {tt}")
+        log.info(f"bulk insert state:{success} in {tt}")
 
         assert not success
         failed_reason = f"Numpy parse: illegal row width {dim} for field {vec_field} dimension {wrong_dim}"
@@ -1354,14 +1354,14 @@ class TestImportInvalidParams(TestcaseBase):
         if not auto_id:
             files.append(f"col_uid_only_{dim}d_{entities}.json")
         t0 = time.time()
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  row_based=False,
-                                                  files=files)
-        logging.info(f"bulk load task ids:{task_ids}")
-        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(task_ids=task_ids,
-                                                                               timeout=30)
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    row_based=False,
+                                                    files=files)
+        logging.info(f"bulk insert task ids:{task_ids}")
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=task_ids,
+                                                                                 timeout=30)
         tt = time.time() - t0
-        log.info(f"bulk load state:{success} in {tt}")
+        log.info(f"bulk insert state:{success} in {tt}")
 
         assert not success
         failed_reason = f"Numpy parse: the field {vec_field} doesn't exist"
@@ -1399,14 +1399,14 @@ class TestImportInvalidParams(TestcaseBase):
         schema = cf.gen_collection_schema(fields=fields, auto_id=False)
         self.collection_wrap.init_collection(c_name, schema=schema)
         # import data
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  row_based=row_based,
-                                                  files=files)
-        logging.info(f"bulk load task ids:{task_ids}")
-        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    row_based=row_based,
+                                                    files=files)
+        logging.info(f"bulk insert task ids:{task_ids}")
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
             task_ids=task_ids,
             timeout=30)
-        log.info(f"bulk load state:{success}")
+        log.info(f"bulk insert state:{success}")
         assert not success
         failed_reason = f"illegal numeric value {err_string_on_pk} at the row"
         for state in states.values():
@@ -1445,14 +1445,14 @@ class TestImportInvalidParams(TestcaseBase):
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
         self.collection_wrap.init_collection(c_name, schema=schema)
         # import data
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  row_based=row_based,
-                                                  files=files)
-        logging.info(f"bulk load task ids:{task_ids}")
-        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    row_based=row_based,
+                                                    files=files)
+        logging.info(f"bulk insert task ids:{task_ids}")
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
             task_ids=task_ids,
             timeout=30)
-        log.info(f"bulk load state:{success}")
+        log.info(f"bulk insert state:{success}")
         assert not success
         failed_reason1 = "illegal value"
         failed_reason2 = "invalid character"

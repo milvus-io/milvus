@@ -19,23 +19,23 @@ class ApiUtilityWrapper:
     ut = utility
     role = None
 
-    def bulk_load(self, collection_name,  partition_name="", row_based=True, files="", timeout=None,
+    def bulk_insert(self, collection_name,  partition_name="", row_based=True, files="", timeout=None,
                   using="default", check_task=None, check_items=None, **kwargs):
         func_name = sys._getframe().f_code.co_name
-        res, is_succ = api_request([self.ut.bulk_load, collection_name, partition_name, row_based,
+        res, is_succ = api_request([self.ut.bulk_insert, collection_name, partition_name, row_based,
                                     files, timeout, using], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ,
                                        collection_name=collection_name, using=using).run()
         return res, check_result
 
-    def get_bulk_load_state(self, task_id, timeout=None, using="default", check_task=None, check_items=None,  **kwargs):
+    def get_bulk_insert_state(self, task_id, timeout=None, using="default", check_task=None, check_items=None,  **kwargs):
         func_name = sys._getframe().f_code.co_name
-        res, is_succ = api_request([self.ut.get_bulk_load_state, task_id, timeout, using], **kwargs)
+        res, is_succ = api_request([self.ut.get_bulk_insert_state, task_id, timeout, using], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ,
                                        task_id=task_id, using=using).run()
         return res, check_result
 
-    def wait_for_bulk_load_tasks_completed(self, task_ids, target_state=BulkLoadStates.BulkLoadPersisted,
+    def wait_for_bulk_insert_tasks_completed(self, task_ids, target_state=BulkLoadStates.BulkLoadPersisted,
                                            timeout=None, using="default", **kwargs):
         start = time.time()
         successes = {}
@@ -51,7 +51,7 @@ class ApiUtilityWrapper:
                 if successes.get(task_id, None) is not None or fails.get(task_id, None) is not None:
                     continue
                 else:
-                    state, _ = self.get_bulk_load_state(task_id, task_timeout, using, **kwargs)
+                    state, _ = self.get_bulk_insert_state(task_id, task_timeout, using, **kwargs)
                     if target_state == BulkLoadStates.BulkLoadDataQueryable:
                         if state.data_queryable is True:
                             successes[task_id] = True
@@ -161,17 +161,6 @@ class ApiUtilityWrapper:
 
         func_name = sys._getframe().f_code.co_name
         res, is_succ = api_request([self.ut.list_collections, timeout, using])
-        check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ,
-                                       timeout=timeout, using=using).run()
-        return res, check_result
-
-    def calc_distance(self, vectors_left, vectors_right, params=None, timeout=None,
-                      using="default", check_task=None, check_items=None):
-        timeout = TIMEOUT if timeout is None else timeout
-
-        func_name = sys._getframe().f_code.co_name
-        res, is_succ = api_request([self.ut.calc_distance, vectors_left, vectors_right,
-                                    params, timeout, using])
         check_result = ResponseChecker(res, func_name, check_task, check_items, is_succ,
                                        timeout=timeout, using=using).run()
         return res, check_result

@@ -176,7 +176,6 @@ class TestIndexParams(TestcaseBase):
                                                             "but parameters are inconsistent"})
 
     @pytest.mark.tags(CaseLabel.L1)
-    # @pytest.mark.xfail(reason="issue 19181")
     @pytest.mark.parametrize("get_invalid_index_name", ["1nDex", "$in4t", "12 s", "(中文)"])
     def test_index_name_invalid(self, get_invalid_index_name):
         """
