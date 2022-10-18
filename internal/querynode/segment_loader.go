@@ -956,7 +956,7 @@ func newSegmentLoader(
 	}
 
 	ioPoolSize := cpuNum * 2
-	if ioPoolSize < 32 {
+	if ioPoolSize > 32 {
 		ioPoolSize = 32
 	}
 	ioPool, err := concurrency.NewPool(ioPoolSize, ants.WithPreAlloc(true))
