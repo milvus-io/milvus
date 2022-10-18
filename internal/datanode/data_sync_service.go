@@ -42,7 +42,7 @@ type dataSyncService struct {
 	fg           *flowgraph.TimeTickedFlowGraph // internal flowgraph processes insert/delta messages
 	flushCh      chan flushMsg                  // chan to notify flush
 	resendTTCh   chan resendTTMsg               // chan to ask for resending DataNode time tick message.
-	replica      Replica                        // segment replica stores meta
+	channel      Channel                        // channel stores meta of channel
 	idAllocator  allocatorInterface             // id/timestamp allocator
 	msFactory    msgstream.Factory
 	collectionID UniqueID // collection id of vchan for which this data sync service serves
@@ -62,7 +62,7 @@ type dataSyncService struct {
 func newDataSyncService(ctx context.Context,
 	flushCh chan flushMsg,
 	resendTTCh chan resendTTMsg,
-	replica Replica,
+	channel Channel,
 	alloc allocatorInterface,
 	factory msgstream.Factory,
 	vchan *datapb.VchannelInfo,
@@ -73,7 +73,7 @@ func newDataSyncService(ctx context.Context,
 	compactor *compactionExecutor,
 ) (*dataSyncService, error) {
 
-	if replica == nil {
+	if channel == nil {
 		return nil, errors.New("Nil input")
 	}
 
@@ -93,7 +93,7 @@ func newDataSyncService(ctx context.Context,
 		fg:               nil,
 		flushCh:          flushCh,
 		resendTTCh:       resendTTCh,
-		replica:          replica,
+		channel:          channel,
 		idAllocator:      alloc,
 		msFactory:        factory,
 		collectionID:     vchan.GetCollectionID(),
@@ -121,7 +121,7 @@ type nodeConfig struct {
 	msFactory    msgstream.Factory // msgStream factory
 	collectionID UniqueID
 	vChannelName string
-	replica      Replica // Segment replica
+	channel      Channel // Channel info
 	allocator    allocatorInterface
 
 	// defaults
@@ -160,7 +160,7 @@ func (dsService *dataSyncService) close() {
 }
 
 func (dsService *dataSyncService) clearGlobalFlushingCache() {
-	segments := dsService.replica.listAllSegmentIDs()
+	segments := dsService.channel.listAllSegmentIDs()
 	dsService.flushingSegCache.Remove(segments...)
 }
 
@@ -168,7 +168,7 @@ func (dsService *dataSyncService) clearGlobalFlushingCache() {
 func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) error {
 	dsService.fg = flowgraph.NewTimeTickedFlowGraph(dsService.ctx)
 	// initialize flush manager for DataSync Service
-	dsService.flushManager = NewRendezvousFlushManager(dsService.idAllocator, dsService.chunkManager, dsService.replica,
+	dsService.flushManager = NewRendezvousFlushManager(dsService.idAllocator, dsService.chunkManager, dsService.channel,
 		flushNotifyFunc(dsService), dropVirtualChannelFunc(dsService))
 
 	var err error
@@ -201,25 +201,18 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 			zap.Int64("segmentID", us.GetID()),
 			zap.Int64("numRows", us.GetNumOfRows()),
 		)
-		var cp *segmentCheckPoint
-		if us.GetDmlPosition() != nil {
-			cp = &segmentCheckPoint{
-				numRows: us.GetNumOfRows(),
-				pos:     *us.GetDmlPosition(),
-			}
-		}
+
 		// avoid closure capture iteration variable
 		segment := us
 		future := dsService.ioPool.Submit(func() (interface{}, error) {
-			if err := dsService.replica.addSegment(addSegmentReq{
+			if err := dsService.channel.addSegment(addSegmentReq{
 				segType:      datapb.SegmentType_Normal,
 				segID:        segment.GetID(),
 				collID:       segment.CollectionID,
 				partitionID:  segment.PartitionID,
-				channelName:  segment.GetInsertChannel(),
 				numOfRows:    segment.GetNumOfRows(),
 				statsBinLogs: segment.Statslogs,
-				cp:           cp,
+				endPos:       segment.GetDmlPosition(),
 				recoverTs:    vchanInfo.GetSeekPosition().GetTimestamp()}); err != nil {
 				return nil, err
 			}
@@ -247,12 +240,11 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 		// avoid closure capture iteration variable
 		segment := fs
 		future := dsService.ioPool.Submit(func() (interface{}, error) {
-			if err := dsService.replica.addSegment(addSegmentReq{
+			if err := dsService.channel.addSegment(addSegmentReq{
 				segType:      datapb.SegmentType_Flushed,
 				segID:        segment.GetID(),
 				collID:       segment.CollectionID,
 				partitionID:  segment.PartitionID,
-				channelName:  segment.GetInsertChannel(),
 				numOfRows:    segment.GetNumOfRows(),
 				statsBinLogs: segment.Statslogs,
 				recoverTs:    vchanInfo.GetSeekPosition().GetTimestamp(),
@@ -273,7 +265,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 		msFactory:    dsService.msFactory,
 		collectionID: vchanInfo.GetCollectionID(),
 		vChannelName: vchanInfo.GetChannelName(),
-		replica:      dsService.replica,
+		channel:      dsService.channel,
 		allocator:    dsService.idAllocator,
 
 		parallelConfig: newParallelConfig(),

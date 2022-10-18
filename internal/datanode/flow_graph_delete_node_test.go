@@ -18,7 +18,6 @@ package datanode
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
@@ -29,86 +28,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/internal/util/retry"
 )
 
 var deleteNodeTestDir = "/tmp/milvus_test/deleteNode"
-
-type mockReplica struct {
-	Replica
-
-	newSegments       map[UniqueID]*Segment
-	normalSegments    map[UniqueID]*Segment
-	flushedSegments   map[UniqueID]*Segment
-	compactedSegments map[UniqueID]*Segment
-}
-
-var _ Replica = (*mockReplica)(nil)
-
-func newMockReplica() *mockReplica {
-	return &mockReplica{
-		newSegments:       make(map[int64]*Segment),
-		normalSegments:    make(map[int64]*Segment),
-		flushedSegments:   make(map[int64]*Segment),
-		compactedSegments: make(map[int64]*Segment),
-	}
-}
-
-func (replica *mockReplica) listCompactedSegmentIDs() map[UniqueID][]UniqueID {
-	return make(map[UniqueID][]UniqueID)
-}
-
-func (replica *mockReplica) removeSegments(segIDs ...UniqueID) {}
-
-func (replica *mockReplica) filterSegments(channelName string, partitionID UniqueID) []*Segment {
-	results := make([]*Segment, 0)
-	for _, value := range replica.newSegments {
-		results = append(results, value)
-	}
-	for _, value := range replica.normalSegments {
-		results = append(results, value)
-	}
-	for _, value := range replica.flushedSegments {
-		results = append(results, value)
-	}
-	return results
-}
-
-func (replica *mockReplica) getCollectionID() UniqueID {
-	return 0
-}
-
-func (replica *mockReplica) getCollectionSchema(collectionID UniqueID, ts Timestamp) (*schemapb.CollectionSchema, error) {
-	if ts == 0 {
-		return nil, errors.New("mocked error")
-	}
-	return &schemapb.CollectionSchema{}, nil
-}
-
-func (replica *mockReplica) getCollectionAndPartitionID(segID UniqueID) (collID, partitionID UniqueID, err error) {
-	if segID == -1 {
-		return -1, -1, errors.New("mocked error")
-	}
-	return 0, 1, nil
-}
-
-func (replica *mockReplica) hasSegment(segID UniqueID, countFlushed bool) bool {
-	_, has := replica.newSegments[segID]
-	if has {
-		return true
-	}
-	_, has = replica.normalSegments[segID]
-	if has {
-		return true
-	}
-	if !countFlushed {
-		return false
-	}
-	_, has = replica.flushedSegments[segID]
-	return has
-}
 
 func TestFlowGraphDeleteNode_newDeleteNode(te *testing.T) {
 	tests := []struct {
@@ -117,7 +43,7 @@ func TestFlowGraphDeleteNode_newDeleteNode(te *testing.T) {
 
 		description string
 	}{
-		{context.Background(), &nodeConfig{}, "pointer of SegmentReplica"},
+		{context.Background(), &nodeConfig{}, "pointer of channel"},
 	}
 
 	for _, test := range tests {
@@ -132,7 +58,7 @@ func TestFlowGraphDeleteNode_newDeleteNode(te *testing.T) {
 	}
 }
 
-func genMockReplica(segIDs []int64, pks []primaryKey, chanName string) *mockReplica {
+func genMockChannel(segIDs []int64, pks []primaryKey, chanName string) *ChannelMeta {
 	buf := make([]byte, 8)
 	filter0 := bloom.NewWithEstimates(1000000, 0.01)
 	for i := 0; i < 3; i++ {
@@ -156,46 +82,33 @@ func genMockReplica(segIDs []int64, pks []primaryKey, chanName string) *mockRepl
 		}
 	}
 
-	seg0 := &Segment{
-		segmentID:   segIDs[0],
-		channelName: chanName,
-		pkFilter:    filter0,
-	}
-	seg1 := &Segment{
-		segmentID:   segIDs[1],
-		channelName: chanName,
-		pkFilter:    filter0,
-	}
-	seg2 := &Segment{
-		segmentID:   segIDs[2],
-		channelName: chanName,
-		pkFilter:    filter0,
-	}
-	seg3 := &Segment{
-		segmentID:   segIDs[3],
-		channelName: chanName,
-		pkFilter:    filter1,
-	}
-	seg4 := &Segment{
-		segmentID:   segIDs[4],
-		channelName: chanName,
-		pkFilter:    filter1,
-	}
-	seg5 := &Segment{
-		segmentID:   segIDs[4],
-		channelName: "test_error",
-		pkFilter:    filter1,
+	segTypes := []datapb.SegmentType{
+		datapb.SegmentType_New,
+		datapb.SegmentType_New,
+		datapb.SegmentType_Normal,
+		datapb.SegmentType_Normal,
+		datapb.SegmentType_Flushed,
+		datapb.SegmentType_Flushed,
 	}
 
-	replica := newMockReplica()
-	replica.newSegments[segIDs[0]] = seg0
-	replica.newSegments[segIDs[1]] = seg1
-	replica.normalSegments[segIDs[2]] = seg2
-	replica.normalSegments[segIDs[3]] = seg3
-	replica.flushedSegments[segIDs[4]] = seg4
-	replica.flushedSegments[segIDs[4]] = seg5
+	channel := &ChannelMeta{
+		channelName: chanName,
+		segments:    make(map[UniqueID]*Segment),
+	}
+	for i := range segIDs {
+		seg := Segment{
+			segmentID: segIDs[i],
+		}
+		seg.setType(segTypes[i])
+		if i < 3 {
+			seg.pkFilter = filter0
+		} else {
+			seg.pkFilter = filter1
+		}
+		channel.segments[segIDs[i]] = &seg
+	}
 
-	return replica
+	return channel
 }
 
 func TestFlowGraphDeleteNode_Operate(t *testing.T) {
@@ -247,10 +160,10 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 	defer cm.RemoveWithPrefix(ctx, "")
 
 	t.Run("Test get segment by varChar primary keys", func(te *testing.T) {
-		replica := genMockReplica(segIDs, varCharPks, chanName)
-		fm := NewRendezvousFlushManager(NewAllocatorFactory(), cm, replica, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
+		channel := genMockChannel(segIDs, varCharPks, chanName)
+		fm := NewRendezvousFlushManager(NewAllocatorFactory(), cm, channel, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
 		c := &nodeConfig{
-			replica:      replica,
+			channel:      channel,
 			allocator:    &allocator{},
 			vChannelName: chanName,
 		}
@@ -275,11 +188,11 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		}
 	})
 
-	replica := genMockReplica(segIDs, int64Pks, chanName)
-	fm := NewRendezvousFlushManager(NewAllocatorFactory(), cm, replica, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
+	channel := genMockChannel(segIDs, int64Pks, chanName)
+	fm := NewRendezvousFlushManager(NewAllocatorFactory(), cm, channel, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
 	t.Run("Test get segment by int64 primary keys", func(te *testing.T) {
 		c := &nodeConfig{
-			replica:      replica,
+			channel:      channel,
 			allocator:    &allocator{},
 			vChannelName: chanName,
 		}
@@ -314,7 +227,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		Params.EtcdCfg.MetaRootPath = testPath
 
 		c := &nodeConfig{
-			replica:      replica,
+			channel:      channel,
 			allocator:    NewAllocatorFactory(),
 			vChannelName: chanName,
 		}
@@ -337,7 +250,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		Params.EtcdCfg.MetaRootPath = testPath
 
 		c := &nodeConfig{
-			replica:      replica,
+			channel:      channel,
 			allocator:    NewAllocatorFactory(),
 			vChannelName: chanName,
 		}
@@ -366,7 +279,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		Params.EtcdCfg.MetaRootPath = testPath
 
 		c := &nodeConfig{
-			replica:      replica,
+			channel:      channel,
 			allocator:    NewAllocatorFactory(),
 			vChannelName: chanName,
 		}
@@ -401,7 +314,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		Params.EtcdCfg.MetaRootPath = testPath
 
 		c := &nodeConfig{
-			replica:      &mockReplica{},
+			channel:      nil,
 			allocator:    NewAllocatorFactory(),
 			vChannelName: chanName,
 		}
@@ -432,15 +345,12 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		assert.NoError(t, clearEtcd(testPath))
 		Params.EtcdCfg.MetaRootPath = testPath
 
-		replica := &SegmentReplica{
-			newSegments:       make(map[UniqueID]*Segment),
-			normalSegments:    make(map[UniqueID]*Segment),
-			flushedSegments:   make(map[UniqueID]*Segment),
-			compactedSegments: make(map[UniqueID]*Segment),
+		channel := &ChannelMeta{
+			segments: make(map[UniqueID]*Segment),
 		}
 
 		c := &nodeConfig{
-			replica:      replica,
+			channel:      channel,
 			allocator:    NewAllocatorFactory(),
 			vChannelName: chanName,
 		}
@@ -448,17 +358,19 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		assert.Nil(t, err)
 
 		compactedSegment := UniqueID(10020987)
-		replica.compactedSegments[compactedSegment] = &Segment{
+		seg := Segment{
 			segmentID:   compactedSegment,
 			compactedTo: 100,
 		}
+		seg.setType(datapb.SegmentType_Compacted)
+		channel.segments[compactedSegment] = &seg
 
 		msg := genFlowGraphDeleteMsg(int64Pks, chanName)
 		msg.deleteMessages = []*msgstream.DeleteMsg{}
 		msg.segmentsToFlush = []UniqueID{compactedSegment}
 
 		delNode.delBuf.Store(compactedSegment, &DelDataBuf{delData: &DeleteData{}})
-		delNode.flushManager = NewRendezvousFlushManager(&allocator{}, cm, replica, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
+		delNode.flushManager = NewRendezvousFlushManager(&allocator{}, cm, channel, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
 
 		var fgMsg flowgraph.Msg = &msg
 		setFlowGraphRetryOpt(retry.Attempts(1))
@@ -480,7 +392,7 @@ func TestFlowGraphDeleteNode_showDelBuf(t *testing.T) {
 	cm := storage.NewLocalChunkManager(storage.RootPath(deleteNodeTestDir))
 	defer cm.RemoveWithPrefix(ctx, "")
 
-	fm := NewRendezvousFlushManager(NewAllocatorFactory(), cm, &mockReplica{}, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
+	fm := NewRendezvousFlushManager(NewAllocatorFactory(), cm, nil, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
 
 	chanName := "datanode-test-FlowGraphDeletenode-showDelBuf"
 	testPath := "/test/datanode/root/meta"
@@ -488,7 +400,7 @@ func TestFlowGraphDeleteNode_showDelBuf(t *testing.T) {
 	Params.EtcdCfg.MetaRootPath = testPath
 
 	c := &nodeConfig{
-		replica:      &mockReplica{},
+		channel:      nil,
 		allocator:    NewAllocatorFactory(),
 		vChannelName: chanName,
 	}
@@ -520,22 +432,19 @@ func TestFlowGraphDeleteNode_updateCompactedSegments(t *testing.T) {
 	cm := storage.NewLocalChunkManager(storage.RootPath(deleteNodeTestDir))
 	defer cm.RemoveWithPrefix(ctx, "")
 
-	fm := NewRendezvousFlushManager(NewAllocatorFactory(), cm, &mockReplica{}, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
+	fm := NewRendezvousFlushManager(NewAllocatorFactory(), cm, nil, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
 
 	chanName := "datanode-test-FlowGraphDeletenode-showDelBuf"
 	testPath := "/test/datanode/root/meta"
 	assert.NoError(t, clearEtcd(testPath))
 	Params.EtcdCfg.MetaRootPath = testPath
 
-	replica := SegmentReplica{
-		newSegments:       make(map[UniqueID]*Segment),
-		normalSegments:    make(map[UniqueID]*Segment),
-		flushedSegments:   make(map[UniqueID]*Segment),
-		compactedSegments: make(map[UniqueID]*Segment),
+	channel := ChannelMeta{
+		segments: make(map[UniqueID]*Segment),
 	}
 
 	c := &nodeConfig{
-		replica:      &replica,
+		channel:      &channel,
 		allocator:    NewAllocatorFactory(),
 		vChannelName: chanName,
 	}
@@ -581,22 +490,26 @@ func TestFlowGraphDeleteNode_updateCompactedSegments(t *testing.T) {
 				delNode.delBuf.Store(seg, delBuf)
 			}
 
-			for i, seg := range test.compactedFromIDs {
-				replica.compactedSegments[seg] = &Segment{
-					segmentID:   seg,
-					compactedTo: test.compactedToIDs[i],
-				}
-			}
-
 			if test.compactToExist {
-				for _, seg := range test.compactedToIDs {
-					replica.flushedSegments[seg] = &Segment{
-						segmentID: seg,
+				for _, segID := range test.compactedToIDs {
+					seg := Segment{
+						segmentID: segID,
 						numRows:   10,
 					}
+					seg.setType(datapb.SegmentType_Flushed)
+					channel.segments[segID] = &seg
 				}
-			} else {
-				replica.flushedSegments = make(map[UniqueID]*Segment)
+			} else { // clear all segments in channel
+				channel.segments = make(map[UniqueID]*Segment)
+			}
+
+			for i, segID := range test.compactedFromIDs {
+				seg := Segment{
+					segmentID:   segID,
+					compactedTo: test.compactedToIDs[i],
+				}
+				seg.setType(datapb.SegmentType_Compacted)
+				channel.segments[segID] = &seg
 			}
 
 			delNode.updateCompactedSegments()

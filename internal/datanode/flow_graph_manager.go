@@ -42,15 +42,11 @@ func (fm *flowgraphManager) addAndStart(dn *DataNode, vchan *datapb.VchannelInfo
 		return nil
 	}
 
-	replica, err := newReplica(dn.ctx, dn.rootCoord, dn.chunkManager, vchan.GetCollectionID(), schema)
-	if err != nil {
-		log.Warn("new replica failed", zap.String("vChannelName", vchan.GetChannelName()), zap.Error(err))
-		return err
-	}
+	channel := newChannel(vchan.GetChannelName(), vchan.GetCollectionID(), schema, dn.rootCoord, dn.chunkManager)
 
 	var alloc allocatorInterface = newAllocator(dn.rootCoord)
 
-	dataSyncService, err := newDataSyncService(dn.ctx, make(chan flushMsg, 100), make(chan resendTTMsg, 100), replica,
+	dataSyncService, err := newDataSyncService(dn.ctx, make(chan flushMsg, 100), make(chan resendTTMsg, 100), channel,
 		alloc, dn.factory, vchan, dn.clearSignal, dn.dataCoord, dn.segmentCache, dn.chunkManager, dn.compactionExecutor)
 	if err != nil {
 		log.Warn("new data sync service fail", zap.String("vChannelName", vchan.GetChannelName()), zap.Error(err))
@@ -76,7 +72,7 @@ func (fm *flowgraphManager) getFlushCh(segID UniqueID) (chan<- flushMsg, error) 
 
 	fm.flowgraphs.Range(func(key, value interface{}) bool {
 		fg := value.(*dataSyncService)
-		if fg.replica.hasSegment(segID, true) {
+		if fg.channel.hasSegment(segID, true) {
 			flushCh = fg.flushCh
 			return false
 		}
@@ -90,16 +86,16 @@ func (fm *flowgraphManager) getFlushCh(segID UniqueID) (chan<- flushMsg, error) 
 	return nil, fmt.Errorf("cannot find segment %d in all flowgraphs", segID)
 }
 
-func (fm *flowgraphManager) getReplica(segID UniqueID) (Replica, error) {
+func (fm *flowgraphManager) getChannel(segID UniqueID) (Channel, error) {
 	var (
-		rep    Replica
+		rep    Channel
 		exists = false
 	)
 	fm.flowgraphs.Range(func(key, value interface{}) bool {
 		fg := value.(*dataSyncService)
-		if fg.replica.hasSegment(segID, true) {
+		if fg.channel.hasSegment(segID, true) {
 			exists = true
-			rep = fg.replica
+			rep = fg.channel
 			return false
 		}
 		return true
@@ -118,7 +114,7 @@ func (fm *flowgraphManager) resendTT() []UniqueID {
 	var unFlushedSegments []UniqueID
 	fm.flowgraphs.Range(func(key, value interface{}) bool {
 		fg := value.(*dataSyncService)
-		segIDs := fg.replica.listNotFlushedSegmentIDs()
+		segIDs := fg.channel.listNotFlushedSegmentIDs()
 		if len(segIDs) > 0 {
 			log.Info("un-flushed segments found, stats will be resend",
 				zap.Int64s("segment IDs", segIDs))

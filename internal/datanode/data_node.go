@@ -834,7 +834,7 @@ func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan
 	task := newCompactionTask(
 		node.ctx,
 		binlogIO, binlogIO,
-		ds.replica,
+		ds.channel,
 		ds.flushManager,
 		ds.idAllocator,
 		req,
@@ -904,7 +904,7 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 	}
 
 	oneSegment := req.GetCompactedFrom()[0]
-	replica, err := node.flowgraphManager.getReplica(oneSegment)
+	channel, err := node.flowgraphManager.getChannel(oneSegment)
 	if err != nil {
 		status.Reason = fmt.Sprintf("invalid request, err=%s", err.Error())
 		return status, nil
@@ -913,29 +913,27 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 	// check if all compactedFrom segments are valid
 	var invalidSegIDs []UniqueID
 	for _, segID := range req.GetCompactedFrom() {
-		if !replica.hasSegment(segID, true) {
+		if !channel.hasSegment(segID, true) {
 			invalidSegIDs = append(invalidSegIDs, segID)
 		}
 	}
 	if len(invalidSegIDs) > 0 {
-		status.Reason = fmt.Sprintf("invalid request, some segments are not in the same replica: %v", invalidSegIDs)
+		status.Reason = fmt.Sprintf("invalid request, some segments are not in the same channel: %v", invalidSegIDs)
 		return status, nil
 	}
 
-	// oneSegment is definitely in the replica, guaranteed by the check before.
-	collID, partID, _ := replica.getCollectionAndPartitionID(oneSegment)
-	chanName, _ := replica.getChannelName(oneSegment)
+	// oneSegment is definitely in the channel, guaranteed by the check before.
+	collID, partID, _ := channel.getCollectionAndPartitionID(oneSegment)
 	targetSeg := &Segment{
 		collectionID: collID,
 		partitionID:  partID,
-		channelName:  chanName,
 		segmentID:    req.GetCompactedTo(),
 		numRows:      req.GetNumOfRows(),
 	}
 
-	replica.(*SegmentReplica).initPKBloomFilter(ctx, targetSeg, req.GetStatsLogs(), tsoutil.GetCurrentTime())
+	channel.(*ChannelMeta).initPKBloomFilter(ctx, targetSeg, req.GetStatsLogs(), tsoutil.GetCurrentTime())
 
-	if err := replica.mergeFlushedSegments(targetSeg, req.GetPlanID(), req.GetCompactedFrom()); err != nil {
+	if err := channel.mergeFlushedSegments(targetSeg, req.GetPlanID(), req.GetCompactedFrom()); err != nil {
 		status.Reason = err.Error()
 		return status, nil
 	}
@@ -1116,19 +1114,18 @@ func (node *DataNode) AddImportSegment(ctx context.Context, req *datapb.AddImpor
 			},
 		}, nil
 	}
-	// Add the new segment to the replica.
-	if !ds.replica.hasSegment(req.GetSegmentId(), true) {
-		log.Info("adding a new segment to replica",
+	// Add the new segment to the channel.
+	if !ds.channel.hasSegment(req.GetSegmentId(), true) {
+		log.Info("adding a new segment to channel",
 			zap.Int64("segment ID", req.GetSegmentId()))
 		// Add segment as a flushed segment, but set `importing` to true to add extra information of the segment.
 		// By 'extra information' we mean segment info while adding a `SegmentType_Flushed` typed segment.
-		if err := ds.replica.addSegment(
+		if err := ds.channel.addSegment(
 			addSegmentReq{
 				segType:      datapb.SegmentType_Flushed,
 				segID:        req.GetSegmentId(),
 				collID:       req.GetCollectionId(),
 				partitionID:  req.GetPartitionId(),
-				channelName:  req.GetChannelName(),
 				numOfRows:    req.GetRowNum(),
 				statsBinLogs: req.GetStatsLog(),
 				startPos: &internalpb.MsgPosition{

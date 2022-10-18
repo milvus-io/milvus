@@ -49,7 +49,7 @@ type deleteNode struct {
 	ctx          context.Context
 	channelName  string
 	delBuf       sync.Map // map[segmentID]*DelDataBuf
-	replica      Replica
+	channel      Channel
 	idAllocator  allocatorInterface
 	flushManager flushManager
 
@@ -209,15 +209,15 @@ func (dn *deleteNode) Operate(in []Msg) []Msg {
 
 // update delBuf for compacted segments
 func (dn *deleteNode) updateCompactedSegments() {
-	compactedTo2From := dn.replica.listCompactedSegmentIDs()
+	compactedTo2From := dn.channel.listCompactedSegmentIDs()
 
 	for compactedTo, compactedFrom := range compactedTo2From {
 		// if the compactedTo segment has 0 numRows, remove all segments related
-		if !dn.replica.hasSegment(compactedTo, true) {
+		if !dn.channel.hasSegment(compactedTo, true) {
 			for _, segID := range compactedFrom {
 				dn.delBuf.Delete(segID)
 			}
-			dn.replica.removeSegments(compactedFrom...)
+			dn.channel.removeSegments(compactedFrom...)
 			continue
 		}
 
@@ -243,7 +243,7 @@ func (dn *deleteNode) updateCompactedSegments() {
 			zap.Int64("compactedTo segmentID", compactedTo),
 			zap.Int64s("compactedFrom segmentIDs", compactedFrom),
 		)
-		dn.replica.removeSegments(compactedFrom...)
+		dn.channel.removeSegments(compactedFrom...)
 	}
 }
 
@@ -301,7 +301,7 @@ func (dn *deleteNode) filterSegmentByPK(partID UniqueID, pks []primaryKey, tss [
 	segID2Pks := make(map[UniqueID][]primaryKey)
 	segID2Tss := make(map[UniqueID][]uint64)
 	buf := make([]byte, 8)
-	segments := dn.replica.filterSegments(dn.channelName, partID)
+	segments := dn.channel.filterSegments(partID)
 	for index, pk := range pks {
 		for _, segment := range segments {
 			segmentID := segment.segmentID
@@ -337,7 +337,7 @@ func newDeleteNode(ctx context.Context, fm flushManager, sig chan<- string, conf
 		BaseNode: baseNode,
 		delBuf:   sync.Map{},
 
-		replica:      config.replica,
+		channel:      config.channel,
 		idAllocator:  config.allocator,
 		channelName:  config.vChannelName,
 		flushManager: fm,

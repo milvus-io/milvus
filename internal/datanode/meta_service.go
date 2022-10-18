@@ -29,11 +29,11 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 )
 
-// metaService initialize replica collections in data node from root coord.
-// Initializing replica collections happens on data node starting. It depends on
+// metaService initialize channel collection in data node from root coord.
+// Initializing channel collection happens on data node starting. It depends on
 // a healthy root coord and a valid root coord grpc client.
 type metaService struct {
-	replica      Replica
+	channel      Channel
 	collectionID UniqueID
 	rootCoord    types.RootCoord
 }

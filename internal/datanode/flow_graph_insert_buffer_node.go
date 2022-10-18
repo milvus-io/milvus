@@ -57,7 +57,7 @@ type insertBufferNode struct {
 	ctx          context.Context
 	channelName  string
 	insertBuffer sync.Map // SegmentID to BufferData
-	replica      Replica
+	channel      Channel
 	idAllocator  allocatorInterface
 
 	flushMap         sync.Map
@@ -226,11 +226,11 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 
 	ibNode.lastTimestamp = endPositions[0].Timestamp
 
-	// Updating segment statistics in replica
-	seg2Upload, err := ibNode.updateSegStatesInReplica(fgMsg.insertMessages, startPositions[0], endPositions[0])
+	// Updating segment statistics in channel
+	seg2Upload, err := ibNode.updateSegmentStates(fgMsg.insertMessages, startPositions[0], endPositions[0])
 	if err != nil {
 		// Occurs only if the collectionID is mismatch, should not happen
-		err = fmt.Errorf("update segment states in Replica wrong, err = %s", err)
+		err = fmt.Errorf("update segment states in channel meta wrong, err = %s", err)
 		log.Error(err.Error())
 		panic(err)
 	}
@@ -285,7 +285,7 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 	)
 
 	if fgMsg.dropCollection {
-		segmentsToFlush := ibNode.replica.listAllSegmentIDs()
+		segmentsToFlush := ibNode.channel.listAllSegmentIDs()
 		log.Info("Receive drop collection req and flushing all segments",
 			zap.Any("segments", segmentsToFlush),
 			zap.String("vchannel name", ibNode.channelName),
@@ -378,9 +378,9 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 
 		// process drop partition
 		for _, partitionDrop := range fgMsg.dropPartitions {
-			segmentIDs := ibNode.replica.listPartitionSegments(partitionDrop)
+			segmentIDs := ibNode.channel.listPartitionSegments(partitionDrop)
 			log.Info("(Drop Partition) process drop partition",
-				zap.Int64("collectionID", ibNode.replica.getCollectionID()),
+				zap.Int64("collectionID", ibNode.channel.getCollectionID()),
 				zap.Int64("partitionID", partitionDrop),
 				zap.Int64s("segmentIDs", segmentIDs),
 				zap.String("v-channel name", ibNode.channelName),
@@ -402,7 +402,7 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 			zap.Any("pos", endPositions[0]),
 		)
 
-		segStats, err := ibNode.replica.getSegmentStatslog(task.segmentID)
+		segStats, err := ibNode.channel.getSegmentStatslog(task.segmentID)
 		if err != nil {
 			log.Error("failed to get segment stats log", zap.Int64("segmentID", task.segmentID), zap.Error(err))
 			panic(err)
@@ -463,10 +463,10 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 	return []Msg{&res}
 }
 
-// updateSegStatesInReplica updates statistics in replica for the segments in insertMsgs.
+// updateSegmentStates updates statistics in channel meta for the segments in insertMsgs.
 //  If the segment doesn't exist, a new segment will be created.
 //  The segment number of rows will be updated in mem, waiting to be uploaded to DataCoord.
-func (ibNode *insertBufferNode) updateSegStatesInReplica(insertMsgs []*msgstream.InsertMsg, startPos, endPos *internalpb.MsgPosition) (seg2Upload []UniqueID, err error) {
+func (ibNode *insertBufferNode) updateSegmentStates(insertMsgs []*msgstream.InsertMsg, startPos, endPos *internalpb.MsgPosition) (seg2Upload []UniqueID, err error) {
 	uniqueSeg := make(map[UniqueID]int64)
 	for _, msg := range insertMsgs {
 
@@ -474,14 +474,13 @@ func (ibNode *insertBufferNode) updateSegStatesInReplica(insertMsgs []*msgstream
 		collID := msg.GetCollectionID()
 		partitionID := msg.GetPartitionID()
 
-		if !ibNode.replica.hasSegment(currentSegID, true) {
-			err = ibNode.replica.addSegment(
+		if !ibNode.channel.hasSegment(currentSegID, true) {
+			err = ibNode.channel.addSegment(
 				addSegmentReq{
 					segType:     datapb.SegmentType_New,
 					segID:       currentSegID,
 					collID:      collID,
 					partitionID: partitionID,
-					channelName: msg.GetShardName(),
 					startPos:    startPos,
 					endPos:      endPos,
 				})
@@ -503,7 +502,7 @@ func (ibNode *insertBufferNode) updateSegStatesInReplica(insertMsgs []*msgstream
 	seg2Upload = make([]UniqueID, 0, len(uniqueSeg))
 	for id, num := range uniqueSeg {
 		seg2Upload = append(seg2Upload, id)
-		ibNode.replica.updateStatistics(id, num)
+		ibNode.channel.updateStatistics(id, num)
 	}
 
 	return
@@ -511,7 +510,7 @@ func (ibNode *insertBufferNode) updateSegStatesInReplica(insertMsgs []*msgstream
 
 /* #nosec G103 */
 // bufferInsertMsg put InsertMsg into buffer
-// 	1.1 fetch related schema from replica
+// 	1.1 fetch related schema from channel meta
 // 	1.2 Get buffer data and put data into each field buffer
 // 	1.3 Put back into buffer
 // 	1.4 Update related statistics
@@ -522,7 +521,7 @@ func (ibNode *insertBufferNode) bufferInsertMsg(msg *msgstream.InsertMsg, endPos
 	currentSegID := msg.GetSegmentID()
 	collectionID := msg.GetCollectionID()
 
-	collSchema, err := ibNode.replica.getCollectionSchema(collectionID, msg.EndTs())
+	collSchema, err := ibNode.channel.getCollectionSchema(collectionID, msg.EndTs())
 	if err != nil {
 		log.Error("Get schema wrong:", zap.Error(err))
 		return err
@@ -563,7 +562,7 @@ func (ibNode *insertBufferNode) bufferInsertMsg(msg *msgstream.InsertMsg, endPos
 	if err != nil {
 		log.Warn("no primary field found in insert msg", zap.Error(err))
 	} else {
-		ibNode.replica.updateSegmentPKRange(currentSegID, addedPfData)
+		ibNode.channel.updateSegmentPKRange(currentSegID, addedPfData)
 	}
 
 	// Maybe there are large write zoom if frequent insert requests are met.
@@ -586,7 +585,7 @@ func (ibNode *insertBufferNode) bufferInsertMsg(msg *msgstream.InsertMsg, endPos
 	ibNode.insertBuffer.Store(currentSegID, buffer)
 
 	// store current endPositions as Segment->EndPostion
-	ibNode.replica.updateSegmentEndPosition(currentSegID, endPos)
+	ibNode.channel.updateSegmentEndPosition(currentSegID, endPos)
 
 	return nil
 }
@@ -616,7 +615,7 @@ func (ibNode *insertBufferNode) writeHardTimeTick(ts Timestamp, segmentIDs []int
 }
 
 func (ibNode *insertBufferNode) getCollectionandPartitionIDbySegID(segmentID UniqueID) (collID, partitionID UniqueID, err error) {
-	return ibNode.replica.getCollectionAndPartitionID(segmentID)
+	return ibNode.channel.getCollectionAndPartitionID(segmentID)
 }
 
 func newInsertBufferNode(ctx context.Context, collID UniqueID, flushCh <-chan flushMsg, resendTTCh <-chan resendTTMsg,
@@ -640,7 +639,7 @@ func newInsertBufferNode(ctx context.Context, collID UniqueID, flushCh <-chan fl
 	mt := newMergedTimeTickerSender(func(ts Timestamp, segmentIDs []int64) error {
 		stats := make([]*datapb.SegmentStats, 0, len(segmentIDs))
 		for _, sid := range segmentIDs {
-			stat, err := config.replica.getSegmentStatisticsUpdates(sid)
+			stat, err := config.channel.getSegmentStatisticsUpdates(sid)
 			if err != nil {
 				log.Warn("failed to get segment statistics info", zap.Int64("segmentID", sid), zap.Error(err))
 				continue
@@ -684,7 +683,7 @@ func newInsertBufferNode(ctx context.Context, collID UniqueID, flushCh <-chan fl
 		flushingSegCache: flushingSegCache,
 		flushManager:     fm,
 
-		replica:     config.replica,
+		channel:     config.channel,
 		idAllocator: config.allocator,
 		channelName: config.vChannelName,
 		ttMerger:    mt,

@@ -16,6 +16,7 @@ enum SegmentType {
   New = 0;
   Normal = 1;
   Flushed = 2;
+  Compacted = 3;
 }
 
 service DataCoord {
