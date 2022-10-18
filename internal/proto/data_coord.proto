@@ -556,6 +556,7 @@ message ImportTaskInfo {
   ImportTaskState state = 11;                   // State of the import task.
   string collection_name = 12;                  // Collection name for the import task.
   string partition_name = 13;                   // Partition name for the import task.
+  repeated common.KeyValuePair infos = 14;      // extra information about the task, bucket, etc.
 }
 
 message ImportTaskResponse {

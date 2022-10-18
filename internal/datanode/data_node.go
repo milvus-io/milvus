@@ -1045,25 +1045,36 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 		}, nil
 	}
 
+	returnFailFunc := func(inputErr error) (*commonpb.Status, error) {
+		log.Warn("import wrapper failed to parse import request",
+			zap.Int64("task ID", req.GetImportTask().GetTaskId()),
+			zap.Error(inputErr))
+		importResult.State = commonpb.ImportState_ImportFailed
+		importResult.Infos = append(importResult.Infos, &commonpb.KeyValuePair{Key: "failed_reason", Value: inputErr.Error()})
+		reportErr := reportFunc(importResult)
+		if reportErr != nil {
+			log.Warn("fail to report import state to RootCoord", zap.Error(inputErr))
+		}
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    inputErr.Error(),
+		}, nil
+	}
+
 	// parse files and generate segments
 	segmentSize := int64(Params.DataCoordCfg.SegmentMaxSize) * 1024 * 1024
 	importWrapper := importutil.NewImportWrapper(newCtx, colInfo.GetSchema(), colInfo.GetShardsNum(), segmentSize, node.rowIDAllocator, node.chunkManager,
 		importFlushReqFunc(node, req, importResult, colInfo.GetSchema(), ts), importResult, reportFunc)
-	err = importWrapper.Import(req.GetImportTask().GetFiles(), req.GetImportTask().GetRowBased(), false)
+	// todo: pass tsStart and tsStart after import_wrapper support
+	tsStart, tsEnd, err := importutil.ParseTSFromOptions(req.GetImportTask().GetInfos())
 	if err != nil {
-		log.Warn("import wrapper failed to parse import request",
-			zap.Int64("task ID", req.GetImportTask().GetTaskId()),
-			zap.Error(err))
-		importResult.State = commonpb.ImportState_ImportFailed
-		importResult.Infos = append(importResult.Infos, &commonpb.KeyValuePair{Key: "failed_reason", Value: err.Error()})
-		reportErr := reportFunc(importResult)
-		if reportErr != nil {
-			log.Warn("fail to report import state to RootCoord", zap.Error(err))
-		}
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return returnFailFunc(err)
+	}
+	log.Debug("import time range", zap.Uint64("start_ts", tsStart), zap.Uint64("end_ts", tsEnd))
+	err = importWrapper.Import(req.GetImportTask().GetFiles(), req.GetImportTask().GetRowBased(), false)
+	//err = importWrapper.Import(req.GetImportTask().GetFiles(), req.GetImportTask().GetRowBased(), false, tsStart, tsEnd)
+	if err != nil {
+		return returnFailFunc(err)
 	}
 
 	resp := &commonpb.Status{

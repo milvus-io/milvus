@@ -41,12 +41,12 @@ import (
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/util"
-
 	"github.com/milvus-io/milvus/internal/util/crypto"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/distance"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/importutil"
 	"github.com/milvus-io/milvus/internal/util/logutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
@@ -3881,6 +3881,37 @@ func TestProxy_Import(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
+	wg.Add(1)
+	t.Run("illegal import options", func(t *testing.T) {
+		defer wg.Done()
+		proxy := &Proxy{}
+		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+		cache := newMockCache()
+		globalMetaCache = cache
+		chMgr := newMockChannelsMgr()
+		proxy.chMgr = chMgr
+		rc := newMockRootCoord()
+		rc.ImportFunc = func(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
+			return &milvuspb.ImportResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}}, nil
+		}
+		proxy.rootCoord = rc
+		req := &milvuspb.ImportRequest{
+			CollectionName: "dummy",
+			Options: []*commonpb.KeyValuePair{
+				{
+					Key:   importutil.StartTs,
+					Value: "0",
+				},
+				{
+					Key:   importutil.EndTs,
+					Value: "not a number",
+				},
+			},
+		}
+		resp, err := proxy.Import(context.TODO(), req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+	})
 	wg.Wait()
 }
 
