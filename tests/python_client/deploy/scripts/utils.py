@@ -1,9 +1,12 @@
 import copy
 import time
+import pymilvus
 from pymilvus import (
     FieldSchema, CollectionSchema, DataType,
     Collection, list_collections,
 )
+
+pymilvus_version = pymilvus.__version__
 
 all_index_types = ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ", "HNSW", "ANNOY"]
 
@@ -55,7 +58,10 @@ def get_collections(prefix, check=False):
     # list entities if collections
     for name in col_list:
         c = Collection(name=name)
-        c.flush()
+        if pymilvus_version >= "2.2.0":
+            c.flush()
+        else:
+            c.num_entities
         num_entities = c.num_entities
         print(f"{name}: {num_entities}")
         if check:
@@ -99,6 +105,10 @@ def create_collections_and_insert_data(prefix, flush=True, count=3000, collectio
         if flush:
             print("Get collection entities")
             start_time = time.time()
+            if pymilvus_version >= "2.2.0":
+                collection.flush()
+            else:
+                collection.num_entities
             print(f"collection entities: {collection.num_entities}")
             end_time = time.time()
             print("Get collection entities time = %.4fs" % (end_time - start_time))

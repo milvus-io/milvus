@@ -1,4 +1,5 @@
 import pytest
+import pymilvus
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
@@ -23,7 +24,7 @@ binary_field_name = default_binary_vec_field_name
 default_search_exp = "int64 >= 0"
 default_term_expr = f'{ct.default_int64_field_name} in [0, 1]'
 
-
+pymilvus_version = pymilvus.__version__
 
 class TestActionSecondDeployment(TestDeployBase):
     """ Test case of action before reinstall """
@@ -121,7 +122,10 @@ class TestActionSecondDeployment(TestDeployBase):
                         check_task=check_task)
 
         # flush
-        collection_w.num_entities
+        if pymilvus_version >= "2.2.0":
+            collection_w.flush()
+        else:
+            collection_w.collection.num_entities
 
         # search and query
         if "empty" in name:
@@ -146,7 +150,10 @@ class TestActionSecondDeployment(TestDeployBase):
         for i in range(2):
             self.init_collection_general(insert_data=True, is_binary=is_binary, nb=data_size,
                                          is_flush=False, is_index=True, name=name)
-        collection_w.num_entities
+        if pymilvus_version >= "2.2.0":
+            collection_w.flush()
+        else:
+            collection_w.collection.num_entities
         
         # delete data
         delete_expr = f"{ct.default_int64_field_name} in [0,1,2,3,4,5,6,7,8,9]"

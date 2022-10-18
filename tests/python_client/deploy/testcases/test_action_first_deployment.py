@@ -1,4 +1,5 @@
 import pytest
+import pymilvus
 from common import common_func as cf
 from common import common_type as ct
 from common.common_type import CaseLabel, CheckTasks
@@ -8,6 +9,7 @@ from deploy.base import TestDeployBase
 from deploy.common import gen_index_param, gen_search_param
 from utils.util_log import test_log as log
 
+pymilvus_version = pymilvus.__version__
 
 default_nb = ct.default_nb
 default_nq = ct.default_nq
@@ -134,7 +136,10 @@ class TestActionFirstDeployment(TestDeployBase):
             self.init_collection_general(insert_data=True, is_binary=is_binary, nb=data_size,
                                          is_flush=False, is_index=True, name=name)
             # at this step, all segment are sealed
-            collection_w.flush()
+            if pymilvus_version >= "2.2.0":
+                collection_w.flush()
+            else:
+                collection_w.collection.num_entities
         # delete data for sealed segment and before index
         delete_expr = f"{ct.default_int64_field_name} in {[i for i in range(10,20)]}"
         if is_deleted == "is_deleted":
