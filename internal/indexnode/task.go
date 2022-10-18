@@ -470,7 +470,7 @@ func (it *indexBuildTask) SaveDiskAnnIndexFiles(ctx context.Context) error {
 	}
 
 	getSavePathByKey := func(key string) string {
-		return path.Join("files/index_files", strconv.Itoa(int(it.req.BuildID)), strconv.Itoa(int(it.req.IndexVersion)),
+		return path.Join(it.req.IndexFilePrefix, strconv.Itoa(int(it.req.BuildID)), strconv.Itoa(int(it.req.IndexVersion)),
 			strconv.Itoa(int(it.partitionID)), strconv.Itoa(int(it.segmentID)), key)
 	}
 
