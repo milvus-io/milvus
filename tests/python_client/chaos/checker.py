@@ -354,6 +354,13 @@ class QueryChecker(Checker):
         if collection_name is None:
             collection_name = cf.gen_unique_str("QueryChecker_")
         super().__init__(collection_name=collection_name, shards_num=shards_num)
+        res, result = self.c_wrap.create_index(ct.default_float_vec_field_name,
+                                               constants.DEFAULT_INDEX_PARAM,
+                                               name=cf.gen_unique_str(
+                                                   'index_'),
+                                               timeout=timeout,
+                                               enable_traceback=enable_traceback,
+                                               check_task=CheckTasks.check_nothing)
         self.c_wrap.load(replica_number=replica_number)  # do load before query
         self.term_expr = None
 
@@ -386,6 +393,13 @@ class LoadChecker(Checker):
             collection_name = cf.gen_unique_str("DeleteChecker_")
         super().__init__(collection_name=collection_name)
         self.replica_number = replica_number
+        res, result = self.c_wrap.create_index(ct.default_float_vec_field_name,
+                                               constants.DEFAULT_INDEX_PARAM,
+                                               name=cf.gen_unique_str(
+                                                   'index_'),
+                                               timeout=timeout,
+                                               enable_traceback=enable_traceback,
+                                               check_task=CheckTasks.check_nothing)
 
     @trace()
     def load(self):
@@ -412,6 +426,13 @@ class DeleteChecker(Checker):
         if collection_name is None:
             collection_name = cf.gen_unique_str("DeleteChecker_")
         super().__init__(collection_name=collection_name)
+        res, result = self.c_wrap.create_index(ct.default_float_vec_field_name,
+                                               constants.DEFAULT_INDEX_PARAM,
+                                               name=cf.gen_unique_str(
+                                                   'index_'),
+                                               timeout=timeout,
+                                               enable_traceback=enable_traceback,
+                                               check_task=CheckTasks.check_nothing)
         self.c_wrap.load()  # load before query
         term_expr = f'{ct.default_int64_field_name} > 0'
         res, _ = self.c_wrap.query(term_expr, output_fields=[
@@ -445,6 +466,13 @@ class CompactChecker(Checker):
             collection_name = cf.gen_unique_str("CompactChecker_")
         super().__init__(collection_name=collection_name)
         self.ut = ApiUtilityWrapper()
+        res, result = self.c_wrap.create_index(ct.default_float_vec_field_name,
+                                               constants.DEFAULT_INDEX_PARAM,
+                                               name=cf.gen_unique_str(
+                                                   'index_'),
+                                               timeout=timeout,
+                                               enable_traceback=enable_traceback,
+                                               check_task=CheckTasks.check_nothing)
         self.c_wrap.load()  # load before compact
 
     @trace()
@@ -502,6 +530,13 @@ class LoadBalanceChecker(Checker):
             collection_name = cf.gen_unique_str("LoadBalanceChecker_")
         super().__init__(collection_name=collection_name)
         self.utility_wrap = ApiUtilityWrapper()
+        res, result = self.c_wrap.create_index(ct.default_float_vec_field_name,
+                                               constants.DEFAULT_INDEX_PARAM,
+                                               name=cf.gen_unique_str(
+                                                   'index_'),
+                                               timeout=timeout,
+                                               enable_traceback=enable_traceback,
+                                               check_task=CheckTasks.check_nothing)
         self.c_wrap.load()
         self.sealed_segment_ids = None
         self.dst_node_ids = None
