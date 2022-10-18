@@ -25,10 +25,10 @@ type kafkaClient struct {
 
 func getBasicConfig(address string) kafka.ConfigMap {
 	return kafka.ConfigMap{
-		"bootstrap.servers":   address,
-		"socket.timeout.ms":   300000,
-		"socket.max.fails":    3,
-		"api.version.request": true,
+		"bootstrap.servers":        address,
+		"api.version.request":      true,
+		"reconnect.backoff.ms":     20,
+		"reconnect.backoff.max.ms": 5000,
 	}
 }
 
@@ -119,7 +119,8 @@ func (kc *kafkaClient) newProducerConfig() *kafka.ConfigMap {
 	// default max message size 5M
 	newConf.SetKey("message.max.bytes", 10485760)
 	newConf.SetKey("compression.codec", "zstd")
-	newConf.SetKey("linger.ms", 20)
+	// we want to ensure tt send out as soon as possible
+	newConf.SetKey("linger.ms", 2)
 
 	//special producer config
 	kc.specialExtraConfig(newConf, kc.producerConfig)
@@ -130,24 +131,12 @@ func (kc *kafkaClient) newProducerConfig() *kafka.ConfigMap {
 func (kc *kafkaClient) newConsumerConfig(group string, offset mqwrapper.SubscriptionInitialPosition) *kafka.ConfigMap {
 	newConf := cloneKafkaConfig(kc.basicConfig)
 
-	if offset == mqwrapper.SubscriptionPositionEarliest {
-		newConf.SetKey("auto.offset.reset", "earliest")
-	} else {
-		newConf.SetKey("auto.offset.reset", "latest")
-	}
-
-	newConf.SetKey("session.timeout.ms", 180000)
 	newConf.SetKey("group.id", group)
 	newConf.SetKey("enable.auto.commit", false)
-
 	//Kafka default will not create topics if consumer's the topics don't exist.
 	//In order to compatible with other MQ, we need to enable the following configuration,
 	//meanwhile, some implementation also try to consume a non-exist topic, such as dataCoordTimeTick.
 	newConf.SetKey("allow.auto.create.topics", true)
-
-	//newConf.SetKey("enable.partition.eof", true)
-	newConf.SetKey("go.events.channel.enable", true)
-
 	kc.specialExtraConfig(newConf, kc.consumerConfig)
 
 	return newConf
@@ -166,8 +155,11 @@ func (kc *kafkaClient) CreateProducer(options mqwrapper.ProducerOptions) (mqwrap
 
 func (kc *kafkaClient) Subscribe(options mqwrapper.ConsumerOptions) (mqwrapper.Consumer, error) {
 	config := kc.newConsumerConfig(options.SubscriptionName, options.SubscriptionInitialPosition)
-	consumer, err := newKafkaConsumer(config, options.Topic, options.SubscriptionName)
-	return consumer, err
+	consumer, err := newKafkaConsumer(config, options.Topic, options.SubscriptionName, options.SubscriptionInitialPosition)
+	if err != nil {
+		return nil, err
+	}
+	return consumer, nil
 }
 
 func (kc *kafkaClient) EarliestMessageID() mqwrapper.MessageID {

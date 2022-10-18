@@ -125,11 +125,6 @@ func (ms *mqMsgStream) AsProducer(channels []string) {
 	}
 }
 
-// AsConsumer Create consumer to receive message from channels
-func (ms *mqMsgStream) AsConsumer(channels []string, subName string) {
-	ms.AsConsumerWithPosition(channels, subName, mqwrapper.SubscriptionPositionEarliest)
-}
-
 func (ms *mqMsgStream) GetLatestMsgID(channel string) (MessageID, error) {
 	lastMsg, err := ms.consumers[channel].GetLatestMsgID()
 	if err != nil {
@@ -141,7 +136,7 @@ func (ms *mqMsgStream) GetLatestMsgID(channel string) (MessageID, error) {
 
 // AsConsumerWithPosition Create consumer to receive message from channels, with initial position
 // if initial position is set to latest, last message in the channel is exclusive
-func (ms *mqMsgStream) AsConsumerWithPosition(channels []string, subName string, position mqwrapper.SubscriptionInitialPosition) {
+func (ms *mqMsgStream) AsConsumer(channels []string, subName string, position mqwrapper.SubscriptionInitialPosition) {
 	for _, channel := range channels {
 		if _, ok := ms.consumers[channel]; ok {
 			continue
@@ -622,13 +617,8 @@ func (ms *MqTtMsgStream) addConsumer(consumer mqwrapper.Consumer, channel string
 	ms.chanTtMsgTime[consumer] = 0
 }
 
-// AsConsumer subscribes channels as consumer for a MsgStream
-func (ms *MqTtMsgStream) AsConsumer(channels []string, subName string) {
-	ms.AsConsumerWithPosition(channels, subName, mqwrapper.SubscriptionPositionEarliest)
-}
-
 // AsConsumerWithPosition subscribes channels as consumer for a MsgStream and seeks to a certain position.
-func (ms *MqTtMsgStream) AsConsumerWithPosition(channels []string, subName string, position mqwrapper.SubscriptionInitialPosition) {
+func (ms *MqTtMsgStream) AsConsumer(channels []string, subName string, position mqwrapper.SubscriptionInitialPosition) {
 	for _, channel := range channels {
 		if _, ok := ms.consumers[channel]; ok {
 			continue

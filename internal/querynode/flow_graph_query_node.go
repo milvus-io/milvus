@@ -197,7 +197,7 @@ func (q *queryNodeFlowGraph) consumeFlowGraph(channel Channel, subName ConsumeSu
 	if q.dmlStream == nil {
 		return errors.New("null dml message stream in flow graph")
 	}
-	q.dmlStream.AsConsumer([]string{channel}, subName)
+	q.dmlStream.AsConsumer([]string{channel}, subName, mqwrapper.SubscriptionPositionUnknown)
 	log.Info("query node flow graph consumes from pChannel",
 		zap.Any("collectionID", q.collectionID),
 		zap.Any("channel", channel),
@@ -213,7 +213,7 @@ func (q *queryNodeFlowGraph) consumeFlowGraphFromLatest(channel Channel, subName
 	if q.dmlStream == nil {
 		return errors.New("null dml message stream in flow graph")
 	}
-	q.dmlStream.AsConsumerWithPosition([]string{channel}, subName, mqwrapper.SubscriptionPositionLatest)
+	q.dmlStream.AsConsumer([]string{channel}, subName, mqwrapper.SubscriptionPositionLatest)
 	log.Info("query node flow graph consumes from pChannel",
 		zap.Any("collectionID", q.collectionID),
 		zap.Any("channel", channel),
@@ -225,8 +225,8 @@ func (q *queryNodeFlowGraph) consumeFlowGraphFromLatest(channel Channel, subName
 }
 
 // seekQueryNodeFlowGraph would seek by position
-func (q *queryNodeFlowGraph) seekQueryNodeFlowGraph(position *internalpb.MsgPosition) error {
-	q.dmlStream.AsConsumer([]string{position.ChannelName}, position.MsgGroup)
+func (q *queryNodeFlowGraph) consumeFlowGraphFromPosition(position *internalpb.MsgPosition) error {
+	q.dmlStream.AsConsumer([]string{position.ChannelName}, position.MsgGroup, mqwrapper.SubscriptionPositionUnknown)
 	err := q.dmlStream.Seek([]*internalpb.MsgPosition{position})
 
 	ts, _ := tsoutil.ParseTS(position.GetTimestamp())

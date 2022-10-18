@@ -1615,16 +1615,6 @@ func checkSearchResult(nq int64, plan *SearchPlan, searchResult *SearchResult) e
 	return nil
 }
 
-func initConsumer(ctx context.Context, queryResultChannel Channel) (msgstream.MsgStream, error) {
-	stream, err := genQueryMsgStream(ctx)
-	if err != nil {
-		return nil, err
-	}
-	stream.AsConsumer([]string{queryResultChannel}, defaultSubName)
-	stream.Start()
-	return stream, nil
-}
-
 func genSimpleSegmentInfo() *querypb.SegmentInfo {
 	return &querypb.SegmentInfo{
 		SegmentID:    defaultSegmentID,

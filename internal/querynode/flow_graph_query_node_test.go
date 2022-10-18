@@ -75,7 +75,7 @@ func TestQueryNodeFlowGraph_seekQueryNodeFlowGraph(t *testing.T) {
 		MsgGroup:    defaultSubName,
 		Timestamp:   0,
 	}
-	err = fg.seekQueryNodeFlowGraph(position)
+	err = fg.consumeFlowGraphFromPosition(position)
 	assert.Error(t, err)
 
 	fg.close()

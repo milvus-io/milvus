@@ -209,13 +209,12 @@ type FailMsgStream struct {
 	errBroadcast bool
 }
 
-func (ms *FailMsgStream) Start()                                       {}
-func (ms *FailMsgStream) Close()                                       {}
-func (ms *FailMsgStream) Chan() <-chan *msgstream.MsgPack              { return nil }
-func (ms *FailMsgStream) AsProducer(channels []string)                 {}
-func (ms *FailMsgStream) AsConsumer(channels []string, subName string) {}
-func (ms *FailMsgStream) AsReader(channels []string, subName string)   {}
-func (ms *FailMsgStream) AsConsumerWithPosition(channels []string, subName string, position mqwrapper.SubscriptionInitialPosition) {
+func (ms *FailMsgStream) Start()                                     {}
+func (ms *FailMsgStream) Close()                                     {}
+func (ms *FailMsgStream) Chan() <-chan *msgstream.MsgPack            { return nil }
+func (ms *FailMsgStream) AsProducer(channels []string)               {}
+func (ms *FailMsgStream) AsReader(channels []string, subName string) {}
+func (ms *FailMsgStream) AsConsumer(channels []string, subName string, position mqwrapper.SubscriptionInitialPosition) {
 }
 func (ms *FailMsgStream) SetRepackFunc(repackFunc msgstream.RepackFunc)                   {}
 func (ms *FailMsgStream) ComputeProduceChannelIndexes(tsMsgs []msgstream.TsMsg) [][]int32 { return nil }

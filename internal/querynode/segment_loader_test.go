@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
+	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -836,7 +837,7 @@ type LoadDeleteMsgStream struct {
 func (ms *LoadDeleteMsgStream) Close() {
 }
 
-func (ms *LoadDeleteMsgStream) AsConsumer(channels []string, subName string) {
+func (ms *LoadDeleteMsgStream) AsConsumer(channels []string, subName string, position mqwrapper.SubscriptionInitialPosition) {
 }
 
 func (ms *LoadDeleteMsgStream) Chan() <-chan *msgstream.MsgPack {

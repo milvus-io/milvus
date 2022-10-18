@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -80,7 +81,7 @@ func TestClient_Subscribe(t *testing.T) {
 	consumer, err := client.Subscribe(ConsumerOptions{
 		Topic:                       newTopicName(),
 		SubscriptionName:            newConsumerName(),
-		SubscriptionInitialPosition: SubscriptionPositionEarliest,
+		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
 	})
 	assert.Error(t, err)
 	assert.Nil(t, consumer)
@@ -98,7 +99,7 @@ func TestClient_Subscribe(t *testing.T) {
 	opt := ConsumerOptions{
 		Topic:                       newTopicName(),
 		SubscriptionName:            newConsumerName(),
-		SubscriptionInitialPosition: SubscriptionPositionEarliest,
+		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
 	}
 	consumer1, err := client1.Subscribe(opt)
 	assert.NoError(t, err)
@@ -110,7 +111,7 @@ func TestClient_Subscribe(t *testing.T) {
 	opt1 := ConsumerOptions{
 		Topic:                       newTopicName(),
 		SubscriptionName:            newConsumerName(),
-		SubscriptionInitialPosition: SubscriptionPositionLatest,
+		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionLatest,
 	}
 	consumer3, err := client1.Subscribe(opt1)
 	assert.NoError(t, err)
@@ -141,7 +142,7 @@ func TestClient_SeekLatest(t *testing.T) {
 	opt := ConsumerOptions{
 		Topic:                       topicName,
 		SubscriptionName:            newConsumerName(),
-		SubscriptionInitialPosition: SubscriptionPositionEarliest,
+		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
 	}
 	consumer1, err := client.Subscribe(opt)
 	assert.NoError(t, err)
@@ -168,7 +169,7 @@ func TestClient_SeekLatest(t *testing.T) {
 	opt1 := ConsumerOptions{
 		Topic:                       topicName,
 		SubscriptionName:            newConsumerName(),
-		SubscriptionInitialPosition: SubscriptionPositionLatest,
+		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionLatest,
 	}
 	consumer2, err := client.Subscribe(opt1)
 	assert.NoError(t, err)
@@ -217,7 +218,7 @@ func TestClient_consume(t *testing.T) {
 	opt := ConsumerOptions{
 		Topic:                       topicName,
 		SubscriptionName:            newConsumerName(),
-		SubscriptionInitialPosition: SubscriptionPositionEarliest,
+		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
 	}
 	consumer, err := client.Subscribe(opt)
 	assert.NoError(t, err)

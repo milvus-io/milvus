@@ -25,6 +25,9 @@ const (
 
 	// SubscriptionPositionEarliest is earliest position which means the start consuming position will be the first message
 	SubscriptionPositionEarliest
+
+	// SubscriptionPositionUnkown indicates we don't care about the consumer location, since we are doing another seek or only some meta api over that
+	SubscriptionPositionUnknown
 )
 
 const DefaultPartitionIdx = 0
@@ -53,7 +56,7 @@ type Consumer interface {
 	// returns the subscription for the consumer
 	Subscription() string
 
-	// Message channel
+	// Get Message channel, once you chan you can not seek again
 	Chan() <-chan Message
 
 	// Seek to the uniqueID position
