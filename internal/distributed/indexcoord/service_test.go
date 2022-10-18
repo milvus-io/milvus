@@ -157,6 +157,12 @@ func TestIndexCoordinateServer(t *testing.T) {
 		assert.Equal(t, typeutil.IndexCoordRole, resp.ComponentName)
 	})
 
+	t.Run("CheckHealth", func(t *testing.T) {
+		ret, err := server.CheckHealth(ctx, nil)
+		assert.Nil(t, err)
+		assert.Equal(t, true, ret.IsHealthy)
+	})
+
 	err = server.Stop()
 	assert.NoError(t, err)
 }

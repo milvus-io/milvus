@@ -48,6 +48,7 @@ type IndexCoordMock struct {
 	timeTickChannel   string
 
 	minioBucketName string
+	checkHealthFunc func(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error)
 }
 
 func (coord *IndexCoordMock) updateState(state commonpb.StateCode) {
@@ -227,6 +228,13 @@ func (coord *IndexCoordMock) GetMetrics(ctx context.Context, req *milvuspb.GetMe
 		Response:      "",
 		ComponentName: "",
 	}, nil
+}
+
+func (coord *IndexCoordMock) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
+	if coord.checkHealthFunc != nil {
+		return coord.checkHealthFunc(ctx, req)
+	}
+	return &milvuspb.CheckHealthResponse{IsHealthy: true}, nil
 }
 
 func NewIndexCoordMock() *IndexCoordMock {

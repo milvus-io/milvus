@@ -150,6 +150,11 @@ func Test_NewClient(t *testing.T) {
 			ret, err := client.BroadcastAlteredCollection(ctx, nil)
 			retCheck(retNotNil, ret, err)
 		}
+
+		{
+			ret, err := client.CheckHealth(ctx, nil)
+			retCheck(retNotNil, ret, err)
+		}
 	}
 
 	client.grpcClient = &mock.GRPCClientBase[datapb.DataCoordClient]{

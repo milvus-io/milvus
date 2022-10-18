@@ -268,6 +268,12 @@ func (m *MockRootCoord) ListPolicy(ctx context.Context, in *internalpb.ListPolic
 	return nil, nil
 }
 
+func (m *MockRootCoord) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
+	return &milvuspb.CheckHealthResponse{
+		IsHealthy: true,
+	}, nil
+}
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type MockIndexCoord struct {
 	MockBase
@@ -326,6 +332,10 @@ func (m *MockIndexCoord) ShowConfigurations(ctx context.Context, req *internalpb
 }
 
 func (m *MockIndexCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	return nil, nil
+}
+
+func (m *MockIndexCoord) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
 	return nil, nil
 }
 
@@ -436,6 +446,12 @@ func (m *MockQueryCoord) GetShardLeaders(ctx context.Context, req *querypb.GetSh
 
 func (m *MockQueryCoord) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
 	return nil, nil
+}
+
+func (m *MockQueryCoord) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
+	return &milvuspb.CheckHealthResponse{
+		IsHealthy: true,
+	}, nil
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -585,6 +601,10 @@ func (m *MockDataCoord) ReleaseSegmentLock(ctx context.Context, req *datapb.Rele
 }
 
 func (m *MockDataCoord) BroadcastAlteredCollection(ctx context.Context, req *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
+	return nil, nil
+}
+
+func (m *MockDataCoord) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
 	return nil, nil
 }
 
@@ -891,6 +911,10 @@ func (m *MockProxy) SelectGrant(ctx context.Context, in *milvuspb.SelectGrantReq
 }
 
 func (m *MockProxy) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.RefreshPolicyInfoCacheRequest) (*commonpb.Status, error) {
+	return nil, nil
+}
+
+func (m *MockProxy) CheckHealth(ctx context.Context, request *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
 	return nil, nil
 }
 
@@ -1311,6 +1335,11 @@ func Test_NewServer(t *testing.T) {
 
 	t.Run("RefreshPrivilegeInfoCache", func(t *testing.T) {
 		_, err := server.RefreshPolicyInfoCache(ctx, nil)
+		assert.Nil(t, err)
+	})
+
+	t.Run("CheckHealth", func(t *testing.T) {
+		_, err := server.CheckHealth(ctx, nil)
 		assert.Nil(t, err)
 	})
 

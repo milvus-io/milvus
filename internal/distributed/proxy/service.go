@@ -882,3 +882,7 @@ func (s *Server) GetVersion(ctx context.Context, request *milvuspb.GetVersionReq
 		Version: buildTags,
 	}, nil
 }
+
+func (s *Server) CheckHealth(ctx context.Context, request *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
+	return s.proxy.CheckHealth(ctx, request)
+}

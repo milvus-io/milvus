@@ -52,6 +52,11 @@ type mockCore struct {
 	types.RootCoordComponent
 }
 
+func (m *mockCore) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
+	return &milvuspb.CheckHealthResponse{
+		IsHealthy: true,
+	}, nil
+}
 func (m *mockCore) UpdateStateCode(commonpb.StateCode) {
 }
 
@@ -180,6 +185,12 @@ func TestRun(t *testing.T) {
 	assert.Nil(t, err)
 	err = svr.Run()
 	assert.Nil(t, err)
+
+	t.Run("CheckHealth", func(t *testing.T) {
+		ret, err := svr.CheckHealth(ctx, nil)
+		assert.Nil(t, err)
+		assert.Equal(t, true, ret.IsHealthy)
+	})
 
 	err = svr.Stop()
 	assert.Nil(t, err)

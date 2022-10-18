@@ -21,6 +21,11 @@ import (
 	"fmt"
 	"math/rand"
 	"strconv"
+	"sync"
+
+	"github.com/milvus-io/milvus/internal/util/errorutil"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
@@ -1391,4 +1396,45 @@ func (s *Server) BroadcastAlteredCollection(ctx context.Context,
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}, nil
+}
+
+func (s *Server) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
+	if s.isClosed() {
+		reason := errorutil.UnHealthReason("datacoord", s.session.ServerID, "datacoord is closed")
+		return &milvuspb.CheckHealthResponse{IsHealthy: false, Reasons: []string{reason}}, nil
+	}
+
+	mu := &sync.Mutex{}
+	group, ctx := errgroup.WithContext(ctx)
+	nodes := s.sessionManager.getLiveNodeIDs()
+	errReasons := make([]string, 0, len(nodes))
+
+	for _, nodeID := range nodes {
+		nodeID := nodeID
+		group.Go(func() error {
+			cli, err := s.sessionManager.getClient(ctx, nodeID)
+			if err != nil {
+				mu.Lock()
+				defer mu.Unlock()
+				errReasons = append(errReasons, errorutil.UnHealthReason("datanode", nodeID, err.Error()))
+				return err
+			}
+
+			sta, err := cli.GetComponentStates(ctx)
+			isHealthy, reason := errorutil.UnHealthReasonWithComponentStatesOrErr("datanode", nodeID, sta, err)
+			if !isHealthy {
+				mu.Lock()
+				defer mu.Unlock()
+				errReasons = append(errReasons, reason)
+			}
+			return err
+		})
+	}
+
+	err := group.Wait()
+	if err != nil || len(errReasons) != 0 {
+		return &milvuspb.CheckHealthResponse{IsHealthy: false, Reasons: errReasons}, nil
+	}
+
+	return &milvuspb.CheckHealthResponse{IsHealthy: true, Reasons: errReasons}, nil
 }

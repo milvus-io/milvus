@@ -277,6 +277,12 @@ func (ds *DataCoordFactory) BroadcastAlteredCollection(ctx context.Context, req 
 	}, nil
 }
 
+func (ds *DataCoordFactory) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
+	return &milvuspb.CheckHealthResponse{
+		IsHealthy: true,
+	}, nil
+}
+
 func (ds *DataCoordFactory) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
 	if ds.GetSegmentInfosError {
 		return nil, errors.New("mock get segment info error")

@@ -28,6 +28,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/errorutil"
+
+	"golang.org/x/sync/errgroup"
+
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -971,6 +975,39 @@ func (i *IndexCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReq
 		},
 		Response: "",
 	}, nil
+}
+
+func (i *IndexCoord) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
+	if !i.isHealthy() {
+		reason := errorutil.UnHealthReason("indexcoord", i.session.ServerID, "indexcoord is unhealthy")
+		return &milvuspb.CheckHealthResponse{IsHealthy: false, Reasons: []string{reason}}, nil
+	}
+
+	mu := &sync.Mutex{}
+	group, ctx := errgroup.WithContext(ctx)
+	errReasons := make([]string, 0, len(i.nodeManager.GetAllClients()))
+
+	for nodeID, indexClient := range i.nodeManager.GetAllClients() {
+		nodeID := nodeID
+		indexClient := indexClient
+		group.Go(func() error {
+			sta, err := indexClient.GetComponentStates(ctx)
+			isHealthy, reason := errorutil.UnHealthReasonWithComponentStatesOrErr("indexnode", nodeID, sta, err)
+			if !isHealthy {
+				mu.Lock()
+				defer mu.Unlock()
+				errReasons = append(errReasons, reason)
+			}
+			return err
+		})
+	}
+
+	err := group.Wait()
+	if err != nil || len(errReasons) != 0 {
+		return &milvuspb.CheckHealthResponse{IsHealthy: false, Reasons: errReasons}, nil
+	}
+
+	return &milvuspb.CheckHealthResponse{IsHealthy: true, Reasons: errReasons}, nil
 }
 
 // watchNodeLoop is used to monitor IndexNode going online and offline.

@@ -780,6 +780,47 @@ func (suite *ServiceSuite) TestGetReplicas() {
 	suite.Contains(resp.Status.Reason, ErrNotHealthy.Error())
 }
 
+func (suite *ServiceSuite) TestCheckHealth() {
+	ctx := context.Background()
+	server := suite.server
+
+	// Test for server is not healthy
+	server.UpdateStateCode(commonpb.StateCode_Initializing)
+	resp, err := server.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
+	suite.NoError(err)
+	suite.Equal(resp.IsHealthy, false)
+	suite.NotEmpty(resp.Reasons)
+
+	// Test for components state fail
+	for _, node := range suite.nodes {
+		suite.cluster.EXPECT().GetComponentStates(mock.Anything, node).Return(
+			&milvuspb.ComponentStates{
+				State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Abnormal},
+				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			},
+			nil).Once()
+	}
+	server.UpdateStateCode(commonpb.StateCode_Healthy)
+	resp, err = server.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
+	suite.NoError(err)
+	suite.Equal(resp.IsHealthy, false)
+	suite.NotEmpty(resp.Reasons)
+
+	// Test for server is healthy
+	for _, node := range suite.nodes {
+		suite.cluster.EXPECT().GetComponentStates(mock.Anything, node).Return(
+			&milvuspb.ComponentStates{
+				State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Healthy},
+				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			},
+			nil).Once()
+	}
+	resp, err = server.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
+	suite.NoError(err)
+	suite.Equal(resp.IsHealthy, true)
+	suite.Empty(resp.Reasons)
+}
+
 func (suite *ServiceSuite) TestGetShardLeaders() {
 	suite.loadAll()
 	ctx := context.Background()

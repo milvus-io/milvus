@@ -665,3 +665,16 @@ func (c *Client) ListPolicy(ctx context.Context, req *internalpb.ListPolicyReque
 	}
 	return ret.(*internalpb.ListPolicyResponse), err
 }
+
+func (c *Client) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client rootcoordpb.RootCoordClient) (any, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.CheckHealth(ctx, req)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return ret.(*milvuspb.CheckHealthResponse), err
+}

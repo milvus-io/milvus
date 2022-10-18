@@ -152,6 +152,12 @@ func (m *MockQueryCoord) GetShardLeaders(ctx context.Context, req *querypb.GetSh
 	return m.shardLeadersResp, m.err
 }
 
+func (m *MockQueryCoord) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
+	return &milvuspb.CheckHealthResponse{
+		IsHealthy: true,
+	}, m.err
+}
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type MockRootCoord struct {
 	types.RootCoord
@@ -385,6 +391,12 @@ func Test_NewServer(t *testing.T) {
 		resp, err := server.GetMetrics(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	t.Run("CheckHealth", func(t *testing.T) {
+		ret, err := server.CheckHealth(ctx, nil)
+		assert.Nil(t, err)
+		assert.Equal(t, true, ret.IsHealthy)
 	})
 
 	err = server.Stop()

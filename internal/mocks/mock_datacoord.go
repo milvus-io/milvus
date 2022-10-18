@@ -123,6 +123,7 @@ func (_c *DataCoord_AssignSegmentID_Call) Return(_a0 *datapb.AssignSegmentIDResp
 	return _c
 }
 
+// BroadcastAlteredCollection provides a mock function with given fields: ctx, req
 func (_m *DataCoord) BroadcastAlteredCollection(ctx context.Context, req *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
 	ret := _m.Called(ctx, req)
 
@@ -145,14 +146,14 @@ func (_m *DataCoord) BroadcastAlteredCollection(ctx context.Context, req *milvus
 	return r0, r1
 }
 
-// DataCoord_BroadcastAlteredCollection_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DataCoord_BroadcastAlteredCollection_Call'
+// DataCoord_BroadcastAlteredCollection_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'BroadcastAlteredCollection'
 type DataCoord_BroadcastAlteredCollection_Call struct {
 	*mock.Call
 }
 
-// AddSegment is a helper method to define mock.On call
+// BroadcastAlteredCollection is a helper method to define mock.On call
 //  - ctx context.Context
-//  - req *datapb.AddSegmentRequest
+//  - req *milvuspb.AlterCollectionRequest
 func (_e *DataCoord_Expecter) BroadcastAlteredCollection(ctx interface{}, req interface{}) *DataCoord_BroadcastAlteredCollection_Call {
 	return &DataCoord_BroadcastAlteredCollection_Call{Call: _e.mock.On("BroadcastAlteredCollection", ctx, req)}
 }
@@ -165,6 +166,53 @@ func (_c *DataCoord_BroadcastAlteredCollection_Call) Run(run func(ctx context.Co
 }
 
 func (_c *DataCoord_BroadcastAlteredCollection_Call) Return(_a0 *commonpb.Status, _a1 error) *DataCoord_BroadcastAlteredCollection_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+// CheckHealth provides a mock function with given fields: ctx, req
+func (_m *DataCoord) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
+	ret := _m.Called(ctx, req)
+
+	var r0 *milvuspb.CheckHealthResponse
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.CheckHealthRequest) *milvuspb.CheckHealthResponse); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.CheckHealthResponse)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.CheckHealthRequest) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// DataCoord_CheckHealth_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CheckHealth'
+type DataCoord_CheckHealth_Call struct {
+	*mock.Call
+}
+
+// CheckHealth is a helper method to define mock.On call
+//  - ctx context.Context
+//  - req *milvuspb.CheckHealthRequest
+func (_e *DataCoord_Expecter) CheckHealth(ctx interface{}, req interface{}) *DataCoord_CheckHealth_Call {
+	return &DataCoord_CheckHealth_Call{Call: _e.mock.On("CheckHealth", ctx, req)}
+}
+
+func (_c *DataCoord_CheckHealth_Call) Run(run func(ctx context.Context, req *milvuspb.CheckHealthRequest)) *DataCoord_CheckHealth_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.CheckHealthRequest))
+	})
+	return _c
+}
+
+func (_c *DataCoord_CheckHealth_Call) Return(_a0 *milvuspb.CheckHealthResponse, _a1 error) *DataCoord_CheckHealth_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
@@ -512,28 +560,6 @@ func (_m *DataCoord) GetFlushedSegments(ctx context.Context, req *datapb.GetFlus
 
 	var r1 error
 	if rf, ok := ret.Get(1).(func(context.Context, *datapb.GetFlushedSegmentsRequest) error); ok {
-		r1 = rf(ctx, req)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-func (_m *DataCoord) GetSegmentsByStates(ctx context.Context, req *datapb.GetSegmentsByStatesRequest) (*datapb.GetSegmentsByStatesResponse, error) {
-	ret := _m.Called(ctx, req)
-
-	var r0 *datapb.GetSegmentsByStatesResponse
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.GetSegmentsByStatesRequest) *datapb.GetSegmentsByStatesResponse); ok {
-		r0 = rf(ctx, req)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*datapb.GetSegmentsByStatesResponse)
-		}
-	}
-
-	var r1 error
-	if rf, ok := ret.Get(1).(func(context.Context, *datapb.GetSegmentsByStatesRequest) error); ok {
 		r1 = rf(ctx, req)
 	} else {
 		r1 = ret.Error(1)
@@ -890,6 +916,53 @@ func (_c *DataCoord_GetSegmentStates_Call) Run(run func(ctx context.Context, req
 }
 
 func (_c *DataCoord_GetSegmentStates_Call) Return(_a0 *datapb.GetSegmentStatesResponse, _a1 error) *DataCoord_GetSegmentStates_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+// GetSegmentsByStates provides a mock function with given fields: ctx, req
+func (_m *DataCoord) GetSegmentsByStates(ctx context.Context, req *datapb.GetSegmentsByStatesRequest) (*datapb.GetSegmentsByStatesResponse, error) {
+	ret := _m.Called(ctx, req)
+
+	var r0 *datapb.GetSegmentsByStatesResponse
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.GetSegmentsByStatesRequest) *datapb.GetSegmentsByStatesResponse); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.GetSegmentsByStatesResponse)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.GetSegmentsByStatesRequest) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// DataCoord_GetSegmentsByStates_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetSegmentsByStates'
+type DataCoord_GetSegmentsByStates_Call struct {
+	*mock.Call
+}
+
+// GetSegmentsByStates is a helper method to define mock.On call
+//  - ctx context.Context
+//  - req *datapb.GetSegmentsByStatesRequest
+func (_e *DataCoord_Expecter) GetSegmentsByStates(ctx interface{}, req interface{}) *DataCoord_GetSegmentsByStates_Call {
+	return &DataCoord_GetSegmentsByStates_Call{Call: _e.mock.On("GetSegmentsByStates", ctx, req)}
+}
+
+func (_c *DataCoord_GetSegmentsByStates_Call) Run(run func(ctx context.Context, req *datapb.GetSegmentsByStatesRequest)) *DataCoord_GetSegmentsByStates_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.GetSegmentsByStatesRequest))
+	})
+	return _c
+}
+
+func (_c *DataCoord_GetSegmentsByStates_Call) Return(_a0 *datapb.GetSegmentsByStatesResponse, _a1 error) *DataCoord_GetSegmentsByStates_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }

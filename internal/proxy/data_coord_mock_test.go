@@ -39,6 +39,7 @@ type DataCoordMock struct {
 	showConfigurationsFunc showConfigurationsFuncType
 	statisticsChannel      string
 	timeTickChannel        string
+	checkHealthFunc        func(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error)
 }
 
 func (coord *DataCoordMock) updateState(state commonpb.StateCode) {
@@ -128,6 +129,13 @@ func (coord *DataCoordMock) MarkSegmentsDropped(ctx context.Context, req *datapb
 
 func (coord *DataCoordMock) BroadcastAlteredCollection(ctx context.Context, req *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
 	panic("implement me")
+}
+
+func (coord *DataCoordMock) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
+	if coord.checkHealthFunc != nil {
+		return coord.checkHealthFunc(ctx, req)
+	}
+	return &milvuspb.CheckHealthResponse{IsHealthy: true}, nil
 }
 
 func (coord *DataCoordMock) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error) {

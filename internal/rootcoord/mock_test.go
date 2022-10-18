@@ -202,6 +202,12 @@ func (m *mockDataCoord) BroadcastAlteredCollection(ctx context.Context, req *mil
 	return m.broadCastAlteredCollectionFunc(ctx, req)
 }
 
+func (m *mockDataCoord) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
+	return &milvuspb.CheckHealthResponse{
+		IsHealthy: true,
+	}, nil
+}
+
 type mockQueryCoord struct {
 	types.QueryCoord
 	GetSegmentInfoFunc     func(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error)
@@ -260,6 +266,7 @@ type mockProxy struct {
 	InvalidateCollectionMetaCacheFunc func(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error)
 	InvalidateCredentialCacheFunc     func(ctx context.Context, request *proxypb.InvalidateCredCacheRequest) (*commonpb.Status, error)
 	RefreshPolicyInfoCacheFunc        func(ctx context.Context, request *proxypb.RefreshPolicyInfoCacheRequest) (*commonpb.Status, error)
+	GetComponentStatesFunc            func(ctx context.Context) (*milvuspb.ComponentStates, error)
 }
 
 func (m mockProxy) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
@@ -272,6 +279,10 @@ func (m mockProxy) InvalidateCredentialCache(ctx context.Context, request *proxy
 
 func (m mockProxy) RefreshPolicyInfoCache(ctx context.Context, request *proxypb.RefreshPolicyInfoCacheRequest) (*commonpb.Status, error) {
 	return m.RefreshPolicyInfoCacheFunc(ctx, request)
+}
+
+func (m mockProxy) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
+	return m.GetComponentStatesFunc(ctx)
 }
 
 func newMockProxy() *mockProxy {
@@ -307,6 +318,13 @@ func withValidProxyManager() Opt {
 		p.InvalidateCollectionMetaCacheFunc = func(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
 			return succStatus(), nil
 		}
+		p.GetComponentStatesFunc = func(ctx context.Context) (*milvuspb.ComponentStates, error) {
+			return &milvuspb.ComponentStates{
+				State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Healthy},
+				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			}, nil
+		}
+		c.proxyClientManager.proxyClient[TestProxyID] = p
 	}
 }
 
@@ -318,6 +336,12 @@ func withInvalidProxyManager() Opt {
 		p := newMockProxy()
 		p.InvalidateCollectionMetaCacheFunc = func(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
 			return succStatus(), errors.New("error mock InvalidateCollectionMetaCache")
+		}
+		p.GetComponentStatesFunc = func(ctx context.Context) (*milvuspb.ComponentStates, error) {
+			return &milvuspb.ComponentStates{
+				State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Abnormal},
+				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			}, nil
 		}
 		c.proxyClientManager.proxyClient[TestProxyID] = p
 	}

@@ -34,6 +34,8 @@ service QueryCoord {
   // https://wiki.lfaidata.foundation/display/MIL/MEP+23+--+Multiple+memory+replication+design
   rpc GetReplicas(milvus.GetReplicasRequest) returns (milvus.GetReplicasResponse) {}
   rpc GetShardLeaders(GetShardLeadersRequest) returns (GetShardLeadersResponse) {}
+
+  rpc CheckHealth(milvus.CheckHealthRequest) returns (milvus.CheckHealthResponse) {}
 }
 
 service QueryNode {

@@ -290,6 +290,10 @@ func (s *Server) GetMetrics(ctx context.Context, request *milvuspb.GetMetricsReq
 	return s.indexcoord.GetMetrics(ctx, request)
 }
 
+func (s *Server) CheckHealth(ctx context.Context, request *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
+	return s.indexcoord.CheckHealth(ctx, request)
+}
+
 // startGrpcLoop starts the grep loop of IndexCoord component.
 func (s *Server) startGrpcLoop(grpcPort int) {
 

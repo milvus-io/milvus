@@ -188,6 +188,12 @@ func TestIndexCoordClient(t *testing.T) {
 		assert.Equal(t, typeutil.IndexCoordRole, resp.ComponentName)
 	})
 
+	t.Run("CheckHealth", func(t *testing.T) {
+		req := &milvuspb.CheckHealthRequest{}
+		resp, err := icc.CheckHealth(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, true, resp.IsHealthy)
+	})
 	err = server.Stop()
 	assert.NoError(t, err)
 
