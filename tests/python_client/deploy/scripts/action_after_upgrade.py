@@ -57,8 +57,8 @@ def task_3(data_size, host):
 def task_4(data_size, host):
     """
     task_4:
-        before upgrade: create collection, load, insert data without flush
-        after upgrade: get collection, load with multi replicas, search, insert data with flush, load with multi replicas and search
+        before upgrade: create collection, insert data, flush, and create index
+        after upgrade: get collection, load with multi replicas, search, insert data, load with multi replicas and search
     """
     prefix = "task_4_"
     connections.connect(host=host, port=19530, timeout=60)
@@ -73,12 +73,13 @@ def task_5(data_size, host):
     """
     task_5_:
         before upgrade: create collection and insert data without flush
-        after upgrade: get collection, load with multi replicas, search, insert data with flush, load with multi replicas and search
+        after upgrade: get collection, create index, load with multi replicas, search, insert data with flush, load with multi replicas and search
     """
     prefix = "task_5_"
     connections.connect(host=host, port=19530, timeout=60)
     col_list = get_collections(prefix, check=True)
     assert len(col_list) == len(all_index_types)
+    create_index(prefix)
     load_and_search(prefix, replicas=NUM_REPLICAS)
     create_collections_and_insert_data(prefix, flush=True, count=data_size)
     load_and_search(prefix, replicas=NUM_REPLICAS)
