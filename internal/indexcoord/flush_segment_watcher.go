@@ -28,10 +28,12 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/util"
 )
 
@@ -265,6 +267,16 @@ func (fsw *flushedSegmentWatcher) constructTask(t *internalTask) error {
 		return nil
 	}
 
+	resp, err := fsw.ic.rootCoordClient.AllocTimestamp(fsw.ctx, &rootcoordpb.AllocTimestampRequest{
+		Count: 1,
+	})
+	if err != nil {
+		return err
+	}
+	if resp.Status.GetErrorCode() != commonpb.ErrorCode_Success {
+		return errors.New(resp.Status.GetReason())
+	}
+
 	for _, index := range fieldIndexes {
 		segIdx := &model.SegmentIndex{
 			SegmentID:    t.segmentInfo.ID,
@@ -272,7 +284,7 @@ func (fsw *flushedSegmentWatcher) constructTask(t *internalTask) error {
 			PartitionID:  t.segmentInfo.PartitionID,
 			NumRows:      t.segmentInfo.NumOfRows,
 			IndexID:      index.IndexID,
-			CreateTime:   t.segmentInfo.StartPosition.Timestamp,
+			CreateTime:   resp.Timestamp,
 		}
 
 		//create index task for metaTable

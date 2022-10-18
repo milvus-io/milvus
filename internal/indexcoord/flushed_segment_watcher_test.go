@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 )
 
 func Test_flushSegmentWatcher(t *testing.T) {
@@ -249,7 +250,8 @@ func Test_flushSegmentWatcher_internalProcess_success(t *testing.T) {
 					}, nil
 				},
 			},
-			metaTable: meta,
+			rootCoordClient: NewRootCoordMock(),
+			metaTable:       meta,
 		},
 		internalTasks: map[UniqueID]*internalTask{
 			segID: task,
@@ -335,7 +337,8 @@ func Test_flushSegmentWatcher_internalProcess_error(t *testing.T) {
 					}, nil
 				},
 			},
-			metaTable: &metaTable{},
+			rootCoordClient: NewRootCoordMock(),
+			metaTable:       &metaTable{},
 		},
 		internalTasks: map[UniqueID]*internalTask{
 			segID: task,
@@ -518,6 +521,92 @@ func Test_flushSegmentWatcher_removeFlushedSegment(t *testing.T) {
 			},
 		}
 		err := fsw.removeFlushedSegment(task)
+		assert.Error(t, err)
+	})
+}
+
+func Test_flushSegmentWatcher_constructTask_error(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	meta := &metaTable{
+		segmentIndexLock: sync.RWMutex{},
+		indexLock:        sync.RWMutex{},
+		catalog: &indexcoord.Catalog{Txn: &mockETCDKV{
+			multiSave: func(m map[string]string) error {
+				return nil
+			},
+		}},
+		collectionIndexes: map[UniqueID]map[UniqueID]*model.Index{
+			collID: {
+				indexID: {
+					TenantID:     "",
+					CollectionID: collID,
+					FieldID:      fieldID,
+					IndexID:      indexID,
+					IndexName:    indexName,
+					IsDeleted:    false,
+					CreateTime:   1,
+					TypeParams:   nil,
+					IndexParams:  nil,
+				},
+			},
+		},
+		segmentIndexes:       map[UniqueID]map[UniqueID]*model.SegmentIndex{},
+		buildID2SegmentIndex: map[UniqueID]*model.SegmentIndex{},
+	}
+
+	task := &internalTask{
+		state: indexTaskInit,
+		segmentInfo: &datapb.SegmentInfo{
+			ID:           segID,
+			CollectionID: collID,
+			PartitionID:  partID,
+		},
+	}
+
+	fsw := &flushedSegmentWatcher{
+		ctx:               ctx,
+		cancel:            cancel,
+		kvClient:          nil,
+		wg:                sync.WaitGroup{},
+		scheduleDuration:  100 * time.Millisecond,
+		internalTaskMutex: sync.RWMutex{},
+		internalNotify:    make(chan struct{}, 1),
+		etcdRevision:      0,
+		watchChan:         nil,
+		meta:              meta,
+		builder:           nil,
+		ic: &IndexCoord{
+			rootCoordClient: NewRootCoordMock(),
+		},
+		handoff: nil,
+		internalTasks: map[UniqueID]*internalTask{
+			segID: task,
+		},
+	}
+
+	t.Run("alloc timestamp error", func(t *testing.T) {
+		fsw.ic.rootCoordClient = &RootCoordMock{
+			CallAllocTimestamp: func(ctx context.Context, req *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error) {
+				return nil, errors.New("error")
+			},
+		}
+		err := fsw.constructTask(task)
+		assert.Error(t, err)
+	})
+
+	t.Run("alloc timestamp not success", func(t *testing.T) {
+		fsw.ic.rootCoordClient = &RootCoordMock{
+			CallAllocTimestamp: func(ctx context.Context, req *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error) {
+				return &rootcoordpb.AllocTimestampResponse{
+					Status: &commonpb.Status{
+						ErrorCode: commonpb.ErrorCode_UnexpectedError,
+						Reason:    "fail reason",
+					},
+				}, nil
+			},
+		}
+		err := fsw.constructTask(task)
 		assert.Error(t, err)
 	})
 }
