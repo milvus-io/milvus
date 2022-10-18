@@ -1,16 +1,14 @@
 import time
 import os
+import pathlib
 import numpy as np
 import random
 from sklearn import preprocessing
 from common.common_func import gen_unique_str
 from minio_comm import copy_files_to_minio
+from utils.util_log import test_log as log
 
-# TODO: remove hardcode with input configurations
-minio = "minio_address:port"     # minio service and port
-bucket_name = "milvus-bulk-load"  # bucket name of milvus is using
-
-data_source = "/tmp/bulk_load_data"
+data_source = "/tmp/bulk_insert_data"
 
 BINARY = "binary"
 FLOAT = "float"
@@ -23,6 +21,7 @@ class DataField:
     string_field = "string_scalar"
     bool_field = "bool_scalar"
     float_field = "float_scalar"
+    double_field = "double_scalar"
 
 
 class DataErrorType:
@@ -35,8 +34,8 @@ class DataErrorType:
     str_on_vector_field = "str_on_vector_field"
 
 
-def gen_file_prefix(row_based=True, auto_id=True, prefix=""):
-    if row_based:
+def gen_file_prefix(is_row_based=True, auto_id=True, prefix=""):
+    if is_row_based:
         if auto_id:
             return f"{prefix}_row_auto"
         else:
@@ -244,8 +243,8 @@ def gen_column_base_json_file(col_file, str_pk, data_fields, float_vect,
         f.write("\n")
 
 
-def gen_vectors_in_numpy_file(dir, float_vector, rows, dim, force=False):
-    file_name = f"{DataField.vec_field}.npy"
+def gen_vectors_in_numpy_file(dir, data_field, float_vector, rows, dim, force=False):
+    file_name = f"{data_field}.npy"
     file = f'{dir}/{file_name}'
 
     if not os.path.exists(file) or force:
@@ -257,6 +256,23 @@ def gen_vectors_in_numpy_file(dir, float_vector, rows, dim, force=False):
             else:
                 vectors = gen_binary_vectors(rows, (dim // 8))
         arr = np.array(vectors)
+        # print(f"file_name: {file_name} data type: {arr.dtype}")
+        log.info(f"file_name: {file_name} data type: {arr.dtype} data shape: {arr.shape}")
+        np.save(file, arr)
+    return file_name
+
+
+def gen_string_in_numpy_file(dir, data_field, rows, start=0, force=False):
+    file_name = f"{data_field}.npy"
+    file = f"{dir}/{file_name}"
+    if not os.path.exists(file) or force:
+        # non vector columns
+        data = []
+        if rows > 0:
+            data = [gen_unique_str(str(i)) for i in range(start, rows+start)]
+        arr = np.array(data)
+        # print(f"file_name: {file_name} data type: {arr.dtype}")
+        log.info(f"file_name: {file_name} data type: {arr.dtype} data shape: {arr.shape}")
         np.save(file, arr)
     return file_name
 
@@ -267,19 +283,24 @@ def gen_int_or_float_in_numpy_file(dir, data_field, rows, start=0, force=False):
     if not os.path.exists(file) or force:
         # non vector columns
         data = []
+        # arr = np.array([])
         if rows > 0:
             if data_field == DataField.float_field:
-                data = [random.random() for _ in range(rows)]
+                data = [np.float32(random.random()) for _ in range(rows)]
+            elif data_field == DataField.double_field:
+                data = [np.float64(random.random()) for _ in range(rows)]
             elif data_field == DataField.pk_field:
                 data = [i for i in range(start, start + rows)]
             elif data_field == DataField.int_field:
                 data = [random.randint(-999999, 9999999) for _ in range(rows)]
-        arr = np.array(data)
-        np.save(file, arr)
+        # print(f"file_name: {file_name} data type: {arr.dtype}")
+            arr = np.array(data)
+            log.info(f"file_name: {file_name} data type: {arr.dtype} data shape: {arr.shape}")
+            np.save(file, arr)
     return file_name
 
 
-def gen_file_name(row_based, rows, dim, auto_id, str_pk,
+def gen_file_name(is_row_based, rows, dim, auto_id, str_pk,
                   float_vector, data_fields, file_num, file_type, err_type):
     row_suffix = entity_suffix(rows)
     field_suffix = ""
@@ -297,7 +318,7 @@ def gen_file_name(row_based, rows, dim, auto_id, str_pk,
     pk = ""
     if str_pk:
         pk = "str_pk_"
-    prefix = gen_file_prefix(row_based=row_based, auto_id=auto_id, prefix=err_type)
+    prefix = gen_file_prefix(is_row_based=is_row_based, auto_id=auto_id, prefix=err_type)
 
     file_name = f"{prefix}_{pk}{vt}{field_suffix}{dim}d_{row_suffix}_{file_num}{file_type}"
     return file_name
@@ -312,7 +333,7 @@ def gen_subfolder(root, dim, rows, file_num):
     return subfolder
 
 
-def gen_json_files(row_based, rows, dim, auto_id, str_pk,
+def gen_json_files(is_row_based, rows, dim, auto_id, str_pk,
                    float_vector, data_fields, file_nums, multi_folder,
                    file_type, err_type, force, **kwargs):
     # gen json files
@@ -322,7 +343,7 @@ def gen_json_files(row_based, rows, dim, auto_id, str_pk,
     if not auto_id and DataField.pk_field not in data_fields:
         data_fields.append(DataField.pk_field)
     for i in range(file_nums):
-        file_name = gen_file_name(row_based=row_based, rows=rows, dim=dim,
+        file_name = gen_file_name(is_row_based=is_row_based, rows=rows, dim=dim,
                                   auto_id=auto_id, str_pk=str_pk, float_vector=float_vector,
                                   data_fields=data_fields, file_num=i, file_type=file_type, err_type=err_type)
         file = f"{data_source}/{file_name}"
@@ -330,7 +351,7 @@ def gen_json_files(row_based, rows, dim, auto_id, str_pk,
             subfolder = gen_subfolder(root=data_source, dim=dim, rows=rows, file_num=i)
             file = f"{data_source}/{subfolder}/{file_name}"
         if not os.path.exists(file) or force:
-            if row_based:
+            if is_row_based:
                 gen_row_based_json_file(row_file=file, str_pk=str_pk, float_vect=float_vector,
                                         data_fields=data_fields, rows=rows, dim=dim,
                                         start_uid=start_uid, err_type=err_type, **kwargs)
@@ -346,7 +367,7 @@ def gen_json_files(row_based, rows, dim, auto_id, str_pk,
     return files
 
 
-def gen_npy_files(float_vector, rows, dim, data_fields, file_nums=1, force=False):
+def gen_npy_files(float_vector, rows, dim, data_fields, file_nums=1, err_type="", force=False):
     # gen numpy files
     files = []
     start_uid = 0
@@ -354,8 +375,10 @@ def gen_npy_files(float_vector, rows, dim, data_fields, file_nums=1, force=False
         # gen the numpy file without subfolders if only one set of files
         for data_field in data_fields:
             if data_field == DataField.vec_field:
-                file_name = gen_vectors_in_numpy_file(dir=data_source, float_vector=float_vector,
+                file_name = gen_vectors_in_numpy_file(dir=data_source, data_field=data_field, float_vector=float_vector,
                                                       rows=rows, dim=dim, force=force)
+            elif data_field == DataField.string_field:  # string field for numpy not supported yet at 2022-10-17
+                file_name = gen_string_in_numpy_file(dir=data_source, data_field=data_field, rows=rows, force=force)
             else:
                 file_name = gen_int_or_float_in_numpy_file(dir=data_source, data_field=data_field,
                                                            rows=rows, force=force)
@@ -365,8 +388,8 @@ def gen_npy_files(float_vector, rows, dim, data_fields, file_nums=1, force=False
             subfolder = gen_subfolder(root=data_source, dim=dim, rows=rows, file_num=i)
             dir = f"{data_source}/{subfolder}"
             for data_field in data_fields:
-                if data_field == DataField.vec_field:
-                    file_name = gen_vectors_in_numpy_file(dir=dir, float_vector=float_vector, rows=rows, dim=dim, force=force)
+                if DataField.vec_field in data_field:
+                    file_name = gen_vectors_in_numpy_file(dir=dir, data_field=data_field, float_vector=float_vector, rows=rows, dim=dim, force=force)
                 else:
                     file_name = gen_int_or_float_in_numpy_file(dir=dir, data_field=data_field, rows=rows, start=start_uid, force=force)
                 files.append(f"{subfolder}/{file_name}")
@@ -374,15 +397,21 @@ def gen_npy_files(float_vector, rows, dim, data_fields, file_nums=1, force=False
     return files
 
 
-def prepare_bulk_load_json_files(row_based=True, rows=100, dim=128,
+def prepare_bulk_insert_json_files(minio_endpoint="", bucket_name="milvus-bucket", is_row_based=True, rows=100, dim=128,
                                  auto_id=True, str_pk=False, float_vector=True,
                                  data_fields=[], file_nums=1, multi_folder=False,
                                  file_type=".json", err_type="", force=False, **kwargs):
     """
     Generate files based on the params in json format and copy them to minio
 
-    :param row_based: indicate the file(s) to be generated is row based or not
-    :type row_based: boolean
+    :param minio_endpoint: the minio_endpoint of minio
+    :type minio_endpoint: str
+
+    :param bucket_name: the bucket name of Milvus
+    :type bucket_name: str
+
+    :param is_row_based: indicate the file(s) to be generated is row based or not
+    :type is_row_based: boolean
 
     :param rows: the number entities to be generated in the file(s)
     :type rows: int
@@ -427,16 +456,16 @@ def prepare_bulk_load_json_files(row_based=True, rows=100, dim=128,
     :return list
         file names list
     """
-    files = gen_json_files(row_based=row_based, rows=rows, dim=dim,
+    files = gen_json_files(is_row_based=is_row_based, rows=rows, dim=dim,
                            auto_id=auto_id, str_pk=str_pk, float_vector=float_vector,
                            data_fields=data_fields, file_nums=file_nums, multi_folder=multi_folder,
                            file_type=file_type, err_type=err_type, force=force, **kwargs)
 
-    copy_files_to_minio(host=minio, r_source=data_source, files=files, bucket_name=bucket_name, force=force)
+    copy_files_to_minio(host=minio_endpoint, r_source=data_source, files=files, bucket_name=bucket_name, force=force)
     return files
 
 
-def prepare_bulk_load_numpy_files(rows, dim, data_fields=[DataField.vec_field],
+def prepare_bulk_insert_numpy_files(minio_endpoint="", bucket_name="milvus-bucket", rows=100, dim=128, data_fields=[DataField.vec_field],
                                   float_vector=True, file_nums=1, force=False):
     """
     Generate column based files based on params in numpy format and copy them to the minio
@@ -471,6 +500,6 @@ def prepare_bulk_load_numpy_files(rows, dim, data_fields=[DataField.vec_field],
                           data_fields=data_fields,
                           file_nums=file_nums, force=force)
 
-    copy_files_to_minio(host=minio, r_source=data_source, files=files, bucket_name=bucket_name, force=force)
+    copy_files_to_minio(host=minio_endpoint, r_source=data_source, files=files, bucket_name=bucket_name, force=force)
     return files
 

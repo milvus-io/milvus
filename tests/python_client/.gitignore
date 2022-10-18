@@ -7,7 +7,7 @@
 .idea
 *.html
 *.hdf5
-
+*.npy
 .python-version
 __pycache__
 .vscode

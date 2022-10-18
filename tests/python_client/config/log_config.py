@@ -1,5 +1,5 @@
 import os
-
+import datetime
 
 class LogConfig:
     def __init__(self):
@@ -16,7 +16,8 @@ class LogConfig:
             log_path = os.environ[var]
             return str(log_path)
         except Exception as e:
-            log_path = "/tmp/ci_logs/"
+            # now = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+            log_path = f"/tmp/ci_logs"
             print("[get_env_variable] failed to get environment variables : %s, use default path : %s" % (str(e), log_path))
             return log_path
 

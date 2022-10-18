@@ -308,6 +308,7 @@ class TestUtilityParams(TestcaseBase):
         self.utility_wrap.drop_collection(c_name)
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="calc_distance interface is no longer supported")
     def test_calc_distance_left_vector_invalid_type(self, get_invalid_vector_dict):
         """
         target: test calculated distance with invalid vectors
@@ -324,6 +325,7 @@ class TestUtilityParams(TestcaseBase):
                                                                     "is illegal".format(invalid_vector)})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="calc_distance interface is no longer supported")
     def test_calc_distance_left_vector_invalid_value(self, get_invalid_vector_dict):
         """
         target: test calculated distance with invalid vectors
@@ -340,6 +342,7 @@ class TestUtilityParams(TestcaseBase):
                                                                     "is illegal".format(invalid_vector)})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="calc_distance interface is no longer supported")
     def test_calc_distance_right_vector_invalid_type(self, get_invalid_vector_dict):
         """
         target: test calculated distance with invalid vectors
@@ -358,6 +361,7 @@ class TestUtilityParams(TestcaseBase):
                                                                     "is illegal".format(invalid_vector)})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="calc_distance interface is no longer supported")
     def test_calc_distance_right_vector_invalid_value(self, get_invalid_vector_dict):
         """
         target: test calculated distance with invalid vectors
@@ -376,6 +380,7 @@ class TestUtilityParams(TestcaseBase):
                                                                     "is illegal".format(invalid_vector)})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="calc_distance interface is no longer supported")
     def test_calc_distance_invalid_metric_type(self, get_support_metric_field, get_invalid_metric_type):
         """
         target: test calculated distance with invalid metric
@@ -397,6 +402,7 @@ class TestUtilityParams(TestcaseBase):
                                                                 "is illegal".format(metric)})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="calc_distance interface is no longer supported")
     def test_calc_distance_invalid_metric_value(self, get_support_metric_field, get_invalid_metric_value):
         """
         target: test calculated distance with invalid metric
@@ -418,6 +424,7 @@ class TestUtilityParams(TestcaseBase):
                                                                 "float vector".format(metric)})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="calc_distance interface is no longer supported")
     def test_calc_distance_not_support_metric(self, get_support_metric_field, get_not_support_metric):
         """
         target: test calculated distance with invalid metric
@@ -439,6 +446,7 @@ class TestUtilityParams(TestcaseBase):
                                                                 "float vector".format(metric)})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="calc_distance interface is no longer supported")
     def test_calc_distance_invalid_using(self, get_support_metric_field):
         """
         target: test calculated distance with invalid using
@@ -459,6 +467,7 @@ class TestUtilityParams(TestcaseBase):
                                                      "err_msg": "should create connect"})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="calc_distance interface is no longer supported")
     def test_calc_distance_not_match_dim(self):
         """
         target: test calculated distance with invalid vectors
@@ -478,6 +487,7 @@ class TestUtilityParams(TestcaseBase):
                                                                 "vectors with different dimension"})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="calc_distance interface is no longer supported")
     def test_calc_distance_collection_before_load(self, get_support_metric_field):
         """
         target: test calculated distance when entities is not ready
@@ -1010,6 +1020,7 @@ class TestUtilityBase(TestcaseBase):
             sleep(1)
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason="calc_distance interface is no longer supported")
     def test_calc_distance_default(self):
         """
         target: test calculated distance with default params
@@ -1030,6 +1041,7 @@ class TestUtilityBase(TestcaseBase):
                                                      "vectors_r": vectors_r})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="calc_distance interface is no longer supported")
     def test_calc_distance_default_sqrt(self, metric_field, metric):
         """
         target: test calculated distance with default param
@@ -1052,6 +1064,7 @@ class TestUtilityBase(TestcaseBase):
                                                      "metric": metric})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="calc_distance interface is no longer supported")
     def test_calc_distance_default_metric(self, sqrt):
         """
         target: test calculated distance with default param
@@ -1074,6 +1087,7 @@ class TestUtilityBase(TestcaseBase):
                                                      "sqrt": sqrt})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="calc_distance interface is no longer supported")
     def test_calc_distance_binary_metric(self, metric_field, metric_binary):
         """
         target: test calculate distance with binary vectors
@@ -1099,6 +1113,7 @@ class TestUtilityBase(TestcaseBase):
                                                      "metric": metric_binary})
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason="calc_distance interface is no longer supported")
     def test_calc_distance_from_collection_ids(self, metric_field, metric, sqrt):
         """
         target: test calculated distance from collection entities
@@ -1130,6 +1145,7 @@ class TestUtilityBase(TestcaseBase):
                                                      "sqrt": sqrt})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="calc_distance interface is no longer supported")
     def test_calc_distance_from_collections(self, metric_field, metric, sqrt):
         """
         target: test calculated distance between entities from collections
@@ -1160,6 +1176,7 @@ class TestUtilityBase(TestcaseBase):
                                                      "sqrt": sqrt})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="calc_distance interface is no longer supported")
     def test_calc_distance_left_vector_and_collection_ids(self, metric_field, metric, sqrt):
         """
         target: test calculated distance from collection entities
@@ -1190,6 +1207,7 @@ class TestUtilityBase(TestcaseBase):
                                                      "sqrt": sqrt})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="calc_distance interface is no longer supported")
     def test_calc_distance_right_vector_and_collection_ids(self, metric_field, metric, sqrt):
         """
         target: test calculated distance from collection entities
@@ -1218,6 +1236,7 @@ class TestUtilityBase(TestcaseBase):
                                                      "sqrt": sqrt})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="calc_distance interface is no longer supported")
     def test_calc_distance_from_partition_ids(self, metric_field, metric, sqrt):
         """
         target: test calculated distance from one partition entities
@@ -1252,6 +1271,7 @@ class TestUtilityBase(TestcaseBase):
                                                          "sqrt": sqrt})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="calc_distance interface is no longer supported")
     def test_calc_distance_from_partitions(self, metric_field, metric, sqrt):
         """
         target: test calculated distance between entities from partitions
@@ -1281,6 +1301,7 @@ class TestUtilityBase(TestcaseBase):
                                                      "sqrt": sqrt})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="calc_distance interface is no longer supported")
     def test_calc_distance_left_vectors_and_partition_ids(self, metric_field, metric, sqrt):
         """
         target: test calculated distance between vectors and partition entities
@@ -1314,6 +1335,7 @@ class TestUtilityBase(TestcaseBase):
                                                          "sqrt": sqrt})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="calc_distance interface is no longer supported")
     def test_calc_distance_right_vectors_and_partition_ids(self, metric_field, metric, sqrt):
         """
         target: test calculated distance between vectors and partition entities
@@ -3340,7 +3362,7 @@ class TestUtilityRBAC(TestcaseBase):
         collection_w.flush(check_task=CheckTasks.check_permission_deny)
         default_term_expr = f'{ct.default_int64_field_name} in [0, 1]'
         collection_w.query(default_term_expr, check_task=CheckTasks.check_permission_deny)
-        # self.utility_wrap.bulk_load(c_name, check_task=CheckTasks.check_permission_deny)
+        # self.utility_wrap.bulk_insert(c_name, check_task=CheckTasks.check_permission_deny)
 
         # Global permission deny
         self.init_collection_wrap(name=c_name_2, check_task=CheckTasks.check_permission_deny)

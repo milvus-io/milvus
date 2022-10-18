@@ -1,5 +1,6 @@
 import os
 import threading
+import time
 import glob
 from chaos import constants
 from yaml import full_load
@@ -68,8 +69,21 @@ def get_chaos_yamls():
     return glob.glob(constants.TESTS_CONFIG_LOCATION + constants.ALL_CHAOS_YAMLS)
 
 
-def reconnect(connections, alias='default'):
+def reconnect(connections, alias='default', timeout=360):
     """trying to connect by connection alias"""
+    is_connected = False
+    start = time.time()
+    end = time.time()
+    while not is_connected or end-start < timeout:
+        try:
+            connections.connect(alias)
+            is_connected = True
+        except Exception as e:
+            log.debug(f"fail to connect, error: {str(e)}")
+            time.sleep(10)
+        end = time.time()
+    else:
+        log.info(f"failed to reconnect after {timeout} seconds")
     return connections.connect(alias)
 
 
