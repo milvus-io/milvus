@@ -60,7 +60,8 @@ func getRequestInfo(req interface{}) (internalpb.RateType, int, error) {
 		return internalpb.RateType_DMLInsert, proto.Size(r), nil
 	case *milvuspb.DeleteRequest:
 		return internalpb.RateType_DMLDelete, proto.Size(r), nil
-	// TODO: add bulkLoad
+	case *milvuspb.ImportRequest:
+		return internalpb.RateType_DMLBulkLoad, proto.Size(r), nil
 	case *milvuspb.SearchRequest:
 		return internalpb.RateType_DQLSearch, int(r.GetNq()), nil
 	case *milvuspb.QueryRequest:
