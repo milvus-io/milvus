@@ -127,6 +127,10 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         assert num_entities == entities
 
         # verify imported data is available for search
+        index_params = ct.default_index
+        self.collection_wrap.create_index(
+            field_name=df.vec_field, index_params=index_params
+        )
         self.collection_wrap.load()
         log.info(f"wait for load finished and be ready for search")
         time.sleep(5)
@@ -203,6 +207,10 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         assert num_entities == entities
 
         # verify imported data is available for search
+        index_params = ct.default_index
+        self.collection_wrap.create_index(
+            field_name=df.vec_field, index_params=index_params
+        )
         self.collection_wrap.load()
         log.info(f"wait for load finished and be ready for search")
         time.sleep(5)
@@ -566,11 +574,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         schema = cf.gen_collection_schema(fields=fields, auto_id=True)
         self.collection_wrap.init_collection(c_name, schema=schema)
         # build index
-        index_params = {
-            "index_type": "HNSW",
-            "params": {"M": 8, "efConstruction": 100},
-            "metric_type": "L2",
-        }
+        index_params = ct.default_index
         self.collection_wrap.create_index(
             field_name=df.vec_field, index_params=index_params
         )
@@ -672,11 +676,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
         self.collection_wrap.init_collection(c_name, schema=schema)
         # build index
-        index_params = {
-            "index_type": "HNSW",
-            "params": {"M": 8, "efConstruction": 100},
-            "metric_type": "L2",
-        }
+        index_params = ct.default_index
         self.collection_wrap.create_index(
             field_name=df.vec_field, index_params=index_params
         )
@@ -1292,7 +1292,7 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
             task_ids=task_ids, timeout=90
         )
         assert not success
-        failed_reason = f"the file {files[0]} is empty"
+        failed_reason = f"failed to get file size of {files[0]}"
         for state in states.values():
             assert state.state_name in ["Failed", "Failed and cleaned"]
             assert failed_reason in state.infos.get("failed_reason", "")
@@ -1521,7 +1521,7 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
             if is_row_based:
                 failed_reason = f"field {dismatch_pk_field} missed at the row 0"
             else:
-                failed_reason = f"import error: field {dismatch_pk_field} row count 0 is not equal to other fields"
+                failed_reason = f"field {dismatch_pk_field} row count 0 is not equal to other fields row count"
             for state in states.values():
                 assert state.state_name in ["Failed", "Failed and cleaned"]
                 assert failed_reason in state.infos.get("failed_reason", "")
@@ -1580,7 +1580,7 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
             if auto_id:
                 failed_reason = f"JSON column consumer: row count is 0"
             else:
-                failed_reason = f"import error: field {dismatch_vec_field} row count 0 is not equal to other fields"
+                failed_reason = f"field {dismatch_vec_field} row count 0 is not equal to other fields row count"
         for state in states.values():
             assert state.state_name in ["Failed", "Failed and cleaned"]
             assert failed_reason in state.infos.get("failed_reason", "")
@@ -1636,7 +1636,7 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
         if is_row_based:
             failed_reason = f"field {dismatch_scalar_field} missed at the row 0"
         else:
-            failed_reason = f"import error: field {dismatch_scalar_field} row count 0 is not equal to other fields"
+            failed_reason = f"field '{dismatch_scalar_field}' row count 0 is not equal to other fields row count"
         for state in states.values():
             assert state.state_name in ["Failed", "Failed and cleaned"]
             assert failed_reason in state.infos.get("failed_reason", "")
@@ -1932,7 +1932,7 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
         log.info(f"bulk insert state:{success} in {tt}")
 
         assert not success
-        failed_reason = f"Numpy parse: illegal row width {dim} for field {df.vec_field} dimension {wrong_dim}"
+        failed_reason = f"illegal row width {dim}"
         for state in states.values():
             assert state.state_name in ["Failed", "Failed and cleaned"]
             assert failed_reason in state.infos.get("failed_reason", "")
@@ -2418,6 +2418,10 @@ class TestBulkInsertAdvanced(TestcaseBaseBulkInsert):
             assert num_entities == entities * file_nums
 
             # verify imported data is available for search
+            index_params = ct.default_index
+            self.collection_wrap.create_index(
+                field_name=df.vec_field, index_params=index_params
+            )
             self.collection_wrap.load()
             log.info(f"wait for load finished and be ready for search")
             time.sleep(5)
