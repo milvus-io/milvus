@@ -57,12 +57,12 @@ class TestBulkLoad(TestcaseBase):
         self.collection_wrap.init_collection(c_name, schema=schema)
         # import data
         t0 = time.time()
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  partition_name='',
-                                                  row_based=row_based,
-                                                  files=files)
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    partition_name='',
+                                                    row_based=row_based,
+                                                    files=files)
         logging.info(f"bulk load task ids:{task_ids}")
-        success, _ = self.utility_wrap.wait_for_bulk_load_tasks_completed(
+        success, _ = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
                                             task_ids=task_ids,
                                             timeout=30)
         tt = time.time() - t0
@@ -118,12 +118,12 @@ class TestBulkLoad(TestcaseBase):
         self.collection_wrap.init_collection(c_name, schema=schema)
         # import data
         t0 = time.time()
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  row_based=row_based,
-                                                  files=files)
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    row_based=row_based,
+                                                    files=files)
         logging.info(f"bulk load task ids:{task_ids}")
-        completed, _ = self.utility_wrap.wait_for_bulk_load_tasks_completed(task_ids=task_ids,
-                                                                            timeout=30)
+        completed, _ = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=task_ids,
+                                                                              timeout=30)
         tt = time.time() - t0
         log.info(f"bulk load state:{completed} in {tt}")
         assert completed
@@ -188,15 +188,15 @@ class TestBulkLoad(TestcaseBase):
 
         # import data into the partition
         t0 = time.time()
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  partition_name=p_name,
-                                                  row_based=row_based,
-                                                  files=files)
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    partition_name=p_name,
+                                                    row_based=row_based,
+                                                    files=files)
         logging.info(f"bulk load task ids:{task_ids}")
         success, state = self.utility_wrap.\
-            wait_for_bulk_load_tasks_completed(task_ids=task_ids,
-                                               target_state=BulkLoadStates.BulkLoadDataQueryable,
-                                               timeout=30)
+            wait_for_bulk_insert_tasks_completed(task_ids=task_ids,
+                                                 target_state=BulkLoadStates.BulkLoadDataQueryable,
+                                                 timeout=30)
         tt = time.time() - t0
         log.info(f"bulk load state:{success} in {tt}")
         assert success
@@ -259,12 +259,12 @@ class TestBulkLoad(TestcaseBase):
 
         # import data
         t0 = time.time()
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  row_based=row_based,
-                                                  files=files)
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    row_based=row_based,
+                                                    files=files)
         logging.info(f"bulk load task ids:{task_ids}")
         # TODO: Update to BulkLoadDataIndexed when issue #16889 fixed
-        success, _ = self.utility_wrap.wait_for_bulk_load_tasks_completed(
+        success, _ = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
                                     task_ids=task_ids,
                                     target_state=BulkLoadStates.BulkLoadDataIndexed,
                                     timeout=30)
@@ -339,11 +339,11 @@ class TestBulkLoad(TestcaseBase):
         self.collection_wrap.load()
         # import data
         t0 = time.time()
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  row_based=row_based,
-                                                  files=files)
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    row_based=row_based,
+                                                    files=files)
         logging.info(f"bulk load task ids:{task_ids}")
-        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
                                                 task_ids=task_ids,
                                                 target_state=BulkLoadStates.BulkLoadPersisted,
                                                 timeout=30)
@@ -459,11 +459,11 @@ class TestBulkLoad(TestcaseBase):
         self.collection_wrap.load()
         # import data
         t0 = time.time()
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  row_based=row_based,
-                                                  files=files)
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    row_based=row_based,
+                                                    files=files)
         logging.info(f"bulk load task ids:{task_ids}")
-        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
                                                 task_ids=task_ids,
                                                 target_state=BulkLoadStates.BulkLoadPersisted,
                                                 timeout=30)
@@ -573,12 +573,12 @@ class TestBulkLoad(TestcaseBase):
         self.collection_wrap.load()
         # import data
         t0 = time.time()
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  row_based=row_based,
-                                                  files=files)
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    row_based=row_based,
+                                                    files=files)
         logging.info(f"bulk load task ids:{task_ids}")
         # TODO: update to BulkLoadDataIndexed after issue #16889 fixed
-        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
                                     task_ids=task_ids,
                                     target_state=BulkLoadStates.BulkLoadPersisted,
                                     timeout=300)
@@ -672,12 +672,12 @@ class TestBulkLoad(TestcaseBase):
 
         # import data
         t0 = time.time()
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  row_based=row_based,
-                                                  files=files)
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    row_based=row_based,
+                                                    files=files)
         logging.info(f"bulk load task ids:{task_ids}")
-        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(task_ids=task_ids,
-                                                                            timeout=30)
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=task_ids,
+                                                                                 timeout=30)
         tt = time.time() - t0
         log.info(f"bulk load state:{success} in {tt}")
 
@@ -742,11 +742,11 @@ class TestBulkLoad(TestcaseBase):
         schema = cf.gen_collection_schema(fields=fields, auto_id=False)
         self.collection_wrap.init_collection(c_name, schema=schema)
         # import data
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  row_based=row_based,
-                                                  files=files)
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    row_based=row_based,
+                                                    files=files)
         logging.info(f"bulk load task ids:{task_ids}")
-        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
             task_ids=task_ids,
             timeout=30)
         log.info(f"bulk load state:{success}")
@@ -793,11 +793,11 @@ class TestBulkLoad(TestcaseBase):
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
         self.collection_wrap.init_collection(c_name, schema=schema)
         # import data
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  row_based=row_based,
-                                                  files=files)
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    row_based=row_based,
+                                                    files=files)
         logging.info(f"bulk load task ids:{task_ids}")
-        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
             task_ids=task_ids,
             timeout=30)
         log.info(f"bulk load state:{success}")
@@ -851,12 +851,12 @@ class TestBulkLoad(TestcaseBase):
 
         # import data
         t0 = time.time()
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  row_based=False,
-                                                  files=files)
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    row_based=False,
+                                                    files=files)
         logging.info(f"bulk load task ids:{task_ids}")
-        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(task_ids=task_ids,
-                                                                               timeout=30)
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=task_ids,
+                                                                                 timeout=30)
         tt = time.time() - t0
         log.info(f"bulk load state:{success} in {tt}")
         assert success
@@ -912,14 +912,14 @@ class TestBulkLoad(TestcaseBase):
             files = prepare_bulk_load_numpy_files(rows=entities, dim=dim,
                                                   data_fields=data_fields,
                                                   file_nums=1, force=True)
-            task_id, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                      row_based=row_based,
-                                                      files=files)
+            task_id, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                       row_based=row_based,
+                                                       files=files)
             task_ids.append(task_id[0])
         success, states = self.utility_wrap.\
-            wait_for_bulk_load_tasks_completed(task_ids=task_ids,
-                                               target_state=BulkLoadStates.BulkLoadDataQueryable,
-                                               timeout=30)
+            wait_for_bulk_insert_tasks_completed(task_ids=task_ids,
+                                                 target_state=BulkLoadStates.BulkLoadDataQueryable,
+                                                 timeout=30)
         log.info(f"bulk load state:{success}")
 
         assert success
@@ -962,13 +962,13 @@ class TestBulkLoadInvalidParams(TestcaseBase):
 
         # import data
         t0 = time.time()
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  partition_name='',
-                                                  row_based=row_based,
-                                                  files=files)
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    partition_name='',
+                                                    row_based=row_based,
+                                                    files=files)
         logging.info(f"bulk load task ids:{task_ids}")
-        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(task_ids=task_ids,
-                                                                               timeout=30)
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=task_ids,
+                                                                                 timeout=30)
         assert not success
         failed_reason = f"the file {files[0]} is empty"
         for state in states.values():
@@ -1001,13 +1001,13 @@ class TestBulkLoadInvalidParams(TestcaseBase):
         self.collection_wrap.init_collection(c_name, schema=schema)
 
         # import data
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  partition_name='',
-                                                  row_based=row_based,
-                                                  files=files)
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    partition_name='',
+                                                    row_based=row_based,
+                                                    files=files)
         logging.info(f"bulk load task ids:{task_ids}")
-        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(task_ids=task_ids,
-                                                                               timeout=30)
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=task_ids,
+                                                                                 timeout=30)
         assert not success
         failed_reason = "JSON parse: row count is 0"
         for state in states.values():
@@ -1051,13 +1051,13 @@ class TestBulkLoadInvalidParams(TestcaseBase):
         self.collection_wrap.init_collection(c_name, schema=schema)
         # import data
         t0 = time.time()
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  partition_name='',
-                                                  row_based=row_based,
-                                                  files=files)
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    partition_name='',
+                                                    row_based=row_based,
+                                                    files=files)
         logging.info(f"bulk load task ids:{task_ids}")
-        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(task_ids=task_ids,
-                                                                            timeout=30)
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=task_ids,
+                                                                                 timeout=30)
         tt = time.time() - t0
         log.info(f"bulk load state:{success} in {tt}")
         assert not success
@@ -1095,13 +1095,13 @@ class TestBulkLoadInvalidParams(TestcaseBase):
         self.collection_wrap.init_collection(c_name, schema=schema)
 
         # import data
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  partition_name='',
-                                                  row_based=row_based,
-                                                  files=files)
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    partition_name='',
+                                                    row_based=row_based,
+                                                    files=files)
         logging.info(f"bulk load task ids:{task_ids}")
-        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(task_ids=task_ids,
-                                                                               timeout=30)
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=task_ids,
+                                                                                 timeout=30)
         assert not success
         if row_based:
             value = df.vec_field     # if auto_id else df.pk_field
@@ -1139,13 +1139,13 @@ class TestBulkLoadInvalidParams(TestcaseBase):
         self.collection_wrap.init_collection(c_name, schema=schema)
         # import data
         t0 = time.time()
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  partition_name='',
-                                                  row_based=row_based,
-                                                  files=files)
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    partition_name='',
+                                                    row_based=row_based,
+                                                    files=files)
         logging.info(f"bulk load task ids:{task_ids}")
-        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(task_ids=task_ids,
-                                                                               timeout=30)
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=task_ids,
+                                                                                 timeout=30)
         tt = time.time() - t0
         log.info(f"bulk load state:{success} in {tt}")
         if auto_id:
@@ -1186,13 +1186,13 @@ class TestBulkLoadInvalidParams(TestcaseBase):
         self.collection_wrap.init_collection(c_name, schema=schema)
         # import data
         t0 = time.time()
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  partition_name='',
-                                                  row_based=row_based,
-                                                  files=files)
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    partition_name='',
+                                                    row_based=row_based,
+                                                    files=files)
         logging.info(f"bulk load task ids:{task_ids}")
-        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(task_ids=task_ids,
-                                                                               timeout=30)
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=task_ids,
+                                                                                 timeout=30)
         tt = time.time() - t0
         log.info(f"bulk load state:{success} in {tt}")
 
@@ -1235,12 +1235,12 @@ class TestBulkLoadInvalidParams(TestcaseBase):
 
         # import data
         t0 = time.time()
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  partition_name="",
-                                                  row_based=row_based,
-                                                  files=files)
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    partition_name="",
+                                                    row_based=row_based,
+                                                    files=files)
         logging.info(f"bulk load task ids:{task_ids}")
-        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
                             task_ids=task_ids,
                             timeout=30)
         tt = time.time() - t0
@@ -1278,11 +1278,11 @@ class TestBulkLoadInvalidParams(TestcaseBase):
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
         self.collection_wrap.init_collection(c_name, schema=schema)
         # import data
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  row_based=row_based,
-                                                  files=files)
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    row_based=row_based,
+                                                    files=files)
         logging.info(f"bulk load task ids:{task_ids}")
-        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
             task_ids=task_ids,
             timeout=30)
         log.info(f"bulk load state:{success}")
@@ -1309,13 +1309,13 @@ class TestBulkLoadInvalidParams(TestcaseBase):
         c_name = cf.gen_unique_str()
         # import data into a non existing collection
         err_msg = f"can't find collection: {c_name}"
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  row_based=row_based,
-                                                  files=files,
-                                                  check_task=CheckTasks.err_res,
-                                                  check_items={"err_code": 1,
-                                                               "err_msg": err_msg}
-                                                  )
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    row_based=row_based,
+                                                    files=files,
+                                                    check_task=CheckTasks.err_res,
+                                                    check_items={"err_code": 1,
+                                                                 "err_msg": err_msg}
+                                                    )
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("row_based", [True, False])
@@ -1340,14 +1340,14 @@ class TestBulkLoadInvalidParams(TestcaseBase):
         # import data into a non existing partition
         p_name = "non_existing"
         err_msg = f" partition {p_name} does not exist"
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  partition_name=p_name,
-                                                  row_based=row_based,
-                                                  files=files,
-                                                  check_task=CheckTasks.err_res,
-                                                  check_items={"err_code": 11,
-                                                               "err_msg": err_msg}
-                                                  )
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    partition_name=p_name,
+                                                    row_based=row_based,
+                                                    files=files,
+                                                    check_task=CheckTasks.err_res,
+                                                    check_items={"err_code": 11,
+                                                                 "err_msg": err_msg}
+                                                    )
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("row_based", [True, False])
@@ -1375,11 +1375,11 @@ class TestBulkLoadInvalidParams(TestcaseBase):
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
         self.collection_wrap.init_collection(c_name, schema=schema)
         # import data
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  row_based=row_based,
-                                                  files=files)
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    row_based=row_based,
+                                                    files=files)
         logging.info(f"bulk load task ids:{task_ids}")
-        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
             task_ids=task_ids,
             timeout=30)
         log.info(f"bulk load state:{success}")
@@ -1430,12 +1430,12 @@ class TestBulkLoadInvalidParams(TestcaseBase):
 
         # import data
         t0 = time.time()
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  row_based=row_based,
-                                                  files=files)
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    row_based=row_based,
+                                                    files=files)
         logging.info(f"bulk load task ids:{task_ids}")
-        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(task_ids=task_ids,
-                                                                               timeout=300)
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=task_ids,
+                                                                                 timeout=300)
         tt = time.time() - t0
         log.info(f"bulk load state:{success} in {tt}")
         assert not success
@@ -1474,12 +1474,12 @@ class TestBulkLoadInvalidParams(TestcaseBase):
 
         # import data
         t0 = time.time()
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  row_based=False,
-                                                  files=files)
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    row_based=False,
+                                                    files=files)
         logging.info(f"bulk load task ids:{task_ids}")
-        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(task_ids=task_ids,
-                                                                               timeout=30)
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=task_ids,
+                                                                                 timeout=30)
         tt = time.time() - t0
         log.info(f"bulk load state:{success} in {tt}")
 
@@ -1522,12 +1522,12 @@ class TestBulkLoadInvalidParams(TestcaseBase):
 
         # import data
         t0 = time.time()
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  row_based=False,
-                                                  files=files)
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    row_based=False,
+                                                    files=files)
         logging.info(f"bulk load task ids:{task_ids}")
-        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(task_ids=task_ids,
-                                                                               timeout=30)
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=task_ids,
+                                                                                 timeout=30)
         tt = time.time() - t0
         log.info(f"bulk load state:{success} in {tt}")
 
@@ -1565,12 +1565,12 @@ class TestBulkLoadInvalidParams(TestcaseBase):
         self.collection_wrap.init_collection(c_name, schema=schema)
         # import data
         t0 = time.time()
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  row_based=False,
-                                                  files=files)
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    row_based=False,
+                                                    files=files)
         logging.info(f"bulk load task ids:{task_ids}")
-        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(task_ids=task_ids,
-                                                                               timeout=30)
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=task_ids,
+                                                                                 timeout=30)
         tt = time.time() - t0
         log.info(f"bulk load state:{success} in {tt}")
         assert not success
@@ -1610,11 +1610,11 @@ class TestBulkLoadInvalidParams(TestcaseBase):
         schema = cf.gen_collection_schema(fields=fields, auto_id=False)
         self.collection_wrap.init_collection(c_name, schema=schema)
         # import data
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  row_based=row_based,
-                                                  files=files)
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    row_based=row_based,
+                                                    files=files)
         logging.info(f"bulk load task ids:{task_ids}")
-        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
             task_ids=task_ids,
             timeout=30)
         log.info(f"bulk load state:{success}")
@@ -1658,11 +1658,11 @@ class TestBulkLoadInvalidParams(TestcaseBase):
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
         self.collection_wrap.init_collection(c_name, schema=schema)
         # import data
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  row_based=row_based,
-                                                  files=files)
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    row_based=row_based,
+                                                    files=files)
         logging.info(f"bulk load task ids:{task_ids}")
-        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
             task_ids=task_ids,
             timeout=30)
         log.info(f"bulk load state:{success}")
@@ -1714,13 +1714,13 @@ class TestBulkLoadInvalidParams(TestcaseBase):
         self.collection_wrap.init_collection(c_name, schema=schema)
 
         t0 = time.time()
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  row_based=row_based,
-                                                  files=files)
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    row_based=row_based,
+                                                    files=files)
         success, states = self.utility_wrap. \
-            wait_for_bulk_load_tasks_completed(task_ids=task_ids,
-                                               target_state=BulkLoadStates.BulkLoadPersisted,
-                                               timeout=30)
+            wait_for_bulk_insert_tasks_completed(task_ids=task_ids,
+                                                 target_state=BulkLoadStates.BulkLoadPersisted,
+                                                 timeout=30)
         tt = time.time() - t0
         log.info(f"bulk load state:{success} in {tt}")
 
@@ -1763,11 +1763,11 @@ class TestBulkLoadInvalidParams(TestcaseBase):
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
         self.collection_wrap.init_collection(c_name, schema=schema)
         # import data
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  row_based=row_based,
-                                                  files=files)
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    row_based=row_based,
+                                                    files=files)
         logging.info(f"bulk load task ids:{task_ids}")
-        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
             task_ids=task_ids,
             timeout=30)
         log.info(f"bulk load state:{success}")
@@ -1812,11 +1812,11 @@ class TestBulkLoadInvalidParams(TestcaseBase):
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
         self.collection_wrap.init_collection(c_name, schema=schema)
         # import data
-        task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                  row_based=row_based,
-                                                  files=files)
+        task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                    row_based=row_based,
+                                                    files=files)
         logging.info(f"bulk load task ids:{task_ids}")
-        success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(
+        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
             task_ids=task_ids,
             timeout=30)
         log.info(f"bulk load state:{success}")
@@ -1872,12 +1872,12 @@ class TestBulkLoadAdvanced(TestcaseBase):
             if not auto_id:
                 files.append(f"{dim}d_{suffix}_{i}/{df.pk_field}.npy")
             t0 = time.time()
-            task_ids, _ = self.utility_wrap.bulk_load(collection_name=c_name,
-                                                      row_based=False,
-                                                      files=files)
+            task_ids, _ = self.utility_wrap.bulk_insert(collection_name=c_name,
+                                                        row_based=False,
+                                                        files=files)
             logging.info(f"bulk load task ids:{task_ids}")
-            success, states = self.utility_wrap.wait_for_bulk_load_tasks_completed(task_ids=task_ids,
-                                                                                   timeout=180)
+            success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=task_ids,
+                                                                                     timeout=180)
             tt = time.time() - t0
             log.info(f"auto_id:{auto_id}, bulk load{suffix}-{i} state:{success} in {tt}")
             assert success

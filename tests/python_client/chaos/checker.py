@@ -26,7 +26,7 @@ class Op(Enum):
     compact = 'compact'
     drop = 'drop'
     load_balance = 'load_balance'
-    bulk_load = 'bulk_load'
+    bulk_insert = 'bulk_insert'
     unknown = 'unknown'
 
 
@@ -564,10 +564,10 @@ class BulkLoadChecker(Checker):
             self.row_based = row_based
 
     @trace()
-    def bulk_load(self):
-        task_ids, result = self.utility_wrap.bulk_load(collection_name=self.c_name,
-                                                       row_based=self.row_based,
-                                                       files=self.files)
+    def bulk_insert(self):
+        task_ids, result = self.utility_wrap.bulk_insert(collection_name=self.c_name,
+                                                         row_based=self.row_based,
+                                                         files=self.files)
         completed, result = self.utility_wrap.wait_for_bulk_load_tasks_completed(task_ids=task_ids, timeout=30)
         return task_ids, completed
 
@@ -580,7 +580,7 @@ class BulkLoadChecker(Checker):
             self.c_name = cf.gen_unique_str("BulkLoadChecker_")
         self.c_wrap.init_collection(name=self.c_name, schema=self.schema)
         # import data
-        task_ids, completed = self.bulk_load()
+        task_ids, completed = self.bulk_insert()
         if not completed:
             self.failed_tasks.append(self.c_name)
         return task_ids, completed
