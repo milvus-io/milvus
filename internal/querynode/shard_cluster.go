@@ -1197,6 +1197,8 @@ func (sc *ShardCluster) Query(ctx context.Context, req *querypb.QueryRequest, wi
 }
 
 func (sc *ShardCluster) GetSegmentInfos() []shardSegmentInfo {
+	sc.mut.RLock()
+	defer sc.mut.RUnlock()
 	ret := make([]shardSegmentInfo, 0, len(sc.segments))
 	for _, info := range sc.segments {
 		ret = append(ret, info)
@@ -1205,7 +1207,7 @@ func (sc *ShardCluster) GetSegmentInfos() []shardSegmentInfo {
 }
 
 func (sc *ShardCluster) getVersion() int64 {
-	sc.mut.RLock()
-	defer sc.mut.RUnlock()
+	sc.mutVersion.RLock()
+	defer sc.mutVersion.RUnlock()
 	return sc.version
 }
