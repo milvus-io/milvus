@@ -19,6 +19,7 @@ package datanode
 import (
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 )
 
@@ -28,6 +29,15 @@ type (
 
 	// MsgStreamMsg is flowgraph.MsgStreamMsg
 	MsgStreamMsg = flowgraph.MsgStreamMsg
+
+	// InsertData of storage
+	InsertData = storage.InsertData
+
+	// DeleteData record deleted IDs and Timestamps
+	DeleteData = storage.DeleteData
+
+	// Blob of storage
+	Blob = storage.Blob
 )
 
 type flowGraphMsg struct {

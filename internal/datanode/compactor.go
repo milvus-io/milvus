@@ -576,6 +576,7 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 		Field2StatslogPaths: statsPaths,
 		Deltalogs:           deltaInfo,
 		NumOfRows:           numRows,
+		Channel:             t.plan.GetChannel(),
 	}
 
 	uninjectStart := time.Now()

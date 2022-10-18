@@ -23,6 +23,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 )
 
 const (
@@ -113,6 +114,16 @@ func (c *compactionExecutor) stopExecutingtaskByVChannelName(vChannelName string
 	c.executing.Range(func(key interface{}, value interface{}) bool {
 		if value.(compactor).getChannelName() == vChannelName {
 			c.stopTask(key.(UniqueID))
+		}
+		return true
+	})
+	// remove all completed plans for vChannelName
+	c.completed.Range(func(key interface{}, value interface{}) bool {
+		if value.(*datapb.CompactionResult).GetChannel() == vChannelName {
+			c.completed.Delete(key.(UniqueID))
+			log.Info("remove compaction results for dropped channel",
+				zap.String("channel", vChannelName),
+				zap.Int64("planID", key.(UniqueID)))
 		}
 		return true
 	})
