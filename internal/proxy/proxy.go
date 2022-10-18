@@ -414,7 +414,7 @@ func (node *Proxy) Stop() error {
 	}
 
 	if node.chMgr != nil {
-		_ = node.chMgr.removeAllDMLStream()
+		node.chMgr.removeAllDMLStream()
 	}
 
 	// https://github.com/milvus-io/milvus/issues/12282

@@ -16,11 +16,10 @@ func (m *mockChannelsMgr) getVChannels(collectionID UniqueID) ([]vChan, error) {
 	return nil, nil
 }
 
-func (m *mockChannelsMgr) removeDMLStream(collectionID UniqueID) error {
+func (m *mockChannelsMgr) removeDMLStream(collectionID UniqueID) {
 	if m.removeDMLStreamFuncType != nil {
-		return m.removeDMLStreamFuncType(collectionID)
+		m.removeDMLStreamFuncType(collectionID)
 	}
-	return nil
 }
 
 func newMockChannelsMgr() *mockChannelsMgr {
