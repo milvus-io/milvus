@@ -10,6 +10,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
@@ -107,7 +108,7 @@ func (i *IndexNode) QueryJobs(ctx context.Context, req *indexpb.QueryJobsRequest
 		if ClusterID == req.ClusterID {
 			infos[buildID] = &taskInfo{
 				state:          info.state,
-				indexFiles:     info.indexFiles[:],
+				fileKeys:       common.CloneStringList(info.fileKeys),
 				serializedSize: info.serializedSize,
 				failReason:     info.failReason,
 			}
@@ -125,12 +126,12 @@ func (i *IndexNode) QueryJobs(ctx context.Context, req *indexpb.QueryJobsRequest
 		ret.IndexInfos = append(ret.IndexInfos, &indexpb.IndexTaskInfo{
 			BuildID:        buildID,
 			State:          commonpb.IndexState_IndexStateNone,
-			IndexFiles:     nil,
+			IndexFileKeys:  nil,
 			SerializedSize: 0,
 		})
 		if info, ok := infos[buildID]; ok {
 			ret.IndexInfos[i].State = info.state
-			ret.IndexInfos[i].IndexFiles = info.indexFiles
+			ret.IndexInfos[i].IndexFileKeys = info.fileKeys
 			ret.IndexInfos[i].SerializedSize = info.serializedSize
 			ret.IndexInfos[i].FailReason = info.failReason
 			log.Ctx(ctx).Debug("querying index build task", zap.String("ClusterID", req.ClusterID),

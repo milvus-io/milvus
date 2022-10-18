@@ -209,20 +209,20 @@ func TestCatalog_DropIndex(t *testing.T) {
 
 func TestCatalog_CreateSegmentIndex(t *testing.T) {
 	segIdx := &model.SegmentIndex{
-		SegmentID:      1,
-		CollectionID:   2,
-		PartitionID:    3,
-		NumRows:        1024,
-		IndexID:        4,
-		BuildID:        5,
-		NodeID:         6,
-		IndexState:     commonpb.IndexState_Finished,
-		FailReason:     "",
-		IndexVersion:   0,
-		IsDeleted:      false,
-		CreateTime:     0,
-		IndexFilePaths: nil,
-		IndexSize:      0,
+		SegmentID:     1,
+		CollectionID:  2,
+		PartitionID:   3,
+		NumRows:       1024,
+		IndexID:       4,
+		BuildID:       5,
+		NodeID:        6,
+		IndexState:    commonpb.IndexState_Finished,
+		FailReason:    "",
+		IndexVersion:  0,
+		IsDeleted:     false,
+		CreateTime:    0,
+		IndexFileKeys: nil,
+		IndexSize:     0,
 	}
 
 	t.Run("success", func(t *testing.T) {
@@ -257,20 +257,20 @@ func TestCatalog_CreateSegmentIndex(t *testing.T) {
 func TestCatalog_ListSegmentIndexes(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		segIdx := &indexpb.SegmentIndex{
-			CollectionID:    0,
-			PartitionID:     0,
-			SegmentID:       0,
-			NumRows:         0,
-			IndexID:         0,
-			BuildID:         0,
-			NodeID:          0,
-			IndexVersion:    0,
-			State:           0,
-			FailReason:      "",
-			IndexFilesPaths: nil,
-			Deleted:         false,
-			CreateTime:      0,
-			SerializeSize:   0,
+			CollectionID:  0,
+			PartitionID:   0,
+			SegmentID:     0,
+			NumRows:       0,
+			IndexID:       0,
+			BuildID:       0,
+			NodeID:        0,
+			IndexVersion:  0,
+			State:         0,
+			FailReason:    "",
+			IndexFileKeys: nil,
+			Deleted:       false,
+			CreateTime:    0,
+			SerializeSize: 0,
 		}
 		v, err := proto.Marshal(segIdx)
 		assert.NoError(t, err)
@@ -320,20 +320,20 @@ func TestCatalog_ListSegmentIndexes(t *testing.T) {
 
 func TestCatalog_AlterSegmentIndex(t *testing.T) {
 	segIdx := &model.SegmentIndex{
-		SegmentID:      0,
-		CollectionID:   0,
-		PartitionID:    0,
-		NumRows:        0,
-		IndexID:        0,
-		BuildID:        0,
-		NodeID:         0,
-		IndexState:     0,
-		FailReason:     "",
-		IndexVersion:   0,
-		IsDeleted:      false,
-		CreateTime:     0,
-		IndexFilePaths: nil,
-		IndexSize:      0,
+		SegmentID:     0,
+		CollectionID:  0,
+		PartitionID:   0,
+		NumRows:       0,
+		IndexID:       0,
+		BuildID:       0,
+		NodeID:        0,
+		IndexState:    0,
+		FailReason:    "",
+		IndexVersion:  0,
+		IsDeleted:     false,
+		CreateTime:    0,
+		IndexFileKeys: nil,
+		IndexSize:     0,
 	}
 
 	t.Run("add", func(t *testing.T) {
@@ -353,20 +353,20 @@ func TestCatalog_AlterSegmentIndex(t *testing.T) {
 
 func TestCatalog_AlterSegmentIndexes(t *testing.T) {
 	segIdx := &model.SegmentIndex{
-		SegmentID:      0,
-		CollectionID:   0,
-		PartitionID:    0,
-		NumRows:        0,
-		IndexID:        0,
-		BuildID:        0,
-		NodeID:         0,
-		IndexState:     0,
-		FailReason:     "",
-		IndexVersion:   0,
-		IsDeleted:      false,
-		CreateTime:     0,
-		IndexFilePaths: nil,
-		IndexSize:      0,
+		SegmentID:     0,
+		CollectionID:  0,
+		PartitionID:   0,
+		NumRows:       0,
+		IndexID:       0,
+		BuildID:       0,
+		NodeID:        0,
+		IndexState:    0,
+		FailReason:    "",
+		IndexVersion:  0,
+		IsDeleted:     false,
+		CreateTime:    0,
+		IndexFileKeys: nil,
+		IndexSize:     0,
 	}
 
 	t.Run("add", func(t *testing.T) {

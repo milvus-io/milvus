@@ -75,7 +75,7 @@ message SegmentIndex {
     int64 index_version = 8;
     common.IndexState state = 9;
     string fail_reason = 10;
-    repeated string index_files_paths = 11;
+    repeated string index_file_keys = 11;
     bool deleted = 12;
     uint64 create_time = 13;
     uint64 serialize_size = 14;
@@ -224,7 +224,7 @@ message QueryJobsRequest {
 message IndexTaskInfo {
   int64 buildID = 1;
   common.IndexState state = 2;
-  repeated string index_files = 3;
+  repeated string index_file_keys = 3;
   uint64 serialized_size = 4;
   string fail_reason = 5;
 }

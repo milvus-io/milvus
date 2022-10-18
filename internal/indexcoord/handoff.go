@@ -207,7 +207,7 @@ func (hd *handoff) process(segID UniqueID, front bool) {
 					IndexID:     indexInfo.IndexID,
 					BuildID:     indexInfo.BuildID,
 					IndexParams: hd.meta.GetIndexParams(info.CollectionID, indexInfo.IndexID),
-					//IndexFilePaths: nil,
+					//IndexFileKeys: nil,
 					//IndexSize:      0,
 				})
 			}

@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/metautil"
+
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -123,7 +125,9 @@ func TestIndexNodeSimple(t *testing.T) {
 		}
 
 		assert.NotNil(t, idxInfo)
-		for _, idxFile := range idxInfo.IndexFiles {
+		for _, idxFileID := range idxInfo.IndexFileKeys {
+			idxFile := metautil.BuildSegmentIndexFilePath(mockChunkMgr.RootPath(), buildID, 0,
+				partID, segID, idxFileID)
 			_, ok := mockChunkMgr.indexedData.Load(idxFile)
 			assert.True(t, ok)
 			t.Logf("indexed file: %s", idxFile)
@@ -310,11 +314,13 @@ Loop:
 	for _, job := range jobresp.IndexInfos {
 		task := tasks[job.BuildID-buildID0]
 		if job.State == commonpb.IndexState_Finished {
-			for _, idxFile := range job.IndexFiles {
+			for _, idxFileID := range job.IndexFileKeys {
+				idxFile := metautil.BuildSegmentIndexFilePath(mockChunkMgr.RootPath(), task.buildID,
+					0, task.partID, task.segID, idxFileID)
 				_, ok := mockChunkMgr.indexedData.Load(idxFile)
 				assert.True(t, ok)
 			}
-			t.Logf("buildID: %d, indexFiles: %v", job.BuildID, job.IndexFiles)
+			t.Logf("buildID: %d, indexFiles: %v", job.BuildID, job.IndexFileKeys)
 		} else {
 			_, ok := mockChunkMgr.indexedData.Load(dataPath(task.collID, task.partID, task.segID))
 			assert.False(t, ok)

@@ -29,6 +29,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -790,54 +791,23 @@ func (mt *metaTable) MarkSegmentsIndexAsDeleted(selector func(index *model.Segme
 	return nil
 }
 
-// GetIndexFilePathInfo gets the index file paths from meta table.
-func (mt *metaTable) GetIndexFilePathInfo(segID, indexID UniqueID) (*indexpb.IndexFilePathInfo, error) {
-	log.Debug("IndexCoord get index file path from meta table", zap.Int64("segmentID", segID))
-	mt.segmentIndexLock.RLock()
-	defer mt.segmentIndexLock.RUnlock()
-	ret := &indexpb.IndexFilePathInfo{
-		SegmentID: segID,
-		IndexID:   indexID,
-	}
-
-	segIndexes, ok := mt.segmentIndexes[segID]
-	if !ok {
-		return nil, ErrNotIndexExist
-	}
-	segIdx, ok := segIndexes[indexID]
-	if !ok || segIdx.IsDeleted {
-		return nil, ErrNotIndexExist
-	}
-	if segIdx.IndexState != commonpb.IndexState_Finished {
-		return nil, fmt.Errorf("the index state is not finish on segment: %d, index state = %s", segID, segIdx.IndexState.String())
-	}
-
-	ret.BuildID = segIdx.BuildID
-	ret.IndexFilePaths = segIdx.IndexFilePaths
-	ret.SerializedSize = segIdx.IndexSize
-
-	log.Debug("IndexCoord get index file path success", zap.Int64("segID", segID),
-		zap.Strings("index files num", ret.IndexFilePaths))
-	return ret, nil
-}
-
-func (mt *metaTable) GetIndexFilePathByBuildID(buildID UniqueID) (bool, []string) {
+func (mt *metaTable) GetSegmentIndexByBuildID(buildID UniqueID) (bool, *model.SegmentIndex) {
 	mt.segmentIndexLock.RLock()
 	defer mt.segmentIndexLock.RUnlock()
 	log.Debug("IndexCoord get index file path from meta table", zap.Int64("buildID", buildID))
 
 	segIdx, ok := mt.buildID2SegmentIndex[buildID]
 	if !ok || segIdx.IsDeleted {
-		return false, []string{}
+		return false, nil
 	}
 
 	if segIdx.IndexState != commonpb.IndexState_Finished && segIdx.IndexState != commonpb.IndexState_Failed {
-		return false, []string{}
+		return false, nil
 	}
 
-	log.Debug("IndexCoord get index file path success", zap.Int64("buildID", buildID),
-		zap.Strings("index files num", segIdx.IndexFilePaths))
-	return true, segIdx.IndexFilePaths
+	log.Debug("IndexCoord get segment index file path success", zap.Int64("buildID", buildID),
+		zap.Int("index files num", len(segIdx.IndexFileKeys)))
+	return true, segIdx
 }
 
 func (mt *metaTable) IsIndexDeleted(collID, indexID UniqueID) bool {
@@ -1051,7 +1021,7 @@ func (mt *metaTable) FinishTask(taskInfo *indexpb.IndexTaskInfo) error {
 	}
 	updateFunc := func(segIdx *model.SegmentIndex) error {
 		segIdx.IndexState = taskInfo.State
-		segIdx.IndexFilePaths = taskInfo.IndexFiles
+		segIdx.IndexFileKeys = common.CloneStringList(taskInfo.IndexFileKeys)
 		segIdx.FailReason = taskInfo.FailReason
 		segIdx.IndexSize = taskInfo.SerializedSize
 		return mt.alterSegmentIndexes([]*model.SegmentIndex{segIdx})

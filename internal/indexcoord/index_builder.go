@@ -219,7 +219,7 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 			if err := ib.meta.FinishTask(&indexpb.IndexTaskInfo{
 				BuildID:        buildID,
 				State:          commonpb.IndexState_Finished,
-				IndexFiles:     nil,
+				IndexFileKeys:  nil,
 				SerializedSize: 0,
 				FailReason:     "",
 			}); err != nil {

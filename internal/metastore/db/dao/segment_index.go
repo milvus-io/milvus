@@ -31,7 +31,7 @@ func (s *segmentIndexDb) List(tenantID string) ([]*dbmodel.SegmentIndexResult, e
 			"segment_indexes.segment_id AS segment_id, segment_indexes.num_rows AS num_rows, segment_indexes.index_id AS index_id, "+
 			"segment_indexes.build_id AS build_id, segment_indexes.node_id AS node_id, segment_indexes.index_version AS index_version, "+
 			"segment_indexes.index_state AS index_state,segment_indexes.fail_reason AS fail_reason, segment_indexes.create_time AS create_time,"+
-			"segment_indexes.index_file_paths AS index_file_paths, segment_indexes.index_size AS index_size, segment_indexes.is_deleted AS is_deleted").
+			"segment_indexes.index_file_keys AS index_file_keys, segment_indexes.index_size AS index_size, segment_indexes.is_deleted AS is_deleted").
 		Where("indexes.tenant_id = ?", tenantID)
 
 	var rs []*dbmodel.SegmentIndexResult

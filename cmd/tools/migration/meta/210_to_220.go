@@ -3,6 +3,7 @@ package meta
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 
@@ -142,21 +143,32 @@ func combineToSegmentIndexesMeta220(segmentIndexes SegmentIndexesMeta210, indexB
 			if !ok {
 				return nil, fmt.Errorf("index build meta not found, segment id: %d, index id: %d, index build id: %d", segID, indexID, record.GetBuildID())
 			}
+
+			fileKeys := make([]string, len(buildMeta.GetIndexFilePaths()))
+			for i, filePath := range buildMeta.GetIndexFilePaths() {
+				parts := strings.Split(filePath, "/")
+				if len(parts) == 0 {
+					return nil, fmt.Errorf("invaild index file path: %s", filePath)
+				}
+
+				fileKeys[i] = parts[len(parts)-1]
+			}
+
 			segmentIndexModel := &model.SegmentIndex{
-				SegmentID:      segID,
-				CollectionID:   record.GetCollectionID(),
-				PartitionID:    record.GetPartitionID(),
-				NumRows:        buildMeta.GetReq().GetNumRows(),
-				IndexID:        indexID,
-				BuildID:        record.GetBuildID(),
-				NodeID:         buildMeta.GetNodeID(),
-				IndexVersion:   buildMeta.GetIndexVersion(),
-				IndexState:     buildMeta.GetState(),
-				FailReason:     buildMeta.GetFailReason(),
-				IsDeleted:      buildMeta.GetMarkDeleted(),
-				CreateTime:     record.GetCreateTime(),
-				IndexFilePaths: buildMeta.GetIndexFilePaths(),
-				IndexSize:      buildMeta.GetSerializeSize(),
+				SegmentID:     segID,
+				CollectionID:  record.GetCollectionID(),
+				PartitionID:   record.GetPartitionID(),
+				NumRows:       buildMeta.GetReq().GetNumRows(),
+				IndexID:       indexID,
+				BuildID:       record.GetBuildID(),
+				NodeID:        buildMeta.GetNodeID(),
+				IndexVersion:  buildMeta.GetIndexVersion(),
+				IndexState:    buildMeta.GetState(),
+				FailReason:    buildMeta.GetFailReason(),
+				IsDeleted:     buildMeta.GetMarkDeleted(),
+				CreateTime:    record.GetCreateTime(),
+				IndexFileKeys: fileKeys,
+				IndexSize:     buildMeta.GetSerializeSize(),
 			}
 			segmentIndexModels.AddRecord(segID, indexID, segmentIndexModel)
 		}
