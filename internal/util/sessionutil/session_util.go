@@ -347,7 +347,15 @@ func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, er
 		log.Debug("put session key into etcd", zap.String("key", completeKey), zap.String("value", string(sessionJSON)))
 
 		keepAliveCtx, keepAliveCancel := context.WithCancel(context.Background())
-		s.keepAliveCancel = keepAliveCancel
+		s.keepAliveCancel = func() {
+			// delete the session key to make roll update faster
+			// ignore the resp and error handle, just delete
+			_, _ = s.etcdCli.Delete(keepAliveCtx, completeKey)
+			if s.enableActiveStandBy && !s.isStandby.Load().(bool) {
+				_, _ = s.etcdCli.Delete(keepAliveCtx, s.activeKey)
+			}
+			keepAliveCancel()
+		}
 		ch, err = s.etcdCli.KeepAlive(keepAliveCtx, resp.ID)
 		if err != nil {
 			fmt.Printf("got error during keeping alive with etcd, err: %s\n", err)
