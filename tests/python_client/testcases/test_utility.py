@@ -918,6 +918,8 @@ class TestUtilityBase(TestcaseBase):
         collection_w = self.init_collection_wrap()
         collection_w.insert(cf.gen_default_dataframe_data())
         assert collection_w.num_entities == ct.default_nb
+        default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
+        collection_w.create_index("float_vector", default_index)
         collection_w.load(partition_names=[ct.default_partition_name], replica_number=2)
         res_collection, _ = self.utility_wrap.loading_progress(collection_w.name)
         assert res_collection == {loading_progress: '100%'}
