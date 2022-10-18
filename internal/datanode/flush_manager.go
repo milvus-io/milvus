@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/metautil"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
+	"github.com/samber/lo"
 )
 
 // flushManager defines a flush manager signature
@@ -688,8 +689,9 @@ func dropVirtualChannelFunc(dsService *dataSyncService, opts ...retry.Option) fl
 			}
 		}
 
+		startPos := dsService.replica.listNewSegmentsStartPositions()
 		// start positions for all new segments
-		for _, pos := range dsService.replica.listNewSegmentsStartPositions() {
+		for _, pos := range startPos {
 			segment, has := segmentPack[pos.GetSegmentID()]
 			if !has {
 				segment = &datapb.DropVirtualChannelSegment{
@@ -726,6 +728,9 @@ func dropVirtualChannelFunc(dsService *dataSyncService, opts ...retry.Option) fl
 			if rsp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 				return fmt.Errorf("data service DropVirtualChannel failed, reason = %s", rsp.GetStatus().GetReason())
 			}
+			dsService.replica.transferNewSegments(lo.Map(startPos, func(pos *datapb.SegmentStartPosition, _ int) UniqueID {
+				return pos.GetSegmentID()
+			}))
 			return nil
 		}, opts...)
 		if err != nil {
@@ -827,6 +832,10 @@ func flushNotifyFunc(dsService *dataSyncService, opts ...retry.Option) notifyMet
 			if rsp.ErrorCode != commonpb.ErrorCode_Success {
 				return fmt.Errorf("data service save bin log path failed, reason = %s", rsp.Reason)
 			}
+
+			dsService.replica.transferNewSegments(lo.Map(startPos, func(pos *datapb.SegmentStartPosition, _ int) UniqueID {
+				return pos.GetSegmentID()
+			}))
 			return nil
 		}, opts...)
 		if err != nil {

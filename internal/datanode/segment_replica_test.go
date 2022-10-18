@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/bits-and-blooms/bloom/v3"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -1003,8 +1004,13 @@ func TestInnerFunctionSegment(t *testing.T) {
 	assert.Equal(t, "insert-01", segPos[0].StartPosition.ChannelName)
 	assert.Equal(t, Timestamp(100), segPos[0].StartPosition.Timestamp)
 
-	assert.Equal(t, 0, len(replica.newSegments))
-	assert.Equal(t, 2, len(replica.normalSegments))
+	// not change until transferNewSegment called
+	assert.Equal(t, 1, len(replica.newSegments))
+	assert.Equal(t, 1, len(replica.normalSegments))
+
+	replica.transferNewSegments(lo.Map(segPos, func(pos *datapb.SegmentStartPosition, _ int) UniqueID {
+		return pos.GetSegmentID()
+	}))
 
 	cps := replica.listSegmentsCheckPoints()
 	assert.Equal(t, 2, len(cps))

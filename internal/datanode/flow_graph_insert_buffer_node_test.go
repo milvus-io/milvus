@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -434,7 +435,10 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 		fpMut.Lock()
 		flushPacks = append(flushPacks, pack)
 		fpMut.Unlock()
-		colRep.listNewSegmentsStartPositions()
+		startPos := colRep.listNewSegmentsStartPositions()
+		colRep.transferNewSegments(lo.Map(startPos, func(pos *datapb.SegmentStartPosition, _ int) UniqueID {
+			return pos.GetSegmentID()
+		}))
 		colRep.listSegmentsCheckPoints()
 		if pack.flushed || pack.dropped {
 			colRep.segmentFlushed(pack.segmentID)

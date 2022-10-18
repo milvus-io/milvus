@@ -65,6 +65,7 @@ type Replica interface {
 	listPartitionSegments(partID UniqueID) []UniqueID
 	filterSegments(channelName string, partitionID UniqueID) []*Segment
 	listNewSegmentsStartPositions() []*datapb.SegmentStartPosition
+	transferNewSegments(segmentIDs []UniqueID)
 	listSegmentsCheckPoints() map[UniqueID]segmentCheckPoint
 	updateSegmentEndPosition(segID UniqueID, endPos *internalpb.MsgPosition)
 	updateSegmentCheckPoint(segID UniqueID)
@@ -525,16 +526,22 @@ func (replica *SegmentReplica) listNewSegmentsStartPositions() []*datapb.Segment
 
 	result := make([]*datapb.SegmentStartPosition, 0, len(replica.newSegments))
 	for id, seg := range replica.newSegments {
-
 		result = append(result, &datapb.SegmentStartPosition{
 			SegmentID:     id,
 			StartPosition: seg.startPos,
 		})
-
-		// transfer states
-		replica.new2NormalSegment(id)
 	}
 	return result
+}
+
+// transferNewSegments make new segment transfer to normal segments.
+func (replica *SegmentReplica) transferNewSegments(segmentIDs []UniqueID) {
+	replica.segMu.Lock()
+	defer replica.segMu.Unlock()
+
+	for _, segmentID := range segmentIDs {
+		replica.new2NormalSegment(segmentID)
+	}
 }
 
 // listSegmentsCheckPoints gets check points from both *New* and *Normal* segments.
