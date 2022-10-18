@@ -205,6 +205,7 @@ func (m *meta) GetTotalBinlogSize() int64 {
 	for _, segment := range segments {
 		ret += segment.getSegmentSize()
 	}
+	metrics.DataCoordStoredBinlogSize.WithLabelValues().Set(float64(ret))
 	return ret
 }
 

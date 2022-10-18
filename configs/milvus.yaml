@@ -449,7 +449,7 @@ quotaAndLimits:
     diskProtection:
       # When the total file size of object storage is greater than `diskQuota`, all dml requests would be rejected;
       enabled: true
-      diskQuota: -1 # GB, (0, +inf), default no limit
+      diskQuota: -1 # MB, (0, +inf), default no limit
 
   # limitReading decides whether dql requests are allowed.
   limitReading:

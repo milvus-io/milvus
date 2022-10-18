@@ -133,6 +133,17 @@ var (
 			Name:      "num_of_roles",
 			Help:      "The number of roles",
 		})
+
+	// RootCoordTtDelay records the max time tick delay of flow graphs in DataNodes and QueryNodes.
+	RootCoordTtDelay = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.RootCoordRole,
+			Name:      "time_tick_delay",
+			Help:      "The max time tick delay of flow graphs",
+		}, []string{
+			nodeIDLabelName,
+		})
 )
 
 //RegisterRootCoord registers RootCoord metrics
@@ -163,4 +174,5 @@ func RegisterRootCoord(registry *prometheus.Registry) {
 	registry.MustRegister(RootCoordNumOfCredentials)
 
 	registry.MustRegister(RootCoordNumOfRoles)
+	registry.MustRegister(RootCoordTtDelay)
 }

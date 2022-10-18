@@ -19,6 +19,7 @@ package rootcoord
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"sync"
 	"time"
 
@@ -27,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/tso"
@@ -34,7 +36,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/ratelimitutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 const (
@@ -86,9 +87,9 @@ type QuotaCenter struct {
 	dataCoord  types.DataCoord
 
 	// metrics
-	queryNodeMetrics []*metricsinfo.QueryNodeQuotaMetrics
-	dataNodeMetrics  []*metricsinfo.DataNodeQuotaMetrics
-	proxyMetrics     []*metricsinfo.ProxyQuotaMetrics
+	queryNodeMetrics map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics
+	dataNodeMetrics  map[UniqueID]*metricsinfo.DataNodeQuotaMetrics
+	proxyMetrics     map[UniqueID]*metricsinfo.ProxyQuotaMetrics
 	dataCoordMetrics *metricsinfo.DataCoordQuotaMetrics
 
 	currentRates map[internalpb.RateType]Limit
@@ -152,9 +153,9 @@ func (q *QuotaCenter) stop() {
 
 //  clearMetrics removes all metrics stored in QuotaCenter.
 func (q *QuotaCenter) clearMetrics() {
-	q.dataNodeMetrics = make([]*metricsinfo.DataNodeQuotaMetrics, 0)
-	q.queryNodeMetrics = make([]*metricsinfo.QueryNodeQuotaMetrics, 0)
-	q.proxyMetrics = make([]*metricsinfo.ProxyQuotaMetrics, 0)
+	q.dataNodeMetrics = make(map[UniqueID]*metricsinfo.DataNodeQuotaMetrics, 0)
+	q.queryNodeMetrics = make(map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics, 0)
+	q.proxyMetrics = make(map[UniqueID]*metricsinfo.ProxyQuotaMetrics, 0)
 }
 
 // syncMetrics sends GetMetrics requests to DataCoord and QueryCoord to sync the metrics in DataNodes and QueryNodes.
@@ -185,7 +186,7 @@ func (q *QuotaCenter) syncMetrics() error {
 		}
 		for _, queryNodeMetric := range queryCoordTopology.Cluster.ConnectedNodes {
 			if queryNodeMetric.QuotaMetrics != nil {
-				q.queryNodeMetrics = append(q.queryNodeMetrics, queryNodeMetric.QuotaMetrics)
+				q.queryNodeMetrics[queryNodeMetric.ID] = queryNodeMetric.QuotaMetrics
 			}
 		}
 		return nil
@@ -206,7 +207,7 @@ func (q *QuotaCenter) syncMetrics() error {
 		}
 		for _, dataNodeMetric := range dataCoordTopology.Cluster.ConnectedNodes {
 			if dataNodeMetric.QuotaMetrics != nil {
-				q.dataNodeMetrics = append(q.dataNodeMetrics, dataNodeMetric.QuotaMetrics)
+				q.dataNodeMetrics[dataNodeMetric.ID] = dataNodeMetric.QuotaMetrics
 			}
 		}
 		if dataCoordTopology.Cluster.Self.QuotaMetrics != nil {
@@ -228,7 +229,7 @@ func (q *QuotaCenter) syncMetrics() error {
 				return err
 			}
 			if proxyMetric.QuotaMetrics != nil {
-				q.proxyMetrics = append(q.proxyMetrics, proxyMetric.QuotaMetrics)
+				q.proxyMetrics[proxyMetric.ID] = proxyMetric.QuotaMetrics
 			}
 		}
 		return nil
@@ -339,10 +340,11 @@ func (q *QuotaCenter) calculateWriteRates() error {
 	}
 	log.Debug("QuotaCenter check diskQuota done", zap.Bool("exceeded", exceeded))
 
-	ttFactor, err := q.timeTickDelay()
+	ts, err := q.tsoAllocator.GenerateTSO(1)
 	if err != nil {
 		return err
 	}
+	ttFactor := q.timeTickDelay(ts)
 	if ttFactor <= 0 {
 		q.forceDenyWriting(TimeTickLongDelay) // tt protection
 		return nil
@@ -409,43 +411,46 @@ func (q *QuotaCenter) resetCurrentRates() {
 
 // timeTickDelay gets time tick delay of DataNodes and QueryNodes,
 // and return the factor according to max tolerable time tick delay.
-func (q *QuotaCenter) timeTickDelay() (float64, error) {
+func (q *QuotaCenter) timeTickDelay(ts Timestamp) float64 {
+	t1, _ := tsoutil.ParseTS(ts)
+
+	var maxDelay time.Duration
+	for nodeID, metric := range q.queryNodeMetrics {
+		if metric.Fgm.NumFlowGraph > 0 {
+			t2, _ := tsoutil.ParseTS(metric.Fgm.MinFlowGraphTt)
+			delay := t1.Sub(t2)
+			if delay.Nanoseconds() > maxDelay.Nanoseconds() {
+				maxDelay = delay
+			}
+			metrics.RootCoordTtDelay.WithLabelValues(strconv.FormatInt(nodeID, 10)).Set(float64(maxDelay.Milliseconds()))
+		}
+	}
+	for nodeID, metric := range q.dataNodeMetrics {
+		if metric.Fgm.NumFlowGraph > 0 {
+			t2, _ := tsoutil.ParseTS(metric.Fgm.MinFlowGraphTt)
+			delay := t1.Sub(t2)
+			if delay.Nanoseconds() > maxDelay.Nanoseconds() {
+				maxDelay = delay
+			}
+			metrics.RootCoordTtDelay.WithLabelValues(strconv.FormatInt(nodeID, 10)).Set(float64(maxDelay.Milliseconds()))
+		}
+	}
+
 	if !Params.QuotaConfig.TtProtectionEnabled {
-		return 1, nil
+		return 1
 	}
 
 	maxTt := Params.QuotaConfig.MaxTimeTickDelay
 	if maxTt < 0 {
 		// < 0 means disable tt protection
-		return 1, nil
+		return 1
 	}
 
-	minTs := typeutil.MaxTimestamp
-	for _, metric := range q.queryNodeMetrics {
-		if metric.Fgm.NumFlowGraph > 0 && metric.Fgm.MinFlowGraphTt < minTs {
-			minTs = metric.Fgm.MinFlowGraphTt
-		}
+	log.Debug("QuotaCenter check timeTick delay", zap.Time("curTs", t1), zap.Duration("maxDelay", maxDelay))
+	if maxDelay.Nanoseconds() >= maxTt.Nanoseconds() {
+		return 0
 	}
-	for _, metric := range q.dataNodeMetrics {
-		if metric.Fgm.NumFlowGraph > 0 && metric.Fgm.MinFlowGraphTt < minTs {
-			minTs = metric.Fgm.MinFlowGraphTt
-		}
-	}
-	ts, err := q.tsoAllocator.GenerateTSO(1)
-	if err != nil {
-		return 0, err
-	}
-	if minTs >= ts {
-		return 1, nil
-	}
-	t1, _ := tsoutil.ParseTS(minTs)
-	t2, _ := tsoutil.ParseTS(ts)
-	delay := t2.Sub(t1)
-	log.Debug("QuotaCenter check timeTick delay", zap.Time("minTs", t1), zap.Time("curTs", t2), zap.Duration("delay", delay))
-	if delay.Nanoseconds() >= maxTt.Nanoseconds() {
-		return 0, nil
-	}
-	return float64(maxTt.Nanoseconds()-delay.Nanoseconds()) / float64(maxTt.Nanoseconds()), nil
+	return float64(maxTt.Nanoseconds()-maxDelay.Nanoseconds()) / float64(maxTt.Nanoseconds())
 }
 
 // checkNQInQuery checks search&query nq in QueryNode,
