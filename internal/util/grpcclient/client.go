@@ -49,6 +49,8 @@ type GrpcClient[T any] interface {
 	ReCall(ctx context.Context, caller func(client T) (any, error)) (any, error)
 	Call(ctx context.Context, caller func(client T) (any, error)) (any, error)
 	Close() error
+	SetNodeID(int64)
+	GetNodeID() int64
 }
 
 // ClientBase is a base of grpc client
@@ -73,6 +75,7 @@ type ClientBase[T any] struct {
 	InitialBackoff    float32
 	MaxBackoff        float32
 	BackoffMultiplier float32
+	NodeID            int64
 }
 
 // SetRole sets role of client
@@ -313,4 +316,14 @@ func (c *ClientBase[T]) Close() error {
 		return c.conn.Close()
 	}
 	return nil
+}
+
+// SetNodeID set ID role of client
+func (c *ClientBase[T]) SetNodeID(nodeID int64) {
+	c.NodeID = nodeID
+}
+
+// GetNodeID returns ID of client
+func (c *ClientBase[T]) GetNodeID() int64 {
+	return c.NodeID
 }

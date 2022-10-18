@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 )
 
@@ -49,12 +50,12 @@ func (ta *timestampAllocator) alloc(count uint32) ([]Timestamp, error) {
 	tr := timerecord.NewTimeRecorder("applyTimestamp")
 	ctx, cancel := context.WithTimeout(ta.ctx, 5*time.Second)
 	req := &rootcoordpb.AllocTimestampRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_RequestTSO,
-			MsgID:     0,
-			Timestamp: 0,
-			SourceID:  ta.peerID,
-		},
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_RequestTSO),
+			commonpbutil.WithMsgID(0),
+			commonpbutil.WithTimeStamp(0),
+			commonpbutil.WithSourceID(ta.peerID),
+		),
 		Count: count,
 	}
 

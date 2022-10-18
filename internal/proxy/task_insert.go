@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/trace"
@@ -308,12 +309,12 @@ func (it *insertTask) assignSegmentID(channelNames []string) (*msgstream.MsgPack
 	// create empty insert message
 	createInsertMsg := func(segmentID UniqueID, channelName string, msgID int64) *msgstream.InsertMsg {
 		insertReq := internalpb.InsertRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_Insert,
-				MsgID:     msgID,
-				Timestamp: it.BeginTimestamp, // entity's timestamp was set to equal it.BeginTimestamp in preExecute()
-				SourceID:  it.Base.SourceID,
-			},
+			Base: commonpbutil.NewMsgBase(
+				commonpbutil.WithMsgType(commonpb.MsgType_Insert),
+				commonpbutil.WithMsgID(msgID),
+				commonpbutil.WithTimeStamp(it.BeginTimestamp), // entity's timestamp was set to equal it.BeginTimestamp in preExecute()
+				commonpbutil.WithSourceID(it.Base.SourceID),
+			),
 			CollectionID:   it.CollectionID,
 			PartitionID:    it.PartitionID,
 			CollectionName: it.CollectionName,

@@ -35,7 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
-
+	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -141,7 +141,7 @@ func (cct *createCollectionTask) SetTs(ts Timestamp) {
 }
 
 func (cct *createCollectionTask) OnEnqueue() error {
-	cct.Base = &commonpb.MsgBase{}
+	cct.Base = commonpbutil.NewMsgBase()
 	cct.Base.MsgType = commonpb.MsgType_CreateCollection
 	cct.Base.SourceID = Params.ProxyCfg.GetNodeID()
 	return nil
@@ -278,7 +278,7 @@ func (dct *dropCollectionTask) SetTs(ts Timestamp) {
 }
 
 func (dct *dropCollectionTask) OnEnqueue() error {
-	dct.Base = &commonpb.MsgBase{}
+	dct.Base = commonpbutil.NewMsgBase()
 	return nil
 }
 
@@ -348,7 +348,7 @@ func (hct *hasCollectionTask) SetTs(ts Timestamp) {
 }
 
 func (hct *hasCollectionTask) OnEnqueue() error {
-	hct.Base = &commonpb.MsgBase{}
+	hct.Base = commonpbutil.NewMsgBase()
 	return nil
 }
 
@@ -422,7 +422,7 @@ func (dct *describeCollectionTask) SetTs(ts Timestamp) {
 }
 
 func (dct *describeCollectionTask) OnEnqueue() error {
-	dct.Base = &commonpb.MsgBase{}
+	dct.Base = commonpbutil.NewMsgBase()
 	return nil
 }
 
@@ -540,7 +540,7 @@ func (sct *showCollectionsTask) SetTs(ts Timestamp) {
 }
 
 func (sct *showCollectionsTask) OnEnqueue() error {
-	sct.Base = &commonpb.MsgBase{}
+	sct.Base = commonpbutil.NewMsgBase()
 	return nil
 }
 
@@ -592,12 +592,10 @@ func (sct *showCollectionsTask) Execute(ctx context.Context) error {
 		}
 
 		resp, err := sct.queryCoord.ShowCollections(ctx, &querypb.ShowCollectionsRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_ShowCollections,
-				MsgID:     sct.Base.MsgID,
-				Timestamp: sct.Base.Timestamp,
-				SourceID:  sct.Base.SourceID,
-			},
+			Base: commonpbutil.NewMsgBaseCopy(
+				sct.Base,
+				commonpbutil.WithMsgType(commonpb.MsgType_ShowCollections),
+			),
 			//DbID: sct.ShowCollectionsRequest.DbName,
 			CollectionIDs: collectionIDs,
 		})
@@ -701,7 +699,7 @@ func (act *alterCollectionTask) SetTs(ts Timestamp) {
 }
 
 func (act *alterCollectionTask) OnEnqueue() error {
-	act.Base = &commonpb.MsgBase{}
+	act.Base = commonpbutil.NewMsgBase()
 	return nil
 }
 
@@ -763,7 +761,7 @@ func (cpt *createPartitionTask) SetTs(ts Timestamp) {
 }
 
 func (cpt *createPartitionTask) OnEnqueue() error {
-	cpt.Base = &commonpb.MsgBase{}
+	cpt.Base = commonpbutil.NewMsgBase()
 	return nil
 }
 
@@ -840,7 +838,7 @@ func (dpt *dropPartitionTask) SetTs(ts Timestamp) {
 }
 
 func (dpt *dropPartitionTask) OnEnqueue() error {
-	dpt.Base = &commonpb.MsgBase{}
+	dpt.Base = commonpbutil.NewMsgBase()
 	return nil
 }
 
@@ -917,7 +915,7 @@ func (hpt *hasPartitionTask) SetTs(ts Timestamp) {
 }
 
 func (hpt *hasPartitionTask) OnEnqueue() error {
-	hpt.Base = &commonpb.MsgBase{}
+	hpt.Base = commonpbutil.NewMsgBase()
 	return nil
 }
 
@@ -994,7 +992,7 @@ func (spt *showPartitionsTask) SetTs(ts Timestamp) {
 }
 
 func (spt *showPartitionsTask) OnEnqueue() error {
-	spt.Base = &commonpb.MsgBase{}
+	spt.Base = commonpbutil.NewMsgBase()
 	return nil
 }
 
@@ -1056,12 +1054,10 @@ func (spt *showPartitionsTask) Execute(ctx context.Context) error {
 			IDs2Names[partitionID] = partitionName
 		}
 		resp, err := spt.queryCoord.ShowPartitions(ctx, &querypb.ShowPartitionsRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_ShowCollections,
-				MsgID:     spt.Base.MsgID,
-				Timestamp: spt.Base.Timestamp,
-				SourceID:  spt.Base.SourceID,
-			},
+			Base: commonpbutil.NewMsgBaseCopy(
+				spt.Base,
+				commonpbutil.WithMsgType(commonpb.MsgType_ShowCollections),
+			),
 			CollectionID: collectionID,
 			PartitionIDs: partitionIDs,
 		})
@@ -1158,7 +1154,7 @@ func (ft *flushTask) SetTs(ts Timestamp) {
 }
 
 func (ft *flushTask) OnEnqueue() error {
-	ft.Base = &commonpb.MsgBase{}
+	ft.Base = commonpbutil.NewMsgBase()
 	return nil
 }
 
@@ -1178,12 +1174,10 @@ func (ft *flushTask) Execute(ctx context.Context) error {
 			return err
 		}
 		flushReq := &datapb.FlushRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_Flush,
-				MsgID:     ft.Base.MsgID,
-				Timestamp: ft.Base.Timestamp,
-				SourceID:  ft.Base.SourceID,
-			},
+			Base: commonpbutil.NewMsgBaseCopy(
+				ft.Base,
+				commonpbutil.WithMsgType(commonpb.MsgType_Flush),
+			),
 			DbID:         0,
 			CollectionID: collID,
 		}
@@ -1259,7 +1253,7 @@ func (lct *loadCollectionTask) SetTs(ts Timestamp) {
 }
 
 func (lct *loadCollectionTask) OnEnqueue() error {
-	lct.Base = &commonpb.MsgBase{}
+	lct.Base = commonpbutil.NewMsgBase()
 	return nil
 }
 
@@ -1322,12 +1316,10 @@ func (lct *loadCollectionTask) Execute(ctx context.Context) (err error) {
 		return errors.New(errMsg)
 	}
 	request := &querypb.LoadCollectionRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_LoadCollection,
-			MsgID:     lct.Base.MsgID,
-			Timestamp: lct.Base.Timestamp,
-			SourceID:  lct.Base.SourceID,
-		},
+		Base: commonpbutil.NewMsgBaseCopy(
+			lct.Base,
+			commonpbutil.WithMsgType(commonpb.MsgType_LoadCollection),
+		),
 		DbID:          0,
 		CollectionID:  collID,
 		Schema:        collSchema,
@@ -1394,7 +1386,7 @@ func (rct *releaseCollectionTask) SetTs(ts Timestamp) {
 }
 
 func (rct *releaseCollectionTask) OnEnqueue() error {
-	rct.Base = &commonpb.MsgBase{}
+	rct.Base = commonpbutil.NewMsgBase()
 	return nil
 }
 
@@ -1418,12 +1410,10 @@ func (rct *releaseCollectionTask) Execute(ctx context.Context) (err error) {
 	}
 	rct.collectionID = collID
 	request := &querypb.ReleaseCollectionRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_ReleaseCollection,
-			MsgID:     rct.Base.MsgID,
-			Timestamp: rct.Base.Timestamp,
-			SourceID:  rct.Base.SourceID,
-		},
+		Base: commonpbutil.NewMsgBaseCopy(
+			rct.Base,
+			commonpbutil.WithMsgType(commonpb.MsgType_ReleaseCollection),
+		),
 		DbID:         0,
 		CollectionID: collID,
 	}
@@ -1484,7 +1474,7 @@ func (lpt *loadPartitionsTask) SetTs(ts Timestamp) {
 }
 
 func (lpt *loadPartitionsTask) OnEnqueue() error {
-	lpt.Base = &commonpb.MsgBase{}
+	lpt.Base = commonpbutil.NewMsgBase()
 	return nil
 }
 
@@ -1547,12 +1537,10 @@ func (lpt *loadPartitionsTask) Execute(ctx context.Context) error {
 		partitionIDs = append(partitionIDs, partitionID)
 	}
 	request := &querypb.LoadPartitionsRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_LoadPartitions,
-			MsgID:     lpt.Base.MsgID,
-			Timestamp: lpt.Base.Timestamp,
-			SourceID:  lpt.Base.SourceID,
-		},
+		Base: commonpbutil.NewMsgBaseCopy(
+			lpt.Base,
+			commonpbutil.WithMsgType(commonpb.MsgType_LoadPartitions),
+		),
 		DbID:          0,
 		CollectionID:  collID,
 		PartitionIDs:  partitionIDs,
@@ -1611,7 +1599,7 @@ func (rpt *releasePartitionsTask) SetTs(ts Timestamp) {
 }
 
 func (rpt *releasePartitionsTask) OnEnqueue() error {
-	rpt.Base = &commonpb.MsgBase{}
+	rpt.Base = commonpbutil.NewMsgBase()
 	return nil
 }
 
@@ -1643,12 +1631,10 @@ func (rpt *releasePartitionsTask) Execute(ctx context.Context) (err error) {
 		partitionIDs = append(partitionIDs, partitionID)
 	}
 	request := &querypb.ReleasePartitionsRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_ReleasePartitions,
-			MsgID:     rpt.Base.MsgID,
-			Timestamp: rpt.Base.Timestamp,
-			SourceID:  rpt.Base.SourceID,
-		},
+		Base: commonpbutil.NewMsgBaseCopy(
+			rpt.Base,
+			commonpbutil.WithMsgType(commonpb.MsgType_ReleasePartitions),
+		),
 		DbID:         0,
 		CollectionID: collID,
 		PartitionIDs: partitionIDs,
@@ -1713,7 +1699,7 @@ func (c *CreateAliasTask) SetTs(ts Timestamp) {
 
 // OnEnqueue defines the behavior task enqueued
 func (c *CreateAliasTask) OnEnqueue() error {
-	c.Base = &commonpb.MsgBase{}
+	c.Base = commonpbutil.NewMsgBase()
 	return nil
 }
 
@@ -1793,7 +1779,7 @@ func (d *DropAliasTask) SetTs(ts Timestamp) {
 }
 
 func (d *DropAliasTask) OnEnqueue() error {
-	d.Base = &commonpb.MsgBase{}
+	d.Base = commonpbutil.NewMsgBase()
 	return nil
 }
 
@@ -1859,7 +1845,7 @@ func (a *AlterAliasTask) SetTs(ts Timestamp) {
 }
 
 func (a *AlterAliasTask) OnEnqueue() error {
-	a.Base = &commonpb.MsgBase{}
+	a.Base = commonpbutil.NewMsgBase()
 	return nil
 }
 

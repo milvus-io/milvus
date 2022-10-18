@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
@@ -163,6 +164,8 @@ func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResp
 
 // CreateCollection create collection
 func (c *Client) CreateCollection(ctx context.Context, in *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
+	in = typeutil.Clone(in)
+	commonpbutil.SetTargetID(in.GetBase(), c.sess.ServerID)
 	ret, err := c.grpcClient.ReCall(ctx, func(client rootcoordpb.RootCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -177,6 +180,8 @@ func (c *Client) CreateCollection(ctx context.Context, in *milvuspb.CreateCollec
 
 // DropCollection drop collection
 func (c *Client) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
+	in = typeutil.Clone(in)
+	commonpbutil.SetTargetID(in.GetBase(), c.sess.ServerID)
 	ret, err := c.grpcClient.ReCall(ctx, func(client rootcoordpb.RootCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -191,6 +196,8 @@ func (c *Client) DropCollection(ctx context.Context, in *milvuspb.DropCollection
 
 // HasCollection check collection existence
 func (c *Client) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
+	in = typeutil.Clone(in)
+	commonpbutil.SetTargetID(in.GetBase(), c.sess.ServerID)
 	ret, err := c.grpcClient.ReCall(ctx, func(client rootcoordpb.RootCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -205,6 +212,8 @@ func (c *Client) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRe
 
 // DescribeCollection return collection info
 func (c *Client) DescribeCollection(ctx context.Context, in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+	in = typeutil.Clone(in)
+	commonpbutil.SetTargetID(in.GetBase(), c.sess.ServerID)
 	ret, err := c.grpcClient.ReCall(ctx, func(client rootcoordpb.RootCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -219,6 +228,8 @@ func (c *Client) DescribeCollection(ctx context.Context, in *milvuspb.DescribeCo
 
 // ShowCollections list all collection names
 func (c *Client) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
+	in = typeutil.Clone(in)
+	commonpbutil.SetTargetID(in.GetBase(), c.sess.ServerID)
 	ret, err := c.grpcClient.ReCall(ctx, func(client rootcoordpb.RootCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -232,6 +243,8 @@ func (c *Client) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectio
 }
 
 func (c *Client) AlterCollection(ctx context.Context, request *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
+	request = typeutil.Clone(request)
+	commonpbutil.SetTargetID(request.GetBase(), c.sess.ServerID)
 	ret, err := c.grpcClient.ReCall(ctx, func(client rootcoordpb.RootCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -246,6 +259,8 @@ func (c *Client) AlterCollection(ctx context.Context, request *milvuspb.AlterCol
 
 // CreatePartition create partition
 func (c *Client) CreatePartition(ctx context.Context, in *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
+	in = typeutil.Clone(in)
+	commonpbutil.SetTargetID(in.GetBase(), c.sess.ServerID)
 	ret, err := c.grpcClient.ReCall(ctx, func(client rootcoordpb.RootCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -260,6 +275,8 @@ func (c *Client) CreatePartition(ctx context.Context, in *milvuspb.CreatePartiti
 
 // DropPartition drop partition
 func (c *Client) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
+	in = typeutil.Clone(in)
+	commonpbutil.SetTargetID(in.GetBase(), c.sess.ServerID)
 	ret, err := c.grpcClient.ReCall(ctx, func(client rootcoordpb.RootCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -274,6 +291,8 @@ func (c *Client) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRe
 
 // HasPartition check partition existence
 func (c *Client) HasPartition(ctx context.Context, in *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error) {
+	in = typeutil.Clone(in)
+	commonpbutil.SetTargetID(in.GetBase(), c.sess.ServerID)
 	ret, err := c.grpcClient.ReCall(ctx, func(client rootcoordpb.RootCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -288,6 +307,8 @@ func (c *Client) HasPartition(ctx context.Context, in *milvuspb.HasPartitionRequ
 
 // ShowPartitions list all partitions in collection
 func (c *Client) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
+	in = typeutil.Clone(in)
+	commonpbutil.SetTargetID(in.GetBase(), c.sess.ServerID)
 	ret, err := c.grpcClient.ReCall(ctx, func(client rootcoordpb.RootCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -302,6 +323,8 @@ func (c *Client) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitions
 
 // AllocTimestamp global timestamp allocator
 func (c *Client) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error) {
+	in = typeutil.Clone(in)
+	commonpbutil.SetTargetID(in.GetBase(), c.sess.ServerID)
 	ret, err := c.grpcClient.ReCall(ctx, func(client rootcoordpb.RootCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -316,6 +339,8 @@ func (c *Client) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTimest
 
 // AllocID global ID allocator
 func (c *Client) AllocID(ctx context.Context, in *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error) {
+	in = typeutil.Clone(in)
+	commonpbutil.SetTargetID(in.GetBase(), c.sess.ServerID)
 	ret, err := c.grpcClient.ReCall(ctx, func(client rootcoordpb.RootCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -330,6 +355,8 @@ func (c *Client) AllocID(ctx context.Context, in *rootcoordpb.AllocIDRequest) (*
 
 // UpdateChannelTimeTick used to handle ChannelTimeTickMsg
 func (c *Client) UpdateChannelTimeTick(ctx context.Context, in *internalpb.ChannelTimeTickMsg) (*commonpb.Status, error) {
+	in = typeutil.Clone(in)
+	commonpbutil.SetTargetID(in.GetBase(), c.sess.ServerID)
 	ret, err := c.grpcClient.ReCall(ctx, func(client rootcoordpb.RootCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -344,6 +371,8 @@ func (c *Client) UpdateChannelTimeTick(ctx context.Context, in *internalpb.Chann
 
 // ShowSegments list all segments
 func (c *Client) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsRequest) (*milvuspb.ShowSegmentsResponse, error) {
+	in = typeutil.Clone(in)
+	commonpbutil.SetTargetID(in.GetBase(), c.sess.ServerID)
 	ret, err := c.grpcClient.ReCall(ctx, func(client rootcoordpb.RootCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -358,6 +387,8 @@ func (c *Client) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsRequ
 
 // InvalidateCollectionMetaCache notifies RootCoord to release the collection cache in Proxies.
 func (c *Client) InvalidateCollectionMetaCache(ctx context.Context, in *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
+	in = typeutil.Clone(in)
+	commonpbutil.SetTargetID(in.GetBase(), c.sess.ServerID)
 	ret, err := c.grpcClient.ReCall(ctx, func(client rootcoordpb.RootCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -372,6 +403,8 @@ func (c *Client) InvalidateCollectionMetaCache(ctx context.Context, in *proxypb.
 
 // ShowConfigurations gets specified configurations para of RootCoord
 func (c *Client) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.SetTargetID(req.GetBase(), c.sess.ServerID)
 	ret, err := c.grpcClient.ReCall(ctx, func(client rootcoordpb.RootCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -387,6 +420,8 @@ func (c *Client) ShowConfigurations(ctx context.Context, req *internalpb.ShowCon
 
 // GetMetrics get metrics
 func (c *Client) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	in = typeutil.Clone(in)
+	commonpbutil.SetTargetID(in.GetBase(), c.sess.ServerID)
 	ret, err := c.grpcClient.ReCall(ctx, func(client rootcoordpb.RootCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -401,6 +436,8 @@ func (c *Client) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest)
 
 // CreateAlias create collection alias
 func (c *Client) CreateAlias(ctx context.Context, req *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.SetTargetID(req.GetBase(), c.sess.ServerID)
 	ret, err := c.grpcClient.ReCall(ctx, func(client rootcoordpb.RootCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -415,6 +452,8 @@ func (c *Client) CreateAlias(ctx context.Context, req *milvuspb.CreateAliasReque
 
 // DropAlias drop collection alias
 func (c *Client) DropAlias(ctx context.Context, req *milvuspb.DropAliasRequest) (*commonpb.Status, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.SetTargetID(req.GetBase(), c.sess.ServerID)
 	ret, err := c.grpcClient.ReCall(ctx, func(client rootcoordpb.RootCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -429,6 +468,8 @@ func (c *Client) DropAlias(ctx context.Context, req *milvuspb.DropAliasRequest) 
 
 // AlterAlias alter collection alias
 func (c *Client) AlterAlias(ctx context.Context, req *milvuspb.AlterAliasRequest) (*commonpb.Status, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.SetTargetID(req.GetBase(), c.sess.ServerID)
 	ret, err := c.grpcClient.ReCall(ctx, func(client rootcoordpb.RootCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -511,6 +552,8 @@ func (c *Client) CreateCredential(ctx context.Context, req *internalpb.Credentia
 }
 
 func (c *Client) GetCredential(ctx context.Context, req *rootcoordpb.GetCredentialRequest) (*rootcoordpb.GetCredentialResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.SetTargetID(req.GetBase(), c.sess.ServerID)
 	ret, err := c.grpcClient.ReCall(ctx, func(client rootcoordpb.RootCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -537,6 +580,8 @@ func (c *Client) UpdateCredential(ctx context.Context, req *internalpb.Credentia
 }
 
 func (c *Client) DeleteCredential(ctx context.Context, req *milvuspb.DeleteCredentialRequest) (*commonpb.Status, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.SetTargetID(req.GetBase(), c.sess.ServerID)
 	ret, err := c.grpcClient.ReCall(ctx, func(client rootcoordpb.RootCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -550,6 +595,8 @@ func (c *Client) DeleteCredential(ctx context.Context, req *milvuspb.DeleteCrede
 }
 
 func (c *Client) ListCredUsers(ctx context.Context, req *milvuspb.ListCredUsersRequest) (*milvuspb.ListCredUsersResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.SetTargetID(req.GetBase(), c.sess.ServerID)
 	ret, err := c.grpcClient.ReCall(ctx, func(client rootcoordpb.RootCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -563,6 +610,8 @@ func (c *Client) ListCredUsers(ctx context.Context, req *milvuspb.ListCredUsersR
 }
 
 func (c *Client) CreateRole(ctx context.Context, req *milvuspb.CreateRoleRequest) (*commonpb.Status, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.SetTargetID(req.GetBase(), c.sess.ServerID)
 	ret, err := c.grpcClient.ReCall(ctx, func(client rootcoordpb.RootCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -576,6 +625,8 @@ func (c *Client) CreateRole(ctx context.Context, req *milvuspb.CreateRoleRequest
 }
 
 func (c *Client) DropRole(ctx context.Context, req *milvuspb.DropRoleRequest) (*commonpb.Status, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.SetTargetID(req.GetBase(), c.sess.ServerID)
 	ret, err := c.grpcClient.ReCall(ctx, func(client rootcoordpb.RootCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -589,6 +640,8 @@ func (c *Client) DropRole(ctx context.Context, req *milvuspb.DropRoleRequest) (*
 }
 
 func (c *Client) OperateUserRole(ctx context.Context, req *milvuspb.OperateUserRoleRequest) (*commonpb.Status, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.SetTargetID(req.GetBase(), c.sess.ServerID)
 	ret, err := c.grpcClient.ReCall(ctx, func(client rootcoordpb.RootCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -602,6 +655,8 @@ func (c *Client) OperateUserRole(ctx context.Context, req *milvuspb.OperateUserR
 }
 
 func (c *Client) SelectRole(ctx context.Context, req *milvuspb.SelectRoleRequest) (*milvuspb.SelectRoleResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.SetTargetID(req.GetBase(), c.sess.ServerID)
 	ret, err := c.grpcClient.ReCall(ctx, func(client rootcoordpb.RootCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -615,6 +670,8 @@ func (c *Client) SelectRole(ctx context.Context, req *milvuspb.SelectRoleRequest
 }
 
 func (c *Client) SelectUser(ctx context.Context, req *milvuspb.SelectUserRequest) (*milvuspb.SelectUserResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.SetTargetID(req.GetBase(), c.sess.ServerID)
 	ret, err := c.grpcClient.ReCall(ctx, func(client rootcoordpb.RootCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -628,6 +685,8 @@ func (c *Client) SelectUser(ctx context.Context, req *milvuspb.SelectUserRequest
 }
 
 func (c *Client) OperatePrivilege(ctx context.Context, req *milvuspb.OperatePrivilegeRequest) (*commonpb.Status, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.SetTargetID(req.GetBase(), c.sess.ServerID)
 	ret, err := c.grpcClient.ReCall(ctx, func(client rootcoordpb.RootCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -641,6 +700,8 @@ func (c *Client) OperatePrivilege(ctx context.Context, req *milvuspb.OperatePriv
 }
 
 func (c *Client) SelectGrant(ctx context.Context, req *milvuspb.SelectGrantRequest) (*milvuspb.SelectGrantResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.SetTargetID(req.GetBase(), c.sess.ServerID)
 	ret, err := c.grpcClient.ReCall(ctx, func(client rootcoordpb.RootCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -654,6 +715,8 @@ func (c *Client) SelectGrant(ctx context.Context, req *milvuspb.SelectGrantReque
 }
 
 func (c *Client) ListPolicy(ctx context.Context, req *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.SetTargetID(req.GetBase(), c.sess.ServerID)
 	ret, err := c.grpcClient.ReCall(ctx, func(client rootcoordpb.RootCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()

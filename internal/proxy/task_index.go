@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/indexparams"
@@ -96,7 +97,7 @@ func (cit *createIndexTask) SetTs(ts Timestamp) {
 }
 
 func (cit *createIndexTask) OnEnqueue() error {
-	cit.req.Base = &commonpb.MsgBase{}
+	cit.req.Base = commonpbutil.NewMsgBase()
 	return nil
 }
 
@@ -361,7 +362,7 @@ func (dit *describeIndexTask) SetTs(ts Timestamp) {
 }
 
 func (dit *describeIndexTask) OnEnqueue() error {
-	dit.Base = &commonpb.MsgBase{}
+	dit.Base = commonpbutil.NewMsgBase()
 	return nil
 }
 
@@ -471,7 +472,7 @@ func (dit *dropIndexTask) SetTs(ts Timestamp) {
 }
 
 func (dit *dropIndexTask) OnEnqueue() error {
-	dit.Base = &commonpb.MsgBase{}
+	dit.Base = commonpbutil.NewMsgBase()
 	return nil
 }
 
@@ -565,7 +566,7 @@ func (gibpt *getIndexBuildProgressTask) SetTs(ts Timestamp) {
 }
 
 func (gibpt *getIndexBuildProgressTask) OnEnqueue() error {
-	gibpt.Base = &commonpb.MsgBase{}
+	gibpt.Base = commonpbutil.NewMsgBase()
 	return nil
 }
 
@@ -658,7 +659,7 @@ func (gist *getIndexStateTask) SetTs(ts Timestamp) {
 }
 
 func (gist *getIndexStateTask) OnEnqueue() error {
-	gist.Base = &commonpb.MsgBase{}
+	gist.Base = commonpbutil.NewMsgBase()
 	return nil
 }
 

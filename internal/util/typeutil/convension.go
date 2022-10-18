@@ -22,8 +22,14 @@ import (
 	"math"
 	"reflect"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/common"
 )
+
+// Generic Clone for proto message
+func Clone[T proto.Message](msg T) T {
+	return proto.Clone(msg).(T)
+}
 
 // Float32ToBytes converts a float to byte slice.
 func Float32ToBytes(float float32) []byte {
