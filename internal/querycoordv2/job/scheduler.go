@@ -42,6 +42,8 @@ type Scheduler struct {
 	processors *typeutil.ConcurrentSet[int64] // Collections of having processor
 	queues     map[int64]jobQueue             // CollectionID -> Queue
 	waitQueue  jobQueue
+
+	stopOnce sync.Once
 }
 
 func NewScheduler() *Scheduler {
@@ -58,8 +60,10 @@ func (scheduler *Scheduler) Start(ctx context.Context) {
 }
 
 func (scheduler *Scheduler) Stop() {
-	close(scheduler.stopCh)
-	scheduler.wg.Wait()
+	scheduler.stopOnce.Do(func() {
+		close(scheduler.stopCh)
+		scheduler.wg.Wait()
+	})
 }
 
 func (scheduler *Scheduler) schedule(ctx context.Context) {
