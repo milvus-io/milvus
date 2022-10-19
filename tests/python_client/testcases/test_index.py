@@ -671,6 +671,7 @@ class TestNewIndexBase(TestcaseBase):
             index_name = cf.gen_unique_str("name")
             collection_w.create_index(default_float_vec_field_name, index, index_name=index_name)
             collection_w.load()
+            collection_w.release()
             collection_w.drop_index(index_name=index_name)
         assert len(collection_w.collection.indexes) == 0
 
@@ -1275,6 +1276,7 @@ class TestNewIndexAsync(TestcaseBase):
         assert len(search_res) == ct.default_nq
         assert len(search_res[0]) == ct.default_limit
 
+        collection_w.release()
         if _async:
             res.done()
             assert collection_w.indexes[0].params == default_index_params
