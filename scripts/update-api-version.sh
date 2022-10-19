@@ -14,3 +14,11 @@ SCRIPTS_DIR=$(dirname "$0")
 EXAMPLE_DIR=$SCRIPTS_DIR/../cmake_build/thirdparty/protobuf/protobuf-src/examples
 rm -rf $EXAMPLE_DIR
 go mod tidy
+
+line echo "Update the milvus-proto repo"
+THIRD_PARTY_DIR=$SCRIPTS_DIR/../cmake_build/thirdparty
+
+pushd $THIRD_PARTY_DIR/milvus-proto
+  git checkout master
+  git pull origin master
+popd
