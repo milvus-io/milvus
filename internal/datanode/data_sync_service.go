@@ -54,9 +54,6 @@ type dataSyncService struct {
 	flushManager     flushManager // flush manager handles flush process
 	chunkManager     storage.ChunkManager
 	compactor        *compactionExecutor // reference to compaction executor
-
-	// concurrent add segments, reduce time to load delta log from oss
-	ioPool *concurrency.Pool
 }
 
 func newDataSyncService(ctx context.Context,
@@ -77,14 +74,6 @@ func newDataSyncService(ctx context.Context,
 		return nil, errors.New("Nil input")
 	}
 
-	// Initialize io cocurrency pool
-	log.Info("initialize io concurrency pool", zap.String("vchannel", vchan.GetChannelName()), zap.Int("ioConcurrency", Params.DataNodeCfg.IOConcurrency))
-	ioPool, err := concurrency.NewPool(Params.DataNodeCfg.IOConcurrency)
-	if err != nil {
-		log.Error("failed to create goroutine pool for dataSyncService", zap.Error(err))
-		return nil, err
-	}
-
 	ctx1, cancel := context.WithCancel(ctx)
 
 	service := &dataSyncService{
@@ -103,7 +92,6 @@ func newDataSyncService(ctx context.Context,
 		flushingSegCache: flushingSegCache,
 		chunkManager:     chunkManager,
 		compactor:        compactor,
-		ioPool:           ioPool,
 	}
 
 	if err := service.initNodes(vchan); err != nil {
@@ -204,7 +192,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 
 		// avoid closure capture iteration variable
 		segment := us
-		future := dsService.ioPool.Submit(func() (interface{}, error) {
+		future := getOrCreateIOPool().Submit(func() (interface{}, error) {
 			if err := dsService.channel.addSegment(addSegmentReq{
 				segType:      datapb.SegmentType_Normal,
 				segID:        segment.GetID(),
@@ -239,7 +227,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 		)
 		// avoid closure capture iteration variable
 		segment := fs
-		future := dsService.ioPool.Submit(func() (interface{}, error) {
+		future := getOrCreateIOPool().Submit(func() (interface{}, error) {
 			if err := dsService.channel.addSegment(addSegmentReq{
 				segType:      datapb.SegmentType_Flushed,
 				segID:        segment.GetID(),
