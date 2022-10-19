@@ -889,7 +889,7 @@ func (m *importManager) expireOldTasksFromMem() {
 		defer m.workingLock.Unlock()
 		for _, v := range m.workingTasks {
 			taskExpiredAndStateUpdated := false
-			if taskExpired(v) {
+			if v.GetState().GetStateCode() != commonpb.ImportState_ImportCompleted && taskExpired(v) {
 				log.Info("a working task has expired", zap.Int64("task ID", v.GetId()))
 				taskID := v.GetId()
 				m.workingLock.Unlock()
