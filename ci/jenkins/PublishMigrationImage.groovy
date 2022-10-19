@@ -18,7 +18,7 @@ pipeline {
     }
 
     environment {
-        HARBOR_REPO = "harbor.milvus.io/milvus"
+        HARBOR_REPO = "harbor.milvus.io"
         CI_DOCKER_CREDENTIAL_ID="harbor-milvus-io-registry"
     }
 
