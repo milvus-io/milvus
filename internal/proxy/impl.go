@@ -2130,6 +2130,7 @@ func (node *Proxy) DropIndex(ctx context.Context, request *milvuspb.DropIndexReq
 		Condition:        NewTaskCondition(ctx),
 		DropIndexRequest: request,
 		indexCoord:       node.indexCoord,
+		queryCoord:       node.queryCoord,
 	}
 
 	method := "DropIndex"
