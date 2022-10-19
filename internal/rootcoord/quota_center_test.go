@@ -138,8 +138,7 @@ func TestQuotaCenter(t *testing.T) {
 	t.Run("test timeTickDelay", func(t *testing.T) {
 		// test MaxTimestamp
 		quotaCenter := NewQuotaCenter(pcm, &queryCoordMockForQuota{}, &dataCoordMockForQuota{}, core.tsoAllocator)
-		factor, err := quotaCenter.timeTickDelay()
-		assert.NoError(t, err)
+		factor := quotaCenter.timeTickDelay(0)
 		assert.Equal(t, float64(1), factor)
 
 		now := time.Now()
@@ -155,14 +154,14 @@ func TestQuotaCenter(t *testing.T) {
 			return ts, nil
 		}
 		quotaCenter.tsoAllocator = alloc
-		quotaCenter.queryNodeMetrics = []*metricsinfo.QueryNodeQuotaMetrics{{
-			Fgm: metricsinfo.FlowGraphMetric{
+		quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{
+			1: {Fgm: metricsinfo.FlowGraphMetric{
 				MinFlowGraphTt: tsoutil.ComposeTSByTime(now, 0),
 				NumFlowGraph:   1,
-			},
-		}}
-		factor, err = quotaCenter.timeTickDelay()
+			}}}
+		ts, err := quotaCenter.tsoAllocator.GenerateTSO(1)
 		assert.NoError(t, err)
+		factor = quotaCenter.timeTickDelay(ts)
 		assert.Equal(t, float64(0), factor)
 
 		// test one-third time tick delay
@@ -172,23 +171,54 @@ func TestQuotaCenter(t *testing.T) {
 			oneThirdTs := tsoutil.ComposeTSByTime(added, 0)
 			return oneThirdTs, nil
 		}
-		quotaCenter.queryNodeMetrics = []*metricsinfo.QueryNodeQuotaMetrics{{
-			Fgm: metricsinfo.FlowGraphMetric{
+		quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{
+			1: {Fgm: metricsinfo.FlowGraphMetric{
 				MinFlowGraphTt: tsoutil.ComposeTSByTime(now, 0),
 				NumFlowGraph:   1,
-			},
-		}}
-		factor, err = quotaCenter.timeTickDelay()
+			}}}
+		ts, err = quotaCenter.tsoAllocator.GenerateTSO(1)
 		assert.NoError(t, err)
+		factor = quotaCenter.timeTickDelay(ts)
 		ok := math.Abs(factor-2.0/3.0) < 0.0001
 		assert.True(t, ok)
+	})
 
-		// test with error
-		alloc.GenerateTSOF = func(count uint32) (typeutil.Timestamp, error) {
-			return 0, fmt.Errorf("mock err")
+	t.Run("test timeTickDelay factors", func(t *testing.T) {
+		quotaCenter := NewQuotaCenter(pcm, &queryCoordMockForQuota{}, &dataCoordMockForQuota{}, core.tsoAllocator)
+		type ttCase struct {
+			maxTtDelay     time.Duration
+			curTt          time.Time
+			fgTt           time.Time
+			expectedFactor float64
 		}
-		_, err = quotaCenter.timeTickDelay()
-		assert.Error(t, err)
+		t0 := time.Now()
+		ttCases := []ttCase{
+			{10 * time.Second, t0, t0.Add(1 * time.Second), 1},
+			{10 * time.Second, t0, t0, 1},
+			{10 * time.Second, t0.Add(1 * time.Second), t0, 0.9},
+			{10 * time.Second, t0.Add(2 * time.Second), t0, 0.8},
+			{10 * time.Second, t0.Add(5 * time.Second), t0, 0.5},
+			{10 * time.Second, t0.Add(7 * time.Second), t0, 0.3},
+			{10 * time.Second, t0.Add(9 * time.Second), t0, 0.1},
+			{10 * time.Second, t0.Add(10 * time.Second), t0, 0},
+			{10 * time.Second, t0.Add(100 * time.Second), t0, 0},
+		}
+
+		backup := Params.QuotaConfig.MaxTimeTickDelay
+
+		for i, c := range ttCases {
+			Params.QuotaConfig.MaxTimeTickDelay = c.maxTtDelay
+			fgTs := tsoutil.ComposeTSByTime(c.fgTt, 0)
+			quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{1: {Fgm: metricsinfo.FlowGraphMetric{NumFlowGraph: 1, MinFlowGraphTt: fgTs}}}
+			curTs := tsoutil.ComposeTSByTime(c.curTt, 0)
+			factor := quotaCenter.timeTickDelay(curTs)
+			if math.Abs(factor-c.expectedFactor) > 0.000001 {
+				t.Errorf("case %d failed: curTs[%v], fgTs[%v], expectedFactor: %f, actualFactor: %f",
+					i, c.curTt, c.fgTt, c.expectedFactor, factor)
+			}
+		}
+
+		Params.QuotaConfig.MaxTimeTickDelay = backup
 	})
 
 	t.Run("test checkNQInQuery", func(t *testing.T) {
@@ -199,20 +229,18 @@ func TestQuotaCenter(t *testing.T) {
 		// test cool off
 		Params.QuotaConfig.QueueProtectionEnabled = true
 		Params.QuotaConfig.NQInQueueThreshold = 100
-		quotaCenter.queryNodeMetrics = []*metricsinfo.QueryNodeQuotaMetrics{{
-			SearchQueue: metricsinfo.ReadInfoInQueue{
+		quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{
+			1: {SearchQueue: metricsinfo.ReadInfoInQueue{
 				UnsolvedQueue: Params.QuotaConfig.NQInQueueThreshold,
-			},
-		}}
+			}}}
 		factor = quotaCenter.checkNQInQuery()
 		assert.Equal(t, Params.QuotaConfig.CoolOffSpeed, factor)
 
 		// test no cool off
-		quotaCenter.queryNodeMetrics = []*metricsinfo.QueryNodeQuotaMetrics{{
-			SearchQueue: metricsinfo.ReadInfoInQueue{
+		quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{
+			1: {SearchQueue: metricsinfo.ReadInfoInQueue{
 				UnsolvedQueue: Params.QuotaConfig.NQInQueueThreshold - 1,
-			},
-		}}
+			}}}
 		factor = quotaCenter.checkNQInQuery()
 		assert.Equal(t, 1.0, factor)
 		//ok := math.Abs(factor-1.0) < 0.0001
@@ -228,20 +256,18 @@ func TestQuotaCenter(t *testing.T) {
 		Params.QuotaConfig.QueueProtectionEnabled = true
 		Params.QuotaConfig.QueueLatencyThreshold = float64(3 * time.Second)
 
-		quotaCenter.queryNodeMetrics = []*metricsinfo.QueryNodeQuotaMetrics{{
-			SearchQueue: metricsinfo.ReadInfoInQueue{
+		quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{
+			1: {SearchQueue: metricsinfo.ReadInfoInQueue{
 				AvgQueueDuration: time.Duration(Params.QuotaConfig.QueueLatencyThreshold),
-			},
-		}}
+			}}}
 		factor = quotaCenter.checkQueryLatency()
 		assert.Equal(t, Params.QuotaConfig.CoolOffSpeed, factor)
 
 		// test no cool off
-		quotaCenter.queryNodeMetrics = []*metricsinfo.QueryNodeQuotaMetrics{{
-			SearchQueue: metricsinfo.ReadInfoInQueue{
+		quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{
+			1: {SearchQueue: metricsinfo.ReadInfoInQueue{
 				AvgQueueDuration: 1 * time.Second,
-			},
-		}}
+			}}}
 		factor = quotaCenter.checkQueryLatency()
 		assert.Equal(t, 1.0, factor)
 	})
@@ -255,65 +281,59 @@ func TestQuotaCenter(t *testing.T) {
 		Params.QuotaConfig.ResultProtectionEnabled = true
 		Params.QuotaConfig.MaxReadResultRate = 1
 
-		quotaCenter.proxyMetrics = []*metricsinfo.ProxyQuotaMetrics{{
-			Rms: []metricsinfo.RateMetric{
+		quotaCenter.proxyMetrics = map[UniqueID]*metricsinfo.ProxyQuotaMetrics{
+			1: {Rms: []metricsinfo.RateMetric{
 				{Label: metricsinfo.ReadResultThroughput, Rate: 1.2},
-			},
-		}}
+			}}}
 		factor = quotaCenter.checkReadResultRate()
 		assert.Equal(t, Params.QuotaConfig.CoolOffSpeed, factor)
 
 		// test no cool off
-		quotaCenter.proxyMetrics = []*metricsinfo.ProxyQuotaMetrics{{
-			Rms: []metricsinfo.RateMetric{
+		quotaCenter.proxyMetrics = map[UniqueID]*metricsinfo.ProxyQuotaMetrics{
+			1: {Rms: []metricsinfo.RateMetric{
 				{Label: metricsinfo.ReadResultThroughput, Rate: 0.8},
-			},
-		}}
+			}}}
 		factor = quotaCenter.checkReadResultRate()
 		assert.Equal(t, 1.0, factor)
 	})
 
 	t.Run("test calculateReadRates", func(t *testing.T) {
 		quotaCenter := NewQuotaCenter(pcm, &queryCoordMockForQuota{}, &dataCoordMockForQuota{}, core.tsoAllocator)
-		quotaCenter.proxyMetrics = []*metricsinfo.ProxyQuotaMetrics{{
-			Rms: []metricsinfo.RateMetric{
+		quotaCenter.proxyMetrics = map[UniqueID]*metricsinfo.ProxyQuotaMetrics{
+			1: {Rms: []metricsinfo.RateMetric{
 				{Label: internalpb.RateType_DQLSearch.String(), Rate: 100},
 				{Label: internalpb.RateType_DQLQuery.String(), Rate: 100},
-			},
-		}}
+			}}}
 
 		Params.QuotaConfig.ForceDenyReading = false
 		Params.QuotaConfig.QueueProtectionEnabled = true
 		Params.QuotaConfig.QueueLatencyThreshold = 100
-		quotaCenter.queryNodeMetrics = []*metricsinfo.QueryNodeQuotaMetrics{{
-			SearchQueue: metricsinfo.ReadInfoInQueue{
+		quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{
+			1: {SearchQueue: metricsinfo.ReadInfoInQueue{
 				AvgQueueDuration: time.Duration(Params.QuotaConfig.QueueLatencyThreshold),
-			},
-		}}
+			}}}
 		quotaCenter.calculateReadRates()
 		assert.Equal(t, Limit(100.0*0.9), quotaCenter.currentRates[internalpb.RateType_DQLSearch])
 		assert.Equal(t, Limit(100.0*0.9), quotaCenter.currentRates[internalpb.RateType_DQLQuery])
 
 		Params.QuotaConfig.NQInQueueThreshold = 100
-		quotaCenter.queryNodeMetrics = []*metricsinfo.QueryNodeQuotaMetrics{{
-			SearchQueue: metricsinfo.ReadInfoInQueue{
+		quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{
+			1: {SearchQueue: metricsinfo.ReadInfoInQueue{
 				UnsolvedQueue: Params.QuotaConfig.NQInQueueThreshold,
-			},
-		}}
+			}}}
 		quotaCenter.calculateReadRates()
 		assert.Equal(t, Limit(100.0*0.9), quotaCenter.currentRates[internalpb.RateType_DQLSearch])
 		assert.Equal(t, Limit(100.0*0.9), quotaCenter.currentRates[internalpb.RateType_DQLQuery])
 
 		Params.QuotaConfig.ResultProtectionEnabled = true
 		Params.QuotaConfig.MaxReadResultRate = 1
-		quotaCenter.proxyMetrics = []*metricsinfo.ProxyQuotaMetrics{{
-			Rms: []metricsinfo.RateMetric{
+		quotaCenter.proxyMetrics = map[UniqueID]*metricsinfo.ProxyQuotaMetrics{
+			1: {Rms: []metricsinfo.RateMetric{
 				{Label: internalpb.RateType_DQLSearch.String(), Rate: 100},
 				{Label: internalpb.RateType_DQLQuery.String(), Rate: 100},
 				{Label: metricsinfo.ReadResultThroughput, Rate: 1.2},
-			},
-		}}
-		quotaCenter.queryNodeMetrics = []*metricsinfo.QueryNodeQuotaMetrics{{SearchQueue: metricsinfo.ReadInfoInQueue{}}}
+			}}}
+		quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{1: {SearchQueue: metricsinfo.ReadInfoInQueue{}}}
 		quotaCenter.calculateReadRates()
 		assert.Equal(t, Limit(100.0*0.9), quotaCenter.currentRates[internalpb.RateType_DQLSearch])
 		assert.Equal(t, Limit(100.0*0.9), quotaCenter.currentRates[internalpb.RateType_DQLQuery])
@@ -348,10 +368,10 @@ func TestQuotaCenter(t *testing.T) {
 		quotaCenter := NewQuotaCenter(pcm, &queryCoordMockForQuota{}, &dataCoordMockForQuota{}, core.tsoAllocator)
 		factor := quotaCenter.memoryToWaterLevel()
 		assert.Equal(t, float64(1), factor)
-		quotaCenter.dataNodeMetrics = []*metricsinfo.DataNodeQuotaMetrics{{Hms: metricsinfo.HardwareMetrics{MemoryUsage: 100, Memory: 100}}}
+		quotaCenter.dataNodeMetrics = map[UniqueID]*metricsinfo.DataNodeQuotaMetrics{1: {Hms: metricsinfo.HardwareMetrics{MemoryUsage: 100, Memory: 100}}}
 		factor = quotaCenter.memoryToWaterLevel()
 		assert.Equal(t, float64(0), factor)
-		quotaCenter.queryNodeMetrics = []*metricsinfo.QueryNodeQuotaMetrics{{Hms: metricsinfo.HardwareMetrics{MemoryUsage: 100, Memory: 100}}}
+		quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{1: {Hms: metricsinfo.HardwareMetrics{MemoryUsage: 100, Memory: 100}}}
 		factor = quotaCenter.memoryToWaterLevel()
 		assert.Equal(t, float64(0), factor)
 	})
@@ -385,8 +405,7 @@ func TestQuotaCenter(t *testing.T) {
 		for i, c := range memCases {
 			Params.QuotaConfig.QueryNodeMemoryLowWaterLevel = c.lowWater
 			Params.QuotaConfig.QueryNodeMemoryHighWaterLevel = c.highWater
-			quotaCenter.queryNodeMetrics = []*metricsinfo.QueryNodeQuotaMetrics{{
-				Hms: metricsinfo.HardwareMetrics{MemoryUsage: c.memUsage, Memory: c.memTotal}}}
+			quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{1: {Hms: metricsinfo.HardwareMetrics{MemoryUsage: c.memUsage, Memory: c.memTotal}}}
 			factor := quotaCenter.memoryToWaterLevel()
 			if math.Abs(factor-c.expectedFactor) > 0.000001 {
 				t.Errorf("case %d failed: waterLever[low:%v, high:%v], memMetric[used:%d, total:%d], expectedFactor: %f, actualFactor: %f",

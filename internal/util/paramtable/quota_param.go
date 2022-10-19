@@ -523,10 +523,13 @@ func (p *quotaConfig) initDiskQuota() {
 	p.DiskQuota = p.Base.ParseFloatWithDefault("quotaAndLimits.limitWriting.diskProtection.diskQuota", defaultDiskQuotaInMB)
 	// (0, +inf)
 	if p.DiskQuota <= 0 {
-		log.Warn("DiskQuota must in the range of `(0, +inf)`, use default +inf", zap.Float64("DiskQuota", p.DiskQuota))
 		p.DiskQuota = defaultDiskQuotaInMB
 	}
-	log.Debug("init disk quota", zap.Float64("diskQuota(MB)", p.DiskQuota))
+	if p.DiskQuota < defaultDiskQuotaInMB {
+		log.Debug("init disk quota", zap.Float64("diskQuota(MB)", p.DiskQuota))
+	} else {
+		log.Debug("init disk quota", zap.String("diskQuota(MB)", "+inf"))
+	}
 	// megabytes to bytes
 	p.DiskQuota = megaBytes2Bytes(p.DiskQuota)
 }

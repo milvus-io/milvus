@@ -84,6 +84,14 @@ var (
 			Help:      "synchronized unix epoch per physical channel",
 		}, []string{channelNameLabelName})
 
+	DataCoordStoredBinlogSize = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "stored_binlog_size",
+			Help:      "binlog size of all collections/segments",
+		}, []string{})
+
 	/* hard to implement, commented now
 	DataCoordSegmentSizeRatio = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -139,4 +147,5 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(DataCoordNumStoredRows)
 	registry.MustRegister(DataCoordNumStoredRowsCounter)
 	registry.MustRegister(DataCoordSyncEpoch)
+	registry.MustRegister(DataCoordStoredBinlogSize)
 }
