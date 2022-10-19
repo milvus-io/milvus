@@ -234,7 +234,7 @@ func (loader *segmentLoader) loadFiles(ctx context.Context, segment *Segment,
 	if segment.getType() == segmentTypeSealed {
 		fieldID2IndexInfo := make(map[int64]*querypb.FieldIndexInfo)
 		for _, indexInfo := range loadInfo.IndexInfos {
-			if indexInfo != nil && indexInfo.EnableIndex && len(indexInfo.IndexFilePaths) > 0 {
+			if len(indexInfo.IndexFilePaths) > 0 {
 				fieldID := indexInfo.FieldID
 				fieldID2IndexInfo[fieldID] = indexInfo
 			}

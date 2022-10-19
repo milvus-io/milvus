@@ -16,7 +16,10 @@
 
 package meta
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 var (
 	// Read errors
@@ -27,4 +30,11 @@ var (
 	// Store errors
 	ErrStoreCollectionFailed = errors.New("StoreCollectionFailed")
 	ErrStoreReplicaFailed    = errors.New("StoreReplicaFailed")
+
+	// Index errors
+	ErrIndexNotExist = errors.New("IndexNotExist")
 )
+
+func WrapErrIndexNotExist(segmentID int64) error {
+	return fmt.Errorf("%w(segmentID=%d)", ErrIndexNotExist, segmentID)
+}
