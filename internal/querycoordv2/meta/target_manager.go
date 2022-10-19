@@ -18,10 +18,12 @@ package meta
 
 import (
 	"sync"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"go.uber.org/zap"
 )
 
@@ -146,8 +148,12 @@ func (mgr *TargetManager) AddDmChannel(channels ...*DmChannel) {
 	defer mgr.rwmutex.Unlock()
 
 	for _, channel := range channels {
+		ts := channel.GetSeekPosition().GetTimestamp()
 		log.Info("add channel into targets",
-			zap.String("channel", channel.GetChannelName()))
+			zap.String("channel", channel.GetChannelName()),
+			zap.Uint64("checkpoint", ts),
+			zap.Duration("sinceCheckpoint", time.Since(tsoutil.PhysicalTime(ts))),
+		)
 		mgr.dmChannels[channel.ChannelName] = channel
 	}
 }
