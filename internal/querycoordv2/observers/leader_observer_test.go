@@ -184,7 +184,7 @@ func (suite *LeaderObserverTestSuite) TestSyncRemovedSegments() {
 
 	expectReq := &querypb.SyncDistributionRequest{
 		Base: commonpbutil.NewMsgBase(
-			MsgType:  commonpb.MsgType_SyncDistribution,
+			commonpbutil.WithMsgType(commonpb.MsgType_SyncDistribution),
 		),
 		CollectionID: 1,
 		Channel:      "test-insert-channel",
