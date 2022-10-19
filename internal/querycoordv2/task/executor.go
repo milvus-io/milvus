@@ -19,6 +19,7 @@ package task
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/log"
@@ -26,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"go.uber.org/zap"
 )
 
@@ -389,7 +391,12 @@ func (ex *Executor) subDmChannel(task *ChannelTask, step int) error {
 			zap.Error(err))
 		return err
 	}
-	log.Info("subscribe channel...")
+
+	ts := dmChannel.GetSeekPosition().GetTimestamp()
+	log.Info("subscribe channel...",
+		zap.Uint64("checkpoint", ts),
+		zap.Duration("sinceCheckpoint", time.Since(tsoutil.PhysicalTime(ts))),
+	)
 	status, err := ex.cluster.WatchDmChannels(ctx, action.Node(), req)
 	if err != nil {
 		log.Warn("failed to subscribe DmChannel, it may be a false failure", zap.Error(err))
