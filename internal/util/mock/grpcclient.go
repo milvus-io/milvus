@@ -40,6 +40,7 @@ type GRPCClientBase[T any] struct {
 	grpcClientMtx    sync.RWMutex
 	GetGrpcClientErr error
 	role             string
+	nodeID           int64
 }
 
 func (c *GRPCClientBase[T]) SetGetAddrFunc(f func() (string, error)) {
@@ -153,4 +154,12 @@ func (c *GRPCClientBase[T]) Close() error {
 		return c.conn.Close()
 	}
 	return nil
+}
+
+func (c *GRPCClientBase[T]) GetNodeID() int64 {
+	return c.nodeID
+}
+
+func (c *GRPCClientBase[T]) SetNodeID(nodeID int64) {
+	c.nodeID = nodeID
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
@@ -88,7 +89,7 @@ func (g *getStatisticsTask) SetTs(ts Timestamp) {
 
 func (g *getStatisticsTask) OnEnqueue() error {
 	g.GetStatisticsRequest = &internalpb.GetStatisticsRequest{
-		Base: &commonpb.MsgBase{},
+		Base: commonpbutil.NewMsgBase(),
 	}
 	return nil
 }
@@ -231,12 +232,10 @@ func (g *getStatisticsTask) getStatisticsFromDataCoord(ctx context.Context) erro
 	partIDs := g.unloadedPartitionIDs
 
 	req := &datapb.GetPartitionStatisticsRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_GetPartitionStatistics,
-			MsgID:     g.Base.MsgID,
-			Timestamp: g.Base.Timestamp,
-			SourceID:  g.Base.SourceID,
-		},
+		Base: commonpbutil.NewMsgBaseCopy(
+			g.Base,
+			commonpbutil.WithMsgType(commonpb.MsgType_GetPartitionStatistics),
+		),
 		CollectionID: collID,
 		PartitionIDs: partIDs,
 	}
@@ -326,10 +325,10 @@ func checkFullLoaded(ctx context.Context, qc types.QueryCoord, collectionName st
 	// If request to search partitions
 	if len(searchPartitionIDs) > 0 {
 		resp, err := qc.ShowPartitions(ctx, &querypb.ShowPartitionsRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:  commonpb.MsgType_ShowPartitions,
-				SourceID: Params.ProxyCfg.GetNodeID(),
-			},
+			Base: commonpbutil.NewMsgBase(
+				commonpbutil.WithMsgType(commonpb.MsgType_ShowPartitions),
+				commonpbutil.WithSourceID(Params.ProxyCfg.GetNodeID()),
+			),
 			CollectionID: info.collID,
 			PartitionIDs: searchPartitionIDs,
 		})
@@ -351,10 +350,10 @@ func checkFullLoaded(ctx context.Context, qc types.QueryCoord, collectionName st
 
 	// If request to search collection
 	resp, err := qc.ShowPartitions(ctx, &querypb.ShowPartitionsRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:  commonpb.MsgType_ShowPartitions,
-			SourceID: Params.ProxyCfg.GetNodeID(),
-		},
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_ShowPartitions),
+			commonpbutil.WithSourceID(Params.ProxyCfg.GetNodeID()),
+		),
 		CollectionID: info.collID,
 	})
 	if err != nil {
@@ -628,7 +627,7 @@ func (g *getCollectionStatisticsTask) SetTs(ts Timestamp) {
 }
 
 func (g *getCollectionStatisticsTask) OnEnqueue() error {
-	g.Base = &commonpb.MsgBase{}
+	g.Base = commonpbutil.NewMsgBase()
 	return nil
 }
 
@@ -645,12 +644,10 @@ func (g *getCollectionStatisticsTask) Execute(ctx context.Context) error {
 	}
 	g.collectionID = collID
 	req := &datapb.GetCollectionStatisticsRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_GetCollectionStatistics,
-			MsgID:     g.Base.MsgID,
-			Timestamp: g.Base.Timestamp,
-			SourceID:  g.Base.SourceID,
-		},
+		Base: commonpbutil.NewMsgBaseCopy(
+			g.Base,
+			commonpbutil.WithMsgType(commonpb.MsgType_GetCollectionStatistics),
+		),
 		CollectionID: collID,
 	}
 
@@ -718,7 +715,7 @@ func (g *getPartitionStatisticsTask) SetTs(ts Timestamp) {
 }
 
 func (g *getPartitionStatisticsTask) OnEnqueue() error {
-	g.Base = &commonpb.MsgBase{}
+	g.Base = commonpbutil.NewMsgBase()
 	return nil
 }
 
@@ -739,12 +736,10 @@ func (g *getPartitionStatisticsTask) Execute(ctx context.Context) error {
 		return err
 	}
 	req := &datapb.GetPartitionStatisticsRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_GetPartitionStatistics,
-			MsgID:     g.Base.MsgID,
-			Timestamp: g.Base.Timestamp,
-			SourceID:  g.Base.SourceID,
-		},
+		Base: commonpbutil.NewMsgBaseCopy(
+			g.Base,
+			commonpbutil.WithMsgType(commonpb.MsgType_GetCollectionStatistics),
+		),
 		CollectionID: collID,
 		PartitionIDs: []int64{partitionID},
 	}

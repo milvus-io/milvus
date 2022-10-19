@@ -24,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 
 	"go.uber.org/zap"
@@ -208,10 +209,10 @@ func (m *MetaCache) GetCollectionInfo(ctx context.Context, collectionName string
 	if !collInfo.isLoaded {
 		// check if collection was loaded
 		showResp, err := m.queryCoord.ShowCollections(ctx, &querypb.ShowCollectionsRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:  commonpb.MsgType_ShowCollections,
-				SourceID: Params.ProxyCfg.GetNodeID(),
-			},
+			Base: commonpbutil.NewMsgBase(
+				commonpbutil.WithMsgType(commonpb.MsgType_ShowCollections),
+				commonpbutil.WithSourceID(Params.ProxyCfg.GetNodeID()),
+			),
 			CollectionIDs: []int64{collInfo.collID},
 		})
 		if err != nil {
@@ -396,9 +397,9 @@ func (m *MetaCache) GetPartitionInfo(ctx context.Context, collectionName string,
 // Get the collection information from rootcoord.
 func (m *MetaCache) describeCollection(ctx context.Context, collectionName string) (*milvuspb.DescribeCollectionResponse, error) {
 	req := &milvuspb.DescribeCollectionRequest{
-		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_DescribeCollection,
-		},
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection),
+		),
 		CollectionName: collectionName,
 	}
 	coll, err := m.rootCoord.DescribeCollection(ctx, req)
@@ -432,9 +433,9 @@ func (m *MetaCache) describeCollection(ctx context.Context, collectionName strin
 
 func (m *MetaCache) showPartitions(ctx context.Context, collectionName string) (*milvuspb.ShowPartitionsResponse, error) {
 	req := &milvuspb.ShowPartitionsRequest{
-		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_ShowPartitions,
-		},
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_ShowPartitions),
+		),
 		CollectionName: collectionName,
 	}
 
@@ -524,9 +525,9 @@ func (m *MetaCache) GetCredentialInfo(ctx context.Context, username string) (*in
 
 	if !ok {
 		req := &rootcoordpb.GetCredentialRequest{
-			Base: &commonpb.MsgBase{
-				MsgType: commonpb.MsgType_GetCredential,
-			},
+			Base: commonpbutil.NewMsgBase(
+				commonpbutil.WithMsgType(commonpb.MsgType_GetCredential),
+			),
 			Username: username,
 		}
 		resp, err := m.rootCoord.GetCredential(ctx, req)
@@ -583,10 +584,10 @@ func (m *MetaCache) GetShards(ctx context.Context, withCache bool, collectionNam
 			zap.String("collectionName", collectionName))
 	}
 	req := &querypb.GetShardLeadersRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:  commonpb.MsgType_GetShardLeaders,
-			SourceID: Params.ProxyCfg.GetNodeID(),
-		},
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_GetShardLeaders),
+			commonpbutil.WithSourceID(Params.ProxyCfg.GetNodeID()),
+		),
 		CollectionID: info.collID,
 	}
 

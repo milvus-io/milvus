@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/logutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
@@ -299,12 +300,12 @@ func (node *Proxy) sendChannelsTimeTickLoop() {
 				}
 
 				req := &internalpb.ChannelTimeTickMsg{
-					Base: &commonpb.MsgBase{
-						MsgType:   commonpb.MsgType_TimeTick, // todo
-						MsgID:     0,                         // todo
-						Timestamp: 0,                         // todo
-						SourceID:  node.session.ServerID,
-					},
+					Base: commonpbutil.NewMsgBase(
+						commonpbutil.WithMsgType(commonpb.MsgType_TimeTick), // todo
+						commonpbutil.WithMsgID(0),                           // todo
+						commonpbutil.WithTimeStamp(0),                       // todo
+						commonpbutil.WithSourceID(node.session.ServerID),
+					),
 					ChannelNames:     channels,
 					Timestamps:       tss,
 					DefaultTimestamp: maxTs,

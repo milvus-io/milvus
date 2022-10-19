@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 
 	"go.uber.org/zap"
 )
@@ -89,7 +90,7 @@ type repackFuncType = func(tsMsgs []msgstream.TsMsg, hashKeys [][]int32) (map[in
 func getDmlChannelsFunc(ctx context.Context, rc types.RootCoord) getChannelsFuncType {
 	return func(collectionID UniqueID) (channelInfos, error) {
 		req := &milvuspb.DescribeCollectionRequest{
-			Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_DescribeCollection},
+			Base:         commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection)),
 			CollectionID: collectionID,
 		}
 

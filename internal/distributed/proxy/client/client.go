@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
+	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
@@ -108,7 +109,7 @@ func (c *Client) GetComponentStates(ctx context.Context) (*milvuspb.ComponentSta
 	return ret.(*milvuspb.ComponentStates), err
 }
 
-//GetStatisticsChannel return the statistics channel in string
+// GetStatisticsChannel return the statistics channel in string
 func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
 	ret, err := c.grpcClient.ReCall(ctx, func(client proxypb.ProxyClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
@@ -124,6 +125,8 @@ func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResp
 
 // InvalidateCollectionMetaCache invalidate collection meta cache
 func (c *Client) InvalidateCollectionMetaCache(ctx context.Context, req *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.SetTargetID(req.GetBase(), c.grpcClient.GetNodeID())
 	ret, err := c.grpcClient.ReCall(ctx, func(client proxypb.ProxyClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -137,6 +140,8 @@ func (c *Client) InvalidateCollectionMetaCache(ctx context.Context, req *proxypb
 }
 
 func (c *Client) InvalidateCredentialCache(ctx context.Context, req *proxypb.InvalidateCredCacheRequest) (*commonpb.Status, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.SetTargetID(req.GetBase(), c.grpcClient.GetNodeID())
 	ret, err := c.grpcClient.ReCall(ctx, func(client proxypb.ProxyClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -150,6 +155,8 @@ func (c *Client) InvalidateCredentialCache(ctx context.Context, req *proxypb.Inv
 }
 
 func (c *Client) UpdateCredentialCache(ctx context.Context, req *proxypb.UpdateCredCacheRequest) (*commonpb.Status, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.SetTargetID(req.GetBase(), c.grpcClient.GetNodeID())
 	ret, err := c.grpcClient.ReCall(ctx, func(client proxypb.ProxyClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -163,6 +170,8 @@ func (c *Client) UpdateCredentialCache(ctx context.Context, req *proxypb.UpdateC
 }
 
 func (c *Client) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.RefreshPolicyInfoCacheRequest) (*commonpb.Status, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.SetTargetID(req.GetBase(), c.grpcClient.GetNodeID())
 	ret, err := c.grpcClient.ReCall(ctx, func(client proxypb.ProxyClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -178,6 +187,8 @@ func (c *Client) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.Refres
 // GetProxyMetrics gets the metrics of proxy, it's an internal interface which is different from GetMetrics interface,
 // because it only obtains the metrics of Proxy, not including the topological metrics of Query cluster and Data cluster.
 func (c *Client) GetProxyMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.SetTargetID(req.GetBase(), c.grpcClient.GetNodeID())
 	ret, err := c.grpcClient.ReCall(ctx, func(client proxypb.ProxyClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -192,6 +203,8 @@ func (c *Client) GetProxyMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 
 // SetRates notifies Proxy to limit rates of requests.
 func (c *Client) SetRates(ctx context.Context, req *proxypb.SetRatesRequest) (*commonpb.Status, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.SetTargetID(req.GetBase(), c.grpcClient.GetNodeID())
 	ret, err := c.grpcClient.ReCall(ctx, func(client proxypb.ProxyClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()

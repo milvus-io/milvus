@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/types"
 
+	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/distance"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
@@ -560,10 +561,10 @@ func checkIfLoaded(ctx context.Context, qc types.QueryCoord, collectionName stri
 
 	// If request to search partitions
 	resp, err := qc.ShowPartitions(ctx, &querypb.ShowPartitionsRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:  commonpb.MsgType_ShowPartitions,
-			SourceID: Params.ProxyCfg.GetNodeID(),
-		},
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_ShowPartitions),
+			commonpbutil.WithSourceID(Params.ProxyCfg.GetNodeID()),
+		),
 		CollectionID: info.collID,
 		PartitionIDs: searchPartitionIDs,
 	})
@@ -841,7 +842,7 @@ func (t *searchTask) SetTs(ts Timestamp) {
 }
 
 func (t *searchTask) OnEnqueue() error {
-	t.Base = &commonpb.MsgBase{}
+	t.Base = commonpbutil.NewMsgBase()
 	t.Base.MsgType = commonpb.MsgType_Search
 	t.Base.SourceID = Params.ProxyCfg.GetNodeID()
 	return nil
