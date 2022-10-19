@@ -18,6 +18,4 @@ COPY ./bin/ /milvus/bin/
 
 ENV PATH=/milvus/bin:$PATH
 
-ENTRYPOINT ["/bin/sh"]
-
 WORKDIR /milvus/
