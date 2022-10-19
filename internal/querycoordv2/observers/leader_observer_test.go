@@ -78,9 +78,9 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegments() {
 	observer.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
 	observer.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, []int64{}))
 	expectReq := &querypb.SyncDistributionRequest{
-		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_SyncDistribution,
-		},
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.with(commonpb.MsgType_SyncDistribution),
+		),
 		CollectionID: 1,
 		Channel:      "test-insert-channel",
 		Actions: []*querypb.SyncAction{
@@ -143,9 +143,9 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegmentsWithReplicas() {
 	observer.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, []int64{}))
 	observer.dist.LeaderViewManager.Update(4, utils.CreateTestLeaderView(4, 1, "test-insert-channel", map[int64]int64{1: 4}, []int64{}))
 	expectReq := &querypb.SyncDistributionRequest{
-		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_SyncDistribution,
-		},
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.with(commonpb.MsgType_SyncDistribution),
+		),
 		CollectionID: 1,
 		Channel:      "test-insert-channel",
 		Actions: []*querypb.SyncAction{
@@ -183,9 +183,9 @@ func (suite *LeaderObserverTestSuite) TestSyncRemovedSegments() {
 	observer.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{3: 2}, []int64{}))
 
 	expectReq := &querypb.SyncDistributionRequest{
-		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_SyncDistribution,
-		},
+		Base: commonpbutil.NewMsgBase(
+			MsgType:  commonpb.MsgType_SyncDistribution,
+		),
 		CollectionID: 1,
 		Channel:      "test-insert-channel",
 		Actions: []*querypb.SyncAction{

@@ -6,6 +6,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	ms "github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 
 	"github.com/milvus-io/milvus/internal/metastore/model"
 )
@@ -139,11 +140,11 @@ func (c *bgGarbageCollector) notifyCollectionGc(ctx context.Context, coll *model
 	msg := &ms.DropCollectionMsg{
 		BaseMsg: baseMsg,
 		DropCollectionRequest: internalpb.DropCollectionRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_DropCollection,
-				Timestamp: ts,
-				SourceID:  c.s.session.ServerID,
-			},
+			Base: commonpbutil.NewMsgBase(
+				commonpbutil.WithMsgType(commonpb.MsgType_DropCollection),
+				commonpbutil.WithTimeStamp(ts),
+				commonpbutil.WithSourceID(c.s.session.ServerID),
+			),
 			CollectionName: coll.Name,
 			CollectionID:   coll.CollectionID,
 		},
@@ -172,11 +173,11 @@ func (c *bgGarbageCollector) notifyPartitionGc(ctx context.Context, pChannels []
 	msg := &ms.DropPartitionMsg{
 		BaseMsg: baseMsg,
 		DropPartitionRequest: internalpb.DropPartitionRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_DropPartition,
-				Timestamp: ts,
-				SourceID:  c.s.session.ServerID,
-			},
+			Base: commonpbutil.NewMsgBase(
+				commonpbutil.WithMsgType(commonpb.MsgType_DropPartition),
+				commonpbutil.WithTimeStamp(ts),
+				commonpbutil.WithSourceID(c.s.session.ServerID),
+			),
 			PartitionName: partition.PartitionName,
 			CollectionID:  partition.CollectionID,
 			PartitionID:   partition.PartitionID,

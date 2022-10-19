@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 )
 
 type task interface {
@@ -155,12 +156,12 @@ func (cit *CreateIndexTask) Execute(ctx context.Context) error {
 
 	// Get flushed segments
 	flushedSegments, err := cit.dataCoordClient.GetFlushedSegments(cit.ctx, &datapb.GetFlushedSegmentsRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   0,
-			MsgID:     cit.indexID,
-			Timestamp: cit.req.Timestamp,
-			SourceID:  cit.indexCoordClient.serverID,
-		},
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(0),
+			commonpbutil.WithMsgID(cit.indexID),
+			commonpbutil.WithTimeStamp(cit.req.Timestamp),
+			commonpbutil.WithSourceID(cit.indexCoordClient.serverID),
+		),
 		CollectionID: cit.req.CollectionID,
 		PartitionID:  -1,
 	})

@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 )
 
 // allocator is the interface that allocating `UniqueID` or `Timestamp`
@@ -49,12 +50,11 @@ func newRootCoordAllocator(rootCoordClient types.RootCoord) allocator {
 // invoking RootCoord `AllocTimestamp`
 func (alloc *rootCoordAllocator) allocTimestamp(ctx context.Context) (Timestamp, error) {
 	resp, err := alloc.AllocTimestamp(ctx, &rootcoordpb.AllocTimestampRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_RequestTSO,
-			MsgID:     0,
-			Timestamp: 0,
-			SourceID:  Params.DataCoordCfg.GetNodeID(),
-		},
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_RequestTSO),
+			commonpbutil.WithMsgID(0),
+			commonpbutil.WithTimeStamp(0),
+		),
 		Count: 1,
 	})
 	if err = VerifyResponse(resp, err); err != nil {
@@ -66,12 +66,11 @@ func (alloc *rootCoordAllocator) allocTimestamp(ctx context.Context) (Timestamp,
 // allocID allocates an `UniqueID` from RootCoord, invoking AllocID grpc
 func (alloc *rootCoordAllocator) allocID(ctx context.Context) (UniqueID, error) {
 	resp, err := alloc.AllocID(ctx, &rootcoordpb.AllocIDRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_RequestID,
-			MsgID:     0,
-			Timestamp: 0,
-			SourceID:  Params.DataCoordCfg.GetNodeID(),
-		},
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_RequestID),
+			commonpbutil.WithMsgID(0),
+			commonpbutil.WithTimeStamp(0),
+		),
 		Count: 1,
 	})
 

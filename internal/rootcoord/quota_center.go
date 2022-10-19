@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/ratelimitutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
@@ -70,15 +71,17 @@ type Limit = ratelimitutil.Limit
 // notifies Proxies to limit rate of requests from clients or reject
 // all requests when the cluster met resources issues.
 // Limitations:
-//   1. DML throughput limitation;
-//   2. DDL, DQL qps/rps limitation;
+//  1. DML throughput limitation;
+//  2. DDL, DQL qps/rps limitation;
+//
 // Protections:
-//   1. TT protection -> 				dqlRate = maxDQLRate * (maxDelay - ttDelay) / maxDelay
-//   2. Memory protection -> 			dmlRate = maxDMLRate * (highMem - curMem) / (highMem - lowMem)
-//   3. Disk quota protection ->		force deny writing if exceeded
-//   4. DQL Queue length protection ->  dqlRate = curDQLRate * CoolOffSpeed
-//   5. DQL queue latency protection -> dqlRate = curDQLRate * CoolOffSpeed
-//	 6. Search result protection ->	 	searchRate = curSearchRate * CoolOffSpeed
+//  1. TT protection -> 				dqlRate = maxDQLRate * (maxDelay - ttDelay) / maxDelay
+//  2. Memory protection -> 			dmlRate = maxDMLRate * (highMem - curMem) / (highMem - lowMem)
+//  3. Disk quota protection ->		force deny writing if exceeded
+//  4. DQL Queue length protection ->  dqlRate = curDQLRate * CoolOffSpeed
+//  5. DQL queue latency protection -> dqlRate = curDQLRate * CoolOffSpeed
+//  6. Search result protection ->	 	searchRate = curSearchRate * CoolOffSpeed
+//
 // If necessary, user can also manually force to deny RW requests.
 type QuotaCenter struct {
 	// clients
@@ -151,7 +154,7 @@ func (q *QuotaCenter) stop() {
 	})
 }
 
-//  clearMetrics removes all metrics stored in QuotaCenter.
+// clearMetrics removes all metrics stored in QuotaCenter.
 func (q *QuotaCenter) clearMetrics() {
 	q.dataNodeMetrics = make(map[UniqueID]*metricsinfo.DataNodeQuotaMetrics, 0)
 	q.queryNodeMetrics = make(map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics, 0)
@@ -610,11 +613,10 @@ func (q *QuotaCenter) setRates() error {
 	}
 	timestamp := tsoutil.ComposeTSByTime(time.Now(), 0)
 	req := &proxypb.SetRatesRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_Undefined,
-			MsgID:     int64(timestamp),
-			Timestamp: timestamp,
-		},
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgID(int64(timestamp)),
+			commonpbutil.WithTimeStamp(timestamp),
+		),
 		Rates: map2List(),
 	}
 	return q.proxies.SetRates(ctx, req)

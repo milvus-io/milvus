@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/errorutil"
 
 	"golang.org/x/sync/errgroup"
@@ -594,10 +595,9 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 	}
 
 	dresp, err := s.rootCoordClient.DescribeCollection(s.ctx, &milvuspb.DescribeCollectionRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:  commonpb.MsgType_DescribeCollection,
-			SourceID: Params.DataCoordCfg.GetNodeID(),
-		},
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection),
+		),
 		CollectionID: collectionID,
 	})
 	if err = VerifyResponse(dresp, err); err != nil {
@@ -786,7 +786,7 @@ func (s *Server) GetSegmentsByStates(ctx context.Context, req *datapb.GetSegment
 	return resp, nil
 }
 
-//ShowConfigurations returns the configurations of DataCoord matching req.Pattern
+// ShowConfigurations returns the configurations of DataCoord matching req.Pattern
 func (s *Server) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
 	log.Debug("DataCoord.ShowConfigurations", zap.String("pattern", req.Pattern))
 	if s.isClosed() {
@@ -1275,10 +1275,9 @@ func (s *Server) SaveImportSegment(ctx context.Context, req *datapb.SaveImportSe
 	}
 	resp, err := cli.AddImportSegment(ctx,
 		&datapb.AddImportSegmentRequest{
-			Base: &commonpb.MsgBase{
-				SourceID:  Params.DataNodeCfg.GetNodeID(),
-				Timestamp: req.GetBase().GetTimestamp(),
-			},
+			Base: commonpbutil.NewMsgBase(
+				commonpbutil.WithTimeStamp(req.GetBase().GetTimestamp()),
+			),
 			SegmentId:    req.GetSegmentId(),
 			ChannelName:  req.GetChannelName(),
 			CollectionId: req.GetCollectionId(),
