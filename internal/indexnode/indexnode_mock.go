@@ -101,9 +101,9 @@ func NewIndexNodeMock() *Mock {
 			indexInfos := make([]*indexpb.IndexTaskInfo, 0)
 			for _, buildID := range in.BuildIDs {
 				indexInfos = append(indexInfos, &indexpb.IndexTaskInfo{
-					BuildID:    buildID,
-					State:      commonpb.IndexState_Finished,
-					IndexFiles: []string{"file1", "file2"},
+					BuildID:       buildID,
+					State:         commonpb.IndexState_Finished,
+					IndexFileKeys: []string{"file1", "file2"},
 				})
 			}
 			return &indexpb.QueryJobsResponse{

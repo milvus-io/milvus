@@ -13,30 +13,30 @@ import (
 func TestSegmentIndex_Insert(t *testing.T) {
 	var segIndexes = []*dbmodel.SegmentIndex{
 		{
-			TenantID:       tenantID,
-			CollectionID:   collID1,
-			PartitionID:    partitionID1,
-			SegmentID:      segmentID1,
-			NumRows:        NumRows,
-			IndexID:        indexID1,
-			BuildID:        1002,
-			NodeID:         3,
-			IndexVersion:   0,
-			IndexState:     3,
-			FailReason:     "",
-			CreateTime:     uint64(1011),
-			IndexFilePaths: "",
-			IndexSize:      1024,
-			IsDeleted:      false,
-			CreatedAt:      time.Now(),
-			UpdatedAt:      time.Now(),
+			TenantID:      tenantID,
+			CollectionID:  collID1,
+			PartitionID:   partitionID1,
+			SegmentID:     segmentID1,
+			NumRows:       NumRows,
+			IndexID:       indexID1,
+			BuildID:       1002,
+			NodeID:        3,
+			IndexVersion:  0,
+			IndexState:    3,
+			FailReason:    "",
+			CreateTime:    uint64(1011),
+			IndexFileKeys: "",
+			IndexSize:     1024,
+			IsDeleted:     false,
+			CreatedAt:     time.Now(),
+			UpdatedAt:     time.Now(),
 		},
 	}
 
 	// expectation
 	mock.ExpectBegin()
-	mock.ExpectExec("INSERT INTO `segment_indexes` (`tenant_id`,`collection_id`,`partition_id`,`segment_id`,`num_rows`,`index_id`,`build_id`,`node_id`,`index_version`,`index_state`,`fail_reason`,`create_time`,`index_file_paths`,`index_size`,`is_deleted`,`created_at`,`updated_at`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").
-		WithArgs(segIndexes[0].TenantID, segIndexes[0].CollectionID, segIndexes[0].PartitionID, segIndexes[0].SegmentID, segIndexes[0].NumRows, segIndexes[0].IndexID, segIndexes[0].BuildID, segIndexes[0].NodeID, segIndexes[0].IndexVersion, segIndexes[0].IndexState, segIndexes[0].FailReason, segIndexes[0].CreateTime, segIndexes[0].IndexFilePaths, segIndexes[0].IndexSize, segIndexes[0].IsDeleted, segIndexes[0].CreatedAt, segIndexes[0].UpdatedAt).
+	mock.ExpectExec("INSERT INTO `segment_indexes` (`tenant_id`,`collection_id`,`partition_id`,`segment_id`,`num_rows`,`index_id`,`build_id`,`node_id`,`index_version`,`index_state`,`fail_reason`,`create_time`,`index_file_keys`,`index_size`,`is_deleted`,`created_at`,`updated_at`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").
+		WithArgs(segIndexes[0].TenantID, segIndexes[0].CollectionID, segIndexes[0].PartitionID, segIndexes[0].SegmentID, segIndexes[0].NumRows, segIndexes[0].IndexID, segIndexes[0].BuildID, segIndexes[0].NodeID, segIndexes[0].IndexVersion, segIndexes[0].IndexState, segIndexes[0].FailReason, segIndexes[0].CreateTime, segIndexes[0].IndexFileKeys, segIndexes[0].IndexSize, segIndexes[0].IsDeleted, segIndexes[0].CreatedAt, segIndexes[0].UpdatedAt).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
@@ -48,30 +48,30 @@ func TestSegmentIndex_Insert(t *testing.T) {
 func TestSegmentIndex_Insert_Error(t *testing.T) {
 	var segIndexes = []*dbmodel.SegmentIndex{
 		{
-			TenantID:       tenantID,
-			CollectionID:   collID1,
-			PartitionID:    partitionID1,
-			SegmentID:      segmentID1,
-			NumRows:        NumRows,
-			IndexID:        indexID1,
-			BuildID:        1002,
-			NodeID:         3,
-			IndexVersion:   0,
-			IndexState:     3,
-			FailReason:     "",
-			CreateTime:     uint64(1011),
-			IndexFilePaths: "",
-			IndexSize:      1024,
-			IsDeleted:      false,
-			CreatedAt:      time.Now(),
-			UpdatedAt:      time.Now(),
+			TenantID:      tenantID,
+			CollectionID:  collID1,
+			PartitionID:   partitionID1,
+			SegmentID:     segmentID1,
+			NumRows:       NumRows,
+			IndexID:       indexID1,
+			BuildID:       1002,
+			NodeID:        3,
+			IndexVersion:  0,
+			IndexState:    3,
+			FailReason:    "",
+			CreateTime:    uint64(1011),
+			IndexFileKeys: "",
+			IndexSize:     1024,
+			IsDeleted:     false,
+			CreatedAt:     time.Now(),
+			UpdatedAt:     time.Now(),
 		},
 	}
 
 	// expectation
 	mock.ExpectBegin()
-	mock.ExpectExec("INSERT INTO `segment_indexes` (`tenant_id`,`collection_id`,`partition_id`,`segment_id`,`num_rows`,`index_id`,`build_id`,`node_id`,`index_version`,`index_state`,`fail_reason`,`create_time`,`index_file_paths`,`index_size`,`is_deleted`,`created_at`,`updated_at`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").
-		WithArgs(segIndexes[0].TenantID, segIndexes[0].CollectionID, segIndexes[0].PartitionID, segIndexes[0].SegmentID, segIndexes[0].NumRows, segIndexes[0].IndexID, segIndexes[0].BuildID, segIndexes[0].NodeID, segIndexes[0].IndexVersion, segIndexes[0].IndexState, segIndexes[0].FailReason, segIndexes[0].CreateTime, segIndexes[0].IndexFilePaths, segIndexes[0].IndexSize, segIndexes[0].IsDeleted, segIndexes[0].CreatedAt, segIndexes[0].UpdatedAt).
+	mock.ExpectExec("INSERT INTO `segment_indexes` (`tenant_id`,`collection_id`,`partition_id`,`segment_id`,`num_rows`,`index_id`,`build_id`,`node_id`,`index_version`,`index_state`,`fail_reason`,`create_time`,`index_file_keys`,`index_size`,`is_deleted`,`created_at`,`updated_at`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").
+		WithArgs(segIndexes[0].TenantID, segIndexes[0].CollectionID, segIndexes[0].PartitionID, segIndexes[0].SegmentID, segIndexes[0].NumRows, segIndexes[0].IndexID, segIndexes[0].BuildID, segIndexes[0].NodeID, segIndexes[0].IndexVersion, segIndexes[0].IndexState, segIndexes[0].FailReason, segIndexes[0].CreateTime, segIndexes[0].IndexFileKeys, segIndexes[0].IndexSize, segIndexes[0].IsDeleted, segIndexes[0].CreatedAt, segIndexes[0].UpdatedAt).
 		WillReturnError(errors.New("test error"))
 	mock.ExpectRollback()
 
@@ -83,30 +83,30 @@ func TestSegmentIndex_Insert_Error(t *testing.T) {
 func TestSegmentIndex_Update(t *testing.T) {
 	var segIndexes = []*dbmodel.SegmentIndex{
 		{
-			TenantID:       tenantID,
-			CollectionID:   collID1,
-			PartitionID:    partitionID1,
-			SegmentID:      segmentID1,
-			NumRows:        NumRows,
-			IndexID:        indexID1,
-			BuildID:        1002,
-			NodeID:         3,
-			IndexVersion:   0,
-			IndexState:     3,
-			FailReason:     "",
-			CreateTime:     uint64(1011),
-			IndexFilePaths: "",
-			IndexSize:      1024,
-			IsDeleted:      true,
-			CreatedAt:      time.Now(),
-			UpdatedAt:      time.Now(),
+			TenantID:      tenantID,
+			CollectionID:  collID1,
+			PartitionID:   partitionID1,
+			SegmentID:     segmentID1,
+			NumRows:       NumRows,
+			IndexID:       indexID1,
+			BuildID:       1002,
+			NodeID:        3,
+			IndexVersion:  0,
+			IndexState:    3,
+			FailReason:    "",
+			CreateTime:    uint64(1011),
+			IndexFileKeys: "",
+			IndexSize:     1024,
+			IsDeleted:     true,
+			CreatedAt:     time.Now(),
+			UpdatedAt:     time.Now(),
 		},
 	}
 
 	// expectation
 	mock.ExpectBegin()
-	mock.ExpectExec("INSERT INTO `segment_indexes` (`tenant_id`,`collection_id`,`partition_id`,`segment_id`,`num_rows`,`index_id`,`build_id`,`node_id`,`index_version`,`index_state`,`fail_reason`,`create_time`,`index_file_paths`,`index_size`,`is_deleted`,`created_at`,`updated_at`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").
-		WithArgs(segIndexes[0].TenantID, segIndexes[0].CollectionID, segIndexes[0].PartitionID, segIndexes[0].SegmentID, segIndexes[0].NumRows, segIndexes[0].IndexID, segIndexes[0].BuildID, segIndexes[0].NodeID, segIndexes[0].IndexVersion, segIndexes[0].IndexState, segIndexes[0].FailReason, segIndexes[0].CreateTime, segIndexes[0].IndexFilePaths, segIndexes[0].IndexSize, segIndexes[0].IsDeleted, segIndexes[0].CreatedAt, segIndexes[0].UpdatedAt).
+	mock.ExpectExec("INSERT INTO `segment_indexes` (`tenant_id`,`collection_id`,`partition_id`,`segment_id`,`num_rows`,`index_id`,`build_id`,`node_id`,`index_version`,`index_state`,`fail_reason`,`create_time`,`index_file_keys`,`index_size`,`is_deleted`,`created_at`,`updated_at`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").
+		WithArgs(segIndexes[0].TenantID, segIndexes[0].CollectionID, segIndexes[0].PartitionID, segIndexes[0].SegmentID, segIndexes[0].NumRows, segIndexes[0].IndexID, segIndexes[0].BuildID, segIndexes[0].NodeID, segIndexes[0].IndexVersion, segIndexes[0].IndexState, segIndexes[0].FailReason, segIndexes[0].CreateTime, segIndexes[0].IndexFileKeys, segIndexes[0].IndexSize, segIndexes[0].IsDeleted, segIndexes[0].CreatedAt, segIndexes[0].UpdatedAt).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
@@ -118,30 +118,30 @@ func TestSegmentIndex_Update(t *testing.T) {
 func TestSegmentIndex_Upsert_Error(t *testing.T) {
 	var segIndexes = []*dbmodel.SegmentIndex{
 		{
-			TenantID:       tenantID,
-			CollectionID:   collID1,
-			PartitionID:    partitionID1,
-			SegmentID:      segmentID1,
-			NumRows:        NumRows,
-			IndexID:        indexID1,
-			BuildID:        1002,
-			NodeID:         3,
-			IndexVersion:   0,
-			IndexState:     3,
-			FailReason:     "",
-			CreateTime:     uint64(1011),
-			IndexFilePaths: "",
-			IndexSize:      1024,
-			IsDeleted:      true,
-			CreatedAt:      time.Now(),
-			UpdatedAt:      time.Now(),
+			TenantID:      tenantID,
+			CollectionID:  collID1,
+			PartitionID:   partitionID1,
+			SegmentID:     segmentID1,
+			NumRows:       NumRows,
+			IndexID:       indexID1,
+			BuildID:       1002,
+			NodeID:        3,
+			IndexVersion:  0,
+			IndexState:    3,
+			FailReason:    "",
+			CreateTime:    uint64(1011),
+			IndexFileKeys: "",
+			IndexSize:     1024,
+			IsDeleted:     true,
+			CreatedAt:     time.Now(),
+			UpdatedAt:     time.Now(),
 		},
 	}
 
 	// expectation
 	mock.ExpectBegin()
-	mock.ExpectExec("INSERT INTO `segment_indexes` (`tenant_id`,`collection_id`,`partition_id`,`segment_id`,`num_rows`,`index_id`,`build_id`,`node_id`,`index_version`,`index_state`,`fail_reason`,`create_time`,`index_file_paths`,`index_size`,`is_deleted`,`created_at`,`updated_at`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").
-		WithArgs(segIndexes[0].TenantID, segIndexes[0].CollectionID, segIndexes[0].PartitionID, segIndexes[0].SegmentID, segIndexes[0].NumRows, segIndexes[0].IndexID, segIndexes[0].BuildID, segIndexes[0].NodeID, segIndexes[0].IndexVersion, segIndexes[0].IndexState, segIndexes[0].FailReason, segIndexes[0].CreateTime, segIndexes[0].IndexFilePaths, segIndexes[0].IndexSize, segIndexes[0].IsDeleted, segIndexes[0].CreatedAt, segIndexes[0].UpdatedAt).
+	mock.ExpectExec("INSERT INTO `segment_indexes` (`tenant_id`,`collection_id`,`partition_id`,`segment_id`,`num_rows`,`index_id`,`build_id`,`node_id`,`index_version`,`index_state`,`fail_reason`,`create_time`,`index_file_keys`,`index_size`,`is_deleted`,`created_at`,`updated_at`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").
+		WithArgs(segIndexes[0].TenantID, segIndexes[0].CollectionID, segIndexes[0].PartitionID, segIndexes[0].SegmentID, segIndexes[0].NumRows, segIndexes[0].IndexID, segIndexes[0].BuildID, segIndexes[0].NodeID, segIndexes[0].IndexVersion, segIndexes[0].IndexState, segIndexes[0].FailReason, segIndexes[0].CreateTime, segIndexes[0].IndexFileKeys, segIndexes[0].IndexSize, segIndexes[0].IsDeleted, segIndexes[0].CreatedAt, segIndexes[0].UpdatedAt).
 		WillReturnError(errors.New("test error"))
 	mock.ExpectRollback()
 

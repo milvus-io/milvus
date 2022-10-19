@@ -148,7 +148,7 @@ func Test_newHandoff(t *testing.T) {
 	err = hd.meta.FinishTask(&indexpb.IndexTaskInfo{
 		BuildID:        buildID,
 		State:          commonpb.IndexState_Finished,
-		IndexFiles:     []string{"file1", "file2"},
+		IndexFileKeys:  []string{"file1", "file2"},
 		SerializedSize: 100,
 		FailReason:     "",
 	})
@@ -156,7 +156,7 @@ func Test_newHandoff(t *testing.T) {
 	err = hd.meta.FinishTask(&indexpb.IndexTaskInfo{
 		BuildID:        buildID + 3,
 		State:          commonpb.IndexState_Failed,
-		IndexFiles:     nil,
+		IndexFileKeys:  nil,
 		SerializedSize: 0,
 		FailReason:     "failed",
 	})

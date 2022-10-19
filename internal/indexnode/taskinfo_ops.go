@@ -2,6 +2,7 @@ package indexnode
 
 import (
 	"github.com/golang/protobuf/proto"
+	"github.com/milvus-io/milvus/internal/common"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -52,12 +53,12 @@ func (i *IndexNode) foreachTaskInfo(fn func(ClusterID string, buildID UniqueID, 
 	}
 }
 
-func (i *IndexNode) storeIndexFilesAndStatistic(ClusterID string, buildID UniqueID, files []string, serializedSize uint64, statistic *indexpb.JobInfo) {
+func (i *IndexNode) storeIndexFilesAndStatistic(ClusterID string, buildID UniqueID, fileKeys []string, serializedSize uint64, statistic *indexpb.JobInfo) {
 	key := taskKey{ClusterID: ClusterID, BuildID: buildID}
 	i.stateLock.Lock()
 	defer i.stateLock.Unlock()
 	if info, ok := i.tasks[key]; ok {
-		info.indexFiles = files[:]
+		info.fileKeys = common.CloneStringList(fileKeys)
 		info.serializedSize = serializedSize
 		info.statistic = proto.Clone(statistic).(*indexpb.JobInfo)
 		return

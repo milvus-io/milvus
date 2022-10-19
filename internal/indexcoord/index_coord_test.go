@@ -828,7 +828,7 @@ func TestIndexCoord_DropIndex(t *testing.T) {
 //					indexMeta: &indexpb.IndexMeta{
 //						IndexBuildID:   1,
 //						State:          commonpb.IndexState_Finished,
-//						IndexFilePaths: []string{"indexFiles-1", "indexFiles-2"},
+//						IndexFileKeys: []string{"indexFiles-1", "indexFiles-2"},
 //					},
 //				},
 //				2: {
@@ -848,14 +848,14 @@ func TestIndexCoord_DropIndex(t *testing.T) {
 //		assert.NoError(t, err)
 //		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 //		assert.Equal(t, 1, len(resp.FilePaths))
-//		assert.ElementsMatch(t, resp.FilePaths[0].IndexFilePaths, []string{"indexFiles-1", "indexFiles-2"})
+//		assert.ElementsMatch(t, resp.FilePaths[0].IndexFileKeys, []string{"indexFiles-1", "indexFiles-2"})
 //	})
 //
 //	t.Run("GetIndexFilePaths failed", func(t *testing.T) {
 //		resp, err := ic.GetIndexFilePaths(context.Background(), &indexpb.GetIndexFilePathsRequest{IndexBuildIDs: []UniqueID{2}})
 //		assert.NoError(t, err)
 //		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-//		assert.Equal(t, 0, len(resp.FilePaths[0].IndexFilePaths))
+//		assert.Equal(t, 0, len(resp.FilePaths[0].IndexFileKeys))
 //	})
 //
 //	t.Run("set DataCoord with nil", func(t *testing.T) {

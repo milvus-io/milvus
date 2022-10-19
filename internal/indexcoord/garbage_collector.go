@@ -22,6 +22,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/metautil"
+
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -241,16 +243,18 @@ func (gc *garbageCollector) recycleUnusedIndexFiles() {
 					continue
 				}
 				log.Ctx(gc.ctx).Info("index meta can be recycled, recycle index files", zap.Int64("buildID", buildID))
-				canRecycle, indexFilePaths := gc.metaTable.GetIndexFilePathByBuildID(buildID)
+				canRecycle, segIdx := gc.metaTable.GetSegmentIndexByBuildID(buildID)
 				if !canRecycle {
 					// Even if the index is marked as deleted, the index file will not be recycled, wait for the next gc,
 					// and delete all index files about the buildID at one time.
 					log.Ctx(gc.ctx).Warn("IndexCoord garbageCollector can not recycle index files", zap.Int64("buildID", buildID))
 					continue
 				}
-				filesMap := make(map[string]bool)
-				for _, file := range indexFilePaths {
-					filesMap[file] = true
+				filesMap := make(map[string]struct{})
+				for _, fileID := range segIdx.IndexFileKeys {
+					filepath := metautil.BuildSegmentIndexFilePath(gc.chunkManager.RootPath(), segIdx.BuildID, segIdx.IndexVersion,
+						segIdx.PartitionID, segIdx.SegmentID, fileID)
+					filesMap[filepath] = struct{}{}
 				}
 				files, _, err := gc.chunkManager.ListWithPrefix(gc.ctx, key, true)
 				if err != nil {

@@ -158,7 +158,7 @@ import (
 //			err = proto.Unmarshal([]byte(strValue), &indexMetaTmp)
 //			assert.Nil(t, err)
 //		}
-//		defer in.chunkManager.MultiRemove(indexMetaTmp.IndexFilePaths)
+//		defer in.chunkManager.MultiRemove(indexMetaTmp.IndexFileKeys)
 //		defer func() {
 //			for k := range kvs {
 //				err = in.chunkManager.Remove(k)
@@ -269,7 +269,7 @@ import (
 //			err = proto.Unmarshal([]byte(strValue), &indexMetaTmp)
 //			assert.Nil(t, err)
 //		}
-//		defer in.chunkManager.MultiRemove(indexMetaTmp.IndexFilePaths)
+//		defer in.chunkManager.MultiRemove(indexMetaTmp.IndexFileKeys)
 //		defer func() {
 //			for k := range kvs {
 //				err = in.chunkManager.Remove(k)
@@ -388,7 +388,7 @@ import (
 //		//	err = proto.Unmarshal([]byte(strValue), &indexMetaTmp)
 //		//	assert.Nil(t, err)
 //		//}
-//		defer in.chunkManager.MultiRemove(indexMetaTmp.IndexFilePaths)
+//		defer in.chunkManager.MultiRemove(indexMetaTmp.IndexFileKeys)
 //		defer func() {
 //			for k := range kvs {
 //				err = in.chunkManager.Remove(k)

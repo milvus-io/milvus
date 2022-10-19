@@ -28,6 +28,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/metautil"
+
 	"github.com/milvus-io/milvus/internal/util/errorutil"
 
 	"golang.org/x/sync/errgroup"
@@ -811,6 +813,9 @@ func (i *IndexCoord) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInf
 		if len(segIdxes) != 0 {
 			ret.SegmentInfo[segID].EnableIndex = true
 			for _, segIdx := range segIdxes {
+				indexFilePaths := metautil.BuildSegmentIndexFilePaths(i.chunkManager.RootPath(), segIdx.BuildID, segIdx.IndexVersion,
+					segIdx.PartitionID, segIdx.SegmentID, segIdx.IndexFileKeys)
+
 				ret.SegmentInfo[segID].IndexInfos = append(ret.SegmentInfo[segID].IndexInfos,
 					&indexpb.IndexFilePathInfo{
 						SegmentID:      segID,
@@ -819,7 +824,7 @@ func (i *IndexCoord) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInf
 						BuildID:        segIdx.BuildID,
 						IndexName:      i.metaTable.GetIndexNameByID(segIdx.CollectionID, segIdx.IndexID),
 						IndexParams:    i.metaTable.GetIndexParams(segIdx.CollectionID, segIdx.IndexID),
-						IndexFilePaths: segIdx.IndexFilePaths,
+						IndexFilePaths: indexFilePaths,
 						SerializedSize: segIdx.IndexSize,
 						IndexVersion:   segIdx.IndexVersion,
 						NumRows:        segIdx.NumRows,

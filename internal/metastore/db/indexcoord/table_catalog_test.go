@@ -166,7 +166,7 @@ package indexcoord
 //				},
 //				BuildID:        indexBuildID1,
 //				CreateTime:     0,
-//				IndexFilePaths: []string{"a\xc5z"},
+//				IndexFileKeys: []string{"a\xc5z"},
 //			},
 //		},
 //	}
@@ -339,7 +339,7 @@ package indexcoord
 ////			EnableIndex:    false,
 ////			IndexBuildID:   indexBuildID1,
 ////			IndexSize:      0,
-////			IndexFilePaths: "[\"test_index_file_path_1\"]",
+////			IndexFileKeys: "[\"test_index_file_path_1\"]",
 ////		},
 ////	}
 ////	out := []*model.Index{
@@ -365,7 +365,7 @@ package indexcoord
 ////					BuildID: indexBuildID1,
 ////					//EnableIndex:    false,
 ////					CreateTime:     0,
-////					IndexFilePaths: []string{"test_index_file_path_1"},
+////					IndexFileKeys: []string{"test_index_file_path_1"},
 ////				},
 ////			},
 ////			Extra: nil,

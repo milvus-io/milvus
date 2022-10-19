@@ -145,39 +145,39 @@ func constructMetaTable(catalog metastore.IndexCoordCatalog) *metaTable {
 		segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
 			segID: {
 				indexID: &model.SegmentIndex{
-					SegmentID:      segID,
-					CollectionID:   collID,
-					PartitionID:    partID,
-					NumRows:        1024,
-					IndexID:        indexID,
-					BuildID:        buildID,
-					NodeID:         0,
-					IndexState:     commonpb.IndexState_Finished,
-					FailReason:     "",
-					IndexVersion:   1,
-					IsDeleted:      false,
-					CreateTime:     createTs,
-					IndexFilePaths: []string{"file1", "file2"},
-					IndexSize:      1024,
+					SegmentID:     segID,
+					CollectionID:  collID,
+					PartitionID:   partID,
+					NumRows:       1024,
+					IndexID:       indexID,
+					BuildID:       buildID,
+					NodeID:        0,
+					IndexState:    commonpb.IndexState_Finished,
+					FailReason:    "",
+					IndexVersion:  1,
+					IsDeleted:     false,
+					CreateTime:    createTs,
+					IndexFileKeys: []string{"file1", "file2"},
+					IndexSize:     1024,
 				},
 			},
 		},
 		buildID2SegmentIndex: map[UniqueID]*model.SegmentIndex{
 			buildID: {
-				SegmentID:      segID,
-				CollectionID:   collID,
-				PartitionID:    partID,
-				NumRows:        1024,
-				IndexID:        indexID,
-				BuildID:        buildID,
-				NodeID:         0,
-				IndexState:     commonpb.IndexState_Finished,
-				FailReason:     "",
-				IndexVersion:   1,
-				IsDeleted:      false,
-				CreateTime:     createTs,
-				IndexFilePaths: []string{"file1", "file2"},
-				IndexSize:      1024,
+				SegmentID:     segID,
+				CollectionID:  collID,
+				PartitionID:   partID,
+				NumRows:       1024,
+				IndexID:       indexID,
+				BuildID:       buildID,
+				NodeID:        0,
+				IndexState:    commonpb.IndexState_Finished,
+				FailReason:    "",
+				IndexVersion:  1,
+				IsDeleted:     false,
+				CreateTime:    createTs,
+				IndexFileKeys: []string{"file1", "file2"},
+				IndexSize:     1024,
 			},
 		},
 	}
@@ -262,20 +262,20 @@ func TestMetaTable_CreateIndex(t *testing.T) {
 func TestMetaTable_AddIndex(t *testing.T) {
 	newBuildID := buildID + 2
 	segIdx := &model.SegmentIndex{
-		SegmentID:      segID,
-		CollectionID:   collID,
-		PartitionID:    partID,
-		NumRows:        1024,
-		IndexID:        indexID,
-		BuildID:        newBuildID,
-		NodeID:         0,
-		IndexState:     commonpb.IndexState_IndexStateNone,
-		FailReason:     "",
-		IndexVersion:   0,
-		IsDeleted:      false,
-		CreateTime:     0,
-		IndexFilePaths: nil,
-		IndexSize:      0,
+		SegmentID:     segID,
+		CollectionID:  collID,
+		PartitionID:   partID,
+		NumRows:       1024,
+		IndexID:       indexID,
+		BuildID:       newBuildID,
+		NodeID:        0,
+		IndexState:    commonpb.IndexState_IndexStateNone,
+		FailReason:    "",
+		IndexVersion:  0,
+		IsDeleted:     false,
+		CreateTime:    0,
+		IndexFileKeys: nil,
+		IndexSize:     0,
 	}
 
 	t.Run("success", func(t *testing.T) {
@@ -310,17 +310,17 @@ func TestMetaTable_AddIndex(t *testing.T) {
 func TestMetaTable_UpdateVersion(t *testing.T) {
 	newBuildID := buildID + 3
 	segIdx := &model.SegmentIndex{
-		SegmentID:      segID,
-		IndexID:        indexID,
-		BuildID:        newBuildID,
-		NodeID:         0,
-		IndexState:     commonpb.IndexState_IndexStateNone,
-		FailReason:     "",
-		IndexVersion:   0,
-		IsDeleted:      false,
-		CreateTime:     0,
-		IndexFilePaths: nil,
-		IndexSize:      0,
+		SegmentID:     segID,
+		IndexID:       indexID,
+		BuildID:       newBuildID,
+		NodeID:        0,
+		IndexState:    commonpb.IndexState_IndexStateNone,
+		FailReason:    "",
+		IndexVersion:  0,
+		IsDeleted:     false,
+		CreateTime:    0,
+		IndexFileKeys: nil,
+		IndexSize:     0,
 	}
 	t.Run("success", func(t *testing.T) {
 		kv := &mockETCDKV{
@@ -396,17 +396,17 @@ func TestMetaTable_UpdateVersion(t *testing.T) {
 func TestMetaTable_BuildIndex(t *testing.T) {
 	newBuildID := buildID + 4
 	segIdx := &model.SegmentIndex{
-		SegmentID:      segID,
-		IndexID:        indexID,
-		BuildID:        newBuildID,
-		NodeID:         0,
-		IndexState:     commonpb.IndexState_IndexStateNone,
-		FailReason:     "",
-		IndexVersion:   0,
-		IsDeleted:      false,
-		CreateTime:     0,
-		IndexFilePaths: nil,
-		IndexSize:      0,
+		SegmentID:     segID,
+		IndexID:       indexID,
+		BuildID:       newBuildID,
+		NodeID:        0,
+		IndexState:    commonpb.IndexState_IndexStateNone,
+		FailReason:    "",
+		IndexVersion:  0,
+		IsDeleted:     false,
+		CreateTime:    0,
+		IndexFileKeys: nil,
+		IndexSize:     0,
 	}
 	t.Run("success and fail", func(t *testing.T) {
 		kv := &mockETCDKV{
@@ -731,97 +731,43 @@ func TestMetaTable_MarkSegmentsIndexAsDeleted(t *testing.T) {
 	})
 }
 
-func TestMetaTable_GetIndexFilePathInfo(t *testing.T) {
-	t.Run("success", func(t *testing.T) {
-		mt := constructMetaTable(&indexcoord.Catalog{})
-
-		info, err := mt.GetIndexFilePathInfo(segID, indexID)
-		assert.NoError(t, err)
-		assert.ElementsMatch(t, []string{"file1", "file2"}, info.IndexFilePaths)
-	})
-
-	t.Run("fail", func(t *testing.T) {
-		mt := constructMetaTable(&indexcoord.Catalog{
-			Txn: &mockETCDKV{
-				save: func(s string, s2 string) error {
-					return nil
-				},
-			},
-		})
-
-		info, err := mt.GetIndexFilePathInfo(segID, indexID)
-		assert.NoError(t, err)
-		assert.ElementsMatch(t, []string{"file1", "file2"}, info.IndexFilePaths)
-
-		info, err = mt.GetIndexFilePathInfo(segID+1, indexID)
-		assert.Error(t, err)
-		assert.Nil(t, info)
-
-		info, err = mt.GetIndexFilePathInfo(segID, indexID+1)
-		assert.Error(t, err)
-		assert.Nil(t, info)
-
-		err = mt.AddIndex(&model.SegmentIndex{
-			SegmentID:      segID + 1,
-			CollectionID:   collID + 1,
-			PartitionID:    partID + 1,
-			NumRows:        1024,
-			IndexID:        indexID + 1,
-			BuildID:        buildID + 1,
-			NodeID:         nodeID + 1,
-			IndexVersion:   0,
-			IndexState:     commonpb.IndexState_Unissued,
-			FailReason:     "",
-			IsDeleted:      false,
-			CreateTime:     0,
-			IndexFilePaths: nil,
-			IndexSize:      0,
-		})
-		assert.NoError(t, err)
-
-		info, err = mt.GetIndexFilePathInfo(segID+1, indexID+1)
-		assert.Error(t, err)
-		assert.Nil(t, info)
-	})
-}
-
-func TestMetaTable_GetIndexFilePathByBuildID(t *testing.T) {
+func TestMetaTable_GetSegmentIndexByBuildID(t *testing.T) {
 	mt := constructMetaTable(&indexcoord.Catalog{
 		Txn: &mockETCDKV{
 			save: func(s string, s2 string) error {
 				return nil
 			},
 		}})
-	canRecycle, files := mt.GetIndexFilePathByBuildID(buildID)
+	canRecycle, segIdx := mt.GetSegmentIndexByBuildID(buildID)
 	assert.True(t, canRecycle)
-	assert.ElementsMatch(t, []string{"file1", "file2"}, files)
+	assert.ElementsMatch(t, []string{"file1", "file2"}, segIdx.IndexFileKeys)
 
-	segIdx := &model.SegmentIndex{
-		SegmentID:      segID + 1,
-		CollectionID:   collID,
-		PartitionID:    partID,
-		NumRows:        1026,
-		IndexID:        indexID,
-		BuildID:        buildID + 1,
-		NodeID:         0,
-		IndexVersion:   0,
-		IndexState:     commonpb.IndexState_Unissued,
-		FailReason:     "",
-		IsDeleted:      false,
-		CreateTime:     0,
-		IndexFilePaths: nil,
-		IndexSize:      0,
+	segIdx = &model.SegmentIndex{
+		SegmentID:     segID + 1,
+		CollectionID:  collID,
+		PartitionID:   partID,
+		NumRows:       1026,
+		IndexID:       indexID,
+		BuildID:       buildID + 1,
+		NodeID:        0,
+		IndexVersion:  0,
+		IndexState:    commonpb.IndexState_Unissued,
+		FailReason:    "",
+		IsDeleted:     false,
+		CreateTime:    0,
+		IndexFileKeys: nil,
+		IndexSize:     0,
 	}
 	err := mt.AddIndex(segIdx)
 	assert.NoError(t, err)
 
-	canRecycle, files = mt.GetIndexFilePathByBuildID(buildID + 1)
+	canRecycle, segIdx = mt.GetSegmentIndexByBuildID(buildID + 1)
 	assert.False(t, canRecycle)
-	assert.Zero(t, len(files))
+	assert.Nil(t, segIdx)
 
-	canRecycle, files = mt.GetIndexFilePathByBuildID(buildID + 2)
+	canRecycle, segIdx = mt.GetSegmentIndexByBuildID(buildID + 2)
 	assert.False(t, canRecycle)
-	assert.Zero(t, len(files))
+	assert.Nil(t, segIdx)
 }
 
 func TestMetaTable_IsIndexDeleted(t *testing.T) {
@@ -1069,41 +1015,41 @@ func TestMetaTable_ResetMeta(t *testing.T) {
 			catalog: &indexcoord.Catalog{Txn: NewMockEtcdKV()},
 			buildID2SegmentIndex: map[UniqueID]*model.SegmentIndex{
 				buildID: {
-					SegmentID:      segID,
-					CollectionID:   collID,
-					PartitionID:    partID,
-					NumRows:        1024,
-					IndexID:        indexID,
-					BuildID:        buildID,
-					NodeID:         1,
-					IndexVersion:   1,
-					IndexState:     commonpb.IndexState_InProgress,
-					FailReason:     "",
-					IsDeleted:      false,
-					CreateTime:     1,
-					IndexFilePaths: nil,
-					IndexSize:      0,
-					WriteHandoff:   false,
+					SegmentID:     segID,
+					CollectionID:  collID,
+					PartitionID:   partID,
+					NumRows:       1024,
+					IndexID:       indexID,
+					BuildID:       buildID,
+					NodeID:        1,
+					IndexVersion:  1,
+					IndexState:    commonpb.IndexState_InProgress,
+					FailReason:    "",
+					IsDeleted:     false,
+					CreateTime:    1,
+					IndexFileKeys: nil,
+					IndexSize:     0,
+					WriteHandoff:  false,
 				},
 			},
 			segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
 				segID: {
 					indexID: {
-						SegmentID:      segID,
-						CollectionID:   collID,
-						PartitionID:    partID,
-						NumRows:        1024,
-						IndexID:        indexID,
-						BuildID:        buildID,
-						NodeID:         1,
-						IndexVersion:   1,
-						IndexState:     commonpb.IndexState_InProgress,
-						FailReason:     "",
-						IsDeleted:      false,
-						CreateTime:     1,
-						IndexFilePaths: nil,
-						IndexSize:      0,
-						WriteHandoff:   false,
+						SegmentID:     segID,
+						CollectionID:  collID,
+						PartitionID:   partID,
+						NumRows:       1024,
+						IndexID:       indexID,
+						BuildID:       buildID,
+						NodeID:        1,
+						IndexVersion:  1,
+						IndexState:    commonpb.IndexState_InProgress,
+						FailReason:    "",
+						IsDeleted:     false,
+						CreateTime:    1,
+						IndexFileKeys: nil,
+						IndexSize:     0,
+						WriteHandoff:  false,
 					},
 				},
 			},
@@ -1132,20 +1078,20 @@ func TestMetaTable_ResetMeta(t *testing.T) {
 
 func TestMetaTable_FinishTask(t *testing.T) {
 	segIdx := &model.SegmentIndex{
-		SegmentID:      segID + 1,
-		CollectionID:   collID,
-		PartitionID:    partID,
-		NumRows:        10240,
-		IndexID:        indexID,
-		BuildID:        buildID + 1,
-		NodeID:         1,
-		IndexVersion:   1,
-		IndexState:     commonpb.IndexState_InProgress,
-		FailReason:     "",
-		IsDeleted:      false,
-		CreateTime:     1234,
-		IndexFilePaths: nil,
-		IndexSize:      0,
+		SegmentID:     segID + 1,
+		CollectionID:  collID,
+		PartitionID:   partID,
+		NumRows:       10240,
+		IndexID:       indexID,
+		BuildID:       buildID + 1,
+		NodeID:        1,
+		IndexVersion:  1,
+		IndexState:    commonpb.IndexState_InProgress,
+		FailReason:    "",
+		IsDeleted:     false,
+		CreateTime:    1234,
+		IndexFileKeys: nil,
+		IndexSize:     0,
 	}
 	t.Run("success", func(t *testing.T) {
 		mt := constructMetaTable(&indexcoord.Catalog{
@@ -1164,7 +1110,7 @@ func TestMetaTable_FinishTask(t *testing.T) {
 		err = mt.FinishTask(&indexpb.IndexTaskInfo{
 			BuildID:        buildID + 1,
 			State:          commonpb.IndexState_Finished,
-			IndexFiles:     []string{"file3", "file4"},
+			IndexFileKeys:  []string{"file3", "file4"},
 			SerializedSize: 1025,
 			FailReason:     "",
 		})
@@ -1172,7 +1118,7 @@ func TestMetaTable_FinishTask(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.IndexState_Finished, mt.buildID2SegmentIndex[buildID+1].IndexState)
 		assert.Equal(t, uint64(1025), mt.buildID2SegmentIndex[buildID+1].IndexSize)
-		assert.ElementsMatch(t, []string{"file3", "file4"}, mt.buildID2SegmentIndex[buildID+1].IndexFilePaths)
+		assert.ElementsMatch(t, []string{"file3", "file4"}, mt.buildID2SegmentIndex[buildID+1].IndexFileKeys)
 	})
 
 	t.Run("state failed", func(t *testing.T) {
@@ -1192,7 +1138,7 @@ func TestMetaTable_FinishTask(t *testing.T) {
 		err = mt.FinishTask(&indexpb.IndexTaskInfo{
 			BuildID:        buildID + 1,
 			State:          commonpb.IndexState_Failed,
-			IndexFiles:     []string{},
+			IndexFileKeys:  []string{},
 			SerializedSize: 0,
 			FailReason:     "failed",
 		})
@@ -1218,7 +1164,7 @@ func TestMetaTable_FinishTask(t *testing.T) {
 		err = mt.FinishTask(&indexpb.IndexTaskInfo{
 			BuildID:        buildID + 1,
 			State:          commonpb.IndexState_Finished,
-			IndexFiles:     []string{"file3", "file4"},
+			IndexFileKeys:  []string{"file3", "file4"},
 			SerializedSize: 1025,
 			FailReason:     "",
 		})
