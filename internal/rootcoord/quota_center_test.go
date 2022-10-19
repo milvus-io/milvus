@@ -135,10 +135,10 @@ func TestQuotaCenter(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("test timeTickDelay", func(t *testing.T) {
+	t.Run("test getTimeTickDelayFactor", func(t *testing.T) {
 		// test MaxTimestamp
 		quotaCenter := NewQuotaCenter(pcm, &queryCoordMockForQuota{}, &dataCoordMockForQuota{}, core.tsoAllocator)
-		factor := quotaCenter.timeTickDelay(0)
+		factor := quotaCenter.getTimeTickDelayFactor(0)
 		assert.Equal(t, float64(1), factor)
 
 		now := time.Now()
@@ -161,7 +161,7 @@ func TestQuotaCenter(t *testing.T) {
 			}}}
 		ts, err := quotaCenter.tsoAllocator.GenerateTSO(1)
 		assert.NoError(t, err)
-		factor = quotaCenter.timeTickDelay(ts)
+		factor = quotaCenter.getTimeTickDelayFactor(ts)
 		assert.Equal(t, float64(0), factor)
 
 		// test one-third time tick delay
@@ -178,12 +178,12 @@ func TestQuotaCenter(t *testing.T) {
 			}}}
 		ts, err = quotaCenter.tsoAllocator.GenerateTSO(1)
 		assert.NoError(t, err)
-		factor = quotaCenter.timeTickDelay(ts)
+		factor = quotaCenter.getTimeTickDelayFactor(ts)
 		ok := math.Abs(factor-2.0/3.0) < 0.0001
 		assert.True(t, ok)
 	})
 
-	t.Run("test timeTickDelay factors", func(t *testing.T) {
+	t.Run("test getTimeTickDelayFactor factors", func(t *testing.T) {
 		quotaCenter := NewQuotaCenter(pcm, &queryCoordMockForQuota{}, &dataCoordMockForQuota{}, core.tsoAllocator)
 		type ttCase struct {
 			maxTtDelay     time.Duration
@@ -211,7 +211,7 @@ func TestQuotaCenter(t *testing.T) {
 			fgTs := tsoutil.ComposeTSByTime(c.fgTt, 0)
 			quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{1: {Fgm: metricsinfo.FlowGraphMetric{NumFlowGraph: 1, MinFlowGraphTt: fgTs}}}
 			curTs := tsoutil.ComposeTSByTime(c.curTt, 0)
-			factor := quotaCenter.timeTickDelay(curTs)
+			factor := quotaCenter.getTimeTickDelayFactor(curTs)
 			if math.Abs(factor-c.expectedFactor) > 0.000001 {
 				t.Errorf("case %d failed: curTs[%v], fgTs[%v], expectedFactor: %f, actualFactor: %f",
 					i, c.curTt, c.fgTt, c.expectedFactor, factor)
@@ -221,9 +221,9 @@ func TestQuotaCenter(t *testing.T) {
 		Params.QuotaConfig.MaxTimeTickDelay = backup
 	})
 
-	t.Run("test checkNQInQuery", func(t *testing.T) {
+	t.Run("test getNQInQueryFactor", func(t *testing.T) {
 		quotaCenter := NewQuotaCenter(pcm, &queryCoordMockForQuota{}, &dataCoordMockForQuota{}, core.tsoAllocator)
-		factor := quotaCenter.checkNQInQuery()
+		factor := quotaCenter.getNQInQueryFactor()
 		assert.Equal(t, float64(1), factor)
 
 		// test cool off
@@ -233,7 +233,7 @@ func TestQuotaCenter(t *testing.T) {
 			1: {SearchQueue: metricsinfo.ReadInfoInQueue{
 				UnsolvedQueue: Params.QuotaConfig.NQInQueueThreshold,
 			}}}
-		factor = quotaCenter.checkNQInQuery()
+		factor = quotaCenter.getNQInQueryFactor()
 		assert.Equal(t, Params.QuotaConfig.CoolOffSpeed, factor)
 
 		// test no cool off
@@ -241,15 +241,15 @@ func TestQuotaCenter(t *testing.T) {
 			1: {SearchQueue: metricsinfo.ReadInfoInQueue{
 				UnsolvedQueue: Params.QuotaConfig.NQInQueueThreshold - 1,
 			}}}
-		factor = quotaCenter.checkNQInQuery()
+		factor = quotaCenter.getNQInQueryFactor()
 		assert.Equal(t, 1.0, factor)
 		//ok := math.Abs(factor-1.0) < 0.0001
 		//assert.True(t, ok)
 	})
 
-	t.Run("test checkQueryLatency", func(t *testing.T) {
+	t.Run("test getQueryLatencyFactor", func(t *testing.T) {
 		quotaCenter := NewQuotaCenter(pcm, &queryCoordMockForQuota{}, &dataCoordMockForQuota{}, core.tsoAllocator)
-		factor := quotaCenter.checkQueryLatency()
+		factor := quotaCenter.getQueryLatencyFactor()
 		assert.Equal(t, float64(1), factor)
 
 		// test cool off
@@ -260,7 +260,7 @@ func TestQuotaCenter(t *testing.T) {
 			1: {SearchQueue: metricsinfo.ReadInfoInQueue{
 				AvgQueueDuration: time.Duration(Params.QuotaConfig.QueueLatencyThreshold),
 			}}}
-		factor = quotaCenter.checkQueryLatency()
+		factor = quotaCenter.getQueryLatencyFactor()
 		assert.Equal(t, Params.QuotaConfig.CoolOffSpeed, factor)
 
 		// test no cool off
@@ -268,13 +268,13 @@ func TestQuotaCenter(t *testing.T) {
 			1: {SearchQueue: metricsinfo.ReadInfoInQueue{
 				AvgQueueDuration: 1 * time.Second,
 			}}}
-		factor = quotaCenter.checkQueryLatency()
+		factor = quotaCenter.getQueryLatencyFactor()
 		assert.Equal(t, 1.0, factor)
 	})
 
 	t.Run("test checkReadResult", func(t *testing.T) {
 		quotaCenter := NewQuotaCenter(pcm, &queryCoordMockForQuota{}, &dataCoordMockForQuota{}, core.tsoAllocator)
-		factor := quotaCenter.checkReadResultRate()
+		factor := quotaCenter.getReadResultFactor()
 		assert.Equal(t, float64(1), factor)
 
 		// test cool off
@@ -285,7 +285,7 @@ func TestQuotaCenter(t *testing.T) {
 			1: {Rms: []metricsinfo.RateMetric{
 				{Label: metricsinfo.ReadResultThroughput, Rate: 1.2},
 			}}}
-		factor = quotaCenter.checkReadResultRate()
+		factor = quotaCenter.getReadResultFactor()
 		assert.Equal(t, Params.QuotaConfig.CoolOffSpeed, factor)
 
 		// test no cool off
@@ -293,7 +293,7 @@ func TestQuotaCenter(t *testing.T) {
 			1: {Rms: []metricsinfo.RateMetric{
 				{Label: metricsinfo.ReadResultThroughput, Rate: 0.8},
 			}}}
-		factor = quotaCenter.checkReadResultRate()
+		factor = quotaCenter.getReadResultFactor()
 		assert.Equal(t, 1.0, factor)
 	})
 
@@ -364,19 +364,19 @@ func TestQuotaCenter(t *testing.T) {
 		Params.QuotaConfig.ForceDenyWriting = forceBak
 	})
 
-	t.Run("test memoryToWaterLevel basic", func(t *testing.T) {
+	t.Run("test getMemoryFactor basic", func(t *testing.T) {
 		quotaCenter := NewQuotaCenter(pcm, &queryCoordMockForQuota{}, &dataCoordMockForQuota{}, core.tsoAllocator)
-		factor := quotaCenter.memoryToWaterLevel()
+		factor := quotaCenter.getMemoryFactor()
 		assert.Equal(t, float64(1), factor)
 		quotaCenter.dataNodeMetrics = map[UniqueID]*metricsinfo.DataNodeQuotaMetrics{1: {Hms: metricsinfo.HardwareMetrics{MemoryUsage: 100, Memory: 100}}}
-		factor = quotaCenter.memoryToWaterLevel()
+		factor = quotaCenter.getMemoryFactor()
 		assert.Equal(t, float64(0), factor)
 		quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{1: {Hms: metricsinfo.HardwareMetrics{MemoryUsage: 100, Memory: 100}}}
-		factor = quotaCenter.memoryToWaterLevel()
+		factor = quotaCenter.getMemoryFactor()
 		assert.Equal(t, float64(0), factor)
 	})
 
-	t.Run("test memoryToWaterLevel factors", func(t *testing.T) {
+	t.Run("test getMemoryFactor factors", func(t *testing.T) {
 		quotaCenter := NewQuotaCenter(pcm, &queryCoordMockForQuota{}, &dataCoordMockForQuota{}, core.tsoAllocator)
 		type memCase struct {
 			lowWater       float64
@@ -406,7 +406,7 @@ func TestQuotaCenter(t *testing.T) {
 			Params.QuotaConfig.QueryNodeMemoryLowWaterLevel = c.lowWater
 			Params.QuotaConfig.QueryNodeMemoryHighWaterLevel = c.highWater
 			quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{1: {Hms: metricsinfo.HardwareMetrics{MemoryUsage: c.memUsage, Memory: c.memTotal}}}
-			factor := quotaCenter.memoryToWaterLevel()
+			factor := quotaCenter.getMemoryFactor()
 			if math.Abs(factor-c.expectedFactor) > 0.000001 {
 				t.Errorf("case %d failed: waterLever[low:%v, high:%v], memMetric[used:%d, total:%d], expectedFactor: %f, actualFactor: %f",
 					i, c.lowWater, c.highWater, c.memUsage, c.memTotal, c.expectedFactor, factor)
@@ -417,23 +417,23 @@ func TestQuotaCenter(t *testing.T) {
 		Params.QuotaConfig.QueryNodeMemoryHighWaterLevel = highBackup
 	})
 
-	t.Run("test diskQuotaExceeded", func(t *testing.T) {
+	t.Run("test ifDiskQuotaExceeded", func(t *testing.T) {
 		quotaCenter := NewQuotaCenter(pcm, &queryCoordMockForQuota{}, &dataCoordMockForQuota{}, core.tsoAllocator)
 
 		Params.QuotaConfig.DiskProtectionEnabled = false
-		ok := quotaCenter.diskQuotaExceeded()
+		ok := quotaCenter.ifDiskQuotaExceeded()
 		assert.False(t, ok)
 		Params.QuotaConfig.DiskProtectionEnabled = true
 
 		quotaBackup := Params.QuotaConfig.DiskQuota
 		Params.QuotaConfig.DiskQuota = 99
 		quotaCenter.dataCoordMetrics = &metricsinfo.DataCoordQuotaMetrics{TotalBinlogSize: 100}
-		ok = quotaCenter.diskQuotaExceeded()
+		ok = quotaCenter.ifDiskQuotaExceeded()
 		assert.True(t, ok)
 
 		Params.QuotaConfig.DiskQuota = 101
 		quotaCenter.dataCoordMetrics = &metricsinfo.DataCoordQuotaMetrics{TotalBinlogSize: 100}
-		ok = quotaCenter.diskQuotaExceeded()
+		ok = quotaCenter.ifDiskQuotaExceeded()
 		assert.False(t, ok)
 		Params.QuotaConfig.DiskQuota = quotaBackup
 	})

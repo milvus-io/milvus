@@ -305,22 +305,22 @@ func (q *QuotaCenter) calculateReadRates() {
 	realTimeSearchRate := q.getRealTimeRate(internalpb.RateType_DQLSearch)
 	realTimeQueryRate := q.getRealTimeRate(internalpb.RateType_DQLQuery)
 
-	queueLatencyFactor := q.checkQueryLatency()
-	log.Debug("QuotaCenter checkQueryLatency done", zap.Float64("queueLatencyFactor", queueLatencyFactor))
+	queueLatencyFactor := q.getQueryLatencyFactor()
+	log.Debug("QuotaCenter getQueryLatencyFactor done", zap.Float64("queueLatencyFactor", queueLatencyFactor))
 	if Limit(queueLatencyFactor) == Limit(coolOffSpeed) {
 		coolOff(realTimeSearchRate, realTimeQueryRate)
 		return
 	}
 
-	queueLengthFactor := q.checkNQInQuery()
-	log.Debug("QuotaCenter checkNQInQuery done", zap.Float64("queueLengthFactor", queueLengthFactor))
+	queueLengthFactor := q.getNQInQueryFactor()
+	log.Debug("QuotaCenter getNQInQueryFactor done", zap.Float64("queueLengthFactor", queueLengthFactor))
 	if Limit(queueLengthFactor) == Limit(coolOffSpeed) {
 		coolOff(realTimeSearchRate, realTimeQueryRate)
 		return
 	}
 
-	resultRateFactor := q.checkReadResultRate()
-	log.Debug("QuotaCenter checkReadResultRate done", zap.Float64("resultRateFactor", resultRateFactor))
+	resultRateFactor := q.getReadResultFactor()
+	log.Debug("QuotaCenter getReadResultFactor done", zap.Float64("resultRateFactor", resultRateFactor))
 	if Limit(resultRateFactor) == Limit(coolOffSpeed) {
 		coolOff(realTimeSearchRate, realTimeQueryRate)
 	}
@@ -333,7 +333,7 @@ func (q *QuotaCenter) calculateWriteRates() error {
 		return nil
 	}
 
-	exceeded := q.diskQuotaExceeded()
+	exceeded := q.ifDiskQuotaExceeded()
 	if exceeded {
 		q.forceDenyWriting(DiskQuotaExceeded) // disk quota protection
 		return nil
@@ -344,14 +344,14 @@ func (q *QuotaCenter) calculateWriteRates() error {
 	if err != nil {
 		return err
 	}
-	ttFactor := q.timeTickDelay(ts)
+	ttFactor := q.getTimeTickDelayFactor(ts)
 	if ttFactor <= 0 {
 		q.forceDenyWriting(TimeTickLongDelay) // tt protection
 		return nil
 	}
-	log.Debug("QuotaCenter check timeTickDelay done", zap.Float64("ttFactor", ttFactor))
+	log.Debug("QuotaCenter check getTimeTickDelayFactor done", zap.Float64("ttFactor", ttFactor))
 
-	memFactor := q.memoryToWaterLevel()
+	memFactor := q.getMemoryFactor()
 	if memFactor <= 0 {
 		q.forceDenyWriting(MemoryExhausted) // memory protection
 		return nil
@@ -409,9 +409,9 @@ func (q *QuotaCenter) resetCurrentRates() {
 	}
 }
 
-// timeTickDelay gets time tick delay of DataNodes and QueryNodes,
+// getTimeTickDelayFactor gets time tick delay of DataNodes and QueryNodes,
 // and return the factor according to max tolerable time tick delay.
-func (q *QuotaCenter) timeTickDelay(ts Timestamp) float64 {
+func (q *QuotaCenter) getTimeTickDelayFactor(ts Timestamp) float64 {
 	t1, _ := tsoutil.ParseTS(ts)
 
 	var maxDelay time.Duration
@@ -453,9 +453,9 @@ func (q *QuotaCenter) timeTickDelay(ts Timestamp) float64 {
 	return float64(maxTt.Nanoseconds()-maxDelay.Nanoseconds()) / float64(maxTt.Nanoseconds())
 }
 
-// checkNQInQuery checks search&query nq in QueryNode,
+// getNQInQueryFactor checks search&query nq in QueryNode,
 // and return the factor according to NQInQueueThreshold.
-func (q *QuotaCenter) checkNQInQuery() float64 {
+func (q *QuotaCenter) getNQInQueryFactor() float64 {
 	if !Params.QuotaConfig.QueueProtectionEnabled {
 		return 1
 	}
@@ -480,9 +480,9 @@ func (q *QuotaCenter) checkNQInQuery() float64 {
 	return 1
 }
 
-// checkQueryLatency checks queueing latency in QueryNode for search&query requests,
+// getQueryLatencyFactor checks queueing latency in QueryNode for search&query requests,
 // and return the factor according to QueueLatencyThreshold.
-func (q *QuotaCenter) checkQueryLatency() float64 {
+func (q *QuotaCenter) getQueryLatencyFactor() float64 {
 	if !Params.QuotaConfig.QueueProtectionEnabled {
 		return 1
 	}
@@ -502,9 +502,9 @@ func (q *QuotaCenter) checkQueryLatency() float64 {
 	return 1
 }
 
-// checkReadResultRate checks search result rate in Proxy,
+// getReadResultFactor checks search result rate in Proxy,
 // and return the factor according to MaxReadResultRate.
-func (q *QuotaCenter) checkReadResultRate() float64 {
+func (q *QuotaCenter) getReadResultFactor() float64 {
 	if !Params.QuotaConfig.ResultProtectionEnabled {
 		return 1
 	}
@@ -524,9 +524,9 @@ func (q *QuotaCenter) checkReadResultRate() float64 {
 	return 1
 }
 
-// memoryToWaterLevel checks whether any node has memory resource issue,
+// getMemoryFactor checks whether any node has memory resource issue,
 // and return the factor according to max memory water level.
-func (q *QuotaCenter) memoryToWaterLevel() float64 {
+func (q *QuotaCenter) getMemoryFactor() float64 {
 	factor := float64(1)
 	if !Params.QuotaConfig.MemProtectionEnabled {
 		return 1
@@ -574,8 +574,8 @@ func (q *QuotaCenter) memoryToWaterLevel() float64 {
 	return factor
 }
 
-// diskQuotaExceeded checks if disk quota exceeded.
-func (q *QuotaCenter) diskQuotaExceeded() bool {
+// ifDiskQuotaExceeded checks if disk quota exceeded.
+func (q *QuotaCenter) ifDiskQuotaExceeded() bool {
 	if !Params.QuotaConfig.DiskProtectionEnabled {
 		return false
 	}
