@@ -71,6 +71,8 @@ type HandoffObserver struct {
 	handoffEvents    map[int64]*HandoffEvent
 	// partition id -> queue
 	handoffSubmitOrders map[int64]queue
+
+	stopOnce sync.Once
 }
 
 func NewHandoffObserver(store meta.Store, meta *meta.Meta, dist *meta.DistributionManager, target *meta.TargetManager) *HandoffObserver {
@@ -149,8 +151,10 @@ func (ob *HandoffObserver) Start(ctx context.Context) error {
 }
 
 func (ob *HandoffObserver) Stop() {
-	close(ob.c)
-	ob.wg.Wait()
+	ob.stopOnce.Do(func() {
+		close(ob.c)
+		ob.wg.Wait()
+	})
 }
 
 func (ob *HandoffObserver) schedule(ctx context.Context) {

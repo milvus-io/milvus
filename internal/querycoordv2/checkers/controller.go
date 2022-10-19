@@ -18,6 +18,7 @@ package checkers
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -44,6 +45,8 @@ type CheckerController struct {
 
 	scheduler task.Scheduler
 	checkers  []Checker
+
+	stopOnce sync.Once
 }
 
 func NewCheckerController(
@@ -96,7 +99,9 @@ func (controller *CheckerController) Start(ctx context.Context) {
 }
 
 func (controller *CheckerController) Stop() {
-	close(controller.stopCh)
+	controller.stopOnce.Do(func() {
+		close(controller.stopCh)
+	})
 }
 
 // check is the real implementation of Check

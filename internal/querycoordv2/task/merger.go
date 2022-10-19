@@ -38,6 +38,8 @@ type Merger[K comparable, R any] struct {
 	queues     map[K]chan MergeableTask[K, R] // TaskID -> Queue
 	waitQueue  chan MergeableTask[K, R]
 	outCh      chan MergeableTask[K, R]
+
+	stopOnce sync.Once
 }
 
 func NewMerger[K comparable, R any]() *Merger[K, R] {
@@ -55,9 +57,11 @@ func (merger *Merger[K, R]) Start(ctx context.Context) {
 }
 
 func (merger *Merger[K, R]) Stop() {
-	close(merger.stopCh)
-	merger.wg.Wait()
-	close(merger.outCh)
+	merger.stopOnce.Do(func() {
+		close(merger.stopCh)
+		merger.wg.Wait()
+		close(merger.outCh)
+	})
 }
 
 func (merger *Merger[K, R]) Chan() <-chan MergeableTask[K, R] {

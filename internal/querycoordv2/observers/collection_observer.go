@@ -18,6 +18,7 @@ package observers
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -36,6 +37,8 @@ type CollectionObserver struct {
 	dist      *meta.DistributionManager
 	meta      *meta.Meta
 	targetMgr *meta.TargetManager
+
+	stopOnce sync.Once
 }
 
 func NewCollectionObserver(
@@ -74,7 +77,9 @@ func (ob *CollectionObserver) Start(ctx context.Context) {
 }
 
 func (ob *CollectionObserver) Stop() {
-	close(ob.stopCh)
+	ob.stopOnce.Do(func() {
+		close(ob.stopCh)
+	})
 }
 
 func (ob *CollectionObserver) Observe() {

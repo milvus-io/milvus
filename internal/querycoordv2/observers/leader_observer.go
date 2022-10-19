@@ -40,6 +40,8 @@ type LeaderObserver struct {
 	meta    *meta.Meta
 	target  *meta.TargetManager
 	cluster session.Cluster
+
+	stopOnce sync.Once
 }
 
 func (o *LeaderObserver) Start(ctx context.Context) {
@@ -63,8 +65,10 @@ func (o *LeaderObserver) Start(ctx context.Context) {
 }
 
 func (o *LeaderObserver) Stop() {
-	close(o.closeCh)
-	o.wg.Wait()
+	o.stopOnce.Do(func() {
+		close(o.closeCh)
+		o.wg.Wait()
+	})
 }
 
 func (o *LeaderObserver) observe(ctx context.Context) {

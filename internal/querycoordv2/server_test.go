@@ -228,6 +228,12 @@ func (suite *ServerSuite) TestEnableActiveStandby() {
 	Params.QueryCoordCfg.EnableActiveStandby = false
 }
 
+func (suite *ServerSuite) TestStop() {
+	suite.server.Stop()
+	// Stop has to be idempotent
+	suite.server.Stop()
+}
+
 func (suite *ServerSuite) waitNodeUp(node *mocks.MockQueryNode, timeout time.Duration) bool {
 	start := time.Now()
 	for time.Since(start) < timeout {

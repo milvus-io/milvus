@@ -50,6 +50,7 @@ type distHandler struct {
 	dist        *meta.DistributionManager
 	target      *meta.TargetManager
 	mu          sync.Mutex
+	stopOnce    sync.Once
 }
 
 func (dh *distHandler) start(ctx context.Context) {
@@ -206,8 +207,10 @@ func (dh *distHandler) getDistribution(ctx context.Context) {
 }
 
 func (dh *distHandler) stop() {
-	close(dh.c)
-	dh.wg.Wait()
+	dh.stopOnce.Do(func() {
+		close(dh.c)
+		dh.wg.Wait()
+	})
 }
 
 func newDistHandler(

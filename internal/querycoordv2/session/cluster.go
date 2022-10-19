@@ -65,6 +65,7 @@ type QueryCluster struct {
 	nodeManager *NodeManager
 	wg          sync.WaitGroup
 	ch          chan struct{}
+	stopOnce    sync.Once
 }
 
 func NewCluster(nodeManager *NodeManager) *QueryCluster {
@@ -82,9 +83,11 @@ func (c *QueryCluster) Start(ctx context.Context) {
 }
 
 func (c *QueryCluster) Stop() {
-	c.clients.closeAll()
-	close(c.ch)
-	c.wg.Wait()
+	c.stopOnce.Do(func() {
+		c.clients.closeAll()
+		close(c.ch)
+		c.wg.Wait()
+	})
 }
 
 func (c *QueryCluster) updateLoop() {
