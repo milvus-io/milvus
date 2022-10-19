@@ -182,9 +182,6 @@ func FilterInIndexedSegments(handler Handler, indexCoord types.IndexCoord, segme
 func extractSegmentsWithVectorIndex(vecFieldID map[int64]int64, segentIndexInfo map[int64]*indexpb.SegmentInfo) []int64 {
 	indexedSegments := make(typeutil.UniqueSet)
 	for _, indexInfo := range segentIndexInfo {
-		if !indexInfo.GetEnableIndex() {
-			continue
-		}
 		for _, index := range indexInfo.GetIndexInfos() {
 			if index.GetFieldID() == vecFieldID[indexInfo.GetCollectionID()] {
 				indexedSegments.Insert(indexInfo.GetSegmentID())

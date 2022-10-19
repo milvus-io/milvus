@@ -170,20 +170,16 @@ func (broker *CoordinatorBroker) GetIndexInfo(ctx context.Context, collectionID 
 		return nil, err
 	}
 
-	segmentInfo := resp.SegmentInfo[segmentID]
+	segmentInfo, ok := resp.SegmentInfo[segmentID]
+	if !ok || len(segmentInfo.GetIndexInfos()) == 0 {
+		return nil, WrapErrIndexNotExist(segmentID)
+	}
 
 	indexes := make([]*querypb.FieldIndexInfo, 0)
-	indexInfo := &querypb.FieldIndexInfo{
-		EnableIndex: segmentInfo.EnableIndex,
-	}
-	if !segmentInfo.EnableIndex {
-		indexes = append(indexes, indexInfo)
-		return indexes, nil
-	}
 	for _, info := range segmentInfo.GetIndexInfos() {
-		indexInfo = &querypb.FieldIndexInfo{
+		indexes = append(indexes, &querypb.FieldIndexInfo{
 			FieldID:        info.GetFieldID(),
-			EnableIndex:    segmentInfo.EnableIndex,
+			EnableIndex:    true,
 			IndexName:      info.GetIndexName(),
 			IndexID:        info.GetIndexID(),
 			BuildID:        info.GetBuildID(),
@@ -192,9 +188,7 @@ func (broker *CoordinatorBroker) GetIndexInfo(ctx context.Context, collectionID 
 			IndexSize:      int64(info.GetSerializedSize()),
 			IndexVersion:   info.GetIndexVersion(),
 			NumRows:        info.GetNumRows(),
-		}
-
-		indexes = append(indexes, indexInfo)
+		})
 	}
 
 	return indexes, nil
