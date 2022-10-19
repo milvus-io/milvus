@@ -64,21 +64,13 @@ class TestActionSecondDeployment(TestDeployBase):
         else:
             default_index_field = ct.default_float_vec_field_name
             vector_index_type = "IVF_FLAT"       
-        
-        is_vector_indexed = False
-        is_string_indexed = False
-        indexed_fields = [index.field_name for index in collection_w.indexes]
+
         binary_vector_index_types = [index.params["index_type"] for index in collection_w.indexes if index.field_name == type_field_map.get("BINARY_VECTOR", "")]
         float_vector_index_types = [index.params["index_type"] for index in collection_w.indexes if index.field_name == type_field_map.get("FLOAT_VECTOR", "")]
-        string_index_types = [index.params["index_type"] for index in collection_w.indexes if index.field_name == type_field_map.get("VARCHAR", "")]
         index_names = [index.index_name for index in collection_w.indexes] # used to drop index
         vector_index_types = binary_vector_index_types + float_vector_index_types
         if len(vector_index_types) > 0:
-            is_vector_indexed = True
             vector_index_type = vector_index_types[0]
-
-        if len(string_index_types) > 0:
-            is_string_indexed = True
  
         try:
             replicas, _ = collection_w.get_replicas(enable_traceback=False)

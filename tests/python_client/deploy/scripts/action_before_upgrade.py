@@ -62,7 +62,7 @@ def task_5(data_size, host):
     """
     task_5_:
         before upgrade: create collection and insert data without flush
-        after upgrade: get collection, load with multi replicas, search, insert data with flush, load with multi replicas and search
+        after upgrade: get collection, create index, load with multi replicas, search, insert data with flush, load with multi replicas and search
     """
     prefix = "task_5_"
     connections.connect(host=host, port=19530, timeout=60)
