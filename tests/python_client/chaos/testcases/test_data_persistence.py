@@ -45,6 +45,13 @@ class TestDataPersistence(TestcaseBase):
         log.info(f"assert flush: {tt}, entities: {entities}")
 
         # search
+        _index_params = {"index_type": "HNSW", "metric_type": "L2", "params": {"M": 48, "efConstruction": 500}}
+        t0 = time.time()
+        index, _ = collection_w.create_index(field_name=ct.default_float_vec_field_name,
+                                             index_params=_index_params,
+                                             name=cf.gen_unique_str())
+        tt = time.time() - t0
+        log.info(f"assert index: {tt}")
         collection_w.load()
         search_vectors = cf.gen_vectors(1, ct.default_dim)
         search_params = {"metric_type": "L2", "params": {"ef": 64}}
