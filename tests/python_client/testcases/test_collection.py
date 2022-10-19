@@ -96,7 +96,7 @@ class TestCollectionParams(TestcaseBase):
         """
         self._connect()
         c_name = ""
-        error = {ct.err_code: -1, ct.err_msg: f'`collection_name` value is illegal'}
+        error = {ct.err_code: 1, ct.err_msg: f'`collection_name` value is illegal'}
         self.collection_wrap.init_collection(c_name, schema=default_schema, check_task=CheckTasks.err_res,
                                              check_items=error)
 
@@ -285,7 +285,7 @@ class TestCollectionParams(TestcaseBase):
         """
         self._connect()
         c_name = cf.gen_unique_str(prefix)
-        error = {ct.err_code: 0, ct.err_msg: "Should be passed into the schema"}
+        error = {ct.err_code: 1, ct.err_msg: "Collection '%s' not exist, or you can pass in schema to create one."}
         self.collection_wrap.init_collection(c_name, schema=None, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2735,7 +2735,7 @@ class TestLoadPartition(TestcaseBase):
                                                )
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         partition_w.drop()
-        error = {ct.err_code: 0, ct.err_msg: 'partitionID of partitionName:%s can not be find' % partition_name}
+        error = {ct.err_code: 1, ct.err_msg: 'partitionID of partitionName:%s can not be find' % partition_name}
         partition_w.load(check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -2775,7 +2775,7 @@ class TestLoadPartition(TestcaseBase):
                                                             "is_empty": True, "num_entities": 0}
                                                )
         partition_w.drop()
-        error = {ct.err_code: 0, ct.err_msg: 'partitionID of partitionName:%s can not be find' % partition_name}
+        error = {ct.err_code: 1, ct.err_msg: 'Partition %s not exist.' % partition_name}
         partition_w.load(check_task=CheckTasks.err_res, check_items=error)
         partition_w.release(check_task=CheckTasks.err_res, check_items=error)
 
@@ -2797,7 +2797,7 @@ class TestLoadPartition(TestcaseBase):
                                                             "is_empty": True, "num_entities": 0}
                                                )
         partition_w.drop()
-        error = {ct.err_code: 0, ct.err_msg: 'partitionID of partitionName:%s can not be find' % partition_name}
+        error = {ct.err_code: 1, ct.err_msg: 'partitionID of partitionName:%s can not be find' % partition_name}
         partition_w.release(check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L0)
