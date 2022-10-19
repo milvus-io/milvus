@@ -383,9 +383,8 @@ func (ob *HandoffObserver) isSegmentExistOnTarget(segmentInfo *querypb.SegmentIn
 
 func (ob *HandoffObserver) isAllCompactFromReleased(segmentInfo *querypb.SegmentInfo) bool {
 	if !segmentInfo.CreatedByCompaction {
-		return !ob.isGrowingSegmentReleased(segmentInfo.SegmentID)
+		return ob.isGrowingSegmentReleased(segmentInfo.SegmentID)
 	}
-
 	for _, segment := range segmentInfo.CompactionFrom {
 		if !ob.isSegmentReleased(segment) {
 			return false

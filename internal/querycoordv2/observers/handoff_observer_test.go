@@ -26,7 +26,6 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/suite"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -161,10 +160,6 @@ func (suite *HandoffObserverTestSuit) TestFlushingHandoff() {
 		GrowingSegments: typeutil.NewUniqueSet(3),
 	})
 
-	suite.Eventually(func() bool {
-		return suite.target.ContainSegment(3)
-	}, 3*time.Second, 1*time.Second)
-
 	// fake release CompactFrom Segment
 	suite.dist.LeaderViewManager.Update(1, &meta.LeaderView{
 		ID:           1,
@@ -208,7 +203,6 @@ func (suite *HandoffObserverTestSuit) TestCompactHandoff() {
 	suite.produceHandOffEvent(compactSegment)
 
 	suite.Eventually(func() bool {
-		log.Info("", zap.Bool("contains", suite.target.ContainSegment(3)))
 		return suite.target.ContainSegment(3)
 	}, 3*time.Second, 1*time.Second)
 
@@ -221,7 +215,6 @@ func (suite *HandoffObserverTestSuit) TestCompactHandoff() {
 	})
 
 	suite.Eventually(func() bool {
-		log.Info("", zap.Bool("contains", suite.target.ContainSegment(1)))
 		return !suite.target.ContainSegment(1)
 	}, 3*time.Second, 1*time.Second)
 
@@ -293,11 +286,11 @@ func (suite *HandoffObserverTestSuit) TestRecursiveHandoff() {
 	})
 
 	suite.Eventually(func() bool {
-		return !suite.target.ContainSegment(3) && !suite.target.ContainSegment(4)
+		return suite.target.ContainSegment(1) && suite.target.ContainSegment(2) && suite.target.ContainSegment(5)
 	}, 3*time.Second, 1*time.Second)
 
 	suite.Eventually(func() bool {
-		return suite.target.ContainSegment(1) && suite.target.ContainSegment(2) && suite.target.ContainSegment(5)
+		return !suite.target.ContainSegment(3) && !suite.target.ContainSegment(4)
 	}, 3*time.Second, 1*time.Second)
 
 	// fake release CompactFrom Segment
@@ -309,11 +302,11 @@ func (suite *HandoffObserverTestSuit) TestRecursiveHandoff() {
 	})
 
 	suite.Eventually(func() bool {
-		return !suite.target.ContainSegment(3) && !suite.target.ContainSegment(4)
+		return suite.target.ContainSegment(1) && suite.target.ContainSegment(2) && suite.target.ContainSegment(5)
 	}, 3*time.Second, 1*time.Second)
 
 	suite.Eventually(func() bool {
-		return suite.target.ContainSegment(1) && suite.target.ContainSegment(2) && suite.target.ContainSegment(5)
+		return !suite.target.ContainSegment(3) && !suite.target.ContainSegment(4)
 	}, 3*time.Second, 1*time.Second)
 
 	suite.Eventually(func() bool {
@@ -424,11 +417,11 @@ func (suite *HandoffObserverTestSuit) TestLoadHandoffEventFromStore() {
 	})
 
 	suite.Eventually(func() bool {
-		return !suite.target.ContainSegment(3) && !suite.target.ContainSegment(4)
+		return suite.target.ContainSegment(1) && suite.target.ContainSegment(2) && suite.target.ContainSegment(5)
 	}, 3*time.Second, 1*time.Second)
 
 	suite.Eventually(func() bool {
-		return suite.target.ContainSegment(1) && suite.target.ContainSegment(2) && suite.target.ContainSegment(5)
+		return !suite.target.ContainSegment(3) && !suite.target.ContainSegment(4)
 	}, 3*time.Second, 1*time.Second)
 
 	// fake release CompactFrom Segment
@@ -440,11 +433,11 @@ func (suite *HandoffObserverTestSuit) TestLoadHandoffEventFromStore() {
 	})
 
 	suite.Eventually(func() bool {
-		return !suite.target.ContainSegment(3) && !suite.target.ContainSegment(4)
+		return suite.target.ContainSegment(1) && suite.target.ContainSegment(2) && suite.target.ContainSegment(5)
 	}, 3*time.Second, 1*time.Second)
 
 	suite.Eventually(func() bool {
-		return suite.target.ContainSegment(1) && suite.target.ContainSegment(2) && suite.target.ContainSegment(5)
+		return !suite.target.ContainSegment(3) && !suite.target.ContainSegment(4)
 	}, 3*time.Second, 1*time.Second)
 
 	suite.Eventually(func() bool {
@@ -530,13 +523,11 @@ func (suite *HandoffObserverTestSuit) TestHandoffOnUnLoadedPartition() {
 	suite.produceHandOffEvent(compactSegment)
 
 	suite.Eventually(func() bool {
-		log.Info("", zap.Bool("contains", suite.target.ContainSegment(3)))
-		return !suite.target.ContainSegment(3)
+		return suite.target.ContainSegment(1) && suite.target.ContainSegment(2)
 	}, 3*time.Second, 1*time.Second)
 
 	suite.Eventually(func() bool {
-		log.Info("", zap.Bool("contains", suite.target.ContainSegment(1)))
-		return suite.target.ContainSegment(1) && suite.target.ContainSegment(2)
+		return !suite.target.ContainSegment(3)
 	}, 3*time.Second, 1*time.Second)
 
 	suite.Eventually(func() bool {
