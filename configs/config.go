@@ -357,7 +357,7 @@ func (c *Config) Load(path string) error {
 }
 
 func (c *Config) Validate() error {
-	if c.Etcd.UseEmbed && c.Metrics.DeployMode != metricsinfo.StandaloneDeployMode {
+	if c.Etcd.UseEmbed && c.Metrics.DeployMode != common.StandaloneDeployMode {
 		return fmt.Errorf("can not use embed etcd in mode %s", c.Metrics.DeployMode)
 	}
 	if c.GarbageCollector.MissedFileTolerance < MinToleranceTime {

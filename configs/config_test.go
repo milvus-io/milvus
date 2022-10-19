@@ -109,7 +109,7 @@ func TestValidate(t *testing.T) {
 					UseEmbed: true,
 				},
 				Metrics: Metrics{
-					DeployMode: metricsinfo.StandaloneDeployMode,
+					DeployMode: common.StandaloneDeployMode,
 				},
 				GarbageCollector: GarbageCollector{
 					MissedFileTolerance:  MinToleranceTime,
@@ -125,7 +125,7 @@ func TestValidate(t *testing.T) {
 					UseEmbed: true,
 				},
 				Metrics: Metrics{
-					DeployMode: metricsinfo.ClusterDeployMode,
+					DeployMode: common.ClusterDeployMode,
 				},
 				GarbageCollector: GarbageCollector{
 					MissedFileTolerance:  MinToleranceTime,
@@ -141,7 +141,7 @@ func TestValidate(t *testing.T) {
 					UseEmbed: true,
 				},
 				Metrics: Metrics{
-					DeployMode: metricsinfo.StandaloneDeployMode,
+					DeployMode: common.StandaloneDeployMode,
 				},
 				GarbageCollector: GarbageCollector{
 					MissedFileTolerance:  MinToleranceTime - 1,

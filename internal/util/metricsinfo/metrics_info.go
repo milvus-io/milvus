@@ -43,31 +43,6 @@ type HardwareMetrics struct {
 	DiskUsage uint64 `json:"disk_usage"`
 }
 
-const (
-	// GitCommitEnvKey defines the key to retrieve the commit corresponding to the current milvus version
-	// from the metrics information
-	GitCommitEnvKey = "MILVUS_GIT_COMMIT"
-
-	// DeployModeEnvKey defines the key to retrieve the current milvus deployment mode
-	// from the metrics information
-	DeployModeEnvKey = "DEPLOY_MODE"
-
-	// ClusterDeployMode represents distributed deployment mode
-	ClusterDeployMode = "DISTRIBUTED"
-
-	// StandaloneDeployMode represents the stand-alone deployment mode
-	StandaloneDeployMode = "STANDALONE"
-
-	// GitBuildTagsEnvKey build tag
-	GitBuildTagsEnvKey = "MILVUS_GIT_BUILD_TAGS"
-
-	// MilvusBuildTimeEnvKey build time
-	MilvusBuildTimeEnvKey = "MILVUS_BUILD_TIME"
-
-	// MilvusUsedGoVersion used go version
-	MilvusUsedGoVersion = "MILVUS_USED_GO_VERSION"
-)
-
 // DeployMetrics records the deploy information of nodes.
 type DeployMetrics struct {
 	SystemVersion string `json:"system_version"`

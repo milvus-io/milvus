@@ -141,7 +141,7 @@ func (s *Server) getDataCoordMetrics() metricsinfo.DataCoordInfos {
 		QuotaMetrics: s.getQuotaMetrics(),
 	}
 
-	metricsinfo.FillDeployMetricsWithEnv(&ret.BaseComponentInfos.SystemInfo)
+	common.FillDeployMetricsWithEnv(&ret.BaseComponentInfos.SystemInfo)
 
 	return ret
 }

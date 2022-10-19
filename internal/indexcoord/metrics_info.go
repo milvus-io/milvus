@@ -23,6 +23,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/hardware"
@@ -86,7 +87,7 @@ func getSystemInfoMetrics(
 		ConnectedNodes: make([]metricsinfo.IndexNodeInfos, 0),
 	}
 
-	metricsinfo.FillDeployMetricsWithEnv(&clusterTopology.Self.SystemInfo)
+	common.FillDeployMetricsWithEnv(&clusterTopology.Self.SystemInfo)
 
 	nodesMetrics := coord.nodeManager.getMetrics(ctx, req)
 	for _, nodeMetrics := range nodesMetrics {

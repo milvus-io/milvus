@@ -51,10 +51,10 @@ func TestServiceParam(t *testing.T) {
 
 		// test UseEmbedEtcd
 		Params.Base.Save("etcd.use.embed", "true")
-		t.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.ClusterDeployMode)
+		t.Setenv(common.DeployModeEnvKey, common.ClusterDeployMode)
 		assert.Panics(t, func() { Params.initUseEmbedEtcd() })
 
-		t.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode)
+		t.Setenv(common.DeployModeEnvKey, common.StandaloneDeployMode)
 		Params.LoadCfgToMemory()
 	})
 

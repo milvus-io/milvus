@@ -1597,7 +1597,7 @@ func Test_NewServer_GetVersion(t *testing.T) {
 
 	t.Run("test get version failed", func(t *testing.T) {
 		server := getServer(t)
-		err := os.Setenv(metricsinfo.GitBuildTagsEnvKey, "v1")
+		err := os.Setenv(common.GitBuildTagsEnvKey, "v1")
 		assert.NoError(t, err)
 		resp, err := server.GetVersion(context.TODO(), req)
 		assert.Equal(t, "v1", resp.GetVersion())

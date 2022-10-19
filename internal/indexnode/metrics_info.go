@@ -80,7 +80,7 @@ func getSystemInfoMetrics(
 		},
 	}
 
-	metricsinfo.FillDeployMetricsWithEnv(&nodeInfos.SystemInfo)
+	common.FillDeployMetricsWithEnv(&nodeInfos.SystemInfo)
 
 	resp, err := metricsinfo.MarshalComponentInfos(nodeInfos)
 	if err != nil {

@@ -121,7 +121,7 @@ func (p *EtcdConfig) LoadCfgToMemory() {
 
 func (p *EtcdConfig) initUseEmbedEtcd() {
 	p.UseEmbedEtcd = p.Base.ParseBool("etcd.use.embed", false)
-	if p.UseEmbedEtcd && (os.Getenv(metricsinfo.DeployModeEnvKey) != metricsinfo.StandaloneDeployMode) {
+	if p.UseEmbedEtcd && (os.Getenv(common.DeployModeEnvKey) != common.StandaloneDeployMode) {
 		panic("embedded etcd can not be used under distributed mode")
 	}
 }

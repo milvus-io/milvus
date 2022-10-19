@@ -27,6 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
@@ -163,7 +164,7 @@ func (s *Server) getSystemInfoMetrics(
 		},
 		ConnectedNodes: make([]metricsinfo.QueryNodeInfos, 0),
 	}
-	metricsinfo.FillDeployMetricsWithEnv(&clusterTopology.Self.SystemInfo)
+	common.FillDeployMetricsWithEnv(&clusterTopology.Self.SystemInfo)
 	nodesMetrics := s.tryGetNodesMetrics(ctx, req, s.nodeMgr.GetAll()...)
 	s.fillMetricsWithNodes(&clusterTopology, nodesMetrics)
 

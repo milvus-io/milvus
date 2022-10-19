@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/util/hardware"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -235,7 +236,7 @@ func getMockSystemInfoMetrics(
 		},
 	}
 
-	metricsinfo.FillDeployMetricsWithEnv(&nodeInfos.SystemInfo)
+	common.FillDeployMetricsWithEnv(&nodeInfos.SystemInfo)
 
 	resp, _ := metricsinfo.MarshalComponentInfos(nodeInfos)
 

@@ -20,7 +20,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/common"
 
 	embed_etcd_kv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
@@ -30,7 +30,7 @@ import (
 
 func TestEtcdRestartLoad(te *testing.T) {
 	etcdDataDir := "/tmp/_etcd_data"
-	te.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode)
+	te.Setenv(common.DeployModeEnvKey, common.StandaloneDeployMode)
 	param := new(paramtable.ServiceParam)
 	param.Init()
 	param.BaseTable.Save("etcd.use.embed", "true")

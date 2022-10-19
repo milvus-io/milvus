@@ -23,6 +23,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/hardware"
@@ -82,7 +83,7 @@ func (c *Core) getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetric
 			ConnectedComponents: []metricsinfo.ConnectionInfo{},
 		},
 	}
-	metricsinfo.FillDeployMetricsWithEnv(&rootCoordTopology.Self.SystemInfo)
+	common.FillDeployMetricsWithEnv(&rootCoordTopology.Self.SystemInfo)
 
 	resp, err := metricsinfo.MarshalTopology(rootCoordTopology)
 	if err != nil {

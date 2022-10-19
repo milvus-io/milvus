@@ -195,7 +195,7 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 
 	// only standalone enable localMsg
 	if local {
-		if err := os.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode); err != nil {
+		if err := os.Setenv(common.DeployModeEnvKey, common.StandaloneDeployMode); err != nil {
 			log.Error("Failed to set deploy mode: ", zap.Error(err))
 		}
 		Params.Init()
@@ -218,12 +218,12 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 			defer etcd.StopEtcdServer()
 		}
 	} else {
-		if err := os.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.ClusterDeployMode); err != nil {
+		if err := os.Setenv(common.DeployModeEnvKey, common.ClusterDeployMode); err != nil {
 			log.Error("Failed to set deploy mode: ", zap.Error(err))
 		}
 	}
 
-	if os.Getenv(metricsinfo.DeployModeEnvKey) == metricsinfo.StandaloneDeployMode {
+	if os.Getenv(common.DeployModeEnvKey) == common.StandaloneDeployMode {
 		closer := trace.InitTracing("standalone")
 		if closer != nil {
 			defer closer.Close()
