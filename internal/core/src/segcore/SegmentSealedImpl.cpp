@@ -392,7 +392,7 @@ SegmentSealedImpl::check_search(const query::Plan* plan) const {
     AssertInfo(plan->extra_info_opt_.has_value(), "Extra info of search plan doesn't have value");
 
     if (!is_system_field_ready()) {
-        PanicInfo("System Field RowID or Timestamp is not loaded");
+        PanicInfo("Segment " + std::to_string(this->id_) + " System Field RowID or Timestamp is not loaded");
     }
 
     auto& request_fields = plan->extra_info_opt_.value().involved_fields_;
