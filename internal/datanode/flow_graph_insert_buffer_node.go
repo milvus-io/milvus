@@ -18,6 +18,7 @@ package datanode
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"reflect"
