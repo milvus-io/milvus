@@ -2,6 +2,20 @@ package typeutil
 
 import "sync"
 
+// MapEqual returns true if the two map contain the same keys and values
+func MapEqual(left, right map[int64]int64) bool {
+	if len(left) != len(right) {
+		return false
+	}
+
+	for k, v := range left {
+		if v2, ok := right[k]; !ok || v != v2 {
+			return false
+		}
+	}
+	return true
+}
+
 // MergeMap merge one map to another
 func MergeMap(src map[string]string, dst map[string]string) map[string]string {
 	for k, v := range src {

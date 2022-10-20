@@ -193,6 +193,52 @@ func (m *CollectionManager) GetStatus(id UniqueID) querypb.LoadStatus {
 	return querypb.LoadStatus_Loaded
 }
 
+func (m *CollectionManager) GetFieldIndex(collectionID UniqueID) map[int64]int64 {
+	m.rwmutex.RLock()
+	defer m.rwmutex.RUnlock()
+
+	collection, ok := m.collections[collectionID]
+	if ok {
+		return collection.GetFieldIndexID()
+	}
+	partitions := m.getPartitionsByCollection(collectionID)
+	if len(partitions) == 0 {
+		return nil
+	}
+	return partitions[0].GetFieldIndexID()
+}
+
+// ContainAnyIndex returns true if the loaded collection contains one of the given indexes,
+// returns false otherwise.
+func (m *CollectionManager) ContainAnyIndex(collectionID int64, indexIDs ...int64) bool {
+	m.rwmutex.RLock()
+	defer m.rwmutex.RUnlock()
+
+	for _, indexID := range indexIDs {
+		if m.containIndex(collectionID, indexID) {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *CollectionManager) containIndex(collectionID, indexID int64) bool {
+	collection, ok := m.collections[collectionID]
+	if ok {
+		return lo.Contains(lo.Values(collection.GetFieldIndexID()), indexID)
+	}
+	partitions := m.getPartitionsByCollection(collectionID)
+	if len(partitions) == 0 {
+		return false
+	}
+	for _, partition := range partitions {
+		if lo.Contains(lo.Values(partition.GetFieldIndexID()), indexID) {
+			return true
+		}
+	}
+	return false
+}
+
 func (m *CollectionManager) Exist(id UniqueID) bool {
 	m.rwmutex.RLock()
 	defer m.rwmutex.RUnlock()

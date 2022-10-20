@@ -34,6 +34,11 @@ import (
 	"github.com/stretchr/testify/suite"
 )
 
+const (
+	defaultVecFieldID = 1
+	defaultIndexID    = 1
+)
+
 type JobSuite struct {
 	suite.Suite
 
@@ -286,6 +291,65 @@ func (suite *JobSuite) TestLoadCollectionWithReplicas() {
 	}
 }
 
+func (suite *JobSuite) TestLoadCollectionWithDiffIndex() {
+	ctx := context.Background()
+
+	// Test load collection
+	for _, collection := range suite.collections {
+		if suite.loadTypes[collection] != querypb.LoadType_LoadCollection {
+			continue
+		}
+		// Load with 1 replica
+		req := &querypb.LoadCollectionRequest{
+			CollectionID: collection,
+			FieldIndexID: map[int64]int64{
+				defaultVecFieldID: defaultIndexID,
+			},
+		}
+		job := NewLoadCollectionJob(
+			ctx,
+			req,
+			suite.dist,
+			suite.meta,
+			suite.targetMgr,
+			suite.broker,
+			suite.nodeMgr,
+			suite.handoffObserver,
+		)
+		suite.scheduler.Add(job)
+		err := job.Wait()
+		suite.NoError(err)
+		suite.EqualValues(1, suite.meta.GetReplicaNumber(collection))
+		suite.assertLoaded(collection)
+	}
+
+	// Test load with different index
+	for _, collection := range suite.collections {
+		if suite.loadTypes[collection] != querypb.LoadType_LoadCollection {
+			continue
+		}
+		req := &querypb.LoadCollectionRequest{
+			CollectionID: collection,
+			FieldIndexID: map[int64]int64{
+				defaultVecFieldID: -defaultIndexID,
+			},
+		}
+		job := NewLoadCollectionJob(
+			ctx,
+			req,
+			suite.dist,
+			suite.meta,
+			suite.targetMgr,
+			suite.broker,
+			suite.nodeMgr,
+			suite.handoffObserver,
+		)
+		suite.scheduler.Add(job)
+		err := job.Wait()
+		suite.ErrorIs(err, ErrLoadParameterMismatched)
+	}
+}
+
 func (suite *JobSuite) TestLoadPartition() {
 	ctx := context.Background()
 
@@ -448,6 +512,68 @@ func (suite *JobSuite) TestLoadPartitionWithReplicas() {
 		suite.scheduler.Add(job)
 		err := job.Wait()
 		suite.ErrorIs(err, ErrNoEnoughNode)
+	}
+}
+
+func (suite *JobSuite) TestLoadPartitionWithDiffIndex() {
+	ctx := context.Background()
+
+	// Test load partition
+	for _, collection := range suite.collections {
+		if suite.loadTypes[collection] != querypb.LoadType_LoadPartition {
+			continue
+		}
+		// Load with 1 replica
+		req := &querypb.LoadPartitionsRequest{
+			CollectionID: collection,
+			PartitionIDs: suite.partitions[collection],
+			FieldIndexID: map[int64]int64{
+				defaultVecFieldID: defaultIndexID,
+			},
+		}
+		job := NewLoadPartitionJob(
+			ctx,
+			req,
+			suite.dist,
+			suite.meta,
+			suite.targetMgr,
+			suite.broker,
+			suite.nodeMgr,
+			suite.handoffObserver,
+		)
+		suite.scheduler.Add(job)
+		err := job.Wait()
+		suite.NoError(err)
+		suite.EqualValues(1, suite.meta.GetReplicaNumber(collection))
+		suite.assertLoaded(collection)
+	}
+
+	// Test load partition with different index
+	for _, collection := range suite.collections {
+		if suite.loadTypes[collection] != querypb.LoadType_LoadPartition {
+			continue
+		}
+		// Load with 1 replica
+		req := &querypb.LoadPartitionsRequest{
+			CollectionID: collection,
+			PartitionIDs: suite.partitions[collection],
+			FieldIndexID: map[int64]int64{
+				defaultVecFieldID: -defaultIndexID,
+			},
+		}
+		job := NewLoadPartitionJob(
+			ctx,
+			req,
+			suite.dist,
+			suite.meta,
+			suite.targetMgr,
+			suite.broker,
+			suite.nodeMgr,
+			suite.handoffObserver,
+		)
+		suite.scheduler.Add(job)
+		err := job.Wait()
+		suite.ErrorIs(err, ErrLoadParameterMismatched)
 	}
 }
 

@@ -188,7 +188,9 @@ func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 
 	log.Info("load collection request received",
 		zap.Any("schema", req.Schema),
-		zap.Int32("replicaNumber", req.ReplicaNumber))
+		zap.Int32("replicaNumber", req.ReplicaNumber),
+		zap.Int64s("fieldIndexes", lo.Values(req.GetFieldIndexID())),
+	)
 	metrics.QueryCoordLoadCount.WithLabelValues(metrics.TotalLabel).Inc()
 
 	if s.status.Load() != commonpb.StateCode_Healthy {
