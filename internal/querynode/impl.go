@@ -330,11 +330,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, in *querypb.WatchDmC
 		}
 
 		sc, _ := node.ShardClusterService.getShardCluster(in.Infos[0].GetChannelName())
-		sc.mutVersion.Lock()
-		defer sc.mutVersion.Unlock()
-		version := NewShardClusterVersion(sc.nextVersionID.Inc(), make(SegmentsStatus), nil)
-		sc.versions.Store(version.versionID, version)
-		sc.currentVersion = version
+		sc.SetupFirstVersion()
 
 		log.Info("watchDmChannelsTask WaitToFinish done", zap.Int64("collectionID", in.CollectionID), zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()))
 		return &commonpb.Status{

@@ -33,7 +33,6 @@ import (
 	"math"
 	"os"
 	"path"
-	"path/filepath"
 	"runtime"
 	"strconv"
 	"sync"
@@ -44,19 +43,14 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/panjf2000/ants/v2"
-	"go.etcd.io/etcd/api/v3/mvccpb"
-	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/concurrency"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/initcore"
@@ -308,9 +302,6 @@ func (node *QueryNode) Start() error {
 	// start task scheduler
 	go node.scheduler.Start()
 
-	// start services
-	go node.watchChangeInfo()
-
 	// create shardClusterService for shardLeader functions.
 	node.ShardClusterService = newShardClusterService(node.etcdCli, node.session, node)
 	// create shard-level query service
@@ -365,105 +356,4 @@ func (node *QueryNode) UpdateStateCode(code commonpb.StateCode) {
 // SetEtcdClient assigns parameter client to its member etcdCli
 func (node *QueryNode) SetEtcdClient(client *clientv3.Client) {
 	node.etcdCli = client
-}
-
-func (node *QueryNode) watchChangeInfo() {
-	log.Info("query node watchChangeInfo start")
-	watchChan := node.etcdKV.WatchWithPrefix(util.ChangeInfoMetaPrefix)
-	for {
-		select {
-		case <-node.queryNodeLoopCtx.Done():
-			log.Info("query node watchChangeInfo close")
-			return
-		case resp, ok := <-watchChan:
-			if !ok {
-				log.Warn("querynode failed to watch channel, return")
-				return
-			}
-
-			if err := resp.Err(); err != nil {
-				log.Warn("query watch channel canceled", zap.Error(resp.Err()))
-				// https://github.com/etcd-io/etcd/issues/8980
-				if resp.Err() == v3rpc.ErrCompacted {
-					go node.watchChangeInfo()
-					return
-				}
-				// if watch loop return due to event canceled, the datanode is not functional anymore
-				log.Panic("querynode is not functional for event canceled", zap.Error(err))
-				return
-			}
-			for _, event := range resp.Events {
-				switch event.Type {
-				case mvccpb.PUT:
-					infoID, err := strconv.ParseInt(filepath.Base(string(event.Kv.Key)), 10, 64)
-					if err != nil {
-						log.Warn("Parse SealedSegmentsChangeInfo id failed", zap.Any("error", err.Error()))
-						continue
-					}
-					log.Info("get SealedSegmentsChangeInfo from etcd",
-						zap.Any("infoID", infoID),
-					)
-					info := &querypb.SealedSegmentsChangeInfo{}
-					err = proto.Unmarshal(event.Kv.Value, info)
-					if err != nil {
-						log.Warn("Unmarshal SealedSegmentsChangeInfo failed", zap.Any("error", err.Error()))
-						continue
-					}
-					go node.handleSealedSegmentsChangeInfo(info)
-				default:
-					// do nothing
-				}
-			}
-		}
-	}
-}
-
-func (node *QueryNode) handleSealedSegmentsChangeInfo(info *querypb.SealedSegmentsChangeInfo) {
-	for _, line := range info.GetInfos() {
-		result := splitSegmentsChange(line)
-
-		for vchannel, changeInfo := range result {
-			err := node.ShardClusterService.HandoffVChannelSegments(vchannel, changeInfo)
-			if err != nil {
-				log.Warn("failed to handle vchannel segments", zap.String("vchannel", vchannel))
-			}
-		}
-	}
-}
-
-// splitSegmentsChange returns rearranged segmentChangeInfo in vchannel dimension
-func splitSegmentsChange(changeInfo *querypb.SegmentChangeInfo) map[string]*querypb.SegmentChangeInfo {
-	result := make(map[string]*querypb.SegmentChangeInfo)
-
-	for _, segment := range changeInfo.GetOnlineSegments() {
-		dmlChannel := segment.GetDmChannel()
-		info, has := result[dmlChannel]
-		if !has {
-			info = &querypb.SegmentChangeInfo{
-				OnlineNodeID:  changeInfo.OnlineNodeID,
-				OfflineNodeID: changeInfo.OfflineNodeID,
-			}
-
-			result[dmlChannel] = info
-		}
-
-		info.OnlineSegments = append(info.OnlineSegments, segment)
-	}
-
-	for _, segment := range changeInfo.GetOfflineSegments() {
-		dmlChannel := segment.GetDmChannel()
-		info, has := result[dmlChannel]
-		if !has {
-			info = &querypb.SegmentChangeInfo{
-				OnlineNodeID:  changeInfo.OnlineNodeID,
-				OfflineNodeID: changeInfo.OfflineNodeID,
-			}
-
-			result[dmlChannel] = info
-		}
-
-		info.OfflineSegments = append(info.OfflineSegments, segment)
-	}
-
-	return result
 }

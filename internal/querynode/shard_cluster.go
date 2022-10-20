@@ -32,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/util/errorutil"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -301,10 +300,28 @@ func (sc *ShardCluster) updateSegment(evt shardSegmentInfo) {
 	sc.transferSegment(old, evt)
 }
 
+// SetupFirstVersion initialized first version for shard cluster.
+func (sc *ShardCluster) SetupFirstVersion() {
+	sc.mutVersion.Lock()
+	defer sc.mutVersion.Unlock()
+	version := NewShardClusterVersion(sc.nextVersionID.Inc(), make(SegmentsStatus), nil)
+	sc.versions.Store(version.versionID, version)
+	sc.currentVersion = version
+}
+
 // SyncSegments synchronize segment distribution in batch
 func (sc *ShardCluster) SyncSegments(distribution []*querypb.ReplicaSegmentsInfo, state segmentState) {
 	log := sc.getLogger()
 	log.Info("ShardCluster sync segments", zap.Any("replica segments", distribution), zap.Int32("state", int32(state)))
+
+	var currentVersion *ShardClusterVersion
+	sc.mutVersion.RLock()
+	currentVersion = sc.currentVersion
+	sc.mutVersion.RUnlock()
+	if currentVersion == nil {
+		log.Warn("received SyncSegments call before version setup")
+		return
+	}
 
 	sc.mut.Lock()
 	for _, line := range distribution {
@@ -340,7 +357,7 @@ func (sc *ShardCluster) SyncSegments(distribution []*querypb.ReplicaSegmentsInfo
 		}
 	}
 
-	allocations := sc.segments.Clone(filterNothing)
+	//	allocations := sc.segments.Clone(filterNothing)
 	sc.mut.Unlock()
 
 	// notify handoff wait online if any
@@ -350,6 +367,15 @@ func (sc *ShardCluster) SyncSegments(distribution []*querypb.ReplicaSegmentsInfo
 
 	sc.mutVersion.Lock()
 	defer sc.mutVersion.Unlock()
+
+	// update shardleader allocation view
+	allocations := sc.currentVersion.segments.Clone(filterNothing)
+	for _, line := range distribution {
+		for _, segmentID := range line.GetSegmentIds() {
+			allocations[segmentID] = shardSegmentInfo{nodeID: line.GetNodeId(), segmentID: segmentID, partitionID: line.GetPartitionId(), state: state}
+		}
+	}
+
 	version := NewShardClusterVersion(sc.nextVersionID.Inc(), allocations, sc.currentVersion)
 	sc.versions.Store(version.versionID, version)
 	sc.currentVersion = version
@@ -597,86 +623,6 @@ func (sc *ShardCluster) finishUsage(versionID int64) {
 	}
 }
 
-// HandoffSegments processes the handoff/load balance segments update procedure.
-func (sc *ShardCluster) HandoffSegments(info *querypb.SegmentChangeInfo) error {
-	log := sc.getLogger()
-	// wait for all OnlineSegment is loaded
-	onlineSegmentIDs := make([]int64, 0, len(info.OnlineSegments))
-	onlineSegments := make([]shardSegmentInfo, 0, len(info.OnlineSegments))
-	for _, seg := range info.OnlineSegments {
-		// filter out segments not maintained in this cluster
-		if seg.GetCollectionID() != sc.collectionID || seg.GetDmChannel() != sc.vchannelName {
-			continue
-		}
-		nodeID, has := sc.selectNodeInReplica(seg.NodeIds)
-		if !has {
-			continue
-		}
-		onlineSegments = append(onlineSegments, shardSegmentInfo{
-			nodeID:    nodeID,
-			segmentID: seg.GetSegmentID(),
-		})
-		onlineSegmentIDs = append(onlineSegmentIDs, seg.GetSegmentID())
-	}
-	sc.waitSegmentsOnline(onlineSegments)
-
-	// now online segment can provide service, generate a new version
-	// add segmentChangeInfo to pending list
-	versionID := sc.applySegmentChange(info, onlineSegmentIDs)
-
-	removes := make(map[int64][]int64) // nodeID => []segmentIDs
-	// remove offline segments record
-	for _, seg := range info.OfflineSegments {
-		// filter out segments not maintained in this cluster
-		if seg.GetCollectionID() != sc.collectionID || seg.GetDmChannel() != sc.vchannelName {
-			continue
-		}
-		nodeID, has := sc.selectNodeInReplica(seg.NodeIds)
-		if !has {
-			// remove segment placeholder
-			nodeID = common.InvalidNodeID
-		}
-		sc.removeSegment(shardSegmentInfo{segmentID: seg.GetSegmentID(), nodeID: nodeID})
-
-		// only add remove operations when node is valid
-		if nodeID != common.InvalidNodeID {
-			removes[nodeID] = append(removes[nodeID], seg.SegmentID)
-		}
-	}
-
-	var errs errorutil.ErrorList
-
-	// notify querynode(s) to release segments
-	for nodeID, segmentIDs := range removes {
-		node, ok := sc.getNode(nodeID)
-		if !ok {
-			log.Warn("node not in cluster", zap.Int64("nodeID", nodeID))
-			errs = append(errs, fmt.Errorf("node not in cluster nodeID %d", nodeID))
-			continue
-		}
-		state, err := node.client.ReleaseSegments(context.Background(), &querypb.ReleaseSegmentsRequest{
-			CollectionID: sc.collectionID,
-			SegmentIDs:   segmentIDs,
-			Scope:        querypb.DataScope_Historical,
-		})
-		if err != nil {
-			errs = append(errs, err)
-			continue
-		}
-		if state.GetErrorCode() != commonpb.ErrorCode_Success {
-			errs = append(errs, fmt.Errorf("Release segments failed with reason: %s", state.GetReason()))
-		}
-	}
-
-	sc.cleanupVersion(versionID)
-
-	// return err if release fail, however the whole segment change is completed
-	if len(errs) > 0 {
-		return errs
-	}
-	return nil
-}
-
 // LoadSegments loads segments with shardCluster.
 // shard cluster shall try to loadSegments in the follower then update the allocation.
 func (sc *ShardCluster) LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
@@ -835,80 +781,6 @@ func (sc *ShardCluster) ReleaseSegments(ctx context.Context, req *querypb.Releas
 	sc.mut.Unlock()
 
 	return err
-}
-
-// appendHandoff adds the change info into pending list and returns the token.
-func (sc *ShardCluster) applySegmentChange(info *querypb.SegmentChangeInfo, onlineSegmentIDs []UniqueID) int64 {
-
-	// the suspects growing segment ids
-	// first all online segment shall be tried, for flush-handoff only puts segment in onlineSegments
-	// and we need to try all offlineSegments in case flush-compact-handoff case
-	possibleGrowingToRemove := make([]UniqueID, 0, len(info.OfflineSegments)+len(onlineSegmentIDs))
-	offlineNodes := make(map[int64]int64)
-	for _, offline := range info.OfflineSegments {
-		offlineNodes[offline.GetSegmentID()] = offline.GetNodeID()
-		possibleGrowingToRemove = append(possibleGrowingToRemove, offline.GetSegmentID())
-	}
-	// add online segment ids to suspect list
-	possibleGrowingToRemove = append(possibleGrowingToRemove, onlineSegmentIDs...)
-
-	// generate next version allocation
-	sc.mut.RLock()
-	allocations := sc.segments.Clone(func(segmentID int64, nodeID int64) bool {
-		offlineNodeID, ok := offlineNodes[segmentID]
-		return ok && offlineNodeID == nodeID
-	})
-	sc.mut.RUnlock()
-
-	sc.mutVersion.Lock()
-	defer sc.mutVersion.Unlock()
-
-	// generate a new version
-	versionID := sc.nextVersionID.Inc()
-	// remove offline segments in next version
-	// so incoming request will not have allocation of these segments
-	version := NewShardClusterVersion(versionID, allocations, sc.currentVersion)
-	sc.versions.Store(versionID, version)
-
-	var lastVersionID int64
-	/*
-		----------------------------------------------------------------------------
-		T0		|T1(S2 online)| T2(change version)|T3(remove G2)|
-		----------------------------------------------------------------------------
-		G2, G3  |G2, G3		  | G2, G3			  | G3
-		----------------------------------------------------------------------------
-		S1      |S1, S2		  | S1, S2			  | S1,S2
-		----------------------------------------------------------------------------
-		v0=[S1] |v0=[S1]	  | v1=[S1,S2]		  | v1=[S1,S2]
-
-		There is no method to ensure search after T2 does not search G2 so that it
-		could be removed safely
-		Currently, the only safe method is to block incoming allocation, so there is no
-		search will be dispatch to G2.
-		After shard cluster is able to maintain growing semgents, this version change could
-		reduce the lock range
-	*/
-	// currentVersion shall be not nil
-	if sc.currentVersion != nil {
-		// wait for last version search done
-		<-sc.currentVersion.Expire()
-		lastVersionID = sc.currentVersion.versionID
-		// remove growing segments if any
-		// handles the case for Growing to Sealed Handoff(which does not has offline segment info)
-		if sc.leader != nil {
-			// error ignored here
-			sc.leader.client.ReleaseSegments(context.Background(), &querypb.ReleaseSegmentsRequest{
-				CollectionID: sc.collectionID,
-				SegmentIDs:   possibleGrowingToRemove,
-				Scope:        querypb.DataScope_Streaming,
-			})
-		}
-	}
-
-	// set current version to new one
-	sc.currentVersion = version
-
-	return lastVersionID
 }
 
 // cleanupVersion clean up version from map

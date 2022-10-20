@@ -620,7 +620,7 @@ func TestImpl_Search(t *testing.T) {
 	// shard cluster sync segments
 	sc, ok := node.ShardClusterService.getShardCluster(defaultDMLChannel)
 	assert.True(t, ok)
-	sc.SyncSegments(nil, segmentStateLoaded)
+	sc.SetupFirstVersion()
 
 	_, err = node.Search(ctx, &queryPb.SearchRequest{
 		Req:             req,
@@ -645,7 +645,7 @@ func TestImpl_searchWithDmlChannel(t *testing.T) {
 	node.ShardClusterService.addShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel)
 	sc, ok := node.ShardClusterService.getShardCluster(defaultDMLChannel)
 	assert.True(t, ok)
-	sc.SyncSegments(nil, segmentStateLoaded)
+	sc.SetupFirstVersion()
 
 	_, err = node.searchWithDmlChannel(ctx, &queryPb.SearchRequest{
 		Req:             req,
@@ -730,7 +730,7 @@ func TestImpl_Query(t *testing.T) {
 	// sync cluster segments
 	sc, ok := node.ShardClusterService.getShardCluster(defaultDMLChannel)
 	assert.True(t, ok)
-	sc.SyncSegments(nil, segmentStateLoaded)
+	sc.SetupFirstVersion()
 
 	_, err = node.Query(ctx, &queryPb.QueryRequest{
 		Req:             req,
@@ -756,7 +756,7 @@ func TestImpl_queryWithDmlChannel(t *testing.T) {
 	node.ShardClusterService.addShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel)
 	sc, ok := node.ShardClusterService.getShardCluster(defaultDMLChannel)
 	assert.True(t, ok)
-	sc.SyncSegments(nil, segmentStateLoaded)
+	sc.SetupFirstVersion()
 
 	_, err = node.queryWithDmlChannel(ctx, &queryPb.QueryRequest{
 		Req:             req,
@@ -820,6 +820,9 @@ func TestImpl_SyncReplicaSegments(t *testing.T) {
 		assert.NoError(t, err)
 
 		node.ShardClusterService.addShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel)
+		cs, ok := node.ShardClusterService.getShardCluster(defaultDMLChannel)
+		require.True(t, ok)
+		cs.SetupFirstVersion()
 
 		resp, err := node.SyncReplicaSegments(ctx, &querypb.SyncReplicaSegmentsRequest{
 			VchannelName: defaultDMLChannel,
@@ -837,8 +840,6 @@ func TestImpl_SyncReplicaSegments(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
 		t.Log(resp.GetReason())
 
-		cs, ok := node.ShardClusterService.getShardCluster(defaultDMLChannel)
-		require.True(t, ok)
 		segment, ok := cs.getSegment(1)
 		require.True(t, ok)
 		assert.Equal(t, common.InvalidNodeID, segment.nodeID)
@@ -921,6 +922,9 @@ func TestSyncDistribution(t *testing.T) {
 		assert.NoError(t, err)
 
 		node.ShardClusterService.addShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel)
+		cs, ok := node.ShardClusterService.getShardCluster(defaultDMLChannel)
+		require.True(t, ok)
+		cs.SetupFirstVersion()
 
 		resp, err := node.SyncDistribution(ctx, &querypb.SyncDistributionRequest{
 			Base:         &commonpb.MsgBase{TargetID: node.session.ServerID},
@@ -939,8 +943,6 @@ func TestSyncDistribution(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
 
-		cs, ok := node.ShardClusterService.getShardCluster(defaultDMLChannel)
-		require.True(t, ok)
 		segment, ok := cs.getSegment(defaultSegmentID)
 		require.True(t, ok)
 		assert.Equal(t, common.InvalidNodeID, segment.nodeID)
