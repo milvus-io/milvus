@@ -39,7 +39,6 @@ import (
 )
 
 const (
-	Bucket          = "bucket"
 	FailedReason    = "failed_reason"
 	Files           = "files"
 	CollectionName  = "collection"
@@ -214,12 +213,7 @@ func (m *importManager) sendOutTasks(ctx context.Context) error {
 			RowBased:     task.GetRowBased(),
 			TaskId:       task.GetId(),
 			Files:        task.GetFiles(),
-			Infos: []*commonpb.KeyValuePair{
-				{
-					Key:   Bucket,
-					Value: task.GetBucket(),
-				},
-			},
+			Infos:        task.GetInfos(),
 		}
 
 		// Get all busy dataNodes for reference.
@@ -438,14 +432,6 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 			return err
 		}
 
-		bucket := ""
-		for _, kv := range req.Options {
-			if kv.Key == Bucket {
-				bucket = kv.Value
-				break
-			}
-		}
-
 		// convert import request to import tasks
 		if req.RowBased {
 			// For row-based importing, each file makes a task.
@@ -460,13 +446,13 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 					CollectionId: cID,
 					PartitionId:  pID,
 					ChannelNames: req.ChannelNames,
-					Bucket:       bucket,
 					RowBased:     req.GetRowBased(),
 					Files:        []string{req.GetFiles()[i]},
 					CreateTs:     time.Now().Unix(),
 					State: &datapb.ImportTaskState{
 						StateCode: commonpb.ImportState_ImportPending,
 					},
+					Infos: req.Options,
 				}
 
 				// Here no need to check error returned by setCollectionPartitionName(),
@@ -499,13 +485,13 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 				CollectionId: cID,
 				PartitionId:  pID,
 				ChannelNames: req.ChannelNames,
-				Bucket:       bucket,
 				RowBased:     req.GetRowBased(),
 				Files:        req.GetFiles(),
 				CreateTs:     time.Now().Unix(),
 				State: &datapb.ImportTaskState{
 					StateCode: commonpb.ImportState_ImportPending,
 				},
+				Infos: req.Options,
 			}
 			// Here no need to check error returned by setCollectionPartitionName(),
 			// since here we always return task list to client no matter something missed.
@@ -1068,13 +1054,13 @@ func cloneImportTaskInfo(taskInfo *datapb.ImportTaskInfo) *datapb.ImportTaskInfo
 		CollectionId:   taskInfo.GetCollectionId(),
 		PartitionId:    taskInfo.GetPartitionId(),
 		ChannelNames:   taskInfo.GetChannelNames(),
-		Bucket:         taskInfo.GetBucket(),
 		RowBased:       taskInfo.GetRowBased(),
 		Files:          taskInfo.GetFiles(),
 		CreateTs:       taskInfo.GetCreateTs(),
 		State:          taskInfo.GetState(),
 		CollectionName: taskInfo.GetCollectionName(),
 		PartitionName:  taskInfo.GetPartitionName(),
+		Infos:          taskInfo.GetInfos(),
 	}
 	return cloned
 }
