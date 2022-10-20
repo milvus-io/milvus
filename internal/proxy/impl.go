@@ -110,12 +110,14 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 
 	collectionName := request.CollectionName
 	collectionID := request.CollectionID
+
+	var aliasName []string
 	if globalMetaCache != nil {
 		if collectionName != "" {
 			globalMetaCache.RemoveCollection(ctx, collectionName) // no need to return error, though collection may be not cached
 		}
 		if request.CollectionID != UniqueID(0) {
-			globalMetaCache.RemoveCollectionsByID(ctx, collectionID)
+			aliasName = globalMetaCache.RemoveCollectionsByID(ctx, collectionID)
 		}
 	}
 	if request.GetBase().GetMsgType() == commonpb.MsgType_DropCollection {
@@ -123,6 +125,9 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 		node.chMgr.removeDMLStream(request.GetCollectionID())
 		// clean up collection level metrics
 		metrics.CleanupCollectionMetrics(Params.ProxyCfg.GetNodeID(), collectionName)
+		for _, alias := range aliasName {
+			metrics.CleanupCollectionMetrics(Params.ProxyCfg.GetNodeID(), alias)
+		}
 	}
 	logutil.Logger(ctx).Info("complete to invalidate collection meta cache",
 		zap.String("role", typeutil.ProxyRole),

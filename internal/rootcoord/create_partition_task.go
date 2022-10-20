@@ -56,7 +56,7 @@ func (t *createPartitionTask) Execute(ctx context.Context) error {
 	undoTask := newBaseUndoTask(t.core.stepExecutor)
 	undoTask.AddStep(&expireCacheStep{
 		baseStep:        baseStep{core: t.core},
-		collectionNames: []string{t.Req.GetCollectionName()},
+		collectionNames: []string{t.collMeta.Name},
 		collectionID:    t.collMeta.CollectionID,
 		ts:              t.GetTs(),
 	}, &nullStep{})
