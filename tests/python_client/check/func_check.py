@@ -127,9 +127,8 @@ class ResponseChecker:
             assert pc.dict_equal_check(res, dict_content)
 
         if func_name == "connect":
-            class_obj = Connect_Object_Name
-            #  res_obj = type(res).__name__
-            #  assert res_obj == class_obj
+            type_name = type(res).__name__
+            assert not type_name.lower().__contains__("error")
 
         if func_name == "has_connection":
             value_content = params.get(ct.value_content, False)
