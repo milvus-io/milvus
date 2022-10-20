@@ -1786,6 +1786,11 @@ func (node *Proxy) getCollectionProgress(ctx context.Context, request *milvuspb.
 	if err != nil {
 		return 0, err
 	}
+
+	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+		return 0, errors.New(resp.Status.Reason)
+	}
+
 	if len(resp.InMemoryPercentages) == 0 {
 		return 0, errors.New("fail to show collections from the querycoord, no data")
 	}
