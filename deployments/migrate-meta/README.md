@@ -10,15 +10,16 @@ Milvus 2.2 has changed the meta structure for segment index. If you have install
 
 ## Parameter Description
 
-| Parameters | Description                                       | Default                      | Required                |
-| ---------- | ------------------------------------------------- | ---------------------------- | ----------------------- |
-| i          | Specify the milvus instance name                  | None                         | true                    |
-| n          | Specify the namespace that milvus is installed in | default                      | false                   |
-| s          | Specify the milvus source version                 | None                         | true                    |
-| t          | Specify the milvus target version                 | None                         | true                    |
-| r          | Specify the milvus meta root path                 | by-dev                       | false                   |
-| w          | Specify the milvus new image tag                  | milvusdb/milvus:v2.2.0       | false                   |
-| o          | Specify the meta migration operation              | migrate                      | false                   |
+| Parameters | Description                                                      | Default                      | Required                |
+| ---------- | ---------------------------------------------------------------- | ---------------------------- | ----------------------- |
+| i          | Specify the milvus instance name                                 | None                         | true                    |
+| n          | Specify the namespace that milvus is installed in                | default                      | false                   |
+| s          | Specify the milvus source version                                | None                         | true                    |
+| t          | Specify the milvus target version                                | None                         | true                    |
+| r          | Specify the milvus meta root path                                | by-dev                       | false                   |
+| w          | Specify the milvus new image tag                                 | milvusdb/milvus:v2.2.0       | false                   |
+| o          | Specify the meta migration operation                             | migrate                      | false                   |
+| d          | Whether delete migration pod after successful migration          | false                        | false                   |
 > By default, the script only migrate from v2.1.x to v2.2.x. If there is anything wrong, you'd first rollback to the older version using the `rollback` operation.
 
 ## Migrate Procedures
@@ -58,7 +59,13 @@ The migration will take four steps:
 ./migrate.sh -i my-release -n milvus -s 2.1.1 -t 2.2.0 -r by-dev -w milvusdb/milvus:master-20221016-15878781
 ```
 
-5. If the migrate is failed, you'd first rollback migration and rerun migrate again.
+5. If you want to automatically remove the migration pod after successful migration, plese specify `-d true`.
+
+```shell
+./migrate.sh -i my-release -n milvus -s 2.1.1 -t 2.2.0 -w milvusdb/milvus:master-20221016-15878781 -d true
+```
+
+6. If the migrate is failed, you'd first rollback migration and rerun migrate again.
 
 ```
 ./migrate.sh -i my-release -n milvus -s 2.1.1 -t 2.2.0 -r by-dev -o rollback -w <milvus-2-1-1-image>
