@@ -83,8 +83,11 @@ func (dNode *deleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 	collection, err := dNode.metaReplica.getCollectionByID(dNode.collectionID)
 	if err != nil {
-		// QueryNode should add collection before start flow graph
-		panic(fmt.Errorf("%s getCollectionByID failed, collectionID = %d, channel = %s", dNode.Name(), dNode.collectionID, dNode.channel))
+		log.Warn("failed to get collection",
+			zap.Int64("collectionID", dNode.collectionID),
+			zap.String("channel", dNode.channel),
+		)
+		return []Msg{}
 	}
 	collection.RLock()
 	defer collection.RUnlock()
@@ -120,9 +123,12 @@ func (dNode *deleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		segment, err := dNode.metaReplica.getSegmentByID(segmentID, segmentTypeSealed)
 		if err != nil {
 			// should not happen, segment should be created before
-			err = fmt.Errorf("deleteNode getSegmentByID failed, err = %s", err)
-			log.Error(err.Error())
-			panic(err)
+			log.Warn("failed to get segment",
+				zap.Int64("collectionID", dNode.collectionID),
+				zap.Int64("segmentID", segmentID),
+				zap.String("channel", dNode.channel),
+			)
+			continue
 		}
 		offset := segment.segmentPreDelete(len(pks))
 		delData.deleteOffset[segmentID] = offset
