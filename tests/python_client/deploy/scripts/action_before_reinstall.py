@@ -14,6 +14,7 @@ def task_1(data_size, host):
     create_index(prefix)
     load_and_search(prefix)
     create_collections_and_insert_data(prefix,data_size)
+    create_index(prefix)
     load_and_search(prefix)
 
 
