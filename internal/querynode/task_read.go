@@ -25,7 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
-	"github.com/milvus-io/milvus/internal/util/tsoutil"
+
 	"go.uber.org/zap"
 )
 
@@ -43,7 +43,6 @@ type readTask interface {
 	Timeout() bool
 	TimeoutError() error
 
-	SetMaxCPUUsage(int32)
 	SetStep(step TaskStep)
 }
 
@@ -56,7 +55,6 @@ type baseReadTask struct {
 
 	DataScope          querypb.DataScope
 	cpu                int32
-	maxCPU             int32
 	DbID               int64
 	CollectionID       int64
 	TravelTimestamp    uint64
@@ -84,10 +82,6 @@ func (b *baseReadTask) SetStep(step TaskStep) {
 func (b *baseReadTask) OnEnqueue() error {
 	b.SetStep(TaskStepEnqueue)
 	return nil
-}
-
-func (b *baseReadTask) SetMaxCPUUsage(cpu int32) {
-	b.maxCPU = cpu
 }
 
 func (b *baseReadTask) PreExecute(ctx context.Context) error {
@@ -141,9 +135,16 @@ func (b *baseReadTask) Ready() (bool, error) {
 	if b.waitTSafeTr == nil {
 		b.waitTSafeTr = timerecord.NewTimeRecorder("waitTSafeTimeRecorder")
 	}
+
 	if b.Timeout() {
 		return false, b.TimeoutError()
 	}
+
+	if released := b.QS.collection.IsReleased(); released {
+		log.Debug("collection release before search", zap.Int64("collectionID", b.CollectionID))
+		return false, fmt.Errorf("collection has been released, taskID = %d, collectionID = %d", b.ID(), b.CollectionID)
+	}
+
 	var channel Channel
 	if b.DataScope == querypb.DataScope_Streaming {
 		channel = b.QS.channel
@@ -153,28 +154,14 @@ func (b *baseReadTask) Ready() (bool, error) {
 		return false, fmt.Errorf("unexpected dataScope %s", b.DataScope.String())
 	}
 
-	if _, released := b.QS.collection.getReleaseTime(); released {
-		log.Debug("collection release before search", zap.Int64("collectionID", b.CollectionID))
-		return false, fmt.Errorf("collection has been released, taskID = %d, collectionID = %d", b.ID(), b.CollectionID)
-	}
-
 	serviceTime, err := b.QS.getServiceableTime(channel)
 	if err != nil {
 		return false, fmt.Errorf("failed to get service timestamp, taskID = %d, collectionID = %d, err=%w", b.ID(), b.CollectionID, err)
 	}
 	guaranteeTs := b.GuaranteeTimestamp
-	gt, _ := tsoutil.ParseTS(guaranteeTs)
-	st, _ := tsoutil.ParseTS(serviceTime)
 	if guaranteeTs > serviceTime {
 		return false, nil
 	}
-	log.Debug("query msg can do",
-		zap.Any("collectionID", b.CollectionID),
-		zap.Any("sm.GuaranteeTimestamp", gt),
-		zap.Any("serviceTime", st),
-		zap.Any("delta milliseconds", gt.Sub(st).Milliseconds()),
-		zap.Any("channel", channel),
-		zap.Any("msgID", b.ID()))
 	b.waitTsDur = b.waitTSafeTr.ElapseSpan()
 	return true, nil
 }

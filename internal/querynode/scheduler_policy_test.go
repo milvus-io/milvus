@@ -44,17 +44,15 @@ func TestScheduler_defaultScheduleReadPolicy(t *testing.T) {
 	assert.Equal(t, int32(0), cur)
 	assert.Equal(t, 0, len(tasks))
 
-	actual := int32(180)     // sum(3..6) * 10   3 + 4 + 5 + 6
 	targetUsage = int32(190) // > actual
-	maxNum = math.MaxInt32
-	tasks, cur = scheduleFunc(readyReadTasks, targetUsage, maxNum)
+	actual := int32(250)     // sum(3..7) * 10   3 + 4 + 5 + 6 + 7
+	tasks, cur = scheduleFunc(readyReadTasks, targetUsage, math.MaxInt32)
 	assert.Equal(t, actual, cur)
-	assert.Equal(t, 4, len(tasks))
+	assert.Equal(t, 5, len(tasks))
 
-	actual = 340 // sum(7..10) * 10 ,  7+ 8 + 9 + 10
+	actual = 270 // sum(8..10) * 10 ,  8 + 9 + 10
 	targetUsage = 340
-	maxNum = 4
-	tasks, cur = scheduleFunc(readyReadTasks, targetUsage, maxNum)
+	tasks, cur = scheduleFunc(readyReadTasks, targetUsage, math.MaxInt32)
 	assert.Equal(t, actual, cur)
-	assert.Equal(t, 4, len(tasks))
+	assert.Equal(t, 3, len(tasks))
 }

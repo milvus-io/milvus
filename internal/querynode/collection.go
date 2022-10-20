@@ -25,8 +25,8 @@ package querynode
 import "C"
 import (
 	"fmt"
-	"math"
 	"sync"
+
 	"sync/atomic"
 	"unsafe"
 
@@ -60,8 +60,8 @@ type Collection struct {
 
 	releaseMu          sync.RWMutex // guards release
 	releasedPartitions map[UniqueID]struct{}
-	releaseTime        Timestamp
-	released           bool
+
+	released int32
 }
 
 // ID returns collection id
@@ -268,19 +268,17 @@ func (c *Collection) removeVDeltaChannel(channel Channel) {
 	metrics.QueryNodeNumDeltaChannels.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Sub(float64(len(c.vDeltaChannels)))
 }
 
-// setReleaseTime records when collection is released
-func (c *Collection) setReleaseTime(t Timestamp, released bool) {
-	c.releaseMu.Lock()
-	defer c.releaseMu.Unlock()
-	c.releaseTime = t
-	c.released = released
+func (c *Collection) setReleased(released bool) {
+	var i int32 = 0
+	if released {
+		i = 1
+	}
+	atomic.StoreInt32(&c.loadType, i)
 }
 
-// getReleaseTime gets the time when collection is released
-func (c *Collection) getReleaseTime() (Timestamp, bool) {
-	c.releaseMu.RLock()
-	defer c.releaseMu.RUnlock()
-	return c.releaseTime, c.released
+// IsReleased return if the collection has beed released
+func (c *Collection) IsReleased() bool {
+	return atomic.LoadInt32(&c.released) == 1
 }
 
 // setLoadType set the loading type of collection, which is loadTypeCollection or loadTypePartition
@@ -328,7 +326,6 @@ func newCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) *Co
 
 	log.Info("create collection", zap.Int64("collectionID", collectionID))
 
-	newCollection.setReleaseTime(Timestamp(math.MaxUint64), false)
 	return newCollection
 }
 

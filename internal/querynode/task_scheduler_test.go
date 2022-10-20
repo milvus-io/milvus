@@ -19,8 +19,11 @@ package querynode
 import (
 	"context"
 	"errors"
+	"math"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/util/concurrency"
+	"github.com/panjf2000/ants/v2"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -96,10 +99,6 @@ func (m *mockReadTask) TimeoutError() error {
 	return m.timeoutError
 }
 
-func (m *mockReadTask) SetMaxCPUUsage(cpu int32) {
-	m.maxCPU = cpu
-}
-
 func (m *mockReadTask) SetStep(step TaskStep) {
 	m.step = step
 }
@@ -112,8 +111,12 @@ func TestTaskScheduler(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	tSafe := newTSafeReplica()
+	pool, err := concurrency.NewPool(12, ants.WithPreAlloc(true),
+		ants.WithExpiryDuration(math.MaxInt64))
 
-	ts := newTaskScheduler(ctx, tSafe)
+	assert.NoError(t, err)
+
+	ts := newTaskScheduler(ctx, tSafe, pool)
 	ts.Start()
 
 	task := &mockTask{
@@ -133,62 +136,18 @@ func TestTaskScheduler(t *testing.T) {
 	ts.Close()
 }
 
-func TestTaskScheduler_tryEvictUnsolvedReadTask(t *testing.T) {
-	t.Run("evict canceled task", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
-		cancel()
-		tSafe := newTSafeReplica()
-
-		ts := newTaskScheduler(ctx, tSafe)
-
-		taskCanceled := &mockReadTask{
-			mockTask: mockTask{
-				baseTask: baseTask{
-					ctx:  ctx,
-					done: make(chan error, 1024),
-				},
-			},
-			timeout:      true,
-			timeoutError: context.Canceled,
-		}
-		taskNormal := &mockReadTask{
-			mockTask: mockTask{
-				baseTask: baseTask{
-					ctx:  context.Background(),
-					done: make(chan error, 1024),
-				},
-			},
-		}
-
-		ts.unsolvedReadTasks.PushBack(taskNormal)
-		ts.unsolvedReadTasks.PushBack(taskCanceled)
-
-		// set max len to 2
-		tmp := Params.QueryNodeCfg.MaxUnsolvedQueueSize
-		Params.QueryNodeCfg.MaxUnsolvedQueueSize = 2
-		ts.tryEvictUnsolvedReadTask(1)
-		Params.QueryNodeCfg.MaxUnsolvedQueueSize = tmp
-
-		err := <-taskCanceled.done
-		assert.ErrorIs(t, err, context.Canceled)
-
-		select {
-		case <-taskNormal.done:
-			t.Fail()
-		default:
-		}
-
-		assert.Equal(t, 1, ts.unsolvedReadTasks.Len())
-	})
-}
-
 func TestTaskScheduler_executeReadTasks(t *testing.T) {
+	pool, err := concurrency.NewPool(2, ants.WithPreAlloc(true),
+		ants.WithExpiryDuration(math.MaxInt64))
+
+	assert.NoError(t, err)
+
 	t.Run("execute canceled task", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		tSafe := newTSafeReplica()
 
-		ts := newTaskScheduler(ctx, tSafe)
+		ts := newTaskScheduler(ctx, tSafe, pool)
 		ts.Start()
 		defer ts.Close()
 

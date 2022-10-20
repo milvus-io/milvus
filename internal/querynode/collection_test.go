@@ -112,16 +112,18 @@ func TestCollection_pDeltaChannel(t *testing.T) {
 	assert.Equal(t, 2, len(channels))
 }
 
-func TestCollection_releaseTime(t *testing.T) {
+func TestCollection_released(t *testing.T) {
 	collectionID := UniqueID(0)
 	schema := genTestCollectionSchema()
 
 	collection := newCollection(collectionID, schema)
-	t0 := Timestamp(1000)
-	collection.setReleaseTime(t0, true)
-	t1, released := collection.getReleaseTime()
-	assert.Equal(t, t0, t1)
+	collection.setReleased(true)
+	released := collection.IsReleased()
 	assert.True(t, released)
+
+	collection.setReleased(false)
+	released = collection.IsReleased()
+	assert.False(t, released)
 }
 
 func TestCollection_loadType(t *testing.T) {

@@ -97,6 +97,9 @@ func newQueryNodeMock() *QueryNode {
 		panic(err)
 	}
 
+	svr.cgoPool = pool
+	svr.scheduler = newTaskScheduler(svr.queryNodeLoopCtx, svr.tSafeReplica, svr.cgoPool)
+
 	replica := newCollectionReplica(pool)
 	svr.metaReplica = replica
 	svr.dataSyncService = newDataSyncService(ctx, svr.metaReplica, tsReplica, factory)

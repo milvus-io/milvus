@@ -1675,6 +1675,13 @@ func genSimpleQueryNodeWithMQFactory(ctx context.Context, fac dependency.Factory
 	node.etcdKV = etcdKV
 
 	node.tSafeReplica = newTSafeReplica()
+	pool, err := concurrency.NewPool(runtime.GOMAXPROCS(0))
+	if err != nil {
+		return nil, err
+	}
+	node.cgoPool = pool
+
+	node.scheduler = newTaskScheduler(node.queryNodeLoopCtx, node.tSafeReplica, node.cgoPool)
 
 	replica, err := genSimpleReplicaWithSealSegment(ctx)
 	if err != nil {

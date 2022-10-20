@@ -132,7 +132,6 @@ func NewQueryNode(ctx context.Context, factory dependency.Factory) *QueryNode {
 	}
 
 	node.tSafeReplica = newTSafeReplica()
-	node.scheduler = newTaskScheduler(ctx1, node.tSafeReplica)
 	node.UpdateStateCode(commonpb.StateCode_Abnormal)
 
 	return node
@@ -273,6 +272,9 @@ func (node *QueryNode) Init() error {
 		}
 		wg.Wait()
 		close(sig)
+
+		log.Info("querynode set cgoPool", zap.Any("capacity", cpuNum))
+		node.scheduler = newTaskScheduler(node.queryNodeLoopCtx, node.tSafeReplica, node.cgoPool)
 
 		node.metaReplica = newCollectionReplica(node.cgoPool)
 

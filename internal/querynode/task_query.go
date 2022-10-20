@@ -68,7 +68,7 @@ func (q *queryTask) queryOnStreaming() error {
 
 	q.QS.collection.RLock() // locks the collectionPtr
 	defer q.QS.collection.RUnlock()
-	if _, released := q.QS.collection.getReleaseTime(); released {
+	if released := q.QS.collection.IsReleased(); released {
 		log.Ctx(ctx).Debug("collection release before search", zap.Int64("msgID", q.ID()),
 			zap.Int64("collectionID", q.CollectionID))
 		return fmt.Errorf("retrieve failed, collection has been released, collectionID = %d", q.CollectionID)
@@ -117,7 +117,7 @@ func (q *queryTask) queryOnHistorical() error {
 	q.QS.collection.RLock() // locks the collectionPtr
 	defer q.QS.collection.RUnlock()
 
-	if _, released := q.QS.collection.getReleaseTime(); released {
+	if released := q.QS.collection.IsReleased(); released {
 		log.Ctx(ctx).Debug("collection release before search", zap.Int64("msgID", q.ID()),
 			zap.Int64("collectionID", q.CollectionID))
 		return fmt.Errorf("retrieve failed, collection has been released, collectionID = %d", q.CollectionID)
@@ -157,10 +157,7 @@ func (q *queryTask) Execute(ctx context.Context) error {
 }
 
 func (q *queryTask) estimateCPUUsage() {
-	q.cpu = 10
-	if q.cpu > q.maxCPU {
-		q.cpu = q.maxCPU
-	}
+	q.cpu = 1
 }
 
 func (q *queryTask) CPUUsage() int32 {

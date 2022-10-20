@@ -196,12 +196,12 @@ var (
 			nodeIDLabelName,
 		})
 
-	QueryNodeEstimateCPUUsage = prometheus.NewGaugeVec(
+	QueryNodePoolJobNum = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
-			Name:      "estimate_cpu_usage",
-			Help:      "estimated cpu usage by the scheduler in QueryNode",
+			Name:      "pool_job_num",
+			Help:      "the number of job in goroutine pool",
 		}, []string{
 			nodeIDLabelName,
 		})
@@ -328,7 +328,7 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeReadTaskUnsolveLen)
 	registry.MustRegister(QueryNodeReadTaskReadyLen)
 	registry.MustRegister(QueryNodeReadTaskConcurrency)
-	registry.MustRegister(QueryNodeEstimateCPUUsage)
+	registry.MustRegister(QueryNodePoolJobNum)
 	registry.MustRegister(QueryNodeSearchGroupNQ)
 	registry.MustRegister(QueryNodeSearchNQ)
 	registry.MustRegister(QueryNodeSearchGroupSize)

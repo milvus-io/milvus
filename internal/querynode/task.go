@@ -614,7 +614,7 @@ func (r *releaseCollectionTask) Execute(ctx context.Context) error {
 	}
 	// set release time
 	log.Info("set release time", zap.Any("collectionID", r.req.CollectionID))
-	collection.setReleaseTime(r.req.Base.Timestamp, true)
+	collection.setReleased(true)
 
 	// remove all flow graphs of the target collection
 	vChannels := collection.getVChannels()
@@ -669,7 +669,7 @@ func (r *releasePartitionsTask) Execute(ctx context.Context) error {
 	if releaseAll {
 		// set release time
 		log.Info("set release time", zap.Int64("collectionID", r.req.CollectionID))
-		coll.setReleaseTime(r.req.Base.Timestamp, true)
+		coll.setReleased(true)
 
 		// remove all flow graphs of the target collection
 		vChannels := coll.getVChannels()

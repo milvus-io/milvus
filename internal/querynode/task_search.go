@@ -104,7 +104,7 @@ func (s *searchTask) searchOnStreaming() error {
 
 	s.QS.collection.RLock() // locks the collectionPtr
 	defer s.QS.collection.RUnlock()
-	if _, released := s.QS.collection.getReleaseTime(); released {
+	if released := s.QS.collection.IsReleased(); released {
 		log.Ctx(ctx).Debug("collection release before search", zap.Int64("msgID", s.ID()),
 			zap.Int64("collectionID", s.CollectionID))
 		return fmt.Errorf("retrieve failed, collection has been released, collectionID = %d", s.CollectionID)
@@ -141,7 +141,7 @@ func (s *searchTask) searchOnHistorical() error {
 
 	s.QS.collection.RLock() // locks the collectionPtr
 	defer s.QS.collection.RUnlock()
-	if _, released := s.QS.collection.getReleaseTime(); released {
+	if released := s.QS.collection.IsReleased(); released {
 		log.Ctx(ctx).Warn("collection release before search", zap.Int64("msgID", s.ID()),
 			zap.Int64("collectionID", s.CollectionID))
 		return fmt.Errorf("retrieve failed, collection has been released, collectionID = %d", s.CollectionID)
@@ -184,7 +184,7 @@ func (s *searchTask) Notify(err error) {
 }
 
 func (s *searchTask) estimateCPUUsage() {
-	var segmentNum int64
+	var segmentNum int32
 	if s.DataScope == querypb.DataScope_Streaming {
 		// assume growing segments num is 5
 		partitionIDs := s.iReq.GetPartitionIDs()
@@ -196,20 +196,14 @@ func (s *searchTask) estimateCPUUsage() {
 		if err != nil {
 			log.Error("searchTask estimateCPUUsage", zap.Error(err))
 		}
-		segmentNum = int64(len(segIDs))
+		segmentNum = int32(len(segIDs))
 		if segmentNum <= 0 {
 			segmentNum = 1
 		}
 	} else if s.DataScope == querypb.DataScope_Historical {
-		segmentNum = int64(len(s.req.GetSegmentIDs()))
+		segmentNum = int32(len(s.req.GetSegmentIDs()))
 	}
-	cpu := float64(s.NQ*segmentNum) * Params.QueryNodeCfg.CPURatio
-	s.cpu = int32(cpu)
-	if s.cpu <= 0 {
-		s.cpu = 5
-	} else if s.cpu > s.maxCPU {
-		s.cpu = s.maxCPU
-	}
+	s.cpu = segmentNum
 }
 
 func (s *searchTask) CPUUsage() int32 {

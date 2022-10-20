@@ -20,14 +20,13 @@ import (
 	"container/list"
 	"context"
 	"fmt"
-	"runtime"
 	"sync"
 	"sync/atomic"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
+
+	"github.com/milvus-io/milvus/internal/util/concurrency"
 )
 
 const (
@@ -38,6 +37,7 @@ type taskScheduler struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
+	unsolveLock sync.Mutex
 	// for search and query start
 	unsolvedReadTasks *list.List
 	readyReadTasks    *list.List
@@ -53,25 +53,17 @@ type taskScheduler struct {
 	schedule scheduleReadTaskPolicy
 	// for search and query end
 
-	cpuUsage        int32 // 1200 means 1200% 12 cores
-	readConcurrency int32 // 1200 means 1200% 12 cores
+	readConcurrency int32
 
 	// for other tasks
-	queue       taskQueue
-	maxCPUUsage int32
+	queue taskQueue
 
 	wg sync.WaitGroup
+
+	pool *concurrency.Pool
 }
 
-func getNumCPU() int {
-	cur := runtime.GOMAXPROCS(0)
-	if cur <= 0 {
-		cur = runtime.NumCPU()
-	}
-	return cur
-}
-
-func newTaskScheduler(ctx context.Context, tSafeReplica TSafeReplicaInterface) *taskScheduler {
+func newTaskScheduler(ctx context.Context, tSafeReplica TSafeReplicaInterface, pool *concurrency.Pool) *taskScheduler {
 	ctx1, cancel := context.WithCancel(ctx)
 	s := &taskScheduler{
 		ctx:                 ctx1,
@@ -82,8 +74,8 @@ func newTaskScheduler(ctx context.Context, tSafeReplica TSafeReplicaInterface) *
 		executeReadTaskChan: make(chan readTask, maxExecuteReadChanLen),
 		notifyChan:          make(chan struct{}, 1),
 		tSafeReplica:        tSafeReplica,
-		maxCPUUsage:         int32(getNumCPU() * 100),
 		schedule:            defaultScheduleReadPolicy,
+		pool:                pool,
 	}
 	s.queue = newQueryNodeTaskQueue(s)
 	return s
@@ -142,48 +134,6 @@ func (s *taskScheduler) Start() {
 	s.wg.Add(1)
 	go s.scheduleReadTasks()
 
-	s.wg.Add(1)
-	go s.executeReadTasks()
-}
-
-func (s *taskScheduler) tryEvictUnsolvedReadTask(headCount int) {
-	after := headCount + s.unsolvedReadTasks.Len()
-	diff := int32(after) - Params.QueryNodeCfg.MaxUnsolvedQueueSize
-	if diff <= 0 {
-		return
-	}
-	var next *list.Element
-	for e := s.unsolvedReadTasks.Front(); e != nil; e = next {
-		next = e.Next()
-		t, ok := e.Value.(readTask)
-		if !ok {
-			s.unsolvedReadTasks.Remove(e)
-			rateCol.rtCounter.sub(t, unsolvedQueueType)
-			diff--
-			continue
-		}
-		if t.Timeout() {
-			s.unsolvedReadTasks.Remove(e)
-			rateCol.rtCounter.sub(t, unsolvedQueueType)
-			t.Notify(t.TimeoutError())
-			diff--
-		}
-	}
-	if diff <= 0 {
-		return
-	}
-	metrics.QueryNodeEvictedReadReqCount.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Add(float64(diff))
-	busyErr := fmt.Errorf("server is busy")
-	for e := s.unsolvedReadTasks.Front(); e != nil && diff > 0; e = next {
-		next = e.Next()
-		diff--
-		s.unsolvedReadTasks.Remove(e)
-		t, ok := e.Value.(readTask)
-		if ok {
-			rateCol.rtCounter.sub(t, unsolvedQueueType)
-			t.Notify(busyErr)
-		}
-	}
 }
 
 func (s *taskScheduler) scheduleReadTasks() {
@@ -195,35 +145,12 @@ func (s *taskScheduler) scheduleReadTasks() {
 		case <-s.ctx.Done():
 			log.Warn("QueryNode stop schedulerReadTasks")
 			return
-
+		case <-s.pool.SignalChan():
+			s.tryMergeReadTasks()
+			s.popAndAddToExecute()
 		case <-s.notifyChan:
 			s.tryMergeReadTasks()
 			s.popAndAddToExecute()
-
-		case t, ok := <-s.receiveReadTaskChan:
-			if ok {
-				rateCol.rtCounter.sub(t, receiveQueueType)
-				pendingTaskLen := len(s.receiveReadTaskChan)
-				s.tryEvictUnsolvedReadTask(pendingTaskLen + 1)
-				if t != nil {
-					s.unsolvedReadTasks.PushBack(t)
-					rateCol.rtCounter.add(t, unsolvedQueueType)
-				}
-				for i := 0; i < pendingTaskLen; i++ {
-					t := <-s.receiveReadTaskChan
-					rateCol.rtCounter.sub(t, receiveQueueType)
-					if t != nil {
-						s.unsolvedReadTasks.PushBack(t)
-						rateCol.rtCounter.add(t, unsolvedQueueType)
-					}
-				}
-				s.tryMergeReadTasks()
-				s.popAndAddToExecute()
-			} else {
-				errMsg := "taskScheduler receiveReadTaskChan has been closed"
-				log.Warn(errMsg)
-				return
-			}
 		case <-l.On():
 			s.tryMergeReadTasks()
 			s.popAndAddToExecute()
@@ -232,96 +159,51 @@ func (s *taskScheduler) scheduleReadTasks() {
 }
 
 func (s *taskScheduler) AddReadTask(ctx context.Context, t readTask) error {
-	t.SetMaxCPUUsage(s.maxCPUUsage)
 	t.OnEnqueue()
+	s.unsolveLock.Lock()
+	s.unsolvedReadTasks.PushBack(t)
+	s.unsolveLock.Unlock()
+
 	select {
 	case <-ctx.Done():
 		return fmt.Errorf("taskScheduler AddReadTask context is done")
 	case <-s.ctx.Done():
 		return fmt.Errorf("taskScheduler stoped")
-	case s.receiveReadTaskChan <- t:
+	case s.notifyChan <- struct{}{}:
 		rateCol.rtCounter.add(t, receiveQueueType)
-		return nil
+	default:
 	}
+	return nil
 }
 
 func (s *taskScheduler) popAndAddToExecute() {
 	readConcurrency := atomic.LoadInt32(&s.readConcurrency)
 	metrics.QueryNodeReadTaskConcurrency.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(readConcurrency))
+
+	jobNum := s.pool.JobNum()
+	metrics.QueryNodePoolJobNum.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(jobNum))
 	if s.readyReadTasks.Len() == 0 {
 		return
 	}
-	curUsage := atomic.LoadInt32(&s.cpuUsage)
-	if curUsage < 0 {
-		curUsage = 0
-	}
-	metrics.QueryNodeEstimateCPUUsage.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(curUsage))
-	targetUsage := s.maxCPUUsage - curUsage
-	if targetUsage <= 0 {
-		return
-	}
 
-	remain := Params.QueryNodeCfg.MaxReadConcurrency - readConcurrency
+	remain := Params.QueryNodeCfg.MaxReadConcurrency - int32(jobNum)
 	if remain <= 0 {
 		return
 	}
 
-	tasks, deltaUsage := s.schedule(s.readyReadTasks, targetUsage, remain)
-	atomic.AddInt32(&s.cpuUsage, deltaUsage)
+	tasks, _ := s.schedule(s.readyReadTasks, remain, Params.QueryNodeCfg.MaxReadConcurrency)
+
+	atomic.AddInt32(&s.readConcurrency, int32(len(tasks)))
 	for _, t := range tasks {
-		s.executeReadTaskChan <- t
 		rateCol.rtCounter.add(t, executeQueueType)
-	}
-}
-
-func (s *taskScheduler) executeReadTasks() {
-	defer s.wg.Done()
-	var taskWg sync.WaitGroup
-	defer taskWg.Wait()
-
-	executeFunc := func(t readTask) {
-		defer taskWg.Done()
-		if t.Timeout() {
-			t.Notify(t.TimeoutError())
-		} else {
+		go func(t readTask) {
 			s.processReadTask(t)
-		}
-		cpu := t.CPUUsage()
-		atomic.AddInt32(&s.readConcurrency, -1)
-		atomic.AddInt32(&s.cpuUsage, -cpu)
-		select {
-		case s.notifyChan <- struct{}{}:
-		default:
-		}
-	}
-
-	for {
-		select {
-		case <-s.ctx.Done():
-			log.Debug("QueryNode stop executeReadTasks", zap.Int64("NodeID", Params.QueryNodeCfg.GetNodeID()))
-			return
-		case t, ok := <-s.executeReadTaskChan:
-			if ok {
-				rateCol.rtCounter.sub(t, receiveQueueType)
-				pendingTaskLen := len(s.executeReadTaskChan)
-				taskWg.Add(1)
-				atomic.AddInt32(&s.readConcurrency, int32(pendingTaskLen+1))
-				log.Debug("begin to execute task")
-				go executeFunc(t)
-
-				for i := 0; i < pendingTaskLen; i++ {
-					taskWg.Add(1)
-					t := <-s.executeReadTaskChan
-					rateCol.rtCounter.sub(t, receiveQueueType)
-					go executeFunc(t)
-				}
-				//log.Debug("QueryNode taskScheduler executeReadTasks process tasks done", zap.Int("numOfTasks", pendingTaskLen+1))
-			} else {
-				errMsg := "taskScheduler executeReadTaskChan has been closed"
-				log.Warn(errMsg)
-				return
+			atomic.AddInt32(&s.readConcurrency, -1)
+			select {
+			case s.notifyChan <- struct{}{}:
+			default:
 			}
-		}
+		}(t)
 	}
 }
 
@@ -350,6 +232,8 @@ func (s *taskScheduler) Close() {
 }
 
 func (s *taskScheduler) tryMergeReadTasks() {
+	s.unsolveLock.Lock()
+	defer s.unsolveLock.Unlock()
 	var next *list.Element
 	for e := s.unsolvedReadTasks.Front(); e != nil; e = next {
 		next = e.Next()
@@ -372,7 +256,9 @@ func (s *taskScheduler) tryMergeReadTasks() {
 				rateCol.rtCounter.add(t, readyQueueType)
 			} else {
 				merged := false
-				for m := s.readyReadTasks.Back(); m != nil; m = m.Prev() {
+				var prev *list.Element
+				for m := s.readyReadTasks.Back(); m != nil; m = prev {
+					prev = m.Prev()
 					mTask, ok := m.Value.(readTask)
 					if !ok {
 						continue
@@ -392,6 +278,7 @@ func (s *taskScheduler) tryMergeReadTasks() {
 			rateCol.rtCounter.sub(t, unsolvedQueueType)
 		}
 	}
+
 	metrics.QueryNodeReadTaskUnsolveLen.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(s.unsolvedReadTasks.Len()))
 	metrics.QueryNodeReadTaskReadyLen.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(s.readyReadTasks.Len()))
 }

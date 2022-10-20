@@ -968,9 +968,9 @@ func (sc *ShardCluster) Search(ctx context.Context, req *querypb.SearchRequest, 
 			)
 		}
 		wg.Add(1)
-		go func() {
+		go func(req *querypb.SearchRequest) {
 			defer wg.Done()
-			partialResult, nodeErr := node.client.Search(reqCtx, nodeReq)
+			partialResult, nodeErr := node.client.Search(reqCtx, req)
 			resultMut.Lock()
 			defer resultMut.Unlock()
 			if nodeErr != nil || partialResult.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
@@ -981,7 +981,7 @@ func (sc *ShardCluster) Search(ctx context.Context, req *querypb.SearchRequest, 
 				return
 			}
 			results = append(results, partialResult)
-		}()
+		}(nodeReq)
 	}
 
 	wg.Wait()
