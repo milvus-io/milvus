@@ -3218,7 +3218,7 @@ class TestSearchBase(TestcaseBase):
                                      ct.default_search_params, ct.default_top_k,
                                      default_search_exp,
                                      check_task=CheckTasks.err_res,
-                                     check_items={"err_code": 0,
+                                     check_items={"err_code": 1,
                                                   "err_msg": "'should create connect first.'"})
 
     @pytest.mark.tags(CaseLabel.L2)
