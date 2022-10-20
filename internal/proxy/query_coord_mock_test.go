@@ -46,6 +46,12 @@ func SetQueryCoordShowCollectionsFunc(f queryCoordShowCollectionsFuncType) Query
 	}
 }
 
+func SetQueryCoordShowPartitionsFunc(f queryCoordShowPartitionsFuncType) QueryCoordMockOption {
+	return func(mock *QueryCoordMock) {
+		mock.showPartitionsFunc = f
+	}
+}
+
 func withValidShardLeaders() QueryCoordMockOption {
 	return func(mock *QueryCoordMock) {
 		mock.validShardLeaders = true

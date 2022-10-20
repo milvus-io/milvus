@@ -664,7 +664,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         """
         # 1. initialize with data
         partition_num = 1
-        collection_w = self.init_collection_general(prefix, True, 1000, partition_num)[0]
+        collection_w = self.init_collection_general(prefix, True, 1000, partition_num, is_index=True)[0]
         # 2. delete partitions
         log.info("test_search_partition_deleted: deleting a partition")
         par = collection_w.partitions

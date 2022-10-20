@@ -24,6 +24,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/types"
+
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
 	"google.golang.org/grpc/metadata"
@@ -831,4 +834,55 @@ func validateIndexName(indexName string) error {
 		}
 	}
 	return nil
+}
+
+func isCollectionLoaded(ctx context.Context, qc types.QueryCoord, collIDs []int64) (bool, error) {
+	// get all loading collections
+	resp, err := qc.ShowCollections(ctx, &querypb.ShowCollectionsRequest{
+		CollectionIDs: nil,
+	})
+	if err != nil {
+		return false, err
+	}
+	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+		return false, errors.New(resp.Status.Reason)
+	}
+
+	loaded := false
+LOOP:
+	for _, loadedCollID := range resp.GetCollectionIDs() {
+		for _, collID := range collIDs {
+			if collID == loadedCollID {
+				loaded = true
+				break LOOP
+			}
+		}
+	}
+	return loaded, nil
+}
+
+func isPartitionLoaded(ctx context.Context, qc types.QueryCoord, collIDs int64, partIDs []int64) (bool, error) {
+	// get all loading collections
+	resp, err := qc.ShowPartitions(ctx, &querypb.ShowPartitionsRequest{
+		CollectionID: collIDs,
+		PartitionIDs: nil,
+	})
+	if err != nil {
+		return false, err
+	}
+	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+		return false, errors.New(resp.Status.Reason)
+	}
+
+	loaded := false
+LOOP:
+	for _, loadedPartID := range resp.GetPartitionIDs() {
+		for _, partID := range partIDs {
+			if partID == loadedPartID {
+				loaded = true
+				break LOOP
+			}
+		}
+	}
+	return loaded, nil
 }

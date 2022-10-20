@@ -1186,6 +1186,7 @@ func (node *Proxy) DropPartition(ctx context.Context, request *milvuspb.DropPart
 		Condition:            NewTaskCondition(ctx),
 		DropPartitionRequest: request,
 		rootCoord:            node.rootCoord,
+		queryCoord:           node.queryCoord,
 		result:               nil,
 	}
 
