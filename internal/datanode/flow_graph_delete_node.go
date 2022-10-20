@@ -19,7 +19,6 @@ package datanode
 import (
 	"context"
 	"fmt"
-	"math"
 	"reflect"
 	"sync"
 
@@ -31,15 +30,9 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/trace"
-)
-
-type (
-	// DeleteData record deleted IDs and Timestamps
-	DeleteData = storage.DeleteData
 )
 
 // DeleteNode is to process delete msg, flush delete info into storage.
@@ -54,47 +47,6 @@ type deleteNode struct {
 	flushManager flushManager
 
 	clearSignal chan<- string
-}
-
-// DelDataBuf buffers insert data, monitoring buffer size and limit
-// size and limit both indicate numOfRows
-type DelDataBuf struct {
-	datapb.Binlog
-	delData *DeleteData
-}
-
-func (ddb *DelDataBuf) updateSize(size int64) {
-	ddb.EntriesNum += size
-}
-
-func (ddb *DelDataBuf) updateTimeRange(tr TimeRange) {
-	if tr.timestampMin < ddb.TimestampFrom {
-		ddb.TimestampFrom = tr.timestampMin
-	}
-	if tr.timestampMax > ddb.TimestampTo {
-		ddb.TimestampTo = tr.timestampMax
-	}
-}
-
-func (ddb *DelDataBuf) updateFromBuf(buf *DelDataBuf) {
-	ddb.updateSize(buf.EntriesNum)
-
-	tr := TimeRange{timestampMax: buf.TimestampTo, timestampMin: buf.TimestampFrom}
-	ddb.updateTimeRange(tr)
-
-	ddb.delData.Pks = append(ddb.delData.Pks, buf.delData.Pks...)
-	ddb.delData.Tss = append(ddb.delData.Tss, buf.delData.Tss...)
-}
-
-func newDelDataBuf() *DelDataBuf {
-	return &DelDataBuf{
-		delData: &DeleteData{},
-		Binlog: datapb.Binlog{
-			EntriesNum:    0,
-			TimestampFrom: math.MaxUint64,
-			TimestampTo:   0,
-		},
-	}
 }
 
 func (dn *deleteNode) Name() string {

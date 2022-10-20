@@ -18,7 +18,6 @@ package datanode
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math"
 	"reflect"
@@ -41,14 +40,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
-)
-
-type (
-	// InsertData of storage
-	InsertData = storage.InsertData
-
-	// Blob of storage
-	Blob = storage.Blob
 )
 
 type insertBufferNode struct {
@@ -103,65 +94,6 @@ type segmentCheckPoint struct {
 	pos     internalpb.MsgPosition
 }
 
-// BufferData buffers insert data, monitoring buffer size and limit
-// size and limit both indicate numOfRows
-type BufferData struct {
-	buffer *InsertData
-	size   int64
-	limit  int64
-	tsFrom Timestamp
-	tsTo   Timestamp
-}
-
-// newBufferData needs an input dimension to calculate the limit of this buffer
-//
-// `limit` is the segment numOfRows a buffer can buffer at most.
-//
-// For a float32 vector field:
-//  limit = 16 * 2^20 Byte [By default] / (dimension * 4 Byte)
-//
-// For a binary vector field:
-//  limit = 16 * 2^20 Byte [By default]/ (dimension / 8 Byte)
-//
-// But since the buffer of binary vector fields is larger than the float32 one
-//   with the same dimension, newBufferData takes the smaller buffer limit
-//   to fit in both types of vector fields
-//
-// * This need to change for string field support and multi-vector fields support.
-func newBufferData(dimension int64) (*BufferData, error) {
-	if dimension == 0 {
-		return nil, errors.New("Invalid dimension")
-	}
-
-	limit := Params.DataNodeCfg.FlushInsertBufferSize / (dimension * 4)
-
-	//TODO::xige-16 eval vec and string field
-	return &BufferData{
-		buffer: &InsertData{Data: make(map[UniqueID]storage.FieldData)},
-		size:   0,
-		limit:  limit,
-		tsFrom: math.MaxUint64,
-		tsTo:   0}, nil
-}
-
-func (bd *BufferData) effectiveCap() int64 {
-	return bd.limit - bd.size
-}
-
-func (bd *BufferData) updateSize(no int64) {
-	bd.size += no
-}
-
-// updateTimeRange update BufferData tsFrom, tsTo range according to input time range
-func (bd *BufferData) updateTimeRange(tr TimeRange) {
-	if tr.timestampMin < bd.tsFrom {
-		bd.tsFrom = tr.timestampMin
-	}
-	if tr.timestampMax > bd.tsTo {
-		bd.tsTo = tr.timestampMax
-	}
-}
-
 func (ibNode *insertBufferNode) Name() string {
 	return "ibNode-" + ibNode.channelName
 }
@@ -175,19 +107,8 @@ func (ibNode *insertBufferNode) Close() {
 }
 
 func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
-	if in == nil {
-		log.Debug("type assertion failed for flowGraphMsg because it's nil")
-		return []Msg{}
-	}
-
-	if len(in) != 1 {
-		log.Error("Invalid operate message input in insertBufferNode", zap.Int("input length", len(in)))
-		return []Msg{}
-	}
-
-	fgMsg, ok := in[0].(*flowGraphMsg)
+	fgMsg, ok := ibNode.verifyInMsg(in)
 	if !ok {
-		log.Warn("type assertion failed for flowGraphMsg", zap.String("name", reflect.TypeOf(in[0]).Name()))
 		return []Msg{}
 	}
 
@@ -246,6 +167,50 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 		}
 	}
 
+	ibNode.DisplayStatistics(seg2Upload)
+
+	segmentsToFlush := ibNode.Flush(fgMsg, seg2Upload, endPositions[0])
+
+	ibNode.WriteTimeTick(fgMsg.timeRange.timestampMax, seg2Upload)
+
+	res := flowGraphMsg{
+		deleteMessages:  fgMsg.deleteMessages,
+		timeRange:       fgMsg.timeRange,
+		startPositions:  fgMsg.startPositions,
+		endPositions:    fgMsg.endPositions,
+		segmentsToFlush: segmentsToFlush,
+		dropCollection:  fgMsg.dropCollection,
+	}
+
+	for _, sp := range spans {
+		sp.Finish()
+	}
+
+	// send delete msg to DeleteNode
+	return []Msg{&res}
+}
+
+func (ibNode *insertBufferNode) verifyInMsg(in []Msg) (*flowGraphMsg, bool) {
+	// while closing
+	if in == nil {
+		log.Debug("type assertion failed for flowGraphMsg because it's nil")
+		return nil, false
+	}
+
+	if len(in) != 1 {
+		log.Warn("Invalid operate message input in insertBufferNode", zap.Int("input length", len(in)))
+		return nil, false
+	}
+
+	fgMsg, ok := in[0].(*flowGraphMsg)
+	if !ok {
+		log.Warn("type assertion failed for flowGraphMsg", zap.String("name", reflect.TypeOf(in[0]).Name()))
+	}
+	return fgMsg, ok
+}
+
+// DisplayStatistics logs the statistic changes of segment in mem
+func (ibNode *insertBufferNode) DisplayStatistics(seg2Upload []UniqueID) {
 	// Find and return the smaller input
 	min := func(former, latter int) (smaller int) {
 		if former <= latter {
@@ -269,8 +234,9 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 			zap.Int64("buffer size", bd.(*BufferData).size),
 			zap.Int64("buffer limit", bd.(*BufferData).limit))
 	}
+}
 
-	// Flush
+func (ibNode *insertBufferNode) Flush(fgMsg *flowGraphMsg, seg2Upload []UniqueID, endPosition *internalpb.MsgPosition) []UniqueID {
 	type flushTask struct {
 		buffer    *BufferData
 		segmentID UniqueID
@@ -286,9 +252,9 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 
 	if fgMsg.dropCollection {
 		segmentsToFlush := ibNode.channel.listAllSegmentIDs()
-		log.Info("Receive drop collection req and flushing all segments",
+		log.Info("Receive drop collection request and flushing all segments",
 			zap.Any("segments", segmentsToFlush),
-			zap.String("vchannel name", ibNode.channelName),
+			zap.String("channel", ibNode.channelName),
 		)
 		flushTaskList = make([]flushTask, 0, len(segmentsToFlush))
 
@@ -311,9 +277,8 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 		segmentsToFlush = make([]UniqueID, 0, len(seg2Upload)+1) //auto flush number + possible manual flush
 		flushTaskList = make([]flushTask, 0, len(seg2Upload)+1)
 
-		// Auto Flush
+		// Auto Syncing
 		for _, segToFlush := range seg2Upload {
-			// If full, auto flush
 			if bd, ok := ibNode.insertBuffer.Load(segToFlush); ok && bd.(*BufferData).effectiveCap() <= 0 {
 				log.Info("(Auto Flush)",
 					zap.Int64("segment id", segToFlush),
@@ -328,7 +293,6 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 					dropped:   false,
 					auto:      true,
 				})
-
 			}
 		}
 
@@ -361,7 +325,7 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 			}
 		}
 
-		// Manual Flush
+		// Manual Syncing
 		select {
 		case fmsg := <-ibNode.flushChan:
 			log.Info("(Manual Flush) receiving flush message",
@@ -396,10 +360,10 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 
 	for _, task := range flushTaskList {
 		log.Debug("insertBufferNode flushing BufferData",
-			zap.Int64("segment ID", task.segmentID),
+			zap.Int64("segmentID", task.segmentID),
 			zap.Bool("flushed", task.flushed),
 			zap.Bool("dropped", task.dropped),
-			zap.Any("pos", endPositions[0]),
+			zap.Any("position", endPosition),
 		)
 
 		segStats, err := ibNode.channel.getSegmentStatslog(task.segmentID)
@@ -414,7 +378,7 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 				task.segmentID,
 				task.flushed,
 				task.dropped,
-				endPositions[0])
+				endPosition)
 		}, getFlowGraphRetryOpt())
 		if err != nil {
 			metrics.DataNodeFlushBufferCount.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID()), metrics.FailLabel).Inc()
@@ -436,31 +400,7 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 			metrics.DataNodeAutoFlushBufferCount.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID()), metrics.FailLabel).Inc()
 		}
 	}
-
-	select {
-	case resendTTMsg := <-ibNode.resendTTChan:
-		log.Info("resend TT msg received in insertBufferNode",
-			zap.Int64s("segment IDs", resendTTMsg.segmentIDs))
-		seg2Upload = append(seg2Upload, resendTTMsg.segmentIDs...)
-	default:
-	}
-	ibNode.writeHardTimeTick(fgMsg.timeRange.timestampMax, seg2Upload)
-
-	res := flowGraphMsg{
-		deleteMessages:  fgMsg.deleteMessages,
-		timeRange:       fgMsg.timeRange,
-		startPositions:  fgMsg.startPositions,
-		endPositions:    fgMsg.endPositions,
-		segmentsToFlush: segmentsToFlush,
-		dropCollection:  fgMsg.dropCollection,
-	}
-
-	for _, sp := range spans {
-		sp.Finish()
-	}
-
-	// send delete msg to DeleteNode
-	return []Msg{&res}
+	return segmentsToFlush
 }
 
 // updateSegmentStates updates statistics in channel meta for the segments in insertMsgs.
@@ -607,8 +547,17 @@ func (ibNode *insertBufferNode) getTimestampRange(tsData *storage.Int64FieldData
 	return tr
 }
 
-// writeHardTimeTick writes timetick once insertBufferNode operates.
-func (ibNode *insertBufferNode) writeHardTimeTick(ts Timestamp, segmentIDs []int64) {
+// WriteTimeTick writes timetick once insertBufferNode operates.
+func (ibNode *insertBufferNode) WriteTimeTick(ts Timestamp, segmentIDs []int64) {
+
+	select {
+	case resendTTMsg := <-ibNode.resendTTChan:
+		log.Info("resend TT msg received in insertBufferNode",
+			zap.Int64s("segmentIDs", resendTTMsg.segmentIDs))
+		segmentIDs = append(segmentIDs, resendTTMsg.segmentIDs...)
+	default:
+	}
+
 	ibNode.ttLogger.LogTs(ts)
 	ibNode.ttMerger.bufferTs(ts, segmentIDs)
 	rateCol.updateFlowGraphTt(ibNode.channelName, ts)

@@ -462,6 +462,7 @@ message CompactionResult {
   repeated FieldBinlog insert_logs = 4;
   repeated FieldBinlog field2StatslogPaths = 5;
   repeated FieldBinlog deltalogs = 6;
+  string channel = 7;
 }
 
 message CompactionStateResult {
