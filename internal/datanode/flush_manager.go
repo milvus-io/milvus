@@ -405,21 +405,24 @@ func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segStats []by
 	field2Stats := make(map[UniqueID]*datapb.Binlog)
 	// write stats binlog
 
-	pkID := getPKID(meta)
-	if pkID == common.InvalidFieldID {
-		return fmt.Errorf("failed to get pk id for segment %d", segmentID)
-	}
+	// if segStats content is not nil, means segment stats changed
+	if len(segStats) > 0 {
+		pkID := getPKID(meta)
+		if pkID == common.InvalidFieldID {
+			return fmt.Errorf("failed to get pk id for segment %d", segmentID)
+		}
 
-	logidx := start + int64(len(binLogs))
-	k := metautil.JoinIDPath(collID, partID, segmentID, pkID, logidx)
-	key := path.Join(m.ChunkManager.RootPath(), common.SegmentStatslogPath, k)
-	kvs[key] = segStats
-	field2Stats[pkID] = &datapb.Binlog{
-		EntriesNum:    0,
-		TimestampFrom: 0, //TODO
-		TimestampTo:   0, //TODO,
-		LogPath:       key,
-		LogSize:       int64(len(segStats)),
+		logidx := start + int64(len(binLogs))
+		k := metautil.JoinIDPath(collID, partID, segmentID, pkID, logidx)
+		key := path.Join(m.ChunkManager.RootPath(), common.SegmentStatslogPath, k)
+		kvs[key] = segStats
+		field2Stats[pkID] = &datapb.Binlog{
+			EntriesNum:    0,
+			TimestampFrom: 0, //TODO
+			TimestampTo:   0, //TODO,
+			LogPath:       key,
+			LogSize:       int64(len(segStats)),
+		}
 	}
 
 	m.handleInsertTask(segmentID, &flushBufferInsertTask{

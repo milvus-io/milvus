@@ -33,7 +33,9 @@ import (
 
 func TestSegment_UpdatePKRange(t *testing.T) {
 	seg := &Segment{
-		pkFilter: bloom.NewWithEstimates(100000, 0.005),
+		pkStat: pkStatistics{
+			pkFilter: bloom.NewWithEstimates(100000, 0.005),
+		},
 	}
 
 	cases := make([]int64, 0, 100)
@@ -48,11 +50,11 @@ func TestSegment_UpdatePKRange(t *testing.T) {
 
 		pk := newInt64PrimaryKey(c)
 
-		assert.Equal(t, true, seg.minPK.LE(pk))
-		assert.Equal(t, true, seg.maxPK.GE(pk))
+		assert.Equal(t, true, seg.pkStat.minPK.LE(pk))
+		assert.Equal(t, true, seg.pkStat.maxPK.GE(pk))
 
 		common.Endian.PutUint64(buf, uint64(c))
-		assert.True(t, seg.pkFilter.Test(buf))
+		assert.True(t, seg.pkStat.pkFilter.Test(buf))
 	}
 }
 
@@ -70,8 +72,9 @@ func TestSegment_getSegmentStatslog(t *testing.T) {
 	buf := make([]byte, 8)
 	for _, tc := range cases {
 		seg := &Segment{
-			pkFilter: bloom.NewWithEstimates(100000, 0.005),
-		}
+			pkStat: pkStatistics{
+				pkFilter: bloom.NewWithEstimates(100000, 0.005),
+			}}
 
 		seg.updatePKRange(&storage.Int64FieldData{
 			Data: tc,
@@ -93,7 +96,7 @@ func TestSegment_getSegmentStatslog(t *testing.T) {
 			assert.True(t, pks.MaxPk.GE(pk))
 
 			common.Endian.PutUint64(buf, uint64(v))
-			assert.True(t, seg.pkFilter.Test(buf))
+			assert.True(t, seg.pkStat.pkFilter.Test(buf))
 		}
 	}
 
