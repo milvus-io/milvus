@@ -2537,6 +2537,18 @@ class TestLoadCollection(TestcaseBase):
                                   check_items={"err_code": 15,
                                                "err_msg": "collection not found, maybe not loaded"})
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_load_collection_without_creating_index(self):
+        """
+        target: test drop index after load without release
+        method: create a collection without index, then load
+        expected: raise exception
+        """
+        collection_w = self.init_collection_general(prefix, True, is_index=True)[0]
+        collection_w.load(check_task=CheckTasks.err_res,
+                          check_items={"err_code": 1,
+                                       "err_msg": "index not exist"})
+
 
 class TestReleaseAdvanced(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L0)
