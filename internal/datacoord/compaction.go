@@ -255,9 +255,13 @@ func (c *compactionPlanHandler) handleMergeCompactionResult(plan *datapb.Compact
 	}
 
 	log.Debug("handleCompactionResult: altering metastore after compaction")
-	if err := c.meta.alterMetaStoreAfterCompaction(modInfos, newSegment.SegmentInfo); err != nil {
-		log.Warn("handleCompactionResult: fail to alter metastore after compaction", zap.Error(err))
-		return fmt.Errorf("fail to alter metastore after compaction, err=%w", err)
+	if newSegment.GetNumOfRows() > 0 {
+		if err := c.meta.alterMetaStoreAfterCompaction(modInfos, newSegment.SegmentInfo); err != nil {
+			log.Warn("handleCompactionResult: fail to alter metastore after compaction", zap.Error(err))
+			return fmt.Errorf("fail to alter metastore after compaction, err=%w", err)
+		}
+	} else {
+		log.Warn("compaction produced an empty segment")
 	}
 
 	var nodeID = c.plans[plan.GetPlanID()].dataNodeID
