@@ -2,7 +2,6 @@ package querynode
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/common"
@@ -37,23 +36,6 @@ func TestShardClusterService(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestShardClusterService_HandoffSegments(t *testing.T) {
-	qn, err := genSimpleQueryNode(context.Background())
-	require.NoError(t, err)
-
-	client := v3client.New(embedetcdServer.Server)
-	defer client.Close()
-	session := sessionutil.NewSession(context.Background(), "/by-dev/sessions/unittest/querynode/", client)
-	clusterService := newShardClusterService(client, session, qn)
-
-	clusterService.addShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel)
-	//TODO change shardCluster to interface to mock test behavior
-	assert.NotPanics(t, func() {
-		clusterService.HandoffSegments(defaultCollectionID, &querypb.SegmentChangeInfo{})
-	})
-	clusterService.releaseShardCluster(defaultDMLChannel)
-}
-
 func TestShardClusterService_SyncReplicaSegments(t *testing.T) {
 	qn, err := genSimpleQueryNode(context.Background())
 	require.NoError(t, err)
@@ -68,8 +50,33 @@ func TestShardClusterService_SyncReplicaSegments(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	t.Run("sync initailizing shard cluster", func(t *testing.T) {
+		clusterService.addShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel)
+
+		sc, ok := clusterService.getShardCluster(defaultDMLChannel)
+		require.True(t, ok)
+		assert.NotPanics(t, func() {
+			err := clusterService.SyncReplicaSegments(defaultDMLChannel, []*querypb.ReplicaSegmentsInfo{
+				{
+					NodeId:      1,
+					PartitionId: defaultPartitionID,
+
+					SegmentIds: []int64{1},
+					Versions:   []int64{1},
+				},
+			})
+
+			assert.NoError(t, err)
+			assert.Nil(t, sc.currentVersion)
+		})
+	})
+
 	t.Run("sync shard cluster", func(t *testing.T) {
 		clusterService.addShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel)
+
+		sc, ok := clusterService.getShardCluster(defaultDMLChannel)
+		require.True(t, ok)
+		sc.SetupFirstVersion()
 
 		err := clusterService.SyncReplicaSegments(defaultDMLChannel, []*querypb.ReplicaSegmentsInfo{
 			{
@@ -91,58 +98,4 @@ func TestShardClusterService_SyncReplicaSegments(t *testing.T) {
 		assert.Equal(t, defaultPartitionID, segment.partitionID)
 		assert.Equal(t, segmentStateLoaded, segment.state)
 	})
-}
-
-func TestShardClusterService_HandoffVChannelSegments(t *testing.T) {
-	qn, err := genSimpleQueryNode(context.Background())
-	require.NoError(t, err)
-
-	client := v3client.New(embedetcdServer.Server)
-	defer client.Close()
-	session := sessionutil.NewSession(context.Background(), "/by-dev/sessions/unittest/querynode/", client)
-	clusterService := newShardClusterService(client, session, qn)
-
-	err = clusterService.HandoffVChannelSegments(defaultDMLChannel, &querypb.SegmentChangeInfo{})
-	assert.NoError(t, err)
-
-	clusterService.addShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel)
-
-	//TODO change shardCluster to interface to mock test behavior
-	t.Run("normal case", func(t *testing.T) {
-		assert.NotPanics(t, func() {
-			err = clusterService.HandoffVChannelSegments(defaultDMLChannel, &querypb.SegmentChangeInfo{})
-			assert.NoError(t, err)
-		})
-
-	})
-
-	t.Run("error case", func(t *testing.T) {
-		mqn := &mockShardQueryNode{}
-		nodeEvents := []nodeEvent{
-			{
-				nodeID:   3,
-				nodeAddr: "addr_3",
-			},
-		}
-
-		sc := NewShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel,
-			&mockNodeDetector{initNodes: nodeEvents}, &mockSegmentDetector{}, func(nodeID int64, addr string) shardQueryNode {
-				return mqn
-			})
-		defer sc.Close()
-
-		mqn.releaseSegmentsErr = errors.New("mocked error")
-
-		// set mocked shard cluster
-		clusterService.clusters.Store(defaultDMLChannel, sc)
-		assert.NotPanics(t, func() {
-			err = clusterService.HandoffVChannelSegments(defaultDMLChannel, &querypb.SegmentChangeInfo{
-				OfflineSegments: []*querypb.SegmentInfo{
-					{SegmentID: 1, NodeID: 3, CollectionID: defaultCollectionID, DmChannel: defaultDMLChannel, NodeIds: []UniqueID{3}},
-				},
-			})
-			assert.Error(t, err)
-		})
-	})
-
 }

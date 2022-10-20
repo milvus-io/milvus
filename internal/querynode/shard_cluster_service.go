@@ -113,24 +113,6 @@ func (s *ShardClusterService) releaseCollection(collectionID int64) {
 	log.Info("successfully release collection", zap.Int64("collectionID", collectionID))
 }
 
-// HandoffSegments dispatch segmentChangeInfo to related shardClusters
-func (s *ShardClusterService) HandoffSegments(collectionID int64, info *querypb.SegmentChangeInfo) {
-	var wg sync.WaitGroup
-	s.clusters.Range(func(k, v interface{}) bool {
-		cs := v.(*ShardCluster)
-		if cs.collectionID == collectionID {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				cs.HandoffSegments(info)
-			}()
-		}
-		return true
-	})
-	wg.Wait()
-	log.Info("successfully handoff segments", zap.Int64("collectionID", collectionID))
-}
-
 // SyncReplicaSegments dispatches nodeID segments distribution to ShardCluster.
 func (s *ShardClusterService) SyncReplicaSegments(vchannelName string, distribution []*querypb.ReplicaSegmentsInfo) error {
 	sc, ok := s.getShardCluster(vchannelName)
@@ -141,23 +123,6 @@ func (s *ShardClusterService) SyncReplicaSegments(vchannelName string, distribut
 	sc.SyncSegments(distribution, segmentStateLoaded)
 	log.Info("successfully sync segments", zap.String("channel", vchannelName), zap.Any("distribution", distribution))
 	return nil
-}
-
-// HandoffVChannelSegments dispatches SegmentChangeInfo to related ShardCluster with VChannel
-func (s *ShardClusterService) HandoffVChannelSegments(vchannel string, info *querypb.SegmentChangeInfo) error {
-	raw, ok := s.clusters.Load(vchannel)
-	if !ok {
-		// not leader for this channel, ignore without error
-		return nil
-	}
-	sc := raw.(*ShardCluster)
-	err := sc.HandoffSegments(info)
-	if err == nil {
-		log.Info("successfully handoff", zap.String("channel", vchannel), zap.Any("segment", info))
-	} else {
-		log.Warn("failed to handoff", zap.String("channel", vchannel), zap.Any("segment", info), zap.Error(err))
-	}
-	return err
 }
 
 func (s *ShardClusterService) GetShardClusters() []*ShardCluster {
