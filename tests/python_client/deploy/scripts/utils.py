@@ -5,17 +5,15 @@ from pymilvus import (
     Collection, list_collections,
 )
 
-all_index_types = ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ", "HNSW", "ANNOY", "RHNSW_FLAT", "RHNSW_PQ", "RHNSW_SQ",
-                   "BIN_FLAT", "BIN_IVF_FLAT"]
+all_index_types = ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ", "HNSW", "ANNOY"]
 
 default_index_params = [{"nlist": 128}, {"nlist": 128}, {"nlist": 128}, {"nlist": 128, "m": 16, "nbits": 8},
-                        {"M": 48, "efConstruction": 500}, {"n_trees": 50}, {"M": 48, "efConstruction": 500},
-                        {"M": 48, "efConstruction": 500, "PQM": 8}, {"M": 48, "efConstruction": 500}, {"nlist": 128},
-                        {"nlist": 128}]
+                        {"M": 48, "efConstruction": 500}, {"n_trees": 50}]
 
 index_params_map = dict(zip(all_index_types, default_index_params))
 
 NUM_REPLICAS = 2
+
 
 def filter_collections_by_prefix(prefix):
     col_list = list_collections()
@@ -54,14 +52,17 @@ def gen_search_param(index_type, metric_type="L2"):
     return search_params
 
 
-def get_collections(prefix):
-    print(f"\nList collections...")
+def get_collections(prefix, check=False):
+    print("\nList collections...")
     col_list = filter_collections_by_prefix(prefix)
     print(f"collections_nums: {len(col_list)}")
     # list entities if collections
     for name in col_list:
         c = Collection(name=name)
-        print(f"{name}: {c.num_entities}")
+        num_entities = c.num_entities
+        print(f"{name}: {num_entities}")
+        if check:
+            assert num_entities >= 3000
     return col_list
 
 
@@ -76,7 +77,7 @@ def create_collections_and_insert_data(prefix, flush=True, count=3000, collectio
     ]
     default_schema = CollectionSchema(fields=default_fields, description="test collection")
     for index_name in all_index_types[:collection_cnt]:
-        print(f"\nCreate collection...")
+        print("\nCreate collection...")
         col_name = prefix + index_name
         collection = Collection(name=col_name, schema=default_schema) 
         print(f"collection name: {col_name}")
@@ -104,7 +105,7 @@ def create_collections_and_insert_data(prefix, flush=True, count=3000, collectio
             print(f"collection entities: {collection.num_entities}")
             end_time = time.time()
             print("Get collection entities time = %.4fs" % (end_time - start_time))
-    print(f"\nList collections...")
+    print("\nList collections...")
     print(get_collections(prefix))
 
 
@@ -112,7 +113,7 @@ def create_index(prefix):
     # create index
     default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
     col_list = get_collections(prefix)
-    print(f"\nCreate index...")
+    print("\nCreate index...")
     for col_name in col_list:
         c = Collection(name=col_name)
         index_name = col_name.replace(prefix, "")
@@ -134,16 +135,20 @@ def load_and_search(prefix, replicas=1):
     for col_name in col_list:
         c = Collection(name=col_name)
         print(f"collection name: {col_name}")
-        print("release collection")
-        c.release()
         print("load collection")
-        t0 = time.time()
         if replicas == 1:
+            t0 = time.time()
             c.load()
+            print(f"load time: {time.time() - t0:.4f}")
         if replicas > 1:
+            print("release collection before load if replicas > 1")
+            t0 = time.time()
+            c.release()
+            print(f"release time: {time.time() - t0:.4f}")
+            t0 = time.time()
             c.load(replica_number=replicas)
+            print(f"load time: {time.time() - t0:.4f}")
             print(c.get_replicas())
-        print(f"load time: {time.time() - t0:.4f}")
         topK = 5
         vectors = [[1.0 for _ in range(128)] for _ in range(3000)]
         index_name = col_name.replace(prefix, "")
@@ -153,8 +158,9 @@ def load_and_search(prefix, replicas=1):
         start_time = time.time()
         print(f"\nSearch...")
         # define output_fields of search result
+        v_search = vectors[:1]
         res = c.search(
-            vectors[:1], "float_vector", search_params, topK,
+            v_search, "float_vector", search_params, topK,
             "count > 500", output_fields=["count", "random_value"], timeout=120
         )
         end_time = time.time()
@@ -164,7 +170,9 @@ def load_and_search(prefix, replicas=1):
                 # Get value of the random value field for search result
                 print(hit, hit.entity.get("random_value"))
             ids = hits.ids
+            assert len(ids) == topK
             print(ids)
+        assert len(res) == len(v_search)
         print("search latency: %.4fs" % (end_time - start_time))
         t0 = time.time()
         expr = "count in [2,4,6,8]"
@@ -174,6 +182,7 @@ def load_and_search(prefix, replicas=1):
         for r in sorted_res:
             print(r)
         t1 = time.time()
+        assert len(res) == 4
         print("query latency: %.4fs" % (t1 - t0))
         # c.release()
         print("###########")

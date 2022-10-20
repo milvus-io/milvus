@@ -62,6 +62,9 @@ class ResponseChecker:
         elif self.check_task == CheckTasks.check_query_empty:
             result = self.check_query_empty(self.response, self.func_name)
 
+        elif self.check_task == CheckTasks.check_query_empty:
+            result = self.check_query_not_empty(self.response, self.func_name)
+
         elif self.check_task == CheckTasks.check_distance:
             # Calculate distance interface that response check
             result = self.check_distance(self.response, self.func_name, self.check_items)

@@ -122,10 +122,10 @@ class TestcaseBase(Base):
                                       **kwargs)
         return partition_wrap
 
-    def init_collection_general(self, prefix, insert_data=False, nb=ct.default_nb,
+    def init_collection_general(self, prefix="test", insert_data=False, nb=ct.default_nb,
                                 partition_num=0, is_binary=False, is_all_data_type=False,
                                 auto_id=False, dim=ct.default_dim, is_index=False,
-                                primary_field=ct.default_int64_field_name, is_flush=True):
+                                primary_field=ct.default_int64_field_name, is_flush=True, name=None):
         """
         target: create specified collections
         method: 1. create collections (binary/non-binary, default/all data type, auto_id or not)
@@ -138,6 +138,8 @@ class TestcaseBase(Base):
         log.info("Test case of search interface: initialize before test case")
         self._connect()
         collection_name = cf.gen_unique_str(prefix)
+        if name is not None:
+            collection_name = name
         vectors = []
         binary_raw_vectors = []
         insert_ids = []
