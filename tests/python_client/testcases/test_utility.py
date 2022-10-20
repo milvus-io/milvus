@@ -706,6 +706,7 @@ class TestUtilityBase(TestcaseBase):
         data = cf.gen_default_list_data(nb)
         cw.insert(data=data)
         cw.create_index(default_field_name, default_index_params)
+        cw.flush()
         res, _ = self.utility_wrap.index_building_progress(c_name)
         assert res['indexed_rows'] == nb
         assert res['total_rows'] == nb
@@ -724,6 +725,7 @@ class TestUtilityBase(TestcaseBase):
         data = cf.gen_default_list_data(nb)
         cw.insert(data=data)
         cw.create_index(default_field_name, default_index_params)
+        cw.flush()
         start = time.time()
         while True:
             time.sleep(1)
@@ -776,6 +778,7 @@ class TestUtilityBase(TestcaseBase):
         data = cf.gen_default_list_data(nb)
         cw.insert(data=data)
         cw.create_index(default_field_name, default_index_params)
+        cw.flush()
         res, _ = self.utility_wrap.wait_for_index_building_complete(c_name)
         assert res is True
         res, _ = self.utility_wrap.index_building_progress(c_name)
