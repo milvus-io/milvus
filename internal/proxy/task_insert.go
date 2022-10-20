@@ -144,6 +144,10 @@ func (it *insertTask) checkPrimaryFieldData() error {
 			return err
 		}
 	} else {
+		// check primary key data not exist
+		if typeutil.IsPrimaryFieldDataExist(it.GetFieldsData(), primaryFieldSchema) {
+			return fmt.Errorf("can not assign primary field data when auto id enabled %v", primaryFieldSchema.Name)
+		}
 		// if autoID == true, currently only support autoID for int64 PrimaryField
 		primaryFieldData, err = autoGenPrimaryFieldData(primaryFieldSchema, it.RowIDs)
 		if err != nil {
