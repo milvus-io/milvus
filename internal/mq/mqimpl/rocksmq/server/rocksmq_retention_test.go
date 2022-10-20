@@ -91,6 +91,7 @@ func TestRmqRetention_Basic(t *testing.T) {
 	}
 	assert.Equal(t, len(cMsgs), msgNum)
 
+	rmq.Info()
 	time.Sleep(time.Duration(checkTimeInterval+1) * time.Second)
 
 	// Seek to a previous consumed message, the message should be clean up
