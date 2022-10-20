@@ -101,9 +101,9 @@ func genMockChannel(segIDs []int64, pks []primaryKey, chanName string) *ChannelM
 		}
 		seg.setType(segTypes[i])
 		if i < 3 {
-			seg.pkFilter = filter0
+			seg.pkStat.pkFilter = filter0
 		} else {
-			seg.pkFilter = filter1
+			seg.pkStat.pkFilter = filter1
 		}
 		channel.segments[segIDs[i]] = &seg
 	}

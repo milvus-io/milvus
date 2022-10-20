@@ -379,7 +379,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			assert.NoError(t, err)
 			assert.Equal(t, int64(0), numOfRow)
 			assert.Equal(t, 0, len(inPaths))
-			assert.Equal(t, 1, len(statsPaths))
+			assert.Equal(t, 0, len(statsPaths))
 		})
 
 		t.Run("Merge with meta error", func(t *testing.T) {

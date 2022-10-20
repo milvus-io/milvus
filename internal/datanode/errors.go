@@ -21,6 +21,11 @@ import (
 	"fmt"
 )
 
+var (
+	// errSegmentStatsNotChanged error stands for segment stats not changed.
+	errSegmentStatsNotChanged = errors.New("segment stats not changed")
+)
+
 func msgDataNodeIsUnhealthy(nodeID UniqueID) string {
 	return fmt.Sprintf("DataNode %d is not ready", nodeID)
 }

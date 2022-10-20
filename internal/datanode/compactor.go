@@ -397,17 +397,20 @@ func (t *compactionTask) merge(
 
 	// marshal segment statslog
 	segStats, err := segment.getSegmentStatslog(pkID, pkType)
-	if err != nil {
+	if err != nil && !errors.Is(err, errSegmentStatsNotChanged) {
 		log.Warn("failed to generate segment statslog", zap.Int64("pkID", pkID), zap.Error(err))
 		return nil, nil, nil, 0, err
 	}
 
-	uploadStatsStart := time.Now()
-	statsPaths, err := t.uploadStatsLog(ctxTimeout, targetSegID, partID, segStats, meta)
-	if err != nil {
-		return nil, nil, nil, 0, err
+	var statsPaths []*datapb.FieldBinlog
+	if len(segStats) > 0 {
+		uploadStatsStart := time.Now()
+		statsPaths, err = t.uploadStatsLog(ctxTimeout, targetSegID, partID, segStats, meta)
+		if err != nil {
+			return nil, nil, nil, 0, err
+		}
+		uploadStatsTimeCost += time.Since(uploadStatsStart)
 	}
-	uploadStatsTimeCost += time.Since(uploadStatsStart)
 
 	log.Debug("merge end", zap.Int64("remaining insert numRows", numRows),
 		zap.Int64("expired entities", expired), zap.Int("binlog file number", numBinlogs),

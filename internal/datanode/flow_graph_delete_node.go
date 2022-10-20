@@ -310,10 +310,10 @@ func (dn *deleteNode) filterSegmentByPK(partID UniqueID, pks []primaryKey, tss [
 			case schemapb.DataType_Int64:
 				int64Pk := pk.(*int64PrimaryKey)
 				common.Endian.PutUint64(buf, uint64(int64Pk.Value))
-				exist = segment.pkFilter.Test(buf)
+				exist = segment.pkStat.pkFilter.Test(buf)
 			case schemapb.DataType_VarChar:
 				varCharPk := pk.(*varCharPrimaryKey)
-				exist = segment.pkFilter.TestString(varCharPk.Value)
+				exist = segment.pkStat.pkFilter.TestString(varCharPk.Value)
 			default:
 				//TODO::
 			}

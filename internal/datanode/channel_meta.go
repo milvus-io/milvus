@@ -175,7 +175,7 @@ func (c *ChannelMeta) initSegmentBloomFilter(s *Segment) error {
 		return err
 	}
 
-	s.pkFilter = bloom.NewWithEstimates(uint(maxRowCount), maxBloomFalsePositive)
+	s.pkStat.pkFilter = bloom.NewWithEstimates(uint(maxRowCount), maxBloomFalsePositive)
 	return nil
 }
 
@@ -308,12 +308,12 @@ func (c *ChannelMeta) initPKBloomFilter(ctx context.Context, s *Segment, statsBi
 	}
 	for _, stat := range stats {
 		// use first BF to merge
-		if s.pkFilter == nil {
-			s.pkFilter = stat.BF
+		if s.pkStat.pkFilter == nil {
+			s.pkStat.pkFilter = stat.BF
 		} else {
 			// for compatibility, statslog before 2.1.2 uses separated stats log which needs to be merged
 			// assuming all legacy BF has same attributes.
-			err = s.pkFilter.Merge(stat.BF)
+			err = s.pkStat.pkFilter.Merge(stat.BF)
 			if err != nil {
 				return err
 			}

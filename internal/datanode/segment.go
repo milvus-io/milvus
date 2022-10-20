@@ -18,6 +18,8 @@ package datanode
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"sync/atomic"
 
 	"github.com/bits-and-blooms/bloom/v3"
@@ -42,12 +44,92 @@ type Segment struct {
 	memorySize  int64
 	compactedTo UniqueID
 
+	pkStat pkStatistics
+
 	startPos *internalpb.MsgPosition // TODO readonly
 	endPos   *internalpb.MsgPosition
+}
 
-	pkFilter *bloom.BloomFilter //  bloom filter of pk inside a segment
-	minPK    primaryKey         //	minimal pk value, shortcut for checking whether a pk is inside this segment
-	maxPK    primaryKey         //  maximal pk value, same above
+// pkStatistics contains pk field statistic information
+type pkStatistics struct {
+	statsChanged bool               //  statistic changed
+	pkFilter     *bloom.BloomFilter //  bloom filter of pk inside a segment
+	minPK        primaryKey         //	minimal pk value, shortcut for checking whether a pk is inside this segment
+	maxPK        primaryKey         //  maximal pk value, same above
+}
+
+// update set pk min/max value if input value is beyond former range.
+func (st *pkStatistics) update(pk primaryKey) error {
+	if st == nil {
+		return errors.New("nil pk statistics")
+	}
+	if st.minPK == nil {
+		st.minPK = pk
+	} else if st.minPK.GT(pk) {
+		st.minPK = pk
+	}
+
+	if st.maxPK == nil {
+		st.maxPK = pk
+	} else if st.maxPK.LT(pk) {
+		st.maxPK = pk
+	}
+
+	return nil
+}
+
+func (st *pkStatistics) updatePKRange(ids storage.FieldData) error {
+	switch pks := ids.(type) {
+	case *storage.Int64FieldData:
+		buf := make([]byte, 8)
+		for _, pk := range pks.Data {
+			id := storage.NewInt64PrimaryKey(pk)
+			err := st.update(id)
+			if err != nil {
+				return err
+			}
+			common.Endian.PutUint64(buf, uint64(pk))
+			st.pkFilter.Add(buf)
+		}
+	case *storage.StringFieldData:
+		for _, pk := range pks.Data {
+			id := storage.NewVarCharPrimaryKey(pk)
+			err := st.update(id)
+			if err != nil {
+				return err
+			}
+			st.pkFilter.AddString(pk)
+		}
+	default:
+		return fmt.Errorf("invalid data type for primary key: %T", ids)
+	}
+
+	// mark statistic updated
+	st.statsChanged = true
+
+	return nil
+}
+
+// getStatslog return marshaled statslog content if there is any change since last call.
+// statslog is marshaled as json.
+func (st *pkStatistics) getStatslog(segmentID, pkID UniqueID, pkType schemapb.DataType) ([]byte, error) {
+	if !st.statsChanged {
+		return nil, fmt.Errorf("%w segment %d", errSegmentStatsNotChanged, segmentID)
+	}
+
+	pks := storage.PrimaryKeyStats{
+		FieldID: pkID,
+		PkType:  int64(pkType),
+		MaxPk:   st.maxPK,
+		MinPk:   st.minPK,
+		BF:      st.pkFilter,
+	}
+
+	bs, err := json.Marshal(pks)
+	if err == nil {
+		st.statsChanged = false
+	}
+	return bs, err
 }
 
 type addSegmentReq struct {
@@ -61,19 +143,7 @@ type addSegmentReq struct {
 }
 
 func (s *Segment) updatePk(pk primaryKey) error {
-	if s.minPK == nil {
-		s.minPK = pk
-	} else if s.minPK.GT(pk) {
-		s.minPK = pk
-	}
-
-	if s.maxPK == nil {
-		s.maxPK = pk
-	} else if s.maxPK.LT(pk) {
-		s.maxPK = pk
-	}
-
-	return nil
+	return s.pkStat.update(pk)
 }
 
 func (s *Segment) isValid() bool {
@@ -93,46 +163,22 @@ func (s *Segment) setType(t datapb.SegmentType) {
 }
 
 func (s *Segment) updatePKRange(ids storage.FieldData) error {
-	switch pks := ids.(type) {
-	case *storage.Int64FieldData:
-		buf := make([]byte, 8)
-		for _, pk := range pks.Data {
-			id := storage.NewInt64PrimaryKey(pk)
-			err := s.updatePk(id)
-			if err != nil {
-				return err
-			}
-			common.Endian.PutUint64(buf, uint64(pk))
-			s.pkFilter.Add(buf)
-		}
-	case *storage.StringFieldData:
-		for _, pk := range pks.Data {
-			id := storage.NewVarCharPrimaryKey(pk)
-			err := s.updatePk(id)
-			if err != nil {
-				return err
-			}
-			s.pkFilter.AddString(pk)
-		}
-	default:
-		//TODO::
+	log := log.With(zap.Int64("collectionID", s.collectionID),
+		zap.Int64("partitionID", s.partitionID),
+		zap.Int64("segmentID", s.segmentID),
+	)
+
+	err := s.pkStat.updatePKRange(ids)
+	if err != nil {
+		log.Warn("failed to updatePKRange", zap.Error(err))
 	}
 
 	log.Info("update pk range",
-		zap.Int64("collectionID", s.collectionID), zap.Int64("partitionID", s.partitionID), zap.Int64("segmentID", s.segmentID),
-		zap.Int64("num_rows", s.numRows), zap.Any("minPK", s.minPK), zap.Any("maxPK", s.maxPK))
+		zap.Int64("num_rows", s.numRows), zap.Any("minPK", s.pkStat.minPK), zap.Any("maxPK", s.pkStat.maxPK))
 
 	return nil
 }
 
 func (s *Segment) getSegmentStatslog(pkID UniqueID, pkType schemapb.DataType) ([]byte, error) {
-	pks := storage.PrimaryKeyStats{
-		FieldID: pkID,
-		PkType:  int64(pkType),
-		MaxPk:   s.maxPK,
-		MinPk:   s.minPK,
-		BF:      s.pkFilter,
-	}
-
-	return json.Marshal(pks)
+	return s.pkStat.getStatslog(s.segmentID, pkID, pkType)
 }

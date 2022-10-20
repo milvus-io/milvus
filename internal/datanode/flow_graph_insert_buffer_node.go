@@ -403,7 +403,7 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 		)
 
 		segStats, err := ibNode.channel.getSegmentStatslog(task.segmentID)
-		if err != nil {
+		if err != nil && !errors.Is(err, errSegmentStatsNotChanged) {
 			log.Error("failed to get segment stats log", zap.Int64("segmentID", task.segmentID), zap.Error(err))
 			panic(err)
 		}
