@@ -155,6 +155,14 @@ func TestComponentParam(t *testing.T) {
 		t.Logf("MaxDimension: %d", Params.MaxDimension)
 
 		t.Logf("MaxTaskNum: %d", Params.MaxTaskNum)
+
+		t.Logf("AccessLog.Enable: %t", Params.AccessLog.Enable)
+
+		t.Logf("AccessLog.MaxSize: %d", Params.AccessLog.File.MaxSize)
+
+		t.Logf("AccessLog.MaxBackups: %d", Params.AccessLog.File.MaxBackups)
+
+		t.Logf("AccessLog.MaxDays: %d", Params.AccessLog.File.MaxDays)
 	})
 
 	t.Run("test proxyConfig panic", func(t *testing.T) {

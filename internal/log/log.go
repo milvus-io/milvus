@@ -44,7 +44,7 @@ import (
 	lumberjack "gopkg.in/natefinch/lumberjack.v2"
 )
 
-var _globalL, _globalP, _globalS, _globalR atomic.Value
+var _globalA, _globalL, _globalP, _globalS, _globalR atomic.Value
 
 var (
 	_globalLevelLogger sync.Map
@@ -96,6 +96,38 @@ func InitLogger(cfg *Config, opts ...zap.Option) (*zap.Logger, *ZapProperties, e
 	}
 	r.Level.SetLevel(level)
 	return debugL.WithOptions(zap.IncreaseLevel(level), zap.AddCallerSkip(1)), r, nil
+}
+
+// InitAccessLogger initializes a zap access logger for proxy
+func InitAccessLogger(cfg *AccessLogConfig) error {
+	if !cfg.Enable {
+		return nil
+	}
+
+	var writeSyncer zapcore.WriteSyncer
+	if len(cfg.File.Filename) > 0 {
+		lg, err := initFileLog(&cfg.File)
+		if err != nil {
+			return err
+		}
+
+		writeSyncer = zapcore.AddSync(lg)
+	} else {
+		stdout, _, err := zap.Open([]string{"stdout"}...)
+		if err != nil {
+			return err
+		}
+
+		writeSyncer = stdout
+	}
+
+	encoder := NewAccessEncoder()
+
+	logger := zap.New(zapcore.NewCore(encoder, writeSyncer, zapcore.DebugLevel))
+	logger.Info("Access log start successful")
+
+	_globalA.Store(logger)
+	return nil
 }
 
 // InitTestLogger initializes a logger for unit tests
@@ -153,6 +185,10 @@ func newStdLogger() (*zap.Logger, *ZapProperties) {
 	conf := &Config{Level: "debug", File: FileLogConfig{}}
 	lg, r, _ := InitLogger(conf)
 	return lg, r
+}
+
+func A() *zap.Logger {
+	return _globalA.Load().(*zap.Logger)
 }
 
 // L returns the global Logger, which can be reconfigured with ReplaceGlobals.

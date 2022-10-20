@@ -26,8 +26,6 @@ const (
 
 // FileLogConfig serializes file log related config in toml/json.
 type FileLogConfig struct {
-	// Log rootpath
-	RootPath string `toml:"rootpath" json:"rootpath"`
 	// Log filename, leave empty to disable file log.
 	Filename string `toml:"filename" json:"filename"`
 	// Max size for a single file, in MB.
@@ -36,6 +34,11 @@ type FileLogConfig struct {
 	MaxDays int `toml:"max-days" json:"max-days"`
 	// Maximum number of old log files to retain.
 	MaxBackups int `toml:"max-backups" json:"max-backups"`
+}
+
+type AccessLogConfig struct {
+	Enable bool          `toml:"enable" json:"enable"`
+	File   FileLogConfig `toml:"file" json:"file"`
 }
 
 // Config serializes log related config in toml/json.

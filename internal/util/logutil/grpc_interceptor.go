@@ -2,6 +2,7 @@ package logutil
 
 import (
 	"context"
+	"time"
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	"github.com/milvus-io/milvus/internal/log"
@@ -20,6 +21,13 @@ const (
 func UnaryTraceLoggerInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 	newctx := withLevelAndTrace(ctx)
 	return handler(newctx, req)
+}
+
+func UnaryAccessLoggerInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+	starttime := time.Now()
+	resp, err := handler(ctx, req)
+	log.PrintAccessInfo(ctx, resp, err, info, time.Since(starttime).Milliseconds())
+	return resp, err
 }
 
 // StreamTraceLoggerInterceptor add a traced logger in stream rpc call ctx

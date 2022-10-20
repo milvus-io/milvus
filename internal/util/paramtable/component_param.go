@@ -513,6 +513,7 @@ type proxyConfig struct {
 	GinLogging               bool
 	MaxUserNum               int
 	MaxRoleNum               int
+	AccessLog                log.AccessLogConfig
 
 	// required from QueryCoord
 	SearchResultChannelNames   []string
@@ -544,6 +545,7 @@ func (p *proxyConfig) init(base *BaseTable) {
 	p.initMaxRoleNum()
 
 	p.initSoPath()
+	p.initAccessLogConfig()
 }
 
 // InitAlias initialize Alias member.
@@ -664,6 +666,26 @@ func (p *proxyConfig) initMaxRoleNum() {
 		panic(err)
 	}
 	p.MaxRoleNum = int(maxRoleNum)
+}
+
+func (p *proxyConfig) initAccessLogConfig() {
+	enable := p.Base.ParseBool("proxy.accessLog.enable", true)
+
+	p.AccessLog = log.AccessLogConfig{
+		Enable: enable,
+		File:   log.FileLogConfig{},
+	}
+
+	if enable {
+		p.initAccessLogFileConfig()
+	}
+}
+
+func (p *proxyConfig) initAccessLogFileConfig() {
+	p.AccessLog.File.Filename = p.Base.LoadWithDefault("proxy.accessLog.filename", "/tme/milvus_accss_log.log")
+	p.AccessLog.File.MaxSize = p.Base.ParseIntWithDefault("proxy.accessLog.maxSize", 300)
+	p.AccessLog.File.MaxBackups = p.Base.ParseIntWithDefault("proxy.accessLog.maxBackups", 1)
+	p.AccessLog.File.MaxDays = p.Base.ParseIntWithDefault("proxy.accessLog.maxDays", 1)
 }
 
 ///////////////////////////////////////////////////////////////////////////////

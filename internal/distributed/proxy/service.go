@@ -181,6 +181,7 @@ func (s *Server) startExternalGrpc(grpcPort int, errChan chan error) {
 			proxy.UnaryServerInterceptor(proxy.PrivilegeInterceptor),
 			logutil.UnaryTraceLoggerInterceptor,
 			proxy.RateLimitInterceptor(limiter),
+			logutil.UnaryAccessLoggerInterceptor,
 		)),
 	}
 

@@ -136,6 +136,7 @@ func LogPanic() {
 }
 
 var once sync.Once
+var accessOnce sync.Once
 
 // SetupLogger is used to initialize the log with config.
 func SetupLogger(cfg *log.Config) {
@@ -162,8 +163,16 @@ func SetupLogger(cfg *log.Config) {
 		wrapper := &zapWrapper{logger, logLevel}
 		grpclog.SetLoggerV2(wrapper)
 
-		log.Info("Log directory", zap.String("configDir", cfg.File.RootPath))
 		log.Info("Set log file to ", zap.String("path", cfg.File.Filename))
+	})
+}
+
+func SetupAccseeLog(cfg *log.AccessLogConfig) {
+	accessOnce.Do(func() {
+		err := log.InitAccessLogger(cfg)
+		if err != nil {
+			log.Fatal("initialize access logger error", zap.Error(err))
+		}
 	})
 }
 

@@ -35,12 +35,18 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"net"
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/peer"
 )
 
 func TestExport(t *testing.T) {
@@ -253,4 +259,26 @@ func TestLeveledLogger(t *testing.T) {
 	assert.Equal(t, ctxL(), L())
 	SetLevel(orgLevel)
 
+}
+
+func TestAccessLogger(t *testing.T) {
+	cfg := AccessLogConfig{
+		true,
+		FileLogConfig{},
+	}
+	InitAccessLogger(&cfg)
+
+	ctx := peer.NewContext(context.Background(), &peer.Peer{Addr: &net.IPAddr{net.IPv4('0', '0', '0', '0'), "test"}})
+	ctx = metadata.AppendToOutgoingContext(ctx, clientRequestIDKey, "test")
+
+	resp := &milvuspb.BoolResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    fmt.Sprintf(""),
+		},
+		Value: false,
+	}
+
+	rpcInfo := &grpc.UnaryServerInfo{Server: nil, FullMethod: "testMethod"}
+	PrintAccessInfo(ctx, resp, nil, rpcInfo, 0)
 }

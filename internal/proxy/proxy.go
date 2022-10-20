@@ -186,6 +186,9 @@ func (node *Proxy) Init() error {
 	node.factory.Init(&Params)
 	log.Debug("init parameters for factory", zap.String("role", typeutil.ProxyRole), zap.Any("parameters", Params.ServiceParam))
 
+	logutil.SetupAccseeLog(&Params.ProxyCfg.AccessLog)
+	log.Debug("init access log for proxy", zap.Any("configs", Params.ProxyCfg.AccessLog))
+
 	err := node.initRateCollector()
 	if err != nil {
 		return err
