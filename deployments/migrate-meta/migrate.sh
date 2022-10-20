@@ -166,7 +166,7 @@ function wait_for_rollback_done(){
 }
 function generate_migrate_meta_cm_and_pvc(){
   etcd_svc=$(kubectl get svc -n $namespace -l app.kubernetes.io/instance=$instance_name,app.kubernetes.io/name=etcd -o name | grep -v headless | cut -d '/' -f 2)
-  cat <<EOF | kubectl apply -f -
+  cat <<EOF | kubectl apply -n $namespace -f -
   apiVersion: v1
   kind: PersistentVolumeClaim
   metadata:
@@ -178,7 +178,7 @@ function generate_migrate_meta_cm_and_pvc(){
       requests:
         storage: 10Gi
 EOF
-  cat <<EOF | kubectl apply -f -
+  cat <<EOF | kubectl apply -n $namespace -f -
   apiVersion: v1
   kind: ConfigMap
   metadata:
@@ -249,7 +249,7 @@ function backup_meta(){
   if [ "$backup_exists" == "succeed" ]; then
     echo "Found previous backups, skip meta backup..."
   else
-    cat <<EOF | kubectl apply -f -
+    cat <<EOF | kubectl apply -n $namespace -f -
     apiVersion: v1
     kind: Pod
     metadata:
@@ -286,7 +286,7 @@ function rollback_meta(){
   backup_exists=$(kubectl get configmap milvus-meta-migration-config -n $namespace --output=jsonpath={.metadata.annotations.backup})
   if [ "$backup_exists" == "succeed" ]; then
     echo "Found previous backups, start meta rollback..."
-  cat <<EOF | kubectl apply -f -
+  cat <<EOF | kubectl apply -n $namespace -f -
   apiVersion: v1
   kind: Pod
   metadata:
@@ -325,7 +325,7 @@ function migrate_meta(){
 
   backup_meta
   echo "Migrating meta..."
-  cat <<EOF | kubectl apply -f -
+  cat <<EOF | kubectl apply -n $namespace -f -
   apiVersion: v1
   kind: Pod
   metadata:
