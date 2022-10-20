@@ -879,6 +879,10 @@ func (s *Server) GetProxyMetrics(ctx context.Context, request *milvuspb.GetMetri
 func (s *Server) GetVersion(ctx context.Context, request *milvuspb.GetVersionRequest) (*milvuspb.GetVersionResponse, error) {
 	buildTags := os.Getenv(metricsinfo.GitBuildTagsEnvKey)
 	return &milvuspb.GetVersionResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
+		},
 		Version: buildTags,
 	}, nil
 }

@@ -4585,7 +4585,10 @@ func (node *Proxy) SetRates(ctx context.Context, request *proxypb.SetRatesReques
 func (node *Proxy) CheckHealth(ctx context.Context, request *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
 	if !node.checkHealthy() {
 		reason := errorutil.UnHealthReason("proxy", node.session.ServerID, "proxy is unhealthy")
-		return &milvuspb.CheckHealthResponse{IsHealthy: false, Reasons: []string{reason}}, nil
+		return &milvuspb.CheckHealthResponse{
+			Status:    unhealthyStatus(),
+			IsHealthy: false,
+			Reasons:   []string{reason}}, nil
 	}
 
 	group, ctx := errgroup.WithContext(ctx)
@@ -4597,13 +4600,13 @@ func (node *Proxy) CheckHealth(ctx context.Context, request *milvuspb.CheckHealt
 		defer mu.Unlock()
 
 		if err != nil {
-			log.Warn("check health fail,", zap.String("role", role), zap.Error(err))
+			log.Warn("check health fail", zap.String("role", role), zap.Error(err))
 			errReasons = append(errReasons, fmt.Sprintf("check health fail for %s", role))
 			return err
 		}
 
 		if !resp.IsHealthy {
-			log.Warn("check health fail,", zap.String("role", role))
+			log.Warn("check health fail", zap.String("role", role))
 			errReasons = append(errReasons, resp.Reasons...)
 		}
 		return nil
@@ -4637,5 +4640,11 @@ func (node *Proxy) CheckHealth(ctx context.Context, request *milvuspb.CheckHealt
 		}, nil
 	}
 
-	return &milvuspb.CheckHealthResponse{IsHealthy: true}, nil
+	return &milvuspb.CheckHealthResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
+		},
+		IsHealthy: true,
+	}, nil
 }
