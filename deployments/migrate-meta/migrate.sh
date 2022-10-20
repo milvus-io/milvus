@@ -4,6 +4,7 @@ namespace="default"
 root_path="by-dev"
 operation="migrate"
 image_tag="milvusdb/milvus:v2.2.0"
+remove_migrate_pod_after_migrate="false"
 
 #-n namespace: The namespace that Milvus is installed in.
 #-i milvus_instance: The name of milvus instance.
@@ -22,6 +23,7 @@ do
     r) root_path=$OPTARG;;
     w) image_tag=$OPTARG;;
     o) operation=$OPTARG;;
+    d) remove_migrate_pod_after_migrate=$OPTARG;;
     *) echo "Unkonwen parameters";;
   esac
 done
@@ -415,6 +417,11 @@ else
        echo
        echo "Upgrading is done. Waiting for milvus components to be ready again..."
        wait_for_milvus_ready
+       if [ "$remove_migrate_pod_after_migrate" == "true" ]; then
+         kubectl delete pods -n $namespace "milvus-meta-migration-backup-${instance_name}" "milvus-meta-migration-${instance_name}"
+         kubectl delete pvc -n $namespace "milvus-meta-migration-backup-${instance_name}"
+         kubectl delete configmap -n $namespace "milvus-meta-migration-config-${instance_name}"
+       fi
        echo "All milvus components are running. Enjoy your vector search..."
        ;;
      rollback)
