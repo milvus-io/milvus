@@ -64,8 +64,8 @@ jobs:
       with:
         body: "Image: ${{ env.IMAGE_REPO}}/${{ env.WEEKLY }}:${{ env.tag }}"
         prerelease: true
-        tag_name: "v2.1.0-testing-${{ env.build }}"
-        release_name: "milvus-2.1.0-testing-${{ env.build }}"
+        tag_name: "v2.2-testing-${{ env.build }}"
+        release_name: "milvus-2.2-testing-${{ env.build }}"
         commitish: "${{ env.sha }}"
 
 
