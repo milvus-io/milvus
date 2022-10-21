@@ -89,11 +89,14 @@ class TestcaseBase(Base):
     def _connect(self):
         """ Add a connection and create the connect """
         if cf.param_info.param_user and cf.param_info.param_password:
-            res, is_succ = self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, host=cf.param_info.param_host,
+            res, is_succ = self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING,
+                                                        host=cf.param_info.param_host,
                                                         port=cf.param_info.param_port, user=cf.param_info.param_user,
-                                                        password=cf.param_info.param_password, secure=cf.param_info.param_secure)
+                                                        password=cf.param_info.param_password,
+                                                        secure=cf.param_info.param_secure)
         else:
-            res, is_succ = self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, host=cf.param_info.param_host,
+            res, is_succ = self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING,
+                                                        host=cf.param_info.param_host,
                                                         port=cf.param_info.param_port)
         return res
 
@@ -103,7 +106,8 @@ class TestcaseBase(Base):
         if not self.connection_wrap.has_connection(alias=DefaultConfig.DEFAULT_USING)[0]:
             self._connect()
         collection_w = ApiCollectionWrapper()
-        collection_w.init_collection(name=name, schema=schema, shards_num=shards_num, check_task=check_task, check_items=check_items, **kwargs)
+        collection_w.init_collection(name=name, schema=schema, shards_num=shards_num, check_task=check_task,
+                                     check_items=check_items, **kwargs)
         self.collection_object_list.append(collection_w)
         return collection_w
 
@@ -126,6 +130,41 @@ class TestcaseBase(Base):
                                       check_task=check_task, check_items=check_items,
                                       **kwargs)
         return partition_wrap
+
+    def insert_data_general(self, prefix="test", insert_data=False, nb=ct.default_nb,
+                            partition_num=0, is_binary=False, is_all_data_type=False,
+                            auto_id=False, dim=ct.default_dim,
+                            primary_field=ct.default_int64_field_name, is_flush=True, name=None, **kwargs):
+        """
+
+        """
+        self._connect()
+        collection_name = cf.gen_unique_str(prefix)
+        if name is not None:
+            collection_name = name
+        vectors = []
+        binary_raw_vectors = []
+        insert_ids = []
+        time_stamp = 0
+        # 1 create collection
+        default_schema = cf.gen_default_collection_schema(auto_id=auto_id, dim=dim, primary_field=primary_field)
+        if is_binary:
+            default_schema = cf.gen_default_binary_collection_schema(auto_id=auto_id, dim=dim,
+                                                                     primary_field=primary_field)
+        if is_all_data_type:
+            default_schema = cf.gen_collection_schema_all_datatype(auto_id=auto_id, dim=dim,
+                                                                   primary_field=primary_field)
+        log.info("init_collection_general: collection creation")
+        collection_w = self.init_collection_wrap(name=collection_name, schema=default_schema, **kwargs)
+        pre_entities = collection_w.num_entities
+        if insert_data:
+            collection_w, vectors, binary_raw_vectors, insert_ids, time_stamp = \
+                cf.insert_data(collection_w, nb, is_binary, is_all_data_type, auto_id=auto_id, dim=dim)
+            if is_flush:
+                collection_w.flush()
+                assert collection_w.num_entities == nb + pre_entities
+
+        return collection_w, vectors, binary_raw_vectors, insert_ids, time_stamp
 
     def init_collection_general(self, prefix="test", insert_data=False, nb=ct.default_nb,
                                 partition_num=0, is_binary=False, is_all_data_type=False,
@@ -152,9 +191,11 @@ class TestcaseBase(Base):
         # 1 create collection
         default_schema = cf.gen_default_collection_schema(auto_id=auto_id, dim=dim, primary_field=primary_field)
         if is_binary:
-            default_schema = cf.gen_default_binary_collection_schema(auto_id=auto_id, dim=dim, primary_field=primary_field)
+            default_schema = cf.gen_default_binary_collection_schema(auto_id=auto_id, dim=dim,
+                                                                     primary_field=primary_field)
         if is_all_data_type:
-            default_schema = cf.gen_collection_schema_all_datatype(auto_id=auto_id, dim=dim, primary_field=primary_field)
+            default_schema = cf.gen_collection_schema_all_datatype(auto_id=auto_id, dim=dim,
+                                                                   primary_field=primary_field)
         log.info("init_collection_general: collection creation")
         collection_w = self.init_collection_wrap(name=collection_name, schema=default_schema, **kwargs)
         # 2 add extra partitions if specified (default is 1 partition named "_default")

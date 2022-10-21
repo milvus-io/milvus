@@ -41,6 +41,21 @@ class TestActionSecondDeployment(TestDeployBase):
                  method.__name__)
         log.info("skip drop collection")
 
+    def create_index(self, collection_w, default_index_field, default_index_param):
+        index_field_map = dict([(index.field_name, index.index_name) for index in collection_w.indexes])
+        index_infos = [index.to_dict() for index in collection_w.indexes]
+        log.info(index_infos)
+        # log.info(f"{default_index_field:} {default_index_param:}")
+        if len(index_infos) > 0:
+            log.info(
+                f"current index param is {index_infos[0]['index_param']}, passed in param is {default_index_param}")
+            log.info(
+                f"current index name is {index_infos[0]['index_name']}, passed in param is {index_field_map.get(default_index_field)}")
+        collection_w.create_index(default_index_field, default_index_param,
+                                  index_name=index_field_map.get(default_index_field, gen_unique_str("test")))
+        collection_w.create_index(default_string_field_name, {},
+                                  index_name=index_field_map.get(default_string_field_name, gen_unique_str("test")))
+
     @pytest.mark.tags(CaseLabel.L3)
     def test_check(self, all_collection_name, data_size):
         """
@@ -93,11 +108,7 @@ class TestActionSecondDeployment(TestDeployBase):
         # load if not loaded
         if replicas_loaded == 0:
             default_index_param = gen_index_param(vector_index_type)
-            collection_w.create_index(default_index_field, default_index_param,
-                                      index_name=index_field_map[default_index_field])
-            collection_w.create_index(default_string_field_name, {},
-                                      index_name=index_field_map[default_string_field_name])
-
+            self.create_index(collection_w, default_index_field, default_index_param)
             collection_w.load()
 
         # search and query
@@ -148,8 +159,8 @@ class TestActionSecondDeployment(TestDeployBase):
 
         # insert data and flush
         for i in range(2):
-            self.init_collection_general(insert_data=True, is_binary=is_binary, nb=data_size,
-                                         is_flush=False, is_index=True, name=name)
+            self.insert_data_general(insert_data=True, is_binary=is_binary, nb=data_size,
+                                     is_flush=False, is_index=True, name=name)
         if pymilvus_version >= "2.2.0":
             collection_w.flush()
         else:
@@ -175,12 +186,8 @@ class TestActionSecondDeployment(TestDeployBase):
             for index_name in index_names:
                 collection_w.release()
                 collection_w.drop_index(index_name=index_name)
-
             default_index_param = gen_index_param(vector_index_type)
-            collection_w.create_index(default_index_field, default_index_param,
-                                      index_name=index_field_map[default_index_field])
-            collection_w.create_index(default_string_field_name, {},
-                                      index_name=index_field_map[default_string_field_name])
+            self.create_index(collection_w, default_index_field, default_index_param)
 
             collection_w.load()
             collection_w.search(vectors_to_search[:default_nq], default_search_field,
@@ -193,11 +200,9 @@ class TestActionSecondDeployment(TestDeployBase):
             collection_w.query(default_term_expr, output_fields=[ct.default_int64_field_name],
                                check_task=CheckTasks.check_query_not_empty)
 
-            # create index
+        # create index
         default_index_param = gen_index_param(vector_index_type)
-        collection_w.create_index(default_index_field, default_index_param,
-                                  index_name=index_field_map[default_index_field])
-        collection_w.create_index(default_string_field_name, {}, index_name=index_field_map[default_string_field_name])
+        self.create_index(collection_w, default_index_field, default_index_param)
 
         # search and query
         collection_w.search(vectors_to_search[:default_nq], default_search_field,
