@@ -215,6 +215,19 @@ class TestIndexOperation(TestcaseBase):
         assert collection_w.indexes[0].params["index_type"] == default_index_params["index_type"]
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="issue 19972")
+    def test_index_create_indexes_for_different_fields(self):
+        """
+        target: Test create indexes for different fields
+        method: create two different indexes
+        expected: create successfully
+        """
+        collection_w = self.init_collection_general(prefix, True, is_index=True)[0]
+        default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
+        collection_w.create_index(default_field_name, default_index)
+        collection_w.create_index(ct.default_int64_field_name, {})
+
+    @pytest.mark.tags(CaseLabel.L1)
     def test_index_collection_empty(self):
         """
         target: test index with empty collection
