@@ -726,7 +726,7 @@ void
 SegmentSealedImpl::mask_with_timestamps(BitsetType& bitset_chunk, Timestamp timestamp) const {
     // TODO change the
     AssertInfo(insert_record_.timestamps_.num_chunk() == 1, "num chunk not equal to 1 for sealed segment");
-    auto timestamps_data = insert_record_.timestamps_.get_chunk(0);
+    const auto& timestamps_data = insert_record_.timestamps_.get_chunk(0);
     AssertInfo(timestamps_data.size() == get_row_count(), "Timestamp size not equal to row count");
     auto range = insert_record_.timestamp_index_.get_active_range(timestamp);
 
