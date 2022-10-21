@@ -18,6 +18,7 @@ package task
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -42,6 +43,12 @@ const (
 	TaskPriorityLow = iota
 	TaskPriorityNormal
 	TaskPriorityHigh
+)
+
+var (
+	ErrEmptyActions              = errors.New("actions could not be empty")
+	ErrActionsTypeInconsistent   = errors.New("actions have inconsistent type")
+	ErrActionsTargetInconsistent = errors.New("actions have inconsistent target channel/segment")
 )
 
 var (
@@ -233,9 +240,9 @@ func NewSegmentTask(ctx context.Context,
 	sourceID,
 	collectionID,
 	replicaID UniqueID,
-	actions ...Action) *SegmentTask {
+	actions ...Action) (*SegmentTask, error) {
 	if len(actions) == 0 {
-		panic("empty actions is not allowed")
+		return nil, ErrEmptyActions
 	}
 
 	segmentID := int64(-1)
@@ -243,13 +250,13 @@ func NewSegmentTask(ctx context.Context,
 	for _, action := range actions {
 		action, ok := action.(*SegmentAction)
 		if !ok {
-			panic("SegmentTask can only contain SegmentActions")
+			return nil, ErrActionsTypeInconsistent
 		}
 		if segmentID == -1 {
 			segmentID = action.SegmentID()
 			shard = action.Shard()
 		} else if segmentID != action.SegmentID() {
-			panic("all actions must process the same segment")
+			return nil, ErrActionsTargetInconsistent
 		}
 	}
 
@@ -258,7 +265,7 @@ func NewSegmentTask(ctx context.Context,
 	return &SegmentTask{
 		baseTask:  base,
 		segmentID: segmentID,
-	}
+	}, nil
 }
 
 func (task *SegmentTask) Shard() string {
@@ -285,21 +292,21 @@ func NewChannelTask(ctx context.Context,
 	sourceID,
 	collectionID,
 	replicaID UniqueID,
-	actions ...Action) *ChannelTask {
+	actions ...Action) (*ChannelTask, error) {
 	if len(actions) == 0 {
-		panic("empty actions is not allowed")
+		return nil, ErrEmptyActions
 	}
 
 	channel := ""
 	for _, action := range actions {
 		channelAction, ok := action.(interface{ ChannelName() string })
 		if !ok {
-			panic("ChannelTask must contain only ChannelAction")
+			return nil, ErrActionsTypeInconsistent
 		}
 		if channel == "" {
 			channel = channelAction.ChannelName()
 		} else if channel != channelAction.ChannelName() {
-			panic("all actions must process the same channel")
+			return nil, ErrActionsTargetInconsistent
 		}
 	}
 
@@ -307,7 +314,7 @@ func NewChannelTask(ctx context.Context,
 	base.actions = actions
 	return &ChannelTask{
 		baseTask: base,
-	}
+	}, nil
 }
 
 func (task *ChannelTask) Channel() string {

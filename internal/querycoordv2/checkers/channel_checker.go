@@ -19,11 +19,13 @@ package checkers
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"go.uber.org/zap"
 )
 
 // TODO(sunby): have too much similar codes with SegmentChecker
@@ -148,7 +150,17 @@ func (c *ChannelChecker) createChannelReduceTasks(ctx context.Context, channels 
 	ret := make([]task.Task, 0, len(channels))
 	for _, ch := range channels {
 		action := task.NewChannelAction(ch.Node, task.ActionTypeReduce, ch.GetChannelName())
-		task := task.NewChannelTask(ctx, Params.QueryCoordCfg.ChannelTaskTimeout, c.ID(), ch.GetCollectionID(), replicaID, action)
+		task, err := task.NewChannelTask(ctx, Params.QueryCoordCfg.ChannelTaskTimeout, c.ID(), ch.GetCollectionID(), replicaID, action)
+		if err != nil {
+			log.Warn("Create channel reduce task failed",
+				zap.Int64("collection", ch.GetCollectionID()),
+				zap.Int64("replica", replicaID),
+				zap.String("channel", ch.GetChannelName()),
+				zap.Int64("From", ch.Node),
+				zap.Error(err),
+			)
+			continue
+		}
 		ret = append(ret, task)
 	}
 	return ret

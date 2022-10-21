@@ -203,7 +203,7 @@ func (suite *TaskSuite) TestSubscribeChannelTask() {
 			ChannelName:         channel,
 			UnflushedSegmentIds: []int64{suite.growingSegments[channel]},
 		}))
-		task := NewChannelTask(
+		task, err := NewChannelTask(
 			ctx,
 			timeout,
 			0,
@@ -211,8 +211,9 @@ func (suite *TaskSuite) TestSubscribeChannelTask() {
 			suite.replica,
 			NewChannelAction(targetNode, ActionTypeGrow, channel),
 		)
+		suite.NoError(err)
 		tasks = append(tasks, task)
-		err := suite.scheduler.Add(task)
+		err = suite.scheduler.Add(task)
 		suite.NoError(err)
 	}
 	suite.AssertTaskNum(0, len(suite.subChannels), len(suite.subChannels), 0)
@@ -261,7 +262,7 @@ func (suite *TaskSuite) TestUnsubscribeChannelTask() {
 			CollectionID: suite.collection,
 			ChannelName:  channel,
 		}))
-		task := NewChannelTask(
+		task, err := NewChannelTask(
 			ctx,
 			timeout,
 			0,
@@ -269,8 +270,10 @@ func (suite *TaskSuite) TestUnsubscribeChannelTask() {
 			-1,
 			NewChannelAction(targetNode, ActionTypeReduce, channel),
 		)
+
+		suite.NoError(err)
 		tasks = append(tasks, task)
-		err := suite.scheduler.Add(task)
+		err = suite.scheduler.Add(task)
 		suite.NoError(err)
 	}
 	// Only first channel exists
@@ -343,7 +346,7 @@ func (suite *TaskSuite) TestLoadSegmentTask() {
 			PartitionID:   partition,
 			InsertChannel: channel.ChannelName,
 		})
-		task := NewSegmentTask(
+		task, err := NewSegmentTask(
 			ctx,
 			timeout,
 			0,
@@ -351,8 +354,9 @@ func (suite *TaskSuite) TestLoadSegmentTask() {
 			suite.replica,
 			NewSegmentAction(targetNode, ActionTypeGrow, channel.GetChannelName(), segment),
 		)
+		suite.NoError(err)
 		tasks = append(tasks, task)
-		err := suite.scheduler.Add(task)
+		err = suite.scheduler.Add(task)
 		suite.NoError(err)
 	}
 	segmentsNum := len(suite.loadSegments)
@@ -426,7 +430,7 @@ func (suite *TaskSuite) TestLoadSegmentTaskFailed() {
 			PartitionID:   partition,
 			InsertChannel: channel.ChannelName,
 		})
-		task := NewSegmentTask(
+		task, err := NewSegmentTask(
 			ctx,
 			timeout,
 			0,
@@ -434,8 +438,9 @@ func (suite *TaskSuite) TestLoadSegmentTaskFailed() {
 			suite.replica,
 			NewSegmentAction(targetNode, ActionTypeGrow, channel.GetChannelName(), segment),
 		)
+		suite.NoError(err)
 		tasks = append(tasks, task)
-		err := suite.scheduler.Add(task)
+		err = suite.scheduler.Add(task)
 		suite.NoError(err)
 	}
 	segmentsNum := len(suite.loadSegments)
@@ -492,7 +497,7 @@ func (suite *TaskSuite) TestReleaseSegmentTask() {
 			},
 		})
 		view.Segments[segment] = &querypb.SegmentDist{NodeID: targetNode, Version: 0}
-		task := NewSegmentTask(
+		task, err := NewSegmentTask(
 			ctx,
 			timeout,
 			0,
@@ -500,8 +505,9 @@ func (suite *TaskSuite) TestReleaseSegmentTask() {
 			suite.replica,
 			NewSegmentAction(targetNode, ActionTypeReduce, channel.GetChannelName(), segment),
 		)
+		suite.NoError(err)
 		tasks = append(tasks, task)
-		err := suite.scheduler.Add(task)
+		err = suite.scheduler.Add(task)
 		suite.NoError(err)
 	}
 	suite.dist.SegmentDistManager.Update(targetNode, segments...)
@@ -539,7 +545,7 @@ func (suite *TaskSuite) TestReleaseGrowingSegmentTask() {
 
 	tasks := []Task{}
 	for _, segment := range suite.releaseSegments {
-		task := NewSegmentTask(
+		task, err := NewSegmentTask(
 			ctx,
 			timeout,
 			0,
@@ -547,8 +553,9 @@ func (suite *TaskSuite) TestReleaseGrowingSegmentTask() {
 			suite.replica,
 			NewSegmentActionWithScope(targetNode, ActionTypeReduce, "", segment, querypb.DataScope_Streaming),
 		)
+		suite.NoError(err)
 		tasks = append(tasks, task)
-		err := suite.scheduler.Add(task)
+		err = suite.scheduler.Add(task)
 		suite.NoError(err)
 	}
 
@@ -630,7 +637,7 @@ func (suite *TaskSuite) TestMoveSegmentTask() {
 		})
 		view.Segments[segment] = &querypb.SegmentDist{NodeID: sourceNode, Version: 0}
 
-		task := NewSegmentTask(
+		task, err := NewSegmentTask(
 			ctx,
 			timeout,
 			0,
@@ -639,8 +646,9 @@ func (suite *TaskSuite) TestMoveSegmentTask() {
 			NewSegmentAction(targetNode, ActionTypeGrow, channel.GetChannelName(), segment),
 			NewSegmentAction(sourceNode, ActionTypeReduce, channel.GetChannelName(), segment),
 		)
+		suite.NoError(err)
 		tasks = append(tasks, task)
-		err := suite.scheduler.Add(task)
+		err = suite.scheduler.Add(task)
 		suite.NoError(err)
 	}
 	suite.dist.SegmentDistManager.Update(sourceNode, segments...)
@@ -689,7 +697,7 @@ func (suite *TaskSuite) TestTaskCanceled() {
 			CollectionID: suite.collection,
 			ChannelName:  channel,
 		}))
-		task := NewChannelTask(
+		task, err := NewChannelTask(
 			ctx,
 			timeout,
 			0,
@@ -697,8 +705,9 @@ func (suite *TaskSuite) TestTaskCanceled() {
 			-1,
 			NewChannelAction(targetNode, ActionTypeReduce, channel),
 		)
+		suite.NoError(err)
 		tasks = append(tasks, task)
-		err := suite.scheduler.Add(task)
+		err = suite.scheduler.Add(task)
 		suite.NoError(err)
 	}
 	// Only first channel exists
@@ -778,7 +787,7 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 			PartitionID:   partition,
 			InsertChannel: channel.ChannelName,
 		})
-		task := NewSegmentTask(
+		task, err := NewSegmentTask(
 			ctx,
 			timeout,
 			0,
@@ -786,8 +795,9 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 			suite.replica,
 			NewSegmentAction(targetNode, ActionTypeGrow, channel.GetChannelName(), segment),
 		)
+		suite.NoError(err)
 		tasks = append(tasks, task)
-		err := suite.scheduler.Add(task)
+		err = suite.scheduler.Add(task)
 		suite.NoError(err)
 	}
 	segmentsNum := len(suite.loadSegments)
@@ -833,7 +843,7 @@ func (suite *TaskSuite) TestChannelTaskReplace() {
 	targetNode := int64(3)
 
 	for _, channel := range suite.subChannels {
-		task := NewChannelTask(
+		task, err := NewChannelTask(
 			ctx,
 			timeout,
 			0,
@@ -841,15 +851,16 @@ func (suite *TaskSuite) TestChannelTaskReplace() {
 			suite.replica,
 			NewChannelAction(targetNode, ActionTypeGrow, channel),
 		)
+		suite.NoError(err)
 		task.SetPriority(TaskPriorityNormal)
-		err := suite.scheduler.Add(task)
+		err = suite.scheduler.Add(task)
 		suite.NoError(err)
 	}
 
 	// Task with the same replica and segment,
 	// but without higher priority can't be added
 	for _, channel := range suite.subChannels {
-		task := NewChannelTask(
+		task, err := NewChannelTask(
 			ctx,
 			timeout,
 			0,
@@ -857,8 +868,9 @@ func (suite *TaskSuite) TestChannelTaskReplace() {
 			suite.replica,
 			NewChannelAction(targetNode, ActionTypeGrow, channel),
 		)
+		suite.NoError(err)
 		task.SetPriority(TaskPriorityNormal)
-		err := suite.scheduler.Add(task)
+		err = suite.scheduler.Add(task)
 		suite.ErrorIs(err, ErrConflictTaskExisted)
 		task.SetPriority(TaskPriorityLow)
 		err = suite.scheduler.Add(task)
@@ -867,7 +879,7 @@ func (suite *TaskSuite) TestChannelTaskReplace() {
 
 	// Replace the task with one with higher priority
 	for _, channel := range suite.subChannels {
-		task := NewChannelTask(
+		task, err := NewChannelTask(
 			ctx,
 			timeout,
 			0,
@@ -875,12 +887,47 @@ func (suite *TaskSuite) TestChannelTaskReplace() {
 			suite.replica,
 			NewChannelAction(targetNode, ActionTypeGrow, channel),
 		)
+		suite.NoError(err)
 		task.SetPriority(TaskPriorityHigh)
-		err := suite.scheduler.Add(task)
+		err = suite.scheduler.Add(task)
 		suite.NoError(err)
 	}
 	channelNum := len(suite.subChannels)
 	suite.AssertTaskNum(0, channelNum, channelNum, 0)
+}
+
+func (suite *TaskSuite) TestCreateTaskBehavior() {
+	chanelTask, err := NewChannelTask(context.TODO(), 5*time.Second, 0, 0, 0)
+	suite.Error(err)
+	suite.ErrorIs(err, ErrEmptyActions)
+	suite.Nil(chanelTask)
+
+	action := NewSegmentAction(0, 0, "", 0)
+	chanelTask, err = NewChannelTask(context.TODO(), 5*time.Second, 0, 0, 0, action)
+	suite.ErrorIs(err, ErrActionsTypeInconsistent)
+	suite.Nil(chanelTask)
+
+	action1 := NewChannelAction(0, 0, "fake-channel1")
+	action2 := NewChannelAction(0, 0, "fake-channel2")
+	chanelTask, err = NewChannelTask(context.TODO(), 5*time.Second, 0, 0, 0, action1, action2)
+	suite.ErrorIs(err, ErrActionsTargetInconsistent)
+	suite.Nil(chanelTask)
+
+	segmentTask, err := NewSegmentTask(context.TODO(), 5*time.Second, 0, 0, 0)
+	suite.ErrorIs(err, ErrEmptyActions)
+	suite.Nil(segmentTask)
+
+	channelAction := NewChannelAction(0, 0, "fake-channel1")
+	segmentTask, err = NewSegmentTask(context.TODO(), 5*time.Second, 0, 0, 0, channelAction)
+	suite.ErrorIs(err, ErrActionsTypeInconsistent)
+	suite.Nil(segmentTask)
+
+	segmentAction1 := NewSegmentAction(0, 0, "", 0)
+	segmentAction2 := NewSegmentAction(0, 0, "", 1)
+
+	segmentTask, err = NewSegmentTask(context.TODO(), 5*time.Second, 0, 0, 0, segmentAction1, segmentAction2)
+	suite.ErrorIs(err, ErrActionsTargetInconsistent)
+	suite.Nil(segmentTask)
 }
 
 func (suite *TaskSuite) TestSegmentTaskReplace() {
@@ -889,7 +936,7 @@ func (suite *TaskSuite) TestSegmentTaskReplace() {
 	targetNode := int64(3)
 
 	for _, segment := range suite.loadSegments {
-		task := NewSegmentTask(
+		task, err := NewSegmentTask(
 			ctx,
 			timeout,
 			0,
@@ -897,15 +944,16 @@ func (suite *TaskSuite) TestSegmentTaskReplace() {
 			suite.replica,
 			NewSegmentAction(targetNode, ActionTypeGrow, "", segment),
 		)
+		suite.NoError(err)
 		task.SetPriority(TaskPriorityNormal)
-		err := suite.scheduler.Add(task)
+		err = suite.scheduler.Add(task)
 		suite.NoError(err)
 	}
 
 	// Task with the same replica and segment,
 	// but without higher priority can't be added
 	for _, segment := range suite.loadSegments {
-		task := NewSegmentTask(
+		task, err := NewSegmentTask(
 			ctx,
 			timeout,
 			0,
@@ -913,8 +961,9 @@ func (suite *TaskSuite) TestSegmentTaskReplace() {
 			suite.replica,
 			NewSegmentAction(targetNode, ActionTypeGrow, "", segment),
 		)
+		suite.NoError(err)
 		task.SetPriority(TaskPriorityNormal)
-		err := suite.scheduler.Add(task)
+		err = suite.scheduler.Add(task)
 		suite.ErrorIs(err, ErrConflictTaskExisted)
 		task.SetPriority(TaskPriorityLow)
 		err = suite.scheduler.Add(task)
@@ -923,7 +972,7 @@ func (suite *TaskSuite) TestSegmentTaskReplace() {
 
 	// Replace the task with one with higher priority
 	for _, segment := range suite.loadSegments {
-		task := NewSegmentTask(
+		task, err := NewSegmentTask(
 			ctx,
 			timeout,
 			0,
@@ -931,8 +980,9 @@ func (suite *TaskSuite) TestSegmentTaskReplace() {
 			suite.replica,
 			NewSegmentAction(targetNode, ActionTypeGrow, "", segment),
 		)
+		suite.NoError(err)
 		task.SetPriority(TaskPriorityHigh)
-		err := suite.scheduler.Add(task)
+		err = suite.scheduler.Add(task)
 		suite.NoError(err)
 	}
 	segmentNum := len(suite.loadSegments)

@@ -120,9 +120,9 @@ func (suite *MergerSuite) TestMerge() {
 	ctx := context.Background()
 
 	for segmentID := int64(1); segmentID <= 3; segmentID++ {
-		task := NewSegmentTask(ctx, timeout, 0, suite.collectionID, suite.replicaID,
+		task, err := NewSegmentTask(ctx, timeout, 0, suite.collectionID, suite.replicaID,
 			NewSegmentAction(suite.nodeID, ActionTypeGrow, "", segmentID))
-
+		suite.NoError(err)
 		suite.merger.Add(NewLoadSegmentsTask(task, 0, suite.requests[segmentID]))
 	}
 

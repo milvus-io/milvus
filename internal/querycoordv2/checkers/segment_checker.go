@@ -19,6 +19,7 @@ package checkers
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
@@ -27,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"go.uber.org/zap"
 )
 
 type SegmentChecker struct {
@@ -246,14 +248,27 @@ func (c *SegmentChecker) createSegmentReduceTasks(ctx context.Context, segments 
 	ret := make([]task.Task, 0, len(segments))
 	for _, s := range segments {
 		action := task.NewSegmentActionWithScope(s.Node, task.ActionTypeReduce, s.GetInsertChannel(), s.GetID(), scope)
-		ret = append(ret, task.NewSegmentTask(
+		task, err := task.NewSegmentTask(
 			ctx,
 			Params.QueryCoordCfg.SegmentTaskTimeout,
 			c.ID(),
 			s.GetCollectionID(),
 			replicaID,
 			action,
-		))
+		)
+
+		if err != nil {
+			log.Warn("Create segment reduce task failed",
+				zap.Int64("collection", s.GetCollectionID()),
+				zap.Int64("replica", replicaID),
+				zap.String("channel", s.GetInsertChannel()),
+				zap.Int64("From", s.Node),
+				zap.Error(err),
+			)
+			continue
+		}
+
+		ret = append(ret, task)
 	}
 	return ret
 }
