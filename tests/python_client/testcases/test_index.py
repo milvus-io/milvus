@@ -1169,7 +1169,7 @@ class TestNewIndexBinary(TestcaseBase):
         assert len(collection_w.indexes) == 0
 
 
-class TestIndexInvalid(object):
+class TestIndexInvalid(TestcaseBase):
     """
     Test create / describe / drop index interfaces with invalid collection names
     """
@@ -1220,6 +1220,23 @@ class TestIndexInvalid(object):
         log.info(get_index)
         with pytest.raises(Exception) as e:
             connect.create_index(collection, field_name, get_index)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_drop_index_without_release(self):
+        """
+        target: test drop index after load without release
+        method: 1. create a collection and build an index then load
+                2. drop the index
+        expected: raise exception
+        """
+        collection_w = self.init_collection_general(prefix, True, is_index=True)[0]
+        default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
+        collection_w.create_index("float_vector", default_index)
+        collection_w.load()
+        collection_w.drop_index(check_task=CheckTasks.err_res,
+                                check_items={"err_code": 1,
+                                             "err_msg": "index cannot be dropped, collection is "
+                                                        "loaded, please release it first"})
 
 
 class TestNewIndexAsync(TestcaseBase):
