@@ -1180,7 +1180,10 @@ func (c *Core) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionsRe
 	// TODO(longjiquan): why ShowPartitionsRequest doesn't contain Timestamp but other requests do.
 	ts := typeutil.MaxTimestamp
 	resp := &milvuspb.ShowPartitionsResponse{Status: succStatus()}
-	log := log.Ctx(ctx).With(zap.String("collection", in.GetCollectionName()), zap.Int64("msgID", in.GetBase().GetMsgID()))
+	log := log.Ctx(ctx).With(
+		zap.String("collection", in.GetCollectionName()),
+		zap.Int64("collectionID", in.GetCollectionID()),
+		zap.Int64("msgID", in.GetBase().GetMsgID()))
 
 	log.Info("received request to show partitions")
 
