@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/common"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 
 	"github.com/stretchr/testify/mock"
@@ -22,11 +23,14 @@ import (
 )
 
 func Test_createCollectionTask_validate(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	t.Run("empty request", func(t *testing.T) {
 		task := createCollectionTask{
 			Req: nil,
 		}
-		err := task.validate()
+		err := task.validate(ctx)
 		assert.Error(t, err)
 	})
 
@@ -36,37 +40,107 @@ func Test_createCollectionTask_validate(t *testing.T) {
 				Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection},
 			},
 		}
-		err := task.validate()
+		err := task.validate(ctx)
 		assert.Error(t, err)
 	})
 
 	t.Run("shard num exceeds limit", func(t *testing.T) {
+		mt := &mockMetaTable{
+			GetCollectionByNameFunc: func(ctx context.Context, name string, ts Timestamp) (*model.Collection, error) {
+				return &model.Collection{}, nil
+			},
+		}
 		task := createCollectionTask{
+			baseTask: baseTask{
+				core: &Core{
+					meta: mt,
+				},
+			},
 			Req: &milvuspb.CreateCollectionRequest{
 				Base:      &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
 				ShardsNum: maxShardNum + 1,
 			},
 		}
-		err := task.validate()
+		err := task.validate(ctx)
 		assert.Error(t, err)
 	})
 
 	t.Run("normal case", func(t *testing.T) {
+		mt := &mockMetaTable{
+			GetCollectionByNameFunc: func(ctx context.Context, name string, ts Timestamp) (*model.Collection, error) {
+				return nil, common.NewCollectionNotExistError("collection exist")
+			},
+		}
 		task := createCollectionTask{
+			baseTask: baseTask{
+				core: &Core{
+					meta: mt,
+				},
+			},
 			Req: &milvuspb.CreateCollectionRequest{
 				Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
 			},
 		}
-		err := task.validate()
+		err := task.validate(ctx)
 		assert.NoError(t, err)
+	})
+
+	t.Run("duplicated collection name", func(t *testing.T) {
+		mt := &mockMetaTable{
+			GetCollectionByNameFunc: func(ctx context.Context, name string, ts Timestamp) (*model.Collection, error) {
+				return &model.Collection{}, nil
+			},
+		}
+		task := createCollectionTask{
+			baseTask: baseTask{
+				core: &Core{
+					meta: mt,
+				},
+			},
+			Req: &milvuspb.CreateCollectionRequest{
+				Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+			},
+		}
+		err := task.validate(ctx)
+		assert.Error(t, err)
+	})
+
+	t.Run("meta get collection error", func(t *testing.T) {
+		mt := &mockMetaTable{
+			GetCollectionByNameFunc: func(ctx context.Context, name string, ts Timestamp) (*model.Collection, error) {
+				return nil, errors.New("mocked")
+			},
+		}
+		task := createCollectionTask{
+			baseTask: baseTask{
+				core: &Core{
+					meta: mt,
+				},
+			},
+			Req: &milvuspb.CreateCollectionRequest{
+				Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+			},
+		}
+		err := task.validate(ctx)
+		assert.Error(t, err)
 	})
 }
 
 func Test_createCollectionTask_validateSchema(t *testing.T) {
+	mt := &mockMetaTable{
+		GetCollectionByNameFunc: func(ctx context.Context, name string, ts Timestamp) (*model.Collection, error) {
+			return nil, common.NewCollectionNotExistError("collection exist")
+		},
+	}
 	t.Run("name mismatch", func(t *testing.T) {
 		collectionName := funcutil.GenRandomStr()
 		otherName := collectionName + "_other"
 		task := createCollectionTask{
+			baseTask: baseTask{
+				core: &Core{
+					meta: mt,
+				},
+			},
 			Req: &milvuspb.CreateCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
 				CollectionName: collectionName,
@@ -82,6 +156,11 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 	t.Run("has system fields", func(t *testing.T) {
 		collectionName := funcutil.GenRandomStr()
 		task := createCollectionTask{
+			baseTask: baseTask{
+				core: &Core{
+					meta: mt,
+				},
+			},
 			Req: &milvuspb.CreateCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
 				CollectionName: collectionName,
@@ -100,6 +179,11 @@ func Test_createCollectionTask_validateSchema(t *testing.T) {
 	t.Run("normal case", func(t *testing.T) {
 		collectionName := funcutil.GenRandomStr()
 		task := createCollectionTask{
+			baseTask: baseTask{
+				core: &Core{
+					meta: mt,
+				},
+			},
 			Req: &milvuspb.CreateCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
 				CollectionName: collectionName,
@@ -177,8 +261,18 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 }
 
 func Test_createCollectionTask_Prepare(t *testing.T) {
+	mt := &mockMetaTable{
+		GetCollectionByNameFunc: func(ctx context.Context, name string, ts Timestamp) (*model.Collection, error) {
+			return nil, common.NewCollectionNotExistError("collection exist")
+		},
+	}
 	t.Run("invalid msg type", func(t *testing.T) {
 		task := &createCollectionTask{
+			baseTask: baseTask{
+				core: &Core{
+					meta: mt,
+				},
+			},
 			Req: &milvuspb.CreateCollectionRequest{
 				Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection},
 			},
@@ -190,6 +284,11 @@ func Test_createCollectionTask_Prepare(t *testing.T) {
 	t.Run("invalid schema", func(t *testing.T) {
 		collectionName := funcutil.GenRandomStr()
 		task := &createCollectionTask{
+			baseTask: baseTask{
+				core: &Core{
+					meta: mt,
+				},
+			},
 			Req: &milvuspb.CreateCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
 				CollectionName: collectionName,
@@ -214,9 +313,10 @@ func Test_createCollectionTask_Prepare(t *testing.T) {
 		marshaledSchema, err := proto.Marshal(schema)
 		assert.NoError(t, err)
 
-		core := newTestCore(withInvalidIDAllocator())
+		core := newTestCore(withInvalidIDAllocator(), withMeta(mt))
 
 		task := createCollectionTask{
+
 			baseTask: baseTask{core: core},
 			Req: &milvuspb.CreateCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
@@ -236,7 +336,7 @@ func Test_createCollectionTask_Prepare(t *testing.T) {
 
 		ticker := newRocksMqTtSynchronizer()
 
-		core := newTestCore(withValidIDAllocator(), withTtSynchronizer(ticker))
+		core := newTestCore(withValidIDAllocator(), withTtSynchronizer(ticker), withMeta(mt))
 
 		schema := &schemapb.CollectionSchema{
 			Name:        collectionName,

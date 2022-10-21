@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/milvus-io/milvus/internal/common"
 	ms "github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 
@@ -42,12 +43,22 @@ type createCollectionTask struct {
 	channels collectionChannels
 }
 
-func (t *createCollectionTask) validate() error {
+func (t *createCollectionTask) validate(ctx context.Context) error {
 	if t.Req == nil {
 		return errors.New("empty requests")
 	}
 
 	if err := CheckMsgType(t.Req.GetBase().GetMsgType(), commonpb.MsgType_CreateCollection); err != nil {
+		return err
+	}
+
+	_, err := t.core.meta.GetCollectionByName(ctx, t.Req.GetCollectionName(), typeutil.MaxTimestamp)
+	// collection already exists
+	if err == nil {
+		return fmt.Errorf("collection %s already exists", t.Req.GetCollectionName())
+	}
+	// not CollectionNotExistError
+	if !common.IsCollectionNotExistError(err) {
 		return err
 	}
 
@@ -152,7 +163,7 @@ func (t *createCollectionTask) assignChannels() error {
 }
 
 func (t *createCollectionTask) Prepare(ctx context.Context) error {
-	if err := t.validate(); err != nil {
+	if err := t.validate(ctx); err != nil {
 		return err
 	}
 
