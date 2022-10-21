@@ -27,6 +27,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/proto/querypb"
+
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 
 	"github.com/milvus-io/milvus/internal/mocks"
@@ -1091,6 +1093,18 @@ func TestDropPartitionTask(t *testing.T) {
 	collectionName := prefix + funcutil.GenRandomStr()
 	partitionName := prefix + funcutil.GenRandomStr()
 
+	showPartitionsMock := func(ctx context.Context, request *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
+		return &querypb.ShowPartitionsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+				Reason:    "",
+			},
+			PartitionIDs: []int64{},
+		}, nil
+	}
+	qc := NewQueryCoordMock(withValidShardLeaders(), SetQueryCoordShowPartitionsFunc(showPartitionsMock))
+	qc.updateState(commonpb.StateCode_Healthy)
+
 	task := &dropPartitionTask{
 		Condition: NewTaskCondition(ctx),
 		DropPartitionRequest: &milvuspb.DropPartitionRequest{
@@ -1103,9 +1117,10 @@ func TestDropPartitionTask(t *testing.T) {
 			CollectionName: collectionName,
 			PartitionName:  partitionName,
 		},
-		ctx:       ctx,
-		rootCoord: rc,
-		result:    nil,
+		ctx:        ctx,
+		rootCoord:  rc,
+		queryCoord: qc,
+		result:     nil,
 	}
 	task.PreExecute(ctx)
 

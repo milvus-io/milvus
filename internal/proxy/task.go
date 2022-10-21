@@ -800,9 +800,10 @@ func (cpt *createPartitionTask) PostExecute(ctx context.Context) error {
 type dropPartitionTask struct {
 	Condition
 	*milvuspb.DropPartitionRequest
-	ctx       context.Context
-	rootCoord types.RootCoord
-	result    *commonpb.Status
+	ctx        context.Context
+	rootCoord  types.RootCoord
+	queryCoord types.QueryCoord
+	result     *commonpb.Status
 }
 
 func (dpt *dropPartitionTask) TraceCtx() context.Context {
@@ -854,6 +855,23 @@ func (dpt *dropPartitionTask) PreExecute(ctx context.Context) error {
 
 	if err := validatePartitionTag(partitionTag, true); err != nil {
 		return err
+	}
+
+	collID, _ := globalMetaCache.GetCollectionID(ctx, dpt.GetCollectionName())
+	partID, _ := globalMetaCache.GetPartitionID(ctx, dpt.GetCollectionName(), dpt.GetPartitionName())
+
+	collLoaded, err := isCollectionLoaded(ctx, dpt.queryCoord, []int64{collID})
+	if err != nil {
+		return err
+	}
+	if collLoaded {
+		loaded, err := isPartitionLoaded(ctx, dpt.queryCoord, collID, []int64{partID})
+		if err != nil {
+			return err
+		}
+		if loaded {
+			return errors.New("partition cannot be dropped, partition is loaded, please release it first")
+		}
 	}
 
 	return nil

@@ -30,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
@@ -499,24 +498,11 @@ func (dit *dropIndexTask) PreExecute(ctx context.Context) error {
 	collID, _ := globalMetaCache.GetCollectionID(ctx, dit.CollectionName)
 	dit.collectionID = collID
 
-	// get all loading collections
-	resp, err := dit.queryCoord.ShowCollections(ctx, &querypb.ShowCollectionsRequest{
-		CollectionIDs: nil,
-	})
+	loaded, err := isCollectionLoaded(ctx, dit.queryCoord, []int64{collID})
 	if err != nil {
 		return err
 	}
-	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
-		return errors.New(resp.Status.Reason)
-	}
 
-	loaded := false
-	for _, loadedCollID := range resp.GetCollectionIDs() {
-		if collID == loadedCollID {
-			loaded = true
-			break
-		}
-	}
 	if loaded {
 		return errors.New("index cannot be dropped, collection is loaded, please release it first")
 	}
