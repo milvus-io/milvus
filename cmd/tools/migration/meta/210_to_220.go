@@ -5,10 +5,13 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 
 	"github.com/milvus-io/milvus/cmd/tools/migration/versions"
 )
@@ -96,6 +99,39 @@ func (meta *CollectionsMeta210) to220() (CollectionsMeta220, FieldIndexes210, er
 	return collections, fieldIndexes, nil
 }
 
+func (meta *CollectionLoadInfo210) to220() (CollectionLoadInfo220, PartitionLoadInfo220, error) {
+	collectionLoadInfos := make(CollectionLoadInfo220)
+	partitionLoadInfos := make(PartitionLoadInfo220)
+	for collectionID, loadInfo := range *meta {
+		if loadInfo.LoadPercentage < 100 {
+			continue
+		}
+
+		switch loadInfo.LoadType {
+		case querypb.LoadType_LoadCollection:
+			collectionLoadInfos[collectionID] = loadInfo
+		case querypb.LoadType_LoadPartition:
+			partitions, ok := partitionLoadInfos[collectionID]
+			if !ok {
+				partitions = make(map[int64]*model.PartitionLoadInfo)
+				partitionLoadInfos[collectionID] = partitions
+			}
+			for _, partitionID := range loadInfo.PartitionIDs {
+				partitions[partitionID] = &model.PartitionLoadInfo{
+					CollectionID:   collectionID,
+					PartitionID:    partitionID,
+					LoadType:       querypb.LoadType_LoadPartition,
+					LoadPercentage: 100,
+					Status:         querypb.LoadStatus_Loaded,
+					ReplicaNumber:  loadInfo.ReplicaNumber,
+				}
+			}
+		}
+	}
+
+	return collectionLoadInfos, partitionLoadInfos, nil
+}
+
 func combineToCollectionIndexesMeta220(fieldIndexes FieldIndexes210, collectionIndexes CollectionIndexesMeta210) (CollectionIndexesMeta220, error) {
 	indexes := make(CollectionIndexesMeta220)
 	for collectionID := range fieldIndexes {
@@ -176,6 +212,33 @@ func combineToSegmentIndexesMeta220(segmentIndexes SegmentIndexesMeta210, indexB
 	return segmentIndexModels, nil
 }
 
+func combineToLoadInfo220(collectionLoadInfo CollectionLoadInfo220, partitionLoadInto PartitionLoadInfo220, fieldIndexes FieldIndexes210) {
+	for collectionID, loadInfo := range collectionLoadInfo {
+		indexes, ok := fieldIndexes[collectionID]
+		if !ok {
+			log.Warn("release the collection without index", zap.Int64("collectionID", collectionID))
+			delete(collectionLoadInfo, collectionID)
+		}
+
+		for _, index := range indexes.indexes {
+			loadInfo.FieldIndexID[index.GetFiledID()] = index.GetIndexID()
+		}
+	}
+
+	for collectionID, partitions := range partitionLoadInto {
+		indexes, ok := fieldIndexes[collectionID]
+		if !ok {
+			log.Warn("release the collection without index", zap.Int64("collectionID", collectionID))
+			delete(collectionLoadInfo, collectionID)
+		}
+		for _, loadInfo := range partitions {
+			for _, index := range indexes.indexes {
+				loadInfo.FieldIndexID[index.GetFiledID()] = index.GetIndexID()
+			}
+		}
+	}
+}
+
 func From210To220(metas *Meta) (*Meta, error) {
 	if !metas.Version.EQ(versions.Version210) {
 		return nil, fmt.Errorf("version mismatch: %s", metas.Version.String())
@@ -196,6 +259,11 @@ func From210To220(metas *Meta) (*Meta, error) {
 	if err != nil {
 		return nil, err
 	}
+	collectionLoadInfos, partitionLoadInfos, err := metas.Meta210.CollectionLoadInfos.to220()
+	if err != nil {
+		return nil, err
+	}
+
 	fieldIndexes.Merge(fieldIndexes2)
 	collectionIndexes, err := combineToCollectionIndexesMeta220(fieldIndexes, metas.Meta210.CollectionIndexes)
 	if err != nil {
@@ -205,20 +273,24 @@ func From210To220(metas *Meta) (*Meta, error) {
 	if err != nil {
 		return nil, err
 	}
+	combineToLoadInfo220(collectionLoadInfos, partitionLoadInfos, fieldIndexes)
+
 	metas220 := &Meta{
 		SourceVersion: metas.Version,
 		Version:       versions.Version220,
 		Meta220: &All220{
-			TtCollections:     ttCollections,
-			Collections:       collections,
-			TtAliases:         ttAliases,
-			Aliases:           aliases,
-			TtPartitions:      make(TtPartitionsMeta220),
-			Partitions:        make(PartitionsMeta220),
-			TtFields:          make(TtFieldsMeta220),
-			Fields:            make(FieldsMeta220),
-			CollectionIndexes: collectionIndexes,
-			SegmentIndexes:    segmentIndexes,
+			TtCollections:       ttCollections,
+			Collections:         collections,
+			TtAliases:           ttAliases,
+			Aliases:             aliases,
+			TtPartitions:        make(TtPartitionsMeta220),
+			Partitions:          make(PartitionsMeta220),
+			TtFields:            make(TtFieldsMeta220),
+			Fields:              make(FieldsMeta220),
+			CollectionIndexes:   collectionIndexes,
+			SegmentIndexes:      segmentIndexes,
+			CollectionLoadInfos: collectionLoadInfos,
+			PartitionLoadInfos:  partitionLoadInfos,
 		},
 	}
 	return metas220, nil

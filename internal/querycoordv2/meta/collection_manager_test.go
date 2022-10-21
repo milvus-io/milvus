@@ -21,7 +21,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -243,46 +242,6 @@ func (suite *CollectionManagerSuite) TestRecover() {
 		exist := suite.loadPercentage[i] == 100
 		suite.Equal(exist, mgr.Exist(collection))
 	}
-
-	// Test recover from 2.1 meta store
-	collectionInfo := querypb.CollectionInfo{
-		CollectionID:  1000,
-		PartitionIDs:  []int64{100, 101},
-		LoadType:      querypb.LoadType_LoadCollection,
-		ReplicaNumber: 3,
-	}
-	value, err := proto.Marshal(&collectionInfo)
-	suite.NoError(err)
-	err = suite.kv.Save(CollectionMetaPrefixV1+"/1000", string(value))
-	suite.NoError(err)
-
-	collectionInfo = querypb.CollectionInfo{
-		CollectionID:  1001,
-		PartitionIDs:  []int64{102, 103},
-		LoadType:      querypb.LoadType_LoadPartition,
-		ReplicaNumber: 1,
-	}
-	value, err = proto.Marshal(&collectionInfo)
-	suite.NoError(err)
-	err = suite.kv.Save(CollectionMetaPrefixV1+"/1001", string(value))
-	suite.NoError(err)
-
-	suite.clearMemory()
-	err = mgr.Recover()
-	suite.NoError(err)
-
-	// Verify collection
-	suite.True(mgr.Exist(1000))
-	suite.Equal(querypb.LoadType_LoadCollection, mgr.GetLoadType(1000))
-	suite.EqualValues(3, mgr.GetReplicaNumber(1000))
-
-	// Verify partitions
-	suite.True(mgr.Exist(1001))
-	suite.Equal(querypb.LoadType_LoadPartition, mgr.GetLoadType(1001))
-	suite.EqualValues(1, mgr.GetReplicaNumber(1001))
-	suite.NotNil(mgr.GetPartition(102))
-	suite.NotNil(mgr.GetPartition(103))
-	suite.Len(mgr.getPartitionsByCollection(1001), 2)
 }
 
 func (suite *CollectionManagerSuite) loadAll() {

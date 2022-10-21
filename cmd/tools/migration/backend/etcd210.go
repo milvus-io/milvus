@@ -21,7 +21,9 @@ import (
 	"github.com/milvus-io/milvus/cmd/tools/migration/utils"
 	"github.com/milvus-io/milvus/cmd/tools/migration/versions"
 	"github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -293,6 +295,35 @@ func (b etcd210) loadLastDDLRecords() (meta.LastDDLRecords, error) {
 	return records, nil
 }
 
+func (b etcd210) loadLoadInfos() (meta.CollectionLoadInfo210, error) {
+	loadInfo := make(meta.CollectionLoadInfo210)
+	_, collectionValues, err := b.txn.LoadWithPrefix(legacy.CollectionLoadMetaPrefixV1)
+	if err != nil {
+		return nil, err
+	}
+	for _, value := range collectionValues {
+		collectionInfo := querypb.CollectionInfo{}
+		err = proto.Unmarshal([]byte(value), &collectionInfo)
+		if err != nil {
+			return nil, err
+		}
+		if collectionInfo.InMemoryPercentage < 100 {
+			continue
+		}
+		loadInfo[collectionInfo.CollectionID] = &model.CollectionLoadInfo{
+			CollectionID:         collectionInfo.GetCollectionID(),
+			PartitionIDs:         collectionInfo.GetPartitionIDs(),
+			ReleasedPartitionIDs: collectionInfo.GetReleasedPartitionIDs(),
+			LoadType:             collectionInfo.GetLoadType(),
+			LoadPercentage:       100,
+			Status:               querypb.LoadStatus_Loaded,
+			ReplicaNumber:        collectionInfo.GetReplicaNumber(),
+			FieldIndexID:         make(map[int64]int64),
+		}
+	}
+	return loadInfo, nil
+}
+
 func (b etcd210) Load() (*meta.Meta, error) {
 	ttCollections, err := b.loadTtCollections()
 	if err != nil {
@@ -326,17 +357,22 @@ func (b etcd210) Load() (*meta.Meta, error) {
 	if err != nil {
 		return nil, err
 	}
+	loadInfos, err := b.loadLoadInfos()
+	if err != nil {
+		return nil, err
+	}
 	return &meta.Meta{
 		Version: versions.Version210,
 		Meta210: &meta.All210{
-			TtCollections:     ttCollections,
-			Collections:       collections,
-			TtAliases:         ttAliases,
-			Aliases:           aliases,
-			CollectionIndexes: collectionIndexes,
-			SegmentIndexes:    segmentIndexes,
-			IndexBuildMeta:    indexBuildMeta,
-			LastDDLRecords:    lastDdlRecords,
+			TtCollections:       ttCollections,
+			Collections:         collections,
+			TtAliases:           ttAliases,
+			Aliases:             aliases,
+			CollectionIndexes:   collectionIndexes,
+			SegmentIndexes:      segmentIndexes,
+			IndexBuildMeta:      indexBuildMeta,
+			LastDDLRecords:      lastDdlRecords,
+			CollectionLoadInfos: loadInfos,
 		},
 	}, nil
 }

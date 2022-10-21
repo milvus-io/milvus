@@ -8,6 +8,7 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
@@ -32,6 +33,8 @@ type IndexBuildMeta210 map[UniqueID]*legacypb.IndexMeta // index_build_id -> ind
 
 type LastDDLRecords map[string]string // We don't care this since it didn't work.
 
+type CollectionLoadInfo210 map[UniqueID]*model.CollectionLoadInfo // collectionID -> CollectionLoadInfo
+
 type All210 struct {
 	TtAliases TtAliasesMeta210
 	Aliases   AliasesMeta210
@@ -44,6 +47,8 @@ type All210 struct {
 	IndexBuildMeta    IndexBuildMeta210
 
 	LastDDLRecords LastDDLRecords
+
+	CollectionLoadInfos CollectionLoadInfo210
 }
 
 func (meta *All210) GenerateSaves() map[string]string {
