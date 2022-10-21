@@ -171,17 +171,17 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 
 	ibNode.DisplayStatistics(seg2Upload)
 
-	segmentsToFlush := ibNode.Flush(fgMsg, seg2Upload, endPositions[0])
+	segmentsToSync := ibNode.Sync(fgMsg, seg2Upload, endPositions[0])
 
 	ibNode.WriteTimeTick(fgMsg.timeRange.timestampMax, seg2Upload)
 
 	res := flowGraphMsg{
-		deleteMessages:  fgMsg.deleteMessages,
-		timeRange:       fgMsg.timeRange,
-		startPositions:  fgMsg.startPositions,
-		endPositions:    fgMsg.endPositions,
-		segmentsToFlush: segmentsToFlush,
-		dropCollection:  fgMsg.dropCollection,
+		deleteMessages: fgMsg.deleteMessages,
+		timeRange:      fgMsg.timeRange,
+		startPositions: fgMsg.startPositions,
+		endPositions:   fgMsg.endPositions,
+		segmentsToSync: segmentsToSync,
+		dropCollection: fgMsg.dropCollection,
 	}
 
 	for _, sp := range spans {
@@ -211,6 +211,58 @@ func (ibNode *insertBufferNode) verifyInMsg(in []Msg) (*flowGraphMsg, bool) {
 	return fgMsg, ok
 }
 
+func (ibNode *insertBufferNode) GetBufferIfFull(segID UniqueID) (*BufferData, bool) {
+	if bd, ok := ibNode.insertBuffer.Load(segID); ok && bd.(*BufferData).effectiveCap() <= 0 {
+		return bd.(*BufferData), true
+	}
+
+	return nil, false
+}
+
+// GetBuffer returns buffer data for a segment, returns nil if segment's not in buffer
+func (ibNode *insertBufferNode) GetBuffer(segID UniqueID) *BufferData {
+	var buf *BufferData
+	if bd, ok := ibNode.insertBuffer.Load(segID); ok {
+		buf = bd.(*BufferData)
+	}
+	return buf
+}
+
+// CollectSegmentsToSync collects segments from flushChan from DataCoord
+func (ibNode *insertBufferNode) CollectSegmentsToSync() (flushedSegments, staleSegments []UniqueID) {
+	var (
+		maxBatch    = 10
+		targetBatch int
+	)
+
+	size := len(ibNode.flushChan)
+	if size >= maxBatch {
+		targetBatch = maxBatch
+	} else {
+		targetBatch = size
+	}
+
+	for i := 1; i <= targetBatch; i++ {
+		fmsg := <-ibNode.flushChan
+		if fmsg.flushed {
+			flushedSegments = append(flushedSegments, fmsg.segmentID)
+		} else {
+			staleSegments = append(staleSegments, fmsg.segmentID)
+		}
+	}
+
+	if targetBatch > 0 {
+		log.Info("(Manual Sync) batch processing flush messages",
+			zap.Int("batchSize", targetBatch),
+			zap.Int64s("flushedSegments", flushedSegments),
+			zap.Int64s("staleSegments", staleSegments),
+			zap.String("channel", ibNode.channelName),
+		)
+	}
+
+	return flushedSegments, staleSegments
+}
+
 // DisplayStatistics logs the statistic changes of segment in mem
 func (ibNode *insertBufferNode) DisplayStatistics(seg2Upload []UniqueID) {
 	// Find and return the smaller input
@@ -221,24 +273,22 @@ func (ibNode *insertBufferNode) DisplayStatistics(seg2Upload []UniqueID) {
 		return latter
 	}
 
+	// limit the logging size
 	displaySize := min(10, len(seg2Upload))
 
-	// Log the segment statistics in mem
 	for k, segID := range seg2Upload[:displaySize] {
-		bd, ok := ibNode.insertBuffer.Load(segID)
-		if !ok {
-			continue
+		if bd, ok := ibNode.insertBuffer.Load(segID); ok {
+			log.Info("segment buffer status",
+				zap.Int("no.", k),
+				zap.Int64("segmentID", segID),
+				zap.String("channel", ibNode.channelName),
+				zap.Int64("size", bd.(*BufferData).size),
+				zap.Int64("limit", bd.(*BufferData).limit))
 		}
-
-		log.Info("insert seg buffer status", zap.Int("No.", k),
-			zap.Int64("segmentID", segID),
-			zap.String("vchannel name", ibNode.channelName),
-			zap.Int64("buffer size", bd.(*BufferData).size),
-			zap.Int64("buffer limit", bd.(*BufferData).limit))
 	}
 }
 
-type flushTask struct {
+type syncTask struct {
 	buffer    *BufferData
 	segmentID UniqueID
 	flushed   bool
@@ -246,127 +296,107 @@ type flushTask struct {
 	auto      bool
 }
 
-func (ibNode *insertBufferNode) FillInSyncTasks(fgMsg *flowGraphMsg, seg2Upload []UniqueID) []flushTask {
-	var flushTasks []flushTask
+func (ibNode *insertBufferNode) FillInSyncTasks(fgMsg *flowGraphMsg, seg2Upload []UniqueID) map[UniqueID]*syncTask {
+	var syncTasks = make(map[UniqueID]*syncTask)
 
 	if fgMsg.dropCollection {
+		// All segments in the collection will be synced, not matter empty buffer or not
 		segmentIDs := ibNode.channel.listAllSegmentIDs()
-		log.Info("Receive drop collection request and flushing all segments",
-			zap.Any("segments", segmentIDs),
+		log.Info("Receive drop collection request and syncing all segments",
+			zap.Int64s("segments", segmentIDs),
 			zap.String("channel", ibNode.channelName),
 		)
-		flushTasks = make([]flushTask, 0, len(segmentIDs))
 
-		for _, seg2Flush := range segmentIDs {
-			var buf *BufferData
-			bd, ok := ibNode.insertBuffer.Load(seg2Flush)
-			if !ok {
-				buf = nil
-			} else {
-				buf = bd.(*BufferData)
-			}
-			flushTasks = append(flushTasks, flushTask{
-				buffer:    buf,
-				segmentID: seg2Flush,
+		for _, segID := range segmentIDs {
+			buf := ibNode.GetBuffer(segID)
+
+			syncTasks[segID] = &syncTask{
+				buffer:    buf, // nil is valid
+				segmentID: segID,
 				flushed:   false,
 				dropped:   true,
-			})
+			}
 		}
-		return flushTasks
+		return syncTasks
 	}
 
-	// Auto Syncing
-	for _, segToFlush := range seg2Upload {
-		if bd, ok := ibNode.insertBuffer.Load(segToFlush); ok && bd.(*BufferData).effectiveCap() <= 0 {
-			log.Info("(Auto Flush)",
-				zap.Int64("segment id", segToFlush),
-				zap.String("vchannel name", ibNode.channelName),
-			)
-			ibuffer := bd.(*BufferData)
+	// Auto Sync
+	for _, segID := range seg2Upload {
+		if ibuffer, ok := ibNode.GetBufferIfFull(segID); ok {
+			log.Info("(Auto Sync)",
+				zap.Int64("segmentID", segID),
+				zap.Int64("numRows", ibuffer.size),
+				zap.Int64("limit", ibuffer.limit),
+				zap.String("channel", ibNode.channelName))
 
-			flushTasks = append(flushTasks, flushTask{
+			syncTasks[segID] = &syncTask{
 				buffer:    ibuffer,
-				segmentID: segToFlush,
+				segmentID: segID,
 				flushed:   false,
 				dropped:   false,
 				auto:      true,
-			})
+			}
 		}
 	}
 
-	mergeFlushTask := func(segmentID UniqueID, setupTask func(task *flushTask)) {
-		// Merge auto & manual flush tasks with the same segment ID.
-		dup := false
-		for i, task := range flushTasks {
-			if task.segmentID == segmentID {
-				log.Info("merging flush task, updating flushed flag",
-					zap.Int64("segment ID", segmentID))
-				setupTask(&flushTasks[i])
-				dup = true
-				break
+	mergeSyncTask := func(segmentIDs []UniqueID, syncTasks map[UniqueID]*syncTask, setupTask func(task *syncTask)) {
+		// Merge auto & manual sync tasks with the same segment ID.
+		for _, segmentID := range segmentIDs {
+			if task, ok := syncTasks[segmentID]; ok {
+				setupTask(task)
+				log.Info("merging sync task, updating flushed flag",
+					zap.Int64("segmentID", segmentID),
+					zap.Bool("flushed", task.flushed),
+					zap.Bool("dropped", task.dropped),
+				)
+				return
 			}
-		}
-		// Load buffer and create new flush task if there's no existing flush task for this segment.
-		if !dup {
-			bd, ok := ibNode.insertBuffer.Load(segmentID)
-			var buf *BufferData
-			if ok {
-				buf = bd.(*BufferData)
-			}
-			task := flushTask{
-				buffer:    buf,
+
+			buf := ibNode.GetBuffer(segmentID)
+			task := syncTask{
+				buffer:    buf, // nil is valid
 				segmentID: segmentID,
-				dropped:   false,
 			}
 			setupTask(&task)
-			flushTasks = append(flushTasks, task)
+			syncTasks[segmentID] = &task
 		}
 	}
 
-	// Manual Syncing
-	select {
-	case fmsg := <-ibNode.flushChan:
-		log.Info("(Manual Flush) receiving flush message",
-			zap.Int64("segmentID", fmsg.segmentID),
-			zap.Int64("collectionID", fmsg.collectionID),
-			zap.Bool("flushed", fmsg.flushed),
-			zap.String("v-channel name", ibNode.channelName),
-		)
-		mergeFlushTask(fmsg.segmentID, func(task *flushTask) {
-			task.flushed = fmsg.flushed
-		})
-	default:
-	}
+	flushedSegments, staleSegments := ibNode.CollectSegmentsToSync()
+	mergeSyncTask(staleSegments, syncTasks, func(task *syncTask) {})
+	mergeSyncTask(flushedSegments, syncTasks, func(task *syncTask) {
+		task.flushed = true
+	})
 
 	// process drop partition
 	for _, partitionDrop := range fgMsg.dropPartitions {
 		segmentIDs := ibNode.channel.listPartitionSegments(partitionDrop)
-		log.Info("(Drop Partition) process drop partition",
+		log.Info("(Drop Partition) syncing all segments in the partition",
 			zap.Int64("collectionID", ibNode.channel.getCollectionID()),
 			zap.Int64("partitionID", partitionDrop),
 			zap.Int64s("segmentIDs", segmentIDs),
-			zap.String("v-channel name", ibNode.channelName),
+			zap.String("channel", ibNode.channelName),
 		)
-		for _, segID := range segmentIDs {
-			mergeFlushTask(segID, func(task *flushTask) {
-				task.flushed = true
-				task.dropped = true
-			})
-		}
+		mergeSyncTask(segmentIDs, syncTasks, func(task *syncTask) {
+			task.flushed = true
+			task.dropped = true
+		})
 	}
-	return flushTasks
+	return syncTasks
 }
 
-func (ibNode *insertBufferNode) Flush(fgMsg *flowGraphMsg, seg2Upload []UniqueID, endPosition *internalpb.MsgPosition) []UniqueID {
-	flushTasks := ibNode.FillInSyncTasks(fgMsg, seg2Upload)
-	segmentsToFlush := make([]UniqueID, 0, len(flushTasks))
+func (ibNode *insertBufferNode) Sync(fgMsg *flowGraphMsg, seg2Upload []UniqueID, endPosition *internalpb.MsgPosition) []UniqueID {
+	syncTasks := ibNode.FillInSyncTasks(fgMsg, seg2Upload)
+	segmentsToSync := make([]UniqueID, 0, len(syncTasks))
 
-	for _, task := range flushTasks {
-		log.Info("insertBufferNode flushing BufferData",
+	for _, task := range syncTasks {
+		log.Info("insertBufferNode syncing BufferData",
 			zap.Int64("segmentID", task.segmentID),
 			zap.Bool("flushed", task.flushed),
 			zap.Bool("dropped", task.dropped),
+			zap.Bool("auto", task.auto),
 			zap.Any("position", endPosition),
+			zap.String("channel", ibNode.channelName),
 		)
 
 		segStats, err := ibNode.channel.getSegmentStatslog(task.segmentID)
@@ -394,7 +424,7 @@ func (ibNode *insertBufferNode) Flush(fgMsg *flowGraphMsg, seg2Upload []UniqueID
 			log.Error(err.Error())
 			panic(err)
 		}
-		segmentsToFlush = append(segmentsToFlush, task.segmentID)
+		segmentsToSync = append(segmentsToSync, task.segmentID)
 		ibNode.insertBuffer.Delete(task.segmentID)
 		metrics.DataNodeFlushBufferCount.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID()), metrics.SuccessLabel).Inc()
 		metrics.DataNodeFlushBufferCount.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID()), metrics.TotalLabel).Inc()
@@ -403,7 +433,7 @@ func (ibNode *insertBufferNode) Flush(fgMsg *flowGraphMsg, seg2Upload []UniqueID
 			metrics.DataNodeAutoFlushBufferCount.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID()), metrics.FailLabel).Inc()
 		}
 	}
-	return segmentsToFlush
+	return segmentsToSync
 }
 
 // updateSegmentStates updates statistics in channel meta for the segments in insertMsgs.

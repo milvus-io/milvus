@@ -189,14 +189,14 @@ func (c *ChannelMeta) addSegment(req addSegmentReq) error {
 		return fmt.Errorf("mismatch collection, ID=%d", req.collID)
 	}
 	log.Info("adding segment",
-		zap.String("segment type", req.segType.String()),
-		zap.Int64("segment ID", req.segID),
-		zap.Int64("collection ID", req.collID),
-		zap.Int64("partition ID", req.partitionID),
-		zap.String("channel name", c.channelName),
-		zap.Any("start position", req.startPos),
-		zap.Any("end position", req.endPos),
-		zap.Uint64("recover ts", req.recoverTs),
+		zap.String("type", req.segType.String()),
+		zap.Int64("segmentID", req.segID),
+		zap.Int64("collectionID", req.collID),
+		zap.Int64("partitionID", req.partitionID),
+		zap.String("channel", c.channelName),
+		zap.Any("startPosition", req.startPos),
+		zap.Any("endPosition", req.endPos),
+		zap.Uint64("recoverTs", req.recoverTs),
 		zap.Bool("importing", req.importing),
 	)
 	seg := &Segment{
