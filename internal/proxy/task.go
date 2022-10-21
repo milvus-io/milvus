@@ -592,7 +592,7 @@ func (sct *showCollectionsTask) Execute(ctx context.Context) error {
 		}
 
 		resp, err := sct.queryCoord.ShowCollections(ctx, &querypb.ShowCollectionsRequest{
-			Base: commonpbutil.NewMsgBaseCopy(
+			Base: commonpbutil.UpdateMsgBase(
 				sct.Base,
 				commonpbutil.WithMsgType(commonpb.MsgType_ShowCollections),
 			),
@@ -1072,7 +1072,7 @@ func (spt *showPartitionsTask) Execute(ctx context.Context) error {
 			IDs2Names[partitionID] = partitionName
 		}
 		resp, err := spt.queryCoord.ShowPartitions(ctx, &querypb.ShowPartitionsRequest{
-			Base: commonpbutil.NewMsgBaseCopy(
+			Base: commonpbutil.UpdateMsgBase(
 				spt.Base,
 				commonpbutil.WithMsgType(commonpb.MsgType_ShowCollections),
 			),
@@ -1192,7 +1192,7 @@ func (ft *flushTask) Execute(ctx context.Context) error {
 			return err
 		}
 		flushReq := &datapb.FlushRequest{
-			Base: commonpbutil.NewMsgBaseCopy(
+			Base: commonpbutil.UpdateMsgBase(
 				ft.Base,
 				commonpbutil.WithMsgType(commonpb.MsgType_Flush),
 			),
@@ -1334,7 +1334,7 @@ func (lct *loadCollectionTask) Execute(ctx context.Context) (err error) {
 		return errors.New(errMsg)
 	}
 	request := &querypb.LoadCollectionRequest{
-		Base: commonpbutil.NewMsgBaseCopy(
+		Base: commonpbutil.UpdateMsgBase(
 			lct.Base,
 			commonpbutil.WithMsgType(commonpb.MsgType_LoadCollection),
 		),
@@ -1428,7 +1428,7 @@ func (rct *releaseCollectionTask) Execute(ctx context.Context) (err error) {
 	}
 	rct.collectionID = collID
 	request := &querypb.ReleaseCollectionRequest{
-		Base: commonpbutil.NewMsgBaseCopy(
+		Base: commonpbutil.UpdateMsgBase(
 			rct.Base,
 			commonpbutil.WithMsgType(commonpb.MsgType_ReleaseCollection),
 		),
@@ -1555,7 +1555,7 @@ func (lpt *loadPartitionsTask) Execute(ctx context.Context) error {
 		partitionIDs = append(partitionIDs, partitionID)
 	}
 	request := &querypb.LoadPartitionsRequest{
-		Base: commonpbutil.NewMsgBaseCopy(
+		Base: commonpbutil.UpdateMsgBase(
 			lpt.Base,
 			commonpbutil.WithMsgType(commonpb.MsgType_LoadPartitions),
 		),
@@ -1649,7 +1649,7 @@ func (rpt *releasePartitionsTask) Execute(ctx context.Context) (err error) {
 		partitionIDs = append(partitionIDs, partitionID)
 	}
 	request := &querypb.ReleasePartitionsRequest{
-		Base: commonpbutil.NewMsgBaseCopy(
+		Base: commonpbutil.UpdateMsgBase(
 			rpt.Base,
 			commonpbutil.WithMsgType(commonpb.MsgType_ReleasePartitions),
 		),

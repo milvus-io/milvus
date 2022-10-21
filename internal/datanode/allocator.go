@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/metautil"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -50,12 +51,12 @@ func newAllocator(s types.RootCoord) *allocator {
 func (alloc *allocator) allocID() (UniqueID, error) {
 	ctx := context.TODO()
 	resp, err := alloc.rootCoord.AllocID(ctx, &rootcoordpb.AllocIDRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_RequestID,
-			MsgID:     1, // GOOSE TODO
-			Timestamp: 0, // GOOSE TODO
-			SourceID:  Params.DataNodeCfg.GetNodeID(),
-		},
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_RequestID),
+			commonpbutil.WithMsgID(1),     // GOOSE TODO
+			commonpbutil.WithTimeStamp(0), // GOOSE TODO
+			commonpbutil.WithSourceID(Params.DataNodeCfg.GetNodeID()),
+		),
 		Count: 1,
 	})
 	if err != nil {
@@ -73,10 +74,10 @@ func (alloc *allocator) allocID() (UniqueID, error) {
 func (alloc *allocator) allocIDBatch(count uint32) (UniqueID, uint32, error) {
 	ctx := context.Background()
 	resp, err := alloc.rootCoord.AllocID(ctx, &rootcoordpb.AllocIDRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:  commonpb.MsgType_RequestID,
-			SourceID: Params.DataNodeCfg.GetNodeID(),
-		},
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_RequestID),
+			commonpbutil.WithSourceID(Params.DataNodeCfg.GetNodeID()),
+		),
 		Count: count,
 	})
 

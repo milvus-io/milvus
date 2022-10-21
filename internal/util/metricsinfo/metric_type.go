@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 )
 
 const (
@@ -52,9 +53,9 @@ func ConstructRequestByMetricType(metricType string) (*milvuspb.GetMetricsReques
 	}
 	//TODO:: switch metricType to different msgType and return err when metricType is not supported
 	return &milvuspb.GetMetricsRequest{
-		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_SystemInfo,
-		},
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_SystemInfo),
+		),
 		Request: string(binary),
 	}, nil
 }

@@ -33,6 +33,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	. "github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -70,9 +71,9 @@ func (broker *CoordinatorBroker) GetCollectionSchema(ctx context.Context, collec
 	defer cancel()
 
 	req := &milvuspb.DescribeCollectionRequest{
-		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_DescribeCollection,
-		},
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_GetDistribution),
+		),
 		CollectionID: collectionID,
 	}
 	resp, err := broker.rootCoord.DescribeCollection(ctx, req)
@@ -83,9 +84,9 @@ func (broker *CoordinatorBroker) GetPartitions(ctx context.Context, collectionID
 	ctx, cancel := context.WithTimeout(ctx, brokerRPCTimeout)
 	defer cancel()
 	req := &milvuspb.ShowPartitionsRequest{
-		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_ShowPartitions,
-		},
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_ShowPartitions),
+		),
 		CollectionID: collectionID,
 	}
 	resp, err := broker.rootCoord.ShowPartitions(ctx, req)
@@ -108,9 +109,9 @@ func (broker *CoordinatorBroker) GetRecoveryInfo(ctx context.Context, collection
 	defer cancel()
 
 	getRecoveryInfoRequest := &datapb.GetRecoveryInfoRequest{
-		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_GetRecoveryInfo,
-		},
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_GetRecoveryInfo),
+		),
 		CollectionID: collectionID,
 		PartitionID:  partitionID,
 	}

@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"go.uber.org/zap"
 )
 
@@ -218,10 +219,10 @@ func (c *SessionManager) execReCollectSegmentStats(ctx context.Context, nodeID i
 	ctx, cancel := context.WithTimeout(ctx, reCollectTimeout)
 	defer cancel()
 	resp, err := cli.ResendSegmentStats(ctx, &datapb.ResendSegmentStatsRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:  commonpb.MsgType_ResendSegmentStats,
-			SourceID: Params.DataCoordCfg.GetNodeID(),
-		},
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_ResendSegmentStats),
+			commonpbutil.WithSourceID(Params.DataCoordCfg.GetNodeID()),
+		),
 	})
 	if err := VerifyResponse(resp, err); err != nil {
 		log.Error("re-collect segment stats call failed",
@@ -253,10 +254,10 @@ func (c *SessionManager) GetCompactionState() map[int64]*datapb.CompactionStateR
 			ctx, cancel := context.WithTimeout(ctx, rpcCompactionTimeout)
 			defer cancel()
 			resp, err := cli.GetCompactionState(ctx, &datapb.CompactionStateRequest{
-				Base: &commonpb.MsgBase{
-					MsgType:  commonpb.MsgType_GetSystemConfigs,
-					SourceID: Params.DataCoordCfg.GetNodeID(),
-				},
+				Base: commonpbutil.NewMsgBase(
+					commonpbutil.WithMsgType(commonpb.MsgType_GetSystemConfigs),
+					commonpbutil.WithSourceID(Params.DataCoordCfg.GetNodeID()),
+				),
 			})
 			if err != nil {
 				log.Info("Get State failed", zap.Error(err))

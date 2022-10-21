@@ -50,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/importutil"
 	"github.com/milvus-io/milvus/internal/util/logutil"
@@ -476,12 +477,12 @@ func (node *DataNode) Start() error {
 	log.Debug("start id allocator done", zap.String("role", typeutil.DataNodeRole))
 
 	rep, err := node.rootCoord.AllocTimestamp(node.ctx, &rootcoordpb.AllocTimestampRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_RequestTSO,
-			MsgID:     0,
-			Timestamp: 0,
-			SourceID:  Params.DataNodeCfg.GetNodeID(),
-		},
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_RequestTSO),
+			commonpbutil.WithMsgID(0),
+			commonpbutil.WithTimeStamp(0),
+			commonpbutil.WithSourceID(Params.DataNodeCfg.GetNodeID()),
+		),
 		Count: 1,
 	})
 	if err != nil || rep.Status.ErrorCode != commonpb.ErrorCode_Success {
@@ -998,12 +999,12 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 	// get a timestamp for all the rows
 	// Ignore cancellation from parent context.
 	rep, err := node.rootCoord.AllocTimestamp(newCtx, &rootcoordpb.AllocTimestampRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_RequestTSO,
-			MsgID:     0,
-			Timestamp: 0,
-			SourceID:  Params.DataNodeCfg.GetNodeID(),
-		},
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_RequestTSO),
+			commonpbutil.WithMsgID(0),
+			commonpbutil.WithTimeStamp(0),
+			commonpbutil.WithSourceID(Params.DataNodeCfg.GetNodeID()),
+		),
 		Count: 1,
 	})
 
@@ -1232,23 +1233,22 @@ func importFlushReqFunc(node *DataNode, req *datapb.ImportTaskRequest, res *root
 		err = retry.Do(context.Background(), func() error {
 			// Ask DataCoord to save binlog path and add segment to the corresponding DataNode flow graph.
 			resp, err := node.dataCoord.SaveImportSegment(context.Background(), &datapb.SaveImportSegmentRequest{
-				Base: &commonpb.MsgBase{
-					SourceID: Params.DataNodeCfg.GetNodeID(),
-					// Pass current timestamp downstream.
-					Timestamp: ts,
-				},
+				Base: commonpbutil.NewMsgBase(
+					commonpbutil.WithTimeStamp(ts), // Pass current timestamp downstream.
+					commonpbutil.WithSourceID(Params.DataNodeCfg.GetNodeID()),
+				),
 				SegmentId:    segmentID,
 				ChannelName:  targetChName,
 				CollectionId: req.GetImportTask().GetCollectionId(),
 				PartitionId:  req.GetImportTask().GetPartitionId(),
 				RowNum:       int64(rowNum),
 				SaveBinlogPathReq: &datapb.SaveBinlogPathsRequest{
-					Base: &commonpb.MsgBase{
-						MsgType:   0,
-						MsgID:     0,
-						Timestamp: ts,
-						SourceID:  Params.DataNodeCfg.GetNodeID(),
-					},
+					Base: commonpbutil.NewMsgBase(
+						commonpbutil.WithMsgType(0),
+						commonpbutil.WithMsgID(0),
+						commonpbutil.WithTimeStamp(ts),
+						commonpbutil.WithSourceID(Params.DataNodeCfg.GetNodeID()),
+					),
 					SegmentID:           segmentID,
 					CollectionID:        req.GetImportTask().GetCollectionId(),
 					Field2BinlogPaths:   fieldInsert,

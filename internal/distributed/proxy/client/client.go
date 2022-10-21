@@ -126,7 +126,7 @@ func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResp
 // InvalidateCollectionMetaCache invalidate collection meta cache
 func (c *Client) InvalidateCollectionMetaCache(ctx context.Context, req *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
 	req = typeutil.Clone(req)
-	commonpbutil.SetTargetID(req.GetBase(), c.grpcClient.GetNodeID())
+	commonpbutil.UpdateMsgBase(req.GetBase(), commonpbutil.FillMsgBaseFromClient(c.grpcClient.GetNodeID()))
 	ret, err := c.grpcClient.ReCall(ctx, func(client proxypb.ProxyClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -141,7 +141,7 @@ func (c *Client) InvalidateCollectionMetaCache(ctx context.Context, req *proxypb
 
 func (c *Client) InvalidateCredentialCache(ctx context.Context, req *proxypb.InvalidateCredCacheRequest) (*commonpb.Status, error) {
 	req = typeutil.Clone(req)
-	commonpbutil.SetTargetID(req.GetBase(), c.grpcClient.GetNodeID())
+	commonpbutil.UpdateMsgBase(req.GetBase(), commonpbutil.FillMsgBaseFromClient(c.grpcClient.GetNodeID()))
 	ret, err := c.grpcClient.ReCall(ctx, func(client proxypb.ProxyClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -156,7 +156,7 @@ func (c *Client) InvalidateCredentialCache(ctx context.Context, req *proxypb.Inv
 
 func (c *Client) UpdateCredentialCache(ctx context.Context, req *proxypb.UpdateCredCacheRequest) (*commonpb.Status, error) {
 	req = typeutil.Clone(req)
-	commonpbutil.SetTargetID(req.GetBase(), c.grpcClient.GetNodeID())
+	commonpbutil.UpdateMsgBase(req.GetBase(), commonpbutil.FillMsgBaseFromClient(c.grpcClient.GetNodeID()))
 	ret, err := c.grpcClient.ReCall(ctx, func(client proxypb.ProxyClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -171,7 +171,7 @@ func (c *Client) UpdateCredentialCache(ctx context.Context, req *proxypb.UpdateC
 
 func (c *Client) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.RefreshPolicyInfoCacheRequest) (*commonpb.Status, error) {
 	req = typeutil.Clone(req)
-	commonpbutil.SetTargetID(req.GetBase(), c.grpcClient.GetNodeID())
+	commonpbutil.UpdateMsgBase(req.GetBase(), commonpbutil.FillMsgBaseFromClient(c.grpcClient.GetNodeID()))
 	ret, err := c.grpcClient.ReCall(ctx, func(client proxypb.ProxyClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -188,7 +188,7 @@ func (c *Client) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.Refres
 // because it only obtains the metrics of Proxy, not including the topological metrics of Query cluster and Data cluster.
 func (c *Client) GetProxyMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	req = typeutil.Clone(req)
-	commonpbutil.SetTargetID(req.GetBase(), c.grpcClient.GetNodeID())
+	commonpbutil.UpdateMsgBase(req.GetBase(), commonpbutil.FillMsgBaseFromClient(c.grpcClient.GetNodeID()))
 	ret, err := c.grpcClient.ReCall(ctx, func(client proxypb.ProxyClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -204,7 +204,7 @@ func (c *Client) GetProxyMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 // SetRates notifies Proxy to limit rates of requests.
 func (c *Client) SetRates(ctx context.Context, req *proxypb.SetRatesRequest) (*commonpb.Status, error) {
 	req = typeutil.Clone(req)
-	commonpbutil.SetTargetID(req.GetBase(), c.grpcClient.GetNodeID())
+	commonpbutil.UpdateMsgBase(req.GetBase(), commonpbutil.FillMsgBaseFromClient(c.grpcClient.GetNodeID()))
 	ret, err := c.grpcClient.ReCall(ctx, func(client proxypb.ProxyClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()

@@ -8,6 +8,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 
@@ -60,7 +61,7 @@ func (b *ServerBroker) ReleaseCollection(ctx context.Context, collectionID Uniqu
 	log.Info("releasing collection", zap.Int64("collection", collectionID))
 
 	resp, err := b.s.queryCoord.ReleaseCollection(ctx, &querypb.ReleaseCollectionRequest{
-		Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_ReleaseCollection},
+		Base:         commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_ReleaseCollection)),
 		CollectionID: collectionID,
 		NodeID:       b.s.session.ServerID,
 	})
@@ -78,10 +79,10 @@ func (b *ServerBroker) ReleaseCollection(ctx context.Context, collectionID Uniqu
 
 func (b *ServerBroker) GetQuerySegmentInfo(ctx context.Context, collectionID int64, segIDs []int64) (retResp *querypb.GetSegmentInfoResponse, retErr error) {
 	resp, err := b.s.queryCoord.GetSegmentInfo(ctx, &querypb.GetSegmentInfoRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:  commonpb.MsgType_GetSegmentState,
-			SourceID: b.s.session.ServerID,
-		},
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_GetSegmentState),
+			commonpbutil.WithSourceID(b.s.session.ServerID),
+		),
 		CollectionID: collectionID,
 		SegmentIDs:   segIDs,
 	})
@@ -169,10 +170,10 @@ func (b *ServerBroker) ReleaseSegRefLock(ctx context.Context, taskID int64, segI
 
 func (b *ServerBroker) Flush(ctx context.Context, cID int64, segIDs []int64) error {
 	resp, err := b.s.dataCoord.Flush(ctx, &datapb.FlushRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:  commonpb.MsgType_Flush,
-			SourceID: b.s.session.ServerID,
-		},
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_Flush),
+			commonpbutil.WithSourceID(b.s.session.ServerID),
+		),
 		DbID:         0,
 		SegmentIDs:   segIDs,
 		CollectionID: cID,

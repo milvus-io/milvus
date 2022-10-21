@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -78,10 +79,10 @@ func packLoadSegmentRequest(
 	}
 
 	return &querypb.LoadSegmentsRequest{
-		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_LoadSegments,
-			MsgID:   task.ID(),
-		},
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_LoadSegments),
+			commonpbutil.WithMsgID(task.ID()),
+		),
 		Infos:          []*querypb.SegmentLoadInfo{loadInfo},
 		Schema:         schema,
 		LoadMeta:       loadMeta,
@@ -96,10 +97,10 @@ func packLoadSegmentRequest(
 
 func packReleaseSegmentRequest(task *SegmentTask, action *SegmentAction) *querypb.ReleaseSegmentsRequest {
 	return &querypb.ReleaseSegmentsRequest{
-		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_ReleaseSegments,
-			MsgID:   task.ID(),
-		},
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_ReleaseSegments),
+			commonpbutil.WithMsgID(task.ID()),
+		),
 
 		NodeID:       action.Node(),
 		CollectionID: task.CollectionID(),
@@ -126,10 +127,10 @@ func packSubDmChannelRequest(
 	channel *meta.DmChannel,
 ) *querypb.WatchDmChannelsRequest {
 	return &querypb.WatchDmChannelsRequest{
-		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_WatchDmChannels,
-			MsgID:   task.ID(),
-		},
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_WatchDmChannels),
+			commonpbutil.WithMsgID(task.ID()),
+		),
 		NodeID:       action.Node(),
 		CollectionID: task.CollectionID(),
 		Infos:        []*datapb.VchannelInfo{channel.VchannelInfo},
@@ -168,10 +169,10 @@ func fillSubDmChannelRequest(
 
 func packUnsubDmChannelRequest(task *ChannelTask, action Action) *querypb.UnsubDmChannelRequest {
 	return &querypb.UnsubDmChannelRequest{
-		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_UnsubDmChannel,
-			MsgID:   task.ID(),
-		},
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_UnsubDmChannel),
+			commonpbutil.WithMsgID(task.ID()),
+		),
 		NodeID:       action.Node(),
 		CollectionID: task.CollectionID(),
 		ChannelName:  task.Channel(),

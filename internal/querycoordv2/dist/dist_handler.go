@@ -31,6 +31,7 @@ import (
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
+	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
 )
@@ -72,7 +73,9 @@ func (dh *distHandler) start(ctx context.Context) {
 			dh.mu.Lock()
 			cctx, cancel := context.WithTimeout(ctx, distReqTimeout)
 			resp, err := dh.client.GetDataDistribution(cctx, dh.nodeID, &querypb.GetDataDistributionRequest{
-				Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_GetDistribution},
+				Base: commonpbutil.NewMsgBase(
+					commonpbutil.WithMsgType(commonpb.MsgType_GetDistribution),
+				),
 			})
 			cancel()
 
@@ -195,7 +198,9 @@ func (dh *distHandler) getDistribution(ctx context.Context) {
 	defer dh.mu.Unlock()
 	cctx, cancel := context.WithTimeout(ctx, distReqTimeout)
 	resp, err := dh.client.GetDataDistribution(cctx, dh.nodeID, &querypb.GetDataDistributionRequest{
-		Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_GetDistribution},
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_GetDistribution),
+		),
 	})
 	cancel()
 

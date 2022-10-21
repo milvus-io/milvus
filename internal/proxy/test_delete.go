@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
+	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -72,7 +73,7 @@ func (dt *deleteTask) SetTs(ts Timestamp) {
 }
 
 func (dt *deleteTask) OnEnqueue() error {
-	dt.DeleteRequest.Base = &commonpb.MsgBase{}
+	dt.DeleteRequest.Base = commonpbutil.NewMsgBase()
 	return nil
 }
 
@@ -266,12 +267,12 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 		_, ok := result[key]
 		if !ok {
 			sliceRequest := internalpb.DeleteRequest{
-				Base: &commonpb.MsgBase{
-					MsgType:   commonpb.MsgType_Delete,
-					MsgID:     dt.Base.MsgID,
-					Timestamp: ts,
-					SourceID:  proxyID,
-				},
+				Base: commonpbutil.NewMsgBase(
+					commonpbutil.WithMsgType(commonpb.MsgType_Delete),
+					commonpbutil.WithMsgID(dt.Base.MsgID),
+					commonpbutil.WithTimeStamp(ts),
+					commonpbutil.WithSourceID(proxyID),
+				),
 				CollectionID:   collectionID,
 				PartitionID:    partitionID,
 				CollectionName: collectionName,

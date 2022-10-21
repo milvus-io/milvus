@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"go.uber.org/zap"
 )
 
@@ -123,10 +124,10 @@ func (c *Cluster) Flush(ctx context.Context, segments []*datapb.SegmentInfo, mar
 			continue
 		}
 		req := &datapb.FlushSegmentsRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:  commonpb.MsgType_Flush,
-				SourceID: Params.DataCoordCfg.GetNodeID(),
-			},
+			Base: commonpbutil.NewMsgBase(
+				commonpbutil.WithMsgType(commonpb.MsgType_Flush),
+				commonpbutil.WithSourceID(Params.DataCoordCfg.GetNodeID()),
+			),
 			CollectionID:   collectionID,
 			SegmentIDs:     segments,
 			MarkSegmentIDs: marks,

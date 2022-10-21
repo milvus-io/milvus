@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/metautil"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
@@ -637,12 +638,12 @@ func getFieldBinlogs(fieldID UniqueID, binlogs []*datapb.FieldBinlog) *datapb.Fi
 func dropVirtualChannelFunc(dsService *dataSyncService, opts ...retry.Option) flushAndDropFunc {
 	return func(packs []*segmentFlushPack) {
 		req := &datapb.DropVirtualChannelRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   0, //TODO msg type
-				MsgID:     0, //TODO msg id
-				Timestamp: 0, //TODO time stamp
-				SourceID:  Params.DataNodeCfg.GetNodeID(),
-			},
+			Base: commonpbutil.NewMsgBase(
+				commonpbutil.WithMsgType(0),   //TODO msg type
+				commonpbutil.WithMsgID(0),     //TODO msg id
+				commonpbutil.WithTimeStamp(0), //TODO time stamp
+				commonpbutil.WithSourceID(Params.DataNodeCfg.GetNodeID()),
+			),
 			ChannelName: dsService.vchannelName,
 		}
 
@@ -790,12 +791,12 @@ func flushNotifyFunc(dsService *dataSyncService, opts ...retry.Option) notifyMet
 		)
 
 		req := &datapb.SaveBinlogPathsRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   0, //TODO msg type
-				MsgID:     0, //TODO msg id
-				Timestamp: 0, //TODO time stamp
-				SourceID:  Params.DataNodeCfg.GetNodeID(),
-			},
+			Base: commonpbutil.NewMsgBase(
+				commonpbutil.WithMsgType(0),
+				commonpbutil.WithMsgID(0),
+				commonpbutil.WithTimeStamp(0),
+				commonpbutil.WithSourceID(Params.DataNodeCfg.GetNodeID()),
+			),
 			SegmentID:           pack.segmentID,
 			CollectionID:        dsService.collectionID,
 			Field2BinlogPaths:   fieldInsert,

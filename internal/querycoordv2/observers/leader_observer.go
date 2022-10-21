@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"go.uber.org/zap"
 )
 
@@ -149,9 +150,9 @@ func (o *LeaderObserver) sync(ctx context.Context, leaderView *meta.LeaderView, 
 		zap.String("channel", leaderView.Channel),
 	)
 	req := &querypb.SyncDistributionRequest{
-		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_SyncDistribution,
-		},
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_SyncDistribution),
+		),
 		CollectionID: leaderView.CollectionID,
 		Channel:      leaderView.Channel,
 		Actions:      diffs,
