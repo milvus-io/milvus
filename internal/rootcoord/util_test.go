@@ -131,3 +131,22 @@ func Test_getTravelTs(t *testing.T) {
 		})
 	}
 }
+
+func Test_isMaxTs(t *testing.T) {
+	type args struct {
+		ts Timestamp
+	}
+	tests := []struct {
+		name string
+		args args
+		want bool
+	}{
+		{args: args{ts: typeutil.MaxTimestamp}, want: true},
+		{args: args{ts: typeutil.ZeroTimestamp}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equalf(t, tt.want, isMaxTs(tt.args.ts), "isMaxTs(%v)", tt.args.ts)
+		})
+	}
+}

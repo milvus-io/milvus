@@ -133,3 +133,7 @@ func getTravelTs(req TimeTravelRequest) Timestamp {
 	}
 	return req.GetTimeStamp()
 }
+
+func isMaxTs(ts Timestamp) bool {
+	return ts == typeutil.MaxTimestamp
+}
