@@ -15,6 +15,7 @@
 # limitations under the License.
 
 echo "Stopping milvus..."
-kill -9 $(ps -e | grep milvus | awk '{print $1}')
+PROCESS=$(ps -e | grep milvus | grep -v grep | awk '{print $1}')
+kill -9 $PROCESS
 echo "Milvus stopped"
 
