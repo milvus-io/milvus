@@ -9,7 +9,6 @@ from deploy.base import TestDeployBase
 from deploy.common import gen_index_param, gen_search_param, get_collections
 from utils.util_log import test_log as log
 
-
 default_nb = ct.default_nb
 default_nq = ct.default_nq
 default_dim = ct.default_dim
@@ -25,6 +24,7 @@ default_search_exp = "int64 >= 0"
 default_term_expr = f'{ct.default_int64_field_name} in [0, 1]'
 
 pymilvus_version = pymilvus.__version__
+
 
 class TestActionSecondDeployment(TestDeployBase):
     """ Test case of action before reinstall """
@@ -52,26 +52,28 @@ class TestActionSecondDeployment(TestDeployBase):
         is_binary = False
         if "BIN" in name:
             is_binary = True
-        collection_w = self.init_collection_general(
-            insert_data=False, name=name, is_binary=is_binary, active_trace=True)[0]
+        collection_w, _ = self.collection_wrap.init_collection(name=name)
         schema = collection_w.schema
-        data_type = [field.dtype.name for field in schema.fields]
+        data_type = [field.dtype for field in schema.fields]
         field_name = [field.name for field in schema.fields]
-        type_field_map = dict(zip(data_type,field_name))
+        type_field_map = dict(zip(data_type, field_name))
         if is_binary:
             default_index_field = ct.default_binary_vec_field_name
             vector_index_type = "BIN_IVF_FLAT"
         else:
             default_index_field = ct.default_float_vec_field_name
-            vector_index_type = "IVF_FLAT"       
+            vector_index_type = "IVF_FLAT"
 
-        binary_vector_index_types = [index.params["index_type"] for index in collection_w.indexes if index.field_name == type_field_map.get("BINARY_VECTOR", "")]
-        float_vector_index_types = [index.params["index_type"] for index in collection_w.indexes if index.field_name == type_field_map.get("FLOAT_VECTOR", "")]
-        index_names = [index.index_name for index in collection_w.indexes] # used to drop index
+        binary_vector_index_types = [index.params["index_type"] for index in collection_w.indexes if
+                                     index.field_name == type_field_map.get(100, "")]
+        float_vector_index_types = [index.params["index_type"] for index in collection_w.indexes if
+                                    index.field_name == type_field_map.get(101, "")]
+        index_field_map = dict([(index.field_name, index.index_name) for index in collection_w.indexes])
+        index_names = [index.index_name for index in collection_w.indexes]  # used to drop index
         vector_index_types = binary_vector_index_types + float_vector_index_types
         if len(vector_index_types) > 0:
             vector_index_type = vector_index_types[0]
- 
+
         try:
             replicas, _ = collection_w.get_replicas(enable_traceback=False)
             replicas_loaded = len(replicas.groups)
@@ -86,32 +88,38 @@ class TestActionSecondDeployment(TestDeployBase):
         else:
             vectors_to_search = cf.gen_vectors(default_nb, default_dim)
             default_search_field = ct.default_float_vec_field_name
-        search_params = gen_search_param(vector_index_type)[0]        
-        
+        search_params = gen_search_param(vector_index_type)[0]
+
         # load if not loaded
         if replicas_loaded == 0:
+            default_index_param = gen_index_param(vector_index_type)
+            collection_w.create_index(default_index_field, default_index_param,
+                                      index_name=index_field_map[default_index_field])
+            collection_w.create_index(default_string_field_name, {},
+                                      index_name=index_field_map[default_string_field_name])
+
             collection_w.load()
-        
+
         # search and query
         if "empty" in name:
             # if the collection is empty, the search result should be empty, so no need to check            
             check_task = None
         else:
             check_task = CheckTasks.check_search_results
-        
+
         collection_w.search(vectors_to_search[:default_nq], default_search_field,
                             search_params, default_limit,
                             default_search_exp,
                             output_fields=[ct.default_int64_field_name],
                             check_task=check_task,
                             check_items={"nq": default_nq,
-                                        "limit": default_limit})
+                                         "limit": default_limit})
         if "empty" in name:
             check_task = None
         else:
             check_task = CheckTasks.check_query_not_empty
         collection_w.query(default_term_expr, output_fields=[ct.default_int64_field_name],
-                        check_task=check_task)
+                           check_task=check_task)
 
         # flush
         if pymilvus_version >= "2.2.0":
@@ -130,14 +138,14 @@ class TestActionSecondDeployment(TestDeployBase):
                             output_fields=[ct.default_int64_field_name],
                             check_task=check_task,
                             check_items={"nq": default_nq,
-                                        "limit": default_limit})
+                                         "limit": default_limit})
         if "empty" in name:
             check_task = None
         else:
             check_task = CheckTasks.check_query_not_empty
         collection_w.query(default_term_expr, output_fields=[ct.default_int64_field_name],
-                        check_task=check_task)
-        
+                           check_task=check_task)
+
         # insert data and flush
         for i in range(2):
             self.init_collection_general(insert_data=True, is_binary=is_binary, nb=data_size,
@@ -146,7 +154,7 @@ class TestActionSecondDeployment(TestDeployBase):
             collection_w.flush()
         else:
             collection_w.collection.num_entities
-        
+
         # delete data
         delete_expr = f"{ct.default_int64_field_name} in [0,1,2,3,4,5,6,7,8,9]"
         collection_w.delete(expr=delete_expr)
@@ -158,55 +166,64 @@ class TestActionSecondDeployment(TestDeployBase):
                             output_fields=[ct.default_int64_field_name],
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
-                                        "limit": default_limit})
+                                         "limit": default_limit})
         collection_w.query(default_term_expr, output_fields=[ct.default_int64_field_name],
-                        check_task=CheckTasks.check_query_not_empty)
-        
+                           check_task=CheckTasks.check_query_not_empty)
+
         # drop index if exist
         if len(index_names) > 0:
             for index_name in index_names:
+                collection_w.release()
                 collection_w.drop_index(index_name=index_name)
-            # search and query after dropping index
+
+            default_index_param = gen_index_param(vector_index_type)
+            collection_w.create_index(default_index_field, default_index_param,
+                                      index_name=index_field_map[default_index_field])
+            collection_w.create_index(default_string_field_name, {},
+                                      index_name=index_field_map[default_string_field_name])
+
+            collection_w.load()
             collection_w.search(vectors_to_search[:default_nq], default_search_field,
+                                search_params, default_limit,
+                                default_search_exp,
+                                output_fields=[ct.default_int64_field_name],
+                                check_task=CheckTasks.check_search_results,
+                                check_items={"nq": default_nq,
+                                             "limit": default_limit})
+            collection_w.query(default_term_expr, output_fields=[ct.default_int64_field_name],
+                               check_task=CheckTasks.check_query_not_empty)
+
+            # create index
+        default_index_param = gen_index_param(vector_index_type)
+        collection_w.create_index(default_index_field, default_index_param,
+                                  index_name=index_field_map[default_index_field])
+        collection_w.create_index(default_string_field_name, {}, index_name=index_field_map[default_string_field_name])
+
+        # search and query
+        collection_w.search(vectors_to_search[:default_nq], default_search_field,
                             search_params, default_limit,
                             default_search_exp,
                             output_fields=[ct.default_int64_field_name],
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
-                                        "limit": default_limit})
-            collection_w.query(default_term_expr, output_fields=[ct.default_int64_field_name],
-                            check_task=CheckTasks.check_query_not_empty)        
-
-        # create index
-        default_index_param = gen_index_param(vector_index_type)
-        collection_w.create_index(default_index_field, default_index_param, index_name=cf.gen_unique_str())    
-        collection_w.create_index(default_string_field_name, {}, index_name=cf.gen_unique_str())
-
-        # search and query
-        collection_w.search(vectors_to_search[:default_nq], default_search_field,
-                        search_params, default_limit,
-                        default_search_exp,
-                        output_fields=[ct.default_int64_field_name],
-                        check_task=CheckTasks.check_search_results,
-                        check_items={"nq": default_nq,
-                                    "limit": default_limit})
+                                         "limit": default_limit})
         collection_w.query(default_term_expr, output_fields=[ct.default_int64_field_name],
-                        check_task=CheckTasks.check_query_not_empty)          
+                           check_task=CheckTasks.check_query_not_empty)
 
         # release and reload with changed replicas
         collection_w.release()
         replica_number = 1
-        if replicas_loaded in [0,1] and len(ms.query_nodes)>=2 :
+        if replicas_loaded in [0, 1] and len(ms.query_nodes) >= 2:
             replica_number = 2
         collection_w.load(replica_number=replica_number)
 
         # search and query
         collection_w.search(vectors_to_search[:default_nq], default_search_field,
-                        search_params, default_limit,
-                        default_search_exp,
-                        output_fields=[ct.default_int64_field_name],
-                        check_task=CheckTasks.check_search_results,
-                        check_items={"nq": default_nq,
-                                    "limit": default_limit})
+                            search_params, default_limit,
+                            default_search_exp,
+                            output_fields=[ct.default_int64_field_name],
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "limit": default_limit})
         collection_w.query(default_term_expr, output_fields=[ct.default_int64_field_name],
-                        check_task=CheckTasks.check_query_not_empty)
+                           check_task=CheckTasks.check_query_not_empty)
