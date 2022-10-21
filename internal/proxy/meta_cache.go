@@ -63,7 +63,7 @@ type Cache interface {
 	GetShards(ctx context.Context, withCache bool, collectionName string) (map[string][]nodeInfo, error)
 	ClearShards(collectionName string)
 	RemoveCollection(ctx context.Context, collectionName string)
-	RemoveCollectionsByID(ctx context.Context, collectionID UniqueID)
+	RemoveCollectionsByID(ctx context.Context, collectionID UniqueID) []string
 	RemovePartition(ctx context.Context, collectionName string, partitionName string)
 
 	// GetCredentialInfo operate credential cache
@@ -515,14 +515,17 @@ func (m *MetaCache) RemoveCollection(ctx context.Context, collectionName string)
 	delete(m.collInfo, collectionName)
 }
 
-func (m *MetaCache) RemoveCollectionsByID(ctx context.Context, collectionID UniqueID) {
+func (m *MetaCache) RemoveCollectionsByID(ctx context.Context, collectionID UniqueID) []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	var collNames []string
 	for k, v := range m.collInfo {
 		if v.collID == collectionID {
 			delete(m.collInfo, k)
+			collNames = append(collNames, k)
 		}
 	}
+	return collNames
 }
 
 func (m *MetaCache) RemovePartition(ctx context.Context, collectionName, partitionName string) {

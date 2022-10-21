@@ -50,9 +50,10 @@ func (a *alterCollectionTask) Execute(ctx context.Context) error {
 	})
 
 	redoTask.AddSyncStep(&expireCacheStep{
-		baseStep:     baseStep{core: a.core},
-		collectionID: oldColl.CollectionID,
-		ts:           ts,
+		baseStep:        baseStep{core: a.core},
+		collectionNames: []string{oldColl.Name},
+		collectionID:    oldColl.CollectionID,
+		ts:              ts,
 	})
 
 	a.Req.CollectionID = oldColl.CollectionID

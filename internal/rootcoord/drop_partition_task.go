@@ -63,7 +63,7 @@ func (t *dropPartitionTask) Execute(ctx context.Context) error {
 	})
 	redoTask.AddSyncStep(&expireCacheStep{
 		baseStep:        baseStep{core: t.core},
-		collectionNames: []string{t.Req.GetCollectionName()},
+		collectionNames: []string{t.collMeta.Name},
 		collectionID:    t.collMeta.CollectionID,
 		ts:              t.GetTs(),
 	})
