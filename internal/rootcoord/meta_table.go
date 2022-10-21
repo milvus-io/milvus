@@ -235,8 +235,33 @@ func (mt *MetaTable) RemoveCollection(ctx context.Context, collectionID UniqueID
 	return nil
 }
 
+func filterUnavailable(coll *model.Collection) *model.Collection {
+	clone := coll.Clone()
+	// pick available partitions.
+	clone.Partitions = nil
+	for _, partition := range coll.Partitions {
+		if partition.Available() {
+			clone.Partitions = append(clone.Partitions, partition.Clone())
+		}
+	}
+	return clone
+}
+
+// getLatestCollectionByIDInternal should be called with ts = typeutil.MaxTimestamp
+func (mt *MetaTable) getLatestCollectionByIDInternal(ctx context.Context, collectionID UniqueID) (*model.Collection, error) {
+	coll, ok := mt.collID2Meta[collectionID]
+	if !ok || coll == nil || !coll.Available() {
+		return nil, common.NewCollectionNotExistError(fmt.Sprintf("can't find collection: %d", collectionID))
+	}
+	return filterUnavailable(coll), nil
+}
+
 // getCollectionByIDInternal get collection by collection id without lock.
 func (mt *MetaTable) getCollectionByIDInternal(ctx context.Context, collectionID UniqueID, ts Timestamp) (*model.Collection, error) {
+	if isMaxTs(ts) {
+		return mt.getLatestCollectionByIDInternal(ctx, collectionID)
+	}
+
 	var coll *model.Collection
 	var err error
 
@@ -255,15 +280,7 @@ func (mt *MetaTable) getCollectionByIDInternal(ctx context.Context, collectionID
 		return nil, common.NewCollectionNotExistError(fmt.Sprintf("can't find collection: %s", coll.Name))
 	}
 
-	clone := coll.Clone()
-	// pick available partitions.
-	clone.Partitions = nil
-	for _, partition := range coll.Partitions {
-		if partition.Available() {
-			clone.Partitions = append(clone.Partitions, partition.Clone())
-		}
-	}
-	return clone, nil
+	return filterUnavailable(coll), nil
 }
 
 func (mt *MetaTable) GetCollectionByName(ctx context.Context, collectionName string, ts Timestamp) (*model.Collection, error) {
@@ -282,23 +299,20 @@ func (mt *MetaTable) GetCollectionByName(ctx context.Context, collectionName str
 		return mt.getCollectionByIDInternal(ctx, collectionID, ts)
 	}
 
+	if isMaxTs(ts) {
+		return nil, common.NewCollectionNotExistError(fmt.Sprintf("can't find collection: %s", collectionName))
+	}
+
 	// travel meta information from catalog. No need to check time travel logic again, since catalog already did.
 	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName)
 	coll, err := mt.catalog.GetCollectionByName(ctx1, collectionName, ts)
 	if err != nil {
 		return nil, err
 	}
-	if !coll.Available() {
+	if coll == nil || !coll.Available() {
 		return nil, common.NewCollectionNotExistError(fmt.Sprintf("can't find collection: %s", collectionName))
 	}
-	partitions := coll.Partitions
-	coll.Partitions = nil
-	for _, partition := range partitions {
-		if partition.Available() {
-			coll.Partitions = append(coll.Partitions, partition.Clone())
-		}
-	}
-	return coll, nil
+	return filterUnavailable(coll), nil
 }
 
 func (mt *MetaTable) GetCollectionByID(ctx context.Context, collectionID UniqueID, ts Timestamp) (*model.Collection, error) {
