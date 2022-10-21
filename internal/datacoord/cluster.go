@@ -18,12 +18,14 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 )
 
@@ -80,64 +82,36 @@ func (c *Cluster) Watch(ch string, collectionID UniqueID) error {
 	return c.channelManager.Watch(&channel{Name: ch, CollectionID: collectionID})
 }
 
-// Flush sends flush requests to corresponding dataNodes according to channels where segments are assigned to.
-func (c *Cluster) Flush(ctx context.Context, segments []*datapb.SegmentInfo, markSegments []*datapb.SegmentInfo) {
-	channels := c.channelManager.GetChannels()
-	nodeSegments := make(map[int64][]int64)
-	nodeMarks := make(map[int64][]int64)
-	channelNodes := make(map[string]int64)
-	targetNodes := make(map[int64]struct{})
-	// channel -> node
-	for _, c := range channels {
-		for _, ch := range c.Channels {
-			channelNodes[ch.Name] = c.NodeID
-		}
-	}
-	// collectionID shall be the same in single Flush call
-	var collectionID int64
-	// find node on which segment exists
-	for _, segment := range segments {
-		collectionID = segment.CollectionID
-		nodeID, ok := channelNodes[segment.GetInsertChannel()]
-		if !ok {
-			log.Warn("channel is not allocated to any node", zap.String("channel", segment.GetInsertChannel()))
-			continue
-		}
-		nodeSegments[nodeID] = append(nodeSegments[nodeID], segment.GetID())
-		targetNodes[nodeID] = struct{}{}
-	}
-	for _, segment := range markSegments {
-		collectionID = segment.CollectionID
-		nodeID, ok := channelNodes[segment.GetInsertChannel()]
-		if !ok {
-			log.Warn("channel is not allocated to any node", zap.String("channel", segment.GetInsertChannel()))
-			continue
-		}
-		nodeMarks[nodeID] = append(nodeMarks[nodeID], segment.GetID())
-		targetNodes[nodeID] = struct{}{}
+// Flush sends flush requests to dataNodes specified
+// which also according to channels where segments are assigned to.
+func (c *Cluster) Flush(ctx context.Context, nodeID int64, channel string,
+	segments []*datapb.SegmentInfo, markSegments []*datapb.SegmentInfo) error {
+	if !c.channelManager.Match(nodeID, channel) {
+		log.Warn("node is not matched with channel",
+			zap.String("channel", channel),
+			zap.Int64("nodeID", nodeID),
+		)
+		return fmt.Errorf("channel %s is not watched on node %d", channel, nodeID)
 	}
 
-	for nodeID := range targetNodes {
-		segments := nodeSegments[nodeID]
-		marks := nodeMarks[nodeID]
-		if len(segments)+len(marks) == 0 { // no segment for this node
-			continue
-		}
-		req := &datapb.FlushSegmentsRequest{
-			Base: commonpbutil.NewMsgBase(
-				commonpbutil.WithMsgType(commonpb.MsgType_Flush),
-				commonpbutil.WithSourceID(Params.DataCoordCfg.GetNodeID()),
-			),
-			CollectionID:   collectionID,
-			SegmentIDs:     segments,
-			MarkSegmentIDs: marks,
-		}
-		log.Info("calling dataNode to flush",
-			zap.Int64("dataNode ID", nodeID),
-			zap.Int64s("segments", segments),
-			zap.Int64s("marks", marks))
-		c.sessionManager.Flush(ctx, nodeID, req)
+	ch := c.channelManager.getChannelByNodeAndName(nodeID, channel)
+
+	getSegmentID := func(segment *datapb.SegmentInfo, _ int) int64 {
+		return segment.GetID()
 	}
+
+	req := &datapb.FlushSegmentsRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_Flush),
+			commonpbutil.WithSourceID(Params.DataCoordCfg.GetNodeID()),
+		),
+		CollectionID:   ch.CollectionID,
+		SegmentIDs:     lo.Map(segments, getSegmentID),
+		MarkSegmentIDs: lo.Map(markSegments, getSegmentID),
+	}
+
+	c.sessionManager.Flush(ctx, nodeID, req)
+	return nil
 }
 
 // Import sends import requests to DataNodes whose ID==nodeID.

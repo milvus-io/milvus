@@ -610,6 +610,7 @@ func newInsertBufferNode(ctx context.Context, collID UniqueID, flushCh <-chan fl
 					commonpbutil.WithMsgType(commonpb.MsgType_DataNodeTt),
 					commonpbutil.WithMsgID(0),
 					commonpbutil.WithTimeStamp(ts),
+					commonpbutil.WithSourceID(Params.DataNodeCfg.GetNodeID()),
 				),
 				ChannelName:   config.vChannelName,
 				Timestamp:     ts,
