@@ -2,70 +2,68 @@
 
 ## Overview
 
-Milvus 2.2 has changed the meta structure for segment index. If you have installed a milvus cluster of version v2.1.x, you'd run this script to migrate the meta and upgrade the milvus image version.
+Milvus 2.2 has changed the meta structure for segment index. To upgrade a Milvus cluster of 2.1.x version you have installed, run this script to migrate the meta and upgrade the Milvus image version.
+
 
 > Note: 
-> 1. This script only works with Milvus installed on k8s cluster.
-> 2. You can only upgrade from v2.1.x to v2.2.
+> 1. This script only applies to Milvus installed on a K8s cluster.
+> 2. This script only supports upgrading from Milvus v2.1.x to v2.2.0.
 
-## Parameter Description
+## Parameters
 
-| Parameters | Description                                                      | Default                      | Required                |
-| ---------- | ---------------------------------------------------------------- | ---------------------------- | ----------------------- |
-| i          | Specify the milvus instance name                                 | None                         | true                    |
-| n          | Specify the namespace that milvus is installed in                | default                      | false                   |
-| s          | Specify the milvus source version                                | None                         | true                    |
-| t          | Specify the milvus target version                                | None                         | true                    |
-| r          | Specify the milvus meta root path                                | by-dev                       | false                   |
-| w          | Specify the milvus new image tag                                 | milvusdb/milvus:v2.2.0       | false                   |
-| o          | Specify the meta migration operation                             | migrate                      | false                   |
-| d          | Whether delete migration pod after successful migration          | false                        | false                   |
-> By default, the script only migrate from v2.1.x to v2.2.x. If there is anything wrong, you'd first rollback to the older version using the `rollback` operation.
+| Parameters   | Description                                                      | Default value                    | Required                |
+| ------------ | ---------------------------------------------------------------- | ---------------------------- | ----------------------- |
+| `i`          | The Milvus instance name.                                 | `None`                         | True                    |
+| `n`          | The namespace that Milvus is installed in.                | `default`                      | False                   |
+| `s`          | The source Milvus version.                                | `None`                         | True                    |
+| `t`          | The target Milvus version.                               | `None`                         | True                    |
+| `r`          | The root path of Milvus meta.                             | `by-dev`                       | False                   |
+| `w`          | The new Milvus image tag.                                 | `milvusdb/milvus:v2.2.0`       | False                   |
+| `o`          | The meta migration operation.                             | `migrate`                      | False                   |
+| `d`          | Whether to delete migration pod after the migration is completed.          | `false`                        | False                   |
+> By default, the script only applies to migration from v2.1.x to v2.2.x. Rollback to the older version with the `rollback` operation first if an error occurs.
 
-## Migrate Procedures
-The migration will take four steps:
-1. Stop the milvus components; if there are any live session in milvus etcd, the migration will fail.
-2. Backup the milvus meta;
-3. Migrate the milvus meta;
-4. Startup milvus components with provided new image;
 
-> Note:
-> 1. if step 1) or 2) are failed, you can rerun the migration again
-> 2. if step 3) or 4) are failed, you'd first rollback and migrate again
+## Overview of migration procedures
+1. Stop the Milvus components. Any live session in the Milvus Etcd can cause the migration to fail. 
+2. Create a backup for Milvus meta.
+3. Migrate the Milvus meta.
+4. Start Milvus components with a new image.
 
-## Usage
 
-1. Milvus instance name, milvus source version, milvus target vresion are required to be specified.
+## Migration guide
+
+1. Specify Milvus instance name, source Milvus version, and target Milvus version.
 
 ```shell
 ./migrate.sh -i my-release -s 2.1.1 -t 2.2.0
 ```
 
-2. If your milvus is not installed in the k8s default namespace, please specify namespace with `-n`.
+2. Specify namespace with `-n` if your Milvus is not installed in the default K8s namespace.
 
 ```shell
 ./migrate.sh -i my-release -n milvus -s 2.1.1 -t 2.2.0
 ```
 
-3. If your milvus is installed with custom `rootpath`, please specify rootpath with `-r`.
+3. Specify rootpath with `-r` if your Milvus is installed with the custom `rootpath`.
 
 ```shell
 ./migrate.sh -i my-release -n milvus -s 2.1.1 -t 2.2.0 -r by-dev
 ```
 
-4. If your milvus is installed with custom `image`, please specify the image tag with `-w`.
+4. Specify the image tag with `-w` if your Milvus is installed with custom `image`.
 
 ```shell
 ./migrate.sh -i my-release -n milvus -s 2.1.1 -t 2.2.0 -r by-dev -w milvusdb/milvus:master-20221016-15878781
 ```
 
-5. If you want to automatically remove the migration pod after successful migration, plese specify `-d true`.
+5. Set `-d true` if you want to automatically remove the migration pod after the migration is completed.
 
 ```shell
 ./migrate.sh -i my-release -n milvus -s 2.1.1 -t 2.2.0 -w milvusdb/milvus:master-20221016-15878781 -d true
 ```
 
-6. If the migrate is failed, you'd first rollback migration and rerun migrate again.
+6. Rollback and migrate again if the migration fails.
 
 ```
 ./migrate.sh -i my-release -n milvus -s 2.1.1 -t 2.2.0 -r by-dev -o rollback -w <milvus-2-1-1-image>
