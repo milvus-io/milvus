@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"testing"
 
+	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
+
 	mocktso "github.com/milvus-io/milvus/internal/tso/mocks"
 	"github.com/stretchr/testify/mock"
 
@@ -15,18 +17,38 @@ import (
 )
 
 func TestGarbageCollectorCtx_ReDropCollection(t *testing.T) {
+	t.Run("failed to expire cache", func(t *testing.T) {
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("ListAliasesByID",
+			mock.AnythingOfType("int64")).
+			Return([]string{"alias1"})
+		ticker := newTickerWithMockNormalStream()
+		core := newTestCore(withInvalidProxyManager(),
+			withTtSynchronizer(ticker), withMeta(meta))
+		gc := newBgGarbageCollector(core)
+		gc.ReDropCollection(&model.Collection{}, 1000)
+	})
+
 	t.Run("failed to release collection", func(t *testing.T) {
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("ListAliasesByID",
+			mock.AnythingOfType("int64")).
+			Return([]string{"alias1"})
 		broker := newMockBroker()
 		broker.ReleaseCollectionFunc = func(ctx context.Context, collectionID UniqueID) error {
 			return errors.New("error mock ReleaseCollection")
 		}
 		ticker := newTickerWithMockNormalStream()
-		core := newTestCore(withBroker(broker), withTtSynchronizer(ticker))
+		core := newTestCore(withBroker(broker), withTtSynchronizer(ticker), withMeta(meta), withValidProxyManager())
 		gc := newBgGarbageCollector(core)
 		gc.ReDropCollection(&model.Collection{}, 1000)
 	})
 
 	t.Run("failed to DropCollectionIndex", func(t *testing.T) {
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("ListAliasesByID",
+			mock.AnythingOfType("int64")).
+			Return([]string{"alias1"})
 		broker := newMockBroker()
 		releaseCollectionCalled := false
 		releaseCollectionChan := make(chan struct{}, 1)
@@ -39,7 +61,7 @@ func TestGarbageCollectorCtx_ReDropCollection(t *testing.T) {
 			return errors.New("error mock DropCollectionIndex")
 		}
 		ticker := newTickerWithMockNormalStream()
-		core := newTestCore(withBroker(broker), withTtSynchronizer(ticker))
+		core := newTestCore(withBroker(broker), withTtSynchronizer(ticker), withMeta(meta), withValidProxyManager())
 		gc := newBgGarbageCollector(core)
 		core.garbageCollector = gc
 		gc.ReDropCollection(&model.Collection{}, 1000)
@@ -48,6 +70,10 @@ func TestGarbageCollectorCtx_ReDropCollection(t *testing.T) {
 	})
 
 	t.Run("failed to GcCollectionData", func(t *testing.T) {
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("ListAliasesByID",
+			mock.AnythingOfType("int64")).
+			Return([]string{"alias1"})
 		broker := newMockBroker()
 		releaseCollectionCalled := false
 		releaseCollectionChan := make(chan struct{}, 1)
@@ -68,7 +94,8 @@ func TestGarbageCollectorCtx_ReDropCollection(t *testing.T) {
 		tsoAllocator.GenerateTSOF = func(count uint32) (uint64, error) {
 			return 100, nil
 		}
-		core := newTestCore(withBroker(broker), withTtSynchronizer(ticker), withTsoAllocator(tsoAllocator))
+		core := newTestCore(withBroker(broker), withTtSynchronizer(ticker), withTsoAllocator(tsoAllocator),
+			withMeta(meta), withValidProxyManager())
 		core.ddlTsLockManager = newDdlTsLockManager(core.tsoAllocator)
 		gc := newBgGarbageCollector(core)
 		core.garbageCollector = gc
@@ -97,10 +124,15 @@ func TestGarbageCollectorCtx_ReDropCollection(t *testing.T) {
 			dropCollectionIndexChan <- struct{}{}
 			return nil
 		}
-		meta := newMockMetaTable()
-		meta.RemoveCollectionFunc = func(ctx context.Context, collectionID UniqueID, ts Timestamp) error {
-			return errors.New("error mock RemoveCollection")
-		}
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("ListAliasesByID",
+			mock.AnythingOfType("int64")).
+			Return([]string{"alias1"})
+		meta.On("RemoveCollection",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("int64"),
+			mock.AnythingOfType("uint64")).
+			Return(errors.New("error mock RemoveCollection"))
 		ticker := newTickerWithMockNormalStream()
 		tsoAllocator := newMockTsoAllocator()
 		tsoAllocator.GenerateTSOF = func(count uint32) (uint64, error) {
@@ -109,6 +141,7 @@ func TestGarbageCollectorCtx_ReDropCollection(t *testing.T) {
 		core := newTestCore(withBroker(broker),
 			withTtSynchronizer(ticker),
 			withTsoAllocator(tsoAllocator),
+			withValidProxyManager(),
 			withMeta(meta))
 		core.ddlTsLockManager = newDdlTsLockManager(core.tsoAllocator)
 		gc := newBgGarbageCollector(core)
@@ -136,14 +169,21 @@ func TestGarbageCollectorCtx_ReDropCollection(t *testing.T) {
 			dropCollectionIndexChan <- struct{}{}
 			return nil
 		}
-		meta := newMockMetaTable()
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("ListAliasesByID",
+			mock.AnythingOfType("int64")).
+			Return([]string{"alias1"})
 		removeCollectionCalled := false
 		removeCollectionChan := make(chan struct{}, 1)
-		meta.RemoveCollectionFunc = func(ctx context.Context, collectionID UniqueID, ts Timestamp) error {
-			removeCollectionCalled = true
-			removeCollectionChan <- struct{}{}
-			return nil
-		}
+		meta.On("RemoveCollection",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("int64"),
+			mock.AnythingOfType("uint64")).
+			Return(func(ctx context.Context, collectionID int64, ts uint64) error {
+				removeCollectionCalled = true
+				removeCollectionChan <- struct{}{}
+				return nil
+			})
 		ticker := newTickerWithMockNormalStream()
 		tsoAllocator := newMockTsoAllocator()
 		tsoAllocator.GenerateTSOF = func(count uint32) (uint64, error) {
@@ -152,6 +192,7 @@ func TestGarbageCollectorCtx_ReDropCollection(t *testing.T) {
 		core := newTestCore(withBroker(broker),
 			withTtSynchronizer(ticker),
 			withTsoAllocator(tsoAllocator),
+			withValidProxyManager(),
 			withMeta(meta))
 		core.ddlTsLockManager = newDdlTsLockManager(core.tsoAllocator)
 		gc := newBgGarbageCollector(core)

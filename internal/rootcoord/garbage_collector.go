@@ -31,8 +31,16 @@ func newBgGarbageCollector(s *Core) *bgGarbageCollector {
 func (c *bgGarbageCollector) ReDropCollection(collMeta *model.Collection, ts Timestamp) {
 	// TODO: remove this after data gc can be notified by rpc.
 	c.s.chanTimeTick.addDmlChannels(collMeta.PhysicalChannelNames...)
+	aliases := c.s.meta.ListAliasesByID(collMeta.CollectionID)
 
 	redo := newBaseRedoTask(c.s.stepExecutor)
+	redo.AddAsyncStep(&expireCacheStep{
+		baseStep:        baseStep{core: c.s},
+		collectionNames: append(aliases, collMeta.Name),
+		collectionID:    collMeta.CollectionID,
+		ts:              ts,
+		opts:            []expireCacheOpt{expireCacheWithDropFlag()},
+	})
 	redo.AddAsyncStep(&releaseCollectionStep{
 		baseStep:     baseStep{core: c.s},
 		collectionID: collMeta.CollectionID,
@@ -96,6 +104,11 @@ func (c *bgGarbageCollector) ReDropPartition(pChannels []string, partition *mode
 	c.s.chanTimeTick.addDmlChannels(pChannels...)
 
 	redo := newBaseRedoTask(c.s.stepExecutor)
+	redo.AddAsyncStep(&expireCacheStep{
+		baseStep:     baseStep{core: c.s},
+		collectionID: partition.CollectionID,
+		ts:           ts,
+	})
 	redo.AddAsyncStep(&deletePartitionDataStep{
 		baseStep:  baseStep{core: c.s},
 		pchans:    pChannels,
