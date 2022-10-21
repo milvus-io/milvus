@@ -68,7 +68,9 @@ const (
 	maxBloomFalsePositive float64 = 0.005
 )
 
-var errSegmentUnhealthy = errors.New("segment unhealthy")
+var (
+	ErrSegmentUnhealthy = errors.New("segment unhealthy")
+)
 
 // IndexedFieldInfo contains binlog info of vector field
 type IndexedFieldInfo struct {
@@ -344,7 +346,7 @@ func (s *Segment) search(searchReq *searchRequest) (*SearchResult, error) {
 	s.mut.RLock()
 	defer s.mut.RUnlock()
 	if !s.healthy() {
-		return nil, fmt.Errorf("%w(segmentID=%d)", errSegmentUnhealthy, s.segmentID)
+		return nil, fmt.Errorf("%w(segmentID=%d)", ErrSegmentUnhealthy, s.segmentID)
 	}
 
 	if searchReq.plan == nil {
@@ -382,7 +384,7 @@ func (s *Segment) retrieve(plan *RetrievePlan) (*segcorepb.RetrieveResults, erro
 	s.mut.RLock()
 	defer s.mut.RUnlock()
 	if !s.healthy() {
-		return nil, fmt.Errorf("%w(segmentID=%d)", errSegmentUnhealthy, s.segmentID)
+		return nil, fmt.Errorf("%w(segmentID=%d)", ErrSegmentUnhealthy, s.segmentID)
 	}
 
 	var retrieveResult RetrieveResult
@@ -646,7 +648,7 @@ func (s *Segment) segmentPreInsert(numOfRecords int) (int64, error) {
 	s.mut.RLock()
 	defer s.mut.RUnlock()
 	if !s.healthy() {
-		return -1, fmt.Errorf("%w(segmentID=%d)", errSegmentUnhealthy, s.segmentID)
+		return -1, fmt.Errorf("%w(segmentID=%d)", ErrSegmentUnhealthy, s.segmentID)
 	}
 
 	var offset int64
@@ -691,7 +693,7 @@ func (s *Segment) segmentInsert(offset int64, entityIDs []UniqueID, timestamps [
 	s.mut.RLock()
 	defer s.mut.RUnlock()
 	if !s.healthy() {
-		return fmt.Errorf("%w(segmentID=%d)", errSegmentUnhealthy, s.segmentID)
+		return fmt.Errorf("%w(segmentID=%d)", ErrSegmentUnhealthy, s.segmentID)
 	}
 
 	insertRecordBlob, err := proto.Marshal(record)
@@ -743,7 +745,7 @@ func (s *Segment) segmentDelete(offset int64, entityIDs []primaryKey, timestamps
 	s.mut.RLock()
 	defer s.mut.RUnlock()
 	if !s.healthy() {
-		return fmt.Errorf("%w(segmentID=%d)", errSegmentUnhealthy, s.segmentID)
+		return fmt.Errorf("%w(segmentID=%d)", ErrSegmentUnhealthy, s.segmentID)
 	}
 
 	if len(entityIDs) != len(timestamps) {
@@ -813,7 +815,7 @@ func (s *Segment) segmentLoadFieldData(fieldID int64, rowCount int64, data *sche
 	s.mut.RLock()
 	defer s.mut.RUnlock()
 	if !s.healthy() {
-		return fmt.Errorf("%w(segmentID=%d)", errSegmentUnhealthy, s.segmentID)
+		return fmt.Errorf("%w(segmentID=%d)", ErrSegmentUnhealthy, s.segmentID)
 	}
 
 	dataBlob, err := proto.Marshal(data)
@@ -850,7 +852,7 @@ func (s *Segment) segmentLoadDeletedRecord(primaryKeys []primaryKey, timestamps 
 	s.mut.RLock()
 	defer s.mut.RUnlock()
 	if !s.healthy() {
-		return fmt.Errorf("%w(segmentID=%d)", errSegmentUnhealthy, s.segmentID)
+		return fmt.Errorf("%w(segmentID=%d)", ErrSegmentUnhealthy, s.segmentID)
 	}
 
 	if len(primaryKeys) <= 0 {
@@ -938,7 +940,7 @@ func (s *Segment) segmentLoadIndexData(bytesIndex [][]byte, indexInfo *querypb.F
 	s.mut.RLock()
 	defer s.mut.RUnlock()
 	if !s.healthy() {
-		return fmt.Errorf("%w(segmentID=%d)", errSegmentUnhealthy, s.segmentID)
+		return fmt.Errorf("%w(segmentID=%d)", ErrSegmentUnhealthy, s.segmentID)
 	}
 
 	var status C.CStatus
