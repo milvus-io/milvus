@@ -186,7 +186,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		if targetSegment != nil {
 			offset, err := targetSegment.segmentPreInsert(numOfRecords)
 			if err != nil {
-				if errors.Is(err, errSegmentUnhealthy) {
+				if errors.Is(err, ErrSegmentUnhealthy) {
 					log.Debug("segment removed before preInsert")
 					continue
 				}
@@ -387,7 +387,7 @@ func (iNode *insertNode) insert(iData *insertData, segmentID UniqueID) error {
 
 	err = targetSegment.segmentInsert(offsets, ids, timestamps, insertRecord)
 	if err != nil {
-		if errors.Is(err, errSegmentUnhealthy) {
+		if errors.Is(err, ErrSegmentUnhealthy) {
 			log.Debug("segment removed before insert")
 			return nil
 		}
@@ -425,7 +425,7 @@ func (iNode *insertNode) delete(deleteData *deleteData, segmentID UniqueID) erro
 
 	err = targetSegment.segmentDelete(offset, ids, timestamps)
 	if err != nil {
-		if errors.Is(err, errSegmentUnhealthy) {
+		if errors.Is(err, ErrSegmentUnhealthy) {
 			log.Debug("segment removed before delete")
 			return nil
 		}

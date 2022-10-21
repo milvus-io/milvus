@@ -17,6 +17,7 @@
 package querynode
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"sync"
@@ -143,9 +144,17 @@ func (dNode *deleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			err := dNode.delete(delData, segmentID, &wg)
 			if err != nil {
 				// error occurs when segment cannot be found, calling cgo function delete failed and etc...
-				err = fmt.Errorf("segment delete failed, segmentID = %d, err = %s", segmentID, err)
-				log.Error(err.Error())
-				panic(err)
+				log.Error("failed to apply deletions to segment",
+					zap.Int64("segmentID", segmentID),
+					zap.Error(err),
+				)
+
+				// For cases: segment compacted, not loaded yet, or just released,
+				// to ignore the error,
+				// panic otherwise.
+				if !errors.Is(err, ErrSegmentNotFound) && !errors.Is(err, ErrSegmentUnhealthy) {
+					panic(err)
+				}
 			}
 		}()
 	}
@@ -166,7 +175,7 @@ func (dNode *deleteNode) delete(deleteData *deleteData, segmentID UniqueID, wg *
 	defer wg.Done()
 	targetSegment, err := dNode.metaReplica.getSegmentByID(segmentID, segmentTypeSealed)
 	if err != nil {
-		return fmt.Errorf("getSegmentByID failed, err = %s", err)
+		return WrapSegmentNotFound(segmentID)
 	}
 
 	if targetSegment.getType() != segmentTypeSealed {
@@ -179,7 +188,7 @@ func (dNode *deleteNode) delete(deleteData *deleteData, segmentID UniqueID, wg *
 
 	err = targetSegment.segmentDelete(offset, ids, timestamps)
 	if err != nil {
-		return fmt.Errorf("segmentDelete failed, segmentID = %d", segmentID)
+		return fmt.Errorf("segmentDelete failed, segmentID = %d, err=%w", segmentID, err)
 	}
 
 	log.Debug("Do delete done", zap.Int("len", len(deleteData.deleteIDs[segmentID])), zap.Int64("segmentID", segmentID), zap.Any("SegmentType", targetSegment.segmentType), zap.String("channel", dNode.channel))
