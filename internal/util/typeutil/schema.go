@@ -556,6 +556,21 @@ func GetPrimaryFieldData(datas []*schemapb.FieldData, primaryFieldSchema *schema
 	return primaryFieldData, nil
 }
 
+func IsPrimaryFieldDataExist(datas []*schemapb.FieldData, primaryFieldSchema *schemapb.FieldSchema) bool {
+	primaryFieldID := primaryFieldSchema.FieldID
+	primaryFieldName := primaryFieldSchema.Name
+
+	var primaryFieldData *schemapb.FieldData
+	for _, field := range datas {
+		if field.FieldId == primaryFieldID || field.FieldName == primaryFieldName {
+			primaryFieldData = field
+			break
+		}
+	}
+
+	return primaryFieldData != nil
+}
+
 func AppendIDs(dst *schemapb.IDs, src *schemapb.IDs, idx int) {
 	switch src.IdField.(type) {
 	case *schemapb.IDs_IntId:
