@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	queryPb "github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/samber/lo"
@@ -214,10 +215,10 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 		}
 	}
 	req := &queryPb.LoadSegmentsRequest{
-		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_LoadSegments,
-			MsgID:   w.req.Base.MsgID, // use parent task's msgID
-		},
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_LoadSegments),
+			commonpbutil.WithMsgID(w.req.Base.MsgID), // use parent task's msgID
+		),
 		Infos:        unFlushedSegments,
 		CollectionID: collectionID,
 		Schema:       w.req.GetSchema(),

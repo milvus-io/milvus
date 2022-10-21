@@ -232,7 +232,7 @@ func (g *getStatisticsTask) getStatisticsFromDataCoord(ctx context.Context) erro
 	partIDs := g.unloadedPartitionIDs
 
 	req := &datapb.GetPartitionStatisticsRequest{
-		Base: commonpbutil.NewMsgBaseCopy(
+		Base: commonpbutil.UpdateMsgBase(
 			g.Base,
 			commonpbutil.WithMsgType(commonpb.MsgType_GetPartitionStatistics),
 		),
@@ -644,7 +644,7 @@ func (g *getCollectionStatisticsTask) Execute(ctx context.Context) error {
 	}
 	g.collectionID = collID
 	req := &datapb.GetCollectionStatisticsRequest{
-		Base: commonpbutil.NewMsgBaseCopy(
+		Base: commonpbutil.UpdateMsgBase(
 			g.Base,
 			commonpbutil.WithMsgType(commonpb.MsgType_GetCollectionStatistics),
 		),
@@ -736,7 +736,7 @@ func (g *getPartitionStatisticsTask) Execute(ctx context.Context) error {
 		return err
 	}
 	req := &datapb.GetPartitionStatisticsRequest{
-		Base: commonpbutil.NewMsgBaseCopy(
+		Base: commonpbutil.UpdateMsgBase(
 			g.Base,
 			commonpbutil.WithMsgType(commonpb.MsgType_GetCollectionStatistics),
 		),

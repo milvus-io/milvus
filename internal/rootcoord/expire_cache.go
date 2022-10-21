@@ -5,6 +5,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
+	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -17,7 +18,7 @@ func (c expireCacheConfig) apply(req *proxypb.InvalidateCollMetaCacheRequest) {
 		return
 	}
 	if req.GetBase() == nil {
-		req.Base = &commonpb.MsgBase{}
+		req.Base = commonpbutil.NewMsgBase()
 	}
 	req.Base.MsgType = commonpb.MsgType_DropCollection
 }
@@ -39,10 +40,10 @@ func (c *Core) ExpireMetaCache(ctx context.Context, collNames []string, collecti
 	// if collectionID is specified, invalidate all the collection meta cache with the specified collectionID and return
 	if collectionID != InvalidCollectionID {
 		req := proxypb.InvalidateCollMetaCacheRequest{
-			Base: &commonpb.MsgBase{
-				Timestamp: ts,
-				SourceID:  c.session.ServerID,
-			},
+			Base: commonpbutil.NewMsgBase(
+				commonpbutil.WithTimeStamp(ts),
+				commonpbutil.WithSourceID(c.session.ServerID),
+			),
 			CollectionID: collectionID,
 		}
 		return c.proxyClientManager.InvalidateCollectionMetaCache(ctx, &req, opts...)
@@ -51,12 +52,12 @@ func (c *Core) ExpireMetaCache(ctx context.Context, collNames []string, collecti
 	// if only collNames are specified, invalidate the collection meta cache with the specified collectionName
 	for _, collName := range collNames {
 		req := proxypb.InvalidateCollMetaCacheRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   0, //TODO, msg type
-				MsgID:     0, //TODO, msg id
-				Timestamp: ts,
-				SourceID:  c.session.ServerID,
-			},
+			Base: commonpbutil.NewMsgBase(
+				commonpbutil.WithMsgType(0), //TODO, msg type
+				commonpbutil.WithMsgID(0),   //TODO, msg id
+				commonpbutil.WithTimeStamp(ts),
+				commonpbutil.WithSourceID(c.session.ServerID),
+			),
 			CollectionName: collName,
 		}
 		err := c.proxyClientManager.InvalidateCollectionMetaCache(ctx, &req, opts...)

@@ -8,6 +8,7 @@ import (
 	ms "github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 
+	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -191,7 +192,10 @@ func (t *createCollectionTask) genCreateCollectionMsg(ctx context.Context) *ms.M
 	msg := &ms.CreateCollectionMsg{
 		BaseMsg: baseMsg,
 		CreateCollectionRequest: internalpb.CreateCollectionRequest{
-			Base:                 &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection, Timestamp: ts},
+			Base: commonpbutil.NewMsgBase(
+				commonpbutil.WithMsgType(commonpb.MsgType_CreateCollection),
+				commonpbutil.WithTimeStamp(ts),
+			),
 			CollectionID:         collectionID,
 			PartitionID:          partitionID,
 			Schema:               marshaledSchema,

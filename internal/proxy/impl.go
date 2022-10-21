@@ -1777,7 +1777,7 @@ func (node *Proxy) ShowPartitions(ctx context.Context, request *milvuspb.ShowPar
 
 func (node *Proxy) getCollectionProgress(ctx context.Context, request *milvuspb.GetLoadingProgressRequest, collectionID int64) (int64, error) {
 	resp, err := node.queryCoord.ShowCollections(ctx, &querypb.ShowCollectionsRequest{
-		Base: commonpbutil.NewMsgBaseCopy(
+		Base: commonpbutil.UpdateMsgBase(
 			request.Base,
 			commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection),
 		),
@@ -1809,7 +1809,7 @@ func (node *Proxy) getPartitionProgress(ctx context.Context, request *milvuspb.G
 		partitionIDs = append(partitionIDs, partitionID)
 	}
 	resp, err := node.queryCoord.ShowPartitions(ctx, &querypb.ShowPartitionsRequest{
-		Base: commonpbutil.NewMsgBaseCopy(
+		Base: commonpbutil.UpdateMsgBase(
 			request.Base,
 			commonpbutil.WithMsgType(commonpb.MsgType_ShowPartitions),
 		),
@@ -3867,10 +3867,10 @@ func (node *Proxy) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasReq
 		return resp, nil
 	}
 
-	req.Base = &commonpb.MsgBase{
-		MsgType:  commonpb.MsgType_GetReplicas,
-		SourceID: Params.ProxyCfg.GetNodeID(),
-	}
+	req.Base = commonpbutil.NewMsgBase(
+		commonpbutil.WithMsgType(commonpb.MsgType_GetReplicas),
+		commonpbutil.WithSourceID(Params.ProxyCfg.GetNodeID()),
+	)
 
 	resp, err := node.queryCoord.GetReplicas(ctx, req)
 	if err != nil {

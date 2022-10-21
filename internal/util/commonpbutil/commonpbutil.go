@@ -20,12 +20,9 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
-	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
 
-const MsgIDNeedFill int64 = -2
-
-var Params paramtable.ComponentParam
+const MsgIDNeedFill int64 = 0
 
 type MsgBaseOptions func(*commonpb.MsgBase)
 
@@ -57,32 +54,35 @@ func GetNowTimestamp() uint64 {
 	return uint64(time.Now().Unix())
 }
 
-func SetTargetID(msgBase *commonpb.MsgBase, targetID int64) *commonpb.MsgBase {
-	if msgBase == nil {
-		return nil
+func FillMsgBaseFromClient(targetID int64) MsgBaseOptions {
+	return func(msgBase *commonpb.MsgBase) {
+		if msgBase.Timestamp == 0 {
+			msgBase.Timestamp = GetNowTimestamp()
+		}
+		msgBase.TargetID = targetID
 	}
-	msgBase.TargetID = targetID
-	return msgBase
+
 }
 
-func NewMsgBaseDefault() *commonpb.MsgBase {
+func newMsgBaseDefault() *commonpb.MsgBase {
 	return &commonpb.MsgBase{
-		MsgType:   commonpb.MsgType_Undefined,
-		MsgID:     MsgIDNeedFill,
-		Timestamp: GetNowTimestamp(),
-		SourceID:  Params.DataCoordCfg.GetNodeID(),
+		MsgType: commonpb.MsgType_Undefined,
+		MsgID:   MsgIDNeedFill,
 	}
 }
 
 func NewMsgBase(options ...MsgBaseOptions) *commonpb.MsgBase {
-	msgBase := NewMsgBaseDefault()
+	msgBase := newMsgBaseDefault()
 	for _, op := range options {
 		op(msgBase)
 	}
 	return msgBase
 }
 
-func NewMsgBaseCopy(msgBase *commonpb.MsgBase, options ...MsgBaseOptions) *commonpb.MsgBase {
+func UpdateMsgBase(msgBase *commonpb.MsgBase, options ...MsgBaseOptions) *commonpb.MsgBase {
+	if msgBase == nil {
+		return nil
+	}
 	msgBaseRt := msgBase
 	for _, op := range options {
 		op(msgBaseRt)

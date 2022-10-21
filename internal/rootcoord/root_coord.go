@@ -52,6 +52,7 @@ import (
 	"github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util"
+	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/crypto"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/errorutil"
@@ -183,11 +184,11 @@ func (c *Core) sendTimeTick(t Timestamp, reason string) error {
 		pt[i] = t
 	}
 	ttMsg := internalpb.ChannelTimeTickMsg{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_TimeTick,
-			Timestamp: t,
-			SourceID:  c.session.ServerID,
-		},
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_TimeTick),
+			commonpbutil.WithTimeStamp(t),
+			commonpbutil.WithSourceID(c.session.ServerID),
+		),
 		ChannelNames:     pc,
 		Timestamps:       pt,
 		DefaultTimestamp: t,
@@ -1313,7 +1314,7 @@ func (c *Core) InvalidateCollectionMetaCache(ctx context.Context, in *proxypb.In
 	return succStatus(), nil
 }
 
-//ShowConfigurations returns the configurations of RootCoord matching req.Pattern
+// ShowConfigurations returns the configurations of RootCoord matching req.Pattern
 func (c *Core) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
 	if code, ok := c.checkHealthy(); !ok {
 		return &internalpb.ShowConfigurationsResponse{
@@ -1681,11 +1682,11 @@ func (c *Core) ReportImport(ctx context.Context, ir *rootcoordpb.ImportResult) (
 // ExpireCredCache will call invalidate credential cache
 func (c *Core) ExpireCredCache(ctx context.Context, username string) error {
 	req := proxypb.InvalidateCredCacheRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:  0, //TODO, msg type
-			MsgID:    0, //TODO, msg id
-			SourceID: c.session.ServerID,
-		},
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(0), //TODO, msg type
+			commonpbutil.WithMsgID(0),   //TODO, msg id
+			commonpbutil.WithSourceID(c.session.ServerID),
+		),
 		Username: username,
 	}
 	return c.proxyClientManager.InvalidateCredentialCache(ctx, &req)
@@ -1694,11 +1695,11 @@ func (c *Core) ExpireCredCache(ctx context.Context, username string) error {
 // UpdateCredCache will call update credential cache
 func (c *Core) UpdateCredCache(ctx context.Context, credInfo *internalpb.CredentialInfo) error {
 	req := proxypb.UpdateCredCacheRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:  0, //TODO, msg type
-			MsgID:    0, //TODO, msg id
-			SourceID: c.session.ServerID,
-		},
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(0), //TODO, msg type
+			commonpbutil.WithMsgID(0),   //TODO, msg id
+			commonpbutil.WithSourceID(c.session.ServerID),
+		),
 		Username: credInfo.Username,
 		Password: credInfo.Sha256Password,
 	}
@@ -1706,9 +1707,9 @@ func (c *Core) UpdateCredCache(ctx context.Context, credInfo *internalpb.Credent
 }
 
 // CreateCredential create new user and password
-// 	1. decode ciphertext password to raw password
-// 	2. encrypt raw password
-// 	3. save in to etcd
+//  1. decode ciphertext password to raw password
+//  2. encrypt raw password
+//  3. save in to etcd
 func (c *Core) CreateCredential(ctx context.Context, credInfo *internalpb.CredentialInfo) (*commonpb.Status, error) {
 	method := "CreateCredential"
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()

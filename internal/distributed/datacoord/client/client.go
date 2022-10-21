@@ -46,6 +46,7 @@ var _ types.DataCoord = (*Client)(nil)
 type Client struct {
 	grpcClient grpcclient.GrpcClient[datapb.DataCoordClient]
 	sess       *sessionutil.Session
+	sourceID   int64
 }
 
 // NewClient creates a new client instance
@@ -163,7 +164,7 @@ func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResp
 // Flush flushes a collection's data
 func (c *Client) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.FlushResponse, error) {
 	req = typeutil.Clone(req)
-	commonpbutil.SetTargetID(req.GetBase(), c.sess.ServerID)
+	commonpbutil.UpdateMsgBase(req.GetBase(), commonpbutil.FillMsgBaseFromClient(c.sess.ServerID))
 	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -215,7 +216,7 @@ func (c *Client) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 // error is returned only when some communication issue occurs
 func (c *Client) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error) {
 	req = typeutil.Clone(req)
-	commonpbutil.SetTargetID(req.GetBase(), c.sess.ServerID)
+	commonpbutil.UpdateMsgBase(req.GetBase(), commonpbutil.FillMsgBaseFromClient(c.sess.ServerID))
 	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -240,7 +241,7 @@ func (c *Client) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentSta
 // error is returned only when some communication issue occurs
 func (c *Client) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsertBinlogPathsRequest) (*datapb.GetInsertBinlogPathsResponse, error) {
 	req = typeutil.Clone(req)
-	commonpbutil.SetTargetID(req.GetBase(), c.sess.ServerID)
+	commonpbutil.UpdateMsgBase(req.GetBase(), commonpbutil.FillMsgBaseFromClient(c.sess.ServerID))
 	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -265,7 +266,7 @@ func (c *Client) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsert
 // error is returned only when some communication issue occurs
 func (c *Client) GetCollectionStatistics(ctx context.Context, req *datapb.GetCollectionStatisticsRequest) (*datapb.GetCollectionStatisticsResponse, error) {
 	req = typeutil.Clone(req)
-	commonpbutil.SetTargetID(req.GetBase(), c.sess.ServerID)
+	commonpbutil.UpdateMsgBase(req.GetBase(), commonpbutil.FillMsgBaseFromClient(c.sess.ServerID))
 	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -290,7 +291,7 @@ func (c *Client) GetCollectionStatistics(ctx context.Context, req *datapb.GetCol
 // error is returned only when some communication issue occurs
 func (c *Client) GetPartitionStatistics(ctx context.Context, req *datapb.GetPartitionStatisticsRequest) (*datapb.GetPartitionStatisticsResponse, error) {
 	req = typeutil.Clone(req)
-	commonpbutil.SetTargetID(req.GetBase(), c.sess.ServerID)
+	commonpbutil.UpdateMsgBase(req.GetBase(), commonpbutil.FillMsgBaseFromClient(c.sess.ServerID))
 	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -327,7 +328,7 @@ func (c *Client) GetSegmentInfoChannel(ctx context.Context) (*milvuspb.StringRes
 // error is returned only when some communication issue occurs
 func (c *Client) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
 	req = typeutil.Clone(req)
-	commonpbutil.SetTargetID(req.GetBase(), c.sess.ServerID)
+	commonpbutil.UpdateMsgBase(req.GetBase(), commonpbutil.FillMsgBaseFromClient(c.sess.ServerID))
 	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -357,7 +358,7 @@ func (c *Client) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 func (c *Client) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) (*commonpb.Status, error) {
 	// use Call here on purpose
 	req = typeutil.Clone(req)
-	commonpbutil.SetTargetID(req.GetBase(), c.sess.ServerID)
+	commonpbutil.UpdateMsgBase(req.GetBase(), commonpbutil.FillMsgBaseFromClient(c.sess.ServerID))
 	ret, err := c.grpcClient.Call(ctx, func(client datapb.DataCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -379,7 +380,7 @@ func (c *Client) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 // error is returned only when some communication issue occurs
 func (c *Client) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInfoRequest) (*datapb.GetRecoveryInfoResponse, error) {
 	req = typeutil.Clone(req)
-	commonpbutil.SetTargetID(req.GetBase(), c.sess.ServerID)
+	commonpbutil.UpdateMsgBase(req.GetBase(), commonpbutil.FillMsgBaseFromClient(c.sess.ServerID))
 	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -403,7 +404,7 @@ func (c *Client) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 // error is returned only when some communication issue occurs
 func (c *Client) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error) {
 	req = typeutil.Clone(req)
-	commonpbutil.SetTargetID(req.GetBase(), c.sess.ServerID)
+	commonpbutil.UpdateMsgBase(req.GetBase(), commonpbutil.FillMsgBaseFromClient(c.sess.ServerID))
 	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -426,7 +427,7 @@ func (c *Client) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedS
 // error is returned only when some communication issue occurs
 func (c *Client) GetSegmentsByStates(ctx context.Context, req *datapb.GetSegmentsByStatesRequest) (*datapb.GetSegmentsByStatesResponse, error) {
 	req = typeutil.Clone(req)
-	commonpbutil.SetTargetID(req.GetBase(), c.sess.ServerID)
+	commonpbutil.UpdateMsgBase(req.GetBase(), commonpbutil.FillMsgBaseFromClient(c.sess.ServerID))
 	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -442,7 +443,7 @@ func (c *Client) GetSegmentsByStates(ctx context.Context, req *datapb.GetSegment
 // ShowConfigurations gets specified configurations para of DataCoord
 func (c *Client) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
 	req = typeutil.Clone(req)
-	commonpbutil.SetTargetID(req.GetBase(), c.sess.ServerID)
+	commonpbutil.UpdateMsgBase(req.GetBase(), commonpbutil.FillMsgBaseFromClient(c.sess.ServerID))
 	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -459,7 +460,7 @@ func (c *Client) ShowConfigurations(ctx context.Context, req *internalpb.ShowCon
 // GetMetrics gets all metrics of datacoord
 func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	req = typeutil.Clone(req)
-	commonpbutil.SetTargetID(req.GetBase(), c.sess.ServerID)
+	commonpbutil.UpdateMsgBase(req.GetBase(), commonpbutil.FillMsgBaseFromClient(c.sess.ServerID))
 	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -545,7 +546,7 @@ func (c *Client) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateR
 // DropVirtualChannel drops virtual channel in datacoord.
 func (c *Client) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtualChannelRequest) (*datapb.DropVirtualChannelResponse, error) {
 	req = typeutil.Clone(req)
-	commonpbutil.SetTargetID(req.GetBase(), c.sess.ServerID)
+	commonpbutil.UpdateMsgBase(req.GetBase(), commonpbutil.FillMsgBaseFromClient(c.sess.ServerID))
 	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -561,7 +562,7 @@ func (c *Client) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtual
 // SetSegmentState sets the state of a given segment.
 func (c *Client) SetSegmentState(ctx context.Context, req *datapb.SetSegmentStateRequest) (*datapb.SetSegmentStateResponse, error) {
 	req = typeutil.Clone(req)
-	commonpbutil.SetTargetID(req.GetBase(), c.sess.ServerID)
+	commonpbutil.UpdateMsgBase(req.GetBase(), commonpbutil.FillMsgBaseFromClient(c.sess.ServerID))
 	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -577,7 +578,7 @@ func (c *Client) SetSegmentState(ctx context.Context, req *datapb.SetSegmentStat
 // Import data files(json, numpy, etc.) on MinIO/S3 storage, read and parse them into sealed segments
 func (c *Client) Import(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
 	req = typeutil.Clone(req)
-	commonpbutil.SetTargetID(req.GetBase(), c.sess.ServerID)
+	commonpbutil.UpdateMsgBase(req.GetBase(), commonpbutil.FillMsgBaseFromClient(c.sess.ServerID))
 	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -593,7 +594,7 @@ func (c *Client) Import(ctx context.Context, req *datapb.ImportTaskRequest) (*da
 // UpdateSegmentStatistics is the client side caller of UpdateSegmentStatistics.
 func (c *Client) UpdateSegmentStatistics(ctx context.Context, req *datapb.UpdateSegmentStatisticsRequest) (*commonpb.Status, error) {
 	req = typeutil.Clone(req)
-	commonpbutil.SetTargetID(req.GetBase(), c.sess.ServerID)
+	commonpbutil.UpdateMsgBase(req.GetBase(), commonpbutil.FillMsgBaseFromClient(c.sess.ServerID))
 	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -609,7 +610,7 @@ func (c *Client) UpdateSegmentStatistics(ctx context.Context, req *datapb.Update
 // AcquireSegmentLock acquire the reference lock of the segments.
 func (c *Client) AcquireSegmentLock(ctx context.Context, req *datapb.AcquireSegmentLockRequest) (*commonpb.Status, error) {
 	req = typeutil.Clone(req)
-	commonpbutil.SetTargetID(req.GetBase(), c.sess.ServerID)
+	commonpbutil.UpdateMsgBase(req.GetBase(), commonpbutil.FillMsgBaseFromClient(c.sess.ServerID))
 	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -625,7 +626,7 @@ func (c *Client) AcquireSegmentLock(ctx context.Context, req *datapb.AcquireSegm
 // ReleaseSegmentLock release the reference lock of the segments.
 func (c *Client) ReleaseSegmentLock(ctx context.Context, req *datapb.ReleaseSegmentLockRequest) (*commonpb.Status, error) {
 	req = typeutil.Clone(req)
-	commonpbutil.SetTargetID(req.GetBase(), c.sess.ServerID)
+	commonpbutil.UpdateMsgBase(req.GetBase(), commonpbutil.FillMsgBaseFromClient(c.sess.ServerID))
 	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -641,7 +642,7 @@ func (c *Client) ReleaseSegmentLock(ctx context.Context, req *datapb.ReleaseSegm
 // SaveImportSegment is the DataCoord client side code for SaveImportSegment call.
 func (c *Client) SaveImportSegment(ctx context.Context, req *datapb.SaveImportSegmentRequest) (*commonpb.Status, error) {
 	req = typeutil.Clone(req)
-	commonpbutil.SetTargetID(req.GetBase(), c.sess.ServerID)
+	commonpbutil.UpdateMsgBase(req.GetBase(), commonpbutil.FillMsgBaseFromClient(c.sess.ServerID))
 	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -656,7 +657,7 @@ func (c *Client) SaveImportSegment(ctx context.Context, req *datapb.SaveImportSe
 
 func (c *Client) UnsetIsImportingState(ctx context.Context, req *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error) {
 	req = typeutil.Clone(req)
-	commonpbutil.SetTargetID(req.GetBase(), c.sess.ServerID)
+	commonpbutil.UpdateMsgBase(req.GetBase(), commonpbutil.FillMsgBaseFromClient(c.sess.ServerID))
 	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -671,7 +672,7 @@ func (c *Client) UnsetIsImportingState(ctx context.Context, req *datapb.UnsetIsI
 
 func (c *Client) MarkSegmentsDropped(ctx context.Context, req *datapb.MarkSegmentsDroppedRequest) (*commonpb.Status, error) {
 	req = typeutil.Clone(req)
-	commonpbutil.SetTargetID(req.GetBase(), c.sess.ServerID)
+	commonpbutil.UpdateMsgBase(req.GetBase(), commonpbutil.FillMsgBaseFromClient(c.sess.ServerID))
 	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -687,7 +688,7 @@ func (c *Client) MarkSegmentsDropped(ctx context.Context, req *datapb.MarkSegmen
 // BroadcastAlteredCollection is the DataCoord client side code for BroadcastAlteredCollection call.
 func (c *Client) BroadcastAlteredCollection(ctx context.Context, req *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
 	req = typeutil.Clone(req)
-	commonpbutil.SetTargetID(req.GetBase(), c.sess.ServerID)
+	commonpbutil.UpdateMsgBase(req.GetBase(), commonpbutil.FillMsgBaseFromClient(c.sess.ServerID))
 	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()

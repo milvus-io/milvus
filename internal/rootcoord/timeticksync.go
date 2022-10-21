@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
@@ -301,12 +302,12 @@ func (t *timetickSync) sendTimeTickToChannel(chanNames []string, ts typeutil.Tim
 		HashValues:     []uint32{0},
 	}
 	timeTickResult := internalpb.TimeTickMsg{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_TimeTick,
-			MsgID:     0,
-			Timestamp: ts,
-			SourceID:  t.sourceID,
-		},
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_TimeTick),
+			commonpbutil.WithMsgID(0),
+			commonpbutil.WithTimeStamp(ts),
+			commonpbutil.WithSourceID(t.sourceID),
+		),
 	}
 	timeTickMsg := &msgstream.TimeTickMsg{
 		BaseMsg:     baseMsg,
@@ -331,7 +332,7 @@ func (t *timetickSync) getSessionNum() int {
 	return len(t.sess2ChanTsMap)
 }
 
-///////////////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////////////
 // getDmlChannelNames returns list of channel names.
 func (t *timetickSync) getDmlChannelNames(count int) []string {
 	return t.dmlChannels.getChannelNames(count)

@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
@@ -48,16 +49,19 @@ var _ flowgraph.Node = (*ddNode)(nil)
 // ddNode filters messages from message streams.
 //
 // ddNode recives all the messages from message stream dml channels, including insert messages,
-//  delete messages and ddl messages like CreateCollectionMsg and DropCollectionMsg.
+//
+//	delete messages and ddl messages like CreateCollectionMsg and DropCollectionMsg.
 //
 // ddNode filters insert messages according to the `sealedSegment`.
 // ddNode will filter out the insert message for those who belong to `sealedSegment`
 //
 // When receiving a `DropCollection` message, ddNode will send a signal to DataNode `BackgroundGC`
-//  goroutinue, telling DataNode to release the resources of this particular flow graph.
+//
+//	goroutinue, telling DataNode to release the resources of this particular flow graph.
 //
 // After the filtering process, ddNode passes all the valid insert messages and delete message
-//  to the following flow graph node, which in DataNode is `insertBufferNode`
+//
+//	to the following flow graph node, which in DataNode is `insertBufferNode`
 type ddNode struct {
 	BaseNode
 
@@ -281,12 +285,12 @@ func (ddn *ddNode) sendDeltaTimeTick(ts Timestamp) error {
 		HashValues:     []uint32{0},
 	}
 	timeTickResult := internalpb.TimeTickMsg{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_TimeTick,
-			MsgID:     0,
-			Timestamp: ts,
-			SourceID:  Params.DataNodeCfg.GetNodeID(),
-		},
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_TimeTick),
+			commonpbutil.WithMsgID(0),
+			commonpbutil.WithTimeStamp(ts),
+			commonpbutil.WithSourceID(Params.DataNodeCfg.GetNodeID()),
+		),
 	}
 	timeTickMsg := &msgstream.TimeTickMsg{
 		BaseMsg:     baseMsg,
