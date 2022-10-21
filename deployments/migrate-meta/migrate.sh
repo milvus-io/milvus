@@ -12,8 +12,9 @@ remove_migrate_pod_after_migrate="false"
 #-t target_version: The milvus target version.
 #-r root_path: The milvus meta root path.
 #-w image_tag: The new milvus image tag.
-#-o operation: The operation: migrate/rollback
-while getopts "n:i:s:t:r:w:o" opt_name
+#-o operation: The operation: migrate/rollback.
+#-d remove_migrate_pod_after_migrate: Remove migration pod after successful migration.
+while getopts "n:i:s:t:r:w:o:d" opt_name
 do
   case $opt_name in
     n) namespace=$OPTARG;;
@@ -23,7 +24,7 @@ do
     r) root_path=$OPTARG;;
     w) image_tag=$OPTARG;;
     o) operation=$OPTARG;;
-    d) remove_migrate_pod_after_migrate=$OPTARG;;
+    d) remove_migrate_pod_after_migrate="true";;
     *) echo "Unkonwen parameters";;
   esac
 done
