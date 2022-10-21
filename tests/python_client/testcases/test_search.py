@@ -1743,7 +1743,6 @@ class TestCollectionSearch(TestcaseBase):
                                          "_async": _async})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="issue 19374")
     @pytest.mark.parametrize("partition_names",
                              [["(.*)"], ["search(.*)"]])
     def test_search_index_partitions_fuzzy(self, nb, nq, dim, partition_names, auto_id, _async):
@@ -1757,22 +1756,26 @@ class TestCollectionSearch(TestcaseBase):
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, nb,
                                                                       partition_num=1,
                                                                       auto_id=auto_id,
-                                                                      dim=dim)[0:4]
+                                                                      dim=dim,
+                                                                      is_index=True)[0:4]
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         # 2. create index
-        default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
+        nlist = 128
+        default_index = {"index_type": "IVF_FLAT", "params": {"nlist": nlist}, "metric_type": "L2"}
         collection_w.create_index("float_vector", default_index)
+        collection_w.load()
         # 3. search through partitions
         log.info("test_search_index_partitions_fuzzy: searching through partitions")
         limit = 1000
         limit_check = limit
         par = collection_w.partitions
+        search_params = {"metric_type": "L2", "params": {"nprobe": nlist}}
         if partition_names == ["search(.*)"]:
             insert_ids = insert_ids[par[0].num_entities:]
             if limit > par[1].num_entities:
                 limit_check = par[1].num_entities
         collection_w.search(vectors[:nq], default_search_field,
-                            default_search_params, limit, default_search_exp,
+                            search_params, limit, default_search_exp,
                             partition_names, _async=_async,
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": nq,
