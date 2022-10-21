@@ -85,7 +85,6 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 const BitsetView& bitset,
                 SearchResult& results) {
     auto& schema = segment.get_schema();
-    auto& indexing_record = segment.get_indexing_record();
     auto& record = segment.get_insert_record();
     auto active_count = segment.get_active_count(timestamp);
 
