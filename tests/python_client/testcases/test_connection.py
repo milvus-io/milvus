@@ -871,9 +871,10 @@ class TestConnectIPInvalid(TestcaseBase):
         method: set host in get_not_string
         expected: connected is False
         """
-        err_msg = cem.FailConnect % (host, port)
-        self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, host=host, port=port, check_task=ct.CheckTasks.ccr,
-                                     check_items={ct.err_code: -1, ct.err_msg: err_msg})
+        err_msg = "Type of 'host' must be str."
+        self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, host=host, port=port,
+                                     check_task=ct.CheckTasks.check_value_equal,
+                                     check_items={ct.err_code: 1, ct.err_msg: err_msg})
 
 
 class TestConnectPortInvalid(TestcaseBase):
@@ -889,9 +890,10 @@ class TestConnectPortInvalid(TestcaseBase):
         method: set port in get_not_string
         expected: connected is False
         """
-        err_msg = cem.FailConnect % (host, str(port))
-        self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, host=host, port=port, check_task=ct.CheckTasks.ccr,
-                                     check_items={ct.err_code: -1, ct.err_msg: err_msg})
+        err_msg = "Type of 'host' must be str."
+        self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, host=host, port=port,
+                                     check_task=ct.CheckTasks.check_value_equal,
+                                     check_items={ct.err_code: 1, ct.err_msg: err_msg})
 
 
 class TestConnectUriInvalid(TestcaseBase):
