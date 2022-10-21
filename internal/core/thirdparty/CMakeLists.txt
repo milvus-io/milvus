@@ -65,7 +65,7 @@ add_subdirectory( arrow )
 add_subdirectory( rocksdb )
 
 # ******************************* Thirdparty aws sdk ********************************
-if ( LINUX )
+if ( LINUX AND BUILD_DISK_ANN STREQUAL "ON" )
     add_subdirectory( aws_sdk )
 endif()
 
