@@ -577,7 +577,8 @@ func (s *Server) handleTimetickMessage(ctx context.Context, ttMsg *msgstream.Dat
 	log.Info("start flushing segments",
 		zap.Int64s("segment IDs", flushableIDs),
 		zap.Int("# of stale/mark segments", len(staleSegments)))
-
+	// update segment last update triggered time
+	// it's ok to fail flushing, since next timetick after duration will re-trigger
 	s.setLastFlushTime(flushableSegments)
 	s.setLastFlushTime(staleSegments)
 
@@ -588,7 +589,12 @@ func (s *Server) handleTimetickMessage(ctx context.Context, ttMsg *msgstream.Dat
 	for _, info := range staleSegments {
 		minfo = append(minfo, info.SegmentInfo)
 	}
-	s.cluster.Flush(s.ctx, finfo, minfo)
+	err = s.cluster.Flush(s.ctx, ttMsg.GetBase().GetSourceID(), ch, finfo, minfo)
+	if err != nil {
+		log.Warn("handle")
+		return err
+	}
+
 	return nil
 }
 
