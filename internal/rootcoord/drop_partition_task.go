@@ -61,7 +61,8 @@ func (t *dropPartitionTask) Execute(ctx context.Context) error {
 		state:        pb.PartitionState_PartitionDropping,
 		ts:           t.GetTs(),
 	})
-	redoTask.AddSyncStep(&expireCacheStep{
+
+	redoTask.AddAsyncStep(&expireCacheStep{
 		baseStep:        baseStep{core: t.core},
 		collectionNames: []string{t.collMeta.Name},
 		collectionID:    t.collMeta.CollectionID,
