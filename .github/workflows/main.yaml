@@ -58,6 +58,12 @@ jobs:
           path: .docker/amd64-ubuntu${{ matrix.ubuntu }}-ccache
           key: ubuntu${{ matrix.ubuntu }}-ccache-${{ env.corehash }}
           restore-keys: ubuntu${{ matrix.ubuntu }}-ccache-
+      - name: Cache Third Party
+        uses: actions/cache@v3
+        with:
+          path: .docker/thirdparty
+          key: ubuntu${{ matrix.ubuntu }}-thirdparty-${{ hashFiles('internal/core/thirdparty/**') }}
+          restore-keys: ubuntu${{ matrix.ubuntu }}-thirdparty-
       - name: Cache Go Mod Volumes
         uses: actions/cache@v3
         with:
