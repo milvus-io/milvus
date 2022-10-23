@@ -57,13 +57,10 @@ spec:
     name: docker-graph
   - emptyDir: {}
     name: docker-root
-  - name: build-cache
-    persistentVolumeClaim:
-      claimName: milvus-build-cache
-  # - hostPath:
-  #     path: /tmp/krte/cache
-  #     type: DirectoryOrCreate
-  #   name: build-cache
+  - hostPath:
+      path: /tmp/krte/cache
+      type: DirectoryOrCreate
+    name: build-cache
   - hostPath:
       path: /lib/modules
       type: Directory
