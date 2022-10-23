@@ -252,7 +252,7 @@ func (ob *HandoffObserver) tryHandoff(ctx context.Context, segment *querypb.Segm
 		ob.handoffSubmitOrders[segment.GetPartitionID()] = append(ob.handoffSubmitOrders[segment.GetPartitionID()], segment.GetSegmentID())
 	} else {
 		// ignore handoff task
-		log.Debug("handoff event trigger failed due to collection/partition is not loaded!")
+		log.Info("handoff event trigger failed due to collection/partition is not loaded!")
 		ob.cleanEvent(ctx, segment)
 	}
 }
