@@ -80,6 +80,18 @@ func (fg *TimeTickedFlowGraph) Start() {
 	})
 }
 
+func (fg *TimeTickedFlowGraph) Blockall() {
+	for _, v := range fg.nodeCtx {
+		v.Block()
+	}
+}
+
+func (fg *TimeTickedFlowGraph) Unblock() {
+	for _, v := range fg.nodeCtx {
+		v.Unblock()
+	}
+}
+
 // Close closes all nodes in flowgraph
 func (fg *TimeTickedFlowGraph) Close() {
 	fg.stopOnce.Do(func() {

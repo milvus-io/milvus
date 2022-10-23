@@ -58,6 +58,8 @@ type nodeCtx struct {
 
 	closeCh chan struct{} // notify work to exit
 	closeWg *sync.WaitGroup
+
+	blockMutex sync.RWMutex
 }
 
 // Start invoke Node `Start` method and start a worker goroutine
@@ -66,6 +68,19 @@ func (nodeCtx *nodeCtx) Start() {
 
 	nodeCtx.closeWg.Add(1)
 	go nodeCtx.work()
+}
+
+func (nodeCtx *nodeCtx) Block() {
+	// input node operate function will be blocking
+	if !nodeCtx.node.IsInputNode() {
+		nodeCtx.blockMutex.Lock()
+	}
+}
+
+func (nodeCtx *nodeCtx) Unblock() {
+	if !nodeCtx.node.IsInputNode() {
+		nodeCtx.blockMutex.Unlock()
+	}
 }
 
 func isCloseMsg(msgs []Msg) bool {
@@ -102,14 +117,15 @@ func (nodeCtx *nodeCtx) work() {
 			if !nodeCtx.node.IsInputNode() {
 				input = <-nodeCtx.inputChannel
 			}
-
 			// the input message decides whether the operate method is executed
 			if isCloseMsg(input) {
 				output = input
 			}
 			if len(output) == 0 {
 				n := nodeCtx.node
+				nodeCtx.blockMutex.RLock()
 				output = n.Operate(input)
+				nodeCtx.blockMutex.RUnlock()
 			}
 			// the output decide whether the node should be closed.
 			if isCloseMsg(output) {

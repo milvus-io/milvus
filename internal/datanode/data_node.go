@@ -911,6 +911,12 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 		return status, nil
 	}
 
+	ds, ok := node.flowgraphManager.getFlowgraphService(channel.getChannelName(oneSegment))
+	if !ok {
+		status.Reason = fmt.Sprintf("failed to find flow graph service, err=%s", err.Error())
+		return status, nil
+	}
+
 	// check if all compactedFrom segments are valid
 	var invalidSegIDs []UniqueID
 	for _, segID := range req.GetCompactedFrom() {
@@ -934,6 +940,9 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 
 	channel.(*ChannelMeta).initPKBloomFilter(ctx, targetSeg, req.GetStatsLogs(), tsoutil.GetCurrentTime())
 
+	// block all flow graph so it's safe to remove segment
+	ds.fg.Blockall()
+	defer ds.fg.Unblock()
 	if err := channel.mergeFlushedSegments(targetSeg, req.GetPlanID(), req.GetCompactedFrom()); err != nil {
 		status.Reason = err.Error()
 		return status, nil
