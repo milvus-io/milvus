@@ -50,16 +50,27 @@ func WithSourceID(sourceID int64) MsgBaseOptions {
 	}
 }
 
+func WithTargetID(targetID int64) MsgBaseOptions {
+	return func(msgBase *commonpb.MsgBase) {
+		msgBase.TargetID = targetID
+	}
+}
+
 func GetNowTimestamp() uint64 {
 	return uint64(time.Now().Unix())
 }
 
-func FillMsgBaseFromClient(targetID int64) MsgBaseOptions {
+func FillMsgBaseFromClient(sourceID int64, options ...MsgBaseOptions) MsgBaseOptions {
 	return func(msgBase *commonpb.MsgBase) {
 		if msgBase.Timestamp == 0 {
 			msgBase.Timestamp = GetNowTimestamp()
 		}
-		msgBase.TargetID = targetID
+		if msgBase.SourceID == 0 {
+			msgBase.SourceID = sourceID
+		}
+		for _, op := range options {
+			op(msgBase)
+		}
 	}
 
 }
@@ -88,5 +99,4 @@ func UpdateMsgBase(msgBase *commonpb.MsgBase, options ...MsgBaseOptions) *common
 		op(msgBaseRt)
 	}
 	return msgBaseRt
-
 }

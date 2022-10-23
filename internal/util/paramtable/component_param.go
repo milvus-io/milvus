@@ -111,7 +111,7 @@ func (p *ComponentParam) KafkaEnable() bool {
 	return p.KafkaCfg.Address != ""
 }
 
-///////////////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////////////
 // --- common ---
 type commonConfig struct {
 	Base *BaseTable
@@ -453,13 +453,15 @@ func (p *commonConfig) initSessionRetryTimes() {
 	p.SessionRetryTimes = p.Base.ParseInt64WithDefault("common.session.retryTimes", 30)
 }
 
-///////////////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////////////
 // --- rootcoord ---
 type rootCoordConfig struct {
 	Base *BaseTable
 
 	Address string
 	Port    int
+
+	NodeID atomic.Value
 
 	DmlChannelNum               int64
 	MaxPartitionNum             int64
@@ -485,9 +487,22 @@ func (p *rootCoordConfig) init(base *BaseTable) {
 	p.ImportTaskRetention = p.Base.ParseFloatWithDefault("rootCoord.importTaskRetention", 24*60*60)
 	p.ImportTaskSubPath = "importtask"
 	p.EnableActiveStandby = p.Base.ParseBool("rootCoord.enableActiveStandby", false)
+	p.NodeID.Store(UniqueID(0))
 }
 
-///////////////////////////////////////////////////////////////////////////////
+func (p *rootCoordConfig) SetNodeID(id UniqueID) {
+	p.NodeID.Store(id)
+}
+
+func (p *rootCoordConfig) GetNodeID() UniqueID {
+	val := p.NodeID.Load()
+	if val != nil {
+		return val.(UniqueID)
+	}
+	return 0
+}
+
+// /////////////////////////////////////////////////////////////////////////////
 // --- proxy ---
 type proxyConfig struct {
 	Base *BaseTable
@@ -666,7 +681,7 @@ func (p *proxyConfig) initMaxRoleNum() {
 	p.MaxRoleNum = int(maxRoleNum)
 }
 
-///////////////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////////////
 // --- querycoord ---
 type queryCoordConfig struct {
 	Base *BaseTable
@@ -855,7 +870,7 @@ func (p *queryCoordConfig) GetNodeID() UniqueID {
 	return 0
 }
 
-///////////////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////////////
 // --- querynode ---
 type queryNodeConfig struct {
 	Base *BaseTable
@@ -1102,7 +1117,7 @@ func (p *queryNodeConfig) initDiskCapacity() {
 	p.DiskCapacityLimit = diskSize * 1024 * 1024 * 1024
 }
 
-///////////////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////////////
 // --- datacoord ---
 type dataCoordConfig struct {
 	Base *BaseTable
@@ -1319,7 +1334,7 @@ func (p *dataCoordConfig) GetNodeID() UniqueID {
 	return 0
 }
 
-///////////////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////////////
 // --- datanode ---
 type dataNodeConfig struct {
 	Base *BaseTable
@@ -1401,7 +1416,7 @@ func (p *dataNodeConfig) GetNodeID() UniqueID {
 	return 0
 }
 
-///////////////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////////////
 // --- indexcoord ---
 type indexCoordConfig struct {
 	Base *BaseTable
@@ -1413,6 +1428,8 @@ type indexCoordConfig struct {
 	IndexNodeAddress  string
 	WithCredential    bool
 	IndexNodeID       int64
+
+	NodeID atomic.Value
 
 	MinSegmentNumRowsToEnableIndex int64
 
@@ -1434,6 +1451,7 @@ func (p *indexCoordConfig) init(base *BaseTable) {
 	p.initWithCredential()
 	p.initIndexNodeID()
 	p.initEnableActiveStandby()
+	p.NodeID.Store(UniqueID(0))
 }
 
 func (p *indexCoordConfig) initMinSegmentNumRowsToEnableIndex() {
@@ -1464,7 +1482,19 @@ func (p *indexCoordConfig) initEnableActiveStandby() {
 	p.EnableActiveStandby = p.Base.ParseBool("indexCoord.enableActiveStandby", false)
 }
 
-///////////////////////////////////////////////////////////////////////////////
+func (p *indexCoordConfig) SetNodeID(id UniqueID) {
+	p.NodeID.Store(id)
+}
+
+func (p *indexCoordConfig) GetNodeID() UniqueID {
+	val := p.NodeID.Load()
+	if val != nil {
+		return val.(UniqueID)
+	}
+	return 0
+}
+
+// /////////////////////////////////////////////////////////////////////////////
 // --- indexnode ---
 type indexNodeConfig struct {
 	Base *BaseTable
