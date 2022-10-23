@@ -112,7 +112,12 @@ func getSegmentCapacityPolicy(sizeFactor float64) segmentSealPolicy {
 		for _, allocation := range segment.allocations {
 			allocSize += allocation.NumOfRows
 		}
-		return float64(segment.currRows) >= sizeFactor*float64(segment.GetMaxRowNum())
+		// Make SegmentSealProportion a little smaller to make compaction behave as expect.
+		// e.g. sizeFactor = 0.25. segment.GetMaxRowNum() = 10000.
+		// We will always get segments a little larger than 2500, like 2501, 2502, as we can't cut it accurately.
+		// Then compaction will accept only 3 segments to merge into one segment of 7500+ rows.
+		// If we make sizeFactor smaller, we suppose to get segments < 2500 and finally compacted segments with expected size (close to 10000).
+		return float64(segment.currRows) >= (0.9*sizeFactor)*float64(segment.GetMaxRowNum())
 	}
 }
 
