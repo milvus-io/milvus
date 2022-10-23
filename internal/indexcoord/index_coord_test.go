@@ -23,6 +23,7 @@ import (
 	"math/rand"
 	"path"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -1073,5 +1074,126 @@ func TestIndexCoord_CheckHealth(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, false, resp.IsHealthy)
 		assert.NotEmpty(t, resp.Reasons)
+	})
+}
+
+func TestIndexCoord_CreateIndex(t *testing.T) {
+	ic := &IndexCoord{
+		metaTable: &metaTable{
+			catalog:          nil,
+			indexLock:        sync.RWMutex{},
+			segmentIndexLock: sync.RWMutex{},
+			collectionIndexes: map[UniqueID]map[UniqueID]*model.Index{
+				collID: {
+					indexID: {
+						TenantID:     "",
+						CollectionID: collID,
+						FieldID:      fieldID,
+						IndexID:      indexID,
+						IndexName:    indexName,
+						IsDeleted:    false,
+						CreateTime:   10,
+						TypeParams: []*commonpb.KeyValuePair{
+							{
+								Key:   "dim",
+								Value: "128",
+							},
+						},
+						IndexParams: []*commonpb.KeyValuePair{
+							{
+								Key:   "index_type",
+								Value: "IVF_FLAT",
+							},
+							{
+								Key:   "metrics_type",
+								Value: "HAMMING",
+							},
+							{
+								Key:   "nlist",
+								Value: "128",
+							},
+						},
+						IsAutoIndex:     false,
+						UserIndexParams: nil,
+					},
+				},
+			},
+			segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
+				segID: {
+					indexID: {
+						SegmentID:     segID,
+						CollectionID:  collID,
+						PartitionID:   partID,
+						NumRows:       1025,
+						IndexID:       indexID,
+						BuildID:       buildID,
+						NodeID:        nodeID,
+						IndexVersion:  1,
+						IndexState:    commonpb.IndexState_Unissued,
+						FailReason:    "",
+						IsDeleted:     false,
+						CreateTime:    10,
+						IndexFileKeys: nil,
+						IndexSize:     0,
+						WriteHandoff:  false,
+					},
+				},
+			},
+			buildID2SegmentIndex: map[UniqueID]*model.SegmentIndex{
+				buildID: {
+					SegmentID:     segID,
+					CollectionID:  collID,
+					PartitionID:   partID,
+					NumRows:       1025,
+					IndexID:       indexID,
+					BuildID:       buildID,
+					NodeID:        nodeID,
+					IndexVersion:  1,
+					IndexState:    commonpb.IndexState_Unissued,
+					FailReason:    "",
+					IsDeleted:     false,
+					CreateTime:    10,
+					IndexFileKeys: nil,
+					IndexSize:     0,
+					WriteHandoff:  false,
+				},
+			},
+		},
+	}
+	ic.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	t.Run("index already exist, but params are inconsistent", func(t *testing.T) {
+		req := &indexpb.CreateIndexRequest{
+			CollectionID: collID,
+			FieldID:      fieldID,
+			IndexName:    indexName,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   "dim",
+					Value: "128",
+				},
+			},
+			IndexParams: []*commonpb.KeyValuePair{
+				{
+					Key:   "index_type",
+					Value: "IVF_FLAT",
+				},
+				{
+					Key:   "metrics_type",
+					Value: "HAMMING",
+				},
+				{
+					Key:   "params",
+					Value: "{nlist: 128}",
+				},
+			},
+			Timestamp:       0,
+			IsAutoIndex:     false,
+			UserIndexParams: nil,
+		}
+
+		resp, err := ic.CreateIndex(context.Background(), req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
 	})
 }
