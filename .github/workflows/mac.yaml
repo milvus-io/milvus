@@ -1,4 +1,4 @@
-name: Code Checker
+name: Mac Code Checker
 
 # This workflow is triggered on pushes or pull request to the repository.
 on:
@@ -30,19 +30,31 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v2
+      - name: "Generate CCache Hash"
+        env:
+          CORE_HASH: ${{ hashFiles( 'internal/core/**/*.cpp', 'internal/core/**/*.cc', 'internal/core/**/*.c', 'internal/core/**/*.h', 'internal/core/**/*.hpp', 'internal/core/**/CMakeLists.txt') }}
+        run: |
+          echo "corehash=${CORE_HASH}" >> $GITHUB_ENV
+          echo "Set CCache hash to ${CORE_HASH}"
       - name: Mac Cache Third Party
         uses: actions/cache@v3
         with:
           path: |
             /tmp/thirdparty 
-            cmake_build/3rdparty_download/download
           key: macos-thirdparty-${{ hashFiles('internal/core/thirdparty/**') }}
           restore-keys: macos-thirdparty-
+      - name: Mac Cache Cmake Build             
+        uses: actions/cache@v3
+        with:
+          path: |
+            cmake_build/3rdparty_download/download
+          key: macos-cmake-build-${{ env.corehash }}
+          restore-keys: macos-cmake-build-
       - name: Mac Cache CCache Volumes
         uses: actions/cache@v3
         with:
           path: /var/tmp/ccache
-          key: macos-ccache-${{ hashFiles('internal/core/**') }}
+          key: macos-ccache-${{ env.corehash }}
           restore-keys: macos-ccache-
       - name: Setup Go environment
         uses: actions/setup-go@v2.2.0

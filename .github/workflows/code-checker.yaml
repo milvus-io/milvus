@@ -39,11 +39,17 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v2
+      - name: "Generate CCache Hash"
+        env:
+          CORE_HASH: ${{ hashFiles( 'internal/core/**/*.cpp', 'internal/core/**/*.cc', 'internal/core/**/*.c', 'internal/core/**/*.h', 'internal/core/**/*.hpp', 'internal/core/**/CMakeLists.txt') }}
+        run: |
+          echo "corehash=${CORE_HASH}" >> $GITHUB_ENV
+          echo "Set CCache hash to ${CORE_HASH}"
       - name: Cache CCache Volumes
         uses: actions/cache@v3
         with:
           path: .docker/amd64-ubuntu20.04-ccache
-          key: ubuntu20.04-ccache-${{ hashFiles('internal/core/**') }}
+          key: ubuntu20.04-ccache-${{ env.corehash }}
           restore-keys: ubuntu20.04-ccache-
       - name: Cache Third Party
         uses: actions/cache@v3
@@ -71,11 +77,17 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v2
+      - name: "Generate CCache Hash"
+        env:
+          CORE_HASH: ${{ hashFiles( 'internal/core/**/*.cpp', 'internal/core/**/*.cc', 'internal/core/**/*.c', 'internal/core/**/*.h', 'internal/core/**/*.hpp', 'internal/core/**/CMakeLists.txt') }}
+        run: |
+          echo "corehash=${CORE_HASH}" >> $GITHUB_ENV
+          echo "Set CCache hash to ${CORE_HASH}"
       - name: Cache CCache Volumes
         uses: actions/cache@v3
         with:
           path: .docker/amd64-centos7-ccache
-          key: centos7-ccache-${{ hashFiles('internal/core/**') }}
+          key: centos7-ccache-${{ env.corehash }}
           restore-keys: centos7-ccache-
       - name: Cache Third Party
         uses: actions/cache@v3
