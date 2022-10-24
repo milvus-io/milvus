@@ -449,6 +449,9 @@ func (scheduler *taskScheduler) schedule(node int64) {
 	log.Info("processed tasks",
 		zap.Int("toRemoveNum", len(toRemove)))
 
+	// trigger executor to execute at once
+	scheduler.executor.TriggerNow()
+
 	log.Debug("process tasks related to node done",
 		zap.Int("processingTaskNum", scheduler.processQueue.Len()),
 		zap.Int("waitingTaskNum", scheduler.waitQueue.Len()),

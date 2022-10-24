@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -126,9 +127,14 @@ func (suite *MergerSuite) TestMerge() {
 		suite.merger.Add(NewLoadSegmentsTask(task, 0, suite.requests[segmentID]))
 	}
 
+	start := time.Now()
 	suite.merger.Start(ctx)
 	defer suite.merger.Stop()
+	// wait until
+	suite.merger.TriggerNow()
 	taskI := <-suite.merger.Chan()
+	elapsed := time.Since(start)
+	assert.True(suite.T(), elapsed < 10*time.Millisecond)
 	task := taskI.(*LoadSegmentsTask)
 	suite.Len(task.tasks, 3)
 	suite.Len(task.steps, 3)

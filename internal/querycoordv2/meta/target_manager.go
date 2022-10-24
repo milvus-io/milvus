@@ -83,7 +83,7 @@ func (mgr *TargetManager) RemoveSegment(segmentID int64) {
 
 func (mgr *TargetManager) removeSegment(segmentID int64) {
 	delete(mgr.segments, segmentID)
-	log.Info("segment removed from targets")
+	log.Info("segment removed from targets", zap.Int64("segment", segmentID))
 }
 
 // AddSegment adds segment into target set,

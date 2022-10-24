@@ -58,6 +58,7 @@ type BaseJob struct {
 	collectionID int64
 	err          error
 	doneCh       chan struct{}
+	startTs      time.Time
 }
 
 func NewBaseJob(ctx context.Context, msgID, collectionID int64) *BaseJob {
@@ -139,6 +140,7 @@ func (job *LoadCollectionJob) PreExecute() error {
 	log := log.Ctx(job.ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
 	)
+	job.startTs = time.Now()
 
 	if req.GetReplicaNumber() <= 0 {
 		log.Info("request doesn't indicate the number of replicas, set it to 1",
@@ -244,7 +246,10 @@ func (job *LoadCollectionJob) PostExecute() {
 		job.meta.ReplicaManager.RemoveCollection(job.CollectionID())
 		job.handoffObserver.Unregister(job.ctx)
 		job.targetMgr.RemoveCollection(job.req.GetCollectionID())
+		return
 	}
+	elapsed := time.Since(job.startTs)
+	log.Info("load collection done", zap.Int64("collectionID", job.CollectionID()), zap.Duration("time taken", elapsed))
 }
 
 type ReleaseCollectionJob struct {
@@ -271,6 +276,11 @@ func NewReleaseCollectionJob(ctx context.Context,
 		targetMgr:       targetMgr,
 		handoffObserver: handoffObserver,
 	}
+}
+
+func (job *ReleaseCollectionJob) PreExecute() error {
+	job.startTs = time.Now()
+	return nil
 }
 
 func (job *ReleaseCollectionJob) Execute() error {
@@ -301,6 +311,13 @@ func (job *ReleaseCollectionJob) Execute() error {
 	job.targetMgr.RemoveCollection(req.GetCollectionID())
 	waitCollectionReleased(job.dist, req.GetCollectionID())
 	return nil
+}
+
+func (job *ReleaseCollectionJob) PostExecute() {
+	if job.Error() == nil {
+		elapsed := time.Since(job.startTs)
+		log.Info("release collection done", zap.Int64("collectionID", job.CollectionID()), zap.Duration("time taken", elapsed))
+	}
 }
 
 type LoadPartitionJob struct {
@@ -342,6 +359,7 @@ func (job *LoadPartitionJob) PreExecute() error {
 	log := log.Ctx(job.ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
 	)
+	job.startTs = time.Now()
 
 	if req.GetReplicaNumber() <= 0 {
 		log.Info("request doesn't indicate the number of replicas, set it to 1",
@@ -452,7 +470,10 @@ func (job *LoadPartitionJob) PostExecute() {
 		job.meta.ReplicaManager.RemoveCollection(job.CollectionID())
 		job.handoffObserver.Unregister(job.ctx, job.CollectionID())
 		job.targetMgr.RemoveCollection(job.req.GetCollectionID())
+		return
 	}
+	elapsed := time.Since(job.startTs)
+	log.Info("load partition done", zap.Int64("collectionID", job.CollectionID()), zap.Duration("time taken", elapsed))
 }
 
 type ReleasePartitionJob struct {
@@ -485,6 +506,7 @@ func (job *ReleasePartitionJob) PreExecute() error {
 	log := log.Ctx(job.ctx).With(
 		zap.Int64("collectionID", job.req.GetCollectionID()),
 	)
+	job.startTs = time.Now()
 	if job.meta.CollectionManager.GetLoadType(job.req.GetCollectionID()) == querypb.LoadType_LoadCollection {
 		msg := "releasing some partitions after load collection is not supported"
 		log.Warn(msg)
@@ -540,4 +562,11 @@ func (job *ReleasePartitionJob) Execute() error {
 		waitCollectionReleased(job.dist, req.GetCollectionID(), toRelease...)
 	}
 	return nil
+}
+
+func (job *ReleasePartitionJob) PostExecute() {
+	if job.Error() == nil {
+		elapsed := time.Since(job.startTs)
+		log.Info("release partition done", zap.Int64("collectionID", job.CollectionID()), zap.Duration("time taken", elapsed))
+	}
 }
