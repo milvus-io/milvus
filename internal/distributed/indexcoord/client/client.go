@@ -39,6 +39,8 @@ import (
 
 var ClientParams paramtable.GrpcClientConfig
 
+var Params paramtable.ComponentParam
+
 // Client is the grpc client of IndexCoord.
 type Client struct {
 	grpcClient grpcclient.GrpcClient[indexpb.IndexCoordClient]
@@ -246,7 +248,10 @@ func (c *Client) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (
 // ShowConfigurations gets specified configurations para of IndexCoord
 func (c *Client) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
 	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(req.GetBase(), commonpbutil.FillMsgBaseFromClient(c.sess.ServerID))
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(Params.IndexCoordCfg.GetNodeID(), commonpbutil.WithTargetID(c.sess.ServerID)),
+	)
 	ret, err := c.grpcClient.ReCall(ctx, func(client indexpb.IndexCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -263,7 +268,10 @@ func (c *Client) ShowConfigurations(ctx context.Context, req *internalpb.ShowCon
 // GetMetrics gets the metrics info of IndexCoord.
 func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(req.GetBase(), commonpbutil.FillMsgBaseFromClient(c.sess.ServerID))
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(Params.IndexCoordCfg.GetNodeID(), commonpbutil.WithTargetID(c.sess.ServerID)),
+	)
 	ret, err := c.grpcClient.ReCall(ctx, func(client indexpb.IndexCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
