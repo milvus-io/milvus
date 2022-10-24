@@ -10,6 +10,7 @@ filters:
       - xige-16
       - yanliang567
       - zwd1208
+      - committers
     approvers:
       - maintainers
 
