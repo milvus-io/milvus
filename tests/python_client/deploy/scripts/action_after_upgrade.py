@@ -16,6 +16,7 @@ def task_1(data_size, host):
     connections.connect(host=host, port=19530, timeout=60)
     col_list = get_collections(prefix, check=True)
     assert len(col_list) == len(all_index_types)
+    create_index(prefix)
     load_and_search(prefix)
     create_collections_and_insert_data(prefix, data_size)
     create_index(prefix)

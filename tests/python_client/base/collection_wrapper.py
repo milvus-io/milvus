@@ -238,7 +238,6 @@ class ApiCollectionWrapper:
         index_name = INDEX_NAME if index_name is None else index_name
         index_name = kwargs.get("index_name", index_name)
         kwargs.update({"timeout": timeout, "index_name": index_name})
-
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([self.collection.create_index, field_name, index_params], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check,

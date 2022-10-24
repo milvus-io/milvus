@@ -52,7 +52,10 @@ class TestActionFirstDeployment(TestDeployBase):
         is_binary = False
         if "BIN" in name:
             is_binary = True
-        self.init_collection_general(insert_data=False, is_binary=is_binary, name=name)[0]
+        collection_w = self.init_collection_general(insert_data=False, is_binary=is_binary, name=name)[0]
+        if collection_w.has_index():
+            collection_w.drop_index()
+
 
 
     @pytest.mark.tags(CaseLabel.L3)
