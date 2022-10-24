@@ -63,3 +63,8 @@ func (gia *GlobalIDAllocator) AllocOne() (typeutil.UniqueID, error) {
 	idStart := typeutil.UniqueID(timestamp)
 	return idStart, nil
 }
+
+// UpdateID updates timestamp of allocator.
+func (gia *GlobalIDAllocator) UpdateID() error {
+	return gia.allocator.UpdateTSO()
+}

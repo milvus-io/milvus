@@ -23,4 +23,5 @@ package allocator
 type Interface interface {
 	Alloc(count uint32) (UniqueID, UniqueID, error)
 	AllocOne() (UniqueID, error)
+	UpdateID() error
 }

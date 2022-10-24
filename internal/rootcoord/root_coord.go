@@ -246,7 +246,7 @@ func (c *Core) tsLoop() {
 			}
 			ts := c.tsoAllocator.GetLastSavedTime()
 			metrics.RootCoordTimestampSaved.Set(float64(ts.Unix()))
-			if err := c.tsoAllocator.UpdateTSO(); err != nil {
+			if err := c.idAllocator.UpdateID(); err != nil {
 				log.Warn("failed to update id: ", zap.Error(err))
 				continue
 			}
