@@ -29,9 +29,6 @@ import (
 )
 
 type queryShard struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-
 	collectionID UniqueID
 	collection   *Collection // quick reference from meta
 	channel      Channel
@@ -80,10 +77,7 @@ func newQueryShard(
 		return nil, err
 	}
 
-	ctx, cancel := context.WithCancel(ctx)
 	qs := &queryShard{
-		ctx:                ctx,
-		cancel:             cancel,
 		collectionID:       collectionID,
 		collection:         collection,
 		channel:            channel,
@@ -104,7 +98,9 @@ func newQueryShard(
 
 // Close cleans query shard
 func (q *queryShard) Close() {
-	q.cancel()
+	if q.vectorChunkManager != nil {
+		q.vectorChunkManager.Close()
+	}
 }
 
 type tsType int32
