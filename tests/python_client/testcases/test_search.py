@@ -2285,7 +2285,7 @@ class TestCollectionSearch(TestcaseBase):
         fields = [cf.gen_int64_field("int64_1"), cf.gen_int64_field("int64_2"),
                   cf.gen_float_vec_field(dim=dim)]
         schema = cf.gen_collection_schema(fields=fields, primary_field="int64_1")
-        collection_w = self.init_collection_wrap(name="comparison", schema=schema)
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str("comparison"), schema=schema)
 
         #2. inset data
         values = pd.Series(data=[i for i in range(0, nb)])
