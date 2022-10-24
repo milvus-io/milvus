@@ -302,6 +302,7 @@ func newTestCore(opts ...Opt) *Core {
 		// no schedule, execute directly.
 		s.Execute(context.Background())
 	}
+	executor.StopFunc = func() {}
 	c.stepExecutor = executor
 	for _, opt := range opts {
 		opt(c)
@@ -737,6 +738,7 @@ type mockScheduler struct {
 	IScheduler
 	AddTaskFunc     func(t task) error
 	GetMinDdlTsFunc func() Timestamp
+	StopFunc        func()
 	minDdlTs        Timestamp
 }
 
@@ -758,6 +760,12 @@ func (m mockScheduler) GetMinDdlTs() Timestamp {
 	return m.minDdlTs
 }
 
+func (m mockScheduler) Stop() {
+	if m.StopFunc != nil {
+		m.StopFunc()
+	}
+}
+
 func withScheduler(sched IScheduler) Opt {
 	return func(c *Core) {
 		c.scheduler = sched
@@ -770,6 +778,7 @@ func withValidScheduler() Opt {
 		t.NotifyDone(nil)
 		return nil
 	}
+	sched.StopFunc = func() {}
 	return withScheduler(sched)
 }
 

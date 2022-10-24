@@ -1449,3 +1449,25 @@ func TestRootCoord_CheckHealth(t *testing.T) {
 		assert.NotEmpty(t, resp.Reasons)
 	})
 }
+
+func TestCore_Stop(t *testing.T) {
+	t.Run("abnormal stop before component is ready", func(t *testing.T) {
+		c := &Core{}
+		err := c.Stop()
+		assert.NoError(t, err)
+		code, ok := c.stateCode.Load().(commonpb.StateCode)
+		assert.True(t, ok)
+		assert.Equal(t, commonpb.StateCode_Abnormal, code)
+	})
+
+	t.Run("normal case", func(t *testing.T) {
+		c := newTestCore(withHealthyCode(),
+			withValidScheduler())
+		c.ctx, c.cancel = context.WithCancel(context.Background())
+		err := c.Stop()
+		assert.NoError(t, err)
+		code, ok := c.stateCode.Load().(commonpb.StateCode)
+		assert.True(t, ok)
+		assert.Equal(t, commonpb.StateCode_Abnormal, code)
+	})
+}
