@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
@@ -32,6 +33,8 @@ import (
 )
 
 var ClientParams paramtable.GrpcClientConfig
+
+var Params paramtable.ComponentParam
 
 // Client is the grpc client for DataNode
 type Client struct {
@@ -129,6 +132,10 @@ func (c *Client) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResp
 // Deprecated
 // WatchDmChannels create consumers on dmChannels to reveive Incremental data
 func (c *Client) WatchDmChannels(ctx context.Context, req *datapb.WatchDmChannelsRequest) (*commonpb.Status, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(Params.DataNodeCfg.GetNodeID()))
 	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -142,14 +149,22 @@ func (c *Client) WatchDmChannels(ctx context.Context, req *datapb.WatchDmChannel
 }
 
 // FlushSegments notifies DataNode to flush the segments req provids. The flush tasks are async to this
-//  rpc, DataNode will flush the segments in the background.
+//
+//	rpc, DataNode will flush the segments in the background.
 //
 // Return UnexpectedError code in status:
-//     If DataNode isn't in HEALTHY: states not HEALTHY or dynamic checks not HEALTHY
-//     If DataNode doesn't find the correspounding segmentID in its memeory replica
+//
+//	If DataNode isn't in HEALTHY: states not HEALTHY or dynamic checks not HEALTHY
+//	If DataNode doesn't find the correspounding segmentID in its memeory replica
+//
 // Return Success code in status and trigers background flush:
-//     Log an info log if a segment is under flushing
+//
+//	Log an info log if a segment is under flushing
 func (c *Client) FlushSegments(ctx context.Context, req *datapb.FlushSegmentsRequest) (*commonpb.Status, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(Params.DataNodeCfg.GetNodeID()))
 	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -164,6 +179,10 @@ func (c *Client) FlushSegments(ctx context.Context, req *datapb.FlushSegmentsReq
 
 // ShowConfigurations gets specified configurations para of DataNode
 func (c *Client) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(Params.DataNodeCfg.GetNodeID()))
 	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -179,6 +198,10 @@ func (c *Client) ShowConfigurations(ctx context.Context, req *internalpb.ShowCon
 
 // GetMetrics returns metrics
 func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(Params.DataNodeCfg.GetNodeID()))
 	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -206,6 +229,10 @@ func (c *Client) Compaction(ctx context.Context, req *datapb.CompactionPlan) (*c
 }
 
 func (c *Client) GetCompactionState(ctx context.Context, req *datapb.CompactionStateRequest) (*datapb.CompactionStateResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(Params.DataNodeCfg.GetNodeID()))
 	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -220,6 +247,10 @@ func (c *Client) GetCompactionState(ctx context.Context, req *datapb.CompactionS
 
 // Import data files(json, numpy, etc.) on MinIO/S3 storage, read and parse them into sealed segments
 func (c *Client) Import(ctx context.Context, req *datapb.ImportTaskRequest) (*commonpb.Status, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(Params.DataNodeCfg.GetNodeID()))
 	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -233,6 +264,10 @@ func (c *Client) Import(ctx context.Context, req *datapb.ImportTaskRequest) (*co
 }
 
 func (c *Client) ResendSegmentStats(ctx context.Context, req *datapb.ResendSegmentStatsRequest) (*datapb.ResendSegmentStatsResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(Params.DataNodeCfg.GetNodeID()))
 	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -247,6 +282,10 @@ func (c *Client) ResendSegmentStats(ctx context.Context, req *datapb.ResendSegme
 
 // AddImportSegment is the DataNode client side code for AddImportSegment call.
 func (c *Client) AddImportSegment(ctx context.Context, req *datapb.AddImportSegmentRequest) (*datapb.AddImportSegmentResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(Params.DataNodeCfg.GetNodeID()))
 	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
