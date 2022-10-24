@@ -14,7 +14,7 @@ from pymilvus.orm.types import CONSISTENCY_STRONG
 from common.common_func import param_info
 
 TIMEOUT = 20
-INDEX_NAME = "_default_idx"
+INDEX_NAME = ""
 
 
 # keep small timeout for stability tests
