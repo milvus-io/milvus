@@ -980,3 +980,43 @@ func TestMetaTable_getLatestCollectionByIDInternal(t *testing.T) {
 		assert.Equal(t, 1, len(coll.Partitions))
 	})
 }
+
+func TestMetaTable_RemoveCollection(t *testing.T) {
+	t.Run("catalog error", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("DropCollection",
+			mock.Anything, // context.Context
+			mock.Anything, // model.Collection
+			mock.AnythingOfType("uint64"),
+		).Return(errors.New("error mock DropCollection"))
+		meta := &MetaTable{catalog: catalog}
+		ctx := context.Background()
+		err := meta.RemoveCollection(ctx, 100, 9999)
+		assert.Error(t, err)
+	})
+
+	t.Run("normal case", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("DropCollection",
+			mock.Anything, // context.Context
+			mock.Anything, // model.Collection
+			mock.AnythingOfType("uint64"),
+		).Return(nil)
+		meta := &MetaTable{
+			catalog: catalog,
+			collAlias2ID: map[string]typeutil.UniqueID{
+				"alias1": 100,
+				"alias2": 100,
+			},
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				100: {Name: "collection"},
+			},
+			collName2ID: map[string]typeutil.UniqueID{
+				"collection": 100,
+			},
+		}
+		ctx := context.Background()
+		err := meta.RemoveCollection(ctx, 100, 9999)
+		assert.NoError(t, err)
+	})
+}
