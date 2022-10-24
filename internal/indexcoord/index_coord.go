@@ -816,19 +816,21 @@ func (i *IndexCoord) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInf
 				indexFilePaths := metautil.BuildSegmentIndexFilePaths(i.chunkManager.RootPath(), segIdx.BuildID, segIdx.IndexVersion,
 					segIdx.PartitionID, segIdx.SegmentID, segIdx.IndexFileKeys)
 
-				ret.SegmentInfo[segID].IndexInfos = append(ret.SegmentInfo[segID].IndexInfos,
-					&indexpb.IndexFilePathInfo{
-						SegmentID:      segID,
-						FieldID:        i.metaTable.GetFieldIDByIndexID(segIdx.CollectionID, segIdx.IndexID),
-						IndexID:        segIdx.IndexID,
-						BuildID:        segIdx.BuildID,
-						IndexName:      i.metaTable.GetIndexNameByID(segIdx.CollectionID, segIdx.IndexID),
-						IndexParams:    i.metaTable.GetIndexParams(segIdx.CollectionID, segIdx.IndexID),
-						IndexFilePaths: indexFilePaths,
-						SerializedSize: segIdx.IndexSize,
-						IndexVersion:   segIdx.IndexVersion,
-						NumRows:        segIdx.NumRows,
-					})
+				if segIdx.IndexState == commonpb.IndexState_Finished {
+					ret.SegmentInfo[segID].IndexInfos = append(ret.SegmentInfo[segID].IndexInfos,
+						&indexpb.IndexFilePathInfo{
+							SegmentID:      segID,
+							FieldID:        i.metaTable.GetFieldIDByIndexID(segIdx.CollectionID, segIdx.IndexID),
+							IndexID:        segIdx.IndexID,
+							BuildID:        segIdx.BuildID,
+							IndexName:      i.metaTable.GetIndexNameByID(segIdx.CollectionID, segIdx.IndexID),
+							IndexParams:    i.metaTable.GetIndexParams(segIdx.CollectionID, segIdx.IndexID),
+							IndexFilePaths: indexFilePaths,
+							SerializedSize: segIdx.IndexSize,
+							IndexVersion:   segIdx.IndexVersion,
+							NumRows:        segIdx.NumRows,
+						})
+				}
 			}
 		}
 	}
