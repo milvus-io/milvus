@@ -24,7 +24,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
-	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
@@ -73,21 +72,6 @@ func (tso *mockTsoAllocator) AllocOne() (Timestamp, error) {
 
 func newMockTsoAllocator() tsoAllocator {
 	return &mockTsoAllocator{}
-}
-
-type mockIDAllocatorInterface struct {
-}
-
-func (m *mockIDAllocatorInterface) AllocOne() (UniqueID, error) {
-	return UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()), nil
-}
-
-func (m *mockIDAllocatorInterface) Alloc(count uint32) (UniqueID, UniqueID, error) {
-	return UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()), UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt() + int(count)), nil
-}
-
-func newMockIDAllocatorInterface() allocator.Interface {
-	return &mockIDAllocatorInterface{}
 }
 
 type mockTask struct {
