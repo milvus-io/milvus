@@ -9,7 +9,7 @@ allure-pytest==2.7.0
 pytest-print==0.2.1
 pytest-level==0.1.1
 pytest-xdist==2.5.0
-pymilvus==2.1.3.dev1
+pymilvus==2.1.3
 pytest-rerunfailures==9.1.1
 git+https://github.com/Projectplace/pytest-tags
 ndg-httpsclient
@@ -33,3 +33,6 @@ protobuf==3.17.1
 
 # for bulk load test
 minio==7.1.5
+
+# for benchmark
+h5py==3.1.0
