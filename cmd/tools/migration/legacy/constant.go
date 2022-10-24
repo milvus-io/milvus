@@ -8,4 +8,5 @@ const (
 	IndexMetaBefore220Prefix    = rootcoord.ComponentPrefix + "/index"
 	SegmentIndexPrefixBefore220 = rootcoord.ComponentPrefix + "/segment-index"
 	IndexBuildPrefixBefore220   = "indexes"
+	CollectionLoadMetaPrefixV1  = "queryCoord-collectionMeta"
 )

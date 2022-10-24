@@ -5,8 +5,10 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/cmd/tools/migration/versions"
 	"github.com/milvus-io/milvus/internal/metastore/kv/indexcoord"
+	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 )
 
 type TtCollectionsMeta220 map[UniqueID]map[Timestamp]*model.Collection // coll_id -> ts -> coll
@@ -23,6 +25,9 @@ type FieldsMeta220 map[UniqueID][]*model.Field                 // coll_id -> ts 
 
 type CollectionIndexesMeta220 map[UniqueID]map[UniqueID]*model.Index     // coll_id -> index_id -> index
 type SegmentIndexesMeta220 map[UniqueID]map[UniqueID]*model.SegmentIndex // seg_id -> index_id -> segment index
+
+type CollectionLoadInfo220 map[UniqueID]*model.CollectionLoadInfo            // collectionID -> CollectionLoadInfo
+type PartitionLoadInfo220 map[UniqueID]map[UniqueID]*model.PartitionLoadInfo // collectionID, partitionID -> PartitionLoadInfo
 
 func (meta *TtCollectionsMeta220) GenerateSaves(sourceVersion semver.Version) (map[string]string, error) {
 	saves := make(map[string]string)
@@ -230,6 +235,46 @@ func (meta *SegmentIndexesMeta220) AddRecord(segID UniqueID, indexID UniqueID, r
 	}
 }
 
+func (meta *CollectionLoadInfo220) GenerateSaves() (map[string]string, error) {
+	saves := make(map[string]string)
+	for _, loadInfo := range *meta {
+		k := querycoord.EncodeCollectionLoadInfoKey(loadInfo.CollectionID)
+		v, err := proto.Marshal(&querypb.CollectionLoadInfo{
+			CollectionID:       loadInfo.CollectionID,
+			ReleasedPartitions: loadInfo.ReleasedPartitionIDs,
+			ReplicaNumber:      loadInfo.ReplicaNumber,
+			Status:             loadInfo.Status,
+			FieldIndexID:       loadInfo.FieldIndexID,
+		})
+		if err != nil {
+			return nil, err
+		}
+		saves[k] = string(v)
+	}
+	return saves, nil
+}
+
+func (meta *PartitionLoadInfo220) GenerateSaves() (map[string]string, error) {
+	saves := make(map[string]string)
+	for _, partitions := range *meta {
+		for _, loadInfo := range partitions {
+			k := querycoord.EncodePartitionLoadInfoKey(loadInfo.CollectionID, loadInfo.PartitionID)
+			v, err := proto.Marshal(&querypb.PartitionLoadInfo{
+				CollectionID:  loadInfo.CollectionID,
+				PartitionID:   loadInfo.PartitionID,
+				ReplicaNumber: loadInfo.ReplicaNumber,
+				Status:        loadInfo.Status,
+				FieldIndexID:  loadInfo.FieldIndexID,
+			})
+			if err != nil {
+				return nil, err
+			}
+			saves[k] = string(v)
+		}
+	}
+	return saves, nil
+}
+
 type All220 struct {
 	TtCollections TtCollectionsMeta220
 	Collections   CollectionsMeta220
@@ -245,4 +290,8 @@ type All220 struct {
 
 	CollectionIndexes CollectionIndexesMeta220
 	SegmentIndexes    SegmentIndexesMeta220
+
+	// QueryCoord Meta
+	CollectionLoadInfos CollectionLoadInfo220
+	PartitionLoadInfos  PartitionLoadInfo220
 }

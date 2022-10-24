@@ -107,38 +107,6 @@ func (s metaStore) GetCollections() ([]*querypb.CollectionLoadInfo, error) {
 		ret = append(ret, &info)
 	}
 
-	collectionsV1, err := s.getCollectionsFromV1()
-	if err != nil {
-		return nil, err
-	}
-	ret = append(ret, collectionsV1...)
-
-	return ret, nil
-}
-
-// getCollectionsFromV1 recovers collections from 2.1 meta store
-func (s metaStore) getCollectionsFromV1() ([]*querypb.CollectionLoadInfo, error) {
-	_, collectionValues, err := s.cli.LoadWithPrefix(CollectionMetaPrefixV1)
-	if err != nil {
-		return nil, err
-	}
-	ret := make([]*querypb.CollectionLoadInfo, 0, len(collectionValues))
-	for _, value := range collectionValues {
-		collectionInfo := querypb.CollectionInfo{}
-		err = proto.Unmarshal([]byte(value), &collectionInfo)
-		if err != nil {
-			return nil, err
-		}
-		if collectionInfo.LoadType != querypb.LoadType_LoadCollection {
-			continue
-		}
-		ret = append(ret, &querypb.CollectionLoadInfo{
-			CollectionID:       collectionInfo.GetCollectionID(),
-			ReleasedPartitions: collectionInfo.GetReleasedPartitionIDs(),
-			ReplicaNumber:      collectionInfo.GetReplicaNumber(),
-			Status:             querypb.LoadStatus_Loaded,
-		})
-	}
 	return ret, nil
 }
 
@@ -156,43 +124,6 @@ func (s metaStore) GetPartitions() (map[int64][]*querypb.PartitionLoadInfo, erro
 		ret[info.GetCollectionID()] = append(ret[info.GetCollectionID()], &info)
 	}
 
-	partitionsV1, err := s.getPartitionsFromV1()
-	if err != nil {
-		return nil, err
-	}
-	for _, partition := range partitionsV1 {
-		ret[partition.GetCollectionID()] = append(ret[partition.GetCollectionID()], partition)
-	}
-
-	return ret, nil
-}
-
-// getCollectionsFromV1 recovers collections from 2.1 meta store
-func (s metaStore) getPartitionsFromV1() ([]*querypb.PartitionLoadInfo, error) {
-	_, collectionValues, err := s.cli.LoadWithPrefix(CollectionMetaPrefixV1)
-	if err != nil {
-		return nil, err
-	}
-	ret := make([]*querypb.PartitionLoadInfo, 0, len(collectionValues))
-	for _, value := range collectionValues {
-		collectionInfo := querypb.CollectionInfo{}
-		err = proto.Unmarshal([]byte(value), &collectionInfo)
-		if err != nil {
-			return nil, err
-		}
-		if collectionInfo.LoadType != querypb.LoadType_LoadPartition {
-			continue
-		}
-
-		for _, partition := range collectionInfo.GetPartitionIDs() {
-			ret = append(ret, &querypb.PartitionLoadInfo{
-				CollectionID:  collectionInfo.GetCollectionID(),
-				PartitionID:   partition,
-				ReplicaNumber: collectionInfo.GetReplicaNumber(),
-				Status:        querypb.LoadStatus_Loaded,
-			})
-		}
-	}
 	return ret, nil
 }
 

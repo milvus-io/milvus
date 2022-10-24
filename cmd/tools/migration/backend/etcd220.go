@@ -99,6 +99,24 @@ func (b etcd220) Save(metas *meta.Meta) error {
 			return err
 		}
 	}
+	{
+		saves, err := metas.Meta220.CollectionLoadInfos.GenerateSaves()
+		if err != nil {
+			return err
+		}
+		if err := b.save(saves); err != nil {
+			return err
+		}
+	}
+	{
+		saves, err := metas.Meta220.PartitionLoadInfos.GenerateSaves()
+		if err != nil {
+			return err
+		}
+		if err := b.save(saves); err != nil {
+			return err
+		}
+	}
 
 	return nil
 }
