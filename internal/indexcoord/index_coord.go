@@ -785,6 +785,8 @@ func (i *IndexCoord) DropIndex(ctx context.Context, req *indexpb.DropIndexReques
 
 // GetIndexInfos gets the index file paths from IndexCoord.
 func (i *IndexCoord) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoRequest) (*indexpb.GetIndexInfoResponse, error) {
+	log.Debug("IndexCoord GetIndexInfos", zap.Int64("collectionID", req.CollectionID),
+		zap.String("indexName", req.GetIndexName()), zap.Int64s("segIDs", req.GetSegmentIDs()))
 	if !i.isHealthy() {
 		log.Warn(msgIndexCoordIsUnhealthy(i.serverID))
 		return &indexpb.GetIndexInfoResponse{
@@ -840,6 +842,7 @@ func (i *IndexCoord) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInf
 
 // DescribeIndex describe the index info of the collection.
 func (i *IndexCoord) DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRequest) (*indexpb.DescribeIndexResponse, error) {
+	log.Debug("IndexCoord DescribeIndex", zap.Int64("collectionID", req.CollectionID), zap.String("indexName", req.GetIndexName()))
 	if !i.isHealthy() {
 		log.Warn(msgIndexCoordIsUnhealthy(i.serverID))
 		return &indexpb.DescribeIndexResponse{

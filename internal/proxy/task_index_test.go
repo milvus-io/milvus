@@ -21,6 +21,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/util/typeutil"
+
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
@@ -96,7 +98,6 @@ func TestDropIndexTask_PreExecute(t *testing.T) {
 	indexName := ""
 
 	Params.Init()
-	rc := newMockRootCoord()
 	showCollectionMock := func(ctx context.Context, request *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
 		return &querypb.ShowCollectionsResponse{
 			Status: &commonpb.Status{
@@ -110,20 +111,11 @@ func TestDropIndexTask_PreExecute(t *testing.T) {
 	ctx := context.Background()
 	qc.updateState(commonpb.StateCode_Healthy)
 
-	shardMgr := newShardClientMgr()
-	// failed to get collection id.
-	_ = InitMetaCache(ctx, rc, qc, shardMgr)
-
-	rc.DescribeCollectionFunc = func(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
-		return &milvuspb.DescribeCollectionResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
-			Schema:         newTestSchema(),
-			CollectionID:   collectionID,
-			CollectionName: request.CollectionName,
-		}, nil
-	}
+	mockCache := newMockCache()
+	mockCache.setGetIDFunc(func(ctx context.Context, collectionName string) (typeutil.UniqueID, error) {
+		return collectionID, nil
+	})
+	globalMetaCache = mockCache
 
 	dit := dropIndexTask{
 		ctx: ctx,
@@ -149,6 +141,21 @@ func TestDropIndexTask_PreExecute(t *testing.T) {
 		err := dit.PreExecute(ctx)
 		assert.NoError(t, err)
 	})
+
+	t.Run("get collectionID error", func(t *testing.T) {
+		mockCache := newMockCache()
+		mockCache.setGetIDFunc(func(ctx context.Context, collectionName string) (typeutil.UniqueID, error) {
+			return 0, errors.New("error")
+		})
+		globalMetaCache = mockCache
+		err := dit.PreExecute(ctx)
+		assert.Error(t, err)
+	})
+
+	mockCache.setGetIDFunc(func(ctx context.Context, collectionName string) (typeutil.UniqueID, error) {
+		return collectionID, nil
+	})
+	globalMetaCache = mockCache
 
 	t.Run("coll has been loaded", func(t *testing.T) {
 		showCollectionMock := func(ctx context.Context, request *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
