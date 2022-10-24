@@ -48,12 +48,14 @@ class BitsetView : public faiss::BitsetView {
     BitsetView
     subview(size_t offset, size_t size) const {
         if (empty()) {
-            return BitsetView();
+            return {};
         }
 
         AssertInfo((offset & 0x7) == 0, "offset is not divisible by 8");
-        AssertInfo((offset + size) <= this->size(), "offset + size cross the border.");
-        return BitsetView(data() + (offset >> 3), size);
+        AssertInfo((offset + size) <= this->size(), "offset + size cross the border.[offset=" + std::to_string(offset) +
+                                                        "][size=" + std::to_string(size) +
+                                                        "][this.size()=" + std::to_string(this->size()) + "]");
+        return {data() + (offset >> 3), size};
     }
 };
 
