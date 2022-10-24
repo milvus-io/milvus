@@ -205,6 +205,35 @@ func (mt *MetaTable) ChangeCollectionState(ctx context.Context, collectionID Uni
 	return nil
 }
 
+func (mt *MetaTable) removeIfNameMatchedInternal(collectionID UniqueID, name string) {
+	id, ok := mt.collName2ID[name]
+	if ok && id == collectionID {
+		delete(mt.collName2ID, name)
+	}
+}
+
+func (mt *MetaTable) removeIfAliasMatchedInternal(collectionID UniqueID, alias string) {
+	id, ok := mt.collAlias2ID[alias]
+	if ok && id == collectionID {
+		delete(mt.collAlias2ID, alias)
+	}
+}
+
+func (mt *MetaTable) removeIfMatchedInternal(collectionID UniqueID, name string) {
+	mt.removeIfNameMatchedInternal(collectionID, name)
+	mt.removeIfAliasMatchedInternal(collectionID, name)
+}
+
+func (mt *MetaTable) removeAllNamesIfMatchedInternal(collectionID UniqueID, names []string) {
+	for _, name := range names {
+		mt.removeIfMatchedInternal(collectionID, name)
+	}
+}
+
+func (mt *MetaTable) removeCollectionByIDInternal(collectionID UniqueID) {
+	delete(mt.collID2Meta, collectionID)
+}
+
 func (mt *MetaTable) RemoveCollection(ctx context.Context, collectionID UniqueID, ts Timestamp) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
@@ -218,18 +247,18 @@ func (mt *MetaTable) RemoveCollection(ctx context.Context, collectionID UniqueID
 		return err
 	}
 
+	allNames := common.CloneStringList(aliases)
+
 	var name string
 	coll, ok := mt.collID2Meta[collectionID]
 	if ok && coll != nil {
 		name = coll.Name
-		delete(mt.collName2ID, name)
+		allNames = append(allNames, name)
 	}
 
-	for _, alias := range aliases {
-		delete(mt.collAlias2ID, alias)
-	}
-
-	delete(mt.collID2Meta, collectionID)
+	// We cannot delete the name directly, since newly collection with same name may be created.
+	mt.removeAllNamesIfMatchedInternal(collectionID, allNames)
+	mt.removeCollectionByIDInternal(collectionID)
 
 	log.Info("remove collection", zap.String("name", name), zap.Int64("id", collectionID), zap.Strings("aliases", aliases))
 	return nil
