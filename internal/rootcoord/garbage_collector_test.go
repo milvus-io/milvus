@@ -124,6 +124,8 @@ func TestGarbageCollectorCtx_ReDropCollection(t *testing.T) {
 			dropCollectionIndexChan <- struct{}{}
 			return nil
 		}
+
+		dropMetaChan := make(chan struct{}, 1)
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.On("ListAliasesByID",
 			mock.AnythingOfType("int64")).
@@ -132,6 +134,9 @@ func TestGarbageCollectorCtx_ReDropCollection(t *testing.T) {
 			mock.Anything, // context.Context
 			mock.AnythingOfType("int64"),
 			mock.AnythingOfType("uint64")).
+			Run(func(args mock.Arguments) {
+				dropMetaChan <- struct{}{}
+			}).
 			Return(errors.New("error mock RemoveCollection"))
 		ticker := newTickerWithMockNormalStream()
 		tsoAllocator := newMockTsoAllocator()
@@ -151,6 +156,7 @@ func TestGarbageCollectorCtx_ReDropCollection(t *testing.T) {
 		assert.True(t, releaseCollectionCalled)
 		<-dropCollectionIndexChan
 		assert.True(t, dropCollectionIndexCalled)
+		<-dropMetaChan
 	})
 
 	t.Run("normal case", func(t *testing.T) {
