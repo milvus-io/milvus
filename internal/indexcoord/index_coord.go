@@ -441,8 +441,10 @@ func (i *IndexCoord) CreateIndex(ctx context.Context, req *indexpb.CreateIndexRe
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
 	}
 
-	if !i.metaTable.CanCreateIndex(req) {
-		ret.Reason = "CreateIndex failed: index already exist, but parameters are inconsistent"
+	ok, err := i.metaTable.CanCreateIndex(req)
+	if !ok {
+		log.Error("CreateIndex failed", zap.Error(err))
+		ret.Reason = err.Error()
 		return ret, nil
 	}
 
@@ -458,7 +460,7 @@ func (i *IndexCoord) CreateIndex(ctx context.Context, req *indexpb.CreateIndexRe
 		req:              req,
 	}
 
-	err := i.sched.IndexAddQueue.Enqueue(t)
+	err = i.sched.IndexAddQueue.Enqueue(t)
 	if err != nil {
 		ret.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		ret.Reason = err.Error()

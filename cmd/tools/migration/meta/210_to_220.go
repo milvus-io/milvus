@@ -5,15 +5,16 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus/cmd/tools/migration/versions"
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-
-	"github.com/milvus-io/milvus/cmd/tools/migration/versions"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"go.uber.org/zap"
 )
 
 func alias210ToAlias220(record *pb.CollectionInfo, ts Timestamp) *model.Alias {
@@ -153,16 +154,35 @@ func combineToCollectionIndexesMeta220(fieldIndexes FieldIndexes210, collectionI
 			if err != nil {
 				return nil, err
 			}
+			newIndexParamsMap := make(map[string]string)
+			for _, kv := range indexInfo.IndexParams {
+				if kv.Key == common.IndexParamsKey {
+					params, err := funcutil.ParseIndexParamsMap(kv.Value)
+					if err != nil {
+						return nil, err
+					}
+					for k, v := range params {
+						newIndexParamsMap[k] = v
+					}
+				} else {
+					newIndexParamsMap[kv.Key] = kv.Value
+				}
+			}
+			newIndexParams := make([]*commonpb.KeyValuePair, 0)
+			for k, v := range newIndexParamsMap {
+				newIndexParams = append(newIndexParams, &commonpb.KeyValuePair{Key: k, Value: v})
+			}
 			record := &model.Index{
-				TenantID:     "", // TODO: how to set this if we support mysql later?
-				CollectionID: collectionID,
-				FieldID:      index.GetFiledID(),
-				IndexID:      index.GetIndexID(),
-				IndexName:    indexInfo.GetIndexName(),
-				IsDeleted:    indexInfo.GetDeleted(),
-				CreateTime:   indexInfo.GetCreateTime(),
-				TypeParams:   field.GetTypeParams(),
-				IndexParams:  indexInfo.GetIndexParams(),
+				TenantID:        "", // TODO: how to set this if we support mysql later?
+				CollectionID:    collectionID,
+				FieldID:         index.GetFiledID(),
+				IndexID:         index.GetIndexID(),
+				IndexName:       indexInfo.GetIndexName(),
+				IsDeleted:       indexInfo.GetDeleted(),
+				CreateTime:      indexInfo.GetCreateTime(),
+				TypeParams:      field.GetTypeParams(),
+				IndexParams:     newIndexParams,
+				UserIndexParams: indexInfo.GetIndexParams(),
 			}
 			indexes.AddRecord(collectionID, index.GetIndexID(), record)
 		}
