@@ -599,6 +599,9 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, in *querypb.ReleaseS
 		}
 	}
 
+	// note that argument is dmlchannel name
+	node.dataSyncService.removeEmptyFlowGraphByChannel(in.GetCollectionID(), in.GetShard())
+
 	log.Info("release segments done", zap.Int64("collectionID", in.CollectionID), zap.Int64s("segmentIDs", in.SegmentIDs), zap.String("Scope", in.GetScope().String()))
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
