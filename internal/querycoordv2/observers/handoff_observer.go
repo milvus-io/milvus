@@ -232,7 +232,7 @@ func (ob *HandoffObserver) tryHandoff(ctx context.Context, segment *querypb.Segm
 	status, ok := ob.collectionStatus[segment.GetCollectionID()]
 	if Params.QueryCoordCfg.AutoHandoff &&
 		ok &&
-		ob.meta.CollectionManager.ContainAnyIndex(segment.GetCollectionID(), indexIDs...) {
+		(segment.GetIsFake() || ob.meta.CollectionManager.ContainAnyIndex(segment.GetCollectionID(), indexIDs...)) {
 		if status == CollectionHandoffStatusRegistered {
 			ob.handoffEvents[segment.GetSegmentID()] = &HandoffEvent{
 				Segment: segment,
@@ -243,7 +243,10 @@ func (ob *HandoffObserver) tryHandoff(ctx context.Context, segment *querypb.Segm
 				Segment: segment,
 				Status:  HandoffEventStatusTriggered,
 			}
-			ob.handoff(segment)
+
+			if !segment.GetIsFake() {
+				ob.handoff(segment)
+			}
 		}
 		_, ok := ob.handoffSubmitOrders[segment.GetPartitionID()]
 		if !ok {
@@ -313,9 +316,23 @@ func (ob *HandoffObserver) getOverrideSegmentInfo(handOffSegments []*datapb.Segm
 	return overrideSegments
 }
 
+func (ob *HandoffObserver) isAllCompactFromHandoffCompleted(segmentInfo *querypb.SegmentInfo) bool {
+	for _, segID := range segmentInfo.CompactionFrom {
+		_, ok := ob.handoffEvents[segID]
+		if ok {
+			return false
+		}
+	}
+	return true
+}
+
 func (ob *HandoffObserver) tryRelease(ctx context.Context, event *HandoffEvent) {
 	segment := event.Segment
 	if ob.isSealedSegmentLoaded(segment) || !ob.isSegmentExistOnTarget(segment) {
+		if segment.GetIsFake() && !ob.isAllCompactFromHandoffCompleted(segment) {
+			return
+		}
+
 		compactSource := segment.CompactionFrom
 		if len(compactSource) == 0 {
 			return
@@ -324,6 +341,7 @@ func (ob *HandoffObserver) tryRelease(ctx context.Context, event *HandoffEvent) 
 			zap.Int64("collectionID", segment.GetCollectionID()),
 			zap.Int64("partitionID", segment.GetPartitionID()),
 			zap.Int64("segmentID", segment.GetSegmentID()),
+			zap.Bool("faked", segment.GetIsFake()),
 			zap.Int64s("sourceSegments", compactSource),
 		)
 		for _, toRelease := range compactSource {
@@ -353,6 +371,7 @@ func (ob *HandoffObserver) tryClean(ctx context.Context) {
 					zap.Int64("collectionID", segment.GetCollectionID()),
 					zap.Int64("partitionID", segment.GetPartitionID()),
 					zap.Int64("segmentID", segment.GetSegmentID()),
+					zap.Bool("faked", segment.GetIsFake()),
 				)
 				err := ob.cleanEvent(ctx, segment)
 				if err == nil {

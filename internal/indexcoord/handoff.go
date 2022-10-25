@@ -23,6 +23,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/proto/datapb"
+
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
@@ -36,7 +38,7 @@ type handoff struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	tasks     map[UniqueID]struct{}
+	segments  map[UniqueID]*datapb.SegmentInfo
 	taskMutex sync.RWMutex
 	wg        sync.WaitGroup
 
@@ -54,7 +56,7 @@ func newHandoff(ctx context.Context, metaTable *metaTable, kvClient kv.MetaKv, i
 	hd := &handoff{
 		ctx:              ctx,
 		cancel:           cancel,
-		tasks:            make(map[UniqueID]struct{}),
+		segments:         make(map[UniqueID]*datapb.SegmentInfo),
 		taskMutex:        sync.RWMutex{},
 		wg:               sync.WaitGroup{},
 		meta:             metaTable,
@@ -73,7 +75,7 @@ func (hd *handoff) recoveryFromMeta() {
 	hd.taskMutex.Lock()
 	defer hd.taskMutex.Unlock()
 
-	hd.tasks = make(map[UniqueID]struct{}, 0)
+	hd.segments = make(map[UniqueID]*datapb.SegmentInfo, 0)
 	for segID, segIdx := range allSegIndexes {
 		if segIdx.IsDeleted {
 			continue
@@ -81,19 +83,22 @@ func (hd *handoff) recoveryFromMeta() {
 		if segIdx.WriteHandoff {
 			continue
 		}
-		hd.tasks[segID] = struct{}{}
+		hd.segments[segID] = &datapb.SegmentInfo{ID: segID}
 	}
-	log.Ctx(hd.ctx).Info("recovery from meta success", zap.Int("task num", len(hd.tasks)))
+	log.Ctx(hd.ctx).Info("recovery from meta success", zap.Int("task num", len(hd.segments)))
 }
 
-func (hd *handoff) enqueue(segID UniqueID) {
+func (hd *handoff) enqueue(segment *datapb.SegmentInfo) {
 	defer hd.Notify()
 	hd.taskMutex.Lock()
 	defer hd.taskMutex.Unlock()
 
 	// note: don't reset state if the task contains state
-	hd.tasks[segID] = struct{}{}
-	log.Ctx(hd.ctx).Info("segment need to write handoff", zap.Int64("segID", segID))
+	hd.segments[segment.GetID()] = segment
+	log.Ctx(hd.ctx).Info("segment need to write handoff",
+		zap.Int64("segID", segment.GetID()),
+		zap.Bool("isFake", segment.GetIsFake()),
+	)
 }
 
 func (hd *handoff) Start() {
@@ -134,8 +139,8 @@ func (hd *handoff) scheduler() {
 
 func (hd *handoff) run() {
 	hd.taskMutex.RLock()
-	segIDs := make([]UniqueID, 0, len(hd.tasks))
-	for segID := range hd.tasks {
+	segIDs := make([]UniqueID, 0, len(hd.segments))
+	for segID := range hd.segments {
 		segIDs = append(segIDs, segID)
 	}
 	hd.taskMutex.RUnlock()
@@ -151,7 +156,45 @@ func (hd *handoff) run() {
 	}
 }
 
+func (hd *handoff) handoffFakedSegment(segment *datapb.SegmentInfo, front bool) {
+	if front || hd.allParentsDone(segment.GetCompactionFrom()) {
+		handoffSegment := &querypb.SegmentInfo{
+			SegmentID:           segment.GetID(),
+			CollectionID:        segment.GetCollectionID(),
+			PartitionID:         segment.GetPartitionID(),
+			CompactionFrom:      segment.GetCompactionFrom(),
+			CreatedByCompaction: segment.GetCreatedByCompaction(),
+			IsFake:              segment.GetIsFake(),
+		}
+
+		if err := hd.writeHandoffSegment(handoffSegment); err != nil {
+			log.Ctx(hd.ctx).Warn("write handoff task fail, need to retry", zap.Int64("segID", segment.GetID()), zap.Error(err))
+			return
+		}
+		log.Ctx(hd.ctx).Info("write handoff task success",
+			zap.Int64("segID", segment.GetID()),
+			zap.Bool("isFake", segment.GetIsFake()),
+			zap.Any("segment", segment))
+
+		hd.deleteTask(segment.GetID())
+	}
+}
+
 func (hd *handoff) process(segID UniqueID, front bool) {
+	hd.taskMutex.RLock()
+	segment, ok := hd.segments[segID]
+	hd.taskMutex.RUnlock()
+
+	if !ok {
+		log.Ctx(hd.ctx).Warn("handoff get segment fail", zap.Int64("segID", segID))
+		return
+	}
+
+	if segment.GetIsFake() {
+		hd.handoffFakedSegment(segment, front)
+		return
+	}
+
 	state := hd.meta.GetSegmentIndexState(segID)
 	log.Ctx(hd.ctx).RatedDebug(30, "handoff task is process", zap.Int64("segID", segID),
 		zap.Bool("front", front), zap.String("state", state.state.String()))
@@ -220,6 +263,7 @@ func (hd *handoff) process(segID UniqueID, front bool) {
 				log.Ctx(hd.ctx).Warn("mark segment as write handoff fail, need to retry", zap.Int64("segID", segID), zap.Error(err))
 				return
 			}
+
 			log.Ctx(hd.ctx).Info("mark segment as write handoff success, remove task", zap.Int64("segID", segID))
 			hd.deleteTask(segID)
 			return
@@ -231,21 +275,21 @@ func (hd *handoff) Len() int {
 	hd.taskMutex.RLock()
 	defer hd.taskMutex.RUnlock()
 
-	return len(hd.tasks)
+	return len(hd.segments)
 }
 
 func (hd *handoff) deleteTask(segID UniqueID) {
 	hd.taskMutex.Lock()
 	defer hd.taskMutex.Unlock()
 
-	delete(hd.tasks, segID)
+	delete(hd.segments, segID)
 }
 
 func (hd *handoff) taskDone(segID UniqueID) bool {
 	hd.taskMutex.RLock()
 	defer hd.taskMutex.RUnlock()
 
-	_, ok := hd.tasks[segID]
+	_, ok := hd.segments[segID]
 	return !ok
 }
 
@@ -254,7 +298,7 @@ func (hd *handoff) allParentsDone(segIDs []UniqueID) bool {
 	defer hd.taskMutex.RUnlock()
 
 	for _, segID := range segIDs {
-		if _, ok := hd.tasks[segID]; ok {
+		if _, ok := hd.segments[segID]; ok {
 			return false
 		}
 	}

@@ -592,6 +592,41 @@ func (suite *HandoffObserverTestSuit) TestFilterOutEventByIndexID() {
 	}, 3*time.Second, 1*time.Second)
 }
 
+func (suite *HandoffObserverTestSuit) TestFakedSegmentHandoff() {
+	suite.dist.LeaderViewManager.Update(2, &meta.LeaderView{
+		ID:           1,
+		CollectionID: suite.collection,
+		Channel:      suite.channel.ChannelName,
+		Segments:     map[int64]*querypb.SegmentDist{1: {NodeID: 1, Version: 0}},
+	})
+
+	Params.QueryCoordCfg.CheckHandoffInterval = 200 * time.Millisecond
+	err := suite.observer.Start(context.Background())
+	suite.NoError(err)
+
+	handoffSegment := &querypb.SegmentInfo{
+		SegmentID:           3,
+		CollectionID:        suite.collection,
+		PartitionID:         suite.partition,
+		CompactionFrom:      []int64{1, 2},
+		CreatedByCompaction: true,
+		IsFake:              true,
+	}
+	suite.produceHandOffEvent(handoffSegment)
+
+	time.Sleep(1 * time.Second)
+	suite.dist.LeaderViewManager.Update(2, &meta.LeaderView{
+		ID:           1,
+		CollectionID: suite.collection,
+		Channel:      suite.channel.ChannelName,
+		Segments:     map[int64]*querypb.SegmentDist{1: {NodeID: 1, Version: 0}, 2: {NodeID: 2, Version: 0}},
+	})
+
+	suite.Eventually(func() bool {
+		return !suite.target.ContainSegment(1) && !suite.target.ContainSegment(2)
+	}, 3*time.Second, 1*time.Second)
+}
+
 func TestHandoffObserverSuit(t *testing.T) {
 	suite.Run(t, new(HandoffObserverTestSuit))
 }

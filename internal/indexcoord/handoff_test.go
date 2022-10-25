@@ -127,10 +127,10 @@ func Test_newHandoff(t *testing.T) {
 	ctx := context.Background()
 	hd := newHandoff(ctx, createMetaForHandoff(&indexcoord.Catalog{Txn: NewMockEtcdKV()}), NewMockEtcdKV(), &IndexCoord{dataCoordClient: NewDataCoordMock()})
 	assert.NotNil(t, hd)
-	assert.Equal(t, 1, len(hd.tasks))
+	assert.Equal(t, 1, len(hd.segments))
 
-	hd.enqueue(segID)
-	assert.Equal(t, 1, len(hd.tasks))
+	hd.enqueue(&datapb.SegmentInfo{ID: segID})
+	assert.Equal(t, 1, len(hd.segments))
 
 	err := hd.meta.AddIndex(&model.SegmentIndex{
 		SegmentID:    segID + 3,
@@ -141,8 +141,8 @@ func Test_newHandoff(t *testing.T) {
 		BuildID:      buildID + 3,
 	})
 	assert.NoError(t, err)
-	hd.enqueue(segID + 3)
-	assert.Equal(t, 2, len(hd.tasks))
+	hd.enqueue(&datapb.SegmentInfo{ID: segID + 3})
+	assert.Equal(t, 2, len(hd.segments))
 
 	hd.Start()
 	err = hd.meta.FinishTask(&indexpb.IndexTaskInfo{
@@ -174,11 +174,39 @@ func Test_newHandoff(t *testing.T) {
 	hd.Stop()
 }
 
+func Test_process(t *testing.T) {
+	t.Run("not found segment", func(t *testing.T) {
+		hd := &handoff{segments: map[UniqueID]*datapb.SegmentInfo{}}
+		hd.process(segID, true)
+		assert.Equal(t, 0, hd.Len())
+	})
+
+	t.Run("write handoff ok for faked segment", func(t *testing.T) {
+		hd := &handoff{
+			segments: map[UniqueID]*datapb.SegmentInfo{
+				segID: {
+					ID:     segID,
+					IsFake: true,
+				},
+			},
+			taskMutex: sync.RWMutex{},
+			kvClient: &mockETCDKV{
+				save: func(s string, s2 string) error {
+					return nil
+				},
+			},
+		}
+
+		hd.process(segID, true)
+		assert.Equal(t, 0, hd.Len())
+	})
+}
+
 func Test_handoff_error(t *testing.T) {
 	t.Run("pullSegmentInfo fail", func(t *testing.T) {
 		hd := &handoff{
 			ctx: context.Background(),
-			tasks: map[UniqueID]struct{}{
+			segments: map[UniqueID]*datapb.SegmentInfo{
 				segID: {},
 			},
 			taskMutex: sync.RWMutex{},
@@ -227,7 +255,7 @@ func Test_handoff_error(t *testing.T) {
 	t.Run("is importing", func(t *testing.T) {
 		hd := &handoff{
 			ctx: context.Background(),
-			tasks: map[UniqueID]struct{}{
+			segments: map[UniqueID]*datapb.SegmentInfo{
 				segID: {},
 			},
 			taskMutex: sync.RWMutex{},
@@ -284,7 +312,7 @@ func Test_handoff_error(t *testing.T) {
 	t.Run("get index info fail", func(t *testing.T) {
 		hd := &handoff{
 			ctx: context.Background(),
-			tasks: map[UniqueID]struct{}{
+			segments: map[UniqueID]*datapb.SegmentInfo{
 				segID: {},
 			},
 			taskMutex: sync.RWMutex{},
@@ -322,7 +350,7 @@ func Test_handoff_error(t *testing.T) {
 	t.Run("write handoff fail", func(t *testing.T) {
 		hd := &handoff{
 			ctx: context.Background(),
-			tasks: map[UniqueID]struct{}{
+			segments: map[UniqueID]*datapb.SegmentInfo{
 				segID: {},
 			},
 			taskMutex: sync.RWMutex{},
@@ -362,10 +390,31 @@ func Test_handoff_error(t *testing.T) {
 		assert.Equal(t, 1, hd.Len())
 	})
 
+	t.Run("write handoff fail for faked segment", func(t *testing.T) {
+		hd := &handoff{
+			ctx: context.Background(),
+			segments: map[UniqueID]*datapb.SegmentInfo{
+				segID: {
+					ID:     segID,
+					IsFake: true,
+				},
+			},
+			taskMutex: sync.RWMutex{},
+			kvClient: &mockETCDKV{
+				save: func(s string, s2 string) error {
+					return errors.New("error")
+				},
+			},
+		}
+
+		hd.process(segID, true)
+		assert.Equal(t, 1, hd.Len())
+	})
+
 	t.Run("mark meta as write handoff fail", func(t *testing.T) {
 		hd := &handoff{
 			ctx: context.Background(),
-			tasks: map[UniqueID]struct{}{
+			segments: map[UniqueID]*datapb.SegmentInfo{
 				segID: {},
 			},
 			taskMutex: sync.RWMutex{},
@@ -409,7 +458,7 @@ func Test_handoff_error(t *testing.T) {
 func Test_handoff_allParentsDone(t *testing.T) {
 	t.Run("done", func(t *testing.T) {
 		hd := &handoff{
-			tasks: map[UniqueID]struct{}{
+			segments: map[UniqueID]*datapb.SegmentInfo{
 				segID: {},
 			},
 			taskMutex: sync.RWMutex{},
@@ -421,7 +470,7 @@ func Test_handoff_allParentsDone(t *testing.T) {
 
 	t.Run("not done", func(t *testing.T) {
 		hd := &handoff{
-			tasks: map[UniqueID]struct{}{
+			segments: map[UniqueID]*datapb.SegmentInfo{
 				segID:     {},
 				segID + 1: {},
 			},

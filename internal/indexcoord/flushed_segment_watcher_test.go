@@ -23,6 +23,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang/protobuf/proto"
+
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -33,13 +35,26 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 )
 
+var (
+	segBytes = marshalSegment()
+)
+
+func marshalSegment() string {
+	segment := &datapb.SegmentInfo{ID: segID}
+	bytes, err := proto.Marshal(segment)
+	if err != nil {
+		panic(err)
+	}
+	return string(bytes)
+}
+
 func Test_flushSegmentWatcher(t *testing.T) {
 	ctx := context.Background()
 
 	fsw, err := newFlushSegmentWatcher(ctx,
 		&mockETCDKV{
 			loadWithRevision: func(key string) ([]string, []string, int64, error) {
-				return []string{"1", "2", "3"}, []string{"1", "2", "3"}, 1, nil
+				return []string{"1"}, []string{segBytes}, 1, nil
 			},
 			removeWithPrefix: func(key string) error {
 				return nil
@@ -61,7 +76,7 @@ func Test_flushSegmentWatcher(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, fsw)
 
-	fsw.enqueueInternalTask(1)
+	fsw.enqueueInternalTask(&datapb.SegmentInfo{ID: 1})
 
 	fsw.Start()
 
@@ -80,7 +95,18 @@ func Test_flushSegmentWatcher_newFlushSegmentWatcher(t *testing.T) {
 		fsw, err := newFlushSegmentWatcher(context.Background(),
 			&mockETCDKV{
 				loadWithRevision: func(key string) ([]string, []string, int64, error) {
-					return []string{"segID1"}, []string{"12345"}, 1, nil
+					return []string{"segID1"}, []string{segBytes}, 1, nil
+				},
+			}, &metaTable{}, &indexBuilder{}, &handoff{}, &IndexCoord{
+				dataCoordClient: NewDataCoordMock(),
+			})
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(fsw.internalTasks))
+
+		fsw, err = newFlushSegmentWatcher(context.Background(),
+			&mockETCDKV{
+				loadWithRevision: func(key string) ([]string, []string, int64, error) {
+					return []string{"segID1"}, []string{"10"}, 1, nil
 				},
 			}, &metaTable{}, &indexBuilder{}, &handoff{}, &IndexCoord{
 				dataCoordClient: NewDataCoordMock(),
@@ -93,7 +119,7 @@ func Test_flushSegmentWatcher_newFlushSegmentWatcher(t *testing.T) {
 		fsw, err := newFlushSegmentWatcher(context.Background(),
 			&mockETCDKV{
 				loadWithRevision: func(key string) ([]string, []string, int64, error) {
-					return []string{"segID1"}, []string{"12345"}, 1, errors.New("error")
+					return []string{"segID1"}, []string{segBytes}, 1, errors.New("error")
 				},
 			}, &metaTable{}, &indexBuilder{}, &handoff{}, &IndexCoord{
 				dataCoordClient: NewDataCoordMock(),
@@ -158,6 +184,23 @@ func Test_flushedSegmentWatcher_internalRun(t *testing.T) {
 	assert.Equal(t, 3, fsw.Len())
 }
 
+func Test_flushSegmentWatcher_enqueueInternalTask(t *testing.T) {
+	fsw := &flushedSegmentWatcher{internalTasks: map[UniqueID]*internalTask{}}
+
+	segment := &datapb.SegmentInfo{ID: segID}
+
+	fakedSegment := &datapb.SegmentInfo{
+		ID:           segID + 1,
+		CollectionID: collID,
+		PartitionID:  partID,
+		IsFake:       true,
+	}
+
+	fsw.enqueueInternalTask(segment)
+	fsw.enqueueInternalTask(fakedSegment)
+	assert.Equal(t, 2, len(fsw.internalTasks))
+}
+
 func Test_flushSegmentWatcher_internalProcess_success(t *testing.T) {
 	meta := &metaTable{
 		segmentIndexLock: sync.RWMutex{},
@@ -212,10 +255,20 @@ func Test_flushSegmentWatcher_internalProcess_success(t *testing.T) {
 		segmentInfo: nil,
 	}
 
+	task2 := &internalTask{
+		state: indexTaskPrepare,
+		segmentInfo: &datapb.SegmentInfo{
+			ID:           segID + 1,
+			CollectionID: collID,
+			PartitionID:  partID,
+			IsFake:       true,
+		},
+	}
+
 	fsw := &flushedSegmentWatcher{
 		ctx: context.Background(),
 		handoff: &handoff{
-			tasks:            map[UniqueID]struct{}{},
+			segments:         map[UniqueID]*datapb.SegmentInfo{},
 			taskMutex:        sync.RWMutex{},
 			wg:               sync.WaitGroup{},
 			meta:             meta,
@@ -255,7 +308,8 @@ func Test_flushSegmentWatcher_internalProcess_success(t *testing.T) {
 			metaTable:       meta,
 		},
 		internalTasks: map[UniqueID]*internalTask{
-			segID: task,
+			segID:     task,
+			segID + 1: task2,
 		},
 		meta: meta,
 		builder: &indexBuilder{
@@ -281,6 +335,13 @@ func Test_flushSegmentWatcher_internalProcess_success(t *testing.T) {
 		fsw.internalProcess(segID)
 		fsw.internalTaskMutex.RLock()
 		assert.Equal(t, indexTaskInit, fsw.internalTasks[segID].state)
+		fsw.internalTaskMutex.RUnlock()
+	})
+
+	t.Run("prepare for fake segment", func(t *testing.T) {
+		fsw.internalProcess(segID + 1)
+		fsw.internalTaskMutex.RLock()
+		assert.Equal(t, indexTaskDone, fsw.internalTasks[segID+1].state)
 		fsw.internalTaskMutex.RUnlock()
 	})
 
