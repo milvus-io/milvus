@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
+	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
@@ -379,7 +380,7 @@ func (dsService *dataSyncService) getChannelLatestMsgID(ctx context.Context, cha
 		zap.String("pChannelName", pChannelName),
 		zap.String("subscription", subName),
 	)
-	dmlStream.AsConsumer([]string{pChannelName}, subName)
+	dmlStream.AsConsumer([]string{pChannelName}, subName, mqwrapper.SubscriptionPositionUnknown)
 	id, err := dmlStream.GetLatestMsgID(pChannelName)
 	if err != nil {
 		return nil, err

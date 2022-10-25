@@ -13,19 +13,11 @@ package client
 
 import (
 	"github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
+	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 )
-
-// SubscriptionInitialPosition is the initial subscription position
-type SubscriptionInitialPosition int
 
 // UniqueID is the type of message ID
 type UniqueID = server.UniqueID
-
-// List 2 kinds of SubscriptionInitialPosition
-const (
-	SubscriptionPositionLatest SubscriptionInitialPosition = iota
-	SubscriptionPositionEarliest
-)
 
 // EarliestMessageID is used to get the earliest message ID, default -1
 func EarliestMessageID() UniqueID {
@@ -42,7 +34,7 @@ type ConsumerOptions struct {
 
 	// InitialPosition at which the cursor will be set when subscribe
 	// Default is `Latest`
-	SubscriptionInitialPosition
+	mqwrapper.SubscriptionInitialPosition
 
 	// Message for this consumer
 	// When a message is received, it will be pushed to this channel for consumption
