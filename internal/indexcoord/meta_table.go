@@ -434,27 +434,33 @@ func (mt *metaTable) GetIndexesForCollection(collID UniqueID, indexName string) 
 	return indexInfos
 }
 
-func (mt *metaTable) CanCreateIndex(req *indexpb.CreateIndexRequest) bool {
+func (mt *metaTable) CanCreateIndex(req *indexpb.CreateIndexRequest) (bool, error) {
 	mt.indexLock.RLock()
 	defer mt.indexLock.RUnlock()
 
 	indexes, ok := mt.collectionIndexes[req.CollectionID]
 	if !ok {
-		return true
+		return true, nil
 	}
 	for _, index := range indexes {
 		if index.IsDeleted {
 			continue
 		}
 		if req.IndexName == index.IndexName {
-			return mt.checkParams(index, req)
+			if mt.checkParams(index, req) {
+				return true, nil
+			}
+			errMsg := fmt.Sprintf("index already exist, but parameters are inconsistent. source index: %v current index: %v",
+				fmt.Sprintf("{index_name: %s, field_id: %d, index_params: %v, type_params: %v}", index.IndexName, index.FieldID, index.IndexParams, index.TypeParams),
+				fmt.Sprintf("{index_name: %s, field_id: %d, index_params: %v, type_params: %v}", req.GetIndexName(), req.GetFieldID(), req.GetIndexParams(), req.GetTypeParams()))
+			return false, fmt.Errorf("CreateIndex failed: %s", errMsg)
 		}
 		if req.FieldID == index.FieldID {
 			// creating multiple indexes on same field is not supported
-			return false
+			return false, fmt.Errorf("CreateIndex failed: creating multiple indexes on same field is not supported")
 		}
 	}
-	return true
+	return true, nil
 }
 
 func (mt *metaTable) checkParams(fieldIndex *model.Index, req *indexpb.CreateIndexRequest) bool {
