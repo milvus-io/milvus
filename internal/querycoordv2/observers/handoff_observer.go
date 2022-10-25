@@ -228,28 +228,40 @@ func (ob *HandoffObserver) tryHandoff(ctx context.Context, segment *querypb.Segm
 		zap.Int64s("indexIDs", indexIDs),
 	)
 
-	log.Info("try handoff segment...")
 	status, ok := ob.collectionStatus[segment.GetCollectionID()]
 	if Params.QueryCoordCfg.AutoHandoff &&
 		ok &&
 		ob.meta.CollectionManager.ContainAnyIndex(segment.GetCollectionID(), indexIDs...) {
+
+		event := ob.handoffEvents[segment.SegmentID]
+		if event == nil {
+			// record submit order
+			_, ok := ob.handoffSubmitOrders[segment.GetPartitionID()]
+			if !ok {
+				ob.handoffSubmitOrders[segment.GetPartitionID()] = make([]int64, 0)
+			}
+			ob.handoffSubmitOrders[segment.GetPartitionID()] = append(ob.handoffSubmitOrders[segment.GetPartitionID()], segment.GetSegmentID())
+		}
+
 		if status == CollectionHandoffStatusRegistered {
-			ob.handoffEvents[segment.GetSegmentID()] = &HandoffEvent{
-				Segment: segment,
-				Status:  HandoffEventStatusReceived,
+			//for new handoff event which collection is not ready
+			if event == nil {
+				ob.handoffEvents[segment.GetSegmentID()] = &HandoffEvent{
+					Segment: segment,
+					Status:  HandoffEventStatusReceived,
+				}
 			}
-		} else {
-			ob.handoffEvents[segment.GetSegmentID()] = &HandoffEvent{
-				Segment: segment,
-				Status:  HandoffEventStatusTriggered,
-			}
-			ob.handoff(segment)
+			return
 		}
-		_, ok := ob.handoffSubmitOrders[segment.GetPartitionID()]
-		if !ok {
-			ob.handoffSubmitOrders[segment.GetPartitionID()] = make([]int64, 0)
+
+		// change to triggered status before handoff, prevent execute twice
+		ob.handoffEvents[segment.GetSegmentID()] = &HandoffEvent{
+			Segment: segment,
+			Status:  HandoffEventStatusTriggered,
 		}
-		ob.handoffSubmitOrders[segment.GetPartitionID()] = append(ob.handoffSubmitOrders[segment.GetPartitionID()], segment.GetSegmentID())
+		log.Info("start to handoff segment...")
+		ob.handoff(segment)
+
 	} else {
 		// ignore handoff task
 		log.Debug("handoff event trigger failed due to collection/partition is not loaded!")
