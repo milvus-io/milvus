@@ -120,8 +120,8 @@ func (s *Server) balanceSegments(ctx context.Context, req *querypb.LoadBalanceRe
 			req.GetBase().GetMsgID(),
 			req.GetCollectionID(),
 			replica.GetID(),
-			task.NewSegmentAction(plan.To, task.ActionTypeGrow, "", plan.Segment.GetID()),
-			task.NewSegmentAction(srcNode, task.ActionTypeReduce, "", plan.Segment.GetID()),
+			task.NewSegmentAction(plan.To, task.ActionTypeGrow, plan.Segment.GetInsertChannel(), plan.Segment.GetID()),
+			task.NewSegmentAction(srcNode, task.ActionTypeReduce, plan.Segment.GetInsertChannel(), plan.Segment.GetID()),
 		)
 		err := s.taskScheduler.Add(task)
 		if err != nil {
