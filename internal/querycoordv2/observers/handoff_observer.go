@@ -230,8 +230,10 @@ func (ob *HandoffObserver) tryHandoff(ctx context.Context, segment *querypb.Segm
 
 	log.Info("try handoff segment...")
 	status, ok := ob.collectionStatus[segment.GetCollectionID()]
+	_, added := ob.handoffEvents[segment.GetSegmentID()]
 	if Params.QueryCoordCfg.AutoHandoff &&
 		ok &&
+		!added &&
 		ob.meta.CollectionManager.ContainAnyIndex(segment.GetCollectionID(), indexIDs...) {
 		if status == CollectionHandoffStatusRegistered {
 			ob.handoffEvents[segment.GetSegmentID()] = &HandoffEvent{
