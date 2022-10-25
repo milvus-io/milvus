@@ -86,3 +86,7 @@ func ErrUnauthenticated() error {
 func ErrProxyNotReady() error {
 	return status.Errorf(codes.Unavailable, "internal: Milvus Proxy is not ready yet. please wait")
 }
+
+func ErrPartitionNotExist(partitionName string) error {
+	return fmt.Errorf("partitionID of partitionName:%s can not be find", partitionName)
+}

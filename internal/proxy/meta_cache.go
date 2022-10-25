@@ -407,7 +407,7 @@ func (m *MetaCache) GetPartitionInfo(ctx context.Context, collectionName string,
 		log.Debug("proxy", zap.Any("GetPartitionID:partitions after update", partitions), zap.Any("collectionName", collectionName))
 		partInfo, ok = m.collInfo[collectionName].partInfo[partitionName]
 		if !ok {
-			return nil, fmt.Errorf("partitionID of partitionName:%s can not be find", partitionName)
+			return nil, ErrPartitionNotExist(partitionName)
 		}
 	}
 	metrics.ProxyCacheStatsCounter.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), "GetPartitionInfo", metrics.CacheHitLabel).Inc()

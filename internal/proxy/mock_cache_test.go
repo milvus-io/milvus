@@ -11,13 +11,15 @@ type getCollectionIDFunc func(ctx context.Context, collectionName string) (typeu
 type getCollectionSchemaFunc func(ctx context.Context, collectionName string) (*schemapb.CollectionSchema, error)
 type getCollectionInfoFunc func(ctx context.Context, collectionName string) (*collectionInfo, error)
 type getUserRoleFunc func(username string) []string
+type getPartitionIDFunc func(ctx context.Context, collectionName string, partitionName string) (typeutil.UniqueID, error)
 
 type mockCache struct {
 	Cache
-	getIDFunc       getCollectionIDFunc
-	getSchemaFunc   getCollectionSchemaFunc
-	getInfoFunc     getCollectionInfoFunc
-	getUserRoleFunc getUserRoleFunc
+	getIDFunc          getCollectionIDFunc
+	getSchemaFunc      getCollectionSchemaFunc
+	getInfoFunc        getCollectionInfoFunc
+	getUserRoleFunc    getUserRoleFunc
+	getPartitionIDFunc getPartitionIDFunc
 }
 
 func (m *mockCache) GetCollectionID(ctx context.Context, collectionName string) (typeutil.UniqueID, error) {
@@ -44,6 +46,13 @@ func (m *mockCache) GetCollectionInfo(ctx context.Context, collectionName string
 func (m *mockCache) RemoveCollection(ctx context.Context, collectionName string) {
 }
 
+func (m *mockCache) GetPartitionID(ctx context.Context, collectionName string, partitionName string) (typeutil.UniqueID, error) {
+	if m.getPartitionIDFunc != nil {
+		return m.getPartitionIDFunc(ctx, collectionName, partitionName)
+	}
+	return 0, nil
+}
+
 func (m *mockCache) GetUserRole(username string) []string {
 	if m.getUserRoleFunc != nil {
 		return m.getUserRoleFunc(username)
@@ -61,6 +70,10 @@ func (m *mockCache) setGetSchemaFunc(f getCollectionSchemaFunc) {
 
 func (m *mockCache) setGetInfoFunc(f getCollectionInfoFunc) {
 	m.getInfoFunc = f
+}
+
+func (m *mockCache) setGetPartitionIDFunc(f getPartitionIDFunc) {
+	m.getPartitionIDFunc = f
 }
 
 func newMockCache() *mockCache {
