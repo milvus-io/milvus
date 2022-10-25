@@ -25,9 +25,10 @@ macro(build_knowhere)
     message(STATUS "Building knowhere-${KNOWHERE_VERSION} from source")
     set (KNOWHERE_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX})
 
+    message(STATUS ${CMAKE_BUILD_TYPE})
     set(KNOWHERE_CMAKE_ARGS
             ${EP_COMMON_CMAKE_ARGS}
-            -DCMAKE_BUILD_TYPE=Release
+            -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
             -DCMAKE_INSTALL_PREFIX=${KNOWHERE_INSTALL_PREFIX}
             )
 
