@@ -215,11 +215,10 @@ class TestIndexOperation(TestcaseBase):
         assert collection_w.indexes[0].params["index_type"] == default_index_params["index_type"]
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue 19972")
     def test_index_create_indexes_for_different_fields(self):
         """
         target: Test create indexes for different fields
-        method: create two different indexes
+        method: create two different indexes with default index name
         expected: create successfully
         """
         collection_w = self.init_collection_general(prefix, True, is_index=True)[0]
