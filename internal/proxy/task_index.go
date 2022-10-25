@@ -374,7 +374,10 @@ func (dit *describeIndexTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	collID, _ := globalMetaCache.GetCollectionID(ctx, dit.CollectionName)
+	collID, err := globalMetaCache.GetCollectionID(ctx, dit.CollectionName)
+	if err != nil {
+		return err
+	}
 	dit.collectionID = collID
 	return nil
 }
@@ -495,7 +498,10 @@ func (dit *dropIndexTask) PreExecute(ctx context.Context) error {
 		dit.IndexName = Params.CommonCfg.DefaultIndexName
 	}
 
-	collID, _ := globalMetaCache.GetCollectionID(ctx, dit.CollectionName)
+	collID, err := globalMetaCache.GetCollectionID(ctx, dit.CollectionName)
+	if err != nil {
+		return err
+	}
 	dit.collectionID = collID
 
 	loaded, err := isCollectionLoaded(ctx, dit.queryCoord, []int64{collID})
