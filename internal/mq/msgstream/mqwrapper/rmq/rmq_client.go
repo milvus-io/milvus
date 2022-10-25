@@ -67,7 +67,7 @@ func (rc *rmqClient) Subscribe(options mqwrapper.ConsumerOptions) (mqwrapper.Con
 		Topic:                       options.Topic,
 		SubscriptionName:            options.SubscriptionName,
 		MessageChannel:              receiveChannel,
-		SubscriptionInitialPosition: client.SubscriptionInitialPosition(options.SubscriptionInitialPosition),
+		SubscriptionInitialPosition: options.SubscriptionInitialPosition,
 	})
 	if err != nil {
 		return nil, err

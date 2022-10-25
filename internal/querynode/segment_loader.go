@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
+	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -716,13 +717,18 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 	pChannelName := funcutil.ToPhysicalChannel(position.ChannelName)
 	position.ChannelName = pChannelName
 
-	stream.AsConsumer([]string{pChannelName}, fmt.Sprintf("querynode-%d-%d", Params.QueryNodeCfg.GetNodeID(), collectionID))
+	stream.AsConsumer([]string{pChannelName}, fmt.Sprintf("querynode-%d-%d", Params.QueryNodeCfg.GetNodeID(), collectionID), mqwrapper.SubscriptionPositionUnknown)
+	// make sure seek position is earlier than
 	lastMsgID, err := stream.GetLatestMsgID(pChannelName)
 	if err != nil {
 		return err
 	}
 
-	reachLatest, _ := lastMsgID.Equal(position.MsgID)
+	reachLatest, err := lastMsgID.Equal(position.MsgID)
+	if err != nil {
+		return err
+	}
+
 	if reachLatest || lastMsgID.AtEarliestPosition() {
 		log.Info("there is no more delta msg", zap.Int64("Collection ID", collectionID), zap.String("channel", pChannelName))
 		return nil

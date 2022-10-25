@@ -262,10 +262,13 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 		}
 	}()
 
+	// So far, we don't support to enable each node with two different channel
 	consumeSubName := funcutil.GenChannelSubName(Params.CommonCfg.QueryNodeSubName, collectionID, Params.QueryNodeCfg.GetNodeID())
 
 	// group channels by to seeking or consuming
 	channel2SeekPosition := make(map[string]*internalpb.MsgPosition)
+
+	// for channel with no position
 	channel2AsConsumerPosition := make(map[string]*internalpb.MsgPosition)
 	for _, info := range w.req.Infos {
 		if info.SeekPosition == nil || len(info.SeekPosition.MsgID) == 0 {
@@ -370,7 +373,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 			pos.MsgGroup = consumeSubName
 			// use pChannel to seek
 			pos.ChannelName = VPChannels[channel]
-			err = fg.seekQueryNodeFlowGraph(pos)
+			err = fg.consumeFlowGraphFromPosition(pos)
 			if err != nil {
 				log.Error("msgStream seek failed for dmChannels", zap.Int64("collectionID", collectionID), zap.String("vChannel", channel))
 				break
