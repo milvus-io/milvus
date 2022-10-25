@@ -57,15 +57,17 @@ func (r *rateCollector) removeFlowGraphChannel(channel string) {
 	delete(r.flowGraphTt, channel)
 }
 
-// getMinFlowGraphTt returns the minimal time tick of flow graphs.
-func (r *rateCollector) getMinFlowGraphTt() Timestamp {
+// getMinFlowGraphTt returns the vchannel and minimal time tick of flow graphs.
+func (r *rateCollector) getMinFlowGraphTt() (string, Timestamp) {
 	r.flowGraphTtMu.Lock()
 	defer r.flowGraphTtMu.Unlock()
 	minTt := typeutil.MaxTimestamp
-	for _, t := range r.flowGraphTt {
+	var channel string
+	for c, t := range r.flowGraphTt {
 		if minTt > t {
 			minTt = t
+			channel = c
 		}
 	}
-	return minTt
+	return channel, minTt
 }

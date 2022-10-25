@@ -811,10 +811,6 @@ func (s *Server) ShowConfigurations(ctx context.Context, req *internalpb.ShowCon
 // GetMetrics returns DataCoord metrics info
 // it may include SystemMetrics, Topology metrics, etc.
 func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	log.Debug("received get metrics request",
-		zap.Int64("nodeID", Params.DataCoordCfg.GetNodeID()),
-		zap.String("request", req.Request))
-
 	if s.isClosed() {
 		log.Warn("DataCoord.GetMetrics failed",
 			zap.Int64("node_id", Params.DataCoordCfg.GetNodeID()),
@@ -848,14 +844,17 @@ func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 		}, nil
 	}
 
-	log.Debug("DataCoord.GetMetrics",
-		zap.String("metric_type", metricType))
-
 	if metricType == metricsinfo.SystemInfoMetrics {
-		log.Debug("failed to get system info metrics from cache, recompute instead",
-			zap.Error(err))
-
 		metrics, err := s.getSystemInfoMetrics(ctx, req)
+		if err != nil {
+			log.Warn("DataCoord GetMetrics failed", zap.Int64("nodeID", Params.DataCoordCfg.GetNodeID()), zap.Error(err))
+			return &milvuspb.GetMetricsResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_UnexpectedError,
+					Reason:    err.Error(),
+				},
+			}, nil
+		}
 
 		log.Debug("DataCoord.GetMetrics",
 			zap.Int64("node_id", Params.DataCoordCfg.GetNodeID()),

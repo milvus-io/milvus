@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/ratelimitutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 const (
@@ -77,9 +78,9 @@ type Limit = ratelimitutil.Limit
 // Protections:
 //  1. TT protection -> 				dqlRate = maxDQLRate * (maxDelay - ttDelay) / maxDelay
 //  2. Memory protection -> 			dmlRate = maxDMLRate * (highMem - curMem) / (highMem - lowMem)
-//  3. Disk quota protection ->		force deny writing if exceeded
-//  4. DQL Queue length protection ->  dqlRate = curDQLRate * CoolOffSpeed
-//  5. DQL queue latency protection -> dqlRate = curDQLRate * CoolOffSpeed
+//  3. Disk quota protection ->			force deny writing if exceeded
+//  4. DQL Queue length protection ->   dqlRate = curDQLRate * CoolOffSpeed
+//  5. DQL queue latency protection ->  dqlRate = curDQLRate * CoolOffSpeed
 //  6. Search result protection ->	 	searchRate = curSearchRate * CoolOffSpeed
 //
 // If necessary, user can also manually force to deny RW requests.
@@ -131,17 +132,17 @@ func (q *QuotaCenter) run() {
 		case <-ticker.C:
 			err := q.syncMetrics()
 			if err != nil {
-				log.Error("quotaCenter sync metrics failed", zap.Error(err))
+				log.Warn("quotaCenter sync metrics failed", zap.Error(err))
 				break
 			}
 			err = q.calculateRates()
 			if err != nil {
-				log.Error("quotaCenter calculate rates failed", zap.Error(err))
+				log.Warn("quotaCenter calculate rates failed", zap.Error(err))
 				break
 			}
 			err = q.setRates()
 			if err != nil {
-				log.Error("quotaCenter setRates failed", zap.Error(err))
+				log.Warn("quotaCenter setRates failed", zap.Error(err))
 			}
 		}
 	}
@@ -241,12 +242,11 @@ func (q *QuotaCenter) syncMetrics() error {
 	if err != nil {
 		return err
 	}
-	// TODO: use rated log
-	log.Debug("QuotaCenter sync metrics done",
-		zap.Any("dataNodeMetrics", q.dataNodeMetrics),
-		zap.Any("queryNodeMetrics", q.queryNodeMetrics),
-		zap.Any("proxyMetrics", q.proxyMetrics),
-		zap.Any("dataCoordMetrics", q.dataCoordMetrics))
+	//log.Debug("QuotaCenter sync metrics done",
+	//	zap.Any("dataNodeMetrics", q.dataNodeMetrics),
+	//	zap.Any("queryNodeMetrics", q.queryNodeMetrics),
+	//	zap.Any("proxyMetrics", q.proxyMetrics),
+	//	zap.Any("dataCoordMetrics", q.dataCoordMetrics))
 	return nil
 }
 
@@ -294,14 +294,18 @@ func (q *QuotaCenter) calculateReadRates() {
 
 	coolOffSpeed := Params.QuotaConfig.CoolOffSpeed
 	coolOff := func(realTimeSearchRate float64, realTimeQueryRate float64) {
-		if q.currentRates[internalpb.RateType_DQLSearch] != Inf {
+		if q.currentRates[internalpb.RateType_DQLSearch] != Inf && realTimeSearchRate > 0 {
 			q.currentRates[internalpb.RateType_DQLSearch] = Limit(realTimeSearchRate * coolOffSpeed)
 		}
-		if q.currentRates[internalpb.RateType_DQLQuery] != Inf {
+		if q.currentRates[internalpb.RateType_DQLQuery] != Inf && realTimeSearchRate > 0 {
 			q.currentRates[internalpb.RateType_DQLQuery] = Limit(realTimeQueryRate * coolOffSpeed)
 		}
 		q.guaranteeMinRate(Params.QuotaConfig.DQLMinSearchRate, internalpb.RateType_DQLSearch)
 		q.guaranteeMinRate(Params.QuotaConfig.DQLMinQueryRate, internalpb.RateType_DQLQuery)
+		log.Warn("QuotaCenter cool read rates off done",
+			zap.Any("searchRate", q.currentRates[internalpb.RateType_DQLSearch]),
+			zap.Any("queryRate", q.currentRates[internalpb.RateType_DQLQuery]))
+		log.Info("QueryNodeMetrics when cool-off", zap.Any("metrics", q.queryNodeMetrics))
 	}
 
 	// TODO: unify search and query?
@@ -309,21 +313,18 @@ func (q *QuotaCenter) calculateReadRates() {
 	realTimeQueryRate := q.getRealTimeRate(internalpb.RateType_DQLQuery)
 
 	queueLatencyFactor := q.getQueryLatencyFactor()
-	log.Debug("QuotaCenter getQueryLatencyFactor done", zap.Float64("queueLatencyFactor", queueLatencyFactor))
 	if Limit(queueLatencyFactor) == Limit(coolOffSpeed) {
 		coolOff(realTimeSearchRate, realTimeQueryRate)
 		return
 	}
 
 	queueLengthFactor := q.getNQInQueryFactor()
-	log.Debug("QuotaCenter getNQInQueryFactor done", zap.Float64("queueLengthFactor", queueLengthFactor))
 	if Limit(queueLengthFactor) == Limit(coolOffSpeed) {
 		coolOff(realTimeSearchRate, realTimeQueryRate)
 		return
 	}
 
 	resultRateFactor := q.getReadResultFactor()
-	log.Debug("QuotaCenter getReadResultFactor done", zap.Float64("resultRateFactor", resultRateFactor))
 	if Limit(resultRateFactor) == Limit(coolOffSpeed) {
 		coolOff(realTimeSearchRate, realTimeQueryRate)
 	}
@@ -341,7 +342,6 @@ func (q *QuotaCenter) calculateWriteRates() error {
 		q.forceDenyWriting(DiskQuotaExceeded) // disk quota protection
 		return nil
 	}
-	log.Debug("QuotaCenter check diskQuota done", zap.Bool("exceeded", exceeded))
 
 	ts, err := q.tsoAllocator.GenerateTSO(1)
 	if err != nil {
@@ -352,14 +352,12 @@ func (q *QuotaCenter) calculateWriteRates() error {
 		q.forceDenyWriting(TimeTickLongDelay) // tt protection
 		return nil
 	}
-	log.Debug("QuotaCenter check getTimeTickDelayFactor done", zap.Float64("ttFactor", ttFactor))
 
 	memFactor := q.getMemoryFactor()
 	if memFactor <= 0 {
 		q.forceDenyWriting(MemoryExhausted) // memory protection
 		return nil
 	}
-	log.Debug("QuotaCenter check memoryWaterLevel done", zap.Float64("memFactor", memFactor))
 
 	if memFactor < ttFactor {
 		ttFactor = memFactor
@@ -386,7 +384,7 @@ func (q *QuotaCenter) calculateRates() error {
 	}
 	q.calculateReadRates()
 
-	log.Debug("QuotaCenter calculates rate done", zap.Any("rates", q.currentRates))
+	// log.Debug("QuotaCenter calculates rate done", zap.Any("rates", q.currentRates))
 	return nil
 }
 
@@ -415,27 +413,35 @@ func (q *QuotaCenter) resetCurrentRates() {
 // getTimeTickDelayFactor gets time tick delay of DataNodes and QueryNodes,
 // and return the factor according to max tolerable time tick delay.
 func (q *QuotaCenter) getTimeTickDelayFactor(ts Timestamp) float64 {
-	t1, _ := tsoutil.ParseTS(ts)
+	var curMaxDelay time.Duration
+	var role, vchannel string
+	var minTt time.Time
 
-	var maxDelay time.Duration
+	t1, _ := tsoutil.ParseTS(ts)
 	for nodeID, metric := range q.queryNodeMetrics {
 		if metric.Fgm.NumFlowGraph > 0 {
 			t2, _ := tsoutil.ParseTS(metric.Fgm.MinFlowGraphTt)
 			delay := t1.Sub(t2)
-			if delay.Nanoseconds() > maxDelay.Nanoseconds() {
-				maxDelay = delay
+			if delay.Nanoseconds() > curMaxDelay.Nanoseconds() {
+				curMaxDelay = delay
+				role = fmt.Sprintf("%s-%d", typeutil.QueryNodeRole, nodeID)
+				vchannel = metric.Fgm.MinFlowGraphChannel
+				minTt = t2
 			}
-			metrics.RootCoordTtDelay.WithLabelValues(strconv.FormatInt(nodeID, 10)).Set(float64(maxDelay.Milliseconds()))
+			metrics.RootCoordTtDelay.WithLabelValues(strconv.FormatInt(nodeID, 10)).Set(float64(curMaxDelay.Milliseconds()))
 		}
 	}
 	for nodeID, metric := range q.dataNodeMetrics {
 		if metric.Fgm.NumFlowGraph > 0 {
 			t2, _ := tsoutil.ParseTS(metric.Fgm.MinFlowGraphTt)
 			delay := t1.Sub(t2)
-			if delay.Nanoseconds() > maxDelay.Nanoseconds() {
-				maxDelay = delay
+			if delay.Nanoseconds() > curMaxDelay.Nanoseconds() {
+				curMaxDelay = delay
+				role = fmt.Sprintf("%s-%d", typeutil.DataNodeRole, nodeID)
+				vchannel = metric.Fgm.MinFlowGraphChannel
+				minTt = t2
 			}
-			metrics.RootCoordTtDelay.WithLabelValues(strconv.FormatInt(nodeID, 10)).Set(float64(maxDelay.Milliseconds()))
+			metrics.RootCoordTtDelay.WithLabelValues(strconv.FormatInt(nodeID, 10)).Set(float64(curMaxDelay.Milliseconds()))
 		}
 	}
 
@@ -443,17 +449,26 @@ func (q *QuotaCenter) getTimeTickDelayFactor(ts Timestamp) float64 {
 		return 1
 	}
 
-	maxTt := Params.QuotaConfig.MaxTimeTickDelay
-	if maxTt < 0 {
+	maxDelay := Params.QuotaConfig.MaxTimeTickDelay
+	if maxDelay < 0 {
 		// < 0 means disable tt protection
 		return 1
 	}
 
-	log.Debug("QuotaCenter check timeTick delay", zap.Time("curTs", t1), zap.Duration("maxDelay", maxDelay))
-	if maxDelay.Nanoseconds() >= maxTt.Nanoseconds() {
+	if curMaxDelay.Nanoseconds() >= maxDelay.Nanoseconds() {
+		log.Warn("QuotaCenter force deny writing due to long timeTick delay",
+			zap.String("node", role),
+			zap.String("vchannel", vchannel),
+			zap.Time("curTs", t1),
+			zap.Time("minTs", minTt),
+			zap.Duration("delay", curMaxDelay),
+			zap.Duration("MaxDelay", maxDelay))
+		log.Info("DataNode and QueryNode Metrics",
+			zap.Any("QueryNodeMetrics", q.queryNodeMetrics),
+			zap.Any("DataNodeMetrics", q.dataNodeMetrics))
 		return 0
 	}
-	return float64(maxTt.Nanoseconds()-maxDelay.Nanoseconds()) / float64(maxTt.Nanoseconds())
+	return float64(maxDelay.Nanoseconds()-curMaxDelay.Nanoseconds()) / float64(maxDelay.Nanoseconds())
 }
 
 // getNQInQueryFactor checks search&query nq in QueryNode,
@@ -540,37 +555,53 @@ func (q *QuotaCenter) getMemoryFactor() float64 {
 	queryNodeMemoryLowWaterLevel := Params.QuotaConfig.QueryNodeMemoryLowWaterLevel
 	queryNodeMemoryHighWaterLevel := Params.QuotaConfig.QueryNodeMemoryHighWaterLevel
 
-	for _, metric := range q.queryNodeMetrics {
+	for nodeID, metric := range q.queryNodeMetrics {
 		memoryWaterLevel := float64(metric.Hms.MemoryUsage) / float64(metric.Hms.Memory)
 		if memoryWaterLevel <= queryNodeMemoryLowWaterLevel {
 			continue
 		}
 		if memoryWaterLevel >= queryNodeMemoryHighWaterLevel {
-			log.Debug("QuotaCenter: QueryNode memory to high water level",
+			log.Warn("QuotaCenter: QueryNode memory to high water level",
+				zap.String("Node", fmt.Sprintf("%s-%d", typeutil.QueryNodeRole, nodeID)),
 				zap.Uint64("UsedMem", metric.Hms.MemoryUsage),
 				zap.Uint64("TotalMem", metric.Hms.Memory),
-				zap.Float64("QueryNodeMemoryHighWaterLevel", queryNodeMemoryHighWaterLevel))
+				zap.Float64("memoryWaterLevel", memoryWaterLevel),
+				zap.Float64("memoryHighWaterLevel", queryNodeMemoryHighWaterLevel))
 			return 0
 		}
 		p := (queryNodeMemoryHighWaterLevel - memoryWaterLevel) / (queryNodeMemoryHighWaterLevel - queryNodeMemoryLowWaterLevel)
 		if p < factor {
+			log.Warn("QuotaCenter: QueryNode memory to low water level, limit writing rate",
+				zap.String("Node", fmt.Sprintf("%s-%d", typeutil.QueryNodeRole, nodeID)),
+				zap.Uint64("UsedMem", metric.Hms.MemoryUsage),
+				zap.Uint64("TotalMem", metric.Hms.Memory),
+				zap.Float64("memoryWaterLevel", memoryWaterLevel),
+				zap.Float64("memoryLowWaterLevel", queryNodeMemoryLowWaterLevel))
 			factor = p
 		}
 	}
-	for _, metric := range q.dataNodeMetrics {
+	for nodeID, metric := range q.dataNodeMetrics {
 		memoryWaterLevel := float64(metric.Hms.MemoryUsage) / float64(metric.Hms.Memory)
 		if memoryWaterLevel <= dataNodeMemoryLowWaterLevel {
 			continue
 		}
 		if memoryWaterLevel >= dataNodeMemoryHighWaterLevel {
-			log.Debug("QuotaCenter: DataNode memory to high water level",
+			log.Warn("QuotaCenter: DataNode memory to high water level",
+				zap.String("Node", fmt.Sprintf("%s-%d", typeutil.DataNodeRole, nodeID)),
 				zap.Uint64("UsedMem", metric.Hms.MemoryUsage),
 				zap.Uint64("TotalMem", metric.Hms.Memory),
-				zap.Float64("DataNodeMemoryHighWaterLevel", dataNodeMemoryHighWaterLevel))
+				zap.Float64("memoryWaterLevel", memoryWaterLevel),
+				zap.Float64("memoryHighWaterLevel", dataNodeMemoryHighWaterLevel))
 			return 0
 		}
 		p := (dataNodeMemoryHighWaterLevel - memoryWaterLevel) / (dataNodeMemoryHighWaterLevel - dataNodeMemoryLowWaterLevel)
 		if p < factor {
+			log.Warn("QuotaCenter: DataNode memory to low water level, limit writing rate",
+				zap.String("Node", fmt.Sprintf("%s-%d", typeutil.DataNodeRole, nodeID)),
+				zap.Uint64("UsedMem", metric.Hms.MemoryUsage),
+				zap.Uint64("TotalMem", metric.Hms.Memory),
+				zap.Float64("memoryWaterLevel", memoryWaterLevel),
+				zap.Float64("memoryLowWaterLevel", dataNodeMemoryLowWaterLevel))
 			factor = p
 		}
 	}
@@ -587,7 +618,15 @@ func (q *QuotaCenter) ifDiskQuotaExceeded() bool {
 	}
 	diskQuota := Params.QuotaConfig.DiskQuota
 	totalSize := q.dataCoordMetrics.TotalBinlogSize
-	return float64(totalSize) >= diskQuota
+	if float64(totalSize) >= diskQuota {
+		log.Warn("QuotaCenter: disk quota exceeded",
+			zap.Int64("curDiskUsage", totalSize),
+			zap.Float64("diskQuota", diskQuota))
+		log.Info("DataCoordMetric",
+			zap.Any("metric", q.dataCoordMetrics))
+		return true
+	}
+	return false
 }
 
 // setRates notifies Proxies to set rates for different rate types.

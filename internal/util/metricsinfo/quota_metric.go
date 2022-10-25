@@ -41,8 +41,9 @@ type RateMetric struct {
 
 // FlowGraphMetric contains a minimal timestamp of flow graph and the number of flow graphs.
 type FlowGraphMetric struct {
-	MinFlowGraphTt typeutil.Timestamp
-	NumFlowGraph   int
+	MinFlowGraphChannel string
+	MinFlowGraphTt      typeutil.Timestamp
+	NumFlowGraph        int
 }
 
 // ReadInfoInQueue contains NQ num or task num in QueryNode's task queue.

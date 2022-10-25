@@ -76,8 +76,6 @@ func (s *Server) getSystemInfoMetrics(
 	}
 
 	// for each data node, fetch metrics info
-	log.Debug("datacoord.getSystemInfoMetrics",
-		zap.Int("DataNodes number", len(nodes)))
 	for _, node := range nodes {
 		infos, err := s.getDataNodeMetrics(ctx, req, node)
 		if err != nil {
