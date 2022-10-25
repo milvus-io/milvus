@@ -170,7 +170,7 @@ func TestIndexTaskScheduler(t *testing.T) {
 		newTask(fakeTaskBuiltIndex, nil, commonpb.IndexState_Failed),
 		newTask(fakeTaskSavedIndexes, nil, commonpb.IndexState_Finished),
 		newTask(fakeTaskSavedIndexes, map[fakeTaskState]error{fakeTaskLoadedData: ErrNoSuchKey}, commonpb.IndexState_Failed),
-		newTask(fakeTaskSavedIndexes, map[fakeTaskState]error{fakeTaskSavedIndexes: fmt.Errorf("auth failed")}, commonpb.IndexState_Unissued))
+		newTask(fakeTaskSavedIndexes, map[fakeTaskState]error{fakeTaskSavedIndexes: fmt.Errorf("auth failed")}, commonpb.IndexState_Retry))
 
 	for _, task := range tasks {
 		assert.Nil(t, scheduler.IndexBuildQueue.Enqueue(task))
