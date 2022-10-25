@@ -29,12 +29,14 @@ func TestRateCollector(t *testing.T) {
 		collector, err := newRateCollector()
 		assert.NoError(t, err)
 
-		minTt := collector.getMinFlowGraphTt()
+		c, minTt := collector.getMinFlowGraphTt()
+		assert.Equal(t, "", c)
 		assert.Equal(t, typeutil.MaxTimestamp, minTt)
 		collector.updateFlowGraphTt("channel1", 100)
 		collector.updateFlowGraphTt("channel2", 200)
 		collector.updateFlowGraphTt("channel3", 50)
-		minTt = collector.getMinFlowGraphTt()
+		c, minTt = collector.getMinFlowGraphTt()
+		assert.Equal(t, "channel3", c)
 		assert.Equal(t, Timestamp(50), minTt)
 	})
 }

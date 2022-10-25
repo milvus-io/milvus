@@ -48,13 +48,14 @@ func (node *DataNode) getQuotaMetrics() (*metricsinfo.DataNodeQuotaMetrics, erro
 	if err != nil {
 		return nil, err
 	}
-
+	minFGChannel, minFGTt := rateCol.getMinFlowGraphTt()
 	return &metricsinfo.DataNodeQuotaMetrics{
 		Hms: metricsinfo.HardwareMetrics{},
 		Rms: rms,
 		Fgm: metricsinfo.FlowGraphMetric{
-			MinFlowGraphTt: rateCol.getMinFlowGraphTt(),
-			NumFlowGraph:   node.flowgraphManager.getFlowGraphNum(),
+			MinFlowGraphChannel: minFGChannel,
+			MinFlowGraphTt:      minFGTt,
+			NumFlowGraph:        node.flowgraphManager.getFlowGraphNum(),
 		},
 	}, nil
 }
