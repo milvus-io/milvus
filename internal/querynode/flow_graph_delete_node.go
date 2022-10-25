@@ -144,7 +144,7 @@ func (dNode *deleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			err := dNode.delete(delData, segmentID, &wg)
 			if err != nil {
 				// error occurs when segment cannot be found, calling cgo function delete failed and etc...
-				log.Error("failed to apply deletions to segment",
+				log.Warn("failed to apply deletions to segment",
 					zap.Int64("segmentID", segmentID),
 					zap.Error(err),
 				)

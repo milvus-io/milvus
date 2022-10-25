@@ -184,7 +184,7 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context, req *querypb.LoadS
 
 	// start to load
 	// Make sure we can always benefit from concurrency, and not spawn too many idle goroutines
-	log.Debug("start to load segments in parallel",
+	log.Info("start to load segments in parallel",
 		zap.Int("segmentNum", segmentNum),
 		zap.Int("concurrencyLevel", concurrencyLevel))
 	err = funcutil.ProcessFuncParallel(segmentNum,
@@ -285,7 +285,7 @@ func (loader *segmentLoader) loadFiles(ctx context.Context, segment *Segment,
 	if pkFieldID == common.InvalidFieldID {
 		log.Warn("segment primary key field doesn't exist when load segment")
 	} else {
-		log.Debug("loading bloom filter...", zap.Int64("segmentID", segmentID))
+		log.Info("loading bloom filter...", zap.Int64("segmentID", segmentID))
 		pkStatsBinlogs := loader.filterPKStatsBinlogs(loadInfo.Statslogs, pkFieldID)
 		err = loader.loadSegmentBloomFilter(ctx, segment, pkStatsBinlogs)
 		if err != nil {
@@ -293,7 +293,7 @@ func (loader *segmentLoader) loadFiles(ctx context.Context, segment *Segment,
 		}
 	}
 
-	log.Debug("loading delta...", zap.Int64("segmentID", segmentID))
+	log.Info("loading delta...", zap.Int64("segmentID", segmentID))
 	err = loader.loadDeltaLogs(ctx, segment, loadInfo.Deltalogs)
 	return err
 }
@@ -479,7 +479,7 @@ func (loader *segmentLoader) loadFieldIndexData(ctx context.Context, segment *Se
 		// get index params when detecting indexParamPrefix
 		if path.Base(indexPath) == storage.IndexParamsKey {
 			indexParamsFuture := loader.ioPool.Submit(func() (interface{}, error) {
-				log.Debug("load index params file", zap.String("path", indexPath))
+				log.Info("load index params file", zap.String("path", indexPath))
 				return loader.cm.Read(ctx, indexPath)
 			})
 
@@ -521,7 +521,7 @@ func (loader *segmentLoader) loadFieldIndexData(ctx context.Context, segment *Se
 		indexPath := p
 		indexFuture := loader.cpuPool.Submit(func() (interface{}, error) {
 			indexBlobFuture := loader.ioPool.Submit(func() (interface{}, error) {
-				log.Debug("load index file", zap.String("path", indexPath))
+				log.Info("load index file", zap.String("path", indexPath))
 				data, err := loader.cm.Read(ctx, indexPath)
 				if err != nil {
 					log.Warn("failed to load index file", zap.String("path", indexPath), zap.Error(err))
@@ -917,7 +917,7 @@ func (loader *segmentLoader) checkSegmentSize(collectionID UniqueID, segmentLoad
 	// when load segment, data will be copied from go memory to c++ memory
 	memLoadingUsage := usedMemAfterLoad + uint64(
 		float64(maxSegmentSize)*float64(concurrency)*Params.QueryNodeCfg.LoadMemoryUsageFactor)
-	log.Debug("predict memory and disk usage while loading (in MiB)",
+	log.Info("predict memory and disk usage while loading (in MiB)",
 		zap.Int64("collectionID", collectionID),
 		zap.Int("concurrency", concurrency),
 		zap.Uint64("memUsage", toMB(memLoadingUsage)),

@@ -193,7 +193,7 @@ func newSegment(collection *Collection,
 		}).Await()
 	default:
 		err := fmt.Errorf("illegal segment type %d when create segment  %d", segType, segmentID)
-		log.Error("create new segment error",
+		log.Warn("create new segment error",
 			zap.Int64("collectionID", collectionID),
 			zap.Int64("partitionID", partitionID),
 			zap.Int64("segmentID", segmentID),
@@ -927,7 +927,7 @@ func (s *Segment) segmentLoadIndexData(bytesIndex [][]byte, indexInfo *querypb.F
 	err = loadIndexInfo.appendLoadIndexInfo(bytesIndex, indexInfo, s.collectionID, s.partitionID, s.segmentID, fieldType)
 	if err != nil {
 		if loadIndexInfo.cleanLocalData() != nil {
-			log.Error("failed to clean cached data on disk after append index failed",
+			log.Warn("failed to clean cached data on disk after append index failed",
 				zap.Int64("buildID", indexInfo.BuildID),
 				zap.Int64("index version", indexInfo.IndexVersion))
 		}

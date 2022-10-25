@@ -154,7 +154,7 @@ func (b *baseReadTask) Ready() (bool, error) {
 	}
 
 	if _, released := b.QS.collection.getReleaseTime(); released {
-		log.Debug("collection release before search", zap.Int64("collectionID", b.CollectionID))
+		log.Info("collection release before search", zap.Int64("collectionID", b.CollectionID))
 		return false, fmt.Errorf("collection has been released, taskID = %d, collectionID = %d", b.ID(), b.CollectionID)
 	}
 

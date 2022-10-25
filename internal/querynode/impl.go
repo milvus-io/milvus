@@ -1085,7 +1085,7 @@ func (node *QueryNode) SyncReplicaSegments(ctx context.Context, req *querypb.Syn
 		}, nil
 	}
 
-	log.Debug("Received SyncReplicaSegments request", zap.String("vchannelName", req.GetVchannelName()))
+	log.Info("Received SyncReplicaSegments request", zap.String("vchannelName", req.GetVchannelName()))
 
 	err := node.ShardClusterService.SyncReplicaSegments(req.GetVchannelName(), req.GetReplicaSegments())
 	if err != nil {
@@ -1096,7 +1096,7 @@ func (node *QueryNode) SyncReplicaSegments(ctx context.Context, req *querypb.Syn
 		}, nil
 	}
 
-	log.Debug("SyncReplicaSegments Done", zap.String("vchannel", req.GetVchannelName()))
+	log.Info("SyncReplicaSegments Done", zap.String("vchannel", req.GetVchannelName()))
 
 	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
 }
@@ -1282,22 +1282,23 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 	}
 	// check target matches
 	if req.GetBase().GetTargetID() != node.session.ServerID {
+		log.Warn("failed to do match target id when sync ", zap.Int64("expect", req.GetBase().GetTargetID()), zap.Int64("actual", node.session.ServerID))
 		status := &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_NodeIDNotMatch,
 			Reason:    common.WrapNodeIDNotMatchMsg(req.GetBase().GetTargetID(), node.session.ServerID),
 		}
 		return status, nil
 	}
-	log.Debug("SyncDistribution received")
 	shardCluster, ok := node.ShardClusterService.getShardCluster(req.GetChannel())
 	if !ok {
+		log.Warn("failed to find shard cluster when sync ", zap.String("channel", req.GetChannel()))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    "shard not exist",
 		}, nil
 	}
 	for _, action := range req.GetActions() {
-		log.Debug("sync action", zap.String("Action", action.GetType().String()), zap.Int64("segmentID", action.SegmentID))
+		log.Info("sync action", zap.String("Action", action.GetType().String()), zap.Int64("segmentID", action.SegmentID))
 		switch action.GetType() {
 		case querypb.SyncType_Remove:
 			shardCluster.ReleaseSegments(ctx, &querypb.ReleaseSegmentsRequest{

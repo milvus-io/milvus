@@ -513,7 +513,7 @@ func (job *ReleasePartitionJob) Execute() error {
 	}
 
 	if len(toRelease) == len(loadedPartitions) { // All partitions are released, clear all
-		log.Debug("release partitions covers all partitions, will remove the whole collection")
+		log.Info("release partitions covers all partitions, will remove the whole collection")
 		err := job.meta.CollectionManager.RemoveCollection(req.GetCollectionID())
 		if err != nil {
 			msg := "failed to release partitions from store"
