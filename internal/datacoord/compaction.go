@@ -174,7 +174,7 @@ func (c *compactionPlanHandler) execCompactionPlan(signal *compactionSignal, pla
 	c.executingTaskNum++
 
 	go func() {
-		log.Debug("acquire queue", zap.Int64("nodeID", nodeID), zap.Int64("planID", plan.GetPlanID()))
+		log.Info("acquire queue", zap.Int64("nodeID", nodeID), zap.Int64("planID", plan.GetPlanID()))
 		c.acquireQueue(nodeID)
 
 		ts, err := c.allocator.allocTimestamp(context.TODO())
@@ -200,7 +200,7 @@ func (c *compactionPlanHandler) execCompactionPlan(signal *compactionSignal, pla
 			return
 		}
 
-		log.Debug("start compaction", zap.Int64("nodeID", nodeID), zap.Int64("planID", plan.GetPlanID()))
+		log.Info("start compaction", zap.Int64("nodeID", nodeID), zap.Int64("planID", plan.GetPlanID()))
 	}()
 	return nil
 }
@@ -254,7 +254,7 @@ func (c *compactionPlanHandler) handleMergeCompactionResult(plan *datapb.Compact
 		modInfos[i] = modSegments[i].SegmentInfo
 	}
 
-	log.Debug("handleCompactionResult: altering metastore after compaction")
+	log.Info("handleCompactionResult: altering metastore after compaction")
 	if newSegment.GetNumOfRows() > 0 {
 		if err := c.meta.alterMetaStoreAfterCompaction(modInfos, newSegment.SegmentInfo); err != nil {
 			log.Warn("handleCompactionResult: fail to alter metastore after compaction", zap.Error(err))
@@ -273,7 +273,7 @@ func (c *compactionPlanHandler) handleMergeCompactionResult(plan *datapb.Compact
 		StatsLogs:     newSegment.GetStatslogs(),
 	}
 
-	log.Debug("handleCompactionResult: syncing segments with node", zap.Int64("nodeID", nodeID))
+	log.Info("handleCompactionResult: syncing segments with node", zap.Int64("nodeID", nodeID))
 	if err := c.sessions.SyncSegments(nodeID, req); err != nil {
 		log.Warn("handleCompactionResult: fail to sync segments with node, reverting metastore",
 			zap.Int64("nodeID", nodeID), zap.String("reason", err.Error()))
@@ -363,7 +363,7 @@ func (c *compactionPlanHandler) acquireQueue(nodeID int64) {
 }
 
 func (c *compactionPlanHandler) releaseQueue(nodeID int64) {
-	log.Debug("try to release queue", zap.Int64("nodeID", nodeID))
+	log.Info("try to release queue", zap.Int64("nodeID", nodeID))
 	ch, ok := c.parallelCh[nodeID]
 	if !ok {
 		return

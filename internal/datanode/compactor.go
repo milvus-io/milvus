@@ -175,7 +175,7 @@ func (t *compactionTask) mergeDeltalogs(dBlobs map[UniqueID][]*Blob, timetravelT
 	}
 
 	dbuff.updateSize(dbuff.delData.RowCount)
-	log.Debug("mergeDeltalogs end",
+	log.Info("mergeDeltalogs end",
 		zap.Int("number of pks to compact in insert logs", len(pk2ts)),
 		zap.Float64("elapse in ms", nano2Milli(time.Since(mergeStart))))
 
@@ -412,7 +412,7 @@ func (t *compactionTask) merge(
 		uploadStatsTimeCost += time.Since(uploadStatsStart)
 	}
 
-	log.Debug("merge end", zap.Int64("remaining insert numRows", numRows),
+	log.Info("merge end", zap.Int64("remaining insert numRows", numRows),
 		zap.Int64("expired entities", expired), zap.Int("binlog file number", numBinlogs),
 		zap.Float64("download insert log elapse in ms", nano2Milli(downloadTimeCost)),
 		zap.Float64("upload insert log elapse in ms", nano2Milli(uploadInsertTimeCost)),
@@ -452,7 +452,7 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 		}
 	}
 
-	log.Debug("compaction start", zap.Int64("planID", t.plan.GetPlanID()), zap.Int32("timeout in seconds", t.plan.GetTimeoutInSeconds()))
+	log.Info("compaction start", zap.Int64("planID", t.plan.GetPlanID()), zap.Int32("timeout in seconds", t.plan.GetTimeoutInSeconds()))
 	segIDs := make([]UniqueID, 0, len(t.plan.GetSegmentBinlogs()))
 	for _, s := range t.plan.GetSegmentBinlogs() {
 		segIDs = append(segIDs, s.GetSegmentID())
@@ -475,7 +475,7 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 	<-ti.Injected()
 	injectEnd := time.Now()
 	defer func() {
-		log.Debug("inject elapse in ms", zap.Int64("planID", t.plan.GetPlanID()), zap.Float64("elapse", nano2Milli(injectEnd.Sub(injectStart))))
+		log.Info("inject elapse in ms", zap.Int64("planID", t.plan.GetPlanID()), zap.Float64("elapse", nano2Milli(injectEnd.Sub(injectStart))))
 	}()
 
 	var (
@@ -536,7 +536,7 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 	err = g.Wait()
 	downloadEnd := time.Now()
 	defer func() {
-		log.Debug("download deltalogs elapse in ms", zap.Int64("planID", t.plan.GetPlanID()), zap.Float64("elapse", nano2Milli(downloadEnd.Sub(downloadStart))))
+		log.Info("download deltalogs elapse in ms", zap.Int64("planID", t.plan.GetPlanID()), zap.Float64("elapse", nano2Milli(downloadEnd.Sub(downloadStart))))
 	}()
 
 	if err != nil {
@@ -561,7 +561,7 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 		log.Error("compact wrong", zap.Int64("planID", t.plan.GetPlanID()), zap.Error(err))
 		return nil, err
 	}
-	log.Debug("upload delta log elapse in ms", zap.Int64("planID", t.plan.GetPlanID()), zap.Float64("elapse", nano2Milli(time.Since(uploadDeltaStart))))
+	log.Info("upload delta log elapse in ms", zap.Int64("planID", t.plan.GetPlanID()), zap.Float64("elapse", nano2Milli(time.Since(uploadDeltaStart))))
 
 	for _, fbl := range deltaInfo {
 		for _, deltaLogInfo := range fbl.GetBinlogs() {
@@ -586,7 +586,7 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 	ti.injectDone(true)
 	uninjectEnd := time.Now()
 	defer func() {
-		log.Debug("uninject elapse in ms", zap.Int64("planID", t.plan.GetPlanID()), zap.Float64("elapse", nano2Milli(uninjectEnd.Sub(uninjectStart))))
+		log.Info("uninject elapse in ms", zap.Int64("planID", t.plan.GetPlanID()), zap.Float64("elapse", nano2Milli(uninjectEnd.Sub(uninjectStart))))
 	}()
 
 	log.Info("compaction done",

@@ -155,7 +155,7 @@ func FilterInIndexedSegments(handler Handler, indexCoord types.IndexCoord, segme
 			}
 			indexed := extractSegmentsWithVectorIndex(vecFieldID, resp.GetSegmentInfo())
 			if len(indexed) == 0 {
-				log.Debug("no vector index for the segment",
+				log.Info("no vector index for the segment",
 					zap.Int64("collectionID", segment.GetCollectionID()),
 					zap.Int64("segmentID", segment.GetID()))
 				return

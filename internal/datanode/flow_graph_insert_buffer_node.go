@@ -362,7 +362,7 @@ func (ibNode *insertBufferNode) Flush(fgMsg *flowGraphMsg, seg2Upload []UniqueID
 	segmentsToFlush := make([]UniqueID, 0, len(flushTasks))
 
 	for _, task := range flushTasks {
-		log.Debug("insertBufferNode flushing BufferData",
+		log.Info("insertBufferNode flushing BufferData",
 			zap.Int64("segmentID", task.segmentID),
 			zap.Bool("flushed", task.flushed),
 			zap.Bool("dropped", task.dropped),
@@ -585,7 +585,7 @@ func newInsertBufferNode(ctx context.Context, collID UniqueID, flushCh <-chan fl
 	}
 	wTt.AsProducer([]string{Params.CommonCfg.DataCoordTimeTick})
 	metrics.DataNodeNumProducers.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID())).Inc()
-	log.Debug("datanode AsProducer", zap.String("TimeTickChannelName", Params.CommonCfg.DataCoordTimeTick))
+	log.Info("datanode AsProducer", zap.String("TimeTickChannelName", Params.CommonCfg.DataCoordTimeTick))
 	var wTtMsgStream msgstream.MsgStream = wTt
 	wTtMsgStream.Start()
 

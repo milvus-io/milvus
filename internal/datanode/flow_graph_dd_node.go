@@ -342,7 +342,7 @@ func newDDNode(ctx context.Context, collID UniqueID, vChannelName string, droppe
 	deltaStream.SetRepackFunc(msgstream.DefaultRepackFunc)
 	deltaStream.AsProducer([]string{deltaChannelName})
 	metrics.DataNodeNumProducers.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID())).Inc()
-	log.Debug("datanode AsProducer", zap.String("DeltaChannelName", deltaChannelName))
+	log.Info("datanode AsProducer", zap.String("DeltaChannelName", deltaChannelName))
 	var deltaMsgStream msgstream.MsgStream = deltaStream
 	deltaMsgStream.Start()
 
