@@ -169,6 +169,7 @@ func NewCore(c context.Context, factory dependency.Factory) (*Core, error) {
 // UpdateStateCode update state code
 func (c *Core) UpdateStateCode(code commonpb.StateCode) {
 	c.stateCode.Store(code)
+	log.Info("update rootcoord state", zap.String("state", code.String()))
 }
 
 func (c *Core) checkHealthy() (commonpb.StateCode, bool) {
@@ -657,17 +658,43 @@ func (c *Core) Start() error {
 	return err
 }
 
+func (c *Core) stopExecutor() {
+	if c.stepExecutor != nil {
+		c.stepExecutor.Stop()
+		log.Info("stop rootcoord executor")
+	}
+}
+
+func (c *Core) stopScheduler() {
+	if c.scheduler != nil {
+		c.scheduler.Stop()
+		log.Info("stop rootcoord scheduler")
+	}
+}
+
+func (c *Core) cancelIfNotNil() {
+	if c.cancel != nil {
+		c.cancel()
+		log.Info("cancel rootcoord goroutines")
+	}
+}
+
+func (c *Core) revokeSession() {
+	if c.session != nil {
+		// wait at most one second to revoke
+		c.session.Revoke(time.Second)
+		log.Info("revoke rootcoord session")
+	}
+}
+
 // Stop stops rootCoord.
 func (c *Core) Stop() error {
 	c.UpdateStateCode(commonpb.StateCode_Abnormal)
-
-	c.stepExecutor.Stop()
-	c.scheduler.Stop()
-
-	c.cancel()
+	c.stopExecutor()
+	c.stopScheduler()
+	c.cancelIfNotNil()
 	c.wg.Wait()
-	// wait at most one second to revoke
-	c.session.Revoke(time.Second)
+	c.revokeSession()
 	return nil
 }
 
