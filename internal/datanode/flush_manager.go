@@ -136,7 +136,7 @@ func (q *orderFlushQueue) getFlushTaskRunner(pos *internalpb.MsgPosition) *flush
 		t.init(q.notifyFunc, q.postTask, q.tailCh)
 		q.tailCh = t.finishSignal
 		q.tailMut.Unlock()
-		log.Debug("new flush task runner created and initialized",
+		log.Info("new flush task runner created and initialized",
 			zap.Int64("segment ID", q.segmentID),
 			zap.String("pos message ID", string(pos.GetMsgID())),
 		)
@@ -284,7 +284,7 @@ func (m *rendezvousFlushManager) getFlushQueue(segmentID UniqueID) *orderFlushQu
 }
 
 func (m *rendezvousFlushManager) handleInsertTask(segmentID UniqueID, task flushInsertTask, binlogs, statslogs map[UniqueID]*datapb.Binlog, flushed bool, dropped bool, pos *internalpb.MsgPosition) {
-	log.Debug("handling insert task",
+	log.Info("handling insert task",
 		zap.Int64("segment ID", segmentID),
 		zap.Bool("flushed", flushed),
 		zap.Bool("dropped", dropped),

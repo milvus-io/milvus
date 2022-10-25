@@ -82,7 +82,7 @@ func (c *channelStateTimer) loadAllChannels(nodeID UniqueID) ([]*datapb.ChannelW
 // startOne can write ToWatch or ToRelease states.
 func (c *channelStateTimer) startOne(watchState datapb.ChannelWatchState, channelName string, nodeID UniqueID, timeoutTs int64) {
 	if timeoutTs == 0 {
-		log.Debug("zero timeoutTs, skip starting timer",
+		log.Info("zero timeoutTs, skip starting timer",
 			zap.String("watch state", watchState.String()),
 			zap.Int64("nodeID", nodeID),
 			zap.String("channel name", channelName),
@@ -94,14 +94,14 @@ func (c *channelStateTimer) startOne(watchState datapb.ChannelWatchState, channe
 	c.runningTimers.Store(channelName, stop)
 	timeoutT := time.Unix(0, timeoutTs)
 	go func() {
-		log.Debug("timer started",
+		log.Info("timer started",
 			zap.String("watch state", watchState.String()),
 			zap.Int64("nodeID", nodeID),
 			zap.String("channel name", channelName),
 			zap.Time("timeout time", timeoutT))
 		select {
 		case <-time.NewTimer(time.Until(timeoutT)).C:
-			log.Debug("timeout and stop timer: wait for channel ACK timeout",
+			log.Info("timeout and stop timer: wait for channel ACK timeout",
 				zap.String("watch state", watchState.String()),
 				zap.Int64("nodeID", nodeID),
 				zap.String("channel name", channelName),
@@ -109,7 +109,7 @@ func (c *channelStateTimer) startOne(watchState datapb.ChannelWatchState, channe
 			ackType := getAckType(watchState)
 			c.notifyTimeoutWatcher(&ackEvent{ackType, channelName, nodeID})
 		case <-stop:
-			log.Debug("stop timer before timeout",
+			log.Info("stop timer before timeout",
 				zap.String("watch state", watchState.String()),
 				zap.Int64("nodeID", nodeID),
 				zap.String("channel name", channelName),
