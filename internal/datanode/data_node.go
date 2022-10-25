@@ -348,7 +348,7 @@ func (node *DataNode) handleWatchInfo(e *event, key string, data []byte) {
 		}
 
 		if isEndWatchState(watchInfo.State) {
-			log.Debug("DataNode received a PUT event with an end State", zap.String("state", watchInfo.State.String()))
+			log.Info("DataNode received a PUT event with an end State", zap.String("state", watchInfo.State.String()))
 			return
 		}
 
@@ -474,7 +474,7 @@ func (node *DataNode) Start() error {
 		log.Error("failed to start id allocator", zap.Error(err), zap.String("role", typeutil.DataNodeRole))
 		return err
 	}
-	log.Debug("start id allocator done", zap.String("role", typeutil.DataNodeRole))
+	log.Info("start id allocator done", zap.String("role", typeutil.DataNodeRole))
 
 	rep, err := node.rootCoord.AllocTimestamp(node.ctx, &rootcoordpb.AllocTimestampRequest{
 		Base: commonpbutil.NewMsgBase(
@@ -877,7 +877,7 @@ func (node *DataNode) GetCompactionState(ctx context.Context, req *datapb.Compac
 		node.compactionExecutor.completed.Delete(k)
 		return true
 	})
-	log.Debug("Compaction results", zap.Any("results", results))
+	log.Info("Compaction results", zap.Any("results", results))
 	return &datapb.CompactionStateResponse{
 		Status:  &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 		Results: results,
@@ -1080,7 +1080,7 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 	if err != nil {
 		return returnFailFunc(err)
 	}
-	log.Debug("import time range", zap.Uint64("start_ts", tsStart), zap.Uint64("end_ts", tsEnd))
+	log.Info("import time range", zap.Uint64("start_ts", tsStart), zap.Uint64("end_ts", tsEnd))
 	err = importWrapper.Import(req.GetImportTask().GetFiles(), req.GetImportTask().GetRowBased(), false)
 	//err = importWrapper.Import(req.GetImportTask().GetFiles(), req.GetImportTask().GetRowBased(), false, tsStart, tsEnd)
 	if err != nil {

@@ -162,7 +162,7 @@ func (c *ChannelManager) Startup(ctx context.Context, nodes []int64) error {
 		ctx1, cancel := context.WithCancel(ctx)
 		c.stopChecker = cancel
 		go c.stateChecker(ctx1)
-		log.Debug("starting etcd states checker")
+		log.Info("starting etcd states checker")
 	}
 
 	log.Info("cluster start up",
@@ -196,7 +196,7 @@ func (c *ChannelManager) checkOldNodes(nodes []UniqueID) error {
 		for _, info := range watchInfos {
 			channelName := info.GetVchan().GetChannelName()
 
-			log.Debug("processing watch info",
+			log.Info("processing watch info",
 				zap.String("watch state", info.GetState().String()),
 				zap.String("channel name", channelName))
 
@@ -387,7 +387,7 @@ func (c *ChannelManager) DeleteNode(nodeID int64) error {
 	for _, ch := range channels {
 		chNames = append(chNames, ch.Name)
 	}
-	log.Debug("remove timers for channel of the deregistered node",
+	log.Info("remove timers for channel of the deregistered node",
 		zap.Any("channels", chNames), zap.Int64("nodeID", nodeID))
 	c.stateTimer.removeTimers(chNames)
 
@@ -557,7 +557,7 @@ func (c *ChannelManager) RemoveChannel(channelName string) error {
 func (c *ChannelManager) remove(nodeID int64, ch *channel) error {
 	var op ChannelOpSet
 	op.Delete(nodeID, []*channel{ch})
-	log.Debug("remove channel assignment",
+	log.Info("remove channel assignment",
 		zap.Int64("nodeID to be removed", nodeID),
 		zap.String("channelID", ch.Name),
 		zap.Int64("collectionID", ch.CollectionID))
@@ -663,7 +663,7 @@ func (c *ChannelManager) watchChannelStatesLoop(ctx context.Context) {
 			log.Info("watch etcd loop quit")
 			return
 		case ackEvent := <-timeoutWatcher:
-			log.Debug("receive timeout acks from state watcher",
+			log.Info("receive timeout acks from state watcher",
 				zap.Any("state", ackEvent.ackType),
 				zap.Int64("nodeID", ackEvent.nodeID), zap.String("channel name", ackEvent.channelName))
 			c.processAck(ackEvent)
@@ -730,7 +730,7 @@ func (c *ChannelManager) Release(nodeID UniqueID, channelName string) error {
 	toReleaseUpdates := getReleaseOp(nodeID, toReleaseChannel)
 	err := c.updateWithTimer(toReleaseUpdates, datapb.ChannelWatchState_ToRelease)
 	if err != nil {
-		log.Debug("fail to update to release with timer", zap.Array("to release updates", toReleaseUpdates))
+		log.Warn("fail to update to release with timer", zap.Array("to release updates", toReleaseUpdates))
 	}
 
 	return err
@@ -802,7 +802,7 @@ func (c *ChannelManager) CleanupAndReassign(nodeID UniqueID, channelName string)
 			return fmt.Errorf("failed to remove watch info: %v,%s", chToCleanUp, err.Error())
 		}
 
-		log.Debug("try to cleanup removal flag ", zap.String("channel name", channelName))
+		log.Info("try to cleanup removal flag ", zap.String("channel name", channelName))
 		c.h.FinishDropChannel(channelName)
 
 		log.Info("removed channel assignment", zap.Any("channel", chToCleanUp))

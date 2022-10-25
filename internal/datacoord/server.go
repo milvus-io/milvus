@@ -311,14 +311,14 @@ func (s *Server) Start() error {
 			log.Info("datacoord switch from standby to active, activating")
 			s.startServerLoop()
 			s.stateCode.Store(commonpb.StateCode_Healthy)
-			logutil.Logger(s.ctx).Debug("startup success")
+			logutil.Logger(s.ctx).Info("startup success")
 		}
 		s.stateCode.Store(commonpb.StateCode_StandBy)
-		logutil.Logger(s.ctx).Debug("DataCoord enter standby mode successfully")
+		logutil.Logger(s.ctx).Info("DataCoord enter standby mode successfully")
 	} else {
 		s.startServerLoop()
 		s.stateCode.Store(commonpb.StateCode_Healthy)
-		logutil.Logger(s.ctx).Debug("DataCoord startup successfully")
+		logutil.Logger(s.ctx).Info("DataCoord startup successfully")
 	}
 
 	Params.DataCoordCfg.CreatedTime = time.Now()
@@ -603,7 +603,7 @@ func (s *Server) updateSegmentStatistics(stats []*datapb.SegmentStats) {
 		// Log if # of rows is updated.
 		if s.meta.GetSegmentUnsafe(stat.GetSegmentID()) != nil &&
 			s.meta.GetSegmentUnsafe(stat.GetSegmentID()).GetNumOfRows() != stat.GetNumRows() {
-			log.Debug("Updating segment number of rows",
+			log.Info("Updating segment number of rows",
 				zap.Int64("segment ID", stat.GetSegmentID()),
 				zap.Int64("old value", s.meta.GetSegmentUnsafe(stat.GetSegmentID()).GetNumOfRows()),
 				zap.Int64("new value", stat.GetNumRows()),
@@ -784,7 +784,7 @@ func (s *Server) startFlushLoop(ctx context.Context) {
 		for {
 			select {
 			case <-ctx.Done():
-				logutil.Logger(s.ctx).Debug("flush loop shutdown")
+				logutil.Logger(s.ctx).Info("flush loop shutdown")
 				return
 			case segmentID := <-s.flushCh:
 				//Ignore return error
@@ -845,7 +845,7 @@ func (s *Server) Stop() error {
 	if !s.stateCode.CompareAndSwap(commonpb.StateCode_Healthy, commonpb.StateCode_Abnormal) {
 		return nil
 	}
-	logutil.Logger(s.ctx).Debug("server shutdown")
+	logutil.Logger(s.ctx).Info("server shutdown")
 	s.cluster.Close()
 	s.garbageCollector.close()
 	s.stopServerLoop()
