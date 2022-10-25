@@ -16,6 +16,8 @@
 
 package indexcoord
 
+import "time"
+
 const (
 	// IndexAddTaskName is the name of the operation to add index task.
 	IndexAddTaskName    = "IndexAddTask"
@@ -24,4 +26,6 @@ const (
 	flatIndex    = "FLAT"
 	diskAnnIndex = "DISKANN"
 	invalidIndex = "invalid"
+
+	reqTimeoutInterval = time.Second * 10
 )

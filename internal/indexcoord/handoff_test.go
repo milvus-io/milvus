@@ -177,6 +177,7 @@ func Test_newHandoff(t *testing.T) {
 func Test_handoff_error(t *testing.T) {
 	t.Run("pullSegmentInfo fail", func(t *testing.T) {
 		hd := &handoff{
+			ctx: context.Background(),
 			tasks: map[UniqueID]struct{}{
 				segID: {},
 			},
@@ -225,6 +226,7 @@ func Test_handoff_error(t *testing.T) {
 
 	t.Run("is importing", func(t *testing.T) {
 		hd := &handoff{
+			ctx: context.Background(),
 			tasks: map[UniqueID]struct{}{
 				segID: {},
 			},
@@ -281,6 +283,7 @@ func Test_handoff_error(t *testing.T) {
 
 	t.Run("get index info fail", func(t *testing.T) {
 		hd := &handoff{
+			ctx: context.Background(),
 			tasks: map[UniqueID]struct{}{
 				segID: {},
 			},
@@ -318,6 +321,7 @@ func Test_handoff_error(t *testing.T) {
 
 	t.Run("write handoff fail", func(t *testing.T) {
 		hd := &handoff{
+			ctx: context.Background(),
 			tasks: map[UniqueID]struct{}{
 				segID: {},
 			},
@@ -360,6 +364,7 @@ func Test_handoff_error(t *testing.T) {
 
 	t.Run("mark meta as write handoff fail", func(t *testing.T) {
 		hd := &handoff{
+			ctx: context.Background(),
 			tasks: map[UniqueID]struct{}{
 				segID: {},
 			},

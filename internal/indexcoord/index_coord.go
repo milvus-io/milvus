@@ -1082,7 +1082,9 @@ func (i *IndexCoord) tryAcquireSegmentReferLock(ctx context.Context, buildID Uni
 	// IndexCoord use buildID instead of taskID.
 	log.Info("try to acquire segment reference lock", zap.Int64("buildID", buildID),
 		zap.Int64("ndoeID", nodeID), zap.Int64s("segIDs", segIDs))
-	status, err := i.dataCoordClient.AcquireSegmentLock(ctx, &datapb.AcquireSegmentLockRequest{
+	ctx1, cancel := context.WithTimeout(ctx, reqTimeoutInterval)
+	defer cancel()
+	status, err := i.dataCoordClient.AcquireSegmentLock(ctx1, &datapb.AcquireSegmentLockRequest{
 		TaskID:     buildID,
 		NodeID:     nodeID,
 		SegmentIDs: segIDs,
@@ -1104,7 +1106,9 @@ func (i *IndexCoord) tryAcquireSegmentReferLock(ctx context.Context, buildID Uni
 
 func (i *IndexCoord) tryReleaseSegmentReferLock(ctx context.Context, buildID UniqueID, nodeID UniqueID) error {
 	releaseLock := func() error {
-		status, err := i.dataCoordClient.ReleaseSegmentLock(ctx, &datapb.ReleaseSegmentLockRequest{
+		ctx1, cancel := context.WithTimeout(ctx, reqTimeoutInterval)
+		defer cancel()
+		status, err := i.dataCoordClient.ReleaseSegmentLock(ctx1, &datapb.ReleaseSegmentLockRequest{
 			TaskID: buildID,
 			NodeID: nodeID,
 		})
@@ -1244,7 +1248,9 @@ func (i *IndexCoord) watchFlushedSegmentLoop() {
 }
 
 func (i *IndexCoord) pullSegmentInfo(ctx context.Context, segmentID UniqueID) (*datapb.SegmentInfo, error) {
-	resp, err := i.dataCoordClient.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{
+	ctx1, cancel := context.WithTimeout(ctx, reqTimeoutInterval)
+	defer cancel()
+	resp, err := i.dataCoordClient.GetSegmentInfo(ctx1, &datapb.GetSegmentInfoRequest{
 		SegmentIDs:       []int64{segmentID},
 		IncludeUnHealthy: false,
 	})

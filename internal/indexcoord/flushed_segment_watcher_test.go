@@ -213,6 +213,7 @@ func Test_flushSegmentWatcher_internalProcess_success(t *testing.T) {
 	}
 
 	fsw := &flushedSegmentWatcher{
+		ctx: context.Background(),
 		handoff: &handoff{
 			tasks:            map[UniqueID]struct{}{},
 			taskMutex:        sync.RWMutex{},
@@ -315,7 +316,9 @@ func Test_flushSegmentWatcher_internalProcess_error(t *testing.T) {
 	}
 
 	fsw := &flushedSegmentWatcher{
+		ctx: context.Background(),
 		ic: &IndexCoord{
+			loopCtx: context.Background(),
 			dataCoordClient: &DataCoordMock{
 				CallGetSegmentInfo: func(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
 					return &datapb.GetSegmentInfoResponse{
@@ -433,6 +436,7 @@ func Test_flushSegmentWatcher_prepare_error(t *testing.T) {
 			meta:              nil,
 			builder:           nil,
 			ic: &IndexCoord{
+				loopCtx:         context.Background(),
 				dataCoordClient: NewDataCoordMock(),
 			},
 			handoff: nil,
@@ -466,6 +470,7 @@ func Test_flushSegmentWatcher_prepare_error(t *testing.T) {
 			meta:              nil,
 			builder:           nil,
 			ic: &IndexCoord{
+				loopCtx: context.Background(),
 				dataCoordClient: &DataCoordMock{
 					CallGetSegmentInfo: func(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
 						return &datapb.GetSegmentInfoResponse{
@@ -502,6 +507,7 @@ func Test_flushSegmentWatcher_removeFlushedSegment(t *testing.T) {
 	}
 	t.Run("success", func(t *testing.T) {
 		fsw := &flushedSegmentWatcher{
+			ctx: context.Background(),
 			kvClient: &mockETCDKV{
 				removeWithPrefix: func(key string) error {
 					return nil
