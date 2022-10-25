@@ -271,6 +271,12 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 	}
 
 	undoTask := newBaseUndoTask(t.core.stepExecutor)
+	undoTask.AddStep(&expireCacheStep{
+		baseStep:        baseStep{core: t.core},
+		collectionNames: []string{t.Req.GetCollectionName()},
+		collectionID:    InvalidCollectionID,
+		ts:              ts,
+	}, &nullStep{})
 	undoTask.AddStep(&nullStep{}, &removeDmlChannelsStep{
 		baseStep:  baseStep{core: t.core},
 		pChannels: chanNames,

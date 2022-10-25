@@ -397,6 +397,7 @@ func Test_createCollectionTask_Execute(t *testing.T) {
 		core := newTestCore(withValidIDAllocator(),
 			withMeta(meta),
 			withTtSynchronizer(ticker),
+			withValidProxyManager(),
 			withDataCoord(dc))
 		core.broker = newServerBroker(core)
 
@@ -480,6 +481,7 @@ func Test_createCollectionTask_Execute(t *testing.T) {
 			withMeta(meta),
 			withTtSynchronizer(ticker),
 			withGarbageCollector(gc),
+			withValidProxyManager(),
 			withBroker(broker))
 
 		schema := &schemapb.CollectionSchema{
