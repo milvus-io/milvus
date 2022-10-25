@@ -215,7 +215,7 @@ func combineToSegmentIndexesMeta220(segmentIndexes SegmentIndexesMeta210, indexB
 func combineToLoadInfo220(collectionLoadInfo CollectionLoadInfo220, partitionLoadInto PartitionLoadInfo220, fieldIndexes FieldIndexes210) {
 	for collectionID, loadInfo := range collectionLoadInfo {
 		indexes, ok := fieldIndexes[collectionID]
-		if !ok {
+		if !ok || len(indexes.indexes) == 0 {
 			log.Warn("release the collection without index", zap.Int64("collectionID", collectionID))
 			delete(collectionLoadInfo, collectionID)
 		}
@@ -227,7 +227,7 @@ func combineToLoadInfo220(collectionLoadInfo CollectionLoadInfo220, partitionLoa
 
 	for collectionID, partitions := range partitionLoadInto {
 		indexes, ok := fieldIndexes[collectionID]
-		if !ok {
+		if !ok || len(indexes.indexes) == 0 {
 			log.Warn("release the collection without index", zap.Int64("collectionID", collectionID))
 			delete(collectionLoadInfo, collectionID)
 		}
