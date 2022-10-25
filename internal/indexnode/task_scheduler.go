@@ -222,7 +222,7 @@ func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
 			} else if errors.Is(err, ErrNoSuchKey) {
 				t.SetState(commonpb.IndexState_Failed, err.Error())
 			} else {
-				t.SetState(commonpb.IndexState_Unissued, err.Error())
+				t.SetState(commonpb.IndexState_Retry, err.Error())
 			}
 			return
 		}
