@@ -28,11 +28,11 @@ func CreateSegmentTasksFromPlans(ctx context.Context, checkerID int64, timeout t
 	for _, p := range plans {
 		actions := make([]task.Action, 0)
 		if p.To != -1 {
-			action := task.NewSegmentAction(p.To, task.ActionTypeGrow, "", p.Segment.GetID())
+			action := task.NewSegmentAction(p.To, task.ActionTypeGrow, p.Segment.GetInsertChannel(), p.Segment.GetID())
 			actions = append(actions, action)
 		}
 		if p.From != -1 {
-			action := task.NewSegmentAction(p.From, task.ActionTypeReduce, "", p.Segment.GetID())
+			action := task.NewSegmentAction(p.From, task.ActionTypeReduce, p.Segment.GetInsertChannel(), p.Segment.GetID())
 			actions = append(actions, action)
 		}
 		task := task.NewSegmentTask(
