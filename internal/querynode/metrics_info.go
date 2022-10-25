@@ -72,13 +72,15 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 	if err != nil {
 		return nil, err
 	}
+	minFGChannel, minFGTt := rateCol.getMinTSafe()
 	defer rateCol.rtCounter.resetQueueTime()
 	return &metricsinfo.QueryNodeQuotaMetrics{
 		Hms: metricsinfo.HardwareMetrics{},
 		Rms: rms,
 		Fgm: metricsinfo.FlowGraphMetric{
-			MinFlowGraphTt: rateCol.getMinTSafe(),
-			NumFlowGraph:   node.dataSyncService.getFlowGraphNum(),
+			MinFlowGraphChannel: minFGChannel,
+			MinFlowGraphTt:      minFGTt,
+			NumFlowGraph:        node.dataSyncService.getFlowGraphNum(),
 		},
 		SearchQueue: rateCol.rtCounter.getSearchNQInQueue(),
 		QueryQueue:  rateCol.rtCounter.getQueryTasksInQueue(),

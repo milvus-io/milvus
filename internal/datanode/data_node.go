@@ -747,12 +747,7 @@ func (node *DataNode) ShowConfigurations(ctx context.Context, req *internalpb.Sh
 }
 
 // GetMetrics return datanode metrics
-// TODO(dragondriver): cache the Metrics and set a retention to the cache
 func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	log.Debug("DataNode.GetMetrics",
-		zap.Int64("node_id", Params.DataNodeCfg.GetNodeID()),
-		zap.String("req", req.Request))
-
 	if !node.isHealthy() {
 		log.Warn("DataNode.GetMetrics failed",
 			zap.Int64("node_id", Params.DataNodeCfg.GetNodeID()),
@@ -782,11 +777,17 @@ func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 		}, nil
 	}
 
-	log.Debug("DataNode.GetMetrics",
-		zap.String("metric_type", metricType))
-
 	if metricType == metricsinfo.SystemInfoMetrics {
 		systemInfoMetrics, err := node.getSystemInfoMetrics(ctx, req)
+		if err != nil {
+			log.Warn("DataNode GetMetrics failed", zap.Int64("nodeID", Params.DataNodeCfg.GetNodeID()), zap.Error(err))
+			return &milvuspb.GetMetricsResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_UnexpectedError,
+					Reason:    err.Error(),
+				},
+			}, nil
+		}
 
 		log.Debug("DataNode.GetMetrics",
 			zap.Int64("node_id", Params.DataNodeCfg.GetNodeID()),

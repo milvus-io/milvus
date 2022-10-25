@@ -1122,7 +1122,6 @@ func (node *QueryNode) ShowConfigurations(ctx context.Context, req *internalpb.S
 }
 
 // GetMetrics return system infos of the query node, such as total memory, memory usage, cpu usage ...
-// TODO(dragondriver): cache the Metrics and set a retention to the cache
 func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	if !node.isHealthy() {
 		log.Warn("QueryNode.GetMetrics failed",
@@ -1151,21 +1150,31 @@ func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    err.Error(),
 			},
-			Response: "",
 		}, nil
 	}
 
 	if metricType == metricsinfo.SystemInfoMetrics {
-		metrics, err := getSystemInfoMetrics(ctx, req, node)
+		queryNodeMetrics, err := getSystemInfoMetrics(ctx, req, node)
 		if err != nil {
 			log.Warn("QueryNode.GetMetrics failed",
 				zap.Int64("nodeId", Params.QueryNodeCfg.GetNodeID()),
 				zap.String("req", req.Request),
 				zap.String("metricType", metricType),
 				zap.Error(err))
+			return &milvuspb.GetMetricsResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_UnexpectedError,
+					Reason:    err.Error(),
+				},
+			}, nil
 		}
+		log.Debug("QueryNode.GetMetrics",
+			zap.Int64("node_id", Params.QueryNodeCfg.GetNodeID()),
+			zap.String("req", req.Request),
+			zap.String("metric_type", metricType),
+			zap.Any("queryNodeMetrics", queryNodeMetrics))
 
-		return metrics, nil
+		return queryNodeMetrics, nil
 	}
 
 	log.Debug("QueryNode.GetMetrics failed, request metric type is not implemented yet",

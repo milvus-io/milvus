@@ -29,12 +29,14 @@ func TestRateCollector(t *testing.T) {
 		collector, err := newRateCollector()
 		assert.NoError(t, err)
 
-		minTt := collector.getMinTSafe()
+		c, minTt := collector.getMinTSafe()
+		assert.Equal(t, "", c)
 		assert.Equal(t, typeutil.MaxTimestamp, minTt)
 		collector.updateTSafe("channel1", 100)
 		collector.updateTSafe("channel2", 200)
 		collector.updateTSafe("channel3", 50)
-		minTt = collector.getMinTSafe()
+		c, minTt = collector.getMinTSafe()
+		assert.Equal(t, "channel3", c)
 		assert.Equal(t, Timestamp(50), minTt)
 	})
 }

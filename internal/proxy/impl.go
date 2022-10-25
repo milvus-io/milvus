@@ -3734,10 +3734,6 @@ func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReque
 // GetProxyMetrics gets the metrics of proxy, it's an internal interface which is different from GetMetrics interface,
 // because it only obtains the metrics of Proxy, not including the topological metrics of Query cluster and Data cluster.
 func (node *Proxy) GetProxyMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	log.Debug("Proxy.GetProxyMetrics",
-		zap.Int64("node_id", Params.ProxyCfg.GetNodeID()),
-		zap.String("req", req.Request))
-
 	if !node.checkHealthy() {
 		log.Warn("Proxy.GetProxyMetrics failed",
 			zap.Int64("node_id", Params.ProxyCfg.GetNodeID()),
@@ -3767,9 +3763,6 @@ func (node *Proxy) GetProxyMetrics(ctx context.Context, req *milvuspb.GetMetrics
 		}, nil
 	}
 
-	log.Debug("Proxy.GetProxyMetrics",
-		zap.String("metric_type", metricType))
-
 	req.Base = commonpbutil.NewMsgBase(
 		commonpbutil.WithMsgType(commonpb.MsgType_SystemInfo),
 		commonpbutil.WithMsgID(0),
@@ -3796,8 +3789,7 @@ func (node *Proxy) GetProxyMetrics(ctx context.Context, req *milvuspb.GetMetrics
 		log.Debug("Proxy.GetProxyMetrics",
 			zap.Int64("node_id", Params.ProxyCfg.GetNodeID()),
 			zap.String("req", req.Request),
-			zap.String("metric_type", metricType),
-			zap.Error(err))
+			zap.String("metric_type", metricType))
 
 		return proxyMetrics, nil
 	}
@@ -4574,7 +4566,6 @@ func (node *Proxy) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.Refr
 
 // SetRates limits the rates of requests.
 func (node *Proxy) SetRates(ctx context.Context, request *proxypb.SetRatesRequest) (*commonpb.Status, error) {
-	log.Debug("SetRates", zap.String("role", typeutil.ProxyRole), zap.Any("rates", request.GetRates()))
 	resp := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
 	}

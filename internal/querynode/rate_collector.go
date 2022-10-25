@@ -60,15 +60,17 @@ func (r *rateCollector) removeTSafeChannel(c string) {
 	delete(r.tSafes, c)
 }
 
-// getMinTSafe returns the minimal tSafe of flow graphs.
-func (r *rateCollector) getMinTSafe() Timestamp {
+// getMinTSafe returns the vchannel and minimal tSafe of flow graphs.
+func (r *rateCollector) getMinTSafe() (Channel, Timestamp) {
 	r.tSafesMu.Lock()
 	defer r.tSafesMu.Unlock()
+	var channel Channel
 	minTt := typeutil.MaxTimestamp
-	for _, t := range r.tSafes {
+	for c, t := range r.tSafes {
 		if minTt > t {
 			minTt = t
+			channel = c
 		}
 	}
-	return minTt
+	return channel, minTt
 }
