@@ -100,9 +100,12 @@ MinioChunkManager::MinioChunkManager(const StorageConfig& storage_config)
             config, Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never, false);
     }
 
-    if (!BucketExists(storage_config.bucket_name)) {
-        CreateBucket(storage_config.bucket_name);
-    }
+    // TODO ::BucketExist and CreateBucket func not work, should be fixed
+    // index node has already tried to create bucket when receive index task if bucket not exist
+    // query node has already tried to create bucket during init stage if bucket not exist
+    //    if (!BucketExists(storage_config.bucket_name)) {
+    //        CreateBucket(storage_config.bucket_name);
+    //    }
 
     LOG_SEGCORE_INFO_C << "init MinioChunkManager with parameter[endpoint: '" << storage_config.address
                        << "', access_key:'" << storage_config.access_key_id << "', access_value:'"
