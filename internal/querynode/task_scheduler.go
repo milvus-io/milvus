@@ -298,7 +298,7 @@ func (s *taskScheduler) executeReadTasks() {
 	for {
 		select {
 		case <-s.ctx.Done():
-			log.Debug("QueryNode stop executeReadTasks", zap.Int64("NodeID", Params.QueryNodeCfg.GetNodeID()))
+			log.Info("QueryNode stop executeReadTasks", zap.Int64("NodeID", Params.QueryNodeCfg.GetNodeID()))
 			return
 		case t, ok := <-s.executeReadTaskChan:
 			if ok {
@@ -306,7 +306,6 @@ func (s *taskScheduler) executeReadTasks() {
 				pendingTaskLen := len(s.executeReadTaskChan)
 				taskWg.Add(1)
 				atomic.AddInt32(&s.readConcurrency, int32(pendingTaskLen+1))
-				log.Debug("begin to execute task")
 				go executeFunc(t)
 
 				for i := 0; i < pendingTaskLen; i++ {
@@ -315,7 +314,6 @@ func (s *taskScheduler) executeReadTasks() {
 					rateCol.rtCounter.sub(t, receiveQueueType)
 					go executeFunc(t)
 				}
-				//log.Debug("QueryNode taskScheduler executeReadTasks process tasks done", zap.Int("numOfTasks", pendingTaskLen+1))
 			} else {
 				errMsg := "taskScheduler executeReadTaskChan has been closed"
 				log.Warn(errMsg)

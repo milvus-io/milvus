@@ -164,7 +164,7 @@ func (s *Server) Init() error {
 	// Init KV
 	etcdKV := etcdkv.NewEtcdKV(s.etcdCli, Params.EtcdCfg.MetaRootPath)
 	s.kv = etcdKV
-	log.Debug("query coordinator try to connect etcd success")
+	log.Info("query coordinator try to connect etcd success")
 
 	// Init ID allocator
 	idAllocatorKV := tsoutil.NewTSOKVBase(s.etcdCli, Params.EtcdCfg.KvRootPath, "querycoord-id-allocator")
@@ -187,12 +187,12 @@ func (s *Server) Init() error {
 		return err
 	}
 	// Init session
-	log.Debug("init session")
+	log.Info("init session")
 	s.nodeMgr = session.NewNodeManager()
 	s.cluster = session.NewCluster(s.nodeMgr)
 
 	// Init schedulers
-	log.Debug("init schedulers")
+	log.Info("init schedulers")
 	s.jobScheduler = job.NewScheduler()
 	s.taskScheduler = task.NewScheduler(
 		s.ctx,
@@ -205,7 +205,7 @@ func (s *Server) Init() error {
 	)
 
 	// Init heartbeat
-	log.Debug("init dist controller")
+	log.Info("init dist controller")
 	s.distController = dist.NewDistController(
 		s.cluster,
 		s.nodeMgr,
@@ -215,7 +215,7 @@ func (s *Server) Init() error {
 	)
 
 	// Init balancer
-	log.Debug("init balancer")
+	log.Info("init balancer")
 	s.balancer = balance.NewRowCountBasedBalancer(
 		s.taskScheduler,
 		s.nodeMgr,
@@ -224,7 +224,7 @@ func (s *Server) Init() error {
 	)
 
 	// Init checker controller
-	log.Debug("init checker controller")
+	log.Info("init checker controller")
 	s.checkerController = checkers.NewCheckerController(
 		s.meta,
 		s.dist,
@@ -241,11 +241,11 @@ func (s *Server) Init() error {
 }
 
 func (s *Server) initMeta() error {
-	log.Debug("init meta")
+	log.Info("init meta")
 	s.store = meta.NewMetaStore(s.kv)
 	s.meta = meta.NewMeta(s.idAllocator, s.store)
 
-	log.Debug("recover meta...")
+	log.Info("recover meta...")
 	err := s.meta.CollectionManager.Recover()
 	if err != nil {
 		log.Error("failed to recover collections")
@@ -272,7 +272,7 @@ func (s *Server) initMeta() error {
 }
 
 func (s *Server) initObserver() {
-	log.Debug("init observers")
+	log.Info("init observers")
 	s.collectionObserver = observers.NewCollectionObserver(
 		s.dist,
 		s.meta,
@@ -658,7 +658,7 @@ func (s *Server) checkReplicas() {
 					zap.Int64("replicaID", replica.GetID()),
 					zap.Int64s("offlineNodes", toRemove),
 				)
-				log.Debug("some nodes are offline, remove them from replica")
+				log.Info("some nodes are offline, remove them from replica", zap.Any("toRemove", toRemove))
 				replica.RemoveNode(toRemove...)
 				err := s.meta.ReplicaManager.Put(replica)
 				if err != nil {
