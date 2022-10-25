@@ -31,13 +31,19 @@ func (s *stepStack) Execute(ctx context.Context) *stepStack {
 		l := len(steps)
 		todo := steps[l-1]
 		childSteps, err := todo.Execute(ctx)
+		// TODO: maybe a interface `step.LogOnError` is better.
+		_, skipLog := todo.(*waitForTsSyncedStep)
 		if retry.IsUnRecoverable(err) {
-			log.Warn("failed to execute step, not able to reschedule", zap.Error(err), zap.String("step", todo.Desc()))
+			if !skipLog {
+				log.Warn("failed to execute step, not able to reschedule", zap.Error(err), zap.String("step", todo.Desc()))
+			}
 			return nil
 		}
 		if err != nil {
 			s.steps = nil // let s can be collected.
-			log.Warn("failed to execute step, wait for reschedule", zap.Error(err), zap.String("step", todo.Desc()))
+			if !skipLog {
+				log.Warn("failed to execute step, wait for reschedule", zap.Error(err), zap.String("step", todo.Desc()))
+			}
 			return &stepStack{steps: steps}
 		}
 		// this step is done.
