@@ -168,7 +168,9 @@ func (ex *Executor) processMergeTask(mergeTask *LoadSegmentsTask) {
 	}
 
 	log.Info("load segments...")
-	status, err := ex.cluster.LoadSegments(task.Context(), leader, mergeTask.req)
+	ctx, cancel := context.WithCancel(task.Context())
+	defer cancel()
+	status, err := ex.cluster.LoadSegments(ctx, leader, mergeTask.req)
 	if err != nil {
 		log.Warn("failed to load segment, it may be a false failure", zap.Error(err))
 		return
@@ -287,8 +289,6 @@ func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
 		zap.Int64("source", task.SourceID()),
 	)
 
-	ctx := task.Context()
-
 	dstNode := action.Node()
 	req := packReleaseSegmentRequest(task, action)
 	if action.Scope() == querypb.DataScope_Streaming {
@@ -323,6 +323,8 @@ func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
 	}
 
 	log.Info("release segment...")
+	ctx, cancel := context.WithCancel(task.Context())
+	defer cancel()
 	status, err := ex.cluster.ReleaseSegments(ctx, dstNode, req)
 	if err != nil {
 		log.Warn("failed to release segment, it may be a false failure", zap.Error(err))
@@ -365,7 +367,8 @@ func (ex *Executor) subDmChannel(task *ChannelTask, step int) error {
 		}
 	}()
 
-	ctx := task.Context()
+	ctx, cancel := context.WithCancel(task.Context())
+	defer cancel()
 
 	schema, err := ex.broker.GetCollectionSchema(ctx, task.CollectionID())
 	if err != nil {
@@ -431,7 +434,8 @@ func (ex *Executor) unsubDmChannel(task *ChannelTask, step int) error {
 		}
 	}()
 
-	ctx := task.Context()
+	ctx, cancel := context.WithCancel(task.Context())
+	defer cancel()
 
 	req := packUnsubDmChannelRequest(task, action)
 	status, err := ex.cluster.UnsubDmChannel(ctx, action.Node(), req)
