@@ -1,5 +1,5 @@
 from pymilvus.client.types import CompactionPlans
-from pymilvus.orm.role import Role
+from pymilvus import Role
 
 from utils.util_log import test_log as log
 from common import common_type as ct
