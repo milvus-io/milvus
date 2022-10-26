@@ -230,6 +230,7 @@ func (s *Server) Init() error {
 		s.dist,
 		s.targetMgr,
 		s.balancer,
+		s.broker,
 		s.taskScheduler,
 	)
 

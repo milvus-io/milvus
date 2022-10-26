@@ -34,9 +34,9 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
+	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/etcd"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 const (
@@ -132,12 +132,14 @@ func (suite *HandoffObserverTestSuit) TearDownTest() {
 
 func (suite *HandoffObserverTestSuit) TestFlushingHandoff() {
 	// init leader view
+	growingSegments := make(map[int64]*meta.Segment)
+	growingSegments[3] = utils.CreateTestSegment(1, 1, 3, 2, 1, "test-insert-channel")
 	suite.dist.LeaderViewManager.Update(1, &meta.LeaderView{
 		ID:              1,
 		CollectionID:    suite.collection,
 		Channel:         suite.channel.ChannelName,
 		Segments:        map[int64]*querypb.SegmentDist{1: {NodeID: 1, Version: 0}, 2: {NodeID: 2, Version: 0}},
-		GrowingSegments: typeutil.NewUniqueSet(3),
+		GrowingSegments: growingSegments,
 	})
 
 	Params.QueryCoordCfg.CheckHandoffInterval = 1 * time.Second
@@ -163,7 +165,7 @@ func (suite *HandoffObserverTestSuit) TestFlushingHandoff() {
 		CollectionID:    suite.collection,
 		Channel:         suite.channel.ChannelName,
 		Segments:        map[int64]*querypb.SegmentDist{1: {NodeID: 1, Version: 0}, 2: {NodeID: 2, Version: 0}, 3: {NodeID: 3, Version: 0}},
-		GrowingSegments: typeutil.NewUniqueSet(3),
+		GrowingSegments: growingSegments,
 	})
 
 	// fake release CompactFrom Segment
@@ -242,12 +244,14 @@ func (suite *HandoffObserverTestSuit) TestCompactHandoff() {
 
 func (suite *HandoffObserverTestSuit) TestRecursiveHandoff() {
 	// init leader view
+	growingSegments := make(map[int64]*meta.Segment)
+	growingSegments[3] = utils.CreateTestSegment(1, 1, 3, 2, 1, "test-insert-channel")
 	suite.dist.LeaderViewManager.Update(1, &meta.LeaderView{
 		ID:              1,
 		CollectionID:    suite.collection,
 		Channel:         suite.channel.ChannelName,
 		Segments:        map[int64]*querypb.SegmentDist{1: {NodeID: 1, Version: 0}, 2: {NodeID: 2, Version: 0}},
-		GrowingSegments: typeutil.NewUniqueSet(3),
+		GrowingSegments: growingSegments,
 	})
 
 	Params.QueryCoordCfg.CheckHandoffInterval = 1 * time.Second
@@ -292,7 +296,7 @@ func (suite *HandoffObserverTestSuit) TestRecursiveHandoff() {
 		CollectionID:    suite.collection,
 		Channel:         suite.channel.ChannelName,
 		Segments:        map[int64]*querypb.SegmentDist{1: {NodeID: 1, Version: 0}, 2: {NodeID: 2, Version: 0}, 5: {NodeID: 3, Version: 0}},
-		GrowingSegments: typeutil.NewUniqueSet(3),
+		GrowingSegments: growingSegments,
 	})
 
 	suite.Eventually(func() bool {
@@ -332,12 +336,14 @@ func (suite *HandoffObserverTestSuit) TestRecursiveHandoff() {
 
 func (suite *HandoffObserverTestSuit) TestReloadHandoffEventOrder() {
 	// init leader view
+	growingSegments := make(map[int64]*meta.Segment)
+	growingSegments[3] = utils.CreateTestSegment(1, 1, 3, 2, 1, "test-insert-channel")
 	suite.dist.LeaderViewManager.Update(1, &meta.LeaderView{
 		ID:              1,
 		CollectionID:    suite.collection,
 		Channel:         suite.channel.ChannelName,
 		Segments:        map[int64]*querypb.SegmentDist{1: {NodeID: 1, Version: 0}, 2: {NodeID: 2, Version: 0}},
-		GrowingSegments: typeutil.NewUniqueSet(3),
+		GrowingSegments: growingSegments,
 	})
 
 	// fake handoff event from start
@@ -380,12 +386,14 @@ func (suite *HandoffObserverTestSuit) TestReloadHandoffEventOrder() {
 
 func (suite *HandoffObserverTestSuit) TestLoadHandoffEventFromStore() {
 	// init leader view
+	growingSegments := make(map[int64]*meta.Segment)
+	growingSegments[3] = utils.CreateTestSegment(1, 1, 3, 2, 1, "test-insert-channel")
 	suite.dist.LeaderViewManager.Update(1, &meta.LeaderView{
 		ID:              1,
 		CollectionID:    suite.collection,
 		Channel:         suite.channel.ChannelName,
 		Segments:        map[int64]*querypb.SegmentDist{1: {NodeID: 1, Version: 0}, 2: {NodeID: 2, Version: 0}},
-		GrowingSegments: typeutil.NewUniqueSet(3),
+		GrowingSegments: growingSegments,
 	})
 
 	// fake handoff event from start

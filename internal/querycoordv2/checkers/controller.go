@@ -47,6 +47,8 @@ type CheckerController struct {
 	checkers  []Checker
 
 	stopOnce sync.Once
+	// check redundancies segment to release, trigger with a lower frequency
+	redundanciesChecker Checker
 }
 
 func NewCheckerController(
@@ -54,6 +56,7 @@ func NewCheckerController(
 	dist *meta.DistributionManager,
 	targetMgr *meta.TargetManager,
 	balancer balance.Balance,
+	broker meta.Broker,
 	scheduler task.Scheduler) *CheckerController {
 
 	// CheckerController runs checkers with the order,
@@ -66,14 +69,17 @@ func NewCheckerController(
 	for i, checker := range checkers {
 		checker.SetID(int64(i + 1))
 	}
+	redundanciesChecker := NewRedundanciesChecker(meta, dist, broker)
+	redundanciesChecker.SetID(4)
 
 	return &CheckerController{
-		stopCh:    make(chan struct{}),
-		meta:      meta,
-		dist:      dist,
-		targetMgr: targetMgr,
-		scheduler: scheduler,
-		checkers:  checkers,
+		stopCh:              make(chan struct{}),
+		meta:                meta,
+		dist:                dist,
+		targetMgr:           targetMgr,
+		scheduler:           scheduler,
+		checkers:            checkers,
+		redundanciesChecker: redundanciesChecker,
 	}
 }
 
@@ -81,6 +87,9 @@ func (controller *CheckerController) Start(ctx context.Context) {
 	go func() {
 		ticker := time.NewTicker(Params.QueryCoordCfg.CheckInterval)
 		defer ticker.Stop()
+
+		checkRedundancyTicker := time.NewTicker(Params.QueryCoordCfg.CheckRedundancyInterval)
+		defer checkRedundancyTicker.Stop()
 		for {
 			select {
 			case <-ctx.Done():
@@ -93,6 +102,9 @@ func (controller *CheckerController) Start(ctx context.Context) {
 
 			case <-ticker.C:
 				controller.check(ctx)
+
+			case <-checkRedundancyTicker.C:
+				controller.checkRedundancy(ctx)
 			}
 		}
 	}()
@@ -111,6 +123,10 @@ func (controller *CheckerController) check(ctx context.Context) {
 		tasks = append(tasks, checker.Check(ctx)...)
 	}
 
+	controller.trySubmitTask(tasks)
+}
+
+func (controller *CheckerController) trySubmitTask(tasks []task.Task) {
 	added := 0
 	for _, task := range tasks {
 		err := controller.scheduler.Add(task)
@@ -125,4 +141,10 @@ func (controller *CheckerController) check(ctx context.Context) {
 				zap.Int("taskNumLimit", checkRoundTaskNumLimit))
 		}
 	}
+}
+
+func (controller *CheckerController) checkRedundancy(ctx context.Context) {
+	tasks := controller.redundanciesChecker.Check(ctx)
+
+	controller.trySubmitTask(tasks)
 }

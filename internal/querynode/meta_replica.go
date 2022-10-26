@@ -104,7 +104,7 @@ type ReplicaInterface interface {
 
 	// segment
 	// addSegment add a new segment to collectionReplica
-	addSegment(segmentID UniqueID, partitionID UniqueID, collectionID UniqueID, vChannelID Channel, version UniqueID, segType segmentType) error
+	addSegment(segmentID UniqueID, partitionID UniqueID, collectionID UniqueID, vChannelID Channel, version UniqueID, seekPosition *internalpb.MsgPosition, segType segmentType) error
 	// setSegment adds a segment to collectionReplica
 	setSegment(segment *Segment) error
 	// removeSegment removes a segment from collectionReplica
@@ -566,7 +566,7 @@ func (replica *metaReplica) getSegmentIDsPrivate(partitionID UniqueID, segType s
 
 //----------------------------------------------------------------------------------------------------- segment
 // addSegment add a new segment to collectionReplica
-func (replica *metaReplica) addSegment(segmentID UniqueID, partitionID UniqueID, collectionID UniqueID, vChannelID Channel, version UniqueID, segType segmentType) error {
+func (replica *metaReplica) addSegment(segmentID UniqueID, partitionID UniqueID, collectionID UniqueID, vChannelID Channel, version UniqueID, seekPosition *internalpb.MsgPosition, segType segmentType) error {
 	replica.mu.Lock()
 	defer replica.mu.Unlock()
 
@@ -577,7 +577,7 @@ func (replica *metaReplica) addSegment(segmentID UniqueID, partitionID UniqueID,
 	collection.mu.Lock()
 	defer collection.mu.Unlock()
 
-	seg, err := newSegment(collection, segmentID, partitionID, collectionID, vChannelID, segType, version, replica.cgoPool)
+	seg, err := newSegment(collection, segmentID, partitionID, collectionID, vChannelID, segType, version, seekPosition, replica.cgoPool)
 	if err != nil {
 		return err
 	}

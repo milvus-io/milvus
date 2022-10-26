@@ -21,10 +21,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/suite"
-	"go.uber.org/atomic"
-
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -33,6 +29,9 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/etcd"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/suite"
+	"go.uber.org/atomic"
 )
 
 type LeaderObserverTestSuite struct {
@@ -76,7 +75,7 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegments() {
 	observer.target.AddSegment(utils.CreateTestSegmentInfo(1, 1, 1, "test-insert-channel"))
 	observer.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 1, 1, 1, "test-insert-channel"))
 	observer.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
-	observer.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, []int64{}))
+	observer.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, map[int64]*meta.Segment{}))
 	expectReq := &querypb.SyncDistributionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_SyncDistribution,
@@ -119,7 +118,7 @@ func (suite *LeaderObserverTestSuite) TestIgnoreBalancedSegment() {
 
 	// The leader view saw the segment on new node,
 	// but another nodes not yet
-	leaderView := utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, []int64{})
+	leaderView := utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, map[int64]*meta.Segment{})
 	leaderView.Segments[1] = &querypb.SegmentDist{
 		NodeID:  2,
 		Version: 2,
@@ -140,8 +139,8 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegmentsWithReplicas() {
 	observer.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 1, 1, 1, "test-insert-channel"))
 	observer.dist.SegmentDistManager.Update(4, utils.CreateTestSegment(1, 1, 1, 4, 2, "test-insert-channel"))
 	observer.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
-	observer.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, []int64{}))
-	observer.dist.LeaderViewManager.Update(4, utils.CreateTestLeaderView(4, 1, "test-insert-channel", map[int64]int64{1: 4}, []int64{}))
+	observer.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, map[int64]*meta.Segment{}))
+	observer.dist.LeaderViewManager.Update(4, utils.CreateTestLeaderView(4, 1, "test-insert-channel", map[int64]int64{1: 4}, map[int64]*meta.Segment{}))
 	expectReq := &querypb.SyncDistributionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_SyncDistribution,
@@ -180,7 +179,7 @@ func (suite *LeaderObserverTestSuite) TestSyncRemovedSegments() {
 	observer.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
 
 	observer.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
-	observer.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{3: 2}, []int64{}))
+	observer.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{3: 2}, map[int64]*meta.Segment{}))
 
 	expectReq := &querypb.SyncDistributionRequest{
 		Base: &commonpb.MsgBase{

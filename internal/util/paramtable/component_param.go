@@ -12,6 +12,7 @@
 package paramtable
 
 import (
+	"fmt"
 	"math"
 	"os"
 	"runtime"
@@ -713,6 +714,7 @@ type queryCoordConfig struct {
 	LoadTimeoutSeconds                  time.Duration
 	CheckHandoffInterval                time.Duration
 	EnableActiveStandby                 bool
+	CheckRedundancyInterval             time.Duration
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -739,6 +741,7 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 	p.initLoadTimeoutSeconds()
 	p.initCheckHandoffInterval()
 	p.initEnableActiveStandby()
+	p.initCheckRedundancyInterval()
 }
 
 func (p *queryCoordConfig) initTaskRetryNum() {
@@ -754,48 +757,59 @@ func (p *queryCoordConfig) initTaskMergeCap() {
 }
 
 func (p *queryCoordConfig) initAutoHandoff() {
-	handoff, err := p.Base.Load("queryCoord.autoHandoff")
+	paramName := "queryCoord.autoHandoff"
+	handoff, err := p.Base.Load(paramName)
 	if err != nil {
-		panic(err)
+		panicReason := fmt.Errorf("filed to parse param %s due to %s", paramName, err.Error())
+		panic(panicReason)
 	}
 	p.AutoHandoff, err = strconv.ParseBool(handoff)
 	if err != nil {
-		panic(err)
+		panicReason := fmt.Errorf("filed to parse param %s due to %s", paramName, err.Error())
+		panic(panicReason)
 	}
 }
 
 func (p *queryCoordConfig) initAutoBalance() {
-	balanceStr := p.Base.LoadWithDefault("queryCoord.autoBalance", "false")
+	paramName := "queryCoord.autoBalance"
+	balanceStr := p.Base.LoadWithDefault(paramName, "false")
 	autoBalance, err := strconv.ParseBool(balanceStr)
 	if err != nil {
-		panic(err)
+		panicReason := fmt.Errorf("filed to parse param %s due to %s", paramName, err.Error())
+		panic(panicReason)
 	}
 	p.AutoBalance = autoBalance
 }
 
 func (p *queryCoordConfig) initOverloadedMemoryThresholdPercentage() {
-	overloadedMemoryThresholdPercentage := p.Base.LoadWithDefault("queryCoord.overloadedMemoryThresholdPercentage", "90")
+	paramName := "queryCoord.overloadedMemoryThresholdPercentage"
+	overloadedMemoryThresholdPercentage := p.Base.LoadWithDefault(paramName, "90")
 	thresholdPercentage, err := strconv.ParseInt(overloadedMemoryThresholdPercentage, 10, 64)
 	if err != nil {
-		panic(err)
+		panicReason := fmt.Errorf("filed to parse param %s due to %s", paramName, err.Error())
+		panic(panicReason)
 	}
 	p.OverloadedMemoryThresholdPercentage = float64(thresholdPercentage) / 100
 }
 
 func (p *queryCoordConfig) initBalanceIntervalSeconds() {
-	balanceInterval := p.Base.LoadWithDefault("queryCoord.balanceIntervalSeconds", "60")
+	paramName := "queryCoord.balanceIntervalSeconds"
+	balanceInterval := p.Base.LoadWithDefault(paramName, "60")
 	interval, err := strconv.ParseInt(balanceInterval, 10, 64)
 	if err != nil {
-		panic(err)
+		panicReason := fmt.Errorf("filed to parse param %s due to %s", paramName, err.Error())
+		panic(panicReason)
 	}
 	p.BalanceIntervalSeconds = interval
 }
 
 func (p *queryCoordConfig) initMemoryUsageMaxDifferencePercentage() {
-	maxDiff := p.Base.LoadWithDefault("queryCoord.memoryUsageMaxDifferencePercentage", "30")
+	paramName := "queryCoord.memoryUsageMaxDifferencePercentage"
+	maxDiff := p.Base.LoadWithDefault(paramName, "30")
 	diffPercentage, err := strconv.ParseInt(maxDiff, 10, 64)
 	if err != nil {
-		panic(err)
+		panicReason := fmt.Errorf("filed to parse param %s due to %s", paramName, err.Error())
+		panic(panicReason)
 	}
 	p.MemoryUsageMaxDifferencePercentage = float64(diffPercentage) / 100
 }
@@ -805,55 +819,78 @@ func (p *queryCoordConfig) initEnableActiveStandby() {
 }
 
 func (p *queryCoordConfig) initCheckInterval() {
-	interval := p.Base.LoadWithDefault("queryCoord.checkInterval", "1000")
+	paramName := "queryCoord.checkInterval"
+	interval := p.Base.LoadWithDefault(paramName, "1000")
 	checkInterval, err := strconv.ParseInt(interval, 10, 64)
 	if err != nil {
-		panic(err)
+		panicReason := fmt.Errorf("filed to parse param %s due to %s", paramName, err.Error())
+		panic(panicReason)
 	}
 	p.CheckInterval = time.Duration(checkInterval) * time.Millisecond
 }
 
+func (p *queryCoordConfig) initCheckRedundancyInterval() {
+	paramName := "queryCoord.checkRedundancyInterval"
+	interval := p.Base.LoadWithDefault(paramName, "60000")
+	checkInterval, err := strconv.ParseInt(interval, 10, 64)
+	if err != nil {
+		panicReason := fmt.Errorf("filed to parse param %s due to %s", paramName, err.Error())
+		panic(panicReason)
+	}
+	p.CheckRedundancyInterval = time.Duration(checkInterval) * time.Millisecond
+}
+
 func (p *queryCoordConfig) initChannelTaskTimeout() {
-	timeout := p.Base.LoadWithDefault("queryCoord.channelTaskTimeout", "60000")
+	paramName := "queryCoord.channelTaskTimeout"
+	timeout := p.Base.LoadWithDefault(paramName, "60000")
 	taskTimeout, err := strconv.ParseInt(timeout, 10, 64)
 	if err != nil {
-		panic(err)
+		panicReason := fmt.Errorf("filed to parse param %s due to %s", paramName, err.Error())
+		panic(panicReason)
 	}
 	p.ChannelTaskTimeout = time.Duration(taskTimeout) * time.Millisecond
 }
 
 func (p *queryCoordConfig) initSegmentTaskTimeout() {
-	timeout := p.Base.LoadWithDefault("queryCoord.segmentTaskTimeout", "120000")
+	paramName := "queryCoord.segmentTaskTimeout"
+	timeout := p.Base.LoadWithDefault(paramName, "120000")
 	taskTimeout, err := strconv.ParseInt(timeout, 10, 64)
 	if err != nil {
-		panic(err)
+		panicReason := fmt.Errorf("filed to parse param %s due to %s", paramName, err.Error())
+		panic(panicReason)
 	}
 	p.SegmentTaskTimeout = time.Duration(taskTimeout) * time.Millisecond
 }
 
 func (p *queryCoordConfig) initDistPullInterval() {
-	interval := p.Base.LoadWithDefault("queryCoord.distPullInterval", "500")
+	paramName := "queryCoord.distPullInterval"
+	interval := p.Base.LoadWithDefault(paramName, "500")
 	pullInterval, err := strconv.ParseInt(interval, 10, 64)
 	if err != nil {
-		panic(err)
+		panicReason := fmt.Errorf("filed to parse param %s due to %s", paramName, err.Error())
+		panic(panicReason)
 	}
 	p.DistPullInterval = time.Duration(pullInterval) * time.Millisecond
 }
 
 func (p *queryCoordConfig) initLoadTimeoutSeconds() {
-	timeout := p.Base.LoadWithDefault("queryCoord.loadTimeoutSeconds", "600")
+	paramName := "queryCoord.loadTimeoutSeconds"
+	timeout := p.Base.LoadWithDefault(paramName, "600")
 	loadTimeout, err := strconv.ParseInt(timeout, 10, 64)
 	if err != nil {
-		panic(err)
+		panicReason := fmt.Errorf("filed to parse param %s due to %s", paramName, err.Error())
+		panic(panicReason)
 	}
 	p.LoadTimeoutSeconds = time.Duration(loadTimeout) * time.Second
 }
 
 func (p *queryCoordConfig) initCheckHandoffInterval() {
-	interval := p.Base.LoadWithDefault("queryCoord.checkHandoffInterval", "5000")
+	paramName := "queryCoord.checkHandoffInterval"
+	interval := p.Base.LoadWithDefault(paramName, "5000")
 	checkHandoffInterval, err := strconv.ParseInt(interval, 10, 64)
 	if err != nil {
-		panic(err)
+		panicReason := fmt.Errorf("filed to parse param %s due to %s", paramName, err.Error())
+		panic(panicReason)
 	}
 	p.CheckHandoffInterval = time.Duration(checkHandoffInterval) * time.Millisecond
 }

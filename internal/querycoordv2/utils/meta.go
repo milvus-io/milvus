@@ -163,3 +163,40 @@ func RegisterTargets(ctx context.Context,
 	}
 	return nil
 }
+
+// PullTarget get target channel and segments from datacoord
+func PullTarget(ctx context.Context,
+	broker meta.Broker,
+	collection int64, partitions []int64) (map[string]*meta.DmChannel, map[int64]*datapb.SegmentBinlogs, error) {
+	dmChannels := make(map[string][]*datapb.VchannelInfo)
+	segments := make(map[int64]*datapb.SegmentBinlogs)
+
+	for _, partitionID := range partitions {
+		log.Debug("get recovery info...",
+			zap.Int64("collectionID", collection),
+			zap.Int64("partitionID", partitionID))
+		vChannelInfos, binlogs, err := broker.GetRecoveryInfo(ctx, collection, partitionID)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		// Register segments
+		for _, segmentBinlogs := range binlogs {
+			segments[segmentBinlogs.SegmentID] = segmentBinlogs
+		}
+
+		for _, info := range vChannelInfos {
+			channelName := info.GetChannelName()
+			dmChannels[channelName] = append(dmChannels[channelName], info)
+		}
+	}
+
+	mergedChannels := make(map[string]*meta.DmChannel)
+	// Merge and register channels
+	for _, channels := range dmChannels {
+		dmChannel := MergeDmChannelInfo(channels)
+		mergedChannels[dmChannel.GetChannelName()] = dmChannel
+	}
+
+	return mergedChannels, segments, nil
+}

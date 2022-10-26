@@ -93,7 +93,7 @@ func (suite *SegmentCheckerTestSuite) TestLoadSegments() {
 
 	// set dist
 	checker.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
-	checker.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, []int64{}))
+	checker.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, map[int64]*meta.Segment{}))
 
 	tasks := checker.Check(context.TODO())
 	suite.Len(tasks, 1)
@@ -114,7 +114,7 @@ func (suite *SegmentCheckerTestSuite) TestReleaseSegments() {
 
 	// set dist
 	checker.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
-	checker.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, []int64{}))
+	checker.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, map[int64]*meta.Segment{}))
 	checker.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 2, 1, 1, "test-insert-channel"))
 
 	tasks := checker.Check(context.TODO())
@@ -138,7 +138,7 @@ func (suite *SegmentCheckerTestSuite) TestReleaseRepeatedSegments() {
 
 	// set dist
 	checker.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
-	checker.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{1: 2}, []int64{}))
+	checker.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{1: 2}, map[int64]*meta.Segment{}))
 	checker.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 1, 1, 1, "test-insert-channel"))
 	checker.dist.SegmentDistManager.Update(2, utils.CreateTestSegment(1, 1, 1, 1, 2, "test-insert-channel"))
 
@@ -153,7 +153,7 @@ func (suite *SegmentCheckerTestSuite) TestReleaseRepeatedSegments() {
 	suite.EqualValues(1, action.Node())
 
 	// test less version exist on leader
-	checker.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{1: 1}, []int64{}))
+	checker.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{1: 1}, map[int64]*meta.Segment{}))
 	tasks = checker.Check(context.TODO())
 	suite.Len(tasks, 0)
 }
@@ -169,8 +169,12 @@ func (suite *SegmentCheckerTestSuite) TestReleaseGrowingSegments() {
 	segment.CompactionFrom = append(segment.CompactionFrom, 2)
 	checker.targetMgr.AddSegment(segment)
 
+	growingSegments := make(map[int64]*meta.Segment)
+	growingSegments[2] = utils.CreateTestSegment(1, 1, 2, 2, 0, "test-insert-channel")
+	growingSegments[3] = utils.CreateTestSegment(1, 1, 3, 2, 1, "test-insert-channel")
+
 	checker.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
-	checker.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{3: 2}, []int64{2, 3}))
+	checker.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{3: 2}, growingSegments))
 	checker.dist.SegmentDistManager.Update(2, utils.CreateTestSegment(1, 1, 3, 2, 1, "test-insert-channel"))
 
 	tasks := checker.Check(context.TODO())

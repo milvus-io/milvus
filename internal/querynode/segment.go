@@ -34,6 +34,7 @@ import (
 	"sync"
 	"unsafe"
 
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/concurrency"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -78,10 +79,11 @@ type Segment struct {
 	mut        sync.RWMutex // protects segmentPtr
 	segmentPtr C.CSegmentInterface
 
-	segmentID    UniqueID
-	partitionID  UniqueID
-	collectionID UniqueID
-	version      UniqueID
+	segmentID     UniqueID
+	partitionID   UniqueID
+	collectionID  UniqueID
+	version       UniqueID
+	startPosition *internalpb.MsgPosition // for growing segment release
 
 	vChannelID   Channel
 	lastMemSize  int64
@@ -172,6 +174,7 @@ func newSegment(collection *Collection,
 	vChannelID Channel,
 	segType segmentType,
 	version UniqueID,
+	startPosition *internalpb.MsgPosition,
 	pool *concurrency.Pool) (*Segment, error) {
 	/*
 		CSegmentInterface
@@ -213,6 +216,7 @@ func newSegment(collection *Collection,
 		partitionID:       partitionID,
 		collectionID:      collectionID,
 		version:           version,
+		startPosition:     startPosition,
 		vChannelID:        vChannelID,
 		indexedFieldInfos: typeutil.NewConcurrentMap[int64, *IndexedFieldInfo](),
 		recentlyModified:  atomic.NewBool(false),

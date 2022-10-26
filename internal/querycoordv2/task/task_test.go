@@ -563,9 +563,14 @@ func (suite *TaskSuite) TestReleaseGrowingSegmentTask() {
 		err = suite.scheduler.Add(task)
 		suite.NoError(err)
 	}
+
+	growingSegments := make(map[int64]*meta.Segment)
+	for _, segmentID := range suite.releaseSegments[1:] {
+		growingSegments[segmentID] = utils.CreateTestSegment(1, 1, segmentID, 1, 0, "test-insert-channel")
+	}
 	suite.dist.LeaderViewManager.Update(targetNode, &meta.LeaderView{
 		ID:              targetNode,
-		GrowingSegments: typeutil.NewUniqueSet(suite.releaseSegments[1:]...),
+		GrowingSegments: growingSegments,
 	})
 
 	segmentsNum := len(suite.releaseSegments)

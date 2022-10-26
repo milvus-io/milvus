@@ -195,7 +195,7 @@ func (c *SegmentChecker) findNeedReleasedGrowingSegments(replica *meta.Replica) 
 
 			sources := append(segment.GetCompactionFrom(), segment.GetID())
 			for _, source := range sources {
-				if leaderView.GrowingSegments.Contain(source) {
+				if s := leaderView.GrowingSegments[source]; s != nil {
 					ret[leaderView.ID] = append(ret[leaderView.ID], &meta.Segment{
 						SegmentInfo: &datapb.SegmentInfo{
 							ID:            source,
@@ -207,21 +207,6 @@ func (c *SegmentChecker) findNeedReleasedGrowingSegments(replica *meta.Replica) 
 				}
 			}
 		}
-	}
-	return ret
-}
-
-func packSegments(segmentIDs []int64, nodeID int64, collectionID int64) []*meta.Segment {
-	ret := make([]*meta.Segment, 0, len(segmentIDs))
-	for _, id := range segmentIDs {
-		segment := &meta.Segment{
-			SegmentInfo: &datapb.SegmentInfo{
-				ID:           id,
-				CollectionID: collectionID,
-			},
-			Node: nodeID,
-		}
-		ret = append(ret, segment)
 	}
 	return ret
 }

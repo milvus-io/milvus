@@ -23,7 +23,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
-func CreateTestLeaderView(id, collection int64, channel string, segments map[int64]int64, growings []int64) *meta.LeaderView {
+func CreateTestLeaderView(id, collection int64, channel string, segments map[int64]int64, growings map[int64]*meta.Segment) *meta.LeaderView {
 	segmentVersions := make(map[int64]*querypb.SegmentDist)
 	for segment, node := range segments {
 		segmentVersions[segment] = &querypb.SegmentDist{
@@ -36,7 +36,7 @@ func CreateTestLeaderView(id, collection int64, channel string, segments map[int
 		CollectionID:    collection,
 		Channel:         channel,
 		Segments:        segmentVersions,
-		GrowingSegments: typeutil.NewUniqueSet(growings...),
+		GrowingSegments: growings,
 	}
 }
 

@@ -21,11 +21,10 @@ import (
 	"errors"
 	"runtime/debug"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/log"
 	queryPb "github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"go.uber.org/zap"
 )
 
 type task interface {

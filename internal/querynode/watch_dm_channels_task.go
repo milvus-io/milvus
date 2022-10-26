@@ -159,6 +159,10 @@ func (w *watchDmChannelsTask) LoadGrowingSegments(ctx context.Context, collectio
 				continue
 			}
 			if len(ufInfo.GetBinlogs()) > 0 {
+				startPosition := ufInfo.DmlPosition
+				if startPosition == nil {
+					startPosition = ufInfo.StartPosition
+				}
 				unFlushedSegments = append(unFlushedSegments, &queryPb.SegmentLoadInfo{
 					SegmentID:     ufInfo.ID,
 					PartitionID:   ufInfo.PartitionID,
@@ -168,6 +172,7 @@ func (w *watchDmChannelsTask) LoadGrowingSegments(ctx context.Context, collectio
 					Statslogs:     ufInfo.Statslogs,
 					Deltalogs:     ufInfo.Deltalogs,
 					InsertChannel: ufInfo.InsertChannel,
+					StartPosition: startPosition,
 				})
 				unFlushedSegmentIDs = append(unFlushedSegmentIDs, ufInfo.GetID())
 			} else {

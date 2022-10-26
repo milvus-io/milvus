@@ -373,6 +373,7 @@ func (suite *ServerSuite) hackServer() {
 		suite.server.dist,
 		suite.server.targetMgr,
 		suite.server.balancer,
+		suite.server.broker,
 		suite.server.taskScheduler,
 	)
 
