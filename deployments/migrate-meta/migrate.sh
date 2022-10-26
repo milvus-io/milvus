@@ -15,7 +15,7 @@ remove_migrate_pod_after_migrate="false"
 #-w image_tag: The new milvus image tag.
 #-o operation: The operation: migrate/rollback.
 #-d remove_migrate_pod_after_migrate: Remove migration pod after successful migration.
-while getopts "n:i:s:t:r:w:o:d:m" opt_name
+while getopts "n:i:s:t:r:w:o:d:m:" opt_name
 do
   case $opt_name in
     n) namespace=$OPTARG;;
