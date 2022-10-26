@@ -1924,6 +1924,7 @@ func (node *Proxy) CreateIndex(ctx context.Context, request *milvuspb.CreateInde
 		req:        request,
 		rootCoord:  node.rootCoord,
 		indexCoord: node.indexCoord,
+		queryCoord: node.queryCoord,
 	}
 
 	method := "CreateIndex"

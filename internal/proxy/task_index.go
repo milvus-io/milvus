@@ -55,6 +55,7 @@ type createIndexTask struct {
 	ctx        context.Context
 	rootCoord  types.RootCoord
 	indexCoord types.IndexCoord
+	queryCoord types.QueryCoord
 	result     *commonpb.Status
 
 	isAutoIndex    bool
@@ -283,7 +284,20 @@ func (cit *createIndexTask) PreExecute(ctx context.Context) error {
 	}
 	cit.fieldSchema = field
 	// check index param, not accurate, only some static rules
-	return cit.parseIndexParams()
+	err = cit.parseIndexParams()
+	if err != nil {
+		return err
+	}
+
+	loaded, err := isCollectionLoaded(ctx, cit.queryCoord, collID)
+	if err != nil {
+		return err
+	}
+
+	if loaded {
+		return fmt.Errorf("create index failed, collection is loaded, please release it first")
+	}
+	return nil
 }
 
 func (cit *createIndexTask) Execute(ctx context.Context) error {
@@ -504,7 +518,7 @@ func (dit *dropIndexTask) PreExecute(ctx context.Context) error {
 	}
 	dit.collectionID = collID
 
-	loaded, err := isCollectionLoaded(ctx, dit.queryCoord, []int64{collID})
+	loaded, err := isCollectionLoaded(ctx, dit.queryCoord, collID)
 	if err != nil {
 		return err
 	}
