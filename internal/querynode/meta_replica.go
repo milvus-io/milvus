@@ -635,15 +635,15 @@ func (replica *metaReplica) removeSegment(segmentID UniqueID, segType segmentTyp
 	case segmentTypeGrowing:
 		if segment, ok := replica.growingSegments[segmentID]; ok {
 			if collection, ok := replica.collections[segment.collectionID]; ok {
-				collection.RLock()
-				defer collection.RUnlock()
+				collection.Lock()
+				defer collection.Unlock()
 			}
 		}
 	case segmentTypeSealed:
 		if segment, ok := replica.sealedSegments[segmentID]; ok {
 			if collection, ok := replica.collections[segment.collectionID]; ok {
-				collection.RLock()
-				defer collection.RUnlock()
+				collection.Lock()
+				defer collection.Unlock()
 			}
 		}
 	default:
