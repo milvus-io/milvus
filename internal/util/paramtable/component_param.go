@@ -465,11 +465,6 @@ func (p *commonConfig) initSessionRetryTimes() {
 type rootCoordConfig struct {
 	Base *BaseTable
 
-	Address string
-	Port    int
-
-	NodeID atomic.Value
-
 	DmlChannelNum               int64
 	MaxPartitionNum             int64
 	MinSegmentSizeToEnableIndex int64
@@ -494,19 +489,6 @@ func (p *rootCoordConfig) init(base *BaseTable) {
 	p.ImportTaskRetention = p.Base.ParseFloatWithDefault("rootCoord.importTaskRetention", 24*60*60)
 	p.ImportTaskSubPath = "importtask"
 	p.EnableActiveStandby = p.Base.ParseBool("rootCoord.enableActiveStandby", false)
-	p.NodeID.Store(UniqueID(0))
-}
-
-func (p *rootCoordConfig) SetNodeID(id UniqueID) {
-	p.NodeID.Store(id)
-}
-
-func (p *rootCoordConfig) GetNodeID() UniqueID {
-	val := p.NodeID.Load()
-	if val != nil {
-		return val.(UniqueID)
-	}
-	return 0
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -514,15 +496,9 @@ func (p *rootCoordConfig) GetNodeID() UniqueID {
 type proxyConfig struct {
 	Base *BaseTable
 
-	// NetworkPort & IP are not used
-	NetworkPort    int
-	IP             string
-	NetworkAddress string
-
 	Alias  string
 	SoPath string
 
-	NodeID                   atomic.Value
 	TimeTickInterval         time.Duration
 	MsgStreamTimeTickBufSize int64
 	MaxNameLength            int64
@@ -548,7 +524,6 @@ type proxyConfig struct {
 
 func (p *proxyConfig) init(base *BaseTable) {
 	p.Base = base
-	p.NodeID.Store(UniqueID(0))
 	p.initTimeTickInterval()
 
 	p.initMsgStreamTimeTickBufSize()
@@ -658,18 +633,6 @@ func (p *proxyConfig) initGinLogging() {
 	p.GinLogging = p.Base.ParseBool("proxy.ginLogging", true)
 }
 
-func (p *proxyConfig) SetNodeID(id UniqueID) {
-	p.NodeID.Store(id)
-}
-
-func (p *proxyConfig) GetNodeID() UniqueID {
-	val := p.NodeID.Load()
-	if val != nil {
-		return val.(UniqueID)
-	}
-	return 0
-}
-
 func (p *proxyConfig) initMaxUserNum() {
 	str := p.Base.LoadWithDefault("proxy.maxUserNum", "100")
 	maxUserNum, err := strconv.ParseInt(str, 10, 64)
@@ -692,10 +655,6 @@ func (p *proxyConfig) initMaxRoleNum() {
 // --- querycoord ---
 type queryCoordConfig struct {
 	Base *BaseTable
-
-	Address string
-	Port    int
-	NodeID  atomic.Value
 
 	CreatedTime time.Time
 	UpdatedTime time.Time
@@ -724,8 +683,6 @@ type queryCoordConfig struct {
 
 func (p *queryCoordConfig) init(base *BaseTable) {
 	p.Base = base
-	p.NodeID.Store(UniqueID(0))
-
 	//---- Task ---
 	p.initTaskRetryNum()
 	p.initTaskRetryInterval()
@@ -865,27 +822,12 @@ func (p *queryCoordConfig) initCheckHandoffInterval() {
 	p.CheckHandoffInterval = time.Duration(checkHandoffInterval) * time.Millisecond
 }
 
-func (p *queryCoordConfig) SetNodeID(id UniqueID) {
-	p.NodeID.Store(id)
-}
-
-func (p *queryCoordConfig) GetNodeID() UniqueID {
-	val := p.NodeID.Load()
-	if val != nil {
-		return val.(UniqueID)
-	}
-	return 0
-}
-
 // /////////////////////////////////////////////////////////////////////////////
 // --- querynode ---
 type queryNodeConfig struct {
 	Base *BaseTable
 
-	Alias         string
-	QueryNodeIP   string
-	QueryNodePort int64
-	NodeID        atomic.Value
+	Alias string
 
 	FlowGraphMaxQueueLength int32
 	FlowGraphMaxParallelism int32
@@ -927,7 +869,6 @@ type queryNodeConfig struct {
 
 func (p *queryNodeConfig) init(base *BaseTable) {
 	p.Base = base
-	p.NodeID.Store(UniqueID(0))
 
 	p.initFlowGraphMaxQueueLength()
 	p.initFlowGraphMaxParallelism()
@@ -1075,18 +1016,6 @@ func (p *queryNodeConfig) initTopKMergeRatio() {
 	p.TopKMergeRatio = p.Base.ParseFloatWithDefault("queryNode.grouping.topKMergeRatio", 10.0)
 }
 
-func (p *queryNodeConfig) SetNodeID(id UniqueID) {
-	p.NodeID.Store(id)
-}
-
-func (p *queryNodeConfig) GetNodeID() UniqueID {
-	val := p.NodeID.Load()
-	if val != nil {
-		return val.(UniqueID)
-	}
-	return 0
-}
-
 func (p *queryNodeConfig) initEnableDisk() {
 	var err error
 	enableDisk := p.Base.LoadWithDefault("queryNode.enableDisk", "false")
@@ -1128,12 +1057,6 @@ func (p *queryNodeConfig) initDiskCapacity() {
 // --- datacoord ---
 type dataCoordConfig struct {
 	Base *BaseTable
-
-	NodeID atomic.Value
-
-	IP      string
-	Port    int
-	Address string
 
 	// --- ETCD ---
 	ChannelWatchSubPath string
@@ -1329,31 +1252,11 @@ func (p *dataCoordConfig) initEnableActiveStandby() {
 	p.EnableActiveStandby = p.Base.ParseBool("dataCoord.enableActiveStandby", false)
 }
 
-func (p *dataCoordConfig) SetNodeID(id UniqueID) {
-	p.NodeID.Store(id)
-}
-
-func (p *dataCoordConfig) GetNodeID() UniqueID {
-	val := p.NodeID.Load()
-	if val != nil {
-		return val.(UniqueID)
-	}
-	return 0
-}
-
 // /////////////////////////////////////////////////////////////////////////////
 // --- datanode ---
 type dataNodeConfig struct {
 	Base *BaseTable
 
-	// ID of the current node
-	//NodeID atomic.Value
-	NodeID atomic.Value
-	// IP of the current DataNode
-	IP string
-
-	// Port of the current DataNode
-	Port                    int
 	FlowGraphMaxQueueLength int32
 	FlowGraphMaxParallelism int32
 	FlushInsertBufferSize   int64
@@ -1372,7 +1275,6 @@ type dataNodeConfig struct {
 
 func (p *dataNodeConfig) init(base *BaseTable) {
 	p.Base = base
-	p.NodeID.Store(UniqueID(0))
 	p.initFlowGraphMaxQueueLength()
 	p.initFlowGraphMaxParallelism()
 	p.initFlushInsertBufferSize()
@@ -1411,32 +1313,15 @@ func (p *dataNodeConfig) initIOConcurrency() {
 	p.IOConcurrency = p.Base.ParseIntWithDefault("dataNode.dataSync.ioConcurrency", 10)
 }
 
-func (p *dataNodeConfig) SetNodeID(id UniqueID) {
-	p.NodeID.Store(id)
-}
-
-func (p *dataNodeConfig) GetNodeID() UniqueID {
-	val := p.NodeID.Load()
-	if val != nil {
-		return val.(UniqueID)
-	}
-	return 0
-}
-
 // /////////////////////////////////////////////////////////////////////////////
 // --- indexcoord ---
 type indexCoordConfig struct {
 	Base *BaseTable
 
-	Address string
-	Port    int
-
 	BindIndexNodeMode bool
 	IndexNodeAddress  string
 	WithCredential    bool
 	IndexNodeID       int64
-
-	NodeID atomic.Value
 
 	MinSegmentNumRowsToEnableIndex int64
 
@@ -1458,7 +1343,6 @@ func (p *indexCoordConfig) init(base *BaseTable) {
 	p.initWithCredential()
 	p.initIndexNodeID()
 	p.initEnableActiveStandby()
-	p.NodeID.Store(UniqueID(0))
 }
 
 func (p *indexCoordConfig) initMinSegmentNumRowsToEnableIndex() {
@@ -1489,28 +1373,10 @@ func (p *indexCoordConfig) initEnableActiveStandby() {
 	p.EnableActiveStandby = p.Base.ParseBool("indexCoord.enableActiveStandby", false)
 }
 
-func (p *indexCoordConfig) SetNodeID(id UniqueID) {
-	p.NodeID.Store(id)
-}
-
-func (p *indexCoordConfig) GetNodeID() UniqueID {
-	val := p.NodeID.Load()
-	if val != nil {
-		return val.(UniqueID)
-	}
-	return 0
-}
-
 // /////////////////////////////////////////////////////////////////////////////
 // --- indexnode ---
 type indexNodeConfig struct {
 	Base *BaseTable
-
-	IP      string
-	Address string
-	Port    int
-
-	NodeID atomic.Value
 
 	Alias string
 
@@ -1527,7 +1393,6 @@ type indexNodeConfig struct {
 
 func (p *indexNodeConfig) init(base *BaseTable) {
 	p.Base = base
-	p.NodeID.Store(UniqueID(0))
 	p.initBuildParallel()
 	p.initEnableDisk()
 	p.initDiskCapacity()
@@ -1541,18 +1406,6 @@ func (p *indexNodeConfig) InitAlias(alias string) {
 
 func (p *indexNodeConfig) initBuildParallel() {
 	p.BuildParallel = p.Base.ParseIntWithDefault("indexNode.scheduler.buildParallel", 1)
-}
-
-func (p *indexNodeConfig) SetNodeID(id UniqueID) {
-	p.NodeID.Store(id)
-}
-
-func (p *indexNodeConfig) GetNodeID() UniqueID {
-	val := p.NodeID.Load()
-	if val != nil {
-		return val.(UniqueID)
-	}
-	return 0
 }
 
 func (p *indexNodeConfig) initEnableDisk() {

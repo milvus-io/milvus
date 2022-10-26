@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
@@ -110,7 +111,7 @@ func (g *getStatisticsTask) PreExecute(ctx context.Context) error {
 
 	// TODO: Maybe we should create a new MsgType: GetStatistics?
 	g.Base.MsgType = commonpb.MsgType_GetPartitionStatistics
-	g.Base.SourceID = Params.ProxyCfg.GetNodeID()
+	g.Base.SourceID = paramtable.GetNodeID()
 
 	collID, err := globalMetaCache.GetCollectionID(ctx, g.collectionName)
 	if err != nil { // err is not nil if collection not exists
@@ -327,7 +328,7 @@ func checkFullLoaded(ctx context.Context, qc types.QueryCoord, collectionName st
 		resp, err := qc.ShowPartitions(ctx, &querypb.ShowPartitionsRequest{
 			Base: commonpbutil.NewMsgBase(
 				commonpbutil.WithMsgType(commonpb.MsgType_ShowPartitions),
-				commonpbutil.WithSourceID(Params.ProxyCfg.GetNodeID()),
+				commonpbutil.WithSourceID(paramtable.GetNodeID()),
 			),
 			CollectionID: info.collID,
 			PartitionIDs: searchPartitionIDs,
@@ -352,7 +353,7 @@ func checkFullLoaded(ctx context.Context, qc types.QueryCoord, collectionName st
 	resp, err := qc.ShowPartitions(ctx, &querypb.ShowPartitionsRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_ShowPartitions),
-			commonpbutil.WithSourceID(Params.ProxyCfg.GetNodeID()),
+			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
 		CollectionID: info.collID,
 	})
@@ -633,7 +634,7 @@ func (g *getCollectionStatisticsTask) OnEnqueue() error {
 
 func (g *getCollectionStatisticsTask) PreExecute(ctx context.Context) error {
 	g.Base.MsgType = commonpb.MsgType_GetCollectionStatistics
-	g.Base.SourceID = Params.ProxyCfg.GetNodeID()
+	g.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
 
@@ -721,7 +722,7 @@ func (g *getPartitionStatisticsTask) OnEnqueue() error {
 
 func (g *getPartitionStatisticsTask) PreExecute(ctx context.Context) error {
 	g.Base.MsgType = commonpb.MsgType_GetPartitionStatistics
-	g.Base.SourceID = Params.ProxyCfg.GetNodeID()
+	g.Base.SourceID = paramtable.GetNodeID()
 	return nil
 }
 

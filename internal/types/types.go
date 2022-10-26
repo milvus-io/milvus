@@ -110,6 +110,8 @@ type DataNodeComponent interface {
 	// GetStateCode return state code of this data node
 	GetStateCode() commonpb.StateCode
 
+	SetAddress(address string)
+
 	// SetEtcdClient set etcd client for DataNode
 	SetEtcdClient(etcdClient *clientv3.Client)
 
@@ -334,6 +336,7 @@ type DataCoord interface {
 type DataCoordComponent interface {
 	DataCoord
 
+	SetAddress(address string)
 	// SetEtcdClient set EtcdClient for DataCoord
 	// `etcdClient` is a client of etcd
 	SetEtcdClient(etcdClient *clientv3.Client)
@@ -373,6 +376,8 @@ type IndexNode interface {
 // IndexNodeComponent is used by grpc server of IndexNode
 type IndexNodeComponent interface {
 	IndexNode
+
+	SetAddress(address string)
 
 	// SetEtcdClient set etcd client for IndexNodeComponent
 	SetEtcdClient(etcdClient *clientv3.Client)
@@ -434,6 +439,7 @@ type IndexCoord interface {
 type IndexCoordComponent interface {
 	IndexCoord
 
+	SetAddress(address string)
 	// SetEtcdClient set etcd client for IndexCoordComponent
 	SetEtcdClient(etcdClient *clientv3.Client)
 
@@ -775,6 +781,7 @@ type RootCoord interface {
 type RootCoordComponent interface {
 	RootCoord
 
+	SetAddress(address string)
 	// SetEtcdClient set EtcdClient for RootCoord
 	// `etcdClient` is a client of etcd
 	SetEtcdClient(etcdClient *clientv3.Client)
@@ -853,6 +860,7 @@ type Proxy interface {
 type ProxyComponent interface {
 	Proxy
 
+	SetAddress(address string)
 	// SetEtcdClient set EtcdClient for Proxy
 	// `etcdClient` is a client of etcd
 	SetEtcdClient(etcdClient *clientv3.Client)
@@ -1338,6 +1346,8 @@ type QueryNodeComponent interface {
 	//  `stateCode` is current statement of this query node, indicating whether it's healthy.
 	UpdateStateCode(stateCode commonpb.StateCode)
 
+	SetAddress(address string)
+
 	// SetEtcdClient set etcd client for QueryNode
 	SetEtcdClient(etcdClient *clientv3.Client)
 }
@@ -1369,6 +1379,8 @@ type QueryCoord interface {
 // QueryCoordComponent is used by grpc server of QueryCoord
 type QueryCoordComponent interface {
 	QueryCoord
+
+	SetAddress(address string)
 
 	// SetEtcdClient set etcd client for QueryCoord
 	SetEtcdClient(etcdClient *clientv3.Client)

@@ -50,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/internal/util/lock"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/panjf2000/ants/v2"
 )
@@ -1610,11 +1611,11 @@ func genSimpleSegmentInfo() *querypb.SegmentInfo {
 
 func genSimpleChangeInfo() *querypb.SealedSegmentsChangeInfo {
 	changeInfo := &querypb.SegmentChangeInfo{
-		OnlineNodeID: Params.QueryNodeCfg.GetNodeID(),
+		OnlineNodeID: paramtable.GetNodeID(),
 		OnlineSegments: []*querypb.SegmentInfo{
 			genSimpleSegmentInfo(),
 		},
-		OfflineNodeID: Params.QueryNodeCfg.GetNodeID() + 1,
+		OfflineNodeID: paramtable.GetNodeID() + 1,
 		OfflineSegments: []*querypb.SegmentInfo{
 			genSimpleSegmentInfo(),
 		},

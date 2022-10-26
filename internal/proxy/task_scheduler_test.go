@@ -26,7 +26,6 @@ import (
 )
 
 func TestBaseTaskQueue(t *testing.T) {
-	Params.Init()
 
 	var err error
 	var unissuedTask task
@@ -104,7 +103,6 @@ func TestBaseTaskQueue(t *testing.T) {
 }
 
 func TestDdTaskQueue(t *testing.T) {
-	Params.Init()
 
 	var err error
 	var unissuedTask task
@@ -183,7 +181,6 @@ func TestDdTaskQueue(t *testing.T) {
 
 // test the logic of queue
 func TestDmTaskQueue_Basic(t *testing.T) {
-	Params.Init()
 
 	var err error
 	var unissuedTask task
@@ -262,7 +259,6 @@ func TestDmTaskQueue_Basic(t *testing.T) {
 
 // test the timestamp statistics
 func TestDmTaskQueue_TimestampStatistics(t *testing.T) {
-	Params.Init()
 
 	var err error
 	var unissuedTask task
@@ -301,7 +297,6 @@ func TestDmTaskQueue_TimestampStatistics(t *testing.T) {
 }
 
 func TestDqTaskQueue(t *testing.T) {
-	Params.Init()
 
 	var err error
 	var unissuedTask task
@@ -379,7 +374,6 @@ func TestDqTaskQueue(t *testing.T) {
 }
 
 func TestTaskScheduler(t *testing.T) {
-	Params.Init()
 
 	var err error
 

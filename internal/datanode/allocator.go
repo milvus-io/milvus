@@ -22,6 +22,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/metautil"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
@@ -55,7 +56,7 @@ func (alloc *allocator) allocID() (UniqueID, error) {
 			commonpbutil.WithMsgType(commonpb.MsgType_RequestID),
 			commonpbutil.WithMsgID(1),     // GOOSE TODO
 			commonpbutil.WithTimeStamp(0), // GOOSE TODO
-			commonpbutil.WithSourceID(Params.DataNodeCfg.GetNodeID()),
+			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
 		Count: 1,
 	})
@@ -76,7 +77,7 @@ func (alloc *allocator) allocIDBatch(count uint32) (UniqueID, uint32, error) {
 	resp, err := alloc.rootCoord.AllocID(ctx, &rootcoordpb.AllocIDRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_RequestID),
-			commonpbutil.WithSourceID(Params.DataNodeCfg.GetNodeID()),
+			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
 		Count: count,
 	})

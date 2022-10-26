@@ -18,6 +18,7 @@ package grpcrootcoord
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"strconv"
@@ -153,10 +154,6 @@ func (s *Server) Run() error {
 
 func (s *Server) init() error {
 	Params.InitOnce(typeutil.RootCoordRole)
-
-	rootcoord.Params.InitOnce()
-	rootcoord.Params.RootCoordCfg.Address = Params.GetAddress()
-	rootcoord.Params.RootCoordCfg.Port = Params.Port
 	log.Debug("init params done..")
 
 	closer := trace.InitTracing("root_coord")
@@ -169,6 +166,7 @@ func (s *Server) init() error {
 	}
 	s.etcdCli = etcdCli
 	s.rootCoord.SetEtcdClient(s.etcdCli)
+	s.rootCoord.SetAddress(fmt.Sprintf("%s:%d", Params.IP, Params.Port))
 	log.Debug("etcd connect done ...")
 
 	err = s.startGrpc(Params.Port)

@@ -30,6 +30,7 @@ import (
 	"sync/atomic"
 	"unsafe"
 
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 
 	"github.com/milvus-io/milvus/internal/metrics"
@@ -123,7 +124,7 @@ OUTER:
 		c.vChannels = append(c.vChannels, dstChan)
 	}
 
-	metrics.QueryNodeNumDmlChannels.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Add(float64(len(c.vChannels)))
+	metrics.QueryNodeNumDmlChannels.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Add(float64(len(c.vChannels)))
 }
 
 // getVChannels get virtual channels of collection
@@ -151,7 +152,7 @@ func (c *Collection) removeVChannel(channel Channel) {
 		zap.String("channel", channel),
 	)
 
-	metrics.QueryNodeNumDmlChannels.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Sub(float64(len(c.vChannels)))
+	metrics.QueryNodeNumDmlChannels.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Sub(float64(len(c.vChannels)))
 }
 
 // addPChannels add physical channels to physical channels of collection
@@ -283,7 +284,7 @@ OUTER:
 		c.vDeltaChannels = append(c.vDeltaChannels, dstChan)
 	}
 
-	metrics.QueryNodeNumDeltaChannels.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Add(float64(len(c.vDeltaChannels)))
+	metrics.QueryNodeNumDeltaChannels.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Add(float64(len(c.vDeltaChannels)))
 }
 
 func (c *Collection) removeVDeltaChannel(channel Channel) {
@@ -301,7 +302,7 @@ func (c *Collection) removeVDeltaChannel(channel Channel) {
 		zap.String("channel", channel),
 	)
 
-	metrics.QueryNodeNumDeltaChannels.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Sub(float64(len(c.vDeltaChannels)))
+	metrics.QueryNodeNumDeltaChannels.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Sub(float64(len(c.vDeltaChannels)))
 }
 
 func (c *Collection) AddVDeltaChannels(toLoadChannels []Channel, VPChannels map[string]string) []Channel {

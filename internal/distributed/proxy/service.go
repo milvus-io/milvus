@@ -316,8 +316,6 @@ func (s *Server) init() error {
 		log.Warn("Proxy get available port when init", zap.Int("Port", Params.Port))
 	}
 
-	proxy.Params.InitOnce()
-	proxy.Params.ProxyCfg.NetworkAddress = Params.GetInternalAddress()
 	log.Debug("init Proxy's parameter table done", zap.String("internal address", Params.GetInternalAddress()), zap.String("external address", Params.GetAddress()))
 
 	serviceName := fmt.Sprintf("Proxy ip: %s, port: %d", Params.IP, Params.Port)
@@ -332,6 +330,7 @@ func (s *Server) init() error {
 	}
 	s.etcdCli = etcdCli
 	s.proxy.SetEtcdClient(s.etcdCli)
+	s.proxy.SetAddress(fmt.Sprintf("%s:%d", Params.IP, Params.Port))
 
 	errChan := make(chan error, 1)
 	{

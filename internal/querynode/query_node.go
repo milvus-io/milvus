@@ -34,7 +34,6 @@ import (
 	"os"
 	"path"
 	"runtime"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -68,7 +67,7 @@ var _ types.QueryNode = (*QueryNode)(nil)
 // make sure QueryNode implements types.QueryNodeComponent
 var _ types.QueryNodeComponent = (*QueryNode)(nil)
 
-var Params paramtable.ComponentParam
+var Params *paramtable.ComponentParam = paramtable.Get()
 
 // rateCol is global rateCollector in QueryNode.
 var rateCol *rateCollector
@@ -105,6 +104,7 @@ type QueryNode struct {
 
 	// etcd client
 	etcdCli *clientv3.Client
+	address string
 
 	factory   dependency.Factory
 	scheduler *taskScheduler
@@ -149,10 +149,10 @@ func (node *QueryNode) initSession() error {
 	if node.session == nil {
 		return fmt.Errorf("session is nil, the etcd client connection may have failed")
 	}
-	node.session.Init(typeutil.QueryNodeRole, Params.QueryNodeCfg.QueryNodeIP+":"+strconv.FormatInt(Params.QueryNodeCfg.QueryNodePort, 10), false, true)
-	Params.QueryNodeCfg.SetNodeID(node.session.ServerID)
-	Params.SetLogger(Params.QueryNodeCfg.GetNodeID())
-	log.Info("QueryNode init session", zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()), zap.String("node address", node.session.Address))
+	node.session.Init(typeutil.QueryNodeRole, node.address, false, true)
+	paramtable.SetNodeID(node.session.ServerID)
+	Params.SetLogger(paramtable.GetNodeID())
+	log.Info("QueryNode init session", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("node address", node.session.Address))
 	return nil
 }
 
@@ -161,7 +161,7 @@ func (node *QueryNode) Register() error {
 	node.session.Register()
 	// start liveness check
 	go node.session.LivenessCheck(node.queryNodeLoopCtx, func() {
-		log.Error("Query Node disconnected from etcd, process will exit", zap.Int64("Server Id", node.session.ServerID))
+		log.Error("Query Node disconnected from etcd, process will exit", zap.Int64("Server Id", paramtable.GetNodeID()))
 		if err := node.Stop(); err != nil {
 			log.Fatal("failed to stop server", zap.Error(err))
 		}
@@ -210,9 +210,7 @@ func (node *QueryNode) InitSegcore() {
 
 	// override segcore SIMD type
 	cSimdType := C.CString(Params.CommonCfg.SimdType)
-	cRealSimdType := C.SegcoreSetSimdType(cSimdType)
-	Params.CommonCfg.SimdType = C.GoString(cRealSimdType)
-	C.free(unsafe.Pointer(cRealSimdType))
+	C.SegcoreSetSimdType(cSimdType)
 	C.free(unsafe.Pointer(cSimdType))
 
 	// override segcore index slice size
@@ -225,12 +223,12 @@ func (node *QueryNode) InitSegcore() {
 	cCpuNum := C.int(hardware.GetCPUNum())
 	C.InitCpuNum(cCpuNum)
 
-	initcore.InitLocalStorageConfig(&Params)
+	initcore.InitLocalStorageConfig(Params)
 }
 
 // Init function init historical and streaming module to manage segments
 func (node *QueryNode) Init() error {
-	var initError error = nil
+	var initError error
 	node.initOnce.Do(func() {
 		//ctx := context.Background()
 		log.Info("QueryNode session info", zap.String("metaPath", Params.EtcdCfg.MetaRootPath))
@@ -241,15 +239,15 @@ func (node *QueryNode) Init() error {
 			return
 		}
 
-		node.factory.Init(&Params)
+		node.factory.Init(Params)
 
 		err = node.initRateCollector()
 		if err != nil {
-			log.Error("QueryNode init rateCollector failed", zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()), zap.Error(err))
+			log.Error("QueryNode init rateCollector failed", zap.Int64("nodeID", paramtable.GetNodeID()), zap.Error(err))
 			initError = err
 			return
 		}
-		log.Info("QueryNode init rateCollector done", zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()))
+		log.Info("QueryNode init rateCollector done", zap.Int64("nodeID", paramtable.GetNodeID()))
 
 		node.vectorStorage, err = node.factory.NewPersistentStorageChunkManager(node.queryNodeLoopCtx)
 		if err != nil {
@@ -309,9 +307,8 @@ func (node *QueryNode) Init() error {
 		node.InitSegcore()
 
 		log.Info("query node init successfully",
-			zap.Any("queryNodeID", Params.QueryNodeCfg.GetNodeID()),
-			zap.Any("IP", Params.QueryNodeCfg.QueryNodeIP),
-			zap.Any("Port", Params.QueryNodeCfg.QueryNodePort),
+			zap.Int64("queryNodeID", paramtable.GetNodeID()),
+			zap.String("Address", node.address),
 		)
 	})
 
@@ -338,9 +335,8 @@ func (node *QueryNode) Start() error {
 
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 	log.Info("query node start successfully",
-		zap.Any("queryNodeID", Params.QueryNodeCfg.GetNodeID()),
-		zap.Any("IP", Params.QueryNodeCfg.QueryNodeIP),
-		zap.Any("Port", Params.QueryNodeCfg.QueryNodePort),
+		zap.Int64("queryNodeID", paramtable.GetNodeID()),
+		zap.String("Address", node.address),
 	)
 	return nil
 }
@@ -381,4 +377,8 @@ func (node *QueryNode) UpdateStateCode(code commonpb.StateCode) {
 // SetEtcdClient assigns parameter client to its member etcdCli
 func (node *QueryNode) SetEtcdClient(client *clientv3.Client) {
 	node.etcdCli = client
+}
+
+func (node *QueryNode) SetAddress(address string) {
+	node.address = address
 }

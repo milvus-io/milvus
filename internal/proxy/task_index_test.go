@@ -19,6 +19,7 @@ package proxy
 import (
 	"context"
 	"errors"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -29,8 +30,15 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
+
+func TestMain(m *testing.M) {
+	paramtable.Init()
+	code := m.Run()
+	os.Exit(code)
+}
 
 func TestGetIndexStateTask_Execute(t *testing.T) {
 	dbName := funcutil.GenRandomStr()
@@ -210,7 +218,6 @@ func TestCreateIndexTask_PreExecute(t *testing.T) {
 	collectionID := UniqueID(1)
 	fieldName := newTestSchema().Fields[0].Name
 
-	Params.Init()
 	ic := newMockIndexCoord()
 	ctx := context.Background()
 

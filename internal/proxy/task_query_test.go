@@ -23,11 +23,11 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 func TestQueryTask_all(t *testing.T) {
-	Params.Init()
 
 	var (
 		err error
@@ -100,7 +100,7 @@ func TestQueryTask_all(t *testing.T) {
 	status, err := qc.LoadCollection(ctx, &querypb.LoadCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:  commonpb.MsgType_LoadCollection,
-			SourceID: Params.ProxyCfg.GetNodeID(),
+			SourceID: paramtable.GetNodeID(),
 		},
 		CollectionID: collectionID,
 	})
@@ -113,7 +113,7 @@ func TestQueryTask_all(t *testing.T) {
 		RetrieveRequest: &internalpb.RetrieveRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:  commonpb.MsgType_Retrieve,
-				SourceID: Params.ProxyCfg.GetNodeID(),
+				SourceID: paramtable.GetNodeID(),
 			},
 			CollectionID:   collectionID,
 			OutputFieldsId: make([]int64, len(fieldName2Types)),
@@ -127,7 +127,7 @@ func TestQueryTask_all(t *testing.T) {
 		request: &milvuspb.QueryRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:  commonpb.MsgType_Retrieve,
-				SourceID: Params.ProxyCfg.GetNodeID(),
+				SourceID: paramtable.GetNodeID(),
 			},
 			CollectionName: collectionName,
 			Expr:           expr,

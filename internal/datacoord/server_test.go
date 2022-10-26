@@ -32,6 +32,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 
 	"github.com/stretchr/testify/assert"
@@ -60,6 +61,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	paramtable.Init()
 	rand.Seed(time.Now().UnixNano())
 	os.Exit(m.Run())
 }
@@ -2413,7 +2415,7 @@ func TestGetCompactionState(t *testing.T) {
 		resp, err := svr.GetCompactionState(context.Background(), &milvuspb.GetCompactionStateRequest{})
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-		assert.Equal(t, msgDataCoordIsUnhealthy(Params.DataCoordCfg.GetNodeID()), resp.GetStatus().GetReason())
+		assert.Equal(t, msgDataCoordIsUnhealthy(paramtable.GetNodeID()), resp.GetStatus().GetReason())
 	})
 }
 
@@ -2474,7 +2476,7 @@ func TestManualCompaction(t *testing.T) {
 		})
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
-		assert.Equal(t, msgDataCoordIsUnhealthy(Params.DataCoordCfg.GetNodeID()), resp.Status.Reason)
+		assert.Equal(t, msgDataCoordIsUnhealthy(paramtable.GetNodeID()), resp.Status.Reason)
 	})
 }
 
@@ -2525,7 +2527,7 @@ func TestGetCompactionStateWithPlans(t *testing.T) {
 		})
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
-		assert.Equal(t, msgDataCoordIsUnhealthy(Params.DataCoordCfg.GetNodeID()), resp.Status.Reason)
+		assert.Equal(t, msgDataCoordIsUnhealthy(paramtable.GetNodeID()), resp.Status.Reason)
 	})
 }
 
@@ -2959,7 +2961,7 @@ func TestDataCoord_Import(t *testing.T) {
 		})
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.GetErrorCode())
-		assert.Equal(t, msgDataCoordIsUnhealthy(Params.DataCoordCfg.GetNodeID()), resp.Status.GetReason())
+		assert.Equal(t, msgDataCoordIsUnhealthy(paramtable.GetNodeID()), resp.Status.GetReason())
 	})
 
 	t.Run("test update segment stat", func(t *testing.T) {
@@ -3041,7 +3043,7 @@ func TestDataCoord_SaveImportSegment(t *testing.T) {
 			RowNum:       int64(1),
 			SaveBinlogPathReq: &datapb.SaveBinlogPathsRequest{
 				Base: &commonpb.MsgBase{
-					SourceID: Params.DataNodeCfg.GetNodeID(),
+					SourceID: paramtable.GetNodeID(),
 				},
 				SegmentID:    100,
 				CollectionID: 100,

@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/metautil"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/samber/lo"
@@ -430,7 +431,7 @@ func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segmentID Uni
 		data:         kvs,
 	}, field2Insert, field2Stats, flushed, dropped, pos)
 
-	metrics.DataNodeEncodeBufferLatency.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID())).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.DataNodeEncodeBufferLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return statsBinlogs, nil
 }
 
@@ -575,10 +576,10 @@ func (t *flushBufferInsertTask) flushInsertData() error {
 	if t.ChunkManager != nil && len(t.data) > 0 {
 		tr := timerecord.NewTimeRecorder("insertData")
 		err := t.MultiWrite(ctx, t.data)
-		metrics.DataNodeSave2StorageLatency.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID()), metrics.InsertLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
+		metrics.DataNodeSave2StorageLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.InsertLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
 		if err == nil {
 			for _, d := range t.data {
-				metrics.DataNodeFlushedSize.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID()), metrics.InsertLabel).Add(float64(len(d)))
+				metrics.DataNodeFlushedSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.InsertLabel).Add(float64(len(d)))
 			}
 		}
 		return err
@@ -598,10 +599,10 @@ func (t *flushBufferDeleteTask) flushDeleteData() error {
 	if len(t.data) > 0 && t.ChunkManager != nil {
 		tr := timerecord.NewTimeRecorder("deleteData")
 		err := t.MultiWrite(ctx, t.data)
-		metrics.DataNodeSave2StorageLatency.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID()), metrics.DeleteLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
+		metrics.DataNodeSave2StorageLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.DeleteLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
 		if err == nil {
 			for _, d := range t.data {
-				metrics.DataNodeFlushedSize.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID()), metrics.DeleteLabel).Add(float64(len(d)))
+				metrics.DataNodeFlushedSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.DeleteLabel).Add(float64(len(d)))
 			}
 		}
 		return err
@@ -641,7 +642,7 @@ func dropVirtualChannelFunc(dsService *dataSyncService, opts ...retry.Option) fl
 				commonpbutil.WithMsgType(0),   //TODO msg type
 				commonpbutil.WithMsgID(0),     //TODO msg id
 				commonpbutil.WithTimeStamp(0), //TODO time stamp
-				commonpbutil.WithSourceID(Params.DataNodeCfg.GetNodeID()),
+				commonpbutil.WithSourceID(paramtable.GetNodeID()),
 			),
 			ChannelName: dsService.vchannelName,
 		}
@@ -794,7 +795,7 @@ func flushNotifyFunc(dsService *dataSyncService, opts ...retry.Option) notifyMet
 				commonpbutil.WithMsgType(0),
 				commonpbutil.WithMsgID(0),
 				commonpbutil.WithTimeStamp(0),
-				commonpbutil.WithSourceID(Params.DataNodeCfg.GetNodeID()),
+				commonpbutil.WithSourceID(paramtable.GetNodeID()),
 			),
 			SegmentID:           pack.segmentID,
 			CollectionID:        dsService.collectionID,

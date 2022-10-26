@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -154,7 +155,7 @@ func getPrimaryKeysFromExpr(schema *schemapb.CollectionSchema, expr string) (res
 
 func (dt *deleteTask) PreExecute(ctx context.Context) error {
 	dt.Base.MsgType = commonpb.MsgType_Delete
-	dt.Base.SourceID = Params.ProxyCfg.GetNodeID()
+	dt.Base.SourceID = paramtable.GetNodeID()
 
 	dt.result = &milvuspb.MutationResult{
 		Status: &commonpb.Status{
@@ -313,7 +314,7 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 		return err
 	}
 	sendMsgDur := tr.Record("send delete request to dml channels")
-	metrics.ProxySendMutationReqLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), metrics.DeleteLabel).Observe(float64(sendMsgDur.Milliseconds()))
+	metrics.ProxySendMutationReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.DeleteLabel).Observe(float64(sendMsgDur.Milliseconds()))
 
 	return nil
 }

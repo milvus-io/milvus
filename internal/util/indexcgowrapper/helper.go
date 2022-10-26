@@ -20,7 +20,7 @@ import (
 func GetBinarySetKeys(cBinarySet C.CBinarySet) ([]string, error) {
 	size := int(C.GetBinarySetSize(cBinarySet))
 	if size == 0 {
-		return nil, fmt.Errorf("BinarySet size is zero!")
+		return nil, fmt.Errorf("BinarySet size is zero")
 	}
 	datas := make([]unsafe.Pointer, size)
 
@@ -39,7 +39,7 @@ func GetBinarySetValue(cBinarySet C.CBinarySet, key string) ([]byte, error) {
 	ret := C.GetBinarySetValueSize(cBinarySet, cIndexKey)
 	size := int(ret)
 	if size == 0 {
-		return nil, fmt.Errorf("GetBinarySetValueSize size is zero!")
+		return nil, fmt.Errorf("GetBinarySetValueSize size is zero")
 	}
 	value := make([]byte, size)
 	status := C.CopyBinarySetValue(unsafe.Pointer(&value[0]), cIndexKey, cBinarySet)

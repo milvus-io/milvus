@@ -72,6 +72,9 @@ func (m *MockQueryCoord) Register() error {
 func (m *MockQueryCoord) UpdateStateCode(code commonpb.StateCode) {
 }
 
+func (m *MockQueryCoord) SetAddress(address string) {
+}
+
 func (m *MockQueryCoord) SetEtcdClient(client *clientv3.Client) {
 }
 

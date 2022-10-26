@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
@@ -237,6 +238,7 @@ func Test_createStream(t *testing.T) {
 }
 
 func Test_singleTypeChannelsMgr_createMsgStream(t *testing.T) {
+	paramtable.Init()
 	t.Run("re-create", func(t *testing.T) {
 		m := &singleTypeChannelsMgr{
 			infos: map[UniqueID]streamInfos{

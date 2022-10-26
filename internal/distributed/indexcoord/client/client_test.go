@@ -31,11 +31,13 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 func TestIndexCoordClient(t *testing.T) {
+	paramtable.Init()
 	ClientParams.InitOnce(typeutil.IndexCoordRole)
 	ctx := context.Background()
 	factory := dependency.NewDefaultFactory(true)
@@ -44,9 +46,14 @@ func TestIndexCoordClient(t *testing.T) {
 	icm := indexcoord.NewIndexCoordMock()
 	etcdCli, err := etcd.GetEtcdClient(&ClientParams.EtcdCfg)
 	assert.NoError(t, err)
+
+	var address string
+	icm.CallSetAddress = func(addr string) {
+		address = addr
+	}
 	icm.CallRegister = func() error {
 		session := sessionutil.NewSession(context.Background(), indexcoord.Params.EtcdCfg.MetaRootPath, etcdCli)
-		session.Init(typeutil.IndexCoordRole, indexcoord.Params.IndexCoordCfg.Address, true, false)
+		session.Init(typeutil.IndexCoordRole, address, true, false)
 		session.Register()
 		return err
 	}

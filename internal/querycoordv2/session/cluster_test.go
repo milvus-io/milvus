@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/mocks"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc"
@@ -42,6 +43,7 @@ type ClusterTestSuite struct {
 }
 
 func (suite *ClusterTestSuite) SetupSuite() {
+	paramtable.Init()
 	suite.setupServers()
 }
 

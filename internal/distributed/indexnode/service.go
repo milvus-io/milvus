@@ -130,12 +130,8 @@ func (s *Server) init() error {
 		Params.Port = funcutil.GetAvailablePort()
 		log.Warn("IndexNode get available port when init", zap.Int("Port", Params.Port))
 	}
-	indexnode.Params.InitOnce()
-	indexnode.Params.IndexNodeCfg.Port = Params.Port
-	indexnode.Params.IndexNodeCfg.IP = Params.IP
-	indexnode.Params.IndexNodeCfg.Address = Params.GetAddress()
 
-	closer := trace.InitTracing(fmt.Sprintf("IndexNode-%d", indexnode.Params.IndexNodeCfg.GetNodeID()))
+	closer := trace.InitTracing(fmt.Sprintf("IndexNode-%d", paramtable.GetNodeID()))
 	s.closer = closer
 
 	defer func() {
@@ -163,6 +159,7 @@ func (s *Server) init() error {
 	}
 	s.etcdCli = etcdCli
 	s.indexnode.SetEtcdClient(etcdCli)
+	s.indexnode.SetAddress(fmt.Sprintf("%s:%d", Params.IP, Params.Port))
 	err = s.indexnode.Init()
 	if err != nil {
 		log.Error("IndexNode Init failed", zap.Error(err))

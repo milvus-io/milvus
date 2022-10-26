@@ -20,10 +20,12 @@ import (
 	"context"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestAllocator_Basic(t *testing.T) {
+	paramtable.Init()
 	ms := newMockRootCoordService()
 	allocator := newRootCoordAllocator(ms)
 	ctx := context.Background()

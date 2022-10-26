@@ -90,7 +90,7 @@ var getFlowGraphServiceAttempts = uint(50)
 var _ types.DataNode = (*DataNode)(nil)
 
 // Params from config.yaml
-var Params paramtable.ComponentParam
+var Params *paramtable.ComponentParam = paramtable.Get()
 
 // rateCol is global rateCollector in DataNode.
 var rateCol *rateCollector
@@ -122,6 +122,7 @@ type DataNode struct {
 	compactionExecutor *compactionExecutor
 
 	etcdCli   *clientv3.Client
+	address   string
 	rootCoord types.RootCoord
 	dataCoord types.DataCoord
 
@@ -155,6 +156,10 @@ func NewDataNode(ctx context.Context, factory dependency.Factory) *DataNode {
 	}
 	node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	return node
+}
+
+func (node *DataNode) SetAddress(address string) {
+	node.address = address
 }
 
 // SetEtcdClient sets etcd client for DataNode
@@ -210,9 +215,9 @@ func (node *DataNode) initSession() error {
 	if node.session == nil {
 		return errors.New("failed to initialize session")
 	}
-	node.session.Init(typeutil.DataNodeRole, Params.DataNodeCfg.IP+":"+strconv.Itoa(Params.DataNodeCfg.Port), false, true)
-	Params.DataNodeCfg.SetNodeID(node.session.ServerID)
-	Params.SetLogger(Params.DataNodeCfg.GetNodeID())
+	node.session.Init(typeutil.DataNodeRole, node.address, false, true)
+	paramtable.SetNodeID(node.session.ServerID)
+	Params.SetLogger(paramtable.GetNodeID())
 	return nil
 }
 
@@ -240,21 +245,21 @@ func (node *DataNode) Init() error {
 
 	err := node.initRateCollector()
 	if err != nil {
-		log.Error("DataNode server init rateCollector failed", zap.Int64("node ID", Params.QueryNodeCfg.GetNodeID()), zap.Error(err))
+		log.Error("DataNode server init rateCollector failed", zap.Int64("node ID", paramtable.GetNodeID()), zap.Error(err))
 		return err
 	}
-	log.Info("DataNode server init rateCollector done", zap.Int64("node ID", Params.QueryNodeCfg.GetNodeID()))
+	log.Info("DataNode server init rateCollector done", zap.Int64("node ID", paramtable.GetNodeID()))
 
-	idAllocator, err := allocator2.NewIDAllocator(node.ctx, node.rootCoord, Params.DataNodeCfg.GetNodeID())
+	idAllocator, err := allocator2.NewIDAllocator(node.ctx, node.rootCoord, paramtable.GetNodeID())
 	if err != nil {
 		log.Error("failed to create id allocator",
 			zap.Error(err),
-			zap.String("role", typeutil.DataNodeRole), zap.Int64("DataNode ID", Params.DataNodeCfg.GetNodeID()))
+			zap.String("role", typeutil.DataNodeRole), zap.Int64("DataNode ID", paramtable.GetNodeID()))
 		return err
 	}
 	node.rowIDAllocator = idAllocator
 
-	node.factory.Init(&Params)
+	node.factory.Init(Params)
 	log.Info("DataNode server init succeeded",
 		zap.String("MsgChannelSubName", Params.CommonCfg.DataNodeSubName))
 
@@ -266,7 +271,7 @@ func (node *DataNode) StartWatchChannels(ctx context.Context) {
 	defer logutil.LogPanic()
 	// REF MEP#7 watch path should be [prefix]/channel/{node_id}/{channel_name}
 	// TODO, this is risky, we'd better watch etcd with revision rather simply a path
-	watchPrefix := path.Join(Params.DataNodeCfg.ChannelWatchSubPath, fmt.Sprintf("%d", Params.DataNodeCfg.GetNodeID()))
+	watchPrefix := path.Join(Params.DataNodeCfg.ChannelWatchSubPath, fmt.Sprintf("%d", paramtable.GetNodeID()))
 	evtChan := node.watchKv.WatchWithPrefix(watchPrefix)
 	// after watch, first check all exists nodes first
 	err := node.checkWatchedList()
@@ -308,7 +313,7 @@ func (node *DataNode) StartWatchChannels(ctx context.Context) {
 // serves the corner case for etcd connection lost and missing some events
 func (node *DataNode) checkWatchedList() error {
 	// REF MEP#7 watch path should be [prefix]/channel/{node_id}/{channel_name}
-	prefix := path.Join(Params.DataNodeCfg.ChannelWatchSubPath, fmt.Sprintf("%d", Params.DataNodeCfg.GetNodeID()))
+	prefix := path.Join(Params.DataNodeCfg.ChannelWatchSubPath, fmt.Sprintf("%d", paramtable.GetNodeID()))
 	keys, values, err := node.watchKv.LoadWithPrefix(prefix)
 	if err != nil {
 		return err
@@ -418,7 +423,7 @@ func (node *DataNode) handlePutEvent(watchInfo *datapb.ChannelWatchInfo, version
 		return fmt.Errorf("fail to marshal watchInfo with state, vChanName: %s, state: %s ,err: %w", vChanName, watchInfo.State.String(), err)
 	}
 
-	key := path.Join(Params.DataNodeCfg.ChannelWatchSubPath, fmt.Sprintf("%d", Params.DataNodeCfg.GetNodeID()), vChanName)
+	key := path.Join(Params.DataNodeCfg.ChannelWatchSubPath, fmt.Sprintf("%d", paramtable.GetNodeID()), vChanName)
 
 	success, err := node.watchKv.CompareVersionAndSwap(key, version, string(v))
 	// etcd error, retrying
@@ -481,7 +486,7 @@ func (node *DataNode) Start() error {
 			commonpbutil.WithMsgType(commonpb.MsgType_RequestTSO),
 			commonpbutil.WithMsgID(0),
 			commonpbutil.WithTimeStamp(0),
-			commonpbutil.WithSourceID(Params.DataNodeCfg.GetNodeID()),
+			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
 		Count: 1,
 	})
@@ -582,7 +587,7 @@ func (node *DataNode) ReadyToFlush() error {
 //	One precondition: The segmentID in req is in ascending order.
 func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmentsRequest) (*commonpb.Status, error) {
 	metrics.DataNodeFlushReqCounter.WithLabelValues(
-		fmt.Sprint(Params.DataNodeCfg.GetNodeID()),
+		fmt.Sprint(paramtable.GetNodeID()),
 		MetricRequestsTotal).Inc()
 
 	errStatus := &commonpb.Status{
@@ -671,7 +676,7 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 	}
 
 	metrics.DataNodeFlushReqCounter.WithLabelValues(
-		fmt.Sprint(Params.DataNodeCfg.GetNodeID()),
+		fmt.Sprint(paramtable.GetNodeID()),
 		MetricRequestsSuccess).Inc()
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
@@ -682,7 +687,7 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 // It returns a list of segments to be sent.
 func (node *DataNode) ResendSegmentStats(ctx context.Context, req *datapb.ResendSegmentStatsRequest) (*datapb.ResendSegmentStatsResponse, error) {
 	log.Info("start resending segment stats, if any",
-		zap.Int64("DataNode ID", Params.DataNodeCfg.GetNodeID()))
+		zap.Int64("DataNode ID", paramtable.GetNodeID()))
 	segResent := node.flowgraphManager.resendTT()
 	log.Info("found segment(s) with stats to resend",
 		zap.Int64s("segment IDs", segResent))
@@ -742,14 +747,14 @@ func (node *DataNode) ShowConfigurations(ctx context.Context, req *internalpb.Sh
 	log.Debug("DataNode.ShowConfigurations", zap.String("pattern", req.Pattern))
 	if !node.isHealthy() {
 		log.Warn("DataNode.ShowConfigurations failed",
-			zap.Int64("nodeId", Params.QueryNodeCfg.GetNodeID()),
+			zap.Int64("nodeId", paramtable.GetNodeID()),
 			zap.String("req", req.Pattern),
-			zap.Error(errDataNodeIsUnhealthy(Params.QueryNodeCfg.GetNodeID())))
+			zap.Error(errDataNodeIsUnhealthy(paramtable.GetNodeID())))
 
 		return &internalpb.ShowConfigurationsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    msgDataNodeIsUnhealthy(Params.QueryNodeCfg.GetNodeID()),
+				Reason:    msgDataNodeIsUnhealthy(paramtable.GetNodeID()),
 			},
 			Configuations: nil,
 		}, nil
@@ -762,14 +767,14 @@ func (node *DataNode) ShowConfigurations(ctx context.Context, req *internalpb.Sh
 func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	if !node.isHealthy() {
 		log.Warn("DataNode.GetMetrics failed",
-			zap.Int64("node_id", Params.DataNodeCfg.GetNodeID()),
+			zap.Int64("node_id", paramtable.GetNodeID()),
 			zap.String("req", req.Request),
-			zap.Error(errDataNodeIsUnhealthy(Params.DataNodeCfg.GetNodeID())))
+			zap.Error(errDataNodeIsUnhealthy(paramtable.GetNodeID())))
 
 		return &milvuspb.GetMetricsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    msgDataNodeIsUnhealthy(Params.DataNodeCfg.GetNodeID()),
+				Reason:    msgDataNodeIsUnhealthy(paramtable.GetNodeID()),
 			},
 		}, nil
 	}
@@ -777,14 +782,14 @@ func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 	metricType, err := metricsinfo.ParseMetricType(req.Request)
 	if err != nil {
 		log.Warn("DataNode.GetMetrics failed to parse metric type",
-			zap.Int64("node_id", Params.DataNodeCfg.GetNodeID()),
+			zap.Int64("node_id", paramtable.GetNodeID()),
 			zap.String("req", req.Request),
 			zap.Error(err))
 
 		return &milvuspb.GetMetricsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    fmt.Sprintf("datanode GetMetrics failed, nodeID=%d, err=%s", Params.DataNodeCfg.GetNodeID(), err.Error()),
+				Reason:    fmt.Sprintf("datanode GetMetrics failed, nodeID=%d, err=%s", paramtable.GetNodeID(), err.Error()),
 			},
 		}, nil
 	}
@@ -792,17 +797,17 @@ func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 	if metricType == metricsinfo.SystemInfoMetrics {
 		systemInfoMetrics, err := node.getSystemInfoMetrics(ctx, req)
 		if err != nil {
-			log.Warn("DataNode GetMetrics failed", zap.Int64("nodeID", Params.DataNodeCfg.GetNodeID()), zap.Error(err))
+			log.Warn("DataNode GetMetrics failed", zap.Int64("nodeID", paramtable.GetNodeID()), zap.Error(err))
 			return &milvuspb.GetMetricsResponse{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,
-					Reason:    fmt.Sprintf("datanode GetMetrics failed, nodeID=%d, err=%s", Params.DataNodeCfg.GetNodeID(), err.Error()),
+					Reason:    fmt.Sprintf("datanode GetMetrics failed, nodeID=%d, err=%s", paramtable.GetNodeID(), err.Error()),
 				},
 			}, nil
 		}
 
 		log.Debug("DataNode.GetMetrics",
-			zap.Int64("node_id", Params.DataNodeCfg.GetNodeID()),
+			zap.Int64("node_id", paramtable.GetNodeID()),
 			zap.String("req", req.Request),
 			zap.String("metric_type", metricType),
 			zap.Any("systemInfoMetrics", systemInfoMetrics), // TODO(dragondriver): necessary? may be very large
@@ -812,7 +817,7 @@ func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 	}
 
 	log.Debug("DataNode.GetMetrics failed, request metric type is not implemented yet",
-		zap.Int64("node_id", Params.DataNodeCfg.GetNodeID()),
+		zap.Int64("node_id", paramtable.GetNodeID()),
 		zap.String("req", req.Request),
 		zap.String("metric_type", metricType))
 
@@ -986,7 +991,7 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
 		TaskId:     req.GetImportTask().TaskId,
-		DatanodeId: Params.DataNodeCfg.GetNodeID(),
+		DatanodeId: paramtable.GetNodeID(),
 		State:      commonpb.ImportState_ImportStarted,
 		Segments:   make([]int64, 0),
 		AutoIds:    make([]int64, 0),
@@ -1014,11 +1019,11 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 			zap.Int64("collection ID", req.GetImportTask().GetCollectionId()),
 			zap.Int64("partition ID", req.GetImportTask().GetPartitionId()),
 			zap.Int64("task ID", req.GetImportTask().GetTaskId()),
-			zap.Error(errDataNodeIsUnhealthy(Params.DataNodeCfg.GetNodeID())))
+			zap.Error(errDataNodeIsUnhealthy(paramtable.GetNodeID())))
 
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    msgDataNodeIsUnhealthy(Params.DataNodeCfg.GetNodeID()),
+			Reason:    msgDataNodeIsUnhealthy(paramtable.GetNodeID()),
 		}, nil
 	}
 
@@ -1029,7 +1034,7 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 			commonpbutil.WithMsgType(commonpb.MsgType_RequestTSO),
 			commonpbutil.WithMsgID(0),
 			commonpbutil.WithTimeStamp(0),
-			commonpbutil.WithSourceID(Params.DataNodeCfg.GetNodeID()),
+			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
 		Count: 1,
 	})
@@ -1135,7 +1140,7 @@ func (node *DataNode) AddImportSegment(ctx context.Context, req *datapb.AddImpor
 	if err != nil {
 		log.Error("channel not found in current DataNode",
 			zap.String("channel name", req.GetChannelName()),
-			zap.Int64("node ID", Params.DataNodeCfg.GetNodeID()))
+			zap.Int64("node ID", paramtable.GetNodeID()))
 		return &datapb.AddImportSegmentResponse{
 			Status: &commonpb.Status{
 				// TODO: Add specific error code.
@@ -1302,7 +1307,7 @@ func saveSegmentFunc(node *DataNode, req *datapb.ImportTaskRequest, res *rootcoo
 			resp, err := node.dataCoord.SaveImportSegment(context.Background(), &datapb.SaveImportSegmentRequest{
 				Base: commonpbutil.NewMsgBase(
 					commonpbutil.WithTimeStamp(ts), // Pass current timestamp downstream.
-					commonpbutil.WithSourceID(Params.DataNodeCfg.GetNodeID()),
+					commonpbutil.WithSourceID(paramtable.GetNodeID()),
 				),
 				SegmentId:    segmentID,
 				ChannelName:  targetChName,
@@ -1314,7 +1319,7 @@ func saveSegmentFunc(node *DataNode, req *datapb.ImportTaskRequest, res *rootcoo
 						commonpbutil.WithMsgType(0),
 						commonpbutil.WithMsgID(0),
 						commonpbutil.WithTimeStamp(ts),
-						commonpbutil.WithSourceID(Params.DataNodeCfg.GetNodeID()),
+						commonpbutil.WithSourceID(paramtable.GetNodeID()),
 					),
 					SegmentID:           segmentID,
 					CollectionID:        req.GetImportTask().GetCollectionId(),

@@ -13,6 +13,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/util/autoindex"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -46,7 +47,7 @@ func TestSearchTask_PostExecute(t *testing.T) {
 			SearchRequest: &internalpb.SearchRequest{
 				Base: &commonpb.MsgBase{
 					MsgType:  commonpb.MsgType_Search,
-					SourceID: Params.ProxyCfg.GetNodeID(),
+					SourceID: paramtable.GetNodeID(),
 				},
 			},
 			request: nil,
@@ -115,7 +116,6 @@ func getValidSearchParams() []*commonpb.KeyValuePair {
 func TestSearchTask_PreExecute(t *testing.T) {
 	var err error
 
-	Params.InitOnce()
 	var (
 		rc  = NewRootCoordMock()
 		qc  = NewQueryCoordMock()
@@ -290,7 +290,6 @@ func TestSearchTask_PreExecute(t *testing.T) {
 }
 
 func TestSearchTaskV2_Execute(t *testing.T) {
-	Params.InitOnce()
 
 	var (
 		err error
@@ -352,7 +351,6 @@ func genSearchResultData(nq int64, topk int64, ids []int64, scores []float32) *s
 }
 
 func TestSearchTask_Ts(t *testing.T) {
-	Params.InitOnce()
 	task := &searchTask{
 		SearchRequest: &internalpb.SearchRequest{},
 
@@ -404,7 +402,6 @@ func TestSearchTask_Reduce(t *testing.T) {
 func TestSearchTaskWithInvalidRoundDecimal(t *testing.T) {
 	// var err error
 	//
-	// Params.Init()
 	// Params.ProxyCfg.SearchResultChannelNames = []string{funcutil.GenRandomStr()}
 	//
 	// rc := NewRootCoordMock()
@@ -476,7 +473,7 @@ func TestSearchTaskWithInvalidRoundDecimal(t *testing.T) {
 	//         MsgType:   commonpb.MsgType_LoadCollection,
 	//         MsgID:     0,
 	//         Timestamp: 0,
-	//         SourceID:  Params.ProxyCfg.GetNodeID(),
+	//         SourceID:  paramtable.GetNodeID(),
 	//     },
 	//     DbID:         0,
 	//     CollectionID: collectionID,
@@ -497,9 +494,9 @@ func TestSearchTaskWithInvalidRoundDecimal(t *testing.T) {
 	//             MsgType:   commonpb.MsgType_Search,
 	//             MsgID:     0,
 	//             Timestamp: 0,
-	//             SourceID:  Params.ProxyCfg.GetNodeID(),
+	//             SourceID:  paramtable.GetNodeID(),
 	//         },
-	//         ResultChannelID:    strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10),
+	//         ResultChannelID:    strconv.FormatInt(paramtable.GetNodeID(), 10),
 	//         DbID:               0,
 	//         CollectionID:       0,
 	//         PartitionIDs:       nil,
@@ -647,7 +644,6 @@ func TestSearchTaskWithInvalidRoundDecimal(t *testing.T) {
 func TestSearchTaskV2_all(t *testing.T) {
 	// var err error
 	//
-	// Params.Init()
 	// Params.ProxyCfg.SearchResultChannelNames = []string{funcutil.GenRandomStr()}
 	//
 	// rc := NewRootCoordMock()
@@ -720,7 +716,7 @@ func TestSearchTaskV2_all(t *testing.T) {
 	//         MsgType:   commonpb.MsgType_LoadCollection,
 	//         MsgID:     0,
 	//         Timestamp: 0,
-	//         SourceID:  Params.ProxyCfg.GetNodeID(),
+	//         SourceID:  paramtable.GetNodeID(),
 	//     },
 	//     DbID:         0,
 	//     CollectionID: collectionID,
@@ -741,9 +737,9 @@ func TestSearchTaskV2_all(t *testing.T) {
 	//             MsgType:   commonpb.MsgType_Search,
 	//             MsgID:     0,
 	//             Timestamp: 0,
-	//             SourceID:  Params.ProxyCfg.GetNodeID(),
+	//             SourceID:  paramtable.GetNodeID(),
 	//         },
-	//         ResultChannelID:    strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10),
+	//         ResultChannelID:    strconv.FormatInt(paramtable.GetNodeID(), 10),
 	//         DbID:               0,
 	//         CollectionID:       0,
 	//         PartitionIDs:       nil,
@@ -892,7 +888,6 @@ func TestSearchTaskV2_all(t *testing.T) {
 func TestSearchTaskV2_7803_reduce(t *testing.T) {
 	// var err error
 	//
-	// Params.Init()
 	// Params.ProxyCfg.SearchResultChannelNames = []string{funcutil.GenRandomStr()}
 	//
 	// rc := NewRootCoordMock()
@@ -958,7 +953,7 @@ func TestSearchTaskV2_7803_reduce(t *testing.T) {
 	//         MsgType:   commonpb.MsgType_LoadCollection,
 	//         MsgID:     0,
 	//         Timestamp: 0,
-	//         SourceID:  Params.ProxyCfg.GetNodeID(),
+	//         SourceID:  paramtable.GetNodeID(),
 	//     },
 	//     DbID:         0,
 	//     CollectionID: collectionID,
@@ -979,9 +974,9 @@ func TestSearchTaskV2_7803_reduce(t *testing.T) {
 	//             MsgType:   commonpb.MsgType_Search,
 	//             MsgID:     0,
 	//             Timestamp: 0,
-	//             SourceID:  Params.ProxyCfg.GetNodeID(),
+	//             SourceID:  paramtable.GetNodeID(),
 	//         },
-	//         ResultChannelID:    strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10),
+	//         ResultChannelID:    strconv.FormatInt(paramtable.GetNodeID(), 10),
 	//         DbID:               0,
 	//         CollectionID:       0,
 	//         PartitionIDs:       nil,
@@ -1645,7 +1640,6 @@ func Test_checkIfLoaded(t *testing.T) {
 }
 
 func TestSearchTask_ErrExecute(t *testing.T) {
-	Params.Init()
 
 	var (
 		err error
@@ -1714,7 +1708,7 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 	status, err := qc.LoadCollection(ctx, &querypb.LoadCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:  commonpb.MsgType_LoadCollection,
-			SourceID: Params.ProxyCfg.GetNodeID(),
+			SourceID: paramtable.GetNodeID(),
 		},
 		CollectionID: collectionID,
 	})
@@ -1727,7 +1721,7 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 		SearchRequest: &internalpb.SearchRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:  commonpb.MsgType_Retrieve,
-				SourceID: Params.ProxyCfg.GetNodeID(),
+				SourceID: paramtable.GetNodeID(),
 			},
 			CollectionID:   collectionID,
 			OutputFieldsId: make([]int64, len(fieldName2Types)),
@@ -1741,7 +1735,7 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 		request: &milvuspb.SearchRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:  commonpb.MsgType_Retrieve,
-				SourceID: Params.ProxyCfg.GetNodeID(),
+				SourceID: paramtable.GetNodeID(),
 			},
 			CollectionName: collectionName,
 			Nq:             2,

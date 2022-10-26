@@ -32,7 +32,6 @@ import (
 	"math/rand"
 	"os"
 	"path"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -68,7 +67,7 @@ var _ types.IndexNode = (*IndexNode)(nil)
 var _ types.IndexNodeComponent = (*IndexNode)(nil)
 
 // Params is a GlobalParamTable singleton of indexnode
-var Params paramtable.ComponentParam
+var Params *paramtable.ComponentParam = paramtable.Get()
 
 type taskKey struct {
 	ClusterID string
@@ -91,6 +90,7 @@ type IndexNode struct {
 	session        *sessionutil.Session
 
 	etcdCli *clientv3.Client
+	address string
 
 	closer io.Closer
 
@@ -148,9 +148,7 @@ func (i *IndexNode) initKnowhere() {
 
 	// override index builder SIMD type
 	cSimdType := C.CString(Params.CommonCfg.SimdType)
-	cRealSimdType := C.IndexBuilderSetSimdType(cSimdType)
-	Params.CommonCfg.SimdType = C.GoString(cRealSimdType)
-	C.free(unsafe.Pointer(cRealSimdType))
+	C.IndexBuilderSetSimdType(cSimdType)
 	C.free(unsafe.Pointer(cSimdType))
 
 	// override segcore index slice size
@@ -163,7 +161,7 @@ func (i *IndexNode) initKnowhere() {
 	cCpuNum := C.int(hardware.GetCPUNum())
 	C.InitCpuNum(cCpuNum)
 
-	initcore.InitLocalStorageConfig(&Params)
+	initcore.InitLocalStorageConfig(Params)
 }
 
 func (i *IndexNode) initSession() error {
@@ -171,18 +169,16 @@ func (i *IndexNode) initSession() error {
 	if i.session == nil {
 		return errors.New("failed to initialize session")
 	}
-	i.session.Init(typeutil.IndexNodeRole, Params.IndexNodeCfg.IP+":"+strconv.Itoa(Params.IndexNodeCfg.Port), false, true)
-	Params.IndexNodeCfg.SetNodeID(i.session.ServerID)
+	i.session.Init(typeutil.IndexNodeRole, i.address, false, true)
+	paramtable.SetNodeID(i.session.ServerID)
 	Params.SetLogger(i.session.ServerID)
 	return nil
 }
 
 // Init initializes the IndexNode component.
 func (i *IndexNode) Init() error {
-	var initErr error = nil
+	var initErr error
 	i.initOnce.Do(func() {
-		Params.Init()
-
 		i.UpdateStateCode(commonpb.StateCode_Initializing)
 		log.Debug("IndexNode init", zap.Any("State", i.stateCode.Load().(commonpb.StateCode)))
 		err := i.initSession()
@@ -212,7 +208,7 @@ func (i *IndexNode) Init() error {
 
 // Start starts the IndexNode component.
 func (i *IndexNode) Start() error {
-	var startErr error = nil
+	var startErr error
 	i.once.Do(func() {
 		startErr = i.sched.Start()
 
@@ -283,7 +279,7 @@ func (i *IndexNode) isHealthy() bool {
 //	sp, ctx2 := trace.StartSpanFromContextWithOperationName(i.loopCtx, "IndexNode-CreateIndex")
 //	defer sp.Finish()
 //	sp.SetTag("IndexBuildID", strconv.FormatInt(request.IndexBuildID, 10))
-//	metrics.IndexNodeBuildIndexTaskCounter.WithLabelValues(strconv.FormatInt(Params.IndexNodeCfg.GetNodeID(), 10), metrics.TotalLabel).Inc()
+//	metrics.IndexNodeBuildIndexTaskCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.TotalLabel).Inc()
 //
 //	t := &IndexBuildTask{
 //		BaseTask: BaseTask{
@@ -293,7 +289,7 @@ func (i *IndexNode) isHealthy() bool {
 //		req:            request,
 //		cm:             i.chunkManager,
 //		etcdKV:         i.etcdKV,
-//		nodeID:         Params.IndexNodeCfg.GetNodeID(),
+//		nodeID:         paramtable.GetNodeID(),
 //		serializedSize: 0,
 //	}
 //
@@ -306,12 +302,12 @@ func (i *IndexNode) isHealthy() bool {
 //		log.Warn("IndexNode failed to schedule", zap.Int64("indexBuildID", request.IndexBuildID), zap.Error(err))
 //		ret.ErrorCode = commonpb.ErrorCode_UnexpectedError
 //		ret.Reason = err.Error()
-//		metrics.IndexNodeBuildIndexTaskCounter.WithLabelValues(strconv.FormatInt(Params.IndexNodeCfg.GetNodeID(), 10), metrics.FailLabel).Inc()
+//		metrics.IndexNodeBuildIndexTaskCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.FailLabel).Inc()
 //		return ret, nil
 //	}
 //	log.Info("IndexNode successfully scheduled", zap.Int64("indexBuildID", request.IndexBuildID))
 //
-//	metrics.IndexNodeBuildIndexTaskCounter.WithLabelValues(strconv.FormatInt(Params.IndexNodeCfg.GetNodeID(), 10), metrics.SuccessLabel).Inc()
+//	metrics.IndexNodeBuildIndexTaskCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.SuccessLabel).Inc()
 //	return ret, nil
 //}
 //
@@ -389,21 +385,21 @@ func (i *IndexNode) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringR
 }
 
 func (i *IndexNode) GetNodeID() int64 {
-	return Params.IndexNodeCfg.GetNodeID()
+	return paramtable.GetNodeID()
 }
 
 //ShowConfigurations returns the configurations of indexNode matching req.Pattern
 func (i *IndexNode) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
 	if !i.isHealthy() {
 		log.Warn("IndexNode.ShowConfigurations failed",
-			zap.Int64("nodeId", Params.IndexNodeCfg.GetNodeID()),
+			zap.Int64("nodeId", paramtable.GetNodeID()),
 			zap.String("req", req.Pattern),
-			zap.Error(errIndexNodeIsUnhealthy(Params.IndexNodeCfg.GetNodeID())))
+			zap.Error(errIndexNodeIsUnhealthy(paramtable.GetNodeID())))
 
 		return &internalpb.ShowConfigurationsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    msgIndexNodeIsUnhealthy(Params.IndexNodeCfg.GetNodeID()),
+				Reason:    msgIndexNodeIsUnhealthy(paramtable.GetNodeID()),
 			},
 			Configuations: nil,
 		}, nil
@@ -412,19 +408,23 @@ func (i *IndexNode) ShowConfigurations(ctx context.Context, req *internalpb.Show
 	return getComponentConfigurations(ctx, req), nil
 }
 
+func (i *IndexNode) SetAddress(address string) {
+	i.address = address
+}
+
 //// GetMetrics gets the metrics info of IndexNode.
 //// TODO(dragondriver): cache the Metrics and set a retention to the cache
 //func (i *IndexNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 //	if !i.isHealthy() {
 //		log.Warn("IndexNode.GetMetrics failed",
-//			zap.Int64("node_id", Params.IndexNodeCfg.GetNodeID()),
+//			zap.Int64("node_id", paramtable.GetNodeID()),
 //			zap.String("req", req.Request),
-//			zap.Error(errIndexNodeIsUnhealthy(Params.IndexNodeCfg.GetNodeID())))
+//			zap.Error(errIndexNodeIsUnhealthy(paramtable.GetNodeID())))
 //
 //		return &milvuspb.GetMetricsResponse{
 //			Status: &commonpb.Status{
 //				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-//				Reason:    msgIndexNodeIsUnhealthy(Params.IndexNodeCfg.GetNodeID()),
+//				Reason:    msgIndexNodeIsUnhealthy(paramtable.GetNodeID()),
 //			},
 //			Response: "",
 //		}, nil
@@ -433,7 +433,7 @@ func (i *IndexNode) ShowConfigurations(ctx context.Context, req *internalpb.Show
 //	metricType, err := metricsinfo.ParseMetricType(req.Request)
 //	if err != nil {
 //		log.Warn("IndexNode.GetMetrics failed to parse metric type",
-//			zap.Int64("node_id", Params.IndexNodeCfg.GetNodeID()),
+//			zap.Int64("node_id", paramtable.GetNodeID()),
 //			zap.String("req", req.Request),
 //			zap.Error(err))
 //
@@ -450,7 +450,7 @@ func (i *IndexNode) ShowConfigurations(ctx context.Context, req *internalpb.Show
 //		metrics, err := getSystemInfoMetrics(ctx, req, i)
 //
 //		log.Debug("IndexNode.GetMetrics",
-//			zap.Int64("node_id", Params.IndexNodeCfg.GetNodeID()),
+//			zap.Int64("node_id", paramtable.GetNodeID()),
 //			zap.String("req", req.Request),
 //			zap.String("metric_type", metricType),
 //			zap.Error(err))
@@ -459,7 +459,7 @@ func (i *IndexNode) ShowConfigurations(ctx context.Context, req *internalpb.Show
 //	}
 //
 //	log.Warn("IndexNode.GetMetrics failed, request metric type is not implemented yet",
-//		zap.Int64("node_id", Params.IndexNodeCfg.GetNodeID()),
+//		zap.Int64("node_id", paramtable.GetNodeID()),
 //		zap.String("req", req.Request),
 //		zap.String("metric_type", metricType))
 //

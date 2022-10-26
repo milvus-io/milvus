@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 
 	"github.com/golang/protobuf/proto"
@@ -474,7 +475,6 @@ func TestTranslateOutputFields(t *testing.T) {
 }
 
 func TestCreateCollectionTask(t *testing.T) {
-	Params.InitOnce()
 
 	rc := NewRootCoordMock()
 	rc.Start()
@@ -755,7 +755,6 @@ func TestCreateCollectionTask(t *testing.T) {
 }
 
 func TestHasCollectionTask(t *testing.T) {
-	Params.InitOnce()
 	rc := NewRootCoordMock()
 	rc.Start()
 	defer rc.Stop()
@@ -812,7 +811,7 @@ func TestHasCollectionTask(t *testing.T) {
 	assert.Equal(t, UniqueID(100), task.ID())
 	assert.Equal(t, Timestamp(100), task.BeginTs())
 	assert.Equal(t, Timestamp(100), task.EndTs())
-	assert.Equal(t, Params.ProxyCfg.GetNodeID(), task.GetBase().GetSourceID())
+	assert.Equal(t, paramtable.GetNodeID(), task.GetBase().GetSourceID())
 	// missing collectionID in globalMetaCache
 	err = task.Execute(ctx)
 	assert.Nil(t, err)
@@ -841,7 +840,6 @@ func TestHasCollectionTask(t *testing.T) {
 }
 
 func TestDescribeCollectionTask(t *testing.T) {
-	Params.InitOnce()
 	rc := NewRootCoordMock()
 	rc.Start()
 	defer rc.Stop()
@@ -877,7 +875,7 @@ func TestDescribeCollectionTask(t *testing.T) {
 	assert.Equal(t, UniqueID(100), task.ID())
 	assert.Equal(t, Timestamp(100), task.BeginTs())
 	assert.Equal(t, Timestamp(100), task.EndTs())
-	assert.Equal(t, Params.ProxyCfg.GetNodeID(), task.GetBase().GetSourceID())
+	assert.Equal(t, paramtable.GetNodeID(), task.GetBase().GetSourceID())
 	// missing collectionID in globalMetaCache
 	err := task.Execute(ctx)
 	assert.Nil(t, err)
@@ -904,7 +902,6 @@ func TestDescribeCollectionTask(t *testing.T) {
 }
 
 func TestDescribeCollectionTask_ShardsNum1(t *testing.T) {
-	Params.InitOnce()
 	rc := NewRootCoordMock()
 	rc.Start()
 	defer rc.Stop()
@@ -969,7 +966,6 @@ func TestDescribeCollectionTask_ShardsNum1(t *testing.T) {
 }
 
 func TestDescribeCollectionTask_ShardsNum2(t *testing.T) {
-	Params.InitOnce()
 	rc := NewRootCoordMock()
 	rc.Start()
 	defer rc.Stop()
@@ -1036,7 +1032,6 @@ func TestDescribeCollectionTask_ShardsNum2(t *testing.T) {
 }
 
 func TestCreatePartitionTask(t *testing.T) {
-	Params.InitOnce()
 	rc := NewRootCoordMock()
 	rc.Start()
 	defer rc.Stop()
@@ -1068,7 +1063,7 @@ func TestCreatePartitionTask(t *testing.T) {
 	assert.Equal(t, UniqueID(100), task.ID())
 	assert.Equal(t, Timestamp(100), task.BeginTs())
 	assert.Equal(t, Timestamp(100), task.EndTs())
-	assert.Equal(t, Params.ProxyCfg.GetNodeID(), task.GetBase().GetSourceID())
+	assert.Equal(t, paramtable.GetNodeID(), task.GetBase().GetSourceID())
 	err := task.Execute(ctx)
 	assert.NotNil(t, err)
 
@@ -1083,7 +1078,6 @@ func TestCreatePartitionTask(t *testing.T) {
 }
 
 func TestDropPartitionTask(t *testing.T) {
-	Params.InitOnce()
 	rc := NewRootCoordMock()
 	rc.Start()
 	defer rc.Stop()
@@ -1133,7 +1127,7 @@ func TestDropPartitionTask(t *testing.T) {
 	assert.Equal(t, UniqueID(100), task.ID())
 	assert.Equal(t, Timestamp(100), task.BeginTs())
 	assert.Equal(t, Timestamp(100), task.EndTs())
-	assert.Equal(t, Params.ProxyCfg.GetNodeID(), task.GetBase().GetSourceID())
+	assert.Equal(t, paramtable.GetNodeID(), task.GetBase().GetSourceID())
 	err := task.Execute(ctx)
 	assert.NotNil(t, err)
 
@@ -1192,7 +1186,6 @@ func TestDropPartitionTask(t *testing.T) {
 }
 
 func TestHasPartitionTask(t *testing.T) {
-	Params.InitOnce()
 	rc := NewRootCoordMock()
 	rc.Start()
 	defer rc.Stop()
@@ -1224,7 +1217,7 @@ func TestHasPartitionTask(t *testing.T) {
 	assert.Equal(t, UniqueID(100), task.ID())
 	assert.Equal(t, Timestamp(100), task.BeginTs())
 	assert.Equal(t, Timestamp(100), task.EndTs())
-	assert.Equal(t, Params.ProxyCfg.GetNodeID(), task.GetBase().GetSourceID())
+	assert.Equal(t, paramtable.GetNodeID(), task.GetBase().GetSourceID())
 	err := task.Execute(ctx)
 	assert.NotNil(t, err)
 
@@ -1239,7 +1232,6 @@ func TestHasPartitionTask(t *testing.T) {
 }
 
 func TestShowPartitionsTask(t *testing.T) {
-	Params.InitOnce()
 	rc := NewRootCoordMock()
 	rc.Start()
 	defer rc.Stop()
@@ -1272,7 +1264,7 @@ func TestShowPartitionsTask(t *testing.T) {
 	assert.Equal(t, UniqueID(100), task.ID())
 	assert.Equal(t, Timestamp(100), task.BeginTs())
 	assert.Equal(t, Timestamp(100), task.EndTs())
-	assert.Equal(t, Params.ProxyCfg.GetNodeID(), task.GetBase().GetSourceID())
+	assert.Equal(t, paramtable.GetNodeID(), task.GetBase().GetSourceID())
 	err := task.Execute(ctx)
 	assert.NotNil(t, err)
 
@@ -1295,8 +1287,6 @@ func TestShowPartitionsTask(t *testing.T) {
 }
 func TestTask_Int64PrimaryKey(t *testing.T) {
 	var err error
-
-	Params.InitOnce()
 
 	rc := NewRootCoordMock()
 	rc.Start()
@@ -1359,7 +1349,7 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 				MsgType:   commonpb.MsgType_CreatePartition,
 				MsgID:     0,
 				Timestamp: 0,
-				SourceID:  Params.ProxyCfg.GetNodeID(),
+				SourceID:  paramtable.GetNodeID(),
 			},
 			DbName:         dbName,
 			CollectionName: collectionName,
@@ -1387,14 +1377,13 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 	_ = ticker.start()
 	defer ticker.close()
 
-	idAllocator, err := allocator.NewIDAllocator(ctx, rc, Params.ProxyCfg.GetNodeID())
+	idAllocator, err := allocator.NewIDAllocator(ctx, rc, paramtable.GetNodeID())
 	assert.NoError(t, err)
 	_ = idAllocator.Start()
 	defer idAllocator.Close()
 
 	segAllocator, err := newSegIDAssigner(ctx, &mockDataCoord{expireTime: Timestamp(2500)}, getLastTick1)
 	assert.NoError(t, err)
-	segAllocator.Init()
 	_ = segAllocator.Start()
 	defer segAllocator.Close()
 
@@ -1409,7 +1398,7 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 					Base: &commonpb.MsgBase{
 						MsgType:  commonpb.MsgType_Insert,
 						MsgID:    0,
-						SourceID: Params.ProxyCfg.GetNodeID(),
+						SourceID: paramtable.GetNodeID(),
 					},
 					DbName:         dbName,
 					CollectionName: collectionName,
@@ -1464,7 +1453,7 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 						MsgType:   commonpb.MsgType_Delete,
 						MsgID:     0,
 						Timestamp: 0,
-						SourceID:  Params.ProxyCfg.GetNodeID(),
+						SourceID:  paramtable.GetNodeID(),
 					},
 					CollectionName: collectionName,
 					PartitionName:  partitionName,
@@ -1518,7 +1507,7 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 						MsgType:   commonpb.MsgType_Delete,
 						MsgID:     0,
 						Timestamp: 0,
-						SourceID:  Params.ProxyCfg.GetNodeID(),
+						SourceID:  paramtable.GetNodeID(),
 					},
 					CollectionName: collectionName,
 					PartitionName:  partitionName,
@@ -1549,8 +1538,6 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 
 func TestTask_VarCharPrimaryKey(t *testing.T) {
 	var err error
-
-	Params.InitOnce()
 
 	rc := NewRootCoordMock()
 	rc.Start()
@@ -1614,7 +1601,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 				MsgType:   commonpb.MsgType_CreatePartition,
 				MsgID:     0,
 				Timestamp: 0,
-				SourceID:  Params.ProxyCfg.GetNodeID(),
+				SourceID:  paramtable.GetNodeID(),
 			},
 			DbName:         dbName,
 			CollectionName: collectionName,
@@ -1642,7 +1629,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 	_ = ticker.start()
 	defer ticker.close()
 
-	idAllocator, err := allocator.NewIDAllocator(ctx, rc, Params.ProxyCfg.GetNodeID())
+	idAllocator, err := allocator.NewIDAllocator(ctx, rc, paramtable.GetNodeID())
 	assert.NoError(t, err)
 	_ = idAllocator.Start()
 	defer idAllocator.Close()
@@ -1664,7 +1651,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 					Base: &commonpb.MsgBase{
 						MsgType:  commonpb.MsgType_Insert,
 						MsgID:    0,
-						SourceID: Params.ProxyCfg.GetNodeID(),
+						SourceID: paramtable.GetNodeID(),
 					},
 					DbName:         dbName,
 					CollectionName: collectionName,
@@ -1721,7 +1708,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 						MsgType:   commonpb.MsgType_Delete,
 						MsgID:     0,
 						Timestamp: 0,
-						SourceID:  Params.ProxyCfg.GetNodeID(),
+						SourceID:  paramtable.GetNodeID(),
 					},
 					CollectionName: collectionName,
 					PartitionName:  partitionName,
@@ -1775,7 +1762,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 						MsgType:   commonpb.MsgType_Delete,
 						MsgID:     0,
 						Timestamp: 0,
-						SourceID:  Params.ProxyCfg.GetNodeID(),
+						SourceID:  paramtable.GetNodeID(),
 					},
 					CollectionName: collectionName,
 					PartitionName:  partitionName,
@@ -1805,7 +1792,6 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 }
 
 func TestCreateAlias_all(t *testing.T) {
-	Params.InitOnce()
 	rc := NewRootCoordMock()
 	rc.Start()
 	defer rc.Stop()
@@ -1847,7 +1833,6 @@ func TestCreateAlias_all(t *testing.T) {
 }
 
 func TestDropAlias_all(t *testing.T) {
-	Params.InitOnce()
 	rc := NewRootCoordMock()
 	rc.Start()
 	defer rc.Stop()
@@ -1886,7 +1871,6 @@ func TestDropAlias_all(t *testing.T) {
 }
 
 func TestAlterAlias_all(t *testing.T) {
-	Params.InitOnce()
 	rc := NewRootCoordMock()
 	rc.Start()
 	defer rc.Stop()
@@ -2125,7 +2109,6 @@ func Test_checkTrain(t *testing.T) {
 func Test_createIndexTask_PreExecute(t *testing.T) {
 	collectionName := "test"
 	fieldName := "test"
-	Params.Init()
 
 	cit := &createIndexTask{
 		req: &milvuspb.CreateIndexRequest{
@@ -2231,7 +2214,6 @@ func Test_createIndexTask_PreExecute(t *testing.T) {
 }
 
 func Test_dropCollectionTask_PreExecute(t *testing.T) {
-	Params.InitOnce()
 	dct := &dropCollectionTask{DropCollectionRequest: &milvuspb.DropCollectionRequest{
 		Base:           &commonpb.MsgBase{},
 		CollectionName: "0xffff", // invalid

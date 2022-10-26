@@ -103,7 +103,7 @@ func (suite *ServerSuite) SetupTest() {
 	suite.NoError(err)
 
 	for i := range suite.nodes {
-		suite.nodes[i] = mocks.NewMockQueryNode(suite.T(), suite.server.etcdCli)
+		suite.nodes[i] = mocks.NewMockQueryNode(suite.T(), suite.server.etcdCli, int64(i))
 		err := suite.nodes[i].Start()
 		suite.Require().NoError(err)
 		ok := suite.waitNodeUp(suite.nodes[i], 5*time.Second)
@@ -143,7 +143,7 @@ func (suite *ServerSuite) TestRecover() {
 }
 
 func (suite *ServerSuite) TestNodeUp() {
-	newNode := mocks.NewMockQueryNode(suite.T(), suite.server.etcdCli)
+	newNode := mocks.NewMockQueryNode(suite.T(), suite.server.etcdCli, 100)
 	newNode.EXPECT().GetDataDistribution(mock.Anything, mock.Anything).Return(&querypb.GetDataDistributionResponse{}, nil)
 	err := newNode.Start()
 	suite.NoError(err)

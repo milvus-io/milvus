@@ -26,12 +26,12 @@ func shouldPanic(t *testing.T, name string, f func()) {
 }
 
 func TestComponentParam(t *testing.T) {
-	var CParams ComponentParam
-	CParams.Init()
+	Init()
+	params := Get()
 
 	t.Run("test kafkaConfig", func(t *testing.T) {
 
-		params := CParams.ServiceParam.KafkaCfg
+		params := params.ServiceParam.KafkaCfg
 		producerConfig := params.ProducerExtraConfig
 		assert.Equal(t, "dc", producerConfig["client.id"])
 
@@ -40,7 +40,7 @@ func TestComponentParam(t *testing.T) {
 	})
 
 	t.Run("test commonConfig", func(t *testing.T) {
-		Params := CParams.CommonCfg
+		Params := params.CommonCfg
 
 		assert.NotEqual(t, Params.DefaultPartitionName, "")
 		t.Logf("default partition name = %s", Params.DefaultPartitionName)
@@ -122,7 +122,7 @@ func TestComponentParam(t *testing.T) {
 	})
 
 	t.Run("test rootCoordConfig", func(t *testing.T) {
-		Params := CParams.RootCoordCfg
+		Params := params.RootCoordCfg
 
 		assert.NotEqual(t, Params.MaxPartitionNum, 0)
 		t.Logf("master MaxPartitionNum = %d", Params.MaxPartitionNum)
@@ -140,7 +140,7 @@ func TestComponentParam(t *testing.T) {
 	})
 
 	t.Run("test proxyConfig", func(t *testing.T) {
-		Params := CParams.ProxyCfg
+		Params := params.ProxyCfg
 
 		t.Logf("TimeTickInterval: %v", Params.TimeTickInterval)
 
@@ -158,7 +158,7 @@ func TestComponentParam(t *testing.T) {
 	})
 
 	t.Run("test proxyConfig panic", func(t *testing.T) {
-		Params := CParams.ProxyCfg
+		Params := params.ProxyCfg
 
 		shouldPanic(t, "proxy.timeTickInterval", func() {
 			Params.Base.Save("proxy.timeTickInterval", "")
@@ -222,13 +222,13 @@ func TestComponentParam(t *testing.T) {
 	})
 
 	t.Run("test queryCoordConfig", func(t *testing.T) {
-		Params := CParams.QueryCoordCfg
+		Params := params.QueryCoordCfg
 		assert.Equal(t, Params.EnableActiveStandby, false)
 		t.Logf("queryCoord EnableActiveStandby = %t", Params.EnableActiveStandby)
 	})
 
 	t.Run("test queryNodeConfig", func(t *testing.T) {
-		Params := CParams.QueryNodeCfg
+		Params := params.QueryNodeCfg
 
 		interval := Params.StatsPublishInterval
 		assert.Equal(t, 1000, interval)
@@ -286,7 +286,7 @@ func TestComponentParam(t *testing.T) {
 	})
 
 	t.Run("test dataCoordConfig", func(t *testing.T) {
-		Params := CParams.DataCoordCfg
+		Params := params.DataCoordCfg
 		assert.Equal(t, 24*60*60*time.Second, Params.SegmentMaxLifetime)
 		assert.True(t, Params.EnableGarbageCollection)
 		assert.Equal(t, Params.EnableActiveStandby, false)
@@ -294,11 +294,11 @@ func TestComponentParam(t *testing.T) {
 	})
 
 	t.Run("test dataNodeConfig", func(t *testing.T) {
-		Params := CParams.DataNodeCfg
+		Params := params.DataNodeCfg
 
-		Params.SetNodeID(2)
+		SetNodeID(2)
 
-		id := Params.GetNodeID()
+		id := GetNodeID()
 		t.Logf("NodeID: %d", id)
 
 		alias := Params.Alias
@@ -321,11 +321,7 @@ func TestComponentParam(t *testing.T) {
 	})
 
 	t.Run("test indexCoordConfig", func(t *testing.T) {
-		Params := CParams.IndexCoordCfg
-
-		t.Logf("Address: %v", Params.Address)
-
-		t.Logf("Port: %v", Params.Port)
+		Params := params.IndexCoordCfg
 
 		Params.CreatedTime = time.Now()
 		t.Logf("CreatedTime: %v", Params.CreatedTime)
@@ -343,15 +339,7 @@ func TestComponentParam(t *testing.T) {
 	})
 
 	t.Run("test indexNodeConfig", func(t *testing.T) {
-		Params := CParams.IndexNodeCfg
-
-		t.Logf("IP: %v", Params.IP)
-
-		t.Logf("Address: %v", Params.Address)
-
-		t.Logf("Port: %v", Params.Port)
-
-		t.Logf("NodeID: %v", Params.GetNodeID())
+		Params := params.IndexNodeCfg
 
 		t.Logf("Alias: %v", Params.Alias)
 

@@ -83,7 +83,7 @@ type rootCoordCreatorFunc func(ctx context.Context, metaRootPath string, etcdCli
 // makes sure Server implements `DataCoord`
 var _ types.DataCoord = (*Server)(nil)
 
-var Params paramtable.ComponentParam
+var Params *paramtable.ComponentParam = paramtable.Get()
 
 // Server implements `types.DataCoord`
 // handles Data Coordinator related jobs
@@ -97,6 +97,7 @@ type Server struct {
 	helper           ServerHelper
 
 	etcdCli          *clientv3.Client
+	address          string
 	kvClient         *etcdkv.EtcdKV
 	meta             *meta
 	segmentManager   Manager
@@ -241,10 +242,10 @@ func (s *Server) initSession() error {
 	if s.session == nil {
 		return errors.New("failed to initialize session")
 	}
-	s.session.Init(typeutil.DataCoordRole, Params.DataCoordCfg.Address, true, true)
+	s.session.Init(typeutil.DataCoordRole, s.address, true, true)
 	s.session.SetEnableActiveStandBy(s.enableActiveStandBy)
-	Params.DataCoordCfg.SetNodeID(s.session.ServerID)
-	Params.SetLogger(Params.DataCoordCfg.GetNodeID())
+	paramtable.SetNodeID(s.session.ServerID)
+	Params.SetLogger(paramtable.GetNodeID())
 	return nil
 }
 
@@ -252,7 +253,7 @@ func (s *Server) initSession() error {
 func (s *Server) Init() error {
 	var err error
 	s.stateCode.Store(commonpb.StateCode_Initializing)
-	s.factory.Init(&Params)
+	s.factory.Init(Params)
 
 	if err = s.initRootCoordClient(); err != nil {
 		return err
@@ -349,6 +350,10 @@ func (s *Server) initCluster() error {
 	return nil
 }
 
+func (s *Server) SetAddress(address string) {
+	s.address = address
+}
+
 // SetEtcdClient sets etcd client for datacoord.
 func (s *Server) SetEtcdClient(client *clientv3.Client) {
 	s.etcdCli = client
@@ -375,7 +380,7 @@ func (s *Server) stopCompactionTrigger() {
 }
 
 func (s *Server) newChunkManagerFactory() (storage.ChunkManager, error) {
-	chunkManagerFactory := storage.NewChunkManagerFactoryWithParam(&Params)
+	chunkManagerFactory := storage.NewChunkManagerFactoryWithParam(Params)
 	cli, err := chunkManagerFactory.NewPersistentStorageChunkManager(s.ctx)
 	if err != nil {
 		log.Error("chunk manager init failed", zap.Error(err))
@@ -893,7 +898,7 @@ func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID i
 	resp, err := s.rootCoordClient.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection),
-			commonpbutil.WithSourceID(Params.DataCoordCfg.GetNodeID()),
+			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
 		DbName:       "",
 		CollectionID: collectionID,
@@ -906,7 +911,7 @@ func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID i
 			commonpbutil.WithMsgType(commonpb.MsgType_ShowPartitions),
 			commonpbutil.WithMsgID(0),
 			commonpbutil.WithTimeStamp(0),
-			commonpbutil.WithSourceID(Params.DataCoordCfg.GetNodeID()),
+			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
 		DbName:         "",
 		CollectionName: resp.Schema.Name,

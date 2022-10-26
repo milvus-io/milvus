@@ -34,7 +34,7 @@ import (
 
 var ClientParams paramtable.GrpcClientConfig
 
-var Params paramtable.ComponentParam
+var Params *paramtable.ComponentParam = paramtable.Get()
 
 // Client is the grpc client for Proxy
 type Client struct {
@@ -130,7 +130,7 @@ func (c *Client) InvalidateCollectionMetaCache(ctx context.Context, req *proxypb
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(Params.ProxyCfg.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
 	)
 	ret, err := c.grpcClient.ReCall(ctx, func(client proxypb.ProxyClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
@@ -148,7 +148,7 @@ func (c *Client) InvalidateCredentialCache(ctx context.Context, req *proxypb.Inv
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(Params.ProxyCfg.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
 	)
 	ret, err := c.grpcClient.ReCall(ctx, func(client proxypb.ProxyClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
@@ -166,7 +166,7 @@ func (c *Client) UpdateCredentialCache(ctx context.Context, req *proxypb.UpdateC
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(Params.ProxyCfg.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
 	)
 	ret, err := c.grpcClient.ReCall(ctx, func(client proxypb.ProxyClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
@@ -184,7 +184,7 @@ func (c *Client) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.Refres
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(Params.ProxyCfg.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
 	)
 	ret, err := c.grpcClient.ReCall(ctx, func(client proxypb.ProxyClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
@@ -204,7 +204,7 @@ func (c *Client) GetProxyMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(Params.ProxyCfg.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
 	)
 	ret, err := c.grpcClient.ReCall(ctx, func(client proxypb.ProxyClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
@@ -223,7 +223,7 @@ func (c *Client) SetRates(ctx context.Context, req *proxypb.SetRatesRequest) (*c
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(Params.ProxyCfg.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
 	)
 	ret, err := c.grpcClient.ReCall(ctx, func(client proxypb.ProxyClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {

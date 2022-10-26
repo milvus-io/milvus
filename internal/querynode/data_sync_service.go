@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
 
 // dataSyncService manages a lot of flow graphs
@@ -88,7 +89,7 @@ func (dsService *dataSyncService) addFlowGraphsForDMLChannels(collectionID Uniqu
 		log.Info("add DML flow graph",
 			zap.Any("collectionID", collectionID),
 			zap.Any("channel", channel))
-		metrics.QueryNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Inc()
+		metrics.QueryNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Inc()
 	}
 
 	return results, nil
@@ -133,7 +134,7 @@ func (dsService *dataSyncService) addFlowGraphsForDeltaChannels(collectionID Uni
 		log.Info("add delta flow graph",
 			zap.Any("collectionID", collectionID),
 			zap.Any("channel", channel))
-		metrics.QueryNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Inc()
+		metrics.QueryNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Inc()
 	}
 
 	return results, nil
@@ -206,7 +207,7 @@ func (dsService *dataSyncService) removeFlowGraphsByDMLChannels(channels []Chann
 		if _, ok := dsService.dmlChannel2FlowGraph[channel]; ok {
 			// close flow graph
 			dsService.dmlChannel2FlowGraph[channel].close()
-			metrics.QueryNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Dec()
+			metrics.QueryNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Dec()
 		}
 		delete(dsService.dmlChannel2FlowGraph, channel)
 		rateCol.removeTSafeChannel(channel)
@@ -222,7 +223,7 @@ func (dsService *dataSyncService) removeFlowGraphsByDeltaChannels(channels []Cha
 		if _, ok := dsService.deltaChannel2FlowGraph[channel]; ok {
 			// close flow graph
 			dsService.deltaChannel2FlowGraph[channel].close()
-			metrics.QueryNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Dec()
+			metrics.QueryNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Dec()
 		}
 		delete(dsService.deltaChannel2FlowGraph, channel)
 		rateCol.removeTSafeChannel(channel)
