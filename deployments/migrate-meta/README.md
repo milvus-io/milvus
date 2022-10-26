@@ -19,6 +19,7 @@ Milvus 2.2 has changed the meta structure for segment index. To upgrade a Milvus
 | `t`          | The target Milvus version.                               | `None`                         | True                    |
 | `r`          | The root path of Milvus meta.                             | `by-dev`                       | False                   |
 | `w`          | The new Milvus image tag.                                 | `milvusdb/milvus:v2.2.0`       | False                   |
+| `m`          | The meta migration image tag.                             | `harbor.milvus.io/milvus/meta-migration:20221025-e54b6181b`       | False                   |
 | `o`          | The meta migration operation.                             | `migrate`                      | False                   |
 | `d`          | Whether to delete migration pod after the migration is completed.          | `false`                        | False                   |
 > By default, the script only applies to migration from v2.1.x to v2.2.x. Rollback to the older version with the `rollback` operation first if an error occurs.

@@ -4,6 +4,7 @@ namespace="default"
 root_path="by-dev"
 operation="migrate"
 image_tag="milvusdb/milvus:v2.2.0"
+meta_migration_pod_tag="harbor.milvus.io/milvus/meta-migration:20221025-e54b6181b"
 remove_migrate_pod_after_migrate="false"
 
 #-n namespace: The namespace that Milvus is installed in.
@@ -14,7 +15,7 @@ remove_migrate_pod_after_migrate="false"
 #-w image_tag: The new milvus image tag.
 #-o operation: The operation: migrate/rollback.
 #-d remove_migrate_pod_after_migrate: Remove migration pod after successful migration.
-while getopts "n:i:s:t:r:w:o:d" opt_name
+while getopts "n:i:s:t:r:w:o:d:m" opt_name
 do
   case $opt_name in
     n) namespace=$OPTARG;;
@@ -24,6 +25,7 @@ do
     r) root_path=$OPTARG;;
     w) image_tag=$OPTARG;;
     o) operation=$OPTARG;;
+    m) meta_migration_pod_tag=$OPTARG;;
     d) remove_migrate_pod_after_migrate="true";;
     *) echo "Unkonwen parameters";;
   esac
@@ -261,7 +263,7 @@ function backup_meta(){
       restartPolicy: Never
       containers:
       - name: meta-migration
-        image: harbor.milvus.io/milvus/meta-migration:20221019-b79687687
+        image: $meta_migration_pod_tag
         command: ["/bin/sh"]
         args:
         - -c
@@ -298,7 +300,7 @@ function rollback_meta(){
     restartPolicy: Never
     containers:
     - name: meta-migration
-      image: harbor.milvus.io/milvus/meta-migration:20221019-b79687687
+      image: $meta_migration_pod_tag
       command: ["/bin/sh"]
       args:
       - -c
@@ -337,7 +339,7 @@ function migrate_meta(){
     restartPolicy: Never
     containers:
     - name: meta-migration
-      image: harbor.milvus.io/milvus/meta-migration:20221019-b79687687
+      image: $meta_migration_pod_tag
       command: ["/bin/sh"]
       args:
       - -c
