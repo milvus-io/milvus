@@ -869,16 +869,36 @@ func (c *Core) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequ
 
 	log.Info("received request to has collection")
 
-	_, err := c.meta.GetCollectionByName(ctx, in.GetCollectionName(), ts)
-	// TODO: what if err != nil && common.IsCollectionNotExistError == false, should we consider this RPC as failure?
-	has := err == nil
+	t := &hasCollectionTask{
+		baseTask: newBaseTask(ctx, c),
+		Req:      in,
+		Rsp:      &milvuspb.BoolResponse{},
+	}
+
+	if err := c.scheduler.AddTask(t); err != nil {
+		log.Error("failed to enqueue request to has collection", zap.Error(err))
+		metrics.RootCoordDDLReqCounter.WithLabelValues("HasCollection", metrics.FailLabel).Inc()
+		return &milvuspb.BoolResponse{
+			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "HasCollection failed: "+err.Error()),
+			Value:  false,
+		}, nil
+	}
+
+	if err := t.WaitToFinish(); err != nil {
+		log.Error("failed to has collection", zap.Error(err))
+		metrics.RootCoordDDLReqCounter.WithLabelValues("HasCollection", metrics.FailLabel).Inc()
+		return &milvuspb.BoolResponse{
+			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "HasCollection failed: "+err.Error()),
+			Value:  false,
+		}, nil
+	}
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("HasCollection", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("HasCollection").Observe(float64(tr.ElapseSpan().Milliseconds()))
 
-	log.Info("done to has collection", zap.Bool("exist", has))
+	log.Info("done to has collection", zap.Bool("exist", t.Rsp.GetValue()))
 
-	return &milvuspb.BoolResponse{Status: succStatus(), Value: has}, nil
+	return t.Rsp, nil
 }
 
 func (c *Core) describeCollection(ctx context.Context, in *milvuspb.DescribeCollectionRequest) (*model.Collection, error) {
@@ -935,28 +955,36 @@ func (c *Core) DescribeCollection(ctx context.Context, in *milvuspb.DescribeColl
 
 	log.Info("received request to describe collection")
 
-	coll, err := c.describeCollection(ctx, in)
-	if err != nil {
-		// TODO: check whether err indicates the collection not exist.
+	t := &describeCollectionTask{
+		baseTask: newBaseTask(ctx, c),
+		Req:      in,
+		Rsp:      &milvuspb.DescribeCollectionResponse{},
+	}
 
-		log.Error("failed to describe collection", zap.Error(err))
+	if err := c.scheduler.AddTask(t); err != nil {
+		log.Error("failed to enqueue request to describe collection", zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues("DescribeCollection", metrics.FailLabel).Inc()
-
 		return &milvuspb.DescribeCollectionResponse{
 			// TODO: use commonpb.ErrorCode_CollectionNotExists. SDK use commonpb.ErrorCode_UnexpectedError now.
 			Status: failStatus(commonpb.ErrorCode_UnexpectedError, err.Error()),
 		}, nil
 	}
 
-	aliases := c.meta.ListAliasesByID(coll.CollectionID)
-	desc := convertModelToDesc(coll, aliases)
+	if err := t.WaitToFinish(); err != nil {
+		log.Error("failed to describe collection", zap.Error(err))
+		metrics.RootCoordDDLReqCounter.WithLabelValues("DescribeCollection", metrics.FailLabel).Inc()
+		return &milvuspb.DescribeCollectionResponse{
+			// TODO: use commonpb.ErrorCode_CollectionNotExists. SDK use commonpb.ErrorCode_UnexpectedError now.
+			Status: failStatus(commonpb.ErrorCode_UnexpectedError, err.Error()),
+		}, nil
+	}
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("DescribeCollection", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("DescribeCollection").Observe(float64(tr.ElapseSpan().Milliseconds()))
 
-	log.Info("done to describe collection", zap.Int64("collection_id", desc.GetCollectionID()))
+	log.Info("done to describe collection", zap.Int64("collection_id", t.Rsp.GetCollectionID()))
 
-	return desc, nil
+	return t.Rsp, nil
 }
 
 // ShowCollections list all collection names
@@ -970,34 +998,39 @@ func (c *Core) ShowCollections(ctx context.Context, in *milvuspb.ShowCollections
 	metrics.RootCoordDDLReqCounter.WithLabelValues("ShowCollections", metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder("ShowCollections")
 
-	resp := &milvuspb.ShowCollectionsResponse{Status: succStatus()}
 	ts := getTravelTs(in)
 	log := log.Ctx(ctx).With(zap.String("dbname", in.GetDbName()), zap.Int64("msgID", in.GetBase().GetMsgID()), zap.Uint64("ts", ts))
 
 	log.Info("received request to show collections")
 
-	colls, err := c.meta.ListCollections(ctx, ts)
-	if err != nil {
-		metrics.RootCoordDDLReqCounter.WithLabelValues("ShowCollections", metrics.FailLabel).Inc()
-		resp.Status = failStatus(commonpb.ErrorCode_UnexpectedError, err.Error())
-		log.Error("failed to show collections", zap.Error(err))
-		return resp, nil
+	t := &showCollectionTask{
+		baseTask: newBaseTask(ctx, c),
+		Req:      in,
+		Rsp:      &milvuspb.ShowCollectionsResponse{},
 	}
 
-	for _, meta := range colls {
-		resp.CollectionNames = append(resp.CollectionNames, meta.Name)
-		resp.CollectionIds = append(resp.CollectionIds, meta.CollectionID)
-		resp.CreatedTimestamps = append(resp.CreatedTimestamps, meta.CreateTime)
-		physical, _ := tsoutil.ParseHybridTs(meta.CreateTime)
-		resp.CreatedUtcTimestamps = append(resp.CreatedUtcTimestamps, uint64(physical))
+	if err := c.scheduler.AddTask(t); err != nil {
+		log.Error("failed to enqueue request to show collections", zap.Error(err))
+		metrics.RootCoordDDLReqCounter.WithLabelValues("ShowCollections", metrics.FailLabel).Inc()
+		return &milvuspb.ShowCollectionsResponse{
+			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "ShowCollections failed: "+err.Error()),
+		}, nil
+	}
+
+	if err := t.WaitToFinish(); err != nil {
+		log.Error("failed to show collections", zap.Error(err))
+		metrics.RootCoordDDLReqCounter.WithLabelValues("ShowCollections", metrics.FailLabel).Inc()
+		return &milvuspb.ShowCollectionsResponse{
+			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "ShowCollections failed: "+err.Error()),
+		}, nil
 	}
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("ShowCollections", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("ShowCollections").Observe(float64(tr.ElapseSpan().Milliseconds()))
 
-	log.Info("done to show collections", zap.Int("num of collections", len(resp.GetCollectionNames()))) // maybe very large, print number instead.
+	log.Info("done to show collections", zap.Int("num of collections", len(t.Rsp.GetCollectionNames()))) // maybe very large, print number instead.
 
-	return resp, nil
+	return t.Rsp, nil
 }
 
 func (c *Core) AlterCollection(ctx context.Context, in *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
@@ -1164,34 +1197,40 @@ func (c *Core) HasPartition(ctx context.Context, in *milvuspb.HasPartitionReques
 
 	// TODO(longjiquan): why HasPartitionRequest doesn't contain Timestamp but other requests do.
 	ts := typeutil.MaxTimestamp
-	resp := &milvuspb.BoolResponse{Status: succStatus(), Value: false}
 	log := log.Ctx(ctx).With(zap.String("collection", in.GetCollectionName()), zap.String("partition", in.GetPartitionName()), zap.Int64("msgID", in.GetBase().GetMsgID()), zap.Uint64("ts", ts))
 
 	log.Info("received request to has partition")
 
-	coll, err := c.meta.GetCollectionByName(ctx, in.GetCollectionName(), ts)
-	if err != nil {
-		// TODO: check if err indicates collection not exist.
-		log.Error("failed to has partition", zap.Error(err))
-		metrics.RootCoordDDLReqCounter.WithLabelValues("HasPartition", metrics.FailLabel).Inc()
-		// TODO: use commonpb.ErrorCode_CollectionNotExists. SDK use commonpb.ErrorCode_UnexpectedError now.
-		resp.Status = failStatus(commonpb.ErrorCode_UnexpectedError, err.Error())
-		return resp, nil
+	t := &hasPartitionTask{
+		baseTask: newBaseTask(ctx, c),
+		Req:      in,
+		Rsp:      &milvuspb.BoolResponse{},
 	}
 
-	for _, part := range coll.Partitions {
-		if part.PartitionName == in.GetPartitionName() {
-			resp.Value = true
-			break
-		}
+	if err := c.scheduler.AddTask(t); err != nil {
+		log.Error("failed to enqueue request to has partition", zap.Error(err))
+		metrics.RootCoordDDLReqCounter.WithLabelValues("HasPartition", metrics.FailLabel).Inc()
+		return &milvuspb.BoolResponse{
+			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "HasPartition failed: "+err.Error()),
+			Value:  false,
+		}, nil
+	}
+
+	if err := t.WaitToFinish(); err != nil {
+		log.Error("failed to has partition", zap.Error(err))
+		metrics.RootCoordDDLReqCounter.WithLabelValues("HasPartition", metrics.FailLabel).Inc()
+		return &milvuspb.BoolResponse{
+			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "HasPartition failed: "+err.Error()),
+			Value:  false,
+		}, nil
 	}
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("HasPartition", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("HasPartition").Observe(float64(tr.ElapseSpan().Milliseconds()))
 
-	log.Info("done to has partition", zap.Bool("exist", resp.GetValue()))
+	log.Info("done to has partition", zap.Bool("exist", t.Rsp.GetValue()))
 
-	return resp, nil
+	return t.Rsp, nil
 }
 
 // ShowPartitions list all partition names
@@ -1205,45 +1244,38 @@ func (c *Core) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionsRe
 	metrics.RootCoordDDLReqCounter.WithLabelValues("ShowPartitions", metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder("ShowPartitions")
 
-	// TODO(longjiquan): why ShowPartitionsRequest doesn't contain Timestamp but other requests do.
-	ts := typeutil.MaxTimestamp
-	resp := &milvuspb.ShowPartitionsResponse{Status: succStatus()}
 	log := log.Ctx(ctx).With(zap.String("collection", in.GetCollectionName()), zap.Int64("msgID", in.GetBase().GetMsgID()))
 
 	log.Info("received request to show partitions")
 
-	var coll *model.Collection
-	var err error
-
-	if in.GetCollectionName() == "" {
-		coll, err = c.meta.GetCollectionByID(ctx, in.GetCollectionID(), ts)
-	} else {
-		coll, err = c.meta.GetCollectionByName(ctx, in.GetCollectionName(), ts)
+	t := &showPartitionTask{
+		baseTask: newBaseTask(ctx, c),
+		Req:      in,
+		Rsp:      &milvuspb.ShowPartitionsResponse{},
 	}
 
-	if err != nil {
-		// TODO: check if err indicates collection not exist.
+	if err := c.scheduler.AddTask(t); err != nil {
+		log.Error("failed to enqueue request to show partitions", zap.Error(err))
+		metrics.RootCoordDDLReqCounter.WithLabelValues("ShowPartitions", metrics.FailLabel).Inc()
+		return &milvuspb.ShowPartitionsResponse{
+			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "ShowPartitions failed: "+err.Error()),
+		}, nil
+	}
+
+	if err := t.WaitToFinish(); err != nil {
 		log.Error("failed to show partitions", zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues("ShowPartitions", metrics.FailLabel).Inc()
-		// TODO: use commonpb.ErrorCode_CollectionNotExists. SDK use commonpb.ErrorCode_UnexpectedError now.
-		resp.Status = failStatus(commonpb.ErrorCode_UnexpectedError, err.Error())
-		return resp, nil
-	}
-
-	for _, part := range coll.Partitions {
-		resp.PartitionIDs = append(resp.PartitionIDs, part.PartitionID)
-		resp.PartitionNames = append(resp.PartitionNames, part.PartitionName)
-		resp.CreatedTimestamps = append(resp.CreatedTimestamps, part.PartitionCreatedTimestamp)
-		physical, _ := tsoutil.ParseHybridTs(part.PartitionCreatedTimestamp)
-		resp.CreatedUtcTimestamps = append(resp.CreatedUtcTimestamps, uint64(physical))
+		return &milvuspb.ShowPartitionsResponse{
+			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "ShowPartitions failed: "+err.Error()),
+		}, nil
 	}
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("ShowPartitions", metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues("ShowPartitions").Observe(float64(tr.ElapseSpan().Milliseconds()))
 
-	log.Info("done to show partitions", zap.Strings("partitions", resp.GetPartitionNames()))
+	log.Info("done to show partitions", zap.Strings("partitions", t.Rsp.GetPartitionNames()))
 
-	return resp, nil
+	return t.Rsp, nil
 }
 
 // ShowSegments list all segments
