@@ -72,10 +72,13 @@ func (t AlterType) String() string {
 type DataCoordCatalog interface {
 	ListSegments(ctx context.Context) ([]*datapb.SegmentInfo, error)
 	AddSegment(ctx context.Context, segment *datapb.SegmentInfo) error
-	AddFakedSegment(ctx context.Context, segment *datapb.SegmentInfo) error
-	AlterSegments(ctx context.Context, segments []*datapb.SegmentInfo) error
+	// TODO Remove this later, we should update flush segments info for each segment separately, so far we still need transaction
+	AlterSegments(ctx context.Context, newSegments []*datapb.SegmentInfo) error
 	// AlterSegmentsAndAddNewSegment for transaction
 	AlterSegmentsAndAddNewSegment(ctx context.Context, segments []*datapb.SegmentInfo, newSegment *datapb.SegmentInfo) error
+	// TODO Remove this later, only a hack
+	AddFakedSegment(ctx context.Context, segment *datapb.SegmentInfo) error
+	AlterSegment(ctx context.Context, newSegment *datapb.SegmentInfo, oldSegment *datapb.SegmentInfo) error
 	SaveDroppedSegmentsInBatch(ctx context.Context, segments []*datapb.SegmentInfo) error
 	DropSegment(ctx context.Context, segment *datapb.SegmentInfo) error
 	MarkChannelDeleted(ctx context.Context, channel string) error

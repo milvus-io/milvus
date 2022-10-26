@@ -788,7 +788,11 @@ func (s *Server) startFlushLoop(ctx context.Context) {
 				return
 			case segmentID := <-s.flushCh:
 				//Ignore return error
-				_ = s.postFlush(ctx, segmentID)
+				log.Info("flush successfully", zap.Any("segmentID", segmentID))
+				err := s.postFlush(ctx, segmentID)
+				if err != nil {
+					log.Warn("failed to do post flush", zap.Any("segmentID", segmentID), zap.Error(err))
+				}
 			}
 		}
 	}()
