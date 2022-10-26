@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
 
 // dataSyncService manages a lot of flow graphs
@@ -244,6 +245,50 @@ func (dsService *dataSyncService) removeFlowGraphsByDeltaChannels(channels []Cha
 		delete(dsService.deltaChannel2FlowGraph, channel)
 		rateCol.removeTSafeChannel(channel)
 	}
+}
+
+// removeEmptyFlowGraphByChannel would remove delta flow graph if no seal segment exists in meta.
+// *segment shall be added into meta before add flow graph
+// *release sealed segment shall always come after load completed
+func (dsService *dataSyncService) removeEmptyFlowGraphByChannel(collectionID int64, channel string) {
+	log := log.With(
+		zap.Int64("collectionID", collectionID),
+		zap.String("channel", channel),
+	)
+	dsService.mu.Lock()
+	defer dsService.mu.Unlock()
+
+	// convert dml channel name to delta channel name
+	dc, err := funcutil.ConvertChannelName(channel, Params.CommonCfg.RootCoordDml, Params.CommonCfg.RootCoordDelta)
+	if err != nil {
+		log.Warn("removeEmptyFGByDelta failed to convert channel to delta", zap.Error(err))
+		return
+	}
+
+	// check flow graph exists first
+	fg, ok := dsService.deltaChannel2FlowGraph[dc]
+	if !ok {
+		log.Warn("remove delta flowgraph does not exist")
+		return
+	}
+
+	// get all sealed segments associated with this channel
+	segments, err := dsService.metaReplica.getSegmentIDsByVChannel(nil, channel, segmentTypeSealed)
+	if err != nil {
+		log.Warn("removeEmptyFGByDelta failed to check segments with VChannel", zap.Error(err))
+	}
+
+	// check whether there are still not released segments
+	if len(segments) > 0 {
+		return
+	}
+
+	// start to release flow graph
+	log.Info("all segments released, start to remove deltaChannel flowgraph")
+	fg.close()
+	delete(dsService.deltaChannel2FlowGraph, dc)
+	dsService.tSafeReplica.removeTSafe(dc)
+	rateCol.removeTSafeChannel(dc)
 }
 
 // newDataSyncService returns a new dataSyncService
