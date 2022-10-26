@@ -225,6 +225,7 @@ func (ob *HandoffObserver) tryHandoff(ctx context.Context, segment *querypb.Segm
 	log := log.With(zap.Int64("collectionID", segment.GetCollectionID()),
 		zap.Int64("partitionID", segment.GetPartitionID()),
 		zap.Int64("segmentID", segment.GetSegmentID()),
+		zap.Bool("fake", segment.GetIsFake()),
 		zap.Int64s("indexIDs", indexIDs),
 	)
 
@@ -328,8 +329,17 @@ func (ob *HandoffObserver) isAllCompactFromHandoffCompleted(segmentInfo *querypb
 
 func (ob *HandoffObserver) tryRelease(ctx context.Context, event *HandoffEvent) {
 	segment := event.Segment
+
 	if ob.isSealedSegmentLoaded(segment) || !ob.isSegmentExistOnTarget(segment) {
+		// Note: the fake segment will not add into target segments, in order to guarantee
+		// the all parent segments are released we check handoff events list instead of to
+		// check segment from the leader view, or might miss some segments to release.
 		if segment.GetIsFake() && !ob.isAllCompactFromHandoffCompleted(segment) {
+			log.Debug("try to release fake segments fails, due to the dependencies haven't complete handoff.",
+				zap.Int64("segmentID", segment.GetSegmentID()),
+				zap.Bool("faked", segment.GetIsFake()),
+				zap.Int64s("sourceSegments", segment.CompactionFrom),
+			)
 			return
 		}
 
