@@ -39,9 +39,27 @@ class TestActionSecondDeployment(TestDeployBase):
         log.info(("*" * 35) + " teardown " + ("*" * 35))
         log.info("[teardown_method] Start teardown test case %s..." %
                  method.__name__)
+        log.info("show collection info")
+        log.info(f"collection {self.collection_w.name} has entities: {self.collection_w.num_entities}")
+        try:
+            replicas = self.collection_w.get_replicas(enable_traceback=False)
+            replicas_loaded = len(replicas.groups)
+        except Exception as e:
+            log.info("get replicas failed with error {str(e)}")
+            replicas_loaded = 0
+        log.info(f"collection {self.collection_w.name} has {replicas_loaded} replicas")
+        index_infos = [index.to_dict() for index in self.collection_w.indexes]
+        log.info(f"collection {self.collection_w.name} index infos {index_infos}")
         log.info("skip drop collection")
 
     def create_index(self, collection_w, default_index_field, default_index_param):
+        try:
+            replicas = collection_w.get_replicas(enable_traceback=False)
+            replicas_loaded = len(replicas.groups)
+        except Exception as e:
+            log.info("get replicas failed")
+            replicas_loaded = 0
+        log.info(f"before create index, collection {collection_w.name} has {replicas_loaded} replicas")
         index_field_map = dict([(index.field_name, index.index_name) for index in collection_w.indexes])
         index_infos = [index.to_dict() for index in collection_w.indexes]
         log.info(index_infos)
@@ -68,6 +86,7 @@ class TestActionSecondDeployment(TestDeployBase):
         if "BIN" in name:
             is_binary = True
         collection_w, _ = self.collection_wrap.init_collection(name=name)
+        self.collection_w = collection_w
         schema = collection_w.schema
         data_type = [field.dtype for field in schema.fields]
         field_name = [field.name for field in schema.fields]
@@ -88,13 +107,14 @@ class TestActionSecondDeployment(TestDeployBase):
         vector_index_types = binary_vector_index_types + float_vector_index_types
         if len(vector_index_types) > 0:
             vector_index_type = vector_index_types[0]
-
+        # get replicas loaded
         try:
-            replicas, _ = collection_w.get_replicas(enable_traceback=False)
+            replicas = collection_w.get_replicas(enable_traceback=False)
             replicas_loaded = len(replicas.groups)
         except Exception as e:
-            log.info("get replicas failed")
+            log.info(f"get replicas failed with error {str(e)}")
             replicas_loaded = 0
+        log.info(f"collection {name} has {replicas_loaded} replicas")
         # params for search and query
         if is_binary:
             _, vectors_to_search = cf.gen_binary_vectors(
@@ -107,8 +127,16 @@ class TestActionSecondDeployment(TestDeployBase):
 
         # load if not loaded
         if replicas_loaded == 0:
-            default_index_param = gen_index_param(vector_index_type)
-            self.create_index(collection_w, default_index_field, default_index_param)
+            # create index for vector if not exist before load
+            is_vector_indexed = False
+            index_infos = [index.to_dict() for index in collection_w.indexes]
+            for index_info in index_infos:
+                if "metric_type" in index_info.keys():
+                    is_vector_indexed = True
+                    break
+            if is_vector_indexed is False:
+                default_index_param = gen_index_param(vector_index_type)
+                self.create_index(collection_w, default_index_field, default_index_param)
             collection_w.load()
 
         # search and query
@@ -199,10 +227,6 @@ class TestActionSecondDeployment(TestDeployBase):
                                              "limit": default_limit})
             collection_w.query(default_term_expr, output_fields=[ct.default_int64_field_name],
                                check_task=CheckTasks.check_query_not_empty)
-
-        # create index
-        default_index_param = gen_index_param(vector_index_type)
-        self.create_index(collection_w, default_index_field, default_index_param)
 
         # search and query
         collection_w.search(vectors_to_search[:default_nq], default_search_field,

@@ -10,7 +10,7 @@ def task_1(data_size, host):
     """
     task_1:
         before upgrade: create collection and insert data with flush, load and search
-        after upgrade: get collection, load, search, insert data with flush, create index, load, and search
+        after upgrade: get collection, load, search, insert data with flush, release, create index, load, and search
     """
     prefix = "task_1_"
     connections.connect(host=host, port=19530, timeout=60)
@@ -23,7 +23,7 @@ def task_2(data_size, host):
     """
     task_2:
         before upgrade: create collection, insert data and create index, load , search, and insert data without flush
-        after upgrade: get collection, load, search, insert data, create index, load, and search
+        after upgrade: get collection, load, search, insert data, release, create index, load, and search
     """
     prefix = "task_2_"
     connections.connect(host=host, port=19530, timeout=60)

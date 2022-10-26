@@ -5,14 +5,15 @@ from utils import *
 def task_1(data_size, host):
     """
     task_1:
-        before reinstall: create collection and insert data, load and search
-        after reinstall: get collection, load, search, create index, load, and search
+        before reinstall: create collection, insert data, create index and insert data, load and search
+        after reinstall: get collection, load, search, release, insert data, create index, load, and search
     """
     prefix = "task_1_"
     connections.connect(host=host, port=19530, timeout=60)
     get_collections(prefix)
     load_and_search(prefix)
-    create_index(prefix)
+    release_collection(prefix)
+    create_collections_and_insert_data(prefix,data_size)
     load_and_search(prefix)
 
 
@@ -20,13 +21,14 @@ def task_2(data_zise, host):
     """
     task_2:
         before reinstall: create collection, insert data and create index, load and search
-        after reinstall: get collection, load, search, insert data, create index, load, and search
+        after reinstall: get collection, load, search, insert data, release, create index, load, and search
     """
     prefix = "task_2_"
     connections.connect(host=host, port=19530, timeout=60)
     get_collections(prefix)
     load_and_search(prefix)
     create_collections_and_insert_data(prefix, data_zise)
+    release_collection(prefix)
     create_index(prefix)
     load_and_search(prefix)
 
