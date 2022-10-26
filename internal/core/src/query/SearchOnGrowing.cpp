@@ -9,6 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include <cstddef>
 #include "common/BitsetView.h"
 #include "common/QueryInfo.h"
 #include "SearchOnGrowing.h"
@@ -86,7 +87,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 SearchResult& results) {
     auto& schema = segment.get_schema();
     auto& record = segment.get_insert_record();
-    auto active_count = segment.get_active_count(timestamp);
+    auto active_count = std::min(int64_t(bitset.size()), segment.get_active_count(timestamp));
 
     // step 1.1: get meta
     // step 1.2: get which vector field to search
