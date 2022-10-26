@@ -91,6 +91,23 @@ func (kc *Catalog) ListSegments(ctx context.Context) ([]*datapb.SegmentInfo, err
 	return segments, nil
 }
 
+func (kc *Catalog) AddFakedSegment(ctx context.Context, segment *datapb.SegmentInfo) error {
+	if !segment.IsFake {
+		return nil
+	}
+	// The fake segment will not be saved into meta, it only needs process handoff case
+	kvs := make(map[string]string)
+	flushSegKey := buildFlushedSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
+	clonedSegment := proto.Clone(segment).(*datapb.SegmentInfo)
+	segBytes, err := marshalSegmentInfo(clonedSegment)
+	if err != nil {
+		return err
+	}
+
+	kvs[flushSegKey] = segBytes
+	return kc.Txn.MultiSave(kvs)
+}
+
 func (kc *Catalog) AddSegment(ctx context.Context, segment *datapb.SegmentInfo) error {
 	kvs, err := buildSegmentAndBinlogsKvs(segment)
 	if err != nil {
@@ -100,7 +117,12 @@ func (kc *Catalog) AddSegment(ctx context.Context, segment *datapb.SegmentInfo) 
 	// save handoff req if segment is flushed
 	if segment.State == commonpb.SegmentState_Flushed {
 		flushSegKey := buildFlushedSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
-		kvs[flushSegKey] = strconv.FormatInt(segment.GetID(), 10)
+		newSeg := &datapb.SegmentInfo{ID: segment.GetID()}
+		segBytes, err := marshalSegmentInfo(newSeg)
+		if err != nil {
+			return err
+		}
+		kvs[flushSegKey] = segBytes
 	}
 
 	return kc.Txn.MultiSave(kvs)
@@ -122,7 +144,12 @@ func (kc *Catalog) AlterSegments(ctx context.Context, modSegments []*datapb.Segm
 		// save handoff req if segment is flushed
 		if segment.State == commonpb.SegmentState_Flushed {
 			flushSegKey := buildFlushedSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
-			kvs[flushSegKey] = strconv.FormatInt(segment.GetID(), 10)
+			newSeg := &datapb.SegmentInfo{ID: segment.GetID()}
+			segBytes, err := marshalSegmentInfo(newSeg)
+			if err != nil {
+				return err
+			}
+			kvs[flushSegKey] = segBytes
 		}
 	}
 
@@ -487,13 +514,22 @@ func CloneSegmentWithExcludeBinlogs(segment *datapb.SegmentInfo) (*datapb.Segmen
 	return clonedSegment, binlogs, deltalogs, statlogs
 }
 
-func buildSegmentKv(segment *datapb.SegmentInfo) (string, string, error) {
+func marshalSegmentInfo(segment *datapb.SegmentInfo) (string, error) {
 	segBytes, err := proto.Marshal(segment)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to marshal segment: %d, err: %w", segment.ID, err)
+		return "", fmt.Errorf("failed to marshal segment: %d, err: %w", segment.ID, err)
+	}
+
+	return string(segBytes), nil
+}
+
+func buildSegmentKv(segment *datapb.SegmentInfo) (string, string, error) {
+	segBytes, err := marshalSegmentInfo(segment)
+	if err != nil {
+		return "", "", err
 	}
 	key := buildSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
-	return key, string(segBytes), nil
+	return key, segBytes, nil
 }
 
 // buildSegmentPath common logic mapping segment info to corresponding key in kv store

@@ -72,6 +72,7 @@ func (t AlterType) String() string {
 type DataCoordCatalog interface {
 	ListSegments(ctx context.Context) ([]*datapb.SegmentInfo, error)
 	AddSegment(ctx context.Context, segment *datapb.SegmentInfo) error
+	AddFakedSegment(ctx context.Context, segment *datapb.SegmentInfo) error
 	AlterSegments(ctx context.Context, segments []*datapb.SegmentInfo) error
 	// AlterSegmentsAndAddNewSegment for transaction
 	AlterSegmentsAndAddNewSegment(ctx context.Context, segments []*datapb.SegmentInfo, newSegment *datapb.SegmentInfo) error

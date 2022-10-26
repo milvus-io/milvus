@@ -261,7 +261,18 @@ func (c *compactionPlanHandler) handleMergeCompactionResult(plan *datapb.Compact
 			return fmt.Errorf("fail to alter metastore after compaction, err=%w", err)
 		}
 	} else {
-		log.Warn("compaction produced an empty segment")
+		log.Warn("compaction produced an empty segment", zap.Int64("segmentID", newSegment.GetID()))
+		fakedSegment := &datapb.SegmentInfo{
+			ID:                  newSegment.GetID(),
+			CollectionID:        newSegment.GetCollectionID(),
+			PartitionID:         newSegment.GetPartitionID(),
+			CompactionFrom:      newSegment.GetCompactionFrom(),
+			CreatedByCompaction: true,
+			IsFake:              true,
+		}
+		if err := c.meta.AddFakedSegment(fakedSegment); err != nil {
+			return fmt.Errorf("fail to save fake segment after compaction, err=%w", err)
+		}
 	}
 
 	var nodeID = c.plans[plan.GetPlanID()].dataNodeID
