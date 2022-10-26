@@ -45,7 +45,8 @@ import (
 )
 
 var (
-	errCancel = fmt.Errorf("canceled")
+	errCancel      = fmt.Errorf("canceled")
+	diskUsageRatio = 4.0
 )
 
 type Blob = storage.Blob
@@ -316,7 +317,7 @@ func (it *indexBuildTask) BuildDiskAnnIndex(ctx context.Context) error {
 		return errors.New("index node get local used size failed")
 	}
 
-	usedLocalSizeWhenBuild := int64(float64(it.fieldData.GetMemorySize())*2.6) + localUsedSize
+	usedLocalSizeWhenBuild := int64(float64(it.fieldData.GetMemorySize())*diskUsageRatio) + localUsedSize
 	maxUsedLocalSize := int64(float64(Params.IndexNodeCfg.DiskCapacityLimit) * Params.IndexNodeCfg.MaxDiskUsagePercentage)
 
 	if usedLocalSizeWhenBuild > maxUsedLocalSize {
