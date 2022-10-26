@@ -72,12 +72,20 @@ func (broker *CoordinatorBroker) GetCollectionSchema(ctx context.Context, collec
 
 	req := &milvuspb.DescribeCollectionRequest{
 		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithMsgType(commonpb.MsgType_GetDistribution),
+			commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection),
 		),
 		CollectionID: collectionID,
 	}
 	resp, err := broker.rootCoord.DescribeCollection(ctx, req)
-	return resp.GetSchema(), err
+	if err != nil {
+		return nil, err
+	}
+	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+		err = errors.New(resp.GetStatus().GetReason())
+		log.Error("failed to get collection schema", zap.Int64("collectionID", collectionID), zap.Error(err))
+		return nil, err
+	}
+	return resp.GetSchema(), nil
 }
 
 func (broker *CoordinatorBroker) GetPartitions(ctx context.Context, collectionID UniqueID) ([]UniqueID, error) {
