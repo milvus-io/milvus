@@ -27,8 +27,8 @@
 #include <aws/s3/model/GetObjectRequest.h>
 #include <aws/s3/model/PutObjectRequest.h>
 
-#include "MinioChunkManager.h"
-
+#include "storage/MinioChunkManager.h"
+#include "exceptions/EasyAssert.h"
 #include "log/Log.h"
 
 #define THROWS3ERROR(FUNCTION)                                                                         \
@@ -94,6 +94,9 @@ MinioChunkManager::MinioChunkManager(const StorageConfig& storage_config)
                            << " access_key:" << provider->GetAWSCredentials().GetAWSSecretKey()
                            << " token:" << provider->GetAWSCredentials().GetSessionToken() << "}";
     } else {
+        AssertInfo(!storage_config.access_key_id.empty(), "if not use iam, access key should not be empty");
+        AssertInfo(!storage_config.access_key_value.empty(), "if not use iam, access value should not be empty");
+
         client_ = std::make_shared<Aws::S3::S3Client>(
             Aws::Auth::AWSCredentials(ConvertToAwsString(storage_config.access_key_id),
                                       ConvertToAwsString(storage_config.access_key_value)),

@@ -31,6 +31,8 @@ NewLoadIndexInfo(CLoadIndexInfo* c_load_index_info, CStorageConfig c_storage_con
         storage_config.remote_root_path = std::string(c_storage_config.remote_root_path);
         storage_config.storage_type = std::string(c_storage_config.storage_type);
         storage_config.iam_endpoint = std::string(c_storage_config.iam_endpoint);
+        storage_config.useSSL = c_storage_config.useSSL;
+        storage_config.useIAM = c_storage_config.useIAM;
 
         *c_load_index_info = load_index_info.release();
         auto status = CStatus();
