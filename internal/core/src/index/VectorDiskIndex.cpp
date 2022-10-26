@@ -27,6 +27,9 @@ namespace milvus::index {
 
 #ifdef BUILD_DISK_ANN
 
+#define kSearchListMaxValue1 200    // used if tok <= 20
+#define kSearchListMaxValue2 65535  // used for topk > 20
+
 template <typename T>
 VectorDiskAnnIndex<T>::VectorDiskAnnIndex(const IndexType& index_type,
                                           const MetricType& metric_type,
@@ -110,8 +113,9 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset, const SearchInfo& search_
     query_config.search_list_size = search_list_size.value();
 
     AssertInfo(query_config.search_list_size > topk, "search_list should be greater than topk");
-    AssertInfo(query_config.search_list_size < std::min(uint32_t(topk * 10), uint32_t(65535)),
-               "search_list should less than min(topk*10, 65535)");
+    AssertInfo(query_config.search_list_size <= std::max(uint32_t(topk * 10), uint32_t(kSearchListMaxValue1)) &&
+                   query_config.search_list_size <= uint32_t(kSearchListMaxValue2),
+               "search_list should be less than max(topk*10, 200) and less than 65535");
 
     // set beamwidth
     query_config.beamwidth = search_beamwidth_;
