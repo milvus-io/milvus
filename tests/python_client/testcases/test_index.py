@@ -228,6 +228,19 @@ class TestIndexOperation(TestcaseBase):
         collection_w.create_index(ct.default_int64_field_name, {})
 
     @pytest.mark.tags(CaseLabel.L1)
+    def test_index_create_on_scalar_field(self):
+        """
+        target: Test create index on scalar field
+        method: create index on scalar field and load
+        expected: raise exception
+        """
+        collection_w = self.init_collection_general(prefix, True, is_index=True)[0]
+        collection_w.create_index(ct.default_int64_field_name, {})
+        collection_w.load(check_task=CheckTasks.err_res,
+                          check_items={ct.err_code: 1, ct.err_msg: "there is no vector index on collection, "
+                                                                   "please create index firstly"})
+
+    @pytest.mark.tags(CaseLabel.L1)
     def test_index_collection_empty(self):
         """
         target: test index with empty collection
