@@ -41,7 +41,7 @@ spec:
     - mountPath: /ci-logs
       name: ci-logs  
   - name: pytest
-    image: milvusdb/pytest:20220926-4afb909
+    image: milvusdb/pytest:20221024-56b3482
     resources:
       limits:
         cpu: "6"
