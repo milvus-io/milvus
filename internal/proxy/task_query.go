@@ -255,6 +255,8 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	t.request.OutputFields = append(t.request.OutputFields, common.TimeStampFieldName)
+	outputFieldIDs = append(outputFieldIDs, common.TimeStampField)
 	t.RetrieveRequest.OutputFieldsId = outputFieldIDs
 	plan.OutputFieldIds = outputFieldIDs
 	log.Ctx(ctx).Debug("translate output fields to field ids", zap.Any("OutputFieldsID", t.OutputFieldsId),

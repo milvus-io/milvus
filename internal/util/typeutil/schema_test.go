@@ -697,3 +697,36 @@ func TestComparePk(t *testing.T) {
 	less = ComparePKInSlice(strPks, 2, 1)
 	assert.False(t, less)
 }
+
+func TestSwapTS(t *testing.T) {
+	timeStamp := []Timestamp{1, 2, 3}
+	SwapTS(timeStamp, 0, 1)
+	assert.Equal(t, []Timestamp{2, 1, 3}, timeStamp)
+	SwapTS(timeStamp, 0, 1)
+	assert.Equal(t, []Timestamp{1, 2, 3}, timeStamp)
+	SwapTS(timeStamp, 0, 2)
+	assert.Equal(t, []Timestamp{3, 2, 1}, timeStamp)
+	SwapTS(timeStamp, 0, 2)
+	assert.Equal(t, []Timestamp{1, 2, 3}, timeStamp)
+	SwapTS(timeStamp, 1, 2)
+	assert.Equal(t, []Timestamp{1, 3, 2}, timeStamp)
+	SwapTS(timeStamp, 1, 2)
+	assert.Equal(t, []Timestamp{1, 2, 3}, timeStamp)
+}
+
+func TestCompareTS(t *testing.T) {
+	timeStamp := []Timestamp{1, 2, 3}
+	less := CompareTimeStampInSlice(timeStamp, 0, 1)
+	assert.False(t, less)
+	less = CompareTimeStampInSlice(timeStamp, 0, 2)
+	assert.False(t, less)
+	less = CompareTimeStampInSlice(timeStamp, 1, 2)
+	assert.False(t, less)
+
+	less = CompareTimeStampInSlice(timeStamp, 1, 0)
+	assert.True(t, less)
+	less = CompareTimeStampInSlice(timeStamp, 2, 0)
+	assert.True(t, less)
+	less = CompareTimeStampInSlice(timeStamp, 2, 1)
+	assert.True(t, less)
+}

@@ -683,6 +683,16 @@ func ComparePKInSlice(data *schemapb.IDs, i, j int) bool {
 	return false
 }
 
+// SwapTS swaps i-th TS with j-th TS
+func SwapTS(timeStamp []Timestamp, i, j int) {
+	timeStamp[i], timeStamp[j] = timeStamp[j], timeStamp[i]
+}
+
+// CompareTimeStampInSlice returns true if i-th TimeStamp > j-th TimeStamp
+func CompareTimeStampInSlice(timeStamp []Timestamp, i, j int) bool {
+	return timeStamp[i] > timeStamp[j]
+}
+
 // ComparePK returns if i-th PK of dataA > j-th PK of dataB
 func ComparePK(pkA, pkB interface{}) bool {
 	switch pkA.(type) {
