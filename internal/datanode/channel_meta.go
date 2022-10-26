@@ -516,6 +516,8 @@ func (c *ChannelMeta) mergeFlushedSegments(seg *Segment, planID UniqueID, compac
 		s := c.segments[ID]
 		s.compactedTo = seg.segmentID
 		s.setType(datapb.SegmentType_Compacted)
+		// release bloom filter
+		s.pkStat.pkFilter = nil
 	}
 	c.segMu.Unlock()
 
