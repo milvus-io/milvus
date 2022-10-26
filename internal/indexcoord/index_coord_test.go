@@ -27,6 +27,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang/protobuf/proto"
+
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/common"
@@ -373,7 +375,33 @@ func testIndexCoord(t *testing.T) {
 
 	t.Run("FlushedSegmentWatcher", func(t *testing.T) {
 		segmentID := segID + 1
-		err = ic.etcdKV.Save(path.Join(util.FlushedSegmentPrefix, strconv.FormatInt(collID, 10), strconv.FormatInt(partID, 10), strconv.FormatInt(segmentID, 10)), string(strconv.FormatInt(segmentID, 10)))
+
+		segment := &datapb.SegmentInfo{ID: segID}
+		segBytes, err := proto.Marshal(segment)
+		if err != nil {
+			panic(err)
+		}
+
+		err = ic.etcdKV.Save(path.Join(util.FlushedSegmentPrefix, strconv.FormatInt(collID, 10), strconv.FormatInt(partID, 10), strconv.FormatInt(segmentID, 10)), string(segBytes))
+		assert.NoError(t, err)
+
+		req := &indexpb.GetSegmentIndexStateRequest{
+			CollectionID: collID,
+			IndexName:    indexName,
+			SegmentIDs:   []UniqueID{segmentID},
+		}
+		resp, err := ic.GetSegmentIndexState(ctx, req)
+		assert.NoError(t, err)
+		for len(resp.States) != 1 || resp.States[0].State != commonpb.IndexState_Finished {
+			resp, err = ic.GetSegmentIndexState(ctx, req)
+			assert.NoError(t, err)
+			time.Sleep(time.Second)
+		}
+	})
+
+	t.Run("FlushedSegmentWatcher backward compatibility testing", func(t *testing.T) {
+		segmentID := segID + 2
+		err = ic.etcdKV.Save(path.Join(util.FlushedSegmentPrefix, strconv.FormatInt(collID, 10), strconv.FormatInt(partID, 10), strconv.FormatInt(segmentID, 10)), strconv.FormatInt(segmentID, 10))
 		assert.NoError(t, err)
 
 		req := &indexpb.GetSegmentIndexStateRequest{

@@ -277,6 +277,16 @@ func TestCompactionPlanHandler_handleMergeCompactionResult(t *testing.T) {
 
 	plans := map[int64]*compactionTask{1: task}
 
+	errMeta := &meta{
+		catalog: &datacoord.Catalog{Txn: &saveFailKV{TxnKV: memkv.NewMemoryKV()}},
+		segments: &SegmentsInfo{
+			map[int64]*SegmentInfo{
+				seg1.ID: {SegmentInfo: seg1},
+				seg2.ID: {SegmentInfo: seg2},
+			},
+		},
+	}
+
 	meta := &meta{
 		catalog: &datacoord.Catalog{Txn: memkv.NewMemoryKV()},
 		segments: &SegmentsInfo{
@@ -296,10 +306,28 @@ func TestCompactionPlanHandler_handleMergeCompactionResult(t *testing.T) {
 		},
 	}
 
+	c2 := &compactionPlanHandler{
+		plans:    plans,
+		sessions: sessions,
+		meta:     errMeta,
+		segRefer: &SegmentReferenceManager{
+			segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{},
+		},
+	}
+
 	compactionResult := &datapb.CompactionResult{
 		PlanID:              1,
 		SegmentID:           3,
 		NumOfRows:           15,
+		InsertLogs:          []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log301")},
+		Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log302")},
+		Deltalogs:           []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log303")},
+	}
+
+	compactionResult2 := &datapb.CompactionResult{
+		PlanID:              1,
+		SegmentID:           3,
+		NumOfRows:           0,
 		InsertLogs:          []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log301")},
 		Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log302")},
 		Deltalogs:           []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log303")},
@@ -315,6 +343,12 @@ func TestCompactionPlanHandler_handleMergeCompactionResult(t *testing.T) {
 
 	err = c.handleMergeCompactionResult(plan, compactionResult)
 	assert.NoError(t, err)
+
+	err = c.handleMergeCompactionResult(plan, compactionResult2)
+	assert.NoError(t, err)
+
+	err = c2.handleMergeCompactionResult(plan, compactionResult2)
+	assert.Error(t, err)
 
 	has, err = c.meta.HasSegments([]UniqueID{1, 2, 3})
 	require.NoError(t, err)

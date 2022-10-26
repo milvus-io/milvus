@@ -28,6 +28,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/golang/protobuf/proto"
+
 	"github.com/milvus-io/milvus/internal/util/metautil"
 
 	"github.com/milvus-io/milvus/internal/util/errorutil"
@@ -66,7 +68,7 @@ var _ types.IndexCoord = (*IndexCoord)(nil)
 
 var Params paramtable.ComponentParam
 
-// IndexCoord is a component responsible for scheduling index construction tasks and maintaining index status.
+// IndexCoord is a component responsible for scheduling index construction segments and maintaining index status.
 // IndexCoord accepts requests from rootcoord to build indexes, delete indexes, and query index information.
 // IndexCoord is responsible for assigning IndexBuildID to the request to build the index, and forwarding the
 // request to build the index to IndexNode. IndexCoord records the status of the index, and the index file.
@@ -1233,14 +1235,21 @@ func (i *IndexCoord) watchFlushedSegmentLoop() {
 			for _, event := range events {
 				switch event.Type {
 				case mvccpb.PUT:
-					segmentID, err := strconv.ParseInt(string(event.Kv.Value), 10, 64)
-					if err != nil {
-						log.Error("IndexCoord watch flushed segment, but parse segmentID fail",
-							zap.String("event.Value", string(event.Kv.Value)), zap.Error(err))
-						continue
+					segmentInfo := &datapb.SegmentInfo{}
+					if err := proto.Unmarshal(event.Kv.Value, segmentInfo); err != nil {
+						// just for  backward compatibility
+						segID, err := strconv.ParseInt(string(event.Kv.Value), 10, 64)
+						if err != nil {
+							log.Error("watchFlushedSegmentLoop unmarshal fail", zap.String("value", string(event.Kv.Value)), zap.Error(err))
+							continue
+						}
+						segmentInfo.ID = segID
 					}
-					log.Debug("watchFlushedSegmentLoop watch event", zap.Int64("segID", segmentID))
-					i.flushedSegmentWatcher.enqueueInternalTask(segmentID)
+
+					log.Debug("watchFlushedSegmentLoop watch event",
+						zap.Int64("segID", segmentInfo.GetID()),
+						zap.Any("isFake", segmentInfo.GetIsFake()))
+					i.flushedSegmentWatcher.enqueueInternalTask(segmentInfo)
 				case mvccpb.DELETE:
 					log.Debug("the segment info has been deleted", zap.String("key", string(event.Kv.Key)))
 				}

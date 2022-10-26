@@ -25,6 +25,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/golang/protobuf/proto"
+
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
@@ -96,12 +98,18 @@ func (fsw *flushedSegmentWatcher) reloadFromKV() error {
 		return err
 	}
 	for _, value := range values {
-		segID, err := strconv.ParseInt(value, 10, 64)
-		if err != nil {
-			log.Ctx(fsw.ctx).Error("flushSegmentWatcher parse segmentID fail", zap.String("value", value), zap.Error(err))
-			return err
+		segmentInfo := &datapb.SegmentInfo{}
+		if err := proto.Unmarshal([]byte(value), segmentInfo); err != nil {
+			// just for backward compatibility
+			segID, err := strconv.ParseInt(value, 10, 64)
+			if err != nil {
+				log.Ctx(fsw.ctx).Error("flushSegmentWatcher unmarshal fail", zap.String("value", value), zap.Error(err))
+				return err
+			}
+			segmentInfo.ID = segID
 		}
-		fsw.enqueueInternalTask(segID)
+
+		fsw.enqueueInternalTask(segmentInfo)
 	}
 	fsw.etcdRevision = version
 	log.Ctx(fsw.ctx).Info("flushSegmentWatcher reloadFromKV success", zap.Int64("etcdRevision", version))
@@ -118,14 +126,21 @@ func (fsw *flushedSegmentWatcher) Stop() {
 	fsw.wg.Wait()
 }
 
-func (fsw *flushedSegmentWatcher) enqueueInternalTask(segmentID UniqueID) {
+func (fsw *flushedSegmentWatcher) enqueueInternalTask(segment *datapb.SegmentInfo) {
 	defer fsw.internalNotifyFunc()
 	fsw.internalTaskMutex.Lock()
 	defer fsw.internalTaskMutex.Unlock()
-	if _, ok := fsw.internalTasks[segmentID]; !ok {
-		fsw.internalTasks[segmentID] = &internalTask{
-			state:       indexTaskPrepare,
-			segmentInfo: nil,
+	if _, ok := fsw.internalTasks[segment.GetID()]; !ok {
+		if segment.GetIsFake() {
+			fsw.internalTasks[segment.GetID()] = &internalTask{
+				state:       indexTaskPrepare,
+				segmentInfo: segment,
+			}
+		} else {
+			fsw.internalTasks[segment.GetID()] = &internalTask{
+				state:       indexTaskPrepare,
+				segmentInfo: nil,
+			}
 		}
 	}
 }
@@ -227,6 +242,13 @@ func (fsw *flushedSegmentWatcher) internalProcess(segID UniqueID) {
 
 	switch t.state {
 	case indexTaskPrepare:
+		if t.segmentInfo.GetIsFake() {
+			fsw.handoff.enqueue(t.segmentInfo)
+			fsw.updateInternalTaskState(segID, indexTaskDone)
+			fsw.internalNotifyFunc()
+			return
+		}
+
 		if err := fsw.prepare(segID); err != nil {
 			log.Ctx(fsw.ctx).RatedWarn(10, "flushedSegmentWatcher prepare internal task fail", zap.Int64("segID", segID), zap.Error(err))
 			return
@@ -299,9 +321,9 @@ func (fsw *flushedSegmentWatcher) constructTask(t *internalTask) error {
 			fsw.builder.enqueue(buildID)
 		}
 	}
-	fsw.handoff.enqueue(t.segmentInfo.ID)
+	fsw.handoff.enqueue(t.segmentInfo)
 	log.Ctx(fsw.ctx).Debug("flushedSegmentWatcher construct task success", zap.Int64("segID", t.segmentInfo.ID),
-		zap.Int("tasks num", len(fieldIndexes)))
+		zap.Int("segments num", len(fieldIndexes)))
 	return nil
 }
 
