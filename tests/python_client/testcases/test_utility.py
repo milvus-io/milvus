@@ -1672,13 +1672,13 @@ class TestUtilityAdvanced(TestcaseBase):
         # init a collection
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
-        collection_w.create_index(default_field_name, default_index_params)
         ms = MilvusSys()
         nb = 3000
         df = cf.gen_default_dataframe_data(nb)
         collection_w.insert(df)
         # get sealed segments
         collection_w.num_entities
+        collection_w.create_index(default_field_name, default_index_params)
         # get growing segments
         collection_w.insert(df)
         collection_w.load()
