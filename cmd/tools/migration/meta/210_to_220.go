@@ -230,6 +230,7 @@ func combineToSegmentIndexesMeta220(segmentIndexes SegmentIndexesMeta210, indexB
 				CreateTime:    record.GetCreateTime(),
 				IndexFileKeys: fileKeys,
 				IndexSize:     buildMeta.GetSerializeSize(),
+				WriteHandoff:  buildMeta.GetState() == commonpb.IndexState_Finished,
 			}
 			segmentIndexModels.AddRecord(segID, indexID, segmentIndexModel)
 		}

@@ -222,6 +222,7 @@ func (cit *CreateIndexTask) Execute(ctx context.Context) error {
 	for _, buildID := range buildIDs {
 		cit.indexCoordClient.indexBuilder.enqueue(buildID)
 	}
+	// If the handoff is not notified here, the segment that has been loaded will not be able to replace the index
 	for _, segment := range segments {
 		cit.indexCoordClient.handoff.enqueue(segment)
 	}
