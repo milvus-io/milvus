@@ -18,6 +18,7 @@ package querynode
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -46,6 +47,9 @@ func searchOnSegments(ctx context.Context, replica ReplicaInterface, segType seg
 			defer wg.Done()
 			seg, err := replica.getSegmentByID(segID, segType)
 			if err != nil {
+				if errors.Is(err, ErrSegmentNotFound) {
+					return
+				}
 				log.Error(err.Error()) // should not happen but still ignore it since the result is still correct
 				return
 			}

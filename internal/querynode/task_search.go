@@ -102,8 +102,6 @@ func (s *searchTask) searchOnStreaming() error {
 		return err
 	}
 
-	s.QS.collection.RLock() // locks the collectionPtr
-	defer s.QS.collection.RUnlock()
 	if _, released := s.QS.collection.getReleaseTime(); released {
 		log.Ctx(ctx).Debug("collection release before search", zap.Int64("msgID", s.ID()),
 			zap.Int64("collectionID", s.CollectionID))
@@ -139,8 +137,6 @@ func (s *searchTask) searchOnHistorical() error {
 		return err
 	}
 
-	s.QS.collection.RLock() // locks the collectionPtr
-	defer s.QS.collection.RUnlock()
 	if _, released := s.QS.collection.getReleaseTime(); released {
 		log.Ctx(ctx).Warn("collection release before search", zap.Int64("msgID", s.ID()),
 			zap.Int64("collectionID", s.CollectionID))

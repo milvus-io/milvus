@@ -82,17 +82,6 @@ func (dNode *deleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		msg.SetTraceCtx(ctx)
 	}
 
-	collection, err := dNode.metaReplica.getCollectionByID(dNode.collectionID)
-	if err != nil {
-		log.Warn("failed to get collection",
-			zap.Int64("collectionID", dNode.collectionID),
-			zap.String("channel", dNode.channel),
-		)
-		return []Msg{}
-	}
-	collection.RLock()
-	defer collection.RUnlock()
-
 	// 1. filter segment by bloom filter
 	for i, delMsg := range dMsg.deleteMessages {
 		traceID, _, _ := trace.InfoFromSpan(spans[i])

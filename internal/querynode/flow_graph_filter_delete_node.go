@@ -81,8 +81,6 @@ func (fddNode *filterDeleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		// QueryNode should add collection before start flow graph
 		panic(fmt.Errorf("%s getCollectionByID failed, collectionID = %d, channel = %s", fddNode.Name(), fddNode.collectionID, fddNode.channel))
 	}
-	collection.RLock()
-	defer collection.RUnlock()
 
 	for _, msg := range msgStreamMsg.TsMessages() {
 		switch msg.Type() {

@@ -188,9 +188,7 @@ func TestFlowGraphDeleteNode_operate(t *testing.T) {
 			},
 		}
 		msg := []flowgraph.Msg{&dMsg}
-		assert.Panics(t, func() {
-			deleteNode.Operate(msg)
-		})
+		assert.Panics(t, func() { deleteNode.Operate(msg) })
 	})
 
 	t.Run("test partition not exist", func(t *testing.T) {
@@ -215,9 +213,7 @@ func TestFlowGraphDeleteNode_operate(t *testing.T) {
 			},
 		}
 		msg := []flowgraph.Msg{&dMsg}
-		assert.Panics(t, func() {
-			deleteNode.Operate(msg)
-		})
+		assert.NotPanics(t, func() { deleteNode.Operate(msg) })
 	})
 
 	t.Run("test invalid input length", func(t *testing.T) {
