@@ -228,20 +228,6 @@ func (m *meta) AddSegment(segment *SegmentInfo) error {
 	return nil
 }
 
-// AddFakedSegment persist a faked segment into meta
-func (m *meta) AddFakedSegment(fakedSegment *datapb.SegmentInfo) error {
-	m.Lock()
-	defer m.Unlock()
-	if err := m.catalog.AddFakedSegment(m.ctx, fakedSegment); err != nil {
-		log.Error("adding faked segment failed",
-			zap.Any("segment", fakedSegment),
-			zap.Error(err))
-		return err
-	}
-	log.Debug("add faked segment finished", zap.Any("segment", fakedSegment))
-	return nil
-}
-
 // DropSegment remove segment with provided id, etcd persistence also removed
 func (m *meta) DropSegment(segmentID UniqueID) error {
 	log.Info("meta update: dropping segment",

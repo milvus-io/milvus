@@ -359,8 +359,6 @@ func TestMeta_Basic(t *testing.T) {
 		assert.NotNil(t, info1_1)
 		assert.Equal(t, false, info1_1.GetIsImporting())
 
-		err = meta.AddFakedSegment(segInfo1_1.SegmentInfo)
-		assert.NoError(t, err)
 	})
 
 	t.Run("Test segment with kv fails", func(t *testing.T) {
@@ -388,8 +386,6 @@ func TestMeta_Basic(t *testing.T) {
 
 		meta, err = newMeta(context.TODO(), fkv, "")
 		assert.Nil(t, err)
-		err = meta.AddFakedSegment(&datapb.SegmentInfo{IsFake: true})
-		assert.NotNil(t, err)
 	})
 
 	t.Run("Test GetCount", func(t *testing.T) {

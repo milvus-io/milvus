@@ -91,23 +91,6 @@ func (kc *Catalog) ListSegments(ctx context.Context) ([]*datapb.SegmentInfo, err
 	return segments, nil
 }
 
-func (kc *Catalog) AddFakedSegment(ctx context.Context, segment *datapb.SegmentInfo) error {
-	if !segment.IsFake {
-		return nil
-	}
-	// The fake segment will not be saved into meta, it only needs process handoff case
-	kvs := make(map[string]string)
-	flushSegKey := buildFlushedSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
-	clonedSegment := proto.Clone(segment).(*datapb.SegmentInfo)
-	segBytes, err := marshalSegmentInfo(clonedSegment)
-	if err != nil {
-		return err
-	}
-
-	kvs[flushSegKey] = segBytes
-	return kc.Txn.MultiSave(kvs)
-}
-
 func (kc *Catalog) AddSegment(ctx context.Context, segment *datapb.SegmentInfo) error {
 	kvs, err := buildSegmentAndBinlogsKvs(segment)
 	if err != nil {
@@ -209,14 +192,23 @@ func (kc *Catalog) AlterSegmentsAndAddNewSegment(ctx context.Context, segments [
 	}
 
 	if newSegment != nil {
-		segmentKvs, err := buildSegmentAndBinlogsKvs(newSegment)
-		if err != nil {
-			return err
+		if newSegment.GetNumOfRows() > 0 {
+			segmentKvs, err := buildSegmentAndBinlogsKvs(newSegment)
+			if err != nil {
+				return err
+			}
+			maps.Copy(kvs, segmentKvs)
+		} else {
+			// should be a faked segment, we create flush path directly here
+			flushSegKey := buildFlushedSegmentPath(newSegment.GetCollectionID(), newSegment.GetPartitionID(), newSegment.GetID())
+			clonedSegment := proto.Clone(newSegment).(*datapb.SegmentInfo)
+			segBytes, err := marshalSegmentInfo(clonedSegment)
+			if err != nil {
+				return err
+			}
+			kvs[flushSegKey] = segBytes
 		}
-
-		maps.Copy(kvs, segmentKvs)
 	}
-
 	return kc.Txn.MultiSave(kvs)
 }
 

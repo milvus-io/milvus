@@ -2693,7 +2693,7 @@ func TestPostFlush(t *testing.T) {
 		defer closeTestServer(t, svr)
 
 		err := svr.postFlush(context.Background(), 1)
-		assert.EqualValues(t, errors.New("segment not found"), err)
+		assert.EqualValues(t, errors.New("segment not found, might be a faked segemnt, ignore post flush"), err)
 	})
 
 	t.Run("success post flush", func(t *testing.T) {
