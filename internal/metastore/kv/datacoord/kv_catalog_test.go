@@ -284,7 +284,7 @@ func Test_AddSegments(t *testing.T) {
 
 		_, ok := savedKvs[k4]
 		assert.False(t, ok)
-		assert.Equal(t, 5, len(savedKvs))
+		assert.Equal(t, 4, len(savedKvs))
 		verifySavedKvsForSegment(t, savedKvs)
 	})
 }
@@ -330,7 +330,7 @@ func Test_AlterSegments(t *testing.T) {
 
 		_, ok := savedKvs[k4]
 		assert.False(t, ok)
-		assert.Equal(t, 5, len(savedKvs))
+		assert.Equal(t, 4, len(savedKvs))
 		verifySavedKvsForSegment(t, savedKvs)
 	})
 }

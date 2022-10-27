@@ -607,7 +607,7 @@ func TestSaveHandoffMeta(t *testing.T) {
 
 	info := &datapb.SegmentInfo{
 		ID:    100,
-		State: commonpb.SegmentState_Flushed,
+		State: commonpb.SegmentState_Flushing,
 	}
 	segmentInfo := &SegmentInfo{
 		SegmentInfo: info,
@@ -618,7 +618,20 @@ func TestSaveHandoffMeta(t *testing.T) {
 
 	keys, _, err := kvClient.LoadWithPrefix(util.FlushedSegmentPrefix)
 	assert.Nil(t, err)
+	assert.Equal(t, 0, len(keys))
+
+	newInfo := &datapb.SegmentInfo{
+		ID:    100,
+		State: commonpb.SegmentState_Flushed,
+	}
+
+	err = meta.catalog.AlterSegment(context.TODO(), newInfo, segmentInfo.SegmentInfo)
+	assert.Nil(t, err)
+
+	keys, _, err = kvClient.LoadWithPrefix(util.FlushedSegmentPrefix)
+	assert.Nil(t, err)
 	assert.Equal(t, 1, len(keys))
+
 	segmentID, err := strconv.ParseInt(filepath.Base(keys[0]), 10, 64)
 	assert.Nil(t, err)
 	assert.Equal(t, 100, int(segmentID))
