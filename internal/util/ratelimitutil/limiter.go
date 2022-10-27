@@ -138,7 +138,7 @@ func (limit Limit) String() string {
 	if limit == Inf {
 		return "+inf"
 	}
-	return fmt.Sprintf("%.4f", limit)
+	return fmt.Sprintf("%v", float64(limit))
 }
 
 // tokensFromDuration is a unit conversion function from a time duration to the number of tokens

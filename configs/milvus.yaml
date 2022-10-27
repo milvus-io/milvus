@@ -435,7 +435,7 @@ quotaAndLimits:
       # maxTimeTickDelay indicates the backpressure for DML Operations.
       # DML rates would be reduced according to the ratio of time tick delay to maxTimeTickDelay,
       # if time tick delay is greater than maxTimeTickDelay, all DML requests would be rejected.
-      maxTimeTickDelay: 30 # in seconds
+      maxTimeTickDelay: 300 # in seconds
     memProtection:
       enabled: true
       # When memory usage > memoryHighWaterLevel, all dml requests would be rejected;
