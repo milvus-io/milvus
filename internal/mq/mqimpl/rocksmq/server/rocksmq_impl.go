@@ -807,12 +807,6 @@ func (rmq *rocksmq) moveConsumePos(topicName string, groupName string, msgID Uni
 		return errors.New("move unknown consumer")
 	}
 
-	if msgID < oldPos.(UniqueID) {
-		log.Warn("RocksMQ: trying to move Consume position backward",
-			zap.String("key", key), zap.Int64("oldPos", oldPos.(UniqueID)), zap.Int64("newPos", msgID))
-		panic("move consume position backward")
-	}
-
 	//update ack if position move forward
 	err := rmq.updateAckedInfo(topicName, groupName, oldPos.(UniqueID), msgID-1)
 	if err != nil {
