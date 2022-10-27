@@ -26,115 +26,115 @@ type mockProxyComponent struct {
 	types.ProxyComponent
 }
 
-func (mockProxyComponent) Dummy(ctx context.Context, request *milvuspb.DummyRequest) (*milvuspb.DummyResponse, error) {
+func (m *mockProxyComponent) Dummy(ctx context.Context, request *milvuspb.DummyRequest) (*milvuspb.DummyResponse, error) {
 	return nil, nil
 }
 
 var emptyBody = &gin.H{}
 var testStatus = &commonpb.Status{Reason: "ok"}
 
-func (mockProxyComponent) CreateCollection(ctx context.Context, request *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
+func (m *mockProxyComponent) CreateCollection(ctx context.Context, request *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
 	return testStatus, nil
 }
 
-func (mockProxyComponent) DropCollection(ctx context.Context, request *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
+func (m *mockProxyComponent) DropCollection(ctx context.Context, request *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
 	return testStatus, nil
 }
 
-func (mockProxyComponent) HasCollection(ctx context.Context, request *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
+func (m *mockProxyComponent) HasCollection(ctx context.Context, request *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
 	return &milvuspb.BoolResponse{Status: testStatus}, nil
 }
 
-func (mockProxyComponent) LoadCollection(ctx context.Context, request *milvuspb.LoadCollectionRequest) (*commonpb.Status, error) {
+func (m *mockProxyComponent) LoadCollection(ctx context.Context, request *milvuspb.LoadCollectionRequest) (*commonpb.Status, error) {
 	return testStatus, nil
 }
 
-func (mockProxyComponent) ReleaseCollection(ctx context.Context, request *milvuspb.ReleaseCollectionRequest) (*commonpb.Status, error) {
+func (m *mockProxyComponent) ReleaseCollection(ctx context.Context, request *milvuspb.ReleaseCollectionRequest) (*commonpb.Status, error) {
 	return testStatus, nil
 }
 
-func (mockProxyComponent) DescribeCollection(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+func (m *mockProxyComponent) DescribeCollection(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 	return &milvuspb.DescribeCollectionResponse{Status: testStatus}, nil
 }
 
-func (mockProxyComponent) GetCollectionStatistics(ctx context.Context, request *milvuspb.GetCollectionStatisticsRequest) (*milvuspb.GetCollectionStatisticsResponse, error) {
+func (m *mockProxyComponent) GetCollectionStatistics(ctx context.Context, request *milvuspb.GetCollectionStatisticsRequest) (*milvuspb.GetCollectionStatisticsResponse, error) {
 	return &milvuspb.GetCollectionStatisticsResponse{Status: testStatus}, nil
 }
 
-func (mockProxyComponent) ShowCollections(ctx context.Context, request *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
+func (m *mockProxyComponent) ShowCollections(ctx context.Context, request *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
 	return &milvuspb.ShowCollectionsResponse{Status: testStatus}, nil
 }
 
-func (mockProxyComponent) AlterCollection(ctx context.Context, request *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
+func (m *mockProxyComponent) AlterCollection(ctx context.Context, request *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
 	return testStatus, nil
 }
 
-func (mockProxyComponent) CreatePartition(ctx context.Context, request *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
+func (m *mockProxyComponent) CreatePartition(ctx context.Context, request *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
 	return testStatus, nil
 }
 
-func (mockProxyComponent) DropPartition(ctx context.Context, request *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
+func (m *mockProxyComponent) DropPartition(ctx context.Context, request *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
 	return testStatus, nil
 }
 
-func (mockProxyComponent) HasPartition(ctx context.Context, request *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error) {
+func (m *mockProxyComponent) HasPartition(ctx context.Context, request *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error) {
 	return &milvuspb.BoolResponse{Status: testStatus}, nil
 }
 
-func (mockProxyComponent) LoadPartitions(ctx context.Context, request *milvuspb.LoadPartitionsRequest) (*commonpb.Status, error) {
+func (m *mockProxyComponent) LoadPartitions(ctx context.Context, request *milvuspb.LoadPartitionsRequest) (*commonpb.Status, error) {
 	return testStatus, nil
 }
-func (mockProxyComponent) ReleasePartitions(ctx context.Context, request *milvuspb.ReleasePartitionsRequest) (*commonpb.Status, error) {
+func (m *mockProxyComponent) ReleasePartitions(ctx context.Context, request *milvuspb.ReleasePartitionsRequest) (*commonpb.Status, error) {
 	return testStatus, nil
 }
-func (mockProxyComponent) GetPartitionStatistics(ctx context.Context, request *milvuspb.GetPartitionStatisticsRequest) (*milvuspb.GetPartitionStatisticsResponse, error) {
+func (m *mockProxyComponent) GetPartitionStatistics(ctx context.Context, request *milvuspb.GetPartitionStatisticsRequest) (*milvuspb.GetPartitionStatisticsResponse, error) {
 	return &milvuspb.GetPartitionStatisticsResponse{Status: testStatus}, nil
 }
 
-func (mockProxyComponent) ShowPartitions(ctx context.Context, request *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
+func (m *mockProxyComponent) ShowPartitions(ctx context.Context, request *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
 	return &milvuspb.ShowPartitionsResponse{Status: testStatus}, nil
 }
 
-func (mockProxyComponent) CreateAlias(ctx context.Context, request *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
+func (m *mockProxyComponent) CreateAlias(ctx context.Context, request *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
 	return testStatus, nil
 }
 
-func (mockProxyComponent) DropAlias(ctx context.Context, request *milvuspb.DropAliasRequest) (*commonpb.Status, error) {
+func (m *mockProxyComponent) DropAlias(ctx context.Context, request *milvuspb.DropAliasRequest) (*commonpb.Status, error) {
 	return testStatus, nil
 }
 
-func (mockProxyComponent) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasRequest) (*commonpb.Status, error) {
+func (m *mockProxyComponent) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasRequest) (*commonpb.Status, error) {
 	return testStatus, nil
 }
 
-func (mockProxyComponent) CreateIndex(ctx context.Context, request *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
+func (m *mockProxyComponent) CreateIndex(ctx context.Context, request *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
 	return testStatus, nil
 }
 
-func (mockProxyComponent) DescribeIndex(ctx context.Context, request *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
+func (m *mockProxyComponent) DescribeIndex(ctx context.Context, request *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
 	return &milvuspb.DescribeIndexResponse{Status: testStatus}, nil
 }
 
-func (mockProxyComponent) GetIndexState(ctx context.Context, request *milvuspb.GetIndexStateRequest) (*milvuspb.GetIndexStateResponse, error) {
+func (m *mockProxyComponent) GetIndexState(ctx context.Context, request *milvuspb.GetIndexStateRequest) (*milvuspb.GetIndexStateResponse, error) {
 	return &milvuspb.GetIndexStateResponse{Status: testStatus}, nil
 }
 
-func (mockProxyComponent) GetIndexBuildProgress(ctx context.Context, request *milvuspb.GetIndexBuildProgressRequest) (*milvuspb.GetIndexBuildProgressResponse, error) {
+func (m *mockProxyComponent) GetIndexBuildProgress(ctx context.Context, request *milvuspb.GetIndexBuildProgressRequest) (*milvuspb.GetIndexBuildProgressResponse, error) {
 	return &milvuspb.GetIndexBuildProgressResponse{Status: testStatus}, nil
 }
 
-func (mockProxyComponent) DropIndex(ctx context.Context, request *milvuspb.DropIndexRequest) (*commonpb.Status, error) {
+func (m *mockProxyComponent) DropIndex(ctx context.Context, request *milvuspb.DropIndexRequest) (*commonpb.Status, error) {
 	return testStatus, nil
 }
 
-func (mockProxyComponent) Insert(ctx context.Context, request *milvuspb.InsertRequest) (*milvuspb.MutationResult, error) {
+func (m *mockProxyComponent) Insert(ctx context.Context, request *milvuspb.InsertRequest) (*milvuspb.MutationResult, error) {
 	if request.CollectionName == "" {
 		return nil, errors.New("body parse err")
 	}
 	return &milvuspb.MutationResult{Acknowledged: true}, nil
 }
 
-func (mockProxyComponent) Delete(ctx context.Context, request *milvuspb.DeleteRequest) (*milvuspb.MutationResult, error) {
+func (m *mockProxyComponent) Delete(ctx context.Context, request *milvuspb.DeleteRequest) (*milvuspb.MutationResult, error) {
 	if request.Expr == "" {
 		return nil, errors.New("body parse err")
 	}
@@ -147,7 +147,7 @@ var searchResult = milvuspb.SearchResults{
 	},
 }
 
-func (mockProxyComponent) Search(ctx context.Context, request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+func (m *mockProxyComponent) Search(ctx context.Context, request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 	if request.Dsl == "" {
 		return nil, errors.New("body parse err")
 	}
@@ -158,7 +158,7 @@ var queryResult = milvuspb.QueryResults{
 	CollectionName: "test",
 }
 
-func (mockProxyComponent) Query(ctx context.Context, request *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
+func (m *mockProxyComponent) Query(ctx context.Context, request *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
 	if request.Expr == "" {
 		return nil, errors.New("body parse err")
 	}
@@ -169,7 +169,7 @@ var flushResult = milvuspb.FlushResponse{
 	DbName: "default",
 }
 
-func (mockProxyComponent) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*milvuspb.FlushResponse, error) {
+func (m *mockProxyComponent) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*milvuspb.FlushResponse, error) {
 	if len(request.CollectionNames) < 1 {
 		return nil, errors.New("body parse err")
 	}
@@ -184,74 +184,74 @@ var calcDistanceResult = milvuspb.CalcDistanceResults{
 	},
 }
 
-func (mockProxyComponent) CalcDistance(ctx context.Context, request *milvuspb.CalcDistanceRequest) (*milvuspb.CalcDistanceResults, error) {
+func (m *mockProxyComponent) CalcDistance(ctx context.Context, request *milvuspb.CalcDistanceRequest) (*milvuspb.CalcDistanceResults, error) {
 	if len(request.Params) < 1 {
 		return nil, errors.New("body parse err")
 	}
 	return &calcDistanceResult, nil
 }
 
-func (mockProxyComponent) GetFlushState(ctx context.Context, request *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
+func (m *mockProxyComponent) GetFlushState(ctx context.Context, request *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
 	return &milvuspb.GetFlushStateResponse{Status: testStatus}, nil
 }
 
-func (mockProxyComponent) GetPersistentSegmentInfo(ctx context.Context, request *milvuspb.GetPersistentSegmentInfoRequest) (*milvuspb.GetPersistentSegmentInfoResponse, error) {
+func (m *mockProxyComponent) GetPersistentSegmentInfo(ctx context.Context, request *milvuspb.GetPersistentSegmentInfoRequest) (*milvuspb.GetPersistentSegmentInfoResponse, error) {
 	return &milvuspb.GetPersistentSegmentInfoResponse{Status: testStatus}, nil
 }
 
-func (mockProxyComponent) GetQuerySegmentInfo(ctx context.Context, request *milvuspb.GetQuerySegmentInfoRequest) (*milvuspb.GetQuerySegmentInfoResponse, error) {
+func (m *mockProxyComponent) GetQuerySegmentInfo(ctx context.Context, request *milvuspb.GetQuerySegmentInfoRequest) (*milvuspb.GetQuerySegmentInfoResponse, error) {
 	return &milvuspb.GetQuerySegmentInfoResponse{Status: testStatus}, nil
 }
 
-func (mockProxyComponent) GetReplicas(ctx context.Context, request *milvuspb.GetReplicasRequest) (*milvuspb.GetReplicasResponse, error) {
+func (m *mockProxyComponent) GetReplicas(ctx context.Context, request *milvuspb.GetReplicasRequest) (*milvuspb.GetReplicasResponse, error) {
 	return &milvuspb.GetReplicasResponse{Status: testStatus}, nil
 }
 
-func (mockProxyComponent) GetMetrics(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+func (m *mockProxyComponent) GetMetrics(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	return &milvuspb.GetMetricsResponse{Status: testStatus}, nil
 }
 
-func (mockProxyComponent) LoadBalance(ctx context.Context, request *milvuspb.LoadBalanceRequest) (*commonpb.Status, error) {
+func (m *mockProxyComponent) LoadBalance(ctx context.Context, request *milvuspb.LoadBalanceRequest) (*commonpb.Status, error) {
 	return testStatus, nil
 }
 
-func (mockProxyComponent) GetCompactionState(ctx context.Context, request *milvuspb.GetCompactionStateRequest) (*milvuspb.GetCompactionStateResponse, error) {
+func (m *mockProxyComponent) GetCompactionState(ctx context.Context, request *milvuspb.GetCompactionStateRequest) (*milvuspb.GetCompactionStateResponse, error) {
 	return &milvuspb.GetCompactionStateResponse{Status: testStatus}, nil
 }
 
-func (mockProxyComponent) GetCompactionStateWithPlans(ctx context.Context, request *milvuspb.GetCompactionPlansRequest) (*milvuspb.GetCompactionPlansResponse, error) {
+func (m *mockProxyComponent) GetCompactionStateWithPlans(ctx context.Context, request *milvuspb.GetCompactionPlansRequest) (*milvuspb.GetCompactionPlansResponse, error) {
 	return &milvuspb.GetCompactionPlansResponse{Status: testStatus}, nil
 }
 
-func (mockProxyComponent) ManualCompaction(ctx context.Context, request *milvuspb.ManualCompactionRequest) (*milvuspb.ManualCompactionResponse, error) {
+func (m *mockProxyComponent) ManualCompaction(ctx context.Context, request *milvuspb.ManualCompactionRequest) (*milvuspb.ManualCompactionResponse, error) {
 	return &milvuspb.ManualCompactionResponse{Status: testStatus}, nil
 }
 
-func (mockProxyComponent) Import(ctx context.Context, request *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
+func (m *mockProxyComponent) Import(ctx context.Context, request *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
 	return &milvuspb.ImportResponse{Status: testStatus}, nil
 }
 
-func (mockProxyComponent) GetImportState(ctx context.Context, request *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error) {
+func (m *mockProxyComponent) GetImportState(ctx context.Context, request *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error) {
 	return &milvuspb.GetImportStateResponse{Status: testStatus}, nil
 }
 
-func (mockProxyComponent) ListImportTasks(ctx context.Context, request *milvuspb.ListImportTasksRequest) (*milvuspb.ListImportTasksResponse, error) {
+func (m *mockProxyComponent) ListImportTasks(ctx context.Context, request *milvuspb.ListImportTasksRequest) (*milvuspb.ListImportTasksResponse, error) {
 	return &milvuspb.ListImportTasksResponse{Status: testStatus}, nil
 }
 
-func (mockProxyComponent) CreateCredential(ctx context.Context, request *milvuspb.CreateCredentialRequest) (*commonpb.Status, error) {
+func (m *mockProxyComponent) CreateCredential(ctx context.Context, request *milvuspb.CreateCredentialRequest) (*commonpb.Status, error) {
 	return testStatus, nil
 }
 
-func (mockProxyComponent) UpdateCredential(ctx context.Context, request *milvuspb.UpdateCredentialRequest) (*commonpb.Status, error) {
+func (m *mockProxyComponent) UpdateCredential(ctx context.Context, request *milvuspb.UpdateCredentialRequest) (*commonpb.Status, error) {
 	return testStatus, nil
 }
 
-func (mockProxyComponent) DeleteCredential(ctx context.Context, request *milvuspb.DeleteCredentialRequest) (*commonpb.Status, error) {
+func (m *mockProxyComponent) DeleteCredential(ctx context.Context, request *milvuspb.DeleteCredentialRequest) (*commonpb.Status, error) {
 	return testStatus, nil
 }
 
-func (mockProxyComponent) ListCredUsers(ctx context.Context, request *milvuspb.ListCredUsersRequest) (*milvuspb.ListCredUsersResponse, error) {
+func (m *mockProxyComponent) ListCredUsers(ctx context.Context, request *milvuspb.ListCredUsersRequest) (*milvuspb.ListCredUsersResponse, error) {
 	return &milvuspb.ListCredUsersResponse{Status: testStatus}, nil
 }
 
