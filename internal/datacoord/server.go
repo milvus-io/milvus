@@ -805,8 +805,7 @@ func (s *Server) startFlushLoop(ctx context.Context) {
 func (s *Server) postFlush(ctx context.Context, segmentID UniqueID) error {
 	segment := s.meta.GetSegment(segmentID)
 	if segment == nil {
-		log.Warn("failed to get flused segment", zap.Int64("id", segmentID))
-		return errors.New("segment not found")
+		return errors.New("segment not found, might be a faked segemnt, ignore post flush")
 	}
 	// set segment to SegmentState_Flushed
 	if err := s.meta.SetState(segmentID, commonpb.SegmentState_Flushed); err != nil {
