@@ -2,6 +2,7 @@ package querynode
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -23,6 +24,9 @@ func statisticOnSegments(replica ReplicaInterface, segType segmentType, segIDs [
 			defer wg.Done()
 			seg, err := replica.getSegmentByID(segID, segType)
 			if err != nil {
+				if errors.Is(err, ErrSegmentNotFound) {
+					return
+				}
 				log.Error(err.Error()) // should not happen but still ignore it since the result is still correct
 				return
 			}

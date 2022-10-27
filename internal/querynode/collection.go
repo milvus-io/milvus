@@ -44,7 +44,7 @@ import (
 
 // Collection is a wrapper of the underlying C-structure C.CCollection
 type Collection struct {
-	sync.RWMutex  // protects colllectionPtr
+	mu            sync.RWMutex // protects colllectionPtr
 	collectionPtr C.CCollection
 	id            UniqueID
 	partitionIDs  []UniqueID

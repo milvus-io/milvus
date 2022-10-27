@@ -85,8 +85,6 @@ func (fdmNode *filterDmNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		// QueryNode should add collection before start flow graph
 		panic(fmt.Errorf("%s getCollectionByID failed, collectionID = %d, channel: %s", fdmNode.Name(), fdmNode.collectionID, fdmNode.channel))
 	}
-	collection.RLock()
-	defer collection.RUnlock()
 
 	for i, msg := range msgStreamMsg.TsMessages() {
 		traceID, _, _ := trace.InfoFromSpan(spans[i])

@@ -45,6 +45,7 @@ import (
 
 var (
 	ErrSegmentNotFound    = errors.New("SegmentNotFound")
+	ErrPartitionNotFound  = errors.New("PartitionNotFound")
 	ErrCollectionNotFound = errors.New("CollectionNotFound")
 )
 
@@ -225,8 +226,8 @@ func (replica *metaReplica) removeCollectionPrivate(collectionID UniqueID) error
 	}
 
 	// block incoming search&query
-	collection.Lock()
-	defer collection.Unlock()
+	collection.mu.Lock()
+	defer collection.mu.Unlock()
 
 	// delete partitions
 	for _, partitionID := range collection.partitionIDs {
@@ -288,6 +289,8 @@ func (replica *metaReplica) getPartitionIDs(collectionID UniqueID) ([]UniqueID, 
 	if err != nil {
 		return nil, err
 	}
+	collection.mu.RLock()
+	defer collection.mu.RUnlock()
 
 	return collection.getPartitionIDs(), nil
 }
@@ -395,19 +398,22 @@ func (replica *metaReplica) getSegmentInfosByColID(collectionID UniqueID) []*que
 func (replica *metaReplica) addPartition(collectionID UniqueID, partitionID UniqueID) error {
 	replica.mu.Lock()
 	defer replica.mu.Unlock()
-	return replica.addPartitionPrivate(collectionID, partitionID)
-}
 
-// addPartitionPrivate is the private function in collectionReplica, to add a new partition to collection
-func (replica *metaReplica) addPartitionPrivate(collectionID UniqueID, partitionID UniqueID) error {
 	collection, err := replica.getCollectionByIDPrivate(collectionID)
 	if err != nil {
 		return err
 	}
+	collection.mu.Lock()
+	defer collection.mu.Unlock()
 
+	return replica.addPartitionPrivate(collection, partitionID)
+}
+
+// addPartitionPrivate is the private function in collectionReplica, to add a new partition to collection
+func (replica *metaReplica) addPartitionPrivate(collection *Collection, partitionID UniqueID) error {
 	if !replica.hasPartitionPrivate(partitionID) {
 		collection.addPartitionID(partitionID)
-		var newPartition = newPartition(collectionID, partitionID)
+		var newPartition = newPartition(collection.ID(), partitionID)
 		replica.partitions[partitionID] = newPartition
 	}
 
@@ -429,8 +435,8 @@ func (replica *metaReplica) removePartition(partitionID UniqueID) error {
 	if err != nil {
 		return err
 	}
-	collection.Lock()
-	defer collection.Unlock()
+	collection.mu.Lock()
+	defer collection.mu.Unlock()
 
 	return replica.removePartitionPrivate(partitionID)
 }
@@ -476,7 +482,7 @@ func (replica *metaReplica) getPartitionByID(partitionID UniqueID) (*Partition, 
 func (replica *metaReplica) getPartitionByIDPrivate(partitionID UniqueID) (*Partition, error) {
 	partition, ok := replica.partitions[partitionID]
 	if !ok {
-		return nil, fmt.Errorf("partition %d hasn't been loaded or has been released", partitionID)
+		return nil, fmt.Errorf("%w(partitionID=%d)", ErrPartitionNotFound, partitionID)
 	}
 
 	return partition, nil
@@ -567,6 +573,9 @@ func (replica *metaReplica) addSegment(segmentID UniqueID, partitionID UniqueID,
 	if err != nil {
 		return err
 	}
+	collection.mu.Lock()
+	defer collection.mu.Unlock()
+
 	seg, err := newSegment(collection, segmentID, partitionID, collectionID, vChannelID, segType, version, replica.cgoPool)
 	if err != nil {
 		return err
@@ -635,15 +644,15 @@ func (replica *metaReplica) removeSegment(segmentID UniqueID, segType segmentTyp
 	case segmentTypeGrowing:
 		if segment, ok := replica.growingSegments[segmentID]; ok {
 			if collection, ok := replica.collections[segment.collectionID]; ok {
-				collection.Lock()
-				defer collection.Unlock()
+				collection.mu.Lock()
+				defer collection.mu.Unlock()
 			}
 		}
 	case segmentTypeSealed:
 		if segment, ok := replica.sealedSegments[segmentID]; ok {
 			if collection, ok := replica.collections[segment.collectionID]; ok {
-				collection.Lock()
-				defer collection.Unlock()
+				collection.mu.Lock()
+				defer collection.mu.Unlock()
 			}
 		}
 	default:
