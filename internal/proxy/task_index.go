@@ -498,6 +498,9 @@ func (dit *dropIndexTask) PreExecute(ctx context.Context) error {
 	dit.Base.MsgType = commonpb.MsgType_DropIndex
 	dit.Base.SourceID = Params.ProxyCfg.GetNodeID()
 
+	if dit.GetIndexName() == "" {
+		return errors.New("IndexName is not specified")
+	}
 	collName, fieldName := dit.CollectionName, dit.FieldName
 
 	if err := validateCollectionName(collName); err != nil {
@@ -506,10 +509,6 @@ func (dit *dropIndexTask) PreExecute(ctx context.Context) error {
 
 	if err := validateFieldName(fieldName); err != nil {
 		return err
-	}
-
-	if dit.IndexName == "" {
-		dit.IndexName = Params.CommonCfg.DefaultIndexName
 	}
 
 	collID, err := globalMetaCache.GetCollectionID(ctx, dit.CollectionName)
