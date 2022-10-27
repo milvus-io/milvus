@@ -15,25 +15,16 @@
 // limitations under the License.
 
 #include "common/Slice.h"
+#include "common/Common.h"
 #include "log/Log.h"
 
 namespace milvus {
-
-const int64_t DEFAULT_INDEX_FILE_SLICE_SIZE = 4;  // megabytes
 
 static const char* INDEX_FILE_SLICE_META = "SLICE_META";
 static const char* META = "meta";
 static const char* NAME = "name";
 static const char* SLICE_NUM = "slice_num";
 static const char* TOTAL_LEN = "total_len";
-
-int64_t index_file_slice_size = DEFAULT_INDEX_FILE_SLICE_SIZE;
-
-void
-SetIndexSliceSize(const int64_t size) {
-    index_file_slice_size = size;
-    LOG_SEGCORE_DEBUG_ << "set config index slice size: " << index_file_slice_size;
-}
 
 void
 Slice(

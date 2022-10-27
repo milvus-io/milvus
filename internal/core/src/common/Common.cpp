@@ -14,24 +14,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#pragma once
+#include "common/Common.h"
+#include "log/Log.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+namespace milvus {
 
-#include <stdbool.h>
-#include <stdint.h>
-
-void
-InitIndexSliceSize(const int64_t);
+int64_t index_file_slice_size = DEFAULT_INDEX_FILE_SLICE_SIZE;
+int64_t thread_core_coefficient = DEFAULT_THREAD_CORE_COEFFICIENT;
 
 void
-InitThreadCoreCoefficient(const int64_t);
+SetIndexSliceSize(const int64_t size) {
+    index_file_slice_size = size;
+    LOG_SEGCORE_DEBUG_ << "set config index slice size: " << index_file_slice_size;
+}
 
 void
-InitLocalRootPath(const char*);
+SetThreadCoreCoefficient(const int64_t coefficient) {
+    thread_core_coefficient = coefficient;
+    LOG_SEGCORE_DEBUG_ << "set thread pool core coefficient: " << thread_core_coefficient;
+}
 
-#ifdef __cplusplus
-};
-#endif
+}  // namespace milvus

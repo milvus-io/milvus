@@ -218,6 +218,9 @@ func (node *QueryNode) InitSegcore() {
 	cIndexSliceSize := C.int64_t(Params.CommonCfg.IndexSliceSize)
 	C.InitIndexSliceSize(cIndexSliceSize)
 
+	cThreadCoreCoefficient := C.int64_t(Params.CommonCfg.ThreadCoreCoefficient)
+	C.InitThreadCoreCoefficient(cThreadCoreCoefficient)
+
 	initcore.InitLocalStorageConfig(&Params)
 }
 

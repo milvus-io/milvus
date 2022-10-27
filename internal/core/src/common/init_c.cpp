@@ -21,8 +21,9 @@
 #include <string>
 #include "config/ConfigChunkManager.h"
 #include "common/Slice.h"
+#include "common/Common.h"
 
-std::once_flag flag1, flag2;
+std::once_flag flag1, flag2, flag3;
 
 void
 InitLocalRootPath(const char* root_path) {
@@ -35,4 +36,10 @@ void
 InitIndexSliceSize(const int64_t size) {
     std::call_once(
         flag2, [](int64_t size) { milvus::SetIndexSliceSize(size); }, size);
+}
+
+void
+InitThreadCoreCoefficient(const int64_t value) {
+    std::call_once(
+        flag3, [](int64_t value) { milvus::SetThreadCoreCoefficient(value); }, value);
 }
