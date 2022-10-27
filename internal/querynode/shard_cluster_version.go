@@ -117,6 +117,8 @@ func (v *ShardClusterVersion) checkSafeGC() {
 				if v.lastVersion != nil {
 					<-v.lastVersion.Expire()
 				}
+				// release the reference of last version, so it could be processed by gc
+				v.lastVersion = nil
 				close(v.ch)
 			}()
 		})
