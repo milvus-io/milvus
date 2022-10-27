@@ -1057,3 +1057,48 @@ func TestRocksmq_updateAckedInfoErr(t *testing.T) {
 	// update acked for all page in rmq but some consumer not in rmq.consumers
 	assert.Error(t, rmq.updateAckedInfo(topicName, groupName, 0, ids[len(ids)-1]))
 }
+
+func TestRocksmq_Info(t *testing.T) {
+	ep := etcdEndpoints()
+	etcdCli, err := etcd.GetRemoteEtcdClient(ep)
+	assert.Nil(t, err)
+	etcdKV := etcdkv.NewEtcdKV(etcdCli, "/etcd/test/root")
+	defer etcdKV.Close()
+	idAllocator := allocator.NewGlobalIDAllocator("dummy", etcdKV)
+	_ = idAllocator.Initialize()
+
+	name := "/tmp/rocksmq_testinfo"
+	defer os.RemoveAll(name)
+	kvName := name + "_meta_kv"
+	_ = os.RemoveAll(kvName)
+	defer os.RemoveAll(kvName)
+	var params paramtable.BaseTable
+	params.Init()
+	atomic.StoreInt64(&RocksmqPageSize, 10)
+	rmq, err := NewRocksMQ(params, name, idAllocator)
+	assert.Nil(t, err)
+	defer rmq.Close()
+
+	topicName := "test_testinfo"
+	groupName := "test"
+	rmq.CreateTopic(topicName)
+	defer rmq.DestroyTopic(topicName)
+
+	consumer := &Consumer{
+		Topic:     topicName,
+		GroupName: groupName,
+	}
+
+	_ = rmq.DestroyConsumerGroup(topicName, groupName)
+	err = rmq.CreateConsumerGroup(topicName, groupName)
+	assert.Nil(t, err)
+
+	err = rmq.RegisterConsumer(consumer)
+	assert.Nil(t, err)
+
+	assert.True(t, rmq.Info())
+
+	//test error
+	rmq.kv = &rocksdbkv.RocksdbKV{}
+	assert.False(t, rmq.Info())
+}
