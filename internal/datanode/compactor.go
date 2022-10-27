@@ -129,7 +129,8 @@ func (t *compactionTask) getChannelName() string {
 	return t.plan.GetChannel()
 }
 
-func (t *compactionTask) mergeDeltalogs(dBlobs map[UniqueID][]*Blob, timetravelTs Timestamp) (map[interface{}]Timestamp, *DelDataBuf, error) {
+func (t *compactionTask) mergeDeltalogs(dBlobs map[UniqueID][]*Blob, timetravelTs Timestamp) (
+	map[interface{}]Timestamp, *DelDataBuf, error) {
 	log := log.With(zap.Int64("planID", t.getPlanID()))
 	mergeStart := time.Now()
 	dCodec := storage.NewDeleteCodec()
@@ -175,7 +176,7 @@ func (t *compactionTask) mergeDeltalogs(dBlobs map[UniqueID][]*Blob, timetravelT
 		}
 	}
 
-	dbuff.updateSize(dbuff.delData.RowCount)
+	dbuff.accumulateEntriesNum(dbuff.delData.RowCount)
 	log.Info("mergeDeltalogs end",
 		zap.Int("number of pks to compact in insert logs", len(pk2ts)),
 		zap.Float64("elapse in ms", nano2Milli(time.Since(mergeStart))))

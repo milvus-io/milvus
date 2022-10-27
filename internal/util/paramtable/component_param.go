@@ -1280,6 +1280,7 @@ type dataNodeConfig struct {
 	FlowGraphMaxQueueLength int32
 	FlowGraphMaxParallelism int32
 	FlushInsertBufferSize   int64
+	FlushDeleteBufferBytes  int64
 
 	Alias string // Different datanode in one machine
 
@@ -1298,6 +1299,7 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	p.initFlowGraphMaxQueueLength()
 	p.initFlowGraphMaxParallelism()
 	p.initFlushInsertBufferSize()
+	p.initFlushDeleteBufferSize()
 	p.initIOConcurrency()
 
 	p.initChannelWatchPath()
@@ -1323,6 +1325,12 @@ func (p *dataNodeConfig) initFlushInsertBufferSize() {
 		panic(err)
 	}
 	p.FlushInsertBufferSize = bs
+}
+
+func (p *dataNodeConfig) initFlushDeleteBufferSize() {
+	deleteBufBytes := p.Base.ParseInt64WithDefault("datanode.flush.deleteBufBytes",
+		64*1024*1024)
+	p.FlushDeleteBufferBytes = deleteBufBytes
 }
 
 func (p *dataNodeConfig) initChannelWatchPath() {

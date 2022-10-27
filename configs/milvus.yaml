@@ -283,6 +283,9 @@ dataNode:
   flush:
     # Max buffer size to flush for a single segment.
     insertBufSize: 16777216 # Bytes, 16 MB
+    # Max buffer size to flush del for a single channel
+    deleteBufBytes: 67108864 # Bytes, 64MB
+
 
 # Configures the system log output.
 log:
