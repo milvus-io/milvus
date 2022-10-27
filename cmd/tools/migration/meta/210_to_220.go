@@ -3,6 +3,7 @@ package meta
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -172,12 +173,16 @@ func combineToCollectionIndexesMeta220(fieldIndexes FieldIndexes210, collectionI
 			for k, v := range newIndexParamsMap {
 				newIndexParams = append(newIndexParams, &commonpb.KeyValuePair{Key: k, Value: v})
 			}
+			newIndexName := indexInfo.GetIndexName()
+			if newIndexName == "_default_idx" {
+				newIndexName = "_default_idx_" + strconv.FormatInt(index.GetFiledID(), 10)
+			}
 			record := &model.Index{
 				TenantID:        "", // TODO: how to set this if we support mysql later?
 				CollectionID:    collectionID,
 				FieldID:         index.GetFiledID(),
 				IndexID:         index.GetIndexID(),
-				IndexName:       indexInfo.GetIndexName(),
+				IndexName:       newIndexName,
 				IsDeleted:       indexInfo.GetDeleted(),
 				CreateTime:      indexInfo.GetCreateTime(),
 				TypeParams:      field.GetTypeParams(),

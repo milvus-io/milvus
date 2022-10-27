@@ -96,7 +96,7 @@ func TestDropIndexTask_PreExecute(t *testing.T) {
 	collectionName := "collection1"
 	collectionID := UniqueID(1)
 	fieldName := "field1"
-	indexName := ""
+	indexName := "_default_idx_101"
 
 	Params.Init()
 	showCollectionMock := func(ctx context.Context, request *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
