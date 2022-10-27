@@ -96,7 +96,7 @@ func (dn *deleteNode) Operate(in []Msg) []Msg {
 	}
 
 	// update compacted segment before operation
-	if len(fgMsg.deleteMessages) > 0 || len(fgMsg.segmentsToFlush) > 0 {
+	if len(fgMsg.deleteMessages) > 0 || len(fgMsg.segmentsToSync) > 0 {
 		dn.updateCompactedSegments()
 	}
 
@@ -122,11 +122,11 @@ func (dn *deleteNode) Operate(in []Msg) []Msg {
 	}
 
 	// process flush messages
-	if len(fgMsg.segmentsToFlush) > 0 {
+	if len(fgMsg.segmentsToSync) > 0 {
 		log.Info("DeleteNode receives flush message",
-			zap.Int64s("segIDs", fgMsg.segmentsToFlush),
+			zap.Int64s("segIDs", fgMsg.segmentsToSync),
 			zap.String("vChannelName", dn.channelName))
-		for _, segmentToFlush := range fgMsg.segmentsToFlush {
+		for _, segmentToFlush := range fgMsg.segmentsToSync {
 			buf, ok := dn.delBuf.Load(segmentToFlush)
 			if !ok {
 				// no related delta data to flush, send empty buf to complete flush life-cycle

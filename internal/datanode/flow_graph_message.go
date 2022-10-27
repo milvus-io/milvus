@@ -46,10 +46,10 @@ type flowGraphMsg struct {
 	timeRange      TimeRange
 	startPositions []*internalpb.MsgPosition
 	endPositions   []*internalpb.MsgPosition
-	//segmentsToFlush is the signal used by insertBufferNode to notify deleteNode to flush
-	segmentsToFlush []UniqueID
-	dropCollection  bool
-	dropPartitions  []UniqueID
+	//segmentsToSync is the signal used by insertBufferNode to notify deleteNode to flush
+	segmentsToSync []UniqueID
+	dropCollection bool
+	dropPartitions []UniqueID
 }
 
 func (fgMsg *flowGraphMsg) TimeTick() Timestamp {
