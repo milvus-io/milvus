@@ -235,7 +235,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		assert.Nil(te, err)
 
 		msg := genFlowGraphDeleteMsg(int64Pks, chanName)
-		msg.segmentsToFlush = segIDs
+		msg.segmentsToSync = segIDs
 		// this will fail since ts = 0 will trigger mocked error
 		var fgMsg flowgraph.Msg = &msg
 		delNode.Operate([]flowgraph.Msg{fgMsg})
@@ -258,7 +258,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		assert.Nil(te, err)
 
 		msg := genFlowGraphDeleteMsg(int64Pks, chanName)
-		msg.segmentsToFlush = segIDs
+		msg.segmentsToSync = segIDs
 
 		msg.endPositions[0].Timestamp = 100 // set to normal timestamp
 		var fgMsg flowgraph.Msg = &msg
@@ -288,7 +288,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		assert.Nil(t, err)
 
 		msg := genFlowGraphDeleteMsg(int64Pks, chanName)
-		msg.segmentsToFlush = segIDs
+		msg.segmentsToSync = segIDs
 
 		msg.endPositions[0].Timestamp = 100 // set to normal timestamp
 		msg.dropCollection = true
@@ -322,7 +322,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		assert.Nil(te, err)
 
 		msg := genFlowGraphDeleteMsg(int64Pks, chanName)
-		msg.segmentsToFlush = []UniqueID{-1}
+		msg.segmentsToSync = []UniqueID{-1}
 		delNode.delBuf.Store(UniqueID(-1), &DelDataBuf{})
 		delNode.flushManager = &mockFlushManager{
 			returnError: true,
@@ -367,7 +367,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 
 		msg := genFlowGraphDeleteMsg(int64Pks, chanName)
 		msg.deleteMessages = []*msgstream.DeleteMsg{}
-		msg.segmentsToFlush = []UniqueID{compactedSegment}
+		msg.segmentsToSync = []UniqueID{compactedSegment}
 
 		delNode.delBuf.Store(compactedSegment, &DelDataBuf{delData: &DeleteData{}})
 		delNode.flushManager = NewRendezvousFlushManager(&allocator{}, cm, channel, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
