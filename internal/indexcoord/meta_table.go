@@ -1084,3 +1084,17 @@ func (mt *metaTable) MarkSegmentWriteHandoff(segID UniqueID) error {
 	}
 	return mt.alterSegmentIndexes(segIdxes)
 }
+
+func (mt *metaTable) AlreadyWrittenHandoff(segID UniqueID) bool {
+	mt.segmentIndexLock.RLock()
+	defer mt.segmentIndexLock.RUnlock()
+
+	if segIndexes, ok := mt.segmentIndexes[segID]; ok {
+		for _, segIdx := range segIndexes {
+			if !segIdx.WriteHandoff {
+				return false
+			}
+		}
+	}
+	return true
+}
