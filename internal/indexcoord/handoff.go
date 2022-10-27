@@ -254,14 +254,17 @@ func (hd *handoff) process(segID UniqueID, front bool) {
 					//IndexSize:      0,
 				})
 			}
-			if err := hd.writeHandoffSegment(handoffTask); err != nil {
-				log.Ctx(hd.ctx).Warn("write handoff task fail, need to retry", zap.Int64("segID", segID), zap.Error(err))
-				return
-			}
+
 			log.Ctx(hd.ctx).Info("write handoff task success", zap.Int64("segID", segID))
-			if err := hd.meta.MarkSegmentWriteHandoff(segID); err != nil {
-				log.Ctx(hd.ctx).Warn("mark segment as write handoff fail, need to retry", zap.Int64("segID", segID), zap.Error(err))
-				return
+			if !hd.meta.AlreadyWrittenHandoff(segID) {
+				if err := hd.writeHandoffSegment(handoffTask); err != nil {
+					log.Ctx(hd.ctx).Warn("write handoff task fail, need to retry", zap.Int64("segID", segID), zap.Error(err))
+					return
+				}
+				if err := hd.meta.MarkSegmentWriteHandoff(segID); err != nil {
+					log.Ctx(hd.ctx).Warn("mark segment as write handoff fail, need to retry", zap.Int64("segID", segID), zap.Error(err))
+					return
+				}
 			}
 
 			log.Ctx(hd.ctx).Info("mark segment as write handoff success, remove task", zap.Int64("segID", segID))
