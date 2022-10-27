@@ -1698,7 +1698,7 @@ func TestProxy(t *testing.T) {
 		defer wg.Done()
 		req := &milvuspb.ImportRequest{
 			CollectionName: collectionName,
-			Files:          []string{"f1.json", "f2.json", "f3.csv"},
+			Files:          []string{"f1.json", "f2.json", "f3.json"},
 		}
 		proxy.stateCode.Store(commonpb.StateCode_Healthy)
 		resp, err := proxy.Import(context.TODO(), req)

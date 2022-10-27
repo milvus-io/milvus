@@ -34,7 +34,9 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/internal/util/importutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+
 	"go.uber.org/zap"
 )
 
@@ -210,7 +212,6 @@ func (m *importManager) sendOutTasks(ctx context.Context) error {
 			CollectionId: task.GetCollectionId(),
 			PartitionId:  task.GetPartitionId(),
 			ChannelNames: task.GetChannelNames(),
-			RowBased:     task.GetRowBased(),
 			TaskId:       task.GetId(),
 			Files:        task.GetFiles(),
 			Infos:        task.GetInfos(),
@@ -381,25 +382,39 @@ func (m *importManager) checkIndexingDone(ctx context.Context, collID UniqueID, 
 	return len(allSegmentIDs) == indexedSegmentCount, nil
 }
 
+func (m *importManager) isRowbased(files []string) (bool, error) {
+	isRowBased := false
+	for _, filePath := range files {
+		_, fileType := importutil.GetFileNameAndExt(filePath)
+		if fileType == importutil.JSONFileExt {
+			isRowBased = true
+		} else if isRowBased {
+			log.Error("row-based data file type must be JSON, mixed file types is not allowed", zap.Strings("files", files))
+			return isRowBased, fmt.Errorf("row-based data file type must be JSON, file type '%s' is not allowed", fileType)
+		}
+	}
+
+	return isRowBased, nil
+}
+
 // importJob processes the import request, generates import tasks, sends these tasks to DataCoord, and returns
 // immediately.
 func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportRequest, cID int64, pID int64) *milvuspb.ImportResponse {
-	if req == nil || len(req.Files) == 0 {
+	returnErrorFunc := func(reason string) *milvuspb.ImportResponse {
 		return &milvuspb.ImportResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    "import request is empty",
+				Reason:    reason,
 			},
 		}
 	}
 
+	if req == nil || len(req.Files) == 0 {
+		return returnErrorFunc("import request is empty")
+	}
+
 	if m.callImportService == nil {
-		return &milvuspb.ImportResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    "import service is not available",
-			},
-		}
+		return returnErrorFunc("import service is not available")
 	}
 
 	resp := &milvuspb.ImportResponse{
@@ -409,7 +424,7 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 		Tasks: make([]int64, 0),
 	}
 
-	log.Debug("request received",
+	log.Debug("receive import job",
 		zap.String("collection name", req.GetCollectionName()),
 		zap.Int64("collection ID", cID),
 		zap.Int64("partition ID", pID))
@@ -420,8 +435,13 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 		capacity := cap(m.pendingTasks)
 		length := len(m.pendingTasks)
 
+		isRowBased, err := m.isRowbased(req.GetFiles())
+		if err != nil {
+			return err
+		}
+
 		taskCount := 1
-		if req.RowBased {
+		if isRowBased {
 			taskCount = len(req.Files)
 		}
 
@@ -433,7 +453,7 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 		}
 
 		// convert import request to import tasks
-		if req.RowBased {
+		if isRowBased {
 			// For row-based importing, each file makes a task.
 			taskList := make([]int64, len(req.Files))
 			for i := 0; i < len(req.Files); i++ {
@@ -446,7 +466,6 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 					CollectionId: cID,
 					PartitionId:  pID,
 					ChannelNames: req.ChannelNames,
-					RowBased:     req.GetRowBased(),
 					Files:        []string{req.GetFiles()[i]},
 					CreateTs:     time.Now().Unix(),
 					State: &datapb.ImportTaskState{
@@ -485,7 +504,6 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 				CollectionId: cID,
 				PartitionId:  pID,
 				ChannelNames: req.ChannelNames,
-				RowBased:     req.GetRowBased(),
 				Files:        req.GetFiles(),
 				CreateTs:     time.Now().Unix(),
 				State: &datapb.ImportTaskState{
@@ -514,12 +532,7 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 		return nil
 	}()
 	if err != nil {
-		return &milvuspb.ImportResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
-		}
+		return returnErrorFunc(err.Error())
 	}
 	if sendOutTasksErr := m.sendOutTasks(ctx); sendOutTasksErr != nil {
 		log.Error("fail to send out tasks", zap.Error(sendOutTasksErr))
@@ -1054,7 +1067,6 @@ func cloneImportTaskInfo(taskInfo *datapb.ImportTaskInfo) *datapb.ImportTaskInfo
 		CollectionId:   taskInfo.GetCollectionId(),
 		PartitionId:    taskInfo.GetPartitionId(),
 		ChannelNames:   taskInfo.GetChannelNames(),
-		RowBased:       taskInfo.GetRowBased(),
 		Files:          taskInfo.GetFiles(),
 		CreateTs:       taskInfo.GetCreateTs(),
 		State:          taskInfo.GetState(),

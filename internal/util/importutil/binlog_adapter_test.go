@@ -16,8 +16,10 @@
 package importutil
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"strconv"
 	"testing"
 
@@ -154,18 +156,20 @@ func createSegmentsData(fieldsData map[storage.FieldID]interface{}, shardNum int
 }
 
 func Test_NewBinlogAdapter(t *testing.T) {
+	ctx := context.Background()
+
 	// nil schema
-	adapter, err := NewBinlogAdapter(nil, 2, 1024, 2048, nil, nil, 0)
+	adapter, err := NewBinlogAdapter(ctx, nil, 2, 1024, 2048, nil, nil, 0, math.MaxUint64)
 	assert.Nil(t, adapter)
 	assert.NotNil(t, err)
 
 	// nil chunkmanager
-	adapter, err = NewBinlogAdapter(sampleSchema(), 2, 1024, 2048, nil, nil, 0)
+	adapter, err = NewBinlogAdapter(ctx, sampleSchema(), 2, 1024, 2048, nil, nil, 0, math.MaxUint64)
 	assert.Nil(t, adapter)
 	assert.NotNil(t, err)
 
 	// nil flushfunc
-	adapter, err = NewBinlogAdapter(sampleSchema(), 2, 1024, 2048, &MockChunkManager{}, nil, 0)
+	adapter, err = NewBinlogAdapter(ctx, sampleSchema(), 2, 1024, 2048, &MockChunkManager{}, nil, 0, math.MaxUint64)
 	assert.Nil(t, adapter)
 	assert.NotNil(t, err)
 
@@ -173,7 +177,7 @@ func Test_NewBinlogAdapter(t *testing.T) {
 	flushFunc := func(fields map[storage.FieldID]storage.FieldData, shardID int) error {
 		return nil
 	}
-	adapter, err = NewBinlogAdapter(sampleSchema(), 2, 2048, 1024, &MockChunkManager{}, flushFunc, 0)
+	adapter, err = NewBinlogAdapter(ctx, sampleSchema(), 2, 2048, 1024, &MockChunkManager{}, flushFunc, 0, math.MaxUint64)
 	assert.NotNil(t, adapter)
 	assert.Nil(t, err)
 
@@ -191,16 +195,18 @@ func Test_NewBinlogAdapter(t *testing.T) {
 			},
 		},
 	}
-	adapter, err = NewBinlogAdapter(schema, 2, 1024, 2048, &MockChunkManager{}, flushFunc, 0)
+	adapter, err = NewBinlogAdapter(ctx, schema, 2, 1024, 2048, &MockChunkManager{}, flushFunc, 0, math.MaxUint64)
 	assert.Nil(t, adapter)
 	assert.NotNil(t, err)
 }
 
 func Test_BinlogAdapterVerify(t *testing.T) {
+	ctx := context.Background()
+
 	flushFunc := func(fields map[storage.FieldID]storage.FieldData, shardID int) error {
 		return nil
 	}
-	adapter, err := NewBinlogAdapter(sampleSchema(), 2, 1024, 2048, &MockChunkManager{}, flushFunc, 0)
+	adapter, err := NewBinlogAdapter(ctx, sampleSchema(), 2, 1024, 2048, &MockChunkManager{}, flushFunc, 0, math.MaxUint64)
 	assert.NotNil(t, adapter)
 	assert.Nil(t, err)
 
@@ -247,6 +253,8 @@ func Test_BinlogAdapterVerify(t *testing.T) {
 }
 
 func Test_BinlogAdapterReadDeltalog(t *testing.T) {
+	ctx := context.Background()
+
 	deleteItems := []int64{1001, 1002, 1003}
 	buf := createDeltalogBuf(t, deleteItems, false)
 	chunkManager := &MockChunkManager{
@@ -259,7 +267,7 @@ func Test_BinlogAdapterReadDeltalog(t *testing.T) {
 		return nil
 	}
 
-	adapter, err := NewBinlogAdapter(sampleSchema(), 2, 1024, 2048, chunkManager, flushFunc, 0)
+	adapter, err := NewBinlogAdapter(ctx, sampleSchema(), 2, 1024, 2048, chunkManager, flushFunc, 0, math.MaxUint64)
 	assert.NotNil(t, adapter)
 	assert.Nil(t, err)
 
@@ -283,6 +291,8 @@ func Test_BinlogAdapterReadDeltalog(t *testing.T) {
 }
 
 func Test_BinlogAdapterDecodeDeleteLogs(t *testing.T) {
+	ctx := context.Background()
+
 	deleteItems := []int64{1001, 1002, 1003, 1004, 1005}
 	buf := createDeltalogBuf(t, deleteItems, false)
 	chunkManager := &MockChunkManager{
@@ -295,7 +305,7 @@ func Test_BinlogAdapterDecodeDeleteLogs(t *testing.T) {
 		return nil
 	}
 
-	adapter, err := NewBinlogAdapter(sampleSchema(), 2, 1024, 2048, chunkManager, flushFunc, 0)
+	adapter, err := NewBinlogAdapter(ctx, sampleSchema(), 2, 1024, 2048, chunkManager, flushFunc, 0, math.MaxUint64)
 	assert.NotNil(t, adapter)
 	assert.Nil(t, err)
 
@@ -316,7 +326,7 @@ func Test_BinlogAdapterDecodeDeleteLogs(t *testing.T) {
 		"dummy": createDeltalogBuf(t, []string{"1001", "1002"}, true),
 	}
 
-	adapter, err = NewBinlogAdapter(sampleSchema(), 2, 1024, 2048, chunkManager, flushFunc, 0)
+	adapter, err = NewBinlogAdapter(ctx, sampleSchema(), 2, 1024, 2048, chunkManager, flushFunc, 0, math.MaxUint64)
 	assert.NotNil(t, adapter)
 	assert.Nil(t, err)
 
@@ -327,11 +337,13 @@ func Test_BinlogAdapterDecodeDeleteLogs(t *testing.T) {
 }
 
 func Test_BinlogAdapterDecodeDeleteLog(t *testing.T) {
+	ctx := context.Background()
+
 	flushFunc := func(fields map[storage.FieldID]storage.FieldData, shardID int) error {
 		return nil
 	}
 
-	adapter, err := NewBinlogAdapter(sampleSchema(), 2, 1024, 2048, &MockChunkManager{}, flushFunc, 0)
+	adapter, err := NewBinlogAdapter(ctx, sampleSchema(), 2, 1024, 2048, &MockChunkManager{}, flushFunc, 0, math.MaxUint64)
 	assert.NotNil(t, adapter)
 	assert.Nil(t, err)
 
@@ -378,6 +390,8 @@ func Test_BinlogAdapterDecodeDeleteLog(t *testing.T) {
 }
 
 func Test_BinlogAdapterReadDeltalogs(t *testing.T) {
+	ctx := context.Background()
+
 	deleteItems := []int64{1001, 1002, 1003, 1004, 1005}
 	buf := createDeltalogBuf(t, deleteItems, false)
 	chunkManager := &MockChunkManager{
@@ -390,7 +404,7 @@ func Test_BinlogAdapterReadDeltalogs(t *testing.T) {
 		return nil
 	}
 
-	adapter, err := NewBinlogAdapter(sampleSchema(), 2, 1024, 2048, chunkManager, flushFunc, 0)
+	adapter, err := NewBinlogAdapter(ctx, sampleSchema(), 2, 1024, 2048, chunkManager, flushFunc, 0, math.MaxUint64)
 	assert.NotNil(t, adapter)
 	assert.Nil(t, err)
 
@@ -432,17 +446,19 @@ func Test_BinlogAdapterReadDeltalogs(t *testing.T) {
 		"dummy": createDeltalogBuf(t, []string{"1001", "1002"}, true),
 	}
 
-	adapter, err = NewBinlogAdapter(schema, 2, 1024, 2048, chunkManager, flushFunc, 0)
+	adapter, err = NewBinlogAdapter(ctx, schema, 2, 1024, 2048, chunkManager, flushFunc, 0, math.MaxUint64)
 	assert.NotNil(t, adapter)
 	assert.Nil(t, err)
 
 	// 2.1 all deletion have been filtered out
+	adapter.tsStartPoint = baseTimestamp + 2
 	intDeletions, strDeletions, err = adapter.readDeltalogs(holder)
 	assert.Nil(t, err)
 	assert.Nil(t, intDeletions)
 	assert.Nil(t, strDeletions)
 
 	// 2.2 filter the no.1 and no.2 deletion
+	adapter.tsStartPoint = 0
 	adapter.tsEndPoint = baseTimestamp + 1
 	intDeletions, strDeletions, err = adapter.readDeltalogs(holder)
 	assert.Nil(t, err)
@@ -470,7 +486,7 @@ func Test_BinlogAdapterReadDeltalogs(t *testing.T) {
 		},
 	}
 
-	adapter, err = NewBinlogAdapter(schema, 2, 1024, 2048, chunkManager, flushFunc, 0)
+	adapter, err = NewBinlogAdapter(ctx, schema, 2, 1024, 2048, chunkManager, flushFunc, 0, math.MaxUint64)
 	assert.NotNil(t, adapter)
 	assert.Nil(t, err)
 
@@ -482,10 +498,12 @@ func Test_BinlogAdapterReadDeltalogs(t *testing.T) {
 }
 
 func Test_BinlogAdapterReadTimestamp(t *testing.T) {
+	ctx := context.Background()
+
 	flushFunc := func(fields map[storage.FieldID]storage.FieldData, shardID int) error {
 		return nil
 	}
-	adapter, err := NewBinlogAdapter(sampleSchema(), 2, 1024, 2048, &MockChunkManager{}, flushFunc, 0)
+	adapter, err := NewBinlogAdapter(ctx, sampleSchema(), 2, 1024, 2048, &MockChunkManager{}, flushFunc, 0, math.MaxUint64)
 	assert.NotNil(t, adapter)
 	assert.Nil(t, err)
 
@@ -515,10 +533,12 @@ func Test_BinlogAdapterReadTimestamp(t *testing.T) {
 }
 
 func Test_BinlogAdapterReadPrimaryKeys(t *testing.T) {
+	ctx := context.Background()
+
 	flushFunc := func(fields map[storage.FieldID]storage.FieldData, shardID int) error {
 		return nil
 	}
-	adapter, err := NewBinlogAdapter(sampleSchema(), 2, 1024, 2048, &MockChunkManager{}, flushFunc, 0)
+	adapter, err := NewBinlogAdapter(ctx, sampleSchema(), 2, 1024, 2048, &MockChunkManager{}, flushFunc, 0, math.MaxUint64)
 	assert.NotNil(t, adapter)
 	assert.Nil(t, err)
 
@@ -570,12 +590,14 @@ func Test_BinlogAdapterReadPrimaryKeys(t *testing.T) {
 }
 
 func Test_BinlogAdapterShardListInt64(t *testing.T) {
+	ctx := context.Background()
+
 	flushFunc := func(fields map[storage.FieldID]storage.FieldData, shardID int) error {
 		return nil
 	}
 
 	shardNum := int32(2)
-	adapter, err := NewBinlogAdapter(sampleSchema(), shardNum, 1024, 2048, &MockChunkManager{}, flushFunc, 0)
+	adapter, err := NewBinlogAdapter(ctx, sampleSchema(), shardNum, 1024, 2048, &MockChunkManager{}, flushFunc, 0, math.MaxUint64)
 	assert.NotNil(t, adapter)
 	assert.Nil(t, err)
 
@@ -610,12 +632,14 @@ func Test_BinlogAdapterShardListInt64(t *testing.T) {
 }
 
 func Test_BinlogAdapterShardListVarchar(t *testing.T) {
+	ctx := context.Background()
+
 	flushFunc := func(fields map[storage.FieldID]storage.FieldData, shardID int) error {
 		return nil
 	}
 
 	shardNum := int32(2)
-	adapter, err := NewBinlogAdapter(strKeySchema(), shardNum, 1024, 2048, &MockChunkManager{}, flushFunc, 0)
+	adapter, err := NewBinlogAdapter(ctx, strKeySchema(), shardNum, 1024, 2048, &MockChunkManager{}, flushFunc, 0, math.MaxUint64)
 	assert.NotNil(t, adapter)
 	assert.Nil(t, err)
 
@@ -650,6 +674,8 @@ func Test_BinlogAdapterShardListVarchar(t *testing.T) {
 }
 
 func Test_BinlogAdapterReadInt64PK(t *testing.T) {
+	ctx := context.Background()
+
 	chunkManager := &MockChunkManager{}
 
 	flushCounter := 0
@@ -669,7 +695,7 @@ func Test_BinlogAdapterReadInt64PK(t *testing.T) {
 	}
 
 	shardNum := int32(2)
-	adapter, err := NewBinlogAdapter(sampleSchema(), shardNum, 1024, 2048, chunkManager, flushFunc, 0)
+	adapter, err := NewBinlogAdapter(ctx, sampleSchema(), shardNum, 1024, 2048, chunkManager, flushFunc, 0, math.MaxUint64)
 	assert.NotNil(t, adapter)
 	assert.Nil(t, err)
 	adapter.tsEndPoint = baseTimestamp + 1
@@ -741,6 +767,8 @@ func Test_BinlogAdapterReadInt64PK(t *testing.T) {
 }
 
 func Test_BinlogAdapterReadVarcharPK(t *testing.T) {
+	ctx := context.Background()
+
 	chunkManager := &MockChunkManager{}
 
 	flushCounter := 0
@@ -814,7 +842,7 @@ func Test_BinlogAdapterReadVarcharPK(t *testing.T) {
 
 	// succeed
 	shardNum := int32(3)
-	adapter, err := NewBinlogAdapter(strKeySchema(), shardNum, 1024, 2048, chunkManager, flushFunc, 0)
+	adapter, err := NewBinlogAdapter(ctx, strKeySchema(), shardNum, 1024, 2048, chunkManager, flushFunc, 0, math.MaxUint64)
 	assert.NotNil(t, adapter)
 	assert.Nil(t, err)
 
@@ -825,93 +853,14 @@ func Test_BinlogAdapterReadVarcharPK(t *testing.T) {
 	assert.Equal(t, rowCount-502, flushRowCount)
 }
 
-func Test_BinlogAdapterTryFlush(t *testing.T) {
-	flushCounter := 0
-	flushRowCount := 0
-	flushFunc := func(fields map[storage.FieldID]storage.FieldData, shardID int) error {
-		flushCounter++
-		rowCount := 0
-		for _, v := range fields {
-			rowCount = v.RowNum()
-			break
-		}
-		flushRowCount += rowCount
-		for _, v := range fields {
-			assert.Equal(t, rowCount, v.RowNum())
-		}
-		return nil
-	}
-
-	segmentSize := int64(1024)
-	maxTotalSize := int64(2048)
-	shardNum := int32(3)
-	adapter, err := NewBinlogAdapter(sampleSchema(), shardNum, segmentSize, maxTotalSize, &MockChunkManager{}, flushFunc, 0)
-	assert.NotNil(t, adapter)
-	assert.Nil(t, err)
-
-	// prepare flush data, 3 shards, each shard 10 rows
-	rowCount := 10
-	fieldsData := createFieldsData(rowCount)
-
-	// non-force flush
-	segmentsData := createSegmentsData(fieldsData, shardNum)
-	err = adapter.tryFlushSegments(segmentsData, false)
-	assert.Nil(t, err)
-	assert.Equal(t, 0, flushCounter)
-	assert.Equal(t, 0, flushRowCount)
-
-	// force flush
-	err = adapter.tryFlushSegments(segmentsData, true)
-	assert.Nil(t, err)
-	assert.Equal(t, int(shardNum), flushCounter)
-	assert.Equal(t, rowCount*int(shardNum), flushRowCount)
-
-	// after force flush, no data left
-	flushCounter = 0
-	flushRowCount = 0
-	err = adapter.tryFlushSegments(segmentsData, true)
-	assert.Nil(t, err)
-	assert.Equal(t, 0, flushCounter)
-	assert.Equal(t, 0, flushRowCount)
-
-	// flush when segment size exceeds segmentSize
-	segmentsData = createSegmentsData(fieldsData, shardNum)
-	adapter.segmentSize = 100 // segmentSize is 100 bytes, less than the 10 rows size
-	err = adapter.tryFlushSegments(segmentsData, false)
-	assert.Nil(t, err)
-	assert.Equal(t, int(shardNum), flushCounter)
-	assert.Equal(t, rowCount*int(shardNum), flushRowCount)
-
-	flushCounter = 0
-	flushRowCount = 0
-	err = adapter.tryFlushSegments(segmentsData, true) // no data left
-	assert.Nil(t, err)
-	assert.Equal(t, 0, flushCounter)
-	assert.Equal(t, 0, flushRowCount)
-
-	// flush when segments total size exceeds maxTotalSize
-	segmentsData = createSegmentsData(fieldsData, shardNum)
-	adapter.segmentSize = 4096 // segmentSize is 4096 bytes, larger than the 10 rows size
-	adapter.maxTotalSize = 100 // maxTotalSize is 100 bytes, less than the 30 rows size
-	err = adapter.tryFlushSegments(segmentsData, false)
-	assert.Nil(t, err)
-	assert.Equal(t, 1, flushCounter) // only the max segment is flushed
-	assert.Equal(t, 10, flushRowCount)
-
-	flushCounter = 0
-	flushRowCount = 0
-	err = adapter.tryFlushSegments(segmentsData, true) // two segments left
-	assert.Nil(t, err)
-	assert.Equal(t, 2, flushCounter)
-	assert.Equal(t, 20, flushRowCount)
-}
-
 func Test_BinlogAdapterDispatch(t *testing.T) {
+	ctx := context.Background()
+
 	flushFunc := func(fields map[storage.FieldID]storage.FieldData, shardID int) error {
 		return nil
 	}
 	shardNum := int32(3)
-	adapter, err := NewBinlogAdapter(sampleSchema(), shardNum, 1024, 2048, &MockChunkManager{}, flushFunc, 0)
+	adapter, err := NewBinlogAdapter(ctx, sampleSchema(), shardNum, 1024, 2048, &MockChunkManager{}, flushFunc, 0, math.MaxUint64)
 	assert.NotNil(t, adapter)
 	assert.Nil(t, err)
 
@@ -1055,10 +1004,12 @@ func Test_BinlogAdapterDispatch(t *testing.T) {
 }
 
 func Test_BinlogAdapterReadInsertlog(t *testing.T) {
+	ctx := context.Background()
+
 	flushFunc := func(fields map[storage.FieldID]storage.FieldData, shardID int) error {
 		return nil
 	}
-	adapter, err := NewBinlogAdapter(sampleSchema(), 2, 1024, 2048, &MockChunkManager{}, flushFunc, 0)
+	adapter, err := NewBinlogAdapter(ctx, sampleSchema(), 2, 1024, 2048, &MockChunkManager{}, flushFunc, 0, math.MaxUint64)
 	assert.NotNil(t, adapter)
 	assert.Nil(t, err)
 

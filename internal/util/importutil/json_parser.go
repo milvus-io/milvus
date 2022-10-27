@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 
@@ -84,28 +85,26 @@ func adjustBufSize(parser *JSONParser, collectionSchema *schemapb.CollectionSche
 		bufSize = MinBufferSize
 	}
 
-	log.Info("JSON parse: reset bufSize", zap.Int("sizePerRecord", sizePerRecord), zap.Int("bufSize", bufSize))
+	log.Info("JSON parser: reset bufSize", zap.Int("sizePerRecord", sizePerRecord), zap.Int("bufSize", bufSize))
 	parser.bufSize = int64(bufSize)
-}
-
-func (p *JSONParser) logError(msg string) error {
-	log.Error(msg)
-	return errors.New(msg)
 }
 
 func (p *JSONParser) ParseRows(r io.Reader, handler JSONRowHandler) error {
 	if handler == nil {
-		return p.logError("JSON parse handler is nil")
+		log.Error("JSON parse handler is nil")
+		return errors.New("JSON parse handler is nil")
 	}
 
 	dec := json.NewDecoder(r)
 
 	t, err := dec.Token()
 	if err != nil {
-		return p.logError("JSON parse: row count is 0")
+		log.Error("JSON parser: row count is 0")
+		return errors.New("JSON parser: row count is 0")
 	}
 	if t != json.Delim('{') {
-		return p.logError("JSON parse: invalid JSON format, the content should be started with'{'")
+		log.Error("JSON parser: invalid JSON format, the content should be started with'{'")
+		return errors.New("JSON parser: invalid JSON format, the content should be started with'{'")
 	}
 
 	// read the first level
@@ -114,24 +113,28 @@ func (p *JSONParser) ParseRows(r io.Reader, handler JSONRowHandler) error {
 		// read the key
 		t, err := dec.Token()
 		if err != nil {
-			return p.logError("JSON parse: " + err.Error())
+			log.Error("JSON parser: read json token error", zap.Any("err", err))
+			return fmt.Errorf("JSON parser: read json token error: %v", err)
 		}
 		key := t.(string)
 		keyLower := strings.ToLower(key)
 
 		// the root key should be RowRootNode
 		if keyLower != RowRootNode {
-			return p.logError("JSON parse: invalid row-based JSON format, the key " + key + " is not found")
+			log.Error("JSON parser: invalid row-based JSON format, the key is not found", zap.String("key", key))
+			return fmt.Errorf("JSON parser: invalid row-based JSON format, the key %s is not found", key)
 		}
 
 		// started by '['
 		t, err = dec.Token()
 		if err != nil {
-			return p.logError("JSON parse: " + err.Error())
+			log.Error("JSON parser: read json token error", zap.Any("err", err))
+			return fmt.Errorf("JSON parser: read json token error: %v", err)
 		}
 
 		if t != json.Delim('[') {
-			return p.logError("JSON parse: invalid row-based JSON format, rows list should begin with '['")
+			log.Error("JSON parser: invalid row-based JSON format, rows list should begin with '['")
+			return errors.New("JSON parser: invalid row-based JSON format, rows list should begin with '['")
 		}
 
 		// read buffer
@@ -139,27 +142,36 @@ func (p *JSONParser) ParseRows(r io.Reader, handler JSONRowHandler) error {
 		for dec.More() {
 			var value interface{}
 			if err := dec.Decode(&value); err != nil {
-				return p.logError("JSON parse: " + err.Error())
+				log.Error("JSON parser: decode json value error", zap.Any("err", err))
+				return fmt.Errorf("JSON parser: decode json value error: %v", err)
 			}
 
 			switch value.(type) {
 			case map[string]interface{}:
 				break
 			default:
-				return p.logError("JSON parse: invalid JSON format, each row should be a key-value map")
+				log.Error("JSON parser: invalid JSON format, each row should be a key-value map")
+				return errors.New("JSON parser: invalid JSON format, each row should be a key-value map")
 			}
 
 			row := make(map[storage.FieldID]interface{})
 			stringMap := value.(map[string]interface{})
 			for k, v := range stringMap {
-				row[p.name2FieldID[k]] = v
+				// if user provided redundant field, return error
+				fieldID, ok := p.name2FieldID[k]
+				if !ok {
+					log.Error("JSON parser: the field is not defined in collection schema", zap.String("fieldName", k))
+					return fmt.Errorf("JSON parser: the field '%s' is not defined in collection schema", k)
+				}
+				row[fieldID] = v
 			}
 
 			buf = append(buf, row)
 			if len(buf) >= int(p.bufSize) {
 				isEmpty = false
 				if err = handler.Handle(buf); err != nil {
-					return p.logError(err.Error())
+					log.Error("JSON parser: parse values error", zap.Any("err", err))
+					return fmt.Errorf("JSON parser: parse values error: %v", err)
 				}
 
 				// clear the buffer
@@ -171,26 +183,27 @@ func (p *JSONParser) ParseRows(r io.Reader, handler JSONRowHandler) error {
 		if len(buf) > 0 {
 			isEmpty = false
 			if err = handler.Handle(buf); err != nil {
-				return p.logError(err.Error())
+				log.Error("JSON parser: parse values error", zap.Any("err", err))
+				return fmt.Errorf("JSON parser: parse values error: %v", err)
 			}
 		}
 
 		// end by ']'
 		t, err = dec.Token()
 		if err != nil {
-			return p.logError("JSON parse: " + err.Error())
+			log.Error("JSON parser: read json token error", zap.Any("err", err))
+			return fmt.Errorf("JSON parser: read json token error: %v", err)
 		}
 
 		if t != json.Delim(']') {
-			return p.logError("JSON parse: invalid column-based JSON format, rows list should end with a ']'")
+			log.Error("JSON parser: invalid column-based JSON format, rows list should end with a ']'")
+			return errors.New("JSON parser: invalid column-based JSON format, rows list should end with a ']'")
 		}
 
-		// canceled?
-		select {
-		case <-p.ctx.Done():
-			return p.logError("import task was canceled")
-		default:
-			break
+		// outside context might be canceled(service stop, or future enhancement for canceling import task)
+		if isCanceled(p.ctx) {
+			log.Error("JSON parser: import task was canceled")
+			return errors.New("JSON parser: import task was canceled")
 		}
 
 		// this break means we require the first node must be RowRootNode
@@ -199,106 +212,8 @@ func (p *JSONParser) ParseRows(r io.Reader, handler JSONRowHandler) error {
 	}
 
 	if isEmpty {
-		return p.logError("JSON parse: row count is 0")
-	}
-
-	// send nil to notify the handler all have done
-	return handler.Handle(nil)
-}
-
-func (p *JSONParser) ParseColumns(r io.Reader, handler JSONColumnHandler) error {
-	if handler == nil {
-		return p.logError("JSON parse handler is nil")
-	}
-
-	dec := json.NewDecoder(r)
-
-	t, err := dec.Token()
-	if err != nil {
-		return p.logError("JSON parse: row count is 0")
-	}
-	if t != json.Delim('{') {
-		return p.logError("JSON parse: invalid JSON format, the content should be started with'{'")
-	}
-
-	// read the first level
-	isEmpty := true
-	for dec.More() {
-		// read the key
-		t, err := dec.Token()
-		if err != nil {
-			return p.logError("JSON parse: " + err.Error())
-		}
-		key := t.(string)
-
-		// not a valid column name, skip
-		_, isValidField := p.fields[key]
-
-		// started by '['
-		t, err = dec.Token()
-		if err != nil {
-			return p.logError("JSON parse: " + err.Error())
-		}
-
-		if t != json.Delim('[') {
-			return p.logError("JSON parse: invalid column-based JSON format, each field should begin with '['")
-		}
-
-		id := p.name2FieldID[key]
-		// read buffer
-		buf := make(map[storage.FieldID][]interface{})
-		buf[id] = make([]interface{}, 0, MinBufferSize)
-		for dec.More() {
-			var value interface{}
-			if err := dec.Decode(&value); err != nil {
-				return p.logError("JSON parse: " + err.Error())
-			}
-
-			if !isValidField {
-				continue
-			}
-
-			buf[id] = append(buf[id], value)
-			if len(buf[id]) >= int(p.bufSize) {
-				isEmpty = false
-				if err = handler.Handle(buf); err != nil {
-					return p.logError(err.Error())
-				}
-
-				// clear the buffer
-				buf[id] = make([]interface{}, 0, MinBufferSize)
-			}
-		}
-
-		// some values in buffer not parsed, parse them
-		if len(buf[id]) > 0 {
-			isEmpty = false
-			if err = handler.Handle(buf); err != nil {
-				return p.logError(err.Error())
-			}
-		}
-
-		// end by ']'
-		t, err = dec.Token()
-		if err != nil {
-			return p.logError("JSON parse: " + err.Error())
-		}
-
-		if t != json.Delim(']') {
-			return p.logError("JSON parse: invalid column-based JSON format, each field should end with a ']'")
-		}
-
-		// canceled?
-		select {
-		case <-p.ctx.Done():
-			return p.logError("import task was canceled")
-		default:
-			break
-		}
-	}
-
-	if isEmpty {
-		return p.logError("JSON parse: row count is 0")
+		log.Error("JSON parser: row count is 0")
+		return errors.New("JSON parser: row count is 0")
 	}
 
 	// send nil to notify the handler all have done

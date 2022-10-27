@@ -17,6 +17,7 @@
 package importutil
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -43,29 +44,39 @@ type SegmentFilesHolder struct {
 // 1. read insert log of each field, then constructs map[storage.FieldID]storage.FieldData in memory.
 // 2. read delta log to remove deleted entities(TimeStampField is used to apply or skip the operation).
 // 3. split data according to shard number
-// 4. call the callFlushFunc function to flush data into new segment if data size reaches segmentSize.
+// 4. call the callFlushFunc function to flush data into new binlog file if data size reaches blockSize.
 type BinlogAdapter struct {
+	ctx              context.Context            // for canceling parse process
 	collectionSchema *schemapb.CollectionSchema // collection schema
 	chunkManager     storage.ChunkManager       // storage interfaces to read binlog files
 	callFlushFunc    ImportFlushFunc            // call back function to flush segment
 	shardNum         int32                      // sharding number of the collection
-	segmentSize      int64                      // maximum size of a segment(unit:byte)
+	blockSize        int64                      // maximum size of a read block(unit:byte)
 	maxTotalSize     int64                      // maximum size of in-memory segments(unit:byte)
 	primaryKey       storage.FieldID            // id of primary key
 	primaryType      schemapb.DataType          // data type of primary key
 
-	// a timestamp to define the end point of restore, data after this point will be ignored
+	// a timestamp to define the start time point of restore, data before this time point will be ignored
+	// set this value to 0, all the data will be imported
+	// set this value to math.MaxUint64, all the data will be ignored
+	// the tsStartPoint value must be less/equal than tsEndPoint
+	tsStartPoint uint64
+
+	// a timestamp to define the end time point of restore, data after this time point will be ignored
 	// set this value to 0, all the data will be ignored
 	// set this value to math.MaxUint64, all the data will be imported
+	// the tsEndPoint value must be larger/equal than tsStartPoint
 	tsEndPoint uint64
 }
 
-func NewBinlogAdapter(collectionSchema *schemapb.CollectionSchema,
+func NewBinlogAdapter(ctx context.Context,
+	collectionSchema *schemapb.CollectionSchema,
 	shardNum int32,
-	segmentSize int64,
+	blockSize int64,
 	maxTotalSize int64,
 	chunkManager storage.ChunkManager,
 	flushFunc ImportFlushFunc,
+	tsStartPoint uint64,
 	tsEndPoint uint64) (*BinlogAdapter, error) {
 	if collectionSchema == nil {
 		log.Error("Binlog adapter: collection schema is nil")
@@ -83,18 +94,20 @@ func NewBinlogAdapter(collectionSchema *schemapb.CollectionSchema,
 	}
 
 	adapter := &BinlogAdapter{
+		ctx:              ctx,
 		collectionSchema: collectionSchema,
 		chunkManager:     chunkManager,
 		callFlushFunc:    flushFunc,
 		shardNum:         shardNum,
-		segmentSize:      segmentSize,
+		blockSize:        blockSize,
 		maxTotalSize:     maxTotalSize,
+		tsStartPoint:     tsStartPoint,
 		tsEndPoint:       tsEndPoint,
 	}
 
 	// amend the segment size to avoid portential OOM risk
-	if adapter.segmentSize > MaxSegmentSizeInMemory {
-		adapter.segmentSize = MaxSegmentSizeInMemory
+	if adapter.blockSize > MaxSegmentSizeInMemory {
+		adapter.blockSize = MaxSegmentSizeInMemory
 	}
 
 	// find out the primary key ID and its data type
@@ -142,7 +155,7 @@ func (p *BinlogAdapter) Read(segmentHolder *SegmentFilesHolder) error {
 	// b has these binlog files: b_1, b_2, b_3 ...
 	// Then first round read a_1 and b_1, second round read a_2 and b_2, etc...
 	// deleted list will be used to remove deleted entities
-	// if accumulate data exceed segmentSize, call callFlushFunc to generate new segment
+	// if accumulate data exceed blockSize, call callFlushFunc to generate new binlog file
 	batchCount := 0
 	for _, files := range segmentHolder.fieldFiles {
 		batchCount = len(files)
@@ -215,24 +228,30 @@ func (p *BinlogAdapter) Read(segmentHolder *SegmentFilesHolder) error {
 
 		// read other insert logs and use the shardList to do sharding
 		for fieldID, file := range batchFiles {
+			// outside context might be canceled(service stop, or future enhancement for canceling import task)
+			if isCanceled(p.ctx) {
+				log.Error("Binlog adapter: import task was canceled")
+				return errors.New("import task was canceled")
+			}
+
 			err = p.readInsertlog(fieldID, file, segmentsData, shardList)
 			if err != nil {
 				return err
 			}
 		}
 
-		// flush segment whose size exceed segmentSize
-		err = p.tryFlushSegments(segmentsData, false)
+		// flush segment whose size exceed blockSize
+		err = tryFlushBlocks(p.ctx, segmentsData, p.collectionSchema, p.callFlushFunc, p.blockSize, p.maxTotalSize, false)
 		if err != nil {
 			return err
 		}
 	}
 
 	// finally, force to flush
-	return p.tryFlushSegments(segmentsData, true)
+	return tryFlushBlocks(p.ctx, segmentsData, p.collectionSchema, p.callFlushFunc, p.blockSize, p.maxTotalSize, true)
 }
 
-// This method verify the schema and binlog files
+// verify method verify the schema and binlog files
 //  1. each field must has binlog file
 //  2. binlog file count of each field must be equal
 //  3. the collectionSchema doesn't contain TimeStampField and RowIDField since the import_wrapper excludes them,
@@ -284,7 +303,7 @@ func (p *BinlogAdapter) verify(segmentHolder *SegmentFilesHolder) error {
 	return nil
 }
 
-// This method read data from deltalog, and convert to a dict
+// readDeltalogs method reads data from deltalog, and convert to a dict
 // The deltalog data is a list, to improve performance of next step, we convert it to a dict,
 // key is the deleted ID, value is operation timestamp which is used to apply or skip the delete operation.
 func (p *BinlogAdapter) readDeltalogs(segmentHolder *SegmentFilesHolder) (map[int64]uint64, map[string]uint64, error) {
@@ -318,7 +337,7 @@ func (p *BinlogAdapter) readDeltalogs(segmentHolder *SegmentFilesHolder) (map[in
 	}
 }
 
-// Decode string array(read from delta log) to storage.DeleteLog array
+// decodeDeleteLogs decodes string array(read from delta log) to storage.DeleteLog array
 func (p *BinlogAdapter) decodeDeleteLogs(segmentHolder *SegmentFilesHolder) ([]*storage.DeleteLog, error) {
 	// step 1: read all delta logs to construct a string array, each string is marshaled from storage.DeleteLog
 	stringArray := make([]string, 0)
@@ -345,8 +364,9 @@ func (p *BinlogAdapter) decodeDeleteLogs(segmentHolder *SegmentFilesHolder) ([]*
 			return nil, err
 		}
 
-		// ignore deletions whose timestamp is larger than the tsEndPoint
-		if deleteLog.Ts <= p.tsEndPoint {
+		// only the ts between tsStartPoint and tsEndPoint is effective
+		// ignore deletions whose timestamp is larger than the tsEndPoint or less than tsStartPoint
+		if deleteLog.Ts >= p.tsStartPoint && deleteLog.Ts <= p.tsEndPoint {
 			deleteLogs = append(deleteLogs, deleteLog)
 		}
 	}
@@ -365,7 +385,7 @@ func (p *BinlogAdapter) decodeDeleteLogs(segmentHolder *SegmentFilesHolder) ([]*
 	return deleteLogs, nil
 }
 
-// Decode a string to storage.DeleteLog
+// decodeDeleteLog decodes a string to storage.DeleteLog
 // Note: the following code is mainly come from data_codec.go, I suppose the code can compatible with old version 2.0
 func (p *BinlogAdapter) decodeDeleteLog(deltaStr string) (*storage.DeleteLog, error) {
 	deleteLog := &storage.DeleteLog{}
@@ -399,7 +419,7 @@ func (p *BinlogAdapter) decodeDeleteLog(deltaStr string) (*storage.DeleteLog, er
 	return deleteLog, nil
 }
 
-// Each delta log data type is varchar, marshaled from an array of storage.DeleteLog objects.
+// readDeltalog parses a delta log file. Each delta log data type is varchar, marshaled from an array of storage.DeleteLog objects.
 func (p *BinlogAdapter) readDeltalog(logPath string) ([]string, error) {
 	// open the delta log file
 	binlogFile, err := NewBinlogFile(p.chunkManager)
@@ -426,7 +446,7 @@ func (p *BinlogAdapter) readDeltalog(logPath string) ([]string, error) {
 	return data, nil
 }
 
-// This method read data from int64 field, currently we use it to read the timestamp field.
+// readTimestamp method reads data from int64 field, currently we use it to read the timestamp field.
 func (p *BinlogAdapter) readTimestamp(logPath string) ([]int64, error) {
 	// open the log file
 	binlogFile, err := NewBinlogFile(p.chunkManager)
@@ -454,7 +474,7 @@ func (p *BinlogAdapter) readTimestamp(logPath string) ([]int64, error) {
 	return int64List, nil
 }
 
-// This method read primary keys from insert log.
+// readPrimaryKeys method reads primary keys from insert log.
 func (p *BinlogAdapter) readPrimaryKeys(logPath string) ([]int64, []string, error) {
 	// open the delta log file
 	binlogFile, err := NewBinlogFile(p.chunkManager)
@@ -493,7 +513,7 @@ func (p *BinlogAdapter) readPrimaryKeys(logPath string) ([]int64, []string, erro
 	}
 }
 
-// This method generate a shard id list by primary key(int64) list and deleted list.
+// getShardingListByPrimaryInt64 method generates a shard id list by primary key(int64) list and deleted list.
 // For example, an insert log has 10 rows, the no.3 and no.7 has been deleted, shardNum=2, the shardList could be:
 // [0, 1, -1, 1, 0, 1, -1, 1, 0, 1]
 // Compare timestampList with tsEndPoint to skip some rows.
@@ -513,10 +533,10 @@ func (p *BinlogAdapter) getShardingListByPrimaryInt64(primaryKeys []int64,
 	excluded := 0
 	shardList := make([]int32, 0, len(primaryKeys))
 	for i, key := range primaryKeys {
-		// if this entity's timestamp is greater than the tsEndPoint, set shardID = -1 to skip this entity
+		// if this entity's timestamp is greater than the tsEndPoint, or less than tsStartPoint, set shardID = -1 to skip this entity
 		// timestamp is stored as int64 type in log file, actually it is uint64, compare with uint64
 		ts := timestampList[i]
-		if uint64(ts) > p.tsEndPoint {
+		if uint64(ts) > p.tsEndPoint || uint64(ts) < p.tsStartPoint {
 			shardList = append(shardList, -1)
 			excluded++
 			continue
@@ -546,7 +566,7 @@ func (p *BinlogAdapter) getShardingListByPrimaryInt64(primaryKeys []int64,
 	return shardList, nil
 }
 
-// This method generate a shard id list by primary key(varchar) list and deleted list.
+// getShardingListByPrimaryVarchar method generates a shard id list by primary key(varchar) list and deleted list.
 // For example, an insert log has 10 rows, the no.3 and no.7 has been deleted, shardNum=2, the shardList could be:
 // [0, 1, -1, 1, 0, 1, -1, 1, 0, 1]
 func (p *BinlogAdapter) getShardingListByPrimaryVarchar(primaryKeys []string,
@@ -565,10 +585,10 @@ func (p *BinlogAdapter) getShardingListByPrimaryVarchar(primaryKeys []string,
 	excluded := 0
 	shardList := make([]int32, 0, len(primaryKeys))
 	for i, key := range primaryKeys {
-		// if this entity's timestamp is greater than the tsEndPoint, set shardID = -1 to skip this entity
+		// if this entity's timestamp is greater than the tsEndPoint, or less than tsStartPoint, set shardID = -1 to skip this entity
 		// timestamp is stored as int64 type in log file, actually it is uint64, compare with uint64
 		ts := timestampList[i]
-		if uint64(ts) > p.tsEndPoint {
+		if uint64(ts) > p.tsEndPoint || uint64(ts) < p.tsStartPoint {
 			shardList = append(shardList, -1)
 			excluded++
 			continue
@@ -598,7 +618,7 @@ func (p *BinlogAdapter) getShardingListByPrimaryVarchar(primaryKeys []string,
 	return shardList, nil
 }
 
-// This method read an insert log, and split the data into different shards according to a shard list
+// readInsertlog method reads an insert log, and split the data into different shards according to a shard list
 // The shardList is a list to tell which row belong to which shard, returned by getShardingListByPrimaryXXX()
 // For deleted rows, we say its shard id is -1.
 // For example, an insert log has 10 rows, the no.3 and no.7 has been deleted, shardNum=2, the shardList could be:
@@ -996,99 +1016,6 @@ func (p *BinlogAdapter) dispatchFloatVecToShards(data []float32, dim int, memory
 			floatVecField.Data = append(floatVecField.Data, val)
 		}
 		floatVecField.NumRows[0]++
-	}
-
-	return nil
-}
-
-// This method do the two things:
-// 1. if accumulate data of a segment exceed segmentSize, call callFlushFunc to generate new segment
-// 2. if total accumulate data exceed maxTotalSize, call callFlushFUnc to flush the biggest segment
-func (p *BinlogAdapter) tryFlushSegments(segmentsData []map[storage.FieldID]storage.FieldData, force bool) error {
-	totalSize := 0
-	biggestSize := 0
-	biggestItem := -1
-
-	// 1. if accumulate data of a segment exceed segmentSize, call callFlushFunc to generate new segment
-	for i := 0; i < len(segmentsData); i++ {
-		segmentData := segmentsData[i]
-		// Note: even rowCount is 0, the size is still non-zero
-		size := 0
-		rowCount := 0
-		for _, fieldData := range segmentData {
-			size += fieldData.GetMemorySize()
-			rowCount = fieldData.RowNum()
-		}
-
-		// force to flush, called at the end of Read()
-		if force && rowCount > 0 {
-			err := p.callFlushFunc(segmentData, i)
-			if err != nil {
-				log.Error("Binlog adapter: failed to force flush segment data", zap.Int("shardID", i))
-				return err
-			}
-			log.Info("Binlog adapter: force flush", zap.Int("rowCount", rowCount), zap.Int("size", size), zap.Int("shardID", i))
-
-			segmentsData[i] = initSegmentData(p.collectionSchema)
-			if segmentsData[i] == nil {
-				log.Error("Binlog adapter: failed to initialize FieldData list")
-				return errors.New("failed to initialize FieldData list")
-			}
-			continue
-		}
-
-		// if segment size is larger than predefined segmentSize, flush to create a new segment
-		// initialize a new FieldData list for next round batch read
-		if size > int(p.segmentSize) && rowCount > 0 {
-			err := p.callFlushFunc(segmentData, i)
-			if err != nil {
-				log.Error("Binlog adapter: failed to flush segment data", zap.Int("shardID", i))
-				return err
-			}
-			log.Info("Binlog adapter: segment size exceed limit and flush", zap.Int("rowCount", rowCount), zap.Int("size", size), zap.Int("shardID", i))
-
-			segmentsData[i] = initSegmentData(p.collectionSchema)
-			if segmentsData[i] == nil {
-				log.Error("Binlog adapter: failed to initialize FieldData list")
-				return errors.New("failed to initialize FieldData list")
-			}
-			continue
-		}
-
-		// calculate the total size(ignore the flushed segments)
-		// find out the biggest segment for the step 2
-		totalSize += size
-		if size > biggestSize {
-			biggestSize = size
-			biggestItem = i
-		}
-	}
-
-	// 2. if total accumulate data exceed maxTotalSize, call callFlushFUnc to flush the biggest segment
-	if totalSize > int(p.maxTotalSize) && biggestItem >= 0 {
-		segmentData := segmentsData[biggestItem]
-		size := 0
-		rowCount := 0
-		for _, fieldData := range segmentData {
-			size += fieldData.GetMemorySize()
-			rowCount = fieldData.RowNum()
-		}
-
-		if rowCount > 0 {
-			err := p.callFlushFunc(segmentData, biggestItem)
-			if err != nil {
-				log.Error("Binlog adapter: failed to flush biggest segment data", zap.Int("shardID", biggestItem))
-				return err
-			}
-			log.Info("Binlog adapter: total size exceed limit and flush", zap.Int("rowCount", rowCount),
-				zap.Int("size", size), zap.Int("totalSize", totalSize), zap.Int("shardID", biggestItem))
-
-			segmentsData[biggestItem] = initSegmentData(p.collectionSchema)
-			if segmentsData[biggestItem] == nil {
-				log.Error("Binlog adapter: failed to initialize FieldData list")
-				return errors.New("failed to initialize FieldData list")
-			}
-		}
 	}
 
 	return nil

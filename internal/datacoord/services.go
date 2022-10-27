@@ -637,7 +637,7 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 		if segment.State != commonpb.SegmentState_Flushed && segment.State != commonpb.SegmentState_Flushing && segment.State != commonpb.SegmentState_Dropped {
 			continue
 		}
-		// Also skip bulk load segments.
+		// Also skip bulk insert segments.
 		if segment.GetIsImporting() {
 			continue
 		}

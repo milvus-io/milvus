@@ -1598,8 +1598,8 @@ type SegmentInfo struct {
 	CompactionFrom      []int64        `protobuf:"varint,15,rep,packed,name=compactionFrom,proto3" json:"compactionFrom,omitempty"`
 	DroppedAt           uint64         `protobuf:"varint,16,opt,name=dropped_at,json=droppedAt,proto3" json:"dropped_at,omitempty"`
 	// A flag indicating if:
-	// (1) this segment is created by bulk load, and
-	// (2) the bulk load task that creates this segment has not yet reached `ImportCompleted` state.
+	// (1) this segment is created by bulk insert, and
+	// (2) the bulk insert task that creates this segment has not yet reached `ImportCompleted` state.
 	IsImporting          bool     `protobuf:"varint,17,opt,name=is_importing,json=isImporting,proto3" json:"is_importing,omitempty"`
 	IsFake               bool     `protobuf:"varint,18,opt,name=is_fake,json=isFake,proto3" json:"is_fake,omitempty"`
 	XXX_NoUnkeyedLiteral struct{} `json:"-"`

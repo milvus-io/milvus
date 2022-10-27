@@ -3967,7 +3967,8 @@ func unhealthyStatus() *commonpb.Status {
 func (node *Proxy) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
 	log.Info("received import request",
 		zap.String("collection name", req.GetCollectionName()),
-		zap.Bool("row-based", req.GetRowBased()))
+		zap.String("partition name", req.GetPartitionName()),
+		zap.Strings("files", req.GetFiles()))
 	resp := &milvuspb.ImportResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
@@ -3996,7 +3997,7 @@ func (node *Proxy) Import(ctx context.Context, req *milvuspb.ImportRequest) (*mi
 	respFromRC, err := node.rootCoord.Import(ctx, req)
 	if err != nil {
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method, metrics.FailLabel).Inc()
-		log.Error("failed to execute bulk load request", zap.Error(err))
+		log.Error("failed to execute bulk insert request", zap.Error(err))
 		resp.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		resp.Status.Reason = err.Error()
 		return resp, nil

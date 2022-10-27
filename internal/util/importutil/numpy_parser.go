@@ -19,12 +19,13 @@ package importutil
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
-	"strconv"
 
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/storage"
+	"go.uber.org/zap"
 )
 
 type ColumnDesc struct {
@@ -43,7 +44,7 @@ type NumpyParser struct {
 	callFlushFunc func(field storage.FieldData) error // call back function to output column data
 }
 
-// NewNumpyParser helper function to create a NumpyParser
+// NewNumpyParser is helper function to create a NumpyParser
 func NewNumpyParser(ctx context.Context, collectionSchema *schemapb.CollectionSchema,
 	flushFunc func(field storage.FieldData) error) *NumpyParser {
 	if collectionSchema == nil || flushFunc == nil {
@@ -60,38 +61,10 @@ func NewNumpyParser(ctx context.Context, collectionSchema *schemapb.CollectionSc
 	return parser
 }
 
-func (p *NumpyParser) logError(msg string) error {
-	log.Error(msg)
-	return errors.New(msg)
-}
-
-// data type converted from numpy header description, for vector field, the type is int8(binary vector) or float32(float vector)
-func convertNumpyType(str string) (schemapb.DataType, error) {
-	switch str {
-	case "b1", "<b1", "|b1", "bool":
-		return schemapb.DataType_Bool, nil
-	case "u1", "<u1", "|u1", "uint8": // binary vector data type is uint8
-		return schemapb.DataType_BinaryVector, nil
-	case "i1", "<i1", "|i1", ">i1", "int8":
-		return schemapb.DataType_Int8, nil
-	case "i2", "<i2", "|i2", ">i2", "int16":
-		return schemapb.DataType_Int16, nil
-	case "i4", "<i4", "|i4", ">i4", "int32":
-		return schemapb.DataType_Int32, nil
-	case "i8", "<i8", "|i8", ">i8", "int64":
-		return schemapb.DataType_Int64, nil
-	case "f4", "<f4", "|f4", ">f4", "float32":
-		return schemapb.DataType_Float, nil
-	case "f8", "<f8", "|f8", ">f8", "float64":
-		return schemapb.DataType_Double, nil
-	default:
-		return schemapb.DataType_None, errors.New("unsupported data type " + str)
-	}
-}
-
 func (p *NumpyParser) validate(adapter *NumpyAdapter, fieldName string) error {
 	if adapter == nil {
-		return errors.New("numpy adapter is nil")
+		log.Error("Numpy parser: numpy adapter is nil")
+		return errors.New("Numpy parser: numpy adapter is nil")
 	}
 
 	// check existence of the target field
@@ -105,27 +78,32 @@ func (p *NumpyParser) validate(adapter *NumpyAdapter, fieldName string) error {
 	}
 
 	if p.columnDesc.name == "" {
-		return errors.New("the field " + fieldName + " doesn't exist")
+		log.Error("Numpy parser: Numpy parser: the field is not found in collection schema", zap.String("fieldName", fieldName))
+		return fmt.Errorf("Numpy parser: the field name '%s' is not found in collection schema", fieldName)
 	}
 
 	p.columnDesc.dt = schema.DataType
-	elementType, err := convertNumpyType(adapter.GetType())
-	if err != nil {
-		return err
-	}
-
+	elementType := adapter.GetType()
 	shape := adapter.GetShape()
 
+	var err error
 	// 1. field data type should be consist to numpy data type
 	// 2. vector field dimension should be consist to numpy shape
 	if schemapb.DataType_FloatVector == schema.DataType {
+		// float32/float64 numpy file can be used for float vector file, 2 reasons:
+		// 1. for float vector, we support float32 and float64 numpy file because python float value is 64 bit
+		// 2. for float64 numpy file, the performance is worse than float32 numpy file
 		if elementType != schemapb.DataType_Float && elementType != schemapb.DataType_Double {
-			return errors.New("illegal data type " + adapter.GetType() + " for field " + schema.GetName())
+			log.Error("Numpy parser: illegal data type of numpy file for float vector field", zap.Any("dataType", elementType),
+				zap.String("fieldName", fieldName))
+			return fmt.Errorf("Numpy parser: illegal data type %s of numpy file for float vector field '%s'", getTypeName(elementType), schema.GetName())
 		}
 
 		// vector field, the shape should be 2
 		if len(shape) != 2 {
-			return errors.New("illegal numpy shape " + strconv.Itoa(len(shape)) + " for field " + schema.GetName())
+			log.Error("Numpy parser: illegal shape of numpy file for float vector field, shape should be 2", zap.Int("shape", len(shape)),
+				zap.String("fieldName", fieldName))
+			return fmt.Errorf("Numpy parser: illegal shape %d of numpy file for float vector field '%s', shape should be 2", shape, schema.GetName())
 		}
 
 		// shape[0] is row count, shape[1] is element count per row
@@ -137,16 +115,23 @@ func (p *NumpyParser) validate(adapter *NumpyAdapter, fieldName string) error {
 		}
 
 		if shape[1] != p.columnDesc.dimension {
-			return errors.New("illegal row width " + strconv.Itoa(shape[1]) + " for field " + schema.GetName() + " dimension " + strconv.Itoa(p.columnDesc.dimension))
+			log.Error("Numpy parser: illegal dimension of numpy file for float vector field", zap.String("fieldName", fieldName),
+				zap.Int("numpyDimension", shape[1]), zap.Int("fieldDimension", p.columnDesc.dimension))
+			return fmt.Errorf("Numpy parser: illegal dimension %d of numpy file for float vector field '%s', dimension should be %d",
+				shape[1], schema.GetName(), p.columnDesc.dimension)
 		}
 	} else if schemapb.DataType_BinaryVector == schema.DataType {
 		if elementType != schemapb.DataType_BinaryVector {
-			return errors.New("illegal data type " + adapter.GetType() + " for field " + schema.GetName())
+			log.Error("Numpy parser: illegal data type of numpy file for binary vector field", zap.Any("dataType", elementType),
+				zap.String("fieldName", fieldName))
+			return fmt.Errorf("Numpy parser: illegal data type %s of numpy file for binary vector field '%s'", getTypeName(elementType), schema.GetName())
 		}
 
 		// vector field, the shape should be 2
 		if len(shape) != 2 {
-			return errors.New("illegal numpy shape " + strconv.Itoa(len(shape)) + " for field " + schema.GetName())
+			log.Error("Numpy parser: illegal shape of numpy file for binary vector field, shape should be 2", zap.Int("shape", len(shape)),
+				zap.String("fieldName", fieldName))
+			return fmt.Errorf("Numpy parser: illegal shape %d of numpy file for binary vector field '%s', shape should be 2", shape, schema.GetName())
 		}
 
 		// shape[0] is row count, shape[1] is element count per row
@@ -158,16 +143,24 @@ func (p *NumpyParser) validate(adapter *NumpyAdapter, fieldName string) error {
 		}
 
 		if shape[1] != p.columnDesc.dimension/8 {
-			return errors.New("illegal row width " + strconv.Itoa(shape[1]) + " for field " + schema.GetName() + " dimension " + strconv.Itoa(p.columnDesc.dimension))
+			log.Error("Numpy parser: illegal dimension of numpy file for float vector field", zap.String("fieldName", fieldName),
+				zap.Int("numpyDimension", shape[1]*8), zap.Int("fieldDimension", p.columnDesc.dimension))
+			return fmt.Errorf("Numpy parser: illegal dimension %d of numpy file for binary vector field '%s', dimension should be %d",
+				shape[1]*8, schema.GetName(), p.columnDesc.dimension)
 		}
 	} else {
 		if elementType != schema.DataType {
-			return errors.New("illegal data type " + adapter.GetType() + " for field " + schema.GetName())
+			log.Error("Numpy parser: illegal data type of numpy file for scalar field", zap.Any("numpyDataType", elementType),
+				zap.String("fieldName", fieldName), zap.Any("fieldDataType", schema.DataType))
+			return fmt.Errorf("Numpy parser: illegal data type %s of numpy file for scalar field '%s' with type %d",
+				getTypeName(elementType), schema.GetName(), schema.DataType)
 		}
 
 		// scalar field, the shape should be 1
 		if len(shape) != 1 {
-			return errors.New("illegal numpy shape " + strconv.Itoa(len(shape)) + " for field " + schema.GetName())
+			log.Error("Numpy parser: illegal shape of numpy file for scalar field, shape should be 1", zap.Int("shape", len(shape)),
+				zap.String("fieldName", fieldName))
+			return fmt.Errorf("Numpy parser: illegal shape %d of numpy file for scalar field '%s', shape should be 1", shape, schema.GetName())
 		}
 
 		p.columnDesc.elementCount = shape[0]
@@ -176,13 +169,14 @@ func (p *NumpyParser) validate(adapter *NumpyAdapter, fieldName string) error {
 	return nil
 }
 
-// this method read numpy data section into a storage.FieldData
+// consume method reads numpy data section into a storage.FieldData
 // please note it will require a large memory block(the memory size is almost equal to numpy file size)
 func (p *NumpyParser) consume(adapter *NumpyAdapter) error {
 	switch p.columnDesc.dt {
 	case schemapb.DataType_Bool:
 		data, err := adapter.ReadBool(p.columnDesc.elementCount)
 		if err != nil {
+			log.Error(err.Error())
 			return err
 		}
 
@@ -194,6 +188,7 @@ func (p *NumpyParser) consume(adapter *NumpyAdapter) error {
 	case schemapb.DataType_Int8:
 		data, err := adapter.ReadInt8(p.columnDesc.elementCount)
 		if err != nil {
+			log.Error(err.Error())
 			return err
 		}
 
@@ -204,6 +199,7 @@ func (p *NumpyParser) consume(adapter *NumpyAdapter) error {
 	case schemapb.DataType_Int16:
 		data, err := adapter.ReadInt16(p.columnDesc.elementCount)
 		if err != nil {
+			log.Error(err.Error())
 			return err
 		}
 
@@ -214,6 +210,7 @@ func (p *NumpyParser) consume(adapter *NumpyAdapter) error {
 	case schemapb.DataType_Int32:
 		data, err := adapter.ReadInt32(p.columnDesc.elementCount)
 		if err != nil {
+			log.Error(err.Error())
 			return err
 		}
 
@@ -224,6 +221,7 @@ func (p *NumpyParser) consume(adapter *NumpyAdapter) error {
 	case schemapb.DataType_Int64:
 		data, err := adapter.ReadInt64(p.columnDesc.elementCount)
 		if err != nil {
+			log.Error(err.Error())
 			return err
 		}
 
@@ -234,6 +232,7 @@ func (p *NumpyParser) consume(adapter *NumpyAdapter) error {
 	case schemapb.DataType_Float:
 		data, err := adapter.ReadFloat32(p.columnDesc.elementCount)
 		if err != nil {
+			log.Error(err.Error())
 			return err
 		}
 
@@ -244,6 +243,7 @@ func (p *NumpyParser) consume(adapter *NumpyAdapter) error {
 	case schemapb.DataType_Double:
 		data, err := adapter.ReadFloat64(p.columnDesc.elementCount)
 		if err != nil {
+			log.Error(err.Error())
 			return err
 		}
 
@@ -251,9 +251,21 @@ func (p *NumpyParser) consume(adapter *NumpyAdapter) error {
 			NumRows: []int64{int64(p.columnDesc.elementCount)},
 			Data:    data,
 		}
+	case schemapb.DataType_VarChar:
+		data, err := adapter.ReadString(p.columnDesc.elementCount)
+		if err != nil {
+			log.Error(err.Error())
+			return err
+		}
+
+		p.columnData = &storage.StringFieldData{
+			NumRows: []int64{int64(p.columnDesc.elementCount)},
+			Data:    data,
+		}
 	case schemapb.DataType_BinaryVector:
 		data, err := adapter.ReadUint8(p.columnDesc.elementCount)
 		if err != nil {
+			log.Error(err.Error())
 			return err
 		}
 
@@ -263,24 +275,24 @@ func (p *NumpyParser) consume(adapter *NumpyAdapter) error {
 			Dim:     p.columnDesc.dimension,
 		}
 	case schemapb.DataType_FloatVector:
-		// for float vector, we support float32 and float64 numpy file because python float value is 64 bit
-		// for float64 numpy file, the performance is worse than float32 numpy file
-		// we don't check overflow here
-		elementType, err := convertNumpyType(adapter.GetType())
-		if err != nil {
-			return err
-		}
+		// float32/float64 numpy file can be used for float vector file, 2 reasons:
+		// 1. for float vector, we support float32 and float64 numpy file because python float value is 64 bit
+		// 2. for float64 numpy file, the performance is worse than float32 numpy file
+		elementType := adapter.GetType()
 
 		var data []float32
+		var err error
 		if elementType == schemapb.DataType_Float {
 			data, err = adapter.ReadFloat32(p.columnDesc.elementCount)
 			if err != nil {
+				log.Error(err.Error())
 				return err
 			}
 		} else if elementType == schemapb.DataType_Double {
 			data = make([]float32, 0, p.columnDesc.elementCount)
 			data64, err := adapter.ReadFloat64(p.columnDesc.elementCount)
 			if err != nil {
+				log.Error(err.Error())
 				return err
 			}
 
@@ -295,7 +307,8 @@ func (p *NumpyParser) consume(adapter *NumpyAdapter) error {
 			Dim:     p.columnDesc.dimension,
 		}
 	default:
-		return errors.New("unsupported data type: " + strconv.Itoa(int(p.columnDesc.dt)))
+		log.Error("Numpy parser: unsupported data type of field", zap.Any("dataType", p.columnDesc.dt), zap.String("fieldName", p.columnDesc.name))
+		return fmt.Errorf("Numpy parser: unsupported data type %s of field '%s'", getTypeName(p.columnDesc.dt), p.columnDesc.name)
 	}
 
 	return nil
@@ -304,13 +317,13 @@ func (p *NumpyParser) consume(adapter *NumpyAdapter) error {
 func (p *NumpyParser) Parse(reader io.Reader, fieldName string, onlyValidate bool) error {
 	adapter, err := NewNumpyAdapter(reader)
 	if err != nil {
-		return p.logError("Numpy parse: " + err.Error())
+		return err
 	}
 
 	// the validation method only check the file header information
 	err = p.validate(adapter, fieldName)
 	if err != nil {
-		return p.logError("Numpy parse: " + err.Error())
+		return err
 	}
 
 	if onlyValidate {
@@ -320,7 +333,7 @@ func (p *NumpyParser) Parse(reader io.Reader, fieldName string, onlyValidate boo
 	// read all data from the numpy file
 	err = p.consume(adapter)
 	if err != nil {
-		return p.logError("Numpy parse: " + err.Error())
+		return err
 	}
 
 	return p.callFlushFunc(p.columnData)
