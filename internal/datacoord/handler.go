@@ -71,7 +71,7 @@ func (h *ServerHandler) GetDataVChanPositions(channel *channel, partitionID Uniq
 			continue
 		}
 		if s.GetIsImporting() {
-			// Skip bulk load segments.
+			// Skip bulk insert segments.
 			continue
 		}
 
@@ -149,7 +149,7 @@ func (h *ServerHandler) GetQueryVChanPositions(channel *channel, partitionID Uni
 			continue
 		}
 		if s.GetIsImporting() {
-			// Skip bulk load segments.
+			// Skip bulk insert segments.
 			continue
 		}
 		segmentInfos[s.GetID()] = s

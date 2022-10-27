@@ -27,157 +27,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func sampleSchema() *schemapb.CollectionSchema {
-	schema := &schemapb.CollectionSchema{
-		Name:        "schema",
-		Description: "schema",
-		AutoID:      true,
-		Fields: []*schemapb.FieldSchema{
-			{
-				FieldID:      102,
-				Name:         "field_bool",
-				IsPrimaryKey: false,
-				Description:  "bool",
-				DataType:     schemapb.DataType_Bool,
-			},
-			{
-				FieldID:      103,
-				Name:         "field_int8",
-				IsPrimaryKey: false,
-				Description:  "int8",
-				DataType:     schemapb.DataType_Int8,
-			},
-			{
-				FieldID:      104,
-				Name:         "field_int16",
-				IsPrimaryKey: false,
-				Description:  "int16",
-				DataType:     schemapb.DataType_Int16,
-			},
-			{
-				FieldID:      105,
-				Name:         "field_int32",
-				IsPrimaryKey: false,
-				Description:  "int32",
-				DataType:     schemapb.DataType_Int32,
-			},
-			{
-				FieldID:      106,
-				Name:         "field_int64",
-				IsPrimaryKey: true,
-				AutoID:       false,
-				Description:  "int64",
-				DataType:     schemapb.DataType_Int64,
-			},
-			{
-				FieldID:      107,
-				Name:         "field_float",
-				IsPrimaryKey: false,
-				Description:  "float",
-				DataType:     schemapb.DataType_Float,
-			},
-			{
-				FieldID:      108,
-				Name:         "field_double",
-				IsPrimaryKey: false,
-				Description:  "double",
-				DataType:     schemapb.DataType_Double,
-			},
-			{
-				FieldID:      109,
-				Name:         "field_string",
-				IsPrimaryKey: false,
-				Description:  "string",
-				DataType:     schemapb.DataType_VarChar,
-				TypeParams: []*commonpb.KeyValuePair{
-					{Key: "max_length", Value: "128"},
-				},
-			},
-			{
-				FieldID:      110,
-				Name:         "field_binary_vector",
-				IsPrimaryKey: false,
-				Description:  "binary_vector",
-				DataType:     schemapb.DataType_BinaryVector,
-				TypeParams: []*commonpb.KeyValuePair{
-					{Key: "dim", Value: "16"},
-				},
-			},
-			{
-				FieldID:      111,
-				Name:         "field_float_vector",
-				IsPrimaryKey: false,
-				Description:  "float_vector",
-				DataType:     schemapb.DataType_FloatVector,
-				TypeParams: []*commonpb.KeyValuePair{
-					{Key: "dim", Value: "4"},
-				},
-			},
-		},
-	}
-	return schema
-}
-
-func strKeySchema() *schemapb.CollectionSchema {
-	schema := &schemapb.CollectionSchema{
-		Name:        "schema",
-		Description: "schema",
-		AutoID:      true,
-		Fields: []*schemapb.FieldSchema{
-			{
-				FieldID:      101,
-				Name:         "uid",
-				IsPrimaryKey: true,
-				AutoID:       false,
-				Description:  "uid",
-				DataType:     schemapb.DataType_VarChar,
-				TypeParams: []*commonpb.KeyValuePair{
-					{Key: "max_length", Value: "1024"},
-				},
-			},
-			{
-				FieldID:      102,
-				Name:         "int_scalar",
-				IsPrimaryKey: false,
-				Description:  "int_scalar",
-				DataType:     schemapb.DataType_Int32,
-			},
-			{
-				FieldID:      103,
-				Name:         "float_scalar",
-				IsPrimaryKey: false,
-				Description:  "float_scalar",
-				DataType:     schemapb.DataType_Float,
-			},
-			{
-				FieldID:      104,
-				Name:         "string_scalar",
-				IsPrimaryKey: false,
-				Description:  "string_scalar",
-				DataType:     schemapb.DataType_VarChar,
-			},
-			{
-				FieldID:      105,
-				Name:         "bool_scalar",
-				IsPrimaryKey: false,
-				Description:  "bool_scalar",
-				DataType:     schemapb.DataType_Bool,
-			},
-			{
-				FieldID:      106,
-				Name:         "vectors",
-				IsPrimaryKey: false,
-				Description:  "vectors",
-				DataType:     schemapb.DataType_FloatVector,
-				TypeParams: []*commonpb.KeyValuePair{
-					{Key: "dim", Value: "4"},
-				},
-			},
-		},
-	}
-	return schema
-}
-
 func Test_AdjustBufSize(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -234,6 +83,7 @@ func Test_JSONParserParserRows(t *testing.T) {
 		]
 	}`)
 
+	// handler is nil
 	err := parser.ParseRows(reader, nil)
 	assert.NotNil(t, err)
 
@@ -241,10 +91,12 @@ func Test_JSONParserParserRows(t *testing.T) {
 	assert.NotNil(t, validator)
 	assert.Nil(t, err)
 
+	// success
 	err = parser.ParseRows(reader, validator)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(5), validator.ValidateCount())
 
+	// not a row-based format
 	reader = strings.NewReader(`{
 		"dummy":[]
 	}`)
@@ -255,6 +107,7 @@ func Test_JSONParserParserRows(t *testing.T) {
 	err = parser.ParseRows(reader, validator)
 	assert.NotNil(t, err)
 
+	// rows is not a list
 	reader = strings.NewReader(`{
 		"rows":
 	}`)
@@ -265,6 +118,7 @@ func Test_JSONParserParserRows(t *testing.T) {
 	err = parser.ParseRows(reader, validator)
 	assert.NotNil(t, err)
 
+	// typo
 	reader = strings.NewReader(`{
 		"rows": [}
 	}`)
@@ -275,6 +129,7 @@ func Test_JSONParserParserRows(t *testing.T) {
 	err = parser.ParseRows(reader, validator)
 	assert.NotNil(t, err)
 
+	// rows is not a list
 	reader = strings.NewReader(`{
 		"rows": {}
 	}`)
@@ -285,6 +140,7 @@ func Test_JSONParserParserRows(t *testing.T) {
 	err = parser.ParseRows(reader, validator)
 	assert.NotNil(t, err)
 
+	// rows is not a list of list
 	reader = strings.NewReader(`{
 		"rows": [[]]
 	}`)
@@ -295,6 +151,7 @@ func Test_JSONParserParserRows(t *testing.T) {
 	err = parser.ParseRows(reader, validator)
 	assert.NotNil(t, err)
 
+	// not valid json format
 	reader = strings.NewReader(`[]`)
 	validator, err = NewJSONRowValidator(schema, nil)
 	assert.NotNil(t, validator)
@@ -303,6 +160,7 @@ func Test_JSONParserParserRows(t *testing.T) {
 	err = parser.ParseRows(reader, validator)
 	assert.NotNil(t, err)
 
+	// empty content
 	reader = strings.NewReader(`{}`)
 	validator, err = NewJSONRowValidator(schema, nil)
 	assert.NotNil(t, validator)
@@ -311,6 +169,7 @@ func Test_JSONParserParserRows(t *testing.T) {
 	err = parser.ParseRows(reader, validator)
 	assert.NotNil(t, err)
 
+	// empty content
 	reader = strings.NewReader(``)
 	validator, err = NewJSONRowValidator(schema, nil)
 	assert.NotNil(t, validator)
@@ -318,129 +177,23 @@ func Test_JSONParserParserRows(t *testing.T) {
 
 	err = parser.ParseRows(reader, validator)
 	assert.NotNil(t, err)
-}
 
-func Test_JSONParserParserColumns(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	schema := sampleSchema()
-	parser := NewJSONParser(ctx, schema)
-	assert.NotNil(t, parser)
-	parser.bufSize = 1
-
-	reader := strings.NewReader(`{
-		"field_bool": [true, false, true, true, true],
-		"field_int8": [10, 11, 12, 13, 14],
-		"field_int16": [100, 101, 102, 103, 104],
-		"field_int32": [1000, 1001, 1002, 1003, 1004],
-		"field_int64": [10000, 10001, 10002, 10003, 10004],
-		"field_float": [3.14, 3.15, 3.16, 3.17, 3.18],
-		"field_double": [5.1, 5.2, 5.3, 5.4, 5.5],
-		"field_string": ["a", "b", "c", "d", "e"],
-		"field_binary_vector": [
-			[254, 1],
-			[253, 2],
-			[252, 3],
-			[251, 4],
-			[250, 5]
-		],
-		"field_float_vector": [
-			[1.1, 1.2, 1.3, 1.4],
-			[2.1, 2.2, 2.3, 2.4],
-			[3.1, 3.2, 3.3, 3.4],
-			[4.1, 4.2, 4.3, 4.4],
-			[5.1, 5.2, 5.3, 5.4]
+	// redundant field
+	reader = strings.NewReader(`{
+		"rows":[
+			{"dummy": 1, "field_bool": true, "field_int8": 10, "field_int16": 101, "field_int32": 1001, "field_int64": 10001, "field_float": 3.14, "field_double": 1.56, "field_string": "hello world", "field_binary_vector": [254, 0], "field_float_vector": [1.1, 1.2, 1.3, 1.4]},
 		]
 	}`)
-
-	err := parser.ParseColumns(reader, nil)
+	err = parser.ParseRows(reader, validator)
 	assert.NotNil(t, err)
 
-	validator, err := NewJSONColumnValidator(schema, nil)
-	assert.NotNil(t, validator)
-	assert.Nil(t, err)
-
-	err = parser.ParseColumns(reader, validator)
-	assert.Nil(t, err)
-	counter := validator.ValidateCount()
-	for _, v := range counter {
-		assert.Equal(t, int64(5), v)
-	}
-
+	// field missed
 	reader = strings.NewReader(`{
-		"field_int8": [10, 11, 12, 13, 14],
-		"dummy":[1, 2, 3]
+		"rows":[
+			{"field_int8": 10, "field_int16": 101, "field_int32": 1001, "field_int64": 10001, "field_float": 3.14, "field_double": 1.56, "field_string": "hello world", "field_binary_vector": [254, 0], "field_float_vector": [1.1, 1.2, 1.3, 1.4]},
+		]
 	}`)
-	validator, err = NewJSONColumnValidator(schema, nil)
-	assert.NotNil(t, validator)
-	assert.Nil(t, err)
-
-	err = parser.ParseColumns(reader, validator)
-	assert.Nil(t, err)
-
-	reader = strings.NewReader(`{
-		"dummy":[1, 2, 3]
-	}`)
-	validator, err = NewJSONColumnValidator(schema, nil)
-	assert.NotNil(t, validator)
-	assert.Nil(t, err)
-
-	err = parser.ParseColumns(reader, validator)
-	assert.NotNil(t, err)
-
-	reader = strings.NewReader(`{
-		"field_bool":
-	}`)
-	validator, err = NewJSONColumnValidator(schema, nil)
-	assert.NotNil(t, validator)
-	assert.Nil(t, err)
-
-	err = parser.ParseColumns(reader, validator)
-	assert.NotNil(t, err)
-
-	reader = strings.NewReader(`{
-		"field_bool":{}
-	}`)
-	validator, err = NewJSONColumnValidator(schema, nil)
-	assert.NotNil(t, validator)
-	assert.Nil(t, err)
-
-	err = parser.ParseColumns(reader, validator)
-	assert.NotNil(t, err)
-
-	reader = strings.NewReader(`{
-		"field_bool":[}
-	}`)
-	validator, err = NewJSONColumnValidator(schema, nil)
-	assert.NotNil(t, validator)
-	assert.Nil(t, err)
-
-	err = parser.ParseColumns(reader, validator)
-	assert.NotNil(t, err)
-
-	reader = strings.NewReader(`[]`)
-	validator, err = NewJSONColumnValidator(schema, nil)
-	assert.NotNil(t, validator)
-	assert.Nil(t, err)
-
-	err = parser.ParseColumns(reader, validator)
-	assert.NotNil(t, err)
-
-	reader = strings.NewReader(`{}`)
-	validator, err = NewJSONColumnValidator(schema, nil)
-	assert.NotNil(t, validator)
-	assert.Nil(t, err)
-
-	err = parser.ParseColumns(reader, validator)
-	assert.NotNil(t, err)
-
-	reader = strings.NewReader(``)
-	validator, err = NewJSONColumnValidator(schema, nil)
-	assert.NotNil(t, validator)
-	assert.Nil(t, err)
-
-	err = parser.ParseColumns(reader, validator)
+	err = parser.ParseRows(reader, validator)
 	assert.NotNil(t, err)
 }
 
@@ -544,43 +297,4 @@ func Test_JSONParserParserRowsStringKey(t *testing.T) {
 	err = parser.ParseRows(reader, validator)
 	assert.Nil(t, err)
 	assert.Equal(t, int64(10), validator.ValidateCount())
-}
-
-func Test_JSONParserParserColumnsStrKey(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	schema := strKeySchema()
-	parser := NewJSONParser(ctx, schema)
-	assert.NotNil(t, parser)
-	parser.bufSize = 1
-
-	reader := strings.NewReader(`{
-		"uid": ["Dm4aWrbNzhmjwCTEnCJ9LDPO2N09sqysxgVfbH9Zmn3nBzmwsmk0eZN6x7wSAoPQ", "RP50U0d2napRjXu94a8oGikWgklvVsXFurp8RR4tHGw7N0gk1b7opm59k3FCpyPb", "oxhFkQitWPPw0Bjmj7UQcn4iwvS0CU7RLAC81uQFFQjWtOdiB329CPyWkfGSeYfE", "sxoEL4Mpk1LdsyXhbNm059UWJ3CvxURLCQczaVI5xtBD4QcVWTDFUW7dBdye6nbn", "g33Rqq2UQSHPRHw5FvuXxf5uGEhIAetxE6UuXXCJj0hafG8WuJr1ueZftsySCqAd"],
-		"int_scalar": [9070353, 8505288, 4392660, 7927425, 9288807],
-		"float_scalar": [0.9798043638085004, 0.937913432198687, 0.32381232630490264, 0.31074026464844895, 0.4953578200336135],
-		"string_scalar": ["ShQ44OX0z8kGpRPhaXmfSsdH7JHq5DsZzu0e2umS1hrWG0uONH2RIIAdOECaaXir", "Ld4b0avxathBdNvCrtm3QsWO1pYktUVR7WgAtrtozIwrA8vpeactNhJ85CFGQnK5", "EmAlB0xdQcxeBtwlZJQnLgKodiuRinynoQtg0eXrjkq24dQohzSm7Bx3zquHd3kO", "fdY2beCvs1wSws0Gb9ySD92xwfEfJpX5DQgsWoISylBAoYOcXpRaqIJoXYS4g269", "6f8Iv1zQAGksj5XxMbbI5evTrYrB8fSFQ58jl0oU7Z4BpA81VsD2tlWqkhfoBNa7"],
-		"bool_scalar": [true, false, true, false, false],
-		"vectors": [
-			[0.5040062902126952, 0.8297619818664708, 0.20248342801564806, 0.12834786423659314],
-			[0.528232122836893, 0.6916116750653186, 0.41443762522548705, 0.26624344144792056],
-			[0.7978693027281338, 0.12394906726785092, 0.42431962903815285, 0.4098707807351914],
-			[0.3716157812069954, 0.006981281113265229, 0.9007003458552365, 0.22492634316191004],
-			[0.5921374209648096, 0.04234832587925662, 0.7803878096531548, 0.1964045837884633]
-		]
-	}`)
-
-	err := parser.ParseColumns(reader, nil)
-	assert.NotNil(t, err)
-
-	validator, err := NewJSONColumnValidator(schema, nil)
-	assert.NotNil(t, validator)
-	assert.Nil(t, err)
-
-	err = parser.ParseColumns(reader, validator)
-	assert.Nil(t, err)
-	counter := validator.ValidateCount()
-	for _, v := range counter {
-		assert.Equal(t, int64(5), v)
-	}
 }

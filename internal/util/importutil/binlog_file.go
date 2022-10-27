@@ -26,7 +26,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// This class is a wrapper of storage.BinlogReader, to read binlog file, block by block.
+// BinlogFile class is a wrapper of storage.BinlogReader, to read binlog file, block by block.
 // Note: for bulkoad function, we only handle normal insert log and delta log.
 // A binlog is designed to support multiple blocks, but so far each binlog always contains only one block.
 // Typically, an insert log file size is 16MB.
@@ -72,7 +72,7 @@ func (p *BinlogFile) Open(filePath string) error {
 	return nil
 }
 
-// The outer caller must call this method in defer
+// Close close the reader object, outer caller must call this method in defer
 func (p *BinlogFile) Close() {
 	if p.reader != nil {
 		p.reader.Close()
@@ -88,8 +88,8 @@ func (p *BinlogFile) DataType() schemapb.DataType {
 	return p.reader.PayloadDataType
 }
 
+// ReadBool method reads all the blocks of a binlog by a data type.
 // A binlog is designed to support multiple blocks, but so far each binlog always contains only one block.
-// This method read all the blocks of a binlog by a data type.
 func (p *BinlogFile) ReadBool() ([]bool, error) {
 	if p.reader == nil {
 		log.Error("Binlog file: binlog reader not yet initialized")
@@ -131,8 +131,8 @@ func (p *BinlogFile) ReadBool() ([]bool, error) {
 	return result, nil
 }
 
+// ReadInt8 method reads all the blocks of a binlog by a data type.
 // A binlog is designed to support multiple blocks, but so far each binlog always contains only one block.
-// This method read all the blocks of a binlog by a data type.
 func (p *BinlogFile) ReadInt8() ([]int8, error) {
 	if p.reader == nil {
 		log.Error("Binlog file: binlog reader not yet initialized")
@@ -174,8 +174,8 @@ func (p *BinlogFile) ReadInt8() ([]int8, error) {
 	return result, nil
 }
 
+// ReadInt16 method reads all the blocks of a binlog by a data type.
 // A binlog is designed to support multiple blocks, but so far each binlog always contains only one block.
-// This method read all the blocks of a binlog by a data type.
 func (p *BinlogFile) ReadInt16() ([]int16, error) {
 	if p.reader == nil {
 		log.Error("Binlog file: binlog reader not yet initialized")
@@ -217,8 +217,8 @@ func (p *BinlogFile) ReadInt16() ([]int16, error) {
 	return result, nil
 }
 
+// ReadInt32 method reads all the blocks of a binlog by a data type.
 // A binlog is designed to support multiple blocks, but so far each binlog always contains only one block.
-// This method read all the blocks of a binlog by a data type.
 func (p *BinlogFile) ReadInt32() ([]int32, error) {
 	if p.reader == nil {
 		log.Error("Binlog file: binlog reader not yet initialized")
@@ -260,8 +260,8 @@ func (p *BinlogFile) ReadInt32() ([]int32, error) {
 	return result, nil
 }
 
+// ReadInt64 method reads all the blocks of a binlog by a data type.
 // A binlog is designed to support multiple blocks, but so far each binlog always contains only one block.
-// This method read all the blocks of a binlog by a data type.
 func (p *BinlogFile) ReadInt64() ([]int64, error) {
 	if p.reader == nil {
 		log.Error("Binlog file: binlog reader not yet initialized")
@@ -303,8 +303,8 @@ func (p *BinlogFile) ReadInt64() ([]int64, error) {
 	return result, nil
 }
 
+// ReadFloat method reads all the blocks of a binlog by a data type.
 // A binlog is designed to support multiple blocks, but so far each binlog always contains only one block.
-// This method read all the blocks of a binlog by a data type.
 func (p *BinlogFile) ReadFloat() ([]float32, error) {
 	if p.reader == nil {
 		log.Error("Binlog file: binlog reader not yet initialized")
@@ -346,8 +346,8 @@ func (p *BinlogFile) ReadFloat() ([]float32, error) {
 	return result, nil
 }
 
+// ReadDouble method reads all the blocks of a binlog by a data type.
 // A binlog is designed to support multiple blocks, but so far each binlog always contains only one block.
-// This method read all the blocks of a binlog by a data type.
 func (p *BinlogFile) ReadDouble() ([]float64, error) {
 	if p.reader == nil {
 		log.Error("Binlog file: binlog reader not yet initialized")
@@ -389,8 +389,8 @@ func (p *BinlogFile) ReadDouble() ([]float64, error) {
 	return result, nil
 }
 
+// ReadVarchar method reads all the blocks of a binlog by a data type.
 // A binlog is designed to support multiple blocks, but so far each binlog always contains only one block.
-// This method read all the blocks of a binlog by a data type.
 func (p *BinlogFile) ReadVarchar() ([]string, error) {
 	if p.reader == nil {
 		log.Error("Binlog file: binlog reader not yet initialized")
@@ -433,8 +433,8 @@ func (p *BinlogFile) ReadVarchar() ([]string, error) {
 	return result, nil
 }
 
+// ReadBinaryVector method reads all the blocks of a binlog by a data type.
 // A binlog is designed to support multiple blocks, but so far each binlog always contains only one block.
-// This method read all the blocks of a binlog by a data type.
 // return vectors data and the dimension
 func (p *BinlogFile) ReadBinaryVector() ([]byte, int, error) {
 	if p.reader == nil {
@@ -479,8 +479,8 @@ func (p *BinlogFile) ReadBinaryVector() ([]byte, int, error) {
 	return result, dim, nil
 }
 
+// ReadFloatVector method reads all the blocks of a binlog by a data type.
 // A binlog is designed to support multiple blocks, but so far each binlog always contains only one block.
-// This method read all the blocks of a binlog by a data type.
 // return vectors data and the dimension
 func (p *BinlogFile) ReadFloatVector() ([]float32, int, error) {
 	if p.reader == nil {

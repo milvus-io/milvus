@@ -86,8 +86,8 @@ type IMetaTable interface {
 	ListAliasesByID(collID UniqueID) []string
 
 	// TODO: better to accept ctx.
-	GetPartitionNameByID(collID UniqueID, partitionID UniqueID, ts Timestamp) (string, error) // serve for bulk load.
-	GetPartitionByName(collID UniqueID, partitionName string, ts Timestamp) (UniqueID, error) // serve for bulk load.
+	GetPartitionNameByID(collID UniqueID, partitionID UniqueID, ts Timestamp) (string, error) // serve for bulk insert.
+	GetPartitionByName(collID UniqueID, partitionName string, ts Timestamp) (UniqueID, error) // serve for bulk insert.
 
 	// TODO: better to accept ctx.
 	AddCredential(credInfo *internalpb.CredentialInfo) error
@@ -634,7 +634,7 @@ func (mt *MetaTable) ListAliasesByID(collID UniqueID) []string {
 	return mt.listAliasesByID(collID)
 }
 
-// GetCollectionNameByID serve for bulk load. TODO: why this didn't accept ts?
+// GetCollectionNameByID serve for bulk insert. TODO: why this didn't accept ts?
 // [Deprecated]
 func (mt *MetaTable) GetCollectionNameByID(collID UniqueID) (string, error) {
 	mt.ddLock.RLock()
@@ -648,7 +648,7 @@ func (mt *MetaTable) GetCollectionNameByID(collID UniqueID) (string, error) {
 	return coll.Name, nil
 }
 
-// GetPartitionNameByID serve for bulk load.
+// GetPartitionNameByID serve for bulk insert.
 func (mt *MetaTable) GetPartitionNameByID(collID UniqueID, partitionID UniqueID, ts Timestamp) (string, error) {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
@@ -680,7 +680,7 @@ func (mt *MetaTable) GetPartitionNameByID(collID UniqueID, partitionID UniqueID,
 	return "", fmt.Errorf("partition not exist: %d", partitionID)
 }
 
-// GetCollectionIDByName serve for bulk load. TODO: why this didn't accept ts?
+// GetCollectionIDByName serve for bulk insert. TODO: why this didn't accept ts?
 // [Deprecated]
 func (mt *MetaTable) GetCollectionIDByName(name string) (UniqueID, error) {
 	mt.ddLock.RLock()
@@ -693,7 +693,7 @@ func (mt *MetaTable) GetCollectionIDByName(name string) (UniqueID, error) {
 	return id, nil
 }
 
-// GetPartitionByName serve for bulk load.
+// GetPartitionByName serve for bulk insert.
 func (mt *MetaTable) GetPartitionByName(collID UniqueID, partitionName string, ts Timestamp) (UniqueID, error) {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()

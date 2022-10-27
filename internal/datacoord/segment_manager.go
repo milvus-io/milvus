@@ -68,7 +68,7 @@ func putAllocation(a *Allocation) {
 type Manager interface {
 	// AllocSegment allocates rows and record the allocation.
 	AllocSegment(ctx context.Context, collectionID, partitionID UniqueID, channelName string, requestRows int64) ([]*Allocation, error)
-	// allocSegmentForImport allocates one segment allocation for bulk load.
+	// allocSegmentForImport allocates one segment allocation for bulk insert.
 	// TODO: Remove this method and AllocSegment() above instead.
 	allocSegmentForImport(ctx context.Context, collectionID, partitionID UniqueID, channelName string, requestRows int64, taskID int64) (*Allocation, error)
 	// DropSegment drops the segment from manager.
@@ -278,7 +278,7 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 	return allocations, nil
 }
 
-// allocSegmentForImport allocates one segment allocation for bulk load.
+// allocSegmentForImport allocates one segment allocation for bulk insert.
 func (s *SegmentManager) allocSegmentForImport(ctx context.Context, collectionID UniqueID,
 	partitionID UniqueID, channelName string, requestRows int64, importTaskID int64) (*Allocation, error) {
 	// init allocation

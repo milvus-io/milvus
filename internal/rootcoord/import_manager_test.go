@@ -574,6 +574,8 @@ func TestImportManager_ImportJob(t *testing.T) {
 			ErrorCode: commonpb.ErrorCode_Success,
 		}, nil
 	}
+
+	// nil request
 	mgr := newImportManager(context.TODO(), mockKv, idAlloc, nil, callMarkSegmentsDropped, nil, nil, nil, nil)
 	resp := mgr.importJob(context.TODO(), nil, colID, 0)
 	assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
@@ -581,27 +583,14 @@ func TestImportManager_ImportJob(t *testing.T) {
 	rowReq := &milvuspb.ImportRequest{
 		CollectionName: "c1",
 		PartitionName:  "p1",
-		RowBased:       true,
-		Files:          []string{"f1", "f2", "f3"},
+		Files:          []string{"f1.json", "f2.json", "f3.json"},
 	}
 
+	// nil callImportService
 	resp = mgr.importJob(context.TODO(), rowReq, colID, 0)
 	assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 
-	colReq := &milvuspb.ImportRequest{
-		CollectionName: "c1",
-		PartitionName:  "p1",
-		RowBased:       false,
-		Files:          []string{"f1", "f2"},
-		Options: []*commonpb.KeyValuePair{
-			{
-				Key:   importutil.Bucket,
-				Value: "mybucket",
-			},
-		},
-	}
-
-	fn := func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
+	importServiceFunc := func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
 		return &datapb.ImportTaskResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -609,17 +598,27 @@ func TestImportManager_ImportJob(t *testing.T) {
 		}, nil
 	}
 
-	mgr = newImportManager(context.TODO(), mockKv, idAlloc, fn, callMarkSegmentsDropped, nil, nil, nil, nil)
+	// row-based case, task count equal to file count
+	// since the importServiceFunc return error, tasks will be kept in pending list
+	mgr = newImportManager(context.TODO(), mockKv, idAlloc, importServiceFunc, callMarkSegmentsDropped, nil, nil, nil, nil)
 	resp = mgr.importJob(context.TODO(), rowReq, colID, 0)
 	assert.Equal(t, len(rowReq.Files), len(mgr.pendingTasks))
 	assert.Equal(t, 0, len(mgr.workingTasks))
 
-	mgr = newImportManager(context.TODO(), mockKv, idAlloc, fn, callMarkSegmentsDropped, nil, nil, nil, nil)
+	colReq := &milvuspb.ImportRequest{
+		CollectionName: "c1",
+		PartitionName:  "p1",
+		Files:          []string{"f1.npy", "f2.npy", "f3.npy"},
+	}
+
+	// column-based case, one quest one task
+	// since the importServiceFunc return error, tasks will be kept in pending list
+	mgr = newImportManager(context.TODO(), mockKv, idAlloc, importServiceFunc, callMarkSegmentsDropped, nil, nil, nil, nil)
 	resp = mgr.importJob(context.TODO(), colReq, colID, 0)
 	assert.Equal(t, 1, len(mgr.pendingTasks))
 	assert.Equal(t, 0, len(mgr.workingTasks))
 
-	fn = func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
+	importServiceFunc = func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
 		return &datapb.ImportTaskResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_Success,
@@ -627,18 +626,20 @@ func TestImportManager_ImportJob(t *testing.T) {
 		}, nil
 	}
 
-	mgr = newImportManager(context.TODO(), mockKv, idAlloc, fn, callMarkSegmentsDropped, nil, nil, nil, nil)
+	// row-based case, since the importServiceFunc return success, tasks will be sent to woring list
+	mgr = newImportManager(context.TODO(), mockKv, idAlloc, importServiceFunc, callMarkSegmentsDropped, nil, nil, nil, nil)
 	resp = mgr.importJob(context.TODO(), rowReq, colID, 0)
 	assert.Equal(t, 0, len(mgr.pendingTasks))
 	assert.Equal(t, len(rowReq.Files), len(mgr.workingTasks))
 
-	mgr = newImportManager(context.TODO(), mockKv, idAlloc, fn, callMarkSegmentsDropped, nil, nil, nil, nil)
+	// column-based case, since the importServiceFunc return success, tasks will be sent to woring list
+	mgr = newImportManager(context.TODO(), mockKv, idAlloc, importServiceFunc, callMarkSegmentsDropped, nil, nil, nil, nil)
 	resp = mgr.importJob(context.TODO(), colReq, colID, 0)
 	assert.Equal(t, 0, len(mgr.pendingTasks))
 	assert.Equal(t, 1, len(mgr.workingTasks))
 
 	count := 0
-	fn = func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
+	importServiceFunc = func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
 		if count >= 2 {
 			return &datapb.ImportTaskResponse{
 				Status: &commonpb.Status{
@@ -654,13 +655,16 @@ func TestImportManager_ImportJob(t *testing.T) {
 		}, nil
 	}
 
-	mgr = newImportManager(context.TODO(), mockKv, idAlloc, fn, callMarkSegmentsDropped, nil, nil, nil, nil)
+	// row-based case, since the importServiceFunc return success for 2 tasks
+	// the 2 tasks are sent to working list, and 1 task left in pending list
+	mgr = newImportManager(context.TODO(), mockKv, idAlloc, importServiceFunc, callMarkSegmentsDropped, nil, nil, nil, nil)
 	resp = mgr.importJob(context.TODO(), rowReq, colID, 0)
 	assert.Equal(t, len(rowReq.Files)-2, len(mgr.pendingTasks))
 	assert.Equal(t, 2, len(mgr.workingTasks))
 
-	for i := 0; i <= 32; i++ {
-		rowReq.Files = append(rowReq.Files, strconv.Itoa(i))
+	// files count exceed MaxPendingCount, return error
+	for i := 0; i <= MaxPendingCount; i++ {
+		rowReq.Files = append(rowReq.Files, strconv.Itoa(i)+".json")
 	}
 	resp = mgr.importJob(context.TODO(), rowReq, colID, 0)
 	assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
@@ -683,14 +687,12 @@ func TestImportManager_AllDataNodesBusy(t *testing.T) {
 	rowReq := &milvuspb.ImportRequest{
 		CollectionName: "c1",
 		PartitionName:  "p1",
-		RowBased:       true,
-		Files:          []string{"f1", "f2", "f3"},
+		Files:          []string{"f1.json", "f2.json", "f3.json"},
 	}
 	colReq := &milvuspb.ImportRequest{
 		CollectionName: "c1",
 		PartitionName:  "p1",
-		RowBased:       false,
-		Files:          []string{"f1", "f2"},
+		Files:          []string{"f1.npy", "f2.npy"},
 		Options: []*commonpb.KeyValuePair{
 			{
 				Key:   importutil.Bucket,
@@ -778,8 +780,7 @@ func TestImportManager_TaskState(t *testing.T) {
 	rowReq := &milvuspb.ImportRequest{
 		CollectionName: "c1",
 		PartitionName:  "p1",
-		RowBased:       true,
-		Files:          []string{"f1", "f2", "f3"},
+		Files:          []string{"f1.json", "f2.json", "f3.json"},
 	}
 
 	callMarkSegmentsDropped := func(ctx context.Context, segIDs []typeutil.UniqueID) (*commonpb.Status, error) {
@@ -817,8 +818,7 @@ func TestImportManager_TaskState(t *testing.T) {
 	assert.Equal(t, int64(2), ti.GetId())
 	assert.Equal(t, int64(100), ti.GetCollectionId())
 	assert.Equal(t, int64(0), ti.GetPartitionId())
-	assert.Equal(t, true, ti.GetRowBased())
-	assert.Equal(t, []string{"f2"}, ti.GetFiles())
+	assert.Equal(t, []string{"f2.json"}, ti.GetFiles())
 	assert.Equal(t, commonpb.ImportState_ImportPersisted, ti.GetState().GetStateCode())
 	assert.Equal(t, int64(1000), ti.GetState().GetRowCount())
 
@@ -876,8 +876,7 @@ func TestImportManager_AllocFail(t *testing.T) {
 	rowReq := &milvuspb.ImportRequest{
 		CollectionName: "c1",
 		PartitionName:  "p1",
-		RowBased:       true,
-		Files:          []string{"f1", "f2", "f3"},
+		Files:          []string{"f1.json", "f2.json", "f3.json"},
 	}
 
 	callMarkSegmentsDropped := func(ctx context.Context, segIDs []typeutil.UniqueID) (*commonpb.Status, error) {
@@ -917,8 +916,7 @@ func TestImportManager_ListAllTasks(t *testing.T) {
 	rowReq := &milvuspb.ImportRequest{
 		CollectionName: "c1",
 		PartitionName:  "p1",
-		RowBased:       true,
-		Files:          []string{"f1", "f2", "f3"},
+		Files:          []string{"f1.json", "f2.json", "f3.json"},
 	}
 	callMarkSegmentsDropped := func(ctx context.Context, segIDs []typeutil.UniqueID) (*commonpb.Status, error) {
 		return &commonpb.Status{
@@ -1006,4 +1004,23 @@ func TestImportManager_rearrangeTasks(t *testing.T) {
 	assert.Equal(t, int64(1), tasks[0].GetId())
 	assert.Equal(t, int64(50), tasks[1].GetId())
 	assert.Equal(t, int64(100), tasks[2].GetId())
+}
+
+func TestImportManager_isRowbased(t *testing.T) {
+	mgr := &importManager{}
+
+	files := []string{"1.json", "2.json"}
+	rb, err := mgr.isRowbased(files)
+	assert.Nil(t, err)
+	assert.True(t, rb)
+
+	files = []string{"1.json", "2.npy"}
+	rb, err = mgr.isRowbased(files)
+	assert.NotNil(t, err)
+	assert.True(t, rb)
+
+	files = []string{"1.npy", "2.npy"}
+	rb, err = mgr.isRowbased(files)
+	assert.Nil(t, err)
+	assert.False(t, rb)
 }

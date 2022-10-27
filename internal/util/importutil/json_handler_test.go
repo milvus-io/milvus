@@ -18,6 +18,7 @@ package importutil
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -26,15 +27,15 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
-	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/storage"
 )
 
 type mockIDAllocator struct {
+	allocErr error
 }
 
-func (tso *mockIDAllocator) AllocID(ctx context.Context, req *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error) {
+func (a *mockIDAllocator) AllocID(ctx context.Context, req *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error) {
 	return &rootcoordpb.AllocIDResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
@@ -42,11 +43,13 @@ func (tso *mockIDAllocator) AllocID(ctx context.Context, req *rootcoordpb.AllocI
 		},
 		ID:    int64(1),
 		Count: req.Count,
-	}, nil
+	}, a.allocErr
 }
 
-func newIDAllocator(ctx context.Context, t *testing.T) *allocator.IDAllocator {
-	mockIDAllocator := &mockIDAllocator{}
+func newIDAllocator(ctx context.Context, t *testing.T, allocErr error) *allocator.IDAllocator {
+	mockIDAllocator := &mockIDAllocator{
+		allocErr: allocErr,
+	}
 
 	idAllocator, err := allocator.NewIDAllocator(ctx, mockIDAllocator, int64(1))
 	assert.Nil(t, err)
@@ -56,136 +59,14 @@ func newIDAllocator(ctx context.Context, t *testing.T) *allocator.IDAllocator {
 	return idAllocator
 }
 
-func Test_GetFieldDimension(t *testing.T) {
-	schema := &schemapb.FieldSchema{
-		FieldID:      111,
-		Name:         "field_float_vector",
-		IsPrimaryKey: false,
-		Description:  "float_vector",
-		DataType:     schemapb.DataType_FloatVector,
-		TypeParams: []*commonpb.KeyValuePair{
-			{Key: "dim", Value: "4"},
-		},
-	}
+func Test_NewJSONRowValidator(t *testing.T) {
+	validator, err := NewJSONRowValidator(nil, nil)
+	assert.NotNil(t, err)
+	assert.Nil(t, validator)
 
-	dim, err := getFieldDimension(schema)
+	validator, err = NewJSONRowValidator(sampleSchema(), nil)
+	assert.NotNil(t, validator)
 	assert.Nil(t, err)
-	assert.Equal(t, 4, dim)
-
-	schema.TypeParams = []*commonpb.KeyValuePair{
-		{Key: "dim", Value: "abc"},
-	}
-	dim, err = getFieldDimension(schema)
-	assert.NotNil(t, err)
-	assert.Equal(t, 0, dim)
-
-	schema.TypeParams = []*commonpb.KeyValuePair{}
-	dim, err = getFieldDimension(schema)
-	assert.NotNil(t, err)
-	assert.Equal(t, 0, dim)
-}
-
-func Test_InitValidators(t *testing.T) {
-	validators := make(map[storage.FieldID]*Validator)
-	err := initValidators(nil, validators)
-	assert.NotNil(t, err)
-
-	schema := sampleSchema()
-	// success case
-	err = initValidators(schema, validators)
-	assert.Nil(t, err)
-	assert.Equal(t, len(schema.Fields), len(validators))
-	name2ID := make(map[string]storage.FieldID)
-	for _, field := range schema.Fields {
-		name2ID[field.GetName()] = field.GetFieldID()
-	}
-
-	checkFunc := func(funcName string, validVal interface{}, invalidVal interface{}) {
-		id := name2ID[funcName]
-		v, ok := validators[id]
-		assert.True(t, ok)
-		err = v.validateFunc(validVal)
-		assert.Nil(t, err)
-		err = v.validateFunc(invalidVal)
-		assert.NotNil(t, err)
-	}
-
-	// validate functions
-	var validVal interface{} = true
-	var invalidVal interface{} = "aa"
-	checkFunc("field_bool", validVal, invalidVal)
-
-	validVal = float64(100)
-	invalidVal = "aa"
-	checkFunc("field_int8", validVal, invalidVal)
-	checkFunc("field_int16", validVal, invalidVal)
-	checkFunc("field_int32", validVal, invalidVal)
-	checkFunc("field_int64", validVal, invalidVal)
-	checkFunc("field_float", validVal, invalidVal)
-	checkFunc("field_double", validVal, invalidVal)
-
-	validVal = "aa"
-	invalidVal = 100
-	checkFunc("field_string", validVal, invalidVal)
-
-	validVal = []interface{}{float64(100), float64(101)}
-	invalidVal = "aa"
-	checkFunc("field_binary_vector", validVal, invalidVal)
-	invalidVal = []interface{}{float64(100)}
-	checkFunc("field_binary_vector", validVal, invalidVal)
-	invalidVal = []interface{}{float64(100), float64(101), float64(102)}
-	checkFunc("field_binary_vector", validVal, invalidVal)
-	invalidVal = []interface{}{true, true}
-	checkFunc("field_binary_vector", validVal, invalidVal)
-	invalidVal = []interface{}{float64(255), float64(-1)}
-	checkFunc("field_binary_vector", validVal, invalidVal)
-
-	validVal = []interface{}{float64(1), float64(2), float64(3), float64(4)}
-	invalidVal = true
-	checkFunc("field_float_vector", validVal, invalidVal)
-	invalidVal = []interface{}{float64(1), float64(2), float64(3)}
-	checkFunc("field_float_vector", validVal, invalidVal)
-	invalidVal = []interface{}{float64(1), float64(2), float64(3), float64(4), float64(5)}
-	checkFunc("field_float_vector", validVal, invalidVal)
-	invalidVal = []interface{}{"a", "b", "c", "d"}
-	checkFunc("field_float_vector", validVal, invalidVal)
-
-	// error cases
-	schema = &schemapb.CollectionSchema{
-		Name:        "schema",
-		Description: "schema",
-		AutoID:      true,
-		Fields:      make([]*schemapb.FieldSchema, 0),
-	}
-	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
-		FieldID:      111,
-		Name:         "field_float_vector",
-		IsPrimaryKey: false,
-		Description:  "float_vector",
-		DataType:     schemapb.DataType_FloatVector,
-		TypeParams: []*commonpb.KeyValuePair{
-			{Key: "dim", Value: "aa"},
-		},
-	})
-
-	validators = make(map[storage.FieldID]*Validator)
-	err = initValidators(schema, validators)
-	assert.NotNil(t, err)
-
-	schema.Fields = make([]*schemapb.FieldSchema, 0)
-	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
-		FieldID:      110,
-		Name:         "field_binary_vector",
-		IsPrimaryKey: false,
-		Description:  "float_vector",
-		DataType:     schemapb.DataType_FloatVector,
-		TypeParams: []*commonpb.KeyValuePair{
-			{Key: "dim", Value: "aa"},
-		},
-	})
-
-	err = initValidators(schema, validators)
-	assert.NotNil(t, err)
 }
 
 func Test_JSONRowValidator(t *testing.T) {
@@ -209,15 +90,15 @@ func Test_JSONRowValidator(t *testing.T) {
 	assert.NotNil(t, err)
 	assert.Equal(t, int64(0), validator.ValidateCount())
 
-	// // missed some fields
-	// reader = strings.NewReader(`{
-	// 	"rows":[
-	// 		{"field_bool": true, "field_int8": 10, "field_int16": 101, "field_int32": 1001, "field_int64": 10001, "field_float": 3.14, "field_double": 1.56, "field_string": "hello world", "field_binary_vector": [254, 0], "field_float_vector": [1.1, 1.2, 1.3, 1.4]},
-	// 		{"field_bool": true, "field_int8": 10, "field_int16": 101, "field_int64": 10001, "field_float": 3.14, "field_double": 1.56, "field_string": "hello world", "field_binary_vector": [254, 0], "field_float_vector": [1.1, 1.2, 1.3, 1.4]}
-	// 	]
-	// }`)
-	// err = parser.ParseRows(reader, validator)
-	// assert.NotNil(t, err)
+	// missed some fields
+	reader = strings.NewReader(`{
+		"rows":[
+			{"field_bool": true, "field_int8": 10, "field_int16": 101, "field_int32": 1001, "field_int64": 10001, "field_float": 3.14, "field_double": 1.56, "field_string": "hello world", "field_binary_vector": [254, 0], "field_float_vector": [1.1, 1.2, 1.3, 1.4]},
+			{"field_int64": 10001, "field_float": 3.14, "field_double": 1.56, "field_string": "hello world", "field_binary_vector": [254, 0], "field_float_vector": [1.1, 1.2, 1.3, 1.4]}
+		]
+	}`)
+	err = parser.ParseRows(reader, validator)
+	assert.NotNil(t, err)
 
 	// invalid dimension
 	reader = strings.NewReader(`{
@@ -241,92 +122,90 @@ func Test_JSONRowValidator(t *testing.T) {
 	validator.validators = nil
 	err = validator.Handle(nil)
 	assert.NotNil(t, err)
-}
 
-func Test_JSONColumnValidator(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	schema := sampleSchema()
-	parser := NewJSONParser(ctx, schema)
-	assert.NotNil(t, parser)
-
-	// 0 row case
-	reader := strings.NewReader(`{
-		"field_bool": [],
-		"field_int8": [],
-		"field_int16": [],
-		"field_int32": [],
-		"field_int64": [],
-		"field_float": [],
-		"field_double": [],
-		"field_string": [],
-		"field_binary_vector": [],
-		"field_float_vector": []
-	}`)
-
-	validator, err := NewJSONColumnValidator(schema, nil)
-	assert.NotNil(t, validator)
-	assert.Nil(t, err)
-
-	err = parser.ParseColumns(reader, validator)
-	assert.NotNil(t, err)
-	for _, count := range validator.rowCounter {
-		assert.Equal(t, int64(0), count)
+	// primary key is auto-generate, but user provide pk value, return error
+	schema = &schemapb.CollectionSchema{
+		Name:        "schema",
+		Description: "schema",
+		AutoID:      true,
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      101,
+				Name:         "ID",
+				IsPrimaryKey: true,
+				AutoID:       true,
+				DataType:     schemapb.DataType_Int64,
+			},
+			{
+				FieldID:      102,
+				Name:         "Age",
+				IsPrimaryKey: false,
+				DataType:     schemapb.DataType_Int64,
+			},
+		},
 	}
 
-	// different row count
-	reader = strings.NewReader(`{
-		"field_bool": [true],
-		"field_int8": [],
-		"field_int16": [],
-		"field_int32": [1, 2, 3],
-		"field_int64": [],
-		"field_float": [],
-		"field_double": [],
-		"field_string": [],
-		"field_binary_vector": [],
-		"field_float_vector": []
-	}`)
-
-	validator, err = NewJSONColumnValidator(schema, nil)
+	validator, err = NewJSONRowValidator(schema, nil)
 	assert.NotNil(t, validator)
 	assert.Nil(t, err)
 
-	err = parser.ParseColumns(reader, validator)
-	assert.NotNil(t, err)
-
-	// invalid value type
 	reader = strings.NewReader(`{
-		"dummy": [],
-		"field_bool": [true],
-		"field_int8": [1],
-		"field_int16": [2],
-		"field_int32": [3],
-		"field_int64": [4],
-		"field_float": [1],
-		"field_double": [1],
-		"field_string": [9],
-		"field_binary_vector": [[254, 1]],
-		"field_float_vector": [[1.1, 1.2, 1.3, 1.4]]
+		"rows":[
+			{"ID": 1, "Age": 2}
+		]
 	}`)
+	parser = NewJSONParser(ctx, schema)
+	err = parser.ParseRows(reader, validator)
+	assert.NotNil(t, err)
+}
 
-	validator, err = NewJSONColumnValidator(schema, nil)
-	assert.NotNil(t, validator)
+func Test_NewJSONRowConsumer(t *testing.T) {
+	// nil schema
+	consumer, err := NewJSONRowConsumer(nil, nil, 2, 16, nil)
+	assert.NotNil(t, err)
+	assert.Nil(t, consumer)
+
+	// wrong schema
+	schema := &schemapb.CollectionSchema{
+		Name:   "schema",
+		AutoID: true,
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      101,
+				Name:         "uid",
+				IsPrimaryKey: true,
+				AutoID:       false,
+				DataType:     schemapb.DataType_None,
+			},
+		},
+	}
+	consumer, err = NewJSONRowConsumer(schema, nil, 2, 16, nil)
+	assert.NotNil(t, err)
+	assert.Nil(t, consumer)
+
+	// no primary key
+	schema.Fields[0].IsPrimaryKey = false
+	schema.Fields[0].DataType = schemapb.DataType_Int64
+	consumer, err = NewJSONRowConsumer(schema, nil, 2, 16, nil)
+	assert.NotNil(t, err)
+	assert.Nil(t, consumer)
+
+	// primary key is autoid, but no IDAllocator
+	schema.Fields[0].IsPrimaryKey = true
+	schema.Fields[0].AutoID = true
+	consumer, err = NewJSONRowConsumer(schema, nil, 2, 16, nil)
+	assert.NotNil(t, err)
+	assert.Nil(t, consumer)
+
+	// success
+	consumer, err = NewJSONRowConsumer(sampleSchema(), nil, 2, 16, nil)
+	assert.NotNil(t, consumer)
 	assert.Nil(t, err)
-
-	err = parser.ParseColumns(reader, validator)
-	assert.NotNil(t, err)
-
-	// init failed
-	validator.validators = nil
-	err = validator.Handle(nil)
-	assert.NotNil(t, err)
 }
 
 func Test_JSONRowConsumer(t *testing.T) {
 	ctx := context.Background()
-	idAllocator := newIDAllocator(ctx, t)
+	idAllocator := newIDAllocator(ctx, t, nil)
 
 	schema := sampleSchema()
 	parser := NewJSONParser(ctx, schema)
@@ -376,9 +255,196 @@ func Test_JSONRowConsumer(t *testing.T) {
 	assert.Equal(t, 5, totalCount)
 }
 
+func Test_JSONRowConsumerFlush(t *testing.T) {
+	var callTime int32
+	var totalCount int
+	flushFunc := func(fields map[storage.FieldID]storage.FieldData, shard int) error {
+		callTime++
+		field, ok := fields[101]
+		assert.True(t, ok)
+		assert.Greater(t, field.RowNum(), 0)
+		totalCount += field.RowNum()
+		return nil
+	}
+
+	schema := &schemapb.CollectionSchema{
+		Name:   "schema",
+		AutoID: true,
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      101,
+				Name:         "uid",
+				IsPrimaryKey: true,
+				AutoID:       false,
+				DataType:     schemapb.DataType_Int64,
+			},
+		},
+	}
+
+	var shardNum int32 = 4
+	var blockSize int64 = 1
+	consumer, err := NewJSONRowConsumer(schema, nil, shardNum, blockSize, flushFunc)
+	assert.NotNil(t, consumer)
+	assert.Nil(t, err)
+
+	// force flush
+	rowCountEachShard := 100
+	for i := 0; i < int(shardNum); i++ {
+		pkFieldData := consumer.segmentsData[i][101].(*storage.Int64FieldData)
+		for j := 0; j < rowCountEachShard; j++ {
+			pkFieldData.Data = append(pkFieldData.Data, int64(j))
+		}
+		pkFieldData.NumRows = []int64{int64(rowCountEachShard)}
+	}
+
+	err = consumer.flush(true)
+	assert.Nil(t, err)
+	assert.Equal(t, shardNum, callTime)
+	assert.Equal(t, rowCountEachShard*int(shardNum), totalCount)
+
+	// execeed block size trigger flush
+	callTime = 0
+	totalCount = 0
+	for i := 0; i < int(shardNum); i++ {
+		consumer.segmentsData[i] = initSegmentData(schema)
+		if i%2 == 0 {
+			continue
+		}
+		pkFieldData := consumer.segmentsData[i][101].(*storage.Int64FieldData)
+		for j := 0; j < rowCountEachShard; j++ {
+			pkFieldData.Data = append(pkFieldData.Data, int64(j))
+		}
+		pkFieldData.NumRows = []int64{int64(rowCountEachShard)}
+	}
+	err = consumer.flush(true)
+	assert.Nil(t, err)
+	assert.Equal(t, shardNum/2, callTime)
+	assert.Equal(t, rowCountEachShard*int(shardNum)/2, totalCount)
+}
+
+func Test_JSONRowConsumerHandle(t *testing.T) {
+	ctx := context.Background()
+	idAllocator := newIDAllocator(ctx, t, errors.New("error"))
+
+	var callTime int32
+	flushFunc := func(fields map[storage.FieldID]storage.FieldData, shard int) error {
+		callTime++
+		return errors.New("dummy error")
+	}
+
+	schema := &schemapb.CollectionSchema{
+		Name:   "schema",
+		AutoID: true,
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      101,
+				Name:         "uid",
+				IsPrimaryKey: true,
+				AutoID:       true,
+				DataType:     schemapb.DataType_Int64,
+			},
+		},
+	}
+
+	t.Run("handle int64 pk", func(t *testing.T) {
+		consumer, err := NewJSONRowConsumer(schema, idAllocator, 1, 1, flushFunc)
+		assert.NotNil(t, consumer)
+		assert.Nil(t, err)
+
+		pkFieldData := consumer.segmentsData[0][101].(*storage.Int64FieldData)
+		for i := 0; i < 10; i++ {
+			pkFieldData.Data = append(pkFieldData.Data, int64(i))
+		}
+		pkFieldData.NumRows = []int64{int64(10)}
+
+		// nil input will trigger flush
+		err = consumer.Handle(nil)
+		assert.NotNil(t, err)
+		assert.Equal(t, int32(1), callTime)
+
+		// optional flush
+		callTime = 0
+		rowCount := 100
+		pkFieldData = consumer.segmentsData[0][101].(*storage.Int64FieldData)
+		for j := 0; j < rowCount; j++ {
+			pkFieldData.Data = append(pkFieldData.Data, int64(j))
+		}
+		pkFieldData.NumRows = []int64{int64(rowCount)}
+
+		input := make([]map[storage.FieldID]interface{}, rowCount)
+		for j := 0; j < rowCount; j++ {
+			input[j] = make(map[int64]interface{})
+			input[j][101] = int64(j)
+		}
+		err = consumer.Handle(input)
+		assert.NotNil(t, err)
+		assert.Equal(t, int32(1), callTime)
+
+		// failed to auto-generate pk
+		consumer.blockSize = 1024 * 1024
+		err = consumer.Handle(input)
+		assert.NotNil(t, err)
+
+		// hash int64 pk
+		consumer.rowIDAllocator = newIDAllocator(ctx, t, nil)
+		err = consumer.Handle(input)
+		assert.Nil(t, err)
+		assert.Equal(t, int64(rowCount), consumer.rowCounter)
+		assert.Equal(t, 2, len(consumer.autoIDRange))
+		assert.Equal(t, int64(1), consumer.autoIDRange[0])
+		assert.Equal(t, int64(1+rowCount), consumer.autoIDRange[1])
+	})
+
+	t.Run("handle varchar pk", func(t *testing.T) {
+		schema = &schemapb.CollectionSchema{
+			Name:   "schema",
+			AutoID: true,
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      101,
+					Name:         "uid",
+					IsPrimaryKey: true,
+					AutoID:       true,
+					DataType:     schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: "max_length", Value: "1024"},
+					},
+				},
+			},
+		}
+
+		idAllocator := newIDAllocator(ctx, t, nil)
+		consumer, err := NewJSONRowConsumer(schema, idAllocator, 1, 1024*1024, flushFunc)
+		assert.NotNil(t, consumer)
+		assert.Nil(t, err)
+
+		rowCount := 100
+		input := make([]map[storage.FieldID]interface{}, rowCount)
+		for j := 0; j < rowCount; j++ {
+			input[j] = make(map[int64]interface{})
+			input[j][101] = "abc"
+		}
+
+		// varchar pk cannot be autoid
+		err = consumer.Handle(input)
+		assert.NotNil(t, err)
+
+		// hash varchar pk
+		schema.Fields[0].AutoID = false
+		consumer, err = NewJSONRowConsumer(schema, idAllocator, 1, 1024*1024, flushFunc)
+		assert.NotNil(t, consumer)
+		assert.Nil(t, err)
+
+		err = consumer.Handle(input)
+		assert.Nil(t, err)
+		assert.Equal(t, int64(rowCount), consumer.rowCounter)
+		assert.Equal(t, 0, len(consumer.autoIDRange))
+	})
+}
+
 func Test_JSONRowConsumerStringKey(t *testing.T) {
 	ctx := context.Background()
-	idAllocator := newIDAllocator(ctx, t)
+	idAllocator := newIDAllocator(ctx, t, nil)
 
 	schema := strKeySchema()
 	parser := NewJSONParser(ctx, schema)
@@ -500,72 +566,4 @@ func Test_JSONRowConsumerStringKey(t *testing.T) {
 
 	assert.Equal(t, shardNum, callTime)
 	assert.Equal(t, 10, totalCount)
-}
-
-func Test_JSONColumnConsumer(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	schema := sampleSchema()
-	parser := NewJSONParser(ctx, schema)
-	assert.NotNil(t, parser)
-
-	reader := strings.NewReader(`{
-		"field_bool": [true, false, true, true, true],
-		"field_int8": [10, 11, 12, 13, 14],
-		"field_int16": [100, 101, 102, 103, 104],
-		"field_int32": [1000, 1001, 1002, 1003, 1004],
-		"field_int64": [10000, 10001, 10002, 10003, 10004],
-		"field_float": [3.14, 3.15, 3.16, 3.17, 3.18],
-		"field_double": [5.1, 5.2, 5.3, 5.4, 5.5],
-		"field_string": ["a", "b", "c", "d", "e"],
-		"field_binary_vector": [
-			[254, 1],
-			[253, 2],
-			[252, 3],
-			[251, 4],
-			[250, 5]
-		],
-		"field_float_vector": [
-			[1.1, 1.2, 1.3, 1.4],
-			[2.1, 2.2, 2.3, 2.4],
-			[3.1, 3.2, 3.3, 3.4],
-			[4.1, 4.2, 4.3, 4.4],
-			[5.1, 5.2, 5.3, 5.4]
-		]
-	}`)
-
-	callTime := 0
-	rowCount := 0
-	consumeFunc := func(fields map[storage.FieldID]storage.FieldData) error {
-		callTime++
-		for id, data := range fields {
-			if id == common.RowIDField {
-				continue
-			}
-			if rowCount == 0 {
-				rowCount = data.RowNum()
-			} else {
-				assert.Equal(t, rowCount, data.RowNum())
-			}
-		}
-		return nil
-	}
-
-	consumer, err := NewJSONColumnConsumer(schema, consumeFunc)
-	assert.NotNil(t, consumer)
-	assert.Nil(t, err)
-
-	validator, err := NewJSONColumnValidator(schema, consumer)
-	assert.NotNil(t, validator)
-	assert.Nil(t, err)
-
-	err = parser.ParseColumns(reader, validator)
-	assert.Nil(t, err)
-	for _, count := range validator.ValidateCount() {
-		assert.Equal(t, int64(5), count)
-	}
-
-	assert.Equal(t, 1, callTime)
-	assert.Equal(t, 5, rowCount)
 }

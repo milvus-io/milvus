@@ -114,7 +114,7 @@ message SegmentIDRequest {
   string channel_name = 2;
   int64 collectionID = 3;
   int64 partitionID = 4;
-  bool isImport = 5;        // Indicate whether this request comes from a bulk load task.
+  bool isImport = 5;        // Indicate whether this request comes from a bulk insert task.
   int64 importTaskID = 6;   // Needed for segment lock.
 }
 
@@ -269,8 +269,8 @@ message SegmentInfo {
   repeated int64 compactionFrom = 15;
   uint64 dropped_at = 16; // timestamp when segment marked drop
   // A flag indicating if:
-  // (1) this segment is created by bulk load, and
-  // (2) the bulk load task that creates this segment has not yet reached `ImportCompleted` state.
+  // (1) this segment is created by bulk insert, and
+  // (2) the bulk insert task that creates this segment has not yet reached `ImportCompleted` state.
   bool is_importing = 17;
   bool is_fake = 18;
 }
