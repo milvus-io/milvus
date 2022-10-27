@@ -17,6 +17,7 @@
 package paramtable
 
 import (
+	"fmt"
 	"math"
 	"sync"
 	"time"
@@ -257,7 +258,7 @@ func megaBytes2Bytes(f float64) float64 {
 func (p *quotaConfig) checkMinMaxLegal(min, max float64) bool {
 	if min > max {
 		log.Warn("init QuotaConfig failed, max/high must be greater than or equal to min/low, use default values",
-			zap.Float64("min", min), zap.Float64("max", max), zap.Float64("defaultMin", defaultMin), zap.Float64("defaultMax", defaultMax))
+			zap.String("msg", fmt.Sprintf("min: %v, max: %v, defaultMin: %v, defaultMax: %v", min, max, defaultMin, defaultMax)))
 		return false
 	}
 	return true
@@ -440,7 +441,7 @@ func (p *quotaConfig) initMaxTimeTickDelay() {
 		p.MaxTimeTickDelay = math.MaxInt64
 		return
 	}
-	const defaultMaxTtDelay = 30.0
+	const defaultMaxTtDelay = 300.0
 	delay := p.Base.ParseFloatWithDefault("quotaAndLimits.limitWriting.ttProtection.maxTimeTickDelay", defaultMaxTtDelay)
 	// (0, 65536)
 	if delay <= 0 || delay >= 65536 {
@@ -526,7 +527,7 @@ func (p *quotaConfig) initDiskQuota() {
 		p.DiskQuota = defaultDiskQuotaInMB
 	}
 	if p.DiskQuota < defaultDiskQuotaInMB {
-		log.Debug("init disk quota", zap.Float64("diskQuota(MB)", p.DiskQuota))
+		log.Debug("init disk quota", zap.String("diskQuota(MB)", fmt.Sprintf("%v", p.DiskQuota)))
 	} else {
 		log.Debug("init disk quota", zap.String("diskQuota(MB)", "+inf"))
 	}

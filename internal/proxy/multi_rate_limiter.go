@@ -90,7 +90,7 @@ func (rl *rateLimiter) setRates(rates []*internalpb.Rate) error {
 func (rl *rateLimiter) printRates(rates []*internalpb.Rate) {
 	//fmt.Printf("RateLimiter set rates:\n---------------------------------\n")
 	//for _, r := range rates {
-	//	fmt.Printf("%s -> %f\n", r.GetRt().String(), r.GetR())
+	//	fmt.Printf("%s -> %v\n", r.GetRt().String(), r.GetR())
 	//}
 	//fmt.Printf("---------------------------------\n")
 	log.Debug("RateLimiter setRates", zap.Any("rates", rates))

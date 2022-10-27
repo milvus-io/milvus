@@ -19,13 +19,10 @@ package metrics
 import (
 	"strconv"
 
-	"github.com/prometheus/client_golang/prometheus"
-	"go.uber.org/zap"
-
-	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/ratelimitutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 var (
@@ -269,7 +266,9 @@ func SetRateGaugeByRateType(rateType internalpb.RateType, nodeID int64, rate flo
 		return
 	}
 	nodeIDStr := strconv.FormatInt(nodeID, 10)
-	log.Debug("set rates", zap.Int64("nodeID", nodeID), zap.String("rateType", rateType.String()), zap.Float64("rate", rate))
+	//log.Debug("set rates", zap.Int64("nodeID", nodeID),
+	//	zap.String("rateType", rateType.String()),
+	//	zap.String("rate", fmt.Sprintf("%v", rate)))
 	switch rateType {
 	case internalpb.RateType_DMLInsert:
 		ProxyLimiterRate.WithLabelValues(nodeIDStr, InsertLabel).Set(rate)
