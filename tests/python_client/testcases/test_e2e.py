@@ -40,12 +40,23 @@ class TestE2e(TestcaseBase):
         entities = collection_w.num_entities
         log.info(f"assert flush: {tt}, entities: {entities}")
 
-        # search
-        _index_params = {"index_type": "IVF_SQ8", "params": {"nlist": 64}, "metric_type": "L2"}
+        # index
+        index_params = {"index_type": "IVF_SQ8", "params": {"nlist": 64}, "metric_type": "L2"}
+        t0 = time.time()
         index, _ = collection_w.create_index(field_name=ct.default_float_vec_field_name,
-                                             index_params=_index_params,
-                                             name=cf.gen_unique_str())
+                                             index_params=index_params,
+                                             index_name=cf.gen_unique_str())
+        index, _ = collection_w.create_index(field_name=ct.default_string_field_name,
+                                             index_params={},
+                                             index_name=cf.gen_unique_str())
+        tt = time.time() - t0
+        log.info(f"assert index: {tt}")
+        assert len(collection_w.indexes) == 2
+
+        # load
         collection_w.load()
+
+        # search
         search_vectors = cf.gen_vectors(1, ct.default_dim)
         search_params = {"metric_type": "L2", "params": {"nprobe": 16}}
         t0 = time.time()
@@ -55,20 +66,13 @@ class TestE2e(TestcaseBase):
         tt = time.time() - t0
         log.info(f"assert search: {tt}")
         assert len(res_1) == 1
+
+        # release
         collection_w.release()
 
-        # index
+        # insert
         d = cf.gen_default_list_data()
         collection_w.insert(d)
-        log.info(f"assert index entities: {collection_w.num_entities}")
-        _index_params = {"index_type": "IVF_SQ8", "params": {"nlist": 64}, "metric_type": "L2"}
-        t0 = time.time()
-        index, _ = collection_w.create_index(field_name=ct.default_float_vec_field_name,
-                                             index_params=_index_params,
-                                             name=cf.gen_unique_str())
-        tt = time.time() - t0
-        log.info(f"assert index: {tt}")
-        assert len(collection_w.indexes) == 1
 
         # search
         t0 = time.time()
