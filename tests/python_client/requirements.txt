@@ -1,6 +1,9 @@
 --extra-index-url https://test.pypi.org/simple/
 pytest-cov==2.8.1
-scikit-learn
+requests==2.26.0
+scikit-learn==1.1.2
+timeout_decorator==0.5.0
+ujson==4.2.0
 pytest==7.2.0
 pytest-assume==2.4.3
 pytest-timeout==1.3.3
@@ -16,9 +19,9 @@ ndg-httpsclient
 pyopenssl
 pyasn1
 pytest-html==3.1.1
-delayed-assert
+delayed-assert==0.3.5
 kubernetes==17.17.0
-PyYAML==5.4.1
+PyYAML==6.0
 pytest-sugar==0.9.5
 pytest-reportportal==5.0.10
 pytest-parallel
