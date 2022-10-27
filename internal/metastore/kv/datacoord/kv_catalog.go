@@ -113,44 +113,41 @@ func (kc *Catalog) AddSegment(ctx context.Context, segment *datapb.SegmentInfo) 
 	if err != nil {
 		return err
 	}
+	return kc.Txn.MultiSave(kvs)
+}
 
-	// save handoff req if segment is flushed
-	if segment.State == commonpb.SegmentState_Flushed {
-		flushSegKey := buildFlushedSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
-		newSeg := &datapb.SegmentInfo{ID: segment.GetID()}
-		segBytes, err := marshalSegmentInfo(newSeg)
+func (kc *Catalog) AlterSegments(ctx context.Context, newSegments []*datapb.SegmentInfo) error {
+	if len(newSegments) == 0 {
+		return nil
+	}
+
+	kvs := make(map[string]string)
+	for _, segment := range newSegments {
+		segmentKvs, err := buildSegmentAndBinlogsKvs(segment)
 		if err != nil {
 			return err
 		}
-		kvs[flushSegKey] = segBytes
+		maps.Copy(kvs, segmentKvs)
 	}
 
 	return kc.Txn.MultiSave(kvs)
 }
 
-func (kc *Catalog) AlterSegments(ctx context.Context, modSegments []*datapb.SegmentInfo) error {
-	if len(modSegments) == 0 {
-		return nil
-	}
-
+func (kc *Catalog) AlterSegment(ctx context.Context, newSegment *datapb.SegmentInfo, oldSegment *datapb.SegmentInfo) error {
 	kvs := make(map[string]string)
-	for _, segment := range modSegments {
-		segmentKvs, err := buildSegmentAndBinlogsKvs(segment)
+	segmentKvs, err := buildSegmentAndBinlogsKvs(newSegment)
+	if err != nil {
+		return err
+	}
+	maps.Copy(kvs, segmentKvs)
+	if newSegment.State == commonpb.SegmentState_Flushed && oldSegment.State != commonpb.SegmentState_Flushed {
+		flushSegKey := buildFlushedSegmentPath(newSegment.GetCollectionID(), newSegment.GetPartitionID(), newSegment.GetID())
+		newSeg := &datapb.SegmentInfo{ID: newSegment.GetID()}
+		segBytes, err := marshalSegmentInfo(newSeg)
 		if err != nil {
 			return err
 		}
-
-		maps.Copy(kvs, segmentKvs)
-		// save handoff req if segment is flushed
-		if segment.State == commonpb.SegmentState_Flushed {
-			flushSegKey := buildFlushedSegmentPath(segment.GetCollectionID(), segment.GetPartitionID(), segment.GetID())
-			newSeg := &datapb.SegmentInfo{ID: segment.GetID()}
-			segBytes, err := marshalSegmentInfo(newSeg)
-			if err != nil {
-				return err
-			}
-			kvs[flushSegKey] = segBytes
-		}
+		kvs[flushSegKey] = segBytes
 	}
 
 	return kc.Txn.MultiSave(kvs)
