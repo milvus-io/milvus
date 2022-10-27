@@ -67,11 +67,6 @@ go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/proxy/..." -failfast
 go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/distributed/proxy/..." -failfast
 }
 
-function test_querycoordv2()
-{
-go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/querycoordv2/..." -failfast
-}
-
 function test_querynode()
 {
 go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/querynode/..." -failfast
@@ -149,7 +144,7 @@ go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/datacoord/..." -failfa
 function test_querycoord()
 {
 go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/distributed/querycoord/..." -failfast
-go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/querycoord/..." -failfast
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/querycoordv2/..." -failfast
 }
 
 function test_indexcoord()
@@ -180,7 +175,6 @@ test_tso
 test_config
 test_util
 test_metastore
-test_querycoordv2
 }
 
 
