@@ -76,11 +76,11 @@ func errProxyIsUnhealthy(id UniqueID) error {
 }
 
 func ErrMissingMetadata() error {
-	return fmt.Errorf("invalid argument: missing metadata")
+	return fmt.Errorf("auth check failure, due to occurs inner error: missing metadata")
 }
 
 func ErrUnauthenticated() error {
-	return fmt.Errorf("unauthenticated: invalid credential")
+	return fmt.Errorf("auth check failure, please check username and password are correct")
 }
 
 func ErrProxyNotReady() error {
