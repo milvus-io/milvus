@@ -126,7 +126,7 @@ func TestFlowGraphInsertNode_insert(t *testing.T) {
 		assert.NoError(t, err)
 		insertNode := newInsertNode(streaming, defaultCollectionID, defaultDMLChannel)
 		err = insertNode.insert(nil, defaultSegmentID)
-		assert.Error(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("test invalid segmentType", func(t *testing.T) {
@@ -288,9 +288,7 @@ func TestFlowGraphInsertNode_operate(t *testing.T) {
 			},
 		}
 		msg := []flowgraph.Msg{&iMsg}
-		assert.Panics(t, func() {
-			insertNode.Operate(msg)
-		})
+		assert.Panics(t, func() { insertNode.Operate(msg) })
 	})
 
 	t.Run("test partition not exist", func(t *testing.T) {
@@ -306,9 +304,7 @@ func TestFlowGraphInsertNode_operate(t *testing.T) {
 			},
 		}
 		msg := []flowgraph.Msg{&iMsg}
-		assert.Panics(t, func() {
-			insertNode.Operate(msg)
-		})
+		assert.NotPanics(t, func() { insertNode.Operate(msg) })
 	})
 
 	t.Run("test invalid input length", func(t *testing.T) {
@@ -327,9 +323,7 @@ func TestFlowGraphInsertNode_operate(t *testing.T) {
 
 		err = insertNode.metaReplica.removeCollection(defaultCollectionID)
 		assert.NoError(t, err)
-		assert.Panics(t, func() {
-			insertNode.Operate(msg)
-		})
+		assert.Panics(t, func() { insertNode.Operate(msg) })
 	})
 
 	t.Run("test TransferInsertMsgToInsertRecord failed", func(t *testing.T) {

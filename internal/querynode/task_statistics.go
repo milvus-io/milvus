@@ -45,8 +45,6 @@ func (s *statistics) statisticOnStreaming() error {
 		return err
 	}
 
-	s.qs.collection.RLock() // locks the collectionPtr
-	defer s.qs.collection.RUnlock()
 	if _, released := s.qs.collection.getReleaseTime(); released {
 		log.Ctx(ctx).Warn("collection release before do statistics", zap.Int64("msgID", s.id),
 			zap.Int64("collectionID", s.iReq.GetCollectionID()))
@@ -76,8 +74,6 @@ func (s *statistics) statisticOnHistorical() error {
 		return err
 	}
 
-	s.qs.collection.RLock() // locks the collectionPtr
-	defer s.qs.collection.RUnlock()
 	if _, released := s.qs.collection.getReleaseTime(); released {
 		log.Ctx(ctx).Debug("collection release before do statistics", zap.Int64("msgID", s.id),
 			zap.Int64("collectionID", s.iReq.GetCollectionID()))

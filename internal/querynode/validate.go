@@ -75,7 +75,11 @@ func validateOnHistoricalReplica(ctx context.Context, replica ReplicaInterface, 
 		newSegmentIDs = segmentIDs
 		for _, segmentID := range newSegmentIDs {
 			var segment *Segment
-			if segment, err = replica.getSegmentByID(segmentID, segmentTypeSealed); err != nil {
+			segment, err = replica.getSegmentByID(segmentID, segmentTypeSealed)
+			if err != nil {
+				if errors.Is(err, ErrSegmentNotFound) {
+					continue
+				}
 				return searchPartIDs, newSegmentIDs, err
 			}
 			if !inList(searchPartIDs, segment.partitionID) {

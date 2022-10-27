@@ -18,6 +18,7 @@ package querynode
 
 import (
 	"context"
+	"errors"
 
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -31,6 +32,9 @@ func retrieveOnSegments(ctx context.Context, replica ReplicaInterface, segType s
 	for _, segID := range segIDs {
 		seg, err := replica.getSegmentByID(segID, segType)
 		if err != nil {
+			if errors.Is(err, ErrSegmentNotFound) {
+				continue
+			}
 			return nil, err
 		}
 		result, err := seg.retrieve(plan)

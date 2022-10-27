@@ -108,8 +108,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		// QueryNode should add collection before start flow graph
 		panic(fmt.Errorf("%s getCollectionByID failed, collectionID = %d, channel: %s", iNode.Name(), iNode.collectionID, iNode.channel))
 	}
-	collection.RLock()
-	defer collection.RUnlock()
+
 	// 1. hash insertMessages to insertData
 	// sort timestamps ensures that the data in iData.insertRecords is sorted in ascending order of timestamp
 	// avoiding re-sorting in segCore, which will need data copying
@@ -179,7 +178,10 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			// should not happen, segment should be created before
 			err = fmt.Errorf("insertNode getSegmentByID failed, err = %s", err)
 			log.Error(err.Error(), zap.Int64("collectionID", iNode.collectionID), zap.String("channel", iNode.channel))
-			panic(err)
+
+			if !errors.Is(err, ErrSegmentNotFound) {
+				panic(err)
+			}
 		}
 
 		var numOfRecords = len(iData.insertIDs[segmentID])
@@ -296,10 +298,14 @@ func processDeleteMessages(replica ReplicaInterface, segType segmentType, msg *m
 	var partitionIDs []UniqueID
 	var err error
 	if msg.PartitionID != -1 {
-		partitionIDs = []UniqueID{msg.PartitionID}
+		partitionIDs = []UniqueID{msg.GetPartitionID()}
 	} else {
-		partitionIDs, err = replica.getPartitionIDs(msg.CollectionID)
+		partitionIDs, err = replica.getPartitionIDs(msg.GetCollectionID())
 		if err != nil {
+			log.Warn("the collection has been released, ignore it",
+				zap.Int64("collectionID", msg.GetCollectionID()),
+				zap.Error(err),
+			)
 			return err
 		}
 	}
@@ -307,6 +313,10 @@ func processDeleteMessages(replica ReplicaInterface, segType segmentType, msg *m
 	for _, partitionID := range partitionIDs {
 		segmentIDs, err := replica.getSegmentIDs(partitionID, segType)
 		if err != nil {
+			// Skip this partition
+			if errors.Is(err, ErrPartitionNotFound) {
+				continue
+			}
 			return err
 		}
 		resultSegmentIDs = append(resultSegmentIDs, segmentIDs...)
@@ -374,6 +384,13 @@ func (iNode *insertNode) insert(iData *insertData, segmentID UniqueID) error {
 		zap.Int64("segmentID", segmentID))
 	var targetSegment, err = iNode.metaReplica.getSegmentByID(segmentID, segmentTypeGrowing)
 	if err != nil {
+		if errors.Is(err, ErrSegmentNotFound) {
+			log.Warn("the segment has been released, ignore it",
+				zap.Int64("segmentID", segmentID),
+				zap.Error(err),
+			)
+			return nil
+		}
 		return fmt.Errorf("getSegmentByID failed, err = %s", err)
 	}
 
