@@ -2136,6 +2136,17 @@ func Test_createIndexTask_PreExecute(t *testing.T) {
 			FieldName:      fieldName,
 		},
 	}
+	showCollectionMock := func(ctx context.Context, request *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
+		return &querypb.ShowCollectionsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+			CollectionIDs: []int64{},
+		}, nil
+	}
+	qc := NewQueryCoordMock(withValidShardLeaders(), SetQueryCoordShowCollectionsFunc(showCollectionMock))
+	qc.updateState(commonpb.StateCode_Healthy)
+	cit.queryCoord = qc
 
 	t.Run("normal", func(t *testing.T) {
 		cache := newMockCache()

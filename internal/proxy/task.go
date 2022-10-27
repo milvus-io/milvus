@@ -869,7 +869,7 @@ func (dpt *dropPartitionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	collLoaded, err := isCollectionLoaded(ctx, dpt.queryCoord, []int64{collID})
+	collLoaded, err := isCollectionLoaded(ctx, dpt.queryCoord, collID)
 	if err != nil {
 		return err
 	}

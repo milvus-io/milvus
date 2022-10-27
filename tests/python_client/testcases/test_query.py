@@ -748,7 +748,7 @@ class TestQueryParams(TestcaseBase):
         expected: verify query result
         """
         # init collection with fields: int64, float, float_vec
-        collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True, is_index=True)[0:2]
         df = vectors[0]
 
         # query with output_fields=["*", float_vector)
