@@ -202,6 +202,7 @@ func (kc *Catalog) AlterSegmentsAndAddNewSegment(ctx context.Context, segments [
 			// should be a faked segment, we create flush path directly here
 			flushSegKey := buildFlushedSegmentPath(newSegment.GetCollectionID(), newSegment.GetPartitionID(), newSegment.GetID())
 			clonedSegment := proto.Clone(newSegment).(*datapb.SegmentInfo)
+			clonedSegment.IsFake = true
 			segBytes, err := marshalSegmentInfo(clonedSegment)
 			if err != nil {
 				return err
