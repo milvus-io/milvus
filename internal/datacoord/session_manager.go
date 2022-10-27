@@ -237,13 +237,11 @@ func (c *SessionManager) execReCollectSegmentStats(ctx context.Context, nodeID i
 func (c *SessionManager) GetCompactionState() map[int64]*datapb.CompactionStateResult {
 	wg := sync.WaitGroup{}
 	ctx := context.Background()
-	c.sessions.RLock()
-	wg.Add(len(c.sessions.data))
-	c.sessions.RUnlock()
 
 	plans := sync.Map{}
 	c.sessions.RLock()
 	for nodeID, s := range c.sessions.data {
+		wg.Add(1)
 		go func(nodeID int64, s *Session) {
 			defer wg.Done()
 			cli, err := s.GetOrCreateClient(ctx)
