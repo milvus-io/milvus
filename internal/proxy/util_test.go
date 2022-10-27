@@ -825,7 +825,7 @@ func Test_isCollectionIsLoaded(t *testing.T) {
 		}
 		qc := NewQueryCoordMock(withValidShardLeaders(), SetQueryCoordShowCollectionsFunc(showCollectionMock))
 		qc.updateState(commonpb.StateCode_Healthy)
-		loaded, err := isCollectionLoaded(ctx, qc, []int64{collID})
+		loaded, err := isCollectionLoaded(ctx, qc, collID)
 		assert.NoError(t, err)
 		assert.True(t, loaded)
 	})
@@ -843,7 +843,7 @@ func Test_isCollectionIsLoaded(t *testing.T) {
 		}
 		qc := NewQueryCoordMock(withValidShardLeaders(), SetQueryCoordShowCollectionsFunc(showCollectionMock))
 		qc.updateState(commonpb.StateCode_Healthy)
-		loaded, err := isCollectionLoaded(ctx, qc, []int64{collID})
+		loaded, err := isCollectionLoaded(ctx, qc, collID)
 		assert.Error(t, err)
 		assert.False(t, loaded)
 	})
@@ -861,7 +861,7 @@ func Test_isCollectionIsLoaded(t *testing.T) {
 		}
 		qc := NewQueryCoordMock(withValidShardLeaders(), SetQueryCoordShowCollectionsFunc(showCollectionMock))
 		qc.updateState(commonpb.StateCode_Healthy)
-		loaded, err := isCollectionLoaded(ctx, qc, []int64{collID})
+		loaded, err := isCollectionLoaded(ctx, qc, collID)
 		assert.Error(t, err)
 		assert.False(t, loaded)
 	})

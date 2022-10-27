@@ -836,7 +836,7 @@ func validateIndexName(indexName string) error {
 	return nil
 }
 
-func isCollectionLoaded(ctx context.Context, qc types.QueryCoord, collIDs []int64) (bool, error) {
+func isCollectionLoaded(ctx context.Context, qc types.QueryCoord, collID int64) (bool, error) {
 	// get all loading collections
 	resp, err := qc.ShowCollections(ctx, &querypb.ShowCollectionsRequest{
 		CollectionIDs: nil,
@@ -848,23 +848,18 @@ func isCollectionLoaded(ctx context.Context, qc types.QueryCoord, collIDs []int6
 		return false, errors.New(resp.Status.Reason)
 	}
 
-	loaded := false
-LOOP:
 	for _, loadedCollID := range resp.GetCollectionIDs() {
-		for _, collID := range collIDs {
-			if collID == loadedCollID {
-				loaded = true
-				break LOOP
-			}
+		if collID == loadedCollID {
+			return true, nil
 		}
 	}
-	return loaded, nil
+	return false, nil
 }
 
-func isPartitionLoaded(ctx context.Context, qc types.QueryCoord, collIDs int64, partIDs []int64) (bool, error) {
+func isPartitionLoaded(ctx context.Context, qc types.QueryCoord, collID int64, partIDs []int64) (bool, error) {
 	// get all loading collections
 	resp, err := qc.ShowPartitions(ctx, &querypb.ShowPartitionsRequest{
-		CollectionID: collIDs,
+		CollectionID: collID,
 		PartitionIDs: nil,
 	})
 	if err != nil {
@@ -874,15 +869,12 @@ func isPartitionLoaded(ctx context.Context, qc types.QueryCoord, collIDs int64, 
 		return false, errors.New(resp.Status.Reason)
 	}
 
-	loaded := false
-LOOP:
 	for _, loadedPartID := range resp.GetPartitionIDs() {
 		for _, partID := range partIDs {
 			if partID == loadedPartID {
-				loaded = true
-				break LOOP
+				return true, nil
 			}
 		}
 	}
-	return loaded, nil
+	return false, nil
 }
