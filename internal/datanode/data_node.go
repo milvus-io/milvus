@@ -772,7 +772,7 @@ func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 		return &milvuspb.GetMetricsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
+				Reason:    fmt.Sprintf("datanode GetMetrics failed, nodeID=%d, err=%s", Params.DataNodeCfg.GetNodeID(), err.Error()),
 			},
 		}, nil
 	}
@@ -784,7 +784,7 @@ func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 			return &milvuspb.GetMetricsResponse{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,
-					Reason:    err.Error(),
+					Reason:    fmt.Sprintf("datanode GetMetrics failed, nodeID=%d, err=%s", Params.DataNodeCfg.GetNodeID(), err.Error()),
 				},
 			}, nil
 		}

@@ -468,7 +468,18 @@ func (q *QuotaCenter) getTimeTickDelayFactor(ts Timestamp) float64 {
 			zap.Any("DataNodeMetrics", q.dataNodeMetrics))
 		return 0
 	}
-	return float64(maxDelay.Nanoseconds()-curMaxDelay.Nanoseconds()) / float64(maxDelay.Nanoseconds())
+	factor := float64(maxDelay.Nanoseconds()-curMaxDelay.Nanoseconds()) / float64(maxDelay.Nanoseconds())
+	if factor <= 0.9 {
+		log.Warn("QuotaCenter: limit writing due to long timeTick delay",
+			zap.String("node", role),
+			zap.String("vchannel", vchannel),
+			zap.Time("curTs", t1),
+			zap.Time("minTs", minTt),
+			zap.Duration("delay", curMaxDelay),
+			zap.Duration("MaxDelay", maxDelay),
+			zap.Float64("factor", factor))
+	}
+	return factor
 }
 
 // getNQInQueryFactor checks search&query nq in QueryNode,
