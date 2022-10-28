@@ -73,7 +73,7 @@ class TestcaseBaseBulkInsert(TestcaseBase):
 class TestBulkInsertTaskClean(TestcaseBaseBulkInsert):
 
     @pytest.mark.tags(CaseLabel.L3)
-    @pytest.mark.parametrize("is_row_based", [True, False])
+    @pytest.mark.parametrize("is_row_based", [True])
     @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("dim", [8])  # 8, 128
     @pytest.mark.parametrize("entities", [100])  # 100, 1000
@@ -114,7 +114,7 @@ class TestBulkInsertTaskClean(TestcaseBaseBulkInsert):
         task_ids, _ = self.utility_wrap.bulk_insert(
             collection_name=c_name,
             partition_name=None,
-            is_row_based=is_row_based,
+            # is_row_based=is_row_based,
             files=files,
         )
         logging.info(f"bulk insert task ids:{task_ids}")
@@ -175,7 +175,7 @@ class TestBulkInsertTaskClean(TestcaseBaseBulkInsert):
             assert len(results) == len(ids)
 
     @pytest.mark.tags(CaseLabel.L3)
-    @pytest.mark.parametrize("is_row_based", [True, False])
+    @pytest.mark.parametrize("is_row_based", [True])
     @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("dim", [8])  # 8, 128
     @pytest.mark.parametrize("entities", [100])  # 100, 1000
