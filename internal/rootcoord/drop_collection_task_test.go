@@ -95,35 +95,29 @@ func Test_dropCollectionTask_Execute(t *testing.T) {
 	})
 
 	t.Run("failed to expire cache", func(t *testing.T) {
-		//collectionName := funcutil.GenRandomStr()
-		//coll := &model.Collection{Name: collectionName}
-		//
-		//meta := mockrootcoord.NewIMetaTable(t)
-		//meta.On("GetCollectionByName",
-		//	mock.Anything, // context.Context
-		//	mock.AnythingOfType("string"),
-		//	mock.AnythingOfType("uint64"),
-		//).Return(coll.Clone(), nil)
-		//meta.On("ListAliasesByID",
-		//	mock.AnythingOfType("int64"),
-		//).Return([]string{})
-		//meta.On("ChangeCollectionState",
-		//	mock.Anything, // context.Context
-		//	mock.AnythingOfType("int64"),
-		//	mock.Anything, // etcdpb.CollectionState
-		//	mock.AnythingOfType("uint64"),
-		//).Return(nil)
-		//
-		//core := newTestCore(withInvalidProxyManager(), withMeta(meta))
-		//task := &dropCollectionTask{
-		//	baseTask: baseTask{core: core},
-		//	Req: &milvuspb.DropCollectionRequest{
-		//		Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection},
-		//		CollectionName: collectionName,
-		//	},
-		//}
-		//err := task.Execute(context.Background())
-		//assert.Error(t, err)
+		collectionName := funcutil.GenRandomStr()
+		coll := &model.Collection{Name: collectionName}
+
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.On("GetCollectionByName",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("uint64"),
+		).Return(coll.Clone(), nil)
+		meta.On("ListAliasesByID",
+			mock.AnythingOfType("int64"),
+		).Return([]string{})
+
+		core := newTestCore(withInvalidProxyManager(), withMeta(meta))
+		task := &dropCollectionTask{
+			baseTask: baseTask{core: core},
+			Req: &milvuspb.DropCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection},
+				CollectionName: collectionName,
+			},
+		}
+		err := task.Execute(context.Background())
+		assert.Error(t, err)
 	})
 
 	t.Run("failed to change collection state", func(t *testing.T) {

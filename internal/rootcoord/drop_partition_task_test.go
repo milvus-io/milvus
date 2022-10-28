@@ -89,29 +89,21 @@ func Test_dropPartitionTask_Execute(t *testing.T) {
 	})
 
 	t.Run("failed to expire cache", func(t *testing.T) {
-		//collectionName := funcutil.GenRandomStr()
-		//partitionName := funcutil.GenRandomStr()
-		//coll := &model.Collection{Name: collectionName, Partitions: []*model.Partition{{PartitionName: partitionName}}}
-		//meta := mockrootcoord.NewIMetaTable(t)
-		//meta.On("ChangePartitionState",
-		//	mock.Anything, // context.Context
-		//	mock.AnythingOfType("int64"),
-		//	mock.AnythingOfType("int64"),
-		//	mock.Anything, // pb.PartitionState
-		//	mock.AnythingOfType("uint64"),
-		//).Return(nil)
-		//core := newTestCore(withInvalidProxyManager(), withMeta(meta))
-		//task := &dropPartitionTask{
-		//	baseTask: baseTask{core: core},
-		//	Req: &milvuspb.DropPartitionRequest{
-		//		Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_DropPartition},
-		//		CollectionName: collectionName,
-		//		PartitionName:  partitionName,
-		//	},
-		//	collMeta: coll.Clone(),
-		//}
-		//err := task.Execute(context.Background())
-		//assert.Error(t, err)
+		collectionName := funcutil.GenRandomStr()
+		partitionName := funcutil.GenRandomStr()
+		coll := &model.Collection{Name: collectionName, Partitions: []*model.Partition{{PartitionName: partitionName}}}
+		core := newTestCore(withInvalidProxyManager())
+		task := &dropPartitionTask{
+			baseTask: baseTask{core: core},
+			Req: &milvuspb.DropPartitionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_DropPartition},
+				CollectionName: collectionName,
+				PartitionName:  partitionName,
+			},
+			collMeta: coll.Clone(),
+		}
+		err := task.Execute(context.Background())
+		assert.Error(t, err)
 	})
 
 	t.Run("failed to change partition state", func(t *testing.T) {
