@@ -115,6 +115,7 @@ func (controller *CheckerController) check(ctx context.Context) {
 	for _, task := range tasks {
 		err := controller.scheduler.Add(task)
 		if err != nil {
+			task.Cancel()
 			continue
 		}
 		added++
