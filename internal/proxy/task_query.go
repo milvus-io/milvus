@@ -263,6 +263,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	outputFieldIDs = append(outputFieldIDs, common.TimeStampField)
 	t.RetrieveRequest.OutputFieldsId = outputFieldIDs
 	plan.OutputFieldIds = outputFieldIDs
 	log.Ctx(ctx).Debug("translate output fields to field ids",
@@ -384,6 +385,11 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 		return err
 	}
 	for i := 0; i < len(t.result.FieldsData); i++ {
+		if t.OutputFieldsId[i] == common.TimeStampField {
+			t.result.FieldsData = append(t.result.FieldsData[:i], t.result.FieldsData[(i+1):]...)
+			i--
+			continue
+		}
 		for _, field := range schema.Fields {
 			if field.FieldID == t.OutputFieldsId[i] {
 				t.result.FieldsData[i].FieldName = field.Name

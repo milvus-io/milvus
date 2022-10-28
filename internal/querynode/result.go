@@ -261,7 +261,6 @@ func mergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 		ret = &internalpb.RetrieveResults{
 			Ids: &schemapb.IDs{},
 		}
-
 		skipDupCnt int64
 		loopEnd    int
 	)
@@ -285,7 +284,7 @@ func mergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 	}
 
 	ret.FieldsData = make([]*schemapb.FieldData, len(validRetrieveResults[0].GetFieldsData()))
-	idSet := make(map[interface{}]struct{})
+	idTsMap := make(map[interface{}]uint64)
 	cursors := make([]int64, len(validRetrieveResults))
 	for j := 0; j < loopEnd; j++ {
 		sel := typeutil.SelectMinPK(validRetrieveResults, cursors)
@@ -294,13 +293,19 @@ func mergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 		}
 
 		pk := typeutil.GetPK(validRetrieveResults[sel].GetIds(), cursors[sel])
-		if _, ok := idSet[pk]; !ok {
+		ts := typeutil.GetTS(validRetrieveResults[sel], cursors[sel])
+		if _, ok := idTsMap[pk]; !ok {
 			typeutil.AppendPKs(ret.Ids, pk)
 			typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[sel].GetFieldsData(), cursors[sel])
-			idSet[pk] = struct{}{}
+			idTsMap[pk] = ts
 		} else {
 			// primary keys duplicate
 			skipDupCnt++
+			if ts != 0 && ts > idTsMap[pk] {
+				idTsMap[pk] = ts
+				typeutil.DeleteFieldData(ret.FieldsData)
+				typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[sel].GetFieldsData(), cursors[sel])
+			}
 		}
 		cursors[sel]++
 	}
