@@ -249,11 +249,13 @@ func NewIndexCoordMock() *IndexCoordMock {
 
 type GetIndexStateFunc func(ctx context.Context, request *indexpb.GetIndexStateRequest) (*indexpb.GetIndexStateResponse, error)
 type DescribeIndexFunc func(ctx context.Context, request *indexpb.DescribeIndexRequest) (*indexpb.DescribeIndexResponse, error)
+type DropIndexFunc func(ctx context.Context, request *indexpb.DropIndexRequest) (*commonpb.Status, error)
 
 type mockIndexCoord struct {
 	types.IndexCoord
 	GetIndexStateFunc
 	DescribeIndexFunc
+	DropIndexFunc
 }
 
 func (m *mockIndexCoord) GetIndexState(ctx context.Context, request *indexpb.GetIndexStateRequest) (*indexpb.GetIndexStateResponse, error) {
@@ -271,6 +273,15 @@ func (m *mockIndexCoord) DescribeIndex(ctx context.Context, request *indexpb.Des
 		return m.DescribeIndexFunc(ctx, request)
 	}
 	log.Warn("DescribeIndexFunc nil")
+	return nil, errors.New("mock")
+}
+
+func (m *mockIndexCoord) DropIndex(ctx context.Context, request *indexpb.DropIndexRequest) (*commonpb.Status, error) {
+	if m.DropIndexFunc != nil {
+		log.Warn("DropIndexFunc not nil")
+		return m.DropIndexFunc(ctx, request)
+	}
+	log.Warn("DropIndexFunc is nil")
 	return nil, errors.New("mock")
 }
 

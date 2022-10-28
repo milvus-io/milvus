@@ -90,3 +90,7 @@ func ErrProxyNotReady() error {
 func ErrPartitionNotExist(partitionName string) error {
 	return fmt.Errorf("partitionID of partitionName:%s can not be find", partitionName)
 }
+
+func ErrAmbiguousIndexName() error {
+	return fmt.Errorf("there are multiple indexes, please specify the index_name")
+}
