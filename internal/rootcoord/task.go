@@ -25,6 +25,15 @@ type baseTask struct {
 	id   UniqueID
 }
 
+func newBaseTask(ctx context.Context, core *Core) baseTask {
+	b := baseTask{
+		core: core,
+		done: make(chan error, 1),
+	}
+	b.SetCtx(ctx)
+	return b
+}
+
 func (b *baseTask) SetCtx(ctx context.Context) {
 	b.ctx = ctx
 }

@@ -54,19 +54,19 @@ func (t *dropPartitionTask) Execute(ctx context.Context) error {
 	}
 
 	redoTask := newBaseRedoTask(t.core.stepExecutor)
+
+	redoTask.AddSyncStep(&expireCacheStep{
+		baseStep:        baseStep{core: t.core},
+		collectionNames: []string{t.collMeta.Name},
+		collectionID:    t.collMeta.CollectionID,
+		ts:              t.GetTs(),
+	})
 	redoTask.AddSyncStep(&changePartitionStateStep{
 		baseStep:     baseStep{core: t.core},
 		collectionID: t.collMeta.CollectionID,
 		partitionID:  partID,
 		state:        pb.PartitionState_PartitionDropping,
 		ts:           t.GetTs(),
-	})
-
-	redoTask.AddAsyncStep(&expireCacheStep{
-		baseStep:        baseStep{core: t.core},
-		collectionNames: []string{t.collMeta.Name},
-		collectionID:    t.collMeta.CollectionID,
-		ts:              t.GetTs(),
 	})
 
 	redoTask.AddAsyncStep(&dropIndexStep{
