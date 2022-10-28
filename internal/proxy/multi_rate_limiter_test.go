@@ -49,10 +49,32 @@ func TestMultiRateLimiter(t *testing.T) {
 		multiLimiter := NewMultiRateLimiter()
 		bak := Params.QuotaConfig.QuotaAndLimitsEnabled
 		Params.QuotaConfig.QuotaAndLimitsEnabled = false
-		ok, r := multiLimiter.Limit(internalpb.RateType(0), 1)
-		assert.False(t, ok)
-		assert.NotEqual(t, float64(0), r)
+		for _, rt := range internalpb.RateType_value {
+			ok, r := multiLimiter.Limit(internalpb.RateType(rt), 1)
+			assert.False(t, ok)
+			assert.NotEqual(t, float64(0), r)
+		}
 		Params.QuotaConfig.QuotaAndLimitsEnabled = bak
+	})
+
+	t.Run("test limit", func(t *testing.T) {
+		run := func(insertRate float64) {
+			bakInsertRate := Params.QuotaConfig.DMLMaxInsertRate
+			Params.QuotaConfig.DMLMaxInsertRate = insertRate
+			multiLimiter := NewMultiRateLimiter()
+			bak := Params.QuotaConfig.QuotaAndLimitsEnabled
+			Params.QuotaConfig.QuotaAndLimitsEnabled = true
+			ok, r := multiLimiter.Limit(internalpb.RateType_DMLInsert, 1*1024*1024)
+			assert.False(t, ok)
+			assert.NotEqual(t, float64(0), r)
+			Params.QuotaConfig.QuotaAndLimitsEnabled = bak
+			Params.QuotaConfig.DMLMaxInsertRate = bakInsertRate
+		}
+		run(math.MaxInt)
+		run(math.MaxInt / 1.2)
+		run(math.MaxInt / 2)
+		run(math.MaxInt / 3)
+		run(math.MaxInt / 10000)
 	})
 }
 
@@ -90,14 +112,8 @@ func TestRateLimiter(t *testing.T) {
 		assert.NoError(t, err)
 		for _, rt := range internalpb.RateType_value {
 			for i := 0; i < 100; i++ {
-				if i == 0 {
-					// Consume token initialed in bucket
-					ok, _ := limiter.limit(internalpb.RateType(rt), 1)
-					assert.False(t, ok)
-				} else {
-					ok, _ := limiter.limit(internalpb.RateType(rt), 1)
-					assert.True(t, ok)
-				}
+				ok, _ := limiter.limit(internalpb.RateType(rt), 1)
+				assert.True(t, ok)
 			}
 		}
 	})

@@ -31,7 +31,7 @@ import (
 type Limit float64
 
 // Inf is the infinite rate limit; it allows all events.
-const Inf = Limit(math.MaxFloat64)
+const Inf = Limit(math.MaxInt)
 
 // A Limiter controls how frequently events are allowed to happen.
 // It implements a "token bucket" of size b, initially full and refilled
@@ -113,6 +113,12 @@ func (lim *Limiter) SetLimit(newLimit Limit) {
 	lim.last = now
 	lim.tokens = tokens
 	lim.limit = newLimit
+	if newLimit >= math.MaxInt {
+		lim.burst = math.MaxInt
+	} else {
+		// use rate as burst, because Limiter is with punishment mechanism, burst is insignificant.
+		lim.burst = int(newLimit)
+	}
 }
 
 // advance calculates and returns an updated state for lim resulting from the passage of time.

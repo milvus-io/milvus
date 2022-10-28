@@ -654,7 +654,11 @@ func (q *QuotaCenter) setRates() error {
 			}
 			rates := make([]*internalpb.Rate, 0, len(q.currentRates))
 			for rt, r := range q.currentRates {
-				rates = append(rates, &internalpb.Rate{Rt: rt, R: float64(r) / float64(proxyNum)})
+				if r == Inf {
+					rates = append(rates, &internalpb.Rate{Rt: rt, R: float64(r)})
+				} else {
+					rates = append(rates, &internalpb.Rate{Rt: rt, R: float64(r) / float64(proxyNum)})
+				}
 			}
 			return rates
 		}
