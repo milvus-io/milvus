@@ -801,7 +801,6 @@ class TestQueryParams(TestcaseBase):
         """
         # init collection with fields: int64, float, float_vec
         collection_w = self.init_collection_general(prefix, insert_data=True, nb=100)[0]
-        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
 
         # query with invalid output_fields
