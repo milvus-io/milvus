@@ -122,14 +122,12 @@ func (rl *rateLimiter) registerLimiters() {
 		case internalpb.RateType_DQLQuery:
 			r = Params.QuotaConfig.DQLMaxQueryRate
 		}
-		log.Info("RateLimiter register for rateType",
-			zap.String("rateType", internalpb.RateType_name[rt]),
-			zap.String("rate", ratelimitutil.Limit(r).String()))
 		limit := ratelimitutil.Limit(r)
-		if limit < 0 {
-			limit = ratelimitutil.Inf
-		}
 		burst := int(r) // use rate as burst, because Limiter is with punishment mechanism, burst is insignificant.
 		rl.limiters[internalpb.RateType(rt)] = ratelimitutil.NewLimiter(limit, burst)
+		log.Info("RateLimiter register for rateType",
+			zap.String("rateType", internalpb.RateType_name[rt]),
+			zap.String("rate", ratelimitutil.Limit(r).String()),
+			zap.String("burst", fmt.Sprintf("%v", burst)))
 	}
 }

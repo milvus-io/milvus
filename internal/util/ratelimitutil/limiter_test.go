@@ -18,6 +18,7 @@ package ratelimitutil
 
 import (
 	"fmt"
+	"math"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -59,6 +60,15 @@ func run(t *testing.T, lim *Limiter, allows []allow) {
 		if ok != a.ok || int64(lim.getTokens()) != int64(a.remainTokens) {
 			t.Errorf("step %d: lim.AllowN(%v, %v) = %v want %v, remainTokens = %v, wantTokens = %v",
 				i, a.t, a.n, ok, a.ok, lim.getTokens(), a.remainTokens)
+		}
+	}
+}
+
+func runWithoutCheckToken(t *testing.T, lim *Limiter, allows []allow) {
+	for i, a := range allows {
+		ok := lim.AllowN(a.t, a.n)
+		if ok != a.ok {
+			t.Errorf("step %d: lim.AllowN(%v, %v) = %v want %v", i, a.t, a.n, ok, a.ok)
 		}
 	}
 }
@@ -119,18 +129,30 @@ func TestLimit(t *testing.T) {
 			{t2, 1, false, -1},
 			{t2, 1, false, -1},
 		})
+
+		limit := Inf
+		burst := math.MaxInt
+		limiter := NewLimiter(limit, burst)
+		runWithoutCheckToken(t, limiter, []allow{
+			{t0, 1 * 1024 * 1024, true, 0},
+			{t1, 1 * 1024 * 1024, true, 0},
+			{t2, 1 * 1024 * 1024, true, 0},
+			{t3, 1 * 1024 * 1024, true, 0},
+			{t4, 1 * 1024 * 1024, true, 0},
+			{t5, 1 * 1024 * 1024, true, 0},
+		})
 	})
 
 	t.Run("test SetLimit", func(t *testing.T) {
-		lim := NewLimiter(10, 2)
+		lim := NewLimiter(10, 10)
 
 		run(t, lim, []allow{
-			{t0, 5, true, -3},
-			{t0, 1, false, -3},
-			{t1, 1, false, -3},
+			{t0, 5, true, 5},
+			{t0, 1, true, 4},
+			{t1, 1, true, 4},
 		})
 		lim.SetLimit(100)
-		run(t, lim, []allow{{t2, 10, true, -8}})
+		runWithoutCheckToken(t, lim, []allow{{t2, 10, true, 0}})
 	})
 
 	t.Run("test no truncation error", func(t *testing.T) {
