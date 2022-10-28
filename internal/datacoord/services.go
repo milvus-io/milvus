@@ -633,7 +633,7 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 			resp.Status.Reason = errMsg
 			return resp, nil
 		}
-		// Skip non-flushing, non-flushed and dropped segments.
+		// Skip non-flushed, non-flushing and non-dropped segments.
 		if segment.State != commonpb.SegmentState_Flushed && segment.State != commonpb.SegmentState_Flushing && segment.State != commonpb.SegmentState_Dropped {
 			continue
 		}
@@ -684,7 +684,7 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 	}
 
 	binlogs := make([]*datapb.SegmentBinlogs, 0, len(segment2Binlogs))
-	for segmentID := range flushedIDs {
+	for segmentID, _ := range segment2Binlogs {
 		sbl := &datapb.SegmentBinlogs{
 			SegmentID:     segmentID,
 			NumOfRows:     segmentsNumOfRows[segmentID],
