@@ -17,6 +17,8 @@
 package querynode
 
 import (
+	"fmt"
+	"strings"
 	"sync"
 
 	"go.uber.org/atomic"
@@ -28,6 +30,20 @@ import (
 // SegmentsStatus alias for map[int64]shardSegmentInfo.
 // Provides some helper function to get segment allocation.
 type SegmentsStatus map[int64]shardSegmentInfo
+
+// String implements Stringer for log.
+func (s SegmentsStatus) String() string {
+	// get nodeID => []segmentID
+	allocation := s.GetAllocations(nil)
+
+	var builder strings.Builder
+	builder.WriteRune('{')
+	for nodeID, segmentIDs := range allocation {
+		builder.WriteString(fmt.Sprintf("Node %d: %v ", nodeID, segmentIDs))
+	}
+	builder.WriteRune('}')
+	return builder.String()
+}
 
 // GetAllocations  returns node to segments mappings.
 func (s SegmentsStatus) GetAllocations(partitionIDs []int64) map[int64][]int64 {
@@ -72,8 +88,14 @@ type ShardClusterVersion struct {
 
 // NewShardClusterVersion creates a version with id and allocation.
 func NewShardClusterVersion(vID int64, status SegmentsStatus, lastVersion *ShardClusterVersion) *ShardClusterVersion {
-	log.Info("Update shard cluster version", zap.Int64("newVersionID", vID),
-		zap.Any("newAllocation", status))
+	log.Info("Update shard cluster version",
+		zap.Int64("newVersionID", vID),
+		zap.String("newAllocation", status.String()),
+	)
+	if lastVersion != nil {
+		// ignore the expiration channel here
+		_ = lastVersion.Expire()
+	}
 	return &ShardClusterVersion{
 		versionID:   vID,
 		segments:    status,
