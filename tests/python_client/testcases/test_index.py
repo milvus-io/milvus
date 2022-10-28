@@ -864,7 +864,7 @@ class TestNewIndexBase(TestcaseBase):
         for index in index_prams:
             index_name = cf.gen_unique_str("name")
             collection_w.create_index(default_float_vec_field_name, index, index_name=index_name)
-            collection_w.load()
+            # collection_w.load()
             collection_w.drop_index(index_name=index_name)
         assert len(collection_w.collection.indexes) == 0
 
