@@ -1,3 +1,4 @@
+import copy
 import time
 import os
 import pathlib
@@ -340,7 +341,7 @@ def gen_json_files(is_row_based, rows, dim, auto_id, str_pk,
     files = []
     start_uid = 0
     # make sure pk field exists when not auto_id
-    if not auto_id and DataField.pk_field not in data_fields:
+    if (not auto_id) and (DataField.pk_field not in data_fields):
         data_fields.append(DataField.pk_field)
     for i in range(file_nums):
         file_name = gen_file_name(is_row_based=is_row_based, rows=rows, dim=dim,
@@ -397,10 +398,11 @@ def gen_npy_files(float_vector, rows, dim, data_fields, file_nums=1, err_type=""
     return files
 
 
-def prepare_bulk_insert_json_files(minio_endpoint="", bucket_name="milvus-bucket", is_row_based=True, rows=100, dim=128,
-                                 auto_id=True, str_pk=False, float_vector=True,
-                                 data_fields=[], file_nums=1, multi_folder=False,
-                                 file_type=".json", err_type="", force=False, **kwargs):
+def prepare_bulk_insert_json_files(minio_endpoint="", bucket_name="milvus-bucket",
+                                   is_row_based=True, rows=100, dim=128,
+                                   auto_id=True, str_pk=False, float_vector=True,
+                                   data_fields=[], file_nums=1, multi_folder=False,
+                                   file_type=".json", err_type="", force=False, **kwargs):
     """
     Generate files based on the params in json format and copy them to minio
 
@@ -456,9 +458,12 @@ def prepare_bulk_insert_json_files(minio_endpoint="", bucket_name="milvus-bucket
     :return list
         file names list
     """
+    data_fields_c = copy.deepcopy(data_fields)
+    print(f"data_fields: {data_fields}")
+    print(f"data_fields_c: {data_fields_c}")
     files = gen_json_files(is_row_based=is_row_based, rows=rows, dim=dim,
                            auto_id=auto_id, str_pk=str_pk, float_vector=float_vector,
-                           data_fields=data_fields, file_nums=file_nums, multi_folder=multi_folder,
+                           data_fields=data_fields_c, file_nums=file_nums, multi_folder=multi_folder,
                            file_type=file_type, err_type=err_type, force=force, **kwargs)
 
     copy_files_to_minio(host=minio_endpoint, r_source=data_source, files=files, bucket_name=bucket_name, force=force)
