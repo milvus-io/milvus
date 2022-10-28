@@ -24,6 +24,7 @@ func NewChunkManagerFactoryWithParam(params *paramtable.ComponentParam) *ChunkMa
 		UseSSL(params.MinioCfg.UseSSL),
 		BucketName(params.MinioCfg.BucketName),
 		UseIAM(params.MinioCfg.UseIAM),
+		CloudProvider(params.MinioCfg.CloudProvider),
 		IAMEndpoint(params.MinioCfg.IAMEndpoint),
 		CreateBucket(true))
 }

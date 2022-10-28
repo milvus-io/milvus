@@ -128,6 +128,8 @@ func TestServiceParam(t *testing.T) {
 
 		assert.Equal(t, Params.UseIAM, false)
 
+		assert.Equal(t, Params.CloudProvider, "aws")
+
 		assert.Equal(t, Params.IAMEndpoint, "")
 
 		t.Logf("Minio BucketName = %s", Params.BucketName)

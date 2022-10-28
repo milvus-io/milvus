@@ -28,7 +28,9 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/storage/gcp"
 	"github.com/milvus-io/milvus/internal/util/errorutil"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
@@ -70,15 +72,26 @@ func NewMinioChunkManager(ctx context.Context, opts ...Option) (*MinioChunkManag
 
 func newMinioChunkManagerWithConfig(ctx context.Context, c *config) (*MinioChunkManager, error) {
 	var creds *credentials.Credentials
-	if c.useIAM {
-		creds = credentials.NewIAM(c.iamEndpoint)
-	} else {
-		creds = credentials.NewStaticV4(c.accessKeyID, c.secretAccessKeyID, "")
+	var newMinioFn = minio.New
+
+	switch c.cloudProvider {
+	case paramtable.CloudProviderGCP:
+		newMinioFn = gcp.NewMinioClient
+		if !c.useIAM {
+			creds = credentials.NewStaticV2(c.accessKeyID, c.secretAccessKeyID, "")
+		}
+	default: // aws, minio
+		if c.useIAM {
+			creds = credentials.NewIAM("")
+		} else {
+			creds = credentials.NewStaticV4(c.accessKeyID, c.secretAccessKeyID, "")
+		}
 	}
-	minIOClient, err := minio.New(c.address, &minio.Options{
+	minioOpts := &minio.Options{
 		Creds:  creds,
 		Secure: c.useSSL,
-	})
+	}
+	minIOClient, err := newMinioFn(c.address, minioOpts)
 	// options nil or invalid formatted endpoint, don't need to retry
 	if err != nil {
 		return nil, err

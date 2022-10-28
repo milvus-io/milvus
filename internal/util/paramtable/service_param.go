@@ -446,6 +446,7 @@ type MinioConfig struct {
 	BucketName      string
 	RootPath        string
 	UseIAM          bool
+	CloudProvider   string
 	IAMEndpoint     string
 }
 
@@ -459,6 +460,7 @@ func (p *MinioConfig) init(base *BaseTable) {
 	p.initBucketName()
 	p.initRootPath()
 	p.initUseIAM()
+	p.initCloudProvider()
 	p.initIAMEndpoint()
 }
 
@@ -518,10 +520,31 @@ func (p *MinioConfig) initRootPath() {
 
 func (p *MinioConfig) initUseIAM() {
 	useIAM := p.Base.LoadWithDefault("minio.useIAM", DefaultMinioUseIAM)
-	p.UseIAM, _ = strconv.ParseBool(useIAM)
+	var err error
+	p.UseIAM, err = strconv.ParseBool(useIAM)
+	if err != nil {
+		panic("parse bool useIAM:" + err.Error())
+	}
+}
+
+// CloudProvider supported
+const (
+	CloudProviderAWS = "aws"
+	CloudProviderGCP = "gcp"
+)
+
+var supportedCloudProvider = map[string]bool{
+	CloudProviderAWS: true,
+	CloudProviderGCP: true,
+}
+
+func (p *MinioConfig) initCloudProvider() {
+	p.CloudProvider = p.Base.LoadWithDefault("minio.cloudProvider", DefaultMinioCloudProvider)
+	if !supportedCloudProvider[p.CloudProvider] {
+		panic("unsupported cloudProvider:" + p.CloudProvider)
+	}
 }
 
 func (p *MinioConfig) initIAMEndpoint() {
-	iamEndpoint := p.Base.LoadWithDefault("minio.iamEndpoint", DefaultMinioIAMEndpoint)
-	p.IAMEndpoint = iamEndpoint
+	p.IAMEndpoint = p.Base.LoadWithDefault("minio.iamEndpoint", DefaultMinioIAMEndpoint)
 }

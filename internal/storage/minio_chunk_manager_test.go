@@ -44,6 +44,7 @@ func newMinIOChunkManager(ctx context.Context, bucketName string, rootPath strin
 		UseSSL(useSSL),
 		BucketName(bucketName),
 		UseIAM(false),
+		CloudProvider("aws"),
 		IAMEndpoint(""),
 		CreateBucket(true),
 	)

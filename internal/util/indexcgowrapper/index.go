@@ -9,10 +9,11 @@ package indexcgowrapper
 import "C"
 import (
 	"fmt"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"path/filepath"
 	"runtime"
 	"unsafe"
+
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 
 	"github.com/golang/protobuf/proto"
 

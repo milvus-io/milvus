@@ -41,6 +41,7 @@ const (
 	DefaultMinioUseSSL          = "false"
 	DefaultMinioBucketName      = "a-bucket"
 	DefaultMinioUseIAM          = "false"
+	DefaultMinioCloudProvider   = "aws"
 	DefaultMinioIAMEndpoint     = ""
 	DefaultEtcdEndpoints        = "localhost:2379"
 	DefaultInsertBufferSize     = "16777216"
