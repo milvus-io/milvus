@@ -498,17 +498,16 @@ func (dit *dropIndexTask) PreExecute(ctx context.Context) error {
 	dit.Base.MsgType = commonpb.MsgType_DropIndex
 	dit.Base.SourceID = Params.ProxyCfg.GetNodeID()
 
-	if dit.GetIndexName() == "" {
-		return errors.New("IndexName is not specified")
-	}
 	collName, fieldName := dit.CollectionName, dit.FieldName
 
 	if err := validateCollectionName(collName); err != nil {
 		return err
 	}
 
-	if err := validateFieldName(fieldName); err != nil {
-		return err
+	if fieldName != "" {
+		if err := validateFieldName(fieldName); err != nil {
+			return err
+		}
 	}
 
 	collID, err := globalMetaCache.GetCollectionID(ctx, dit.CollectionName)
@@ -530,7 +529,28 @@ func (dit *dropIndexTask) PreExecute(ctx context.Context) error {
 }
 
 func (dit *dropIndexTask) Execute(ctx context.Context) error {
-	var err error
+	resp, err := dit.indexCoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
+		CollectionID: dit.collectionID,
+		IndexName:    dit.GetIndexName(),
+	})
+	if err != nil {
+		return err
+	}
+	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+		if resp.GetStatus().GetErrorCode() == commonpb.ErrorCode_IndexNotExist {
+			// skip drop
+			return nil
+		}
+		return errors.New(resp.GetStatus().GetReason())
+	}
+
+	if len(resp.GetIndexInfos()) > 1 && dit.GetIndexName() == "" {
+		return ErrAmbiguousIndexName()
+	}
+
+	// if len(indexInfos) == 0, the ErrorCode must be IndexNotExist
+	dit.IndexName = resp.GetIndexInfos()[0].IndexName
+
 	dit.result, err = dit.indexCoord.DropIndex(ctx, &indexpb.DropIndexRequest{
 		CollectionID: dit.collectionID,
 		PartitionIDs: nil,
