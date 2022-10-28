@@ -464,12 +464,12 @@ func (b etcd210) BackupV2(file string) error {
 			return err
 		}
 		for _, kv := range resp.Kvs {
+			currentKey = string(append(kv.Key, 0))
 			if kv.Lease != 0 {
 				console.Warning(fmt.Sprintf("lease key won't be backuped: %s, lease id: %d", kv.Key, kv.Lease))
 				continue
 			}
 			saves[string(kv.Key)] = string(kv.Value)
-			currentKey = string(append(kv.Key, 0))
 		}
 	}
 
