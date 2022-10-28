@@ -152,8 +152,8 @@ func (p *NumpyParser) validate(adapter *NumpyAdapter, fieldName string) error {
 		if elementType != schema.DataType {
 			log.Error("Numpy parser: illegal data type of numpy file for scalar field", zap.Any("numpyDataType", elementType),
 				zap.String("fieldName", fieldName), zap.Any("fieldDataType", schema.DataType))
-			return fmt.Errorf("Numpy parser: illegal data type %s of numpy file for scalar field '%s' with type %d",
-				getTypeName(elementType), schema.GetName(), schema.DataType)
+			return fmt.Errorf("Numpy parser: illegal data type %s of numpy file for scalar field '%s' with type %s",
+				getTypeName(elementType), schema.GetName(), getTypeName(schema.DataType))
 		}
 
 		// scalar field, the shape should be 1

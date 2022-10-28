@@ -267,7 +267,7 @@ func (p *ImportWrapper) fileValidation(filePaths []string) (bool, error) {
 		// TODO add context
 		size, err := p.chunkManager.Size(context.TODO(), filePath)
 		if err != nil {
-			log.Error("import wrapper: failed to get file size", zap.String("filePath", filePath), zap.Any("err", err))
+			log.Error("import wrapper: failed to get file size", zap.String("filePath", filePath), zap.Error(err))
 			return rowBased, fmt.Errorf("import wrapper: failed to get file size of '%s'", filePath)
 		}
 
@@ -334,7 +334,7 @@ func (p *ImportWrapper) Import(filePaths []string, options ImportOptions) error 
 			if fileType == JSONFileExt {
 				err = p.parseRowBasedJSON(filePath, options.OnlyValidate)
 				if err != nil {
-					log.Error("import wrapper: failed to parse row-based json file", zap.Any("err", err), zap.String("filePath", filePath))
+					log.Error("import wrapper: failed to parse row-based json file", zap.Error(err), zap.String("filePath", filePath))
 					return err
 				}
 			} // no need to check else, since the fileValidation() already do this
@@ -407,7 +407,7 @@ func (p *ImportWrapper) Import(filePaths []string, options ImportOptions) error 
 				err = p.parseColumnBasedNumpy(filePath, options.OnlyValidate, combineFunc)
 
 				if err != nil {
-					log.Error("import wrapper: failed to parse column-based numpy file", zap.Any("err", err), zap.String("filePath", filePath))
+					log.Error("import wrapper: failed to parse column-based numpy file", zap.Error(err), zap.String("filePath", filePath))
 					return err
 				}
 			}
@@ -732,7 +732,7 @@ func (p *ImportWrapper) splitFieldsData(fieldsData map[storage.FieldID]storage.F
 	// generate auto id for primary key and rowid field
 	rowIDBegin, rowIDEnd, err := p.rowIDAllocator.Alloc(uint32(rowCount))
 	if err != nil {
-		log.Error("import wrapper: failed to alloc row ID", zap.Any("err", err))
+		log.Error("import wrapper: failed to alloc row ID", zap.Error(err))
 		return err
 	}
 
@@ -869,7 +869,7 @@ func (p *ImportWrapper) flushFunc(fields map[storage.FieldID]storage.FieldData, 
 		// create a new segment
 		segID, channelName, err := p.assignSegmentFunc(shardID)
 		if err != nil {
-			log.Error("import wrapper: failed to assign a new segment", zap.Any("error", err), zap.Int("shardID", shardID))
+			log.Error("import wrapper: failed to assign a new segment", zap.Error(err), zap.Int("shardID", shardID))
 			return err
 		}
 
@@ -888,7 +888,7 @@ func (p *ImportWrapper) flushFunc(fields map[storage.FieldID]storage.FieldData, 
 	// save binlogs
 	fieldsInsert, fieldsStats, err := p.createBinlogsFunc(fields, segment.segmentID)
 	if err != nil {
-		log.Error("import wrapper: failed to save binlogs", zap.Any("error", err), zap.Int("shardID", shardID),
+		log.Error("import wrapper: failed to save binlogs", zap.Error(err), zap.Int("shardID", shardID),
 			zap.Int64("segmentID", segment.segmentID), zap.String("targetChannel", segment.targetChName))
 		return err
 	}
@@ -914,7 +914,7 @@ func (p *ImportWrapper) closeWorkingSegment(segment *WorkingSegment) error {
 	err := p.saveSegmentFunc(segment.fieldsInsert, segment.fieldsStats, segment.segmentID, segment.targetChName, segment.rowCount)
 	if err != nil {
 		log.Error("import wrapper: failed to save segment",
-			zap.Any("error", err),
+			zap.Error(err),
 			zap.Int("shardID", segment.shardID),
 			zap.Int64("segmentID", segment.segmentID),
 			zap.String("targetChannel", segment.targetChName))

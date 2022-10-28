@@ -34,6 +34,7 @@ import (
 	"github.com/sbinet/npyio"
 	"github.com/sbinet/npyio/npy"
 	"go.uber.org/zap"
+	"golang.org/x/text/encoding/unicode"
 )
 
 var (
@@ -135,7 +136,7 @@ func convertNumpyType(typeStr string) (schemapb.DataType, error) {
 		if isStringType(typeStr) {
 			return schemapb.DataType_VarChar, nil
 		}
-		log.Error("Numpy adapter: the numpy file data type not supported", zap.String("dataType", typeStr))
+		log.Error("Numpy adapter: the numpy file data type is not supported", zap.String("dataType", typeStr))
 		return schemapb.DataType_None, fmt.Errorf("Numpy adapter: the numpy file dtype '%s' is not supported", typeStr)
 	}
 }
@@ -496,7 +497,7 @@ func (n *NumpyAdapter) ReadString(count int) ([]string, error) {
 	// varchar length, this is the max length, some item is shorter than this length, but they also occupy bytes of max length
 	maxLen, utf, err := stringLen(n.npyReader.Header.Descr.Type)
 	if err != nil || maxLen <= 0 {
-		log.Error("Numpy adapter: failed to get max length of varchar from numpy file header", zap.Int("maxLen", maxLen), zap.Any("err", err))
+		log.Error("Numpy adapter: failed to get max length of varchar from numpy file header", zap.Int("maxLen", maxLen), zap.Error(err))
 		return nil, fmt.Errorf("Numpy adapter: failed to get max length %d of varchar from numpy file header, error: %w", maxLen, err)
 	}
 	log.Info("Numpy adapter: get varchar max length from numpy file header", zap.Int("maxLen", maxLen), zap.Bool("utf", utf))
@@ -511,45 +512,33 @@ func (n *NumpyAdapter) ReadString(count int) ([]string, error) {
 	data := make([]string, 0)
 	for i := 0; i < readSize; i++ {
 		if utf {
-			// in the numpy file, each utf8 character occupy utf8.UTFMax bytes, each string occupys utf8.UTFMax*maxLen bytes
-			// for example, an ANSI character "a" only uses one byte, but it still occupy utf8.UTFMax bytes
-			// a chinese character uses three bytes, it also occupy utf8.UTFMax bytes
+			// in the numpy file with utf32 encoding, the dType could be like "<U2",
+			// "<" is byteorder(LittleEndian), "U" means it is utf32 encoding, "2" means the max length of strings is 2(characters)
+			// each character occupy 4 bytes, each string occupys 4*maxLen bytes
+			// for example, a numpy file has two strings: "a" and "bb", the maxLen is 2, byte order is LittleEndian
+			// the character "a" occupys 2*4=8 bytes(0x97,0x00,0x00,0x00,0x00,0x00,0x00,0x00),
+			// the "bb" occupys 8 bytes(0x97,0x00,0x00,0x00,0x98,0x00,0x00,0x00)
+			// for non-ascii characters, the unicode could be 1 ~ 4 bytes, each character occupys 4 bytes, too
 			raw, err := ioutil.ReadAll(io.LimitReader(n.reader, utf8.UTFMax*int64(maxLen)))
 			if err != nil {
-				log.Error("Numpy adapter: failed to read utf8 string from numpy file", zap.Int("i", i), zap.Any("err", err))
-				return nil, fmt.Errorf("Numpy adapter: failed to read utf8 string from numpy file, error: %w", err)
+				log.Error("Numpy adapter: failed to read utf32 bytes from numpy file", zap.Int("i", i), zap.Error(err))
+				return nil, fmt.Errorf("Numpy adapter: failed to read utf32 bytes from numpy file, error: %w", err)
 			}
 
-			var str string
-			for len(raw) > 0 {
-				r, _ := utf8.DecodeRune(raw)
-				if r == utf8.RuneError {
-					log.Error("Numpy adapter: failed to decode utf8 string from numpy file", zap.Any("raw", raw[:utf8.UTFMax]))
-					return nil, fmt.Errorf("Numpy adapter: failed to decode utf8 string from numpy file, error: illegal utf-8 encoding")
-				}
-
-				// only support ascii characters, because the numpy lib encode the utf8 bytes by its internal method,
-				// the encode/decode logic is not clear now, return error
-				n := n.order.Uint32(raw)
-				if n > 127 {
-					log.Error("Numpy adapter: a string contains non-ascii characters, not support yet", zap.Int32("utf8Code", r))
-					return nil, fmt.Errorf("Numpy adapter: a string contains non-ascii characters, not support yet")
-				}
-
-				// if a string is shorter than maxLen, the tail characters will be filled with "\u0000"(in utf spec this is Null)
-				if r > 0 {
-					str += string(r)
-				}
-
-				raw = raw[utf8.UTFMax:]
+			str, err := decodeUtf32(raw, n.order)
+			if err != nil {
+				log.Error("Numpy adapter: failed todecode utf32 bytes", zap.Int("i", i), zap.Error(err))
+				return nil, fmt.Errorf("Numpy adapter: failed to decode utf32 bytes, error: %w", err)
 			}
 
 			data = append(data, str)
 		} else {
+			// in the numpy file with ansi encoding, the dType could be like "S2", maxLen is 2, each string occupys 2 bytes
+			// bytes.Index(buf, []byte{0}) tell us which position is the end of the string
 			buf, err := ioutil.ReadAll(io.LimitReader(n.reader, int64(maxLen)))
 			if err != nil {
-				log.Error("Numpy adapter: failed to read string from numpy file", zap.Int("i", i), zap.Any("err", err))
-				return nil, fmt.Errorf("Numpy adapter: failed to read string from numpy file, error: %w", err)
+				log.Error("Numpy adapter: failed to read ascii bytes from numpy file", zap.Int("i", i), zap.Error(err))
+				return nil, fmt.Errorf("Numpy adapter: failed to read ascii bytes from numpy file, error: %w", err)
 			}
 			n := bytes.Index(buf, []byte{0})
 			if n > 0 {
@@ -563,4 +552,62 @@ func (n *NumpyAdapter) ReadString(count int) ([]string, error) {
 	n.readPosition += readSize
 
 	return data, nil
+}
+
+func decodeUtf32(src []byte, order binary.ByteOrder) (string, error) {
+	if len(src)%4 != 0 {
+		return "", fmt.Errorf("invalid utf32 bytes length %d, the byte array length should be multiple of 4", len(src))
+	}
+
+	var str string
+	for len(src) > 0 {
+		// check the high bytes, if high bytes are 0, the UNICODE is less than U+FFFF, we can use unicode.UTF16 to decode
+		isUtf16 := false
+		var lowbytesPosition int
+		uOrder := unicode.LittleEndian
+		if order == binary.LittleEndian {
+			if src[2] == 0 && src[3] == 0 {
+				isUtf16 = true
+			}
+			lowbytesPosition = 0
+		} else {
+			if src[0] == 0 && src[1] == 0 {
+				isUtf16 = true
+			}
+			lowbytesPosition = 2
+			uOrder = unicode.BigEndian
+		}
+
+		if isUtf16 {
+			// use unicode.UTF16 to decode the low bytes to utf8
+			// utf32 and utf16 is same if the unicode code is less than 65535
+			if src[lowbytesPosition] != 0 || src[lowbytesPosition+1] != 0 {
+				decoder := unicode.UTF16(uOrder, unicode.IgnoreBOM).NewDecoder()
+				res, err := decoder.Bytes(src[lowbytesPosition : lowbytesPosition+2])
+				if err != nil {
+					return "", fmt.Errorf("failed to decode utf32 binary bytes, error: %w", err)
+				}
+				str += string(res)
+			}
+		} else {
+			// convert the 4 bytes to a unicode and encode to utf8
+			// Golang strongly opposes utf32 coding, this kind of encoding has been excluded from standard lib
+			var x uint32
+			if order == binary.LittleEndian {
+				x = uint32(src[3])<<24 | uint32(src[2])<<16 | uint32(src[1])<<8 | uint32(src[0])
+			} else {
+				x = uint32(src[0])<<24 | uint32(src[1])<<16 | uint32(src[2])<<8 | uint32(src[3])
+			}
+			r := rune(x)
+			utf8Code := make([]byte, 4)
+			utf8.EncodeRune(utf8Code, r)
+			if r == utf8.RuneError {
+				return "", fmt.Errorf("failed to convert 4 bytes unicode %d to utf8 rune", x)
+			}
+			str += string(utf8Code)
+		}
+
+		src = src[4:]
+	}
+	return str, nil
 }

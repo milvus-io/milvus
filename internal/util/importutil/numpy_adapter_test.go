@@ -20,6 +20,8 @@ import (
 	"encoding/binary"
 	"io"
 	"os"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
@@ -553,9 +555,62 @@ func Test_NumpyAdapterRead(t *testing.T) {
 		assert.Nil(t, res)
 	})
 
-	t.Run("test read ascii characters", func(t *testing.T) {
+	t.Run("test read ascii characters with ansi", func(t *testing.T) {
+		npyReader := &npy.Reader{
+			Header: npy.Header{},
+		}
+
+		data := make([]byte, 0)
+		values := []string{"ab", "ccc", "d"}
+		maxLen := 0
+		for _, str := range values {
+			if len(str) > maxLen {
+				maxLen = len(str)
+			}
+		}
+		for _, str := range values {
+			for i := 0; i < maxLen; i++ {
+				if i < len(str) {
+					data = append(data, str[i])
+				} else {
+					data = append(data, 0)
+				}
+			}
+		}
+
+		npyReader.Header.Descr.Shape = append(npyReader.Header.Descr.Shape, len(values))
+
+		adapter := &NumpyAdapter{
+			reader:       strings.NewReader(string(data)),
+			npyReader:    npyReader,
+			readPosition: 0,
+			dataType:     schemapb.DataType_VarChar,
+		}
+
+		// count should greater than 0
+		res, err := adapter.ReadString(0)
+		assert.NotNil(t, err)
+		assert.Nil(t, res)
+
+		// maxLen is zero
+		npyReader.Header.Descr.Type = "S0"
+		res, err = adapter.ReadString(1)
+		assert.NotNil(t, err)
+		assert.Nil(t, res)
+
+		npyReader.Header.Descr.Type = "S" + strconv.FormatInt(int64(maxLen), 10)
+
+		res, err = adapter.ReadString(len(values) + 1)
+		assert.Nil(t, err)
+		assert.Equal(t, len(values), len(res))
+		for i := 0; i < len(res); i++ {
+			assert.Equal(t, values[i], res[i])
+		}
+	})
+
+	t.Run("test read ascii characters with utf32", func(t *testing.T) {
 		filePath := TempFilesPath + "varchar1.npy"
-		data := []string{"a", "bbb", "c", "dd", "eeee", "fff"}
+		data := []string{"a ", "bbb", " c", "dd", "eeee", "fff"}
 		err := CreateNumpyFile(filePath, data)
 		assert.Nil(t, err)
 
@@ -583,9 +638,9 @@ func Test_NumpyAdapterRead(t *testing.T) {
 		assert.Nil(t, res)
 	})
 
-	t.Run("test read non-ascii", func(t *testing.T) {
+	t.Run("test read non-ascii characters with utf32", func(t *testing.T) {
 		filePath := TempFilesPath + "varchar2.npy"
-		data := []string{"a三百", "马克bbb"}
+		data := []string{"で と ど ", " 马克bbb", "$(한)삼각*"}
 		err := CreateNumpyFile(filePath, data)
 		assert.Nil(t, err)
 
@@ -596,7 +651,33 @@ func Test_NumpyAdapterRead(t *testing.T) {
 		adapter, err := NewNumpyAdapter(file)
 		assert.Nil(t, err)
 		res, err := adapter.ReadString(len(data))
-		assert.NotNil(t, err)
-		assert.Nil(t, res)
+		assert.Nil(t, err)
+		assert.Equal(t, len(data), len(res))
+
+		for i := 0; i < len(res); i++ {
+			assert.Equal(t, data[i], res[i])
+		}
 	})
+}
+
+func Test_DecodeUtf32(t *testing.T) {
+	// wrong input
+	res, err := decodeUtf32([]byte{1, 2}, binary.LittleEndian)
+	assert.NotNil(t, err)
+	assert.Empty(t, res)
+
+	// this string contains ascii characters and unicode characters
+	str := "ad◤三百🎵ゐ↙"
+
+	// utf32 littleEndian of str
+	src := []byte{97, 0, 0, 0, 100, 0, 0, 0, 228, 37, 0, 0, 9, 78, 0, 0, 126, 118, 0, 0, 181, 243, 1, 0, 144, 48, 0, 0, 153, 33, 0, 0}
+	res, err = decodeUtf32(src, binary.LittleEndian)
+	assert.Nil(t, err)
+	assert.Equal(t, str, res)
+
+	// utf32 bigEndian of str
+	src = []byte{0, 0, 0, 97, 0, 0, 0, 100, 0, 0, 37, 228, 0, 0, 78, 9, 0, 0, 118, 126, 0, 1, 243, 181, 0, 0, 48, 144, 0, 0, 33, 153}
+	res, err = decodeUtf32(src, binary.BigEndian)
+	assert.Nil(t, err)
+	assert.Equal(t, str, res)
 }
