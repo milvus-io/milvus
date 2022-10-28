@@ -20,7 +20,9 @@ import (
 	"context"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
+	"go.uber.org/zap"
 )
 
 func CreateSegmentTasksFromPlans(ctx context.Context, checkerID int64, timeout time.Duration, plans []SegmentAssignPlan) []task.Task {
@@ -35,7 +37,7 @@ func CreateSegmentTasksFromPlans(ctx context.Context, checkerID int64, timeout t
 			action := task.NewSegmentAction(p.From, task.ActionTypeReduce, p.Segment.GetInsertChannel(), p.Segment.GetID())
 			actions = append(actions, action)
 		}
-		task := task.NewSegmentTask(
+		task, err := task.NewSegmentTask(
 			ctx,
 			timeout,
 			checkerID,
@@ -43,6 +45,17 @@ func CreateSegmentTasksFromPlans(ctx context.Context, checkerID int64, timeout t
 			p.ReplicaID,
 			actions...,
 		)
+		if err != nil {
+			log.Warn("Create segment task from plan failed",
+				zap.Int64("collection", p.Segment.GetCollectionID()),
+				zap.Int64("replica", p.ReplicaID),
+				zap.String("channel", p.Segment.GetInsertChannel()),
+				zap.Int64("From", p.From),
+				zap.Int64("To", p.To),
+				zap.Error(err),
+			)
+			continue
+		}
 		ret = append(ret, task)
 	}
 	return ret
@@ -60,7 +73,18 @@ func CreateChannelTasksFromPlans(ctx context.Context, checkerID int64, timeout t
 			action := task.NewChannelAction(p.From, task.ActionTypeReduce, p.Channel.GetChannelName())
 			actions = append(actions, action)
 		}
-		task := task.NewChannelTask(ctx, timeout, checkerID, p.Channel.GetCollectionID(), p.ReplicaID, actions...)
+		task, err := task.NewChannelTask(ctx, timeout, checkerID, p.Channel.GetCollectionID(), p.ReplicaID, actions...)
+		if err != nil {
+			log.Warn("Create channel task from plan failed",
+				zap.Int64("collection", p.Channel.GetCollectionID()),
+				zap.Int64("replica", p.ReplicaID),
+				zap.String("channel", p.Channel.GetChannelName()),
+				zap.Int64("From", p.From),
+				zap.Int64("To", p.To),
+				zap.Error(err),
+			)
+			continue
+		}
 		ret = append(ret, task)
 	}
 	return ret

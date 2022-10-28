@@ -115,7 +115,7 @@ func (s *Server) balanceSegments(ctx context.Context, req *querypb.LoadBalanceRe
 			zap.Int64("destNodeID", plan.To),
 			zap.Int64("segmentID", plan.Segment.GetID()),
 		)
-		task := task.NewSegmentTask(ctx,
+		task, err := task.NewSegmentTask(ctx,
 			Params.QueryCoordCfg.SegmentTaskTimeout,
 			req.GetBase().GetMsgID(),
 			req.GetCollectionID(),
@@ -123,7 +123,19 @@ func (s *Server) balanceSegments(ctx context.Context, req *querypb.LoadBalanceRe
 			task.NewSegmentAction(plan.To, task.ActionTypeGrow, plan.Segment.GetInsertChannel(), plan.Segment.GetID()),
 			task.NewSegmentAction(srcNode, task.ActionTypeReduce, plan.Segment.GetInsertChannel(), plan.Segment.GetID()),
 		)
-		err := s.taskScheduler.Add(task)
+
+		if err != nil {
+			log.Warn("Create segment task for balance failed",
+				zap.Int64("collection", req.GetCollectionID()),
+				zap.Int64("replica", replica.GetID()),
+				zap.String("channel", plan.Segment.InsertChannel),
+				zap.Int64("From", srcNode),
+				zap.Int64("To", plan.To),
+				zap.Error(err),
+			)
+			continue
+		}
+		err = s.taskScheduler.Add(task)
 		if err != nil {
 			task.Cancel()
 			return err
