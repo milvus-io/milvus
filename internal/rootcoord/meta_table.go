@@ -355,6 +355,10 @@ func (mt *MetaTable) ListCollections(ctx context.Context, ts Timestamp) ([]*mode
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
 
+	if isMaxTs(ts) {
+		return mt.listCollectionFromCache()
+	}
+
 	// list collections should always be loaded from catalog.
 	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName)
 	colls, err := mt.catalog.ListCollections(ctx1, ts)
@@ -368,6 +372,16 @@ func (mt *MetaTable) ListCollections(ctx context.Context, ts Timestamp) ([]*mode
 		}
 	}
 	return onlineCollections, nil
+}
+
+func (mt *MetaTable) listCollectionFromCache() ([]*model.Collection, error) {
+	collectionFromCache := make([]*model.Collection, 0)
+	for _, meta := range mt.collID2Meta {
+		if meta.Available() {
+			collectionFromCache = append(collectionFromCache, meta)
+		}
+	}
+	return collectionFromCache, nil
 }
 
 func (mt *MetaTable) ListAbnormalCollections(ctx context.Context, ts Timestamp) ([]*model.Collection, error) {
