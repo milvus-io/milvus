@@ -30,6 +30,9 @@ func newRunConfig(base *paramtable.BaseTable) *RunConfig {
 }
 
 func (c *RunConfig) String() string {
+	if c == nil {
+		return ""
+	}
 	switch c.Cmd {
 	case RunCmd:
 		return fmt.Sprintf("Cmd: %s, SourceVersion: %s, TargetVersion: %s, BackupFilePath: %s, RunWithBackup: %v",
@@ -57,8 +60,6 @@ func (c *RunConfig) init(base *paramtable.BaseTable) {
 	c.SourceVersion = c.base.LoadWithDefault("config.sourceVersion", "")
 	c.TargetVersion = c.base.LoadWithDefault("config.targetVersion", "")
 	c.BackupFilePath = c.base.LoadWithDefault("config.backupFilePath", "")
-
-	c.show()
 }
 
 type MilvusConfig struct {
@@ -92,6 +93,22 @@ func (c *MilvusConfig) init(base *paramtable.BaseTable) {
 	c.EtcdCfg.LoadCfgToMemory()
 }
 
+func (c *MilvusConfig) String() string {
+	if c == nil {
+		return ""
+	}
+	switch c.MetaStoreCfg.MetaStoreType {
+	case util.MetaStoreTypeEtcd:
+		return fmt.Sprintf("Type: %s, EndPoints: %v, MetaRootPath: %s", c.MetaStoreCfg.MetaStoreType, c.EtcdCfg.Endpoints, c.EtcdCfg.MetaRootPath)
+	default:
+		return fmt.Sprintf("unsupported meta store: %s", c.MetaStoreCfg.MetaStoreType)
+	}
+}
+
+func (c *MilvusConfig) show() {
+	console.Warning(c.String())
+}
+
 type Config struct {
 	base *paramtable.BaseTable
 	*RunConfig
@@ -102,6 +119,9 @@ func (c *Config) init(yamlFile string) {
 	c.base = paramtable.NewBaseTableFromYamlOnly(yamlFile)
 	c.RunConfig = newRunConfig(c.base)
 	c.MilvusConfig = newMilvusConfig(c.base)
+
+	c.RunConfig.show()
+	c.MilvusConfig.show()
 }
 
 func NewConfig(yamlFile string) *Config {
