@@ -585,23 +585,19 @@ class BulkInsertChecker(Checker):
         self.utility_wrap = ApiUtilityWrapper()
         self.schema = cf.gen_default_collection_schema()
         self.files = files
-        self.is_row_based = True
         self.recheck_failed_task = False
         self.failed_tasks = []
         self.c_name = None
 
-    def update(self, files=None, schema=None, is_row_based=None):
+    def update(self, files=None, schema=None):
         if files is not None:
             self.files = files
         if schema is not None:
             self.schema = schema
-        if is_row_based is not None:
-            self.is_row_based = is_row_based
 
     @trace()
     def bulk_insert(self):
         task_ids, result = self.utility_wrap.bulk_insert(collection_name=self.c_name,
-                                                       is_row_based=self.is_row_based,
                                                        files=self.files)
         completed, result = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=task_ids, timeout=60)
         return task_ids, completed
