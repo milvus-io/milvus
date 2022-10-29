@@ -349,7 +349,7 @@ func (ibNode *insertBufferNode) FillInSyncTasks(fgMsg *flowGraphMsg, seg2Upload 
 					zap.Bool("flushed", task.flushed),
 					zap.Bool("dropped", task.dropped),
 				)
-				return
+				continue
 			}
 
 			buf := ibNode.GetBuffer(segmentID)
