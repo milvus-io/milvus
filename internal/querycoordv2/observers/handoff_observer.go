@@ -22,10 +22,6 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/samber/lo"
-	"go.etcd.io/etcd/api/v3/mvccpb"
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -34,6 +30,9 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/samber/lo"
+	"go.etcd.io/etcd/api/v3/mvccpb"
+	"go.uber.org/zap"
 )
 
 type CollectionHandoffStatus int32
@@ -116,22 +115,23 @@ func (ob *HandoffObserver) StartHandoff(collectionIDs ...int64) {
 	}
 }
 
-func (ob *HandoffObserver) reloadFromStore(ctx context.Context) error {
-	_, handoffReqValues, version, err := ob.store.LoadHandoffWithRevision()
+func (ob *HandoffObserver) consumeOutdatedHandoffEvent(ctx context.Context) error {
+	_, handoffReqValues, revision, err := ob.store.LoadHandoffWithRevision()
 	if err != nil {
 		log.Error("reloadFromKV: LoadWithRevision from kv failed", zap.Error(err))
 		return err
 	}
-	ob.revision = version
+	// set watch start revision
+	ob.revision = revision
 
 	for _, value := range handoffReqValues {
 		segmentInfo := &querypb.SegmentInfo{}
 		err := proto.Unmarshal([]byte(value), segmentInfo)
 		if err != nil {
-			log.Error("reloadFromKV: unmarshal failed", zap.Any("error", err.Error()))
+			log.Error("reloadFromKV: unmarshal failed", zap.Error(err))
 			return err
 		}
-		ob.tryHandoff(ctx, segmentInfo)
+		ob.cleanEvent(ctx, segmentInfo)
 	}
 
 	return nil
@@ -139,7 +139,7 @@ func (ob *HandoffObserver) reloadFromStore(ctx context.Context) error {
 
 func (ob *HandoffObserver) Start(ctx context.Context) error {
 	log.Info("Start reload handoff event from etcd")
-	if err := ob.reloadFromStore(ctx); err != nil {
+	if err := ob.consumeOutdatedHandoffEvent(ctx); err != nil {
 		log.Error("handoff observer reload from kv failed", zap.Error(err))
 		return err
 	}
@@ -176,6 +176,7 @@ func (ob *HandoffObserver) schedule(ctx context.Context) {
 		case resp, ok := <-watchChan:
 			if !ok {
 				log.Error("watch Segment handoff loop failed because watch channel is closed!")
+				return
 			}
 
 			if err := resp.Err(); err != nil {
@@ -234,26 +235,36 @@ func (ob *HandoffObserver) tryHandoff(ctx context.Context, segment *querypb.Segm
 	if Params.QueryCoordCfg.AutoHandoff &&
 		ok &&
 		(segment.GetIsFake() || ob.meta.CollectionManager.ContainAnyIndex(segment.GetCollectionID(), indexIDs...)) {
-		if status == CollectionHandoffStatusRegistered {
-			ob.handoffEvents[segment.GetSegmentID()] = &HandoffEvent{
-				Segment: segment,
-				Status:  HandoffEventStatusReceived,
+		event := ob.handoffEvents[segment.SegmentID]
+		if event == nil {
+			// record submit order
+			_, ok := ob.handoffSubmitOrders[segment.GetPartitionID()]
+			if !ok {
+				ob.handoffSubmitOrders[segment.GetPartitionID()] = make([]int64, 0)
 			}
-		} else {
-			ob.handoffEvents[segment.GetSegmentID()] = &HandoffEvent{
-				Segment: segment,
-				Status:  HandoffEventStatusTriggered,
-			}
+			ob.handoffSubmitOrders[segment.GetPartitionID()] = append(ob.handoffSubmitOrders[segment.GetPartitionID()], segment.GetSegmentID())
+		}
 
-			if !segment.GetIsFake() {
-				ob.handoff(segment)
+		if status == CollectionHandoffStatusRegistered {
+			if event == nil {
+				// keep all handoff event, waiting collection ready and to trigger handoff
+				ob.handoffEvents[segment.GetSegmentID()] = &HandoffEvent{
+					Segment: segment,
+					Status:  HandoffEventStatusReceived,
+				}
 			}
+			return
 		}
-		_, ok := ob.handoffSubmitOrders[segment.GetPartitionID()]
-		if !ok {
-			ob.handoffSubmitOrders[segment.GetPartitionID()] = make([]int64, 0)
+
+		ob.handoffEvents[segment.GetSegmentID()] = &HandoffEvent{
+			Segment: segment,
+			Status:  HandoffEventStatusTriggered,
 		}
-		ob.handoffSubmitOrders[segment.GetPartitionID()] = append(ob.handoffSubmitOrders[segment.GetPartitionID()], segment.GetSegmentID())
+
+		if !segment.GetIsFake() {
+			log.Info("start to do handoff...")
+			ob.handoff(segment)
+		}
 	} else {
 		// ignore handoff task
 		log.Info("handoff event trigger failed due to collection/partition is not loaded!")

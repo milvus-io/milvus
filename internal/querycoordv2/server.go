@@ -308,6 +308,12 @@ func (s *Server) Start() error {
 	s.wg.Add(1)
 	go s.watchNodes(revision)
 
+	// handoff master start before recover collection, to clean all outdated handoff event.
+	if err := s.handoffObserver.Start(s.ctx); err != nil {
+		log.Error("start handoff observer failed, exit...", zap.Error(err))
+		panic(err.Error())
+	}
+
 	log.Info("start recovering dist and target")
 	err = s.recover()
 	if err != nil {
@@ -329,10 +335,6 @@ func (s *Server) Start() error {
 	log.Info("start observers...")
 	s.collectionObserver.Start(s.ctx)
 	s.leaderObserver.Start(s.ctx)
-	if err := s.handoffObserver.Start(s.ctx); err != nil {
-		log.Error("start handoff observer failed, exit...", zap.Error(err))
-		panic(err.Error())
-	}
 
 	if s.enableActiveStandBy {
 		s.activateFunc = func() {
