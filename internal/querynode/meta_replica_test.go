@@ -408,6 +408,30 @@ func TestMetaReplica_BlackList(t *testing.T) {
 
 }
 
+func TestMetaReplica_removeCollectionVDeltaChannel(t *testing.T) {
+	replica, err := genSimpleReplica()
+	require.NoError(t, err)
+
+	// remove when collection not exists
+	assert.NotPanics(t, func() {
+		replica.removeCollectionVDeltaChannel(-1, defaultDeltaChannel)
+	})
+
+	schema := genTestCollectionSchema()
+	collection := replica.addCollection(defaultCollectionID, schema)
+	replica.addPartition(defaultCollectionID, defaultPartitionID)
+	replica.addPartition(defaultCollectionID, defaultPartitionID+1)
+
+	collection.addVDeltaChannels([]string{defaultDeltaChannel})
+
+	assert.NotPanics(t, func() {
+		replica.removeCollectionVDeltaChannel(defaultCollectionID, defaultDeltaChannel)
+	})
+
+	channels := collection.getVDeltaChannels()
+	assert.Equal(t, 0, len(channels))
+}
+
 func TestMetaReplica_freeAll(t *testing.T) {
 	replica, err := genSimpleReplica()
 	assert.NoError(t, err)
