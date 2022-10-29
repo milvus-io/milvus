@@ -168,17 +168,29 @@ func TestIVFPQConfAdapter_CheckTrain(t *testing.T) {
 }
 
 func TestIVFSQConfAdapter_CheckTrain(t *testing.T) {
-	validParams := map[string]string{
-		DIM:    strconv.Itoa(128),
-		NLIST:  strconv.Itoa(100),
-		NBITS:  strconv.Itoa(8),
-		Metric: L2,
+	getValidParams := func(withNBits bool) map[string]string {
+		validParams := map[string]string{
+			DIM:    strconv.Itoa(128),
+			NLIST:  strconv.Itoa(100),
+			NBITS:  strconv.Itoa(8),
+			Metric: L2,
+		}
+		if withNBits {
+			validParams[NBITS] = strconv.Itoa(DefaultNBits)
+		}
+		return validParams
 	}
+	validParams := getValidParams(false)
+	validParamsWithNBits := getValidParams(true)
+	paramsWithInvalidNBits := getValidParams(false)
+	paramsWithInvalidNBits[NBITS] = strconv.Itoa(DefaultNBits + 1)
 	cases := []struct {
 		params map[string]string
 		want   bool
 	}{
 		{validParams, true},
+		{validParamsWithNBits, true},
+		{paramsWithInvalidNBits, false},
 		{invalidIVFParamsMin(), false},
 		{invalidIVFParamsMax(), false},
 	}

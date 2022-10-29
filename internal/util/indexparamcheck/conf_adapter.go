@@ -254,9 +254,21 @@ type IVFSQConfAdapter struct {
 	IVFConfAdapter
 }
 
+func (adapter *IVFSQConfAdapter) checkNBits(params map[string]string) bool {
+	// cgo will set this key to DefaultNBits (8), which is the only value Milvus supports.
+	_, exist := params[NBITS]
+	if exist {
+		// 8 is the only supported nbits.
+		return CheckIntByRange(params, NBITS, DefaultNBits, DefaultNBits)
+	}
+	return true
+}
+
 // CheckTrain returns true if the index can be built with the specific index parameters.
 func (adapter *IVFSQConfAdapter) CheckTrain(params map[string]string) bool {
-	params[NBITS] = strconv.Itoa(DefaultNBits)
+	if !adapter.checkNBits(params) {
+		return false
+	}
 	return adapter.IVFConfAdapter.CheckTrain(params)
 }
 
