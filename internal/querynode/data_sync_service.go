@@ -288,6 +288,8 @@ func (dsService *dataSyncService) removeEmptyFlowGraphByChannel(collectionID int
 	fg.close()
 	delete(dsService.deltaChannel2FlowGraph, dc)
 	dsService.tSafeReplica.removeTSafe(dc)
+	// try best to remove, it's ok if all info is gone before this call
+	dsService.metaReplica.removeCollectionVDeltaChannel(collectionID, dc)
 	rateCol.removeTSafeChannel(dc)
 }
 
