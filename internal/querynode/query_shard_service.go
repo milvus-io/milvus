@@ -28,6 +28,7 @@ import (
 	"go.uber.org/zap"
 )
 
+// TODO, remove queryShardService, it's not used any more.
 type queryShardService struct {
 	ctx    context.Context
 	cancel context.CancelFunc

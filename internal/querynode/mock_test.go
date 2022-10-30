@@ -49,7 +49,9 @@ import (
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
+	"github.com/milvus-io/milvus/internal/util/lock"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/panjf2000/ants/v2"
 )
 
 // ---------- unittest util functions ----------
@@ -1262,13 +1264,10 @@ func genSimpleReplicaWithSealSegment(ctx context.Context) (ReplicaInterface, err
 	if err != nil {
 		return nil, err
 	}
-	col, err := r.getCollectionByID(defaultCollectionID)
+	_, err = r.getCollectionByID(defaultCollectionID)
 	if err != nil {
 		return nil, err
 	}
-	col.addVChannels([]Channel{
-		defaultDeltaChannel,
-	})
 	return r, nil
 }
 
@@ -1661,6 +1660,12 @@ func genSimpleQueryNodeWithMQFactory(ctx context.Context, fac dependency.Factory
 	node.etcdCli = etcdCli
 	node.initSession()
 
+	node.taskPool, err = concurrency.NewPool(2, ants.WithPreAlloc(true))
+	if err != nil {
+		log.Error("QueryNode init channel pool failed", zap.Error(err))
+		return nil, err
+	}
+	node.taskLock = lock.NewKeyLock()
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
 	node.etcdKV = etcdKV
 

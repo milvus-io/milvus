@@ -50,6 +50,7 @@ type Collection struct {
 	partitionIDs  []UniqueID
 	schema        *schemapb.CollectionSchema
 
+	// TODO, remove delta channels
 	channelMu      sync.RWMutex
 	vChannels      []Channel
 	pChannels      []Channel
@@ -225,6 +226,41 @@ func (c *Collection) getVDeltaChannels() []Channel {
 	return tmpChannels
 }
 
+func (c *Collection) AddChannels(toLoadChannels []Channel, VPChannels map[string]string) []Channel {
+	c.channelMu.Lock()
+	defer c.channelMu.Unlock()
+
+	retVChannels := []Channel{}
+	for _, toLoadChannel := range toLoadChannels {
+		if !c.isVChannelExist(toLoadChannel) {
+			retVChannels = append(retVChannels, toLoadChannel)
+			c.vChannels = append(c.vChannels, toLoadChannel)
+			if !c.isPChannelExist(VPChannels[toLoadChannel]) {
+				c.pChannels = append(c.pChannels, VPChannels[toLoadChannel])
+			}
+		}
+	}
+	return retVChannels
+}
+
+func (c *Collection) isVChannelExist(channel string) bool {
+	for _, vChannel := range c.vChannels {
+		if vChannel == channel {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *Collection) isPChannelExist(channel string) bool {
+	for _, vChannel := range c.pChannels {
+		if vChannel == channel {
+			return true
+		}
+	}
+	return false
+}
+
 // addVChannels add virtual channels to collection
 func (c *Collection) addVDeltaChannels(channels []Channel) {
 	c.channelMu.Lock()
@@ -266,6 +302,41 @@ func (c *Collection) removeVDeltaChannel(channel Channel) {
 	)
 
 	metrics.QueryNodeNumDeltaChannels.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Sub(float64(len(c.vDeltaChannels)))
+}
+
+func (c *Collection) AddVDeltaChannels(toLoadChannels []Channel, VPChannels map[string]string) []Channel {
+	c.channelMu.Lock()
+	defer c.channelMu.Unlock()
+
+	retVDeltaChannels := []Channel{}
+	for _, toLoadChannel := range toLoadChannels {
+		if !c.isVDeltaChannelExist(toLoadChannel) {
+			retVDeltaChannels = append(retVDeltaChannels, toLoadChannel)
+			c.vDeltaChannels = append(c.vDeltaChannels, toLoadChannel)
+			if !c.isPDeltaChannelExist(VPChannels[toLoadChannel]) {
+				c.pDeltaChannels = append(c.pDeltaChannels, VPChannels[toLoadChannel])
+			}
+		}
+	}
+	return retVDeltaChannels
+}
+
+func (c *Collection) isVDeltaChannelExist(channel string) bool {
+	for _, vDeltaChanel := range c.vDeltaChannels {
+		if vDeltaChanel == channel {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *Collection) isPDeltaChannelExist(channel string) bool {
+	for _, vChannel := range c.pDeltaChannels {
+		if vChannel == channel {
+			return true
+		}
+	}
+	return false
 }
 
 // setReleaseTime records when collection is released
