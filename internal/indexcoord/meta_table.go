@@ -450,9 +450,10 @@ func (mt *metaTable) CanCreateIndex(req *indexpb.CreateIndexRequest) (bool, erro
 			if mt.checkParams(index, req) {
 				return true, nil
 			}
-			errMsg := fmt.Sprintf("index already exist, but parameters are inconsistent. source index: %v current index: %v",
-				fmt.Sprintf("{index_name: %s, field_id: %d, index_params: %v, type_params: %v}", index.IndexName, index.FieldID, index.IndexParams, index.TypeParams),
-				fmt.Sprintf("{index_name: %s, field_id: %d, index_params: %v, type_params: %v}", req.GetIndexName(), req.GetFieldID(), req.GetIndexParams(), req.GetTypeParams()))
+			errMsg := "at most one distinct index is allowed per field"
+			log.Warn(errMsg,
+				zap.String("source index", fmt.Sprintf("{index_name: %s, field_id: %d, index_params: %v, type_params: %v}", index.IndexName, index.FieldID, index.IndexParams, index.TypeParams)),
+				zap.String("current index", fmt.Sprintf("{index_name: %s, field_id: %d, index_params: %v, type_params: %v}", req.GetIndexName(), req.GetFieldID(), req.GetIndexParams(), req.GetTypeParams())))
 			return false, fmt.Errorf("CreateIndex failed: %s", errMsg)
 		}
 		if req.FieldID == index.FieldID {
