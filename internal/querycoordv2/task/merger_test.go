@@ -134,6 +134,9 @@ func (suite *MergerSuite) TestMerge() {
 	suite.Len(task.steps, 3)
 	suite.EqualValues(1, task.Result().DeltaPositions[0].Timestamp)
 	suite.EqualValues(1, task.Result().DeltaPositions[1].Timestamp)
+	suite.merger.Stop()
+	_, ok := <-suite.merger.Chan()
+	suite.Equal(ok, false)
 }
 
 func TestMerger(t *testing.T) {

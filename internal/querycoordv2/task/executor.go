@@ -133,6 +133,7 @@ func (ex *Executor) scheduleRequests() {
 }
 
 func (ex *Executor) processMergeTask(mergeTask *LoadSegmentsTask) {
+	startTs := time.Now()
 	task := mergeTask.tasks[0]
 	action := task.Actions()[mergeTask.steps[0]]
 
@@ -152,6 +153,7 @@ func (ex *Executor) processMergeTask(mergeTask *LoadSegmentsTask) {
 	log := log.With(
 		zap.Int64s("taskIDs", taskIDs),
 		zap.Int64("collectionID", task.CollectionID()),
+		zap.String("shard", task.Shard()),
 		zap.Int64s("segmentIDs", segments),
 		zap.Int64("nodeID", action.Node()),
 		zap.Int64("source", task.SourceID()),
@@ -177,7 +179,8 @@ func (ex *Executor) processMergeTask(mergeTask *LoadSegmentsTask) {
 		log.Warn("failed to load segment", zap.String("reason", status.GetReason()))
 		return
 	}
-	log.Info("load segments done")
+	elapsed := time.Since(startTs)
+	log.Info("load segments done", zap.Int64("taskID", task.ID()), zap.Duration("timeTaken", elapsed))
 }
 
 func (ex *Executor) removeAction(task Task, step int) {
@@ -275,7 +278,7 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 
 func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
 	defer ex.removeAction(task, step)
-
+	startTs := time.Now()
 	action := task.Actions()[step].(*SegmentAction)
 	defer action.isReleaseCommitted.Store(true)
 
@@ -332,7 +335,8 @@ func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
 		log.Warn("failed to release segment", zap.String("reason", status.GetReason()))
 		return
 	}
-	log.Info("release segment done")
+	elapsed := time.Since(startTs)
+	log.Info("release segment done", zap.Int64("taskID", task.ID()), zap.Duration("time taken", elapsed))
 }
 
 func (ex *Executor) executeDmChannelAction(task *ChannelTask, step int) {
@@ -347,7 +351,7 @@ func (ex *Executor) executeDmChannelAction(task *ChannelTask, step int) {
 
 func (ex *Executor) subDmChannel(task *ChannelTask, step int) error {
 	defer ex.removeAction(task, step)
-
+	startTs := time.Now()
 	action := task.Actions()[step].(*ChannelAction)
 	log := log.With(
 		zap.Int64("taskID", task.ID()),
@@ -407,13 +411,14 @@ func (ex *Executor) subDmChannel(task *ChannelTask, step int) error {
 		log.Warn("failed to subscribe DmChannel", zap.String("reason", status.GetReason()))
 		return err
 	}
-	log.Info("subscribe DmChannel done")
+	elapsed := time.Since(startTs)
+	log.Info("subscribe DmChannel done", zap.Int64("taskID", task.ID()), zap.Duration("time taken", elapsed))
 	return nil
 }
 
 func (ex *Executor) unsubDmChannel(task *ChannelTask, step int) error {
 	defer ex.removeAction(task, step)
-
+	startTs := time.Now()
 	action := task.Actions()[step].(*ChannelAction)
 	log := log.With(
 		zap.Int64("taskID", task.ID()),
@@ -444,5 +449,8 @@ func (ex *Executor) unsubDmChannel(task *ChannelTask, step int) error {
 		log.Warn("failed to unsubscribe DmChannel", zap.String("reason", status.GetReason()))
 		return err
 	}
+
+	elapsed := time.Since(startTs)
+	log.Info("unsubscribe DmChannel done", zap.Int64("taskID", task.ID()), zap.Duration("time taken", elapsed))
 	return nil
 }
