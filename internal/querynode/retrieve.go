@@ -16,18 +16,25 @@
 
 package querynode
 
+/*
+#cgo pkg-config: milvus_segcore
+
+#include "segcore/segment_c.h"
+*/
+import "C"
+
 import (
 	"context"
 	"errors"
-
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/storage"
 )
 
 // retrieveOnSegments performs retrieve on listed segments
 // all segment ids are validated before calling this function
-func retrieveOnSegments(ctx context.Context, replica ReplicaInterface, segType segmentType, collID UniqueID, plan *RetrievePlan, segIDs []UniqueID, vcm storage.ChunkManager) ([]*segcorepb.RetrieveResults, error) {
+func retrieveOnSegments(ctx context.Context, replica ReplicaInterface, segType segmentType, collID UniqueID, plan *RetrievePlan, segIDs []UniqueID, vcm storage.ChunkManager) ([]*segcorepb.RetrieveResults, []*RetrieveResult, error) {
 	var retrieveResults []*segcorepb.RetrieveResults
+	var cResults []*RetrieveResult
 
 	for _, segID := range segIDs {
 		seg, err := replica.getSegmentByID(segID, segType)
@@ -35,18 +42,20 @@ func retrieveOnSegments(ctx context.Context, replica ReplicaInterface, segType s
 			if errors.Is(err, ErrSegmentNotFound) {
 				continue
 			}
-			return nil, err
+			return nil, nil, err
 		}
-		result, err := seg.retrieve(plan)
+		var result *segcorepb.RetrieveResults
+		result, cResult, err := seg.retrieve(plan)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if err := seg.fillIndexedFieldsData(ctx, collID, vcm, result); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		retrieveResults = append(retrieveResults, result)
+		cResults = append(cResults, cResult)
 	}
-	return retrieveResults, nil
+	return retrieveResults, cResults, nil
 }
 
 // retrieveHistorical will retrieve all the target segments in historical
@@ -60,7 +69,9 @@ func retrieveHistorical(ctx context.Context, replica ReplicaInterface, plan *Ret
 		return retrieveResults, retrieveSegmentIDs, retrievePartIDs, err
 	}
 
-	retrieveResults, err = retrieveOnSegments(ctx, replica, segmentTypeSealed, collID, plan, retrieveSegmentIDs, vcm)
+	var cResults []*RetrieveResult
+	retrieveResults, cResults, err = retrieveOnSegments(ctx, replica, segmentTypeSealed, collID, plan, retrieveSegmentIDs, vcm)
+	defer deleteRetrieveResult(cResults)
 	return retrieveResults, retrievePartIDs, retrieveSegmentIDs, err
 }
 
@@ -75,6 +86,14 @@ func retrieveStreaming(ctx context.Context, replica ReplicaInterface, plan *Retr
 	if err != nil {
 		return retrieveResults, retrieveSegmentIDs, retrievePartIDs, err
 	}
-	retrieveResults, err = retrieveOnSegments(ctx, replica, segmentTypeGrowing, collID, plan, retrieveSegmentIDs, vcm)
+	var cResults []*RetrieveResult
+	retrieveResults, cResults, err = retrieveOnSegments(ctx, replica, segmentTypeGrowing, collID, plan, retrieveSegmentIDs, vcm)
+	defer deleteRetrieveResult(cResults)
 	return retrieveResults, retrievePartIDs, retrieveSegmentIDs, err
+}
+
+func deleteRetrieveResult(cResults []*RetrieveResult) {
+	for _, cResult := range cResults {
+		C.DeleteRetrieveResult(&(cResult.cRetrieveResult))
+	}
 }

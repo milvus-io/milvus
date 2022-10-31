@@ -39,7 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
 
-//-------------------------------------------------------------------------------------- constructor and destructor
+// -------------------------------------------------------------------------------------- constructor and destructor
 func TestSegment_newSegment(t *testing.T) {
 	pool, err := concurrency.NewPool(runtime.GOMAXPROCS(0))
 	require.NoError(t, err)
@@ -94,7 +94,7 @@ func TestSegment_deleteSegment(t *testing.T) {
 	})
 }
 
-//-------------------------------------------------------------------------------------- stats functions
+// -------------------------------------------------------------------------------------- stats functions
 func TestSegment_getRowCount(t *testing.T) {
 	pool, err := concurrency.NewPool(runtime.GOMAXPROCS(0))
 	require.NoError(t, err)
@@ -206,7 +206,7 @@ func TestSegment_retrieve(t *testing.T) {
 	defer plan.delete()
 	assert.NoError(t, err)
 
-	res, err := segment.retrieve(plan)
+	res, _, err := segment.retrieve(plan)
 	assert.NoError(t, err)
 
 	assert.Equal(t, res.GetFieldsData()[0].GetScalars().Data.(*schemapb.ScalarField_IntData).IntData.Data, []int32{1, 2, 3})
@@ -219,7 +219,7 @@ func TestSegment_retrieve(t *testing.T) {
 		err = segment.segmentInsert(offset, insertMsg.RowIDs, insertMsg.Timestamps, insertRecord)
 		require.NoError(t, err)
 
-		res, err := segment.retrieve(plan)
+		res, _, err := segment.retrieve(plan)
 		assert.NoError(t, err)
 
 		assert.Equal(t, []int32{1, 1, 2, 2, 3, 3}, res.GetFieldsData()[0].GetScalars().Data.(*schemapb.ScalarField_IntData).IntData.Data)
@@ -317,7 +317,7 @@ func TestSegment_getMemSize(t *testing.T) {
 	deleteCollection(collection)
 }
 
-//-------------------------------------------------------------------------------------- dm & search functions
+// -------------------------------------------------------------------------------------- dm & search functions
 func TestSegment_segmentInsert(t *testing.T) {
 	pool, err := concurrency.NewPool(runtime.GOMAXPROCS(0))
 	require.NoError(t, err)
@@ -461,7 +461,7 @@ func TestSegment_segmentSearch(t *testing.T) {
 	deleteCollection(collection)
 }
 
-//-------------------------------------------------------------------------------------- preDm functions
+// -------------------------------------------------------------------------------------- preDm functions
 func TestSegment_segmentPreInsert(t *testing.T) {
 	pool, err := concurrency.NewPool(runtime.GOMAXPROCS(0))
 	require.NoError(t, err)
