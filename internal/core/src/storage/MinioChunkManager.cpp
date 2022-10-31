@@ -43,6 +43,7 @@
 namespace milvus::storage {
 
 std::atomic<size_t> MinioChunkManager::init_count_(0);
+std::mutex MinioChunkManager::client_mutex_;
 
 /**
  * @brief convert std::string to Aws::String
@@ -67,12 +68,27 @@ ConvertFromAwsString(const Aws::String& aws_str) {
     return std::string(aws_str.c_str(), aws_str.size());
 }
 
-MinioChunkManager::MinioChunkManager(const StorageConfig& storage_config)
-    : default_bucket_name_(storage_config.bucket_name) {
+void
+MinioChunkManager::InitSDKAPI() {
+    std::scoped_lock lock{client_mutex_};
     const size_t initCount = init_count_++;
     if (initCount == 0) {
         Aws::InitAPI(sdk_options_);
     }
+}
+
+void
+MinioChunkManager::ShutdownSDKAPI() {
+    std::scoped_lock lock{client_mutex_};
+    const size_t initCount = --init_count_;
+    if (initCount == 0) {
+        Aws::ShutdownAPI(sdk_options_);
+    }
+}
+
+MinioChunkManager::MinioChunkManager(const StorageConfig& storage_config)
+    : default_bucket_name_(storage_config.bucket_name) {
+    InitSDKAPI();
     Aws::Client::ClientConfiguration config;
     config.endpointOverride = ConvertToAwsString(storage_config.address);
 
@@ -117,10 +133,7 @@ MinioChunkManager::MinioChunkManager(const StorageConfig& storage_config)
 }
 
 MinioChunkManager::~MinioChunkManager() {
-    const size_t initCount = --init_count_;
-    if (initCount == 0) {
-        Aws::ShutdownAPI(sdk_options_);
-    }
+    ShutdownSDKAPI();
     client_.reset();
 }
 
