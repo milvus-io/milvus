@@ -153,57 +153,6 @@ func TestDataSyncService_DeltaFlowGraphs(t *testing.T) {
 	})
 }
 
-func TestDataSyncService_checkReplica(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	replica, err := genSimpleReplica()
-	assert.NoError(t, err)
-
-	fac := genFactory()
-	assert.NoError(t, err)
-
-	tSafe := newTSafeReplica()
-	dataSyncService := newDataSyncService(ctx, replica, tSafe, fac)
-	assert.NotNil(t, dataSyncService)
-	defer dataSyncService.close()
-
-	t.Run("test checkReplica", func(t *testing.T) {
-		err = dataSyncService.checkReplica(defaultCollectionID)
-		assert.NoError(t, err)
-	})
-
-	t.Run("test collection doesn't exist", func(t *testing.T) {
-		err = dataSyncService.metaReplica.removeCollection(defaultCollectionID)
-		assert.NoError(t, err)
-		err = dataSyncService.checkReplica(defaultCollectionID)
-		assert.Error(t, err)
-		coll := dataSyncService.metaReplica.addCollection(defaultCollectionID, genTestCollectionSchema())
-		assert.NotNil(t, coll)
-	})
-
-	t.Run("test cannot find tSafe", func(t *testing.T) {
-		coll, err := dataSyncService.metaReplica.getCollectionByID(defaultCollectionID)
-		assert.NoError(t, err)
-		coll.addVDeltaChannels([]Channel{defaultDeltaChannel})
-		coll.addVChannels([]Channel{defaultDMLChannel})
-
-		dataSyncService.tSafeReplica.addTSafe(defaultDeltaChannel)
-		dataSyncService.tSafeReplica.addTSafe(defaultDMLChannel)
-
-		dataSyncService.tSafeReplica.removeTSafe(defaultDeltaChannel)
-		err = dataSyncService.checkReplica(defaultCollectionID)
-		assert.Error(t, err)
-
-		dataSyncService.tSafeReplica.removeTSafe(defaultDMLChannel)
-		err = dataSyncService.checkReplica(defaultCollectionID)
-		assert.Error(t, err)
-
-		dataSyncService.tSafeReplica.addTSafe(defaultDeltaChannel)
-		dataSyncService.tSafeReplica.addTSafe(defaultDMLChannel)
-	})
-}
-
 type DataSyncServiceSuite struct {
 	suite.Suite
 	factory   dependency.Factory

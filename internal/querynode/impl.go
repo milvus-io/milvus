@@ -20,8 +20,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
@@ -308,37 +310,57 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, in *querypb.WatchDmC
 		node: node,
 	}
 
-	err := node.scheduler.queue.Enqueue(task)
-	if err != nil {
-		status := &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}
-		log.Warn(err.Error())
-		return status, nil
-	}
-	log.Info("watchDmChannelsTask Enqueue done", zap.Int64("collectionID", in.CollectionID), zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()), zap.Int64("replicaID", in.GetReplicaID()))
-	waitFunc := func() (*commonpb.Status, error) {
-		err = task.WaitToFinish()
+	startTs := time.Now()
+	log.Info("watchDmChannels init", zap.Int64("collectionID", in.CollectionID),
+		zap.String("channelName", in.Infos[0].GetChannelName()),
+		zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()))
+	// currently we only support load one channel as a time
+	node.taskLock.RLock(strconv.FormatInt(in.Infos[0].CollectionID, 10))
+	defer node.taskLock.RUnlock(strconv.FormatInt(in.Infos[0].CollectionID, 10))
+	future := node.taskPool.Submit(func() (interface{}, error) {
+		log.Info("watchDmChannels start ", zap.Int64("collectionID", in.CollectionID),
+			zap.String("channelName", in.Infos[0].GetChannelName()),
+			zap.Duration("timeInQueue", time.Since(startTs)))
+		err := task.PreExecute(ctx)
 		if err != nil {
 			status := &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    err.Error(),
 			}
-			log.Warn(err.Error())
+			log.Warn("failed to subscribe channel on preExecute ", zap.Error(err))
+			return status, nil
+		}
+
+		err = task.Execute(ctx)
+		if err != nil {
+			status := &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			}
+			log.Warn("failed to subscribe channel ", zap.Error(err))
+			return status, nil
+		}
+
+		err = task.PostExecute(ctx)
+		if err != nil {
+			status := &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			}
+			log.Warn("failed to unsubscribe channel on postExecute ", zap.Error(err))
 			return status, nil
 		}
 
 		sc, _ := node.ShardClusterService.getShardCluster(in.Infos[0].GetChannelName())
 		sc.SetupFirstVersion()
-
-		log.Info("watchDmChannelsTask WaitToFinish done", zap.Int64("collectionID", in.CollectionID), zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()))
+		log.Info("successfully watchDmChannelsTask", zap.Int64("collectionID", in.CollectionID),
+			zap.String("channelName", in.Infos[0].GetChannelName()), zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		}, nil
-	}
-
-	return waitFunc()
+	})
+	ret, _ := future.Await()
+	return ret.(*commonpb.Status), nil
 }
 
 func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmChannelRequest) (*commonpb.Status, error) {
@@ -375,13 +397,15 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 		node: node,
 	}
 
+	node.taskLock.Lock(strconv.FormatInt(dct.req.CollectionID, 10))
+	defer node.taskLock.Unlock(strconv.FormatInt(dct.req.CollectionID, 10))
 	err := node.scheduler.queue.Enqueue(dct)
 	if err != nil {
 		status := &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
 		}
-		log.Warn(err.Error())
+		log.Warn("failed to enqueue subscribe channel task", zap.Error(err))
 		return status, nil
 	}
 	log.Info("unsubDmChannel(ReleaseCollection) enqueue done", zap.Int64("collectionID", req.GetCollectionID()))
@@ -389,7 +413,7 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 	func() {
 		err = dct.WaitToFinish()
 		if err != nil {
-			log.Warn(err.Error())
+			log.Warn("failed to do subscribe channel task successfully", zap.Error(err))
 			return
 		}
 		log.Info("unsubDmChannel(ReleaseCollection) WaitToFinish done", zap.Int64("collectionID", req.GetCollectionID()))
@@ -439,35 +463,66 @@ func (node *QueryNode) LoadSegments(ctx context.Context, in *querypb.LoadSegment
 	for _, info := range in.Infos {
 		segmentIDs = append(segmentIDs, info.SegmentID)
 	}
-	err := node.scheduler.queue.Enqueue(task)
-	if err != nil {
-		status := &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}
-		log.Warn(err.Error())
-		return status, nil
+	sort.SliceStable(segmentIDs, func(i, j int) bool {
+		return segmentIDs[i] < segmentIDs[j]
+	})
+
+	startTs := time.Now()
+	log.Info("loadSegmentsTask init", zap.Int64("collectionID", in.CollectionID),
+		zap.Int64s("segmentIDs", segmentIDs),
+		zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()))
+
+	node.taskLock.RLock(strconv.FormatInt(in.CollectionID, 10))
+	for _, segmentID := range segmentIDs {
+		node.taskLock.Lock(strconv.FormatInt(segmentID, 10))
 	}
 
-	log.Info("loadSegmentsTask Enqueue done", zap.Int64("collectionID", in.CollectionID), zap.Int64s("segmentIDs", segmentIDs), zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()))
-
-	waitFunc := func() (*commonpb.Status, error) {
-		err = task.WaitToFinish()
+	// release all task locks
+	defer func() {
+		node.taskLock.RUnlock(strconv.FormatInt(in.CollectionID, 10))
+		for _, id := range segmentIDs {
+			node.taskLock.Unlock(strconv.FormatInt(id, 10))
+		}
+	}()
+	future := node.taskPool.Submit(func() (interface{}, error) {
+		log.Info("loadSegmentsTask start ", zap.Int64("collectionID", in.CollectionID),
+			zap.Int64s("segmentIDs", segmentIDs),
+			zap.Duration("timeInQueue", time.Since(startTs)))
+		err := task.PreExecute(ctx)
 		if err != nil {
 			status := &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    err.Error(),
 			}
-			log.Warn(err.Error())
+			log.Warn("failed to load segments on preExecute ", zap.Error(err))
 			return status, nil
 		}
-		log.Info("loadSegmentsTask WaitToFinish done", zap.Int64("collectionID", in.CollectionID), zap.Int64s("segmentIDs", segmentIDs), zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()))
+		err = task.Execute(ctx)
+		if err != nil {
+			status := &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			}
+			log.Warn("failed to load segment", zap.Int64("collectionID", in.CollectionID), zap.Int64s("segmentIDs", segmentIDs), zap.Error(err))
+			return status, nil
+		}
+
+		err = task.PostExecute(ctx)
+		if err != nil {
+			status := &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			}
+			log.Warn("failed to load segments on postExecute ", zap.Error(err))
+			return status, nil
+		}
+		log.Info("loadSegmentsTask done", zap.Int64("collectionID", in.CollectionID), zap.Int64s("segmentIDs", segmentIDs), zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		}, nil
-	}
-
-	return waitFunc()
+	})
+	ret, _ := future.Await()
+	return ret.(*commonpb.Status), nil
 }
 
 // ReleaseCollection clears all data related to this collection on the querynode
@@ -490,6 +545,8 @@ func (node *QueryNode) ReleaseCollection(ctx context.Context, in *querypb.Releas
 		node: node,
 	}
 
+	node.taskLock.Lock(strconv.FormatInt(dct.req.CollectionID, 10))
+	defer node.taskLock.Unlock(strconv.FormatInt(dct.req.CollectionID, 10))
 	err := node.scheduler.queue.Enqueue(dct)
 	if err != nil {
 		status := &commonpb.Status{
@@ -536,6 +593,8 @@ func (node *QueryNode) ReleasePartitions(ctx context.Context, in *querypb.Releas
 		node: node,
 	}
 
+	node.taskLock.Lock(strconv.FormatInt(dct.req.CollectionID, 10))
+	defer node.taskLock.Unlock(strconv.FormatInt(dct.req.CollectionID, 10))
 	err := node.scheduler.queue.Enqueue(dct)
 	if err != nil {
 		status := &commonpb.Status{
@@ -587,6 +646,23 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, in *querypb.ReleaseS
 		return node.TransferRelease(ctx, in)
 	}
 
+	log.Info("start to release segments", zap.Int64("collectionID", in.CollectionID), zap.Int64s("segmentIDs", in.SegmentIDs))
+	node.taskLock.RLock(strconv.FormatInt(in.CollectionID, 10))
+	sort.SliceStable(in.SegmentIDs, func(i, j int) bool {
+		return in.SegmentIDs[i] < in.SegmentIDs[j]
+	})
+
+	for _, segmentID := range in.SegmentIDs {
+		node.taskLock.Lock(strconv.FormatInt(segmentID, 10))
+	}
+
+	// release all task locks
+	defer func() {
+		node.taskLock.RUnlock(strconv.FormatInt(in.CollectionID, 10))
+		for _, id := range in.SegmentIDs {
+			node.taskLock.Unlock(strconv.FormatInt(id, 10))
+		}
+	}()
 	for _, id := range in.SegmentIDs {
 		switch in.GetScope() {
 		case querypb.DataScope_Streaming:

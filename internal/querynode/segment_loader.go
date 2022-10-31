@@ -20,12 +20,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand"
 	"path"
 	"runtime"
 	"runtime/debug"
 	"strconv"
+	"time"
 
-	"github.com/panjf2000/ants/v2"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -46,6 +47,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/hardware"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
+	"github.com/panjf2000/ants/v2"
 )
 
 const (
@@ -703,7 +706,7 @@ func (loader *segmentLoader) loadDeltaLogs(ctx context.Context, segment *Segment
 }
 
 func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collectionID int64, position *internalpb.MsgPosition) error {
-	log.Info("from dml check point load delete", zap.Any("position", position))
+	startTs := time.Now()
 	stream, err := loader.factory.NewMsgStream(ctx)
 	if err != nil {
 		return err
@@ -717,7 +720,12 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 	pChannelName := funcutil.ToPhysicalChannel(position.ChannelName)
 	position.ChannelName = pChannelName
 
-	stream.AsConsumer([]string{pChannelName}, fmt.Sprintf("querynode-%d-%d", Params.QueryNodeCfg.GetNodeID(), collectionID), mqwrapper.SubscriptionPositionUnknown)
+	ts, _ := tsoutil.ParseTS(position.Timestamp)
+
+	// Random the subname in case we trying to load same delta at the same time
+	subName := fmt.Sprintf("querynode-delta-loader-%d-%d-%d", Params.QueryNodeCfg.GetNodeID(), collectionID, rand.Int())
+	log.Info("from dml check point load delete", zap.Any("position", position), zap.String("subName", subName), zap.Time("positionTs", ts))
+	stream.AsConsumer([]string{pChannelName}, subName, mqwrapper.SubscriptionPositionUnknown)
 	// make sure seek position is earlier than
 	lastMsgID, err := stream.GetLatestMsgID(pChannelName)
 	if err != nil {
@@ -730,7 +738,7 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 	}
 
 	if reachLatest || lastMsgID.AtEarliestPosition() {
-		log.Info("there is no more delta msg", zap.Int64("Collection ID", collectionID), zap.String("channel", pChannelName))
+		log.Info("there is no more delta msg", zap.Int64("collectionID", collectionID), zap.String("channel", pChannelName))
 		return nil
 	}
 
@@ -748,7 +756,7 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 	}
 
 	log.Info("start read delta msg from seek position to last position",
-		zap.Int64("Collection ID", collectionID), zap.String("channel", pChannelName), zap.Any("seek pos", position), zap.Any("last msg", lastMsgID))
+		zap.Int64("collectionID", collectionID), zap.String("channel", pChannelName), zap.Any("seekPos", position), zap.Any("lastMsg", lastMsgID))
 	hasMore := true
 	for hasMore {
 		select {
@@ -791,7 +799,7 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 				ret, err := lastMsgID.LessOrEqualThan(tsMsg.Position().MsgID)
 				if err != nil {
 					log.Warn("check whether current MsgID less than last MsgID failed",
-						zap.Int64("Collection ID", collectionID), zap.String("channel", pChannelName), zap.Error(err))
+						zap.Int64("collectionID", collectionID), zap.String("channel", pChannelName), zap.Error(err))
 					return err
 				}
 
@@ -803,8 +811,8 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 		}
 	}
 
-	log.Info("All data has been read, there is no more data", zap.Int64("Collection ID", collectionID),
-		zap.String("channel", pChannelName), zap.Any("msg id", position.GetMsgID()))
+	log.Info("All data has been read, there is no more data", zap.Int64("collectionID", collectionID),
+		zap.String("channel", pChannelName), zap.Any("msgID", position.GetMsgID()))
 	for segmentID, pks := range delData.deleteIDs {
 		segment, err := loader.metaReplica.getSegmentByID(segmentID, segmentTypeSealed)
 		if err != nil {
@@ -821,7 +829,7 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 		}
 	}
 
-	log.Info("from dml check point load done", zap.Any("msg id", position.GetMsgID()))
+	log.Info("from dml check point load done", zap.String("subName", subName), zap.Any("timeTake", time.Since(startTs)))
 	return nil
 }
 

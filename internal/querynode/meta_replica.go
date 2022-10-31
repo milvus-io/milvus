@@ -417,9 +417,8 @@ func (replica *metaReplica) addPartitionPrivate(collection *Collection, partitio
 		collection.addPartitionID(partitionID)
 		var newPartition = newPartition(collection.ID(), partitionID)
 		replica.partitions[partitionID] = newPartition
+		metrics.QueryNodeNumPartitions.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(len(replica.partitions)))
 	}
-
-	metrics.QueryNodeNumPartitions.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(len(replica.partitions)))
 	return nil
 }
 

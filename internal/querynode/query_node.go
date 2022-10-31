@@ -54,6 +54,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/concurrency"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/initcore"
+	"github.com/milvus-io/milvus/internal/util/lock"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -120,6 +121,10 @@ type QueryNode struct {
 
 	// cgoPool is the worker pool to control concurrency of cgo call
 	cgoPool *concurrency.Pool
+	// pool for load/release channel
+	taskPool *concurrency.Pool
+	// lock to avoid same chanel/channel run multiple times
+	taskLock *lock.KeyLock
 }
 
 // NewQueryNode will return a QueryNode with abnormal state.
@@ -257,6 +262,15 @@ func (node *QueryNode) Init() error {
 			initError = err
 			return
 		}
+
+		node.taskPool, err = concurrency.NewPool(cpuNum, ants.WithPreAlloc(true))
+		if err != nil {
+			log.Error("QueryNode init channel pool failed", zap.Error(err))
+			initError = err
+			return
+		}
+
+		node.taskLock = lock.NewKeyLock()
 
 		// ensure every cgopool go routine is locked with a OS thread
 		// so openmp in knowhere won't create too much request

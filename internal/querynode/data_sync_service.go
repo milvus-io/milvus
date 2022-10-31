@@ -49,32 +49,13 @@ func (dsService *dataSyncService) getFlowGraphNum() int {
 	return len(dsService.dmlChannel2FlowGraph) + len(dsService.deltaChannel2FlowGraph)
 }
 
-// checkReplica used to check replica info before init flow graph, it's a private method of dataSyncService
-func (dsService *dataSyncService) checkReplica(collectionID UniqueID) error {
-	// check if the collection exists
-	coll, err := dsService.metaReplica.getCollectionByID(collectionID)
-	if err != nil {
-		return err
-	}
-	for _, channel := range coll.getVChannels() {
-		if _, err := dsService.tSafeReplica.getTSafe(channel); err != nil {
-			return fmt.Errorf("getTSafe failed, err = %s", err)
-		}
-	}
-	for _, channel := range coll.getVDeltaChannels() {
-		if _, err := dsService.tSafeReplica.getTSafe(channel); err != nil {
-			return fmt.Errorf("getTSafe failed, err = %s", err)
-		}
-	}
-	return nil
-}
-
 // addFlowGraphsForDMLChannels add flowGraphs to dmlChannel2FlowGraph
 func (dsService *dataSyncService) addFlowGraphsForDMLChannels(collectionID UniqueID, dmlChannels []string) (map[string]*queryNodeFlowGraph, error) {
 	dsService.mu.Lock()
 	defer dsService.mu.Unlock()
 
-	if err := dsService.checkReplica(collectionID); err != nil {
+	_, err := dsService.metaReplica.getCollectionByID(collectionID)
+	if err != nil {
 		return nil, err
 	}
 
@@ -118,7 +99,8 @@ func (dsService *dataSyncService) addFlowGraphsForDeltaChannels(collectionID Uni
 	dsService.mu.Lock()
 	defer dsService.mu.Unlock()
 
-	if err := dsService.checkReplica(collectionID); err != nil {
+	_, err := dsService.metaReplica.getCollectionByID(collectionID)
+	if err != nil {
 		return nil, err
 	}
 
