@@ -12,6 +12,7 @@ from common.common_type import CaseLabel, CheckTasks
 from utils.util_k8s import (
     get_pod_ip_name_pairs,
     get_milvus_instance_name,
+    get_milvus_deploy_tool
 )
 from utils.util_log import test_log as log
 from bulk_insert_data import (
@@ -33,7 +34,7 @@ default_multi_fields = [
 default_vec_n_int_fields = [df.vec_field, df.int_field]
 
 
-milvus_ns = "chaos-testing"
+# milvus_ns = "chaos-testing"
 base_dir = "/tmp/bulk_insert_data"
 
 
@@ -50,12 +51,18 @@ def entity_suffix(entities):
 class TestcaseBaseBulkInsert(TestcaseBase):
 
     @pytest.fixture(scope="function", autouse=True)
-    def init_minio_client(self, host):
+    def init_minio_client(self, host, milvus_ns):
         Path("/tmp/bulk_insert_data").mkdir(parents=True, exist_ok=True)
         self._connect()
-        self.instance_name = get_milvus_instance_name(milvus_ns, host)
+        self.milvus_ns = milvus_ns
+        self.milvus_sys = MilvusSys(alias='default')
+        self.instance_name = get_milvus_instance_name(self.milvus_ns, host)
+        self.deploy_tool = get_milvus_deploy_tool(self.milvus_ns, self.milvus_sys)
+        minio_label = f"release={self.instance_name}, app=minio"
+        if self.deploy_tool == "milvus-operator":
+            minio_label = f"release={self.instance_name}-minio, app=minio"
         minio_ip_pod_pair = get_pod_ip_name_pairs(
-            milvus_ns, f"release={self.instance_name}, app=minio"
+            self.milvus_ns, minio_label
         )
         ms = MilvusSys()
         minio_ip = list(minio_ip_pod_pair.keys())[0]
