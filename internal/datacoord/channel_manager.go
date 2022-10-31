@@ -765,10 +765,6 @@ func (c *ChannelManager) Reassign(nodeID UniqueID, channelName string) error {
 			zap.Int64("nodeID", nodeID),
 			zap.String("channel name", channelName))
 		updates.Add(nodeID, []*channel{ch})
-	} else {
-		if err := c.remove(nodeID, ch); err != nil {
-			return fmt.Errorf("failed to remove watch info: %v,%s", ch, err.Error())
-		}
 	}
 
 	log.Info("channel manager reassigning channels",
@@ -817,10 +813,6 @@ func (c *ChannelManager) CleanupAndReassign(nodeID UniqueID, channelName string)
 			zap.Int64("node ID", nodeID),
 			zap.String("channel name", channelName))
 		updates.Add(nodeID, []*channel{chToCleanUp})
-	} else {
-		if err := c.remove(nodeID, chToCleanUp); err != nil {
-			return fmt.Errorf("failed to remove watch info: %v,%s", chToCleanUp, err.Error())
-		}
 	}
 
 	log.Info("channel manager reassigning channels",
