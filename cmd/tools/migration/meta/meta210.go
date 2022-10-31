@@ -298,6 +298,14 @@ func (meta *IndexBuildMeta210) GenerateSaves() map[string]string {
 	return kvs
 }
 
+func (meta *IndexBuildMeta210) GetAllBuildIDs() []UniqueID {
+	ret := make([]UniqueID, 0, len(*meta))
+	for buildID := range *meta {
+		ret = append(ret, buildID)
+	}
+	return ret
+}
+
 func (meta *FieldIndexes210) AddRecord(collectionID UniqueID, fieldIndexes []*pb.FieldIndexInfo, schema *schemapb.CollectionSchema) {
 	(*meta)[collectionID] = &FieldIndexesWithSchema{indexes: fieldIndexes, schema: schema}
 }
