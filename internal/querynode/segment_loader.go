@@ -761,6 +761,7 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 	for hasMore {
 		select {
 		case <-ctx.Done():
+			log.Debug("read delta msg from seek position done", zap.Error(ctx.Err()))
 			return ctx.Err()
 		case msgPack, ok := <-stream.Chan():
 			if !ok {

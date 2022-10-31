@@ -371,10 +371,11 @@ func (dsService *dataSyncService) getSegmentInfos(segmentIDs []int64) ([]*datapb
 func (dsService *dataSyncService) getChannelLatestMsgID(ctx context.Context, channelName string, segmentID int64) ([]byte, error) {
 	pChannelName := funcutil.ToPhysicalChannel(channelName)
 	dmlStream, err := dsService.msFactory.NewMsgStream(ctx)
-	defer dmlStream.Close()
 	if err != nil {
 		return nil, err
 	}
+	defer dmlStream.Close()
+
 	subName := fmt.Sprintf("datanode-%d-%s-%d", Params.DataNodeCfg.GetNodeID(), channelName, segmentID)
 	log.Debug("dataSyncService register consumer for getChannelLatestMsgID",
 		zap.String("pChannelName", pChannelName),
