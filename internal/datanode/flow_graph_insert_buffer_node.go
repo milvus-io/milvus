@@ -18,7 +18,6 @@ package datanode
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math"
 	"reflect"
@@ -89,11 +88,6 @@ func (l *timeTickLogger) printLogs(start, end Timestamp) {
 	t1, _ := tsoutil.ParseTS(start)
 	t2, _ := tsoutil.ParseTS(end)
 	log.Debug("IBN timetick log", zap.Time("from", t1), zap.Time("to", t2), zap.Duration("elapsed", t2.Sub(t1)), zap.Uint64("start", start), zap.Uint64("end", end), zap.String("vChannelName", l.vChannelName))
-}
-
-type segmentCheckPoint struct {
-	numRows int64
-	pos     internalpb.MsgPosition
 }
 
 func (ibNode *insertBufferNode) Name() string {
@@ -398,20 +392,23 @@ func (ibNode *insertBufferNode) Sync(fgMsg *flowGraphMsg, seg2Upload []UniqueID,
 			zap.Any("position", endPosition),
 			zap.String("channel", ibNode.channelName),
 		)
-
-		segStats, err := ibNode.channel.getSegmentStatslog(task.segmentID)
-		if err != nil && !errors.Is(err, errSegmentStatsNotChanged) {
-			log.Error("failed to get segment stats log", zap.Int64("segmentID", task.segmentID), zap.Error(err))
-			panic(err)
-		}
-
-		err = retry.Do(ibNode.ctx, func() error {
-			return ibNode.flushManager.flushBufferData(task.buffer,
-				segStats,
+		// use the flushed pk stats to take current stat
+		var pkStats []*storage.PrimaryKeyStats
+		err := retry.Do(ibNode.ctx, func() error {
+			statBlobs, err := ibNode.flushManager.flushBufferData(task.buffer,
 				task.segmentID,
 				task.flushed,
 				task.dropped,
 				endPosition)
+			if err != nil {
+				return err
+			}
+			pkStats, err = storage.DeserializeStats(statBlobs)
+			if err != nil {
+				log.Warn("failed to deserialize bloom filter files", zap.Error(err))
+				return err
+			}
+			return nil
 		}, getFlowGraphRetryOpt())
 		if err != nil {
 			metrics.DataNodeFlushBufferCount.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID()), metrics.FailLabel).Inc()
@@ -426,6 +423,7 @@ func (ibNode *insertBufferNode) Sync(fgMsg *flowGraphMsg, seg2Upload []UniqueID,
 		}
 		segmentsToSync = append(segmentsToSync, task.segmentID)
 		ibNode.insertBuffer.Delete(task.segmentID)
+		ibNode.channel.RollPKstats(task.segmentID, pkStats)
 		metrics.DataNodeFlushBufferCount.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID()), metrics.SuccessLabel).Inc()
 		metrics.DataNodeFlushBufferCount.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID()), metrics.TotalLabel).Inc()
 		if task.auto {

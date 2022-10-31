@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 )
 
@@ -127,17 +128,61 @@ func TestFlowGraphDeleteNode_operate(t *testing.T) {
 		msg := []flowgraph.Msg{&dMsg}
 		deleteNode.Operate(msg)
 		s, err := historical.getSegmentByID(defaultSegmentID, segmentTypeSealed)
+		assert.NoError(t, err)
 		pks := make([]primaryKey, defaultMsgLength)
 		for i := 0; i < defaultMsgLength; i++ {
 			pks[i] = newInt64PrimaryKey(int64(i))
 		}
-		s.updateBloomFilter(pks)
-		assert.Nil(t, err)
-		buf := make([]byte, 8)
+
+		// load bf
+		value := make([]int64, defaultMsgLength)
 		for i := 0; i < defaultMsgLength; i++ {
-			common.Endian.PutUint64(buf, uint64(i))
-			assert.True(t, s.pkFilter.Test(buf))
+			value[i] = int64(i)
 		}
+		data := &storage.Int64FieldData{
+			Data: value,
+		}
+		statsWriter := &storage.StatsWriter{}
+		err = statsWriter.GeneratePrimaryKeyStats(1, schemapb.DataType_Int64, data)
+		assert.NoError(t, err)
+		sr := &storage.StatsReader{}
+		sr.SetBuffer(statsWriter.GetBuffer())
+		stat, err := sr.GetPrimaryKeyStats()
+		assert.NoError(t, err)
+
+		s, err = historical.getSegmentByID(defaultSegmentID, segmentTypeSealed)
+		assert.NoError(t, err)
+		pkStat := &storage.PkStatistics{
+			PkFilter: stat.BF,
+			MinPK:    stat.MinPk,
+			MaxPK:    stat.MaxPk,
+		}
+		s.historyStats = append(s.historyStats, pkStat)
+
+		// another bf
+		for i := 0; i < defaultMsgLength; i++ {
+			value[i] = int64(i + defaultMsgLength)
+		}
+		err = statsWriter.GeneratePrimaryKeyStats(1, schemapb.DataType_Int64, data)
+		assert.NoError(t, err)
+		sr.SetBuffer(statsWriter.GetBuffer())
+		stat, err = sr.GetPrimaryKeyStats()
+		assert.NoError(t, err)
+
+		s, err = historical.getSegmentByID(defaultSegmentID, segmentTypeSealed)
+		assert.NoError(t, err)
+		pkStat = &storage.PkStatistics{
+			PkFilter: stat.BF,
+			MinPK:    stat.MinPk,
+			MaxPK:    stat.MaxPk,
+		}
+		s.historyStats = append(s.historyStats, pkStat)
+
+		assert.Nil(t, err)
+		for i := 0; i < defaultMsgLength*2; i++ {
+			assert.True(t, s.isPKExist(newInt64PrimaryKey(int64(i))))
+		}
+		assert.False(t, s.isPKExist(newInt64PrimaryKey(int64(defaultMsgLength*2+1))))
 	})
 
 	t.Run("test invalid partitionID", func(t *testing.T) {

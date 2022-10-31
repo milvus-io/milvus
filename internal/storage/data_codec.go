@@ -434,7 +434,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 		// stats fields
 		if field.GetIsPrimaryKey() {
 			statsWriter := &StatsWriter{}
-			err = statsWriter.generatePrimaryKeyStats(field.FieldID, field.DataType, singleData)
+			err = statsWriter.GeneratePrimaryKeyStats(field.FieldID, field.DataType, singleData)
 			if err != nil {
 				return nil, nil, err
 			}

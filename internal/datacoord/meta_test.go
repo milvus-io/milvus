@@ -541,7 +541,19 @@ func TestUpdateFlushSegmentsInfo(t *testing.T) {
 			Statslogs:     []*datapb.FieldBinlog{getFieldBinlogPaths(1, "statslog0", "statslog1")},
 			Deltalogs:     []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 1, TimestampFrom: 100, TimestampTo: 200, LogSize: 1000}}}},
 		}}
-		assert.True(t, proto.Equal(expected, updated))
+
+		fmt.Println(updated)
+		fmt.Println(expected)
+		assert.Equal(t, updated.StartPosition, expected.StartPosition)
+		assert.Equal(t, updated.DmlPosition, expected.DmlPosition)
+		assert.Equal(t, updated.DmlPosition, expected.DmlPosition)
+		assert.Equal(t, len(updated.Binlogs[0].Binlogs), len(expected.Binlogs[0].Binlogs))
+		assert.Equal(t, len(updated.Statslogs[0].Binlogs), len(expected.Statslogs[0].Binlogs))
+		assert.Equal(t, len(updated.Deltalogs[0].Binlogs), len(expected.Deltalogs[0].Binlogs))
+		assert.Equal(t, updated.State, expected.State)
+		assert.Equal(t, updated.size, expected.size)
+		assert.Equal(t, updated.NumOfRows, expected.NumOfRows)
+
 	})
 
 	t.Run("update non-existed segment", func(t *testing.T) {

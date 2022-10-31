@@ -355,21 +355,8 @@ func filterSegmentsByPKs(pks []primaryKey, timestamps []Timestamp, segment *Segm
 
 	retPks := make([]primaryKey, 0)
 	retTss := make([]Timestamp, 0)
-	buf := make([]byte, 8)
 	for index, pk := range pks {
-		exist := false
-		switch pk.Type() {
-		case schemapb.DataType_Int64:
-			int64Pk := pk.(*int64PrimaryKey)
-			common.Endian.PutUint64(buf, uint64(int64Pk.Value))
-			exist = segment.pkFilter.Test(buf)
-		case schemapb.DataType_VarChar:
-			varCharPk := pk.(*varCharPrimaryKey)
-			exist = segment.pkFilter.TestString(varCharPk.Value)
-		default:
-			return nil, nil, fmt.Errorf("invalid data type of delete primary keys")
-		}
-		if exist {
+		if segment.isPKExist(pk) {
 			retPks = append(retPks, pk)
 			retTss = append(retTss, timestamps[index])
 		}

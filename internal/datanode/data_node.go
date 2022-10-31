@@ -939,7 +939,11 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 		numRows:      req.GetNumOfRows(),
 	}
 
-	channel.(*ChannelMeta).initPKBloomFilter(ctx, targetSeg, req.GetStatsLogs(), tsoutil.GetCurrentTime())
+	err = channel.InitPKstats(ctx, targetSeg, req.GetStatsLogs(), tsoutil.GetCurrentTime())
+	if err != nil {
+		status.Reason = fmt.Sprintf("init pk stats fail, err=%s", err.Error())
+		return status, nil
+	}
 
 	// block all flow graph so it's safe to remove segment
 	ds.fg.Blockall()

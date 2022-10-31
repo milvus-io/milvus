@@ -17,17 +17,9 @@
 package datanode
 
 import (
-	"encoding/json"
-	"errors"
-	"fmt"
 	"sync/atomic"
 
 	"github.com/bits-and-blooms/bloom/v3"
-	"github.com/milvus-io/milvus-proto/go-api/schemapb"
-	"go.uber.org/zap"
-
-	"github.com/milvus-io/milvus/internal/common"
-	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -44,92 +36,11 @@ type Segment struct {
 	memorySize  int64
 	compactedTo UniqueID
 
-	pkStat pkStatistics
+	currentStat  *storage.PkStatistics
+	historyStats []*storage.PkStatistics
 
 	startPos *internalpb.MsgPosition // TODO readonly
 	endPos   *internalpb.MsgPosition
-}
-
-// pkStatistics contains pk field statistic information
-type pkStatistics struct {
-	statsChanged bool               //  statistic changed
-	pkFilter     *bloom.BloomFilter //  bloom filter of pk inside a segment
-	minPK        primaryKey         //	minimal pk value, shortcut for checking whether a pk is inside this segment
-	maxPK        primaryKey         //  maximal pk value, same above
-}
-
-// update set pk min/max value if input value is beyond former range.
-func (st *pkStatistics) update(pk primaryKey) error {
-	if st == nil {
-		return errors.New("nil pk statistics")
-	}
-	if st.minPK == nil {
-		st.minPK = pk
-	} else if st.minPK.GT(pk) {
-		st.minPK = pk
-	}
-
-	if st.maxPK == nil {
-		st.maxPK = pk
-	} else if st.maxPK.LT(pk) {
-		st.maxPK = pk
-	}
-
-	return nil
-}
-
-func (st *pkStatistics) updatePKRange(ids storage.FieldData) error {
-	switch pks := ids.(type) {
-	case *storage.Int64FieldData:
-		buf := make([]byte, 8)
-		for _, pk := range pks.Data {
-			id := storage.NewInt64PrimaryKey(pk)
-			err := st.update(id)
-			if err != nil {
-				return err
-			}
-			common.Endian.PutUint64(buf, uint64(pk))
-			st.pkFilter.Add(buf)
-		}
-	case *storage.StringFieldData:
-		for _, pk := range pks.Data {
-			id := storage.NewVarCharPrimaryKey(pk)
-			err := st.update(id)
-			if err != nil {
-				return err
-			}
-			st.pkFilter.AddString(pk)
-		}
-	default:
-		return fmt.Errorf("invalid data type for primary key: %T", ids)
-	}
-
-	// mark statistic updated
-	st.statsChanged = true
-
-	return nil
-}
-
-// getStatslog return marshaled statslog content if there is any change since last call.
-// statslog is marshaled as json.
-func (st *pkStatistics) getStatslog(segmentID, pkID UniqueID, pkType schemapb.DataType) ([]byte, error) {
-	if !st.statsChanged {
-		return nil, fmt.Errorf("%w segment %d", errSegmentStatsNotChanged, segmentID)
-	}
-
-	pks := storage.PrimaryKeyStats{
-		FieldID: pkID,
-		PkType:  int64(pkType),
-		MaxPk:   st.maxPK,
-		MinPk:   st.minPK,
-		BF:      st.pkFilter,
-	}
-
-	bs, err := json.Marshal(pks)
-	if err == nil {
-		st.statsChanged = false
-	}
-	return bs, err
 }
 
 type addSegmentReq struct {
@@ -140,10 +51,6 @@ type addSegmentReq struct {
 	statsBinLogs               []*datapb.FieldBinlog
 	recoverTs                  Timestamp
 	importing                  bool
-}
-
-func (s *Segment) updatePk(pk primaryKey) error {
-	return s.pkStat.update(pk)
 }
 
 func (s *Segment) isValid() bool {
@@ -162,23 +69,32 @@ func (s *Segment) setType(t datapb.SegmentType) {
 	s.sType.Store(t)
 }
 
-func (s *Segment) updatePKRange(ids storage.FieldData) error {
-	log := log.With(zap.Int64("collectionID", s.collectionID),
-		zap.Int64("partitionID", s.partitionID),
-		zap.Int64("segmentID", s.segmentID),
-	)
-
-	err := s.pkStat.updatePKRange(ids)
+func (s *Segment) updatePKRange(ids storage.FieldData) {
+	s.InitCurrentStat()
+	err := s.currentStat.UpdatePKRange(ids)
 	if err != nil {
-		log.Warn("failed to updatePKRange", zap.Error(err))
+		panic(err)
 	}
-
-	log.Info("update pk range",
-		zap.Int64("num_rows", s.numRows), zap.Any("minPK", s.pkStat.minPK), zap.Any("maxPK", s.pkStat.maxPK))
-
-	return nil
 }
 
-func (s *Segment) getSegmentStatslog(pkID UniqueID, pkType schemapb.DataType) ([]byte, error) {
-	return s.pkStat.getStatslog(s.segmentID, pkID, pkType)
+func (s *Segment) InitCurrentStat() {
+	if s.currentStat == nil {
+		s.currentStat = &storage.PkStatistics{
+			PkFilter: bloom.NewWithEstimates(storage.BloomFilterSize, storage.MaxBloomFalsePositive),
+		}
+	}
+}
+
+// check if PK exists is current
+func (s *Segment) isPKExist(pk primaryKey) bool {
+	if s.currentStat != nil && s.currentStat.PkExist(pk) {
+		return true
+	}
+
+	for _, historyStats := range s.historyStats {
+		if historyStats.PkExist(pk) {
+			return true
+		}
+	}
+	return false
 }

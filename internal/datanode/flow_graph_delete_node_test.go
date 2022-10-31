@@ -18,6 +18,7 @@ package datanode
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -59,26 +60,45 @@ func TestFlowGraphDeleteNode_newDeleteNode(te *testing.T) {
 }
 
 func genMockChannel(segIDs []int64, pks []primaryKey, chanName string) *ChannelMeta {
-	buf := make([]byte, 8)
-	filter0 := bloom.NewWithEstimates(1000000, 0.01)
+	pkStat1 := &storage.PkStatistics{
+		PkFilter: bloom.NewWithEstimates(1000000, 0.01),
+	}
+
+	pkStat2 := &storage.PkStatistics{
+		PkFilter: bloom.NewWithEstimates(1000000, 0.01),
+	}
+
 	for i := 0; i < 3; i++ {
-		switch pks[i].Type() {
-		case schemapb.DataType_Int64:
-			common.Endian.PutUint64(buf, uint64(pks[i].(*int64PrimaryKey).Value))
-			filter0.Add(buf)
-		case schemapb.DataType_VarChar:
-			filter0.AddString(pks[i].(*varCharPrimaryKey).Value)
+		pkStat1.UpdateMinMax(pks[i])
+		buf := make([]byte, 8)
+		for _, pk := range pks {
+			switch pk.Type() {
+			case schemapb.DataType_Int64:
+				int64Value := pk.(*int64PrimaryKey).Value
+				common.Endian.PutUint64(buf, uint64(int64Value))
+				pkStat1.PkFilter.Add(buf)
+			case schemapb.DataType_VarChar:
+				stringValue := pk.(*varCharPrimaryKey).Value
+				pkStat1.PkFilter.AddString(stringValue)
+			default:
+			}
 		}
 	}
 
-	filter1 := bloom.NewWithEstimates(1000000, 0.01)
 	for i := 3; i < 5; i++ {
-		switch pks[i].Type() {
-		case schemapb.DataType_Int64:
-			common.Endian.PutUint64(buf, uint64(pks[i].(*int64PrimaryKey).Value))
-			filter1.Add(buf)
-		case schemapb.DataType_VarChar:
-			filter1.AddString(pks[i].(*varCharPrimaryKey).Value)
+		pkStat2.UpdateMinMax(pks[i])
+		buf := make([]byte, 8)
+		for _, pk := range pks {
+			switch pk.Type() {
+			case schemapb.DataType_Int64:
+				int64Value := pk.(*int64PrimaryKey).Value
+				common.Endian.PutUint64(buf, uint64(int64Value))
+				pkStat2.PkFilter.Add(buf)
+			case schemapb.DataType_VarChar:
+				stringValue := pk.(*varCharPrimaryKey).Value
+				pkStat2.PkFilter.AddString(stringValue)
+			default:
+			}
 		}
 	}
 
@@ -101,9 +121,9 @@ func genMockChannel(segIDs []int64, pks []primaryKey, chanName string) *ChannelM
 		}
 		seg.setType(segTypes[i])
 		if i < 3 {
-			seg.pkStat.pkFilter = filter0
+			seg.currentStat = pkStat1
 		} else {
-			seg.pkStat.pkFilter = filter1
+			seg.currentStat = pkStat2
 		}
 		channel.segments[segIDs[i]] = &seg
 	}
@@ -201,6 +221,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		assert.Nil(t, err)
 
 		segID2Pks, _ := dn.filterSegmentByPK(0, int64Pks, tss)
+		fmt.Println(segID2Pks)
 		expected := map[int64][]primaryKey{
 			segIDs[0]: int64Pks[0:3],
 			segIDs[1]: int64Pks[0:3],
