@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -1771,7 +1772,8 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 			ErrorCode: commonpb.ErrorCode_NotShardLeader,
 		},
 	}
-	assert.Equal(t, task.Execute(ctx), errInvalidShardLeaders)
+	err = task.Execute(ctx)
+	assert.True(t, strings.Contains(err.Error(), errInvalidShardLeaders.Error()))
 
 	qn.withSearchResult = &internalpb.SearchResults{
 		Status: &commonpb.Status{
