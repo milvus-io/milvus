@@ -25,6 +25,7 @@ def pytest_addoption(parser):
     parser.addoption("--user", action="store", default="", help="user name for connection")
     parser.addoption("--password", action="store", default="", help="password for connection")
     parser.addoption("--secure", type=bool, action="store", default=True, help="secure for connection")
+    parser.addoption("--milvus_ns", action="store", default="chaos-testing", help="milvus_ns")
     parser.addoption("--http_port", action="store", default=19121, help="http's port")
     parser.addoption("--handler", action="store", default="GRPC", help="handler of request")
     parser.addoption("--tag", action="store", default="all", help="only run tests matching the tag.")
@@ -73,6 +74,11 @@ def password(request):
 @pytest.fixture
 def secure(request):
     return request.config.getoption("--secure")
+
+
+@pytest.fixture
+def milvus_ns(request):
+    return request.config.getoption("--milvus_ns") 
 
 
 @pytest.fixture
