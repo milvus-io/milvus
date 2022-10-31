@@ -149,6 +149,9 @@ pipeline {
                                                     --set queryNode.profiling.enabled=true \
                                                     --set indexCoordinator.profiling.enabled=true \
                                                     --set indexNode.profiling.enabled=true \
+                                                    --set indexNode.disk.enabled=true \
+                                                    --set queryNode.disk.enabled=true \
+                                                    --set standalone.disk.enabled=true \
                                                     --version ${chart_version} \
                                                     -f values/${mqMode}.yaml \
                                                     -f values/ci/nightly.yaml "
