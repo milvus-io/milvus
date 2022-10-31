@@ -449,6 +449,11 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, force bool, c
 	// TODO, currently we lack of the measurement of data distribution, there should be another compaction help on redistributing segment based on scalar/vector field distribution
 	for _, segment := range segments {
 		segment := segment.ShadowClone()
+		// by-pass stale segments
+		if !force && t.isStaleSegment(segment) {
+			log.Debug("generate plans skip stale segment", zap.Int64("segmentID", segment.GetID()), zap.Time("lastFlushTime", segment.lastFlushTime))
+			continue
+		}
 		// TODO should we trigger compaction periodically even if the segment has no obvious reason to be compacted?
 		if force || t.ShouldDoSingleCompaction(segment, compactTime) {
 			prioritizedCandidates = append(prioritizedCandidates, segment)
@@ -628,6 +633,10 @@ func (t *compactionTrigger) fillOriginPlan(plan *datapb.CompactionPlan) error {
 	plan.PlanID = id
 	plan.TimeoutInSeconds = Params.DataCoordCfg.CompactionTimeoutInSeconds
 	return nil
+}
+
+func (t *compactionTrigger) isStaleSegment(segment *SegmentInfo) bool {
+	return time.Since(segment.lastFlushTime).Minutes() >= segmentTimedFlushDuration
 }
 
 func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compactTime *compactTime) bool {
