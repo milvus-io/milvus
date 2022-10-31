@@ -113,7 +113,7 @@ func (p *JSONParser) ParseRows(r io.Reader, handler JSONRowHandler) error {
 		// read the key
 		t, err := dec.Token()
 		if err != nil {
-			log.Error("JSON parser: read json token error", zap.Any("err", err))
+			log.Error("JSON parser: read json token error", zap.Error(err))
 			return fmt.Errorf("JSON parser: read json token error: %v", err)
 		}
 		key := t.(string)
@@ -128,7 +128,7 @@ func (p *JSONParser) ParseRows(r io.Reader, handler JSONRowHandler) error {
 		// started by '['
 		t, err = dec.Token()
 		if err != nil {
-			log.Error("JSON parser: read json token error", zap.Any("err", err))
+			log.Error("JSON parser: read json token error", zap.Error(err))
 			return fmt.Errorf("JSON parser: read json token error: %v", err)
 		}
 
@@ -142,7 +142,7 @@ func (p *JSONParser) ParseRows(r io.Reader, handler JSONRowHandler) error {
 		for dec.More() {
 			var value interface{}
 			if err := dec.Decode(&value); err != nil {
-				log.Error("JSON parser: decode json value error", zap.Any("err", err))
+				log.Error("JSON parser: decode json value error", zap.Error(err))
 				return fmt.Errorf("JSON parser: decode json value error: %v", err)
 			}
 
@@ -170,7 +170,7 @@ func (p *JSONParser) ParseRows(r io.Reader, handler JSONRowHandler) error {
 			if len(buf) >= int(p.bufSize) {
 				isEmpty = false
 				if err = handler.Handle(buf); err != nil {
-					log.Error("JSON parser: parse values error", zap.Any("err", err))
+					log.Error("JSON parser: parse values error", zap.Error(err))
 					return fmt.Errorf("JSON parser: parse values error: %v", err)
 				}
 
@@ -183,7 +183,7 @@ func (p *JSONParser) ParseRows(r io.Reader, handler JSONRowHandler) error {
 		if len(buf) > 0 {
 			isEmpty = false
 			if err = handler.Handle(buf); err != nil {
-				log.Error("JSON parser: parse values error", zap.Any("err", err))
+				log.Error("JSON parser: parse values error", zap.Error(err))
 				return fmt.Errorf("JSON parser: parse values error: %v", err)
 			}
 		}
@@ -191,7 +191,7 @@ func (p *JSONParser) ParseRows(r io.Reader, handler JSONRowHandler) error {
 		// end by ']'
 		t, err = dec.Token()
 		if err != nil {
-			log.Error("JSON parser: read json token error", zap.Any("err", err))
+			log.Error("JSON parser: read json token error", zap.Error(err))
 			return fmt.Errorf("JSON parser: read json token error: %v", err)
 		}
 
