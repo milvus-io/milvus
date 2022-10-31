@@ -747,6 +747,12 @@ func (i *IndexCoord) DropIndex(ctx context.Context, req *indexpb.DropIndexReques
 		log.Warn(fmt.Sprintf("there is no index on collection: %d with the index name: %s", req.CollectionID, req.IndexName))
 		return ret, nil
 	}
+	if !req.GetDropAll() && len(indexID2CreateTs) > 1 {
+		log.Warn(ErrMsgAmbiguousIndexName)
+		ret.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		ret.Reason = ErrMsgAmbiguousIndexName
+		return ret, nil
+	}
 	indexIDs := make([]UniqueID, 0)
 	for indexID := range indexID2CreateTs {
 		indexIDs = append(indexIDs, indexID)

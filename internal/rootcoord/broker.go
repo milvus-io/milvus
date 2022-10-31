@@ -205,6 +205,7 @@ func (b *ServerBroker) DropCollectionIndex(ctx context.Context, collID UniqueID,
 		CollectionID: collID,
 		PartitionIDs: partIDs,
 		IndexName:    "",
+		DropAll:      true,
 	})
 	if err != nil {
 		return err
