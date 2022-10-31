@@ -6,6 +6,10 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/milvus-io/milvus/cmd/tools/migration/legacy/legacypb"
+
+	"github.com/milvus-io/milvus/cmd/tools/migration/allocator"
+
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/cmd/tools/migration/versions"
 	"github.com/milvus-io/milvus/internal/common"
@@ -195,14 +199,45 @@ func combineToCollectionIndexesMeta220(fieldIndexes FieldIndexes210, collectionI
 	return indexes, nil
 }
 
+func getOrFillBuildMeta(record *pb.SegmentIndexInfo, indexBuildMeta IndexBuildMeta210, alloc allocator.Allocator) (*legacypb.IndexMeta, error) {
+	if record.GetBuildID() == 0 && !record.GetEnableIndex() {
+		buildID, err := alloc.AllocID()
+		if err != nil {
+			return nil, err
+		}
+		buildMeta := &legacypb.IndexMeta{
+			IndexBuildID:   buildID,
+			State:          commonpb.IndexState_Finished,
+			FailReason:     "",
+			Req:            nil,
+			IndexFilePaths: nil,
+			MarkDeleted:    false,
+			NodeID:         0,
+			IndexVersion:   1, // TODO: maybe a constraint is better.
+			Recycled:       false,
+			SerializeSize:  0,
+		}
+		indexBuildMeta[buildID] = buildMeta
+		return buildMeta, nil
+	}
+	buildMeta, ok := indexBuildMeta[record.GetBuildID()]
+	if !ok {
+		return nil, fmt.Errorf("index build meta not found, segment id: %d, index id: %d, index build id: %d",
+			record.GetSegmentID(), record.GetIndexID(), record.GetBuildID())
+	}
+	return buildMeta, nil
+}
+
 func combineToSegmentIndexesMeta220(segmentIndexes SegmentIndexesMeta210, indexBuildMeta IndexBuildMeta210) (SegmentIndexesMeta220, error) {
+	alloc := allocator.NewAllocatorFromList(indexBuildMeta.GetAllBuildIDs(), false, true)
+
 	segmentIndexModels := make(SegmentIndexesMeta220)
 	for segID := range segmentIndexes {
 		for indexID := range segmentIndexes[segID] {
 			record := segmentIndexes[segID][indexID]
-			buildMeta, ok := indexBuildMeta[record.GetBuildID()]
-			if !ok {
-				return nil, fmt.Errorf("index build meta not found, segment id: %d, index id: %d, index build id: %d", segID, indexID, record.GetBuildID())
+			buildMeta, err := getOrFillBuildMeta(record, indexBuildMeta, alloc)
+			if err != nil {
+				return nil, err
 			}
 
 			fileKeys := make([]string, len(buildMeta.GetIndexFilePaths()))
