@@ -25,8 +25,6 @@ import (
 	"github.com/opentracing/opentracing-go"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/schemapb"
-	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
@@ -252,24 +250,11 @@ func (dn *deleteNode) bufferDeleteMsg(msg *msgstream.DeleteMsg, tr TimeRange) ([
 func (dn *deleteNode) filterSegmentByPK(partID UniqueID, pks []primaryKey, tss []Timestamp) (map[UniqueID][]primaryKey, map[UniqueID][]uint64) {
 	segID2Pks := make(map[UniqueID][]primaryKey)
 	segID2Tss := make(map[UniqueID][]uint64)
-	buf := make([]byte, 8)
 	segments := dn.channel.filterSegments(partID)
 	for index, pk := range pks {
 		for _, segment := range segments {
 			segmentID := segment.segmentID
-			exist := false
-			switch pk.Type() {
-			case schemapb.DataType_Int64:
-				int64Pk := pk.(*int64PrimaryKey)
-				common.Endian.PutUint64(buf, uint64(int64Pk.Value))
-				exist = segment.pkStat.pkFilter.Test(buf)
-			case schemapb.DataType_VarChar:
-				varCharPk := pk.(*varCharPrimaryKey)
-				exist = segment.pkStat.pkFilter.TestString(varCharPk.Value)
-			default:
-				//TODO::
-			}
-			if exist {
+			if segment.isPKExist(pk) {
 				segID2Pks[segmentID] = append(segID2Pks[segmentID], pk)
 				segID2Tss[segmentID] = append(segID2Tss[segmentID], tss[index])
 			}

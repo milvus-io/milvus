@@ -20,8 +20,8 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
-	"github.com/bits-and-blooms/bloom/v3"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"go.uber.org/zap"
 
@@ -33,10 +33,6 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-)
-
-const (
-	maxBloomFalsePositive float64 = 0.005
 )
 
 type (
@@ -72,10 +68,10 @@ type Channel interface {
 	listCompactedSegmentIDs() map[UniqueID][]UniqueID
 
 	updateStatistics(segID UniqueID, numRows int64)
+	InitPKstats(ctx context.Context, s *Segment, statsBinlogs []*datapb.FieldBinlog, ts Timestamp) error
+	RollPKstats(segID UniqueID, stats []*storage.PrimaryKeyStats)
 	getSegmentStatisticsUpdates(segID UniqueID) (*datapb.SegmentStats, error)
 	segmentFlushed(segID UniqueID)
-	getSegmentStatslog(segID UniqueID) ([]byte, error)
-	initSegmentBloomFilter(seg *Segment) error
 }
 
 // ChannelMeta contains channel meta and the latest segments infos of the channel.
@@ -162,23 +158,6 @@ func (c *ChannelMeta) maxRowCountPerSegment(ts Timestamp) (int64, error) {
 	return int64(threshold / float64(sizePerRecord)), nil
 }
 
-// initSegmentBloomFilter initialize segment pkFilter with a new bloom filter.
-// this new BF will be initialized with estimated max rows and default false positive rate.
-func (c *ChannelMeta) initSegmentBloomFilter(s *Segment) error {
-	var ts Timestamp
-	if s.startPos != nil {
-		ts = s.startPos.Timestamp
-	}
-	maxRowCount, err := c.maxRowCountPerSegment(ts)
-	if err != nil {
-		log.Warn("initSegmentBloomFilter failed, cannot estimate max row count", zap.Error(err))
-		return err
-	}
-
-	s.pkStat.pkFilter = bloom.NewWithEstimates(uint(maxRowCount), maxBloomFalsePositive)
-	return nil
-}
-
 // addSegment adds the segment to current channel. Segments can be added as *new*, *normal* or *flushed*.
 // Make sure to verify `channel.hasSegment(segID)` == false before calling `channel.addSegment()`.
 func (c *ChannelMeta) addSegment(req addSegmentReq) error {
@@ -208,8 +187,8 @@ func (c *ChannelMeta) addSegment(req addSegmentReq) error {
 		endPos:       req.endPos,
 	}
 	seg.sType.Store(req.segType)
-	// Set up bloom filter.
-	err := c.initPKBloomFilter(context.TODO(), seg, req.statsBinLogs, req.recoverTs)
+	// Set up pk stats
+	err := c.InitPKstats(context.TODO(), seg, req.statsBinLogs, req.recoverTs)
 	if err != nil {
 		log.Error("failed to init bloom filter",
 			zap.Int64("segment ID", req.segID),
@@ -256,7 +235,8 @@ func (c *ChannelMeta) filterSegments(partitionID UniqueID) []*Segment {
 	return results
 }
 
-func (c *ChannelMeta) initPKBloomFilter(ctx context.Context, s *Segment, statsBinlogs []*datapb.FieldBinlog, ts Timestamp) error {
+func (c *ChannelMeta) InitPKstats(ctx context.Context, s *Segment, statsBinlogs []*datapb.FieldBinlog, ts Timestamp) error {
+	startTs := time.Now()
 	log := log.With(zap.Int64("segmentID", s.segmentID))
 	log.Info("begin to init pk bloom filter", zap.Int("stats bin logs", len(statsBinlogs)))
 	schema, err := c.getCollectionSchema(s.collectionID, ts)
@@ -287,10 +267,11 @@ func (c *ChannelMeta) initPKBloomFilter(ctx context.Context, s *Segment, statsBi
 
 	// no stats log to parse, initialize a new BF
 	if len(bloomFilterFiles) == 0 {
-		log.Warn("no stats files to load, initializa a new one")
-		return c.initSegmentBloomFilter(s)
+		log.Warn("no stats files to load")
+		return nil
 	}
 
+	// read historical PK filter
 	values, err := c.chunkManager.MultiRead(ctx, bloomFilterFiles)
 	if err != nil {
 		log.Warn("failed to load bloom filter files", zap.Error(err))
@@ -306,24 +287,44 @@ func (c *ChannelMeta) initPKBloomFilter(ctx context.Context, s *Segment, statsBi
 		log.Warn("failed to deserialize bloom filter files", zap.Error(err))
 		return err
 	}
+	var size uint
 	for _, stat := range stats {
-		// use first BF to merge
-		if s.pkStat.pkFilter == nil {
-			s.pkStat.pkFilter = stat.BF
-		} else {
-			// for compatibility, statslog before 2.1.2 uses separated stats log which needs to be merged
-			// assuming all legacy BF has same attributes.
-			err = s.pkStat.pkFilter.Merge(stat.BF)
-			if err != nil {
-				return err
-			}
+		pkStat := &storage.PkStatistics{
+			PkFilter: stat.BF,
+			MinPK:    stat.MinPk,
+			MaxPK:    stat.MaxPk,
 		}
-
-		s.updatePk(stat.MinPk)
-		s.updatePk(stat.MaxPk)
+		size += stat.BF.Cap()
+		s.historyStats = append(s.historyStats, pkStat)
 	}
+	log.Info("Successfully load pk stats", zap.Any("time", time.Since(startTs)), zap.Uint("size", size))
 
 	return nil
+}
+
+func (c *ChannelMeta) RollPKstats(segID UniqueID, stats []*storage.PrimaryKeyStats) {
+	c.segMu.Lock()
+	defer c.segMu.Unlock()
+	seg, ok := c.segments[segID]
+	log.Info("roll pk stats", zap.Int64("segment id", segID))
+	if ok && seg.notFlushed() {
+		for _, stat := range stats {
+			pkStat := &storage.PkStatistics{
+				PkFilter: stat.BF,
+				MinPK:    stat.MinPk,
+				MaxPK:    stat.MaxPk,
+			}
+			seg.historyStats = append(seg.historyStats, pkStat)
+		}
+		seg.currentStat = nil
+		return
+	}
+	// should not happen at all
+	if ok {
+		log.Warn("only growing segment should roll PK stats", zap.Int64("segment", segID), zap.Any("type", seg.sType))
+	} else {
+		log.Warn("can not find segment", zap.Int64("segment", segID))
+	}
 }
 
 // listNewSegmentsStartPositions gets all *New Segments* start positions and
@@ -517,7 +518,8 @@ func (c *ChannelMeta) mergeFlushedSegments(seg *Segment, planID UniqueID, compac
 		s.compactedTo = seg.segmentID
 		s.setType(datapb.SegmentType_Compacted)
 		// release bloom filter
-		s.pkStat.pkFilter = nil
+		s.currentStat = nil
+		s.historyStats = nil
 	}
 	c.segMu.Unlock()
 
@@ -554,11 +556,6 @@ func (c *ChannelMeta) addFlushedSegmentWithPKs(segID, collID, partID UniqueID, n
 		partitionID:  partID,
 		segmentID:    segID,
 		numRows:      numOfRows,
-	}
-
-	err := c.initSegmentBloomFilter(seg)
-	if err != nil {
-		return err
 	}
 
 	seg.updatePKRange(ids)
@@ -609,31 +606,4 @@ func (c *ChannelMeta) listNotFlushedSegmentIDs() []UniqueID {
 	}
 
 	return segIDs
-}
-
-// getSegmentStatslog returns the segment statslog for the provided segment id.
-func (c *ChannelMeta) getSegmentStatslog(segID UniqueID) ([]byte, error) {
-	c.segMu.RLock()
-	defer c.segMu.RUnlock()
-	colID := c.getCollectionID()
-
-	schema, err := c.getCollectionSchema(colID, 0)
-	if err != nil {
-		return nil, err
-	}
-
-	var pkID UniqueID
-	var pkType schemapb.DataType
-	for _, field := range schema.GetFields() {
-		if field.GetIsPrimaryKey() {
-			pkID = field.GetFieldID()
-			pkType = field.GetDataType()
-		}
-	}
-
-	if seg, ok := c.segments[segID]; ok && seg.isValid() {
-		return seg.getSegmentStatslog(pkID, pkType)
-	}
-
-	return nil, fmt.Errorf("segment not found: %d", segID)
 }

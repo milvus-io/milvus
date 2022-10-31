@@ -1024,21 +1024,22 @@ func TestUpdateBloomFilter(t *testing.T) {
 			defaultCollectionID,
 			defaultDMLChannel,
 			defaultSegmentVersion,
-			segmentTypeSealed)
+			segmentTypeGrowing)
 		assert.NoError(t, err)
-		seg, err := replica.getSegmentByID(defaultSegmentID, segmentTypeSealed)
+		seg, err := replica.getSegmentByID(defaultSegmentID, segmentTypeGrowing)
 		assert.Nil(t, err)
-		pkValues := []int64{1, 2}
+		pkValues := []int64{1, 3}
 		pks := make([]primaryKey, len(pkValues))
 		for index, v := range pkValues {
 			pks[index] = newInt64PrimaryKey(v)
 		}
 		seg.updateBloomFilter(pks)
-		buf := make([]byte, 8)
 		for _, v := range pkValues {
-			common.Endian.PutUint64(buf, uint64(v))
-			assert.True(t, seg.pkFilter.Test(buf))
+			assert.True(t, seg.isPKExist(storage.NewInt64PrimaryKey(v)))
 		}
+		assert.False(t, seg.isPKExist(storage.NewInt64PrimaryKey(0)))
+		assert.False(t, seg.isPKExist(storage.NewInt64PrimaryKey(2)))
+		assert.False(t, seg.isPKExist(storage.NewInt64PrimaryKey(4)))
 	})
 	t.Run("test string pk", func(t *testing.T) {
 		replica, err := genSimpleReplica()
@@ -1048,19 +1049,22 @@ func TestUpdateBloomFilter(t *testing.T) {
 			defaultCollectionID,
 			defaultDMLChannel,
 			defaultSegmentVersion,
-			segmentTypeSealed)
+			segmentTypeGrowing)
 		assert.NoError(t, err)
-		seg, err := replica.getSegmentByID(defaultSegmentID, segmentTypeSealed)
+		seg, err := replica.getSegmentByID(defaultSegmentID, segmentTypeGrowing)
 		assert.Nil(t, err)
-		pkValues := []string{"test1", "test2"}
+		pkValues := []string{"test1", "test3"}
 		pks := make([]primaryKey, len(pkValues))
 		for index, v := range pkValues {
 			pks[index] = newVarCharPrimaryKey(v)
 		}
 		seg.updateBloomFilter(pks)
 		for _, v := range pkValues {
-			assert.True(t, seg.pkFilter.TestString(v))
+			assert.True(t, seg.isPKExist(storage.NewVarCharPrimaryKey(v)))
 		}
+		assert.False(t, seg.isPKExist(storage.NewVarCharPrimaryKey("test0")))
+		assert.False(t, seg.isPKExist(storage.NewVarCharPrimaryKey("test2")))
+		assert.False(t, seg.isPKExist(storage.NewVarCharPrimaryKey("test4")))
 	})
 
 }

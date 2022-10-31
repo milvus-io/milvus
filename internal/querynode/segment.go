@@ -38,10 +38,10 @@ import (
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 
+	"github.com/bits-and-blooms/bloom/v3"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 
-	"github.com/bits-and-blooms/bloom/v3"
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
@@ -61,11 +61,6 @@ type segmentType = commonpb.SegmentState
 const (
 	segmentTypeGrowing = commonpb.SegmentState_Growing
 	segmentTypeSealed  = commonpb.SegmentState_Sealed
-)
-
-const (
-	bloomFilterSize       uint    = 100000
-	maxBloomFalsePositive float64 = 0.005
 )
 
 var (
@@ -100,7 +95,9 @@ type Segment struct {
 
 	indexedFieldInfos *typeutil.ConcurrentMap[UniqueID, *IndexedFieldInfo]
 
-	pkFilter *bloom.BloomFilter //  bloom filter of pk inside a segment
+	// only used by sealed segments
+	currentStat  *storage.PkStatistics
+	historyStats []*storage.PkStatistics
 
 	pool *concurrency.Pool
 }
@@ -219,9 +216,8 @@ func newSegment(collection *Collection,
 		indexedFieldInfos: typeutil.NewConcurrentMap[int64, *IndexedFieldInfo](),
 		recentlyModified:  atomic.NewBool(false),
 		destroyed:         atomic.NewBool(false),
-
-		pkFilter: bloom.NewWithEstimates(bloomFilterSize, maxBloomFalsePositive),
-		pool:     pool,
+		historyStats:      []*storage.PkStatistics{},
+		pool:              pool,
 	}
 
 	return segment, nil
@@ -248,6 +244,9 @@ func deleteSegment(segment *Segment) {
 		C.DeleteSegment(cPtr)
 		return nil, nil
 	}).Await()
+
+	segment.currentStat = nil
+	segment.historyStats = nil
 
 	log.Info("delete segment from memory",
 		zap.Int64("collectionID", segment.collectionID),
@@ -619,20 +618,46 @@ func (s *Segment) fillIndexedFieldsData(ctx context.Context, collectionID Unique
 }
 
 func (s *Segment) updateBloomFilter(pks []primaryKey) {
+	s.InitCurrentStat()
 	buf := make([]byte, 8)
 	for _, pk := range pks {
+		s.currentStat.UpdateMinMax(pk)
 		switch pk.Type() {
 		case schemapb.DataType_Int64:
 			int64Value := pk.(*int64PrimaryKey).Value
 			common.Endian.PutUint64(buf, uint64(int64Value))
-			s.pkFilter.Add(buf)
+			s.currentStat.PkFilter.Add(buf)
 		case schemapb.DataType_VarChar:
 			stringValue := pk.(*varCharPrimaryKey).Value
-			s.pkFilter.AddString(stringValue)
+			s.currentStat.PkFilter.AddString(stringValue)
 		default:
-			log.Warn("failed to update bloomfilter", zap.Any("PK type", pk.Type()))
+			log.Error("failed to update bloomfilter", zap.Any("PK type", pk.Type()))
+			panic("failed to update bloomfilter")
 		}
 	}
+}
+
+func (s *Segment) InitCurrentStat() {
+	if s.currentStat == nil {
+		s.currentStat = &storage.PkStatistics{
+			PkFilter: bloom.NewWithEstimates(storage.BloomFilterSize, storage.MaxBloomFalsePositive),
+		}
+	}
+}
+
+// check if PK exists is current
+func (s *Segment) isPKExist(pk primaryKey) bool {
+	if s.currentStat != nil && s.currentStat.PkExist(pk) {
+		return true
+	}
+
+	// for sealed, if one of the stats shows it exist, then we have to check it
+	for _, historyStat := range s.historyStats {
+		if historyStat.PkExist(pk) {
+			return true
+		}
+	}
+	return false
 }
 
 //-------------------------------------------------------------------------------------- interfaces for growing segment

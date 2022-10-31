@@ -277,7 +277,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			iData := genInsertDataWithExpiredTS()
 
 			var allPaths [][]string
-			inpath, err := mockbIO.uploadInsertLog(context.Background(), 1, 0, iData, meta)
+			inpath, _, err := mockbIO.uploadInsertLog(context.Background(), 1, 0, iData, meta)
 			assert.NoError(t, err)
 			assert.Equal(t, 12, len(inpath))
 			binlogNum := len(inpath[0].GetBinlogs())
@@ -296,7 +296,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			}
 
 			ct := &compactionTask{Channel: channel, downloader: mockbIO, uploader: mockbIO}
-			inPaths, statsPaths, _, numOfRow, err := ct.merge(context.Background(), allPaths, 2, 0, meta, dm)
+			inPaths, statsPaths, numOfRow, err := ct.merge(context.Background(), allPaths, 2, 0, meta, dm)
 			assert.NoError(t, err)
 			assert.Equal(t, int64(2), numOfRow)
 			assert.Equal(t, 1, len(inPaths[0].GetBinlogs()))
@@ -315,7 +315,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			meta := NewMetaFactory().GetCollectionMeta(1, "test", schemapb.DataType_Int64)
 
 			var allPaths [][]string
-			inpath, err := mockbIO.uploadInsertLog(context.Background(), 1, 0, iData, meta)
+			inpath, _, err := mockbIO.uploadInsertLog(context.Background(), 1, 0, iData, meta)
 			assert.NoError(t, err)
 			assert.Equal(t, 12, len(inpath))
 			binlogNum := len(inpath[0].GetBinlogs())
@@ -332,12 +332,12 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			dm := map[interface{}]Timestamp{}
 
 			ct := &compactionTask{Channel: channel, downloader: mockbIO, uploader: mockbIO}
-			inPaths, statsPaths, _, numOfRow, err := ct.merge(context.Background(), allPaths, 2, 0, meta, dm)
+			inPaths, statsPaths, numOfRow, err := ct.merge(context.Background(), allPaths, 2, 0, meta, dm)
 			assert.NoError(t, err)
 			assert.Equal(t, int64(2), numOfRow)
 			assert.Equal(t, 2, len(inPaths[0].GetBinlogs()))
 			assert.Equal(t, 1, len(statsPaths))
-			assert.Equal(t, 1, len(statsPaths[0].GetBinlogs()))
+			assert.Equal(t, 2, len(statsPaths[0].GetBinlogs()))
 		})
 
 		t.Run("Merge with expiration", func(t *testing.T) {
@@ -348,7 +348,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			meta := NewMetaFactory().GetCollectionMeta(1, "test", schemapb.DataType_Int64)
 
 			var allPaths [][]string
-			inpath, err := mockbIO.uploadInsertLog(context.Background(), 1, 0, iData, meta)
+			inpath, _, err := mockbIO.uploadInsertLog(context.Background(), 1, 0, iData, meta)
 			assert.NoError(t, err)
 			assert.Equal(t, 12, len(inpath))
 			binlogNum := len(inpath[0].GetBinlogs())
@@ -375,7 +375,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 					CollectionTtl: 864000,
 				},
 			}
-			inPaths, statsPaths, _, numOfRow, err := ct.merge(context.Background(), allPaths, 2, 0, meta, dm)
+			inPaths, statsPaths, numOfRow, err := ct.merge(context.Background(), allPaths, 2, 0, meta, dm)
 			assert.NoError(t, err)
 			assert.Equal(t, int64(0), numOfRow)
 			assert.Equal(t, 0, len(inPaths))
@@ -390,7 +390,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			meta := NewMetaFactory().GetCollectionMeta(1, "test", schemapb.DataType_Int64)
 
 			var allPaths [][]string
-			inpath, err := mockbIO.uploadInsertLog(context.Background(), 1, 0, iData, meta)
+			inpath, _, err := mockbIO.uploadInsertLog(context.Background(), 1, 0, iData, meta)
 			assert.NoError(t, err)
 			assert.Equal(t, 12, len(inpath))
 			binlogNum := len(inpath[0].GetBinlogs())
@@ -409,7 +409,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			}
 
 			ct := &compactionTask{Channel: channel, downloader: mockbIO, uploader: mockbIO}
-			_, _, _, _, err = ct.merge(context.Background(), allPaths, 2, 0, &etcdpb.CollectionMeta{
+			_, _, _, err = ct.merge(context.Background(), allPaths, 2, 0, &etcdpb.CollectionMeta{
 				Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 					{DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{
 						{Key: "dim", Value: "64"},
@@ -427,7 +427,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			meta := NewMetaFactory().GetCollectionMeta(1, "test", schemapb.DataType_Int64)
 
 			var allPaths [][]string
-			inpath, err := mockbIO.uploadInsertLog(context.Background(), 1, 0, iData, meta)
+			inpath, _, err := mockbIO.uploadInsertLog(context.Background(), 1, 0, iData, meta)
 			assert.NoError(t, err)
 			assert.Equal(t, 12, len(inpath))
 			binlogNum := len(inpath[0].GetBinlogs())
@@ -447,7 +447,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 
 			ct := &compactionTask{Channel: channel, downloader: mockbIO, uploader: mockbIO}
 
-			_, _, _, _, err = ct.merge(context.Background(), allPaths, 2, 0, &etcdpb.CollectionMeta{
+			_, _, _, err = ct.merge(context.Background(), allPaths, 2, 0, &etcdpb.CollectionMeta{
 				Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 					{DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{
 						{Key: "dim", Value: "dim"},
@@ -659,11 +659,11 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 				RowCount: 1,
 			}
 
-			cpaths1, err := mockbIO.upload(context.TODO(), c.segID1, c.parID, []*InsertData{iData1}, []byte{}, dData1, meta)
+			cpaths1, err := mockbIO.upload(context.TODO(), c.segID1, c.parID, []*InsertData{iData1}, dData1, meta)
 			require.NoError(t, err)
 			require.Equal(t, 12, len(cpaths1.inPaths))
 
-			cpaths2, err := mockbIO.upload(context.TODO(), c.segID2, c.parID, []*InsertData{iData2}, []byte{}, dData2, meta)
+			cpaths2, err := mockbIO.upload(context.TODO(), c.segID2, c.parID, []*InsertData{iData2}, dData2, meta)
 			require.NoError(t, err)
 			require.Equal(t, 12, len(cpaths2.inPaths))
 
@@ -790,11 +790,11 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 			RowCount: 0,
 		}
 
-		cpaths1, err := mockbIO.upload(context.TODO(), segID1, partID, []*InsertData{iData1}, []byte{}, dData1, meta)
+		cpaths1, err := mockbIO.upload(context.TODO(), segID1, partID, []*InsertData{iData1}, dData1, meta)
 		require.NoError(t, err)
 		require.Equal(t, 12, len(cpaths1.inPaths))
 
-		cpaths2, err := mockbIO.upload(context.TODO(), segID2, partID, []*InsertData{iData2}, []byte{}, dData2, meta)
+		cpaths2, err := mockbIO.upload(context.TODO(), segID2, partID, []*InsertData{iData2}, dData2, meta)
 		require.NoError(t, err)
 		require.Equal(t, 12, len(cpaths2.inPaths))
 
@@ -842,11 +842,11 @@ type mockFlushManager struct {
 
 var _ flushManager = (*mockFlushManager)(nil)
 
-func (mfm *mockFlushManager) flushBufferData(data *BufferData, segStats []byte, segmentID UniqueID, flushed bool, dropped bool, pos *internalpb.MsgPosition) error {
+func (mfm *mockFlushManager) flushBufferData(data *BufferData, segmentID UniqueID, flushed bool, dropped bool, pos *internalpb.MsgPosition) ([]*Blob, error) {
 	if mfm.returnError {
-		return fmt.Errorf("mock error")
+		return nil, fmt.Errorf("mock error")
 	}
-	return nil
+	return nil, nil
 }
 
 func (mfm *mockFlushManager) flushDelData(data *DelDataBuf, segmentID UniqueID, pos *internalpb.MsgPosition) error {

@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -55,7 +56,7 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 			Tss:      []uint64{666666},
 		}
 
-		p, err := b.upload(context.TODO(), 1, 10, []*InsertData{iData}, []byte{}, dData, meta)
+		p, err := b.upload(context.TODO(), 1, 10, []*InsertData{iData}, dData, meta)
 		assert.NoError(t, err)
 		assert.Equal(t, 12, len(p.inPaths))
 		assert.Equal(t, 1, len(p.statsPaths))
@@ -63,25 +64,21 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 		assert.Equal(t, 1, len(p.statsPaths[0].GetBinlogs()))
 		assert.NotNil(t, p.deltaInfo)
 
-		p, err = b.upload(context.TODO(), 1, 10, []*InsertData{iData, iData}, []byte{}, dData, meta)
+		p, err = b.upload(context.TODO(), 1, 10, []*InsertData{iData, iData}, dData, meta)
 		assert.NoError(t, err)
 		assert.Equal(t, 12, len(p.inPaths))
 		assert.Equal(t, 1, len(p.statsPaths))
 		assert.Equal(t, 2, len(p.inPaths[0].GetBinlogs()))
-		assert.Equal(t, 1, len(p.statsPaths[0].GetBinlogs()))
+		assert.Equal(t, 2, len(p.statsPaths[0].GetBinlogs()))
 		assert.NotNil(t, p.deltaInfo)
 
 		ctx, cancel := context.WithCancel(context.Background())
 
-		in, err := b.uploadInsertLog(ctx, 1, 10, iData, meta)
+		in, stats, err := b.uploadInsertLog(ctx, 1, 10, iData, meta)
 		assert.NoError(t, err)
 		assert.Equal(t, 12, len(in))
 		assert.Equal(t, 1, len(in[0].GetBinlogs()))
-
-		stats, err := b.uploadStatsLog(ctx, 1, 10, []byte{}, meta)
-		assert.NoError(t, err)
 		assert.Equal(t, 1, len(stats))
-		assert.Equal(t, 1, len(stats[0].GetBinlogs()))
 
 		deltas, err := b.uploadDeltaLog(ctx, 1, 10, dData, meta)
 		assert.NoError(t, err)
@@ -90,17 +87,13 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 
 		cancel()
 
-		p, err = b.upload(ctx, 1, 10, []*InsertData{iData}, []byte{}, dData, meta)
+		p, err = b.upload(ctx, 1, 10, []*InsertData{iData}, dData, meta)
 		assert.EqualError(t, err, errUploadToBlobStorage.Error())
 		assert.Nil(t, p)
 
-		in, err = b.uploadInsertLog(ctx, 1, 10, iData, meta)
+		in, _, err = b.uploadInsertLog(ctx, 1, 10, iData, meta)
 		assert.EqualError(t, err, errUploadToBlobStorage.Error())
 		assert.Nil(t, in)
-
-		stats, err = b.uploadStatsLog(ctx, 1, 10, []byte{}, meta)
-		assert.EqualError(t, err, errUploadToBlobStorage.Error())
-		assert.Nil(t, stats)
 
 		deltas, err = b.uploadDeltaLog(ctx, 1, 10, dData, meta)
 		assert.EqualError(t, err, errUploadToBlobStorage.Error())
@@ -117,17 +110,17 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 		}
 
 		iData := genEmptyInsertData()
-		p, err := b.upload(context.TODO(), 1, 10, []*InsertData{iData}, []byte{}, dData, meta)
+		p, err := b.upload(context.TODO(), 1, 10, []*InsertData{iData}, dData, meta)
 		assert.NoError(t, err)
 		assert.Empty(t, p.inPaths)
-		assert.NotEmpty(t, p.statsPaths)
+		assert.Empty(t, p.statsPaths)
 		assert.Empty(t, p.deltaInfo)
 
 		iData = &InsertData{Data: make(map[int64]storage.FieldData)}
-		p, err = b.upload(context.TODO(), 1, 10, []*InsertData{iData}, []byte{}, dData, meta)
+		p, err = b.upload(context.TODO(), 1, 10, []*InsertData{iData}, dData, meta)
 		assert.NoError(t, err)
 		assert.Empty(t, p.inPaths)
-		assert.NotEmpty(t, p.statsPaths)
+		assert.Empty(t, p.statsPaths)
 		assert.Empty(t, p.deltaInfo)
 
 		iData = genInsertData()
@@ -136,7 +129,7 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 			Tss:      []uint64{1},
 			RowCount: 1,
 		}
-		p, err = b.upload(context.TODO(), 1, 10, []*InsertData{iData}, []byte{}, dData, meta)
+		p, err = b.upload(context.TODO(), 1, 10, []*InsertData{iData}, dData, meta)
 		assert.Error(t, err)
 		assert.Empty(t, p)
 
@@ -150,34 +143,26 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 			RowCount: 1,
 		}
 		ctx, cancel := context.WithTimeout(context.TODO(), 20*time.Millisecond)
-		p, err = bin.upload(ctx, 1, 10, []*InsertData{iData}, []byte{}, dData, meta)
+		p, err = bin.upload(ctx, 1, 10, []*InsertData{iData}, dData, meta)
 		assert.Error(t, err)
 		assert.Empty(t, p)
 
-		in, err := b.uploadInsertLog(ctx, 1, 10, iData, meta)
+		in, _, err := b.uploadInsertLog(ctx, 1, 10, iData, meta)
 		assert.Error(t, err)
 		assert.Empty(t, in)
-
-		stats, err := b.uploadStatsLog(ctx, 1, 10, []byte{}, meta)
-		assert.Error(t, err)
-		assert.Empty(t, stats)
 
 		deltas, err := b.uploadDeltaLog(ctx, 1, 10, dData, meta)
 		assert.Error(t, err)
 		assert.Empty(t, deltas)
 
 		alloc.isvalid = false
-		p, err = bin.upload(ctx, 1, 10, []*InsertData{iData}, []byte{}, dData, meta)
+		p, err = bin.upload(ctx, 1, 10, []*InsertData{iData}, dData, meta)
 		assert.Error(t, err)
 		assert.Empty(t, p)
 
-		in, err = b.uploadInsertLog(ctx, 1, 10, iData, meta)
+		in, _, err = b.uploadInsertLog(ctx, 1, 10, iData, meta)
 		assert.Error(t, err)
 		assert.Empty(t, in)
-
-		stats, err = b.uploadStatsLog(ctx, 1, 10, []byte{}, meta)
-		assert.Error(t, err)
-		assert.Empty(t, stats)
 
 		deltas, err = b.uploadDeltaLog(ctx, 1, 10, dData, meta)
 		assert.Error(t, err)
@@ -187,17 +172,13 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 		for _, field := range meta.GetSchema().GetFields() {
 			field.IsPrimaryKey = false
 		}
-		p, err = bin.upload(ctx, 1, 10, []*InsertData{iData}, []byte{}, dData, meta)
+		p, err = bin.upload(ctx, 1, 10, []*InsertData{iData}, dData, meta)
 		assert.Error(t, err)
 		assert.Empty(t, p)
 
-		in, err = b.uploadInsertLog(ctx, 1, 10, iData, meta)
+		in, _, err = b.uploadInsertLog(ctx, 1, 10, iData, meta)
 		assert.Error(t, err)
 		assert.Empty(t, in)
-
-		stats, err = b.uploadStatsLog(ctx, 1, 10, []byte{}, meta)
-		assert.Error(t, err)
-		assert.Empty(t, stats)
 
 		deltas, err = b.uploadDeltaLog(ctx, 1, 10, dData, meta)
 		assert.Error(t, err)
@@ -349,46 +330,52 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
 				meta := f.GetCollectionMeta(UniqueID(10001), "test_gen_blobs", test.pkType)
-
-				kvs, pin, err := b.genInsertBlobs(genInsertData(), 10, 1, meta)
-
-				if test.expectError {
-					assert.Error(t, err)
-					return
-				}
+				helper, err := typeutil.CreateSchemaHelper(meta.Schema)
 				assert.NoError(t, err)
+				primaryKeyFieldSchema, err := helper.GetPrimaryKeyField()
+				assert.NoError(t, err)
+				primaryKeyFieldID := primaryKeyFieldSchema.GetFieldID()
+
+				kvs, pin, pstats, err := b.genInsertBlobs(genInsertData(), 10, 1, meta)
+
+				assert.NoError(t, err)
+				assert.Equal(t, 1, len(pstats))
 				assert.Equal(t, 12, len(pin))
-				assert.Equal(t, 12, len(kvs))
+				assert.Equal(t, 13, len(kvs))
 
 				log.Debug("test paths",
 					zap.Any("kvs no.", len(kvs)),
-					zap.String("insert paths field0", pin[common.TimeStampField].GetBinlogs()[0].GetLogPath()))
+					zap.String("insert paths field0", pin[common.TimeStampField].GetBinlogs()[0].GetLogPath()),
+					zap.String("stats paths field0", pstats[primaryKeyFieldID].GetBinlogs()[0].GetLogPath()))
 			})
 		}
 	})
 
 	t.Run("Test genInsertBlobs error", func(t *testing.T) {
-		kvs, pin, err := b.genInsertBlobs(&InsertData{}, 1, 1, nil)
+		kvs, pin, pstats, err := b.genInsertBlobs(&InsertData{}, 1, 1, nil)
 		assert.Error(t, err)
 		assert.Empty(t, kvs)
 		assert.Empty(t, pin)
+		assert.Empty(t, pstats)
 
 		f := &MetaFactory{}
 		meta := f.GetCollectionMeta(UniqueID(10001), "test_gen_blobs", schemapb.DataType_Int64)
 
-		kvs, pin, err = b.genInsertBlobs(genEmptyInsertData(), 10, 1, meta)
+		kvs, pin, pstats, err = b.genInsertBlobs(genEmptyInsertData(), 10, 1, meta)
 		assert.Error(t, err)
 		assert.Empty(t, kvs)
 		assert.Empty(t, pin)
+		assert.Empty(t, pstats)
 
 		errAlloc := NewAllocatorFactory()
 		errAlloc.errAllocBatch = true
 		bin := &binlogIO{cm, errAlloc}
-		kvs, pin, err = bin.genInsertBlobs(genInsertData(), 10, 1, meta)
+		kvs, pin, pstats, err = bin.genInsertBlobs(genInsertData(), 10, 1, meta)
 
 		assert.Error(t, err)
 		assert.Empty(t, kvs)
 		assert.Empty(t, pin)
+		assert.Empty(t, pstats)
 	})
 
 	t.Run("Test idxGenerator", func(t *testing.T) {

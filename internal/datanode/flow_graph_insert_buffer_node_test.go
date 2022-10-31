@@ -543,6 +543,138 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 	})
 }
 
+func TestRollBF(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	testPath := "/test/datanode/root/meta"
+	err := clearEtcd(testPath)
+	require.NoError(t, err)
+	Params.EtcdCfg.MetaRootPath = testPath
+
+	Factory := &MetaFactory{}
+	collMeta := Factory.GetCollectionMeta(UniqueID(0), "coll1", schemapb.DataType_Int64)
+	dataFactory := NewDataFactory()
+
+	mockRootCoord := &RootCoordFactory{
+		pkType: schemapb.DataType_Int64,
+	}
+
+	channel := &ChannelMeta{
+		collectionID: collMeta.ID,
+		segments:     make(map[UniqueID]*Segment),
+	}
+
+	channel.metaService = newMetaService(mockRootCoord, collMeta.ID)
+
+	factory := dependency.NewDefaultFactory(true)
+
+	flushPacks := []*segmentFlushPack{}
+	fpMut := sync.Mutex{}
+	wg := sync.WaitGroup{}
+
+	cm := storage.NewLocalChunkManager(storage.RootPath(insertNodeTestDir))
+	defer cm.RemoveWithPrefix(ctx, "")
+	fm := NewRendezvousFlushManager(NewAllocatorFactory(), cm, channel, func(pack *segmentFlushPack) {
+		fpMut.Lock()
+		flushPacks = append(flushPacks, pack)
+		fpMut.Unlock()
+		startPos := channel.listNewSegmentsStartPositions()
+		channel.transferNewSegments(lo.Map(startPos, func(pos *datapb.SegmentStartPosition, _ int) UniqueID {
+			return pos.GetSegmentID()
+		}))
+		if pack.flushed || pack.dropped {
+			channel.segmentFlushed(pack.segmentID)
+		}
+		wg.Done()
+	}, emptyFlushAndDropFunc)
+
+	flushChan := make(chan flushMsg, 100)
+	resendTTChan := make(chan resendTTMsg, 100)
+	c := &nodeConfig{
+		channel:      channel,
+		msFactory:    factory,
+		allocator:    NewAllocatorFactory(),
+		vChannelName: "string",
+	}
+	iBNode, err := newInsertBufferNode(ctx, collMeta.ID, flushChan, resendTTChan, fm, newCache(), c)
+	require.NoError(t, err)
+
+	// Auto flush number of rows set to 2
+
+	inMsg := genFlowGraphInsertMsg("")
+	inMsg.insertMessages = dataFactory.GetMsgStreamInsertMsgs(1)
+	var iMsg flowgraph.Msg = &inMsg
+
+	t.Run("Pure roll BF", func(t *testing.T) {
+		tmp := Params.DataNodeCfg.FlushInsertBufferSize
+		Params.DataNodeCfg.FlushInsertBufferSize = 4 * 4
+		defer func() {
+			Params.DataNodeCfg.FlushInsertBufferSize = tmp
+		}()
+
+		inMsg.startPositions = []*internalpb.MsgPosition{{Timestamp: 100}}
+		inMsg.endPositions = []*internalpb.MsgPosition{{Timestamp: 123}}
+
+		type Test struct {
+			expectedSegID       UniqueID
+			expectedNumOfRows   int64
+			expectedStartPosTs  Timestamp
+			expectedEndPosTs    Timestamp
+			expectedCpNumOfRows int64
+			expectedCpPosTs     Timestamp
+		}
+
+		iBNode.Operate([]flowgraph.Msg{iMsg})
+
+		assert.Equal(t, 0, len(flushPacks))
+
+		// should not be flushed with only 1 one
+		channel.segMu.Lock()
+		seg, ok := channel.segments[UniqueID(1)]
+		channel.segMu.Unlock()
+		assert.True(t, ok)
+		assert.Equal(t, datapb.SegmentType_New, seg.getType())
+		assert.Equal(t, int64(1), seg.numRows)
+		assert.Equal(t, uint64(100), seg.startPos.GetTimestamp())
+		assert.Equal(t, uint64(123), seg.endPos.GetTimestamp())
+		// because this is the origincal
+		assert.True(t, seg.currentStat.PkFilter.Cap() > uint(1000000))
+
+		inMsg.startPositions = []*internalpb.MsgPosition{{Timestamp: 200}}
+		inMsg.endPositions = []*internalpb.MsgPosition{{Timestamp: 234}}
+		iMsg = &inMsg
+
+		// Triger auto flush
+		output := iBNode.Operate([]flowgraph.Msg{iMsg})
+		fgm := output[0].(*flowGraphMsg)
+		wg.Add(len(fgm.segmentsToSync))
+		t.Log("segments to flush", fgm.segmentsToSync)
+
+		for _, im := range fgm.segmentsToSync {
+			// send del done signal
+			err = fm.flushDelData(nil, im, fgm.endPositions[0])
+			assert.NoError(t, err)
+		}
+		wg.Wait()
+
+		assert.Equal(t, 1, len(flushPacks))
+		assert.Less(t, 0, len(flushPacks[0].insertLogs))
+		assert.False(t, flushPacks[0].flushed)
+
+		assert.True(t, ok)
+		assert.Equal(t, datapb.SegmentType_Normal, seg.getType())
+		assert.Equal(t, int64(2), seg.numRows)
+		assert.Equal(t, uint64(100), seg.startPos.GetTimestamp())
+		assert.Equal(t, uint64(234), seg.endPos.GetTimestamp())
+		// filter should be rolled
+
+		assert.Nil(t, seg.currentStat)
+		assert.True(t, len(seg.historyStats) == 1)
+		assert.True(t, seg.historyStats[0].PkFilter.Cap() < 100)
+	})
+}
+
 type InsertBufferNodeSuit struct {
 	suite.Suite
 

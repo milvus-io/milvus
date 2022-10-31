@@ -24,6 +24,7 @@ import (
 	"runtime"
 	"runtime/debug"
 	"strconv"
+	"time"
 
 	"github.com/panjf2000/ants/v2"
 	"go.uber.org/zap"
@@ -637,6 +638,7 @@ func (loader *segmentLoader) loadSegmentBloomFilter(ctx context.Context, segment
 		return nil
 	}
 
+	startTs := time.Now()
 	values, err := loader.cm.MultiRead(ctx, binlogPaths)
 	if err != nil {
 		return err
@@ -651,22 +653,17 @@ func (loader *segmentLoader) loadSegmentBloomFilter(ctx context.Context, segment
 		log.Warn("failed to deserialize stats", zap.Error(err))
 		return err
 	}
-	// just one BF, just use it
-	if len(stats) == 1 && stats[0].BF != nil {
-		segment.pkFilter = stats[0].BF
-		return nil
-	}
-	// legacy merge
+	var size uint
 	for _, stat := range stats {
-		if stat.BF == nil {
-			log.Warn("stat log with nil bloom filter", zap.Int64("segmentID", segment.segmentID), zap.Any("stat", stat))
-			continue
+		pkStat := &storage.PkStatistics{
+			PkFilter: stat.BF,
+			MinPK:    stat.MinPk,
+			MaxPK:    stat.MaxPk,
 		}
-		err = segment.pkFilter.Merge(stat.BF)
-		if err != nil {
-			return err
-		}
+		size += stat.BF.Cap()
+		segment.historyStats = append(segment.historyStats, pkStat)
 	}
+	log.Info("Successfully load pk stats", zap.Any("time", time.Since(startTs)), zap.Int64("segment", segment.segmentID), zap.Uint("size", size))
 	return nil
 }
 

@@ -26,8 +26,8 @@ import (
 
 const (
 	// TODO silverxia maybe need set from config
-	bloomFilterSize       uint    = 100000
-	maxBloomFalsePositive float64 = 0.005
+	BloomFilterSize       uint    = 100000
+	MaxBloomFalsePositive float64 = 0.005
 )
 
 // PrimaryKeyStats contains statistics data for pk column
@@ -109,8 +109,8 @@ func (stats *PrimaryKeyStats) UnmarshalJSON(data []byte) error {
 		}
 	}
 
-	stats.BF = bloom.NewWithEstimates(bloomFilterSize, maxBloomFalsePositive)
 	if bfMessage, ok := messageMap["bf"]; ok && bfMessage != nil {
+		stats.BF = &bloom.BloomFilter{}
 		err = stats.BF.UnmarshalJSON(*bfMessage)
 		if err != nil {
 			return err
@@ -145,14 +145,14 @@ func (sw *StatsWriter) GetBuffer() []byte {
 	return sw.buffer
 }
 
-// generatePrimaryKeyStats writes Int64Stats from @msgs with @fieldID to @buffer
-func (sw *StatsWriter) generatePrimaryKeyStats(fieldID int64, pkType schemapb.DataType, msgs FieldData) error {
+// GeneratePrimaryKeyStats writes Int64Stats from @msgs with @fieldID to @buffer
+func (sw *StatsWriter) GeneratePrimaryKeyStats(fieldID int64, pkType schemapb.DataType, msgs FieldData) error {
 	stats := &PrimaryKeyStats{
 		FieldID: fieldID,
 		PkType:  int64(pkType),
 	}
 
-	stats.BF = bloom.NewWithEstimates(bloomFilterSize, maxBloomFalsePositive)
+	stats.BF = bloom.NewWithEstimates(uint(msgs.RowNum()), MaxBloomFalsePositive)
 	switch pkType {
 	case schemapb.DataType_Int64:
 		data := msgs.(*Int64FieldData).Data

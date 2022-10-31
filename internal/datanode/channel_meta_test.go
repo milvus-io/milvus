@@ -56,7 +56,7 @@ func (kv *mockDataCM) MultiRead(ctx context.Context, keys []string) ([][]byte, e
 		FieldID: common.RowIDField,
 		Min:     0,
 		Max:     10,
-		BF:      bloom.NewWithEstimates(100000, maxBloomFalsePositive),
+		BF:      bloom.NewWithEstimates(storage.BloomFilterSize, storage.MaxBloomFalsePositive),
 	}
 	buffer, _ := json.Marshal(stats)
 	return [][]byte{buffer}, nil
@@ -774,7 +774,6 @@ func TestChannelMeta_UpdatePKRange(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		cases = append(cases, rand.Int63())
 	}
-	buf := make([]byte, 8)
 	for _, c := range cases {
 		channel.updateSegmentPKRange(1, &storage.Int64FieldData{Data: []int64{c}}) // new segment
 		channel.updateSegmentPKRange(2, &storage.Int64FieldData{Data: []int64{c}}) // normal segment
@@ -782,16 +781,8 @@ func TestChannelMeta_UpdatePKRange(t *testing.T) {
 
 		pk := newInt64PrimaryKey(c)
 
-		assert.Equal(t, true, segNew.pkStat.minPK.LE(pk))
-		assert.Equal(t, true, segNew.pkStat.maxPK.GE(pk))
-
-		assert.Equal(t, true, segNormal.pkStat.minPK.LE(pk))
-		assert.Equal(t, true, segNormal.pkStat.maxPK.GE(pk))
-
-		common.Endian.PutUint64(buf, uint64(c))
-		assert.True(t, segNew.pkStat.pkFilter.Test(buf))
-		assert.True(t, segNormal.pkStat.pkFilter.Test(buf))
-
+		assert.True(t, segNew.isPKExist(pk))
+		assert.True(t, segNormal.isPKExist(pk))
 	}
 
 }
@@ -908,50 +899,6 @@ func (s *ChannelMetaSuite) TestHasSegment() {
 			s.Assert().Equal(test.expected, got)
 		})
 	}
-}
-
-func (s *ChannelMetaSuite) TestGetSegmentStatslog() {
-	s.channel.updateSegmentPKRange(1, &storage.Int64FieldData{Data: []int64{1}})
-	bs, err := s.channel.getSegmentStatslog(1)
-	s.NoError(err)
-
-	segment, ok := s.getSegmentByID(1)
-	s.Require().True(ok)
-	err = segment.updatePKRange(&storage.Int64FieldData{Data: []int64{1}})
-	s.Require().NoError(err)
-	expected, err := segment.getSegmentStatslog(106, schemapb.DataType_Int64)
-	s.Require().NoError(err)
-	s.Equal(expected, bs)
-
-	s.channel.updateSegmentPKRange(2, &storage.Int64FieldData{Data: []int64{2}})
-	bs, err = s.channel.getSegmentStatslog(2)
-	s.NoError(err)
-
-	segment, ok = s.getSegmentByID(2)
-	s.Require().True(ok)
-	err = segment.updatePKRange(&storage.Int64FieldData{Data: []int64{2}})
-	s.Require().NoError(err)
-	expected, err = segment.getSegmentStatslog(106, schemapb.DataType_Int64)
-	s.Require().NoError(err)
-	s.Equal(expected, bs)
-
-	s.channel.updateSegmentPKRange(3, &storage.Int64FieldData{Data: []int64{3}})
-	bs, err = s.channel.getSegmentStatslog(3)
-	s.NoError(err)
-
-	segment, ok = s.getSegmentByID(3)
-	s.Require().True(ok)
-	err = segment.updatePKRange(&storage.Int64FieldData{Data: []int64{3}})
-	s.Require().NoError(err)
-	expected, err = segment.getSegmentStatslog(106, schemapb.DataType_Int64)
-	s.Require().NoError(err)
-	s.Equal(expected, bs)
-
-	_, err = s.channel.getSegmentStatslog(4)
-	s.Error(err)
-
-	_, err = s.channel.getSegmentStatslog(1)
-	s.ErrorIs(err, errSegmentStatsNotChanged)
 }
 
 func (s *ChannelMetaSuite) getSegmentByID(id UniqueID) (*Segment, bool) {

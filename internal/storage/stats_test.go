@@ -18,6 +18,7 @@ package storage
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/bits-and-blooms/bloom/v3"
@@ -32,7 +33,7 @@ func TestStatsWriter_Int64PrimaryKey(t *testing.T) {
 		Data: []int64{1, 2, 3, 4, 5, 6, 7, 8, 9},
 	}
 	sw := &StatsWriter{}
-	err := sw.generatePrimaryKeyStats(common.RowIDField, schemapb.DataType_Int64, data)
+	err := sw.GeneratePrimaryKeyStats(common.RowIDField, schemapb.DataType_Int64, data)
 	assert.NoError(t, err)
 	b := sw.GetBuffer()
 
@@ -57,8 +58,37 @@ func TestStatsWriter_Int64PrimaryKey(t *testing.T) {
 	msgs := &Int64FieldData{
 		Data: []int64{},
 	}
-	err = sw.generatePrimaryKeyStats(common.RowIDField, schemapb.DataType_Int64, msgs)
+	err = sw.GeneratePrimaryKeyStats(common.RowIDField, schemapb.DataType_Int64, msgs)
 	assert.Nil(t, err)
+}
+
+func TestStatsWriter_BF(t *testing.T) {
+	value := make([]int64, 1000000)
+	for i := 0; i < 1000000; i++ {
+		value[i] = int64(i)
+	}
+	data := &Int64FieldData{
+		Data: value,
+	}
+	fmt.Println(data.RowNum())
+	sw := &StatsWriter{}
+	err := sw.GeneratePrimaryKeyStats(common.RowIDField, schemapb.DataType_Int64, data)
+	assert.NoError(t, err)
+
+	stats := &PrimaryKeyStats{}
+	stats.UnmarshalJSON(sw.buffer)
+	buf := make([]byte, 8)
+
+	for i := 0; i < 1000000; i++ {
+		common.Endian.PutUint64(buf, uint64(i))
+		assert.True(t, stats.BF.Test(buf))
+	}
+
+	common.Endian.PutUint64(buf, uint64(1000001))
+	assert.False(t, stats.BF.Test(buf))
+
+	assert.True(t, stats.MinPk.EQ(NewInt64PrimaryKey(0)))
+	assert.True(t, stats.MaxPk.EQ(NewInt64PrimaryKey(999999)))
 }
 
 func TestStatsWriter_VarCharPrimaryKey(t *testing.T) {
@@ -66,7 +96,7 @@ func TestStatsWriter_VarCharPrimaryKey(t *testing.T) {
 		Data: []string{"bc", "ac", "abd", "cd", "milvus"},
 	}
 	sw := &StatsWriter{}
-	err := sw.generatePrimaryKeyStats(common.RowIDField, schemapb.DataType_VarChar, data)
+	err := sw.GeneratePrimaryKeyStats(common.RowIDField, schemapb.DataType_VarChar, data)
 	assert.NoError(t, err)
 	b := sw.GetBuffer()
 
@@ -85,7 +115,7 @@ func TestStatsWriter_VarCharPrimaryKey(t *testing.T) {
 	msgs := &Int64FieldData{
 		Data: []int64{},
 	}
-	err = sw.generatePrimaryKeyStats(common.RowIDField, schemapb.DataType_Int64, msgs)
+	err = sw.GeneratePrimaryKeyStats(common.RowIDField, schemapb.DataType_Int64, msgs)
 	assert.Nil(t, err)
 }
 
@@ -98,7 +128,7 @@ func TestStatsWriter_UpgradePrimaryKey(t *testing.T) {
 		FieldID: common.RowIDField,
 		Min:     1,
 		Max:     9,
-		BF:      bloom.NewWithEstimates(bloomFilterSize, maxBloomFalsePositive),
+		BF:      bloom.NewWithEstimates(100000, 0.05),
 	}
 
 	b := make([]byte, 8)

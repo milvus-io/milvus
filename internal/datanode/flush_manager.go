@@ -45,7 +45,7 @@ import (
 // flushManager defines a flush manager signature
 type flushManager interface {
 	// notify flush manager insert buffer data
-	flushBufferData(data *BufferData, segStats []byte, segmentID UniqueID, flushed bool, dropped bool, pos *internalpb.MsgPosition) error
+	flushBufferData(data *BufferData, segmentID UniqueID, flushed bool, dropped bool, pos *internalpb.MsgPosition) ([]*Blob, error)
 	// notify flush manager del buffer data
 	flushDelData(data *DelDataBuf, segmentID UniqueID, pos *internalpb.MsgPosition) error
 	// injectFlush injects compaction or other blocking task before flush sync
@@ -339,8 +339,7 @@ func (m *rendezvousFlushManager) handleDeleteTask(segmentID UniqueID, task flush
 
 // flushBufferData notifies flush manager insert buffer data.
 // This method will be retired on errors. Final errors will be propagated upstream and logged.
-func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segStats []byte, segmentID UniqueID, flushed bool,
-	dropped bool, pos *internalpb.MsgPosition) error {
+func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segmentID UniqueID, flushed bool, dropped bool, pos *internalpb.MsgPosition) ([]*Blob, error) {
 	tr := timerecord.NewTimeRecorder("flushDuration")
 	// empty flush
 	if data == nil || data.buffer == nil {
@@ -348,12 +347,12 @@ func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segStats []by
 		//	map[UniqueID]string{}, map[UniqueID]string{}, flushed, dropped, pos)
 		m.handleInsertTask(segmentID, &flushBufferInsertTask{}, map[UniqueID]*datapb.Binlog{}, map[UniqueID]*datapb.Binlog{},
 			flushed, dropped, pos)
-		return nil
+		return nil, nil
 	}
 
 	collID, partID, meta, err := m.getSegmentMeta(segmentID, pos)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	// get memory size of buffer data
 	fieldMemorySize := make(map[int64]int)
@@ -364,25 +363,24 @@ func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segStats []by
 	// encode data and convert output data
 	inCodec := storage.NewInsertCodec(meta)
 
-	binLogs, _, err := inCodec.Serialize(partID, segmentID, data.buffer)
+	binLogs, statsBinlogs, err := inCodec.Serialize(partID, segmentID, data.buffer)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	// binlogs + 1 statslog
-	start, _, err := m.allocIDBatch(uint32(len(binLogs) + 1))
+	// binlogs
+	start, _, err := m.allocIDBatch(uint32(len(binLogs) + len(statsBinlogs)))
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	field2Insert := make(map[UniqueID]*datapb.Binlog, len(binLogs))
 	kvs := make(map[string][]byte, len(binLogs))
-	field2Logidx := make(map[UniqueID]UniqueID, len(binLogs))
 	for idx, blob := range binLogs {
 		fieldID, err := strconv.ParseInt(blob.GetKey(), 10, 64)
 		if err != nil {
 			log.Error("Flush failed ... cannot parse string to fieldID ..", zap.Error(err))
-			return err
+			return nil, err
 		}
 
 		logidx := start + int64(idx)
@@ -400,29 +398,30 @@ func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segStats []by
 			LogPath:       key,
 			LogSize:       int64(fieldMemorySize[fieldID]),
 		}
-		field2Logidx[fieldID] = logidx
 	}
 
 	field2Stats := make(map[UniqueID]*datapb.Binlog)
 	// write stats binlog
-
-	// if segStats content is not nil, means segment stats changed
-	if len(segStats) > 0 {
-		pkID := getPKID(meta)
-		if pkID == common.InvalidFieldID {
-			return fmt.Errorf("failed to get pk id for segment %d", segmentID)
+	for idx, blob := range statsBinlogs {
+		fieldID, err := strconv.ParseInt(blob.GetKey(), 10, 64)
+		if err != nil {
+			log.Error("Flush failed ... cannot parse string to fieldID ..", zap.Error(err))
+			return nil, err
 		}
 
-		logidx := start + int64(len(binLogs))
-		k := metautil.JoinIDPath(collID, partID, segmentID, pkID, logidx)
+		logidx := start + UniqueID(len(binLogs)+idx)
+
+		// no error raise if alloc=false
+		k := metautil.JoinIDPath(collID, partID, segmentID, fieldID, logidx)
+
 		key := path.Join(m.ChunkManager.RootPath(), common.SegmentStatslogPath, k)
-		kvs[key] = segStats
-		field2Stats[pkID] = &datapb.Binlog{
+		kvs[key] = blob.Value
+		field2Stats[fieldID] = &datapb.Binlog{
 			EntriesNum:    0,
 			TimestampFrom: 0, //TODO
 			TimestampTo:   0, //TODO,
 			LogPath:       key,
-			LogSize:       int64(len(segStats)),
+			LogSize:       int64(len(blob.Value)),
 		}
 	}
 
@@ -432,7 +431,7 @@ func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segStats []by
 	}, field2Insert, field2Stats, flushed, dropped, pos)
 
 	metrics.DataNodeEncodeBufferLatency.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID())).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return nil
+	return statsBinlogs, nil
 }
 
 // notify flush manager del buffer data

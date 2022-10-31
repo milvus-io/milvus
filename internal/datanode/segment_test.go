@@ -17,26 +17,16 @@
 package datanode
 
 import (
-	"encoding/json"
 	"math/rand"
 	"testing"
-	"time"
 
-	"github.com/bits-and-blooms/bloom/v3"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-
-	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestSegment_UpdatePKRange(t *testing.T) {
-	seg := &Segment{
-		pkStat: pkStatistics{
-			pkFilter: bloom.NewWithEstimates(100000, 0.005),
-		},
-	}
+	seg := &Segment{}
 
 	cases := make([]int64, 0, 100)
 	for i := 0; i < 100; i++ {
@@ -50,57 +40,19 @@ func TestSegment_UpdatePKRange(t *testing.T) {
 
 		pk := newInt64PrimaryKey(c)
 
-		assert.Equal(t, true, seg.pkStat.minPK.LE(pk))
-		assert.Equal(t, true, seg.pkStat.maxPK.GE(pk))
+		assert.Equal(t, true, seg.currentStat.MinPK.LE(pk))
+		assert.Equal(t, true, seg.currentStat.MaxPK.GE(pk))
 
 		common.Endian.PutUint64(buf, uint64(c))
-		assert.True(t, seg.pkStat.pkFilter.Test(buf))
+		assert.True(t, seg.currentStat.PkFilter.Test(buf))
+
+		assert.True(t, seg.isPKExist(pk))
 	}
 }
 
-func TestSegment_getSegmentStatslog(t *testing.T) {
-	rand.Seed(time.Now().UnixNano())
+func TestEmptySegment(t *testing.T) {
+	seg := &Segment{}
 
-	cases := make([][]int64, 0, 100)
-	for i := 0; i < 100; i++ {
-		tc := make([]int64, 0, 10)
-		for j := 0; j < 100; j++ {
-			tc = append(tc, rand.Int63())
-		}
-		cases = append(cases, tc)
-	}
-	buf := make([]byte, 8)
-	for _, tc := range cases {
-		seg := &Segment{
-			pkStat: pkStatistics{
-				pkFilter: bloom.NewWithEstimates(100000, 0.005),
-			}}
-
-		seg.updatePKRange(&storage.Int64FieldData{
-			Data: tc,
-		})
-
-		statBytes, err := seg.getSegmentStatslog(1, schemapb.DataType_Int64)
-		assert.NoError(t, err)
-
-		pks := storage.PrimaryKeyStats{}
-		err = json.Unmarshal(statBytes, &pks)
-		require.NoError(t, err)
-
-		assert.Equal(t, int64(1), pks.FieldID)
-		assert.Equal(t, int64(schemapb.DataType_Int64), pks.PkType)
-
-		for _, v := range tc {
-			pk := newInt64PrimaryKey(v)
-			assert.True(t, pks.MinPk.LE(pk))
-			assert.True(t, pks.MaxPk.GE(pk))
-
-			common.Endian.PutUint64(buf, uint64(v))
-			assert.True(t, seg.pkStat.pkFilter.Test(buf))
-		}
-	}
-
-	pks := &storage.PrimaryKeyStats{}
-	_, err := json.Marshal(pks)
-	assert.NoError(t, err)
+	pk := newInt64PrimaryKey(1000)
+	assert.False(t, seg.isPKExist(pk))
 }

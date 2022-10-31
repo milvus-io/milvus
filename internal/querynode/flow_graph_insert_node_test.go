@@ -25,11 +25,13 @@ import (
 	"github.com/bits-and-blooms/bloom/v3"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
+	"go.uber.org/atomic"
 )
 
 func getInsertNode() (*insertNode, error) {
@@ -251,10 +253,8 @@ func TestFlowGraphInsertNode_operate(t *testing.T) {
 		insertNode.Operate(msg)
 		s, err := insertNode.metaReplica.getSegmentByID(defaultSegmentID, segmentTypeGrowing)
 		assert.Nil(t, err)
-		buf := make([]byte, 8)
 		for i := 0; i < defaultMsgLength; i++ {
-			common.Endian.PutUint64(buf, uint64(i))
-			assert.True(t, s.pkFilter.Test(buf))
+			assert.True(t, s.isPKExist(newInt64PrimaryKey(int64(i))))
 		}
 	})
 
@@ -360,7 +360,7 @@ func TestFlowGraphInsertNode_operate(t *testing.T) {
 	})
 }
 
-func TestFilterSegmentsByPKs(t *testing.T) {
+func TestFilterSealedSegmentsByPKs(t *testing.T) {
 	t.Run("filter int64 pks", func(t *testing.T) {
 		buf := make([]byte, 8)
 		filter := bloom.NewWithEstimates(1000000, 0.01)
@@ -368,10 +368,17 @@ func TestFilterSegmentsByPKs(t *testing.T) {
 			common.Endian.PutUint64(buf, uint64(i))
 			filter.Add(buf)
 		}
-		segment := &Segment{
-			segmentID: 1,
-			pkFilter:  filter,
+		stat := &storage.PkStatistics{
+			PkFilter: filter,
+			MinPK:    storage.NewInt64PrimaryKey(0),
+			MaxPK:    storage.NewInt64PrimaryKey(2),
 		}
+		segment := &Segment{
+			segmentID:    1,
+			segmentType:  atomic.NewInt32(0),
+			historyStats: []*storage.PkStatistics{stat},
+		}
+		segment.setType(commonpb.SegmentState_Sealed)
 
 		pk0 := newInt64PrimaryKey(0)
 		pk1 := newInt64PrimaryKey(1)
@@ -398,11 +405,94 @@ func TestFilterSegmentsByPKs(t *testing.T) {
 		for i := 0; i < 3; i++ {
 			filter.AddString(fmt.Sprintf("test%d", i))
 		}
-		segment := &Segment{
-			segmentID: 1,
-			pkFilter:  filter,
+		stat := &storage.PkStatistics{
+			PkFilter: filter,
+			MinPK:    storage.NewVarCharPrimaryKey("test0"),
+			MaxPK:    storage.NewVarCharPrimaryKey("test2"),
 		}
+		segment := &Segment{
+			segmentID:    1,
+			segmentType:  atomic.NewInt32(0),
+			historyStats: []*storage.PkStatistics{stat},
+		}
+		segment.setType(commonpb.SegmentState_Sealed)
+		pk0 := newVarCharPrimaryKey("test0")
+		pk1 := newVarCharPrimaryKey("test1")
+		pk2 := newVarCharPrimaryKey("test2")
+		pk3 := newVarCharPrimaryKey("test3")
+		pk4 := newVarCharPrimaryKey("test4")
 
+		timestamps := []uint64{1, 1, 1, 1, 1}
+		pks, _, err := filterSegmentsByPKs([]primaryKey{pk0, pk1, pk2, pk3, pk4}, timestamps, segment)
+		assert.Nil(t, err)
+		assert.Equal(t, len(pks), 3)
+
+		pks, _, err = filterSegmentsByPKs([]primaryKey{}, timestamps, segment)
+		assert.Nil(t, err)
+		assert.Equal(t, len(pks), 0)
+		_, _, err = filterSegmentsByPKs(nil, timestamps, segment)
+		assert.NoError(t, err)
+		_, _, err = filterSegmentsByPKs([]primaryKey{pk0, pk1, pk2, pk3, pk4}, timestamps, nil)
+		assert.NotNil(t, err)
+	})
+}
+
+func TestFilterGrowingSegmentsByPKs(t *testing.T) {
+	t.Run("filter int64 pks", func(t *testing.T) {
+		buf := make([]byte, 8)
+		filter := bloom.NewWithEstimates(1000000, 0.01)
+		for i := 0; i < 3; i++ {
+			common.Endian.PutUint64(buf, uint64(i))
+			filter.Add(buf)
+		}
+		stat := &storage.PkStatistics{
+			PkFilter: filter,
+			MinPK:    storage.NewInt64PrimaryKey(0),
+			MaxPK:    storage.NewInt64PrimaryKey(2),
+		}
+		segment := &Segment{
+			segmentID:    1,
+			segmentType:  atomic.NewInt32(0),
+			historyStats: []*storage.PkStatistics{stat},
+		}
+		segment.setType(commonpb.SegmentState_Growing)
+
+		pk0 := newInt64PrimaryKey(0)
+		pk1 := newInt64PrimaryKey(1)
+		pk2 := newInt64PrimaryKey(2)
+		pk3 := newInt64PrimaryKey(3)
+		pk4 := newInt64PrimaryKey(4)
+
+		timestamps := []uint64{1, 1, 1, 1, 1}
+		pks, _, err := filterSegmentsByPKs([]primaryKey{pk0, pk1, pk2, pk3, pk4}, timestamps, segment)
+		assert.Nil(t, err)
+		assert.Equal(t, len(pks), 3)
+
+		pks, _, err = filterSegmentsByPKs([]primaryKey{}, timestamps, segment)
+		assert.Nil(t, err)
+		assert.Equal(t, len(pks), 0)
+		_, _, err = filterSegmentsByPKs(nil, timestamps, segment)
+		assert.NoError(t, err)
+		_, _, err = filterSegmentsByPKs([]primaryKey{pk0, pk1, pk2, pk3, pk4}, timestamps, nil)
+		assert.NotNil(t, err)
+	})
+
+	t.Run("filter varChar pks", func(t *testing.T) {
+		filter := bloom.NewWithEstimates(1000000, 0.01)
+		for i := 0; i < 3; i++ {
+			filter.AddString(fmt.Sprintf("test%d", i))
+		}
+		stat := &storage.PkStatistics{
+			PkFilter: filter,
+			MinPK:    storage.NewVarCharPrimaryKey("test0"),
+			MaxPK:    storage.NewVarCharPrimaryKey("test2"),
+		}
+		segment := &Segment{
+			segmentID:    1,
+			segmentType:  atomic.NewInt32(0),
+			historyStats: []*storage.PkStatistics{stat},
+		}
+		segment.setType(commonpb.SegmentState_Growing)
 		pk0 := newVarCharPrimaryKey("test0")
 		pk1 := newVarCharPrimaryKey("test1")
 		pk2 := newVarCharPrimaryKey("test2")
