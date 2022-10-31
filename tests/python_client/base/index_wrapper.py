@@ -6,7 +6,7 @@ from check.func_check import ResponseChecker
 from utils.api_request import api_request
 
 TIMEOUT = 20
-INDEX_NAME = "_default_idx"
+INDEX_NAME = ""
 
 
 class ApiIndexWrapper:
