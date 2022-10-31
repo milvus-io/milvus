@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 
@@ -109,7 +110,7 @@ func TestGroupShardLeadersWithSameQueryNode(t *testing.T) {
 
 	nexts["c0"] = 3
 	_, _, err = groupShardleadersWithSameQueryNode(ctx, shard2leaders, nexts, errSet, mgr)
-	assert.Equal(t, err, errSet["c0"])
+	assert.True(t, strings.Contains(err.Error(), errSet["c0"].Error()))
 
 	nexts["c0"] = 2
 	nexts["c1"] = 3
@@ -155,7 +156,7 @@ func TestMergeRoundRobinPolicy(t *testing.T) {
 	querier.failset[2] = mockerr
 	querier.failset[3] = mockerr
 	err = mergeRoundRobinPolicy(ctx, mgr, querier.query, shard2leaders)
-	assert.Equal(t, err, mockerr)
+	assert.True(t, strings.Contains(err.Error(), mockerr.Error()))
 }
 
 func mockQueryNodeCreator(ctx context.Context, address string) (types.QueryNode, error) {

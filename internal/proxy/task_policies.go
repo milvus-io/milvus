@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -31,6 +32,19 @@ func updateShardsWithRoundRobin(shardsLeaders map[string][]nodeInfo) {
 	}
 }
 
+// mergeErrSet merges all errors in ErrSet
+func mergeErrSet(errSet map[string]error) error {
+	var builder strings.Builder
+	for channel, err := range errSet {
+		if err == nil {
+			continue
+		}
+
+		builder.WriteString(fmt.Sprintf("Channel: %s returns err: %s", channel, err.Error()))
+	}
+	return errors.New(builder.String())
+}
+
 // group dml shard leader with same nodeID
 func groupShardleadersWithSameQueryNode(
 	ctx context.Context,
@@ -43,8 +57,8 @@ func groupShardleadersWithSameQueryNode(
 			log.Ctx(ctx).Warn("no shard leaders were available",
 				zap.String("channel", dml),
 				zap.String("leaders", fmt.Sprintf("%v", shard2leaders[dml])))
-			if e, ok := errSet[dml]; ok {
-				return nil, nil, e // return last error recorded
+			if _, ok := errSet[dml]; ok {
+				return nil, nil, mergeErrSet(errSet) // return merged last error recorded
 			}
 			return nil, nil, fmt.Errorf("no available shard leader")
 		}

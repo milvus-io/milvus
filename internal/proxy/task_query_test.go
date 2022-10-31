@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -183,7 +184,8 @@ func TestQueryTask_all(t *testing.T) {
 			ErrorCode: commonpb.ErrorCode_NotShardLeader,
 		},
 	}
-	assert.Equal(t, task.Execute(ctx), errInvalidShardLeaders)
+	err = task.Execute(ctx)
+	assert.True(t, strings.Contains(err.Error(), errInvalidShardLeaders.Error()))
 
 	qn.withQueryResult = &internalpb.RetrieveResults{
 		Status: &commonpb.Status{
