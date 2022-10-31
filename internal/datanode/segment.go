@@ -17,6 +17,7 @@
 package datanode
 
 import (
+	"sync"
 	"sync/atomic"
 
 	"github.com/bits-and-blooms/bloom/v3"
@@ -36,6 +37,7 @@ type Segment struct {
 	memorySize  int64
 	compactedTo UniqueID
 
+	statLock     sync.Mutex
 	currentStat  *storage.PkStatistics
 	historyStats []*storage.PkStatistics
 
@@ -70,6 +72,8 @@ func (s *Segment) setType(t datapb.SegmentType) {
 }
 
 func (s *Segment) updatePKRange(ids storage.FieldData) {
+	s.statLock.Lock()
+	defer s.statLock.Unlock()
 	s.InitCurrentStat()
 	err := s.currentStat.UpdatePKRange(ids)
 	if err != nil {
@@ -87,6 +91,8 @@ func (s *Segment) InitCurrentStat() {
 
 // check if PK exists is current
 func (s *Segment) isPKExist(pk primaryKey) bool {
+	s.statLock.Lock()
+	defer s.statLock.Unlock()
 	if s.currentStat != nil && s.currentStat.PkExist(pk) {
 		return true
 	}

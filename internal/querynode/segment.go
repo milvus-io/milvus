@@ -95,6 +95,7 @@ type Segment struct {
 
 	indexedFieldInfos *typeutil.ConcurrentMap[UniqueID, *IndexedFieldInfo]
 
+	statLock sync.Mutex
 	// only used by sealed segments
 	currentStat  *storage.PkStatistics
 	historyStats []*storage.PkStatistics
@@ -618,6 +619,8 @@ func (s *Segment) fillIndexedFieldsData(ctx context.Context, collectionID Unique
 }
 
 func (s *Segment) updateBloomFilter(pks []primaryKey) {
+	s.statLock.Lock()
+	defer s.statLock.Unlock()
 	s.InitCurrentStat()
 	buf := make([]byte, 8)
 	for _, pk := range pks {
@@ -647,6 +650,8 @@ func (s *Segment) InitCurrentStat() {
 
 // check if PK exists is current
 func (s *Segment) isPKExist(pk primaryKey) bool {
+	s.statLock.Lock()
+	defer s.statLock.Unlock()
 	if s.currentStat != nil && s.currentStat.PkExist(pk) {
 		return true
 	}
