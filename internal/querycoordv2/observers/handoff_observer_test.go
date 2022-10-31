@@ -389,19 +389,12 @@ func (suite *HandoffObserverTestSuit) TestLoadHandoffEventFromStore() {
 	})
 
 	// fake handoff event from start
-	flushingSegment := &querypb.SegmentInfo{
-		SegmentID:    3,
-		CollectionID: suite.collection,
-		PartitionID:  suite.partition,
-		SegmentState: commonpb.SegmentState_Sealed,
-		IndexInfos:   []*querypb.FieldIndexInfo{{IndexID: defaultIndexID}},
-	}
 	compactSegment1 := &querypb.SegmentInfo{
 		SegmentID:           4,
 		CollectionID:        suite.collection,
 		PartitionID:         suite.partition,
 		SegmentState:        commonpb.SegmentState_Sealed,
-		CompactionFrom:      []int64{3},
+		CompactionFrom:      []int64{1},
 		CreatedByCompaction: true,
 		IndexInfos:          []*querypb.FieldIndexInfo{{IndexID: defaultIndexID}},
 	}
@@ -410,12 +403,11 @@ func (suite *HandoffObserverTestSuit) TestLoadHandoffEventFromStore() {
 		CollectionID:        suite.collection,
 		PartitionID:         suite.partition,
 		SegmentState:        commonpb.SegmentState_Sealed,
-		CompactionFrom:      []int64{4},
+		CompactionFrom:      []int64{3},
 		CreatedByCompaction: true,
 		IndexInfos:          []*querypb.FieldIndexInfo{{IndexID: defaultIndexID}},
 	}
 
-	suite.produceHandOffEvent(flushingSegment)
 	suite.produceHandOffEvent(compactSegment1)
 	suite.produceHandOffEvent(compactSegment2)
 
@@ -423,47 +415,12 @@ func (suite *HandoffObserverTestSuit) TestLoadHandoffEventFromStore() {
 	err := suite.observer.Start(context.Background())
 	suite.NoError(err)
 
-	// fake load CompactTo Segment
-	suite.dist.LeaderViewManager.Update(1, &meta.LeaderView{
-		ID:              1,
-		CollectionID:    suite.collection,
-		Channel:         suite.channel.ChannelName,
-		Segments:        map[int64]*querypb.SegmentDist{1: {NodeID: 1, Version: 0}, 2: {NodeID: 2, Version: 0}, 3: {NodeID: 3, Version: 0}, 4: {NodeID: 2, Version: 0}, 5: {NodeID: 3, Version: 0}},
-		GrowingSegments: typeutil.NewUniqueSet(3),
-	})
-
 	suite.Eventually(func() bool {
-		return suite.target.ContainSegment(1) && suite.target.ContainSegment(2) && suite.target.ContainSegment(5)
+		return suite.target.ContainSegment(1) && suite.target.ContainSegment(2)
 	}, 3*time.Second, 1*time.Second)
 
 	suite.Eventually(func() bool {
-		return !suite.target.ContainSegment(3) && !suite.target.ContainSegment(4)
-	}, 3*time.Second, 1*time.Second)
-
-	// fake release CompactFrom Segment
-	suite.dist.LeaderViewManager.Update(1, &meta.LeaderView{
-		ID:           1,
-		CollectionID: suite.collection,
-		Channel:      suite.channel.ChannelName,
-		Segments:     map[int64]*querypb.SegmentDist{1: {NodeID: 1, Version: 0}, 2: {NodeID: 2, Version: 0}, 5: {NodeID: 3, Version: 0}},
-	})
-
-	suite.Eventually(func() bool {
-		return suite.target.ContainSegment(1) && suite.target.ContainSegment(2) && suite.target.ContainSegment(5)
-	}, 3*time.Second, 1*time.Second)
-
-	suite.Eventually(func() bool {
-		return !suite.target.ContainSegment(3) && !suite.target.ContainSegment(4)
-	}, 3*time.Second, 1*time.Second)
-
-	suite.Eventually(func() bool {
-		return len(suite.dist.LeaderViewManager.GetGrowingSegmentDist(3)) == 0
-	}, 3*time.Second, 1*time.Second)
-
-	suite.Eventually(func() bool {
-		key := fmt.Sprintf("%s/%d/%d/%d", util.HandoffSegmentPrefix, suite.collection, suite.partition, 3)
-		value, err := suite.kv.Load(key)
-		return len(value) == 0 && err != nil
+		return !suite.target.ContainSegment(4) && !suite.target.ContainSegment(5)
 	}, 3*time.Second, 1*time.Second)
 }
 
