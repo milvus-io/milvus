@@ -31,7 +31,7 @@ import (
 type Limit float64
 
 // Inf is the infinite rate limit; it allows all events.
-const Inf = Limit(math.MaxInt)
+const Inf = Limit(math.MaxFloat64)
 
 // A Limiter controls how frequently events are allowed to happen.
 // It implements a "token bucket" of size b, initially full and refilled
@@ -47,14 +47,14 @@ const Inf = Limit(math.MaxInt)
 type Limiter struct {
 	mu     sync.Mutex
 	limit  Limit
-	burst  int
+	burst  float64
 	tokens float64
 	// last is the last time the limiter's tokens field was updated
 	last time.Time
 }
 
 // NewLimiter returns a new Limiter that allows events up to rate r.
-func NewLimiter(r Limit, b int) *Limiter {
+func NewLimiter(r Limit, b float64) *Limiter {
 	return &Limiter{
 		limit: r,
 		burst: b,
@@ -77,9 +77,9 @@ func (lim *Limiter) AllowN(now time.Time, n int) bool {
 		return true
 	} else if lim.limit == 0 {
 		var ok bool
-		if lim.burst >= n {
+		if lim.burst >= float64(n) {
 			ok = true
-			lim.burst -= n
+			lim.burst -= float64(n)
 		}
 		return ok
 	}
@@ -113,11 +113,11 @@ func (lim *Limiter) SetLimit(newLimit Limit) {
 	lim.last = now
 	lim.tokens = tokens
 	lim.limit = newLimit
-	if newLimit >= math.MaxInt {
+	if newLimit >= math.MaxFloat64 {
 		lim.burst = math.MaxInt
 	} else {
 		// use rate as burst, because Limiter is with punishment mechanism, burst is insignificant.
-		lim.burst = int(newLimit)
+		lim.burst = float64(newLimit)
 	}
 }
 
@@ -133,7 +133,7 @@ func (lim *Limiter) advance(now time.Time) (newNow time.Time, newLast time.Time,
 	elapsed := now.Sub(last)
 	delta := lim.limit.tokensFromDuration(elapsed)
 	tokens := lim.tokens + delta
-	if burst := float64(lim.burst); tokens > burst {
+	if burst := lim.burst; tokens > burst {
 		tokens = burst
 	}
 	return now, last, tokens
