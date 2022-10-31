@@ -39,6 +39,14 @@ datatype_sizeof(DataType data_type, int dim = 1) {
             return sizeof(int32_t);
         case DataType::INT64:
             return sizeof(int64_t);
+        case DataType::UINT8:
+            return sizeof(uint8_t);
+        case DataType::UINT16:
+            return sizeof(uint16_t);
+        case DataType::UINT32:
+            return sizeof(uint32_t);
+        case DataType::UINT64:
+            return sizeof(uint64_t);
         case DataType::FLOAT:
             return sizeof(float);
         case DataType::DOUBLE:
@@ -69,6 +77,14 @@ datatype_name(DataType data_type) {
             return "int32_t";
         case DataType::INT64:
             return "int64_t";
+        case DataType::UINT8:
+            return "uint8_t";
+        case DataType::UINT16:
+            return "uint16_t";
+        case DataType::UINT32:
+            return "uint32_t";
+        case DataType::UINT64:
+            return "uint64_t";
         case DataType::FLOAT:
             return "float";
         case DataType::DOUBLE:
@@ -110,6 +126,10 @@ datatype_is_integer(DataType datatype) {
         case DataType::INT16:
         case DataType::INT32:
         case DataType::INT64:
+        case DataType::UINT8:
+        case DataType::UINT16:
+        case DataType::UINT32:
+        case DataType::UINT64:
             return true;
         default:
             return false;

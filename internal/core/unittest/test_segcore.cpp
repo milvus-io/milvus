@@ -88,12 +88,11 @@ TEST(InsertRecordTest, growing_int64_t) {
     auto i64_fid = schema->AddDebugField("age", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
     auto record = milvus::segcore::InsertRecord<false>(*schema, int64_t(32));
-    const int N=100000;
+    const int N = 100000;
 
-    for (int i = 1; i <= N; i++)
-        record.insert_pk(PkType(int64_t(i)), int64_t(i));
+    for (int i = 1; i <= N; i++) record.insert_pk(PkType(int64_t(i)), int64_t(i));
 
-    for (int i = 1; i <= N; i++){
+    for (int i = 1; i <= N; i++) {
         std::vector<SegOffset> offset = record.search_pk(PkType(int64_t(i)), int64_t(N + 1));
         ASSERT_EQ(offset[0].get(), int64_t(i));
     }
@@ -108,10 +107,9 @@ TEST(InsertRecordTest, growing_string) {
     auto record = milvus::segcore::InsertRecord<false>(*schema, int64_t(32));
     const int N = 100000;
 
-    for (int i = 1; i <= N; i++)
-        record.insert_pk(PkType(std::to_string(i)), int64_t(i));
+    for (int i = 1; i <= N; i++) record.insert_pk(PkType(std::to_string(i)), int64_t(i));
 
-    for (int i = 1; i <= N; i++){
+    for (int i = 1; i <= N; i++) {
         std::vector<SegOffset> offset = record.search_pk(std::to_string(i), int64_t(N + 1));
         ASSERT_EQ(offset[0].get(), int64_t(i));
     }
@@ -126,11 +124,10 @@ TEST(InsertRecordTest, sealed_int64_t) {
     auto record = milvus::segcore::InsertRecord<true>(*schema, int64_t(32));
     const int N = 100000;
 
-    for (int i = N; i >= 1; i--)
-        record.insert_pk(PkType(int64_t(i)), int64_t(i));
+    for (int i = N; i >= 1; i--) record.insert_pk(PkType(int64_t(i)), int64_t(i));
     record.seal_pks();
 
-    for (int i = 1;i <= N; i++){
+    for (int i = 1; i <= N; i++) {
         std::vector<SegOffset> offset = record.search_pk(PkType(int64_t(i)), int64_t(N + 1));
         ASSERT_EQ(offset[0].get(), int64_t(i));
     }
@@ -145,12 +142,11 @@ TEST(InsertRecordTest, sealed_string) {
     auto record = milvus::segcore::InsertRecord<true>(*schema, int64_t(32));
     const int N = 100000;
 
-    for (int i = 1; i <= N; i++)
-        record.insert_pk(PkType(std::to_string(i)), int64_t(i));
+    for (int i = 1; i <= N; i++) record.insert_pk(PkType(std::to_string(i)), int64_t(i));
 
     record.seal_pks();
 
-    for (int i = 1; i <= N; i++){
+    for (int i = 1; i <= N; i++) {
         std::vector<SegOffset> offset = record.search_pk(std::to_string(i), int64_t(N + 1));
         ASSERT_EQ(offset[0].get(), int64_t(i));
     }

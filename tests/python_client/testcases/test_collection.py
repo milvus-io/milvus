@@ -357,7 +357,7 @@ class TestCollectionParams(TestcaseBase):
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("dtype", [6, [[]], {}, (), "", "a"])
+    @pytest.mark.parametrize("dtype", [12, [[]], {}, (), "", "a"])
     def test_collection_invalid_field_type(self, dtype):
         """
         target: test collection with invalid field type

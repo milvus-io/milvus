@@ -161,6 +161,10 @@ func TestInsertTask_CheckAligned(t *testing.T) {
 	int16FieldSchema := &schemapb.FieldSchema{DataType: schemapb.DataType_Int16}
 	int32FieldSchema := &schemapb.FieldSchema{DataType: schemapb.DataType_Int32}
 	int64FieldSchema := &schemapb.FieldSchema{DataType: schemapb.DataType_Int64}
+	uint8FieldSchema := &schemapb.FieldSchema{DataType: schemapb.DataType_UInt8}
+	uint16FieldSchema := &schemapb.FieldSchema{DataType: schemapb.DataType_UInt16}
+	uint32FieldSchema := &schemapb.FieldSchema{DataType: schemapb.DataType_UInt32}
+	uint64FieldSchema := &schemapb.FieldSchema{DataType: schemapb.DataType_UInt64}
 	floatFieldSchema := &schemapb.FieldSchema{DataType: schemapb.DataType_Float}
 	doubleFieldSchema := &schemapb.FieldSchema{DataType: schemapb.DataType_Double}
 	floatVectorFieldSchema := &schemapb.FieldSchema{DataType: schemapb.DataType_FloatVector}
@@ -190,6 +194,12 @@ func TestInsertTask_CheckAligned(t *testing.T) {
 				int16FieldSchema,
 				int32FieldSchema,
 				int64FieldSchema,
+				//
+				uint8FieldSchema,
+				uint16FieldSchema,
+				uint32FieldSchema,
+				uint64FieldSchema,
+
 				floatFieldSchema,
 				doubleFieldSchema,
 				floatVectorFieldSchema,
@@ -207,6 +217,12 @@ func TestInsertTask_CheckAligned(t *testing.T) {
 		newScalarFieldData(int16FieldSchema, "Int16", numRows),
 		newScalarFieldData(int32FieldSchema, "Int32", numRows),
 		newScalarFieldData(int64FieldSchema, "Int64", numRows),
+		//
+		newScalarFieldData(uint8FieldSchema, "UInt8", numRows),
+		newScalarFieldData(uint16FieldSchema, "UInt16", numRows),
+		newScalarFieldData(uint32FieldSchema, "UInt32", numRows),
+		newScalarFieldData(uint64FieldSchema, "UInt64", numRows),
+
 		newScalarFieldData(floatFieldSchema, "Float", numRows),
 		newScalarFieldData(doubleFieldSchema, "Double", numRows),
 		newFloatVectorFieldData("FloatVector", numRows, dim),
@@ -280,6 +296,59 @@ func TestInsertTask_CheckAligned(t *testing.T) {
 	case2.FieldsData[4] = newScalarFieldData(int64FieldSchema, "Int64", numRows)
 	err = case2.CheckAligned()
 	assert.NoError(t, err)
+
+	// less uint8 data
+	case2.FieldsData[1] = newScalarFieldData(uint8FieldSchema, "UInt8", numRows/2)
+	err = case2.CheckAligned()
+	assert.Error(t, err)
+	// more uint8 data
+	case2.FieldsData[1] = newScalarFieldData(uint8FieldSchema, "UInt8", numRows*2)
+	err = case2.CheckAligned()
+	assert.Error(t, err)
+	// revert
+	case2.FieldsData[1] = newScalarFieldData(uint8FieldSchema, "UInt8", numRows)
+	err = case2.CheckAligned()
+	assert.NoError(t, err)
+
+	// less uint16 data
+	case2.FieldsData[2] = newScalarFieldData(uint16FieldSchema, "UInt16", numRows/2)
+	err = case2.CheckAligned()
+	assert.Error(t, err)
+	// more uint16 data
+	case2.FieldsData[2] = newScalarFieldData(uint16FieldSchema, "UInt16", numRows*2)
+	err = case2.CheckAligned()
+	assert.Error(t, err)
+	// revert
+	case2.FieldsData[2] = newScalarFieldData(uint16FieldSchema, "UInt16", numRows)
+	err = case2.CheckAligned()
+	assert.NoError(t, err)
+
+	// less uint32 data
+	case2.FieldsData[3] = newScalarFieldData(uint32FieldSchema, "UInt32", numRows/2)
+	err = case2.CheckAligned()
+	assert.Error(t, err)
+	// more uint32 data
+	case2.FieldsData[3] = newScalarFieldData(uint32FieldSchema, "UInt32", numRows*2)
+	err = case2.CheckAligned()
+	assert.Error(t, err)
+	// revert
+	case2.FieldsData[3] = newScalarFieldData(uint32FieldSchema, "UInt32", numRows)
+	err = case2.CheckAligned()
+	assert.NoError(t, err)
+
+	// less uint64 data
+	case2.FieldsData[4] = newScalarFieldData(uint64FieldSchema, "UInt64", numRows/2)
+	err = case2.CheckAligned()
+	assert.Error(t, err)
+	// more uint64 data
+	case2.FieldsData[4] = newScalarFieldData(uint64FieldSchema, "UInt64", numRows*2)
+	err = case2.CheckAligned()
+	assert.Error(t, err)
+	// revert
+	case2.FieldsData[4] = newScalarFieldData(uint64FieldSchema, "UInt64", numRows)
+	err = case2.CheckAligned()
+	assert.NoError(t, err)
+	//
 
 	// less float data
 	case2.FieldsData[5] = newScalarFieldData(floatFieldSchema, "Float", numRows/2)

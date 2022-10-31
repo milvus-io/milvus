@@ -91,8 +91,22 @@ ScalarIndex<int8_t>::BuildWithRawData(size_t n, const void* values, const Config
 
 template <>
 inline void
+ScalarIndex<uint8_t>::BuildWithRawData(size_t n, const void* values, const Config& config) {
+    auto data = reinterpret_cast<uint8_t*>(const_cast<void*>(values));
+    Build(n, data);
+}
+
+template <>
+inline void
 ScalarIndex<int16_t>::BuildWithRawData(size_t n, const void* values, const Config& config) {
     auto data = reinterpret_cast<int16_t*>(const_cast<void*>(values));
+    Build(n, data);
+}
+
+template <>
+inline void
+ScalarIndex<uint16_t>::BuildWithRawData(size_t n, const void* values, const Config& config) {
+    auto data = reinterpret_cast<uint16_t*>(const_cast<void*>(values));
     Build(n, data);
 }
 
@@ -105,8 +119,22 @@ ScalarIndex<int32_t>::BuildWithRawData(size_t n, const void* values, const Confi
 
 template <>
 inline void
+ScalarIndex<uint32_t>::BuildWithRawData(size_t n, const void* values, const Config& config) {
+    auto data = reinterpret_cast<uint32_t*>(const_cast<void*>(values));
+    Build(n, data);
+}
+
+template <>
+inline void
 ScalarIndex<int64_t>::BuildWithRawData(size_t n, const void* values, const Config& config) {
     auto data = reinterpret_cast<int64_t*>(const_cast<void*>(values));
+    Build(n, data);
+}
+
+template <>
+inline void
+ScalarIndex<uint64_t>::BuildWithRawData(size_t n, const void* values, const Config& config) {
+    auto data = reinterpret_cast<uint64_t*>(const_cast<void*>(values));
     Build(n, data);
 }
 

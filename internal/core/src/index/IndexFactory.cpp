@@ -51,6 +51,14 @@ IndexFactory::CreateScalarIndex(const CreateIndexInfo& create_index_info) {
             return CreateScalarIndex<int32_t>(index_type);
         case DataType::INT64:
             return CreateScalarIndex<int64_t>(index_type);
+        case DataType::UINT8:
+            return CreateScalarIndex<uint8_t>(index_type);
+        case DataType::UINT16:
+            return CreateScalarIndex<uint16_t>(index_type);
+        case DataType::UINT32:
+            return CreateScalarIndex<uint32_t>(index_type);
+        case DataType::UINT64:
+            return CreateScalarIndex<uint64_t>(index_type);
         case DataType::FLOAT:
             return CreateScalarIndex<float>(index_type);
         case DataType::DOUBLE:

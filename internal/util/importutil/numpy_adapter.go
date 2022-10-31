@@ -216,6 +216,36 @@ func (n *NumpyAdapter) ReadInt8(size int) ([]int8, error) {
 	return data, nil
 }
 
+func (n *NumpyAdapter) ReadUint16(size int) ([]uint16, error) {
+	if n.npyReader == nil {
+		return nil, errors.New("reader is not initialized")
+	}
+
+	// incorrect type
+	switch n.npyReader.Header.Descr.Type {
+	case "u2", "<u2", "|u2", ">u2", "uint16":
+	default:
+		return nil, errors.New("numpy data is not uint16 type")
+	}
+
+	// avoid read overflow
+	readSize := n.checkSize(size)
+	if readSize <= 0 {
+		return nil, errors.New("nothing to read")
+	}
+
+	data := make([]uint16, readSize)
+	err := binary.Read(n.reader, n.order, &data)
+	if err != nil {
+		return nil, err
+	}
+
+	// update read position after successfully read
+	n.readPosition += readSize
+
+	return data, nil
+}
+
 func (n *NumpyAdapter) ReadInt16(size int) ([]int16, error) {
 	if n.npyReader == nil {
 		return nil, errors.New("reader is not initialized")
@@ -246,6 +276,36 @@ func (n *NumpyAdapter) ReadInt16(size int) ([]int16, error) {
 	return data, nil
 }
 
+func (n *NumpyAdapter) ReadUint32(size int) ([]uint32, error) {
+	if n.npyReader == nil {
+		return nil, errors.New("reader is not initialized")
+	}
+
+	// incorrect type
+	switch n.npyReader.Header.Descr.Type {
+	case "u4", "<u4", "|u4", ">u4", "uint32":
+	default:
+		return nil, errors.New("numpy data is not uint32 type")
+	}
+
+	// avoid read overflow
+	readSize := n.checkSize(size)
+	if readSize <= 0 {
+		return nil, errors.New("nothing to read")
+	}
+
+	data := make([]uint32, readSize)
+	err := binary.Read(n.reader, n.order, &data)
+	if err != nil {
+		return nil, err
+	}
+
+	// update read position after successfully read
+	n.readPosition += readSize
+
+	return data, nil
+}
+
 func (n *NumpyAdapter) ReadInt32(size int) ([]int32, error) {
 	if n.npyReader == nil {
 		return nil, errors.New("reader is not initialized")
@@ -265,6 +325,36 @@ func (n *NumpyAdapter) ReadInt32(size int) ([]int32, error) {
 	}
 
 	data := make([]int32, readSize)
+	err := binary.Read(n.reader, n.order, &data)
+	if err != nil {
+		return nil, err
+	}
+
+	// update read position after successfully read
+	n.readPosition += readSize
+
+	return data, nil
+}
+
+func (n *NumpyAdapter) ReadUint64(size int) ([]uint64, error) {
+	if n.npyReader == nil {
+		return nil, errors.New("reader is not initialized")
+	}
+
+	// incorrect type
+	switch n.npyReader.Header.Descr.Type {
+	case "u8", "<u8", "|u8", ">u8", "uint64":
+	default:
+		return nil, errors.New("numpy data is not uint64 type")
+	}
+
+	// avoid read overflow
+	readSize := n.checkSize(size)
+	if readSize <= 0 {
+		return nil, errors.New("nothing to read")
+	}
+
+	data := make([]uint64, readSize)
 	err := binary.Read(n.reader, n.order, &data)
 	if err != nil {
 		return nil, err

@@ -339,7 +339,9 @@ func isVector(dataType schemapb.DataType) (bool, error) {
 	switch dataType {
 	case schemapb.DataType_Bool, schemapb.DataType_Int8,
 		schemapb.DataType_Int16, schemapb.DataType_Int32,
-		schemapb.DataType_Int64,
+		schemapb.DataType_Int64, schemapb.DataType_UInt8,
+		schemapb.DataType_UInt16, schemapb.DataType_UInt32,
+		schemapb.DataType_UInt64,
 		schemapb.DataType_Float, schemapb.DataType_Double:
 		return false, nil
 

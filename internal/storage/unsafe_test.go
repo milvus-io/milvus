@@ -39,6 +39,22 @@ func TestUnsafe(t *testing.T) {
 	int64Res := UnsafeReadInt64(buf, 0)
 	assert.Equal(t, int64Res, int64(1157442765409226768))
 
+	buf = []byte{16}
+	uint8Res := UnsafeReadUInt8(buf, 0)
+	assert.Equal(t, uint8Res, uint8(16))
+
+	buf = []byte{16, 16}
+	uint16Res := UnsafeReadUInt16(buf, 0)
+	assert.Equal(t, uint16Res, uint16(4112))
+
+	buf = []byte{16, 16, 16, 16}
+	uint32Res := UnsafeReadUInt32(buf, 0)
+	assert.Equal(t, uint32Res, uint32(269488144))
+
+	buf = []byte{16, 16, 16, 16, 16, 16, 16, 16}
+	uint64Res := UnsafeReadUInt64(buf, 0)
+	assert.Equal(t, uint64Res, uint64(1157442765409226768))
+
 	buf = []byte{16, 16, 16, 16}
 	float32Res := UnsafeReadFloat32(buf, 0)
 	assert.Equal(t, float32Res, float32(2.8411367e-29))

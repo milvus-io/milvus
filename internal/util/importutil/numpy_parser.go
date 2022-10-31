@@ -64,6 +64,12 @@ func convertNumpyType(str string) (schemapb.DataType, error) {
 		return schemapb.DataType_Int32, nil
 	case "i8", "<i8", "|i8", ">i8", "int64":
 		return schemapb.DataType_Int64, nil
+	case "u2", "<u2", "|u2", ">u2", "uint16":
+		return schemapb.DataType_UInt16, nil
+	case "u4", "<u4", "|u4", ">u4", "uint32":
+		return schemapb.DataType_UInt32, nil
+	case "u8", "<u8", "|u8", ">u8", "uint64":
+		return schemapb.DataType_UInt64, nil
 	case "f4", "<f4", "|f4", ">f4", "float32":
 		return schemapb.DataType_Float, nil
 	case "f8", "<f8", "|f8", ">f8", "float64":
@@ -212,6 +218,46 @@ func (p *NumpyParser) consume(adapter *NumpyAdapter) error {
 		}
 
 		p.columnData = &storage.Int64FieldData{
+			NumRows: []int64{int64(p.columnDesc.elementCount)},
+			Data:    data,
+		}
+	case schemapb.DataType_UInt8:
+		data, err := adapter.ReadUint8(p.columnDesc.elementCount)
+		if err != nil {
+			return err
+		}
+
+		p.columnData = &storage.UInt8FieldData{
+			NumRows: []int64{int64(p.columnDesc.elementCount)},
+			Data:    data,
+		}
+	case schemapb.DataType_UInt16:
+		data, err := adapter.ReadUint16(p.columnDesc.elementCount)
+		if err != nil {
+			return err
+		}
+
+		p.columnData = &storage.UInt16FieldData{
+			NumRows: []int64{int64(p.columnDesc.elementCount)},
+			Data:    data,
+		}
+	case schemapb.DataType_UInt32:
+		data, err := adapter.ReadUint32(p.columnDesc.elementCount)
+		if err != nil {
+			return err
+		}
+
+		p.columnData = &storage.UInt32FieldData{
+			NumRows: []int64{int64(p.columnDesc.elementCount)},
+			Data:    data,
+		}
+	case schemapb.DataType_UInt64:
+		data, err := adapter.ReadUint64(p.columnDesc.elementCount)
+		if err != nil {
+			return err
+		}
+
+		p.columnData = &storage.UInt64FieldData{
 			NumRows: []int64{int64(p.columnDesc.elementCount)},
 			Data:    data,
 		}
