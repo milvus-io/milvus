@@ -855,6 +855,7 @@ func Test_compactionTrigger_noplan(t *testing.T) {
 										},
 									},
 								},
+								lastFlushTime: time.Now(),
 							},
 							2: {
 								SegmentInfo: &datapb.SegmentInfo{
@@ -881,6 +882,7 @@ func Test_compactionTrigger_noplan(t *testing.T) {
 										},
 									},
 								},
+								lastFlushTime: time.Now(),
 							},
 							3: {
 								SegmentInfo: &datapb.SegmentInfo{
@@ -900,6 +902,7 @@ func Test_compactionTrigger_noplan(t *testing.T) {
 										},
 									},
 								},
+								lastFlushTime: time.Now(),
 							},
 							4: {
 								SegmentInfo: &datapb.SegmentInfo{
@@ -919,6 +922,27 @@ func Test_compactionTrigger_noplan(t *testing.T) {
 										},
 									},
 								},
+								lastFlushTime: time.Now(),
+							},
+							5: {
+								SegmentInfo: &datapb.SegmentInfo{
+									ID:             4,
+									CollectionID:   2,
+									PartitionID:    1,
+									LastExpireTime: 100,
+									NumOfRows:      3,
+									MaxRowNum:      300,
+									InsertChannel:  "ch1",
+									State:          commonpb.SegmentState_Flushed,
+									Binlogs: []*datapb.FieldBinlog{
+										{
+											Binlogs: []*datapb.Binlog{
+												{EntriesNum: 5, LogPath: "log1", LogSize: 100},
+											},
+										},
+									},
+								},
+								lastFlushTime: time.Unix(0, 0),
 							},
 						},
 					},
@@ -1033,6 +1057,7 @@ func Test_compactionTrigger_smallfiles(t *testing.T) {
 										},
 									},
 								},
+								lastFlushTime: time.Now(),
 							},
 							2: {
 								SegmentInfo: &datapb.SegmentInfo{
@@ -1059,6 +1084,7 @@ func Test_compactionTrigger_smallfiles(t *testing.T) {
 										},
 									},
 								},
+								lastFlushTime: time.Now(),
 							},
 							3: {
 								SegmentInfo: &datapb.SegmentInfo{
@@ -1085,6 +1111,7 @@ func Test_compactionTrigger_smallfiles(t *testing.T) {
 										},
 									},
 								},
+								lastFlushTime: time.Now(),
 							},
 							4: {
 								SegmentInfo: &datapb.SegmentInfo{
@@ -1111,6 +1138,7 @@ func Test_compactionTrigger_smallfiles(t *testing.T) {
 										},
 									},
 								},
+								lastFlushTime: time.Now(),
 							},
 						},
 					},
@@ -1220,6 +1248,7 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 					},
 				},
 			},
+			lastFlushTime: time.Now(),
 		}
 		segmentInfos.segments[i] = info
 	}
