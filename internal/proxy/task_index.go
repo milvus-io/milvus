@@ -529,32 +529,12 @@ func (dit *dropIndexTask) PreExecute(ctx context.Context) error {
 }
 
 func (dit *dropIndexTask) Execute(ctx context.Context) error {
-	resp, err := dit.indexCoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
-		CollectionID: dit.collectionID,
-		IndexName:    dit.GetIndexName(),
-	})
-	if err != nil {
-		return err
-	}
-	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		if resp.GetStatus().GetErrorCode() == commonpb.ErrorCode_IndexNotExist {
-			// skip drop
-			return nil
-		}
-		return errors.New(resp.GetStatus().GetReason())
-	}
-
-	if len(resp.GetIndexInfos()) > 1 && dit.GetIndexName() == "" {
-		return ErrAmbiguousIndexName()
-	}
-
-	// if len(indexInfos) == 0, the ErrorCode must be IndexNotExist
-	dit.IndexName = resp.GetIndexInfos()[0].IndexName
-
+	var err error
 	dit.result, err = dit.indexCoord.DropIndex(ctx, &indexpb.DropIndexRequest{
 		CollectionID: dit.collectionID,
 		PartitionIDs: nil,
 		IndexName:    dit.IndexName,
+		DropAll:      false,
 	})
 	if dit.result == nil {
 		return errors.New("drop index resp is nil")

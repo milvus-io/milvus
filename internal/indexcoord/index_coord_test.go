@@ -450,6 +450,7 @@ func testIndexCoord(t *testing.T) {
 			CollectionID: collID,
 			PartitionIDs: nil,
 			IndexName:    indexName,
+			DropAll:      false,
 		}
 		resp, err := ic.DropIndex(ctx, req)
 		assert.NoError(t, err)
@@ -623,6 +624,7 @@ func TestIndexCoord_DropIndex(t *testing.T) {
 			CollectionID: collID,
 			PartitionIDs: []int64{partID},
 			IndexName:    indexName,
+			DropAll:      false,
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
@@ -631,6 +633,7 @@ func TestIndexCoord_DropIndex(t *testing.T) {
 			CollectionID: collID,
 			PartitionIDs: []int64{partID},
 			IndexName:    indexName,
+			DropAll:      false,
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
@@ -639,6 +642,7 @@ func TestIndexCoord_DropIndex(t *testing.T) {
 			CollectionID: collID,
 			PartitionIDs: nil,
 			IndexName:    indexName,
+			DropAll:      false,
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
@@ -647,6 +651,7 @@ func TestIndexCoord_DropIndex(t *testing.T) {
 			CollectionID: collID,
 			PartitionIDs: nil,
 			IndexName:    indexName,
+			DropAll:      false,
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
@@ -668,6 +673,7 @@ func TestIndexCoord_DropIndex(t *testing.T) {
 			CollectionID: collID,
 			PartitionIDs: []int64{partID},
 			IndexName:    indexName,
+			DropAll:      false,
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
@@ -676,6 +682,58 @@ func TestIndexCoord_DropIndex(t *testing.T) {
 			CollectionID: collID,
 			PartitionIDs: nil,
 			IndexName:    indexName,
+			DropAll:      false,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
+	})
+
+	t.Run("multiple index but no index name", func(t *testing.T) {
+		ic := &IndexCoord{
+			metaTable: &metaTable{
+				catalog:          &indexcoord.Catalog{Txn: NewMockEtcdKV()},
+				indexLock:        sync.RWMutex{},
+				segmentIndexLock: sync.RWMutex{},
+				collectionIndexes: map[UniqueID]map[UniqueID]*model.Index{
+					collID: {
+						indexID: {
+							TenantID:        "",
+							CollectionID:    collID,
+							FieldID:         fieldID,
+							IndexID:         indexID,
+							IndexName:       indexName,
+							IsDeleted:       false,
+							CreateTime:      10,
+							TypeParams:      nil,
+							IndexParams:     nil,
+							IsAutoIndex:     false,
+							UserIndexParams: nil,
+						},
+						indexID + 1: {
+							TenantID:        "",
+							CollectionID:    collID,
+							FieldID:         fieldID + 1,
+							IndexID:         indexID + 1,
+							IndexName:       indexName + "1",
+							IsDeleted:       false,
+							CreateTime:      20,
+							TypeParams:      nil,
+							IndexParams:     nil,
+							IsAutoIndex:     false,
+							UserIndexParams: nil,
+						},
+					},
+				},
+				segmentIndexes:       nil,
+				buildID2SegmentIndex: nil,
+			},
+		}
+		ic.UpdateStateCode(commonpb.StateCode_Healthy)
+		resp, err := ic.DropIndex(context.Background(), &indexpb.DropIndexRequest{
+			CollectionID: collID,
+			PartitionIDs: []int64{partID},
+			IndexName:    "",
+			DropAll:      false,
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())

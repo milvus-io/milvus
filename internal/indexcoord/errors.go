@@ -22,9 +22,10 @@ import (
 )
 
 var (
-	ErrCompareVersion  = errors.New("failed to save meta in etcd because version compare failure")
-	ErrNotIndexExist   = errors.New("there is no index")
-	ErrSegmentNotFound = errors.New("failed to get segment")
+	ErrCompareVersion        = errors.New("failed to save meta in etcd because version compare failure")
+	ErrNotIndexExist         = errors.New("there is no index")
+	ErrSegmentNotFound       = errors.New("failed to get segment")
+	ErrMsgAmbiguousIndexName = "there are multiple indexes, please specify the index_name"
 )
 
 // errIndexNodeIsNotOnService return an error that the specified IndexNode is not exists.
