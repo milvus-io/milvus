@@ -1,3 +1,4 @@
+from time import sleep
 import pytest
 
 from base.client_base import TestcaseBase
@@ -358,7 +359,7 @@ class TestIndexOperation(TestcaseBase):
         expected: exception raised
         """
         pass
-
+    
     @pytest.mark.tags(CaseLabel.L1)
     def test_index_drop_index(self):
         """
@@ -371,8 +372,8 @@ class TestIndexOperation(TestcaseBase):
         index, _ = self.index_wrap.init_index(collection_w.collection, default_field_name, default_index_params)
         cf.assert_equal_index(index, collection_w.collection.indexes[0])
         self.index_wrap.drop()
-        assert len(collection_w.collection.indexes) == 0
-
+        assert len(collection_w.indexes) == 0
+    
     @pytest.mark.tags(CaseLabel.L1)
     # TODO #7372
     def test_index_drop_repeatedly(self):
@@ -385,8 +386,7 @@ class TestIndexOperation(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         _, _ = self.index_wrap.init_index(collection_w.collection, default_field_name, default_index_params)
         self.index_wrap.drop()
-        self.index_wrap.drop(check_task=CheckTasks.err_res,
-                             check_items={ct.err_code: 1, ct.err_msg: "Index doesn't exist"})
+        self.index_wrap.drop()
 
 
 class TestIndexAdvanced(TestcaseBase):
@@ -849,6 +849,7 @@ class TestNewIndexBase(TestcaseBase):
                                   check_items={ct.err_code: 1,
                                                ct.err_msg: "CreateIndex failed: creating multiple indexes on same field is not supported"})
 
+    @pytest.mark.tags(CaseLabel.L0)
     def test_create_different_index_repeatedly_ip(self):
         """
         target: check if index can be created repeatedly, with the different create_index params
@@ -864,7 +865,7 @@ class TestNewIndexBase(TestcaseBase):
         for index in index_prams:
             index_name = cf.gen_unique_str("name")
             collection_w.create_index(default_float_vec_field_name, index, index_name=index_name)
-            # collection_w.load()
+            collection_w.release()
             collection_w.drop_index(index_name=index_name)
         assert len(collection_w.collection.indexes) == 0
 
@@ -1547,6 +1548,263 @@ class TestIndexString(TestcaseBase):
 
         collection_w.create_index(default_string_field_name, default_string_index_params, index_name=index_name2)
         assert collection_w.has_index(index_name=index_name2)[0] == True
-
         collection_w.drop_index(index_name=index_name2)
         assert len(collection_w.indexes) == 0
+    
+class TestIndexDiskann(TestcaseBase):
+    """
+    ******************************************************************
+      The following cases are used to test create index about diskann
+    ******************************************************************
+    """
+    @pytest.fixture(scope="function", params=[False, True])
+    def _async(self, request):
+        yield request.param
+
+    def call_back(self):
+        assert True
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_index_with_diskann_normal(self):
+        """
+        target: test create index with diskann
+        method: 1.create collection and insert data 
+                2.create diskann index , then load data
+                3.search successfully
+        expected: create index successfully
+        """
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name)
+        data = cf.gen_default_list_data()
+        collection_w.insert(data=data)
+        index, _ = self.index_wrap.init_index(collection_w.collection, default_float_vec_field_name, ct.default_diskann_index)
+        log.info(self.index_wrap.params)
+        cf.assert_equal_index(index, collection_w.indexes[0])
+        collection_w.load()
+        assert collection_w.num_entities == default_nb
+        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
+        search_res, _ = collection_w.search(vectors[:default_nq], default_search_field,
+                                            ct.default_diskann_search_params, default_limit,
+                                            default_search_exp, 
+                                            check_task=CheckTasks.check_search_results,
+                                            check_items={"nq": default_nq,
+                                                         "limit": default_limit})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_index_with_over_max_dim(self):
+        """
+        target: test create index with diskann
+        method: 1.create collection, when the dim of the vector is greater than 1024 
+                2.create diskann index
+        expected: create index raise an error
+        """
+        dim = 1025
+        c_name = cf.gen_unique_str(prefix)
+        fields = [cf.gen_int64_field(is_primary=True), cf.gen_float_field(), cf.gen_string_field(),
+                  cf.gen_float_vec_field(dim=dim)]
+        schema = cf.gen_collection_schema(fields=fields)
+        collection_w = self.init_collection_wrap(name=c_name, schema=schema)
+        collection_w.create_index(default_float_vec_field_name, ct.default_diskann_index,
+                                  check_task=CheckTasks.err_res,
+                                  check_items={ct.err_code: 1,
+                                               ct.err_msg: "invalid index params"})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_index_with_diskann_callback(self,_async):
+        """
+        target: test create index with diskann
+        method: 1.create collection and insert data 
+                2.create diskann index ,then load
+                3.search 
+        expected: create index successfully
+        """
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(c_name)
+        data = cf.gen_default_list_data()
+        collection_w.insert(data=data)
+        res, _ = collection_w.create_index(ct.default_float_vec_field_name, ct.default_diskann_index,
+                                           index_name=ct.default_index_name, _async=_async,
+                                           _callback=self.call_back())
+
+        if _async:
+            res.done()
+            assert len(collection_w.indexes) == 1
+        collection_w.load()
+        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
+        search_res, _ = collection_w.search(vectors[:default_nq], default_search_field,
+                                            ct.default_diskann_search_params, default_limit,
+                                            default_search_exp, 
+                                            check_task=CheckTasks.check_search_results,
+                                            check_items={"nq": default_nq,
+                                                         "limit": default_limit})
+
+    def test_create_diskann_index_drop_with_async(self, _async):
+        """
+        target: test create index interface
+        method: create collection and add entities in it, create diskann index
+        expected: return search success
+        """
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(c_name)
+        data = cf.gen_default_list_data()
+        collection_w.insert(data=data)
+        res, _ = collection_w.create_index(ct.default_float_vec_field_name, ct.default_diskann_index,
+                                           index_name=ct.default_index_name, _async=_async)
+        if _async:
+            res.done()
+            assert len(collection_w.indexes) == 1
+        collection_w.release()
+        collection_w.drop_index(index_name=ct.default_index_name)
+        assert len(collection_w.indexes) == 0
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_diskann_index_with_partition(self):
+        """
+        target: test create index with diskann
+        method: 1.create collection , partition and insert data to partition
+                2.create diskann index ,then load
+        expected: create index successfully
+        """
+
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name, schema=default_schema)
+        partition_name = cf.gen_unique_str(prefix)
+        partition_w = self.init_partition_wrap(collection_w, partition_name)
+        assert collection_w.has_partition(partition_name)[0]
+        df = cf.gen_default_list_data(ct.default_nb)
+        ins_res, _ = partition_w.insert(df)
+        assert len(ins_res.primary_keys) == ct.default_nb
+        collection_w.create_index(default_float_vec_field_name, ct.default_diskann_index,
+                                  index_name=field_name)
+        collection_w.load()
+        assert collection_w.has_index(index_name=field_name)[0] == True
+        assert len(collection_w.indexes) == 1 
+        collection_w.release()
+        collection_w.drop_index(index_name=field_name)
+        assert collection_w.has_index(index_name=field_name)[0] == False
+        assert len(collection_w.indexes) == 0
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_drop_diskann_index_with_noraml(self):
+        """
+        target: test drop diskann index normal
+        method: 1.create collection and insert data
+                2.create index and uses collection.drop_index () drop index
+        expected: drop index successfully
+        """
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name)
+        data = cf.gen_default_list_data()
+        collection_w.insert(data=data)
+        collection_w.create_index(default_float_vec_field_name, ct.default_diskann_index, index_name=index_name1)
+        collection_w.load()
+        assert len(collection_w.indexes) == 1
+        collection_w.release()
+        collection_w.drop_index(index_name=index_name1)
+        assert collection_w.has_index(index_name=index_name1)[0] == False
+    
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_drop_diskann_index_and_create_again(self):
+        """
+        target: test drop diskann index normal
+        method: 1.create collection and insert data
+                2.create index and uses collection.drop_index () drop index
+        expected: drop index successfully
+        """
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name)
+        data = cf.gen_default_list_data()
+        collection_w.insert(data=data)
+        collection_w.create_index(default_field_name, ct.default_diskann_index)
+        collection_w.load()
+        assert len(collection_w.indexes) == 1
+        collection_w.release()
+        collection_w.drop_index()
+        assert len(collection_w.indexes) == 0
+        collection_w.create_index(default_field_name, ct.default_diskann_index)
+        assert len(collection_w.indexes) == 1
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_more_than_three_index(self):
+        """
+        target: test create diskann index 
+        method: 1.create collection and insert data
+                2.create different index
+        expected: drop index successfully
+        """
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name)
+        data = cf.gen_default_list_data()
+        collection_w.insert(data=data)
+        collection_w.create_index(default_float_vec_field_name, ct.default_diskann_index, index_name="a")
+        assert collection_w.has_index(index_name="a")[0] == True
+        collection_w.create_index(default_string_field_name, default_string_index_params, index_name="b")
+        assert collection_w.has_index(index_name="b")[0] == True
+        default_params = {}
+        collection_w.create_index("float", default_params, index_name="c")
+        assert collection_w.has_index(index_name="c")[0] == True
+   
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_drop_diskann_index_with_partition(self):
+        """
+        target: test drop diskann index normal
+        method: 1.create collection and insert data
+                2.create  diskann index and uses collection.drop_index () drop index
+        expected: drop index successfully
+        """
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name, schema=default_schema)
+        partition_name = cf.gen_unique_str(prefix)
+        partition_w = self.init_partition_wrap(collection_w, partition_name)
+        assert collection_w.has_partition(partition_name)[0]
+        df = cf.gen_default_list_data()
+        ins_res, _ = partition_w.insert(df)
+        collection_w.create_index(default_float_vec_field_name, ct.default_diskann_index)
+        collection_w.load()
+        assert len(collection_w.indexes) == 1
+        collection_w.release()
+        collection_w.drop_index()
+        assert len(collection_w.indexes) == 0
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_diskann_index_with_binary(self):
+        """
+        target: test create diskann index with binary
+        method: 1.create collection and insert binary data
+                2.create diskann index 
+        expected: report an error
+        """
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name, schema=default_binary_schema)
+        df, _ = cf.gen_default_binary_dataframe_data()
+        collection_w.insert(data=df)
+        collection_w.create_index(default_binary_vec_field_name, ct.default_diskann_index, index_name=binary_field_name,
+                                  check_task=CheckTasks.err_res,
+                                  check_items={ct.err_code: 1,
+                                               ct.err_msg: "field data type BinaryVector don't support the index build type DISKANN"})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_create_diskann_index_multithread(self):
+        """
+        target: test create index interface with multiprocess
+        method: create collection and add entities in it, create diskann index
+        expected: return search success
+        """
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name)
+        data = cf.gen_default_list_data(default_nb)
+        collection_w.insert(data=data)
+
+        def build(collection_w):
+
+            collection_w.create_index(ct.default_float_vec_field_name, ct.default_diskann_index)
+
+        threads_num = 10
+        threads = []
+        for i in range(threads_num):
+            t = MyThread(target=build, args=(collection_w,))
+            threads.append(t)
+            t.start()
+            time.sleep(0.2)
+        for t in threads:
+            t.join()

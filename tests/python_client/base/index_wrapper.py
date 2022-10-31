@@ -6,7 +6,7 @@ from check.func_check import ResponseChecker
 from utils.api_request import api_request
 
 TIMEOUT = 20
-INDEX_NAME = "_default_idx"
+INDEX_NAME = ""
 
 
 class ApiIndexWrapper:
@@ -14,7 +14,8 @@ class ApiIndexWrapper:
 
     def init_index(self, collection, field_name, index_params, index_name=None, check_task=None, check_items=None,
                    **kwargs):
-        timeout = kwargs.get("timeout", TIMEOUT * 2)
+        disktimeout = 100
+        timeout = kwargs.get("timeout", disktimeout * 2)
         index_name = INDEX_NAME if index_name is None else index_name
         index_name = kwargs.get("index_name", index_name)
         kwargs.update({"timeout": timeout, "index_name": index_name})

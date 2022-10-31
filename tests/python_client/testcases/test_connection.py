@@ -541,7 +541,8 @@ class TestConnectionOperation(TestcaseBase):
         self.connection_wrap.get_connection_addr(alias=connect_name, check_task=ct.CheckTasks.ccr,
                                                  check_items={ct.dict_content: {"address": f"{host}:{port}",
                                                                                 "user": ""}})
-
+     
+    @pytest.mark.skip("not support now")
     @pytest.mark.tags(ct.CaseLabel.L2)
     @pytest.mark.parametrize("connect_name", [DefaultConfig.DEFAULT_USING, "test_alias_nme"])
     def test_connection_connect_wrong_params(self, host, port, connect_name):

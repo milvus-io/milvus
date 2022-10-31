@@ -126,6 +126,9 @@ pipeline {
                                                 --set etcd.metrics.enabled=true \
                                                 --set etcd.metrics.podMonitor.enabled=true \
                                                 --set indexCoordinator.gc.interval=1 \
+                                                --set indexNode.disk.enabled=true \
+                                                --set queryNode.disk.enabled=true \
+                                                --set standalone.disk.enabled=true \
                                                 --version ${chart_version} \
                                                 -f values/ci/pr.yaml" 
                                                 """
