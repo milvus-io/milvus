@@ -179,6 +179,9 @@ func (ms *mqMsgStream) Start() {
 }
 
 func (ms *mqMsgStream) Close() {
+	log.Info("start to close mq msg stream",
+		zap.Int("producer num", len(ms.producers)),
+		zap.Int("consumer num", len(ms.consumers)))
 	ms.streamCancel()
 	ms.closeRWMutex.Lock()
 	defer ms.closeRWMutex.Unlock()
@@ -909,7 +912,7 @@ func (ms *MqTtMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
 		for runLoop {
 			select {
 			case <-ms.ctx.Done():
-				return nil
+				return ms.ctx.Err()
 			case msg, ok := <-consumer.Chan():
 				if !ok {
 					return fmt.Errorf("consumer closed")
