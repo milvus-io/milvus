@@ -251,18 +251,6 @@ func (loader *segmentLoader) loadFiles(ctx context.Context, segment *Segment,
 			fieldID := fieldBinlog.FieldID
 			// check num rows of data meta and index meta are consistent
 			if indexInfo, ok := fieldID2IndexInfo[fieldID]; ok {
-				if loadInfo.GetNumOfRows() != indexInfo.GetNumRows() {
-					err = fmt.Errorf("num rows of segment binlog file %d mismatch with num rows of index file %d",
-						loadInfo.GetNumOfRows(), indexInfo.GetNumRows())
-					log.Error("load segment failed, set segment to meta failed",
-						zap.Int64("collectionID", segment.collectionID),
-						zap.Int64("partitionID", segment.partitionID),
-						zap.Int64("segmentID", segment.segmentID),
-						zap.Int64("indexBuildID", indexInfo.BuildID),
-						zap.Error(err))
-					return err
-				}
-
 				fieldInfo := &IndexedFieldInfo{
 					fieldBinlog: fieldBinlog,
 					indexInfo:   indexInfo,
