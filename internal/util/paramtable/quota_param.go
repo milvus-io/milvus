@@ -29,7 +29,7 @@ import (
 
 const (
 	// defaultMax is the default unlimited rate or threshold.
-	defaultMax = float64(math.MaxInt)
+	defaultMax = float64(math.MaxFloat64)
 	// MBSize used to convert megabytes and bytes.
 	MBSize = 1024.0 * 1024.0
 	// defaultDiskQuotaInMB is the default disk quota in megabytes.

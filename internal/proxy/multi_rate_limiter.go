@@ -123,7 +123,7 @@ func (rl *rateLimiter) registerLimiters() {
 			r = Params.QuotaConfig.DQLMaxQueryRate
 		}
 		limit := ratelimitutil.Limit(r)
-		burst := int(r) // use rate as burst, because Limiter is with punishment mechanism, burst is insignificant.
+		burst := r // use rate as burst, because Limiter is with punishment mechanism, burst is insignificant.
 		rl.limiters[internalpb.RateType(rt)] = ratelimitutil.NewLimiter(limit, burst)
 		log.Info("RateLimiter register for rateType",
 			zap.String("rateType", internalpb.RateType_name[rt]),

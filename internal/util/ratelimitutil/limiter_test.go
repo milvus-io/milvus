@@ -131,7 +131,7 @@ func TestLimit(t *testing.T) {
 		})
 
 		limit := Inf
-		burst := math.MaxInt
+		burst := math.MaxFloat64
 		limiter := NewLimiter(limit, burst)
 		runWithoutCheckToken(t, limiter, []allow{
 			{t0, 1 * 1024 * 1024, true, 0},

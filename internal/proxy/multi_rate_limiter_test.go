@@ -70,11 +70,11 @@ func TestMultiRateLimiter(t *testing.T) {
 			Params.QuotaConfig.QuotaAndLimitsEnabled = bak
 			Params.QuotaConfig.DMLMaxInsertRate = bakInsertRate
 		}
-		run(math.MaxInt)
-		run(math.MaxInt / 1.2)
-		run(math.MaxInt / 2)
-		run(math.MaxInt / 3)
-		run(math.MaxInt / 10000)
+		run(math.MaxFloat64)
+		run(math.MaxFloat64 / 1.2)
+		run(math.MaxFloat64 / 2)
+		run(math.MaxFloat64 / 3)
+		run(math.MaxFloat64 / 10000)
 	})
 }
 
