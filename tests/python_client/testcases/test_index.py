@@ -909,8 +909,8 @@ class TestNewIndexBase(TestcaseBase):
             assert len(collection_w.indexes) == 1
             collection_w.drop_index(index_name=ct.default_index_name)
             assert len(collection_w.indexes) == 0
-            collection_w.drop_index(index_name=ct.default_index_name, check_task=CheckTasks.err_res,
-                                    check_items={ct.err_code: 0, ct.err_msg: "Index doesn\'t exist."})
+            collection_w.drop_index(index_name=ct.default_index_name)
+            assert len(collection_w.indexes) == 0
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_drop_index_without_connect(self):
@@ -978,8 +978,8 @@ class TestNewIndexBase(TestcaseBase):
             assert len(collection_w.indexes) == 1
             collection_w.drop_index(index_name=ct.default_index_name)
             assert len(collection_w.indexes) == 0
-            collection_w.drop_index(index_name=ct.default_index_name, check_task=CheckTasks.err_res,
-                                    check_items={ct.err_code: 0, ct.err_msg: "Index doesn\'t exist."})
+            collection_w.drop_index(index_name=ct.default_index_name)
+            assert len(collection_w.indexes) == 0
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_drop_index_without_connect_ip(self):
@@ -1039,8 +1039,8 @@ class TestNewIndexBase(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         data = cf.gen_default_list_data()
         collection_w.insert(data=data)
-        collection_w.drop_index(index_name=default_field_name, check_task=CheckTasks.err_res,
-                                check_items={ct.err_code: 0, ct.err_msg: "Index doesn\'t exist."})
+        collection_w.drop_index(index_name=default_field_name)
+        assert len(collection_w.indexes) == 0
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_index_collection_with_after_load(self):
