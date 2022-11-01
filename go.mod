@@ -11,7 +11,7 @@ require (
 	github.com/antonmedv/expr v1.8.9
 	github.com/apache/arrow/go/v8 v8.0.0-20220322092137-778b1772fd20
 	github.com/apache/pulsar-client-go v0.6.1-0.20210728062540-29414db801a7
-	github.com/apache/thrift v0.15.0
+	github.com/apache/thrift v0.15.0 // indirect
 	github.com/bits-and-blooms/bloom/v3 v3.0.1
 	github.com/casbin/casbin/v2 v2.44.2
 	github.com/casbin/json-adapter/v2 v2.0.0
@@ -20,7 +20,6 @@ require (
 	github.com/gin-gonic/gin v1.7.7
 	github.com/go-basic/ipv4 v1.0.0
 	github.com/gofrs/flock v0.8.1
-	github.com/golang/mock v1.5.0
 	github.com/golang/protobuf v1.5.2
 	github.com/google/btree v1.0.1
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
@@ -65,6 +64,7 @@ require (
 )
 
 require (
+	cloud.google.com/go v0.81.0 // indirect
 	github.com/99designs/go-keychain v0.0.0-20191008050251-8e49817e8af4 // indirect
 	github.com/AthenZ/athenz v1.10.15 // indirect
 	github.com/DataDog/zstd v1.4.6-0.20210211175136-c6db21d202f4 // indirect
@@ -178,7 +178,7 @@ require (
 	go.uber.org/multierr v1.6.0 // indirect
 	golang.org/x/mod v0.6.0-dev.0.20211013180041-c96bc1413d57 // indirect
 	golang.org/x/net v0.0.0-20220127200216-cd36cc0744dd // indirect
-	golang.org/x/oauth2 v0.0.0-20210402161424-2e8d93401602 // indirect
+	golang.org/x/oauth2 v0.0.0-20210402161424-2e8d93401602
 	golang.org/x/sys v0.0.0-20220520151302-bc2c85ada10a // indirect
 	golang.org/x/term v0.0.0-20210927222741-03fcf44c2211 // indirect
 	golang.org/x/text v0.3.7 // indirect
