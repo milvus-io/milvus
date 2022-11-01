@@ -23,7 +23,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/log"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
 )
 
@@ -31,24 +30,21 @@ import (
 const waitQueueCap = 256
 
 type Merger[K comparable, R any] struct {
-	stopCh chan struct{}
-	wg     sync.WaitGroup
-
-	processors *typeutil.ConcurrentSet[K]     // Tasks of having processor
-	queues     map[K]chan MergeableTask[K, R] // TaskID -> Queue
-	waitQueue  chan MergeableTask[K, R]
-	outCh      chan MergeableTask[K, R]
+	stopCh    chan struct{}
+	wg        sync.WaitGroup
+	queues    map[K][]MergeableTask[K, R] // TaskID -> Queue
+	waitQueue chan MergeableTask[K, R]
+	outCh     chan MergeableTask[K, R]
 
 	stopOnce sync.Once
 }
 
 func NewMerger[K comparable, R any]() *Merger[K, R] {
 	return &Merger[K, R]{
-		stopCh:     make(chan struct{}),
-		processors: typeutil.NewConcurrentSet[K](),
-		queues:     make(map[K]chan MergeableTask[K, R]),
-		waitQueue:  make(chan MergeableTask[K, R], waitQueueCap),
-		outCh:      make(chan MergeableTask[K, R], Params.QueryCoordCfg.TaskMergeCap),
+		stopCh:    make(chan struct{}),
+		queues:    make(map[K][]MergeableTask[K, R]),
+		waitQueue: make(chan MergeableTask[K, R], waitQueueCap),
+		outCh:     make(chan MergeableTask[K, R], Params.QueryCoordCfg.TaskMergeCap),
 	}
 }
 
@@ -60,7 +56,6 @@ func (merger *Merger[K, R]) Stop() {
 	merger.stopOnce.Do(func() {
 		close(merger.stopCh)
 		merger.wg.Wait()
-		close(merger.outCh)
 	})
 }
 
@@ -73,40 +68,23 @@ func (merger *Merger[K, R]) schedule(ctx context.Context) {
 	go func() {
 		defer merger.wg.Done()
 		ticker := time.NewTicker(500 * time.Millisecond)
+		defer ticker.Stop()
 		for {
 			select {
 			case <-ctx.Done():
+				close(merger.outCh)
 				log.Info("Merger stopped due to context canceled")
 				return
 
 			case <-merger.stopCh:
+				close(merger.outCh)
 				log.Info("Merger stopped")
 				return
 
-			case task := <-merger.waitQueue:
-				queue, ok := merger.queues[task.ID()]
-				if !ok {
-					queue = make(chan MergeableTask[K, R], Params.QueryCoordCfg.TaskMergeCap)
-					merger.queues[task.ID()] = queue
-				}
-			outer:
-				for {
-					select {
-					case queue <- task:
-						break outer
-					default: // Queue full, flush and retry
-						merger.merge(task.ID(), queue)
-					}
-				}
-
 			case <-ticker.C:
-				for id, queue := range merger.queues {
-					if len(queue) > 0 {
-						merger.merge(id, queue)
-					} else {
-						// Release resource if no task for the queue
-						delete(merger.queues, id)
-					}
+				merger.drain()
+				for id := range merger.queues {
+					merger.triggerExecution(id)
 				}
 			}
 		}
@@ -126,32 +104,44 @@ func (merger *Merger[K, R]) Add(task MergeableTask[K, R]) {
 	merger.waitQueue <- task
 }
 
-func (merger *Merger[K, R]) merge(id K, queue chan MergeableTask[K, R]) {
-	if merger.isStopped() {
-		return
+func (merger *Merger[K, R]) drain() {
+	for {
+		select {
+		case task := <-merger.waitQueue:
+			queue, ok := merger.queues[task.ID()]
+			if !ok {
+				queue = []MergeableTask[K, R]{}
+			}
+			queue = append(queue, task)
+			merger.queues[task.ID()] = queue
+		default:
+			return
+		}
 	}
-	if !merger.processors.Insert(id) {
-		return
-	}
-
-	merger.wg.Add(1)
-	go merger.mergeQueue(id, queue)
 }
 
-// mergeQueue merges tasks in the given queue,
-// it only processes tasks with the number of the length of queue at the time,
-// to avoid leaking goroutines
-func (merger *Merger[K, R]) mergeQueue(id K, queue chan MergeableTask[K, R]) {
-	defer merger.wg.Done()
-	defer merger.processors.Remove(id)
+func (merger *Merger[K, R]) triggerExecution(id K) {
+	tasks := merger.queues[id]
+	delete(merger.queues, id)
 
-	len := len(queue)
-	task := <-queue
-	for i := 1; i < len; i++ {
-		task.Merge(<-queue)
+	var task MergeableTask[K, R]
+	merged := 0
+	for i := 0; i < len(tasks); i++ {
+		if merged == 0 {
+			task = tasks[i]
+		} else {
+			task.Merge(tasks[i])
+		}
+		merged++
+		if merged >= int(Params.QueryCoordCfg.TaskMergeCap) {
+			merger.outCh <- task
+			merged = 0
+		}
 	}
 
-	log.Info("merge tasks done",
-		zap.Any("mergeID", task.ID()))
-	merger.outCh <- task
+	if merged != 0 {
+		merger.outCh <- task
+	}
+
+	log.Info("merge tasks done, trigger execution", zap.Any("mergeID", task.ID()))
 }
