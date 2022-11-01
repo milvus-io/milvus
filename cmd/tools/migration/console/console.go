@@ -20,7 +20,7 @@ func Warning(msg string) {
 }
 
 func Exit(msg string) {
-	ExitWithOption(WithAbnormalExit(), WithMsg(msg))
+	ExitWithOption(WithAbnormalExit(), WithExitCode(Unexpected), WithMsg(msg))
 }
 
 func ExitIf(err error) {

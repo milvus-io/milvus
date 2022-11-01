@@ -3,6 +3,7 @@ package migration
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -213,8 +214,28 @@ func (r *Runner) Migrate() error {
 	return target.Save(targetMetas)
 }
 
+func (r *Runner) waitUntilSessionExpired() {
+	for {
+		err := r.checkSessionsWithPrefix(Role)
+		if err == nil {
+			console.Success("migration session expired")
+			return
+		}
+
+		// TODO: better to wrap this error.
+		if !strings.Contains(err.Error(), "there are still sessions alive") {
+			console.Warning(err.Error())
+			return
+		}
+
+		// 1s may be enough to expire the lease session.
+		time.Sleep(time.Second)
+	}
+}
+
 func (r *Runner) Stop() {
 	r.session.Revoke(time.Second)
+	r.waitUntilSessionExpired()
 	r.cancel()
 	r.wg.Wait()
 }
