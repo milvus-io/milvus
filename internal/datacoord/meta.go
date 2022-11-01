@@ -28,6 +28,7 @@ import (
 	"github.com/golang/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -1095,4 +1096,18 @@ func (m *meta) HasSegments(segIDs []UniqueID) (bool, error) {
 		}
 	}
 	return true, nil
+}
+
+func (m *meta) GetCompactionTo(segmentID int64) *SegmentInfo {
+	m.RLock()
+	defer m.RUnlock()
+
+	segments := m.segments.GetSegments()
+	for _, segment := range segments {
+		parents := typeutil.NewUniqueSet(segment.GetCompactionFrom()...)
+		if parents.Contain(segmentID) {
+			return segment
+		}
+	}
+	return nil
 }

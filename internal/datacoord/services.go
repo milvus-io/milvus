@@ -349,11 +349,20 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 		var info *SegmentInfo
 		if req.IncludeUnHealthy {
 			info = s.meta.GetSegmentUnsafe(id)
+
 			if info == nil {
 				log.Warn("failed to get segment, this may have been cleaned", zap.Int64("segmentID", id))
 				resp.Status.Reason = msgSegmentNotFound(id)
 				return resp, nil
 			}
+
+			child := s.meta.GetCompactionTo(id)
+			if child != nil {
+				info = info.Clone()
+				info.Deltalogs = append(info.Deltalogs, child.GetDeltalogs()...)
+				info.DmlPosition = child.GetDmlPosition()
+			}
+
 			infos = append(infos, info.SegmentInfo)
 		} else {
 			info = s.meta.GetSegment(id)
