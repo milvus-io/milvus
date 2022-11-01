@@ -489,38 +489,35 @@ func (node *QueryNode) LoadSegments(ctx context.Context, in *querypb.LoadSegment
 	log.Info("loadSegmentsTask start ", zap.Int64("collectionID", in.CollectionID),
 		zap.Int64s("segmentIDs", segmentIDs),
 		zap.Duration("timeInQueue", time.Since(startTs)))
-	err := task.PreExecute(ctx)
+	err := node.scheduler.queue.Enqueue(task)
 	if err != nil {
 		status := &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
 		}
-		log.Warn("failed to load segments on preExecute ", zap.Error(err))
-		return status, nil
-	}
-	err = task.Execute(ctx)
-	if err != nil {
-		status := &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}
-		log.Warn("failed to load segment", zap.Int64("collectionID", in.CollectionID), zap.Int64s("segmentIDs", segmentIDs), zap.Error(err))
+		log.Warn(err.Error())
 		return status, nil
 	}
 
-	err = task.PostExecute(ctx)
-	if err != nil {
-		status := &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
+	log.Info("loadSegmentsTask Enqueue done", zap.Int64("collectionID", in.CollectionID), zap.Int64s("segmentIDs", segmentIDs), zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()))
+
+	waitFunc := func() (*commonpb.Status, error) {
+		err = task.WaitToFinish()
+		if err != nil {
+			status := &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			}
+			log.Warn(err.Error())
+			return status, nil
 		}
-		log.Warn("failed to load segments on postExecute ", zap.Error(err))
-		return status, nil
+		log.Info("loadSegmentsTask WaitToFinish done", zap.Int64("collectionID", in.CollectionID), zap.Int64s("segmentIDs", segmentIDs), zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()))
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		}, nil
 	}
-	log.Info("loadSegmentsTask done", zap.Int64("collectionID", in.CollectionID), zap.Int64s("segmentIDs", segmentIDs), zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()))
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
-	}, nil
+
+	return waitFunc()
 }
 
 // ReleaseCollection clears all data related to this collection on the querynode
