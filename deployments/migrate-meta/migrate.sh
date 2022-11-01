@@ -81,7 +81,8 @@ function wait_for_milvus_stopped(){
     total=0
     for deploy in $1;
     do 
-      count=$(kubectl get deploy $deploy -n $namespace --output=jsonpath={.spec.replicas})
+      count=$(kubectl get deploy $deploy -n $namespace --output=jsonpath={.status.replicas})
+      count=${count:-0}
       total=`expr $total + $count`
     done
     if [ $total -eq 0 ]; then
@@ -89,6 +90,8 @@ function wait_for_milvus_stopped(){
     fi
     sleep 5
   done
+  # wait for the session key expire
+  sleep 75
 }
 
 function wait_for_backup_done(){
