@@ -114,6 +114,9 @@ func (l *loadSegmentsTask) Execute(ctx context.Context) error {
 		for _, segment := range l.req.Infos {
 			l.node.metaReplica.removeSegment(segment.SegmentID, segmentTypeSealed)
 		}
+		for _, vchannel := range vchanName {
+			l.node.dataSyncService.removeEmptyFlowGraphByChannel(l.req.CollectionID, vchannel)
+		}
 		log.Warn("failed to load delete data while load segment", zap.Int64("collectionID", l.req.CollectionID),
 			zap.Int64("replicaID", l.req.ReplicaID), zap.Error(err))
 		return err
