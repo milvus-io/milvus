@@ -428,7 +428,7 @@ func (q *QuotaCenter) getTimeTickDelayFactor(ts Timestamp) float64 {
 				vchannel = metric.Fgm.MinFlowGraphChannel
 				minTt = t2
 			}
-			metrics.RootCoordTtDelay.WithLabelValues(strconv.FormatInt(nodeID, 10)).Set(float64(curMaxDelay.Milliseconds()))
+			metrics.RootCoordTtDelay.WithLabelValues(typeutil.QueryNodeRole, strconv.FormatInt(nodeID, 10)).Set(float64(curMaxDelay.Milliseconds()))
 		}
 	}
 	for nodeID, metric := range q.dataNodeMetrics {
@@ -441,7 +441,7 @@ func (q *QuotaCenter) getTimeTickDelayFactor(ts Timestamp) float64 {
 				vchannel = metric.Fgm.MinFlowGraphChannel
 				minTt = t2
 			}
-			metrics.RootCoordTtDelay.WithLabelValues(strconv.FormatInt(nodeID, 10)).Set(float64(curMaxDelay.Milliseconds()))
+			metrics.RootCoordTtDelay.WithLabelValues(typeutil.DataNodeRole, strconv.FormatInt(nodeID, 10)).Set(float64(curMaxDelay.Milliseconds()))
 		}
 	}
 

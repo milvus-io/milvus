@@ -65,7 +65,7 @@ const (
 	collectionName           = "collection_name"
 	segmentStateLabelName    = "segment_state"
 	usernameLabelName        = "username"
-	rolenameLabelName        = "role_name"
+	roleNameLabelName        = "role_name"
 	cacheNameLabelName       = "cache_name"
 	cacheStateLabelName      = "cache_state"
 )
