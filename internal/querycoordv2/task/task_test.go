@@ -297,9 +297,14 @@ func (suite *TaskSuite) TestUnsubscribeChannelTask() {
 	suite.dispatchAndWait(targetNode)
 	suite.AssertTaskNum(0, 0, 0, 0)
 
-	for _, task := range tasks {
-		suite.Equal(TaskStatusSucceeded, task.Status())
-		suite.NoError(task.Err())
+	for i, task := range tasks {
+		if i == 0 {
+			suite.Equal(TaskStatusSucceeded, task.Status())
+			suite.NoError(task.Err())
+		} else {
+			suite.Equal(TaskStatusStale, task.Status())
+			suite.Error(task.Err())
+		}
 	}
 }
 
@@ -558,25 +563,37 @@ func (suite *TaskSuite) TestReleaseGrowingSegmentTask() {
 		err = suite.scheduler.Add(task)
 		suite.NoError(err)
 	}
+	suite.dist.LeaderViewManager.Update(targetNode, &meta.LeaderView{
+		ID:              targetNode,
+		GrowingSegments: typeutil.NewUniqueSet(suite.releaseSegments[1:]...),
+	})
 
 	segmentsNum := len(suite.releaseSegments)
 	suite.AssertTaskNum(0, segmentsNum, 0, segmentsNum)
 
 	// Process tasks
 	suite.dispatchAndWait(targetNode)
-	suite.AssertTaskNum(segmentsNum, 0, 0, segmentsNum)
+	suite.AssertTaskNum(segmentsNum-1, 0, 0, segmentsNum-1)
 
 	// Other nodes' HB can't trigger the procedure of tasks
 	suite.dispatchAndWait(targetNode + 1)
-	suite.AssertTaskNum(segmentsNum, 0, 0, segmentsNum)
+	suite.AssertTaskNum(segmentsNum-1, 0, 0, segmentsNum-1)
+
+	// Release done
+	suite.dist.LeaderViewManager.Update(targetNode)
 
 	// Process tasks done
 	suite.dispatchAndWait(targetNode)
 	suite.AssertTaskNum(0, 0, 0, 0)
 
-	for _, task := range tasks {
-		suite.Equal(TaskStatusSucceeded, task.Status())
-		suite.NoError(task.Err())
+	for i, task := range tasks {
+		if i == 0 {
+			suite.Equal(TaskStatusStale, task.Status())
+			suite.Error(task.Err())
+		} else {
+			suite.Equal(TaskStatusSucceeded, task.Status())
+			suite.NoError(task.Err())
+		}
 	}
 }
 
@@ -736,8 +753,8 @@ func (suite *TaskSuite) TestTaskCanceled() {
 			suite.Equal(TaskStatusCanceled, task.Status())
 			suite.ErrorIs(task.Err(), ErrTaskCanceled)
 		} else {
-			suite.Equal(TaskStatusSucceeded, task.Status())
-			suite.NoError(task.Err())
+			suite.Equal(TaskStatusStale, task.Status())
+			suite.Error(task.Err())
 		}
 	}
 }
