@@ -419,13 +419,14 @@ func tryFlushBlocks(ctx context.Context,
 		// if segment size is larger than predefined blockSize, flush to create a new binlog file
 		// initialize a new FieldData list for next round batch read
 		if size > int(blockSize) && rowCount > 0 {
-			printFieldsDataInfo(blockData, "import util: prepare to flush block larger than maxBlockSize", nil)
+			printFieldsDataInfo(blockData, "import util: prepare to flush block larger than blockSize", nil)
 			err := callFlushFunc(blockData, i)
 			if err != nil {
 				log.Error("Import util: failed to flush block data", zap.Int("shardID", i))
 				return err
 			}
-			log.Info("Import util: block size exceed limit and flush", zap.Int("rowCount", rowCount), zap.Int("size", size), zap.Int("shardID", i))
+			log.Info("Import util: block size exceed limit and flush", zap.Int("rowCount", rowCount),
+				zap.Int("size", size), zap.Int("shardID", i), zap.Int64("blockSize", blockSize))
 
 			blocksData[i] = initSegmentData(collectionSchema)
 			if blocksData[i] == nil {

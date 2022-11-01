@@ -264,11 +264,10 @@ func (p *ImportWrapper) fileValidation(filePaths []string) (bool, error) {
 		fileNames[name] = struct{}{}
 
 		// check file size, single file size cannot exceed MaxFileSize
-		// TODO add context
-		size, err := p.chunkManager.Size(context.TODO(), filePath)
+		size, err := p.chunkManager.Size(p.ctx, filePath)
 		if err != nil {
 			log.Error("import wrapper: failed to get file size", zap.String("filePath", filePath), zap.Error(err))
-			return rowBased, fmt.Errorf("import wrapper: failed to get file size of '%s'", filePath)
+			return rowBased, fmt.Errorf("import wrapper: failed to get file size of '%s', make sure the input path is related path, error:%w", filePath, err)
 		}
 
 		// empty file
@@ -312,7 +311,6 @@ func (p *ImportWrapper) Import(filePaths []string, options ImportOptions) error 
 	// data restore function to import milvus native binlog files(for backup/restore tools)
 	// the backup/restore tool provide two paths for a partition, the first path is binlog path, the second is deltalog path
 	if p.isBinlogImport(filePaths) {
-		// TODO: handle the timestamp end point passed from client side, currently use math.MaxUint64
 		return p.doBinlogImport(filePaths, options.TsStartPoint, options.TsEndPoint)
 	}
 
@@ -454,23 +452,51 @@ func (p *ImportWrapper) reportPersisted() error {
 // isBinlogImport is to judge whether it is binlog import operation
 // For internal usage by the restore tool: https://github.com/zilliztech/milvus-backup
 // This tool exports data from a milvus service, and call bulkload interface to import native data into another milvus service.
-// This tool provides two paths: one is data log path of a partition,the other is delta log path of this partition.
+// This tool provides two paths: one is insert log path of a partition,the other is delta log path of this partition.
 // This method checks the filePaths, if the file paths is exist and not a file, we say it is native import.
 func (p *ImportWrapper) isBinlogImport(filePaths []string) bool {
-	// must contains the insert log path, and the delta log path is optional
-	if len(filePaths) != 1 && len(filePaths) != 2 {
-		log.Info("import wrapper: paths count is not 1 or 2, not binlog import", zap.Int("len", len(filePaths)))
+	// must contains the insert log path, and the delta log path is optional to be empty string
+	if len(filePaths) != 2 {
+		log.Info("import wrapper: paths count is not 2, not binlog import", zap.Int("len", len(filePaths)))
 		return false
 	}
 
-	for i := 0; i < len(filePaths); i++ {
-		filePath := filePaths[i]
-		_, fileType := GetFileNameAndExt(filePath)
+	checkFunc := func(filePath string) bool {
 		// contains file extension, is not a path
+		_, fileType := GetFileNameAndExt(filePath)
 		if len(fileType) != 0 {
 			log.Info("import wrapper: not a path, not binlog import", zap.String("filePath", filePath), zap.String("fileType", fileType))
 			return false
 		}
+
+		// check path existence
+		exist, err := p.chunkManager.Exist(p.ctx, filePath)
+		if err != nil {
+			log.Error("import wrapper: failed to check the path existence, not binlog import", zap.String("filePath", filePath), zap.Error(err))
+			return false
+		}
+		if !exist {
+			log.Info("import wrapper: the input path doesn't exist, not binlog import", zap.String("filePath", filePath))
+			return false
+		}
+		return true
+	}
+
+	// the first path is insert log path
+	filePath := filePaths[0]
+	if len(filePath) == 0 {
+		log.Info("import wrapper: the first path is empty string, not binlog import")
+		return false
+	}
+
+	if !checkFunc(filePath) {
+		return false
+	}
+
+	// the second path is delta log path
+	filePath = filePaths[1]
+	if len(filePath) > 0 && !checkFunc(filePath) {
+		return false
 	}
 
 	log.Info("import wrapper: do binlog import")
@@ -501,12 +527,9 @@ func (p *ImportWrapper) doBinlogImport(filePaths []string, tsStartPoint uint64, 
 func (p *ImportWrapper) parseRowBasedJSON(filePath string, onlyValidate bool) error {
 	tr := timerecord.NewTimeRecorder("json row-based parser: " + filePath)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	// for minio storage, chunkManager will download file into local memory
 	// for local storage, chunkManager open the file directly
-	file, err := p.chunkManager.Reader(ctx, filePath)
+	file, err := p.chunkManager.Reader(p.ctx, filePath)
 	if err != nil {
 		return err
 	}
@@ -553,13 +576,11 @@ func (p *ImportWrapper) parseColumnBasedNumpy(filePath string, onlyValidate bool
 	combineFunc func(fields map[storage.FieldID]storage.FieldData) error) error {
 	tr := timerecord.NewTimeRecorder("numpy parser: " + filePath)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	fileName, _ := GetFileNameAndExt(filePath)
 
 	// for minio storage, chunkManager will download file into local memory
 	// for local storage, chunkManager open the file directly
-	file, err := p.chunkManager.Reader(ctx, filePath)
+	file, err := p.chunkManager.Reader(p.ctx, filePath)
 	if err != nil {
 		return err
 	}
@@ -721,7 +742,7 @@ func (p *ImportWrapper) splitFieldsData(fieldsData map[storage.FieldID]storage.F
 			return fmt.Errorf("import wrapper: field '%s' row count %d is not equal to other fields row count: %d", name, count, rowCount)
 		}
 	}
-	log.Info("import wrapper: try to split a block with row count", zap.Int("rowCount", rowCount), zap.Any("rowCountOfEachField", rowCounter))
+	log.Info("import wrapper: try to split a block with row count", zap.Int("rowCount", rowCount))
 
 	primaryData, ok := fieldsData[primaryKey.GetFieldID()]
 	if !ok {
