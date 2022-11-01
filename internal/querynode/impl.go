@@ -484,45 +484,43 @@ func (node *QueryNode) LoadSegments(ctx context.Context, in *querypb.LoadSegment
 			node.taskLock.Unlock(strconv.FormatInt(id, 10))
 		}
 	}()
-	future := node.taskPool.Submit(func() (interface{}, error) {
-		log.Info("loadSegmentsTask start ", zap.Int64("collectionID", in.CollectionID),
-			zap.Int64s("segmentIDs", segmentIDs),
-			zap.Duration("timeInQueue", time.Since(startTs)))
-		err := task.PreExecute(ctx)
-		if err != nil {
-			status := &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			}
-			log.Warn("failed to load segments on preExecute ", zap.Error(err))
-			return status, nil
-		}
-		err = task.Execute(ctx)
-		if err != nil {
-			status := &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			}
-			log.Warn("failed to load segment", zap.Int64("collectionID", in.CollectionID), zap.Int64s("segmentIDs", segmentIDs), zap.Error(err))
-			return status, nil
-		}
 
-		err = task.PostExecute(ctx)
-		if err != nil {
-			status := &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			}
-			log.Warn("failed to load segments on postExecute ", zap.Error(err))
-			return status, nil
+	// TODO remove concurrent load segment for now, unless we solve the memory issue
+	log.Info("loadSegmentsTask start ", zap.Int64("collectionID", in.CollectionID),
+		zap.Int64s("segmentIDs", segmentIDs),
+		zap.Duration("timeInQueue", time.Since(startTs)))
+	err := task.PreExecute(ctx)
+	if err != nil {
+		status := &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
 		}
-		log.Info("loadSegmentsTask done", zap.Int64("collectionID", in.CollectionID), zap.Int64s("segmentIDs", segmentIDs), zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()))
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		}, nil
-	})
-	ret, _ := future.Await()
-	return ret.(*commonpb.Status), nil
+		log.Warn("failed to load segments on preExecute ", zap.Error(err))
+		return status, nil
+	}
+	err = task.Execute(ctx)
+	if err != nil {
+		status := &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}
+		log.Warn("failed to load segment", zap.Int64("collectionID", in.CollectionID), zap.Int64s("segmentIDs", segmentIDs), zap.Error(err))
+		return status, nil
+	}
+
+	err = task.PostExecute(ctx)
+	if err != nil {
+		status := &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}
+		log.Warn("failed to load segments on postExecute ", zap.Error(err))
+		return status, nil
+	}
+	log.Info("loadSegmentsTask done", zap.Int64("collectionID", in.CollectionID), zap.Int64s("segmentIDs", segmentIDs), zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()))
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}, nil
 }
 
 // ReleaseCollection clears all data related to this collection on the querynode
