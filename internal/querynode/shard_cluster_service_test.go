@@ -99,3 +99,30 @@ func TestShardClusterService_SyncReplicaSegments(t *testing.T) {
 		assert.Equal(t, segmentStateLoaded, segment.state)
 	})
 }
+
+func TestShardClusterService_close(t *testing.T) {
+	client := v3client.New(embedetcdServer.Server)
+	defer client.Close()
+	session := sessionutil.NewSession(context.Background(), "/by-dev/sessions/unittest/querynode/", client)
+	clusterService := newShardClusterService(client, session, nil)
+
+	t.Run("close ok", func(t *testing.T) {
+		clusterService.addShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel)
+
+		cnt := 0
+		clusterService.clusters.Range(func(key, value any) bool {
+			cnt++
+			return true
+		})
+		assert.Equal(t, 1, cnt)
+
+		err := clusterService.close()
+		assert.NoError(t, err)
+	})
+
+	t.Run("close fail", func(t *testing.T) {
+		clusterService.clusters.Store("key", "error")
+		err := clusterService.close()
+		assert.Error(t, err)
+	})
+}

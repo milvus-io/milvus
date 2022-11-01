@@ -2,6 +2,7 @@ package querynode
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path"
 	"strconv"
@@ -99,6 +100,29 @@ func (s *ShardClusterService) releaseShardCluster(vchannelName string) error {
 	cs := raw.(*ShardCluster)
 	cs.Close()
 	return nil
+}
+
+func (s *ShardClusterService) close() error {
+	log.Debug("start to close shard cluster service")
+
+	isFinish := true
+	s.clusters.Range(func(key, value any) bool {
+		cs, ok := value.(*ShardCluster)
+		if !ok {
+			log.Error("convert to ShardCluster fail, close shard cluster is interrupted", zap.Any("key", key))
+			isFinish = false
+			return false
+		}
+
+		cs.Close()
+		return true
+	})
+
+	if isFinish {
+		return nil
+	}
+
+	return errors.New("close shard cluster failed")
 }
 
 // releaseCollection removes all shardCluster matching specified collectionID
