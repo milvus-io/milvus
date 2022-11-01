@@ -512,6 +512,7 @@ func (c *ChannelMeta) mergeFlushedSegments(seg *Segment, planID UniqueID, compac
 
 	log.Info("merge flushed segments")
 	c.segMu.Lock()
+	defer c.segMu.Unlock()
 	for _, ID := range compactedFrom {
 		// the existent of the segments are already checked
 		s := c.segments[ID]
@@ -521,15 +522,11 @@ func (c *ChannelMeta) mergeFlushedSegments(seg *Segment, planID UniqueID, compac
 		s.currentStat = nil
 		s.historyStats = nil
 	}
-	c.segMu.Unlock()
 
 	// only store segments with numRows > 0
 	if seg.numRows > 0 {
 		seg.setType(datapb.SegmentType_Flushed)
-
-		c.segMu.Lock()
 		c.segments[seg.segmentID] = seg
-		c.segMu.Unlock()
 	}
 
 	return nil
