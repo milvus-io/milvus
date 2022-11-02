@@ -57,7 +57,11 @@ func (rc *Consumer) Chan() <-chan mqwrapper.Message {
 						}
 						skip := atomic.LoadInt32(&rc.skip)
 						if skip != 1 {
-							rc.msgChannel <- &rmqMessage{msg: msg}
+							select {
+							case rc.msgChannel <- &rmqMessage{msg: msg}:
+							case <-rc.closeCh:
+								// if consumer closed, enter close branch below
+							}
 						} else {
 							atomic.StoreInt32(&rc.skip, 0)
 						}
