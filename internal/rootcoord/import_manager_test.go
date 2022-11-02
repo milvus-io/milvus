@@ -26,18 +26,16 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
-	"github.com/milvus-io/milvus/internal/kv"
+	memkv "github.com/milvus-io/milvus/internal/kv/mem"
+	"github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/util/importutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 )
-
-type customKV struct {
-	kv.MockMetaKV
-}
 
 func TestImportManager_NewImportManager(t *testing.T) {
 	var countLock sync.RWMutex
@@ -54,8 +52,7 @@ func TestImportManager_NewImportManager(t *testing.T) {
 	Params.RootCoordCfg.ImportTaskRetention = 200
 	checkPendingTasksInterval = 100
 	cleanUpLoopInterval = 100
-	mockKv := &kv.MockMetaKV{}
-	mockKv.InMemKv = sync.Map{}
+	mockKv := memkv.NewMemoryKV()
 	ti1 := &datapb.ImportTaskInfo{
 		Id: 100,
 		State: &datapb.ImportTaskState{
@@ -136,13 +133,13 @@ func TestImportManager_NewImportManager(t *testing.T) {
 	wg.Add(1)
 	t.Run("importManager init fail because of loadFromTaskStore fail", func(t *testing.T) {
 		defer wg.Done()
+
+		mockTxnKV := &mocks.TxnKV{}
+		mockTxnKV.EXPECT().LoadWithPrefix(mock.Anything).Return(nil, nil, errors.New("mock error"))
+
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
 		defer cancel()
-		mgr := newImportManager(ctx, mockKv, idAlloc, callImportServiceFn, callMarkSegmentsDropped, nil, nil, nil, nil)
-		mockKv.LoadWithPrefixMockErr = true
-		defer func() {
-			mockKv.LoadWithPrefixMockErr = false
-		}()
+		mgr := newImportManager(ctx, mockTxnKV, idAlloc, callImportServiceFn, callMarkSegmentsDropped, nil, nil, nil, nil)
 		assert.NotNil(t, mgr)
 		assert.Panics(t, func() {
 			mgr.init(context.TODO())
@@ -152,13 +149,14 @@ func TestImportManager_NewImportManager(t *testing.T) {
 	wg.Add(1)
 	t.Run("sendOutTasks fail", func(t *testing.T) {
 		defer wg.Done()
+
+		mockTxnKV := &mocks.TxnKV{}
+		mockTxnKV.EXPECT().LoadWithPrefix(mock.Anything).Return(nil, nil, nil)
+		mockTxnKV.EXPECT().Save(mock.Anything, mock.Anything).Return(errors.New("mock save error"))
+
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
 		defer cancel()
-		mgr := newImportManager(ctx, mockKv, idAlloc, callImportServiceFn, callMarkSegmentsDropped, nil, nil, nil, nil)
-		mockKv.SaveMockErr = true
-		defer func() {
-			mockKv.SaveMockErr = false
-		}()
+		mgr := newImportManager(ctx, mockTxnKV, idAlloc, callImportServiceFn, callMarkSegmentsDropped, nil, nil, nil, nil)
 		assert.NotNil(t, mgr)
 		mgr.init(context.TODO())
 	})
@@ -166,24 +164,23 @@ func TestImportManager_NewImportManager(t *testing.T) {
 	wg.Add(1)
 	t.Run("sendOutTasks fail", func(t *testing.T) {
 		defer wg.Done()
+
+		mockTxnKV := &mocks.TxnKV{}
+		mockTxnKV.EXPECT().LoadWithPrefix(mock.Anything).Return(nil, nil, nil)
+
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
 		defer cancel()
-		mgr := newImportManager(ctx, mockKv, idAlloc, callImportServiceFn, callMarkSegmentsDropped, nil, nil, nil, nil)
+		mgr := newImportManager(ctx, mockTxnKV, idAlloc, callImportServiceFn, callMarkSegmentsDropped, nil, nil, nil, nil)
 		assert.NotNil(t, mgr)
 		mgr.init(context.TODO())
 		func() {
-			mockKv.SaveMockErr = true
-			defer func() {
-				mockKv.SaveMockErr = false
-			}()
+			mockTxnKV.EXPECT().Save(mock.Anything, mock.Anything).Maybe().Return(errors.New("mock save error"))
 			mgr.sendOutTasks(context.TODO())
 		}()
 
 		func() {
+			mockTxnKV.EXPECT().Save(mock.Anything, mock.Anything).Maybe().Return(nil)
 			mockCallImportServiceErr = true
-			defer func() {
-				mockKv.SaveMockErr = false
-			}()
 			mgr.sendOutTasks(context.TODO())
 		}()
 	})
@@ -254,8 +251,7 @@ func TestImportManager_TestSetImportTaskState(t *testing.T) {
 	Params.RootCoordCfg.ImportTaskRetention = 200
 	checkPendingTasksInterval = 100
 	cleanUpLoopInterval = 100
-	mockKv := &kv.MockMetaKV{}
-	mockKv.InMemKv = sync.Map{}
+	mockKv := memkv.NewMemoryKV()
 	ti1 := &datapb.ImportTaskInfo{
 		Id: 100,
 		State: &datapb.ImportTaskState{
@@ -324,8 +320,7 @@ func TestImportManager_TestEtcdCleanUp(t *testing.T) {
 	Params.RootCoordCfg.ImportTaskRetention = 200
 	checkPendingTasksInterval = 100
 	cleanUpLoopInterval = 100
-	mockKv := &kv.MockMetaKV{}
-	mockKv.InMemKv = sync.Map{}
+	mockKv := memkv.NewMemoryKV()
 	ti1 := &datapb.ImportTaskInfo{
 		Id: 100,
 		State: &datapb.ImportTaskState{
@@ -413,8 +408,7 @@ func TestImportManager_TestFlipTaskStateLoop(t *testing.T) {
 	Params.RootCoordCfg.ImportTaskRetention = 200
 	checkPendingTasksInterval = 100
 	cleanUpLoopInterval = 100
-	mockKv := &kv.MockMetaKV{}
-	mockKv.InMemKv = sync.Map{}
+	mockKv := memkv.NewMemoryKV()
 	ti1 := &datapb.ImportTaskInfo{
 		Id: 100,
 		State: &datapb.ImportTaskState{
@@ -566,8 +560,7 @@ func TestImportManager_ImportJob(t *testing.T) {
 	}
 	Params.RootCoordCfg.ImportTaskSubPath = "test_import_task"
 	colID := int64(100)
-	mockKv := &kv.MockMetaKV{}
-	mockKv.InMemKv = sync.Map{}
+	mockKv := memkv.NewMemoryKV()
 	callMarkSegmentsDropped := func(ctx context.Context, segIDs []typeutil.UniqueID) (*commonpb.Status, error) {
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
@@ -693,8 +686,7 @@ func TestImportManager_AllDataNodesBusy(t *testing.T) {
 	}
 	Params.RootCoordCfg.ImportTaskSubPath = "test_import_task"
 	colID := int64(100)
-	mockKv := &kv.MockMetaKV{}
-	mockKv.InMemKv = sync.Map{}
+	mockKv := memkv.NewMemoryKV()
 	rowReq := &milvuspb.ImportRequest{
 		CollectionName: "c1",
 		PartitionName:  "p1",
@@ -790,8 +782,7 @@ func TestImportManager_TaskState(t *testing.T) {
 	}
 	Params.RootCoordCfg.ImportTaskSubPath = "test_import_task"
 	colID := int64(100)
-	mockKv := &kv.MockMetaKV{}
-	mockKv.InMemKv = sync.Map{}
+	mockKv := memkv.NewMemoryKV()
 	importServiceFunc := func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
 		return &datapb.ImportTaskResponse{
 			Status: &commonpb.Status{
@@ -891,8 +882,7 @@ func TestImportManager_AllocFail(t *testing.T) {
 	}
 	Params.RootCoordCfg.ImportTaskSubPath = "test_import_task"
 	colID := int64(100)
-	mockKv := &kv.MockMetaKV{}
-	mockKv.InMemKv = sync.Map{}
+	mockKv := memkv.NewMemoryKV()
 	importServiceFunc := func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
 		return &datapb.ImportTaskResponse{
 			Status: &commonpb.Status{
@@ -931,8 +921,7 @@ func TestImportManager_ListAllTasks(t *testing.T) {
 
 	Params.RootCoordCfg.ImportTaskSubPath = "test_import_task"
 	colID := int64(100)
-	mockKv := &kv.MockMetaKV{}
-	mockKv.InMemKv = sync.Map{}
+	mockKv := memkv.NewMemoryKV()
 
 	// reject some tasks so there are 3 tasks left in pending list
 	fn := func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {

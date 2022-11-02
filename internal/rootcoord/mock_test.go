@@ -9,7 +9,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/allocator"
-	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
@@ -246,17 +245,6 @@ func newMockTsoAllocator() *tso.MockAllocator {
 	r := tso.NewMockAllocator()
 	r.GenerateTSOF = func(count uint32) (uint64, error) {
 		return 0, nil
-	}
-	return r
-}
-
-func newTxnKV() *kv.TxnKVMock {
-	r := kv.NewMockTxnKV()
-	r.SaveF = func(key, value string) error {
-		return nil
-	}
-	r.RemoveF = func(key string) error {
-		return nil
 	}
 	return r
 }

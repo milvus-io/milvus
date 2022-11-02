@@ -38,7 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
-func newMemoryMeta(allocator allocator) (*meta, error) {
+func newMemoryMeta() (*meta, error) {
 	memoryKV := memkv.NewMemoryKV()
 	return newMeta(context.TODO(), memoryKV, "")
 }
