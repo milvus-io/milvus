@@ -353,6 +353,10 @@ func (node *QueryNode) Stop() error {
 		node.metaReplica.freeAll()
 	}
 
+	if node.ShardClusterService != nil {
+		node.ShardClusterService.close()
+	}
+
 	if node.queryShardService != nil {
 		node.queryShardService.close()
 	}
