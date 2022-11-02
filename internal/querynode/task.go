@@ -107,8 +107,8 @@ func (r *releaseCollectionTask) Execute(ctx context.Context) error {
 		return err
 	}
 	// set release time
-	log.Info("set release time", zap.Any("collectionID", r.req.CollectionID))
-	collection.setReleaseTime(r.req.Base.Timestamp, true)
+	log.Info("mark collection to be destroyed", zap.Int64("collectionID", r.req.CollectionID))
+	collection.MarkDestroyed()
 
 	// remove all flow graphs of the target collection
 	vChannels := collection.getVChannels()
@@ -162,8 +162,8 @@ func (r *releasePartitionsTask) Execute(ctx context.Context) error {
 
 	if releaseAll {
 		// set release time
-		log.Info("set release time", zap.Int64("collectionID", r.req.CollectionID))
-		coll.setReleaseTime(r.req.Base.Timestamp, true)
+		log.Info("mark collection to be destroyed", zap.Int64("collectionID", r.req.CollectionID))
+		coll.MarkDestroyed()
 
 		// remove all flow graphs of the target collection
 		vChannels := coll.getVChannels()

@@ -83,13 +83,10 @@ type Segment struct {
 	collectionID UniqueID
 	version      UniqueID
 
-	vChannelID   Channel
-	lastMemSize  int64
-	lastRowCount int64
+	vChannelID Channel
 
-	recentlyModified *atomic.Bool
-	segmentType      *atomic.Int32
-	destroyed        *atomic.Bool
+	segmentType *atomic.Int32
+	destroyed   *atomic.Bool
 
 	idBinlogRowSizes []int64
 
@@ -114,14 +111,6 @@ func (s *Segment) setIDBinlogRowSizes(sizes []int64) {
 
 func (s *Segment) getIDBinlogRowSizes() []int64 {
 	return s.idBinlogRowSizes
-}
-
-func (s *Segment) setRecentlyModified(modify bool) {
-	s.recentlyModified.Store(modify)
-}
-
-func (s *Segment) getRecentlyModified() bool {
-	return s.recentlyModified.Load()
 }
 
 func (s *Segment) setType(segType segmentType) {
@@ -173,6 +162,12 @@ func newSegment(collection *Collection,
 	segType segmentType,
 	version UniqueID,
 	pool *concurrency.Pool) (*Segment, error) {
+
+	collection.mu.RLock()
+	defer collection.mu.RUnlock()
+	if !collection.healthyCheck() {
+		return nil, fmt.Errorf("newSegment failed, unhealthy collection %d when create segment  %d", collection.ID(), segmentID)
+	}
 	/*
 		CSegmentInterface
 		NewSegment(CCollection collection, uint64_t segment_id, SegmentType seg_type);
@@ -215,7 +210,6 @@ func newSegment(collection *Collection,
 		version:           version,
 		vChannelID:        vChannelID,
 		indexedFieldInfos: typeutil.NewConcurrentMap[int64, *IndexedFieldInfo](),
-		recentlyModified:  atomic.NewBool(false),
 		destroyed:         atomic.NewBool(false),
 		historyStats:      []*storage.PkStatistics{},
 		pool:              pool,
@@ -755,7 +749,6 @@ func (s *Segment) segmentInsert(offset int64, entityIDs []UniqueID, timestamps [
 		return err
 	}
 	metrics.QueryNodeNumEntities.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Add(float64(numOfRow))
-	s.setRecentlyModified(true)
 	return nil
 }
 

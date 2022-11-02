@@ -87,7 +87,7 @@ func TestReduce_AllFunc(t *testing.T) {
 
 	dslString := "{\"bool\": { \n\"vector\": {\n \"floatVectorField\": {\n \"metric_type\": \"L2\", \n \"params\": {\n \"nprobe\": 10 \n},\n \"query\": \"$0\",\n \"topk\": 10 \n,\"round_decimal\": 6\n } \n } \n } \n }"
 
-	plan, err := createSearchPlan(collection, dslString)
+	plan, err := collection.createSearchPlan(dslString)
 	assert.NoError(t, err)
 	searchReq, err := parseSearchRequest(plan, placeGroupByte)
 	searchReq.timestamp = 0
@@ -101,7 +101,7 @@ func TestReduce_AllFunc(t *testing.T) {
 
 	searchReq.delete()
 	deleteSegment(segment)
-	deleteCollection(collection)
+	collection.Clear()
 }
 
 func TestReduce_Invalid(t *testing.T) {

@@ -66,14 +66,14 @@ func (q *queryTask) queryOnStreaming() error {
 		return err
 	}
 
-	if _, released := q.QS.collection.getReleaseTime(); released {
+	if healthy := q.QS.collection.IsHealthy(); !healthy {
 		log.Ctx(ctx).Debug("collection release before search", zap.Int64("msgID", q.ID()),
 			zap.Int64("collectionID", q.CollectionID))
 		return fmt.Errorf("retrieve failed, collection has been released, collectionID = %d", q.CollectionID)
 	}
 
 	// deserialize query plan
-	plan, err := createRetrievePlanByExpr(q.QS.collection, q.iReq.GetSerializedExprPlan(), q.TravelTimestamp, q.ID())
+	plan, err := q.QS.collection.createRetrievePlanByExpr(q.iReq.GetSerializedExprPlan(), q.TravelTimestamp, q.ID())
 	if err != nil {
 		return err
 	}
@@ -112,14 +112,14 @@ func (q *queryTask) queryOnHistorical() error {
 		return err
 	}
 
-	if _, released := q.QS.collection.getReleaseTime(); released {
+	if healthy := q.QS.collection.IsHealthy(); !healthy {
 		log.Ctx(ctx).Debug("collection release before search", zap.Int64("msgID", q.ID()),
 			zap.Int64("collectionID", q.CollectionID))
 		return fmt.Errorf("retrieve failed, collection has been released, collectionID = %d", q.CollectionID)
 	}
 
 	// deserialize query plan
-	plan, err := createRetrievePlanByExpr(q.QS.collection, q.iReq.GetSerializedExprPlan(), q.TravelTimestamp, q.ID())
+	plan, err := q.QS.collection.createRetrievePlanByExpr(q.iReq.GetSerializedExprPlan(), q.TravelTimestamp, q.ID())
 	if err != nil {
 		return err
 	}

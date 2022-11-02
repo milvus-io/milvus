@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/concurrency"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
 
 func TestMetaReplica_collection(t *testing.T) {
@@ -421,8 +422,9 @@ func TestMetaReplica_removeCollectionVDeltaChannel(t *testing.T) {
 	collection := replica.addCollection(defaultCollectionID, schema)
 	replica.addPartition(defaultCollectionID, defaultPartitionID)
 	replica.addPartition(defaultCollectionID, defaultPartitionID+1)
-
-	collection.addVDeltaChannels([]string{defaultDeltaChannel})
+	vpChannels := make(map[string]string)
+	vpChannels[defaultDeltaChannel] = funcutil.ToPhysicalChannel(defaultDeltaChannel)
+	collection.AddVDeltaChannels([]string{defaultDeltaChannel}, vpChannels)
 
 	assert.NotPanics(t, func() {
 		replica.removeCollectionVDeltaChannel(defaultCollectionID, defaultDeltaChannel)

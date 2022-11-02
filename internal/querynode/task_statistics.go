@@ -45,7 +45,7 @@ func (s *statistics) statisticOnStreaming() error {
 		return err
 	}
 
-	if _, released := s.qs.collection.getReleaseTime(); released {
+	if healthy := s.qs.collection.IsHealthy(); !healthy {
 		log.Ctx(ctx).Warn("collection release before do statistics", zap.Int64("msgID", s.id),
 			zap.Int64("collectionID", s.iReq.GetCollectionID()))
 		return fmt.Errorf("statistic failed, collection has been released, collectionID = %d", s.iReq.GetCollectionID())
@@ -74,7 +74,7 @@ func (s *statistics) statisticOnHistorical() error {
 		return err
 	}
 
-	if _, released := s.qs.collection.getReleaseTime(); released {
+	if healthy := s.qs.collection.IsHealthy(); !healthy {
 		log.Ctx(ctx).Debug("collection release before do statistics", zap.Int64("msgID", s.id),
 			zap.Int64("collectionID", s.iReq.GetCollectionID()))
 		return fmt.Errorf("statistic failed, collection has been released, collectionID = %d", s.iReq.GetCollectionID())

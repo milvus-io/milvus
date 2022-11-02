@@ -56,7 +56,7 @@ func TestSegment_newSegment(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, segmentID, segment.segmentID)
 	deleteSegment(segment)
-	deleteCollection(collection)
+	collection.Clear()
 
 	t.Run("test invalid type", func(t *testing.T) {
 		_, err = newSegment(collection,
@@ -84,7 +84,7 @@ func TestSegment_deleteSegment(t *testing.T) {
 	assert.Nil(t, err)
 
 	deleteSegment(segment)
-	deleteCollection(collection)
+	collection.Clear()
 
 	t.Run("test delete nil ptr", func(t *testing.T) {
 		s, err := genSimpleSealedSegment(defaultMsgLength)
@@ -129,7 +129,7 @@ func TestSegment_getRowCount(t *testing.T) {
 	assert.Equal(t, int64(defaultMsgLength), rowCount)
 
 	deleteSegment(segment)
-	deleteCollection(collection)
+	collection.Clear()
 
 	t.Run("test getRowCount nil ptr", func(t *testing.T) {
 		s, err := genSimpleSealedSegment(defaultMsgLength)
@@ -202,7 +202,7 @@ func TestSegment_retrieve(t *testing.T) {
 	}
 	planExpr, err := proto.Marshal(planNode)
 	assert.NoError(t, err)
-	plan, err := createRetrievePlanByExpr(collection, planExpr, 100, 100)
+	plan, err := collection.createRetrievePlanByExpr(planExpr, 100, 100)
 	defer plan.delete()
 	assert.NoError(t, err)
 
@@ -268,7 +268,7 @@ func TestSegment_getDeletedCount(t *testing.T) {
 	// TODO: assert.Equal(t, deletedCount, len(ids))
 	assert.Equal(t, deletedCount, int64(len(pks)))
 
-	deleteCollection(collection)
+	collection.Clear()
 
 	t.Run("test getDeletedCount nil ptr", func(t *testing.T) {
 		s, err := genSimpleSealedSegment(defaultMsgLength)
@@ -314,7 +314,7 @@ func TestSegment_getMemSize(t *testing.T) {
 	fmt.Printf("memory size of segment: %d\n", memSize)
 
 	deleteSegment(segment)
-	deleteCollection(collection)
+	collection.Clear()
 }
 
 //-------------------------------------------------------------------------------------- dm & search functions
@@ -346,7 +346,7 @@ func TestSegment_segmentInsert(t *testing.T) {
 	err = segment.segmentInsert(offsetInsert, insertMsg.RowIDs, insertMsg.Timestamps, insertRecord)
 	assert.NoError(t, err)
 	deleteSegment(segment)
-	deleteCollection(collection)
+	collection.Clear()
 
 	t.Run("test nil segment", func(t *testing.T) {
 		segment, err := genSimpleSealedSegment(defaultMsgLength)
@@ -401,7 +401,7 @@ func TestSegment_segmentDelete(t *testing.T) {
 	err = segment.segmentDelete(offsetDelete, pks, insertMsg.Timestamps)
 	assert.NoError(t, err)
 
-	deleteCollection(collection)
+	collection.Clear()
 }
 
 func TestSegment_segmentSearch(t *testing.T) {
@@ -445,7 +445,7 @@ func TestSegment_segmentSearch(t *testing.T) {
 
 	dslString := "{\"bool\": { \n\"vector\": {\n \"floatVectorField\": {\n \"metric_type\": \"L2\", \n \"params\": {\n \"nprobe\": 10 \n},\n \"query\": \"$0\",\n \"topk\": 10 \n,\"round_decimal\": 6\n } \n } \n } \n }"
 
-	plan, err := createSearchPlan(collection, dslString)
+	plan, err := collection.createSearchPlan(dslString)
 	assert.NoError(t, err)
 	req, err := parseSearchRequest(plan, placeGroupByte)
 	assert.NoError(t, err)
@@ -458,7 +458,7 @@ func TestSegment_segmentSearch(t *testing.T) {
 
 	req.delete()
 	deleteSegment(segment)
-	deleteCollection(collection)
+	collection.Clear()
 }
 
 //-------------------------------------------------------------------------------------- preDm functions
@@ -481,7 +481,7 @@ func TestSegment_segmentPreInsert(t *testing.T) {
 	assert.GreaterOrEqual(t, offset, int64(0))
 
 	deleteSegment(segment)
-	deleteCollection(collection)
+	collection.Clear()
 }
 
 func TestSegment_segmentPreDelete(t *testing.T) {
@@ -516,7 +516,7 @@ func TestSegment_segmentPreDelete(t *testing.T) {
 	assert.GreaterOrEqual(t, offsetDelete, int64(0))
 
 	deleteSegment(segment)
-	deleteCollection(collection)
+	collection.Clear()
 }
 
 func TestSegment_segmentLoadDeletedRecord(t *testing.T) {

@@ -38,42 +38,6 @@ type SearchPlan struct {
 	cSearchPlan C.CSearchPlan
 }
 
-// createSearchPlan returns a new SearchPlan and error
-func createSearchPlan(col *Collection, dsl string) (*SearchPlan, error) {
-	if col.collectionPtr == nil {
-		return nil, errors.New("nil collection ptr, collectionID = " + fmt.Sprintln(col.id))
-	}
-
-	cDsl := C.CString(dsl)
-	defer C.free(unsafe.Pointer(cDsl))
-	var cPlan C.CSearchPlan
-	status := C.CreateSearchPlan(col.collectionPtr, cDsl, &cPlan)
-
-	err1 := HandleCStatus(&status, "Create Plan failed")
-	if err1 != nil {
-		return nil, err1
-	}
-
-	var newPlan = &SearchPlan{cSearchPlan: cPlan}
-	return newPlan, nil
-}
-
-func createSearchPlanByExpr(col *Collection, expr []byte) (*SearchPlan, error) {
-	if col.collectionPtr == nil {
-		return nil, errors.New("nil collection ptr, collectionID = " + fmt.Sprintln(col.id))
-	}
-	var cPlan C.CSearchPlan
-	status := C.CreateSearchPlanByExpr(col.collectionPtr, unsafe.Pointer(&expr[0]), (C.int64_t)(len(expr)), &cPlan)
-
-	err1 := HandleCStatus(&status, "Create Plan by expr failed")
-	if err1 != nil {
-		return nil, err1
-	}
-
-	var newPlan = &SearchPlan{cSearchPlan: cPlan}
-	return newPlan, nil
-}
-
 func (plan *SearchPlan) getTopK() int64 {
 	topK := C.GetTopK(plan.cSearchPlan)
 	return int64(topK)
@@ -103,13 +67,13 @@ func newSearchRequest(collection *Collection, req *querypb.SearchRequest, placeh
 	var plan *SearchPlan
 	if req.Req.GetDslType() == commonpb.DslType_BoolExprV1 {
 		expr := req.Req.SerializedExprPlan
-		plan, err = createSearchPlanByExpr(collection, expr)
+		plan, err = collection.createSearchPlanByExpr(expr)
 		if err != nil {
 			return nil, err
 		}
 	} else {
 		dsl := req.Req.GetDsl()
-		plan, err = createSearchPlan(collection, dsl)
+		plan, err = collection.createSearchPlan(dsl)
 		if err != nil {
 			return nil, err
 		}
@@ -182,26 +146,6 @@ type RetrievePlan struct {
 	cRetrievePlan C.CRetrievePlan
 	Timestamp     Timestamp
 	msgID         UniqueID // only used to debug.
-}
-
-func createRetrievePlanByExpr(col *Collection, expr []byte, timestamp Timestamp, msgID UniqueID) (*RetrievePlan, error) {
-	col.mu.RLock()
-	defer col.mu.RUnlock()
-
-	var cPlan C.CRetrievePlan
-	status := C.CreateRetrievePlanByExpr(col.collectionPtr, unsafe.Pointer(&expr[0]), (C.int64_t)(len(expr)), &cPlan)
-
-	err := HandleCStatus(&status, "Create retrieve plan by expr failed")
-	if err != nil {
-		return nil, err
-	}
-
-	var newPlan = &RetrievePlan{
-		cRetrievePlan: cPlan,
-		Timestamp:     timestamp,
-		msgID:         msgID,
-	}
-	return newPlan, nil
 }
 
 func (plan *RetrievePlan) delete() {

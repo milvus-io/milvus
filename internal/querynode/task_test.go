@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
 
 func TestTask_watchDmChannelsTask(t *testing.T) {
@@ -364,7 +365,10 @@ func TestTask_releaseCollectionTask(t *testing.T) {
 
 		col, err := node.metaReplica.getCollectionByID(defaultCollectionID)
 		assert.NoError(t, err)
-		col.addVDeltaChannels([]Channel{defaultDeltaChannel})
+
+		vpChannels := make(map[string]string)
+		vpChannels[defaultDeltaChannel] = funcutil.ToPhysicalChannel(defaultDeltaChannel)
+		col.AddVDeltaChannels([]string{defaultDeltaChannel}, vpChannels)
 
 		task := releaseCollectionTask{
 			req:  genReleaseCollectionRequest(),
@@ -506,7 +510,9 @@ func TestTask_releasePartitionTask(t *testing.T) {
 		err = node.metaReplica.removePartition(defaultPartitionID)
 		assert.NoError(t, err)
 
-		col.addVDeltaChannels([]Channel{defaultDeltaChannel})
+		vpChannels := make(map[string]string)
+		vpChannels[defaultDeltaChannel] = funcutil.ToPhysicalChannel(defaultDeltaChannel)
+		col.AddVDeltaChannels([]string{defaultDeltaChannel}, vpChannels)
 		col.setLoadType(loadTypePartition)
 
 		/*

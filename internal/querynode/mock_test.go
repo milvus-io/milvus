@@ -1289,9 +1289,10 @@ func genSimpleReplicaWithGrowingSegment() (ReplicaInterface, error) {
 	if err != nil {
 		return nil, err
 	}
-	col.addVChannels([]Channel{
-		defaultDMLChannel,
-	})
+
+	vpChannels := make(map[string]string)
+	vpChannels[defaultDMLChannel] = funcutil.ToPhysicalChannel(defaultDMLChannel)
+	col.AddChannels([]string{defaultDMLChannel}, vpChannels)
 	return r, nil
 }
 
@@ -1486,7 +1487,7 @@ func genSimpleRetrievePlan(collection *Collection) (*RetrievePlan, error) {
 		return nil, err
 	}
 
-	plan, err2 := createRetrievePlanByExpr(collection, planBytes, timestamp, 100)
+	plan, err2 := collection.createRetrievePlanByExpr(planBytes, timestamp, 100)
 	return plan, err2
 }
 

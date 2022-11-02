@@ -24,8 +24,8 @@ package querynode
 */
 import "C"
 import (
+	"errors"
 	"fmt"
-	"math"
 	"sync"
 	"sync/atomic"
 	"unsafe"
@@ -44,7 +44,7 @@ import (
 
 // Collection is a wrapper of the underlying C-structure C.CCollection
 type Collection struct {
-	mu            sync.RWMutex // protects colllectionPtr
+	mu            sync.RWMutex
 	collectionPtr C.CCollection
 	id            UniqueID
 	partitionIDs  []UniqueID
@@ -59,14 +59,15 @@ type Collection struct {
 
 	loadType int32
 
-	releaseMu          sync.RWMutex // guards release
 	releasedPartitions map[UniqueID]struct{}
-	releaseTime        Timestamp
-	released           bool
+	markDestroyed      bool
 }
 
 // ID returns collection id
 func (c *Collection) ID() UniqueID {
+	if c == nil {
+		return 0
+	}
 	return c.id
 }
 
@@ -76,6 +77,7 @@ func (c *Collection) Schema() *schemapb.CollectionSchema {
 }
 
 // getPartitionIDs return partitionIDs of collection
+// it only called by meta_replica, no need to add lock
 func (c *Collection) getPartitionIDs() []UniqueID {
 	dst := make([]UniqueID, len(c.partitionIDs))
 	copy(dst, c.partitionIDs)
@@ -83,6 +85,7 @@ func (c *Collection) getPartitionIDs() []UniqueID {
 }
 
 // addPartitionID would add a partition id to partition id list of collection
+// it only called by meta_replica, no need to add lock
 func (c *Collection) addPartitionID(partitionID UniqueID) {
 	c.partitionIDs = append(c.partitionIDs, partitionID)
 	log.Info("queryNode collection info after add a partition",
@@ -91,6 +94,7 @@ func (c *Collection) addPartitionID(partitionID UniqueID) {
 }
 
 // removePartitionID removes the partition id from partition id list of collection
+// it only called by meta_replica, no need to add lock
 func (c *Collection) removePartitionID(partitionID UniqueID) {
 	tmpIDs := make([]UniqueID, 0, len(c.partitionIDs))
 	for _, id := range c.partitionIDs {
@@ -99,31 +103,6 @@ func (c *Collection) removePartitionID(partitionID UniqueID) {
 		}
 	}
 	c.partitionIDs = tmpIDs
-}
-
-// addVChannels adds virtual channels to collection
-func (c *Collection) addVChannels(channels []Channel) {
-	c.channelMu.Lock()
-	defer c.channelMu.Unlock()
-OUTER:
-	for _, dstChan := range channels {
-		for _, srcChan := range c.vChannels {
-			if dstChan == srcChan {
-				log.Warn("vChannel has been existed in collection's vChannels",
-					zap.Int64("collectionID", c.ID()),
-					zap.String("vChannel", dstChan),
-				)
-				continue OUTER
-			}
-		}
-		log.Info("add vChannel to collection",
-			zap.Int64("collectionID", c.ID()),
-			zap.String("vChannel", dstChan),
-		)
-		c.vChannels = append(c.vChannels, dstChan)
-	}
-
-	metrics.QueryNodeNumDmlChannels.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Add(float64(len(c.vChannels)))
 }
 
 // getVChannels get virtual channels of collection
@@ -154,29 +133,6 @@ func (c *Collection) removeVChannel(channel Channel) {
 	metrics.QueryNodeNumDmlChannels.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Sub(float64(len(c.vChannels)))
 }
 
-// addPChannels add physical channels to physical channels of collection
-func (c *Collection) addPChannels(channels []Channel) {
-	c.channelMu.Lock()
-	defer c.channelMu.Unlock()
-OUTER:
-	for _, dstChan := range channels {
-		for _, srcChan := range c.pChannels {
-			if dstChan == srcChan {
-				log.Info("pChannel has been existed in collection's pChannels",
-					zap.Int64("collectionID", c.ID()),
-					zap.String("pChannel", dstChan),
-				)
-				continue OUTER
-			}
-		}
-		log.Info("add pChannel to collection",
-			zap.Int64("collectionID", c.ID()),
-			zap.String("pChannel", dstChan),
-		)
-		c.pChannels = append(c.pChannels, dstChan)
-	}
-}
-
 // getPChannels get physical channels of collection
 func (c *Collection) getPChannels() []Channel {
 	c.channelMu.RLock()
@@ -184,29 +140,6 @@ func (c *Collection) getPChannels() []Channel {
 	tmpChannels := make([]Channel, len(c.pChannels))
 	copy(tmpChannels, c.pChannels)
 	return tmpChannels
-}
-
-// addPChannels add physical channels to physical channels of collection
-func (c *Collection) addPDeltaChannels(channels []Channel) {
-	c.channelMu.Lock()
-	defer c.channelMu.Unlock()
-OUTER:
-	for _, dstChan := range channels {
-		for _, srcChan := range c.pDeltaChannels {
-			if dstChan == srcChan {
-				log.Info("pChannel has been existed in collection's pChannels",
-					zap.Int64("collectionID", c.ID()),
-					zap.String("pChannel", dstChan),
-				)
-				continue OUTER
-			}
-		}
-		log.Info("add pChannel to collection",
-			zap.Int64("collectionID", c.ID()),
-			zap.String("pChannel", dstChan),
-		)
-		c.pDeltaChannels = append(c.pDeltaChannels, dstChan)
-	}
 }
 
 // getPChannels get physical channels of collection
@@ -259,31 +192,6 @@ func (c *Collection) isPChannelExist(channel string) bool {
 		}
 	}
 	return false
-}
-
-// addVChannels add virtual channels to collection
-func (c *Collection) addVDeltaChannels(channels []Channel) {
-	c.channelMu.Lock()
-	defer c.channelMu.Unlock()
-OUTER:
-	for _, dstChan := range channels {
-		for _, srcChan := range c.vDeltaChannels {
-			if dstChan == srcChan {
-				log.Info("vDeltaChannel has been existed in collection's vDeltaChannels",
-					zap.Int64("collectionID", c.ID()),
-					zap.String("vChannel", dstChan),
-				)
-				continue OUTER
-			}
-		}
-		log.Info("add vDeltaChannel to collection",
-			zap.Int64("collectionID", c.ID()),
-			zap.String("vDeltaChannel", dstChan),
-		)
-		c.vDeltaChannels = append(c.vDeltaChannels, dstChan)
-	}
-
-	metrics.QueryNodeNumDeltaChannels.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Add(float64(len(c.vDeltaChannels)))
 }
 
 func (c *Collection) removeVDeltaChannel(channel Channel) {
@@ -339,19 +247,29 @@ func (c *Collection) isPDeltaChannelExist(channel string) bool {
 	return false
 }
 
-// setReleaseTime records when collection is released
-func (c *Collection) setReleaseTime(t Timestamp, released bool) {
-	c.releaseMu.Lock()
-	defer c.releaseMu.Unlock()
-	c.releaseTime = t
-	c.released = released
+// MarkDestroyed mark the collection to be/ has been destroyed
+func (c *Collection) MarkDestroyed() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.markDestroyed = true
 }
 
-// getReleaseTime gets the time when collection is released
-func (c *Collection) getReleaseTime() (Timestamp, bool) {
-	c.releaseMu.RLock()
-	defer c.releaseMu.RUnlock()
-	return c.releaseTime, c.released
+// healthyCheck check whether the collection is healthy
+func (c *Collection) healthyCheck() bool {
+	return !c.markDestroyed && c.collectionPtr != nil
+}
+
+// IsHealthy get whether the collection is healthy
+func (c *Collection) IsHealthy() bool {
+	if c == nil {
+		return false
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.healthyCheck()
 }
 
 // setLoadType set the loading type of collection, which is loadTypeCollection or loadTypePartition
@@ -378,6 +296,96 @@ func (c *Collection) getFieldType(fieldID FieldID) (schemapb.DataType, error) {
 	return field.GetDataType(), nil
 }
 
+// Clear free the collection memory
+func (c *Collection) Clear() {
+	defer func() {
+		log.Info("delete collection", zap.Int64("collectionID", c.ID()))
+	}()
+
+	if c == nil {
+		return
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.markDestroyed = true
+
+	/*
+		void
+		deleteCollection(CCollection collection);
+	*/
+	if c.collectionPtr == nil {
+		return
+	}
+
+	C.DeleteCollection(c.collectionPtr)
+	c.collectionPtr = nil
+}
+
+// createSearchPlan returns a new SearchPlan and error
+func (c *Collection) createSearchPlan(dsl string) (*SearchPlan, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if !c.healthyCheck() {
+		return nil, errors.New("unhealthy collection, collectionID = " + fmt.Sprintln(c.ID()))
+	}
+
+	cDsl := C.CString(dsl)
+	defer C.free(unsafe.Pointer(cDsl))
+	var cPlan C.CSearchPlan
+	status := C.CreateSearchPlan(c.collectionPtr, cDsl, &cPlan)
+
+	err1 := HandleCStatus(&status, "Create Plan failed")
+	if err1 != nil {
+		return nil, err1
+	}
+
+	var newPlan = &SearchPlan{cSearchPlan: cPlan}
+	return newPlan, nil
+}
+
+func (c *Collection) createSearchPlanByExpr(expr []byte) (*SearchPlan, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if !c.healthyCheck() {
+		return nil, errors.New("unhealthy collection, collectionID = " + fmt.Sprintln(c.ID()))
+	}
+	var cPlan C.CSearchPlan
+	status := C.CreateSearchPlanByExpr(c.collectionPtr, unsafe.Pointer(&expr[0]), (C.int64_t)(len(expr)), &cPlan)
+
+	err1 := HandleCStatus(&status, "Create Plan by expr failed")
+	if err1 != nil {
+		return nil, err1
+	}
+
+	var newPlan = &SearchPlan{cSearchPlan: cPlan}
+	return newPlan, nil
+}
+
+func (c *Collection) createRetrievePlanByExpr(expr []byte, timestamp Timestamp, msgID UniqueID) (*RetrievePlan, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if !c.healthyCheck() {
+		return nil, errors.New("unhealthy collection, collectionID = " + fmt.Sprintln(c.ID()))
+	}
+
+	var cPlan C.CRetrievePlan
+	status := C.CreateRetrievePlanByExpr(c.collectionPtr, unsafe.Pointer(&expr[0]), (C.int64_t)(len(expr)), &cPlan)
+
+	err := HandleCStatus(&status, "Create retrieve plan by expr failed")
+	if err != nil {
+		return nil, err
+	}
+
+	var newPlan = &RetrievePlan{
+		cRetrievePlan: cPlan,
+		Timestamp:     timestamp,
+		msgID:         msgID,
+	}
+	return newPlan, nil
+}
+
 // newCollection returns a new Collection
 func newCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) *Collection {
 	/*
@@ -398,23 +406,5 @@ func newCollection(collectionID UniqueID, schema *schemapb.CollectionSchema) *Co
 	C.free(unsafe.Pointer(cSchemaBlob))
 
 	log.Info("create collection", zap.Int64("collectionID", collectionID))
-
-	newCollection.setReleaseTime(Timestamp(math.MaxUint64), false)
 	return newCollection
-}
-
-// deleteCollection delete collection and free the collection memory
-func deleteCollection(collection *Collection) {
-	/*
-		void
-		deleteCollection(CCollection collection);
-	*/
-	cPtr := collection.collectionPtr
-	C.DeleteCollection(cPtr)
-
-	collection.collectionPtr = nil
-
-	log.Info("delete collection", zap.Int64("collectionID", collection.ID()))
-
-	collection = nil
 }

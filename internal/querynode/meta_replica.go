@@ -226,18 +226,14 @@ func (replica *metaReplica) removeCollectionPrivate(collectionID UniqueID) error
 	if err != nil {
 		return err
 	}
-
-	// block incoming search&query
-	collection.mu.Lock()
-	defer collection.mu.Unlock()
-
+	// preventing query & search
+	collection.MarkDestroyed()
 	// delete partitions
 	for _, partitionID := range collection.partitionIDs {
 		// ignore error, try to delete
 		_ = replica.removePartitionPrivate(partitionID)
 	}
-
-	deleteCollection(collection)
+	collection.Clear()
 	delete(replica.collections, collectionID)
 
 	metrics.QueryNodeNumCollections.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(len(replica.collections)))
@@ -291,9 +287,6 @@ func (replica *metaReplica) getPartitionIDs(collectionID UniqueID) ([]UniqueID, 
 	if err != nil {
 		return nil, err
 	}
-	collection.mu.RLock()
-	defer collection.mu.RUnlock()
-
 	return collection.getPartitionIDs(), nil
 }
 
@@ -405,9 +398,6 @@ func (replica *metaReplica) addPartition(collectionID UniqueID, partitionID Uniq
 	if err != nil {
 		return err
 	}
-	collection.mu.Lock()
-	defer collection.mu.Unlock()
-
 	return replica.addPartitionPrivate(collection, partitionID)
 }
 
@@ -426,19 +416,6 @@ func (replica *metaReplica) addPartitionPrivate(collection *Collection, partitio
 func (replica *metaReplica) removePartition(partitionID UniqueID) error {
 	replica.mu.Lock()
 	defer replica.mu.Unlock()
-
-	partition, err := replica.getPartitionByIDPrivate(partitionID)
-	if err != nil {
-		return err
-	}
-
-	collection, err := replica.getCollectionByIDPrivate(partition.collectionID)
-	if err != nil {
-		return err
-	}
-	collection.mu.Lock()
-	defer collection.mu.Unlock()
-
 	return replica.removePartitionPrivate(partitionID)
 }
 
@@ -574,9 +551,6 @@ func (replica *metaReplica) addSegment(segmentID UniqueID, partitionID UniqueID,
 	if err != nil {
 		return err
 	}
-	collection.mu.Lock()
-	defer collection.mu.Unlock()
-
 	seg, err := newSegment(collection, segmentID, partitionID, collectionID, vChannelID, segType, version, replica.cgoPool)
 	if err != nil {
 		return err
@@ -640,25 +614,6 @@ func (replica *metaReplica) setSegment(segment *Segment) error {
 func (replica *metaReplica) removeSegment(segmentID UniqueID, segType segmentType) {
 	replica.mu.Lock()
 	defer replica.mu.Unlock()
-
-	switch segType {
-	case segmentTypeGrowing:
-		if segment, ok := replica.growingSegments[segmentID]; ok {
-			if collection, ok := replica.collections[segment.collectionID]; ok {
-				collection.mu.Lock()
-				defer collection.mu.Unlock()
-			}
-		}
-	case segmentTypeSealed:
-		if segment, ok := replica.sealedSegments[segmentID]; ok {
-			if collection, ok := replica.collections[segment.collectionID]; ok {
-				collection.mu.Lock()
-				defer collection.mu.Unlock()
-			}
-		}
-	default:
-		panic(fmt.Sprintf("unsupported segment type %s", segType.String()))
-	}
 	replica.removeSegmentPrivate(segmentID, segType)
 }
 

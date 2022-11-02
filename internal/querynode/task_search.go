@@ -102,10 +102,10 @@ func (s *searchTask) searchOnStreaming() error {
 		return err
 	}
 
-	if _, released := s.QS.collection.getReleaseTime(); released {
+	if healthy := s.QS.collection.IsHealthy(); !healthy {
 		log.Ctx(ctx).Debug("collection release before search", zap.Int64("msgID", s.ID()),
 			zap.Int64("collectionID", s.CollectionID))
-		return fmt.Errorf("retrieve failed, collection has been released, collectionID = %d", s.CollectionID)
+		return fmt.Errorf("retrieve failed, collection has been unhealthy, collectionID = %d", s.CollectionID)
 	}
 
 	searchReq, err2 := newSearchRequest(s.QS.collection, s.req, s.PlaceholderGroup)
@@ -137,10 +137,10 @@ func (s *searchTask) searchOnHistorical() error {
 		return err
 	}
 
-	if _, released := s.QS.collection.getReleaseTime(); released {
+	if healthy := s.QS.collection.IsHealthy(); !healthy {
 		log.Ctx(ctx).Warn("collection release before search", zap.Int64("msgID", s.ID()),
 			zap.Int64("collectionID", s.CollectionID))
-		return fmt.Errorf("retrieve failed, collection has been released, collectionID = %d", s.CollectionID)
+		return fmt.Errorf("retrieve failed, collection has been unhealthy, collectionID = %d", s.CollectionID)
 	}
 
 	segmentIDs := s.req.GetSegmentIDs()

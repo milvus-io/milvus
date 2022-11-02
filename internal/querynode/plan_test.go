@@ -38,7 +38,7 @@ func TestPlan_Plan(t *testing.T) {
 
 	dslString := "{\"bool\": { \n\"vector\": {\n \"floatVectorField\": {\n \"metric_type\": \"L2\", \n \"params\": {\n \"nprobe\": 10 \n},\n \"query\": \"$0\",\n \"topk\": 10 \n,\"round_decimal\": 6\n } \n } \n } \n }"
 
-	plan, err := createSearchPlan(collection, dslString)
+	plan, err := collection.createSearchPlan(dslString)
 	assert.NoError(t, err)
 	assert.NotEqual(t, plan, nil)
 	topk := plan.getTopK()
@@ -46,7 +46,7 @@ func TestPlan_Plan(t *testing.T) {
 	metricType := plan.getMetricType()
 	assert.Equal(t, metricType, "L2")
 	plan.delete()
-	deleteCollection(collection)
+	collection.Clear()
 }
 
 func TestPlan_createSearchPlanByExpr(t *testing.T) {
@@ -65,7 +65,7 @@ func TestPlan_createSearchPlanByExpr(t *testing.T) {
 	expr, err := proto.Marshal(planNode)
 	assert.NoError(t, err)
 
-	_, err = createSearchPlanByExpr(col, expr)
+	_, err = col.createSearchPlanByExpr(expr)
 	assert.Error(t, err)
 }
 
@@ -74,10 +74,10 @@ func TestPlan_NilCollection(t *testing.T) {
 		id: defaultCollectionID,
 	}
 
-	_, err := createSearchPlan(collection, "")
+	_, err := collection.createSearchPlan("")
 	assert.Error(t, err)
 
-	_, err = createSearchPlanByExpr(collection, nil)
+	_, err = collection.createSearchPlanByExpr(nil)
 	assert.Error(t, err)
 }
 
@@ -87,7 +87,7 @@ func TestPlan_PlaceholderGroup(t *testing.T) {
 	collection := newCollection(collectionID, schema)
 
 	dslString := "{\"bool\": { \n\"vector\": {\n \"floatVectorField\": {\n \"metric_type\": \"L2\", \n \"params\": {\n \"nprobe\": 10 \n},\n \"query\": \"$0\",\n \"topk\": 10 \n,\"round_decimal\": 6\n } \n } \n } \n }"
-	plan, err := createSearchPlan(collection, dslString)
+	plan, err := collection.createSearchPlan(dslString)
 	assert.NoError(t, err)
 	assert.NotNil(t, plan)
 
@@ -123,7 +123,7 @@ func TestPlan_PlaceholderGroup(t *testing.T) {
 	assert.Equal(t, int(numQueries), 2)
 
 	holder.delete()
-	deleteCollection(collection)
+	collection.Clear()
 }
 
 func TestPlan_newSearchRequest(t *testing.T) {
@@ -143,5 +143,5 @@ func TestPlan_newSearchRequest(t *testing.T) {
 	assert.EqualValues(t, defaultNQ, searchReq.getNumOfQuery())
 
 	searchReq.delete()
-	deleteCollection(collection)
+	collection.Clear()
 }
