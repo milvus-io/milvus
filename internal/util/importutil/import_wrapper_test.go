@@ -37,7 +37,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 )
 
@@ -173,7 +172,9 @@ func createMockCallbackFunctions(t *testing.T, rowCounter *rowCounterTest) (Assi
 }
 
 func Test_NewImportWrapper(t *testing.T) {
-	f := dependency.NewDefaultFactory(true)
+	// NewDefaultFactory() use "/tmp/milvus" as default root path, and cannot specify root path
+	// NewChunkManagerFactory() can specify the root path
+	f := storage.NewChunkManagerFactory("local", storage.RootPath(TempFilesPath))
 	ctx := context.Background()
 	cm, err := f.NewPersistentStorageChunkManager(ctx)
 	assert.NoError(t, err)
@@ -226,7 +227,9 @@ func Test_ImportWrapperRowBased(t *testing.T) {
 	assert.Nil(t, err)
 	defer os.RemoveAll(TempFilesPath)
 
-	f := dependency.NewDefaultFactory(true)
+	// NewDefaultFactory() use "/tmp/milvus" as default root path, and cannot specify root path
+	// NewChunkManagerFactory() can specify the root path
+	f := storage.NewChunkManagerFactory("local", storage.RootPath(TempFilesPath))
 	ctx := context.Background()
 	cm, err := f.NewPersistentStorageChunkManager(ctx)
 	assert.NoError(t, err)
@@ -388,7 +391,9 @@ func Test_ImportWrapperColumnBased_numpy(t *testing.T) {
 	assert.Nil(t, err)
 	defer os.RemoveAll(TempFilesPath)
 
-	f := dependency.NewDefaultFactory(true)
+	// NewDefaultFactory() use "/tmp/milvus" as default root path, and cannot specify root path
+	// NewChunkManagerFactory() can specify the root path
+	f := storage.NewChunkManagerFactory("local", storage.RootPath(TempFilesPath))
 	ctx := context.Background()
 	cm, err := f.NewPersistentStorageChunkManager(ctx)
 	assert.NoError(t, err)
@@ -485,7 +490,9 @@ func Test_ImportWrapperRowBased_perf(t *testing.T) {
 	assert.Nil(t, err)
 	defer os.RemoveAll(TempFilesPath)
 
-	f := dependency.NewDefaultFactory(true)
+	// NewDefaultFactory() use "/tmp/milvus" as default root path, and cannot specify root path
+	// NewChunkManagerFactory() can specify the root path
+	f := storage.NewChunkManagerFactory("local", storage.RootPath(TempFilesPath))
 	ctx := context.Background()
 	cm, err := f.NewPersistentStorageChunkManager(ctx)
 	assert.NoError(t, err)
@@ -764,7 +771,9 @@ func Test_ImportWrapperReportFailRowBased(t *testing.T) {
 	assert.Nil(t, err)
 	defer os.RemoveAll(TempFilesPath)
 
-	f := dependency.NewDefaultFactory(true)
+	// NewDefaultFactory() use "/tmp/milvus" as default root path, and cannot specify root path
+	// NewChunkManagerFactory() can specify the root path
+	f := storage.NewChunkManagerFactory("local", storage.RootPath(TempFilesPath))
 	ctx := context.Background()
 	cm, err := f.NewPersistentStorageChunkManager(ctx)
 	assert.NoError(t, err)
@@ -824,7 +833,9 @@ func Test_ImportWrapperReportFailColumnBased_numpy(t *testing.T) {
 	assert.Nil(t, err)
 	defer os.RemoveAll(TempFilesPath)
 
-	f := dependency.NewDefaultFactory(true)
+	// NewDefaultFactory() use "/tmp/milvus" as default root path, and cannot specify root path
+	// NewChunkManagerFactory() can specify the root path
+	f := storage.NewChunkManagerFactory("local", storage.RootPath(TempFilesPath))
 	ctx := context.Background()
 	cm, err := f.NewPersistentStorageChunkManager(ctx)
 	assert.NoError(t, err)
@@ -867,11 +878,16 @@ func Test_ImportWrapperReportFailColumnBased_numpy(t *testing.T) {
 }
 
 func Test_ImportWrapperIsBinlogImport(t *testing.T) {
-	ctx := context.Background()
+	err := os.MkdirAll(TempFilesPath, os.ModePerm)
+	assert.Nil(t, err)
+	defer os.RemoveAll(TempFilesPath)
 
-	cm := &MockChunkManager{
-		size: 1,
-	}
+	// NewDefaultFactory() use "/tmp/milvus" as default root path, and cannot specify root path
+	// NewChunkManagerFactory() can specify the root path
+	f := storage.NewChunkManagerFactory("local", storage.RootPath(TempFilesPath))
+	ctx := context.Background()
+	cm, err := f.NewPersistentStorageChunkManager(ctx)
+	assert.NoError(t, err)
 
 	idAllocator := newIDAllocator(ctx, t, nil)
 	schema := perfSchema(128)
@@ -902,13 +918,43 @@ func Test_ImportWrapperIsBinlogImport(t *testing.T) {
 	b = wrapper.isBinlogImport(paths)
 	assert.False(t, b)
 
-	// success
+	// path doesn't exist
 	paths = []string{
-		"/tmp",
-		"/tmp",
+		"path1",
+		"path2",
+	}
+	b = wrapper.isBinlogImport(paths)
+	assert.False(t, b)
+
+	// insert log path is created, but delta log path doesn't exist
+	err = os.MkdirAll(TempFilesPath+paths[0], os.ModePerm)
+	assert.NoError(t, err)
+
+	b = wrapper.isBinlogImport(paths)
+	assert.False(t, b)
+
+	// both the two path are created, success
+	err = os.MkdirAll(TempFilesPath+paths[1], os.ModePerm)
+	assert.NoError(t, err)
+
+	b = wrapper.isBinlogImport(paths)
+	assert.True(t, b)
+
+	// the delta log path is empty, success
+	paths = []string{
+		"path1",
+		"",
 	}
 	b = wrapper.isBinlogImport(paths)
 	assert.True(t, b)
+
+	// path is empty string
+	paths = []string{
+		"",
+		"",
+	}
+	b = wrapper.isBinlogImport(paths)
+	assert.False(t, b)
 }
 
 func Test_ImportWrapperDoBinlogImport(t *testing.T) {
@@ -1022,7 +1068,7 @@ func Test_ImportWrapperSplitFieldsData(t *testing.T) {
 	err := wrapper.splitFieldsData(nil, 0)
 	assert.NotNil(t, err)
 
-	// split 100 rows to 4 blocks
+	// split 100 rows to 4 blocks, success
 	rowCount := 100
 	input := initSegmentData(schema)
 	for j := 0; j < rowCount; j++ {
@@ -1039,6 +1085,12 @@ func Test_ImportWrapperSplitFieldsData(t *testing.T) {
 	assert.Equal(t, 4, rowCounter.callTime)
 	assert.Equal(t, rowCount, rowCounter.rowCount)
 
+	// alloc id failed
+	wrapper.rowIDAllocator = newIDAllocator(ctx, t, errors.New("error"))
+	err = wrapper.splitFieldsData(input, 512)
+	assert.NotNil(t, err)
+	wrapper.rowIDAllocator = newIDAllocator(ctx, t, nil)
+
 	// row count of fields are unequal
 	schema.Fields[0].AutoID = false
 	input = initSegmentData(schema)
@@ -1053,4 +1105,29 @@ func Test_ImportWrapperSplitFieldsData(t *testing.T) {
 	}
 	err = wrapper.splitFieldsData(input, 512)
 	assert.NotNil(t, err)
+
+	// primary key not found
+	wrapper.collectionSchema.Fields[0].IsPrimaryKey = false
+	err = wrapper.splitFieldsData(input, 512)
+	assert.NotNil(t, err)
+	wrapper.collectionSchema.Fields[0].IsPrimaryKey = true
+
+	// primary key is varchar, success
+	wrapper.collectionSchema.Fields[0].DataType = schemapb.DataType_VarChar
+	input = initSegmentData(schema)
+	for j := 0; j < rowCount; j++ {
+		pkField := input[101].(*storage.StringFieldData)
+		pkField.Data = append(pkField.Data, strconv.FormatInt(int64(j), 10))
+
+		flagField := input[102].(*storage.BoolFieldData)
+		flagField.Data = append(flagField.Data, true)
+	}
+	rowCounter.callTime = 0
+	rowCounter.rowCount = 0
+	importResult.AutoIds = []int64{}
+	err = wrapper.splitFieldsData(input, 1024)
+	assert.Nil(t, err)
+	assert.Equal(t, 0, len(importResult.AutoIds))
+	assert.Equal(t, 2, rowCounter.callTime)
+	assert.Equal(t, rowCount, rowCounter.rowCount)
 }

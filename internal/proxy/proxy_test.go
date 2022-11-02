@@ -1698,7 +1698,7 @@ func TestProxy(t *testing.T) {
 		defer wg.Done()
 		req := &milvuspb.ImportRequest{
 			CollectionName: collectionName,
-			Files:          []string{"f1.json", "f2.json", "f3.json"},
+			Files:          []string{"f1.json"},
 		}
 		proxy.stateCode.Store(commonpb.StateCode_Healthy)
 		resp, err := proxy.Import(context.TODO(), req)
@@ -1713,7 +1713,7 @@ func TestProxy(t *testing.T) {
 		defer wg.Done()
 		req := &milvuspb.ImportRequest{
 			CollectionName: "bad_collection_name",
-			Files:          []string{"f1", "f2", "f3"},
+			Files:          []string{"f1.json"},
 		}
 		proxy.stateCode.Store(commonpb.StateCode_Healthy)
 		resp, err := proxy.Import(context.TODO(), req)
@@ -1726,7 +1726,7 @@ func TestProxy(t *testing.T) {
 		defer wg.Done()
 		req := &milvuspb.ImportRequest{
 			CollectionName: "bad_collection_name",
-			Files:          []string{"f1", "f2", "f3"},
+			Files:          []string{"f1.json"},
 		}
 		proxy.stateCode.Store(commonpb.StateCode_Healthy)
 		resp, err := proxy.Import(context.TODO(), req)

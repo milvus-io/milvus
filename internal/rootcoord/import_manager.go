@@ -394,6 +394,12 @@ func (m *importManager) isRowbased(files []string) (bool, error) {
 		}
 	}
 
+	// for row_based, we only allow one file so that each invocation only generate a task
+	if isRowBased && len(files) > 1 {
+		log.Error("row-based import, only allow one JSON file each time", zap.Strings("files", files))
+		return isRowBased, fmt.Errorf("row-based import, only allow one JSON file each time")
+	}
+
 	return isRowBased, nil
 }
 
@@ -459,6 +465,7 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 			for i := 0; i < len(req.Files); i++ {
 				tID, _, err := m.idAllocator(1)
 				if err != nil {
+					log.Error("failed to allocate ID for import task", zap.Error(err))
 					return err
 				}
 				newTask := &datapb.ImportTaskInfo{
@@ -976,22 +983,29 @@ func (m *importManager) listAllTasks(colName string, limit int64) []*milvuspb.Ge
 		log.Error("failed to load from task store", zap.Error(err))
 		return tasks
 	}
-	taskCount := int64(0)
+
+	// filter tasks by collection name
+	// TODO: how to handle duplicated collection name? for example: a new collection has same name with a dropped collection
 	for _, task := range importTasks {
 		if colName != "" && task.GetCollectionName() != colName {
 			continue
 		}
-		taskCount++
-		if limit > 0 && taskCount > limit {
-			break
-		}
+
 		currTask := &milvuspb.GetImportStateResponse{}
 		m.copyTaskInfo(task, currTask)
 		tasks = append(tasks, currTask)
 	}
 
+	// arrange tasks by id with ascending order, actually, id is the create time of a task
 	rearrangeTasks(tasks)
-	return tasks
+
+	// if limit is 0 or larger than length of tasks, return all tasks
+	if limit <= 0 || limit >= int64(len(tasks)) {
+		return tasks
+	}
+
+	// return the newly tasks from the tail
+	return tasks[len(tasks)-int(limit):]
 }
 
 // removeBadImportSegments marks segments of a failed import task as `dropped`.
