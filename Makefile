@@ -240,7 +240,12 @@ docker: install
 install: milvus
 	@echo "Installing binary to './bin'"
 	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/milvus $(GOPATH)/bin/milvus
-	@mkdir -p $(LIBRARY_PATH) && cp -r -P $(PWD)/internal/core/output/lib/*.so* $(LIBRARY_PATH)
+	@mkdir -p $(LIBRARY_PATH)
+ifeq ($(OS),Darwin)
+	@cp -r -P $(PWD)/internal/core/output/lib/*.dylib* $(LIBRARY_PATH)
+else
+	@cp -r -P $(PWD)/internal/core/output/lib/*.so* $(LIBRARY_PATH)
+endif
 	@echo "Installation successful."
 
 clean:
