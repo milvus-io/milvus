@@ -169,6 +169,13 @@ func (ex *Executor) processMergeTask(mergeTask *LoadSegmentsTask) {
 		return
 	}
 
+	for _, position := range mergeTask.req.GetDeltaPositions() {
+		log.Debug("process merged task with position",
+			zap.String("channelName", position.GetChannelName()),
+			zap.Uint64("position", position.GetTimestamp()),
+		)
+	}
+
 	log.Info("load segments...")
 	status, err := ex.cluster.LoadSegments(task.Context(), leader, mergeTask.req)
 	if err != nil {
