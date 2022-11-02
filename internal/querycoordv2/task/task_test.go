@@ -144,6 +144,7 @@ func (suite *TaskSuite) BeforeTest(suiteName, testName string) {
 		"TestLoadSegmentTask",
 		"TestLoadSegmentTaskFailed",
 		"TestSegmentTaskStale",
+		"TestTaskCanceled",
 		"TestMoveSegmentTask":
 		suite.meta.PutCollection(&meta.Collection{
 			CollectionLoadInfo: &querypb.CollectionLoadInfo{
@@ -297,14 +298,9 @@ func (suite *TaskSuite) TestUnsubscribeChannelTask() {
 	suite.dispatchAndWait(targetNode)
 	suite.AssertTaskNum(0, 0, 0, 0)
 
-	for i, task := range tasks {
-		if i == 0 {
-			suite.Equal(TaskStatusSucceeded, task.Status())
-			suite.NoError(task.Err())
-		} else {
-			suite.Equal(TaskStatusStale, task.Status())
-			suite.Error(task.Err())
-		}
+	for _, task := range tasks {
+		suite.Equal(TaskStatusSucceeded, task.Status())
+		suite.NoError(task.Err())
 	}
 }
 
@@ -586,14 +582,9 @@ func (suite *TaskSuite) TestReleaseGrowingSegmentTask() {
 	suite.dispatchAndWait(targetNode)
 	suite.AssertTaskNum(0, 0, 0, 0)
 
-	for i, task := range tasks {
-		if i == 0 {
-			suite.Equal(TaskStatusStale, task.Status())
-			suite.Error(task.Err())
-		} else {
-			suite.Equal(TaskStatusSucceeded, task.Status())
-			suite.NoError(task.Err())
-		}
+	for _, task := range tasks {
+		suite.Equal(TaskStatusSucceeded, task.Status())
+		suite.NoError(task.Err())
 	}
 }
 
@@ -702,60 +693,81 @@ func (suite *TaskSuite) TestMoveSegmentTask() {
 func (suite *TaskSuite) TestTaskCanceled() {
 	ctx := context.Background()
 	timeout := 10 * time.Second
-	targetNode := int64(1)
+	targetNode := int64(3)
+	partition := int64(100)
+	channel := &datapb.VchannelInfo{
+		CollectionID: suite.collection,
+		ChannelName:  Params.CommonCfg.RootCoordDml + "-test",
+	}
 
 	// Expect
-	suite.cluster.EXPECT().UnsubDmChannel(mock.Anything, targetNode, mock.Anything).Return(utils.WrapStatus(commonpb.ErrorCode_Success, ""), nil)
+	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, suite.collection).Return(&schemapb.CollectionSchema{
+		Name: "TestSubscribeChannelTask",
+	}, nil)
+	suite.broker.EXPECT().GetPartitions(mock.Anything, suite.collection).Return([]int64{100, 101}, nil)
+	for _, segment := range suite.loadSegments {
+		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).Return([]*datapb.SegmentInfo{
+			{
+				ID:            segment,
+				CollectionID:  suite.collection,
+				PartitionID:   partition,
+				InsertChannel: channel.ChannelName,
+			},
+		}, nil)
+		suite.broker.EXPECT().GetIndexInfo(mock.Anything, suite.collection, segment).Return(nil, nil)
+	}
+	// suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, suite.collection, partition).
+	// 	Return([]*datapb.VchannelInfo{channel}, nil, nil)
+	suite.cluster.EXPECT().LoadSegments(mock.Anything, targetNode, mock.Anything).Return(utils.WrapStatus(commonpb.ErrorCode_Success, ""), nil)
 
-	// Test unsubscribe channel task
+	// Test load segment task
+	suite.dist.ChannelDistManager.Update(targetNode, meta.DmChannelFromVChannel(&datapb.VchannelInfo{
+		CollectionID: suite.collection,
+		ChannelName:  channel.ChannelName,
+	}))
 	tasks := []Task{}
-	for _, channel := range suite.unsubChannels {
-		suite.target.AddDmChannel(meta.DmChannelFromVChannel(&datapb.VchannelInfo{
-			CollectionID: suite.collection,
-			ChannelName:  channel,
-		}))
-		task, err := NewChannelTask(
+	for _, segment := range suite.loadSegments {
+		suite.target.AddSegment(&datapb.SegmentInfo{
+			ID:            segment,
+			CollectionID:  suite.collection,
+			PartitionID:   partition,
+			InsertChannel: channel.ChannelName,
+		})
+		task, err := NewSegmentTask(
 			ctx,
 			timeout,
 			0,
 			suite.collection,
-			-1,
-			NewChannelAction(targetNode, ActionTypeReduce, channel),
+			suite.replica,
+			NewSegmentAction(targetNode, ActionTypeGrow, channel.GetChannelName(), segment),
 		)
 		suite.NoError(err)
 		tasks = append(tasks, task)
 		err = suite.scheduler.Add(task)
 		suite.NoError(err)
 	}
-	// Only first channel exists
-	suite.dist.LeaderViewManager.Update(targetNode, &meta.LeaderView{
-		ID:           targetNode,
-		CollectionID: suite.collection,
-		Channel:      suite.unsubChannels[0],
-	})
-	suite.AssertTaskNum(0, len(suite.unsubChannels), len(suite.unsubChannels), 0)
+	segmentsNum := len(suite.loadSegments)
+	suite.AssertTaskNum(0, segmentsNum, 0, segmentsNum)
 
-	// ProcessTasks
+	// Process tasks
 	suite.dispatchAndWait(targetNode)
-	suite.AssertTaskNum(1, 0, 1, 0)
+	suite.AssertTaskNum(segmentsNum, 0, 0, segmentsNum)
 
 	// Other nodes' HB can't trigger the procedure of tasks
 	suite.dispatchAndWait(targetNode + 1)
-	suite.AssertTaskNum(1, 0, 1, 0)
+	suite.AssertTaskNum(segmentsNum, 0, 0, segmentsNum)
 
-	// Cancel first task
-	tasks[0].Cancel()
+	// Cancel all tasks
+	for _, task := range tasks {
+		task.Cancel()
+	}
+
 	suite.dispatchAndWait(targetNode)
 	suite.AssertTaskNum(0, 0, 0, 0)
 
-	for i, task := range tasks {
-		if i == 0 {
-			suite.Equal(TaskStatusCanceled, task.Status())
-			suite.ErrorIs(task.Err(), ErrTaskCanceled)
-		} else {
-			suite.Equal(TaskStatusStale, task.Status())
-			suite.Error(task.Err())
-		}
+	for _, task := range tasks {
+		suite.Equal(TaskStatusCanceled, task.Status())
+		suite.Error(task.Err())
 	}
 }
 
