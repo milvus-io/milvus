@@ -53,7 +53,7 @@
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
   "id": null,
-  "iteration": 1666679764757,
+  "iteration": 1667373267980,
   "links": [],
   "liveNow": false,
   "panels": [
@@ -3478,17 +3478,17 @@
                 "uid": "$datasource"
               },
               "exemplar": true,
-              "expr": "sum(milvus_rootcoord_time_tick_delay{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (app_kubernetes_io_instance)",
+              "expr": "sum(milvus_rootcoord_time_tick_delay{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (role_name, node_id)",
               "interval": "",
               "intervalFactor": 2,
-              "legendFormat": "timetick",
+              "legendFormat": "{{role_name}}-{{node_id}}",
               "queryType": "randomWalk",
               "refId": "A"
             }
           ],
           "thresholds": [],
           "timeRegions": [],
-          "title": "Time Tick",
+          "title": "Time Tick Delay",
           "tooltip": {
             "shared": true,
             "sort": 0,
@@ -11591,8 +11591,8 @@
     ]
   },
   "time": {
-    "from": "2022-10-25T06:50:00.718Z",
-    "to": "2022-10-25T06:52:31.136Z"
+    "from": "now-30m",
+    "to": "now"
   },
   "timepicker": {
     "hidden": false,
@@ -11624,6 +11624,6 @@
   "timezone": "browser",
   "title": "Milvus2.0",
   "uid": "uLf5cJ3Gz",
-  "version": 22,
+  "version": 23,
   "weekStart": ""
 }
