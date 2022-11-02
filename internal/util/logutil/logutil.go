@@ -162,7 +162,6 @@ func SetupLogger(cfg *log.Config) {
 		wrapper := &zapWrapper{logger, logLevel}
 		grpclog.SetLoggerV2(wrapper)
 
-		log.Info("Log directory", zap.String("configDir", cfg.File.RootPath))
 		log.Info("Set log file to ", zap.String("path", cfg.File.Filename))
 	})
 }

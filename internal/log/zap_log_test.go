@@ -141,7 +141,7 @@ func TestTimeEncoder(t *testing.T) {
 
 	tt := time.Unix(sec, nsec).In(as)
 	conf := &Config{Level: "debug", File: FileLogConfig{}, DisableTimestamp: true}
-	enc := NewTextEncoder(conf).(*textEncoder)
+	enc := NewTextEncoderByConfig(conf).(*textEncoder)
 	DefaultTimeEncoder(tt, enc)
 	assert.Equal(t, "2019/01/11 15:45:41.165 +08:00", enc.buf.String())
 
@@ -169,7 +169,7 @@ func TestZapCaller(t *testing.T) {
 		"undefined",
 	}
 	conf := &Config{Level: "deug", File: FileLogConfig{}, DisableTimestamp: true}
-	enc := NewTextEncoder(conf).(*textEncoder)
+	enc := NewTextEncoderByConfig(conf).(*textEncoder)
 
 	for i, d := range data {
 		ShortCallerEncoder(d, enc)

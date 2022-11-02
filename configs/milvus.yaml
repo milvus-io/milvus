@@ -161,6 +161,9 @@ proxy:
   maxTaskNum: 1024 # max task number of proxy task queue
   # please adjust in embedded Milvus: false
   ginLogging: true # Whether to produce gin logs.
+  accessLog:
+    localPath: /tmp/accesslog
+    filename: milvus_access_log.log
 
 
 # Related configuration of queryCoord, used to manage topology and load balancing for the query nodes, and handoff from growing segments to sealed segments.

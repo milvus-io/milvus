@@ -30,6 +30,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/proxy/accesslog"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 
 	"github.com/gin-gonic/gin"
@@ -181,6 +182,7 @@ func (s *Server) startExternalGrpc(grpcPort int, errChan chan error) {
 			proxy.UnaryServerInterceptor(proxy.PrivilegeInterceptor),
 			logutil.UnaryTraceLoggerInterceptor,
 			proxy.RateLimitInterceptor(limiter),
+			accesslog.UnaryAccessLoggerInterceptor,
 		)),
 	}
 
