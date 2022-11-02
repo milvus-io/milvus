@@ -23,8 +23,6 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
@@ -33,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"go.uber.org/zap"
 )
 
 type (
@@ -328,7 +327,8 @@ func (c *ChannelMeta) RollPKstats(segID UniqueID, stats []*storage.PrimaryKeySta
 }
 
 // listNewSegmentsStartPositions gets all *New Segments* start positions and
-//   transfer segments states from *New* to *Normal*.
+//
+//	transfer segments states from *New* to *Normal*.
 func (c *ChannelMeta) listNewSegmentsStartPositions() []*datapb.SegmentStartPosition {
 	c.segMu.Lock()
 	defer c.segMu.Unlock()
@@ -451,7 +451,8 @@ func (c *ChannelMeta) getCollectionID() UniqueID {
 }
 
 // getCollectionSchema gets collection schema from rootcoord for a certain timestamp.
-//   If you want the latest collection schema, ts should be 0.
+//
+//	If you want the latest collection schema, ts should be 0.
 func (c *ChannelMeta) getCollectionSchema(collID UniqueID, ts Timestamp) (*schemapb.CollectionSchema, error) {
 	if !c.validCollection(collID) {
 		return nil, fmt.Errorf("mismatch collection, want %d, actual %d", c.collectionID, collID)
