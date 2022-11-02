@@ -137,6 +137,10 @@ func (m *MockQueryNode) SetIndexCoord(index types.IndexCoord) error {
 	return m.err
 }
 
+func (m *MockQueryNode) SetDataCoordClient(dataCoord types.DataCoord) {
+
+}
+
 func (m *MockQueryNode) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
 	return m.configResp, m.err
 }

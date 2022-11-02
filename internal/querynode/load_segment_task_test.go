@@ -79,7 +79,7 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 	})
 
 	t.Run("test execute grpc", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
+		node, err := genSimpleQueryNode(ctx, t)
 		assert.NoError(t, err)
 
 		node.metaReplica.removeSegment(defaultSegmentID, segmentTypeSealed)
@@ -113,7 +113,7 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 	})
 
 	t.Run("test repeated load", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
+		node, err := genSimpleQueryNode(ctx, t)
 		assert.NoError(t, err)
 
 		node.metaReplica.removeSegment(defaultSegmentID, segmentTypeSealed)
@@ -157,7 +157,7 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 	})
 
 	t.Run("test FromDmlCPLoadDelete", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
+		node, err := genSimpleQueryNode(ctx, t)
 		assert.NoError(t, err)
 
 		vDmChannel := "by-dev-rootcoord-dml_1_2021v1"
@@ -268,7 +268,7 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 	})
 
 	t.Run("test OOM", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
+		node, err := genSimpleQueryNode(ctx, t)
 		assert.NoError(t, err)
 
 		totalRAM := int64(hardware.GetMemoryCount())
@@ -311,7 +311,7 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 	})
 
 	t.Run("test FromDmlCPLoadDelete failed", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
+		node, err := genSimpleQueryNode(ctx, t)
 		assert.NoError(t, err)
 		node.metaReplica.removeSegment(defaultSegmentID, segmentTypeSealed)
 
@@ -364,7 +364,7 @@ func TestTask_loadSegmentsTaskLoadDelta(t *testing.T) {
 	schema := genTestCollectionSchema()
 
 	t.Run("test repeated load delta channel", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
+		node, err := genSimpleQueryNode(ctx, t)
 		assert.NoError(t, err)
 		vDmChannel := "by-dev-rootcoord-dml-test_2_2021v2"
 

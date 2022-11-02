@@ -26,8 +26,10 @@ import (
 	"path"
 	"runtime"
 	"strconv"
+	"testing"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/stretchr/testify/mock"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -35,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/common"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
@@ -1651,7 +1654,7 @@ func saveChangeInfo(key string, value string) error {
 	return kv.Save(key, value)
 }
 
-func genSimpleQueryNodeWithMQFactory(ctx context.Context, fac dependency.Factory) (*QueryNode, error) {
+func genSimpleQueryNodeWithMQFactory(ctx context.Context, fac dependency.Factory, t testing.TB) (*QueryNode, error) {
 	node := NewQueryNode(ctx, fac)
 	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	if err != nil {
@@ -1659,6 +1662,13 @@ func genSimpleQueryNodeWithMQFactory(ctx context.Context, fac dependency.Factory
 	}
 	node.etcdCli = etcdCli
 	node.initSession()
+	mockedDataCoord := mocks.NewDataCoord(t)
+	mockedDataCoord.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).Return(&datapb.GetSegmentInfoResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+	}, nil).Maybe()
+	node.dataCoord = mockedDataCoord
 
 	node.taskPool, err = concurrency.NewPool(2, ants.WithPreAlloc(true))
 	if err != nil {
@@ -1711,9 +1721,9 @@ func genSimpleQueryNodeWithMQFactory(ctx context.Context, fac dependency.Factory
 }
 
 // node
-func genSimpleQueryNode(ctx context.Context) (*QueryNode, error) {
+func genSimpleQueryNode(ctx context.Context, t testing.TB) (*QueryNode, error) {
 	fac := genFactory()
-	return genSimpleQueryNodeWithMQFactory(ctx, fac)
+	return genSimpleQueryNodeWithMQFactory(ctx, fac, t)
 }
 
 func genFieldData(fieldName string, fieldID int64, fieldType schemapb.DataType, fieldValue interface{}, dim int64) *schemapb.FieldData {

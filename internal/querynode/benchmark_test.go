@@ -126,7 +126,7 @@ func benchmarkQueryCollectionSearchIndex(nq int64, indexType string, b *testing.
 	assert.Equal(b, 0, queryShardObj.metaReplica.getSegmentNum(segmentTypeSealed))
 	assert.Equal(b, 0, queryShardObj.metaReplica.getSegmentNum(segmentTypeGrowing))
 
-	node, err := genSimpleQueryNode(tx)
+	node, err := genSimpleQueryNode(tx, b)
 	assert.NoError(b, err)
 	node.loader.metaReplica = queryShardObj.metaReplica
 

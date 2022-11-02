@@ -34,6 +34,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
+	grpcdatacoordclient "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -67,6 +68,8 @@ type Server struct {
 	etcdCli *clientv3.Client
 
 	closer io.Closer
+
+	dataCoord types.DataCoord
 }
 
 func (s *Server) GetStatistics(ctx context.Context, request *querypb.GetStatisticsRequest) (*internalpb.GetStatisticsResponse, error) {
@@ -113,6 +116,22 @@ func (s *Server) init() error {
 	s.etcdCli = etcdCli
 	s.SetEtcdClient(etcdCli)
 	log.Debug("QueryNode connect to etcd successfully")
+
+	s.dataCoord, err = grpcdatacoordclient.NewClient(s.ctx, Params.EtcdCfg.MetaRootPath, s.etcdCli)
+	if err != nil {
+		log.Error("failed to create datacoord client", zap.Error(err))
+		return err
+	}
+	if err = s.dataCoord.Init(); err != nil {
+		log.Error("failed to init datacoord client", zap.Error(err))
+		return err
+	}
+	if err = s.dataCoord.Start(); err != nil {
+		log.Error("failed to start datacoord client", zap.Error(err))
+		return err
+	}
+	s.SetDataCoordClient(s.dataCoord)
+
 	s.wg.Add(1)
 	go s.startGrpcLoop(Params.Port)
 	// wait for grpc server loop start
@@ -237,6 +256,10 @@ func (s *Server) Stop() error {
 	if err != nil {
 		return err
 	}
+
+	if s.dataCoord != nil {
+		s.dataCoord.Stop()
+	}
 	s.wg.Wait()
 	return nil
 }
@@ -244,6 +267,10 @@ func (s *Server) Stop() error {
 // SetEtcdClient sets the etcd client for QueryNode component.
 func (s *Server) SetEtcdClient(etcdCli *clientv3.Client) {
 	s.querynode.SetEtcdClient(etcdCli)
+}
+
+func (s *Server) SetDataCoordClient(datacoord types.DataCoord) {
+	s.querynode.SetDataCoordClient(datacoord)
 }
 
 // GetTimeTickChannel gets the time tick channel of QueryNode.

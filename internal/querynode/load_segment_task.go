@@ -18,12 +18,16 @@ package querynode
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	queryPb "github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/samber/lo"
@@ -39,6 +43,50 @@ type loadSegmentsTask struct {
 func (l *loadSegmentsTask) PreExecute(ctx context.Context) error {
 	log.Info("LoadSegmentTask PreExecute start", zap.Int64("msgID", l.req.Base.MsgID))
 	var err error
+
+	// refresh load info
+	segmentIDs := make([]int64, 0, len(l.req.Infos))
+	segmentLoadInfos := make(map[int64]*queryPb.SegmentLoadInfo)
+	for _, info := range l.req.Infos {
+		segmentIDs = append(segmentIDs, info.GetSegmentID())
+		segmentLoadInfos[info.GetSegmentID()] = info
+	}
+
+	resp, err := l.node.dataCoord.GetSegmentInfo(l.ctx, &datapb.GetSegmentInfoRequest{
+		SegmentIDs:       segmentIDs,
+		IncludeUnHealthy: true,
+	})
+	if err != nil {
+		log.Warn("failed to refresh segment", zap.Int64("msgID", l.req.Base.GetMsgID()), zap.Error(err))
+		return err
+	} else if resp.GetStatus().ErrorCode != commonpb.ErrorCode_Success {
+		err = errors.New(resp.Status.GetReason())
+		log.Warn("failed to refresh segment", zap.Int64("msgID", l.req.Base.GetMsgID()), zap.Error(err))
+		return err
+	}
+
+	var minPos *internalpb.MsgPosition
+	for _, info := range resp.GetInfos() {
+		var segmentPos *internalpb.MsgPosition
+		if info.GetDmlPosition() != nil {
+			segmentPos = info.GetDmlPosition()
+		} else {
+			segmentPos = info.GetStartPosition()
+		}
+		if minPos == nil || segmentPos.GetTimestamp() < minPos.GetTimestamp() {
+			minPos = segmentPos
+		}
+
+		if loadInfo, ok := segmentLoadInfos[info.GetID()]; ok {
+			loadInfo.Deltalogs = info.GetDeltalogs()
+		}
+	}
+
+	if minPos != nil {
+		l.req.DeltaPositions = l.req.DeltaPositions[:0]
+		l.req.DeltaPositions = append(l.req.DeltaPositions, minPos)
+	}
+
 	// init meta
 	collectionID := l.req.GetCollectionID()
 	l.node.metaReplica.addCollection(collectionID, l.req.GetSchema())

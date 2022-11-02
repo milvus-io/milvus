@@ -25,7 +25,7 @@ import (
 )
 
 func TestQueryShardService(t *testing.T) {
-	qn, err := genSimpleQueryNode(context.Background())
+	qn, err := genSimpleQueryNode(context.Background(), t)
 	require.NoError(t, err)
 
 	qss, err := newQueryShardService(context.Background(), qn.metaReplica, qn.tSafeReplica, qn.ShardClusterService, qn.factory, qn.scheduler)
@@ -48,7 +48,7 @@ func TestQueryShardService(t *testing.T) {
 }
 
 func TestQueryShardService_InvalidChunkManager(t *testing.T) {
-	qn, err := genSimpleQueryNode(context.Background())
+	qn, err := genSimpleQueryNode(context.Background(), t)
 	require.NoError(t, err)
 
 	qss, err := newQueryShardService(context.Background(), qn.metaReplica, qn.tSafeReplica, qn.ShardClusterService, qn.factory, qn.scheduler)

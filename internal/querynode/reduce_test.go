@@ -48,7 +48,7 @@ func TestReduce_AllFunc(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	node, err := genSimpleQueryNode(ctx)
+	node, err := genSimpleQueryNode(ctx, t)
 	assert.NoError(t, err)
 
 	collection, err := node.metaReplica.getCollectionByID(defaultCollectionID)

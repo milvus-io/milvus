@@ -37,7 +37,7 @@ func TestShardClusterService(t *testing.T) {
 }
 
 func TestShardClusterService_SyncReplicaSegments(t *testing.T) {
-	qn, err := genSimpleQueryNode(context.Background())
+	qn, err := genSimpleQueryNode(context.Background(), t)
 	require.NoError(t, err)
 
 	client := v3client.New(embedetcdServer.Server)

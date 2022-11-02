@@ -125,6 +125,8 @@ type QueryNode struct {
 	taskPool *concurrency.Pool
 	// lock to avoid same chanel/channel run multiple times
 	taskLock *lock.KeyLock
+
+	dataCoord types.DataCoord
 }
 
 // NewQueryNode will return a QueryNode with abnormal state.
@@ -374,4 +376,8 @@ func (node *QueryNode) UpdateStateCode(code commonpb.StateCode) {
 // SetEtcdClient assigns parameter client to its member etcdCli
 func (node *QueryNode) SetEtcdClient(client *clientv3.Client) {
 	node.etcdCli = client
+}
+
+func (node *QueryNode) SetDataCoordClient(dataCoord types.DataCoord) {
+	node.dataCoord = dataCoord
 }

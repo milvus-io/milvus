@@ -168,7 +168,7 @@ func TestQueryNode_register(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	node, err := genSimpleQueryNode(ctx)
+	node, err := genSimpleQueryNode(ctx, t)
 	assert.NoError(t, err)
 
 	etcdcli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
@@ -187,7 +187,7 @@ func TestQueryNode_init(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	node, err := genSimpleQueryNode(ctx)
+	node, err := genSimpleQueryNode(ctx, t)
 	assert.NoError(t, err)
 	etcdcli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.NoError(t, err)
@@ -197,8 +197,8 @@ func TestQueryNode_init(t *testing.T) {
 	assert.Nil(t, err)
 }
 
-func genSimpleQueryNodeToTestWatchChangeInfo(ctx context.Context) (*QueryNode, error) {
-	node, err := genSimpleQueryNode(ctx)
+func genSimpleQueryNodeToTestWatchChangeInfo(ctx context.Context, t testing.TB) (*QueryNode, error) {
+	node, err := genSimpleQueryNode(ctx, t)
 	if err != nil {
 		return nil, err
 	}
@@ -225,7 +225,7 @@ func TestQueryNode_adjustByChangeInfo(t *testing.T) {
 	wg.Add(1)
 	t.Run("test cleanup segments", func(t *testing.T) {
 		defer wg.Done()
-		_, err := genSimpleQueryNodeToTestWatchChangeInfo(ctx)
+		_, err := genSimpleQueryNodeToTestWatchChangeInfo(ctx, t)
 		assert.NoError(t, err)
 
 	})
@@ -233,7 +233,7 @@ func TestQueryNode_adjustByChangeInfo(t *testing.T) {
 	wg.Add(1)
 	t.Run("test cleanup segments no segment", func(t *testing.T) {
 		defer wg.Done()
-		node, err := genSimpleQueryNodeToTestWatchChangeInfo(ctx)
+		node, err := genSimpleQueryNodeToTestWatchChangeInfo(ctx, t)
 		assert.NoError(t, err)
 
 		node.metaReplica.removeSegment(defaultSegmentID, segmentTypeSealed)

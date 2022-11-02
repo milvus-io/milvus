@@ -1340,6 +1340,7 @@ type QueryNodeComponent interface {
 
 	// SetEtcdClient set etcd client for QueryNode
 	SetEtcdClient(etcdClient *clientv3.Client)
+	SetDataCoordClient(dataCoord DataCoord)
 }
 
 // QueryCoord is the interface `querycoord` package implements
