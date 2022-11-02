@@ -118,15 +118,14 @@ class TestBulkInsertTaskClean(TestcaseBaseBulkInsert):
         self.collection_wrap.init_collection(c_name, schema=schema)
         # import data
         t0 = time.time()
-        task_ids, _ = self.utility_wrap.bulk_insert(
+        task_id, _ = self.utility_wrap.do_bulk_insert(
             collection_name=c_name,
             partition_name=None,
-            # is_row_based=is_row_based,
             files=files,
         )
-        logging.info(f"bulk insert task ids:{task_ids}")
+        logging.info(f"bulk insert task ids:{task_id}")
         success, _ = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=task_ids, timeout=90
+            task_ids=[task_id], timeout=90
         )
         tt = time.time() - t0
         log.info(f"bulk insert state:{success} in {tt}")
@@ -220,15 +219,15 @@ class TestBulkInsertTaskClean(TestcaseBaseBulkInsert):
         self.collection_wrap.init_collection(c_name, schema=schema)
         # import data
         t0 = time.time()
-        task_ids, _ = self.utility_wrap.bulk_insert(
+        task_id, _ = self.utility_wrap.do_bulk_insert(
             collection_name=c_name,
             partition_name=None,
             is_row_based=is_row_based,
             files=files,
         )
-        logging.info(f"bulk insert task ids:{task_ids}")
+        logging.info(f"bulk insert task ids:{task_id}")
         success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=task_ids, timeout=90
+            task_ids=[task_id], timeout=90
         )
         tt = time.time() - t0
         log.info(f"bulk insert state:{success} in {tt}")
@@ -245,7 +244,7 @@ class TestBulkInsertTaskClean(TestcaseBaseBulkInsert):
         log.info(f" collection entities: {num_entities}")
         assert num_entities == 0
         success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=task_ids, timeout=90
+            task_ids=[task_id], timeout=90
         )
         assert not success
         for state in states.values():
