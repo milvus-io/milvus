@@ -439,51 +439,6 @@ func TestStream_PulsarMsgStream_Delete(t *testing.T) {
 	outputStream.Close()
 }
 
-func TestStream_PulsarMsgStream_Search(t *testing.T) {
-	pulsarAddress := getPulsarAddress()
-	c := funcutil.RandomString(8)
-	producerChannels := []string{c}
-	consumerChannels := []string{c}
-	consumerSubName := funcutil.RandomString(8)
-
-	msgPack := MsgPack{}
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Search, 1))
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Search, 3))
-
-	ctx := context.Background()
-	inputStream := getPulsarInputStream(ctx, pulsarAddress, producerChannels)
-	outputStream := getPulsarOutputStream(ctx, pulsarAddress, consumerChannels, consumerSubName)
-
-	err := inputStream.Produce(&msgPack)
-	require.NoErrorf(t, err, fmt.Sprintf("produce error = %v", err))
-
-	receiveMsg(ctx, outputStream, len(msgPack.Msgs))
-	inputStream.Close()
-	outputStream.Close()
-}
-
-func TestStream_PulsarMsgStream_SearchResult(t *testing.T) {
-	pulsarAddress := getPulsarAddress()
-	c := funcutil.RandomString(8)
-	producerChannels := []string{c}
-	consumerChannels := []string{c}
-	consumerSubName := funcutil.RandomString(8)
-	msgPack := MsgPack{}
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_SearchResult, 1))
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_SearchResult, 3))
-
-	ctx := context.Background()
-	inputStream := getPulsarInputStream(ctx, pulsarAddress, producerChannels)
-	outputStream := getPulsarOutputStream(ctx, pulsarAddress, consumerChannels, consumerSubName)
-
-	err := inputStream.Produce(&msgPack)
-	require.NoErrorf(t, err, fmt.Sprintf("produce error = %v", err))
-
-	receiveMsg(ctx, outputStream, len(msgPack.Msgs))
-	inputStream.Close()
-	outputStream.Close()
-}
-
 func TestStream_PulsarMsgStream_TimeTick(t *testing.T) {
 	pulsarAddress := getPulsarAddress()
 	c := funcutil.RandomString(8)
@@ -672,8 +627,8 @@ func TestStream_PulsarMsgStream_DefaultRepackFunc(t *testing.T) {
 
 	msgPack := MsgPack{}
 	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_TimeTick, 1))
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Search, 2))
-	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_SearchResult, 3))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Insert, 2))
+	msgPack.Msgs = append(msgPack.Msgs, getTsMsg(commonpb.MsgType_Delete, 3))
 
 	factory := ProtoUDFactory{}
 
@@ -1572,8 +1527,8 @@ func TestStream_RmqTtMsgStream_DuplicatedIDs(t *testing.T) {
 
 	// would not dedup for non-dml messages
 	msgPack2 := MsgPack{}
-	msgPack2.Msgs = append(msgPack2.Msgs, getTsMsg(commonpb.MsgType_Search, 2))
-	msgPack2.Msgs = append(msgPack2.Msgs, getTsMsg(commonpb.MsgType_Search, 2))
+	msgPack2.Msgs = append(msgPack2.Msgs, getTsMsg(commonpb.MsgType_CreateCollection, 2))
+	msgPack2.Msgs = append(msgPack2.Msgs, getTsMsg(commonpb.MsgType_CreateCollection, 2))
 
 	msgPack3 := MsgPack{}
 	msgPack3.Msgs = append(msgPack3.Msgs, getTimeTickMsg(15))
@@ -1608,8 +1563,8 @@ func TestStream_RmqTtMsgStream_DuplicatedIDs(t *testing.T) {
 	seekMsg := consumer(ctx, outputStream)
 	assert.Equal(t, len(seekMsg.Msgs), 1+2)
 	assert.EqualValues(t, seekMsg.Msgs[0].BeginTs(), 1)
-	assert.Equal(t, commonpb.MsgType_Search, seekMsg.Msgs[1].Type())
-	assert.Equal(t, commonpb.MsgType_Search, seekMsg.Msgs[2].Type())
+	assert.Equal(t, commonpb.MsgType_CreateCollection, seekMsg.Msgs[1].Type())
+	assert.Equal(t, commonpb.MsgType_CreateCollection, seekMsg.Msgs[2].Type())
 
 	Close(rocksdbName, inputStream, outputStream, etcdKV)
 }
@@ -1958,37 +1913,29 @@ func getTsMsg(msgType MsgType, reqID UniqueID) TsMsg {
 			DeleteRequest: deleteRequest,
 		}
 		return deleteMsg
-	case commonpb.MsgType_Search:
-		searchRequest := internalpb.SearchRequest{
+	case commonpb.MsgType_CreateCollection:
+		createCollectionRequest := internalpb.CreateCollectionRequest{
 			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_Search,
+				MsgType:   commonpb.MsgType_CreateCollection,
 				MsgID:     reqID,
 				Timestamp: 11,
 				SourceID:  reqID,
 			},
-			ReqID: 0,
+			DbName:               "test_db",
+			CollectionName:       "test_collection",
+			PartitionName:        "test_partition",
+			DbID:                 4,
+			CollectionID:         5,
+			PartitionID:          6,
+			Schema:               []byte{},
+			VirtualChannelNames:  []string{},
+			PhysicalChannelNames: []string{},
 		}
-		searchMsg := &SearchMsg{
-			BaseMsg:       baseMsg,
-			SearchRequest: searchRequest,
+		createCollectionMsg := &CreateCollectionMsg{
+			BaseMsg:                 baseMsg,
+			CreateCollectionRequest: createCollectionRequest,
 		}
-		return searchMsg
-	case commonpb.MsgType_SearchResult:
-		searchResult := internalpb.SearchResults{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_SearchResult,
-				MsgID:     reqID,
-				Timestamp: 1,
-				SourceID:  reqID,
-			},
-			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
-			ReqID:  0,
-		}
-		searchResultMsg := &SearchResultMsg{
-			BaseMsg:       baseMsg,
-			SearchResults: searchResult,
-		}
-		return searchResultMsg
+		return createCollectionMsg
 	case commonpb.MsgType_TimeTick:
 		timeTickResult := internalpb.TimeTickMsg{
 			Base: &commonpb.MsgBase{
