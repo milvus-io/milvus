@@ -104,6 +104,7 @@ func (c *Cluster) Flush(ctx context.Context, nodeID int64, channel string,
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_Flush),
 			commonpbutil.WithSourceID(Params.DataCoordCfg.GetNodeID()),
+			commonpbutil.WithTargetID(nodeID),
 		),
 		CollectionID:   ch.CollectionID,
 		SegmentIDs:     lo.Map(segments, getSegmentID),

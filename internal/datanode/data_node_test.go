@@ -227,7 +227,9 @@ func TestDataNode(t *testing.T) {
 		assert.Nil(t, err)
 
 		req := &datapb.FlushSegmentsRequest{
-			Base:         &commonpb.MsgBase{},
+			Base: &commonpb.MsgBase{
+				TargetID: node1.session.ServerID,
+			},
 			DbID:         0,
 			CollectionID: 1,
 			SegmentIDs:   []int64{0},
@@ -288,7 +290,21 @@ func TestDataNode(t *testing.T) {
 
 		// failure call
 		req = &datapb.FlushSegmentsRequest{
-			Base:         &commonpb.MsgBase{},
+			Base: &commonpb.MsgBase{
+				TargetID: -1,
+			},
+			DbID:         0,
+			CollectionID: 1,
+			SegmentIDs:   []int64{1},
+		}
+		status, err = node1.FlushSegments(node1.ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_NodeIDNotMatch, status.ErrorCode)
+
+		req = &datapb.FlushSegmentsRequest{
+			Base: &commonpb.MsgBase{
+				TargetID: node1.session.ServerID,
+			},
 			DbID:         0,
 			CollectionID: 1,
 			SegmentIDs:   []int64{1},
@@ -299,7 +315,9 @@ func TestDataNode(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
 
 		req = &datapb.FlushSegmentsRequest{
-			Base:           &commonpb.MsgBase{},
+			Base: &commonpb.MsgBase{
+				TargetID: node1.session.ServerID,
+			},
 			DbID:           0,
 			CollectionID:   1,
 			SegmentIDs:     []int64{},
