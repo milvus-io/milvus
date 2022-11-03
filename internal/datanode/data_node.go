@@ -594,6 +594,18 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 		return errStatus, nil
 	}
 
+	if req.GetBase().GetTargetID() != node.session.ServerID {
+		log.Warn("flush segment target id not matched",
+			zap.Int64("targetID", req.GetBase().GetTargetID()),
+			zap.Int64("serverID", node.session.ServerID),
+		)
+		status := &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_NodeIDNotMatch,
+			Reason:    common.WrapNodeIDNotMatchMsg(req.GetBase().GetTargetID(), node.session.ServerID),
+		}
+		return status, nil
+	}
+
 	log.Info("receiving FlushSegments request",
 		zap.Int64("collection ID", req.GetCollectionID()),
 		zap.Int64s("segments", req.GetSegmentIDs()),
