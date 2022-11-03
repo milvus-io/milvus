@@ -23,6 +23,8 @@ pipeline {
         TARGET_REPO = "milvusdb"
         CI_DOCKER_CREDENTIAL_ID = "harbor-milvus-io-registry"
         HARBOR_REPO = "harbor.milvus.io"
+        // Add CI variable to use proxy when build image 
+        CI="true"
     }
 
     stages {

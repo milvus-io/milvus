@@ -44,6 +44,8 @@ pipeline {
         HUB = "harbor.milvus.io/milvus"
         JENKINS_BUILD_ID = "${env.BUILD_ID}"
         CI_MODE="nightly"
+        // Add CI variable to use proxy when build image 
+        CI="true"
     }
 
     stages {

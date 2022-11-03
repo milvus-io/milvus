@@ -27,10 +27,17 @@ toplevel=$(dirname "$(cd "$(dirname "${0}")"; pwd)")
 OS_NAME="${OS_NAME:-ubuntu20.04}"
 MILVUS_IMAGE_REPO="${MILVUS_IMAGE_REPO:-milvusdb/milvus}"
 MILVUS_IMAGE_TAG="${MILVUS_IMAGE_TAG:-latest}"
+build_args=""
+ci_apt_proxy="https://nexus-ci.zilliz.cc/repository/apt-proxy-focal"
+
+# add apt_proxy to decrease the time to build image when network is slow for ci
+if [[ "${CI}" == "true" ]];then 
+    build_args="--build-arg CI=\"true\" --build-arg APT_PROXY=${ci_apt_proxy}"
+fi 
 
 pushd "${toplevel}"
 
-docker build -f "./build/docker/milvus/${OS_NAME}/Dockerfile" -t "${MILVUS_IMAGE_REPO}:${MILVUS_IMAGE_TAG}" .
+docker build ${build_args} -f "./build/docker/milvus/${OS_NAME}/Dockerfile" -t "${MILVUS_IMAGE_REPO}:${MILVUS_IMAGE_TAG}" .
 
 image_size=$(docker inspect ${MILVUS_IMAGE_REPO}:${MILVUS_IMAGE_TAG}  -f '{{.Size}}'| awk '{ byte =$1 /1024/1024/1024; print byte " GB" }')
 

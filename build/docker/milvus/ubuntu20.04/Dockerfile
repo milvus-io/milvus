@@ -17,6 +17,11 @@ FROM ubuntu:focal-20220426
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=UTC
 
+ARG CI
+ARG APT_PROXY
+
+RUN if [ "$CI" = "true" ] ; then echo "deb ${APT_PROXY} focal main" >/etc/apt/sources.list ;  fi
+
 RUN apt-get update && \
     apt-get install -y --no-install-recommends curl libtbb-dev gfortran netcat iputils-ping ca-certificates liblapack3 libzstd-dev uuid-dev libaio-dev libboost-program-options-dev libboost-filesystem-dev && \
     apt-get remove --purge -y && \
