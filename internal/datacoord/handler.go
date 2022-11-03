@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
 )
@@ -65,6 +66,8 @@ func (h *ServerHandler) GetDataVChanPositions(channel *channel, partitionID Uniq
 		droppedIDs   = make(typeutil.UniqueSet)
 		seekPosition *internalpb.MsgPosition
 	)
+	var minPosSegID int64
+	var minPosTs uint64
 	for _, s := range segments {
 		if (partitionID > allPartitionID && s.PartitionID != partitionID) ||
 			(s.GetStartPosition() == nil && s.GetDmlPosition() == nil) {
@@ -91,20 +94,36 @@ func (h *ServerHandler) GetDataVChanPositions(channel *channel, partitionID Uniq
 			segmentPosition = s.GetStartPosition()
 		}
 		if seekPosition == nil || segmentPosition.Timestamp < seekPosition.Timestamp {
+			minPosSegID = s.GetID()
+			minPosTs = segmentPosition.GetTimestamp()
 			seekPosition = segmentPosition
 		}
 	}
 
-	// use collection start position when segment position is not found
-	if seekPosition == nil {
+	if seekPosition != nil {
+		log.Info("channel seek position set as the minimal segment position",
+			zap.Int64("segment ID", minPosSegID),
+			zap.Uint64("position timestamp", minPosTs),
+			zap.String("realworld position timestamp", tsoutil.ParseAndFormatHybridTs(minPosTs)),
+		)
+	} else {
+		// use collection start position when segment position is not found
 		if channel.StartPositions == nil {
 			collection, err := h.GetCollection(h.s.ctx, channel.CollectionID)
 			if collection != nil && err == nil {
 				seekPosition = getCollectionStartPosition(channel.Name, collection)
 			}
+			log.Info("NEITHER segment position or channel start position are found, setting channel seek position to collection start position",
+				zap.Uint64("position timestamp", seekPosition.GetTimestamp()),
+				zap.String("realworld position timestamp", tsoutil.ParseAndFormatHybridTs(seekPosition.GetTimestamp())),
+			)
 		} else {
-			// use passed start positions, skip to ask rootcoord.
+			// use passed start positions, skip to ask RootCoord.
 			seekPosition = toMsgPosition(channel.Name, channel.StartPositions)
+			log.Info("segment position not found, setting channel seek position to channel start position",
+				zap.Uint64("position timestamp", seekPosition.GetTimestamp()),
+				zap.String("realworld position timestamp", tsoutil.ParseAndFormatHybridTs(seekPosition.GetTimestamp())),
+			)
 		}
 	}
 

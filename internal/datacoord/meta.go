@@ -625,10 +625,16 @@ func (m *meta) mergeDropSegment(seg2Drop *SegmentInfo) *SegmentInfo {
 // since the channel unwatching operation is not atomic here
 // ** the removal flag is always with last batch
 // ** the last batch must contains at least one segment
-// 1. when failure occurs between batches, failover mechanism will continue with the earlist  checkpoint of this channel
-//   since the flag is not marked so DataNode can re-consume the drop collection msg
-// 2. when failure occurs between save meta and unwatch channel, the removal flag shall be check before let datanode watch this channel
+//  1. when failure occurs between batches, failover mechanism will continue with the earlist  checkpoint of this channel
+//     since the flag is not marked so DataNode can re-consume the drop collection msg
+//  2. when failure occurs between save meta and unwatch channel, the removal flag shall be check before let datanode watch this channel
 func (m *meta) batchSaveDropSegments(channel string, modSegments map[int64]*SegmentInfo) error {
+	var modSegIDs []int64
+	for k := range modSegments {
+		modSegIDs = append(modSegIDs, k)
+	}
+	log.Info("meta update: batch save drop segments",
+		zap.Int64s("drop segments", modSegIDs))
 	segments := make([]*datapb.SegmentInfo, 0)
 	for _, seg := range modSegments {
 		segments = append(segments, seg.SegmentInfo)
@@ -863,13 +869,13 @@ func (m *meta) SetSegmentCompacting(segmentID UniqueID, compacting bool) {
 	m.segments.SetIsCompacting(segmentID, compacting)
 }
 
-// GetCompleteCompactionMeta returns
+// PrepareCompleteCompactionMutation returns
 // - the segment info of compactedFrom segments before compaction to revert
 // - the segment info of compactedFrom segments after compaction to alter
 // - the segment info of compactedTo segment after compaction to add
 // The compactedTo segment could contain 0 numRows
-func (m *meta) GetCompleteCompactionMeta(compactionLogs []*datapb.CompactionSegmentBinlogs, result *datapb.CompactionResult) ([]*datapb.SegmentInfo, []*SegmentInfo, *SegmentInfo) {
-	log.Info("meta update: get complete compaction meta")
+func (m *meta) PrepareCompleteCompactionMutation(compactionLogs []*datapb.CompactionSegmentBinlogs, result *datapb.CompactionResult) ([]*datapb.SegmentInfo, []*SegmentInfo, *SegmentInfo) {
+	log.Info("meta update: prepare for complete compaction mutation")
 	m.Lock()
 	defer m.Unlock()
 
@@ -939,26 +945,33 @@ func (m *meta) GetCompleteCompactionMeta(compactionLogs []*datapb.CompactionSegm
 	}
 	segment := NewSegmentInfo(segmentInfo)
 
-	log.Info("meta update: get complete compaction meta - complete",
-		zap.Int64("segmentID", segmentInfo.ID),
-		zap.Int64("collectionID", segmentInfo.CollectionID),
-		zap.Int64("partitionID", segmentInfo.PartitionID),
-		zap.Int64("NumOfRows", segmentInfo.NumOfRows),
-		zap.Any("compactionFrom", segmentInfo.CompactionFrom))
+	log.Info("meta update: prepare for complete compaction mutation - complete",
+		zap.Int64("collection ID", segment.GetCollectionID()),
+		zap.Int64("partition ID", segment.GetPartitionID()),
+		zap.Int64("new segment ID", segment.GetID()),
+		zap.Int64("new segment num of rows", segment.GetNumOfRows()),
+		zap.Any("compacted from", segment.GetCompactionFrom()))
 
 	return oldSegments, modSegments, segment
 }
 
 func (m *meta) alterMetaStoreAfterCompaction(modSegments []*datapb.SegmentInfo, newSegment *datapb.SegmentInfo) error {
+	var modSegIDs []int64
+	for _, seg := range modSegments {
+		modSegIDs = append(modSegIDs, seg.GetID())
+	}
+	log.Info("meta update: alter meta store for compaction updates",
+		zap.Int64s("compact from segments (segments to be updated as dropped)", modSegIDs),
+		zap.Int64("compact to segment", newSegment.GetID()))
 	return m.catalog.AlterSegmentsAndAddNewSegment(m.ctx, modSegments, newSegment)
 }
 
 func (m *meta) revertAlterMetaStoreAfterCompaction(oldSegments []*datapb.SegmentInfo, removalSegment *datapb.SegmentInfo) error {
-	log.Info("revert metastore after compaction failure",
+	log.Info("meta update: revert metastore after compaction failure",
 		zap.Int64("collectionID", removalSegment.CollectionID),
 		zap.Int64("partitionID", removalSegment.PartitionID),
-		zap.Int64("compactedTo", removalSegment.ID),
-		zap.Int64s("compactedFrom", removalSegment.GetCompactionFrom()),
+		zap.Int64("compactedTo (segment to remove)", removalSegment.ID),
+		zap.Int64s("compactedFrom (segments to add back)", removalSegment.GetCompactionFrom()),
 	)
 	return m.catalog.RevertAlterSegmentsAndAddNewSegment(m.ctx, oldSegments, removalSegment)
 }

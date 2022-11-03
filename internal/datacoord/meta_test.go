@@ -730,7 +730,7 @@ func TestMeta_alterInMemoryMetaAfterCompaction(t *testing.T) {
 
 }
 
-func TestMeta_GetCompleteCompactionMeta(t *testing.T) {
+func TestMeta_PrepareCompleteCompactionMutation(t *testing.T) {
 	prepareSegments := &SegmentsInfo{
 		map[UniqueID]*SegmentInfo{
 			1: {SegmentInfo: &datapb.SegmentInfo{
@@ -781,7 +781,7 @@ func TestMeta_GetCompleteCompactionMeta(t *testing.T) {
 		Deltalogs:           []*datapb.FieldBinlog{getFieldBinlogPaths(0, "deltalog5")},
 		NumOfRows:           1,
 	}
-	beforeCompact, afterCompact, newSegment := m.GetCompleteCompactionMeta(inCompactionLogs, inCompactionResult)
+	beforeCompact, afterCompact, newSegment := m.PrepareCompleteCompactionMutation(inCompactionLogs, inCompactionResult)
 	assert.NotNil(t, beforeCompact)
 	assert.NotNil(t, afterCompact)
 	assert.NotNil(t, newSegment)
