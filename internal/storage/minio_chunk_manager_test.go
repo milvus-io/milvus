@@ -18,6 +18,7 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"path"
 	"strconv"
 	"strings"
@@ -507,6 +508,26 @@ func TestMinIOCM(t *testing.T) {
 		pathWrong := path.Join(testPrefix, string(b))
 		_, _, err = testCM.ListWithPrefix(ctx, pathWrong, true)
 		assert.Error(t, err)
+	})
+
+	t.Run("test NoSuchKey", func(t *testing.T) {
+		testPrefix := path.Join(testMinIOKVRoot, "nokey")
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		testCM, err := newMinIOChunkManager(ctx, testBucket, testPrefix)
+		require.NoError(t, err)
+		defer testCM.RemoveWithPrefix(ctx, testPrefix)
+
+		key := "a"
+
+		_, err = testCM.Read(ctx, key)
+		assert.Error(t, err)
+		assert.True(t, errors.Is(err, ErrNoSuchKey))
+
+		_, err = testCM.ReadAt(ctx, key, 100, 1)
+		assert.Error(t, err)
+		assert.True(t, errors.Is(err, ErrNoSuchKey))
 	})
 }
 

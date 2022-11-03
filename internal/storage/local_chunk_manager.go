@@ -139,16 +139,7 @@ func (lcm *LocalChunkManager) Read(ctx context.Context, filePath string) ([]byte
 		return nil, fmt.Errorf("file not exist: %s", filePath)
 	}
 	absPath := path.Join(lcm.localPath, filePath)
-	file, err := os.Open(path.Clean(absPath))
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-	content, err := ioutil.ReadAll(file)
-	if err != nil {
-		return nil, err
-	}
-	return content, nil
+	return ioutil.ReadFile(absPath)
 }
 
 // MultiRead reads the local storage data if exists.
