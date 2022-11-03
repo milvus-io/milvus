@@ -23,7 +23,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"strings"
 	"time"
 
@@ -232,7 +231,17 @@ func (mcm *MinioChunkManager) Read(ctx context.Context, filePath string) ([]byte
 	}
 	defer object.Close()
 
-	data, err := ioutil.ReadAll(object)
+	objectInfo, err := object.Stat()
+	if err != nil {
+		log.Warn("failed to stat object", zap.String("path", filePath), zap.Error(err))
+		errResponse := minio.ToErrorResponse(err)
+		if errResponse.Code == "NoSuchKey" {
+			return nil, WrapErrNoSuchKey(filePath)
+		}
+		return nil, err
+	}
+
+	data, err := Read(object, objectInfo.Size)
 	if err != nil {
 		errResponse := minio.ToErrorResponse(err)
 		if errResponse.Code == "NoSuchKey" {
@@ -297,8 +306,13 @@ func (mcm *MinioChunkManager) ReadAt(ctx context.Context, filePath string, off i
 		return nil, err
 	}
 	defer object.Close()
-	data, err := ioutil.ReadAll(object)
+
+	data, err := Read(object, length)
 	if err != nil {
+		errResponse := minio.ToErrorResponse(err)
+		if errResponse.Code == "NoSuchKey" {
+			return nil, WrapErrNoSuchKey(filePath)
+		}
 		log.Warn("failed to read object", zap.String("path", filePath), zap.Error(err))
 		return nil, err
 	}
@@ -388,4 +402,23 @@ func (mcm *MinioChunkManager) ListWithPrefix(ctx context.Context, prefix string,
 	}
 
 	return objectsKeys, modTimes, nil
+}
+
+// Learn from file.ReadFile
+func Read(r io.Reader, size int64) ([]byte, error) {
+	data := make([]byte, 0, size)
+	for {
+		if len(data) >= cap(data) {
+			d := append(data[:cap(data)], 0)
+			data = d[:len(data)]
+		}
+		n, err := r.Read(data[len(data):cap(data)])
+		data = data[:len(data)+n]
+		if err != nil {
+			if err == io.EOF {
+				err = nil
+			}
+			return data, err
+		}
+	}
 }
