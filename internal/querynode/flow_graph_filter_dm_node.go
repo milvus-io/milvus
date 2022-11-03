@@ -39,12 +39,12 @@ type filterDmNode struct {
 	baseNode
 	collectionID UniqueID
 	metaReplica  ReplicaInterface
-	channel      Channel
+	vchannel     Channel
 }
 
 // Name returns the name of filterDmNode
 func (fdmNode *filterDmNode) Name() string {
-	return fmt.Sprintf("fdmNode-%s", fdmNode.channel)
+	return fmt.Sprintf("fdmNode-%s", fdmNode.vchannel)
 }
 
 // Operate handles input messages, to filter invalid insert messages
@@ -83,7 +83,7 @@ func (fdmNode *filterDmNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	collection, err := fdmNode.metaReplica.getCollectionByID(fdmNode.collectionID)
 	if err != nil {
 		// QueryNode should add collection before start flow graph
-		panic(fmt.Errorf("%s getCollectionByID failed, collectionID = %d, channel: %s", fdmNode.Name(), fdmNode.collectionID, fdmNode.channel))
+		panic(fmt.Errorf("%s getCollectionByID failed, collectionID = %d, vchannel: %s", fdmNode.Name(), fdmNode.collectionID, fdmNode.vchannel))
 	}
 
 	for i, msg := range msgStreamMsg.TsMessages() {
@@ -95,7 +95,7 @@ func (fdmNode *filterDmNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			if err != nil {
 				// error occurs when missing meta info or data is misaligned, should not happen
 				err = fmt.Errorf("filterInvalidInsertMessage failed, err = %s", err)
-				log.Error(err.Error(), zap.Int64("collection", fdmNode.collectionID), zap.String("channel", fdmNode.channel))
+				log.Error(err.Error(), zap.Int64("collection", fdmNode.collectionID), zap.String("vchannel", fdmNode.vchannel))
 				panic(err)
 			}
 			if resMsg != nil {
@@ -108,7 +108,7 @@ func (fdmNode *filterDmNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			if err != nil {
 				// error occurs when missing meta info or data is misaligned, should not happen
 				err = fmt.Errorf("filterInvalidDeleteMessage failed, err = %s", err)
-				log.Error(err.Error(), zap.Int64("collection", fdmNode.collectionID), zap.String("channel", fdmNode.channel))
+				log.Error(err.Error(), zap.Int64("collection", fdmNode.collectionID), zap.String("vchannel", fdmNode.vchannel))
 				panic(err)
 			}
 			if resMsg != nil {
@@ -120,7 +120,7 @@ func (fdmNode *filterDmNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			log.Warn("invalid message type in filterDmNode",
 				zap.String("message type", msg.Type().String()),
 				zap.Int64("collection", fdmNode.collectionID),
-				zap.String("channel", fdmNode.channel))
+				zap.String("vchannel", fdmNode.vchannel))
 		}
 	}
 
@@ -139,9 +139,9 @@ func (fdmNode *filterDmNode) filterInvalidDeleteMessage(msg *msgstream.DeleteMsg
 
 	if len(msg.Timestamps) <= 0 {
 		log.Debug("filter invalid delete message, no message",
-			zap.String("channel", fdmNode.channel),
-			zap.Any("collectionID", msg.CollectionID),
-			zap.Any("partitionID", msg.PartitionID))
+			zap.String("vchannel", fdmNode.vchannel),
+			zap.Int64("collectionID", msg.CollectionID),
+			zap.Int64("partitionID", msg.PartitionID))
 		return nil, nil
 	}
 
@@ -172,9 +172,9 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 
 	if len(msg.Timestamps) <= 0 {
 		log.Debug("filter invalid insert message, no message",
-			zap.String("channel", fdmNode.channel),
-			zap.Any("collectionID", msg.CollectionID),
-			zap.Any("partitionID", msg.PartitionID))
+			zap.String("vchannel", fdmNode.vchannel),
+			zap.Int64("collectionID", msg.CollectionID),
+			zap.Int64("partitionID", msg.PartitionID))
 		return nil, nil
 	}
 
@@ -185,8 +185,8 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 	// check if the collection from message is target collection
 	if msg.CollectionID != fdmNode.collectionID {
 		//log.Debug("filter invalid insert message, collection is not the target collection",
-		//	zap.Any("collectionID", msg.CollectionID),
-		//	zap.Any("partitionID", msg.PartitionID))
+		//	zap.Int64("collectionID", msg.CollectionID),
+		//	zap.Int64("partitionID", msg.PartitionID))
 		return nil, nil
 	}
 
@@ -209,7 +209,7 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 		// unFlushed segment may not have checkPoint, so `segmentInfo.DmlPosition` may be nil
 		if segmentInfo.DmlPosition == nil {
 			log.Warn("filter unFlushed segment without checkPoint",
-				zap.String("channel", fdmNode.channel),
+				zap.String("vchannel", fdmNode.vchannel),
 				zap.Int64("collectionID", msg.CollectionID),
 				zap.Int64("partitionID", msg.PartitionID),
 				zap.Int64("segmentID", msg.SegmentID))
@@ -217,7 +217,7 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 		}
 		if msg.SegmentID == segmentInfo.ID && msg.EndTs() < segmentInfo.DmlPosition.Timestamp {
 			log.Debug("filter invalid insert message, segments are excluded segments",
-				zap.String("channel", fdmNode.channel),
+				zap.String("vchannel", fdmNode.vchannel),
 				zap.Int64("collectionID", msg.CollectionID),
 				zap.Int64("partitionID", msg.PartitionID),
 				zap.Int64("segmentID", msg.SegmentID))
@@ -229,7 +229,7 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 }
 
 // newFilteredDmNode returns a new filterDmNode
-func newFilteredDmNode(metaReplica ReplicaInterface, collectionID UniqueID, channel Channel) *filterDmNode {
+func newFilteredDmNode(metaReplica ReplicaInterface, collectionID UniqueID, vchannel Channel) *filterDmNode {
 
 	maxQueueLength := Params.QueryNodeCfg.FlowGraphMaxQueueLength
 	maxParallelism := Params.QueryNodeCfg.FlowGraphMaxParallelism
@@ -242,6 +242,6 @@ func newFilteredDmNode(metaReplica ReplicaInterface, collectionID UniqueID, chan
 		baseNode:     baseNode,
 		collectionID: collectionID,
 		metaReplica:  metaReplica,
-		channel:      channel,
+		vchannel:     vchannel,
 	}
 }

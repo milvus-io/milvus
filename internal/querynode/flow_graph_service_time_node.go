@@ -19,6 +19,7 @@ package querynode
 import (
 	"fmt"
 	"reflect"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -67,10 +68,11 @@ func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	rateCol.updateTSafe(stNode.vChannel, serviceTimeMsg.timeRange.timestampMax)
 	p, _ := tsoutil.ParseTS(serviceTimeMsg.timeRange.timestampMax)
 	log.RatedDebug(10.0, "update tSafe:",
-		zap.Any("collectionID", stNode.collectionID),
-		zap.Any("tSafe", serviceTimeMsg.timeRange.timestampMax),
-		zap.Any("tSafe_p", p),
-		zap.Any("channel", stNode.vChannel),
+		zap.Int64("collectionID", stNode.collectionID),
+		zap.Uint64("tSafe", serviceTimeMsg.timeRange.timestampMax),
+		zap.Time("tSafe_p", p),
+		zap.Duration("tsLag", time.Since(p)),
+		zap.String("channel", stNode.vChannel),
 	)
 
 	return in
@@ -79,7 +81,7 @@ func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 // newServiceTimeNode returns a new serviceTimeNode
 func newServiceTimeNode(tSafeReplica TSafeReplicaInterface,
 	collectionID UniqueID,
-	channel Channel) *serviceTimeNode {
+	vchannel Channel) *serviceTimeNode {
 
 	maxQueueLength := Params.QueryNodeCfg.FlowGraphMaxQueueLength
 	maxParallelism := Params.QueryNodeCfg.FlowGraphMaxParallelism
@@ -91,7 +93,7 @@ func newServiceTimeNode(tSafeReplica TSafeReplicaInterface,
 	return &serviceTimeNode{
 		baseNode:     baseNode,
 		collectionID: collectionID,
-		vChannel:     channel,
+		vChannel:     vchannel,
 		tSafeReplica: tSafeReplica,
 	}
 }

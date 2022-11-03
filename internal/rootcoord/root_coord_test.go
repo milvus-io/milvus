@@ -917,22 +917,25 @@ func TestCore_ListImportTasks(t *testing.T) {
 	ti1 := &datapb.ImportTaskInfo{
 		Id:             100,
 		CollectionName: "collection-A",
+		CollectionId:   1,
 		State: &datapb.ImportTaskState{
 			StateCode: commonpb.ImportState_ImportPending,
 		},
-		CreateTs: time.Now().Unix() - 100,
+		CreateTs: time.Now().Unix() - 300,
 	}
 	ti2 := &datapb.ImportTaskInfo{
 		Id:             200,
 		CollectionName: "collection-A",
+		CollectionId:   1,
 		State: &datapb.ImportTaskState{
 			StateCode: commonpb.ImportState_ImportPersisted,
 		},
-		CreateTs: time.Now().Unix() - 100,
+		CreateTs: time.Now().Unix() - 200,
 	}
 	ti3 := &datapb.ImportTaskInfo{
 		Id:             300,
 		CollectionName: "collection-B",
+		CollectionId:   2,
 		State: &datapb.ImportTaskState{
 			StateCode: commonpb.ImportState_ImportPersisted,
 		},
@@ -944,7 +947,7 @@ func TestCore_ListImportTasks(t *testing.T) {
 	assert.NoError(t, err)
 	taskInfo3, err := proto.Marshal(ti3)
 	assert.NoError(t, err)
-	mockKv.Save(BuildImportTaskKey(1), "value")
+	mockKv.Save(BuildImportTaskKey(1), "value") // this item will trigger an error log in importManager.loadFromTaskStore()
 	mockKv.Save(BuildImportTaskKey(100), string(taskInfo1))
 	mockKv.Save(BuildImportTaskKey(200), string(taskInfo2))
 	mockKv.Save(BuildImportTaskKey(300), string(taskInfo3))
@@ -957,14 +960,81 @@ func TestCore_ListImportTasks(t *testing.T) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
+	verifyTaskFunc := func(task *milvuspb.GetImportStateResponse, taskID int64, colID int64, state commonpb.ImportState) {
+		assert.Equal(t, commonpb.ErrorCode_Success, task.GetStatus().ErrorCode)
+		assert.Equal(t, taskID, task.GetId())
+		assert.Equal(t, state, task.GetState())
+		assert.Equal(t, colID, task.GetCollectionId())
+	}
+
 	t.Run("normal case", func(t *testing.T) {
+		meta := newMockMetaTable()
+		meta.GetCollectionByNameFunc = func(ctx context.Context, collectionName string, ts Timestamp) (*model.Collection, error) {
+			if collectionName == ti1.CollectionName {
+				return &model.Collection{
+					CollectionID: ti1.CollectionId,
+				}, nil
+			} else if collectionName == ti3.CollectionName {
+				return &model.Collection{
+					CollectionID: ti3.CollectionId,
+				}, nil
+			}
+			return nil, errors.New("GetCollectionByName error")
+		}
+
 		ctx := context.Background()
-		c := newTestCore(withHealthyCode())
+		c := newTestCore(withHealthyCode(), withMeta(meta))
 		c.importManager = newImportManager(ctx, mockKv, nil, nil, nil, nil, nil, nil, nil)
+
+		// list all tasks
 		resp, err := c.ListImportTasks(ctx, &milvuspb.ListImportTasksRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, 3, len(resp.GetTasks()))
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		verifyTaskFunc(resp.GetTasks()[0], 100, 1, commonpb.ImportState_ImportPending)
+		verifyTaskFunc(resp.GetTasks()[1], 200, 1, commonpb.ImportState_ImportPersisted)
+		verifyTaskFunc(resp.GetTasks()[2], 300, 2, commonpb.ImportState_ImportPersisted)
+
+		// list tasks of collection-A
+		resp, err = c.ListImportTasks(ctx, &milvuspb.ListImportTasksRequest{
+			CollectionName: "collection-A",
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, 2, len(resp.GetTasks()))
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+
+		// list tasks of collection-B
+		resp, err = c.ListImportTasks(ctx, &milvuspb.ListImportTasksRequest{
+			CollectionName: "collection-B",
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(resp.GetTasks()))
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+
+		// invalid collection name
+		resp, err = c.ListImportTasks(ctx, &milvuspb.ListImportTasksRequest{
+			CollectionName: "dummy",
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, 0, len(resp.GetTasks()))
+		assert.Equal(t, commonpb.ErrorCode_IllegalCollectionName, resp.GetStatus().GetErrorCode())
+
+		// list the latest 2 tasks
+		resp, err = c.ListImportTasks(ctx, &milvuspb.ListImportTasksRequest{
+			Limit: 2,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, 2, len(resp.GetTasks()))
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		verifyTaskFunc(resp.GetTasks()[0], 200, 1, commonpb.ImportState_ImportPersisted)
+		verifyTaskFunc(resp.GetTasks()[1], 300, 2, commonpb.ImportState_ImportPersisted)
+
+		// failed to load tasks from store
+		mockKv.LoadWithPrefixMockErr = true
+		resp, err = c.ListImportTasks(ctx, &milvuspb.ListImportTasksRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, 0, len(resp.GetTasks()))
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
 	})
 }
 
