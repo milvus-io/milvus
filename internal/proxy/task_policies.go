@@ -57,8 +57,8 @@ func groupShardleadersWithSameQueryNode(
 			log.Ctx(ctx).Warn("no shard leaders were available",
 				zap.String("channel", dml),
 				zap.String("leaders", fmt.Sprintf("%v", shard2leaders[dml])))
-			if _, ok := errSet[dml]; ok {
-				return nil, nil, mergeErrSet(errSet) // return merged last error recorded
+			if err, ok := errSet[dml]; ok {
+				return nil, nil, err
 			}
 			return nil, nil, fmt.Errorf("no available shard leader")
 		}
@@ -113,6 +113,7 @@ func mergeRoundRobinPolicy(
 	for len(nexts) > 0 {
 		node2dmls, nodeset, err := groupShardleadersWithSameQueryNode(ctx, dml2leaders, nexts, errSet, mgr)
 		if err != nil {
+			log.Ctx(ctx).Warn("failed to search/query with round-robin policy", zap.Error(mergeErrSet(errSet)))
 			return err
 		}
 		wg := &sync.WaitGroup{}
