@@ -485,6 +485,9 @@ func (node *QueryNode) LoadSegments(ctx context.Context, in *querypb.LoadSegment
 		}
 	}()
 
+	node.metaReplica.addSegmentsLoadingList(segmentIDs)
+	defer node.metaReplica.removeSegmentsLoadingList(segmentIDs)
+
 	// TODO remove concurrent load segment for now, unless we solve the memory issue
 	log.Info("loadSegmentsTask start ", zap.Int64("collectionID", in.CollectionID),
 		zap.Int64s("segmentIDs", segmentIDs),

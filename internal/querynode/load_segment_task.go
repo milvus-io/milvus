@@ -26,7 +26,6 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	queryPb "github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
-	"github.com/samber/lo"
 )
 
 type loadSegmentsTask struct {
@@ -75,9 +74,6 @@ func (l *loadSegmentsTask) Execute(ctx context.Context) error {
 		return nil
 	}
 
-	segmentIDs := lo.Map(l.req.Infos, func(info *queryPb.SegmentLoadInfo, idx int) UniqueID { return info.SegmentID })
-	l.node.metaReplica.addSegmentsLoadingList(segmentIDs)
-	defer l.node.metaReplica.removeSegmentsLoadingList(segmentIDs)
 	err := l.node.loader.LoadSegment(l.ctx, l.req, segmentTypeSealed)
 	if err != nil {
 		log.Warn("failed to load segment", zap.Int64("collectionID", l.req.CollectionID),

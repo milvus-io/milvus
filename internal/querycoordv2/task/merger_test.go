@@ -119,6 +119,7 @@ func (suite *MergerSuite) TestMerge() {
 	)
 	ctx := context.Background()
 
+	Params.QueryCoordCfg.TaskMergeCap = 3
 	for segmentID := int64(1); segmentID <= 3; segmentID++ {
 		task, err := NewSegmentTask(ctx, timeout, 0, suite.collectionID, suite.replicaID,
 			NewSegmentAction(suite.nodeID, ActionTypeGrow, "", segmentID))
@@ -134,6 +135,34 @@ func (suite *MergerSuite) TestMerge() {
 	suite.Len(task.steps, 3)
 	suite.EqualValues(1, task.Result().DeltaPositions[0].Timestamp)
 	suite.EqualValues(1, task.Result().DeltaPositions[1].Timestamp)
+	suite.merger.Stop()
+	_, ok := <-suite.merger.Chan()
+	suite.Equal(ok, false)
+}
+
+func (suite *MergerSuite) TestMergeSameTask() {
+	const (
+		requestNum = 5
+		timeout    = 5 * time.Second
+	)
+	ctx := context.Background()
+
+	segmentID := int64(1)
+	task, err := NewSegmentTask(ctx, timeout, 0, suite.collectionID, suite.replicaID,
+		NewSegmentAction(suite.nodeID, ActionTypeGrow, "", segmentID))
+	suite.NoError(err)
+	// should dedup the same task
+	suite.merger.Add(NewLoadSegmentsTask(task, 0, suite.requests[segmentID]))
+	suite.merger.Add(NewLoadSegmentsTask(task, 0, suite.requests[segmentID]))
+
+	suite.merger.Start(ctx)
+	defer suite.merger.Stop()
+	taskI := <-suite.merger.Chan()
+	taskMerged := taskI.(*LoadSegmentsTask)
+	suite.Equal(2, len(taskMerged.tasks))
+	suite.Equal(1, len(taskMerged.req.Infos))
+	//suite.EqualValues(1, taskMerged.Result().DeltaPositions[0].Timestamp)
+	//suite.EqualValues(1, taskMerged.Result().DeltaPositions[1].Timestamp)
 	suite.merger.Stop()
 	_, ok := <-suite.merger.Chan()
 	suite.Equal(ok, false)
