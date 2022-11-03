@@ -23,11 +23,15 @@ namespace milvus {
 
 extern int64_t index_file_slice_size;
 extern int64_t thread_core_coefficient;
+extern int cpu_num;
 
 void
 SetIndexSliceSize(const int64_t size);
 
 void
 SetThreadCoreCoefficient(const int64_t coefficient);
+
+void
+SetCpuNum(const int core);
 
 }  // namespace milvus

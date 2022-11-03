@@ -53,6 +53,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/concurrency"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/hardware"
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/internal/util/lock"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
@@ -220,6 +221,9 @@ func (node *QueryNode) InitSegcore() {
 
 	cThreadCoreCoefficient := C.int64_t(Params.CommonCfg.ThreadCoreCoefficient)
 	C.InitThreadCoreCoefficient(cThreadCoreCoefficient)
+
+	cCpuNum := C.int(hardware.GetCPUNum())
+	C.InitCpuNum(cCpuNum)
 
 	initcore.InitLocalStorageConfig(&Params)
 }
