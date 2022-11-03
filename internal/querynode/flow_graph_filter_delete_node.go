@@ -35,12 +35,12 @@ type filterDeleteNode struct {
 	baseNode
 	collectionID UniqueID
 	metaReplica  ReplicaInterface
-	channel      Channel
+	vchannel     Channel
 }
 
 // Name returns the name of filterDeleteNode
 func (fddNode *filterDeleteNode) Name() string {
-	return fmt.Sprintf("fdNode-%s", fddNode.channel)
+	return fmt.Sprintf("fdNode-%s", fddNode.vchannel)
 }
 
 // Operate handles input messages, to filter invalid delete messages
@@ -79,7 +79,7 @@ func (fddNode *filterDeleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	collection, err := fddNode.metaReplica.getCollectionByID(fddNode.collectionID)
 	if err != nil {
 		// QueryNode should add collection before start flow graph
-		panic(fmt.Errorf("%s getCollectionByID failed, collectionID = %d, channel = %s", fddNode.Name(), fddNode.collectionID, fddNode.channel))
+		panic(fmt.Errorf("%s getCollectionByID failed, collectionID = %d, channel = %s", fddNode.Name(), fddNode.collectionID, fddNode.vchannel))
 	}
 
 	for _, msg := range msgStreamMsg.TsMessages() {
@@ -88,7 +88,7 @@ func (fddNode *filterDeleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			resMsg, err := fddNode.filterInvalidDeleteMessage(msg.(*msgstream.DeleteMsg), collection.getLoadType())
 			if err != nil {
 				// error occurs when missing meta info or data is misaligned, should not happen
-				err = fmt.Errorf("filterInvalidDeleteMessage failed, err = %s, collection = %d, channel = %s", err, fddNode.collectionID, fddNode.channel)
+				err = fmt.Errorf("filterInvalidDeleteMessage failed, err = %s, collection = %d, channel = %s", err, fddNode.collectionID, fddNode.vchannel)
 				log.Error(err.Error())
 				panic(err)
 			}
@@ -99,7 +99,7 @@ func (fddNode *filterDeleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			log.Warn("invalid message type in filterDeleteNode",
 				zap.String("message type", msg.Type().String()),
 				zap.Int64("collection", fddNode.collectionID),
-				zap.String("channel", fddNode.channel))
+				zap.String("vchannel", fddNode.vchannel))
 		}
 	}
 	var res Msg = &dMsg
@@ -125,9 +125,9 @@ func (fddNode *filterDeleteNode) filterInvalidDeleteMessage(msg *msgstream.Delet
 
 	if len(msg.Timestamps) <= 0 {
 		log.Debug("filter invalid delete message, no message",
-			zap.String("channel", fddNode.channel),
-			zap.Any("collectionID", msg.CollectionID),
-			zap.Any("partitionID", msg.PartitionID))
+			zap.String("vchannel", fddNode.vchannel),
+			zap.Int64("collectionID", msg.CollectionID),
+			zap.Int64("partitionID", msg.PartitionID))
 		return nil, nil
 	}
 
@@ -141,7 +141,7 @@ func (fddNode *filterDeleteNode) filterInvalidDeleteMessage(msg *msgstream.Delet
 }
 
 // newFilteredDeleteNode returns a new filterDeleteNode
-func newFilteredDeleteNode(metaReplica ReplicaInterface, collectionID UniqueID, channel Channel) *filterDeleteNode {
+func newFilteredDeleteNode(metaReplica ReplicaInterface, collectionID UniqueID, vchannel Channel) *filterDeleteNode {
 
 	maxQueueLength := Params.QueryNodeCfg.FlowGraphMaxQueueLength
 	maxParallelism := Params.QueryNodeCfg.FlowGraphMaxParallelism
@@ -154,6 +154,6 @@ func newFilteredDeleteNode(metaReplica ReplicaInterface, collectionID UniqueID, 
 		baseNode:     baseNode,
 		collectionID: collectionID,
 		metaReplica:  metaReplica,
-		channel:      channel,
+		vchannel:     vchannel,
 	}
 }

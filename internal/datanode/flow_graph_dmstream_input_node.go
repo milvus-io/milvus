@@ -21,13 +21,15 @@ import (
 	"fmt"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
-	"go.uber.org/zap"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
 )
 
 // DmInputNode receives messages from message streams, packs messages between two timeticks, and passes all
@@ -48,13 +50,27 @@ func newDmInputNode(ctx context.Context, seekPos *internalpb.MsgPosition, dmNode
 	if seekPos != nil {
 		insertStream.AsConsumer([]string{pchannelName}, consumeSubName, mqwrapper.SubscriptionPositionUnknown)
 		seekPos.ChannelName = pchannelName
+		cpTs, _ := tsoutil.ParseTS(seekPos.Timestamp)
 		start := time.Now()
-		log.Info("datanode begin to seek", zap.ByteString("seek msgID", seekPos.GetMsgID()), zap.String("physical channel", seekPos.GetChannelName()), zap.Int64("collection ID", dmNodeConfig.collectionID))
+		log.Info("datanode begin to seek",
+			zap.ByteString("seek msgID", seekPos.GetMsgID()),
+			zap.String("pchannel", seekPos.GetChannelName()),
+			zap.String("vchannel", dmNodeConfig.vChannelName),
+			zap.Time("position", cpTs),
+			zap.Duration("tsLag", time.Since(cpTs)),
+			zap.Int64("collection ID", dmNodeConfig.collectionID))
 		err = insertStream.Seek([]*internalpb.MsgPosition{seekPos})
 		if err != nil {
 			return nil, err
 		}
-		log.Info("datanode seek successfully", zap.ByteString("seek msgID", seekPos.GetMsgID()), zap.String("physical channel", seekPos.GetChannelName()), zap.Int64("collection ID", dmNodeConfig.collectionID), zap.Duration("elapse", time.Since(start)))
+		log.Info("datanode seek successfully",
+			zap.ByteString("seek msgID", seekPos.GetMsgID()),
+			zap.String("pchannel", seekPos.GetChannelName()),
+			zap.String("vchannel", dmNodeConfig.vChannelName),
+			zap.Time("position", cpTs),
+			zap.Duration("tsLag", time.Since(cpTs)),
+			zap.Int64("collection ID", dmNodeConfig.collectionID),
+			zap.Duration("elapse", time.Since(start)))
 	} else {
 		insertStream.AsConsumer([]string{pchannelName}, consumeSubName, mqwrapper.SubscriptionPositionEarliest)
 	}
