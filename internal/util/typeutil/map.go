@@ -72,6 +72,17 @@ func (m *ConcurrentMap[K, V]) GetOrInsert(key K, value V) (V, bool) {
 	return loaded.(V), true
 }
 
+func (m *ConcurrentMap[K, V]) LoadOrComputeAndStore(key K, f func() V) (V, bool) {
+	loaded, exist := m.inner.Load(key)
+	if exist {
+		return loaded.(V), true
+	}
+
+	newValue := f()
+	m.inner.Store(key, newValue)
+	return newValue, false
+}
+
 func (m *ConcurrentMap[K, V]) GetAndRemove(key K) (V, bool) {
 	var zeroValue V
 	value, ok := m.inner.LoadAndDelete(key)

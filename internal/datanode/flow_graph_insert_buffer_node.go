@@ -52,11 +52,9 @@ type insertBufferNode struct {
 	channel      Channel
 	idAllocator  allocatorInterface
 
-	flushMap         sync.Map
-	flushChan        <-chan flushMsg
-	resendTTChan     <-chan resendTTMsg
-	flushingSegCache *Cache
-	flushManager     flushManager
+	flushChan    <-chan flushMsg
+	resendTTChan <-chan resendTTMsg
+	flushManager flushManager
 
 	timeTickStream msgstream.MsgStream
 	ttLogger       *timeTickLogger
@@ -515,11 +513,13 @@ func (ibNode *insertBufferNode) bufferInsertMsg(msg *msgstream.InsertMsg, endPos
 		}
 	}
 
-	newbd, err := newBufferData(int64(dimension))
-	if err != nil {
-		return err
+	bd, loaded := ibNode.insertBuffer.Load(currentSegID)
+	if !loaded {
+		bd, err = newBufferData(int64(dimension))
+		if err != nil {
+			return err
+		}
 	}
-	bd, _ := ibNode.insertBuffer.LoadOrStore(currentSegID, newbd)
 
 	buffer := bd.(*BufferData)
 	// idata := buffer.buffer
@@ -658,12 +658,10 @@ func newInsertBufferNode(ctx context.Context, collID UniqueID, flushCh <-chan fl
 		BaseNode:     baseNode,
 		insertBuffer: sync.Map{},
 
-		timeTickStream:   wTtMsgStream,
-		flushMap:         sync.Map{},
-		flushChan:        flushCh,
-		resendTTChan:     resendTTCh,
-		flushingSegCache: flushingSegCache,
-		flushManager:     fm,
+		timeTickStream: wTtMsgStream,
+		flushChan:      flushCh,
+		resendTTChan:   resendTTCh,
+		flushManager:   fm,
 
 		channel:     config.channel,
 		idAllocator: config.allocator,
