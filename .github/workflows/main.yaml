@@ -73,13 +73,15 @@ jobs:
       - name: Start Service
         shell: bash
         run: |
-          docker-compose up -d pulsar etcd minio
+          docker-compose up -d ut-deps
+          docker-compose ps 
       - name: Build and UnitTest
         run: |
           ./build/builder.sh /bin/bash -c "make ci-ut"
       - name: Get the status & restart count for containers when ut failed
         if: ${{ failure() }}
         run: |  
+          docker-compose ps
           echo "----show current status for each container---"
           docker ps --format "table {{.Names}}\t\t{{.Image}}\t\t{{.Status}}"
           for container in $(docker ps --format "table {{.Names}}" | grep -v "NAMES"); do

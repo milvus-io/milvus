@@ -57,11 +57,15 @@ services:
       interval: 30s
       timeout: 20s
       retries: 3
-
+  
   pulsar:
     image: apachepulsar/pulsar:2.8.2
     command: bin/pulsar standalone --no-functions-worker --no-stream-storage
-
+    healthcheck:
+      test: ["CMD-SHELL", "bin/pulsar-admin brokers healthcheck"]
+      interval: 5s
+      timeout: 10s
+      retries: 5
   minio:
     image: minio/minio:RELEASE.2022-03-17T06-34-49Z
     environment:
@@ -77,6 +81,15 @@ services:
   jaeger:
     image: jaegertracing/all-in-one:latest
 
+  ut-deps:
+    image: alpine:3.16
+    depends_on:
+      minio:
+        condition: service_healthy
+      pulsar:
+        condition: service_healthy
+      etcd:
+        condition: service_healthy
 networks:
   default:
     name: milvus_dev
