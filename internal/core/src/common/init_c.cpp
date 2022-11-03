@@ -23,7 +23,7 @@
 #include "common/Slice.h"
 #include "common/Common.h"
 
-std::once_flag flag1, flag2, flag3;
+std::once_flag flag1, flag2, flag3, flag4;
 
 void
 InitLocalRootPath(const char* root_path) {
@@ -42,4 +42,10 @@ void
 InitThreadCoreCoefficient(const int64_t value) {
     std::call_once(
         flag3, [](int64_t value) { milvus::SetThreadCoreCoefficient(value); }, value);
+}
+
+void
+InitCpuNum(const int value) {
+    std::call_once(
+        flag4, [](int value) { milvus::SetCpuNum(value); }, value);
 }

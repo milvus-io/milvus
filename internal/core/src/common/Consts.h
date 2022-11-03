@@ -41,3 +41,5 @@ const int DEFAULT_DISK_INDEX_MAX_MEMORY_LIMIT = 2;  // gigabytes
 const int64_t DEFAULT_THREAD_CORE_COEFFICIENT = 50;
 
 const int64_t DEFAULT_INDEX_FILE_SLICE_SIZE = 4;  // megabytes
+
+const int DEFAULT_CPU_NUM = 1;
