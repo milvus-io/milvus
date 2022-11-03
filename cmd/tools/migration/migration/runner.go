@@ -51,7 +51,8 @@ func NewRunner(ctx context.Context, cfg *configs.Config) *Runner {
 func (r *Runner) watchByPrefix(prefix string) {
 	defer r.wg.Done()
 	_, revision, err := r.session.GetSessions(prefix)
-	console.AbnormalExitIf(err, r.backupFinished.Load())
+	fn := func() { r.Stop() }
+	console.AbnormalExitIf(err, r.backupFinished.Load(), console.AddCallbacks(fn))
 	eventCh := r.session.WatchServices(prefix, revision, nil)
 	for {
 		select {
@@ -59,7 +60,7 @@ func (r *Runner) watchByPrefix(prefix string) {
 			return
 		case event := <-eventCh:
 			msg := fmt.Sprintf("session up/down, exit migration, event type: %s, session: %s", event.EventType.String(), event.Session.String())
-			console.AbnormalExit(r.backupFinished.Load(), msg)
+			console.AbnormalExit(r.backupFinished.Load(), msg, console.AddCallbacks(fn))
 		}
 	}
 }

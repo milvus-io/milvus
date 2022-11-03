@@ -15,15 +15,16 @@ func Run(c *configs.Config) {
 	runner := migration.NewRunner(ctx, c)
 	console.AbnormalExitIf(runner.CheckSessions(), false)
 	console.AbnormalExitIf(runner.RegisterSession(), false)
-	defer runner.Stop()
+	fn := func() { runner.Stop() }
+	defer fn()
 	// double check.
-	console.AbnormalExitIf(runner.CheckSessions(), false)
-	console.AbnormalExitIf(runner.Validate(), false)
-	console.NormalExitIf(runner.CheckCompatible(), "version compatible, no need to migrate")
+	console.AbnormalExitIf(runner.CheckSessions(), false, console.AddCallbacks(fn))
+	console.AbnormalExitIf(runner.Validate(), false, console.AddCallbacks(fn))
+	console.NormalExitIf(runner.CheckCompatible(), "version compatible, no need to migrate", console.AddCallbacks(fn))
 	if c.RunWithBackup {
-		console.AbnormalExitIf(runner.Backup(), false)
+		console.AbnormalExitIf(runner.Backup(), false, console.AddCallbacks(fn))
 	} else {
 		console.Warning("run migration without backup!")
 	}
-	console.AbnormalExitIf(runner.Migrate(), true)
+	console.AbnormalExitIf(runner.Migrate(), true, console.AddCallbacks(fn))
 }

@@ -13,8 +13,9 @@ func Rollback(c *configs.Config) {
 	runner := migration.NewRunner(ctx, c)
 	console.ExitIf(runner.CheckSessions())
 	console.ExitIf(runner.RegisterSession())
-	defer runner.Stop()
+	fn := func() { runner.Stop() }
+	defer fn()
 	// double check.
-	console.ExitIf(runner.CheckSessions())
-	console.ExitIf(runner.Rollback())
+	console.ExitIf(runner.CheckSessions(), console.AddCallbacks(fn))
+	console.ExitIf(runner.Rollback(), console.AddCallbacks(fn))
 }

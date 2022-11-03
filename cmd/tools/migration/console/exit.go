@@ -12,31 +12,36 @@ func ExitWithOption(opts ...ExitOption) {
 	} else {
 		Success(c.msg)
 	}
+	c.runBeforeExit()
 	os.Exit(c.code)
 }
 
-func AbnormalExit(backupFinished bool, msg string) {
-	opts := []ExitOption{WithAbnormalExit(), WithMsg(msg)}
+func AbnormalExit(backupFinished bool, msg string, options ...ExitOption) {
+	opts := append([]ExitOption{}, options...)
+	opts = append(opts, WithAbnormalExit())
+	opts = append(opts, WithMsg(msg))
 	if backupFinished {
 		opts = append(opts, WithExitCode(FailButBackupFinished))
 	} else {
-		opts = append(opts, WithExitCode(BackupUnfinished))
+		opts = append(opts, WithExitCode(FailWithBackupUnfinished))
 	}
 	ExitWithOption(opts...)
 }
 
-func AbnormalExitIf(err error, backupFinished bool) {
+func AbnormalExitIf(err error, backupFinished bool, options ...ExitOption) {
 	if err != nil {
-		AbnormalExit(backupFinished, err.Error())
+		AbnormalExit(backupFinished, err.Error(), options...)
 	}
 }
 
-func NormalExit(msg string) {
-	ExitWithOption(WithExitCode(NormalCode), WithMsg(msg))
+func NormalExit(msg string, options ...ExitOption) {
+	opts := append([]ExitOption{}, options...)
+	opts = append(opts, WithExitCode(NormalCode), WithMsg(msg))
+	ExitWithOption(opts...)
 }
 
-func NormalExitIf(success bool, msg string) {
+func NormalExitIf(success bool, msg string, options ...ExitOption) {
 	if success {
-		NormalExit(msg)
+		NormalExit(msg, options...)
 	}
 }

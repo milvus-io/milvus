@@ -19,13 +19,15 @@ func Warning(msg string) {
 	colorOut(msg, "yellow")
 }
 
-func Exit(msg string) {
-	ExitWithOption(WithAbnormalExit(), WithExitCode(Unexpected), WithMsg(msg))
+func Exit(msg string, options ...ExitOption) {
+	opts := append([]ExitOption{}, options...)
+	opts = append(opts, WithAbnormalExit(), WithExitCode(Unexpected), WithMsg(msg))
+	ExitWithOption(opts...)
 }
 
-func ExitIf(err error) {
+func ExitIf(err error, options ...ExitOption) {
 	if err != nil {
-		Exit(err.Error())
+		Exit(err.Error(), options...)
 	}
 }
 
