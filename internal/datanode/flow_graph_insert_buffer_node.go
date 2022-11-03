@@ -118,14 +118,17 @@ type BufferData struct {
 // `limit` is the segment numOfRows a buffer can buffer at most.
 //
 // For a float32 vector field:
-//  limit = 16 * 2^20 Byte [By default] / (dimension * 4 Byte)
+//
+//	limit = 16 * 2^20 Byte [By default] / (dimension * 4 Byte)
 //
 // For a binary vector field:
-//  limit = 16 * 2^20 Byte [By default]/ (dimension / 8 Byte)
+//
+//	limit = 16 * 2^20 Byte [By default]/ (dimension / 8 Byte)
 //
 // But since the buffer of binary vector fields is larger than the float32 one
-//   with the same dimension, newBufferData takes the smaller buffer limit
-//   to fit in both types of vector fields
+//
+//	with the same dimension, newBufferData takes the smaller buffer limit
+//	to fit in both types of vector fields
 //
 // * This need to change for string field support and multi-vector fields support.
 func newBufferData(dimension int64) (*BufferData, error) {
@@ -228,12 +231,16 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 	ibNode.lastTimestamp = endPositions[0].Timestamp
 
 	// Updating segment statistics in replica
-	seg2Upload, err := ibNode.updateSegStatesInReplica(fgMsg.insertMessages, startPositions[0], endPositions[0])
-	if err != nil {
-		// Occurs only if the collectionID is mismatch, should not happen
-		err = fmt.Errorf("update segment states in Replica wrong, err = %s", err)
-		log.Error(err.Error())
-		panic(err)
+	var seg2Upload []UniqueID
+	if !fgMsg.dropCollection {
+		var err error
+		seg2Upload, err = ibNode.updateSegStatesInReplica(fgMsg.insertMessages, startPositions[0], endPositions[0])
+		if err != nil {
+			// Occurs only if the collectionID is mismatch, should not happen
+			err = fmt.Errorf("update segment states in Replica wrong, err = %s", err)
+			log.Error(err.Error())
+			panic(err)
+		}
 	}
 
 	// insert messages -> buffer
@@ -465,8 +472,9 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 }
 
 // updateSegStatesInReplica updates statistics in replica for the segments in insertMsgs.
-//  If the segment doesn't exist, a new segment will be created.
-//  The segment number of rows will be updated in mem, waiting to be uploaded to DataCoord.
+//
+//	If the segment doesn't exist, a new segment will be created.
+//	The segment number of rows will be updated in mem, waiting to be uploaded to DataCoord.
 func (ibNode *insertBufferNode) updateSegStatesInReplica(insertMsgs []*msgstream.InsertMsg, startPos, endPos *internalpb.MsgPosition) (seg2Upload []UniqueID, err error) {
 	uniqueSeg := make(map[UniqueID]int64)
 	for _, msg := range insertMsgs {
