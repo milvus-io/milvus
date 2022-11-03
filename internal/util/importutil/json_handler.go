@@ -163,7 +163,7 @@ func NewJSONRowConsumer(collectionSchema *schemapb.CollectionSchema, idAlloc *al
 	err := initValidators(collectionSchema, v.validators)
 	if err != nil {
 		log.Error("JSON row consumer: fail to initialize json row-based consumer", zap.Error(err))
-		return nil, fmt.Errorf("fail to initialize json row-based consumer: %v", err)
+		return nil, fmt.Errorf("fail to initialize json row-based consumer, error: %w", err)
 	}
 
 	v.segmentsData = make([]map[storage.FieldID]storage.FieldData, 0, shardNum)
@@ -171,7 +171,7 @@ func NewJSONRowConsumer(collectionSchema *schemapb.CollectionSchema, idAlloc *al
 		segmentData := initSegmentData(collectionSchema)
 		if segmentData == nil {
 			log.Error("JSON row consumer: fail to initialize in-memory segment data", zap.Int("shardID", i))
-			return nil, fmt.Errorf("fail to initialize in-memory segment data for shardID %d", i)
+			return nil, fmt.Errorf("fail to initialize in-memory segment data for shard id %d", i)
 		}
 		v.segmentsData = append(v.segmentsData, segmentData)
 	}
@@ -267,7 +267,7 @@ func (v *JSONRowConsumer) Handle(rows []map[storage.FieldID]interface{}) error {
 	err := v.flush(false)
 	if err != nil {
 		log.Error("JSON row consumer: try flush data but failed", zap.Error(err))
-		return fmt.Errorf("try flush data but failed: %s", err.Error())
+		return fmt.Errorf("try flush data but failed, error: %w", err)
 	}
 
 	// prepare autoid, no matter int64 or varchar pk, we always generate autoid since the hidden field RowIDField requires them
@@ -279,7 +279,7 @@ func (v *JSONRowConsumer) Handle(rows []map[storage.FieldID]interface{}) error {
 		rowIDBegin, rowIDEnd, err = v.rowIDAllocator.Alloc(uint32(len(rows)))
 		if err != nil {
 			log.Error("JSON row consumer: failed to generate primary keys", zap.Int("count", len(rows)), zap.Error(err))
-			return fmt.Errorf("failed to generate %d primary keys: %s", len(rows), err.Error())
+			return fmt.Errorf("failed to generate %d primary keys, error: %w", len(rows), err)
 		}
 		if rowIDEnd-rowIDBegin != int64(len(rows)) {
 			log.Error("JSON row consumer: try to generate primary keys but allocated ids are not enough",
@@ -326,7 +326,7 @@ func (v *JSONRowConsumer) Handle(rows []map[storage.FieldID]interface{}) error {
 			if err != nil {
 				log.Error("JSON row consumer: failed to hash primary key at the row",
 					zap.Int64("key", pk), zap.Int64("rowNumber", v.rowCounter+int64(i)), zap.Error(err))
-				return fmt.Errorf("failed to hash primary key %d at the row %d, error: %s", pk, v.rowCounter+int64(i), err.Error())
+				return fmt.Errorf("failed to hash primary key %d at the row %d, error: %w", pk, v.rowCounter+int64(i), err)
 			}
 
 			shard = hash % uint32(v.shardNum)
@@ -349,8 +349,8 @@ func (v *JSONRowConsumer) Handle(rows []map[storage.FieldID]interface{}) error {
 			if err := validator.convertFunc(value, v.segmentsData[shard][name]); err != nil {
 				log.Error("JSON row consumer: failed to convert value for field at the row",
 					zap.String("fieldName", validator.fieldName), zap.Int64("rowNumber", v.rowCounter+int64(i)), zap.Error(err))
-				return fmt.Errorf("failed to convert value for field %s at the row %d,  error: %s",
-					validator.fieldName, v.rowCounter+int64(i), err.Error())
+				return fmt.Errorf("failed to convert value for field '%s' at the row %d,  error: %w",
+					validator.fieldName, v.rowCounter+int64(i), err)
 			}
 		}
 	}
