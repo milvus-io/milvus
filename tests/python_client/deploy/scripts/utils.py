@@ -10,7 +10,7 @@ pymilvus_version = pymilvus.__version__
 
 all_index_types = ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ", "HNSW", "ANNOY"]
 
-default_index_params = [{"nlist": 128}, {"nlist": 128}, {"nlist": 128}, {"nlist": 128, "m": 16, "nbits": 8},
+default_index_params = [{}, {"nlist": 128}, {"nlist": 128}, {"nlist": 128, "m": 16, "nbits": 8},
                         {"M": 48, "efConstruction": 500}, {"n_trees": 50}]
 
 index_params_map = dict(zip(all_index_types, default_index_params))
@@ -116,6 +116,23 @@ def create_collections_and_insert_data(prefix, flush=True, count=3000, collectio
     print(get_collections(prefix))
 
 
+def create_index_flat():
+    # create index
+    default_flat_index = {"index_type": "FLAT", "params": {}, "metric_type": "L2"}
+    all_col_list = list_collections()
+    col_list = []
+    for col_name in all_col_list:
+        if "FLAT" in col_name and "task" in col_name and "IVF" not in col_name:
+            col_list.append(col_name)
+    print("\nCreate index for FLAT...")
+    for col_name in col_list:
+        c = Collection(name=col_name)
+        print(c)
+        t0 = time.time()
+        c.create_index(field_name="float_vector", index_params=default_flat_index)
+        print(f"create index time: {time.time() - t0:.4f}")
+
+
 def create_index(prefix):
     # create index
     default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
@@ -134,6 +151,14 @@ def create_index(prefix):
         t0 = time.time()
         c.create_index(field_name="float_vector", index_params=index)
         print(f"create index time: {time.time() - t0:.4f}")
+
+
+def release_collection(prefix):
+    col_list = get_collections(prefix)
+    print("release collection")
+    for col_name in col_list:
+        c = Collection(name=col_name)
+        c.release()
 
 
 def load_and_search(prefix, replicas=1):

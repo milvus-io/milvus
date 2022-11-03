@@ -27,6 +27,7 @@ default_term_expr = f'{ct.default_int64_field_name} in [0, 1]'
 
 prefix = "deploy_test"
 
+TIMEOUT = 60
 
 class TestActionFirstDeployment(TestDeployBase):
     """ Test case of action before reinstall """
@@ -54,7 +55,10 @@ class TestActionFirstDeployment(TestDeployBase):
             is_binary = True
         collection_w = self.init_collection_general(insert_data=False, is_binary=is_binary, name=name)[0]
         if collection_w.has_index():
-            collection_w.drop_index()
+            index_names = [index.index_name for index in collection_w.indexes]
+            for index_name in index_names:
+                collection_w.drop_index(index_name=index_name)
+
 
 
 
@@ -112,6 +116,12 @@ class TestActionFirstDeployment(TestDeployBase):
         # create index for vector
         default_index_param = gen_index_param(index_type)
         collection_w.create_index(default_index_field, default_index_param)
+        # create index for string
+        if is_string_indexed == "is_string_indexed":
+            default_string_index_params = {}
+            default_string_index_name = "_default_string_idx"
+            collection_w.create_index(
+                default_string_field_name, default_string_index_params, index_name=default_string_index_name)
 
         # load for growing segment
         if replica_number >= 1:
@@ -120,7 +130,7 @@ class TestActionFirstDeployment(TestDeployBase):
             except Exception as e:
                 log.error(
                     f"release collection failed: {e} maybe the collection is not loaded")
-            collection_w.load(replica_number=replica_number)
+            collection_w.load(replica_number=replica_number, timeout=TIMEOUT)
 
         # delete data for growing segment
         delete_expr = f"{ct.default_int64_field_name} in {[i for i in range(0,10)]}"
@@ -156,12 +166,6 @@ class TestActionFirstDeployment(TestDeployBase):
         delete_expr = f"{ct.default_int64_field_name} in {[i for i in range(10,20)]}"
         if is_deleted == "is_deleted":
             collection_w.delete(expr=delete_expr)
-        # create index for string
-        if is_string_indexed == "is_string_indexed":
-            default_string_index_params = {}
-            default_string_index_name = "_default_string_idx"
-            collection_w.create_index(
-                default_string_field_name, default_string_index_params, index_name=default_string_index_name)
 
         # delete data for sealed segment and after index
         delete_expr = f"{ct.default_int64_field_name} in {[i for i in range(20,30)]}"
@@ -176,7 +180,7 @@ class TestActionFirstDeployment(TestDeployBase):
         # reload after flush and creating index
         if replica_number > 0:
             collection_w.release()
-            collection_w.load(replica_number=replica_number)
+            collection_w.load(replica_number=replica_number, timeout=TIMEOUT)
 
         # insert data to get growing segment after reload
         if segment_status == "all":
