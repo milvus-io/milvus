@@ -349,7 +349,7 @@ func (m *importManager) checkIndexingDone(ctx context.Context, collID UniqueID, 
 		zap.Any("index info", descIdxResp.GetIndexInfos()))
 	if descIdxResp.GetStatus().GetErrorCode() == commonpb.ErrorCode_IndexNotExist ||
 		len(descIdxResp.GetIndexInfos()) == 0 {
-		log.Info("index not exist for collection",
+		log.Info("index doesn't exist for collection",
 			zap.Int64("collection ID", collID))
 		return true, nil
 	}
@@ -694,6 +694,7 @@ func (m *importManager) copyTaskInfo(input *datapb.ImportTaskInfo, output *milvu
 	output.Status = &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}
+
 	output.Id = input.GetId()
 	output.CollectionId = input.GetCollectionId()
 	output.State = input.GetState().GetStateCode()
@@ -777,6 +778,7 @@ func (m *importManager) loadFromTaskStore(load2Mem bool) ([]*datapb.ImportTaskIn
 		return nil, err
 	}
 	var taskList []*datapb.ImportTaskInfo
+
 	for i := range v {
 		ti := &datapb.ImportTaskInfo{}
 		if err := proto.Unmarshal([]byte(v[i]), ti); err != nil {
@@ -784,6 +786,7 @@ func (m *importManager) loadFromTaskStore(load2Mem bool) ([]*datapb.ImportTaskIn
 			// Ignore bad protos.
 			continue
 		}
+
 		if load2Mem {
 			// Put pending tasks back to pending task list.
 			if ti.GetState().GetStateCode() == commonpb.ImportState_ImportPending {
@@ -974,38 +977,35 @@ func rearrangeTasks(tasks []*milvuspb.GetImportStateResponse) {
 	})
 }
 
-func (m *importManager) listAllTasks(colName string, limit int64) []*milvuspb.GetImportStateResponse {
-	tasks := make([]*milvuspb.GetImportStateResponse, 0)
-
+func (m *importManager) listAllTasks(colID int64, limit int64) ([]*milvuspb.GetImportStateResponse, error) {
 	var importTasks []*datapb.ImportTaskInfo
 	var err error
 	if importTasks, err = m.loadFromTaskStore(false); err != nil {
 		log.Error("failed to load from task store", zap.Error(err))
-		return tasks
+		return nil, fmt.Errorf("failed to load task list from etcd, error: %w", err)
 	}
 
-	// filter tasks by collection name
-	// TODO: how to handle duplicated collection name? for example: a new collection has same name with a dropped collection
+	tasks := make([]*milvuspb.GetImportStateResponse, 0)
+	// filter tasks by collection id
+	// if colID is negative, we will return all tasks
 	for _, task := range importTasks {
-		if colName != "" && task.GetCollectionName() != colName {
-			continue
+		if colID < 0 || colID == task.GetCollectionId() {
+			currTask := &milvuspb.GetImportStateResponse{}
+			m.copyTaskInfo(task, currTask)
+			tasks = append(tasks, currTask)
 		}
-
-		currTask := &milvuspb.GetImportStateResponse{}
-		m.copyTaskInfo(task, currTask)
-		tasks = append(tasks, currTask)
 	}
 
-	// arrange tasks by id with ascending order, actually, id is the create time of a task
+	// arrange tasks by id in ascending order, actually, id is the create time of a task
 	rearrangeTasks(tasks)
 
 	// if limit is 0 or larger than length of tasks, return all tasks
 	if limit <= 0 || limit >= int64(len(tasks)) {
-		return tasks
+		return tasks, nil
 	}
 
 	// return the newly tasks from the tail
-	return tasks[len(tasks)-int(limit):]
+	return tasks[len(tasks)-int(limit):], nil
 }
 
 // removeBadImportSegments marks segments of a failed import task as `dropped`.

@@ -17,6 +17,7 @@ package importutil
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -201,6 +202,29 @@ func Test_InitSegmentData(t *testing.T) {
 	}
 	testFunc(sampleSchema())
 	testFunc(strKeySchema())
+
+	// unsupported data type
+	schema := &schemapb.CollectionSchema{
+		Name:   "schema",
+		AutoID: true,
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:      101,
+				Name:         "uid",
+				IsPrimaryKey: true,
+				AutoID:       true,
+				DataType:     schemapb.DataType_Int64,
+			},
+			{
+				FieldID:      102,
+				Name:         "flag",
+				IsPrimaryKey: false,
+				DataType:     schemapb.DataType_None,
+			},
+		},
+	}
+	data := initSegmentData(schema)
+	assert.Nil(t, data)
 }
 
 func Test_InitValidators(t *testing.T) {
@@ -218,6 +242,9 @@ func Test_InitValidators(t *testing.T) {
 		name2ID[field.GetName()] = field.GetFieldID()
 	}
 
+	fields := initSegmentData(schema)
+	assert.NotNil(t, fields)
+
 	checkFunc := func(funcName string, validVal interface{}, invalidVal interface{}) {
 		id := name2ID[funcName]
 		v, ok := validators[id]
@@ -226,6 +253,13 @@ func Test_InitValidators(t *testing.T) {
 		assert.Nil(t, err)
 		err = v.validateFunc(invalidVal)
 		assert.NotNil(t, err)
+
+		fieldData := fields[id]
+		preNum := fieldData.RowNum()
+		err = v.convertFunc(validVal, fieldData)
+		assert.Nil(t, err)
+		postNum := fieldData.RowNum()
+		assert.Equal(t, 1, postNum-preNum)
 	}
 
 	// validate functions
@@ -279,7 +313,6 @@ func Test_InitValidators(t *testing.T) {
 		FieldID:      111,
 		Name:         "field_float_vector",
 		IsPrimaryKey: false,
-		Description:  "float_vector",
 		DataType:     schemapb.DataType_FloatVector,
 		TypeParams: []*commonpb.KeyValuePair{
 			{Key: "dim", Value: "aa"},
@@ -295,11 +328,22 @@ func Test_InitValidators(t *testing.T) {
 		FieldID:      110,
 		Name:         "field_binary_vector",
 		IsPrimaryKey: false,
-		Description:  "float_vector",
-		DataType:     schemapb.DataType_FloatVector,
+		DataType:     schemapb.DataType_BinaryVector,
 		TypeParams: []*commonpb.KeyValuePair{
 			{Key: "dim", Value: "aa"},
 		},
+	})
+
+	err = initValidators(schema, validators)
+	assert.NotNil(t, err)
+
+	// unsupported data type
+	schema.Fields = make([]*schemapb.FieldSchema, 0)
+	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+		FieldID:      110,
+		Name:         "dummy",
+		IsPrimaryKey: false,
+		DataType:     schemapb.DataType_None,
 	})
 
 	err = initValidators(schema, validators)
@@ -420,6 +464,18 @@ func Test_TryFlushBlocks(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, 2, flushCounter)
 	assert.Equal(t, 20, flushRowCount)
+
+	// call flush function failed
+	flushFunc = func(fields map[storage.FieldID]storage.FieldData, shardID int) error {
+		return errors.New("error")
+	}
+	segmentsData = createSegmentsData(fieldsData, shardNum)
+	err = tryFlushBlocks(ctx, segmentsData, sampleSchema(), flushFunc, blockSize, maxTotalSize, true) // failed to force flush
+	assert.Error(t, err)
+	err = tryFlushBlocks(ctx, segmentsData, sampleSchema(), flushFunc, 1, maxTotalSize, false) // failed to flush block larger than blockSize
+	assert.Error(t, err)
+	err = tryFlushBlocks(ctx, segmentsData, sampleSchema(), flushFunc, blockSize, maxTotalSize, false) // failed to flush biggest block
+	assert.Error(t, err)
 
 	// canceled
 	cancel()
