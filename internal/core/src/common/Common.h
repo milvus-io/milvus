@@ -16,22 +16,18 @@
 
 #pragma once
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+#include <iostream>
+#include "common/Consts.h"
 
-#include <stdbool.h>
-#include <stdint.h>
+namespace milvus {
 
-void
-InitIndexSliceSize(const int64_t);
+extern int64_t index_file_slice_size;
+extern int64_t thread_core_coefficient;
 
 void
-InitThreadCoreCoefficient(const int64_t);
+SetIndexSliceSize(const int64_t size);
 
 void
-InitLocalRootPath(const char*);
+SetThreadCoreCoefficient(const int64_t coefficient);
 
-#ifdef __cplusplus
-};
-#endif
+}  // namespace milvus

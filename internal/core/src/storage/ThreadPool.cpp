@@ -14,24 +14,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#pragma once
+#include "ThreadPool.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-#include <stdbool.h>
-#include <stdint.h>
+namespace milvus {
 
 void
-InitIndexSliceSize(const int64_t);
+ThreadPool::Init() {
+    for (int i = 0; i < threads_.size(); i++) {
+        threads_[i] = std::thread(Worker(this, i));
+    }
+}
 
 void
-InitThreadCoreCoefficient(const int64_t);
-
-void
-InitLocalRootPath(const char*);
-
-#ifdef __cplusplus
-};
-#endif
+ThreadPool::ShutDown() {
+    shutdown_ = true;
+    condition_lock_.notify_all();
+    for (int i = 0; i < threads_.size(); i++) {
+        if (threads_[i].joinable()) {
+            threads_[i].join();
+        }
+    }
+}
+};  // namespace milvus

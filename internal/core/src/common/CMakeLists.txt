@@ -17,6 +17,7 @@ set(COMMON_SRC
         Slice.cpp
         binary_set_c.cpp
         init_c.cpp
+        Common.cpp
         )
 
 add_library(milvus_common SHARED ${COMMON_SRC})
