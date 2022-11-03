@@ -219,10 +219,9 @@ func (it *indexBuildTask) LoadData(ctx context.Context) error {
 		log.Ctx(ctx).Warn("loadKey failed", zap.Error(err))
 		return err
 	}
-	loadVectorDuration := it.tr.RecordSpan().Milliseconds()
-	log.Ctx(ctx).Debug("indexnode load data success")
-	it.tr.Record("load field data done")
-	metrics.IndexNodeLoadFieldLatency.WithLabelValues(strconv.FormatInt(Params.IndexNodeCfg.GetNodeID(), 10)).Observe(float64(loadVectorDuration))
+
+	loadFieldDataLatency := it.tr.CtxRecord(ctx, "load field data done")
+	metrics.IndexNodeLoadFieldLatency.WithLabelValues(strconv.FormatInt(Params.IndexNodeCfg.GetNodeID(), 10)).Observe(float64(loadFieldDataLatency.Milliseconds()))
 
 	err = it.decodeBlobs(ctx, blobs)
 	if err != nil {
@@ -256,9 +255,10 @@ func (it *indexBuildTask) BuildIndex(ctx context.Context) error {
 			return err
 		}
 	}
-	metrics.IndexNodeKnowhereBuildIndexLatency.WithLabelValues(strconv.FormatInt(Params.IndexNodeCfg.GetNodeID(), 10)).Observe(float64(it.tr.RecordSpan().Milliseconds()))
 
-	it.tr.Record("build index done")
+	buildIndexLatency := it.tr.Record("build index done")
+	metrics.IndexNodeKnowhereBuildIndexLatency.WithLabelValues(strconv.FormatInt(Params.IndexNodeCfg.GetNodeID(), 10)).Observe(float64(buildIndexLatency.Milliseconds()))
+
 	indexBlobs, err := it.index.Serialize()
 	if err != nil {
 		log.Ctx(ctx).Error("IndexNode index Serialize failed", zap.Error(err))
@@ -371,9 +371,8 @@ func (it *indexBuildTask) BuildDiskAnnIndex(ctx context.Context) error {
 		}
 	}
 
-	metrics.IndexNodeKnowhereBuildIndexLatency.WithLabelValues(strconv.FormatInt(Params.IndexNodeCfg.GetNodeID(), 10)).Observe(float64(it.tr.RecordSpan()))
-
-	it.tr.Record("build index done")
+	buildIndexLatency := it.tr.Record("build index done")
+	metrics.IndexNodeKnowhereBuildIndexLatency.WithLabelValues(strconv.FormatInt(Params.IndexNodeCfg.GetNodeID(), 10)).Observe(float64(buildIndexLatency.Milliseconds()))
 
 	fileInfos, err := it.index.GetIndexFileInfo()
 	if err != nil {

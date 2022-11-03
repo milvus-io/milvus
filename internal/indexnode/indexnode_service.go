@@ -37,7 +37,8 @@ func (i *IndexNode) CreateJob(ctx context.Context, req *indexpb.CreateJobRequest
 		zap.Int64("IndexVersion", req.IndexVersion),
 		zap.Strings("DataPaths", req.DataPaths),
 		zap.Any("TypeParams", req.TypeParams),
-		zap.Any("IndexParams", req.IndexParams))
+		zap.Any("IndexParams", req.IndexParams),
+		zap.Int64("num_rows", req.GetNumRows()))
 	sp, _ := trace.StartSpanFromContextWithOperationName(ctx, "IndexNode-CreateIndex")
 	defer sp.Finish()
 	sp.SetTag("IndexBuildID", strconv.FormatInt(req.BuildID, 10))
