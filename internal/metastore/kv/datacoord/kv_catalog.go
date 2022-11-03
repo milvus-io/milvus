@@ -113,7 +113,14 @@ func (kc *Catalog) AlterSegments(ctx context.Context, newSegments []*datapb.Segm
 		maps.Copy(kvs, segmentKvs)
 	}
 
-	return kc.Txn.MultiSave(kvs)
+	saveFn := func(partialKvs map[string]string) error {
+		return kc.Txn.MultiSave(partialKvs)
+	}
+	if err := etcd.SaveByBatch(kvs, saveFn); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (kc *Catalog) AlterSegment(ctx context.Context, newSegment *datapb.SegmentInfo, oldSegment *datapb.SegmentInfo) error {
