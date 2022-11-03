@@ -108,8 +108,9 @@ func (fm *flowgraphManager) getChannel(segID UniqueID) (Channel, error) {
 	return nil, fmt.Errorf("cannot find segment %d in all flowgraphs", segID)
 }
 
-// resendTT loops through flow graphs, looks for segments that are not flushed, and sends them to that flow graph's
-// `resendTTCh` channel so stats of these segments will be resent.
+// resendTT loops through flow graphs, looks for segments that are not flushed,
+// and sends them to that flow graph's `resendTTCh` channel so stats of
+// these segments will be resent.
 func (fm *flowgraphManager) resendTT() []UniqueID {
 	var unFlushedSegments []UniqueID
 	fm.flowgraphs.Range(func(key, value interface{}) bool {
