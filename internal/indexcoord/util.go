@@ -82,3 +82,7 @@ func getIndexType(indexParams []*commonpb.KeyValuePair) string {
 	}
 	return invalidIndex
 }
+
+func isFlatIndex(indexType string) bool {
+	return indexType == flatIndex || indexType == binFlatIndex
+}

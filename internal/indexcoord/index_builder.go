@@ -213,7 +213,7 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 			return true
 		}
 		indexParams := ib.meta.GetIndexParams(meta.CollectionID, meta.IndexID)
-		if getIndexType(indexParams) == flatIndex || meta.NumRows < Params.IndexCoordCfg.MinSegmentNumRowsToEnableIndex {
+		if isFlatIndex(getIndexType(indexParams)) || meta.NumRows < Params.IndexCoordCfg.MinSegmentNumRowsToEnableIndex {
 			log.Ctx(ib.ctx).Debug("segment does not need index really", zap.Int64("buildID", buildID),
 				zap.Int64("segID", meta.SegmentID), zap.Int64("num rows", meta.NumRows))
 			if err := ib.meta.FinishTask(&indexpb.IndexTaskInfo{
