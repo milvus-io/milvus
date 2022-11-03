@@ -18,6 +18,10 @@
 
 # Exit immediately for non zero status
 set -e
+# concurrency limit
+THREAD_NUMBER=${THREAD_NUMBER:-15}
+TMP_FIFO=$$.fifo
+
 
 SOURCE="${BASH_SOURCE[0]}"
 while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symlink
@@ -58,17 +62,43 @@ if [ $? -ne 0 ]; then
     exit -1
 fi
 
-# run unittest
-for test in `ls ${MILVUS_CORE_UNITTEST_DIR}`; do
-    echo "Running cpp unittest: ${MILVUS_CORE_UNITTEST_DIR}/$test"
+
+
+function run_cpp_unittest(){
+    beginTime=`date +%s`
+    mkfifo ${TMP_FIFO}
+    exec 6<> ${TMP_FIFO}
+    rm -f ${TMP_FIFO}
+    # control concurrency limit 
+    for i in `seq ${THREAD_NUMBER}`
+    do  
+        # put max concurrency into pipe
+        echo  >&6
+    done 
     # run unittest
-    ${MILVUS_CORE_UNITTEST_DIR}/${test}
-    if [ $? -ne 0 ]; then
-        echo ${args}
-        echo ${${MILVUS_CORE_UNITTEST_DIR}/}/${test} "run failed"
-        exit -1
-    fi
-done
+    for test in `ls ${MILVUS_CORE_UNITTEST_DIR}`; do
+        # read line through file handles
+        read -u 6 
+        {
+            echo "Running cpp unittest: ${MILVUS_CORE_UNITTEST_DIR}/$test"
+            # run unittest
+            ${MILVUS_CORE_UNITTEST_DIR}/${test}
+            if [ $? -ne 0 ]; then
+                echo ${args}
+                echo ${${MILVUS_CORE_UNITTEST_DIR}/}/${test} "run failed"
+                exit -1
+            fi
+            echo >&6
+        }&
+        
+    done
+    wait
+    endTime=`date +%s`
+    echo "Total time for cpp unittest:" $(($endTime-$beginTime)) "s"
+}
+
+
+run_cpp_unittest
 
 # generate ut file
 ${LCOV_CMD} -c -d ${DIR_GCNO} -o ${FILE_INFO_UT}
