@@ -89,3 +89,9 @@ func Test_parseKey(t *testing.T) {
 	_, err2 := parseBuildIDFromFilePath(key2)
 	assert.Error(t, err2)
 }
+
+func Test_isFlatIndex(t *testing.T) {
+	assert.True(t, isFlatIndex(flatIndex))
+	assert.True(t, isFlatIndex(binFlatIndex))
+	assert.False(t, isFlatIndex(diskAnnIndex))
+}

@@ -26,8 +26,6 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
-
-	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -51,7 +49,6 @@ type flushedSegmentWatcher struct {
 	internalNotify    chan struct{}
 
 	etcdRevision int64
-	watchChan    clientv3.WatchChan
 
 	meta    *metaTable
 	builder *indexBuilder

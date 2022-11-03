@@ -153,7 +153,6 @@ func Test_flushedSegmentWatcher_internalRun(t *testing.T) {
 		internalTaskMutex: sync.RWMutex{},
 		internalNotify:    make(chan struct{}, 1),
 		etcdRevision:      0,
-		watchChan:         nil,
 		meta:              nil,
 		builder:           nil,
 		ic: &IndexCoord{
@@ -493,7 +492,6 @@ func Test_flushSegmentWatcher_prepare_error(t *testing.T) {
 			internalTaskMutex: sync.RWMutex{},
 			internalNotify:    make(chan struct{}, 1),
 			etcdRevision:      0,
-			watchChan:         nil,
 			meta:              nil,
 			builder:           nil,
 			ic: &IndexCoord{
@@ -527,7 +525,6 @@ func Test_flushSegmentWatcher_prepare_error(t *testing.T) {
 			internalTaskMutex: sync.RWMutex{},
 			internalNotify:    make(chan struct{}, 1),
 			etcdRevision:      0,
-			watchChan:         nil,
 			meta:              nil,
 			builder:           nil,
 			ic: &IndexCoord{
@@ -640,7 +637,6 @@ func Test_flushSegmentWatcher_constructTask_error(t *testing.T) {
 		internalTaskMutex: sync.RWMutex{},
 		internalNotify:    make(chan struct{}, 1),
 		etcdRevision:      0,
-		watchChan:         nil,
 		meta:              meta,
 		builder:           nil,
 		ic: &IndexCoord{
