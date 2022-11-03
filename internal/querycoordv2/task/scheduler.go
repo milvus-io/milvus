@@ -26,7 +26,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/internal/util/funcutil"
 	. "github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
 )
@@ -645,19 +644,8 @@ func (scheduler *taskScheduler) checkSegmentTaskStale(task *SegmentTask) bool {
 			}
 
 		case ActionTypeReduce:
+			// Do nothing here,
 			// the task should succeeded if the segment not exists
-			sealed := scheduler.distMgr.SegmentDistManager.GetByNode(action.Node())
-			growing := scheduler.distMgr.LeaderViewManager.GetSegmentByNode(action.Node())
-			segments := make([]int64, 0, len(sealed)+len(growing))
-			for _, segment := range sealed {
-				segments = append(segments, segment.GetID())
-			}
-			segments = append(segments, growing...)
-			if !funcutil.SliceContain(segments, task.SegmentID()) {
-				log.Warn("the task is stale, the segment to release not exists in dist",
-					zap.Int64("segment", task.segmentID))
-				return true
-			}
 		}
 	}
 	return false
@@ -679,20 +667,8 @@ func (scheduler *taskScheduler) checkChannelTaskStale(task *ChannelTask) bool {
 			}
 
 		case ActionTypeReduce:
+			// Do nothing here,
 			// the task should succeeded if the channel not exists
-			hasChannel := false
-			views := scheduler.distMgr.LeaderViewManager.GetLeaderView(action.Node())
-			for _, view := range views {
-				if view.Channel == task.Channel() {
-					hasChannel = true
-					break
-				}
-			}
-			if !hasChannel {
-				log.Warn("the task is stale, the channel to unsubscribe not exists in dist",
-					zap.String("channel", task.Channel()))
-				return true
-			}
 		}
 	}
 	return false

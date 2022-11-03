@@ -24,6 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	. "github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -106,15 +107,27 @@ func (action *SegmentAction) IsFinished(distMgr *meta.DistributionManager) bool 
 	if action.Type() == ActionTypeGrow {
 		nodes := distMgr.LeaderViewManager.GetSealedSegmentDist(action.SegmentID())
 		return lo.Contains(nodes, action.Node())
+	} else if action.Type() == ActionTypeReduce {
+		// FIXME: Now shard leader's segment view is a map of segment ID to node ID,
+		// loading segment replaces the node ID with the new one,
+		// which confuses the condition of finishing,
+		// the leader should return a map of segment ID to list of nodes,
+		// now, we just always commit the release task to executor once.
+		// NOTE: DO NOT create a task containing release action and the action is not the last action
+		sealed := distMgr.SegmentDistManager.GetByNode(action.Node())
+		growing := distMgr.LeaderViewManager.GetSegmentByNode(action.Node())
+		segments := make([]int64, 0, len(sealed)+len(growing))
+		for _, segment := range sealed {
+			segments = append(segments, segment.GetID())
+		}
+		segments = append(segments, growing...)
+		if !funcutil.SliceContain(segments, action.SegmentID()) {
+			return true
+		}
+		return action.isReleaseCommitted.Load()
 	}
-	// FIXME: Now shard leader's segment view is a map of segment ID to node ID,
-	// loading segment replaces the node ID with the new one,
-	// which confuses the condition of finishing,
-	// the leader should return a map of segment ID to list of nodes,
-	// now, we just always commit the release task to executor once.
-	// NOTE: DO NOT create a task containing release action and the action is not the last action
 
-	return action.isReleaseCommitted.Load()
+	return true
 }
 
 type ChannelAction struct {
