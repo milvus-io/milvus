@@ -301,6 +301,7 @@ func Test_JSONRowConsumerFlush(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, shardNum, callTime)
 	assert.Equal(t, rowCountEachShard*int(shardNum), totalCount)
+	assert.Equal(t, 0, len(consumer.IDRange())) // not auto-generated id, no id range
 
 	// execeed block size trigger flush
 	callTime = 0
@@ -320,6 +321,7 @@ func Test_JSONRowConsumerFlush(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, shardNum/2, callTime)
 	assert.Equal(t, rowCountEachShard*int(shardNum)/2, totalCount)
+	assert.Equal(t, 0, len(consumer.IDRange())) // not auto-generated id, no id range
 }
 
 func Test_JSONRowConsumerHandle(t *testing.T) {
@@ -345,6 +347,10 @@ func Test_JSONRowConsumerHandle(t *testing.T) {
 			},
 		},
 	}
+
+	var consumer *JSONRowConsumer
+	err := consumer.Handle(nil)
+	assert.Error(t, err)
 
 	t.Run("handle int64 pk", func(t *testing.T) {
 		consumer, err := NewJSONRowConsumer(schema, idAllocator, 1, 1, flushFunc)

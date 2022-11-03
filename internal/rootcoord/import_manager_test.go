@@ -19,6 +19,7 @@ package rootcoord
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -525,7 +526,7 @@ func TestImportManager_TestFlipTaskStateLoop(t *testing.T) {
 	})
 
 	wg.Add(1)
-	t.Run("describe index with index not exist", func(t *testing.T) {
+	t.Run("describe index with index doesn't exist", func(t *testing.T) {
 		defer wg.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
@@ -920,8 +921,6 @@ func TestImportManager_ListAllTasks(t *testing.T) {
 	}
 
 	Params.RootCoordCfg.ImportTaskSubPath = "test_import_task"
-	colID := int64(100)
-	mockKv := memkv.NewMemoryKV()
 
 	// reject some tasks so there are 3 tasks left in pending list
 	fn := func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
@@ -932,41 +931,113 @@ func TestImportManager_ListAllTasks(t *testing.T) {
 		}, nil
 	}
 
-	rowReq := &milvuspb.ImportRequest{
-		CollectionName: "c1",
-		PartitionName:  "p1",
-		Files:          []string{"f1.json"},
-	}
 	callMarkSegmentsDropped := func(ctx context.Context, segIDs []typeutil.UniqueID) (*commonpb.Status, error) {
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		}, nil
 	}
-	mgr := newImportManager(context.TODO(), mockKv, idAlloc, fn, callMarkSegmentsDropped, nil, nil, nil, nil)
-	repeat := 10
-	for i := 0; i < repeat; i++ {
-		mgr.importJob(context.TODO(), rowReq, colID, 0)
+
+	colID1 := int64(100)
+	colID2 := int64(101)
+	colName1 := "c1"
+	colName2 := "c2"
+	partID1 := int64(200)
+	partID2 := int64(201)
+	partName1 := "p1"
+	partName2 := "p2"
+	getCollectionName := func(collID, partitionID typeutil.UniqueID) (string, string, error) {
+		collectionName := "unknow"
+		if collID == colID1 {
+			collectionName = colName1
+		} else if collID == colID2 {
+			collectionName = colName2
+		}
+
+		partitionName := "unknow"
+		if partitionID == partID1 {
+			partitionName = partName1
+		} else if partitionID == partID2 {
+			partitionName = partName2
+		}
+
+		return collectionName, partitionName, nil
 	}
 
-	// list all tasks
-	tasks := mgr.listAllTasks("", int64(repeat))
-	assert.Equal(t, repeat, len(tasks))
-	for i := 0; i < repeat; i++ {
-		assert.Equal(t, int64(i+1), tasks[i].Id)
+	mockKv := memkv.NewMemoryKV()
+	mgr := newImportManager(context.TODO(), mockKv, idAlloc, fn, callMarkSegmentsDropped, getCollectionName, nil, nil, nil)
+
+	// add 10 tasks for collection1, id from 1 to 10
+	file1 := "f1.json"
+	rowReq1 := &milvuspb.ImportRequest{
+		CollectionName: colName1,
+		PartitionName:  partName1,
+		Files:          []string{file1},
+	}
+	repeat1 := 10
+	for i := 0; i < repeat1; i++ {
+		mgr.importJob(context.TODO(), rowReq1, colID1, partID1)
 	}
 
-	// list few tasks
+	// add 5 tasks for collection2, id from 11 to 15, totally 15 tasks
+	file2 := "f2.json"
+	rowReq2 := &milvuspb.ImportRequest{
+		CollectionName: colName2,
+		PartitionName:  partName2,
+		Files:          []string{file2},
+	}
+	repeat2 := 5
+	for i := 0; i < repeat2; i++ {
+		mgr.importJob(context.TODO(), rowReq2, colID2, partID2)
+	}
+
+	verifyTaskFunc := func(task *milvuspb.GetImportStateResponse, taskID int64, colID int64, state commonpb.ImportState) {
+		assert.Equal(t, commonpb.ErrorCode_Success, task.GetStatus().ErrorCode)
+		assert.Equal(t, taskID, task.GetId())
+		assert.Equal(t, colID, task.GetCollectionId())
+		assert.Equal(t, state, task.GetState())
+		compareReq := rowReq1
+		if colID == colID2 {
+			compareReq = rowReq2
+		}
+		for _, kv := range task.GetInfos() {
+			if kv.GetKey() == CollectionName {
+				assert.Equal(t, compareReq.GetCollectionName(), kv.GetValue())
+			} else if kv.GetKey() == PartitionName {
+				assert.Equal(t, compareReq.GetPartitionName(), kv.GetValue())
+			} else if kv.GetKey() == Files {
+				assert.Equal(t, strings.Join(compareReq.GetFiles(), ","), kv.GetValue())
+			}
+		}
+	}
+
+	// list all tasks of collection1, id from 1 to 10
+	tasks, err := mgr.listAllTasks(colID1, int64(repeat1))
+	assert.NoError(t, err)
+	assert.Equal(t, repeat1, len(tasks))
+	for i := 0; i < repeat1; i++ {
+		verifyTaskFunc(tasks[i], int64(i+1), colID1, commonpb.ImportState_ImportPending)
+	}
+
+	// list latest 3 tasks of collection1, id from 8 to 10
 	limit := 3
-	tasks = mgr.listAllTasks("", int64(limit))
+	tasks, err = mgr.listAllTasks(colID1, int64(limit))
+	assert.NoError(t, err)
 	assert.Equal(t, limit, len(tasks))
 	for i := 0; i < limit; i++ {
-		assert.Equal(t, int64(i+repeat-limit+1), tasks[i].Id)
+		verifyTaskFunc(tasks[i], int64(i+repeat1-limit+1), colID1, commonpb.ImportState_ImportPending)
 	}
 
+	// list all tasks of collection2, id from 11 to 15
+	tasks, err = mgr.listAllTasks(colID2, int64(repeat2))
+	assert.NoError(t, err)
+	assert.Equal(t, repeat2, len(tasks))
+	for i := 0; i < repeat2; i++ {
+		verifyTaskFunc(tasks[i], int64(i+repeat1+1), colID2, commonpb.ImportState_ImportPending)
+	}
+
+	// get the first task state
 	resp := mgr.getTaskState(1)
-	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-	assert.Equal(t, commonpb.ImportState_ImportPending, resp.State)
-	assert.Equal(t, int64(1), resp.Id)
+	verifyTaskFunc(resp, int64(1), colID1, commonpb.ImportState_ImportPending)
 
 	// accept tasks to working list
 	mgr.callImportService = func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
@@ -977,10 +1048,14 @@ func TestImportManager_ListAllTasks(t *testing.T) {
 		}, nil
 	}
 
-	// there are 10 tasks in working list, and 1 task in pending list, totally 11 tasks
-	mgr.importJob(context.TODO(), rowReq, colID, 0)
-	tasks = mgr.listAllTasks("", 100)
-	assert.Equal(t, repeat+1, len(tasks))
+	// there are 15 tasks in working list, and 1 task for collection1 in pending list, totally 16 tasks
+	mgr.importJob(context.TODO(), rowReq1, colID1, partID1)
+	tasks, err = mgr.listAllTasks(-1, 0)
+	assert.NoError(t, err)
+	assert.Equal(t, repeat1+repeat2+1, len(tasks))
+	for i := 0; i < len(tasks); i++ {
+		assert.Equal(t, commonpb.ImportState_ImportStarted, tasks[i].GetState())
+	}
 
 	// the id of tasks must be 1,2,3,4,5,6(sequence not guaranteed)
 	ids := make(map[int64]struct{})
@@ -992,13 +1067,19 @@ func TestImportManager_ListAllTasks(t *testing.T) {
 	}
 	assert.Equal(t, 0, len(ids))
 
-	// list few tasks
-	tasks = mgr.listAllTasks("", 1)
+	// list the latest task, the task is for collection1
+	tasks, err = mgr.listAllTasks(-1, 1)
+	assert.NoError(t, err)
 	assert.Equal(t, 1, len(tasks))
+	verifyTaskFunc(tasks[0], int64(repeat1+repeat2+1), colID1, commonpb.ImportState_ImportStarted)
 
-	// invliad collection name, returns empty
-	tasks = mgr.listAllTasks("bad-collection-name", 1)
-	assert.Equal(t, 0, len(tasks))
+	// failed to load task from store
+	mockTxnKV := &mocks.TxnKV{}
+	mockTxnKV.EXPECT().LoadWithPrefix(mock.Anything).Return(nil, nil, errors.New("mock error"))
+	mgr.taskStore = mockTxnKV
+	tasks, err = mgr.listAllTasks(-1, 0)
+	assert.Error(t, err)
+	assert.Nil(t, tasks)
 }
 
 func TestImportManager_setCollectionPartitionName(t *testing.T) {

@@ -1652,11 +1652,37 @@ func (c *Core) ListImportTasks(ctx context.Context, req *milvuspb.ListImportTask
 		}, nil
 	}
 
+	colID := int64(-1)
+	collectionName := req.GetCollectionName()
+	if len(collectionName) != 0 {
+		// if the collection name is specified but not found, user may input a wrong name, the collection doesn't exist or has been dropped.
+		// we will return error to notify user the name is incorrect.
+		colInfo, err := c.meta.GetCollectionByName(ctx, req.GetCollectionName(), typeutil.MaxTimestamp)
+		if err != nil {
+			err = fmt.Errorf("failed to find collection ID from its name: '%s', error: %w", req.GetCollectionName(), err)
+			log.Error("ListImportTasks failed", zap.Error(err))
+			return &milvuspb.ListImportTasksResponse{
+				Status: failStatus(commonpb.ErrorCode_IllegalCollectionName, err.Error()),
+			}, nil
+		}
+		colID = colInfo.CollectionID
+	}
+
+	// if the collection name is not specified, the colID is -1, listAllTasks will return all tasks
+	tasks, err := c.importManager.listAllTasks(colID, req.GetLimit())
+	if err != nil {
+		err = fmt.Errorf("failed to list import tasks, collection name: '%s', error: %w", req.GetCollectionName(), err)
+		log.Error("ListImportTasks failed", zap.Error(err))
+		return &milvuspb.ListImportTasksResponse{
+			Status: failStatus(commonpb.ErrorCode_UnexpectedError, err.Error()),
+		}, nil
+	}
+
 	resp := &milvuspb.ListImportTasksResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
-		Tasks: c.importManager.listAllTasks(req.GetCollectionName(), req.GetLimit()),
+		Tasks: tasks,
 	}
 	return resp, nil
 }

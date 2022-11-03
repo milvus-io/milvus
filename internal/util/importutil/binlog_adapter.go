@@ -217,8 +217,8 @@ func (p *BinlogAdapter) Read(segmentHolder *SegmentFilesHolder) error {
 				return err
 			}
 		} else {
-			log.Error("Binlog adapter: unknow primary key type", zap.Int("type", int(p.primaryType)))
-			return errors.New("unknow primary key type")
+			log.Error("Binlog adapter: unsupported primary key type", zap.Int("type", int(p.primaryType)))
+			return fmt.Errorf("unsupported primary key type %d, primary key should be int64 or varchar", p.primaryType)
 		}
 
 		// if shardList is empty, that means all the primary keys have been deleted(or skipped), no need to read other files
@@ -270,7 +270,7 @@ func (p *BinlogAdapter) verify(segmentHolder *SegmentFilesHolder) error {
 		files, ok := segmentHolder.fieldFiles[schema.FieldID]
 		if !ok {
 			log.Error("Binlog adapter: a field has no binlog file", zap.Int64("fieldID", schema.FieldID))
-			return errors.New("the field " + strconv.Itoa(int(schema.FieldID)) + " has no binlog file")
+			return fmt.Errorf("the field %d has no binlog file", schema.FieldID)
 		}
 
 		if i == 0 {
@@ -296,7 +296,8 @@ func (p *BinlogAdapter) verify(segmentHolder *SegmentFilesHolder) error {
 	for _, files := range segmentHolder.fieldFiles {
 		if firstFieldFileCount != len(files) {
 			log.Error("Binlog adapter: file count of each field must be equal", zap.Int("firstFieldFileCount", firstFieldFileCount))
-			return errors.New("binlog file count of each field must be equal")
+			return fmt.Errorf("binlog file count of each field must be equal, first field files count: %d, other field files count: %d",
+				firstFieldFileCount, len(files))
 		}
 	}
 
@@ -332,8 +333,8 @@ func (p *BinlogAdapter) readDeltalogs(segmentHolder *SegmentFilesHolder) (map[in
 		log.Info("Binlog adapter: count of deleted entities", zap.Int("deletedCount", len(deletedIDDict)))
 		return nil, deletedIDDict, nil
 	} else {
-		log.Error("Binlog adapter: primary key is neither int64 nor varchar")
-		return nil, nil, errors.New("primary key is neither int64 nor varchar")
+		log.Error("Binlog adapter: unsupported primary key type", zap.Int("type", int(p.primaryType)))
+		return nil, nil, fmt.Errorf("unsupported primary key type %d, primary key should be int64 or varchar", p.primaryType)
 	}
 }
 
@@ -378,7 +379,8 @@ func (p *BinlogAdapter) decodeDeleteLogs(segmentHolder *SegmentFilesHolder) ([]*
 			log.Error("Binlog adapter: delta log data type is not equal to collection's primary key data type",
 				zap.Int64("deltaDataType", deleteLogs[i].PkType),
 				zap.Int64("pkDataType", int64(p.primaryType)))
-			return nil, errors.New("delta log data type is not equal to collection's primary key data type")
+			return nil, fmt.Errorf("delta log data type %d is not equal to collection's primary key data type %d",
+				deleteLogs[i].PkType, p.primaryType)
 		}
 	}
 
@@ -396,13 +398,13 @@ func (p *BinlogAdapter) decodeDeleteLog(deltaStr string) (*storage.DeleteLog, er
 		splits := strings.Split(deltaStr, ",")
 		if len(splits) != 2 {
 			log.Error("Binlog adapter: the format of deletion string is incorrect", zap.String("deltaStr", deltaStr))
-			return nil, fmt.Errorf("the format of deletion string is incorrect, %v can not be split", deltaStr)
+			return nil, fmt.Errorf("the format of deletion string is incorrect, '%s' can not be split", deltaStr)
 		}
 		pk, err := strconv.ParseInt(splits[0], 10, 64)
 		if err != nil {
 			log.Error("Binlog adapter: failed to parse primary key of deletion string from old version",
 				zap.String("deltaStr", deltaStr), zap.Error(err))
-			return nil, err
+			return nil, fmt.Errorf("failed to parse primary key of deletion string '%s' from old version, error: %w", deltaStr, err)
 		}
 		deleteLog.Pk = &storage.Int64PrimaryKey{
 			Value: pk,
@@ -412,7 +414,7 @@ func (p *BinlogAdapter) decodeDeleteLog(deltaStr string) (*storage.DeleteLog, er
 		if err != nil {
 			log.Error("Binlog adapter: failed to parse timestamp of deletion string from old version",
 				zap.String("deltaStr", deltaStr), zap.Error(err))
-			return nil, err
+			return nil, fmt.Errorf("failed to parse timestamp of deletion string '%s' from old version, error: %w", deltaStr, err)
 		}
 	}
 
@@ -425,13 +427,13 @@ func (p *BinlogAdapter) readDeltalog(logPath string) ([]string, error) {
 	binlogFile, err := NewBinlogFile(p.chunkManager)
 	if err != nil {
 		log.Error("Binlog adapter: failed to initialize binlog file", zap.String("logPath", logPath), zap.Error(err))
-		return nil, err
+		return nil, fmt.Errorf("failed to initialize binlog file '%s', error: %w", logPath, err)
 	}
 
 	err = binlogFile.Open(logPath)
 	if err != nil {
 		log.Error("Binlog adapter: failed to open delta log", zap.String("logPath", logPath), zap.Error(err))
-		return nil, err
+		return nil, fmt.Errorf("failed to open delta log '%s', error: %w", logPath, err)
 	}
 	defer binlogFile.Close()
 
@@ -439,7 +441,7 @@ func (p *BinlogAdapter) readDeltalog(logPath string) ([]string, error) {
 	data, err := binlogFile.ReadVarchar()
 	if err != nil {
 		log.Error("Binlog adapter: failed to read delta log", zap.String("logPath", logPath), zap.Error(err))
-		return nil, err
+		return nil, fmt.Errorf("failed to read delta log '%s', error: %w", logPath, err)
 	}
 	log.Info("Binlog adapter: successfully read deltalog", zap.Int("deleteCount", len(data)))
 
@@ -452,13 +454,13 @@ func (p *BinlogAdapter) readTimestamp(logPath string) ([]int64, error) {
 	binlogFile, err := NewBinlogFile(p.chunkManager)
 	if err != nil {
 		log.Error("Binlog adapter: failed to initialize binlog file", zap.String("logPath", logPath), zap.Error(err))
-		return nil, err
+		return nil, fmt.Errorf("failed to initialize binlog file '%s', error: %w", logPath, err)
 	}
 
 	err = binlogFile.Open(logPath)
 	if err != nil {
 		log.Error("Binlog adapter: failed to open timestamp log file", zap.String("logPath", logPath))
-		return nil, err
+		return nil, fmt.Errorf("failed to open timestamp log file '%s', error: %w", logPath, err)
 	}
 	defer binlogFile.Close()
 
@@ -466,7 +468,7 @@ func (p *BinlogAdapter) readTimestamp(logPath string) ([]int64, error) {
 	int64List, err := binlogFile.ReadInt64()
 	if err != nil {
 		log.Error("Binlog adapter: failed to read timestamp data from log file", zap.String("logPath", logPath))
-		return nil, err
+		return nil, fmt.Errorf("failed to read timestamp data from log file '%s', error: %w", logPath, err)
 	}
 
 	log.Info("Binlog adapter: read timestamp from log file", zap.Int("tsCount", len(int64List)))
@@ -480,13 +482,13 @@ func (p *BinlogAdapter) readPrimaryKeys(logPath string) ([]int64, []string, erro
 	binlogFile, err := NewBinlogFile(p.chunkManager)
 	if err != nil {
 		log.Error("Binlog adapter: failed to initialize binlog file", zap.String("logPath", logPath), zap.Error(err))
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("failed to initialize binlog file '%s', error: %w", logPath, err)
 	}
 
 	err = binlogFile.Open(logPath)
 	if err != nil {
 		log.Error("Binlog adapter: failed to open primary key binlog", zap.String("logPath", logPath))
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("failed to open primary key binlog '%s', error: %w", logPath, err)
 	}
 	defer binlogFile.Close()
 
@@ -495,7 +497,7 @@ func (p *BinlogAdapter) readPrimaryKeys(logPath string) ([]int64, []string, erro
 		idList, err := binlogFile.ReadInt64()
 		if err != nil {
 			log.Error("Binlog adapter: failed to read int64 primary key from binlog", zap.String("logPath", logPath), zap.Error(err))
-			return nil, nil, err
+			return nil, nil, fmt.Errorf("failed to read int64 primary key from binlog '%s', error: %w", logPath, err)
 		}
 		log.Info("Binlog adapter: succeed to read int64 primary key binlog", zap.Int("len", len(idList)))
 		return idList, nil, nil
@@ -503,13 +505,13 @@ func (p *BinlogAdapter) readPrimaryKeys(logPath string) ([]int64, []string, erro
 		idList, err := binlogFile.ReadVarchar()
 		if err != nil {
 			log.Error("Binlog adapter: failed to read varchar primary key from binlog", zap.String("logPath", logPath), zap.Error(err))
-			return nil, nil, err
+			return nil, nil, fmt.Errorf("failed to read varchar primary key from binlog '%s', error: %w", logPath, err)
 		}
 		log.Info("Binlog adapter: succeed to read varchar primary key binlog", zap.Int("len", len(idList)))
 		return nil, idList, nil
 	} else {
-		log.Error("Binlog adapter: primary key is neither int64 nor varchar")
-		return nil, nil, errors.New("primary key is neither int64 nor varchar")
+		log.Error("Binlog adapter: unsupported primary key type", zap.Int("type", int(p.primaryType)))
+		return nil, nil, fmt.Errorf("unsupported primary key type %d, primary key should be int64 or varchar", p.primaryType)
 	}
 }
 
@@ -524,7 +526,7 @@ func (p *BinlogAdapter) getShardingListByPrimaryInt64(primaryKeys []int64,
 	if len(timestampList) != len(primaryKeys) {
 		log.Error("Binlog adapter: primary key length is not equal to timestamp list length",
 			zap.Int("primaryKeysLen", len(primaryKeys)), zap.Int("timestampLen", len(timestampList)))
-		return nil, errors.New("primary key length is not equal to timestamp list length")
+		return nil, fmt.Errorf("primary key length %d is not equal to timestamp list length %d", len(primaryKeys), len(timestampList))
 	}
 
 	log.Info("Binlog adapter: building shard list", zap.Int("pkLen", len(primaryKeys)), zap.Int("tsLen", len(timestampList)))
@@ -576,7 +578,7 @@ func (p *BinlogAdapter) getShardingListByPrimaryVarchar(primaryKeys []string,
 	if len(timestampList) != len(primaryKeys) {
 		log.Error("Binlog adapter: primary key length is not equal to timestamp list length",
 			zap.Int("primaryKeysLen", len(primaryKeys)), zap.Int("timestampLen", len(timestampList)))
-		return nil, errors.New("primary key length is not equal to timestamp list length")
+		return nil, fmt.Errorf("primary key length %d is not equal to timestamp list length %d", len(primaryKeys), len(timestampList))
 	}
 
 	log.Info("Binlog adapter: building shard list", zap.Int("pkLen", len(primaryKeys)), zap.Int("tsLen", len(timestampList)))
@@ -633,13 +635,13 @@ func (p *BinlogAdapter) readInsertlog(fieldID storage.FieldID, logPath string,
 	binlogFile, err := NewBinlogFile(p.chunkManager)
 	if err != nil {
 		log.Error("Binlog adapter: failed to initialize binlog file", zap.String("logPath", logPath), zap.Error(err))
-		return err
+		return fmt.Errorf("failed to initialize binlog file %s, error: %w", logPath, err)
 	}
 
 	err = binlogFile.Open(logPath)
 	if err != nil {
 		log.Error("Binlog adapter: failed to open insert log", zap.String("logPath", logPath), zap.Error(err))
-		return err
+		return fmt.Errorf("failed to open insert log %s, error: %w", logPath, err)
 	}
 	defer binlogFile.Close()
 
@@ -746,7 +748,7 @@ func (p *BinlogAdapter) readInsertlog(fieldID storage.FieldID, logPath string,
 			return err
 		}
 	default:
-		return errors.New("unsupported data type")
+		return fmt.Errorf("unsupported data type %d", binlogFile.DataType())
 	}
 	log.Info("Binlog adapter: read data into shard list", zap.Int("dataType", int(binlogFile.DataType())), zap.Int("shardLen", len(shardList)))
 
@@ -757,8 +759,8 @@ func (p *BinlogAdapter) dispatchBoolToShards(data []bool, memoryData []map[stora
 	shardList []int32, fieldID storage.FieldID) error {
 	// verify row count
 	if len(data) != len(shardList) {
-		log.Error("Binlog adapter: bool field row count is not equal to primary key", zap.Int("dataLen", len(data)), zap.Int("shardLen", len(shardList)))
-		return errors.New("bool field row count is not equal to primary key")
+		log.Error("Binlog adapter: bool field row count is not equal to shard list row count %d", zap.Int("dataLen", len(data)), zap.Int("shardLen", len(shardList)))
+		return fmt.Errorf("bool field row count %d is not equal to shard list row count %d", len(data), len(shardList))
 	}
 
 	// dispatch entities acoording to shard list
@@ -781,8 +783,8 @@ func (p *BinlogAdapter) dispatchInt8ToShards(data []int8, memoryData []map[stora
 	shardList []int32, fieldID storage.FieldID) error {
 	// verify row count
 	if len(data) != len(shardList) {
-		log.Error("Binlog adapter: int8 field row count is not equal to primary key", zap.Int("dataLen", len(data)), zap.Int("shardLen", len(shardList)))
-		return errors.New("int8 field row count is not equal to primary key")
+		log.Error("Binlog adapter: int8 field row count is not equal to shard list row count", zap.Int("dataLen", len(data)), zap.Int("shardLen", len(shardList)))
+		return fmt.Errorf("int8 field row count %d is not equal to shard list row count %d", len(data), len(shardList))
 	}
 
 	// dispatch entity acoording to shard list
@@ -805,8 +807,8 @@ func (p *BinlogAdapter) dispatchInt16ToShards(data []int16, memoryData []map[sto
 	shardList []int32, fieldID storage.FieldID) error {
 	// verify row count
 	if len(data) != len(shardList) {
-		log.Error("Binlog adapter: int16 field row count is not equal to primary key", zap.Int("dataLen", len(data)), zap.Int("shardLen", len(shardList)))
-		return errors.New("int16 field row count is not equal to primary key")
+		log.Error("Binlog adapter: int16 field row count is not equal to shard list row count", zap.Int("dataLen", len(data)), zap.Int("shardLen", len(shardList)))
+		return fmt.Errorf("int16 field row count %d is not equal to shard list row count %d", len(data), len(shardList))
 	}
 
 	// dispatch entities acoording to shard list
@@ -829,8 +831,8 @@ func (p *BinlogAdapter) dispatchInt32ToShards(data []int32, memoryData []map[sto
 	shardList []int32, fieldID storage.FieldID) error {
 	// verify row count
 	if len(data) != len(shardList) {
-		log.Error("Binlog adapter: int32 field row count is not equal to primary key", zap.Int("dataLen", len(data)), zap.Int("shardLen", len(shardList)))
-		return errors.New("int32 field row count is not equal to primary key")
+		log.Error("Binlog adapter: int32 field row count is not equal to shard list row count", zap.Int("dataLen", len(data)), zap.Int("shardLen", len(shardList)))
+		return fmt.Errorf("int32 field row count %d is not equal to shard list row count %d", len(data), len(shardList))
 	}
 
 	// dispatch entities acoording to shard list
@@ -853,8 +855,8 @@ func (p *BinlogAdapter) dispatchInt64ToShards(data []int64, memoryData []map[sto
 	shardList []int32, fieldID storage.FieldID) error {
 	// verify row count
 	if len(data) != len(shardList) {
-		log.Error("Binlog adapter: int64 field row count is not equal to primary key", zap.Int("dataLen", len(data)), zap.Int("shardLen", len(shardList)))
-		return errors.New("int64 field row count is not equal to primary key")
+		log.Error("Binlog adapter: int64 field row count is not equal to shard list row count", zap.Int("dataLen", len(data)), zap.Int("shardLen", len(shardList)))
+		return fmt.Errorf("int64 field row count %d is not equal to shard list row count %d", len(data), len(shardList))
 	}
 
 	// dispatch entities acoording to shard list
@@ -877,8 +879,8 @@ func (p *BinlogAdapter) dispatchFloatToShards(data []float32, memoryData []map[s
 	shardList []int32, fieldID storage.FieldID) error {
 	// verify row count
 	if len(data) != len(shardList) {
-		log.Error("Binlog adapter: float field row count is not equal to primary key", zap.Int("dataLen", len(data)), zap.Int("shardLen", len(shardList)))
-		return errors.New("float field row count is not equal to primary key")
+		log.Error("Binlog adapter: float field row count is not equal to shard list row count", zap.Int("dataLen", len(data)), zap.Int("shardLen", len(shardList)))
+		return fmt.Errorf("float field row count %d is not equal to shard list row count %d", len(data), len(shardList))
 	}
 
 	// dispatch entities acoording to shard list
@@ -901,8 +903,8 @@ func (p *BinlogAdapter) dispatchDoubleToShards(data []float64, memoryData []map[
 	shardList []int32, fieldID storage.FieldID) error {
 	// verify row count
 	if len(data) != len(shardList) {
-		log.Error("Binlog adapter: double field row count is not equal to primary key", zap.Int("dataLen", len(data)), zap.Int("shardLen", len(shardList)))
-		return errors.New("double field row count is not equal to primary key")
+		log.Error("Binlog adapter: double field row count is not equal to shard list row count", zap.Int("dataLen", len(data)), zap.Int("shardLen", len(shardList)))
+		return fmt.Errorf("double field row count %d is not equal to shard list row count %d", len(data), len(shardList))
 	}
 
 	// dispatch entities acoording to shard list
@@ -925,8 +927,8 @@ func (p *BinlogAdapter) dispatchVarcharToShards(data []string, memoryData []map[
 	shardList []int32, fieldID storage.FieldID) error {
 	// verify row count
 	if len(data) != len(shardList) {
-		log.Error("Binlog adapter: varchar field row count is not equal to primary key", zap.Int("dataLen", len(data)), zap.Int("shardLen", len(shardList)))
-		return errors.New("varchar field row count is not equal to primary key")
+		log.Error("Binlog adapter: varchar field row count is not equal to shard list row count", zap.Int("dataLen", len(data)), zap.Int("shardLen", len(shardList)))
+		return fmt.Errorf("varchar field row count %d is not equal to shard list row count %d", len(data), len(shardList))
 	}
 
 	// dispatch entities acoording to shard list
@@ -951,8 +953,9 @@ func (p *BinlogAdapter) dispatchBinaryVecToShards(data []byte, dim int, memoryDa
 	bytesPerVector := dim / 8
 	count := len(data) / bytesPerVector
 	if count != len(shardList) {
-		log.Error("Binlog adapter: binary vector field row count is not equal to primary key", zap.Int("dataLen", count), zap.Int("shardLen", len(shardList)))
-		return errors.New("binary vector field row count is not equal to primary key")
+		log.Error("Binlog adapter: binary vector field row count is not equal to shard list row count",
+			zap.Int("dataLen", count), zap.Int("shardLen", len(shardList)))
+		return fmt.Errorf("binary vector field row count %d is not equal to shard list row count %d", len(data), len(shardList))
 	}
 
 	// dispatch entities acoording to shard list
@@ -966,12 +969,14 @@ func (p *BinlogAdapter) dispatchBinaryVecToShards(data []byte, dim int, memoryDa
 		field := fields[fieldID]      // initSegmentData() can ensure the existence, no need to check existence here
 		binVecField := field.(*storage.BinaryVectorFieldData)
 		if binVecField == nil {
-			log.Error("Binlog adapter: the in-memory field is not a binary vector field")
-			return errors.New("the in-memory field is not a binary vector field")
+			log.Error("Binlog adapter: the in-memory field is not a binary vector field",
+				zap.Int64("fieldID", fieldID), zap.Int32("shardID", shardID))
+			return fmt.Errorf("the in-memory field is not a binary vector field, field id: %d", fieldID)
 		}
 		if binVecField.Dim != dim {
-			log.Error("Binlog adapter: binary vector dimension mismatch", zap.Int("sourceDim", dim), zap.Int("schemaDim", binVecField.Dim))
-			return errors.New("binary vector dimension mismatch")
+			log.Error("Binlog adapter: binary vector dimension mismatch",
+				zap.Int("sourceDim", dim), zap.Int("schemaDim", binVecField.Dim))
+			return fmt.Errorf("binary vector dimension %d is not equal to schema dimension %d", dim, binVecField.Dim)
 		}
 		for j := 0; j < bytesPerVector; j++ {
 			val := data[bytesPerVector*i+j]
@@ -989,8 +994,9 @@ func (p *BinlogAdapter) dispatchFloatVecToShards(data []float32, dim int, memory
 	// verify row count
 	count := len(data) / dim
 	if count != len(shardList) {
-		log.Error("Binlog adapter: float vector field row count is not equal to primary key", zap.Int("dataLen", count), zap.Int("shardLen", len(shardList)))
-		return errors.New("float vector field row count is not equal to primary key")
+		log.Error("Binlog adapter: float vector field row count is not equal to shard list row count",
+			zap.Int("dataLen", count), zap.Int("shardLen", len(shardList)))
+		return fmt.Errorf("float vector field row count %d is not equal to shard list row count %d", len(data), len(shardList))
 	}
 
 	// dispatch entities acoording to shard list
@@ -1004,12 +1010,14 @@ func (p *BinlogAdapter) dispatchFloatVecToShards(data []float32, dim int, memory
 		field := fields[fieldID]      // initSegmentData() can ensure the existence, no need to check existence here
 		floatVecField := field.(*storage.FloatVectorFieldData)
 		if floatVecField == nil {
-			log.Error("Binlog adapter: the in-memory field is not a float vector field")
-			return errors.New("the in-memory field is not a float vector field")
+			log.Error("Binlog adapter: the in-memory field is not a float vector field",
+				zap.Int64("fieldID", fieldID), zap.Int32("shardID", shardID))
+			return fmt.Errorf("the in-memory field is not a float vector field, field id: %d", fieldID)
 		}
 		if floatVecField.Dim != dim {
-			log.Error("Binlog adapter: float vector dimension mismatch", zap.Int("sourceDim", dim), zap.Int("schemaDim", floatVecField.Dim))
-			return errors.New("float vector dimension mismatch")
+			log.Error("Binlog adapter: float vector dimension mismatch",
+				zap.Int("sourceDim", dim), zap.Int("schemaDim", floatVecField.Dim))
+			return fmt.Errorf("binary vector dimension %d is not equal to schema dimension %d", dim, floatVecField.Dim)
 		}
 		for j := 0; j < dim; j++ {
 			val := data[dim*i+j]

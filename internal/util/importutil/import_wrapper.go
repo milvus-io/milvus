@@ -106,8 +106,9 @@ type ImportWrapper struct {
 	createBinlogsFunc CreateBinlogsFunc // function to create binlog for a segment
 	saveSegmentFunc   SaveSegmentFunc   // function to persist a segment
 
-	importResult *rootcoordpb.ImportResult                 // import result
-	reportFunc   func(res *rootcoordpb.ImportResult) error // report import state to rootcoord
+	importResult         *rootcoordpb.ImportResult                 // import result
+	reportFunc           func(res *rootcoordpb.ImportResult) error // report import state to rootcoord
+	reportImportAttempts uint                                      // attempts count if report function get error
 
 	workingSegments map[int]*WorkingSegment // a map shard id to working segments
 }
@@ -138,16 +139,17 @@ func NewImportWrapper(ctx context.Context, collectionSchema *schemapb.Collection
 	ctx, cancel := context.WithCancel(ctx)
 
 	wrapper := &ImportWrapper{
-		ctx:              ctx,
-		cancel:           cancel,
-		collectionSchema: realSchema,
-		shardNum:         shardNum,
-		segmentSize:      segmentSize,
-		rowIDAllocator:   idAlloc,
-		chunkManager:     cm,
-		importResult:     importResult,
-		reportFunc:       reportFunc,
-		workingSegments:  make(map[int]*WorkingSegment),
+		ctx:                  ctx,
+		cancel:               cancel,
+		collectionSchema:     realSchema,
+		shardNum:             shardNum,
+		segmentSize:          segmentSize,
+		rowIDAllocator:       idAlloc,
+		chunkManager:         cm,
+		importResult:         importResult,
+		reportFunc:           reportFunc,
+		reportImportAttempts: ReportImportAttempts,
+		workingSegments:      make(map[int]*WorkingSegment),
 	}
 
 	return wrapper
@@ -156,17 +158,17 @@ func NewImportWrapper(ctx context.Context, collectionSchema *schemapb.Collection
 func (p *ImportWrapper) SetCallbackFunctions(assignSegmentFunc AssignSegmentFunc, createBinlogsFunc CreateBinlogsFunc, saveSegmentFunc SaveSegmentFunc) error {
 	if assignSegmentFunc == nil {
 		log.Error("import wrapper: callback function AssignSegmentFunc is nil")
-		return fmt.Errorf("import wrapper: callback function AssignSegmentFunc is nil")
+		return fmt.Errorf("callback function AssignSegmentFunc is nil")
 	}
 
 	if createBinlogsFunc == nil {
 		log.Error("import wrapper: callback function CreateBinlogsFunc is nil")
-		return fmt.Errorf("import wrapper: callback function CreateBinlogsFunc is nil")
+		return fmt.Errorf("callback function CreateBinlogsFunc is nil")
 	}
 
 	if saveSegmentFunc == nil {
 		log.Error("import wrapper: callback function SaveSegmentFunc is nil")
-		return fmt.Errorf("import wrapper: callback function SaveSegmentFunc is nil")
+		return fmt.Errorf("callback function SaveSegmentFunc is nil")
 	}
 
 	p.assignSegmentFunc = assignSegmentFunc
@@ -201,7 +203,7 @@ func (p *ImportWrapper) validateColumnBasedFiles(filePaths []string, collectionS
 		_, ok := requiredFieldNames[name]
 		if !ok {
 			log.Error("import wrapper: the file has no corresponding field in collection", zap.String("fieldName", name))
-			return fmt.Errorf("import wrapper: the file '%s' has no corresponding field in collection", filePath)
+			return fmt.Errorf("the file '%s' has no corresponding field in collection", filePath)
 		}
 	}
 
@@ -210,7 +212,7 @@ func (p *ImportWrapper) validateColumnBasedFiles(filePaths []string, collectionS
 		_, ok := fileNames[name]
 		if !ok {
 			log.Error("import wrapper: there is no file corresponding to field", zap.String("fieldName", name))
-			return fmt.Errorf("import wrapper: there is no file corresponding to field '%s'", name)
+			return fmt.Errorf("there is no file corresponding to field '%s'", name)
 		}
 	}
 
@@ -232,8 +234,8 @@ func (p *ImportWrapper) fileValidation(filePaths []string) (bool, error) {
 
 		// only allow json file or numpy file
 		if fileType != JSONFileExt && fileType != NumpyFileExt {
-			log.Error("import wrapper: unsupportted file type", zap.String("filePath", filePath))
-			return false, fmt.Errorf("import wrapper: unsupportted file type: '%s'", filePath)
+			log.Error("import wrapper: unsupported file type", zap.String("filePath", filePath))
+			return false, fmt.Errorf("unsupported file type: '%s'", filePath)
 		}
 
 		// we use the first file to determine row-based or column-based
@@ -246,12 +248,12 @@ func (p *ImportWrapper) fileValidation(filePaths []string) (bool, error) {
 		if rowBased {
 			if fileType != JSONFileExt {
 				log.Error("import wrapper: unsupported file type for row-based mode", zap.String("filePath", filePath))
-				return rowBased, fmt.Errorf("import wrapper: unsupported file type for row-based mode: '%s'", filePath)
+				return rowBased, fmt.Errorf("unsupported file type for row-based mode: '%s'", filePath)
 			}
 		} else {
 			if fileType != NumpyFileExt {
 				log.Error("import wrapper: unsupported file type for column-based mode", zap.String("filePath", filePath))
-				return rowBased, fmt.Errorf("import wrapper: unsupported file type for column-based mode: '%s'", filePath)
+				return rowBased, fmt.Errorf("unsupported file type for column-based mode: '%s'", filePath)
 			}
 		}
 
@@ -259,7 +261,7 @@ func (p *ImportWrapper) fileValidation(filePaths []string) (bool, error) {
 		_, ok := fileNames[name]
 		if ok {
 			log.Error("import wrapper: duplicate file name", zap.String("filePath", filePath))
-			return rowBased, fmt.Errorf("import wrapper: duplicate file: '%s'", filePath)
+			return rowBased, fmt.Errorf("duplicate file: '%s'", filePath)
 		}
 		fileNames[name] = struct{}{}
 
@@ -267,19 +269,19 @@ func (p *ImportWrapper) fileValidation(filePaths []string) (bool, error) {
 		size, err := p.chunkManager.Size(p.ctx, filePath)
 		if err != nil {
 			log.Error("import wrapper: failed to get file size", zap.String("filePath", filePath), zap.Error(err))
-			return rowBased, fmt.Errorf("import wrapper: failed to get file size of '%s', make sure the input path is related path, error:%w", filePath, err)
+			return rowBased, fmt.Errorf("failed to get file size of '%s', error:%w", filePath, err)
 		}
 
 		// empty file
 		if size == 0 {
 			log.Error("import wrapper: file size is zero", zap.String("filePath", filePath))
-			return rowBased, fmt.Errorf("import wrapper: the file '%s' size is zero", filePath)
+			return rowBased, fmt.Errorf("the file '%s' size is zero", filePath)
 		}
 
 		if size > MaxFileSize {
 			log.Error("import wrapper: file size exceeds the maximum size", zap.String("filePath", filePath),
 				zap.Int64("fileSize", size), zap.Int64("MaxFileSize", MaxFileSize))
-			return rowBased, fmt.Errorf("import wrapper: the file '%s' size exceeds the maximum size: %d bytes", filePath, MaxFileSize)
+			return rowBased, fmt.Errorf("the file '%s' size exceeds the maximum size: %d bytes", filePath, MaxFileSize)
 		}
 		totalSize += size
 	}
@@ -287,7 +289,7 @@ func (p *ImportWrapper) fileValidation(filePaths []string) (bool, error) {
 	// especially for column-base, total size of files cannot exceed MaxTotalSizeInMemory
 	if totalSize > MaxTotalSizeInMemory {
 		log.Error("import wrapper: total size of files exceeds the maximum size", zap.Int64("totalSize", totalSize), zap.Int64("MaxTotalSize", MaxTotalSizeInMemory))
-		return rowBased, fmt.Errorf("import wrapper: total size(%d bytes) of all files exceeds the maximum size: %d bytes", totalSize, MaxTotalSizeInMemory)
+		return rowBased, fmt.Errorf("total size(%d bytes) of all files exceeds the maximum size: %d bytes", totalSize, MaxTotalSizeInMemory)
 	}
 
 	// check redundant files for column-based import
@@ -348,7 +350,7 @@ func (p *ImportWrapper) Import(filePaths []string, options ImportOptions) error 
 		fieldsData := initSegmentData(p.collectionSchema)
 		if fieldsData == nil {
 			log.Error("import wrapper: failed to initialize FieldData list")
-			return fmt.Errorf("import wrapper: failed to initialize FieldData list")
+			return fmt.Errorf("failed to initialize FieldData list")
 		}
 
 		rowCount := 0
@@ -384,7 +386,7 @@ func (p *ImportWrapper) Import(filePaths []string, options ImportOptions) error 
 
 				// check the row count. only count non-zero row fields
 				if rowCount > 0 && rowCount != v.RowNum() {
-					return fmt.Errorf("the field %d row count %d doesn't equal others row count: %d", k, v.RowNum(), rowCount)
+					return fmt.Errorf("the field %d row count %d doesn't equal to others row count: %d", k, v.RowNum(), rowCount)
 				}
 				rowCount = v.RowNum()
 
@@ -425,11 +427,11 @@ func (p *ImportWrapper) Import(filePaths []string, options ImportOptions) error 
 		triggerGC()
 	}
 
-	return p.reportPersisted()
+	return p.reportPersisted(p.reportImportAttempts)
 }
 
 // reportPersisted notify the rootcoord to mark the task state to be ImportPersisted
-func (p *ImportWrapper) reportPersisted() error {
+func (p *ImportWrapper) reportPersisted(reportAttempts uint) error {
 	// force close all segments
 	err := p.closeAllWorkingSegments()
 	if err != nil {
@@ -441,7 +443,7 @@ func (p *ImportWrapper) reportPersisted() error {
 	// persist state task is valuable, retry more times in case fail this task only because of network error
 	reportErr := retry.Do(p.ctx, func() error {
 		return p.reportFunc(p.importResult)
-	}, retry.Attempts(ReportImportAttempts))
+	}, retry.Attempts(reportAttempts))
 	if reportErr != nil {
 		log.Warn("import wrapper: fail to report import state to RootCoord", zap.Error(reportErr))
 		return reportErr
@@ -520,7 +522,7 @@ func (p *ImportWrapper) doBinlogImport(filePaths []string, tsStartPoint uint64, 
 		return err
 	}
 
-	return p.reportPersisted()
+	return p.reportPersisted(p.reportImportAttempts)
 }
 
 // parseRowBasedJSON is the entry of row-based json import operation
@@ -700,7 +702,7 @@ func (p *ImportWrapper) appendFunc(schema *schemapb.FieldSchema) func(src storag
 func (p *ImportWrapper) splitFieldsData(fieldsData map[storage.FieldID]storage.FieldData, blockSize int64) error {
 	if len(fieldsData) == 0 {
 		log.Error("import wrapper: fields data is empty")
-		return fmt.Errorf("import wrapper: fields data is empty")
+		return fmt.Errorf("fields data is empty")
 	}
 
 	tr := timerecord.NewTimeRecorder("import wrapper: split field data")
@@ -722,7 +724,7 @@ func (p *ImportWrapper) splitFieldsData(fieldsData map[storage.FieldID]storage.F
 			v, ok := fieldsData[schema.GetFieldID()]
 			if !ok {
 				log.Error("import wrapper: field not provided", zap.String("fieldName", schema.GetName()))
-				return fmt.Errorf("import wrapper: field '%s' not provided", schema.GetName())
+				return fmt.Errorf("field '%s' not provided", schema.GetName())
 			}
 			rowCounter[schema.GetName()] = v.RowNum()
 			if v.RowNum() > rowCount {
@@ -732,14 +734,14 @@ func (p *ImportWrapper) splitFieldsData(fieldsData map[storage.FieldID]storage.F
 	}
 	if primaryKey == nil {
 		log.Error("import wrapper: primary key field is not found")
-		return fmt.Errorf("import wrapper: primary key field is not found")
+		return fmt.Errorf("primary key field is not found")
 	}
 
 	for name, count := range rowCounter {
 		if count != rowCount {
 			log.Error("import wrapper: field row count is not equal to other fields row count", zap.String("fieldName", name),
 				zap.Int("rowCount", count), zap.Int("otherRowCount", rowCount))
-			return fmt.Errorf("import wrapper: field '%s' row count %d is not equal to other fields row count: %d", name, count, rowCount)
+			return fmt.Errorf("field '%s' row count %d is not equal to other fields row count: %d", name, count, rowCount)
 		}
 	}
 	log.Info("import wrapper: try to split a block with row count", zap.Int("rowCount", rowCount))
@@ -747,14 +749,14 @@ func (p *ImportWrapper) splitFieldsData(fieldsData map[storage.FieldID]storage.F
 	primaryData, ok := fieldsData[primaryKey.GetFieldID()]
 	if !ok {
 		log.Error("import wrapper: primary key field is not provided", zap.String("keyName", primaryKey.GetName()))
-		return fmt.Errorf("import wrapper: primary key field is not provided")
+		return fmt.Errorf("primary key field is not provided")
 	}
 
 	// generate auto id for primary key and rowid field
 	rowIDBegin, rowIDEnd, err := p.rowIDAllocator.Alloc(uint32(rowCount))
 	if err != nil {
 		log.Error("import wrapper: failed to alloc row ID", zap.Error(err))
-		return err
+		return fmt.Errorf("failed to alloc row ID, error: %w", err)
 	}
 
 	rowIDField := fieldsData[common.RowIDField]
@@ -781,8 +783,8 @@ func (p *ImportWrapper) splitFieldsData(fieldsData map[storage.FieldID]storage.F
 	}
 
 	if primaryData.RowNum() <= 0 {
-		log.Error("import wrapper: primary key not provided", zap.String("keyName", primaryKey.GetName()))
-		return fmt.Errorf("import wrapper: the primary key '%s' not provided", primaryKey.GetName())
+		log.Error("import wrapper: primary key is not provided", zap.String("keyName", primaryKey.GetName()))
+		return fmt.Errorf("the primary key '%s' is not provided", primaryKey.GetName())
 	}
 
 	// prepare segemnts
@@ -791,7 +793,7 @@ func (p *ImportWrapper) splitFieldsData(fieldsData map[storage.FieldID]storage.F
 		segmentData := initSegmentData(p.collectionSchema)
 		if segmentData == nil {
 			log.Error("import wrapper: failed to initialize FieldData list")
-			return fmt.Errorf("import wrapper: failed to initialize FieldData list")
+			return fmt.Errorf("failed to initialize FieldData list")
 		}
 		segmentsData = append(segmentsData, segmentData)
 	}
@@ -803,7 +805,7 @@ func (p *ImportWrapper) splitFieldsData(fieldsData map[storage.FieldID]storage.F
 		appendFuncErr := p.appendFunc(schema)
 		if appendFuncErr == nil {
 			log.Error("import wrapper: unsupported field data type")
-			return fmt.Errorf("import wrapper: unsupported field data type")
+			return fmt.Errorf("unsupported field data type: %d", schema.GetDataType())
 		}
 		appendFunctions[schema.GetName()] = appendFuncErr
 	}
@@ -821,7 +823,7 @@ func (p *ImportWrapper) splitFieldsData(fieldsData map[storage.FieldID]storage.F
 			intPK, ok := interface{}(pk).(int64)
 			if !ok {
 				log.Error("import wrapper: primary key field must be int64 or varchar")
-				return fmt.Errorf("import wrapper: primary key field must be int64 or varchar")
+				return fmt.Errorf("primary key field must be int64 or varchar")
 			}
 			hash, _ := typeutil.Hash32Int64(intPK)
 			shard = hash % uint32(p.shardNum)
@@ -891,7 +893,7 @@ func (p *ImportWrapper) flushFunc(fields map[storage.FieldID]storage.FieldData, 
 		segID, channelName, err := p.assignSegmentFunc(shardID)
 		if err != nil {
 			log.Error("import wrapper: failed to assign a new segment", zap.Error(err), zap.Int("shardID", shardID))
-			return err
+			return fmt.Errorf("failed to assign a new segment for shard id %d, error: %w", shardID, err)
 		}
 
 		segment = &WorkingSegment{
@@ -911,7 +913,8 @@ func (p *ImportWrapper) flushFunc(fields map[storage.FieldID]storage.FieldData, 
 	if err != nil {
 		log.Error("import wrapper: failed to save binlogs", zap.Error(err), zap.Int("shardID", shardID),
 			zap.Int64("segmentID", segment.segmentID), zap.String("targetChannel", segment.targetChName))
-		return err
+		return fmt.Errorf("failed to save binlogs, shard id %d, segment id %d, channel '%s', error: %w",
+			shardID, segment.segmentID, segment.targetChName, err)
 	}
 
 	segment.fieldsInsert = append(segment.fieldsInsert, fieldsInsert...)
@@ -934,12 +937,13 @@ func (p *ImportWrapper) closeWorkingSegment(segment *WorkingSegment) error {
 
 	err := p.saveSegmentFunc(segment.fieldsInsert, segment.fieldsStats, segment.segmentID, segment.targetChName, segment.rowCount)
 	if err != nil {
-		log.Error("import wrapper: failed to save segment",
+		log.Error("import wrapper: failed to seal segment",
 			zap.Error(err),
 			zap.Int("shardID", segment.shardID),
 			zap.Int64("segmentID", segment.segmentID),
 			zap.String("targetChannel", segment.targetChName))
-		return err
+		return fmt.Errorf("failed to seal segment, shard id %d, segment id %d, channel '%s', error: %w",
+			segment.shardID, segment.segmentID, segment.targetChName, err)
 	}
 
 	return nil

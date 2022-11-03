@@ -879,7 +879,7 @@ func (i *IndexCoord) DescribeIndex(ctx context.Context, req *indexpb.DescribeInd
 		return &indexpb.DescribeIndexResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_IndexNotExist,
-				Reason:    fmt.Sprint("index not exist, collectionID ", req.CollectionID),
+				Reason:    fmt.Sprint("index doesn't exist, collectionID ", req.CollectionID),
 			},
 		}, nil
 	}
