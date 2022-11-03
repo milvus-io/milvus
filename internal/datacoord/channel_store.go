@@ -23,6 +23,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/milvus-io/milvus/internal/util/timerecord"
+
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -131,6 +133,7 @@ func NewChannelStore(kv kv.TxnKV) *ChannelStore {
 
 // Reload restores the buffer channels and node-channels mapping from kv.
 func (c *ChannelStore) Reload() error {
+	record := timerecord.NewTimeRecorder("datacoord")
 	keys, values, err := c.store.LoadWithPrefix(Params.DataCoordCfg.ChannelWatchSubPath)
 	if err != nil {
 		return err
@@ -156,6 +159,7 @@ func (c *ChannelStore) Reload() error {
 		}
 		c.channelsInfo[nodeID].Channels = append(c.channelsInfo[nodeID].Channels, channel)
 	}
+	record.Record("ChannelStore reload")
 	return nil
 }
 

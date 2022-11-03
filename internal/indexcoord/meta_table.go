@@ -23,6 +23,8 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/util/timerecord"
+
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/golang/protobuf/proto"
@@ -90,6 +92,7 @@ func (mt *metaTable) updateSegmentIndex(segIdx *model.SegmentIndex) {
 
 // reloadFromKV reloads the index meta from ETCD.
 func (mt *metaTable) reloadFromKV() error {
+	record := timerecord.NewTimeRecorder("indexcoord")
 	mt.collectionIndexes = make(map[UniqueID]map[UniqueID]*model.Index)
 	mt.segmentIndexes = make(map[UniqueID]map[UniqueID]*model.SegmentIndex)
 	mt.buildID2SegmentIndex = make(map[UniqueID]*model.SegmentIndex)
@@ -115,6 +118,7 @@ func (mt *metaTable) reloadFromKV() error {
 	}
 
 	log.Info("IndexCoord metaTable reloadFromKV success")
+	record.Record("metaTable reloadFromKV")
 	return nil
 }
 
