@@ -23,8 +23,8 @@ var (
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.RootCoordRole,
-			Name:      "sync_epoch_time",
-			Help:      "synchronized unix epoch per physical channel",
+			Name:      "produce_tt_lag_ms",
+			Help:      "now time minus tt per physical channel",
 		}, []string{channelNameLabelName})
 
 	RootCoordDDLReqCounter = prometheus.NewCounterVec(

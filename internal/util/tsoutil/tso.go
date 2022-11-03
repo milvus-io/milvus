@@ -97,3 +97,10 @@ func AddPhysicalDurationOnTs(ts uint64, duration time.Duration) uint64 {
 func NewTSOKVBase(client *clientv3.Client, tsoRoot, subPath string) *etcdkv.EtcdKV {
 	return etcdkv.NewEtcdKV(client, path.Join(tsoRoot, subPath))
 }
+
+// SubByNow ts is a hybrid
+func SubByNow(ts uint64) int64 {
+	utcT, _ := ParseHybridTs(ts)
+	now := time.Now().UnixMilli()
+	return now - utcT
+}

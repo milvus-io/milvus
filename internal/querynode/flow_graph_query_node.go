@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/typeutil"
+
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -71,7 +73,7 @@ func newQueryNodeFlowGraph(ctx context.Context,
 		flowGraph:    flowgraph.NewTimeTickedFlowGraph(ctx1),
 	}
 
-	dmStreamNode, err := q.newDmInputNode(ctx1, factory, collectionID, vchannel)
+	dmStreamNode, err := q.newDmInputNode(ctx1, factory, collectionID, vchannel, metrics.InsertLabel)
 	if err != nil {
 		return nil, err
 	}
@@ -137,7 +139,7 @@ func newQueryNodeDeltaFlowGraph(ctx context.Context,
 		flowGraph:    flowgraph.NewTimeTickedFlowGraph(ctx1),
 	}
 
-	dmStreamNode, err := q.newDmInputNode(ctx1, factory, collectionID, vchannel)
+	dmStreamNode, err := q.newDmInputNode(ctx1, factory, collectionID, vchannel, metrics.DeleteLabel)
 	if err != nil {
 		return nil, err
 	}
@@ -186,7 +188,8 @@ func newQueryNodeDeltaFlowGraph(ctx context.Context,
 }
 
 // newDmInputNode returns a new inputNode
-func (q *queryNodeFlowGraph) newDmInputNode(ctx context.Context, factory msgstream.Factory, collectionID UniqueID, vchannel Channel) (*flowgraph.InputNode, error) {
+
+func (q *queryNodeFlowGraph) newDmInputNode(ctx context.Context, factory msgstream.Factory, collectionID UniqueID, vchannel Channel, dataType string) (*flowgraph.InputNode, error) {
 	insertStream, err := factory.NewTtMsgStream(ctx)
 	if err != nil {
 		return nil, err
@@ -197,7 +200,8 @@ func (q *queryNodeFlowGraph) newDmInputNode(ctx context.Context, factory msgstre
 	maxQueueLength := Params.QueryNodeCfg.FlowGraphMaxQueueLength
 	maxParallelism := Params.QueryNodeCfg.FlowGraphMaxParallelism
 	name := fmt.Sprintf("dmInputNode-query-%d-%s", collectionID, vchannel)
-	node := flowgraph.NewInputNode(insertStream, name, maxQueueLength, maxParallelism)
+	node := flowgraph.NewInputNode(insertStream, name, maxQueueLength, maxParallelism, typeutil.QueryNodeRole,
+		paramtable.GetNodeID(), collectionID, dataType)
 	return node, nil
 }
 
@@ -267,4 +271,6 @@ func (q *queryNodeFlowGraph) close() {
 		zap.Int64("collectionID", q.collectionID),
 		zap.String("vchannel", q.vchannel),
 	)
+
+	metrics.CleanupQueryNodeCollectionMetrics(paramtable.GetNodeID(), q.collectionID)
 }

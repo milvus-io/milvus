@@ -555,10 +555,11 @@ func (s *Server) handleTimetickMessage(ctx context.Context, ttMsg *msgstream.Dat
 		log.RatedWarn(60.0, "time tick lag behind for more than 1 minutes", zap.String("channel", ch), zap.Time("timetick", physical))
 	}
 
-	utcT, _ := tsoutil.ParseHybridTs(ts)
-
+	sub := tsoutil.SubByNow(ts)
 	pChannelName := funcutil.ToPhysicalChannel(ch)
-	metrics.DataCoordSyncEpoch.WithLabelValues(pChannelName).Set(float64(utcT))
+	metrics.DataCoordConsumeDataNodeTimeTickLag.
+		WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), pChannelName).
+		Set(float64(sub))
 
 	s.updateSegmentStatistics(ttMsg.GetSegmentsStats())
 
