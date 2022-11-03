@@ -56,33 +56,23 @@ type ProtoUDFactory struct{}
 func (pudf *ProtoUDFactory) NewUnmarshalDispatcher() *ProtoUnmarshalDispatcher {
 	insertMsg := InsertMsg{}
 	deleteMsg := DeleteMsg{}
-	searchMsg := SearchMsg{}
-	searchResultMsg := SearchResultMsg{}
-	retrieveMsg := RetrieveMsg{}
-	retrieveResultMsg := RetrieveResultMsg{}
 	timeTickMsg := TimeTickMsg{}
 	createCollectionMsg := CreateCollectionMsg{}
 	dropCollectionMsg := DropCollectionMsg{}
 	createPartitionMsg := CreatePartitionMsg{}
 	dropPartitionMsg := DropPartitionMsg{}
 	dataNodeTtMsg := DataNodeTtMsg{}
-	sealedSegmentsChangeInfoMsg := SealedSegmentsChangeInfoMsg{}
 
 	p := &ProtoUnmarshalDispatcher{}
 	p.TempMap = make(map[commonpb.MsgType]UnmarshalFunc)
 	p.TempMap[commonpb.MsgType_Insert] = insertMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_Delete] = deleteMsg.Unmarshal
-	p.TempMap[commonpb.MsgType_Search] = searchMsg.Unmarshal
-	p.TempMap[commonpb.MsgType_SearchResult] = searchResultMsg.Unmarshal
-	p.TempMap[commonpb.MsgType_Retrieve] = retrieveMsg.Unmarshal
-	p.TempMap[commonpb.MsgType_RetrieveResult] = retrieveResultMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_TimeTick] = timeTickMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_CreateCollection] = createCollectionMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_DropCollection] = dropCollectionMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_CreatePartition] = createPartitionMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_DropPartition] = dropPartitionMsg.Unmarshal
 	p.TempMap[commonpb.MsgType_DataNodeTt] = dataNodeTtMsg.Unmarshal
-	p.TempMap[commonpb.MsgType_SealedSegmentsChangeInfo] = sealedSegmentsChangeInfoMsg.Unmarshal
 
 	return p
 }

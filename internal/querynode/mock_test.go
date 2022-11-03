@@ -1480,13 +1480,13 @@ func genSimpleRetrievePlanExpr(schema *schemapb.CollectionSchema) ([]byte, error
 }
 
 func genSimpleRetrievePlan(collection *Collection) (*RetrievePlan, error) {
-	retrieveMsg, err := genRetrieveMsg(collection.schema)
+	timestamp := Timestamp(1000)
+	planBytes, err := genSimpleRetrievePlanExpr(collection.schema)
 	if err != nil {
 		return nil, err
 	}
-	timestamp := retrieveMsg.RetrieveRequest.TravelTimestamp
 
-	plan, err2 := createRetrievePlanByExpr(collection, retrieveMsg.SerializedExprPlan, timestamp, 100)
+	plan, err2 := createRetrievePlanByExpr(collection, planBytes, timestamp, 100)
 	return plan, err2
 }
 
@@ -1544,20 +1544,6 @@ func genRetrieveRequest(schema *schemapb.CollectionSchema) (*internalpb.Retrieve
 		TravelTimestamp:    Timestamp(1000),
 		SerializedExprPlan: expr,
 	}, nil
-}
-
-func genRetrieveMsg(schema *schemapb.CollectionSchema) (*msgstream.RetrieveMsg, error) {
-	req, err := genRetrieveRequest(schema)
-	if err != nil {
-		return nil, err
-	}
-
-	msg := &msgstream.RetrieveMsg{
-		BaseMsg:         genMsgStreamBaseMsg(),
-		RetrieveRequest: *req,
-	}
-	msg.SetTimeRecorder()
-	return msg, nil
 }
 
 func genQueryResultChannel() Channel {
