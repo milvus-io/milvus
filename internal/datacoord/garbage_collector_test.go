@@ -45,8 +45,7 @@ func Test_garbageCollector_basic(t *testing.T) {
 	cli, _, _, _, _, err := initUtOSSEnv(bucketName, rootPath, 0)
 	require.NoError(t, err)
 
-	mockAllocator := newMockAllocator()
-	meta, err := newMemoryMeta(mockAllocator)
+	meta, err := newMemoryMeta()
 	assert.Nil(t, err)
 
 	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
@@ -108,8 +107,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 	cli, inserts, stats, delta, others, err := initUtOSSEnv(bucketName, rootPath, 4)
 	require.NoError(t, err)
 
-	mockAllocator := newMockAllocator()
-	meta, err := newMemoryMeta(mockAllocator)
+	meta, err := newMemoryMeta()
 	assert.Nil(t, err)
 
 	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)

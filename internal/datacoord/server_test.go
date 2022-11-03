@@ -44,7 +44,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/common"
-	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
@@ -2809,18 +2808,6 @@ func TestGetFlushState(t *testing.T) {
 	})
 }
 
-type mockTxnKVext struct {
-	kv.MockTxnKV
-}
-
-func (m *mockTxnKVext) LoadWithPrefix(prefix string) ([]string, []string, error) {
-	return []string{}, []string{}, nil
-}
-
-func (m *mockTxnKVext) MultiSave(kvs map[string]string) error {
-	return errors.New("(testing only) injected error")
-}
-
 func TestDataCoordServer_SetSegmentState(t *testing.T) {
 	t.Run("normal case", func(t *testing.T) {
 		svr := newTestServer(t, nil)
@@ -2862,27 +2849,11 @@ func TestDataCoordServer_SetSegmentState(t *testing.T) {
 		assert.EqualValues(t, commonpb.SegmentState_Flushed, resp.States[0].State)
 	})
 
-	t.Run("dataCoord meta set state error", func(t *testing.T) {
-		meta, err := newMeta(context.TODO(), &mockTxnKVext{}, "")
+	t.Run("dataCoord meta set state not exists", func(t *testing.T) {
+		meta, err := newMemoryMeta()
 		assert.NoError(t, err)
 		svr := newTestServerWithMeta(t, nil, meta)
 		defer closeTestServer(t, svr)
-		segment := &datapb.SegmentInfo{
-			ID:            1000,
-			CollectionID:  100,
-			PartitionID:   0,
-			InsertChannel: "c1",
-			NumOfRows:     0,
-			State:         commonpb.SegmentState_Growing,
-			StartPosition: &internalpb.MsgPosition{
-				ChannelName: "c1",
-				MsgID:       []byte{},
-				MsgGroup:    "",
-				Timestamp:   0,
-			},
-		}
-		err2 := svr.meta.AddSegment(NewSegmentInfo(segment))
-		assert.NotNil(t, err2)
 		// Set segment state.
 		svr.SetSegmentState(context.TODO(), &datapb.SetSegmentStateRequest{
 			SegmentId: 1000,

@@ -35,7 +35,7 @@ func TestManagerOptions(t *testing.T) {
 	//	ctx := context.Background()
 	Params.Init()
 	mockAllocator := newMockAllocator()
-	meta, err := newMemoryMeta(mockAllocator)
+	meta, err := newMemoryMeta()
 	assert.Nil(t, err)
 	segmentManager := newSegmentManager(meta, mockAllocator, nil)
 
@@ -96,7 +96,7 @@ func TestAllocSegment(t *testing.T) {
 	ctx := context.Background()
 	Params.Init()
 	mockAllocator := newMockAllocator()
-	meta, err := newMemoryMeta(mockAllocator)
+	meta, err := newMemoryMeta()
 	assert.Nil(t, err)
 	segmentManager := newSegmentManager(meta, mockAllocator, nil)
 
@@ -137,7 +137,7 @@ func TestAllocSegmentForImport(t *testing.T) {
 	ctx := context.Background()
 	Params.Init()
 	mockAllocator := newMockAllocator()
-	meta, err := newMemoryMeta(mockAllocator)
+	meta, err := newMemoryMeta()
 	assert.Nil(t, err)
 	ms := newMockRootCoordService()
 	segmentManager := newSegmentManager(meta, mockAllocator, ms)
@@ -185,7 +185,7 @@ func TestLoadSegmentsFromMeta(t *testing.T) {
 	ctx := context.Background()
 	Params.Init()
 	mockAllocator := newMockAllocator()
-	meta, err := newMemoryMeta(mockAllocator)
+	meta, err := newMemoryMeta()
 	assert.Nil(t, err)
 
 	schema := newTestSchema()
@@ -235,7 +235,7 @@ func TestLoadSegmentsFromMeta(t *testing.T) {
 func TestSaveSegmentsToMeta(t *testing.T) {
 	Params.Init()
 	mockAllocator := newMockAllocator()
-	meta, err := newMemoryMeta(mockAllocator)
+	meta, err := newMemoryMeta()
 	assert.Nil(t, err)
 
 	schema := newTestSchema()
@@ -257,7 +257,7 @@ func TestSaveSegmentsToMeta(t *testing.T) {
 func TestSaveSegmentsToMetaWithSpecificSegments(t *testing.T) {
 	Params.Init()
 	mockAllocator := newMockAllocator()
-	meta, err := newMemoryMeta(mockAllocator)
+	meta, err := newMemoryMeta()
 	assert.Nil(t, err)
 
 	schema := newTestSchema()
@@ -279,7 +279,7 @@ func TestSaveSegmentsToMetaWithSpecificSegments(t *testing.T) {
 func TestDropSegment(t *testing.T) {
 	Params.Init()
 	mockAllocator := newMockAllocator()
-	meta, err := newMemoryMeta(mockAllocator)
+	meta, err := newMemoryMeta()
 	assert.Nil(t, err)
 
 	schema := newTestSchema()
@@ -302,7 +302,7 @@ func TestDropSegment(t *testing.T) {
 func TestAllocRowsLargerThanOneSegment(t *testing.T) {
 	Params.Init()
 	mockAllocator := newMockAllocator()
-	meta, err := newMemoryMeta(mockAllocator)
+	meta, err := newMemoryMeta()
 	assert.Nil(t, err)
 
 	schema := newTestSchema()
@@ -324,7 +324,7 @@ func TestAllocRowsLargerThanOneSegment(t *testing.T) {
 func TestExpireAllocation(t *testing.T) {
 	Params.Init()
 	mockAllocator := newMockAllocator()
-	meta, err := newMemoryMeta(mockAllocator)
+	meta, err := newMemoryMeta()
 	assert.Nil(t, err)
 
 	schema := newTestSchema()
@@ -367,7 +367,7 @@ func TestGetFlushableSegments(t *testing.T) {
 	t.Run("get flushable segments between small interval", func(t *testing.T) {
 		Params.Init()
 		mockAllocator := newMockAllocator()
-		meta, err := newMemoryMeta(mockAllocator)
+		meta, err := newMemoryMeta()
 		assert.Nil(t, err)
 
 		schema := newTestSchema()
@@ -413,7 +413,7 @@ func TestTryToSealSegment(t *testing.T) {
 	t.Run("normal seal with segment policies", func(t *testing.T) {
 		Params.Init()
 		mockAllocator := newMockAllocator()
-		meta, err := newMemoryMeta(mockAllocator)
+		meta, err := newMemoryMeta()
 		assert.Nil(t, err)
 
 		schema := newTestSchema()
@@ -438,7 +438,7 @@ func TestTryToSealSegment(t *testing.T) {
 	t.Run("normal seal with channel seal policies", func(t *testing.T) {
 		Params.Init()
 		mockAllocator := newMockAllocator()
-		meta, err := newMemoryMeta(mockAllocator)
+		meta, err := newMemoryMeta()
 		assert.Nil(t, err)
 
 		schema := newTestSchema()
@@ -463,7 +463,7 @@ func TestTryToSealSegment(t *testing.T) {
 	t.Run("normal seal with both segment & channel seal policy", func(t *testing.T) {
 		Params.Init()
 		mockAllocator := newMockAllocator()
-		meta, err := newMemoryMeta(mockAllocator)
+		meta, err := newMemoryMeta()
 		assert.Nil(t, err)
 
 		schema := newTestSchema()

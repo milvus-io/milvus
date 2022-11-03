@@ -13,7 +13,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/allocator"
-	"github.com/milvus-io/milvus/internal/kv"
+	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
@@ -864,8 +864,7 @@ func TestCore_Import(t *testing.T) {
 }
 
 func TestCore_GetImportState(t *testing.T) {
-	mockKv := &kv.MockMetaKV{}
-	mockKv.InMemKv = sync.Map{}
+	mockKv := memkv.NewMemoryKV()
 	ti1 := &datapb.ImportTaskInfo{
 		Id: 100,
 		State: &datapb.ImportTaskState{
@@ -914,8 +913,7 @@ func TestCore_GetImportState(t *testing.T) {
 }
 
 func TestCore_ListImportTasks(t *testing.T) {
-	mockKv := &kv.MockMetaKV{}
-	mockKv.InMemKv = sync.Map{}
+	mockKv := memkv.NewMemoryKV()
 	ti1 := &datapb.ImportTaskInfo{
 		Id:             100,
 		CollectionName: "collection-A",
@@ -980,8 +978,7 @@ func TestCore_ReportImport(t *testing.T) {
 		globalCount++
 		return globalCount, 0, nil
 	}
-	mockKv := &kv.MockMetaKV{}
-	mockKv.InMemKv = sync.Map{}
+	mockKv := memkv.NewMemoryKV()
 	ti1 := &datapb.ImportTaskInfo{
 		Id: 100,
 		State: &datapb.ImportTaskState{

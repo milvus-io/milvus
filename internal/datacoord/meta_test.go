@@ -243,7 +243,7 @@ func TestMeta_Basic(t *testing.T) {
 	ctx := context.Background()
 
 	mockAllocator := newMockAllocator()
-	meta, err := newMemoryMeta(mockAllocator)
+	meta, err := newMemoryMeta()
 	assert.Nil(t, err)
 
 	testSchema := newTestSchema()
@@ -489,8 +489,7 @@ func TestMeta_Basic(t *testing.T) {
 }
 
 func TestGetUnFlushedSegments(t *testing.T) {
-	mockAllocator := newMockAllocator()
-	meta, err := newMemoryMeta(mockAllocator)
+	meta, err := newMemoryMeta()
 	assert.Nil(t, err)
 	s1 := &datapb.SegmentInfo{
 		ID:           0,

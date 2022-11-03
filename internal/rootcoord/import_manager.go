@@ -66,7 +66,7 @@ var flipTaskStateInterval = 15 * 1000
 // importManager manager for import tasks
 type importManager struct {
 	ctx       context.Context // reserved
-	taskStore kv.MetaKv       // Persistent task info storage.
+	taskStore kv.TxnKV        // Persistent task info storage.
 	busyNodes map[int64]int64 // Set of all current working DataNode IDs and related task create timestamp.
 
 	// TODO: Make pendingTask a map to improve look up performance.
@@ -89,7 +89,7 @@ type importManager struct {
 }
 
 // newImportManager helper function to create a importManager
-func newImportManager(ctx context.Context, client kv.MetaKv,
+func newImportManager(ctx context.Context, client kv.TxnKV,
 	idAlloc func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error),
 	importService func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error),
 	markSegmentsDropped func(ctx context.Context, segIDs []typeutil.UniqueID) (*commonpb.Status, error),
