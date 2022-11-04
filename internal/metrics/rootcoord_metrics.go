@@ -142,7 +142,6 @@ var (
 			Name:      "time_tick_delay",
 			Help:      "The max time tick delay of flow graphs",
 		}, []string{
-			roleNameLabelName,
 			nodeIDLabelName,
 		})
 )
