@@ -865,6 +865,10 @@ type queryNodeConfig struct {
 	MaxGroupNQ           int64
 	TopKMergeRatio       float64
 	CPURatio             float64
+
+	GCHelperEnabled   bool
+	MinimumGOGCConfig int
+	MaximumGOGCConfig int
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -893,6 +897,10 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 	p.initEnableDisk()
 	p.initDiskCapacity()
 	p.initMaxDiskUsagePercentage()
+
+	p.initGCTunerEnbaled()
+	p.initMaximumGOGC()
+	p.initMinimumGOGC()
 }
 
 // InitAlias initializes an alias for the QueryNode role.
@@ -1051,6 +1059,18 @@ func (p *queryNodeConfig) initDiskCapacity() {
 		panic(err)
 	}
 	p.DiskCapacityLimit = diskSize * 1024 * 1024 * 1024
+}
+
+func (p *queryNodeConfig) initGCTunerEnbaled() {
+	p.GCHelperEnabled = p.Base.ParseBool("queryNode.gchelper.enabled", true)
+}
+
+func (p *queryNodeConfig) initMinimumGOGC() {
+	p.MinimumGOGCConfig = p.Base.ParseIntWithDefault("queryNode.gchelper.minimumGoGC", 30)
+}
+
+func (p *queryNodeConfig) initMaximumGOGC() {
+	p.MaximumGOGCConfig = p.Base.ParseIntWithDefault("queryNode.gchelper.maximumGoGC", 200)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
