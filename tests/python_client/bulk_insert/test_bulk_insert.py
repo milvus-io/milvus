@@ -72,9 +72,9 @@ class TestcaseBaseBulkInsert(TestcaseBase):
             "minio_bucket_name"
         ]
 
-    def teardown_method(self, method):
-        log.info(("*" * 35) + " teardown " + ("*" * 35))
-        log.info("[teardown_method] Start teardown test case %s..." % method.__name__)
+    # def teardown_method(self, method):
+    #     log.info(("*" * 35) + " teardown " + ("*" * 35))
+    #     log.info("[teardown_method] Start teardown test case %s..." % method.__name__)
 
 
 class TestBulkInsert(TestcaseBaseBulkInsert):

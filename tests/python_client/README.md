@@ -73,7 +73,7 @@ $ kind export logs .
 
 ### PyMilvus Test Environment Deployment and Case Execution
 
-We recommend using Python 3 (3.6 or higher), consistent with the version supported by PyMilvus.
+We recommend using Python 3 (3.8 or higher), consistent with the version supported by PyMilvus.
 
 > Note: Procedures listed below will be completed automatically if you deployed Milvus using KinD.
 
