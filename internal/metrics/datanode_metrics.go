@@ -171,6 +171,15 @@ var (
 			Name:      "consume_counter",
 			Help:      "",
 		}, []string{nodeIDLabelName, msgTypeLabelName})
+
+	DataNodeSendDeltaChannelTimeTaken = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataNodeRole,
+			Name:      "send_delta_channel_time_taken_ms",
+			Help:      "send delta channel time take",
+			Buckets:   buckets, // unit: ms
+		}, []string{nodeIDLabelName})
 )
 
 //RegisterDataNode registers DataNode metrics
@@ -189,4 +198,5 @@ func RegisterDataNode(registry *prometheus.Registry) {
 	registry.MustRegister(DataNodeCompactionLatency)
 	registry.MustRegister(DataNodeFlushReqCounter)
 	registry.MustRegister(DataNodeConsumeCounter)
+	registry.MustRegister(DataNodeSendDeltaChannelTimeTaken)
 }

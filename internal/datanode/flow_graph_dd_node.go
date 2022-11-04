@@ -23,6 +23,8 @@ import (
 	"strconv"
 	"sync/atomic"
 
+	"github.com/milvus-io/milvus/internal/util/timerecord"
+
 	"github.com/golang/protobuf/proto"
 	"github.com/opentracing/opentracing-go"
 	"go.uber.org/zap"
@@ -78,6 +80,8 @@ type ddNode struct {
 	growingSegInfo    map[UniqueID]*datapb.SegmentInfo // segmentID
 	sealedSegInfo     map[UniqueID]*datapb.SegmentInfo // segmentID
 	droppedSegmentIDs []int64
+
+	deleteMsgBuffer []msgstream.TsMsg
 }
 
 // Name returns node name, implementing flowgraph.Node
@@ -128,7 +132,6 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 		dropCollection: false,
 	}
 
-	var forwardMsgs []msgstream.TsMsg
 	for _, msg := range msMsg.TsMessages() {
 		switch msg.Type() {
 		case commonpb.MsgType_DropCollection:
@@ -187,7 +190,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 			for i := int64(0); i < dmsg.NumRows; i++ {
 				dmsg.HashValues = append(dmsg.HashValues, uint32(0))
 			}
-			forwardMsgs = append(forwardMsgs, dmsg)
+			ddn.deleteMsgBuffer = append(ddn.deleteMsgBuffer, dmsg)
 			if dmsg.CollectionID != ddn.collectionID {
 				log.Warn("filter invalid DeleteMsg, collection mis-match",
 					zap.Int64("Get collID", dmsg.CollectionID),
@@ -197,16 +200,11 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 			rateCol.Add(metricsinfo.DeleteConsumeThroughput, float64(proto.Size(&dmsg.DeleteRequest)))
 			metrics.DataNodeConsumeCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.DeleteLabel).Add(float64(proto.Size(&dmsg.DeleteRequest)))
 			fgMsg.deleteMessages = append(fgMsg.deleteMessages, dmsg)
-		}
-	}
-	err := retry.Do(ddn.ctx, func() error {
-		return ddn.forwardDeleteMsg(forwardMsgs, msMsg.TimestampMin(), msMsg.TimestampMax())
-	}, getFlowGraphRetryOpt())
-	if err != nil {
-		err = fmt.Errorf("DDNode forward delete msg failed, vChannel = %s, err = %s", ddn.vChannelName, err)
-		log.Error(err.Error())
-		if !common.IsIgnorableError(err) {
-			panic(err)
+		case commonpb.MsgType_TimeTick:
+			ttMsg := msg.(*msgstream.TimeTickMsg)
+			// due to time tick will be received pre 200ms, so all data of the buffer
+			// will forward.
+			ddn.forwardDeleteMsg(ttMsg.EndTs())
 		}
 	}
 
@@ -261,21 +259,44 @@ func (ddn *ddNode) isDropped(segID UniqueID) bool {
 	return false
 }
 
-func (ddn *ddNode) forwardDeleteMsg(msgs []msgstream.TsMsg, minTs Timestamp, maxTs Timestamp) error {
-	if len(msgs) != 0 {
-		var msgPack = msgstream.MsgPack{
-			Msgs:    msgs,
-			BeginTs: minTs,
-			EndTs:   maxTs,
+func (ddn *ddNode) forwardDeleteMsg(maxTs Timestamp) {
+	tr := timerecord.NewTimeRecorder("forwardDeleteMsg")
+
+	err := retry.Do(ddn.ctx, func() error {
+		if len(ddn.deleteMsgBuffer) != 0 {
+			minTs := ddn.deleteMsgBuffer[0].BeginTs()
+			var msgPack = msgstream.MsgPack{
+				Msgs:    ddn.deleteMsgBuffer,
+				BeginTs: minTs,
+				EndTs:   maxTs,
+			}
+
+			// TODO msgstream support batch produce
+			if err := ddn.deltaMsgStream.Produce(&msgPack); err != nil {
+				return err
+			}
 		}
-		if err := ddn.deltaMsgStream.Produce(&msgPack); err != nil {
+
+		if err := ddn.sendDeltaTimeTick(maxTs); err != nil {
 			return err
 		}
+
+		return nil
+	}, getFlowGraphRetryOpt())
+
+	if err != nil {
+		err = fmt.Errorf("DDNode forward delete msg failed, vChannel = %s, err = %s", ddn.vChannelName, err)
+		log.Error(err.Error())
+		if !common.IsIgnorableError(err) {
+			panic(err)
+		}
 	}
-	if err := ddn.sendDeltaTimeTick(maxTs); err != nil {
-		return err
-	}
-	return nil
+
+	// reset buffer
+	ddn.deleteMsgBuffer = make([]msgstream.TsMsg, 0)
+	metrics.DataNodeSendDeltaChannelTimeTaken.
+		WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).
+		Observe(float64(tr.ElapseSpan().Milliseconds()))
 }
 
 func (ddn *ddNode) sendDeltaTimeTick(ts Timestamp) error {
@@ -357,6 +378,7 @@ func newDDNode(ctx context.Context, collID UniqueID, vChannelName string, droppe
 		vChannelName:       vChannelName,
 		deltaMsgStream:     deltaMsgStream,
 		compactionExecutor: compactor,
+		deleteMsgBuffer:    make([]msgstream.TsMsg, 0),
 	}
 
 	dd.dropMode.Store(false)

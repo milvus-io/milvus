@@ -19,6 +19,7 @@ package datanode
 import (
 	"context"
 	"fmt"
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -283,11 +284,29 @@ func TestFlowGraph_DDNode_Operate(t *testing.T) {
 						CollectionID: test.inMsgCollID,
 					},
 				}
-				tsMessages := []msgstream.TsMsg{dMsg}
+
+				timeTickMsg := &msgstream.TimeTickMsg{
+					BaseMsg: msgstream.BaseMsg{
+						BeginTimestamp: Timestamp(0),
+						EndTimestamp:   Timestamp(0),
+						HashValues:     []uint32{0},
+					},
+					TimeTickMsg: internalpb.TimeTickMsg{
+						Base: &commonpb.MsgBase{
+							MsgType:   commonpb.MsgType_TimeTick,
+							MsgID:     UniqueID(0),
+							Timestamp: math.MaxUint64,
+							SourceID:  0,
+						},
+					},
+				}
+
+				tsMessages := []msgstream.TsMsg{dMsg, timeTickMsg}
 				var msgStreamMsg Msg = flowgraph.GenerateMsgStreamMsg(tsMessages, 0, 0, nil, nil)
 
 				// Test
 				rt := ddn.Operate([]Msg{msgStreamMsg})
+				assert.Equal(t, 0, len(ddn.deleteMsgBuffer))
 				assert.Equal(t, test.expectedRtLen, len(rt[0].(*flowGraphMsg).deleteMessages))
 			})
 		}
@@ -316,7 +335,23 @@ func TestFlowGraph_DDNode_Operate(t *testing.T) {
 				CollectionID: 1,
 			},
 		}
-		tsMessages := []msgstream.TsMsg{dMsg}
+		timeTickMsg := &msgstream.TimeTickMsg{
+			BaseMsg: msgstream.BaseMsg{
+				BeginTimestamp: Timestamp(0),
+				EndTimestamp:   Timestamp(0),
+				HashValues:     []uint32{0},
+			},
+			TimeTickMsg: internalpb.TimeTickMsg{
+				Base: &commonpb.MsgBase{
+					MsgType:   commonpb.MsgType_TimeTick,
+					MsgID:     UniqueID(0),
+					Timestamp: math.MaxUint64,
+					SourceID:  0,
+				},
+			},
+		}
+
+		tsMessages := []msgstream.TsMsg{dMsg, timeTickMsg}
 		var msgStreamMsg Msg = flowgraph.GenerateMsgStreamMsg(tsMessages, 0, 0, nil, nil)
 
 		// Test
