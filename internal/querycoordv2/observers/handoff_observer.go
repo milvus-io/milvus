@@ -122,6 +122,10 @@ func (ob *HandoffObserver) Unregister(ctx context.Context, collectionIDs ...int6
 			delete(ob.handoffEvents, segmentID)
 		}
 	}
+
+	for _, event := range ob.handoffEvents {
+		ob.cleanEvent(ctx, event.Segment)
+	}
 }
 
 func (ob *HandoffObserver) StartHandoff(collectionIDs ...int64) {

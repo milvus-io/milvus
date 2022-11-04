@@ -679,6 +679,7 @@ type queryCoordConfig struct {
 	LoadTimeoutSeconds                  time.Duration
 	CheckHandoffInterval                time.Duration
 	EnableActiveStandby                 bool
+	RefreshTargetsIntervalSeconds       time.Duration
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -703,6 +704,7 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 	p.initLoadTimeoutSeconds()
 	p.initCheckHandoffInterval()
 	p.initEnableActiveStandby()
+	p.initRefreshTargetsIntervalSeconds()
 }
 
 func (p *queryCoordConfig) initTaskRetryNum() {
@@ -820,6 +822,15 @@ func (p *queryCoordConfig) initCheckHandoffInterval() {
 		panic(err)
 	}
 	p.CheckHandoffInterval = time.Duration(checkHandoffInterval) * time.Millisecond
+}
+
+func (p *queryCoordConfig) initRefreshTargetsIntervalSeconds() {
+	interval := p.Base.LoadWithDefault("queryCoord.refreshTargetsIntervalSeconds", "300")
+	refreshInterval, err := strconv.ParseInt(interval, 10, 64)
+	if err != nil {
+		panic(err)
+	}
+	p.RefreshTargetsIntervalSeconds = time.Duration(refreshInterval) * time.Second
 }
 
 // /////////////////////////////////////////////////////////////////////////////
