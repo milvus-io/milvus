@@ -16,6 +16,7 @@ pipeline {
         timestamps()
         timeout(time: 36, unit: 'MINUTES')
         // parallelsAlwaysFailFast()
+        disableConcurrentBuilds()
     }
 
     environment {
