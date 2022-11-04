@@ -41,7 +41,8 @@ jobs:
         uses: actions/checkout@v2
       - name: "Generate CCache Hash"
         env:
-          CORE_HASH: ${{ hashFiles( 'internal/core/**/*.cpp', 'internal/core/**/*.cc', 'internal/core/**/*.c', 'internal/core/**/*.h', 'internal/core/**/*.hpp', 'internal/core/**/CMakeLists.txt') }}
+          CORE_HASH: ${{ hashFiles( '**/*.cpp', '**/*.cc', '**/*.c', '**/*.h', '**/*.hpp', '**/CMakeLists.txt') }}
+          # CORE_HASH: ${{ hashFiles( 'internal/core/**/*.cpp', 'internal/core/**/*.cc', 'internal/core/**/*.c', 'internal/core/**/*.h', 'internal/core/**/*.hpp', 'internal/core/**/CMakeLists.txt') }}
         run: |
           echo "corehash=${CORE_HASH}" >> $GITHUB_ENV
           echo "Set CCache hash to ${CORE_HASH}"
@@ -79,7 +80,8 @@ jobs:
         uses: actions/checkout@v2
       - name: "Generate CCache Hash"
         env:
-          CORE_HASH: ${{ hashFiles( 'internal/core/**/*.cpp', 'internal/core/**/*.cc', 'internal/core/**/*.c', 'internal/core/**/*.h', 'internal/core/**/*.hpp', 'internal/core/**/CMakeLists.txt') }}
+          CORE_HASH: ${{ hashFiles( '**/*.cpp', '**/*.cc', '**/*.c', '**/*.h', '**/*.hpp', '**/CMakeLists.txt') }}
+          # CORE_HASH: ${{ hashFiles( 'internal/core/**/*.cpp', 'internal/core/**/*.cc', 'internal/core/**/*.c', 'internal/core/**/*.h', 'internal/core/**/*.hpp', 'internal/core/**/CMakeLists.txt') }}
         run: |
           echo "corehash=${CORE_HASH}" >> $GITHUB_ENV
           echo "Set CCache hash to ${CORE_HASH}"
@@ -123,6 +125,13 @@ jobs:
           git config --global core.eol lf
       - name: Checkout
         uses: actions/checkout@v2
+      - name: "Generate CCache Hash"
+        env:
+          CORE_HASH: ${{ hashFiles( '**/*.cpp', '**/*.cc', '**/*.c', '**/*.h', '**/*.hpp', '**/CMakeLists.txt') }}
+          # CORE_HASH: ${{ hashFiles( 'internal/core/**/*.cpp', 'internal/core/**/*.cc', 'internal/core/**/*.c', 'internal/core/**/*.h', 'internal/core/**/*.hpp', 'internal/core/**/CMakeLists.txt') }}
+        run: |
+          echo "corehash=${CORE_HASH}" >> $GITHUB_ENV
+          echo "Set CCache hash to ${CORE_HASH}"
       - name: Cache go
         uses: actions/cache@v3
         with:
@@ -136,7 +145,8 @@ jobs:
         with:
           path: |
             ${{ github.workspace }}/.ccache
-          key: ${{ runner.os }}-ccache-${{ hashFiles('internal/core/**') }}
+          # key: ${{ runner.os }}-ccache-${{ hashFiles('internal/core/**') }}
+          key: ${{ runner.os }}-ccache-${{ env.corehash }}          
           restore-keys: ${{ runner.os }}-ccache-
       - name: Configure Toolchain
         uses: msys2/setup-msys2@v2.12.0
