@@ -360,6 +360,7 @@ func (suite *ServerSuite) hackServer() {
 		suite.server.meta,
 		suite.server.dist,
 		suite.server.targetMgr,
+		suite.server.broker,
 	)
 	suite.server.distController = dist.NewDistController(
 		suite.server.cluster,
