@@ -18,6 +18,7 @@ package observers
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 
@@ -64,33 +65,40 @@ type HandoffObserver struct {
 	meta     *meta.Meta
 	dist     *meta.DistributionManager
 	target   *meta.TargetManager
+	broker   meta.Broker
 	revision int64
 
 	collectionStatus map[int64]CollectionHandoffStatus
 	handoffEventLock sync.RWMutex
 	handoffEvents    map[int64]*HandoffEvent
-	// partition id -> queue
+	// collection id -> queue
 	handoffSubmitOrders map[int64]queue
+	// collectionId -> loaded partitionId, only for load collection case
+	loadedPartitions map[int64]typeutil.UniqueSet
 
 	stopOnce sync.Once
 }
 
-func NewHandoffObserver(store meta.Store, meta *meta.Meta, dist *meta.DistributionManager, target *meta.TargetManager) *HandoffObserver {
+func NewHandoffObserver(store meta.Store, meta *meta.Meta, dist *meta.DistributionManager, target *meta.TargetManager, broker meta.Broker) *HandoffObserver {
 	return &HandoffObserver{
 		store:               store,
 		c:                   make(chan struct{}),
 		meta:                meta,
 		dist:                dist,
 		target:              target,
+		broker:              broker,
 		collectionStatus:    map[int64]CollectionHandoffStatus{},
 		handoffEvents:       map[int64]*HandoffEvent{},
 		handoffSubmitOrders: map[int64]queue{},
+		loadedPartitions:    map[int64]typeutil.Set[int64]{},
 	}
 }
 
 func (ob *HandoffObserver) Register(collectionIDs ...int64) {
 	ob.handoffEventLock.Lock()
 	defer ob.handoffEventLock.Unlock()
+	log.Info("Register handoff for collection",
+		zap.Int64s("collectionIDs", collectionIDs))
 
 	for _, collectionID := range collectionIDs {
 		ob.collectionStatus[collectionID] = CollectionHandoffStatusRegistered
@@ -100,9 +108,19 @@ func (ob *HandoffObserver) Register(collectionIDs ...int64) {
 func (ob *HandoffObserver) Unregister(ctx context.Context, collectionIDs ...int64) {
 	ob.handoffEventLock.Lock()
 	defer ob.handoffEventLock.Unlock()
+	log.Info("Unregister handoff for collection",
+		zap.Int64s("collectionIDs", collectionIDs))
 
 	for _, collectionID := range collectionIDs {
 		delete(ob.collectionStatus, collectionID)
+		delete(ob.handoffSubmitOrders, collectionID)
+	}
+
+	collectionSet := typeutil.NewUniqueSet(collectionIDs...)
+	for segmentID, event := range ob.handoffEvents {
+		if collectionSet.Contain(event.Segment.GetCollectionID()) {
+			delete(ob.handoffEvents, segmentID)
+		}
 	}
 }
 
@@ -113,6 +131,13 @@ func (ob *HandoffObserver) StartHandoff(collectionIDs ...int64) {
 	for _, collectionID := range collectionIDs {
 		ob.collectionStatus[collectionID] = CollectionHandoffStatusStarted
 	}
+}
+
+func (ob *HandoffObserver) GetEventNum() int {
+	ob.handoffEventLock.Lock()
+	defer ob.handoffEventLock.Unlock()
+
+	return len(ob.handoffEvents)
 }
 
 func (ob *HandoffObserver) consumeOutdatedHandoffEvent(ctx context.Context) error {
@@ -231,18 +256,19 @@ func (ob *HandoffObserver) tryHandoff(ctx context.Context, segment *querypb.Segm
 	)
 
 	log.Info("try handoff segment...")
-	status, ok := ob.collectionStatus[segment.GetCollectionID()]
+	status, collectionRegistered := ob.collectionStatus[segment.GetCollectionID()]
 	if Params.QueryCoordCfg.AutoHandoff &&
-		ok &&
+		collectionRegistered &&
+		ob.checkLoadStatus(segment) &&
 		(segment.GetIsFake() || ob.meta.CollectionManager.ContainAnyIndex(segment.GetCollectionID(), indexIDs...)) {
 		event := ob.handoffEvents[segment.SegmentID]
 		if event == nil {
 			// record submit order
-			_, ok := ob.handoffSubmitOrders[segment.GetPartitionID()]
+			_, ok := ob.handoffSubmitOrders[segment.GetCollectionID()]
 			if !ok {
-				ob.handoffSubmitOrders[segment.GetPartitionID()] = make([]int64, 0)
+				ob.handoffSubmitOrders[segment.GetCollectionID()] = make([]int64, 0)
 			}
-			ob.handoffSubmitOrders[segment.GetPartitionID()] = append(ob.handoffSubmitOrders[segment.GetPartitionID()], segment.GetSegmentID())
+			ob.handoffSubmitOrders[segment.GetCollectionID()] = append(ob.handoffSubmitOrders[segment.GetCollectionID()], segment.GetSegmentID())
 		}
 
 		if status == CollectionHandoffStatusRegistered {
@@ -270,6 +296,48 @@ func (ob *HandoffObserver) tryHandoff(ctx context.Context, segment *querypb.Segm
 		log.Info("handoff event trigger failed due to collection/partition is not loaded!")
 		ob.cleanEvent(ctx, segment)
 	}
+}
+
+func (ob *HandoffObserver) checkLoadStatus(segment *querypb.SegmentInfo) bool {
+	if ob.meta.GetCollection(segment.GetCollectionID()) != nil {
+		// if collection is loaded, should check whether the partition has been droped!
+		if ob.loadedPartitions[segment.GetCollectionID()] == nil {
+			ob.loadedPartitions[segment.GetCollectionID()] = typeutil.NewUniqueSet()
+		}
+
+		// should updated loaded partitions when meet new partitionID
+		if !ob.loadedPartitions[segment.GetCollectionID()].Contain(segment.GetPartitionID()) {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			err := retry.Do(ctx, func() error {
+				partitionIDs, err := ob.broker.GetPartitions(ctx, segment.GetCollectionID())
+				if err == nil {
+					ob.loadedPartitions[segment.GetCollectionID()].Insert(partitionIDs...)
+					return nil
+				}
+				return err
+			}, retry.Attempts(5))
+
+			if err != nil {
+				// collection has been dropped or released
+				if strings.Contains(err.Error(), "CollectionNotExists") ||
+					ob.meta.GetCollection(segment.GetCollectionID()) == nil {
+					return false
+				}
+				// collection not released , but can get partition list to check handoff
+				log.Warn("handoff check load status failed due to get partitions failed",
+					zap.Int64("collectionID", segment.GetCollectionID()),
+					zap.Int64("partitionID", segment.GetPartitionID()),
+					zap.String("channel", segment.GetDmChannel()),
+					zap.Int64("segmentID", segment.GetSegmentID()))
+				return false
+			}
+		}
+
+		return ob.loadedPartitions[segment.GetCollectionID()].Contain(segment.GetPartitionID())
+	}
+
+	return ob.meta.GetPartition(segment.GetPartitionID()) != nil
 }
 
 func (ob *HandoffObserver) handoff(segment *querypb.SegmentInfo) {
@@ -378,7 +446,7 @@ func (ob *HandoffObserver) tryClean(ctx context.Context) {
 	ob.handoffEventLock.Lock()
 	defer ob.handoffEventLock.Unlock()
 
-	for partitionID, partitionSubmitOrder := range ob.handoffSubmitOrders {
+	for collectionID, partitionSubmitOrder := range ob.handoffSubmitOrders {
 		pos := 0
 		for _, segmentID := range partitionSubmitOrder {
 			event, ok := ob.handoffEvents[segmentID]
@@ -403,7 +471,7 @@ func (ob *HandoffObserver) tryClean(ctx context.Context) {
 				break
 			}
 		}
-		ob.handoffSubmitOrders[partitionID] = partitionSubmitOrder[pos:]
+		ob.handoffSubmitOrders[collectionID] = partitionSubmitOrder[pos:]
 	}
 }
 
