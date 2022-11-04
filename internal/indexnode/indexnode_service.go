@@ -1,3 +1,19 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package indexnode
 
 import (
@@ -136,7 +152,7 @@ func (i *IndexNode) QueryJobs(ctx context.Context, req *indexpb.QueryJobsRequest
 			ret.IndexInfos[i].IndexFileKeys = info.fileKeys
 			ret.IndexInfos[i].SerializedSize = info.serializedSize
 			ret.IndexInfos[i].FailReason = info.failReason
-			log.Ctx(ctx).Debug("querying index build task", zap.String("ClusterID", req.ClusterID),
+			log.RatedDebug(5, "querying index build task", zap.String("ClusterID", req.ClusterID),
 				zap.Int64("IndexBuildID", buildID), zap.String("state", info.state.String()),
 				zap.String("fail reason", info.failReason))
 		}
@@ -145,7 +161,7 @@ func (i *IndexNode) QueryJobs(ctx context.Context, req *indexpb.QueryJobsRequest
 }
 
 func (i *IndexNode) DropJobs(ctx context.Context, req *indexpb.DropJobsRequest) (*commonpb.Status, error) {
-	log.Ctx(ctx).Debug("drop index build jobs", zap.String("ClusterID", req.ClusterID), zap.Int64s("IndexBuildIDs", req.BuildIDs))
+	log.Ctx(ctx).Info("drop index build jobs", zap.String("ClusterID", req.ClusterID), zap.Int64s("IndexBuildIDs", req.BuildIDs))
 	stateCode := i.stateCode.Load().(commonpb.StateCode)
 	if stateCode != commonpb.StateCode_Healthy {
 		log.Ctx(ctx).Warn("index node not ready", zap.Int32("state", int32(stateCode)), zap.String("ClusterID", req.ClusterID))
@@ -164,7 +180,7 @@ func (i *IndexNode) DropJobs(ctx context.Context, req *indexpb.DropJobsRequest) 
 			info.cancel()
 		}
 	}
-	log.Ctx(ctx).Debug("drop index build jobs success", zap.String("ClusterID", req.ClusterID),
+	log.Ctx(ctx).Info("drop index build jobs success", zap.String("ClusterID", req.ClusterID),
 		zap.Int64s("IndexBuildIDs", req.BuildIDs))
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
