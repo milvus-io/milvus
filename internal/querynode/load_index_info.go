@@ -27,12 +27,13 @@ import "C"
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
+	"unsafe"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/indexparams"
 	"go.uber.org/zap"
-	"path/filepath"
-	"unsafe"
 
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"

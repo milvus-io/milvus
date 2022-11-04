@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/hardware"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -58,7 +59,7 @@ func getSystemInfoMetrics(
 	// TODO(dragondriver): add more metrics
 	nodeInfos := metricsinfo.IndexNodeInfos{
 		BaseComponentInfos: metricsinfo.BaseComponentInfos{
-			Name: metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, Params.IndexNodeCfg.GetNodeID()),
+			Name: metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, paramtable.GetNodeID()),
 			HardwareInfos: metricsinfo.HardwareMetrics{
 				IP:           node.session.Address,
 				CPUCoreCount: hardware.GetCPUNum(),
@@ -90,7 +91,7 @@ func getSystemInfoMetrics(
 				Reason:    err.Error(),
 			},
 			Response:      "",
-			ComponentName: metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, Params.IndexNodeCfg.GetNodeID()),
+			ComponentName: metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, paramtable.GetNodeID()),
 		}, nil
 	}
 
@@ -100,6 +101,6 @@ func getSystemInfoMetrics(
 			Reason:    "",
 		},
 		Response:      resp,
-		ComponentName: metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, Params.IndexNodeCfg.GetNodeID()),
+		ComponentName: metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, paramtable.GetNodeID()),
 	}, nil
 }

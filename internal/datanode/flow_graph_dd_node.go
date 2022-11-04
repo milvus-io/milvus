@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
@@ -171,7 +172,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 			}
 
 			rateCol.Add(metricsinfo.InsertConsumeThroughput, float64(proto.Size(&imsg.InsertRequest)))
-			metrics.DataNodeConsumeCounter.WithLabelValues(strconv.FormatInt(Params.DataNodeCfg.GetNodeID(), 10), metrics.InsertLabel).Add(float64(proto.Size(&imsg.InsertRequest)))
+			metrics.DataNodeConsumeCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.InsertLabel).Add(float64(proto.Size(&imsg.InsertRequest)))
 
 			log.Debug("DDNode receive insert messages",
 				zap.Int("numRows", len(imsg.GetRowIDs())),
@@ -194,7 +195,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 				continue
 			}
 			rateCol.Add(metricsinfo.DeleteConsumeThroughput, float64(proto.Size(&dmsg.DeleteRequest)))
-			metrics.DataNodeConsumeCounter.WithLabelValues(strconv.FormatInt(Params.DataNodeCfg.GetNodeID(), 10), metrics.DeleteLabel).Add(float64(proto.Size(&dmsg.DeleteRequest)))
+			metrics.DataNodeConsumeCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.DeleteLabel).Add(float64(proto.Size(&dmsg.DeleteRequest)))
 			fgMsg.deleteMessages = append(fgMsg.deleteMessages, dmsg)
 		}
 	}
@@ -289,7 +290,7 @@ func (ddn *ddNode) sendDeltaTimeTick(ts Timestamp) error {
 			commonpbutil.WithMsgType(commonpb.MsgType_TimeTick),
 			commonpbutil.WithMsgID(0),
 			commonpbutil.WithTimeStamp(ts),
-			commonpbutil.WithSourceID(Params.DataNodeCfg.GetNodeID()),
+			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
 	}
 	timeTickMsg := &msgstream.TimeTickMsg{
@@ -341,7 +342,7 @@ func newDDNode(ctx context.Context, collID UniqueID, vChannelName string, droppe
 	}
 	deltaStream.SetRepackFunc(msgstream.DefaultRepackFunc)
 	deltaStream.AsProducer([]string{deltaChannelName})
-	metrics.DataNodeNumProducers.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID())).Inc()
+	metrics.DataNodeNumProducers.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Inc()
 	log.Info("datanode AsProducer", zap.String("DeltaChannelName", deltaChannelName))
 	var deltaMsgStream msgstream.MsgStream = deltaStream
 	deltaMsgStream.Start()

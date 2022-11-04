@@ -39,8 +39,8 @@ func (converter *BytesConverter) add(p unsafe.Pointer) int32 {
 // Call Release(lease) after you don't need the returned []byte
 func (converter *BytesConverter) UnsafeGoBytes(cbytes *unsafe.Pointer, len int) (int32, []byte) {
 	var (
-		goBytes []byte = nil
-		lease   int32  = 0
+		goBytes []byte
+		lease   int32
 	)
 
 	if len > maxByteArrayLen {

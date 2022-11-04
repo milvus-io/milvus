@@ -608,13 +608,11 @@ func TestValidateUsername(t *testing.T) {
 	res = ValidateUsername("a1^7*).,")
 	assert.Error(t, res)
 	// normal username that only contains alphabet, _, and number
-	Params.InitOnce()
 	res = ValidateUsername("a17_good")
 	assert.Nil(t, res)
 }
 
 func TestValidatePassword(t *testing.T) {
-	Params.InitOnce()
 	// only spaces
 	res := ValidatePassword("")
 	assert.NotNil(t, res)
@@ -636,7 +634,6 @@ func TestReplaceID2Name(t *testing.T) {
 }
 
 func TestValidateName(t *testing.T) {
-	Params.InitOnce()
 	nameType := "Test"
 	validNames := []string{
 		"abc",
@@ -779,7 +776,6 @@ func TestPasswordVerify(t *testing.T) {
 }
 
 func TestValidateTravelTimestamp(t *testing.T) {
-	Params.Init()
 	originalRetentionDuration := Params.CommonCfg.RetentionDuration
 	defer func() {
 		Params.CommonCfg.RetentionDuration = originalRetentionDuration

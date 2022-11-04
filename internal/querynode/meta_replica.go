@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/concurrency"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/samber/lo"
 )
@@ -209,7 +210,7 @@ func (replica *metaReplica) addCollection(collectionID UniqueID, schema *schemap
 
 	var newC = newCollection(collectionID, schema)
 	replica.collections[collectionID] = newC
-	metrics.QueryNodeNumCollections.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(len(replica.collections)))
+	metrics.QueryNodeNumCollections.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(float64(len(replica.collections)))
 	return newC
 }
 
@@ -240,8 +241,8 @@ func (replica *metaReplica) removeCollectionPrivate(collectionID UniqueID) error
 	deleteCollection(collection)
 	delete(replica.collections, collectionID)
 
-	metrics.QueryNodeNumCollections.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(len(replica.collections)))
-	metrics.QueryNodeNumPartitions.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Sub(float64(len(collection.partitionIDs)))
+	metrics.QueryNodeNumCollections.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(float64(len(replica.collections)))
+	metrics.QueryNodeNumPartitions.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Sub(float64(len(collection.partitionIDs)))
 	return nil
 }
 
@@ -417,7 +418,7 @@ func (replica *metaReplica) addPartitionPrivate(collection *Collection, partitio
 		collection.addPartitionID(partitionID)
 		var newPartition = newPartition(collection.ID(), partitionID)
 		replica.partitions[partitionID] = newPartition
-		metrics.QueryNodeNumPartitions.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(len(replica.partitions)))
+		metrics.QueryNodeNumPartitions.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(float64(len(replica.partitions)))
 	}
 	return nil
 }
@@ -468,7 +469,7 @@ func (replica *metaReplica) removePartitionPrivate(partitionID UniqueID) error {
 	collection.removePartitionID(partitionID)
 	delete(replica.partitions, partitionID)
 
-	metrics.QueryNodeNumPartitions.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(len(replica.partitions)))
+	metrics.QueryNodeNumPartitions.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(float64(len(replica.partitions)))
 	return nil
 }
 
@@ -611,10 +612,10 @@ func (replica *metaReplica) addSegmentPrivate(segmentID UniqueID, partitionID Un
 		return fmt.Errorf("unexpected segment type, segmentID = %d, segmentType = %s", segmentID, segType.String())
 	}
 
-	metrics.QueryNodeNumSegments.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Inc()
+	metrics.QueryNodeNumSegments.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Inc()
 	rowCount := segment.getRowCount()
 	if rowCount > 0 {
-		metrics.QueryNodeNumEntities.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Add(float64(rowCount))
+		metrics.QueryNodeNumEntities.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Add(float64(rowCount))
 	}
 	return nil
 }
@@ -689,9 +690,9 @@ func (replica *metaReplica) removeSegmentPrivate(segmentID UniqueID, segType seg
 		panic(fmt.Sprintf("unsupported segment type %s", segType.String()))
 	}
 
-	metrics.QueryNodeNumSegments.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Dec()
+	metrics.QueryNodeNumSegments.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Dec()
 	if rowCount > 0 {
-		metrics.QueryNodeNumEntities.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Sub(float64(rowCount))
+		metrics.QueryNodeNumEntities.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Sub(float64(rowCount))
 	}
 }
 
@@ -905,7 +906,7 @@ func (replica *metaReplica) getSegmentInfo(segment *Segment) *querypb.SegmentInf
 		SegmentID:    segment.ID(),
 		CollectionID: segment.collectionID,
 		PartitionID:  segment.partitionID,
-		NodeID:       Params.QueryNodeCfg.GetNodeID(),
+		NodeID:       paramtable.GetNodeID(),
 		MemSize:      segment.getMemSize(),
 		NumRows:      segment.getRowCount(),
 		IndexName:    indexName,
@@ -913,7 +914,7 @@ func (replica *metaReplica) getSegmentInfo(segment *Segment) *querypb.SegmentInf
 		DmChannel:    segment.vChannelID,
 		SegmentState: segment.getType(),
 		IndexInfos:   indexInfos,
-		NodeIds:      []UniqueID{Params.QueryNodeCfg.GetNodeID()},
+		NodeIds:      []UniqueID{paramtable.GetNodeID()},
 	}
 	return info
 }

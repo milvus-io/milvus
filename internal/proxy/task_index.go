@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/indexparams"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -152,7 +153,7 @@ func (cit *createIndexTask) parseIndexParams() error {
 			return fmt.Errorf("IndexType not specified")
 		}
 		if indexType == indexparamcheck.IndexDISKANN {
-			err := indexparams.FillDiskIndexParams(&Params, indexParamsMap)
+			err := indexparams.FillDiskIndexParams(Params, indexParamsMap)
 			if err != nil {
 				return err
 			}
@@ -264,7 +265,7 @@ func checkTrain(field *schemapb.FieldSchema, indexParams map[string]string) erro
 
 func (cit *createIndexTask) PreExecute(ctx context.Context) error {
 	cit.req.Base.MsgType = commonpb.MsgType_CreateIndex
-	cit.req.Base.SourceID = Params.ProxyCfg.GetNodeID()
+	cit.req.Base.SourceID = paramtable.GetNodeID()
 
 	collName := cit.req.GetCollectionName()
 
@@ -382,7 +383,7 @@ func (dit *describeIndexTask) OnEnqueue() error {
 
 func (dit *describeIndexTask) PreExecute(ctx context.Context) error {
 	dit.Base.MsgType = commonpb.MsgType_DescribeIndex
-	dit.Base.SourceID = Params.ProxyCfg.GetNodeID()
+	dit.Base.SourceID = paramtable.GetNodeID()
 
 	if err := validateCollectionName(dit.CollectionName); err != nil {
 		return err
@@ -496,7 +497,7 @@ func (dit *dropIndexTask) OnEnqueue() error {
 
 func (dit *dropIndexTask) PreExecute(ctx context.Context) error {
 	dit.Base.MsgType = commonpb.MsgType_DropIndex
-	dit.Base.SourceID = Params.ProxyCfg.GetNodeID()
+	dit.Base.SourceID = paramtable.GetNodeID()
 
 	collName, fieldName := dit.CollectionName, dit.FieldName
 
@@ -601,7 +602,7 @@ func (gibpt *getIndexBuildProgressTask) OnEnqueue() error {
 
 func (gibpt *getIndexBuildProgressTask) PreExecute(ctx context.Context) error {
 	gibpt.Base.MsgType = commonpb.MsgType_GetIndexBuildProgress
-	gibpt.Base.SourceID = Params.ProxyCfg.GetNodeID()
+	gibpt.Base.SourceID = paramtable.GetNodeID()
 
 	if err := validateCollectionName(gibpt.CollectionName); err != nil {
 		return err
@@ -694,7 +695,7 @@ func (gist *getIndexStateTask) OnEnqueue() error {
 
 func (gist *getIndexStateTask) PreExecute(ctx context.Context) error {
 	gist.Base.MsgType = commonpb.MsgType_GetIndexState
-	gist.Base.SourceID = Params.ProxyCfg.GetNodeID()
+	gist.Base.SourceID = paramtable.GetNodeID()
 
 	if err := validateCollectionName(gist.CollectionName); err != nil {
 		return err

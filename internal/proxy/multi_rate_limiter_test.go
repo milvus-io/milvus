@@ -26,7 +26,6 @@ import (
 )
 
 func TestMultiRateLimiter(t *testing.T) {
-	Params.Init()
 	t.Run("test multiRateLimiter", func(t *testing.T) {
 		bak := Params.QuotaConfig.QuotaAndLimitsEnabled
 		Params.QuotaConfig.QuotaAndLimitsEnabled = true
@@ -79,7 +78,6 @@ func TestMultiRateLimiter(t *testing.T) {
 }
 
 func TestRateLimiter(t *testing.T) {
-	Params.Init()
 	t.Run("test limit", func(t *testing.T) {
 		limiter := newRateLimiter()
 		limiter.registerLimiters()

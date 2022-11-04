@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/trace"
 )
@@ -43,7 +44,7 @@ func (i *IndexNode) CreateJob(ctx context.Context, req *indexpb.CreateJobRequest
 	defer sp.Finish()
 	sp.SetTag("IndexBuildID", strconv.FormatInt(req.BuildID, 10))
 	sp.SetTag("ClusterID", req.ClusterID)
-	metrics.IndexNodeBuildIndexTaskCounter.WithLabelValues(strconv.FormatInt(Params.IndexNodeCfg.GetNodeID(), 10), metrics.TotalLabel).Inc()
+	metrics.IndexNodeBuildIndexTaskCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.TotalLabel).Inc()
 
 	taskCtx, taskCancel := context.WithCancel(i.loopCtx)
 	if oldInfo := i.loadOrStoreTask(req.ClusterID, req.BuildID, &taskInfo{
@@ -86,7 +87,7 @@ func (i *IndexNode) CreateJob(ctx context.Context, req *indexpb.CreateJobRequest
 		log.Ctx(ctx).Warn("IndexNode failed to schedule", zap.Int64("IndexBuildID", req.BuildID), zap.String("ClusterID", req.ClusterID), zap.Error(err))
 		ret.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		ret.Reason = err.Error()
-		metrics.IndexNodeBuildIndexTaskCounter.WithLabelValues(strconv.FormatInt(Params.IndexNodeCfg.GetNodeID(), 10), metrics.FailLabel).Inc()
+		metrics.IndexNodeBuildIndexTaskCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.FailLabel).Inc()
 		return ret, nil
 	}
 	log.Ctx(ctx).Info("IndexNode successfully scheduled", zap.Int64("IndexBuildID", req.BuildID), zap.String("ClusterID", req.ClusterID), zap.String("indexName", req.IndexName))
@@ -213,14 +214,14 @@ func (i *IndexNode) GetJobStats(ctx context.Context, req *indexpb.GetJobStatsReq
 func (i *IndexNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	if !i.isHealthy() {
 		log.Ctx(ctx).Warn("IndexNode.GetMetrics failed",
-			zap.Int64("node_id", Params.IndexNodeCfg.GetNodeID()),
+			zap.Int64("node_id", paramtable.GetNodeID()),
 			zap.String("req", req.Request),
-			zap.Error(errIndexNodeIsUnhealthy(Params.IndexNodeCfg.GetNodeID())))
+			zap.Error(errIndexNodeIsUnhealthy(paramtable.GetNodeID())))
 
 		return &milvuspb.GetMetricsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    msgIndexNodeIsUnhealthy(Params.IndexNodeCfg.GetNodeID()),
+				Reason:    msgIndexNodeIsUnhealthy(paramtable.GetNodeID()),
 			},
 			Response: "",
 		}, nil
@@ -229,7 +230,7 @@ func (i *IndexNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequ
 	metricType, err := metricsinfo.ParseMetricType(req.Request)
 	if err != nil {
 		log.Ctx(ctx).Warn("IndexNode.GetMetrics failed to parse metric type",
-			zap.Int64("node_id", Params.IndexNodeCfg.GetNodeID()),
+			zap.Int64("node_id", paramtable.GetNodeID()),
 			zap.String("req", req.Request),
 			zap.Error(err))
 
@@ -246,7 +247,7 @@ func (i *IndexNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequ
 		metrics, err := getSystemInfoMetrics(ctx, req, i)
 
 		log.Ctx(ctx).Debug("IndexNode.GetMetrics",
-			zap.Int64("node_id", Params.IndexNodeCfg.GetNodeID()),
+			zap.Int64("node_id", paramtable.GetNodeID()),
 			zap.String("req", req.Request),
 			zap.String("metric_type", metricType),
 			zap.Error(err))
@@ -255,7 +256,7 @@ func (i *IndexNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequ
 	}
 
 	log.Ctx(ctx).Warn("IndexNode.GetMetrics failed, request metric type is not implemented yet",
-		zap.Int64("node_id", Params.IndexNodeCfg.GetNodeID()),
+		zap.Int64("node_id", paramtable.GetNodeID()),
 		zap.String("req", req.Request),
 		zap.String("metric_type", metricType))
 

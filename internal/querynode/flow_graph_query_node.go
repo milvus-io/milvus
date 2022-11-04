@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 )
 
@@ -213,7 +214,7 @@ func (q *queryNodeFlowGraph) consumeFlowGraph(channel Channel, subName ConsumeSu
 		zap.String("subName", subName),
 	)
 	q.consumerCnt++
-	metrics.QueryNodeNumConsumers.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Inc()
+	metrics.QueryNodeNumConsumers.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Inc()
 	return nil
 }
 
@@ -230,7 +231,7 @@ func (q *queryNodeFlowGraph) consumeFlowGraphFromLatest(channel Channel, subName
 		zap.String("subName", subName),
 	)
 	q.consumerCnt++
-	metrics.QueryNodeNumConsumers.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Inc()
+	metrics.QueryNodeNumConsumers.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Inc()
 	return nil
 }
 
@@ -251,7 +252,7 @@ func (q *queryNodeFlowGraph) consumeFlowGraphFromPosition(position *internalpb.M
 		zap.Duration("elapse", time.Since(start)),
 	)
 	q.consumerCnt++
-	metrics.QueryNodeNumConsumers.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Inc()
+	metrics.QueryNodeNumConsumers.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Inc()
 	return err
 }
 
@@ -260,7 +261,7 @@ func (q *queryNodeFlowGraph) close() {
 	q.cancel()
 	q.flowGraph.Close()
 	if q.dmlStream != nil && q.consumerCnt > 0 {
-		metrics.QueryNodeNumConsumers.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Sub(float64(q.consumerCnt))
+		metrics.QueryNodeNumConsumers.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Sub(float64(q.consumerCnt))
 	}
 	log.Info("stop query node flow graph",
 		zap.Int64("collectionID", q.collectionID),

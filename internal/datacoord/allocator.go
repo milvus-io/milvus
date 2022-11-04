@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
 
 // allocator is the interface that allocating `UniqueID` or `Timestamp`
@@ -54,7 +55,7 @@ func (alloc *rootCoordAllocator) allocTimestamp(ctx context.Context) (Timestamp,
 			commonpbutil.WithMsgType(commonpb.MsgType_RequestTSO),
 			commonpbutil.WithMsgID(0),
 			commonpbutil.WithTimeStamp(0),
-			commonpbutil.WithSourceID(Params.DataCoordCfg.GetNodeID()),
+			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
 		Count: 1,
 	})
@@ -71,7 +72,7 @@ func (alloc *rootCoordAllocator) allocID(ctx context.Context) (UniqueID, error) 
 			commonpbutil.WithMsgType(commonpb.MsgType_RequestID),
 			commonpbutil.WithMsgID(0),
 			commonpbutil.WithTimeStamp(0),
-			commonpbutil.WithSourceID(Params.DataCoordCfg.GetNodeID()),
+			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
 		Count: 1,
 	})

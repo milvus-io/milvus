@@ -27,6 +27,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -34,7 +35,6 @@ import (
 )
 
 func TestEtcdShardNodeDetector_watch(t *testing.T) {
-
 	client := v3client.New(embedetcdServer.Server)
 	defer client.Close()
 
@@ -268,6 +268,7 @@ func TestEtcdShardNodeDetector_watch(t *testing.T) {
 			replicaID:    1,
 		},
 	}
+	paramtable.SetNodeID(0)
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			suffix := funcutil.RandomString(6)

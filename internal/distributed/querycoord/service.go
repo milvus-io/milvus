@@ -18,6 +18,7 @@ package grpcquerycoord
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"strconv"
@@ -111,10 +112,6 @@ func (s *Server) Run() error {
 func (s *Server) init() error {
 	Params.InitOnce(typeutil.QueryCoordRole)
 
-	qc.Params.InitOnce()
-	qc.Params.QueryCoordCfg.Address = Params.GetAddress()
-	qc.Params.QueryCoordCfg.Port = Params.Port
-
 	closer := trace.InitTracing("querycoord")
 	s.closer = closer
 
@@ -125,6 +122,7 @@ func (s *Server) init() error {
 	}
 	s.etcdCli = etcdCli
 	s.SetEtcdClient(etcdCli)
+	s.queryCoord.SetAddress(fmt.Sprintf("%s:%d", Params.IP, Params.Port))
 
 	s.wg.Add(1)
 	go s.startGrpcLoop(Params.Port)

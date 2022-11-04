@@ -229,9 +229,6 @@ func (s *Server) init() error {
 		Params.Port = funcutil.GetAvailablePort()
 		log.Warn("DataNode found available port during init", zap.Int("port", Params.Port))
 	}
-	dn.Params.InitOnce()
-	dn.Params.DataNodeCfg.Port = Params.Port
-	dn.Params.DataNodeCfg.IP = Params.IP
 
 	etcdCli, err := etcd.GetEtcdClient(&dn.Params.EtcdCfg)
 	if err != nil {
@@ -240,6 +237,7 @@ func (s *Server) init() error {
 	}
 	s.etcdCli = etcdCli
 	s.SetEtcdClient(s.etcdCli)
+	s.datanode.SetAddress(fmt.Sprintf("%s:%d", Params.IP, Params.Port))
 	closer := trace.InitTracing(fmt.Sprintf("DataNode IP: %s, port: %d", Params.IP, Params.Port))
 	s.closer = closer
 	log.Info("DataNode address", zap.String("address", Params.IP+":"+strconv.Itoa(Params.Port)))

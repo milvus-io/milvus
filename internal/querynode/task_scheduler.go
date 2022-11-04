@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
 
 const (
@@ -172,7 +173,7 @@ func (s *taskScheduler) tryEvictUnsolvedReadTask(headCount int) {
 	if diff <= 0 {
 		return
 	}
-	metrics.QueryNodeEvictedReadReqCount.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Add(float64(diff))
+	metrics.QueryNodeEvictedReadReqCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Add(float64(diff))
 	busyErr := fmt.Errorf("server is busy")
 	for e := s.unsolvedReadTasks.Front(); e != nil && diff > 0; e = next {
 		next = e.Next()
@@ -247,7 +248,7 @@ func (s *taskScheduler) AddReadTask(ctx context.Context, t readTask) error {
 
 func (s *taskScheduler) popAndAddToExecute() {
 	readConcurrency := atomic.LoadInt32(&s.readConcurrency)
-	metrics.QueryNodeReadTaskConcurrency.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(readConcurrency))
+	metrics.QueryNodeReadTaskConcurrency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(float64(readConcurrency))
 	if s.readyReadTasks.Len() == 0 {
 		return
 	}
@@ -255,7 +256,7 @@ func (s *taskScheduler) popAndAddToExecute() {
 	if curUsage < 0 {
 		curUsage = 0
 	}
-	metrics.QueryNodeEstimateCPUUsage.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(curUsage))
+	metrics.QueryNodeEstimateCPUUsage.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(float64(curUsage))
 	targetUsage := s.maxCPUUsage - curUsage
 	if targetUsage <= 0 {
 		return
@@ -298,7 +299,7 @@ func (s *taskScheduler) executeReadTasks() {
 	for {
 		select {
 		case <-s.ctx.Done():
-			log.Info("QueryNode stop executeReadTasks", zap.Int64("NodeID", Params.QueryNodeCfg.GetNodeID()))
+			log.Info("QueryNode stop executeReadTasks", zap.Int64("NodeID", paramtable.GetNodeID()))
 			return
 		case t, ok := <-s.executeReadTaskChan:
 			if ok {
@@ -390,6 +391,6 @@ func (s *taskScheduler) tryMergeReadTasks() {
 			rateCol.rtCounter.sub(t, unsolvedQueueType)
 		}
 	}
-	metrics.QueryNodeReadTaskUnsolveLen.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(s.unsolvedReadTasks.Len()))
-	metrics.QueryNodeReadTaskReadyLen.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(s.readyReadTasks.Len()))
+	metrics.QueryNodeReadTaskUnsolveLen.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(float64(s.unsolvedReadTasks.Len()))
+	metrics.QueryNodeReadTaskReadyLen.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(float64(s.readyReadTasks.Len()))
 }

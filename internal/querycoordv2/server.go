@@ -53,6 +53,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -60,7 +61,7 @@ import (
 
 var (
 	// Only for re-export
-	Params = &params.Params
+	Params = params.Params
 )
 
 type Server struct {
@@ -69,6 +70,7 @@ type Server struct {
 	wg                  sync.WaitGroup
 	status              atomic.Value
 	etcdCli             *clientv3.Client
+	address             string
 	session             *sessionutil.Session
 	kv                  kv.MetaKv
 	idAllocator         func() (int64, error)
@@ -147,17 +149,17 @@ func (s *Server) Register() error {
 func (s *Server) Init() error {
 	log.Info("QueryCoord start init",
 		zap.String("meta-root-path", Params.EtcdCfg.MetaRootPath),
-		zap.String("address", Params.QueryCoordCfg.Address))
+		zap.String("address", s.address))
 
 	// Init QueryCoord session
 	s.session = sessionutil.NewSession(s.ctx, Params.EtcdCfg.MetaRootPath, s.etcdCli)
 	if s.session == nil {
 		return fmt.Errorf("failed to create session")
 	}
-	s.session.Init(typeutil.QueryCoordRole, Params.QueryCoordCfg.Address, true, true)
+	s.session.Init(typeutil.QueryCoordRole, s.address, true, true)
 	s.enableActiveStandBy = Params.QueryCoordCfg.EnableActiveStandby
 	s.session.SetEnableActiveStandBy(s.enableActiveStandBy)
-	Params.QueryCoordCfg.SetNodeID(s.session.ServerID)
+	paramtable.SetNodeID(s.session.ServerID)
 	Params.SetLogger(s.session.ServerID)
 	s.factory.Init(Params)
 
@@ -441,6 +443,10 @@ func (s *Server) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringRespon
 		},
 		Value: Params.CommonCfg.QueryCoordTimeTick,
 	}, nil
+}
+
+func (s *Server) SetAddress(address string) {
+	s.address = address
 }
 
 // SetEtcdClient sets etcd's client

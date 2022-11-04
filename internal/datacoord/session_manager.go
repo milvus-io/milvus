@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"go.uber.org/zap"
 )
 
@@ -221,7 +222,7 @@ func (c *SessionManager) execReCollectSegmentStats(ctx context.Context, nodeID i
 	resp, err := cli.ResendSegmentStats(ctx, &datapb.ResendSegmentStatsRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_ResendSegmentStats),
-			commonpbutil.WithSourceID(Params.DataCoordCfg.GetNodeID()),
+			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
 	})
 	if err := VerifyResponse(resp, err); err != nil {
@@ -254,7 +255,7 @@ func (c *SessionManager) GetCompactionState() map[int64]*datapb.CompactionStateR
 			resp, err := cli.GetCompactionState(ctx, &datapb.CompactionStateRequest{
 				Base: commonpbutil.NewMsgBase(
 					commonpbutil.WithMsgType(commonpb.MsgType_GetSystemConfigs),
-					commonpbutil.WithSourceID(Params.DataCoordCfg.GetNodeID()),
+					commonpbutil.WithSourceID(paramtable.GetNodeID()),
 				),
 			})
 			if err != nil {

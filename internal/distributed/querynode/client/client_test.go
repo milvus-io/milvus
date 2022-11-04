@@ -23,12 +23,14 @@ import (
 
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/mock"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc"
 )
 
 func Test_NewClient(t *testing.T) {
+	paramtable.Init()
 	ClientParams.InitOnce(typeutil.QueryNodeRole)
 
 	ctx := context.Background()

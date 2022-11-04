@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/etcd"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -58,6 +59,9 @@ func (m *mockCore) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthReq
 	}, nil
 }
 func (m *mockCore) UpdateStateCode(commonpb.StateCode) {
+}
+
+func (m *mockCore) SetAddress(address string) {
 }
 
 func (m *mockCore) SetEtcdClient(etcdClient *clientv3.Client) {
@@ -148,6 +152,7 @@ func (m *mockQuery) Stop() error {
 }
 
 func TestRun(t *testing.T) {
+	paramtable.Init()
 	ctx, cancel := context.WithCancel(context.Background())
 	svr := Server{
 		rootCoord:   &mockCore{},

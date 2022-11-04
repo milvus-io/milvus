@@ -47,6 +47,7 @@ type Mock struct {
 	CallGetStatisticsChannel func(ctx context.Context) (*milvuspb.StringResponse, error)
 	CallRegister             func() error
 
+	CallSetAddress      func(address string)
 	CallSetEtcdClient   func(etcdClient *clientv3.Client)
 	CallSetDataCoord    func(dataCoord types.DataCoord) error
 	CallSetRootCoord    func(rootCoord types.RootCoord) error
@@ -81,6 +82,10 @@ func (m *Mock) Stop() error {
 // Register registers an IndexCoord role in ETCD, if Param `Failure` is true, it will return an error.
 func (m *Mock) Register() error {
 	return m.CallRegister()
+}
+
+func (m *Mock) SetAddress(address string) {
+	m.CallSetAddress(address)
 }
 
 func (m *Mock) SetEtcdClient(client *clientv3.Client) {
@@ -164,6 +169,8 @@ func NewIndexCoordMock() *Mock {
 		},
 		CallStop: func() error {
 			return nil
+		},
+		CallSetAddress: func(address string) {
 		},
 		CallSetEtcdClient: func(etcdClient *clientv3.Client) {
 		},

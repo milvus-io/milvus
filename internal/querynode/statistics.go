@@ -41,7 +41,7 @@ func statisticOnSegments(replica ReplicaInterface, segType segmentType, segIDs [
 				"row_count": count,
 			}
 			// update metrics
-			//metrics.QueryNodeSQSegmentLatency.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()),
+			//metrics.QueryNodeSQSegmentLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
 			//	metrics.SearchLabel,
 			//	metrics.SealedSegmentLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
 		}(segID, i)

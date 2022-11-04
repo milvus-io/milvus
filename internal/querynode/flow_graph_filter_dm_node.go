@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/trace"
 )
 
@@ -101,7 +102,7 @@ func (fdmNode *filterDmNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			if resMsg != nil {
 				iMsg.insertMessages = append(iMsg.insertMessages, resMsg)
 				rateCol.Add(metricsinfo.InsertConsumeThroughput, float64(proto.Size(&resMsg.InsertRequest)))
-				metrics.QueryNodeConsumeCounter.WithLabelValues(strconv.FormatInt(Params.QueryNodeCfg.GetNodeID(), 10), metrics.InsertLabel).Add(float64(proto.Size(&resMsg.InsertRequest)))
+				metrics.QueryNodeConsumeCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.InsertLabel).Add(float64(proto.Size(&resMsg.InsertRequest)))
 			}
 		case commonpb.MsgType_Delete:
 			resMsg, err := fdmNode.filterInvalidDeleteMessage(msg.(*msgstream.DeleteMsg), collection.getLoadType())
@@ -114,7 +115,7 @@ func (fdmNode *filterDmNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			if resMsg != nil {
 				iMsg.deleteMessages = append(iMsg.deleteMessages, resMsg)
 				rateCol.Add(metricsinfo.DeleteConsumeThroughput, float64(proto.Size(&resMsg.DeleteRequest)))
-				metrics.QueryNodeConsumeCounter.WithLabelValues(strconv.FormatInt(Params.QueryNodeCfg.GetNodeID(), 10), metrics.DeleteLabel).Add(float64(proto.Size(&resMsg.DeleteRequest)))
+				metrics.QueryNodeConsumeCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.DeleteLabel).Add(float64(proto.Size(&resMsg.DeleteRequest)))
 			}
 		default:
 			log.Warn("invalid message type in filterDmNode",

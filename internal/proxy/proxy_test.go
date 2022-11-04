@@ -100,7 +100,6 @@ func runRootCoord(ctx context.Context, localMsg bool) *grpcrootcoord.Server {
 
 	wg.Add(1)
 	go func() {
-		rootcoord.Params.InitOnce()
 		if !localMsg {
 			logutil.SetupLogger(&rootcoord.Params.Log)
 			defer log.Sync()
@@ -130,8 +129,6 @@ func runQueryCoord(ctx context.Context, localMsg bool) *grpcquerycoord.Server {
 
 	wg.Add(1)
 	go func() {
-		querycoord.Params.InitOnce()
-
 		if !localMsg {
 			logutil.SetupLogger(&querycoord.Params.Log)
 			defer log.Sync()
@@ -161,9 +158,6 @@ func runQueryNode(ctx context.Context, localMsg bool, alias string) *grpcqueryno
 
 	wg.Add(1)
 	go func() {
-		querynode.Params.QueryNodeCfg.InitAlias(alias)
-		querynode.Params.InitOnce()
-
 		if !localMsg {
 			logutil.SetupLogger(&querynode.Params.Log)
 			defer log.Sync()
@@ -193,8 +187,6 @@ func runDataCoord(ctx context.Context, localMsg bool) *grpcdatacoordclient.Serve
 
 	wg.Add(1)
 	go func() {
-		datacoord.Params.InitOnce()
-
 		if !localMsg {
 			logutil.SetupLogger(&datacoord.Params.Log)
 			defer log.Sync()
@@ -220,9 +212,6 @@ func runDataNode(ctx context.Context, localMsg bool, alias string) *grpcdatanode
 
 	wg.Add(1)
 	go func() {
-		datanode.Params.DataNodeCfg.InitAlias(alias)
-		datanode.Params.InitOnce()
-
 		if !localMsg {
 			logutil.SetupLogger(&datanode.Params.Log)
 			defer log.Sync()
@@ -252,8 +241,6 @@ func runIndexCoord(ctx context.Context, localMsg bool) *grpcindexcoord.Server {
 
 	wg.Add(1)
 	go func() {
-		indexcoord.Params.InitOnce()
-
 		if !localMsg {
 			logutil.SetupLogger(&indexcoord.Params.Log)
 			defer log.Sync()
@@ -283,9 +270,6 @@ func runIndexNode(ctx context.Context, localMsg bool, alias string) *grpcindexno
 
 	wg.Add(1)
 	go func() {
-		indexnode.Params.IndexNodeCfg.InitAlias(alias)
-		indexnode.Params.InitOnce()
-
 		if !localMsg {
 			logutil.SetupLogger(&indexnode.Params.Log)
 			defer log.Sync()
@@ -347,8 +331,7 @@ func (s *proxyTestServer) startGrpc(ctx context.Context, wg *sync.WaitGroup) {
 
 	var p paramtable.GrpcServerConfig
 	p.InitOnce(typeutil.ProxyRole)
-	Params.InitOnce()
-	Params.ProxyCfg.NetworkAddress = p.GetAddress()
+	s.Proxy.SetAddress(p.GetAddress())
 
 	var kaep = keepalive.EnforcementPolicy{
 		MinTime:             5 * time.Second, // If a client pings more than once every 5 seconds, terminate the connection
@@ -416,6 +399,7 @@ func (s *proxyTestServer) gracefulStop() {
 func TestProxy(t *testing.T) {
 	var err error
 	var wg sync.WaitGroup
+	paramtable.Init()
 
 	path := "/tmp/milvus/rocksmq" + funcutil.GenRandomStr()
 	t.Setenv("ROCKSMQ_PATH", path)
@@ -427,7 +411,6 @@ func TestProxy(t *testing.T) {
 	factory := dependency.NewDefaultFactory(localMsg)
 	alias := "TestProxy"
 
-	Params.InitOnce()
 	log.Info("Initialize parameter table of Proxy")
 
 	rc := runRootCoord(ctx, localMsg)
@@ -580,7 +563,7 @@ func TestProxy(t *testing.T) {
 		states, err := proxy.GetComponentStates(ctx)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, states.Status.ErrorCode)
-		assert.Equal(t, Params.ProxyCfg.GetNodeID(), states.State.NodeID)
+		assert.Equal(t, paramtable.GetNodeID(), states.State.NodeID)
 		assert.Equal(t, typeutil.ProxyRole, states.State.Role)
 		assert.Equal(t, proxy.stateCode.Load().(commonpb.StateCode), states.State.StateCode)
 	})

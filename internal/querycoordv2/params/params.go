@@ -26,7 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
 
-var Params paramtable.ComponentParam
+var Params *paramtable.ComponentParam = paramtable.Get()
 
 var (
 	ErrFailedAllocateID = errors.New("failed to allocate ID")

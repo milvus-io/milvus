@@ -123,6 +123,9 @@ func (m *MockQueryNode) SyncReplicaSegments(ctx context.Context, req *querypb.Sy
 	return m.status, m.err
 }
 
+func (m *MockQueryNode) SetAddress(address string) {
+}
+
 func (m *MockQueryNode) SetEtcdClient(client *clientv3.Client) {
 }
 

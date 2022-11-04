@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 
@@ -1276,7 +1277,7 @@ func TestRootcoord_EnableActiveStandby(t *testing.T) {
 			MsgType:   commonpb.MsgType_DescribeCollection,
 			MsgID:     0,
 			Timestamp: 0,
-			SourceID:  Params.ProxyCfg.GetNodeID(),
+			SourceID:  paramtable.GetNodeID(),
 		},
 		CollectionName: "unexist"})
 	assert.NoError(t, err)

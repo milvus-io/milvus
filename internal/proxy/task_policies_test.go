@@ -57,7 +57,6 @@ func TestUpdateShardsWithRoundRobin(t *testing.T) {
 func TestGroupShardLeadersWithSameQueryNode(t *testing.T) {
 	var err error
 
-	Params.Init()
 	var (
 		ctx = context.TODO()
 	)
@@ -121,7 +120,6 @@ func TestGroupShardLeadersWithSameQueryNode(t *testing.T) {
 func TestMergeRoundRobinPolicy(t *testing.T) {
 	var err error
 
-	Params.Init()
 	var (
 		ctx = context.TODO()
 	)

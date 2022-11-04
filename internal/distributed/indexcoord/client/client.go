@@ -39,7 +39,7 @@ import (
 
 var ClientParams paramtable.GrpcClientConfig
 
-var Params paramtable.ComponentParam
+var Params *paramtable.ComponentParam = paramtable.Get()
 
 // Client is the grpc client of IndexCoord.
 type Client struct {
@@ -250,7 +250,7 @@ func (c *Client) ShowConfigurations(ctx context.Context, req *internalpb.ShowCon
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(Params.IndexCoordCfg.GetNodeID(), commonpbutil.WithTargetID(c.sess.ServerID)),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.sess.ServerID)),
 	)
 	ret, err := c.grpcClient.ReCall(ctx, func(client indexpb.IndexCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
@@ -270,7 +270,7 @@ func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(Params.IndexCoordCfg.GetNodeID(), commonpbutil.WithTargetID(c.sess.ServerID)),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.sess.ServerID)),
 	)
 	ret, err := c.grpcClient.ReCall(ctx, func(client indexpb.IndexCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {

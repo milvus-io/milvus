@@ -28,10 +28,12 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 func TestIndexCoordinateServer(t *testing.T) {
+	paramtable.Init()
 	ctx := context.Background()
 	factory := dependency.NewDefaultFactory(true)
 	server, err := NewServer(ctx, factory)

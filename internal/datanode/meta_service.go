@@ -23,6 +23,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
@@ -63,7 +64,7 @@ func (mService *metaService) getCollectionInfo(ctx context.Context, collID Uniqu
 			commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection),
 			commonpbutil.WithMsgID(0),     //GOOSE TODO
 			commonpbutil.WithTimeStamp(0), //GOOSE TODO
-			commonpbutil.WithSourceID(Params.DataNodeCfg.GetNodeID()),
+			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
 		DbName:       "default", // GOOSE TODO
 		CollectionID: collID,

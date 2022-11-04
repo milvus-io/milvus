@@ -18,6 +18,7 @@ package grpcindexcoord
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"strconv"
@@ -93,10 +94,6 @@ func (s *Server) Run() error {
 func (s *Server) init() error {
 	Params.InitOnce(typeutil.IndexCoordRole)
 
-	indexcoord.Params.InitOnce()
-	indexcoord.Params.IndexCoordCfg.Address = Params.GetAddress()
-	indexcoord.Params.IndexCoordCfg.Port = Params.Port
-
 	closer := trace.InitTracing("IndexCoord")
 	s.closer = closer
 
@@ -107,9 +104,10 @@ func (s *Server) init() error {
 	}
 	s.etcdCli = etcdCli
 	s.indexcoord.SetEtcdClient(s.etcdCli)
+	s.indexcoord.SetAddress(fmt.Sprintf("%s:%d", Params.IP, Params.Port))
 
 	s.loopWg.Add(1)
-	go s.startGrpcLoop(indexcoord.Params.IndexCoordCfg.Port)
+	go s.startGrpcLoop(Params.Port)
 	// wait for grpc IndexCoord loop start
 	if err := <-s.grpcErrChan; err != nil {
 		log.Error("IndexCoord", zap.Any("init error", err))

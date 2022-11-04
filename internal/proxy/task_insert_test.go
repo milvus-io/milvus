@@ -59,7 +59,7 @@ func TestInsertTask_checkLengthOfFieldsData(t *testing.T) {
 	// 		Base: &commonpb.MsgBase{
 	// 			MsgType:  commonpb.MsgType_Insert,
 	// 			MsgID:    0,
-	// 			SourceID: Params.ProxyCfg.GetNodeID(),
+	// 			SourceID: paramtable.GetNodeID(),
 	// 		},
 	// 	},
 	// }

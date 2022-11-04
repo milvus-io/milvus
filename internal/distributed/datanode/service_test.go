@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -78,6 +79,9 @@ func (m *MockDataNode) UpdateStateCode(code commonpb.StateCode) {
 
 func (m *MockDataNode) GetStateCode() commonpb.StateCode {
 	return m.stateCode
+}
+
+func (m *MockDataNode) SetAddress(address string) {
 }
 
 func (m *MockDataNode) SetRootCoord(rc types.RootCoord) error {
@@ -201,6 +205,7 @@ func (m *mockRootCoord) Stop() error {
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 func Test_NewServer(t *testing.T) {
+	paramtable.Init()
 	ctx := context.Background()
 	server, err := NewServer(ctx, nil)
 	assert.Nil(t, err)

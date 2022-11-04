@@ -24,7 +24,7 @@ func (m *chunkMgr) NewChunkManager(ctx context.Context, config *indexpb.StorageC
 		return v.(storage.ChunkManager), nil
 	}
 
-	chunkManagerFactory := storage.NewChunkManagerFactoryWithParam(&Params)
+	chunkManagerFactory := storage.NewChunkManagerFactoryWithParam(Params)
 	mgr, err := chunkManagerFactory.NewPersistentStorageChunkManager(ctx)
 	if err != nil {
 		return nil, err

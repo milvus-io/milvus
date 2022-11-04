@@ -31,6 +31,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/util/concurrency"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/types"
@@ -46,7 +47,7 @@ type queryCoordMock struct {
 
 func setup() {
 	os.Setenv("QUERY_NODE_ID", "1")
-	Params.Init()
+	paramtable.Init()
 	Params.EtcdCfg.MetaRootPath = "/etcd/test/root/querynode"
 }
 
@@ -239,7 +240,7 @@ func TestQueryNode_adjustByChangeInfo(t *testing.T) {
 		node.metaReplica.removeSegment(defaultSegmentID, segmentTypeSealed)
 		segmentChangeInfos := genSimpleChangeInfo()
 		segmentChangeInfos.Infos[0].OnlineSegments = nil
-		segmentChangeInfos.Infos[0].OfflineNodeID = Params.QueryNodeCfg.GetNodeID()
+		segmentChangeInfos.Infos[0].OfflineNodeID = paramtable.GetNodeID()
 
 		/*
 			qc, err := node.queryService.getQueryCollection(defaultCollectionID)

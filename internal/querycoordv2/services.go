@@ -23,6 +23,7 @@ import (
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/util/errorutil"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 
 	"golang.org/x/sync/errgroup"
 
@@ -561,7 +562,7 @@ func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 	resp := &milvuspb.GetMetricsResponse{
 		Status: successStatus,
 		ComponentName: metricsinfo.ConstructComponentName(typeutil.QueryCoordRole,
-			Params.QueryCoordCfg.GetNodeID()),
+			paramtable.GetNodeID()),
 	}
 
 	metricType, err := metricsinfo.ParseMetricType(req.GetRequest())

@@ -40,10 +40,8 @@ import (
 	"google.golang.org/grpc"
 )
 
-var Params paramtable.BaseTable
-
 func TestConnectionManager(t *testing.T) {
-	Params.Init()
+	paramtable.Init()
 	ctx := context.Background()
 
 	session := initSession(ctx)
@@ -270,17 +268,18 @@ type testIndexNode struct {
 }
 
 func initSession(ctx context.Context) *sessionutil.Session {
-	rootPath, err := Params.Load("etcd.rootPath")
+	baseTable := paramtable.Get().BaseTable
+	rootPath, err := baseTable.Load("etcd.rootPath")
 	if err != nil {
 		panic(err)
 	}
-	subPath, err := Params.Load("etcd.metaSubPath")
+	subPath, err := baseTable.Load("etcd.metaSubPath")
 	if err != nil {
 		panic(err)
 	}
 	metaRootPath := rootPath + "/" + subPath
 
-	endpoints := Params.LoadWithDefault("etcd.endpoints", paramtable.DefaultEtcdEndpoints)
+	endpoints := baseTable.LoadWithDefault("etcd.endpoints", paramtable.DefaultEtcdEndpoints)
 	etcdEndpoints := strings.Split(endpoints, ",")
 
 	log.Debug("metaRootPath", zap.Any("metaRootPath", metaRootPath))

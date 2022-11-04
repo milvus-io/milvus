@@ -76,9 +76,7 @@ type Timestamp = typeutil.Timestamp
 
 const InvalidCollectionID = UniqueID(0)
 
-// ------------------ struct -----------------------
-
-var Params paramtable.ComponentParam
+var Params *paramtable.ComponentParam = paramtable.Get()
 
 type Opt func(*Core)
 
@@ -96,6 +94,7 @@ type Core struct {
 	cancel           context.CancelFunc
 	wg               sync.WaitGroup
 	etcdCli          *clientv3.Client
+	address          string
 	meta             IMetaTable
 	scheduler        IScheduler
 	broker           Broker
@@ -317,6 +316,10 @@ func (c *Core) Register() error {
 	return nil
 }
 
+func (c *Core) SetAddress(address string) {
+	c.address = address
+}
+
 // SetEtcdClient sets the etcdCli of Core
 func (c *Core) SetEtcdClient(etcdClient *clientv3.Client) {
 	c.etcdCli = etcdClient
@@ -327,7 +330,7 @@ func (c *Core) initSession() error {
 	if c.session == nil {
 		return fmt.Errorf("session is nil, the etcd client connection may have failed")
 	}
-	c.session.Init(typeutil.RootCoordRole, Params.RootCoordCfg.Address, true, true)
+	c.session.Init(typeutil.RootCoordRole, c.address, true, true)
 	c.session.SetEnableActiveStandBy(c.enableActiveStandBy)
 	Params.SetLogger(c.session.ServerID)
 	return nil
@@ -446,7 +449,7 @@ func (c *Core) initInternal() error {
 
 	c.scheduler = newScheduler(c.ctx, c.idAllocator, c.tsoAllocator)
 
-	c.factory.Init(&Params)
+	c.factory.Init(Params)
 
 	chanMap := c.meta.ListCollectionPhysicalChannels()
 	c.chanTimeTick = newTimeTickSync(c.ctx, c.session.ServerID, c.factory, chanMap)

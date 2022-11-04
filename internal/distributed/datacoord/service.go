@@ -19,6 +19,7 @@ package grpcdatacoord
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"strconv"
@@ -87,11 +88,6 @@ func (s *Server) init() error {
 	closer := trace.InitTracing("datacoord")
 	s.closer = closer
 
-	datacoord.Params.InitOnce()
-	datacoord.Params.DataCoordCfg.IP = Params.IP
-	datacoord.Params.DataCoordCfg.Port = Params.Port
-	datacoord.Params.DataCoordCfg.Address = Params.GetAddress()
-
 	etcdCli, err := etcd.GetEtcdClient(&datacoord.Params.EtcdCfg)
 	if err != nil {
 		log.Debug("DataCoord connect to etcd failed", zap.Error(err))
@@ -99,6 +95,7 @@ func (s *Server) init() error {
 	}
 	s.etcdCli = etcdCli
 	s.dataCoord.SetEtcdClient(etcdCli)
+	s.dataCoord.SetAddress(fmt.Sprintf("%s:%d", Params.IP, Params.Port))
 
 	if s.indexCoord == nil {
 		var err error

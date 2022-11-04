@@ -60,7 +60,7 @@ type Timestamp = typeutil.Timestamp
 // make sure Proxy implements types.Proxy
 var _ types.Proxy = (*Proxy)(nil)
 
-var Params paramtable.ComponentParam
+var Params *paramtable.ComponentParam = paramtable.Get()
 
 // rateCol is global rateCollector in Proxy.
 var rateCol *ratelimitutil.RateCollector
@@ -78,6 +78,7 @@ type Proxy struct {
 	stateCode atomic.Value
 
 	etcdCli    *clientv3.Client
+	address    string
 	rootCoord  types.RootCoord
 	indexCoord types.IndexCoord
 	dataCoord  types.DataCoord
@@ -152,8 +153,8 @@ func (node *Proxy) initSession() error {
 	if node.session == nil {
 		return errors.New("new session failed, maybe etcd cannot be connected")
 	}
-	node.session.Init(typeutil.ProxyRole, Params.ProxyCfg.NetworkAddress, false, true)
-	Params.ProxyCfg.SetNodeID(node.session.ServerID)
+	node.session.Init(typeutil.ProxyRole, node.address, false, true)
+	paramtable.SetNodeID(node.session.ServerID)
 	Params.SetLogger(node.session.ServerID)
 	return nil
 }
@@ -183,48 +184,48 @@ func (node *Proxy) Init() error {
 	}
 	log.Info("init session for Proxy done")
 
-	node.factory.Init(&Params)
+	node.factory.Init(Params)
 	log.Debug("init parameters for factory", zap.String("role", typeutil.ProxyRole), zap.Any("parameters", Params.ServiceParam))
 
 	err := node.initRateCollector()
 	if err != nil {
 		return err
 	}
-	log.Info("Proxy init rateCollector done", zap.Int64("nodeID", Params.ProxyCfg.GetNodeID()))
+	log.Info("Proxy init rateCollector done", zap.Int64("nodeID", paramtable.GetNodeID()))
 
-	log.Debug("create id allocator", zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", Params.ProxyCfg.GetNodeID()))
-	idAllocator, err := allocator.NewIDAllocator(node.ctx, node.rootCoord, Params.ProxyCfg.GetNodeID())
+	log.Debug("create id allocator", zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", paramtable.GetNodeID()))
+	idAllocator, err := allocator.NewIDAllocator(node.ctx, node.rootCoord, paramtable.GetNodeID())
 	if err != nil {
 		log.Warn("failed to create id allocator",
 			zap.Error(err),
-			zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", Params.ProxyCfg.GetNodeID()))
+			zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", paramtable.GetNodeID()))
 		return err
 	}
 	node.rowIDAllocator = idAllocator
-	log.Debug("create id allocator done", zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", Params.ProxyCfg.GetNodeID()))
+	log.Debug("create id allocator done", zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", paramtable.GetNodeID()))
 
-	log.Debug("create timestamp allocator", zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", Params.ProxyCfg.GetNodeID()))
-	tsoAllocator, err := newTimestampAllocator(node.ctx, node.rootCoord, Params.ProxyCfg.GetNodeID())
+	log.Debug("create timestamp allocator", zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", paramtable.GetNodeID()))
+	tsoAllocator, err := newTimestampAllocator(node.ctx, node.rootCoord, paramtable.GetNodeID())
 	if err != nil {
 		log.Warn("failed to create timestamp allocator",
 			zap.Error(err),
-			zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", Params.ProxyCfg.GetNodeID()))
+			zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", paramtable.GetNodeID()))
 		return err
 	}
 	node.tsoAllocator = tsoAllocator
-	log.Debug("create timestamp allocator done", zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", Params.ProxyCfg.GetNodeID()))
+	log.Debug("create timestamp allocator done", zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", paramtable.GetNodeID()))
 
-	log.Debug("create segment id assigner", zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", Params.ProxyCfg.GetNodeID()))
+	log.Debug("create segment id assigner", zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", paramtable.GetNodeID()))
 	segAssigner, err := newSegIDAssigner(node.ctx, node.dataCoord, node.lastTick)
 	if err != nil {
 		log.Warn("failed to create segment id assigner",
 			zap.Error(err),
-			zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", Params.ProxyCfg.GetNodeID()))
+			zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", paramtable.GetNodeID()))
 		return err
 	}
 	node.segAssigner = segAssigner
-	node.segAssigner.PeerID = Params.ProxyCfg.GetNodeID()
-	log.Debug("create segment id assigner done", zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", Params.ProxyCfg.GetNodeID()))
+	node.segAssigner.PeerID = paramtable.GetNodeID()
+	log.Debug("create segment id assigner done", zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", paramtable.GetNodeID()))
 
 	log.Debug("create channels manager", zap.String("role", typeutil.ProxyRole))
 	dmlChannelsFunc := getDmlChannelsFunc(node.ctx, node.rootCoord)
@@ -291,7 +292,7 @@ func (node *Proxy) sendChannelsTimeTickLoop() {
 				maxTs := ts
 				for channel, ts := range stats {
 					physicalTs, _ := tsoutil.ParseHybridTs(ts)
-					metrics.ProxySyncTimeTick.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), channel).Set(float64(physicalTs))
+					metrics.ProxySyncTimeTick.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), channel).Set(float64(physicalTs))
 					channels = append(channels, channel)
 					tss = append(tss, ts)
 					if ts > maxTs {
@@ -311,7 +312,7 @@ func (node *Proxy) sendChannelsTimeTickLoop() {
 					DefaultTimestamp: maxTs,
 				}
 				maxPhysicalTs, _ := tsoutil.ParseHybridTs(maxTs)
-				metrics.ProxySyncTimeTick.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), "default").Set(float64(maxPhysicalTs))
+				metrics.ProxySyncTimeTick.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "default").Set(float64(maxPhysicalTs))
 				status, err := node.rootCoord.UpdateChannelTimeTick(node.ctx, req)
 				if err != nil {
 					log.Warn("sendChannelsTimeTickLoop.UpdateChannelTimeTick", zap.Error(err))
@@ -437,6 +438,10 @@ func (node *Proxy) lastTick() Timestamp {
 // AddCloseCallback adds a callback in the Close phase.
 func (node *Proxy) AddCloseCallback(callbacks ...func()) {
 	node.closeCallbacks = append(node.closeCallbacks, callbacks...)
+}
+
+func (node *Proxy) SetAddress(address string) {
+	node.address = address
 }
 
 // SetEtcdClient sets etcd client for proxy.

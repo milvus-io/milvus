@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/hardware"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/internal/util/uniquegenerator"
 )
@@ -153,7 +154,7 @@ func (s *Server) getSystemInfoMetrics(
 	clusterTopology := metricsinfo.QueryClusterTopology{
 		Self: metricsinfo.QueryCoordInfos{
 			BaseComponentInfos: metricsinfo.BaseComponentInfos{
-				Name: metricsinfo.ConstructComponentName(typeutil.QueryCoordRole, Params.QueryCoordCfg.GetNodeID()),
+				Name: metricsinfo.ConstructComponentName(typeutil.QueryCoordRole, paramtable.GetNodeID()),
 				HardwareInfos: metricsinfo.HardwareMetrics{
 					IP:           s.session.Address,
 					CPUCoreCount: hardware.GetCPUNum(),
@@ -183,7 +184,7 @@ func (s *Server) getSystemInfoMetrics(
 	coordTopology := metricsinfo.QueryCoordTopology{
 		Cluster: clusterTopology,
 		Connections: metricsinfo.ConnTopology{
-			Name: metricsinfo.ConstructComponentName(typeutil.QueryCoordRole, Params.QueryCoordCfg.GetNodeID()),
+			Name: metricsinfo.ConstructComponentName(typeutil.QueryCoordRole, paramtable.GetNodeID()),
 			// TODO(dragondriver): fill ConnectedComponents if necessary
 			ConnectedComponents: []metricsinfo.ConnectionInfo{},
 		},

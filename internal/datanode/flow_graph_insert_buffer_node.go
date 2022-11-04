@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
@@ -411,11 +412,11 @@ func (ibNode *insertBufferNode) Sync(fgMsg *flowGraphMsg, seg2Upload []UniqueID,
 			return nil
 		}, getFlowGraphRetryOpt())
 		if err != nil {
-			metrics.DataNodeFlushBufferCount.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID()), metrics.FailLabel).Inc()
-			metrics.DataNodeFlushBufferCount.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID()), metrics.TotalLabel).Inc()
+			metrics.DataNodeFlushBufferCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.FailLabel).Inc()
+			metrics.DataNodeFlushBufferCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.TotalLabel).Inc()
 			if task.auto {
-				metrics.DataNodeAutoFlushBufferCount.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID()), metrics.FailLabel).Inc()
-				metrics.DataNodeAutoFlushBufferCount.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID()), metrics.TotalLabel).Inc()
+				metrics.DataNodeAutoFlushBufferCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.FailLabel).Inc()
+				metrics.DataNodeAutoFlushBufferCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.TotalLabel).Inc()
 			}
 			err = fmt.Errorf("insertBufferNode flushBufferData failed, err = %s", err)
 			log.Error(err.Error())
@@ -424,11 +425,11 @@ func (ibNode *insertBufferNode) Sync(fgMsg *flowGraphMsg, seg2Upload []UniqueID,
 		segmentsToSync = append(segmentsToSync, task.segmentID)
 		ibNode.insertBuffer.Delete(task.segmentID)
 		ibNode.channel.RollPKstats(task.segmentID, pkStats)
-		metrics.DataNodeFlushBufferCount.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID()), metrics.SuccessLabel).Inc()
-		metrics.DataNodeFlushBufferCount.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID()), metrics.TotalLabel).Inc()
+		metrics.DataNodeFlushBufferCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SuccessLabel).Inc()
+		metrics.DataNodeFlushBufferCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.TotalLabel).Inc()
 		if task.auto {
-			metrics.DataNodeAutoFlushBufferCount.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID()), metrics.TotalLabel).Inc()
-			metrics.DataNodeAutoFlushBufferCount.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID()), metrics.FailLabel).Inc()
+			metrics.DataNodeAutoFlushBufferCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.TotalLabel).Inc()
+			metrics.DataNodeAutoFlushBufferCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.FailLabel).Inc()
 		}
 	}
 	return segmentsToSync
@@ -551,7 +552,7 @@ func (ibNode *insertBufferNode) bufferInsertMsg(msg *msgstream.InsertMsg, endPos
 	// update timestamp range
 	buffer.updateTimeRange(ibNode.getTimestampRange(tsData))
 
-	metrics.DataNodeConsumeMsgRowsCount.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID()), metrics.InsertLabel).Add(float64(len(msg.RowData)))
+	metrics.DataNodeConsumeMsgRowsCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.InsertLabel).Add(float64(len(msg.RowData)))
 
 	// store in buffer
 	ibNode.insertBuffer.Store(currentSegID, buffer)
@@ -612,7 +613,7 @@ func newInsertBufferNode(ctx context.Context, collID UniqueID, flushCh <-chan fl
 		return nil, err
 	}
 	wTt.AsProducer([]string{Params.CommonCfg.DataCoordTimeTick})
-	metrics.DataNodeNumProducers.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID())).Inc()
+	metrics.DataNodeNumProducers.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Inc()
 	log.Info("datanode AsProducer", zap.String("TimeTickChannelName", Params.CommonCfg.DataCoordTimeTick))
 	var wTtMsgStream msgstream.MsgStream = wTt
 	wTtMsgStream.Start()
@@ -639,7 +640,7 @@ func newInsertBufferNode(ctx context.Context, collID UniqueID, flushCh <-chan fl
 					commonpbutil.WithMsgType(commonpb.MsgType_DataNodeTt),
 					commonpbutil.WithMsgID(0),
 					commonpbutil.WithTimeStamp(ts),
-					commonpbutil.WithSourceID(Params.DataNodeCfg.GetNodeID()),
+					commonpbutil.WithSourceID(paramtable.GetNodeID()),
 				),
 				ChannelName:   config.vChannelName,
 				Timestamp:     ts,
@@ -649,7 +650,7 @@ func newInsertBufferNode(ctx context.Context, collID UniqueID, flushCh <-chan fl
 		msgPack.Msgs = append(msgPack.Msgs, &timeTickMsg)
 		pt, _ := tsoutil.ParseHybridTs(ts)
 		pChan := funcutil.ToPhysicalChannel(config.vChannelName)
-		metrics.DataNodeTimeSync.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID()), pChan).Set(float64(pt))
+		metrics.DataNodeTimeSync.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), pChan).Set(float64(pt))
 		return wTtMsgStream.Produce(&msgPack)
 	})
 

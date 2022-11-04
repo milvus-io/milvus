@@ -35,7 +35,7 @@ import (
 
 var ClientParams paramtable.GrpcClientConfig
 
-var Params paramtable.ComponentParam
+var Params *paramtable.ComponentParam = paramtable.Get()
 
 // Client is the grpc client of QueryNode.
 type Client struct {
@@ -146,7 +146,7 @@ func (c *Client) WatchDmChannels(ctx context.Context, req *querypb.WatchDmChanne
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(Params.QueryNodeCfg.GetNodeID()))
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID()))
 	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -164,7 +164,7 @@ func (c *Client) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmChannel
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(Params.QueryNodeCfg.GetNodeID()))
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID()))
 	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -182,7 +182,7 @@ func (c *Client) LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequ
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(Params.QueryNodeCfg.GetNodeID()))
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID()))
 	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -200,7 +200,7 @@ func (c *Client) ReleaseCollection(ctx context.Context, req *querypb.ReleaseColl
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(Params.QueryNodeCfg.GetNodeID()))
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID()))
 	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -218,7 +218,7 @@ func (c *Client) ReleasePartitions(ctx context.Context, req *querypb.ReleasePart
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(Params.QueryNodeCfg.GetNodeID()))
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID()))
 	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -236,7 +236,7 @@ func (c *Client) ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmen
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(Params.QueryNodeCfg.GetNodeID()))
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID()))
 	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -282,7 +282,7 @@ func (c *Client) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfo
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(Params.QueryNodeCfg.GetNodeID()))
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID()))
 	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -300,7 +300,7 @@ func (c *Client) SyncReplicaSegments(ctx context.Context, req *querypb.SyncRepli
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(Params.QueryNodeCfg.GetNodeID()))
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID()))
 	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -318,7 +318,7 @@ func (c *Client) ShowConfigurations(ctx context.Context, req *internalpb.ShowCon
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(Params.QueryNodeCfg.GetNodeID()))
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID()))
 	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -337,7 +337,7 @@ func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(Params.QueryNodeCfg.GetNodeID()))
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID()))
 	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -367,7 +367,7 @@ func (c *Client) GetDataDistribution(ctx context.Context, req *querypb.GetDataDi
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(Params.QueryNodeCfg.GetNodeID()))
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID()))
 	ret, err := c.grpcClient.Call(ctx, func(client querypb.QueryNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -384,7 +384,7 @@ func (c *Client) SyncDistribution(ctx context.Context, req *querypb.SyncDistribu
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(Params.QueryNodeCfg.GetNodeID()))
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID()))
 	ret, err := c.grpcClient.Call(ctx, func(client querypb.QueryNodeClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()

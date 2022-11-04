@@ -66,7 +66,7 @@ import (
 // make sure IndexCoord implements types.IndexCoord
 var _ types.IndexCoord = (*IndexCoord)(nil)
 
-var Params paramtable.ComponentParam
+var Params *paramtable.ComponentParam = paramtable.Get()
 
 // IndexCoord is a component responsible for scheduling index construction segments and maintaining index status.
 // IndexCoord accepts requests from rootcoord to build indexes, delete indexes, and query index information.
@@ -87,6 +87,7 @@ type IndexCoord struct {
 
 	factory      dependency.Factory
 	etcdCli      *clientv3.Client
+	address      string
 	etcdKV       kv.MetaKv
 	chunkManager storage.ChunkManager
 
@@ -161,7 +162,7 @@ func (i *IndexCoord) initSession() error {
 	if i.session == nil {
 		return errors.New("failed to initialize session")
 	}
-	i.session.Init(typeutil.IndexCoordRole, Params.IndexCoordCfg.Address, true, true)
+	i.session.Init(typeutil.IndexCoordRole, i.address, true, true)
 	i.session.SetEnableActiveStandBy(i.enableActiveStandBy)
 	Params.SetLogger(i.session.ServerID)
 	i.serverID = i.session.ServerID
@@ -171,12 +172,11 @@ func (i *IndexCoord) initSession() error {
 // Init initializes the IndexCoord component.
 func (i *IndexCoord) Init() error {
 	var initErr error
-	Params.InitOnce()
 	i.initOnce.Do(func() {
 		i.UpdateStateCode(commonpb.StateCode_Initializing)
 		log.Debug("IndexCoord init", zap.Any("stateCode", i.stateCode.Load().(commonpb.StateCode)))
 
-		i.factory.Init(&Params)
+		i.factory.Init(Params)
 
 		err := i.initSession()
 		if err != nil {
@@ -348,6 +348,10 @@ func (i *IndexCoord) Stop() error {
 	i.session.Revoke(time.Second)
 
 	return nil
+}
+
+func (i *IndexCoord) SetAddress(address string) {
+	i.address = address
 }
 
 func (i *IndexCoord) SetEtcdClient(etcdClient *clientv3.Client) {
@@ -913,12 +917,12 @@ func (i *IndexCoord) ShowConfigurations(ctx context.Context, req *internalpb.Sho
 		log.Warn("IndexCoord.ShowConfigurations failed",
 			zap.Int64("nodeId", i.serverID),
 			zap.String("req", req.Pattern),
-			zap.Error(errIndexCoordIsUnhealthy(Params.QueryNodeCfg.GetNodeID())))
+			zap.Error(errIndexCoordIsUnhealthy(paramtable.GetNodeID())))
 
 		return &internalpb.ShowConfigurationsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    msgIndexCoordIsUnhealthy(Params.QueryNodeCfg.GetNodeID()),
+				Reason:    msgIndexCoordIsUnhealthy(paramtable.GetNodeID()),
 			},
 			Configuations: nil,
 		}, nil

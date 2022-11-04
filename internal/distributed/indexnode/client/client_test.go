@@ -40,6 +40,7 @@ import (
 var ParamsGlobal paramtable.ComponentParam
 
 func Test_NewClient(t *testing.T) {
+	paramtable.Init()
 	ClientParams.InitOnce(typeutil.IndexNodeRole)
 	ctx := context.Background()
 	client, err := NewClient(ctx, "", false)

@@ -36,6 +36,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/util/concurrency"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 
 	"github.com/bits-and-blooms/bloom/v3"
@@ -366,7 +367,7 @@ func (s *Segment) search(searchReq *searchRequest) (*SearchResult, error) {
 		tr := timerecord.NewTimeRecorder("cgoSearch")
 		status = C.Search(s.segmentPtr, searchReq.plan.cSearchPlan, searchReq.cPlaceholderGroup,
 			C.uint64_t(searchReq.timestamp), &searchResult.cSearchResult)
-		metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()), metrics.SearchLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
+		metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
 		return nil, nil
 	}).Await()
 	if err := HandleCStatus(&status, "Search failed"); err != nil {
@@ -394,7 +395,7 @@ func (s *Segment) retrieve(plan *RetrievePlan) (*segcorepb.RetrieveResults, erro
 	s.pool.Submit(func() (interface{}, error) {
 		tr := timerecord.NewTimeRecorder("cgoRetrieve")
 		status = C.Retrieve(s.segmentPtr, plan.cRetrievePlan, ts, &retrieveResult.cRetrieveResult)
-		metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()),
+		metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
 			metrics.QueryLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
 		log.Debug("do retrieve on segment",
 			zap.Int64("msgID", plan.msgID),
@@ -754,7 +755,7 @@ func (s *Segment) segmentInsert(offset int64, entityIDs []UniqueID, timestamps [
 	if err := HandleCStatus(&status, "Insert failed"); err != nil {
 		return err
 	}
-	metrics.QueryNodeNumEntities.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Add(float64(numOfRow))
+	metrics.QueryNodeNumEntities.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Add(float64(numOfRow))
 	s.setRecentlyModified(true)
 	return nil
 }

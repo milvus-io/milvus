@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 
 	"go.uber.org/zap"
 )
@@ -55,14 +56,14 @@ func (fm *flowgraphManager) addAndStart(dn *DataNode, vchan *datapb.VchannelInfo
 	dataSyncService.start()
 	fm.flowgraphs.Store(vchan.GetChannelName(), dataSyncService)
 
-	metrics.DataNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID())).Inc()
+	metrics.DataNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Inc()
 	return nil
 }
 
 func (fm *flowgraphManager) release(vchanName string) {
 	if fg, loaded := fm.flowgraphs.LoadAndDelete(vchanName); loaded {
 		fg.(*dataSyncService).close()
-		metrics.DataNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID())).Dec()
+		metrics.DataNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Dec()
 	}
 	rateCol.removeFlowGraphChannel(vchanName)
 }

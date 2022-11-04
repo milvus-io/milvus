@@ -33,7 +33,6 @@ import (
 )
 
 func getMetaKv(t *testing.T) kv.MetaKv {
-	Params.Init()
 	rootPath := "/etcd/test/root/" + t.Name()
 	metakv, err := etcdkv.NewMetaKvFactory(rootPath, &Params.EtcdCfg)
 	require.NoError(t, err)

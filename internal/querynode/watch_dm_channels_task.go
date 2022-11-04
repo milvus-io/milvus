@@ -31,6 +31,7 @@ import (
 	queryPb "github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
 
 type watchDmChannelsTask struct {
@@ -218,7 +219,7 @@ func (w *watchDmChannelsTask) LoadGrowingSegments(ctx context.Context, collectio
 
 func (w *watchDmChannelsTask) initFlowGraph(ctx context.Context, collectionID UniqueID, vChannels []Channel, VPChannels map[string]string) (map[string]*queryNodeFlowGraph, error) {
 	// So far, we don't support to enable each node with two different channel
-	consumeSubName := funcutil.GenChannelSubName(Params.CommonCfg.QueryNodeSubName, collectionID, Params.QueryNodeCfg.GetNodeID())
+	consumeSubName := funcutil.GenChannelSubName(Params.CommonCfg.QueryNodeSubName, collectionID, paramtable.GetNodeID())
 
 	// group channels by to seeking or consuming
 	channel2SeekPosition := make(map[string]*internalpb.MsgPosition)

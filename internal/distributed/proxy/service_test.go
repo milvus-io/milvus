@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -823,6 +824,9 @@ func (m *MockProxy) UpdateStateCode(stateCode commonpb.StateCode) {
 
 }
 
+func (m *MockProxy) SetAddress(address string) {
+}
+
 func (m *MockProxy) SetEtcdClient(etcdClient *clientv3.Client) {
 }
 
@@ -1037,6 +1041,7 @@ func runAndWaitForServerReady(server *Server) error {
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 func Test_NewServer(t *testing.T) {
+	paramtable.Init()
 	ctx := context.Background()
 	server, err := NewServer(ctx, nil)
 	assert.NotNil(t, server)

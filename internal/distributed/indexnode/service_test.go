@@ -36,6 +36,7 @@ import (
 var ParamsGlobal paramtable.ComponentParam
 
 func TestIndexNodeServer(t *testing.T) {
+	paramtable.Init()
 	ctx := context.Background()
 	factory := dependency.NewDefaultFactory(true)
 	server, err := NewServer(ctx, factory)

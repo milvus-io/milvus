@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/ratelimitutil"
 )
 
@@ -77,7 +78,7 @@ func (rl *rateLimiter) setRates(rates []*internalpb.Rate) error {
 	for _, r := range rates {
 		if _, ok := rl.limiters[r.GetRt()]; ok {
 			rl.limiters[r.GetRt()].SetLimit(ratelimitutil.Limit(r.GetR()))
-			metrics.SetRateGaugeByRateType(r.GetRt(), Params.ProxyCfg.GetNodeID(), r.GetR())
+			metrics.SetRateGaugeByRateType(r.GetRt(), paramtable.GetNodeID(), r.GetR())
 		} else {
 			return fmt.Errorf("unregister rateLimiter for rateType %s", r.GetRt().String())
 		}

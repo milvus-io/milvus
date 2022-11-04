@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 
 	"go.uber.org/zap"
 )
@@ -209,13 +210,13 @@ func createStream(factory msgstream.Factory, streamType streamType, pchans []pCh
 
 func incPChansMetrics(pchans []pChan) {
 	for _, pc := range pchans {
-		metrics.ProxyMsgStreamObjectsForPChan.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), pc).Inc()
+		metrics.ProxyMsgStreamObjectsForPChan.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), pc).Inc()
 	}
 }
 
 func decPChanMetrics(pchans []pChan) {
 	for _, pc := range pchans {
-		metrics.ProxyMsgStreamObjectsForPChan.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), pc).Dec()
+		metrics.ProxyMsgStreamObjectsForPChan.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), pc).Dec()
 	}
 }
 

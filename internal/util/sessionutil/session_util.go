@@ -1,3 +1,19 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package sessionutil
 
 import (
@@ -7,6 +23,7 @@ import (
 	"fmt"
 	"path"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -27,8 +44,6 @@ const (
 	// DefaultIDKey default id key for Session
 	DefaultIDKey = "id"
 )
-
-var GlobalParams paramtable.ComponentParam
 
 // SessionEventType session event type
 type SessionEventType int
@@ -214,9 +229,6 @@ func (s *Session) Init(serverName, address string, exclusive bool, triggerKill b
 		panic(err)
 	}
 	s.ServerID = serverID
-	if !s.useCustomConfig {
-		GlobalParams.InitOnce()
-	}
 }
 
 // String makes Session struct able to be logged by zap
@@ -234,7 +246,16 @@ func (s *Session) Register() {
 	s.UpdateRegistered(true)
 }
 
+var serverIDMu sync.Mutex
+
 func (s *Session) getServerID() (int64, error) {
+	serverIDMu.Lock()
+	defer serverIDMu.Unlock()
+
+	nodeID := paramtable.GetNodeID()
+	if nodeID != 0 {
+		return nodeID, nil
+	}
 	return s.getServerIDWithKey(DefaultIDKey)
 }
 
@@ -312,8 +333,8 @@ func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, er
 	ttl := s.sessionTTL
 	retryTimes := s.sessionRetryTimes
 	if !s.useCustomConfig {
-		ttl = GlobalParams.CommonCfg.SessionTTL
-		retryTimes = GlobalParams.CommonCfg.SessionRetryTimes
+		ttl = paramtable.Get().CommonCfg.SessionTTL
+		retryTimes = paramtable.Get().CommonCfg.SessionRetryTimes
 	}
 
 	registerFn := func() error {
