@@ -43,17 +43,6 @@ VectorMemIndex::Serialize(const Config& config) {
     parse_config(serialize_config);
 
     auto ret = index_->Serialize(serialize_config);
-    auto index_type = GetIndexType();
-
-    if (is_in_nm_list(index_type)) {
-        auto deleter = [&](uint8_t*) {};  // avoid repeated deconstruction
-        auto raw_data = std::shared_ptr<uint8_t[]>(static_cast<uint8_t*>(raw_data_.data()), deleter);
-
-        //        std::shared_ptr<uint8_t[]> raw_data(new uint8_t[raw_data_.size()], std::default_delete<uint8_t[]>());
-        //        memcpy(raw_data.get(), raw_data_.data(), raw_data_.size());
-        ret.Append(RAW_DATA, raw_data, raw_data_.size());
-        // Disassemble will only divide the raw vectors, other keys were already divided
-    }
     milvus::Disassemble(ret);
 
     return ret;
@@ -62,19 +51,7 @@ VectorMemIndex::Serialize(const Config& config) {
 void
 VectorMemIndex::Load(const BinarySet& binary_set, const Config& config) {
     milvus::Assemble(const_cast<BinarySet&>(binary_set));
-
     index_->Load(binary_set);
-    auto& map_ = binary_set.binary_map_;
-    // copy RAW_DATA after index->Load(), since assemble is performed inside.
-    for (auto it = map_.begin(); it != map_.end(); ++it) {
-        if (it->first == RAW_DATA) {
-            raw_data_.clear();
-            auto data_size = it->second->size;
-            raw_data_.resize(data_size);
-            memcpy(raw_data_.data(), it->second->data.get(), data_size);
-            break;
-        }
-    }
     SetDim(index_->Dim());
 }
 
@@ -96,12 +73,6 @@ VectorMemIndex::BuildWithDataset(const DatasetPtr& dataset, const Config& config
 
     knowhere::TimeRecorder rc("BuildWithoutIds", 1);
     index_->BuildAll(dataset, index_config);
-    rc.RecordSection("TrainAndAdd");
-
-    if (is_in_nm_list(GetIndexType())) {
-        store_raw_data(dataset);
-        rc.RecordSection("store_raw_data");
-    }
     rc.ElapseFromBegin("Done");
     SetDim(index_->Dim());
 }
@@ -110,13 +81,6 @@ std::unique_ptr<SearchResult>
 VectorMemIndex::Query(const DatasetPtr dataset, const SearchInfo& search_info, const BitsetView& bitset) {
     //    AssertInfo(GetMetricType() == search_info.metric_type_,
     //               "Metric type of field index isn't the same with search info");
-
-    auto load_raw_data_closure = [&]() { LoadRawData(); };  // hide this pointer
-    auto index_type = GetIndexType();
-
-    if (is_in_nm_list(index_type)) {
-        std::call_once(raw_data_loaded_, load_raw_data_closure);
-    }
 
     auto num_queries = knowhere::GetDatasetRows(dataset);
     Config search_conf = search_info.search_params_;
@@ -157,38 +121,6 @@ VectorMemIndex::Query(const DatasetPtr dataset, const SearchInfo& search_info, c
     std::copy_n(distances, total_num, result->distances_.data());
 
     return result;
-}
-
-void
-VectorMemIndex::store_raw_data(const knowhere::DatasetPtr& dataset) {
-    auto index_type = GetIndexType();
-    if (is_in_nm_list(index_type)) {
-        auto tensor = knowhere::GetDatasetTensor(dataset);
-        auto row_num = knowhere::GetDatasetRows(dataset);
-        auto dim = knowhere::GetDatasetDim(dataset);
-        int64_t data_size;
-        if (is_in_bin_list(index_type)) {
-            data_size = dim / 8 * row_num;
-        } else {
-            data_size = dim * row_num * sizeof(float);
-        }
-        raw_data_.resize(data_size);
-        memcpy(raw_data_.data(), tensor, data_size);
-    }
-}
-
-void
-VectorMemIndex::LoadRawData() {
-    auto index_type = GetIndexType();
-    if (is_in_nm_list(index_type)) {
-        auto bs = index_->Serialize(Config{});
-        auto bptr = std::make_shared<knowhere::Binary>();
-        auto deleter = [&](uint8_t*) {};  // avoid repeated deconstruction
-        bptr->data = std::shared_ptr<uint8_t[]>(static_cast<uint8_t*>(raw_data_.data()), deleter);
-        bptr->size = raw_data_.size();
-        bs.Append(RAW_DATA, bptr);
-        index_->Load(bs);
-    }
 }
 
 void
