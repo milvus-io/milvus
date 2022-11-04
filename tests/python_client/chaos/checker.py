@@ -580,7 +580,7 @@ class BulkInsertChecker(Checker):
 
     def __init__(self, collection_name=None, files=[]):
         if collection_name is None:
-            collection_name = cf.gen_unique_str("BulkLoadChecker_")
+            collection_name = cf.gen_unique_str("BulkInsertChecker_")
         super().__init__(collection_name=collection_name)
         self.utility_wrap = ApiUtilityWrapper()
         self.schema = cf.gen_default_collection_schema()
@@ -597,9 +597,9 @@ class BulkInsertChecker(Checker):
 
     @trace()
     def bulk_insert(self):
-        task_ids, result = self.utility_wrap.bulk_insert(collection_name=self.c_name,
+        task_ids, result = self.utility_wrap.do_bulk_insert(collection_name=self.c_name,
                                                        files=self.files)
-        completed, result = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=task_ids, timeout=60)
+        completed, result = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_ids], timeout=60)
         return task_ids, completed
 
     @exception_handler()
