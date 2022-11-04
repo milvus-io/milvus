@@ -114,6 +114,7 @@ const (
 	IndexFaissIVFSQ8     = "IVF_SQ8"
 	IndexFaissBinIDMap   = "BIN_FLAT"
 	IndexFaissBinIVFFlat = "BIN_IVF_FLAT"
+	IndexDISKANN         = "DISKANN"
 
 	IndexHNSW  = "HNSW"
 	IndexANNOY = "ANNOY"
@@ -463,6 +464,8 @@ func genIndexParams(indexType, metricType string) (map[string]string, map[string
 		indexParams["nbits"] = strconv.Itoa(nbits)
 	} else if indexType == IndexFaissBinIDMap {
 		//indexParams["dim"] = strconv.Itoa(defaultDim)
+	} else if indexType == IndexDISKANN {
+
 	} else {
 		panic("")
 	}

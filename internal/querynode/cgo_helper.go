@@ -82,7 +82,7 @@ func GetCProtoBlob(cProto *C.CProto) []byte {
 	return blob
 }
 
-func GetLocalUsedSize() (int64, error) {
+func GetLocalDiskUsedSize() (int64, error) {
 	var availableSize int64
 	cSize := C.int64_t(availableSize)
 

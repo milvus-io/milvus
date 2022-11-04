@@ -29,12 +29,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper/rmq"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
-	"github.com/milvus-io/milvus/internal/util/hardware"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 func TestTask_loadSegmentsTask(t *testing.T) {
@@ -265,49 +262,6 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 		// has reload 3 delete log from dm channel, so next delete offset should be 3
 		offset := segment.segmentPreDelete(1)
 		assert.Equal(t, int64(3), offset)
-	})
-
-	t.Run("test OOM", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
-		assert.NoError(t, err)
-
-		totalRAM := int64(hardware.GetMemoryCount())
-
-		col, err := node.metaReplica.getCollectionByID(defaultCollectionID)
-		assert.NoError(t, err)
-
-		sizePerRecord, err := typeutil.EstimateSizePerRecord(col.schema)
-		assert.NoError(t, err)
-
-		task := loadSegmentsTask{
-			baseTask: baseTask{
-				ctx: ctx,
-			},
-			req:  genLoadEmptySegmentsRequest(),
-			node: node,
-		}
-		binlogs := []*datapb.Binlog{
-			{
-				LogSize: totalRAM,
-			},
-		}
-		task.req.Infos = []*querypb.SegmentLoadInfo{
-			{
-				SegmentID:    defaultSegmentID,
-				PartitionID:  defaultPartitionID,
-				CollectionID: defaultCollectionID,
-				NumOfRows:    totalRAM / int64(sizePerRecord),
-				SegmentSize:  totalRAM,
-				BinlogPaths:  []*datapb.FieldBinlog{{Binlogs: binlogs}},
-			},
-		}
-		// Reach the segment size that would cause OOM
-		for node.loader.checkSegmentSize(defaultCollectionID, task.req.Infos, 1) == nil {
-			task.req.Infos[0].SegmentSize *= 2
-		}
-		err = task.Execute(ctx)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "OOM")
 	})
 
 	t.Run("test FromDmlCPLoadDelete failed", func(t *testing.T) {

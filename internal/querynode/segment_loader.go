@@ -45,16 +45,11 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/concurrency"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
-	"github.com/milvus-io/milvus/internal/util/hardware"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/panjf2000/ants/v2"
-)
-
-const (
-	UsedDiskMemoryRatio = 4
 )
 
 var (
@@ -70,9 +65,12 @@ type segmentLoader struct {
 	cm     storage.ChunkManager // minio cm
 	etcdKV *etcdkv.EtcdKV
 
-	ioPool *concurrency.Pool
+	segmentPool *concurrency.Pool
+	ioPool      *concurrency.Pool
 	// cgoPool for all cgo invocation
 	cgoPool *concurrency.Pool
+
+	rm ResourceManager
 
 	factory msgstream.Factory
 }
@@ -100,34 +98,16 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context, req *querypb.LoadS
 		return nil
 	}
 
-	log.Info("segmentLoader start loading...", zap.Any("segmentNum", segmentNum))
-
-	// check memory limit
-	min := func(first int, values ...int) int {
-		minValue := first
-		for _, v := range values {
-			if v < minValue {
-				minValue = v
-			}
+	segmentSize := make(map[int64]int64)
+	for _, info := range req.Infos {
+		_, ok := segmentSize[info.SegmentID]
+		if ok {
+			return fmt.Errorf("load segment contains duplicated task = %d, segment = %d", req.CollectionID, info.SegmentID)
 		}
-		return minValue
-	}
-	concurrencyLevel := min(runtime.GOMAXPROCS(0), len(req.Infos))
-	for ; concurrencyLevel > 1; concurrencyLevel /= 2 {
-		err := loader.checkSegmentSize(req.CollectionID, req.Infos, concurrencyLevel)
-		if err == nil {
-			break
-		}
+		segmentSize[info.SegmentID] = info.GetSegmentSize()
 	}
 
-	err := loader.checkSegmentSize(req.CollectionID, req.Infos, concurrencyLevel)
-	if err != nil {
-		log.Error("load failed, OOM if loaded",
-			zap.Int64("loadSegmentRequest msgID", req.Base.MsgID),
-			zap.Error(err))
-		return err
-	}
-
+	log.Info("segmentLoader start loading...", zap.Any("segment", segmentSize))
 	newSegments := make(map[UniqueID]*Segment, len(req.Infos))
 	segmentGC := func() {
 		for _, s := range newSegments {
@@ -161,34 +141,41 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context, req *querypb.LoadS
 		newSegments[segmentID] = segment
 	}
 
-	loadFileFunc := func(idx int) error {
-		loadInfo := req.Infos[idx]
+	futures := make([]*concurrency.Future, 0, segmentNum)
+	// start to load
+	// Make sure we can always benefit from concurrency, and not spawn too many idle goroutines
+	for index := range req.Infos {
+		loadInfo := req.Infos[index]
 		partitionID := loadInfo.PartitionID
 		segmentID := loadInfo.SegmentID
 		segment := newSegments[segmentID]
+		future := loader.segmentPool.Submit(func() (interface{}, error) {
+			// may block for a while
+			err := loader.rm.reserve(loadInfo.CollectionID, loadInfo)
+			if err != nil {
+				log.Warn("failed to reserve resource", zap.Error(err))
+				return nil, err
+			}
+			// release the segment
+			defer loader.rm.release(loadInfo.CollectionID, loadInfo)
 
-		tr := timerecord.NewTimeRecorder("loadDurationPerSegment")
-		err := loader.loadFiles(ctx, segment, loadInfo)
-		if err != nil {
-			log.Error("load segment failed when load data into memory",
-				zap.Int64("partitionID", partitionID),
-				zap.Int64("segmentID", segmentID),
-				zap.Error(err))
-			return err
-		}
+			tr := timerecord.NewTimeRecorder("loadDurationPerSegment")
+			err = loader.loadFiles(ctx, segment, loadInfo)
+			if err != nil {
+				log.Error("load segment failed when load data into memory",
+					zap.Int64("partitionID", partitionID),
+					zap.Int64("segmentID", segmentID),
+					zap.Error(err))
+				return nil, err
+			}
 
-		metrics.QueryNodeLoadSegmentLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(tr.ElapseSpan().Milliseconds()))
+			metrics.QueryNodeLoadSegmentLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
-		return nil
+			return nil, nil
+		})
+		futures = append(futures, future)
 	}
-
-	// start to load
-	// Make sure we can always benefit from concurrency, and not spawn too many idle goroutines
-	log.Info("start to load segments in parallel",
-		zap.Int("segmentNum", segmentNum),
-		zap.Int("concurrencyLevel", concurrencyLevel))
-	err = funcutil.ProcessFuncParallel(segmentNum,
-		concurrencyLevel, loadFileFunc, "loadSegmentFunc")
+	err := concurrency.AwaitAll(futures...)
 	if err != nil {
 		segmentGC()
 		return err
@@ -462,7 +449,7 @@ func (loader *segmentLoader) loadFieldIndexData(ctx context.Context, segment *Se
 	futures := make([]*concurrency.Future, 0, len(indexInfo.IndexFilePaths))
 	indexCodec := storage.NewIndexFileBinlogCodec()
 
-	// TODO, remove the load index info froam
+	// TODO, remove the load index info from IO, this will dramatically affect the load performance
 	for _, indexPath := range indexInfo.IndexFilePaths {
 		// get index params when detecting indexParamPrefix
 		if path.Base(indexPath) == storage.IndexParamsKey {
@@ -812,117 +799,6 @@ func JoinIDPath(ids ...UniqueID) string {
 	return path.Join(idStr...)
 }
 
-func GetStorageSizeByIndexInfo(indexInfo *querypb.FieldIndexInfo) (uint64, uint64, error) {
-	indexType, err := funcutil.GetAttrByKeyFromRepeatedKV("index_type", indexInfo.IndexParams)
-	if err != nil {
-		return 0, 0, fmt.Errorf("index type not exist in index params")
-	}
-	if indexType == indexparamcheck.IndexDISKANN {
-		neededMemSize := indexInfo.IndexSize / UsedDiskMemoryRatio
-		neededDiskSize := indexInfo.IndexSize - neededMemSize
-		return uint64(neededMemSize), uint64(neededDiskSize), nil
-	}
-
-	return uint64(indexInfo.IndexSize), 0, nil
-}
-
-func (loader *segmentLoader) checkSegmentSize(collectionID UniqueID, segmentLoadInfos []*querypb.SegmentLoadInfo, concurrency int) error {
-	usedMem := hardware.GetUsedMemoryCount()
-	totalMem := hardware.GetMemoryCount()
-	if len(segmentLoadInfos) < concurrency {
-		concurrency = len(segmentLoadInfos)
-	}
-
-	if usedMem == 0 || totalMem == 0 {
-		return fmt.Errorf("get memory failed when checkSegmentSize, collectionID = %d", collectionID)
-	}
-
-	usedMemAfterLoad := usedMem
-	maxSegmentSize := uint64(0)
-
-	localUsedSize, err := GetLocalUsedSize()
-	if err != nil {
-		return fmt.Errorf("get local used size failed, collectionID = %d", collectionID)
-	}
-	usedLocalSizeAfterLoad := uint64(localUsedSize)
-
-	for _, loadInfo := range segmentLoadInfos {
-		oldUsedMem := usedMemAfterLoad
-		vecFieldID2IndexInfo := make(map[int64]*querypb.FieldIndexInfo)
-		for _, fieldIndexInfo := range loadInfo.IndexInfos {
-			if fieldIndexInfo.EnableIndex {
-				fieldID := fieldIndexInfo.FieldID
-				vecFieldID2IndexInfo[fieldID] = fieldIndexInfo
-			}
-		}
-
-		for _, fieldBinlog := range loadInfo.BinlogPaths {
-			fieldID := fieldBinlog.FieldID
-			if fieldIndexInfo, ok := vecFieldID2IndexInfo[fieldID]; ok {
-				neededMemSize, neededDiskSize, err := GetStorageSizeByIndexInfo(fieldIndexInfo)
-				if err != nil {
-					log.Error(err.Error(), zap.Int64("collectionID", loadInfo.CollectionID),
-						zap.Int64("segmentID", loadInfo.SegmentID),
-						zap.Int64("indexBuildID", fieldIndexInfo.BuildID))
-					return err
-				}
-				usedMemAfterLoad += neededMemSize
-				usedLocalSizeAfterLoad += neededDiskSize
-			} else {
-				usedMemAfterLoad += uint64(funcutil.GetFieldSizeFromFieldBinlog(fieldBinlog))
-			}
-		}
-
-		// get size of state data
-		for _, fieldBinlog := range loadInfo.Statslogs {
-			usedMemAfterLoad += uint64(funcutil.GetFieldSizeFromFieldBinlog(fieldBinlog))
-		}
-
-		// get size of delete data
-		for _, fieldBinlog := range loadInfo.Deltalogs {
-			usedMemAfterLoad += uint64(funcutil.GetFieldSizeFromFieldBinlog(fieldBinlog))
-		}
-
-		if usedMemAfterLoad-oldUsedMem > maxSegmentSize {
-			maxSegmentSize = usedMemAfterLoad - oldUsedMem
-		}
-	}
-
-	toMB := func(mem uint64) uint64 {
-		return mem / 1024 / 1024
-	}
-
-	// when load segment, data will be copied from go memory to c++ memory
-	memLoadingUsage := usedMemAfterLoad + uint64(
-		float64(maxSegmentSize)*float64(concurrency)*Params.QueryNodeCfg.LoadMemoryUsageFactor)
-	log.Info("predict memory and disk usage while loading (in MiB)",
-		zap.Int64("collectionID", collectionID),
-		zap.Int("concurrency", concurrency),
-		zap.Uint64("memUsage", toMB(memLoadingUsage)),
-		zap.Uint64("memUsageAfterLoad", toMB(usedMemAfterLoad)),
-		zap.Uint64("diskUsageAfterLoad", toMB(usedLocalSizeAfterLoad)))
-
-	if memLoadingUsage > uint64(float64(totalMem)*Params.QueryNodeCfg.OverloadedMemoryThresholdPercentage) {
-		return fmt.Errorf("load segment failed, OOM if load, collectionID = %d, maxSegmentSize = %v MB, concurrency = %d, usedMemAfterLoad = %v MB, totalMem = %v MB, thresholdFactor = %f",
-			collectionID,
-			toMB(maxSegmentSize),
-			concurrency,
-			toMB(usedMemAfterLoad),
-			toMB(totalMem),
-			Params.QueryNodeCfg.OverloadedMemoryThresholdPercentage)
-	}
-
-	if usedLocalSizeAfterLoad > uint64(float64(Params.QueryNodeCfg.DiskCapacityLimit)*Params.QueryNodeCfg.MaxDiskUsagePercentage) {
-		return fmt.Errorf("load segment failed, disk space is not enough, collectionID = %d, usedDiskAfterLoad = %v MB, totalDisk = %v MB, thresholdFactor = %f",
-			collectionID,
-			toMB(usedLocalSizeAfterLoad),
-			toMB(uint64(Params.QueryNodeCfg.DiskCapacityLimit)),
-			Params.QueryNodeCfg.MaxDiskUsagePercentage)
-	}
-
-	return nil
-}
-
 func newSegmentLoader(
 	metaReplica ReplicaInterface,
 	etcdKV *etcdkv.EtcdKV,
@@ -931,6 +807,12 @@ func newSegmentLoader(
 	pool *concurrency.Pool) *segmentLoader {
 
 	cpuNum := runtime.GOMAXPROCS(0)
+	segmentPool, err := concurrency.NewPool(cpuNum, ants.WithPreAlloc(true))
+	if err != nil {
+		log.Error("failed to create goroutine pool for segment loader", zap.Error(err))
+		panic(err)
+	}
+
 	ioPoolSize := cpuNum * 8
 	// make sure small machines could load faster
 	if ioPoolSize < 32 {
@@ -942,13 +824,17 @@ func newSegmentLoader(
 	}
 	ioPool, err := concurrency.NewPool(ioPoolSize, ants.WithPreAlloc(true))
 	if err != nil {
-		log.Error("failed to create goroutine pool for segment loader",
-			zap.Error(err))
+		log.Error("failed to create goroutine pool for segment loader", zap.Error(err))
 		panic(err)
 	}
 
 	log.Info("SegmentLoader created", zap.Int("io-pool-size", ioPoolSize))
-
+	resourceManger := ResourceManager{}
+	err = resourceManger.Init()
+	if err != nil {
+		log.Error("failed to init resource manager", zap.Error(err))
+		panic(err)
+	}
 	loader := &segmentLoader{
 		metaReplica: metaReplica,
 
@@ -956,10 +842,11 @@ func newSegmentLoader(
 		etcdKV: etcdKV,
 
 		// init them later
-		ioPool:  ioPool,
-		cgoPool: pool,
-
-		factory: factory,
+		segmentPool: segmentPool,
+		ioPool:      ioPool,
+		cgoPool:     pool,
+		rm:          resourceManger,
+		factory:     factory,
 	}
 
 	return loader

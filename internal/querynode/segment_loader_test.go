@@ -74,6 +74,14 @@ func TestSegmentLoader_loadSegment(t *testing.T) {
 					BinlogPaths:  fieldBinlog,
 					Statslogs:    statsLog,
 				},
+
+				{
+					SegmentID:    UniqueID(20),
+					PartitionID:  defaultPartitionID,
+					CollectionID: defaultCollectionID,
+					BinlogPaths:  fieldBinlog,
+					Statslogs:    statsLog,
+				},
 			},
 		}
 
@@ -401,19 +409,6 @@ func TestSegmentLoader_invalid(t *testing.T) {
 
 		assert.Error(t, err)
 	})
-}
-
-func TestSegmentLoader_checkSegmentSize(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	node, err := genSimpleQueryNode(ctx)
-	assert.NoError(t, err)
-	loader := node.loader
-	assert.NotNil(t, loader)
-
-	err = loader.checkSegmentSize(defaultCollectionID, []*querypb.SegmentLoadInfo{{SegmentID: defaultSegmentID, SegmentSize: 1024}}, runtime.GOMAXPROCS(0))
-	assert.NoError(t, err)
 }
 
 func TestSegmentLoader_testLoadGrowing(t *testing.T) {
