@@ -16,7 +16,7 @@
 
 #include "common/SystemProperty.h"
 #include "segcore/FieldIndexing.h"
-#include "index/VectorMemIndex.h"
+#include "index/VectorMemNMIndex.h"
 
 namespace milvus::segcore {
 
@@ -33,8 +33,8 @@ VectorFieldIndexing::BuildIndexRange(int64_t ack_beg, int64_t ack_end, const Vec
     data_.grow_to_at_least(ack_end);
     for (int chunk_id = ack_beg; chunk_id < ack_end; chunk_id++) {
         const auto& chunk = source->get_chunk(chunk_id);
-        auto indexing = std::make_unique<index::VectorMemIndex>(knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
-                                                                knowhere::metric::L2, IndexMode::MODE_CPU);
+        auto indexing = std::make_unique<index::VectorMemNMIndex>(knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+                                                                  knowhere::metric::L2, IndexMode::MODE_CPU);
         auto dataset = knowhere::GenDataset(source->get_size_per_chunk(), dim, chunk.data());
         indexing->BuildWithDataset(dataset, conf);
         data_[chunk_id] = std::move(indexing);
