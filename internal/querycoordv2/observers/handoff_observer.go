@@ -120,6 +120,7 @@ func (ob *HandoffObserver) Unregister(ctx context.Context, collectionIDs ...int6
 	for segmentID, event := range ob.handoffEvents {
 		if collectionSet.Contain(event.Segment.GetCollectionID()) {
 			delete(ob.handoffEvents, segmentID)
+			ob.cleanEvent(ctx, event.Segment)
 		}
 	}
 }

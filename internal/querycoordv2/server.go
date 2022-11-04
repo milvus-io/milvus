@@ -273,23 +273,25 @@ func (s *Server) initMeta() error {
 
 func (s *Server) initObserver() {
 	log.Info("init observers")
-	s.collectionObserver = observers.NewCollectionObserver(
-		s.dist,
-		s.meta,
-		s.targetMgr,
-	)
-	s.leaderObserver = observers.NewLeaderObserver(
-		s.dist,
-		s.meta,
-		s.targetMgr,
-		s.cluster,
-	)
 	s.handoffObserver = observers.NewHandoffObserver(
 		s.store,
 		s.meta,
 		s.dist,
 		s.targetMgr,
 		s.broker,
+	)
+	s.collectionObserver = observers.NewCollectionObserver(
+		s.dist,
+		s.meta,
+		s.targetMgr,
+		s.broker,
+		s.handoffObserver,
+	)
+	s.leaderObserver = observers.NewLeaderObserver(
+		s.dist,
+		s.meta,
+		s.targetMgr,
+		s.cluster,
 	)
 }
 
@@ -518,18 +520,13 @@ func (s *Server) recoverCollectionTargets(ctx context.Context, collection int64)
 	}
 
 	s.handoffObserver.Register(collection)
-	err = utils.RegisterTargets(
+	return utils.RegisterTargets(
 		ctx,
 		s.targetMgr,
 		s.broker,
 		collection,
 		partitions,
 	)
-	if err != nil {
-		return err
-	}
-	s.handoffObserver.StartHandoff(collection)
-	return nil
 }
 
 func (s *Server) watchNodes(revision int64) {

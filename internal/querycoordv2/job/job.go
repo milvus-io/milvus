@@ -218,7 +218,6 @@ func (job *LoadCollectionJob) Execute() error {
 		log.Error(msg, zap.Error(err))
 		return utils.WrapError(msg, err)
 	}
-	job.handoffObserver.StartHandoff(job.CollectionID())
 
 	err = job.meta.CollectionManager.PutCollection(&meta.Collection{
 		CollectionLoadInfo: &querypb.CollectionLoadInfo{
@@ -242,7 +241,7 @@ func (job *LoadCollectionJob) Execute() error {
 func (job *LoadCollectionJob) PostExecute() {
 	if job.Error() != nil && !job.meta.Exist(job.CollectionID()) {
 		job.meta.ReplicaManager.RemoveCollection(job.CollectionID())
-		job.handoffObserver.Unregister(job.ctx)
+		job.handoffObserver.Unregister(job.ctx, job.CollectionID())
 		job.targetMgr.RemoveCollection(job.req.GetCollectionID())
 	}
 }
