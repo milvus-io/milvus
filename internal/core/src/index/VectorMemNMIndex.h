@@ -20,41 +20,42 @@
 #include <memory>
 #include <string>
 #include <vector>
-#include <boost/dynamic_bitset.hpp>
 
-#include "index/VectorIndex.h"
+#include "index/Utils.h"
+#include "index/VectorMemIndex.h"
 
 namespace milvus::index {
 
-class VectorMemIndex : public VectorIndex {
+class VectorMemNMIndex : public VectorMemIndex {
  public:
-    explicit VectorMemIndex(const IndexType& index_type, const MetricType& metric_type, const IndexMode& index_mode);
+    explicit VectorMemNMIndex(const IndexType& index_type, const MetricType& metric_type, const IndexMode& index_mode)
+        : VectorMemIndex(index_type, metric_type, index_mode) {
+        AssertInfo(is_in_nm_list(index_type), "not valid nm index type");
+    }
 
     BinarySet
     Serialize(const Config& config) override;
 
     void
-    Load(const BinarySet& binary_set, const Config& config = {}) override;
-
-    void
     BuildWithDataset(const DatasetPtr& dataset, const Config& config = {}) override;
 
-    int64_t
-    Count() override {
-        return index_->Count();
-    }
+    void
+    Load(const BinarySet& binary_set, const Config& config = {}) override;
 
     std::unique_ptr<SearchResult>
     Query(const DatasetPtr dataset, const SearchInfo& search_info, const BitsetView& bitset) override;
 
- protected:
+ private:
     void
-    parse_config(Config& config);
+    store_raw_data(const knowhere::DatasetPtr& dataset);
 
- protected:
-    Config config_;
-    knowhere::VecIndexPtr index_ = nullptr;
+    void
+    LoadRawData();
+
+ private:
+    std::vector<uint8_t> raw_data_;
+    std::once_flag raw_data_loaded_;
 };
 
-using VectorMemIndexPtr = std::unique_ptr<VectorMemIndex>;
+using VectorMemNMIndexPtr = std::unique_ptr<VectorMemNMIndex>;
 }  // namespace milvus::index
