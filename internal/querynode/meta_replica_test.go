@@ -145,7 +145,7 @@ func TestMetaReplica_segment(t *testing.T) {
 
 		const segmentNum = 3
 		for i := 0; i < segmentNum; i++ {
-			err := replica.addSegment(UniqueID(i), defaultPartitionID, defaultCollectionID, "", defaultSegmentVersion, segmentTypeGrowing)
+			err := replica.addSegment(UniqueID(i), defaultPartitionID, defaultCollectionID, "", defaultSegmentVersion, defaultSegmentStartPosition, segmentTypeGrowing)
 			assert.NoError(t, err)
 			targetSeg, err := replica.getSegmentByID(UniqueID(i), segmentTypeGrowing)
 			assert.NoError(t, err)
@@ -160,7 +160,7 @@ func TestMetaReplica_segment(t *testing.T) {
 
 		const segmentNum = 3
 		for i := 0; i < segmentNum; i++ {
-			err := replica.addSegment(UniqueID(i), defaultPartitionID, defaultCollectionID, "", defaultSegmentVersion, segmentTypeGrowing)
+			err := replica.addSegment(UniqueID(i), defaultPartitionID, defaultCollectionID, "", defaultSegmentVersion, defaultSegmentStartPosition, segmentTypeGrowing)
 			assert.NoError(t, err)
 			targetSeg, err := replica.getSegmentByID(UniqueID(i), segmentTypeGrowing)
 			assert.NoError(t, err)
@@ -176,7 +176,7 @@ func TestMetaReplica_segment(t *testing.T) {
 
 		const segmentNum = 3
 		for i := 0; i < segmentNum; i++ {
-			err := replica.addSegment(UniqueID(i), defaultPartitionID, defaultCollectionID, "", defaultSegmentVersion, segmentTypeGrowing)
+			err := replica.addSegment(UniqueID(i), defaultPartitionID, defaultCollectionID, "", defaultSegmentVersion, defaultSegmentStartPosition, segmentTypeGrowing)
 			assert.NoError(t, err)
 			targetSeg, err := replica.getSegmentByID(UniqueID(i), segmentTypeGrowing)
 			assert.NoError(t, err)
@@ -195,10 +195,10 @@ func TestMetaReplica_segment(t *testing.T) {
 		assert.NoError(t, err)
 		defer replica.freeAll()
 
-		err = replica.addSegment(defaultSegmentID, defaultPartitionID, defaultCollectionID, "", defaultSegmentVersion, segmentTypeGrowing)
+		err = replica.addSegment(defaultSegmentID, defaultPartitionID, defaultCollectionID, "", defaultSegmentVersion, defaultSegmentStartPosition, segmentTypeGrowing)
 		assert.NoError(t, err)
 
-		err = replica.addSegment(defaultSegmentID, defaultPartitionID, defaultCollectionID, "", defaultSegmentVersion, segmentTypeGrowing)
+		err = replica.addSegment(defaultSegmentID, defaultPartitionID, defaultCollectionID, "", defaultSegmentVersion, defaultSegmentStartPosition, segmentTypeGrowing)
 		assert.Error(t, err)
 	})
 
@@ -208,7 +208,7 @@ func TestMetaReplica_segment(t *testing.T) {
 		defer replica.freeAll()
 
 		invalidType := commonpb.SegmentState_NotExist
-		err = replica.addSegment(defaultSegmentID, defaultPartitionID, defaultCollectionID, "", defaultSegmentVersion, invalidType)
+		err = replica.addSegment(defaultSegmentID, defaultPartitionID, defaultCollectionID, "", defaultSegmentVersion, defaultSegmentStartPosition, invalidType)
 		assert.Error(t, err)
 		_, err = replica.getSegmentByID(defaultSegmentID, invalidType)
 		assert.Error(t, err)
@@ -245,12 +245,12 @@ func TestMetaReplica_segment(t *testing.T) {
 			},
 		}
 
-		segment1, err := newSegment(collection, UniqueID(1), defaultPartitionID, defaultCollectionID, "", segmentTypeGrowing, defaultSegmentVersion)
+		segment1, err := newSegment(collection, UniqueID(1), defaultPartitionID, defaultCollectionID, "", segmentTypeGrowing, defaultSegmentVersion, defaultSegmentStartPosition)
 		assert.NoError(t, err)
 		err = replica.setSegment(segment1)
 		assert.NoError(t, err)
 
-		segment2, err := newSegment(collection, UniqueID(2), defaultPartitionID, defaultCollectionID, "", segmentTypeSealed, defaultSegmentVersion)
+		segment2, err := newSegment(collection, UniqueID(2), defaultPartitionID, defaultCollectionID, "", segmentTypeSealed, defaultSegmentVersion, defaultSegmentStartPosition)
 		assert.NoError(t, err)
 		segment2.setIndexedFieldInfo(fieldID, indexInfo)
 		err = replica.setSegment(segment2)
@@ -277,22 +277,22 @@ func TestMetaReplica_segment(t *testing.T) {
 		replica.addPartition(defaultCollectionID, defaultPartitionID)
 		replica.addPartition(defaultCollectionID, defaultPartitionID+1)
 
-		segment1, err := newSegment(collection, UniqueID(1), defaultPartitionID, defaultCollectionID, "channel1", segmentTypeGrowing, defaultSegmentVersion)
+		segment1, err := newSegment(collection, UniqueID(1), defaultPartitionID, defaultCollectionID, "channel1", segmentTypeGrowing, defaultSegmentVersion, defaultSegmentStartPosition)
 		assert.NoError(t, err)
 		err = replica.setSegment(segment1)
 		assert.NoError(t, err)
 
-		segment2, err := newSegment(collection, UniqueID(2), defaultPartitionID+1, defaultCollectionID, "channel2", segmentTypeGrowing, defaultSegmentVersion)
+		segment2, err := newSegment(collection, UniqueID(2), defaultPartitionID+1, defaultCollectionID, "channel2", segmentTypeGrowing, defaultSegmentVersion, defaultSegmentStartPosition)
 		assert.NoError(t, err)
 		err = replica.setSegment(segment2)
 		assert.NoError(t, err)
 
-		segment3, err := newSegment(collection, UniqueID(3), defaultPartitionID+1, defaultCollectionID, "channel2", segmentTypeGrowing, defaultSegmentVersion)
+		segment3, err := newSegment(collection, UniqueID(3), defaultPartitionID+1, defaultCollectionID, "channel2", segmentTypeGrowing, defaultSegmentVersion, defaultSegmentStartPosition)
 		assert.NoError(t, err)
 		err = replica.setSegment(segment3)
 		assert.NoError(t, err)
 
-		segment4, err := newSegment(collection, UniqueID(4), defaultPartitionID, defaultCollectionID, "channel1", segmentTypeSealed, defaultSegmentVersion)
+		segment4, err := newSegment(collection, UniqueID(4), defaultPartitionID, defaultCollectionID, "channel1", segmentTypeSealed, defaultSegmentVersion, defaultSegmentStartPosition)
 		assert.NoError(t, err)
 		err = replica.setSegment(segment4)
 		assert.NoError(t, err)
@@ -344,13 +344,13 @@ func TestMetaReplica_BlackList(t *testing.T) {
 	replica.addPartition(defaultCollectionID, defaultPartitionID)
 	replica.addPartition(defaultCollectionID, defaultPartitionID+1)
 
-	segment1, err := newSegment(collection, UniqueID(1), defaultPartitionID, defaultCollectionID, "channel1", segmentTypeSealed, defaultSegmentVersion)
+	segment1, err := newSegment(collection, UniqueID(1), defaultPartitionID, defaultCollectionID, "channel1", segmentTypeSealed, defaultSegmentVersion, defaultSegmentStartPosition)
 	assert.NoError(t, err)
 
-	segment2, err := newSegment(collection, UniqueID(2), defaultPartitionID, defaultCollectionID, "channel2", segmentTypeSealed, defaultSegmentVersion)
+	segment2, err := newSegment(collection, UniqueID(2), defaultPartitionID, defaultCollectionID, "channel2", segmentTypeSealed, defaultSegmentVersion, defaultSegmentStartPosition)
 	assert.NoError(t, err)
 
-	segment3, err := newSegment(collection, UniqueID(3), defaultPartitionID, defaultCollectionID, "channel2", segmentTypeGrowing, defaultSegmentVersion)
+	segment3, err := newSegment(collection, UniqueID(3), defaultPartitionID, defaultCollectionID, "channel2", segmentTypeGrowing, defaultSegmentVersion, defaultSegmentStartPosition)
 	assert.NoError(t, err)
 
 	replica.addSegmentsLoadingList([]UniqueID{1, 2, 3})

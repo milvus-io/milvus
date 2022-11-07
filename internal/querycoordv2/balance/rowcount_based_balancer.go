@@ -113,7 +113,7 @@ func (b *RowCountBasedBalancer) balanceReplica(replica *meta.Replica) ([]Segment
 		segments := b.dist.SegmentDistManager.GetByCollectionAndNode(replica.GetCollectionID(), nid)
 		// Only balance segments in targets
 		segments = lo.Filter(segments, func(segment *meta.Segment, _ int) bool {
-			return b.targetMgr.GetSegment(segment.GetID()) != nil
+			return b.targetMgr.GetHistoricalSegment(segment.GetCollectionID(), segment.GetID(), meta.CurrentTarget) != nil
 		})
 		cnt := 0
 		for _, s := range segments {

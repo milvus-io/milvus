@@ -42,6 +42,7 @@ func TestFlowGraphDeleteNode_delete(t *testing.T) {
 			defaultCollectionID,
 			defaultDMLChannel,
 			defaultSegmentVersion,
+			defaultSegmentStartPosition,
 			segmentTypeSealed)
 		assert.NoError(t, err)
 
@@ -65,6 +66,7 @@ func TestFlowGraphDeleteNode_delete(t *testing.T) {
 			defaultCollectionID,
 			defaultDMLChannel,
 			defaultSegmentVersion,
+			defaultSegmentStartPosition,
 			segmentTypeSealed)
 		assert.NoError(t, err)
 
@@ -101,6 +103,7 @@ func TestFlowGraphDeleteNode_delete(t *testing.T) {
 			defaultCollectionID,
 			defaultDMLChannel,
 			defaultSegmentVersion,
+			defaultSegmentStartPosition,
 			segmentTypeGrowing)
 		assert.NoError(t, err)
 
@@ -123,6 +126,7 @@ func TestFlowGraphDeleteNode_operate(t *testing.T) {
 			defaultCollectionID,
 			defaultDMLChannel,
 			defaultSegmentVersion,
+			defaultSegmentStartPosition,
 			segmentTypeSealed)
 		assert.NoError(t, err)
 
@@ -203,6 +207,7 @@ func TestFlowGraphDeleteNode_operate(t *testing.T) {
 			defaultCollectionID,
 			defaultDMLChannel,
 			defaultSegmentVersion,
+			defaultSegmentStartPosition,
 			segmentTypeSealed)
 		assert.NoError(t, err)
 
@@ -229,6 +234,7 @@ func TestFlowGraphDeleteNode_operate(t *testing.T) {
 			defaultCollectionID,
 			defaultDMLChannel,
 			defaultSegmentVersion,
+			defaultSegmentStartPosition,
 			segmentTypeSealed)
 		assert.NoError(t, err)
 
@@ -256,6 +262,7 @@ func TestFlowGraphDeleteNode_operate(t *testing.T) {
 			defaultCollectionID,
 			defaultDMLChannel,
 			defaultSegmentVersion,
+			defaultSegmentStartPosition,
 			segmentTypeSealed)
 		assert.NoError(t, err)
 
@@ -282,6 +289,7 @@ func TestFlowGraphDeleteNode_operate(t *testing.T) {
 			defaultCollectionID,
 			defaultDMLChannel,
 			defaultSegmentVersion,
+			defaultSegmentStartPosition,
 			segmentTypeSealed)
 		assert.NoError(t, err)
 

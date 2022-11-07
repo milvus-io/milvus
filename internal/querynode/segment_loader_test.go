@@ -229,7 +229,9 @@ func TestSegmentLoader_loadSegmentFieldsData(t *testing.T) {
 			defaultCollectionID,
 			defaultDMLChannel,
 			segmentTypeSealed,
-			defaultSegmentVersion)
+			defaultSegmentVersion,
+			defaultSegmentStartPosition,
+		)
 		assert.Nil(t, err)
 
 		binlog, _, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, schema)
@@ -383,7 +385,9 @@ func TestSegmentLoader_invalid(t *testing.T) {
 			defaultCollectionID,
 			defaultDMLChannel,
 			segmentTypeSealed,
-			defaultSegmentVersion)
+			defaultSegmentVersion,
+			defaultSegmentStartPosition,
+		)
 		assert.Nil(t, err)
 
 		binlog, _, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, schema)
@@ -422,7 +426,9 @@ func TestSegmentLoader_invalid(t *testing.T) {
 			defaultCollectionID,
 			defaultDMLChannel,
 			segmentTypeSealed,
-			defaultSegmentVersion)
+			defaultSegmentVersion,
+			defaultSegmentStartPosition,
+		)
 		assert.Nil(t, err)
 
 		err = loader.loadFieldIndexData(ctx, segment, &querypb.FieldIndexInfo{
@@ -462,7 +468,7 @@ func TestSegmentLoader_testLoadGrowing(t *testing.T) {
 		collection, err := node.metaReplica.getCollectionByID(defaultCollectionID)
 		assert.NoError(t, err)
 
-		segment, err := newSegment(collection, defaultSegmentID+1, defaultPartitionID, defaultCollectionID, defaultDMLChannel, segmentTypeGrowing, defaultSegmentVersion)
+		segment, err := newSegment(collection, defaultSegmentID+1, defaultPartitionID, defaultCollectionID, defaultDMLChannel, segmentTypeGrowing, defaultSegmentVersion, defaultSegmentStartPosition)
 		assert.Nil(t, err)
 
 		insertData, err := genInsertData(defaultMsgLength, collection.schema)
@@ -491,7 +497,7 @@ func TestSegmentLoader_testLoadGrowing(t *testing.T) {
 		collection, err := node.metaReplica.getCollectionByID(defaultCollectionID)
 		assert.NoError(t, err)
 
-		segment, err := newSegment(collection, defaultSegmentID+1, defaultPartitionID, defaultCollectionID, defaultDMLChannel, segmentTypeGrowing, defaultSegmentVersion)
+		segment, err := newSegment(collection, defaultSegmentID+1, defaultPartitionID, defaultCollectionID, defaultDMLChannel, segmentTypeGrowing, defaultSegmentVersion, defaultSegmentStartPosition)
 		assert.Nil(t, err)
 
 		insertData, err := genInsertData(defaultMsgLength, collection.schema)

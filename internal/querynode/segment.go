@@ -50,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -77,10 +78,11 @@ type Segment struct {
 	mut        sync.RWMutex // protects segmentPtr
 	segmentPtr C.CSegmentInterface
 
-	segmentID    UniqueID
-	partitionID  UniqueID
-	collectionID UniqueID
-	version      UniqueID
+	segmentID     UniqueID
+	partitionID   UniqueID
+	collectionID  UniqueID
+	version       UniqueID
+	startPosition *internalpb.MsgPosition // for growing segment release
 
 	vChannelID   Channel
 	lastMemSize  int64
@@ -168,7 +170,9 @@ func newSegment(collection *Collection,
 	collectionID UniqueID,
 	vChannelID Channel,
 	segType segmentType,
-	version UniqueID) (*Segment, error) {
+	version UniqueID,
+	startPosition *internalpb.MsgPosition,
+) (*Segment, error) {
 	/*
 		CSegmentInterface
 		NewSegment(CCollection collection, uint64_t segment_id, SegmentType seg_type);
@@ -203,6 +207,7 @@ func newSegment(collection *Collection,
 		partitionID:       partitionID,
 		collectionID:      collectionID,
 		version:           version,
+		startPosition:     startPosition,
 		vChannelID:        vChannelID,
 		indexedFieldInfos: typeutil.NewConcurrentMap[int64, *IndexedFieldInfo](),
 		recentlyModified:  atomic.NewBool(false),

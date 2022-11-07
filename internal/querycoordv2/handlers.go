@@ -88,7 +88,7 @@ func (s *Server) balanceSegments(ctx context.Context, req *querypb.LoadBalanceRe
 	// Only balance segments in targets
 	segments := s.dist.SegmentDistManager.GetByCollectionAndNode(req.GetCollectionID(), srcNode)
 	segments = lo.Filter(segments, func(segment *meta.Segment, _ int) bool {
-		return s.targetMgr.GetSegment(segment.GetID()) != nil
+		return s.targetMgr.GetHistoricalSegment(segment.GetCollectionID(), segment.GetID(), meta.CurrentTarget) != nil
 	})
 	allSegments := make(map[int64]*meta.Segment)
 	for _, segment := range segments {
@@ -290,7 +290,7 @@ func (s *Server) tryGetNodesMetrics(ctx context.Context, req *milvuspb.GetMetric
 func (s *Server) fillReplicaInfo(replica *meta.Replica, withShardNodes bool) (*milvuspb.ReplicaInfo, error) {
 	info := utils.Replica2ReplicaInfo(replica.Replica)
 
-	channels := s.targetMgr.GetDmChannelsByCollection(replica.GetCollectionID())
+	channels := s.targetMgr.GetDmChannelsByCollection(replica.GetCollectionID(), meta.CurrentTarget)
 	if len(channels) == 0 {
 		msg := "failed to get channels, collection not loaded"
 		log.Warn(msg)
