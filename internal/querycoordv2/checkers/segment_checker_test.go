@@ -18,23 +18,29 @@ package checkers
 
 import (
 	"context"
+	"sort"
 	"testing"
 
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/suite"
+
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/etcd"
-	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/suite"
 )
 
 type SegmentCheckerTestSuite struct {
 	suite.Suite
 	kv      *etcdkv.EtcdKV
 	checker *SegmentChecker
+	meta    *meta.Meta
+	broker  *meta.MockBroker
 }
 
 func (suite *SegmentCheckerTestSuite) SetupSuite() {
@@ -51,13 +57,13 @@ func (suite *SegmentCheckerTestSuite) SetupTest() {
 	// meta
 	store := meta.NewMetaStore(suite.kv)
 	idAllocator := RandomIncrementIDAllocator()
-	testMeta := meta.NewMeta(idAllocator, store)
-
+	suite.meta = meta.NewMeta(idAllocator, store)
 	distManager := meta.NewDistributionManager()
-	targetManager := meta.NewTargetManager()
+	suite.broker = meta.NewMockBroker(suite.T())
+	targetManager := meta.NewTargetManager(suite.broker, suite.meta)
 
 	balancer := suite.createMockBalancer()
-	suite.checker = NewSegmentChecker(testMeta, distManager, targetManager, balancer)
+	suite.checker = NewSegmentChecker(suite.meta, distManager, targetManager, balancer)
 }
 
 func (suite *SegmentCheckerTestSuite) TearDownTest() {
@@ -89,11 +95,19 @@ func (suite *SegmentCheckerTestSuite) TestLoadSegments() {
 	checker.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
 
 	// set target
-	checker.targetMgr.AddSegment(utils.CreateTestSegmentInfo(1, 1, 1, "test-insert-channel"))
+	segments := []*datapb.SegmentBinlogs{
+		{
+			SegmentID:     1,
+			InsertChannel: "test-insert-channel",
+		},
+	}
+	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, int64(1), int64(1)).Return(
+		nil, segments, nil)
+	checker.targetMgr.UpdateCollectionNextTargetWithPartitions(int64(1), int64(1))
 
 	// set dist
 	checker.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
-	checker.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, []int64{}))
+	checker.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, map[int64]*meta.Segment{}))
 
 	tasks := checker.Check(context.TODO())
 	suite.Len(tasks, 1)
@@ -114,7 +128,7 @@ func (suite *SegmentCheckerTestSuite) TestReleaseSegments() {
 
 	// set dist
 	checker.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
-	checker.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, []int64{}))
+	checker.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, map[int64]*meta.Segment{}))
 	checker.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 2, 1, 1, "test-insert-channel"))
 
 	tasks := checker.Check(context.TODO())
@@ -134,11 +148,19 @@ func (suite *SegmentCheckerTestSuite) TestReleaseRepeatedSegments() {
 	checker.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
 
 	// set target
-	checker.targetMgr.AddSegment(utils.CreateTestSegmentInfo(1, 1, 1, "test-insert-channel"))
+	segments := []*datapb.SegmentBinlogs{
+		{
+			SegmentID:     1,
+			InsertChannel: "test-insert-channel",
+		},
+	}
+	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, int64(1), int64(1)).Return(
+		nil, segments, nil)
+	checker.targetMgr.UpdateCollectionNextTargetWithPartitions(int64(1), int64(1))
 
 	// set dist
 	checker.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
-	checker.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{1: 2}, []int64{}))
+	checker.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{1: 2}, map[int64]*meta.Segment{}))
 	checker.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 1, 1, 1, "test-insert-channel"))
 	checker.dist.SegmentDistManager.Update(2, utils.CreateTestSegment(1, 1, 1, 1, 2, "test-insert-channel"))
 
@@ -153,7 +175,7 @@ func (suite *SegmentCheckerTestSuite) TestReleaseRepeatedSegments() {
 	suite.EqualValues(1, action.Node())
 
 	// test less version exist on leader
-	checker.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{1: 1}, []int64{}))
+	checker.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{1: 1}, map[int64]*meta.Segment{}))
 	tasks = checker.Check(context.TODO())
 	suite.Len(tasks, 0)
 }
@@ -165,16 +187,43 @@ func (suite *SegmentCheckerTestSuite) TestReleaseGrowingSegments() {
 	checker.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
 	checker.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
 
-	segment := utils.CreateTestSegmentInfo(1, 1, 3, "test-insert-channel")
-	segment.CompactionFrom = append(segment.CompactionFrom, 2)
-	checker.targetMgr.AddSegment(segment)
+	segments := []*datapb.SegmentBinlogs{
+		{
+			SegmentID:     3,
+			InsertChannel: "test-insert-channel",
+		},
+	}
+	channels := []*datapb.VchannelInfo{
+		{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel",
+			SeekPosition: &internalpb.MsgPosition{Timestamp: 10},
+		},
+	}
+	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, int64(1), int64(1)).Return(
+		channels, segments, nil)
+	checker.targetMgr.UpdateCollectionNextTargetWithPartitions(int64(1), int64(1))
+	checker.targetMgr.UpdateCollectionCurrentTarget(int64(1), int64(1))
 
-	checker.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
-	checker.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{3: 2}, []int64{2, 3}))
-	checker.dist.SegmentDistManager.Update(2, utils.CreateTestSegment(1, 1, 3, 2, 1, "test-insert-channel"))
+	growingSegments := make(map[int64]*meta.Segment)
+	growingSegments[2] = utils.CreateTestSegment(1, 1, 2, 2, 0, "test-insert-channel")
+	growingSegments[2].SegmentInfo.StartPosition = &internalpb.MsgPosition{Timestamp: 2}
+	growingSegments[3] = utils.CreateTestSegment(1, 1, 3, 2, 1, "test-insert-channel")
+	growingSegments[3].SegmentInfo.StartPosition = &internalpb.MsgPosition{Timestamp: 3}
+	growingSegments[4] = utils.CreateTestSegment(1, 1, 4, 2, 1, "test-insert-channel")
+	growingSegments[4].SegmentInfo.StartPosition = &internalpb.MsgPosition{Timestamp: 11}
+
+	dmChannel := utils.CreateTestChannel(1, 2, 1, "test-insert-channel")
+	dmChannel.UnflushedSegmentIds = []int64{2, 3}
+	checker.dist.ChannelDistManager.Update(2, dmChannel)
+	checker.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{3: 2}, growingSegments))
+	checker.dist.SegmentDistManager.Update(2, utils.CreateTestSegment(1, 1, 3, 2, 2, "test-insert-channel"))
 
 	tasks := checker.Check(context.TODO())
 	suite.Len(tasks, 2)
+	sort.Slice(tasks, func(i, j int) bool {
+		return tasks[i].Actions()[0].(*task.SegmentAction).SegmentID() < tasks[j].Actions()[0].(*task.SegmentAction).SegmentID()
+	})
 	suite.Len(tasks[0].Actions(), 1)
 	action, ok := tasks[0].Actions()[0].(*task.SegmentAction)
 	suite.True(ok)

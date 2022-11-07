@@ -19,8 +19,9 @@ package meta
 import (
 	"sync"
 
+	"github.com/samber/lo"
+
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 type LeaderView struct {
@@ -28,7 +29,7 @@ type LeaderView struct {
 	CollectionID    int64
 	Channel         string
 	Segments        map[int64]*querypb.SegmentDist
-	GrowingSegments typeutil.UniqueSet
+	GrowingSegments map[int64]*Segment
 }
 
 func (view *LeaderView) Clone() *LeaderView {
@@ -36,7 +37,11 @@ func (view *LeaderView) Clone() *LeaderView {
 	for k, v := range view.Segments {
 		segments[k] = v
 	}
-	growings := typeutil.NewUniqueSet(view.GrowingSegments.Collect()...)
+
+	growings := make(map[int64]*Segment)
+	for k, v := range view.GrowingSegments {
+		growings[k] = v
+	}
 
 	return &LeaderView{
 		ID:              view.ID,
@@ -75,7 +80,7 @@ func (mgr *LeaderViewManager) GetSegmentByNode(nodeID int64) []int64 {
 				}
 			}
 			if leaderID == nodeID {
-				segments = append(segments, view.GrowingSegments.Collect()...)
+				segments = append(segments, lo.Keys(view.GrowingSegments)...)
 			}
 		}
 	}
@@ -104,7 +109,7 @@ func (mgr *LeaderViewManager) GetSegmentDist(segmentID int64) []int64 {
 			if ok {
 				nodes = append(nodes, version.NodeID)
 			}
-			if view.GrowingSegments.Contain(segmentID) {
+			if _, ok := view.GrowingSegments[segmentID]; ok {
 				nodes = append(nodes, leaderID)
 			}
 		}
@@ -135,7 +140,7 @@ func (mgr *LeaderViewManager) GetGrowingSegmentDist(segmentID int64) []int64 {
 	nodes := make([]int64, 0)
 	for leaderID, views := range mgr.views {
 		for _, view := range views {
-			if view.GrowingSegments.Contain(segmentID) {
+			if _, ok := view.GrowingSegments[segmentID]; ok {
 				nodes = append(nodes, leaderID)
 				break
 			}
@@ -151,12 +156,31 @@ func (mgr *LeaderViewManager) GetLeadersByGrowingSegment(segmentID int64) *Leade
 
 	for _, views := range mgr.views {
 		for _, view := range views {
-			if view.GrowingSegments.Contain(segmentID) {
+			if _, ok := view.GrowingSegments[segmentID]; ok {
 				return view
 			}
 		}
 	}
 	return nil
+}
+
+// GetGrowingSegmentDistByCollectionAndNode returns all segments of the given collection and node.
+func (mgr *LeaderViewManager) GetGrowingSegmentDistByCollectionAndNode(collectionID, nodeID int64) map[int64]*Segment {
+	mgr.rwmutex.RLock()
+	defer mgr.rwmutex.RUnlock()
+
+	segments := make(map[int64]*Segment, 0)
+	if viewsOnNode, ok := mgr.views[nodeID]; ok {
+		for _, view := range viewsOnNode {
+			if view.CollectionID == collectionID {
+				for ID, segment := range view.GrowingSegments {
+					segments[ID] = segment
+				}
+			}
+		}
+	}
+
+	return segments
 }
 
 // GetSegmentDist returns the list of nodes the given segment on

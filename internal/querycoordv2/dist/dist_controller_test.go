@@ -21,15 +21,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/suite"
+	"go.uber.org/atomic"
+
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
+	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/suite"
-	"go.uber.org/atomic"
 )
 
 type DistControllerTestSuite struct {
@@ -37,17 +40,37 @@ type DistControllerTestSuite struct {
 	controller    *Controller
 	mockCluster   *session.MockCluster
 	mockScheduler *task.MockScheduler
+
+	kv     *etcdkv.EtcdKV
+	meta   *meta.Meta
+	broker *meta.MockBroker
 }
 
 func (suite *DistControllerTestSuite) SetupTest() {
 	Params.Init()
 
+	var err error
+	config := GenerateEtcdConfig()
+	cli, err := etcd.GetEtcdClient(&config)
+	suite.Require().NoError(err)
+	suite.kv = etcdkv.NewEtcdKV(cli, config.MetaRootPath)
+
+	// meta
+	store := meta.NewMetaStore(suite.kv)
+	idAllocator := RandomIncrementIDAllocator()
+	suite.meta = meta.NewMeta(idAllocator, store)
+
 	suite.mockCluster = session.NewMockCluster(suite.T())
 	nodeManager := session.NewNodeManager()
 	distManager := meta.NewDistributionManager()
-	targetManager := meta.NewTargetManager()
+	suite.broker = meta.NewMockBroker(suite.T())
+	targetManager := meta.NewTargetManager(suite.broker, suite.meta)
 	suite.mockScheduler = task.NewMockScheduler(suite.T())
 	suite.controller = NewDistController(suite.mockCluster, nodeManager, distManager, targetManager, suite.mockScheduler)
+}
+
+func (suite *DistControllerTestSuite) TearDownSuite() {
+	suite.kv.Close()
 }
 
 func (suite *DistControllerTestSuite) TestStart() {

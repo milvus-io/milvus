@@ -27,6 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
@@ -40,6 +41,9 @@ type LeaderObserverTestSuite struct {
 	observer    *LeaderObserver
 	kv          *etcdkv.EtcdKV
 	mockCluster *session.MockCluster
+
+	meta   *meta.Meta
+	broker *meta.MockBroker
 }
 
 func (suite *LeaderObserverTestSuite) SetupSuite() {
@@ -56,12 +60,13 @@ func (suite *LeaderObserverTestSuite) SetupTest() {
 	// meta
 	store := meta.NewMetaStore(suite.kv)
 	idAllocator := RandomIncrementIDAllocator()
-	testMeta := meta.NewMeta(idAllocator, store)
+	suite.meta = meta.NewMeta(idAllocator, store)
+	suite.broker = meta.NewMockBroker(suite.T())
 
 	suite.mockCluster = session.NewMockCluster(suite.T())
 	distManager := meta.NewDistributionManager()
-	targetManager := meta.NewTargetManager()
-	suite.observer = NewLeaderObserver(distManager, testMeta, targetManager, suite.mockCluster)
+	targetManager := meta.NewTargetManager(suite.broker, suite.meta)
+	suite.observer = NewLeaderObserver(distManager, suite.meta, targetManager, suite.mockCluster)
 }
 
 func (suite *LeaderObserverTestSuite) TearDownTest() {
@@ -73,10 +78,25 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegments() {
 	observer := suite.observer
 	observer.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
 	observer.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
-	observer.target.AddSegment(utils.CreateTestSegmentInfo(1, 1, 1, "test-insert-channel"))
-	observer.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 1, 1, 1, "test-insert-channel"))
+	segments := []*datapb.SegmentBinlogs{
+		{
+			SegmentID:     1,
+			InsertChannel: "test-insert-channel",
+		},
+	}
+	channels := []*datapb.VchannelInfo{
+		{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel",
+		},
+	}
+	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, int64(1), int64(1)).Return(
+		channels, segments, nil)
+	observer.target.UpdateCollectionNextTargetWithPartitions(int64(1), int64(1))
+	observer.target.UpdateCollectionCurrentTarget(1)
+	observer.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 1, 2, 1, "test-insert-channel"))
 	observer.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
-	observer.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, []int64{}))
+	observer.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, map[int64]*meta.Segment{}))
 	expectReq := &querypb.SyncDistributionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_SyncDistribution,
@@ -113,13 +133,28 @@ func (suite *LeaderObserverTestSuite) TestIgnoreBalancedSegment() {
 	observer := suite.observer
 	observer.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
 	observer.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
-	observer.target.AddSegment(utils.CreateTestSegmentInfo(1, 1, 1, "test-insert-channel"))
+	segments := []*datapb.SegmentBinlogs{
+		{
+			SegmentID:     1,
+			InsertChannel: "test-insert-channel",
+		},
+	}
+	channels := []*datapb.VchannelInfo{
+		{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel",
+		},
+	}
+	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, int64(1), int64(1)).Return(
+		channels, segments, nil)
+	observer.target.UpdateCollectionNextTargetWithPartitions(int64(1), int64(1))
+	observer.target.UpdateCollectionCurrentTarget(1)
 	observer.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 1, 1, 1, "test-insert-channel"))
 	observer.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
 
 	// The leader view saw the segment on new node,
 	// but another nodes not yet
-	leaderView := utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, []int64{})
+	leaderView := utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, map[int64]*meta.Segment{})
 	leaderView.Segments[1] = &querypb.SegmentDist{
 		NodeID:  2,
 		Version: 2,
@@ -136,12 +171,27 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegmentsWithReplicas() {
 	observer.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 2))
 	observer.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
 	observer.meta.ReplicaManager.Put(utils.CreateTestReplica(2, 1, []int64{3, 4}))
-	observer.target.AddSegment(utils.CreateTestSegmentInfo(1, 1, 1, "test-insert-channel"))
+	segments := []*datapb.SegmentBinlogs{
+		{
+			SegmentID:     1,
+			InsertChannel: "test-insert-channel",
+		},
+	}
+	channels := []*datapb.VchannelInfo{
+		{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel",
+		},
+	}
+	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, int64(1), int64(1)).Return(
+		channels, segments, nil)
+	observer.target.UpdateCollectionNextTargetWithPartitions(int64(1), int64(1))
+	observer.target.UpdateCollectionCurrentTarget(1)
 	observer.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 1, 1, 1, "test-insert-channel"))
 	observer.dist.SegmentDistManager.Update(4, utils.CreateTestSegment(1, 1, 1, 4, 2, "test-insert-channel"))
 	observer.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
-	observer.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, []int64{}))
-	observer.dist.LeaderViewManager.Update(4, utils.CreateTestLeaderView(4, 1, "test-insert-channel", map[int64]int64{1: 4}, []int64{}))
+	observer.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, map[int64]*meta.Segment{}))
+	observer.dist.LeaderViewManager.Update(4, utils.CreateTestLeaderView(4, 1, "test-insert-channel", map[int64]int64{1: 4}, map[int64]*meta.Segment{}))
 	expectReq := &querypb.SyncDistributionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_SyncDistribution,
@@ -180,7 +230,7 @@ func (suite *LeaderObserverTestSuite) TestSyncRemovedSegments() {
 	observer.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
 
 	observer.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
-	observer.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{3: 2}, []int64{}))
+	observer.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{3: 2}, map[int64]*meta.Segment{}))
 
 	expectReq := &querypb.SyncDistributionRequest{
 		Base: &commonpb.MsgBase{

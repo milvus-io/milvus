@@ -111,5 +111,4 @@ type QueryCoordCatalog interface {
 	ReleasePartition(collection int64, partitions ...int64) error
 	ReleaseReplicas(collectionID int64) error
 	ReleaseReplica(collection, replica int64) error
-	RemoveHandoffEvent(segmentInfo *querypb.SegmentInfo) error
 }

@@ -48,8 +48,6 @@ type WatchStoreChan = clientv3.WatchChan
 // Store is used to save and get from object storage.
 type Store interface {
 	metastore.QueryCoordCatalog
-	WatchHandoffEvent(revision int64) WatchStoreChan
-	LoadHandoffWithRevision() ([]string, []string, int64, error)
 }
 
 type metaStore struct {
@@ -193,19 +191,6 @@ func (s metaStore) ReleaseReplicas(collectionID int64) error {
 func (s metaStore) ReleaseReplica(collection, replica int64) error {
 	key := encodeReplicaKey(collection, replica)
 	return s.cli.Remove(key)
-}
-
-func (s metaStore) WatchHandoffEvent(revision int64) WatchStoreChan {
-	return s.cli.WatchWithRevision(util.HandoffSegmentPrefix, revision)
-}
-
-func (s metaStore) RemoveHandoffEvent(info *querypb.SegmentInfo) error {
-	key := encodeHandoffEventKey(info.CollectionID, info.PartitionID, info.SegmentID)
-	return s.cli.Remove(key)
-}
-
-func (s metaStore) LoadHandoffWithRevision() ([]string, []string, int64, error) {
-	return s.cli.LoadWithRevision(util.HandoffSegmentPrefix)
 }
 
 func encodeCollectionLoadInfoKey(collection int64) string {

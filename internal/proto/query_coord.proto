@@ -218,6 +218,7 @@ message SegmentLoadInfo {
   repeated FieldIndexInfo index_infos = 11;
   int64 segment_size = 12;
   string insert_channel = 13;
+  internal.MsgPosition start_position = 14;
 }
 
 message FieldIndexInfo {
@@ -434,6 +435,7 @@ message LeaderView {
   string channel = 2;
   map<int64, SegmentDist> segment_dist = 3;
   repeated int64 growing_segmentIDs = 4;
+  map<int64, internal.MsgPosition> growing_segments = 5;
 }
 
 message SegmentDist {
