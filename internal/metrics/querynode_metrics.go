@@ -17,6 +17,8 @@
 package metrics
 
 import (
+	"fmt"
+
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -30,6 +32,30 @@ var (
 			Help:      "number of collections loaded",
 		}, []string{
 			nodeIDLabelName,
+		})
+
+	QueryNodeConsumeTimeTickLag = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "consume_tt_lag_ms",
+			Help:      "now time minus tt per physical channel",
+		}, []string{
+			nodeIDLabelName,
+			msgTypeLabelName,
+			collectionIDLabelName,
+		})
+
+	QueryNodeConsumerMsgCount = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "consume_msg_count",
+			Help:      "count of consumed msg",
+		}, []string{
+			nodeIDLabelName,
+			msgTypeLabelName,
+			collectionIDLabelName,
 		})
 
 	QueryNodeNumPartitions = prometheus.NewGaugeVec(
@@ -339,4 +365,27 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeNumEntities)
 	registry.MustRegister(QueryNodeConsumeCounter)
 	registry.MustRegister(QueryNodeExecuteCounter)
+	registry.MustRegister(QueryNodeConsumerMsgCount)
+	registry.MustRegister(QueryNodeConsumeTimeTickLag)
+}
+
+func CleanupQueryNodeCollectionMetrics(nodeID int64, collectionID int64) {
+	for _, label := range []string{DeleteLabel, InsertLabel} {
+		QueryNodeConsumerMsgCount.
+			Delete(
+				prometheus.Labels{
+					nodeIDLabelName:       fmt.Sprint(nodeID),
+					msgTypeLabelName:      label,
+					collectionIDLabelName: fmt.Sprint(collectionID),
+				})
+
+		QueryNodeConsumeTimeTickLag.
+			Delete(
+				prometheus.Labels{
+					nodeIDLabelName:       fmt.Sprint(nodeID),
+					msgTypeLabelName:      label,
+					collectionIDLabelName: fmt.Sprint(collectionID),
+				})
+	}
+
 }

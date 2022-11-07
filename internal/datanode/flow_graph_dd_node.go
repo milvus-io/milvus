@@ -20,8 +20,9 @@ import (
 	"context"
 	"fmt"
 	"reflect"
-	"strconv"
 	"sync/atomic"
+
+	"github.com/milvus-io/milvus/internal/util/timerecord"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/opentracing/opentracing-go"
@@ -141,6 +142,9 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 				log.Info("Stop compaction of vChannel", zap.String("vChannelName", ddn.vChannelName))
 				ddn.compactionExecutor.stopExecutingtaskByVChannelName(ddn.vChannelName)
 				fgMsg.dropCollection = true
+
+				pChan := funcutil.ToPhysicalChannel(ddn.vChannelName)
+				metrics.CleanupDataNodeCollectionMetrics(paramtable.GetNodeID(), ddn.collectionID, pChan)
 			}
 
 		case commonpb.MsgType_DropPartition:
@@ -172,7 +176,14 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 			}
 
 			rateCol.Add(metricsinfo.InsertConsumeThroughput, float64(proto.Size(&imsg.InsertRequest)))
-			metrics.DataNodeConsumeCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.InsertLabel).Add(float64(proto.Size(&imsg.InsertRequest)))
+
+			metrics.DataNodeConsumeBytesCount.
+				WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.InsertLabel).
+				Add(float64(proto.Size(&imsg.InsertRequest)))
+
+			metrics.DataNodeConsumeMsgCount.
+				WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.InsertLabel, fmt.Sprint(ddn.collectionID)).
+				Inc()
 
 			log.Debug("DDNode receive insert messages",
 				zap.Int("numRows", len(imsg.GetRowIDs())),
@@ -195,7 +206,14 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 				continue
 			}
 			rateCol.Add(metricsinfo.DeleteConsumeThroughput, float64(proto.Size(&dmsg.DeleteRequest)))
-			metrics.DataNodeConsumeCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.DeleteLabel).Add(float64(proto.Size(&dmsg.DeleteRequest)))
+
+			metrics.DataNodeConsumeBytesCount.
+				WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.DeleteLabel).
+				Add(float64(proto.Size(&dmsg.DeleteRequest)))
+
+			metrics.DataNodeConsumeMsgCount.
+				WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.DeleteLabel, fmt.Sprint(ddn.collectionID)).
+				Inc()
 			fgMsg.deleteMessages = append(fgMsg.deleteMessages, dmsg)
 		}
 	}
@@ -262,6 +280,8 @@ func (ddn *ddNode) isDropped(segID UniqueID) bool {
 }
 
 func (ddn *ddNode) forwardDeleteMsg(msgs []msgstream.TsMsg, minTs Timestamp, maxTs Timestamp) error {
+	tr := timerecord.NewTimeRecorder("forwardDeleteMsg")
+
 	if len(msgs) != 0 {
 		var msgPack = msgstream.MsgPack{
 			Msgs:    msgs,
@@ -275,6 +295,10 @@ func (ddn *ddNode) forwardDeleteMsg(msgs []msgstream.TsMsg, minTs Timestamp, max
 	if err := ddn.sendDeltaTimeTick(maxTs); err != nil {
 		return err
 	}
+
+	metrics.DataNodeForwardDeleteMsgTimeTaken.
+		WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).
+		Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return nil
 }
 

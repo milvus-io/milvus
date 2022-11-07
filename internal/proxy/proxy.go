@@ -291,8 +291,6 @@ func (node *Proxy) sendChannelsTimeTickLoop() {
 
 				maxTs := ts
 				for channel, ts := range stats {
-					physicalTs, _ := tsoutil.ParseHybridTs(ts)
-					metrics.ProxySyncTimeTick.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), channel).Set(float64(physicalTs))
 					channels = append(channels, channel)
 					tss = append(tss, ts)
 					if ts > maxTs {
@@ -311,8 +309,8 @@ func (node *Proxy) sendChannelsTimeTickLoop() {
 					Timestamps:       tss,
 					DefaultTimestamp: maxTs,
 				}
-				maxPhysicalTs, _ := tsoutil.ParseHybridTs(maxTs)
-				metrics.ProxySyncTimeTick.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "default").Set(float64(maxPhysicalTs))
+				sub := tsoutil.SubByNow(maxTs)
+				metrics.ProxySyncTimeTickLag.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "default").Set(float64(sub))
 				status, err := node.rootCoord.UpdateChannelTimeTick(node.ctx, req)
 				if err != nil {
 					log.Warn("sendChannelsTimeTickLoop.UpdateChannelTimeTick", zap.Error(err))
