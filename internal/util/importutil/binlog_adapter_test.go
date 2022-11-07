@@ -181,6 +181,12 @@ func Test_NewBinlogAdapter(t *testing.T) {
 	assert.NotNil(t, adapter)
 	assert.Nil(t, err)
 
+	// amend blockSize, blockSize should less than MaxSegmentSizeInMemory
+	adapter, err = NewBinlogAdapter(ctx, sampleSchema(), 2, MaxSegmentSizeInMemory+1, 1024, &MockChunkManager{}, flushFunc, 0, math.MaxUint64)
+	assert.NotNil(t, adapter)
+	assert.Nil(t, err)
+	assert.Equal(t, int64(MaxSegmentSizeInMemory), adapter.blockSize)
+
 	// no primary key
 	schema := &schemapb.CollectionSchema{
 		Name:        "schema",

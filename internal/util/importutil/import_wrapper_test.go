@@ -429,28 +429,25 @@ func Test_ImportWrapperColumnBased_numpy(t *testing.T) {
 	assert.Equal(t, 5, rowCounter.rowCount)
 	assert.Equal(t, commonpb.ImportState_ImportPersisted, importResult.State)
 
-	// parse error
-	content := []byte(`{
-		"field_bool": [true, false, true, true, true]
-	}`)
-
-	filePath := "rows_2.json"
+	// row count of fields not equal
+	filePath := "field_int8.npy"
+	content, err := CreateNumpyData([]int8{10})
+	assert.Nil(t, err)
 	err = cm.Write(ctx, filePath, content)
 	assert.NoError(t, err)
+	files[1] = filePath
 
 	importResult.State = commonpb.ImportState_ImportStarted
 	wrapper = NewImportWrapper(ctx, sampleSchema(), 2, 1, idAllocator, cm, importResult, reportFunc)
 	wrapper.SetCallbackFunctions(assignSegmentFunc, flushFunc, saveSegmentFunc)
 
-	files = make([]string, 0)
-	files = append(files, filePath)
 	err = wrapper.Import(files, DefaultImportOptions())
 	assert.NotNil(t, err)
 	assert.NotEqual(t, commonpb.ImportState_ImportPersisted, importResult.State)
 
 	// file doesn't exist
 	files = make([]string, 0)
-	files = append(files, "/dummy/dummy.json")
+	files = append(files, "/dummy/dummy.npy")
 	err = wrapper.Import(files, DefaultImportOptions())
 	assert.NotNil(t, err)
 }
@@ -819,6 +816,7 @@ func Test_ImportWrapperReportFailRowBased(t *testing.T) {
 	files := make([]string, 0)
 	files = append(files, filePath)
 
+	wrapper.reportImportAttempts = 2
 	wrapper.reportFunc = func(res *rootcoordpb.ImportResult) error {
 		return errors.New("mock error")
 	}
@@ -865,6 +863,7 @@ func Test_ImportWrapperReportFailColumnBased_numpy(t *testing.T) {
 	wrapper := NewImportWrapper(ctx, schema, 2, 1, idAllocator, cm, importResult, reportFunc)
 	wrapper.SetCallbackFunctions(assignSegmentFunc, flushFunc, saveSegmentFunc)
 
+	wrapper.reportImportAttempts = 2
 	wrapper.reportFunc = func(res *rootcoordpb.ImportResult) error {
 		return errors.New("mock error")
 	}
@@ -1130,4 +1129,52 @@ func Test_ImportWrapperSplitFieldsData(t *testing.T) {
 	assert.Equal(t, 0, len(importResult.AutoIds))
 	assert.Equal(t, 2, rowCounter.callTime)
 	assert.Equal(t, rowCount, rowCounter.rowCount)
+}
+
+func Test_ImportWrapperReportPersisted(t *testing.T) {
+	ctx := context.Background()
+
+	importResult := &rootcoordpb.ImportResult{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		TaskId:     1,
+		DatanodeId: 1,
+		State:      commonpb.ImportState_ImportStarted,
+		Segments:   make([]int64, 0),
+		AutoIds:    make([]int64, 0),
+		RowCount:   0,
+	}
+	reportFunc := func(res *rootcoordpb.ImportResult) error {
+		return nil
+	}
+	wrapper := NewImportWrapper(ctx, sampleSchema(), int32(2), int64(1024), nil, nil, importResult, reportFunc)
+	assert.NotNil(t, wrapper)
+
+	rowCounter := &rowCounterTest{}
+	assignSegmentFunc, flushFunc, saveSegmentFunc := createMockCallbackFunctions(t, rowCounter)
+	err := wrapper.SetCallbackFunctions(assignSegmentFunc, flushFunc, saveSegmentFunc)
+	assert.Nil(t, err)
+
+	// success
+	err = wrapper.reportPersisted(2)
+	assert.Nil(t, err)
+
+	// error when closing segments
+	wrapper.saveSegmentFunc = func(fieldsInsert []*datapb.FieldBinlog, fieldsStats []*datapb.FieldBinlog, segmentID int64, targetChName string, rowCount int64) error {
+		return errors.New("error")
+	}
+	wrapper.workingSegments[0] = &WorkingSegment{}
+	err = wrapper.reportPersisted(2)
+	assert.Error(t, err)
+
+	// failed to report
+	wrapper.saveSegmentFunc = func(fieldsInsert []*datapb.FieldBinlog, fieldsStats []*datapb.FieldBinlog, segmentID int64, targetChName string, rowCount int64) error {
+		return nil
+	}
+	wrapper.reportFunc = func(res *rootcoordpb.ImportResult) error {
+		return errors.New("error")
+	}
+	err = wrapper.reportPersisted(2)
+	assert.Error(t, err)
 }

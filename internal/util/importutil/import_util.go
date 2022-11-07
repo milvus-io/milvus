@@ -112,7 +112,7 @@ func initSegmentData(collectionSchema *schemapb.CollectionSchema) map[storage.Fi
 				NumRows: []int64{0},
 			}
 		default:
-			log.Error("Import util: unsupported data type", zap.Int("DataType", int(schema.DataType)))
+			log.Error("Import util: unsupported data type", zap.String("DataType", getTypeName(schema.DataType)))
 			return nil
 		}
 	}
@@ -132,9 +132,7 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 		case float64:
 			return nil
 		default:
-			s := fmt.Sprintf("%v", obj)
-			msg := "illegal numeric value " + s
-			return errors.New(msg)
+			return fmt.Errorf("illegal numeric value %v", obj)
 		}
 
 	}
@@ -155,9 +153,7 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 				case bool:
 					return nil
 				default:
-					s := fmt.Sprintf("%v", obj)
-					msg := "illegal value " + s + " for bool type field " + schema.GetName()
-					return errors.New(msg)
+					return fmt.Errorf("illegal value %v for bool type field '%s'", obj, schema.GetName())
 				}
 
 			}
@@ -226,26 +222,21 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 				switch vt := obj.(type) {
 				case []interface{}:
 					if len(vt)*8 != dim {
-						msg := "bit size " + strconv.Itoa(len(vt)*8) + " doesn't equal to vector dimension " + strconv.Itoa(dim) + " of field " + schema.GetName()
-						return errors.New(msg)
+						return fmt.Errorf("bit size %d doesn't equal to vector dimension %d of field '%s'", len(vt)*8, dim, schema.GetName())
 					}
 					for i := 0; i < len(vt); i++ {
 						if e := numericValidator(vt[i]); e != nil {
-							msg := e.Error() + " for binary vector field " + schema.GetName()
-							return errors.New(msg)
+							return fmt.Errorf("%s for binary vector field '%s'", e.Error(), schema.GetName())
 						}
 
 						t := int(vt[i].(float64))
 						if t > 255 || t < 0 {
-							msg := "illegal value " + strconv.Itoa(t) + " for binary vector field " + schema.GetName()
-							return errors.New(msg)
+							return fmt.Errorf("illegal value %d for binary vector field '%s'", t, schema.GetName())
 						}
 					}
 					return nil
 				default:
-					s := fmt.Sprintf("%v", obj)
-					msg := s + " is not an array for binary vector field " + schema.GetName()
-					return errors.New(msg)
+					return fmt.Errorf("%v is not an array for binary vector field '%s'", obj, schema.GetName())
 				}
 			}
 
@@ -270,20 +261,16 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 				switch vt := obj.(type) {
 				case []interface{}:
 					if len(vt) != dim {
-						msg := "array size " + strconv.Itoa(len(vt)) + " doesn't equal to vector dimension " + strconv.Itoa(dim) + " of field " + schema.GetName()
-						return errors.New(msg)
+						return fmt.Errorf("array size %d doesn't equal to vector dimension %d of field '%s'", len(vt), dim, schema.GetName())
 					}
 					for i := 0; i < len(vt); i++ {
 						if e := numericValidator(vt[i]); e != nil {
-							msg := e.Error() + " for float vector field " + schema.GetName()
-							return errors.New(msg)
+							return fmt.Errorf("%s for float vector field '%s'", e.Error(), schema.GetName())
 						}
 					}
 					return nil
 				default:
-					s := fmt.Sprintf("%v", obj)
-					msg := s + " is not an array for float vector field " + schema.GetName()
-					return errors.New(msg)
+					return fmt.Errorf("%v is not an array for float vector field '%s'", obj, schema.GetName())
 				}
 			}
 
@@ -303,9 +290,7 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 				case string:
 					return nil
 				default:
-					s := fmt.Sprintf("%v", obj)
-					msg := s + " is not a string for string type field " + schema.GetName()
-					return errors.New(msg)
+					return fmt.Errorf("%v is not a string for string type field '%s'", obj, schema.GetName())
 				}
 			}
 
@@ -316,7 +301,7 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 				return nil
 			}
 		default:
-			return errors.New("unsupport data type: " + strconv.Itoa(int(collectionSchema.Fields[i].DataType)))
+			return fmt.Errorf("unsupport data type: %s", getTypeName(collectionSchema.Fields[i].DataType))
 		}
 	}
 
@@ -351,13 +336,13 @@ func getFieldDimension(schema *schemapb.FieldSchema) (int, error) {
 		if key == "dim" {
 			dim, err := strconv.Atoi(value)
 			if err != nil {
-				return 0, errors.New("vector dimension is invalid")
+				return 0, fmt.Errorf("illegal vector dimension '%s' for field '%s', error: %w", value, schema.GetName(), err)
 			}
 			return dim, nil
 		}
 	}
 
-	return 0, errors.New("vector dimension is not defined")
+	return 0, fmt.Errorf("vector dimension is not defined for field '%s'", schema.GetName())
 }
 
 // triggerGC triggers golang gc to return all free memory back to the underlying system at once,
@@ -403,15 +388,15 @@ func tryFlushBlocks(ctx context.Context,
 			printFieldsDataInfo(blockData, "import util: prepare to force flush a block", nil)
 			err := callFlushFunc(blockData, i)
 			if err != nil {
-				log.Error("Import util: failed to force flush block data", zap.Int("shardID", i))
-				return err
+				log.Error("Import util: failed to force flush block data", zap.Int("shardID", i), zap.Error(err))
+				return fmt.Errorf("failed to force flush block data for shard id %d, error: %w", i, err)
 			}
 			log.Info("Import util: force flush", zap.Int("rowCount", rowCount), zap.Int("size", size), zap.Int("shardID", i))
 
 			blocksData[i] = initSegmentData(collectionSchema)
 			if blocksData[i] == nil {
-				log.Error("Import util: failed to initialize FieldData list")
-				return errors.New("failed to initialize FieldData list")
+				log.Error("Import util: failed to initialize FieldData list", zap.Int("shardID", i))
+				return fmt.Errorf("failed to initialize FieldData list for shard id %d", i)
 			}
 			continue
 		}
@@ -422,16 +407,16 @@ func tryFlushBlocks(ctx context.Context,
 			printFieldsDataInfo(blockData, "import util: prepare to flush block larger than blockSize", nil)
 			err := callFlushFunc(blockData, i)
 			if err != nil {
-				log.Error("Import util: failed to flush block data", zap.Int("shardID", i))
-				return err
+				log.Error("Import util: failed to flush block data", zap.Int("shardID", i), zap.Error(err))
+				return fmt.Errorf("failed to flush block data for shard id %d, error: %w", i, err)
 			}
 			log.Info("Import util: block size exceed limit and flush", zap.Int("rowCount", rowCount),
 				zap.Int("size", size), zap.Int("shardID", i), zap.Int64("blockSize", blockSize))
 
 			blocksData[i] = initSegmentData(collectionSchema)
 			if blocksData[i] == nil {
-				log.Error("Import util: failed to initialize FieldData list")
-				return errors.New("failed to initialize FieldData list")
+				log.Error("Import util: failed to initialize FieldData list", zap.Int("shardID", i))
+				return fmt.Errorf("failed to initialize FieldData list for shard id %d", i)
 			}
 			continue
 		}
@@ -467,15 +452,15 @@ func tryFlushBlocks(ctx context.Context,
 			err := callFlushFunc(blockData, biggestItem)
 			if err != nil {
 				log.Error("Import util: failed to flush biggest block data", zap.Int("shardID", biggestItem))
-				return err
+				return fmt.Errorf("failed to flush biggest block data for shard id %d, error: %w", biggestItem, err)
 			}
 			log.Info("Import util: total size exceed limit and flush", zap.Int("rowCount", rowCount),
 				zap.Int("size", size), zap.Int("totalSize", totalSize), zap.Int("shardID", biggestItem))
 
 			blocksData[biggestItem] = initSegmentData(collectionSchema)
 			if blocksData[biggestItem] == nil {
-				log.Error("Import util: failed to initialize FieldData list")
-				return errors.New("failed to initialize FieldData list")
+				log.Error("Import util: failed to initialize FieldData list", zap.Int("shardID", biggestItem))
+				return fmt.Errorf("failed to initialize FieldData list for shard id %d", biggestItem)
 			}
 		}
 	}
