@@ -43,8 +43,11 @@ func (b *BalanceChecker) Description() string {
 func (b *BalanceChecker) Check(ctx context.Context) []task.Task {
 	ret := make([]task.Task, 0)
 	segmentPlans, channelPlans := b.Balance.Balance()
+
 	tasks := balance.CreateSegmentTasksFromPlans(ctx, b.ID(), Params.QueryCoordCfg.SegmentTaskTimeout, segmentPlans)
+	task.SetPriority(task.TaskPriorityLow, tasks...)
 	ret = append(ret, tasks...)
+
 	tasks = balance.CreateChannelTasksFromPlans(ctx, b.ID(), Params.QueryCoordCfg.ChannelTaskTimeout, channelPlans)
 	ret = append(ret, tasks...)
 	return ret

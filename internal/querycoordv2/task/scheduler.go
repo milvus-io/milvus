@@ -23,6 +23,7 @@ import (
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
@@ -62,6 +63,16 @@ type Type = int32
 type replicaSegmentIndex struct {
 	ReplicaID int64
 	SegmentID int64
+	IsGrowing bool
+}
+
+func NewReplicaSegmentIndex(task *SegmentTask) replicaSegmentIndex {
+	isGrowing := task.Actions()[0].(*SegmentAction).Scope() == querypb.DataScope_Streaming
+	return replicaSegmentIndex{
+		ReplicaID: task.ReplicaID(),
+		SegmentID: task.SegmentID(),
+		IsGrowing: isGrowing,
+	}
 }
 
 type replicaChannelIndex struct {
@@ -208,7 +219,7 @@ func (scheduler *taskScheduler) Add(task Task) error {
 	scheduler.tasks.Insert(task.ID())
 	switch task := task.(type) {
 	case *SegmentTask:
-		index := replicaSegmentIndex{task.ReplicaID(), task.SegmentID()}
+		index := NewReplicaSegmentIndex(task)
 		scheduler.segmentTasks[index] = task
 
 	case *ChannelTask:
@@ -232,7 +243,7 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 
 	switch task := task.(type) {
 	case *SegmentTask:
-		index := replicaSegmentIndex{task.ReplicaID(), task.segmentID}
+		index := NewReplicaSegmentIndex(task)
 		if old, ok := scheduler.segmentTasks[index]; ok {
 			if task.Priority() > old.Priority() {
 				log.Info("replace old task, the new one with higher priority",
@@ -553,7 +564,7 @@ func (scheduler *taskScheduler) remove(task Task) {
 
 	switch task := task.(type) {
 	case *SegmentTask:
-		index := replicaSegmentIndex{task.ReplicaID(), task.SegmentID()}
+		index := NewReplicaSegmentIndex(task)
 		delete(scheduler.segmentTasks, index)
 		log = log.With(zap.Int64("segmentID", task.SegmentID()))
 
