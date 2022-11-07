@@ -19,10 +19,11 @@ package indexcoord
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
-	"github.com/stretchr/testify/assert"
 )
 
 func Test_getDimension(t *testing.T) {
