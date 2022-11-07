@@ -85,6 +85,9 @@ func (c *ChannelChecker) checkReplica(ctx context.Context, replica *meta.Replica
 	repeated := findRepeatedChannels(dists)
 	tasks = c.createChannelReduceTasks(ctx, repeated, replica.GetID())
 	ret = append(ret, tasks...)
+
+	// All channel related tasks should be with high priority
+	task.SetPriority(task.TaskPriorityHigh, tasks...)
 	return ret
 }
 
