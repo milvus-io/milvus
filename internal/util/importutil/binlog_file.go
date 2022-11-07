@@ -19,6 +19,7 @@ package importutil
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/log"
@@ -59,13 +60,13 @@ func (p *BinlogFile) Open(filePath string) error {
 	bytes, err := p.chunkManager.Read(context.TODO(), filePath)
 	if err != nil {
 		log.Error("Binlog file: failed to open binlog", zap.String("filePath", filePath), zap.Error(err))
-		return err
+		return fmt.Errorf("failed to open binlog %s", filePath)
 	}
 
 	p.reader, err = storage.NewBinlogReader(bytes)
 	if err != nil {
 		log.Error("Binlog file: failed to initialize binlog reader", zap.String("filePath", filePath), zap.Error(err))
-		return err
+		return fmt.Errorf("failed to initialize binlog reader for binlog %s, error: %w", filePath, err)
 	}
 
 	log.Info("Binlog file: open binlog successfully", zap.String("filePath", filePath))
@@ -101,7 +102,7 @@ func (p *BinlogFile) ReadBool() ([]bool, error) {
 		event, err := p.reader.NextEventReader()
 		if err != nil {
 			log.Error("Binlog file: failed to iterate events reader", zap.Error(err))
-			return nil, err
+			return nil, fmt.Errorf("failed to iterate events reader, error: %w", err)
 		}
 
 		// end of the file
@@ -122,7 +123,7 @@ func (p *BinlogFile) ReadBool() ([]bool, error) {
 		data, err := event.PayloadReaderInterface.GetBoolFromPayload()
 		if err != nil {
 			log.Error("Binlog file: failed to read bool data", zap.Error(err))
-			return nil, err
+			return nil, fmt.Errorf("failed to read bool data, error: %w", err)
 		}
 
 		result = append(result, data...)
@@ -144,7 +145,7 @@ func (p *BinlogFile) ReadInt8() ([]int8, error) {
 		event, err := p.reader.NextEventReader()
 		if err != nil {
 			log.Error("Binlog file: failed to iterate events reader", zap.Error(err))
-			return nil, err
+			return nil, fmt.Errorf("failed to iterate events reader, error: %w", err)
 		}
 
 		// end of the file
@@ -165,7 +166,7 @@ func (p *BinlogFile) ReadInt8() ([]int8, error) {
 		data, err := event.PayloadReaderInterface.GetInt8FromPayload()
 		if err != nil {
 			log.Error("Binlog file: failed to read int8 data", zap.Error(err))
-			return nil, err
+			return nil, fmt.Errorf("failed to read int8 data, error: %w", err)
 		}
 
 		result = append(result, data...)
@@ -187,7 +188,7 @@ func (p *BinlogFile) ReadInt16() ([]int16, error) {
 		event, err := p.reader.NextEventReader()
 		if err != nil {
 			log.Error("Binlog file: failed to iterate events reader", zap.Error(err))
-			return nil, err
+			return nil, fmt.Errorf("failed to iterate events reader, error: %w", err)
 		}
 
 		// end of the file
@@ -208,7 +209,7 @@ func (p *BinlogFile) ReadInt16() ([]int16, error) {
 		data, err := event.PayloadReaderInterface.GetInt16FromPayload()
 		if err != nil {
 			log.Error("Binlog file: failed to read int16 data", zap.Error(err))
-			return nil, err
+			return nil, fmt.Errorf("failed to read int16 data, error: %w", err)
 		}
 
 		result = append(result, data...)
@@ -230,7 +231,7 @@ func (p *BinlogFile) ReadInt32() ([]int32, error) {
 		event, err := p.reader.NextEventReader()
 		if err != nil {
 			log.Error("Binlog file: failed to iterate events reader", zap.Error(err))
-			return nil, err
+			return nil, fmt.Errorf("failed to iterate events reader, error: %w", err)
 		}
 
 		// end of the file
@@ -251,7 +252,7 @@ func (p *BinlogFile) ReadInt32() ([]int32, error) {
 		data, err := event.PayloadReaderInterface.GetInt32FromPayload()
 		if err != nil {
 			log.Error("Binlog file: failed to read int32 data", zap.Error(err))
-			return nil, err
+			return nil, fmt.Errorf("failed to read int32 data, error: %w", err)
 		}
 
 		result = append(result, data...)
@@ -273,7 +274,7 @@ func (p *BinlogFile) ReadInt64() ([]int64, error) {
 		event, err := p.reader.NextEventReader()
 		if err != nil {
 			log.Error("Binlog file: failed to iterate events reader", zap.Error(err))
-			return nil, err
+			return nil, fmt.Errorf("failed to iterate events reader, error: %w", err)
 		}
 
 		// end of the file
@@ -294,7 +295,7 @@ func (p *BinlogFile) ReadInt64() ([]int64, error) {
 		data, err := event.PayloadReaderInterface.GetInt64FromPayload()
 		if err != nil {
 			log.Error("Binlog file: failed to read int64 data", zap.Error(err))
-			return nil, err
+			return nil, fmt.Errorf("failed to read int64 data, error: %w", err)
 		}
 
 		result = append(result, data...)
@@ -316,7 +317,7 @@ func (p *BinlogFile) ReadFloat() ([]float32, error) {
 		event, err := p.reader.NextEventReader()
 		if err != nil {
 			log.Error("Binlog file: failed to iterate events reader", zap.Error(err))
-			return nil, err
+			return nil, fmt.Errorf("failed to iterate events reader, error: %w", err)
 		}
 
 		// end of the file
@@ -337,7 +338,7 @@ func (p *BinlogFile) ReadFloat() ([]float32, error) {
 		data, err := event.PayloadReaderInterface.GetFloatFromPayload()
 		if err != nil {
 			log.Error("Binlog file: failed to read float data", zap.Error(err))
-			return nil, err
+			return nil, fmt.Errorf("failed to read float data, error: %w", err)
 		}
 
 		result = append(result, data...)
@@ -359,7 +360,7 @@ func (p *BinlogFile) ReadDouble() ([]float64, error) {
 		event, err := p.reader.NextEventReader()
 		if err != nil {
 			log.Error("Binlog file: failed to iterate events reader", zap.Error(err))
-			return nil, err
+			return nil, fmt.Errorf("failed to iterate events reader, error: %w", err)
 		}
 
 		// end of the file
@@ -380,7 +381,7 @@ func (p *BinlogFile) ReadDouble() ([]float64, error) {
 		data, err := event.PayloadReaderInterface.GetDoubleFromPayload()
 		if err != nil {
 			log.Error("Binlog file: failed to read double data", zap.Error(err))
-			return nil, err
+			return nil, fmt.Errorf("failed to read double data, error: %w", err)
 		}
 
 		result = append(result, data...)
@@ -402,7 +403,7 @@ func (p *BinlogFile) ReadVarchar() ([]string, error) {
 		event, err := p.reader.NextEventReader()
 		if err != nil {
 			log.Error("Binlog file: failed to iterate events reader", zap.Error(err))
-			return nil, err
+			return nil, fmt.Errorf("failed to iterate events reader, error: %w", err)
 		}
 
 		// end of the file
@@ -424,7 +425,7 @@ func (p *BinlogFile) ReadVarchar() ([]string, error) {
 		data, err := event.PayloadReaderInterface.GetStringFromPayload()
 		if err != nil {
 			log.Error("Binlog file: failed to read varchar data", zap.Error(err))
-			return nil, err
+			return nil, fmt.Errorf("failed to read varchar data, error: %w", err)
 		}
 
 		result = append(result, data...)
@@ -448,7 +449,7 @@ func (p *BinlogFile) ReadBinaryVector() ([]byte, int, error) {
 		event, err := p.reader.NextEventReader()
 		if err != nil {
 			log.Error("Binlog file: failed to iterate events reader", zap.Error(err))
-			return nil, 0, err
+			return nil, 0, fmt.Errorf("failed to iterate events reader, error: %w", err)
 		}
 
 		// end of the file
@@ -469,7 +470,7 @@ func (p *BinlogFile) ReadBinaryVector() ([]byte, int, error) {
 		data, dimenson, err := event.PayloadReaderInterface.GetBinaryVectorFromPayload()
 		if err != nil {
 			log.Error("Binlog file: failed to read binary vector data", zap.Error(err))
-			return nil, 0, err
+			return nil, 0, fmt.Errorf("failed to read binary vector data, error: %w", err)
 		}
 
 		dim = dimenson
@@ -494,7 +495,7 @@ func (p *BinlogFile) ReadFloatVector() ([]float32, int, error) {
 		event, err := p.reader.NextEventReader()
 		if err != nil {
 			log.Error("Binlog file: failed to iterate events reader", zap.Error(err))
-			return nil, 0, err
+			return nil, 0, fmt.Errorf("failed to iterate events reader, error: %w", err)
 		}
 
 		// end of the file
@@ -515,7 +516,7 @@ func (p *BinlogFile) ReadFloatVector() ([]float32, int, error) {
 		data, dimension, err := event.PayloadReaderInterface.GetFloatVectorFromPayload()
 		if err != nil {
 			log.Error("Binlog file: failed to read float vector data", zap.Error(err))
-			return nil, 0, err
+			return nil, 0, fmt.Errorf("failed to read float vector data, error: %w", err)
 		}
 
 		dim = dimension
