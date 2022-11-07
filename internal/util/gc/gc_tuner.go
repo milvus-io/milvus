@@ -60,11 +60,16 @@ func optimizeGOGC() {
 	totaluse := hardware.GetUsedMemoryCount()
 	heapTarget := memoryThreshold - (totaluse - heapuse)
 
-	newGoGC := uint32(math.Floor(float64(heapTarget-heapuse) / float64(heapuse) * 100))
-	if newGoGC < minGOGC {
+	var newGoGC uint32
+	if heapTarget < heapuse {
 		newGoGC = minGOGC
-	} else if newGoGC > maxGOGC {
-		newGoGC = maxGOGC
+	} else {
+		newGoGC = uint32(math.Floor(float64(heapTarget-heapuse) / float64(heapuse) * 100))
+		if newGoGC < minGOGC {
+			newGoGC = minGOGC
+		} else if newGoGC > maxGOGC {
+			newGoGC = maxGOGC
+		}
 	}
 
 	action(newGoGC)
