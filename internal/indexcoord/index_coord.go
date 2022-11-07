@@ -164,7 +164,6 @@ func (i *IndexCoord) initSession() error {
 	}
 	i.session.Init(typeutil.IndexCoordRole, i.address, true, true)
 	i.session.SetEnableActiveStandBy(i.enableActiveStandBy)
-	Params.SetLogger(i.session.ServerID)
 	i.serverID = i.session.ServerID
 	return nil
 }

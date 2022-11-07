@@ -102,9 +102,6 @@ func (c *run) execute(args []string, flags *flag.FlagSet) {
 		} else {
 			params.Init()
 		}
-		params.SetLogConfig()
-		params.RoleName = c.serverType
-		params.SetLogger(0)
 	}
 
 	runtimeDir := createRuntimeDir(c.serverType)

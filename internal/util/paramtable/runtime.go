@@ -17,6 +17,7 @@ import (
 
 const (
 	runtimeNodeIDKey = "runtime.nodeID"
+	runtimeRoleKey   = "runtime.role"
 )
 
 var params ComponentParam
@@ -39,4 +40,12 @@ func GetNodeID() UniqueID {
 		return 0
 	}
 	return nodeID
+}
+
+func SetRole(role string) {
+	params.Save(runtimeRoleKey, role)
+}
+
+func GetRole() string {
+	return params.Get(runtimeRoleKey)
 }

@@ -217,7 +217,6 @@ func (node *DataNode) initSession() error {
 	}
 	node.session.Init(typeutil.DataNodeRole, node.address, false, true)
 	paramtable.SetNodeID(node.session.ServerID)
-	Params.SetLogger(paramtable.GetNodeID())
 	return nil
 }
 

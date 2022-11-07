@@ -20,6 +20,8 @@ import (
 	"context"
 	"os"
 	"os/signal"
+	"path"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -39,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynode"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
+	"github.com/milvus-io/milvus/internal/util/logutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/trace"
@@ -76,7 +79,6 @@ func runComponent[T component](ctx context.Context,
 
 	wg.Add(1)
 	go func() {
-		params := paramtable.Get()
 		if extraInit != nil {
 			extraInit()
 		}
@@ -84,9 +86,9 @@ func runComponent[T component](ctx context.Context,
 		var err error
 		role, err = creator(ctx, factory)
 		if localMsg {
-			params.SetLogConfig(typeutil.StandaloneRole)
+			paramtable.SetRole(typeutil.StandaloneRole)
 		} else {
-			params.SetLogConfig(role.GetName())
+			paramtable.SetRole(role.GetName())
 		}
 		if err != nil {
 			panic(err)
@@ -180,6 +182,24 @@ func (mr *MilvusRoles) runIndexNode(ctx context.Context, localMsg bool, alias st
 		metrics.RegisterIndexNode)
 }
 
+func (mr *MilvusRoles) setupLogger() {
+	logConfig := paramtable.Get().Log
+	id := paramtable.GetNodeID()
+	roleName := paramtable.GetRole()
+	rootPath := logConfig.File.RootPath
+	if rootPath != "" {
+		if id < 0 {
+			logConfig.File.Filename = path.Join(rootPath, roleName+".log")
+		} else {
+			logConfig.File.Filename = path.Join(rootPath, roleName+"-"+strconv.FormatInt(id, 10)+".log")
+		}
+	} else {
+		logConfig.File.Filename = ""
+	}
+
+	logutil.SetupLogger(&logConfig)
+}
+
 // Run Milvus components.
 func (mr *MilvusRoles) Run(local bool, alias string) {
 	log.Info("starting running Milvus components")
@@ -217,6 +237,8 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 		}
 		paramtable.Init()
 	}
+
+	mr.setupLogger()
 
 	if os.Getenv(metricsinfo.DeployModeEnvKey) == metricsinfo.StandaloneDeployMode {
 		closer := trace.InitTracing("standalone")
