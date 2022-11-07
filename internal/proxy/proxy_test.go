@@ -2680,6 +2680,12 @@ func TestProxy(t *testing.T) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
+	t.Run("InvalidateCollectionMetaCache failed", func(t *testing.T) {
+		resp, err := proxy.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
 	testProxyRoleUnhealthy(ctx, t, proxy)
 	testProxyPrivilegeUnhealthy(ctx, t, proxy)
 	testProxyRefreshPolicyInfoCacheUnhealthy(ctx, t, proxy)
