@@ -28,6 +28,7 @@ func TestProxy_InvalidateCollectionMetaCache_remove_stream(t *testing.T) {
 	}
 
 	node := &Proxy{chMgr: chMgr}
+	node.stateCode.Store(commonpb.StateCode_Healthy)
 
 	ctx := context.Background()
 	req := &proxypb.InvalidateCollMetaCacheRequest{
