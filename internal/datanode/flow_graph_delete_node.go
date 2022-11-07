@@ -22,28 +22,25 @@ import (
 	"reflect"
 	"sync"
 
-	"github.com/opentracing/opentracing-go"
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/trace"
+
+	"github.com/opentracing/opentracing-go"
+	"go.uber.org/zap"
 )
 
 // DeleteNode is to process delete msg, flush delete info into storage.
 type deleteNode struct {
 	BaseNode
-
-	ctx          context.Context
-	channelName  string
-	delBuf       sync.Map // map[segmentID]*DelDataBuf
-	channel      Channel
-	idAllocator  allocatorInterface
-	flushManager flushManager
+	ctx              context.Context
+	channelName      string
+	delBufferManager *DelBufferManager // manager of delete msg
+	channel          Channel
+	idAllocator      allocatorInterface
+	flushManager     flushManager
 
 	clearSignal chan<- string
 }
@@ -58,12 +55,12 @@ func (dn *deleteNode) Close() {
 
 func (dn *deleteNode) showDelBuf(segIDs []UniqueID, ts Timestamp) {
 	for _, segID := range segIDs {
-		if v, ok := dn.delBuf.Load(segID); ok {
-			delDataBuf, _ := v.(*DelDataBuf)
+		if _, ok := dn.delBufferManager.Load(segID); ok {
 			log.Debug("delta buffer status",
 				zap.Uint64("timestamp", ts),
 				zap.Int64("segment ID", segID),
-				zap.Int64("entries", delDataBuf.GetEntriesNum()),
+				zap.Int64("entries", dn.delBufferManager.GetEntriesNum(segID)),
+				zap.Int64("memory size", dn.delBufferManager.GetSegDelBufMemSize(segID)),
 				zap.String("vChannel", dn.channelName))
 		}
 	}
@@ -103,8 +100,7 @@ func (dn *deleteNode) Operate(in []Msg) []Msg {
 	var segIDs []UniqueID
 	for i, msg := range fgMsg.deleteMessages {
 		traceID, _, _ := trace.InfoFromSpan(spans[i])
-		log.Info("Buffer delete request in DataNode", zap.String("traceID", traceID))
-
+		log.Debug("Buffer delete request in DataNode", zap.String("traceID", traceID))
 		tmpSegIDs, err := dn.bufferDeleteMsg(msg, fgMsg.timeRange)
 		if err != nil {
 			// error occurs only when deleteMsg is misaligned, should not happen
@@ -120,19 +116,39 @@ func (dn *deleteNode) Operate(in []Msg) []Msg {
 		dn.showDelBuf(segIDs, fgMsg.timeRange.timestampMax)
 	}
 
+	//here we adopt a quite radical strategy:
+	//every time we make sure that the N biggest delDataBuf can be flushed
+	//when memsize usage reaches a certain level
+	//then we will add all segments in the fgMsg.segmentsToFlush into the toFlushSeg and remove duplicate segments
+	//the aim for taking all these actions is to guarantee that the memory consumed by delBuf will not exceed a limit
+	segmentsToFlush := dn.delBufferManager.ShouldFlushSegments()
+	log.Info("should flush segments, ", zap.Int("seg_count", len(segmentsToFlush)))
+	for _, msgSegmentID := range fgMsg.segmentsToSync {
+		existed := false
+		for _, autoFlushSegment := range segmentsToFlush {
+			if msgSegmentID == autoFlushSegment {
+				existed = true
+				break
+			}
+		}
+		if !existed {
+			segmentsToFlush = append(segmentsToFlush, msgSegmentID)
+		}
+	}
+
 	// process flush messages
-	if len(fgMsg.segmentsToSync) > 0 {
-		log.Info("DeleteNode receives flush message",
-			zap.Int64s("segIDs", fgMsg.segmentsToSync),
+	if len(segmentsToFlush) > 0 {
+		log.Debug("DeleteNode receives flush message",
+			zap.Int64s("segIDs", segmentsToFlush),
 			zap.String("vChannelName", dn.channelName))
-		for _, segmentToFlush := range fgMsg.segmentsToSync {
-			buf, ok := dn.delBuf.Load(segmentToFlush)
+		for _, segmentToFlush := range segmentsToFlush {
+			buf, ok := dn.delBufferManager.Load(segmentToFlush)
 			if !ok {
 				// no related delta data to flush, send empty buf to complete flush life-cycle
 				dn.flushManager.flushDelData(nil, segmentToFlush, fgMsg.endPositions[0])
 			} else {
 				err := retry.Do(dn.ctx, func() error {
-					return dn.flushManager.flushDelData(buf.(*DelDataBuf), segmentToFlush, fgMsg.endPositions[0])
+					return dn.flushManager.flushDelData(buf, segmentToFlush, fgMsg.endPositions[0])
 				}, getFlowGraphRetryOpt())
 				if err != nil {
 					err = fmt.Errorf("failed to flush delete data, err = %s", err)
@@ -140,7 +156,7 @@ func (dn *deleteNode) Operate(in []Msg) []Msg {
 					panic(err)
 				}
 				// remove delete buf
-				dn.delBuf.Delete(segmentToFlush)
+				dn.delBufferManager.Delete(segmentToFlush)
 			}
 		}
 	}
@@ -166,30 +182,13 @@ func (dn *deleteNode) updateCompactedSegments() {
 		// if the compactedTo segment has 0 numRows, remove all segments related
 		if !dn.channel.hasSegment(compactedTo, true) {
 			for _, segID := range compactedFrom {
-				dn.delBuf.Delete(segID)
+				dn.delBufferManager.Delete(segID)
 			}
 			dn.channel.removeSegments(compactedFrom...)
 			continue
 		}
 
-		var compactToDelBuff *DelDataBuf
-		delBuf, loaded := dn.delBuf.Load(compactedTo)
-		if !loaded {
-			compactToDelBuff = newDelDataBuf()
-		} else {
-			compactToDelBuff = delBuf.(*DelDataBuf)
-		}
-
-		for _, segID := range compactedFrom {
-			if value, loaded := dn.delBuf.LoadAndDelete(segID); loaded {
-				compactToDelBuff.updateFromBuf(value.(*DelDataBuf))
-
-				// only store delBuf if EntriesNum > 0
-				if compactToDelBuff.EntriesNum > 0 {
-					dn.delBuf.Store(compactedTo, compactToDelBuff)
-				}
-			}
-		}
+		dn.delBufferManager.CompactSegBuf(compactedTo, compactedFrom)
 		log.Info("update delBuf for compacted segments",
 			zap.Int64("compactedTo segmentID", compactedTo),
 			zap.Int64s("compactedFrom segmentIDs", compactedFrom),
@@ -208,47 +207,21 @@ func (dn *deleteNode) bufferDeleteMsg(msg *msgstream.DeleteMsg, tr TimeRange) ([
 	for segID, pks := range segIDToPks {
 		segIDs = append(segIDs, segID)
 
-		rows := len(pks)
 		tss, ok := segIDToTss[segID]
-		if !ok || rows != len(tss) {
+		if !ok || len(pks) != len(tss) {
 			return nil, fmt.Errorf("primary keys and timestamp's element num mis-match, segmentID = %d", segID)
 		}
-
-		var delDataBuf *DelDataBuf
-		value, ok := dn.delBuf.Load(segID)
-		if ok {
-			delDataBuf = value.(*DelDataBuf)
-		} else {
-			delDataBuf = newDelDataBuf()
-		}
-		delData := delDataBuf.delData
-
-		for i := 0; i < rows; i++ {
-			delData.Pks = append(delData.Pks, pks[i])
-			delData.Tss = append(delData.Tss, tss[i])
-			// this log will influence the data node performance as it may be too many,
-			// only use it when we focus on delete operations
-			//log.Debug("delete",
-			//	zap.Any("primary key", pks[i]),
-			//	zap.Uint64("ts", tss[i]),
-			//	zap.Int64("segmentID", segID),
-			//	zap.String("vChannelName", dn.channelName))
-		}
-
-		// store
-		delDataBuf.updateSize(int64(rows))
-		metrics.DataNodeConsumeMsgRowsCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.DeleteLabel).Add(float64(rows))
-		delDataBuf.updateTimeRange(tr)
-		dn.delBuf.Store(segID, delDataBuf)
+		dn.delBufferManager.StoreNewDeletes(segID, pks, tss, tr)
 	}
 
 	return segIDs, nil
 }
 
 // filterSegmentByPK returns the bloom filter check result.
-// If the key may exists in the segment, returns it in map.
-// If the key not exists in the segment, the segment is filter out.
-func (dn *deleteNode) filterSegmentByPK(partID UniqueID, pks []primaryKey, tss []Timestamp) (map[UniqueID][]primaryKey, map[UniqueID][]uint64) {
+// If the key may exist in the segment, returns it in map.
+// If the key not exist in the segment, the segment is filter out.
+func (dn *deleteNode) filterSegmentByPK(partID UniqueID, pks []primaryKey, tss []Timestamp) (
+	map[UniqueID][]primaryKey, map[UniqueID][]uint64) {
 	segID2Pks := make(map[UniqueID][]primaryKey)
 	segID2Tss := make(map[UniqueID][]uint64)
 	segments := dn.channel.filterSegments(partID)
@@ -273,8 +246,11 @@ func newDeleteNode(ctx context.Context, fm flushManager, sig chan<- string, conf
 	return &deleteNode{
 		ctx:      ctx,
 		BaseNode: baseNode,
-		delBuf:   sync.Map{},
-
+		delBufferManager: &DelBufferManager{
+			delBufMap:     sync.Map{},
+			delMemorySize: 0,
+			delBufHeap:    &PriorityQueue{},
+		},
 		channel:      config.channel,
 		idAllocator:  config.allocator,
 		channelName:  config.vChannelName,

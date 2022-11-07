@@ -17,6 +17,7 @@
 package datanode
 
 import (
+	"container/heap"
 	"context"
 	"fmt"
 	"testing"
@@ -344,7 +345,9 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 
 		msg := genFlowGraphDeleteMsg(int64Pks, chanName)
 		msg.segmentsToSync = []UniqueID{-1}
-		delNode.delBuf.Store(UniqueID(-1), &DelDataBuf{})
+		delDataBuf := newDelDataBuf()
+		delNode.delBufferManager.Store(UniqueID(-1), delDataBuf)
+		heap.Push(delNode.delBufferManager.delBufHeap, delDataBuf.item)
 		delNode.flushManager = &mockFlushManager{
 			returnError: true,
 		}
@@ -390,8 +393,13 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		msg.deleteMessages = []*msgstream.DeleteMsg{}
 		msg.segmentsToSync = []UniqueID{compactedSegment}
 
-		delNode.delBuf.Store(compactedSegment, &DelDataBuf{delData: &DeleteData{}})
-		delNode.flushManager = NewRendezvousFlushManager(&allocator{}, cm, channel, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
+		bufItem := &Item{memorySize: 0}
+		delNode.delBufferManager.Store(compactedSegment,
+			&DelDataBuf{delData: &DeleteData{}, item: bufItem})
+		heap.Push(delNode.delBufferManager.delBufHeap, bufItem)
+
+		delNode.flushManager = NewRendezvousFlushManager(&allocator{}, cm, channel,
+			func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
 
 		var fgMsg flowgraph.Msg = &msg
 		setFlowGraphRetryOpt(retry.Attempts(1))
@@ -399,10 +407,92 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 			delNode.Operate([]flowgraph.Msg{fgMsg})
 		})
 
-		_, ok := delNode.delBuf.Load(100)
+		_, ok := delNode.delBufferManager.Load(100)
 		assert.False(t, ok)
-		_, ok = delNode.delBuf.Load(compactedSegment)
+		_, ok = delNode.delBufferManager.Load(compactedSegment)
 		assert.False(t, ok)
+	})
+
+	t.Run("Test deleteNode auto flush function", func(t *testing.T) {
+		//for issue
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+
+		chanName := "datanode-test-FlowGraphDeletenode-autoflush"
+		testPath := "/test/datanode/root/meta"
+		assert.NoError(t, clearEtcd(testPath))
+		Params.EtcdCfg.MetaRootPath = testPath
+
+		c := &nodeConfig{
+			channel:      channel,
+			allocator:    NewAllocatorFactory(),
+			vChannelName: chanName,
+		}
+		mockFlushManager := &mockFlushManager{
+			recordFlushedSeg: true,
+		}
+		delNode, err := newDeleteNode(ctx, mockFlushManager, make(chan string, 1), c)
+		assert.Nil(t, err)
+
+		//2. here we set flushing segments inside fgmsg to empty
+		//in order to verify the validity of auto flush function
+		msg := genFlowGraphDeleteMsg(int64Pks, chanName)
+		msg.segmentsToSync = []UniqueID{}
+
+		var fgMsg flowgraph.Msg = &msg
+		//1. here we set buffer bytes to a relatively high level
+		//and the sum of memory consumption in this case is 208
+		//so no segments will be flushed
+		Params.DataNodeCfg.FlushDeleteBufferBytes = 300
+		delNode.Operate([]flowgraph.Msg{fgMsg})
+		assert.Equal(t, 0, len(mockFlushManager.flushedSegIDs))
+		assert.Equal(t, int64(208), delNode.delBufferManager.delMemorySize)
+		assert.Equal(t, 5, delNode.delBufferManager.delBufHeap.Len())
+
+		//3. note that the whole memory size used by 5 segments will be 208
+		//so when setting delete buffer size equal to 200
+		//there will only be one segment to be flushed then the
+		//memory consumption will be reduced to 160(under 200)
+		msg.deleteMessages = []*msgstream.DeleteMsg{}
+		msg.segmentsToSync = []UniqueID{}
+		Params.DataNodeCfg.FlushDeleteBufferBytes = 200
+		delNode.Operate([]flowgraph.Msg{fgMsg})
+		assert.Equal(t, 1, len(mockFlushManager.flushedSegIDs))
+		assert.Equal(t, int64(160), delNode.delBufferManager.delMemorySize)
+		assert.Equal(t, 4, delNode.delBufferManager.delBufHeap.Len())
+
+		//4. there is no new delete msg and delBufferSize is still 200
+		//we expect there will not be any auto flush del
+		delNode.Operate([]flowgraph.Msg{fgMsg})
+		assert.Equal(t, 1, len(mockFlushManager.flushedSegIDs))
+		assert.Equal(t, int64(160), delNode.delBufferManager.delMemorySize)
+		assert.Equal(t, 4, delNode.delBufferManager.delBufHeap.Len())
+
+		//5. we reset buffer bytes to 150, then we expect there would be one more
+		//segment which is 48 in size to be flushed, so the remained del memory size
+		//will be 112
+		Params.DataNodeCfg.FlushDeleteBufferBytes = 150
+		delNode.Operate([]flowgraph.Msg{fgMsg})
+		assert.Equal(t, 2, len(mockFlushManager.flushedSegIDs))
+		assert.Equal(t, int64(112), delNode.delBufferManager.delMemorySize)
+		assert.Equal(t, 3, delNode.delBufferManager.delBufHeap.Len())
+
+		//6. we reset buffer bytes to 60, then most of the segments will be flushed
+		//except for the smallest entry with size equaling to 32
+		Params.DataNodeCfg.FlushDeleteBufferBytes = 60
+		delNode.Operate([]flowgraph.Msg{fgMsg})
+		assert.Equal(t, 4, len(mockFlushManager.flushedSegIDs))
+		assert.Equal(t, int64(32), delNode.delBufferManager.delMemorySize)
+		assert.Equal(t, 1, delNode.delBufferManager.delBufHeap.Len())
+
+		//7. we reset buffer bytes to 20, then as all segment-memory consumption
+		//is more than 20, so all five segments will be flushed and the remained
+		//del memory will be lowered to zero
+		Params.DataNodeCfg.FlushDeleteBufferBytes = 20
+		delNode.Operate([]flowgraph.Msg{fgMsg})
+		assert.Equal(t, 5, len(mockFlushManager.flushedSegIDs))
+		assert.Equal(t, int64(0), delNode.delBufferManager.delMemorySize)
+		assert.Equal(t, 0, delNode.delBufferManager.delBufHeap.Len())
 	})
 }
 
@@ -439,8 +529,9 @@ func TestFlowGraphDeleteNode_showDelBuf(t *testing.T) {
 
 	for _, test := range tests {
 		delBuf := newDelDataBuf()
-		delBuf.updateSize(test.numRows)
-		delNode.delBuf.Store(test.seg, delBuf)
+		delBuf.accumulateEntriesNum(test.numRows)
+		delNode.delBufferManager.Store(test.seg, delBuf)
+		heap.Push(delNode.delBufferManager.delBufHeap, delBuf.item)
 	}
 
 	delNode.showDelBuf([]UniqueID{111, 112, 113}, 100)
@@ -507,8 +598,9 @@ func TestFlowGraphDeleteNode_updateCompactedSegments(t *testing.T) {
 		t.Run(test.description, func(t *testing.T) {
 			for _, seg := range test.segIDsInBuffer {
 				delBuf := newDelDataBuf()
-				delBuf.updateSize(100)
-				delNode.delBuf.Store(seg, delBuf)
+				delBuf.accumulateEntriesNum(100)
+				heap.Push(delNode.delBufferManager.delBufHeap, delBuf.item)
+				delNode.delBufferManager.Store(seg, delBuf)
 			}
 
 			if test.compactToExist {
@@ -536,7 +628,7 @@ func TestFlowGraphDeleteNode_updateCompactedSegments(t *testing.T) {
 			delNode.updateCompactedSegments()
 
 			for _, remain := range test.expectedSegsRemain {
-				_, ok := delNode.delBuf.Load(remain)
+				_, ok := delNode.delBufferManager.Load(remain)
 				assert.True(t, ok)
 			}
 		})
