@@ -132,6 +132,7 @@ func (suite *ServiceSuite) SetupTest() {
 		suite.meta,
 		suite.dist,
 		suite.targetMgr,
+		suite.broker,
 	)
 	suite.balancer = balance.NewRowCountBasedBalancer(
 		suite.taskScheduler,

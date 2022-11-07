@@ -132,6 +132,7 @@ func (suite *JobSuite) SetupTest() {
 		suite.meta,
 		suite.dist,
 		suite.targetMgr,
+		suite.broker,
 	)
 	suite.scheduler = NewScheduler()
 
