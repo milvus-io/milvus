@@ -231,12 +231,13 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 			Schema: schema,
 			Infos: []*querypb.SegmentLoadInfo{
 				{
-					SegmentID:    segmentID,
-					PartitionID:  defaultPartitionID,
-					CollectionID: defaultCollectionID,
-					BinlogPaths:  fieldBinlog,
-					NumOfRows:    defaultMsgLength,
-					Statslogs:    statsLog,
+					SegmentID:     segmentID,
+					PartitionID:   defaultPartitionID,
+					CollectionID:  defaultCollectionID,
+					BinlogPaths:   fieldBinlog,
+					NumOfRows:     defaultMsgLength,
+					Statslogs:     statsLog,
+					InsertChannel: vDmChannel,
 				},
 			},
 			DeltaPositions: []*internalpb.MsgPosition{
