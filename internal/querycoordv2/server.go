@@ -157,7 +157,6 @@ func (s *Server) Init() error {
 	s.enableActiveStandBy = Params.QueryCoordCfg.EnableActiveStandby
 	s.session.SetEnableActiveStandBy(s.enableActiveStandBy)
 	paramtable.SetNodeID(s.session.ServerID)
-	Params.SetLogger(s.session.ServerID)
 	s.factory.Init(Params)
 
 	// Init KV

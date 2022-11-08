@@ -17,7 +17,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"google.golang.org/grpc/grpclog"
 )
 
 var baseParams = BaseTable{}
@@ -254,33 +253,6 @@ func Test_ConvertRangeToIntSlice(t *testing.T) {
 		assert.Panics(t, func() { ConvertRangeToIntSlice("0,abc", ",") })
 		assert.Panics(t, func() { ConvertRangeToIntSlice("-1,9", ",") })
 		assert.Panics(t, func() { ConvertRangeToIntSlice("9,0", ",") })
-	})
-}
-
-func Test_SetLogger(t *testing.T) {
-	t.Run("TestSetLooger", func(t *testing.T) {
-		baseParams.RoleName = "rootcoord"
-		baseParams.Save("log.file.rootPath", ".")
-		baseParams.SetLogger(UniqueID(-1))
-		assert.Equal(t, "rootcoord.log", baseParams.Log.File.Filename)
-
-		baseParams.RoleName = "datanode"
-		baseParams.SetLogger(UniqueID(1))
-		assert.Equal(t, "datanode-1.log", baseParams.Log.File.Filename)
-
-		baseParams.RoleName = "datanode"
-		baseParams.SetLogger(UniqueID(0))
-		assert.Equal(t, "datanode-0.log", baseParams.Log.File.Filename)
-	})
-
-	t.Run("TestGrpclog", func(t *testing.T) {
-		baseParams.Save("grpc.log.level", "Warning")
-		baseParams.SetLogConfig()
-
-		baseParams.SetLogger(UniqueID(1))
-		assert.Equal(t, false, grpclog.V(0))
-		assert.Equal(t, true, grpclog.V(1))
-		assert.Equal(t, true, grpclog.V(2))
 	})
 }
 

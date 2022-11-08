@@ -23,7 +23,6 @@ import (
 
 	config "github.com/milvus-io/milvus/internal/config"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/util/logutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
 )
@@ -76,9 +75,7 @@ type BaseTable struct {
 
 	configDir string
 
-	RoleName   string
-	Log        log.Config
-	LogCfgFunc func(log.Config)
+	Log log.Config
 
 	YamlFile string
 }
@@ -398,37 +395,13 @@ func (gp *BaseTable) InitLogCfg() {
 	gp.Log.File.MaxSize = gp.ParseIntWithDefault("log.file.maxSize", DefaultMaxSize)
 	gp.Log.File.MaxBackups = gp.ParseIntWithDefault("log.file.maxBackups", DefaultMaxBackups)
 	gp.Log.File.MaxDays = gp.ParseIntWithDefault("log.file.maxAge", DefaultMaxAge)
-}
+	gp.Log.File.RootPath = gp.LoadWithDefault("log.file.rootPath", DefaultRootPath)
 
-// SetLogConfig set log config of the base table
-func (gp *BaseTable) SetLogConfig() {
-	gp.LogCfgFunc = func(cfg log.Config) {
-		var err error
-		grpclog, err := gp.Load("grpc.log.level")
-		if err != nil {
-			cfg.GrpcLevel = DefaultLogLevel
-		} else {
-			cfg.GrpcLevel = strings.ToUpper(grpclog)
-		}
-		logutil.SetupLogger(&cfg)
-		defer log.Sync()
-	}
-}
-
-// SetLogger sets the logger file by given id
-func (gp *BaseTable) SetLogger(id UniqueID) {
-	rootPath := gp.LoadWithDefault("log.file.rootPath", DefaultRootPath)
-	if rootPath != "" {
-		if id < 0 {
-			gp.Log.File.Filename = path.Join(rootPath, gp.RoleName+".log")
-		} else {
-			gp.Log.File.Filename = path.Join(rootPath, gp.RoleName+"-"+strconv.FormatInt(id, 10)+".log")
-		}
+	grpclog, err := gp.Load("grpc.log.level")
+	if err != nil {
+		gp.Log.GrpcLevel = DefaultLogLevel
 	} else {
-		gp.Log.File.Filename = ""
+		gp.Log.GrpcLevel = strings.ToUpper(grpclog)
 	}
 
-	if gp.LogCfgFunc != nil {
-		gp.LogCfgFunc(gp.Log)
-	}
 }

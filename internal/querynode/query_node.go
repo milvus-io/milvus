@@ -150,7 +150,6 @@ func (node *QueryNode) initSession() error {
 	}
 	node.session.Init(typeutil.QueryNodeRole, node.address, false, true)
 	paramtable.SetNodeID(node.session.ServerID)
-	Params.SetLogger(paramtable.GetNodeID())
 	log.Info("QueryNode init session", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("node address", node.session.Address))
 	return nil
 }

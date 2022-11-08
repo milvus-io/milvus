@@ -332,7 +332,6 @@ func (c *Core) initSession() error {
 	}
 	c.session.Init(typeutil.RootCoordRole, c.address, true, true)
 	c.session.SetEnableActiveStandBy(c.enableActiveStandBy)
-	Params.SetLogger(c.session.ServerID)
 	return nil
 }
 

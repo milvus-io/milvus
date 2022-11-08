@@ -171,7 +171,6 @@ func (i *IndexNode) initSession() error {
 	}
 	i.session.Init(typeutil.IndexNodeRole, i.address, false, true)
 	paramtable.SetNodeID(i.session.ServerID)
-	Params.SetLogger(i.session.ServerID)
 	return nil
 }
 

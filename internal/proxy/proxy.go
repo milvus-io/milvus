@@ -155,7 +155,6 @@ func (node *Proxy) initSession() error {
 	}
 	node.session.Init(typeutil.ProxyRole, node.address, false, true)
 	paramtable.SetNodeID(node.session.ServerID)
-	Params.SetLogger(node.session.ServerID)
 	return nil
 }
 

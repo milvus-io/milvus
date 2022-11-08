@@ -94,12 +94,6 @@ func (p *ComponentParam) Init() {
 	p.HookCfg.init()
 }
 
-// SetLogConfig set log config with given role
-func (p *ComponentParam) SetLogConfig(role string) {
-	p.BaseTable.RoleName = role
-	p.BaseTable.SetLogConfig()
-}
-
 func (p *ComponentParam) RocksmqEnable() bool {
 	return p.RocksmqCfg.Path != ""
 }
