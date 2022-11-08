@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/concurrency"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
@@ -100,6 +101,7 @@ type indexBuildTask struct {
 	tr             *timerecord.TimeRecorder
 	statistic      indexpb.JobInfo
 	node           *IndexNode
+	pool           *concurrency.Pool
 }
 
 func (it *indexBuildTask) Reset() {
@@ -247,13 +249,18 @@ func (it *indexBuildTask) BuildIndex(ctx context.Context) error {
 	dType := dataset.DType
 	var err error
 	if dType != schemapb.DataType_None {
-		it.index, err = indexcgowrapper.NewCgoIndex(dType, it.newTypeParams, it.newIndexParams, it.req.GetStorageConfig())
-		if err != nil {
-			log.Ctx(ctx).Error("failed to create index", zap.Error(err))
-			return err
-		}
+		_, err = it.pool.Submit(func() (interface{}, error) {
+			it.index, err = indexcgowrapper.NewCgoIndex(dType, it.newTypeParams, it.newIndexParams, it.req.GetStorageConfig())
+			if err != nil {
+				return nil, err
+			}
 
-		err = it.index.Build(dataset)
+			err = it.index.Build(dataset)
+			if err != nil {
+				return nil, err
+			}
+			return nil, nil
+		}).Await()
 		if err != nil {
 			log.Ctx(ctx).Error("failed to build index", zap.Error(err))
 			return err
@@ -358,13 +365,19 @@ func (it *indexBuildTask) BuildDiskAnnIndex(ctx context.Context) error {
 			zap.Int64("buildID", it.BuildID),
 			zap.String("index params", string(jsonIndexParams)))
 
-		it.index, err = indexcgowrapper.NewCgoIndex(dType, it.newTypeParams, it.newIndexParams, it.req.GetStorageConfig())
-		if err != nil {
-			log.Ctx(ctx).Error("failed to create index", zap.Error(err))
-			return err
-		}
+		_, err = it.pool.Submit(func() (interface{}, error) {
+			it.index, err = indexcgowrapper.NewCgoIndex(dType, it.newTypeParams, it.newIndexParams, it.req.GetStorageConfig())
+			if err != nil {
+				log.Ctx(ctx).Error("failed to create index", zap.Error(err))
+				return nil, err
+			}
 
-		err = it.index.Build(dataset)
+			err = it.index.Build(dataset)
+			if err != nil {
+				return nil, err
+			}
+			return nil, nil
+		}).Await()
 		if err != nil {
 			if it.index.CleanLocalData() != nil {
 				log.Ctx(ctx).Error("failed to clean cached data on disk after build index failed",
