@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/util"
+	"github.com/milvus-io/milvus/internal/util/timerecord"
 )
 
 type flushedSegmentWatcher struct {
@@ -87,6 +88,7 @@ func newFlushSegmentWatcher(ctx context.Context, kv kv.MetaKv, meta *metaTable, 
 }
 
 func (fsw *flushedSegmentWatcher) reloadFromKV() error {
+	record := timerecord.NewTimeRecorder("indexcoord")
 	log.Ctx(fsw.ctx).Info("flushSegmentWatcher reloadFromKV")
 	fsw.internalTasks = make(map[UniqueID]*internalTask)
 	_, values, version, err := fsw.kvClient.LoadWithRevision(util.FlushedSegmentPrefix)
@@ -110,6 +112,7 @@ func (fsw *flushedSegmentWatcher) reloadFromKV() error {
 	}
 	fsw.etcdRevision = version
 	log.Ctx(fsw.ctx).Info("flushSegmentWatcher reloadFromKV success", zap.Int64("etcdRevision", version))
+	record.Record("flushedSegmentWatcher reloadFromKV")
 	return nil
 }
 

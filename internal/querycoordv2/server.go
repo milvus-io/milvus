@@ -27,6 +27,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/timerecord"
+
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -239,6 +241,8 @@ func (s *Server) Init() error {
 }
 
 func (s *Server) initMeta() error {
+	record := timerecord.NewTimeRecorder("querycoord")
+
 	log.Info("init meta")
 	s.store = meta.NewMetaStore(s.kv)
 	s.meta = meta.NewMeta(s.idAllocator, s.store)
@@ -267,6 +271,7 @@ func (s *Server) initMeta() error {
 	)
 	s.targetMgr = meta.NewTargetManager(s.broker, s.meta)
 
+	record.Record("Server initMeta")
 	return nil
 }
 

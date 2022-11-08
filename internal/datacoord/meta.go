@@ -23,6 +23,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/timerecord"
+
 	"golang.org/x/exp/maps"
 
 	"github.com/golang/protobuf/proto"
@@ -75,6 +77,7 @@ func newMeta(ctx context.Context, kv kv.TxnKV, chunkManagerRootPath string) (*me
 
 // reloadFromKV loads meta from KV storage
 func (m *meta) reloadFromKV() error {
+	record := timerecord.NewTimeRecorder("datacoord")
 	segments, err := m.catalog.ListSegments(m.ctx)
 	if err != nil {
 		return err
@@ -96,6 +99,7 @@ func (m *meta) reloadFromKV() error {
 	}
 	metrics.DataCoordNumStoredRows.WithLabelValues().Set(float64(numStoredRows))
 	metrics.DataCoordNumStoredRowsCounter.WithLabelValues().Add(float64(numStoredRows))
+	record.Record("meta reloadFromKV")
 	return nil
 }
 

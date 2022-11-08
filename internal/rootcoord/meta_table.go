@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/util/timerecord"
+
 	"github.com/milvus-io/milvus/internal/common"
 
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
@@ -136,6 +138,7 @@ func (mt *MetaTable) reload() error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
+	record := timerecord.NewTimeRecorder("rootcoord")
 	mt.collID2Meta = make(map[UniqueID]*model.Collection)
 	mt.collName2ID = make(map[string]UniqueID)
 	mt.collAlias2ID = make(map[string]UniqueID)
@@ -159,6 +162,7 @@ func (mt *MetaTable) reload() error {
 		mt.collAlias2ID[alias.Name] = alias.CollectionID
 	}
 
+	record.Record("MetaTable reload")
 	return nil
 }
 
