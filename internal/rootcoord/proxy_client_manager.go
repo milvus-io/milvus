@@ -100,7 +100,7 @@ func (p *proxyClientManager) connect(session *sessionutil.Session) {
 		return
 	}
 	p.proxyClient[session.ServerID] = pc
-	log.Debug("succeed to create proxy client", zap.String("address", session.Address), zap.Int64("serverID", session.ServerID))
+	log.Info("succeed to create proxy client", zap.String("address", session.Address), zap.Int64("serverID", session.ServerID))
 	p.helper.afterConnect()
 }
 
@@ -114,7 +114,7 @@ func (p *proxyClientManager) DelProxyClient(s *sessionutil.Session) {
 	}
 
 	delete(p.proxyClient, s.ServerID)
-	log.Debug("remove proxy client", zap.String("proxy address", s.Address), zap.Int64("proxy id", s.ServerID))
+	log.Info("remove proxy client", zap.String("proxy address", s.Address), zap.Int64("proxy id", s.ServerID))
 }
 
 func (p *proxyClientManager) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest, opts ...expireCacheOpt) error {

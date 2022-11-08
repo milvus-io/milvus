@@ -1415,7 +1415,7 @@ func (c *Core) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) (
 			return ret, nil
 		}
 
-		log.Warn("GetSystemInfoMetrics from cache failed", zap.String("role", typeutil.RootCoordRole),
+		log.Debug("GetSystemInfoMetrics from cache failed, recompute instead", zap.String("role", typeutil.RootCoordRole),
 			zap.Int64("msgID", in.GetBase().GetMsgID()), zap.Error(err))
 
 		systemInfoMetrics, err := c.getSystemInfoMetrics(ctx, in)
