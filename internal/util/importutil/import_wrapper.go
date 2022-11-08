@@ -82,6 +82,7 @@ type ImportOptions struct {
 	OnlyValidate bool
 	TsStartPoint uint64
 	TsEndPoint   uint64
+	IsBackup     bool // whether is triggered by backup tool
 }
 
 func DefaultImportOptions() ImportOptions {
@@ -312,7 +313,7 @@ func (p *ImportWrapper) Import(filePaths []string, options ImportOptions) error 
 	log.Info("import wrapper: begin import", zap.Any("filePaths", filePaths), zap.Any("options", options))
 	// data restore function to import milvus native binlog files(for backup/restore tools)
 	// the backup/restore tool provide two paths for a partition, the first path is binlog path, the second is deltalog path
-	if p.isBinlogImport(filePaths) {
+	if options.IsBackup && p.isBinlogImport(filePaths) {
 		return p.doBinlogImport(filePaths, options.TsStartPoint, options.TsEndPoint)
 	}
 
@@ -468,17 +469,6 @@ func (p *ImportWrapper) isBinlogImport(filePaths []string) bool {
 		_, fileType := GetFileNameAndExt(filePath)
 		if len(fileType) != 0 {
 			log.Info("import wrapper: not a path, not binlog import", zap.String("filePath", filePath), zap.String("fileType", fileType))
-			return false
-		}
-
-		// check path existence
-		exist, err := p.chunkManager.Exist(p.ctx, filePath)
-		if err != nil {
-			log.Error("import wrapper: failed to check the path existence, not binlog import", zap.String("filePath", filePath), zap.Error(err))
-			return false
-		}
-		if !exist {
-			log.Info("import wrapper: the input path doesn't exist, not binlog import", zap.String("filePath", filePath))
 			return false
 		}
 		return true
