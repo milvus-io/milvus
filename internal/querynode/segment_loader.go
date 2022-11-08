@@ -50,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/panjf2000/ants/v2"
 )
 
@@ -674,7 +675,8 @@ func (loader *segmentLoader) loadDeltaLogs(ctx context.Context, segment *Segment
 	return nil
 }
 
-func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collectionID int64, position *internalpb.MsgPosition) error {
+func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collectionID int64, position *internalpb.MsgPosition,
+	segmentIDs []int64) error {
 	startTs := time.Now()
 	stream, err := loader.factory.NewMsgStream(ctx)
 	if err != nil {
@@ -725,7 +727,11 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 	}
 
 	log.Info("start read delta msg from seek position to last position",
-		zap.Int64("collectionID", collectionID), zap.String("channel", pChannelName), zap.Any("seekPos", position), zap.Any("lastMsg", lastMsgID))
+		zap.Int64("collectionID", collectionID),
+		zap.String("channel", pChannelName),
+		zap.String("seekPos", position.String()),
+		zap.Any("lastMsg", lastMsgID), // use any in case of nil
+	)
 	hasMore := true
 	for hasMore {
 		select {
@@ -740,7 +746,7 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 					position.GetMsgID())
 				log.Warn("fail to read delta msg",
 					zap.String("pChannelName", pChannelName),
-					zap.ByteString("msgID", position.GetMsgID()),
+					zap.Binary("msgID", position.GetMsgID()),
 					zap.Error(err),
 				)
 				return err
@@ -760,8 +766,8 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 					if err != nil {
 						// TODO: panic?
 						// error occurs when missing meta info or unexpected pk type, should not happen
-						err = fmt.Errorf("deleteNode processDeleteMessages failed, collectionID = %d, err = %s", dmsg.CollectionID, err)
-						log.Error(err.Error())
+						err = fmt.Errorf("processDeleteMessages failed, collectionID = %d, err = %s", dmsg.CollectionID, err)
+						log.Error("FromDmlCPLoadDelete failed to process delete message", zap.Error(err))
 						return err
 					}
 				}
@@ -769,7 +775,10 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 				ret, err := lastMsgID.LessOrEqualThan(tsMsg.Position().MsgID)
 				if err != nil {
 					log.Warn("check whether current MsgID less than last MsgID failed",
-						zap.Int64("collectionID", collectionID), zap.String("channel", pChannelName), zap.Error(err))
+						zap.Int64("collectionID", collectionID),
+						zap.String("channel", pChannelName),
+						zap.Error(err),
+					)
 					return err
 				}
 
@@ -781,9 +790,19 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 		}
 	}
 
-	log.Info("All data has been read, there is no more data", zap.Int64("collectionID", collectionID),
-		zap.String("channel", pChannelName), zap.Any("msgID", position.GetMsgID()))
+	log.Info("All data has been read, there is no more data",
+		zap.Int64("collectionID", collectionID),
+		zap.String("channel", pChannelName),
+		zap.Binary("msgID", position.GetMsgID()),
+	)
+
+	segmentIDSet := typeutil.NewUniqueSet(segmentIDs...)
+
 	for segmentID, pks := range delData.deleteIDs {
+		// ignore non target segment
+		if !segmentIDSet.Contain(segmentID) {
+			continue
+		}
 		segment, err := loader.metaReplica.getSegmentByID(segmentID, segmentTypeSealed)
 		if err != nil {
 			log.Warn("failed to get segment", zap.Int64("segment", segmentID), zap.Error(err))

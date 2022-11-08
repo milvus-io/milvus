@@ -107,7 +107,10 @@ func (l *loadSegmentsTask) Execute(ctx context.Context) error {
 		pos := deltaPosition
 		runningGroup.Go(func() error {
 			// reload data from dml channel
-			return l.node.loader.FromDmlCPLoadDelete(groupCtx, l.req.CollectionID, pos)
+			return l.node.loader.FromDmlCPLoadDelete(groupCtx, l.req.CollectionID, pos,
+				lo.FilterMap(l.req.Infos, func(info *queryPb.SegmentLoadInfo, _ int) (int64, bool) {
+					return info.GetSegmentID(), info.GetInsertChannel() == pos.GetChannelName()
+				}))
 		})
 	}
 	err = runningGroup.Wait()
