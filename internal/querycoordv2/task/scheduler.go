@@ -25,6 +25,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
@@ -475,7 +476,13 @@ func (scheduler *taskScheduler) isRelated(task Task, node int64) bool {
 			return true
 		}
 		if task, ok := task.(*SegmentTask); ok {
-			segment := scheduler.targetMgr.GetHistoricalSegment(task.CollectionID(), task.SegmentID(), meta.NextTarget)
+			taskType := GetTaskType(task)
+			var segment *datapb.SegmentInfo
+			if taskType == TaskTypeMove {
+				segment = scheduler.targetMgr.GetHistoricalSegment(task.CollectionID(), task.SegmentID(), meta.CurrentTarget)
+			} else {
+				segment = scheduler.targetMgr.GetHistoricalSegment(task.CollectionID(), task.SegmentID(), meta.NextTarget)
+			}
 			if segment == nil {
 				continue
 			}
@@ -638,12 +645,21 @@ func (scheduler *taskScheduler) checkSegmentTaskStale(task *SegmentTask) bool {
 	for _, action := range task.Actions() {
 		switch action.Type() {
 		case ActionTypeGrow:
-			segment := scheduler.targetMgr.GetHistoricalSegment(task.CollectionID(), task.SegmentID(), meta.NextTarget)
+			taskType := GetTaskType(task)
+			var segment *datapb.SegmentInfo
+			if taskType == TaskTypeMove {
+				segment = scheduler.targetMgr.GetHistoricalSegment(task.CollectionID(), task.SegmentID(), meta.CurrentTarget)
+			} else {
+				segment = scheduler.targetMgr.GetHistoricalSegment(task.CollectionID(), task.SegmentID(), meta.NextTarget)
+			}
 			if segment == nil {
-				log.Warn("task stale due tu the segment to load not exists in targets",
-					zap.Int64("segment", task.segmentID))
+				log.Warn("task stale due to the segment to load not exists in targets",
+					zap.Int64("segment", task.segmentID),
+					zap.Int32("taskType", taskType),
+				)
 				return true
 			}
+
 			replica := scheduler.meta.ReplicaManager.GetByCollectionAndNode(task.CollectionID(), action.Node())
 			if replica == nil {
 				log.Warn("task stale due to replica not found")

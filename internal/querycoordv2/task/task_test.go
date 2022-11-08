@@ -636,10 +636,11 @@ func (suite *TaskSuite) TestMoveSegmentTask() {
 	suite.cluster.EXPECT().ReleaseSegments(mock.Anything, leader, mock.Anything).Return(utils.WrapStatus(commonpb.ErrorCode_Success, ""), nil)
 
 	// Test move segment task
-	suite.dist.ChannelDistManager.Update(leader, meta.DmChannelFromVChannel(&datapb.VchannelInfo{
+	vchannel := &datapb.VchannelInfo{
 		CollectionID: suite.collection,
 		ChannelName:  channel.ChannelName,
-	}))
+	}
+	suite.dist.ChannelDistManager.Update(leader, meta.DmChannelFromVChannel(vchannel))
 	view := &meta.LeaderView{
 		ID:           leader,
 		CollectionID: suite.collection,
@@ -672,8 +673,9 @@ func (suite *TaskSuite) TestMoveSegmentTask() {
 		err = suite.scheduler.Add(task)
 		suite.NoError(err)
 	}
-	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, suite.collection, int64(1)).Return(nil, segmentInfos, nil)
+	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, suite.collection, int64(1)).Return([]*datapb.VchannelInfo{vchannel}, segmentInfos, nil)
 	suite.target.UpdateCollectionNextTargetWithPartitions(suite.collection, int64(1))
+	suite.target.UpdateCollectionCurrentTarget(suite.collection, int64(1))
 	suite.dist.SegmentDistManager.Update(sourceNode, segments...)
 	suite.dist.LeaderViewManager.Update(leader, view)
 	segmentsNum := len(suite.moveSegments)

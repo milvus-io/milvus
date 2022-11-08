@@ -698,7 +698,6 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 	p.initSegmentTaskTimeout()
 	p.initDistPullInterval()
 	p.initLoadTimeoutSeconds()
-	p.initCheckHandoffInterval()
 	p.initEnableActiveStandby()
 	p.initNextTargetSurviveTime()
 	p.initUpdateNextTargetInterval()
@@ -812,15 +811,6 @@ func (p *queryCoordConfig) initLoadTimeoutSeconds() {
 	p.LoadTimeoutSeconds = time.Duration(loadTimeout) * time.Second
 }
 
-func (p *queryCoordConfig) initCheckHandoffInterval() {
-	interval := p.Base.LoadWithDefault("queryCoord.checkHandoffInterval", "5000")
-	checkHandoffInterval, err := strconv.ParseInt(interval, 10, 64)
-	if err != nil {
-		panic(err)
-	}
-	p.CheckHandoffInterval = time.Duration(checkHandoffInterval) * time.Millisecond
-}
-
 func (p *queryCoordConfig) initNextTargetSurviveTime() {
 	interval := p.Base.LoadWithDefault("queryCoord.NextTargetSurviveTime", "300")
 	nextTargetSurviveTime, err := strconv.ParseInt(interval, 10, 64)
@@ -831,7 +821,7 @@ func (p *queryCoordConfig) initNextTargetSurviveTime() {
 }
 
 func (p *queryCoordConfig) initUpdateNextTargetInterval() {
-	interval := p.Base.LoadWithDefault("queryCoord.UpdateNextTargetInterval", "30")
+	interval := p.Base.LoadWithDefault("queryCoord.UpdateNextTargetInterval", "10")
 	updateNextTargetInterval, err := strconv.ParseInt(interval, 10, 64)
 	if err != nil {
 		panic(err)
