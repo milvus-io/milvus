@@ -289,6 +289,7 @@ func (s *Server) initObserver() {
 		s.meta,
 		s.dist,
 		s.targetMgr,
+		s.broker,
 	)
 }
 

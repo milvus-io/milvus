@@ -24,9 +24,6 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/stretchr/testify/suite"
-	clientv3 "go.etcd.io/etcd/client/v3"
-
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
@@ -37,6 +34,9 @@ import (
 	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/suite"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 const (
@@ -65,6 +65,7 @@ type HandoffObserverTestSuit struct {
 	meta   *meta.Meta
 	dist   *meta.DistributionManager
 	target *meta.TargetManager
+	broker *meta.MockBroker
 
 	// Test Object
 	observer *HandoffObserver
@@ -117,9 +118,10 @@ func (suite *HandoffObserverTestSuit) SetupTest() {
 	suite.meta = meta.NewMeta(suite.idAllocator, suite.store)
 	suite.dist = meta.NewDistributionManager()
 	suite.target = meta.NewTargetManager()
+	suite.broker = meta.NewMockBroker(suite.T())
 
 	// Test Object
-	suite.observer = NewHandoffObserver(suite.store, suite.meta, suite.dist, suite.target)
+	suite.observer = NewHandoffObserver(suite.store, suite.meta, suite.dist, suite.target, suite.broker)
 	suite.observer.Register(suite.collection)
 	suite.observer.StartHandoff(suite.collection)
 	suite.load()
@@ -143,6 +145,7 @@ func (suite *HandoffObserverTestSuit) TestFlushingHandoff() {
 	Params.QueryCoordCfg.CheckHandoffInterval = 1 * time.Second
 	err := suite.observer.Start(context.Background())
 	suite.NoError(err)
+	suite.broker.EXPECT().GetPartitions(mock.Anything, mock.Anything).Return([]int64{suite.partition}, nil)
 
 	flushingSegment := &querypb.SegmentInfo{
 		SegmentID:    3,
@@ -197,7 +200,7 @@ func (suite *HandoffObserverTestSuit) TestCompactHandoff() {
 	Params.QueryCoordCfg.CheckHandoffInterval = 1 * time.Second
 	err := suite.observer.Start(context.Background())
 	suite.NoError(err)
-
+	suite.broker.EXPECT().GetPartitions(mock.Anything, mock.Anything).Return([]int64{suite.partition}, nil)
 	compactSegment := &querypb.SegmentInfo{
 		SegmentID:           3,
 		CollectionID:        suite.collection,
@@ -249,6 +252,7 @@ func (suite *HandoffObserverTestSuit) TestRecursiveHandoff() {
 		Segments:        map[int64]*querypb.SegmentDist{1: {NodeID: 1, Version: 0}, 2: {NodeID: 2, Version: 0}},
 		GrowingSegments: typeutil.NewUniqueSet(3),
 	})
+	suite.broker.EXPECT().GetPartitions(mock.Anything, mock.Anything).Return([]int64{suite.partition}, nil)
 
 	Params.QueryCoordCfg.CheckHandoffInterval = 1 * time.Second
 	err := suite.observer.Start(context.Background())
@@ -464,57 +468,107 @@ func (suite *HandoffObserverTestSuit) load() {
 	suite.target.AddSegment(suite.sealedSegments...)
 }
 
-func (suite *HandoffObserverTestSuit) TestHandoffOnUnLoadedPartition() {
-	const (
-		collectionID        = 111
-		loadedPartitionID   = 1
-		unloadedPartitionID = 2
-	)
-	err := suite.meta.PutPartition(&meta.Partition{
-		PartitionLoadInfo: &querypb.PartitionLoadInfo{
-			CollectionID:  collectionID,
-			PartitionID:   loadedPartitionID,
-			ReplicaNumber: suite.replicaNumber,
-			Status:        querypb.LoadStatus_Loaded,
-		},
-	})
+func (suite *HandoffObserverTestSuit) TestHandoffOnUnloadedPartition() {
+	Params.QueryCoordCfg.CheckHandoffInterval = 1 * time.Second
+	err := suite.observer.Start(context.Background())
 	suite.NoError(err)
 
-	// init leader view
-	suite.dist.LeaderViewManager.Update(2, &meta.LeaderView{
+	suite.dist.LeaderViewManager.Update(1, &meta.LeaderView{
 		ID:           1,
-		CollectionID: collectionID,
+		CollectionID: suite.collection,
 		Channel:      suite.channel.ChannelName,
 		Segments:     map[int64]*querypb.SegmentDist{1: {NodeID: 1, Version: 0}, 2: {NodeID: 2, Version: 0}},
 	})
 
+	suite.dist.LeaderViewManager.Update(1, &meta.LeaderView{
+		ID:           2,
+		CollectionID: suite.collection,
+		Channel:      suite.channel.ChannelName,
+		Segments:     map[int64]*querypb.SegmentDist{1: {NodeID: 1, Version: 0}, 2: {NodeID: 2, Version: 0}},
+	})
+	suite.broker.EXPECT().GetPartitions(mock.Anything, mock.Anything).Return([]int64{2222}, nil)
+
+	suite.observer.Register(suite.collection)
+	suite.observer.StartHandoff(suite.collection)
+	defer suite.observer.Unregister(context.TODO(), suite.collection)
+
+	compactSegment1 := &querypb.SegmentInfo{
+		SegmentID:           111,
+		CollectionID:        suite.collection,
+		PartitionID:         1111,
+		SegmentState:        commonpb.SegmentState_Sealed,
+		CompactionFrom:      []int64{1},
+		CreatedByCompaction: true,
+		IndexInfos:          []*querypb.FieldIndexInfo{{IndexID: defaultIndexID}},
+	}
+
+	compactSegment2 := &querypb.SegmentInfo{
+		SegmentID:           222,
+		CollectionID:        suite.collection,
+		PartitionID:         2222,
+		SegmentState:        commonpb.SegmentState_Sealed,
+		CompactionFrom:      []int64{1},
+		CreatedByCompaction: true,
+		IndexInfos:          []*querypb.FieldIndexInfo{{IndexID: defaultIndexID}},
+	}
+	suite.produceHandOffEvent(compactSegment1)
+	suite.produceHandOffEvent(compactSegment2)
+
+	suite.Eventually(func() bool {
+		return !suite.target.ContainSegment(111) && suite.target.ContainSegment(222)
+	}, 3*time.Second, 1*time.Second)
+}
+
+func (suite *HandoffObserverTestSuit) TestUnRegisterHandoff() {
 	Params.QueryCoordCfg.CheckHandoffInterval = 1 * time.Second
-	err = suite.observer.Start(context.Background())
+	err := suite.observer.Start(context.Background())
 	suite.NoError(err)
 
-	compactSegment := &querypb.SegmentInfo{
-		SegmentID:           3,
-		CollectionID:        collectionID,
-		PartitionID:         unloadedPartitionID,
+	suite.dist.LeaderViewManager.Update(1, &meta.LeaderView{
+		ID:           1,
+		CollectionID: suite.collection,
+		Channel:      suite.channel.ChannelName,
+		Segments:     map[int64]*querypb.SegmentDist{1: {NodeID: 1, Version: 0}, 2: {NodeID: 2, Version: 0}},
+	})
+
+	suite.dist.LeaderViewManager.Update(1, &meta.LeaderView{
+		ID:           2,
+		CollectionID: suite.collection,
+		Channel:      suite.channel.ChannelName,
+		Segments:     map[int64]*querypb.SegmentDist{1: {NodeID: 1, Version: 0}, 2: {NodeID: 2, Version: 0}},
+	})
+
+	suite.broker.EXPECT().GetPartitions(mock.Anything, mock.Anything).Return([]int64{1111, 2222}, nil)
+	suite.observer.Register(suite.collection)
+	compactSegment1 := &querypb.SegmentInfo{
+		SegmentID:           111,
+		CollectionID:        suite.collection,
+		PartitionID:         1111,
+		SegmentState:        commonpb.SegmentState_Sealed,
+		CompactionFrom:      []int64{1},
+		CreatedByCompaction: true,
+		IndexInfos:          []*querypb.FieldIndexInfo{{IndexID: defaultIndexID}},
+	}
+	suite.produceHandOffEvent(compactSegment1)
+	suite.Eventually(func() bool {
+		return suite.observer.GetEventNum() == 1
+	}, 3*time.Second, 1*time.Second)
+	suite.observer.Unregister(context.TODO(), suite.collection)
+
+	suite.observer.Register(suite.collection)
+	defer suite.observer.Unregister(context.TODO(), suite.collection)
+	compactSegment2 := &querypb.SegmentInfo{
+		SegmentID:           222,
+		CollectionID:        suite.collection,
+		PartitionID:         2222,
 		SegmentState:        commonpb.SegmentState_Sealed,
 		CompactionFrom:      []int64{2},
 		CreatedByCompaction: true,
 		IndexInfos:          []*querypb.FieldIndexInfo{{IndexID: defaultIndexID}},
 	}
-	suite.produceHandOffEvent(compactSegment)
-
+	suite.produceHandOffEvent(compactSegment2)
 	suite.Eventually(func() bool {
-		return suite.target.ContainSegment(1) && suite.target.ContainSegment(2)
-	}, 3*time.Second, 1*time.Second)
-
-	suite.Eventually(func() bool {
-		return !suite.target.ContainSegment(3)
-	}, 3*time.Second, 1*time.Second)
-
-	suite.Eventually(func() bool {
-		key := fmt.Sprintf("%s/%d/%d/%d", util.HandoffSegmentPrefix, suite.collection, suite.partition, 3)
-		value, err := suite.kv.Load(key)
-		return len(value) == 0 && err != nil
+		return suite.observer.GetEventNum() == 1
 	}, 3*time.Second, 1*time.Second)
 }
 
@@ -526,6 +580,7 @@ func (suite *HandoffObserverTestSuit) TestFilterOutEventByIndexID() {
 		Channel:      suite.channel.ChannelName,
 		Segments:     map[int64]*querypb.SegmentDist{1: {NodeID: 1, Version: 0}, 2: {NodeID: 2, Version: 0}},
 	})
+	suite.broker.EXPECT().GetPartitions(mock.Anything, mock.Anything).Return([]int64{suite.partition}, nil)
 
 	Params.QueryCoordCfg.CheckHandoffInterval = 1 * time.Second
 	err := suite.observer.Start(context.Background())
@@ -556,6 +611,7 @@ func (suite *HandoffObserverTestSuit) TestFakedSegmentHandoff() {
 		Channel:      suite.channel.ChannelName,
 		Segments:     map[int64]*querypb.SegmentDist{1: {NodeID: 1, Version: 0}},
 	})
+	suite.broker.EXPECT().GetPartitions(mock.Anything, mock.Anything).Return([]int64{suite.partition}, nil)
 
 	Params.QueryCoordCfg.CheckHandoffInterval = 200 * time.Millisecond
 	err := suite.observer.Start(context.Background())
