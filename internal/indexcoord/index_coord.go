@@ -207,6 +207,8 @@ func (i *IndexCoord) Init() error {
 			initErr = err
 			return
 		}
+		log.Info("IndexCoord get node sessions from etcd", zap.Bool("bind mode", Params.IndexCoordCfg.BindIndexNodeMode),
+			zap.String("node address", Params.IndexCoordCfg.IndexNodeAddress))
 		aliveNodeID := make([]UniqueID, 0)
 		if Params.IndexCoordCfg.BindIndexNodeMode {
 			if err = i.nodeManager.AddNode(Params.IndexCoordCfg.IndexNodeID, Params.IndexCoordCfg.IndexNodeAddress); err != nil {
