@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/util/etcd"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
@@ -56,6 +57,8 @@ type CollectionObserverSuite struct {
 	dist      *meta.DistributionManager
 	meta      *meta.Meta
 	targetMgr *meta.TargetManager
+	broker    *meta.MockBroker
+	handoffOb *HandoffObserver
 
 	// Test object
 	ob *CollectionObserver
@@ -153,13 +156,26 @@ func (suite *CollectionObserverSuite) SetupTest() {
 	suite.dist = meta.NewDistributionManager()
 	suite.meta = meta.NewMeta(suite.idAllocator, suite.store)
 	suite.targetMgr = meta.NewTargetManager()
+	suite.broker = meta.NewMockBroker(suite.T())
+	suite.handoffOb = NewHandoffObserver(
+		suite.store,
+		suite.meta,
+		suite.dist,
+		suite.targetMgr,
+		suite.broker,
+	)
 
 	// Test object
 	suite.ob = NewCollectionObserver(
 		suite.dist,
 		suite.meta,
 		suite.targetMgr,
+		suite.broker,
+		suite.handoffOb,
 	)
+
+	Params.QueryCoordCfg.LoadTimeoutSeconds = 600 * time.Second
+	Params.QueryCoordCfg.RefreshTargetsIntervalSeconds = 600 * time.Second
 
 	suite.loadAll()
 }
@@ -169,7 +185,35 @@ func (suite *CollectionObserverSuite) TearDownTest() {
 	suite.kv.Close()
 }
 
-func (suite *CollectionObserverSuite) TestObserve() {
+func (suite *CollectionObserverSuite) TestObserveCollectionTimeout() {
+	const (
+		timeout = 2 * time.Second
+	)
+	// Not timeout
+	Params.QueryCoordCfg.LoadTimeoutSeconds = timeout
+	suite.ob.Start(context.Background())
+
+	// Collection 100 timeout,
+	// collection 101 loaded timeout
+	suite.dist.LeaderViewManager.Update(1, &meta.LeaderView{
+		ID:           1,
+		CollectionID: 101,
+		Channel:      "101-dmc0",
+		Segments:     map[int64]*querypb.SegmentDist{3: {NodeID: 1, Version: 0}},
+	})
+	suite.dist.LeaderViewManager.Update(2, &meta.LeaderView{
+		ID:           2,
+		CollectionID: 101,
+		Channel:      "101-dmc1",
+		Segments:     map[int64]*querypb.SegmentDist{4: {NodeID: 2, Version: 0}},
+	})
+	suite.Eventually(func() bool {
+		return suite.isCollectionTimeout(suite.collections[0]) &&
+			suite.isCollectionLoaded(suite.collections[1])
+	}, timeout*2, timeout/10)
+}
+
+func (suite *CollectionObserverSuite) TestObservePartitionsTimeout() {
 	const (
 		timeout = 2 * time.Second
 	)
@@ -195,6 +239,63 @@ func (suite *CollectionObserverSuite) TestObserve() {
 		return suite.isCollectionLoaded(suite.collections[0]) &&
 			suite.isCollectionTimeout(suite.collections[1])
 	}, timeout*2, timeout/10)
+}
+
+func (suite *CollectionObserverSuite) TestObserveCollectionRefresh() {
+	const (
+		timeout = 2 * time.Second
+	)
+	// Not timeout
+	Params.QueryCoordCfg.RefreshTargetsIntervalSeconds = timeout
+	suite.broker.EXPECT().GetPartitions(mock.Anything, int64(100)).Return(suite.partitions[100], nil)
+	for _, partition := range suite.partitions[100] {
+		suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, int64(100), partition).Return(nil, nil, nil)
+	}
+	suite.ob.Start(context.Background())
+
+	// Collection 100 refreshed,
+	// collection 101 loaded
+	suite.dist.LeaderViewManager.Update(1, &meta.LeaderView{
+		ID:           1,
+		CollectionID: 101,
+		Channel:      "101-dmc0",
+		Segments:     map[int64]*querypb.SegmentDist{3: {NodeID: 1, Version: 0}},
+	})
+	suite.dist.LeaderViewManager.Update(2, &meta.LeaderView{
+		ID:           2,
+		CollectionID: 101,
+		Channel:      "101-dmc1",
+		Segments:     map[int64]*querypb.SegmentDist{4: {NodeID: 2, Version: 0}},
+	})
+	time.Sleep(timeout * 2)
+}
+
+func (suite *CollectionObserverSuite) TestObservePartitionsRefresh() {
+	const (
+		timeout = 2 * time.Second
+	)
+	// Not timeout
+	Params.QueryCoordCfg.RefreshTargetsIntervalSeconds = timeout
+	for _, partition := range suite.partitions[101] {
+		suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, int64(101), partition).Return(nil, nil, nil)
+	}
+	suite.ob.Start(context.Background())
+
+	// Collection 100 loaded,
+	// collection 101 refreshed
+	suite.dist.LeaderViewManager.Update(1, &meta.LeaderView{
+		ID:           1,
+		CollectionID: 100,
+		Channel:      "100-dmc0",
+		Segments:     map[int64]*querypb.SegmentDist{1: {NodeID: 1, Version: 0}},
+	})
+	suite.dist.LeaderViewManager.Update(2, &meta.LeaderView{
+		ID:           2,
+		CollectionID: 100,
+		Channel:      "100-dmc1",
+		Segments:     map[int64]*querypb.SegmentDist{2: {NodeID: 2, Version: 0}},
+	})
+	time.Sleep(timeout * 2)
 }
 
 func (suite *CollectionObserverSuite) isCollectionLoaded(collection int64) bool {
