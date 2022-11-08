@@ -3879,8 +3879,7 @@ class TestsearchPagination(TestcaseBase):
         assert search_res[0].ids == res[0].ids[offset:]
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="wait to test")
-    @pytest.mark.parametrize("limit", [1, 10, 100, 3000])
+    @pytest.mark.parametrize("limit", [100, 3000, 10000])
     def test_search_with_pagination_topK(self, auto_id, dim, limit, _async):
         """
         target: test search with pagination limit + offset = topK
@@ -3893,7 +3892,7 @@ class TestsearchPagination(TestcaseBase):
         # 1. create a collection
         topK = 16384
         offset = topK - limit
-        collection_w = self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim)[0]
+        collection_w = self.init_collection_general(prefix, True, nb=20000, auto_id=auto_id, dim=dim)[0]
         # 2. search
         search_param = {"metric_type": "L2", "params": {"nprobe": 10}, "offset": offset}
         vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
