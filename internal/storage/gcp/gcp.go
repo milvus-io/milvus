@@ -13,8 +13,9 @@ import (
 
 // WrapHTTPTransport wraps http.Transport, add an auth header to support GCP native auth
 type WrapHTTPTransport struct {
-	tokenSrc oauth2.TokenSource
-	backend  transport
+	tokenSrc     oauth2.TokenSource
+	backend      transport
+	currentToken *oauth2.Token
 }
 
 // transport abstracts http.Transport to simplify test
@@ -36,13 +37,18 @@ func NewWrapHTTPTransport(secure bool) (*WrapHTTPTransport, error) {
 	}, nil
 }
 
-// RoundTrip implements http.RoundTripper
+// RoundTrip wraps original http.RoundTripper by Adding a Bearer token acquired from tokenSrc
 func (t *WrapHTTPTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	token, err := t.tokenSrc.Token()
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to acquire token")
+	// here Valid() means the token won't be expired in 10 sec
+	// so the http client timeout shouldn't be longer, or we need to change the default `expiryDelta` time
+	if !t.currentToken.Valid() {
+		var err error
+		t.currentToken, err = t.tokenSrc.Token()
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to acquire token")
+		}
 	}
-	req.Header.Set("Authorization", "Bearer "+token.AccessToken)
+	req.Header.Set("Authorization", "Bearer "+t.currentToken.AccessToken)
 	return t.backend.RoundTrip(req)
 }
 
