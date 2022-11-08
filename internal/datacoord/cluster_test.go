@@ -534,21 +534,19 @@ func TestCluster_Flush(t *testing.T) {
 
 	// flush empty should impact nothing
 	assert.NotPanics(t, func() {
-		err := cluster.Flush(context.Background(), 1, "chan-1", []*datapb.SegmentInfo{}, []*datapb.SegmentInfo{})
+		err := cluster.Flush(context.Background(), 1, "chan-1", []*datapb.SegmentInfo{})
 		assert.NoError(t, err)
 	})
 
 	// flush not watched channel
 	assert.NotPanics(t, func() {
-		err := cluster.Flush(context.Background(), 1, "chan-2", []*datapb.SegmentInfo{{ID: 1}},
-			[]*datapb.SegmentInfo{{ID: 2}})
+		err := cluster.Flush(context.Background(), 1, "chan-2", []*datapb.SegmentInfo{{ID: 1}})
 		assert.Error(t, err)
 	})
 
 	// flush from wrong datanode
 	assert.NotPanics(t, func() {
-		err := cluster.Flush(context.Background(), 2, "chan-1", []*datapb.SegmentInfo{{ID: 1}},
-			[]*datapb.SegmentInfo{{ID: 3}})
+		err := cluster.Flush(context.Background(), 2, "chan-1", []*datapb.SegmentInfo{{ID: 1}})
 		assert.Error(t, err)
 	})
 

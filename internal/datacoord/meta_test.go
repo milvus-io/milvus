@@ -57,6 +57,11 @@ func (mek *mockEtcdKv) LoadWithPrefix(key string) ([]string, []string, error) {
 	case strings.Contains(key, datacoord.SegmentStatslogPathPrefix):
 		segInfo := getFieldBinlogPaths(1, "statslog1")
 		val, _ = proto.Marshal(segInfo)
+	case strings.Contains(key, datacoord.ChannelCheckpointPrefix):
+		channelCP := &internalpb.MsgPosition{
+			Timestamp: 1000,
+		}
+		val, _ = proto.Marshal(channelCP)
 	default:
 		return nil, nil, fmt.Errorf("invalid key")
 	}
@@ -1046,4 +1051,55 @@ func equalCollectionInfo(t *testing.T, a *collectionInfo, b *collectionInfo) {
 	assert.Equal(t, a.Schema, b.Schema)
 	assert.Equal(t, a.Properties, b.Properties)
 	assert.Equal(t, a.StartPositions, b.StartPositions)
+}
+
+func TestChannelCP(t *testing.T) {
+	mockVChannel := "fake-by-dev-rootcoord-dml-1-testchannelcp-v0"
+	mockPChannel := "fake-by-dev-rootcoord-dml-1"
+
+	pos := &internalpb.MsgPosition{
+		ChannelName: mockPChannel,
+		MsgID:       []byte{},
+		Timestamp:   1000,
+	}
+
+	t.Run("UpdateChannelCheckpoint", func(t *testing.T) {
+		meta, err := newMeta(context.TODO(), memkv.NewMemoryKV(), "")
+		assert.NoError(t, err)
+
+		// nil position
+		err = meta.UpdateChannelCheckpoint(mockVChannel, nil)
+		assert.Error(t, err)
+
+		err = meta.UpdateChannelCheckpoint(mockVChannel, pos)
+		assert.NoError(t, err)
+	})
+
+	t.Run("GetChannelCheckpoint", func(t *testing.T) {
+		meta, err := newMeta(context.TODO(), memkv.NewMemoryKV(), "")
+		assert.NoError(t, err)
+
+		position := meta.GetChannelCheckpoint(mockVChannel)
+		assert.Nil(t, position)
+
+		err = meta.UpdateChannelCheckpoint(mockVChannel, pos)
+		assert.NoError(t, err)
+		position = meta.GetChannelCheckpoint(mockVChannel)
+		assert.NotNil(t, position)
+		assert.True(t, position.ChannelName == pos.ChannelName)
+		assert.True(t, position.Timestamp == pos.Timestamp)
+	})
+
+	t.Run("DropChannelCheckpoint", func(t *testing.T) {
+		meta, err := newMeta(context.TODO(), memkv.NewMemoryKV(), "")
+		assert.NoError(t, err)
+
+		err = meta.DropChannelCheckpoint(mockVChannel)
+		assert.NoError(t, err)
+
+		err = meta.UpdateChannelCheckpoint(mockVChannel, pos)
+		assert.NoError(t, err)
+		err = meta.DropChannelCheckpoint(mockVChannel)
+		assert.NoError(t, err)
+	})
 }

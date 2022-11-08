@@ -14,16 +14,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package datacoord
+package datanode
+
+import (
+	"time"
+
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
+)
 
 const (
-	MetaPrefix                = "datacoord-meta"
-	SegmentPrefix             = MetaPrefix + "/s"
-	SegmentBinlogPathPrefix   = MetaPrefix + "/binlog"
-	SegmentDeltalogPathPrefix = MetaPrefix + "/deltalog"
-	SegmentStatslogPathPrefix = MetaPrefix + "/statslog"
-	ChannelRemovePrefix       = MetaPrefix + "/channel-removal"
-	ChannelCheckpointPrefix   = MetaPrefix + "/channel-cp"
-
-	RemoveFlagTomestone = "removed"
+	syncPeriod = 10 * time.Minute // TODO: move to config?
 )
+
+// segmentSyncPolicy sync policy applies to segment
+type segmentSyncPolicy func(segment *Segment, ts Timestamp) bool
+
+// syncPeriodically get segmentSyncPolicy with segment sync periodically.
+func syncPeriodically() segmentSyncPolicy {
+	return func(segment *Segment, ts Timestamp) bool {
+		endTime := tsoutil.PhysicalTime(ts)
+		lastSyncTime := tsoutil.PhysicalTime(segment.lastSyncTs)
+		return endTime.Sub(lastSyncTime) >= syncPeriod && !segment.isBufferEmpty()
+	}
+}

@@ -326,40 +326,6 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		}
 	})
 
-	t.Run("Test deleteNode Operate flushDelData failed", func(te *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-
-		chanName := "datanode-test-FlowGraphDeletenode-operate"
-		testPath := "/test/datanode/root/meta"
-		assert.NoError(t, clearEtcd(testPath))
-		Params.EtcdCfg.MetaRootPath = testPath
-
-		c := &nodeConfig{
-			channel:      nil,
-			allocator:    NewAllocatorFactory(),
-			vChannelName: chanName,
-		}
-		delNode, err := newDeleteNode(ctx, fm, make(chan string, 1), c)
-		assert.Nil(te, err)
-
-		msg := genFlowGraphDeleteMsg(int64Pks, chanName)
-		msg.segmentsToSync = []UniqueID{-1}
-		delDataBuf := newDelDataBuf()
-		delNode.delBufferManager.Store(UniqueID(-1), delDataBuf)
-		heap.Push(delNode.delBufferManager.delBufHeap, delDataBuf.item)
-		delNode.flushManager = &mockFlushManager{
-			returnError: true,
-		}
-
-		var fgMsg flowgraph.Msg = &msg
-
-		setFlowGraphRetryOpt(retry.Attempts(1))
-		assert.Panics(te, func() {
-			delNode.Operate([]flowgraph.Msg{fgMsg})
-		})
-	})
-
 	t.Run("Test issue#18565", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
@@ -510,8 +476,11 @@ func TestFlowGraphDeleteNode_showDelBuf(t *testing.T) {
 	assert.NoError(t, clearEtcd(testPath))
 	Params.EtcdCfg.MetaRootPath = testPath
 
+	channel := &ChannelMeta{
+		segments: make(map[UniqueID]*Segment),
+	}
 	c := &nodeConfig{
-		channel:      nil,
+		channel:      channel,
 		allocator:    NewAllocatorFactory(),
 		vChannelName: chanName,
 	}
@@ -566,7 +535,6 @@ func TestFlowGraphDeleteNode_updateCompactedSegments(t *testing.T) {
 	tests := []struct {
 		description    string
 		compactToExist bool
-		segIDsInBuffer []UniqueID
 
 		compactedToIDs   []UniqueID
 		compactedFromIDs []UniqueID
@@ -574,35 +542,28 @@ func TestFlowGraphDeleteNode_updateCompactedSegments(t *testing.T) {
 		expectedSegsRemain []UniqueID
 	}{
 		{"zero segments", false,
-			[]UniqueID{}, []UniqueID{}, []UniqueID{}, []UniqueID{}},
+			[]UniqueID{}, []UniqueID{}, []UniqueID{}},
 		{"segment no compaction", false,
-			[]UniqueID{100, 101}, []UniqueID{}, []UniqueID{}, []UniqueID{100, 101}},
-		{"segment compacted not in buffer", true,
-			[]UniqueID{100, 101}, []UniqueID{200}, []UniqueID{103}, []UniqueID{100, 101}},
-		{"segment compacted in buffer 100>201", true,
-			[]UniqueID{100, 101}, []UniqueID{201}, []UniqueID{100}, []UniqueID{101, 201}},
-		{"segment compacted in buffer 100+101>201", true,
-			[]UniqueID{100, 101}, []UniqueID{201, 201}, []UniqueID{100, 101}, []UniqueID{201}},
-		{"segment compacted in buffer 100>201, 101>202", true,
-			[]UniqueID{100, 101}, []UniqueID{201, 202}, []UniqueID{100, 101}, []UniqueID{201, 202}},
+			[]UniqueID{}, []UniqueID{}, []UniqueID{100, 101}},
+		{"segment compacted", true,
+			[]UniqueID{200}, []UniqueID{103}, []UniqueID{100, 101}},
+		{"segment compacted 100>201", true,
+			[]UniqueID{201}, []UniqueID{100}, []UniqueID{101, 201}},
+		{"segment compacted 100+101>201", true,
+			[]UniqueID{201, 201}, []UniqueID{100, 101}, []UniqueID{201}},
+		{"segment compacted 100>201, 101>202", true,
+			[]UniqueID{201, 202}, []UniqueID{100, 101}, []UniqueID{201, 202}},
 		// false
-		{"segment compacted in buffer 100>201", false,
-			[]UniqueID{100, 101}, []UniqueID{201}, []UniqueID{100}, []UniqueID{101}},
-		{"segment compacted in buffer 100+101>201", false,
-			[]UniqueID{100, 101}, []UniqueID{201, 201}, []UniqueID{100, 101}, []UniqueID{}},
-		{"segment compacted in buffer 100>201, 101>202", false,
-			[]UniqueID{100, 101}, []UniqueID{201, 202}, []UniqueID{100, 101}, []UniqueID{}},
+		{"segment compacted 100>201", false,
+			[]UniqueID{201}, []UniqueID{100}, []UniqueID{101}},
+		{"segment compacted 100+101>201", false,
+			[]UniqueID{201, 201}, []UniqueID{100, 101}, []UniqueID{}},
+		{"segment compacted 100>201, 101>202", false,
+			[]UniqueID{201, 202}, []UniqueID{100, 101}, []UniqueID{}},
 	}
 
 	for _, test := range tests {
 		t.Run(test.description, func(t *testing.T) {
-			for _, seg := range test.segIDsInBuffer {
-				delBuf := newDelDataBuf()
-				delBuf.accumulateEntriesNum(100)
-				heap.Push(delNode.delBufferManager.delBufHeap, delBuf.item)
-				delNode.delBufferManager.Store(seg, delBuf)
-			}
-
 			if test.compactToExist {
 				for _, segID := range test.compactedToIDs {
 					seg := Segment{
@@ -628,8 +589,7 @@ func TestFlowGraphDeleteNode_updateCompactedSegments(t *testing.T) {
 			delNode.updateCompactedSegments()
 
 			for _, remain := range test.expectedSegsRemain {
-				_, ok := delNode.delBufferManager.Load(remain)
-				assert.True(t, ok)
+				delNode.channel.hasSegment(remain, true)
 			}
 		})
 	}

@@ -21,16 +21,16 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"sync"
+
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
-
-	"go.uber.org/zap"
 )
 
 // DelBufferManager is in charge of managing insertBuf and delBuf from an overall prospect
@@ -38,37 +38,37 @@ import (
 // insert/delete flush when the memory usage of the whole manager reach a certain level.
 // but at the first stage, this struct is only used for delete buff
 type DelBufferManager struct {
-	delBufMap     sync.Map // map[segmentID]*DelDataBuf
+	channel       Channel
 	delMemorySize int64
 	delBufHeap    *PriorityQueue
 }
 
 func (bm *DelBufferManager) GetSegDelBufMemSize(segID UniqueID) int64 {
-	if delDataBuf, ok := bm.delBufMap.Load(segID); ok {
-		return delDataBuf.(*DelDataBuf).item.memorySize
+	if delDataBuf, ok := bm.channel.getCurDeleteBuffer(segID); ok {
+		return delDataBuf.item.memorySize
 	}
 	return 0
 }
 
 func (bm *DelBufferManager) GetEntriesNum(segID UniqueID) int64 {
-	if delDataBuf, ok := bm.delBufMap.Load(segID); ok {
-		return delDataBuf.(*DelDataBuf).GetEntriesNum()
+	if delDataBuf, ok := bm.channel.getCurDeleteBuffer(segID); ok {
+		return delDataBuf.GetEntriesNum()
 	}
 	return 0
 }
 
 // Store :the method only for unit test
 func (bm *DelBufferManager) Store(segID UniqueID, delDataBuf *DelDataBuf) {
-	bm.delBufMap.Store(segID, delDataBuf)
+	bm.channel.setCurDeleteBuffer(segID, delDataBuf)
 }
 
 func (bm *DelBufferManager) StoreNewDeletes(segID UniqueID, pks []primaryKey,
-	tss []Timestamp, tr TimeRange) {
+	tss []Timestamp, tr TimeRange, startPos, endPos *internalpb.MsgPosition) {
 	//1. load or create delDataBuf
 	var delDataBuf *DelDataBuf
-	value, loaded := bm.delBufMap.Load(segID)
+	buffer, loaded := bm.channel.getCurDeleteBuffer(segID)
 	if loaded {
-		delDataBuf = value.(*DelDataBuf)
+		delDataBuf = buffer
 	} else {
 		delDataBuf = newDelDataBuf()
 	}
@@ -93,6 +93,7 @@ func (bm *DelBufferManager) StoreNewDeletes(segID UniqueID, pks []primaryKey,
 	//3. update statistics of del data
 	delDataBuf.accumulateEntriesNum(int64(rowCount))
 	delDataBuf.updateTimeRange(tr)
+	delDataBuf.updateStartAndEndPosition(startPos, endPos)
 
 	//4. update and sync memory size with priority queue
 	if !loaded {
@@ -102,7 +103,7 @@ func (bm *DelBufferManager) StoreNewDeletes(segID UniqueID, pks []primaryKey,
 	} else {
 		bm.delBufHeap.update(delDataBuf.item, delDataBuf.item.memorySize+bufSize)
 	}
-	bm.delBufMap.Store(segID, delDataBuf)
+	bm.channel.setCurDeleteBuffer(segID, delDataBuf)
 	bm.delMemorySize += bufSize
 	//4. sync metrics
 	metrics.DataNodeConsumeMsgRowsCount.WithLabelValues(
@@ -110,19 +111,19 @@ func (bm *DelBufferManager) StoreNewDeletes(segID UniqueID, pks []primaryKey,
 }
 
 func (bm *DelBufferManager) Load(segID UniqueID) (delDataBuf *DelDataBuf, ok bool) {
-	value, ok := bm.delBufMap.Load(segID)
+	buffer, ok := bm.channel.getCurDeleteBuffer(segID)
 	if ok {
-		return value.(*DelDataBuf), ok
+		return buffer, ok
 	}
 	return nil, ok
 }
 
 func (bm *DelBufferManager) Delete(segID UniqueID) {
-	if buf, ok := bm.delBufMap.Load(segID); ok {
-		item := buf.(*DelDataBuf).item
+	if buf, ok := bm.channel.getCurDeleteBuffer(segID); ok {
+		item := buf.item
 		bm.delMemorySize -= item.memorySize
 		heap.Remove(bm.delBufHeap, item.index)
-		bm.delBufMap.Delete(segID)
+		bm.channel.rollDeleteBuffer(segID)
 	}
 }
 
@@ -156,7 +157,7 @@ func (bm *DelBufferManager) CompactSegBuf(compactedToSegID UniqueID, compactedFr
 		//note that when compacting segment in del buffer manager
 		//there is no need to modify the general memory size as there is no new
 		//added del into the memory
-		bm.delBufMap.Store(compactedToSegID, compactToDelBuff)
+		bm.channel.setCurDeleteBuffer(compactedToSegID, compactToDelBuff)
 	}
 }
 
@@ -238,11 +239,13 @@ func (pq *PriorityQueue) update(item *Item, memorySize int64) {
 // BufferData buffers insert data, monitoring buffer size and limit
 // size and limit both indicate numOfRows
 type BufferData struct {
-	buffer *InsertData
-	size   int64
-	limit  int64
-	tsFrom Timestamp
-	tsTo   Timestamp
+	buffer   *InsertData
+	size     int64
+	limit    int64
+	tsFrom   Timestamp
+	tsTo     Timestamp
+	startPos *internalpb.MsgPosition
+	endPos   *internalpb.MsgPosition
 }
 
 func (bd *BufferData) effectiveCap() int64 {
@@ -263,12 +266,23 @@ func (bd *BufferData) updateTimeRange(tr TimeRange) {
 	}
 }
 
+func (bd *BufferData) updateStartAndEndPosition(startPos *internalpb.MsgPosition, endPos *internalpb.MsgPosition) {
+	if bd.startPos == nil || startPos.Timestamp < bd.startPos.Timestamp {
+		bd.startPos = startPos
+	}
+	if bd.endPos == nil || endPos.Timestamp > bd.endPos.Timestamp {
+		bd.endPos = endPos
+	}
+}
+
 // DelDataBuf buffers delete data, monitoring buffer size and limit
 // size and limit both indicate numOfRows
 type DelDataBuf struct {
 	datapb.Binlog
-	delData *DeleteData
-	item    *Item
+	delData  *DeleteData
+	item     *Item
+	startPos *internalpb.MsgPosition
+	endPos   *internalpb.MsgPosition
 }
 
 func (ddb *DelDataBuf) accumulateEntriesNum(entryNum int64) {
@@ -295,6 +309,15 @@ func (ddb *DelDataBuf) mergeDelDataBuf(buf *DelDataBuf) {
 	ddb.item.memorySize += buf.item.memorySize
 }
 
+func (ddb *DelDataBuf) updateStartAndEndPosition(startPos *internalpb.MsgPosition, endPos *internalpb.MsgPosition) {
+	if ddb.startPos == nil || startPos.Timestamp < ddb.startPos.Timestamp {
+		ddb.startPos = startPos
+	}
+	if ddb.endPos == nil || endPos.Timestamp > ddb.endPos.Timestamp {
+		ddb.endPos = endPos
+	}
+}
+
 // newBufferData needs an input dimension to calculate the limit of this buffer
 //
 // `limit` is the segment numOfRows a buffer can buffer at most.
@@ -313,12 +336,29 @@ func (ddb *DelDataBuf) mergeDelDataBuf(buf *DelDataBuf) {
 //	to fit in both types of vector fields
 //
 // * This need to change for string field support and multi-vector fields support.
-func newBufferData(dimension int64) (*BufferData, error) {
+func newBufferData(collSchema *schemapb.CollectionSchema) (*BufferData, error) {
+	// Get Dimension
+	// TODO GOOSE: under assumption that there's only 1 Vector field in one collection schema
+	var dimension int
+	var err error
+	for _, field := range collSchema.Fields {
+		if field.DataType == schemapb.DataType_FloatVector ||
+			field.DataType == schemapb.DataType_BinaryVector {
+
+			dimension, err = storage.GetDimFromParams(field.TypeParams)
+			if err != nil {
+				log.Error("failed to get dim from field", zap.Error(err))
+				return nil, err
+			}
+			break
+		}
+	}
+
 	if dimension == 0 {
 		return nil, errors.New("Invalid dimension")
 	}
 
-	limit := Params.DataNodeCfg.FlushInsertBufferSize / (dimension * 4)
+	limit := Params.DataNodeCfg.FlushInsertBufferSize / (int64(dimension) * 4)
 
 	//TODO::xige-16 eval vec and string field
 	return &BufferData{
