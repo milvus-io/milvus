@@ -534,7 +534,7 @@ func (t *searchTask) fillInFieldInfo() {
 func (t *searchTask) collectSearchResults(ctx context.Context) error {
 	select {
 	case <-t.TraceCtx().Done():
-		log.Ctx(ctx).Debug("wait to finish timeout!", zap.Int64("msgID", t.ID()))
+		log.Ctx(ctx).Warn("search task wait to finish timeout!", zap.Int64("msgID", t.ID()))
 		return fmt.Errorf("search task wait to finish timeout, msgID=%d", t.ID())
 	default:
 		log.Ctx(ctx).Debug("all searches are finished or canceled", zap.Int64("msgID", t.ID()))
