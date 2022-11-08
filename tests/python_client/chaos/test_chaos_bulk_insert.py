@@ -119,15 +119,16 @@ class TestChaos(TestChaosBase):
 			entity = dict(zip(fields_name, entity_value))
 			entities.append(entity)
 		data_dict = {"rows": entities}
-		file_name = "/tmp/ci_logs/bulk_insert_data_source.json"
-		files = [file_name]
+		data_source = "/tmp/ci_logs/bulk_insert_data_source.json"
+		file_name = "bulk_insert_data_source.json"
+		files = ["bulk_insert_data_source.json"]
 		#TODO: npy file type is not supported so far
 		log.info("generate bulk load file")
-		with open(file_name, "w") as f:
+		with open(data_source, "w") as f:
 			f.write(json.dumps(data_dict, indent=4))
 		log.info("upload file to minio")
 		client = Minio(minio_endpoint, access_key="minioadmin", secret_key="minioadmin", secure=False)
-		client.fput_object(bucket_name, file_name, file_name)
+		client.fput_object(bucket_name, file_name, data_source)
 		self.health_checkers[Op.bulk_insert].update(schema=schema, files=files)
 		log.info("prepare data for bulk load done")
 
