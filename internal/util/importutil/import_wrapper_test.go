@@ -922,19 +922,6 @@ func Test_ImportWrapperIsBinlogImport(t *testing.T) {
 		"path1",
 		"path2",
 	}
-	b = wrapper.isBinlogImport(paths)
-	assert.False(t, b)
-
-	// insert log path is created, but delta log path doesn't exist
-	err = os.MkdirAll(TempFilesPath+paths[0], os.ModePerm)
-	assert.NoError(t, err)
-
-	b = wrapper.isBinlogImport(paths)
-	assert.False(t, b)
-
-	// both the two path are created, success
-	err = os.MkdirAll(TempFilesPath+paths[1], os.ModePerm)
-	assert.NoError(t, err)
 
 	b = wrapper.isBinlogImport(paths)
 	assert.True(t, b)

@@ -87,3 +87,22 @@ func TestParseTSFromOptions(t *testing.T) {
 	assert.Equal(t, uint64(0), tsEnd)
 	assert.Error(t, err)
 }
+
+func TestIsBackup(t *testing.T) {
+	isBackup := IsBackup([]*commonpb.KeyValuePair{
+		{Key: "backup", Value: "true"},
+	})
+	assert.Equal(t, true, isBackup)
+	isBackup2 := IsBackup([]*commonpb.KeyValuePair{
+		{Key: "backup", Value: "True"},
+	})
+	assert.Equal(t, true, isBackup2)
+	falseBackup := IsBackup([]*commonpb.KeyValuePair{
+		{Key: "backup", Value: "false"},
+	})
+	assert.Equal(t, false, falseBackup)
+	noBackup := IsBackup([]*commonpb.KeyValuePair{
+		{Key: "backup", Value: "false"},
+	})
+	assert.Equal(t, false, noBackup)
+}

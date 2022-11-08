@@ -1102,12 +1102,13 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 		saveSegmentFunc(node, req, importResult, ts))
 	// todo: pass tsStart and tsStart after import_wrapper support
 	tsStart, tsEnd, err := importutil.ParseTSFromOptions(req.GetImportTask().GetInfos())
+	isBackup := importutil.IsBackup(req.GetImportTask().GetInfos())
 	if err != nil {
 		return returnFailFunc(err)
 	}
 	log.Info("import time range", zap.Uint64("start_ts", tsStart), zap.Uint64("end_ts", tsEnd))
 	err = importWrapper.Import(req.GetImportTask().GetFiles(),
-		importutil.ImportOptions{OnlyValidate: false, TsStartPoint: tsStart, TsEndPoint: tsEnd})
+		importutil.ImportOptions{OnlyValidate: false, TsStartPoint: tsStart, TsEndPoint: tsEnd, IsBackup: isBackup})
 	if err != nil {
 		return returnFailFunc(err)
 	}
