@@ -767,7 +767,7 @@ func testSeekFailWhenConsumingDeltaMsg(ctx context.Context, t *testing.T, positi
 	loader := node.loader
 	assert.NotNil(t, loader)
 
-	ret := loader.FromDmlCPLoadDelete(ctx, defaultCollectionID, position)
+	ret := loader.FromDmlCPLoadDelete(ctx, defaultCollectionID, position, []int64{})
 	assert.EqualError(t, ret, errMsg)
 }
 
@@ -801,7 +801,7 @@ func testConsumingDeltaMsg(ctx context.Context, t *testing.T, position *msgstrea
 	loader := node.loader
 	assert.NotNil(t, loader)
 
-	return loader.FromDmlCPLoadDelete(ctx, defaultCollectionID, position)
+	return loader.FromDmlCPLoadDelete(ctx, defaultCollectionID, position, []int64{})
 }
 
 type mockMsgID struct {
