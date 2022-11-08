@@ -1019,7 +1019,6 @@ class TestQueryParams(TestcaseBase):
         assert query_res == res
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="issue #19482")
     @pytest.mark.parametrize("limit", ["12 s", " ", [0, 1], {2}])
     def test_query_pagination_with_invalid_limit_type(self, limit):
         """
@@ -1032,14 +1031,12 @@ class TestQueryParams(TestcaseBase):
         int_values = vectors[0][ct.default_int64_field_name].values.tolist()
         pos = 10
         term_expr = f'{ct.default_int64_field_name} in {int_values[10: pos+10]}'
-        res = vectors[0].iloc[10: pos+10, :1].to_dict('records')
-        query_params = {"offset": 10, "limit": limit}
-        collection_w.query(term_expr, params=query_params,
-                           check_task=CheckTasks.check_query_results,
-                           check_items={exp_res: res})
+        collection_w.query(term_expr, offset=10, limit=limit,
+                           check_task=CheckTasks.err_res,
+                           check_items={ct.err_code: 1,
+                                        ct.err_msg: "limit [%s] is invalid" % limit})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="issue #19482")
     @pytest.mark.parametrize("limit", [-1, 67890])
     def test_query_pagination_with_invalid_limit_value(self, limit):
         """
@@ -1052,14 +1049,13 @@ class TestQueryParams(TestcaseBase):
         int_values = vectors[0][ct.default_int64_field_name].values.tolist()
         pos = 10
         term_expr = f'{ct.default_int64_field_name} in {int_values[10: pos + 10]}'
-        res = vectors[0].iloc[10: pos + 10, :1].to_dict('records')
-        query_params = {"offset": 10, "limit": limit}
-        collection_w.query(term_expr, params=query_params,
-                           check_task=CheckTasks.check_query_results,
-                           check_items={exp_res: res})
+        collection_w.query(term_expr, offset=10, limit=limit,
+                           check_task=CheckTasks.err_res,
+                           check_items={ct.err_code: 1,
+                                        ct.err_msg: "limit [%s] is invalid, should be in range "
+                                                    "[1, 16384], but got %s" % (limit, limit)})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="issue #19482")
     @pytest.mark.parametrize("offset", ["12 s", " ", [0, 1], {2}])
     def test_query_pagination_with_invalid_offset_type(self, offset):
         """
@@ -1072,14 +1068,12 @@ class TestQueryParams(TestcaseBase):
         int_values = vectors[0][ct.default_int64_field_name].values.tolist()
         pos = 10
         term_expr = f'{ct.default_int64_field_name} in {int_values[10: pos + 10]}'
-        res = vectors[0].iloc[10: pos + 10, :1].to_dict('records')
-        query_params = {"offset": offset, "limit": 10}
-        collection_w.query(term_expr, params=query_params,
-                           check_task=CheckTasks.check_query_results,
-                           check_items={exp_res: res})
+        collection_w.query(term_expr, offset=offset, limit=10,
+                           check_task=CheckTasks.err_res,
+                           check_items={ct.err_code: 1,
+                                        ct.err_msg: "offset [%s] is invalid" % offset})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="issue #19482")
     @pytest.mark.parametrize("offset", [-1, 67890])
     def test_query_pagination_with_invalid_offset_value(self, offset):
         """
@@ -1092,11 +1086,11 @@ class TestQueryParams(TestcaseBase):
         int_values = vectors[0][ct.default_int64_field_name].values.tolist()
         pos = 10
         term_expr = f'{ct.default_int64_field_name} in {int_values[10: pos + 10]}'
-        res = vectors[0].iloc[10: pos + 10, :1].to_dict('records')
-        query_params = {"offset": offset, "limit": 10}
-        collection_w.query(term_expr, params=query_params,
-                           check_task=CheckTasks.check_query_results,
-                           check_items={exp_res: res})
+        collection_w.query(term_expr, offset=offset, limit=10,
+                           check_task=CheckTasks.err_res,
+                           check_items={ct.err_code: 1,
+                                        ct.err_msg: "offset [%s] is invalid, should be in range "
+                                                    "[1, 16384], but got %s" % (offset, offset)})
 
 
 class TestQueryOperation(TestcaseBase):

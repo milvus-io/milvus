@@ -175,7 +175,7 @@ class ApiCollectionWrapper:
         timeout = TIMEOUT if timeout is None else timeout
 
         func_name = sys._getframe().f_code.co_name
-        res, check = api_request([self.collection.query, expr, output_fields, partition_names, timeout])
+        res, check = api_request([self.collection.query, expr, output_fields, partition_names, timeout], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check,
                                        expression=expr, partition_names=partition_names,
                                        output_fields=output_fields,
