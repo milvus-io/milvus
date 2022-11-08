@@ -98,7 +98,7 @@ func (ticker *channelsTimeTickerImpl) tick() error {
 
 	stats, err2 := ticker.getStatisticsFunc()
 	if err2 != nil {
-		log.Debug("Proxy channelsTimeTickerImpl failed to getStatistics", zap.Error(err2))
+		log.Warn("failed to get tt statistics", zap.Error(err))
 		return nil
 	}
 
