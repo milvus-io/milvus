@@ -37,6 +37,22 @@ const (
 	BackupFlag = "backup"
 )
 
+type ImportOptions struct {
+	OnlyValidate bool
+	TsStartPoint uint64
+	TsEndPoint   uint64
+	IsBackup     bool // whether is triggered by backup tool
+}
+
+func DefaultImportOptions() ImportOptions {
+	options := ImportOptions{
+		OnlyValidate: false,
+		TsStartPoint: 0,
+		TsEndPoint:   math.MaxUint64,
+	}
+	return options
+}
+
 // ValidateOptions the options is illegal, return nil if illegal, return error if not.
 // Illegal options:
 //     start_ts: 10-digit physical timestamp, e.g. 1665995420

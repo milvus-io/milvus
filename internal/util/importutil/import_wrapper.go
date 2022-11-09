@@ -20,7 +20,6 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"math"
 
 	"go.uber.org/zap"
 
@@ -76,22 +75,6 @@ type WorkingSegment struct {
 	memSize      int                   // total memory size of all binlogs
 	fieldsInsert []*datapb.FieldBinlog // persisted binlogs
 	fieldsStats  []*datapb.FieldBinlog // stats of persisted binlogs
-}
-
-type ImportOptions struct {
-	OnlyValidate bool
-	TsStartPoint uint64
-	TsEndPoint   uint64
-	IsBackup     bool // whether is triggered by backup tool
-}
-
-func DefaultImportOptions() ImportOptions {
-	options := ImportOptions{
-		OnlyValidate: false,
-		TsStartPoint: 0,
-		TsEndPoint:   math.MaxUint64,
-	}
-	return options
 }
 
 type ImportWrapper struct {
