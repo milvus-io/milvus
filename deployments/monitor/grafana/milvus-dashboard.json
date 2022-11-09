@@ -22,7 +22,7 @@
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
   "id": 34,
-  "iteration": 1667533774069,
+  "iteration": 1667987821492,
   "links": [],
   "liveNow": false,
   "panels": [
@@ -7401,7 +7401,7 @@
             "uid": "$datasource"
           },
           "exemplar": true,
-          "expr": "avg(milvus_datacoord_consume_datanode_tt_lag_ms{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", msg_type=\"all\"}) by (pod, node_id)",
+          "expr": "avg(milvus_datacoord_consume_datanode_tt_lag_ms{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (pod, node_id)",
           "hide": false,
           "interval": "",
           "intervalFactor": 2,
@@ -7415,7 +7415,7 @@
             "uid": "$datasource"
           },
           "exemplar": true,
-          "expr": "max(milvus_datacoord_consume_datanode_tt_lag_ms{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", msg_type=\"all\"}) by (pod, node_id)",
+          "expr": "max(milvus_datacoord_consume_datanode_tt_lag_ms{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (pod, node_id)",
           "hide": false,
           "interval": "",
           "legendFormat": "{{pod}}-{{node_id}}-max",
@@ -7427,7 +7427,7 @@
             "uid": "$datasource"
           },
           "exemplar": true,
-          "expr": "min(milvus_datacoord_consume_datanode_tt_lag_ms{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\", msg_type=\"all\"}) by (pod, node_id)",
+          "expr": "min(milvus_datacoord_consume_datanode_tt_lag_ms{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (pod, node_id)",
           "hide": false,
           "interval": "",
           "legendFormat": "{{pod}}-{{node_id}}-min",
@@ -8365,6 +8365,109 @@
         "type": "prometheus",
         "uid": "$datasource"
       },
+      "description": "forward delete and timetick message to delta channel latency",
+      "fill": 1,
+      "fillGradient": 0,
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 16,
+        "y": 156
+      },
+      "hiddenSeries": false,
+      "id": 123394,
+      "legend": {
+        "avg": false,
+        "current": false,
+        "max": false,
+        "min": false,
+        "show": true,
+        "total": false,
+        "values": false
+      },
+      "lines": true,
+      "linewidth": 1,
+      "nullPointMode": "null",
+      "options": {
+        "alertThreshold": true
+      },
+      "percentage": false,
+      "pluginVersion": "8.3.3",
+      "pointradius": 2,
+      "points": false,
+      "renderer": "flot",
+      "seriesOverrides": [],
+      "spaceLength": 10,
+      "stack": false,
+      "steppedLine": false,
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "exemplar": true,
+          "expr": "histogram_quantile(0.99, sum by (le, pod, node_id) (rate(milvus_datanode_forward_delete_msg_time_taken_ms_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "p99-{{pod}}-{{node_id}}",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "exemplar": true,
+          "expr": "sum(increase(milvus_datanode_forward_delete_msg_time_taken_ms_sum{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])) by(pod, node_id) / sum(increase(milvus_datanode_forward_delete_msg_time_taken_ms_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])) by(pod, node_id)",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "avg-{{pod}}-{{node_id}}",
+          "refId": "C"
+        }
+      ],
+      "thresholds": [],
+      "timeRegions": [],
+      "title": "Forward Delete&Timetick Message latency",
+      "tooltip": {
+        "shared": true,
+        "sort": 0,
+        "value_type": "individual"
+      },
+      "type": "graph",
+      "xaxis": {
+        "mode": "time",
+        "show": true,
+        "values": []
+      },
+      "yaxes": [
+        {
+          "$$hashKey": "object:536",
+          "decimals": 0,
+          "format": "ms",
+          "logBase": 1,
+          "show": true
+        },
+        {
+          "$$hashKey": "object:537",
+          "format": "short",
+          "logBase": 1,
+          "show": true
+        }
+      ],
+      "yaxis": {
+        "align": false
+      }
+    },
+    {
+      "aliasColors": {},
+      "bars": false,
+      "dashLength": 10,
+      "dashes": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
       "description": "Total number of consumers created on the DataNode",
       "fill": 1,
       "fillGradient": 0,
@@ -8560,7 +8663,7 @@
         "type": "prometheus",
         "uid": "$datasource"
       },
-      "description": "per-second increasing rate of consuming message",
+      "description": "per-second increasing rate of messages consumed for insert and delete operation.",
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
@@ -8570,7 +8673,7 @@
         "y": 162
       },
       "hiddenSeries": false,
-      "id": 123391,
+      "id": 123274,
       "legend": {
         "avg": false,
         "current": false,
@@ -8602,16 +8705,16 @@
             "uid": "$datasource"
           },
           "exemplar": true,
-          "expr": "sum(increase(milvus_datanode_consume_msg_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])/120) by (pod, node_id)",
+          "expr": "sum(increase(milvus_datanode_msg_rows_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])/120) by (msg_type, pod, node_id)",
           "interval": "",
-          "legendFormat": "{{pod}}-{{node_id}}",
+          "legendFormat": "{{pod}}-{{node_id}}-{{msg_type}}",
           "queryType": "randomWalk",
           "refId": "A"
         }
       ],
       "thresholds": [],
       "timeRegions": [],
-      "title": "Consumed Message Rate",
+      "title": "Msg Rows Consumed Rate",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -8625,14 +8728,14 @@
       },
       "yaxes": [
         {
-          "$$hashKey": "object:3414",
+          "$$hashKey": "object:101",
           "format": "cps",
           "logBase": 1,
           "min": "0",
           "show": true
         },
         {
-          "$$hashKey": "object:3415",
+          "$$hashKey": "object:102",
           "format": "short",
           "logBase": 1,
           "show": true
@@ -8834,7 +8937,7 @@
         "type": "prometheus",
         "uid": "$datasource"
       },
-      "description": "per-second increasing rate of messages consumed for insert and delete operation.",
+      "description": "per-second increasing rate of each message that has been flushed.",
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
@@ -8844,7 +8947,7 @@
         "y": 168
       },
       "hiddenSeries": false,
-      "id": 123274,
+      "id": 123275,
       "legend": {
         "avg": false,
         "current": false,
@@ -8876,7 +8979,7 @@
             "uid": "$datasource"
           },
           "exemplar": true,
-          "expr": "sum(increase(milvus_datanode_msg_rows_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])/120) by (msg_type, pod, node_id)",
+          "expr": "sum(increase(milvus_datanode_flushed_data_size{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])/120) by (msg_type, pod, node_id)",
           "interval": "",
           "legendFormat": "{{pod}}-{{node_id}}-{{msg_type}}",
           "queryType": "randomWalk",
@@ -8885,7 +8988,7 @@
       ],
       "thresholds": [],
       "timeRegions": [],
-      "title": "Msg Rows Consumed Rate",
+      "title": "Flush Data Size Rate",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -8900,7 +9003,7 @@
       "yaxes": [
         {
           "$$hashKey": "object:101",
-          "format": "cps",
+          "format": "short",
           "logBase": 1,
           "min": "0",
           "show": true
@@ -9016,17 +9119,17 @@
         "type": "prometheus",
         "uid": "$datasource"
       },
-      "description": "per-second increasing rate of each message that has been flushed.",
+      "description": "per-second increasing rate of flush requests.",
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
         "h": 6,
         "w": 8,
-        "x": 16,
+        "x": 8,
         "y": 174
       },
       "hiddenSeries": false,
-      "id": 123275,
+      "id": 123286,
       "legend": {
         "avg": false,
         "current": false,
@@ -9058,16 +9161,16 @@
             "uid": "$datasource"
           },
           "exemplar": true,
-          "expr": "sum(increase(milvus_datanode_flushed_data_size{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])/120) by (msg_type, pod, node_id)",
+          "expr": "sum(increase(milvus_datanode_flush_req_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])/120) by (status, pod, node_id)",
           "interval": "",
-          "legendFormat": "{{pod}}-{{node_id}}-{{msg_type}}",
+          "legendFormat": "{{pod}}-{{node_id}}-{{status}}",
           "queryType": "randomWalk",
           "refId": "A"
         }
       ],
       "thresholds": [],
       "timeRegions": [],
-      "title": "Flush Data Size Rate",
+      "title": "Flush Request Rate",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -9107,109 +9210,6 @@
         "type": "prometheus",
         "uid": "$datasource"
       },
-      "description": "The 99th percentile and average latency of compaction over the last 2 minutes.",
-      "fill": 1,
-      "fillGradient": 0,
-      "gridPos": {
-        "h": 6,
-        "w": 8,
-        "x": 0,
-        "y": 180
-      },
-      "hiddenSeries": false,
-      "id": 123314,
-      "legend": {
-        "avg": false,
-        "current": false,
-        "max": false,
-        "min": false,
-        "show": true,
-        "total": false,
-        "values": false
-      },
-      "lines": true,
-      "linewidth": 1,
-      "nullPointMode": "null",
-      "options": {
-        "alertThreshold": true
-      },
-      "percentage": false,
-      "pluginVersion": "8.3.3",
-      "pointradius": 2,
-      "points": false,
-      "renderer": "flot",
-      "seriesOverrides": [],
-      "spaceLength": 10,
-      "stack": false,
-      "steppedLine": false,
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$datasource"
-          },
-          "exemplar": true,
-          "expr": "histogram_quantile(0.99, sum by (le, pod, node_id) (rate(milvus_datanode_compaction_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
-          "interval": "",
-          "legendFormat": "p99-{{pod}}-{{node_id}}",
-          "queryType": "randomWalk",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "$datasource"
-          },
-          "exemplar": true,
-          "expr": "sum(increase(milvus_datanode_compaction_latency_sum{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])) by(pod, node_id) / sum(increase(milvus_datanode_compaction_latency_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])) by(pod, node_id)",
-          "hide": false,
-          "interval": "",
-          "legendFormat": "avg-{{pod}}-{{node_id}}",
-          "refId": "B"
-        }
-      ],
-      "thresholds": [],
-      "timeRegions": [],
-      "title": "Compaction Latency",
-      "tooltip": {
-        "shared": true,
-        "sort": 0,
-        "value_type": "individual"
-      },
-      "type": "graph",
-      "xaxis": {
-        "mode": "time",
-        "show": true,
-        "values": []
-      },
-      "yaxes": [
-        {
-          "$$hashKey": "object:161",
-          "format": "short",
-          "logBase": 1,
-          "min": "0",
-          "show": true
-        },
-        {
-          "$$hashKey": "object:162",
-          "format": "short",
-          "logBase": 1,
-          "show": true
-        }
-      ],
-      "yaxis": {
-        "align": false
-      }
-    },
-    {
-      "aliasColors": {},
-      "bars": false,
-      "dashLength": 10,
-      "dashes": false,
-      "datasource": {
-        "type": "prometheus",
-        "uid": "$datasource"
-      },
       "description": "The 99th percentile and average latency of writte the data in buffer to storage  over the last 2 minutes.",
       "fill": 1,
       "fillGradient": 0,
@@ -9217,7 +9217,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 180
+        "y": 174
       },
       "hiddenSeries": false,
       "id": 123283,
@@ -9313,17 +9313,17 @@
         "type": "prometheus",
         "uid": "$datasource"
       },
-      "description": "per-second increasing rate of flush requests.",
+      "description": "The 99th percentile and average latency of compaction over the last 2 minutes.",
       "fill": 1,
       "fillGradient": 0,
       "gridPos": {
         "h": 6,
         "w": 8,
-        "x": 16,
-        "y": 186
+        "x": 0,
+        "y": 180
       },
       "hiddenSeries": false,
-      "id": 123286,
+      "id": 123314,
       "legend": {
         "avg": false,
         "current": false,
@@ -9355,16 +9355,29 @@
             "uid": "$datasource"
           },
           "exemplar": true,
-          "expr": "sum(increase(milvus_datanode_flush_req_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])/120) by (status, pod, node_id)",
+          "expr": "histogram_quantile(0.99, sum by (le, pod, node_id) (rate(milvus_datanode_compaction_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
+          "hide": false,
           "interval": "",
-          "legendFormat": "{{pod}}-{{node_id}}-{{status}}",
+          "legendFormat": "p99-{{pod}}-{{node_id}}",
           "queryType": "randomWalk",
           "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "exemplar": true,
+          "expr": "sum(increase(milvus_datanode_compaction_latency_sum{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])) by(pod, node_id) / sum(increase(milvus_datanode_compaction_latency_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])) by(pod, node_id)",
+          "hide": false,
+          "interval": "",
+          "legendFormat": "avg-{{pod}}-{{node_id}}",
+          "refId": "B"
         }
       ],
       "thresholds": [],
       "timeRegions": [],
-      "title": "Flush Request Rate",
+      "title": "Compaction Latency",
       "tooltip": {
         "shared": true,
         "sort": 0,
@@ -9378,14 +9391,14 @@
       },
       "yaxes": [
         {
-          "$$hashKey": "object:101",
+          "$$hashKey": "object:161",
           "format": "short",
           "logBase": 1,
           "min": "0",
           "show": true
         },
         {
-          "$$hashKey": "object:102",
+          "$$hashKey": "object:162",
           "format": "short",
           "logBase": 1,
           "show": true
@@ -9401,7 +9414,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 192
+        "y": 186
       },
       "id": 123223,
       "panels": [
@@ -9691,7 +9704,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 193
+        "y": 187
       },
       "id": 123231,
       "panels": [
@@ -10309,7 +10322,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 194
+        "y": 188
       },
       "id": 123157,
       "panels": [
@@ -12092,8 +12105,8 @@
       {
         "current": {
           "selected": true,
-          "text": "milvus-ci",
-          "value": "milvus-ci"
+          "text": "chaos-testing",
+          "value": "chaos-testing"
         },
         "datasource": {
           "uid": "$datasource"
@@ -12120,8 +12133,8 @@
       {
         "current": {
           "selected": false,
-          "text": "md-20166-27-pr",
-          "value": "md-20166-27-pr"
+          "text": "bulk-insert-test",
+          "value": "bulk-insert-test"
         },
         "datasource": {
           "uid": "$datasource"
@@ -12175,8 +12188,8 @@
       {
         "current": {
           "selected": false,
-          "text": "md-20166-27-pr-milvus-datacoord-5bbc7b5f54-4265t",
-          "value": "md-20166-27-pr-milvus-datacoord-5bbc7b5f54-4265t"
+          "text": "bulk-insert-test-milvus-standalone-55968cfc55-cxnps",
+          "value": "bulk-insert-test-milvus-standalone-55968cfc55-cxnps"
         },
         "datasource": {
           "uid": "$datasource"
@@ -12232,7 +12245,7 @@
     ]
   },
   "time": {
-    "from": "now-6h",
+    "from": "now-3h",
     "to": "now"
   },
   "timepicker": {
