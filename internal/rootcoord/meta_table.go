@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/metrics"
+
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 
 	"github.com/milvus-io/milvus/internal/common"
@@ -143,6 +145,9 @@ func (mt *MetaTable) reload() error {
 	mt.collName2ID = make(map[string]UniqueID)
 	mt.collAlias2ID = make(map[string]UniqueID)
 
+	collectionNum := int64(0)
+	partitionNum := int64(0)
+
 	// max ts means listing latest resources, meta table should always cache the latest version of catalog.
 	collections, err := mt.catalog.ListCollections(mt.ctx, typeutil.MaxTimestamp)
 	if err != nil {
@@ -151,6 +156,11 @@ func (mt *MetaTable) reload() error {
 	for name, collection := range collections {
 		mt.collID2Meta[collection.CollectionID] = collection
 		mt.collName2ID[name] = collection.CollectionID
+
+		if collection.Available() {
+			collectionNum++
+			partitionNum += int64(collection.GetPartitionNum(true))
+		}
 	}
 
 	// max ts means listing latest resources, meta table should always cache the latest version of catalog.
@@ -161,6 +171,9 @@ func (mt *MetaTable) reload() error {
 	for _, alias := range aliases {
 		mt.collAlias2ID[alias.Name] = alias.CollectionID
 	}
+
+	metrics.RootCoordNumOfCollections.Set(float64(collectionNum))
+	metrics.RootCoordNumOfPartitions.WithLabelValues().Set(float64(partitionNum))
 
 	record.Record("MetaTable reload")
 	return nil
@@ -203,6 +216,16 @@ func (mt *MetaTable) ChangeCollectionState(ctx context.Context, collectionID Uni
 		return err
 	}
 	mt.collID2Meta[collectionID] = clone
+
+	switch state {
+	case pb.CollectionState_CollectionCreated:
+		metrics.RootCoordNumOfCollections.Inc()
+		metrics.RootCoordNumOfPartitions.WithLabelValues().Add(float64(coll.GetPartitionNum(true)))
+	default:
+		metrics.RootCoordNumOfCollections.Dec()
+		metrics.RootCoordNumOfPartitions.WithLabelValues().Sub(float64(coll.GetPartitionNum(true)))
+	}
+
 	log.Info("change collection state", zap.Int64("collection", collectionID),
 		zap.String("state", state.String()), zap.Uint64("ts", ts))
 
@@ -461,9 +484,13 @@ func (mt *MetaTable) AddPartition(ctx context.Context, partition *model.Partitio
 		return err
 	}
 	mt.collID2Meta[partition.CollectionID].Partitions = append(mt.collID2Meta[partition.CollectionID].Partitions, partition.Clone())
+
+	metrics.RootCoordNumOfPartitions.WithLabelValues().Inc()
+
 	log.Info("add partition to meta table",
 		zap.Int64("collection", partition.CollectionID), zap.String("partition", partition.PartitionName),
 		zap.Int64("partitionid", partition.PartitionID), zap.Uint64("ts", partition.PartitionCreatedTimestamp))
+
 	return nil
 }
 
@@ -484,9 +511,20 @@ func (mt *MetaTable) ChangePartitionState(ctx context.Context, collectionID Uniq
 				return err
 			}
 			mt.collID2Meta[collectionID].Partitions[idx] = clone
+
+			switch state {
+			case pb.PartitionState_PartitionCreated:
+				log.Warn("[should not happen] change partition to created",
+					zap.String("collection", coll.Name), zap.Int64("collection id", coll.CollectionID),
+					zap.String("partition", clone.PartitionName), zap.Int64("partition id", clone.PartitionID))
+			default:
+				metrics.RootCoordNumOfPartitions.WithLabelValues().Dec()
+			}
+
 			log.Info("change partition state", zap.Int64("collection", collectionID),
 				zap.Int64("partition", partitionID), zap.String("state", state.String()),
 				zap.Uint64("ts", ts))
+
 			return nil
 		}
 	}

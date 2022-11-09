@@ -102,3 +102,18 @@ func TestUnmarshalCollectionModel(t *testing.T) {
 func TestMarshalCollectionModel(t *testing.T) {
 	assert.Nil(t, MarshalCollectionModel(nil))
 }
+
+func TestCollection_GetPartitionNum(t *testing.T) {
+	coll := &Collection{
+		Partitions: []*Partition{
+			{State: pb.PartitionState_PartitionCreated},
+			{State: pb.PartitionState_PartitionCreating},
+			{State: pb.PartitionState_PartitionCreated},
+			{State: pb.PartitionState_PartitionDropping},
+			{State: pb.PartitionState_PartitionCreated},
+			{State: pb.PartitionState_PartitionDropped},
+		},
+	}
+	assert.Equal(t, 3, coll.GetPartitionNum(true))
+	assert.Equal(t, 6, coll.GetPartitionNum(false))
+}
