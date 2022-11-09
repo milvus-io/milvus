@@ -898,6 +898,7 @@ func (sc *ShardCluster) GetStatistics(ctx context.Context, req *querypb.GetStati
 
 // Search preforms search operation on shard cluster.
 func (sc *ShardCluster) Search(ctx context.Context, req *querypb.SearchRequest, withStreaming withStreaming) ([]*internalpb.SearchResults, error) {
+	log := log.Ctx(ctx)
 	if !sc.serviceable() {
 		err := WrapErrShardNotAvailable(sc.replicaID, sc.vchannelName)
 		log.Warn("failed to search on shard",
@@ -983,7 +984,6 @@ func (sc *ShardCluster) Search(ctx context.Context, req *querypb.SearchRequest, 
 	wg.Wait()
 	if err != nil {
 		log.Error("failed to do search",
-			zap.Int64("msgID", req.GetReq().GetBase().GetMsgID()),
 			zap.Int64("sourceID", req.GetReq().GetBase().GetSourceID()),
 			zap.Strings("channels", req.GetDmlChannels()),
 			zap.Int64s("segmentIDs", req.GetSegmentIDs()),

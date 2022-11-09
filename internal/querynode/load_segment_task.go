@@ -38,7 +38,7 @@ type loadSegmentsTask struct {
 
 // loadSegmentsTask
 func (l *loadSegmentsTask) PreExecute(ctx context.Context) error {
-	log.Info("LoadSegmentTask PreExecute start", zap.Int64("msgID", l.req.Base.MsgID))
+	log.Ctx(ctx).Info("LoadSegmentTask PreExecute start")
 	var err error
 	// init meta
 	collectionID := l.req.GetCollectionID()
@@ -64,15 +64,15 @@ func (l *loadSegmentsTask) PreExecute(ctx context.Context) error {
 		}
 	}
 	l.req.Infos = filteredInfos
-	log.Info("LoadSegmentTask PreExecute done", zap.Int64("msgID", l.req.Base.MsgID))
+	log.Info("LoadSegmentTask PreExecute done")
 	return nil
 }
 
 func (l *loadSegmentsTask) Execute(ctx context.Context) error {
-	log.Info("LoadSegmentTask Execute start", zap.Int64("msgID", l.req.Base.MsgID))
+	log.Ctx(ctx).Info("LoadSegmentTask Execute start")
 
 	if len(l.req.Infos) == 0 {
-		log.Info("all segments loaded", zap.Int64("msgID", l.req.GetBase().GetMsgID()))
+		log.Info("all segments loaded")
 		return nil
 	}
 
@@ -127,7 +127,7 @@ func (l *loadSegmentsTask) Execute(ctx context.Context) error {
 	}
 
 	log.Info("LoadSegmentTask Execute done", zap.Int64("collectionID", l.req.CollectionID),
-		zap.Int64("replicaID", l.req.ReplicaID), zap.Int64("msgID", l.req.Base.MsgID))
+		zap.Int64("replicaID", l.req.ReplicaID))
 	return nil
 }
 

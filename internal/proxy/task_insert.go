@@ -132,7 +132,7 @@ func (it *insertTask) checkPrimaryFieldData() error {
 
 	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(it.schema)
 	if err != nil {
-		log.Error("get primary field schema failed", zap.String("collection name", it.CollectionName), zap.Any("schema", it.schema), zap.Error(err))
+		log.Error("get primary field schema failed", zap.String("collectionName", it.CollectionName), zap.Any("schema", it.schema), zap.Error(err))
 		return err
 	}
 
@@ -141,7 +141,7 @@ func (it *insertTask) checkPrimaryFieldData() error {
 	if !primaryFieldSchema.AutoID {
 		primaryFieldData, err = typeutil.GetPrimaryFieldData(it.GetFieldsData(), primaryFieldSchema)
 		if err != nil {
-			log.Error("get primary field data failed", zap.String("collection name", it.CollectionName), zap.Error(err))
+			log.Error("get primary field data failed", zap.String("collectionName", it.CollectionName), zap.Error(err))
 			return err
 		}
 	} else {
@@ -152,7 +152,7 @@ func (it *insertTask) checkPrimaryFieldData() error {
 		// if autoID == true, currently only support autoID for int64 PrimaryField
 		primaryFieldData, err = autoGenPrimaryFieldData(primaryFieldSchema, it.RowIDs)
 		if err != nil {
-			log.Error("generate primary field data failed when autoID == true", zap.String("collection name", it.CollectionName), zap.Error(err))
+			log.Error("generate primary field data failed when autoID == true", zap.String("collectionName", it.CollectionName), zap.Error(err))
 			return err
 		}
 		// if autoID == true, set the primary field data
@@ -162,7 +162,7 @@ func (it *insertTask) checkPrimaryFieldData() error {
 	// parse primaryFieldData to result.IDs, and as returned primary keys
 	it.result.IDs, err = parsePrimaryFieldData2IDs(primaryFieldData)
 	if err != nil {
-		log.Error("parse primary field data to IDs failed", zap.String("collection name", it.CollectionName), zap.Error(err))
+		log.Error("parse primary field data to IDs failed", zap.String("collectionName", it.CollectionName), zap.Error(err))
 		return err
 	}
 
@@ -185,7 +185,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 
 	collectionName := it.CollectionName
 	if err := validateCollectionName(collectionName); err != nil {
-		log.Error("valid collection name failed", zap.String("collection name", collectionName), zap.Error(err))
+		log.Error("valid collection name failed", zap.String("collectionName", collectionName), zap.Error(err))
 		return err
 	}
 
@@ -197,7 +197,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 
 	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, collectionName)
 	if err != nil {
-		log.Error("get collection schema from global meta cache failed", zap.String("collection name", collectionName), zap.Error(err))
+		log.Error("get collection schema from global meta cache failed", zap.String("collectionName", collectionName), zap.Error(err))
 		return err
 	}
 	it.schema = collSchema
@@ -232,25 +232,29 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	// check primaryFieldData whether autoID is true or not
 	// set rowIDs as primary data if autoID == true
 	err = it.checkPrimaryFieldData()
+	log := log.Ctx(ctx).With(zap.String("collectionName", collectionName))
 	if err != nil {
-		log.Error("check primary field data and hash primary key failed", zap.Int64("msgID", it.Base.MsgID), zap.String("collection name", collectionName), zap.Error(err))
+		log.Error("check primary field data and hash primary key failed",
+			zap.Error(err))
 		return err
 	}
 
 	// set field ID to insert field data
 	err = fillFieldIDBySchema(it.GetFieldsData(), collSchema)
 	if err != nil {
-		log.Error("set fieldID to fieldData failed", zap.Int64("msgID", it.Base.MsgID), zap.String("collection name", collectionName), zap.Error(err))
+		log.Error("set fieldID to fieldData failed",
+			zap.Error(err))
 		return err
 	}
 
 	// check that all field's number rows are equal
 	if err = it.CheckAligned(); err != nil {
-		log.Error("field data is not aligned", zap.Int64("msgID", it.Base.MsgID), zap.String("collection name", collectionName), zap.Error(err))
+		log.Error("field data is not aligned",
+			zap.Error(err))
 		return err
 	}
 
-	log.Debug("Proxy Insert PreExecute done", zap.Int64("msgID", it.Base.MsgID), zap.String("collection name", collectionName))
+	log.Debug("Proxy Insert PreExecute done")
 
 	return nil
 }
@@ -444,7 +448,9 @@ func (it *insertTask) Execute(ctx context.Context) error {
 
 	channelNames, err := it.chMgr.getVChannels(collID)
 	if err != nil {
-		log.Error("get vChannels failed", zap.Int64("msgID", it.Base.MsgID), zap.Int64("collectionID", collID), zap.Error(err))
+		log.Ctx(ctx).Error("get vChannels failed",
+			zap.Int64("collectionID", collID),
+			zap.Error(err))
 		it.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		it.result.Status.Reason = err.Error()
 		return err
@@ -461,12 +467,16 @@ func (it *insertTask) Execute(ctx context.Context) error {
 	// assign segmentID for insert data and repack data by segmentID
 	msgPack, err := it.assignSegmentID(channelNames)
 	if err != nil {
-		log.Error("assign segmentID and repack insert data failed", zap.Int64("msgID", it.Base.MsgID), zap.Int64("collectionID", collID), zap.Error(err))
+		log.Error("assign segmentID and repack insert data failed",
+			zap.Int64("collectionID", collID),
+			zap.Error(err))
 		it.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		it.result.Status.Reason = err.Error()
 		return err
 	}
-	log.Debug("assign segmentID for insert data success", zap.Int64("msgID", it.Base.MsgID), zap.Int64("collectionID", collID), zap.String("collection name", it.CollectionName))
+	log.Debug("assign segmentID for insert data success",
+		zap.Int64("collectionID", collID),
+		zap.String("collectionName", it.CollectionName))
 	tr.Record("assign segment id")
 	err = stream.Produce(msgPack)
 	if err != nil {
@@ -477,7 +487,8 @@ func (it *insertTask) Execute(ctx context.Context) error {
 	sendMsgDur := tr.Record("send insert request to dml channel")
 	metrics.ProxySendMutationReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.InsertLabel).Observe(float64(sendMsgDur.Milliseconds()))
 
-	log.Debug("Proxy Insert Execute done", zap.Int64("msgID", it.Base.MsgID), zap.String("collection name", collectionName))
+	log.Debug("Proxy Insert Execute done",
+		zap.String("collectionName", collectionName))
 
 	return nil
 }

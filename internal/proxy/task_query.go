@@ -170,45 +170,51 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	collectionName := t.request.CollectionName
 	t.collectionName = collectionName
 	if err := validateCollectionName(collectionName); err != nil {
-		log.Ctx(ctx).Warn("Invalid collection name.", zap.String("collectionName", collectionName),
-			zap.Int64("msgID", t.ID()), zap.String("requestType", "query"))
+		log.Ctx(ctx).Warn("Invalid collectionName.",
+			zap.String("collectionName", collectionName),
+			zap.String("requestType", "query"))
 		return err
 	}
 
-	log.Ctx(ctx).Debug("Validate collection name.", zap.Any("collectionName", collectionName),
-		zap.Int64("msgID", t.ID()), zap.Any("requestType", "query"))
+	log.Ctx(ctx).Debug("Validate collectionName.",
+		zap.Any("collectionName", collectionName),
+		zap.Any("requestType", "query"))
 
 	collID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
 	if err != nil {
-		log.Ctx(ctx).Warn("Failed to get collection id.", zap.Any("collectionName", collectionName),
-			zap.Int64("msgID", t.ID()), zap.Any("requestType", "query"))
+		log.Ctx(ctx).Warn("Failed to get collection id.",
+			zap.Any("collectionName", collectionName),
+			zap.Any("requestType", "query"))
 		return err
 	}
 
 	t.CollectionID = collID
 	log.Ctx(ctx).Debug("Get collection ID by name",
-		zap.Int64("collectionID", t.CollectionID), zap.String("collection name", collectionName),
-		zap.Int64("msgID", t.ID()), zap.Any("requestType", "query"))
+		zap.Int64("collectionID", t.CollectionID),
+		zap.String("collectionName", collectionName),
+		zap.Any("requestType", "query"))
 
 	for _, tag := range t.request.PartitionNames {
 		if err := validatePartitionTag(tag, false); err != nil {
-			log.Ctx(ctx).Warn("invalid partition name", zap.String("partition name", tag),
-				zap.Int64("msgID", t.ID()), zap.Any("requestType", "query"))
+			log.Ctx(ctx).Warn("invalid partition name",
+				zap.String("partition name", tag),
+				zap.Any("requestType", "query"))
 			return err
 		}
 	}
 	log.Ctx(ctx).Debug("Validate partition names.",
-		zap.Int64("msgID", t.ID()), zap.Any("requestType", "query"))
+		zap.Any("requestType", "query"))
 
 	t.RetrieveRequest.PartitionIDs, err = getPartitionIDs(ctx, collectionName, t.request.GetPartitionNames())
 	if err != nil {
-		log.Ctx(ctx).Warn("failed to get partitions in collection.", zap.String("collection name", collectionName),
+		log.Ctx(ctx).Warn("failed to get partitions in collection.", zap.String("collectionName", collectionName),
 			zap.Error(err),
-			zap.Int64("msgID", t.ID()), zap.Any("requestType", "query"))
+			zap.Any("requestType", "query"))
 		return err
 	}
-	log.Ctx(ctx).Debug("Get partitions in collection.", zap.Any("collectionName", collectionName),
-		zap.Int64("msgID", t.ID()), zap.Any("requestType", "query"))
+	log.Ctx(ctx).Debug("Get partitions in collection.",
+		zap.Any("collectionName", collectionName),
+		zap.Any("requestType", "query"))
 
 	queryParams, err := parseQueryParams(t.request.GetQueryParams())
 	if err != nil {
@@ -249,8 +255,9 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	log.Ctx(ctx).Debug("translate output fields", zap.Any("OutputFields", t.request.OutputFields),
-		zap.Int64("msgID", t.ID()), zap.Any("requestType", "query"))
+	log.Ctx(ctx).Debug("translate output fields",
+		zap.Any("OutputFields", t.request.OutputFields),
+		zap.Any("requestType", "query"))
 
 	outputFieldIDs, err := translateToOutputFieldIDs(t.request.GetOutputFields(), schema)
 	if err != nil {
@@ -258,8 +265,9 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	}
 	t.RetrieveRequest.OutputFieldsId = outputFieldIDs
 	plan.OutputFieldIds = outputFieldIDs
-	log.Ctx(ctx).Debug("translate output fields to field ids", zap.Any("OutputFieldsID", t.OutputFieldsId),
-		zap.Int64("msgID", t.ID()), zap.Any("requestType", "query"))
+	log.Ctx(ctx).Debug("translate output fields to field ids",
+		zap.Any("OutputFieldsID", t.OutputFieldsId),
+		zap.Any("requestType", "query"))
 
 	t.RetrieveRequest.SerializedExprPlan, err = proto.Marshal(plan)
 	if err != nil {
@@ -287,8 +295,9 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 
 	t.DbID = 0 // TODO
 	log.Ctx(ctx).Debug("Query PreExecute done.",
-		zap.Int64("msgID", t.ID()), zap.Any("requestType", "query"),
-		zap.Uint64("guarantee_ts", guaranteeTs), zap.Uint64("travel_ts", t.GetTravelTimestamp()),
+		zap.Any("requestType", "query"),
+		zap.Uint64("guarantee_ts", guaranteeTs),
+		zap.Uint64("travel_ts", t.GetTravelTimestamp()),
 		zap.Uint64("timeout_ts", t.GetTimeoutTimestamp()))
 	return nil
 }
@@ -314,7 +323,7 @@ func (t *queryTask) Execute(ctx context.Context) error {
 	err := executeQuery(WithCache)
 	if errors.Is(err, errInvalidShardLeaders) || funcutil.IsGrpcErr(err) || errors.Is(err, grpcclient.ErrConnect) {
 		log.Ctx(ctx).Warn("invalid shard leaders cache, updating shardleader caches and retry search",
-			zap.Int64("msgID", t.ID()), zap.Error(err))
+			zap.Error(err))
 		return executeQuery(WithoutCache)
 	}
 	if err != nil {
@@ -322,7 +331,7 @@ func (t *queryTask) Execute(ctx context.Context) error {
 	}
 
 	log.Ctx(ctx).Debug("Query Execute done.",
-		zap.Int64("msgID", t.ID()), zap.Any("requestType", "query"))
+		zap.Any("requestType", "query"))
 	return nil
 }
 
@@ -339,11 +348,11 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 		log.Ctx(ctx).Warn("proxy", zap.Int64("Query: wait to finish failed, timeout!, msgID:", t.ID()))
 		return nil
 	default:
-		log.Ctx(ctx).Debug("all queries are finished or canceled", zap.Int64("msgID", t.ID()))
+		log.Ctx(ctx).Debug("all queries are finished or canceled")
 		close(t.resultBuf)
 		for res := range t.resultBuf {
 			t.toReduceResults = append(t.toReduceResults, res)
-			log.Ctx(ctx).Debug("proxy receives one query result", zap.Int64("sourceID", res.GetBase().GetSourceID()), zap.Any("msgID", t.ID()))
+			log.Ctx(ctx).Debug("proxy receives one query result", zap.Int64("sourceID", res.GetBase().GetSourceID()))
 		}
 	}
 
@@ -361,7 +370,8 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 			ErrorCode: commonpb.ErrorCode_Success,
 		}
 	} else {
-		log.Ctx(ctx).Warn("Query result is nil", zap.Int64("msgID", t.ID()), zap.Any("requestType", "query"))
+		log.Ctx(ctx).Warn("Query result is nil",
+			zap.Any("requestType", "query"))
 		t.result.Status = &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_EmptyCollection,
 			Reason:    "empty collection", // TODO
@@ -382,7 +392,8 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 			}
 		}
 	}
-	log.Ctx(ctx).Debug("Query PostExecute done", zap.Int64("msgID", t.ID()), zap.String("requestType", "query"))
+	log.Ctx(ctx).Debug("Query PostExecute done",
+		zap.String("requestType", "query"))
 	return nil
 }
 
@@ -395,8 +406,9 @@ func (t *queryTask) queryShard(ctx context.Context, nodeID int64, qn types.Query
 
 	result, err := qn.Query(ctx, req)
 	if err != nil {
-		log.Ctx(ctx).Warn("QueryNode query return error", zap.Int64("msgID", t.ID()),
-			zap.Int64("nodeID", nodeID), zap.Strings("channels", channelIDs), zap.Error(err))
+		log.Ctx(ctx).Warn("QueryNode query return error",
+			zap.Int64("nodeID", nodeID),
+			zap.Strings("channels", channelIDs), zap.Error(err))
 		return err
 	}
 	if result.GetStatus().GetErrorCode() == commonpb.ErrorCode_NotShardLeader {
@@ -404,12 +416,15 @@ func (t *queryTask) queryShard(ctx context.Context, nodeID int64, qn types.Query
 		return errInvalidShardLeaders
 	}
 	if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Ctx(ctx).Warn("QueryNode query result error", zap.Int64("msgID", t.ID()), zap.Int64("nodeID", nodeID),
+		log.Ctx(ctx).Warn("QueryNode query result error",
+			zap.Int64("nodeID", nodeID),
 			zap.String("reason", result.GetStatus().GetReason()))
 		return fmt.Errorf("fail to Query, QueryNode ID = %d, reason=%s", nodeID, result.GetStatus().GetReason())
 	}
 
-	log.Ctx(ctx).Debug("get query result", zap.Int64("msgID", t.ID()), zap.Int64("nodeID", nodeID), zap.Strings("channelIDs", channelIDs))
+	log.Ctx(ctx).Debug("get query result",
+		zap.Int64("nodeID", nodeID),
+		zap.Strings("channelIDs", channelIDs))
 	t.resultBuf <- result
 	return nil
 }
