@@ -5,6 +5,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/common"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"github.com/samber/lo"
 )
 
 type Collection struct {
@@ -49,6 +50,13 @@ func (c Collection) Clone() *Collection {
 		Properties:           common.CloneKeyValuePairs(c.Properties),
 		State:                c.State,
 	}
+}
+
+func (c Collection) GetPartitionNum(filterUnavailable bool) int {
+	if !filterUnavailable {
+		return len(c.Partitions)
+	}
+	return lo.CountBy(c.Partitions, func(p *Partition) bool { return p.Available() })
 }
 
 func (c Collection) Equal(other Collection) bool {

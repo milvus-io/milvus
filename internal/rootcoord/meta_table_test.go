@@ -1020,3 +1020,233 @@ func TestMetaTable_RemoveCollection(t *testing.T) {
 		assert.NoError(t, err)
 	})
 }
+
+func TestMetaTable_reload(t *testing.T) {
+	t.Run("failed to list collections", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("ListCollections",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("uint64"),
+		).Return(nil, errors.New("error mock ListCollections"))
+		meta := &MetaTable{catalog: catalog}
+		err := meta.reload()
+		assert.Error(t, err)
+		assert.Empty(t, meta.collID2Meta)
+		assert.Empty(t, meta.collName2ID)
+		assert.Empty(t, meta.collAlias2ID)
+	})
+
+	t.Run("failed to list aliases", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("ListCollections",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("uint64"),
+		).Return(
+			map[string]*model.Collection{"test": {CollectionID: 100, Name: "test"}},
+			nil)
+		catalog.On("ListAliases",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("uint64"),
+		).Return(nil, errors.New("error mock ListAliases"))
+		meta := &MetaTable{catalog: catalog}
+		err := meta.reload()
+		assert.Error(t, err)
+		assert.Empty(t, meta.collAlias2ID)
+	})
+
+	t.Run("normal case", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+
+		catalog.On("ListCollections",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("uint64"),
+		).Return(
+			map[string]*model.Collection{"test": {CollectionID: 100, Name: "test"}},
+			nil)
+
+		catalog.On("ListAliases",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("uint64"),
+		).Return(
+			[]*model.Alias{{Name: "alias", CollectionID: 100}},
+			nil)
+
+		meta := &MetaTable{catalog: catalog}
+		err := meta.reload()
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(meta.collID2Meta))
+		assert.Equal(t, 1, len(meta.collName2ID))
+		assert.Equal(t, 1, len(meta.collAlias2ID))
+	})
+}
+
+func TestMetaTable_ChangeCollectionState(t *testing.T) {
+	t.Run("not exist", func(t *testing.T) {
+		meta := &MetaTable{}
+		err := meta.ChangeCollectionState(context.TODO(), 100, pb.CollectionState_CollectionCreated, 100)
+		assert.NoError(t, err)
+	})
+
+	t.Run("failed to alter collection", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("AlterCollection",
+			mock.Anything, // context.Context
+			mock.Anything, // *model.Collection
+			mock.Anything, // *model.Collection
+			mock.Anything, // metastore.AlterType
+			mock.AnythingOfType("uint64"),
+		).Return(errors.New("error mock AlterCollection"))
+		meta := &MetaTable{
+			catalog: catalog,
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				100: {Name: "test", CollectionID: 100},
+			},
+		}
+		err := meta.ChangeCollectionState(context.TODO(), 100, pb.CollectionState_CollectionCreated, 1000)
+		assert.Error(t, err)
+	})
+
+	t.Run("normal case", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("AlterCollection",
+			mock.Anything, // context.Context
+			mock.Anything, // *model.Collection
+			mock.Anything, // *model.Collection
+			mock.Anything, // metastore.AlterType
+			mock.AnythingOfType("uint64"),
+		).Return(nil)
+		meta := &MetaTable{
+			catalog: catalog,
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				100: {Name: "test", CollectionID: 100},
+			},
+		}
+		err := meta.ChangeCollectionState(context.TODO(), 100, pb.CollectionState_CollectionCreated, 1000)
+		assert.NoError(t, err)
+		err = meta.ChangeCollectionState(context.TODO(), 100, pb.CollectionState_CollectionDropping, 1000)
+		assert.NoError(t, err)
+	})
+}
+
+func TestMetaTable_AddPartition(t *testing.T) {
+	t.Run("collection not available", func(t *testing.T) {
+		meta := &MetaTable{}
+		err := meta.AddPartition(context.TODO(), &model.Partition{CollectionID: 100})
+		assert.Error(t, err)
+	})
+
+	t.Run("add not-created partition", func(t *testing.T) {
+		meta := &MetaTable{
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				100: {
+					Name:         "test",
+					CollectionID: 100,
+				},
+			},
+		}
+		err := meta.AddPartition(context.TODO(), &model.Partition{CollectionID: 100, State: pb.PartitionState_PartitionDropping})
+		assert.Error(t, err)
+	})
+
+	t.Run("failed to create partition", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("CreatePartition",
+			mock.Anything, // context.Context
+			mock.Anything, // *model.Partition
+			mock.AnythingOfType("uint64"),
+		).Return(errors.New("error mock CreatePartition"))
+		meta := &MetaTable{
+			catalog: catalog,
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				100: {Name: "test", CollectionID: 100},
+			},
+		}
+		err := meta.AddPartition(context.TODO(), &model.Partition{CollectionID: 100, State: pb.PartitionState_PartitionCreated})
+		assert.Error(t, err)
+	})
+
+	t.Run("normal case", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("CreatePartition",
+			mock.Anything, // context.Context
+			mock.Anything, // *model.Partition
+			mock.AnythingOfType("uint64"),
+		).Return(nil)
+		meta := &MetaTable{
+			catalog: catalog,
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				100: {Name: "test", CollectionID: 100},
+			},
+		}
+		err := meta.AddPartition(context.TODO(), &model.Partition{CollectionID: 100, State: pb.PartitionState_PartitionCreated})
+		assert.NoError(t, err)
+	})
+}
+
+func TestMetaTable_ChangePartitionState(t *testing.T) {
+	t.Run("collection not exist", func(t *testing.T) {
+		meta := &MetaTable{}
+		err := meta.ChangePartitionState(context.TODO(), 100, 500, pb.PartitionState_PartitionDropping, 1000)
+		assert.NoError(t, err)
+	})
+
+	t.Run("partition not exist", func(t *testing.T) {
+		meta := &MetaTable{
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				100: {Name: "test", CollectionID: 100},
+			},
+		}
+		err := meta.ChangePartitionState(context.TODO(), 100, 500, pb.PartitionState_PartitionDropping, 1000)
+		assert.Error(t, err)
+	})
+
+	t.Run("failed to alter partition", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("AlterPartition",
+			mock.Anything, // context.Context
+			mock.Anything, // *model.Partition
+			mock.Anything, // *model.Partition
+			mock.Anything, // metastore.AlterType
+			mock.AnythingOfType("uint64"),
+		).Return(errors.New("error mock AlterPartition"))
+		meta := &MetaTable{
+			catalog: catalog,
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				100: {
+					Name: "test", CollectionID: 100,
+					Partitions: []*model.Partition{
+						{CollectionID: 100, PartitionID: 500},
+					},
+				},
+			},
+		}
+		err := meta.ChangePartitionState(context.TODO(), 100, 500, pb.PartitionState_PartitionDropping, 1000)
+		assert.Error(t, err)
+	})
+
+	t.Run("normal case", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("AlterPartition",
+			mock.Anything, // context.Context
+			mock.Anything, // *model.Partition
+			mock.Anything, // *model.Partition
+			mock.Anything, // metastore.AlterType
+			mock.AnythingOfType("uint64"),
+		).Return(nil)
+		meta := &MetaTable{
+			catalog: catalog,
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				100: {
+					Name: "test", CollectionID: 100,
+					Partitions: []*model.Partition{
+						{CollectionID: 100, PartitionID: 500},
+					},
+				},
+			},
+		}
+		err := meta.ChangePartitionState(context.TODO(), 100, 500, pb.PartitionState_PartitionCreated, 1000)
+		assert.NoError(t, err)
+		err = meta.ChangePartitionState(context.TODO(), 100, 500, pb.PartitionState_PartitionDropping, 1000)
+		assert.NoError(t, err)
+	})
+}
