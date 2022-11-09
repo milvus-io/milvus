@@ -345,6 +345,10 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 			updateStateFunc(buildID, indexTaskDeleted)
 			return true
 		}
+		if !ib.dropIndexTask(buildID, meta.NodeID) {
+			log.Ctx(ib.ctx).RatedWarn(5, "drop index task fail, need retry")
+			return true
+		}
 		if err := ib.releaseLockAndResetTask(buildID, meta.NodeID); err != nil {
 			// release lock failed, no need to modify state, wait to retry
 			log.Ctx(ib.ctx).RatedWarn(10, "index builder try to release reference lock failed", zap.Error(err))
