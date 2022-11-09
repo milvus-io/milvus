@@ -449,7 +449,7 @@ func (it *insertTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	log.Info("send insert request to virtual channels",
+	log.Ctx(ctx).Debug("send insert request to virtual channels",
 		zap.String("collection", it.GetCollectionName()),
 		zap.String("partition", it.GetPartitionName()),
 		zap.Int64("collection_id", collID),

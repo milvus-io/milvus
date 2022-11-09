@@ -327,7 +327,7 @@ func (sa *segIDAssigner) syncSegments() (bool, error) {
 	success := true
 	for _, segAssign := range resp.SegIDAssignments {
 		if segAssign.Status.GetErrorCode() != commonpb.ErrorCode_Success {
-			log.Debug("proxy", zap.String("SyncSegment Error", segAssign.Status.Reason))
+			log.Warn("proxy", zap.String("SyncSegment Error", segAssign.Status.Reason))
 			errMsg += segAssign.Status.Reason
 			errMsg += "\n"
 			success = false
