@@ -295,6 +295,12 @@ func (s *Server) initObserver() {
 	)
 }
 
+func (s *Server) afterStart() {
+	now := time.Now()
+	Params.QueryCoordCfg.CreatedTime = now
+	Params.QueryCoordCfg.UpdatedTime = now
+}
+
 func (s *Server) Start() error {
 	log.Info("start watcher...")
 	sessions, revision, err := s.session.GetSessions(typeutil.QueryNodeRole)
@@ -351,6 +357,8 @@ func (s *Server) Start() error {
 		s.UpdateStateCode(commonpb.StateCode_Healthy)
 	}
 	log.Info("QueryCoord started")
+
+	s.afterStart()
 
 	return nil
 }
