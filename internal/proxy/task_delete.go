@@ -169,12 +169,12 @@ func (dt *deleteTask) PreExecute(ctx context.Context) error {
 
 	collName := dt.CollectionName
 	if err := validateCollectionName(collName); err != nil {
-		log.Error("Invalid collection name", zap.String("collectionName", collName))
+		log.Info("Invalid collection name", zap.String("collectionName", collName), zap.Error(err))
 		return err
 	}
 	collID, err := globalMetaCache.GetCollectionID(ctx, collName)
 	if err != nil {
-		log.Debug("Failed to get collection id", zap.String("collectionName", collName))
+		log.Info("Failed to get collection id", zap.String("collectionName", collName), zap.Error(err))
 		return err
 	}
 	dt.DeleteRequest.CollectionID = collID
@@ -184,12 +184,12 @@ func (dt *deleteTask) PreExecute(ctx context.Context) error {
 	if len(dt.PartitionName) > 0 {
 		partName := dt.PartitionName
 		if err := validatePartitionTag(partName, true); err != nil {
-			log.Error("Invalid partition name", zap.String("partitionName", partName))
+			log.Info("Invalid partition name", zap.String("partitionName", partName), zap.Error(err))
 			return err
 		}
 		partID, err := globalMetaCache.GetPartitionID(ctx, collName, partName)
 		if err != nil {
-			log.Debug("Failed to get partition id", zap.String("collectionName", collName), zap.String("partitionName", partName))
+			log.Info("Failed to get partition id", zap.String("collectionName", collName), zap.String("partitionName", partName), zap.Error(err))
 			return err
 		}
 		dt.DeleteRequest.PartitionID = partID
@@ -199,7 +199,7 @@ func (dt *deleteTask) PreExecute(ctx context.Context) error {
 
 	schema, err := globalMetaCache.GetCollectionSchema(ctx, collName)
 	if err != nil {
-		log.Error("Failed to get collection schema", zap.String("collectionName", collName))
+		log.Info("Failed to get collection schema", zap.String("collectionName", collName), zap.Error(err))
 		return err
 	}
 	dt.schema = schema
@@ -207,7 +207,7 @@ func (dt *deleteTask) PreExecute(ctx context.Context) error {
 	// get delete.primaryKeys from delete expr
 	primaryKeys, numRow, err := getPrimaryKeysFromExpr(schema, dt.deleteExpr)
 	if err != nil {
-		log.Error("Failed to get primary keys from expr", zap.Error(err))
+		log.Info("Failed to get primary keys from expr", zap.Error(err))
 		return err
 	}
 
@@ -242,14 +242,14 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 	// hash primary keys to channels
 	channelNames, err := dt.chMgr.getVChannels(collID)
 	if err != nil {
-		log.Error("get vChannels failed", zap.Int64("collectionID", collID), zap.Error(err))
+		log.Warn("get vChannels failed", zap.Int64("collectionID", collID), zap.Error(err))
 		dt.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		dt.result.Status.Reason = err.Error()
 		return err
 	}
 	dt.HashValues = typeutil.HashPK2Channels(dt.result.IDs, channelNames)
 
-	log.Info("send delete request to virtual channels",
+	log.Debug("send delete request to virtual channels",
 		zap.String("collection", dt.GetCollectionName()),
 		zap.Int64("collection_id", collID),
 		zap.Strings("virtual_channels", channelNames),
