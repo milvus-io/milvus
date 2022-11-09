@@ -380,7 +380,7 @@ func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segmentID Uni
 	for idx, blob := range binLogs {
 		fieldID, err := strconv.ParseInt(blob.GetKey(), 10, 64)
 		if err != nil {
-			log.Error("Flush failed ... cannot parse string to fieldID ..", zap.Error(err))
+			log.Warn("Flush failed ... cannot parse string to fieldID ..", zap.Error(err))
 			return nil, err
 		}
 
@@ -406,7 +406,7 @@ func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segmentID Uni
 	for idx, blob := range statsBinlogs {
 		fieldID, err := strconv.ParseInt(blob.GetKey(), 10, 64)
 		if err != nil {
-			log.Error("Flush failed ... cannot parse string to fieldID ..", zap.Error(err))
+			log.Warn("Flush failed ... cannot parse string to fieldID ..", zap.Error(err))
 			return nil, err
 		}
 
@@ -459,7 +459,7 @@ func (m *rendezvousFlushManager) flushDelData(data *DelDataBuf, segmentID Unique
 
 	logID, err := m.allocID()
 	if err != nil {
-		log.Error("failed to alloc ID", zap.Error(err))
+		log.Warn("failed to alloc ID", zap.Error(err))
 		return err
 	}
 
@@ -737,7 +737,7 @@ func dropVirtualChannelFunc(dsService *dataSyncService, opts ...retry.Option) fl
 			return nil
 		}, opts...)
 		if err != nil {
-			log.Warn("failed to DropVirtualChannel", zap.String("channel", dsService.vchannelName), zap.Error(err))
+			log.Error("failed to DropVirtualChannel", zap.String("channel", dsService.vchannelName), zap.Error(err))
 			panic(err)
 		}
 		for segID := range segmentPack {
@@ -842,7 +842,7 @@ func flushNotifyFunc(dsService *dataSyncService, opts ...retry.Option) notifyMet
 			return nil
 		}, opts...)
 		if err != nil {
-			log.Warn("failed to SaveBinlogPaths",
+			log.Error("failed to SaveBinlogPaths",
 				zap.Int64("segment ID", pack.segmentID),
 				zap.Error(err))
 			// TODO change to graceful stop

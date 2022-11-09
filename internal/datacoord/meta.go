@@ -221,7 +221,7 @@ func (m *meta) AddSegment(segment *SegmentInfo) error {
 	m.Lock()
 	defer m.Unlock()
 	if err := m.catalog.AddSegment(m.ctx, segment.SegmentInfo); err != nil {
-		log.Error("meta update: adding segment failed",
+		log.Warn("meta update: adding segment failed",
 			zap.Int64("segment ID", segment.GetID()),
 			zap.Error(err))
 		return err
@@ -307,7 +307,7 @@ func (m *meta) SetState(segmentID UniqueID, targetState commonpb.SegmentState) e
 	oldState := curSegInfo.GetState()
 	if clonedSegment != nil && isSegmentHealthy(clonedSegment) {
 		if err := m.catalog.AlterSegment(m.ctx, clonedSegment.SegmentInfo, curSegInfo.SegmentInfo); err != nil {
-			log.Error("meta update: setting segment state - failed to alter segments",
+			log.Warn("meta update: setting segment state - failed to alter segments",
 				zap.Int64("segment ID", segmentID),
 				zap.String("target state", targetState.String()),
 				zap.Error(err))
@@ -345,7 +345,7 @@ func (m *meta) UnsetIsImporting(segmentID UniqueID) error {
 	clonedSegment.IsImporting = false
 	if isSegmentHealthy(clonedSegment) {
 		if err := m.catalog.AlterSegment(m.ctx, clonedSegment.SegmentInfo, curSegInfo.SegmentInfo); err != nil {
-			log.Error("meta update: unsetting isImport state of segment - failed to unset segment isImporting state",
+			log.Warn("meta update: unsetting isImport state of segment - failed to unset segment isImporting state",
 				zap.Int64("segment ID", segmentID),
 				zap.Error(err))
 			return err
@@ -491,7 +491,7 @@ func (m *meta) UpdateFlushSegmentsInfo(
 		segments = append(segments, seg.SegmentInfo)
 	}
 	if err := m.catalog.AlterSegments(m.ctx, segments); err != nil {
-		log.Error("meta update: update flush segments info - failed to store flush segment info into Etcd",
+		log.Warn("meta update: update flush segments info - failed to store flush segment info into Etcd",
 			zap.Error(err))
 		return err
 	}
@@ -556,7 +556,7 @@ func (m *meta) UpdateDropChannelSegmentInfo(channel string, segments []*SegmentI
 		}
 	}
 	if err != nil {
-		log.Error("meta update: update drop channel segment info failed",
+		log.Warn("meta update: update drop channel segment info failed",
 			zap.String("channel", channel),
 			zap.Error(err))
 	} else {
@@ -828,7 +828,7 @@ func (m *meta) AddAllocation(segmentID UniqueID, allocation *Allocation) error {
 	clonedSegment := curSegInfo.Clone(AddAllocation(allocation))
 	if clonedSegment != nil && isSegmentHealthy(clonedSegment) {
 		if err := m.catalog.AlterSegment(m.ctx, clonedSegment.SegmentInfo, curSegInfo.SegmentInfo); err != nil {
-			log.Error("meta update: add allocation failed",
+			log.Warn("meta update: add allocation failed",
 				zap.Int64("segment ID", segmentID),
 				zap.Error(err))
 			return err

@@ -74,7 +74,7 @@ func (dn *deleteNode) Operate(in []Msg) []Msg {
 	}
 
 	if len(in) != 1 {
-		log.Error("Invalid operate message input in deleteNode", zap.Int("input length", len(in)))
+		log.Warn("Invalid operate message input in deleteNode", zap.Int("input length", len(in)))
 		return []Msg{}
 	}
 
@@ -122,7 +122,9 @@ func (dn *deleteNode) Operate(in []Msg) []Msg {
 	//then we will add all segments in the fgMsg.segmentsToFlush into the toFlushSeg and remove duplicate segments
 	//the aim for taking all these actions is to guarantee that the memory consumed by delBuf will not exceed a limit
 	segmentsToFlush := dn.delBufferManager.ShouldFlushSegments()
-	log.Info("should flush segments, ", zap.Int("seg_count", len(segmentsToFlush)))
+	if len(segmentsToFlush) != 0 {
+		log.Debug("should flush segments, ", zap.Int("seg_count", len(segmentsToFlush)))
+	}
 	for _, msgSegmentID := range fgMsg.segmentsToSync {
 		existed := false
 		for _, autoFlushSegment := range segmentsToFlush {

@@ -89,7 +89,7 @@ func (ddn *ddNode) Name() string {
 // Operate handles input messages, implementing flowgrpah.Node
 func (ddn *ddNode) Operate(in []Msg) []Msg {
 	if in == nil {
-		log.Debug("type assertion failed for MsgStreamMsg because it's nil")
+		log.Warn("type assertion failed for MsgStreamMsg because it's nil")
 		return []Msg{}
 	}
 
@@ -112,7 +112,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 	}
 
 	if load := ddn.dropMode.Load(); load != nil && load.(bool) {
-		log.Debug("ddNode in dropMode",
+		log.Warn("ddNode in dropMode",
 			zap.String("vChannelName", ddn.vChannelName),
 			zap.Int64("collection ID", ddn.collectionID))
 		return []Msg{}
@@ -160,14 +160,14 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 		case commonpb.MsgType_Insert:
 			imsg := msg.(*msgstream.InsertMsg)
 			if imsg.CollectionID != ddn.collectionID {
-				log.Warn("filter invalid insert message, collection mis-match",
+				log.Debug("filter invalid insert message, collection mis-match",
 					zap.Int64("Get collID", imsg.CollectionID),
 					zap.Int64("Expected collID", ddn.collectionID))
 				continue
 			}
 
 			if ddn.tryToFilterSegmentInsertMessages(imsg) {
-				log.Info("filter insert messages",
+				log.Debug("filter insert messages",
 					zap.Int64("filter segment ID", imsg.GetSegmentID()),
 					zap.Uint64("message timestamp", msg.EndTs()),
 					zap.String("segment's vChannel", imsg.GetShardName()),
@@ -200,7 +200,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 			}
 			forwardMsgs = append(forwardMsgs, dmsg)
 			if dmsg.CollectionID != ddn.collectionID {
-				log.Warn("filter invalid DeleteMsg, collection mis-match",
+				log.Debug("filter invalid DeleteMsg, collection mis-match",
 					zap.Int64("Get collID", dmsg.CollectionID),
 					zap.Int64("Expected collID", ddn.collectionID))
 				continue

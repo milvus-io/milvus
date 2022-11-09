@@ -123,7 +123,7 @@ func (mt *mergedTimeTickerSender) work() {
 			mt.lastSent = time.Now()
 
 			if err := mt.send(mt.ts, sids); err != nil {
-				log.Error("send hard time tick failed", zap.Error(err))
+				log.Warn("send hard time tick failed", zap.Error(err))
 			}
 		}
 		mt.mu.Unlock()

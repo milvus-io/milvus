@@ -190,7 +190,7 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 func (ibNode *insertBufferNode) verifyInMsg(in []Msg) (*flowGraphMsg, bool) {
 	// while closing
 	if in == nil {
-		log.Debug("type assertion failed for flowGraphMsg because it's nil")
+		log.Warn("type assertion failed for flowGraphMsg because it's nil")
 		return nil, false
 	}
 
@@ -458,7 +458,7 @@ func (ibNode *insertBufferNode) updateSegmentStates(insertMsgs []*msgstream.Inse
 					endPos:      endPos,
 				})
 			if err != nil {
-				log.Error("add segment wrong",
+				log.Warn("add segment wrong",
 					zap.Int64("segID", currentSegID),
 					zap.Int64("collID", collID),
 					zap.Int64("partID", partitionID),
@@ -496,7 +496,7 @@ func (ibNode *insertBufferNode) bufferInsertMsg(msg *msgstream.InsertMsg, endPos
 
 	collSchema, err := ibNode.channel.getCollectionSchema(collectionID, msg.EndTs())
 	if err != nil {
-		log.Error("Get schema wrong:", zap.Error(err))
+		log.Warn("Get schema wrong:", zap.Error(err))
 		return err
 	}
 
@@ -509,7 +509,7 @@ func (ibNode *insertBufferNode) bufferInsertMsg(msg *msgstream.InsertMsg, endPos
 
 			dimension, err = storage.GetDimFromParams(field.TypeParams)
 			if err != nil {
-				log.Error("failed to get dim from field", zap.Error(err))
+				log.Warn("failed to get dim from field", zap.Error(err))
 				return err
 			}
 			break
@@ -527,7 +527,7 @@ func (ibNode *insertBufferNode) bufferInsertMsg(msg *msgstream.InsertMsg, endPos
 
 	addedBuffer, err := storage.InsertMsgToInsertData(msg, collSchema)
 	if err != nil {
-		log.Error("failed to transfer insert msg to insert data", zap.Error(err))
+		log.Warn("failed to transfer insert msg to insert data", zap.Error(err))
 		return err
 	}
 

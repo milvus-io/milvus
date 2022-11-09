@@ -490,7 +490,7 @@ func (node *DataNode) Start() error {
 		Count: 1,
 	})
 	if err != nil || rep.Status.ErrorCode != commonpb.ErrorCode_Success {
-		log.Warn("fail to alloc timestamp", zap.Any("rep", rep), zap.Error(err))
+		log.Error("fail to alloc timestamp", zap.Any("rep", rep), zap.Error(err))
 		return errors.New("DataNode fail to alloc timestamp")
 	}
 
@@ -631,7 +631,7 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 			flushCh, err := node.flowgraphManager.getFlushCh(segID)
 			if err != nil {
 				errStatus.Reason = "no flush channel found for the segment, unable to flush"
-				log.Error(errStatus.Reason, zap.Int64("segment ID", segID), zap.Error(err))
+				log.Warn(errStatus.Reason, zap.Int64("segment ID", segID), zap.Error(err))
 				noErr = false
 				continue
 			}
@@ -1004,7 +1004,7 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 	reportFunc := func(res *rootcoordpb.ImportResult) error {
 		status, err := node.rootCoord.ReportImport(newCtx, res)
 		if err != nil {
-			log.Error("fail to report import state to RootCoord", zap.Error(err))
+			log.Warn("fail to report import state to RootCoord", zap.Error(err))
 			return err
 		}
 		if status != nil && status.ErrorCode != commonpb.ErrorCode_Success {
@@ -1138,7 +1138,7 @@ func (node *DataNode) AddImportSegment(ctx context.Context, req *datapb.AddImpor
 		return nil
 	}, retry.Attempts(getFlowGraphServiceAttempts))
 	if err != nil {
-		log.Error("channel not found in current DataNode",
+		log.Warn("channel not found in current DataNode",
 			zap.String("channel name", req.GetChannelName()),
 			zap.Int64("node ID", paramtable.GetNodeID()))
 		return &datapb.AddImportSegmentResponse{
@@ -1187,7 +1187,7 @@ func (node *DataNode) AddImportSegment(ctx context.Context, req *datapb.AddImpor
 				recoverTs: req.GetBase().GetTimestamp(),
 				importing: true,
 			}); err != nil {
-			log.Error("failed to add segment to flow graph",
+			log.Warn("failed to add segment to flow graph",
 				zap.Error(err))
 			return &datapb.AddImportSegmentResponse{
 				Status: &commonpb.Status{
@@ -1212,7 +1212,7 @@ func assignSegmentFunc(node *DataNode, req *datapb.ImportTaskRequest) importutil
 		chNames := req.GetImportTask().GetChannelNames()
 		importTaskID := req.GetImportTask().GetTaskId()
 		if shardID >= len(chNames) {
-			log.Error("import task returns invalid shard ID",
+			log.Warn("import task returns invalid shard ID",
 				zap.Int64("task ID", importTaskID),
 				zap.Int("shard ID", shardID),
 				zap.Int("# of channels", len(chNames)),
@@ -1260,7 +1260,7 @@ func createBinLogsFunc(node *DataNode, req *datapb.ImportTaskRequest, schema *sc
 		chNames := req.GetImportTask().GetChannelNames()
 		importTaskID := req.GetImportTask().GetTaskId()
 		if rowNum <= 0 {
-			log.Info("fields data is empty, no need to generate binlog",
+			log.Warn("fields data is empty, no need to generate binlog",
 				zap.Int64("task ID", importTaskID),
 				zap.Int("# of channels", len(chNames)),
 				zap.Strings("channel names", chNames),
@@ -1273,7 +1273,7 @@ func createBinLogsFunc(node *DataNode, req *datapb.ImportTaskRequest, schema *sc
 
 		fieldInsert, fieldStats, err := createBinLogs(rowNum, schema, ts, fields, node, segmentID, colID, partID)
 		if err != nil {
-			log.Error("failed to create binlogs",
+			log.Warn("failed to create binlogs",
 				zap.Int64("task ID", importTaskID),
 				zap.Int("# of channels", len(chNames)),
 				zap.Strings("channel names", chNames),
@@ -1436,7 +1436,7 @@ func createBinLogs(rowNum int, schema *schemapb.CollectionSchema, ts Timestamp,
 	for idx, blob := range binLogs {
 		fieldID, err := strconv.ParseInt(blob.GetKey(), 10, 64)
 		if err != nil {
-			log.Error("Flush failed ... cannot parse string to fieldID ..", zap.Error(err))
+			log.Warn("Flush failed ... cannot parse string to fieldID ..", zap.Error(err))
 			return nil, nil, err
 		}
 
@@ -1462,7 +1462,7 @@ func createBinLogs(rowNum int, schema *schemapb.CollectionSchema, ts Timestamp,
 	for _, blob := range statsBinLogs {
 		fieldID, err := strconv.ParseInt(blob.GetKey(), 10, 64)
 		if err != nil {
-			log.Error("Flush failed ... cannot parse string to fieldID ..", zap.Error(err))
+			log.Warn("Flush failed ... cannot parse string to fieldID ..", zap.Error(err))
 			return nil, nil, err
 		}
 

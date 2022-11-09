@@ -137,7 +137,7 @@ func (c *SessionManager) execFlush(ctx context.Context, nodeID int64, req *datap
 
 	resp, err := cli.FlushSegments(ctx, req)
 	if err := VerifyResponse(resp, err); err != nil {
-		log.Error("flush call (perhaps partially) failed", zap.Int64("dataNode ID", nodeID), zap.Error(err))
+		log.Warn("flush call (perhaps partially) failed", zap.Int64("dataNode ID", nodeID), zap.Error(err))
 	} else {
 		log.Info("flush call succeeded", zap.Int64("dataNode ID", nodeID))
 	}
@@ -226,7 +226,7 @@ func (c *SessionManager) execReCollectSegmentStats(ctx context.Context, nodeID i
 		),
 	})
 	if err := VerifyResponse(resp, err); err != nil {
-		log.Error("re-collect segment stats call failed",
+		log.Warn("re-collect segment stats call failed",
 			zap.Int64("DataNode ID", nodeID), zap.Error(err))
 	} else {
 		log.Info("re-collect segment stats call succeeded",
@@ -247,7 +247,7 @@ func (c *SessionManager) GetCompactionState() map[int64]*datapb.CompactionStateR
 			defer wg.Done()
 			cli, err := s.GetOrCreateClient(ctx)
 			if err != nil {
-				log.Info("Cannot Create Client", zap.Int64("NodeID", nodeID))
+				log.Warn("Cannot Create Client", zap.Int64("NodeID", nodeID))
 				return
 			}
 			ctx, cancel := context.WithTimeout(ctx, rpcCompactionTimeout)
@@ -259,12 +259,12 @@ func (c *SessionManager) GetCompactionState() map[int64]*datapb.CompactionStateR
 				),
 			})
 			if err != nil {
-				log.Info("Get State failed", zap.Error(err))
+				log.Warn("Get State failed", zap.Error(err))
 				return
 			}
 
 			if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-				log.Info("Get State failed", zap.String("Reason", resp.GetStatus().GetReason()))
+				log.Warn("Get State failed", zap.String("Reason", resp.GetStatus().GetReason()))
 				return
 			}
 			for _, rst := range resp.GetResults() {

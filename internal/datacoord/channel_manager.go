@@ -369,7 +369,7 @@ func (c *ChannelManager) DeleteNode(nodeID int64) error {
 	c.unsubAttempt(nodeChannelInfo)
 
 	updates := c.deregisterPolicy(c.store, nodeID)
-	log.Warn("deregister node",
+	log.Info("deregister node",
 		zap.Int64("unregistered node", nodeID),
 		zap.Array("updates", updates))
 	if len(updates) <= 0 {
@@ -407,7 +407,7 @@ func (c *ChannelManager) unsubAttempt(ncInfo *NodeChannelInfo) {
 	}
 
 	if c.msgstreamFactory == nil {
-		log.Warn("msgstream factory is not set")
+		log.Warn("unsubAttempt msgstream factory is not set")
 		return
 	}
 

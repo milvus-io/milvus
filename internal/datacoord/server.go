@@ -402,7 +402,7 @@ func (s *Server) initServiceDiscovery() error {
 	r := semver.MustParseRange(">=2.1.2")
 	sessions, rev, err := s.session.GetSessionsWithVersionRange(typeutil.DataNodeRole, r)
 	if err != nil {
-		log.Warn("DataCoord failed to init service discovery", zap.Error(err))
+		log.Error("DataCoord failed to init service discovery", zap.Error(err))
 		return err
 	}
 	log.Info("DataCoord success to get DataNode sessions", zap.Any("sessions", sessions))
@@ -522,7 +522,7 @@ func (s *Server) handleDataNodeTimetickMsgstream(ctx context.Context, ttMsgStrea
 			return
 		case msgPack, ok := <-ttMsgStream.Chan():
 			if !ok || msgPack == nil || len(msgPack.Msgs) == 0 {
-				log.Info("receive nil timetick msg and shutdown timetick channel")
+				log.Warn("receive nil timetick msg and shutdown timetick channel")
 				return
 			}
 
@@ -597,7 +597,7 @@ func (s *Server) handleTimetickMessage(ctx context.Context, ttMsg *msgstream.Dat
 	}
 	err = s.cluster.Flush(s.ctx, ttMsg.GetBase().GetSourceID(), ch, finfo, minfo)
 	if err != nil {
-		log.Warn("handle")
+		log.Warn("handleTimetickMessage failed", zap.Error(err))
 		return err
 	}
 
@@ -609,7 +609,7 @@ func (s *Server) updateSegmentStatistics(stats []*datapb.SegmentStats) {
 		// Log if # of rows is updated.
 		if s.meta.GetSegmentUnsafe(stat.GetSegmentID()) != nil &&
 			s.meta.GetSegmentUnsafe(stat.GetSegmentID()).GetNumOfRows() != stat.GetNumRows() {
-			log.Info("Updating segment number of rows",
+			log.Debug("Updating segment number of rows",
 				zap.Int64("segment ID", stat.GetSegmentID()),
 				zap.Int64("old value", s.meta.GetSegmentUnsafe(stat.GetSegmentID()).GetNumOfRows()),
 				zap.Int64("new value", stat.GetNumRows()),
@@ -624,7 +624,7 @@ func (s *Server) getFlushableSegmentsInfo(flushableIDs []int64) []*SegmentInfo {
 	for _, id := range flushableIDs {
 		sinfo := s.meta.GetSegment(id)
 		if sinfo == nil {
-			log.Error("get segment from meta error", zap.Int64("id", id))
+			log.Warn("getFlushableSegmentsInfo get segment from meta error", zap.Int64("segmentID", id))
 			continue
 		}
 		res = append(res, sinfo)
@@ -694,6 +694,9 @@ func (s *Server) processSessionEvent(ctx context.Context, role string, event *se
 		if err := retry.Do(ctx, func() error {
 			return s.segReferManager.ReleaseSegmentsLockByNodeID(event.Session.ServerID)
 		}, retry.Attempts(100)); err != nil {
+			log.Error("there is service offline",
+				zap.String("server role", role),
+				zap.Int64("server ID", event.Session.ServerID), zap.Error(err))
 			panic(err)
 		}
 	}
@@ -716,7 +719,7 @@ func (s *Server) watchService(ctx context.Context) {
 			if err := s.handleSessionEvent(ctx, event); err != nil {
 				go func() {
 					if err := s.Stop(); err != nil {
-						log.Warn("DataCoord server stop error", zap.Error(err))
+						log.Fatal("DataCoord server stop error", zap.Error(err))
 					}
 				}()
 				return
@@ -815,7 +818,7 @@ func (s *Server) postFlush(ctx context.Context, segmentID UniqueID) error {
 	}
 	// set segment to SegmentState_Flushed
 	if err := s.meta.SetState(segmentID, commonpb.SegmentState_Flushed); err != nil {
-		log.Error("flush segment complete failed", zap.Error(err))
+		log.Warn("flush segment complete failed", zap.Error(err))
 		return err
 	}
 	log.Info("flush segment complete", zap.Int64("id", segmentID))
@@ -919,7 +922,7 @@ func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID i
 		CollectionID:   resp.CollectionID,
 	})
 	if err = VerifyResponse(presp, err); err != nil {
-		log.Error("show partitions error", zap.String("collectionName", resp.Schema.Name),
+		log.Warn("show partitions error", zap.String("collectionName", resp.Schema.Name),
 			zap.Int64("collectionID", resp.CollectionID), zap.Error(err))
 		return err
 	}
@@ -942,7 +945,7 @@ func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID i
 
 func (s *Server) reCollectSegmentStats(ctx context.Context) {
 	if s.channelManager == nil {
-		log.Error("null channel manager found, which should NOT happen in non-testing environment")
+		log.Warn("null channel manager found, which should NOT happen in non-testing environment")
 		return
 	}
 	nodes := s.sessionManager.getLiveNodeIDs()

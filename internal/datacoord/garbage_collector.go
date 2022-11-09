@@ -83,7 +83,7 @@ func newGarbageCollector(meta *meta, handler Handler, segRefer *SegmentReference
 func (gc *garbageCollector) start() {
 	if gc.option.enabled {
 		if gc.option.cli == nil {
-			log.Warn("DataCoord gc enabled, but SSO client is not provided")
+			log.Error("DataCoord gc enabled, but SSO client is not provided")
 			return
 		}
 		gc.startOnce.Do(func() {
@@ -148,7 +148,7 @@ func (gc *garbageCollector) scan() {
 	for _, prefix := range prefixes {
 		infoKeys, modTimes, err := gc.option.cli.ListWithPrefix(ctx, prefix, true)
 		if err != nil {
-			log.Error("failed to list files with prefix",
+			log.Warn("failed to list files with prefix",
 				zap.String("prefix", prefix),
 				zap.String("error", err.Error()),
 			)
@@ -188,7 +188,7 @@ func (gc *garbageCollector) scan() {
 				err = gc.option.cli.Remove(ctx, infoKey)
 				if err != nil {
 					missing++
-					log.Error("failed to remove object",
+					log.Warn("failed to remove object",
 						zap.String("infoKey", infoKey),
 						zap.Error(err))
 				}

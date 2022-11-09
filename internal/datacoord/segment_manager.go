@@ -298,7 +298,7 @@ func (s *SegmentManager) allocSegmentForImport(ctx context.Context, collectionID
 	// ReportImport with the new segment so RootCoord can add segment ref lock onto it.
 	// TODO: This is a hack and will be removed once the whole ImportManager is migrated from RootCoord to DataCoord.
 	if s.rcc == nil {
-		log.Error("RootCoord client not set")
+		log.Warn("RootCoord client not set")
 		return nil, errors.New("RootCoord client not set")
 	}
 
@@ -336,12 +336,12 @@ func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID Unique
 	defer sp.Finish()
 	id, err := s.allocator.allocID(ctx)
 	if err != nil {
-		log.Error("failed to open new segment while allocID", zap.Error(err))
+		log.Warn("failed to open new segment while allocID", zap.Error(err))
 		return nil, err
 	}
 	maxNumOfRows, err := s.estimateMaxNumOfRows(collectionID)
 	if err != nil {
-		log.Error("failed to open new segment while estimateMaxNumOfRows", zap.Error(err))
+		log.Warn("failed to open new segment while estimateMaxNumOfRows", zap.Error(err))
 		return nil, err
 	}
 
@@ -360,7 +360,7 @@ func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID Unique
 	}
 	segment := NewSegmentInfo(segmentInfo)
 	if err := s.meta.AddSegment(segment); err != nil {
-		log.Error("failed to add segment to DataCoord", zap.Error(err))
+		log.Warn("failed to add segment to DataCoord", zap.Error(err))
 		return nil, err
 	}
 	s.segments = append(s.segments, id)

@@ -404,7 +404,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	segment := s.meta.GetSegment(segmentID)
 
 	if segment == nil {
-		log.Error("failed to get segment", zap.Int64("segmentID", segmentID))
+		log.Warn("failed to get segment", zap.Int64("segmentID", segmentID))
 		failResponseWithCode(resp, commonpb.ErrorCode_SegmentNotFound, fmt.Sprintf("failed to get segment %d", segmentID))
 		return resp, nil
 	}
@@ -436,7 +436,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		req.GetCheckPoints(),
 		req.GetStartPositions())
 	if err != nil {
-		log.Error("save binlog and checkpoints failed",
+		log.Warn("save binlog and checkpoints failed",
 			zap.Int64("segmentID", req.GetSegmentID()),
 			zap.Error(err))
 		resp.Reason = err.Error()
@@ -509,7 +509,7 @@ func (s *Server) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtual
 
 	err := s.meta.UpdateDropChannelSegmentInfo(channel, segments)
 	if err != nil {
-		log.Error("Update Drop Channel segment info failed", zap.String("channel", channel), zap.Error(err))
+		log.Warn("Update Drop Channel segment info failed", zap.String("channel", channel), zap.Error(err))
 		resp.Status.Reason = err.Error()
 		return resp, nil
 	}
@@ -538,7 +538,7 @@ func (s *Server) SetSegmentState(ctx context.Context, req *datapb.SetSegmentStat
 	}
 	err := s.meta.SetState(req.GetSegmentId(), req.GetNewState())
 	if err != nil {
-		log.Error("failed to updated segment state in dataCoord meta",
+		log.Warn("failed to updated segment state in dataCoord meta",
 			zap.Int64("segment ID", req.SegmentId),
 			zap.String("to state", req.GetNewState().String()))
 		return &datapb.SetSegmentStateResponse{
@@ -915,7 +915,7 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 
 	id, err := s.compactionTrigger.forceTriggerCompaction(req.CollectionID)
 	if err != nil {
-		log.Error("failed to trigger manual compaction", zap.Int64("collectionID", req.GetCollectionID()), zap.Error(err))
+		log.Warn("failed to trigger manual compaction", zap.Int64("collectionID", req.GetCollectionID()), zap.Error(err))
 		resp.Status.Reason = err.Error()
 		return resp, nil
 	}
@@ -1121,14 +1121,14 @@ func (s *Server) Import(ctx context.Context, itr *datapb.ImportTaskRequest) (*da
 	}
 
 	if s.isClosed() {
-		log.Error("failed to import for closed DataCoord service")
+		log.Warn("failed to import for closed DataCoord service")
 		resp.Status.Reason = msgDataCoordIsUnhealthy(paramtable.GetNodeID())
 		return resp, nil
 	}
 
 	nodes := s.sessionManager.getLiveNodeIDs()
 	if len(nodes) == 0 {
-		log.Error("import failed as all DataNodes are offline")
+		log.Warn("import failed as all DataNodes are offline")
 		return resp, nil
 	}
 	log.Info("available DataNodes are", zap.Int64s("node ID", nodes))
@@ -1199,7 +1199,7 @@ func (s *Server) AcquireSegmentLock(ctx context.Context, req *datapb.AcquireSegm
 
 	hasSegments, err := s.meta.HasSegments(req.SegmentIDs)
 	if !hasSegments || err != nil {
-		log.Error("AcquireSegmentLock failed", zap.Error(err))
+		log.Warn("AcquireSegmentLock failed", zap.Error(err))
 		resp.Reason = err.Error()
 		return resp, nil
 	}
@@ -1212,7 +1212,7 @@ func (s *Server) AcquireSegmentLock(ctx context.Context, req *datapb.AcquireSegm
 	}
 	hasSegments, err = s.meta.HasSegments(req.SegmentIDs)
 	if !hasSegments || err != nil {
-		log.Error("AcquireSegmentLock failed, try to release reference lock", zap.Error(err))
+		log.Warn("AcquireSegmentLock failed, try to release reference lock", zap.Error(err))
 		if err2 := retry.Do(ctx, func() error {
 			return s.segReferManager.ReleaseSegmentsLock(req.TaskID, req.NodeID)
 		}, retry.Attempts(100)); err2 != nil {
@@ -1239,7 +1239,7 @@ func (s *Server) ReleaseSegmentLock(ctx context.Context, req *datapb.ReleaseSegm
 
 	err := s.segReferManager.ReleaseSegmentsLock(req.TaskID, req.NodeID)
 	if err != nil {
-		log.Error("DataCoord ReleaseSegmentLock failed", zap.Int64("taskID", req.TaskID), zap.Int64("nodeID", req.NodeID),
+		log.Warn("DataCoord ReleaseSegmentLock failed", zap.Int64("taskID", req.TaskID), zap.Int64("nodeID", req.NodeID),
 			zap.Error(err))
 		resp.Reason = err.Error()
 		return resp, nil
@@ -1269,14 +1269,14 @@ func (s *Server) SaveImportSegment(ctx context.Context, req *datapb.SaveImportSe
 	// Look for the DataNode that watches the channel.
 	ok, nodeID := s.channelManager.getNodeIDByChannelName(req.GetChannelName())
 	if !ok {
-		log.Error("no DataNode found for channel", zap.String("channel name", req.GetChannelName()))
+		log.Warn("no DataNode found for channel", zap.String("channel name", req.GetChannelName()))
 		errResp.Reason = fmt.Sprint("no DataNode found for channel ", req.GetChannelName())
 		return errResp, nil
 	}
 	// Call DataNode to add the new segment to its own flow graph.
 	cli, err := s.sessionManager.getClient(ctx, nodeID)
 	if err != nil {
-		log.Error("failed to get DataNode client for SaveImportSegment",
+		log.Warn("failed to get DataNode client for SaveImportSegment",
 			zap.Int64("DataNode ID", nodeID),
 			zap.Error(err))
 		return &commonpb.Status{
@@ -1297,7 +1297,7 @@ func (s *Server) SaveImportSegment(ctx context.Context, req *datapb.SaveImportSe
 			StatsLog:     req.GetSaveBinlogPathReq().GetField2StatslogPaths(),
 		})
 	if err := VerifyResponse(resp.GetStatus(), err); err != nil {
-		log.Error("failed to add segment", zap.Int64("DataNode ID", nodeID), zap.Error(err))
+		log.Warn("failed to add segment", zap.Int64("DataNode ID", nodeID), zap.Error(err))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		}, nil
@@ -1309,7 +1309,7 @@ func (s *Server) SaveImportSegment(ctx context.Context, req *datapb.SaveImportSe
 	// Start saving bin log paths.
 	rsp, err := s.SaveBinlogPaths(context.Background(), req.GetSaveBinlogPathReq())
 	if err := VerifyResponse(rsp, err); err != nil {
-		log.Error("failed to SaveBinlogPaths", zap.Error(err))
+		log.Warn("failed to SaveBinlogPaths", zap.Error(err))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		}, nil
@@ -1328,7 +1328,7 @@ func (s *Server) UnsetIsImportingState(ctx context.Context, req *datapb.UnsetIsI
 	for _, segID := range req.GetSegmentIds() {
 		if err := s.meta.UnsetIsImporting(segID); err != nil {
 			// Fail-open.
-			log.Error("failed to unset segment is importing state", zap.Int64("segment ID", segID))
+			log.Warn("failed to unset segment is importing state", zap.Int64("segment ID", segID))
 			failure = true
 		}
 	}
@@ -1351,7 +1351,7 @@ func (s *Server) MarkSegmentsDropped(ctx context.Context, req *datapb.MarkSegmen
 	for _, segID := range req.GetSegmentIds() {
 		if err := s.meta.SetState(segID, commonpb.SegmentState_Dropped); err != nil {
 			// Fail-open.
-			log.Error("failed to set segment state as dropped", zap.Int64("segment ID", segID))
+			log.Warn("failed to set segment state as dropped", zap.Int64("segment ID", segID))
 			failure = true
 		}
 	}

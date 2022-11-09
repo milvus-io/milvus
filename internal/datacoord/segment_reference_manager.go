@@ -93,12 +93,12 @@ func (srm *SegmentReferenceManager) AddSegmentsLock(taskID int64, segIDs []Uniqu
 	}
 	value, err := proto.Marshal(segReferLock)
 	if err != nil {
-		log.Error("AddSegmentsLock marshal failed", zap.Int64("taskID", taskID), zap.Int64("nodeID", nodeID),
+		log.Warn("AddSegmentsLock marshal failed", zap.Int64("taskID", taskID), zap.Int64("nodeID", nodeID),
 			zap.Int64s("segIDs", segIDs), zap.Error(err))
 		return err
 	}
 	if err = srm.etcdKV.Save(generateLocKey(taskID, nodeID), string(value)); err != nil {
-		log.Error("AddSegmentsLock save segment lock to etcd failed", zap.Int64("taskID", taskID),
+		log.Warn("AddSegmentsLock save segment lock to etcd failed", zap.Int64("taskID", taskID),
 			zap.Int64("nodeID", nodeID), zap.Int64s("segIDs", segIDs), zap.Error(err))
 		return err
 	}
@@ -129,7 +129,7 @@ func (srm *SegmentReferenceManager) ReleaseSegmentsLock(taskID int64, nodeID Uni
 	}
 
 	if err := srm.etcdKV.Remove(generateLocKey(taskID, nodeID)); err != nil {
-		log.Error("remove reference lock paths by taskID failed", zap.Int64("taskID", taskID),
+		log.Warn("remove reference lock paths by taskID failed", zap.Int64("taskID", taskID),
 			zap.Int64("nodeID", nodeID), zap.Error(err))
 		return err
 	}
@@ -196,7 +196,7 @@ func (srm *SegmentReferenceManager) recoverySegReferManager(nodeIDs []UniqueID) 
 	}
 	for nodeID := range offlineIDs {
 		if err := srm.ReleaseSegmentsLockByNodeID(nodeID); err != nil {
-			log.Error("remove reference lock on segments by offline node failed",
+			log.Warn("remove reference lock on segments by offline node failed",
 				zap.Int64("offline nodeID", nodeID), zap.Error(err))
 			return err
 		}

@@ -190,7 +190,7 @@ func (c *ChannelMeta) addSegment(req addSegmentReq) error {
 	// Set up pk stats
 	err := c.InitPKstats(context.TODO(), seg, req.statsBinLogs, req.recoverTs)
 	if err != nil {
-		log.Error("failed to init bloom filter",
+		log.Warn("failed to init bloom filter",
 			zap.Int64("segment ID", req.segID),
 			zap.Error(err))
 		return err

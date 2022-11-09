@@ -312,7 +312,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 		[]string{ddNode.Name()},
 	)
 	if err != nil {
-		log.Error("set edges failed in node", zap.String("name", dmStreamNode.Name()), zap.Error(err))
+		log.Warn("set edges failed in node", zap.String("name", dmStreamNode.Name()), zap.Error(err))
 		return err
 	}
 
@@ -321,7 +321,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 		[]string{insertBufferNode.Name()},
 	)
 	if err != nil {
-		log.Error("set edges failed in node", zap.String("name", ddNode.Name()), zap.Error(err))
+		log.Warn("set edges failed in node", zap.String("name", ddNode.Name()), zap.Error(err))
 		return err
 	}
 
@@ -330,7 +330,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 		[]string{deleteNode.Name()},
 	)
 	if err != nil {
-		log.Error("set edges failed in node", zap.String("name", insertBufferNode.Name()), zap.Error(err))
+		log.Warn("set edges failed in node", zap.String("name", insertBufferNode.Name()), zap.Error(err))
 		return err
 	}
 
@@ -339,7 +339,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 		[]string{},
 	)
 	if err != nil {
-		log.Error("set edges failed in node", zap.String("name", deleteNode.Name()), zap.Error(err))
+		log.Warn("set edges failed in node", zap.String("name", deleteNode.Name()), zap.Error(err))
 		return err
 	}
 	return nil
@@ -358,12 +358,12 @@ func (dsService *dataSyncService) getSegmentInfos(segmentIDs []int64) ([]*datapb
 		IncludeUnHealthy: true,
 	})
 	if err != nil {
-		log.Error("Fail to get datapb.SegmentInfo by ids from datacoord", zap.Error(err))
+		log.Warn("Fail to get datapb.SegmentInfo by ids from datacoord", zap.Error(err))
 		return nil, err
 	}
 	if infoResp.GetStatus().ErrorCode != commonpb.ErrorCode_Success {
 		err = errors.New(infoResp.GetStatus().Reason)
-		log.Error("Fail to get datapb.SegmentInfo by ids from datacoord", zap.Error(err))
+		log.Warn("Fail to get datapb.SegmentInfo by ids from datacoord", zap.Error(err))
 		return nil, err
 	}
 	return infoResp.Infos, nil
