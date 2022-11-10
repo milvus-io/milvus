@@ -71,6 +71,7 @@ func (c *SegmentChecker) Check(ctx context.Context) []task.Task {
 	segments := c.dist.SegmentDistManager.GetAll()
 	released := utils.FilterReleased(segments, collectionIDs)
 	tasks = append(tasks, c.createSegmentReduceTasks(ctx, released, -1, querypb.DataScope_All)...)
+	task.SetPriority(task.TaskPriorityNormal, tasks...)
 	return tasks
 }
 
