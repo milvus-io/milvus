@@ -19,9 +19,11 @@ package balance
 import (
 	"sort"
 
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
+	"github.com/samber/lo"
 )
 
 type RowCountBasedBalancer struct {
@@ -81,8 +83,13 @@ func (b *RowCountBasedBalancer) convertToNodeItems(nodeIDs []int64) []*nodeItem 
 func (b *RowCountBasedBalancer) Balance() ([]SegmentAssignPlan, []ChannelAssignPlan) {
 	ids := b.meta.CollectionManager.GetAll()
 
+	// loading collection should skip balance
+	loadedCollections := lo.Filter(ids, func(cid int64, _ int) bool {
+		return b.meta.GetStatus(cid) == querypb.LoadStatus_Loaded
+	})
+
 	segmentPlans, channelPlans := make([]SegmentAssignPlan, 0), make([]ChannelAssignPlan, 0)
-	for _, cid := range ids {
+	for _, cid := range loadedCollections {
 		replicas := b.meta.ReplicaManager.GetByCollection(cid)
 		for _, replica := range replicas {
 			splans, cplans := b.balanceReplica(replica)
