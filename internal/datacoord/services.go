@@ -739,13 +739,15 @@ func (s *Server) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedS
 	ret := make([]UniqueID, 0, len(segmentIDs))
 	for _, id := range segmentIDs {
 		segment := s.meta.GetSegment(id)
-		if segment != nil &&
-			segment.GetState() != commonpb.SegmentState_Dropped &&
-			segment.GetState() != commonpb.SegmentState_Flushed {
+		// if this segment == nil, we assume this segment has been gc
+		if segment == nil ||
+			(segment.GetState() != commonpb.SegmentState_Dropped &&
+				segment.GetState() != commonpb.SegmentState_Flushed) {
 			continue
 		}
-
-		// if this segment == nil, we assume this segment has been compacted and flushed
+		if !req.GetIncludeUnhealthy() && segment.GetState() == commonpb.SegmentState_Dropped {
+			continue
+		}
 		ret = append(ret, id)
 	}
 
