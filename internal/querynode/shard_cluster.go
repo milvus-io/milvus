@@ -280,9 +280,7 @@ func (sc *ShardCluster) updateSegment(evt shardSegmentInfo) {
 	log.Info("ShardCluster update segment", zap.Int64("nodeID", evt.nodeID), zap.Int64("segmentID", evt.segmentID), zap.Int32("state", int32(evt.state)))
 	// notify handoff wait online if any
 	defer func() {
-		sc.segmentCond.L.Lock()
 		sc.segmentCond.Broadcast()
-		sc.segmentCond.L.Unlock()
 	}()
 
 	sc.mut.Lock()
@@ -358,9 +356,7 @@ func (sc *ShardCluster) SyncSegments(distribution []*querypb.ReplicaSegmentsInfo
 	sc.mut.Unlock()
 
 	// notify handoff wait online if any
-	sc.segmentCond.L.Lock()
 	sc.segmentCond.Broadcast()
-	sc.segmentCond.L.Unlock()
 
 	sc.mutVersion.Lock()
 	defer sc.mutVersion.Unlock()
@@ -663,9 +659,7 @@ func (sc *ShardCluster) LoadSegments(ctx context.Context, req *querypb.LoadSegme
 	}
 
 	// notify handoff wait online if any
-	sc.segmentCond.L.Lock()
 	sc.segmentCond.Broadcast()
-	sc.segmentCond.L.Unlock()
 
 	sc.mutVersion.Lock()
 	defer sc.mutVersion.Unlock()
