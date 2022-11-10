@@ -140,7 +140,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         )
         self.collection_wrap.load()
         log.info(f"wait for load finished and be ready for search")
-        time.sleep(5)
+        time.sleep(10)
         log.info(
             f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}"
         )
@@ -220,7 +220,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         )
         self.collection_wrap.load()
         log.info(f"wait for load finished and be ready for search")
-        time.sleep(5)
+        time.sleep(10)
         log.info(
             f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}"
         )
@@ -228,7 +228,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         topk = 2
         search_data = cf.gen_vectors(nq, dim)
         search_params = ct.default_search_params
-        time.sleep(5)
+        time.sleep(10)
         res, _ = self.collection_wrap.search(
             search_data,
             df.vec_field,
@@ -314,7 +314,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         exp_res = {"total_rows": entities, "indexed_rows": entities}
         assert res == exp_res
         log.info(f"wait for load finished and be ready for search")
-        time.sleep(5)
+        time.sleep(10)
         log.info(
             f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}"
         )
@@ -403,7 +403,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         assert self.collection_wrap.num_entities == entities
         # verify search and query
         log.info(f"wait for load finished and be ready for search")
-        time.sleep(5)
+        time.sleep(10)
         search_data = cf.gen_binary_vectors(1, dim)[1]
         search_params = {"metric_type": "JACCARD", "params": {"nprobe": 10}}
         res, _ = self.collection_wrap.search(
@@ -511,7 +511,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             assert res is True
             # verify search and query
             log.info(f"wait for load finished and be ready for search")
-            time.sleep(5)
+            time.sleep(10)
             nq = 3
             topk = 10
             search_data = cf.gen_vectors(nq, dim)
@@ -614,7 +614,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         assert res == exp_res
         # verify search and query
         log.info(f"wait for load finished and be ready for search")
-        time.sleep(5)
+        time.sleep(10)
         nq = 3
         topk = 10
         search_data = cf.gen_vectors(nq, dim=dim)
@@ -702,7 +702,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         assert res == exp_res
         # verify search and query
         log.info(f"wait for load finished and be ready for search")
-        time.sleep(5)
+        time.sleep(10)
         nq = 3
         topk = 10
         search_data = cf.gen_vectors(nq, 16)
@@ -811,7 +811,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             assert res is True
             # verify search and query
             log.info(f"wait for load finished and be ready for search")
-            time.sleep(5)
+            time.sleep(10)
             search_data = cf.gen_vectors(1, dim)
             search_params = ct.default_search_params
             res, _ = self.collection_wrap.search(
@@ -916,7 +916,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         #
         #     # verify search and query
         #     log.info(f"wait for load finished and be ready for search")
-        #     time.sleep(5)
+        #     time.sleep(10)
         #     nq = 5
         #     topk = 1
         #     search_data = cf.gen_vectors(nq, dim)
@@ -1051,7 +1051,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             )
             self.collection_wrap.load()
             log.info(f"wait for load finished and be ready for search")
-            time.sleep(5)
+            time.sleep(10)
             log.info(
                 f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}"
             )
@@ -1129,7 +1129,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         )
         self.collection_wrap.load()
         log.info(f"wait for load finished and be ready for search")
-        time.sleep(5)
+        time.sleep(10)
         # the pk value was automatically convert to int from float
         res, _ = self.collection_wrap.query(
             expr=f"{df.pk_field} in [3]", output_fields=[df.pk_field]
@@ -1194,7 +1194,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         )
         self.collection_wrap.load()
         log.info(f"wait for load finished and be ready for search")
-        time.sleep(5)
+        time.sleep(10)
         search_data = cf.gen_vectors(1, dim)
         search_params = ct.default_search_params
         res, _ = self.collection_wrap.search(
@@ -1268,7 +1268,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         )
         self.collection_wrap.load()
         log.info(f"wait for load finished and be ready for search")
-        time.sleep(5)
+        time.sleep(10)
         # log.info(f"query seg info: {self.utility_wrap.get_query_segment_info(c_name)[0]}")
         search_data = cf.gen_vectors(1, dim)
         search_params = ct.default_search_params
@@ -1342,7 +1342,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
 
         # verify search and query
         log.info(f"wait for load finished and be ready for search")
-        time.sleep(5)
+        time.sleep(10)
         search_data = cf.gen_vectors(1, dim)
         search_params = ct.default_search_params
         res, _ = self.collection_wrap.search(
@@ -1442,7 +1442,7 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
             task_ids=[task_id], timeout=90
         )
         assert not success
-        failed_reason = "JSON parser: row count is 0"
+        failed_reason = "row count is 0"
         for state in states.values():
             assert state.state_name in ["Failed", "Failed and cleaned"]
             assert failed_reason in state.infos.get("failed_reason", "")
@@ -1507,7 +1507,7 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
         log.info(f"bulk insert state:{success} in {tt}")
         assert not success
         failed_reason = f"the file '{files[0]}' has no corresponding field in collection"
-        failed_reason2 = "unsupportted file type"
+        failed_reason2 = "unsupported file type"
         for state in states.values():
             assert state.state_name in ["Failed", "Failed and cleaned"]
             assert failed_reason in state.infos.get("failed_reason", "") or \
@@ -1560,7 +1560,7 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
         assert not success
         if is_row_based:
             value = df.vec_field  # if auto_id else df.pk_field
-            failed_reason = f"JSON parser: invalid row-based JSON format, the key {value} is not found"
+            failed_reason = f"invalid JSON format, the root key should be 'rows', but get '{value}'"
         else:
             failed_reason = "JSON parse: row count is 0"
         for state in states.values():
@@ -1779,7 +1779,7 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
         )
         log.info(f"bulk insert state:{success}")
         assert not success
-        failed_reason = f"array size {dim} doesn't equal to vector dimension {wrong_dim} of field vectors"
+        failed_reason = f"array size {dim} doesn't equal to vector dimension {wrong_dim} of field 'vectors'"
         for state in states.values():
             assert state.state_name in ["Failed", "Failed and cleaned"]
             assert failed_reason in state.infos.get("failed_reason", "")
@@ -1818,7 +1818,6 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("is_row_based", [True])
     @pytest.mark.parametrize("dim", [4])
     @pytest.mark.parametrize("entities", [200])
-    @pytest.mark.xfail(reason="issue: https://github.com/milvus-io/milvus/issues/19553")
     def test_non_existing_partition(self, is_row_based, dim, entities):
         """
         collection: create a collection
@@ -1845,13 +1844,13 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
         self.collection_wrap.init_collection(c_name, schema=schema)
         # import data into a non existing partition
         p_name = "non_existing"
-        err_msg = f" partition {p_name} does not exist"
+        err_msg = f"partition ID not found for partition name {p_name}"
         task_id, _ = self.utility_wrap.do_bulk_insert(
             collection_name=c_name,
             partition_name=p_name,
             files=files,
             check_task=CheckTasks.err_res,
-            check_items={"err_code": 11, "err_msg": err_msg},
+            check_items={"err_code": 1, "err_msg": err_msg},
         )
 
     @pytest.mark.tags(CaseLabel.L3)
@@ -1901,7 +1900,7 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
         log.info(f"bulk insert state:{success}")
         assert not success
         failed_reason = (
-            f"doesn't equal to vector dimension {dim} of field vectors"
+            f"doesn't equal to vector dimension {dim} of field 'vectors'"
         )
         for state in states.values():
             assert state.state_name in ["Failed", "Failed and cleaned"]
@@ -2436,7 +2435,6 @@ class TestBulkInsertInvalidParams(TestcaseBaseBulkInsert):
         assert self.collection_wrap.num_entities == 0
 
 
-@pytest.mark.skip()
 class TestBulkInsertAdvanced(TestcaseBaseBulkInsert):
 
     @pytest.mark.tags(CaseLabel.L3)
@@ -2522,7 +2520,7 @@ class TestBulkInsertAdvanced(TestcaseBaseBulkInsert):
             )
             self.collection_wrap.load()
             log.info(f"wait for load finished and be ready for search")
-            time.sleep(5)
+            time.sleep(10)
             loaded_segs = len(self.utility_wrap.get_query_segment_info(c_name)[0])
             log.info(f"query seg info: {loaded_segs} segs loaded.")
             search_data = cf.gen_vectors(1, dim)
