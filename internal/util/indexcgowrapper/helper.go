@@ -79,9 +79,9 @@ func HandleCStatus(status *C.CStatus, extraInfo string) error {
 
 func GetLocalUsedSize() (int64, error) {
 	var availableSize int64
-	cSize := C.int64_t(availableSize)
+	cSize := (*C.int64_t)(&availableSize)
 
-	status := C.GetLocalUsedSize(&cSize)
+	status := C.GetLocalUsedSize(cSize)
 	err := HandleCStatus(&status, "get local used size failed")
 	if err != nil {
 		return 0, err
