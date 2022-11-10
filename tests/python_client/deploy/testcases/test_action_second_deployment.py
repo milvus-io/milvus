@@ -1,4 +1,5 @@
 import pytest
+import re
 import pymilvus
 from common import common_func as cf
 from common import common_type as ct
@@ -115,6 +116,8 @@ class TestActionSecondDeployment(TestDeployBase):
             log.info(f"get replicas failed with error {str(e)}")
             replicas_loaded = 0
         log.info(f"collection {name} has {replicas_loaded} replicas")
+        actual_replicas = re.search(r'replica_number_(.*?)_', name).group(1)
+        assert replicas_loaded == int(actual_replicas)
         # params for search and query
         if is_binary:
             _, vectors_to_search = cf.gen_binary_vectors(
