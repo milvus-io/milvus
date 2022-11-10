@@ -759,7 +759,9 @@ func (h *mockHandler) CheckShouldDropChannel(channel string) bool {
 	return false
 }
 
-func (h *mockHandler) FinishDropChannel(channel string) {}
+func (h *mockHandler) FinishDropChannel(channel string) error {
+	return nil
+}
 
 func (h *mockHandler) GetCollection(_ context.Context, collectionID UniqueID) (*collectionInfo, error) {
 	// empty schema

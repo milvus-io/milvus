@@ -21,12 +21,14 @@ import (
 	"errors"
 	"sync"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/retry"
-	"go.uber.org/zap"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
 )
 
 // errStart used for retry start
@@ -134,6 +136,7 @@ func (t *flushTaskRunner) runFlushInsert(task flushInsertTask,
 			zap.Bool("flushed", flushed),
 			zap.Bool("dropped", dropped),
 			zap.Any("position", pos),
+			zap.Time("PosTime", tsoutil.PhysicalTime(pos.GetTimestamp())),
 		)
 		go func() {
 			err := retry.Do(context.Background(), func() error {
