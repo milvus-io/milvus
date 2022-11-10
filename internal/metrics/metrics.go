@@ -55,6 +55,9 @@ const (
 	FlushingSegmentLabel = "Flushing"
 	DropedSegmentLabel   = "Dropped"
 
+	Leader     = "OnLeader"
+	FromLeader = "FromLeader"
+
 	nodeIDLabelName          = "node_id"
 	statusLabelName          = "status"
 	indexTaskStatusLabelName = "index_task_status"
@@ -69,6 +72,7 @@ const (
 	roleNameLabelName        = "role_name"
 	cacheNameLabelName       = "cache_name"
 	cacheStateLabelName      = "cache_state"
+	requestScope             = "scope"
 )
 
 var (

@@ -130,6 +130,7 @@ var (
 		}, []string{
 			nodeIDLabelName,
 			queryTypeLabelName,
+			requestScope,
 		})
 
 	QueryNodeSQLatencyInQueue = prometheus.NewHistogramVec(
