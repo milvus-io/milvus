@@ -252,6 +252,7 @@ func (m *importManager) sendOutTasks(ctx context.Context) error {
 			defer m.workingLock.Unlock()
 			log.Debug("import task added as working task", zap.Int64("task ID", it.TaskId))
 			task.State.StateCode = commonpb.ImportState_ImportStarted
+			task.StartTs = time.Now().Unix()
 			// first update the import task into meta store and then put it into working tasks
 			if err := m.persistTaskInfo(task); err != nil {
 				log.Error("failed to update import task",
@@ -284,6 +285,11 @@ func (m *importManager) flipTaskState(ctx context.Context) error {
 		if task.GetState().GetStateCode() == commonpb.ImportState_ImportPersisted {
 			log.Info("<ImportPersisted> task found, checking if it is eligible to become <ImportCompleted>",
 				zap.Int64("task ID", task.GetId()))
+
+			// TODO: if collection or partition has been dropped before the task complete,
+			// we need to set the task to failed, because the checkIndexingDone() cannot know
+			// whether the collection has been dropped.
+
 			resp := m.getTaskState(task.GetId())
 			ok, err := m.checkIndexingDone(ctx, resp.GetCollectionId(), resp.GetSegmentIds())
 			if err != nil {
@@ -858,54 +864,27 @@ func (m *importManager) yieldTaskInfo(tID int64) error {
 
 // expireOldTasks removes expired tasks from memory.
 func (m *importManager) expireOldTasksFromMem() {
-	// Expire old pending tasks, if any.
-	func() {
-		m.pendingLock.Lock()
-		defer m.pendingLock.Unlock()
-		index := 0
-		for _, t := range m.pendingTasks {
-			taskExpiredAndStateUpdated := false
-			if taskExpired(t) {
-				taskID := t.GetId()
-				m.pendingLock.Unlock()
-				if err := m.setImportTaskStateAndReason(taskID, commonpb.ImportState_ImportFailed,
-					"the import task has timed out"); err != nil {
-					log.Error("failed to set import task state",
-						zap.Int64("task ID", taskID),
-						zap.Any("target state", commonpb.ImportState_ImportFailed))
-				} else {
-					// Set true when task has expired and its state has been successfully updated.
-					taskExpiredAndStateUpdated = true
-				}
-				m.pendingLock.Lock()
-				log.Info("a pending task has expired", zap.Int64("task ID", t.GetId()))
-			}
-			if !taskExpiredAndStateUpdated {
-				// Only keep tasks that are not expired or failed to have their states updated.
-				m.pendingTasks[index] = t
-				index++
-			}
-		}
-		// To prevent memory leak.
-		for i := index; i < len(m.pendingTasks); i++ {
-			m.pendingTasks[i] = nil
-		}
-		m.pendingTasks = m.pendingTasks[:index]
-	}()
-	// Expire old working tasks.
+	// no need to expire pending tasks. With old working tasks finish or turn into expired, datanodes back to idle,
+	// let the sendOutTasksLoop() push pending tasks into datanodes.
+
+	// expire old working tasks.
 	func() {
 		m.workingLock.Lock()
 		defer m.workingLock.Unlock()
 		for _, v := range m.workingTasks {
 			taskExpiredAndStateUpdated := false
 			if v.GetState().GetStateCode() != commonpb.ImportState_ImportCompleted && taskExpired(v) {
-				log.Info("a working task has expired", zap.Int64("task ID", v.GetId()))
+				log.Info("a working task has expired and will be marked as failed",
+					zap.Int64("task ID", v.GetId()),
+					zap.Int64("startTs", v.GetStartTs()),
+					zap.Float64("ImportTaskExpiration", Params.RootCoordCfg.ImportTaskExpiration))
 				taskID := v.GetId()
 				m.workingLock.Unlock()
 				// Remove DataNode from busy node list, so it can serve other tasks again.
 				m.busyNodesLock.Lock()
 				delete(m.busyNodes, v.GetDatanodeId())
 				m.busyNodesLock.Unlock()
+
 				if err := m.setImportTaskStateAndReason(taskID, commonpb.ImportState_ImportFailed,
 					"the import task has timed out"); err != nil {
 					log.Error("failed to set import task state",
@@ -943,7 +922,9 @@ func (m *importManager) expireOldTasksFromEtcd() {
 		}
 		if taskPastRetention(ti) {
 			log.Info("an import task has passed retention period and will be removed from Etcd",
-				zap.Int64("task ID", ti.GetId()))
+				zap.Int64("task ID", ti.GetId()),
+				zap.Int64("createTs", ti.GetCreateTs()),
+				zap.Float64("ImportTaskRetention", Params.RootCoordCfg.ImportTaskRetention))
 			if err = m.yieldTaskInfo(ti.GetId()); err != nil {
 				log.Error("failed to remove import task from Etcd",
 					zap.Int64("task ID", ti.GetId()),
@@ -1053,7 +1034,7 @@ func BuildImportTaskKey(taskID int64) string {
 
 // taskExpired returns true if the in-mem task is considered expired.
 func taskExpired(ti *datapb.ImportTaskInfo) bool {
-	return Params.RootCoordCfg.ImportTaskExpiration <= float64(time.Now().Unix()-ti.GetCreateTs())
+	return Params.RootCoordCfg.ImportTaskExpiration <= float64(time.Now().Unix()-ti.GetStartTs())
 }
 
 // taskPastRetention returns true if the task is considered expired in Etcd.
@@ -1087,6 +1068,7 @@ func cloneImportTaskInfo(taskInfo *datapb.ImportTaskInfo) *datapb.ImportTaskInfo
 		CollectionName: taskInfo.GetCollectionName(),
 		PartitionName:  taskInfo.GetPartitionName(),
 		Infos:          taskInfo.GetInfos(),
+		StartTs:        taskInfo.GetStartTs(),
 	}
 	return cloned
 }

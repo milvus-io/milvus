@@ -49,10 +49,10 @@ func TestImportManager_NewImportManager(t *testing.T) {
 		return globalCount, 0, nil
 	}
 	Params.RootCoordCfg.ImportTaskSubPath = "test_import_task"
-	Params.RootCoordCfg.ImportTaskExpiration = 50
-	Params.RootCoordCfg.ImportTaskRetention = 200
-	checkPendingTasksInterval = 100
-	cleanUpLoopInterval = 100
+	Params.RootCoordCfg.ImportTaskExpiration = 1  // unit: second
+	Params.RootCoordCfg.ImportTaskRetention = 200 // unit: second
+	checkPendingTasksInterval = 500               // unit: millisecond
+	cleanUpLoopInterval = 500                     // unit: millisecond
 	mockKv := memkv.NewMemoryKV()
 	ti1 := &datapb.ImportTaskInfo{
 		Id: 100,
@@ -104,14 +104,27 @@ func TestImportManager_NewImportManager(t *testing.T) {
 		defer cancel()
 		mgr := newImportManager(ctx, mockKv, idAlloc, callImportServiceFn, callMarkSegmentsDropped, nil, nil, nil, nil)
 		assert.NotNil(t, mgr)
+
+		// there are 2 tasks read from store, one is pending, the other is persisted.
+		// the persisted task will be marked to failed since the server restart
+		// pending list: 1 task, working list: 0 task
 		_, err := mgr.loadFromTaskStore(true)
 		assert.NoError(t, err)
 		var wgLoop sync.WaitGroup
 		wgLoop.Add(2)
+
+		// the pending task will be sent to working list
+		// pending list: 0 task, working list: 1 task
 		mgr.sendOutTasks(ctx)
 		assert.Equal(t, 1, len(mgr.workingTasks))
+
+		// this case wait 3 seconds, the pending task's StartTs is set when it is put into working list
+		// ImportTaskExpiration is 1 second, it will be marked as expired task by the expireOldTasksFromMem()
+		// pending list: 0 task, working list: 0 task
 		mgr.cleanupLoop(&wgLoop)
 		assert.Equal(t, 0, len(mgr.workingTasks))
+
+		// nothing to send now
 		mgr.sendOutTasksLoop(&wgLoop)
 		wgLoop.Wait()
 	})
@@ -187,41 +200,9 @@ func TestImportManager_NewImportManager(t *testing.T) {
 	})
 
 	wg.Add(1)
-	t.Run("pending task expired", func(t *testing.T) {
-		defer wg.Done()
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		mgr := newImportManager(ctx, mockKv, idAlloc, callImportServiceFn, callMarkSegmentsDropped, nil, nil, nil, nil)
-		assert.NotNil(t, mgr)
-		mgr.pendingTasks = append(mgr.pendingTasks, &datapb.ImportTaskInfo{
-			Id: 300,
-			State: &datapb.ImportTaskState{
-				StateCode: commonpb.ImportState_ImportPending,
-			},
-			CreateTs: time.Now().Unix() + 1,
-		})
-		mgr.pendingTasks = append(mgr.pendingTasks, &datapb.ImportTaskInfo{
-			Id: 400,
-			State: &datapb.ImportTaskState{
-				StateCode: commonpb.ImportState_ImportPending,
-			},
-			CreateTs: time.Now().Unix() - 100,
-		})
-		_, err := mgr.loadFromTaskStore(true)
-		assert.NoError(t, err)
-		var wgLoop sync.WaitGroup
-		wgLoop.Add(2)
-		assert.Equal(t, 2, len(mgr.pendingTasks))
-		mgr.cleanupLoop(&wgLoop)
-		assert.Equal(t, 1, len(mgr.pendingTasks))
-		mgr.sendOutTasksLoop(&wgLoop)
-		wgLoop.Wait()
-	})
-
-	wg.Add(1)
 	t.Run("check init", func(t *testing.T) {
 		defer wg.Done()
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		mgr := newImportManager(ctx, mockKv, idAlloc, callImportServiceFn, callMarkSegmentsDropped, nil, nil, nil, nil)
 		assert.NotNil(t, mgr)
@@ -1148,4 +1129,101 @@ func TestImportManager_isRowbased(t *testing.T) {
 	rb, err = mgr.isRowbased(files)
 	assert.Nil(t, err)
 	assert.False(t, rb)
+}
+
+func TestImportManager_checkIndexingDone(t *testing.T) {
+	ctx := context.Background()
+
+	mgr := &importManager{
+		callDescribeIndex: func(ctx context.Context, colID UniqueID) (*indexpb.DescribeIndexResponse, error) {
+			return nil, errors.New("error")
+		},
+		callGetSegmentIndexState: func(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*indexpb.SegmentIndexState, error) {
+			return nil, errors.New("error")
+		},
+	}
+
+	segmentsID := []typeutil.UniqueID{1, 2, 3}
+
+	// check index of 3 segments
+	// callDescribeIndex() failed
+	done, err := mgr.checkIndexingDone(ctx, 1, segmentsID)
+	assert.False(t, done)
+	assert.Error(t, err)
+
+	mgr.callDescribeIndex = func(ctx context.Context, colID UniqueID) (*indexpb.DescribeIndexResponse, error) {
+		return &indexpb.DescribeIndexResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			},
+		}, nil
+	}
+
+	// callDescribeIndex() unexpected error
+	done, err = mgr.checkIndexingDone(ctx, 1, segmentsID)
+	assert.False(t, done)
+	assert.Error(t, err)
+
+	mgr.callDescribeIndex = func(ctx context.Context, colID UniqueID) (*indexpb.DescribeIndexResponse, error) {
+		return &indexpb.DescribeIndexResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_IndexNotExist,
+			},
+		}, nil
+	}
+
+	// callDescribeIndex() index not exist
+	done, err = mgr.checkIndexingDone(ctx, 1, segmentsID)
+	assert.True(t, done)
+	assert.Nil(t, err)
+
+	mgr.callDescribeIndex = func(ctx context.Context, colID UniqueID) (*indexpb.DescribeIndexResponse, error) {
+		return &indexpb.DescribeIndexResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+			IndexInfos: []*indexpb.IndexInfo{
+				{
+					State: commonpb.IndexState_Finished,
+				},
+			},
+		}, nil
+	}
+
+	// callGetSegmentIndexState() failed
+	done, err = mgr.checkIndexingDone(ctx, 1, segmentsID)
+	assert.False(t, done)
+	assert.Error(t, err)
+
+	mgr.callGetSegmentIndexState = func(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*indexpb.SegmentIndexState, error) {
+		return []*indexpb.SegmentIndexState{
+			{
+				State: commonpb.IndexState_Finished,
+			},
+		}, nil
+	}
+
+	// only 1 segment indexed
+	done, err = mgr.checkIndexingDone(ctx, 1, segmentsID)
+	assert.False(t, done)
+	assert.Nil(t, err)
+
+	mgr.callGetSegmentIndexState = func(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*indexpb.SegmentIndexState, error) {
+		return []*indexpb.SegmentIndexState{
+			{
+				State: commonpb.IndexState_Finished,
+			},
+			{
+				State: commonpb.IndexState_Finished,
+			},
+			{
+				State: commonpb.IndexState_Finished,
+			},
+		}, nil
+	}
+
+	// all segments indexed
+	done, err = mgr.checkIndexingDone(ctx, 1, segmentsID)
+	assert.True(t, done)
+	assert.Nil(t, err)
 }
