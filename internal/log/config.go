@@ -26,6 +26,8 @@ const (
 
 // FileLogConfig serializes file log related config in toml/json.
 type FileLogConfig struct {
+	// Log rootpath
+	RootPath string `toml:"rootpath" json:"rootpath"`
 	// Log filename, leave empty to disable file log.
 	Filename string `toml:"filename" json:"filename"`
 	// Max size for a single file, in MB.
