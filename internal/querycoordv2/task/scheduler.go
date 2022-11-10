@@ -218,6 +218,11 @@ func (scheduler *taskScheduler) Add(task Task) error {
 		return err
 	}
 
+	if !scheduler.waitQueue.Add(task) {
+		log.Warn("failed to add task", zap.String("task", task.String()))
+		return ErrTaskQueueFull
+	}
+
 	task.SetID(scheduler.idAllocator())
 	scheduler.tasks.Insert(task.ID())
 	switch task := task.(type) {
@@ -229,10 +234,7 @@ func (scheduler *taskScheduler) Add(task Task) error {
 		index := replicaChannelIndex{task.ReplicaID(), task.Channel()}
 		scheduler.channelTasks[index] = task
 	}
-	if !scheduler.waitQueue.Add(task) {
-		log.Warn("failed to add task", zap.String("task", task.String()))
-		return nil
-	}
+
 	metrics.QueryCoordTaskNum.WithLabelValues().Set(float64(scheduler.tasks.Len()))
 	log.Info("task added", zap.String("task", task.String()))
 	return nil
@@ -241,10 +243,6 @@ func (scheduler *taskScheduler) Add(task Task) error {
 // check checks whether the task is valid to add,
 // must hold lock
 func (scheduler *taskScheduler) preAdd(task Task) error {
-	if scheduler.waitQueue.Len() >= scheduler.waitQueue.Cap() {
-		return ErrTaskQueueFull
-	}
-
 	switch task := task.(type) {
 	case *SegmentTask:
 		index := NewReplicaSegmentIndex(task)
