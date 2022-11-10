@@ -805,13 +805,6 @@ func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 			}, nil
 		}
 
-		log.Debug("DataNode.GetMetrics",
-			zap.Int64("node_id", paramtable.GetNodeID()),
-			zap.String("req", req.Request),
-			zap.String("metric_type", metricType),
-			zap.Any("systemInfoMetrics", systemInfoMetrics), // TODO(dragondriver): necessary? may be very large
-			zap.Error(err))
-
 		return systemInfoMetrics, nil
 	}
 
