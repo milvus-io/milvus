@@ -12,14 +12,15 @@
 FROM milvusdb/openblas:ubuntu20.04-20220914-179ea77
 
 RUN apt-get update && apt-get install -y --no-install-recommends wget curl ca-certificates gnupg2 && \
-    wget -qO- "https://cmake.org/files/v3.18/cmake-3.18.6-Linux-x86_64.tar.gz" | tar --strip-components=1 -xz -C /usr/local && \
+    wget -qO- "https://cmake.org/files/v3.24/cmake-3.24.0-linux-x86_64.tar.gz" | tar --strip-components=1 -xz -C /usr/local && \
     apt-get update && apt-get install -y --no-install-recommends \
-    g++ gcc gfortran git make ccache libssl-dev zlib1g-dev libboost-regex-dev libboost-program-options-dev libboost-system-dev unzip \
-    libboost-filesystem-dev libboost-serialization-dev python3-dev libboost-python-dev libcurl4-openssl-dev libtbb-dev clang-format-10 clang-tidy-10 lcov libtool m4 autoconf automake python  && \
+    g++ gcc gfortran git make ccache libssl-dev zlib1g-dev unzip \
+    clang-format-10 clang-tidy-10 lcov libtool m4 autoconf automake python3 python3-pip \
+    pkg-config uuid-dev libaio-dev libgoogle-perftools-dev && \
     apt-get remove --purge -y && \
     rm -rf /var/lib/apt/lists/*
 
-RUN apt-get update && apt-get install -y --no-install-recommends libzstd-dev pkg-config libtbb-dev uuid-dev libaio-dev libgoogle-perftools-dev clang-format libboost-all-dev
+RUN pip3 install conan
 
 # Install Go
 ENV GOPATH /go

@@ -12,34 +12,30 @@
 FROM milvusdb/openblas:centos7-20210706
 
 RUN yum install -y epel-release centos-release-scl-rh && yum install -y wget curl which && \
-    wget -qO- "https://cmake.org/files/v3.18/cmake-3.18.6-Linux-x86_64.tar.gz" | tar --strip-components=1 -xz -C /usr/local && \
-    yum install -y git make automake openssl-devel zlib-devel  libzstd-devel\
-      libcurl-devel python3-devel \
-      devtoolset-7-gcc devtoolset-7-gcc-c++ devtoolset-7-gcc-gfortran \
-      llvm-toolset-7.0-clang llvm-toolset-7.0-clang-tools-extra \
-      libaio libuuid-devel pulseaudio-libs-devel unzip \
-      ccache lcov libtool m4 autoconf automake && \
-      rm -rf /var/cache/yum/* && \
+    wget -qO- "https://cmake.org/files/v3.24/cmake-3.24.0-linux-x86_64.tar.gz" | tar --strip-components=1 -xz -C /usr/local && \
+    yum install -y git make automake python3-devel \
+    devtoolset-7-gcc devtoolset-7-gcc-c++ devtoolset-7-gcc-gfortran \
+    llvm-toolset-7.0-clang llvm-toolset-7.0-clang-tools-extra \
+    libaio libuuid-devel unzip \
+    ccache lcov libtool m4 autoconf automake && \
+    rm -rf /var/cache/yum/* && \
     echo "source scl_source enable devtoolset-7" >> /etc/profile.d/devtoolset-7.sh && \
     echo "source scl_source enable llvm-toolset-7.0" >> /etc/profile.d/llvm-toolset-7.sh
 
+RUN pip3 install conan
+
+RUN mkdir /tmp/stdlib && cd /tmp/stdlib && \
+    wget https://repo.anaconda.com/archive/Anaconda3-2019.07-Linux-x86_64.sh && \
+    sh Anaconda3-2019.07-Linux-x86_64.sh -b -p conda && \
+    cp conda/lib/libstdc++.so.6.0.26 /usr/lib64 && \
+    rm /usr/lib64/libstdc++.so.6 && \
+    ln -s /usr/lib64/libstdc++.so.6.0.26 /usr/lib64/libstdc++.so.6 && \
+    cp conda/lib/libatomic.so.1.2.0 /usr/lib64 && \
+    ln -s /usr/lib64/libatomic.so.1.2.0 /usr/lib64/libatomic.so && \
+    ln -s /usr/lib64/libatomic.so.1.2.0 /usr/lib64/libatomic.so.1 && \
+    rm -rf /tmp/stdlib
+
 ENV CLANG_TOOLS_PATH="/opt/rh/llvm-toolset-7.0/root/usr/bin"
-
-# Install tbb
-RUN source /etc/profile.d/devtoolset-7.sh && \
-    git clone https://github.com/wjakob/tbb.git && \
-    cd tbb/build && \
-    cmake .. && make -j && make install && \
-    cd ../../ && rm -rf tbb/
-
-# Install boost
-RUN source /etc/profile.d/devtoolset-7.sh && \
-    wget -q https://boostorg.jfrog.io/artifactory/main/release/1.65.1/source/boost_1_65_1.tar.gz && \
-    tar zxf boost_1_65_1.tar.gz && cd boost_1_65_1 && \
-    ./bootstrap.sh --prefix=/usr/local --with-toolset=gcc --without-libraries=python && \
-    ./b2 -j2 --prefix=/usr/local --without-python toolset=gcc install && \
-    cd ../ && rm -rf ./boost_1_65_1*
-
 ENV LD_LIBRARY_PATH /usr/local/lib:$LD_LIBRARY_PATH
 
 # Install Go
