@@ -77,29 +77,12 @@ var (
 			Buckets:   []float64{0, 5, 10, 20, 40, 100, 200, 400, 1000, 10000},
 		}, []string{})
 
-	QueryCoordNumChildTasks = prometheus.NewGaugeVec(
+	QueryCoordTaskNum = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryCoordRole,
-			Name:      "child_task_num",
-			Help:      "number of child tasks in QueryCoord's queue",
-		}, []string{})
-
-	QueryCoordNumParentTasks = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: milvusNamespace,
-			Subsystem: typeutil.QueryCoordRole,
-			Name:      "parent_task_num",
-			Help:      "number of parent tasks in QueryCoord's queue",
-		}, []string{})
-
-	QueryCoordChildTaskLatency = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Namespace: milvusNamespace,
-			Subsystem: typeutil.QueryCoordRole,
-			Name:      "child_task_latency",
-			Help:      "latency of child tasks",
-			Buckets:   buckets,
+			Name:      "task_num",
+			Help:      "the number of tasks in QueryCoord's scheduler",
 		}, []string{})
 
 	QueryCoordNumQueryNodes = prometheus.NewGaugeVec(
@@ -119,8 +102,6 @@ func RegisterQueryCoord(registry *prometheus.Registry) {
 	registry.MustRegister(QueryCoordReleaseCount)
 	registry.MustRegister(QueryCoordLoadLatency)
 	registry.MustRegister(QueryCoordReleaseLatency)
-	registry.MustRegister(QueryCoordNumChildTasks)
-	registry.MustRegister(QueryCoordNumParentTasks)
-	registry.MustRegister(QueryCoordChildTaskLatency)
+	registry.MustRegister(QueryCoordTaskNum)
 	registry.MustRegister(QueryCoordNumQueryNodes)
 }

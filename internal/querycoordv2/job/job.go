@@ -25,6 +25,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
@@ -227,6 +228,7 @@ func (job *LoadCollectionJob) Execute() error {
 		return utils.WrapError(msg, err)
 	}
 
+	metrics.QueryCoordNumCollections.WithLabelValues().Inc()
 	return nil
 }
 
@@ -285,6 +287,7 @@ func (job *ReleaseCollectionJob) Execute() error {
 
 	job.targetMgr.RemoveCollection(req.GetCollectionID())
 	waitCollectionReleased(job.dist, req.GetCollectionID())
+	metrics.QueryCoordNumCollections.WithLabelValues().Dec()
 	return nil
 }
 
@@ -422,6 +425,7 @@ func (job *LoadPartitionJob) Execute() error {
 		return utils.WrapError(msg, err)
 	}
 
+	metrics.QueryCoordNumCollections.WithLabelValues().Inc()
 	return nil
 }
 
@@ -510,5 +514,6 @@ func (job *ReleasePartitionJob) Execute() error {
 		job.targetMgr.RemovePartition(req.GetCollectionID(), toRelease...)
 		waitCollectionReleased(job.dist, req.GetCollectionID(), toRelease...)
 	}
+	metrics.QueryCoordNumCollections.WithLabelValues().Dec()
 	return nil
 }
