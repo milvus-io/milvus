@@ -114,7 +114,7 @@ func newTimeTickSync(ctx context.Context, sourceID int64, factory msgstream.Fact
 	// recover physical channels for all collections
 	for collID, chanNames := range chanMap {
 		dmlChannels.addChannels(chanNames...)
-		log.Debug("recover physical channels", zap.Int64("collID", collID), zap.Strings("physical channels", chanNames))
+		log.Info("recover physical channels", zap.Int64("collID", collID), zap.Strings("physical channels", chanNames))
 	}
 
 	return &timetickSync{
@@ -208,7 +208,7 @@ func (t *timetickSync) addSession(sess *sessionutil.Session) {
 	t.lock.Lock()
 	defer t.lock.Unlock()
 	t.sess2ChanTsMap[sess.ServerID] = nil
-	log.Debug("Add session for timeticksync", zap.Int64("serverID", sess.ServerID))
+	log.Info("Add session for timeticksync", zap.Int64("serverID", sess.ServerID))
 }
 
 func (t *timetickSync) delSession(sess *sessionutil.Session) {
@@ -216,7 +216,7 @@ func (t *timetickSync) delSession(sess *sessionutil.Session) {
 	defer t.lock.Unlock()
 	if _, ok := t.sess2ChanTsMap[sess.ServerID]; ok {
 		delete(t.sess2ChanTsMap, sess.ServerID)
-		log.Debug("Remove session from timeticksync", zap.Int64("serverID", sess.ServerID))
+		log.Info("Remove session from timeticksync", zap.Int64("serverID", sess.ServerID))
 		t.sendToChannel()
 	}
 }
@@ -228,7 +228,7 @@ func (t *timetickSync) initSessions(sess []*sessionutil.Session) {
 	t.sess2ChanTsMap[t.sourceID] = nil
 	for _, s := range sess {
 		t.sess2ChanTsMap[s.ServerID] = nil
-		log.Debug("Init proxy sessions for timeticksync", zap.Int64("serverID", s.ServerID))
+		log.Info("Init proxy sessions for timeticksync", zap.Int64("serverID", s.ServerID))
 	}
 }
 
@@ -246,11 +246,11 @@ func (t *timetickSync) startWatch(wg *sync.WaitGroup) {
 	for {
 		select {
 		case <-t.ctx.Done():
-			log.Debug("rootcoord context done", zap.Error(t.ctx.Err()))
+			log.Info("rootcoord context done", zap.Error(t.ctx.Err()))
 			return
 		case sessTimetick, ok := <-t.sendChan:
 			if !ok {
-				log.Debug("timetickSync sendChan closed")
+				log.Info("timetickSync sendChan closed")
 				return
 			}
 			if enableTtChecker {
