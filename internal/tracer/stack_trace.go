@@ -14,26 +14,39 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package datanode
+package tracer
 
-import "github.com/milvus-io/milvus/internal/util/typeutil"
-
-type (
-	// UniqueID is type int64
-	UniqueID = typeutil.UniqueID
-
-	// Timestamp is type uint64
-	Timestamp = typeutil.Timestamp
-
-	// IntPrimaryKey is type int64
-	IntPrimaryKey = typeutil.IntPrimaryKey
-
-	// DSL is type string
-	DSL = string
+import (
+	"fmt"
+	"runtime"
 )
 
-// TimeRange is a range of timestamp contains the min-timestamp and max-timestamp
-type TimeRange struct {
-	timestampMin Timestamp
-	timestampMax Timestamp
+const (
+	numFuncsInStack = 10
+	frameNumToSkip  = 2
+)
+
+// StackTraceMsg returns the stack information, which numFuncs means how many functions do you want to show in the stack
+// information.
+func StackTraceMsg(numFuncs uint) string {
+	pc := make([]uintptr, numFuncs)
+	n := runtime.Callers(frameNumToSkip, pc)
+	frames := runtime.CallersFrames(pc[:n])
+
+	ret := ""
+
+	for {
+		frame, more := frames.Next()
+		ret += fmt.Sprintf("%s:%d %s\n", frame.File, frame.Line, frame.Function)
+		if !more {
+			break
+		}
+	}
+
+	return ret
+}
+
+// StackTrace returns the stack trace information.
+func StackTrace() string {
+	return StackTraceMsg(numFuncsInStack)
 }

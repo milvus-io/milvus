@@ -18,7 +18,6 @@ package components
 
 import (
 	"context"
-	"io"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
@@ -27,7 +26,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 
-	"github.com/opentracing/opentracing-go"
 	"go.uber.org/zap"
 )
 
@@ -35,9 +33,6 @@ import (
 type RootCoord struct {
 	ctx context.Context
 	svr *rc.Server
-
-	tracer opentracing.Tracer
-	closer io.Closer
 }
 
 // NewRootCoord creates a new RoorCoord

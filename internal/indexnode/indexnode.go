@@ -28,7 +28,6 @@ import "C"
 import (
 	"context"
 	"errors"
-	"io"
 	"math/rand"
 	"os"
 	"path"
@@ -50,7 +49,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
@@ -92,8 +90,6 @@ type IndexNode struct {
 
 	etcdCli *clientv3.Client
 	address string
-
-	closer io.Closer
 
 	initOnce  sync.Once
 	stateLock sync.Mutex
@@ -195,7 +191,6 @@ func (i *IndexNode) Init() error {
 		}
 
 		log.Info("IndexNode NewMinIOKV succeeded")
-		i.closer = trace.InitTracing("index_node")
 
 		i.initKnowhere()
 	})

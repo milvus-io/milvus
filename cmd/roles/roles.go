@@ -26,6 +26,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/tracer"
+
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/cmd/components"
@@ -40,7 +42,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	_ "github.com/milvus-io/milvus/internal/util/symbolizer" // support symbolizer and crash dump
-	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -67,6 +68,7 @@ type component interface {
 
 func runComponent[T component](ctx context.Context,
 	localMsg bool,
+	runWg *sync.WaitGroup,
 	creator func(context.Context, dependency.Factory) (T, error),
 	metricRegister func(*prometheus.Registry)) T {
 	var role T
@@ -87,6 +89,7 @@ func runComponent[T component](ctx context.Context,
 		}
 		wg.Done()
 		_ = role.Run()
+		runWg.Done()
 	}()
 	wg.Wait()
 
@@ -122,36 +125,44 @@ func (mr *MilvusRoles) printLDPreLoad() {
 	}
 }
 
-func (mr *MilvusRoles) runRootCoord(ctx context.Context, localMsg bool) *components.RootCoord {
-	return runComponent(ctx, localMsg, components.NewRootCoord, metrics.RegisterRootCoord)
+func (mr *MilvusRoles) runRootCoord(ctx context.Context, localMsg bool, wg *sync.WaitGroup) *components.RootCoord {
+	wg.Add(1)
+	return runComponent(ctx, localMsg, wg, components.NewRootCoord, metrics.RegisterRootCoord)
 }
 
-func (mr *MilvusRoles) runProxy(ctx context.Context, localMsg bool) *components.Proxy {
-	return runComponent(ctx, localMsg, components.NewProxy, metrics.RegisterProxy)
+func (mr *MilvusRoles) runProxy(ctx context.Context, localMsg bool, wg *sync.WaitGroup) *components.Proxy {
+	wg.Add(1)
+	return runComponent(ctx, localMsg, wg, components.NewProxy, metrics.RegisterProxy)
 }
 
-func (mr *MilvusRoles) runQueryCoord(ctx context.Context, localMsg bool) *components.QueryCoord {
-	return runComponent(ctx, localMsg, components.NewQueryCoord, metrics.RegisterQueryCoord)
+func (mr *MilvusRoles) runQueryCoord(ctx context.Context, localMsg bool, wg *sync.WaitGroup) *components.QueryCoord {
+	wg.Add(1)
+	return runComponent(ctx, localMsg, wg, components.NewQueryCoord, metrics.RegisterQueryCoord)
 }
 
-func (mr *MilvusRoles) runQueryNode(ctx context.Context, localMsg bool) *components.QueryNode {
-	return runComponent(ctx, localMsg, components.NewQueryNode, metrics.RegisterQueryNode)
+func (mr *MilvusRoles) runQueryNode(ctx context.Context, localMsg bool, wg *sync.WaitGroup) *components.QueryNode {
+	wg.Add(1)
+	return runComponent(ctx, localMsg, wg, components.NewQueryNode, metrics.RegisterQueryNode)
 }
 
-func (mr *MilvusRoles) runDataCoord(ctx context.Context, localMsg bool) *components.DataCoord {
-	return runComponent(ctx, localMsg, components.NewDataCoord, metrics.RegisterDataCoord)
+func (mr *MilvusRoles) runDataCoord(ctx context.Context, localMsg bool, wg *sync.WaitGroup) *components.DataCoord {
+	wg.Add(1)
+	return runComponent(ctx, localMsg, wg, components.NewDataCoord, metrics.RegisterDataCoord)
 }
 
-func (mr *MilvusRoles) runDataNode(ctx context.Context, localMsg bool) *components.DataNode {
-	return runComponent(ctx, localMsg, components.NewDataNode, metrics.RegisterDataNode)
+func (mr *MilvusRoles) runDataNode(ctx context.Context, localMsg bool, wg *sync.WaitGroup) *components.DataNode {
+	wg.Add(1)
+	return runComponent(ctx, localMsg, wg, components.NewDataNode, metrics.RegisterDataNode)
 }
 
-func (mr *MilvusRoles) runIndexCoord(ctx context.Context, localMsg bool) *components.IndexCoord {
-	return runComponent(ctx, localMsg, components.NewIndexCoord, func(registry *prometheus.Registry) {})
+func (mr *MilvusRoles) runIndexCoord(ctx context.Context, localMsg bool, wg *sync.WaitGroup) *components.IndexCoord {
+	wg.Add(1)
+	return runComponent(ctx, localMsg, wg, components.NewIndexCoord, func(registry *prometheus.Registry) {})
 }
 
-func (mr *MilvusRoles) runIndexNode(ctx context.Context, localMsg bool) *components.IndexNode {
-	return runComponent(ctx, localMsg, components.NewIndexNode, metrics.RegisterIndexNode)
+func (mr *MilvusRoles) runIndexNode(ctx context.Context, localMsg bool, wg *sync.WaitGroup) *components.IndexNode {
+	wg.Add(1)
+	return runComponent(ctx, localMsg, wg, components.NewIndexNode, metrics.RegisterIndexNode)
 }
 
 func (mr *MilvusRoles) setupLogger() {
@@ -209,6 +220,7 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 				params.EtcdCfg.EtcdLogLevel.GetValue())
 			defer etcd.StopEtcdServer()
 		}
+		paramtable.SetRole(typeutil.StandaloneRole)
 	} else {
 		if err := os.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.ClusterDeployMode); err != nil {
 			log.Error("Failed to set deploy mode: ", zap.Error(err))
@@ -216,16 +228,10 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 		paramtable.Init()
 	}
 
-	if os.Getenv(metricsinfo.DeployModeEnvKey) == metricsinfo.StandaloneDeployMode {
-		closer := trace.InitTracing("standalone")
-		if closer != nil {
-			defer closer.Close()
-		}
-	}
-
 	var rc *components.RootCoord
+	var wg sync.WaitGroup
 	if mr.EnableRootCoord {
-		rc = mr.runRootCoord(ctx, local)
+		rc = mr.runRootCoord(ctx, local, &wg)
 		if rc != nil {
 			defer rc.Stop()
 		}
@@ -233,8 +239,7 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 
 	var pn *components.Proxy
 	if mr.EnableProxy {
-		pctx := log.WithModule(ctx, "Proxy")
-		pn = mr.runProxy(pctx, local)
+		pn = mr.runProxy(ctx, local, &wg)
 		if pn != nil {
 			defer pn.Stop()
 		}
@@ -242,7 +247,7 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 
 	var qs *components.QueryCoord
 	if mr.EnableQueryCoord {
-		qs = mr.runQueryCoord(ctx, local)
+		qs = mr.runQueryCoord(ctx, local, &wg)
 		if qs != nil {
 			defer qs.Stop()
 		}
@@ -250,7 +255,7 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 
 	var qn *components.QueryNode
 	if mr.EnableQueryNode {
-		qn = mr.runQueryNode(ctx, local)
+		qn = mr.runQueryNode(ctx, local, &wg)
 		if qn != nil {
 			defer qn.Stop()
 		}
@@ -258,7 +263,7 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 
 	var ds *components.DataCoord
 	if mr.EnableDataCoord {
-		ds = mr.runDataCoord(ctx, local)
+		ds = mr.runDataCoord(ctx, local, &wg)
 		if ds != nil {
 			defer ds.Stop()
 		}
@@ -266,7 +271,7 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 
 	var dn *components.DataNode
 	if mr.EnableDataNode {
-		dn = mr.runDataNode(ctx, local)
+		dn = mr.runDataNode(ctx, local, &wg)
 		if dn != nil {
 			defer dn.Stop()
 		}
@@ -274,7 +279,7 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 
 	var is *components.IndexCoord
 	if mr.EnableIndexCoord {
-		is = mr.runIndexCoord(ctx, local)
+		is = mr.runIndexCoord(ctx, local, &wg)
 		if is != nil {
 			defer is.Stop()
 		}
@@ -282,14 +287,16 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 
 	var in *components.IndexNode
 	if mr.EnableIndexNode {
-		in = mr.runIndexNode(ctx, local)
+		in = mr.runIndexNode(ctx, local, &wg)
 		if in != nil {
 			defer in.Stop()
 		}
 	}
 
-	mr.setupLogger()
+	wg.Wait()
 
+	mr.setupLogger()
+	tracer.Init()
 	metrics.Register(Registry)
 	management.ServeHTTP()
 

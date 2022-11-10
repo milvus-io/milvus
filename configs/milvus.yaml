@@ -523,3 +523,15 @@ quotaAndLimits:
       maxReadResultRate: -1 # MB/s, default no limit
     # coolOffSpeed is the speed of search&query rates cool off.
     coolOffSpeed: 0.9 # (0, 1]
+
+trace:
+  # trace exporter type, default is empty,
+  # optional values: ['stdout', 'jaeger']
+  exporter: 'stdout'
+  # fraction of traceID based sampler,
+  # optional values: [0, 1]
+  # Fractions >= 1 will always sample. Fractions < 0 are treated as zero.
+  sampleFraction: 0
+  # when exporter is jaeger should set the jaeger's URL
+  jaeger:
+    url: ''

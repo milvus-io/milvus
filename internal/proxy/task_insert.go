@@ -14,7 +14,8 @@ import (
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
-	"github.com/milvus-io/milvus/internal/util/trace"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 )
 
@@ -101,8 +102,8 @@ func (it *insertTask) OnEnqueue() error {
 }
 
 func (it *insertTask) PreExecute(ctx context.Context) error {
-	sp, ctx := trace.StartSpanFromContextWithOperationName(it.ctx, "Proxy-Insert-PreExecute")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Insert-PreExecute")
+	defer sp.End()
 
 	it.result = &milvuspb.MutationResult{
 		Status: &commonpb.Status{
@@ -192,8 +193,8 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 }
 
 func (it *insertTask) Execute(ctx context.Context) error {
-	sp, ctx := trace.StartSpanFromContextWithOperationName(it.ctx, "Proxy-Insert-Execute")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Insert-PreExecute")
+	defer sp.End()
 
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute insert %d", it.ID()))
 	defer tr.Elapse("insert execute done")

@@ -22,7 +22,8 @@ import (
 	"strconv"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/opentracing/opentracing-go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -32,7 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
-	"github.com/milvus-io/milvus/internal/util/trace"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 // filterDmNode is one of the nodes in query node flow graph
@@ -64,15 +65,15 @@ func (fdmNode *filterDmNode) IsValidInMsg(in []Msg) bool {
 func (fdmNode *filterDmNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	msgStreamMsg := in[0].(*MsgStreamMsg)
 
-	var spans []opentracing.Span
+	var spans []trace.Span
 	for _, msg := range msgStreamMsg.TsMessages() {
-		sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
+		ctx, sp := otel.Tracer(typeutil.QueryNodeRole).Start(msg.TraceCtx(), "Filter_Node")
 		spans = append(spans, sp)
 		msg.SetTraceCtx(ctx)
 	}
 	defer func() {
 		for _, sp := range spans {
-			sp.Finish()
+			sp.End()
 		}
 	}()
 
@@ -98,7 +99,7 @@ func (fdmNode *filterDmNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	}
 
 	for i, msg := range msgStreamMsg.TsMessages() {
-		traceID, _, _ := trace.InfoFromSpan(spans[i])
+		traceID := spans[i].SpanContext().TraceID().String()
 		log.Debug("Filter invalid message in QueryNode", zap.String("traceID", traceID))
 		switch msg.Type() {
 		case commonpb.MsgType_Insert:
@@ -152,9 +153,9 @@ func (fdmNode *filterDmNode) filterInvalidDeleteMessage(msg *msgstream.DeleteMsg
 		return nil, nil
 	}
 
-	sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(msg.TraceCtx(), "Filter-Delete-Message")
 	msg.SetTraceCtx(ctx)
-	defer sp.Finish()
+	defer sp.End()
 
 	if msg.CollectionID != fdmNode.collectionID {
 		// filter out msg which not belongs to the current collection
@@ -185,9 +186,9 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 		return nil, nil
 	}
 
-	sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(msg.TraceCtx(), "Filter-Insert-Message")
 	msg.SetTraceCtx(ctx)
-	defer sp.Finish()
+	defer sp.End()
 
 	// check if the collection from message is target collection
 	if msg.CollectionID != fdmNode.collectionID {

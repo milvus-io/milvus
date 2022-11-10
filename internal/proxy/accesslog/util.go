@@ -25,7 +25,7 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
-	"github.com/milvus-io/milvus/internal/util/trace"
+	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -76,11 +76,8 @@ func getTraceID(ctx context.Context) (id string, ok bool) {
 		return meta.Get(clientRequestIDKey)[0], true
 	}
 
-	traceID, _, ok := trace.InfoFromContext(ctx)
-	if ok {
-		return traceID, true
-	}
-	return "", false
+	traceID := trace.SpanFromContext(ctx).SpanContext().TraceID()
+	return traceID.String(), traceID.IsValid()
 }
 
 func getResponseSize(resq interface{}) (int, bool) {

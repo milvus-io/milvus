@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynode"
 
 	"github.com/golang/protobuf/proto"
+	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -25,7 +26,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
-	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 
@@ -259,8 +259,8 @@ func getNq(req *milvuspb.SearchRequest) (int64, error) {
 }
 
 func (t *searchTask) PreExecute(ctx context.Context) error {
-	sp, ctx := trace.StartSpanFromContextWithOperationName(t.TraceCtx(), "Proxy-Search-PreExecute")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Search-PreExecute")
+	defer sp.End()
 
 	if t.searchShardPolicy == nil {
 		t.searchShardPolicy = mergeRoundRobinPolicy
@@ -386,8 +386,8 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 }
 
 func (t *searchTask) Execute(ctx context.Context) error {
-	sp, ctx := trace.StartSpanFromContextWithOperationName(t.TraceCtx(), "Proxy-Search-Execute")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Search-Execute")
+	defer sp.End()
 	log := log.Ctx(ctx)
 
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute search %d", t.ID()))
@@ -424,8 +424,8 @@ func (t *searchTask) Execute(ctx context.Context) error {
 }
 
 func (t *searchTask) PostExecute(ctx context.Context) error {
-	sp, ctx := trace.StartSpanFromContextWithOperationName(t.TraceCtx(), "Proxy-Search-PostExecute")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Search-PostExecute")
+	defer sp.End()
 
 	tr := timerecord.NewTimeRecorder("searchTask PostExecute")
 	defer func() {

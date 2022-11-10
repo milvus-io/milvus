@@ -19,15 +19,14 @@ package grpcquerynode
 import (
 	"context"
 	"fmt"
-	"io"
 	"net"
 	"strconv"
 	"sync"
 	"time"
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
-	ot "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
@@ -38,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	qn "github.com/milvus-io/milvus/internal/querynode"
+	"github.com/milvus-io/milvus/internal/tracer"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
@@ -45,7 +45,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/logutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
-	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -63,8 +62,6 @@ type Server struct {
 	grpcServer *grpc.Server
 
 	etcdCli *clientv3.Client
-
-	closer io.Closer
 }
 
 func (s *Server) GetStatistics(ctx context.Context, request *querypb.GetStatisticsRequest) (*internalpb.GetStatisticsResponse, error) {
@@ -93,9 +90,6 @@ func (s *Server) init() error {
 		paramtable.Get().Save(Params.Port.Key, fmt.Sprintf("%d", funcutil.GetAvailablePort()))
 		log.Warn("QueryNode get available port when init", zap.Int("Port", Params.Port.GetAsInt()))
 	}
-
-	closer := trace.InitTracing(fmt.Sprintf("query_node ip: %s, port: %d", Params.IP, Params.Port.GetAsInt()))
-	s.closer = closer
 
 	log.Debug("QueryNode", zap.Int("port", Params.Port.GetAsInt()))
 
@@ -178,17 +172,17 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 		return
 	}
 
-	opts := trace.GetInterceptorOpts()
+	opts := tracer.GetInterceptorOpts()
 	s.grpcServer = grpc.NewServer(
 		grpc.KeepaliveEnforcementPolicy(kaep),
 		grpc.KeepaliveParams(kasp),
 		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize.GetAsInt()),
 		grpc.MaxSendMsgSize(Params.ServerMaxSendSize.GetAsInt()),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
-			ot.UnaryServerInterceptor(opts...),
+			otelgrpc.UnaryServerInterceptor(opts...),
 			logutil.UnaryTraceLoggerInterceptor)),
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
-			ot.StreamServerInterceptor(opts...),
+			otelgrpc.StreamServerInterceptor(opts...),
 			logutil.StreamTraceLoggerInterceptor)))
 	querypb.RegisterQueryNodeServer(s.grpcServer, s)
 
@@ -225,12 +219,6 @@ func (s *Server) Stop() error {
 	err := s.querynode.Stop()
 	if err != nil {
 		return err
-	}
-
-	if s.closer != nil {
-		if err := s.closer.Close(); err != nil {
-			return err
-		}
 	}
 	if s.etcdCli != nil {
 		defer s.etcdCli.Close()

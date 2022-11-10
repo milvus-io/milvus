@@ -54,6 +54,7 @@ type ComponentParam struct {
 	CommonCfg       commonConfig
 	QuotaConfig     quotaConfig
 	AutoIndexConfig autoIndexConfig
+	TraceCfg        traceConfig
 
 	RootCoordCfg  rootCoordConfig
 	ProxyCfg      proxyConfig
@@ -98,6 +99,7 @@ func (p *ComponentParam) Init() {
 	p.CommonCfg.init(&p.BaseTable)
 	p.QuotaConfig.init(&p.BaseTable)
 	p.AutoIndexConfig.init(&p.BaseTable)
+	p.TraceCfg.init(&p.BaseTable)
 
 	p.RootCoordCfg.init(&p.BaseTable)
 	p.ProxyCfg.init(&p.BaseTable)
@@ -537,6 +539,33 @@ func (p *commonConfig) init(base *BaseTable) {
 	}
 	p.SessionRetryTimes.Init(base.mgr)
 
+}
+
+type traceConfig struct {
+	Exporter       ParamItem `refreshable:"false"`
+	SampleFraction ParamItem `refreshable:"false"`
+	JaegerURL      ParamItem `refreshable:"false"`
+}
+
+func (t *traceConfig) init(base *BaseTable) {
+	t.Exporter = ParamItem{
+		Key:     "trace.exporter",
+		Version: "2.3.0",
+	}
+	t.Exporter.Init(base.mgr)
+
+	t.SampleFraction = ParamItem{
+		Key:          "trace.sampleFraction",
+		Version:      "2.3.0",
+		DefaultValue: "1",
+	}
+	t.SampleFraction.Init(base.mgr)
+
+	t.JaegerURL = ParamItem{
+		Key:     "trace.jaeger.url",
+		Version: "2.3.0",
+	}
+	t.JaegerURL.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

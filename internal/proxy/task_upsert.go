@@ -32,8 +32,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
-	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 )
 
@@ -237,8 +237,8 @@ func (it *upsertTask) deletePreExecute(ctx context.Context) error {
 }
 
 func (it *upsertTask) PreExecute(ctx context.Context) error {
-	sp, ctx := trace.StartSpanFromContextWithOperationName(it.ctx, "Proxy-Upsert-PreExecute")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Upsert-PreExecute")
+	defer sp.End()
 	log := log.Ctx(ctx).With(zap.String("collectionName", it.req.CollectionName))
 
 	it.req.Base = commonpbutil.NewMsgBase(
@@ -463,8 +463,8 @@ func (it *upsertTask) deleteExecute(ctx context.Context, msgPack *msgstream.MsgP
 }
 
 func (it *upsertTask) Execute(ctx context.Context) (err error) {
-	sp, ctx := trace.StartSpanFromContextWithOperationName(it.ctx, "Proxy-Upsert-Execute")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Upsert-Execute")
+	defer sp.End()
 	log := log.Ctx(ctx).With(zap.String("collectionName", it.req.CollectionName))
 
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute upsert %d", it.ID()))

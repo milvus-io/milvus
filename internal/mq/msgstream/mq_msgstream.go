@@ -33,9 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/retry"
-	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/opentracing/opentracing-go"
 )
 
 var _ MsgStream = (*mqMsgStream)(nil)
@@ -197,7 +195,6 @@ func (ms *mqMsgStream) Close() {
 	}
 
 	ms.client.Close()
-
 	close(ms.receiveBuf)
 
 }
@@ -258,7 +255,7 @@ func (ms *mqMsgStream) Produce(msgPack *MsgPack) error {
 	for k, v := range result {
 		channel := ms.producerChannels[k]
 		for i := 0; i < len(v.Msgs); i++ {
-			sp, spanCtx := MsgSpanFromCtx(v.Msgs[i].TraceCtx(), v.Msgs[i])
+			spanCtx, sp := MsgSpanFromCtx(v.Msgs[i].TraceCtx(), v.Msgs[i])
 
 			mb, err := v.Msgs[i].Marshal(v.Msgs[i])
 			if err != nil {
@@ -272,34 +269,31 @@ func (ms *mqMsgStream) Produce(msgPack *MsgPack) error {
 
 			msg := &mqwrapper.ProducerMessage{Payload: m, Properties: map[string]string{}}
 
-			trace.InjectContextToMsgProperties(sp.Context(), msg.Properties)
+			InjectCtx(spanCtx, msg.Properties)
 
 			ms.producerLock.Lock()
-			if _, err := ms.producers[channel].Send(
-				spanCtx,
-				msg,
-			); err != nil {
+			if _, err := ms.producers[channel].Send(spanCtx, msg); err != nil {
 				ms.producerLock.Unlock()
-				trace.LogError(sp, err)
-				sp.Finish()
+				sp.RecordError(err)
+				sp.End()
 				return err
 			}
-			sp.Finish()
+			sp.End()
 			ms.producerLock.Unlock()
 		}
 	}
 	return nil
 }
 
-// Broadcast put msgPack to all producer in current msgstream and returned message id
-// which ignores repackFunc logic
+// BroadcastMark broadcast msg pack to all producers and returns corresponding msg id
+// the returned message id serves as marking
 func (ms *mqMsgStream) Broadcast(msgPack *MsgPack) (map[string][]MessageID, error) {
 	ids := make(map[string][]MessageID)
 	if msgPack == nil || len(msgPack.Msgs) <= 0 {
 		return ids, errors.New("empty msgs")
 	}
 	for _, v := range msgPack.Msgs {
-		sp, spanCtx := MsgSpanFromCtx(v.TraceCtx(), v)
+		spanCtx, sp := MsgSpanFromCtx(v.TraceCtx(), v)
 
 		mb, err := v.Marshal(v)
 		if err != nil {
@@ -313,21 +307,21 @@ func (ms *mqMsgStream) Broadcast(msgPack *MsgPack) (map[string][]MessageID, erro
 
 		msg := &mqwrapper.ProducerMessage{Payload: m, Properties: map[string]string{}}
 
-		trace.InjectContextToMsgProperties(sp.Context(), msg.Properties)
+		InjectCtx(spanCtx, msg.Properties)
 
 		ms.producerLock.Lock()
 		for channel, producer := range ms.producers {
 			id, err := producer.Send(spanCtx, msg)
 			if err != nil {
 				ms.producerLock.Unlock()
-				trace.LogError(sp, err)
-				sp.Finish()
+				sp.RecordError(err)
+				sp.End()
 				return ids, err
 			}
 			ids[channel] = append(ids[channel], id)
 		}
 		ms.producerLock.Unlock()
-		sp.Finish()
+		sp.End()
 	}
 	return ids, nil
 }
@@ -391,9 +385,9 @@ func (ms *mqMsgStream) receiveMsg(consumer mqwrapper.Consumer) {
 				Timestamp:   tsMsg.BeginTs(),
 			})
 
-			sp, ok := ExtractFromMsgProperties(tsMsg, msg.Properties())
-			if ok {
-				tsMsg.SetTraceCtx(opentracing.ContextWithSpan(context.Background(), sp))
+			ctx, sp := ExtractCtx(tsMsg, msg.Properties())
+			if ctx != nil {
+				tsMsg.SetTraceCtx(ctx)
 			}
 
 			msgPack := MsgPack{
@@ -407,7 +401,7 @@ func (ms *mqMsgStream) receiveMsg(consumer mqwrapper.Consumer) {
 				return
 			}
 
-			sp.Finish()
+			sp.End()
 		}
 	}
 }
@@ -694,9 +688,9 @@ func (ms *MqTtMsgStream) consumeToTtMsg(consumer mqwrapper.Consumer) {
 				continue
 			}
 
-			sp, ok := ExtractFromMsgProperties(tsMsg, msg.Properties())
-			if ok {
-				tsMsg.SetTraceCtx(opentracing.ContextWithSpan(context.Background(), sp))
+			ctx, sp := ExtractCtx(tsMsg, msg.Properties())
+			if ctx != nil {
+				tsMsg.SetTraceCtx(ctx)
 			}
 
 			ms.chanMsgBufMutex.Lock()
@@ -707,10 +701,10 @@ func (ms *MqTtMsgStream) consumeToTtMsg(consumer mqwrapper.Consumer) {
 				ms.chanTtMsgTimeMutex.Lock()
 				ms.chanTtMsgTime[consumer] = tsMsg.(*TimeTickMsg).Base.Timestamp
 				ms.chanTtMsgTimeMutex.Unlock()
-				sp.Finish()
+				sp.End()
 				return
 			}
-			sp.Finish()
+			sp.End()
 		}
 	}
 }

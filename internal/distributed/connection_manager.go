@@ -26,16 +26,16 @@ import (
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_retry "github.com/grpc-ecosystem/go-grpc-middleware/retry"
-	grpc_opentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/internal/tracer"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 
@@ -374,8 +374,8 @@ func (bct *buildClientTask) Run() {
 	go func() {
 		defer bct.finish()
 		connectGrpcFunc := func() error {
-			opts := trace.GetInterceptorOpts()
-			log.Debug("Grpc connect ", zap.String("Address", bct.sess.Address))
+			opts := tracer.GetInterceptorOpts()
+			log.Debug("Grpc connect", zap.String("Address", bct.sess.Address))
 			conn, err := grpc.DialContext(bct.ctx, bct.sess.Address,
 				grpc.WithInsecure(), grpc.WithBlock(), grpc.WithTimeout(30*time.Second),
 				grpc.WithDisableRetry(),
@@ -385,7 +385,7 @@ func (bct *buildClientTask) Run() {
 							grpc_retry.WithMax(3),
 							grpc_retry.WithCodes(codes.Aborted, codes.Unavailable),
 						),
-						grpc_opentracing.UnaryClientInterceptor(opts...),
+						otelgrpc.UnaryClientInterceptor(opts...),
 					)),
 				grpc.WithStreamInterceptor(
 					grpc_middleware.ChainStreamClient(
@@ -393,7 +393,7 @@ func (bct *buildClientTask) Run() {
 							grpc_retry.WithMax(3),
 							grpc_retry.WithCodes(codes.Aborted, codes.Unavailable),
 						),
-						grpc_opentracing.StreamClientInterceptor(opts...),
+						otelgrpc.StreamClientInterceptor(opts...),
 					)),
 			)
 			if err != nil {

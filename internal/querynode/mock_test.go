@@ -1196,6 +1196,7 @@ func genSimpleDeleteID(dataType schemapb.DataType, numRows int) *schemapb.IDs {
 
 func genMsgStreamBaseMsg() msgstream.BaseMsg {
 	return msgstream.BaseMsg{
+		Ctx:            context.Background(),
 		BeginTimestamp: 0,
 		EndTimestamp:   0,
 		HashValues:     []uint32{0},

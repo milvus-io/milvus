@@ -26,7 +26,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
-	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
@@ -35,8 +34,6 @@ import (
 
 func TestAccessLogger_NotEnable(t *testing.T) {
 	var Params paramtable.ComponentParam
-	closer := trace.InitTracing("test-trace")
-	defer closer.Close()
 
 	Params.Init()
 	Params.Save(Params.ProxyCfg.AccessLog.Enable.Key, "false")
@@ -68,8 +65,6 @@ func TestAccessLogger_NotEnable(t *testing.T) {
 
 func TestAccessLogger_Basic(t *testing.T) {
 	var Params paramtable.ComponentParam
-	closer := trace.InitTracing("test-trace")
-	defer closer.Close()
 
 	Params.Init()
 	testPath := "/tmp/accesstest"
@@ -103,8 +98,6 @@ func TestAccessLogger_Basic(t *testing.T) {
 
 func TestAccessLogger_Stdout(t *testing.T) {
 	var Params paramtable.ComponentParam
-	closer := trace.InitTracing("test-trace")
-	defer closer.Close()
 
 	Params.Init()
 	Params.Save(Params.ProxyCfg.AccessLog.Filename.Key, "")
@@ -135,8 +128,6 @@ func TestAccessLogger_Stdout(t *testing.T) {
 }
 func TestAccessLogger_WithMinio(t *testing.T) {
 	var Params paramtable.ComponentParam
-	closer := trace.InitTracing("test-trace")
-	defer closer.Close()
 
 	Params.Init()
 	testPath := "/tmp/accesstest"
@@ -181,8 +172,6 @@ func TestAccessLogger_WithMinio(t *testing.T) {
 
 func TestAccessLogger_Error(t *testing.T) {
 	var Params paramtable.ComponentParam
-	closer := trace.InitTracing("test-trace")
-	defer closer.Close()
 
 	Params.Init()
 	testPath := "/tmp/accesstest"

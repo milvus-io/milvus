@@ -23,9 +23,9 @@ import (
 	"sync/atomic"
 
 	"github.com/milvus-io/milvus/internal/util/timerecord"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/opentracing/opentracing-go"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -41,7 +41,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
-	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 )
 
@@ -129,15 +128,15 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 		return []Msg{}
 	}
 
-	var spans []opentracing.Span
+	var spans []trace.Span
 	for _, msg := range msMsg.TsMessages() {
-		sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
+		ctx, sp := startTracer(msg, "DDNode-Operate")
 		spans = append(spans, sp)
 		msg.SetTraceCtx(ctx)
 	}
 	defer func() {
 		for _, sp := range spans {
-			sp.Finish()
+			sp.End()
 		}
 	}()
 

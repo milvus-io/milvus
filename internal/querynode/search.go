@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"sync"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -29,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 // searchOnSegments performs search on listed segments
@@ -55,6 +58,11 @@ func searchSegments(ctx context.Context, replica ReplicaInterface, segType segme
 		wg.Add(1)
 		go func(segID UniqueID, i int) {
 			defer wg.Done()
+			ctx, span := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "Search-Segment")
+			span.SetAttributes(attribute.String("segmentType", searchLabel))
+			span.SetAttributes(attribute.Int64("segmentID", segID))
+			defer span.End()
+
 			seg, err := replica.getSegmentByID(segID, segType)
 			if err != nil {
 				if errors.Is(err, ErrSegmentNotFound) {

@@ -8,6 +8,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"go.opentelemetry.io/otel"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/log"
@@ -19,8 +20,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
-	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
 )
 
@@ -102,8 +103,8 @@ func (g *getStatisticsTask) PreExecute(ctx context.Context) error {
 	// g.TravelTimestamp = g.request.GetTravelTimestamp()
 	g.GuaranteeTimestamp = g.request.GetGuaranteeTimestamp()
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(g.TraceCtx(), "Proxy-GetStatistics-PreExecute")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetStatistics-PreExecute")
+	defer sp.End()
 
 	if g.statisticShardPolicy == nil {
 		g.statisticShardPolicy = mergeRoundRobinPolicy
@@ -170,8 +171,8 @@ func (g *getStatisticsTask) PreExecute(ctx context.Context) error {
 }
 
 func (g *getStatisticsTask) Execute(ctx context.Context) error {
-	sp, ctx := trace.StartSpanFromContextWithOperationName(g.TraceCtx(), "Proxy-GetStatistics-Execute")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetStatistics-Execute")
+	defer sp.End()
 	if g.fromQueryNode {
 		// if request get statistics of collection which is full loaded into query node
 		// then we need not pass partition ids params
@@ -195,8 +196,8 @@ func (g *getStatisticsTask) Execute(ctx context.Context) error {
 }
 
 func (g *getStatisticsTask) PostExecute(ctx context.Context) error {
-	sp, _ := trace.StartSpanFromContextWithOperationName(g.TraceCtx(), "Proxy-GetStatistic-PostExecute")
-	defer sp.Finish()
+	_, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetStatistic-PostExecute")
+	defer sp.End()
 	tr := timerecord.NewTimeRecorder("getStatisticTask PostExecute")
 	defer func() {
 		tr.Elapse("done")

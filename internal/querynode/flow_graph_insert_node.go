@@ -27,7 +27,7 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/opentracing/opentracing-go"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
@@ -38,7 +38,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
-	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -87,15 +86,16 @@ func (iNode *insertNode) IsValidInMsg(in []Msg) bool {
 func (iNode *insertNode) Operate(in []Msg) []Msg {
 	iMsg := in[0].(*insertMsg)
 
-	var spans []opentracing.Span
+	var spans []trace.Span
 	for _, msg := range iMsg.insertMessages {
-		sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
+		ctx := msg.TraceCtx()
+		sp := trace.SpanFromContext(msg.TraceCtx())
 		spans = append(spans, sp)
 		msg.SetTraceCtx(ctx)
 	}
 	defer func() {
 		for _, sp := range spans {
-			sp.Finish()
+			sp.End()
 		}
 	}()
 
