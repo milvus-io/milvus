@@ -256,7 +256,7 @@ func (s *Server) initMeta() error {
 	}
 	metrics.QueryCoordNumCollections.WithLabelValues().Set(float64(len(s.meta.GetAll())))
 
-	err = s.meta.ReplicaManager.Recover()
+	err = s.meta.ReplicaManager.Recover(s.meta.CollectionManager.GetAll())
 	if err != nil {
 		log.Error("failed to recover replicas")
 		return err
