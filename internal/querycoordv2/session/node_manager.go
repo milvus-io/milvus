@@ -16,7 +16,11 @@
 
 package session
 
-import "sync"
+import (
+	"sync"
+
+	"github.com/milvus-io/milvus/internal/metrics"
+)
 
 type Manager interface {
 	Add(node *NodeInfo)
@@ -34,12 +38,14 @@ func (m *NodeManager) Add(node *NodeInfo) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.nodes[node.ID()] = node
+	metrics.QueryCoordNumQueryNodes.WithLabelValues().Set(float64(len(m.nodes)))
 }
 
 func (m *NodeManager) Remove(nodeID int64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.nodes, nodeID)
+	metrics.QueryCoordNumQueryNodes.WithLabelValues().Set(float64(len(m.nodes)))
 }
 
 func (m *NodeManager) Get(nodeID int64) *NodeInfo {

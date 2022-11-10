@@ -27,6 +27,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/samber/lo"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
@@ -251,6 +252,8 @@ func (s *Server) initMeta() error {
 		log.Error("failed to recover collections")
 		return err
 	}
+	metrics.QueryCoordNumCollections.WithLabelValues().Set(float64(len(s.meta.GetAll())))
+
 	err = s.meta.ReplicaManager.Recover()
 	if err != nil {
 		log.Error("failed to recover replicas")
