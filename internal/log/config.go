@@ -26,8 +26,6 @@ const (
 
 // FileLogConfig serializes file log related config in toml/json.
 type FileLogConfig struct {
-	// Log rootpath
-	RootPath string `toml:"rootpath" json:"rootpath"`
 	// Log filename, leave empty to disable file log.
 	Filename string `toml:"filename" json:"filename"`
 	// Max size for a single file, in MB.
@@ -79,7 +77,7 @@ type ZapProperties struct {
 }
 
 func newZapTextEncoder(cfg *Config) zapcore.Encoder {
-	return NewTextEncoder(cfg)
+	return NewTextEncoderByConfig(cfg)
 }
 
 func (cfg *Config) buildOptions(errSink zapcore.WriteSyncer) []zap.Option {

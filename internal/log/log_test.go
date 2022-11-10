@@ -83,7 +83,7 @@ func TestZapTextEncoder(t *testing.T) {
 
 	var buffer bytes.Buffer
 	writer := bufio.NewWriter(&buffer)
-	encoder := NewTextEncoder(conf)
+	encoder := NewTextEncoderByConfig(conf)
 	logger := zap.New(zapcore.NewCore(encoder, zapcore.AddSync(writer), zapcore.InfoLevel)).Sugar()
 
 	logger.Info("this is a message from zap")

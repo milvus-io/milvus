@@ -487,6 +487,25 @@ func (p *rootCoordConfig) init(base *BaseTable) {
 
 // /////////////////////////////////////////////////////////////////////////////
 // --- proxy ---
+type AccessLogConfig struct {
+	// if use access log
+	Enable bool
+	// if upload sealed access log file to minio
+	MinioEnable bool
+	// Log path
+	LocalPath string
+	// Log filename, leave empty to disable file log.
+	Filename string
+	// Max size for a single file, in MB.
+	MaxSize int
+	// Max time for single access log file in seconds
+	RotatedTime int64
+	// Maximum number of old log files to retain.
+	MaxBackups int
+	//File path in minIO
+	RemotePath string
+}
+
 type proxyConfig struct {
 	Base *BaseTable
 
@@ -505,6 +524,7 @@ type proxyConfig struct {
 	GinLogging               bool
 	MaxUserNum               int
 	MaxRoleNum               int
+	AccessLog                AccessLogConfig
 
 	// required from QueryCoord
 	SearchResultChannelNames   []string
@@ -535,6 +555,7 @@ func (p *proxyConfig) init(base *BaseTable) {
 	p.initMaxRoleNum()
 
 	p.initSoPath()
+	p.initAccessLogConfig()
 }
 
 // InitAlias initialize Alias member.
@@ -645,7 +666,38 @@ func (p *proxyConfig) initMaxRoleNum() {
 	p.MaxRoleNum = int(maxRoleNum)
 }
 
-// /////////////////////////////////////////////////////////////////////////////
+func (p *proxyConfig) initAccessLogConfig() {
+	enable := p.Base.ParseBool("proxy.accessLog.enable", true)
+	minioEnable := p.Base.ParseBool("proxy.accessLog.minioEnable", false)
+
+	p.AccessLog = AccessLogConfig{
+		Enable:      enable,
+		MinioEnable: minioEnable,
+	}
+
+	if enable {
+		p.initAccessLogFileConfig()
+	}
+
+	if minioEnable {
+		p.initAccessLogMinioConfig()
+	}
+}
+
+func (p *proxyConfig) initAccessLogFileConfig() {
+	//use os.TempDir() if localPath was empty
+	p.AccessLog.LocalPath = p.Base.LoadWithDefault("proxy.accessLog.localPath", "")
+	p.AccessLog.Filename = p.Base.LoadWithDefault("proxy.accessLog.filename", "milvus_access_log.log")
+	p.AccessLog.MaxSize = p.Base.ParseIntWithDefault("proxy.accessLog.maxSize", 64)
+	p.AccessLog.MaxBackups = p.Base.ParseIntWithDefault("proxy.accessLog.maxBackups", 8)
+	p.AccessLog.RotatedTime = p.Base.ParseInt64WithDefault("proxy.accessLog.rotatedTime", 3600)
+}
+
+func (p *proxyConfig) initAccessLogMinioConfig() {
+	p.AccessLog.RemotePath = p.Base.LoadWithDefault("proxy.accessLog.remotePath", "access_log/")
+}
+
+///////////////////////////////////////////////////////////////////////////////
 // --- querycoord ---
 type queryCoordConfig struct {
 	Base *BaseTable

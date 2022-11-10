@@ -105,9 +105,18 @@ type textEncoder struct {
 	reflectEnc *json.Encoder
 }
 
-// NewTextEncoder creates a fast, low-allocation Text encoder. The encoder
+func NewTextEncoder(encoderConfig *zapcore.EncoderConfig, spaced bool, disableErrorVerbose bool) zapcore.Encoder {
+	return &textEncoder{
+		EncoderConfig:       encoderConfig,
+		buf:                 _pool.Get(),
+		spaced:              spaced,
+		disableErrorVerbose: disableErrorVerbose,
+	}
+}
+
+// NewTextEncoderByConfig creates a fast, low-allocation Text encoder with config. The encoder
 // appropriately escapes all field keys and values.
-func NewTextEncoder(cfg *Config) zapcore.Encoder {
+func NewTextEncoderByConfig(cfg *Config) zapcore.Encoder {
 	cc := zapcore.EncoderConfig{
 		// Keys can be anything except the empty string.
 		TimeKey:        "time",
