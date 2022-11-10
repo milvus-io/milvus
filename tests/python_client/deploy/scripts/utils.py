@@ -209,7 +209,7 @@ def load_and_search(prefix, replicas=1):
         t0 = time.time()
         expr = "count in [2,4,6,8]"
         output_fields = ["count", "random_value"]
-        res = c.query(expr, output_fields, timeout=20)
+        res = c.query(expr, output_fields, timeout=120)
         sorted_res = sorted(res, key=lambda k: k['count'])
         for r in sorted_res:
             print(r)
