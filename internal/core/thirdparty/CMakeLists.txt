@@ -40,47 +40,6 @@ find_package( Threads REQUIRED )
 
 add_subdirectory( knowhere )
 
-# ****************************** Thirdparty googletest ***************************************
-if ( MILVUS_BUILD_TESTS)
-    add_subdirectory( gtest )
-    add_subdirectory( google_benchmark )
-endif()
-
-if ( MILVUS_BUILD_TESTS AND LINUX )
-    add_subdirectory( profiler )
-endif()
-
-
-# ****************************** Thirdparty yaml ***************************************
-add_subdirectory( yaml-cpp )
-
-# ****************************** Thirdparty opentracing ***************************************
-if ( MILVUS_WITH_OPENTRACING )
-    add_subdirectory( opentracing )
-
-endif()
-add_subdirectory( protobuf )
 add_subdirectory( boost_ext )
-add_subdirectory( arrow )
 add_subdirectory( rocksdb )
 
-# ******************************* Thirdparty aws sdk ********************************
-if ( LINUX AND BUILD_DISK_ANN STREQUAL "ON" )
-    add_subdirectory( aws_sdk )
-endif()
-
-# ******************************* Thirdparty marisa ********************************
-# TODO: support win.
-if ( LINUX OR APPLE)
-    add_subdirectory( marisa )
-endif()
-
-# ******************************* Thirdparty jemalloc ********************************
-if ( LINUX )
-    add_subdirectory( jemalloc )
-endif()
-
-# ******************************* Thirdparty rapidxml ********************************
-#if ( LINUX )
-#    add_subdirectory( rapidxml )
-#endif()

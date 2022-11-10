@@ -28,7 +28,7 @@ target_link_libraries(all_bench
         pthread
         )
 
-target_link_libraries(all_bench benchmark::benchmark_main)
+target_link_libraries(all_bench benchmark_main)
 
 add_executable(indexbuilder_bench ${indexbuilder_bench_srcs})
 target_link_libraries(indexbuilder_bench
@@ -41,4 +41,4 @@ target_link_libraries(indexbuilder_bench
         milvus_utils
         )
 
-target_link_libraries(indexbuilder_bench benchmark::benchmark_main)
+target_link_libraries(indexbuilder_bench benchmark_main)

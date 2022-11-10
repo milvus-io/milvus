@@ -48,14 +48,11 @@ add_library(milvus_storage SHARED ${STORAGE_FILES})
 
 find_package(Boost REQUIRED COMPONENTS filesystem)
 
-if(BUILD_DISK_ANN STREQUAL "ON")
-    target_link_libraries(milvus_storage PUBLIC milvus_common Boost::filesystem aws-cpp-sdk-s3 pthread)
-else()
-    target_link_libraries(milvus_storage PUBLIC milvus_common Boost::filesystem pthread)
-endif()
-
-if(NOT CMAKE_INSTALL_PREFIX)
-    set(CMAKE_INSTALL_PREFIX ${CMAKE_CURRENT_BINARY_DIR})
-endif()
+target_link_libraries(milvus_storage PUBLIC 
+        milvus_common 
+        Boost::filesystem 
+        pthread 
+        ${CONAN_LIBS}
+        )
 
 install(TARGETS milvus_storage DESTINATION "${CMAKE_INSTALL_LIBDIR}")

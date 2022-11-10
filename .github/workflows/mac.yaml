@@ -26,11 +26,11 @@ jobs:
   mac:
     name: Code Checker MacOS 12
     runs-on: macos-12
-    timeout-minutes: 60
+    timeout-minutes: 120
     steps:
       - name: Checkout
         uses: actions/checkout@v2
-      - name: "Generate CCache Hash"
+      - name: 'Generate CCache Hash'
         env:
           CORE_HASH: ${{ hashFiles( 'internal/core/**/*.cpp', 'internal/core/**/*.cc', 'internal/core/**/*.c', 'internal/core/**/*.h', 'internal/core/**/*.hpp', 'internal/core/**/CMakeLists.txt') }}
         run: |
@@ -40,10 +40,10 @@ jobs:
         uses: actions/cache@v3
         with:
           path: |
-            /tmp/thirdparty 
+            /tmp/thirdparty
           key: macos-thirdparty-${{ hashFiles('internal/core/thirdparty/**') }}
           restore-keys: macos-thirdparty-
-      - name: Mac Cache Cmake Build             
+      - name: Mac Cache Cmake Build
         uses: actions/cache@v3
         with:
           path: |
@@ -66,6 +66,12 @@ jobs:
           path: ~/go/pkg/mod
           key: macos-go-mod-${{ hashFiles('**/go.sum') }}
           restore-keys: macos-go-mod-
+      - name: Mac Cache Conan Packages
+        uses: pat-s/always-upload-cache@v3
+        with:
+          path: ~/.conan
+          key: macos-conan-${{ hashFiles('internal/core/conanfile.txt') }}
+          restore-keys: macos-conan-
       - name: Code Check
         env:
           CCACHE_DIR: /var/tmp/ccache
@@ -78,11 +84,11 @@ jobs:
           if [[ ! -d "/var/tmp/ccache" ]];then
             mkdir -p /var/tmp/ccache
           fi
-          brew install boost libomp ninja tbb openblas ccache
+          brew install boost libomp ninja tbb openblas ccache conan
           if [[ ! -d "/usr/local/opt/llvm" ]]; then
             ln -s /usr/local/opt/llvm@14 /usr/local/opt/llvm
           fi
-          make milvus && sh scripts/collect_arrow_dep.sh -f /tmp/thirdparty
+          make milvus
       - name: Upload Cmake log
         uses: actions/upload-artifact@v3
         if: ${{ failure() }}

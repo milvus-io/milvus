@@ -275,7 +275,7 @@ TEST(CApiTest, CPlan) {
 template <typename Message>
 std::vector<uint8_t>
 serialize(const Message* msg) {
-    auto l = msg->ByteSize();
+    auto l = msg->ByteSizeLong();
     std::vector<uint8_t> ret(l);
     auto ok = msg->SerializeToArray(ret.data(), l);
     assert(ok);

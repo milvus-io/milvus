@@ -34,11 +34,12 @@ services:
       - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${IMAGE_ARCH}-${OS_NAME}-go-mod:/go/pkg/mod:delegated
       - ${DOCKER_VOLUME_DIRECTORY:-.docker}/thirdparty:/tmp/thirdparty:delegated
       - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${IMAGE_ARCH}-${OS_NAME}-vscode-extensions:/home/milvus/.vscode-server/extensions:delegated
-    working_dir: "/go/src/github.com/milvus-io/milvus"
+      - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${IMAGE_ARCH}-${OS_NAME}-conan:/home/milvus/.conan:delegated
+    working_dir: '/go/src/github.com/milvus-io/milvus'
     depends_on:
-    - etcd
-    - minio
-    - pulsar
+      - etcd
+      - minio
+      - pulsar
     # Command
     command: &builder-command >
       /bin/bash -c "
@@ -53,7 +54,7 @@ services:
       - ETCD_QUOTA_BACKEND_BYTES=4294967296
       - ETCD_SNAPSHOT_COUNT=50000
     healthcheck:
-      test: ["CMD", "/opt/bitnami/scripts/etcd/healthcheck.sh"]
+      test: ['CMD', '/opt/bitnami/scripts/etcd/healthcheck.sh']
       interval: 30s
       timeout: 20s
       retries: 3
@@ -69,7 +70,7 @@ services:
       MINIO_SECRET_KEY: minioadmin
     command: minio server /minio_data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: ['CMD', 'curl', '-f', 'http://localhost:9000/minio/health/live']
       interval: 30s
       timeout: 20s
       retries: 3

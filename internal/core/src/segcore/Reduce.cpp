@@ -335,7 +335,7 @@ ReduceHelper::GetSearchResultDataSlice(int slice_index) {
     }
 
     // SearchResultData to blob
-    auto size = search_result_data->ByteSize();
+    auto size = search_result_data->ByteSizeLong();
     auto buffer = std::vector<char>(size);
     search_result_data->SerializePartialToArray(buffer.data(), size);
 

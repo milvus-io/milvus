@@ -8,6 +8,7 @@
 **/cmake-build-release/*
 **/cmake_build_release/*
 **/cmake_build/*
+**/CmakeFiles/*
 .cache
 
 internal/core/output/*
