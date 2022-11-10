@@ -27,7 +27,6 @@ import (
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
-	"go.uber.org/zap"
 )
 
 var (
@@ -111,18 +110,11 @@ func (controller *CheckerController) check(ctx context.Context) {
 		tasks = append(tasks, checker.Check(ctx)...)
 	}
 
-	added := 0
 	for _, task := range tasks {
 		err := controller.scheduler.Add(task)
 		if err != nil {
 			task.Cancel()
 			continue
-		}
-		added++
-		if added >= checkRoundTaskNumLimit {
-			log.Info("checkers have added too many tasks, truncate the subsequent tasks",
-				zap.Int("taskNum", len(tasks)),
-				zap.Int("taskNumLimit", checkRoundTaskNumLimit))
 		}
 	}
 }
