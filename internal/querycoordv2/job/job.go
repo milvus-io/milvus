@@ -183,8 +183,14 @@ func (job *LoadCollectionJob) Execute() error {
 		zap.Int64("collectionID", req.GetCollectionID()),
 	)
 
+	// Clear stale replicas
+	err := job.meta.ReplicaManager.RemoveCollection(req.GetCollectionID())
+	if err != nil {
+		log.Warn("failed to clear stale replicas", zap.Error(err))
+		return err
+	}
+
 	// Create replicas
-	// TODO(yah01): store replicas and collection atomically
 	replicas, err := utils.SpawnReplicas(job.meta.ReplicaManager,
 		job.nodeMgr,
 		req.GetCollectionID(),
@@ -397,8 +403,14 @@ func (job *LoadPartitionJob) Execute() error {
 		zap.Int64("collectionID", req.GetCollectionID()),
 	)
 
+	// Clear stale replicas
+	err := job.meta.ReplicaManager.RemoveCollection(req.GetCollectionID())
+	if err != nil {
+		log.Warn("failed to clear stale replicas", zap.Error(err))
+		return err
+	}
+
 	// Create replicas
-	// TODO(yah01): store replicas and collection atomically
 	replicas, err := utils.SpawnReplicas(job.meta.ReplicaManager,
 		job.nodeMgr,
 		req.GetCollectionID(),

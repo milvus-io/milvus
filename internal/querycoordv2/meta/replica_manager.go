@@ -21,8 +21,11 @@ import (
 	"sync"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 	. "github.com/milvus-io/milvus/internal/util/typeutil"
+	"go.uber.org/zap"
 )
 
 type Replica struct {
@@ -64,15 +67,34 @@ func NewReplicaManager(idAllocator func() (int64, error), store Store) *ReplicaM
 }
 
 // Recover recovers the replicas for given collections from meta store
-func (m *ReplicaManager) Recover() error {
+func (m *ReplicaManager) Recover(collections []int64) error {
 	replicas, err := m.store.GetReplicas()
 	if err != nil {
 		return fmt.Errorf("failed to recover replicas, err=%w", err)
 	}
+
+	collectionSet := typeutil.NewUniqueSet(collections...)
 	for _, replica := range replicas {
-		m.replicas[replica.GetID()] = &Replica{
-			Replica: replica,
-			Nodes:   NewUniqueSet(replica.GetNodes()...),
+		if collectionSet.Contain(replica.GetCollectionID()) {
+			m.replicas[replica.GetID()] = &Replica{
+				Replica: replica,
+				Nodes:   NewUniqueSet(replica.GetNodes()...),
+			}
+			log.Info("recover replica",
+				zap.Int64("collectionID", replica.GetCollectionID()),
+				zap.Int64("replicaID", replica.GetID()),
+				zap.Int64s("nodes", replica.GetNodes()),
+			)
+		} else {
+			err := m.store.ReleaseReplica(replica.GetCollectionID(), replica.GetID())
+			if err != nil {
+				return err
+			}
+			log.Info("clear stale replica",
+				zap.Int64("collectionID", replica.GetCollectionID()),
+				zap.Int64("replicaID", replica.GetID()),
+				zap.Int64s("nodes", replica.GetNodes()),
+			)
 		}
 	}
 	return nil
