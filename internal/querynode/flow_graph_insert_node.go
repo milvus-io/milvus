@@ -74,7 +74,7 @@ func (iNode *insertNode) Name() string {
 // Operate handles input messages, to execute insert operations
 func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	if in == nil {
-		log.Debug("type assertion failed for insertMsg because it's nil", zap.String("name", iNode.Name()))
+		log.Warn("type assertion failed for insertMsg because it's nil", zap.String("name", iNode.Name()))
 		return []Msg{}
 	}
 

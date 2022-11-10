@@ -46,7 +46,7 @@ func (s *statistics) statisticOnStreaming() error {
 	}
 
 	if _, released := s.qs.collection.getReleaseTime(); released {
-		log.Ctx(ctx).Warn("collection release before do statistics", zap.Int64("msgID", s.id),
+		log.Ctx(ctx).Info("collection release before do statistics", zap.Int64("msgID", s.id),
 			zap.Int64("collectionID", s.iReq.GetCollectionID()))
 		return fmt.Errorf("statistic failed, collection has been released, collectionID = %d", s.iReq.GetCollectionID())
 	}
@@ -54,7 +54,7 @@ func (s *statistics) statisticOnStreaming() error {
 	results, _, _, err := statisticStreaming(ctx, s.qs.metaReplica, s.iReq.GetCollectionID(),
 		s.iReq.GetPartitionIDs(), s.req.GetDmlChannels()[0])
 	if err != nil {
-		log.Ctx(ctx).Warn("failed to statistic on streaming data", zap.Int64("msgID", s.id),
+		log.Ctx(ctx).Info("failed to statistic on streaming data", zap.Int64("msgID", s.id),
 			zap.Int64("collectionID", s.iReq.GetCollectionID()), zap.Error(err))
 		return err
 	}
@@ -75,7 +75,7 @@ func (s *statistics) statisticOnHistorical() error {
 	}
 
 	if _, released := s.qs.collection.getReleaseTime(); released {
-		log.Ctx(ctx).Debug("collection release before do statistics", zap.Int64("msgID", s.id),
+		log.Ctx(ctx).Info("collection release before do statistics", zap.Int64("msgID", s.id),
 			zap.Int64("collectionID", s.iReq.GetCollectionID()))
 		return fmt.Errorf("statistic failed, collection has been released, collectionID = %d", s.iReq.GetCollectionID())
 	}

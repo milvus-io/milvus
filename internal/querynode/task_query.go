@@ -67,7 +67,7 @@ func (q *queryTask) queryOnStreaming() error {
 	}
 
 	if _, released := q.QS.collection.getReleaseTime(); released {
-		log.Ctx(ctx).Debug("collection release before search", zap.Int64("msgID", q.ID()),
+		log.Ctx(ctx).Info("collection release before search", zap.Int64("msgID", q.ID()),
 			zap.Int64("collectionID", q.CollectionID))
 		return fmt.Errorf("retrieve failed, collection has been released, collectionID = %d", q.CollectionID)
 	}
@@ -113,7 +113,7 @@ func (q *queryTask) queryOnHistorical() error {
 	}
 
 	if _, released := q.QS.collection.getReleaseTime(); released {
-		log.Ctx(ctx).Debug("collection release before search", zap.Int64("msgID", q.ID()),
+		log.Ctx(ctx).Info("collection release before search", zap.Int64("msgID", q.ID()),
 			zap.Int64("collectionID", q.CollectionID))
 		return fmt.Errorf("retrieve failed, collection has been released, collectionID = %d", q.CollectionID)
 	}

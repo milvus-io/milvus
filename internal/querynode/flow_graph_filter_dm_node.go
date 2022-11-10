@@ -51,7 +51,7 @@ func (fdmNode *filterDmNode) Name() string {
 // Operate handles input messages, to filter invalid insert messages
 func (fdmNode *filterDmNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	if in == nil {
-		log.Debug("type assertion failed for MsgStreamMsg because it's nil", zap.String("name", fdmNode.Name()))
+		log.Warn("type assertion failed for MsgStreamMsg because it's nil", zap.String("name", fdmNode.Name()))
 		return []Msg{}
 	}
 	if len(in) != 1 {
@@ -118,7 +118,7 @@ func (fdmNode *filterDmNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 				metrics.QueryNodeConsumeCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.DeleteLabel).Add(float64(proto.Size(&resMsg.DeleteRequest)))
 			}
 		default:
-			log.Warn("invalid message type in filterDmNode",
+			log.Info("invalid message type in filterDmNode",
 				zap.String("message type", msg.Type().String()),
 				zap.Int64("collection", fdmNode.collectionID),
 				zap.String("vchannel", fdmNode.vchannel))

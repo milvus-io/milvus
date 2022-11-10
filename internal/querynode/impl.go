@@ -257,7 +257,7 @@ func (node *QueryNode) getStatisticsWithDmlChannel(ctx context.Context, req *que
 	// shard leader dispatches request to its shard cluster
 	results, errCluster = cluster.GetStatistics(statisticCtx, req, withStreaming)
 	if errCluster != nil {
-		log.Warn("get statistics on cluster failed", zap.Int64("msgID", msgID), zap.Int64("collectionID", req.Req.GetCollectionID()), zap.Error(errCluster))
+		log.Info("get statistics on cluster failed", zap.Int64("msgID", msgID), zap.Int64("collectionID", req.Req.GetCollectionID()), zap.Error(errCluster))
 		failRet.Status.Reason = errCluster.Error()
 		return failRet, nil
 	}
@@ -326,7 +326,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, in *querypb.WatchDmC
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    err.Error(),
 			}
-			log.Warn("failed to subscribe channel on preExecute ", zap.Error(err))
+			log.Info("failed to subscribe channel on preExecute ", zap.Error(err))
 			return status, nil
 		}
 
@@ -336,7 +336,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, in *querypb.WatchDmC
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    err.Error(),
 			}
-			log.Warn("failed to subscribe channel ", zap.Error(err))
+			log.Info("failed to subscribe channel ", zap.Error(err))
 			return status, nil
 		}
 
@@ -346,7 +346,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, in *querypb.WatchDmC
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    err.Error(),
 			}
-			log.Warn("failed to unsubscribe channel on postExecute ", zap.Error(err))
+			log.Info("failed to unsubscribe channel on postExecute ", zap.Error(err))
 			return status, nil
 		}
 
@@ -793,7 +793,7 @@ func (node *QueryNode) searchWithDmlChannel(ctx context.Context, req *querypb.Se
 
 	qs, err := node.queryShardService.getQueryShard(dmlChannel)
 	if err != nil {
-		log.Ctx(ctx).Warn("Search failed, failed to get query shard",
+		log.Ctx(ctx).Info("Search failed, failed to get query shard",
 			zap.Int64("msgID", msgID),
 			zap.String("dml channel", dmlChannel),
 			zap.Error(err))
@@ -884,7 +884,7 @@ func (node *QueryNode) searchWithDmlChannel(ctx context.Context, req *querypb.Se
 	// shard leader dispatches request to its shard cluster
 	results, errCluster = cluster.Search(searchCtx, req, withStreaming)
 	if errCluster != nil {
-		log.Ctx(ctx).Warn("search cluster failed", zap.Int64("msgID", msgID), zap.Int64("collectionID", req.Req.GetCollectionID()), zap.Error(errCluster))
+		log.Ctx(ctx).Info("search cluster failed", zap.Int64("msgID", msgID), zap.Int64("collectionID", req.Req.GetCollectionID()), zap.Error(errCluster))
 		failRet.Status.Reason = errCluster.Error()
 		return failRet, nil
 	}
@@ -946,7 +946,7 @@ func (node *QueryNode) queryWithDmlChannel(ctx context.Context, req *querypb.Que
 
 	qs, err := node.queryShardService.getQueryShard(dmlChannel)
 	if err != nil {
-		log.Ctx(ctx).Warn("Query failed, failed to get query shard", zap.Int64("msgID", msgID), zap.String("dml channel", dmlChannel), zap.Error(err))
+		log.Ctx(ctx).Info("Query failed, failed to get query shard", zap.Int64("msgID", msgID), zap.String("dml channel", dmlChannel), zap.Error(err))
 		failRet.Status.Reason = err.Error()
 		return failRet, nil
 	}
@@ -1028,7 +1028,7 @@ func (node *QueryNode) queryWithDmlChannel(ctx context.Context, req *querypb.Que
 	// shard leader dispatches request to its shard cluster
 	results, errCluster = cluster.Query(queryCtx, req, withStreaming)
 	if errCluster != nil {
-		log.Ctx(ctx).Warn("failed to query cluster", zap.Int64("msgID", msgID), zap.Int64("collectionID", req.Req.GetCollectionID()), zap.Error(errCluster))
+		log.Ctx(ctx).Info("failed to query cluster", zap.Int64("msgID", msgID), zap.Int64("collectionID", req.Req.GetCollectionID()), zap.Error(errCluster))
 		failRet.Status.Reason = errCluster.Error()
 		return failRet, nil
 	}
@@ -1216,7 +1216,7 @@ func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 		return queryNodeMetrics, nil
 	}
 
-	log.Debug("QueryNode.GetMetrics failed, request metric type is not implemented yet",
+	log.Warn("QueryNode.GetMetrics failed, request metric type is not implemented yet",
 		zap.Int64("nodeId", paramtable.GetNodeID()),
 		zap.String("req", req.Request),
 		zap.String("metricType", metricType))

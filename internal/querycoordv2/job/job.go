@@ -188,7 +188,7 @@ func (job *LoadCollectionJob) Execute() error {
 		req.GetReplicaNumber())
 	if err != nil {
 		msg := "failed to spawn replica for collection"
-		log.Error(msg, zap.Error(err))
+		log.Warn(msg, zap.Error(err))
 		return utils.WrapError(msg, err)
 	}
 	for _, replica := range replicas {
@@ -201,14 +201,14 @@ func (job *LoadCollectionJob) Execute() error {
 	partitionIDs, err := job.broker.GetPartitions(job.ctx, req.GetCollectionID())
 	if err != nil {
 		msg := "failed to get partitions from RootCoord"
-		log.Error(msg, zap.Error(err))
+		log.Warn(msg, zap.Error(err))
 		return utils.WrapError(msg, err)
 	}
 
 	err = job.targetMgr.UpdateCollectionNextTargetWithPartitions(req.GetCollectionID(), partitionIDs...)
 	if err != nil {
 		msg := "failed to update next targets for collection"
-		log.Error(msg, zap.Error(err))
+		log.Warn(msg, zap.Error(err))
 		return utils.WrapError(msg, err)
 	}
 
@@ -224,7 +224,7 @@ func (job *LoadCollectionJob) Execute() error {
 	})
 	if err != nil {
 		msg := "failed to store collection"
-		log.Error(msg, zap.Error(err))
+		log.Warn(msg, zap.Error(err))
 		return utils.WrapError(msg, err)
 	}
 
@@ -389,7 +389,7 @@ func (job *LoadPartitionJob) Execute() error {
 		req.GetReplicaNumber())
 	if err != nil {
 		msg := "failed to spawn replica for collection"
-		log.Error(msg, zap.Error(err))
+		log.Warn(msg, zap.Error(err))
 		return utils.WrapError(msg, err)
 	}
 	for _, replica := range replicas {
@@ -401,7 +401,7 @@ func (job *LoadPartitionJob) Execute() error {
 	err = job.targetMgr.UpdateCollectionNextTargetWithPartitions(req.GetCollectionID(), req.GetPartitionIDs()...)
 	if err != nil {
 		msg := "failed to update next targets for collection"
-		log.Error(msg,
+		log.Warn(msg,
 			zap.Int64s("partitionIDs", req.GetPartitionIDs()),
 			zap.Error(err))
 		return utils.WrapError(msg, err)
@@ -421,7 +421,7 @@ func (job *LoadPartitionJob) Execute() error {
 	err = job.meta.CollectionManager.PutPartition(partitions...)
 	if err != nil {
 		msg := "failed to store partitions"
-		log.Error(msg, zap.Error(err))
+		log.Warn(msg, zap.Error(err))
 		return utils.WrapError(msg, err)
 	}
 

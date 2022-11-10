@@ -51,7 +51,7 @@ func searchSegments(ctx context.Context, replica ReplicaInterface, segType segme
 				if errors.Is(err, ErrSegmentNotFound) {
 					return
 				}
-				log.Error(err.Error()) // should not happen but still ignore it since the result is still correct
+				log.Warn(err.Error()) // should not happen but still ignore it since the result is still correct
 				return
 			}
 			// record search time

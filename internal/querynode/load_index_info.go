@@ -111,7 +111,7 @@ func (li *LoadIndexInfo) appendLoadIndexInfo(bytesIndex [][]byte, indexInfo *que
 		err = fmt.Errorf("failed to json marshal index params %w", err)
 		return err
 	}
-	log.Info("start append index params", zap.String("index params", string(jsonIndexParams)))
+	log.Debug("start append index params", zap.String("index params", string(jsonIndexParams)))
 
 	for key, value := range indexParams {
 		err = li.appendIndexParam(key, value)

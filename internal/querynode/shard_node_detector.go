@@ -69,7 +69,7 @@ func (nd *etcdShardNodeDetector) watchNodes(collectionID int64, replicaID int64,
 	log.Info("nodeDetector watch", zap.Int64("collectionID", collectionID), zap.Int64("replicaID", replicaID), zap.String("vchannelName", vchannelName))
 	resp, err := nd.client.Get(context.Background(), nd.path, clientv3.WithPrefix())
 	if err != nil {
-		log.Warn("Etcd NodeDetector get replica info failed", zap.Error(err))
+		log.Error("Etcd NodeDetector get replica info failed", zap.Error(err))
 		panic(err)
 	}
 

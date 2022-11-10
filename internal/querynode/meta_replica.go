@@ -754,7 +754,7 @@ func (replica *metaReplica) getSegmentNum(segType segmentType) int {
 	case segmentTypeSealed:
 		return len(replica.sealedSegments)
 	default:
-		log.Error("unexpected segment type", zap.String("segmentType", segType.String()))
+		log.Warn("getSegmentNum unexpected segment type", zap.String("segmentType", segType.String()))
 		return 0
 	}
 }

@@ -46,7 +46,7 @@ func (fddNode *filterDeleteNode) Name() string {
 // Operate handles input messages, to filter invalid delete messages
 func (fddNode *filterDeleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	if in == nil {
-		log.Debug("type assertion failed for MsgStreamMsg because it's nil", zap.String("name", fddNode.Name()))
+		log.Warn("type assertion failed for MsgStreamMsg because it's nil", zap.String("name", fddNode.Name()))
 		return []Msg{}
 	}
 

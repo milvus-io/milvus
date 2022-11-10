@@ -82,7 +82,7 @@ func (broker *CoordinatorBroker) GetCollectionSchema(ctx context.Context, collec
 	}
 	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		err = errors.New(resp.GetStatus().GetReason())
-		log.Error("failed to get collection schema", zap.Int64("collectionID", collectionID), zap.Error(err))
+		log.Warn("failed to get collection schema", zap.Int64("collectionID", collectionID), zap.Error(err))
 		return nil, err
 	}
 	return resp.GetSchema(), nil
@@ -99,13 +99,13 @@ func (broker *CoordinatorBroker) GetPartitions(ctx context.Context, collectionID
 	}
 	resp, err := broker.rootCoord.ShowPartitions(ctx, req)
 	if err != nil {
-		log.Error("showPartition failed", zap.Int64("collectionID", collectionID), zap.Error(err))
+		log.Warn("showPartition failed", zap.Int64("collectionID", collectionID), zap.Error(err))
 		return nil, err
 	}
 
 	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
 		err = errors.New(resp.Status.Reason)
-		log.Error("showPartition failed", zap.Int64("collectionID", collectionID), zap.Error(err))
+		log.Warn("showPartition failed", zap.Int64("collectionID", collectionID), zap.Error(err))
 		return nil, err
 	}
 
@@ -125,13 +125,13 @@ func (broker *CoordinatorBroker) GetRecoveryInfo(ctx context.Context, collection
 	}
 	recoveryInfo, err := broker.dataCoord.GetRecoveryInfo(ctx, getRecoveryInfoRequest)
 	if err != nil {
-		log.Error("get recovery info failed", zap.Int64("collectionID", collectionID), zap.Int64("partitionID", partitionID), zap.Error(err))
+		log.Warn("get recovery info failed", zap.Int64("collectionID", collectionID), zap.Int64("partitionID", partitionID), zap.Error(err))
 		return nil, nil, err
 	}
 
 	if recoveryInfo.Status.ErrorCode != commonpb.ErrorCode_Success {
 		err = errors.New(recoveryInfo.Status.Reason)
-		log.Error("get recovery info failed", zap.Int64("collectionID", collectionID), zap.Int64("partitionID", partitionID), zap.Error(err))
+		log.Warn("get recovery info failed", zap.Int64("collectionID", collectionID), zap.Int64("partitionID", partitionID), zap.Error(err))
 		return nil, nil, err
 	}
 
@@ -148,7 +148,7 @@ func (broker *CoordinatorBroker) GetSegmentInfo(ctx context.Context, ids ...Uniq
 	}
 	resp, err := broker.dataCoord.GetSegmentInfo(ctx, req)
 	if err != nil {
-		log.Error("failed to get segment info from DataCoord",
+		log.Warn("failed to get segment info from DataCoord",
 			zap.Int64s("segments", ids),
 			zap.Error(err))
 		return nil, err
@@ -172,7 +172,7 @@ func (broker *CoordinatorBroker) GetIndexInfo(ctx context.Context, collectionID 
 		SegmentIDs:   []int64{segmentID},
 	})
 	if err != nil || resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Error("failed to get segment index info",
+		log.Warn("failed to get segment index info",
 			zap.Int64("collection", collectionID),
 			zap.Int64("segment", segmentID),
 			zap.Error(err))

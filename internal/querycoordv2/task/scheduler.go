@@ -540,6 +540,7 @@ func (scheduler *taskScheduler) process(task Task) bool {
 		log.Warn("failed to execute task", zap.Error(task.Err()))
 
 	default:
+		log.Error("failed to execute task, invalid task status", zap.Any("status", task.Status()))
 		panic(fmt.Sprintf("invalid task status: %v", task.Status()))
 	}
 

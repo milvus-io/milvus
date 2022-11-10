@@ -320,7 +320,7 @@ func (w *watchDmChannelsTask) initFlowGraph(ctx context.Context, collectionID Un
 			// use pChannel to consume
 			err = fg.consumeFlowGraph(VPChannels[channel], consumeSubName)
 			if err != nil {
-				log.Error("msgStream as consumer failed for dmChannels", zap.Int64("collectionID", collectionID), zap.String("vChannel", channel))
+				log.Warn("msgStream as consumer failed for dmChannels", zap.Int64("collectionID", collectionID), zap.String("vChannel", channel))
 				break
 			}
 		}
@@ -331,7 +331,7 @@ func (w *watchDmChannelsTask) initFlowGraph(ctx context.Context, collectionID Un
 			pos.ChannelName = VPChannels[channel]
 			err = fg.consumeFlowGraphFromPosition(pos)
 			if err != nil {
-				log.Error("msgStream seek failed for dmChannels", zap.Int64("collectionID", collectionID), zap.String("vChannel", channel))
+				log.Warn("msgStream seek failed for dmChannels", zap.Int64("collectionID", collectionID), zap.String("vChannel", channel))
 				break
 			}
 		}

@@ -109,7 +109,7 @@ func (queue *baseTaskQueue) PopUnissuedTask() task {
 	defer queue.utMu.Unlock()
 
 	if queue.unissuedTasks.Len() <= 0 {
-		log.Fatal("unissued task list is empty!")
+		log.Warn("unissued task list is empty!")
 		return nil
 	}
 

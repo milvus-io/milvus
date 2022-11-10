@@ -27,7 +27,7 @@ func statisticOnSegments(replica ReplicaInterface, segType segmentType, segIDs [
 				if errors.Is(err, ErrSegmentNotFound) {
 					return
 				}
-				log.Error(err.Error()) // should not happen but still ignore it since the result is still correct
+				log.Warn(err.Error()) // should not happen but still ignore it since the result is still correct
 				return
 			}
 			// record search time

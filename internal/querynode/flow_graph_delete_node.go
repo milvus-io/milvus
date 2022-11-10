@@ -54,7 +54,7 @@ func (dNode *deleteNode) Name() string {
 // Operate handles input messages, do delete operations
 func (dNode *deleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	if in == nil {
-		log.Debug("type assertion failed for deleteMsg because it's nil", zap.String("name", dNode.Name()))
+		log.Warn("type assertion failed for deleteMsg because it's nil", zap.String("name", dNode.Name()))
 		return []Msg{}
 	}
 

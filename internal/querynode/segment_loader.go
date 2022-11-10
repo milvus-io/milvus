@@ -123,7 +123,7 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context, req *querypb.LoadS
 
 	err := loader.checkSegmentSize(req.CollectionID, req.Infos, concurrencyLevel)
 	if err != nil {
-		log.Error("load failed, OOM if loaded",
+		log.Warn("load failed, OOM if loaded",
 			zap.Int64("loadSegmentRequest msgID", req.Base.MsgID),
 			zap.Error(err))
 		return err
@@ -151,7 +151,7 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context, req *querypb.LoadS
 
 		segment, err := newSegment(collection, segmentID, partitionID, collectionID, vChannelID, segmentType, req.GetVersion(), info.StartPosition, loader.cgoPool)
 		if err != nil {
-			log.Error("load segment failed when create new segment",
+			log.Warn("load segment failed when create new segment",
 				zap.Int64("partitionID", partitionID),
 				zap.Int64("segmentID", segmentID),
 				zap.Error(err))
@@ -171,7 +171,7 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context, req *querypb.LoadS
 		tr := timerecord.NewTimeRecorder("loadDurationPerSegment")
 		err := loader.loadFiles(ctx, segment, loadInfo)
 		if err != nil {
-			log.Error("load segment failed when load data into memory",
+			log.Warn("load segment failed when load data into memory",
 				zap.Int64("partitionID", partitionID),
 				zap.Int64("segmentID", segmentID),
 				zap.Error(err))
@@ -199,7 +199,7 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context, req *querypb.LoadS
 	for _, s := range newSegments {
 		err = loader.metaReplica.setSegment(s)
 		if err != nil {
-			log.Error("load segment failed, set segment to meta failed",
+			log.Warn("load segment failed, set segment to meta failed",
 				zap.Int64("collectionID", s.collectionID),
 				zap.Int64("partitionID", s.partitionID),
 				zap.Int64("segmentID", s.segmentID),
@@ -736,7 +736,7 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 	for hasMore {
 		select {
 		case <-ctx.Done():
-			log.Debug("read delta msg from seek position done", zap.Error(ctx.Err()))
+			log.Warn("read delta msg from seek position timeout", zap.Error(ctx.Err()))
 			return ctx.Err()
 		case msgPack, ok := <-stream.Chan():
 			if !ok {
@@ -767,7 +767,7 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 						// TODO: panic?
 						// error occurs when missing meta info or unexpected pk type, should not happen
 						err = fmt.Errorf("processDeleteMessages failed, collectionID = %d, err = %s", dmsg.CollectionID, err)
-						log.Error("FromDmlCPLoadDelete failed to process delete message", zap.Error(err))
+						log.Warn("FromDmlCPLoadDelete failed to process delete message", zap.Error(err))
 						return err
 					}
 				}
@@ -880,7 +880,7 @@ func (loader *segmentLoader) checkSegmentSize(collectionID UniqueID, segmentLoad
 			if fieldIndexInfo, ok := vecFieldID2IndexInfo[fieldID]; ok {
 				neededMemSize, neededDiskSize, err := GetStorageSizeByIndexInfo(fieldIndexInfo)
 				if err != nil {
-					log.Error(err.Error(), zap.Int64("collectionID", loadInfo.CollectionID),
+					log.Warn(err.Error(), zap.Int64("collectionID", loadInfo.CollectionID),
 						zap.Int64("segmentID", loadInfo.SegmentID),
 						zap.Int64("indexBuildID", fieldIndexInfo.BuildID))
 					return err

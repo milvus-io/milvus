@@ -889,7 +889,7 @@ func (sc *ShardCluster) GetStatistics(ctx context.Context, req *querypb.GetStati
 
 	wg.Wait()
 	if err != nil {
-		log.Error(err.Error())
+		log.Info(err.Error())
 		return nil, err
 	}
 
@@ -982,7 +982,7 @@ func (sc *ShardCluster) Search(ctx context.Context, req *querypb.SearchRequest, 
 
 	wg.Wait()
 	if err != nil {
-		log.Error("failed to do search",
+		log.Info("failed to do search",
 			zap.Int64("msgID", req.GetReq().GetBase().GetMsgID()),
 			zap.Int64("sourceID", req.GetReq().GetBase().GetSourceID()),
 			zap.Strings("channels", req.GetDmlChannels()),
@@ -1062,7 +1062,7 @@ func (sc *ShardCluster) Query(ctx context.Context, req *querypb.QueryRequest, wi
 
 	wg.Wait()
 	if err != nil {
-		log.Error(err.Error())
+		log.Info(err.Error())
 		return nil, err
 	}
 

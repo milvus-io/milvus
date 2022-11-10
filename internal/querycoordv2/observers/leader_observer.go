@@ -159,12 +159,12 @@ func (o *LeaderObserver) sync(ctx context.Context, leaderView *meta.LeaderView, 
 	}
 	resp, err := o.cluster.SyncDistribution(ctx, leaderView.ID, req)
 	if err != nil {
-		log.Error("failed to sync distribution", zap.Error(err))
+		log.Warn("failed to sync distribution", zap.Error(err))
 		return
 	}
 
 	if resp.ErrorCode != commonpb.ErrorCode_Success {
-		log.Error("failed to sync distribution", zap.String("reason", resp.GetReason()))
+		log.Warn("failed to sync distribution", zap.String("reason", resp.GetReason()))
 	}
 }
 

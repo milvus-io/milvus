@@ -184,7 +184,7 @@ func (l *loadSegmentsTask) watchDeltaChannel(vchanName []string) error {
 		// use pChannel to consume
 		err = fg.consumeFlowGraphFromLatest(pchannel, consumeSubName)
 		if err != nil {
-			log.Error("msgStream as consumer failed for deltaChannels", zap.Int64("collectionID", collectionID), zap.Strings("vDeltaChannels", vDeltaChannels))
+			log.Warn("msgStream as consumer failed for deltaChannels", zap.Int64("collectionID", collectionID), zap.Strings("vDeltaChannels", vDeltaChannels))
 			break
 		}
 	}

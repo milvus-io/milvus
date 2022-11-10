@@ -98,7 +98,7 @@ func (s *taskScheduler) processTask(t task, q taskQueue) {
 		t.Notify(err)
 	}()
 	if err != nil {
-		log.Warn(err.Error())
+		log.Info(err.Error())
 		return
 	}
 
@@ -109,7 +109,7 @@ func (s *taskScheduler) processTask(t task, q taskQueue) {
 
 	err = t.Execute(s.ctx)
 	if err != nil {
-		log.Warn(err.Error())
+		log.Info(err.Error())
 		return
 	}
 	err = t.PostExecute(s.ctx)
@@ -299,7 +299,7 @@ func (s *taskScheduler) executeReadTasks() {
 	for {
 		select {
 		case <-s.ctx.Done():
-			log.Info("QueryNode stop executeReadTasks", zap.Int64("NodeID", paramtable.GetNodeID()))
+			log.Warn("QueryNode stop executeReadTasks", zap.Int64("NodeID", paramtable.GetNodeID()))
 			return
 		case t, ok := <-s.executeReadTaskChan:
 			if ok {
@@ -331,13 +331,13 @@ func (s *taskScheduler) processReadTask(t readTask) {
 		t.Notify(err)
 	}()
 	if err != nil {
-		log.Warn(err.Error())
+		log.Info(err.Error())
 		return
 	}
 
 	err = t.Execute(s.ctx)
 	if err != nil {
-		log.Warn(err.Error())
+		log.Info(err.Error())
 		return
 	}
 	err = t.PostExecute(s.ctx)

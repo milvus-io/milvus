@@ -516,7 +516,7 @@ func (s *Server) recoverCollectionTargets(ctx context.Context, collection int64)
 	err := s.targetMgr.UpdateCollectionNextTarget(collection)
 	if err != nil {
 		msg := "failed to update next target for collection"
-		log.Error(msg, zap.Error(err))
+		log.Warn(msg, zap.Error(err))
 		return utils.WrapError(msg, err)
 	}
 	return nil
@@ -607,7 +607,7 @@ func (s *Server) handleNodeDown(node int64) {
 		err := s.targetMgr.UpdateCollectionNextTarget(channel.GetCollectionID())
 		if err != nil {
 			msg := "failed to update next targets for collection"
-			log.Error(msg,
+			log.Warn(msg,
 				zap.Error(err))
 			continue
 		}
