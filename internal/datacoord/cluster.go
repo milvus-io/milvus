@@ -86,7 +86,7 @@ func (c *Cluster) Watch(ch string, collectionID UniqueID) error {
 // Flush sends flush requests to dataNodes specified
 // which also according to channels where segments are assigned to.
 func (c *Cluster) Flush(ctx context.Context, nodeID int64, channel string,
-	segments []*datapb.SegmentInfo, markSegments []*datapb.SegmentInfo) error {
+	segments []*datapb.SegmentInfo) error {
 	if !c.channelManager.Match(nodeID, channel) {
 		log.Warn("node is not matched with channel",
 			zap.String("channel", channel),
@@ -107,9 +107,8 @@ func (c *Cluster) Flush(ctx context.Context, nodeID int64, channel string,
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 			commonpbutil.WithTargetID(nodeID),
 		),
-		CollectionID:   ch.CollectionID,
-		SegmentIDs:     lo.Map(segments, getSegmentID),
-		MarkSegmentIDs: lo.Map(markSegments, getSegmentID),
+		CollectionID: ch.CollectionID,
+		SegmentIDs:   lo.Map(segments, getSegmentID),
 	}
 
 	c.sessionManager.Flush(ctx, nodeID, req)

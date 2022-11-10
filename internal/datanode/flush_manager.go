@@ -852,5 +852,8 @@ func flushNotifyFunc(dsService *dataSyncService, opts ...retry.Option) notifyMet
 			dsService.channel.segmentFlushed(pack.segmentID)
 		}
 		dsService.flushingSegCache.Remove(req.GetSegmentID())
+		dsService.channel.evictHistoryInsertBuffer(req.GetSegmentID(), pack.pos)
+		dsService.channel.evictHistoryDeleteBuffer(req.GetSegmentID(), pack.pos)
+		dsService.channel.setSegmentLastSyncTs(req.GetSegmentID(), pack.pos.GetTimestamp())
 	}
 }

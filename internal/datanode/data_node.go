@@ -613,7 +613,6 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 	log.Info("receiving FlushSegments request",
 		zap.Int64("collection ID", req.GetCollectionID()),
 		zap.Int64s("segments", req.GetSegmentIDs()),
-		zap.Int64s("stale segments", req.GetMarkSegmentIDs()),
 	)
 
 	// TODO: Here and in other places, replace `flushed` param with a more meaningful name.
@@ -662,15 +661,13 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 	}
 
 	seg, noErr1 := processSegments(req.GetSegmentIDs(), true)
-	staleSeg, noErr2 := processSegments(req.GetMarkSegmentIDs(), false)
 	// Log success flushed segments.
-	if len(seg)+len(staleSeg) > 0 {
+	if len(seg) > 0 {
 		log.Info("sending segments to flush channel",
-			zap.Any("newly sealed segment IDs", seg),
-			zap.Any("stale segment IDs", staleSeg))
+			zap.Any("newly sealed segment IDs", seg))
 	}
-	// Fail FlushSegments call if at least one segment (no matter stale or not) fails to get flushed.
-	if !noErr1 || !noErr2 {
+	// Fail FlushSegments call if at least one segment fails to get flushed.
+	if !noErr1 {
 		return errStatus, nil
 	}
 

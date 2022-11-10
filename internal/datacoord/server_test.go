@@ -1646,6 +1646,63 @@ func TestDataNodeTtChannel(t *testing.T) {
 	})
 }
 
+func TestGetChannelCheckpoint(t *testing.T) {
+	svr := newTestServer(t, nil)
+	defer closeTestServer(t, svr)
+	schema := newTestSchema()
+	svr.meta.AddCollection(&collectionInfo{
+		ID:     0,
+		Schema: schema,
+		StartPositions: []*commonpb.KeyDataPair{
+			{
+				Key:  "ch1",
+				Data: []byte{8, 9, 10},
+			},
+		},
+	})
+	svr.meta.AddCollection(&collectionInfo{
+		ID:     1,
+		Schema: schema,
+		StartPositions: []*commonpb.KeyDataPair{
+			{
+				Key:  "ch0",
+				Data: []byte{11, 12, 13},
+			},
+		},
+	})
+
+	t.Run("get non-existent channel", func(t *testing.T) {
+		channelCP := svr.handler.(*ServerHandler).getChannelCheckpoint(&channel{Name: "chx1", CollectionID: 0})
+		assert.Nil(t, channelCP)
+	})
+
+	t.Run("get no channelCP in meta", func(t *testing.T) {
+		channelCP := svr.handler.(*ServerHandler).getChannelCheckpoint(&channel{Name: "ch1", CollectionID: 0})
+		assert.NotNil(t, channelCP)
+		assert.EqualValues(t, []byte{8, 9, 10}, channelCP.GetMsgID())
+		channelCP = svr.handler.(*ServerHandler).getChannelCheckpoint(&channel{Name: "ch0", CollectionID: 1})
+		assert.NotNil(t, channelCP)
+		assert.EqualValues(t, []byte{11, 12, 13}, channelCP.GetMsgID())
+	})
+
+	t.Run("empty collection", func(t *testing.T) {
+		channelCP := svr.handler.(*ServerHandler).getChannelCheckpoint(&channel{Name: "ch0_suffix", CollectionID: 2})
+		assert.Nil(t, channelCP)
+	})
+
+	t.Run("with channel cp", func(t *testing.T) {
+		err := svr.meta.UpdateChannelCheckpoint("ch1", &internalpb.MsgPosition{
+			ChannelName: "ch1",
+			Timestamp:   100,
+		})
+		assert.NoError(t, err)
+		channelCP := svr.handler.(*ServerHandler).getChannelCheckpoint(&channel{Name: "ch1", CollectionID: 1})
+		assert.NotNil(t, channelCP)
+		assert.True(t, channelCP.ChannelName == "ch1")
+		assert.True(t, channelCP.Timestamp == 100)
+	})
+}
+
 func TestGetDataVChanPositions(t *testing.T) {
 	svr := newTestServer(t, nil)
 	defer closeTestServer(t, svr)
@@ -1733,7 +1790,6 @@ func TestGetDataVChanPositions(t *testing.T) {
 		assert.EqualValues(t, 1, vchan.FlushedSegmentIds[0])
 		assert.EqualValues(t, 2, len(vchan.UnflushedSegmentIds))
 		assert.ElementsMatch(t, []int64{s2.ID, s3.ID}, vchan.UnflushedSegmentIds)
-		assert.EqualValues(t, []byte{1, 2, 3}, vchan.GetSeekPosition().GetMsgID())
 	})
 
 	t.Run("empty collection", func(t *testing.T) {
@@ -1741,7 +1797,6 @@ func TestGetDataVChanPositions(t *testing.T) {
 		assert.EqualValues(t, 1, infos.CollectionID)
 		assert.EqualValues(t, 0, len(infos.FlushedSegmentIds))
 		assert.EqualValues(t, 0, len(infos.UnflushedSegmentIds))
-		assert.EqualValues(t, []byte{8, 9, 10}, infos.SeekPosition.MsgID)
 	})
 
 	t.Run("filter partition", func(t *testing.T) {
@@ -1749,7 +1804,6 @@ func TestGetDataVChanPositions(t *testing.T) {
 		assert.EqualValues(t, 0, infos.CollectionID)
 		assert.EqualValues(t, 0, len(infos.FlushedSegmentIds))
 		assert.EqualValues(t, 1, len(infos.UnflushedSegmentIds))
-		assert.EqualValues(t, []byte{11, 12, 13}, infos.SeekPosition.MsgID)
 	})
 
 	t.Run("empty collection with passed positions", func(t *testing.T) {
@@ -1762,7 +1816,6 @@ func TestGetDataVChanPositions(t *testing.T) {
 		}, allPartitionID)
 		assert.EqualValues(t, 0, infos.CollectionID)
 		assert.EqualValues(t, vchannel, infos.ChannelName)
-		assert.EqualValues(t, []byte{14, 15, 16}, infos.SeekPosition.MsgID)
 	})
 }
 
@@ -1877,7 +1930,6 @@ func TestGetQueryVChanPositions(t *testing.T) {
 		assert.EqualValues(t, 1, vchan.FlushedSegmentIds[0])
 		assert.EqualValues(t, 2, len(vchan.UnflushedSegmentIds))
 		assert.ElementsMatch(t, []int64{s2.ID, s3.ID}, vchan.UnflushedSegmentIds)
-		assert.EqualValues(t, []byte{1, 2, 3}, vchan.GetSeekPosition().GetMsgID())
 	})
 
 	t.Run("empty collection", func(t *testing.T) {
@@ -1885,7 +1937,6 @@ func TestGetQueryVChanPositions(t *testing.T) {
 		assert.EqualValues(t, 1, infos.CollectionID)
 		assert.EqualValues(t, 0, len(infos.FlushedSegmentIds))
 		assert.EqualValues(t, 0, len(infos.UnflushedSegmentIds))
-		assert.EqualValues(t, []byte{8, 9, 10}, infos.SeekPosition.MsgID)
 	})
 
 	t.Run("filter partition", func(t *testing.T) {
@@ -1893,7 +1944,6 @@ func TestGetQueryVChanPositions(t *testing.T) {
 		assert.EqualValues(t, 0, infos.CollectionID)
 		assert.EqualValues(t, 0, len(infos.FlushedSegmentIds))
 		assert.EqualValues(t, 1, len(infos.UnflushedSegmentIds))
-		assert.EqualValues(t, []byte{11, 12, 13}, infos.SeekPosition.MsgID)
 	})
 
 	t.Run("empty collection with passed positions", func(t *testing.T) {
@@ -1906,7 +1956,6 @@ func TestGetQueryVChanPositions(t *testing.T) {
 		}, allPartitionID)
 		assert.EqualValues(t, 0, infos.CollectionID)
 		assert.EqualValues(t, vchannel, infos.ChannelName)
-		assert.EqualValues(t, []byte{14, 15, 16}, infos.SeekPosition.MsgID)
 	})
 
 	t.Run("filter non indexed segments", func(t *testing.T) {
@@ -1918,7 +1967,6 @@ func TestGetQueryVChanPositions(t *testing.T) {
 		assert.EqualValues(t, 0, len(vchan.FlushedSegmentIds))
 		assert.EqualValues(t, 3, len(vchan.UnflushedSegmentIds))
 		assert.ElementsMatch(t, []int64{s1.ID, s2.ID, s3.ID}, vchan.UnflushedSegmentIds)
-		assert.EqualValues(t, []byte{1, 2, 3}, vchan.GetSeekPosition().GetMsgID())
 	})
 }
 
@@ -2125,9 +2173,16 @@ func TestGetRecoveryInfo(t *testing.T) {
 		svr.meta.AddCollection(&collectionInfo{
 			Schema: newTestSchema(),
 		})
+
+		err := svr.meta.UpdateChannelCheckpoint("vchan1", &internalpb.MsgPosition{
+			ChannelName: "vchan1",
+			Timestamp:   10,
+		})
+		assert.NoError(t, err)
+
 		seg1 := createSegment(0, 0, 0, 100, 10, "vchan1", commonpb.SegmentState_Flushed)
 		seg2 := createSegment(1, 0, 0, 100, 20, "vchan1", commonpb.SegmentState_Flushed)
-		err := svr.meta.AddSegment(NewSegmentInfo(seg1))
+		err = svr.meta.AddSegment(NewSegmentInfo(seg1))
 		assert.Nil(t, err)
 		err = svr.meta.AddSegment(NewSegmentInfo(seg2))
 		assert.Nil(t, err)
@@ -2187,9 +2242,15 @@ func TestGetRecoveryInfo(t *testing.T) {
 			Schema: newTestSchema(),
 		})
 
+		err := svr.meta.UpdateChannelCheckpoint("vchan1", &internalpb.MsgPosition{
+			ChannelName: "vchan1",
+			Timestamp:   0,
+		})
+		assert.NoError(t, err)
+
 		seg1 := createSegment(3, 0, 0, 100, 30, "vchan1", commonpb.SegmentState_Growing)
 		seg2 := createSegment(4, 0, 0, 100, 40, "vchan1", commonpb.SegmentState_Growing)
-		err := svr.meta.AddSegment(NewSegmentInfo(seg1))
+		err = svr.meta.AddSegment(NewSegmentInfo(seg1))
 		assert.Nil(t, err)
 		err = svr.meta.AddSegment(NewSegmentInfo(seg2))
 		assert.Nil(t, err)
@@ -2321,9 +2382,15 @@ func TestGetRecoveryInfo(t *testing.T) {
 			Schema: newTestSchema(),
 		})
 
+		err := svr.meta.UpdateChannelCheckpoint("vchan1", &internalpb.MsgPosition{
+			ChannelName: "vchan1",
+			Timestamp:   0,
+		})
+		assert.NoError(t, err)
+
 		seg1 := createSegment(7, 0, 0, 100, 30, "vchan1", commonpb.SegmentState_Growing)
 		seg2 := createSegment(8, 0, 0, 100, 40, "vchan1", commonpb.SegmentState_Dropped)
-		err := svr.meta.AddSegment(NewSegmentInfo(seg1))
+		err = svr.meta.AddSegment(NewSegmentInfo(seg1))
 		assert.Nil(t, err)
 		err = svr.meta.AddSegment(NewSegmentInfo(seg2))
 		assert.Nil(t, err)
@@ -3135,6 +3202,36 @@ func TestDataCoord_MarkSegmentsDropped(t *testing.T) {
 		assert.NoError(t, err)
 		// Returning success as SetState will succeed if segment does not exist. This should probably get fixed.
 		assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
+	})
+}
+
+func TestDataCoordServer_UpdateChannelCheckpoint(t *testing.T) {
+	mockVChannel := "fake-by-dev-rootcoord-dml-1-testchannelcp-v0"
+	mockPChannel := "fake-by-dev-rootcoord-dml-1"
+
+	t.Run("UpdateChannelCheckpoint", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+
+		req := &datapb.UpdateChannelCheckpointRequest{
+			Base: &commonpb.MsgBase{
+				SourceID: paramtable.GetNodeID(),
+			},
+			VChannel: mockVChannel,
+			Position: &internalpb.MsgPosition{
+				ChannelName: mockPChannel,
+				Timestamp:   1000,
+			},
+		}
+
+		resp, err := svr.UpdateChannelCheckpoint(context.TODO(), req)
+		assert.NoError(t, err)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		req.Position = nil
+		resp, err = svr.UpdateChannelCheckpoint(context.TODO(), req)
+		assert.NoError(t, err)
+		assert.EqualValues(t, commonpb.ErrorCode_UnexpectedError, resp.ErrorCode)
 	})
 }
 

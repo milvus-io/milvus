@@ -573,29 +573,21 @@ func (s *Server) handleTimetickMessage(ctx context.Context, ttMsg *msgstream.Dat
 	}
 	flushableSegments := s.getFlushableSegmentsInfo(flushableIDs)
 
-	staleSegments := s.getStaleSegmentsInfo(ch)
-	staleSegments = s.filterWithFlushableSegments(staleSegments, flushableIDs)
-
-	if len(flushableSegments)+len(staleSegments) == 0 {
+	if len(flushableSegments) == 0 {
 		return nil
 	}
 
 	log.Info("start flushing segments",
-		zap.Int64s("segment IDs", flushableIDs),
-		zap.Int("# of stale/mark segments", len(staleSegments)))
+		zap.Int64s("segment IDs", flushableIDs))
 	// update segment last update triggered time
 	// it's ok to fail flushing, since next timetick after duration will re-trigger
 	s.setLastFlushTime(flushableSegments)
-	s.setLastFlushTime(staleSegments)
 
-	finfo, minfo := make([]*datapb.SegmentInfo, 0, len(flushableSegments)), make([]*datapb.SegmentInfo, 0, len(staleSegments))
+	finfo := make([]*datapb.SegmentInfo, 0, len(flushableSegments))
 	for _, info := range flushableSegments {
 		finfo = append(finfo, info.SegmentInfo)
 	}
-	for _, info := range staleSegments {
-		minfo = append(minfo, info.SegmentInfo)
-	}
-	err = s.cluster.Flush(s.ctx, ttMsg.GetBase().GetSourceID(), ch, finfo, minfo)
+	err = s.cluster.Flush(s.ctx, ttMsg.GetBase().GetSourceID(), ch, finfo)
 	if err != nil {
 		log.Warn("handle")
 		return err
@@ -625,32 +617,6 @@ func (s *Server) getFlushableSegmentsInfo(flushableIDs []int64) []*SegmentInfo {
 		sinfo := s.meta.GetSegment(id)
 		if sinfo == nil {
 			log.Error("get segment from meta error", zap.Int64("id", id))
-			continue
-		}
-		res = append(res, sinfo)
-	}
-	return res
-}
-
-func (s *Server) getStaleSegmentsInfo(ch string) []*SegmentInfo {
-	return s.meta.SelectSegments(func(info *SegmentInfo) bool {
-		return isSegmentHealthy(info) &&
-			info.GetInsertChannel() == ch &&
-			!info.lastFlushTime.IsZero() &&
-			time.Since(info.lastFlushTime).Minutes() >= segmentTimedFlushDuration &&
-			info.GetNumOfRows() != 0
-	})
-}
-
-func (s *Server) filterWithFlushableSegments(staleSegments []*SegmentInfo, flushableIDs []int64) []*SegmentInfo {
-	filter := map[int64]struct{}{}
-	for _, sid := range flushableIDs {
-		filter[sid] = struct{}{}
-	}
-
-	res := make([]*SegmentInfo, 0, len(staleSegments))
-	for _, sinfo := range staleSegments {
-		if _, ok := filter[sinfo.GetID()]; ok {
 			continue
 		}
 		res = append(res, sinfo)

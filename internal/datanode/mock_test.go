@@ -253,6 +253,12 @@ func (ds *DataCoordFactory) UpdateSegmentStatistics(ctx context.Context, req *da
 	}, nil
 }
 
+func (ds *DataCoordFactory) UpdateChannelCheckpoint(ctx context.Context, req *datapb.UpdateChannelCheckpointRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}, nil
+}
+
 func (ds *DataCoordFactory) SaveImportSegment(ctx context.Context, req *datapb.SaveImportSegmentRequest) (*commonpb.Status, error) {
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,

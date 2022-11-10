@@ -7,14 +7,16 @@ import (
 	"testing"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"golang.org/x/exp/maps"
+
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/metautil"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
-	"golang.org/x/exp/maps"
 )
 
 type MockedTxnKV struct {
@@ -506,6 +508,81 @@ func TestCatalog_RevertAlterSegmentsAndAddNewSegment(t *testing.T) {
 		catalog := &Catalog{txn, ""}
 		err := catalog.RevertAlterSegmentsAndAddNewSegment(context.TODO(), []*datapb.SegmentInfo{segment1}, droppedSegment)
 		assert.NoError(t, err)
+	})
+}
+
+func TestChannelCP(t *testing.T) {
+	mockVChannel := "fake-by-dev-rootcoord-dml-1-testchannelcp-v0"
+	mockPChannel := "fake-by-dev-rootcoord-dml-1"
+
+	pos := &internalpb.MsgPosition{
+		ChannelName: mockPChannel,
+		MsgID:       []byte{},
+		Timestamp:   1000,
+	}
+	k := buildChannelCPKey(mockVChannel)
+	v, err := proto.Marshal(pos)
+	assert.NoError(t, err)
+
+	t.Run("ListChannelCheckpoint", func(t *testing.T) {
+		txn := &mocks.TxnKV{}
+		txn.EXPECT().Save(mock.Anything, mock.Anything).Return(nil)
+		catalog := &Catalog{txn, ""}
+		err := catalog.SaveChannelCheckpoint(context.TODO(), mockVChannel, pos)
+		assert.NoError(t, err)
+
+		txn.EXPECT().LoadWithPrefix(mock.Anything).Return([]string{k}, []string{string(v)}, nil)
+		res, err := catalog.ListChannelCheckpoint(context.TODO())
+		assert.NoError(t, err)
+		assert.True(t, len(res) > 0)
+	})
+
+	t.Run("ListChannelCheckpoint failed", func(t *testing.T) {
+		txn := &mocks.TxnKV{}
+		catalog := &Catalog{txn, ""}
+		txn.EXPECT().LoadWithPrefix(mock.Anything).Return(nil, nil, errors.New("mock error"))
+		_, err = catalog.ListChannelCheckpoint(context.TODO())
+		assert.Error(t, err)
+	})
+
+	t.Run("SaveChannelCheckpoint", func(t *testing.T) {
+		txn := &mocks.TxnKV{}
+		txn.EXPECT().Save(mock.Anything, mock.Anything).Return(nil)
+		catalog := &Catalog{txn, ""}
+		err := catalog.SaveChannelCheckpoint(context.TODO(), mockVChannel, pos)
+		assert.NoError(t, err)
+	})
+
+	t.Run("SaveChannelCheckpoint failed", func(t *testing.T) {
+		txn := &mocks.TxnKV{}
+		catalog := &Catalog{txn, ""}
+		txn.EXPECT().Save(mock.Anything, mock.Anything).Return(errors.New("mock error"))
+		err = catalog.SaveChannelCheckpoint(context.TODO(), mockVChannel, &internalpb.MsgPosition{})
+		assert.Error(t, err)
+	})
+
+	t.Run("DropChannelCheckpoint", func(t *testing.T) {
+		txn := &mocks.TxnKV{}
+		txn.EXPECT().Save(mock.Anything, mock.Anything).Return(nil)
+		catalog := &Catalog{txn, ""}
+		err := catalog.SaveChannelCheckpoint(context.TODO(), mockVChannel, pos)
+		assert.NoError(t, err)
+
+		txn.EXPECT().Remove(mock.Anything).Return(nil)
+		txn.EXPECT().LoadWithPrefix(mock.Anything).Return(nil, nil, nil)
+		err = catalog.DropChannelCheckpoint(context.TODO(), mockVChannel)
+		assert.NoError(t, err)
+		res, err := catalog.ListChannelCheckpoint(context.TODO())
+		assert.NoError(t, err)
+		assert.True(t, len(res) == 0)
+	})
+
+	t.Run("DropChannelCheckpoint failed", func(t *testing.T) {
+		txn := &mocks.TxnKV{}
+		catalog := &Catalog{txn, ""}
+		txn.EXPECT().Remove(mock.Anything).Return(errors.New("mock error"))
+		err = catalog.DropChannelCheckpoint(context.TODO(), mockVChannel)
+		assert.Error(t, err)
 	})
 }
 

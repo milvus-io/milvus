@@ -63,6 +63,7 @@ type MockDataCoord struct {
 	setSegmentStateResp       *datapb.SetSegmentStateResponse
 	importResp                *datapb.ImportTaskResponse
 	updateSegStatResp         *commonpb.Status
+	updateChanPos             *commonpb.Status
 	acquireSegLockResp        *commonpb.Status
 	releaseSegLockResp        *commonpb.Status
 	addSegmentResp            *commonpb.Status
@@ -202,6 +203,10 @@ func (m *MockDataCoord) Import(ctx context.Context, req *datapb.ImportTaskReques
 
 func (m *MockDataCoord) UpdateSegmentStatistics(ctx context.Context, req *datapb.UpdateSegmentStatisticsRequest) (*commonpb.Status, error) {
 	return m.updateSegStatResp, m.err
+}
+
+func (m *MockDataCoord) UpdateChannelCheckpoint(ctx context.Context, req *datapb.UpdateChannelCheckpointRequest) (*commonpb.Status, error) {
+	return m.updateChanPos, m.err
 }
 
 func (m *MockDataCoord) AcquireSegmentLock(ctx context.Context, req *datapb.AcquireSegmentLockRequest) (*commonpb.Status, error) {
@@ -476,6 +481,17 @@ func Test_NewServer(t *testing.T) {
 			},
 		}
 		resp, err := server.UpdateSegmentStatistics(ctx, nil)
+		assert.Nil(t, err)
+		assert.NotNil(t, resp)
+	})
+
+	t.Run("UpdateChannelCheckpoint", func(t *testing.T) {
+		server.dataCoord = &MockDataCoord{
+			updateChanPos: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+		}
+		resp, err := server.UpdateChannelCheckpoint(ctx, nil)
 		assert.Nil(t, err)
 		assert.NotNil(t, resp)
 	})

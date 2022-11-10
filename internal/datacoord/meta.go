@@ -23,18 +23,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/util/timerecord"
-
-	"golang.org/x/exp/maps"
-
 	"github.com/golang/protobuf/proto"
-
-	"github.com/milvus-io/milvus/internal/common"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"go.uber.org/zap"
+	"golang.org/x/exp/maps"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -42,14 +36,19 @@ import (
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/timerecord"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"go.uber.org/zap"
 )
 
 type meta struct {
 	sync.RWMutex
 	ctx         context.Context
 	catalog     metastore.DataCoordCatalog
-	collections map[UniqueID]*collectionInfo // collection id to collection info
-	segments    *SegmentsInfo                // segment id to segment info
+	collections map[UniqueID]*collectionInfo       // collection id to collection info
+	segments    *SegmentsInfo                      // segment id to segment info
+	channelCPs  map[string]*internalpb.MsgPosition // vChannel -> channel checkpoint/see position
 }
 
 type collectionInfo struct {
@@ -67,6 +66,7 @@ func newMeta(ctx context.Context, kv kv.TxnKV, chunkManagerRootPath string) (*me
 		catalog:     &datacoord.Catalog{Txn: kv, ChunkManagerRootPath: chunkManagerRootPath},
 		collections: make(map[UniqueID]*collectionInfo),
 		segments:    NewSegmentsInfo(),
+		channelCPs:  make(map[string]*internalpb.MsgPosition),
 	}
 	err := mt.reloadFromKV()
 	if err != nil {
@@ -99,6 +99,14 @@ func (m *meta) reloadFromKV() error {
 	}
 	metrics.DataCoordNumStoredRows.WithLabelValues().Set(float64(numStoredRows))
 	metrics.DataCoordNumStoredRowsCounter.WithLabelValues().Add(float64(numStoredRows))
+
+	channelCPs, err := m.catalog.ListChannelCheckpoint(m.ctx)
+	if err != nil {
+		return err
+	}
+	for vChannel, pos := range channelCPs {
+		m.channelCPs[vChannel] = pos
+	}
 	record.Record("meta reloadFromKV")
 	return nil
 }
@@ -1126,5 +1134,48 @@ func (m *meta) GetCompactionTo(segmentID int64) *SegmentInfo {
 			return segment
 		}
 	}
+	return nil
+}
+
+// UpdateChannelCheckpoint updates and saves channel checkpoint.
+func (m *meta) UpdateChannelCheckpoint(vChannel string, pos *internalpb.MsgPosition) error {
+	m.Lock()
+	defer m.Unlock()
+
+	if pos == nil {
+		return fmt.Errorf("channelCP is nil, vChannel=%s", vChannel)
+	}
+
+	oldPosition, ok := m.channelCPs[vChannel]
+	if !ok || oldPosition.Timestamp < pos.Timestamp {
+		err := m.catalog.SaveChannelCheckpoint(m.ctx, vChannel, pos)
+		if err != nil {
+			return err
+		}
+		m.channelCPs[vChannel] = pos
+		ts, _ := tsoutil.ParseTS(pos.Timestamp)
+		log.Debug("UpdateChannelCheckpoint done", zap.String("vChannel", vChannel), zap.Time("time", ts))
+	}
+	return nil
+}
+
+func (m *meta) GetChannelCheckpoint(vChannel string) *internalpb.MsgPosition {
+	m.RLock()
+	defer m.RUnlock()
+	if m.channelCPs[vChannel] == nil {
+		return nil
+	}
+	return proto.Clone(m.channelCPs[vChannel]).(*internalpb.MsgPosition)
+}
+
+func (m *meta) DropChannelCheckpoint(vChannel string) error {
+	m.Lock()
+	defer m.Unlock()
+	err := m.catalog.DropChannelCheckpoint(m.ctx, vChannel)
+	if err != nil {
+		return err
+	}
+	delete(m.channelCPs, vChannel)
+	log.Debug("DropChannelCheckpoint done", zap.String("vChannel", vChannel))
 	return nil
 }

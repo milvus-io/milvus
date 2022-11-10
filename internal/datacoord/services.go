@@ -1170,6 +1170,29 @@ func (s *Server) UpdateSegmentStatistics(ctx context.Context, req *datapb.Update
 	}, nil
 }
 
+// UpdateChannelCheckpoint updates channel checkpoint in dataCoord.
+func (s *Server) UpdateChannelCheckpoint(ctx context.Context, req *datapb.UpdateChannelCheckpointRequest) (*commonpb.Status, error) {
+	resp := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+	}
+	if s.isClosed() {
+		log.Warn("failed to update channel position for closed server")
+		resp.Reason = msgDataCoordIsUnhealthy(paramtable.GetNodeID())
+		return resp, nil
+	}
+
+	err := s.meta.UpdateChannelCheckpoint(req.GetVChannel(), req.GetPosition())
+	if err != nil {
+		log.Warn("failed to UpdateChannelCheckpoint", zap.String("vChannel", req.GetVChannel()), zap.Error(err))
+		resp.Reason = err.Error()
+		return resp, nil
+	}
+
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}, nil
+}
+
 // getDiff returns the difference of base and remove. i.e. all items that are in `base` but not in `remove`.
 func getDiff(base, remove []int64) []int64 {
 	mb := make(map[int64]struct{}, len(remove))
