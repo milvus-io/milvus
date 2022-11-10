@@ -322,20 +322,11 @@ func (h *Handlers) handleInsert(c *gin.Context) (interface{}, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: parse body failed: %v", errBadRequest, err)
 	}
-	fieldData, err := convertFieldDataArray(wrappedReq.FieldsData)
+	req, err := wrappedReq.AsInsertRequest()
 	if err != nil {
-		return nil, fmt.Errorf("%w: convert field data failed: %v", errBadRequest, err)
+		return nil, fmt.Errorf("%w: convert body to pb failed: %v", errBadRequest, err)
 	}
-	req := milvuspb.InsertRequest{
-		Base:           wrappedReq.Base,
-		DbName:         wrappedReq.DbName,
-		CollectionName: wrappedReq.CollectionName,
-		PartitionName:  wrappedReq.PartitionName,
-		FieldsData:     fieldData,
-		HashKeys:       wrappedReq.HashKeys,
-		NumRows:        wrappedReq.NumRows,
-	}
-	return h.proxy.Insert(c, &req)
+	return h.proxy.Insert(c, req)
 }
 
 func (h *Handlers) handleDelete(c *gin.Context) (interface{}, error) {
