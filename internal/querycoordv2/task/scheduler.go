@@ -23,6 +23,7 @@ import (
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
@@ -230,6 +231,7 @@ func (scheduler *taskScheduler) Add(task Task) error {
 		log.Warn("failed to add task", zap.String("task", task.String()))
 		return nil
 	}
+	metrics.QueryCoordTaskNum.WithLabelValues().Set(float64(scheduler.tasks.Len()))
 	log.Info("task added", zap.String("task", task.String()))
 	return nil
 }
@@ -574,6 +576,7 @@ func (scheduler *taskScheduler) remove(task Task) {
 		log = log.With(zap.String("channel", task.Channel()))
 	}
 
+	metrics.QueryCoordTaskNum.WithLabelValues().Set(float64(scheduler.tasks.Len()))
 	log.Debug("task removed")
 }
 
