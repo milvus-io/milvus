@@ -53,7 +53,7 @@ func newServerHandler(s *Server) *ServerHandler {
 // GetDataVChanPositions gets vchannel latest postitions with provided dml channel names for DataNode.
 func (h *ServerHandler) GetDataVChanPositions(channel *channel, partitionID UniqueID) *datapb.VchannelInfo {
 	segments := h.s.meta.SelectSegments(func(s *SegmentInfo) bool {
-		return s.InsertChannel == channel.Name
+		return s.InsertChannel == channel.Name && !s.GetIsFake()
 	})
 	log.Info("GetDataVChanPositions",
 		zap.Int64("collectionID", channel.CollectionID),
@@ -101,7 +101,7 @@ func (h *ServerHandler) GetDataVChanPositions(channel *channel, partitionID Uniq
 func (h *ServerHandler) GetQueryVChanPositions(channel *channel, partitionID UniqueID) *datapb.VchannelInfo {
 	// cannot use GetSegmentsByChannel since dropped segments are needed here
 	segments := h.s.meta.SelectSegments(func(s *SegmentInfo) bool {
-		return s.InsertChannel == channel.Name
+		return s.InsertChannel == channel.Name && !s.GetIsFake()
 	})
 	segmentInfos := make(map[int64]*SegmentInfo)
 	indexedSegments := FilterInIndexedSegments(h, h.s.indexCoord, segments...)
