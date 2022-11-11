@@ -25,6 +25,7 @@ import (
 	"strings"
 
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -53,6 +54,15 @@ func NewJSONParser(ctx context.Context, collectionSchema *schemapb.CollectionSch
 	name2FieldID := make(map[string]storage.FieldID)
 	for i := 0; i < len(collectionSchema.Fields); i++ {
 		schema := collectionSchema.Fields[i]
+		// RowIDField and TimeStampField is internal field, no need to parse
+		if schema.GetFieldID() == common.RowIDField || schema.GetFieldID() == common.TimeStampField {
+			continue
+		}
+		// if primary key field is auto-gernerated, no need to parse
+		if schema.GetAutoID() {
+			continue
+		}
+
 		fields[schema.GetName()] = 0
 		name2FieldID[schema.GetName()] = schema.GetFieldID()
 	}
@@ -87,6 +97,38 @@ func adjustBufSize(parser *JSONParser, collectionSchema *schemapb.CollectionSche
 
 	log.Info("JSON parser: reset bufSize", zap.Int("sizePerRecord", sizePerRecord), zap.Int("bufSize", bufSize))
 	parser.bufSize = int64(bufSize)
+}
+
+func (p *JSONParser) verifyRow(raw interface{}) (map[storage.FieldID]interface{}, error) {
+	stringMap, ok := raw.(map[string]interface{})
+	if !ok {
+		log.Error("JSON parser: invalid JSON format, each row should be a key-value map")
+		return nil, errors.New("invalid JSON format, each row should be a key-value map")
+	}
+
+	row := make(map[storage.FieldID]interface{})
+	for k, v := range stringMap {
+		// if user provided redundant field, return error
+		fieldID, ok := p.name2FieldID[k]
+		if !ok {
+			log.Error("JSON parser: the field is not defined in collection schema", zap.String("fieldName", k))
+			return nil, fmt.Errorf("the field '%s' is not defined in collection schema", k)
+		}
+		row[fieldID] = v
+	}
+
+	// some fields not provided?
+	if len(row) != len(p.name2FieldID) {
+		for k, v := range p.name2FieldID {
+			_, ok := row[v]
+			if !ok {
+				log.Error("JSON parser: a field value is missed", zap.String("fieldName", k))
+				return nil, fmt.Errorf("value of field '%s' is missed", k)
+			}
+		}
+	}
+
+	return row, nil
 }
 
 func (p *JSONParser) ParseRows(r io.Reader, handler JSONRowHandler) error {
@@ -151,24 +193,9 @@ func (p *JSONParser) ParseRows(r io.Reader, handler JSONRowHandler) error {
 				return fmt.Errorf("failed to parse row value, error: %w", err)
 			}
 
-			switch value.(type) {
-			case map[string]interface{}:
-				break
-			default:
-				log.Error("JSON parser: invalid JSON format, each row should be a key-value map")
-				return errors.New("invalid JSON format, each row should be a key-value map")
-			}
-
-			row := make(map[storage.FieldID]interface{})
-			stringMap := value.(map[string]interface{})
-			for k, v := range stringMap {
-				// if user provided redundant field, return error
-				fieldID, ok := p.name2FieldID[k]
-				if !ok {
-					log.Error("JSON parser: the field is not defined in collection schema", zap.String("fieldName", k))
-					return fmt.Errorf("the field '%s' is not defined in collection schema", k)
-				}
-				row[fieldID] = v
+			row, err := p.verifyRow(value)
+			if err != nil {
+				return err
 			}
 
 			buf = append(buf, row)
