@@ -758,6 +758,26 @@ func TestIndexBuilder_Error(t *testing.T) {
 		ib.process(buildID)
 	})
 
+	t.Run("drop retry job fail", func(t *testing.T) {
+		ib.tasks[buildID] = indexTaskRetry
+		ib.meta = createMetaTable(&indexcoord.Catalog{
+			Txn: NewMockEtcdKV(),
+		})
+		err := ib.meta.UpdateVersion(buildID, nodeID)
+		assert.NoError(t, err)
+		ib.ic.nodeManager = &NodeManager{
+			ctx: context.Background(),
+			nodeClients: map[UniqueID]types.IndexNode{
+				nodeID: &indexnode.Mock{
+					CallDropJobs: func(ctx context.Context, in *indexpb.DropJobsRequest) (*commonpb.Status, error) {
+						return nil, errors.New("error")
+					},
+				},
+			},
+		}
+		ib.process(buildID)
+	})
+
 	t.Run("drop index job fail", func(t *testing.T) {
 		ib.tasks[buildID] = indexTaskDone
 		ib.meta = createMetaTable(&indexcoord.Catalog{
