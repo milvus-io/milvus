@@ -41,9 +41,9 @@ const (
 
 	DefaultMaxDegree                = 56
 	DefaultSearchListSize           = 100
-	DefaultPGCodeBudgetGBRatio      = 0.125
+	DefaultPQCodeBudgetGBRatio      = 0.125
 	DefaultBuildNumThreadsRatio     = 1.0
-	DefaultSearchCacheBudgetGBRatio = 0.125
+	DefaultSearchCacheBudgetGBRatio = 0.10
 	DefaultLoadNumThreadRatio       = 8.0
 	DefaultBeamWidthRatio           = 4.0
 )
@@ -147,7 +147,7 @@ type commonConfig struct {
 	ThreadCoreCoefficient    int64
 	MaxDegree                int64
 	SearchListSize           int64
-	PGCodeBudgetGBRatio      float64
+	PQCodeBudgetGBRatio      float64
 	BuildNumThreadsRatio     float64
 	SearchCacheBudgetGBRatio float64
 	LoadNumThreadRatio       float64
@@ -198,7 +198,7 @@ func (p *commonConfig) init(base *BaseTable) {
 	p.initIndexSliceSize()
 	p.initMaxDegree()
 	p.initSearchListSize()
-	p.initPGCodeBudgetGBRatio()
+	p.initPQCodeBudgetGBRatio()
 	p.initBuildNumThreadsRatio()
 	p.initSearchCacheBudgetGBRatio()
 	p.initLoadNumThreadRatio()
@@ -408,8 +408,8 @@ func (p *commonConfig) initThreadCoreCoefficient() {
 	p.ThreadCoreCoefficient = p.Base.ParseInt64WithDefault("common.threadCoreCoefficient", DefaultThreadCoreCoefficient)
 }
 
-func (p *commonConfig) initPGCodeBudgetGBRatio() {
-	p.PGCodeBudgetGBRatio = p.Base.ParseFloatWithDefault("common.DiskIndex.PGCodeBudgetGBRatio", DefaultPGCodeBudgetGBRatio)
+func (p *commonConfig) initPQCodeBudgetGBRatio() {
+	p.PQCodeBudgetGBRatio = p.Base.ParseFloatWithDefault("common.DiskIndex.PQCodeBudgetGBRatio", DefaultPQCodeBudgetGBRatio)
 }
 
 func (p *commonConfig) initBuildNumThreadsRatio() {
