@@ -50,7 +50,7 @@ def trace(fmt=DEFAULT_FMT, prefix='chaos-test', flag=True):
                 log_str = f"[{prefix}]" + fmt.format(**locals())
                 # TODO: add report function in this place, like uploading to influxdb
                 # it is better a async way to do this, in case of blocking the request processing
-                log.debug(log_str)
+                log.info(log_str)
             if result:
                 self.rsp_times.append(elapsed)
                 self.average_time = (
@@ -101,6 +101,7 @@ class Checker:
                                     schema=cf.gen_default_collection_schema(),
                                     shards_num=shards_num,
                                     timeout=timeout,
+                                    # active_trace=True,
                                     enable_traceback=enable_traceback)
         self.c_wrap.insert(data=cf.gen_default_list_data(nb=constants.ENTITIES_FOR_SEARCH),
                            timeout=timeout,
@@ -578,16 +579,25 @@ class LoadBalanceChecker(Checker):
 class BulkInsertChecker(Checker):
     """check bulk load operations in a dependent thread"""
 
-    def __init__(self, collection_name=None, files=[]):
+    def __init__(self, collection_name=None, files=[], use_one_collection=False):
         if collection_name is None:
             collection_name = cf.gen_unique_str("BulkInsertChecker_")
         super().__init__(collection_name=collection_name)
+        res, result = self.c_wrap.create_index(ct.default_float_vec_field_name,
+                                               constants.DEFAULT_INDEX_PARAM,
+                                               index_name=cf.gen_unique_str(
+                                                   'index_'),
+                                               timeout=timeout,
+                                               enable_traceback=enable_traceback,
+                                               check_task=CheckTasks.check_nothing)
+        self.c_wrap.load()
         self.utility_wrap = ApiUtilityWrapper()
         self.schema = cf.gen_default_collection_schema()
         self.files = files
         self.recheck_failed_task = False
         self.failed_tasks = []
-        self.c_name = None
+        self.use_one_collection = use_one_collection  # if True, all tasks will use one collection to bulk insert
+        self.c_name = collection_name
 
     def update(self, files=None, schema=None):
         if files is not None:
@@ -597,20 +607,22 @@ class BulkInsertChecker(Checker):
 
     @trace()
     def bulk_insert(self):
+        log.info(f"bulk insert collection name: {self.c_name}")
         task_ids, result = self.utility_wrap.do_bulk_insert(collection_name=self.c_name,
-                                                       files=self.files)
+                                                            files=self.files)
         completed, result = self.utility_wrap.wait_for_bulk_insert_tasks_completed(task_ids=[task_ids], timeout=60)
         return task_ids, completed
 
     @exception_handler()
     def run_task(self):
-        if self.recheck_failed_task and self.failed_tasks:
-            self.c_name = self.failed_tasks.pop(0)
-            log.debug(f"check failed task: {self.c_name}")
-        else:
-            self.c_name = cf.gen_unique_str("BulkLoadChecker_")
+        if not self.use_one_collection:
+            if self.recheck_failed_task and self.failed_tasks:
+                self.c_name = self.failed_tasks.pop(0)
+                log.debug(f"check failed task: {self.c_name}")
+            else:
+                self.c_name = cf.gen_unique_str("BulkInsertChecker_")
         self.c_wrap.init_collection(name=self.c_name, schema=self.schema)
-        # import data
+        # bulk insert data
         task_ids, completed = self.bulk_insert()
         if not completed:
             self.failed_tasks.append(self.c_name)

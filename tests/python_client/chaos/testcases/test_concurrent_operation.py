@@ -112,7 +112,7 @@ class TestOperations(TestBase):
         request_duration = eval(request_duration)
         for i in range(10):
             sleep(request_duration//10)
-            for k,v in self.health_checkers.items():
+            for k, v in self.health_checkers.items():
                 v.check_result()
                 # log.info(v.check_result())
         if is_check:
