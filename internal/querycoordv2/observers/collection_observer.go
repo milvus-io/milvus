@@ -117,10 +117,11 @@ func (ob *CollectionObserver) observeTimeout() {
 			ob.meta.ReplicaManager.RemoveCollection(collection.GetCollectionID())
 			ob.targetMgr.RemoveCollection(collection.GetCollectionID())
 		} else if now.After(refreshTime) {
-			ob.refreshTargets(collection.UpdatedAt, collection.GetCollectionID())
-			log.Info("load for long time, refresh targets of collection",
-				zap.Duration("loadTime", time.Since(collection.CreatedAt)),
-			)
+			if ob.refreshTargets(collection.UpdatedAt, collection.GetCollectionID()) {
+				log.Info("load for long time, refresh targets of collection",
+					zap.Duration("loadTime", time.Since(collection.CreatedAt)),
+				)
+			}
 		}
 	}
 
@@ -155,20 +156,25 @@ func (ob *CollectionObserver) observeTimeout() {
 				partitionIDs := lo.Map(partitions, func(partition *meta.Partition, _ int) int64 {
 					return partition.GetPartitionID()
 				})
-				ob.refreshTargets(partition.UpdatedAt, partition.GetCollectionID(), partitionIDs...)
-				log.Info("load for long time, refresh targets of partitions",
-					zap.Duration("loadTime", time.Since(partition.CreatedAt)),
-				)
+				if ob.refreshTargets(partition.UpdatedAt, partition.GetCollectionID(), partitionIDs...) {
+					log.Info("load for long time, refresh targets of partitions",
+						zap.Duration("loadTime", time.Since(partition.CreatedAt)),
+					)
+				}
 				break
 			}
 		}
 	}
 }
 
-func (ob *CollectionObserver) refreshTargets(updatedAt time.Time, collectionID int64, partitions ...int64) {
+// refreshTargets refreshes the targets of the given collection,
+// avoids repeated refreshing by checking the updatedAt,
+// returns true if actually refreshed the targets,
+// false otherwise
+func (ob *CollectionObserver) refreshTargets(updatedAt time.Time, collectionID int64, partitions ...int64) bool {
 	refreshedTime, ok := ob.refreshed[collectionID]
 	if ok && refreshedTime.Equal(updatedAt) {
-		return
+		return false
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -181,8 +187,8 @@ func (ob *CollectionObserver) refreshTargets(updatedAt time.Time, collectionID i
 		var err error
 		partitions, err = ob.broker.GetPartitions(ctx, collectionID)
 		if err != nil {
-			log.Error("failed to get partitions from RootCoord", zap.Error(err))
-			return
+			log.Warn("failed to get partitions from RootCoord, will refresh targets later", zap.Error(err))
+			return false
 		}
 	}
 
@@ -195,6 +201,7 @@ func (ob *CollectionObserver) refreshTargets(updatedAt time.Time, collectionID i
 	)
 
 	ob.refreshed[collectionID] = updatedAt
+	return true
 }
 
 func (ob *CollectionObserver) observeLoadStatus() {

@@ -27,35 +27,6 @@ import (
 )
 
 func TestDiskIndexParams(t *testing.T) {
-	t.Run("fill index params without auto index param", func(t *testing.T) {
-		var params paramtable.ComponentParam
-		params.Init()
-
-		indexParams := make(map[string]string)
-		err := FillDiskIndexParams(&params, indexParams)
-		assert.NoError(t, err)
-
-		pgCodeBudgetGBRatio, err := strconv.ParseFloat(indexParams[PQCodeBudgetRatioKey], 64)
-		assert.NoError(t, err)
-		assert.Equal(t, 0.125, pgCodeBudgetGBRatio)
-
-		buildNumThreadsRatio, err := strconv.ParseFloat(indexParams[NumBuildThreadRatioKey], 64)
-		assert.NoError(t, err)
-		assert.Equal(t, 1.0, buildNumThreadsRatio)
-
-		searchCacheBudgetGBRatio, err := strconv.ParseFloat(indexParams[SearchCacheBudgetRatioKey], 64)
-		assert.NoError(t, err)
-		assert.Equal(t, 0.125, searchCacheBudgetGBRatio)
-
-		loadNumThreadRatio, err := strconv.ParseFloat(indexParams[NumLoadThreadRatioKey], 64)
-		assert.NoError(t, err)
-		assert.Equal(t, 8.0, loadNumThreadRatio)
-
-		beamWidthRatio, err := strconv.ParseFloat(indexParams[BeamWidthRatioKey], 64)
-		assert.NoError(t, err)
-		assert.Equal(t, 4.0, beamWidthRatio)
-	})
-
 	t.Run("fill index params with auto index", func(t *testing.T) {
 		var params paramtable.ComponentParam
 		params.AutoIndexConfig.Enable = true
