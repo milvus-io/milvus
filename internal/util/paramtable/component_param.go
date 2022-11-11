@@ -1338,8 +1338,11 @@ type dataNodeConfig struct {
 
 	FlowGraphMaxQueueLength int32
 	FlowGraphMaxParallelism int32
-	FlushInsertBufferSize   int64
-	FlushDeleteBufferBytes  int64
+
+	// segment
+	FlushInsertBufferSize  int64
+	FlushDeleteBufferBytes int64
+	SyncPeriod             time.Duration
 
 	Alias string // Different datanode in one machine
 
@@ -1359,6 +1362,7 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	p.initFlowGraphMaxParallelism()
 	p.initFlushInsertBufferSize()
 	p.initFlushDeleteBufferSize()
+	p.initSyncPeriod()
 	p.initIOConcurrency()
 
 	p.initChannelWatchPath()
@@ -1378,7 +1382,7 @@ func (p *dataNodeConfig) initFlowGraphMaxParallelism() {
 }
 
 func (p *dataNodeConfig) initFlushInsertBufferSize() {
-	bufferSize := p.Base.LoadWithDefault2([]string{"DATA_NODE_IBUFSIZE", "datanode.flush.insertBufSize"}, "0")
+	bufferSize := p.Base.LoadWithDefault2([]string{"DATA_NODE_IBUFSIZE", "datanode.segment.insertBufSize"}, "0")
 	bs, err := strconv.ParseInt(bufferSize, 10, 64)
 	if err != nil {
 		panic(err)
@@ -1387,9 +1391,14 @@ func (p *dataNodeConfig) initFlushInsertBufferSize() {
 }
 
 func (p *dataNodeConfig) initFlushDeleteBufferSize() {
-	deleteBufBytes := p.Base.ParseInt64WithDefault("datanode.flush.deleteBufBytes",
+	deleteBufBytes := p.Base.ParseInt64WithDefault("datanode.segment.deleteBufBytes",
 		64*1024*1024)
 	p.FlushDeleteBufferBytes = deleteBufBytes
+}
+
+func (p *dataNodeConfig) initSyncPeriod() {
+	syncPeriodInSeconds := p.Base.ParseInt64WithDefault("datanode.segment.syncPeriod", 600)
+	p.SyncPeriod = time.Duration(syncPeriodInSeconds) * time.Second
 }
 
 func (p *dataNodeConfig) initChannelWatchPath() {

@@ -1139,12 +1139,12 @@ func (m *meta) GetCompactionTo(segmentID int64) *SegmentInfo {
 
 // UpdateChannelCheckpoint updates and saves channel checkpoint.
 func (m *meta) UpdateChannelCheckpoint(vChannel string, pos *internalpb.MsgPosition) error {
-	m.Lock()
-	defer m.Unlock()
-
 	if pos == nil {
 		return fmt.Errorf("channelCP is nil, vChannel=%s", vChannel)
 	}
+
+	m.Lock()
+	defer m.Unlock()
 
 	oldPosition, ok := m.channelCPs[vChannel]
 	if !ok || oldPosition.Timestamp < pos.Timestamp {

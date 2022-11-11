@@ -285,11 +285,13 @@ dataNode:
     flowGraph:
       maxQueueLength: 1024 # Maximum length of task queue in flowgraph
       maxParallelism: 1024 # Maximum number of tasks executed in parallel in the flowgraph
-  flush:
+  segment:
     # Max buffer size to flush for a single segment.
     insertBufSize: 16777216 # Bytes, 16 MB
     # Max buffer size to flush del for a single channel
     deleteBufBytes: 67108864 # Bytes, 64MB
+    # The period to sync segments if buffer is not empty.
+    syncPeriod: 600 # Seconds, 10min
 
 
 # Configures the system log output.

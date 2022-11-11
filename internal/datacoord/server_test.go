@@ -1646,61 +1646,98 @@ func TestDataNodeTtChannel(t *testing.T) {
 	})
 }
 
-func TestGetChannelCheckpoint(t *testing.T) {
-	svr := newTestServer(t, nil)
-	defer closeTestServer(t, svr)
-	schema := newTestSchema()
-	svr.meta.AddCollection(&collectionInfo{
-		ID:     0,
-		Schema: schema,
-		StartPositions: []*commonpb.KeyDataPair{
-			{
-				Key:  "ch1",
-				Data: []byte{8, 9, 10},
-			},
+func TestGetChannelSeekPosition(t *testing.T) {
+	startPos1 := []*commonpb.KeyDataPair{
+		{
+			Key:  "ch1",
+			Data: []byte{1, 2, 3},
 		},
-	})
-	svr.meta.AddCollection(&collectionInfo{
-		ID:     1,
-		Schema: schema,
-		StartPositions: []*commonpb.KeyDataPair{
-			{
-				Key:  "ch0",
-				Data: []byte{11, 12, 13},
-			},
+	}
+	startPosNonExist := []*commonpb.KeyDataPair{
+		{
+			Key:  "ch2",
+			Data: []byte{4, 5, 6},
 		},
-	})
+	}
 
-	t.Run("get non-existent channel", func(t *testing.T) {
-		channelCP := svr.handler.(*ServerHandler).getChannelCheckpoint(&channel{Name: "chx1", CollectionID: 0})
-		assert.Nil(t, channelCP)
-	})
+	tests := []struct {
+		testName     string
+		channelCP    *internalpb.MsgPosition
+		segDMLPos    []*internalpb.MsgPosition
+		collStartPos []*commonpb.KeyDataPair
+		channelName  string
+		expectedPos  *internalpb.MsgPosition
+	}{
+		{"test-with-channelCP",
+			&internalpb.MsgPosition{ChannelName: "ch1", Timestamp: 100},
+			[]*internalpb.MsgPosition{{ChannelName: "ch1", Timestamp: 50}, {ChannelName: "ch1", Timestamp: 200}},
+			startPos1,
+			"ch1", &internalpb.MsgPosition{ChannelName: "ch1", Timestamp: 100}},
 
-	t.Run("get no channelCP in meta", func(t *testing.T) {
-		channelCP := svr.handler.(*ServerHandler).getChannelCheckpoint(&channel{Name: "ch1", CollectionID: 0})
-		assert.NotNil(t, channelCP)
-		assert.EqualValues(t, []byte{8, 9, 10}, channelCP.GetMsgID())
-		channelCP = svr.handler.(*ServerHandler).getChannelCheckpoint(&channel{Name: "ch0", CollectionID: 1})
-		assert.NotNil(t, channelCP)
-		assert.EqualValues(t, []byte{11, 12, 13}, channelCP.GetMsgID())
-	})
+		{"test-with-segmentDMLPos",
+			nil,
+			[]*internalpb.MsgPosition{{ChannelName: "ch1", Timestamp: 50}, {ChannelName: "ch1", Timestamp: 200}},
+			startPos1,
+			"ch1", &internalpb.MsgPosition{ChannelName: "ch1", Timestamp: 50}},
 
-	t.Run("empty collection", func(t *testing.T) {
-		channelCP := svr.handler.(*ServerHandler).getChannelCheckpoint(&channel{Name: "ch0_suffix", CollectionID: 2})
-		assert.Nil(t, channelCP)
-	})
+		{"test-with-collStartPos",
+			nil,
+			nil,
+			startPos1,
+			"ch1", &internalpb.MsgPosition{ChannelName: "ch1", MsgID: startPos1[0].Data}},
 
-	t.Run("with channel cp", func(t *testing.T) {
-		err := svr.meta.UpdateChannelCheckpoint("ch1", &internalpb.MsgPosition{
-			ChannelName: "ch1",
-			Timestamp:   100,
+		{"test-non-exist-channel-1",
+			nil,
+			nil,
+			startPosNonExist,
+			"ch1", nil},
+
+		{"test-non-exist-channel-2",
+			nil,
+			nil,
+			nil,
+			"ch1", nil},
+	}
+	for _, test := range tests {
+		t.Run(test.testName, func(t *testing.T) {
+			svr := newTestServer(t, nil)
+			defer closeTestServer(t, svr)
+			schema := newTestSchema()
+			if test.collStartPos != nil {
+				svr.meta.AddCollection(&collectionInfo{
+					ID:             0,
+					Schema:         schema,
+					StartPositions: test.collStartPos,
+				})
+			}
+			for i, segPos := range test.segDMLPos {
+				seg := &datapb.SegmentInfo{
+					ID:            UniqueID(i),
+					CollectionID:  0,
+					PartitionID:   0,
+					DmlPosition:   segPos,
+					InsertChannel: "ch1",
+				}
+				err := svr.meta.AddSegment(NewSegmentInfo(seg))
+				assert.NoError(t, err)
+			}
+			if test.channelCP != nil {
+				err := svr.meta.UpdateChannelCheckpoint(test.channelCP.ChannelName, test.channelCP)
+				assert.NoError(t, err)
+			}
+
+			seekPos := svr.handler.(*ServerHandler).GetChannelSeekPosition(&channel{
+				Name:         test.channelName,
+				CollectionID: 0}, allPartitionID)
+			if test.expectedPos == nil {
+				assert.True(t, seekPos == nil)
+			} else {
+				assert.Equal(t, test.expectedPos.ChannelName, seekPos.ChannelName)
+				assert.Equal(t, test.expectedPos.Timestamp, seekPos.Timestamp)
+				assert.ElementsMatch(t, test.expectedPos.MsgID, seekPos.MsgID)
+			}
 		})
-		assert.NoError(t, err)
-		channelCP := svr.handler.(*ServerHandler).getChannelCheckpoint(&channel{Name: "ch1", CollectionID: 1})
-		assert.NotNil(t, channelCP)
-		assert.True(t, channelCP.ChannelName == "ch1")
-		assert.True(t, channelCP.Timestamp == 100)
-	})
+	}
 }
 
 func TestGetDataVChanPositions(t *testing.T) {
