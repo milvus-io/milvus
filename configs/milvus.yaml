@@ -176,7 +176,7 @@ queryCoord:
   channelTaskTimeout: 60000 # 1 minute
   segmentTaskTimeout: 120000 # 2 minute
   distPullInterval: 500
-  loadTimeoutSeconds: 600
+  loadTimeoutSeconds: 3600
   checkHandoffInterval: 5000
   taskMergeCap: 16
   enableActiveStandby: false  # Enable active-standby

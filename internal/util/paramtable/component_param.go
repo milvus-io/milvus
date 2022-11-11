@@ -850,7 +850,7 @@ func (p *queryCoordConfig) initDistPullInterval() {
 }
 
 func (p *queryCoordConfig) initLoadTimeoutSeconds() {
-	timeout := p.Base.LoadWithDefault("queryCoord.loadTimeoutSeconds", "600")
+	timeout := p.Base.LoadWithDefault("queryCoord.loadTimeoutSeconds", "3600")
 	loadTimeout, err := strconv.ParseInt(timeout, 10, 64)
 	if err != nil {
 		panic(err)
