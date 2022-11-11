@@ -18,6 +18,7 @@ package msgstream
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/apache/pulsar-client-go/pulsar"
@@ -25,14 +26,12 @@ import (
 	rmqimplserver "github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 	kafkawrapper "github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper/kafka"
-	puslarmqwrapper "github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper/pulsar"
+	pulsarmqwrapper "github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper/pulsar"
 	rmqwrapper "github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper/rmq"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/streamnative/pulsarctl/pkg/cli"
-	"github.com/streamnative/pulsarctl/pkg/cmdutils"
 	"github.com/streamnative/pulsarctl/pkg/pulsar/utils"
-
 	"go.uber.org/zap"
 )
 
@@ -44,6 +43,10 @@ type PmsFactory struct {
 	PulsarWebAddress string
 	ReceiveBufSize   int64
 	PulsarBufSize    int64
+	PulsarAuthPlugin string
+	PulsarAuthParams string
+	PulsarTenant     string
+	PulsarNameSpace  string
 }
 
 func NewPmsFactory(config *paramtable.PulsarConfig) *PmsFactory {
@@ -52,12 +55,25 @@ func NewPmsFactory(config *paramtable.PulsarConfig) *PmsFactory {
 		ReceiveBufSize:   1024,
 		PulsarAddress:    config.Address,
 		PulsarWebAddress: config.WebAddress,
+		PulsarAuthPlugin: config.AuthPlugin,
+		PulsarAuthParams: config.AuthParams,
+		PulsarTenant:     config.Tenant,
+		PulsarNameSpace:  config.Namespace,
 	}
 }
 
 // NewMsgStream is used to generate a new Msgstream object
 func (f *PmsFactory) NewMsgStream(ctx context.Context) (MsgStream, error) {
-	pulsarClient, err := puslarmqwrapper.NewClient(pulsar.ClientOptions{URL: f.PulsarAddress})
+	auth, err := f.getAuthentication()
+	if err != nil {
+		return nil, err
+	}
+	clientOpts := pulsar.ClientOptions{
+		URL:            f.PulsarAddress,
+		Authentication: auth,
+	}
+
+	pulsarClient, err := pulsarmqwrapper.NewClient(f.PulsarTenant, f.PulsarNameSpace, clientOpts)
 	if err != nil {
 		return nil, err
 	}
@@ -66,11 +82,32 @@ func (f *PmsFactory) NewMsgStream(ctx context.Context) (MsgStream, error) {
 
 // NewTtMsgStream is used to generate a new TtMsgstream object
 func (f *PmsFactory) NewTtMsgStream(ctx context.Context) (MsgStream, error) {
-	pulsarClient, err := puslarmqwrapper.NewClient(pulsar.ClientOptions{URL: f.PulsarAddress})
+	auth, err := f.getAuthentication()
+	if err != nil {
+		return nil, err
+	}
+	clientOpts := pulsar.ClientOptions{
+		URL:            f.PulsarAddress,
+		Authentication: auth,
+	}
+
+	pulsarClient, err := pulsarmqwrapper.NewClient(f.PulsarTenant, f.PulsarNameSpace, clientOpts)
 	if err != nil {
 		return nil, err
 	}
 	return NewMqTtMsgStream(ctx, f.ReceiveBufSize, f.PulsarBufSize, pulsarClient, f.dispatcherFactory.NewUnmarshalDispatcher())
+}
+
+func (f *PmsFactory) getAuthentication() (pulsar.Authentication, error) {
+	auth, err := pulsar.NewAuthentication(f.PulsarAuthPlugin, f.PulsarAuthParams)
+
+	if err != nil {
+		log.Error("build authencation from config failed, please check it!",
+			zap.String("authPlugin", f.PulsarAuthPlugin),
+			zap.Error(err))
+		return nil, errors.New("build authencation from config failed")
+	}
+	return auth, nil
 }
 
 // NewQueryMsgStream is used to generate a new QueryMsgstream object
@@ -81,9 +118,16 @@ func (f *PmsFactory) NewQueryMsgStream(ctx context.Context) (MsgStream, error) {
 func (f *PmsFactory) NewMsgStreamDisposer(ctx context.Context) func([]string, string) error {
 	return func(channels []string, subname string) error {
 		// try to delete the old subscription
-		admin := cmdutils.NewPulsarClient()
+		admin, err := pulsarmqwrapper.NewAdminClient(f.PulsarWebAddress, f.PulsarAuthPlugin, f.PulsarAuthParams)
+		if err != nil {
+			return err
+		}
 		for _, channel := range channels {
-			topic, err := utils.GetTopicName(channel)
+			fullTopicName, err := pulsarmqwrapper.GetFullTopicName(f.PulsarTenant, f.PulsarNameSpace, channel)
+			if err != nil {
+				return err
+			}
+			topic, err := utils.GetTopicName(fullTopicName)
 			if err != nil {
 				log.Warn("failed to get topic name", zap.Error(err))
 				return retry.Unrecoverable(err)

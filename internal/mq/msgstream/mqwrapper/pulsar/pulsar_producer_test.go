@@ -28,7 +28,7 @@ import (
 
 func TestPulsarProducer(t *testing.T) {
 	pulsarAddress := getPulsarAddress()
-	pc, err := NewClient(pulsar.ClientOptions{URL: pulsarAddress})
+	pc, err := NewClient(DefaultPulsarTenant, DefaultPulsarNamespace, pulsar.ClientOptions{URL: pulsarAddress})
 	defer pc.Close()
 	assert.NoError(t, err)
 	assert.NotNil(t, pc)
@@ -39,7 +39,9 @@ func TestPulsarProducer(t *testing.T) {
 	assert.NotNil(t, producer)
 
 	pulsarProd := producer.(*pulsarProducer)
-	assert.Equal(t, pulsarProd.Topic(), topic)
+	fullTopicName, err := GetFullTopicName(DefaultPulsarTenant, DefaultPulsarNamespace, topic)
+	assert.Nil(t, err)
+	assert.Equal(t, pulsarProd.Topic(), fullTopicName)
 
 	msg := &mqwrapper.ProducerMessage{
 		Payload:    []byte{},

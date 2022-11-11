@@ -21,6 +21,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -36,6 +37,45 @@ func TestPmsFactory(t *testing.T) {
 
 	_, err = pmsFactory.NewQueryMsgStream(ctx)
 	assert.Nil(t, err)
+
+	err = pmsFactory.NewMsgStreamDisposer(ctx)([]string{"hello"}, "xx")
+	assert.Nil(t, err)
+}
+
+func TestPmsFactoryWithAuth(t *testing.T) {
+	config := &paramtable.PulsarConfig{
+		Address:        Params.PulsarCfg.Address,
+		WebAddress:     Params.PulsarCfg.WebAddress,
+		MaxMessageSize: Params.PulsarCfg.MaxMessageSize,
+		AuthPlugin:     "token",
+		AuthParams:     "{\"token\":\"fake_token\"}",
+	}
+
+	pmsFactory := NewPmsFactory(config)
+
+	ctx := context.Background()
+	_, err := pmsFactory.NewMsgStream(ctx)
+	assert.Nil(t, err)
+
+	_, err = pmsFactory.NewTtMsgStream(ctx)
+	assert.Nil(t, err)
+
+	_, err = pmsFactory.NewQueryMsgStream(ctx)
+	assert.Nil(t, err)
+
+	config.AuthParams = ""
+	pmsFactory = NewPmsFactory(config)
+
+	ctx = context.Background()
+	_, err = pmsFactory.NewMsgStream(ctx)
+	assert.Error(t, err)
+
+	_, err = pmsFactory.NewTtMsgStream(ctx)
+	assert.Error(t, err)
+
+	_, err = pmsFactory.NewQueryMsgStream(ctx)
+	assert.Error(t, err)
+
 }
 
 func TestRmsFactory(t *testing.T) {
@@ -54,6 +94,9 @@ func TestRmsFactory(t *testing.T) {
 
 	_, err = rmsFactory.NewQueryMsgStream(ctx)
 	assert.Nil(t, err)
+
+	err = rmsFactory.NewMsgStreamDisposer(ctx)([]string{"hello"}, "xx")
+	assert.Nil(t, err)
 }
 
 func TestKafkaFactory(t *testing.T) {
@@ -68,4 +111,7 @@ func TestKafkaFactory(t *testing.T) {
 
 	_, err = kmsFactory.NewQueryMsgStream(ctx)
 	assert.Nil(t, err)
+
+	// err = kmsFactory.NewMsgStreamDisposer(ctx)([]string{"hello"}, "xx")
+	// assert.Nil(t, err)
 }
