@@ -18,6 +18,7 @@ package pulsar
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -26,11 +27,15 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/internal/util/retry"
+	pulsarctl "github.com/streamnative/pulsarctl/pkg/pulsar"
+	"github.com/streamnative/pulsarctl/pkg/pulsar/common"
 	"go.uber.org/zap"
 )
 
 type pulsarClient struct {
-	client pulsar.Client
+	tenant    string
+	namespace string
+	client    pulsar.Client
 }
 
 var sc *pulsarClient
@@ -38,14 +43,18 @@ var once sync.Once
 
 // NewClient creates a pulsarClient object
 // according to the parameter opts of type pulsar.ClientOptions
-func NewClient(opts pulsar.ClientOptions) (*pulsarClient, error) {
+func NewClient(tenant string, namespace string, opts pulsar.ClientOptions) (*pulsarClient, error) {
 	once.Do(func() {
 		c, err := pulsar.NewClient(opts)
 		if err != nil {
 			log.Error("Failed to set pulsar client: ", zap.Error(err))
 			return
 		}
-		cli := &pulsarClient{client: c}
+		cli := &pulsarClient{
+			client:    c,
+			tenant:    tenant,
+			namespace: namespace,
+		}
 		sc = cli
 	})
 	return sc, nil
@@ -53,7 +62,11 @@ func NewClient(opts pulsar.ClientOptions) (*pulsarClient, error) {
 
 // CreateProducer create a pulsar producer from options
 func (pc *pulsarClient) CreateProducer(options mqwrapper.ProducerOptions) (mqwrapper.Producer, error) {
-	opts := pulsar.ProducerOptions{Topic: options.Topic}
+	fullTopicName, err := GetFullTopicName(pc.tenant, pc.namespace, options.Topic)
+	if err != nil {
+		return nil, err
+	}
+	opts := pulsar.ProducerOptions{Topic: fullTopicName}
 	if options.EnableCompression {
 		opts.CompressionType = pulsar.ZSTD
 		opts.CompressionLevel = pulsar.Faster
@@ -77,8 +90,12 @@ func (pc *pulsarClient) CreateProducer(options mqwrapper.ProducerOptions) (mqwra
 // Subscribe creates a pulsar consumer instance and subscribe a topic
 func (pc *pulsarClient) Subscribe(options mqwrapper.ConsumerOptions) (mqwrapper.Consumer, error) {
 	receiveChannel := make(chan pulsar.ConsumerMessage, options.BufSize)
+	fullTopicName, err := GetFullTopicName(pc.tenant, pc.namespace, options.Topic)
+	if err != nil {
+		return nil, err
+	}
 	consumer, err := pc.client.Subscribe(pulsar.ConsumerOptions{
-		Topic:                       options.Topic,
+		Topic:                       fullTopicName,
 		SubscriptionName:            options.SubscriptionName,
 		Type:                        pulsar.Exclusive,
 		SubscriptionInitialPosition: pulsar.SubscriptionInitialPosition(options.SubscriptionInitialPosition),
@@ -98,6 +115,32 @@ func (pc *pulsarClient) Subscribe(options mqwrapper.ConsumerOptions) (mqwrapper.
 	}
 
 	return pConsumer, nil
+}
+
+func GetFullTopicName(tenant string, namespace string, topic string) (string, error) {
+	if len(tenant) == 0 || len(namespace) == 0 || len(topic) == 0 {
+		log.Error("build full topic name failed",
+			zap.String("tenant", tenant),
+			zap.String("namesapce", namespace),
+			zap.String("topic", topic))
+		return "", errors.New("build full topic name failed")
+	}
+
+	return fmt.Sprintf("%s/%s/%s", tenant, namespace, topic), nil
+}
+
+func NewAdminClient(address, authPlugin, authParams string) (pulsarctl.Client, error) {
+	config := common.Config{
+		WebServiceURL: address,
+		AuthPlugin:    authPlugin,
+		AuthParams:    authParams,
+	}
+	admin, err := pulsarctl.New(&config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build pulsar admin client due to %s", err.Error())
+	}
+
+	return admin, nil
 }
 
 // EarliestMessageID returns the earliest message id

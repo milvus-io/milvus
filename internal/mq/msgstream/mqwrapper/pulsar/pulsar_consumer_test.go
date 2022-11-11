@@ -24,7 +24,6 @@ import (
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
-	"github.com/streamnative/pulsarctl/pkg/cmdutils"
 	"github.com/streamnative/pulsarctl/pkg/pulsar/utils"
 
 	"github.com/apache/pulsar-client-go/pulsar"
@@ -33,7 +32,7 @@ import (
 
 func TestPulsarConsumer_Subscription(t *testing.T) {
 	pulsarAddress := getPulsarAddress()
-	pc, err := NewClient(pulsar.ClientOptions{URL: pulsarAddress})
+	pc, err := NewClient(DefaultPulsarTenant, DefaultPulsarNamespace, pulsar.ClientOptions{URL: pulsarAddress})
 	assert.Nil(t, err)
 	defer pc.Close()
 
@@ -65,7 +64,7 @@ func Test_PatchEarliestMessageID(t *testing.T) {
 
 func TestComsumeCompressedMessage(t *testing.T) {
 	pulsarAddress := getPulsarAddress()
-	pc, err := NewClient(pulsar.ClientOptions{URL: pulsarAddress})
+	pc, err := NewClient(DefaultPulsarTenant, DefaultPulsarNamespace, pulsar.ClientOptions{URL: pulsarAddress})
 	assert.Nil(t, err)
 	defer pc.Close()
 
@@ -113,7 +112,7 @@ func TestComsumeCompressedMessage(t *testing.T) {
 
 func TestPulsarConsumer_Close(t *testing.T) {
 	pulsarAddress := getPulsarAddress()
-	pc, err := NewClient(pulsar.ClientOptions{URL: pulsarAddress})
+	pc, err := NewClient(DefaultPulsarTenant, DefaultPulsarNamespace, pulsar.ClientOptions{URL: pulsarAddress})
 	assert.Nil(t, err)
 
 	receiveChannel := make(chan pulsar.ConsumerMessage, 100)
@@ -173,12 +172,14 @@ func TestPulsarClientCloseUnsubscribeError(t *testing.T) {
 		panic(err)
 	}
 	webport := Params.LoadWithDefault("pulsar.webport", "80")
-	cmdutils.PulsarCtlConfig.WebServiceURL = "http://" + pulsarURL.Hostname() + ":" + webport
-	admin := cmdutils.NewPulsarClient()
+	webServiceURL := "http://" + pulsarURL.Hostname() + ":" + webport
+	admin, err := NewAdminClient(webServiceURL, "", "")
+	assert.NoError(t, err)
 	err = admin.Subscriptions().Delete(*topicName, subName, true)
 	if err != nil {
-		cmdutils.PulsarCtlConfig.WebServiceURL = "http://" + pulsarURL.Hostname() + ":" + "8080"
-		admin := cmdutils.NewPulsarClient()
+		webServiceURL = "http://" + pulsarURL.Hostname() + ":" + "8080"
+		admin, err := NewAdminClient(webServiceURL, "", "")
+		assert.NoError(t, err)
 		err = admin.Subscriptions().Delete(*topicName, subName, true)
 		assert.NoError(t, err)
 	}

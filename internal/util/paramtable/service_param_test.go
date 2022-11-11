@@ -105,6 +105,26 @@ func TestServiceParam(t *testing.T) {
 		}
 	})
 
+	t.Run("test pulsar auth config", func(t *testing.T) {
+		Params := SParams.PulsarCfg
+
+		Params.initAuthPlugin()
+		assert.Equal(t, "", Params.AuthPlugin)
+
+		Params.initAuthParams()
+		assert.Equal(t, "", Params.AuthParams)
+	})
+
+	t.Run("test pulsar tenant/namespace config", func(t *testing.T) {
+		Params := SParams.PulsarCfg
+
+		Params.initTenant()
+		assert.Equal(t, "public", Params.Tenant)
+
+		Params.initNamespace()
+		assert.Equal(t, "default", Params.Namespace)
+	})
+
 	t.Run("test rocksmqConfig", func(t *testing.T) {
 		Params := SParams.RocksmqCfg
 
