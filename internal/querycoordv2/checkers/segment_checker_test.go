@@ -124,6 +124,7 @@ func (suite *SegmentCheckerTestSuite) TestLoadSegments() {
 	suite.EqualValues(1, tasks[0].ReplicaID())
 	suite.Equal(task.ActionTypeGrow, action.Type())
 	suite.EqualValues(1, action.SegmentID())
+	suite.Equal(tasks[0].Priority(), task.TaskPriorityNormal)
 
 }
 
@@ -146,6 +147,7 @@ func (suite *SegmentCheckerTestSuite) TestReleaseSegments() {
 	suite.EqualValues(1, tasks[0].ReplicaID())
 	suite.Equal(task.ActionTypeReduce, action.Type())
 	suite.EqualValues(2, action.SegmentID())
+	suite.Equal(tasks[0].Priority(), task.TaskPriorityNormal)
 }
 
 func (suite *SegmentCheckerTestSuite) TestReleaseRepeatedSegments() {
@@ -180,6 +182,7 @@ func (suite *SegmentCheckerTestSuite) TestReleaseRepeatedSegments() {
 	suite.Equal(task.ActionTypeReduce, action.Type())
 	suite.EqualValues(1, action.SegmentID())
 	suite.EqualValues(1, action.Node())
+	suite.Equal(tasks[0].Priority(), task.TaskPriorityNormal)
 
 	// test less version exist on leader
 	checker.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{1: 1}, map[int64]*meta.Segment{}))
@@ -238,6 +241,7 @@ func (suite *SegmentCheckerTestSuite) TestReleaseGrowingSegments() {
 	suite.Equal(task.ActionTypeReduce, action.Type())
 	suite.EqualValues(2, action.SegmentID())
 	suite.EqualValues(2, action.Node())
+	suite.Equal(tasks[0].Priority(), task.TaskPriorityNormal)
 
 	suite.Len(tasks[1].Actions(), 1)
 	action, ok = tasks[1].Actions()[0].(*task.SegmentAction)
@@ -246,6 +250,7 @@ func (suite *SegmentCheckerTestSuite) TestReleaseGrowingSegments() {
 	suite.Equal(task.ActionTypeReduce, action.Type())
 	suite.EqualValues(3, action.SegmentID())
 	suite.EqualValues(2, action.Node())
+	suite.Equal(tasks[1].Priority(), task.TaskPriorityNormal)
 }
 
 func (suite *SegmentCheckerTestSuite) TestReleaseDroppedSegments() {
@@ -260,6 +265,7 @@ func (suite *SegmentCheckerTestSuite) TestReleaseDroppedSegments() {
 	suite.Equal(task.ActionTypeReduce, action.Type())
 	suite.EqualValues(1, action.SegmentID())
 	suite.EqualValues(1, action.Node())
+	suite.Equal(tasks[0].Priority(), task.TaskPriorityNormal)
 }
 
 func TestSegmentCheckerSuite(t *testing.T) {

@@ -105,8 +105,9 @@ func (o *LeaderObserver) findNeedLoadedSegments(leaderView *meta.LeaderView, dis
 	dists = utils.FindMaxVersionSegments(dists)
 	for _, s := range dists {
 		version, ok := leaderView.Segments[s.GetID()]
-		if ok && version.GetVersion() >= s.Version ||
-			o.target.GetHistoricalSegment(s.CollectionID, s.GetID(), meta.CurrentTarget) == nil {
+		existInCurrentTarget := o.target.GetHistoricalSegment(s.CollectionID, s.GetID(), meta.CurrentTarget) != nil
+		existInNextTarget := o.target.GetHistoricalSegment(s.CollectionID, s.GetID(), meta.NextTarget) != nil
+		if ok && version.GetVersion() >= s.Version || (!existInCurrentTarget && !existInNextTarget) {
 			continue
 		}
 		ret = append(ret, &querypb.SyncAction{
@@ -128,7 +129,9 @@ func (o *LeaderObserver) findNeedRemovedSegments(leaderView *meta.LeaderView, di
 	}
 	for sid := range leaderView.Segments {
 		_, ok := distMap[sid]
-		if ok || o.target.GetHistoricalSegment(leaderView.CollectionID, sid, meta.CurrentTarget) != nil {
+		existInCurrentTarget := o.target.GetHistoricalSegment(leaderView.CollectionID, sid, meta.CurrentTarget) != nil
+		existInNextTarget := o.target.GetHistoricalSegment(leaderView.CollectionID, sid, meta.NextTarget) != nil
+		if ok || existInCurrentTarget || existInNextTarget {
 			continue
 		}
 		ret = append(ret, &querypb.SyncAction{
