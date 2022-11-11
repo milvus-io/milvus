@@ -62,8 +62,20 @@ func (s *Server) checkAnyReplicaAvailable(collectionID int64) bool {
 
 func (s *Server) getCollectionSegmentInfo(collection int64) []*querypb.SegmentInfo {
 	segments := s.dist.SegmentDistManager.GetByCollection(collection)
+	currentTargetSegmentsMap := s.targetMgr.GetHistoricalSegmentsByCollection(collection, meta.CurrentTarget)
 	infos := make(map[int64]*querypb.SegmentInfo)
 	for _, segment := range segments {
+		if _, existCurrentTarget := currentTargetSegmentsMap[segment.GetID()]; !existCurrentTarget {
+			//if one segment exists in distMap but doesn't exist in currentTargetMap
+			//in order to guarantee that get segment request launched by sdk could get
+			//consistent result, for example
+			//sdk insert three segments:A, B, D, then A + B----compact--> C
+			//In this scenario, we promise that clients see either 2 segments(C,D) or 3 segments(A, B, D)
+			//rather than 4 segments(A, B, C, D), in which query nodes are loading C but have completed loading process
+			log.Info("filtered segment being in the intermediate status",
+				zap.Int64("segmentID", segment.GetID()))
+			continue
+		}
 		info, ok := infos[segment.GetID()]
 		if !ok {
 			info = &querypb.SegmentInfo{}
