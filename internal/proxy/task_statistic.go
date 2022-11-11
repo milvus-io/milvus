@@ -343,8 +343,9 @@ func checkFullLoaded(ctx context.Context, qc types.QueryCoord, collectionName st
 		for i, percentage := range resp.GetInMemoryPercentages() {
 			if percentage >= 100 {
 				loadedPartitionIDs = append(loadedPartitionIDs, resp.GetPartitionIDs()[i])
+			} else {
+				unloadPartitionIDs = append(unloadPartitionIDs, resp.GetPartitionIDs()[i])
 			}
-			unloadPartitionIDs = append(unloadPartitionIDs, resp.GetPartitionIDs()[i])
 		}
 		return loadedPartitionIDs, unloadPartitionIDs, nil
 	}
