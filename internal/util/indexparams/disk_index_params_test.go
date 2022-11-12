@@ -46,9 +46,9 @@ func TestDiskIndexParams(t *testing.T) {
 		err = FillDiskIndexParams(&params, indexParams)
 		assert.NoError(t, err)
 
-		pgCodeBudgetGBRatio, err := strconv.ParseFloat(indexParams[PQCodeBudgetRatioKey], 64)
+		pqCodeBudgetGBRatio, err := strconv.ParseFloat(indexParams[PQCodeBudgetRatioKey], 64)
 		assert.NoError(t, err)
-		assert.Equal(t, 0.125, pgCodeBudgetGBRatio)
+		assert.Equal(t, 0.125, pqCodeBudgetGBRatio)
 
 		buildNumThreadsRatio, err := strconv.ParseFloat(indexParams[NumBuildThreadRatioKey], 64)
 		assert.NoError(t, err)
