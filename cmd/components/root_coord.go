@@ -58,7 +58,7 @@ func (rc *RootCoord) Run() error {
 		log.Error("RootCoord starts error", zap.Error(err))
 		return err
 	}
-	log.Debug("RootCoord successfully started")
+	log.Info("RootCoord successfully started")
 	return nil
 }
 

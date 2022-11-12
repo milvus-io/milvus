@@ -41,6 +41,7 @@ var (
 	timeTickSyncTtInterval = 2 * time.Minute
 	ttCheckerName          = "rootTtChecker"
 	ttCheckerWarnMsg       = fmt.Sprintf("RootCoord haven't synchronized the time tick for %f minutes", timeTickSyncTtInterval.Minutes())
+	ddlSourceID            = UniqueID(-1)
 )
 
 type ttHistogram struct {
@@ -133,9 +134,9 @@ func newTimeTickSync(ctx context.Context, sourceID int64, factory msgstream.Fact
 
 // sendToChannel send all channels' timetick to sendChan
 // lock is needed by the invoker
-func (t *timetickSync) sendToChannel() {
+func (t *timetickSync) sendToChannel() bool {
 	if len(t.sess2ChanTsMap) == 0 {
-		return
+		return false
 	}
 
 	// detect whether rootcoord receives ttMsg from all source sessions
@@ -157,7 +158,7 @@ func (t *timetickSync) sendToChannel() {
 			log.Warn("session idle for long time", zap.Any("idle list", idleSessionList),
 				zap.Any("idle time", Params.ProxyCfg.TimeTickInterval.Milliseconds()*maxCnt))
 		}
-		return
+		return false
 	}
 
 	// clear sess2ChanTsMap and send a clone
@@ -167,6 +168,7 @@ func (t *timetickSync) sendToChannel() {
 		t.sess2ChanTsMap[k] = nil
 	}
 	t.sendChan <- ptt
+	return true
 }
 
 // UpdateTimeTick check msg validation and send it to local channel
@@ -183,16 +185,6 @@ func (t *timetickSync) updateTimeTick(in *internalpb.ChannelTimeTickMsg, reason 
 	prev, ok := t.sess2ChanTsMap[in.Base.SourceID]
 	if !ok {
 		return fmt.Errorf("skip ChannelTimeTickMsg from un-recognized session %d", in.Base.SourceID)
-	}
-
-	if in.Base.SourceID == t.sourceID {
-		if prev != nil && in.DefaultTimestamp <= prev.defaultTs {
-			log.Warn("timestamp go back", zap.Int64("source id", in.Base.SourceID),
-				zap.Uint64("curr ts", in.DefaultTimestamp),
-				zap.Uint64("prev ts", prev.defaultTs),
-				zap.String("reason", reason))
-			return nil
-		}
 	}
 
 	if prev == nil {
@@ -225,7 +217,8 @@ func (t *timetickSync) initSessions(sess []*sessionutil.Session) {
 	t.lock.Lock()
 	defer t.lock.Unlock()
 	t.sess2ChanTsMap = make(map[typeutil.UniqueID]*chanTsMsg)
-	t.sess2ChanTsMap[t.sourceID] = nil
+	// Init DDL source
+	t.sess2ChanTsMap[ddlSourceID] = nil
 	for _, s := range sess {
 		t.sess2ChanTsMap[s.ServerID] = nil
 		log.Info("Init proxy sessions for timeticksync", zap.Int64("serverID", s.ServerID))
@@ -257,7 +250,7 @@ func (t *timetickSync) startWatch(wg *sync.WaitGroup) {
 				checker.Check()
 			}
 			// reduce each channel to get min timestamp
-			local := sessTimetick[t.sourceID]
+			local := sessTimetick[ddlSourceID]
 			if len(local.chanTsMap) == 0 {
 				continue
 			}

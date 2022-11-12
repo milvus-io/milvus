@@ -207,29 +207,3 @@ func (p *proxyManager) getSessionsOnEtcd(ctx context.Context) ([]*sessionutil.Se
 func (p *proxyManager) Stop() {
 	p.cancel()
 }
-
-// listProxyInEtcd helper function lists proxy in etcd
-func listProxyInEtcd(ctx context.Context, cli *clientv3.Client) (map[int64]*sessionutil.Session, error) {
-	ctx2, cancel := context.WithTimeout(ctx, rootcoord.RequestTimeout)
-	defer cancel()
-	resp, err := cli.Get(
-		ctx2,
-		path.Join(Params.EtcdCfg.MetaRootPath, sessionutil.DefaultServiceRoot, typeutil.ProxyRole),
-		clientv3.WithPrefix(),
-		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("list proxy failed, etcd error = %w", err)
-	}
-	sess := make(map[int64]*sessionutil.Session)
-	for _, v := range resp.Kvs {
-		var s sessionutil.Session
-		err := json.Unmarshal(v.Value, &s)
-		if err != nil {
-			log.Debug("unmarshal SvrSession failed", zap.Error(err))
-			continue
-		}
-		sess[s.ServerID] = &s
-	}
-	return sess, nil
-}

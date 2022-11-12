@@ -229,6 +229,7 @@ func (s *Session) Init(serverName, address string, exclusive bool, triggerKill b
 		panic(err)
 	}
 	s.ServerID = serverID
+	log.Info("start server", zap.String("name", serverName), zap.String("address", address), zap.Int64("id", s.ServerID))
 }
 
 // String makes Session struct able to be logged by zap
@@ -252,6 +253,7 @@ func (s *Session) getServerID() (int64, error) {
 	serverIDMu.Lock()
 	defer serverIDMu.Unlock()
 
+	// Notice, For standalone, all process share the same nodeID.
 	nodeID := paramtable.GetNodeID()
 	if nodeID != 0 {
 		return nodeID, nil
