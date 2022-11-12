@@ -520,7 +520,7 @@ func (ibNode *insertBufferNode) bufferInsertMsg(msg *msgstream.InsertMsg, startP
 	if !loaded {
 		buffer, err = newBufferData(collSchema)
 		if err != nil {
-			return fmt.Errorf("newBufferData failed, segment=%d, channel=%s, err=%s", currentSegID, ibNode.channelName, err)
+			return fmt.Errorf("newBufferData failed, segment=%d, channel=%s, err=%w", currentSegID, ibNode.channelName, err)
 		}
 	}
 

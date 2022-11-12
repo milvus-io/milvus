@@ -321,6 +321,10 @@ func TestComponentParam(t *testing.T) {
 		size := Params.FlushInsertBufferSize
 		t.Logf("FlushInsertBufferSize: %d", size)
 
+		period := Params.SyncPeriod
+		t.Logf("SyncPeriod: %v", period)
+		assert.Equal(t, 10*time.Minute, Params.SyncPeriod)
+
 		Params.CreatedTime = time.Now()
 		t.Logf("CreatedTime: %v", Params.CreatedTime)
 

@@ -59,7 +59,7 @@ func (ttn *ttNode) Name() string {
 // Operate handles input messages, implementing flowgraph.Node
 func (ttn *ttNode) Operate(in []Msg) []Msg {
 	if in == nil {
-		log.Debug("type assertion failed for flowGraphMsg because it's nil")
+		log.Warn("type assertion failed for flowGraphMsg because it's nil")
 		return []Msg{}
 	}
 

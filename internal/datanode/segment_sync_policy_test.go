@@ -35,10 +35,10 @@ func TestSyncPeriodically(t *testing.T) {
 		isBufferEmpty bool
 		shouldSync    bool
 	}{
-		{"test buffer empty and stale", t0, t0.Add(syncPeriod), true, false},
-		{"test buffer empty and not stale", t0, t0.Add(syncPeriod / 2), true, false},
-		{"test buffer not empty and stale", t0, t0.Add(syncPeriod), false, true},
-		{"test buffer not empty and not stale", t0, t0.Add(syncPeriod / 2), false, false},
+		{"test buffer empty and stale", t0, t0.Add(Params.DataNodeCfg.SyncPeriod), true, false},
+		{"test buffer empty and not stale", t0, t0.Add(Params.DataNodeCfg.SyncPeriod / 2), true, false},
+		{"test buffer not empty and stale", t0, t0.Add(Params.DataNodeCfg.SyncPeriod), false, true},
+		{"test buffer not empty and not stale", t0, t0.Add(Params.DataNodeCfg.SyncPeriod / 2), false, false},
 	}
 
 	for _, test := range tests {
