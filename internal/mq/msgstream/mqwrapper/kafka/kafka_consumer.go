@@ -198,8 +198,9 @@ func (kc *Consumer) internalSeek(offset kafka.Offset, inclusive bool) error {
 }
 
 func (kc *Consumer) Ack(message mqwrapper.Message) {
-	kafkaMsg, _ := message.(*kafkaMessage)
-	kc.c.CommitMessage(kafkaMsg.msg)
+	// Do nothing
+	// Kafka retention mechanism only depends on retention configuration,
+	// it does not relate to the commit with consumer's offsets.
 }
 
 func (kc *Consumer) GetLatestMsgID() (mqwrapper.MessageID, error) {
