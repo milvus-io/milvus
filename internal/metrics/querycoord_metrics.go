@@ -64,8 +64,8 @@ var (
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryCoordRole,
 			Name:      "load_latency",
-			Help:      "latency of load request",
-			Buckets:   buckets,
+			Help:      "latency of load the entire collection",
+			Buckets:   []float64{0, 500, 1000, 2000, 5000, 10000, 20000, 50000, 60000, 300000, 600000, 1800000},
 		}, []string{})
 
 	QueryCoordReleaseLatency = prometheus.NewHistogramVec(
