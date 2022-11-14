@@ -199,16 +199,22 @@ func (p *EtcdConfig) initEtcdTLSMinVersion() {
 type LocalStorageConfig struct {
 	Base *BaseTable
 
-	Path string
+	Path         string
+	TempFilePath string
 }
 
 func (p *LocalStorageConfig) init(base *BaseTable) {
 	p.Base = base
 	p.initPath()
+	p.initTmpFilePath()
 }
 
 func (p *LocalStorageConfig) initPath() {
 	p.Path = p.Base.LoadWithDefault("localStorage.path", "/var/lib/milvus/data")
+}
+
+func (p *LocalStorageConfig) initTmpFilePath() {
+	p.TempFilePath = p.Base.LoadWithDefault("localStorage.tempFilePath", "/milvus/data")
 }
 
 type MetaStoreConfig struct {

@@ -51,6 +51,7 @@ import (
 )
 
 var Params paramtable.ComponentParam
+var cleanDiskData sync.Once
 
 // all milvus related metrics is in a separate registry
 var Registry *prometheus.Registry
@@ -84,6 +85,22 @@ func runComponent[T component](ctx context.Context,
 	wg.Add(1)
 	go func() {
 		params.InitOnce()
+		cleanDiskData.Do(func() {
+			rootPath := params.LocalStorageCfg.TempFilePath
+			filesInfo, err := os.ReadDir(rootPath)
+			if err != nil && !os.IsNotExist(err) {
+				log.Warn(err.Error())
+				panic(err)
+			}
+			for _, info := range filesInfo {
+				filePath := rootPath + info.Name()
+				err = os.RemoveAll(filePath)
+				if err != nil {
+					log.Warn(err.Error())
+					panic(err)
+				}
+			}
+		})
 		if extraInit != nil {
 			extraInit()
 		}

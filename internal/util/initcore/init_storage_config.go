@@ -25,16 +25,13 @@ package initcore
 */
 import "C"
 import (
-	"os"
-	"path/filepath"
 	"unsafe"
 
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
 
 func InitLocalStorageConfig(params *paramtable.ComponentParam) {
-	b, _ := os.Getwd()
-	LocalRootPath := filepath.Dir(b) + "/" + filepath.Base(b) + "/" + "data/"
+	LocalRootPath := params.LocalStorageCfg.TempFilePath
 	CLocalRootPath := C.CString(LocalRootPath)
 	C.InitLocalRootPath(CLocalRootPath)
 	C.free(unsafe.Pointer(CLocalRootPath))

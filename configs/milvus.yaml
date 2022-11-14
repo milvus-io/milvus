@@ -65,7 +65,8 @@ mysql:
 
 # please adjust in embedded Milvus: /tmp/milvus/data/
 localStorage:
-  path: /var/lib/milvus/data/
+  path: /var/lib/milvus/data/ # used to storage rdb datas, which must be persistent
+  tempFilePath: /milvus/data/ # used for build disk index and load disk index or raw data, data can be cleaned when restart.
 
 # Related configuration of MinIO/S3/GCS or any other service supports S3 API, which is responsible for data persistence for Milvus.
 # We refer to the storage service as MinIO/S3 in the following description for simplicity.
