@@ -278,6 +278,8 @@ TEST(Retrieve, Delete) {
     auto DIM = 16;
     auto fid_vec = schema->AddDebugField("vector_64", DataType::VECTOR_FLOAT, DIM, knowhere::metric::L2);
     schema->set_primary_field_id(fid_64);
+    // auto fid_ts = FieldId(1);
+    auto fid_ts = schema->AddDebugField("Timestamp", DataType::INT64);
 
     int64_t N = 10;
     int64_t req_size = 10;
@@ -287,6 +289,7 @@ TEST(Retrieve, Delete) {
     auto segment = CreateSealedSegment(schema);
     SealedLoadFieldData(dataset, *segment);
     auto i64_col = dataset.get_col<int64_t>(fid_64);
+    auto ts_col = dataset.get_col<int64_t>(fid_ts);
 
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
     std::vector<int64_t> values;
@@ -296,12 +299,15 @@ TEST(Retrieve, Delete) {
     auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(fid_64, DataType::INT64, values);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
     plan->plan_node_->predicate_ = std::move(term_expr);
-    std::vector<FieldId> target_offsets{fid_64, fid_vec};
+
+    std::vector<FieldId> target_offsets{FieldId(1), fid_64, fid_vec};
     plan->field_ids_ = target_offsets;
 
     {
         auto retrieve_results = segment->Retrieve(plan.get(), 100);
-        Assert(retrieve_results->fields_data_size() == target_offsets.size());
+        ASSERT_EQ(retrieve_results->fields_data_size(), target_offsets.size());
+        // Assert(retrieve_results->fields_data_size() == target_offsets.size());
+
         auto field0 = retrieve_results->fields_data(0);
         Assert(field0.has_scalars());
         auto field0_data = field0.scalars().long_data();
@@ -309,18 +315,24 @@ TEST(Retrieve, Delete) {
         for (int i = 0; i < req_size; ++i) {
             auto index = choose(i);
             auto data = field0_data.data(i);
-        }
-
-        for (int i = 0; i < req_size; ++i) {
-            auto index = choose(i);
-            auto data = field0_data.data(i);
-            ASSERT_EQ(data, i64_col[index]);
+            std::cout << "ts col, i: " << i << ", index: " << index << ": " << ts_col[index] << std::endl;
+            // ASSERT_EQ(data, ts_col[index]);
         }
 
         auto field1 = retrieve_results->fields_data(1);
-        Assert(field1.has_vectors());
-        auto field1_data = field1.vectors().float_vector();
-        ASSERT_EQ(field1_data.data_size(), DIM * req_size);
+        Assert(field1.has_scalars());
+        auto field1_data = field1.scalars().long_data();
+
+        for (int i = 0; i < req_size; ++i) {
+            auto index = choose(i);
+            auto data = field1_data.data(i);
+            ASSERT_EQ(data, i64_col[index]);
+        }
+
+        auto field2 = retrieve_results->fields_data(2);
+        Assert(field2.has_vectors());
+        auto field2_data = field2.vectors().float_vector();
+        ASSERT_EQ(field2_data.data_size(), DIM * req_size);
     }
 
     int64_t row_count = 0;
@@ -350,7 +362,7 @@ TEST(Retrieve, Delete) {
     {
         auto retrieve_results = segment->Retrieve(plan.get(), 100);
         Assert(retrieve_results->fields_data_size() == target_offsets.size());
-        auto field0 = retrieve_results->fields_data(0);
+        auto field0 = retrieve_results->fields_data(1);
         Assert(field0.has_scalars());
         auto field0_data = field0.scalars().long_data();
         auto size = req_size - new_count;
@@ -360,7 +372,7 @@ TEST(Retrieve, Delete) {
             ASSERT_EQ(data, i64_col[index + new_count]);
         }
 
-        auto field1 = retrieve_results->fields_data(1);
+        auto field1 = retrieve_results->fields_data(2);
         Assert(field1.has_vectors());
         auto field1_data = field1.vectors().float_vector();
         ASSERT_EQ(field1_data.data_size(), DIM * size);

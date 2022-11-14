@@ -423,10 +423,16 @@ SegmentSealedImpl::bulk_subscript(SystemFieldType system_type,
                                   const int64_t* seg_offsets,
                                   int64_t count,
                                   void* output) const {
+    // AssertInfo(is_system_field_ready(), "System field isn't ready when do bulk_insert");
+    // AssertInfo(system_type == SystemFieldType::RowId, "System field type of id column is not RowId");
+    // AssertInfo(insert_record_.row_ids_.num_chunk() == 1, "num chunk not equal to 1 for sealed segment");
+    // auto field_data = insert_record_.row_ids_.get_chunk_data(0);
+    // bulk_subscript_impl<int64_t>(field_data, seg_offsets, count, output);
     AssertInfo(is_system_field_ready(), "System field isn't ready when do bulk_insert");
-    AssertInfo(system_type == SystemFieldType::RowId, "System field type of id column is not RowId");
-    AssertInfo(insert_record_.row_ids_.num_chunk() == 1, "num chunk not equal to 1 for sealed segment");
-    auto field_data = insert_record_.row_ids_.get_chunk_data(0);
+    AssertInfo(system_type == SystemFieldType::Timestamp, "System field type of id column is not Timestamp");
+    AssertInfo(insert_record_.timestamps_.num_chunk() == 1, "num chunk not equal to 1 for sealed segment");
+    auto field_data = insert_record_.timestamps_.get_chunk_data(0);
+
     bulk_subscript_impl<int64_t>(field_data, seg_offsets, count, output);
 }
 
