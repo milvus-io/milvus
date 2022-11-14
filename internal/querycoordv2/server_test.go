@@ -18,6 +18,7 @@ package querycoordv2
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -138,6 +139,26 @@ func (suite *ServerSuite) TestRecover() {
 
 	for _, collection := range suite.collections {
 		suite.assertLoaded(collection)
+	}
+}
+
+func (suite *ServerSuite) TestRecoverFailed() {
+	err := suite.server.Stop()
+	suite.NoError(err)
+
+	suite.server, err = newQueryCoord()
+	suite.NoError(err)
+
+	broker := meta.NewMockBroker(suite.T())
+	broker.EXPECT().GetPartitions(context.TODO(), int64(1000)).Return(nil, errors.New("CollectionNotExist"))
+	broker.EXPECT().GetRecoveryInfo(context.TODO(), int64(1001), mock.Anything).Return(nil, nil, errors.New("CollectionNotExist"))
+	suite.server.targetMgr = meta.NewTargetManager(broker, suite.server.meta)
+	err = suite.server.Start()
+	suite.NoError(err)
+
+	for _, collection := range suite.collections {
+		suite.False(suite.server.meta.Exist(collection))
+		suite.Nil(suite.server.targetMgr.GetDmChannelsByCollection(collection, meta.NextTarget))
 	}
 }
 
