@@ -187,7 +187,7 @@ func (c *Core) sendTimeTick(t Timestamp, reason string) error {
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_TimeTick),
 			commonpbutil.WithTimeStamp(t),
-			commonpbutil.WithSourceID(c.session.ServerID),
+			commonpbutil.WithSourceID(ddlSourceID),
 		),
 		ChannelNames:     pc,
 		Timestamps:       pt,
@@ -197,6 +197,11 @@ func (c *Core) sendTimeTick(t Timestamp, reason string) error {
 }
 
 func (c *Core) sendMinDdlTsAsTt() {
+	code := c.stateCode.Load().(commonpb.StateCode)
+	if code != commonpb.StateCode_Healthy {
+		log.Warn("rootCoord is not healthy, skip send timetick")
+		return
+	}
 	minBgDdlTs := c.ddlTsLockManager.GetMinDdlTs()
 	minNormalDdlTs := c.scheduler.GetMinDdlTs()
 	minDdlTs := funcutil.Min(minBgDdlTs, minNormalDdlTs)
@@ -452,7 +457,6 @@ func (c *Core) initInternal() error {
 
 	chanMap := c.meta.ListCollectionPhysicalChannels()
 	c.chanTimeTick = newTimeTickSync(c.ctx, c.session.ServerID, c.factory, chanMap)
-	c.chanTimeTick.addSession(c.session)
 	c.proxyClientManager = newProxyClientManager(c.proxyCreator)
 
 	c.broker = newServerBroker(c)

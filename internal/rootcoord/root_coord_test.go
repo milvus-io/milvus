@@ -1276,6 +1276,9 @@ func TestCore_sendMinDdlTsAsTt(t *testing.T) {
 		withTtSynchronizer(ticker),
 		withDdlTsLockManager(ddlManager),
 		withScheduler(sched))
+
+	c.stateCode.Store(commonpb.StateCode_Healthy)
+	c.session.ServerID = TestRootCoordID
 	c.sendMinDdlTsAsTt() // no session.
 	ticker.addSession(&sessionutil.Session{ServerID: TestRootCoordID})
 	c.sendMinDdlTsAsTt()
@@ -1311,6 +1314,7 @@ func TestCore_startTimeTickLoop(t *testing.T) {
 	c.ctx = ctx
 	Params.ProxyCfg.TimeTickInterval = time.Millisecond
 	c.wg.Add(1)
+	c.UpdateStateCode(commonpb.StateCode_Initializing)
 	go c.startTimeTickLoop()
 
 	time.Sleep(time.Millisecond * 4)
