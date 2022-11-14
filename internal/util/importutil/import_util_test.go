@@ -17,6 +17,7 @@ package importutil
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -180,6 +181,10 @@ func strKeySchema() *schemapb.CollectionSchema {
 	return schema
 }
 
+func jsonNumber(value string) json.Number {
+	return json.Number(value)
+}
+
 func Test_IsCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -245,7 +250,7 @@ func Test_InitValidators(t *testing.T) {
 	fields := initSegmentData(schema)
 	assert.NotNil(t, fields)
 
-	checkFunc := func(funcName string, validVal interface{}, invalidVal interface{}) {
+	checkValidateFunc := func(funcName string, validVal interface{}, invalidVal interface{}) {
 		id := name2ID[funcName]
 		v, ok := validators[id]
 		assert.True(t, ok)
@@ -253,6 +258,12 @@ func Test_InitValidators(t *testing.T) {
 		assert.Nil(t, err)
 		err = v.validateFunc(invalidVal)
 		assert.NotNil(t, err)
+	}
+
+	checkConvertFunc := func(funcName string, validVal interface{}, invalidVal interface{}) {
+		id := name2ID[funcName]
+		v, ok := validators[id]
+		assert.True(t, ok)
 
 		fieldData := fields[id]
 		preNum := fieldData.RowNum()
@@ -260,94 +271,133 @@ func Test_InitValidators(t *testing.T) {
 		assert.Nil(t, err)
 		postNum := fieldData.RowNum()
 		assert.Equal(t, 1, postNum-preNum)
+
+		if invalidVal != nil {
+			err = v.convertFunc(invalidVal, fieldData)
+			assert.NotNil(t, err)
+		}
 	}
 
-	// validate functions
-	var validVal interface{} = true
-	var invalidVal interface{} = "aa"
-	checkFunc("field_bool", validVal, invalidVal)
+	t.Run("check validate functions", func(t *testing.T) {
+		var validVal interface{} = true
+		var invalidVal interface{} = "aa"
+		checkValidateFunc("field_bool", validVal, invalidVal)
 
-	validVal = float64(100)
-	invalidVal = "aa"
-	checkFunc("field_int8", validVal, invalidVal)
-	checkFunc("field_int16", validVal, invalidVal)
-	checkFunc("field_int32", validVal, invalidVal)
-	checkFunc("field_int64", validVal, invalidVal)
-	checkFunc("field_float", validVal, invalidVal)
-	checkFunc("field_double", validVal, invalidVal)
+		validVal = jsonNumber("100")
+		invalidVal = "aa"
+		checkValidateFunc("field_int8", validVal, invalidVal)
+		checkValidateFunc("field_int16", validVal, invalidVal)
+		checkValidateFunc("field_int32", validVal, invalidVal)
+		checkValidateFunc("field_int64", validVal, invalidVal)
+		checkValidateFunc("field_float", validVal, invalidVal)
+		checkValidateFunc("field_double", validVal, invalidVal)
 
-	validVal = "aa"
-	invalidVal = 100
-	checkFunc("field_string", validVal, invalidVal)
+		validVal = "aa"
+		invalidVal = 100
+		checkValidateFunc("field_string", validVal, invalidVal)
 
-	validVal = []interface{}{float64(100), float64(101)}
-	invalidVal = "aa"
-	checkFunc("field_binary_vector", validVal, invalidVal)
-	invalidVal = []interface{}{float64(100)}
-	checkFunc("field_binary_vector", validVal, invalidVal)
-	invalidVal = []interface{}{float64(100), float64(101), float64(102)}
-	checkFunc("field_binary_vector", validVal, invalidVal)
-	invalidVal = []interface{}{true, true}
-	checkFunc("field_binary_vector", validVal, invalidVal)
-	invalidVal = []interface{}{float64(255), float64(-1)}
-	checkFunc("field_binary_vector", validVal, invalidVal)
+		// the binary vector dimension is 16, shoud input 2 uint8 values
+		validVal = []interface{}{jsonNumber("100"), jsonNumber("101")}
+		invalidVal = "aa"
+		checkValidateFunc("field_binary_vector", validVal, invalidVal)
+		invalidVal = []interface{}{jsonNumber("100")}
+		checkValidateFunc("field_binary_vector", validVal, invalidVal)
+		invalidVal = []interface{}{jsonNumber("100"), jsonNumber("101"), jsonNumber("102")}
+		checkValidateFunc("field_binary_vector", validVal, invalidVal)
+		invalidVal = []interface{}{100, jsonNumber("100")}
+		checkValidateFunc("field_binary_vector", validVal, invalidVal)
 
-	validVal = []interface{}{float64(1), float64(2), float64(3), float64(4)}
-	invalidVal = true
-	checkFunc("field_float_vector", validVal, invalidVal)
-	invalidVal = []interface{}{float64(1), float64(2), float64(3)}
-	checkFunc("field_float_vector", validVal, invalidVal)
-	invalidVal = []interface{}{float64(1), float64(2), float64(3), float64(4), float64(5)}
-	checkFunc("field_float_vector", validVal, invalidVal)
-	invalidVal = []interface{}{"a", "b", "c", "d"}
-	checkFunc("field_float_vector", validVal, invalidVal)
-
-	// error cases
-	schema = &schemapb.CollectionSchema{
-		Name:        "schema",
-		Description: "schema",
-		AutoID:      true,
-		Fields:      make([]*schemapb.FieldSchema, 0),
-	}
-	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
-		FieldID:      111,
-		Name:         "field_float_vector",
-		IsPrimaryKey: false,
-		DataType:     schemapb.DataType_FloatVector,
-		TypeParams: []*commonpb.KeyValuePair{
-			{Key: "dim", Value: "aa"},
-		},
+		// the float vector dimension is 4, shoud input 4 float values
+		validVal = []interface{}{jsonNumber("1"), jsonNumber("2"), jsonNumber("3"), jsonNumber("4")}
+		invalidVal = true
+		checkValidateFunc("field_float_vector", validVal, invalidVal)
+		invalidVal = []interface{}{jsonNumber("1"), jsonNumber("2"), jsonNumber("3")}
+		checkValidateFunc("field_float_vector", validVal, invalidVal)
+		invalidVal = []interface{}{jsonNumber("1"), jsonNumber("2"), jsonNumber("3"), jsonNumber("4"), jsonNumber("5")}
+		checkValidateFunc("field_float_vector", validVal, invalidVal)
+		invalidVal = []interface{}{"a", "b", "c", "d"}
+		checkValidateFunc("field_float_vector", validVal, invalidVal)
 	})
 
-	validators = make(map[storage.FieldID]*Validator)
-	err = initValidators(schema, validators)
-	assert.NotNil(t, err)
+	t.Run("check convert functions", func(t *testing.T) {
+		var validVal interface{} = true
+		var invalidVal interface{}
+		checkConvertFunc("field_bool", validVal, invalidVal)
 
-	schema.Fields = make([]*schemapb.FieldSchema, 0)
-	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
-		FieldID:      110,
-		Name:         "field_binary_vector",
-		IsPrimaryKey: false,
-		DataType:     schemapb.DataType_BinaryVector,
-		TypeParams: []*commonpb.KeyValuePair{
-			{Key: "dim", Value: "aa"},
-		},
+		validVal = jsonNumber("100")
+		invalidVal = jsonNumber("128")
+		checkConvertFunc("field_int8", validVal, invalidVal)
+		invalidVal = jsonNumber("65536")
+		checkConvertFunc("field_int16", validVal, invalidVal)
+		invalidVal = jsonNumber("2147483648")
+		checkConvertFunc("field_int32", validVal, invalidVal)
+		invalidVal = jsonNumber("1.2")
+		checkConvertFunc("field_int64", validVal, invalidVal)
+		invalidVal = jsonNumber("dummy")
+		checkConvertFunc("field_float", validVal, invalidVal)
+		checkConvertFunc("field_double", validVal, invalidVal)
+
+		validVal = "aa"
+		checkConvertFunc("field_string", validVal, nil)
+
+		// the binary vector dimension is 16, shoud input two uint8 values, each value should between 0~255
+		validVal = []interface{}{jsonNumber("100"), jsonNumber("101")}
+		invalidVal = []interface{}{jsonNumber("100"), jsonNumber("256")}
+		checkConvertFunc("field_binary_vector", validVal, invalidVal)
+
+		// the float vector dimension is 4, each value should be valid float number
+		validVal = []interface{}{jsonNumber("1"), jsonNumber("2"), jsonNumber("3"), jsonNumber("4")}
+		invalidVal = []interface{}{jsonNumber("1"), jsonNumber("2"), jsonNumber("3"), jsonNumber("dummy")}
+		checkConvertFunc("field_float_vector", validVal, invalidVal)
 	})
 
-	err = initValidators(schema, validators)
-	assert.NotNil(t, err)
+	t.Run("init error cases", func(t *testing.T) {
+		schema = &schemapb.CollectionSchema{
+			Name:        "schema",
+			Description: "schema",
+			AutoID:      true,
+			Fields:      make([]*schemapb.FieldSchema, 0),
+		}
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			FieldID:      111,
+			Name:         "field_float_vector",
+			IsPrimaryKey: false,
+			DataType:     schemapb.DataType_FloatVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: "dim", Value: "aa"},
+			},
+		})
 
-	// unsupported data type
-	schema.Fields = make([]*schemapb.FieldSchema, 0)
-	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
-		FieldID:      110,
-		Name:         "dummy",
-		IsPrimaryKey: false,
-		DataType:     schemapb.DataType_None,
+		validators = make(map[storage.FieldID]*Validator)
+		err = initValidators(schema, validators)
+		assert.NotNil(t, err)
+
+		schema.Fields = make([]*schemapb.FieldSchema, 0)
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			FieldID:      110,
+			Name:         "field_binary_vector",
+			IsPrimaryKey: false,
+			DataType:     schemapb.DataType_BinaryVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{Key: "dim", Value: "aa"},
+			},
+		})
+
+		err = initValidators(schema, validators)
+		assert.NotNil(t, err)
+
+		// unsupported data type
+		schema.Fields = make([]*schemapb.FieldSchema, 0)
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			FieldID:      110,
+			Name:         "dummy",
+			IsPrimaryKey: false,
+			DataType:     schemapb.DataType_None,
+		})
+
+		err = initValidators(schema, validators)
+		assert.NotNil(t, err)
 	})
-
-	err = initValidators(schema, validators)
-	assert.NotNil(t, err)
 }
 
 func Test_GetFileNameAndExt(t *testing.T) {
