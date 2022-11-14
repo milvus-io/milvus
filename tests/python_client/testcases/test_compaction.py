@@ -1161,8 +1161,6 @@ class TestCompactionOperation(TestcaseBase):
         # create collection and partition
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), shards_num=1)
         partition_w = self.init_partition_wrap(collection_wrap=collection_w)
-        collection_w.create_index(ct.default_float_vec_field_name, ct.default_index)
-        log.debug(collection_w.index())
 
         # insert
         df = cf.gen_default_dataframe_data(tmp_nb)
@@ -1170,6 +1168,10 @@ class TestCompactionOperation(TestcaseBase):
         assert collection_w.num_entities == tmp_nb
         partition_w.insert(df)
         assert collection_w.num_entities == tmp_nb * 2
+
+        # compaction only applied to indexed segments.
+        collection_w.create_index(ct.default_float_vec_field_name, ct.default_index)
+        log.debug(collection_w.index())
 
         # compact
         collection_w.compact()
