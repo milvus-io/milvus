@@ -46,7 +46,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
-	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
@@ -515,9 +514,12 @@ func (s *Server) recover() error {
 func (s *Server) recoverCollectionTargets(ctx context.Context, collection int64) error {
 	err := s.targetMgr.UpdateCollectionNextTarget(collection)
 	if err != nil {
-		msg := "failed to update next target for collection"
-		log.Error(msg, zap.Error(err))
-		return utils.WrapError(msg, err)
+		s.meta.CollectionManager.RemoveCollection(collection)
+		s.meta.ReplicaManager.RemoveCollection(collection)
+		log.Error("failed to recover collection due to update next target failed",
+			zap.Int64("collectionID", collection),
+			zap.Error(err),
+		)
 	}
 	return nil
 }
