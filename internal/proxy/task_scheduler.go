@@ -482,7 +482,7 @@ func (sched *taskScheduler) definitionLoop() {
 		case <-sched.ddQueue.utChan():
 			if !sched.ddQueue.utEmpty() {
 				t := sched.scheduleDdTask()
-				sched.processTask(t, sched.ddQueue)
+				go sched.processTask(t, sched.ddQueue)
 			}
 		}
 	}
