@@ -253,6 +253,15 @@ func Test_JSONRowConsumer(t *testing.T) {
 
 	assert.Equal(t, shardNum, callTime)
 	assert.Equal(t, 5, totalCount)
+
+	// parse primary key error
+	reader = strings.NewReader(`{
+			"rows":[
+				{"field_bool": true, "field_int8": 10, "field_int16": 101, "field_int32": 1001, "field_int64": 0.5, "field_float": 3.14, "field_double": 1.56, "field_string": "hello world", "field_binary_vector": [254, 0], "field_float_vector": [1.1, 1.2, 1.3, 1.4]}
+			]
+		}`)
+	err = parser.ParseRows(reader, validator)
+	assert.Error(t, err)
 }
 
 func Test_JSONRowConsumerFlush(t *testing.T) {

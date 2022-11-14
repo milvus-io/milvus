@@ -97,6 +97,11 @@ func (p *JSONParser) ParseRows(r io.Reader, handler JSONRowHandler) error {
 
 	dec := json.NewDecoder(r)
 
+	// treat number value as a string instead of a float64.
+	// by default, json lib treat all number values as float64, but if an int64 value
+	// has more than 15 digits, the value would be incorrect after converting from float64
+	dec.UseNumber()
+
 	t, err := dec.Token()
 	if err != nil {
 		log.Error("JSON parser: failed to decode the JSON file", zap.Error(err))

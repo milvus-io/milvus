@@ -18,6 +18,7 @@ package importutil
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path"
@@ -127,14 +128,15 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 	}
 
 	// json decoder parse all the numeric value into float64
-	numericValidator := func(obj interface{}) error {
-		switch obj.(type) {
-		case float64:
-			return nil
-		default:
-			return fmt.Errorf("illegal numeric value %v", obj)
+	numericValidator := func(fieldName string) func(obj interface{}) error {
+		return func(obj interface{}) error {
+			switch obj.(type) {
+			case json.Number:
+				return nil
+			default:
+				return fmt.Errorf("illegal value %v for numeric type field '%s'", obj, fieldName)
+			}
 		}
-
 	}
 
 	for i := 0; i < len(collectionSchema.Fields); i++ {
@@ -153,7 +155,7 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 				case bool:
 					return nil
 				default:
-					return fmt.Errorf("illegal value %v for bool type field '%s'", obj, schema.GetName())
+					return fmt.Errorf("illegal value '%v' for bool type field '%s'", obj, schema.GetName())
 				}
 
 			}
@@ -164,49 +166,73 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 				return nil
 			}
 		case schemapb.DataType_Float:
-			validators[schema.GetFieldID()].validateFunc = numericValidator
+			validators[schema.GetFieldID()].validateFunc = numericValidator(schema.GetName())
 			validators[schema.GetFieldID()].convertFunc = func(obj interface{}, field storage.FieldData) error {
-				value := float32(obj.(float64))
-				field.(*storage.FloatFieldData).Data = append(field.(*storage.FloatFieldData).Data, value)
+				value, err := strconv.ParseFloat(string(obj.(json.Number)), 32)
+				if err != nil {
+					return fmt.Errorf("failed to parse value '%v' for float type field '%s', error: %w",
+						obj, schema.GetName(), err)
+				}
+				field.(*storage.FloatFieldData).Data = append(field.(*storage.FloatFieldData).Data, float32(value))
 				field.(*storage.FloatFieldData).NumRows[0]++
 				return nil
 			}
 		case schemapb.DataType_Double:
-			validators[schema.GetFieldID()].validateFunc = numericValidator
+			validators[schema.GetFieldID()].validateFunc = numericValidator(schema.GetName())
 			validators[schema.GetFieldID()].convertFunc = func(obj interface{}, field storage.FieldData) error {
-				value := obj.(float64)
+				value, err := strconv.ParseFloat(string(obj.(json.Number)), 32)
+				if err != nil {
+					return fmt.Errorf("failed to parse value '%v' for double type field '%s', error: %w",
+						obj, schema.GetName(), err)
+				}
 				field.(*storage.DoubleFieldData).Data = append(field.(*storage.DoubleFieldData).Data, value)
 				field.(*storage.DoubleFieldData).NumRows[0]++
 				return nil
 			}
 		case schemapb.DataType_Int8:
-			validators[schema.GetFieldID()].validateFunc = numericValidator
+			validators[schema.GetFieldID()].validateFunc = numericValidator(schema.GetName())
 			validators[schema.GetFieldID()].convertFunc = func(obj interface{}, field storage.FieldData) error {
-				value := int8(obj.(float64))
-				field.(*storage.Int8FieldData).Data = append(field.(*storage.Int8FieldData).Data, value)
+				value, err := strconv.ParseInt(string(obj.(json.Number)), 10, 8)
+				if err != nil {
+					return fmt.Errorf("failed to parse value '%v' for int8 type field '%s', error: %w",
+						obj, schema.GetName(), err)
+				}
+				field.(*storage.Int8FieldData).Data = append(field.(*storage.Int8FieldData).Data, int8(value))
 				field.(*storage.Int8FieldData).NumRows[0]++
 				return nil
 			}
 		case schemapb.DataType_Int16:
-			validators[schema.GetFieldID()].validateFunc = numericValidator
+			validators[schema.GetFieldID()].validateFunc = numericValidator(schema.GetName())
 			validators[schema.GetFieldID()].convertFunc = func(obj interface{}, field storage.FieldData) error {
-				value := int16(obj.(float64))
-				field.(*storage.Int16FieldData).Data = append(field.(*storage.Int16FieldData).Data, value)
+				value, err := strconv.ParseInt(string(obj.(json.Number)), 10, 16)
+				if err != nil {
+					return fmt.Errorf("failed to parse value '%v' for int16 type field '%s', error: %w",
+						obj, schema.GetName(), err)
+				}
+				field.(*storage.Int16FieldData).Data = append(field.(*storage.Int16FieldData).Data, int16(value))
 				field.(*storage.Int16FieldData).NumRows[0]++
 				return nil
 			}
 		case schemapb.DataType_Int32:
-			validators[schema.GetFieldID()].validateFunc = numericValidator
+			validators[schema.GetFieldID()].validateFunc = numericValidator(schema.GetName())
 			validators[schema.GetFieldID()].convertFunc = func(obj interface{}, field storage.FieldData) error {
-				value := int32(obj.(float64))
-				field.(*storage.Int32FieldData).Data = append(field.(*storage.Int32FieldData).Data, value)
+				value, err := strconv.ParseInt(string(obj.(json.Number)), 10, 32)
+				if err != nil {
+					return fmt.Errorf("failed to parse value '%v' for int32 type field '%s', error: %w",
+						obj, schema.GetName(), err)
+				}
+				field.(*storage.Int32FieldData).Data = append(field.(*storage.Int32FieldData).Data, int32(value))
 				field.(*storage.Int32FieldData).NumRows[0]++
 				return nil
 			}
 		case schemapb.DataType_Int64:
-			validators[schema.GetFieldID()].validateFunc = numericValidator
+			validators[schema.GetFieldID()].validateFunc = numericValidator(schema.GetName())
 			validators[schema.GetFieldID()].convertFunc = func(obj interface{}, field storage.FieldData) error {
-				value := int64(obj.(float64))
+				value, err := strconv.ParseInt(string(obj.(json.Number)), 10, 64)
+				if err != nil {
+					return fmt.Errorf("failed to parse value '%v' for int64 type field '%s', error: %w",
+						obj, schema.GetName(), err)
+				}
 				field.(*storage.Int64FieldData).Data = append(field.(*storage.Int64FieldData).Data, value)
 				field.(*storage.Int64FieldData).NumRows[0]++
 				return nil
@@ -224,27 +250,27 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 					if len(vt)*8 != dim {
 						return fmt.Errorf("bit size %d doesn't equal to vector dimension %d of field '%s'", len(vt)*8, dim, schema.GetName())
 					}
+					numValidateFunc := numericValidator(schema.GetName())
 					for i := 0; i < len(vt); i++ {
-						if e := numericValidator(vt[i]); e != nil {
-							return fmt.Errorf("%s for binary vector field '%s'", e.Error(), schema.GetName())
-						}
-
-						t := int(vt[i].(float64))
-						if t > 255 || t < 0 {
-							return fmt.Errorf("illegal value %d for binary vector field '%s'", t, schema.GetName())
+						if e := numValidateFunc(vt[i]); e != nil {
+							return e
 						}
 					}
 					return nil
 				default:
-					return fmt.Errorf("%v is not an array for binary vector field '%s'", obj, schema.GetName())
+					return fmt.Errorf("'%v' is not an array for binary vector field '%s'", obj, schema.GetName())
 				}
 			}
 
 			validators[schema.GetFieldID()].convertFunc = func(obj interface{}, field storage.FieldData) error {
 				arr := obj.([]interface{})
 				for i := 0; i < len(arr); i++ {
-					value := byte(arr[i].(float64))
-					field.(*storage.BinaryVectorFieldData).Data = append(field.(*storage.BinaryVectorFieldData).Data, value)
+					value, err := strconv.ParseUint(string(arr[i].(json.Number)), 10, 8)
+					if err != nil {
+						return fmt.Errorf("failed to parse value '%v' for binary vector type field '%s', error: %w",
+							obj, schema.GetName(), err)
+					}
+					field.(*storage.BinaryVectorFieldData).Data = append(field.(*storage.BinaryVectorFieldData).Data, byte(value))
 				}
 
 				field.(*storage.BinaryVectorFieldData).NumRows[0]++
@@ -263,22 +289,27 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 					if len(vt) != dim {
 						return fmt.Errorf("array size %d doesn't equal to vector dimension %d of field '%s'", len(vt), dim, schema.GetName())
 					}
+					numValidateFunc := numericValidator(schema.GetName())
 					for i := 0; i < len(vt); i++ {
-						if e := numericValidator(vt[i]); e != nil {
-							return fmt.Errorf("%s for float vector field '%s'", e.Error(), schema.GetName())
+						if e := numValidateFunc(vt[i]); e != nil {
+							return e
 						}
 					}
 					return nil
 				default:
-					return fmt.Errorf("%v is not an array for float vector field '%s'", obj, schema.GetName())
+					return fmt.Errorf("'%v' is not an array for float vector field '%s'", obj, schema.GetName())
 				}
 			}
 
 			validators[schema.GetFieldID()].convertFunc = func(obj interface{}, field storage.FieldData) error {
 				arr := obj.([]interface{})
 				for i := 0; i < len(arr); i++ {
-					value := float32(arr[i].(float64))
-					field.(*storage.FloatVectorFieldData).Data = append(field.(*storage.FloatVectorFieldData).Data, value)
+					value, err := strconv.ParseFloat(string(arr[i].(json.Number)), 32)
+					if err != nil {
+						return fmt.Errorf("failed to parse value '%v' for binary vector type field '%s', error: %w",
+							obj, schema.GetName(), err)
+					}
+					field.(*storage.FloatVectorFieldData).Data = append(field.(*storage.FloatVectorFieldData).Data, float32(value))
 				}
 				field.(*storage.FloatVectorFieldData).NumRows[0]++
 				return nil
@@ -290,7 +321,7 @@ func initValidators(collectionSchema *schemapb.CollectionSchema, validators map[
 				case string:
 					return nil
 				default:
-					return fmt.Errorf("%v is not a string for string type field '%s'", obj, schema.GetName())
+					return fmt.Errorf("'%v' is not a string for varchar type field '%s'", obj, schema.GetName())
 				}
 			}
 

@@ -17,9 +17,11 @@
 package importutil
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
+	"strconv"
 
 	"go.uber.org/zap"
 
@@ -319,7 +321,15 @@ func (v *JSONRowConsumer) Handle(rows []map[storage.FieldID]interface{}) error {
 				pk = rowIDBegin + int64(i)
 			} else {
 				value := row[v.primaryKey]
-				pk = int64(value.(float64))
+				// parse the pk from a string
+				strValue := string(value.(json.Number))
+				pk, err = strconv.ParseInt(strValue, 10, 64)
+				if err != nil {
+					log.Error("JSON row consumer: failed to parse primary key at the row",
+						zap.String("value", strValue), zap.Int64("rowNumber", v.rowCounter+int64(i)), zap.Error(err))
+					return fmt.Errorf("failed to parse primary key '%s' at the row %d, error: %w",
+						strValue, v.rowCounter+int64(i), err)
+				}
 			}
 
 			hash, err := typeutil.Hash32Int64(pk)
