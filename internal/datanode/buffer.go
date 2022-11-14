@@ -115,7 +115,7 @@ func (bm *DelBufferManager) Load(segID UniqueID) (delDataBuf *DelDataBuf, ok boo
 	if ok {
 		return buffer, ok
 	}
-	return nil, ok
+	return nil, false
 }
 
 func (bm *DelBufferManager) Delete(segID UniqueID) {
@@ -127,14 +127,6 @@ func (bm *DelBufferManager) Delete(segID UniqueID) {
 	}
 }
 
-func (bm *DelBufferManager) LoadAndDelete(segID UniqueID) (delDataBuf *DelDataBuf, ok bool) {
-	if buf, ok := bm.Load(segID); ok {
-		bm.Delete(segID)
-		return buf, ok
-	}
-	return nil, ok
-}
-
 func (bm *DelBufferManager) CompactSegBuf(compactedToSegID UniqueID, compactedFromSegIDs []UniqueID) {
 	var compactToDelBuff *DelDataBuf
 	compactToDelBuff, loaded := bm.Load(compactedToSegID)
@@ -143,8 +135,9 @@ func (bm *DelBufferManager) CompactSegBuf(compactedToSegID UniqueID, compactedFr
 	}
 
 	for _, segID := range compactedFromSegIDs {
-		if delDataBuf, loaded := bm.LoadAndDelete(segID); loaded {
+		if delDataBuf, loaded := bm.Load(segID); loaded {
 			compactToDelBuff.mergeDelDataBuf(delDataBuf)
+			bm.Delete(segID)
 		}
 	}
 	// only store delBuf if EntriesNum > 0
