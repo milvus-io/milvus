@@ -18,10 +18,9 @@ package roles
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/signal"
-	"path"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -188,11 +187,7 @@ func (mr *MilvusRoles) setupLogger() {
 	roleName := paramtable.GetRole()
 	rootPath := logConfig.File.RootPath
 	if rootPath != "" {
-		if id < 0 {
-			logConfig.File.Filename = path.Join(rootPath, roleName+".log")
-		} else {
-			logConfig.File.Filename = path.Join(rootPath, roleName+"-"+strconv.FormatInt(id, 10)+".log")
-		}
+		logConfig.File.Filename = fmt.Sprintf("%s-%d.log", roleName, id)
 	} else {
 		logConfig.File.Filename = ""
 	}
@@ -237,8 +232,6 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 		}
 		paramtable.Init()
 	}
-
-	mr.setupLogger()
 
 	if os.Getenv(metricsinfo.DeployModeEnvKey) == metricsinfo.StandaloneDeployMode {
 		closer := trace.InitTracing("standalone")
@@ -311,6 +304,8 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 			defer in.Stop()
 		}
 	}
+
+	mr.setupLogger()
 
 	metrics.Register(Registry)
 	management.ServeHTTP()
