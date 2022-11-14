@@ -647,14 +647,22 @@ func TestMetaTable_GetSegmentIndexState(t *testing.T) {
 }
 
 func TestMetaTable_GetIndexBuildProgress(t *testing.T) {
-	mt := constructMetaTable(&indexcoord.Catalog{})
-	indexRows := mt.GetIndexBuildProgress(indexID, 11)
+	mt := constructMetaTable(&indexcoord.Catalog{
+		Txn: NewMockEtcdKV(),
+	})
+	indexRows := mt.GetIndexBuildProgress(indexID, []UniqueID{segID})
 	assert.Equal(t, int64(1024), indexRows)
 
-	indexRows = mt.GetIndexBuildProgress(indexID+1, 11)
+	indexRows = mt.GetIndexBuildProgress(indexID+1, []UniqueID{segID})
 	assert.Equal(t, int64(0), indexRows)
 
-	indexRows = mt.GetIndexBuildProgress(indexID, 5)
+	indexRows = mt.GetIndexBuildProgress(indexID, []UniqueID{segID + 1})
+	assert.Equal(t, int64(0), indexRows)
+
+	err := mt.MarkSegmentsIndexAsDeletedByBuildID([]UniqueID{buildID})
+	assert.NoError(t, err)
+
+	indexRows = mt.GetIndexBuildProgress(indexID, []UniqueID{segID})
 	assert.Equal(t, int64(0), indexRows)
 }
 

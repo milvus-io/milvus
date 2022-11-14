@@ -135,8 +135,9 @@ func (gc *garbageCollector) recycleSegIndexesMeta() {
 	}
 	for collID, segIDs := range collID2segID {
 		resp, err := gc.indexCoordClient.dataCoordClient.GetFlushedSegments(gc.ctx, &datapb.GetFlushedSegmentsRequest{
-			CollectionID: collID,
-			PartitionID:  -1,
+			CollectionID:     collID,
+			PartitionID:      -1,
+			IncludeUnhealthy: true,
 		})
 		if err != nil {
 			log.Ctx(gc.ctx).Warn("IndexCoord garbageCollector get flushed segments from DataCoord fail",
