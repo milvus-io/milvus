@@ -253,7 +253,7 @@ func encodeSearchResultData(searchResultData *schemapb.SearchResultData, nq int6
 }
 
 func mergeInternalRetrieveResult(ctx context.Context, retrieveResults []*internalpb.RetrieveResults, limit int64) (*internalpb.RetrieveResults, error) {
-	log.Ctx(ctx).Debug("reduceInternelRetrieveResults",
+	log.Ctx(ctx).Debug("mergeInternelRetrieveResults",
 		zap.Int64("limit", limit),
 		zap.Int("len(retrieveResults)", len(retrieveResults)),
 	)
@@ -313,7 +313,7 @@ func mergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 }
 
 func mergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcorepb.RetrieveResults, limit int64) (*segcorepb.RetrieveResults, error) {
-	log.Ctx(ctx).Debug("reduceSegcoreRetrieveResults",
+	log.Ctx(ctx).Debug("mergeSegcoreRetrieveResults",
 		zap.Int64("limit", limit),
 		zap.Int("len(retrieveResults)", len(retrieveResults)),
 	)
