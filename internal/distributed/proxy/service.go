@@ -224,7 +224,6 @@ func (s *Server) startExternalGrpc(grpcPort int, errChan chan error) {
 		grpcOpts = append(grpcOpts, grpc.Creds(credentials.NewTLS(tlsConf)))
 	}
 	s.grpcExternalServer = grpc.NewServer(grpcOpts...)
-	proxypb.RegisterProxyServer(s.grpcExternalServer, s)
 	milvuspb.RegisterMilvusServiceServer(s.grpcExternalServer, s)
 	grpc_health_v1.RegisterHealthServer(s.grpcExternalServer, s)
 	errChan <- nil
@@ -273,7 +272,6 @@ func (s *Server) startInternalGrpc(grpcPort int, errChan chan error) {
 		)),
 	)
 	proxypb.RegisterProxyServer(s.grpcInternalServer, s)
-	milvuspb.RegisterMilvusServiceServer(s.grpcInternalServer, s)
 	grpc_health_v1.RegisterHealthServer(s.grpcInternalServer, s)
 	errChan <- nil
 
@@ -332,7 +330,7 @@ func (s *Server) init() error {
 	}
 	s.etcdCli = etcdCli
 	s.proxy.SetEtcdClient(s.etcdCli)
-	s.proxy.SetAddress(fmt.Sprintf("%s:%d", Params.IP, Params.Port))
+	s.proxy.SetAddress(fmt.Sprintf("%s:%d", Params.IP, Params.InternalPort))
 
 	errChan := make(chan error, 1)
 	{
