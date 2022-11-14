@@ -673,8 +673,12 @@ func (scheduler *taskScheduler) checkSegmentTaskStale(task *SegmentTask) bool {
 			}
 
 		case ActionTypeReduce:
-			// Do nothing here,
-			// the task should succeeded if the segment not exists
+			taskType := GetTaskType(task)
+			var segment *datapb.SegmentInfo
+			if taskType == TaskTypeReduce {
+				segment = scheduler.targetMgr.GetHistoricalSegment(task.CollectionID(), task.SegmentID(), meta.NextTarget)
+				return segment != nil
+			}
 		}
 	}
 	return false
@@ -696,8 +700,12 @@ func (scheduler *taskScheduler) checkChannelTaskStale(task *ChannelTask) bool {
 			}
 
 		case ActionTypeReduce:
-			// Do nothing here,
-			// the task should succeeded if the channel not exists
+			taskType := GetTaskType(task)
+			var channel *meta.DmChannel
+			if taskType == TaskTypeReduce {
+				channel = scheduler.targetMgr.GetDmChannel(task.CollectionID(), task.Channel(), meta.NextTarget)
+				return channel != nil
+			}
 		}
 	}
 	return false

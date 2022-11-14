@@ -292,7 +292,6 @@ func (job *ReleaseCollectionJob) Execute() error {
 	}
 
 	job.targetMgr.RemoveCollection(req.GetCollectionID())
-	waitCollectionReleased(job.dist, req.GetCollectionID())
 	metrics.QueryCoordNumCollections.WithLabelValues().Dec()
 	return nil
 }
@@ -515,7 +514,6 @@ func (job *ReleasePartitionJob) Execute() error {
 			log.Warn("failed to remove replicas", zap.Error(err))
 		}
 		job.targetMgr.RemoveCollection(req.GetCollectionID())
-		waitCollectionReleased(job.dist, req.GetCollectionID())
 	} else {
 		err := job.meta.CollectionManager.RemovePartition(toRelease...)
 		if err != nil {
@@ -524,7 +522,6 @@ func (job *ReleasePartitionJob) Execute() error {
 			return utils.WrapError(msg, err)
 		}
 		job.targetMgr.RemovePartition(req.GetCollectionID(), toRelease...)
-		waitCollectionReleased(job.dist, req.GetCollectionID(), toRelease...)
 	}
 	metrics.QueryCoordNumCollections.WithLabelValues().Dec()
 	return nil
