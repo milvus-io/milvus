@@ -209,17 +209,23 @@ func (m *meta) GetNumRowsOfCollection(collectionID UniqueID) int64 {
 	return ret
 }
 
-// GetTotalBinlogSize returns the total size (bytes) of all segments in cluster.
+// GetTotalBinlogSize returns the total size (bytes) of healthy segments in cluster.
 func (m *meta) GetTotalBinlogSize() int64 {
 	m.RLock()
 	defer m.RUnlock()
-	var ret int64
+	var totalHealthySize int64
 	segments := m.segments.GetSegments()
+	sizes := make(map[commonpb.SegmentState]int64)
 	for _, segment := range segments {
-		ret += segment.getSegmentSize()
+		if isSegmentHealthy(segment) {
+			totalHealthySize += segment.getSegmentSize()
+		}
+		sizes[segment.GetState()] += segment.getSegmentSize()
 	}
-	metrics.DataCoordStoredBinlogSize.WithLabelValues().Set(float64(ret))
-	return ret
+	for state, size := range sizes {
+		metrics.DataCoordStoredBinlogSize.WithLabelValues(state.String()).Set(float64(size))
+	}
+	return totalHealthySize
 }
 
 // AddSegment records segment info, persisting info into kv store

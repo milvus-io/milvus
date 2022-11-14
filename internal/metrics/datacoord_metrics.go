@@ -92,8 +92,8 @@ var (
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.DataCoordRole,
 			Name:      "stored_binlog_size",
-			Help:      "binlog size of all collections/segments",
-		}, []string{})
+			Help:      "binlog size of segments",
+		}, []string{segmentStateLabelName})
 
 	/* hard to implement, commented now
 	DataCoordSegmentSizeRatio = prometheus.NewHistogramVec(
