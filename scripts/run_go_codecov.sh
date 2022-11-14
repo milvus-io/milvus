@@ -27,6 +27,9 @@ source $BASEDIR/setenv.sh
 
 # run unittest
 echo "Running unittest under ./internal"
+
+# starting the timer
+beginTime=`date +%s`
 if [[ $(uname -s) == "Darwin" && "$(uname -m)" == "arm64" ]]; then
     APPLE_SILICON_FLAG="-tags dynamic"
 fi
@@ -37,6 +40,9 @@ for d in $(go list ./internal/... | grep -v -e vendor -e kafka -e planparserv2/g
         rm profile.out
     fi
 done
+endTime=`date +%s`
+
+echo "Total time for go unittest:" $(($endTime-$beginTime)) "s"
 
 # generate html report
 go tool cover -html=./${FILE_COVERAGE_INFO} -o ./${FILE_COVERAGE_HTML}

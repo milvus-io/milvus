@@ -57,6 +57,8 @@ if [ $? -ne 0 ]; then
     echo "Failed to generate coverage baseline"
     exit -1
 fi
+# starting the timer
+beginTime=`date +%s`
 
 # run unittest
 for test in `ls ${MILVUS_CORE_UNITTEST_DIR}`; do
@@ -91,3 +93,6 @@ ${LCOV_GEN_CMD} ${FILE_INFO_OUTPUT} --output-directory ${DIR_LCOV_OUTPUT}/
 echo "Generate cpp code coverage report to ${DIR_LCOV_OUTPUT}"
 
 
+endTime=`date +%s`
+
+echo "Total time for cpp unittest:" $(($endTime-$beginTime)) "s"
