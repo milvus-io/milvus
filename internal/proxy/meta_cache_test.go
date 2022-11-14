@@ -373,7 +373,7 @@ func TestMetaCache_GetShards(t *testing.T) {
 
 	qc.Init()
 	qc.Start()
-	defer qc.Stop()
+	defer qc.Stop(false)
 
 	t.Run("No collection in meta cache", func(t *testing.T) {
 		shards, err := globalMetaCache.GetShards(ctx, true, "non-exists")
@@ -421,7 +421,7 @@ func TestMetaCache_ClearShards(t *testing.T) {
 
 	qc.Init()
 	qc.Start()
-	defer qc.Stop()
+	defer qc.Stop(false)
 
 	t.Run("Clear with no collection info", func(t *testing.T) {
 		globalMetaCache.ClearShards("collection_not_exist")

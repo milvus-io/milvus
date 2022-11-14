@@ -144,6 +144,6 @@ func Test_NewClient(t *testing.T) {
 	}
 
 	// cleanup
-	err = client.Stop()
+	err = client.Stop(false)
 	assert.Nil(t, err)
 }

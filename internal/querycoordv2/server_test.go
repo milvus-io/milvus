@@ -118,17 +118,17 @@ func (suite *ServerSuite) SetupTest() {
 }
 
 func (suite *ServerSuite) TearDownTest() {
-	err := suite.server.Stop()
+	err := suite.server.Stop(false)
 	suite.Require().NoError(err)
 	for _, node := range suite.nodes {
 		if node != nil {
-			node.Stop()
+			node.Stop(false)
 		}
 	}
 }
 
 func (suite *ServerSuite) TestRecover() {
-	err := suite.server.Stop()
+	err := suite.server.Stop(false)
 	suite.NoError(err)
 
 	suite.server, err = newQueryCoord()
@@ -143,7 +143,7 @@ func (suite *ServerSuite) TestRecover() {
 }
 
 func (suite *ServerSuite) TestRecoverFailed() {
-	err := suite.server.Stop()
+	err := suite.server.Stop(false)
 	suite.NoError(err)
 
 	suite.server, err = newQueryCoord()
@@ -167,7 +167,7 @@ func (suite *ServerSuite) TestNodeUp() {
 	newNode.EXPECT().GetDataDistribution(mock.Anything, mock.Anything).Return(&querypb.GetDataDistributionResponse{}, nil)
 	err := newNode.Start()
 	suite.NoError(err)
-	defer newNode.Stop()
+	defer newNode.Stop(false)
 
 	suite.Eventually(func() bool {
 		node := suite.server.nodeMgr.Get(newNode.ID)
@@ -187,7 +187,7 @@ func (suite *ServerSuite) TestNodeUp() {
 
 func (suite *ServerSuite) TestNodeDown() {
 	downNode := suite.nodes[0]
-	downNode.Stop()
+	downNode.Stop(false)
 	suite.nodes[0] = nil
 
 	suite.Eventually(func() bool {
@@ -208,7 +208,7 @@ func (suite *ServerSuite) TestNodeDown() {
 func (suite *ServerSuite) TestDisableActiveStandby() {
 	Params.QueryCoordCfg.EnableActiveStandby = false
 
-	err := suite.server.Stop()
+	err := suite.server.Stop(false)
 	suite.NoError(err)
 
 	suite.server, err = newQueryCoord()
@@ -227,7 +227,7 @@ func (suite *ServerSuite) TestDisableActiveStandby() {
 func (suite *ServerSuite) TestEnableActiveStandby() {
 	Params.QueryCoordCfg.EnableActiveStandby = true
 
-	err := suite.server.Stop()
+	err := suite.server.Stop(false)
 	suite.NoError(err)
 
 	suite.server, err = newQueryCoord()
@@ -249,9 +249,9 @@ func (suite *ServerSuite) TestEnableActiveStandby() {
 }
 
 func (suite *ServerSuite) TestStop() {
-	suite.server.Stop()
+	suite.server.Stop(false)
 	// Stop has to be idempotent
-	suite.server.Stop()
+	suite.server.Stop(false)
 }
 
 func (suite *ServerSuite) waitNodeUp(node *mocks.MockQueryNode, timeout time.Duration) bool {

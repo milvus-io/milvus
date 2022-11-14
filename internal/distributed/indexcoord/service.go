@@ -192,7 +192,7 @@ func (s *Server) start() error {
 }
 
 // Stop stops IndexCoord's grpc service.
-func (s *Server) Stop() error {
+func (s *Server) Stop(graceful bool) error {
 	log.Debug("Indexcoord stop", zap.String("Address", Params.GetAddress()))
 	if s.closer != nil {
 		if err := s.closer.Close(); err != nil {
@@ -200,7 +200,7 @@ func (s *Server) Stop() error {
 		}
 	}
 	if s.indexcoord != nil {
-		s.indexcoord.Stop()
+		s.indexcoord.Stop(graceful)
 	}
 	if s.etcdCli != nil {
 		defer s.etcdCli.Close()

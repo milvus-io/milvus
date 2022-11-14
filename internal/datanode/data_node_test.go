@@ -91,7 +91,7 @@ func TestDataNode(t *testing.T) {
 	assert.Nil(t, err)
 	err = node.Start()
 	assert.Nil(t, err)
-	defer node.Stop()
+	defer node.Stop(false)
 
 	node.chunkManager = storage.NewLocalChunkManager(storage.RootPath("/tmp/lib/milvus"))
 	paramtable.SetNodeID(1)
@@ -200,7 +200,7 @@ func TestDataNode(t *testing.T) {
 		err = node1.Start()
 		assert.Nil(t, err)
 		defer func() {
-			err := node1.Stop()
+			err := node1.Stop(false)
 			assert.Nil(t, err)
 		}()
 
@@ -662,7 +662,7 @@ func TestDataNode(t *testing.T) {
 		assert.Nil(t, err)
 		err = node.Start()
 		assert.Nil(t, err)
-		defer node.Stop()
+		defer node.Stop(false)
 
 		err = node.flowgraphManager.addAndStart(node, &datapb.VchannelInfo{
 			ChannelName:         chanName,
@@ -755,7 +755,7 @@ func TestDataNode_AddSegment(t *testing.T) {
 	assert.Nil(t, err)
 	err = node.Start()
 	assert.Nil(t, err)
-	defer node.Stop()
+	defer node.Stop(false)
 
 	node.chunkManager = storage.NewLocalChunkManager(storage.RootPath("/tmp/lib/milvus"))
 	paramtable.SetNodeID(1)
@@ -824,7 +824,7 @@ func TestWatchChannel(t *testing.T) {
 	assert.Nil(t, err)
 	err = node.Start()
 	assert.Nil(t, err)
-	defer node.Stop()
+	defer node.Stop(false)
 	err = node.Register()
 	assert.Nil(t, err)
 
@@ -1099,7 +1099,7 @@ func TestDataNode_ResendSegmentStats(t *testing.T) {
 	err = node.Start()
 	assert.Nil(t, err)
 	defer func() {
-		err := node.Stop()
+		err := node.Stop(false)
 		assert.Nil(t, err)
 	}()
 

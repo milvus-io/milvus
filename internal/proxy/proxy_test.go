@@ -418,7 +418,7 @@ func TestProxy(t *testing.T) {
 
 	if rc != nil {
 		defer func() {
-			err := rc.Stop()
+			err := rc.Stop(false)
 			assert.NoError(t, err)
 			log.Info("stop RootCoord")
 		}()
@@ -429,7 +429,7 @@ func TestProxy(t *testing.T) {
 
 	if dc != nil {
 		defer func() {
-			err := dc.Stop()
+			err := dc.Stop(false)
 			assert.NoError(t, err)
 			log.Info("stop DataCoord")
 		}()
@@ -440,7 +440,7 @@ func TestProxy(t *testing.T) {
 
 	if dn != nil {
 		defer func() {
-			err := dn.Stop()
+			err := dn.Stop(false)
 			assert.NoError(t, err)
 			log.Info("stop DataNode")
 		}()
@@ -451,7 +451,7 @@ func TestProxy(t *testing.T) {
 
 	if qc != nil {
 		defer func() {
-			err := qc.Stop()
+			err := qc.Stop(false)
 			assert.NoError(t, err)
 			log.Info("stop QueryCoord")
 		}()
@@ -462,7 +462,7 @@ func TestProxy(t *testing.T) {
 
 	if qn != nil {
 		defer func() {
-			err := qn.Stop()
+			err := qn.Stop(false)
 			assert.NoError(t, err)
 			log.Info("stop query node")
 		}()
@@ -473,7 +473,7 @@ func TestProxy(t *testing.T) {
 
 	if ic != nil {
 		defer func() {
-			err := ic.Stop()
+			err := ic.Stop(false)
 			assert.NoError(t, err)
 			log.Info("stop IndexCoord")
 		}()
@@ -484,7 +484,7 @@ func TestProxy(t *testing.T) {
 
 	if in != nil {
 		defer func() {
-			err := in.Stop()
+			err := in.Stop(false)
 			assert.NoError(t, err)
 			log.Info("stop IndexNode")
 		}()
@@ -555,7 +555,7 @@ func TestProxy(t *testing.T) {
 	assert.NoError(t, err)
 	log.Info("Register proxy done")
 	defer func() {
-		err := proxy.Stop()
+		err := proxy.Stop(false)
 		assert.NoError(t, err)
 	}()
 
@@ -3950,4 +3950,7 @@ func TestProxy_ListImportTasks(t *testing.T) {
 
 func TestProxy_GetStatistics(t *testing.T) {
 
+}
+func (s *proxyTestServer) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
+	return nil, nil
 }

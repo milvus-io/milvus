@@ -201,6 +201,6 @@ func Test_NewClient(t *testing.T) {
 	assert.NotNil(t, ret)
 	assert.Nil(t, err)
 
-	err = client.Stop()
+	err = client.Stop(false)
 	assert.Nil(t, err)
 }

@@ -224,7 +224,7 @@ func (s *Server) Register() error {
 	}
 	go s.session.LivenessCheck(s.serverLoopCtx, func() {
 		logutil.Logger(s.ctx).Error("disconnected from etcd and exited", zap.Int64("serverID", s.session.ServerID))
-		if err := s.Stop(); err != nil {
+		if err := s.Stop(false); err != nil {
 			logutil.Logger(s.ctx).Fatal("failed to stop server", zap.Error(err))
 		}
 		// manually send signal to starter goroutine
@@ -638,7 +638,7 @@ func (s *Server) startWatchService(ctx context.Context) {
 func (s *Server) stopServiceWatch() {
 	// ErrCompacted is handled inside SessionWatcher, which means there is some other error occurred, closing server.
 	logutil.Logger(s.ctx).Error("watch service channel closed", zap.Int64("serverID", s.session.ServerID))
-	go s.Stop()
+	go s.Stop(false)
 	if s.session.TriggerKill {
 		if p, err := os.FindProcess(os.Getpid()); err == nil {
 			p.Signal(syscall.SIGINT)
@@ -681,7 +681,7 @@ func (s *Server) watchService(ctx context.Context) {
 			}
 			if err := s.handleSessionEvent(ctx, event); err != nil {
 				go func() {
-					if err := s.Stop(); err != nil {
+					if err := s.Stop(false); err != nil {
 						log.Warn("DataCoord server stop error", zap.Error(err))
 					}
 				}()
@@ -816,7 +816,7 @@ func (s *Server) initRootCoordClient() error {
 // if Server is healthy, set server state to stopped, release etcd session,
 //
 //	stop message stream client and stop server loops
-func (s *Server) Stop() error {
+func (s *Server) Stop(bool) error {
 	if !s.stateCode.CompareAndSwap(commonpb.StateCode_Healthy, commonpb.StateCode_Abnormal) {
 		return nil
 	}

@@ -110,7 +110,7 @@ func (coord *QueryCoordMock) Start() error {
 	return nil
 }
 
-func (coord *QueryCoordMock) Stop() error {
+func (coord *QueryCoordMock) Stop(bool) error {
 	defer coord.updateState(commonpb.StateCode_Abnormal)
 
 	return nil

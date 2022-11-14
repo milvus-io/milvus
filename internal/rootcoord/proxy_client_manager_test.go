@@ -43,7 +43,7 @@ type proxyMock struct {
 	returnGrpcError bool
 }
 
-func (p *proxyMock) Stop() error {
+func (p *proxyMock) Stop(bool) error {
 	return nil
 }
 

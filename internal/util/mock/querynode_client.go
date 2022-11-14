@@ -45,7 +45,7 @@ func (q QueryNodeClient) Start() error {
 	return nil
 }
 
-func (q QueryNodeClient) Stop() error {
+func (q QueryNodeClient) Stop(bool) error {
 	return nil
 }
 

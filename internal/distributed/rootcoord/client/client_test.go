@@ -420,6 +420,6 @@ func Test_NewClient(t *testing.T) {
 		retCheck(rTimeout, err)
 	}
 	// clean up
-	err = client.Stop()
+	err = client.Stop(false)
 	assert.Nil(t, err)
 }

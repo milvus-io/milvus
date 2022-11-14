@@ -328,7 +328,7 @@ Loop:
 	}
 
 	// stop indexnode
-	assert.Nil(t, in.Stop())
+	assert.Nil(t, in.Stop(false))
 	node := in.(*mockIndexNodeComponent).IndexNode
 	assert.Equal(t, 0, len(node.tasks))
 	assert.Equal(t, commonpb.StateCode_Abnormal, node.stateCode.Load().(commonpb.StateCode))
@@ -337,7 +337,7 @@ Loop:
 func TestAbnormalIndexNode(t *testing.T) {
 	in, err := NewMockIndexNodeComponent(context.TODO())
 	assert.Nil(t, err)
-	assert.Nil(t, in.Stop())
+	assert.Nil(t, in.Stop(false))
 	ctx := context.TODO()
 	status, err := in.CreateJob(ctx, &indexpb.CreateJobRequest{})
 	assert.Nil(t, err)

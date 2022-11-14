@@ -28,7 +28,7 @@ type shardQueryNodeWrapper struct {
 }
 
 // Stop overrides default close method
-func (w *shardQueryNodeWrapper) Stop() error { return nil }
+func (w *shardQueryNodeWrapper) Stop(bool) error { return nil }
 
 // ShardClusterService maintains the online ShardCluster(leader) in this querynode.
 type ShardClusterService struct {

@@ -83,7 +83,7 @@ func (c *Client) Start() error {
 
 // Stop stops the client.
 // Currently, it closes the grpc connection with the DataNode.
-func (c *Client) Stop() error {
+func (c *Client) Stop(bool) error {
 	return c.grpcClient.Close()
 }
 

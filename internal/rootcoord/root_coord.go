@@ -306,7 +306,7 @@ func (c *Core) Register() error {
 	log.Info("RootCoord Register Finished")
 	go c.session.LivenessCheck(c.ctx, func() {
 		log.Error("Root Coord disconnected from etcd, process will exit", zap.Int64("Server Id", c.session.ServerID))
-		if err := c.Stop(); err != nil {
+		if err := c.Stop(false); err != nil {
 			log.Fatal("failed to stop server", zap.Error(err))
 		}
 		// manually send signal to starter goroutine
@@ -694,7 +694,7 @@ func (c *Core) revokeSession() {
 }
 
 // Stop stops rootCoord.
-func (c *Core) Stop() error {
+func (c *Core) Stop(bool) error {
 	c.UpdateStateCode(commonpb.StateCode_Abnormal)
 	c.stopExecutor()
 	c.stopScheduler()

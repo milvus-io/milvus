@@ -267,7 +267,7 @@ func (c *mockDataNodeClient) SyncSegments(ctx context.Context, req *datapb.SyncS
 	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
 }
 
-func (c *mockDataNodeClient) Stop() error {
+func (c *mockDataNodeClient) Stop(bool) error {
 	c.state = commonpb.StateCode_Abnormal
 	return nil
 }
@@ -309,7 +309,7 @@ func (m *mockRootCoordService) Start() error {
 	return nil
 }
 
-func (m *mockRootCoordService) Stop() error {
+func (m *mockRootCoordService) Stop(bool) error {
 	m.state = commonpb.StateCode_Abnormal
 	return nil
 }

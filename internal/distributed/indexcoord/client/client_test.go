@@ -201,9 +201,9 @@ func TestIndexCoordClient(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, true, resp.IsHealthy)
 	})
-	err = server.Stop()
+	err = server.Stop(false)
 	assert.NoError(t, err)
 
-	err = icc.Stop()
+	err = icc.Stop(false)
 	assert.NoError(t, err)
 }

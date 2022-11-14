@@ -55,9 +55,9 @@ func TestQueryTask_all(t *testing.T) {
 	mgr := newShardClientMgr(withShardClientCreator(mockCreator))
 
 	rc.Start()
-	defer rc.Stop()
+	defer rc.Stop(false)
 	qc.Start()
-	defer qc.Stop()
+	defer qc.Stop(false)
 
 	err = InitMetaCache(ctx, rc, qc, mgr)
 	assert.NoError(t, err)

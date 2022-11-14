@@ -123,7 +123,7 @@ func (node *MockQueryNode) Start() error {
 	return err
 }
 
-func (node *MockQueryNode) Stop() {
+func (node *MockQueryNode) Stop(bool) {
 	node.cancel()
 	node.server.GracefulStop()
 	node.session.Revoke(time.Second)

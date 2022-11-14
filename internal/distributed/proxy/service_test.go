@@ -113,7 +113,7 @@ func (m *MockRootCoord) Start() error {
 	return m.startErr
 }
 
-func (m *MockRootCoord) Stop() error {
+func (m *MockRootCoord) Stop(bool) error {
 	return m.stopErr
 }
 
@@ -292,7 +292,7 @@ func (m *MockIndexCoord) Start() error {
 	return m.startErr
 }
 
-func (m *MockIndexCoord) Stop() error {
+func (m *MockIndexCoord) Stop(bool) error {
 	return m.stopErr
 }
 
@@ -357,7 +357,7 @@ func (m *MockQueryCoord) Start() error {
 	return m.startErr
 }
 
-func (m *MockQueryCoord) Stop() error {
+func (m *MockQueryCoord) Stop(bool) error {
 	return m.stopErr
 }
 
@@ -473,7 +473,7 @@ func (m *MockDataCoord) Start() error {
 	return m.startErr
 }
 
-func (m *MockDataCoord) Stop() error {
+func (m *MockDataCoord) Stop(bool) error {
 	return m.stopErr
 }
 
@@ -632,7 +632,7 @@ func (m *MockProxy) Start() error {
 	return m.startErr
 }
 
-func (m *MockProxy) Stop() error {
+func (m *MockProxy) Stop(bool) error {
 	return m.stopErr
 }
 
@@ -1352,7 +1352,7 @@ func Test_NewServer(t *testing.T) {
 		assert.Nil(t, err)
 	})
 
-	err = server.Stop()
+	err = server.Stop(false)
 	assert.Nil(t, err)
 
 	// Update config and start server again to test with different config set.
@@ -1360,7 +1360,7 @@ func Test_NewServer(t *testing.T) {
 	proxy.Params.ProxyCfg.GinLogging = false
 	err = runAndWaitForServerReady(server)
 	assert.Nil(t, err)
-	err = server.Stop()
+	err = server.Stop(false)
 	assert.Nil(t, err)
 }
 
@@ -1503,7 +1503,7 @@ func Test_NewServer_HTTPServer_Enabled(t *testing.T) {
 
 	err = runAndWaitForServerReady(server)
 	assert.Nil(t, err)
-	err = server.Stop()
+	err = server.Stop(false)
 	assert.Nil(t, err)
 
 	defer func() {
@@ -1543,7 +1543,7 @@ func Test_NewServer_TLS_TwoWay(t *testing.T) {
 	err := runAndWaitForServerReady(server)
 	assert.Nil(t, err)
 	assert.NotNil(t, server.grpcExternalServer)
-	err = server.Stop()
+	err = server.Stop(false)
 	assert.Nil(t, err)
 }
 
@@ -1559,7 +1559,7 @@ func Test_NewServer_TLS_OneWay(t *testing.T) {
 	err := runAndWaitForServerReady(server)
 	assert.Nil(t, err)
 	assert.NotNil(t, server.grpcExternalServer)
-	err = server.Stop()
+	err = server.Stop(false)
 	assert.Nil(t, err)
 }
 
@@ -1573,26 +1573,26 @@ func Test_NewServer_TLS_FileNotExisted(t *testing.T) {
 	HTTPParams.Enabled = false
 	err := runAndWaitForServerReady(server)
 	assert.NotNil(t, err)
-	server.Stop()
+	server.Stop(false)
 
 	Params.TLSMode = 2
 	Params.ServerPemPath = "../not/existed/server.pem"
 	Params.CaPemPath = "../../../configs/cert/ca.pem"
 	err = runAndWaitForServerReady(server)
 	assert.NotNil(t, err)
-	server.Stop()
+	server.Stop(false)
 
 	Params.ServerPemPath = "../../../configs/cert/server.pem"
 	Params.CaPemPath = "../not/existed/ca.pem"
 	err = runAndWaitForServerReady(server)
 	assert.NotNil(t, err)
-	server.Stop()
+	server.Stop(false)
 
 	Params.ServerPemPath = "../../../configs/cert/server.pem"
 	Params.CaPemPath = "service.go"
 	err = runAndWaitForServerReady(server)
 	assert.NotNil(t, err)
-	server.Stop()
+	server.Stop(false)
 }
 
 func Test_NewServer_GetVersion(t *testing.T) {

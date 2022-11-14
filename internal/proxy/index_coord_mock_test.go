@@ -74,7 +74,7 @@ func (coord *IndexCoordMock) Start() error {
 	return nil
 }
 
-func (coord *IndexCoordMock) Stop() error {
+func (coord *IndexCoordMock) Stop(bool) error {
 	defer coord.updateState(commonpb.StateCode_Abnormal)
 
 	return nil

@@ -57,7 +57,7 @@ func (mc *MockComponent) Start() error {
 	return nil
 }
 
-func (mc *MockComponent) Stop() error {
+func (mc *MockComponent) Stop(bool) error {
 	return nil
 }
 

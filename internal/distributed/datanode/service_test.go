@@ -61,7 +61,7 @@ func (m *MockDataNode) Start() error {
 	return m.startErr
 }
 
-func (m *MockDataNode) Stop() error {
+func (m *MockDataNode) Stop(bool) error {
 	return m.stopErr
 }
 
@@ -169,7 +169,7 @@ func (m *mockDataCoord) GetComponentStates(ctx context.Context) (*milvuspb.Compo
 		},
 	}, nil
 }
-func (m *mockDataCoord) Stop() error {
+func (m *mockDataCoord) Stop(bool) error {
 	return fmt.Errorf("stop error")
 }
 
@@ -199,7 +199,7 @@ func (m *mockRootCoord) GetComponentStates(ctx context.Context) (*milvuspb.Compo
 		},
 	}, nil
 }
-func (m *mockRootCoord) Stop() error {
+func (m *mockRootCoord) Stop(bool) error {
 	return fmt.Errorf("stop error")
 }
 
@@ -320,7 +320,7 @@ func Test_NewServer(t *testing.T) {
 		assert.NotNil(t, resp)
 	})
 
-	err = server.Stop()
+	err = server.Stop(false)
 	assert.Nil(t, err)
 }
 
@@ -363,6 +363,6 @@ func Test_Run(t *testing.T) {
 		stopErr: errors.New("error"),
 	}
 
-	err = server.Stop()
+	err = server.Stop(false)
 	assert.Error(t, err)
 }

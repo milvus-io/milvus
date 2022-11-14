@@ -65,7 +65,7 @@ func stopRocksmq() {
 type component interface {
 	healthz.Indicator
 	Run() error
-	Stop() error
+	Stop(graceful bool) error
 }
 
 func runComponent[T component](ctx context.Context,
@@ -240,11 +240,15 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 		}
 	}
 
+	graceful := false
+
 	var rc *components.RootCoord
 	if mr.EnableRootCoord {
 		rc = mr.runRootCoord(ctx, local)
 		if rc != nil {
-			defer rc.Stop()
+			defer func() {
+				rc.Stop(graceful)
+			}()
 		}
 	}
 
@@ -253,7 +257,9 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 		pctx := log.WithModule(ctx, "Proxy")
 		pn = mr.runProxy(pctx, local, alias)
 		if pn != nil {
-			defer pn.Stop()
+			defer func() {
+				pn.Stop(graceful)
+			}()
 		}
 	}
 
@@ -261,7 +267,9 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 	if mr.EnableQueryCoord {
 		qs = mr.runQueryCoord(ctx, local)
 		if qs != nil {
-			defer qs.Stop()
+			defer func() {
+				qs.Stop(graceful)
+			}()
 		}
 	}
 
@@ -269,7 +277,9 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 	if mr.EnableQueryNode {
 		qn = mr.runQueryNode(ctx, local, alias)
 		if qn != nil {
-			defer qn.Stop()
+			defer func() {
+				qn.Stop(graceful)
+			}()
 		}
 	}
 
@@ -277,7 +287,9 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 	if mr.EnableDataCoord {
 		ds = mr.runDataCoord(ctx, local)
 		if ds != nil {
-			defer ds.Stop()
+			defer func() {
+				ds.Stop(graceful)
+			}()
 		}
 	}
 
@@ -285,7 +297,9 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 	if mr.EnableDataNode {
 		dn = mr.runDataNode(ctx, local, alias)
 		if dn != nil {
-			defer dn.Stop()
+			defer func() {
+				dn.Stop(graceful)
+			}()
 		}
 	}
 
@@ -293,7 +307,9 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 	if mr.EnableIndexCoord {
 		is = mr.runIndexCoord(ctx, local)
 		if is != nil {
-			defer is.Stop()
+			defer func() {
+				is.Stop(graceful)
+			}()
 		}
 	}
 
@@ -301,7 +317,9 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 	if mr.EnableIndexNode {
 		in = mr.runIndexNode(ctx, local, alias)
 		if in != nil {
-			defer in.Stop()
+			defer func() {
+				in.Stop(graceful)
+			}()
 		}
 	}
 
@@ -315,7 +333,9 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 		syscall.SIGINT,
 		syscall.SIGTERM,
 		syscall.SIGQUIT)
+
 	sig := <-sc
+	graceful = sig == syscall.SIGQUIT
 	log.Error("Get signal to exit\n", zap.String("signal", sig.String()))
 
 	// some deferred Stop has race with context cancel

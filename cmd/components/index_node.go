@@ -57,8 +57,8 @@ func (n *IndexNode) Run() error {
 }
 
 // Stop terminates service
-func (n *IndexNode) Stop() error {
-	if err := n.svr.Stop(); err != nil {
+func (n *IndexNode) Stop(graceful bool) error {
+	if err := n.svr.Stop(graceful); err != nil {
 		return err
 	}
 	return nil

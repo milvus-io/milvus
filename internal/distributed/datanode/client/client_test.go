@@ -128,6 +128,6 @@ func Test_NewClient(t *testing.T) {
 
 	checkFunc(true)
 
-	err = client.Stop()
+	err = client.Stop(false)
 	assert.Nil(t, err)
 }

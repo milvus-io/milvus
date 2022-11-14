@@ -14,12 +14,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-echo "Stopping milvus..."
+echo "Gracefully stopping milvus..."
 PROCESS=$(ps -e | grep milvus | grep -v grep | awk '{print $1}')
 if [ -z "$PROCESS" ]; then
   echo "No milvus process"
   exit 0
 fi
-kill -15 $PROCESS
+kill -3 $PROCESS
 echo "Milvus stopped"
 

@@ -164,7 +164,7 @@ func (m *Mock) Start() error {
 	return m.CallStart()
 }
 
-func (m *Mock) Stop() error {
+func (m *Mock) Stop(bool) error {
 	return m.CallStop()
 }
 

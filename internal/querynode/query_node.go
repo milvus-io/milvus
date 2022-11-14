@@ -159,7 +159,7 @@ func (node *QueryNode) Register() error {
 	// start liveness check
 	go node.session.LivenessCheck(node.queryNodeLoopCtx, func() {
 		log.Error("Query Node disconnected from etcd, process will exit", zap.Int64("Server Id", paramtable.GetNodeID()))
-		if err := node.Stop(); err != nil {
+		if err := node.Stop(false); err != nil {
 			log.Fatal("failed to stop server", zap.Error(err))
 		}
 		// manually send signal to starter goroutine
@@ -347,7 +347,7 @@ func (node *QueryNode) Start() error {
 }
 
 // Stop mainly stop QueryNode's query service, historical loop and streaming loop.
-func (node *QueryNode) Stop() error {
+func (node *QueryNode) Stop(bool) error {
 	log.Warn("Query node stop..")
 	node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	node.queryNodeLoopCancel()

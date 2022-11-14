@@ -196,7 +196,7 @@ func (node *DataNode) Register() error {
 	// Start liveness check
 	go node.session.LivenessCheck(node.ctx, func() {
 		log.Error("Data Node disconnected from etcd, process will exit", zap.Int64("Server Id", node.session.ServerID))
-		if err := node.Stop(); err != nil {
+		if err := node.Stop(false); err != nil {
 			log.Fatal("failed to stop server", zap.Error(err))
 		}
 		// manually send signal to starter goroutine
@@ -695,7 +695,7 @@ func (node *DataNode) ResendSegmentStats(ctx context.Context, req *datapb.Resend
 }
 
 // Stop will release DataNode resources and shutdown datanode
-func (node *DataNode) Stop() error {
+func (node *DataNode) Stop(bool) error {
 	// https://github.com/milvus-io/milvus/issues/12282
 	node.UpdateStateCode(commonpb.StateCode_Abnormal)
 

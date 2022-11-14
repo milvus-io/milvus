@@ -270,7 +270,7 @@ func (s *Server) start() error {
 	return nil
 }
 
-func (s *Server) Stop() error {
+func (s *Server) Stop(graceful bool) error {
 	log.Debug("Rootcoord stop", zap.String("Address", Params.GetAddress()))
 	if s.closer != nil {
 		if err := s.closer.Close(); err != nil {
@@ -281,22 +281,22 @@ func (s *Server) Stop() error {
 		defer s.etcdCli.Close()
 	}
 	if s.indexCoord != nil {
-		if err := s.indexCoord.Stop(); err != nil {
+		if err := s.indexCoord.Stop(graceful); err != nil {
 			log.Error("Failed to close indexCoord client", zap.Error(err))
 		}
 	}
 	if s.dataCoord != nil {
-		if err := s.dataCoord.Stop(); err != nil {
+		if err := s.dataCoord.Stop(graceful); err != nil {
 			log.Error("Failed to close dataCoord client", zap.Error(err))
 		}
 	}
 	if s.queryCoord != nil {
-		if err := s.queryCoord.Stop(); err != nil {
+		if err := s.queryCoord.Stop(graceful); err != nil {
 			log.Error("Failed to close queryCoord client", zap.Error(err))
 		}
 	}
 	if s.rootCoord != nil {
-		if err := s.rootCoord.Stop(); err != nil {
+		if err := s.rootCoord.Stop(graceful); err != nil {
 			log.Error("Failed to close close rootCoord", zap.Error(err))
 		}
 	}

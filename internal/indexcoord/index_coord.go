@@ -144,7 +144,7 @@ func (i *IndexCoord) Register() error {
 	}
 	go i.session.LivenessCheck(i.loopCtx, func() {
 		log.Error("Index Coord disconnected from etcd, process will exit", zap.Int64("Server Id", i.session.ServerID))
-		if err := i.Stop(); err != nil {
+		if err := i.Stop(false); err != nil {
 			log.Fatal("failed to stop server", zap.Error(err))
 		}
 		// manually send signal to starter goroutine
@@ -315,7 +315,7 @@ func (i *IndexCoord) Start() error {
 }
 
 // Stop stops the IndexCoord component.
-func (i *IndexCoord) Stop() error {
+func (i *IndexCoord) Stop(bool) error {
 	// https://github.com/milvus-io/milvus/issues/12282
 	i.UpdateStateCode(commonpb.StateCode_Abnormal)
 
@@ -1079,7 +1079,7 @@ func (i *IndexCoord) watchNodeLoop() {
 			if !ok {
 				// ErrCompacted is handled inside SessionWatcher
 				log.Error("Session Watcher channel closed", zap.Int64("server id", i.session.ServerID))
-				go i.Stop()
+				go i.Stop(false)
 				if i.session.TriggerKill {
 					if p, err := os.FindProcess(os.Getpid()); err == nil {
 						p.Signal(syscall.SIGINT)

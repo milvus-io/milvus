@@ -121,7 +121,7 @@ func Test_NewClient(t *testing.T) {
 	client.grpcClient.SetNewGrpcClientFunc(newFunc3)
 	checkFunc(true)
 
-	err = client.Stop()
+	err = client.Stop(false)
 	assert.Nil(t, err)
 }
 
@@ -215,9 +215,9 @@ func TestIndexNodeClient(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
-	err = ins.Stop()
+	err = ins.Stop(false)
 	assert.Nil(t, err)
 
-	err = inc.Stop()
+	err = inc.Stop(false)
 	assert.Nil(t, err)
 }

@@ -56,8 +56,8 @@ func (d *DataNode) Run() error {
 }
 
 // Stop terminates service
-func (d *DataNode) Stop() error {
-	if err := d.svr.Stop(); err != nil {
+func (d *DataNode) Stop(graceful bool) error {
+	if err := d.svr.Stop(graceful); err != nil {
 		return err
 	}
 	return nil

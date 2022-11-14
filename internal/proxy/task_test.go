@@ -478,7 +478,7 @@ func TestCreateCollectionTask(t *testing.T) {
 
 	rc := NewRootCoordMock()
 	rc.Start()
-	defer rc.Stop()
+	defer rc.Stop(false)
 	ctx := context.Background()
 	shardsNum := int32(2)
 	prefix := "TestCreateCollectionTask"
@@ -757,10 +757,10 @@ func TestCreateCollectionTask(t *testing.T) {
 func TestHasCollectionTask(t *testing.T) {
 	rc := NewRootCoordMock()
 	rc.Start()
-	defer rc.Stop()
+	defer rc.Stop(false)
 	qc := NewQueryCoordMock()
 	qc.Start()
-	defer qc.Stop()
+	defer qc.Stop(false)
 	ctx := context.Background()
 	mgr := newShardClientMgr()
 	InitMetaCache(ctx, rc, qc, mgr)
@@ -842,10 +842,10 @@ func TestHasCollectionTask(t *testing.T) {
 func TestDescribeCollectionTask(t *testing.T) {
 	rc := NewRootCoordMock()
 	rc.Start()
-	defer rc.Stop()
+	defer rc.Stop(false)
 	qc := NewQueryCoordMock()
 	qc.Start()
-	defer qc.Stop()
+	defer qc.Stop(false)
 	ctx := context.Background()
 	mgr := newShardClientMgr()
 	InitMetaCache(ctx, rc, qc, mgr)
@@ -891,7 +891,7 @@ func TestDescribeCollectionTask(t *testing.T) {
 	err = task.PreExecute(ctx)
 	assert.NoError(t, err)
 
-	rc.Stop()
+	rc.Stop(false)
 	task.CollectionID = 0
 	task.CollectionName = collectionName
 	err = task.PreExecute(ctx)
@@ -904,10 +904,10 @@ func TestDescribeCollectionTask(t *testing.T) {
 func TestDescribeCollectionTask_ShardsNum1(t *testing.T) {
 	rc := NewRootCoordMock()
 	rc.Start()
-	defer rc.Stop()
+	defer rc.Stop(false)
 	qc := NewQueryCoordMock()
 	qc.Start()
-	defer qc.Stop()
+	defer qc.Stop(false)
 	ctx := context.Background()
 	mgr := newShardClientMgr()
 	InitMetaCache(ctx, rc, qc, mgr)
@@ -968,10 +968,10 @@ func TestDescribeCollectionTask_ShardsNum1(t *testing.T) {
 func TestDescribeCollectionTask_ShardsNum2(t *testing.T) {
 	rc := NewRootCoordMock()
 	rc.Start()
-	defer rc.Stop()
+	defer rc.Stop(false)
 	qc := NewQueryCoordMock()
 	qc.Start()
-	defer qc.Stop()
+	defer qc.Stop(false)
 	ctx := context.Background()
 	mgr := newShardClientMgr()
 	InitMetaCache(ctx, rc, qc, mgr)
@@ -1028,13 +1028,13 @@ func TestDescribeCollectionTask_ShardsNum2(t *testing.T) {
 	assert.Equal(t, commonpb.ErrorCode_Success, task.result.Status.ErrorCode)
 	assert.Equal(t, common.DefaultShardsNum, task.result.ShardsNum)
 	assert.Equal(t, collectionName, task.result.GetCollectionName())
-	rc.Stop()
+	rc.Stop(false)
 }
 
 func TestCreatePartitionTask(t *testing.T) {
 	rc := NewRootCoordMock()
 	rc.Start()
-	defer rc.Stop()
+	defer rc.Stop(false)
 	ctx := context.Background()
 	prefix := "TestCreatePartitionTask"
 	dbName := ""
@@ -1080,7 +1080,7 @@ func TestCreatePartitionTask(t *testing.T) {
 func TestDropPartitionTask(t *testing.T) {
 	rc := NewRootCoordMock()
 	rc.Start()
-	defer rc.Stop()
+	defer rc.Stop(false)
 	ctx := context.Background()
 	prefix := "TestDropPartitionTask"
 	dbName := ""
@@ -1188,7 +1188,7 @@ func TestDropPartitionTask(t *testing.T) {
 func TestHasPartitionTask(t *testing.T) {
 	rc := NewRootCoordMock()
 	rc.Start()
-	defer rc.Stop()
+	defer rc.Stop(false)
 	ctx := context.Background()
 	prefix := "TestHasPartitionTask"
 	dbName := ""
@@ -1234,7 +1234,7 @@ func TestHasPartitionTask(t *testing.T) {
 func TestShowPartitionsTask(t *testing.T) {
 	rc := NewRootCoordMock()
 	rc.Start()
-	defer rc.Stop()
+	defer rc.Stop(false)
 	ctx := context.Background()
 	prefix := "TestShowPartitionsTask"
 	dbName := ""
@@ -1290,10 +1290,10 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 
 	rc := NewRootCoordMock()
 	rc.Start()
-	defer rc.Stop()
+	defer rc.Stop(false)
 	qc := NewQueryCoordMock()
 	qc.Start()
-	defer qc.Stop()
+	defer qc.Stop(false)
 
 	ctx := context.Background()
 
@@ -1541,10 +1541,10 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 
 	rc := NewRootCoordMock()
 	rc.Start()
-	defer rc.Stop()
+	defer rc.Stop(false)
 	qc := NewQueryCoordMock()
 	qc.Start()
-	defer qc.Stop()
+	defer qc.Stop(false)
 
 	ctx := context.Background()
 
@@ -1794,7 +1794,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 func TestCreateAlias_all(t *testing.T) {
 	rc := NewRootCoordMock()
 	rc.Start()
-	defer rc.Stop()
+	defer rc.Stop(false)
 	ctx := context.Background()
 	prefix := "TestCreateAlias_all"
 	collectionName := prefix + funcutil.GenRandomStr()
@@ -1835,7 +1835,7 @@ func TestCreateAlias_all(t *testing.T) {
 func TestDropAlias_all(t *testing.T) {
 	rc := NewRootCoordMock()
 	rc.Start()
-	defer rc.Stop()
+	defer rc.Stop(false)
 	ctx := context.Background()
 	task := &DropAliasTask{
 		Condition: NewTaskCondition(ctx),
@@ -1873,7 +1873,7 @@ func TestDropAlias_all(t *testing.T) {
 func TestAlterAlias_all(t *testing.T) {
 	rc := NewRootCoordMock()
 	rc.Start()
-	defer rc.Stop()
+	defer rc.Stop(false)
 	ctx := context.Background()
 	prefix := "TestAlterAlias_all"
 	collectionName := prefix + funcutil.GenRandomStr()

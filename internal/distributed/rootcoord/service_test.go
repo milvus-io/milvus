@@ -90,7 +90,7 @@ func (m *mockCore) Start() error {
 	return nil
 }
 
-func (m *mockCore) Stop() error {
+func (m *mockCore) Stop(bool) error {
 	return fmt.Errorf("stop error")
 }
 
@@ -119,7 +119,7 @@ func (m *mockDataCoord) GetComponentStates(ctx context.Context) (*milvuspb.Compo
 		},
 	}, nil
 }
-func (m *mockDataCoord) Stop() error {
+func (m *mockDataCoord) Stop(bool) error {
 	return fmt.Errorf("stop error")
 }
 
@@ -131,7 +131,7 @@ func (m *mockIndex) Init() error {
 	return nil
 }
 
-func (m *mockIndex) Stop() error {
+func (m *mockIndex) Stop(bool) error {
 	return fmt.Errorf("stop error")
 }
 
@@ -147,7 +147,7 @@ func (m *mockQuery) Start() error {
 	return nil
 }
 
-func (m *mockQuery) Stop() error {
+func (m *mockQuery) Stop(bool) error {
 	return fmt.Errorf("stop error")
 }
 
@@ -197,7 +197,7 @@ func TestRun(t *testing.T) {
 		assert.Equal(t, true, ret.IsHealthy)
 	})
 
-	err = svr.Stop()
+	err = svr.Stop(false)
 	assert.Nil(t, err)
 
 }

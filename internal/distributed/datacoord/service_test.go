@@ -80,7 +80,7 @@ func (m *MockDataCoord) Start() error {
 	return m.startErr
 }
 
-func (m *MockDataCoord) Stop() error {
+func (m *MockDataCoord) Stop(bool) error {
 	return m.stopErr
 }
 
@@ -567,7 +567,7 @@ func Test_NewServer(t *testing.T) {
 		assert.Equal(t, true, ret.IsHealthy)
 	})
 
-	err := server.Stop()
+	err := server.Stop(false)
 	assert.Nil(t, err)
 }
 
@@ -601,6 +601,6 @@ func Test_Run(t *testing.T) {
 		stopErr: errors.New("error"),
 	}
 
-	err = server.Stop()
+	err = server.Stop(false)
 	assert.Error(t, err)
 }

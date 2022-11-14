@@ -59,7 +59,7 @@ func (m *MockQueryNode) Start() error {
 	return m.startErr
 }
 
-func (m *MockQueryNode) Stop() error {
+func (m *MockQueryNode) Stop(bool) error {
 	return m.stopErr
 }
 
@@ -171,7 +171,7 @@ func (m *MockRootCoord) Start() error {
 	return m.startErr
 }
 
-func (m *MockRootCoord) Stop() error {
+func (m *MockRootCoord) Stop(bool) error {
 	return m.stopErr
 }
 
@@ -207,7 +207,7 @@ func (m *MockIndexCoord) Start() error {
 	return m.startErr
 }
 
-func (m *MockIndexCoord) Stop() error {
+func (m *MockIndexCoord) Stop(bool) error {
 	return m.stopErr
 }
 
@@ -350,7 +350,7 @@ func Test_NewServer(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
-	err = server.Stop()
+	err = server.Stop(false)
 	assert.Nil(t, err)
 }
 
@@ -369,6 +369,6 @@ func Test_Run(t *testing.T) {
 	assert.Error(t, err)
 
 	server.querynode = &MockQueryNode{stopErr: errors.New("Failed")}
-	err = server.Stop()
+	err = server.Stop(false)
 	assert.Error(t, err)
 }

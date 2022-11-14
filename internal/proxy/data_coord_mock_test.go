@@ -65,7 +65,7 @@ func (coord *DataCoordMock) Start() error {
 	return nil
 }
 
-func (coord *DataCoordMock) Stop() error {
+func (coord *DataCoordMock) Stop(bool) error {
 	defer coord.updateState(commonpb.StateCode_Abnormal)
 
 	return nil

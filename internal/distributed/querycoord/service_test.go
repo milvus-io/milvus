@@ -60,7 +60,7 @@ func (m *MockQueryCoord) Start() error {
 	return m.startErr
 }
 
-func (m *MockQueryCoord) Stop() error {
+func (m *MockQueryCoord) Stop(bool) error {
 	return m.stopErr
 }
 
@@ -179,7 +179,7 @@ func (m *MockRootCoord) Start() error {
 	return m.startErr
 }
 
-func (m *MockRootCoord) Stop() error {
+func (m *MockRootCoord) Stop(bool) error {
 	return m.stopErr
 }
 
@@ -212,7 +212,7 @@ func (m *MockDataCoord) Start() error {
 	return m.startErr
 }
 
-func (m *MockDataCoord) Stop() error {
+func (m *MockDataCoord) Stop(bool) error {
 	return m.stopErr
 }
 
@@ -245,7 +245,7 @@ func (m *MockIndexCoord) Start() error {
 	return m.startErr
 }
 
-func (m *MockIndexCoord) Stop() error {
+func (m *MockIndexCoord) Stop(bool) error {
 	return m.stopErr
 }
 
@@ -402,7 +402,7 @@ func Test_NewServer(t *testing.T) {
 		assert.Equal(t, true, ret.IsHealthy)
 	})
 
-	err = server.Stop()
+	err = server.Stop(false)
 	assert.Nil(t, err)
 }
 
@@ -420,7 +420,7 @@ func TestServer_Run1(t *testing.T) {
 	err = server.Run()
 	assert.Error(t, err)
 
-	err = server.Stop()
+	err = server.Stop(false)
 	assert.Nil(t, err)
 }
 
@@ -436,7 +436,7 @@ func TestServer_Run2(t *testing.T) {
 	}
 	server.indexCoord = &MockIndexCoord{}
 	assert.Panics(t, func() { server.Run() })
-	err = server.Stop()
+	err = server.Stop(false)
 	assert.Nil(t, err)
 }
 
@@ -452,7 +452,7 @@ func TestServer_Run3(t *testing.T) {
 	}
 	server.indexCoord = &MockIndexCoord{}
 	assert.Panics(t, func() { server.Run() })
-	err = server.Stop()
+	err = server.Stop(false)
 	assert.Nil(t, err)
 
 }
@@ -470,7 +470,7 @@ func TestServer_Run4(t *testing.T) {
 	}
 	server.indexCoord = &MockIndexCoord{}
 	assert.Panics(t, func() { server.Run() })
-	err = server.Stop()
+	err = server.Stop(false)
 	assert.Nil(t, err)
 }
 
@@ -487,6 +487,6 @@ func TestServer_Run5(t *testing.T) {
 	}
 	server.indexCoord = &MockIndexCoord{}
 	assert.Panics(t, func() { server.Run() })
-	err = server.Stop()
+	err = server.Stop(false)
 	assert.Nil(t, err)
 }

@@ -162,7 +162,7 @@ func TestQueryNode_Start(t *testing.T) {
 	localNode := newQueryNodeMock()
 	localNode.Start()
 	<-localNode.queryNodeLoopCtx.Done()
-	localNode.Stop()
+	localNode.Stop(false)
 }
 
 func TestQueryNode_register(t *testing.T) {

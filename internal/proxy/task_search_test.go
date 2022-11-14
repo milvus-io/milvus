@@ -125,14 +125,14 @@ func TestSearchTask_PreExecute(t *testing.T) {
 	)
 
 	err = rc.Start()
-	defer rc.Stop()
+	defer rc.Stop(false)
 	require.NoError(t, err)
 	mgr := newShardClientMgr()
 	err = InitMetaCache(ctx, rc, qc, mgr)
 	require.NoError(t, err)
 
 	err = qc.Start()
-	defer qc.Stop()
+	defer qc.Stop(false)
 	require.NoError(t, err)
 
 	getSearchTask := func(t *testing.T, collName string) *searchTask {
@@ -303,14 +303,14 @@ func TestSearchTaskV2_Execute(t *testing.T) {
 
 	err = rc.Start()
 	require.NoError(t, err)
-	defer rc.Stop()
+	defer rc.Stop(false)
 	mgr := newShardClientMgr()
 	err = InitMetaCache(ctx, rc, qc, mgr)
 	require.NoError(t, err)
 
 	err = qc.Start()
 	require.NoError(t, err)
-	defer qc.Stop()
+	defer qc.Stop(false)
 
 	task := &searchTask{
 		ctx: ctx,
@@ -1663,9 +1663,9 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 	mgr := newShardClientMgr(withShardClientCreator(mockCreator))
 
 	rc.Start()
-	defer rc.Stop()
+	defer rc.Stop(false)
 	qc.Start()
-	defer qc.Stop()
+	defer qc.Stop(false)
 
 	err = InitMetaCache(ctx, rc, qc, mgr)
 	assert.NoError(t, err)

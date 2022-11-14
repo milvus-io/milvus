@@ -43,7 +43,7 @@ func TestAllocator_Basic(t *testing.T) {
 	t.Run("Test Unhealthy Root", func(t *testing.T) {
 		ms := newMockRootCoordService()
 		allocator := newRootCoordAllocator(ms)
-		err := ms.Stop()
+		err := ms.Stop(false)
 		assert.Nil(t, err)
 
 		_, err = allocator.allocTimestamp(ctx)

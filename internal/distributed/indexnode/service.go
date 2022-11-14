@@ -136,7 +136,7 @@ func (s *Server) init() error {
 
 	defer func() {
 		if err != nil {
-			err = s.Stop()
+			err = s.Stop(false)
 			if err != nil {
 				log.Error("IndexNode Init failed, and Stop failed")
 			}
@@ -185,7 +185,7 @@ func (s *Server) start() error {
 }
 
 // Stop stops IndexNode's grpc service.
-func (s *Server) Stop() error {
+func (s *Server) Stop(graceful bool) error {
 	log.Debug("IndexNode stop", zap.String("Address", Params.GetAddress()))
 	if s.closer != nil {
 		if err := s.closer.Close(); err != nil {
@@ -194,7 +194,7 @@ func (s *Server) Stop() error {
 	}
 	s.loopCancel()
 	if s.indexnode != nil {
-		s.indexnode.Stop()
+		s.indexnode.Stop(graceful)
 	}
 	if s.etcdCli != nil {
 		defer s.etcdCli.Close()

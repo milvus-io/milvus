@@ -87,7 +87,7 @@ func (n *Session) Dispose() {
 	defer n.Unlock()
 
 	if n.client != nil {
-		n.client.Stop()
+		n.client.Stop(false)
 		n.client = nil
 	}
 	n.isDisposed = true

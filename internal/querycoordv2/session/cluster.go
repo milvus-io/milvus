@@ -303,7 +303,7 @@ func (c *clients) close(nodeID int64) {
 	c.Lock()
 	defer c.Unlock()
 	if cli, ok := c.clients[nodeID]; ok {
-		if err := cli.Stop(); err != nil {
+		if err := cli.Stop(false); err != nil {
 			log.Warn("error occurred during stopping client", zap.Int64("nodeID", nodeID), zap.Error(err))
 		}
 		delete(c.clients, nodeID)
@@ -314,7 +314,7 @@ func (c *clients) closeAll() {
 	c.Lock()
 	defer c.Unlock()
 	for nodeID, cli := range c.clients {
-		if err := cli.Stop(); err != nil {
+		if err := cli.Stop(false); err != nil {
 			log.Warn("error occurred during stopping client", zap.Int64("nodeID", nodeID), zap.Error(err))
 		}
 	}

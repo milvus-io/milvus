@@ -668,7 +668,7 @@ func TestImpl_GetCollectionStatistics(t *testing.T) {
 	defer cancel()
 
 	node, err := genSimpleQueryNode(ctx)
-	defer node.Stop()
+	defer node.Stop(false)
 	require.NoError(t, err)
 
 	req, err := genGetCollectionStatisticRequest()
@@ -689,7 +689,7 @@ func TestImpl_GetPartitionStatistics(t *testing.T) {
 	defer cancel()
 
 	node, err := genSimpleQueryNode(ctx)
-	defer node.Stop()
+	defer node.Stop(false)
 	require.NoError(t, err)
 
 	req, err := genGetPartitionStatisticRequest()
@@ -710,7 +710,7 @@ func TestImpl_Query(t *testing.T) {
 	defer cancel()
 
 	node, err := genSimpleQueryNode(ctx)
-	defer node.Stop()
+	defer node.Stop(false)
 	require.NoError(t, err)
 
 	schema := genTestCollectionSchema()
@@ -745,7 +745,7 @@ func TestImpl_queryWithDmlChannel(t *testing.T) {
 	defer cancel()
 
 	node, err := genSimpleQueryNode(ctx)
-	defer node.Stop()
+	defer node.Stop(false)
 	require.NoError(t, err)
 
 	schema := genTestCollectionSchema()
@@ -779,7 +779,7 @@ func TestImpl_SyncReplicaSegments(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		node, err := genSimpleQueryNode(ctx)
-		defer node.Stop()
+		defer node.Stop(false)
 		assert.NoError(t, err)
 
 		node.UpdateStateCode(commonpb.StateCode_Abnormal)
@@ -793,7 +793,7 @@ func TestImpl_SyncReplicaSegments(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		node, err := genSimpleQueryNode(ctx)
-		defer node.Stop()
+		defer node.Stop(false)
 		assert.NoError(t, err)
 
 		resp, err := node.SyncReplicaSegments(ctx, &querypb.SyncReplicaSegmentsRequest{
@@ -816,7 +816,7 @@ func TestImpl_SyncReplicaSegments(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		node, err := genSimpleQueryNode(ctx)
-		defer node.Stop()
+		defer node.Stop(false)
 		assert.NoError(t, err)
 
 		node.ShardClusterService.addShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel)
@@ -854,7 +854,7 @@ func TestSyncDistribution(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		node, err := genSimpleQueryNode(ctx)
-		defer node.Stop()
+		defer node.Stop(false)
 		assert.NoError(t, err)
 
 		node.UpdateStateCode(commonpb.StateCode_Abnormal)
@@ -868,7 +868,7 @@ func TestSyncDistribution(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		node, err := genSimpleQueryNode(ctx)
-		defer node.Stop()
+		defer node.Stop(false)
 		assert.NoError(t, err)
 
 		resp, err := node.SyncDistribution(ctx, &querypb.SyncDistributionRequest{
@@ -893,7 +893,7 @@ func TestSyncDistribution(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		node, err := genSimpleQueryNode(ctx)
-		defer node.Stop()
+		defer node.Stop(false)
 		assert.NoError(t, err)
 
 		resp, err := node.SyncDistribution(ctx, &querypb.SyncDistributionRequest{
@@ -918,7 +918,7 @@ func TestSyncDistribution(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		node, err := genSimpleQueryNode(ctx)
-		defer node.Stop()
+		defer node.Stop(false)
 		assert.NoError(t, err)
 
 		node.ShardClusterService.addShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel)
@@ -978,7 +978,7 @@ func TestGetDataDistribution(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		node, err := genSimpleQueryNode(ctx)
-		defer node.Stop()
+		defer node.Stop(false)
 		assert.NoError(t, err)
 
 		node.UpdateStateCode(commonpb.StateCode_Abnormal)
@@ -992,7 +992,7 @@ func TestGetDataDistribution(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		node, err := genSimpleQueryNode(ctx)
-		defer node.Stop()
+		defer node.Stop(false)
 		assert.NoError(t, err)
 
 		resp, err := node.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{

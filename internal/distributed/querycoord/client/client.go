@@ -107,7 +107,7 @@ func (c *Client) Start() error {
 }
 
 // Stop stops QueryCoordinator's grpc client server.
-func (c *Client) Stop() error {
+func (c *Client) Stop(bool) error {
 	return c.grpcClient.Close()
 }
 

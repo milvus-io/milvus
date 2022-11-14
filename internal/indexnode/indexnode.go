@@ -134,7 +134,7 @@ func (i *IndexNode) Register() error {
 	//start liveness check
 	go i.session.LivenessCheck(i.loopCtx, func() {
 		log.Error("Index Node disconnected from etcd, process will exit", zap.Int64("Server Id", i.session.ServerID))
-		if err := i.Stop(); err != nil {
+		if err := i.Stop(false); err != nil {
 			log.Fatal("failed to stop server", zap.Error(err))
 		}
 		// manually send signal to starter goroutine
@@ -250,7 +250,7 @@ func (i *IndexNode) Start() error {
 }
 
 // Stop closes the server.
-func (i *IndexNode) Stop() error {
+func (i *IndexNode) Stop(bool) error {
 	// https://github.com/milvus-io/milvus/issues/12282
 	i.UpdateStateCode(commonpb.StateCode_Abnormal)
 	// cleanup all running tasks

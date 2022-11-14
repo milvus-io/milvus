@@ -113,7 +113,7 @@ func (c *Client) Start() error {
 }
 
 // Stop terminate grpc connection
-func (c *Client) Stop() error {
+func (c *Client) Stop(bool) error {
 	return c.grpcClient.Close()
 }
 

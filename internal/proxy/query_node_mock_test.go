@@ -107,7 +107,7 @@ func (m *QueryNodeMock) GetMetrics(ctx context.Context, req *milvuspb.GetMetrics
 
 func (m *QueryNodeMock) Init() error     { return nil }
 func (m *QueryNodeMock) Start() error    { return nil }
-func (m *QueryNodeMock) Stop() error     { return nil }
+func (m *QueryNodeMock) Stop(bool) error { return nil }
 func (m *QueryNodeMock) Register() error { return nil }
 func (m *QueryNodeMock) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
 	return nil, nil

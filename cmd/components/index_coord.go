@@ -56,8 +56,8 @@ func (s *IndexCoord) Run() error {
 }
 
 // Stop terminates service
-func (s *IndexCoord) Stop() error {
-	if err := s.svr.Stop(); err != nil {
+func (s *IndexCoord) Stop(graceful bool) error {
+	if err := s.svr.Stop(graceful); err != nil {
 		return err
 	}
 	return nil

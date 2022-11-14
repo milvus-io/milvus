@@ -503,7 +503,7 @@ func (s *Server) start() error {
 }
 
 // Stop stop the Proxy Server
-func (s *Server) Stop() error {
+func (s *Server) Stop(graceful bool) error {
 	log.Debug("Proxy stop", zap.String("internal address", Params.GetInternalAddress()), zap.String("external address", Params.GetInternalAddress()))
 	var err error
 	if s.closer != nil {
@@ -534,7 +534,7 @@ func (s *Server) Stop() error {
 
 	s.wg.Wait()
 
-	err = s.proxy.Stop()
+	err = s.proxy.Stop(graceful)
 	if err != nil {
 		return err
 	}

@@ -227,7 +227,7 @@ func (coord *RootCoordMock) Start() error {
 	return nil
 }
 
-func (coord *RootCoordMock) Stop() error {
+func (coord *RootCoordMock) Stop(bool) error {
 	defer coord.updateState(commonpb.StateCode_Abnormal)
 
 	return nil

@@ -606,7 +606,7 @@ func (_c *DataNode_Start_Call) Return(_a0 error) *DataNode_Start_Call {
 }
 
 // Stop provides a mock function with given fields:
-func (_m *DataNode) Stop() error {
+func (_m *DataNode) Stop(bool) error {
 	ret := _m.Called()
 
 	var r0 error

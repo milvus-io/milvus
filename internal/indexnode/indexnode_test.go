@@ -480,7 +480,7 @@ func TestComponentState(t *testing.T) {
 	assert.Equal(t, state.Status.ErrorCode, commonpb.ErrorCode_Success)
 	assert.Equal(t, state.State.StateCode, commonpb.StateCode_Healthy)
 
-	assert.Nil(t, in.Stop())
+	assert.Nil(t, in.Stop(false))
 	state, err = in.GetComponentStates(ctx)
 	assert.Nil(t, err)
 	assert.Equal(t, state.Status.ErrorCode, commonpb.ErrorCode_Success)

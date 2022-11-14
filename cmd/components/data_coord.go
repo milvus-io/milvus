@@ -54,8 +54,8 @@ func (s *DataCoord) Run() error {
 }
 
 // Stop terminates service
-func (s *DataCoord) Stop() error {
-	if err := s.svr.Stop(); err != nil {
+func (s *DataCoord) Stop(graceful bool) error {
+	if err := s.svr.Stop(graceful); err != nil {
 		return err
 	}
 	return nil

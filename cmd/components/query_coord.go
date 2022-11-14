@@ -58,8 +58,8 @@ func (qs *QueryCoord) Run() error {
 }
 
 // Stop terminates service
-func (qs *QueryCoord) Stop() error {
-	if err := qs.svr.Stop(); err != nil {
+func (qs *QueryCoord) Stop(graceful bool) error {
+	if err := qs.svr.Stop(graceful); err != nil {
 		return err
 	}
 	return nil

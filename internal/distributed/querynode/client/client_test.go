@@ -151,6 +151,6 @@ func Test_NewClient(t *testing.T) {
 	cancel() // make context canceled
 	checkFunc(false)
 
-	err = client.Stop()
+	err = client.Stop(false)
 	assert.Nil(t, err)
 }

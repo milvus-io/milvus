@@ -53,7 +53,7 @@ func (n *shardClient) close() {
 	n.isClosed = true
 	n.refCnt = 0
 	if n.client != nil {
-		n.client.Stop()
+		n.client.Stop(false)
 		n.client = nil
 	}
 }

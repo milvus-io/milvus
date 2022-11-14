@@ -3436,7 +3436,7 @@ func newTestServerWithMeta(t *testing.T, receiveCh chan any, meta *meta, opts ..
 }
 
 func closeTestServer(t *testing.T, svr *Server) {
-	err := svr.Stop()
+	err := svr.Stop(false)
 	assert.Nil(t, err)
 	err = svr.CleanMeta()
 	assert.Nil(t, err)

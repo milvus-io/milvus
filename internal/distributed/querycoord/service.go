@@ -283,7 +283,7 @@ func (s *Server) start() error {
 }
 
 // Stop stops QueryCoord's grpc service.
-func (s *Server) Stop() error {
+func (s *Server) Stop(graceful bool) error {
 	log.Debug("QueryCoord stop", zap.String("Address", Params.GetAddress()))
 	if s.closer != nil {
 		if err := s.closer.Close(); err != nil {
@@ -293,7 +293,7 @@ func (s *Server) Stop() error {
 	if s.etcdCli != nil {
 		defer s.etcdCli.Close()
 	}
-	err := s.queryCoord.Stop()
+	err := s.queryCoord.Stop(graceful)
 	s.loopCancel()
 	if s.grpcServer != nil {
 		log.Debug("Graceful stop grpc server...")

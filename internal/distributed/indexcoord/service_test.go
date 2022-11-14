@@ -165,6 +165,6 @@ func TestIndexCoordinateServer(t *testing.T) {
 		assert.Equal(t, true, ret.IsHealthy)
 	})
 
-	err = server.Stop()
+	err = server.Stop(false)
 	assert.NoError(t, err)
 }

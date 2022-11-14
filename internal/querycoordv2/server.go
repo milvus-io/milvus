@@ -132,7 +132,7 @@ func (s *Server) Register() error {
 	}
 	go s.session.LivenessCheck(s.ctx, func() {
 		log.Error("QueryCoord disconnected from etcd, process will exit", zap.Int64("serverID", s.session.ServerID))
-		if err := s.Stop(); err != nil {
+		if err := s.Stop(false); err != nil {
 			log.Fatal("failed to stop server", zap.Error(err))
 		}
 		// manually send signal to starter goroutine
@@ -361,7 +361,7 @@ func (s *Server) Start() error {
 	return nil
 }
 
-func (s *Server) Stop() error {
+func (s *Server) Stop(bool) error {
 	s.cancel()
 	if s.session != nil {
 		s.session.Revoke(time.Second)
@@ -538,7 +538,7 @@ func (s *Server) watchNodes(revision int64) {
 			if !ok {
 				// ErrCompacted is handled inside SessionWatcher
 				log.Error("Session Watcher channel closed", zap.Int64("serverID", s.session.ServerID))
-				go s.Stop()
+				go s.Stop(false)
 				if s.session.TriggerKill {
 					if p, err := os.FindProcess(os.Getpid()); err == nil {
 						p.Signal(syscall.SIGINT)

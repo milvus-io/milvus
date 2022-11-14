@@ -86,7 +86,7 @@ func (m *mockShardQueryNode) ReleaseSegments(ctx context.Context, in *querypb.Re
 	return m.releaseSegmentsResult, m.releaseSegmentsErr
 }
 
-func (m *mockShardQueryNode) Stop() error {
+func (m *mockShardQueryNode) Stop(bool) error {
 	return nil
 }
 

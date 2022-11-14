@@ -75,7 +75,7 @@ func (m *Mock) Start() error {
 }
 
 // Stop stops the Mock of IndexCoord. When param `Failure` is true, it will return an error.
-func (m *Mock) Stop() error {
+func (m *Mock) Stop(bool) error {
 	return m.CallStop()
 }
 

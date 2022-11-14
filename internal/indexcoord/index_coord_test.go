@@ -492,7 +492,7 @@ func testIndexCoord(t *testing.T) {
 	})
 
 	// Stop IndexCoord
-	err = ic.Stop()
+	err = ic.Stop(false)
 	assert.NoError(t, err)
 
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)

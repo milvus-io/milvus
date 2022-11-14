@@ -63,8 +63,8 @@ func (rc *RootCoord) Run() error {
 }
 
 // Stop terminates service
-func (rc *RootCoord) Stop() error {
-	if err := rc.svr.Stop(); err != nil {
+func (rc *RootCoord) Stop(graceful bool) error {
+	if err := rc.svr.Stop(graceful); err != nil {
 		return err
 	}
 	return nil

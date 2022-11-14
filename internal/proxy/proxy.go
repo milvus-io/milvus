@@ -134,7 +134,7 @@ func (node *Proxy) Register() error {
 	node.session.Register()
 	go node.session.LivenessCheck(node.ctx, func() {
 		log.Error("Proxy disconnected from etcd, process will exit", zap.Int64("Server Id", node.session.ServerID))
-		if err := node.Stop(); err != nil {
+		if err := node.Stop(false); err != nil {
 			log.Fatal("failed to stop server", zap.Error(err))
 		}
 		if node.session.TriggerKill {
@@ -377,7 +377,7 @@ func (node *Proxy) Start() error {
 }
 
 // Stop stops a proxy node.
-func (node *Proxy) Stop() error {
+func (node *Proxy) Stop(bool) error {
 	node.cancel()
 
 	if node.rowIDAllocator != nil {

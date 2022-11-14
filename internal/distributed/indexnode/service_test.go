@@ -118,6 +118,6 @@ func TestIndexNodeServer(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
-	err = server.Stop()
+	err = server.Stop(false)
 	assert.Nil(t, err)
 }

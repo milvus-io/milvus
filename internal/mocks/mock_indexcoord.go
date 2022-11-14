@@ -700,7 +700,7 @@ func (_c *MockIndexCoord_Start_Call) Return(_a0 error) *MockIndexCoord_Start_Cal
 }
 
 // Stop provides a mock function with given fields:
-func (_m *MockIndexCoord) Stop() error {
+func (_m *MockIndexCoord) Stop(bool) error {
 	ret := _m.Called()
 
 	var r0 error

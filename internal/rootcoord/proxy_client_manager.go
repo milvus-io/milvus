@@ -96,7 +96,7 @@ func (p *proxyClientManager) connect(session *sessionutil.Session) {
 
 	_, ok := p.proxyClient[session.ServerID]
 	if ok {
-		pc.Stop()
+		pc.Stop(false)
 		return
 	}
 	p.proxyClient[session.ServerID] = pc
@@ -110,7 +110,7 @@ func (p *proxyClientManager) DelProxyClient(s *sessionutil.Session) {
 
 	cli, ok := p.proxyClient[s.ServerID]
 	if ok {
-		cli.Stop()
+		cli.Stop(false)
 	}
 
 	delete(p.proxyClient, s.ServerID)

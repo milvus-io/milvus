@@ -1970,7 +1970,7 @@ func (_c *RootCoord_Start_Call) Return(_a0 error) *RootCoord_Start_Call {
 }
 
 // Stop provides a mock function with given fields:
-func (_m *RootCoord) Stop() error {
+func (_m *RootCoord) Stop(bool) error {
 	ret := _m.Called()
 
 	var r0 error

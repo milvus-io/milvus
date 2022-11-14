@@ -47,7 +47,7 @@ type Limiter interface {
 type Component interface {
 	Init() error
 	Start() error
-	Stop() error
+	Stop(graceful bool) error
 	GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error)
 	GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error)
 	Register() error

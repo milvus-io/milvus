@@ -87,7 +87,7 @@ type shardQueryNode interface {
 	Query(context.Context, *querypb.QueryRequest) (*internalpb.RetrieveResults, error)
 	LoadSegments(ctx context.Context, in *querypb.LoadSegmentsRequest) (*commonpb.Status, error)
 	ReleaseSegments(ctx context.Context, in *querypb.ReleaseSegmentsRequest) (*commonpb.Status, error)
-	Stop() error
+	Stop(graceful bool) error
 }
 
 type shardNode struct {
@@ -233,7 +233,7 @@ func (sc *ShardCluster) addNode(evt nodeEvent) {
 			log.Warn("ShardCluster add same node, skip", zap.Int64("nodeID", evt.nodeID), zap.String("addr", evt.nodeAddr))
 			return
 		}
-		defer oldNode.client.Stop()
+		defer oldNode.client.Stop(false)
 	}
 
 	node := &shardNode{
@@ -260,7 +260,7 @@ func (sc *ShardCluster) removeNode(evt nodeEvent) {
 		return
 	}
 
-	defer old.client.Stop()
+	defer old.client.Stop(false)
 	delete(sc.nodes, evt.nodeID)
 
 	for id, segment := range sc.segments {

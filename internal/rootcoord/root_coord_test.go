@@ -1360,7 +1360,7 @@ func TestRootcoord_EnableActiveStandby(t *testing.T) {
 		CollectionName: "unexist"})
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-	err = core.Stop()
+	err = core.Stop(false)
 	assert.NoError(t, err)
 }
 
@@ -1440,7 +1440,7 @@ func TestRootCoord_CheckHealth(t *testing.T) {
 func TestCore_Stop(t *testing.T) {
 	t.Run("abnormal stop before component is ready", func(t *testing.T) {
 		c := &Core{}
-		err := c.Stop()
+		err := c.Stop(false)
 		assert.NoError(t, err)
 		code, ok := c.stateCode.Load().(commonpb.StateCode)
 		assert.True(t, ok)
@@ -1451,7 +1451,7 @@ func TestCore_Stop(t *testing.T) {
 		c := newTestCore(withHealthyCode(),
 			withValidScheduler())
 		c.ctx, c.cancel = context.WithCancel(context.Background())
-		err := c.Stop()
+		err := c.Stop(false)
 		assert.NoError(t, err)
 		code, ok := c.stateCode.Load().(commonpb.StateCode)
 		assert.True(t, ok)

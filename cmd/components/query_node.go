@@ -59,8 +59,8 @@ func (q *QueryNode) Run() error {
 }
 
 // Stop terminates service
-func (q *QueryNode) Stop() error {
-	if err := q.svr.Stop(); err != nil {
+func (q *QueryNode) Stop(graceful bool) error {
+	if err := q.svr.Stop(graceful); err != nil {
 		return err
 	}
 	return nil

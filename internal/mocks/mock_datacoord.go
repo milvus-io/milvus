@@ -1544,7 +1544,7 @@ func (_c *DataCoord_Start_Call) Return(_a0 error) *DataCoord_Start_Call {
 }
 
 // Stop provides a mock function with given fields:
-func (_m *DataCoord) Stop() error {
+func (_m *DataCoord) Stop(bool) error {
 	ret := _m.Called()
 
 	var r0 error
