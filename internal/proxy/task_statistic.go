@@ -145,18 +145,25 @@ func (g *getStatisticsTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		g.fromDataCoord = true
 		g.unloadedPartitionIDs = partIDs
-		log.Debug("checkFullLoaded failed, try get statistics from DataCoord", zap.Int64("msgID", g.ID()), zap.Error(err))
+		log.Ctx(ctx).Debug("checkFullLoaded failed, try get statistics from DataCoord",
+			zap.Error(err))
 		return nil
 	}
 	if len(unloaded) > 0 {
 		g.fromDataCoord = true
 		g.unloadedPartitionIDs = unloaded
-		log.Debug("some partitions has not been loaded, try get statistics from DataCoord", zap.Int64("msgID", g.ID()), zap.String("collection", g.collectionName), zap.Int64s("unloaded partitions", unloaded), zap.Error(err))
+		log.Debug("some partitions has not been loaded, try get statistics from DataCoord",
+			zap.String("collection", g.collectionName),
+			zap.Int64s("unloaded partitions", unloaded),
+			zap.Error(err))
 	}
 	if len(loaded) > 0 {
 		g.fromQueryNode = true
 		g.loadedPartitionIDs = loaded
-		log.Debug("some partitions has been loaded, try get statistics from QueryNode", zap.Int64("msgID", g.ID()), zap.String("collection", g.collectionName), zap.Int64s("loaded partitions", loaded), zap.Error(err))
+		log.Debug("some partitions has been loaded, try get statistics from QueryNode",
+			zap.String("collection", g.collectionName),
+			zap.Int64s("loaded partitions", loaded),
+			zap.Error(err))
 	}
 	return nil
 }
@@ -174,14 +181,14 @@ func (g *getStatisticsTask) Execute(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		log.Debug("get collection statistics from QueryNode execute done", zap.Int64("msgID", g.ID()))
+		log.Ctx(ctx).Debug("get collection statistics from QueryNode execute done")
 	}
 	if g.fromDataCoord {
 		err := g.getStatisticsFromDataCoord(ctx)
 		if err != nil {
 			return err
 		}
-		log.Debug("get collection statistics from DataCoord execute done", zap.Int64("msgID", g.ID()))
+		log.Debug("get collection statistics from DataCoord execute done")
 	}
 	return nil
 }
@@ -197,14 +204,15 @@ func (g *getStatisticsTask) PostExecute(ctx context.Context) error {
 	if g.fromQueryNode {
 		select {
 		case <-g.TraceCtx().Done():
-			log.Debug("wait to finish timeout!", zap.Int64("msgID", g.ID()))
+			log.Debug("wait to finish timeout!")
 			return nil
 		default:
-			log.Debug("all get statistics are finished or canceled", zap.Int64("msgID", g.ID()))
+			log.Debug("all get statistics are finished or canceled")
 			close(g.resultBuf)
 			for res := range g.resultBuf {
 				g.toReduceResults = append(g.toReduceResults, res)
-				log.Debug("proxy receives one get statistic response", zap.Int64("sourceID", res.GetBase().GetSourceID()), zap.Int64("msgID", g.ID()))
+				log.Debug("proxy receives one get statistic response",
+					zap.Int64("sourceID", res.GetBase().GetSourceID()))
 			}
 		}
 	}
@@ -223,7 +231,8 @@ func (g *getStatisticsTask) PostExecute(ctx context.Context) error {
 		Stats:  result,
 	}
 
-	log.Info("get statistics post execute done", zap.Int64("msgID", g.ID()), zap.Any("result", result))
+	log.Info("get statistics post execute done",
+		zap.Any("result", result))
 	return nil
 }
 
@@ -256,7 +265,6 @@ func (g *getStatisticsTask) getStatisticsFromDataCoord(ctx context.Context) erro
 
 func (g *getStatisticsTask) getStatisticsFromQueryNode(ctx context.Context) error {
 	g.GetStatisticsRequest.PartitionIDs = g.loadedPartitionIDs
-
 	executeGetStatistics := func(withCache bool) error {
 		shard2Leaders, err := globalMetaCache.GetShards(ctx, withCache, g.collectionName)
 		if err != nil {
@@ -264,7 +272,9 @@ func (g *getStatisticsTask) getStatisticsFromQueryNode(ctx context.Context) erro
 		}
 		g.resultBuf = make(chan *internalpb.GetStatisticsResponse, len(shard2Leaders))
 		if err := g.statisticShardPolicy(ctx, g.shardMgr, g.getStatisticsShard, shard2Leaders); err != nil {
-			log.Warn("failed to get statistics", zap.Int64("msgID", g.ID()), zap.Error(err), zap.String("Shards", fmt.Sprintf("%v", shard2Leaders)))
+			log.Warn("failed to get statistics",
+				zap.Error(err),
+				zap.String("Shards", fmt.Sprintf("%v", shard2Leaders)))
 			return err
 		}
 		return nil
@@ -273,7 +283,6 @@ func (g *getStatisticsTask) getStatisticsFromQueryNode(ctx context.Context) erro
 	err := executeGetStatistics(WithCache)
 	if errors.Is(err, errInvalidShardLeaders) || funcutil.IsGrpcErr(err) || errors.Is(err, grpcclient.ErrConnect) {
 		log.Warn("first get statistics failed, updating shard leader caches and retry",
-			zap.Int64("msgID", g.ID()),
 			zap.Error(err),
 		)
 		// invalidate cache first, since ctx may be canceled or timeout here
@@ -295,18 +304,22 @@ func (g *getStatisticsTask) getStatisticsShard(ctx context.Context, nodeID int64
 	}
 	result, err := qn.GetStatistics(ctx, req)
 	if err != nil {
-		log.Warn("QueryNode statistic return error", zap.Int64("msgID", g.ID()),
-			zap.Int64("nodeID", nodeID), zap.Strings("channels", channelIDs), zap.Error(err))
+		log.Warn("QueryNode statistic return error",
+			zap.Int64("nodeID", nodeID),
+			zap.Strings("channels", channelIDs),
+			zap.Error(err))
 		return err
 	}
 	if result.GetStatus().GetErrorCode() == commonpb.ErrorCode_NotShardLeader {
-		log.Warn("QueryNode is not shardLeader", zap.Int64("msgID", g.ID()),
-			zap.Int64("nodeID", nodeID), zap.Strings("channels", channelIDs))
+		log.Warn("QueryNode is not shardLeader",
+			zap.Int64("nodeID", nodeID),
+			zap.Strings("channels", channelIDs))
 		return errInvalidShardLeaders
 	}
 	if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("QueryNode statistic result error", zap.Int64("msgID", g.ID()),
-			zap.Int64("nodeID", nodeID), zap.String("reason", result.GetStatus().GetReason()))
+		log.Warn("QueryNode statistic result error",
+			zap.Int64("nodeID", nodeID),
+			zap.String("reason", result.GetStatus().GetReason()))
 		return fmt.Errorf("fail to get statistic, QueryNode ID=%d, reason=%s", nodeID, result.GetStatus().GetReason())
 	}
 	g.resultBuf <- result

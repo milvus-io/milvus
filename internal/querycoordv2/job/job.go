@@ -41,6 +41,7 @@ import (
 type Job interface {
 	MsgID() int64
 	CollectionID() int64
+	Context() context.Context
 	// PreExecute does checks, DO NOT persists any thing within this stage,
 	PreExecute() error
 	// Execute processes the request
@@ -76,6 +77,10 @@ func (job *BaseJob) MsgID() int64 {
 
 func (job *BaseJob) CollectionID() int64 {
 	return job.collectionID
+}
+
+func (job *BaseJob) Context() context.Context {
+	return job.ctx
 }
 
 func (job *BaseJob) Error() error {

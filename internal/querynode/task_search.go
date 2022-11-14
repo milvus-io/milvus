@@ -103,7 +103,7 @@ func (s *searchTask) searchOnStreaming() error {
 	}
 
 	if _, released := s.QS.collection.getReleaseTime(); released {
-		log.Ctx(ctx).Debug("collection release before search", zap.Int64("msgID", s.ID()),
+		log.Ctx(ctx).Debug("collection release before search",
 			zap.Int64("collectionID", s.CollectionID))
 		return fmt.Errorf("retrieve failed, collection has been released, collectionID = %d", s.CollectionID)
 	}
@@ -116,7 +116,7 @@ func (s *searchTask) searchOnStreaming() error {
 
 	partResults, _, _, sErr := searchStreaming(ctx, s.QS.metaReplica, searchReq, s.CollectionID, s.iReq.GetPartitionIDs(), s.req.GetDmlChannels()[0])
 	if sErr != nil {
-		log.Ctx(ctx).Warn("failed to search streaming data", zap.Int64("msgID", s.ID()),
+		log.Ctx(ctx).Warn("failed to search streaming data",
 			zap.Int64("collectionID", s.CollectionID), zap.Error(sErr))
 		return sErr
 	}
@@ -138,7 +138,7 @@ func (s *searchTask) searchOnHistorical() error {
 	}
 
 	if _, released := s.QS.collection.getReleaseTime(); released {
-		log.Ctx(ctx).Warn("collection release before search", zap.Int64("msgID", s.ID()),
+		log.Ctx(ctx).Warn("collection release before search",
 			zap.Int64("collectionID", s.CollectionID))
 		return fmt.Errorf("retrieve failed, collection has been released, collectionID = %d", s.CollectionID)
 	}
@@ -226,7 +226,8 @@ func (s *searchTask) reduceResults(ctx context.Context, searchReq *searchRequest
 		numSegment := int64(len(results))
 		blobs, err := reduceSearchResultsAndFillData(searchReq.plan, results, numSegment, sInfo.sliceNQs, sInfo.sliceTopKs)
 		if err != nil {
-			log.Ctx(ctx).Warn("marshal for historical results error", zap.Int64("msgID", s.ID()), zap.Error(err))
+			log.Ctx(ctx).Warn("marshal for historical results error",
+				zap.Error(err))
 			return err
 		}
 
@@ -238,7 +239,7 @@ func (s *searchTask) reduceResults(ctx context.Context, searchReq *searchRequest
 		for i := 0; i < cnt; i++ {
 			blob, err := getSearchResultDataBlob(blobs, i)
 			if err != nil {
-				log.Ctx(ctx).Warn("getSearchResultDataBlob for historical results error", zap.Int64("msgID", s.ID()),
+				log.Ctx(ctx).Warn("getSearchResultDataBlob for historical results error",
 					zap.Error(err))
 				return err
 			}

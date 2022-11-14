@@ -91,7 +91,7 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context, req *querypb.LoadS
 		return nil, fmt.Errorf("nil base message when load segment, collectionID = %d", req.CollectionID)
 	}
 
-	log := log.With(zap.Int64("collectionID", req.CollectionID), zap.String("segmentType", segmentType.String()))
+	log := log.Ctx(ctx).With(zap.Int64("collectionID", req.CollectionID), zap.String("segmentType", segmentType.String()))
 	// no segment needs to load, return
 	segmentNum := len(req.Infos)
 
@@ -123,7 +123,6 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context, req *querypb.LoadS
 	err := loader.checkSegmentSize(req.CollectionID, req.Infos, concurrencyLevel)
 	if err != nil {
 		log.Error("load failed, OOM if loaded",
-			zap.Int64("loadSegmentRequest msgID", req.Base.MsgID),
 			zap.Error(err))
 		return nil, err
 	}
@@ -204,7 +203,6 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context, req *querypb.LoadS
 				zap.Int64("collectionID", segment.collectionID),
 				zap.Int64("partitionID", segment.partitionID),
 				zap.Int64("segmentID", segment.segmentID),
-				zap.Int64("loadSegmentRequest msgID", req.Base.MsgID),
 				zap.Error(err))
 			failedSetMetaSegmentIDs = append(failedSetMetaSegmentIDs, id)
 			loadDoneSegmentIDSet.Remove(id)

@@ -333,7 +333,6 @@ func (s *Segment) search(ctx context.Context, searchReq *searchRequest) (*Search
 	loadIndex := s.hasLoadIndexForIndexedField(searchReq.searchFieldID)
 	var searchResult SearchResult
 	log.Ctx(ctx).Debug("start do search on segment",
-		zap.Int64("msgID", searchReq.msgID),
 		zap.Int64("segmentID", s.segmentID),
 		zap.String("segmentType", s.segmentType.String()),
 		zap.Bool("loadIndex", loadIndex))
@@ -347,7 +346,6 @@ func (s *Segment) search(ctx context.Context, searchReq *searchRequest) (*Search
 		return nil, err
 	}
 	log.Ctx(ctx).Debug("do search on segment done",
-		zap.Int64("msgID", searchReq.msgID),
 		zap.Int64("segmentID", s.segmentID),
 		zap.String("segmentType", s.segmentType.String()),
 		zap.Bool("loadIndex", loadIndex))
@@ -369,7 +367,6 @@ func (s *Segment) retrieve(plan *RetrievePlan) (*segcorepb.RetrieveResults, erro
 	metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()),
 		metrics.QueryLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	log.Debug("do retrieve on segment",
-		zap.Int64("msgID", plan.msgID),
 		zap.Int64("segmentID", s.segmentID), zap.String("segmentType", s.segmentType.String()))
 
 	if err := HandleCStatus(&status, "Retrieve failed"); err != nil {
