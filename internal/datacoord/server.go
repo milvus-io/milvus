@@ -877,7 +877,6 @@ func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID i
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_ShowPartitions),
 			commonpbutil.WithMsgID(0),
-			commonpbutil.WithTimeStamp(0),
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
 		DbName:         "",

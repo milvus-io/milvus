@@ -484,7 +484,6 @@ func (node *DataNode) Start() error {
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_RequestTSO),
 			commonpbutil.WithMsgID(0),
-			commonpbutil.WithTimeStamp(0),
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
 		Count: 1,
@@ -1022,7 +1021,6 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_RequestTSO),
 			commonpbutil.WithMsgID(0),
-			commonpbutil.WithTimeStamp(0),
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
 		Count: 1,

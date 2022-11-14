@@ -54,7 +54,6 @@ func (ta *timestampAllocator) alloc(count uint32) ([]Timestamp, error) {
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_RequestTSO),
 			commonpbutil.WithMsgID(0),
-			commonpbutil.WithTimeStamp(0),
 			commonpbutil.WithSourceID(ta.peerID),
 		),
 		Count: count,

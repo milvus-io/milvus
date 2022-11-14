@@ -1518,7 +1518,6 @@ func (node *Proxy) GetLoadingProgress(ctx context.Context, request *milvuspb.Get
 	msgBase := commonpbutil.NewMsgBase(
 		commonpbutil.WithMsgType(commonpb.MsgType_SystemInfo),
 		commonpbutil.WithMsgID(0),
-		commonpbutil.WithTimeStamp(0),
 		commonpbutil.WithSourceID(paramtable.GetNodeID()),
 	)
 	if request.Base == nil {
@@ -2832,7 +2831,6 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_SegmentInfo),
 			commonpbutil.WithMsgID(0),
-			commonpbutil.WithTimeStamp(0),
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
 		SegmentIDs: getSegmentsByStatesResponse.Segments,
@@ -2909,7 +2907,6 @@ func (node *Proxy) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.GetQue
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_SegmentInfo),
 			commonpbutil.WithMsgID(0),
-			commonpbutil.WithTimeStamp(0),
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
 		CollectionID: collID,
@@ -3085,7 +3082,6 @@ func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReque
 	req.Base = commonpbutil.NewMsgBase(
 		commonpbutil.WithMsgType(commonpb.MsgType_SystemInfo),
 		commonpbutil.WithMsgID(0),
-		commonpbutil.WithTimeStamp(0),
 		commonpbutil.WithSourceID(paramtable.GetNodeID()),
 	)
 	if metricType == metricsinfo.SystemInfoMetrics {
@@ -3162,7 +3158,6 @@ func (node *Proxy) GetProxyMetrics(ctx context.Context, req *milvuspb.GetMetrics
 	req.Base = commonpbutil.NewMsgBase(
 		commonpbutil.WithMsgType(commonpb.MsgType_SystemInfo),
 		commonpbutil.WithMsgID(0),
-		commonpbutil.WithTimeStamp(0),
 		commonpbutil.WithSourceID(paramtable.GetNodeID()),
 	)
 
@@ -3228,7 +3223,6 @@ func (node *Proxy) LoadBalance(ctx context.Context, req *milvuspb.LoadBalanceReq
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_LoadBalanceSegments),
 			commonpbutil.WithMsgID(0),
-			commonpbutil.WithTimeStamp(0),
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
 		SourceNodeIDs:    []int64{req.SrcNodeID},
