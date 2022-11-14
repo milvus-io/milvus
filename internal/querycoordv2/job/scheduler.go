@@ -147,8 +147,7 @@ func (scheduler *Scheduler) processQueue(collection int64, queue jobQueue) {
 }
 
 func (scheduler *Scheduler) process(job Job) {
-	log := log.With(
-		zap.Int64("msgID", job.MsgID()),
+	log := log.Ctx(job.Context()).With(
 		zap.Int64("collectionID", job.CollectionID()))
 
 	defer func() {

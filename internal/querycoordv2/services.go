@@ -46,9 +46,7 @@ var (
 )
 
 func (s *Server) ShowCollections(ctx context.Context, req *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
-	log := log.With(zap.Int64("msgID", req.GetBase().GetMsgID()))
-
-	log.Info("show collections request received", zap.Int64s("collections", req.GetCollectionIDs()))
+	log.Ctx(ctx).Info("show collections request received", zap.Int64s("collections", req.GetCollectionIDs()))
 
 	if s.status.Load() != commonpb.StateCode_Healthy {
 		msg := "failed to show collections"
@@ -102,8 +100,7 @@ func (s *Server) ShowCollections(ctx context.Context, req *querypb.ShowCollectio
 }
 
 func (s *Server) ShowPartitions(ctx context.Context, req *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
-	log := log.With(
-		zap.Int64("msgID", req.GetBase().GetMsgID()),
+	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
 	)
 
@@ -180,8 +177,7 @@ func (s *Server) ShowPartitions(ctx context.Context, req *querypb.ShowPartitions
 }
 
 func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollectionRequest) (*commonpb.Status, error) {
-	log := log.With(
-		zap.Int64("msgID", req.GetBase().GetMsgID()),
+	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
 	)
 
@@ -221,8 +217,7 @@ func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 }
 
 func (s *Server) ReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
-	log := log.With(
-		zap.Int64("msgID", req.GetBase().GetMsgID()),
+	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
 	)
 
@@ -259,8 +254,7 @@ func (s *Server) ReleaseCollection(ctx context.Context, req *querypb.ReleaseColl
 }
 
 func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitionsRequest) (*commonpb.Status, error) {
-	log := log.With(
-		zap.Int64("msgID", req.GetBase().GetMsgID()),
+	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
 	)
 
@@ -299,8 +293,7 @@ func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitions
 }
 
 func (s *Server) ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error) {
-	log := log.With(
-		zap.Int64("msgID", req.GetBase().GetMsgID()),
+	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
 	)
 
@@ -343,8 +336,7 @@ func (s *Server) ReleasePartitions(ctx context.Context, req *querypb.ReleasePart
 }
 
 func (s *Server) GetPartitionStates(ctx context.Context, req *querypb.GetPartitionStatesRequest) (*querypb.GetPartitionStatesResponse, error) {
-	log := log.With(
-		zap.Int64("msgID", req.GetBase().GetMsgID()),
+	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
 	)
 
@@ -412,8 +404,7 @@ func (s *Server) GetPartitionStates(ctx context.Context, req *querypb.GetPartiti
 }
 
 func (s *Server) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
-	log := log.With(
-		zap.Int64("msgID", req.GetBase().GetMsgID()),
+	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
 	)
 
@@ -453,8 +444,7 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfo
 }
 
 func (s *Server) LoadBalance(ctx context.Context, req *querypb.LoadBalanceRequest) (*commonpb.Status, error) {
-	log := log.With(
-		zap.Int64("msgID", req.GetBase().GetMsgID()),
+	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
 	)
 
@@ -505,9 +495,7 @@ func (s *Server) LoadBalance(ctx context.Context, req *querypb.LoadBalanceReques
 }
 
 func (s *Server) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
-	log := log.With(
-		zap.Int64("msgID", req.GetBase().GetMsgID()),
-	)
+	log := log.Ctx(ctx)
 
 	log.Info("show configurations request received", zap.String("pattern", req.GetPattern()))
 
@@ -540,7 +528,7 @@ func (s *Server) ShowConfigurations(ctx context.Context, req *internalpb.ShowCon
 }
 
 func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	log := log.With(zap.Int64("msgID", req.Base.GetMsgID()))
+	log := log.Ctx(ctx)
 
 	log.Debug("get metrics request received",
 		zap.String("metricType", req.GetRequest()))
@@ -587,8 +575,7 @@ func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 }
 
 func (s *Server) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasRequest) (*milvuspb.GetReplicasResponse, error) {
-	log := log.With(
-		zap.Int64("msgID", req.Base.GetMsgID()),
+	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
 	)
 
@@ -630,8 +617,7 @@ func (s *Server) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasReque
 }
 
 func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeadersRequest) (*querypb.GetShardLeadersResponse, error) {
-	log := log.With(
-		zap.Int64("msgID", req.Base.GetMsgID()),
+	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
 	)
 

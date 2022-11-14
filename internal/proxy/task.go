@@ -1286,7 +1286,8 @@ func (lct *loadCollectionTask) OnEnqueue() error {
 }
 
 func (lct *loadCollectionTask) PreExecute(ctx context.Context) error {
-	log.Debug("loadCollectionTask PreExecute", zap.String("role", typeutil.ProxyRole), zap.Int64("msgID", lct.Base.MsgID))
+	log.Ctx(ctx).Debug("loadCollectionTask PreExecute",
+		zap.String("role", typeutil.ProxyRole))
 	lct.Base.MsgType = commonpb.MsgType_LoadCollection
 	lct.Base.SourceID = paramtable.GetNodeID()
 
@@ -1305,8 +1306,13 @@ func (lct *loadCollectionTask) PreExecute(ctx context.Context) error {
 }
 
 func (lct *loadCollectionTask) Execute(ctx context.Context) (err error) {
-	log.Debug("loadCollectionTask Execute", zap.String("role", typeutil.ProxyRole), zap.Int64("msgID", lct.Base.MsgID))
 	collID, err := globalMetaCache.GetCollectionID(ctx, lct.CollectionName)
+
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.ProxyRole),
+		zap.Int64("collectionID", collID))
+
+	log.Debug("loadCollectionTask Execute")
 	if err != nil {
 		return err
 	}
@@ -1340,7 +1346,7 @@ func (lct *loadCollectionTask) Execute(ctx context.Context) (err error) {
 	}
 	if !hasVecIndex {
 		errMsg := fmt.Sprintf("there is no vector index on collection: %s, please create index firstly", lct.LoadCollectionRequest.CollectionName)
-		log.Ctx(ctx).Error(errMsg)
+		log.Error(errMsg)
 		return errors.New(errMsg)
 	}
 	request := &querypb.LoadCollectionRequest{
@@ -1354,8 +1360,7 @@ func (lct *loadCollectionTask) Execute(ctx context.Context) (err error) {
 		ReplicaNumber: lct.ReplicaNumber,
 		FieldIndexID:  fieldIndexIDs,
 	}
-	log.Debug("send LoadCollectionRequest to query coordinator", zap.String("role", typeutil.ProxyRole),
-		zap.Int64("msgID", request.Base.MsgID), zap.Int64("collectionID", request.CollectionID),
+	log.Debug("send LoadCollectionRequest to query coordinator",
 		zap.Any("schema", request.Schema))
 	lct.result, err = lct.queryCoord.LoadCollection(ctx, request)
 	if err != nil {
@@ -1365,8 +1370,13 @@ func (lct *loadCollectionTask) Execute(ctx context.Context) (err error) {
 }
 
 func (lct *loadCollectionTask) PostExecute(ctx context.Context) error {
-	log.Debug("loadCollectionTask PostExecute", zap.String("role", typeutil.ProxyRole),
-		zap.Int64("msgID", lct.Base.MsgID))
+	collID, err := globalMetaCache.GetCollectionID(ctx, lct.CollectionName)
+	log.Ctx(ctx).Debug("loadCollectionTask PostExecute",
+		zap.String("role", typeutil.ProxyRole),
+		zap.Int64("collectionID", collID))
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
