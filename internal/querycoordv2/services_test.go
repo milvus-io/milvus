@@ -861,6 +861,7 @@ func (suite *ServiceSuite) loadAll() {
 				suite.targetMgr,
 				suite.broker,
 				suite.nodeMgr,
+				suite.taskScheduler,
 			)
 			suite.jobScheduler.Add(job)
 			err := job.Wait()
@@ -883,6 +884,7 @@ func (suite *ServiceSuite) loadAll() {
 				suite.targetMgr,
 				suite.broker,
 				suite.nodeMgr,
+				suite.taskScheduler,
 			)
 			suite.jobScheduler.Add(job)
 			err := job.Wait()

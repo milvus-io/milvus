@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 )
 
@@ -50,13 +51,14 @@ type JobSuite struct {
 	loadTypes   map[int64]querypb.LoadType
 
 	// Dependencies
-	kv        kv.MetaKv
-	store     meta.Store
-	dist      *meta.DistributionManager
-	meta      *meta.Meta
-	targetMgr *meta.TargetManager
-	broker    *meta.MockBroker
-	nodeMgr   *session.NodeManager
+	kv            kv.MetaKv
+	store         meta.Store
+	dist          *meta.DistributionManager
+	meta          *meta.Meta
+	targetMgr     *meta.TargetManager
+	broker        *meta.MockBroker
+	nodeMgr       *session.NodeManager
+	taskScheduler *task.MockScheduler
 
 	// Test objects
 	scheduler *Scheduler
@@ -126,6 +128,7 @@ func (suite *JobSuite) SetupTest() {
 	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta)
 	suite.nodeMgr = session.NewNodeManager()
 	suite.nodeMgr.Add(&session.NodeInfo{})
+	suite.taskScheduler = task.NewMockScheduler(suite.T())
 	suite.scheduler = NewScheduler()
 
 	suite.scheduler.Start(context.Background())
@@ -172,6 +175,7 @@ func (suite *JobSuite) TestLoadCollection() {
 			suite.targetMgr,
 			suite.broker,
 			suite.nodeMgr,
+			suite.taskScheduler,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -197,6 +201,7 @@ func (suite *JobSuite) TestLoadCollection() {
 			suite.targetMgr,
 			suite.broker,
 			suite.nodeMgr,
+			suite.taskScheduler,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -220,6 +225,7 @@ func (suite *JobSuite) TestLoadCollection() {
 			suite.targetMgr,
 			suite.broker,
 			suite.nodeMgr,
+			suite.taskScheduler,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -245,6 +251,7 @@ func (suite *JobSuite) TestLoadCollection() {
 			suite.targetMgr,
 			suite.broker,
 			suite.nodeMgr,
+			suite.taskScheduler,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -273,6 +280,7 @@ func (suite *JobSuite) TestLoadCollectionWithReplicas() {
 			suite.targetMgr,
 			suite.broker,
 			suite.nodeMgr,
+			suite.taskScheduler,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -303,6 +311,7 @@ func (suite *JobSuite) TestLoadCollectionWithDiffIndex() {
 			suite.targetMgr,
 			suite.broker,
 			suite.nodeMgr,
+			suite.taskScheduler,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -331,6 +340,7 @@ func (suite *JobSuite) TestLoadCollectionWithDiffIndex() {
 			suite.targetMgr,
 			suite.broker,
 			suite.nodeMgr,
+			suite.taskScheduler,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -360,6 +370,7 @@ func (suite *JobSuite) TestLoadPartition() {
 			suite.targetMgr,
 			suite.broker,
 			suite.nodeMgr,
+			suite.taskScheduler,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -388,6 +399,7 @@ func (suite *JobSuite) TestLoadPartition() {
 			suite.targetMgr,
 			suite.broker,
 			suite.nodeMgr,
+			suite.taskScheduler,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -413,6 +425,7 @@ func (suite *JobSuite) TestLoadPartition() {
 			suite.targetMgr,
 			suite.broker,
 			suite.nodeMgr,
+			suite.taskScheduler,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -438,6 +451,7 @@ func (suite *JobSuite) TestLoadPartition() {
 			suite.targetMgr,
 			suite.broker,
 			suite.nodeMgr,
+			suite.taskScheduler,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -462,6 +476,7 @@ func (suite *JobSuite) TestLoadPartition() {
 			suite.targetMgr,
 			suite.broker,
 			suite.nodeMgr,
+			suite.taskScheduler,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -491,6 +506,7 @@ func (suite *JobSuite) TestLoadPartitionWithReplicas() {
 			suite.targetMgr,
 			suite.broker,
 			suite.nodeMgr,
+			suite.taskScheduler,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -522,6 +538,7 @@ func (suite *JobSuite) TestLoadPartitionWithDiffIndex() {
 			suite.targetMgr,
 			suite.broker,
 			suite.nodeMgr,
+			suite.taskScheduler,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -552,6 +569,7 @@ func (suite *JobSuite) TestLoadPartitionWithDiffIndex() {
 			suite.targetMgr,
 			suite.broker,
 			suite.nodeMgr,
+			suite.taskScheduler,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -713,6 +731,7 @@ func (suite *JobSuite) TestLoadCollectionStoreFailed() {
 			suite.targetMgr,
 			suite.broker,
 			suite.nodeMgr,
+			suite.taskScheduler,
 		)
 		suite.scheduler.Add(job)
 		loadErr := job.Wait()
@@ -746,6 +765,7 @@ func (suite *JobSuite) TestLoadPartitionStoreFailed() {
 			suite.targetMgr,
 			suite.broker,
 			suite.nodeMgr,
+			suite.taskScheduler,
 		)
 		suite.scheduler.Add(job)
 		loadErr := job.Wait()
@@ -768,6 +788,7 @@ func (suite *JobSuite) TestLoadCreateReplicaFailed() {
 			suite.targetMgr,
 			suite.broker,
 			suite.nodeMgr,
+			suite.taskScheduler,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -790,6 +811,7 @@ func (suite *JobSuite) loadAll() {
 				suite.targetMgr,
 				suite.broker,
 				suite.nodeMgr,
+				suite.taskScheduler,
 			)
 			suite.scheduler.Add(job)
 			err := job.Wait()
@@ -811,6 +833,7 @@ func (suite *JobSuite) loadAll() {
 				suite.targetMgr,
 				suite.broker,
 				suite.nodeMgr,
+				suite.taskScheduler,
 			)
 			suite.scheduler.Add(job)
 			err := job.Wait()

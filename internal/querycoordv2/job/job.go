@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -110,6 +111,7 @@ type LoadCollectionJob struct {
 	targetMgr *meta.TargetManager
 	broker    meta.Broker
 	nodeMgr   *session.NodeManager
+	scheduler task.Scheduler
 }
 
 func NewLoadCollectionJob(
@@ -120,6 +122,7 @@ func NewLoadCollectionJob(
 	targetMgr *meta.TargetManager,
 	broker meta.Broker,
 	nodeMgr *session.NodeManager,
+	scheduler task.Scheduler,
 ) *LoadCollectionJob {
 	return &LoadCollectionJob{
 		BaseJob:   NewBaseJob(ctx, req.Base.GetMsgID(), req.GetCollectionID()),
@@ -129,6 +132,7 @@ func NewLoadCollectionJob(
 		targetMgr: targetMgr,
 		broker:    broker,
 		nodeMgr:   nodeMgr,
+		scheduler: scheduler,
 	}
 }
 
@@ -179,6 +183,9 @@ func (job *LoadCollectionJob) Execute() error {
 	log := log.Ctx(job.ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
 	)
+
+	// Clear stale release related tasks
+	job.scheduler.RemoveByCollection(req.GetCollectionID())
 
 	// Clear stale replicas
 	err := job.meta.ReplicaManager.RemoveCollection(req.GetCollectionID())
@@ -292,7 +299,6 @@ func (job *ReleaseCollectionJob) Execute() error {
 	}
 
 	job.targetMgr.RemoveCollection(req.GetCollectionID())
-	waitCollectionReleased(job.dist, req.GetCollectionID())
 	metrics.QueryCoordNumCollections.WithLabelValues().Dec()
 	return nil
 }
@@ -306,6 +312,7 @@ type LoadPartitionJob struct {
 	targetMgr *meta.TargetManager
 	broker    meta.Broker
 	nodeMgr   *session.NodeManager
+	scheduler task.Scheduler
 }
 
 func NewLoadPartitionJob(
@@ -316,6 +323,7 @@ func NewLoadPartitionJob(
 	targetMgr *meta.TargetManager,
 	broker meta.Broker,
 	nodeMgr *session.NodeManager,
+	scheduler task.Scheduler,
 ) *LoadPartitionJob {
 	return &LoadPartitionJob{
 		BaseJob:   NewBaseJob(ctx, req.Base.GetMsgID(), req.GetCollectionID()),
@@ -325,6 +333,7 @@ func NewLoadPartitionJob(
 		targetMgr: targetMgr,
 		broker:    broker,
 		nodeMgr:   nodeMgr,
+		scheduler: scheduler,
 	}
 }
 
@@ -386,6 +395,9 @@ func (job *LoadPartitionJob) Execute() error {
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.Int64s("partitionIDs", req.GetPartitionIDs()),
 	)
+
+	// Clear stale release related tasks
+	job.scheduler.RemoveByCollection(req.GetCollectionID())
 
 	// Clear stale replicas
 	err := job.meta.ReplicaManager.RemoveCollection(req.GetCollectionID())
@@ -515,7 +527,6 @@ func (job *ReleasePartitionJob) Execute() error {
 			log.Warn("failed to remove replicas", zap.Error(err))
 		}
 		job.targetMgr.RemoveCollection(req.GetCollectionID())
-		waitCollectionReleased(job.dist, req.GetCollectionID())
 	} else {
 		err := job.meta.CollectionManager.RemovePartition(toRelease...)
 		if err != nil {
@@ -524,7 +535,6 @@ func (job *ReleasePartitionJob) Execute() error {
 			return utils.WrapError(msg, err)
 		}
 		job.targetMgr.RemovePartition(req.GetCollectionID(), toRelease...)
-		waitCollectionReleased(job.dist, req.GetCollectionID(), toRelease...)
 	}
 	metrics.QueryCoordNumCollections.WithLabelValues().Dec()
 	return nil

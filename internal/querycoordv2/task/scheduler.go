@@ -147,6 +147,7 @@ type Scheduler interface {
 	Stop()
 	Add(task Task) error
 	Dispatch(node int64)
+	RemoveByCollection(collection int64)
 	RemoveByNode(node int64)
 	GetNodeSegmentDelta(nodeID int64) int
 	GetNodeChannelDelta(nodeID int64) int
@@ -542,6 +543,22 @@ func (scheduler *taskScheduler) process(task Task) bool {
 	}
 
 	return false
+}
+
+func (scheduler *taskScheduler) RemoveByCollection(collection int64) {
+	scheduler.rwmutex.Lock()
+	defer scheduler.rwmutex.Unlock()
+
+	for _, task := range scheduler.segmentTasks {
+		if task.CollectionID() == collection {
+			scheduler.remove(task)
+		}
+	}
+	for _, task := range scheduler.channelTasks {
+		if task.CollectionID() == collection {
+			scheduler.remove(task)
+		}
+	}
 }
 
 func (scheduler *taskScheduler) RemoveByNode(node int64) {

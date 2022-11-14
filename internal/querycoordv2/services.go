@@ -206,6 +206,7 @@ func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 		s.targetMgr,
 		s.broker,
 		s.nodeMgr,
+		s.taskScheduler,
 	)
 	s.jobScheduler.Add(loadJob)
 	err := loadJob.Wait()
@@ -284,6 +285,7 @@ func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitions
 		s.targetMgr,
 		s.broker,
 		s.nodeMgr,
+		s.taskScheduler,
 	)
 	s.jobScheduler.Add(loadJob)
 	err := loadJob.Wait()
