@@ -706,27 +706,26 @@ func (mt *metaTable) GetSegmentIndexState(segmentID UniqueID) IndexState {
 }
 
 // GetIndexBuildProgress gets the index progress for indexID from meta table.
-func (mt *metaTable) GetIndexBuildProgress(indexID int64, createTs uint64) int64 {
+func (mt *metaTable) GetIndexBuildProgress(indexID int64, segIDs []UniqueID) int64 {
 	mt.segmentIndexLock.RLock()
 	defer mt.segmentIndexLock.RUnlock()
 
 	indexRows := int64(0)
 
-	for _, indexID2SegIdx := range mt.segmentIndexes {
-		segIdx, ok := indexID2SegIdx[indexID]
+	for _, segID := range segIDs {
+		segIndexes, ok := mt.segmentIndexes[segID]
 		if !ok {
 			continue
 		}
-		if segIdx.CreateTime > createTs {
-			continue
-		}
-		if segIdx.IsDeleted {
-			// skip deleted index, deleted by compaction
-			continue
-		}
-
-		if segIdx.IndexState == commonpb.IndexState_Finished && segIdx.NumRows >= Params.IndexCoordCfg.MinSegmentNumRowsToEnableIndex {
-			indexRows += segIdx.NumRows
+		if segIdx, ok2 := segIndexes[indexID]; ok2 {
+			if segIdx.IsDeleted {
+				// partition is dropped, but DataCoord has not received the message
+				continue
+			}
+			// flat index, small segment
+			if segIdx.IndexState == commonpb.IndexState_Finished {
+				indexRows += segIdx.NumRows
+			}
 		}
 	}
 

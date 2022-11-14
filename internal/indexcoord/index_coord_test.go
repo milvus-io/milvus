@@ -320,6 +320,18 @@ func testIndexCoord(t *testing.T) {
 		mockIndexs[222] = make(map[UniqueID]*model.SegmentIndex)
 		mockIndexs[222][indexIDTest] = progressIndex
 		resp, err = ic.DescribeIndex(ctx, req)
+		assert.Error(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+
+		dcm.CallGetFlushedSegment = func(ctx context.Context, req *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error) {
+			return &datapb.GetFlushedSegmentsResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_UnexpectedError,
+					Reason:    "mock fail",
+				},
+			}, nil
+		}
+		resp, err = ic.DescribeIndex(ctx, req)
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 
@@ -331,6 +343,20 @@ func testIndexCoord(t *testing.T) {
 		dcm.SetFunc(func() {
 			dcm.CallGetSegmentInfo = func(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
 				return nil, errors.New("mock error")
+			}
+		})
+		resp, err = ic.DescribeIndex(ctx, req)
+		assert.Error(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+
+		dcm.SetFunc(func() {
+			dcm.CallGetSegmentInfo = func(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
+				return &datapb.GetSegmentInfoResponse{
+					Status: &commonpb.Status{
+						ErrorCode: commonpb.ErrorCode_UnexpectedError,
+						Reason:    "mock fail",
+					},
+				}, nil
 			}
 		})
 		resp, err = ic.DescribeIndex(ctx, req)

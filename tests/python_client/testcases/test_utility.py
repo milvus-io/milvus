@@ -777,8 +777,8 @@ class TestUtilityBase(TestcaseBase):
         cw = self.init_collection_wrap(name=c_name)
         data = cf.gen_default_list_data(nb)
         cw.insert(data=data)
-        cw.create_index(default_field_name, default_index_params)
         cw.flush()
+        cw.create_index(default_field_name, default_index_params)
         res, _ = self.utility_wrap.wait_for_index_building_complete(c_name)
         assert res is True
         res, _ = self.utility_wrap.index_building_progress(c_name)

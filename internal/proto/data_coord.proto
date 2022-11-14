@@ -395,6 +395,7 @@ message GetFlushedSegmentsRequest {
   common.MsgBase base = 1;
   int64 collectionID = 2;
   int64 partitionID = 3;
+  bool includeUnhealthy = 4;
 }
 
 message GetFlushedSegmentsResponse {

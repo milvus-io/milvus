@@ -35,6 +35,7 @@ type IndexInfo struct {
 	TypeParams   []*commonpb.KeyValuePair `protobuf:"bytes,5,rep,name=type_params,json=typeParams,proto3" json:"type_params,omitempty"`
 	IndexParams  []*commonpb.KeyValuePair `protobuf:"bytes,6,rep,name=index_params,json=indexParams,proto3" json:"index_params,omitempty"`
 	// index build progress
+	// The real-time statistics may not be expected due to the existence of the compaction mechanism.
 	IndexedRows int64 `protobuf:"varint,7,opt,name=indexed_rows,json=indexedRows,proto3" json:"indexed_rows,omitempty"`
 	TotalRows   int64 `protobuf:"varint,8,opt,name=total_rows,json=totalRows,proto3" json:"total_rows,omitempty"`
 	// index state

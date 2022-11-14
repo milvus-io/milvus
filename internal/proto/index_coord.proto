@@ -49,6 +49,7 @@ message IndexInfo {
   repeated common.KeyValuePair type_params = 5;
   repeated common.KeyValuePair index_params = 6;
   // index build progress
+  // The real-time statistics may not be expected due to the existence of the compaction mechanism.
   int64 indexed_rows = 7;
   int64 total_rows = 8;
   // index state
