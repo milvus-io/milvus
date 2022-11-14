@@ -27,7 +27,7 @@ default_term_expr = f'{ct.default_int64_field_name} in [0, 1]'
 
 prefix = "deploy_test"
 
-TIMEOUT = 60
+TIMEOUT = 120
 
 class TestActionFirstDeployment(TestDeployBase):
     """ Test case of action before reinstall """
@@ -39,13 +39,14 @@ class TestActionFirstDeployment(TestDeployBase):
         log.info("skip drop collection")
 
     @pytest.mark.tags(CaseLabel.L3)
-    @pytest.mark.parametrize("index_type", ["HNSW","BIN_IVF_FLAT"])
-    def test_task_all_empty(self,index_type):
+    @pytest.mark.parametrize("replica_number", [0])
+    @pytest.mark.parametrize("index_type", ["HNSW", "BIN_IVF_FLAT"])
+    def test_task_all_empty(self, index_type, replica_number):
         """
         before reinstall: create collection
         """
         name = ""
-        for k,v in locals().items():
+        for k, v in locals().items():
             if k in ["self", "name"]:
                 continue
             name += f"_{k}_{v}"
@@ -58,9 +59,6 @@ class TestActionFirstDeployment(TestDeployBase):
             index_names = [index.index_name for index in collection_w.indexes]
             for index_name in index_names:
                 collection_w.drop_index(index_name=index_name)
-
-
-
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("replica_number", [0, 1, 2])
@@ -131,6 +129,7 @@ class TestActionFirstDeployment(TestDeployBase):
                 log.error(
                     f"release collection failed: {e} maybe the collection is not loaded")
             collection_w.load(replica_number=replica_number, timeout=TIMEOUT)
+            self.utility_wrap.wait_for_loading_complete(name)
 
         # delete data for growing segment
         delete_expr = f"{ct.default_int64_field_name} in {[i for i in range(0,10)]}"
@@ -181,6 +180,7 @@ class TestActionFirstDeployment(TestDeployBase):
         if replica_number > 0:
             collection_w.release()
             collection_w.load(replica_number=replica_number, timeout=TIMEOUT)
+            self.utility_wrap.wait_for_loading_complete(name)
 
         # insert data to get growing segment after reload
         if segment_status == "all":
