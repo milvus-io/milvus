@@ -367,7 +367,6 @@ func (dsService *dataSyncService) getSegmentInfos(segmentIDs []int64) ([]*datapb
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_SegmentInfo),
 			commonpbutil.WithMsgID(0),
-			commonpbutil.WithTimeStamp(0),
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
 		SegmentIDs:       segmentIDs,

@@ -54,8 +54,7 @@ func (alloc *allocator) allocID() (UniqueID, error) {
 	resp, err := alloc.rootCoord.AllocID(ctx, &rootcoordpb.AllocIDRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_RequestID),
-			commonpbutil.WithMsgID(1),     // GOOSE TODO
-			commonpbutil.WithTimeStamp(0), // GOOSE TODO
+			commonpbutil.WithMsgID(1), // GOOSE TODO
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
 		Count: 1,

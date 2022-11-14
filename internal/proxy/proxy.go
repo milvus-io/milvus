@@ -305,7 +305,6 @@ func (node *Proxy) sendChannelsTimeTickLoop() {
 					Base: commonpbutil.NewMsgBase(
 						commonpbutil.WithMsgType(commonpb.MsgType_TimeTick), // todo
 						commonpbutil.WithMsgID(0),                           // todo
-						commonpbutil.WithTimeStamp(0),                       // todo
 						commonpbutil.WithSourceID(node.session.ServerID),
 					),
 					ChannelNames:     channels,

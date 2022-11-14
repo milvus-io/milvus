@@ -639,9 +639,8 @@ func dropVirtualChannelFunc(dsService *dataSyncService, opts ...retry.Option) fl
 	return func(packs []*segmentFlushPack) {
 		req := &datapb.DropVirtualChannelRequest{
 			Base: commonpbutil.NewMsgBase(
-				commonpbutil.WithMsgType(0),   //TODO msg type
-				commonpbutil.WithMsgID(0),     //TODO msg id
-				commonpbutil.WithTimeStamp(0), //TODO time stamp
+				commonpbutil.WithMsgType(0), //TODO msg type
+				commonpbutil.WithMsgID(0),   //TODO msg id
 				commonpbutil.WithSourceID(paramtable.GetNodeID()),
 			),
 			ChannelName: dsService.vchannelName,
@@ -794,7 +793,6 @@ func flushNotifyFunc(dsService *dataSyncService, opts ...retry.Option) notifyMet
 			Base: commonpbutil.NewMsgBase(
 				commonpbutil.WithMsgType(0),
 				commonpbutil.WithMsgID(0),
-				commonpbutil.WithTimeStamp(0),
 				commonpbutil.WithSourceID(paramtable.GetNodeID()),
 			),
 			SegmentID:           pack.segmentID,
