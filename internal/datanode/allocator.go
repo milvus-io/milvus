@@ -80,7 +80,6 @@ func (alloc *allocator) allocIDBatch(count uint32) (UniqueID, uint32, error) {
 		),
 		Count: count,
 	})
-
 	if err != nil {
 		return 0, 0, err
 	}
