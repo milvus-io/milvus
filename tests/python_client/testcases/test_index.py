@@ -1312,6 +1312,9 @@ class TestNewIndexAsync(TestcaseBase):
                                            index_name=ct.default_index_name, _async=_async)
 
         # load and search
+        if _async:
+            res.done()
+            assert len(collection_w.indexes) == 1
         collection_w.load()
         vectors_s = [[random.random() for _ in range(ct.default_dim)] for _ in range(ct.default_nq)]
         search_res, _ = collection_w.search(vectors_s[:ct.default_nq], ct.default_float_vec_field_name,
@@ -1808,3 +1811,4 @@ class TestIndexDiskann(TestcaseBase):
             time.sleep(0.2)
         for t in threads:
             t.join()
+
