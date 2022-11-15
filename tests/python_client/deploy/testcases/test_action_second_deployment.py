@@ -42,28 +42,19 @@ class TestActionSecondDeployment(TestDeployBase):
                  method.__name__)
         log.info("show collection info")
         log.info(f"collection {self.collection_w.name} has entities: {self.collection_w.num_entities}")
-        try:
-            replicas = self.collection_w.get_replicas(enable_traceback=False)
-            replicas_loaded = len(replicas.groups)
-        except Exception as e:
-            log.info("get replicas failed with error {str(e)}")
-            replicas_loaded = 0
-        log.info(f"collection {self.collection_w.name} has {replicas_loaded} replicas")
+
+        res, _ = self.utility_wrap.get_query_segment_info(self.collection_w.name)
+        log.info(f"The segment info of collection {self.collection_w.name} is {res}")
+
         index_infos = [index.to_dict() for index in self.collection_w.indexes]
         log.info(f"collection {self.collection_w.name} index infos {index_infos}")
         log.info("skip drop collection")
 
     def create_index(self, collection_w, default_index_field, default_index_param):
-        try:
-            replicas = collection_w.get_replicas(enable_traceback=False)
-            replicas_loaded = len(replicas.groups)
-        except Exception as e:
-            log.info("get replicas failed")
-            replicas_loaded = 0
-        log.info(f"before create index, collection {collection_w.name} has {replicas_loaded} replicas")
+
         index_field_map = dict([(index.field_name, index.index_name) for index in collection_w.indexes])
         index_infos = [index.to_dict() for index in collection_w.indexes]
-        log.info(index_infos)
+        log.info(f"index info: {index_infos}")
         # log.info(f"{default_index_field:} {default_index_param:}")
         if len(index_infos) > 0:
             log.info(
@@ -108,13 +99,20 @@ class TestActionSecondDeployment(TestDeployBase):
         vector_index_types = binary_vector_index_types + float_vector_index_types
         if len(vector_index_types) > 0:
             vector_index_type = vector_index_types[0]
+        try:
+            t0 = time.time()
+            self.utility_wrap.wait_for_loading_complete(name)
+            log.info(f"wait for {name} loading complete cost {time.time() - t0}")
+        except Exception as e:
+            log.error(e)
         # get replicas loaded
         try:
             replicas = collection_w.get_replicas(enable_traceback=False)
             replicas_loaded = len(replicas.groups)
         except Exception as e:
-            log.info(f"get replicas failed with error {str(e)}")
+            log.error(e)
             replicas_loaded = 0
+
         log.info(f"collection {name} has {replicas_loaded} replicas")
         actual_replicas = re.search(r'replica_number_(.*?)_', name).group(1)
         assert replicas_loaded == int(actual_replicas)
