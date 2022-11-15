@@ -1208,13 +1208,28 @@ class TestCompactionOperation(TestcaseBase):
         collection_w.compact()
         collection_w.wait_for_compaction_completed()
         collection_w.get_compaction_plans()
-
         t.join()
-        collection_w.load()
-        replicas = collection_w.get_replicas()[0]
-        replica_num = len(replicas.groups)
-        seg_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
-        assert len(seg_info) == 2*replica_num
+
+        # waitting for new segment index and compact
+        cost = 240
+        start = time()
+        while True:
+            sleep(20)
+            collection_w.load()
+            # new segment compacted
+            seg_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
+            if len(seg_info) == 1:
+                break
+            end = time()
+            collection_w.release()
+            if end - start > cost:
+                raise MilvusException(1, f"Waitting new segment index and compact more than {cost}s")
+
+        # search
+        search_res, _ = collection_w.search(cf.gen_vectors(1, ct.default_dim),
+                                            ct.default_float_vec_field_name,
+                                            ct.default_search_params, ct.default_limit)
+        assert len(search_res[0]) == ct.default_limit
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_compact_during_index(self):
