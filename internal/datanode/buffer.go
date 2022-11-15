@@ -296,6 +296,7 @@ func (ddb *DelDataBuf) mergeDelDataBuf(buf *DelDataBuf) {
 
 	tr := TimeRange{timestampMax: buf.TimestampTo, timestampMin: buf.TimestampFrom}
 	ddb.updateTimeRange(tr)
+	ddb.updateStartAndEndPosition(buf.startPos, buf.endPos)
 
 	ddb.delData.Pks = append(ddb.delData.Pks, buf.delData.Pks...)
 	ddb.delData.Tss = append(ddb.delData.Tss, buf.delData.Tss...)
