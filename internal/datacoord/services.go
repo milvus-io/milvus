@@ -738,7 +738,7 @@ func (s *Server) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedS
 	}
 	ret := make([]UniqueID, 0, len(segmentIDs))
 	for _, id := range segmentIDs {
-		segment := s.meta.GetSegment(id)
+		segment := s.meta.GetSegmentUnsafe(id)
 		// if this segment == nil, we assume this segment has been gc
 		if segment == nil ||
 			(segment.GetState() != commonpb.SegmentState_Dropped &&
