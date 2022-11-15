@@ -159,6 +159,9 @@ func (c *compactionPlanHandler) execCompactionPlan(signal *compactionSignal, pla
 
 	nodeID, err := c.chManager.FindWatcher(plan.GetChannel())
 	if err != nil {
+		log.Error("failed to find watcher",
+			zap.Int64("plan ID", plan.GetPlanID()),
+			zap.Error(err))
 		return err
 	}
 

@@ -353,28 +353,44 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) {
 
 		plans := t.generatePlans(group.segments, signal.isForce, ct)
 		for _, plan := range plans {
+			segIDs := fetchSegIDs(plan.GetSegmentBinlogs())
+
 			if !signal.isForce && t.compactionHandler.isFull() {
-				log.Warn("compaction plan skipped due to handler full", zap.Int64("collection", signal.collectionID), zap.Int64("planID", plan.PlanID))
+				log.Warn("compaction plan skipped due to handler full",
+					zap.Int64("collection", signal.collectionID),
+					zap.Int64s("segment IDs", segIDs))
 				break
 			}
 			start := time.Now()
 			if err := t.fillOriginPlan(plan); err != nil {
-				log.Warn("failed to fill plan", zap.Error(err))
+				log.Warn("failed to fill plan",
+					zap.Int64s("segment IDs", segIDs),
+					zap.Error(err))
 				continue
 			}
 			err := t.compactionHandler.execCompactionPlan(signal, plan)
 			if err != nil {
-				log.Warn("failed to execute compaction plan", zap.Int64("collection", signal.collectionID), zap.Int64("planID", plan.PlanID), zap.Error(err))
+				log.Warn("failed to execute compaction plan",
+					zap.Int64("collection", signal.collectionID),
+					zap.Int64("planID", plan.PlanID),
+					zap.Int64s("segment IDs", segIDs),
+					zap.Error(err))
 				continue
 			}
 
-			segIDs := make(map[int64][]*datapb.FieldBinlog, len(plan.SegmentBinlogs))
+			segIDMap := make(map[int64][]*datapb.FieldBinlog, len(plan.SegmentBinlogs))
 			for _, seg := range plan.SegmentBinlogs {
-				segIDs[seg.SegmentID] = seg.Deltalogs
+				segIDMap[seg.SegmentID] = seg.Deltalogs
 			}
 
-			log.Info("time cost of generating global compaction", zap.Any("segID2DeltaLogs", segIDs), zap.Int64("planID", plan.PlanID), zap.Any("time cost", time.Since(start).Milliseconds()),
-				zap.Int64("collectionID", signal.collectionID), zap.String("channel", group.channelName), zap.Int64("partitionID", group.partitionID))
+			log.Info("time cost of generating global compaction",
+				zap.Any("segID2DeltaLogs", segIDMap),
+				zap.Int64("planID", plan.PlanID),
+				zap.Any("time cost", time.Since(start).Milliseconds()),
+				zap.Int64("collectionID", signal.collectionID),
+				zap.String("channel", group.channelName),
+				zap.Int64("partitionID", group.partitionID),
+				zap.Int64s("segment IDs", segIDs))
 		}
 	}
 }
@@ -433,10 +449,21 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 			log.Warn("failed to fill plan", zap.Error(err))
 			continue
 		}
-		t.compactionHandler.execCompactionPlan(signal, plan)
-
-		log.Info("time cost of generating compaction", zap.Int64("planID", plan.PlanID), zap.Any("time cost", time.Since(start).Milliseconds()),
-			zap.Int64("collectionID", signal.collectionID), zap.String("channel", channel), zap.Int64("partitionID", partitionID))
+		if err := t.compactionHandler.execCompactionPlan(signal, plan); err != nil {
+			log.Warn("failed to execute compaction plan",
+				zap.Int64("collection", signal.collectionID),
+				zap.Int64("planID", plan.PlanID),
+				zap.Int64s("segment IDs", fetchSegIDs(plan.GetSegmentBinlogs())),
+				zap.Error(err))
+			continue
+		}
+		log.Info("time cost of generating compaction",
+			zap.Int64("plan ID", plan.PlanID),
+			zap.Any("time cost", time.Since(start).Milliseconds()),
+			zap.Int64("collection ID", signal.collectionID),
+			zap.String("channel", channel),
+			zap.Int64("partition ID", partitionID),
+			zap.Int64s("segment IDs", fetchSegIDs(plan.GetSegmentBinlogs())))
 	}
 }
 
@@ -710,4 +737,12 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compa
 
 func isFlush(segment *SegmentInfo) bool {
 	return segment.GetState() == commonpb.SegmentState_Flushed || segment.GetState() == commonpb.SegmentState_Flushing
+}
+
+func fetchSegIDs(segBinLogs []*datapb.CompactionSegmentBinlogs) []int64 {
+	var segIDs []int64
+	for _, segBinLog := range segBinLogs {
+		segIDs = append(segIDs, segBinLog.GetSegmentID())
+	}
+	return segIDs
 }
