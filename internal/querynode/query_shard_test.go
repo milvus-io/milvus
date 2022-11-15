@@ -45,7 +45,7 @@ func genSimpleQueryShard(ctx context.Context) (*queryShard, error) {
 		return nil, err
 	}
 
-	shardCluster := NewShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel,
+	shardCluster := NewShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel, defaultVersion,
 		&mockNodeDetector{}, &mockSegmentDetector{}, buildMockQueryNode)
 	shardClusterService := &ShardClusterService{
 		clusters: sync.Map{},
@@ -81,7 +81,7 @@ func TestNewQueryShard_IllegalCases(t *testing.T) {
 	remoteCM, err := genRemoteChunkManager(ctx)
 	require.NoError(t, err)
 
-	shardCluster := NewShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel,
+	shardCluster := NewShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel, defaultVersion,
 		&mockNodeDetector{}, &mockSegmentDetector{}, buildMockQueryNode)
 	shardClusterService := &ShardClusterService{
 		clusters: sync.Map{},

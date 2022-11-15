@@ -143,6 +143,7 @@ func packSubDmChannelRequest(
 		Schema:       schema,
 		LoadMeta:     loadMeta,
 		ReplicaID:    task.ReplicaID(),
+		Version:      time.Now().UnixNano(),
 	}
 }
 

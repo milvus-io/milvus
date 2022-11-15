@@ -608,7 +608,7 @@ func TestImpl_Search(t *testing.T) {
 	require.NoError(t, err)
 
 	node.queryShardService.addQueryShard(defaultCollectionID, defaultDMLChannel, defaultReplicaID)
-	node.ShardClusterService.addShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel)
+	node.ShardClusterService.addShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel, defaultVersion)
 	// shard cluster not synced
 	_, err = node.Search(ctx, &queryPb.SearchRequest{
 		Req:             req,
@@ -642,7 +642,7 @@ func TestImpl_searchWithDmlChannel(t *testing.T) {
 	require.NoError(t, err)
 
 	node.queryShardService.addQueryShard(defaultCollectionID, defaultDMLChannel, defaultReplicaID)
-	node.ShardClusterService.addShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel)
+	node.ShardClusterService.addShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel, defaultVersion)
 	sc, ok := node.ShardClusterService.getShardCluster(defaultDMLChannel)
 	assert.True(t, ok)
 	sc.SetupFirstVersion()
@@ -718,7 +718,7 @@ func TestImpl_Query(t *testing.T) {
 	require.NoError(t, err)
 
 	node.queryShardService.addQueryShard(defaultCollectionID, defaultDMLChannel, defaultReplicaID)
-	node.ShardClusterService.addShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel)
+	node.ShardClusterService.addShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel, defaultVersion)
 	// shard cluster not synced
 	_, err = node.Query(ctx, &queryPb.QueryRequest{
 		Req:             req,
@@ -753,7 +753,7 @@ func TestImpl_queryWithDmlChannel(t *testing.T) {
 	require.NoError(t, err)
 
 	node.queryShardService.addQueryShard(defaultCollectionID, defaultDMLChannel, defaultReplicaID)
-	node.ShardClusterService.addShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel)
+	node.ShardClusterService.addShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel, defaultVersion)
 	sc, ok := node.ShardClusterService.getShardCluster(defaultDMLChannel)
 	assert.True(t, ok)
 	sc.SetupFirstVersion()
@@ -819,7 +819,7 @@ func TestImpl_SyncReplicaSegments(t *testing.T) {
 		defer node.Stop()
 		assert.NoError(t, err)
 
-		node.ShardClusterService.addShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel)
+		node.ShardClusterService.addShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel, defaultVersion)
 		cs, ok := node.ShardClusterService.getShardCluster(defaultDMLChannel)
 		require.True(t, ok)
 		cs.SetupFirstVersion()
@@ -921,7 +921,7 @@ func TestSyncDistribution(t *testing.T) {
 		defer node.Stop()
 		assert.NoError(t, err)
 
-		node.ShardClusterService.addShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel)
+		node.ShardClusterService.addShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel, defaultVersion)
 		cs, ok := node.ShardClusterService.getShardCluster(defaultDMLChannel)
 		require.True(t, ok)
 		cs.SetupFirstVersion()

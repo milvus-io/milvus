@@ -19,7 +19,7 @@ func TestShardClusterService(t *testing.T) {
 	clusterService := newShardClusterService(client, session, nil)
 
 	assert.NotPanics(t, func() {
-		clusterService.addShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel)
+		clusterService.addShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel, defaultVersion)
 	})
 
 	shardCluster, ok := clusterService.getShardCluster(defaultDMLChannel)
@@ -51,7 +51,7 @@ func TestShardClusterService_SyncReplicaSegments(t *testing.T) {
 	})
 
 	t.Run("sync initailizing shard cluster", func(t *testing.T) {
-		clusterService.addShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel)
+		clusterService.addShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel, defaultVersion)
 
 		sc, ok := clusterService.getShardCluster(defaultDMLChannel)
 		require.True(t, ok)
@@ -72,7 +72,7 @@ func TestShardClusterService_SyncReplicaSegments(t *testing.T) {
 	})
 
 	t.Run("sync shard cluster", func(t *testing.T) {
-		clusterService.addShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel)
+		clusterService.addShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel, defaultVersion)
 
 		sc, ok := clusterService.getShardCluster(defaultDMLChannel)
 		require.True(t, ok)
@@ -107,7 +107,7 @@ func TestShardClusterService_close(t *testing.T) {
 	clusterService := newShardClusterService(client, session, nil)
 
 	t.Run("close ok", func(t *testing.T) {
-		clusterService.addShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel)
+		clusterService.addShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel, defaultVersion)
 
 		cnt := 0
 		clusterService.clusters.Range(func(key, value any) bool {
