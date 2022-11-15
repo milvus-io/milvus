@@ -99,8 +99,10 @@ class TestChaosApply:
         res = chaos_res.list_all()
         chaos_list = [r['metadata']['name'] for r in res['items']]
         # verify the chaos is deleted
+        sleep(10)
+        res = chaos_res.list_all()
+        chaos_list = [r['metadata']['name'] for r in res['items']]
         assert meta_name not in chaos_list
-        sleep(2)
         # wait all pods ready
         t0 = time.time()
         log.info(f"wait for pods in namespace {constants.CHAOS_NAMESPACE} with label app.kubernetes.io/instance={meta_name}")
