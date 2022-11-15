@@ -134,7 +134,7 @@ func (s *Segment) evictHistoryInsertBuffer(endPos *internalpb.MsgPosition) {
 	}
 	s.historyInsertBuf = tmpBuffers
 	ts, _ := tsoutil.ParseTS(endPos.Timestamp)
-	log.Debug("evictHistoryInsertBuffer done", zap.Int64("segmentID", s.segmentID), zap.Time("ts", ts), zap.String("channel", endPos.ChannelName))
+	log.Info("evictHistoryInsertBuffer done", zap.Int64("segmentID", s.segmentID), zap.Time("ts", ts), zap.String("channel", endPos.ChannelName))
 }
 
 // rollDeleteBuffer moves curDeleteBuf to historyDeleteBuf, and then sets curDeleteBuf to nil.
@@ -157,7 +157,7 @@ func (s *Segment) evictHistoryDeleteBuffer(endPos *internalpb.MsgPosition) {
 	}
 	s.historyDeleteBuf = tmpBuffers
 	ts, _ := tsoutil.ParseTS(endPos.Timestamp)
-	log.Debug("evictHistoryDeleteBuffer done", zap.Int64("segmentID", s.segmentID), zap.Time("ts", ts), zap.String("channel", endPos.ChannelName))
+	log.Info("evictHistoryDeleteBuffer done", zap.Int64("segmentID", s.segmentID), zap.Time("ts", ts), zap.String("channel", endPos.ChannelName))
 }
 
 func (s *Segment) isBufferEmpty() bool {
