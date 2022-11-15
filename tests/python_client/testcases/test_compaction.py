@@ -1211,14 +1211,14 @@ class TestCompactionOperation(TestcaseBase):
 
         t.join()
         # waitting for new segment index and compact
-        cost = 240
+        cost = 60
         start = time()
         while True:
             sleep(20)
             collection_w.load()
             # new segment compacted
             seg_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
-            if len(seg_info) == 1:
+            if len(seg_info) == 2:
                 break
             end = time()
             collection_w.release()
