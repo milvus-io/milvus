@@ -91,6 +91,11 @@ type Allocation struct {
 	ExpireTime Timestamp
 }
 
+func (alloc Allocation) String() string {
+	t, _ := tsoutil.ParseTS(alloc.ExpireTime)
+	return fmt.Sprintf("SegmentID: %d, NumOfRows: %d, ExpireTime: %v", alloc.SegmentID, alloc.NumOfRows, t)
+}
+
 // make sure SegmentManager implements Manager
 var _ Manager = (*SegmentManager)(nil)
 
