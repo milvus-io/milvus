@@ -36,6 +36,7 @@ class TestActionFirstDeployment(TestDeployBase):
         log.info("skip drop collection")
 
     @pytest.mark.tags(CaseLabel.L3)
+    @pytest.mark.parametrize("replica_number", [0])
     @pytest.mark.parametrize("index_type", ["HNSW","BIN_IVF_FLAT"])
     def test_task_all_empty(self,index_type):
         """
