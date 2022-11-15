@@ -76,13 +76,16 @@ var (
 			Help:      "count of all stored rows ever",
 		}, []string{})
 
-	DataCoordSyncEpoch = prometheus.NewGaugeVec(
+	DataCoordConsumeDataNodeTimeTickLag = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.DataCoordRole,
-			Name:      "sync_epoch_time",
-			Help:      "synchronized unix epoch per physical channel",
-		}, []string{channelNameLabelName})
+			Name:      "consume_datanode_tt_lag_ms",
+			Help:      "now time minus tt per physical channel",
+		}, []string{
+			nodeIDLabelName,
+			channelNameLabelName,
+		})
 
 	DataCoordStoredBinlogSize = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -146,6 +149,6 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(DataCoordNumCollections)
 	registry.MustRegister(DataCoordNumStoredRows)
 	registry.MustRegister(DataCoordNumStoredRowsCounter)
-	registry.MustRegister(DataCoordSyncEpoch)
+	registry.MustRegister(DataCoordConsumeDataNodeTimeTickLag)
 	registry.MustRegister(DataCoordStoredBinlogSize)
 }

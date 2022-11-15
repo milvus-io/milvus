@@ -150,13 +150,13 @@ var (
 			Buckets:   buckets, // unit: ms
 		}, []string{nodeIDLabelName})
 
-	// ProxySyncTimeTick record Proxy synchronization timestamp statistics, differentiated by Channel.
-	ProxySyncTimeTick = prometheus.NewGaugeVec(
+	// ProxySyncTimeTickLag record Proxy synchronization timestamp statistics, differentiated by Channel.
+	ProxySyncTimeTickLag = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.ProxyRole,
-			Name:      "sync_epoch_time",
-			Help:      "synchronized unix epoch per physical channel and default channel",
+			Name:      "tt_lag_ms",
+			Help:      "now time minus tt per physical channel",
 		}, []string{nodeIDLabelName, channelNameLabelName})
 
 	// ProxyApplyPrimaryKeyLatency record the latency that apply primary key.
@@ -247,7 +247,7 @@ func RegisterProxy(registry *prometheus.Registry) {
 	registry.MustRegister(ProxyCacheStatsCounter)
 	registry.MustRegister(ProxyUpdateCacheLatency)
 
-	registry.MustRegister(ProxySyncTimeTick)
+	registry.MustRegister(ProxySyncTimeTickLag)
 	registry.MustRegister(ProxyApplyPrimaryKeyLatency)
 	registry.MustRegister(ProxyApplyTimestampLatency)
 
