@@ -1081,7 +1081,5 @@ func (sc *ShardCluster) GetSegmentInfos() []shardSegmentInfo {
 }
 
 func (sc *ShardCluster) getVersion() int64 {
-	sc.mutVersion.RLock()
-	defer sc.mutVersion.RUnlock()
 	return sc.version
 }
