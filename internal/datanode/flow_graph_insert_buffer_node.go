@@ -646,9 +646,11 @@ func newInsertBufferNode(ctx context.Context, collID UniqueID, flushCh <-chan fl
 			},
 		}
 		msgPack.Msgs = append(msgPack.Msgs, &timeTickMsg)
-		pt, _ := tsoutil.ParseHybridTs(ts)
+		sub := tsoutil.SubByNow(ts)
 		pChan := funcutil.ToPhysicalChannel(config.vChannelName)
-		metrics.DataNodeTimeSync.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID()), pChan).Set(float64(pt))
+		metrics.DataNodeProduceTimeTickLag.
+			WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID()), fmt.Sprint(collID), pChan).
+			Set(float64(sub))
 		return wTtMsgStream.Produce(&msgPack)
 	})
 

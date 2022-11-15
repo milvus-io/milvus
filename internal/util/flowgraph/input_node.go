@@ -17,9 +17,15 @@
 package flowgraph
 
 import (
+	"fmt"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
+
+	"github.com/milvus-io/milvus/internal/util/typeutil"
+
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/opentracing/opentracing-go"
@@ -30,9 +36,13 @@ import (
 // InputNode is the entry point of flowgragh
 type InputNode struct {
 	BaseNode
-	inStream  msgstream.MsgStream
-	name      string
-	closeOnce sync.Once
+	inStream     msgstream.MsgStream
+	name         string
+	role         string
+	nodeID       int64
+	collectionID int64
+	dataType     string
+	closeOnce    sync.Once
 }
 
 // IsInputNode returns whether Node is InputNode
@@ -76,6 +86,28 @@ func (inNode *InputNode) Operate(in []Msg) []Msg {
 	if msgPack == nil {
 		return []Msg{}
 	}
+
+	sub := tsoutil.SubByNow(msgPack.EndTs)
+	if inNode.role == typeutil.QueryNodeRole {
+		metrics.QueryNodeConsumerMsgCount.
+			WithLabelValues(fmt.Sprint(inNode.nodeID), inNode.dataType, fmt.Sprint(inNode.collectionID)).
+			Inc()
+
+		metrics.QueryNodeConsumeTimeTickLag.
+			WithLabelValues(fmt.Sprint(inNode.nodeID), inNode.dataType, fmt.Sprint(inNode.collectionID)).
+			Set(float64(sub))
+	}
+
+	if inNode.role == typeutil.DataNodeRole {
+		metrics.DataNodeConsumeMsgCount.
+			WithLabelValues(fmt.Sprint(inNode.nodeID), inNode.dataType, fmt.Sprint(inNode.collectionID)).
+			Inc()
+
+		metrics.DataNodeConsumeTimeTickLag.
+			WithLabelValues(fmt.Sprint(inNode.nodeID), inNode.dataType, fmt.Sprint(inNode.collectionID)).
+			Set(float64(sub))
+	}
+
 	var spans []opentracing.Span
 	for _, msg := range msgPack.Msgs {
 		sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
@@ -101,14 +133,18 @@ func (inNode *InputNode) Operate(in []Msg) []Msg {
 }
 
 // NewInputNode composes an InputNode with provided MsgStream, name and parameters
-func NewInputNode(inStream msgstream.MsgStream, nodeName string, maxQueueLength int32, maxParallelism int32) *InputNode {
+func NewInputNode(inStream msgstream.MsgStream, nodeName string, maxQueueLength int32, maxParallelism int32, role string, nodeID int64, collectionID int64, dataType string) *InputNode {
 	baseNode := BaseNode{}
 	baseNode.SetMaxQueueLength(maxQueueLength)
 	baseNode.SetMaxParallelism(maxParallelism)
 
 	return &InputNode{
-		BaseNode: baseNode,
-		inStream: inStream,
-		name:     nodeName,
+		BaseNode:     baseNode,
+		inStream:     inStream,
+		name:         nodeName,
+		role:         role,
+		nodeID:       nodeID,
+		collectionID: collectionID,
+		dataType:     dataType,
 	}
 }

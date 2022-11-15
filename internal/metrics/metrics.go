@@ -34,13 +34,14 @@ const (
 	FailLabel    = "fail"
 	TotalLabel   = "total"
 
-	InsertLabel = "insert"
-	DeleteLabel = "delete"
-	SearchLabel = "search"
-	QueryLabel  = "query"
-
+	InsertLabel    = "insert"
+	DeleteLabel    = "delete"
+	SearchLabel    = "search"
+	QueryLabel     = "query"
 	CacheHitLabel  = "hit"
 	CacheMissLabel = "miss"
+	TimetickLabel  = "timetick"
+	AllLabel       = "all"
 
 	UnissuedIndexTaskLabel   = "unissued"
 	InProgressIndexTaskLabel = "in-progress"
