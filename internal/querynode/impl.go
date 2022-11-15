@@ -930,7 +930,7 @@ func (node *QueryNode) queryWithDmlChannel(ctx context.Context, req *querypb.Que
 	}
 
 	msgID := req.GetReq().GetBase().GetMsgID()
-	log.Ctx(ctx).Debug("Received QueryRequest",
+	log.Ctx(ctx).Debug("queryWithDmlChannel receives query request",
 		zap.Int64("msgID", msgID),
 		zap.Bool("fromShardLeader", req.GetFromShardLeader()),
 		zap.String("vChannel", dmlChannel),
@@ -950,7 +950,7 @@ func (node *QueryNode) queryWithDmlChannel(ctx context.Context, req *querypb.Que
 		return failRet, nil
 	}
 
-	log.Ctx(ctx).Debug("start do query",
+	log.Ctx(ctx).Debug("queryWithDmlChannel starts do query",
 		zap.Int64("msgID", msgID),
 		zap.Bool("fromShardLeader", req.GetFromShardLeader()),
 		zap.String("vChannel", dmlChannel),
@@ -1055,6 +1055,7 @@ func (node *QueryNode) queryWithDmlChannel(ctx context.Context, req *querypb.Que
 // Query performs replica query tasks.
 func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
 	log.Ctx(ctx).Debug("Received QueryRequest", zap.Int64("msgID", req.GetReq().GetBase().GetMsgID()),
+		zap.Bool("fromShardleader", req.GetFromShardLeader()),
 		zap.Strings("vChannels", req.GetDmlChannels()),
 		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
 		zap.Uint64("guaranteeTimestamp", req.Req.GetGuaranteeTimestamp()),
