@@ -25,6 +25,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -137,10 +138,47 @@ func TestImpl_WatchDmChannels(t *testing.T) {
 			},
 		}
 		node.UpdateStateCode(commonpb.StateCode_Abnormal)
+		defer node.UpdateStateCode(commonpb.StateCode_Healthy)
 		status, err := node.WatchDmChannels(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
 	})
+
+	t.Run("mock release after loaded", func(t *testing.T) {
+
+		mockTSReplica := &MockTSafeReplicaInterface{}
+
+		oldTSReplica := node.tSafeReplica
+		defer func() {
+			node.tSafeReplica = oldTSReplica
+		}()
+		node.tSafeReplica = mockTSReplica
+		mockTSReplica.On("addTSafe", mock.Anything).Run(func(_ mock.Arguments) {
+			node.ShardClusterService.releaseShardCluster("1001-dmc0")
+		})
+		schema := genTestCollectionSchema()
+		req := &queryPb.WatchDmChannelsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_WatchDmChannels,
+				MsgID:    rand.Int63(),
+				TargetID: node.session.ServerID,
+			},
+			CollectionID: defaultCollectionID,
+			PartitionIDs: []UniqueID{defaultPartitionID},
+			Schema:       schema,
+			Infos: []*datapb.VchannelInfo{
+				{
+					CollectionID: 1001,
+					ChannelName:  "1001-dmc0",
+				},
+			},
+		}
+
+		status, err := node.WatchDmChannels(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
+	})
+
 }
 
 func TestImpl_UnsubDmChannel(t *testing.T) {
