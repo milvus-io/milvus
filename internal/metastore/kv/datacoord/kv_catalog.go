@@ -22,21 +22,20 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/milvus-io/milvus/internal/util/metautil"
-
-	"github.com/milvus-io/milvus/internal/util/etcd"
-
+	"github.com/golang/protobuf/proto"
+	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util"
+	"github.com/milvus-io/milvus/internal/util/etcd"
+	"github.com/milvus-io/milvus/internal/util/metautil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"go.uber.org/zap"
 )
 
 type Catalog struct {
@@ -312,6 +311,43 @@ func (kc *Catalog) DropChannel(ctx context.Context, channel string) error {
 	return kc.Txn.Remove(key)
 }
 
+func (kc *Catalog) ListChannelCheckpoint(ctx context.Context) (map[string]*internalpb.MsgPosition, error) {
+	keys, values, err := kc.Txn.LoadWithPrefix(ChannelCheckpointPrefix)
+	if err != nil {
+		return nil, err
+	}
+
+	channelCPs := make(map[string]*internalpb.MsgPosition)
+	for i, key := range keys {
+		value := values[i]
+		channelCP := &internalpb.MsgPosition{}
+		err = proto.Unmarshal([]byte(value), channelCP)
+		if err != nil {
+			log.Error("unmarshal channelCP failed when ListChannelCheckpoint", zap.Error(err))
+			return nil, err
+		}
+		ss := strings.Split(key, "/")
+		vChannel := ss[len(ss)-1]
+		channelCPs[vChannel] = channelCP
+	}
+
+	return channelCPs, nil
+}
+
+func (kc *Catalog) SaveChannelCheckpoint(ctx context.Context, vChannel string, pos *internalpb.MsgPosition) error {
+	k := buildChannelCPKey(vChannel)
+	v, err := proto.Marshal(pos)
+	if err != nil {
+		return err
+	}
+	return kc.Txn.Save(k, string(v))
+}
+
+func (kc *Catalog) DropChannelCheckpoint(ctx context.Context, vChannel string) error {
+	k := buildChannelCPKey(vChannel)
+	return kc.Txn.Remove(k)
+}
+
 func (kc *Catalog) getBinlogsWithPrefix(binlogType storage.BinlogType, collectionID, partitionID,
 	segmentID typeutil.UniqueID) ([]string, []string, error) {
 	var binlogPrefix string
@@ -566,4 +602,8 @@ func buildFieldStatslogPathPrefix(collectionID typeutil.UniqueID, partitionID ty
 // buildChannelRemovePath builds vchannel remove flag path
 func buildChannelRemovePath(channel string) string {
 	return fmt.Sprintf("%s/%s", ChannelRemovePrefix, channel)
+}
+
+func buildChannelCPKey(vChannel string) string {
+	return fmt.Sprintf("%s/%s", ChannelCheckpointPrefix, vChannel)
 }

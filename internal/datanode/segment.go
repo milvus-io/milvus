@@ -21,9 +21,13 @@ import (
 	"sync/atomic"
 
 	"github.com/bits-and-blooms/bloom/v3"
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
 )
 
 // Segment contains the latest segment infos from channel.
@@ -37,12 +41,17 @@ type Segment struct {
 	memorySize  int64
 	compactedTo UniqueID
 
-	statLock     sync.Mutex
+	curInsertBuf     *BufferData
+	curDeleteBuf     *DelDataBuf
+	historyInsertBuf []*BufferData
+	historyDeleteBuf []*DelDataBuf
+
+	statLock     sync.RWMutex
 	currentStat  *storage.PkStatistics
 	historyStats []*storage.PkStatistics
 
-	startPos *internalpb.MsgPosition // TODO readonly
-	endPos   *internalpb.MsgPosition
+	lastSyncTs Timestamp
+	startPos   *internalpb.MsgPosition // TODO readonly
 }
 
 type addSegmentReq struct {
@@ -103,4 +112,57 @@ func (s *Segment) isPKExist(pk primaryKey) bool {
 		}
 	}
 	return false
+}
+
+// rollInsertBuffer moves curInsertBuf to historyInsertBuf, and then sets curInsertBuf to nil.
+func (s *Segment) rollInsertBuffer() {
+	if s.curInsertBuf == nil {
+		return
+	}
+	s.curInsertBuf.buffer = nil // free buffer memory, only keep meta infos in historyInsertBuf
+	s.historyInsertBuf = append(s.historyInsertBuf, s.curInsertBuf)
+	s.curInsertBuf = nil
+}
+
+// evictHistoryInsertBuffer removes flushed buffer from historyInsertBuf after saveBinlogPath.
+func (s *Segment) evictHistoryInsertBuffer(endPos *internalpb.MsgPosition) {
+	tmpBuffers := make([]*BufferData, 0)
+	for _, buf := range s.historyInsertBuf {
+		if buf.endPos.Timestamp > endPos.Timestamp {
+			tmpBuffers = append(tmpBuffers, buf)
+		}
+	}
+	s.historyInsertBuf = tmpBuffers
+	ts, _ := tsoutil.ParseTS(endPos.Timestamp)
+	log.Debug("evictHistoryInsertBuffer done", zap.Int64("segmentID", s.segmentID), zap.Time("ts", ts), zap.String("channel", endPos.ChannelName))
+}
+
+// rollDeleteBuffer moves curDeleteBuf to historyDeleteBuf, and then sets curDeleteBuf to nil.
+func (s *Segment) rollDeleteBuffer() {
+	if s.curDeleteBuf == nil {
+		return
+	}
+	s.curDeleteBuf.delData = nil // free buffer memory, only keep meta infos in historyDeleteBuf
+	s.historyDeleteBuf = append(s.historyDeleteBuf, s.curDeleteBuf)
+	s.curDeleteBuf = nil
+}
+
+// evictHistoryDeleteBuffer removes flushed buffer from historyDeleteBuf after saveBinlogPath.
+func (s *Segment) evictHistoryDeleteBuffer(endPos *internalpb.MsgPosition) {
+	tmpBuffers := make([]*DelDataBuf, 0)
+	for _, buf := range s.historyDeleteBuf {
+		if buf.endPos.Timestamp > endPos.Timestamp {
+			tmpBuffers = append(tmpBuffers, buf)
+		}
+	}
+	s.historyDeleteBuf = tmpBuffers
+	ts, _ := tsoutil.ParseTS(endPos.Timestamp)
+	log.Debug("evictHistoryDeleteBuffer done", zap.Int64("segmentID", s.segmentID), zap.Time("ts", ts), zap.String("channel", endPos.ChannelName))
+}
+
+func (s *Segment) isBufferEmpty() bool {
+	return s.curInsertBuf == nil &&
+		s.curDeleteBuf == nil &&
+		len(s.historyInsertBuf) == 0 &&
+		len(s.historyDeleteBuf) == 0
 }

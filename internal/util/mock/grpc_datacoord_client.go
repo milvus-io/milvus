@@ -145,6 +145,10 @@ func (m *GrpcDataCoordClient) UpdateSegmentStatistics(ctx context.Context, req *
 	return &commonpb.Status{}, m.Err
 }
 
+func (m *GrpcDataCoordClient) UpdateChannelCheckpoint(ctx context.Context, req *datapb.UpdateChannelCheckpointRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
 func (m *GrpcDataCoordClient) AcquireSegmentLock(ctx context.Context, req *datapb.AcquireSegmentLockRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }

@@ -17,12 +17,37 @@
 package datanode
 
 import (
+	"fmt"
 	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 )
+
+func genTestCollectionSchema(dim int64) *schemapb.CollectionSchema {
+	floatVecFieldSchema := &schemapb.FieldSchema{
+		FieldID:  100,
+		Name:     "vec",
+		DataType: schemapb.DataType_FloatVector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   "dim",
+				Value: fmt.Sprintf("%d", dim),
+			},
+		},
+	}
+	schema := &schemapb.CollectionSchema{
+		Name: "collection-0",
+		Fields: []*schemapb.FieldSchema{
+			floatVecFieldSchema,
+		},
+	}
+	return schema
+}
 
 func TestBufferData(t *testing.T) {
 	Params.DataNodeCfg.FlushInsertBufferSize = 16 * (1 << 20) // 16 MB
@@ -43,7 +68,7 @@ func TestBufferData(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.description, func(t *testing.T) {
-			idata, err := newBufferData(test.indim)
+			idata, err := newBufferData(genTestCollectionSchema(test.indim))
 
 			if test.isValid {
 				assert.NoError(t, err)
@@ -101,7 +126,7 @@ func TestBufferData_updateTimeRange(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.tag, func(t *testing.T) {
-			bd, err := newBufferData(16)
+			bd, err := newBufferData(genTestCollectionSchema(16))
 			require.NoError(t, err)
 			for _, tr := range tc.trs {
 				bd.updateTimeRange(tr)

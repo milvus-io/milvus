@@ -240,7 +240,10 @@ func (c *ChannelManager) unwatchDroppedChannels() {
 				log.Warn("unable to remove channel", zap.String("channel", ch.Name), zap.Error(err))
 				continue
 			}
-			c.h.FinishDropChannel(ch.Name)
+			err = c.h.FinishDropChannel(ch.Name)
+			if err != nil {
+				log.Warn("FinishDropChannel failed when unwatchDroppedChannels", zap.String("channel", ch.Name), zap.Error(err))
+			}
 		}
 	}
 }
@@ -752,7 +755,9 @@ func (c *ChannelManager) Reassign(nodeID UniqueID, channelName string) error {
 		if err := c.remove(nodeID, ch); err != nil {
 			return fmt.Errorf("failed to remove watch info: %v,%s", ch, err.Error())
 		}
-		c.h.FinishDropChannel(channelName)
+		if err := c.h.FinishDropChannel(channelName); err != nil {
+			return fmt.Errorf("FinishDropChannel failed, err=%s", err)
+		}
 		log.Info("removed channel assignment", zap.String("channel name", channelName))
 		return nil
 	}
@@ -799,7 +804,9 @@ func (c *ChannelManager) CleanupAndReassign(nodeID UniqueID, channelName string)
 		}
 
 		log.Info("try to cleanup removal flag ", zap.String("channel name", channelName))
-		c.h.FinishDropChannel(channelName)
+		if err := c.h.FinishDropChannel(channelName); err != nil {
+			return fmt.Errorf("FinishDropChannel failed, err=%s", err)
+		}
 
 		log.Info("removed channel assignment", zap.Any("channel", chToCleanUp))
 		return nil

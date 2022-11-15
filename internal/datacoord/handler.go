@@ -36,7 +36,7 @@ type Handler interface {
 	// GetDataVChanPositions gets the information recovery needed of a channel for DataNode
 	GetDataVChanPositions(channel *channel, partitionID UniqueID) *datapb.VchannelInfo
 	CheckShouldDropChannel(channel string) bool
-	FinishDropChannel(channel string)
+	FinishDropChannel(channel string) error
 	GetCollection(ctx context.Context, collectionID UniqueID) (*collectionInfo, error)
 }
 
@@ -64,10 +64,7 @@ func (h *ServerHandler) GetDataVChanPositions(channel *channel, partitionID Uniq
 		flushedIDs   = make(typeutil.UniqueSet)
 		unflushedIDs = make(typeutil.UniqueSet)
 		droppedIDs   = make(typeutil.UniqueSet)
-		seekPosition *internalpb.MsgPosition
 	)
-	var minPosSegID int64
-	var minPosTs uint64
 	for _, s := range segments {
 		if (partitionID > allPartitionID && s.PartitionID != partitionID) ||
 			(s.GetStartPosition() == nil && s.GetDmlPosition() == nil) {
@@ -86,51 +83,12 @@ func (h *ServerHandler) GetDataVChanPositions(channel *channel, partitionID Uniq
 		} else {
 			unflushedIDs.Insert(s.GetID())
 		}
-
-		var segmentPosition *internalpb.MsgPosition
-		if s.GetDmlPosition() != nil {
-			segmentPosition = s.GetDmlPosition()
-		} else {
-			segmentPosition = s.GetStartPosition()
-		}
-		if seekPosition == nil || segmentPosition.Timestamp < seekPosition.Timestamp {
-			minPosSegID = s.GetID()
-			minPosTs = segmentPosition.GetTimestamp()
-			seekPosition = segmentPosition
-		}
-	}
-
-	if seekPosition != nil {
-		log.Info("channel seek position set as the minimal segment position",
-			zap.Int64("segment ID", minPosSegID),
-			zap.Uint64("position timestamp", minPosTs),
-			zap.String("realworld position timestamp", tsoutil.ParseAndFormatHybridTs(minPosTs)),
-		)
-	} else {
-		// use collection start position when segment position is not found
-		if channel.StartPositions == nil {
-			collection, err := h.GetCollection(h.s.ctx, channel.CollectionID)
-			if collection != nil && err == nil {
-				seekPosition = getCollectionStartPosition(channel.Name, collection)
-			}
-			log.Info("NEITHER segment position or channel start position are found, setting channel seek position to collection start position",
-				zap.Uint64("position timestamp", seekPosition.GetTimestamp()),
-				zap.String("realworld position timestamp", tsoutil.ParseAndFormatHybridTs(seekPosition.GetTimestamp())),
-			)
-		} else {
-			// use passed start positions, skip to ask RootCoord.
-			seekPosition = toMsgPosition(channel.Name, channel.StartPositions)
-			log.Info("segment position not found, setting channel seek position to channel start position",
-				zap.Uint64("position timestamp", seekPosition.GetTimestamp()),
-				zap.String("realworld position timestamp", tsoutil.ParseAndFormatHybridTs(seekPosition.GetTimestamp())),
-			)
-		}
 	}
 
 	return &datapb.VchannelInfo{
 		CollectionID:        channel.CollectionID,
 		ChannelName:         channel.Name,
-		SeekPosition:        seekPosition,
+		SeekPosition:        h.getChannelCheckpoint(channel),
 		FlushedSegmentIds:   flushedIDs.Collect(),
 		UnflushedSegmentIds: unflushedIDs.Collect(),
 		DroppedSegmentIds:   droppedIDs.Collect(),
@@ -160,7 +118,6 @@ func (h *ServerHandler) GetQueryVChanPositions(channel *channel, partitionID Uni
 		indexedIDs   = make(typeutil.UniqueSet)
 		unIndexedIDs = make(typeutil.UniqueSet)
 		droppedIDs   = make(typeutil.UniqueSet)
-		seekPosition *internalpb.MsgPosition
 	)
 	for _, s := range segments {
 		if (partitionID > allPartitionID && s.PartitionID != partitionID) ||
@@ -191,54 +148,47 @@ func (h *ServerHandler) GetQueryVChanPositions(channel *channel, partitionID Uni
 		}
 	}
 
-	for id := range indexedIDs {
-		var segmentPosition *internalpb.MsgPosition
-		segment := segmentInfos[id]
-		if segment.GetDmlPosition() != nil {
-			segmentPosition = segment.GetDmlPosition()
-		} else {
-			segmentPosition = segment.GetStartPosition()
-		}
-
-		if seekPosition == nil || segmentPosition.Timestamp < seekPosition.Timestamp {
-			seekPosition = segmentPosition
-		}
+	return &datapb.VchannelInfo{
+		CollectionID:        channel.CollectionID,
+		ChannelName:         channel.Name,
+		SeekPosition:        h.getChannelCheckpoint(channel),
+		FlushedSegmentIds:   indexedIDs.Collect(),
+		UnflushedSegmentIds: unIndexedIDs.Collect(),
+		DroppedSegmentIds:   droppedIDs.Collect(),
 	}
-	for id := range unIndexedIDs {
-		var segmentPosition *internalpb.MsgPosition
-		segment := segmentInfos[id]
-		if segment.GetDmlPosition() != nil {
-			segmentPosition = segment.GetDmlPosition()
-		} else {
-			segmentPosition = segment.GetStartPosition()
-		}
+}
 
-		if seekPosition == nil || segmentPosition.Timestamp < seekPosition.Timestamp {
-			seekPosition = segmentPosition
-		}
-	}
-
-	// use collection start position when segment position is not found
-	if seekPosition == nil {
+func (h *ServerHandler) getChannelCheckpoint(channel *channel) *internalpb.MsgPosition {
+	seekPosition := h.s.meta.GetChannelCheckpoint(channel.Name)
+	if seekPosition != nil {
+		log.Info("channel seek position set from ChannelCP",
+			zap.String("channel", channel.Name),
+			zap.Uint64("position timestamp", seekPosition.Timestamp),
+			zap.Time("realworld position timestamp", tsoutil.PhysicalTime(seekPosition.GetTimestamp())),
+		)
+	} else {
+		// use collection start position when segment position is not found
 		if channel.StartPositions == nil {
 			collection, err := h.GetCollection(h.s.ctx, channel.CollectionID)
 			if collection != nil && err == nil {
 				seekPosition = getCollectionStartPosition(channel.Name, collection)
 			}
+			log.Info("NEITHER segment position or channel start position are found, setting channel seek position to collection start position",
+				zap.String("channel", channel.Name),
+				zap.Uint64("position timestamp", seekPosition.GetTimestamp()),
+				zap.Time("realworld position timestamp", tsoutil.PhysicalTime(seekPosition.GetTimestamp())),
+			)
 		} else {
-			// use passed start positions, skip to ask rootcoord.
+			// use passed start positions, skip to ask RootCoord.
 			seekPosition = toMsgPosition(channel.Name, channel.StartPositions)
+			log.Info("segment position not found, setting channel seek position to channel start position",
+				zap.String("channel", channel.Name),
+				zap.Uint64("position timestamp", seekPosition.GetTimestamp()),
+				zap.Time("realworld position timestamp", tsoutil.PhysicalTime(seekPosition.GetTimestamp())),
+			)
 		}
 	}
-
-	return &datapb.VchannelInfo{
-		CollectionID:        channel.CollectionID,
-		ChannelName:         channel.Name,
-		SeekPosition:        seekPosition,
-		FlushedSegmentIds:   indexedIDs.Collect(),
-		UnflushedSegmentIds: unIndexedIDs.Collect(),
-		DroppedSegmentIds:   droppedIDs.Collect(),
-	}
+	return seekPosition
 }
 
 func getCollectionStartPosition(channel string, collectionInfo *collectionInfo) *internalpb.MsgPosition {
@@ -311,6 +261,16 @@ func (h *ServerHandler) CheckShouldDropChannel(channel string) bool {
 
 // FinishDropChannel cleans up the remove flag for channels
 // this function is a wrapper of server.meta.FinishDropChannel
-func (h *ServerHandler) FinishDropChannel(channel string) {
-	h.s.meta.catalog.DropChannel(h.s.ctx, channel)
+func (h *ServerHandler) FinishDropChannel(channel string) error {
+	err := h.s.meta.catalog.DropChannel(h.s.ctx, channel)
+	if err != nil {
+		log.Warn("DropChannel failed", zap.String("vChannel", channel), zap.Error(err))
+		return err
+	}
+	err = h.s.meta.DropChannelCheckpoint(channel)
+	if err != nil {
+		log.Warn("DropChannelCheckpoint failed", zap.String("vChannel", channel), zap.Error(err))
+		return err
+	}
+	return nil
 }

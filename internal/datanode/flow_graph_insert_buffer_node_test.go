@@ -249,7 +249,7 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	setFlowGraphRetryOpt(retry.Attempts(1))
 	inMsg = genFlowGraphInsertMsg(insertChannelName)
 	iBNode.flushManager = &mockFlushManager{returnError: true}
-	iBNode.insertBuffer.Store(inMsg.insertMessages[0].SegmentID, &BufferData{})
+	iBNode.channel.setCurInsertBuffer(inMsg.insertMessages[0].SegmentID, &BufferData{})
 	assert.Panics(t, func() { iBNode.Operate([]flowgraph.Msg{&inMsg}) })
 	iBNode.flushManager = fm
 }
@@ -637,7 +637,6 @@ func TestRollBF(t *testing.T) {
 		assert.Equal(t, datapb.SegmentType_New, seg.getType())
 		assert.Equal(t, int64(1), seg.numRows)
 		assert.Equal(t, uint64(100), seg.startPos.GetTimestamp())
-		assert.Equal(t, uint64(123), seg.endPos.GetTimestamp())
 		// because this is the origincal
 		assert.True(t, seg.currentStat.PkFilter.Cap() > uint(1000000))
 
@@ -666,7 +665,6 @@ func TestRollBF(t *testing.T) {
 		assert.Equal(t, datapb.SegmentType_Normal, seg.getType())
 		assert.Equal(t, int64(2), seg.numRows)
 		assert.Equal(t, uint64(100), seg.startPos.GetTimestamp())
-		assert.Equal(t, uint64(234), seg.endPos.GetTimestamp())
 		// filter should be rolled
 
 		assert.Nil(t, seg.currentStat)
@@ -769,9 +767,9 @@ func (s *InsertBufferNodeSuit) TestFillInSyncTasks() {
 			size:   2,
 			limit:  2,
 		}
-		node.insertBuffer.Store(UniqueID(1), &buffer)
+		node.channel.setCurInsertBuffer(UniqueID(1), &buffer)
 
-		syncTasks := node.FillInSyncTasks(new(flowGraphMsg), segToFlush)
+		syncTasks := node.FillInSyncTasks(&flowGraphMsg{endPositions: []*internalpb.MsgPosition{{Timestamp: 100}}}, segToFlush)
 		s.Assert().NotEmpty(syncTasks)
 		s.Assert().Equal(1, len(syncTasks))
 
@@ -784,7 +782,7 @@ func (s *InsertBufferNodeSuit) TestFillInSyncTasks() {
 	})
 
 	s.Run("drop partition", func() {
-		fgMsg := flowGraphMsg{dropPartitions: []UniqueID{s.partID}}
+		fgMsg := flowGraphMsg{dropPartitions: []UniqueID{s.partID}, endPositions: []*internalpb.MsgPosition{{Timestamp: 100}}}
 		node := &insertBufferNode{
 			channelName: s.channel.channelName,
 			channel:     s.channel,
@@ -820,7 +818,7 @@ func (s *InsertBufferNodeSuit) TestFillInSyncTasks() {
 			flushCh <- msg
 		}
 
-		syncTasks := node.FillInSyncTasks(new(flowGraphMsg), nil)
+		syncTasks := node.FillInSyncTasks(&flowGraphMsg{endPositions: []*internalpb.MsgPosition{{Timestamp: 100}}}, nil)
 		s.Assert().NotEmpty(syncTasks)
 
 		for segID, task := range syncTasks {
@@ -857,7 +855,7 @@ func (s *InsertBufferNodeSuit) TestFillInSyncTasks() {
 			flushCh <- msg
 		}
 
-		syncTasks := node.FillInSyncTasks(new(flowGraphMsg), nil)
+		syncTasks := node.FillInSyncTasks(&flowGraphMsg{endPositions: []*internalpb.MsgPosition{{Timestamp: 100}}}, nil)
 		s.Assert().NotEmpty(syncTasks)
 		s.Assert().Equal(10, len(syncTasks)) // 10 is max batch
 
@@ -960,14 +958,14 @@ func TestInsertBufferNode_bufferInsertMsg(t *testing.T) {
 		inMsg := genFlowGraphInsertMsg(insertChannelName)
 		for _, msg := range inMsg.insertMessages {
 			msg.EndTimestamp = 101 // ts valid
-			err = iBNode.bufferInsertMsg(msg, &internalpb.MsgPosition{})
+			err = iBNode.bufferInsertMsg(msg, &internalpb.MsgPosition{}, &internalpb.MsgPosition{})
 			assert.Nil(t, err)
 		}
 
 		for _, msg := range inMsg.insertMessages {
 			msg.EndTimestamp = 101 // ts valid
 			msg.RowIDs = []int64{} //misaligned data
-			err = iBNode.bufferInsertMsg(msg, &internalpb.MsgPosition{})
+			err = iBNode.bufferInsertMsg(msg, &internalpb.MsgPosition{}, &internalpb.MsgPosition{})
 			assert.NotNil(t, err)
 		}
 	}
