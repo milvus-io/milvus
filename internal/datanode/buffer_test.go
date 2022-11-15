@@ -17,6 +17,7 @@
 package datanode
 
 import (
+	"container/heap"
 	"fmt"
 	"math"
 	"testing"
@@ -136,4 +137,47 @@ func TestBufferData_updateTimeRange(t *testing.T) {
 			assert.Equal(t, tc.expectTo, bd.tsTo)
 		})
 	}
+}
+
+func Test_CompactSegBuff(t *testing.T) {
+	channelSegments := make(map[UniqueID]*Segment)
+	delBufferManager := &DelBufferManager{
+		channel: &ChannelMeta{
+			segments: channelSegments,
+		},
+		delMemorySize: 0,
+		delBufHeap:    &PriorityQueue{},
+	}
+	//1. set compactTo and compactFrom
+	compactedFromSegIDs := make([]UniqueID, 2)
+	var segID1 UniqueID = 1111
+	var segID2 UniqueID = 2222
+	compactedFromSegIDs[0] = segID1
+	compactedFromSegIDs[1] = segID2
+	channelSegments[segID1] = &Segment{}
+	channelSegments[segID2] = &Segment{}
+	var compactedToSegID UniqueID = 3333
+	channelSegments[compactedToSegID] = &Segment{}
+
+	//2. set up deleteDataBuf for seg1 and seg2
+	delDataBuf1 := newDelDataBuf()
+	delDataBuf1.EntriesNum++
+	delBufferManager.Store(segID1, delDataBuf1)
+	heap.Push(delBufferManager.delBufHeap, delDataBuf1.item)
+	delDataBuf2 := newDelDataBuf()
+	delDataBuf2.EntriesNum++
+	delBufferManager.Store(segID2, delDataBuf2)
+	heap.Push(delBufferManager.delBufHeap, delDataBuf2.item)
+
+	//3. test compact
+	delBufferManager.CompactSegBuf(compactedToSegID, compactedFromSegIDs)
+
+	//4. expect results in two aspects:
+	//4.1 compactedFrom segments are removed from delBufferManager
+	//4.2 compactedTo seg is set properly with correct entriesNum
+	_, seg1Exist := delBufferManager.Load(segID1)
+	_, seg2Exist := delBufferManager.Load(segID2)
+	assert.False(t, seg1Exist)
+	assert.False(t, seg2Exist)
+	assert.Equal(t, int64(2), delBufferManager.GetEntriesNum(compactedToSegID))
 }
