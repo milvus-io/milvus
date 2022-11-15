@@ -158,7 +158,7 @@ func (gc *garbageCollector) recycleSegIndexesMeta() {
 				continue
 			}
 			if _, ok := flushedSegments[segID]; !ok {
-				log.Ctx(gc.ctx).Debug("segment is already not exist, mark it deleted", zap.Int64("collID", collID),
+				log.Ctx(gc.ctx).Info("segment is already not exist, mark it deleted", zap.Int64("collID", collID),
 					zap.Int64("segID", segID))
 				if err := gc.metaTable.MarkSegmentsIndexAsDeleted(func(segIndex *model.SegmentIndex) bool {
 					return segIndex.SegmentID == segID
@@ -180,7 +180,8 @@ func (gc *garbageCollector) recycleSegIndexesMeta() {
 					zap.Int64("nodeID", meta.NodeID), zap.Error(err))
 				continue
 			}
-			log.Ctx(gc.ctx).Debug("index meta recycle success", zap.Int64("buildID", meta.BuildID))
+			log.Ctx(gc.ctx).Info("index meta recycle success", zap.Int64("buildID", meta.BuildID),
+				zap.Int64("segID", meta.SegmentID))
 		}
 	}
 }
