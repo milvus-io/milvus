@@ -232,9 +232,9 @@ func (ob *CollectionObserver) observeCollectionLoadStatus(collection *meta.Colle
 	channelTargets := ob.targetMgr.GetDmChannelsByCollection(collection.GetCollectionID())
 	targetNum := len(segmentTargets) + len(channelTargets)
 	log.Info("collection targets",
-		zap.Int("segment-target-num", len(segmentTargets)),
-		zap.Int("channel-target-num", len(channelTargets)),
-		zap.Int("total-target-num", targetNum))
+		zap.Int("segmentTargetNum", len(segmentTargets)),
+		zap.Int("channelTargetNum", len(channelTargets)),
+		zap.Int("totalTargetNum", targetNum))
 	if targetNum == 0 {
 		log.Info("collection released, skip it")
 		return
@@ -296,9 +296,9 @@ func (ob *CollectionObserver) observePartitionLoadStatus(partition *meta.Partiti
 	channelTargets := ob.targetMgr.GetDmChannelsByCollection(partition.GetCollectionID())
 	targetNum := len(segmentTargets) + len(channelTargets)
 	log.Info("partition targets",
-		zap.Int("segment-target-num", len(segmentTargets)),
-		zap.Int("channel-target-num", len(channelTargets)),
-		zap.Int("total-target-num", targetNum))
+		zap.Int("segmentTargetNum", len(segmentTargets)),
+		zap.Int("channelTargetNum", len(channelTargets)),
+		zap.Int("totalTargetNum", targetNum))
 	if targetNum == 0 {
 		log.Info("partition released, skip it")
 		return

@@ -165,6 +165,7 @@ func (job *LoadCollectionJob) PreExecute() error {
 			log.Warn(msg)
 			return utils.WrapError(msg, ErrLoadParameterMismatched)
 		}
+
 		return ErrCollectionLoaded
 	}
 
