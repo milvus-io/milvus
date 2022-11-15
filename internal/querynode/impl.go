@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
@@ -34,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
@@ -303,6 +305,14 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, in *querypb.WatchDmC
 		return status, nil
 	}
 
+	log := log.With(
+		zap.Int64("collectionID", in.GetCollectionID()),
+		zap.Int64("nodeID", paramtable.GetNodeID()),
+		zap.Strings("channels", lo.Map(in.GetInfos(), func(info *datapb.VchannelInfo, _ int) string {
+			return info.GetChannelName()
+		})),
+	)
+
 	task := &watchDmChannelsTask{
 		baseTask: baseTask{
 			ctx:  ctx,
@@ -313,13 +323,10 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, in *querypb.WatchDmC
 	}
 
 	startTs := time.Now()
-	log.Info("watchDmChannels init", zap.Int64("collectionID", in.CollectionID),
-		zap.String("channelName", in.Infos[0].GetChannelName()),
-		zap.Int64("nodeID", paramtable.GetNodeID()))
+	log.Info("watchDmChannels init")
 	// currently we only support load one channel as a time
 	future := node.taskPool.Submit(func() (interface{}, error) {
-		log.Info("watchDmChannels start ", zap.Int64("collectionID", in.CollectionID),
-			zap.String("channelName", in.Infos[0].GetChannelName()),
+		log.Info("watchDmChannels start ",
 			zap.Duration("timeInQueue", time.Since(startTs)))
 		err := task.PreExecute(ctx)
 		if err != nil {
@@ -337,7 +344,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, in *querypb.WatchDmC
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    err.Error(),
 			}
-			log.Warn("failed to subscribe channel ", zap.Error(err))
+			log.Warn("failed to subscribe channel", zap.Error(err))
 			return status, nil
 		}
 
@@ -351,10 +358,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, in *querypb.WatchDmC
 			return status, nil
 		}
 
-		sc, _ := node.ShardClusterService.getShardCluster(in.Infos[0].GetChannelName())
-		sc.SetupFirstVersion()
-		log.Info("successfully watchDmChannelsTask", zap.Int64("collectionID", in.CollectionID),
-			zap.String("channelName", in.Infos[0].GetChannelName()), zap.Int64("nodeID", paramtable.GetNodeID()))
+		log.Info("successfully watchDmChannelsTask")
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		}, nil
