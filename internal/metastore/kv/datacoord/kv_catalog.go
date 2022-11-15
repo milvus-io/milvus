@@ -38,6 +38,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
+const maxEtcdTxnNum = 64
+
 type Catalog struct {
 	Txn                  kv.TxnKV
 	ChunkManagerRootPath string
@@ -102,23 +104,40 @@ func (kc *Catalog) AlterSegments(ctx context.Context, newSegments []*datapb.Segm
 	if len(newSegments) == 0 {
 		return nil
 	}
-
-	kvs := make(map[string]string)
+	kvsBySeg := make(map[int64]map[string]string)
 	for _, segment := range newSegments {
 		segmentKvs, err := buildSegmentAndBinlogsKvs(segment)
 		if err != nil {
 			return err
 		}
-		maps.Copy(kvs, segmentKvs)
+		kvsBySeg[segment.GetID()] = make(map[string]string)
+		maps.Copy(kvsBySeg[segment.GetID()], segmentKvs)
 	}
-
+	// Split kvs into multiple operations to avoid over-sized operations.
+	// Also make sure kvs of the same segment are not split into different operations.
+	kvsPiece := make(map[string]string)
+	currSize := 0
 	saveFn := func(partialKvs map[string]string) error {
 		return kc.Txn.MultiSave(partialKvs)
 	}
-	if err := etcd.SaveByBatch(kvs, saveFn); err != nil {
-		return err
+	for _, kvs := range kvsBySeg {
+		if currSize+len(kvs) >= maxEtcdTxnNum {
+			if err := etcd.SaveByBatch(kvsPiece, saveFn); err != nil {
+				log.Error("failed to save by batch", zap.Error(err))
+				return err
+			}
+			kvsPiece = make(map[string]string)
+			currSize = 0
+		}
+		maps.Copy(kvsPiece, kvs)
+		currSize += len(kvs)
 	}
-
+	if currSize > 0 {
+		if err := etcd.SaveByBatch(kvsPiece, saveFn); err != nil {
+			log.Error("failed to save by batch", zap.Error(err))
+			return err
+		}
+	}
 	return nil
 }
 
@@ -219,7 +238,7 @@ func (kc *Catalog) AlterSegmentsAndAddNewSegment(ctx context.Context, segments [
 	return kc.Txn.MultiSave(kvs)
 }
 
-// RevertAlterSegmentsAndAddNewSegment reverts the metastore operation of AtlerSegmentsAndAddNewSegment
+// RevertAlterSegmentsAndAddNewSegment reverts the metastore operation of AlterSegmentsAndAddNewSegment
 func (kc *Catalog) RevertAlterSegmentsAndAddNewSegment(ctx context.Context, oldSegments []*datapb.SegmentInfo, removeSegment *datapb.SegmentInfo) error {
 	var (
 		kvs      = make(map[string]string)
