@@ -102,12 +102,24 @@ class TestChaosApply:
         assert meta_name not in chaos_list
         sleep(2)
         # wait all pods ready
+        t0 = time.time()
         log.info(f"wait for pods in namespace {constants.CHAOS_NAMESPACE} with label app.kubernetes.io/instance={meta_name}")
         wait_pods_ready(constants.CHAOS_NAMESPACE, f"app.kubernetes.io/instance={meta_name}")
         log.info(f"wait for pods in namespace {constants.CHAOS_NAMESPACE} with label release={meta_name}")
         wait_pods_ready(constants.CHAOS_NAMESPACE, f"release={meta_name}")
         log.info("all pods are ready")
+        pods_ready_time = time.time() - t0
+        log.info(f"pods ready time: {pods_ready_time}")
         # reconnect to test the service healthy
-        sleep(20)
-        self.reconnect()
+        start_time = time.time()
+        end_time = start_time + 120
+        while time.time() < end_time:
+            try:
+                self.reconnect()
+                break
+            except Exception as e:
+                log.error(e)
+                sleep(2)
+        recovery_time = time.time() - start_time
+        log.info(f"recovery time: {recovery_time}")
         log.info("*********************Chaos Test Completed**********************")
