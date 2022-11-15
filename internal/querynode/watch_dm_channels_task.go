@@ -97,7 +97,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 
 	//add shard cluster
 	for _, vchannel := range vChannels {
-		w.node.ShardClusterService.addShardCluster(w.req.GetCollectionID(), w.req.GetReplicaID(), vchannel)
+		w.node.ShardClusterService.addShardCluster(w.req.GetCollectionID(), w.req.GetReplicaID(), vchannel, w.req.GetVersion())
 	}
 
 	defer func() {

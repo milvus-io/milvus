@@ -50,7 +50,7 @@ func newShardClusterService(client *clientv3.Client, session *sessionutil.Sessio
 }
 
 // addShardCluster adds shardCluster into service.
-func (s *ShardClusterService) addShardCluster(collectionID, replicaID int64, vchannelName string) {
+func (s *ShardClusterService) addShardCluster(collectionID, replicaID int64, vchannelName string, version int64) {
 	nodeDetector := NewEtcdShardNodeDetector(s.client, path.Join(Params.EtcdCfg.MetaRootPath, ReplicaMetaPrefix),
 		func() (map[int64]string, error) {
 			result := make(map[int64]string)
@@ -66,7 +66,7 @@ func (s *ShardClusterService) addShardCluster(collectionID, replicaID int64, vch
 
 	segmentDetector := NewEtcdShardSegmentDetector(s.client, path.Join(Params.EtcdCfg.MetaRootPath, util.SegmentMetaPrefix, strconv.FormatInt(collectionID, 10)))
 
-	cs := NewShardCluster(collectionID, replicaID, vchannelName, nodeDetector, segmentDetector,
+	cs := NewShardCluster(collectionID, replicaID, vchannelName, version, nodeDetector, segmentDetector,
 		func(nodeID int64, addr string) shardQueryNode {
 			if nodeID == s.session.ServerID {
 				// wrap node itself

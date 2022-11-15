@@ -125,9 +125,10 @@ func TestShardCluster_Create(t *testing.T) {
 	collectionID := int64(1)
 	vchannelName := "dml_1_1_v0"
 	replicaID := int64(0)
+	version := int64(1)
 
 	t.Run("empty shard cluster", func(t *testing.T) {
-		sc := NewShardCluster(collectionID, replicaID, vchannelName,
+		sc := NewShardCluster(collectionID, replicaID, vchannelName, version,
 			&mockNodeDetector{}, &mockSegmentDetector{}, buildMockQueryNode)
 		assert.NotPanics(t, func() { sc.Close() })
 		// close twice
@@ -146,7 +147,7 @@ func TestShardCluster_Create(t *testing.T) {
 				nodeAddr: "addr_2",
 			},
 		}
-		sc := NewShardCluster(collectionID, replicaID, vchannelName,
+		sc := NewShardCluster(collectionID, replicaID, vchannelName, version,
 			&mockNodeDetector{
 				initNodes: nodeEvent,
 			}, &mockSegmentDetector{}, buildMockQueryNode)
@@ -193,7 +194,7 @@ func TestShardCluster_Create(t *testing.T) {
 				state:     segmentStateOffline,
 			},
 		}
-		sc := NewShardCluster(collectionID, replicaID, vchannelName,
+		sc := NewShardCluster(collectionID, replicaID, vchannelName, version,
 			&mockNodeDetector{
 				initNodes: nodeEvents,
 			}, &mockSegmentDetector{
@@ -223,6 +224,7 @@ func TestShardCluster_nodeEvent(t *testing.T) {
 	collectionID := int64(1)
 	vchannelName := "dml_1_1_v0"
 	replicaID := int64(0)
+	version := int64(1)
 
 	t.Run("only nodes", func(t *testing.T) {
 		nodeEvents := []nodeEvent{
@@ -236,7 +238,7 @@ func TestShardCluster_nodeEvent(t *testing.T) {
 			},
 		}
 		evtCh := make(chan nodeEvent, 10)
-		sc := NewShardCluster(collectionID, replicaID, vchannelName,
+		sc := NewShardCluster(collectionID, replicaID, vchannelName, version,
 			&mockNodeDetector{
 				initNodes: nodeEvents,
 				evtCh:     evtCh,
@@ -320,7 +322,7 @@ func TestShardCluster_nodeEvent(t *testing.T) {
 		}
 
 		evtCh := make(chan nodeEvent, 10)
-		sc := NewShardCluster(collectionID, replicaID, vchannelName,
+		sc := NewShardCluster(collectionID, replicaID, vchannelName, version,
 			&mockNodeDetector{
 				initNodes: nodeEvents,
 				evtCh:     evtCh,
@@ -374,6 +376,7 @@ func TestShardCluster_segmentEvent(t *testing.T) {
 	collectionID := int64(1)
 	vchannelName := "dml_1_1_v0"
 	replicaID := int64(0)
+	version := int64(1)
 
 	t.Run("from loading", func(t *testing.T) {
 		nodeEvents := []nodeEvent{
@@ -410,7 +413,7 @@ func TestShardCluster_segmentEvent(t *testing.T) {
 		}
 
 		evtCh := make(chan segmentEvent, 10)
-		sc := NewShardCluster(collectionID, replicaID, vchannelName,
+		sc := NewShardCluster(collectionID, replicaID, vchannelName, version,
 			&mockNodeDetector{
 				initNodes: nodeEvents,
 			}, &mockSegmentDetector{
@@ -502,7 +505,7 @@ func TestShardCluster_segmentEvent(t *testing.T) {
 		}
 
 		evtCh := make(chan segmentEvent, 10)
-		sc := NewShardCluster(collectionID, replicaID, vchannelName,
+		sc := NewShardCluster(collectionID, replicaID, vchannelName, version,
 			&mockNodeDetector{initNodes: nodeEvents}, &mockSegmentDetector{
 				initSegments: segmentEvents,
 				evtCh:        evtCh,
@@ -594,7 +597,7 @@ func TestShardCluster_segmentEvent(t *testing.T) {
 		}
 
 		evtCh := make(chan segmentEvent, 10)
-		sc := NewShardCluster(collectionID, replicaID, vchannelName,
+		sc := NewShardCluster(collectionID, replicaID, vchannelName, version,
 			&mockNodeDetector{initNodes: nodeEvents}, &mockSegmentDetector{
 				initSegments: segmentEvents,
 				evtCh:        evtCh,
@@ -669,7 +672,7 @@ func TestShardCluster_segmentEvent(t *testing.T) {
 		}
 
 		evtCh := make(chan segmentEvent, 10)
-		sc := NewShardCluster(collectionID, replicaID, vchannelName,
+		sc := NewShardCluster(collectionID, replicaID, vchannelName, version,
 			&mockNodeDetector{initNodes: nodeEvents}, &mockSegmentDetector{
 				initSegments: segmentEvents,
 				evtCh:        evtCh,
@@ -750,7 +753,7 @@ func TestShardCluster_segmentEvent(t *testing.T) {
 		}
 
 		evtCh := make(chan segmentEvent, 10)
-		sc := NewShardCluster(collectionID, replicaID, vchannelName,
+		sc := NewShardCluster(collectionID, replicaID, vchannelName, version,
 			&mockNodeDetector{initNodes: nodeEvents}, &mockSegmentDetector{
 				initSegments: segmentEvents,
 				evtCh:        evtCh,
@@ -823,7 +826,7 @@ func TestShardCluster_segmentEvent(t *testing.T) {
 		}
 
 		evtCh := make(chan segmentEvent, 10)
-		sc := NewShardCluster(collectionID, replicaID, vchannelName,
+		sc := NewShardCluster(collectionID, replicaID, vchannelName, version,
 			&mockNodeDetector{initNodes: nodeEvents}, &mockSegmentDetector{
 				initSegments: segmentEvents,
 				evtCh:        evtCh,
@@ -865,6 +868,7 @@ func TestShardCluster_SyncSegments(t *testing.T) {
 	collectionID := int64(1)
 	vchannelName := "dml_1_1_v0"
 	replicaID := int64(0)
+	version := int64(1)
 
 	t.Run("sync new segments", func(t *testing.T) {
 		nodeEvents := []nodeEvent{
@@ -885,7 +889,7 @@ func TestShardCluster_SyncSegments(t *testing.T) {
 		segmentEvents := []segmentEvent{}
 
 		evtCh := make(chan segmentEvent, 10)
-		sc := NewShardCluster(collectionID, replicaID, vchannelName,
+		sc := NewShardCluster(collectionID, replicaID, vchannelName, version,
 			&mockNodeDetector{initNodes: nodeEvents}, &mockSegmentDetector{
 				initSegments: segmentEvents,
 				evtCh:        evtCh,
@@ -960,7 +964,7 @@ func TestShardCluster_SyncSegments(t *testing.T) {
 		}
 
 		evtCh := make(chan segmentEvent, 10)
-		sc := NewShardCluster(collectionID, replicaID, vchannelName,
+		sc := NewShardCluster(collectionID, replicaID, vchannelName, version,
 			&mockNodeDetector{initNodes: nodeEvents}, &mockSegmentDetector{
 				initSegments: segmentEvents,
 				evtCh:        evtCh,
@@ -1005,7 +1009,7 @@ func TestShardCluster_SyncSegments(t *testing.T) {
 		segmentEvents := []segmentEvent{}
 
 		evtCh := make(chan segmentEvent, 10)
-		sc := NewShardCluster(collectionID, replicaID, vchannelName,
+		sc := NewShardCluster(collectionID, replicaID, vchannelName, version,
 			&mockNodeDetector{initNodes: nodeEvents}, &mockSegmentDetector{
 				initSegments: segmentEvents,
 				evtCh:        evtCh,
@@ -1052,6 +1056,7 @@ func TestShardCluster_Search(t *testing.T) {
 	collectionID := int64(1)
 	vchannelName := "dml_1_1_v0"
 	replicaID := int64(0)
+	version := int64(1)
 	ctx := context.Background()
 
 	t.Run("search unavailable cluster", func(t *testing.T) {
@@ -1088,7 +1093,7 @@ func TestShardCluster_Search(t *testing.T) {
 			},
 		}
 
-		sc := NewShardCluster(collectionID, replicaID, vchannelName,
+		sc := NewShardCluster(collectionID, replicaID, vchannelName, version,
 			&mockNodeDetector{initNodes: nodeEvents}, &mockSegmentDetector{
 				initSegments: segmentEvents,
 			}, buildMockQueryNode)
@@ -1103,7 +1108,7 @@ func TestShardCluster_Search(t *testing.T) {
 	})
 
 	t.Run("search wrong channel", func(t *testing.T) {
-		sc := NewShardCluster(collectionID, replicaID, vchannelName,
+		sc := NewShardCluster(collectionID, replicaID, vchannelName, version,
 			&mockNodeDetector{}, &mockSegmentDetector{}, buildMockQueryNode)
 
 		defer sc.Close()
@@ -1144,7 +1149,7 @@ func TestShardCluster_Search(t *testing.T) {
 			},
 		}
 
-		sc := NewShardCluster(collectionID, replicaID, vchannelName,
+		sc := NewShardCluster(collectionID, replicaID, vchannelName, version,
 			&mockNodeDetector{
 				initNodes: nodeEvents,
 			}, &mockSegmentDetector{
@@ -1195,7 +1200,7 @@ func TestShardCluster_Search(t *testing.T) {
 			},
 		}
 
-		sc := NewShardCluster(collectionID, replicaID, vchannelName,
+		sc := NewShardCluster(collectionID, replicaID, vchannelName, version,
 			&mockNodeDetector{
 				initNodes: nodeEvents,
 			}, &mockSegmentDetector{
@@ -1245,7 +1250,7 @@ func TestShardCluster_Search(t *testing.T) {
 			},
 		}
 
-		sc := NewShardCluster(collectionID, replicaID, vchannelName,
+		sc := NewShardCluster(collectionID, replicaID, vchannelName, version,
 			&mockNodeDetector{
 				initNodes: nodeEvents,
 			}, &mockSegmentDetector{
@@ -1297,7 +1302,7 @@ func TestShardCluster_Search(t *testing.T) {
 			},
 		}
 
-		sc := NewShardCluster(collectionID, replicaID, vchannelName,
+		sc := NewShardCluster(collectionID, replicaID, vchannelName, version,
 			&mockNodeDetector{
 				initNodes: nodeEvents,
 			}, &mockSegmentDetector{
@@ -1330,6 +1335,7 @@ func TestShardCluster_Query(t *testing.T) {
 	collectionID := int64(1)
 	vchannelName := "dml_1_1_v0"
 	replicaID := int64(0)
+	version := int64(1)
 	ctx := context.Background()
 
 	t.Run("query unavailable cluster", func(t *testing.T) {
@@ -1366,7 +1372,7 @@ func TestShardCluster_Query(t *testing.T) {
 			},
 		}
 
-		sc := NewShardCluster(collectionID, replicaID, vchannelName,
+		sc := NewShardCluster(collectionID, replicaID, vchannelName, version,
 			&mockNodeDetector{initNodes: nodeEvents}, &mockSegmentDetector{
 				initSegments: segmentEvents,
 			}, buildMockQueryNode)
@@ -1384,7 +1390,7 @@ func TestShardCluster_Query(t *testing.T) {
 		assert.Error(t, err)
 	})
 	t.Run("query wrong channel", func(t *testing.T) {
-		sc := NewShardCluster(collectionID, replicaID, vchannelName,
+		sc := NewShardCluster(collectionID, replicaID, vchannelName, version,
 			&mockNodeDetector{}, &mockSegmentDetector{}, buildMockQueryNode)
 
 		defer sc.Close()
@@ -1426,7 +1432,7 @@ func TestShardCluster_Query(t *testing.T) {
 			},
 		}
 
-		sc := NewShardCluster(collectionID, replicaID, vchannelName,
+		sc := NewShardCluster(collectionID, replicaID, vchannelName, version,
 			&mockNodeDetector{
 				initNodes: nodeEvents,
 			}, &mockSegmentDetector{
@@ -1476,7 +1482,7 @@ func TestShardCluster_Query(t *testing.T) {
 			},
 		}
 
-		sc := NewShardCluster(collectionID, replicaID, vchannelName,
+		sc := NewShardCluster(collectionID, replicaID, vchannelName, version,
 			&mockNodeDetector{
 				initNodes: nodeEvents,
 			}, &mockSegmentDetector{
@@ -1526,7 +1532,7 @@ func TestShardCluster_Query(t *testing.T) {
 			},
 		}
 
-		sc := NewShardCluster(collectionID, replicaID, vchannelName,
+		sc := NewShardCluster(collectionID, replicaID, vchannelName, version,
 			&mockNodeDetector{
 				initNodes: nodeEvents,
 			}, &mockSegmentDetector{
@@ -1578,7 +1584,7 @@ func TestShardCluster_Query(t *testing.T) {
 			},
 		}
 
-		sc := NewShardCluster(collectionID, replicaID, vchannelName,
+		sc := NewShardCluster(collectionID, replicaID, vchannelName, version,
 			&mockNodeDetector{
 				initNodes: nodeEvents,
 			}, &mockSegmentDetector{
@@ -1613,6 +1619,7 @@ func TestShardCluster_GetStatistics(t *testing.T) {
 	collectionID := int64(1)
 	vchannelName := "dml_1_1_v0"
 	replicaID := int64(0)
+	version := int64(1)
 	ctx := context.Background()
 
 	t.Run("get statistics on unavailable cluster", func(t *testing.T) {
@@ -1649,7 +1656,7 @@ func TestShardCluster_GetStatistics(t *testing.T) {
 			},
 		}
 
-		sc := NewShardCluster(collectionID, replicaID, vchannelName,
+		sc := NewShardCluster(collectionID, replicaID, vchannelName, version,
 			&mockNodeDetector{initNodes: nodeEvents}, &mockSegmentDetector{
 				initSegments: segmentEvents,
 			}, buildMockQueryNode)
@@ -1664,7 +1671,7 @@ func TestShardCluster_GetStatistics(t *testing.T) {
 	})
 
 	t.Run("get statistics on wrong channel", func(t *testing.T) {
-		sc := NewShardCluster(collectionID, replicaID, vchannelName,
+		sc := NewShardCluster(collectionID, replicaID, vchannelName, version,
 			&mockNodeDetector{}, &mockSegmentDetector{}, buildMockQueryNode)
 
 		defer sc.Close()
@@ -1705,7 +1712,7 @@ func TestShardCluster_GetStatistics(t *testing.T) {
 			},
 		}
 
-		sc := NewShardCluster(collectionID, replicaID, vchannelName,
+		sc := NewShardCluster(collectionID, replicaID, vchannelName, version,
 			&mockNodeDetector{
 				initNodes: nodeEvents,
 			}, &mockSegmentDetector{
@@ -1756,7 +1763,7 @@ func TestShardCluster_GetStatistics(t *testing.T) {
 			},
 		}
 
-		sc := NewShardCluster(collectionID, replicaID, vchannelName,
+		sc := NewShardCluster(collectionID, replicaID, vchannelName, version,
 			&mockNodeDetector{
 				initNodes: nodeEvents,
 			}, &mockSegmentDetector{
@@ -1806,7 +1813,7 @@ func TestShardCluster_GetStatistics(t *testing.T) {
 			},
 		}
 
-		sc := NewShardCluster(collectionID, replicaID, vchannelName,
+		sc := NewShardCluster(collectionID, replicaID, vchannelName, version,
 			&mockNodeDetector{
 				initNodes: nodeEvents,
 			}, &mockSegmentDetector{
@@ -1859,7 +1866,7 @@ func TestShardCluster_GetStatistics(t *testing.T) {
 			},
 		}
 
-		sc := NewShardCluster(collectionID, replicaID, vchannelName,
+		sc := NewShardCluster(collectionID, replicaID, vchannelName, version,
 			&mockNodeDetector{
 				initNodes: nodeEvents,
 			}, &mockSegmentDetector{
@@ -1891,9 +1898,10 @@ func TestShardCluster_Version(t *testing.T) {
 	collectionID := int64(1)
 	vchannelName := "dml_1_1_v0"
 	replicaID := int64(0)
+	version := int64(1)
 	//	ctx := context.Background()
 	t.Run("alloc with non-serviceable", func(t *testing.T) {
-		sc := NewShardCluster(collectionID, replicaID, vchannelName,
+		sc := NewShardCluster(collectionID, replicaID, vchannelName, version,
 			&mockNodeDetector{}, &mockSegmentDetector{}, buildMockQueryNode)
 		defer sc.Close()
 
@@ -1925,7 +1933,7 @@ func TestShardCluster_Version(t *testing.T) {
 				state:     segmentStateLoaded,
 			},
 		}
-		sc := NewShardCluster(collectionID, replicaID, vchannelName,
+		sc := NewShardCluster(collectionID, replicaID, vchannelName, version,
 			&mockNodeDetector{
 				initNodes: nodeEvents,
 			}, &mockSegmentDetector{
@@ -1973,7 +1981,7 @@ func TestShardCluster_Version(t *testing.T) {
 			},
 		}
 		evtCh := make(chan segmentEvent, 10)
-		sc := NewShardCluster(collectionID, replicaID, vchannelName,
+		sc := NewShardCluster(collectionID, replicaID, vchannelName, version,
 			&mockNodeDetector{
 				initNodes: nodeEvents,
 			}, &mockSegmentDetector{
@@ -2027,16 +2035,18 @@ type ShardClusterSuite struct {
 	otherVchannelName string
 
 	replicaID int64
+	version   int64
 
 	sc *ShardCluster
 }
 
 func (suite *ShardClusterSuite) SetupSuite() {
-	suite.collectionID = int64(1)
-	suite.otherCollectionID = int64(2)
+	suite.collectionID = 1
+	suite.otherCollectionID = 2
 	suite.vchannelName = "dml_1_1_v0"
 	suite.otherVchannelName = "dml_1_2_v0"
-	suite.replicaID = int64(0)
+	suite.replicaID = 0
+	suite.version = 1
 }
 
 func (suite *ShardClusterSuite) SetupTest() {
@@ -2064,7 +2074,7 @@ func (suite *ShardClusterSuite) SetupTest() {
 			state:     segmentStateLoaded,
 		},
 	}
-	suite.sc = NewShardCluster(suite.collectionID, suite.replicaID, suite.vchannelName,
+	suite.sc = NewShardCluster(suite.collectionID, suite.replicaID, suite.vchannelName, suite.version,
 		&mockNodeDetector{
 			initNodes: nodeEvents,
 		}, &mockSegmentDetector{

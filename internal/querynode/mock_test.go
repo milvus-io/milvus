@@ -75,6 +75,7 @@ const (
 	defaultDMLChannel   = "query-node-unittest-DML-0"
 	defaultDeltaChannel = "query-node-unittest-delta-channel-0"
 	defaultSubName      = "query-node-unittest-sub-name-0"
+	defaultVersion      = 1
 
 	defaultLocalStorage = "/tmp/milvus_test/querynode"
 
