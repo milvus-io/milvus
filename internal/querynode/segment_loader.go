@@ -71,7 +71,8 @@ type segmentLoader struct {
 	cm     storage.ChunkManager // minio cm
 	etcdKV *etcdkv.EtcdKV
 
-	ioPool *concurrency.Pool
+	ioPool  *concurrency.Pool
+	cpuPool *concurrency.Pool
 	// cgoPool for all cgo invocation
 	cgoPool *concurrency.Pool
 
@@ -406,6 +407,7 @@ func (loader *segmentLoader) loadSealedField(ctx context.Context, segment *Segme
 		Data: make(map[int64]storage.FieldData),
 	}
 	_, _, _, err = iCodec.DeserializeInto(blobs, int(loadInfo.GetNumOfRows()), &insertData)
+
 	if err != nil {
 		log.Warn("failed to load sealed field", zap.Int64("SegmentId", segment.segmentID), zap.Error(err))
 		return err
@@ -458,6 +460,7 @@ func (loader *segmentLoader) loadIndexedFieldData(ctx context.Context, segment *
 }
 
 func (loader *segmentLoader) loadFieldIndexData(ctx context.Context, segment *Segment, indexInfo *querypb.FieldIndexInfo) error {
+	log := log.With(zap.Int64("segment", segment.ID()))
 	indexBuffer := make([][]byte, 0, len(indexInfo.IndexFilePaths))
 	filteredPaths := make([]string, 0, len(indexInfo.IndexFilePaths))
 	futures := make([]*concurrency.Future, 0, len(indexInfo.IndexFilePaths))
@@ -473,6 +476,7 @@ func (loader *segmentLoader) loadFieldIndexData(ctx context.Context, segment *Se
 				return err
 			}
 
+			// indexParams is small, skip cpu pooling
 			_, indexParams, _, _, err := indexCodec.Deserialize([]*storage.Blob{{Key: storage.IndexParamsKey, Value: indexParamsBlob}})
 			if err != nil {
 				return err
@@ -509,11 +513,30 @@ func (loader *segmentLoader) loadFieldIndexData(ctx context.Context, segment *Se
 			log.Info("load index file", zap.String("path", indexPath))
 			data, err := loader.cm.Read(ctx, indexPath)
 			if err != nil {
-				log.Warn("failed to load index file", zap.String("path", indexPath), zap.Error(err))
+				log.Warn("failed to load index file",
+					zap.String("path", indexPath),
+					zap.Error(err),
+				)
 				return nil, err
 			}
-			blobs, _, _, _, err := indexCodec.Deserialize([]*storage.Blob{{Key: path.Base(indexPath), Value: data}})
-			return blobs, err
+			result, err := loader.cpuPool.Submit(func() (interface{}, error) {
+				blobs, _, _, _, err := indexCodec.Deserialize([]*storage.Blob{{Key: path.Base(indexPath), Value: data}})
+				if err != nil {
+					log.Warn("failed to decode index file",
+						zap.String("file", indexPath),
+						zap.Error(err),
+					)
+					return nil, err
+				}
+
+				// it's certain blobs has only one item
+				result := blobs[0].GetValue()
+				// force invoke gc
+				debug.FreeOSMemory()
+				return result, nil
+			}).Await()
+
+			return result, err
 		})
 
 		futures = append(futures, indexFuture)
@@ -524,9 +547,9 @@ func (loader *segmentLoader) loadFieldIndexData(ctx context.Context, segment *Se
 		return err
 	}
 
-	for _, index := range futures {
-		blobs := index.Value().([]*storage.Blob)
-		indexBuffer = append(indexBuffer, blobs[0].Value)
+	for _, future := range futures {
+		bs := future.Value().([]byte)
+		indexBuffer = append(indexBuffer, bs)
 	}
 
 	return segment.segmentLoadIndexData(indexBuffer, indexInfo, fieldType)
@@ -965,8 +988,16 @@ func newSegmentLoader(
 			zap.Error(err))
 		panic(err)
 	}
+	cpuPool, err := concurrency.NewPool(cpuNum, ants.WithPreAlloc(true))
+	if err != nil {
+		log.Error("failed to create cpu goroutine pool for segment loader", zap.Error(err))
+		panic(err)
+	}
 
-	log.Info("SegmentLoader created", zap.Int("io-pool-size", ioPoolSize))
+	log.Info("SegmentLoader created",
+		zap.Int("ioPoolSize", ioPoolSize),
+		zap.Int("cpuPoolSize", cpuNum),
+	)
 
 	loader := &segmentLoader{
 		metaReplica: metaReplica,
@@ -976,6 +1007,7 @@ func newSegmentLoader(
 
 		// init them later
 		ioPool:  ioPool,
+		cpuPool: cpuPool,
 		cgoPool: pool,
 
 		factory: factory,
