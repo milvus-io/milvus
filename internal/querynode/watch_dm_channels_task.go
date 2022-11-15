@@ -240,8 +240,8 @@ func (w *watchDmChannelsTask) initFlowGraph(ctx context.Context, collectionID Un
 	// unFlushed segments before check point should be filtered out.
 	unFlushedCheckPointInfos := make([]*datapb.SegmentInfo, 0)
 	for _, info := range w.req.Infos {
-		for _, ufsID := range info.GetUnflushedSegmentIds() {
-			unFlushedCheckPointInfos = append(unFlushedCheckPointInfos, w.req.SegmentInfos[ufsID])
+		for _, segmentID := range info.GetUnflushedSegmentIds() {
+			unFlushedCheckPointInfos = append(unFlushedCheckPointInfos, w.req.SegmentInfos[segmentID])
 		}
 	}
 	w.node.metaReplica.addExcludedSegments(collectionID, unFlushedCheckPointInfos)
@@ -260,13 +260,7 @@ func (w *watchDmChannelsTask) initFlowGraph(ctx context.Context, collectionID Un
 	for _, info := range w.req.Infos {
 		for _, flushedSegmentID := range info.GetFlushedSegmentIds() {
 			flushedSegment := w.req.SegmentInfos[flushedSegmentID]
-			for _, position := range channel2SeekPosition {
-				if flushedSegment.DmlPosition != nil &&
-					flushedSegment.DmlPosition.ChannelName == position.ChannelName &&
-					flushedSegment.DmlPosition.Timestamp > position.Timestamp {
-					flushedCheckPointInfos = append(flushedCheckPointInfos, flushedSegment)
-				}
-			}
+			flushedCheckPointInfos = append(flushedCheckPointInfos, flushedSegment)
 		}
 	}
 	w.node.metaReplica.addExcludedSegments(collectionID, flushedCheckPointInfos)
