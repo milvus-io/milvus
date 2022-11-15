@@ -158,9 +158,9 @@ func (ob *CollectionObserver) observeCollectionLoadStatus(collection *meta.Colle
 	channelTargets := ob.targetMgr.GetDmChannelsByCollection(collection.GetCollectionID(), meta.NextTarget)
 	targetNum := len(segmentTargets) + len(channelTargets)
 	log.Info("collection targets",
-		zap.Int("segment-target-num", len(segmentTargets)),
-		zap.Int("channel-target-num", len(channelTargets)),
-		zap.Int("total-target-num", targetNum))
+		zap.Int("segmentTargetNum", len(segmentTargets)),
+		zap.Int("channelTargetNum", len(channelTargets)),
+		zap.Int("totalTargetNum", targetNum))
 
 	updated := collection.Clone()
 	loadedCount := 0
@@ -187,8 +187,8 @@ func (ob *CollectionObserver) observeCollectionLoadStatus(collection *meta.Colle
 		}
 		if loadedCount > 0 {
 			log.Info("collection load progress",
-				zap.Int("sub-channel-count", subChannelCount),
-				zap.Int("load-segment-count", loadedCount-subChannelCount),
+				zap.Int("subChannelCount", subChannelCount),
+				zap.Int("loadSegmentCount", loadedCount-subChannelCount),
 			)
 		}
 
@@ -253,8 +253,8 @@ func (ob *CollectionObserver) observePartitionLoadStatus(partition *meta.Partiti
 		}
 		if loadedCount > 0 {
 			log.Info("partition load progress",
-				zap.Int("sub-channel-count", subChannelCount),
-				zap.Int("load-segment-count", loadedCount-subChannelCount))
+				zap.Int("subChannelCount", subChannelCount),
+				zap.Int("loadSegmentCount", loadedCount-subChannelCount))
 		}
 		updated.LoadPercentage = int32(loadedCount * 100 / targetNum)
 
