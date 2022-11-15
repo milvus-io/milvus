@@ -193,8 +193,10 @@ message WatchDmChannelsRequest {
   LoadMetaInfo load_meta = 8;
   int64 replicaID = 9;
   map<int64, data.SegmentInfo> segment_infos = 10;
+  // Deprecated
   // for node down load balance, need to remove offline node in time after every watchDmChannel finish.
   int64 offlineNodeID = 11;
+  int64 version = 12;
 }
 
 message UnsubDmChannelRequest {

@@ -157,7 +157,7 @@ type ShardCluster struct {
 }
 
 // NewShardCluster create a ShardCluster with provided information.
-func NewShardCluster(collectionID int64, replicaID int64, vchannelName string,
+func NewShardCluster(collectionID int64, replicaID int64, vchannelName string, version int64,
 	nodeDetector ShardNodeDetector, segmentDetector ShardSegmentDetector, nodeBuilder ShardNodeBuilder) *ShardCluster {
 	sc := &ShardCluster{
 		state: atomic.NewInt32(int32(unavailable)),
@@ -165,6 +165,7 @@ func NewShardCluster(collectionID int64, replicaID int64, vchannelName string,
 		collectionID: collectionID,
 		replicaID:    replicaID,
 		vchannelName: vchannelName,
+		version:      version,
 
 		segmentDetector: segmentDetector,
 		nodeDetector:    nodeDetector,
