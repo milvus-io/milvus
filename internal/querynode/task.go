@@ -107,6 +107,7 @@ func (r *releaseCollectionTask) Execute(ctx context.Context) error {
 		return err
 	}
 	// set release time
+	r.node.ShardClusterService.releaseCollection(r.req.CollectionID)
 	log.Info("set release time", zap.Any("collectionID", r.req.CollectionID))
 	collection.setReleaseTime(r.req.Base.Timestamp, true)
 
@@ -131,7 +132,6 @@ func (r *releaseCollectionTask) Execute(ctx context.Context) error {
 
 	r.node.metaReplica.removeExcludedSegments(r.req.CollectionID)
 	r.node.queryShardService.releaseCollection(r.req.CollectionID)
-	r.node.ShardClusterService.releaseCollection(r.req.CollectionID)
 	err = r.node.metaReplica.removeCollection(r.req.CollectionID)
 	if err != nil {
 		return err

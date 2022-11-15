@@ -191,13 +191,15 @@ func (sc *ShardCluster) Close() {
 	log.Info("Close shard cluster")
 	sc.closeOnce.Do(func() {
 		sc.updateShardClusterState(unavailable)
+		sc.mutVersion.Lock()
+		defer sc.mutVersion.Unlock()
+		<-sc.currentVersion.Expire()
 		if sc.nodeDetector != nil {
 			sc.nodeDetector.Close()
 		}
 		if sc.segmentDetector != nil {
 			sc.segmentDetector.Close()
 		}
-
 		close(sc.closeCh)
 	})
 }
@@ -591,13 +593,13 @@ func (sc *ShardCluster) getSegment(segmentID int64) (shardSegmentInfo, bool) {
 // segmentAllocations returns node to segments mappings.
 // calling this function also increases the reference count of related segments.
 func (sc *ShardCluster) segmentAllocations(partitionIDs []int64) (map[int64][]int64, int64) {
-	// check cluster serviceable
+	sc.mutVersion.RLock()
+	defer sc.mutVersion.RUnlock()
+	// check cluster serviceable, in case of release happened during the RLock wait period
 	if !sc.serviceable() {
 		log.Warn("request segment allocations when cluster is not serviceable", zap.Int64("collectionID", sc.collectionID), zap.Int64("replicaID", sc.replicaID), zap.String("vchannelName", sc.vchannelName))
 		return map[int64][]int64{}, 0
 	}
-	sc.mutVersion.RLock()
-	defer sc.mutVersion.RUnlock()
 	// return allocation from current version and version id
 	return sc.currentVersion.GetAllocation(partitionIDs), sc.currentVersion.versionID
 }

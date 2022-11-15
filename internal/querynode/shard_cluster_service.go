@@ -127,13 +127,17 @@ func (s *ShardClusterService) close() error {
 
 // releaseCollection removes all shardCluster matching specified collectionID
 func (s *ShardClusterService) releaseCollection(collectionID int64) {
+	var wg sync.WaitGroup
 	s.clusters.Range(func(k, v interface{}) bool {
 		cs := v.(*ShardCluster)
 		if cs.collectionID == collectionID {
-			s.releaseShardCluster(k.(string))
+			wg.Add(1)
+			// may take some time for one share to purge search requests
+			go s.releaseShardCluster(k.(string))
 		}
 		return true
 	})
+	wg.Wait()
 	log.Info("successfully release collection", zap.Int64("collectionID", collectionID))
 }
 
