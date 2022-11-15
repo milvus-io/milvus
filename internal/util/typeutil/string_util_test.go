@@ -59,3 +59,19 @@ func TestAfterN(t *testing.T) {
 	strs := AfterN("by-dev/meta/root-coord/credential/grantee-privileges/public/Global/*", "root-coord/credential/grantee-privileges/", "/")
 	assert.Len(t, strs, 3)
 }
+
+func TestStrByteConversion(t *testing.T) {
+	test := "test"
+	testByte := UnsafeStr2bytes(test)
+	assert.Equal(t, len(testByte), 4)
+	testResult := UnsafeBytes2str(testByte)
+	assert.Equal(t, testResult, test)
+
+	testByte = []byte{1, 2, 3, 4, 5}
+	testStr := UnsafeBytes2str(testByte)
+	assert.Equal(t, len(testStr), 5)
+	testByteResult := UnsafeStr2bytes(testStr)
+	for i, b := range testByteResult {
+		assert.Equal(t, testByte[i], b)
+	}
+}
