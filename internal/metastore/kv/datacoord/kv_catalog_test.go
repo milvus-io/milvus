@@ -335,6 +335,54 @@ func Test_AlterSegments(t *testing.T) {
 		assert.Equal(t, 4, len(savedKvs))
 		verifySavedKvsForSegment(t, savedKvs)
 	})
+
+	t.Run("save large ops successfully", func(t *testing.T) {
+		txn := &MockedTxnKV{}
+		savedKvs := make(map[string]string)
+		opGroupCount := 0
+		txn.multiSave = func(kvs map[string]string) error {
+			var ks []string
+			for k := range kvs {
+				ks = append(ks, k)
+			}
+			maps.Copy(savedKvs, kvs)
+			opGroupCount++
+			return nil
+		}
+
+		catalog := &Catalog{txn, "a"}
+		err := catalog.AlterSegments(context.TODO(), []*datapb.SegmentInfo{})
+		assert.Nil(t, err)
+
+		var binlogXL []*datapb.FieldBinlog
+		for i := 0; i < 255; i++ {
+			binlogXL = append(binlogXL, &datapb.FieldBinlog{
+				FieldID: int64(i),
+				Binlogs: []*datapb.Binlog{
+					{
+						EntriesNum: 5,
+						LogPath:    binlogPath,
+					},
+				},
+			})
+		}
+
+		segmentXL := &datapb.SegmentInfo{
+			ID:           segmentID,
+			CollectionID: collectionID,
+			PartitionID:  partitionID,
+			NumOfRows:    100,
+			State:        commonpb.SegmentState_Flushed,
+			Binlogs:      binlogXL,
+			Deltalogs:    deltalogs,
+			Statslogs:    statslogs,
+		}
+
+		err = catalog.AlterSegments(context.TODO(), []*datapb.SegmentInfo{segmentXL})
+		assert.Nil(t, err)
+		assert.Equal(t, 255+3, len(savedKvs))
+		assert.Equal(t, 5, opGroupCount)
+	})
 }
 
 func Test_AlterSegmentsAndAddNewSegment(t *testing.T) {
