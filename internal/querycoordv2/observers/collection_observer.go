@@ -88,6 +88,7 @@ func (ob *CollectionObserver) Observe() {
 }
 
 func (ob *CollectionObserver) observeTimeout() {
+	// TODO fubang concurrent problem
 	collections := ob.meta.CollectionManager.GetAllCollections()
 	for _, collection := range collections {
 		if collection.GetStatus() != querypb.LoadStatus_Loading ||

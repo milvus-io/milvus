@@ -193,6 +193,7 @@ func (t *compactionTask) mergeDeltalogs(dBlobs map[UniqueID][]*Blob, timetravelT
 
 // nano2Milli transfers nanoseconds to milliseconds in unit
 func nano2Milli(nano time.Duration) float64 {
+	// TODO nano.Milliseconds()
 	return float64(nano) / float64(time.Millisecond)
 }
 

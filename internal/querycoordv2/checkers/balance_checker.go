@@ -45,7 +45,13 @@ func (b *BalanceChecker) Check(ctx context.Context) []task.Task {
 	segmentPlans, channelPlans := b.Balance.Balance()
 
 	tasks := balance.CreateSegmentTasksFromPlans(ctx, b.ID(), Params.QueryCoordCfg.SegmentTaskTimeout, segmentPlans)
-	task.SetPriority(task.TaskPriorityLow, tasks...)
+	task.SetPriorityWithFunc(func(t task.Task) task.Priority {
+		if t.Priority() == task.TaskPriorityHigh {
+			return task.TaskPriorityHigh
+		} else {
+			return task.TaskPriorityLow
+		}
+	}, tasks...)
 	ret = append(ret, tasks...)
 
 	tasks = balance.CreateChannelTasksFromPlans(ctx, b.ID(), Params.QueryCoordCfg.ChannelTaskTimeout, channelPlans)
