@@ -513,26 +513,27 @@ func (p *ImportWrapper) parseRowBasedJSON(filePath string, onlyValidate bool) er
 	// parse file
 	reader := bufio.NewReader(file)
 	parser := NewJSONParser(p.ctx, p.collectionSchema)
-	var consumer *JSONRowConsumer
-	if !onlyValidate {
-		flushFunc := func(fields map[storage.FieldID]storage.FieldData, shardID int) error {
+
+	// if only validate, we input a empty flushFunc so that the consumer do nothing but only validation.
+	var flushFunc ImportFlushFunc
+	if onlyValidate {
+		flushFunc = func(fields map[storage.FieldID]storage.FieldData, shardID int) error {
+			return nil
+		}
+	} else {
+		flushFunc = func(fields map[storage.FieldID]storage.FieldData, shardID int) error {
 			var filePaths = []string{filePath}
 			printFieldsDataInfo(fields, "import wrapper: prepare to flush binlogs", filePaths)
 			return p.flushFunc(fields, shardID)
 		}
-
-		consumer, err = NewJSONRowConsumer(p.collectionSchema, p.rowIDAllocator, p.shardNum, SingleBlockSize, flushFunc)
-		if err != nil {
-			return err
-		}
 	}
 
-	validator, err := NewJSONRowValidator(p.collectionSchema, consumer)
+	consumer, err := NewJSONRowConsumer(p.collectionSchema, p.rowIDAllocator, p.shardNum, SingleBlockSize, flushFunc)
 	if err != nil {
 		return err
 	}
 
-	err = parser.ParseRows(reader, validator)
+	err = parser.ParseRows(reader, consumer)
 	if err != nil {
 		return err
 	}
