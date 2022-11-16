@@ -451,7 +451,7 @@ quotaAndLimits:
     # specific conditions, such as memory of nodes to water marker), `true` means always reject all dml requests.
     forceDeny: false
     ttProtection:
-      enabled: true
+      enabled: false
       # maxTimeTickDelay indicates the backpressure for DML Operations.
       # DML rates would be reduced according to the ratio of time tick delay to maxTimeTickDelay,
       # if time tick delay is greater than maxTimeTickDelay, all DML requests would be rejected.
