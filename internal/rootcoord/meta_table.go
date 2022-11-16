@@ -959,6 +959,10 @@ func (mt *MetaTable) OperatePrivilege(tenant string, entity *milvuspb.GrantEntit
 // The resource entity and the resource name are optional, and the two params should be not empty together when you select some grants about the resource kind.
 func (mt *MetaTable) SelectGrant(tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error) {
 	var entities []*milvuspb.GrantEntity
+	if entity == nil {
+		return entities, fmt.Errorf("the grant entity is nil")
+	}
+
 	if entity.Role == nil || funcutil.IsEmptyString(entity.Role.Name) {
 		return entities, fmt.Errorf("the role entity in the grant entity is invalid")
 	}
