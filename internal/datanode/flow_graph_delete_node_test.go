@@ -178,7 +178,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		tss = []uint64{1, 1, 1, 1, 1}
 	)
 	cm := storage.NewLocalChunkManager(storage.RootPath(deleteNodeTestDir))
-	defer cm.RemoveWithPrefix(ctx, "")
+	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
 	t.Run("Test get segment by varChar primary keys", func(te *testing.T) {
 		channel := genMockChannel(segIDs, varCharPks, chanName)
@@ -467,7 +467,7 @@ func TestFlowGraphDeleteNode_showDelBuf(t *testing.T) {
 	defer cancel()
 
 	cm := storage.NewLocalChunkManager(storage.RootPath(deleteNodeTestDir))
-	defer cm.RemoveWithPrefix(ctx, "")
+	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
 	fm := NewRendezvousFlushManager(NewAllocatorFactory(), cm, nil, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
 
@@ -511,7 +511,7 @@ func TestFlowGraphDeleteNode_updateCompactedSegments(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	cm := storage.NewLocalChunkManager(storage.RootPath(deleteNodeTestDir))
-	defer cm.RemoveWithPrefix(ctx, "")
+	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
 	fm := NewRendezvousFlushManager(NewAllocatorFactory(), cm, nil, func(*segmentFlushPack) {}, emptyFlushAndDropFunc)
 
