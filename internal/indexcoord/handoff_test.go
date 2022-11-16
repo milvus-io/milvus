@@ -177,7 +177,7 @@ func Test_newHandoff(t *testing.T) {
 func Test_process(t *testing.T) {
 	t.Run("not found segment", func(t *testing.T) {
 		hd := &handoff{segments: map[UniqueID]*datapb.SegmentInfo{}}
-		hd.process(segID, true)
+		hd.process(segID)
 		assert.Equal(t, 0, hd.Len())
 	})
 
@@ -197,7 +197,7 @@ func Test_process(t *testing.T) {
 			},
 		}
 
-		hd.process(segID, true)
+		hd.process(segID)
 		assert.Equal(t, 0, hd.Len())
 	})
 }
@@ -240,7 +240,7 @@ func Test_handoff_error(t *testing.T) {
 				},
 			},
 		}
-		hd.process(segID, true)
+		hd.process(segID)
 		assert.Equal(t, 1, hd.Len())
 
 		hd.ic.dataCoordClient = &DataCoordMock{
@@ -248,7 +248,7 @@ func Test_handoff_error(t *testing.T) {
 				return nil, errSegmentNotFound(segID)
 			},
 		}
-		hd.process(segID, true)
+		hd.process(segID)
 		assert.Equal(t, 0, hd.Len())
 	})
 
@@ -305,7 +305,7 @@ func Test_handoff_error(t *testing.T) {
 			},
 		}
 
-		hd.process(segID, true)
+		hd.process(segID)
 		assert.Equal(t, 1, hd.Len())
 	})
 
@@ -343,7 +343,7 @@ func Test_handoff_error(t *testing.T) {
 			},
 		}
 
-		hd.process(segID, true)
+		hd.process(segID)
 		assert.Equal(t, 0, hd.Len())
 	})
 
@@ -386,7 +386,7 @@ func Test_handoff_error(t *testing.T) {
 			},
 		}
 
-		hd.process(segID, true)
+		hd.process(segID)
 		assert.Equal(t, 1, hd.Len())
 	})
 
@@ -407,7 +407,7 @@ func Test_handoff_error(t *testing.T) {
 			},
 		}
 
-		hd.process(segID, true)
+		hd.process(segID)
 		assert.Equal(t, 1, hd.Len())
 	})
 
@@ -450,7 +450,7 @@ func Test_handoff_error(t *testing.T) {
 			},
 		}
 
-		hd.process(segID, true)
+		hd.process(segID)
 		assert.Equal(t, 1, hd.Len())
 	})
 }

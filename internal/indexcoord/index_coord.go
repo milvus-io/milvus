@@ -1172,7 +1172,6 @@ func (i *IndexCoord) tryReleaseSegmentReferLock(ctx context.Context, buildID Uni
 // assignTask sends the index task to the IndexNode, it has a timeout interval, if the IndexNode doesn't respond within
 // the interval, it is considered that the task sending failed.
 func (i *IndexCoord) assignTask(builderClient types.IndexNode, req *indexpb.CreateJobRequest) error {
-	log.Info("IndexCoord assignTask", zap.Int64("buildID", req.GetBuildID()))
 	ctx, cancel := context.WithTimeout(i.loopCtx, i.reqTimeoutInterval)
 	defer cancel()
 	resp, err := builderClient.CreateJob(ctx, req)
@@ -1185,7 +1184,6 @@ func (i *IndexCoord) assignTask(builderClient types.IndexNode, req *indexpb.Crea
 		log.Error("IndexCoord assignmentTasksLoop builderClient.CreateIndex failed", zap.String("Reason", resp.Reason))
 		return errors.New(resp.Reason)
 	}
-	log.Info("IndexCoord assignTask successfully", zap.Int64("buildID", req.GetBuildID()))
 	return nil
 }
 
@@ -1296,7 +1294,6 @@ func (i *IndexCoord) watchFlushedSegmentLoop() {
 }
 
 func (i *IndexCoord) pullSegmentInfo(ctx context.Context, segmentID UniqueID) (*datapb.SegmentInfo, error) {
-	log.Debug("pullSegmentInfo", zap.Int64("segID", segmentID))
 	ctx1, cancel := context.WithTimeout(ctx, reqTimeoutInterval)
 	defer cancel()
 	resp, err := i.dataCoordClient.GetSegmentInfo(ctx1, &datapb.GetSegmentInfoRequest{
@@ -1304,11 +1301,11 @@ func (i *IndexCoord) pullSegmentInfo(ctx context.Context, segmentID UniqueID) (*
 		IncludeUnHealthy: false,
 	})
 	if err != nil {
-		log.Error("IndexCoord get segment info fail", zap.Int64("segID", segmentID), zap.Error(err))
+		log.Warn("IndexCoord get segment info fail", zap.Int64("segID", segmentID), zap.Error(err))
 		return nil, err
 	}
 	if resp.Status.GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Error("IndexCoord get segment info fail", zap.Int64("segID", segmentID),
+		log.Warn("IndexCoord get segment info fail", zap.Int64("segID", segmentID),
 			zap.String("fail reason", resp.Status.GetReason()))
 		if resp.Status.GetReason() == msgSegmentNotFound(segmentID) {
 			return nil, errSegmentNotFound(segmentID)
@@ -1322,6 +1319,6 @@ func (i *IndexCoord) pullSegmentInfo(ctx context.Context, segmentID UniqueID) (*
 		}
 	}
 	errMsg := msgSegmentNotFound(segmentID)
-	log.Error(errMsg)
+	log.Warn(errMsg)
 	return nil, errSegmentNotFound(segmentID)
 }
