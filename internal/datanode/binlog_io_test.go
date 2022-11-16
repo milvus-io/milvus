@@ -40,7 +40,7 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 	defer cancel()
 	alloc := NewAllocatorFactory()
 	cm := storage.NewLocalChunkManager(storage.RootPath(binlogTestDir))
-	defer cm.RemoveWithPrefix(ctx, "")
+	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
 	b := &binlogIO{cm, alloc}
 	t.Run("Test upload", func(t *testing.T) {
@@ -245,7 +245,7 @@ func prepareBlob(cm storage.ChunkManager, key string) ([]byte, string, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	k := path.Join("test_prepare_blob", key)
+	k := path.Join(cm.RootPath(), "test_prepare_blob", key)
 	blob := []byte{1, 2, 3, 255, 188}
 
 	err := cm.Write(ctx, k, blob[:])
@@ -260,7 +260,7 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 	defer cancel()
 	alloc := NewAllocatorFactory()
 	cm := storage.NewLocalChunkManager(storage.RootPath(binlogTestDir))
-	defer cm.RemoveWithPrefix(ctx, "")
+	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 	b := &binlogIO{
 		cm,
 		alloc,

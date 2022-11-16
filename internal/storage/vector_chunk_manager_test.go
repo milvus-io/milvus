@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -139,7 +140,7 @@ func buildVectorChunkManager(localPath string, localCacheEnable bool) (*VectorCh
 }
 
 var Params paramtable.BaseTable
-var localPath = "/tmp/milvus/test_data/"
+var localPath = "/tmp/milvus_test/chunkmanager/"
 
 func TestMain(m *testing.M) {
 	Params.Init()
@@ -180,7 +181,7 @@ func TestVectorChunkManager_GetPath(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, vcm)
 
-		key := "1"
+		key := path.Join(localPath, "1")
 		err = vcm.Write(ctx, key, []byte{1})
 		assert.Nil(t, err)
 		pathGet, err := vcm.Path(ctx, key)
@@ -209,7 +210,7 @@ func TestVectorChunkManager_GetSize(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, vcm)
 
-		key := "1"
+		key := path.Join(localPath, "1")
 		err = vcm.Write(ctx, key, []byte{1})
 		assert.Nil(t, err)
 		sizeGet, err := vcm.Size(ctx, key)
@@ -239,25 +240,26 @@ func TestVectorChunkManager_Write(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, vcm)
 
-		key := "1"
-		err = vcm.Write(ctx, key, []byte{1})
+		key1 := path.Join(localPath, "key_1")
+		key2 := path.Join(localPath, "key_2")
+		err = vcm.Write(ctx, key1, []byte{1})
 		assert.Nil(t, err)
 
-		exist, err := vcm.Exist(ctx, key)
+		exist, err := vcm.Exist(ctx, key1)
 		assert.True(t, exist)
 		assert.NoError(t, err)
 
 		contents := map[string][]byte{
-			"key_1": {111},
-			"key_2": {222},
+			key1: {111},
+			key2: {222},
 		}
 		err = vcm.MultiWrite(ctx, contents)
 		assert.NoError(t, err)
 
-		exist, err = vcm.Exist(ctx, "key_1")
+		exist, err = vcm.Exist(ctx, key1)
 		assert.True(t, exist)
 		assert.NoError(t, err)
-		exist, err = vcm.Exist(ctx, "key_2")
+		exist, err = vcm.Exist(ctx, key2)
 		assert.True(t, exist)
 		assert.NoError(t, err)
 
@@ -278,31 +280,32 @@ func TestVectorChunkManager_Remove(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, vcm)
 
-		key := "1"
-		err = vcm.cacheStorage.Write(ctx, key, []byte{1})
+		key1 := path.Join(localPath, "key_1")
+		key2 := path.Join(localPath, "key_2")
+		err = vcm.cacheStorage.Write(ctx, key1, []byte{1})
 		assert.Nil(t, err)
 
-		err = vcm.Remove(ctx, key)
+		err = vcm.Remove(ctx, key1)
 		assert.Nil(t, err)
 
-		exist, err := vcm.Exist(ctx, key)
+		exist, err := vcm.Exist(ctx, key1)
 		assert.False(t, exist)
 		assert.NoError(t, err)
 
 		contents := map[string][]byte{
-			"key_1": {111},
-			"key_2": {222},
+			key1: {111},
+			key2: {222},
 		}
 		err = vcm.cacheStorage.MultiWrite(ctx, contents)
 		assert.NoError(t, err)
 
-		err = vcm.MultiRemove(ctx, []string{"key_1", "key_2"})
+		err = vcm.MultiRemove(ctx, []string{key1, key2})
 		assert.NoError(t, err)
 
-		exist, err = vcm.Exist(ctx, "key_1")
+		exist, err = vcm.Exist(ctx, key1)
 		assert.False(t, exist)
 		assert.NoError(t, err)
-		exist, err = vcm.Exist(ctx, "key_2")
+		exist, err = vcm.Exist(ctx, key2)
 		assert.False(t, exist)
 		assert.NoError(t, err)
 
