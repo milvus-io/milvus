@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -836,8 +837,45 @@ func TestDropPartitionEvent(t *testing.T) {
 
 /* #nosec G103 */
 func TestIndexFileEvent(t *testing.T) {
-	t.Run("index_file_timestamp", func(t *testing.T) {
-		w, err := newIndexFileEventWriter()
+	t.Run("index_file_string", func(t *testing.T) {
+		w, err := newIndexFileEventWriter(schemapb.DataType_String)
+		assert.Nil(t, err)
+		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
+
+		payload := funcutil.GenRandomBytes()
+		err = w.AddOneStringToPayload(typeutil.UnsafeBytes2str(payload))
+		assert.Nil(t, err)
+
+		err = w.Finish()
+		assert.Nil(t, err)
+
+		var buf bytes.Buffer
+		err = w.Write(&buf)
+		assert.Nil(t, err)
+		w.Close()
+
+		wBuf := buf.Bytes()
+		st := UnsafeReadInt64(wBuf, binary.Size(eventHeader{}))
+		assert.Equal(t, Timestamp(st), tsoutil.ComposeTS(10, 0))
+		et := UnsafeReadInt64(wBuf, binary.Size(eventHeader{})+int(unsafe.Sizeof(st)))
+		assert.Equal(t, Timestamp(et), tsoutil.ComposeTS(100, 0))
+
+		payloadOffset := binary.Size(eventHeader{}) + binary.Size(indexFileEventData{})
+		pBuf := wBuf[payloadOffset:]
+		pR, err := NewPayloadReader(schemapb.DataType_String, pBuf)
+		assert.Nil(t, err)
+		assert.Equal(t, pR.numRows, int64(1))
+		value, err := pR.GetStringFromPayload()
+
+		assert.Equal(t, len(value), 1)
+
+		assert.Nil(t, err)
+		assert.Equal(t, payload, typeutil.UnsafeStr2bytes(value[0]))
+		pR.Close()
+	})
+
+	t.Run("index_file_int8", func(t *testing.T) {
+		w, err := newIndexFileEventWriter(schemapb.DataType_Int8)
 		assert.Nil(t, err)
 		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
 
@@ -862,6 +900,41 @@ func TestIndexFileEvent(t *testing.T) {
 		payloadOffset := binary.Size(eventHeader{}) + binary.Size(indexFileEventData{})
 		pBuf := wBuf[payloadOffset:]
 		pR, err := NewPayloadReader(schemapb.DataType_Int8, pBuf)
+		assert.Equal(t, pR.numRows, int64(len(payload)))
+		assert.Nil(t, err)
+		value, err := pR.GetByteFromPayload()
+		assert.Nil(t, err)
+		assert.Equal(t, payload, value)
+		pR.Close()
+	})
+
+	t.Run("index_file_int8_large", func(t *testing.T) {
+		w, err := newIndexFileEventWriter(schemapb.DataType_Int8)
+		assert.Nil(t, err)
+		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
+
+		payload := funcutil.GenRandomBytesWithLength(1000)
+		err = w.AddByteToPayload(payload)
+		assert.Nil(t, err)
+
+		err = w.Finish()
+		assert.Nil(t, err)
+
+		var buf bytes.Buffer
+		err = w.Write(&buf)
+		assert.Nil(t, err)
+		w.Close()
+
+		wBuf := buf.Bytes()
+		st := UnsafeReadInt64(wBuf, binary.Size(eventHeader{}))
+		assert.Equal(t, Timestamp(st), tsoutil.ComposeTS(10, 0))
+		et := UnsafeReadInt64(wBuf, binary.Size(eventHeader{})+int(unsafe.Sizeof(st)))
+		assert.Equal(t, Timestamp(et), tsoutil.ComposeTS(100, 0))
+
+		payloadOffset := binary.Size(eventHeader{}) + binary.Size(indexFileEventData{})
+		pBuf := wBuf[payloadOffset:]
+		pR, err := NewPayloadReader(schemapb.DataType_Int8, pBuf)
+		assert.Equal(t, pR.numRows, int64(len(payload)))
 		assert.Nil(t, err)
 		value, err := pR.GetByteFromPayload()
 		assert.Nil(t, err)
