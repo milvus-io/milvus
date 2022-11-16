@@ -373,7 +373,7 @@ common:
     LoadNumThreadRatio: 8.0
     BeamWidthRatio: 4.0
   # This parameter specify how many times the number of threads is the number of cores
-  threadCoreCoefficient : 10
+  threadCoreCoefficient : 8
 
   # please adjust in embedded Milvus: local
   storageType: minio
