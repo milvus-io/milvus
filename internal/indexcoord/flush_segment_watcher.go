@@ -143,6 +143,8 @@ func (fsw *flushedSegmentWatcher) enqueueInternalTask(segment *datapb.SegmentInf
 			}
 		}
 	}
+	log.Ctx(fsw.ctx).Info("flushed segment task enqueue successfully", zap.Int64("segID", segment.GetID()),
+		zap.Bool("isFake", segment.GetIsFake()))
 }
 
 func (fsw *flushedSegmentWatcher) internalScheduler() {
@@ -232,13 +234,10 @@ func (fsw *flushedSegmentWatcher) setInternalTaskSegmentInfo(segID UniqueID, seg
 	if _, ok := fsw.internalTasks[segID]; ok {
 		fsw.internalTasks[segID].segmentInfo = segInfo
 	}
-	log.Ctx(fsw.ctx).Debug("flushedSegmentWatcher set internal task segment info success", zap.Int64("segID", segID))
 }
 
 func (fsw *flushedSegmentWatcher) internalProcess(segID UniqueID) {
 	t := fsw.getInternalTask(segID)
-	log.Ctx(fsw.ctx).RatedDebug(10, "flushedSegmentWatcher process internal task", zap.Int64("segID", segID),
-		zap.String("state", t.state.String()))
 
 	switch t.state {
 	case indexTaskPrepare:
@@ -250,13 +249,13 @@ func (fsw *flushedSegmentWatcher) internalProcess(segID UniqueID) {
 		}
 
 		if err := fsw.prepare(segID); err != nil {
-			log.Ctx(fsw.ctx).RatedWarn(10, "flushedSegmentWatcher prepare internal task fail", zap.Int64("segID", segID), zap.Error(err))
+			log.Ctx(fsw.ctx).Warn("flushedSegmentWatcher prepare internal task fail", zap.Int64("segID", segID), zap.Error(err))
 			return
 		}
 		fsw.updateInternalTaskState(segID, indexTaskInit)
 	case indexTaskInit:
 		if err := fsw.constructTask(t); err != nil {
-			log.Ctx(fsw.ctx).RatedWarn(10, "flushedSegmentWatcher construct task fail", zap.Int64("segID", segID), zap.Error(err))
+			log.Ctx(fsw.ctx).Warn("flushedSegmentWatcher construct task fail", zap.Int64("segID", segID), zap.Error(err))
 			return
 		}
 		fsw.updateInternalTaskState(segID, indexTaskInProgress)
@@ -268,8 +267,6 @@ func (fsw *flushedSegmentWatcher) internalProcess(segID UniqueID) {
 		}
 	case indexTaskDone:
 		if err := fsw.removeFlushedSegment(t); err != nil {
-			log.Ctx(fsw.ctx).RatedWarn(10, "IndexCoord flushSegmentWatcher removeFlushedSegment fail",
-				zap.Int64("segID", segID), zap.Error(err))
 			return
 		}
 		fsw.deleteInternalTask(segID)
@@ -313,17 +310,15 @@ func (fsw *flushedSegmentWatcher) constructTask(t *internalTask) error {
 		// send to indexBuilder
 		have, buildID, err := fsw.ic.createIndexForSegment(segIdx)
 		if err != nil {
-			log.Ctx(fsw.ctx).Warn("IndexCoord create index for segment fail", zap.Int64("segID", t.segmentInfo.ID),
-				zap.Int64("indexID", index.IndexID), zap.Error(err))
 			return err
 		}
 		if !have {
 			fsw.builder.enqueue(buildID)
 		}
+		log.Ctx(fsw.ctx).Info("flushedSegmentWatcher construct task success", zap.Int64("segID", t.segmentInfo.ID),
+			zap.Int64("buildID", buildID), zap.Bool("already have index task", have))
 	}
 	fsw.handoff.enqueue(t.segmentInfo)
-	log.Ctx(fsw.ctx).Debug("flushedSegmentWatcher construct task success", zap.Int64("segID", t.segmentInfo.ID),
-		zap.Int("segments num", len(fieldIndexes)))
 	return nil
 }
 
@@ -331,25 +326,24 @@ func (fsw *flushedSegmentWatcher) removeFlushedSegment(t *internalTask) error {
 	deletedKeys := fmt.Sprintf("%s/%d/%d/%d", util.FlushedSegmentPrefix, t.segmentInfo.CollectionID, t.segmentInfo.PartitionID, t.segmentInfo.ID)
 	err := fsw.kvClient.RemoveWithPrefix(deletedKeys)
 	if err != nil {
-		log.Ctx(fsw.ctx).Warn("IndexCoord remove flushed segment fail", zap.Int64("collID", t.segmentInfo.CollectionID),
+		log.Ctx(fsw.ctx).Warn("IndexCoord remove flushed segment key fail", zap.Int64("collID", t.segmentInfo.CollectionID),
 			zap.Int64("partID", t.segmentInfo.PartitionID), zap.Int64("segID", t.segmentInfo.ID), zap.Error(err))
 		return err
 	}
-	log.Ctx(fsw.ctx).Info("IndexCoord remove flushed segment success", zap.Int64("collID", t.segmentInfo.CollectionID),
+	log.Ctx(fsw.ctx).Info("IndexCoord remove flushed segment key success", zap.Int64("collID", t.segmentInfo.CollectionID),
 		zap.Int64("partID", t.segmentInfo.PartitionID), zap.Int64("segID", t.segmentInfo.ID))
 	return nil
 }
 
 func (fsw *flushedSegmentWatcher) prepare(segID UniqueID) error {
 	defer fsw.internalNotifyFunc()
-	log.Debug("prepare flushed segment task", zap.Int64("segID", segID))
 	t := fsw.getInternalTask(segID)
 	if t.segmentInfo != nil {
 		return nil
 	}
 	info, err := fsw.ic.pullSegmentInfo(fsw.ctx, segID)
 	if err != nil {
-		log.Error("flushedSegmentWatcher get segment info fail", zap.Int64("segID", segID),
+		log.Warn("flushedSegmentWatcher get segment info fail", zap.Int64("segID", segID),
 			zap.Error(err))
 		if errors.Is(err, ErrSegmentNotFound) {
 			fsw.deleteInternalTask(segID)
@@ -358,5 +352,6 @@ func (fsw *flushedSegmentWatcher) prepare(segID UniqueID) error {
 		return err
 	}
 	fsw.setInternalTaskSegmentInfo(segID, info)
+	log.Ctx(fsw.ctx).Info("flushedSegmentWatcher prepare task success", zap.Int64("segID", segID))
 	return nil
 }

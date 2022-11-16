@@ -1042,6 +1042,8 @@ func (mt *metaTable) FinishTask(taskInfo *indexpb.IndexTaskInfo) error {
 	}
 
 	mt.updateIndexTasksMetrics()
+	log.Info("finish index task success", zap.Int64("buildID", taskInfo.BuildID),
+		zap.String("state", taskInfo.GetState().String()), zap.String("fail reason", taskInfo.GetFailReason()))
 	return nil
 }
 
