@@ -37,13 +37,13 @@ class TestActionFirstDeployment(TestDeployBase):
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("replica_number", [0])
-    @pytest.mark.parametrize("index_type", ["HNSW","BIN_IVF_FLAT"])
-    def test_task_all_empty(self,index_type):
+    @pytest.mark.parametrize("index_type", ["HNSW", "BIN_IVF_FLAT"])
+    def test_task_all_empty(self, index_type, replica_number):
         """
         before reinstall: create collection
         """
         name = ""
-        for k,v in locals().items():
+        for k, v in locals().items():
             if k in ["self", "name"]:
                 continue
             name += f"_{k}_{v}"
