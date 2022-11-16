@@ -55,7 +55,7 @@ func Test_NumpyParserValidate(t *testing.T) {
 			Fields: []*schemapb.FieldSchema{
 				{
 					FieldID:      109,
-					Name:         "field_string",
+					Name:         "FieldString",
 					IsPrimaryKey: false,
 					Description:  "string",
 					DataType:     schemapb.DataType_String,
@@ -64,7 +64,7 @@ func Test_NumpyParserValidate(t *testing.T) {
 		}, flushFunc)
 		err = p.validate(adapter, "dummy")
 		assert.NotNil(t, err)
-		err = p.validate(adapter, "field_string")
+		err = p.validate(adapter, "FieldString")
 		assert.NotNil(t, err)
 	})
 
@@ -87,7 +87,7 @@ func Test_NumpyParserValidate(t *testing.T) {
 		assert.Nil(t, err)
 		assert.NotNil(t, adapter)
 
-		err = parser.validate(adapter, "field_double")
+		err = parser.validate(adapter, "FieldDouble")
 		assert.Nil(t, err)
 		assert.Equal(t, len(data1), parser.columnDesc.elementCount)
 
@@ -108,7 +108,7 @@ func Test_NumpyParserValidate(t *testing.T) {
 		assert.Nil(t, err)
 		assert.NotNil(t, adapter)
 
-		err = parser.validate(adapter, "field_double")
+		err = parser.validate(adapter, "FieldDouble")
 		assert.NotNil(t, err)
 
 		// shape mismatch
@@ -125,7 +125,7 @@ func Test_NumpyParserValidate(t *testing.T) {
 		assert.Nil(t, err)
 		assert.NotNil(t, adapter)
 
-		err = parser.validate(adapter, "field_double")
+		err = parser.validate(adapter, "FieldDouble")
 		assert.NotNil(t, err)
 	})
 
@@ -143,7 +143,7 @@ func Test_NumpyParserValidate(t *testing.T) {
 		assert.Nil(t, err)
 		assert.NotNil(t, adapter)
 
-		err = parser.validate(adapter, "field_binary_vector")
+		err = parser.validate(adapter, "FieldBinaryVector")
 		assert.Nil(t, err)
 		assert.Equal(t, len(data1)*len(data1[0]), parser.columnDesc.elementCount)
 
@@ -175,7 +175,7 @@ func Test_NumpyParserValidate(t *testing.T) {
 		assert.Nil(t, err)
 		assert.NotNil(t, adapter)
 
-		err = parser.validate(adapter, "field_binary_vector")
+		err = parser.validate(adapter, "FieldBinaryVector")
 		assert.NotNil(t, err)
 
 		// shape[1] mismatch
@@ -192,7 +192,7 @@ func Test_NumpyParserValidate(t *testing.T) {
 		assert.Nil(t, err)
 		assert.NotNil(t, adapter)
 
-		err = parser.validate(adapter, "field_binary_vector")
+		err = parser.validate(adapter, "FieldBinaryVector")
 		assert.NotNil(t, err)
 
 		// dimension mismatch
@@ -200,18 +200,18 @@ func Test_NumpyParserValidate(t *testing.T) {
 			Fields: []*schemapb.FieldSchema{
 				{
 					FieldID:  109,
-					Name:     "field_binary_vector",
+					Name:     "FieldBinaryVector",
 					DataType: schemapb.DataType_BinaryVector,
 				},
 			},
 		}, flushFunc)
 
-		err = p.validate(adapter, "field_binary_vector")
+		err = p.validate(adapter, "FieldBinaryVector")
 		assert.NotNil(t, err)
 	})
 
 	t.Run("validate float vector", func(t *testing.T) {
-		filePath := TempFilesPath + "float_vector.npy"
+		filePath := TempFilesPath + "Float_vector.npy"
 		data1 := [][4]float32{{0, 0, 0, 0}, {1, 1, 1, 1}, {2, 2, 2, 2}, {3, 3, 3, 3}}
 		err := CreateNumpyFile(filePath, data1)
 		assert.Nil(t, err)
@@ -224,7 +224,7 @@ func Test_NumpyParserValidate(t *testing.T) {
 		assert.Nil(t, err)
 		assert.NotNil(t, adapter)
 
-		err = parser.validate(adapter, "field_float_vector")
+		err = parser.validate(adapter, "FieldFloatVector")
 		assert.Nil(t, err)
 		assert.Equal(t, len(data1)*len(data1[0]), parser.columnDesc.elementCount)
 
@@ -242,7 +242,7 @@ func Test_NumpyParserValidate(t *testing.T) {
 		assert.Nil(t, err)
 		assert.NotNil(t, adapter)
 
-		err = parser.validate(adapter, "field_float_vector")
+		err = parser.validate(adapter, "FieldFloatVector")
 		assert.NotNil(t, err)
 
 		// shape mismatch
@@ -259,7 +259,7 @@ func Test_NumpyParserValidate(t *testing.T) {
 		assert.Nil(t, err)
 		assert.NotNil(t, adapter)
 
-		err = parser.validate(adapter, "field_float_vector")
+		err = parser.validate(adapter, "FieldFloatVector")
 		assert.NotNil(t, err)
 
 		// shape[1] mismatch
@@ -276,7 +276,7 @@ func Test_NumpyParserValidate(t *testing.T) {
 		assert.Nil(t, err)
 		assert.NotNil(t, adapter)
 
-		err = parser.validate(adapter, "field_float_vector")
+		err = parser.validate(adapter, "FieldFloatVector")
 		assert.NotNil(t, err)
 
 		// dimension mismatch
@@ -284,13 +284,13 @@ func Test_NumpyParserValidate(t *testing.T) {
 			Fields: []*schemapb.FieldSchema{
 				{
 					FieldID:  109,
-					Name:     "field_float_vector",
+					Name:     "FieldFloatVector",
 					DataType: schemapb.DataType_FloatVector,
 				},
 			},
 		}, flushFunc)
 
-		err = p.validate(adapter, "field_float_vector")
+		err = p.validate(adapter, "FieldFloatVector")
 		assert.NotNil(t, err)
 	})
 }
@@ -350,7 +350,7 @@ func Test_NumpyParserParse(t *testing.T) {
 
 			return nil
 		}
-		checkFunc(data, "field_bool", flushFunc)
+		checkFunc(data, "FieldBool", flushFunc)
 	})
 
 	t.Run("parse scalar int8", func(t *testing.T) {
@@ -365,7 +365,7 @@ func Test_NumpyParserParse(t *testing.T) {
 
 			return nil
 		}
-		checkFunc(data, "field_int8", flushFunc)
+		checkFunc(data, "FieldInt8", flushFunc)
 	})
 
 	t.Run("parse scalar int16", func(t *testing.T) {
@@ -380,7 +380,7 @@ func Test_NumpyParserParse(t *testing.T) {
 
 			return nil
 		}
-		checkFunc(data, "field_int16", flushFunc)
+		checkFunc(data, "FieldInt16", flushFunc)
 	})
 
 	t.Run("parse scalar int32", func(t *testing.T) {
@@ -395,7 +395,7 @@ func Test_NumpyParserParse(t *testing.T) {
 
 			return nil
 		}
-		checkFunc(data, "field_int32", flushFunc)
+		checkFunc(data, "FieldInt32", flushFunc)
 	})
 
 	t.Run("parse scalar int64", func(t *testing.T) {
@@ -410,7 +410,7 @@ func Test_NumpyParserParse(t *testing.T) {
 
 			return nil
 		}
-		checkFunc(data, "field_int64", flushFunc)
+		checkFunc(data, "FieldInt64", flushFunc)
 	})
 
 	t.Run("parse scalar float", func(t *testing.T) {
@@ -425,7 +425,7 @@ func Test_NumpyParserParse(t *testing.T) {
 
 			return nil
 		}
-		checkFunc(data, "field_float", flushFunc)
+		checkFunc(data, "FieldFloat", flushFunc)
 	})
 
 	t.Run("parse scalar double", func(t *testing.T) {
@@ -440,7 +440,7 @@ func Test_NumpyParserParse(t *testing.T) {
 
 			return nil
 		}
-		checkFunc(data, "field_double", flushFunc)
+		checkFunc(data, "FieldDouble", flushFunc)
 	})
 
 	t.Run("parse scalar varchar", func(t *testing.T) {
@@ -455,7 +455,7 @@ func Test_NumpyParserParse(t *testing.T) {
 
 			return nil
 		}
-		checkFunc(data, "field_string", flushFunc)
+		checkFunc(data, "FieldString", flushFunc)
 	})
 
 	t.Run("parse binary vector", func(t *testing.T) {
@@ -473,7 +473,7 @@ func Test_NumpyParserParse(t *testing.T) {
 
 			return nil
 		}
-		checkFunc(data, "field_binary_vector", flushFunc)
+		checkFunc(data, "FieldBinaryVector", flushFunc)
 	})
 
 	t.Run("parse binary vector with float32", func(t *testing.T) {
@@ -491,7 +491,7 @@ func Test_NumpyParserParse(t *testing.T) {
 
 			return nil
 		}
-		checkFunc(data, "field_float_vector", flushFunc)
+		checkFunc(data, "FieldFloatVector", flushFunc)
 	})
 
 	t.Run("parse binary vector with float64", func(t *testing.T) {
@@ -509,7 +509,7 @@ func Test_NumpyParserParse(t *testing.T) {
 
 			return nil
 		}
-		checkFunc(data, "field_float_vector", flushFunc)
+		checkFunc(data, "FieldFloatVector", flushFunc)
 	})
 }
 

@@ -18,14 +18,37 @@ package importutil
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"math"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
 )
+
+// mock class of JSONRowCounsumer
+type mockJSONRowConsumer struct {
+	handleErr   error
+	rows        []map[storage.FieldID]interface{}
+	handleCount int
+}
+
+func (v *mockJSONRowConsumer) Handle(rows []map[storage.FieldID]interface{}) error {
+	if v.handleErr != nil {
+		return v.handleErr
+	}
+	if rows != nil {
+		v.rows = append(v.rows, rows...)
+	}
+	v.handleCount++
+	return nil
+}
 
 func Test_AdjustBufSize(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -64,237 +87,302 @@ func Test_AdjustBufSize(t *testing.T) {
 	assert.Equal(t, int64(MinBufferSize), parser.bufSize)
 }
 
-func Test_JSONParserParserRows(t *testing.T) {
+func Test_JSONParserParseRows_IntPK(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	schema := sampleSchema()
 	parser := NewJSONParser(ctx, schema)
 	assert.NotNil(t, parser)
-	parser.bufSize = 1
 
-	reader := strings.NewReader(`{
-		"rows":[
-			{"field_bool": true, "field_int8": 10, "field_int16": 101, "field_int32": 1001, "field_int64": 10001, "field_float": 3.14, "field_double": 1.56, "field_string": "hello world", "field_binary_vector": [254, 0], "field_float_vector": [1.1, 1.2, 1.3, 1.4]},
-			{"field_bool": false, "field_int8": 11, "field_int16": 102, "field_int32": 1002, "field_int64": 10002, "field_float": 3.15, "field_double": 2.56, "field_string": "hello world", "field_binary_vector": [253, 0], "field_float_vector": [2.1, 2.2, 2.3, 2.4]},
-			{"field_bool": true, "field_int8": 12, "field_int16": 103, "field_int32": 1003, "field_int64": 10003, "field_float": 3.16, "field_double": 3.56, "field_string": "hello world", "field_binary_vector": [252, 0], "field_float_vector": [3.1, 3.2, 3.3, 3.4]},
-			{"field_bool": false, "field_int8": 13, "field_int16": 104, "field_int32": 1004, "field_int64": 10004, "field_float": 3.17, "field_double": 4.56, "field_string": "hello world", "field_binary_vector": [251, 0], "field_float_vector": [4.1, 4.2, 4.3, 4.4]},
-			{"field_bool": true, "field_int8": 14, "field_int16": 105, "field_int32": 1005, "field_int64": 10005, "field_float": 3.18, "field_double": 5.56, "field_string": "hello world", "field_binary_vector": [250, 0], "field_float_vector": [5.1, 5.2, 5.3, 5.4]}
-		]
-	}`)
+	// prepare test data
+	content := &sampleContent{
+		Rows: make([]sampleRow, 0),
+	}
+	for i := 0; i < 10; i++ {
+		row := sampleRow{
+			FieldBool:         i%2 == 0,
+			FieldInt8:         int8(i % math.MaxInt8),
+			FieldInt16:        int16(100 + i),
+			FieldInt32:        int32(1000 + i),
+			FieldInt64:        int64(99999999999999999 + i),
+			FieldFloat:        3 + float32(i)/11,
+			FieldDouble:       1 + float64(i)/7,
+			FieldString:       "No." + strconv.FormatInt(int64(i), 10),
+			FieldBinaryVector: []int{(200 + i) % math.MaxUint8, 0},
+			FieldFloatVector:  []float32{float32(i) + 0.1, float32(i) + 0.2, float32(i) + 0.3, float32(i) + 0.4},
+		}
+		content.Rows = append(content.Rows, row)
+	}
 
-	// handler is nil
-	err := parser.ParseRows(reader, nil)
-	assert.NotNil(t, err)
-
-	validator, err := NewJSONRowValidator(schema, nil)
-	assert.NotNil(t, validator)
+	binContent, err := json.Marshal(content)
 	assert.Nil(t, err)
+	strContent := string(binContent)
+	reader := strings.NewReader(strContent)
 
-	// success
-	err = parser.ParseRows(reader, validator)
-	assert.Nil(t, err)
-	assert.Equal(t, int64(5), validator.ValidateCount())
+	consumer := &mockJSONRowConsumer{
+		handleErr:   nil,
+		rows:        make([]map[int64]interface{}, 0),
+		handleCount: 0,
+	}
 
-	// not a row-based format
-	reader = strings.NewReader(`{
-		"dummy":[]
-	}`)
-	validator, err = NewJSONRowValidator(schema, nil)
-	assert.NotNil(t, validator)
-	assert.Nil(t, err)
+	t.Run("parse success", func(t *testing.T) {
+		// set bufSize = 4, means call handle() after reading 4 rows
+		parser.bufSize = 4
+		err = parser.ParseRows(reader, consumer)
+		assert.Nil(t, err)
+		assert.Equal(t, len(content.Rows), len(consumer.rows))
+		for i := 0; i < len(consumer.rows); i++ {
+			contenctRow := content.Rows[i]
+			parsedRow := consumer.rows[i]
 
-	err = parser.ParseRows(reader, validator)
-	assert.NotNil(t, err)
+			v1, ok := parsedRow[102].(bool)
+			assert.True(t, ok)
+			assert.Equal(t, contenctRow.FieldBool, v1)
 
-	// rows is not a list
-	reader = strings.NewReader(`{
-		"rows":
-	}`)
-	validator, err = NewJSONRowValidator(schema, nil)
-	assert.NotNil(t, validator)
-	assert.Nil(t, err)
+			v2, ok := parsedRow[103].(json.Number)
+			assert.True(t, ok)
+			assert.Equal(t, strconv.FormatInt(int64(contenctRow.FieldInt8), 10), string(v2))
 
-	err = parser.ParseRows(reader, validator)
-	assert.NotNil(t, err)
+			v3, ok := parsedRow[104].(json.Number)
+			assert.True(t, ok)
+			assert.Equal(t, strconv.FormatInt(int64(contenctRow.FieldInt16), 10), string(v3))
 
-	// typo
-	reader = strings.NewReader(`{
-		"rows": [}
-	}`)
-	validator, err = NewJSONRowValidator(schema, nil)
-	assert.NotNil(t, validator)
-	assert.Nil(t, err)
+			v4, ok := parsedRow[105].(json.Number)
+			assert.True(t, ok)
+			assert.Equal(t, strconv.FormatInt(int64(contenctRow.FieldInt32), 10), string(v4))
 
-	err = parser.ParseRows(reader, validator)
-	assert.NotNil(t, err)
+			v5, ok := parsedRow[106].(json.Number)
+			assert.True(t, ok)
+			assert.Equal(t, strconv.FormatInt(contenctRow.FieldInt64, 10), string(v5))
 
-	// rows is not a list
-	reader = strings.NewReader(`{
-		"rows": {}
-	}`)
-	validator, err = NewJSONRowValidator(schema, nil)
-	assert.NotNil(t, validator)
-	assert.Nil(t, err)
+			v6, ok := parsedRow[107].(json.Number)
+			assert.True(t, ok)
+			f32, err := parseFloat(string(v6), 32, "")
+			assert.Nil(t, err)
+			assert.InDelta(t, contenctRow.FieldFloat, float32(f32), 10e-6)
 
-	err = parser.ParseRows(reader, validator)
-	assert.NotNil(t, err)
+			v7, ok := parsedRow[108].(json.Number)
+			assert.True(t, ok)
+			f64, err := parseFloat(string(v7), 64, "")
+			assert.Nil(t, err)
+			assert.InDelta(t, contenctRow.FieldDouble, f64, 10e-14)
 
-	// rows is not a list of list
-	reader = strings.NewReader(`{
-		"rows": [[]]
-	}`)
-	validator, err = NewJSONRowValidator(schema, nil)
-	assert.NotNil(t, validator)
-	assert.Nil(t, err)
+			v8, ok := parsedRow[109].(string)
+			assert.True(t, ok)
+			assert.Equal(t, contenctRow.FieldString, v8)
 
-	err = parser.ParseRows(reader, validator)
-	assert.NotNil(t, err)
+			v9, ok := parsedRow[110].([]interface{})
+			assert.True(t, ok)
+			assert.Equal(t, len(contenctRow.FieldBinaryVector), len(v9))
+			for k := 0; k < len(v9); k++ {
+				val, ok := v9[k].(json.Number)
+				assert.True(t, ok)
+				assert.Equal(t, strconv.FormatInt(int64(contenctRow.FieldBinaryVector[k]), 10), string(val))
+			}
 
-	// not valid json format
-	reader = strings.NewReader(`[]`)
-	validator, err = NewJSONRowValidator(schema, nil)
-	assert.NotNil(t, validator)
-	assert.Nil(t, err)
+			v10, ok := parsedRow[111].([]interface{})
+			assert.True(t, ok)
+			assert.Equal(t, len(contenctRow.FieldFloatVector), len(v10))
+			for k := 0; k < len(v10); k++ {
+				val, ok := v10[k].(json.Number)
+				assert.True(t, ok)
+				fval, err := parseFloat(string(val), 64, "")
+				assert.Nil(t, err)
+				assert.InDelta(t, contenctRow.FieldFloatVector[k], float32(fval), 10e-6)
+			}
+		}
+	})
 
-	err = parser.ParseRows(reader, validator)
-	assert.NotNil(t, err)
+	t.Run("error cases", func(t *testing.T) {
+		// handler is nil
+		err = parser.ParseRows(reader, nil)
+		assert.NotNil(t, err)
 
-	// empty content
-	reader = strings.NewReader(`{}`)
-	validator, err = NewJSONRowValidator(schema, nil)
-	assert.NotNil(t, validator)
-	assert.Nil(t, err)
+		// not a row-based format
+		reader = strings.NewReader(`{
+			"dummy":[]
+		}`)
 
-	err = parser.ParseRows(reader, validator)
-	assert.NotNil(t, err)
+		err = parser.ParseRows(reader, consumer)
+		assert.NotNil(t, err)
 
-	// empty content
-	reader = strings.NewReader(``)
-	validator, err = NewJSONRowValidator(schema, nil)
-	assert.NotNil(t, validator)
-	assert.Nil(t, err)
+		// rows is not a list
+		reader = strings.NewReader(`{
+			"rows":
+		}`)
 
-	err = parser.ParseRows(reader, validator)
-	assert.NotNil(t, err)
+		err = parser.ParseRows(reader, consumer)
+		assert.NotNil(t, err)
 
-	// redundant field
-	reader = strings.NewReader(`{
-		"rows":[
-			{"dummy": 1, "field_bool": true, "field_int8": 10, "field_int16": 101, "field_int32": 1001, "field_int64": 10001, "field_float": 3.14, "field_double": 1.56, "field_string": "hello world", "field_binary_vector": [254, 0], "field_float_vector": [1.1, 1.2, 1.3, 1.4]},
-		]
-	}`)
-	err = parser.ParseRows(reader, validator)
-	assert.NotNil(t, err)
+		// typo
+		reader = strings.NewReader(`{
+			"rows": [}
+		}`)
 
-	// field missed
-	reader = strings.NewReader(`{
-		"rows":[
-			{"field_int8": 10, "field_int16": 101, "field_int32": 1001, "field_int64": 10001, "field_float": 3.14, "field_double": 1.56, "field_string": "hello world", "field_binary_vector": [254, 0], "field_float_vector": [1.1, 1.2, 1.3, 1.4]},
-		]
-	}`)
-	err = parser.ParseRows(reader, validator)
-	assert.NotNil(t, err)
+		err = parser.ParseRows(reader, consumer)
+		assert.NotNil(t, err)
+
+		// rows is not a list
+		reader = strings.NewReader(`{
+			"rows": {}
+		}`)
+
+		err = parser.ParseRows(reader, consumer)
+		assert.NotNil(t, err)
+
+		// rows is not a list of list
+		reader = strings.NewReader(`{
+			"rows": [[]]
+		}`)
+
+		err = parser.ParseRows(reader, consumer)
+		assert.NotNil(t, err)
+
+		// not valid json format
+		reader = strings.NewReader(`[]`)
+
+		err = parser.ParseRows(reader, consumer)
+		assert.NotNil(t, err)
+
+		// empty content
+		reader = strings.NewReader(`{}`)
+
+		err = parser.ParseRows(reader, consumer)
+		assert.NotNil(t, err)
+
+		// empty content
+		reader = strings.NewReader(``)
+
+		err = parser.ParseRows(reader, consumer)
+		assert.NotNil(t, err)
+
+		// redundant field
+		reader = strings.NewReader(`{
+			"rows":[
+				{"dummy": 1, "FieldBool": true, "FieldInt8": 10, "FieldInt16": 101, "FieldInt32": 1001, "FieldInt64": 10001, "FieldFloat": 3.14, "FieldDouble": 1.56, "FieldString": "hello world", "FieldBinaryVector": [254, 0], "FieldFloatVector": [1.1, 1.2, 1.3, 1.4]}
+			]
+		}`)
+		err = parser.ParseRows(reader, consumer)
+		assert.NotNil(t, err)
+
+		// field missed
+		reader = strings.NewReader(`{
+			"rows":[
+				{"FieldInt8": 10, "FieldInt16": 101, "FieldInt32": 1001, "FieldInt64": 10001, "FieldFloat": 3.14, "FieldDouble": 1.56, "FieldString": "hello world", "FieldBinaryVector": [254, 0], "FieldFloatVector": [1.1, 1.2, 1.3, 1.4]}
+			]
+		}`)
+		err = parser.ParseRows(reader, consumer)
+		assert.NotNil(t, err)
+
+		// handle() error
+		content := `{
+			"rows":[
+				{"FieldBool": true, "FieldInt8": 10, "FieldInt16": 101, "FieldInt32": 1001, "FieldInt64": 10001, "FieldFloat": 3.14, "FieldDouble": 1.56, "FieldString": "hello world", "FieldBinaryVector": [254, 0], "FieldFloatVector": [1.1, 1.2, 1.3, 1.4]},
+				{"FieldBool": true, "FieldInt8": 10, "FieldInt16": 101, "FieldInt32": 1001, "FieldInt64": 10001, "FieldFloat": 3.14, "FieldDouble": 1.56, "FieldString": "hello world", "FieldBinaryVector": [254, 0], "FieldFloatVector": [1.1, 1.2, 1.3, 1.4]},
+				{"FieldBool": true, "FieldInt8": 10, "FieldInt16": 101, "FieldInt32": 1001, "FieldInt64": 10001, "FieldFloat": 3.14, "FieldDouble": 1.56, "FieldString": "hello world", "FieldBinaryVector": [254, 0], "FieldFloatVector": [1.1, 1.2, 1.3, 1.4]}
+			]
+		}`
+		consumer.handleErr = errors.New("error")
+		reader = strings.NewReader(content)
+		parser.bufSize = 2
+		err = parser.ParseRows(reader, consumer)
+		assert.NotNil(t, err)
+
+		reader = strings.NewReader(content)
+		parser.bufSize = 5
+		err = parser.ParseRows(reader, consumer)
+		assert.NotNil(t, err)
+
+		// row count is 0
+		reader = strings.NewReader(`{
+			"rows":[]
+		}`)
+		err = parser.ParseRows(reader, consumer)
+		assert.NotNil(t, err)
+
+		// canceled
+		consumer.handleErr = nil
+		cancel()
+		reader = strings.NewReader(content)
+		err = parser.ParseRows(reader, consumer)
+		assert.NotNil(t, err)
+	})
 }
 
-func Test_JSONParserParserRowsStringKey(t *testing.T) {
+func Test_JSONParserParseRows_StrPK(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	schema := strKeySchema()
 	parser := NewJSONParser(ctx, schema)
 	assert.NotNil(t, parser)
-	parser.bufSize = 1
 
-	reader := strings.NewReader(`{
-		"rows": [{
-				"uid": "Dm4aWrbNzhmjwCTEnCJ9LDPO2N09sqysxgVfbH9Zmn3nBzmwsmk0eZN6x7wSAoPQ",
-				"int_scalar": 9070353,
-				"float_scalar": 0.9798043638085004,
-				"string_scalar": "ShQ44OX0z8kGpRPhaXmfSsdH7JHq5DsZzu0e2umS1hrWG0uONH2RIIAdOECaaXir",
-				"bool_scalar": true,
-				"vectors": [0.5040062902126952, 0.8297619818664708, 0.20248342801564806, 0.12834786423659314]
-			},
-			{
-				"uid": "RP50U0d2napRjXu94a8oGikWgklvVsXFurp8RR4tHGw7N0gk1b7opm59k3FCpyPb",
-				"int_scalar": 8505288,
-				"float_scalar": 0.937913432198687,
-				"string_scalar": "Ld4b0avxathBdNvCrtm3QsWO1pYktUVR7WgAtrtozIwrA8vpeactNhJ85CFGQnK5",
-				"bool_scalar": false,
-				"vectors": [0.528232122836893, 0.6916116750653186, 0.41443762522548705, 0.26624344144792056]
-			},
-			{
-				"uid": "oxhFkQitWPPw0Bjmj7UQcn4iwvS0CU7RLAC81uQFFQjWtOdiB329CPyWkfGSeYfE",
-				"int_scalar": 4392660,
-				"float_scalar": 0.32381232630490264,
-				"string_scalar": "EmAlB0xdQcxeBtwlZJQnLgKodiuRinynoQtg0eXrjkq24dQohzSm7Bx3zquHd3kO",
-				"bool_scalar": false,
-				"vectors": [0.7978693027281338, 0.12394906726785092, 0.42431962903815285, 0.4098707807351914]
-			},
-			{
-				"uid": "sxoEL4Mpk1LdsyXhbNm059UWJ3CvxURLCQczaVI5xtBD4QcVWTDFUW7dBdye6nbn",
-				"int_scalar": 7927425,
-				"float_scalar": 0.31074026464844895,
-				"string_scalar": "fdY2beCvs1wSws0Gb9ySD92xwfEfJpX5DQgsWoISylBAoYOcXpRaqIJoXYS4g269",
-				"bool_scalar": true,
-				"vectors": [0.3716157812069954, 0.006981281113265229, 0.9007003458552365, 0.22492634316191004]
-			},
-			{
-				"uid": "g33Rqq2UQSHPRHw5FvuXxf5uGEhIAetxE6UuXXCJj0hafG8WuJr1ueZftsySCqAd",
-				"int_scalar": 9288807,
-				"float_scalar": 0.4953578200336135,
-				"string_scalar": "6f8Iv1zQAGksj5XxMbbI5evTrYrB8fSFQ58jl0oU7Z4BpA81VsD2tlWqkhfoBNa7",
-				"bool_scalar": false,
-				"vectors": [0.5921374209648096, 0.04234832587925662, 0.7803878096531548, 0.1964045837884633]
-			},
-			{
-				"uid": "ACIJd7lTXkRgUNmlQk6AbnWIKEEV8Z6OS3vDcm0w9psmt9sH3z1JLg1fNVCqiX3d",
-				"int_scalar": 1173595,
-				"float_scalar": 0.9000745450802002,
-				"string_scalar": "gpj9YctF2ig1l1APkvRzHbVE8PZVKRbk7nvW73qS2uQbY5l7MeIeTPwRBjasbY8z",
-				"bool_scalar": true,
-				"vectors": [0.4655121736168688, 0.6195496905333787, 0.5316616196326639, 0.3417492053890768]
-			},
-			{
-				"uid": "f0wRVZZ9u1bEKrAjLeZj3oliEnUjBiUl6TiermeczceBmGe6M2RHONgz3qEogrd5",
-				"int_scalar": 3722368,
-				"float_scalar": 0.7212299175768438,
-				"string_scalar": "xydiejGUlvS49BfBuy1EuYRKt3v2oKwC6pqy7Ga4dGWn3BnQigV4XAGawixDAGHN",
-				"bool_scalar": false,
-				"vectors": [0.6173164237304075, 0.374107748459483, 0.3686321416317251, 0.585725336391797]
-			},
-			{
-				"uid": "uXq9q96vUqnDebcUISFkRFT27OjD89DWhok6urXIjTuLzaSWnCVTJkrJXxFctSg0",
-				"int_scalar": 1940731,
-				"float_scalar": 0.9524404085944204,
-				"string_scalar": "ZXSNzR5V3t62fjop7b7DHK56ByAF0INYwycKsu6OxGP4p2j0Obs6l0NUqukypGXd",
-				"bool_scalar": false,
-				"vectors": [0.07178869784465443, 0.4208459174227864, 0.5882811425075762, 0.6867753592116734]
-			},
-			{
-				"uid": "EXDDklLvQIfeCJN8cES3b9mdCYDQVhq2iLj8WWA3TPtZ1SZ4Jpidj7OXJidSD7Wn",
-				"int_scalar": 2158426,
-				"float_scalar": 0.23770219927963454,
-				"string_scalar": "9TNeKVSMqTP8Zxs90kaAcB7n6JbIcvFWInzi9JxZQgmYxD5xLYwaCoeUzRiNAxAg",
-				"bool_scalar": false,
-				"vectors": [0.5659468293534021, 0.6275816433340369, 0.3978846871291008, 0.3571179679645908]
-			},
-			{
-				"uid": "mlaXOgYvB88WWRpXNyWv6UqpmvIHrC6pRo03AtaPLMpVymu0L9ioO8GWa1XgGyj0",
-				"int_scalar": 198279,
-				"float_scalar": 0.020343767010139513,
-				"string_scalar": "AblYGRZJiMAwDbMEkungG0yKTeuya4FgyliakWWqSOJ5TvQWB9Ki2WXbnvSsYIDF",
-				"bool_scalar": true,
-				"vectors": [0.5374636140212398, 0.7655373567912009, 0.05491796821609715, 0.349384366747262]
-			}
-		]
-	}`)
+	// prepare test data
+	content := &strKeyContent{
+		Rows: make([]strKeyRow, 0),
+	}
+	for i := 0; i < 10; i++ {
+		row := strKeyRow{
+			UID:              "strID_" + strconv.FormatInt(int64(i), 10),
+			FieldInt32:       int32(10000 + i),
+			FieldFloat:       1 + float32(i)/13,
+			FieldString:      strconv.FormatInt(int64(i+1), 10) + " this string contains unicode character: 🎵",
+			FieldBool:        i%3 == 0,
+			FieldFloatVector: []float32{float32(i) / 2, float32(i) / 3, float32(i) / 6, float32(i) / 9},
+		}
+		content.Rows = append(content.Rows, row)
+	}
 
-	validator, err := NewJSONRowValidator(schema, nil)
-	assert.NotNil(t, validator)
+	binContent, err := json.Marshal(content)
 	assert.Nil(t, err)
+	strContent := string(binContent)
+	reader := strings.NewReader(strContent)
 
-	err = parser.ParseRows(reader, validator)
+	consumer := &mockJSONRowConsumer{
+		handleErr:   nil,
+		rows:        make([]map[int64]interface{}, 0),
+		handleCount: 0,
+	}
+
+	err = parser.ParseRows(reader, consumer)
 	assert.Nil(t, err)
-	assert.Equal(t, int64(10), validator.ValidateCount())
+	assert.Equal(t, len(content.Rows), len(consumer.rows))
+	for i := 0; i < len(consumer.rows); i++ {
+		contenctRow := content.Rows[i]
+		parsedRow := consumer.rows[i]
+
+		v1, ok := parsedRow[101].(string)
+		assert.True(t, ok)
+		assert.Equal(t, contenctRow.UID, v1)
+
+		v2, ok := parsedRow[102].(json.Number)
+		assert.True(t, ok)
+		assert.Equal(t, strconv.FormatInt(int64(contenctRow.FieldInt32), 10), string(v2))
+
+		v3, ok := parsedRow[103].(json.Number)
+		assert.True(t, ok)
+		f32, err := parseFloat(string(v3), 32, "")
+		assert.Nil(t, err)
+		assert.InDelta(t, contenctRow.FieldFloat, float32(f32), 10e-6)
+
+		v4, ok := parsedRow[104].(string)
+		assert.True(t, ok)
+		assert.Equal(t, contenctRow.FieldString, v4)
+
+		v5, ok := parsedRow[105].(bool)
+		assert.True(t, ok)
+		assert.Equal(t, contenctRow.FieldBool, v5)
+
+		v6, ok := parsedRow[106].([]interface{})
+		assert.True(t, ok)
+		assert.Equal(t, len(contenctRow.FieldFloatVector), len(v6))
+		for k := 0; k < len(v6); k++ {
+			val, ok := v6[k].(json.Number)
+			assert.True(t, ok)
+			fval, err := parseFloat(string(val), 64, "")
+			assert.Nil(t, err)
+			assert.InDelta(t, contenctRow.FieldFloatVector[k], float32(fval), 10e-6)
+		}
+	}
 }

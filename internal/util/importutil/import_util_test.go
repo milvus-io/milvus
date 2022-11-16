@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"testing"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -27,6 +28,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// sampleSchema() return a schema contains all supported data types with an int64 primary key
 func sampleSchema() *schemapb.CollectionSchema {
 	schema := &schemapb.CollectionSchema{
 		Name:        "schema",
@@ -35,35 +37,35 @@ func sampleSchema() *schemapb.CollectionSchema {
 		Fields: []*schemapb.FieldSchema{
 			{
 				FieldID:      102,
-				Name:         "field_bool",
+				Name:         "FieldBool",
 				IsPrimaryKey: false,
 				Description:  "bool",
 				DataType:     schemapb.DataType_Bool,
 			},
 			{
 				FieldID:      103,
-				Name:         "field_int8",
+				Name:         "FieldInt8",
 				IsPrimaryKey: false,
 				Description:  "int8",
 				DataType:     schemapb.DataType_Int8,
 			},
 			{
 				FieldID:      104,
-				Name:         "field_int16",
+				Name:         "FieldInt16",
 				IsPrimaryKey: false,
 				Description:  "int16",
 				DataType:     schemapb.DataType_Int16,
 			},
 			{
 				FieldID:      105,
-				Name:         "field_int32",
+				Name:         "FieldInt32",
 				IsPrimaryKey: false,
 				Description:  "int32",
 				DataType:     schemapb.DataType_Int32,
 			},
 			{
 				FieldID:      106,
-				Name:         "field_int64",
+				Name:         "FieldInt64",
 				IsPrimaryKey: true,
 				AutoID:       false,
 				Description:  "int64",
@@ -71,21 +73,21 @@ func sampleSchema() *schemapb.CollectionSchema {
 			},
 			{
 				FieldID:      107,
-				Name:         "field_float",
+				Name:         "FieldFloat",
 				IsPrimaryKey: false,
 				Description:  "float",
 				DataType:     schemapb.DataType_Float,
 			},
 			{
 				FieldID:      108,
-				Name:         "field_double",
+				Name:         "FieldDouble",
 				IsPrimaryKey: false,
 				Description:  "double",
 				DataType:     schemapb.DataType_Double,
 			},
 			{
 				FieldID:      109,
-				Name:         "field_string",
+				Name:         "FieldString",
 				IsPrimaryKey: false,
 				Description:  "string",
 				DataType:     schemapb.DataType_VarChar,
@@ -95,7 +97,7 @@ func sampleSchema() *schemapb.CollectionSchema {
 			},
 			{
 				FieldID:      110,
-				Name:         "field_binary_vector",
+				Name:         "FieldBinaryVector",
 				IsPrimaryKey: false,
 				Description:  "binary_vector",
 				DataType:     schemapb.DataType_BinaryVector,
@@ -105,7 +107,7 @@ func sampleSchema() *schemapb.CollectionSchema {
 			},
 			{
 				FieldID:      111,
-				Name:         "field_float_vector",
+				Name:         "FieldFloatVector",
 				IsPrimaryKey: false,
 				Description:  "float_vector",
 				DataType:     schemapb.DataType_FloatVector,
@@ -118,6 +120,24 @@ func sampleSchema() *schemapb.CollectionSchema {
 	return schema
 }
 
+// sampleContent/sampleRow is json structs to represent sampleSchema() for testing
+type sampleRow struct {
+	FieldBool         bool
+	FieldInt8         int8
+	FieldInt16        int16
+	FieldInt32        int32
+	FieldInt64        int64
+	FieldFloat        float32
+	FieldDouble       float64
+	FieldString       string
+	FieldBinaryVector []int
+	FieldFloatVector  []float32
+}
+type sampleContent struct {
+	Rows []sampleRow
+}
+
+// strKeySchema() return a schema with a varchar primary key
 func strKeySchema() *schemapb.CollectionSchema {
 	schema := &schemapb.CollectionSchema{
 		Name:        "schema",
@@ -126,7 +146,7 @@ func strKeySchema() *schemapb.CollectionSchema {
 		Fields: []*schemapb.FieldSchema{
 			{
 				FieldID:      101,
-				Name:         "uid",
+				Name:         "UID",
 				IsPrimaryKey: true,
 				AutoID:       false,
 				Description:  "uid",
@@ -137,21 +157,21 @@ func strKeySchema() *schemapb.CollectionSchema {
 			},
 			{
 				FieldID:      102,
-				Name:         "int_scalar",
+				Name:         "FieldInt32",
 				IsPrimaryKey: false,
 				Description:  "int_scalar",
 				DataType:     schemapb.DataType_Int32,
 			},
 			{
 				FieldID:      103,
-				Name:         "float_scalar",
+				Name:         "FieldFloat",
 				IsPrimaryKey: false,
 				Description:  "float_scalar",
 				DataType:     schemapb.DataType_Float,
 			},
 			{
 				FieldID:      104,
-				Name:         "string_scalar",
+				Name:         "FieldString",
 				IsPrimaryKey: false,
 				Description:  "string_scalar",
 				DataType:     schemapb.DataType_VarChar,
@@ -161,14 +181,14 @@ func strKeySchema() *schemapb.CollectionSchema {
 			},
 			{
 				FieldID:      105,
-				Name:         "bool_scalar",
+				Name:         "FieldBool",
 				IsPrimaryKey: false,
 				Description:  "bool_scalar",
 				DataType:     schemapb.DataType_Bool,
 			},
 			{
 				FieldID:      106,
-				Name:         "vectors",
+				Name:         "FieldFloatVector",
 				IsPrimaryKey: false,
 				Description:  "vectors",
 				DataType:     schemapb.DataType_FloatVector,
@@ -179,6 +199,19 @@ func strKeySchema() *schemapb.CollectionSchema {
 		},
 	}
 	return schema
+}
+
+// strKeyContent/strKeyRow is json structs to represent strKeySchema() for testing
+type strKeyRow struct {
+	UID              string
+	FieldInt32       int32
+	FieldFloat       float32
+	FieldString      string
+	FieldBool        bool
+	FieldFloatVector []float32
+}
+type strKeyContent struct {
+	Rows []strKeyRow
 }
 
 func jsonNumber(value string) json.Number {
@@ -232,6 +265,40 @@ func Test_InitSegmentData(t *testing.T) {
 	assert.Nil(t, data)
 }
 
+func Test_parseFloat(t *testing.T) {
+	value, err := parseFloat("dummy", 32, "")
+	assert.Zero(t, value)
+	assert.Error(t, err)
+
+	value, err = parseFloat("NaN", 32, "")
+	assert.Zero(t, value)
+	assert.Error(t, err)
+
+	value, err = parseFloat("Inf", 32, "")
+	assert.Zero(t, value)
+	assert.Error(t, err)
+
+	value, err = parseFloat("Infinity", 32, "")
+	assert.Zero(t, value)
+	assert.Error(t, err)
+
+	value, err = parseFloat("3.5e+38", 32, "")
+	assert.Zero(t, value)
+	assert.Error(t, err)
+
+	value, err = parseFloat("1.8e+308", 64, "")
+	assert.Zero(t, value)
+	assert.Error(t, err)
+
+	value, err = parseFloat("3.14159", 32, "")
+	assert.True(t, math.Abs(value-3.14159) < 0.000001)
+	assert.Nil(t, err)
+
+	value, err = parseFloat("2.718281828459045", 64, "")
+	assert.True(t, math.Abs(value-2.718281828459045) < 0.0000000000000001)
+	assert.Nil(t, err)
+}
+
 func Test_InitValidators(t *testing.T) {
 	validators := make(map[storage.FieldID]*Validator)
 	err := initValidators(nil, validators)
@@ -242,6 +309,18 @@ func Test_InitValidators(t *testing.T) {
 	err = initValidators(schema, validators)
 	assert.Nil(t, err)
 	assert.Equal(t, len(schema.Fields), len(validators))
+	for _, field := range schema.Fields {
+		fieldID := field.GetFieldID()
+		assert.Equal(t, field.GetName(), validators[fieldID].fieldName)
+		assert.Equal(t, field.GetIsPrimaryKey(), validators[fieldID].primaryKey)
+		assert.Equal(t, field.GetAutoID(), validators[fieldID].autoID)
+		if field.GetDataType() != schemapb.DataType_VarChar && field.GetDataType() != schemapb.DataType_String {
+			assert.False(t, validators[fieldID].isString)
+		} else {
+			assert.True(t, validators[fieldID].isString)
+		}
+	}
+
 	name2ID := make(map[string]storage.FieldID)
 	for _, field := range schema.Fields {
 		name2ID[field.GetName()] = field.GetFieldID()
@@ -249,16 +328,6 @@ func Test_InitValidators(t *testing.T) {
 
 	fields := initSegmentData(schema)
 	assert.NotNil(t, fields)
-
-	checkValidateFunc := func(funcName string, validVal interface{}, invalidVal interface{}) {
-		id := name2ID[funcName]
-		v, ok := validators[id]
-		assert.True(t, ok)
-		err = v.validateFunc(validVal)
-		assert.Nil(t, err)
-		err = v.validateFunc(invalidVal)
-		assert.NotNil(t, err)
-	}
 
 	checkConvertFunc := func(funcName string, validVal interface{}, invalidVal interface{}) {
 		id := name2ID[funcName]
@@ -272,83 +341,61 @@ func Test_InitValidators(t *testing.T) {
 		postNum := fieldData.RowNum()
 		assert.Equal(t, 1, postNum-preNum)
 
-		if invalidVal != nil {
-			err = v.convertFunc(invalidVal, fieldData)
-			assert.NotNil(t, err)
-		}
+		err = v.convertFunc(invalidVal, fieldData)
+		assert.NotNil(t, err)
 	}
-
-	t.Run("check validate functions", func(t *testing.T) {
-		var validVal interface{} = true
-		var invalidVal interface{} = "aa"
-		checkValidateFunc("field_bool", validVal, invalidVal)
-
-		validVal = jsonNumber("100")
-		invalidVal = "aa"
-		checkValidateFunc("field_int8", validVal, invalidVal)
-		checkValidateFunc("field_int16", validVal, invalidVal)
-		checkValidateFunc("field_int32", validVal, invalidVal)
-		checkValidateFunc("field_int64", validVal, invalidVal)
-		checkValidateFunc("field_float", validVal, invalidVal)
-		checkValidateFunc("field_double", validVal, invalidVal)
-
-		validVal = "aa"
-		invalidVal = 100
-		checkValidateFunc("field_string", validVal, invalidVal)
-
-		// the binary vector dimension is 16, shoud input 2 uint8 values
-		validVal = []interface{}{jsonNumber("100"), jsonNumber("101")}
-		invalidVal = "aa"
-		checkValidateFunc("field_binary_vector", validVal, invalidVal)
-		invalidVal = []interface{}{jsonNumber("100")}
-		checkValidateFunc("field_binary_vector", validVal, invalidVal)
-		invalidVal = []interface{}{jsonNumber("100"), jsonNumber("101"), jsonNumber("102")}
-		checkValidateFunc("field_binary_vector", validVal, invalidVal)
-		invalidVal = []interface{}{100, jsonNumber("100")}
-		checkValidateFunc("field_binary_vector", validVal, invalidVal)
-
-		// the float vector dimension is 4, shoud input 4 float values
-		validVal = []interface{}{jsonNumber("1"), jsonNumber("2"), jsonNumber("3"), jsonNumber("4")}
-		invalidVal = true
-		checkValidateFunc("field_float_vector", validVal, invalidVal)
-		invalidVal = []interface{}{jsonNumber("1"), jsonNumber("2"), jsonNumber("3")}
-		checkValidateFunc("field_float_vector", validVal, invalidVal)
-		invalidVal = []interface{}{jsonNumber("1"), jsonNumber("2"), jsonNumber("3"), jsonNumber("4"), jsonNumber("5")}
-		checkValidateFunc("field_float_vector", validVal, invalidVal)
-		invalidVal = []interface{}{"a", "b", "c", "d"}
-		checkValidateFunc("field_float_vector", validVal, invalidVal)
-	})
 
 	t.Run("check convert functions", func(t *testing.T) {
 		var validVal interface{} = true
-		var invalidVal interface{}
-		checkConvertFunc("field_bool", validVal, invalidVal)
+		var invalidVal interface{} = 5
+		checkConvertFunc("FieldBool", validVal, invalidVal)
 
 		validVal = jsonNumber("100")
 		invalidVal = jsonNumber("128")
-		checkConvertFunc("field_int8", validVal, invalidVal)
+		checkConvertFunc("FieldInt8", validVal, invalidVal)
 		invalidVal = jsonNumber("65536")
-		checkConvertFunc("field_int16", validVal, invalidVal)
+		checkConvertFunc("FieldInt16", validVal, invalidVal)
 		invalidVal = jsonNumber("2147483648")
-		checkConvertFunc("field_int32", validVal, invalidVal)
+		checkConvertFunc("FieldInt32", validVal, invalidVal)
 		invalidVal = jsonNumber("1.2")
-		checkConvertFunc("field_int64", validVal, invalidVal)
+		checkConvertFunc("FieldInt64", validVal, invalidVal)
 		invalidVal = jsonNumber("dummy")
-		checkConvertFunc("field_float", validVal, invalidVal)
-		checkConvertFunc("field_double", validVal, invalidVal)
+		checkConvertFunc("FieldFloat", validVal, invalidVal)
+		checkConvertFunc("FieldDouble", validVal, invalidVal)
+
+		invalidVal = "6"
+		checkConvertFunc("FieldInt8", validVal, invalidVal)
+		checkConvertFunc("FieldInt16", validVal, invalidVal)
+		checkConvertFunc("FieldInt32", validVal, invalidVal)
+		checkConvertFunc("FieldInt64", validVal, invalidVal)
+		checkConvertFunc("FieldFloat", validVal, invalidVal)
+		checkConvertFunc("FieldDouble", validVal, invalidVal)
 
 		validVal = "aa"
-		checkConvertFunc("field_string", validVal, nil)
+		checkConvertFunc("FieldString", validVal, nil)
 
 		// the binary vector dimension is 16, shoud input two uint8 values, each value should between 0~255
 		validVal = []interface{}{jsonNumber("100"), jsonNumber("101")}
-		invalidVal = []interface{}{jsonNumber("100"), jsonNumber("256")}
-		checkConvertFunc("field_binary_vector", validVal, invalidVal)
+		invalidVal = []interface{}{jsonNumber("100"), jsonNumber("1256")}
+		checkConvertFunc("FieldBinaryVector", validVal, invalidVal)
+
+		invalidVal = false
+		checkConvertFunc("FieldBinaryVector", validVal, invalidVal)
+		invalidVal = []interface{}{jsonNumber("100")}
+		checkConvertFunc("FieldBinaryVector", validVal, invalidVal)
+		invalidVal = []interface{}{jsonNumber("100"), 0}
+		checkConvertFunc("FieldBinaryVector", validVal, invalidVal)
 
 		// the float vector dimension is 4, each value should be valid float number
 		validVal = []interface{}{jsonNumber("1"), jsonNumber("2"), jsonNumber("3"), jsonNumber("4")}
 		invalidVal = []interface{}{jsonNumber("1"), jsonNumber("2"), jsonNumber("3"), jsonNumber("dummy")}
-		checkConvertFunc("field_float_vector", validVal, invalidVal)
+		checkConvertFunc("FieldFloatVector", validVal, invalidVal)
+		invalidVal = false
+		checkConvertFunc("FieldFloatVector", validVal, invalidVal)
+		invalidVal = []interface{}{jsonNumber("1")}
+		checkConvertFunc("FieldFloatVector", validVal, invalidVal)
+		invalidVal = []interface{}{jsonNumber("1"), jsonNumber("2"), jsonNumber("3"), true}
+		checkConvertFunc("FieldFloatVector", validVal, invalidVal)
 	})
 
 	t.Run("init error cases", func(t *testing.T) {
@@ -360,7 +407,7 @@ func Test_InitValidators(t *testing.T) {
 		}
 		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
 			FieldID:      111,
-			Name:         "field_float_vector",
+			Name:         "FieldFloatVector",
 			IsPrimaryKey: false,
 			DataType:     schemapb.DataType_FloatVector,
 			TypeParams: []*commonpb.KeyValuePair{
@@ -375,7 +422,7 @@ func Test_InitValidators(t *testing.T) {
 		schema.Fields = make([]*schemapb.FieldSchema, 0)
 		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
 			FieldID:      110,
-			Name:         "field_binary_vector",
+			Name:         "FieldBinaryVector",
 			IsPrimaryKey: false,
 			DataType:     schemapb.DataType_BinaryVector,
 			TypeParams: []*commonpb.KeyValuePair{
@@ -410,7 +457,7 @@ func Test_GetFileNameAndExt(t *testing.T) {
 func Test_GetFieldDimension(t *testing.T) {
 	schema := &schemapb.FieldSchema{
 		FieldID:      111,
-		Name:         "field_float_vector",
+		Name:         "FieldFloatVector",
 		IsPrimaryKey: false,
 		Description:  "float_vector",
 		DataType:     schemapb.DataType_FloatVector,
