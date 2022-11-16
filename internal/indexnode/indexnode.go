@@ -176,7 +176,6 @@ func (i *IndexNode) initSession() error {
 		return errors.New("failed to initialize session")
 	}
 	i.session.Init(typeutil.IndexNodeRole, i.address, false, true)
-	paramtable.SetNodeID(i.session.ServerID)
 	return nil
 }
 

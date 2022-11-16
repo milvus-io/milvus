@@ -49,7 +49,6 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
-	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -158,7 +157,6 @@ func (s *Server) Init() error {
 	s.session.Init(typeutil.QueryCoordRole, s.address, true, true)
 	s.enableActiveStandBy = Params.QueryCoordCfg.EnableActiveStandby
 	s.session.SetEnableActiveStandBy(s.enableActiveStandBy)
-	paramtable.SetNodeID(s.session.ServerID)
 	s.factory.Init(Params)
 
 	// Init KV
