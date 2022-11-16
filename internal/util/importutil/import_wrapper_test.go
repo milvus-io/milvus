@@ -239,11 +239,11 @@ func Test_ImportWrapperRowBased(t *testing.T) {
 
 	content := []byte(`{
 		"rows":[
-			{"field_bool": true, "field_int8": 10, "field_int16": 101, "field_int32": 1001, "field_int64": 10001, "field_float": 3.14, "field_double": 1.56, "field_string": "hello world", "field_binary_vector": [254, 0], "field_float_vector": [1.1, 1.2, 1.3, 1.4]},
-			{"field_bool": false, "field_int8": 11, "field_int16": 102, "field_int32": 1002, "field_int64": 10002, "field_float": 3.15, "field_double": 2.56, "field_string": "hello world", "field_binary_vector": [253, 0], "field_float_vector": [2.1, 2.2, 2.3, 2.4]},
-			{"field_bool": true, "field_int8": 12, "field_int16": 103, "field_int32": 1003, "field_int64": 10003, "field_float": 3.16, "field_double": 3.56, "field_string": "hello world", "field_binary_vector": [252, 0], "field_float_vector": [3.1, 3.2, 3.3, 3.4]},
-			{"field_bool": false, "field_int8": 13, "field_int16": 104, "field_int32": 1004, "field_int64": 10004, "field_float": 3.17, "field_double": 4.56, "field_string": "hello world", "field_binary_vector": [251, 0], "field_float_vector": [4.1, 4.2, 4.3, 4.4]},
-			{"field_bool": true, "field_int8": 14, "field_int16": 105, "field_int32": 1005, "field_int64": 10005, "field_float": 3.18, "field_double": 5.56, "field_string": "hello world", "field_binary_vector": [250, 0], "field_float_vector": [5.1, 5.2, 5.3, 5.4]}
+			{"FieldBool": true, "FieldInt8": 10, "FieldInt16": 101, "FieldInt32": 1001, "FieldInt64": 10001, "FieldFloat": 3.14, "FieldDouble": 1.56, "FieldString": "hello world", "FieldBinaryVector": [254, 0], "FieldFloatVector": [1.1, 1.2, 1.3, 1.4]},
+			{"FieldBool": false, "FieldInt8": 11, "FieldInt16": 102, "FieldInt32": 1002, "FieldInt64": 10002, "FieldFloat": 3.15, "FieldDouble": 2.56, "FieldString": "hello world", "FieldBinaryVector": [253, 0], "FieldFloatVector": [2.1, 2.2, 2.3, 2.4]},
+			{"FieldBool": true, "FieldInt8": 12, "FieldInt16": 103, "FieldInt32": 1003, "FieldInt64": 10003, "FieldFloat": 3.16, "FieldDouble": 3.56, "FieldString": "hello world", "FieldBinaryVector": [252, 0], "FieldFloatVector": [3.1, 3.2, 3.3, 3.4]},
+			{"FieldBool": false, "FieldInt8": 13, "FieldInt16": 104, "FieldInt32": 1004, "FieldInt64": 10004, "FieldFloat": 3.17, "FieldDouble": 4.56, "FieldString": "hello world", "FieldBinaryVector": [251, 0], "FieldFloatVector": [4.1, 4.2, 4.3, 4.4]},
+			{"FieldBool": true, "FieldInt8": 14, "FieldInt16": 105, "FieldInt32": 1005, "FieldInt64": 10005, "FieldFloat": 3.18, "FieldDouble": 5.56, "FieldString": "hello world", "FieldBinaryVector": [250, 0], "FieldFloatVector": [5.1, 5.2, 5.3, 5.4]}
 		]
 	}`)
 
@@ -286,7 +286,7 @@ func Test_ImportWrapperRowBased(t *testing.T) {
 	// parse error
 	content = []byte(`{
 		"rows":[
-			{"field_bool": true, "field_int8": false, "field_int16": 101, "field_int32": 1001, "field_int64": 10001, "field_float": 3.14, "field_double": 1.56, "field_string": "hello world", "field_binary_vector": [254, 0], "field_float_vector": [1.1, 1.2, 1.3, 1.4]},
+			{"FieldBool": true, "FieldInt8": false, "FieldInt16": 101, "FieldInt32": 1001, "FieldInt64": 10001, "FieldFloat": 3.14, "FieldDouble": 1.56, "FieldString": "hello world", "FieldBinaryVector": [254, 0], "FieldFloatVector": [1.1, 1.2, 1.3, 1.4]},
 		]
 	}`)
 
@@ -314,70 +314,70 @@ func createSampleNumpyFiles(t *testing.T, cm storage.ChunkManager) []string {
 	ctx := context.Background()
 	files := make([]string, 0)
 
-	filePath := path.Join(cm.RootPath(), "field_bool.npy")
+	filePath := path.Join(cm.RootPath(), "FieldBool.npy")
 	content, err := CreateNumpyData([]bool{true, false, true, true, true})
 	assert.Nil(t, err)
 	err = cm.Write(ctx, filePath, content)
 	assert.NoError(t, err)
 	files = append(files, filePath)
 
-	filePath = path.Join(cm.RootPath(), "field_int8.npy")
+	filePath = path.Join(cm.RootPath(), "FieldInt8.npy")
 	content, err = CreateNumpyData([]int8{10, 11, 12, 13, 14})
 	assert.Nil(t, err)
 	err = cm.Write(ctx, filePath, content)
 	assert.NoError(t, err)
 	files = append(files, filePath)
 
-	filePath = path.Join(cm.RootPath(), "field_int16.npy")
+	filePath = path.Join(cm.RootPath(), "FieldInt16.npy")
 	content, err = CreateNumpyData([]int16{100, 101, 102, 103, 104})
 	assert.Nil(t, err)
 	err = cm.Write(ctx, filePath, content)
 	assert.NoError(t, err)
 	files = append(files, filePath)
 
-	filePath = path.Join(cm.RootPath(), "field_int32.npy")
+	filePath = path.Join(cm.RootPath(), "FieldInt32.npy")
 	content, err = CreateNumpyData([]int32{1000, 1001, 1002, 1003, 1004})
 	assert.Nil(t, err)
 	err = cm.Write(ctx, filePath, content)
 	assert.NoError(t, err)
 	files = append(files, filePath)
 
-	filePath = path.Join(cm.RootPath(), "field_int64.npy")
+	filePath = path.Join(cm.RootPath(), "FieldInt64.npy")
 	content, err = CreateNumpyData([]int64{10000, 10001, 10002, 10003, 10004})
 	assert.Nil(t, err)
 	err = cm.Write(ctx, filePath, content)
 	assert.NoError(t, err)
 	files = append(files, filePath)
 
-	filePath = path.Join(cm.RootPath(), "field_float.npy")
+	filePath = path.Join(cm.RootPath(), "FieldFloat.npy")
 	content, err = CreateNumpyData([]float32{3.14, 3.15, 3.16, 3.17, 3.18})
 	assert.Nil(t, err)
 	err = cm.Write(ctx, filePath, content)
 	assert.NoError(t, err)
 	files = append(files, filePath)
 
-	filePath = path.Join(cm.RootPath(), "field_double.npy")
+	filePath = path.Join(cm.RootPath(), "FieldDouble.npy")
 	content, err = CreateNumpyData([]float64{5.1, 5.2, 5.3, 5.4, 5.5})
 	assert.Nil(t, err)
 	err = cm.Write(ctx, filePath, content)
 	assert.NoError(t, err)
 	files = append(files, filePath)
 
-	filePath = path.Join(cm.RootPath(), "field_string.npy")
+	filePath = path.Join(cm.RootPath(), "FieldString.npy")
 	content, err = CreateNumpyData([]string{"a", "bb", "ccc", "dd", "e"})
 	assert.Nil(t, err)
 	err = cm.Write(ctx, filePath, content)
 	assert.NoError(t, err)
 	files = append(files, filePath)
 
-	filePath = path.Join(cm.RootPath(), "field_binary_vector.npy")
+	filePath = path.Join(cm.RootPath(), "FieldBinaryVector.npy")
 	content, err = CreateNumpyData([][2]uint8{{1, 2}, {3, 4}, {5, 6}, {7, 8}, {9, 10}})
 	assert.Nil(t, err)
 	err = cm.Write(ctx, filePath, content)
 	assert.NoError(t, err)
 	files = append(files, filePath)
 
-	filePath = path.Join(cm.RootPath(), "field_float_vector.npy")
+	filePath = path.Join(cm.RootPath(), "FieldFloatVector.npy")
 	content, err = CreateNumpyData([][4]float32{{1, 2, 3, 4}, {3, 4, 5, 6}, {5, 6, 7, 8}, {7, 8, 9, 10}, {9, 10, 11, 12}})
 	assert.Nil(t, err)
 	err = cm.Write(ctx, filePath, content)
@@ -431,7 +431,7 @@ func Test_ImportWrapperColumnBased_numpy(t *testing.T) {
 	assert.Equal(t, commonpb.ImportState_ImportPersisted, importResult.State)
 
 	// row count of fields not equal
-	filePath := path.Join(cm.RootPath(), "field_int8.npy")
+	filePath := path.Join(cm.RootPath(), "FieldInt8.npy")
 	content, err := CreateNumpyData([]int8{10})
 	assert.Nil(t, err)
 	err = cm.Write(ctx, filePath, content)
@@ -780,11 +780,11 @@ func Test_ImportWrapperReportFailRowBased(t *testing.T) {
 
 	content := []byte(`{
 		"rows":[
-			{"field_bool": true, "field_int8": 10, "field_int16": 101, "field_int32": 1001, "field_int64": 10001, "field_float": 3.14, "field_double": 1.56, "field_string": "hello world", "field_binary_vector": [254, 0], "field_float_vector": [1.1, 1.2, 1.3, 1.4]},
-			{"field_bool": false, "field_int8": 11, "field_int16": 102, "field_int32": 1002, "field_int64": 10002, "field_float": 3.15, "field_double": 2.56, "field_string": "hello world", "field_binary_vector": [253, 0], "field_float_vector": [2.1, 2.2, 2.3, 2.4]},
-			{"field_bool": true, "field_int8": 12, "field_int16": 103, "field_int32": 1003, "field_int64": 10003, "field_float": 3.16, "field_double": 3.56, "field_string": "hello world", "field_binary_vector": [252, 0], "field_float_vector": [3.1, 3.2, 3.3, 3.4]},
-			{"field_bool": false, "field_int8": 13, "field_int16": 104, "field_int32": 1004, "field_int64": 10004, "field_float": 3.17, "field_double": 4.56, "field_string": "hello world", "field_binary_vector": [251, 0], "field_float_vector": [4.1, 4.2, 4.3, 4.4]},
-			{"field_bool": true, "field_int8": 14, "field_int16": 105, "field_int32": 1005, "field_int64": 10005, "field_float": 3.18, "field_double": 5.56, "field_string": "hello world", "field_binary_vector": [250, 0], "field_float_vector": [5.1, 5.2, 5.3, 5.4]}
+			{"FieldBool": true, "FieldInt8": 10, "FieldInt16": 101, "FieldInt32": 1001, "FieldInt64": 10001, "FieldFloat": 3.14, "FieldDouble": 1.56, "FieldString": "hello world", "FieldBinaryVector": [254, 0], "FieldFloatVector": [1.1, 1.2, 1.3, 1.4]},
+			{"FieldBool": false, "FieldInt8": 11, "FieldInt16": 102, "FieldInt32": 1002, "FieldInt64": 10002, "FieldFloat": 3.15, "FieldDouble": 2.56, "FieldString": "hello world", "FieldBinaryVector": [253, 0], "FieldFloatVector": [2.1, 2.2, 2.3, 2.4]},
+			{"FieldBool": true, "FieldInt8": 12, "FieldInt16": 103, "FieldInt32": 1003, "FieldInt64": 10003, "FieldFloat": 3.16, "FieldDouble": 3.56, "FieldString": "hello world", "FieldBinaryVector": [252, 0], "FieldFloatVector": [3.1, 3.2, 3.3, 3.4]},
+			{"FieldBool": false, "FieldInt8": 13, "FieldInt16": 104, "FieldInt32": 1004, "FieldInt64": 10004, "FieldFloat": 3.17, "FieldDouble": 4.56, "FieldString": "hello world", "FieldBinaryVector": [251, 0], "FieldFloatVector": [4.1, 4.2, 4.3, 4.4]},
+			{"FieldBool": true, "FieldInt8": 14, "FieldInt16": 105, "FieldInt32": 1005, "FieldInt64": 10005, "FieldFloat": 3.18, "FieldDouble": 5.56, "FieldString": "hello world", "FieldBinaryVector": [250, 0], "FieldFloatVector": [5.1, 5.2, 5.3, 5.4]}
 		]
 	}`)
 
