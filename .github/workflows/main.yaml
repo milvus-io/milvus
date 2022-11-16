@@ -46,7 +46,19 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v2
-      - name: 'Generate CCache Hash'
+      - name: Paths Changes Filter
+        id: changes
+        uses: dorny/paths-filter@v2.11.1
+        with:
+          filters: |
+            cpp:
+              - '**.cpp'
+              - '**.cc'
+              - '**.c'
+              - '**.hpp'
+              - '**/CMakeLists.txt'
+
+      - name: "Generate CCache Hash"
         env:
           CORE_HASH: ${{ hashFiles( 'internal/core/**/*.cpp', 'internal/core/**/*.cc', 'internal/core/**/*.c', 'internal/core/**/*.h', 'internal/core/**/*.hpp', 'internal/core/**/CMakeLists.txt') }}
         run: |
@@ -58,6 +70,12 @@ jobs:
           path: .docker/amd64-ubuntu${{ matrix.ubuntu }}-ccache
           key: ubuntu${{ matrix.ubuntu }}-ccache-${{ env.corehash }}
           restore-keys: ubuntu${{ matrix.ubuntu }}-ccache-
+      - name: Cache CPP UT Coverage
+        uses: actions/cache@v3
+        with:
+          path: ./lcov_output.info
+          key: ubuntu${{ matrix.ubuntu }}-cpp-ut-coverage-${{ env.corehash }}
+          restore-keys: ubuntu${{ matrix.ubuntu }}-cpp-ut-coverage-
       - name: Cache Third Party
         uses: actions/cache@v3
         with:
@@ -83,6 +101,11 @@ jobs:
       - name: Build and UnitTest
         run: |
           ./build/builder.sh /bin/bash -c "make ci-ut"
+# if [[ ${{ steps.changes.outputs.cpp }} == 'true' }} ]];then
+#   ./build/builder.sh /bin/bash -c "make ci-ut"
+# else
+#   ./build/builder.sh /bin/bash -c "make ci-ut-without-cpp"
+# fi    
       - name: Get the status & restart count for containers when ut failed
         if: ${{ failure() }}
         run: |

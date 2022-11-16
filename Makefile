@@ -296,3 +296,5 @@ mock-tnx-kv:
 
 
 ci-ut: build-cpp-with-coverage generated-proto-go-without-cpp codecov-cpp codecov-go
+
+ci-ut-without-cpp: build-cpp-with-coverage generated-proto-go-without-cpp codecov-go
