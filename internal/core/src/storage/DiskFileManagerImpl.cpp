@@ -60,6 +60,10 @@ using WriteLock = std::lock_guard<std::shared_mutex>;
 
 namespace milvus::storage {
 
+std::atomic<int> DiskFileManagerImpl::cached_index_tasks_{0};
+
+static const int max_data_parallel_worker = 128;
+
 DiskFileManagerImpl::DiskFileManagerImpl(const FieldDataMeta& field_mata,
                                          const IndexMeta& index_meta,
                                          const StorageConfig& storage_config)
@@ -211,8 +215,12 @@ DiskFileManagerImpl::CacheBatchIndexFilesToDisk(const std::vector<std::string>& 
     }
     std::vector<std::future<std::unique_ptr<DataCodec>>> futures;
     for (int i = 0; i < batch_size; ++i) {
+        while (cached_index_tasks_.load() > max_data_parallel_worker) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
         futures.push_back(
             pool.Submit(DownloadAndDecodeRemoteIndexfile, rcm_.get(), remote_files[i], &cache_payloads[i]));
+        cached_index_tasks_.fetch_add(1);
     }
 
     uint64_t offset = local_file_init_offfset;
@@ -222,6 +230,7 @@ DiskFileManagerImpl::CacheBatchIndexFilesToDisk(const std::vector<std::string>& 
         auto index_size = index_payload->rows * sizeof(uint8_t);
         local_chunk_manager.Write(local_file_name, offset, const_cast<uint8_t*>(index_payload->raw_data), index_size);
         offset += index_size;
+        cached_index_tasks_.fetch_sub(1);
     }
 
     return offset;

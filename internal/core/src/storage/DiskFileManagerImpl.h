@@ -118,6 +118,8 @@ class DiskFileManagerImpl : public FileManagerImpl {
 
     RemoteChunkManagerPtr rcm_;
     std::string remote_root_path_;
+
+    static std::atomic<int> cached_index_tasks_;
 };
 
 using DiskANNFileManagerImplPtr = std::shared_ptr<DiskFileManagerImpl>;
