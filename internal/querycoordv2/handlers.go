@@ -86,7 +86,11 @@ func (s *Server) balanceSegments(ctx context.Context, req *querypb.LoadBalanceRe
 	dstNodeSet.Remove(srcNode)
 
 	toBalance := typeutil.NewSet[*meta.Segment]()
+	// Only balance segments in targets
 	segments := s.dist.SegmentDistManager.GetByNode(srcNode)
+	segments = lo.Filter(segments, func(segment *meta.Segment, _ int) bool {
+		return s.targetMgr.GetHistoricalSegment(segment.GetCollectionID(), segment.GetID(), meta.CurrentTarget) != nil
+	})
 	allSegments := make(map[int64]*meta.Segment)
 	for _, segment := range segments {
 		allSegments[segment.GetID()] = segment
