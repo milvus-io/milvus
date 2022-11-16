@@ -198,6 +198,16 @@ DownloadAndDecodeRemoteIndexfile(RemoteChunkManager* remote_chunk_manager,
     return DeserializeFileData(buf.get(), fileSize);
 }
 
+void
+WriteLocalIndexFile(LocalChunkManager* local_chunk_manager,
+                    std::string file,
+                    uint64_t offset,
+                    std::shared_ptr<DataCodec> data,
+                    uint64_t size) {
+    auto index_payload = data->GetPayload();
+    local_chunk_manager->Write(file, offset, const_cast<uint8_t*>(index_payload->raw_data), size);
+}
+
 uint64_t
 DiskFileManagerImpl::CacheBatchIndexFilesToDisk(const std::vector<std::string>& remote_files,
                                                 const std::string& local_file_name,
@@ -216,14 +226,18 @@ DiskFileManagerImpl::CacheBatchIndexFilesToDisk(const std::vector<std::string>& 
     }
 
     uint64_t offset = local_file_init_offfset;
+    std::vector<std::future<void>> write_futures;
     for (int i = 0; i < batch_size; ++i) {
         auto res = futures[i].get();
-        auto index_payload = res->GetPayload();
-        auto index_size = index_payload->rows * sizeof(uint8_t);
-        local_chunk_manager.Write(local_file_name, offset, const_cast<uint8_t*>(index_payload->raw_data), index_size);
+        std::shared_ptr<DataCodec> data = std::move(res);
+        auto index_size = data->GetPayload()->rows * sizeof(uint8_t);
+        write_futures.push_back(
+            pool.Submit(WriteLocalIndexFile, &local_chunk_manager, local_file_name, offset, data, index_size));
         offset += index_size;
     }
-
+    for (auto& future : write_futures) {
+        future.get();
+    }
     return offset;
 }
 
