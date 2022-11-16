@@ -206,7 +206,7 @@ func printBinlogFile(filename string) error {
 			physical, _ = tsoutil.ParseTS(evd.EndTimestamp)
 			fmt.Printf("\tEndTimestamp: %v\n", physical)
 			key := fmt.Sprintf("%v", extra["key"])
-			if err := printIndexFilePayloadValues(event.PayloadReaderInterface, key); err != nil {
+			if err := printIndexFilePayloadValues(event.PayloadReaderInterface, key, desc.PayloadDataType); err != nil {
 				return err
 			}
 		default:
@@ -385,30 +385,57 @@ func printDDLPayloadValues(eventType EventTypeCode, colType schemapb.DataType, r
 }
 
 // only print slice meta and index params
-func printIndexFilePayloadValues(reader PayloadReaderInterface, key string) error {
-	if key == IndexParamsKey {
-		content, err := reader.GetByteFromPayload()
-		if err != nil {
-			return err
+func printIndexFilePayloadValues(reader PayloadReaderInterface, key string, dataType schemapb.DataType) error {
+	if dataType == schemapb.DataType_Int8 {
+		if key == IndexParamsKey {
+			content, err := reader.GetByteFromPayload()
+			if err != nil {
+				return err
+			}
+			fmt.Print("index params: \n")
+			fmt.Println(content)
+
+			return nil
 		}
-		fmt.Print("index params: \n")
-		fmt.Println(content)
 
-		return nil
-	}
+		if key == "SLICE_META" {
+			content, err := reader.GetByteFromPayload()
+			if err != nil {
+				return err
+			}
+			// content is a json string serialized by milvus::json,
+			// it's better to use milvus::json to parse the content also,
+			// fortunately, the json string is readable enough.
+			fmt.Print("index slice meta: \n")
+			fmt.Println(content)
 
-	if key == "SLICE_META" {
-		content, err := reader.GetByteFromPayload()
-		if err != nil {
-			return err
+			return nil
 		}
-		// content is a json string serialized by milvus::json,
-		// it's better to use milvus::json to parse the content also,
-		// fortunately, the json string is readable enough.
-		fmt.Print("index slice meta: \n")
-		fmt.Println(content)
+	} else {
+		if key == IndexParamsKey {
+			content, err := reader.GetStringFromPayload()
+			if err != nil {
+				return err
+			}
+			fmt.Print("index params: \n")
+			fmt.Println(content[0])
 
-		return nil
+			return nil
+		}
+
+		if key == "SLICE_META" {
+			content, err := reader.GetStringFromPayload()
+			if err != nil {
+				return err
+			}
+			// content is a json string serialized by milvus::json,
+			// it's better to use milvus::json to parse the content also,
+			// fortunately, the json string is readable enough.
+			fmt.Print("index slice meta: \n")
+			fmt.Println(content[0])
+
+			return nil
+		}
 	}
 
 	return nil

@@ -18,6 +18,7 @@ package typeutil
 
 import (
 	"strings"
+	"unsafe"
 )
 
 // AddOne add one to last byte in string, on empty string return empty
@@ -51,4 +52,16 @@ func After(str string, sub string) string {
 // AfterN Split slices After(str) into all substrings separated by sep
 func AfterN(str string, sub string, sep string) []string {
 	return strings.Split(After(str, sub), sep)
+}
+
+/* #nosec G103 */
+func UnsafeStr2bytes(s string) []byte {
+	x := (*[2]uintptr)(unsafe.Pointer(&s))
+	b := [3]uintptr{x[0], x[1], x[1]}
+	return *(*[]byte)(unsafe.Pointer(&b))
+}
+
+/* #nosec G103 */
+func UnsafeBytes2str(b []byte) string {
+	return *(*string)(unsafe.Pointer(&b))
 }
