@@ -1287,11 +1287,11 @@ func (i *IndexCoord) pullSegmentInfo(ctx context.Context, segmentID UniqueID) (*
 		IncludeUnHealthy: false,
 	})
 	if err != nil {
-		log.Error("IndexCoord get segment info fail", zap.Int64("segID", segmentID), zap.Error(err))
+		log.Warn("IndexCoord get segment info fail", zap.Int64("segID", segmentID), zap.Error(err))
 		return nil, err
 	}
 	if resp.Status.GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Error("IndexCoord get segment info fail", zap.Int64("segID", segmentID),
+		log.Warn("IndexCoord get segment info fail", zap.Int64("segID", segmentID),
 			zap.String("fail reason", resp.Status.GetReason()))
 		if resp.Status.GetReason() == msgSegmentNotFound(segmentID) {
 			return nil, errSegmentNotFound(segmentID)
@@ -1304,6 +1304,6 @@ func (i *IndexCoord) pullSegmentInfo(ctx context.Context, segmentID UniqueID) (*
 		}
 	}
 	errMsg := msgSegmentNotFound(segmentID)
-	log.Error(errMsg)
+	log.Warn(errMsg)
 	return nil, errSegmentNotFound(segmentID)
 }
