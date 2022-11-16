@@ -185,6 +185,16 @@ func (suite *ServerSuite) TestNodeUp() {
 
 }
 
+func (suite *ServerSuite) TestNodeUpdate() {
+	downNode := suite.nodes[0]
+	downNode.Stopping()
+
+	suite.Eventually(func() bool {
+		node := suite.server.nodeMgr.Get(downNode.ID)
+		return node.IsStoppingState()
+	}, 5*time.Second, time.Second)
+}
+
 func (suite *ServerSuite) TestNodeDown() {
 	downNode := suite.nodes[0]
 	downNode.Stop()

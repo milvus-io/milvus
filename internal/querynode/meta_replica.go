@@ -139,6 +139,7 @@ type ReplicaInterface interface {
 
 	getGrowingSegments() []*Segment
 	getSealedSegments() []*Segment
+	getNoSegmentChan() <-chan struct{}
 }
 
 // collectionReplica is the data replication of memory data in query node.
@@ -149,6 +150,7 @@ type metaReplica struct {
 	partitions      map[UniqueID]*Partition
 	growingSegments map[UniqueID]*Segment
 	sealedSegments  map[UniqueID]*Segment
+	noSegmentChan   chan struct{}
 
 	excludedSegments map[UniqueID][]*datapb.SegmentInfo // map[collectionID]segmentIDs
 
@@ -743,6 +745,26 @@ func (replica *metaReplica) removeSegmentPrivate(segmentID UniqueID, segType seg
 			).Sub(float64(rowCount))
 		}
 	}
+	replica.sendNoSegmentSignal()
+}
+
+func (replica *metaReplica) sendNoSegmentSignal() {
+	if replica.noSegmentChan == nil {
+		return
+	}
+	select {
+	case <-replica.noSegmentChan:
+	default:
+		if len(replica.growingSegments) == 0 && len(replica.sealedSegments) == 0 {
+			close(replica.noSegmentChan)
+		}
+	}
+}
+
+func (replica *metaReplica) getNoSegmentChan() <-chan struct{} {
+	replica.noSegmentChan = make(chan struct{})
+	replica.sendNoSegmentSignal()
+	return replica.noSegmentChan
 }
 
 // getSegmentByID returns the segment which id is segmentID

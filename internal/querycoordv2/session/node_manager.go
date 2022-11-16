@@ -26,6 +26,7 @@ import (
 
 type Manager interface {
 	Add(node *NodeInfo)
+	Stopping(nodeID int64)
 	Remove(nodeID int64)
 	Get(nodeID int64) *NodeInfo
 	GetAll() []*NodeInfo
@@ -50,6 +51,14 @@ func (m *NodeManager) Remove(nodeID int64) {
 	metrics.QueryCoordNumQueryNodes.WithLabelValues().Set(float64(len(m.nodes)))
 }
 
+func (m *NodeManager) Stopping(nodeID int64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if nodeInfo, ok := m.nodes[nodeID]; ok {
+		nodeInfo.SetState(NodeStateStopping)
+	}
+}
+
 func (m *NodeManager) Get(nodeID int64) *NodeInfo {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -72,11 +81,19 @@ func NewNodeManager() *NodeManager {
 	}
 }
 
+type State int
+
+const (
+	NodeStateNormal = iota
+	NodeStateStopping
+)
+
 type NodeInfo struct {
 	stats
 	mu            sync.RWMutex
 	id            int64
 	addr          string
+	state         State
 	lastHeartbeat *atomic.Int64
 }
 
@@ -106,6 +123,18 @@ func (n *NodeInfo) SetLastHeartbeat(time time.Time) {
 
 func (n *NodeInfo) LastHeartbeat() time.Time {
 	return time.Unix(0, n.lastHeartbeat.Load())
+}
+
+func (n *NodeInfo) IsStoppingState() bool {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	return n.state == NodeStateStopping
+}
+
+func (n *NodeInfo) SetState(s State) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.state = s
 }
 
 func (n *NodeInfo) UpdateStats(opts ...StatsOption) {

@@ -30,6 +30,8 @@ import "C"
 import (
 	"context"
 	"fmt"
+	"github.com/samber/lo"
+	uberatomic "go.uber.org/atomic"
 	"os"
 	"path"
 	"runtime"
@@ -87,6 +89,7 @@ type QueryNode struct {
 	wg sync.WaitGroup
 
 	stateCode atomic.Value
+	stopFlag  uberatomic.Bool
 
 	//call once
 	initOnce sync.Once
@@ -137,6 +140,7 @@ func NewQueryNode(ctx context.Context, factory dependency.Factory) *QueryNode {
 	node.tSafeReplica = newTSafeReplica()
 	node.scheduler = newTaskScheduler(ctx1, node.tSafeReplica)
 	node.UpdateStateCode(commonpb.StateCode_Abnormal)
+	node.stopFlag.Store(false)
 
 	return node
 }
@@ -324,8 +328,34 @@ func (node *QueryNode) Start() error {
 
 // Stop mainly stop QueryNode's query service, historical loop and streaming loop.
 func (node *QueryNode) Stop() error {
+	if node.stopFlag.Load() {
+		return nil
+	}
+	node.stopFlag.Store(true)
+
 	log.Warn("Query node stop..")
+	err := node.session.GoingStop()
+	if err != nil {
+		log.Warn("session fail to go stopping state", zap.Error(err))
+	} else {
+		node.UpdateStateCode(commonpb.StateCode_Stopping)
+		noSegmentChan := node.metaReplica.getNoSegmentChan()
+		select {
+		case <-noSegmentChan:
+		case <-time.After(time.Duration(Params.QueryNodeCfg.GracefulStopTimeout) * time.Second):
+			log.Warn("migrate data timed out", zap.Int64("server_id", paramtable.GetNodeID()),
+				zap.Int64s("sealed_segment", lo.Map[*Segment, int64](node.metaReplica.getSealedSegments(), func(t *Segment, i int) int64 {
+					return t.ID()
+				})),
+				zap.Int64s("growing_segment", lo.Map[*Segment, int64](node.metaReplica.getGrowingSegments(), func(t *Segment, i int) int64 {
+					return t.ID()
+				})),
+			)
+		}
+	}
+
 	node.UpdateStateCode(commonpb.StateCode_Abnormal)
+	node.wg.Wait()
 	node.queryNodeLoopCancel()
 
 	// close services
@@ -346,7 +376,6 @@ func (node *QueryNode) Stop() error {
 	}
 
 	node.session.Revoke(time.Second)
-	node.wg.Wait()
 	return nil
 }
 

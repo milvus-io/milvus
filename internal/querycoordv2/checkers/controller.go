@@ -35,6 +35,7 @@ var (
 
 type CheckerController struct {
 	stopCh    chan struct{}
+	checkCh   chan struct{}
 	meta      *meta.Meta
 	dist      *meta.DistributionManager
 	targetMgr *meta.TargetManager
@@ -68,6 +69,7 @@ func NewCheckerController(
 
 	return &CheckerController{
 		stopCh:    make(chan struct{}),
+		checkCh:   make(chan struct{}),
 		meta:      meta,
 		dist:      dist,
 		targetMgr: targetMgr,
@@ -92,6 +94,11 @@ func (controller *CheckerController) Start(ctx context.Context) {
 
 			case <-ticker.C:
 				controller.check(ctx)
+
+			case <-controller.checkCh:
+				ticker.Stop()
+				controller.check(ctx)
+				ticker.Reset(Params.QueryCoordCfg.CheckInterval)
 			}
 		}
 	}()
@@ -101,6 +108,10 @@ func (controller *CheckerController) Stop() {
 	controller.stopOnce.Do(func() {
 		close(controller.stopCh)
 	})
+}
+
+func (controller *CheckerController) Check() {
+	controller.checkCh <- struct{}{}
 }
 
 // check is the real implementation of Check

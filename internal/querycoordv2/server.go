@@ -559,6 +559,16 @@ func (s *Server) watchNodes(revision int64) {
 				s.handleNodeUp(nodeID)
 				s.metricsCacheManager.InvalidateSystemInfoMetrics()
 
+			case sessionutil.SessionUpdateEvent:
+				nodeID := event.Session.ServerID
+				addr := event.Session.Address
+				log.Info("stopping the node",
+					zap.Int64("nodeID", nodeID),
+					zap.String("nodeAddr", addr),
+				)
+				s.nodeMgr.Stopping(nodeID)
+				s.checkerController.Check()
+
 			case sessionutil.SessionDelEvent:
 				nodeID := event.Session.ServerID
 				log.Info("a node down, remove it", zap.Int64("nodeID", nodeID))

@@ -58,7 +58,6 @@ func (dh *distHandler) start(ctx context.Context) {
 	logger := log.With(zap.Int64("nodeID", dh.nodeID))
 	logger.Info("start dist handler")
 	ticker := time.NewTicker(Params.QueryCoordCfg.DistPullInterval)
-	id := int64(1)
 	failures := 0
 	for {
 		select {
@@ -69,36 +68,25 @@ func (dh *distHandler) start(ctx context.Context) {
 			logger.Info("close dist handelr")
 			return
 		case <-ticker.C:
-			dh.mu.Lock()
-			cctx, cancel := context.WithTimeout(ctx, distReqTimeout)
-			resp, err := dh.client.GetDataDistribution(cctx, dh.nodeID, &querypb.GetDataDistributionRequest{
-				Base: commonpbutil.NewMsgBase(
-					commonpbutil.WithMsgType(commonpb.MsgType_GetDistribution),
-				),
-			})
-			cancel()
-
-			if err != nil || resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-				failures++
-				dh.logFailureInfo(resp, err)
-				node := dh.nodeManager.Get(dh.nodeID)
-				if node != nil {
-					log.RatedDebug(30.0, "failed to get node's data distribution",
-						zap.Int64("nodeID", dh.nodeID),
-						zap.Time("lastHeartbeat", node.LastHeartbeat()),
-					)
+			dh.getDistribution(ctx, func(isSuccess bool) {
+				if !isSuccess {
+					failures++
+					node := dh.nodeManager.Get(dh.nodeID)
+					if node != nil {
+						log.RatedDebug(30.0, "failed to get node's data distribution",
+							zap.Int64("nodeID", dh.nodeID),
+							zap.Time("lastHeartbeat", node.LastHeartbeat()),
+						)
+					}
+				} else {
+					failures = 0
 				}
-			} else {
-				failures = 0
-				dh.handleDistResp(resp)
-			}
 
-			if failures >= maxFailureTimes {
-				log.RatedInfo(30.0, fmt.Sprintf("can not get data distribution from node %d for %d times", dh.nodeID, failures))
-				// TODO: kill the querynode server and stop the loop?
-			}
-			id++
-			dh.mu.Unlock()
+				if failures >= maxFailureTimes {
+					log.RatedInfo(30.0, fmt.Sprintf("can not get data distribution from node %d for %d times", dh.nodeID, failures))
+					// TODO: kill the querynode server and stop the loop?
+				}
+			})
 		}
 	}
 }
@@ -219,7 +207,7 @@ func (dh *distHandler) updateLeaderView(resp *querypb.GetDataDistributionRespons
 	dh.dist.LeaderViewManager.Update(resp.GetNodeID(), updates...)
 }
 
-func (dh *distHandler) getDistribution(ctx context.Context) {
+func (dh *distHandler) getDistribution(ctx context.Context, fn func(isSuccess bool)) {
 	dh.mu.Lock()
 	defer dh.mu.Unlock()
 	cctx, cancel := context.WithTimeout(ctx, distReqTimeout)
@@ -230,10 +218,15 @@ func (dh *distHandler) getDistribution(ctx context.Context) {
 	})
 	cancel()
 
-	if err != nil || resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+	isSuccess := err != nil || resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success
+	if isSuccess {
 		dh.logFailureInfo(resp, err)
 	} else {
 		dh.handleDistResp(resp)
+	}
+
+	if fn != nil {
+		fn(isSuccess)
 	}
 }
 

@@ -34,6 +34,7 @@ const (
 	// DefaultIndexSliceSize defines the default slice size of index file when serializing.
 	DefaultIndexSliceSize        = 16
 	DefaultGracefulTime          = 5000 //ms
+	DefaultGracefulStopTimeout   = 30   // s
 	DefaultThreadCoreCoefficient = 10
 
 	DefaultSessionTTL        = 60 //s
@@ -147,6 +148,7 @@ type commonConfig struct {
 	LoadNumThreadRatio       float64
 	BeamWidthRatio           float64
 	GracefulTime             int64
+	GracefulStopTimeout      int64 // unit: s
 
 	StorageType string
 	SimdType    string
@@ -198,6 +200,7 @@ func (p *commonConfig) init(base *BaseTable) {
 	p.initLoadNumThreadRatio()
 	p.initBeamWidthRatio()
 	p.initGracefulTime()
+	p.initGracefulStopTimeout()
 	p.initStorageType()
 	p.initThreadCoreCoefficient()
 
@@ -432,6 +435,10 @@ func (p *commonConfig) initSearchListSize() {
 
 func (p *commonConfig) initGracefulTime() {
 	p.GracefulTime = p.Base.ParseInt64WithDefault("common.gracefulTime", DefaultGracefulTime)
+}
+
+func (p *commonConfig) initGracefulStopTimeout() {
+	p.GracefulStopTimeout = p.Base.ParseInt64WithDefault("common.gracefulStopTimeout", DefaultGracefulStopTimeout)
 }
 
 func (p *commonConfig) initStorageType() {
@@ -941,6 +948,8 @@ type queryNodeConfig struct {
 	GCHelperEnabled   bool
 	MinimumGOGCConfig int
 	MaximumGOGCConfig int
+
+	GracefulStopTimeout int64
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -973,6 +982,8 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 	p.initGCTunerEnbaled()
 	p.initMaximumGOGC()
 	p.initMinimumGOGC()
+
+	p.initGracefulStopTimeout()
 }
 
 // InitAlias initializes an alias for the QueryNode role.
@@ -1143,6 +1154,10 @@ func (p *queryNodeConfig) initMinimumGOGC() {
 
 func (p *queryNodeConfig) initMaximumGOGC() {
 	p.MaximumGOGCConfig = p.Base.ParseIntWithDefault("queryNode.gchelper.maximumGoGC", 200)
+}
+
+func (p *queryNodeConfig) initGracefulStopTimeout() {
+	p.GracefulStopTimeout = p.Base.ParseInt64WithDefault("queryNode.gracefulStopTimeout", params.CommonCfg.GracefulStopTimeout)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

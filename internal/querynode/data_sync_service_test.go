@@ -27,6 +27,10 @@ import (
 	"github.com/stretchr/testify/suite"
 )
 
+func init() {
+	rateCol, _ = newRateCollector()
+}
+
 func TestDataSyncService_DMLFlowGraphs(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
