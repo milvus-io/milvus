@@ -1183,7 +1183,7 @@ class TestCompactionOperation(TestcaseBase):
         for plan in c_plans.plans:
             assert len(plan.sources) == 1
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_compact_during_insert(self):
         """
         target: test compact during insert and flush
@@ -1211,10 +1211,30 @@ class TestCompactionOperation(TestcaseBase):
         t.join()
 
         # waitting for new segment index and compact
-        cost = 240
+        index_cost = 240
         start = time()
         while True:
-            sleep(20)
+            sleep(10)
+            collection_w.load()
+            # new segment compacted
+            seg_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
+            if len(seg_info) == 2:
+                break
+            end = time()
+            collection_w.release()
+            if end - start > index_cost:
+                raise MilvusException(1, f"Waiting more than {index_cost}s for the new segment indexed")
+
+        # compact new segment
+        collection_w.compact()
+        collection_w.wait_for_compaction_completed()
+        collection_w.get_compaction_plans()
+
+        # waitting for new segment index and compact
+        compact_cost = 120
+        start = time()
+        while True:
+            sleep(10)
             collection_w.load()
             # new segment compacted
             seg_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
@@ -1222,11 +1242,11 @@ class TestCompactionOperation(TestcaseBase):
                 break
             end = time()
             collection_w.release()
-            if end - start > cost:
-                raise MilvusException(1, f"Waitting new segment index and compact more than {cost}s")
+            if end - start > compact_cost:
+                raise MilvusException(1, f"Waiting more than {compact_cost}s for the new target segment to load")
 
         # search
-        search_res, _ = collection_w.search(cf.gen_vectors(1, ct.default_dim),
+        search_res, _ = collection_w.search([df[ct.default_float_vec_field_name][0]],
                                             ct.default_float_vec_field_name,
                                             ct.default_search_params, ct.default_limit)
         assert len(search_res[0]) == ct.default_limit
