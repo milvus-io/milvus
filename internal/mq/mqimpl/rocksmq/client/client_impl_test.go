@@ -154,7 +154,8 @@ func TestClient_SeekLatest(t *testing.T) {
 	assert.NotNil(t, producer)
 	assert.NoError(t, err)
 	msg := &ProducerMessage{
-		Payload: make([]byte, 10),
+		Payload:    make([]byte, 10),
+		Properties: map[string]string{},
 	}
 	id, err := producer.Send(msg)
 	assert.Nil(t, err)

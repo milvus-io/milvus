@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/common"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	rocksdbkv "github.com/milvus-io/milvus/internal/kv/rocksdb"
 	"github.com/milvus-io/milvus/internal/util/etcd"
@@ -151,14 +152,14 @@ func TestRocksmq_Basic(t *testing.T) {
 
 	msgA := "a_message"
 	pMsgs := make([]ProducerMessage, 1)
-	pMsgA := ProducerMessage{Payload: []byte(msgA)}
+	pMsgA := ProducerMessage{Payload: []byte(msgA), Properties: map[string]string{common.TraceIDKey: "a"}}
 	pMsgs[0] = pMsgA
 
 	_, err = rmq.Produce(channelName, pMsgs)
 	assert.Nil(t, err)
 
-	pMsgB := ProducerMessage{Payload: []byte("b_message")}
-	pMsgC := ProducerMessage{Payload: []byte("c_message")}
+	pMsgB := ProducerMessage{Payload: []byte("b_message"), Properties: map[string]string{common.TraceIDKey: "b"}}
+	pMsgC := ProducerMessage{Payload: []byte("c_message"), Properties: map[string]string{common.TraceIDKey: "c"}}
 
 	pMsgs[0] = pMsgB
 	pMsgs = append(pMsgs, pMsgC)
@@ -176,12 +177,21 @@ func TestRocksmq_Basic(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, len(cMsgs), 1)
 	assert.Equal(t, string(cMsgs[0].Payload), "a_message")
+	_, ok := cMsgs[0].Properties[common.TraceIDKey]
+	assert.True(t, ok)
+	assert.Equal(t, cMsgs[0].Properties[common.TraceIDKey], "a")
 
 	cMsgs, err = rmq.Consume(channelName, groupName, 2)
 	assert.Nil(t, err)
 	assert.Equal(t, len(cMsgs), 2)
 	assert.Equal(t, string(cMsgs[0].Payload), "b_message")
+	_, ok = cMsgs[0].Properties[common.TraceIDKey]
+	assert.True(t, ok)
+	assert.Equal(t, cMsgs[0].Properties[common.TraceIDKey], "b")
 	assert.Equal(t, string(cMsgs[1].Payload), "c_message")
+	_, ok = cMsgs[1].Properties[common.TraceIDKey]
+	assert.True(t, ok)
+	assert.Equal(t, cMsgs[1].Properties[common.TraceIDKey], "c")
 }
 
 func TestRocksmq_MultiConsumer(t *testing.T) {
@@ -509,15 +519,17 @@ func TestRocksmq_Goroutines(t *testing.T) {
 	wg.Wait()
 }
 
-/**
-	This test is aim to measure RocksMq throughout.
-	Hardware:
-		CPU   Intel(R) Core(TM) i7-8700 CPU @ 3.20GHz
-        Disk  SSD
+/*
+*
 
-    Test with 1,000,000 message, result is as follow:
-	  	Produce: 190000 message / s
-		Consume: 90000 message / s
+		This test is aim to measure RocksMq throughout.
+		Hardware:
+			CPU   Intel(R) Core(TM) i7-8700 CPU @ 3.20GHz
+	        Disk  SSD
+
+	    Test with 1,000,000 message, result is as follow:
+		  	Produce: 190000 message / s
+			Consume: 90000 message / s
 */
 func TestRocksmq_Throughout(t *testing.T) {
 	ep := etcdEndpoints()

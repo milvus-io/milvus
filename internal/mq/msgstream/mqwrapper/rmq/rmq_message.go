@@ -31,7 +31,7 @@ func (rm *rmqMessage) Topic() string {
 
 // Properties returns the properties of rocksmq message
 func (rm *rmqMessage) Properties() map[string]string {
-	return nil
+	return rm.msg.Properties
 }
 
 // Payload returns the payload of rocksmq message

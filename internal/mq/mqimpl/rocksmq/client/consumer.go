@@ -44,9 +44,10 @@ type ConsumerOptions struct {
 // Message is the message content of a consumer message
 type Message struct {
 	Consumer
-	MsgID   UniqueID
-	Topic   string
-	Payload []byte
+	MsgID      UniqueID
+	Topic      string
+	Payload    []byte
+	Properties map[string]string
 }
 
 // Consumer interface provide operations for a consumer

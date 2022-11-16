@@ -275,7 +275,7 @@ func (ms *mqMsgStream) Produce(msgPack *MsgPack) error {
 
 			msg := &mqwrapper.ProducerMessage{Payload: m, Properties: map[string]string{}}
 
-			trace.InjectContextToPulsarMsgProperties(sp.Context(), msg.Properties)
+			trace.InjectContextToMsgProperties(sp.Context(), msg.Properties)
 
 			ms.producerLock.Lock()
 			if _, err := ms.producers[channel].Send(
@@ -341,7 +341,7 @@ func (ms *mqMsgStream) ProduceMark(msgPack *MsgPack) (map[string][]MessageID, er
 
 			msg := &mqwrapper.ProducerMessage{Payload: m, Properties: map[string]string{}}
 
-			trace.InjectContextToPulsarMsgProperties(sp.Context(), msg.Properties)
+			trace.InjectContextToMsgProperties(sp.Context(), msg.Properties)
 
 			ms.producerLock.Lock()
 			id, err := ms.producers[channel].Send(
@@ -384,7 +384,7 @@ func (ms *mqMsgStream) Broadcast(msgPack *MsgPack) error {
 
 		msg := &mqwrapper.ProducerMessage{Payload: m, Properties: map[string]string{}}
 
-		trace.InjectContextToPulsarMsgProperties(sp.Context(), msg.Properties)
+		trace.InjectContextToMsgProperties(sp.Context(), msg.Properties)
 
 		ms.producerLock.Lock()
 		for _, producer := range ms.producers {
@@ -426,7 +426,7 @@ func (ms *mqMsgStream) BroadcastMark(msgPack *MsgPack) (map[string][]MessageID, 
 
 		msg := &mqwrapper.ProducerMessage{Payload: m, Properties: map[string]string{}}
 
-		trace.InjectContextToPulsarMsgProperties(sp.Context(), msg.Properties)
+		trace.InjectContextToMsgProperties(sp.Context(), msg.Properties)
 
 		ms.producerLock.Lock()
 		for channel, producer := range ms.producers {
@@ -504,7 +504,7 @@ func (ms *mqMsgStream) receiveMsg(consumer mqwrapper.Consumer) {
 				Timestamp:   tsMsg.BeginTs(),
 			})
 
-			sp, ok := ExtractFromPulsarMsgProperties(tsMsg, msg.Properties())
+			sp, ok := ExtractFromMsgProperties(tsMsg, msg.Properties())
 			if ok {
 				tsMsg.SetTraceCtx(opentracing.ContextWithSpan(context.Background(), sp))
 			}
@@ -810,7 +810,7 @@ func (ms *MqTtMsgStream) consumeToTtMsg(consumer mqwrapper.Consumer) {
 				continue
 			}
 
-			sp, ok := ExtractFromPulsarMsgProperties(tsMsg, msg.Properties())
+			sp, ok := ExtractFromMsgProperties(tsMsg, msg.Properties())
 			if ok {
 				tsMsg.SetTraceCtx(opentracing.ContextWithSpan(context.Background(), sp))
 			}

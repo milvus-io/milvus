@@ -172,7 +172,9 @@ func TestKafkaClient_ConsumeWithAck(t *testing.T) {
 	rand.Seed(time.Now().UnixNano())
 	topic := fmt.Sprintf("test-topic-%d", rand.Int())
 	subName := fmt.Sprintf("test-subname-%d", rand.Int())
-	arr := []int{111, 222, 333, 444, 555, 666, 777}
+	arr1 := []int{111, 222, 333, 444, 555, 666, 777}
+	arr2 := []string{"111", "222", "333", "444", "555", "666", "777"}
+
 	c := make(chan mqwrapper.MessageID, 1)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -183,7 +185,7 @@ func TestKafkaClient_ConsumeWithAck(t *testing.T) {
 
 	producer := createProducer(t, kc, topic)
 	defer producer.Close()
-	produceData(ctx, t, producer, arr)
+	produceData(ctx, t, producer, arr1, arr2)
 	time.Sleep(100 * time.Millisecond)
 
 	ctx1, cancel1 := context.WithTimeout(ctx, 5*time.Second)
@@ -203,9 +205,9 @@ func TestKafkaClient_ConsumeWithAck(t *testing.T) {
 	cancel3()
 
 	cancel()
-	assert.Equal(t, len(arr), total1+total2)
+	assert.Equal(t, len(arr1), total1+total2)
 
-	assert.Equal(t, len(arr), total3)
+	assert.Equal(t, len(arr1), total3)
 }
 
 func TestKafkaClient_SeekPosition(t *testing.T) {
@@ -220,8 +222,9 @@ func TestKafkaClient_SeekPosition(t *testing.T) {
 	producer := createProducer(t, kc, topic)
 	defer producer.Close()
 
-	data := []int{1, 2, 3}
-	ids := produceData(ctx, t, producer, data)
+	data1 := []int{1, 2, 3}
+	data2 := []string{"1", "2", "3"}
+	ids := produceData(ctx, t, producer, data1, data2)
 
 	consumer := createConsumer(t, kc, topic, subName, mqwrapper.SubscriptionPositionUnknown)
 	defer consumer.Close()
@@ -233,6 +236,7 @@ func TestKafkaClient_SeekPosition(t *testing.T) {
 	case msg := <-consumer.Chan():
 		consumer.Ack(msg)
 		assert.Equal(t, 3, BytesToInt(msg.Payload()))
+		assert.Equal(t, "3", msg.Properties()[common.TraceIDKey])
 	case <-time.After(10 * time.Second):
 		assert.FailNow(t, "should not wait")
 	}
@@ -250,22 +254,25 @@ func TestKafkaClient_ConsumeFromLatest(t *testing.T) {
 	producer := createProducer(t, kc, topic)
 	defer producer.Close()
 
-	data := []int{1, 2}
-	produceData(ctx, t, producer, data)
+	data1 := []int{1, 2}
+	data2 := []string{"1", "2"}
+	produceData(ctx, t, producer, data1, data2)
 
 	consumer := createConsumer(t, kc, topic, subName, mqwrapper.SubscriptionPositionLatest)
 	defer consumer.Close()
 
 	go func() {
 		time.Sleep(time.Second * 2)
-		data := []int{3}
-		produceData(ctx, t, producer, data)
+		data1 := []int{3}
+		data2 := []string{"3"}
+		produceData(ctx, t, producer, data1, data2)
 	}()
 
 	select {
 	case msg := <-consumer.Chan():
 		consumer.Ack(msg)
 		assert.Equal(t, 3, BytesToInt(msg.Payload()))
+		assert.Equal(t, "3", msg.Properties()[common.TraceIDKey])
 	case <-time.After(5 * time.Second):
 		assert.FailNow(t, "should not wait")
 	}
@@ -380,12 +387,14 @@ func createProducer(t *testing.T, kc *kafkaClient, topic string) mqwrapper.Produ
 	return producer
 }
 
-func produceData(ctx context.Context, t *testing.T, producer mqwrapper.Producer, arr []int) []mqwrapper.MessageID {
+func produceData(ctx context.Context, t *testing.T, producer mqwrapper.Producer, arr []int, pArr []string) []mqwrapper.MessageID {
 	var msgIDs []mqwrapper.MessageID
-	for _, v := range arr {
+	for k, v := range arr {
 		msg := &mqwrapper.ProducerMessage{
-			Payload:    IntToBytes(v),
-			Properties: map[string]string{},
+			Payload: IntToBytes(v),
+			Properties: map[string]string{
+				common.TraceIDKey: pArr[k],
+			},
 		}
 		msgID, err := producer.Send(ctx, msg)
 		msgIDs = append(msgIDs, msgID)

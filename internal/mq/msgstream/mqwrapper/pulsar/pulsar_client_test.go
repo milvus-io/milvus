@@ -425,11 +425,14 @@ func TestPulsarClient_SeekPosition(t *testing.T) {
 
 	log.Info("Produce start")
 	ids := []mqwrapper.MessageID{}
-	arr := []int{1, 2, 3}
-	for _, v := range arr {
+	arr1 := []int{1, 2, 3}
+	arr2 := []string{"1", "2", "3"}
+	for k, v := range arr1 {
 		msg := &mqwrapper.ProducerMessage{
-			Payload:    IntToBytes(v),
-			Properties: map[string]string{},
+			Payload: IntToBytes(v),
+			Properties: map[string]string{
+				common.TraceIDKey: arr2[k],
+			},
 		}
 		id, err := producer.Send(ctx, msg)
 		ids = append(ids, id)
@@ -459,6 +462,7 @@ func TestPulsarClient_SeekPosition(t *testing.T) {
 		assert.Equal(t, seekID.EntryID(), msg.ID().EntryID())
 		assert.Equal(t, seekID.PartitionIdx(), msg.ID().PartitionIdx())
 		assert.Equal(t, 3, BytesToInt(msg.Payload()))
+		assert.Equal(t, "3", msg.Properties()[common.TraceIDKey])
 	case <-time.After(2 * time.Second):
 		assert.FailNow(t, "should not wait")
 	}
@@ -475,6 +479,7 @@ func TestPulsarClient_SeekPosition(t *testing.T) {
 		assert.Equal(t, seekID.EntryID(), msg.ID().EntryID())
 		assert.Equal(t, seekID.PartitionIdx(), msg.ID().PartitionIdx())
 		assert.Equal(t, 2, BytesToInt(msg.Payload()))
+		assert.Equal(t, "2", msg.Properties()[common.TraceIDKey])
 	case <-time.After(2 * time.Second):
 		assert.FailNow(t, "should not wait")
 	}

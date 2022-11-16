@@ -87,3 +87,8 @@ const (
 const (
 	CollectionTTLConfigKey = "collection.ttl.seconds"
 )
+
+const (
+	PropertiesKey string = "properties"
+	TraceIDKey    string = "uber-trace-id"
+)
