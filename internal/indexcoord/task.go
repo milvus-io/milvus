@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
 
 type task interface {
@@ -160,7 +161,7 @@ func (cit *CreateIndexTask) Execute(ctx context.Context) error {
 			commonpbutil.WithMsgType(0),
 			commonpbutil.WithMsgID(cit.indexID),
 			commonpbutil.WithTimeStamp(cit.req.Timestamp),
-			commonpbutil.WithSourceID(cit.indexCoordClient.serverID),
+			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
 		CollectionID: cit.req.CollectionID,
 		PartitionID:  -1,

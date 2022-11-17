@@ -73,9 +73,7 @@ func TestGetServerIDConcurrently(t *testing.T) {
 		go getIDFunc()
 	}
 	wg.Wait()
-	for i := 1; i <= 10; i++ {
-		assert.Contains(t, res, int64(i))
-	}
+	assert.ElementsMatch(t, []int64{1, 1, 1, 1, 1, 1, 1, 1, 1, 1}, res)
 }
 
 func TestInit(t *testing.T) {
@@ -125,7 +123,7 @@ func TestUpdateSessions(t *testing.T) {
 	var wg sync.WaitGroup
 	var muList = sync.Mutex{}
 
-	s := NewSession(ctx, metaRoot, etcdCli)
+	s := NewSession(ctx, metaRoot, etcdCli, WithResueNodeID(false))
 
 	sessions, rev, err := s.GetSessions("test")
 	assert.Nil(t, err)
@@ -137,7 +135,7 @@ func TestUpdateSessions(t *testing.T) {
 	getIDFunc := func() {
 		etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
 		require.NoError(t, err)
-		singleS := NewSession(ctx, metaRoot, etcdCli)
+		singleS := NewSession(ctx, metaRoot, etcdCli, WithResueNodeID(false))
 		singleS.Init("test", "testAddr", false, false)
 		singleS.Register()
 		muList.Lock()
@@ -498,21 +496,21 @@ func (suite *SessionWithVersionSuite) SetupTest() {
 	suite.metaRoot = "sessionWithVersion"
 	suite.serverName = "sessionComp"
 
-	s1 := NewSession(ctx, suite.metaRoot, client)
+	s1 := NewSession(ctx, suite.metaRoot, client, WithResueNodeID(false))
 	s1.Version.Major, s1.Version.Minor, s1.Version.Patch = 0, 0, 0
 	s1.Init(suite.serverName, "s1", false, false)
 	s1.Register()
 
 	suite.sessions = append(suite.sessions, s1)
 
-	s2 := NewSession(ctx, suite.metaRoot, client)
+	s2 := NewSession(ctx, suite.metaRoot, client, WithResueNodeID(false))
 	s2.Version.Major, s2.Version.Minor, s2.Version.Patch = 2, 1, 0
 	s2.Init(suite.serverName, "s2", false, false)
 	s2.Register()
 
 	suite.sessions = append(suite.sessions, s2)
 
-	s3 := NewSession(ctx, suite.metaRoot, client)
+	s3 := NewSession(ctx, suite.metaRoot, client, WithResueNodeID(false))
 	s3.Version.Major, s3.Version.Minor, s3.Version.Patch = 2, 2, 0
 	s3.Version.Build = []string{"dev"}
 	s3.Init(suite.serverName, "s3", false, false)
@@ -538,7 +536,7 @@ func (suite *SessionWithVersionSuite) TearDownTest() {
 }
 
 func (suite *SessionWithVersionSuite) TestGetSessionsWithRangeVersion() {
-	s := NewSession(context.Background(), suite.metaRoot, suite.client)
+	s := NewSession(context.Background(), suite.metaRoot, suite.client, WithResueNodeID(false))
 
 	suite.Run(">1.0.0", func() {
 		r, err := semver.ParseRange(">1.0.0")
@@ -581,7 +579,7 @@ func (suite *SessionWithVersionSuite) TestGetSessionsWithRangeVersion() {
 }
 
 func (suite *SessionWithVersionSuite) TestWatchServicesWithVersionRange() {
-	s := NewSession(context.Background(), suite.metaRoot, suite.client)
+	s := NewSession(context.Background(), suite.metaRoot, suite.client, WithResueNodeID(false))
 
 	suite.Run(">1.0.0 <=2.1.0", func() {
 		r, err := semver.ParseRange(">1.0.0 <=2.1.0")
@@ -641,7 +639,7 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 
 	// register session 1, will be active
 	ctx1 := context.Background()
-	s1 := NewSession(ctx1, metaRoot, etcdCli)
+	s1 := NewSession(ctx1, metaRoot, etcdCli, WithResueNodeID(false))
 	s1.Init("inittest", "testAddr", true, true)
 	s1.SetEnableActiveStandBy(true)
 	s1.Register()
@@ -660,7 +658,7 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 
 	// register session 2, will be standby
 	ctx2 := context.Background()
-	s2 := NewSession(ctx2, metaRoot, etcdCli)
+	s2 := NewSession(ctx2, metaRoot, etcdCli, WithResueNodeID(false))
 	s2.Init("inittest", "testAddr", true, true)
 	s2.SetEnableActiveStandBy(true)
 	s2.Register()
@@ -704,7 +702,7 @@ func TestSessionEventType_String(t *testing.T) {
 
 func TestSession_apply(t *testing.T) {
 	session := &Session{}
-	opts := []SessionOption{WithCustomConfigEnable(), WithSessionTTL(100), WithSessionRetryTimes(200)}
+	opts := []SessionOption{WithCustomConfigEnable(), WithTTL(100), WithRetryTimes(200)}
 	session.apply(opts...)
 	assert.True(t, session.useCustomConfig)
 	assert.Equal(t, int64(100), session.sessionTTL)

@@ -216,7 +216,6 @@ func (node *DataNode) initSession() error {
 		return errors.New("failed to initialize session")
 	}
 	node.session.Init(typeutil.DataNodeRole, node.address, false, true)
-	paramtable.SetNodeID(node.session.ServerID)
 	return nil
 }
 

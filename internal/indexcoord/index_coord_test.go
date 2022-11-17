@@ -530,9 +530,7 @@ func TestIndexCoord_GetComponentStates(t *testing.T) {
 
 func TestIndexCoord_UnHealthy(t *testing.T) {
 	ctx := context.Background()
-	ic := &IndexCoord{
-		serverID: 1,
-	}
+	ic := &IndexCoord{}
 	ic.stateCode.Store(commonpb.StateCode_Abnormal)
 
 	// Test IndexCoord function

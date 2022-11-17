@@ -104,6 +104,7 @@ type Session struct {
 	useCustomConfig   bool
 	sessionTTL        int64
 	sessionRetryTimes int64
+	reuseNodeID       bool
 }
 
 type SessionOption func(session *Session)
@@ -112,12 +113,16 @@ func WithCustomConfigEnable() SessionOption {
 	return func(session *Session) { session.useCustomConfig = true }
 }
 
-func WithSessionTTL(ttl int64) SessionOption {
+func WithTTL(ttl int64) SessionOption {
 	return func(session *Session) { session.sessionTTL = ttl }
 }
 
-func WithSessionRetryTimes(n int64) SessionOption {
+func WithRetryTimes(n int64) SessionOption {
 	return func(session *Session) { session.sessionRetryTimes = n }
+}
+
+func WithResueNodeID(b bool) SessionOption {
+	return func(session *Session) { session.reuseNodeID = b }
 }
 
 func (s *Session) apply(opts ...SessionOption) {
@@ -184,12 +189,15 @@ func (s *Session) MarshalJSON() ([]byte, error) {
 // etcdEndpoints is to init etcdCli when NewSession
 func NewSession(ctx context.Context, metaRoot string, client *clientv3.Client, opts ...SessionOption) *Session {
 	session := &Session{
-		ctx:               ctx,
-		metaRoot:          metaRoot,
-		Version:           common.Version,
+		ctx:      ctx,
+		metaRoot: metaRoot,
+		Version:  common.Version,
+
+		// options
 		useCustomConfig:   false,
 		sessionTTL:        60,
 		sessionRetryTimes: 30,
+		reuseNodeID:       true,
 	}
 
 	session.apply(opts...)
@@ -241,6 +249,7 @@ func (s *Session) String() string {
 func (s *Session) Register() {
 	ch, err := s.registerService()
 	if err != nil {
+		log.Error("Register failed", zap.Error(err))
 		panic(err)
 	}
 	s.liveCh = s.processKeepAliveResponse(ch)
@@ -253,12 +262,21 @@ func (s *Session) getServerID() (int64, error) {
 	serverIDMu.Lock()
 	defer serverIDMu.Unlock()
 
-	// Notice, For standalone, all process share the same nodeID.
-	nodeID := paramtable.GetNodeID()
-	if nodeID != 0 {
-		return nodeID, nil
+	log.Debug("getServerID", zap.Bool("reuse", s.reuseNodeID))
+	if s.reuseNodeID {
+		// Notice, For standalone, all process share the same nodeID.
+		if nodeID := paramtable.GetNodeID(); nodeID != 0 {
+			return nodeID, nil
+		}
 	}
-	return s.getServerIDWithKey(DefaultIDKey)
+	nodeID, err := s.getServerIDWithKey(DefaultIDKey)
+	if err != nil {
+		return nodeID, err
+	}
+	if s.reuseNodeID {
+		paramtable.SetNodeID(nodeID)
+	}
+	return nodeID, nil
 }
 
 func (s *Session) checkIDExist() {

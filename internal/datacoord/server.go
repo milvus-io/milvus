@@ -244,7 +244,6 @@ func (s *Server) initSession() error {
 	}
 	s.session.Init(typeutil.DataCoordRole, s.address, true, true)
 	s.session.SetEnableActiveStandBy(s.enableActiveStandBy)
-	paramtable.SetNodeID(s.session.ServerID)
 	return nil
 }
 

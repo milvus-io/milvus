@@ -149,7 +149,6 @@ func (node *QueryNode) initSession() error {
 		return fmt.Errorf("session is nil, the etcd client connection may have failed")
 	}
 	node.session.Init(typeutil.QueryNodeRole, node.address, false, true)
-	paramtable.SetNodeID(node.session.ServerID)
 	return nil
 }
 
