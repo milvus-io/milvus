@@ -857,7 +857,6 @@ func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan
 // GetCompactionState called by DataCoord
 // return status of all compaction plans
 func (node *DataNode) GetCompactionState(ctx context.Context, req *datapb.CompactionStateRequest) (*datapb.CompactionStateResponse, error) {
-	log.Info("DataNode.GetCompactionState")
 	if !node.isHealthy() {
 		return &datapb.CompactionStateResponse{
 			Status: &commonpb.Status{
@@ -883,7 +882,10 @@ func (node *DataNode) GetCompactionState(ctx context.Context, req *datapb.Compac
 		node.compactionExecutor.completed.Delete(k)
 		return true
 	})
-	log.Info("Compaction results", zap.Any("results", results))
+
+	if len(results) > 0 {
+		log.Info("Compaction results", zap.Any("results", results))
+	}
 	return &datapb.CompactionStateResponse{
 		Status:  &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 		Results: results,
