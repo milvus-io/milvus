@@ -260,7 +260,6 @@ func testIndexCoord(t *testing.T) {
 		indexs := ic.metaTable.collectionIndexes
 		ic.metaTable.collectionIndexes = make(map[UniqueID]map[UniqueID]*model.Index)
 		defer func() {
-			fmt.Println("simfg fubang")
 			ic.metaTable.collectionIndexes = indexs
 		}()
 
@@ -278,7 +277,19 @@ func testIndexCoord(t *testing.T) {
 			break
 		}
 
-		indexs := ic.metaTable.segmentIndexes
+		updateSegmentIndexes := func(i map[UniqueID]map[UniqueID]*model.SegmentIndex) {
+			ic.metaTable.indexLock.Lock()
+			ic.metaTable.segmentIndexes = i
+			ic.metaTable.indexLock.Unlock()
+		}
+
+		getSegmentIndexes := func() map[UniqueID]map[UniqueID]*model.SegmentIndex {
+			ic.metaTable.indexLock.RLock()
+			defer ic.metaTable.indexLock.RUnlock()
+			return ic.metaTable.segmentIndexes
+		}
+
+		indexs := getSegmentIndexes()
 		mockIndexs := make(map[UniqueID]map[UniqueID]*model.SegmentIndex)
 		progressIndex := &model.SegmentIndex{
 			IndexState: commonpb.IndexState_InProgress,
@@ -292,9 +303,10 @@ func testIndexCoord(t *testing.T) {
 			IndexState: commonpb.IndexState_Finished,
 			NumRows:    2048,
 		}
-		ic.metaTable.segmentIndexes = mockIndexs
+
+		updateSegmentIndexes(mockIndexs)
 		defer func() {
-			ic.metaTable.segmentIndexes = indexs
+			updateSegmentIndexes(indexs)
 		}()
 
 		mockIndexs[111] = make(map[UniqueID]*model.SegmentIndex)

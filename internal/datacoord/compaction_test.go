@@ -22,6 +22,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/metautil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
+
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/log"
@@ -219,6 +222,18 @@ func Test_compactionPlanHandler_execWithParallels(t *testing.T) {
 	assert.Less(t, uint64(2), max-min)
 }
 
+func getInsertLogPath(rootPath string, segmentID typeutil.UniqueID) string {
+	return metautil.BuildInsertLogPath(rootPath, 10, 100, segmentID, 1000, 10000)
+}
+
+func getStatsLogPath(rootPath string, segmentID typeutil.UniqueID) string {
+	return metautil.BuildStatsLogPath(rootPath, 10, 100, segmentID, 1000, 10000)
+}
+
+func getDeltaLogPath(rootPath string, segmentID typeutil.UniqueID) string {
+	return metautil.BuildDeltaLogPath(rootPath, 10, 100, segmentID, 10000)
+}
+
 func TestCompactionPlanHandler_handleMergeCompactionResult(t *testing.T) {
 	mockDataNode := &mocks.DataNode{}
 	mockDataNode.EXPECT().SyncSegments(mock.Anything, mock.Anything).Run(func(ctx context.Context, req *datapb.SyncSegmentsRequest) {}).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil)
@@ -227,16 +242,16 @@ func TestCompactionPlanHandler_handleMergeCompactionResult(t *testing.T) {
 
 	seg1 := &datapb.SegmentInfo{
 		ID:        1,
-		Binlogs:   []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log1")},
-		Statslogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log2")},
-		Deltalogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log3")},
+		Binlogs:   []*datapb.FieldBinlog{getFieldBinlogPaths(101, getInsertLogPath("log1", 1))},
+		Statslogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, getStatsLogPath("log2", 1))},
+		Deltalogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, getDeltaLogPath("log3", 1))},
 	}
 
 	seg2 := &datapb.SegmentInfo{
 		ID:        2,
-		Binlogs:   []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log4")},
-		Statslogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log5")},
-		Deltalogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log6")},
+		Binlogs:   []*datapb.FieldBinlog{getFieldBinlogPaths(101, getInsertLogPath("log4", 2))},
+		Statslogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, getStatsLogPath("log5", 2))},
+		Deltalogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, getDeltaLogPath("log6", 2))},
 	}
 
 	plan := &datapb.CompactionPlan{
@@ -319,18 +334,18 @@ func TestCompactionPlanHandler_handleMergeCompactionResult(t *testing.T) {
 		PlanID:              1,
 		SegmentID:           3,
 		NumOfRows:           15,
-		InsertLogs:          []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log301")},
-		Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log302")},
-		Deltalogs:           []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log303")},
+		InsertLogs:          []*datapb.FieldBinlog{getFieldBinlogPaths(101, getInsertLogPath("log301", 3))},
+		Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogPaths(101, getStatsLogPath("log302", 3))},
+		Deltalogs:           []*datapb.FieldBinlog{getFieldBinlogPaths(101, getDeltaLogPath("log303", 3))},
 	}
 
 	compactionResult2 := &datapb.CompactionResult{
 		PlanID:              1,
 		SegmentID:           3,
 		NumOfRows:           0,
-		InsertLogs:          []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log301")},
-		Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log302")},
-		Deltalogs:           []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log303")},
+		InsertLogs:          []*datapb.FieldBinlog{getFieldBinlogPaths(101, getInsertLogPath("log301", 3))},
+		Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogPaths(101, getStatsLogPath("log302", 3))},
+		Deltalogs:           []*datapb.FieldBinlog{getFieldBinlogPaths(101, getDeltaLogPath("log303", 3))},
 	}
 
 	has, err := c.meta.HasSegments([]UniqueID{1, 2})
@@ -385,16 +400,16 @@ func TestCompactionPlanHandler_completeCompaction(t *testing.T) {
 
 		seg1 := &datapb.SegmentInfo{
 			ID:        1,
-			Binlogs:   []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log1")},
-			Statslogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log2")},
-			Deltalogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log3")},
+			Binlogs:   []*datapb.FieldBinlog{getFieldBinlogPaths(101, getInsertLogPath("log1", 1))},
+			Statslogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, getStatsLogPath("log2", 1))},
+			Deltalogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, getDeltaLogPath("log3", 1))},
 		}
 
 		seg2 := &datapb.SegmentInfo{
 			ID:        2,
-			Binlogs:   []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log4")},
-			Statslogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log5")},
-			Deltalogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log6")},
+			Binlogs:   []*datapb.FieldBinlog{getFieldBinlogPaths(101, getInsertLogPath("log4", 2))},
+			Statslogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, getStatsLogPath("log5", 2))},
+			Deltalogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, getDeltaLogPath("log6", 2))},
 		}
 
 		plan := &datapb.CompactionPlan{
@@ -448,9 +463,9 @@ func TestCompactionPlanHandler_completeCompaction(t *testing.T) {
 			PlanID:              1,
 			SegmentID:           3,
 			NumOfRows:           15,
-			InsertLogs:          []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log301")},
-			Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log302")},
-			Deltalogs:           []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log303")},
+			InsertLogs:          []*datapb.FieldBinlog{getFieldBinlogPaths(101, getInsertLogPath("log301", 3))},
+			Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogPaths(101, getStatsLogPath("log302", 3))},
+			Deltalogs:           []*datapb.FieldBinlog{getFieldBinlogPaths(101, getDeltaLogPath("log303", 3))},
 		}
 
 		flushCh := make(chan UniqueID, 1)
@@ -480,16 +495,16 @@ func TestCompactionPlanHandler_completeCompaction(t *testing.T) {
 
 		seg1 := &datapb.SegmentInfo{
 			ID:        1,
-			Binlogs:   []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log1")},
-			Statslogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log2")},
-			Deltalogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log3")},
+			Binlogs:   []*datapb.FieldBinlog{getFieldBinlogPaths(101, getInsertLogPath("log1", 1))},
+			Statslogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, getStatsLogPath("log2", 1))},
+			Deltalogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, getDeltaLogPath("log3", 1))},
 		}
 
 		seg2 := &datapb.SegmentInfo{
 			ID:        2,
-			Binlogs:   []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log4")},
-			Statslogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log5")},
-			Deltalogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log6")},
+			Binlogs:   []*datapb.FieldBinlog{getFieldBinlogPaths(101, getInsertLogPath("log4", 2))},
+			Statslogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, getStatsLogPath("log5", 2))},
+			Deltalogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, getDeltaLogPath("log6", 2))},
 		}
 
 		plan := &datapb.CompactionPlan{
@@ -549,9 +564,9 @@ func TestCompactionPlanHandler_completeCompaction(t *testing.T) {
 			PlanID:              1,
 			SegmentID:           3,
 			NumOfRows:           0,
-			InsertLogs:          []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log301")},
-			Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log302")},
-			Deltalogs:           []*datapb.FieldBinlog{getFieldBinlogPaths(101, "log303")},
+			InsertLogs:          []*datapb.FieldBinlog{getFieldBinlogPaths(101, getInsertLogPath("log301", 3))},
+			Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogPaths(101, getStatsLogPath("log302", 3))},
+			Deltalogs:           []*datapb.FieldBinlog{getFieldBinlogPaths(101, getDeltaLogPath("log303", 3))},
 		}
 
 		flushCh := make(chan UniqueID, 1)

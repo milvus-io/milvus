@@ -465,8 +465,34 @@ func buildLogPath(chunkManagerRootPath string, binlogType storage.BinlogType, co
 	}
 }
 
+func checkBinlogs(binlogType storage.BinlogType, segmentID typeutil.UniqueID, logs []*datapb.FieldBinlog) {
+	check := func(getSegmentID func(logPath string) typeutil.UniqueID) {
+		for _, fieldBinlog := range logs {
+			for _, binlog := range fieldBinlog.Binlogs {
+				if segmentID != getSegmentID(binlog.LogPath) {
+					log.Panic("the segment path doesn't match the segment id", zap.Int64("segment_id", segmentID), zap.String("path", binlog.LogPath))
+				}
+			}
+		}
+	}
+	switch binlogType {
+	case storage.InsertBinlog:
+		check(metautil.GetSegmentIDFromInsertLogPath)
+	case storage.DeleteBinlog:
+		check(metautil.GetSegmentIDFromDeltaLogPath)
+	case storage.StatsBinlog:
+		check(metautil.GetSegmentIDFromStatsLogPath)
+	default:
+		log.Panic("invalid binlog type")
+	}
+}
+
 func buildBinlogKvsWithLogID(collectionID, partitionID, segmentID typeutil.UniqueID,
 	binlogs, deltalogs, statslogs []*datapb.FieldBinlog) (map[string]string, error) {
+
+	checkBinlogs(storage.InsertBinlog, segmentID, binlogs)
+	checkBinlogs(storage.DeleteBinlog, segmentID, deltalogs)
+	checkBinlogs(storage.StatsBinlog, segmentID, statslogs)
 
 	fillLogIDByLogPath(binlogs, deltalogs, statslogs)
 	kvs, err := buildBinlogKvs(collectionID, partitionID, segmentID, binlogs, deltalogs, statslogs)
