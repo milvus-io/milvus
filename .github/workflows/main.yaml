@@ -94,13 +94,7 @@ jobs:
             ./lcov_output.info
             *.info
             *.out
-            codecov.yml
-            internal/**
-            cmd/**
-            configs/**
-            pkg/**
-            go.mod
-            go.sum
+            .git
   codecov:
     name: Upload Code Coverage
     needs: UT
@@ -112,7 +106,9 @@ jobs:
         with:
           name: code-coverage-result
       - name: Display structure of code coverage results
-        run: ls -lah
+        run: |
+          ls -lah
+          
       - name: Upload coverage to Codecov
         if: "github.repository == 'milvus-io/milvus'"
         uses: codecov/codecov-action@v3.1.1
