@@ -19,7 +19,6 @@ package paramtable
 import (
 	"math"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -72,8 +71,8 @@ func TestQuotaParam(t *testing.T) {
 
 	t.Run("test limit writing", func(t *testing.T) {
 		assert.False(t, qc.ForceDenyWriting)
-		assert.Equal(t, true, qc.TtProtectionEnabled)
-		assert.Equal(t, 300*time.Second, qc.MaxTimeTickDelay)
+		assert.Equal(t, false, qc.TtProtectionEnabled)
+		assert.Equal(t, math.MaxInt64, int(qc.MaxTimeTickDelay))
 		assert.Equal(t, defaultLowWaterLevel, qc.DataNodeMemoryLowWaterLevel)
 		assert.Equal(t, defaultHighWaterLevel, qc.DataNodeMemoryHighWaterLevel)
 		assert.Equal(t, defaultLowWaterLevel, qc.QueryNodeMemoryLowWaterLevel)
