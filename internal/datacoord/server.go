@@ -263,7 +263,7 @@ func (s *Server) Init() error {
 		return err
 	}
 
-	if err = s.initMeta(storageCli.RootPath()); err != nil {
+	if err = s.initMeta(storageCli.RootPath(), storageCli); err != nil {
 		return err
 	}
 
@@ -449,12 +449,12 @@ func (s *Server) initSegmentManager() {
 	}
 }
 
-func (s *Server) initMeta(chunkManagerRootPath string) error {
+func (s *Server) initMeta(chunkManagerRootPath string, chunkManager storage.ChunkManager) error {
 	etcdKV := etcdkv.NewEtcdKV(s.etcdCli, Params.EtcdCfg.MetaRootPath)
 	s.kvClient = etcdKV
 	reloadEtcdFn := func() error {
 		var err error
-		s.meta, err = newMeta(s.ctx, s.kvClient, chunkManagerRootPath)
+		s.meta, err = newMeta(s.ctx, s.kvClient, chunkManagerRootPath, chunkManager)
 		if err != nil {
 			return err
 		}

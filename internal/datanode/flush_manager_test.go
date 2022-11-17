@@ -583,13 +583,6 @@ func TestFlushNotifyFunc(t *testing.T) {
 		})
 	})
 
-	t.Run("stale segment not found", func(t *testing.T) {
-		dataCoord.SaveBinlogPathStatus = commonpb.ErrorCode_SegmentNotFound
-		assert.NotPanics(t, func() {
-			notifyFunc(&segmentFlushPack{flushed: false})
-		})
-	})
-
 	// issue https://github.com/milvus-io/milvus/issues/17097
 	// meta error, datanode shall not panic, just drop the virtual channel
 	t.Run("datacoord found meta error", func(t *testing.T) {
