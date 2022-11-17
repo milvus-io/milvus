@@ -22,11 +22,11 @@ import (
 	"net/url"
 	"os"
 	"runtime"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.etcd.io/etcd/server/v3/embed"
 
 	"github.com/milvus-io/milvus/internal/util/concurrency"
@@ -170,7 +170,8 @@ func TestQueryNode_register(t *testing.T) {
 	defer cancel()
 
 	node, err := genSimpleQueryNode(ctx)
-	assert.NoError(t, err)
+	require.NoError(t, err)
+	defer node.Stop()
 
 	etcdcli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.NoError(t, err)
@@ -189,7 +190,9 @@ func TestQueryNode_init(t *testing.T) {
 	defer cancel()
 
 	node, err := genSimpleQueryNode(ctx)
-	assert.NoError(t, err)
+	require.NoError(t, err)
+	defer node.Stop()
+
 	etcdcli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.NoError(t, err)
 	defer etcdcli.Close()
@@ -222,20 +225,16 @@ func TestQueryNode_adjustByChangeInfo(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	var wg sync.WaitGroup
-	wg.Add(1)
 	t.Run("test cleanup segments", func(t *testing.T) {
-		defer wg.Done()
-		_, err := genSimpleQueryNodeToTestWatchChangeInfo(ctx)
-		assert.NoError(t, err)
-
+		node, err := genSimpleQueryNodeToTestWatchChangeInfo(ctx)
+		require.NoError(t, err)
+		defer node.Stop()
 	})
 
-	wg.Add(1)
 	t.Run("test cleanup segments no segment", func(t *testing.T) {
-		defer wg.Done()
 		node, err := genSimpleQueryNodeToTestWatchChangeInfo(ctx)
-		assert.NoError(t, err)
+		require.NoError(t, err)
+		defer node.Stop()
 
 		node.metaReplica.removeSegment(defaultSegmentID, segmentTypeSealed)
 		segmentChangeInfos := genSimpleChangeInfo()
@@ -249,5 +248,4 @@ func TestQueryNode_adjustByChangeInfo(t *testing.T) {
 		*/
 
 	})
-	wg.Wait()
 }

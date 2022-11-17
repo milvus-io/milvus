@@ -53,7 +53,8 @@ func TestSegmentLoader_loadSegment(t *testing.T) {
 
 	t.Run("test load segment", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
-		assert.NoError(t, err)
+		require.NoError(t, err)
+		defer node.Stop()
 
 		node.metaReplica.removeSegment(defaultSegmentID, segmentTypeSealed)
 		loader := node.loader
@@ -83,7 +84,8 @@ func TestSegmentLoader_loadSegment(t *testing.T) {
 
 	t.Run("test set segment error due to without partition", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
-		assert.NoError(t, err)
+		require.NoError(t, err)
+		defer node.Stop()
 
 		err = node.metaReplica.removePartition(defaultPartitionID)
 		assert.NoError(t, err)
@@ -114,7 +116,7 @@ func TestSegmentLoader_loadSegment(t *testing.T) {
 
 	t.Run("test load segment with nil base message", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 
 		loader := node.loader
 		assert.NotNil(t, loader)
@@ -132,7 +134,9 @@ func TestSegmentLoader_loadSegmentFieldsData(t *testing.T) {
 
 	runLoadSegmentFieldData := func(dataType schemapb.DataType, pkType schemapb.DataType) {
 		node, err := genSimpleQueryNode(ctx)
-		assert.NoError(t, err)
+		require.NoError(t, err)
+		defer node.Stop()
+
 		loader := node.loader
 		assert.NotNil(t, loader)
 
@@ -226,7 +230,9 @@ func TestSegmentLoader_invalid(t *testing.T) {
 
 	t.Run("test no collection", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
-		assert.NoError(t, err)
+		require.NoError(t, err)
+		defer node.Stop()
+
 		loader := node.loader
 		assert.NotNil(t, loader)
 
@@ -254,7 +260,9 @@ func TestSegmentLoader_invalid(t *testing.T) {
 
 	t.Run("test no vec field 2", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
-		assert.NoError(t, err)
+		require.NoError(t, err)
+		defer node.Stop()
+
 		loader := node.loader
 		assert.NotNil(t, loader)
 
@@ -292,7 +300,8 @@ func TestSegmentLoader_invalid(t *testing.T) {
 
 	t.Run("Test Invalid SegmentType", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
-		assert.NoError(t, err)
+		require.NoError(t, err)
+		defer node.Stop()
 		loader := node.loader
 		assert.NotNil(t, loader)
 
@@ -317,7 +326,9 @@ func TestSegmentLoader_invalid(t *testing.T) {
 
 	t.Run("Test load file failed", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
-		assert.NoError(t, err)
+		require.NoError(t, err)
+		defer node.Stop()
+
 		loader := node.loader
 		assert.NotNil(t, loader)
 
@@ -359,9 +370,10 @@ func TestSegmentLoader_invalid(t *testing.T) {
 	})
 
 	t.Run("Test load index failed", func(t *testing.T) {
-
 		node, err := genSimpleQueryNode(ctx)
-		assert.NoError(t, err)
+		require.NoError(t, err)
+		defer node.Stop()
+
 		loader := node.loader
 		assert.NotNil(t, loader)
 
@@ -411,7 +423,9 @@ func TestSegmentLoader_checkSegmentSize(t *testing.T) {
 	defer cancel()
 
 	node, err := genSimpleQueryNode(ctx)
-	assert.NoError(t, err)
+	require.NoError(t, err)
+	defer node.Stop()
+
 	loader := node.loader
 	assert.NotNil(t, loader)
 
@@ -425,7 +439,9 @@ func TestSegmentLoader_testLoadGrowing(t *testing.T) {
 
 	t.Run("test load growing segments", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
-		assert.NoError(t, err)
+		require.NoError(t, err)
+		defer node.Stop()
+
 		loader := node.loader
 		assert.NotNil(t, loader)
 
@@ -454,7 +470,9 @@ func TestSegmentLoader_testLoadGrowing(t *testing.T) {
 
 	t.Run("test invalid insert data", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
-		assert.NoError(t, err)
+		require.NoError(t, err)
+		defer node.Stop()
+
 		loader := node.loader
 		assert.NotNil(t, loader)
 
@@ -495,7 +513,8 @@ func TestSegmentLoader_testLoadGrowingAndSealed(t *testing.T) {
 
 	t.Run("test load sealed segments", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
-		assert.NoError(t, err)
+		require.NoError(t, err)
+		defer node.Stop()
 
 		loader := node.loader
 		assert.NotNil(t, loader)
@@ -556,7 +575,8 @@ func TestSegmentLoader_testLoadGrowingAndSealed(t *testing.T) {
 
 	t.Run("test load growing segments", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
-		assert.NoError(t, err)
+		require.NoError(t, err)
+		defer node.Stop()
 
 		loader := node.loader
 		assert.NotNil(t, loader)
@@ -642,7 +662,9 @@ func TestSegmentLoader_testLoadSealedSegmentWithIndex(t *testing.T) {
 
 	// generate segmentLoader
 	node, err := genSimpleQueryNode(ctx)
-	assert.NoError(t, err)
+	require.NoError(t, err)
+	defer node.Stop()
+
 	loader := node.loader
 	assert.NotNil(t, loader)
 
@@ -763,7 +785,9 @@ func testSeekFailWhenConsumingDeltaMsg(ctx context.Context, t *testing.T, positi
 
 	factory := &mockMsgStreamFactory{mockMqStream: msgStream}
 	node, err := genSimpleQueryNodeWithMQFactory(ctx, factory)
-	assert.NoError(t, err)
+	require.NoError(t, err)
+	defer node.Stop()
+
 	loader := node.loader
 	assert.NotNil(t, loader)
 
@@ -796,7 +820,8 @@ func testConsumingDeltaMsg(ctx context.Context, t *testing.T, position *msgstrea
 	msgStream.On("Chan").Return(msgChan)
 	factory := &mockMsgStreamFactory{mockMqStream: msgStream}
 	node, err := genSimpleQueryNodeWithMQFactory(ctx, factory)
-	assert.NoError(t, err)
+	require.NoError(t, err)
+	defer node.Stop()
 
 	loader := node.loader
 	assert.NotNil(t, loader)
