@@ -58,7 +58,8 @@ var (
 
 	ErrTaskQueueFull = errors.New("TaskQueueFull")
 
-	ErrFailedResponse = errors.New("RpcFailed")
+	ErrFailedResponse  = errors.New("RpcFailed")
+	ErrTaskAlreadyDone = errors.New("TaskAlreadyDone")
 )
 
 type Type = int32
@@ -262,6 +263,13 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 
 			return ErrConflictTaskExisted
 		}
+		if GetTaskType(task) == TaskTypeGrow {
+			nodesWithSegment := scheduler.distMgr.LeaderViewManager.GetSealedSegmentDist(task.SegmentID())
+			replicaNodeMap := utils.GroupNodesByReplica(scheduler.meta.ReplicaManager, task.CollectionID(), nodesWithSegment)
+			if _, ok := replicaNodeMap[task.ReplicaID()]; ok {
+				return ErrTaskAlreadyDone
+			}
+		}
 
 	case *ChannelTask:
 		index := replicaChannelIndex{task.ReplicaID(), task.Channel()}
@@ -280,6 +288,14 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 			}
 
 			return ErrConflictTaskExisted
+		}
+
+		if GetTaskType(task) == TaskTypeGrow {
+			nodesWithChannel := scheduler.distMgr.LeaderViewManager.GetChannelDist(task.Channel())
+			replicaNodeMap := utils.GroupNodesByReplica(scheduler.meta.ReplicaManager, task.CollectionID(), nodesWithChannel)
+			if _, ok := replicaNodeMap[task.ReplicaID()]; ok {
+				return ErrTaskAlreadyDone
+			}
 		}
 
 	default:
