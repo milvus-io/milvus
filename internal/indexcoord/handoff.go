@@ -95,7 +95,7 @@ func (hd *handoff) enqueue(segment *datapb.SegmentInfo) {
 
 	// note: don't reset state if the task contains state
 	hd.segments[segment.GetID()] = segment
-	log.Ctx(hd.ctx).Info("segment need to write handoff",
+	log.Ctx(hd.ctx).Info("handoff task enqueue successfully",
 		zap.Int64("segID", segment.GetID()),
 		zap.Bool("isFake", segment.GetIsFake()),
 	)
@@ -151,13 +151,13 @@ func (hd *handoff) run() {
 	if len(segIDs) > 0 {
 		log.Ctx(hd.ctx).Debug("handoff process...", zap.Int("task num", len(segIDs)))
 	}
-	for i, segID := range segIDs {
-		hd.process(segID, i == 0)
+	for _, segID := range segIDs {
+		hd.process(segID)
 	}
 }
 
-func (hd *handoff) handoffFakedSegment(segment *datapb.SegmentInfo, front bool) {
-	if front || hd.allParentsDone(segment.GetCompactionFrom()) {
+func (hd *handoff) handoffFakedSegment(segment *datapb.SegmentInfo) {
+	if hd.allParentsDone(segment.GetCompactionFrom()) {
 		handoffSegment := &querypb.SegmentInfo{
 			SegmentID:           segment.GetID(),
 			CollectionID:        segment.GetCollectionID(),
@@ -180,24 +180,24 @@ func (hd *handoff) handoffFakedSegment(segment *datapb.SegmentInfo, front bool) 
 	}
 }
 
-func (hd *handoff) process(segID UniqueID, front bool) {
+func (hd *handoff) process(segID UniqueID) {
 	hd.taskMutex.RLock()
 	segment, ok := hd.segments[segID]
 	hd.taskMutex.RUnlock()
 
 	if !ok {
-		log.Ctx(hd.ctx).Warn("handoff get segment fail", zap.Int64("segID", segID))
+		log.Ctx(hd.ctx).Warn("handoff get task fail", zap.Int64("segID", segID))
 		return
 	}
 
 	if segment.GetIsFake() {
-		hd.handoffFakedSegment(segment, front)
+		hd.handoffFakedSegment(segment)
 		return
 	}
 
 	state := hd.meta.GetSegmentIndexState(segID)
 	log.Ctx(hd.ctx).RatedDebug(30, "handoff task is process", zap.Int64("segID", segID),
-		zap.Bool("front", front), zap.String("state", state.state.String()))
+		zap.String("state", state.state.String()))
 	if state.state == commonpb.IndexState_Failed {
 		log.Ctx(hd.ctx).Error("build index failed, may be need manual intervention", zap.Int64("segID", segID),
 			zap.String("fail reason", state.failReason))
@@ -210,7 +210,7 @@ func (hd *handoff) process(segID UniqueID, front bool) {
 		info, err := hd.ic.pullSegmentInfo(hd.ctx, segID)
 		if err != nil {
 			if errors.Is(err, ErrSegmentNotFound) {
-				log.Ctx(hd.ctx).Error("handoff get segment fail", zap.Error(err))
+				log.Ctx(hd.ctx).Warn("handoff get segment fail, remove task", zap.Error(err))
 				hd.deleteTask(segID)
 				return
 			}
@@ -221,12 +221,13 @@ func (hd *handoff) process(segID UniqueID, front bool) {
 			log.Debug("segment is importing, can't write handoff event", zap.Int64("segID", segID))
 			return
 		}
-		if front || hd.allParentsDone(info.CompactionFrom) {
-			log.Ctx(hd.ctx).Debug("segment can write handoff event", zap.Int64("segID", segID), zap.Bool("front", front),
+		if hd.allParentsDone(info.CompactionFrom) {
+			log.Ctx(hd.ctx).Debug("segment can write handoff event", zap.Int64("segID", segID),
 				zap.Int64s("compactionFrom", info.CompactionFrom))
 			indexInfos := hd.meta.GetSegmentIndexes(segID)
 			if len(indexInfos) == 0 {
-				log.Ctx(hd.ctx).Warn("ready to write handoff, but there is no index, may be dropped", zap.Int64("segID", segID))
+				log.Ctx(hd.ctx).Warn("ready to write handoff, but there is no index, may be dropped, remove task",
+					zap.Int64("segID", segID))
 				hd.deleteTask(segID)
 				return
 			}
@@ -255,12 +256,12 @@ func (hd *handoff) process(segID UniqueID, front bool) {
 				})
 			}
 
-			log.Ctx(hd.ctx).Info("write handoff task success", zap.Int64("segID", segID))
 			if !hd.meta.AlreadyWrittenHandoff(segID) {
 				if err := hd.writeHandoffSegment(handoffTask); err != nil {
 					log.Ctx(hd.ctx).Warn("write handoff task fail, need to retry", zap.Int64("segID", segID), zap.Error(err))
 					return
 				}
+				log.Ctx(hd.ctx).Info("write handoff success", zap.Int64("segID", segID))
 				if err := hd.meta.MarkSegmentWriteHandoff(segID); err != nil {
 					log.Ctx(hd.ctx).Warn("mark segment as write handoff fail, need to retry", zap.Int64("segID", segID), zap.Error(err))
 					return
@@ -271,6 +272,8 @@ func (hd *handoff) process(segID UniqueID, front bool) {
 			hd.deleteTask(segID)
 			return
 		}
+		log.Ctx(hd.ctx).RatedDebug(5, "the handoff of the parent segment has not been written yet",
+			zap.Int64("segID", segID), zap.Int64s("compactionFrom", info.CompactionFrom))
 	}
 }
 
