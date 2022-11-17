@@ -162,7 +162,7 @@ type mockDataCoord struct {
 	FlushFunc                      func(ctx context.Context, req *datapb.FlushRequest) (*datapb.FlushResponse, error)
 	ImportFunc                     func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error)
 	UnsetIsImportingStateFunc      func(ctx context.Context, req *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error)
-	broadCastAlteredCollectionFunc func(ctx context.Context, req *milvuspb.AlterCollectionRequest) (*commonpb.Status, error)
+	broadCastAlteredCollectionFunc func(ctx context.Context, req *datapb.AlterCollectionRequest) (*commonpb.Status, error)
 }
 
 func newMockDataCoord() *mockDataCoord {
@@ -197,7 +197,7 @@ func (m *mockDataCoord) UnsetIsImportingState(ctx context.Context, req *datapb.U
 	return m.UnsetIsImportingStateFunc(ctx, req)
 }
 
-func (m *mockDataCoord) BroadcastAlteredCollection(ctx context.Context, req *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
+func (m *mockDataCoord) BroadcastAlteredCollection(ctx context.Context, req *datapb.AlterCollectionRequest) (*commonpb.Status, error) {
 	return m.broadCastAlteredCollectionFunc(ctx, req)
 }
 
@@ -623,7 +623,7 @@ func withInvalidDataCoord() Opt {
 	dc.UnsetIsImportingStateFunc = func(ctx context.Context, req *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error) {
 		return nil, errors.New("error mock UnsetIsImportingState")
 	}
-	dc.broadCastAlteredCollectionFunc = func(ctx context.Context, req *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
+	dc.broadCastAlteredCollectionFunc = func(ctx context.Context, req *datapb.AlterCollectionRequest) (*commonpb.Status, error) {
 		return nil, errors.New("error mock broadCastAlteredCollection")
 	}
 	return withDataCoord(dc)
@@ -664,7 +664,7 @@ func withFailedDataCoord() Opt {
 			Reason:    "mock UnsetIsImportingState error",
 		}, nil
 	}
-	dc.broadCastAlteredCollectionFunc = func(ctx context.Context, req *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
+	dc.broadCastAlteredCollectionFunc = func(ctx context.Context, req *datapb.AlterCollectionRequest) (*commonpb.Status, error) {
 		return failStatus(commonpb.ErrorCode_UnexpectedError, "mock broadcast altered collection error"), nil
 	}
 	return withDataCoord(dc)
@@ -702,7 +702,7 @@ func withValidDataCoord() Opt {
 	dc.UnsetIsImportingStateFunc = func(ctx context.Context, req *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error) {
 		return succStatus(), nil
 	}
-	dc.broadCastAlteredCollectionFunc = func(ctx context.Context, req *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
+	dc.broadCastAlteredCollectionFunc = func(ctx context.Context, req *datapb.AlterCollectionRequest) (*commonpb.Status, error) {
 		return succStatus(), nil
 	}
 	return withDataCoord(dc)
