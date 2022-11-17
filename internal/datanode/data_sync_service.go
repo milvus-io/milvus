@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
+	"github.com/milvus-io/milvus/internal/util/retry"
 )
 
 // dataSyncService controls a flowgraph for a specific collection
@@ -160,7 +161,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 	dsService.fg = flowgraph.NewTimeTickedFlowGraph(dsService.ctx)
 	// initialize flush manager for DataSync Service
 	dsService.flushManager = NewRendezvousFlushManager(dsService.idAllocator, dsService.chunkManager, dsService.channel,
-		flushNotifyFunc(dsService), dropVirtualChannelFunc(dsService))
+		flushNotifyFunc(dsService, retry.Attempts(50)), dropVirtualChannelFunc(dsService))
 
 	var err error
 	// recover segment checkpoints

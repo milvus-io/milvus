@@ -20,6 +20,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"path"
 	"sync"
 	"time"
 
@@ -36,6 +37,8 @@ import (
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/metautil"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -44,11 +47,12 @@ import (
 
 type meta struct {
 	sync.RWMutex
-	ctx         context.Context
-	catalog     metastore.DataCoordCatalog
-	collections map[UniqueID]*collectionInfo       // collection id to collection info
-	segments    *SegmentsInfo                      // segment id to segment info
-	channelCPs  map[string]*internalpb.MsgPosition // vChannel -> channel checkpoint/see position
+	ctx          context.Context
+	catalog      metastore.DataCoordCatalog
+	collections  map[UniqueID]*collectionInfo       // collection id to collection info
+	segments     *SegmentsInfo                      // segment id to segment info
+	channelCPs   map[string]*internalpb.MsgPosition // vChannel -> channel checkpoint/see position
+	chunkManager storage.ChunkManager
 }
 
 type collectionInfo struct {
@@ -60,13 +64,14 @@ type collectionInfo struct {
 }
 
 // NewMeta creates meta from provided `kv.TxnKV`
-func newMeta(ctx context.Context, kv kv.TxnKV, chunkManagerRootPath string) (*meta, error) {
+func newMeta(ctx context.Context, kv kv.TxnKV, chunkManagerRootPath string, chunkManager storage.ChunkManager) (*meta, error) {
 	mt := &meta{
-		ctx:         ctx,
-		catalog:     &datacoord.Catalog{Txn: kv, ChunkManagerRootPath: chunkManagerRootPath},
-		collections: make(map[UniqueID]*collectionInfo),
-		segments:    NewSegmentsInfo(),
-		channelCPs:  make(map[string]*internalpb.MsgPosition),
+		ctx:          ctx,
+		catalog:      &datacoord.Catalog{Txn: kv, ChunkManagerRootPath: chunkManagerRootPath},
+		collections:  make(map[UniqueID]*collectionInfo),
+		segments:     NewSegmentsInfo(),
+		channelCPs:   make(map[string]*internalpb.MsgPosition),
+		chunkManager: chunkManager,
 	}
 	err := mt.reloadFromKV()
 	if err != nil {
@@ -892,7 +897,7 @@ func (m *meta) SetSegmentCompacting(segmentID UniqueID, compacting bool) {
 // - the segment info of compactedFrom segments after compaction to alter
 // - the segment info of compactedTo segment after compaction to add
 // The compactedTo segment could contain 0 numRows
-func (m *meta) PrepareCompleteCompactionMutation(compactionLogs []*datapb.CompactionSegmentBinlogs, result *datapb.CompactionResult) ([]*datapb.SegmentInfo, []*SegmentInfo, *SegmentInfo) {
+func (m *meta) PrepareCompleteCompactionMutation(compactionLogs []*datapb.CompactionSegmentBinlogs, result *datapb.CompactionResult) ([]*datapb.SegmentInfo, []*SegmentInfo, *SegmentInfo, error) {
 	log.Info("meta update: prepare for complete compaction mutation")
 	m.Lock()
 	defer m.Unlock()
@@ -938,7 +943,11 @@ func (m *meta) PrepareCompleteCompactionMutation(compactionLogs []*datapb.Compac
 	}
 
 	newAddedDeltalogs := m.updateDeltalogs(originDeltalogs, deletedDeltalogs, nil)
-	deltalogs := append(result.GetDeltalogs(), newAddedDeltalogs...)
+	copiedDeltalogs, err := m.copyDeltaFiles(newAddedDeltalogs, modSegments[0].CollectionID, modSegments[0].PartitionID, result.GetSegmentID())
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	deltalogs := append(result.GetDeltalogs(), copiedDeltalogs...)
 
 	compactionFrom := make([]UniqueID, 0, len(modSegments))
 	for _, s := range modSegments {
@@ -970,7 +979,29 @@ func (m *meta) PrepareCompleteCompactionMutation(compactionLogs []*datapb.Compac
 		zap.Int64("new segment num of rows", segment.GetNumOfRows()),
 		zap.Any("compacted from", segment.GetCompactionFrom()))
 
-	return oldSegments, modSegments, segment
+	return oldSegments, modSegments, segment, nil
+}
+
+func (m *meta) copyDeltaFiles(binlogs []*datapb.FieldBinlog, collectionID, partitionID, targetSegmentID int64) ([]*datapb.FieldBinlog, error) {
+	ret := make([]*datapb.FieldBinlog, 0, len(binlogs))
+	for _, fieldBinlog := range binlogs {
+		fieldBinlog = proto.Clone(fieldBinlog).(*datapb.FieldBinlog)
+		for _, binlog := range fieldBinlog.Binlogs {
+			blobKey := metautil.JoinIDPath(collectionID, partitionID, targetSegmentID, binlog.LogID)
+			blobPath := path.Join(m.chunkManager.RootPath(), common.SegmentDeltaLogPath, blobKey)
+			blob, err := m.chunkManager.Read(m.ctx, binlog.LogPath)
+			if err != nil {
+				return nil, err
+			}
+			err = m.chunkManager.Write(m.ctx, blobPath, blob)
+			if err != nil {
+				return nil, err
+			}
+			binlog.LogPath = blobPath
+		}
+		ret = append(ret, fieldBinlog)
+	}
+	return ret, nil
 }
 
 func (m *meta) alterMetaStoreAfterCompaction(modSegments []*datapb.SegmentInfo, newSegment *datapb.SegmentInfo) error {
