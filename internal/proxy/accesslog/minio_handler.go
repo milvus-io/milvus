@@ -19,8 +19,10 @@ package accesslog
 import (
 	"context"
 	"fmt"
+	"path"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
@@ -44,6 +46,7 @@ type config struct {
 //minIO client for upload access log
 //TODO file retention on minio
 
+type RetentionFunc func(object minio.ObjectInfo) bool
 type task struct {
 	objectName string
 	filePath   string
@@ -52,7 +55,8 @@ type minioHandler struct {
 	bucketName string
 	rootPath   string
 
-	client *minio.Client
+	retentionPolicy RetentionFunc
+	client          *minio.Client
 
 	taskCh    chan task
 	closeCh   chan struct{}
@@ -61,6 +65,10 @@ type minioHandler struct {
 }
 
 func NewMinioHandler(ctx context.Context, cfg *paramtable.MinioConfig, rootPath string, queueLen int) (*minioHandler, error) {
+	if !strings.HasSuffix(rootPath, "/") {
+		rootPath = rootPath + "/"
+	}
+
 	handlerCfg := config{
 		address:           cfg.Address.GetValue(),
 		bucketName:        cfg.BucketName.GetValue(),
@@ -139,6 +147,7 @@ func (c *minioHandler) scheduler() {
 				zap.String("object name", task.objectName),
 				zap.String("file path", task.filePath))
 			c.update(task.objectName, task.filePath)
+			c.Retention()
 		case <-c.closeCh:
 			log.Warn("close minio logger handler")
 			return
@@ -175,6 +184,31 @@ func (c *minioHandler) update(objectName string, filePath string) error {
 	return err
 }
 
+func (c *minioHandler) Retention() error {
+	if c.retentionPolicy == nil {
+		return nil
+	}
+
+	objects := c.client.ListObjects(context.Background(), c.bucketName, minio.ListObjectsOptions{Prefix: c.rootPath, Recursive: false})
+	removeObjects := make(chan minio.ObjectInfo)
+	go func() {
+		defer close(removeObjects)
+		for object := range objects {
+			if c.retentionPolicy(object) {
+				removeObjects <- object
+			}
+		}
+	}()
+
+	for rErr := range c.client.RemoveObjects(context.Background(), c.bucketName, removeObjects, minio.RemoveObjectsOptions{GovernanceBypass: false}) {
+		if rErr.Err != nil {
+			log.Warn("failed to remove retention objects", zap.Error(rErr.Err))
+			return rErr.Err
+		}
+	}
+	return nil
+}
+
 func (c *minioHandler) removeWithPrefix(prefix string) error {
 	objects := c.client.ListObjects(context.Background(), c.bucketName, minio.ListObjectsOptions{Prefix: prefix, Recursive: true})
 	for rErr := range c.client.RemoveObjects(context.Background(), c.bucketName, objects, minio.RemoveObjectsOptions{GovernanceBypass: false}) {
@@ -189,7 +223,6 @@ func (c *minioHandler) removeWithPrefix(prefix string) error {
 func (c *minioHandler) listAll() ([]string, error) {
 	var objectsKeys []string
 
-	log.Info(c.rootPath)
 	objects := c.client.ListObjects(context.Background(), c.bucketName, minio.ListObjectsOptions{Prefix: c.rootPath, Recursive: false})
 
 	for object := range objects {
@@ -197,7 +230,6 @@ func (c *minioHandler) listAll() ([]string, error) {
 			log.Warn("failed to list with rootpath", zap.String("rootpath", c.rootPath), zap.Error(object.Err))
 			return nil, object.Err
 		}
-		log.Info(object.Key)
 		// with tailing "/", object is a "directory"
 		if strings.HasSuffix(object.Key, "/") {
 			continue
@@ -220,9 +252,20 @@ func (c *minioHandler) Close() error {
 	return nil
 }
 
-func Join(path1, path2 string) string {
-	if strings.HasSuffix(path1, "/") {
-		return path1 + path2
+func getTimeRetentionFunc(retentionTime int, prefix, ext string) RetentionFunc {
+	if retentionTime == 0 {
+		return nil
 	}
-	return path1 + "/" + path2
+
+	return func(object minio.ObjectInfo) bool {
+		name := path.Base(object.Key)
+		fileTime, err := timeFromName(name, prefix, ext)
+		if err != nil {
+			return false
+		}
+
+		nowWallTime, _ := time.Parse(timeFormat, time.Now().Format(timeFormat))
+		intervalTime := nowWallTime.Sub(fileTime)
+		return intervalTime > (time.Duration(retentionTime) * time.Hour)
+	}
 }

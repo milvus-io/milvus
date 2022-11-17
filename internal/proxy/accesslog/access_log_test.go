@@ -186,7 +186,7 @@ func TestAccessLogger_Error(t *testing.T) {
 
 	Params.Init()
 	testPath := "/tmp/accesstest"
-	Params.Save(Params.ProxyCfg.AccessLog.LocalPath.Key, "testPath")
+	Params.Save(Params.ProxyCfg.AccessLog.LocalPath.Key, testPath)
 	defer os.RemoveAll(testPath)
 
 	InitAccessLogger(&Params.ProxyCfg.AccessLog, &Params.MinioCfg)

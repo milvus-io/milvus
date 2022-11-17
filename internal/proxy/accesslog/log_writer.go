@@ -18,12 +18,10 @@ package accesslog
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"os"
 	"path"
-	"strings"
 	"sync"
 	"time"
 
@@ -83,6 +81,8 @@ func NewRotateLogger(logCfg *paramtable.AccessLogConfig, minioCfg *paramtable.Mi
 		if err != nil {
 			return nil, err
 		}
+		prefix, ext := logger.prefixAndExt()
+		handler.retentionPolicy = getTimeRetentionFunc(logCfg.RemoteMaxTime.GetAsInt(), prefix, ext)
 		logger.handler = handler
 	}
 
@@ -313,8 +313,8 @@ func (l *RotateLogger) prefixAndExt() (string, string) {
 func (l *RotateLogger) newBackupName() string {
 	t := time.Now()
 	timestamp := t.Format(timeFormat)
-	name, suffix := l.prefixAndExt()
-	return path.Join(l.dir(), name+timestamp+suffix)
+	prefix, ext := l.prefixAndExt()
+	return path.Join(l.dir(), prefix+timestamp+ext)
 }
 
 func (l *RotateLogger) oldLogFiles() ([]logInfo, error) {
@@ -330,24 +330,13 @@ func (l *RotateLogger) oldLogFiles() ([]logInfo, error) {
 		if f.IsDir() {
 			continue
 		}
-		if t, err := l.timeFromName(f.Name(), prefix, ext); err == nil {
+		if t, err := timeFromName(f.Name(), prefix, ext); err == nil {
 			logFiles = append(logFiles, logInfo{t, f.Name()})
 			continue
 		}
 	}
 
 	return logFiles, nil
-}
-
-func (l *RotateLogger) timeFromName(filename, prefix, ext string) (time.Time, error) {
-	if !strings.HasPrefix(filename, prefix) {
-		return time.Time{}, errors.New("mismatched prefix")
-	}
-	if !strings.HasSuffix(filename, ext) {
-		return time.Time{}, errors.New("mismatched extension")
-	}
-	ts := filename[len(prefix) : len(filename)-len(ext)]
-	return time.Parse(timeFormat, ts)
 }
 
 type logInfo struct {

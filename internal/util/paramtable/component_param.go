@@ -560,6 +560,8 @@ type AccessLogConfig struct {
 	MaxBackups ParamItem
 	//File path in minIO
 	RemotePath ParamItem
+	//Max time for log file in minIO, in hours
+	RemoteMaxTime ParamItem
 }
 
 type proxyConfig struct {
@@ -751,6 +753,13 @@ func (p *proxyConfig) init(base *BaseTable) {
 		DefaultValue: "access_log/",
 	}
 	p.AccessLog.RemotePath.Init(base.mgr)
+
+	p.AccessLog.RemoteMaxTime = ParamItem{
+		Key:          "proxy.accessLog.remoteMaxTime",
+		Version:      "2.2.0",
+		DefaultValue: "168",
+	}
+	p.AccessLog.RemoteMaxTime.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
