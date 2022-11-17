@@ -131,8 +131,27 @@ func SpawnReplicas(replicaMgr *meta.ReplicaManager, nodeMgr *session.NodeManager
 func RegisterTargets(ctx context.Context,
 	targetMgr *meta.TargetManager,
 	broker meta.Broker,
-	collection int64, partitions []int64) error {
-	dmChannels := make(map[string][]*datapb.VchannelInfo)
+	collection int64,
+	partitions []int64,
+) error {
+	channels, segments, err := FetchTargets(ctx, targetMgr, broker, collection, partitions)
+	if err != nil {
+		return err
+	}
+
+	targetMgr.AddDmChannel(channels...)
+	targetMgr.AddSegment(segments...)
+	return nil
+}
+
+func FetchTargets(ctx context.Context,
+	targetMgr *meta.TargetManager,
+	broker meta.Broker,
+	collection int64,
+	partitions []int64,
+) ([]*meta.DmChannel, []*datapb.SegmentInfo, error) {
+	channels := make(map[string][]*datapb.VchannelInfo)
+	segments := make([]*datapb.SegmentInfo, 0)
 
 	for _, partitionID := range partitions {
 		log.Debug("get recovery info...",
@@ -140,12 +159,12 @@ func RegisterTargets(ctx context.Context,
 			zap.Int64("partitionID", partitionID))
 		vChannelInfos, binlogs, err := broker.GetRecoveryInfo(ctx, collection, partitionID)
 		if err != nil {
-			return err
+			return nil, nil, err
 		}
 
 		// Register segments
 		for _, segmentBinlogs := range binlogs {
-			targetMgr.AddSegment(SegmentBinlogs2SegmentInfo(
+			segments = append(segments, SegmentBinlogs2SegmentInfo(
 				collection,
 				partitionID,
 				segmentBinlogs))
@@ -153,13 +172,14 @@ func RegisterTargets(ctx context.Context,
 
 		for _, info := range vChannelInfos {
 			channelName := info.GetChannelName()
-			dmChannels[channelName] = append(dmChannels[channelName], info)
+			channels[channelName] = append(channels[channelName], info)
 		}
 	}
 	// Merge and register channels
-	for _, channels := range dmChannels {
+	dmChannels := make([]*meta.DmChannel, 0, len(channels))
+	for _, channels := range channels {
 		dmChannel := MergeDmChannelInfo(channels)
-		targetMgr.AddDmChannel(dmChannel)
+		dmChannels = append(dmChannels, dmChannel)
 	}
-	return nil
+	return dmChannels, segments, nil
 }

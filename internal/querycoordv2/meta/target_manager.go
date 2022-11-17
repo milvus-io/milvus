@@ -46,7 +46,11 @@ func (mgr *TargetManager) RemoveCollection(collectionID int64) {
 	mgr.rwmutex.Lock()
 	defer mgr.rwmutex.Unlock()
 
-	log.Info("remove collection from targets")
+	mgr.removeCollection(collectionID)
+}
+
+func (mgr *TargetManager) removeCollection(collectionID int64) {
+	log.Info("remove collection from targets", zap.Int64("collectionID", collectionID))
 	for _, segment := range mgr.segments {
 		if segment.CollectionID == collectionID {
 			mgr.removeSegment(segment.GetID())
@@ -83,7 +87,15 @@ func (mgr *TargetManager) RemoveSegment(segmentID int64) {
 
 func (mgr *TargetManager) removeSegment(segmentID int64) {
 	delete(mgr.segments, segmentID)
-	log.Info("segment removed from targets", zap.Int64("segment", segmentID))
+	log.Info("segment removed from targets", zap.Int64("segmentID", segmentID))
+}
+
+func (mgr *TargetManager) Replace(collectionID int64, channels []*DmChannel, segments []*datapb.SegmentInfo) {
+	mgr.rwmutex.Lock()
+	defer mgr.rwmutex.Unlock()
+
+	mgr.addDmChannel(channels...)
+	mgr.addSegment(segments...)
 }
 
 // AddSegment adds segment into target set,
@@ -147,6 +159,10 @@ func (mgr *TargetManager) AddDmChannel(channels ...*DmChannel) {
 	mgr.rwmutex.Lock()
 	defer mgr.rwmutex.Unlock()
 
+	mgr.addDmChannel(channels...)
+}
+
+func (mgr *TargetManager) addDmChannel(channels ...*DmChannel) {
 	for _, channel := range channels {
 		ts := channel.GetSeekPosition().GetTimestamp()
 		log.Info("add channel into targets",

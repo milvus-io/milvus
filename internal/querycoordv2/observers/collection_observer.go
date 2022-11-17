@@ -180,7 +180,6 @@ func (ob *CollectionObserver) refreshTargets(updatedAt time.Time, collectionID i
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	ob.targetMgr.RemoveCollection(collectionID)
 	ob.handoffOb.Unregister(ctx, collectionID)
 
 	if len(partitions) == 0 {
@@ -193,12 +192,12 @@ func (ob *CollectionObserver) refreshTargets(updatedAt time.Time, collectionID i
 	}
 
 	ob.handoffOb.Register(collectionID)
-	utils.RegisterTargets(ctx,
-		ob.targetMgr,
-		ob.broker,
-		collectionID,
-		partitions,
-	)
+	channels, segments, err := utils.FetchTargets(ctx, ob.targetMgr, ob.broker, collectionID, partitions)
+	if err != nil {
+		log.Warn("failed to fetch targets from DataCoord, will refresh targets later", zap.Error(err))
+		return false
+	}
+	ob.targetMgr.Replace(collectionID, channels, segments)
 
 	ob.refreshed[collectionID] = updatedAt
 	return true
