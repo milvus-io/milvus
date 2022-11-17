@@ -89,8 +89,7 @@ func (c *MilvusConfig) init(base *paramtable.BaseTable) {
 	default:
 	}
 
-	c.EtcdCfg.Base = base
-	c.EtcdCfg.LoadCfgToMemory()
+	c.EtcdCfg.Init(base)
 }
 
 func (c *MilvusConfig) String() string {

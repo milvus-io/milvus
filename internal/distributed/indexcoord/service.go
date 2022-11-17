@@ -120,7 +120,7 @@ func (s *Server) init() error {
 
 	// --- RootCoord ---
 	if s.rootCoord == nil {
-		s.rootCoord, err = rcc.NewClient(s.loopCtx, ic.Params.EtcdCfg.MetaRootPath, s.etcdCli)
+		s.rootCoord, err = rcc.NewClient(s.loopCtx, ic.Params.EtcdCfg.MetaRootPath.GetValue(), s.etcdCli)
 		if err != nil {
 			log.Debug("IndexCoord try to new RootCoord client failed", zap.Error(err))
 			panic(err)
@@ -148,7 +148,7 @@ func (s *Server) init() error {
 
 	// --- DataCoord ---
 	if s.dataCoord == nil {
-		s.dataCoord, err = dcc.NewClient(s.loopCtx, ic.Params.EtcdCfg.MetaRootPath, s.etcdCli)
+		s.dataCoord, err = dcc.NewClient(s.loopCtx, ic.Params.EtcdCfg.MetaRootPath.GetValue(), s.etcdCli)
 		if err != nil {
 			log.Debug("IndexCoord try to new DataCoord client failed", zap.Error(err))
 			panic(err)

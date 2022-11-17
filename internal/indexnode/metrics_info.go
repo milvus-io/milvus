@@ -76,7 +76,7 @@ func getSystemInfoMetrics(
 			ID:          node.session.ServerID,
 		},
 		SystemConfigurations: metricsinfo.IndexNodeConfiguration{
-			MinioBucketName: Params.MinioCfg.BucketName,
+			MinioBucketName: Params.MinioCfg.BucketName.GetValue(),
 			SimdType:        Params.CommonCfg.SimdType,
 		},
 	}

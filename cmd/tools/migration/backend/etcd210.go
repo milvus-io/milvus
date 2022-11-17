@@ -413,7 +413,7 @@ func (b etcd210) Backup(meta *meta.Meta, backupFile string) error {
 	saves := meta.Meta210.GenerateSaves()
 	codec := NewBackupCodec()
 	var instance, metaPath string
-	metaRootPath := b.cfg.EtcdCfg.MetaRootPath
+	metaRootPath := b.cfg.EtcdCfg.MetaRootPath.GetValue()
 	parts := strings.Split(metaRootPath, "/")
 	if len(parts) > 1 {
 		metaPath = parts[len(parts)-1]
@@ -439,7 +439,7 @@ func (b etcd210) Backup(meta *meta.Meta, backupFile string) error {
 
 func (b etcd210) BackupV2(file string) error {
 	var instance, metaPath string
-	metaRootPath := b.cfg.EtcdCfg.MetaRootPath
+	metaRootPath := b.cfg.EtcdCfg.MetaRootPath.GetValue()
 	parts := strings.Split(metaRootPath, "/")
 	if len(parts) > 1 {
 		metaPath = parts[len(parts)-1]

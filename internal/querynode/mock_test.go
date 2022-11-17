@@ -427,14 +427,14 @@ func generateAndSaveIndex(segmentID UniqueID, msgLength int, indexType, metricTy
 
 func genStorageConfig() *indexpb.StorageConfig {
 	return &indexpb.StorageConfig{
-		Address:         Params.MinioCfg.Address,
-		AccessKeyID:     Params.MinioCfg.AccessKeyID,
-		SecretAccessKey: Params.MinioCfg.SecretAccessKey,
-		BucketName:      Params.MinioCfg.BucketName,
-		RootPath:        Params.MinioCfg.RootPath,
-		IAMEndpoint:     Params.MinioCfg.IAMEndpoint,
-		UseSSL:          Params.MinioCfg.UseSSL,
-		UseIAM:          Params.MinioCfg.UseIAM,
+		Address:         Params.MinioCfg.Address.GetValue(),
+		AccessKeyID:     Params.MinioCfg.AccessKeyID.GetValue(),
+		SecretAccessKey: Params.MinioCfg.SecretAccessKey.GetValue(),
+		BucketName:      Params.MinioCfg.BucketName.GetValue(),
+		RootPath:        Params.MinioCfg.RootPath.GetValue(),
+		IAMEndpoint:     Params.MinioCfg.IAMEndpoint.GetValue(),
+		UseSSL:          Params.MinioCfg.UseSSL.GetAsBool(),
+		UseIAM:          Params.MinioCfg.UseIAM.GetAsBool(),
 	}
 }
 
@@ -533,7 +533,7 @@ func genEtcdKV() (*etcdkv.EtcdKV, error) {
 	if err != nil {
 		return nil, err
 	}
-	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
+	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath.GetValue())
 	return etcdKV, nil
 }
 
@@ -560,11 +560,11 @@ func genLocalChunkManager() (storage.ChunkManager, error) {
 func genRemoteChunkManager(ctx context.Context) (storage.ChunkManager, error) {
 	return storage.NewMinioChunkManager(
 		ctx,
-		storage.Address(Params.MinioCfg.Address),
-		storage.AccessKeyID(Params.MinioCfg.AccessKeyID),
-		storage.SecretAccessKeyID(Params.MinioCfg.SecretAccessKey),
-		storage.UseSSL(Params.MinioCfg.UseSSL),
-		storage.BucketName(Params.MinioCfg.BucketName),
+		storage.Address(Params.MinioCfg.Address.GetValue()),
+		storage.AccessKeyID(Params.MinioCfg.AccessKeyID.GetValue()),
+		storage.SecretAccessKeyID(Params.MinioCfg.SecretAccessKey.GetValue()),
+		storage.UseSSL(Params.MinioCfg.UseSSL.GetAsBool()),
+		storage.BucketName(Params.MinioCfg.BucketName.GetValue()),
 		storage.CreateBucket(true))
 }
 
@@ -574,11 +574,11 @@ func genVectorChunkManager(ctx context.Context, col *Collection) (*storage.Vecto
 
 	rcm, err := storage.NewMinioChunkManager(
 		ctx,
-		storage.Address(Params.MinioCfg.Address),
-		storage.AccessKeyID(Params.MinioCfg.AccessKeyID),
-		storage.SecretAccessKeyID(Params.MinioCfg.SecretAccessKey),
-		storage.UseSSL(Params.MinioCfg.UseSSL),
-		storage.BucketName(Params.MinioCfg.BucketName),
+		storage.Address(Params.MinioCfg.Address.GetValue()),
+		storage.AccessKeyID(Params.MinioCfg.AccessKeyID.GetValue()),
+		storage.SecretAccessKeyID(Params.MinioCfg.SecretAccessKey.GetValue()),
+		storage.UseSSL(Params.MinioCfg.UseSSL.GetAsBool()),
+		storage.BucketName(Params.MinioCfg.BucketName.GetValue()),
 		storage.CreateBucket(true))
 
 	if err != nil {
@@ -1660,7 +1660,7 @@ func genSimpleQueryNodeWithMQFactory(ctx context.Context, fac dependency.Factory
 		log.Error("QueryNode init channel pool failed", zap.Error(err))
 		return nil, err
 	}
-	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
+	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath.GetValue())
 	node.etcdKV = etcdKV
 
 	node.tSafeReplica = newTSafeReplica()

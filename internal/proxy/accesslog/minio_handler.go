@@ -62,14 +62,14 @@ type minioHandler struct {
 
 func NewMinioHandler(ctx context.Context, cfg *paramtable.MinioConfig, rootPath string, queueLen int) (*minioHandler, error) {
 	handlerCfg := config{
-		address:           cfg.Address,
-		bucketName:        cfg.BucketName,
-		accessKeyID:       cfg.AccessKeyID,
-		secretAccessKeyID: cfg.SecretAccessKey,
-		useSSL:            cfg.UseSSL,
+		address:           cfg.Address.GetValue(),
+		bucketName:        cfg.BucketName.GetValue(),
+		accessKeyID:       cfg.AccessKeyID.GetValue(),
+		secretAccessKeyID: cfg.SecretAccessKey.GetValue(),
+		useSSL:            cfg.UseSSL.GetAsBool(),
 		createBucket:      true,
-		useIAM:            cfg.UseIAM,
-		iamEndpoint:       cfg.IAMEndpoint,
+		useIAM:            cfg.UseIAM.GetAsBool(),
+		iamEndpoint:       cfg.IAMEndpoint.GetValue(),
 	}
 
 	client, err := newMinioClient(ctx, handlerCfg)

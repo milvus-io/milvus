@@ -53,12 +53,12 @@ func NewPmsFactory(config *paramtable.PulsarConfig) *PmsFactory {
 	return &PmsFactory{
 		PulsarBufSize:    1024,
 		ReceiveBufSize:   1024,
-		PulsarAddress:    config.Address,
-		PulsarWebAddress: config.WebAddress,
-		PulsarAuthPlugin: config.AuthPlugin,
-		PulsarAuthParams: config.AuthParams,
-		PulsarTenant:     config.Tenant,
-		PulsarNameSpace:  config.Namespace,
+		PulsarAddress:    config.Address.GetValue(),
+		PulsarWebAddress: config.WebAddress.GetValue(),
+		PulsarAuthPlugin: config.AuthPlugin.GetValue(),
+		PulsarAuthParams: config.AuthParams.GetValue(),
+		PulsarTenant:     config.Tenant.GetValue(),
+		PulsarNameSpace:  config.Namespace.GetValue(),
 	}
 }
 

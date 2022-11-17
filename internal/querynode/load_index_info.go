@@ -50,13 +50,13 @@ func newLoadIndexInfo() (*LoadIndexInfo, error) {
 
 	// TODO::xige-16 support embedded milvus
 	storageType := "minio"
-	cAddress := C.CString(Params.MinioCfg.Address)
-	cBucketName := C.CString(Params.MinioCfg.BucketName)
-	cAccessKey := C.CString(Params.MinioCfg.AccessKeyID)
-	cAccessValue := C.CString(Params.MinioCfg.SecretAccessKey)
-	cRootPath := C.CString(Params.MinioCfg.RootPath)
+	cAddress := C.CString(Params.MinioCfg.Address.GetValue())
+	cBucketName := C.CString(Params.MinioCfg.BucketName.GetValue())
+	cAccessKey := C.CString(Params.MinioCfg.AccessKeyID.GetValue())
+	cAccessValue := C.CString(Params.MinioCfg.SecretAccessKey.GetValue())
+	cRootPath := C.CString(Params.MinioCfg.RootPath.GetValue())
 	cStorageType := C.CString(storageType)
-	cIamEndPoint := C.CString(Params.MinioCfg.IAMEndpoint)
+	cIamEndPoint := C.CString(Params.MinioCfg.IAMEndpoint.GetValue())
 	defer C.free(unsafe.Pointer(cAddress))
 	defer C.free(unsafe.Pointer(cBucketName))
 	defer C.free(unsafe.Pointer(cAccessKey))
@@ -72,8 +72,8 @@ func newLoadIndexInfo() (*LoadIndexInfo, error) {
 		remote_root_path: cRootPath,
 		storage_type:     cStorageType,
 		iam_endpoint:     cIamEndPoint,
-		useSSL:           C.bool(Params.MinioCfg.UseSSL),
-		useIAM:           C.bool(Params.MinioCfg.UseIAM),
+		useSSL:           C.bool(Params.MinioCfg.UseSSL.GetAsBool()),
+		useIAM:           C.bool(Params.MinioCfg.UseIAM.GetAsBool()),
 	}
 
 	status := C.NewLoadIndexInfo(&cLoadIndexInfo, storageConfig)

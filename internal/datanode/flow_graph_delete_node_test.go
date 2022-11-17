@@ -246,7 +246,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		chanName := "datanode-test-FlowGraphDeletenode-operate"
 		testPath := "/test/datanode/root/meta"
 		assert.NoError(t, clearEtcd(testPath))
-		Params.EtcdCfg.MetaRootPath = testPath
+		Params.BaseTable.Save("etcd.rootPath", "/test/datanode/root")
 
 		c := &nodeConfig{
 			channel:      channel,
@@ -269,7 +269,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		chanName := "datanode-test-FlowGraphDeletenode-operate"
 		testPath := "/test/datanode/root/meta"
 		assert.NoError(t, clearEtcd(testPath))
-		Params.EtcdCfg.MetaRootPath = testPath
+		Params.BaseTable.Save("etcd.rootPath", "/test/datanode/root")
 
 		c := &nodeConfig{
 			channel:      channel,
@@ -298,7 +298,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		chanName := "datanode-test-FlowGraphDeletenode-operate"
 		testPath := "/test/datanode/root/meta"
 		assert.NoError(t, clearEtcd(testPath))
-		Params.EtcdCfg.MetaRootPath = testPath
+		Params.BaseTable.Save("etcd.rootPath", "/test/datanode/root")
 
 		c := &nodeConfig{
 			channel:      channel,
@@ -333,7 +333,6 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		chanName := "datanode-test-FlowGraphDeletenode-issue18565"
 		testPath := "/test/datanode/root/meta"
 		assert.NoError(t, clearEtcd(testPath))
-		Params.EtcdCfg.MetaRootPath = testPath
 
 		channel := &ChannelMeta{
 			segments: make(map[UniqueID]*Segment),
@@ -387,7 +386,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		chanName := "datanode-test-FlowGraphDeletenode-autoflush"
 		testPath := "/test/datanode/root/meta"
 		assert.NoError(t, clearEtcd(testPath))
-		Params.EtcdCfg.MetaRootPath = testPath
+		Params.BaseTable.Save("etcd.rootPath", "/test/datanode/root")
 
 		c := &nodeConfig{
 			channel:      channel,
@@ -474,7 +473,7 @@ func TestFlowGraphDeleteNode_showDelBuf(t *testing.T) {
 	chanName := "datanode-test-FlowGraphDeletenode-showDelBuf"
 	testPath := "/test/datanode/root/meta"
 	assert.NoError(t, clearEtcd(testPath))
-	Params.EtcdCfg.MetaRootPath = testPath
+	Params.BaseTable.Save("etcd.rootPath", "/test/datanode/root")
 
 	channel := &ChannelMeta{
 		segments: make(map[UniqueID]*Segment),
@@ -518,7 +517,7 @@ func TestFlowGraphDeleteNode_updateCompactedSegments(t *testing.T) {
 	chanName := "datanode-test-FlowGraphDeletenode-showDelBuf"
 	testPath := "/test/datanode/root/meta"
 	assert.NoError(t, clearEtcd(testPath))
-	Params.EtcdCfg.MetaRootPath = testPath
+	Params.BaseTable.Save("etcd.rootPath", "/test/datanode/root")
 
 	channel := ChannelMeta{
 		segments: make(map[UniqueID]*Segment),

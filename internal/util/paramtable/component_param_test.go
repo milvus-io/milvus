@@ -32,10 +32,10 @@ func TestComponentParam(t *testing.T) {
 	t.Run("test kafkaConfig", func(t *testing.T) {
 
 		params := params.ServiceParam.KafkaCfg
-		producerConfig := params.ProducerExtraConfig
+		producerConfig := params.ProducerExtraConfig.GetValue()
 		assert.Equal(t, "dc", producerConfig["client.id"])
 
-		consumerConfig := params.ConsumerExtraConfig
+		consumerConfig := params.ConsumerExtraConfig.GetValue()
 		assert.Equal(t, "dc1", consumerConfig["client.id"])
 	})
 

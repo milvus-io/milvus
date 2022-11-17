@@ -35,13 +35,13 @@ var (
 
 // GetEtcdClient returns etcd client
 func GetEtcdClient(cfg *paramtable.EtcdConfig) (*clientv3.Client, error) {
-	if cfg.UseEmbedEtcd {
+	if cfg.UseEmbedEtcd.GetAsBool() {
 		return GetEmbedEtcdClient()
 	}
-	if cfg.EtcdUseSSL {
-		return GetRemoteEtcdSSLClient(cfg.Endpoints, cfg.EtcdTLSCert, cfg.EtcdTLSKey, cfg.EtcdTLSCACert, cfg.EtcdTLSMinVersion)
+	if cfg.EtcdUseSSL.GetAsBool() {
+		return GetRemoteEtcdSSLClient(cfg.Endpoints.GetAsStrings(), cfg.EtcdTLSCert.GetValue(), cfg.EtcdTLSKey.GetValue(), cfg.EtcdTLSCACert.GetValue(), cfg.EtcdTLSMinVersion.GetValue())
 	}
-	return GetRemoteEtcdClient(cfg.Endpoints)
+	return GetRemoteEtcdClient(cfg.Endpoints.GetAsStrings())
 }
 
 // GetRemoteEtcdClient returns client of remote etcd by given endpoints

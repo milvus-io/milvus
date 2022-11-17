@@ -171,13 +171,13 @@ func TestRotateLogger_BasicError(t *testing.T) {
 }
 
 func TestRotateLogger_InitError(t *testing.T) {
-	var Params paramtable.ComponentParam
-	Params.Init()
+	var params paramtable.ComponentParam
+	params.Init()
 	testPath := ""
-	Params.ProxyCfg.AccessLog.LocalPath = testPath
-	Params.ProxyCfg.AccessLog.MinioEnable = true
-	Params.MinioCfg.Address = ""
+	params.ProxyCfg.AccessLog.LocalPath = testPath
+	params.ProxyCfg.AccessLog.MinioEnable = true
+	params.Save(params.MinioCfg.Address.Key, "")
 	//init err with invalid minio address
-	_, err := NewRotateLogger(&Params.ProxyCfg.AccessLog, &Params.MinioCfg)
+	_, err := NewRotateLogger(&params.ProxyCfg.AccessLog, &params.MinioCfg)
 	assert.Error(t, err)
 }

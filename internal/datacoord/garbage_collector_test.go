@@ -50,7 +50,7 @@ func Test_garbageCollector_basic(t *testing.T) {
 
 	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.Nil(t, err)
-	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
+	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath.GetValue())
 	segRefer, err := NewSegmentReferenceManager(etcdKV, nil)
 	assert.NoError(t, err)
 	assert.NotNil(t, segRefer)
@@ -112,7 +112,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 
 	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.Nil(t, err)
-	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
+	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath.GetValue())
 	segRefer, err := NewSegmentReferenceManager(etcdKV, nil)
 	assert.NoError(t, err)
 	assert.NotNil(t, segRefer)
@@ -276,9 +276,9 @@ func Test_garbageCollector_scan(t *testing.T) {
 // initialize unit test sso env
 func initUtOSSEnv(bucket, root string, n int) (mcm *storage.MinioChunkManager, inserts []string, stats []string, delta []string, other []string, err error) {
 	Params.Init()
-	cli, err := minio.New(Params.MinioCfg.Address, &minio.Options{
-		Creds:  credentials.NewStaticV4(Params.MinioCfg.AccessKeyID, Params.MinioCfg.SecretAccessKey, ""),
-		Secure: Params.MinioCfg.UseSSL,
+	cli, err := minio.New(Params.MinioCfg.Address.GetValue(), &minio.Options{
+		Creds:  credentials.NewStaticV4(Params.MinioCfg.AccessKeyID.GetValue(), Params.MinioCfg.SecretAccessKey.GetValue(), ""),
+		Secure: Params.MinioCfg.UseSSL.GetAsBool(),
 	})
 	if err != nil {
 		return nil, nil, nil, nil, nil, err

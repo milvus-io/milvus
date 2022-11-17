@@ -26,19 +26,19 @@ import (
 )
 
 func TestMinioHandler_ConnectError(t *testing.T) {
-	var Params paramtable.ComponentParam
-	Params.Init()
+	var params paramtable.ComponentParam
+	params.Init()
 	testPath := "/tme/miniotest"
-	Params.ProxyCfg.AccessLog.LocalPath = testPath
-	Params.MinioCfg.UseIAM = true
-	Params.MinioCfg.Address = ""
+	params.ProxyCfg.AccessLog.LocalPath = testPath
+	params.Save(params.MinioCfg.UseIAM.Key, "true")
+	params.Save(params.MinioCfg.Address.Key, "")
 	defer os.RemoveAll(testPath)
 
 	_, err := NewMinioHandler(
 		context.Background(),
-		&Params.MinioCfg,
-		Params.ProxyCfg.AccessLog.RemotePath,
-		Params.ProxyCfg.AccessLog.MaxBackups,
+		&params.MinioCfg,
+		params.ProxyCfg.AccessLog.RemotePath,
+		params.ProxyCfg.AccessLog.MaxBackups,
 	)
 	assert.Error(t, err)
 }

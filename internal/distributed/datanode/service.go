@@ -250,7 +250,7 @@ func (s *Server) init() error {
 	// --- RootCoord Client ---
 	if s.newRootCoordClient != nil {
 		log.Info("initializing RootCoord client for DataNode")
-		rootCoordClient, err := s.newRootCoordClient(dn.Params.EtcdCfg.MetaRootPath, s.etcdCli)
+		rootCoordClient, err := s.newRootCoordClient(dn.Params.EtcdCfg.MetaRootPath.GetValue(), s.etcdCli)
 		if err != nil {
 			log.Error("failed to create new RootCoord client", zap.Error(err))
 			panic(err)
@@ -276,7 +276,7 @@ func (s *Server) init() error {
 	// --- DataCoord Client ---
 	if s.newDataCoordClient != nil {
 		log.Debug("starting DataCoord client for DataNode")
-		dataCoordClient, err := s.newDataCoordClient(dn.Params.EtcdCfg.MetaRootPath, s.etcdCli)
+		dataCoordClient, err := s.newDataCoordClient(dn.Params.EtcdCfg.MetaRootPath.GetValue(), s.etcdCli)
 		if err != nil {
 			log.Error("failed to create new DataCoord client", zap.Error(err))
 			panic(err)

@@ -83,7 +83,10 @@ type BaseTable struct {
 // NewBaseTableFromYamlOnly only used in migration tool.
 // Maybe we shouldn't limit the configDir internally.
 func NewBaseTableFromYamlOnly(yaml string) *BaseTable {
-	mgr, _ := config.Init(config.WithFilesSource(yaml))
+	mgr, _ := config.Init(config.WithFilesSource(&config.FileInfo{
+		Filepath:        yaml,
+		RefreshInterval: 10 * time.Second,
+	}))
 	gp := &BaseTable{mgr: mgr, YamlFile: yaml}
 	return gp
 }
@@ -126,7 +129,12 @@ func (gp *BaseTable) initConfigsFromLocal(formatter func(key string) string) {
 
 	gp.configDir = gp.initConfPath()
 	configFilePath := gp.configDir + "/" + gp.YamlFile
-	gp.mgr, err = config.Init(config.WithEnvSource(formatter), config.WithFilesSource(configFilePath))
+	gp.mgr, err = config.Init(
+		config.WithEnvSource(formatter),
+		config.WithFilesSource(&config.FileInfo{
+			Filepath:        configFilePath,
+			RefreshInterval: 10 * time.Second,
+		}))
 	if err != nil {
 		log.Warn("init baseTable with file failed", zap.String("configFile", configFilePath), zap.Error(err))
 		return
@@ -147,11 +155,13 @@ func (gp *BaseTable) initConfigsFromRemote(formatter func(key string) string) {
 
 	configFilePath := gp.configDir + "/" + gp.YamlFile
 	gp.mgr, err = config.Init(config.WithEnvSource(formatter),
-		config.WithFilesSource(configFilePath),
+		config.WithFilesSource(&config.FileInfo{
+			Filepath:        configFilePath,
+			RefreshInterval: 10 * time.Second,
+		}),
 		config.WithEtcdSource(&config.EtcdInfo{
 			Endpoints:       strings.Split(endpoints, ","),
 			KeyPrefix:       rootPath,
-			RefreshMode:     config.ModeInterval,
 			RefreshInterval: 10 * time.Second,
 		}))
 	if err != nil {
@@ -183,7 +193,7 @@ func (gp *BaseTable) initConfPath() string {
 }
 
 func (gp *BaseTable) Configs() map[string]string {
-	return gp.mgr.Configs()
+	return gp.mgr.GetConfigs()
 }
 
 // Load loads an object with @key.
@@ -239,6 +249,10 @@ func (gp *BaseTable) GetByPattern(pattern string) map[string]string {
 
 func (gp *BaseTable) GetConfigSubSet(pattern string) map[string]string {
 	return gp.mgr.GetConfigsByPattern(pattern, false)
+}
+
+func (gp *BaseTable) GetAll() map[string]string {
+	return gp.mgr.GetConfigs()
 }
 
 // For compatible reason, only visiable for Test

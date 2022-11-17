@@ -30,9 +30,9 @@ import (
 func NewMetaKvFactory(rootPath string, etcdCfg *paramtable.EtcdConfig) (kv.MetaKv, error) {
 	log.Info("start etcd with rootPath",
 		zap.String("rootpath", rootPath),
-		zap.Bool("isEmbed", etcdCfg.UseEmbedEtcd))
-	if etcdCfg.UseEmbedEtcd {
-		path := etcdCfg.ConfigPath
+		zap.Bool("isEmbed", etcdCfg.UseEmbedEtcd.GetAsBool()))
+	if etcdCfg.UseEmbedEtcd.GetAsBool() {
+		path := etcdCfg.ConfigPath.GetValue()
 		var cfg *embed.Config
 		if len(path) > 0 {
 			cfgFromFile, err := embed.ConfigFromFile(path)
@@ -43,7 +43,7 @@ func NewMetaKvFactory(rootPath string, etcdCfg *paramtable.EtcdConfig) (kv.MetaK
 		} else {
 			cfg = embed.NewConfig()
 		}
-		cfg.Dir = etcdCfg.DataDir
+		cfg.Dir = etcdCfg.DataDir.GetValue()
 		metaKv, err := NewEmbededEtcdKV(cfg, rootPath)
 		if err != nil {
 			return nil, err

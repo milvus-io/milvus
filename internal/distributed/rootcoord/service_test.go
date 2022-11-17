@@ -180,12 +180,13 @@ func TestRun(t *testing.T) {
 
 	rand.Seed(time.Now().UnixNano())
 	randVal := rand.Int()
+	rootPath := fmt.Sprintf("/%d/test", randVal)
+	rootcoord.Params.BaseTable.Save("etcd.rootPath", rootPath)
 	rootcoord.Params.Init()
-	rootcoord.Params.EtcdCfg.MetaRootPath = fmt.Sprintf("/%d/test/meta", randVal)
 
 	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	assert.Nil(t, err)
-	sessKey := path.Join(rootcoord.Params.EtcdCfg.MetaRootPath, sessionutil.DefaultServiceRoot)
+	sessKey := path.Join(rootcoord.Params.EtcdCfg.MetaRootPath.GetValue(), sessionutil.DefaultServiceRoot)
 	_, err = etcdCli.Delete(ctx, sessKey, clientv3.WithPrefix())
 	assert.Nil(t, err)
 	err = svr.Run()

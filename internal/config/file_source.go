@@ -32,17 +32,24 @@ type FileSource struct {
 	sync.RWMutex
 	file    string
 	configs map[string]string
+
+	configRefresher refresher
 }
 
-func NewFileSource(file string) *FileSource {
-	fs := &FileSource{file: file, configs: make(map[string]string)}
-	fs.loadFromFile()
+func NewFileSource(fileInfo *FileInfo) *FileSource {
+	fs := &FileSource{
+		file:    fileInfo.Filepath,
+		configs: make(map[string]string),
+	}
+	fs.configRefresher = newRefresher(fileInfo.RefreshInterval, fs.loadFromFile)
 	return fs
 }
 
 // GetConfigurationByKey implements ConfigSource
 func (fs *FileSource) GetConfigurationByKey(key string) (string, error) {
+	fs.RLock()
 	v, ok := fs.configs[key]
+	fs.RUnlock()
 	if !ok {
 		return "", fmt.Errorf("key not found: %s", key)
 	}
@@ -52,11 +59,19 @@ func (fs *FileSource) GetConfigurationByKey(key string) (string, error) {
 // GetConfigurations implements ConfigSource
 func (fs *FileSource) GetConfigurations() (map[string]string, error) {
 	configMap := make(map[string]string)
-	fs.Lock()
-	defer fs.Unlock()
+
+	err := fs.loadFromFile()
+	if err != nil {
+		return nil, err
+	}
+
+	fs.configRefresher.start()
+
+	fs.RLock()
 	for k, v := range fs.configs {
 		configMap[k] = v
 	}
+	fs.RUnlock()
 	return configMap, nil
 }
 
@@ -71,8 +86,12 @@ func (fs *FileSource) GetSourceName() string {
 }
 
 func (fs *FileSource) Close() {
+	fs.configRefresher.stop()
 }
 
+func (fs *FileSource) SetEventHandler(eh EventHandler) {
+	fs.configRefresher.eh = eh
+}
 func (fs *FileSource) loadFromFile() error {
 	yamlReader := viper.New()
 	configFile := fs.file
@@ -86,6 +105,7 @@ func (fs *FileSource) loadFromFile() error {
 		return err
 	}
 
+	newConfig := make(map[string]string)
 	for _, key := range yamlReader.AllKeys() {
 		val := yamlReader.Get(key)
 		str, err := cast.ToStringE(val)
@@ -110,11 +130,17 @@ func (fs *FileSource) loadFromFile() error {
 				continue
 			}
 		}
-		fs.Lock()
-		fs.configs[key] = str
-		fs.configs[formatKey(key)] = str
-		fs.Unlock()
+		newConfig[key] = str
+		newConfig[formatKey(key)] = str
 	}
+
+	fs.Lock()
+	defer fs.Unlock()
+	err := fs.configRefresher.fireEvents(fs.GetSourceName(), fs.configs, newConfig)
+	if err != nil {
+		return err
+	}
+	fs.configs = newConfig
 
 	return nil
 }

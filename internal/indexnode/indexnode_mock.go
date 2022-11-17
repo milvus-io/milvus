@@ -237,7 +237,7 @@ func getMockSystemInfoMetrics(
 			Type:        typeutil.IndexNodeRole,
 		},
 		SystemConfigurations: metricsinfo.IndexNodeConfiguration{
-			MinioBucketName: Params.MinioCfg.BucketName,
+			MinioBucketName: Params.MinioCfg.BucketName.GetValue(),
 			SimdType:        Params.CommonCfg.SimdType,
 		},
 	}

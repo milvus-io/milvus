@@ -50,9 +50,9 @@ func (suite *SegmentCheckerTestSuite) SetupSuite() {
 func (suite *SegmentCheckerTestSuite) SetupTest() {
 	var err error
 	config := GenerateEtcdConfig()
-	cli, err := etcd.GetEtcdClient(&config)
+	cli, err := etcd.GetEtcdClient(config)
 	suite.Require().NoError(err)
-	suite.kv = etcdkv.NewEtcdKV(cli, config.MetaRootPath)
+	suite.kv = etcdkv.NewEtcdKV(cli, config.MetaRootPath.GetValue())
 
 	// meta
 	store := meta.NewMetaStore(suite.kv)

@@ -1324,13 +1324,12 @@ func TestCore_startTimeTickLoop(t *testing.T) {
 
 // make sure the main functions work well when EnableActiveStandby=true
 func TestRootcoord_EnableActiveStandby(t *testing.T) {
-	Params.Init()
-	Params.RootCoordCfg.EnableActiveStandby = true
 	randVal := rand.Int()
+	Params.Init()
+	Params.BaseTable.Save("etcd.rootPath", fmt.Sprintf("/%d", randVal))
+	Params.RootCoordCfg.EnableActiveStandby = true
 	Params.CommonCfg.RootCoordTimeTick = fmt.Sprintf("rootcoord-time-tick-%d", randVal)
 	Params.CommonCfg.RootCoordStatistics = fmt.Sprintf("rootcoord-statistics-%d", randVal)
-	Params.EtcdCfg.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.EtcdCfg.MetaRootPath)
-	Params.EtcdCfg.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.EtcdCfg.KvRootPath)
 	Params.CommonCfg.RootCoordSubName = fmt.Sprintf("subname-%d", randVal)
 	Params.CommonCfg.RootCoordDml = fmt.Sprintf("rootcoord-dml-test-%d", randVal)
 	Params.CommonCfg.RootCoordDelta = fmt.Sprintf("rootcoord-delta-test-%d", randVal)

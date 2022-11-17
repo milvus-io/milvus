@@ -648,7 +648,7 @@ func (q *QuotaCenter) setRates() error {
 	switch q.rateAllocateStrategy {
 	case Average:
 		map2List = func() []*internalpb.Rate {
-			proxyNum := q.proxies.GetProxyNumber()
+			proxyNum := q.proxies.GetProxyCount()
 			if proxyNum == 0 {
 				return nil
 			}

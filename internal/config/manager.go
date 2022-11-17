@@ -26,19 +26,20 @@ import (
 )
 
 const (
-	TombValue        = "TOMB_VALUE"
-	CustomSourceName = "CustomSource"
+	TombValue = "TOMB_VAULE"
 )
 
 type Manager struct {
 	sync.RWMutex
+	Dispatcher     *EventDispatcher
 	sources        map[string]Source
 	keySourceMap   map[string]string
-	overlayConfigs map[string]string // store the configs setted or deleted by user
+	overlayConfigs map[string]string
 }
 
 func NewManager() *Manager {
 	return &Manager{
+		Dispatcher:     NewEventDispatcher(),
 		sources:        make(map[string]Source),
 		keySourceMap:   make(map[string]string),
 		overlayConfigs: make(map[string]string),
@@ -52,7 +53,7 @@ func (m *Manager) GetConfig(key string) (string, error) {
 	v, ok := m.overlayConfigs[realKey]
 	if ok {
 		if v == TombValue {
-			return "", fmt.Errorf("key not found: %s", key)
+			return "", fmt.Errorf("key not found %s", key)
 		}
 		return v, nil
 	}
@@ -94,8 +95,8 @@ func (m *Manager) GetConfigsByPattern(pattern string, withPrefix bool) map[strin
 	return matchedConfig
 }
 
-// Configs returns all the key values
-func (m *Manager) Configs() map[string]string {
+// GetConfigs returns all the key values
+func (m *Manager) GetConfigs() map[string]string {
 	m.RLock()
 	defer m.RUnlock()
 	config := make(map[string]string)
@@ -109,24 +110,6 @@ func (m *Manager) Configs() map[string]string {
 	}
 
 	return config
-}
-
-// For compatible reason, only visiable for Test
-func (m *Manager) SetConfig(key, value string) {
-	m.Lock()
-	defer m.Unlock()
-	realKey := formatKey(key)
-	m.overlayConfigs[realKey] = value
-	m.updateEvent(newEvent(CustomSourceName, CreateType, realKey, value))
-}
-
-// For compatible reason, only visiable for Test
-func (m *Manager) DeleteConfig(key string) {
-	m.Lock()
-	defer m.Unlock()
-	realKey := formatKey(key)
-	m.overlayConfigs[realKey] = TombValue
-	m.updateEvent(newEvent(realKey, DeleteType, realKey, ""))
 }
 
 func (m *Manager) Close() {
@@ -154,6 +137,20 @@ func (m *Manager) AddSource(source Source) error {
 	}
 
 	return nil
+}
+
+// For compatible reason, only visiable for Test
+func (m *Manager) SetConfig(key, value string) {
+	m.Lock()
+	defer m.Unlock()
+	m.overlayConfigs[formatKey(key)] = value
+}
+
+// For compatible reason, only visiable for Test
+func (m *Manager) DeleteConfig(key string) {
+	m.Lock()
+	defer m.Unlock()
+	m.overlayConfigs[formatKey(key)] = TombValue
 }
 
 // Do not use it directly, only used when add source and unittests.
@@ -260,7 +257,11 @@ func (m *Manager) OnEvent(event *Event) {
 		return
 	}
 
-	// m.dispatcher.DispatchEvent(event)
+	m.Dispatcher.Dispatch(event)
+}
+
+func (m *Manager) GetIdentifier() string {
+	return "Manager"
 }
 
 func (m *Manager) findNextBestSource(key string, sourceName string) Source {

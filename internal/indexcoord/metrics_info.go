@@ -80,7 +80,7 @@ func getSystemInfoMetrics(
 				ID:          coord.session.ServerID,
 			},
 			SystemConfigurations: metricsinfo.IndexCoordConfiguration{
-				MinioBucketName: Params.MinioCfg.BucketName,
+				MinioBucketName: Params.MinioCfg.BucketName.GetValue(),
 			},
 		},
 		ConnectedNodes: make([]metricsinfo.IndexNodeInfos, 0),

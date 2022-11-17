@@ -56,156 +56,178 @@ type ServiceParam struct {
 func (p *ServiceParam) Init() {
 	p.BaseTable.Init()
 
-	p.LocalStorageCfg.init(&p.BaseTable)
-	p.MetaStoreCfg.init(&p.BaseTable)
-	p.EtcdCfg.init(&p.BaseTable)
+	p.LocalStorageCfg.Init(&p.BaseTable)
+	p.MetaStoreCfg.Init(&p.BaseTable)
+	p.EtcdCfg.Init(&p.BaseTable)
 	if p.MetaStoreCfg.MetaStoreType == util.MetaStoreTypeMysql {
 		log.Debug("Mysql protocol is used as meta store")
-		p.DBCfg.init(&p.BaseTable)
+		p.DBCfg.Init(&p.BaseTable)
 	}
-	p.PulsarCfg.init(&p.BaseTable)
-	p.KafkaCfg.init(&p.BaseTable)
-	p.RocksmqCfg.init(&p.BaseTable)
-	p.MinioCfg.init(&p.BaseTable)
+	p.PulsarCfg.Init(&p.BaseTable)
+	p.KafkaCfg.Init(&p.BaseTable)
+	p.RocksmqCfg.Init(&p.BaseTable)
+	p.MinioCfg.Init(&p.BaseTable)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
 // --- etcd ---
 type EtcdConfig struct {
-	Base *BaseTable
-
 	// --- ETCD ---
-	Endpoints         []string
-	MetaRootPath      string
-	KvRootPath        string
-	EtcdLogLevel      string
-	EtcdLogPath       string
-	EtcdUseSSL        bool
-	EtcdTLSCert       string
-	EtcdTLSKey        string
-	EtcdTLSCACert     string
-	EtcdTLSMinVersion string
+	Endpoints         ParamItem
+	RootPath          ParamItem
+	MetaSubPath       ParamItem
+	KvSubPath         ParamItem
+	MetaRootPath      CompositeParamItem
+	KvRootPath        CompositeParamItem
+	EtcdLogLevel      ParamItem
+	EtcdLogPath       ParamItem
+	EtcdUseSSL        ParamItem
+	EtcdTLSCert       ParamItem
+	EtcdTLSKey        ParamItem
+	EtcdTLSCACert     ParamItem
+	EtcdTLSMinVersion ParamItem
 
 	// --- Embed ETCD ---
-	UseEmbedEtcd bool
-	ConfigPath   string
-	DataDir      string
+	UseEmbedEtcd ParamItem
+	ConfigPath   ParamItem
+	DataDir      ParamItem
 }
 
-func (p *EtcdConfig) init(base *BaseTable) {
-	p.Base = base
-	p.LoadCfgToMemory()
-}
-
-func (p *EtcdConfig) LoadCfgToMemory() {
-	p.initUseEmbedEtcd()
-	if p.UseEmbedEtcd {
-		p.initConfigPath()
-		p.initDataDir()
-	} else {
-		p.initEndpoints()
+func (p *EtcdConfig) Init(base *BaseTable) {
+	p.Endpoints = ParamItem{
+		Key:          "etcd.endpoints",
+		Version:      "2.0.0",
+		PanicIfEmpty: true,
 	}
-	p.initMetaRootPath()
-	p.initKvRootPath()
-	p.initEtcdLogLevel()
-	p.initEtcdLogPath()
-	p.initEtcdUseSSL()
-	p.initEtcdTLSCert()
-	p.initEtcdTLSKey()
-	p.initEtcdTLSCACert()
-	p.initEtcdTLSMinVersion()
-}
+	p.Endpoints.Init(base.mgr)
 
-func (p *EtcdConfig) initUseEmbedEtcd() {
-	p.UseEmbedEtcd = p.Base.ParseBool("etcd.use.embed", false)
-	if p.UseEmbedEtcd && (os.Getenv(metricsinfo.DeployModeEnvKey) != metricsinfo.StandaloneDeployMode) {
+	p.UseEmbedEtcd = ParamItem{
+		Key:          "etcd.use.embed",
+		DefaultValue: "false",
+		Version:      "2.1.0",
+	}
+	p.UseEmbedEtcd.Init(base.mgr)
+
+	if p.UseEmbedEtcd.GetAsBool() && (os.Getenv(metricsinfo.DeployModeEnvKey) != metricsinfo.StandaloneDeployMode) {
 		panic("embedded etcd can not be used under distributed mode")
 	}
-}
 
-func (p *EtcdConfig) initConfigPath() {
-	addr := p.Base.LoadWithDefault("etcd.config.path", "")
-	p.ConfigPath = addr
-}
+	if p.UseEmbedEtcd.GetAsBool() {
+		p.ConfigPath = ParamItem{
+			Key:          "etcd.config.path",
+			DefaultValue: "",
+			Version:      "2.1.0",
+		}
+		p.ConfigPath.Init(base.mgr)
 
-func (p *EtcdConfig) initDataDir() {
-	addr := p.Base.LoadWithDefault("etcd.data.dir", "default.etcd")
-	p.DataDir = addr
-}
-
-func (p *EtcdConfig) initEndpoints() {
-	endpoints, err := p.Base.Load("etcd.endpoints")
-	if err != nil {
-		panic(err)
+		p.DataDir = ParamItem{
+			Key:          "etcd.data.dir",
+			DefaultValue: "default.etcd",
+			Version:      "2.1.0",
+		}
+		p.DataDir.Init(base.mgr)
+	} else {
+		p.Endpoints = ParamItem{
+			Key:          "etcd.endpoints",
+			Version:      "2.0.0",
+			PanicIfEmpty: true,
+		}
+		p.Endpoints.Init(base.mgr)
 	}
-	p.Endpoints = strings.Split(endpoints, ",")
-}
 
-func (p *EtcdConfig) initMetaRootPath() {
-	rootPath, err := p.Base.Load("etcd.rootPath")
-	if err != nil {
-		panic(err)
+	p.RootPath = ParamItem{
+		Key:          "etcd.rootPath",
+		Version:      "2.0.0",
+		PanicIfEmpty: true,
 	}
-	subPath, err := p.Base.Load("etcd.metaSubPath")
-	if err != nil {
-		panic(err)
+	p.RootPath.Init(base.mgr)
+
+	p.MetaSubPath = ParamItem{
+		Key:          "etcd.metaSubPath",
+		Version:      "2.0.0",
+		PanicIfEmpty: true,
 	}
-	p.MetaRootPath = path.Join(rootPath, subPath)
-}
+	p.MetaSubPath.Init(base.mgr)
 
-func (p *EtcdConfig) initKvRootPath() {
-	rootPath, err := p.Base.Load("etcd.rootPath")
-	if err != nil {
-		panic(err)
+	p.MetaRootPath = CompositeParamItem{
+		Items: []*ParamItem{&p.RootPath, &p.MetaSubPath},
+		Format: func(kvs map[string]string) string {
+			return path.Join(kvs["etcd.rootPath"], kvs["etcd.metaSubPath"])
+		},
 	}
-	subPath, err := p.Base.Load("etcd.kvSubPath")
-	if err != nil {
-		panic(err)
+
+	p.KvSubPath = ParamItem{
+		Key:          "etcd.kvSubPath",
+		Version:      "2.0.0",
+		PanicIfEmpty: true,
 	}
-	p.KvRootPath = path.Join(rootPath, subPath)
-}
+	p.KvSubPath.Init(base.mgr)
 
-func (p *EtcdConfig) initEtcdLogLevel() {
-	p.EtcdLogLevel = p.Base.LoadWithDefault("etcd.log.level", defaultEtcdLogLevel)
-}
+	p.KvRootPath = CompositeParamItem{
+		Items: []*ParamItem{&p.RootPath, &p.KvSubPath},
+		Format: func(kvs map[string]string) string {
+			return path.Join(kvs["etcd.rootPath"], kvs["etcd.kvSubPath"])
+		},
+	}
 
-func (p *EtcdConfig) initEtcdLogPath() {
-	p.EtcdLogPath = p.Base.LoadWithDefault("etcd.log.path", defaultEtcdLogPath)
-}
+	p.EtcdLogLevel = ParamItem{
+		Key:          "etcd.log.level",
+		DefaultValue: defaultEtcdLogLevel,
+		Version:      "2.0.0",
+	}
+	p.EtcdLogLevel.Init(base.mgr)
 
-func (p *EtcdConfig) initEtcdUseSSL() {
-	p.EtcdUseSSL = p.Base.ParseBool("etcd.ssl.enabled", false)
-}
+	p.EtcdLogPath = ParamItem{
+		Key:          "etcd.log.path",
+		DefaultValue: defaultEtcdLogPath,
+		Version:      "2.0.0",
+	}
+	p.EtcdLogPath.Init(base.mgr)
 
-func (p *EtcdConfig) initEtcdTLSCert() {
-	p.EtcdTLSCert = p.Base.LoadWithDefault("etcd.ssl.tlsCert", "")
-}
+	p.EtcdUseSSL = ParamItem{
+		Key:          "etcd.ssl.enabled",
+		DefaultValue: "false",
+		Version:      "2.0.0",
+	}
+	p.EtcdUseSSL.Init(base.mgr)
 
-func (p *EtcdConfig) initEtcdTLSKey() {
-	p.EtcdTLSKey = p.Base.LoadWithDefault("etcd.ssl.tlsKey", "")
-}
+	p.EtcdTLSCert = ParamItem{
+		Key:     "etcd.ssl.tlsCert",
+		Version: "2.0.0",
+	}
+	p.EtcdTLSCert.Init(base.mgr)
 
-func (p *EtcdConfig) initEtcdTLSCACert() {
-	p.EtcdTLSCACert = p.Base.LoadWithDefault("etcd.ssl.tlsCACert", "")
-}
+	p.EtcdTLSKey = ParamItem{
+		Key:     "etcd.ssl.tlsKey",
+		Version: "2.0.0",
+	}
+	p.EtcdTLSKey.Init(base.mgr)
 
-func (p *EtcdConfig) initEtcdTLSMinVersion() {
-	p.EtcdTLSMinVersion = p.Base.LoadWithDefault("etcd.ssl.tlsMinVersion", "1.3")
+	p.EtcdTLSCACert = ParamItem{
+		Key:     "etcd.ssl.tlsCACert",
+		Version: "2.0.0",
+	}
+	p.EtcdTLSCACert.Init(base.mgr)
+
+	p.EtcdTLSMinVersion = ParamItem{
+		Key:          "etcd.ssl.tlsMinVersion",
+		DefaultValue: "1.3",
+		Version:      "2.0.0",
+	}
+	p.EtcdTLSMinVersion.Init(base.mgr)
 }
 
 type LocalStorageConfig struct {
-	Base *BaseTable
-
-	Path string
+	Path ParamItem
 }
 
-func (p *LocalStorageConfig) init(base *BaseTable) {
-	p.Base = base
-	p.initPath()
-}
-
-func (p *LocalStorageConfig) initPath() {
-	p.Path = p.Base.LoadWithDefault("localStorage.path", "/var/lib/milvus/data")
+func (p *LocalStorageConfig) Init(base *BaseTable) {
+	p.Path = ParamItem{
+		Key:          "localStorage.path",
+		Version:      "2.0.0",
+		DefaultValue: "/var/lib/milvus/data",
+	}
+	p.Path.Init(base.mgr)
 }
 
 type MetaStoreConfig struct {
@@ -214,7 +236,7 @@ type MetaStoreConfig struct {
 	MetaStoreType string
 }
 
-func (p *MetaStoreConfig) init(base *BaseTable) {
+func (p *MetaStoreConfig) Init(base *BaseTable) {
 	p.Base = base
 	p.LoadCfgToMemory()
 }
@@ -241,7 +263,7 @@ type MetaDBConfig struct {
 	MaxIdleConns int
 }
 
-func (p *MetaDBConfig) init(base *BaseTable) {
+func (p *MetaDBConfig) Init(base *BaseTable) {
 	p.Base = base
 	p.LoadCfgToMemory()
 }
@@ -306,286 +328,287 @@ func (p *MetaDBConfig) initMaxIdleConns() {
 // /////////////////////////////////////////////////////////////////////////////
 // --- pulsar ---
 type PulsarConfig struct {
-	Base *BaseTable
-
-	Address        string
-	WebAddress     string
-	MaxMessageSize int
+	Address        ParamItem
+	Port           ParamItem
+	WebAddress     ParamItem
+	WebPort        ParamItem
+	MaxMessageSize ParamItem
 
 	// support auth
-	AuthPlugin string
-	AuthParams string
+	AuthPlugin ParamItem
+	AuthParams ParamItem
 
 	// support tenant
-	Tenant    string
-	Namespace string
+	Tenant    ParamItem
+	Namespace ParamItem
 }
 
-func (p *PulsarConfig) init(base *BaseTable) {
-	p.Base = base
-
-	p.initAddress()
-	p.initWebAddress()
-	p.initMaxMessageSize()
-	p.initAuthPlugin()
-	p.initAuthParams()
-	p.initTenant()
-	p.initNamespace()
-}
-
-func (p *PulsarConfig) initAddress() {
-	pulsarHost := p.Base.LoadWithDefault("pulsar.address", "")
-	if strings.Contains(pulsarHost, ":") {
-		p.Address = pulsarHost
-		return
+func (p *PulsarConfig) Init(base *BaseTable) {
+	p.Port = ParamItem{
+		Key:          "pulsar.port",
+		Version:      "2.0.0",
+		DefaultValue: "6650",
 	}
+	p.Port.Init(base.mgr)
 
-	port := p.Base.LoadWithDefault("pulsar.port", "")
-	if len(pulsarHost) != 0 && len(port) != 0 {
-		p.Address = "pulsar://" + pulsarHost + ":" + port
+	p.Address = ParamItem{
+		Key:          "pulsar.address",
+		Version:      "2.0.0",
+		DefaultValue: "localhost",
+		Formatter: func(addr string) string {
+			if addr == "" {
+				return ""
+			}
+			if strings.Contains(addr, ":") {
+				return addr
+			}
+			port, _ := p.Port.get()
+			return "pulsar://" + addr + ":" + port
+		},
 	}
-}
+	p.Address.Init(base.mgr)
 
-func (p *PulsarConfig) initWebAddress() {
-	if p.Address == "" {
-		return
+	p.WebPort = ParamItem{
+		Key:          "pulsar.webport",
+		Version:      "2.0.0",
+		DefaultValue: "80",
 	}
+	p.WebPort.Init(base.mgr)
 
-	pulsarURL, err := url.ParseRequestURI(p.Address)
-	if err != nil {
-		p.WebAddress = ""
-		log.Info("failed to parse pulsar config, assume pulsar not used", zap.Error(err))
-	} else {
-		webport := p.Base.LoadWithDefault("pulsar.webport", "80")
-		p.WebAddress = "http://" + pulsarURL.Hostname() + ":" + webport
+	p.WebAddress = ParamItem{
+		Key:          "pulsar.webaddress",
+		Version:      "2.0.0",
+		DefaultValue: "",
+		Formatter: func(add string) string {
+			pulsarURL, err := url.ParseRequestURI(p.Address.GetValue())
+			if err != nil {
+				log.Info("failed to parse pulsar config, assume pulsar not used", zap.Error(err))
+				return ""
+			}
+			return "http://" + pulsarURL.Hostname() + ":" + p.WebPort.GetValue()
+		},
 	}
-}
+	p.WebAddress.Init(base.mgr)
 
-func (p *PulsarConfig) initMaxMessageSize() {
-	maxMessageSizeStr, err := p.Base.Load("pulsar.maxMessageSize")
-	if err != nil {
-		p.MaxMessageSize = SuggestPulsarMaxMessageSize
-	} else {
-		maxMessageSize, err := strconv.Atoi(maxMessageSizeStr)
-		if err != nil {
-			p.MaxMessageSize = SuggestPulsarMaxMessageSize
-		} else {
-			p.MaxMessageSize = maxMessageSize
-		}
+	p.MaxMessageSize = ParamItem{
+		Key:          "pulsar.maxMessageSize",
+		Version:      "2.0.0",
+		DefaultValue: strconv.Itoa(SuggestPulsarMaxMessageSize),
 	}
-}
+	p.MaxMessageSize.Init(base.mgr)
 
-func (p *PulsarConfig) initAuthPlugin() {
-	p.AuthPlugin = p.Base.LoadWithDefault("pulsar.authPlugin", "")
-}
-
-func (p *PulsarConfig) initAuthParams() {
-	paramString := p.Base.LoadWithDefault("pulsar.authParams", "")
-
-	// need to parse params to json due to .yaml config file doesn't support json format config item
-	// official pulsar client JWT config : {"token","fake_token_string"}
-	// milvus config: token:fake_token_string
-	jsonMap := make(map[string]string)
-	params := strings.Split(paramString, ",")
-	for _, param := range params {
-		kv := strings.Split(param, ":")
-		if len(kv) == 2 {
-			jsonMap[kv[0]] = kv[1]
-		}
+	p.Tenant = ParamItem{
+		Key:          "pulsar.tenant",
+		Version:      "2.2.0",
+		DefaultValue: "public",
 	}
+	p.Tenant.Init(base.mgr)
 
-	if len(jsonMap) == 0 {
-		p.AuthParams = ""
-	} else {
-		jsonData, _ := json.Marshal(&jsonMap)
-		p.AuthParams = string(jsonData)
+	p.Namespace = ParamItem{
+		Key:          "pulsar.namespace",
+		Version:      "2.2.0",
+		DefaultValue: "default",
 	}
-}
+	p.Namespace.Init(base.mgr)
 
-func (p *PulsarConfig) initTenant() {
-	p.Tenant = p.Base.LoadWithDefault("pulsar.tenant", "public")
-}
+	p.AuthPlugin = ParamItem{
+		Key:     "pulsar.authPlugin",
+		Version: "2.2.0",
+	}
+	p.AuthPlugin.Init(base.mgr)
 
-func (p *PulsarConfig) initNamespace() {
-	p.Namespace = p.Base.LoadWithDefault("pulsar.namespace", "default")
+	p.AuthParams = ParamItem{
+		Key:     "pulsar.authParams",
+		Version: "2.2.0",
+		Formatter: func(authParams string) string {
+			jsonMap := make(map[string]string)
+			params := strings.Split(authParams, ",")
+			for _, param := range params {
+				kv := strings.Split(param, ":")
+				if len(kv) == 2 {
+					jsonMap[kv[0]] = kv[1]
+				}
+			}
+
+			if len(jsonMap) == 0 {
+				return ""
+			}
+			jsonData, _ := json.Marshal(&jsonMap)
+			return string(jsonData)
+		},
+	}
+	p.AuthParams.Init(base.mgr)
+
 }
 
 // --- kafka ---
 type KafkaConfig struct {
-	Base                *BaseTable
-	Address             string
-	SaslUsername        string
-	SaslPassword        string
-	SaslMechanisms      string
-	SecurityProtocol    string
-	ConsumerExtraConfig map[string]string
-	ProducerExtraConfig map[string]string
+	Address             ParamItem
+	SaslUsername        ParamItem
+	SaslPassword        ParamItem
+	SaslMechanisms      ParamItem
+	SecurityProtocol    ParamItem
+	ConsumerExtraConfig ParamGroup
+	ProducerExtraConfig ParamGroup
 }
 
-func (k *KafkaConfig) init(base *BaseTable) {
-	k.Base = base
-	k.initAddress()
-	k.initSaslUsername()
-	k.initSaslPassword()
-	k.initSaslMechanisms()
-	k.initSecurityProtocol()
-	k.initExtraKafkaConfig()
-}
+func (k *KafkaConfig) Init(base *BaseTable) {
+	k.Address = ParamItem{
+		Key:          "kafka.brokerList",
+		DefaultValue: "",
+		Version:      "2.1.0",
+	}
+	k.Address.Init(base.mgr)
 
-func (k *KafkaConfig) initAddress() {
-	k.Address = k.Base.LoadWithDefault("kafka.brokerList", "")
-}
+	k.SaslUsername = ParamItem{
+		Key:          "kafka.saslUsername",
+		DefaultValue: "",
+		Version:      "2.1.0",
+	}
+	k.SaslUsername.Init(base.mgr)
 
-func (k *KafkaConfig) initSaslUsername() {
-	k.SaslUsername = k.Base.LoadWithDefault("kafka.saslUsername", "")
-}
+	k.SaslPassword = ParamItem{
+		Key:          "kafka.saslPassword",
+		DefaultValue: "",
+		Version:      "2.1.0",
+	}
+	k.SaslPassword.Init(base.mgr)
 
-func (k *KafkaConfig) initSaslPassword() {
-	k.SaslPassword = k.Base.LoadWithDefault("kafka.saslPassword", "")
-}
+	k.SaslMechanisms = ParamItem{
+		Key:          "kafka.saslMechanisms",
+		DefaultValue: "PLAIN",
+		Version:      "2.1.0",
+	}
+	k.SaslMechanisms.Init(base.mgr)
 
-func (k *KafkaConfig) initSaslMechanisms() {
-	k.SaslMechanisms = k.Base.LoadWithDefault("kafka.saslMechanisms", "PLAIN")
-}
+	k.SecurityProtocol = ParamItem{
+		Key:          "kafka.securityProtocol",
+		DefaultValue: "SASL_SSL",
+		Version:      "2.1.0",
+	}
+	k.SecurityProtocol.Init(base.mgr)
 
-func (k *KafkaConfig) initSecurityProtocol() {
-	k.SecurityProtocol = k.Base.LoadWithDefault("kafka.securityProtocol", "SASL_SSL")
-}
+	k.ConsumerExtraConfig = ParamGroup{
+		KeyPrefix: "kafka.consumer.",
+		Version:   "2.2.0",
+	}
+	k.ConsumerExtraConfig.Init(base.mgr)
 
-func (k *KafkaConfig) initExtraKafkaConfig() {
-	k.ConsumerExtraConfig = k.Base.GetConfigSubSet(KafkaConsumerConfigPrefix)
-	k.ProducerExtraConfig = k.Base.GetConfigSubSet(KafkaProducerConfigPrefix)
+	k.ProducerExtraConfig = ParamGroup{
+		KeyPrefix: "kafka.producer.",
+		Version:   "2.2.0",
+	}
+	k.ProducerExtraConfig.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
 // --- rocksmq ---
 type RocksmqConfig struct {
-	Base *BaseTable
-
-	Path string
+	Path ParamItem
 }
 
-func (p *RocksmqConfig) init(base *BaseTable) {
-	p.Base = base
-
-	p.initPath()
-}
-
-func (p *RocksmqConfig) initPath() {
-	p.Path = p.Base.LoadWithDefault("rocksmq.path", "")
+func (r *RocksmqConfig) Init(base *BaseTable) {
+	r.Path = ParamItem{
+		Key:          "rocksmq.path",
+		DefaultValue: "",
+		Version:      "2.0.0",
+	}
+	r.Path.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
 // --- minio ---
 type MinioConfig struct {
-	Base *BaseTable
-
-	Address         string
-	AccessKeyID     string
-	SecretAccessKey string
-	UseSSL          bool
-	BucketName      string
-	RootPath        string
-	UseIAM          bool
-	CloudProvider   string
-	IAMEndpoint     string
+	Address         ParamItem
+	Port            ParamItem
+	AccessKeyID     ParamItem
+	SecretAccessKey ParamItem
+	UseSSL          ParamItem
+	BucketName      ParamItem
+	RootPath        ParamItem
+	UseIAM          ParamItem
+	CloudProvider   ParamItem
+	IAMEndpoint     ParamItem
 }
 
-func (p *MinioConfig) init(base *BaseTable) {
-	p.Base = base
-
-	p.initAddress()
-	p.initAccessKeyID()
-	p.initSecretAccessKey()
-	p.initUseSSL()
-	p.initBucketName()
-	p.initRootPath()
-	p.initUseIAM()
-	p.initCloudProvider()
-	p.initIAMEndpoint()
-}
-
-func (p *MinioConfig) initAddress() {
-	host, err := p.Base.Load("minio.Address")
-	if err != nil {
-		panic(err)
+func (p *MinioConfig) Init(base *BaseTable) {
+	p.Port = ParamItem{
+		Key:          "minio.port",
+		DefaultValue: "9000",
+		Version:      "2.0.0",
 	}
-	// for compatible
-	if strings.Contains(host, ":") {
-		p.Address = host
-	} else {
-		port := p.Base.LoadWithDefault("minio.port", "9000")
-		p.Address = host + ":" + port
+	p.Port.Init(base.mgr)
+
+	p.Address = ParamItem{
+		Key:          "minio.address",
+		DefaultValue: "",
+		Version:      "2.0.0",
+		Formatter: func(addr string) string {
+			if addr == "" {
+				return ""
+			}
+			if strings.Contains(addr, ":") {
+				return addr
+			}
+			port, _ := p.Port.get()
+			return addr + ":" + port
+		},
 	}
-}
+	p.Address.Init(base.mgr)
 
-func (p *MinioConfig) initAccessKeyID() {
-	keyID, err := p.Base.Load("minio.accessKeyID")
-	if err != nil {
-		panic(err)
+	p.AccessKeyID = ParamItem{
+		Key:          "minio.accessKeyID",
+		Version:      "2.0.0",
+		PanicIfEmpty: true,
 	}
-	p.AccessKeyID = keyID
-}
+	p.AccessKeyID.Init(base.mgr)
 
-func (p *MinioConfig) initSecretAccessKey() {
-	key, err := p.Base.Load("minio.secretAccessKey")
-	if err != nil {
-		panic(err)
+	p.SecretAccessKey = ParamItem{
+		Key:          "minio.secretAccessKey",
+		Version:      "2.0.0",
+		PanicIfEmpty: true,
 	}
-	p.SecretAccessKey = key
-}
+	p.SecretAccessKey.Init(base.mgr)
 
-func (p *MinioConfig) initUseSSL() {
-	usessl, err := p.Base.Load("minio.useSSL")
-	if err != nil {
-		panic(err)
+	p.UseSSL = ParamItem{
+		Key:          "minio.useSSL",
+		Version:      "2.0.0",
+		PanicIfEmpty: true,
 	}
-	p.UseSSL, _ = strconv.ParseBool(usessl)
-}
+	p.UseSSL.Init(base.mgr)
 
-func (p *MinioConfig) initBucketName() {
-	bucketName, err := p.Base.Load("minio.bucketName")
-	if err != nil {
-		panic(err)
+	p.BucketName = ParamItem{
+		Key:          "minio.bucketName",
+		Version:      "2.0.0",
+		PanicIfEmpty: true,
 	}
-	p.BucketName = bucketName
-}
+	p.BucketName.Init(base.mgr)
 
-func (p *MinioConfig) initRootPath() {
-	rootPath, err := p.Base.Load("minio.rootPath")
-	if err != nil {
-		panic(err)
+	p.RootPath = ParamItem{
+		Key:          "minio.rootPath",
+		Version:      "2.0.0",
+		PanicIfEmpty: true,
 	}
-	p.RootPath = rootPath
-}
+	p.RootPath.Init(base.mgr)
 
-func (p *MinioConfig) initUseIAM() {
-	useIAM := p.Base.LoadWithDefault("minio.useIAM", DefaultMinioUseIAM)
-	var err error
-	p.UseIAM, err = strconv.ParseBool(useIAM)
-	if err != nil {
-		panic("parse bool useIAM:" + err.Error())
+	p.UseIAM = ParamItem{
+		Key:          "minio.useIAM",
+		DefaultValue: DefaultMinioUseIAM,
+		Version:      "2.0.0",
 	}
-}
+	p.UseIAM.Init(base.mgr)
 
-// CloudProvider supported
-const (
-	CloudProviderAWS = "aws"
-	CloudProviderGCP = "gcp"
-)
-
-var supportedCloudProvider = map[string]bool{
-	CloudProviderAWS: true,
-	CloudProviderGCP: true,
-}
-
-func (p *MinioConfig) initCloudProvider() {
-	p.CloudProvider = p.Base.LoadWithDefault("minio.cloudProvider", DefaultMinioCloudProvider)
-	if !supportedCloudProvider[p.CloudProvider] {
-		panic("unsupported cloudProvider:" + p.CloudProvider)
+	p.CloudProvider = ParamItem{
+		Key:          "minio.cloudProvider",
+		DefaultValue: DefaultMinioCloudProvider,
+		Version:      "2.2.0",
 	}
-}
+	p.CloudProvider.Init(base.mgr)
 
-func (p *MinioConfig) initIAMEndpoint() {
-	p.IAMEndpoint = p.Base.LoadWithDefault("minio.iamEndpoint", DefaultMinioIAMEndpoint)
+	p.IAMEndpoint = ParamItem{
+		Key:          "minio.iamEndpoint",
+		DefaultValue: DefaultMinioIAMEndpoint,
+		Version:      "2.0.0",
+	}
+	p.IAMEndpoint.Init(base.mgr)
 }

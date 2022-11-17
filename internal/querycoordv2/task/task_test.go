@@ -118,10 +118,10 @@ func (suite *TaskSuite) SetupSuite() {
 
 func (suite *TaskSuite) SetupTest() {
 	config := GenerateEtcdConfig()
-	cli, err := etcd.GetEtcdClient(&config)
+	cli, err := etcd.GetEtcdClient(config)
 	suite.Require().NoError(err)
 
-	suite.kv = etcdkv.NewEtcdKV(cli, config.MetaRootPath)
+	suite.kv = etcdkv.NewEtcdKV(cli, config.MetaRootPath.GetValue())
 	suite.store = meta.NewMetaStore(suite.kv)
 	suite.meta = meta.NewMeta(RandomIncrementIDAllocator(), suite.store)
 	suite.dist = meta.NewDistributionManager()
