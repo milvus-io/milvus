@@ -844,6 +844,7 @@ func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan
 		ds.flushManager,
 		ds.idAllocator,
 		req,
+		node.chunkManager,
 	)
 
 	node.compactionExecutor.execute(task)

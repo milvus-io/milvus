@@ -249,7 +249,10 @@ func (c *compactionPlanHandler) completeCompaction(result *datapb.CompactionResu
 }
 
 func (c *compactionPlanHandler) handleMergeCompactionResult(plan *datapb.CompactionPlan, result *datapb.CompactionResult) error {
-	oldSegments, modSegments, newSegment := c.meta.PrepareCompleteCompactionMutation(plan.GetSegmentBinlogs(), result)
+	oldSegments, modSegments, newSegment, err := c.meta.PrepareCompleteCompactionMutation(plan.GetSegmentBinlogs(), result)
+	if err != nil {
+		return err
+	}
 	log := log.With(zap.Int64("planID", plan.GetPlanID()))
 
 	modInfos := make([]*datapb.SegmentInfo, len(modSegments))

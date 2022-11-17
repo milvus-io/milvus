@@ -691,7 +691,7 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 			}
 
 			alloc.random = false // generated ID = 19530
-			task := newCompactionTask(context.TODO(), mockbIO, mockbIO, channel, mockfm, alloc, plan)
+			task := newCompactionTask(context.TODO(), mockbIO, mockbIO, channel, mockfm, alloc, plan, nil)
 			result, err := task.compact()
 			assert.NoError(t, err)
 			assert.NotNil(t, result)
@@ -822,7 +822,7 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 		}
 
 		alloc.random = false // generated ID = 19530
-		task := newCompactionTask(context.TODO(), mockbIO, mockbIO, channel, mockfm, alloc, plan)
+		task := newCompactionTask(context.TODO(), mockbIO, mockbIO, channel, mockfm, alloc, plan, nil)
 		result, err := task.compact()
 		assert.NoError(t, err)
 		assert.NotNil(t, result)

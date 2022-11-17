@@ -21,17 +21,21 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"path"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/metautil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
@@ -77,8 +81,9 @@ type compactionTask struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	wg sync.WaitGroup
-	tr *timerecord.TimeRecorder
+	wg           sync.WaitGroup
+	tr           *timerecord.TimeRecorder
+	chunkManager storage.ChunkManager
 }
 
 // check if compactionTask implements compactor
@@ -91,7 +96,8 @@ func newCompactionTask(
 	channel Channel,
 	fm flushManager,
 	alloc allocatorInterface,
-	plan *datapb.CompactionPlan) *compactionTask {
+	plan *datapb.CompactionPlan,
+	chunkManager storage.ChunkManager) *compactionTask {
 
 	ctx1, cancel := context.WithCancel(ctx)
 	return &compactionTask{
@@ -105,6 +111,7 @@ func newCompactionTask(
 		allocatorInterface: alloc,
 		plan:               plan,
 		tr:                 timerecord.NewTimeRecorder("compactionTask"),
+		chunkManager:       chunkManager,
 	}
 }
 
@@ -458,7 +465,96 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 	// Inject to stop flush
 	injectStart := time.Now()
 	ti := newTaskInjection(len(segIDs), func(pack *segmentFlushPack) {
+		collectionID := meta.GetID()
 		pack.segmentID = targetSegID
+		for _, insertLog := range pack.insertLogs {
+			splits := strings.Split(insertLog.LogPath, "/")
+			if len(splits) < 2 {
+				pack.err = fmt.Errorf("bad insert log path: %s", insertLog.LogPath)
+				return
+			}
+			logID, err := strconv.ParseInt(splits[len(splits)-1], 10, 64)
+			if err != nil {
+				pack.err = err
+				return
+			}
+			fieldID, err := strconv.ParseInt(splits[len(splits)-2], 10, 64)
+			if err != nil {
+				pack.err = err
+				return
+			}
+			blobKey := metautil.JoinIDPath(collectionID, partID, targetSegID, fieldID, logID)
+			blobPath := path.Join(t.chunkManager.RootPath(), common.SegmentInsertLogPath, blobKey)
+			blob, err := t.chunkManager.Read(t.ctx, insertLog.LogPath)
+			if err != nil {
+				pack.err = err
+				return
+			}
+			err = t.chunkManager.Write(t.ctx, blobPath, blob)
+			if err != nil {
+				pack.err = err
+				return
+			}
+			insertLog.LogPath = blobPath
+		}
+
+		for _, deltaLog := range pack.deltaLogs {
+			splits := strings.Split(deltaLog.LogPath, "/")
+			if len(splits) < 1 {
+				pack.err = fmt.Errorf("delta stats log path: %s", deltaLog.LogPath)
+				return
+			}
+			logID, err := strconv.ParseInt(splits[len(splits)-1], 10, 64)
+			if err != nil {
+				pack.err = err
+				return
+			}
+			blobKey := metautil.JoinIDPath(collectionID, partID, targetSegID, logID)
+			blobPath := path.Join(t.chunkManager.RootPath(), common.SegmentDeltaLogPath, blobKey)
+			blob, err := t.chunkManager.Read(t.ctx, deltaLog.LogPath)
+			if err != nil {
+				pack.err = err
+				return
+			}
+			err = t.chunkManager.Write(t.ctx, blobPath, blob)
+			if err != nil {
+				pack.err = err
+				return
+			}
+			deltaLog.LogPath = blobPath
+		}
+
+		for _, statsLog := range pack.statsLogs {
+			splits := strings.Split(statsLog.LogPath, "/")
+			if len(splits) < 2 {
+				pack.err = fmt.Errorf("bad stats log path: %s", statsLog.LogPath)
+				return
+			}
+			logID, err := strconv.ParseInt(splits[len(splits)-1], 10, 64)
+			if err != nil {
+				pack.err = err
+				return
+			}
+			fieldID, err := strconv.ParseInt(splits[len(splits)-2], 10, 64)
+			if err != nil {
+				pack.err = err
+				return
+			}
+			blobKey := metautil.JoinIDPath(collectionID, partID, targetSegID, fieldID, logID)
+			blobPath := path.Join(t.chunkManager.RootPath(), common.SegmentStatslogPath, blobKey)
+
+			blob, err := t.chunkManager.Read(t.ctx, statsLog.LogPath)
+			if err != nil {
+				pack.err = err
+				return
+			}
+			err = t.chunkManager.Write(t.ctx, blobPath, blob)
+			if err != nil {
+				pack.err = err
+				return
+			}
+			statsLog.LogPath = blobPath
+		}
 	})
 	defer close(ti.injectOver)
 
