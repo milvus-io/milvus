@@ -5,6 +5,9 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
+
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
@@ -234,7 +237,30 @@ func (b *ServerBroker) GetSegmentIndexState(ctx context.Context, collID UniqueID
 
 func (b *ServerBroker) BroadcastAlteredCollection(ctx context.Context, req *milvuspb.AlterCollectionRequest) error {
 	log.Info("broadcasting request to alter collection", zap.String("collection name", req.GetCollectionName()), zap.Int64("collection id", req.GetCollectionID()))
-	resp, err := b.s.dataCoord.BroadcastAlteredCollection(ctx, req)
+
+	colMeta, err := b.s.meta.GetCollectionByID(ctx, req.GetCollectionID(), typeutil.MaxTimestamp)
+	if err != nil {
+		return err
+	}
+
+	partitionIDs := make([]int64, len(colMeta.Partitions))
+	for _, p := range colMeta.Partitions {
+		partitionIDs = append(partitionIDs, p.PartitionID)
+	}
+	dcReq := &datapb.AlterCollectionRequest{
+		CollectionID: req.GetCollectionID(),
+		Schema: &schemapb.CollectionSchema{
+			Name:        colMeta.Name,
+			Description: colMeta.Description,
+			AutoID:      colMeta.AutoID,
+			Fields:      model.MarshalFieldModels(colMeta.Fields),
+		},
+		PartitionIDs:   partitionIDs,
+		StartPositions: colMeta.StartPositions,
+		Properties:     req.GetProperties(),
+	}
+
+	resp, err := b.s.dataCoord.BroadcastAlteredCollection(ctx, dcReq)
 	if err != nil {
 		return err
 	}

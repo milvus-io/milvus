@@ -127,7 +127,7 @@ func (coord *DataCoordMock) MarkSegmentsDropped(ctx context.Context, req *datapb
 	panic("implement me")
 }
 
-func (coord *DataCoordMock) BroadcastAlteredCollection(ctx context.Context, req *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
+func (coord *DataCoordMock) BroadcastAlteredCollection(ctx context.Context, req *datapb.AlterCollectionRequest) (*commonpb.Status, error) {
 	panic("implement me")
 }
 

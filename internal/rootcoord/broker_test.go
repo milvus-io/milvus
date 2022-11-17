@@ -2,7 +2,10 @@ package rootcoord
 
 import (
 	"context"
+	"errors"
 	"testing"
+
+	"github.com/milvus-io/milvus/internal/metastore/model"
 
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 
@@ -280,8 +283,43 @@ func TestServerBroker_GetSegmentIndexState(t *testing.T) {
 }
 
 func TestServerBroker_BroadcastAlteredCollection(t *testing.T) {
+	collMeta := &model.Collection{
+		CollectionID: 1,
+		StartPositions: []*commonpb.KeyDataPair{
+			{
+				Key:  "0",
+				Data: []byte("0"),
+			},
+		},
+		Partitions: []*model.Partition{
+			{
+				PartitionID:               2,
+				PartitionName:             "test_partition_name_1",
+				PartitionCreatedTimestamp: 0,
+			},
+		},
+	}
+
+	t.Run("get meta fail", func(t *testing.T) {
+		c := newTestCore(withInvalidDataCoord())
+		c.meta = &mockMetaTable{
+			GetCollectionByIDFunc: func(ctx context.Context, collectionID UniqueID, ts Timestamp) (*model.Collection, error) {
+				return nil, errors.New("err")
+			},
+		}
+		b := newServerBroker(c)
+		ctx := context.Background()
+		err := b.BroadcastAlteredCollection(ctx, &milvuspb.AlterCollectionRequest{})
+		assert.Error(t, err)
+	})
+
 	t.Run("failed to execute", func(t *testing.T) {
 		c := newTestCore(withInvalidDataCoord())
+		c.meta = &mockMetaTable{
+			GetCollectionByIDFunc: func(ctx context.Context, collectionID UniqueID, ts Timestamp) (*model.Collection, error) {
+				return collMeta, nil
+			},
+		}
 		b := newServerBroker(c)
 		ctx := context.Background()
 		err := b.BroadcastAlteredCollection(ctx, &milvuspb.AlterCollectionRequest{})
@@ -290,6 +328,11 @@ func TestServerBroker_BroadcastAlteredCollection(t *testing.T) {
 
 	t.Run("non success error code on execute", func(t *testing.T) {
 		c := newTestCore(withFailedDataCoord())
+		c.meta = &mockMetaTable{
+			GetCollectionByIDFunc: func(ctx context.Context, collectionID UniqueID, ts Timestamp) (*model.Collection, error) {
+				return collMeta, nil
+			},
+		}
 		b := newServerBroker(c)
 		ctx := context.Background()
 		err := b.BroadcastAlteredCollection(ctx, &milvuspb.AlterCollectionRequest{})
@@ -298,9 +341,18 @@ func TestServerBroker_BroadcastAlteredCollection(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		c := newTestCore(withValidDataCoord())
+		c.meta = &mockMetaTable{
+			GetCollectionByIDFunc: func(ctx context.Context, collectionID UniqueID, ts Timestamp) (*model.Collection, error) {
+				return collMeta, nil
+			},
+		}
 		b := newServerBroker(c)
 		ctx := context.Background()
-		err := b.BroadcastAlteredCollection(ctx, &milvuspb.AlterCollectionRequest{})
+
+		req := &milvuspb.AlterCollectionRequest{
+			CollectionID: 1,
+		}
+		err := b.BroadcastAlteredCollection(ctx, req)
 		assert.NoError(t, err)
 	})
 }
