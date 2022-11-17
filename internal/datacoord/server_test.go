@@ -1150,10 +1150,10 @@ func TestSaveBinlogPaths(t *testing.T) {
 					FieldID: 1,
 					Binlogs: []*datapb.Binlog{
 						{
-							LogPath: "/by-dev/test/0/1/2/1/Allo1",
+							LogPath: "/by-dev/test/0/1/1/1/Allo1",
 						},
 						{
-							LogPath: "/by-dev/test/0/1/2/1/Allo2",
+							LogPath: "/by-dev/test/0/1/1/1/Allo2",
 						},
 					},
 				},
@@ -1183,8 +1183,8 @@ func TestSaveBinlogPaths(t *testing.T) {
 		assert.NotNil(t, fieldBinlogs)
 		assert.EqualValues(t, 2, len(fieldBinlogs.GetBinlogs()))
 		assert.EqualValues(t, 1, fieldBinlogs.GetFieldID())
-		assert.EqualValues(t, "/by-dev/test/0/1/2/1/Allo1", fieldBinlogs.GetBinlogs()[0].GetLogPath())
-		assert.EqualValues(t, "/by-dev/test/0/1/2/1/Allo2", fieldBinlogs.GetBinlogs()[1].GetLogPath())
+		assert.EqualValues(t, "/by-dev/test/0/1/1/1/Allo1", fieldBinlogs.GetBinlogs()[0].GetLogPath())
+		assert.EqualValues(t, "/by-dev/test/0/1/1/1/Allo2", fieldBinlogs.GetBinlogs()[1].GetLogPath())
 
 		segmentInfo := svr.meta.GetSegment(0)
 		assert.NotNil(t, segmentInfo)
