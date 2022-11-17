@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -690,48 +691,15 @@ func TestMeta_alterMetaStore(t *testing.T) {
 		}},
 	}
 
-	err := m.alterMetaStoreAfterCompaction(toAlter, newSeg)
+	toAlterInfo := lo.Map[*datapb.SegmentInfo, *SegmentInfo](toAlter, func(item *datapb.SegmentInfo, _ int) *SegmentInfo {
+		return &SegmentInfo{SegmentInfo: item}
+	})
+
+	err := m.alterMetaStoreAfterCompaction(toAlterInfo, &SegmentInfo{SegmentInfo: newSeg})
 	assert.NoError(t, err)
 
-	err = m.revertAlterMetaStoreAfterCompaction(toAlter, newSeg)
+	err = m.revertAlterMetaStoreAfterCompaction(toAlterInfo, &SegmentInfo{SegmentInfo: newSeg})
 	assert.NoError(t, err)
-}
-
-func TestMeta_alterInMemoryMetaAfterCompaction(t *testing.T) {
-	m := &meta{
-		catalog:  &datacoord.Catalog{Txn: memkv.NewMemoryKV()},
-		segments: &SegmentsInfo{make(map[UniqueID]*SegmentInfo)},
-	}
-
-	tests := []struct {
-		description  string
-		compactToSeg *SegmentInfo
-	}{
-		{
-			"numRows>0", &SegmentInfo{
-				SegmentInfo: &datapb.SegmentInfo{
-					ID:        1,
-					NumOfRows: 10,
-				},
-			},
-		},
-		{
-			"numRows=0", &SegmentInfo{
-				SegmentInfo: &datapb.SegmentInfo{
-					ID: 1,
-				},
-			},
-		},
-	}
-
-	compactFrom := []*SegmentInfo{{}, {}}
-
-	for _, test := range tests {
-		t.Run(test.description, func(t *testing.T) {
-			m.alterInMemoryMetaAfterCompaction(test.compactToSeg, compactFrom)
-		})
-	}
-
 }
 
 func TestMeta_PrepareCompleteCompactionMutation(t *testing.T) {

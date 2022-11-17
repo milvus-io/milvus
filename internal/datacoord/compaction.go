@@ -256,13 +256,8 @@ func (c *compactionPlanHandler) handleMergeCompactionResult(plan *datapb.Compact
 	}
 	log := log.With(zap.Int64("planID", plan.GetPlanID()))
 
-	modInfos := make([]*datapb.SegmentInfo, len(modSegments))
-	for i := range modSegments {
-		modInfos[i] = modSegments[i].SegmentInfo
-	}
-
 	log.Info("handleCompactionResult: altering metastore after compaction")
-	if err := c.meta.alterMetaStoreAfterCompaction(modInfos, newSegment.SegmentInfo); err != nil {
+	if err := c.meta.alterMetaStoreAfterCompaction(modSegments, newSegment); err != nil {
 		log.Warn("handleCompactionResult: fail to alter metastore after compaction", zap.Error(err))
 		return fmt.Errorf("fail to alter metastore after compaction, err=%w", err)
 	}
@@ -280,12 +275,11 @@ func (c *compactionPlanHandler) handleMergeCompactionResult(plan *datapb.Compact
 	if err := c.sessions.SyncSegments(nodeID, req); err != nil {
 		log.Warn("handleCompactionResult: fail to sync segments with node, reverting metastore",
 			zap.Int64("nodeID", nodeID), zap.String("reason", err.Error()))
-		return c.meta.revertAlterMetaStoreAfterCompaction(oldSegments, newSegment.SegmentInfo)
+		return c.meta.revertAlterMetaStoreAfterCompaction(oldSegments, newSegment)
 	}
 	// Apply metrics after successful meta update.
 	metricMutation.commit()
 
-	c.meta.alterInMemoryMetaAfterCompaction(newSegment, modSegments)
 	log.Info("handleCompactionResult: success to handle merge compaction result")
 	return nil
 }
