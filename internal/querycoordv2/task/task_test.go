@@ -145,7 +145,9 @@ func (suite *TaskSuite) BeforeTest(suiteName, testName string) {
 		"TestLoadSegmentTaskFailed",
 		"TestSegmentTaskStale",
 		"TestTaskCanceled",
-		"TestMoveSegmentTask":
+		"TestMoveSegmentTask",
+		"TestSubmitDuplicateLoadSegmentTask",
+		"TestSubmitDuplicateSubscribeChannelTask":
 		suite.meta.PutCollection(&meta.Collection{
 			CollectionLoadInfo: &querypb.CollectionLoadInfo{
 				CollectionID:  suite.collection,
@@ -155,6 +157,48 @@ func (suite *TaskSuite) BeforeTest(suiteName, testName string) {
 		})
 		suite.meta.ReplicaManager.Put(
 			utils.CreateTestReplica(suite.replica, suite.collection, []int64{1, 2, 3}))
+	}
+}
+
+func (suite *TaskSuite) TestSubmitDuplicateSubscribeChannelTask() {
+	ctx := context.Background()
+	timeout := 10 * time.Second
+	targetNode := int64(3)
+
+	tasks := []Task{}
+	dmChannels := make([]*datapb.VchannelInfo, 0)
+	for _, channel := range suite.subChannels {
+		dmChannels = append(dmChannels, &datapb.VchannelInfo{
+			CollectionID:        suite.collection,
+			ChannelName:         channel,
+			UnflushedSegmentIds: []int64{suite.growingSegments[channel]},
+		})
+		task, err := NewChannelTask(
+			ctx,
+			timeout,
+			0,
+			suite.collection,
+			suite.replica,
+			NewChannelAction(targetNode, ActionTypeGrow, channel),
+		)
+		suite.NoError(err)
+		tasks = append(tasks, task)
+	}
+
+	views := make([]*meta.LeaderView, 0)
+	for _, channel := range suite.subChannels {
+		views = append(views, &meta.LeaderView{
+			ID:           targetNode,
+			CollectionID: suite.collection,
+			Channel:      channel,
+		})
+	}
+	suite.dist.LeaderViewManager.Update(targetNode, views...)
+
+	for _, task := range tasks {
+		err := suite.scheduler.Add(task)
+		suite.Error(err)
+		suite.ErrorIs(err, ErrTaskAlreadyDone)
 	}
 }
 
@@ -399,6 +443,47 @@ func (suite *TaskSuite) TestLoadSegmentTask() {
 	}
 }
 
+func (suite *TaskSuite) TestSubmitDuplicateLoadSegmentTask() {
+	ctx := context.Background()
+	timeout := 10 * time.Second
+	targetNode := int64(3)
+	channel := &datapb.VchannelInfo{
+		CollectionID: suite.collection,
+		ChannelName:  Params.CommonCfg.RootCoordDml + "-test",
+	}
+
+	tasks := []Task{}
+	for _, segment := range suite.loadSegments {
+		task, err := NewSegmentTask(
+			ctx,
+			timeout,
+			0,
+			suite.collection,
+			suite.replica,
+			NewSegmentAction(targetNode, ActionTypeGrow, channel.GetChannelName(), segment),
+		)
+		suite.NoError(err)
+		tasks = append(tasks, task)
+	}
+
+	// Process tasks done
+	// Dist contains channels
+	view := &meta.LeaderView{
+		ID:           targetNode,
+		CollectionID: suite.collection,
+		Segments:     map[int64]*querypb.SegmentDist{},
+	}
+	for _, segment := range suite.loadSegments {
+		view.Segments[segment] = &querypb.SegmentDist{NodeID: targetNode, Version: 0}
+	}
+	suite.dist.LeaderViewManager.Update(targetNode, view)
+
+	for _, task := range tasks {
+		err := suite.scheduler.Add(task)
+		suite.Error(err)
+		suite.ErrorIs(err, ErrTaskAlreadyDone)
+	}
+}
 func (suite *TaskSuite) TestLoadSegmentTaskFailed() {
 	ctx := context.Background()
 	timeout := 10 * time.Second
