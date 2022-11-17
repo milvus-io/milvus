@@ -169,7 +169,7 @@ func (m *GrpcDataCoordClient) MarkSegmentsDropped(context.Context, *datapb.MarkS
 	return &commonpb.Status{}, m.Err
 }
 
-func (m *GrpcDataCoordClient) BroadcastAlteredCollection(ctx context.Context, in *milvuspb.AlterCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+func (m *GrpcDataCoordClient) BroadcastAlteredCollection(ctx context.Context, in *datapb.AlterCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 
 }
