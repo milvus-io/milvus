@@ -409,7 +409,8 @@ func TestSegment_segmentSearch(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	node, err := genSimpleQueryNode(ctx)
-	assert.NoError(t, err)
+	require.NoError(t, err)
+	defer node.Stop()
 
 	collection, err := node.metaReplica.getCollectionByID(defaultCollectionID)
 	assert.NoError(t, err)

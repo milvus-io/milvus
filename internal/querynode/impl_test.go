@@ -544,7 +544,8 @@ func TestImpl_ReleaseSegments(t *testing.T) {
 
 	t.Run("test valid", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
-		assert.NoError(t, err)
+		require.NoError(t, err)
+		defer node.Stop()
 
 		req := &queryPb.ReleaseSegmentsRequest{
 			Base:         genCommonMsgBase(commonpb.MsgType_ReleaseSegments, node.session.ServerID),
@@ -568,7 +569,8 @@ func TestImpl_ReleaseSegments(t *testing.T) {
 
 	t.Run("test invalid query node", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
-		assert.NoError(t, err)
+		require.NoError(t, err)
+		defer node.Stop()
 
 		req := &queryPb.ReleaseSegmentsRequest{
 			Base:         genCommonMsgBase(commonpb.MsgType_ReleaseSegments, node.session.ServerID),
@@ -585,7 +587,8 @@ func TestImpl_ReleaseSegments(t *testing.T) {
 
 	t.Run("test target not matched", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
-		assert.NoError(t, err)
+		require.NoError(t, err)
+		defer node.Stop()
 
 		req := &queryPb.ReleaseSegmentsRequest{
 			Base:         genCommonMsgBase(commonpb.MsgType_ReleaseSegments, -1),
@@ -601,7 +604,8 @@ func TestImpl_ReleaseSegments(t *testing.T) {
 
 	t.Run("test segment not exists", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
-		assert.NoError(t, err)
+		require.NoError(t, err)
+		defer node.Stop()
 
 		req := &queryPb.ReleaseSegmentsRequest{
 			Base:         genCommonMsgBase(commonpb.MsgType_ReleaseSegments, node.session.ServerID),
@@ -619,7 +623,8 @@ func TestImpl_ReleaseSegments(t *testing.T) {
 
 	t.Run("test no collection", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
-		assert.NoError(t, err)
+		require.NoError(t, err)
+		defer node.Stop()
 		err = node.metaReplica.removeCollection(defaultCollectionID)
 		assert.NoError(t, err)
 
@@ -640,6 +645,7 @@ func TestImpl_Search(t *testing.T) {
 
 	node, err := genSimpleQueryNode(ctx)
 	require.NoError(t, err)
+	defer node.Stop()
 
 	schema := genTestCollectionSchema()
 	req, err := genSearchRequest(defaultNQ, IndexFaissIDMap, schema)
@@ -674,6 +680,7 @@ func TestImpl_searchWithDmlChannel(t *testing.T) {
 
 	node, err := genSimpleQueryNode(ctx)
 	require.NoError(t, err)
+	defer node.Stop()
 
 	schema := genTestCollectionSchema()
 	req, err := genSearchRequest(defaultNQ, IndexFaissIDMap, schema)
@@ -706,8 +713,8 @@ func TestImpl_GetCollectionStatistics(t *testing.T) {
 	defer cancel()
 
 	node, err := genSimpleQueryNode(ctx)
-	defer node.Stop()
 	require.NoError(t, err)
+	defer node.Stop()
 
 	req, err := genGetCollectionStatisticRequest()
 	require.NoError(t, err)
@@ -727,8 +734,8 @@ func TestImpl_GetPartitionStatistics(t *testing.T) {
 	defer cancel()
 
 	node, err := genSimpleQueryNode(ctx)
-	defer node.Stop()
 	require.NoError(t, err)
+	defer node.Stop()
 
 	req, err := genGetPartitionStatisticRequest()
 	require.NoError(t, err)
@@ -748,8 +755,8 @@ func TestImpl_Query(t *testing.T) {
 	defer cancel()
 
 	node, err := genSimpleQueryNode(ctx)
-	defer node.Stop()
 	require.NoError(t, err)
+	defer node.Stop()
 
 	schema := genTestCollectionSchema()
 	req, err := genRetrieveRequest(schema)
@@ -783,8 +790,8 @@ func TestImpl_queryWithDmlChannel(t *testing.T) {
 	defer cancel()
 
 	node, err := genSimpleQueryNode(ctx)
-	defer node.Stop()
 	require.NoError(t, err)
+	defer node.Stop()
 
 	schema := genTestCollectionSchema()
 	req, err := genRetrieveRequest(schema)
@@ -817,8 +824,8 @@ func TestImpl_SyncReplicaSegments(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		node, err := genSimpleQueryNode(ctx)
+		require.NoError(t, err)
 		defer node.Stop()
-		assert.NoError(t, err)
 
 		node.UpdateStateCode(commonpb.StateCode_Abnormal)
 
@@ -831,8 +838,8 @@ func TestImpl_SyncReplicaSegments(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		node, err := genSimpleQueryNode(ctx)
+		require.NoError(t, err)
 		defer node.Stop()
-		assert.NoError(t, err)
 
 		resp, err := node.SyncReplicaSegments(ctx, &querypb.SyncReplicaSegmentsRequest{
 			VchannelName: defaultDMLChannel,
@@ -854,8 +861,8 @@ func TestImpl_SyncReplicaSegments(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		node, err := genSimpleQueryNode(ctx)
+		require.NoError(t, err)
 		defer node.Stop()
-		assert.NoError(t, err)
 
 		node.ShardClusterService.addShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel, defaultVersion)
 		cs, ok := node.ShardClusterService.getShardCluster(defaultDMLChannel)
@@ -892,8 +899,8 @@ func TestSyncDistribution(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		node, err := genSimpleQueryNode(ctx)
+		require.NoError(t, err)
 		defer node.Stop()
-		assert.NoError(t, err)
 
 		node.UpdateStateCode(commonpb.StateCode_Abnormal)
 
@@ -906,8 +913,8 @@ func TestSyncDistribution(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		node, err := genSimpleQueryNode(ctx)
+		require.NoError(t, err)
 		defer node.Stop()
-		assert.NoError(t, err)
 
 		resp, err := node.SyncDistribution(ctx, &querypb.SyncDistributionRequest{
 			Base:         &commonpb.MsgBase{TargetID: -1},
@@ -931,8 +938,8 @@ func TestSyncDistribution(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		node, err := genSimpleQueryNode(ctx)
+		require.NoError(t, err)
 		defer node.Stop()
-		assert.NoError(t, err)
 
 		resp, err := node.SyncDistribution(ctx, &querypb.SyncDistributionRequest{
 			Base:         &commonpb.MsgBase{TargetID: node.session.ServerID},
@@ -956,8 +963,8 @@ func TestSyncDistribution(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		node, err := genSimpleQueryNode(ctx)
+		require.NoError(t, err)
 		defer node.Stop()
-		assert.NoError(t, err)
 
 		node.ShardClusterService.addShardCluster(defaultCollectionID, defaultReplicaID, defaultDMLChannel, defaultVersion)
 		cs, ok := node.ShardClusterService.getShardCluster(defaultDMLChannel)
@@ -1016,8 +1023,8 @@ func TestGetDataDistribution(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		node, err := genSimpleQueryNode(ctx)
+		require.NoError(t, err)
 		defer node.Stop()
-		assert.NoError(t, err)
 
 		node.UpdateStateCode(commonpb.StateCode_Abnormal)
 
@@ -1030,8 +1037,8 @@ func TestGetDataDistribution(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		node, err := genSimpleQueryNode(ctx)
+		require.NoError(t, err)
 		defer node.Stop()
-		assert.NoError(t, err)
 
 		resp, err := node.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{
 			Base: &commonpb.MsgBase{TargetID: -1},

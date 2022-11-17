@@ -26,6 +26,7 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/common"
@@ -49,7 +50,8 @@ func TestReduce_AllFunc(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	node, err := genSimpleQueryNode(ctx)
-	assert.NoError(t, err)
+	require.NoError(t, err)
+	defer node.Stop()
 
 	collection, err := node.metaReplica.getCollectionByID(defaultCollectionID)
 	assert.NoError(t, err)

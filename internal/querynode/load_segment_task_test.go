@@ -24,6 +24,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
@@ -80,7 +81,8 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 
 	t.Run("test execute grpc", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
-		assert.NoError(t, err)
+		require.NoError(t, err)
+		defer node.Stop()
 
 		node.metaReplica.removeSegment(defaultSegmentID, segmentTypeSealed)
 
@@ -114,7 +116,8 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 
 	t.Run("test repeated load", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
-		assert.NoError(t, err)
+		require.NoError(t, err)
+		defer node.Stop()
 
 		node.metaReplica.removeSegment(defaultSegmentID, segmentTypeSealed)
 
@@ -157,8 +160,11 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 	})
 
 	t.Run("test FromDmlCPLoadDelete", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(ctx)
+		defer cancel()
 		node, err := genSimpleQueryNode(ctx)
-		assert.NoError(t, err)
+		require.NoError(t, err)
+		defer node.Stop()
 
 		vDmChannel := "by-dev-rootcoord-dml_1_2021v1"
 		pDmChannel := funcutil.ToPhysicalChannel(vDmChannel)
@@ -270,7 +276,8 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 
 	t.Run("test OOM", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
-		assert.NoError(t, err)
+		require.NoError(t, err)
+		defer node.Stop()
 
 		totalRAM := int64(hardware.GetMemoryCount())
 
@@ -313,7 +320,9 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 
 	t.Run("test FromDmlCPLoadDelete failed", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
-		assert.NoError(t, err)
+		require.NoError(t, err)
+		defer node.Stop()
+
 		node.metaReplica.removeSegment(defaultSegmentID, segmentTypeSealed)
 
 		msgStream := &LoadDeleteMsgStream{}
@@ -366,7 +375,8 @@ func TestTask_loadSegmentsTaskLoadDelta(t *testing.T) {
 
 	t.Run("test repeated load delta channel", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
-		assert.NoError(t, err)
+		require.NoError(t, err)
+		defer node.Stop()
 		vDmChannel := "by-dev-rootcoord-dml-test_2_2021v2"
 
 		segmentLoadInfo := &querypb.SegmentLoadInfo{
