@@ -32,11 +32,6 @@ import (
 	"go.uber.org/zap"
 )
 
-type actionIndex struct {
-	Task int64
-	Step int
-}
-
 type Executor struct {
 	doneCh    chan struct{}
 	wg        sync.WaitGroup
@@ -50,7 +45,7 @@ type Executor struct {
 	// Merge load segment requests
 	merger *Merger[segmentIndex, *querypb.LoadSegmentsRequest]
 
-	executingActions sync.Map
+	executingTasks sync.Map
 }
 
 func NewExecutor(meta *meta.Meta,
@@ -69,7 +64,7 @@ func NewExecutor(meta *meta.Meta,
 		nodeMgr:   nodeMgr,
 		merger:    NewMerger[segmentIndex, *querypb.LoadSegmentsRequest](),
 
-		executingActions: sync.Map{},
+		executingTasks: sync.Map{},
 	}
 }
 
@@ -87,11 +82,7 @@ func (ex *Executor) Stop() {
 // does nothing and returns false if the action is already committed,
 // returns true otherwise.
 func (ex *Executor) Execute(task Task, step int) bool {
-	index := actionIndex{
-		Task: task.ID(),
-		Step: step,
-	}
-	_, exist := ex.executingActions.LoadOrStore(index, struct{}{})
+	_, exist := ex.executingTasks.LoadOrStore(task.ID(), struct{}{})
 	if exist {
 		return false
 	}
@@ -114,6 +105,11 @@ func (ex *Executor) Execute(task Task, step int) bool {
 	}()
 
 	return true
+}
+
+func (ex *Executor) Exist(taskID int64) bool {
+	_, ok := ex.executingTasks.Load(taskID)
+	return ok
 }
 
 func (ex *Executor) scheduleRequests() {
@@ -192,11 +188,7 @@ func (ex *Executor) removeAction(task Task, step int) {
 			zap.Error(task.Err()))
 	}
 
-	index := actionIndex{
-		Task: task.ID(),
-		Step: step,
-	}
-	ex.executingActions.Delete(index)
+	ex.executingTasks.Delete(task.ID())
 }
 
 func (ex *Executor) executeSegmentAction(task *SegmentTask, step int) {

@@ -1148,7 +1148,7 @@ func (suite *TaskSuite) dispatchAndWait(node int64) {
 	for start := time.Now(); time.Since(start) < timeout; {
 		count = 0
 		keys = make([]any, 0)
-		suite.scheduler.executor.executingActions.Range(func(key, value any) bool {
+		suite.scheduler.executor.executingTasks.Range(func(key, value any) bool {
 			keys = append(keys, key)
 			count++
 			return true

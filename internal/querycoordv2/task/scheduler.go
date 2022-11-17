@@ -527,7 +527,7 @@ func (scheduler *taskScheduler) process(task Task) bool {
 		zap.Int64("source", task.SourceID()),
 	)
 
-	if task.IsFinished(scheduler.distMgr) {
+	if !scheduler.executor.Exist(task.ID()) && task.IsFinished(scheduler.distMgr) {
 		task.SetStatus(TaskStatusSucceeded)
 	} else if scheduler.checkCanceled(task) {
 		task.SetStatus(TaskStatusCanceled)
