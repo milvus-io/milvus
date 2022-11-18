@@ -219,6 +219,7 @@ func (s *Server) Init() error {
 		s.nodeMgr,
 		s.dist,
 		s.meta,
+		s.targetMgr,
 	)
 
 	// Init checker controller
