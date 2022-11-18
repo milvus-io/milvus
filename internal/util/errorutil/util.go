@@ -65,3 +65,37 @@ func UnHealthReasonWithComponentStatesOrErr(role string, nodeID typeutil.UniqueI
 
 	return true, ""
 }
+
+type ErrorChecker func(err error) bool
+
+func AnyError() ErrorChecker {
+	return func(err error) bool {
+		return err != nil
+	}
+}
+
+func Any(errs ...error) ErrorChecker {
+	return func(err error) bool {
+		if err == nil {
+			return false
+		}
+
+		for i := range errs {
+			if errors.Is(err, errs[i]) {
+				return true
+			}
+		}
+		return false
+	}
+}
+
+func Exclude(errs ...error) ErrorChecker {
+	return func(err error) bool {
+		if err == nil {
+			return false
+		}
+
+		checker := Any(errs...)
+		return !checker(err)
+	}
+}

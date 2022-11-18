@@ -27,10 +27,15 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
+	"github.com/milvus-io/milvus/internal/util/errorutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 func Wait(ctx context.Context, timeout time.Duration, tasks ...Task) error {
+	return WaitWithErrorChecker(ctx, timeout, errorutil.AnyError(), tasks...)
+}
+
+func WaitWithErrorChecker(ctx context.Context, timeout time.Duration, checker errorutil.ErrorChecker, tasks ...Task) error {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -38,7 +43,7 @@ func Wait(ctx context.Context, timeout time.Duration, tasks ...Task) error {
 	go func() {
 		for _, task := range tasks {
 			err = task.Wait()
-			if err != nil {
+			if checker(err) {
 				cancel()
 				break
 			}

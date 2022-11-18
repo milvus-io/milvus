@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/util/errorutil"
 	"github.com/milvus-io/milvus/internal/util/hardware"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
@@ -134,8 +135,8 @@ func (s *Server) balanceSegments(ctx context.Context, req *querypb.LoadBalanceRe
 				zap.Int64("collection", req.GetCollectionID()),
 				zap.Int64("replica", replica.GetID()),
 				zap.String("channel", plan.Segment.InsertChannel),
-				zap.Int64("From", srcNode),
-				zap.Int64("To", plan.To),
+				zap.Int64("from", srcNode),
+				zap.Int64("to", plan.To),
 				zap.Error(err),
 			)
 			continue
@@ -147,7 +148,7 @@ func (s *Server) balanceSegments(ctx context.Context, req *querypb.LoadBalanceRe
 		}
 		tasks = append(tasks, task)
 	}
-	return task.Wait(ctx, Params.QueryCoordCfg.SegmentTaskTimeout, tasks...)
+	return task.WaitWithErrorChecker(ctx, Params.QueryCoordCfg.SegmentTaskTimeout, errorutil.Exclude(task.ErrTaskStale), tasks...)
 }
 
 // TODO(dragondriver): add more detail metrics
