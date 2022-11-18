@@ -975,7 +975,7 @@ class TestUtilityBase(TestcaseBase):
         assert collection_w.num_entities == nb
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load(_async=True)
-        self.utility_wrap.wait_for_loading_complete(collection_w.name)
+        self.utility_wrap.wait_for_loading_complete(collection_w.name, timeout=45)
         res, _ = self.utility_wrap.loading_progress(collection_w.name)
         assert res[loading_progress] == '100%'
 

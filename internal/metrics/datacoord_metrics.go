@@ -142,7 +142,7 @@ var (
 
 )
 
-//RegisterDataCoord registers DataCoord metrics
+// RegisterDataCoord registers DataCoord metrics
 func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(DataCoordNumDataNodes)
 	registry.MustRegister(DataCoordNumSegments)

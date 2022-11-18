@@ -745,6 +745,7 @@ func TestMeta_PrepareCompleteCompactionMutation(t *testing.T) {
 				Binlogs:      []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log1", "log2")},
 				Statslogs:    []*datapb.FieldBinlog{getFieldBinlogPaths(1, "statlog1", "statlog2")},
 				Deltalogs:    []*datapb.FieldBinlog{getFieldBinlogPaths(0, "deltalog1", "deltalog2")},
+				NumOfRows:    1,
 			}},
 			2: {SegmentInfo: &datapb.SegmentInfo{
 				ID:           2,
@@ -754,6 +755,7 @@ func TestMeta_PrepareCompleteCompactionMutation(t *testing.T) {
 				Binlogs:      []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log3", "log4")},
 				Statslogs:    []*datapb.FieldBinlog{getFieldBinlogPaths(1, "statlog3", "statlog4")},
 				Deltalogs:    []*datapb.FieldBinlog{getFieldBinlogPaths(0, "deltalog3", "deltalog4")},
+				NumOfRows:    1,
 			}},
 		},
 	}
@@ -783,13 +785,16 @@ func TestMeta_PrepareCompleteCompactionMutation(t *testing.T) {
 		InsertLogs:          []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log5")},
 		Field2StatslogPaths: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "statlog5")},
 		Deltalogs:           []*datapb.FieldBinlog{getFieldBinlogPaths(0, "deltalog5")},
-		NumOfRows:           1,
+		NumOfRows:           2,
 	}
-	beforeCompact, afterCompact, newSegment, err := m.PrepareCompleteCompactionMutation(inCompactionLogs, inCompactionResult)
+	beforeCompact, afterCompact, newSegment, metricMutation, err := m.PrepareCompleteCompactionMutation(inCompactionLogs, inCompactionResult)
 	assert.Nil(t, err)
 	assert.NotNil(t, beforeCompact)
 	assert.NotNil(t, afterCompact)
 	assert.NotNil(t, newSegment)
+	assert.Equal(t, 3, len(metricMutation.stateChange))
+	assert.Equal(t, int64(0), metricMutation.rowCountChange)
+	assert.Equal(t, int64(2), metricMutation.rowCountAccChange)
 
 	require.Equal(t, 2, len(beforeCompact))
 	assert.Equal(t, commonpb.SegmentState_Flushed, beforeCompact[0].GetState())
