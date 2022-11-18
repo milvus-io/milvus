@@ -44,6 +44,8 @@ pipeline {
         HUB = "harbor.milvus.io/milvus"
         JENKINS_BUILD_ID = "${env.BUILD_ID}"
         CI_MODE="nightly"
+        
+        SHOW_MILVUS_CONFIGMAP= true
     }
 
     stages {
