@@ -4,7 +4,7 @@ namespace="default"
 root_path="by-dev"
 operation="migrate"
 image_tag="milvusdb/milvus:v2.2.0"
-meta_migration_pod_tag="harbor.milvus.io/milvus/meta-migration:20221025-e54b6181b"
+meta_migration_pod_tag="milvusdb/meta-migration:v2.2.0"
 remove_migrate_pod_after_migrate="false"
 
 #-n namespace: The namespace that Milvus is installed in.
