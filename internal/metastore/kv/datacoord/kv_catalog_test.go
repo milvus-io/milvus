@@ -39,6 +39,10 @@ var (
 	deltalogPath = metautil.BuildDeltaLogPath("a", collectionID, partitionID, segmentID, logID)
 	statslogPath = metautil.BuildStatsLogPath("a", collectionID, partitionID, segmentID, fieldID, logID)
 
+	binlogPath2   = metautil.BuildInsertLogPath("a", collectionID, partitionID, segmentID2, fieldID, logID)
+	deltalogPath2 = metautil.BuildDeltaLogPath("a", collectionID, partitionID, segmentID2, logID)
+	statslogPath2 = metautil.BuildStatsLogPath("a", collectionID, partitionID, segmentID2, fieldID, logID)
+
 	k1 = buildFieldBinlogPath(collectionID, partitionID, segmentID, fieldID)
 	k2 = buildFieldDeltalogPath(collectionID, partitionID, segmentID, fieldID)
 	k3 = buildFieldStatslogPath(collectionID, partitionID, segmentID, fieldID)
@@ -114,6 +118,20 @@ var (
 		},
 	}
 
+	getlogs = func(logpath string) []*datapb.FieldBinlog {
+		return []*datapb.FieldBinlog{
+			{
+				FieldID: 1,
+				Binlogs: []*datapb.Binlog{
+					{
+						EntriesNum: 5,
+						LogPath:    logpath,
+					},
+				},
+			},
+		}
+	}
+
 	segment1 = &datapb.SegmentInfo{
 		ID:           segmentID,
 		CollectionID: collectionID,
@@ -131,9 +149,9 @@ var (
 		PartitionID:  partitionID,
 		NumOfRows:    100,
 		State:        commonpb.SegmentState_Dropped,
-		Binlogs:      binlogs,
-		Deltalogs:    deltalogs,
-		Statslogs:    statslogs,
+		Binlogs:      getlogs(binlogPath2),
+		Deltalogs:    getlogs(deltalogPath2),
+		Statslogs:    getlogs(statslogPath2),
 	}
 )
 
@@ -257,8 +275,9 @@ func Test_AddSegments(t *testing.T) {
 		}
 
 		catalog := &Catalog{txn, "a"}
-		err := catalog.AddSegment(context.TODO(), invalidSegment)
-		assert.Error(t, err)
+		assert.Panics(t, func() {
+			catalog.AddSegment(context.TODO(), invalidSegment)
+		})
 	})
 
 	t.Run("save error", func(t *testing.T) {
@@ -299,8 +318,9 @@ func Test_AlterSegments(t *testing.T) {
 		}
 
 		catalog := &Catalog{txn, "a"}
-		err := catalog.AlterSegments(context.TODO(), []*datapb.SegmentInfo{invalidSegment})
-		assert.Error(t, err)
+		assert.Panics(t, func() {
+			catalog.AlterSegments(context.TODO(), []*datapb.SegmentInfo{invalidSegment})
+		})
 	})
 
 	t.Run("save error", func(t *testing.T) {
@@ -420,6 +440,7 @@ func Test_AlterSegmentsAndAddNewSegment(t *testing.T) {
 			return []string{}, []string{}, nil
 		}
 
+		// TODO fubang
 		catalog := &Catalog{txn, "a"}
 		err := catalog.AlterSegmentsAndAddNewSegment(context.TODO(), []*datapb.SegmentInfo{droppedSegment}, segment1)
 		assert.NoError(t, err)
