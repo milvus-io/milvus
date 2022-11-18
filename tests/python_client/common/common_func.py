@@ -400,6 +400,10 @@ def gen_invaild_search_params_type():
                     continue
                 annoy_search_param = {"index_type": index_type, "search_params": {"search_k": search_k}}
                 search_params.append(annoy_search_param)
+        elif index_type == "DISKANN":
+            for search_list in ct.get_invalid_ints:
+                diskann_search_param = {"index_type": index_type, "search_params": {"search_list": search_list}}
+                search_params.append(diskann_search_param)
     return search_params
 
 
@@ -425,6 +429,10 @@ def gen_search_param(index_type, metric_type="L2"):
         for search_k in [1000, 5000]:
             annoy_search_param = {"metric_type": metric_type, "params": {"search_k": search_k}}
             search_params.append(annoy_search_param)
+    elif index_type == "DISKANN":
+        for search_list in [20, 30]:
+            diskann_search_param = {"metric_type": metric_type, "params": {"search_list": search_list}}
+            search_params.append(diskann_search_param)
     else:
         log.error("Invalid index_type.")
         raise Exception("Invalid index_type.")
@@ -446,6 +454,11 @@ def gen_invalid_search_param(index_type, metric_type="L2"):
         for search_k in ["-1"]:
             annoy_search_param = {"metric_type": metric_type, "params": {"search_k": search_k}}
             search_params.append(annoy_search_param)
+    elif index_type == "DISKANN":
+        for search_list in ["-1"]:
+            diskann_search_param = {"metric_type": metric_type, "params": {"search_list": search_list}}
+            search_params.append(diskann_search_param)
+    
     else:
         log.error("Invalid index_type.")
         raise Exception("Invalid index_type.")
