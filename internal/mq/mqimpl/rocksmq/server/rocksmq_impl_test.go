@@ -509,15 +509,17 @@ func TestRocksmq_Goroutines(t *testing.T) {
 	wg.Wait()
 }
 
-/**
-	This test is aim to measure RocksMq throughout.
-	Hardware:
-		CPU   Intel(R) Core(TM) i7-8700 CPU @ 3.20GHz
-        Disk  SSD
+/*
+*
 
-    Test with 1,000,000 message, result is as follow:
-	  	Produce: 190000 message / s
-		Consume: 90000 message / s
+		This test is aim to measure RocksMq throughout.
+		Hardware:
+			CPU   Intel(R) Core(TM) i7-8700 CPU @ 3.20GHz
+	        Disk  SSD
+
+	    Test with 1,000,000 message, result is as follow:
+		  	Produce: 190000 message / s
+			Consume: 90000 message / s
 */
 func TestRocksmq_Throughout(t *testing.T) {
 	ep := etcdEndpoints()

@@ -142,12 +142,12 @@ func (s *Server) Run() error {
 	if err := s.init(); err != nil {
 		return err
 	}
-	log.Debug("RootCoord init done ...")
+	log.Info("RootCoord init done ...")
 
 	if err := s.start(); err != nil {
 		return err
 	}
-	log.Debug("RootCoord start done ...")
+	log.Info("RootCoord start done ...")
 	return nil
 }
 
@@ -157,31 +157,31 @@ func (s *Server) init() error {
 	rootcoord.Params.InitOnce()
 	rootcoord.Params.RootCoordCfg.Address = Params.GetAddress()
 	rootcoord.Params.RootCoordCfg.Port = Params.Port
-	log.Debug("init params done..")
+	log.Info("init params done..")
 
 	closer := trace.InitTracing("root_coord")
 	s.closer = closer
 
 	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	if err != nil {
-		log.Debug("RootCoord connect to etcd failed", zap.Error(err))
+		log.Warn("RootCoord connect to etcd failed", zap.Error(err))
 		return err
 	}
 	s.etcdCli = etcdCli
 	s.rootCoord.SetEtcdClient(s.etcdCli)
-	log.Debug("etcd connect done ...")
+	log.Info("etcd connect done ...")
 
 	err = s.startGrpc(Params.Port)
 	if err != nil {
 		return err
 	}
-	log.Debug("grpc init done ...")
+	log.Info("grpc init done ...")
 
 	s.rootCoord.UpdateStateCode(commonpb.StateCode_Initializing)
-	log.Debug("RootCoord", zap.Any("State", commonpb.StateCode_Initializing))
+	log.Info("RootCoord", zap.Any("State", commonpb.StateCode_Initializing))
 
 	if s.newDataCoordClient != nil {
-		log.Debug("RootCoord start to create DataCoord client")
+		log.Info("RootCoord start to create DataCoord client")
 		dataCoord := s.newDataCoordClient(rootcoord.Params.EtcdCfg.MetaRootPath, s.etcdCli)
 		if err := s.rootCoord.SetDataCoord(s.ctx, dataCoord); err != nil {
 			panic(err)
@@ -189,7 +189,7 @@ func (s *Server) init() error {
 		s.dataCoord = dataCoord
 	}
 	if s.newIndexCoordClient != nil {
-		log.Debug("RootCoord start to create IndexCoord client")
+		log.Info("RootCoord start to create IndexCoord client")
 		indexCoord := s.newIndexCoordClient(rootcoord.Params.EtcdCfg.MetaRootPath, s.etcdCli)
 		if err := s.rootCoord.SetIndexCoord(indexCoord); err != nil {
 			panic(err)
@@ -197,7 +197,7 @@ func (s *Server) init() error {
 		s.indexCoord = indexCoord
 	}
 	if s.newQueryCoordClient != nil {
-		log.Debug("RootCoord start to create QueryCoord client")
+		log.Info("RootCoord start to create QueryCoord client")
 		queryCoord := s.newQueryCoordClient(rootcoord.Params.EtcdCfg.MetaRootPath, s.etcdCli)
 		if err := s.rootCoord.SetQueryCoord(queryCoord); err != nil {
 			panic(err)
@@ -227,7 +227,7 @@ func (s *Server) startGrpcLoop(port int) {
 		Time:    60 * time.Second, // Ping the client if it is idle for 60 seconds to ensure the connection is still active
 		Timeout: 10 * time.Second, // Wait 10 second for the ping ack before assuming the connection is dead
 	}
-	log.Debug("start grpc ", zap.Int("port", port))
+	log.Info("start grpc ", zap.Int("port", port))
 	lis, err := net.Listen("tcp", ":"+strconv.Itoa(port))
 	if err != nil {
 		log.Error("GrpcServer:failed to listen", zap.String("error", err.Error()))
@@ -259,7 +259,7 @@ func (s *Server) startGrpcLoop(port int) {
 }
 
 func (s *Server) start() error {
-	log.Debug("RootCoord Core start ...")
+	log.Info("RootCoord Core start ...")
 	if err := s.rootCoord.Start(); err != nil {
 		log.Error(err.Error())
 		return err
@@ -273,7 +273,7 @@ func (s *Server) start() error {
 }
 
 func (s *Server) Stop() error {
-	log.Debug("Rootcoord stop", zap.String("Address", Params.GetAddress()))
+	log.Info("Rootcoord stop", zap.String("Address", Params.GetAddress()))
 	if s.closer != nil {
 		if err := s.closer.Close(); err != nil {
 			log.Error("Failed to close opentracing", zap.Error(err))
@@ -302,10 +302,10 @@ func (s *Server) Stop() error {
 			log.Error("Failed to close close rootCoord", zap.Error(err))
 		}
 	}
-	log.Debug("Rootcoord begin to stop grpc server")
+	log.Info("Rootcoord begin to stop grpc server")
 	s.cancel()
 	if s.grpcServer != nil {
-		log.Debug("Graceful stop grpc server...")
+		log.Info("Graceful stop grpc server...")
 		s.grpcServer.GracefulStop()
 	}
 	s.wg.Wait()

@@ -583,7 +583,7 @@ func (sct *showCollectionsTask) Execute(ctx context.Context) error {
 		for _, collectionName := range sct.CollectionNames {
 			collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
 			if err != nil {
-				log.Debug("Failed to get collection id.", zap.Any("collectionName", collectionName),
+				log.Warn("Failed to get collection id.", zap.Any("collectionName", collectionName),
 					zap.Any("requestID", sct.Base.MsgID), zap.Any("requestType", "showCollections"))
 				return err
 			}
@@ -630,13 +630,13 @@ func (sct *showCollectionsTask) Execute(ctx context.Context) error {
 		for offset, id := range resp.CollectionIDs {
 			collectionName, ok := IDs2Names[id]
 			if !ok {
-				log.Debug("Failed to get collection info.", zap.Any("collectionName", collectionName),
+				log.Warn("Failed to get collection info.", zap.Any("collectionName", collectionName),
 					zap.Any("requestID", sct.Base.MsgID), zap.Any("requestType", "showCollections"))
 				return errors.New("failed to show collections")
 			}
 			collectionInfo, err := globalMetaCache.GetCollectionInfo(ctx, collectionName)
 			if err != nil {
-				log.Debug("Failed to get collection info.", zap.Any("collectionName", collectionName),
+				log.Warn("Failed to get collection info.", zap.Any("collectionName", collectionName),
 					zap.Any("requestID", sct.Base.MsgID), zap.Any("requestType", "showCollections"))
 				return err
 			}
@@ -1060,7 +1060,7 @@ func (spt *showPartitionsTask) Execute(ctx context.Context) error {
 		collectionName := spt.CollectionName
 		collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
 		if err != nil {
-			log.Debug("Failed to get collection id.", zap.Any("collectionName", collectionName),
+			log.Warn("Failed to get collection id.", zap.Any("collectionName", collectionName),
 				zap.Any("requestID", spt.Base.MsgID), zap.Any("requestType", "showPartitions"))
 			return err
 		}
@@ -1073,7 +1073,7 @@ func (spt *showPartitionsTask) Execute(ctx context.Context) error {
 		for _, partitionName := range spt.PartitionNames {
 			partitionID, err := globalMetaCache.GetPartitionID(ctx, collectionName, partitionName)
 			if err != nil {
-				log.Debug("Failed to get partition id.", zap.Any("partitionName", partitionName),
+				log.Warn("Failed to get partition id.", zap.Any("partitionName", partitionName),
 					zap.Any("requestID", spt.Base.MsgID), zap.Any("requestType", "showPartitions"))
 				return err
 			}
@@ -1113,13 +1113,13 @@ func (spt *showPartitionsTask) Execute(ctx context.Context) error {
 		for offset, id := range resp.PartitionIDs {
 			partitionName, ok := IDs2Names[id]
 			if !ok {
-				log.Debug("Failed to get partition id.", zap.Any("partitionName", partitionName),
+				log.Warn("Failed to get partition id.", zap.Any("partitionName", partitionName),
 					zap.Any("requestID", spt.Base.MsgID), zap.Any("requestType", "showPartitions"))
 				return errors.New("failed to show partitions")
 			}
 			partitionInfo, err := globalMetaCache.GetPartitionInfo(ctx, collectionName, partitionName)
 			if err != nil {
-				log.Debug("Failed to get partition id.", zap.Any("partitionName", partitionName),
+				log.Warn("Failed to get partition id.", zap.Any("partitionName", partitionName),
 					zap.Any("requestID", spt.Base.MsgID), zap.Any("requestType", "showPartitions"))
 				return err
 			}
@@ -1285,7 +1285,7 @@ func (lct *loadCollectionTask) OnEnqueue() error {
 }
 
 func (lct *loadCollectionTask) PreExecute(ctx context.Context) error {
-	log.Debug("loadCollectionTask PreExecute", zap.String("role", typeutil.ProxyRole), zap.Int64("msgID", lct.Base.MsgID))
+	log.Info("loadCollectionTask PreExecute", zap.String("role", typeutil.ProxyRole), zap.Int64("msgID", lct.Base.MsgID))
 	lct.Base.MsgType = commonpb.MsgType_LoadCollection
 	lct.Base.SourceID = Params.ProxyCfg.GetNodeID()
 
@@ -1304,7 +1304,7 @@ func (lct *loadCollectionTask) PreExecute(ctx context.Context) error {
 }
 
 func (lct *loadCollectionTask) Execute(ctx context.Context) (err error) {
-	log.Debug("loadCollectionTask Execute", zap.String("role", typeutil.ProxyRole), zap.Int64("msgID", lct.Base.MsgID))
+	log.Info("loadCollectionTask Execute", zap.String("role", typeutil.ProxyRole), zap.Int64("msgID", lct.Base.MsgID))
 	collID, err := globalMetaCache.GetCollectionID(ctx, lct.CollectionName)
 	if err != nil {
 		return err
@@ -1353,7 +1353,7 @@ func (lct *loadCollectionTask) Execute(ctx context.Context) (err error) {
 		ReplicaNumber: lct.ReplicaNumber,
 		FieldIndexID:  fieldIndexIDs,
 	}
-	log.Debug("send LoadCollectionRequest to query coordinator", zap.String("role", typeutil.ProxyRole),
+	log.Info("send LoadCollectionRequest to query coordinator", zap.String("role", typeutil.ProxyRole),
 		zap.Int64("msgID", request.Base.MsgID), zap.Int64("collectionID", request.CollectionID),
 		zap.Any("schema", request.Schema))
 	lct.result, err = lct.queryCoord.LoadCollection(ctx, request)
@@ -1364,7 +1364,7 @@ func (lct *loadCollectionTask) Execute(ctx context.Context) (err error) {
 }
 
 func (lct *loadCollectionTask) PostExecute(ctx context.Context) error {
-	log.Debug("loadCollectionTask PostExecute", zap.String("role", typeutil.ProxyRole),
+	log.Info("loadCollectionTask PostExecute", zap.String("role", typeutil.ProxyRole),
 		zap.Int64("msgID", lct.Base.MsgID))
 	return nil
 }

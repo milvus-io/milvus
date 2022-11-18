@@ -833,9 +833,9 @@ func (sc *ShardCluster) GetStatistics(ctx context.Context, req *querypb.GetStati
 	segAllocs, versionID := sc.segmentAllocations(req.GetReq().GetPartitionIDs())
 	defer sc.finishUsage(versionID)
 
-	log.Debug("cluster segment distribution", zap.Int("len", len(segAllocs)))
+	log.Info("cluster segment distribution", zap.Int("len", len(segAllocs)))
 	for nodeID, segmentIDs := range segAllocs {
-		log.Debug("segments distribution", zap.Int64("nodeID", nodeID), zap.Int64s("segments", segmentIDs))
+		log.Info("segments distribution", zap.Int64("nodeID", nodeID), zap.Int64s("segments", segmentIDs))
 	}
 
 	// concurrent visiting nodes
@@ -924,9 +924,9 @@ func (sc *ShardCluster) Search(ctx context.Context, req *querypb.SearchRequest, 
 	segAllocs, versionID := sc.segmentAllocations(req.GetReq().GetPartitionIDs())
 	defer sc.finishUsage(versionID)
 
-	log.Debug("cluster segment distribution", zap.Int("len", len(segAllocs)), zap.Int64s("partitionIDs", req.GetReq().GetPartitionIDs()))
+	log.Info("cluster segment distribution", zap.Int("len", len(segAllocs)), zap.Int64s("partitionIDs", req.GetReq().GetPartitionIDs()))
 	for nodeID, segmentIDs := range segAllocs {
-		log.Debug("segments distribution", zap.Int64("nodeID", nodeID), zap.Int64s("segments", segmentIDs))
+		log.Info("segments distribution", zap.Int64("nodeID", nodeID), zap.Int64s("segments", segmentIDs))
 	}
 
 	// concurrent visiting nodes

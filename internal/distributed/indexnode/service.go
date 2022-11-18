@@ -70,11 +70,11 @@ func (s *Server) Run() error {
 	if err := s.init(); err != nil {
 		return err
 	}
-	log.Debug("IndexNode init done ...")
+	log.Info("IndexNode init done ...")
 	if err := s.start(); err != nil {
 		return err
 	}
-	log.Debug("IndexNode start done ...")
+	log.Info("IndexNode start done ...")
 	return nil
 }
 
@@ -82,7 +82,7 @@ func (s *Server) Run() error {
 func (s *Server) startGrpcLoop(grpcPort int) {
 	defer s.loopWg.Done()
 
-	log.Debug("IndexNode", zap.String("network address", Params.GetAddress()), zap.Int("network port: ", grpcPort))
+	log.Info("IndexNode", zap.String("network address", Params.GetAddress()), zap.Int("network port: ", grpcPort))
 	lis, err := net.Listen("tcp", ":"+strconv.Itoa(grpcPort))
 	if err != nil {
 		log.Warn("IndexNode", zap.String("GrpcServer:failed to listen", err.Error()))
@@ -158,7 +158,7 @@ func (s *Server) init() error {
 
 	etcdCli, err := etcd.GetEtcdClient(&indexnode.Params.EtcdCfg)
 	if err != nil {
-		log.Debug("IndexNode connect to etcd failed", zap.Error(err))
+		log.Warn("IndexNode connect to etcd failed", zap.Error(err))
 		return err
 	}
 	s.etcdCli = etcdCli
@@ -183,13 +183,13 @@ func (s *Server) start() error {
 		log.Error("IndexNode Register etcd failed", zap.Error(err))
 		return err
 	}
-	log.Debug("IndexNode Register etcd success")
+	log.Info("IndexNode Register etcd success")
 	return nil
 }
 
 // Stop stops IndexNode's grpc service.
 func (s *Server) Stop() error {
-	log.Debug("IndexNode stop", zap.String("Address", Params.GetAddress()))
+	log.Info("IndexNode stop", zap.String("Address", Params.GetAddress()))
 	if s.closer != nil {
 		if err := s.closer.Close(); err != nil {
 			return err
@@ -203,7 +203,7 @@ func (s *Server) Stop() error {
 		defer s.etcdCli.Close()
 	}
 	if s.grpcServer != nil {
-		log.Debug("Graceful stop grpc server...")
+		log.Info("Graceful stop grpc server...")
 		s.grpcServer.GracefulStop()
 	}
 	s.loopWg.Wait()

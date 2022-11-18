@@ -107,7 +107,7 @@ type IndexNode struct {
 
 // NewIndexNode creates a new IndexNode component.
 func NewIndexNode(ctx context.Context, factory dependency.Factory) (*IndexNode, error) {
-	log.Debug("New IndexNode ...")
+	log.Info("New IndexNode ...")
 	rand.Seed(time.Now().UnixNano())
 	ctx1, cancel := context.WithCancel(ctx)
 	b := &IndexNode{

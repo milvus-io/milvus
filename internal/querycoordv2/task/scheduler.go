@@ -352,7 +352,7 @@ func (scheduler *taskScheduler) tryPromoteAll() {
 	}
 
 	if len(toPromote) > 0 || len(toRemove) > 0 {
-		log.Debug("promoted tasks",
+		log.Info("promoted tasks",
 			zap.Int("promotedNum", len(toPromote)),
 			zap.Int("toRemoveNum", len(toRemove)))
 	}
@@ -449,7 +449,7 @@ func (scheduler *taskScheduler) schedule(node int64) {
 
 	scheduler.tryPromoteAll()
 
-	log.Debug("process tasks related to node",
+	log.Info("process tasks related to node",
 		zap.Int("processingTaskNum", scheduler.processQueue.Len()),
 		zap.Int("waitingTaskNum", scheduler.waitQueue.Len()),
 		zap.Int("segmentTaskNum", len(scheduler.segmentTasks)),
@@ -476,7 +476,7 @@ func (scheduler *taskScheduler) schedule(node int64) {
 	log.Info("processed tasks",
 		zap.Int("toRemoveNum", len(toRemove)))
 
-	log.Debug("process tasks related to node done",
+	log.Info("process tasks related to node done",
 		zap.Int("processingTaskNum", scheduler.processQueue.Len()),
 		zap.Int("waitingTaskNum", scheduler.waitQueue.Len()),
 		zap.Int("segmentTaskNum", len(scheduler.segmentTasks)),
@@ -591,7 +591,7 @@ func (scheduler *taskScheduler) remove(task Task) {
 	}
 
 	metrics.QueryCoordTaskNum.WithLabelValues().Set(float64(scheduler.tasks.Len()))
-	log.Debug("task removed")
+	log.Info("task removed")
 }
 
 func (scheduler *taskScheduler) checkCanceled(task Task) bool {

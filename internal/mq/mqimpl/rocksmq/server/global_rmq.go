@@ -52,7 +52,7 @@ func InitRocksMQ(path string) error {
 	var finalErr error
 	once.Do(func() {
 		params.Init()
-		log.Debug("initializing global rmq", zap.String("path", path))
+		log.Info("initializing global rmq", zap.String("path", path))
 		var fi os.FileInfo
 		fi, finalErr = os.Stat(path)
 		if os.IsNotExist(finalErr) {
@@ -85,7 +85,7 @@ func InitRocksMQ(path string) error {
 
 // CloseRocksMQ is used to close global rocksmq
 func CloseRocksMQ() {
-	log.Debug("Close Rocksmq!")
+	log.Info("Close Rocksmq!")
 	if Rmq != nil && Rmq.store != nil {
 		Rmq.Close()
 	}
