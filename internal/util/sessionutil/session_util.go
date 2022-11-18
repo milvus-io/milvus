@@ -182,7 +182,7 @@ func NewSession(ctx context.Context, metaRoot string, client *clientv3.Client, o
 	session.UpdateRegistered(false)
 
 	connectEtcdFn := func() error {
-		log.Debug("Session try to connect to etcd")
+		log.Info("Session try to connect to etcd")
 		ctx2, cancel2 := context.WithTimeout(session.ctx, 5*time.Second)
 		defer cancel2()
 		if _, err := client.Get(ctx2, "health"); err != nil {
@@ -197,7 +197,7 @@ func NewSession(ctx context.Context, metaRoot string, client *clientv3.Client, o
 			zap.Error(err))
 		return nil
 	}
-	log.Debug("Session connect to etcd success")
+	log.Info("Session connect to etcd success")
 	return session
 }
 
@@ -279,7 +279,7 @@ func (s *Session) getServerIDWithKey(key string) (int64, error) {
 			log.Warn("Session Txn unsuccessful", zap.String("key", key))
 			continue
 		}
-		log.Debug("Session get serverID success", zap.String("key", key), zap.Int64("ServerId", valueInt))
+		log.Info("Session get serverID success", zap.String("key", key), zap.Int64("ServerId", valueInt))
 		return valueInt, nil
 	}
 }
@@ -307,7 +307,7 @@ func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, er
 	}
 	completeKey := path.Join(s.metaRoot, DefaultServiceRoot, key)
 	var ch <-chan *clientv3.LeaseKeepAliveResponse
-	log.Debug("service begin to register to etcd", zap.String("serverName", s.ServerName), zap.Int64("ServerID", s.ServerID))
+	log.Info("service begin to register to etcd", zap.String("serverName", s.ServerName), zap.Int64("ServerID", s.ServerID))
 
 	ttl := s.sessionTTL
 	retryTimes := s.sessionRetryTimes
@@ -344,7 +344,7 @@ func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, er
 		if !txnResp.Succeeded {
 			return fmt.Errorf("function CompareAndSwap error for compare is false for key: %s", key)
 		}
-		log.Debug("put session key into etcd", zap.String("key", completeKey), zap.String("value", string(sessionJSON)))
+		log.Info("put session key into etcd", zap.String("key", completeKey), zap.String("value", string(sessionJSON)))
 
 		keepAliveCtx, keepAliveCancel := context.WithCancel(context.Background())
 		s.keepAliveCancel = func() {
@@ -419,7 +419,7 @@ func (s *Session) GetSessions(prefix string) (map[string]*Session, int64, error)
 			return nil, 0, err
 		}
 		_, mapKey := path.Split(string(kv.Key))
-		log.Debug("SessionUtil GetSessions ", zap.Any("prefix", prefix),
+		log.Info("SessionUtil GetSessions ", zap.Any("prefix", prefix),
 			zap.String("key", mapKey),
 			zap.Any("address", session.Address))
 		res[mapKey] = session
@@ -444,11 +444,11 @@ func (s *Session) GetSessionsWithVersionRange(prefix string, r semver.Range) (ma
 			return nil, 0, err
 		}
 		if !r(session.Version) {
-			log.Debug("Session version out of range", zap.String("version", session.Version.String()), zap.Int64("serverID", session.ServerID))
+			log.Info("Session version out of range", zap.String("version", session.Version.String()), zap.Int64("serverID", session.ServerID))
 			continue
 		}
 		_, mapKey := path.Split(string(kv.Key))
-		log.Debug("SessionUtil GetSessions ", zap.String("prefix", prefix),
+		log.Info("SessionUtil GetSessions ", zap.String("prefix", prefix),
 			zap.String("key", mapKey),
 			zap.String("address", session.Address))
 		res[mapKey] = session
@@ -545,7 +545,7 @@ func (w *sessionWatcher) handleWatchResponse(wresp clientv3.WatchResponse) {
 		var eventType SessionEventType
 		switch ev.Type {
 		case mvccpb.PUT:
-			log.Debug("watch services",
+			log.Info("watch services",
 				zap.Any("add kv", ev.Kv))
 			err := json.Unmarshal([]byte(ev.Kv.Value), session)
 			if err != nil {
@@ -557,7 +557,7 @@ func (w *sessionWatcher) handleWatchResponse(wresp clientv3.WatchResponse) {
 			}
 			eventType = SessionAddEvent
 		case mvccpb.DELETE:
-			log.Debug("watch services",
+			log.Info("watch services",
 				zap.Any("delete kv", ev.PrevKv))
 			err := json.Unmarshal([]byte(ev.PrevKv.Value), session)
 			if err != nil {
@@ -569,7 +569,7 @@ func (w *sessionWatcher) handleWatchResponse(wresp clientv3.WatchResponse) {
 			}
 			eventType = SessionDelEvent
 		}
-		log.Debug("WatchService", zap.Any("event type", eventType))
+		log.Info("WatchService", zap.Any("event type", eventType))
 		w.eventCh <- &SessionEvent{
 			EventType: eventType,
 			Session:   session,
@@ -627,7 +627,7 @@ func (s *Session) LivenessCheck(ctx context.Context, callback func()) {
 			}
 			return
 		case <-ctx.Done():
-			log.Debug("liveness exits due to context done")
+			log.Info("liveness exits due to context done")
 			// cancel the etcd keepAlive context
 			if s.keepAliveCancel != nil {
 				s.keepAliveCancel()
@@ -721,7 +721,7 @@ func (s *Session) ProcessActiveStandBy(activateFunc func()) error {
 	log.Info(fmt.Sprintf("serverName: %v enter STANDBY mode", s.ServerName))
 	go func() {
 		for s.isStandby.Load().(bool) {
-			log.Debug(fmt.Sprintf("serverName: %v is in STANDBY ...", s.ServerName))
+			log.Info(fmt.Sprintf("serverName: %v is in STANDBY ...", s.ServerName))
 			time.Sleep(10 * time.Second)
 		}
 	}()
@@ -751,9 +751,9 @@ func (s *Session) ProcessActiveStandBy(activateFunc func()) error {
 			for _, event := range wresp.Events {
 				switch event.Type {
 				case mvccpb.PUT:
-					log.Debug("watch the ACTIVE key", zap.Any("ADD", event.Kv))
+					log.Info("watch the ACTIVE key", zap.Any("ADD", event.Kv))
 				case mvccpb.DELETE:
-					log.Debug("watch the ACTIVE key", zap.Any("DELETE", event.Kv))
+					log.Info("watch the ACTIVE key", zap.Any("DELETE", event.Kv))
 					cancel()
 				}
 			}

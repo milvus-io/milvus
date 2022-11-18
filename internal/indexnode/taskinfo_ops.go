@@ -38,7 +38,7 @@ func (i *IndexNode) storeTaskState(ClusterID string, buildID UniqueID, state com
 	i.stateLock.Lock()
 	defer i.stateLock.Unlock()
 	if task, ok := i.tasks[key]; ok {
-		log.Debug("IndexNode store task state", zap.String("clusterID", ClusterID), zap.Int64("buildID", buildID),
+		log.Info("IndexNode store task state", zap.String("clusterID", ClusterID), zap.Int64("buildID", buildID),
 			zap.String("state", state.String()), zap.String("fail reason", failReason))
 		task.state = state
 		task.failReason = failReason

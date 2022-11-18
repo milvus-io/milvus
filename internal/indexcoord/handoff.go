@@ -218,7 +218,7 @@ func (hd *handoff) process(segID UniqueID) {
 			return
 		}
 		if info.IsImporting {
-			log.Debug("segment is importing, can't write handoff event", zap.Int64("segID", segID))
+			log.Info("segment is importing, can't write handoff event", zap.Int64("segID", segID))
 			return
 		}
 		if hd.allParentsDone(info.CompactionFrom) {

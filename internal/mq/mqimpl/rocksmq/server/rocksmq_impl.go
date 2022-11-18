@@ -151,7 +151,7 @@ func NewRocksMQ(params paramtable.BaseTable, name string, idAllocator allocator.
 			rocksDBLRUCacheCapacity = calculatedCapacity
 		}
 	}
-	log.Debug("Start rocksmq ", zap.Int("max proc", maxProcs),
+	log.Info("Start rocksmq ", zap.Int("max proc", maxProcs),
 		zap.Int("parallism", parallelism), zap.Uint64("lru cache", rocksDBLRUCacheCapacity))
 	bbto := gorocksdb.NewDefaultBlockBasedTableOptions()
 	bbto.SetBlockCache(gorocksdb.NewLRUCache(rocksDBLRUCacheCapacity))
@@ -274,7 +274,7 @@ func (rmq *rocksmq) Close() {
 	log.Info("Successfully close rocksmq")
 }
 
-//print rmq consumer Info
+// print rmq consumer Info
 func (rmq *rocksmq) Info() bool {
 	rtn := true
 	rmq.consumers.Range(func(key, vals interface{}) bool {
@@ -377,7 +377,7 @@ func (rmq *rocksmq) CreateTopic(topicName string) error {
 	rmq.retentionInfo.mutex.Lock()
 	defer rmq.retentionInfo.mutex.Unlock()
 	rmq.retentionInfo.topicRetetionTime.Store(topicName, time.Now().Unix())
-	log.Debug("Rocksmq create topic successfully ", zap.String("topic", topicName), zap.Int64("elapsed", time.Since(start).Milliseconds()))
+	log.Info("Rocksmq create topic successfully ", zap.String("topic", topicName), zap.Int64("elapsed", time.Since(start).Milliseconds()))
 	return nil
 }
 
@@ -441,7 +441,7 @@ func (rmq *rocksmq) DestroyTopic(topicName string) error {
 	topicMu.Delete(topicName)
 	rmq.retentionInfo.topicRetetionTime.Delete(topicName)
 
-	log.Debug("Rocksmq destroy topic successfully ", zap.String("topic", topicName), zap.Int64("elapsed", time.Since(start).Milliseconds()))
+	log.Info("Rocksmq destroy topic successfully ", zap.String("topic", topicName), zap.Int64("elapsed", time.Since(start).Milliseconds()))
 	return nil
 }
 
@@ -473,7 +473,7 @@ func (rmq *rocksmq) CreateConsumerGroup(topicName, groupName string) error {
 		return fmt.Errorf("RMQ CreateConsumerGroup key already exists, key = %s", key)
 	}
 	rmq.consumersID.Store(key, DefaultMessageID)
-	log.Debug("Rocksmq create consumer group successfully ", zap.String("topic", topicName),
+	log.Info("Rocksmq create consumer group successfully ", zap.String("topic", topicName),
 		zap.String("group", groupName),
 		zap.Int64("elapsed", time.Since(start).Milliseconds()))
 	return nil
@@ -499,7 +499,7 @@ func (rmq *rocksmq) RegisterConsumer(consumer *Consumer) error {
 		consumers[0] = consumer
 		rmq.consumers.Store(consumer.Topic, consumers)
 	}
-	log.Debug("Rocksmq register consumer successfully ", zap.String("topic", consumer.Topic), zap.Int64("elapsed", time.Since(start).Milliseconds()))
+	log.Info("Rocksmq register consumer successfully ", zap.String("topic", consumer.Topic), zap.Int64("elapsed", time.Since(start).Milliseconds()))
 	return nil
 }
 
@@ -549,7 +549,7 @@ func (rmq *rocksmq) destroyConsumerGroupInternal(topicName, groupName string) er
 			}
 		}
 	}
-	log.Debug("Rocksmq destroy consumer group successfully ", zap.String("topic", topicName),
+	log.Info("Rocksmq destroy consumer group successfully ", zap.String("topic", topicName),
 		zap.String("group", groupName),
 		zap.Int64("elapsed", time.Since(start).Milliseconds()))
 	return nil
@@ -846,11 +846,11 @@ func (rmq *rocksmq) Seek(topicName string, groupName string, msgID UniqueID) err
 	if err != nil {
 		return err
 	}
-	log.Debug("successfully seek", zap.String("topic", topicName), zap.String("group", groupName), zap.Uint64("msgId", uint64(msgID)))
+	log.Info("successfully seek", zap.String("topic", topicName), zap.String("group", groupName), zap.Uint64("msgId", uint64(msgID)))
 	return nil
 }
 
-//Only for test
+// Only for test
 func (rmq *rocksmq) ForceSeek(topicName string, groupName string, msgID UniqueID) error {
 	log.Warn("Use method ForceSeek that only for test")
 	if rmq.isClosed() {
@@ -878,7 +878,7 @@ func (rmq *rocksmq) ForceSeek(topicName string, groupName string, msgID UniqueID
 
 	rmq.consumersID.Store(key, msgID)
 
-	log.Debug("successfully force seek", zap.String("topic", topicName),
+	log.Info("successfully force seek", zap.String("topic", topicName),
 		zap.String("group", groupName), zap.Uint64("msgID", uint64(msgID)))
 	return nil
 }
@@ -908,7 +908,7 @@ func (rmq *rocksmq) SeekToLatest(topicName, groupName string) error {
 		return err
 	}
 
-	log.Debug("successfully seek to latest", zap.String("topic", topicName),
+	log.Info("successfully seek to latest", zap.String("topic", topicName),
 		zap.String("group", groupName), zap.Uint64("latest", uint64(msgID+1)))
 	return nil
 }

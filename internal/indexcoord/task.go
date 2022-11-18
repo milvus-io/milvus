@@ -171,7 +171,7 @@ func (cit *CreateIndexTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	log.Debug("IndexCoord get flushed segment from DataCoord success", zap.Int64("collectionID", cit.req.CollectionID),
+	log.Info("IndexCoord get flushed segment from DataCoord success", zap.Int64("collectionID", cit.req.CollectionID),
 		zap.Int64s("flushed segments", flushedSegments.Segments))
 	segmentsInfo, err := cit.dataCoordClient.GetSegmentInfo(cit.ctx, &datapb.GetSegmentInfoRequest{
 		SegmentIDs:       flushedSegments.Segments,

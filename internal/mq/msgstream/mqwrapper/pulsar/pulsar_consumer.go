@@ -72,7 +72,7 @@ func (pc *Consumer) Chan() <-chan mqwrapper.Message {
 					select {
 					case msg, ok := <-pc.c.Chan():
 						if !ok {
-							log.Debug("pulsar consumer channel closed")
+							log.Info("pulsar consumer channel closed")
 							return
 						}
 						if !pc.skip {

@@ -164,7 +164,7 @@ func (bm *DelBufferManager) ShouldFlushSegments() []UniqueID {
 		segMem := heap.Pop(bm.delBufHeap).(*Item)
 		poppedSegMem = append(poppedSegMem, segMem)
 		shouldFlushSegments = append(shouldFlushSegments, segMem.segmentID)
-		log.Debug("add segment for delete buf flush", zap.Int64("segmentID", segMem.segmentID))
+		log.Info("add segment for delete buf flush", zap.Int64("segmentID", segMem.segmentID))
 		mmUsage -= segMem.memorySize
 		if mmUsage < Params.DataNodeCfg.FlushDeleteBufferBytes {
 			break

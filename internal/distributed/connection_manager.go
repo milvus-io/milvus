@@ -106,12 +106,12 @@ func (cm *ConnectionManager) AddDependency(roleName string) error {
 
 	msess, rev, err := cm.session.GetSessions(roleName)
 	if err != nil {
-		log.Debug("ClientManager GetSessions failed", zap.Any("roleName", roleName))
+		log.Warn("ClientManager GetSessions failed", zap.Any("roleName", roleName))
 		return err
 	}
 
 	if len(msess) == 0 {
-		log.Debug("No nodes are currently alive", zap.Any("roleName", roleName))
+		log.Warn("No nodes are currently alive", zap.Any("roleName", roleName))
 	} else {
 		for _, value := range msess {
 			cm.buildConnections(value)
@@ -245,7 +245,7 @@ func (cm *ConnectionManager) processEvent(channel <-chan *sessionutil.SessionEve
 			}
 			switch ev.EventType {
 			case sessionutil.SessionAddEvent:
-				log.Debug("ConnectionManager", zap.Any("add event", ev.Session))
+				log.Info("ConnectionManager", zap.Any("add event", ev.Session))
 				cm.buildConnections(ev.Session)
 			case sessionutil.SessionDelEvent:
 				cm.removeTask(ev.Session.ServerID)
@@ -265,12 +265,11 @@ func (cm *ConnectionManager) receiveFinishTask() {
 		case serverID := <-cm.notify:
 			cm.taskMu.Lock()
 			task, ok := cm.buildTasks[serverID]
-			log.Debug("ConnectionManager", zap.Any("receive finish", serverID))
+			log.Info("ConnectionManager", zap.Any("receive finish", serverID))
 			if ok {
-				log.Debug("ConnectionManager", zap.Any("get task ok", serverID))
-				log.Debug("ConnectionManager", zap.Any("task state", task.state))
+				log.Info("ConnectionManager", zap.Any("get task ok", serverID))
 				if task.state == buildClientSuccess {
-					log.Debug("ConnectionManager", zap.Any("build success", serverID))
+					log.Info("ConnectionManager", zap.Any("build success", serverID))
 					cm.addConnection(task.sess.ServerID, task.result)
 					cm.buildClients(task.sess, task.result)
 				}
@@ -393,7 +392,7 @@ func (bct *buildClientTask) Run() {
 		defer bct.finish()
 		connectGrpcFunc := func() error {
 			opts := trace.GetInterceptorOpts()
-			log.Debug("Grpc connect ", zap.String("Address", bct.sess.Address))
+			log.Info("Grpc connect ", zap.String("Address", bct.sess.Address))
 			conn, err := grpc.DialContext(bct.ctx, bct.sess.Address,
 				grpc.WithInsecure(), grpc.WithBlock(), grpc.WithTimeout(30*time.Second),
 				grpc.WithDisableRetry(),
@@ -423,9 +422,9 @@ func (bct *buildClientTask) Run() {
 		}
 
 		err := retry.Do(bct.ctx, connectGrpcFunc, bct.retryOptions...)
-		log.Debug("ConnectionManager", zap.Any("build connection finish", bct.sess.ServerID))
+		log.Info("ConnectionManager", zap.Any("build connection finish", bct.sess.ServerID))
 		if err != nil {
-			log.Debug("BuildClientTask try connect failed",
+			log.Warn("BuildClientTask try connect failed",
 				zap.Any("roleName", bct.sess.ServerName), zap.Error(err))
 			bct.state = buildClientFailed
 			return
@@ -437,7 +436,7 @@ func (bct *buildClientTask) Stop() {
 }
 
 func (bct *buildClientTask) finish() {
-	log.Debug("ConnectionManager", zap.Any("notify connection finish", bct.sess.ServerID))
+	log.Info("ConnectionManager", zap.Any("notify connection finish", bct.sess.ServerID))
 	bct.notify <- bct.sess.ServerID
 }
 

@@ -78,7 +78,7 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 	log.Debug("PrivilegeInterceptor", zap.String("type", reflect.TypeOf(req).String()))
 	privilegeExt, err := funcutil.GetPrivilegeExtObj(req)
 	if err != nil {
-		log.Debug("GetPrivilegeExtObj err", zap.Error(err))
+		log.Warn("GetPrivilegeExtObj err", zap.Error(err))
 		return ctx, nil
 	}
 	username, err := GetCurUserFromContext(ctx)
@@ -166,7 +166,7 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 		}
 	}
 
-	log.Debug("permission deny", zap.String("policy", policy), zap.Strings("roles", roleNames))
+	log.Info("permission deny", zap.String("policy", policy), zap.Strings("roles", roleNames))
 	return ctx, status.Error(codes.PermissionDenied, fmt.Sprintf("%s: permission deny", objectPrivilege))
 }
 

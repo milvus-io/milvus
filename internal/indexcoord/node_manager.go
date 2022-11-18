@@ -63,14 +63,14 @@ func (nm *NodeManager) setClient(nodeID UniqueID, client types.IndexNode) {
 	}
 	nm.lock.Lock()
 	nm.nodeClients[nodeID] = client
-	log.Debug("IndexNode NodeManager setClient success", zap.Int64("nodeID", nodeID), zap.Int("IndexNode num", len(nm.nodeClients)))
+	log.Info("IndexNode NodeManager setClient success", zap.Int64("nodeID", nodeID), zap.Int("IndexNode num", len(nm.nodeClients)))
 	nm.lock.Unlock()
 	nm.pq.Push(item)
 }
 
 // RemoveNode removes the unused client of IndexNode.
 func (nm *NodeManager) RemoveNode(nodeID UniqueID) {
-	log.Debug("IndexCoord", zap.Any("Remove node with ID", nodeID))
+	log.Info("IndexCoord", zap.Any("Remove node with ID", nodeID))
 	nm.lock.Lock()
 	delete(nm.nodeClients, nodeID)
 	nm.lock.Unlock()
@@ -81,7 +81,7 @@ func (nm *NodeManager) RemoveNode(nodeID UniqueID) {
 // AddNode adds the client of IndexNode.
 func (nm *NodeManager) AddNode(nodeID UniqueID, address string) error {
 
-	log.Debug("IndexCoord addNode", zap.Any("nodeID", nodeID), zap.Any("node address", address))
+	log.Info("IndexCoord addNode", zap.Any("nodeID", nodeID), zap.Any("node address", address))
 	if nm.pq.CheckExist(nodeID) {
 		log.Warn("IndexCoord", zap.Any("Node client already exist with ID:", nodeID))
 		return nil

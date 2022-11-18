@@ -103,16 +103,16 @@ func (s *Server) init() error {
 	closer := trace.InitTracing(fmt.Sprintf("query_node ip: %s, port: %d", Params.IP, Params.Port))
 	s.closer = closer
 
-	log.Debug("QueryNode", zap.Int("port", Params.Port))
+	log.Info("QueryNode", zap.Int("port", Params.Port))
 
 	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	if err != nil {
-		log.Debug("QueryNode connect to etcd failed", zap.Error(err))
+		log.Warn("QueryNode connect to etcd failed", zap.Error(err))
 		return err
 	}
 	s.etcdCli = etcdCli
 	s.SetEtcdClient(etcdCli)
-	log.Debug("QueryNode connect to etcd successfully")
+	log.Info("QueryNode connect to etcd successfully")
 	s.wg.Add(1)
 	go s.startGrpcLoop(Params.Port)
 	// wait for grpc server loop start
@@ -122,7 +122,7 @@ func (s *Server) init() error {
 	}
 
 	s.querynode.UpdateStateCode(commonpb.StateCode_Initializing)
-	log.Debug("QueryNode", zap.Any("State", commonpb.StateCode_Initializing))
+	log.Info("QueryNode", zap.Any("State", commonpb.StateCode_Initializing))
 	if err := s.querynode.Init(); err != nil {
 		log.Error("QueryNode init error: ", zap.Error(err))
 		return err
@@ -194,7 +194,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
 	if err := s.grpcServer.Serve(lis); err != nil {
-		log.Debug("QueryNode Start Grpc Failed!!!!")
+		log.Warn("QueryNode Start Grpc Failed!!!!")
 		s.grpcErrChan <- err
 	}
 
@@ -206,18 +206,18 @@ func (s *Server) Run() error {
 	if err := s.init(); err != nil {
 		return err
 	}
-	log.Debug("QueryNode init done ...")
+	log.Info("QueryNode init done ...")
 
 	if err := s.start(); err != nil {
 		return err
 	}
-	log.Debug("QueryNode start done ...")
+	log.Info("QueryNode start done ...")
 	return nil
 }
 
 // Stop stops QueryNode's grpc service.
 func (s *Server) Stop() error {
-	log.Debug("QueryNode stop", zap.String("Address", Params.GetAddress()))
+	log.Info("QueryNode stop", zap.String("Address", Params.GetAddress()))
 	if s.closer != nil {
 		if err := s.closer.Close(); err != nil {
 			return err
@@ -229,7 +229,7 @@ func (s *Server) Stop() error {
 
 	s.cancel()
 	if s.grpcServer != nil {
-		log.Debug("Graceful stop grpc server...")
+		log.Info("Graceful stop grpc server...")
 		s.grpcServer.GracefulStop()
 	}
 

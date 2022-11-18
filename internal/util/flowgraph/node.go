@@ -109,7 +109,7 @@ func (nodeCtx *nodeCtx) work() {
 	for {
 		select {
 		case <-nodeCtx.closeCh:
-			log.Debug("flow graph node closed", zap.String("nodeName", nodeCtx.node.Name()))
+			log.Info("flow graph node closed", zap.String("nodeName", nodeCtx.node.Name()))
 			return
 		default:
 			// inputs from inputsMessages for Operate

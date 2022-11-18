@@ -136,7 +136,7 @@ func (queue *BaseTaskQueue) PopActiveTask(tID UniqueID) task {
 		delete(queue.activeTasks, tID)
 		return t
 	}
-	log.Debug("indexcoord", zap.Int64("sorry, but the ID was not found in the active task list!", tID))
+	log.Warn("failed to pop active task", zap.Int64("the task ID was not found in the active task list!", tID))
 	return nil
 }
 

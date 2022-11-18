@@ -338,17 +338,17 @@ func (mt *metaTable) NeedIndex(collID, indexID UniqueID) bool {
 
 func (mt *metaTable) canIndex(segIdx *model.SegmentIndex) bool {
 	if segIdx.IsDeleted {
-		log.Debug("Index has been deleted", zap.Int64("buildID", segIdx.BuildID))
+		log.Info("Index has been deleted", zap.Int64("buildID", segIdx.BuildID))
 		return false
 	}
 
 	if segIdx.NodeID != 0 {
-		log.Debug("IndexCoord metaTable BuildIndex, but indexMeta's NodeID is not zero",
+		log.Info("IndexCoord metaTable BuildIndex, but indexMeta's NodeID is not zero",
 			zap.Int64("buildID", segIdx.BuildID), zap.Int64("nodeID", segIdx.NodeID))
 		return false
 	}
 	if segIdx.IndexState != commonpb.IndexState_Unissued {
-		log.Debug("IndexCoord metaTable BuildIndex, but indexMeta's state is not unissued",
+		log.Info("IndexCoord metaTable BuildIndex, but indexMeta's state is not unissued",
 			zap.Int64("buildID", segIdx.BuildID), zap.String("state", segIdx.IndexState.String()))
 		return false
 	}
@@ -361,7 +361,7 @@ func (mt *metaTable) UpdateVersion(buildID UniqueID, nodeID UniqueID) error {
 	mt.segmentIndexLock.Lock()
 	defer mt.segmentIndexLock.Unlock()
 
-	log.Debug("IndexCoord metaTable UpdateVersion receive", zap.Int64("buildID", buildID), zap.Int64("nodeID", nodeID))
+	log.Info("IndexCoord metaTable UpdateVersion receive", zap.Int64("buildID", buildID), zap.Int64("nodeID", nodeID))
 	segIdx, ok := mt.buildID2SegmentIndex[buildID]
 	if !ok {
 		return fmt.Errorf("there is no index with buildID: %d", buildID)
@@ -523,7 +523,7 @@ func (mt *metaTable) HasSameReq(req *indexpb.CreateIndexRequest) (bool, UniqueID
 		if !mt.checkParams(fieldIndex, req) {
 			continue
 		}
-		log.Debug("IndexCoord has same index", zap.Int64("collectionID", req.CollectionID),
+		log.Info("IndexCoord has same index", zap.Int64("collectionID", req.CollectionID),
 			zap.Int64("fieldID", req.FieldID), zap.String("indexName", req.IndexName),
 			zap.Int64("indexID", fieldIndex.IndexID))
 		return true, fieldIndex.IndexID
@@ -787,7 +787,7 @@ func (mt *metaTable) MarkSegmentsIndexAsDeleted(selector func(index *model.Segme
 	}
 
 	if len(segIdxes) == 0 {
-		log.Debug("IndexCoord metaTable MarkSegmentsIndexAsDeleted success, no segment index need to mark")
+		log.Info("IndexCoord metaTable MarkSegmentsIndexAsDeleted success, no segment index need to mark")
 		return nil
 	}
 	err := mt.alterSegmentIndexes(segIdxes)
@@ -800,7 +800,7 @@ func (mt *metaTable) MarkSegmentsIndexAsDeleted(selector func(index *model.Segme
 func (mt *metaTable) GetSegmentIndexByBuildID(buildID UniqueID) (bool, *model.SegmentIndex) {
 	mt.segmentIndexLock.RLock()
 	defer mt.segmentIndexLock.RUnlock()
-	log.Debug("IndexCoord get index file path from meta table", zap.Int64("buildID", buildID))
+	log.Info("IndexCoord get index file path from meta table", zap.Int64("buildID", buildID))
 
 	segIdx, ok := mt.buildID2SegmentIndex[buildID]
 	if !ok || segIdx.IsDeleted {
@@ -811,7 +811,7 @@ func (mt *metaTable) GetSegmentIndexByBuildID(buildID UniqueID) (bool, *model.Se
 		return false, nil
 	}
 
-	log.Debug("IndexCoord get segment index file path success", zap.Int64("buildID", buildID),
+	log.Info("IndexCoord get segment index file path success", zap.Int64("buildID", buildID),
 		zap.Int("index files num", len(segIdx.IndexFileKeys)))
 	return true, segIdx
 }
@@ -1059,7 +1059,7 @@ func (mt *metaTable) MarkSegmentsIndexAsDeletedByBuildID(buildIDs []UniqueID) er
 		}
 	}
 	if len(segIdxes) == 0 {
-		log.Debug("IndexCoord metaTable MarkSegmentsIndexAsDeletedByBuildID success, already have deleted",
+		log.Info("IndexCoord metaTable MarkSegmentsIndexAsDeletedByBuildID success, already have deleted",
 			zap.Int64s("buildIDs", buildIDs))
 		return nil
 	}

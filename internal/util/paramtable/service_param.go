@@ -63,7 +63,7 @@ func (p *ServiceParam) Init() {
 	p.MetaStoreCfg.init(&p.BaseTable)
 	p.EtcdCfg.init(&p.BaseTable)
 	if p.MetaStoreCfg.MetaStoreType == util.MetaStoreTypeMysql {
-		log.Debug("Mysql protocol is used as meta store")
+		log.Info("Mysql protocol is used as meta store")
 		p.DBCfg.init(&p.BaseTable)
 	}
 	p.PulsarCfg.init(&p.BaseTable)

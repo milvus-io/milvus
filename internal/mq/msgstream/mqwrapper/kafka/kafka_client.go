@@ -100,7 +100,7 @@ func (kc *kafkaClient) getKafkaProducer() (*kafka.Producer, error) {
 						panic(ev)
 					}
 				default:
-					log.Debug("kafka producer event", zap.Any("event", ev))
+					log.Info("kafka producer event", zap.Any("event", ev))
 				}
 			}
 		}()

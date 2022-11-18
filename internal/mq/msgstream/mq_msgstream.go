@@ -795,7 +795,7 @@ func (ms *MqTtMsgStream) consumeToTtMsg(consumer mqwrapper.Consumer) {
 			return
 		case msg, ok := <-consumer.Chan():
 			if !ok {
-				log.Debug("consumer closed!")
+				log.Info("consumer closed!")
 				return
 			}
 			consumer.Ack(msg)
