@@ -54,6 +54,14 @@ func GenRandomBytes() []byte {
 	return b
 }
 
+func GenRandomBytesWithLength(length int64) []byte {
+	b := make([]byte, length)
+	if _, err := rand.Read(b); err != nil {
+		return nil
+	}
+	return b
+}
+
 // GenRandomStr generates a random string.
 func GenRandomStr() string {
 	return fmt.Sprintf("%X", GenRandomBytes())

@@ -32,9 +32,10 @@ func NewPayloadReader(colType schemapb.DataType, buf []byte) (*PayloadReader, er
 
 // GetDataFromPayload returns data,length from payload, returns err if failed
 // Return:
-//      `interface{}`: all types.
-//      `int`: dim, only meaningful to FLOAT/BINARY VECTOR type.
-//      `error`: error.
+//
+//	`interface{}`: all types.
+//	`int`: dim, only meaningful to FLOAT/BINARY VECTOR type.
+//	`error`: error.
 func (r *PayloadReader) GetDataFromPayload() (interface{}, int, error) {
 	switch r.colType {
 	case schemapb.DataType_Bool:

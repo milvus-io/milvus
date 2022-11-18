@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/apache/arrow/go/v8/parquet/file"
+	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -20,6 +21,8 @@ type ReadDataFromAllRowGroupsSuite struct {
 func (s *ReadDataFromAllRowGroupsSuite) SetupSuite() {
 	w := NewIndexFileBinlogWriter(0, 0, 1, 2, 3, 100, "", 0, "test")
 	defer w.Close()
+	// make sure it's still written int8 data
+	w.PayloadDataType = schemapb.DataType_Int8
 	ew, err := w.NextIndexFileEventWriter()
 	s.Require().NoError(err)
 	defer ew.Close()
@@ -68,12 +71,6 @@ func (s *ReadDataFromAllRowGroupsSuite) TestNormalRun() {
 	valuesRead, err := ReadDataFromAllRowGroups[int32, *file.Int32ColumnChunkReader](s.reader.reader, values, 0, int64(s.size))
 	s.Assert().NoError(err)
 	s.Assert().EqualValues(s.size, valuesRead)
-}
-
-func (s *ReadDataFromAllRowGroupsSuite) TestColIdxOutOfRange() {
-	values := make([]int32, s.size)
-	_, err := ReadDataFromAllRowGroups[int32, *file.Int32ColumnChunkReader](s.reader.reader, values, 1, int64(s.size))
-	s.Assert().Error(err)
 }
 
 func TestReadDataFromAllRowGroupsSuite(t *testing.T) {
