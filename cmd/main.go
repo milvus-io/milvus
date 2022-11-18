@@ -24,4 +24,5 @@ import (
 
 func main() {
 	milvus.RunMilvus(os.Args)
+
 }
