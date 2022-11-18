@@ -300,8 +300,8 @@ class TestCollectionSearchInvalid(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("index, params",
-                             zip(ct.all_index_types[:7],
-                                 ct.default_index_params[:7]))
+                             zip(ct.all_index_types[:6],
+                                 ct.default_index_params[:6]))
     def test_search_invalid_params_type(self, index, params):
         """
         target: test search with invalid search params
@@ -906,7 +906,7 @@ class TestCollectionSearch(TestcaseBase):
     def nq(self, request):
         yield request.param
 
-    @pytest.fixture(scope="function", params=[8, 128])
+    @pytest.fixture(scope="function", params=[32, 128])
     def dim(self, request):
         yield request.param
 
@@ -1476,8 +1476,8 @@ class TestCollectionSearch(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("index, params",
-                             zip(ct.all_index_types[:7],
-                                 ct.default_index_params[:7]))
+                             zip(ct.all_index_types[:6],
+                                 ct.default_index_params[:6]))
     def test_search_after_different_index_with_params(self, dim, index, params, auto_id, _async):
         """
         target: test search after different index
@@ -1516,8 +1516,8 @@ class TestCollectionSearch(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index, params",
-                             zip(ct.all_index_types[:7],
-                                 ct.default_index_params[:7]))
+                             zip(ct.all_index_types[:6],
+                                 ct.default_index_params[:6]))
     def test_search_after_different_index_with_min_dim(self, index, params, auto_id, _async):
         """
         target: test search after different index with min dim
@@ -1554,8 +1554,8 @@ class TestCollectionSearch(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index, params",
-                             zip(ct.all_index_types[:7],
-                                 ct.default_index_params[:7]))
+                             zip(ct.all_index_types[:6],
+                                 ct.default_index_params[:6]))
     def test_search_after_index_different_metric_type(self, dim, index, params, auto_id, _async):
         """
         target: test search with different metric type
@@ -2923,7 +2923,7 @@ class TestSearchBase(TestcaseBase):
     def get_nq(self, request):
         yield request.param
 
-    @pytest.fixture(scope="function", params=[8, 128])
+    @pytest.fixture(scope="function", params=[32, 128])
     def dim(self, request):
         yield request.param
 
@@ -2960,8 +2960,8 @@ class TestSearchBase(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index, params",
-                             zip(ct.all_index_types[:7],
-                                 ct.default_index_params[:7]))
+                             zip(ct.all_index_types[:6],
+                                 ct.default_index_params[:6]))
     def test_search_index_empty_partition(self, index, params):
         """
         target: test basic search function, all the search params are correct, test all index params, and build
@@ -3009,8 +3009,8 @@ class TestSearchBase(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index, params",
-                             zip(ct.all_index_types[:7],
-                                 ct.default_index_params[:7]))
+                             zip(ct.all_index_types[:6],
+                                 ct.default_index_params[:6]))
     def test_search_index_partitions(self, index, params, get_top_k):
         """
         target: test basic search function, all the search params are correct, test all index params, and build
@@ -3069,8 +3069,8 @@ class TestSearchBase(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index, params",
-                             zip(ct.all_index_types[:7],
-                                 ct.default_index_params[:7]))
+                             zip(ct.all_index_types[:6],
+                                 ct.default_index_params[:6]))
     def test_search_ip_after_index(self, index, params):
         """
         target: test basic search function, all the search params are correct, test all index params, and build
@@ -3126,8 +3126,8 @@ class TestSearchBase(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index, params",
-                             zip(ct.all_index_types[:7],
-                                 ct.default_index_params[:7]))
+                             zip(ct.all_index_types[:6],
+                                 ct.default_index_params[:6]))
     def test_search_ip_index_empty_partition(self, index, params):
         """
         target: test basic search function, all the search params are correct, test all index params, and build
@@ -3169,8 +3169,8 @@ class TestSearchBase(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index, params",
-                             zip(ct.all_index_types[:7],
-                                 ct.default_index_params[:7]))
+                             zip(ct.all_index_types[:6],
+                                 ct.default_index_params[:6]))
     def test_search_ip_index_partitions(self, index, params):
         """
         target: test basic search function, all the search params are correct, test all index params, and build
@@ -3321,7 +3321,7 @@ class  TestsearchString(TestcaseBase):
     def nq(self, request):
         yield request.param
 
-    @pytest.fixture(scope="function", params=[8, 128])
+    @pytest.fixture(scope="function", params=[32, 128])
     def dim(self, request):
         yield request.param
 
@@ -3763,7 +3763,7 @@ class TestsearchPagination(TestcaseBase):
     def offset(self, request):
         yield request.param
 
-    @pytest.fixture(scope="function", params=[8, 128])
+    @pytest.fixture(scope="function", params=[32, 128])
     def dim(self, request):
         yield request.param
 
@@ -4101,8 +4101,8 @@ class TestsearchPagination(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index, params",
-                             zip(ct.all_index_types[:7],
-                                 ct.default_index_params[:7]))
+                             zip(ct.all_index_types[:6],
+                                 ct.default_index_params[:6]))
     def test_search_pagination_after_different_index(self, index, params, auto_id, offset, _async):
         """
         target: test search pagination after different index
@@ -4110,7 +4110,7 @@ class TestsearchPagination(TestcaseBase):
         expected: search successfully
         """
         # 1. initialize with data
-        dim = 8
+        dim = 32
         collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, 1000,
                                                                                   partition_num=1,
                                                                                   auto_id=auto_id,
@@ -4211,7 +4211,7 @@ class  TestsearchDiskann(TestcaseBase):
       The following cases are used to test search about diskann index
     ******************************************************************
     """
-    @pytest.fixture(scope="function", params=[8, 128])
+    @pytest.fixture(scope="function", params=[32, 128])
     def dim(self, request):
         yield request.param
 
@@ -4224,6 +4224,7 @@ class  TestsearchDiskann(TestcaseBase):
         yield request.param
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason="wait to test")
     def test_search_with_diskann_index(self, dim, auto_id, _async):
         """
         target: test delete after creating index
@@ -4263,6 +4264,7 @@ class  TestsearchDiskann(TestcaseBase):
                             )
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason="wait to test")
     @pytest.mark.parametrize("limit", [20])
     @pytest.mark.parametrize("search_list", [10, 201])
     def test_search_invalid_params_with_diskann_A(self, dim, auto_id, search_list, limit):
@@ -4294,6 +4296,7 @@ class  TestsearchDiskann(TestcaseBase):
                             )
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason="wait to test")
     @pytest.mark.parametrize("limit", [6553])
     @pytest.mark.parametrize("search_list", [6553, 65531])
     def test_search_invalid_params_with_diskann_B(self, dim, auto_id, search_list, limit):
@@ -4325,6 +4328,7 @@ class  TestsearchDiskann(TestcaseBase):
                             )
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason="wait to test")
     @pytest.mark.parametrize("limit", [6554])
     @pytest.mark.parametrize("search_list", [6554, 65536])
     def test_search_invalid_params_with_diskann_C(self, dim, auto_id, search_list, limit):
@@ -4355,6 +4359,7 @@ class  TestsearchDiskann(TestcaseBase):
                                          "err_msg": "fail to search on all shard leaders"}
                             )
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason="wait to test")
     def test_search_with_diskann_with_string_pk(self, dim):
         """
         target: test delete after creating index
@@ -4387,6 +4392,7 @@ class  TestsearchDiskann(TestcaseBase):
 
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason="wait to test")
     def test_search_with_delete_data(self, dim, auto_id, _async):
         """
         target: test delete after creating index
@@ -4429,6 +4435,7 @@ class  TestsearchDiskann(TestcaseBase):
         
     
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason="wait to test")
     def test_search_with_diskann_and_more_index(self, dim, auto_id, _async):
         """
         target: test delete after creating index
