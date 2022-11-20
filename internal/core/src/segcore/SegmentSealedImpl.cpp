@@ -10,11 +10,13 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "SegmentSealedImpl.h"
+
+#include "Utils.h"
 #include "common/Consts.h"
+#include "common/FieldMeta.h"
+#include "query/ScalarIndex.h"
 #include "query/SearchBruteForce.h"
 #include "query/SearchOnSealed.h"
-#include "query/ScalarIndex.h"
-#include "Utils.h"
 
 namespace milvus::segcore {
 
@@ -474,50 +476,10 @@ SegmentSealedImpl::bulk_subscript_impl(
 std::unique_ptr<DataArray>
 SegmentSealedImpl::fill_with_empty(FieldId field_id, int64_t count) const {
     auto& field_meta = schema_->operator[](field_id);
-    switch (field_meta.get_data_type()) {
-        case DataType::BOOL: {
-            FixedVector<bool> output(count);
-            return CreateScalarDataArrayFrom(output.data(), count, field_meta);
-        }
-        case DataType::INT8: {
-            FixedVector<int8_t> output(count);
-            return CreateScalarDataArrayFrom(output.data(), count, field_meta);
-        }
-        case DataType::INT16: {
-            FixedVector<int16_t> output(count);
-            return CreateScalarDataArrayFrom(output.data(), count, field_meta);
-        }
-        case DataType::INT32: {
-            FixedVector<int32_t> output(count);
-            return CreateScalarDataArrayFrom(output.data(), count, field_meta);
-        }
-        case DataType::INT64: {
-            FixedVector<int64_t> output(count);
-            return CreateScalarDataArrayFrom(output.data(), count, field_meta);
-        }
-        case DataType::FLOAT: {
-            FixedVector<float> output(count);
-            return CreateScalarDataArrayFrom(output.data(), count, field_meta);
-        }
-        case DataType::DOUBLE: {
-            FixedVector<double> output(count);
-            return CreateScalarDataArrayFrom(output.data(), count, field_meta);
-        }
-        case DataType::VARCHAR: {
-            FixedVector<std::string> output(count);
-            return CreateScalarDataArrayFrom(output.data(), count, field_meta);
-        }
-
-        case DataType::VECTOR_FLOAT:
-        case DataType::VECTOR_BINARY: {
-            aligned_vector<char> output(field_meta.get_sizeof() * count);
-            return CreateVectorDataArrayFrom(output.data(), count, field_meta);
-        }
-
-        default: {
-            PanicInfo("unsupported");
-        }
+    if (datatype_is_vector(field_meta.get_data_type())) {
+        return CreateVectorDataArray(count, field_meta);
     }
+    return CreateScalarDataArray(count, field_meta);
 }
 
 std::unique_ptr<DataArray>
