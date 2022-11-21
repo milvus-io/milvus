@@ -64,7 +64,7 @@ func TestFlowGraphInsertBufferNodeCreate(t *testing.T) {
 	defer cancel()
 
 	cm := storage.NewLocalChunkManager(storage.RootPath(insertNodeTestDir))
-	defer cm.RemoveWithPrefix(ctx, "")
+	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 	insertChannelName := "datanode-01-test-flowgraphinsertbuffernode-create"
 
 	testPath := "/test/datanode/root/meta"
@@ -159,7 +159,7 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	insertChannelName := "datanode-01-test-flowgraphinsertbuffernode-operate"
 
 	cm := storage.NewLocalChunkManager(storage.RootPath(insertNodeTestDir))
-	defer cm.RemoveWithPrefix(ctx, "")
+	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 	testPath := "/test/datanode/root/meta"
 	err := clearEtcd(testPath)
 	require.NoError(t, err)
@@ -336,7 +336,7 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 	wg := sync.WaitGroup{}
 
 	cm := storage.NewLocalChunkManager(storage.RootPath(insertNodeTestDir))
-	defer cm.RemoveWithPrefix(ctx, "")
+	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 	fm := NewRendezvousFlushManager(NewAllocatorFactory(), cm, channel, func(pack *segmentFlushPack) {
 		fpMut.Lock()
 		flushPacks = append(flushPacks, pack)
@@ -574,7 +574,7 @@ func TestRollBF(t *testing.T) {
 	wg := sync.WaitGroup{}
 
 	cm := storage.NewLocalChunkManager(storage.RootPath(insertNodeTestDir))
-	defer cm.RemoveWithPrefix(ctx, "")
+	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 	fm := NewRendezvousFlushManager(NewAllocatorFactory(), cm, channel, func(pack *segmentFlushPack) {
 		fpMut.Lock()
 		flushPacks = append(flushPacks, pack)
@@ -702,7 +702,7 @@ func (s *InsertBufferNodeSuit) SetupSuite() {
 }
 
 func (s *InsertBufferNodeSuit) TearDownSuite() {
-	s.cm.RemoveWithPrefix(context.Background(), "")
+	s.cm.RemoveWithPrefix(context.Background(), s.cm.RootPath())
 	Params.DataNodeCfg.FlushInsertBufferSize = s.originalConfig
 }
 
@@ -917,7 +917,7 @@ func TestInsertBufferNode_bufferInsertMsg(t *testing.T) {
 	}
 
 	cm := storage.NewLocalChunkManager(storage.RootPath(insertNodeTestDir))
-	defer cm.RemoveWithPrefix(ctx, "")
+	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 	for _, test := range tests {
 		collMeta := Factory.GetCollectionMeta(test.collID, "collection", test.pkType)
 		rcf := &RootCoordFactory{
@@ -975,7 +975,7 @@ func TestInsertBufferNode_updateSegmentStates(te *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cm := storage.NewLocalChunkManager(storage.RootPath(insertNodeTestDir))
-	defer cm.RemoveWithPrefix(ctx, "")
+	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 	invalideTests := []struct {
 		channelCollID UniqueID
 

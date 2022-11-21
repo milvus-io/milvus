@@ -24,6 +24,7 @@ import (
 	"math"
 	"math/rand"
 	"path"
+	"path/filepath"
 	"runtime"
 	"strconv"
 
@@ -407,9 +408,9 @@ func generateAndSaveIndex(segmentID UniqueID, msgLength int, indexType, metricTy
 
 	indexPaths := make([]string, 0)
 	for _, index := range serializedIndexBlobs {
-		p := strconv.Itoa(int(segmentID)) + "/" + index.Key
-		indexPaths = append(indexPaths, p)
-		err := cm.Write(context.Background(), p, index.Value)
+		indexPath := filepath.Join(defaultLocalStorage, strconv.Itoa(int(segmentID)), index.Key)
+		indexPaths = append(indexPaths, indexPath)
+		err := cm.Write(context.Background(), indexPath, index.Value)
 		if err != nil {
 			return nil, err
 		}
@@ -545,7 +546,7 @@ func genQueryMsgStream(ctx context.Context) (msgstream.MsgStream, error) {
 }
 
 func genLocalChunkManager() (storage.ChunkManager, error) {
-	p := Params.LoadWithDefault("storage.path", "/tmp/milvus/data")
+	p := Params.LoadWithDefault("storage.path", "/tmp/milvus_test/data")
 	lcm := storage.NewLocalChunkManager(storage.RootPath(p))
 	return lcm, nil
 }
@@ -562,7 +563,7 @@ func genRemoteChunkManager(ctx context.Context) (storage.ChunkManager, error) {
 }
 
 func genVectorChunkManager(ctx context.Context, col *Collection) (*storage.VectorChunkManager, error) {
-	p := Params.LoadWithDefault("storage.path", "/tmp/milvus/data")
+	p := Params.LoadWithDefault("storage.path", "/tmp/milvus_test/data")
 	lcm := storage.NewLocalChunkManager(storage.RootPath(p))
 
 	rcm, err := storage.NewMinioChunkManager(
@@ -991,7 +992,7 @@ func getFakeBinLog(ctx context.Context,
 		k := JoinIDPath(collectionID, partitionID, segmentID, fieldID)
 		fieldBinlog = append(fieldBinlog, &datapb.FieldBinlog{
 			FieldID: fieldID,
-			Binlogs: []*datapb.Binlog{{LogPath: path.Join("insert-log", k, "notExistKey")}},
+			Binlogs: []*datapb.Binlog{{LogPath: path.Join(defaultLocalStorage, "insert-log", k, "notExistKey")}},
 		})
 	}
 
@@ -1006,7 +1007,7 @@ func getFakeBinLog(ctx context.Context,
 		k := JoinIDPath(collectionID, partitionID, segmentID, fieldID)
 		statsBinlog = append(statsBinlog, &datapb.FieldBinlog{
 			FieldID: fieldID,
-			Binlogs: []*datapb.Binlog{{LogPath: path.Join("delta-log", k, "notExistKey")}},
+			Binlogs: []*datapb.Binlog{{LogPath: path.Join(defaultLocalStorage, "delta-log", k, "notExistKey")}},
 		})
 	}
 
@@ -1041,7 +1042,7 @@ func saveBinLog(ctx context.Context,
 		}
 
 		k := JoinIDPath(collectionID, partitionID, segmentID, fieldID)
-		key := path.Join("insert-log", k)
+		key := path.Join(defaultLocalStorage, "insert-log", k)
 		kvs[key] = blob.Value[:]
 		fieldBinlog = append(fieldBinlog, &datapb.FieldBinlog{
 			FieldID: fieldID,
@@ -1060,7 +1061,7 @@ func saveBinLog(ctx context.Context,
 		}
 
 		k := JoinIDPath(collectionID, partitionID, segmentID, fieldID)
-		key := path.Join("delta-log", k)
+		key := path.Join(defaultLocalStorage, "delta-log", k)
 		kvs[key] = blob.Value[:]
 		statsBinlog = append(statsBinlog, &datapb.FieldBinlog{
 			FieldID: fieldID,
@@ -1111,10 +1112,11 @@ func saveDeltaLog(collectionID UniqueID,
 	log.Debug("[query node unittest] save delta log", zap.Int64("fieldID", pkFieldID))
 	key := JoinIDPath(collectionID, partitionID, segmentID, pkFieldID)
 	key += "delta" // append suffix 'delta' to avoid conflicts against binlog
-	kvs[key] = blob.Value[:]
+	keyPath := path.Join(defaultLocalStorage, key)
+	kvs[keyPath] = blob.Value[:]
 	fieldBinlog = append(fieldBinlog, &datapb.FieldBinlog{
 		FieldID: pkFieldID,
-		Binlogs: []*datapb.Binlog{{LogPath: key}},
+		Binlogs: []*datapb.Binlog{{LogPath: keyPath}},
 	})
 	log.Debug("[query node unittest] save delta log file to MinIO/S3")
 

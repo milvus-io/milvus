@@ -22,6 +22,7 @@ import (
 	"math"
 	"math/rand"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -92,7 +93,7 @@ func TestDataNode(t *testing.T) {
 	assert.Nil(t, err)
 	defer node.Stop()
 
-	node.chunkManager = storage.NewLocalChunkManager(storage.RootPath("/tmp/lib/milvus"))
+	node.chunkManager = storage.NewLocalChunkManager(storage.RootPath("/tmp/milvus_test/datanode"))
 	Params.DataNodeCfg.SetNodeID(1)
 	t.Run("Test WatchDmChannels ", func(t *testing.T) {
 		emptyNode := &DataNode{}
@@ -470,7 +471,7 @@ func TestDataNode(t *testing.T) {
 		_, ok = node.flowgraphManager.getFlowgraphService(chName2)
 		assert.True(t, ok)
 
-		filePath := "import/rows_1.json"
+		filePath := filepath.Join(node.chunkManager.RootPath(), "rows_1.json")
 		err = node.chunkManager.Write(ctx, filePath, content)
 		assert.NoError(t, err)
 		req := &datapb.ImportTaskRequest{
@@ -546,7 +547,7 @@ func TestDataNode(t *testing.T) {
 		]
 		}`)
 
-		filePath := "import/rows_1.json"
+		filePath := filepath.Join(node.chunkManager.RootPath(), "rows_1.json")
 		err = node.chunkManager.Write(ctx, filePath, content)
 		assert.NoError(t, err)
 		req := &datapb.ImportTaskRequest{
@@ -580,7 +581,7 @@ func TestDataNode(t *testing.T) {
 		]
 		}`)
 
-		filePath := "import/rows_1.json"
+		filePath := filepath.Join(node.chunkManager.RootPath(), "rows_1.json")
 		err = node.chunkManager.Write(ctx, filePath, content)
 		assert.NoError(t, err)
 		req := &datapb.ImportTaskRequest{
@@ -756,7 +757,7 @@ func TestDataNode_AddSegment(t *testing.T) {
 	assert.Nil(t, err)
 	defer node.Stop()
 
-	node.chunkManager = storage.NewLocalChunkManager(storage.RootPath("/tmp/lib/milvus"))
+	node.chunkManager = storage.NewLocalChunkManager(storage.RootPath("/tmp/milvus_test/datanode"))
 	Params.DataNodeCfg.SetNodeID(1)
 
 	t.Run("test AddSegment", func(t *testing.T) {

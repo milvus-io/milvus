@@ -42,7 +42,7 @@ var channelMetaNodeTestDir = "/tmp/milvus_test/channel_meta"
 func TestNewChannel(t *testing.T) {
 	rc := &RootCoordFactory{}
 	cm := storage.NewLocalChunkManager(storage.RootPath(channelMetaNodeTestDir))
-	defer cm.RemoveWithPrefix(context.Background(), "")
+	defer cm.RemoveWithPrefix(context.Background(), cm.RootPath())
 	channel := newChannel("channel", 0, nil, rc, cm)
 	assert.NotNil(t, channel)
 }
@@ -114,7 +114,7 @@ func TestChannelMeta_InnerFunction(t *testing.T) {
 		cm      = storage.NewLocalChunkManager(storage.RootPath(channelMetaNodeTestDir))
 		channel = newChannel("insert-01", collID, nil, rc, cm)
 	)
-	defer cm.RemoveWithPrefix(ctx, "")
+	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
 	require.False(t, channel.hasSegment(0, true))
 	require.False(t, channel.hasSegment(0, false))
@@ -214,7 +214,7 @@ func TestChannelMeta_segmentFlushed(t *testing.T) {
 	}
 	collID := UniqueID(1)
 	cm := storage.NewLocalChunkManager(storage.RootPath(channelMetaNodeTestDir))
-	defer cm.RemoveWithPrefix(ctx, "")
+	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
 	t.Run("Test coll mot match", func(t *testing.T) {
 		channel := newChannel("channel", collID, nil, rc, cm)
@@ -281,7 +281,7 @@ func TestChannelMeta_InterfaceMethod(t *testing.T) {
 		pkType: schemapb.DataType_Int64,
 	}
 	cm := storage.NewLocalChunkManager(storage.RootPath(channelMetaNodeTestDir))
-	defer cm.RemoveWithPrefix(ctx, "")
+	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
 	t.Run("Test addFlushedSegmentWithPKs", func(t *testing.T) {
 		tests := []struct {
@@ -705,7 +705,7 @@ func TestChannelMeta_UpdatePKRange(t *testing.T) {
 	endPos := &internalpb.MsgPosition{ChannelName: chanName, Timestamp: Timestamp(200)}
 
 	cm := storage.NewLocalChunkManager(storage.RootPath(channelMetaNodeTestDir))
-	defer cm.RemoveWithPrefix(ctx, "")
+	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 	channel := newChannel("chanName", collID, nil, rc, cm)
 	channel.chunkManager = &mockDataCM{}
 
@@ -764,7 +764,7 @@ func TestChannelMeta_ChannelCP(t *testing.T) {
 	collID := UniqueID(1)
 	cm := storage.NewLocalChunkManager(storage.RootPath(channelMetaNodeTestDir))
 	defer func() {
-		err := cm.RemoveWithPrefix(ctx, "")
+		err := cm.RemoveWithPrefix(ctx, cm.RootPath())
 		assert.NoError(t, err)
 	}()
 
@@ -878,7 +878,7 @@ func (s *ChannelMetaSuite) SetupSuite() {
 }
 
 func (s *ChannelMetaSuite) TearDownSuite() {
-	s.cm.RemoveWithPrefix(context.Background(), "")
+	s.cm.RemoveWithPrefix(context.Background(), s.cm.RootPath())
 }
 
 func (s *ChannelMetaSuite) SetupTest() {
