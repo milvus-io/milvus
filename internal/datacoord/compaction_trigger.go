@@ -102,7 +102,7 @@ func newCompactionTrigger(
 
 func (t *compactionTrigger) start() {
 	t.quit = make(chan struct{})
-	t.globalTrigger = time.NewTicker(Params.DataCoordCfg.GlobalCompactionInterval)
+	t.globalTrigger = time.NewTicker(Params.DataCoordCfg.GlobalCompactionInterval.GetAsDuration(time.Second))
 	t.wg.Add(2)
 	go func() {
 		defer logutil.LogPanic()
@@ -134,7 +134,7 @@ func (t *compactionTrigger) startGlobalCompactionLoop() {
 	defer t.wg.Done()
 
 	// If AutoCompaction disabled, global loop will not start
-	if !Params.DataCoordCfg.GetEnableAutoCompaction() {
+	if !Params.DataCoordCfg.EnableAutoCompaction.GetAsBool() {
 		return
 	}
 
@@ -184,7 +184,7 @@ func (t *compactionTrigger) getCompactTime(ts Timestamp, collectionID UniqueID) 
 	}
 
 	pts, _ := tsoutil.ParseTS(ts)
-	ttRetention := pts.Add(-time.Duration(Params.CommonCfg.RetentionDuration) * time.Second)
+	ttRetention := pts.Add(Params.CommonCfg.RetentionDuration.GetAsDuration(time.Second) * -1)
 	ttRetentionLogic := tsoutil.ComposeTS(ttRetention.UnixNano()/int64(time.Millisecond), 0)
 
 	if collectionTTL > 0 {
@@ -216,7 +216,7 @@ func (t *compactionTrigger) triggerCompaction() error {
 // triggerSingleCompaction triger a compaction bundled with collection-partiiton-channel-segment
 func (t *compactionTrigger) triggerSingleCompaction(collectionID, partitionID, segmentID int64, channel string) error {
 	// If AutoCompaction diabled, flush request will not trigger compaction
-	if !Params.DataCoordCfg.GetEnableAutoCompaction() {
+	if !Params.DataCoordCfg.EnableAutoCompaction.GetAsBool() {
 		return nil
 	}
 
@@ -515,7 +515,7 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, force bool, c
 		if segment.GetNumOfRows() < segment.GetMaxRowNum() {
 			var result []*SegmentInfo
 			free := segment.GetMaxRowNum() - segment.GetNumOfRows()
-			maxNum := Params.DataCoordCfg.MaxSegmentToMerge - 1
+			maxNum := Params.DataCoordCfg.MaxSegmentToMerge.GetAsInt() - 1
 			prioritizedCandidates, result, free = greedySelect(prioritizedCandidates, free, maxNum)
 			bucket = append(bucket, result...)
 			maxNum -= len(result)
@@ -550,7 +550,7 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, force bool, c
 		// for small segment merge, we pick one largest segment and merge as much as small segment together with it
 		// Why reverse?	 try to merge as many segments as expected.
 		// for instance, if a 255M and 255M is the largest small candidates, they will never be merged because of the MinSegmentToMerge limit.
-		smallCandidates, result, _ = reverseGreedySelect(smallCandidates, free, Params.DataCoordCfg.MaxSegmentToMerge-1)
+		smallCandidates, result, _ = reverseGreedySelect(smallCandidates, free, Params.DataCoordCfg.MaxSegmentToMerge.GetAsInt()-1)
 		bucket = append(bucket, result...)
 
 		var size int64
@@ -560,7 +560,7 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, force bool, c
 			targetRow += s.GetNumOfRows()
 		}
 		// only merge if candidate number is large than MinSegmentToMerge or if target row is large enough
-		if len(bucket) >= Params.DataCoordCfg.MinSegmentToMerge || targetRow > int64(float64(segment.GetMaxRowNum())*Params.DataCoordCfg.SegmentCompactableProportion) {
+		if len(bucket) >= Params.DataCoordCfg.MinSegmentToMerge.GetAsInt() || targetRow > int64(float64(segment.GetMaxRowNum())*Params.DataCoordCfg.SegmentCompactableProportion.GetAsFloat()) {
 			plan := segmentsToPlan(bucket, compactTime)
 			log.Info("generate a plan for small candidates", zap.Any("plan", plan),
 				zap.Int64("target segment row", targetRow), zap.Int64("target segment size", size))
@@ -643,7 +643,7 @@ func (t *compactionTrigger) getCandidateSegments(channel string, partitionID Uni
 }
 
 func (t *compactionTrigger) isSmallSegment(segment *SegmentInfo) bool {
-	return segment.GetNumOfRows() < int64(float64(segment.GetMaxRowNum())*Params.DataCoordCfg.SegmentSmallProportion)
+	return segment.GetNumOfRows() < int64(float64(segment.GetMaxRowNum())*Params.DataCoordCfg.SegmentSmallProportion.GetAsFloat())
 }
 
 func (t *compactionTrigger) fillOriginPlan(plan *datapb.CompactionPlan) error {
@@ -653,7 +653,7 @@ func (t *compactionTrigger) fillOriginPlan(plan *datapb.CompactionPlan) error {
 		return err
 	}
 	plan.PlanID = id
-	plan.TimeoutInSeconds = Params.DataCoordCfg.CompactionTimeoutInSeconds
+	plan.TimeoutInSeconds = int32(Params.DataCoordCfg.CompactionTimeoutInSeconds.GetAsInt())
 	return nil
 }
 
@@ -676,7 +676,7 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compa
 		totalLogNum += len(statsLogs.GetBinlogs())
 	}
 	// avoid segment has too many bin logs and the etcd meta is too large, force trigger compaction
-	if totalLogNum > int(Params.DataCoordCfg.SingleCompactionBinlogMaxNum) {
+	if totalLogNum > Params.DataCoordCfg.SingleCompactionBinlogMaxNum.GetAsInt() {
 		log.Info("total binlog number is too much, trigger compaction", zap.Int64("segment", segment.ID),
 			zap.Int("Delta logs", len(segment.GetDeltalogs())), zap.Int("Bin Logs", len(segment.GetBinlogs())), zap.Int("Stat logs", len(segment.GetStatslogs())))
 		return true
@@ -695,7 +695,7 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compa
 		}
 	}
 
-	if float32(totalExpiredRows)/float32(segment.GetNumOfRows()) >= Params.DataCoordCfg.SingleCompactionRatioThreshold || totalExpiredSize > Params.DataCoordCfg.SingleCompactionExpiredLogMaxSize {
+	if float64(totalExpiredRows)/float64(segment.GetNumOfRows()) >= Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat() || totalExpiredSize > Params.DataCoordCfg.SingleCompactionExpiredLogMaxSize.GetAsInt64() {
 		log.Info("total expired entities is too much, trigger compation", zap.Int64("segment", segment.ID),
 			zap.Int("expired rows", totalExpiredRows), zap.Int64("expired log size", totalExpiredSize))
 		return true
@@ -721,7 +721,7 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compa
 	}
 
 	// currently delta log size and delete ratio policy is applied
-	if float32(totalDeletedRows)/float32(segment.GetNumOfRows()) >= Params.DataCoordCfg.SingleCompactionRatioThreshold || totalDeleteLogSize > Params.DataCoordCfg.SingleCompactionDeltaLogMaxSize {
+	if float64(totalDeletedRows)/float64(segment.GetNumOfRows()) >= Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat() || totalDeleteLogSize > Params.DataCoordCfg.SingleCompactionDeltaLogMaxSize.GetAsInt64() {
 		log.Info("total delete entities is too much, trigger compation", zap.Int64("segment", segment.ID),
 			zap.Int("deleted rows", totalDeletedRows), zap.Int64("delete log size", totalDeleteLogSize))
 		return true

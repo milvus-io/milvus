@@ -121,7 +121,7 @@ type nodeConfig struct {
 }
 
 func newParallelConfig() parallelConfig {
-	return parallelConfig{Params.DataNodeCfg.FlowGraphMaxQueueLength, Params.DataNodeCfg.FlowGraphMaxParallelism}
+	return parallelConfig{Params.DataNodeCfg.FlowGraphMaxQueueLength.GetAsInt32(), Params.DataNodeCfg.FlowGraphMaxParallelism.GetAsInt32()}
 }
 
 // start starts the flow graph in datasyncservice

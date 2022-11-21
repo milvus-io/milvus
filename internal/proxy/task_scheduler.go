@@ -201,8 +201,8 @@ func newBaseTaskQueue(tsoAllocatorIns tsoAllocator) *baseTaskQueue {
 		activeTasks:     make(map[UniqueID]task),
 		utLock:          sync.RWMutex{},
 		atLock:          sync.RWMutex{},
-		maxTaskNum:      Params.ProxyCfg.MaxTaskNum,
-		utBufChan:       make(chan int, Params.ProxyCfg.MaxTaskNum),
+		maxTaskNum:      Params.ProxyCfg.MaxTaskNum.GetAsInt64(),
+		utBufChan:       make(chan int, Params.ProxyCfg.MaxTaskNum.GetAsInt()),
 		tsoAllocatorIns: tsoAllocatorIns,
 	}
 }

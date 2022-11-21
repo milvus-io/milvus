@@ -177,7 +177,7 @@ func NewTaskScheduler(ctx context.Context) (*TaskScheduler, error) {
 	s := &TaskScheduler{
 		ctx:           ctx1,
 		cancel:        cancel,
-		buildParallel: Params.IndexNodeCfg.BuildParallel,
+		buildParallel: Params.IndexNodeCfg.BuildParallel.GetAsInt(),
 	}
 	s.IndexBuildQueue = NewIndexBuildTaskQueue(s)
 

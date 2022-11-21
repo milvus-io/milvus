@@ -29,6 +29,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
+	"go.uber.org/zap"
 )
 
 const megabyte = 1024 * 1024
@@ -66,17 +67,19 @@ type RotateLogger struct {
 
 func NewRotateLogger(logCfg *paramtable.AccessLogConfig, minioCfg *paramtable.MinioConfig) (*RotateLogger, error) {
 	logger := &RotateLogger{
-		localPath:   logCfg.LocalPath,
-		fileName:    logCfg.Filename,
-		rotatedTime: logCfg.RotatedTime,
-		maxSize:     logCfg.MaxSize,
-		maxBackups:  logCfg.MaxBackups,
+		localPath:   logCfg.LocalPath.GetValue(),
+		fileName:    logCfg.Filename.GetValue(),
+		rotatedTime: logCfg.RotatedTime.GetAsInt64(),
+		maxSize:     logCfg.MaxSize.GetAsInt(),
+		maxBackups:  logCfg.MaxBackups.GetAsInt(),
 	}
 	log.Info("Access log save to " + logger.dir())
-	if logCfg.MinioEnable {
+	if logCfg.MinioEnable.GetAsBool() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		handler, err := NewMinioHandler(ctx, minioCfg, logCfg.RemotePath, logCfg.MaxBackups)
+		log.Debug("remtepath", zap.Any("remote", logCfg.RemotePath.GetValue()))
+		log.Debug("maxBackups", zap.Any("maxBackups", logCfg.MaxBackups.GetValue()))
+		handler, err := NewMinioHandler(ctx, minioCfg, logCfg.RemotePath.GetValue(), logCfg.MaxBackups.GetAsInt())
 		if err != nil {
 			return nil, err
 		}

@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/crypto"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -133,7 +134,7 @@ func TestValidateDimension(t *testing.T) {
 	fieldSchema.TypeParams = []*commonpb.KeyValuePair{
 		{
 			Key:   "dim",
-			Value: strconv.Itoa(int(Params.ProxyCfg.MaxDimension)),
+			Value: Params.ProxyCfg.MaxDimension.GetValue(),
 		},
 	}
 	assert.Nil(t, validateDimension(fieldSchema))
@@ -149,7 +150,7 @@ func TestValidateDimension(t *testing.T) {
 	fieldSchema.TypeParams = []*commonpb.KeyValuePair{
 		{
 			Key:   "dim",
-			Value: strconv.Itoa(int(Params.ProxyCfg.MaxDimension + 1)),
+			Value: strconv.Itoa(int(Params.ProxyCfg.MaxDimension.GetAsInt32() + 1)),
 		},
 	}
 	assert.NotNil(t, validateDimension(fieldSchema))
@@ -165,7 +166,7 @@ func TestValidateDimension(t *testing.T) {
 	fieldSchema.TypeParams = []*commonpb.KeyValuePair{
 		{
 			Key:   "dim",
-			Value: strconv.Itoa(int(Params.ProxyCfg.MaxDimension)),
+			Value: strconv.Itoa(Params.ProxyCfg.MaxDimension.GetAsInt()),
 		},
 	}
 	assert.Nil(t, validateDimension(fieldSchema))
@@ -784,18 +785,19 @@ func TestValidateTravelTimestamp(t *testing.T) {
 	travelTs := tsoutil.GetCurrentTime()
 	tests := []struct {
 		description string
-		defaultRD   int64
+		defaultRD   string
 		nowTs       typeutil.Timestamp
 		isValid     bool
 	}{
-		{"one second", 100, tsoutil.AddPhysicalDurationOnTs(travelTs, time.Second), true},
-		{"retention duration", 100, tsoutil.AddPhysicalDurationOnTs(travelTs, 100*time.Second), true},
-		{"retention duration+1", 100, tsoutil.AddPhysicalDurationOnTs(travelTs, 101*time.Second), false},
+		{"one second", "100", tsoutil.AddPhysicalDurationOnTs(travelTs, time.Second), true},
+		{"retention duration", "100", tsoutil.AddPhysicalDurationOnTs(travelTs, 100*time.Second), true},
+		{"retention duration+1", "100", tsoutil.AddPhysicalDurationOnTs(travelTs, 101*time.Second), false},
 	}
 
 	for _, test := range tests {
 		t.Run(test.description, func(t *testing.T) {
-			Params.CommonCfg.RetentionDuration = test.defaultRD
+			paramtable.Get().Save(Params.CommonCfg.RetentionDuration.Key, test.defaultRD)
+			defer paramtable.Get().Reset(Params.CommonCfg.RetentionDuration.Key)
 			err := validateTravelTimestamp(travelTs, test.nowTs)
 			if test.isValid {
 				assert.NoError(t, err)

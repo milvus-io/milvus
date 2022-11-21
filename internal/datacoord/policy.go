@@ -461,7 +461,7 @@ func BgCheckWithMaxWatchDuration(kv kv.TxnKV) ChannelBGChecker {
 				}
 				startTime := time.Unix(watchInfo.StartTs, 0)
 				d := ts.Sub(startTime)
-				if d >= Params.DataCoordCfg.MaxWatchDuration {
+				if d >= Params.DataCoordCfg.MaxWatchDuration.GetAsDuration(time.Second) {
 					cinfo.Channels = append(cinfo.Channels, c)
 				}
 			}

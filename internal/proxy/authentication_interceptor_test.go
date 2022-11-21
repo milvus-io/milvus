@@ -9,6 +9,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util"
 
 	"github.com/milvus-io/milvus/internal/util/crypto"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -46,7 +47,8 @@ func TestValidSourceID(t *testing.T) {
 
 func TestAuthenticationInterceptor(t *testing.T) {
 	ctx := context.Background()
-	Params.CommonCfg.AuthorizationEnabled = true // mock authorization is turned on
+	paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true") // mock authorization is turned on
+	defer paramtable.Get().Reset(Params.CommonCfg.AuthorizationEnabled.Key)  // mock authorization is turned on
 	// no metadata
 	_, err := AuthenticationInterceptor(ctx)
 	assert.NotNil(t, err)

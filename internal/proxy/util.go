@@ -99,9 +99,8 @@ func validateCollectionNameOrAlias(entity, entityType string) error {
 	}
 
 	invalidMsg := fmt.Sprintf("Invalid collection %s: %s. ", entityType, entity)
-	if int64(len(entity)) > Params.ProxyCfg.MaxNameLength {
-		msg := invalidMsg + fmt.Sprintf("The length of a collection %s must be less than ", entityType) +
-			strconv.FormatInt(Params.ProxyCfg.MaxNameLength, 10) + " characters."
+	if len(entity) > Params.ProxyCfg.MaxNameLength.GetAsInt() {
+		msg := invalidMsg + fmt.Sprintf("The length of a collection %s must be less than ", entityType) + Params.ProxyCfg.MaxNameLength.GetValue() + " characters."
 		return errors.New(msg)
 	}
 
@@ -139,9 +138,8 @@ func validatePartitionTag(partitionTag string, strictCheck bool) error {
 		return errors.New(msg)
 	}
 
-	if int64(len(partitionTag)) > Params.ProxyCfg.MaxNameLength {
-		msg := invalidMsg + "The length of a partition name must be less than " +
-			strconv.FormatInt(Params.ProxyCfg.MaxNameLength, 10) + " characters."
+	if len(partitionTag) > Params.ProxyCfg.MaxNameLength.GetAsInt() {
+		msg := invalidMsg + "The length of a partition name must be less than " + Params.ProxyCfg.MaxNameLength.GetValue() + " characters."
 		return errors.New(msg)
 	}
 
@@ -173,9 +171,8 @@ func validateFieldName(fieldName string) error {
 	}
 
 	invalidMsg := "Invalid field name: " + fieldName + ". "
-	if int64(len(fieldName)) > Params.ProxyCfg.MaxNameLength {
-		msg := invalidMsg + "The length of a field name must be less than " +
-			strconv.FormatInt(Params.ProxyCfg.MaxNameLength, 10) + " characters."
+	if len(fieldName) > Params.ProxyCfg.MaxNameLength.GetAsInt() {
+		msg := invalidMsg + "The length of a field name must be less than " + Params.ProxyCfg.MaxNameLength.GetValue() + " characters."
 		return errors.New(msg)
 	}
 
@@ -214,8 +211,8 @@ func validateDimension(field *schemapb.FieldSchema) error {
 		return errors.New("dimension is not defined in field type params, check type param `dim` for vector field")
 	}
 
-	if dim <= 0 || dim > Params.ProxyCfg.MaxDimension {
-		return fmt.Errorf("invalid dimension: %d. should be in range 1 ~ %d", dim, Params.ProxyCfg.MaxDimension)
+	if dim <= 0 || dim > Params.ProxyCfg.MaxDimension.GetAsInt64() {
+		return fmt.Errorf("invalid dimension: %d. should be in range 1 ~ %d", dim, Params.ProxyCfg.MaxDimension.GetAsInt())
 	}
 	if field.DataType == schemapb.DataType_BinaryVector && dim%8 != 0 {
 		return fmt.Errorf("invalid dimension: %d. should be multiple of 8. ", dim)
@@ -566,9 +563,8 @@ func ValidateUsername(username string) error {
 	}
 
 	invalidMsg := "Invalid username: " + username + ". "
-	if int64(len(username)) > Params.ProxyCfg.MaxUsernameLength {
-		msg := invalidMsg + "The length of username must be less than " +
-			strconv.FormatInt(Params.ProxyCfg.MaxUsernameLength, 10) + " characters."
+	if len(username) > Params.ProxyCfg.MaxUsernameLength.GetAsInt() {
+		msg := invalidMsg + "The length of username must be less than " + Params.ProxyCfg.MaxUsernameLength.GetValue() + " characters."
 		return errors.New(msg)
 	}
 
@@ -590,9 +586,9 @@ func ValidateUsername(username string) error {
 }
 
 func ValidatePassword(password string) error {
-	if int64(len(password)) < Params.ProxyCfg.MinPasswordLength || int64(len(password)) > Params.ProxyCfg.MaxPasswordLength {
-		msg := "The length of password must be great than " + strconv.FormatInt(Params.ProxyCfg.MinPasswordLength, 10) +
-			" and less than " + strconv.FormatInt(Params.ProxyCfg.MaxPasswordLength, 10) + " characters."
+	if len(password) < Params.ProxyCfg.MinPasswordLength.GetAsInt() || len(password) > Params.ProxyCfg.MaxPasswordLength.GetAsInt() {
+		msg := "The length of password must be great than " + Params.ProxyCfg.MinPasswordLength.GetValue() +
+			" and less than " + Params.ProxyCfg.MaxPasswordLength.GetValue() + " characters."
 		return errors.New(msg)
 	}
 	return nil
@@ -600,10 +596,10 @@ func ValidatePassword(password string) error {
 
 func validateTravelTimestamp(travelTs, tMax typeutil.Timestamp) error {
 	durationSeconds := tsoutil.CalculateDuration(tMax, travelTs) / 1000
-	if durationSeconds > Params.CommonCfg.RetentionDuration {
+	if durationSeconds > Params.CommonCfg.RetentionDuration.GetAsInt64() {
 
 		durationIn := time.Second * time.Duration(durationSeconds)
-		durationSupport := time.Second * time.Duration(Params.CommonCfg.RetentionDuration)
+		durationSupport := time.Second * time.Duration(Params.CommonCfg.RetentionDuration.GetAsInt64())
 		return fmt.Errorf("only support to travel back to %v so far, but got %v", durationSupport, durationIn)
 	}
 	return nil
@@ -618,7 +614,7 @@ func parseGuaranteeTs(ts, tMax typeutil.Timestamp) typeutil.Timestamp {
 	case strongTS:
 		ts = tMax
 	case boundedTS:
-		ratio := time.Duration(-Params.CommonCfg.GracefulTime)
+		ratio := time.Duration(-Params.CommonCfg.GracefulTime.GetAsInt64())
 		ts = tsoutil.AddPhysicalDurationOnTs(tMax, ratio*time.Millisecond)
 	}
 	return ts
@@ -632,9 +628,8 @@ func validateName(entity string, nameType string) error {
 	}
 
 	invalidMsg := fmt.Sprintf("invalid %s: %s. ", nameType, entity)
-	if int64(len(entity)) > Params.ProxyCfg.MaxNameLength {
-		msg := invalidMsg + fmt.Sprintf("the length of %s must be less than ", nameType) +
-			strconv.FormatInt(Params.ProxyCfg.MaxNameLength, 10) + " characters."
+	if len(entity) > Params.ProxyCfg.MaxNameLength.GetAsInt() {
+		msg := invalidMsg + fmt.Sprintf("the length of %s must be less than ", nameType) + Params.ProxyCfg.MaxNameLength.GetValue() + " characters."
 		return errors.New(msg)
 	}
 
@@ -813,9 +808,8 @@ func validateIndexName(indexName string) error {
 		return nil
 	}
 	invalidMsg := "Invalid index name: " + indexName + ". "
-	if int64(len(indexName)) > Params.ProxyCfg.MaxNameLength {
-		msg := invalidMsg + "The length of a index name must be less than " +
-			strconv.FormatInt(Params.ProxyCfg.MaxNameLength, 10) + " characters."
+	if len(indexName) > Params.ProxyCfg.MaxNameLength.GetAsInt() {
+		msg := invalidMsg + "The length of a index name must be less than " + Params.ProxyCfg.MaxNameLength.GetValue() + " characters."
 		return errors.New(msg)
 	}
 

@@ -91,7 +91,7 @@ func (nm *NodeManager) AddNode(nodeID UniqueID, address string) error {
 		err        error
 	)
 
-	nodeClient, err = grpcindexnodeclient.NewClient(context.TODO(), address, Params.IndexCoordCfg.WithCredential)
+	nodeClient, err = grpcindexnodeclient.NewClient(context.TODO(), address, Params.IndexCoordCfg.WithCredential.GetAsBool())
 	if err != nil {
 		log.Error("IndexCoord NodeManager", zap.Any("Add node err", err))
 		return err

@@ -58,12 +58,12 @@ func SetupAccseeLog(logCfg *paramtable.AccessLogConfig, minioCfg *paramtable.Min
 func InitAccessLogger(logCfg *paramtable.AccessLogConfig, minioCfg *paramtable.MinioConfig) (*RotateLogger, error) {
 	var lg *RotateLogger
 	var err error
-	if !logCfg.Enable {
+	if !logCfg.Enable.GetAsBool() {
 		return nil, nil
 	}
 
 	var writeSyncer zapcore.WriteSyncer
-	if len(logCfg.Filename) > 0 {
+	if len(logCfg.Filename.GetValue()) > 0 {
 		lg, err = NewRotateLogger(logCfg, minioCfg)
 		if err != nil {
 			return nil, err

@@ -64,7 +64,7 @@ func (node *DataNode) getQuotaMetrics() (*metricsinfo.DataNodeQuotaMetrics, erro
 //getComponentConfigurations returns the configurations of dataNode matching req.Pattern
 func getComponentConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) *internalpb.ShowConfigurationsResponse {
 	prefix := "datanode."
-	matchedConfig := Params.DataNodeCfg.Base.GetByPattern(prefix + req.Pattern)
+	matchedConfig := Params.GetByPattern(prefix + req.Pattern)
 	configList := make([]*commonpb.KeyValuePair, 0, len(matchedConfig))
 	for key, value := range matchedConfig {
 		configList = append(configList,
@@ -114,13 +114,13 @@ func (node *DataNode) getSystemInfoMetrics(ctx context.Context, req *milvuspb.Ge
 			Name:          metricsinfo.ConstructComponentName(typeutil.DataNodeRole, paramtable.GetNodeID()),
 			HardwareInfos: hardwareMetrics,
 			SystemInfo:    metricsinfo.DeployMetrics{},
-			CreatedTime:   Params.DataNodeCfg.CreatedTime.String(),
-			UpdatedTime:   Params.DataNodeCfg.UpdatedTime.String(),
+			CreatedTime:   paramtable.GetCreateTime().String(),
+			UpdatedTime:   paramtable.GetUpdateTime().String(),
 			Type:          typeutil.DataNodeRole,
 			ID:            node.session.ServerID,
 		},
 		SystemConfigurations: metricsinfo.DataNodeConfiguration{
-			FlushInsertBufferSize: Params.DataNodeCfg.FlushInsertBufferSize,
+			FlushInsertBufferSize: Params.DataNodeCfg.FlushInsertBufferSize.GetAsInt64(),
 		},
 		QuotaMetrics: quotaMetrics,
 	}

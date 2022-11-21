@@ -153,6 +153,12 @@ func (m *Manager) DeleteConfig(key string) {
 	m.overlayConfigs[formatKey(key)] = TombValue
 }
 
+func (m *Manager) ResetConfig(key string) {
+	m.Lock()
+	defer m.Unlock()
+	delete(m.overlayConfigs, formatKey(key))
+}
+
 // Do not use it directly, only used when add source and unittests.
 func (m *Manager) pullSourceConfigs(source string) error {
 	configSource, ok := m.sources[source]

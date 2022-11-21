@@ -347,8 +347,8 @@ func newDDNode(ctx context.Context, collID UniqueID, vChannelName string, droppe
 	msFactory msgstream.Factory, compactor *compactionExecutor) (*ddNode, error) {
 
 	baseNode := BaseNode{}
-	baseNode.SetMaxQueueLength(Params.DataNodeCfg.FlowGraphMaxQueueLength)
-	baseNode.SetMaxParallelism(Params.DataNodeCfg.FlowGraphMaxParallelism)
+	baseNode.SetMaxQueueLength(Params.DataNodeCfg.FlowGraphMaxQueueLength.GetAsInt32())
+	baseNode.SetMaxParallelism(Params.DataNodeCfg.FlowGraphMaxParallelism.GetAsInt32())
 
 	deltaStream, err := msFactory.NewMsgStream(ctx)
 	if err != nil {
@@ -360,7 +360,7 @@ func newDDNode(ctx context.Context, collID UniqueID, vChannelName string, droppe
 		zap.String("pChannelName", pChannelName),
 	)
 
-	deltaChannelName, err := funcutil.ConvertChannelName(pChannelName, Params.CommonCfg.RootCoordDml, Params.CommonCfg.RootCoordDelta)
+	deltaChannelName, err := funcutil.ConvertChannelName(pChannelName, Params.CommonCfg.RootCoordDml.GetValue(), Params.CommonCfg.RootCoordDelta.GetValue())
 	if err != nil {
 		return nil, err
 	}

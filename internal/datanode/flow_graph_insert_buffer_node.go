@@ -605,9 +605,9 @@ func newInsertBufferNode(ctx context.Context, collID UniqueID, flushCh <-chan fl
 	if err != nil {
 		return nil, err
 	}
-	wTt.AsProducer([]string{Params.CommonCfg.DataCoordTimeTick})
+	wTt.AsProducer([]string{Params.CommonCfg.DataCoordTimeTick.GetValue()})
 	metrics.DataNodeNumProducers.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Inc()
-	log.Info("datanode AsProducer", zap.String("TimeTickChannelName", Params.CommonCfg.DataCoordTimeTick))
+	log.Info("datanode AsProducer", zap.String("TimeTickChannelName", Params.CommonCfg.DataCoordTimeTick.GetValue()))
 	var wTtMsgStream msgstream.MsgStream = wTt
 
 	mt := newMergedTimeTickerSender(func(ts Timestamp, segmentIDs []int64) error {

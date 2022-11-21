@@ -57,7 +57,7 @@ func (dh *distHandler) start(ctx context.Context) {
 	defer dh.wg.Done()
 	logger := log.With(zap.Int64("nodeID", dh.nodeID))
 	logger.Info("start dist handler")
-	ticker := time.NewTicker(Params.QueryCoordCfg.DistPullInterval)
+	ticker := time.NewTicker(Params.QueryCoordCfg.DistPullInterval.GetAsDuration(time.Millisecond))
 	failures := 0
 	for {
 		select {

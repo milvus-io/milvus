@@ -75,10 +75,9 @@ func TestMain(t *testing.M) {
 	os.Setenv("ROCKSMQ_PATH", path)
 	defer os.RemoveAll(path)
 
-	Params.DataNodeCfg.InitAlias("datanode-alias-1")
 	Params.Init()
 	// change to specific channel for test
-	Params.CommonCfg.DataCoordTimeTick = Params.CommonCfg.DataCoordTimeTick + strconv.Itoa(rand.Int())
+	paramtable.Get().Save(Params.CommonCfg.DataCoordTimeTick.Key, Params.CommonCfg.DataCoordTimeTick.GetValue()+strconv.Itoa(rand.Int()))
 
 	rateCol, err = newRateCollector()
 	if err != nil {
@@ -876,15 +875,15 @@ func TestWatchChannel(t *testing.T) {
 		// GOOSE TODO
 		kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath.GetValue())
 		oldInvalidCh := "datanode-etcd-test-by-dev-rootcoord-dml-channel-invalid"
-		path := fmt.Sprintf("%s/%d/%s", Params.DataNodeCfg.ChannelWatchSubPath, paramtable.GetNodeID(), oldInvalidCh)
+		path := fmt.Sprintf("%s/%d/%s", Params.CommonCfg.DataCoordWatchSubPath.GetValue(), paramtable.GetNodeID(), oldInvalidCh)
 		err = kv.Save(path, string([]byte{23}))
 		assert.NoError(t, err)
 
 		ch := fmt.Sprintf("datanode-etcd-test-by-dev-rootcoord-dml-channel_%d", rand.Int31())
-		path = fmt.Sprintf("%s/%d/%s", Params.DataNodeCfg.ChannelWatchSubPath, paramtable.GetNodeID(), ch)
+		path = fmt.Sprintf("%s/%d/%s", Params.CommonCfg.DataCoordWatchSubPath.GetValue(), paramtable.GetNodeID(), ch)
 		c := make(chan struct{})
 		go func() {
-			ec := kv.WatchWithPrefix(fmt.Sprintf("%s/%d", Params.DataNodeCfg.ChannelWatchSubPath, paramtable.GetNodeID()))
+			ec := kv.WatchWithPrefix(fmt.Sprintf("%s/%d", Params.CommonCfg.DataCoordWatchSubPath.GetValue(), paramtable.GetNodeID()))
 			c <- struct{}{}
 			cnt := 0
 			for {
@@ -923,7 +922,7 @@ func TestWatchChannel(t *testing.T) {
 		exist := node.flowgraphManager.exist(ch)
 		assert.True(t, exist)
 
-		err = kv.RemoveWithPrefix(fmt.Sprintf("%s/%d", Params.DataNodeCfg.ChannelWatchSubPath, paramtable.GetNodeID()))
+		err = kv.RemoveWithPrefix(fmt.Sprintf("%s/%d", Params.CommonCfg.DataCoordWatchSubPath.GetValue(), paramtable.GetNodeID()))
 		assert.Nil(t, err)
 		//TODO there is not way to sync Release done, use sleep for now
 		time.Sleep(100 * time.Millisecond)
@@ -935,15 +934,15 @@ func TestWatchChannel(t *testing.T) {
 	t.Run("Test release channel", func(t *testing.T) {
 		kv := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath.GetValue())
 		oldInvalidCh := "datanode-etcd-test-by-dev-rootcoord-dml-channel-invalid"
-		path := fmt.Sprintf("%s/%d/%s", Params.DataNodeCfg.ChannelWatchSubPath, paramtable.GetNodeID(), oldInvalidCh)
+		path := fmt.Sprintf("%s/%d/%s", Params.CommonCfg.DataCoordWatchSubPath.GetValue(), paramtable.GetNodeID(), oldInvalidCh)
 		err = kv.Save(path, string([]byte{23}))
 		assert.NoError(t, err)
 
 		ch := fmt.Sprintf("datanode-etcd-test-by-dev-rootcoord-dml-channel_%d", rand.Int31())
-		path = fmt.Sprintf("%s/%d/%s", Params.DataNodeCfg.ChannelWatchSubPath, paramtable.GetNodeID(), ch)
+		path = fmt.Sprintf("%s/%d/%s", Params.CommonCfg.DataCoordWatchSubPath.GetValue(), paramtable.GetNodeID(), ch)
 		c := make(chan struct{})
 		go func() {
-			ec := kv.WatchWithPrefix(fmt.Sprintf("%s/%d", Params.DataNodeCfg.ChannelWatchSubPath, paramtable.GetNodeID()))
+			ec := kv.WatchWithPrefix(fmt.Sprintf("%s/%d", Params.CommonCfg.DataCoordWatchSubPath.GetValue(), paramtable.GetNodeID()))
 			c <- struct{}{}
 			cnt := 0
 			for {
@@ -982,7 +981,7 @@ func TestWatchChannel(t *testing.T) {
 		exist := node.flowgraphManager.exist(ch)
 		assert.False(t, exist)
 
-		err = kv.RemoveWithPrefix(fmt.Sprintf("%s/%d", Params.DataNodeCfg.ChannelWatchSubPath, paramtable.GetNodeID()))
+		err = kv.RemoveWithPrefix(fmt.Sprintf("%s/%d", Params.CommonCfg.DataCoordWatchSubPath.GetValue(), paramtable.GetNodeID()))
 		assert.Nil(t, err)
 		//TODO there is not way to sync Release done, use sleep for now
 		time.Sleep(100 * time.Millisecond)

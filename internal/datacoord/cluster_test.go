@@ -85,7 +85,7 @@ func TestClusterCreate(t *testing.T) {
 		}
 		info1Data, err := proto.Marshal(info1)
 		assert.Nil(t, err)
-		err = kv.Save(Params.DataCoordCfg.ChannelWatchSubPath+"/1/channel1", string(info1Data))
+		err = kv.Save(Params.CommonCfg.DataCoordWatchSubPath.GetValue()+"/1/channel1", string(info1Data))
 		assert.Nil(t, err)
 
 		sessionManager := NewSessionManager()

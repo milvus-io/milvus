@@ -232,8 +232,8 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 // newFilteredDmNode returns a new filterDmNode
 func newFilteredDmNode(metaReplica ReplicaInterface, collectionID UniqueID, vchannel Channel) *filterDmNode {
 
-	maxQueueLength := Params.QueryNodeCfg.FlowGraphMaxQueueLength
-	maxParallelism := Params.QueryNodeCfg.FlowGraphMaxParallelism
+	maxQueueLength := Params.QueryNodeCfg.FlowGraphMaxQueueLength.GetAsInt32()
+	maxParallelism := Params.QueryNodeCfg.FlowGraphMaxParallelism.GetAsInt32()
 
 	baseNode := baseNode{}
 	baseNode.SetMaxQueueLength(maxQueueLength)

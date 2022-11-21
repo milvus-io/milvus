@@ -39,7 +39,7 @@ func TestAccessLogger_NotEnable(t *testing.T) {
 	defer closer.Close()
 
 	Params.Init()
-	Params.ProxyCfg.AccessLog.Enable = false
+	Params.Save(Params.ProxyCfg.AccessLog.Enable.Key, "false")
 
 	InitAccessLogger(&Params.ProxyCfg.AccessLog, &Params.MinioCfg)
 
@@ -73,7 +73,7 @@ func TestAccessLogger_Basic(t *testing.T) {
 
 	Params.Init()
 	testPath := "/tmp/accesstest"
-	Params.ProxyCfg.AccessLog.LocalPath = testPath
+	Params.Save(Params.ProxyCfg.AccessLog.LocalPath.Key, testPath)
 	defer os.RemoveAll(testPath)
 
 	InitAccessLogger(&Params.ProxyCfg.AccessLog, &Params.MinioCfg)
@@ -107,7 +107,7 @@ func TestAccessLogger_Stdout(t *testing.T) {
 	defer closer.Close()
 
 	Params.Init()
-	Params.ProxyCfg.AccessLog.Filename = ""
+	Params.Save(Params.ProxyCfg.AccessLog.Filename.Key, "")
 
 	InitAccessLogger(&Params.ProxyCfg.AccessLog, &Params.MinioCfg)
 
@@ -140,9 +140,10 @@ func TestAccessLogger_WithMinio(t *testing.T) {
 
 	Params.Init()
 	testPath := "/tmp/accesstest"
-	Params.ProxyCfg.AccessLog.LocalPath = testPath
-	Params.ProxyCfg.AccessLog.MinioEnable = true
-	Params.ProxyCfg.AccessLog.RemotePath = "access_log/"
+	Params.Save(Params.ProxyCfg.AccessLog.LocalPath.Key, testPath)
+	Params.Save(Params.ProxyCfg.AccessLog.MinioEnable.Key, "true")
+	Params.Save(Params.ProxyCfg.AccessLog.RemotePath.Key, "access_log/")
+	Params.Save(Params.ProxyCfg.AccessLog.MaxSize.Key, "1")
 	defer os.RemoveAll(testPath)
 
 	InitAccessLogger(&Params.ProxyCfg.AccessLog, &Params.MinioCfg)
@@ -185,7 +186,7 @@ func TestAccessLogger_Error(t *testing.T) {
 
 	Params.Init()
 	testPath := "/tmp/accesstest"
-	Params.ProxyCfg.AccessLog.LocalPath = testPath
+	Params.Save(Params.ProxyCfg.AccessLog.LocalPath.Key, "testPath")
 	defer os.RemoveAll(testPath)
 
 	InitAccessLogger(&Params.ProxyCfg.AccessLog, &Params.MinioCfg)

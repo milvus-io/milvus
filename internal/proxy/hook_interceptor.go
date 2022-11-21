@@ -36,7 +36,7 @@ func (d defaultHook) Release() {}
 var hoo hook.Hook
 
 func initHook() error {
-	path := Params.ProxyCfg.SoPath
+	path := Params.ProxyCfg.SoPath.GetValue()
 	if path == "" {
 		hoo = defaultHook{}
 		return nil
@@ -59,7 +59,7 @@ func initHook() error {
 	if !ok {
 		return fmt.Errorf("fail to convert the `Hook` interface")
 	}
-	if err = hoo.Init(Params.HookCfg.SoConfig); err != nil {
+	if err = hoo.Init(Params.HookCfg.SoConfig.GetValue()); err != nil {
 		return fmt.Errorf("fail to init configs for the hook, error: %s", err.Error())
 	}
 	return nil
@@ -67,7 +67,7 @@ func initHook() error {
 
 func UnaryServerHookInterceptor() grpc.UnaryServerInterceptor {
 	if hookError := initHook(); hookError != nil {
-		logger.Error("hook error", zap.String("path", Params.ProxyCfg.SoPath), zap.Error(hookError))
+		logger.Error("hook error", zap.String("path", Params.ProxyCfg.SoPath.GetValue()), zap.Error(hookError))
 		hoo = defaultHook{}
 	}
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {

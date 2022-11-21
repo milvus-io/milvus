@@ -18,6 +18,7 @@ package checkers
 
 import (
 	"context"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -269,7 +270,7 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 	for i := range plans {
 		plans[i].ReplicaID = replica.GetID()
 	}
-	return balance.CreateSegmentTasksFromPlans(ctx, c.ID(), Params.QueryCoordCfg.SegmentTaskTimeout, plans)
+	return balance.CreateSegmentTasksFromPlans(ctx, c.ID(), Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond), plans)
 }
 
 func (c *SegmentChecker) createSegmentReduceTasks(ctx context.Context, segments []*meta.Segment, replicaID int64, scope querypb.DataScope) []task.Task {
@@ -278,7 +279,7 @@ func (c *SegmentChecker) createSegmentReduceTasks(ctx context.Context, segments 
 		action := task.NewSegmentActionWithScope(s.Node, task.ActionTypeReduce, s.GetInsertChannel(), s.GetID(), scope)
 		task, err := task.NewSegmentTask(
 			ctx,
-			Params.QueryCoordCfg.SegmentTaskTimeout,
+			Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond),
 			c.ID(),
 			s.GetCollectionID(),
 			replicaID,

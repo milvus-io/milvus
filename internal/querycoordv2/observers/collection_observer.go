@@ -95,7 +95,7 @@ func (ob *CollectionObserver) observeTimeout() {
 	collections := ob.meta.CollectionManager.GetAllCollections()
 	for _, collection := range collections {
 		if collection.GetStatus() != querypb.LoadStatus_Loading ||
-			time.Now().Before(collection.UpdatedAt.Add(Params.QueryCoordCfg.LoadTimeoutSeconds)) {
+			time.Now().Before(collection.UpdatedAt.Add(Params.QueryCoordCfg.LoadTimeoutSeconds.GetAsDuration(time.Second))) {
 			continue
 		}
 
@@ -118,7 +118,7 @@ func (ob *CollectionObserver) observeTimeout() {
 		)
 		for _, partition := range partitions {
 			if partition.GetStatus() != querypb.LoadStatus_Loading ||
-				time.Now().Before(partition.CreatedAt.Add(Params.QueryCoordCfg.LoadTimeoutSeconds)) {
+				time.Now().Before(partition.CreatedAt.Add(Params.QueryCoordCfg.LoadTimeoutSeconds.GetAsDuration(time.Second))) {
 				continue
 			}
 

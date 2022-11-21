@@ -110,7 +110,7 @@ func (c *chanTsMsg) getTimetick(channelName string) typeutil.Timestamp {
 
 func newTimeTickSync(ctx context.Context, sourceID int64, factory msgstream.Factory, chanMap map[typeutil.UniqueID][]string) *timetickSync {
 	// initialize dml channels used for insert
-	dmlChannels := newDmlChannels(ctx, factory, Params.CommonCfg.RootCoordDml, Params.RootCoordCfg.DmlChannelNum)
+	dmlChannels := newDmlChannels(ctx, factory, Params.CommonCfg.RootCoordDml.GetValue(), Params.RootCoordCfg.DmlChannelNum.GetAsInt64())
 
 	// recover physical channels for all collections
 	for collID, chanNames := range chanMap {
@@ -156,7 +156,7 @@ func (t *timetickSync) sendToChannel() bool {
 		// give warning every 2 second if not get ttMsg from source sessions
 		if maxCnt%10 == 0 {
 			log.Warn("session idle for long time", zap.Any("idle list", idleSessionList),
-				zap.Any("idle time", Params.ProxyCfg.TimeTickInterval.Milliseconds()*maxCnt))
+				zap.Any("idle time", Params.ProxyCfg.TimeTickInterval.GetAsInt64()*time.Millisecond.Milliseconds()*maxCnt))
 		}
 		return false
 	}
@@ -278,7 +278,7 @@ func (t *timetickSync) startWatch(wg *sync.WaitGroup) {
 			span := tr.ElapseSpan()
 			metrics.RootCoordSyncTimeTickLatency.Observe(float64(span.Milliseconds()))
 			// rootcoord send tt msg to all channels every 200ms by default
-			if span > Params.ProxyCfg.TimeTickInterval {
+			if span > Params.ProxyCfg.TimeTickInterval.GetAsDuration(time.Millisecond) {
 				log.Warn("rootcoord send tt to all channels too slowly",
 					zap.Int("chanNum", len(local.chanTsMap)), zap.Int64("span", span.Milliseconds()))
 			}

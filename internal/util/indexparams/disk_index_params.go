@@ -17,10 +17,12 @@
 package indexparams
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"unsafe"
 
+	"github.com/milvus-io/milvus/internal/util/autoindex"
 	"github.com/milvus-io/milvus/internal/util/hardware"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
@@ -54,39 +56,42 @@ func getRowDataSizeOfFloatVector(numRows int64, dim int64) int64 {
 // FillDiskIndexParams fill ratio params to index param on proxy node
 // Which will be used to calculate build and load params
 func FillDiskIndexParams(params *paramtable.ComponentParam, indexParams map[string]string) error {
-	maxDegree := strconv.FormatInt(params.CommonCfg.MaxDegree, 10)
-	searchListSize := strconv.FormatInt(params.CommonCfg.SearchListSize, 10)
-	pqCodeBudgetGBRatio := params.CommonCfg.PQCodeBudgetGBRatio
-	buildNumThreadsRatio := params.CommonCfg.BuildNumThreadsRatio
+	maxDegree := params.CommonCfg.MaxDegree.GetValue()
+	searchListSize := params.CommonCfg.SearchListSize.GetValue()
+	pqCodeBudgetGBRatio := params.CommonCfg.PQCodeBudgetGBRatio.GetValue()
+	buildNumThreadsRatio := params.CommonCfg.BuildNumThreadsRatio.GetValue()
 
-	searchCacheBudgetGBRatio := params.CommonCfg.SearchCacheBudgetGBRatio
-	loadNumThreadRatio := params.CommonCfg.LoadNumThreadRatio
-	beamWidthRatio := params.CommonCfg.BeamWidthRatio
+	searchCacheBudgetGBRatio := params.CommonCfg.SearchCacheBudgetGBRatio.GetValue()
+	loadNumThreadRatio := params.CommonCfg.LoadNumThreadRatio.GetValue()
+	beamWidthRatio := params.CommonCfg.BeamWidthRatio.GetValue()
 
-	if params.AutoIndexConfig.Enable {
+	if params.AutoIndexConfig.Enable.GetAsBool() {
+		indexParams := params.AutoIndexConfig.IndexParams.GetAsJSONMap()
 		var ok bool
-		maxDegree, ok = params.AutoIndexConfig.IndexParams[MaxDegreeKey]
+		maxDegree, ok = indexParams[MaxDegreeKey]
 		if !ok {
 			return fmt.Errorf("index param max_degree not exist")
 		}
-		searchListSize, ok = params.AutoIndexConfig.IndexParams[SearchListSizeKey]
+		searchListSize, ok = indexParams[SearchListSizeKey]
 		if !ok {
 			return fmt.Errorf("index param search_list_size not exist")
 		}
-		pqCodeBudgetGBRatio = params.AutoIndexConfig.BigDataExtraParams.PQCodeBudgetGBRatio
-		buildNumThreadsRatio = params.AutoIndexConfig.BigDataExtraParams.BuildNumThreadsRatio
-		searchCacheBudgetGBRatio = params.AutoIndexConfig.BigDataExtraParams.SearchCacheBudgetGBRatio
-		loadNumThreadRatio = params.AutoIndexConfig.BigDataExtraParams.LoadNumThreadRatio
-		beamWidthRatio = params.AutoIndexConfig.BigDataExtraParams.BeamWidthRatio
+		extraParams := autoindex.BigDataIndexExtraParams{}
+		json.Unmarshal([]byte(params.AutoIndexConfig.ExtraParams.GetValue()), &extraParams)
+		pqCodeBudgetGBRatio = fmt.Sprintf("%f", extraParams.PQCodeBudgetGBRatio)
+		buildNumThreadsRatio = fmt.Sprintf("%f", extraParams.BuildNumThreadsRatio)
+		searchCacheBudgetGBRatio = fmt.Sprintf("%f", extraParams.SearchCacheBudgetGBRatio)
+		loadNumThreadRatio = fmt.Sprintf("%f", extraParams.LoadNumThreadRatio)
+		beamWidthRatio = fmt.Sprintf("%f", extraParams.BeamWidthRatio)
 	}
 
 	indexParams[MaxDegreeKey] = maxDegree
 	indexParams[SearchListSizeKey] = searchListSize
-	indexParams[PQCodeBudgetRatioKey] = fmt.Sprintf("%f", pqCodeBudgetGBRatio)
-	indexParams[NumBuildThreadRatioKey] = fmt.Sprintf("%f", buildNumThreadsRatio)
-	indexParams[SearchCacheBudgetRatioKey] = fmt.Sprintf("%f", searchCacheBudgetGBRatio)
-	indexParams[NumLoadThreadRatioKey] = fmt.Sprintf("%f", loadNumThreadRatio)
-	indexParams[BeamWidthRatioKey] = fmt.Sprintf("%f", beamWidthRatio)
+	indexParams[PQCodeBudgetRatioKey] = pqCodeBudgetGBRatio
+	indexParams[NumBuildThreadRatioKey] = buildNumThreadsRatio
+	indexParams[SearchCacheBudgetRatioKey] = searchCacheBudgetGBRatio
+	indexParams[NumLoadThreadRatioKey] = loadNumThreadRatio
+	indexParams[BeamWidthRatioKey] = beamWidthRatio
 
 	return nil
 }

@@ -7,12 +7,13 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/internal/util/concurrency"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
 
 func Test_getOrCreateIOPool(t *testing.T) {
 	Params.InitOnce()
 	ioConcurrency := Params.DataNodeCfg.IOConcurrency
-	Params.DataNodeCfg.IOConcurrency = 64
+	paramtable.Get().Save(Params.DataNodeCfg.IOConcurrency.Key, "64")
 	defer func() { Params.DataNodeCfg.IOConcurrency = ioConcurrency }()
 	nP := 10
 	nTask := 10

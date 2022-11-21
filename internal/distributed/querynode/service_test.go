@@ -19,9 +19,11 @@ package grpcquerynode
 import (
 	"context"
 	"errors"
+	"os"
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 
 	"github.com/stretchr/testify/assert"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -226,6 +228,12 @@ func (m *MockIndexCoord) GetComponentStates(ctx context.Context) (*milvuspb.Comp
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+func TestMain(m *testing.M) {
+	paramtable.Init()
+	os.Exit(m.Run())
+}
+
 func Test_NewServer(t *testing.T) {
 	ctx := context.Background()
 	server, err := NewServer(ctx, nil)

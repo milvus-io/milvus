@@ -10,6 +10,7 @@ import (
 
 	"go.uber.org/atomic"
 
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -186,7 +187,7 @@ func Test_scheduler_updateDdlMinTsLoop(t *testing.T) {
 		ctx := context.Background()
 		s := newScheduler(ctx, idAlloc, tsoAlloc)
 		Params.InitOnce()
-		Params.ProxyCfg.TimeTickInterval = time.Millisecond
+		paramtable.Get().Save(Params.ProxyCfg.TimeTickInterval.Key, "1")
 		s.Start()
 
 		time.Sleep(time.Millisecond * 4)
@@ -217,7 +218,7 @@ func Test_scheduler_updateDdlMinTsLoop(t *testing.T) {
 		ctx := context.Background()
 		s := newScheduler(ctx, idAlloc, tsoAlloc)
 		Params.InitOnce()
-		Params.ProxyCfg.TimeTickInterval = time.Millisecond
+		paramtable.Get().Save(Params.ProxyCfg.TimeTickInterval.Key, "1")
 		s.Start()
 
 		time.Sleep(time.Millisecond * 4)

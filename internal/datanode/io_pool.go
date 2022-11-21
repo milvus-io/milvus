@@ -10,7 +10,7 @@ var ioPool *concurrency.Pool
 var ioPoolInitOnce sync.Once
 
 func initIOPool() {
-	capacity := Params.DataNodeCfg.IOConcurrency
+	capacity := Params.DataNodeCfg.IOConcurrency.GetAsInt()
 	if capacity > 32 {
 		capacity = 32
 	}

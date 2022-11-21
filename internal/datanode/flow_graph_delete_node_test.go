@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
 )
 
@@ -408,7 +409,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		//1. here we set buffer bytes to a relatively high level
 		//and the sum of memory consumption in this case is 208
 		//so no segments will be flushed
-		Params.DataNodeCfg.FlushDeleteBufferBytes = 300
+		paramtable.Get().Save(Params.DataNodeCfg.FlushDeleteBufferBytes.Key, "300")
 		delNode.Operate([]flowgraph.Msg{fgMsg})
 		assert.Equal(t, 0, len(mockFlushManager.flushedSegIDs))
 		assert.Equal(t, int64(208), delNode.delBufferManager.delMemorySize)
@@ -420,7 +421,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		//memory consumption will be reduced to 160(under 200)
 		msg.deleteMessages = []*msgstream.DeleteMsg{}
 		msg.segmentsToSync = []UniqueID{}
-		Params.DataNodeCfg.FlushDeleteBufferBytes = 200
+		paramtable.Get().Save(Params.DataNodeCfg.FlushDeleteBufferBytes.Key, "200")
 		delNode.Operate([]flowgraph.Msg{fgMsg})
 		assert.Equal(t, 1, len(mockFlushManager.flushedSegIDs))
 		assert.Equal(t, int64(160), delNode.delBufferManager.delMemorySize)
@@ -436,7 +437,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		//5. we reset buffer bytes to 150, then we expect there would be one more
 		//segment which is 48 in size to be flushed, so the remained del memory size
 		//will be 112
-		Params.DataNodeCfg.FlushDeleteBufferBytes = 150
+		paramtable.Get().Save(Params.DataNodeCfg.FlushDeleteBufferBytes.Key, "150")
 		delNode.Operate([]flowgraph.Msg{fgMsg})
 		assert.Equal(t, 2, len(mockFlushManager.flushedSegIDs))
 		assert.Equal(t, int64(112), delNode.delBufferManager.delMemorySize)
@@ -444,7 +445,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 
 		//6. we reset buffer bytes to 60, then most of the segments will be flushed
 		//except for the smallest entry with size equaling to 32
-		Params.DataNodeCfg.FlushDeleteBufferBytes = 60
+		paramtable.Get().Save(Params.DataNodeCfg.FlushDeleteBufferBytes.Key, "60")
 		delNode.Operate([]flowgraph.Msg{fgMsg})
 		assert.Equal(t, 4, len(mockFlushManager.flushedSegIDs))
 		assert.Equal(t, int64(32), delNode.delBufferManager.delMemorySize)
@@ -453,7 +454,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		//7. we reset buffer bytes to 20, then as all segment-memory consumption
 		//is more than 20, so all five segments will be flushed and the remained
 		//del memory will be lowered to zero
-		Params.DataNodeCfg.FlushDeleteBufferBytes = 20
+		paramtable.Get().Save(Params.DataNodeCfg.FlushDeleteBufferBytes.Key, "20")
 		delNode.Operate([]flowgraph.Msg{fgMsg})
 		assert.Equal(t, 5, len(mockFlushManager.flushedSegIDs))
 		assert.Equal(t, int64(0), delNode.delBufferManager.delMemorySize)

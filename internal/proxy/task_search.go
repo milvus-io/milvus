@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/types"
 
+	"github.com/milvus-io/milvus/internal/util/autoindex"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/distance"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
@@ -100,7 +101,7 @@ func getPartitionIDs(ctx context.Context, collectionName string, partitionNames 
 
 func parseSearchParams(searchParamsPair []*commonpb.KeyValuePair) (string, error) {
 	searchParamStr, err := funcutil.GetAttrByKeyFromRepeatedKV(SearchParamsKey, searchParamsPair)
-	if Params.AutoIndexConfig.Enable {
+	if Params.AutoIndexConfig.Enable.GetAsBool() {
 		searchParamMap := make(map[string]interface{})
 		var level int
 		if err == nil { // if specified params, we try to parse params
@@ -129,7 +130,8 @@ func parseSearchParams(searchParamsPair []*commonpb.KeyValuePair) (string, error
 		} else {
 			level = 1
 		}
-		calculator := Params.AutoIndexConfig.GetSearchParamStrCalculator(level)
+		paramsStr := Params.AutoIndexConfig.SearchParamsYamlStr.GetValue()
+		calculator := autoindex.GetSearchCalculator(paramsStr, level)
 		if calculator == nil {
 			return "", fmt.Errorf("search params calculator not found for level:%d", level)
 		}

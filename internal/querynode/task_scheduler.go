@@ -79,7 +79,7 @@ func newTaskScheduler(ctx context.Context, tSafeReplica TSafeReplicaInterface) *
 		cancel:              cancel,
 		unsolvedReadTasks:   list.New(),
 		readyReadTasks:      list.New(),
-		receiveReadTaskChan: make(chan readTask, Params.QueryNodeCfg.MaxReceiveChanSize),
+		receiveReadTaskChan: make(chan readTask, Params.QueryNodeCfg.MaxReceiveChanSize.GetAsInt()),
 		executeReadTaskChan: make(chan readTask, maxExecuteReadChanLen),
 		notifyChan:          make(chan struct{}, 1),
 		tSafeReplica:        tSafeReplica,
@@ -149,7 +149,7 @@ func (s *taskScheduler) Start() {
 
 func (s *taskScheduler) tryEvictUnsolvedReadTask(headCount int) {
 	after := headCount + s.unsolvedReadTasks.Len()
-	diff := int32(after) - Params.QueryNodeCfg.MaxUnsolvedQueueSize
+	diff := int32(after) - Params.QueryNodeCfg.MaxUnsolvedQueueSize.GetAsInt32()
 	if diff <= 0 {
 		return
 	}
@@ -262,7 +262,7 @@ func (s *taskScheduler) popAndAddToExecute() {
 		return
 	}
 
-	remain := Params.QueryNodeCfg.MaxReadConcurrency - readConcurrency
+	remain := Params.QueryNodeCfg.MaxReadConcurrency.GetAsInt32() - readConcurrency
 	if remain <= 0 {
 		return
 	}
@@ -366,7 +366,7 @@ func (s *taskScheduler) tryMergeReadTasks() {
 			continue
 		}
 		if ready {
-			if !Params.QueryNodeCfg.GroupEnabled {
+			if !Params.QueryNodeCfg.GroupEnabled.GetAsBool() {
 				s.readyReadTasks.PushBack(t)
 				rateCol.rtCounter.add(t, readyQueueType)
 			} else {

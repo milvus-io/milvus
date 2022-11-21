@@ -194,7 +194,7 @@ func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Optio
 		rootCoordClientCreator: defaultRootCoordCreatorFunc,
 		helper:                 defaultServerHelper(),
 		metricsCacheManager:    metricsinfo.NewMetricsCacheManager(),
-		enableActiveStandBy:    Params.DataCoordCfg.EnableActiveStandby,
+		enableActiveStandBy:    Params.DataCoordCfg.EnableActiveStandby.GetAsBool(),
 	}
 
 	for _, opt := range opts {
@@ -282,7 +282,7 @@ func (s *Server) Init() error {
 		return err
 	}
 
-	if Params.DataCoordCfg.EnableCompaction {
+	if Params.DataCoordCfg.EnableCompaction.GetAsBool() {
 		s.createCompactionHandler()
 		s.createCompactionTrigger()
 	}
@@ -301,7 +301,7 @@ func (s *Server) Init() error {
 //     datanodes etcd watch, etcd alive check and flush completed status check
 //  4. set server state to Healthy
 func (s *Server) Start() error {
-	if Params.DataCoordCfg.EnableCompaction {
+	if Params.DataCoordCfg.EnableCompaction.GetAsBool() {
 		s.compactionHandler.start()
 		s.compactionTrigger.start()
 	}
@@ -321,9 +321,6 @@ func (s *Server) Start() error {
 		s.stateCode.Store(commonpb.StateCode_Healthy)
 		logutil.Logger(s.ctx).Info("DataCoord startup successfully")
 	}
-
-	Params.DataCoordCfg.CreatedTime = time.Now()
-	Params.DataCoordCfg.UpdatedTime = time.Now()
 
 	// DataCoord (re)starts successfully and starts to collection segment stats
 	// data from all DataNode.
@@ -392,10 +389,10 @@ func (s *Server) newChunkManagerFactory() (storage.ChunkManager, error) {
 func (s *Server) initGarbageCollection(cli storage.ChunkManager) {
 	s.garbageCollector = newGarbageCollector(s.meta, s.handler, s.segReferManager, s.indexCoord, GcOption{
 		cli:              cli,
-		enabled:          Params.DataCoordCfg.EnableGarbageCollection,
-		checkInterval:    Params.DataCoordCfg.GCInterval,
-		missingTolerance: Params.DataCoordCfg.GCMissingTolerance,
-		dropTolerance:    Params.DataCoordCfg.GCDropTolerance,
+		enabled:          Params.DataCoordCfg.EnableGarbageCollection.GetAsBool(),
+		checkInterval:    Params.DataCoordCfg.GCInterval.GetAsDuration(time.Second),
+		missingTolerance: Params.DataCoordCfg.GCMissingTolerance.GetAsDuration(time.Second),
+		dropTolerance:    Params.DataCoordCfg.GCDropTolerance.GetAsDuration(time.Second),
 	})
 }
 
@@ -486,11 +483,11 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 		log.Error("DataCoord failed to create timetick channel", zap.Error(err))
 		panic(err)
 	}
-	subName := fmt.Sprintf("%s-%d-datanodeTl", Params.CommonCfg.DataCoordSubName, paramtable.GetNodeID())
-	ttMsgStream.AsConsumer([]string{Params.CommonCfg.DataCoordTimeTick},
+	subName := fmt.Sprintf("%s-%d-datanodeTl", Params.CommonCfg.DataCoordSubName.GetValue(), paramtable.GetNodeID())
+	ttMsgStream.AsConsumer([]string{Params.CommonCfg.DataCoordTimeTick.GetValue()},
 		subName, mqwrapper.SubscriptionPositionLatest)
 	log.Info("DataCoord creates the timetick channel consumer",
-		zap.String("timeTickChannel", Params.CommonCfg.DataCoordTimeTick),
+		zap.String("timeTickChannel", Params.CommonCfg.DataCoordTimeTick.GetValue()),
 		zap.String("subscription", subName))
 
 	go s.handleDataNodeTimetickMsgstream(ctx, ttMsgStream)
@@ -827,7 +824,7 @@ func (s *Server) Stop() error {
 	s.stopServerLoop()
 	s.session.Revoke(time.Second)
 
-	if Params.DataCoordCfg.EnableCompaction {
+	if Params.DataCoordCfg.EnableCompaction.GetAsBool() {
 		s.stopCompactionTrigger()
 		s.stopCompactionHandler()
 	}

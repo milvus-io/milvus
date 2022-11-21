@@ -932,7 +932,7 @@ func (suite *ServiceSuite) TestGetShardLeadersFailed() {
 		}
 
 		// Last heartbeat response time too old
-		suite.fetchHeartbeats(time.Now().Add(-Params.QueryCoordCfg.HeartbeatAvailableInterval - 1))
+		suite.fetchHeartbeats(time.Now().Add(-Params.QueryCoordCfg.HeartbeatAvailableInterval.GetAsDuration(time.Millisecond) - 1))
 		resp, err := server.GetShardLeaders(ctx, req)
 		suite.NoError(err)
 		suite.Equal(commonpb.ErrorCode_NoReplicaAvailable, resp.Status.ErrorCode)

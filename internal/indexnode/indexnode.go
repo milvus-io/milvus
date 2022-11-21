@@ -147,15 +147,15 @@ func (i *IndexNode) initKnowhere() {
 	C.free(unsafe.Pointer(cEasyloggingYaml))
 
 	// override index builder SIMD type
-	cSimdType := C.CString(Params.CommonCfg.SimdType)
+	cSimdType := C.CString(Params.CommonCfg.SimdType.GetValue())
 	C.IndexBuilderSetSimdType(cSimdType)
 	C.free(unsafe.Pointer(cSimdType))
 
 	// override segcore index slice size
-	cIndexSliceSize := C.int64_t(Params.CommonCfg.IndexSliceSize)
+	cIndexSliceSize := C.int64_t(Params.CommonCfg.IndexSliceSize.GetAsInt64())
 	C.InitIndexSliceSize(cIndexSliceSize)
 
-	cThreadCoreCoefficient := C.int64_t(Params.CommonCfg.ThreadCoreCoefficient)
+	cThreadCoreCoefficient := C.int64_t(Params.CommonCfg.ThreadCoreCoefficient.GetAsInt64())
 	C.InitThreadCoreCoefficient(cThreadCoreCoefficient)
 
 	cCPUNum := C.int(hardware.GetCPUNum())
@@ -209,9 +209,6 @@ func (i *IndexNode) Start() error {
 	var startErr error
 	i.once.Do(func() {
 		startErr = i.sched.Start()
-
-		Params.IndexNodeCfg.CreatedTime = time.Now()
-		Params.IndexNodeCfg.UpdatedTime = time.Now()
 
 		i.UpdateStateCode(commonpb.StateCode_Healthy)
 		log.Info("IndexNode", zap.Any("State", i.stateCode.Load()))

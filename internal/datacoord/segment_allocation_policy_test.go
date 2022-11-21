@@ -78,7 +78,7 @@ func TestUpperLimitCalBySchema(t *testing.T) {
 					},
 				},
 			},
-			expected:  int(Params.DataCoordCfg.SegmentMaxSize * 1024 * 1024 / float64(524)),
+			expected:  int(Params.DataCoordCfg.SegmentMaxSize.GetAsFloat() * 1024 * 1024 / float64(524)),
 			expectErr: false,
 		},
 	}

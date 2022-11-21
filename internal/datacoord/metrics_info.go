@@ -43,7 +43,7 @@ func (s *Server) getQuotaMetrics() *metricsinfo.DataCoordQuotaMetrics {
 //getComponentConfigurations returns the configurations of dataNode matching req.Pattern
 func getComponentConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) *internalpb.ShowConfigurationsResponse {
 	prefix := "datacoord."
-	matchedConfig := Params.DataCoordCfg.Base.GetByPattern(prefix + req.Pattern)
+	matchedConfig := Params.GetByPattern(prefix + req.Pattern)
 	configList := make([]*commonpb.KeyValuePair, 0, len(matchedConfig))
 	for key, value := range matchedConfig {
 		configList = append(configList,
@@ -129,13 +129,13 @@ func (s *Server) getDataCoordMetrics() metricsinfo.DataCoordInfos {
 				DiskUsage:    hardware.GetDiskUsage(),
 			},
 			SystemInfo:  metricsinfo.DeployMetrics{},
-			CreatedTime: Params.DataCoordCfg.CreatedTime.String(),
-			UpdatedTime: Params.DataCoordCfg.UpdatedTime.String(),
+			CreatedTime: paramtable.GetCreateTime().String(),
+			UpdatedTime: paramtable.GetUpdateTime().String(),
 			Type:        typeutil.DataCoordRole,
 			ID:          s.session.ServerID,
 		},
 		SystemConfigurations: metricsinfo.DataCoordConfiguration{
-			SegmentMaxSize: Params.DataCoordCfg.SegmentMaxSize,
+			SegmentMaxSize: Params.DataCoordCfg.SegmentMaxSize.GetAsFloat(),
 		},
 		QuotaMetrics: s.getQuotaMetrics(),
 	}

@@ -200,7 +200,7 @@ func (s *searchTask) estimateCPUUsage() {
 	} else if s.DataScope == querypb.DataScope_Historical {
 		segmentNum = int64(len(s.req.GetSegmentIDs()))
 	}
-	cpu := float64(s.NQ*segmentNum) * Params.QueryNodeCfg.CPURatio
+	cpu := float64(s.NQ*segmentNum) * Params.QueryNodeCfg.CPURatio.GetAsFloat()
 	s.cpu = int32(cpu)
 	if s.cpu <= 0 {
 		s.cpu = 5
@@ -359,10 +359,10 @@ func (s *searchTask) CanMergeWith(t readTask) bool {
 		return false
 	}
 	ratio := float64(after) / float64(pre)
-	if ratio > Params.QueryNodeCfg.TopKMergeRatio {
+	if ratio > Params.QueryNodeCfg.TopKMergeRatio.GetAsFloat() {
 		return false
 	}
-	if s.NQ+s2.NQ > Params.QueryNodeCfg.MaxGroupNQ {
+	if s.NQ+s2.NQ > Params.QueryNodeCfg.MaxGroupNQ.GetAsInt64() {
 		return false
 	}
 	return true

@@ -142,7 +142,7 @@ func (l *loadSegmentsTask) watchDeltaChannel(deltaChannels []string) error {
 	var vDeltaChannels []string
 	VPDeltaChannels := make(map[string]string)
 	for _, v := range deltaChannels {
-		dc, err := funcutil.ConvertChannelName(v, Params.CommonCfg.RootCoordDml, Params.CommonCfg.RootCoordDelta)
+		dc, err := funcutil.ConvertChannelName(v, Params.CommonCfg.RootCoordDml.GetValue(), Params.CommonCfg.RootCoordDelta.GetValue())
 		if err != nil {
 			log.Warn("watchDeltaChannels, failed to convert deltaChannel from dmlChannel",
 				zap.String("DmlChannel", v),
@@ -189,7 +189,7 @@ func (l *loadSegmentsTask) watchDeltaChannel(deltaChannels []string) error {
 			}
 		}
 	}()
-	consumeSubName := funcutil.GenChannelSubName(Params.CommonCfg.QueryNodeSubName, collectionID, paramtable.GetNodeID())
+	consumeSubName := funcutil.GenChannelSubName(Params.CommonCfg.QueryNodeSubName.GetValue(), collectionID, paramtable.GetNodeID())
 
 	// channels as consumer
 	for channel, fg := range channel2FlowGraph {
@@ -224,7 +224,7 @@ func (l *loadSegmentsTask) watchDeltaChannel(deltaChannels []string) error {
 
 	// add tsafe watch in query shard if exists, we find no way to handle it if query shard not exist
 	for _, channel := range vDeltaChannels {
-		dmlChannel, err := funcutil.ConvertChannelName(channel, Params.CommonCfg.RootCoordDelta, Params.CommonCfg.RootCoordDml)
+		dmlChannel, err := funcutil.ConvertChannelName(channel, Params.CommonCfg.RootCoordDelta.GetValue(), Params.CommonCfg.RootCoordDml.GetValue())
 		if err != nil {
 			log.Error("failed to convert delta channel to dml", zap.String("channel", channel), zap.Error(err))
 			panic(err)

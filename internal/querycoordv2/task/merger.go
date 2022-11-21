@@ -44,7 +44,7 @@ func NewMerger[K comparable, R any]() *Merger[K, R] {
 		stopCh:    make(chan struct{}),
 		queues:    make(map[K][]MergeableTask[K, R]),
 		waitQueue: make(chan MergeableTask[K, R], waitQueueCap),
-		outCh:     make(chan MergeableTask[K, R], Params.QueryCoordCfg.TaskMergeCap),
+		outCh:     make(chan MergeableTask[K, R], Params.QueryCoordCfg.TaskMergeCap.GetAsInt()),
 	}
 }
 
@@ -133,7 +133,7 @@ func (merger *Merger[K, R]) triggerExecution(id K) {
 			task.Merge(tasks[i])
 		}
 		merged++
-		if merged >= int(Params.QueryCoordCfg.TaskMergeCap) {
+		if merged >= Params.QueryCoordCfg.TaskMergeCap.GetAsInt() {
 			merger.outCh <- task
 			merged = 0
 		}

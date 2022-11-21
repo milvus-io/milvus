@@ -94,7 +94,7 @@ func (node *QueryNode) GetTimeTickChannel(ctx context.Context) (*milvuspb.String
 			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",
 		},
-		Value: Params.CommonCfg.QueryCoordTimeTick,
+		Value: Params.CommonCfg.QueryCoordTimeTick.GetValue(),
 	}, nil
 }
 

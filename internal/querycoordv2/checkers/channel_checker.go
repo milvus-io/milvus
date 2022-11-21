@@ -18,6 +18,7 @@ package checkers
 
 import (
 	"context"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
@@ -176,14 +177,14 @@ func (c *ChannelChecker) createChannelLoadTask(ctx context.Context, channels []*
 	// log.Debug("try to subscribe channels",
 	// 	zap.Any("channels", channels),
 	// 	zap.Any("plans", plans))
-	return balance.CreateChannelTasksFromPlans(ctx, c.ID(), Params.QueryCoordCfg.ChannelTaskTimeout, plans)
+	return balance.CreateChannelTasksFromPlans(ctx, c.ID(), Params.QueryCoordCfg.ChannelTaskTimeout.GetAsDuration(time.Millisecond), plans)
 }
 
 func (c *ChannelChecker) createChannelReduceTasks(ctx context.Context, channels []*meta.DmChannel, replicaID int64) []task.Task {
 	ret := make([]task.Task, 0, len(channels))
 	for _, ch := range channels {
 		action := task.NewChannelAction(ch.Node, task.ActionTypeReduce, ch.GetChannelName())
-		task, err := task.NewChannelTask(ctx, Params.QueryCoordCfg.ChannelTaskTimeout, c.ID(), ch.GetCollectionID(), replicaID, action)
+		task, err := task.NewChannelTask(ctx, Params.QueryCoordCfg.ChannelTaskTimeout.GetAsDuration(time.Millisecond), c.ID(), ch.GetCollectionID(), replicaID, action)
 		if err != nil {
 			log.Warn("Create channel reduce task failed",
 				zap.Int64("collection", ch.GetCollectionID()),

@@ -77,7 +77,7 @@ func (es *EtcdSource) GetConfigurations() (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	es.configRefresher.start()
+	es.configRefresher.start(es.GetSourceName())
 	es.RLock()
 	for key, value := range es.currentConfig {
 		configMap[key] = value
@@ -98,6 +98,7 @@ func (es *EtcdSource) GetSourceName() string {
 }
 
 func (es *EtcdSource) Close() {
+	es.etcdCli.Close()
 	es.configRefresher.stop()
 }
 

@@ -13,11 +13,14 @@ package paramtable
 
 import (
 	"strconv"
+	"time"
 )
 
 const (
-	runtimeNodeIDKey = "runtime.nodeID"
-	runtimeRoleKey   = "runtime.role"
+	runtimeNodeIDKey     = "runtime.nodeID"
+	runtimeRoleKey       = "runtime.role"
+	runtimeCreateTimeKey = "runtime.createTime"
+	runtimeUpdateTimeKey = "runtime.updateTime"
 )
 
 var params ComponentParam
@@ -48,4 +51,22 @@ func SetRole(role string) {
 
 func GetRole() string {
 	return params.Get(runtimeRoleKey)
+}
+
+func SetCreateTime(d time.Time) {
+	params.Save(runtimeCreateTimeKey, strconv.FormatInt(d.UnixNano(), 10))
+}
+
+func GetCreateTime() time.Time {
+	v, _ := strconv.ParseInt(params.Get(runtimeCreateTimeKey), 10, 64)
+	return time.Unix(v/1e9, v%1e9)
+}
+
+func SetUpdateTime(d time.Time) {
+	params.Save(runtimeUpdateTimeKey, strconv.FormatInt(d.UnixNano(), 10))
+}
+
+func GetUpdateTime() time.Time {
+	v, _ := strconv.ParseInt(params.Get(runtimeUpdateTimeKey), 10, 64)
+	return time.Unix(v/1e9, v%1e9)
 }

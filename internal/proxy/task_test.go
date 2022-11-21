@@ -570,7 +570,7 @@ func TestCreateCollectionTask(t *testing.T) {
 		assert.Error(t, err)
 		task.Schema = marshaledSchema
 
-		task.ShardsNum = Params.ProxyCfg.MaxShardNum + 1
+		task.ShardsNum = Params.ProxyCfg.MaxShardNum.GetAsInt32() + 1
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 		task.ShardsNum = shardsNum
@@ -582,7 +582,7 @@ func TestCreateCollectionTask(t *testing.T) {
 			Name:        collectionName,
 			Description: "",
 			AutoID:      false,
-			Fields:      make([]*schemapb.FieldSchema, Params.ProxyCfg.MaxFieldNum+1),
+			Fields:      make([]*schemapb.FieldSchema, Params.ProxyCfg.MaxFieldNum.GetAsInt32()+1),
 		}
 		marshaledSchemaWithTooManyFields, err := proto.Marshal(schemaWithTooManyFields)
 		assert.NoError(t, err)
@@ -602,7 +602,7 @@ func TestCreateCollectionTask(t *testing.T) {
 		assert.Error(t, err)
 
 		schema.Name = prefix
-		for i := 0; i < int(Params.ProxyCfg.MaxNameLength); i++ {
+		for i := 0; i < Params.ProxyCfg.MaxNameLength.GetAsInt(); i++ {
 			schema.Name += strconv.Itoa(i % 10)
 		}
 		tooLongNameSchema, err := proto.Marshal(schema)
@@ -701,7 +701,7 @@ func TestCreateCollectionTask(t *testing.T) {
 				schema.Fields[idx].TypeParams = []*commonpb.KeyValuePair{
 					{
 						Key:   "dim",
-						Value: strconv.Itoa(int(Params.ProxyCfg.MaxDimension) + 1),
+						Value: strconv.Itoa(Params.ProxyCfg.MaxDimension.GetAsInt() + 1),
 					},
 				}
 			}
@@ -717,7 +717,7 @@ func TestCreateCollectionTask(t *testing.T) {
 		schema.Fields[1].TypeParams = []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
-				Value: strconv.Itoa(int(Params.ProxyCfg.MaxDimension) + 1),
+				Value: strconv.Itoa(Params.ProxyCfg.MaxDimension.GetAsInt() + 1),
 			},
 		}
 		binaryTooLargeDimSchema, err := proto.Marshal(schema)

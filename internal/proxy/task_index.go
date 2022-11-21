@@ -116,7 +116,7 @@ func (cit *createIndexTask) parseIndexParams() error {
 
 	for _, kv := range cit.req.GetExtraParams() {
 		if kv.Key == common.IndexParamsKey {
-			params, err := funcutil.ParseIndexParamsMap(kv.Value)
+			params, err := funcutil.JSONToMap(kv.Value)
 			if err != nil {
 				return err
 			}
@@ -130,16 +130,16 @@ func (cit *createIndexTask) parseIndexParams() error {
 
 	if isVecIndex {
 		specifyIndexType, exist := indexParamsMap[common.IndexTypeKey]
-		if Params.AutoIndexConfig.Enable {
+		if Params.AutoIndexConfig.Enable.GetAsBool() {
 			if exist {
 				if specifyIndexType != AutoIndexName {
 					return fmt.Errorf("IndexType should be %s", AutoIndexName)
 				}
 			}
 			log.Debug("create index trigger AutoIndex",
-				zap.String("type", Params.AutoIndexConfig.AutoIndexTypeName))
+				zap.String("type", Params.AutoIndexConfig.AutoIndexTypeName.GetValue()))
 			// override params
-			for k, v := range Params.AutoIndexConfig.IndexParams {
+			for k, v := range Params.AutoIndexConfig.IndexParams.GetAsJSONMap() {
 				indexParamsMap[k] = v
 			}
 		} else {
@@ -307,7 +307,7 @@ func (cit *createIndexTask) Execute(ctx context.Context) error {
 		zap.Any("indexParams", cit.req.GetExtraParams()))
 
 	if cit.req.GetIndexName() == "" {
-		cit.req.IndexName = Params.CommonCfg.DefaultIndexName + "_" + strconv.FormatInt(cit.fieldSchema.GetFieldID(), 10)
+		cit.req.IndexName = Params.CommonCfg.DefaultIndexName.GetValue() + "_" + strconv.FormatInt(cit.fieldSchema.GetFieldID(), 10)
 	}
 	var err error
 	req := &indexpb.CreateIndexRequest{
@@ -620,7 +620,7 @@ func (gibpt *getIndexBuildProgressTask) Execute(ctx context.Context) error {
 	gibpt.collectionID = collectionID
 
 	if gibpt.IndexName == "" {
-		gibpt.IndexName = Params.CommonCfg.DefaultIndexName
+		gibpt.IndexName = Params.CommonCfg.DefaultIndexName.GetValue()
 	}
 
 	resp, err := gibpt.indexCoord.GetIndexBuildProgress(ctx, &indexpb.GetIndexBuildProgressRequest{
@@ -707,7 +707,7 @@ func (gist *getIndexStateTask) PreExecute(ctx context.Context) error {
 func (gist *getIndexStateTask) Execute(ctx context.Context) error {
 
 	if gist.IndexName == "" {
-		gist.IndexName = Params.CommonCfg.DefaultIndexName
+		gist.IndexName = Params.CommonCfg.DefaultIndexName.GetValue()
 	}
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, gist.CollectionName)
 	if err != nil {

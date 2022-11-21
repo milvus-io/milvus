@@ -55,7 +55,7 @@ func (c *channelStateTimer) getWatchers(prefix string) (clientv3.WatchChan, chan
 }
 
 func (c *channelStateTimer) loadAllChannels(nodeID UniqueID) ([]*datapb.ChannelWatchInfo, error) {
-	prefix := path.Join(Params.DataCoordCfg.ChannelWatchSubPath, strconv.FormatInt(nodeID, 10))
+	prefix := path.Join(Params.CommonCfg.DataCoordWatchSubPath.GetValue(), strconv.FormatInt(nodeID, 10))
 
 	// TODO: change to LoadWithPrefixBytes
 	keys, values, err := c.watchkv.LoadWithPrefix(prefix)

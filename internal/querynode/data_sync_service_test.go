@@ -188,7 +188,7 @@ func (s *DataSyncServiceSuite) TearDownTest() {
 func (s *DataSyncServiceSuite) TestRemoveEmptyFlowgraphByChannel() {
 	s.Run("non existing channel", func() {
 		s.Assert().NotPanics(func() {
-			channelName := fmt.Sprintf("%s_%d_1", Params.CommonCfg.RootCoordDml, defaultCollectionID)
+			channelName := fmt.Sprintf("%s_%d_1", Params.CommonCfg.RootCoordDml.GetValue(), defaultCollectionID)
 			s.dsService.removeEmptyFlowGraphByChannel(defaultCollectionID, channelName)
 		})
 	})
@@ -200,8 +200,8 @@ func (s *DataSyncServiceSuite) TestRemoveEmptyFlowgraphByChannel() {
 	})
 
 	s.Run("non-empty flowgraph", func() {
-		channelName := fmt.Sprintf("%s_%d_1", Params.CommonCfg.RootCoordDml, defaultCollectionID)
-		deltaChannelName, err := funcutil.ConvertChannelName(channelName, Params.CommonCfg.RootCoordDml, Params.CommonCfg.RootCoordDelta)
+		channelName := fmt.Sprintf("%s_%d_1", Params.CommonCfg.RootCoordDml.GetValue(), defaultCollectionID)
+		deltaChannelName, err := funcutil.ConvertChannelName(channelName, Params.CommonCfg.RootCoordDml.GetValue(), Params.CommonCfg.RootCoordDelta.GetValue())
 		s.Require().NoError(err)
 		err = s.dsService.metaReplica.addSegment(defaultSegmentID, defaultPartitionID, defaultCollectionID, channelName, defaultSegmentVersion, defaultSegmentStartPosition, segmentTypeSealed)
 		s.Require().NoError(err)
@@ -218,8 +218,8 @@ func (s *DataSyncServiceSuite) TestRemoveEmptyFlowgraphByChannel() {
 	})
 
 	s.Run("empty flowgraph", func() {
-		channelName := fmt.Sprintf("%s_%d_2", Params.CommonCfg.RootCoordDml, defaultCollectionID)
-		deltaChannelName, err := funcutil.ConvertChannelName(channelName, Params.CommonCfg.RootCoordDml, Params.CommonCfg.RootCoordDelta)
+		channelName := fmt.Sprintf("%s_%d_2", Params.CommonCfg.RootCoordDml.GetValue(), defaultCollectionID)
+		deltaChannelName, err := funcutil.ConvertChannelName(channelName, Params.CommonCfg.RootCoordDml.GetValue(), Params.CommonCfg.RootCoordDelta.GetValue())
 		s.Require().NoError(err)
 
 		_, err = s.dsService.addFlowGraphsForDeltaChannels(defaultCollectionID, []string{deltaChannelName}, map[string]string{deltaChannelName: deltaChannelName})

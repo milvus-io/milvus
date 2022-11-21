@@ -85,7 +85,7 @@ func (ex *Executor) Stop() {
 // does nothing and returns false if the action is already committed,
 // returns true otherwise.
 func (ex *Executor) Execute(task Task, step int) bool {
-	if ex.executingTaskNum.Load() > Params.QueryCoordCfg.TaskExecutionCap {
+	if ex.executingTaskNum.Load() > Params.QueryCoordCfg.TaskExecutionCap.GetAsInt32() {
 		return false
 	}
 	_, exist := ex.executingTasks.LoadOrStore(task.ID(), struct{}{})

@@ -243,10 +243,10 @@ func (node *Proxy) Init() error {
 	}
 	log.Debug("create task scheduler done", zap.String("role", typeutil.ProxyRole))
 
-	syncTimeTickInterval := Params.ProxyCfg.TimeTickInterval / 2
+	syncTimeTickInterval := Params.ProxyCfg.TimeTickInterval.GetAsDuration(time.Millisecond) / 2
 	log.Debug("create channels time ticker",
 		zap.String("role", typeutil.ProxyRole), zap.Duration("syncTimeTickInterval", syncTimeTickInterval))
-	node.chTicker = newChannelsTimeTicker(node.ctx, Params.ProxyCfg.TimeTickInterval/2, []string{}, node.sched.getPChanStatistics, tsoAllocator)
+	node.chTicker = newChannelsTimeTicker(node.ctx, Params.ProxyCfg.TimeTickInterval.GetAsDuration(time.Millisecond)/2, []string{}, node.sched.getPChanStatistics, tsoAllocator)
 	log.Debug("create channels time ticker done", zap.String("role", typeutil.ProxyRole))
 
 	log.Debug("create metrics cache manager", zap.String("role", typeutil.ProxyRole))
@@ -269,7 +269,7 @@ func (node *Proxy) sendChannelsTimeTickLoop() {
 	go func() {
 		defer node.wg.Done()
 
-		timer := time.NewTicker(Params.ProxyCfg.TimeTickInterval)
+		timer := time.NewTicker(Params.ProxyCfg.TimeTickInterval.GetAsDuration(time.Millisecond))
 
 		for {
 			select {
@@ -364,10 +364,6 @@ func (node *Proxy) Start() error {
 	for _, cb := range node.startCallbacks {
 		cb()
 	}
-
-	now := time.Now()
-	Params.ProxyCfg.CreatedTime = now
-	Params.ProxyCfg.UpdatedTime = now
 
 	log.Debug("update state code", zap.String("role", typeutil.ProxyRole), zap.String("State", commonpb.StateCode_Healthy.String()))
 	node.UpdateStateCode(commonpb.StateCode_Healthy)

@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
 
 var dataSyncServiceTestDir = "/tmp/milvus_test/data_sync_service"
@@ -217,7 +218,7 @@ func TestDataSyncService_Start(t *testing.T) {
 	allocFactory := NewAllocatorFactory(1)
 	factory := dependency.NewDefaultFactory(true)
 
-	Params.DataNodeCfg.FlushInsertBufferSize = 1
+	paramtable.Get().Save(Params.DataNodeCfg.FlushInsertBufferSize.Key, "1")
 
 	ufs := []*datapb.SegmentInfo{{
 		CollectionID:  collMeta.ID,

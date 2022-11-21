@@ -32,7 +32,7 @@ func TestChannelStateTimer(t *testing.T) {
 	kv := getMetaKv(t)
 	defer kv.Close()
 
-	prefix := Params.DataCoordCfg.ChannelWatchSubPath
+	prefix := Params.CommonCfg.DataCoordWatchSubPath.GetValue()
 
 	t.Run("test getWatcher", func(t *testing.T) {
 		timer := newChannelStateTimer(kv)
@@ -60,7 +60,7 @@ func TestChannelStateTimer(t *testing.T) {
 		validData, err := proto.Marshal(&validWatchInfo)
 		require.NoError(t, err)
 
-		prefix = Params.DataCoordCfg.ChannelWatchSubPath
+		prefix = Params.CommonCfg.DataCoordWatchSubPath.GetValue()
 		prepareKvs := map[string]string{
 			path.Join(prefix, "1/channel-1"): "invalidWatchInfo",
 			path.Join(prefix, "1/channel-2"): string(validData),

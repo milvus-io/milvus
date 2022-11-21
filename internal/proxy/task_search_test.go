@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/milvus-io/milvus/internal/util/autoindex"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/stretchr/testify/assert"
@@ -1897,13 +1896,17 @@ func TestTaskSearch_parseSearchParams_AutoIndexEnable(t *testing.T) {
 	oldIndexType := Params.AutoIndexConfig.IndexType
 	oldIndexParams := Params.AutoIndexConfig.IndexParams
 	oldSearchParamYamStr := Params.AutoIndexConfig.SearchParamsYamlStr
-	oldParser := Params.AutoIndexConfig.Parser
 	//parseSearchParams
-	Params.AutoIndexConfig.Enable = true
-	Params.AutoIndexConfig.IndexType = indexparamcheck.IndexHNSW
-	Params.AutoIndexConfig.IndexParams = make(map[string]string)
+	paramtable.Get().Save(Params.AutoIndexConfig.Enable.Key, "true")
+	paramtable.Get().Save(Params.AutoIndexConfig.IndexType.Key, indexparamcheck.IndexHNSW)
+	paramtable.Get().Save(Params.AutoIndexConfig.IndexParams.Key, "{}")
+	defer func() {
+		paramtable.Get().Reset(Params.AutoIndexConfig.Enable.Key)
+		paramtable.Get().Reset(Params.AutoIndexConfig.IndexType.Key)
+		paramtable.Get().Reset(Params.AutoIndexConfig.IndexParams.Key)
+	}()
 
-	buildParams := map[string]interface{}{
+	buildParams := map[string]any{
 		common.MetricTypeKey: indexparamcheck.L2,
 		common.IndexTypeKey:  indexparamcheck.IndexHNSW,
 		"M":                  8,
@@ -1911,7 +1914,8 @@ func TestTaskSearch_parseSearchParams_AutoIndexEnable(t *testing.T) {
 	}
 	buildParamsJSONValue, err := json.Marshal(buildParams)
 	assert.NoError(t, err)
-	Params.AutoIndexConfig.IndexParams, err = funcutil.ParseIndexParamsMap(string(buildParamsJSONValue))
+	paramtable.Get().Save(Params.AutoIndexConfig.IndexParams.Key, string(buildParamsJSONValue))
+	defer paramtable.Get().Reset(Params.AutoIndexConfig.IndexParams.Key)
 	assert.NoError(t, err)
 
 	jsonStr := `
@@ -1941,8 +1945,8 @@ func TestTaskSearch_parseSearchParams_AutoIndexEnable(t *testing.T) {
           ]
         }
       }`
-	Params.AutoIndexConfig.Parser = autoindex.NewParser()
-	Params.AutoIndexConfig.Parser.InitFromJSONStr(jsonStr)
+	paramtable.Get().Save(Params.AutoIndexConfig.SearchParamsYamlStr.Key, jsonStr)
+	defer paramtable.Get().Reset(Params.AutoIndexConfig.SearchParamsYamlStr.Key)
 
 	normalKVPairs := []*commonpb.KeyValuePair{
 		{
@@ -2085,7 +2089,6 @@ func TestTaskSearch_parseSearchParams_AutoIndexEnable(t *testing.T) {
 	Params.AutoIndexConfig.IndexType = oldIndexType
 	Params.AutoIndexConfig.IndexParams = oldIndexParams
 	Params.AutoIndexConfig.SearchParamsYamlStr = oldSearchParamYamStr
-	Params.AutoIndexConfig.Parser = oldParser
 
 }
 

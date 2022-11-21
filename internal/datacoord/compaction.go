@@ -119,7 +119,7 @@ func newCompactionPlanHandler(sessions *SessionManager, cm *ChannelManager, meta
 }
 
 func (c *compactionPlanHandler) start() {
-	interval := time.Duration(Params.DataCoordCfg.CompactionCheckIntervalInSeconds) * time.Second
+	interval := Params.DataCoordCfg.CompactionCheckIntervalInSeconds.GetAsDuration(time.Second)
 	ticker := time.NewTicker(interval)
 	c.quit = make(chan struct{})
 	c.wg.Add(1)

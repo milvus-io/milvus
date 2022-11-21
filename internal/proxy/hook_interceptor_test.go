@@ -7,18 +7,19 @@ import (
 
 	"google.golang.org/grpc"
 
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestInitHook(t *testing.T) {
-	Params.ProxyCfg.SoPath = ""
+	paramtable.Get().Save(Params.ProxyCfg.SoPath.Key, "")
 	initHook()
 	assert.IsType(t, defaultHook{}, hoo)
 
-	Params.ProxyCfg.SoPath = "/a/b/hook.so"
+	paramtable.Get().Save(Params.ProxyCfg.SoPath.Key, "/a/b/hook.so")
 	err := initHook()
 	assert.NotNil(t, err)
-	Params.ProxyCfg.SoPath = ""
+	paramtable.Get().Save(Params.ProxyCfg.SoPath.Key, "")
 }
 
 type mockHook struct {

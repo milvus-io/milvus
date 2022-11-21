@@ -56,7 +56,7 @@ func (s *Server) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringRespon
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
-		Value: Params.CommonCfg.DataCoordTimeTick,
+		Value: Params.CommonCfg.DataCoordTimeTick.GetValue(),
 	}, nil
 }
 
@@ -330,7 +330,7 @@ func (s *Server) GetSegmentInfoChannel(ctx context.Context) (*milvuspb.StringRes
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
-		Value: Params.CommonCfg.DataCoordSegmentInfo,
+		Value: Params.CommonCfg.DataCoordSegmentInfo.GetValue(),
 	}, nil
 }
 
@@ -453,7 +453,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		s.segmentManager.DropSegment(ctx, req.SegmentID)
 		s.flushCh <- req.SegmentID
 
-		if !req.Importing && Params.DataCoordCfg.EnableCompaction {
+		if !req.Importing && Params.DataCoordCfg.EnableCompaction.GetAsBool() {
 			err = s.compactionTrigger.triggerSingleCompaction(segment.GetCollectionID(), segment.GetPartitionID(),
 				segmentID, segment.GetInsertChannel())
 			if err != nil {
@@ -923,7 +923,7 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 		return resp, nil
 	}
 
-	if !Params.DataCoordCfg.EnableCompaction {
+	if !Params.DataCoordCfg.EnableCompaction.GetAsBool() {
 		resp.Status.Reason = "compaction disabled"
 		return resp, nil
 	}
@@ -957,7 +957,7 @@ func (s *Server) GetCompactionState(ctx context.Context, req *milvuspb.GetCompac
 		return resp, nil
 	}
 
-	if !Params.DataCoordCfg.EnableCompaction {
+	if !Params.DataCoordCfg.EnableCompaction.GetAsBool() {
 		resp.Status.Reason = "compaction disabled"
 		return resp, nil
 	}
@@ -996,7 +996,7 @@ func (s *Server) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.
 		return resp, nil
 	}
 
-	if !Params.DataCoordCfg.EnableCompaction {
+	if !Params.DataCoordCfg.EnableCompaction.GetAsBool() {
 		resp.Status.Reason = "compaction disabled"
 		return resp, nil
 	}

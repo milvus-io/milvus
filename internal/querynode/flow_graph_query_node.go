@@ -200,8 +200,8 @@ func (q *queryNodeFlowGraph) newDmInputNode(ctx context.Context, factory msgstre
 
 	q.dmlStream = insertStream
 
-	maxQueueLength := Params.QueryNodeCfg.FlowGraphMaxQueueLength
-	maxParallelism := Params.QueryNodeCfg.FlowGraphMaxParallelism
+	maxQueueLength := Params.QueryNodeCfg.FlowGraphMaxQueueLength.GetAsInt32()
+	maxParallelism := Params.QueryNodeCfg.FlowGraphMaxParallelism.GetAsInt32()
 	name := fmt.Sprintf("dmInputNode-query-%d-%s", collectionID, vchannel)
 	node := flowgraph.NewInputNode(insertStream, name, maxQueueLength, maxParallelism, typeutil.QueryNodeRole,
 		paramtable.GetNodeID(), collectionID, dataType)

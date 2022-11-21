@@ -20,6 +20,7 @@ import (
 	"container/heap"
 	"fmt"
 	"math"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -28,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
 
 func genTestCollectionSchema(dim int64, vectorType schemapb.DataType) *schemapb.CollectionSchema {
@@ -52,8 +54,7 @@ func genTestCollectionSchema(dim int64, vectorType schemapb.DataType) *schemapb.
 }
 
 func TestBufferData(t *testing.T) {
-	Params.DataNodeCfg.FlushInsertBufferSize = 16 * (1 << 20) // 16 MB
-
+	paramtable.Get().Save(Params.DataNodeCfg.FlushInsertBufferSize.Key, strconv.FormatInt(16*(1<<20), 10)) // 16 MB
 	tests := []struct {
 		isValid bool
 
@@ -92,7 +93,7 @@ func TestBufferData(t *testing.T) {
 }
 
 func TestBufferData_updateTimeRange(t *testing.T) {
-	Params.DataNodeCfg.FlushInsertBufferSize = 16 * (1 << 20) // 16 MB
+	paramtable.Get().Save(Params.DataNodeCfg.FlushInsertBufferSize.Key, strconv.FormatInt(16*(1<<20), 10)) // 16 MB
 
 	type testCase struct {
 		tag string

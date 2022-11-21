@@ -155,7 +155,7 @@ func (s *Server) Init() error {
 		return fmt.Errorf("failed to create session")
 	}
 	s.session.Init(typeutil.QueryCoordRole, s.address, true, true)
-	s.enableActiveStandBy = Params.QueryCoordCfg.EnableActiveStandby
+	s.enableActiveStandBy = Params.QueryCoordCfg.EnableActiveStandby.GetAsBool()
 	s.session.SetEnableActiveStandBy(s.enableActiveStandBy)
 	s.factory.Init(Params)
 
@@ -298,9 +298,6 @@ func (s *Server) initObserver() {
 }
 
 func (s *Server) afterStart() {
-	now := time.Now()
-	Params.QueryCoordCfg.CreatedTime = now
-	Params.QueryCoordCfg.UpdatedTime = now
 }
 
 func (s *Server) Start() error {
@@ -448,7 +445,7 @@ func (s *Server) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringRespon
 			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",
 		},
-		Value: Params.CommonCfg.QueryCoordTimeTick,
+		Value: Params.CommonCfg.QueryCoordTimeTick.GetValue(),
 	}, nil
 }
 

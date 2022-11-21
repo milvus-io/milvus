@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/util/importutil"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -48,11 +49,11 @@ func TestImportManager_NewImportManager(t *testing.T) {
 		globalCount++
 		return globalCount, 0, nil
 	}
-	Params.RootCoordCfg.ImportTaskSubPath = "test_import_task"
-	Params.RootCoordCfg.ImportTaskExpiration = 1  // unit: second
-	Params.RootCoordCfg.ImportTaskRetention = 200 // unit: second
-	checkPendingTasksInterval = 500               // unit: millisecond
-	cleanUpLoopInterval = 500                     // unit: millisecond
+	paramtable.Get().Save(Params.RootCoordCfg.ImportTaskSubPath.Key, "test_import_task")
+	paramtable.Get().Save(Params.RootCoordCfg.ImportTaskExpiration.Key, "1")  // unit: second
+	paramtable.Get().Save(Params.RootCoordCfg.ImportTaskRetention.Key, "200") // unit: second
+	checkPendingTasksInterval = 500                                           // unit: millisecond
+	cleanUpLoopInterval = 500                                                 // unit: millisecond
 	mockKv := memkv.NewMemoryKV()
 	ti1 := &datapb.ImportTaskInfo{
 		Id: 100,
@@ -228,9 +229,9 @@ func TestImportManager_TestSetImportTaskState(t *testing.T) {
 		globalCount++
 		return globalCount, 0, nil
 	}
-	Params.RootCoordCfg.ImportTaskSubPath = "test_import_task"
-	Params.RootCoordCfg.ImportTaskExpiration = 50
-	Params.RootCoordCfg.ImportTaskRetention = 200
+	paramtable.Get().Save(Params.RootCoordCfg.ImportTaskSubPath.Key, "test_import_task")
+	paramtable.Get().Save(Params.RootCoordCfg.ImportTaskExpiration.Key, "50")
+	paramtable.Get().Save(Params.RootCoordCfg.ImportTaskRetention.Key, "200")
 	checkPendingTasksInterval = 100
 	cleanUpLoopInterval = 100
 	mockKv := memkv.NewMemoryKV()
@@ -297,9 +298,9 @@ func TestImportManager_TestEtcdCleanUp(t *testing.T) {
 		globalCount++
 		return globalCount, 0, nil
 	}
-	Params.RootCoordCfg.ImportTaskSubPath = "test_import_task"
-	Params.RootCoordCfg.ImportTaskExpiration = 50
-	Params.RootCoordCfg.ImportTaskRetention = 200
+	paramtable.Get().Save(Params.RootCoordCfg.ImportTaskSubPath.Key, "test_import_task")
+	paramtable.Get().Save(Params.RootCoordCfg.ImportTaskExpiration.Key, "50")
+	paramtable.Get().Save(Params.RootCoordCfg.ImportTaskRetention.Key, "200")
 	checkPendingTasksInterval = 100
 	cleanUpLoopInterval = 100
 	mockKv := memkv.NewMemoryKV()
@@ -385,9 +386,9 @@ func TestImportManager_TestFlipTaskStateLoop(t *testing.T) {
 		globalCount++
 		return globalCount, 0, nil
 	}
-	Params.RootCoordCfg.ImportTaskSubPath = "test_import_task"
-	Params.RootCoordCfg.ImportTaskExpiration = 50
-	Params.RootCoordCfg.ImportTaskRetention = 200
+	paramtable.Get().Save(Params.RootCoordCfg.ImportTaskSubPath.Key, "test_import_task")
+	paramtable.Get().Save(Params.RootCoordCfg.ImportTaskExpiration.Key, "50")
+	paramtable.Get().Save(Params.RootCoordCfg.ImportTaskRetention.Key, "200")
 	checkPendingTasksInterval = 100
 	cleanUpLoopInterval = 100
 	mockKv := memkv.NewMemoryKV()
@@ -540,7 +541,7 @@ func TestImportManager_ImportJob(t *testing.T) {
 		globalCount++
 		return globalCount, 0, nil
 	}
-	Params.RootCoordCfg.ImportTaskSubPath = "test_import_task"
+	paramtable.Get().Save(Params.RootCoordCfg.ImportTaskSubPath.Key, "test_import_task")
 	colID := int64(100)
 	mockKv := memkv.NewMemoryKV()
 	callMarkSegmentsDropped := func(ctx context.Context, segIDs []typeutil.UniqueID) (*commonpb.Status, error) {
@@ -666,7 +667,7 @@ func TestImportManager_AllDataNodesBusy(t *testing.T) {
 		globalCount++
 		return globalCount, 0, nil
 	}
-	Params.RootCoordCfg.ImportTaskSubPath = "test_import_task"
+	paramtable.Get().Save(Params.RootCoordCfg.ImportTaskSubPath.Key, "test_import_task")
 	colID := int64(100)
 	mockKv := memkv.NewMemoryKV()
 	rowReq := &milvuspb.ImportRequest{
@@ -762,7 +763,7 @@ func TestImportManager_TaskState(t *testing.T) {
 		globalCount++
 		return globalCount, 0, nil
 	}
-	Params.RootCoordCfg.ImportTaskSubPath = "test_import_task"
+	paramtable.Get().Save(Params.RootCoordCfg.ImportTaskSubPath.Key, "test_import_task")
 	colID := int64(100)
 	mockKv := memkv.NewMemoryKV()
 	importServiceFunc := func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
@@ -916,7 +917,7 @@ func TestImportManager_AllocFail(t *testing.T) {
 	var idAlloc = func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
 		return 0, 0, errors.New("injected failure")
 	}
-	Params.RootCoordCfg.ImportTaskSubPath = "test_import_task"
+	paramtable.Get().Save(Params.RootCoordCfg.ImportTaskSubPath.Key, "test_import_task")
 	colID := int64(100)
 	mockKv := memkv.NewMemoryKV()
 	importServiceFunc := func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
@@ -955,7 +956,7 @@ func TestImportManager_ListAllTasks(t *testing.T) {
 		return globalCount, 0, nil
 	}
 
-	Params.RootCoordCfg.ImportTaskSubPath = "test_import_task"
+	paramtable.Get().Save(Params.RootCoordCfg.ImportTaskSubPath.Key, "test_import_task")
 
 	// reject some tasks so there are 3 tasks left in pending list
 	fn := func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {

@@ -79,13 +79,11 @@ func (c *MilvusConfig) init(base *paramtable.BaseTable) {
 	c.EtcdCfg = &paramtable.EtcdConfig{}
 	c.MysqlCfg = &paramtable.MetaDBConfig{}
 
-	c.MetaStoreCfg.Base = base
-	c.MetaStoreCfg.LoadCfgToMemory()
+	c.MetaStoreCfg.Init(base)
 
-	switch c.MetaStoreCfg.MetaStoreType {
+	switch c.MetaStoreCfg.MetaStoreType.GetValue() {
 	case util.MetaStoreTypeMysql:
-		c.MysqlCfg.Base = base
-		c.MysqlCfg.LoadCfgToMemory()
+		c.MysqlCfg.Init(base)
 	default:
 	}
 
@@ -96,11 +94,11 @@ func (c *MilvusConfig) String() string {
 	if c == nil {
 		return ""
 	}
-	switch c.MetaStoreCfg.MetaStoreType {
+	switch c.MetaStoreCfg.MetaStoreType.GetValue() {
 	case util.MetaStoreTypeEtcd:
-		return fmt.Sprintf("Type: %s, EndPoints: %v, MetaRootPath: %s", c.MetaStoreCfg.MetaStoreType, c.EtcdCfg.Endpoints, c.EtcdCfg.MetaRootPath)
+		return fmt.Sprintf("Type: %s, EndPoints: %v, MetaRootPath: %s", c.MetaStoreCfg.MetaStoreType.GetValue(), c.EtcdCfg.Endpoints.GetValue(), c.EtcdCfg.MetaRootPath.GetValue())
 	default:
-		return fmt.Sprintf("unsupported meta store: %s", c.MetaStoreCfg.MetaStoreType)
+		return fmt.Sprintf("unsupported meta store: %s", c.MetaStoreCfg.MetaStoreType.GetValue())
 	}
 }
 

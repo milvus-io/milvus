@@ -46,7 +46,7 @@ func NewMultiRateLimiter() *MultiRateLimiter {
 // Limit returns true, the request will be rejected.
 // Otherwise, the request will pass. Limit also returns limit of limiter.
 func (m *MultiRateLimiter) Limit(rt internalpb.RateType, n int) (bool, float64) {
-	if !Params.QuotaConfig.QuotaAndLimitsEnabled {
+	if !Params.QuotaConfig.QuotaAndLimitsEnabled.GetAsBool() {
 		return false, 1 // no limit
 	}
 	// TODO: call other rate limiters
@@ -103,25 +103,25 @@ func (rl *rateLimiter) registerLimiters() {
 		var r float64
 		switch internalpb.RateType(rt) {
 		case internalpb.RateType_DDLCollection:
-			r = Params.QuotaConfig.DDLCollectionRate
+			r = Params.QuotaConfig.DDLCollectionRate.GetAsFloat()
 		case internalpb.RateType_DDLPartition:
-			r = Params.QuotaConfig.DDLPartitionRate
+			r = Params.QuotaConfig.DDLPartitionRate.GetAsFloat()
 		case internalpb.RateType_DDLIndex:
-			r = Params.QuotaConfig.MaxIndexRate
+			r = Params.QuotaConfig.MaxIndexRate.GetAsFloat()
 		case internalpb.RateType_DDLFlush:
-			r = Params.QuotaConfig.MaxFlushRate
+			r = Params.QuotaConfig.MaxFlushRate.GetAsFloat()
 		case internalpb.RateType_DDLCompaction:
-			r = Params.QuotaConfig.MaxCompactionRate
+			r = Params.QuotaConfig.MaxCompactionRate.GetAsFloat()
 		case internalpb.RateType_DMLInsert:
-			r = Params.QuotaConfig.DMLMaxInsertRate
+			r = Params.QuotaConfig.DMLMaxInsertRate.GetAsFloat()
 		case internalpb.RateType_DMLDelete:
-			r = Params.QuotaConfig.DMLMaxDeleteRate
+			r = Params.QuotaConfig.DMLMaxDeleteRate.GetAsFloat()
 		case internalpb.RateType_DMLBulkLoad:
-			r = Params.QuotaConfig.DMLMaxBulkLoadRate
+			r = Params.QuotaConfig.DMLMaxBulkLoadRate.GetAsFloat()
 		case internalpb.RateType_DQLSearch:
-			r = Params.QuotaConfig.DQLMaxSearchRate
+			r = Params.QuotaConfig.DQLMaxSearchRate.GetAsFloat()
 		case internalpb.RateType_DQLQuery:
-			r = Params.QuotaConfig.DQLMaxQueryRate
+			r = Params.QuotaConfig.DQLMaxQueryRate.GetAsFloat()
 		}
 		limit := ratelimitutil.Limit(r)
 		burst := r // use rate as burst, because Limiter is with punishment mechanism, burst is insignificant.

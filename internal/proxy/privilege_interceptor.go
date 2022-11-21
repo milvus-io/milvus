@@ -72,7 +72,7 @@ func UnaryServerInterceptor(privilegeFunc PrivilegeFunc) grpc.UnaryServerInterce
 }
 
 func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context, error) {
-	if !Params.CommonCfg.AuthorizationEnabled {
+	if !Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
 		return ctx, nil
 	}
 	log.Debug("PrivilegeInterceptor", zap.String("type", reflect.TypeOf(req).String()))

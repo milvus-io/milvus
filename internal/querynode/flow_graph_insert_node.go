@@ -556,8 +556,8 @@ func getPKsFromColumnBasedInsertMsg(msg *msgstream.InsertMsg, schema *schemapb.C
 
 // newInsertNode returns a new insertNode
 func newInsertNode(metaReplica ReplicaInterface, collectionID UniqueID, vchannel Channel) *insertNode {
-	maxQueueLength := Params.QueryNodeCfg.FlowGraphMaxQueueLength
-	maxParallelism := Params.QueryNodeCfg.FlowGraphMaxParallelism
+	maxQueueLength := Params.QueryNodeCfg.FlowGraphMaxQueueLength.GetAsInt32()
+	maxParallelism := Params.QueryNodeCfg.FlowGraphMaxParallelism.GetAsInt32()
 
 	baseNode := baseNode{}
 	baseNode.SetMaxQueueLength(maxQueueLength)

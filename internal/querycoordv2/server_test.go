@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
 
 type ServerSuite struct {
@@ -216,7 +217,7 @@ func (suite *ServerSuite) TestNodeDown() {
 }
 
 func (suite *ServerSuite) TestDisableActiveStandby() {
-	Params.QueryCoordCfg.EnableActiveStandby = false
+	paramtable.Get().Save(Params.QueryCoordCfg.EnableActiveStandby.Key, "false")
 
 	err := suite.server.Stop()
 	suite.NoError(err)
@@ -235,7 +236,7 @@ func (suite *ServerSuite) TestDisableActiveStandby() {
 }
 
 func (suite *ServerSuite) TestEnableActiveStandby() {
-	Params.QueryCoordCfg.EnableActiveStandby = true
+	paramtable.Get().Save(Params.QueryCoordCfg.EnableActiveStandby.Key, "true")
 
 	err := suite.server.Stop()
 	suite.NoError(err)
@@ -255,7 +256,7 @@ func (suite *ServerSuite) TestEnableActiveStandby() {
 	suite.NoError(err)
 	suite.Equal(commonpb.StateCode_Healthy, states2.GetState().GetStateCode())
 
-	Params.QueryCoordCfg.EnableActiveStandby = false
+	paramtable.Get().Save(Params.QueryCoordCfg.EnableActiveStandby.Key, "false")
 }
 
 func (suite *ServerSuite) TestStop() {

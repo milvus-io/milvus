@@ -65,7 +65,7 @@ func (fs *FileSource) GetConfigurations() (map[string]string, error) {
 		return nil, err
 	}
 
-	fs.configRefresher.start()
+	fs.configRefresher.start(fs.GetSourceName())
 
 	fs.RLock()
 	for k, v := range fs.configs {

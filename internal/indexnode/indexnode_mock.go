@@ -232,13 +232,13 @@ func getMockSystemInfoMetrics(
 				DiskUsage:    hardware.GetDiskUsage(),
 			},
 			SystemInfo:  metricsinfo.DeployMetrics{},
-			CreatedTime: Params.IndexNodeCfg.CreatedTime.String(),
-			UpdatedTime: Params.IndexNodeCfg.UpdatedTime.String(),
+			CreatedTime: paramtable.GetCreateTime().String(),
+			UpdatedTime: paramtable.GetUpdateTime().String(),
 			Type:        typeutil.IndexNodeRole,
 		},
 		SystemConfigurations: metricsinfo.IndexNodeConfiguration{
 			MinioBucketName: Params.MinioCfg.BucketName.GetValue(),
-			SimdType:        Params.CommonCfg.SimdType,
+			SimdType:        Params.CommonCfg.SimdType.GetValue(),
 		},
 	}
 

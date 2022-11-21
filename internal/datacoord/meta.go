@@ -1022,7 +1022,7 @@ func (m *meta) alterMetaStoreAfterCompaction(modSegments []*SegmentInfo, newSegm
 	m.Lock()
 	defer m.Unlock()
 
-	modInfos := lo.Map[*SegmentInfo, *datapb.SegmentInfo](modSegments, func(item *SegmentInfo, _ int) *datapb.SegmentInfo {
+	modInfos := lo.Map(modSegments, func(item *SegmentInfo, _ int) *datapb.SegmentInfo {
 		return item.SegmentInfo
 	})
 
@@ -1052,7 +1052,7 @@ func (m *meta) revertAlterMetaStoreAfterCompaction(oldSegments []*SegmentInfo, r
 	m.Lock()
 	defer m.Unlock()
 
-	oldSegmentInfos := lo.Map[*SegmentInfo, *datapb.SegmentInfo](oldSegments, func(item *SegmentInfo, _ int) *datapb.SegmentInfo {
+	oldSegmentInfos := lo.Map(oldSegments, func(item *SegmentInfo, _ int) *datapb.SegmentInfo {
 		return item.SegmentInfo
 	})
 

@@ -21,7 +21,6 @@ import (
 	"errors"
 	"math/rand"
 	"testing"
-	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/stretchr/testify/assert"
@@ -37,13 +36,11 @@ import (
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 func generateMetaTable(t *testing.T) *MetaTable {
-	rand.Seed(time.Now().UnixNano())
-	Params.Init()
-
 	return &MetaTable{catalog: &rootcoord.Catalog{Txn: memkv.NewMemoryKV()}}
 }
 
@@ -69,11 +66,11 @@ func TestRbacAddCredential(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.description, func(t *testing.T) {
 			if test.maxUser {
-				Params.ProxyCfg.MaxUserNum = 1
+				paramtable.Get().Save(Params.ProxyCfg.MaxUserNum.Key, "1")
 			} else {
-				Params.ProxyCfg.MaxUserNum = 3
-
+				paramtable.Get().Save(Params.ProxyCfg.MaxUserNum.Key, "3")
 			}
+			defer paramtable.Get().Reset(Params.ProxyCfg.MaxUserNum.Key)
 			err := mt.AddCredential(test.info)
 			assert.Error(t, err)
 		})
@@ -83,7 +80,8 @@ func TestRbacAddCredential(t *testing.T) {
 func TestRbacCreateRole(t *testing.T) {
 	mt := generateMetaTable(t)
 
-	Params.ProxyCfg.MaxRoleNum = 2
+	paramtable.Get().Save(Params.ProxyCfg.MaxRoleNum.Key, "2")
+	defer paramtable.Get().Reset(Params.ProxyCfg.MaxRoleNum.Key)
 	err := mt.CreateRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: "role1"})
 	require.NoError(t, err)
 	err = mt.CreateRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: "role2"})
@@ -454,7 +452,7 @@ func TestMetaTable_getCollectionByIDInternal(t *testing.T) {
 					State:      pb.CollectionState_CollectionCreated,
 					CreateTime: 99,
 					Partitions: []*model.Partition{
-						{PartitionID: 11, PartitionName: Params.CommonCfg.DefaultPartitionName, State: pb.PartitionState_PartitionCreated},
+						{PartitionID: 11, PartitionName: Params.CommonCfg.DefaultPartitionName.GetValue(), State: pb.PartitionState_PartitionCreated},
 						{PartitionID: 22, PartitionName: "dropped", State: pb.PartitionState_PartitionDropped},
 					},
 				},
@@ -465,7 +463,7 @@ func TestMetaTable_getCollectionByIDInternal(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(coll.Partitions))
 		assert.Equal(t, UniqueID(11), coll.Partitions[0].PartitionID)
-		assert.Equal(t, Params.CommonCfg.DefaultPartitionName, coll.Partitions[0].PartitionName)
+		assert.Equal(t, Params.CommonCfg.DefaultPartitionName.GetValue(), coll.Partitions[0].PartitionName)
 	})
 
 	t.Run("get latest version", func(t *testing.T) {
@@ -476,7 +474,7 @@ func TestMetaTable_getCollectionByIDInternal(t *testing.T) {
 					State:      pb.CollectionState_CollectionCreated,
 					CreateTime: 99,
 					Partitions: []*model.Partition{
-						{PartitionID: 11, PartitionName: Params.CommonCfg.DefaultPartitionName, State: pb.PartitionState_PartitionCreated},
+						{PartitionID: 11, PartitionName: Params.CommonCfg.DefaultPartitionName.GetValue(), State: pb.PartitionState_PartitionCreated},
 						{PartitionID: 22, PartitionName: "dropped", State: pb.PartitionState_PartitionDropped},
 					},
 				},
@@ -487,7 +485,7 @@ func TestMetaTable_getCollectionByIDInternal(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(coll.Partitions))
 		assert.Equal(t, UniqueID(11), coll.Partitions[0].PartitionID)
-		assert.Equal(t, Params.CommonCfg.DefaultPartitionName, coll.Partitions[0].PartitionName)
+		assert.Equal(t, Params.CommonCfg.DefaultPartitionName.GetValue(), coll.Partitions[0].PartitionName)
 	})
 }
 
@@ -502,7 +500,7 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 					State:      pb.CollectionState_CollectionCreated,
 					CreateTime: 99,
 					Partitions: []*model.Partition{
-						{PartitionID: 11, PartitionName: Params.CommonCfg.DefaultPartitionName, State: pb.PartitionState_PartitionCreated},
+						{PartitionID: 11, PartitionName: Params.CommonCfg.DefaultPartitionName.GetValue(), State: pb.PartitionState_PartitionCreated},
 						{PartitionID: 22, PartitionName: "dropped", State: pb.PartitionState_PartitionDropped},
 					},
 				},
@@ -513,7 +511,7 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(coll.Partitions))
 		assert.Equal(t, UniqueID(11), coll.Partitions[0].PartitionID)
-		assert.Equal(t, Params.CommonCfg.DefaultPartitionName, coll.Partitions[0].PartitionName)
+		assert.Equal(t, Params.CommonCfg.DefaultPartitionName.GetValue(), coll.Partitions[0].PartitionName)
 	})
 
 	t.Run("get by name", func(t *testing.T) {
@@ -526,7 +524,7 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 					State:      pb.CollectionState_CollectionCreated,
 					CreateTime: 99,
 					Partitions: []*model.Partition{
-						{PartitionID: 11, PartitionName: Params.CommonCfg.DefaultPartitionName, State: pb.PartitionState_PartitionCreated},
+						{PartitionID: 11, PartitionName: Params.CommonCfg.DefaultPartitionName.GetValue(), State: pb.PartitionState_PartitionCreated},
 						{PartitionID: 22, PartitionName: "dropped", State: pb.PartitionState_PartitionDropped},
 					},
 				},
@@ -537,7 +535,7 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(coll.Partitions))
 		assert.Equal(t, UniqueID(11), coll.Partitions[0].PartitionID)
-		assert.Equal(t, Params.CommonCfg.DefaultPartitionName, coll.Partitions[0].PartitionName)
+		assert.Equal(t, Params.CommonCfg.DefaultPartitionName.GetValue(), coll.Partitions[0].PartitionName)
 	})
 
 	t.Run("failed to get from catalog", func(t *testing.T) {
@@ -577,7 +575,7 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 			State:      pb.CollectionState_CollectionCreated,
 			CreateTime: 99,
 			Partitions: []*model.Partition{
-				{PartitionID: 11, PartitionName: Params.CommonCfg.DefaultPartitionName, State: pb.PartitionState_PartitionCreated},
+				{PartitionID: 11, PartitionName: Params.CommonCfg.DefaultPartitionName.GetValue(), State: pb.PartitionState_PartitionCreated},
 				{PartitionID: 22, PartitionName: "dropped", State: pb.PartitionState_PartitionDropped},
 			},
 		}, nil)
@@ -587,7 +585,7 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(coll.Partitions))
 		assert.Equal(t, UniqueID(11), coll.Partitions[0].PartitionID)
-		assert.Equal(t, Params.CommonCfg.DefaultPartitionName, coll.Partitions[0].PartitionName)
+		assert.Equal(t, Params.CommonCfg.DefaultPartitionName.GetValue(), coll.Partitions[0].PartitionName)
 	})
 
 	t.Run("get latest version", func(t *testing.T) {

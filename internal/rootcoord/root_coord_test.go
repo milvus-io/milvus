@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -33,6 +34,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
+
+func TestMain(m *testing.M) {
+	paramtable.Init()
+	rand.Seed(time.Now().UnixNano())
+	os.Exit(m.Run())
+}
 
 func TestRootCoord_CreateCollection(t *testing.T) {
 	t.Run("not healthy", func(t *testing.T) {
@@ -1045,7 +1052,7 @@ func TestCore_ListImportTasks(t *testing.T) {
 }
 
 func TestCore_ReportImport(t *testing.T) {
-	Params.RootCoordCfg.ImportTaskSubPath = "importtask"
+	paramtable.Get().Save(Params.RootCoordCfg.ImportTaskSubPath.Key, "importtask")
 	var countLock sync.RWMutex
 	var globalCount = typeutil.UniqueID(0)
 	var idAlloc = func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error) {
@@ -1328,7 +1335,7 @@ func TestCore_startTimeTickLoop(t *testing.T) {
 		withScheduler(sched))
 	ctx, cancel := context.WithCancel(context.Background())
 	c.ctx = ctx
-	Params.ProxyCfg.TimeTickInterval = time.Millisecond
+	paramtable.Get().Save(Params.ProxyCfg.TimeTickInterval.Key, "1")
 	c.wg.Add(1)
 	c.UpdateStateCode(commonpb.StateCode_Initializing)
 	go c.startTimeTickLoop()
@@ -1343,12 +1350,12 @@ func TestRootcoord_EnableActiveStandby(t *testing.T) {
 	randVal := rand.Int()
 	Params.Init()
 	Params.BaseTable.Save("etcd.rootPath", fmt.Sprintf("/%d", randVal))
-	Params.RootCoordCfg.EnableActiveStandby = true
-	Params.CommonCfg.RootCoordTimeTick = fmt.Sprintf("rootcoord-time-tick-%d", randVal)
-	Params.CommonCfg.RootCoordStatistics = fmt.Sprintf("rootcoord-statistics-%d", randVal)
-	Params.CommonCfg.RootCoordSubName = fmt.Sprintf("subname-%d", randVal)
-	Params.CommonCfg.RootCoordDml = fmt.Sprintf("rootcoord-dml-test-%d", randVal)
-	Params.CommonCfg.RootCoordDelta = fmt.Sprintf("rootcoord-delta-test-%d", randVal)
+	paramtable.Get().Save(Params.RootCoordCfg.EnableActiveStandby.Key, "true")
+	paramtable.Get().Save(Params.CommonCfg.RootCoordTimeTick.Key, fmt.Sprintf("rootcoord-time-tick-%d", randVal))
+	paramtable.Get().Save(Params.CommonCfg.RootCoordStatistics.Key, fmt.Sprintf("rootcoord-statistics-%d", randVal))
+	paramtable.Get().Save(Params.CommonCfg.RootCoordSubName.Key, fmt.Sprintf("subname-%d", randVal))
+	paramtable.Get().Save(Params.CommonCfg.RootCoordDml.Key, fmt.Sprintf("rootcoord-dml-test-%d", randVal))
+	paramtable.Get().Save(Params.CommonCfg.RootCoordDelta.Key, fmt.Sprintf("rootcoord-delta-test-%d", randVal))
 
 	ctx := context.Background()
 	coreFactory := dependency.NewDefaultFactory(true)

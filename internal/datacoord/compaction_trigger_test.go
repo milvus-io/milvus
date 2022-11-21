@@ -24,6 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/common"
 
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -84,11 +85,12 @@ func Test_compactionTrigger_force(t *testing.T) {
 		segRefer          *SegmentReferenceManager
 	}
 
-	Params.Init()
-	Params.CommonCfg.RetentionDuration = 200
+	paramtable.Init()
+	paramtable.Get().Save(Params.CommonCfg.RetentionDuration.Key, "200")
+	defer paramtable.Get().Reset(Params.CommonCfg.RetentionDuration.Key)
 
 	pts, _ := tsoutil.ParseTS(0)
-	ttRetention := pts.Add(-time.Duration(Params.CommonCfg.RetentionDuration) * time.Second)
+	ttRetention := pts.Add(-1 * Params.CommonCfg.RetentionDuration.GetAsDuration(time.Second))
 	timeTravel := tsoutil.ComposeTS(ttRetention.UnixNano()/int64(time.Millisecond), 0)
 
 	vecFieldID := int64(201)
@@ -331,7 +333,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 						},
 					},
 					StartTime:        0,
-					TimeoutInSeconds: Params.DataCoordCfg.CompactionTimeoutInSeconds,
+					TimeoutInSeconds: Params.DataCoordCfg.CompactionTimeoutInSeconds.GetAsInt32(),
 					Type:             datapb.CompactionType_MixCompaction,
 					Timetravel:       timeTravel,
 					Channel:          "ch1",
@@ -766,7 +768,7 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 						},
 					},
 					StartTime:        3,
-					TimeoutInSeconds: Params.DataCoordCfg.CompactionTimeoutInSeconds,
+					TimeoutInSeconds: Params.DataCoordCfg.CompactionTimeoutInSeconds.GetAsInt32(),
 					Type:             datapb.CompactionType_MixCompaction,
 					Timetravel:       200,
 					Channel:          "ch1",
@@ -870,7 +872,7 @@ func Test_compactionTrigger_noplan(t *testing.T) {
 									Binlogs: []*datapb.FieldBinlog{
 										{
 											Binlogs: []*datapb.Binlog{
-												{EntriesNum: 5, LogPath: "log2", LogSize: int64(Params.DataCoordCfg.SegmentMaxSize)*1024*1024 - 1},
+												{EntriesNum: 5, LogPath: "log2", LogSize: Params.DataCoordCfg.SegmentMaxSize.GetAsInt64()*1024*1024 - 1},
 											},
 										},
 									},

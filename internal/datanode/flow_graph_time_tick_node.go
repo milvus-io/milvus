@@ -111,8 +111,8 @@ func (ttn *ttNode) updateChannelCP(ttPos *internalpb.MsgPosition) {
 
 func newTTNode(config *nodeConfig, dc types.DataCoord) (*ttNode, error) {
 	baseNode := BaseNode{}
-	baseNode.SetMaxQueueLength(Params.DataNodeCfg.FlowGraphMaxQueueLength)
-	baseNode.SetMaxParallelism(Params.DataNodeCfg.FlowGraphMaxParallelism)
+	baseNode.SetMaxQueueLength(Params.DataNodeCfg.FlowGraphMaxQueueLength.GetAsInt32())
+	baseNode.SetMaxParallelism(Params.DataNodeCfg.FlowGraphMaxParallelism.GetAsInt32())
 
 	tt := &ttNode{
 		BaseNode:       baseNode,

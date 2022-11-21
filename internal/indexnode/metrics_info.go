@@ -31,7 +31,7 @@ import (
 //getComponentConfigurations returns the configurations of queryNode matching req.Pattern
 func getComponentConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) *internalpb.ShowConfigurationsResponse {
 	prefix := "indexnode."
-	matchedConfig := Params.IndexNodeCfg.Base.GetByPattern(prefix + req.Pattern)
+	matchedConfig := Params.GetByPattern(prefix + req.Pattern)
 	configList := make([]*commonpb.KeyValuePair, 0, len(matchedConfig))
 	for key, value := range matchedConfig {
 		configList = append(configList,
@@ -70,14 +70,14 @@ func getSystemInfoMetrics(
 				DiskUsage:    hardware.GetDiskUsage(),
 			},
 			SystemInfo:  metricsinfo.DeployMetrics{},
-			CreatedTime: Params.IndexNodeCfg.CreatedTime.String(),
-			UpdatedTime: Params.IndexNodeCfg.UpdatedTime.String(),
+			CreatedTime: paramtable.GetCreateTime().String(),
+			UpdatedTime: paramtable.GetUpdateTime().String(),
 			Type:        typeutil.IndexNodeRole,
 			ID:          node.session.ServerID,
 		},
 		SystemConfigurations: metricsinfo.IndexNodeConfiguration{
 			MinioBucketName: Params.MinioCfg.BucketName.GetValue(),
-			SimdType:        Params.CommonCfg.SimdType,
+			SimdType:        Params.CommonCfg.SimdType.GetValue(),
 		},
 	}
 

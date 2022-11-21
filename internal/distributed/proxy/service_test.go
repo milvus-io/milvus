@@ -1357,7 +1357,7 @@ func Test_NewServer(t *testing.T) {
 
 	// Update config and start server again to test with different config set.
 	// This works as config will be initialized only once
-	proxy.Params.ProxyCfg.GinLogging = false
+	paramtable.Get().Save(proxy.Params.ProxyCfg.GinLogging.Key, "false")
 	err = runAndWaitForServerReady(server)
 	assert.Nil(t, err)
 	err = server.Stop()

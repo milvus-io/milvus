@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/util/metautil"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -124,7 +125,7 @@ func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
 				parallelCh: make(map[int64]chan struct{}),
 				allocator:  newMockAllocator(),
 			}
-			Params.DataCoordCfg.CompactionCheckIntervalInSeconds = 1
+			Params.Save(Params.DataCoordCfg.CompactionCheckIntervalInSeconds.Key, "1")
 			c.start()
 			err := c.execCompactionPlan(tt.args.signal, tt.args.plan)
 			assert.Equal(t, tt.err, err)
@@ -154,7 +155,8 @@ func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
 func Test_compactionPlanHandler_execWithParallels(t *testing.T) {
 
 	mockDataNode := &mocks.DataNode{}
-	Params.DataCoordCfg.CompactionCheckIntervalInSeconds = 1
+	paramtable.Get().Save(Params.DataCoordCfg.CompactionCheckIntervalInSeconds.Key, "1")
+	defer paramtable.Get().Reset(Params.DataCoordCfg.CompactionCheckIntervalInSeconds.Key)
 	c := &compactionPlanHandler{
 		plans: map[int64]*compactionTask{},
 		sessions: &SessionManager{

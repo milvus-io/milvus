@@ -347,7 +347,7 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 	})
 
 	t.Run("test load with partial success", func(t *testing.T) {
-		deltaChannel, err := funcutil.ConvertChannelName(testVChannel, Params.CommonCfg.RootCoordDml, Params.CommonCfg.RootCoordDelta)
+		deltaChannel, err := funcutil.ConvertChannelName(testVChannel, Params.CommonCfg.RootCoordDml.GetValue(), Params.CommonCfg.RootCoordDelta.GetValue())
 		assert.NoError(t, err)
 
 		node.metaReplica.removeSegment(defaultSegmentID, segmentTypeSealed)

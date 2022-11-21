@@ -366,8 +366,8 @@ func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, er
 	ttl := s.sessionTTL
 	retryTimes := s.sessionRetryTimes
 	if !s.useCustomConfig {
-		ttl = paramtable.Get().CommonCfg.SessionTTL
-		retryTimes = paramtable.Get().CommonCfg.SessionRetryTimes
+		ttl = paramtable.Get().CommonCfg.SessionTTL.GetAsInt64()
+		retryTimes = paramtable.Get().CommonCfg.SessionRetryTimes.GetAsInt64()
 	}
 
 	registerFn := func() error {

@@ -145,6 +145,8 @@ func (gp *BaseTable) initConfigsFromLocal(formatter func(key string) string) {
 func (gp *BaseTable) initConfigsFromRemote(formatter func(key string) string) {
 	etcdConfig := EtcdConfig{}
 	etcdConfig.Init(gp)
+	etcdConfig.Endpoints.PanicIfEmpty = false
+	etcdConfig.RootPath.PanicIfEmpty = false
 	if etcdConfig.Endpoints.GetValue() == "" {
 		return
 	}
@@ -163,19 +165,13 @@ func (gp *BaseTable) initConfigsFromRemote(formatter func(key string) string) {
 		RefreshInterval: 10 * time.Second,
 	}
 
-	configFilePath := gp.configDir + "/" + gp.YamlFile
-	var err error
-	gp.mgr, err = config.Init(
-		config.WithEnvSource(formatter),
-		config.WithFilesSource(&config.FileInfo{
-			Filepath:        configFilePath,
-			RefreshInterval: 10 * time.Second,
-		}),
-		config.WithEtcdSource(info))
+	s, err := config.NewEtcdSource(info)
 	if err != nil {
 		log.Info("init with etcd failed", zap.Error(err))
 		return
 	}
+	gp.mgr.AddSource(s)
+	s.SetEventHandler(gp.mgr)
 }
 
 // GetConfigDir returns the config directory
@@ -263,15 +259,21 @@ func (gp *BaseTable) GetAll() map[string]string {
 	return gp.mgr.GetConfigs()
 }
 
-// For compatible reason, only visiable for Test
+// Remove Config by key
 func (gp *BaseTable) Remove(key string) error {
 	gp.mgr.DeleteConfig(key)
 	return nil
 }
 
-// For compatible reason, only visiable for Test
+// Update Config
 func (gp *BaseTable) Save(key, value string) error {
 	gp.mgr.SetConfig(key, value)
+	return nil
+}
+
+// Reset Config to default value
+func (gp *BaseTable) Reset(key string) error {
+	gp.mgr.ResetConfig(key)
 	return nil
 }
 

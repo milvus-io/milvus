@@ -156,7 +156,7 @@ func (bm *DelBufferManager) CompactSegBuf(compactedToSegID UniqueID, compactedFr
 
 func (bm *DelBufferManager) ShouldFlushSegments() []UniqueID {
 	var shouldFlushSegments []UniqueID
-	if bm.delMemorySize < Params.DataNodeCfg.FlushDeleteBufferBytes {
+	if bm.delMemorySize < Params.DataNodeCfg.FlushDeleteBufferBytes.GetAsInt64() {
 		return shouldFlushSegments
 	}
 	mmUsage := bm.delMemorySize
@@ -167,7 +167,7 @@ func (bm *DelBufferManager) ShouldFlushSegments() []UniqueID {
 		shouldFlushSegments = append(shouldFlushSegments, segMem.segmentID)
 		log.Debug("add segment for delete buf flush", zap.Int64("segmentID", segMem.segmentID))
 		mmUsage -= segMem.memorySize
-		if mmUsage < Params.DataNodeCfg.FlushDeleteBufferBytes {
+		if mmUsage < Params.DataNodeCfg.FlushDeleteBufferBytes.GetAsInt64() {
 			break
 		}
 	}
@@ -357,7 +357,7 @@ func newBufferData(collSchema *schemapb.CollectionSchema) (*BufferData, error) {
 		return nil, errors.New("Invalid dimension")
 	}
 
-	limit := Params.DataNodeCfg.FlushInsertBufferSize / int64(vectorSize)
+	limit := Params.DataNodeCfg.FlushInsertBufferSize.GetAsInt64() / int64(vectorSize)
 
 	//TODO::xige-16 eval vec and string field
 	return &BufferData{

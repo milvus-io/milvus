@@ -69,7 +69,7 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 	defer ob.wg.Done()
 	log.Info("Start update next target loop")
 
-	ticker := time.NewTicker(params.Params.QueryCoordCfg.UpdateNextTargetInterval)
+	ticker := time.NewTicker(params.Params.QueryCoordCfg.UpdateNextTargetInterval.GetAsDuration(time.Second))
 	for {
 		select {
 		case <-ctx.Done():
@@ -112,7 +112,7 @@ func (ob *TargetObserver) shouldUpdateNextTarget(collectionID int64) bool {
 }
 
 func (ob *TargetObserver) isNextTargetExpired(collectionID int64) bool {
-	return time.Since(ob.nextTargetLastUpdate[collectionID]) > params.Params.QueryCoordCfg.NextTargetSurviveTime
+	return time.Since(ob.nextTargetLastUpdate[collectionID]) > params.Params.QueryCoordCfg.NextTargetSurviveTime.GetAsDuration(time.Second)
 }
 
 func (ob *TargetObserver) UpdateNextTarget(collectionID int64) {

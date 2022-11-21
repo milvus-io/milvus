@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/util/etcd"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
 
 type CollectionObserverSuite struct {
@@ -198,7 +199,7 @@ func (suite *CollectionObserverSuite) TestObserve() {
 	// time before load
 	time := suite.meta.GetCollection(suite.collections[2]).UpdatedAt
 	// Not timeout
-	Params.QueryCoordCfg.LoadTimeoutSeconds = timeout
+	paramtable.Get().Save(Params.QueryCoordCfg.LoadTimeoutSeconds.Key, "2")
 
 	segments := []*datapb.SegmentBinlogs{}
 	for _, segment := range suite.segments[100] {

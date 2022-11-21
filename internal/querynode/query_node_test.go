@@ -135,6 +135,7 @@ func TestMain(m *testing.M) {
 	addrs := etcd.GetEmbedEtcdEndpoints(embedetcdServer)
 	// setup env for etcd endpoint
 	os.Setenv("etcd.endpoints", strings.Join(addrs, ","))
+	paramtable.Init()
 	setup()
 	exitCode := m.Run()
 	os.Exit(exitCode)

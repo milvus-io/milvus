@@ -21,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -563,7 +564,7 @@ func withTtSynchronizer(ticker *timetickSync) Opt {
 
 func newRocksMqTtSynchronizer() *timetickSync {
 	Params.InitOnce()
-	Params.RootCoordCfg.DmlChannelNum = 4
+	paramtable.Get().Save(Params.RootCoordCfg.DmlChannelNum.Key, "4")
 	ctx := context.Background()
 	factory := dependency.NewDefaultFactory(true)
 	chans := map[UniqueID][]string{}
@@ -945,7 +946,7 @@ func newTickerWithMockNormalStream() *timetickSync {
 
 func newTickerWithFactory(factory msgstream.Factory) *timetickSync {
 	Params.InitOnce()
-	Params.RootCoordCfg.DmlChannelNum = 4
+	paramtable.Get().Save(Params.RootCoordCfg.DmlChannelNum.Key, "4")
 	ctx := context.Background()
 	chans := map[UniqueID][]string{}
 	ticker := newTimeTickSync(ctx, TestRootCoordID, factory, chans)

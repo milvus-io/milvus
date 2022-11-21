@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -133,7 +134,7 @@ func (s *Server) balanceSegments(ctx context.Context, req *querypb.LoadBalanceRe
 			zap.Int64("segmentID", plan.Segment.GetID()),
 		)
 		task, err := task.NewSegmentTask(ctx,
-			Params.QueryCoordCfg.SegmentTaskTimeout,
+			Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond),
 			req.GetBase().GetMsgID(),
 			req.GetCollectionID(),
 			replica.GetID(),
@@ -159,7 +160,7 @@ func (s *Server) balanceSegments(ctx context.Context, req *querypb.LoadBalanceRe
 		}
 		tasks = append(tasks, task)
 	}
-	return task.Wait(ctx, Params.QueryCoordCfg.SegmentTaskTimeout, tasks...)
+	return task.Wait(ctx, Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond), tasks...)
 }
 
 // TODO(dragondriver): add more detail metrics
@@ -181,14 +182,14 @@ func (s *Server) getSystemInfoMetrics(
 					DiskUsage:    hardware.GetDiskUsage(),
 				},
 				SystemInfo:  metricsinfo.DeployMetrics{},
-				CreatedTime: Params.QueryCoordCfg.CreatedTime.String(),
-				UpdatedTime: Params.QueryCoordCfg.UpdatedTime.String(),
+				CreatedTime: paramtable.GetCreateTime().String(),
+				UpdatedTime: paramtable.GetUpdateTime().String(),
 				Type:        typeutil.QueryCoordRole,
 				ID:          s.session.ServerID,
 			},
 			SystemConfigurations: metricsinfo.QueryCoordConfiguration{
-				SearchChannelPrefix:       Params.CommonCfg.QueryCoordSearch,
-				SearchResultChannelPrefix: Params.CommonCfg.QueryCoordSearchResult,
+				SearchChannelPrefix:       Params.CommonCfg.QueryCoordSearch.GetValue(),
+				SearchResultChannelPrefix: Params.CommonCfg.QueryCoordSearchResult.GetValue(),
 			},
 		},
 		ConnectedNodes: make([]metricsinfo.QueryNodeInfos, 0),

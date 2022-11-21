@@ -235,7 +235,7 @@ func (node *DataNode) initRateCollector() error {
 // Init function does nothing now.
 func (node *DataNode) Init() error {
 	log.Info("DataNode server initializing",
-		zap.String("TimeTickChannelName", Params.CommonCfg.DataCoordTimeTick),
+		zap.String("TimeTickChannelName", Params.CommonCfg.DataCoordTimeTick.GetValue()),
 	)
 	if err := node.initSession(); err != nil {
 		log.Error("DataNode server init session failed", zap.Error(err))
@@ -260,7 +260,7 @@ func (node *DataNode) Init() error {
 
 	node.factory.Init(Params)
 	log.Info("DataNode server init succeeded",
-		zap.String("MsgChannelSubName", Params.CommonCfg.DataNodeSubName))
+		zap.String("MsgChannelSubName", Params.CommonCfg.DataNodeSubName.GetValue()))
 
 	return nil
 }
@@ -270,7 +270,7 @@ func (node *DataNode) StartWatchChannels(ctx context.Context) {
 	defer logutil.LogPanic()
 	// REF MEP#7 watch path should be [prefix]/channel/{node_id}/{channel_name}
 	// TODO, this is risky, we'd better watch etcd with revision rather simply a path
-	watchPrefix := path.Join(Params.DataNodeCfg.ChannelWatchSubPath, fmt.Sprintf("%d", paramtable.GetNodeID()))
+	watchPrefix := path.Join(Params.CommonCfg.DataCoordWatchSubPath.GetValue(), fmt.Sprintf("%d", paramtable.GetNodeID()))
 	evtChan := node.watchKv.WatchWithPrefix(watchPrefix)
 	// after watch, first check all exists nodes first
 	err := node.checkWatchedList()
@@ -312,7 +312,7 @@ func (node *DataNode) StartWatchChannels(ctx context.Context) {
 // serves the corner case for etcd connection lost and missing some events
 func (node *DataNode) checkWatchedList() error {
 	// REF MEP#7 watch path should be [prefix]/channel/{node_id}/{channel_name}
-	prefix := path.Join(Params.DataNodeCfg.ChannelWatchSubPath, fmt.Sprintf("%d", paramtable.GetNodeID()))
+	prefix := path.Join(Params.CommonCfg.DataCoordWatchSubPath.GetValue(), fmt.Sprintf("%d", paramtable.GetNodeID()))
 	keys, values, err := node.watchKv.LoadWithPrefix(prefix)
 	if err != nil {
 		return err
@@ -422,7 +422,7 @@ func (node *DataNode) handlePutEvent(watchInfo *datapb.ChannelWatchInfo, version
 		return fmt.Errorf("fail to marshal watchInfo with state, vChanName: %s, state: %s ,err: %w", vChanName, watchInfo.State.String(), err)
 	}
 
-	key := path.Join(Params.DataNodeCfg.ChannelWatchSubPath, fmt.Sprintf("%d", paramtable.GetNodeID()), vChanName)
+	key := path.Join(Params.CommonCfg.DataCoordWatchSubPath.GetValue(), fmt.Sprintf("%d", paramtable.GetNodeID()), vChanName)
 
 	success, err := node.watchKv.CompareVersionAndSwap(key, version, string(v))
 	// etcd error, retrying
@@ -517,9 +517,6 @@ func (node *DataNode) Start() error {
 
 	// Start node watch node
 	go node.StartWatchChannels(node.ctx)
-
-	Params.DataNodeCfg.CreatedTime = time.Now()
-	Params.DataNodeCfg.UpdatedTime = time.Now()
 
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 	return nil
@@ -1068,7 +1065,7 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 	}
 
 	// parse files and generate segments
-	segmentSize := int64(Params.DataCoordCfg.SegmentMaxSize) * 1024 * 1024
+	segmentSize := Params.DataCoordCfg.SegmentMaxSize.GetAsInt64() * 1024 * 1024
 	importWrapper := importutil.NewImportWrapper(newCtx, colInfo.GetSchema(), colInfo.GetShardsNum(), segmentSize, node.rowIDAllocator,
 		node.chunkManager, importResult, reportFunc)
 	importWrapper.SetCallbackFunctions(assignSegmentFunc(node, req),
