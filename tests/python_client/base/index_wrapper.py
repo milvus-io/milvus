@@ -14,7 +14,7 @@ class ApiIndexWrapper:
 
     def init_index(self, collection, field_name, index_params, index_name=None, check_task=None, check_items=None,
                    **kwargs):
-        disktimeout = 100
+        disktimeout = 600
         timeout = kwargs.get("timeout", disktimeout * 2)
         index_name = INDEX_NAME if index_name is None else index_name
         index_name = kwargs.get("index_name", index_name)
