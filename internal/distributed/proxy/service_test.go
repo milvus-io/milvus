@@ -752,10 +752,6 @@ func (m *MockProxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (
 	return nil, nil
 }
 
-func (m *MockProxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDistanceRequest) (*milvuspb.CalcDistanceResults, error) {
-	return nil, nil
-}
-
 func (m *MockProxy) GetDdChannel(ctx context.Context, request *internalpb.GetDdChannelRequest) (*milvuspb.StringResponse, error) {
 	return nil, nil
 }
@@ -1204,11 +1200,6 @@ func Test_NewServer(t *testing.T) {
 
 	t.Run("Query", func(t *testing.T) {
 		_, err := server.Query(ctx, nil)
-		assert.Nil(t, err)
-	})
-
-	t.Run("CalcDistance", func(t *testing.T) {
-		_, err := server.CalcDistance(ctx, nil)
 		assert.Nil(t, err)
 	})
 

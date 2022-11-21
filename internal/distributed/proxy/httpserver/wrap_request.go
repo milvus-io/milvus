@@ -313,16 +313,6 @@ func serializeVectors(fv []float32) []byte {
 	return data
 }
 
-// WrappedCalcDistanceRequest is the RESTful request body for calc distance
-type WrappedCalcDistanceRequest struct {
-	Base *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
-
-	OpLeft  VectorsArray `json:"op_left,omitempty"`
-	OpRight VectorsArray `json:"op_right,omitempty"`
-
-	Params []*commonpb.KeyValuePair `json:"params,omitempty"`
-}
-
 // VectorsArray is vector array, assigned by vectors or ids
 type VectorsArray struct {
 	// Dim of vectors or binary_vectors, not needed when use ids

@@ -685,8 +685,9 @@ func (s *Server) Query(ctx context.Context, request *milvuspb.QueryRequest) (*mi
 	return s.proxy.Query(ctx, request)
 }
 
+// the CalcDistance function is removed, but the proto still keep the declaration. will delete it in next step
 func (s *Server) CalcDistance(ctx context.Context, request *milvuspb.CalcDistanceRequest) (*milvuspb.CalcDistanceResults, error) {
-	return s.proxy.CalcDistance(ctx, request)
+	return nil, nil
 }
 
 func (s *Server) GetDdChannel(ctx context.Context, request *internalpb.GetDdChannelRequest) (*milvuspb.StringResponse, error) {

@@ -1163,16 +1163,6 @@ type ProxyComponent interface {
 	// error is always nil
 	Query(ctx context.Context, request *milvuspb.QueryRequest) (*milvuspb.QueryResults, error)
 
-	// CalcDistance notifies Proxy to calculate distance between specified vectors
-	//
-	// ctx is the context to control request deadline and cancellation
-	// req contains the request params, including database name(reserved), vectors to calculate
-	//
-	// The `Status` in response struct `CalcDistanceResults` indicates if this operation is processed successfully or fail cause;
-	// The `Array` in response struct `CalcDistanceResults` return distance result
-	// Return generic error when specified vectors not found or float/binary vectors mismatch, otherwise return nil
-	CalcDistance(ctx context.Context, request *milvuspb.CalcDistanceRequest) (*milvuspb.CalcDistanceResults, error)
-
 	// Not yet implemented
 	GetDdChannel(ctx context.Context, request *internalpb.GetDdChannelRequest) (*milvuspb.StringResponse, error)
 

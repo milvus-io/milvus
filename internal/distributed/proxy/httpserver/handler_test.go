@@ -176,21 +176,6 @@ func (m *mockProxyComponent) Flush(ctx context.Context, request *milvuspb.FlushR
 	return &flushResult, nil
 }
 
-var calcDistanceResult = milvuspb.CalcDistanceResults{
-	Array: &milvuspb.CalcDistanceResults_IntDist{
-		IntDist: &schemapb.IntArray{
-			Data: []int32{1, 2, 3},
-		},
-	},
-}
-
-func (m *mockProxyComponent) CalcDistance(ctx context.Context, request *milvuspb.CalcDistanceRequest) (*milvuspb.CalcDistanceResults, error) {
-	if len(request.Params) < 1 {
-		return nil, errors.New("body parse err")
-	}
-	return &calcDistanceResult, nil
-}
-
 func (m *mockProxyComponent) GetFlushState(ctx context.Context, request *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
 	return &milvuspb.GetFlushStateResponse{Status: testStatus}, nil
 }
@@ -438,13 +423,6 @@ func TestHandlers(t *testing.T) {
 		{
 			http.MethodPost, "/persist", milvuspb.FlushRequest{CollectionNames: []string{"c1"}},
 			http.StatusOK, flushResult,
-		},
-		{
-			http.MethodGet, "/distance", milvuspb.CalcDistanceRequest{
-				Params: []*commonpb.KeyValuePair{
-					{Key: "key", Value: "val"},
-				}},
-			http.StatusOK, calcDistanceResult,
 		},
 		{
 			http.MethodGet, "/persist/state", emptyBody,

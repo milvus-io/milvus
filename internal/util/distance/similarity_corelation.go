@@ -18,6 +18,23 @@ package distance
 
 import "strings"
 
+const (
+	// L2 represents the Euclidean distance
+	L2 = "L2"
+	// IP represents the inner product distance
+	IP = "IP"
+	// HAMMING represents the hamming distance
+	HAMMING = "HAMMING"
+	// TANIMOTO represents the tanimoto distance
+	TANIMOTO = "TANIMOTO"
+	// JACCARD in string
+	JACCARD = "JACCARD"
+	// SUPERSTRUCTURE in string
+	SUPERSTRUCTURE = "SUPERSTRUCTURE"
+	// SUBSTRUCTURE in string
+	SUBSTRUCTURE = "SUBSTRUCTURE"
+)
+
 // PositivelyRelated return if metricType are "ip" or "IP"
 func PositivelyRelated(metricType string) bool {
 	mUpper := strings.ToUpper(metricType)

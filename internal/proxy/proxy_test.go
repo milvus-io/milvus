@@ -326,6 +326,10 @@ func (s *proxyTestServer) GetStatisticsChannel(ctx context.Context, request *int
 	return s.Proxy.GetStatisticsChannel(ctx)
 }
 
+func (s *proxyTestServer) CalcDistance(ctx context.Context, request *milvuspb.CalcDistanceRequest) (*milvuspb.CalcDistanceResults, error) {
+	return nil, nil
+}
+
 func (s *proxyTestServer) startGrpc(ctx context.Context, wg *sync.WaitGroup) {
 	defer wg.Done()
 
@@ -593,7 +597,7 @@ func TestProxy(t *testing.T) {
 	// topk := 10
 	// add a test parameter
 	// roundDecimal := 6
-	nq := 10
+
 	// expr := fmt.Sprintf("%s > 0", int64Field)
 	var segmentIDs []int64
 
@@ -1507,54 +1511,6 @@ func TestProxy(t *testing.T) {
 	//         assert.Equal(t, commonpb.ErrorCode_EmptyCollection, res.Status.ErrorCode)
 	//     })
 	// }
-
-	wg.Add(1)
-	t.Run("calculate distance", func(t *testing.T) {
-		defer wg.Done()
-		opLeft := &milvuspb.VectorsArray{
-			Array: &milvuspb.VectorsArray_DataArray{
-				DataArray: &schemapb.VectorField{
-					Dim: int64(dim),
-					Data: &schemapb.VectorField_FloatVector{
-						FloatVector: &schemapb.FloatArray{
-							Data: generateFloatVectors(nq, dim),
-						},
-					},
-				},
-			},
-		}
-
-		opRight := &milvuspb.VectorsArray{
-			Array: &milvuspb.VectorsArray_DataArray{
-				DataArray: &schemapb.VectorField{
-					Dim: int64(dim),
-					Data: &schemapb.VectorField_FloatVector{
-						FloatVector: &schemapb.FloatArray{
-							Data: generateFloatVectors(nq, dim),
-						},
-					},
-				},
-			},
-		}
-
-		//resp, err := proxy.CalcDistance(ctx, &milvuspb.CalcDistanceRequest{
-		_, err := proxy.CalcDistance(ctx, &milvuspb.CalcDistanceRequest{
-			Base:    nil,
-			OpLeft:  opLeft,
-			OpRight: opRight,
-			Params: []*commonpb.KeyValuePair{
-				{
-					Key:   common.MetricTypeKey,
-					Value: distance.L2,
-				},
-			},
-		})
-		assert.NoError(t, err)
-		// assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-		// TODO(dragondriver): compare distance
-
-		// TODO(dragondriver): use primary key to calculate distance
-	})
 
 	t.Run("get dd channel", func(t *testing.T) {
 		f := func() {

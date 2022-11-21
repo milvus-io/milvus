@@ -59,7 +59,6 @@ func (h *Handlers) RegisterRoutesTo(router gin.IRouter) {
 	router.POST("/query", wrapHandler(h.handleQuery))
 
 	router.POST("/persist", wrapHandler(h.handleFlush))
-	router.GET("/distance", wrapHandler(h.handleCalcDistance))
 	router.GET("/persist/state", wrapHandler(h.handleGetFlushState))
 	router.GET("/persist/segment-info", wrapHandler(h.handleGetPersistentSegmentInfo))
 	router.GET("/query-segment-info", wrapHandler(h.handleGetQuerySegmentInfo))
@@ -390,22 +389,6 @@ func (h *Handlers) handleFlush(c *gin.Context) (interface{}, error) {
 		return nil, fmt.Errorf("%w: parse body failed: %v", errBadRequest, err)
 	}
 	return h.proxy.Flush(c, &req)
-}
-
-func (h *Handlers) handleCalcDistance(c *gin.Context) (interface{}, error) {
-	wrappedReq := WrappedCalcDistanceRequest{}
-	err := shouldBind(c, &wrappedReq)
-	if err != nil {
-		return nil, fmt.Errorf("%w: parse body failed: %v", errBadRequest, err)
-	}
-
-	req := milvuspb.CalcDistanceRequest{
-		Base:    wrappedReq.Base,
-		Params:  wrappedReq.Params,
-		OpLeft:  wrappedReq.OpLeft.AsPbVectorArray(),
-		OpRight: wrappedReq.OpRight.AsPbVectorArray(),
-	}
-	return h.proxy.CalcDistance(c, &req)
 }
 
 func (h *Handlers) handleGetFlushState(c *gin.Context) (interface{}, error) {
