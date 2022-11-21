@@ -1057,7 +1057,7 @@ func Test_compactionTrigger_smallfiles(t *testing.T) {
 										},
 									},
 								},
-								lastFlushTime: time.Now(),
+								lastFlushTime: time.Now().Add(-100 * time.Minute),
 							},
 							2: {
 								SegmentInfo: &datapb.SegmentInfo{
