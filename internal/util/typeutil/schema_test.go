@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -514,6 +515,75 @@ func TestAppendFieldData(t *testing.T) {
 	assert.Equal(t, FloatVector, result[6].GetVectors().GetFloatVector().Data)
 }
 
+func TestDeleteFieldData(t *testing.T) {
+	const (
+		Dim                   = 8
+		BoolFieldName         = "BoolField"
+		Int32FieldName        = "Int32Field"
+		Int64FieldName        = "Int64Field"
+		FloatFieldName        = "FloatField"
+		DoubleFieldName       = "DoubleField"
+		BinaryVectorFieldName = "BinaryVectorField"
+		FloatVectorFieldName  = "FloatVectorField"
+		BoolFieldID           = common.StartOfUserFieldID + 1
+		Int32FieldID          = common.StartOfUserFieldID + 2
+		Int64FieldID          = common.StartOfUserFieldID + 3
+		FloatFieldID          = common.StartOfUserFieldID + 4
+		DoubleFieldID         = common.StartOfUserFieldID + 5
+		BinaryVectorFieldID   = common.StartOfUserFieldID + 6
+		FloatVectorFieldID    = common.StartOfUserFieldID + 7
+	)
+	BoolArray := []bool{true, false}
+	Int32Array := []int32{1, 2}
+	Int64Array := []int64{11, 22}
+	FloatArray := []float32{1.0, 2.0}
+	DoubleArray := []float64{11.0, 22.0}
+	BinaryVector := []byte{0x12, 0x34}
+	FloatVector := []float32{1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 11.0, 22.0, 33.0, 44.0, 55.0, 66.0, 77.0, 88.0}
+
+	result1 := make([]*schemapb.FieldData, 7)
+	result2 := make([]*schemapb.FieldData, 7)
+	var fieldDataArray1 []*schemapb.FieldData
+	fieldDataArray1 = append(fieldDataArray1, genFieldData(BoolFieldName, BoolFieldID, schemapb.DataType_Bool, BoolArray[0:1], 1))
+	fieldDataArray1 = append(fieldDataArray1, genFieldData(Int32FieldName, Int32FieldID, schemapb.DataType_Int32, Int32Array[0:1], 1))
+	fieldDataArray1 = append(fieldDataArray1, genFieldData(Int64FieldName, Int64FieldID, schemapb.DataType_Int64, Int64Array[0:1], 1))
+	fieldDataArray1 = append(fieldDataArray1, genFieldData(FloatFieldName, FloatFieldID, schemapb.DataType_Float, FloatArray[0:1], 1))
+	fieldDataArray1 = append(fieldDataArray1, genFieldData(DoubleFieldName, DoubleFieldID, schemapb.DataType_Double, DoubleArray[0:1], 1))
+	fieldDataArray1 = append(fieldDataArray1, genFieldData(BinaryVectorFieldName, BinaryVectorFieldID, schemapb.DataType_BinaryVector, BinaryVector[0:Dim/8], Dim))
+	fieldDataArray1 = append(fieldDataArray1, genFieldData(FloatVectorFieldName, FloatVectorFieldID, schemapb.DataType_FloatVector, FloatVector[0:Dim], Dim))
+
+	var fieldDataArray2 []*schemapb.FieldData
+	fieldDataArray2 = append(fieldDataArray2, genFieldData(BoolFieldName, BoolFieldID, schemapb.DataType_Bool, BoolArray[1:2], 1))
+	fieldDataArray2 = append(fieldDataArray2, genFieldData(Int32FieldName, Int32FieldID, schemapb.DataType_Int32, Int32Array[1:2], 1))
+	fieldDataArray2 = append(fieldDataArray2, genFieldData(Int64FieldName, Int64FieldID, schemapb.DataType_Int64, Int64Array[1:2], 1))
+	fieldDataArray2 = append(fieldDataArray2, genFieldData(FloatFieldName, FloatFieldID, schemapb.DataType_Float, FloatArray[1:2], 1))
+	fieldDataArray2 = append(fieldDataArray2, genFieldData(DoubleFieldName, DoubleFieldID, schemapb.DataType_Double, DoubleArray[1:2], 1))
+	fieldDataArray2 = append(fieldDataArray2, genFieldData(BinaryVectorFieldName, BinaryVectorFieldID, schemapb.DataType_BinaryVector, BinaryVector[Dim/8:2*Dim/8], Dim))
+	fieldDataArray2 = append(fieldDataArray2, genFieldData(FloatVectorFieldName, FloatVectorFieldID, schemapb.DataType_FloatVector, FloatVector[Dim:2*Dim], Dim))
+
+	AppendFieldData(result1, fieldDataArray1, 0)
+	AppendFieldData(result1, fieldDataArray2, 0)
+	DeleteFieldData(result1)
+	assert.Equal(t, BoolArray[0:1], result1[0].GetScalars().GetBoolData().Data)
+	assert.Equal(t, Int32Array[0:1], result1[1].GetScalars().GetIntData().Data)
+	assert.Equal(t, Int64Array[0:1], result1[2].GetScalars().GetLongData().Data)
+	assert.Equal(t, FloatArray[0:1], result1[3].GetScalars().GetFloatData().Data)
+	assert.Equal(t, DoubleArray[0:1], result1[4].GetScalars().GetDoubleData().Data)
+	assert.Equal(t, BinaryVector[0:Dim/8], result1[5].GetVectors().Data.(*schemapb.VectorField_BinaryVector).BinaryVector)
+	assert.Equal(t, FloatVector[0:Dim], result1[6].GetVectors().GetFloatVector().Data)
+
+	AppendFieldData(result2, fieldDataArray2, 0)
+	AppendFieldData(result2, fieldDataArray1, 0)
+	DeleteFieldData(result2)
+	assert.Equal(t, BoolArray[1:2], result2[0].GetScalars().GetBoolData().Data)
+	assert.Equal(t, Int32Array[1:2], result2[1].GetScalars().GetIntData().Data)
+	assert.Equal(t, Int64Array[1:2], result2[2].GetScalars().GetLongData().Data)
+	assert.Equal(t, FloatArray[1:2], result2[3].GetScalars().GetFloatData().Data)
+	assert.Equal(t, DoubleArray[1:2], result2[4].GetScalars().GetDoubleData().Data)
+	assert.Equal(t, BinaryVector[Dim/8:2*Dim/8], result2[5].GetVectors().Data.(*schemapb.VectorField_BinaryVector).BinaryVector)
+	assert.Equal(t, FloatVector[Dim:2*Dim], result2[6].GetVectors().GetFloatVector().Data)
+}
+
 func TestGetPrimaryFieldSchema(t *testing.T) {
 	int64Field := &schemapb.FieldSchema{
 		FieldID:  1,
@@ -598,6 +668,26 @@ func TestGetPK(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGetTS(t *testing.T) {
+	var timeStampFieldData = [5]Timestamp{0, 1, 2, 3, 4}
+	result := &internalpb.RetrieveResults{
+		FieldsData: []*schemapb.FieldData{
+			genFieldData(common.TimeStampFieldName, common.TimeStampField, schemapb.DataType_Int64,
+				[]int64{0, 1, 2, 3, 4}, 1),
+		},
+	}
+	timeStamp := GetTS(result, 0)
+	assert.Equal(t, timeStampFieldData[0], timeStamp)
+	timeStamp = GetTS(result, 1)
+	assert.Equal(t, timeStampFieldData[1], timeStamp)
+	timeStamp = GetTS(result, 2)
+	assert.Equal(t, timeStampFieldData[2], timeStamp)
+	timeStamp = GetTS(result, 3)
+	assert.Equal(t, timeStampFieldData[3], timeStamp)
+	timeStamp = GetTS(result, 4)
+	assert.Equal(t, timeStampFieldData[4], timeStamp)
 }
 
 func TestAppendPKs(t *testing.T) {

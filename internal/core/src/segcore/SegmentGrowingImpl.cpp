@@ -300,7 +300,8 @@ SegmentGrowingImpl::bulk_subscript(SystemFieldType system_type,
                                    void* output) const {
     switch (system_type) {
         case SystemFieldType::Timestamp:
-            PanicInfo("timestamp unsupported");
+            bulk_subscript_impl<Timestamp>(this->insert_record_.timestamps_, seg_offsets, count, output);
+            break;
         case SystemFieldType::RowId:
             bulk_subscript_impl<int64_t>(this->insert_record_.row_ids_, seg_offsets, count, output);
             break;

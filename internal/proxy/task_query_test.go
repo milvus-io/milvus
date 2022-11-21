@@ -123,6 +123,7 @@ func TestQueryTask_all(t *testing.T) {
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_Success,
 			},
+			FieldsData: []*schemapb.FieldData{},
 		},
 		request: &milvuspb.QueryRequest{
 			Base: &commonpb.MsgBase{
@@ -173,7 +174,8 @@ func TestQueryTask_all(t *testing.T) {
 	for fieldName, dataType := range fieldName2Types {
 		result1.FieldsData = append(result1.FieldsData, generateFieldData(dataType, fieldName, hitNum))
 	}
-
+	result1.FieldsData = append(result1.FieldsData, generateFieldData(schemapb.DataType_Int64, common.TimeStampFieldName, hitNum))
+	task.RetrieveRequest.OutputFieldsId = append(task.RetrieveRequest.OutputFieldsId, common.TimeStampField)
 	task.ctx = ctx
 	qn.queryError = fmt.Errorf("mock error")
 	assert.Error(t, task.Execute(ctx))
@@ -199,6 +201,10 @@ func TestQueryTask_all(t *testing.T) {
 	assert.NoError(t, task.Execute(ctx))
 
 	assert.NoError(t, task.PostExecute(ctx))
+
+	for i := 0; i < len(task.result.FieldsData); i++ {
+		assert.NotEqual(t, task.result.FieldsData[i].FieldId, common.TimeStampField)
+	}
 }
 
 func Test_translateToOutputFieldIDs(t *testing.T) {
