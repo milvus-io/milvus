@@ -56,7 +56,7 @@ func getRowDataSizeOfFloatVector(numRows int64, dim int64) int64 {
 func FillDiskIndexParams(params *paramtable.ComponentParam, indexParams map[string]string) error {
 	maxDegree := strconv.FormatInt(params.CommonCfg.MaxDegree, 10)
 	searchListSize := strconv.FormatInt(params.CommonCfg.SearchListSize, 10)
-	pgCodeBudgetGBRatio := params.CommonCfg.PGCodeBudgetGBRatio
+	pqCodeBudgetGBRatio := params.CommonCfg.PQCodeBudgetGBRatio
 	buildNumThreadsRatio := params.CommonCfg.BuildNumThreadsRatio
 
 	searchCacheBudgetGBRatio := params.CommonCfg.SearchCacheBudgetGBRatio
@@ -73,7 +73,7 @@ func FillDiskIndexParams(params *paramtable.ComponentParam, indexParams map[stri
 		if !ok {
 			return fmt.Errorf("index param search_list_size not exist")
 		}
-		pgCodeBudgetGBRatio = params.AutoIndexConfig.BigDataExtraParams.PGCodeBudgetGBRatio
+		pqCodeBudgetGBRatio = params.AutoIndexConfig.BigDataExtraParams.PQCodeBudgetGBRatio
 		buildNumThreadsRatio = params.AutoIndexConfig.BigDataExtraParams.BuildNumThreadsRatio
 		searchCacheBudgetGBRatio = params.AutoIndexConfig.BigDataExtraParams.SearchCacheBudgetGBRatio
 		loadNumThreadRatio = params.AutoIndexConfig.BigDataExtraParams.LoadNumThreadRatio
@@ -82,7 +82,7 @@ func FillDiskIndexParams(params *paramtable.ComponentParam, indexParams map[stri
 
 	indexParams[MaxDegreeKey] = maxDegree
 	indexParams[SearchListSizeKey] = searchListSize
-	indexParams[PQCodeBudgetRatioKey] = fmt.Sprintf("%f", pgCodeBudgetGBRatio)
+	indexParams[PQCodeBudgetRatioKey] = fmt.Sprintf("%f", pqCodeBudgetGBRatio)
 	indexParams[NumBuildThreadRatioKey] = fmt.Sprintf("%f", buildNumThreadsRatio)
 	indexParams[SearchCacheBudgetRatioKey] = fmt.Sprintf("%f", searchCacheBudgetGBRatio)
 	indexParams[NumLoadThreadRatioKey] = fmt.Sprintf("%f", loadNumThreadRatio)
@@ -104,11 +104,11 @@ func SetDiskIndexBuildParams(indexParams map[string]string, numRows int64) error
 		return err
 	}
 
-	pgCodeBudgetGBRatioStr, ok := indexParams[PQCodeBudgetRatioKey]
+	pqCodeBudgetGBRatioStr, ok := indexParams[PQCodeBudgetRatioKey]
 	if !ok {
-		return fmt.Errorf("index param pgCodeBudgetGBRatio not exist")
+		return fmt.Errorf("index param pqCodeBudgetGBRatio not exist")
 	}
-	pgCodeBudgetGBRatio, err := strconv.ParseFloat(pgCodeBudgetGBRatioStr, 64)
+	pqCodeBudgetGBRatio, err := strconv.ParseFloat(pqCodeBudgetGBRatioStr, 64)
 	if err != nil {
 		return err
 	}
@@ -122,7 +122,7 @@ func SetDiskIndexBuildParams(indexParams map[string]string, numRows int64) error
 	}
 
 	indexParams[PQCodeBudgetKey] = fmt.Sprintf("%f",
-		float32(getRowDataSizeOfFloatVector(numRows, dim))*float32(pgCodeBudgetGBRatio)/(1<<30))
+		float32(getRowDataSizeOfFloatVector(numRows, dim))*float32(pqCodeBudgetGBRatio)/(1<<30))
 	indexParams[NumBuildThreadKey] = strconv.Itoa(int(float32(hardware.GetCPUNum()) * float32(buildNumThreadsRatio)))
 	indexParams[BuildDramBudgetKey] = fmt.Sprintf("%f", float32(hardware.GetFreeMemoryCount())/(1<<30))
 

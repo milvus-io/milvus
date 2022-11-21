@@ -22,7 +22,7 @@ import (
 )
 
 type BigDataIndexExtraParams struct {
-	PGCodeBudgetGBRatio      float64
+	PQCodeBudgetGBRatio      float64
 	BuildNumThreadsRatio     float64
 	SearchCacheBudgetGBRatio float64
 	LoadNumThreadRatio       float64
@@ -33,7 +33,7 @@ const (
 	BuildRatioKey                   = "build_ratio"
 	PrepareRatioKey                 = "prepare_ratio"
 	BeamWidthRatioKey               = "beamwidth_ratio"
-	DefaultPGCodeBudgetGBRatio      = 0.125
+	DefaultPQCodeBudgetGBRatio      = 0.125
 	DefaultBuildNumThreadsRatio     = 1.0
 	DefaultSearchCacheBudgetGBRatio = 0.125
 	DefaultLoadNumThreadRatio       = 8.0
@@ -42,7 +42,7 @@ const (
 
 func NewBigDataIndexExtraParams() *BigDataIndexExtraParams {
 	ret := &BigDataIndexExtraParams{
-		PGCodeBudgetGBRatio:      DefaultPGCodeBudgetGBRatio,
+		PQCodeBudgetGBRatio:      DefaultPQCodeBudgetGBRatio,
 		BuildNumThreadsRatio:     DefaultBuildNumThreadsRatio,
 		SearchCacheBudgetGBRatio: DefaultSearchCacheBudgetGBRatio,
 		LoadNumThreadRatio:       DefaultLoadNumThreadRatio,
@@ -65,7 +65,7 @@ func NewBigDataExtraParamsFromMap(value map[string]string) (*BigDataIndexExtraPa
 	var err error
 	buildRatio, ok := value[BuildRatioKey]
 	if !ok {
-		ret.PGCodeBudgetGBRatio = DefaultPGCodeBudgetGBRatio
+		ret.PQCodeBudgetGBRatio = DefaultPQCodeBudgetGBRatio
 		ret.BuildNumThreadsRatio = DefaultBuildNumThreadsRatio
 	} else {
 		valueMap1 := make(map[string]float64)
@@ -74,11 +74,11 @@ func NewBigDataExtraParamsFromMap(value map[string]string) (*BigDataIndexExtraPa
 			return ret, err
 		}
 
-		PGCodeBudgetGBRatio, ok := valueMap1["pg_code_budget_gb"]
+		PQCodeBudgetGBRatio, ok := valueMap1["pq_code_budget_gb"]
 		if !ok {
-			ret.PGCodeBudgetGBRatio = DefaultPGCodeBudgetGBRatio
+			ret.PQCodeBudgetGBRatio = DefaultPQCodeBudgetGBRatio
 		} else {
-			ret.PGCodeBudgetGBRatio = PGCodeBudgetGBRatio
+			ret.PQCodeBudgetGBRatio = PQCodeBudgetGBRatio
 		}
 		BuildNumThreadsRatio, ok := valueMap1["num_threads"]
 		if !ok {

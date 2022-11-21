@@ -35,9 +35,9 @@ func TestDiskIndexParams(t *testing.T) {
 		err := FillDiskIndexParams(&params, indexParams)
 		assert.NoError(t, err)
 
-		pgCodeBudgetGBRatio, err := strconv.ParseFloat(indexParams[PQCodeBudgetRatioKey], 64)
+		pqCodeBudgetGBRatio, err := strconv.ParseFloat(indexParams[PQCodeBudgetRatioKey], 64)
 		assert.NoError(t, err)
-		assert.Equal(t, 0.125, pgCodeBudgetGBRatio)
+		assert.Equal(t, 0.125, pqCodeBudgetGBRatio)
 
 		buildNumThreadsRatio, err := strconv.ParseFloat(indexParams[NumBuildThreadRatioKey], 64)
 		assert.NoError(t, err)
@@ -61,7 +61,7 @@ func TestDiskIndexParams(t *testing.T) {
 		params.AutoIndexConfig.Enable = true
 
 		mapString := make(map[string]string)
-		mapString[autoindex.BuildRatioKey] = "{\"pg_code_budget_gb\": 0.125, \"num_threads\": 1}"
+		mapString[autoindex.BuildRatioKey] = "{\"pq_code_budget_gb\": 0.125, \"num_threads\": 1}"
 		mapString[autoindex.PrepareRatioKey] = "{\"search_cache_budget_gb\": 0.225, \"num_threads\": 4}"
 		extraParams, err := autoindex.NewBigDataExtraParamsFromMap(mapString)
 		assert.NoError(t, err)
@@ -75,9 +75,9 @@ func TestDiskIndexParams(t *testing.T) {
 		err = FillDiskIndexParams(&params, indexParams)
 		assert.NoError(t, err)
 
-		pgCodeBudgetGBRatio, err := strconv.ParseFloat(indexParams[PQCodeBudgetRatioKey], 64)
+		pqCodeBudgetGBRatio, err := strconv.ParseFloat(indexParams[PQCodeBudgetRatioKey], 64)
 		assert.NoError(t, err)
-		assert.Equal(t, 0.125, pgCodeBudgetGBRatio)
+		assert.Equal(t, 0.125, pqCodeBudgetGBRatio)
 
 		buildNumThreadsRatio, err := strconv.ParseFloat(indexParams[NumBuildThreadRatioKey], 64)
 		assert.NoError(t, err)
