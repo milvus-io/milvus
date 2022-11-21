@@ -1580,11 +1580,11 @@ class TestIndexDiskann(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         data = cf.gen_default_list_data()
         collection_w.insert(data=data)
+        assert collection_w.num_entities == default_nb
         index, _ = self.index_wrap.init_index(collection_w.collection, default_float_vec_field_name, ct.default_diskann_index)
         log.info(self.index_wrap.params)
         cf.assert_equal_index(index, collection_w.indexes[0])
         collection_w.load()
-        assert collection_w.num_entities == default_nb
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         search_res, _ = collection_w.search(vectors[:default_nq], default_search_field,
                                             ct.default_diskann_search_params, default_limit,
@@ -1625,6 +1625,7 @@ class TestIndexDiskann(TestcaseBase):
         collection_w = self.init_collection_wrap(c_name)
         data = cf.gen_default_list_data()
         collection_w.insert(data=data)
+        assert collection_w.num_entities == default_nb
         res, _ = collection_w.create_index(ct.default_float_vec_field_name, ct.default_diskann_index,
                                            index_name=ct.default_index_name, _async=_async,
                                            _callback=self.call_back())
@@ -1651,6 +1652,7 @@ class TestIndexDiskann(TestcaseBase):
         collection_w = self.init_collection_wrap(c_name)
         data = cf.gen_default_list_data()
         collection_w.insert(data=data)
+        assert collection_w.num_entities == default_nb
         res, _ = collection_w.create_index(ct.default_float_vec_field_name, ct.default_diskann_index,
                                            index_name=ct.default_index_name, _async=_async)
         if _async:
@@ -1699,6 +1701,7 @@ class TestIndexDiskann(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         data = cf.gen_default_list_data()
         collection_w.insert(data=data)
+        assert collection_w.num_entities == default_nb
         collection_w.create_index(default_float_vec_field_name, ct.default_diskann_index, index_name=index_name1)
         collection_w.load()
         assert len(collection_w.indexes) == 1
@@ -1739,6 +1742,7 @@ class TestIndexDiskann(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         data = cf.gen_default_list_data()
         collection_w.insert(data=data)
+        assert collection_w.num_entities == default_nb
         collection_w.create_index(default_float_vec_field_name, ct.default_diskann_index, index_name="a")
         assert collection_w.has_index(index_name="a")[0] == True
         collection_w.create_index(default_string_field_name, default_string_index_params, index_name="b")
@@ -1797,6 +1801,7 @@ class TestIndexDiskann(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         data = cf.gen_default_list_data(default_nb)
         collection_w.insert(data=data)
+        assert collection_w.num_entities == default_nb
 
         def build(collection_w):
 
