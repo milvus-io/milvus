@@ -34,6 +34,7 @@ type RowCountBasedBalancerTestSuite struct {
 	suite.Suite
 	balancer *RowCountBasedBalancer
 	kv       *etcdkv.EtcdKV
+	broker   *meta.MockBroker
 }
 
 func (suite *RowCountBasedBalancerTestSuite) SetupSuite() {
@@ -46,14 +47,16 @@ func (suite *RowCountBasedBalancerTestSuite) SetupTest() {
 	cli, err := etcd.GetEtcdClient(&config)
 	suite.Require().NoError(err)
 	suite.kv = etcdkv.NewEtcdKV(cli, config.MetaRootPath)
+	suite.broker = meta.NewMockBroker(suite.T())
 
 	store := meta.NewMetaStore(suite.kv)
 	idAllocator := RandomIncrementIDAllocator()
 	testMeta := meta.NewMeta(idAllocator, store)
+	testTarget := meta.NewTargetManager()
 
 	distManager := meta.NewDistributionManager()
 	nodeManager := session.NewNodeManager()
-	suite.balancer = NewRowCountBasedBalancer(nil, nodeManager, distManager, testMeta)
+	suite.balancer = NewRowCountBasedBalancer(nil, nodeManager, distManager, testMeta, testTarget)
 }
 
 func (suite *RowCountBasedBalancerTestSuite) TearDownTest() {
@@ -146,6 +149,9 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalance() {
 			defer suite.TearDownTest()
 			balancer := suite.balancer
 			collection := utils.CreateTestCollection(1, 1)
+			balancer.targetMgr.AddSegment(utils.CreateTestSegmentInfo(1, 1, 1, "test-insert-channel"))
+			balancer.targetMgr.AddSegment(utils.CreateTestSegmentInfo(1, 1, 2, "test-insert-channel"))
+			balancer.targetMgr.AddSegment(utils.CreateTestSegmentInfo(1, 1, 3, "test-insert-channel"))
 			collection.LoadPercentage = 100
 			collection.Status = querypb.LoadStatus_Loaded
 			balancer.meta.CollectionManager.PutCollection(collection)

@@ -140,6 +140,7 @@ func (suite *ServiceSuite) SetupTest() {
 		suite.nodeMgr,
 		suite.dist,
 		suite.meta,
+		suite.targetMgr,
 	)
 
 	suite.server = &Server{
