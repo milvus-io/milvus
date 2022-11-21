@@ -229,3 +229,37 @@ TEST_F(LocalChunkManagerTest, ReadOffset) {
     exist = lcm.DirExist(path_prefix);
     EXPECT_EQ(exist, false);
 }
+
+TEST_F(LocalChunkManagerTest, GetSizeOfDir) {
+    auto& lcm = LocalChunkManager::GetInstance();
+    auto path_prefix = lcm.GetPathPrefix();
+    auto test_dir = path_prefix + "/" + "test_dir/";
+    EXPECT_EQ(lcm.DirExist(test_dir), false);
+    lcm.CreateDir(test_dir);
+    EXPECT_EQ(lcm.DirExist(test_dir), true);
+    EXPECT_EQ(lcm.GetSizeOfDir(test_dir), 0);
+
+    uint8_t data[] = {0x17, 0x32, 0x00, 0x34, 0x23, 0x23, 0x87, 0x98};
+    // test get size of file in test_dir
+    auto file1 = test_dir + "file";
+    auto res = lcm.CreateFile(file1);
+    EXPECT_EQ(res, true);
+    lcm.Write(file1, data, sizeof(data));
+    EXPECT_EQ(lcm.GetSizeOfDir(test_dir), sizeof(data));
+    lcm.Remove(file1);
+    auto exist = lcm.Exist(file1);
+    EXPECT_EQ(exist, false);
+
+    // test get dir size with nested dirs
+    auto nest_dir = test_dir + "nest_dir/";
+    auto file2 = nest_dir + "file";
+    res = lcm.CreateFile(file2);
+    EXPECT_EQ(res, true);
+    lcm.Write(file2, data, sizeof(data));
+    EXPECT_EQ(lcm.GetSizeOfDir(test_dir), sizeof(data));
+    lcm.RemoveDir(test_dir);
+
+    lcm.RemoveDir(path_prefix);
+    exist = lcm.DirExist(path_prefix);
+    EXPECT_EQ(exist, false);
+}

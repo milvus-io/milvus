@@ -202,6 +202,9 @@ LocalChunkManager::GetSizeOfDir(const std::string& dir) {
         if (boost::filesystem::is_regular_file(it->path())) {
             total_file_size += boost::filesystem::file_size(it->path());
         }
+        if (boost::filesystem::is_directory(it->path())) {
+            total_file_size += GetSizeOfDir(it->path().string());
+        }
     }
 
     return total_file_size;
