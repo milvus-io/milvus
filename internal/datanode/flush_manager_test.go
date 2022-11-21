@@ -150,7 +150,7 @@ func TestRendezvousFlushManager(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cm := storage.NewLocalChunkManager(storage.RootPath(flushTestDir))
-	defer cm.RemoveWithPrefix(ctx, "")
+	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
 	size := 1000
 	var counter atomic.Int64
@@ -189,7 +189,7 @@ func TestRendezvousFlushManager_Inject(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cm := storage.NewLocalChunkManager(storage.RootPath(flushTestDir))
-	defer cm.RemoveWithPrefix(ctx, "")
+	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
 	size := 1000
 	var counter atomic.Int64
@@ -288,7 +288,11 @@ func TestRendezvousFlushManager_Inject(t *testing.T) {
 }
 
 func TestRendezvousFlushManager_getSegmentMeta(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
 	cm := storage.NewLocalChunkManager(storage.RootPath(flushTestDir))
+	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
+
 	channel := newTestChannel()
 	channel.collSchema = &schemapb.CollectionSchema{}
 	fm := NewRendezvousFlushManager(NewAllocatorFactory(), cm, channel, func(*segmentFlushPack) {
@@ -315,7 +319,10 @@ func TestRendezvousFlushManager_getSegmentMeta(t *testing.T) {
 }
 
 func TestRendezvousFlushManager_waitForAllFlushQueue(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	cm := storage.NewLocalChunkManager(storage.RootPath(flushTestDir))
+	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
 	size := 1000
 	var counter atomic.Int64
@@ -384,8 +391,11 @@ func TestRendezvousFlushManager_waitForAllFlushQueue(t *testing.T) {
 }
 
 func TestRendezvousFlushManager_dropMode(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	t.Run("test drop mode", func(t *testing.T) {
 		cm := storage.NewLocalChunkManager(storage.RootPath(flushTestDir))
+		defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
 		var mut sync.Mutex
 		var result []*segmentFlushPack
@@ -438,6 +448,7 @@ func TestRendezvousFlushManager_dropMode(t *testing.T) {
 	})
 	t.Run("test drop mode with injection", func(t *testing.T) {
 		cm := storage.NewLocalChunkManager(storage.RootPath(flushTestDir))
+		defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
 		var mut sync.Mutex
 		var result []*segmentFlushPack
@@ -496,7 +507,10 @@ func TestRendezvousFlushManager_dropMode(t *testing.T) {
 }
 
 func TestRendezvousFlushManager_close(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	cm := storage.NewLocalChunkManager(storage.RootPath(flushTestDir))
+	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
 	size := 1000
 	var counter atomic.Int64
@@ -536,7 +550,10 @@ func TestFlushNotifyFunc(t *testing.T) {
 	rcf := &RootCoordFactory{
 		pkType: schemapb.DataType_Int64,
 	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	cm := storage.NewLocalChunkManager(storage.RootPath(flushTestDir))
+	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
 	channel := newChannel("channel", 1, nil, rcf, cm)
 
@@ -606,7 +623,11 @@ func TestDropVirtualChannelFunc(t *testing.T) {
 	}
 	vchanName := "vchan_01"
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	cm := storage.NewLocalChunkManager(storage.RootPath(flushTestDir))
+	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
+
 	channel := newChannel(vchanName, 1, nil, rcf, cm)
 
 	dataCoord := &DataCoordFactory{}

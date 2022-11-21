@@ -145,7 +145,7 @@ func TestDataSyncService_newDataSyncService(te *testing.T) {
 			"add un-flushed and flushed segments"},
 	}
 	cm := storage.NewLocalChunkManager(storage.RootPath(dataSyncServiceTestDir))
-	defer cm.RemoveWithPrefix(ctx, "")
+	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
 	for _, test := range tests {
 		te.Run(test.description, func(t *testing.T) {
@@ -211,7 +211,7 @@ func TestDataSyncService_Start(t *testing.T) {
 	flushChan := make(chan flushMsg, 100)
 	resendTTChan := make(chan resendTTMsg, 100)
 	cm := storage.NewLocalChunkManager(storage.RootPath(dataSyncServiceTestDir))
-	defer cm.RemoveWithPrefix(ctx, "")
+	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 	channel := newChannel(insertChannelName, collectionID, collMeta.GetSchema(), mockRootCoord, cm)
 
 	allocFactory := NewAllocatorFactory(1)
@@ -414,7 +414,7 @@ func TestClearGlobalFlushingCache(t *testing.T) {
 	defer cancel()
 	dataCoord := &DataCoordFactory{}
 	cm := storage.NewLocalChunkManager(storage.RootPath(dataSyncServiceTestDir))
-	defer cm.RemoveWithPrefix(ctx, "")
+	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 	channel := newChannel("channel", 1, nil, &RootCoordFactory{pkType: schemapb.DataType_Int64}, cm)
 	var err error
 

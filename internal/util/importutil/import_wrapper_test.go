@@ -24,6 +24,7 @@ import (
 	"errors"
 	"math"
 	"os"
+	"path"
 	"strconv"
 	"testing"
 	"time"
@@ -249,7 +250,7 @@ func Test_ImportWrapperRowBased(t *testing.T) {
 	filePath := TempFilesPath + "rows_1.json"
 	err = cm.Write(ctx, filePath, content)
 	assert.NoError(t, err)
-	defer cm.RemoveWithPrefix(ctx, "")
+	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
 	rowCounter := &rowCounterTest{}
 	assignSegmentFunc, flushFunc, saveSegmentFunc := createMockCallbackFunctions(t, rowCounter)
@@ -313,70 +314,70 @@ func createSampleNumpyFiles(t *testing.T, cm storage.ChunkManager) []string {
 	ctx := context.Background()
 	files := make([]string, 0)
 
-	filePath := "FieldBool.npy"
+	filePath := path.Join(cm.RootPath(), "FieldBool.npy")
 	content, err := CreateNumpyData([]bool{true, false, true, true, true})
 	assert.Nil(t, err)
 	err = cm.Write(ctx, filePath, content)
 	assert.NoError(t, err)
 	files = append(files, filePath)
 
-	filePath = "FieldInt8.npy"
+	filePath = path.Join(cm.RootPath(), "FieldInt8.npy")
 	content, err = CreateNumpyData([]int8{10, 11, 12, 13, 14})
 	assert.Nil(t, err)
 	err = cm.Write(ctx, filePath, content)
 	assert.NoError(t, err)
 	files = append(files, filePath)
 
-	filePath = "FieldInt16.npy"
+	filePath = path.Join(cm.RootPath(), "FieldInt16.npy")
 	content, err = CreateNumpyData([]int16{100, 101, 102, 103, 104})
 	assert.Nil(t, err)
 	err = cm.Write(ctx, filePath, content)
 	assert.NoError(t, err)
 	files = append(files, filePath)
 
-	filePath = "FieldInt32.npy"
+	filePath = path.Join(cm.RootPath(), "FieldInt32.npy")
 	content, err = CreateNumpyData([]int32{1000, 1001, 1002, 1003, 1004})
 	assert.Nil(t, err)
 	err = cm.Write(ctx, filePath, content)
 	assert.NoError(t, err)
 	files = append(files, filePath)
 
-	filePath = "FieldInt64.npy"
+	filePath = path.Join(cm.RootPath(), "FieldInt64.npy")
 	content, err = CreateNumpyData([]int64{10000, 10001, 10002, 10003, 10004})
 	assert.Nil(t, err)
 	err = cm.Write(ctx, filePath, content)
 	assert.NoError(t, err)
 	files = append(files, filePath)
 
-	filePath = "FieldFloat.npy"
+	filePath = path.Join(cm.RootPath(), "FieldFloat.npy")
 	content, err = CreateNumpyData([]float32{3.14, 3.15, 3.16, 3.17, 3.18})
 	assert.Nil(t, err)
 	err = cm.Write(ctx, filePath, content)
 	assert.NoError(t, err)
 	files = append(files, filePath)
 
-	filePath = "FieldDouble.npy"
+	filePath = path.Join(cm.RootPath(), "FieldDouble.npy")
 	content, err = CreateNumpyData([]float64{5.1, 5.2, 5.3, 5.4, 5.5})
 	assert.Nil(t, err)
 	err = cm.Write(ctx, filePath, content)
 	assert.NoError(t, err)
 	files = append(files, filePath)
 
-	filePath = "FieldString.npy"
+	filePath = path.Join(cm.RootPath(), "FieldString.npy")
 	content, err = CreateNumpyData([]string{"a", "bb", "ccc", "dd", "e"})
 	assert.Nil(t, err)
 	err = cm.Write(ctx, filePath, content)
 	assert.NoError(t, err)
 	files = append(files, filePath)
 
-	filePath = "FieldBinaryVector.npy"
+	filePath = path.Join(cm.RootPath(), "FieldBinaryVector.npy")
 	content, err = CreateNumpyData([][2]uint8{{1, 2}, {3, 4}, {5, 6}, {7, 8}, {9, 10}})
 	assert.Nil(t, err)
 	err = cm.Write(ctx, filePath, content)
 	assert.NoError(t, err)
 	files = append(files, filePath)
 
-	filePath = "FieldFloatVector.npy"
+	filePath = path.Join(cm.RootPath(), "FieldFloatVector.npy")
 	content, err = CreateNumpyData([][4]float32{{1, 2, 3, 4}, {3, 4, 5, 6}, {5, 6, 7, 8}, {7, 8, 9, 10}, {9, 10, 11, 12}})
 	assert.Nil(t, err)
 	err = cm.Write(ctx, filePath, content)
@@ -397,7 +398,7 @@ func Test_ImportWrapperColumnBased_numpy(t *testing.T) {
 	ctx := context.Background()
 	cm, err := f.NewPersistentStorageChunkManager(ctx)
 	assert.NoError(t, err)
-	defer cm.RemoveWithPrefix(ctx, "")
+	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
 	idAllocator := newIDAllocator(ctx, t, nil)
 
@@ -430,7 +431,7 @@ func Test_ImportWrapperColumnBased_numpy(t *testing.T) {
 	assert.Equal(t, commonpb.ImportState_ImportPersisted, importResult.State)
 
 	// row count of fields not equal
-	filePath := "FieldInt8.npy"
+	filePath := path.Join(cm.RootPath(), "FieldInt8.npy")
 	content, err := CreateNumpyData([]int8{10})
 	assert.Nil(t, err)
 	err = cm.Write(ctx, filePath, content)
@@ -493,7 +494,7 @@ func Test_ImportWrapperRowBased_perf(t *testing.T) {
 	ctx := context.Background()
 	cm, err := f.NewPersistentStorageChunkManager(ctx)
 	assert.NoError(t, err)
-	defer cm.RemoveWithPrefix(ctx, "")
+	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
 	idAllocator := newIDAllocator(ctx, t, nil)
 
@@ -532,7 +533,7 @@ func Test_ImportWrapperRowBased_perf(t *testing.T) {
 	tr.Record("generate " + strconv.Itoa(rowCount) + " rows")
 
 	// generate a json file
-	filePath := "row_perf.json"
+	filePath := path.Join(cm.RootPath(), "row_perf.json")
 	func() {
 		var b bytes.Buffer
 		bw := bufio.NewWriter(&b)
@@ -545,7 +546,7 @@ func Test_ImportWrapperRowBased_perf(t *testing.T) {
 		err = cm.Write(ctx, filePath, b.Bytes())
 		assert.NoError(t, err)
 	}()
-	tr.Record("generate large json file " + filePath)
+	tr.Record("generate large json file: " + filePath)
 
 	rowCounter := &rowCounterTest{}
 	assignSegmentFunc, flushFunc, saveSegmentFunc := createMockCallbackFunctions(t, rowCounter)
@@ -787,10 +788,10 @@ func Test_ImportWrapperReportFailRowBased(t *testing.T) {
 		]
 	}`)
 
-	filePath := "rows_1.json"
+	filePath := path.Join(cm.RootPath(), "rows_1.json")
 	err = cm.Write(ctx, filePath, content)
 	assert.NoError(t, err)
-	defer cm.RemoveWithPrefix(ctx, "")
+	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
 	rowCounter := &rowCounterTest{}
 	assignSegmentFunc, flushFunc, saveSegmentFunc := createMockCallbackFunctions(t, rowCounter)
@@ -813,9 +814,7 @@ func Test_ImportWrapperReportFailRowBased(t *testing.T) {
 	wrapper := NewImportWrapper(ctx, sampleSchema(), 2, 1, idAllocator, cm, importResult, reportFunc)
 	wrapper.SetCallbackFunctions(assignSegmentFunc, flushFunc, saveSegmentFunc)
 
-	files := make([]string, 0)
-	files = append(files, filePath)
-
+	files := []string{filePath}
 	wrapper.reportImportAttempts = 2
 	wrapper.reportFunc = func(res *rootcoordpb.ImportResult) error {
 		return errors.New("mock error")
@@ -837,7 +836,7 @@ func Test_ImportWrapperReportFailColumnBased_numpy(t *testing.T) {
 	ctx := context.Background()
 	cm, err := f.NewPersistentStorageChunkManager(ctx)
 	assert.NoError(t, err)
-	defer cm.RemoveWithPrefix(ctx, "")
+	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
 	idAllocator := newIDAllocator(ctx, t, nil)
 

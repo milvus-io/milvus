@@ -45,7 +45,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cm := storage.NewLocalChunkManager(storage.RootPath(compactTestDir))
-	defer cm.RemoveWithPrefix(ctx, "")
+	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 	t.Run("Test getSegmentMeta", func(t *testing.T) {
 		rc := &RootCoordFactory{
 			pkType: schemapb.DataType_Int64,
@@ -554,7 +554,7 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cm := storage.NewLocalChunkManager(storage.RootPath(compactTestDir))
-	defer cm.RemoveWithPrefix(ctx, "")
+	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 	notEmptySegmentBinlogs := []*datapb.CompactionSegmentBinlogs{{
 		SegmentID:           100,
 		FieldBinlogs:        nil,
