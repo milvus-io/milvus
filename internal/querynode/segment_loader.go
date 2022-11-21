@@ -27,6 +27,7 @@ import (
 	"strconv"
 	"time"
 
+	"go.uber.org/multierr"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
@@ -88,9 +89,9 @@ func (loader *segmentLoader) getFieldType(segment *Segment, fieldID FieldID) (sc
 	return coll.getFieldType(fieldID)
 }
 
-func (loader *segmentLoader) LoadSegment(ctx context.Context, req *querypb.LoadSegmentsRequest, segmentType segmentType) error {
+func (loader *segmentLoader) LoadSegment(ctx context.Context, req *querypb.LoadSegmentsRequest, segmentType segmentType) ([]UniqueID, error) {
 	if req.Base == nil {
-		return fmt.Errorf("nil base message when load segment, collectionID = %d", req.CollectionID)
+		return nil, fmt.Errorf("nil base message when load segment, collectionID = %d", req.CollectionID)
 	}
 
 	log := log.With(zap.Int64("collectionID", req.CollectionID), zap.String("segmentType", segmentType.String()))
@@ -99,7 +100,7 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context, req *querypb.LoadS
 
 	if segmentNum == 0 {
 		log.Warn("find no valid segment target, skip load segment", zap.Any("request", req))
-		return nil
+		return nil, nil
 	}
 
 	log.Info("segmentLoader start loading...", zap.Any("segmentNum", segmentNum))
@@ -127,13 +128,16 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context, req *querypb.LoadS
 		log.Error("load failed, OOM if loaded",
 			zap.Int64("loadSegmentRequest msgID", req.Base.MsgID),
 			zap.Error(err))
-		return err
+		return nil, err
 	}
 
-	newSegments := make(map[UniqueID]*Segment, len(req.Infos))
-	segmentGC := func() {
-		for _, s := range newSegments {
-			deleteSegment(s)
+	newSegments := make(map[UniqueID]*Segment, segmentNum)
+	loadDoneSegmentIDSet := typeutil.NewConcurrentSet[int64]()
+	segmentGC := func(force bool) {
+		for id, s := range newSegments {
+			if force || !loadDoneSegmentIDSet.Contain(id) {
+				deleteSegment(s)
+			}
 		}
 		debug.FreeOSMemory()
 	}
@@ -146,8 +150,8 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context, req *querypb.LoadS
 
 		collection, err := loader.metaReplica.getCollectionByID(collectionID)
 		if err != nil {
-			segmentGC()
-			return err
+			segmentGC(true)
+			return nil, err
 		}
 
 		segment, err := newSegment(collection, segmentID, partitionID, collectionID, vChannelID, segmentType, req.GetVersion(), info.StartPosition, loader.cgoPool)
@@ -156,8 +160,8 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context, req *querypb.LoadS
 				zap.Int64("partitionID", partitionID),
 				zap.Int64("segmentID", segmentID),
 				zap.Error(err))
-			segmentGC()
-			return err
+			segmentGC(true)
+			return nil, err
 		}
 
 		newSegments[segmentID] = segment
@@ -179,6 +183,7 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context, req *querypb.LoadS
 			return err
 		}
 
+		loadDoneSegmentIDSet.Insert(segmentID)
 		metrics.QueryNodeLoadSegmentLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 		return nil
@@ -189,29 +194,35 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context, req *querypb.LoadS
 	log.Info("start to load segments in parallel",
 		zap.Int("segmentNum", segmentNum),
 		zap.Int("concurrencyLevel", concurrencyLevel))
-	err = funcutil.ProcessFuncParallel(segmentNum,
+	loadErr := funcutil.ProcessFuncParallel(segmentNum,
 		concurrencyLevel, loadFileFunc, "loadSegmentFunc")
-	if err != nil {
-		segmentGC()
-		return err
-	}
-
-	// set segment to meta replica
-	for _, s := range newSegments {
-		err = loader.metaReplica.setSegment(s)
+	// set segment which has been loaded done to meta replica
+	failedSetMetaSegmentIDs := make([]UniqueID, 0)
+	for _, id := range loadDoneSegmentIDSet.Collect() {
+		segment := newSegments[id]
+		err = loader.metaReplica.setSegment(segment)
 		if err != nil {
 			log.Error("load segment failed, set segment to meta failed",
-				zap.Int64("collectionID", s.collectionID),
-				zap.Int64("partitionID", s.partitionID),
-				zap.Int64("segmentID", s.segmentID),
+				zap.Int64("collectionID", segment.collectionID),
+				zap.Int64("partitionID", segment.partitionID),
+				zap.Int64("segmentID", segment.segmentID),
 				zap.Int64("loadSegmentRequest msgID", req.Base.MsgID),
 				zap.Error(err))
-			segmentGC()
-			return err
+			failedSetMetaSegmentIDs = append(failedSetMetaSegmentIDs, id)
+			loadDoneSegmentIDSet.Remove(id)
 		}
 	}
+	if len(failedSetMetaSegmentIDs) > 0 {
+		err = fmt.Errorf("load segment failed, set segment to meta failed, segmentIDs: %v", failedSetMetaSegmentIDs)
+	}
 
-	return nil
+	err = multierr.Combine(loadErr, err)
+	if err != nil {
+		segmentGC(false)
+		return loadDoneSegmentIDSet.Collect(), err
+	}
+
+	return loadDoneSegmentIDSet.Collect(), nil
 }
 
 func (loader *segmentLoader) loadFiles(ctx context.Context, segment *Segment,

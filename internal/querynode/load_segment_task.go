@@ -79,51 +79,53 @@ func (l *loadSegmentsTask) Execute(ctx context.Context) error {
 	segmentIDs := lo.Map(l.req.Infos, func(info *queryPb.SegmentLoadInfo, idx int) UniqueID { return info.SegmentID })
 	l.node.metaReplica.addSegmentsLoadingList(segmentIDs)
 	defer l.node.metaReplica.removeSegmentsLoadingList(segmentIDs)
-	err := l.node.loader.LoadSegment(l.ctx, l.req, segmentTypeSealed)
-	if err != nil {
+	loadDoneSegmentIDs, loadErr := l.node.loader.LoadSegment(l.ctx, l.req, segmentTypeSealed)
+	if len(loadDoneSegmentIDs) > 0 {
+		vchanName := make([]string, 0)
+		for _, deltaPosition := range l.req.DeltaPositions {
+			vchanName = append(vchanName, deltaPosition.ChannelName)
+		}
+
+		// TODO delta channel need to released 1. if other watchDeltaChannel fail 2. when segment release
+		err := l.watchDeltaChannel(vchanName)
+		if err != nil {
+			// roll back
+			for _, segment := range l.req.Infos {
+				l.node.metaReplica.removeSegment(segment.SegmentID, segmentTypeSealed)
+			}
+			log.Warn("failed to watch Delta channel while load segment", zap.Int64("collectionID", l.req.CollectionID),
+				zap.Int64("replicaID", l.req.ReplicaID), zap.Error(err))
+			return err
+		}
+
+		runningGroup, groupCtx := errgroup.WithContext(l.ctx)
+		for _, deltaPosition := range l.req.DeltaPositions {
+			pos := deltaPosition
+			runningGroup.Go(func() error {
+				// reload data from dml channel
+				return l.node.loader.FromDmlCPLoadDelete(groupCtx, l.req.CollectionID, pos,
+					lo.FilterMap(l.req.Infos, func(info *queryPb.SegmentLoadInfo, _ int) (int64, bool) {
+						return info.GetSegmentID(), funcutil.SliceContain(loadDoneSegmentIDs, info.SegmentID) && info.GetInsertChannel() == pos.GetChannelName()
+					}))
+			})
+		}
+		err = runningGroup.Wait()
+		if err != nil {
+			for _, segment := range l.req.Infos {
+				l.node.metaReplica.removeSegment(segment.SegmentID, segmentTypeSealed)
+			}
+			for _, vchannel := range vchanName {
+				l.node.dataSyncService.removeEmptyFlowGraphByChannel(l.req.CollectionID, vchannel)
+			}
+			log.Warn("failed to load delete data while load segment", zap.Int64("collectionID", l.req.CollectionID),
+				zap.Int64("replicaID", l.req.ReplicaID), zap.Error(err))
+			return err
+		}
+	}
+	if loadErr != nil {
 		log.Warn("failed to load segment", zap.Int64("collectionID", l.req.CollectionID),
-			zap.Int64("replicaID", l.req.ReplicaID), zap.Error(err))
-		return err
-	}
-	vchanName := make([]string, 0)
-	for _, deltaPosition := range l.req.DeltaPositions {
-		vchanName = append(vchanName, deltaPosition.ChannelName)
-	}
-
-	// TODO delta channel need to released 1. if other watchDeltaChannel fail 2. when segment release
-	err = l.watchDeltaChannel(vchanName)
-	if err != nil {
-		// roll back
-		for _, segment := range l.req.Infos {
-			l.node.metaReplica.removeSegment(segment.SegmentID, segmentTypeSealed)
-		}
-		log.Warn("failed to watch Delta channel while load segment", zap.Int64("collectionID", l.req.CollectionID),
-			zap.Int64("replicaID", l.req.ReplicaID), zap.Error(err))
-		return err
-	}
-
-	runningGroup, groupCtx := errgroup.WithContext(l.ctx)
-	for _, deltaPosition := range l.req.DeltaPositions {
-		pos := deltaPosition
-		runningGroup.Go(func() error {
-			// reload data from dml channel
-			return l.node.loader.FromDmlCPLoadDelete(groupCtx, l.req.CollectionID, pos,
-				lo.FilterMap(l.req.Infos, func(info *queryPb.SegmentLoadInfo, _ int) (int64, bool) {
-					return info.GetSegmentID(), info.GetInsertChannel() == pos.GetChannelName()
-				}))
-		})
-	}
-	err = runningGroup.Wait()
-	if err != nil {
-		for _, segment := range l.req.Infos {
-			l.node.metaReplica.removeSegment(segment.SegmentID, segmentTypeSealed)
-		}
-		for _, vchannel := range vchanName {
-			l.node.dataSyncService.removeEmptyFlowGraphByChannel(l.req.CollectionID, vchannel)
-		}
-		log.Warn("failed to load delete data while load segment", zap.Int64("collectionID", l.req.CollectionID),
-			zap.Int64("replicaID", l.req.ReplicaID), zap.Error(err))
-		return err
+			zap.Int64("replicaID", l.req.ReplicaID), zap.Error(loadErr))
+		return loadErr
 	}
 
 	log.Info("LoadSegmentTask Execute done", zap.Int64("collectionID", l.req.CollectionID),

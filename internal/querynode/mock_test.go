@@ -347,7 +347,7 @@ func loadIndexForSegment(ctx context.Context, node *QueryNode, segmentID UniqueI
 		},
 	}
 
-	err = loader.LoadSegment(ctx, req, segmentTypeSealed)
+	_, err = loader.LoadSegment(ctx, req, segmentTypeSealed)
 	if err != nil {
 		return err
 	}
@@ -971,6 +971,54 @@ func genSimpleInsertMsg(schema *schemapb.CollectionSchema, numRows int) (*msgstr
 			Version:        internalpb.InsertDataVersion_ColumnBased,
 		},
 	}, nil
+}
+
+func getFakeBinLog(ctx context.Context,
+	collectionID UniqueID,
+	partitionID UniqueID,
+	segmentID UniqueID,
+	msgLength int,
+	schema *schemapb.CollectionSchema) ([]*datapb.FieldBinlog, []*datapb.FieldBinlog, error) {
+	binLogs, statsLogs, err := genStorageBlob(collectionID,
+		partitionID,
+		segmentID,
+		msgLength,
+		schema)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// gen fake insert binlog path, don't write data to minio
+	fieldBinlog := make([]*datapb.FieldBinlog, 0)
+	for _, blob := range binLogs {
+		fieldID, err := strconv.ParseInt(blob.GetKey(), 10, 64)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		k := JoinIDPath(collectionID, partitionID, segmentID, fieldID)
+		fieldBinlog = append(fieldBinlog, &datapb.FieldBinlog{
+			FieldID: fieldID,
+			Binlogs: []*datapb.Binlog{{LogPath: path.Join("insert-log", k, "notExistKey")}},
+		})
+	}
+
+	// gen fake stats binlog path, don't write data to minio
+	statsBinlog := make([]*datapb.FieldBinlog, 0)
+	for _, blob := range statsLogs {
+		fieldID, err := strconv.ParseInt(blob.GetKey(), 10, 64)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		k := JoinIDPath(collectionID, partitionID, segmentID, fieldID)
+		statsBinlog = append(statsBinlog, &datapb.FieldBinlog{
+			FieldID: fieldID,
+			Binlogs: []*datapb.Binlog{{LogPath: path.Join("delta-log", k, "notExistKey")}},
+		})
+	}
+
+	return fieldBinlog, statsBinlog, err
 }
 
 func saveBinLog(ctx context.Context,
