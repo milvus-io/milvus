@@ -351,10 +351,11 @@ func (p *PulsarConfig) Init(base *BaseTable) {
 	}
 	p.Port.Init(base.mgr)
 
+	// due to implicit rule of MQ priority，the default address should be empty
 	p.Address = ParamItem{
 		Key:          "pulsar.address",
 		Version:      "2.0.0",
-		DefaultValue: "localhost",
+		DefaultValue: "",
 		Formatter: func(addr string) string {
 			if addr == "" {
 				return ""
@@ -453,6 +454,7 @@ type KafkaConfig struct {
 }
 
 func (k *KafkaConfig) Init(base *BaseTable) {
+	// due to implicit rule of MQ priority，the default address should be empty
 	k.Address = ParamItem{
 		Key:          "kafka.brokerList",
 		DefaultValue: "",
