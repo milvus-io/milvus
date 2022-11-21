@@ -231,7 +231,7 @@ func (w *watchDmChannelsTask) LoadGrowingSegments(ctx context.Context, collectio
 		zap.Int64("collectionID", collectionID),
 		zap.Int64s("unFlushedSegmentIDs", unFlushedSegmentIDs),
 	)
-	err := w.node.loader.LoadSegment(w.ctx, req, segmentTypeGrowing)
+	_, err := w.node.loader.LoadSegment(w.ctx, req, segmentTypeGrowing)
 	if err != nil {
 		log.Warn("failed to load segment", zap.Int64("collection", collectionID), zap.Error(err))
 		return nil, err

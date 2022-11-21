@@ -43,6 +43,12 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 	defer cancel()
 	schema := genTestCollectionSchema()
 
+	node, err := genSimpleQueryNode(ctx)
+	assert.NoError(t, err)
+	testVChannel := "by-dev-rootcoord-dml_1_2021v1"
+	fieldBinlog, statsLog, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, schema)
+	assert.NoError(t, err)
+
 	genLoadEmptySegmentsRequest := func() *querypb.LoadSegmentsRequest {
 		req := &querypb.LoadSegmentsRequest{
 			Base:         genCommonMsgBase(commonpb.MsgType_LoadSegments, 0),
@@ -80,14 +86,7 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 	})
 
 	t.Run("test execute grpc", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
-		require.NoError(t, err)
-		defer node.Stop()
-
 		node.metaReplica.removeSegment(defaultSegmentID, segmentTypeSealed)
-
-		fieldBinlog, statsLog, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, schema)
-		assert.NoError(t, err)
 
 		req := &querypb.LoadSegmentsRequest{
 			Base:   genCommonMsgBase(commonpb.MsgType_LoadSegments, node.session.ServerID),
@@ -115,14 +114,7 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 	})
 
 	t.Run("test repeated load", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
-		require.NoError(t, err)
-		defer node.Stop()
-
 		node.metaReplica.removeSegment(defaultSegmentID, segmentTypeSealed)
-
-		fieldBinlog, statsLog, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, schema)
-		assert.NoError(t, err)
 
 		req := &querypb.LoadSegmentsRequest{
 			Base:   genCommonMsgBase(commonpb.MsgType_LoadSegments, node.session.ServerID),
@@ -159,125 +151,8 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 		assert.Equal(t, 1, num)
 	})
 
-	t.Run("test FromDmlCPLoadDelete", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(ctx)
-		defer cancel()
-		node, err := genSimpleQueryNode(ctx)
-		require.NoError(t, err)
-		defer node.Stop()
-
-		vDmChannel := "by-dev-rootcoord-dml_1_2021v1"
-		pDmChannel := funcutil.ToPhysicalChannel(vDmChannel)
-		stream, err := node.factory.NewMsgStream(node.queryNodeLoopCtx)
-		assert.Nil(t, err)
-		stream.AsProducer([]string{pDmChannel})
-		timeTickMsg := &msgstream.TimeTickMsg{
-			BaseMsg: msgstream.BaseMsg{
-				HashValues: []uint32{1},
-			},
-			TimeTickMsg: internalpb.TimeTickMsg{
-				Base: &commonpb.MsgBase{
-					MsgType:   commonpb.MsgType_TimeTick,
-					Timestamp: 100,
-				},
-			},
-		}
-
-		deleteMsg := &msgstream.DeleteMsg{
-			BaseMsg: msgstream.BaseMsg{
-				HashValues: []uint32{1, 1, 1},
-			},
-			DeleteRequest: internalpb.DeleteRequest{
-				Base: &commonpb.MsgBase{
-					MsgType:   commonpb.MsgType_Delete,
-					Timestamp: 110,
-				},
-				CollectionID: defaultCollectionID,
-				PartitionID:  defaultPartitionID,
-				PrimaryKeys: &schemapb.IDs{
-					IdField: &schemapb.IDs_IntId{
-						IntId: &schemapb.LongArray{
-							Data: []int64{1, 2, 3},
-						},
-					},
-				},
-				Timestamps: []Timestamp{110, 110, 110},
-				NumRows:    3,
-			},
-		}
-
-		pos1, err := stream.ProduceMark(&msgstream.MsgPack{Msgs: []msgstream.TsMsg{timeTickMsg}})
-		assert.NoError(t, err)
-		msgIDs, ok := pos1[pDmChannel]
-		assert.True(t, ok)
-		assert.Equal(t, 1, len(msgIDs))
-		err = stream.Produce(&msgstream.MsgPack{Msgs: []msgstream.TsMsg{deleteMsg}})
-		assert.NoError(t, err)
-
-		// to stop reader from cp
-		go func() {
-			for {
-				select {
-				case <-ctx.Done():
-					break
-				default:
-					timeTickMsg.Base.Timestamp += 100
-					stream.Produce(&msgstream.MsgPack{Msgs: []msgstream.TsMsg{timeTickMsg}})
-					time.Sleep(200 * time.Millisecond)
-				}
-			}
-		}()
-
-		segmentID := defaultSegmentID + 1
-		fieldBinlog, statsLog, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, segmentID, defaultMsgLength, schema)
-		assert.NoError(t, err)
-
-		req := &querypb.LoadSegmentsRequest{
-			Base:   genCommonMsgBase(commonpb.MsgType_LoadSegments, node.session.ServerID),
-			Schema: schema,
-			Infos: []*querypb.SegmentLoadInfo{
-				{
-					SegmentID:     segmentID,
-					PartitionID:   defaultPartitionID,
-					CollectionID:  defaultCollectionID,
-					BinlogPaths:   fieldBinlog,
-					NumOfRows:     defaultMsgLength,
-					Statslogs:     statsLog,
-					InsertChannel: vDmChannel,
-				},
-			},
-			DeltaPositions: []*internalpb.MsgPosition{
-				{
-					ChannelName: vDmChannel,
-					MsgID:       msgIDs[0].Serialize(),
-					Timestamp:   100,
-				},
-			},
-		}
-
-		task := loadSegmentsTask{
-			baseTask: baseTask{
-				ctx: ctx,
-			},
-			req:  req,
-			node: node,
-		}
-		err = task.PreExecute(ctx)
-		assert.NoError(t, err)
-		err = task.Execute(ctx)
-		assert.NoError(t, err)
-		segment, err := node.metaReplica.getSegmentByID(segmentID, segmentTypeSealed)
-		assert.NoError(t, err)
-
-		// has reload 3 delete log from dm channel, so next delete offset should be 3
-		offset := segment.segmentPreDelete(1)
-		assert.Equal(t, int64(3), offset)
-	})
-
 	t.Run("test OOM", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
-		require.NoError(t, err)
-		defer node.Stop()
+		node.metaReplica.removeSegment(defaultSegmentID, segmentTypeSealed)
 
 		totalRAM := int64(hardware.GetMemoryCount())
 
@@ -318,11 +193,8 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 		assert.Contains(t, err.Error(), "OOM")
 	})
 
+	factory := node.loader.factory
 	t.Run("test FromDmlCPLoadDelete failed", func(t *testing.T) {
-		node, err := genSimpleQueryNode(ctx)
-		require.NoError(t, err)
-		defer node.Stop()
-
 		node.metaReplica.removeSegment(defaultSegmentID, segmentTypeSealed)
 
 		msgStream := &LoadDeleteMsgStream{}
@@ -343,7 +215,7 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 			Infos:  []*querypb.SegmentLoadInfo{segmentLoadInfo},
 			DeltaPositions: []*internalpb.MsgPosition{
 				{
-					ChannelName: "by-dev-rootcoord-dml-test_1_2021v2",
+					ChannelName: testVChannel,
 					MsgID:       rmq.SerializeRmqID(0),
 				},
 			},
@@ -365,6 +237,177 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 		assert.Equal(t, 0, num)
 		fgNum := node.dataSyncService.getFlowGraphNum()
 		assert.Equal(t, 0, fgNum)
+	})
+
+	node.loader.factory = factory
+	pDmChannel := funcutil.ToPhysicalChannel(testVChannel)
+	stream, err := node.factory.NewMsgStream(node.queryNodeLoopCtx)
+	assert.Nil(t, err)
+	stream.AsProducer([]string{pDmChannel})
+	timeTickMsg := &msgstream.TimeTickMsg{
+		BaseMsg: msgstream.BaseMsg{
+			HashValues: []uint32{1},
+		},
+		TimeTickMsg: internalpb.TimeTickMsg{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_TimeTick,
+				Timestamp: 100,
+			},
+		},
+	}
+
+	deleteMsg := &msgstream.DeleteMsg{
+		BaseMsg: msgstream.BaseMsg{
+			HashValues: []uint32{1, 1, 1},
+		},
+		DeleteRequest: internalpb.DeleteRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_Delete,
+				Timestamp: 110,
+			},
+			CollectionID: defaultCollectionID,
+			PartitionID:  defaultPartitionID,
+			PrimaryKeys: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{
+						Data: []int64{1, 2, 3},
+					},
+				},
+			},
+			Timestamps: []Timestamp{110, 110, 110},
+			NumRows:    3,
+		},
+	}
+
+	pos1, err := stream.ProduceMark(&msgstream.MsgPack{Msgs: []msgstream.TsMsg{timeTickMsg}})
+	assert.NoError(t, err)
+	msgIDs, ok := pos1[pDmChannel]
+	assert.True(t, ok)
+	assert.Equal(t, 1, len(msgIDs))
+	err = stream.Produce(&msgstream.MsgPack{Msgs: []msgstream.TsMsg{deleteMsg}})
+	assert.NoError(t, err)
+
+	// to stop reader from cp
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				break
+			default:
+				timeTickMsg.Base.Timestamp += 100
+				stream.Produce(&msgstream.MsgPack{Msgs: []msgstream.TsMsg{timeTickMsg}})
+				time.Sleep(200 * time.Millisecond)
+			}
+		}
+	}()
+
+	t.Run("test FromDmlCPLoadDelete", func(t *testing.T) {
+		node.metaReplica.removeSegment(defaultSegmentID, segmentTypeSealed)
+
+		req := &querypb.LoadSegmentsRequest{
+			Base:   genCommonMsgBase(commonpb.MsgType_LoadSegments, node.session.ServerID),
+			Schema: schema,
+			Infos: []*querypb.SegmentLoadInfo{
+				{
+					SegmentID:     defaultSegmentID,
+					PartitionID:   defaultPartitionID,
+					CollectionID:  defaultCollectionID,
+					BinlogPaths:   fieldBinlog,
+					NumOfRows:     defaultMsgLength,
+					Statslogs:     statsLog,
+					InsertChannel: testVChannel,
+				},
+			},
+			DeltaPositions: []*internalpb.MsgPosition{
+				{
+					ChannelName: testVChannel,
+					MsgID:       msgIDs[0].Serialize(),
+					Timestamp:   100,
+				},
+			},
+		}
+
+		task := loadSegmentsTask{
+			baseTask: baseTask{
+				ctx: ctx,
+			},
+			req:  req,
+			node: node,
+		}
+		err = task.PreExecute(ctx)
+		assert.NoError(t, err)
+		err = task.Execute(ctx)
+		assert.NoError(t, err)
+		segment, err := node.metaReplica.getSegmentByID(defaultSegmentID, segmentTypeSealed)
+		assert.NoError(t, err)
+
+		// has reload 3 delete log from dm channel, so next delete offset should be 3
+		offset := segment.segmentPreDelete(1)
+		assert.Equal(t, int64(3), offset)
+	})
+
+	t.Run("test load with partial success", func(t *testing.T) {
+		deltaChannel, err := funcutil.ConvertChannelName(testVChannel, Params.CommonCfg.RootCoordDml, Params.CommonCfg.RootCoordDelta)
+		assert.NoError(t, err)
+
+		node.metaReplica.removeSegment(defaultSegmentID, segmentTypeSealed)
+		node.dataSyncService.removeFlowGraphsByDMLChannels([]Channel{testVChannel})
+		node.dataSyncService.removeFlowGraphsByDeltaChannels([]Channel{deltaChannel})
+
+		fakeFieldBinlog, fakeStatsBinlog, err := getFakeBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, schema)
+		assert.NoError(t, err)
+
+		segmentID1 := defaultSegmentID
+		segmentID2 := defaultSegmentID + 1
+		req := &querypb.LoadSegmentsRequest{
+			Base:   genCommonMsgBase(commonpb.MsgType_LoadSegments, node.session.ServerID),
+			Schema: schema,
+			Infos: []*querypb.SegmentLoadInfo{
+				{
+					SegmentID:     segmentID1,
+					PartitionID:   defaultPartitionID,
+					CollectionID:  defaultCollectionID,
+					BinlogPaths:   fieldBinlog,
+					NumOfRows:     defaultMsgLength,
+					Statslogs:     statsLog,
+					InsertChannel: testVChannel,
+				},
+				{
+					SegmentID:     segmentID2,
+					PartitionID:   defaultPartitionID,
+					CollectionID:  defaultCollectionID,
+					BinlogPaths:   fakeFieldBinlog,
+					NumOfRows:     defaultMsgLength,
+					Statslogs:     fakeStatsBinlog,
+					InsertChannel: testVChannel,
+				},
+			},
+			DeltaPositions: []*internalpb.MsgPosition{
+				{
+					ChannelName: testVChannel,
+					MsgID:       msgIDs[0].Serialize(),
+					Timestamp:   100,
+				},
+			},
+		}
+
+		task := loadSegmentsTask{
+			baseTask: baseTask{
+				ctx: ctx,
+			},
+			req:  req,
+			node: node,
+		}
+		err = task.PreExecute(ctx)
+		assert.NoError(t, err)
+		err = task.Execute(ctx)
+		assert.Error(t, err)
+		exist, err := node.metaReplica.hasSegment(segmentID1, segmentTypeSealed)
+		assert.NoError(t, err)
+		assert.True(t, exist)
+		exist, err = node.metaReplica.hasSegment(segmentID2, segmentTypeSealed)
+		assert.NoError(t, err)
+		assert.False(t, exist)
 	})
 }
 
