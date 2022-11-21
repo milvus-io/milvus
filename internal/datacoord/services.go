@@ -1390,8 +1390,7 @@ func (s *Server) MarkSegmentsDropped(ctx context.Context, req *datapb.MarkSegmen
 	}, nil
 }
 
-func (s *Server) BroadcastAlteredCollection(ctx context.Context,
-	req *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
+func (s *Server) BroadcastAlteredCollection(ctx context.Context, req *datapb.AlterCollectionRequest) (*commonpb.Status, error) {
 	errResp := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
 		Reason:    "",
@@ -1406,24 +1405,24 @@ func (s *Server) BroadcastAlteredCollection(ctx context.Context,
 	// get collection info from cache
 	clonedColl := s.meta.GetClonedCollectionInfo(req.CollectionID)
 
-	// try to reload collection from RootCoord
-	if clonedColl == nil {
-		err := s.loadCollectionFromRootCoord(ctx, req.CollectionID)
-		if err != nil {
-			log.Warn("failed to load collection from rootcoord", zap.Int64("collectionID", req.CollectionID), zap.Error(err))
-			errResp.Reason = fmt.Sprintf("failed to load collection from rootcoord, collectionID:%d", req.CollectionID)
-			return errResp, nil
-		}
-	}
-
-	clonedColl = s.meta.GetClonedCollectionInfo(req.CollectionID)
-	if clonedColl == nil {
-		return nil, fmt.Errorf("get collection from cache failed, collectionID:%d", req.CollectionID)
-	}
-
 	properties := make(map[string]string)
 	for _, pair := range req.Properties {
 		properties[pair.GetKey()] = pair.GetValue()
+	}
+
+	// cache miss and update cache
+	if clonedColl == nil {
+		collInfo := &collectionInfo{
+			ID:             req.GetCollectionID(),
+			Schema:         req.GetSchema(),
+			Partitions:     req.GetPartitionIDs(),
+			StartPositions: req.GetStartPositions(),
+			Properties:     properties,
+		}
+		s.meta.AddCollection(collInfo)
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		}, nil
 	}
 
 	clonedColl.Properties = properties
