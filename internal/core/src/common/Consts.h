@@ -37,7 +37,7 @@ const char INDEX_BUILD_ID_KEY[] = "indexBuildID";
 const char INDEX_ROOT_PATH[] = "index_files";
 const char RAWDATA_ROOT_PATH[] = "raw_datas";
 
-const int DEFAULT_DISK_INDEX_MAX_MEMORY_LIMIT = 2;  // gigabytes
+const int64_t DEFAULT_DISK_INDEX_MAX_MEMORY_LIMIT = 67108864;  // bytes
 const int64_t DEFAULT_THREAD_CORE_COEFFICIENT = 50;
 
 const int64_t DEFAULT_INDEX_FILE_SLICE_SIZE = 4;  // megabytes
