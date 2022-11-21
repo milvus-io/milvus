@@ -872,8 +872,7 @@ func GetStorageSizeByIndexInfo(indexInfo *querypb.FieldIndexInfo) (uint64, uint6
 	}
 	if indexType == indexparamcheck.IndexDISKANN {
 		neededMemSize := indexInfo.IndexSize / UsedDiskMemoryRatio
-		neededDiskSize := indexInfo.IndexSize - neededMemSize
-		return uint64(neededMemSize), uint64(neededDiskSize), nil
+		return uint64(neededMemSize), uint64(indexInfo.IndexSize), nil
 	}
 
 	return uint64(indexInfo.IndexSize), 0, nil
