@@ -14,6 +14,8 @@ package paramtable
 import (
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/config"
+
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/stretchr/testify/assert"
 )
@@ -60,6 +62,13 @@ func TestServiceParam(t *testing.T) {
 	})
 
 	t.Run("test pulsarConfig", func(t *testing.T) {
+		// test default value
+		{
+			pc := &PulsarConfig{}
+			base := &BaseTable{mgr: &config.Manager{}}
+			pc.Init(base)
+			assert.Empty(t, pc.Address.GetValue())
+		}
 		{
 			assert.NotEqual(t, SParams.PulsarCfg.Address.GetValue(), "")
 			t.Logf("pulsar address = %s", SParams.PulsarCfg.Address.GetValue())
@@ -116,6 +125,18 @@ func TestServiceParam(t *testing.T) {
 
 		assert.NotEqual(t, Params.Path.GetValue(), "")
 		t.Logf("rocksmq path = %s", Params.Path.GetValue())
+	})
+
+	t.Run("test kafkaConfig", func(t *testing.T) {
+		// test default value
+		{
+			kc := &KafkaConfig{}
+			base := &BaseTable{mgr: &config.Manager{}}
+			kc.Init(base)
+			assert.Empty(t, kc.Address.GetValue())
+			assert.Equal(t, kc.SaslMechanisms.GetValue(), "PLAIN")
+			assert.Equal(t, kc.SecurityProtocol.GetValue(), "SASL_SSL")
+		}
 	})
 
 	t.Run("test minioConfig", func(t *testing.T) {
