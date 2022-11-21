@@ -32,4 +32,29 @@ TEST(TimestampIndex, Naive) {
     for (auto i = 0; i < lengths.size(); ++i) {
         ASSERT_EQ(guessed_slice[i], lengths[i]);
     }
+
+    Timestamp query_ts = 0;
+    auto range = index.get_active_range(query_ts);
+    ASSERT_EQ(range.first, 0);
+    ASSERT_EQ(range.second, 0);
+
+    query_ts = 1;
+    range = index.get_active_range(query_ts);
+    ASSERT_EQ(range.first, 0);
+    ASSERT_EQ(range.second, 2);
+
+    query_ts = 11;
+    range = index.get_active_range(query_ts);
+    ASSERT_EQ(range.first, 2);
+    ASSERT_EQ(range.second, 5);
+
+    query_ts = 21;
+    range = index.get_active_range(query_ts);
+    ASSERT_EQ(range.first, 5);
+    ASSERT_EQ(range.second, 8);
+
+    query_ts = 22;
+    range = index.get_active_range(query_ts);
+    ASSERT_EQ(range.first, 8);
+    ASSERT_EQ(range.second, 8);
 }

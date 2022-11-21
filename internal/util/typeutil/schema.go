@@ -23,7 +23,9 @@ import (
 	"strconv"
 
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"go.uber.org/zap"
 )
 
@@ -395,6 +397,52 @@ func AppendFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData, idx i
 	}
 }
 
+// DeleteFieldData delete fields data appended last time
+func DeleteFieldData(dst []*schemapb.FieldData) {
+	for i, fieldData := range dst {
+		switch fieldType := fieldData.Field.(type) {
+		case *schemapb.FieldData_Scalars:
+			if dst[i] == nil || dst[i].GetScalars() == nil {
+				log.Info("empty field data can't be deleted")
+				return
+			}
+			dstScalar := dst[i].GetScalars()
+			switch fieldType.Scalars.Data.(type) {
+			case *schemapb.ScalarField_BoolData:
+				dstScalar.GetBoolData().Data = dstScalar.GetBoolData().Data[:len(dstScalar.GetBoolData().Data)-1]
+			case *schemapb.ScalarField_IntData:
+				dstScalar.GetIntData().Data = dstScalar.GetIntData().Data[:len(dstScalar.GetIntData().Data)-1]
+			case *schemapb.ScalarField_LongData:
+				dstScalar.GetLongData().Data = dstScalar.GetLongData().Data[:len(dstScalar.GetLongData().Data)-1]
+			case *schemapb.ScalarField_FloatData:
+				dstScalar.GetFloatData().Data = dstScalar.GetFloatData().Data[:len(dstScalar.GetFloatData().Data)-1]
+			case *schemapb.ScalarField_DoubleData:
+				dstScalar.GetDoubleData().Data = dstScalar.GetDoubleData().Data[:len(dstScalar.GetDoubleData().Data)-1]
+			case *schemapb.ScalarField_StringData:
+				dstScalar.GetStringData().Data = dstScalar.GetStringData().Data[:len(dstScalar.GetStringData().Data)-1]
+			default:
+				log.Error("wrong field type added", zap.String("field type", fieldData.Type.String()))
+			}
+		case *schemapb.FieldData_Vectors:
+			if dst[i] == nil || dst[i].GetVectors() == nil {
+				log.Info("empty field data can't be deleted")
+				return
+			}
+			dim := fieldType.Vectors.Dim
+			dstVector := dst[i].GetVectors()
+			switch fieldType.Vectors.Data.(type) {
+			case *schemapb.VectorField_BinaryVector:
+				dstBinaryVector := dstVector.Data.(*schemapb.VectorField_BinaryVector)
+				dstBinaryVector.BinaryVector = dstBinaryVector.BinaryVector[:len(dstBinaryVector.BinaryVector)-int(dim/8)]
+			case *schemapb.VectorField_FloatVector:
+				dstVector.GetFloatVector().Data = dstVector.GetFloatVector().Data[:len(dstVector.GetFloatVector().Data)-int(dim)]
+			default:
+				log.Error("wrong field type added", zap.String("field type", fieldData.Type.String()))
+			}
+		}
+	}
+}
+
 // MergeFieldData appends fields data to dst
 func MergeFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData) {
 	fieldID2Data := make(map[int64]*schemapb.FieldData)
@@ -635,6 +683,24 @@ func GetPK(data *schemapb.IDs, idx int64) interface{} {
 		return data.GetStrId().GetData()[idx]
 	}
 	return nil
+}
+
+func GetTS(i *internalpb.RetrieveResults, idx int64) uint64 {
+	if i.FieldsData == nil {
+		return 0
+	}
+	for _, fieldData := range i.FieldsData {
+		fieldID := fieldData.FieldId
+		if fieldID == common.TimeStampField {
+			res := fieldData.GetScalars().GetLongData().Data
+			timeStamp := make([]uint64, len(res))
+			for i, v := range res {
+				timeStamp[i] = uint64(v)
+			}
+			return timeStamp[idx]
+		}
+	}
+	return 0
 }
 
 func AppendPKs(pks *schemapb.IDs, pk interface{}) {

@@ -29,6 +29,7 @@ static inline bool
 get_bit(const BitsetType& bitset, FieldId field_id) {
     auto pos = field_id.get() - START_USER_FIELDID;
     AssertInfo(pos >= 0, "invalid field id");
+
     return bitset[pos];
 }
 
@@ -424,10 +425,21 @@ SegmentSealedImpl::bulk_subscript(SystemFieldType system_type,
                                   int64_t count,
                                   void* output) const {
     AssertInfo(is_system_field_ready(), "System field isn't ready when do bulk_insert");
-    AssertInfo(system_type == SystemFieldType::RowId, "System field type of id column is not RowId");
-    AssertInfo(insert_record_.row_ids_.num_chunk() == 1, "num chunk not equal to 1 for sealed segment");
-    auto field_data = insert_record_.row_ids_.get_chunk_data(0);
-    bulk_subscript_impl<int64_t>(field_data, seg_offsets, count, output);
+    switch (system_type) {
+        case SystemFieldType::Timestamp:
+            AssertInfo(insert_record_.timestamps_.num_chunk() == 1,
+                       "num chunk of timestamp not equal to 1 for sealed segment");
+            bulk_subscript_impl<Timestamp>(this->insert_record_.timestamps_.get_chunk_data(0), seg_offsets, count,
+                                           output);
+            break;
+        case SystemFieldType::RowId:
+            AssertInfo(insert_record_.row_ids_.num_chunk() == 1,
+                       "num chunk of rowID not equal to 1 for sealed segment");
+            bulk_subscript_impl<int64_t>(this->insert_record_.row_ids_.get_chunk_data(0), seg_offsets, count, output);
+            break;
+        default:
+            PanicInfo("unknown subscript fields");
+    }
 }
 
 template <typename T>
@@ -592,8 +604,6 @@ SegmentSealedImpl::bulk_subscript(FieldId field_id, const int64_t* seg_offsets, 
 bool
 SegmentSealedImpl::HasIndex(FieldId field_id) const {
     std::shared_lock lck(mutex_);
-    AssertInfo(!SystemProperty::Instance().IsSystem(field_id),
-               "Field id:" + std::to_string(field_id.get()) + " isn't one of system type when drop index");
     return get_bit(index_ready_bitset_, field_id);
 }
 

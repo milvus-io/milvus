@@ -250,6 +250,42 @@ func TestResult_mergeInternalRetrieveResults(t *testing.T) {
 		assert.Empty(t, ret.GetFieldsData())
 	})
 
+	t.Run("test timestamp decided", func(t *testing.T) {
+		ret1 := &internalpb.RetrieveResults{
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{
+						Data: []int64{0, 1},
+					}},
+			},
+			FieldsData: []*schemapb.FieldData{
+				genFieldData(common.TimeStampFieldName, common.TimeStampField, schemapb.DataType_Int64,
+					[]int64{1, 2}, 1),
+				genFieldData(Int64FieldName, Int64FieldID, schemapb.DataType_Int64,
+					[]int64{3, 4}, 1),
+			},
+		}
+		ret2 := &internalpb.RetrieveResults{
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{
+						Data: []int64{0, 1},
+					}},
+			},
+			FieldsData: []*schemapb.FieldData{
+				genFieldData(common.TimeStampFieldName, common.TimeStampField, schemapb.DataType_Int64,
+					[]int64{5, 6}, 1),
+				genFieldData(Int64FieldName, Int64FieldID, schemapb.DataType_Int64,
+					[]int64{7, 8}, 1),
+			},
+		}
+		result, err := mergeInternalRetrieveResult(context.Background(), []*internalpb.RetrieveResults{ret1, ret2}, typeutil.Unlimited)
+		assert.NoError(t, err)
+		assert.Equal(t, 2, len(result.GetFieldsData()))
+		assert.Equal(t, []int64{0, 1}, result.GetIds().GetIntId().GetData())
+		assert.Equal(t, []int64{7, 8}, result.GetFieldsData()[1].GetScalars().GetLongData().Data)
+	})
+
 	t.Run("test merge", func(t *testing.T) {
 		r1 := &internalpb.RetrieveResults{
 			Ids: &schemapb.IDs{

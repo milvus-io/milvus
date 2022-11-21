@@ -181,7 +181,6 @@ class SegmentInternalInterface : public SegmentInterface {
     virtual const index::IndexBase*
     chunk_index_impl(FieldId field_id, int64_t chunk_id) const = 0;
 
-    // TODO remove system fields
     // calculate output[i] = Vec[seg_offsets[i]}, where Vec binds to system_type
     virtual void
     bulk_subscript(SystemFieldType system_type, const int64_t* seg_offsets, int64_t count, void* output) const = 0;
