@@ -27,10 +27,11 @@ import (
 )
 
 type RowCountBasedBalancer struct {
-	RoundRobinBalancer
+	*RoundRobinBalancer
 	nodeManager *session.NodeManager
 	dist        *meta.DistributionManager
 	meta        *meta.Meta
+	targetMgr   *meta.TargetManager
 }
 
 func (b *RowCountBasedBalancer) AssignSegment(segments []*meta.Segment, nodes []int64) []SegmentAssignPlan {
@@ -110,6 +111,10 @@ func (b *RowCountBasedBalancer) balanceReplica(replica *meta.Replica) ([]Segment
 	totalCnt := 0
 	for _, nid := range nodes {
 		segments := b.dist.SegmentDistManager.GetByCollectionAndNode(replica.GetCollectionID(), nid)
+		// Only balance segments in targets
+		segments = lo.Filter(segments, func(segment *meta.Segment, _ int) bool {
+			return b.targetMgr.GetHistoricalSegment(segment.GetCollectionID(), segment.GetID(), meta.CurrentTarget) != nil
+		})
 		cnt := 0
 		for _, s := range segments {
 			cnt += int(s.GetNumOfRows())
@@ -192,12 +197,14 @@ func NewRowCountBasedBalancer(
 	nodeManager *session.NodeManager,
 	dist *meta.DistributionManager,
 	meta *meta.Meta,
+	targetMgr *meta.TargetManager,
 ) *RowCountBasedBalancer {
 	return &RowCountBasedBalancer{
-		RoundRobinBalancer: *NewRoundRobinBalancer(scheduler, nodeManager),
+		RoundRobinBalancer: NewRoundRobinBalancer(scheduler, nodeManager),
 		nodeManager:        nodeManager,
 		dist:               dist,
 		meta:               meta,
+		targetMgr:          targetMgr,
 	}
 }
 

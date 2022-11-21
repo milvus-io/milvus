@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/etcd"
+	mock "github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -34,6 +35,7 @@ type RowCountBasedBalancerTestSuite struct {
 	suite.Suite
 	balancer *RowCountBasedBalancer
 	kv       *etcdkv.EtcdKV
+	broker   *meta.MockBroker
 }
 
 func (suite *RowCountBasedBalancerTestSuite) SetupSuite() {
@@ -46,14 +48,16 @@ func (suite *RowCountBasedBalancerTestSuite) SetupTest() {
 	cli, err := etcd.GetEtcdClient(config)
 	suite.Require().NoError(err)
 	suite.kv = etcdkv.NewEtcdKV(cli, config.MetaRootPath.GetValue())
+	suite.broker = meta.NewMockBroker(suite.T())
 
 	store := meta.NewMetaStore(suite.kv)
 	idAllocator := RandomIncrementIDAllocator()
 	testMeta := meta.NewMeta(idAllocator, store)
+	testTarget := meta.NewTargetManager(suite.broker, testMeta)
 
 	distManager := meta.NewDistributionManager()
 	nodeManager := session.NewNodeManager()
-	suite.balancer = NewRowCountBasedBalancer(nil, nodeManager, distManager, testMeta)
+	suite.balancer = NewRowCountBasedBalancer(nil, nodeManager, distManager, testMeta, testTarget)
 }
 
 func (suite *RowCountBasedBalancerTestSuite) TearDownTest() {
@@ -146,6 +150,21 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalance() {
 			defer suite.TearDownTest()
 			balancer := suite.balancer
 			collection := utils.CreateTestCollection(1, 1)
+			segments := []*datapb.SegmentBinlogs{
+				{
+					SegmentID: 1,
+				},
+				{
+					SegmentID: 2,
+				},
+				{
+					SegmentID: 3,
+				},
+			}
+			suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, int64(1), int64(1)).Return(
+				nil, segments, nil)
+			balancer.targetMgr.UpdateCollectionNextTargetWithPartitions(int64(1), int64(1))
+			balancer.targetMgr.UpdateCollectionCurrentTarget(1, 1)
 			collection.LoadPercentage = 100
 			collection.Status = querypb.LoadStatus_Loaded
 			balancer.meta.CollectionManager.PutCollection(collection)

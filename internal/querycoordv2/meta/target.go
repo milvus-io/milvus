@@ -52,7 +52,7 @@ func (p *CollectionTarget) GetAllDmChannelNames() []string {
 }
 
 func (p *CollectionTarget) IsEmpty() bool {
-	return len(p.dmChannels) == 0
+	return len(p.dmChannels)+len(p.segments) == 0
 }
 
 type target struct {
