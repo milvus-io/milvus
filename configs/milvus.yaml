@@ -373,7 +373,7 @@ common:
     SearchListSize: 100
     PQCodeBudgetGBRatio: 0.125
     BuildNumThreadsRatio: 1.0
-    SearchCacheBudgetGBRatio: 0.125
+    SearchCacheBudgetGBRatio: 0.10
     LoadNumThreadRatio: 8.0
     BeamWidthRatio: 4.0
   # This parameter specify how many times the number of threads is the number of cores

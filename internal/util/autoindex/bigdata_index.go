@@ -35,7 +35,7 @@ const (
 	BeamWidthRatioKey               = "beamwidth_ratio"
 	DefaultPQCodeBudgetGBRatio      = 0.125
 	DefaultBuildNumThreadsRatio     = 1.0
-	DefaultSearchCacheBudgetGBRatio = 0.125
+	DefaultSearchCacheBudgetGBRatio = 0.10
 	DefaultLoadNumThreadRatio       = 8.0
 	DefaultBeamWidthRatio           = 4.0
 )
