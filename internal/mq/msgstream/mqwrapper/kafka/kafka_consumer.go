@@ -1,20 +1,23 @@
 package kafka
 
 import (
+	"context"
 	"errors"
 	"sync"
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
+	"github.com/jackc/puddle/v2"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 	"go.uber.org/zap"
 )
 
 type Consumer struct {
-	c          *kafka.Consumer
-	config     *kafka.ConfigMap
+	resource   *puddle.Resource[*kafka.Consumer]
 	msgChannel chan mqwrapper.Message
+	tp         []kafka.TopicPartition
 	hasAssign  bool
 	skipMsg    bool
 	topic      string
@@ -26,10 +29,9 @@ type Consumer struct {
 
 const timeout = 3000
 
-func newKafkaConsumer(config *kafka.ConfigMap, topic string, groupID string, position mqwrapper.SubscriptionInitialPosition) (*Consumer, error) {
+func newKafkaConsumer(topic string, groupID string, position mqwrapper.SubscriptionInitialPosition) (*Consumer, error) {
 	msgChannel := make(chan mqwrapper.Message, 256)
 	kc := &Consumer{
-		config:     config,
 		msgChannel: msgChannel,
 		topic:      topic,
 		groupID:    groupID,
@@ -75,8 +77,8 @@ func newKafkaConsumer(config *kafka.ConfigMap, topic string, groupID string, pos
 		}
 
 		start := time.Now()
-		topicPartition := []kafka.TopicPartition{{Topic: &topic, Partition: mqwrapper.DefaultPartitionIdx, Offset: offset}}
-		err = kc.c.Assign(topicPartition)
+		kc.tp = []kafka.TopicPartition{{Topic: &topic, Partition: mqwrapper.DefaultPartitionIdx, Offset: offset}}
+		err = kc.resource.Value().Assign(kc.tp)
 		if err != nil {
 			log.Error("kafka consumer assign failed ", zap.String("topic name", topic), zap.Any("Msg position", position), zap.Error(err))
 			return nil, err
@@ -94,11 +96,23 @@ func newKafkaConsumer(config *kafka.ConfigMap, topic string, groupID string, pos
 
 func (kc *Consumer) createKafkaConsumer() error {
 	var err error
-	kc.c, err = kafka.NewConsumer(kc.config)
+	kc.resource, err = ConsumerConnectionPool.Acquire(context.Background())
 	if err != nil {
-		log.Error("create kafka consumer failed", zap.String("topic", kc.topic), zap.Error(err))
+		log.Error("get kafka consumer failed from consumer connection pool", zap.String("topic", kc.topic), zap.Error(err))
 		return err
 	}
+
+	stats := ConsumerConnectionPool.Stat()
+	log.Debug("kafka consumer connection pool stats", zap.Int32("total resource", stats.TotalResources()),
+		zap.Int32("acquired resource", stats.AcquiredResources()),
+		zap.Int32("idle resource", stats.IdleResources()),
+		zap.Int32("construction resource", stats.ConstructingResources()),
+		zap.Int32("max resource", stats.MaxResources()),
+		zap.Int64("acquired resource count", stats.AcquireCount()),
+		zap.Any("acquired duration", stats.AcquireDuration()),
+		zap.Int64("canceled acquire resource count", stats.CanceledAcquireCount()),
+		zap.Int64("empty acquire resource count", stats.EmptyAcquireCount()),
+	)
 	return nil
 }
 
@@ -121,21 +135,21 @@ func (kc *Consumer) Chan() <-chan mqwrapper.Message {
 				select {
 				case <-kc.closeCh:
 					log.Info("close consumer ", zap.String("topic", kc.topic), zap.String("groupID", kc.groupID))
-					start := time.Now()
-					err := kc.c.Close()
+					err := kc.resource.Value().Unassign()
 					if err != nil {
-						log.Warn("failed to close ", zap.String("topic", kc.topic), zap.Error(err))
+						log.Error("kafka unassign consumer fail", zap.String("topic", kc.topic), zap.String("groupID", kc.groupID), zap.Error(err))
+						// try to destroy directly it if unassign fail.
+						kc.resource.Destroy()
+						return
 					}
-					cost := time.Since(start).Milliseconds()
-					if cost > 200 {
-						log.Warn("close consumer costs too long time", zap.Any("topic", kc.topic), zap.String("groupID", kc.groupID), zap.Int64("time(ms)", cost))
-					}
+
+					kc.resource.Release()
 					if kc.msgChannel != nil {
 						close(kc.msgChannel)
 					}
 					return
 				default:
-					e, err := kc.c.ReadMessage(30 * time.Second)
+					e, err := kc.resource.Value().ReadMessage(30 * time.Second)
 					if err != nil {
 						// if we failed to read message in 30 Seconds, print out a warn message since there should always be a tt
 						log.Warn("consume msg failed", zap.Any("topic", kc.topic), zap.String("groupID", kc.groupID), zap.Error(err))
@@ -168,7 +182,8 @@ func (kc *Consumer) internalSeek(offset kafka.Offset, inclusive bool) error {
 		zap.Any("Msg offset", offset), zap.Bool("inclusive", inclusive))
 
 	start := time.Now()
-	err := kc.c.Assign([]kafka.TopicPartition{{Topic: &kc.topic, Partition: mqwrapper.DefaultPartitionIdx, Offset: offset}})
+	kc.tp = []kafka.TopicPartition{{Topic: &kc.topic, Partition: mqwrapper.DefaultPartitionIdx, Offset: offset}}
+	err := kc.resource.Value().Assign(kc.tp)
 	if err != nil {
 		log.Warn("kafka consumer assign failed ", zap.String("topic name", kc.topic), zap.Any("Msg offset", offset), zap.Error(err))
 		return err
@@ -183,7 +198,7 @@ func (kc *Consumer) internalSeek(offset kafka.Offset, inclusive bool) error {
 	// If seek timeout is not 0 the call twice will return error isStarted RD_KAFKA_RESP_ERR__STATE.
 	// if the timeout is 0 it will initiate the seek  but return immediately without any error reporting
 	kc.skipMsg = !inclusive
-	if err := kc.c.Seek(kafka.TopicPartition{
+	if err := kc.resource.Value().Seek(kafka.TopicPartition{
 		Topic:     &kc.topic,
 		Partition: mqwrapper.DefaultPartitionIdx,
 		Offset:    offset}, timeout); err != nil {
@@ -204,7 +219,7 @@ func (kc *Consumer) Ack(message mqwrapper.Message) {
 }
 
 func (kc *Consumer) GetLatestMsgID() (mqwrapper.MessageID, error) {
-	low, high, err := kc.c.QueryWatermarkOffsets(kc.topic, mqwrapper.DefaultPartitionIdx, timeout)
+	low, high, err := kc.resource.Value().QueryWatermarkOffsets(kc.topic, mqwrapper.DefaultPartitionIdx, timeout)
 	if err != nil {
 		return nil, err
 	}

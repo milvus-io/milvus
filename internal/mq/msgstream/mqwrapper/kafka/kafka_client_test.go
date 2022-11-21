@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"math"
 	"math/rand"
 	"os"
 	"testing"
@@ -339,7 +340,7 @@ func TestKafkaClient_NewKafkaClientInstanceWithConfig(t *testing.T) {
 	assert.NotNil(t, client.basicConfig)
 
 	assert.Equal(t, "dc", client.consumerConfig["client.id"])
-	newConsumerConfig := client.newConsumerConfig("test", 0)
+	newConsumerConfig := client.newConsumerConfig("test")
 	clientID, err := newConsumerConfig.Get("client.id", "")
 	assert.Nil(t, err)
 	assert.Equal(t, "dc", clientID)
@@ -349,6 +350,24 @@ func TestKafkaClient_NewKafkaClientInstanceWithConfig(t *testing.T) {
 	pClientID, err := newProducerConfig.Get("client.id", "")
 	assert.Nil(t, err)
 	assert.Equal(t, pClientID, "dc1")
+}
+
+func TestKafkaClient_InitConsumeConnectionPool(t *testing.T) {
+	kafkaAddress := getKafkaBrokerList()
+	kc := NewKafkaClientInstance(kafkaAddress)
+	ctx := context.Background()
+	kc.initConsumerConnectionPool()
+
+	t.Run("create consumer ok", func(t *testing.T) {
+		preStats := ConsumerConnectionPool.Stat()
+		_, err := ConsumerConnectionPool.Acquire(ctx)
+		assert.NoError(t, err)
+		stats := ConsumerConnectionPool.Stat()
+		assert.Equal(t, preStats.AcquireCount()+1, stats.AcquireCount())
+		assert.Equal(t, int32(math.MaxInt32), stats.MaxResources())
+		assert.Equal(t, preStats.TotalResources()+1, stats.TotalResources())
+		assert.Equal(t, preStats.AcquiredResources()+1, stats.AcquiredResources())
+	})
 }
 
 func createKafkaClient(t *testing.T) *kafkaClient {

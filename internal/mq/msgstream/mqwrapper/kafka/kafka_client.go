@@ -1,20 +1,30 @@
 package kafka
 
 import (
+	"context"
 	"fmt"
+	"math"
+	"runtime"
 	"strconv"
 	"sync"
-
-	"github.com/milvus-io/milvus/internal/util/paramtable"
+	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
+	"github.com/jackc/puddle/v2"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
-	"go.uber.org/zap"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
 
+// Producer A kafka produce singleton
 var Producer *kafka.Producer
 var once sync.Once
+
+// ConsumerConnectionPool A consumer connection pool singleton
+var ConsumerConnectionPool *puddle.Pool[*kafka.Consumer]
+var consumerPoolOnce sync.Once
 
 type kafkaClient struct {
 	// more configs you can see https://github.com/edenhill/librdkafka/blob/master/CONFIGURATION.md
@@ -128,7 +138,7 @@ func (kc *kafkaClient) newProducerConfig() *kafka.ConfigMap {
 	return newConf
 }
 
-func (kc *kafkaClient) newConsumerConfig(group string, offset mqwrapper.SubscriptionInitialPosition) *kafka.ConfigMap {
+func (kc *kafkaClient) newConsumerConfig(group string) *kafka.ConfigMap {
 	newConf := cloneKafkaConfig(kc.basicConfig)
 
 	newConf.SetKey("group.id", group)
@@ -140,6 +150,72 @@ func (kc *kafkaClient) newConsumerConfig(group string, offset mqwrapper.Subscrip
 	kc.specialExtraConfig(newConf, kc.consumerConfig)
 
 	return newConf
+}
+
+func (kc *kafkaClient) initConsumerConnectionPool() {
+	consumerPoolOnce.Do(func() {
+		constructor := func(context.Context) (*kafka.Consumer, error) {
+			config := kc.newConsumerConfig(fmt.Sprintf("rand-group-id-%d", time.Now().UnixMilli()))
+			consumer, err := kafka.NewConsumer(config)
+			if err != nil {
+				log.Error("create kafka consumer failed", zap.Error(err))
+				return nil, err
+			}
+
+			return consumer, err
+		}
+
+		destructor := func(value *kafka.Consumer) {
+			start := time.Now()
+			value.Close()
+			cost := time.Since(start).Milliseconds()
+			if cost > 200 {
+				log.Warn("close consumer taken too long time",
+					zap.String("name", value.String()),
+					zap.Int64("time(ms)", cost))
+			}
+		}
+
+		var err error
+		ConsumerConnectionPool, err = puddle.NewPool(
+			&puddle.Config[*kafka.Consumer]{
+				Constructor: constructor,
+				Destructor:  destructor,
+				MaxSize:     math.MaxInt32,
+			},
+		)
+		if err != nil {
+			log.Error("create kafka consumer connection pool failed", zap.Error(err))
+			panic(err)
+		}
+
+		ticker := time.NewTicker(time.Minute * 5)
+		stopCh := make(chan struct{}, 1)
+		go func() {
+			for {
+				select {
+				case <-stopCh:
+					ticker.Stop()
+					return
+				case <-ticker.C:
+					resources := ConsumerConnectionPool.AcquireAllIdle()
+					expiredTime := time.Minute * 5
+					for _, r := range resources {
+						// to close consumer connection if the idle time greater than 5 minutes.
+						if r.IdleDuration().Minutes() > expiredTime.Minutes() {
+							r.Destroy()
+						}
+					}
+				}
+			}
+		}()
+
+		runtime.SetFinalizer(ConsumerConnectionPool, func(pool *puddle.Pool[*kafka.Consumer]) {
+			log.Debug("close kafka consumer connection pool")
+			ConsumerConnectionPool.Close()
+			stopCh <- struct{}{}
+		})
+	})
 }
 
 func (kc *kafkaClient) CreateProducer(options mqwrapper.ProducerOptions) (mqwrapper.Producer, error) {
@@ -154,8 +230,8 @@ func (kc *kafkaClient) CreateProducer(options mqwrapper.ProducerOptions) (mqwrap
 }
 
 func (kc *kafkaClient) Subscribe(options mqwrapper.ConsumerOptions) (mqwrapper.Consumer, error) {
-	config := kc.newConsumerConfig(options.SubscriptionName, options.SubscriptionInitialPosition)
-	consumer, err := newKafkaConsumer(config, options.Topic, options.SubscriptionName, options.SubscriptionInitialPosition)
+	kc.initConsumerConnectionPool()
+	consumer, err := newKafkaConsumer(options.Topic, options.SubscriptionName, options.SubscriptionInitialPosition)
 	if err != nil {
 		return nil, err
 	}
