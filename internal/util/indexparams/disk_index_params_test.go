@@ -45,7 +45,7 @@ func TestDiskIndexParams(t *testing.T) {
 
 		searchCacheBudgetGBRatio, err := strconv.ParseFloat(indexParams[SearchCacheBudgetRatioKey], 64)
 		assert.NoError(t, err)
-		assert.Equal(t, 0.125, searchCacheBudgetGBRatio)
+		assert.Equal(t, 0.10, searchCacheBudgetGBRatio)
 
 		loadNumThreadRatio, err := strconv.ParseFloat(indexParams[NumLoadThreadRatioKey], 64)
 		assert.NoError(t, err)
