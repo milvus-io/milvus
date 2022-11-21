@@ -83,7 +83,7 @@ class TestCompactionParams(TestcaseBase):
         log.debug(collection_w.index())
 
         # insert flush twice
-        for i in range(2):
+        for i in range(3):
             df = cf.gen_default_dataframe_data(tmp_nb)
             partition_w.insert(df)
             assert partition_w.num_entities == tmp_nb * (i + 1)
@@ -94,7 +94,7 @@ class TestCompactionParams(TestcaseBase):
         c_plans = collection_w.get_compaction_plans()[0]
 
         assert len(c_plans.plans) == 1
-        assert len(c_plans.plans[0].sources) == 2
+        assert len(c_plans.plans[0].sources) > 1
         target = c_plans.plans[0].target
 
         # verify queryNode load the compacted segments
@@ -1116,7 +1116,8 @@ class TestCompactionOperation(TestcaseBase):
         c_plans = collection_w.get_compaction_plans()[0]
 
         # Actually no merged
-        assert len(c_plans.plans) == 2
+        # The auto-compaction may have compact some shards
+        assert len(c_plans.plans) > 0
         for plan in c_plans.plans:
             assert len(plan.sources) == 1
 
