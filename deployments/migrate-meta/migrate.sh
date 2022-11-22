@@ -4,6 +4,7 @@ namespace="default"
 root_path="by-dev"
 operation="migrate"
 image_tag="milvusdb/milvus:v2.2.0"
+attu_image_tag="zilliz/attu:v2.1.1"
 meta_migration_pod_tag="milvusdb/meta-migration:v2.2.0"
 remove_migrate_pod_after_migrate="false"
 
@@ -373,6 +374,11 @@ function start_milvus_deploy(){
     replica_count="${item[1]}"
     echo "Starting $deploy_name..."
     component=$(kubectl get deploy -n $namespace $deploy_name --output=jsonpath={.metadata.labels.component})
+    image_tag_to_use="$image_tag"
+    # if component = "attu", set $image_tag to $attu_image_tag
+    if [ "$component" == "attu" ]; then
+      image_tag_to_use="$attu_image_tag"
+    fi
     kubectl patch deployment/$deploy_name -n $namespace --patch-file=/dev/stdin <<-EOF
     spec:
       replicas: $replica_count
@@ -380,7 +386,7 @@ function start_milvus_deploy(){
         spec:
           containers:
           - name: $component
-            image: $image_tag
+            image: $image_tag_to_use
 EOF
   done
 }
