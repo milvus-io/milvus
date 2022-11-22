@@ -17,23 +17,65 @@
 package allocator
 
 import (
+	"io/ioutil"
+	"net/url"
+	"os"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/stretchr/testify/assert"
+	"go.etcd.io/etcd/server/v3/embed"
+	"go.etcd.io/etcd/server/v3/etcdserver/api/v3client"
 )
 
 var gTestIDAllocator *GlobalIDAllocator
 
 var Params paramtable.ComponentParam
 
+var embedEtcdServer *embed.Etcd
+
+func startEmbedEtcdServer() (*embed.Etcd, error) {
+	dir, err := ioutil.TempDir(os.TempDir(), "milvus_ut")
+	if err != nil {
+		return nil, err
+	}
+	config := embed.NewConfig()
+
+	config.Dir = dir
+	config.LogLevel = "warn"
+	config.LogOutputs = []string{"default"}
+	u, err := url.Parse("http://localhost:0")
+	if err != nil {
+		return nil, err
+	}
+	config.LCUrls = []url.URL{*u}
+	u, err = url.Parse("http://localhost:0")
+	if err != nil {
+		return nil, err
+	}
+	config.LPUrls = []url.URL{*u}
+
+	return embed.StartEtcd(config)
+}
+
+func TestMain(m *testing.M) {
+	var err error
+	// init embed etcd
+	embedEtcdServer, err = startEmbedEtcdServer()
+	if err != nil {
+		os.Exit(1)
+	}
+	defer embedEtcdServer.Close()
+
+	exitCode := m.Run()
+	if exitCode > 0 {
+		os.Exit(exitCode)
+	}
+}
+
 func TestGlobalTSOAllocator_All(t *testing.T) {
-	Params.Init()
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-	assert.NoError(t, err)
-	defer etcdCli.Close()
+	etcdCli := v3client.New(embedEtcdServer.Server)
 	etcdKV := tsoutil.NewTSOKVBase(etcdCli, "/test/root/kv", "gidTest")
 
 	gTestIDAllocator = NewGlobalIDAllocator("idTimestamp", etcdKV)
@@ -67,6 +109,5 @@ func TestGlobalTSOAllocator_All(t *testing.T) {
 		id2, err := gTestIDAllocator.allocator.GenerateTSO(count2)
 		assert.Nil(t, err)
 		assert.Equal(t, id2-id1, uint64(count2))
-
 	})
 }
