@@ -17,7 +17,6 @@
 package metrics
 
 import (
-
 	// nolint:gosec
 	_ "net/http/pprof"
 
@@ -49,11 +48,12 @@ const (
 	FailedIndexTaskLabel     = "failed"
 	RecycledIndexTaskLabel   = "recycled"
 
+	// Note: below must matchcommonpb.SegmentState_name fields.
 	SealedSegmentLabel   = "Sealed"
 	GrowingSegmentLabel  = "Growing"
 	FlushedSegmentLabel  = "Flushed"
 	FlushingSegmentLabel = "Flushing"
-	DropedSegmentLabel   = "Dropped"
+	DroppedSegmentLabel  = "Dropped"
 
 	Leader     = "OnLeader"
 	FromLeader = "FromLeader"
@@ -81,7 +81,7 @@ var (
 	buckets = prometheus.ExponentialBuckets(1, 2, 18)
 )
 
-//Register serves prometheus http service
+// Register serves prometheus http service
 func Register(r *prometheus.Registry) {
 	management.Register(&management.HTTPHandler{
 		Path:    "/metrics",

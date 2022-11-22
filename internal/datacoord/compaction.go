@@ -249,7 +249,8 @@ func (c *compactionPlanHandler) completeCompaction(result *datapb.CompactionResu
 }
 
 func (c *compactionPlanHandler) handleMergeCompactionResult(plan *datapb.CompactionPlan, result *datapb.CompactionResult) error {
-	oldSegments, modSegments, newSegment, err := c.meta.PrepareCompleteCompactionMutation(plan.GetSegmentBinlogs(), result)
+	// Also prepare metric updates.
+	oldSegments, modSegments, newSegment, metricMutation, err := c.meta.PrepareCompleteCompactionMutation(plan.GetSegmentBinlogs(), result)
 	if err != nil {
 		return err
 	}
@@ -281,6 +282,8 @@ func (c *compactionPlanHandler) handleMergeCompactionResult(plan *datapb.Compact
 			zap.Int64("nodeID", nodeID), zap.String("reason", err.Error()))
 		return c.meta.revertAlterMetaStoreAfterCompaction(oldSegments, newSegment.SegmentInfo)
 	}
+	// Apply metrics after successful meta update.
+	metricMutation.commit()
 
 	c.meta.alterInMemoryMetaAfterCompaction(newSegment, modSegments)
 	log.Info("handleCompactionResult: success to handle merge compaction result")
