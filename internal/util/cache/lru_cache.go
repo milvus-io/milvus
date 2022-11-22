@@ -24,15 +24,15 @@ import (
 	"sync"
 )
 
-type LRU struct {
+type LRU[K comparable, V any] struct {
 	ctx       context.Context
 	cancel    context.CancelFunc
 	evictList *list.List
-	items     map[interface{}]*list.Element
+	items     map[K]*list.Element
 	capacity  int
-	onEvicted func(k Key, v Value)
+	onEvicted func(k K, v V)
 	m         sync.RWMutex
-	evictedCh chan *entry
+	evictedCh chan *entry[K, V]
 	stats     *Stats
 }
 
@@ -54,36 +54,31 @@ func (s *Stats) String() string {
 	return fmt.Sprintf("lru cache hit ratio = %f, evictedRatio = %f", hitRatio, evictedRatio)
 }
 
-type Key interface {
-}
-type Value interface {
-}
-
-type entry struct {
-	key   Key
-	value Value
+type entry[K comparable, V any] struct {
+	key   K
+	value V
 }
 
-func NewLRU(capacity int, onEvicted func(k Key, v Value)) (*LRU, error) {
+func NewLRU[K comparable, V any](capacity int, onEvicted func(k K, v V)) (*LRU[K, V], error) {
 	if capacity <= 0 {
 		return nil, errors.New("cache size must be positive")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	c := &LRU{
+	c := &LRU[K, V]{
 		ctx:       ctx,
 		cancel:    cancel,
 		capacity:  capacity,
 		evictList: list.New(),
-		items:     make(map[interface{}]*list.Element),
+		items:     make(map[K]*list.Element),
 		onEvicted: onEvicted,
-		evictedCh: make(chan *entry, 16),
+		evictedCh: make(chan *entry[K, V], 16),
 		stats:     &Stats{},
 	}
 	go c.evictedWorker()
 	return c, nil
 }
 
-func (c *LRU) evictedWorker() {
+func (c *LRU[K, V]) evictedWorker() {
 	for {
 		select {
 		case <-c.ctx.Done():
@@ -98,16 +93,16 @@ func (c *LRU) evictedWorker() {
 	}
 }
 
-func (c *LRU) Add(key, value Value) {
+func (c *LRU[K, V]) Add(key K, value V) {
 	c.m.Lock()
 	defer c.m.Unlock()
 	c.stats.writeCount++
 	if e, ok := c.items[key]; ok {
 		c.evictList.MoveToFront(e)
-		e.Value.(*entry).value = value
+		e.Value.(*entry[K, V]).value = value
 		return
 	}
-	e := &entry{key: key, value: value}
+	e := &entry[K, V]{key: key, value: value}
 	listE := c.evictList.PushFront(e)
 	c.items[key] = listE
 
@@ -116,7 +111,7 @@ func (c *LRU) Add(key, value Value) {
 		oldestE := c.evictList.Back()
 		if oldestE != nil {
 			c.evictList.Remove(oldestE)
-			kv := oldestE.Value.(*entry)
+			kv := oldestE.Value.(*entry[K, V])
 			delete(c.items, kv.key)
 			if c.onEvicted != nil {
 				c.evictedCh <- kv
@@ -125,25 +120,27 @@ func (c *LRU) Add(key, value Value) {
 	}
 }
 
-func (c *LRU) Get(key Key) (value Value, ok bool) {
+func (c *LRU[K, V]) Get(key K) (value V, ok bool) {
 	c.m.RLock()
 	defer c.m.RUnlock()
 	c.stats.readCount++
 	if e, ok := c.items[key]; ok {
 		c.stats.hitCount++
 		c.evictList.MoveToFront(e)
-		kv := e.Value.(*entry)
+		kv := e.Value.(*entry[K, V])
 		return kv.value, true
 	}
-	return nil, false
+
+	var zeroV V
+	return zeroV, false
 }
 
-func (c *LRU) Remove(key Key) {
+func (c *LRU[K, V]) Remove(key K) {
 	c.m.Lock()
 	defer c.m.Unlock()
 	if e, ok := c.items[key]; ok {
 		c.evictList.Remove(e)
-		kv := e.Value.(*entry)
+		kv := e.Value.(*entry[K, V])
 		delete(c.items, kv.key)
 		if c.onEvicted != nil {
 			c.evictedCh <- kv
@@ -151,48 +148,48 @@ func (c *LRU) Remove(key Key) {
 	}
 }
 
-func (c *LRU) Contains(key Key) bool {
+func (c *LRU[K, V]) Contains(key K) bool {
 	c.m.RLock()
 	defer c.m.RUnlock()
 	_, ok := c.items[key]
 	return ok
 }
 
-func (c *LRU) Keys() []Key {
+func (c *LRU[K, V]) Keys() []K {
 	c.m.RLock()
 	defer c.m.RUnlock()
-	keys := make([]Key, len(c.items))
+	keys := make([]K, len(c.items))
 	i := 0
 	for ent := c.evictList.Back(); ent != nil; ent = ent.Prev() {
-		keys[i] = ent.Value.(*entry).key
+		keys[i] = ent.Value.(*entry[K, V]).key
 		i++
 	}
 	return keys
 }
 
-func (c *LRU) Len() int {
+func (c *LRU[K, V]) Len() int {
 	c.m.RLock()
 	defer c.m.RUnlock()
 	return c.evictList.Len()
 }
 
-func (c *LRU) Capacity() int {
+func (c *LRU[K, V]) Capacity() int {
 	return c.capacity
 }
 
-func (c *LRU) Purge() {
+func (c *LRU[K, V]) Purge() {
 	c.m.Lock()
 	defer c.m.Unlock()
 	for k, v := range c.items {
 		if c.onEvicted != nil {
-			c.evictedCh <- v.Value.(*entry)
+			c.evictedCh <- v.Value.(*entry[K, V])
 		}
 		delete(c.items, k)
 	}
 	c.evictList.Init()
 }
 
-func (c *LRU) Resize(capacity int) int {
+func (c *LRU[K, V]) Resize(capacity int) int {
 	c.m.Lock()
 	defer c.m.Unlock()
 	c.capacity = capacity
@@ -204,7 +201,7 @@ func (c *LRU) Resize(capacity int) int {
 		oldestE := c.evictList.Back()
 		if oldestE != nil {
 			c.evictList.Remove(oldestE)
-			kv := oldestE.Value.(*entry)
+			kv := oldestE.Value.(*entry[K, V])
 			delete(c.items, kv.key)
 			if c.onEvicted != nil {
 				c.evictedCh <- kv
@@ -214,18 +211,23 @@ func (c *LRU) Resize(capacity int) int {
 	return diff
 }
 
-func (c *LRU) GetOldest() (Key, Value, bool) {
+func (c *LRU[K, V]) GetOldest() (K, V, bool) {
 	c.m.RLock()
 	defer c.m.RUnlock()
 	ent := c.evictList.Back()
 	if ent != nil {
-		kv := ent.Value.(*entry)
+		kv := ent.Value.(*entry[K, V])
 		return kv.key, kv.value, true
 	}
-	return nil, nil, false
+
+	var (
+		zeroK K
+		zeroV V
+	)
+	return zeroK, zeroV, false
 }
 
-func (c *LRU) Close() {
+func (c *LRU[K, V]) Close() {
 	c.Purge()
 	c.cancel()
 	remain := len(c.evictedCh)
@@ -238,6 +240,6 @@ func (c *LRU) Close() {
 	close(c.evictedCh)
 }
 
-func (c *LRU) Stats() *Stats {
+func (c *LRU[K, V]) Stats() *Stats {
 	return c.stats
 }

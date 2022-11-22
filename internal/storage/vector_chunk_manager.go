@@ -40,7 +40,7 @@ var (
 type VectorChunkManager struct {
 	cacheStorage  ChunkManager
 	vectorStorage ChunkManager
-	cache         *cache.LRU
+	cache         *cache.LRU[string, *mmap.ReaderAt]
 
 	insertCodec *InsertCodec
 
@@ -68,14 +68,13 @@ func NewVectorChunkManager(ctx context.Context, cacheStorage ChunkManager, vecto
 		if cacheLimit <= 0 {
 			return nil, errors.New("cache limit must be positive if cacheEnable")
 		}
-		c, err := cache.NewLRU(defaultLocalCacheSize, func(k cache.Key, v cache.Value) {
-			r := v.(*mmap.ReaderAt)
-			size := r.Len()
-			err := r.Close()
+		c, err := cache.NewLRU(defaultLocalCacheSize, func(k string, v *mmap.ReaderAt) {
+			size := v.Len()
+			err := v.Close()
 			if err != nil {
 				log.Error("Unmmap file failed", zap.Any("file", k))
 			}
-			err = cacheStorage.Remove(ctx, k.(string))
+			err = cacheStorage.Remove(ctx, k)
 			if err != nil {
 				log.Error("cache storage remove file failed", zap.Any("file", k))
 			}
@@ -191,9 +190,8 @@ func (vcm *VectorChunkManager) readWithCache(ctx context.Context, filePath strin
 func (vcm *VectorChunkManager) Read(ctx context.Context, filePath string) ([]byte, error) {
 	if vcm.cacheEnable {
 		if r, ok := vcm.cache.Get(filePath); ok {
-			at := r.(*mmap.ReaderAt)
-			p := make([]byte, at.Len())
-			_, err := at.ReadAt(p, 0)
+			p := make([]byte, r.Len())
+			_, err := r.ReadAt(p, 0)
 			if err != nil {
 				return p, err
 			}
@@ -241,7 +239,7 @@ func (vcm *VectorChunkManager) ListWithPrefix(ctx context.Context, prefix string
 func (vcm *VectorChunkManager) Mmap(ctx context.Context, filePath string) (*mmap.ReaderAt, error) {
 	if vcm.cacheEnable && vcm.cache != nil {
 		if r, ok := vcm.cache.Get(filePath); ok {
-			return r.(*mmap.ReaderAt), nil
+			return r, nil
 		}
 	}
 	return nil, errors.New("the file mmap has not been cached")
@@ -255,9 +253,8 @@ func (vcm *VectorChunkManager) Reader(ctx context.Context, filePath string) (Fil
 func (vcm *VectorChunkManager) ReadAt(ctx context.Context, filePath string, off int64, length int64) ([]byte, error) {
 	if vcm.cacheEnable {
 		if r, ok := vcm.cache.Get(filePath); ok {
-			at := r.(*mmap.ReaderAt)
 			p := make([]byte, length)
-			_, err := at.ReadAt(p, off)
+			_, err := r.ReadAt(p, off)
 			if err != nil {
 				return nil, err
 			}
