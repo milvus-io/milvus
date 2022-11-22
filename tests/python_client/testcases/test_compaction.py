@@ -79,14 +79,16 @@ class TestCompactionParams(TestcaseBase):
         # create collection with shard_num=1, and create partition
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), shards_num=1)
         partition_w = self.init_partition_wrap(collection_wrap=collection_w)
-        collection_w.create_index(ct.default_float_vec_field_name, ct.default_index)
-        log.debug(collection_w.index())
 
         # insert flush twice
         for i in range(2):
             df = cf.gen_default_dataframe_data(tmp_nb)
             partition_w.insert(df)
             assert partition_w.num_entities == tmp_nb * (i + 1)
+
+        # create index
+        collection_w.create_index(ct.default_float_vec_field_name, ct.default_index)
+        log.debug(collection_w.index())
 
         # compact
         collection_w.compact()
@@ -949,12 +951,10 @@ class TestCompactionOperation(TestcaseBase):
         from pymilvus import utility
         # create collection shard_num=1, insert 2 segments, each with tmp_nb entities
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), shards_num=1)
-        collection_w.create_index(ct.default_float_vec_field_name, ct.default_index)
-        log.debug(collection_w.index())
 
         # insert twice
         df1 = cf.gen_default_dataframe_data(tmp_nb)
-        collection_w.insert(df1)[0]
+        collection_w.insert(df1)
         assert collection_w.num_entities == tmp_nb
 
         df2 = cf.gen_default_dataframe_data(tmp_nb, start=tmp_nb)
@@ -962,6 +962,9 @@ class TestCompactionOperation(TestcaseBase):
         assert collection_w.num_entities == tmp_nb * 2
 
         tt = utility.mkts_from_hybridts(insert_two.timestamp, milliseconds=0.1)
+
+        collection_w.create_index(ct.default_float_vec_field_name, ct.default_index)
+        log.debug(collection_w.index())
 
         collection_w.compact()
         collection_w.wait_for_compaction_completed()
@@ -1104,11 +1107,11 @@ class TestCompactionOperation(TestcaseBase):
         """
         # insert into two segments with two shard
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), shards_num=2)
-        collection_w.create_index(ct.default_float_vec_field_name, ct.default_index)
-        log.debug(collection_w.index())
         df = cf.gen_default_dataframe_data(tmp_nb)
         collection_w.insert(df)
         assert collection_w.num_entities == tmp_nb
+        collection_w.create_index(ct.default_float_vec_field_name, ct.default_index)
+        log.debug(collection_w.index())
 
         # compact
         collection_w.compact()
@@ -1133,13 +1136,13 @@ class TestCompactionOperation(TestcaseBase):
         shards_num = 2
         # insert into two segments with two shard
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix), shards_num=shards_num)
-        collection_w.create_index(ct.default_float_vec_field_name, ct.default_index)
-        log.debug(collection_w.index())
         df = cf.gen_default_dataframe_data(tmp_nb)
         collection_w.insert(df)
         expr = f"{ct.default_int64_field_name} in [0, 99]"
         collection_w.delete(expr)
         assert collection_w.num_entities == tmp_nb
+        collection_w.create_index(ct.default_float_vec_field_name, ct.default_index)
+        log.debug(collection_w.index())
 
         # compact
         sleep(ct.compact_retention_duration + 1)
