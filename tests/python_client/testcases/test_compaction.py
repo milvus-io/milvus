@@ -70,6 +70,7 @@ class TestCompactionParams(TestcaseBase):
         log.debug(c_plans2.plans[0].target)
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/20747")
     def test_compact_partition(self):
         """
         target: test compact partition
