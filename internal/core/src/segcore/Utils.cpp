@@ -10,6 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "segcore/Utils.h"
+
 #include "index/ScalarIndex.h"
 
 namespace milvus::segcore {
@@ -67,6 +68,96 @@ GetSizeOfIdArray(const IdArray& data) {
 
 // Note: this is temporary solution.
 // modify bulk script implement to make process more clear
+
+std::unique_ptr<DataArray>
+CreateScalarDataArray(int64_t count, const FieldMeta& field_meta) {
+    auto data_type = field_meta.get_data_type();
+    auto data_array = std::make_unique<DataArray>();
+    data_array->set_field_id(field_meta.get_id().get());
+    data_array->set_type(milvus::proto::schema::DataType(field_meta.get_data_type()));
+
+    auto scalar_array = data_array->mutable_scalars();
+    switch (data_type) {
+        case DataType::BOOL: {
+            auto obj = scalar_array->mutable_bool_data();
+            obj->mutable_data()->Resize(count, 0);
+            break;
+        }
+        case DataType::INT8: {
+            auto obj = scalar_array->mutable_int_data();
+            obj->mutable_data()->Resize(count, 0);
+            break;
+        }
+        case DataType::INT16: {
+            auto obj = scalar_array->mutable_int_data();
+            obj->mutable_data()->Resize(count, 0);
+            break;
+        }
+        case DataType::INT32: {
+            auto obj = scalar_array->mutable_int_data();
+            obj->mutable_data()->Resize(count, 0);
+            break;
+        }
+        case DataType::INT64: {
+            auto obj = scalar_array->mutable_long_data();
+            obj->mutable_data()->Resize(count, 0);
+            break;
+        }
+        case DataType::FLOAT: {
+            auto obj = scalar_array->mutable_float_data();
+            obj->mutable_data()->Resize(count, 0);
+            break;
+        }
+        case DataType::DOUBLE: {
+            auto obj = scalar_array->mutable_double_data();
+            obj->mutable_data()->Resize(count, 0);
+            break;
+        }
+        case DataType::VARCHAR: {
+            auto obj = scalar_array->mutable_string_data();
+            obj->mutable_data()->Reserve(count);
+            for (auto i = 0; i < count; i++) *(obj->mutable_data()->Add()) = std::string();
+            break;
+        }
+        default: {
+            PanicInfo("unsupported datatype");
+        }
+    }
+
+    return data_array;
+}
+
+std::unique_ptr<DataArray>
+CreateVectorDataArray(int64_t count, const FieldMeta& field_meta) {
+    auto data_type = field_meta.get_data_type();
+    auto data_array = std::make_unique<DataArray>();
+    data_array->set_field_id(field_meta.get_id().get());
+    data_array->set_type(milvus::proto::schema::DataType(field_meta.get_data_type()));
+
+    auto vector_array = data_array->mutable_vectors();
+    auto dim = field_meta.get_dim();
+    vector_array->set_dim(dim);
+    switch (data_type) {
+        case DataType::VECTOR_FLOAT: {
+            auto length = count * dim;
+            auto obj = vector_array->mutable_float_vector();
+            obj->mutable_data()->Resize(length, 0);
+            break;
+        }
+        case DataType::VECTOR_BINARY: {
+            AssertInfo(dim % 8 == 0, "Binary vector field dimension is not a multiple of 8");
+            auto num_bytes = count * dim / 8;
+            auto obj = vector_array->mutable_binary_vector();
+            obj->resize(num_bytes);
+            break;
+        }
+        default: {
+            PanicInfo("unsupported datatype");
+        }
+    }
+    return data_array;
+}
+
 std::unique_ptr<DataArray>
 CreateScalarDataArrayFrom(const void* data_raw, int64_t count, const FieldMeta& field_meta) {
     auto data_type = field_meta.get_data_type();
