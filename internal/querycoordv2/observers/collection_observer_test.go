@@ -199,6 +199,15 @@ func (suite *CollectionObserverSuite) TestObserve() {
 	time := suite.meta.GetCollection(suite.collections[2]).UpdatedAt
 	// Not timeout
 	Params.QueryCoordCfg.LoadTimeoutSeconds = timeout
+
+	segments := []*datapb.SegmentBinlogs{}
+	for _, segment := range suite.segments[100] {
+		segments = append(segments, &datapb.SegmentBinlogs{
+			SegmentID:     segment.GetID(),
+			InsertChannel: segment.GetInsertChannel(),
+		})
+	}
+
 	suite.ob.Start(context.Background())
 
 	// Collection 100 loaded before timeout,
@@ -325,8 +334,12 @@ func (suite *CollectionObserverSuite) load(collection int64) {
 		})
 
 	}
-	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, collection, int64(1)).Return(dmChannels, allSegments, nil)
-	suite.targetMgr.UpdateCollectionNextTargetWithPartitions(collection, int64(1))
+
+	partitions := suite.partitions[collection]
+	for _, partition := range partitions {
+		suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, collection, partition).Return(dmChannels, allSegments, nil)
+	}
+	suite.targetMgr.UpdateCollectionNextTargetWithPartitions(collection, partitions...)
 }
 
 func TestCollectionObserver(t *testing.T) {
