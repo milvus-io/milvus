@@ -134,14 +134,20 @@ func (l *loadSegmentsTask) Execute(ctx context.Context) error {
 }
 
 // internal helper function to subscribe delta channel
-func (l *loadSegmentsTask) watchDeltaChannel(vchanName []string) error {
+func (l *loadSegmentsTask) watchDeltaChannel(deltaChannels []string) error {
 	collectionID := l.req.CollectionID
+	log := log.With(
+		zap.Int64("collectionID", collectionID),
+	)
 	var vDeltaChannels []string
 	VPDeltaChannels := make(map[string]string)
-	for _, v := range vchanName {
+	for _, v := range deltaChannels {
 		dc, err := funcutil.ConvertChannelName(v, Params.CommonCfg.RootCoordDml, Params.CommonCfg.RootCoordDelta)
 		if err != nil {
-			log.Warn("watchDeltaChannels, failed to convert deltaChannel from dmlChannel", zap.String("DmlChannel", v), zap.Error(err))
+			log.Warn("watchDeltaChannels, failed to convert deltaChannel from dmlChannel",
+				zap.String("DmlChannel", v),
+				zap.Error(err),
+			)
 			return err
 		}
 		p := funcutil.ToPhysicalChannel(dc)
@@ -149,8 +155,7 @@ func (l *loadSegmentsTask) watchDeltaChannel(vchanName []string) error {
 		VPDeltaChannels[dc] = p
 	}
 	log.Info("Starting WatchDeltaChannels ...",
-		zap.Int64("collectionID", collectionID),
-		zap.Any("channels", VPDeltaChannels),
+		zap.Strings("channels", vDeltaChannels),
 	)
 
 	coll, err := l.node.metaReplica.getCollectionByID(collectionID)
@@ -158,8 +163,25 @@ func (l *loadSegmentsTask) watchDeltaChannel(vchanName []string) error {
 		return err
 	}
 
-	// filter out duplicated channels
-	vDeltaChannels = coll.AddVDeltaChannels(vDeltaChannels, VPDeltaChannels)
+	// add collection meta and fg with mutex protection.
+	channel2FlowGraph, err := l.node.dataSyncService.addFlowGraphsForDeltaChannels(collectionID, vDeltaChannels, VPDeltaChannels)
+	if err != nil {
+		log.Warn("watchDeltaChannel, add flowGraph for deltaChannel failed", zap.Int64("collectionID", collectionID), zap.Strings("vDeltaChannels", vDeltaChannels), zap.Error(err))
+		return err
+	}
+
+	if len(channel2FlowGraph) == 0 {
+		log.Warn("all delta channels have been added before",
+			zap.Strings("deltaChannels", deltaChannels),
+		)
+		return nil
+	}
+
+	// use valid channel names only.
+	vDeltaChannels = make([]string, 0, len(channel2FlowGraph))
+	for ch := range channel2FlowGraph {
+		vDeltaChannels = append(vDeltaChannels, ch)
+	}
 	defer func() {
 		if err != nil {
 			for _, vDeltaChannel := range vDeltaChannels {
@@ -167,17 +189,6 @@ func (l *loadSegmentsTask) watchDeltaChannel(vchanName []string) error {
 			}
 		}
 	}()
-
-	if len(vDeltaChannels) == 0 {
-		log.Warn("all delta channels has be added before, ignore watch delta requests")
-		return nil
-	}
-
-	channel2FlowGraph, err := l.node.dataSyncService.addFlowGraphsForDeltaChannels(collectionID, vDeltaChannels)
-	if err != nil {
-		log.Warn("watchDeltaChannel, add flowGraph for deltaChannel failed", zap.Int64("collectionID", collectionID), zap.Strings("vDeltaChannels", vDeltaChannels), zap.Error(err))
-		return err
-	}
 	consumeSubName := funcutil.GenChannelSubName(Params.CommonCfg.QueryNodeSubName, collectionID, paramtable.GetNodeID())
 
 	// channels as consumer

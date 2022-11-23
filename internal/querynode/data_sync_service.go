@@ -96,21 +96,30 @@ func (dsService *dataSyncService) addFlowGraphsForDMLChannels(collectionID Uniqu
 }
 
 // addFlowGraphsForDeltaChannels add flowGraphs to deltaChannel2FlowGraph
-func (dsService *dataSyncService) addFlowGraphsForDeltaChannels(collectionID UniqueID, deltaChannels []string) (map[string]*queryNodeFlowGraph, error) {
+func (dsService *dataSyncService) addFlowGraphsForDeltaChannels(collectionID UniqueID, deltaChannels []string, VPDeltaChannels map[string]string) (map[string]*queryNodeFlowGraph, error) {
+	log := log.With(
+		zap.Int64("collectionID", collectionID),
+		zap.Strings("deltaChannels", deltaChannels),
+	)
+
 	dsService.mu.Lock()
 	defer dsService.mu.Unlock()
 
-	_, err := dsService.metaReplica.getCollectionByID(collectionID)
+	coll, err := dsService.metaReplica.getCollectionByID(collectionID)
 	if err != nil {
 		return nil, err
 	}
+	// filter out duplicated channels
+	vDeltaChannels := coll.AddVDeltaChannels(deltaChannels, VPDeltaChannels)
+	if len(vDeltaChannels) == 0 {
+		return map[string]*queryNodeFlowGraph{}, nil
+	}
 
 	results := make(map[string]*queryNodeFlowGraph)
-	for _, channel := range deltaChannels {
+	for _, channel := range vDeltaChannels {
 		if _, ok := dsService.deltaChannel2FlowGraph[channel]; ok {
 			log.Warn("delta flow graph has been existed",
-				zap.Any("collectionID", collectionID),
-				zap.Any("channel", channel),
+				zap.String("channel", channel),
 			)
 			continue
 		}
@@ -121,8 +130,9 @@ func (dsService *dataSyncService) addFlowGraphsForDeltaChannels(collectionID Uni
 			channel,
 			dsService.msFactory)
 		if err != nil {
-			for _, fg := range results {
+			for channel, fg := range results {
 				fg.flowGraph.Close()
+				coll.removeVDeltaChannel(channel)
 			}
 			return nil, err
 		}
@@ -132,8 +142,8 @@ func (dsService *dataSyncService) addFlowGraphsForDeltaChannels(collectionID Uni
 	for channel, fg := range results {
 		dsService.deltaChannel2FlowGraph[channel] = fg
 		log.Info("add delta flow graph",
-			zap.Any("collectionID", collectionID),
-			zap.Any("channel", channel))
+			zap.String("channel", channel),
+		)
 		metrics.QueryNodeNumFlowGraphs.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Inc()
 	}
 
@@ -268,11 +278,12 @@ func (dsService *dataSyncService) removeEmptyFlowGraphByChannel(collectionID int
 
 	// start to release flow graph
 	log.Info("all segments released, start to remove deltaChannel flowgraph")
-	fg.close()
 	delete(dsService.deltaChannel2FlowGraph, dc)
+	dsService.metaReplica.removeCollectionVDeltaChannel(collectionID, dc)
+	// close flowgraph first, so no write will be dispatched to tSafeReplica
+	fg.close()
 	dsService.tSafeReplica.removeTSafe(dc)
 	// try best to remove, it's ok if all info is gone before this call
-	dsService.metaReplica.removeCollectionVDeltaChannel(collectionID, dc)
 	rateCol.removeTSafeChannel(dc)
 }
 

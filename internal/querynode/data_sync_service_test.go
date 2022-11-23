@@ -105,11 +105,11 @@ func TestDataSyncService_DeltaFlowGraphs(t *testing.T) {
 	assert.NotNil(t, dataSyncService)
 
 	t.Run("test DeltaFlowGraphs", func(t *testing.T) {
-		_, err = dataSyncService.addFlowGraphsForDeltaChannels(defaultCollectionID, []Channel{defaultDeltaChannel})
+		_, err = dataSyncService.addFlowGraphsForDeltaChannels(defaultCollectionID, []Channel{defaultDeltaChannel}, map[string]string{defaultDeltaChannel: defaultDeltaChannel})
 		assert.NoError(t, err)
 		assert.Len(t, dataSyncService.deltaChannel2FlowGraph, 1)
 
-		_, err = dataSyncService.addFlowGraphsForDeltaChannels(defaultCollectionID, []Channel{defaultDeltaChannel})
+		_, err = dataSyncService.addFlowGraphsForDeltaChannels(defaultCollectionID, []Channel{defaultDeltaChannel}, map[string]string{defaultDeltaChannel: defaultDeltaChannel})
 		assert.NoError(t, err)
 		assert.Len(t, dataSyncService.deltaChannel2FlowGraph, 1)
 
@@ -127,7 +127,7 @@ func TestDataSyncService_DeltaFlowGraphs(t *testing.T) {
 		assert.Nil(t, fg)
 		assert.Error(t, err)
 
-		_, err = dataSyncService.addFlowGraphsForDeltaChannels(defaultCollectionID, []Channel{defaultDMLChannel})
+		_, err = dataSyncService.addFlowGraphsForDeltaChannels(defaultCollectionID, []Channel{defaultDMLChannel}, map[string]string{defaultDMLChannel: defaultDMLChannel})
 		assert.NoError(t, err)
 		assert.Len(t, dataSyncService.deltaChannel2FlowGraph, 1)
 
@@ -147,7 +147,7 @@ func TestDataSyncService_DeltaFlowGraphs(t *testing.T) {
 	t.Run("test addFlowGraphsForDeltaChannels checkReplica Failed", func(t *testing.T) {
 		err = dataSyncService.metaReplica.removeCollection(defaultCollectionID)
 		assert.NoError(t, err)
-		_, err = dataSyncService.addFlowGraphsForDeltaChannels(defaultCollectionID, []Channel{defaultDMLChannel})
+		_, err = dataSyncService.addFlowGraphsForDeltaChannels(defaultCollectionID, []Channel{defaultDMLChannel}, map[string]string{defaultDMLChannel: defaultDMLChannel})
 		assert.Error(t, err)
 		dataSyncService.metaReplica.addCollection(defaultCollectionID, genTestCollectionSchema())
 	})
@@ -201,7 +201,7 @@ func (s *DataSyncServiceSuite) TestRemoveEmptyFlowgraphByChannel() {
 		err = s.dsService.metaReplica.addSegment(defaultSegmentID, defaultPartitionID, defaultCollectionID, channelName, defaultSegmentVersion, defaultSegmentStartPosition, segmentTypeSealed)
 		s.Require().NoError(err)
 
-		_, err = s.dsService.addFlowGraphsForDeltaChannels(defaultCollectionID, []string{deltaChannelName})
+		_, err = s.dsService.addFlowGraphsForDeltaChannels(defaultCollectionID, []string{deltaChannelName}, map[string]string{deltaChannelName: deltaChannelName})
 		s.Require().NoError(err)
 
 		s.Assert().NotPanics(func() {
@@ -217,7 +217,7 @@ func (s *DataSyncServiceSuite) TestRemoveEmptyFlowgraphByChannel() {
 		deltaChannelName, err := funcutil.ConvertChannelName(channelName, Params.CommonCfg.RootCoordDml, Params.CommonCfg.RootCoordDelta)
 		s.Require().NoError(err)
 
-		_, err = s.dsService.addFlowGraphsForDeltaChannels(defaultCollectionID, []string{deltaChannelName})
+		_, err = s.dsService.addFlowGraphsForDeltaChannels(defaultCollectionID, []string{deltaChannelName}, map[string]string{deltaChannelName: deltaChannelName})
 		s.Require().NoError(err)
 
 		s.Assert().NotPanics(func() {
