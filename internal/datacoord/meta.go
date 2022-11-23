@@ -543,9 +543,7 @@ func (m *meta) UpdateDropChannelSegmentInfo(channel string, segments []*SegmentI
 	defer m.Unlock()
 
 	// Prepare segment metric mutation.
-	metricMutation := &segMetricMutation{
-		stateChange: make(map[string]int),
-	}
+	var metricMutation *segMetricMutation
 	modSegments := make(map[UniqueID]*SegmentInfo)
 	// save new segments flushed from buffer data
 	for _, seg2Drop := range segments {
@@ -553,6 +551,12 @@ func (m *meta) UpdateDropChannelSegmentInfo(channel string, segments []*SegmentI
 		segment, metricMutation = m.mergeDropSegment(seg2Drop)
 		if segment != nil {
 			modSegments[seg2Drop.GetID()] = segment
+		}
+	}
+
+	if metricMutation == nil {
+		metricMutation = &segMetricMutation{
+			stateChange: make(map[string]int),
 		}
 	}
 	// set existed segments of channel to Dropped
