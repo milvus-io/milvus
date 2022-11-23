@@ -62,14 +62,6 @@ define_option(MILVUS_USE_CCACHE "Use ccache when compiling (if available)" ON)
 define_option(MILVUS_VERBOSE_THIRDPARTY_BUILD
         "Show output from ExternalProjects rather than just logging to files" ON)
 
-define_option(MILVUS_WITH_EASYLOGGINGPP "Build with Easylogging++ library" ON)
-
-define_option(MILVUS_WITH_ZLIB "Build with zlib compression" ON)
-
-define_option(MILVUS_WITH_OPENTRACING "Build with Opentracing" ON)
-
-define_option(MILVUS_WITH_YAMLCPP "Build with yaml-cpp library" ON)
-
 #----------------------------------------------------------------------
 set_option_category("Test and benchmark")
 

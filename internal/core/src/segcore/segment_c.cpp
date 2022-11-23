@@ -95,7 +95,7 @@ Retrieve(CSegmentInterface c_segment, CRetrievePlan c_plan, uint64_t timestamp, 
         auto plan = (const milvus::query::RetrievePlan*)c_plan;
         auto retrieve_result = segment->Retrieve(plan, timestamp);
 
-        auto size = retrieve_result->ByteSize();
+        auto size = retrieve_result->ByteSizeLong();
         void* buffer = malloc(size);
         retrieve_result->SerializePartialToArray(buffer, size);
 

@@ -247,11 +247,9 @@ install: milvus
 	@echo "Installing binary to './bin'"
 	@mkdir -p $(GOPATH)/bin && cp -f $(PWD)/bin/milvus $(GOPATH)/bin/milvus
 	@mkdir -p $(LIBRARY_PATH)
-ifeq ($(OS),Darwin)
-	@cp -r -P $(PWD)/internal/core/output/lib/*.dylib* $(LIBRARY_PATH)
-else
-	@cp -r -P $(PWD)/internal/core/output/lib/*.so* $(LIBRARY_PATH)
-endif
+	-cp -r -P $(PWD)/internal/core/output/lib/*.dylib* $(LIBRARY_PATH) 2>/dev/null
+	-cp -r -P $(PWD)/internal/core/output/lib/*.so* $(LIBRARY_PATH) 2>/dev/null
+	-cp -r -P $(PWD)/internal/core/output/lib64/*.so* $(LIBRARY_PATH) 2>/dev/null
 	@echo "Installation successful."
 
 clean:

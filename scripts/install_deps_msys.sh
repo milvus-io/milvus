@@ -15,18 +15,15 @@ pacmanInstall()
     mingw-w64-x86_64-make \
     mingw-w64-x86_64-ccache \
     mingw-w64-x86_64-cmake \
-    mingw-w64-x86_64-boost \
-    mingw-w64-x86_64-intel-tbb \
     mingw-w64-x86_64-openblas \
     mingw-w64-x86_64-clang \
     mingw-w64-x86_64-clang-tools-extra \
     mingw-w64-x86_64-python2 \
+    mingw-w64-x86_64-python-pip \
     mingw-w64-x86_64-diffutils \
-    mingw-w64-x86_64-arrow \
-    mingw-w64-x86_64-go \
-    mingw-w64-x86_64-zstd
-  pacman -U --noconfirm \
-    https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-rocksdb-6.26.1-1-any.pkg.tar.zst
+    mingw-w64-x86_64-go 
+
+  pip3 install conan
 }
 
 updateKey()

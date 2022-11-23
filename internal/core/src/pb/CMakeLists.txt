@@ -14,7 +14,6 @@ set( proto_file_names
     common.proto
     )
 
-set( PROTO_GOOGLE_PATH  "${MILVUS_SOURCE_DIR}/../../cmake_build/thirdparty/protobuf/protobuf-src/src/" )
 set( PROTO_PATH  "${MILVUS_SOURCE_DIR}/../../cmake_build/thirdparty/milvus-proto/proto/")
 
 FOREACH(proto_file ${proto_file_names})
@@ -25,11 +24,9 @@ FOREACH(proto_file ${proto_file_names})
         OUTPUT  "${CMAKE_CURRENT_SOURCE_DIR}/${proto_src_file_name}.pb.h"
                 "${CMAKE_CURRENT_SOURCE_DIR}/${proto_src_file_name}.pb.cc"
         COMMAND protobuf::protoc --proto_path=${PROTO_PATH}/
-                --proto_path=${PROTO_GOOGLE_PATH}/
                 --cpp_out=${CMAKE_CURRENT_SOURCE_DIR}/
                 ${proto_file}
         DEPENDS ${PROTO_PATH}/${proto_file} )
-
 ENDFOREACH(proto_file)
 
 set( proto_file_names
@@ -39,7 +36,6 @@ set( proto_file_names
     )
 
 set( PROTO_PATH  "${MILVUS_SOURCE_DIR}/../proto/")
-set( PROTO_GOOGLE_PATH  "${MILVUS_SOURCE_DIR}/../../cmake_build/thirdparty/protobuf/protobuf-src/src/" )
 set( PROTO_API_PATH  "${MILVUS_SOURCE_DIR}/../../cmake_build/thirdparty/milvus-proto/proto/" )
 
 FOREACH(proto_file ${proto_file_names})
@@ -50,7 +46,6 @@ FOREACH(proto_file ${proto_file_names})
         OUTPUT  "${CMAKE_CURRENT_SOURCE_DIR}/${proto_src_file_name}.pb.h"
                 "${CMAKE_CURRENT_SOURCE_DIR}/${proto_src_file_name}.pb.cc"
         COMMAND protobuf::protoc --proto_path=${PROTO_PATH}/
-                --proto_path=${PROTO_GOOGLE_PATH}/
                 --proto_path=${PROTO_API_PATH}/
                 --cpp_out=${CMAKE_CURRENT_SOURCE_DIR}/
                 ${proto_file}
@@ -61,4 +56,4 @@ ENDFOREACH(proto_file)
 add_library(milvus_proto STATIC ${milvus_proto_srcs})
 message(STATUS "milvus proto sources: " ${milvus_proto_srcs})
 
-target_link_libraries( milvus_proto PUBLIC protobuf::libprotobuf)
+target_link_libraries( milvus_proto PUBLIC ${CONAN_LIBS} )

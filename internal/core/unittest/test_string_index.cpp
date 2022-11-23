@@ -264,9 +264,9 @@ TEST_F(StringIndexMarisaTest, BaseIndexCodec) {
         strings[i] = std::to_string(std::rand() % 10);
     }
     *str_arr.mutable_data() = {strings.begin(), strings.end()};
-    auto data = new char[str_arr.ByteSize()];
-    str_arr.SerializeToArray(data, str_arr.ByteSize());
-    index->BuildWithRawData(str_arr.ByteSize(), data);
+    auto data = new char[str_arr.ByteSizeLong()];
+    str_arr.SerializeToArray(data, str_arr.ByteSizeLong());
+    index->BuildWithRawData(str_arr.ByteSizeLong(), data);
 
     std::vector<std::string> invalid_strings = {std::to_string(nb)};
     auto copy_index = milvus::index::CreateStringIndexMarisa();

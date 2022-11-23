@@ -36,7 +36,7 @@ jobs:
   UT:
     name: Build and test AMD64 Ubuntu ${{ matrix.ubuntu }}
     runs-on: ubuntu-${{ matrix.ubuntu }}
-    timeout-minutes: 60
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
@@ -46,7 +46,7 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v2
-      - name: "Generate CCache Hash"
+      - name: 'Generate CCache Hash'
         env:
           CORE_HASH: ${{ hashFiles( 'internal/core/**/*.cpp', 'internal/core/**/*.cc', 'internal/core/**/*.c', 'internal/core/**/*.h', 'internal/core/**/*.hpp', 'internal/core/**/CMakeLists.txt') }}
         run: |
@@ -70,6 +70,12 @@ jobs:
           path: .docker/amd64-ubuntu${{ matrix.ubuntu }}-go-mod
           key: ubuntu${{ matrix.ubuntu }}-go-mod-${{ hashFiles('**/go.sum') }}
           restore-keys: ubuntu${{ matrix.ubuntu }}-go-mod-
+      - name: Cache Conan Packages
+        uses: actions/cache@v3
+        with:
+          path: .docker/amd64-ubuntu${{ matrix.ubuntu }}-conan
+          key: ubuntu${{ matrix.ubuntu }}-conan-${{ hashFiles('internal/core/conanfile.txt') }}
+          restore-keys: ubuntu${{ matrix.ubuntu }}-conan-
       - name: Start Service
         shell: bash
         run: |
@@ -79,7 +85,7 @@ jobs:
           ./build/builder.sh /bin/bash -c "make ci-ut"
       - name: Get the status & restart count for containers when ut failed
         if: ${{ failure() }}
-        run: |  
+        run: |
           echo "----show current status for each container---"
           docker ps --format "table {{.Names}}\t\t{{.Image}}\t\t{{.Status}}"
           for container in $(docker ps --format "table {{.Names}}" | grep -v "NAMES"); do
@@ -101,7 +107,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name:  Download code coverage results
+      - name: Download code coverage results
         uses: actions/download-artifact@v3.0.1
         with:
           name: code-coverage-result
@@ -118,4 +124,12 @@ jobs:
           files: ./go_coverage.txt,./lcov_output.info
           name: ubuntu-20.04-unittests
           fail_ci_if_error: true
-          verbose: true
+      - name: Retry Upload coverage to Codecov
+        if: "${{ failure() }} && github.repository == 'milvus-io/milvus'"
+        uses: codecov/codecov-action@v3.1.1
+        id: retry_upload_cov
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./go_coverage.txt,./lcov_output.info
+          name: ubuntu-${{ matrix.ubuntu }}-unittests
+          fail_ci_if_error: true
