@@ -169,10 +169,10 @@ get_wrong_format_dict = [
 ]
 
 """ Specially defined list """
-all_index_types = ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ", "HNSW", "ANNOY", "BIN_FLAT", "BIN_IVF_FLAT"]
+all_index_types = ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ", "HNSW", "ANNOY", "DISKANN", "BIN_FLAT", "BIN_IVF_FLAT"]
 
 default_index_params = [{"nlist": 128}, {"nlist": 128}, {"nlist": 128}, {"nlist": 128, "m": 16, "nbits": 8},
-                        {"M": 48, "efConstruction": 500}, {"n_trees": 50}, {"nlist": 128}, {"nlist": 128}]
+                        {"M": 48, "efConstruction": 500}, {"n_trees": 50}, {}, {"nlist": 128}, {"nlist": 128}]
 
 Handler_type = ["GRPC", "HTTP"]
 binary_support = ["BIN_FLAT", "BIN_IVF_FLAT"]

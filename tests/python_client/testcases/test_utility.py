@@ -714,6 +714,7 @@ class TestUtilityBase(TestcaseBase):
         assert res['total_rows'] == nb
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason='wait to modify')
     def test_index_process_collection_indexing(self):
         """
         target: test building_process

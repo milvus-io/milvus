@@ -52,6 +52,7 @@ raw_vectors, binary_entities = gen_binary_entities(default_nb)
 default_query, _ = gen_search_vectors_params(field_name, entities, default_top_k, nq)
 index_name1 = cf.gen_unique_str("float")
 index_name2 = cf.gen_unique_str("varhar")
+half_nb = ct.default_nb // 2
 
 
 class TestCollectionSearchInvalid(TestcaseBase):
@@ -299,8 +300,8 @@ class TestCollectionSearchInvalid(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("index, params",
-                             zip(ct.all_index_types[:6],
-                                 ct.default_index_params[:6]))
+                             zip(ct.all_index_types[:7],
+                                 ct.default_index_params[:7]))
     def test_search_invalid_params_type(self, index, params):
         """
         target: test search with invalid search params
@@ -905,7 +906,7 @@ class TestCollectionSearch(TestcaseBase):
     def nq(self, request):
         yield request.param
 
-    @pytest.fixture(scope="function", params=[8, 128])
+    @pytest.fixture(scope="function", params=[32, 128])
     def dim(self, request):
         yield request.param
 
@@ -1475,8 +1476,8 @@ class TestCollectionSearch(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("index, params",
-                             zip(ct.all_index_types[:6],
-                                 ct.default_index_params[:6]))
+                             zip(ct.all_index_types[:7],
+                                 ct.default_index_params[:7]))
     def test_search_after_different_index_with_params(self, dim, index, params, auto_id, _async):
         """
         target: test search after different index
@@ -1553,8 +1554,8 @@ class TestCollectionSearch(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index, params",
-                             zip(ct.all_index_types[:6],
-                                 ct.default_index_params[:6]))
+                             zip(ct.all_index_types[:7],
+                                 ct.default_index_params[:7]))
     def test_search_after_index_different_metric_type(self, dim, index, params, auto_id, _async):
         """
         target: test search with different metric type
@@ -2922,7 +2923,7 @@ class TestSearchBase(TestcaseBase):
     def get_nq(self, request):
         yield request.param
 
-    @pytest.fixture(scope="function", params=[8, 128])
+    @pytest.fixture(scope="function", params=[32, 128])
     def dim(self, request):
         yield request.param
 
@@ -2959,8 +2960,8 @@ class TestSearchBase(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index, params",
-                             zip(ct.all_index_types[:6],
-                                 ct.default_index_params[:6]))
+                             zip(ct.all_index_types[:7],
+                                 ct.default_index_params[:7]))
     def test_search_index_empty_partition(self, index, params):
         """
         target: test basic search function, all the search params are correct, test all index params, and build
@@ -3008,8 +3009,8 @@ class TestSearchBase(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index, params",
-                             zip(ct.all_index_types[:6],
-                                 ct.default_index_params[:6]))
+                             zip(ct.all_index_types[:7],
+                                 ct.default_index_params[:7]))
     def test_search_index_partitions(self, index, params, get_top_k):
         """
         target: test basic search function, all the search params are correct, test all index params, and build
@@ -3068,8 +3069,8 @@ class TestSearchBase(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index, params",
-                             zip(ct.all_index_types[:6],
-                                 ct.default_index_params[:6]))
+                             zip(ct.all_index_types[:7],
+                                 ct.default_index_params[:7]))
     def test_search_ip_after_index(self, index, params):
         """
         target: test basic search function, all the search params are correct, test all index params, and build
@@ -3125,8 +3126,8 @@ class TestSearchBase(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index, params",
-                             zip(ct.all_index_types[:6],
-                                 ct.default_index_params[:6]))
+                             zip(ct.all_index_types[:7],
+                                 ct.default_index_params[:7]))
     def test_search_ip_index_empty_partition(self, index, params):
         """
         target: test basic search function, all the search params are correct, test all index params, and build
@@ -3168,8 +3169,8 @@ class TestSearchBase(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index, params",
-                             zip(ct.all_index_types[:6],
-                                 ct.default_index_params[:6]))
+                             zip(ct.all_index_types[:7],
+                                 ct.default_index_params[:7]))
     def test_search_ip_index_partitions(self, index, params):
         """
         target: test basic search function, all the search params are correct, test all index params, and build
@@ -3320,7 +3321,7 @@ class  TestsearchString(TestcaseBase):
     def nq(self, request):
         yield request.param
 
-    @pytest.fixture(scope="function", params=[8, 128])
+    @pytest.fixture(scope="function", params=[32, 128])
     def dim(self, request):
         yield request.param
 
@@ -3762,7 +3763,7 @@ class TestsearchPagination(TestcaseBase):
     def offset(self, request):
         yield request.param
 
-    @pytest.fixture(scope="function", params=[8, 128])
+    @pytest.fixture(scope="function", params=[32, 128])
     def dim(self, request):
         yield request.param
 
@@ -4099,8 +4100,8 @@ class TestsearchPagination(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index, params",
-                             zip(ct.all_index_types[:6],
-                                 ct.default_index_params[:6]))
+                             zip(ct.all_index_types[:7],
+                                 ct.default_index_params[:7]))
     def test_search_pagination_after_different_index(self, index, params, auto_id, offset, _async):
         """
         target: test search pagination after different index
@@ -4108,7 +4109,7 @@ class TestsearchPagination(TestcaseBase):
         expected: search successfully
         """
         # 1. initialize with data
-        dim = 8
+        dim = 128
         collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, 1000,
                                                                                   partition_num=1,
                                                                                   auto_id=auto_id,
@@ -4202,3 +4203,272 @@ class TestsearchPaginationInvalid(TestcaseBase):
                             check_items={"err_code": 1,
                                          "err_msg": "offset [%d] is invalid, should be in range "
                                                     "[1, 16385], but got %d" % (offset, offset)})
+    
+class  TestsearchDiskann(TestcaseBase):
+    """
+    ******************************************************************
+      The following cases are used to test search about diskann index
+    ******************************************************************
+    """
+    @pytest.fixture(scope="function", params=[32, 128])
+    def dim(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=[False, True])
+    def auto_id(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=[False ,True])
+    def _async(self, request):
+        yield request.param
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_with_diskann_index(self, dim, auto_id, _async):
+        """
+        target: test delete after creating index
+        method: 1.create collection , insert data, primary_field is int field
+                2.create diskann index ,  then load
+                3.search
+        expected: search successfully
+        """
+        # 1. initialize with data
+
+        nb = 2000
+        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, auto_id=auto_id,
+                                                                             nb=nb, dim=dim,
+                                                                             is_index=True)[0:4]
+        
+        # 2. create index
+        default_index = {"index_type": "DISKANN", "metric_type":"L2", "params": {}}
+        collection_w.create_index(ct.default_float_vec_field_name, default_index)
+        collection_w.load()
+       
+
+       
+        default_search_params ={"metric_type": "L2", "params": {"search_list": 30}}
+        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        output_fields = [default_int64_field_name, default_float_field_name,  default_string_field_name]
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, default_limit, 
+                            default_search_exp,
+                            output_fields=output_fields,
+                            _async=_async,
+                            travel_timestamp=0,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "ids": insert_ids,
+                                         "limit": default_limit,
+                                         "_async": _async}
+                            )
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("limit", [20])
+    @pytest.mark.parametrize("search_list", [10, 201])
+    def test_search_invalid_params_with_diskann_A(self, dim, auto_id, search_list, limit):
+        """
+        target: test delete after creating index
+        method: 1.create collection , insert data, primary_field is int field
+                2.create diskann index 
+                3.search with invalid params, where  topk <=20, search list (topk, 200]
+        expected: search report an error
+        """
+        # 1. initialize with data
+        collection_w, _, _, insert_ids = \
+            self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim, is_index=True)[0:4]
+        # 2. create index
+        default_index = {"index_type": "DISKANN", "metric_type":"L2", "params": {}}
+        collection_w.create_index(ct.default_float_vec_field_name, default_index)
+        collection_w.load()
+        default_search_params ={"metric_type": "L2", "params": {"search_list": search_list}}
+        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        output_fields = [default_int64_field_name, default_float_field_name,  default_string_field_name]
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, limit, 
+                            default_search_exp,
+                            output_fields=output_fields,
+                            travel_timestamp=0,
+                            check_task=CheckTasks.err_res,
+                            check_items={"err_code": 1,
+                                         "err_msg": "fail to search on all shard leaders"}
+                            )
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("limit", [6553])
+    @pytest.mark.parametrize("search_list", [6553, 65531])
+    def test_search_invalid_params_with_diskann_B(self, dim, auto_id, search_list, limit):
+        """
+        target: test delete after creating index
+        method: 1.create collection , insert data, primary_field is int field
+                2.create  diskann index 
+                3.search with invalid params, where 20< topk <= 6553, search list (topk, topk * 10]
+        expected: search report an error
+        """
+        # 1. initialize with data
+        collection_w, _, _, insert_ids = \
+            self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim, is_index=True)[0:4]
+        # 2. create index
+        default_index = {"index_type": "DISKANN", "metric_type":"L2", "params": {}}
+        collection_w.create_index(ct.default_float_vec_field_name, default_index)
+        collection_w.load()
+        default_search_params ={"metric_type": "L2", "params": {"search_list": search_list}}
+        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        output_fields = [default_int64_field_name, default_float_field_name,  default_string_field_name]
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, limit, 
+                            default_search_exp,
+                            output_fields=output_fields,
+                            travel_timestamp=0,
+                            check_task=CheckTasks.err_res,
+                            check_items={"err_code": 1,
+                                         "err_msg": "fail to search on all shard leaders"}
+                            )
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("limit", [6554])
+    @pytest.mark.parametrize("search_list", [6554, 65536])
+    def test_search_invalid_params_with_diskann_C(self, dim, auto_id, search_list, limit):
+        """
+        target: test delete after creating index
+        method: 1.create collection , insert data, primary_field is int field
+                2.create diskann index 
+                3.search with invalid params, where topk > 6553, search list (topk, 65535]
+        expected: search report an error
+        """
+        # 1. initialize with data
+        collection_w, _, _, insert_ids = \
+            self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim, is_index=True)[0:4]
+        # 2. create index
+        default_index = {"index_type": "DISKANN", "metric_type":"L2", "params": {}}
+        collection_w.create_index(ct.default_float_vec_field_name, default_index)
+        collection_w.load()
+        default_search_params ={"metric_type": "L2", "params": {"search_list": search_list}}
+        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        output_fields = [default_int64_field_name, default_float_field_name,  default_string_field_name]
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, limit, 
+                            default_search_exp,
+                            output_fields=output_fields,
+                            travel_timestamp=0,
+                            check_task=CheckTasks.err_res,
+                            check_items={"err_code": 1,
+                                         "err_msg": "fail to search on all shard leaders"}
+                            )
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_with_diskann_with_string_pk(self, dim):
+        """
+        target: test delete after creating index
+        method: 1.create collection , insert data, primary_field is string field
+                2.create diskann index 
+                3.search with invalid metric type
+        expected: search successfully
+        """
+        # 1. initialize with data
+        collection_w, _, _, insert_ids = \
+            self.init_collection_general(prefix, True, auto_id=False, dim=dim, is_index=True, primary_field=ct.default_string_field_name)[0:4]
+        # 2. create index
+        default_index = {"index_type": "DISKANN", "metric_type":"L2", "params": {}}
+        collection_w.create_index(ct.default_float_vec_field_name, default_index)
+        collection_w.load()
+        search_list = 20
+        default_search_params ={"metric_type": "L2", "params": {"search_list": search_list}}
+        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        output_fields = [default_int64_field_name, default_float_field_name,  default_string_field_name]
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, default_limit, 
+                            default_search_exp,
+                            output_fields=output_fields,
+                            travel_timestamp=0,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "ids": insert_ids,
+                                         "limit": default_limit}
+                            )
+
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_with_delete_data(self, dim, auto_id, _async):
+        """
+        target: test delete after creating index
+        method: 1.create collection , insert data, 
+                2.create  diskann index 
+                3.delete data, the search
+        expected: assert index and deleted id not in search result
+        """
+        # 1. initialize with data
+        collection_w, _, _, ids = \
+            self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim, is_index=True)[0:4]
+        # 2. create index
+        default_index = {"index_type": "DISKANN", "metric_type":"L2", "params": {}}
+        collection_w.create_index(ct.default_float_vec_field_name, default_index)
+        collection_w.load()
+        tmp_expr = f'{ct.default_int64_field_name} in {[0]}'
+
+        expr = f'{ct.default_int64_field_name} in {ids[:half_nb]}'
+
+        # delete half of data
+        del_res = collection_w.delete(expr)[0]
+        assert del_res.delete_count == half_nb
+
+        collection_w.delete(tmp_expr)
+        default_search_params ={"metric_type": "L2", "params": {"search_list": 30}}
+        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        output_fields = [default_int64_field_name, default_float_field_name,  default_string_field_name]
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, default_limit, 
+                            default_search_exp,
+                            output_fields=output_fields,
+                            _async=_async,
+                            travel_timestamp=0,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "ids": ids,
+                                         "limit": default_limit,
+                                         "_async": _async}  
+                            )
+        
+    
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_with_diskann_and_more_index(self, dim, auto_id, _async):
+        """
+        target: test delete after creating index
+        method: 1.create collection , insert data
+                2.create more index ,then load
+                3.delete half data, search
+        expected: assert index and deleted id not in search result
+        """
+        # 1. initialize with data
+        collection_w, _, _, ids = \
+            self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim, is_index=True)[0:4]
+        # 2. create index
+        default_index = {"index_type": "DISKANN", "metric_type":"L2", "params": {}}
+        collection_w.create_index(ct.default_float_vec_field_name, default_index, index_name=index_name1)
+        index_params_one = {}
+        collection_w.create_index("float", index_params_one, index_name="a")
+        index_param_two ={}
+        collection_w.create_index("varchar", index_param_two, index_name="b")
+        
+        collection_w.load()
+        tmp_expr = f'{ct.default_int64_field_name} in {[0]}'
+
+        expr = f'{ct.default_int64_field_name} in {ids[:half_nb]}'
+
+        # delete half of data
+        del_res = collection_w.delete(expr)[0]
+        assert del_res.delete_count == half_nb
+
+        collection_w.delete(tmp_expr)
+        default_search_params ={"metric_type": "L2", "params": {"search_list": 30}}
+        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        output_fields = [default_int64_field_name, default_float_field_name,  default_string_field_name]
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, default_limit, 
+                            default_search_exp,
+                            output_fields=output_fields,
+                            _async=_async,
+                            travel_timestamp=0,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "ids": ids,
+                                         "limit": default_limit,
+                                         "_async": _async}  
+                            )

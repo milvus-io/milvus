@@ -1671,4 +1671,39 @@ class TestqueryString(TestcaseBase):
         res, _ = collection_w.query(expr, output_fields=output_fields)
 
         assert len(res) == nb
+    
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_query_with_create_diskann_index(self):
+        """
+        target: test query after create diskann index 
+        method: create a collection and build diskann index 
+        expected: verify query result
+        """
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True, is_index=True)[0:2]
+    
+        collection_w.create_index(ct.default_float_vec_field_name, ct.default_diskann_index)
+        assert collection_w.has_index()[0]
+
+        collection_w.load()
+
+        int_values = [0]
+        term_expr = f'{ct.default_int64_field_name} in {int_values}'
+        check_vec = vectors[0].iloc[:, [0]][0:len(int_values)].to_dict('records')
+        collection_w.query(term_expr, check_task=CheckTasks.check_query_results, check_items={exp_res: check_vec})
+    
+    @pytest.mark.tags(CaseLabel.L0)
+    def test_query_with_create_diskann_with_string_pk(self):
+        """
+        target: test query after create diskann index 
+        method: create a collection with string pk and build diskann index 
+        expected: verify query result
+        """
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True,  primary_field=ct.default_string_field_name, is_index=True)[0:2]
+        collection_w.create_index(ct.default_float_vec_field_name, ct.default_diskann_index)
+        assert collection_w.has_index()[0]
+        collection_w.load()
+        res = vectors[0].iloc[:, 1:3].to_dict('records')
+        output_fields = [default_float_field_name, default_string_field_name]
+        collection_w.query(default_mix_expr, output_fields=output_fields,
+                                   check_task=CheckTasks.check_query_results, check_items={exp_res: res})
         
