@@ -45,7 +45,7 @@ function install_linux_deps() {
     exit 1
   fi
   # install cmake
-  wget -qO- "https://cmake.org/files/v3.24/cmake-3.24.0-linux-x86_64.tar.gz" | tar --strip-components=1 -xz -C /usr/local
+  wget -qO- "https://cmake.org/files/v3.24/cmake-3.24.0-linux-x86_64.tar.gz" | sudo tar --strip-components=1 -xz -C /usr/local
 }
 
 function install_mac_deps() {
