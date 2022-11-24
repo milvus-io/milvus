@@ -69,6 +69,7 @@ GetSizeOfIdArray(const IdArray& data) {
 // modify bulk script implement to make process more clear
 std::unique_ptr<DataArray>
 CreateScalarDataArrayFrom(const void* data_raw, int64_t count, const FieldMeta& field_meta) {
+    // Test PR
     auto data_type = field_meta.get_data_type();
     auto data_array = std::make_unique<DataArray>();
     data_array->set_field_id(field_meta.get_id().get());
