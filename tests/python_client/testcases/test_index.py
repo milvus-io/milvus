@@ -1567,7 +1567,7 @@ class TestIndexDiskann(TestcaseBase):
     def call_back(self):
         assert True
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_create_index_with_diskann_normal(self):
         """
         target: test create index with diskann
@@ -1593,7 +1593,7 @@ class TestIndexDiskann(TestcaseBase):
                                             check_items={"nq": default_nq,
                                                          "limit": default_limit})
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_create_index_with_over_max_dim(self):
         """
         target: test create index with diskann
@@ -1612,7 +1612,7 @@ class TestIndexDiskann(TestcaseBase):
                                   check_items={ct.err_code: 1,
                                                ct.err_msg: "invalid index params"})
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_create_index_with_diskann_callback(self,_async):
         """
         target: test create index with diskann
@@ -1641,7 +1641,8 @@ class TestIndexDiskann(TestcaseBase):
                                             check_task=CheckTasks.check_search_results,
                                             check_items={"nq": default_nq,
                                                          "limit": default_limit})
-
+    
+    @pytest.mark.tags(CaseLabel.L2)
     def test_create_diskann_index_drop_with_async(self, _async):
         """
         target: test create index interface
@@ -1662,7 +1663,7 @@ class TestIndexDiskann(TestcaseBase):
         collection_w.drop_index(index_name=ct.default_index_name)
         assert len(collection_w.indexes) == 0
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_create_diskann_index_with_partition(self):
         """
         target: test create index with diskann
@@ -1689,7 +1690,7 @@ class TestIndexDiskann(TestcaseBase):
         assert collection_w.has_index(index_name=field_name)[0] == False
         assert len(collection_w.indexes) == 0
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_drop_diskann_index_with_noraml(self):
         """
         target: test drop diskann index normal
@@ -1709,7 +1710,7 @@ class TestIndexDiskann(TestcaseBase):
         collection_w.drop_index(index_name=index_name1)
         assert collection_w.has_index(index_name=index_name1)[0] == False
     
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_drop_diskann_index_and_create_again(self):
         """
         target: test drop diskann index normal
@@ -1730,7 +1731,7 @@ class TestIndexDiskann(TestcaseBase):
         collection_w.create_index(default_field_name, ct.default_diskann_index)
         assert len(collection_w.indexes) == 1
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_create_more_than_three_index(self):
         """
         target: test create diskann index 
@@ -1751,7 +1752,7 @@ class TestIndexDiskann(TestcaseBase):
         collection_w.create_index("float", default_params, index_name="c")
         assert collection_w.has_index(index_name="c")[0] == True
    
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_drop_diskann_index_with_partition(self):
         """
         target: test drop diskann index normal
@@ -1773,7 +1774,7 @@ class TestIndexDiskann(TestcaseBase):
         collection_w.drop_index()
         assert len(collection_w.indexes) == 0
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_create_diskann_index_with_binary(self):
         """
         target: test create diskann index with binary
@@ -1790,7 +1791,7 @@ class TestIndexDiskann(TestcaseBase):
                                   check_items={ct.err_code: 1,
                                                ct.err_msg: "field data type BinaryVector don't support the index build type DISKANN"})
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_create_diskann_index_multithread(self):
         """
         target: test create index interface with multiprocess
