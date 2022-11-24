@@ -1678,8 +1678,7 @@ class TestqueryString(TestcaseBase):
 
         assert len(res) == nb
     
-    @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.skip(reason="wait to test")
+    @pytest.mark.tags(CaseLabel.L2)
     def test_query_with_create_diskann_index(self):
         """
         target: test query after create diskann index 
@@ -1698,8 +1697,7 @@ class TestqueryString(TestcaseBase):
         check_vec = vectors[0].iloc[:, [0]][0:len(int_values)].to_dict('records')
         collection_w.query(term_expr, check_task=CheckTasks.check_query_results, check_items={exp_res: check_vec})
     
-    @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.skip(reason="wait to test")
+    @pytest.mark.tags(CaseLabel.L2)
     def test_query_with_create_diskann_with_string_pk(self):
         """
         target: test query after create diskann index 

@@ -13,7 +13,7 @@ from utils.util_log import test_log as log
 from pymilvus.orm.types import CONSISTENCY_STRONG
 from common.common_func import param_info
 
-TIMEOUT = 20
+TIMEOUT = 120
 INDEX_NAME = ""
 
 
@@ -234,7 +234,7 @@ class ApiCollectionWrapper:
 
     @trace()
     def create_index(self, field_name, index_params, index_name=None, check_task=None, check_items=None, **kwargs):
-        disktimeout = 300
+        disktimeout = 600
         timeout = kwargs.get("timeout", disktimeout * 2)
         index_name = INDEX_NAME if index_name is None else index_name
         index_name = kwargs.get("index_name", index_name)

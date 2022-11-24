@@ -4223,7 +4223,7 @@ class  TestsearchDiskann(TestcaseBase):
     def _async(self, request):
         yield request.param
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_search_with_diskann_index(self, dim, auto_id, _async):
         """
         target: test delete after creating index
@@ -4262,7 +4262,7 @@ class  TestsearchDiskann(TestcaseBase):
                                          "_async": _async}
                             )
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("limit", [20])
     @pytest.mark.parametrize("search_list", [10, 201])
     def test_search_invalid_params_with_diskann_A(self, dim, auto_id, search_list, limit):
@@ -4293,7 +4293,7 @@ class  TestsearchDiskann(TestcaseBase):
                                          "err_msg": "fail to search on all shard leaders"}
                             )
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("limit", [6553])
     @pytest.mark.parametrize("search_list", [6553, 65531])
     def test_search_invalid_params_with_diskann_B(self, dim, auto_id, search_list, limit):
@@ -4324,7 +4324,7 @@ class  TestsearchDiskann(TestcaseBase):
                                          "err_msg": "fail to search on all shard leaders"}
                             )
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("limit", [6554])
     @pytest.mark.parametrize("search_list", [6554, 65536])
     def test_search_invalid_params_with_diskann_C(self, dim, auto_id, search_list, limit):
@@ -4354,7 +4354,7 @@ class  TestsearchDiskann(TestcaseBase):
                             check_items={"err_code": 1,
                                          "err_msg": "fail to search on all shard leaders"}
                             )
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_search_with_diskann_with_string_pk(self, dim):
         """
         target: test delete after creating index
@@ -4386,7 +4386,7 @@ class  TestsearchDiskann(TestcaseBase):
                             )
 
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_search_with_delete_data(self, dim, auto_id, _async):
         """
         target: test delete after creating index
@@ -4428,7 +4428,7 @@ class  TestsearchDiskann(TestcaseBase):
                             )
         
     
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_search_with_diskann_and_more_index(self, dim, auto_id, _async):
         """
         target: test delete after creating index
