@@ -295,13 +295,14 @@ func sprinterr(m dsl.Matcher) {
 
 }
 
-func largeloopcopy(m dsl.Matcher) {
-	m.Match(
-		`for $_, $v := range $_ { $*_ }`,
-	).
-		Where(m["v"].Type.Size > 1024).
-		Report(`loop copies large value each iteration`)
-}
+// disable this check, because it can not apply to generic type
+//func largeloopcopy(m dsl.Matcher) {
+//	m.Match(
+//		`for $_, $v := range $_ { $*_ }`,
+//	).
+//		Where(m["v"].Type.Size > 1024).
+//		Report(`loop copies large value each iteration`)
+//}
 
 func joinpath(m dsl.Matcher) {
 	m.Match(
