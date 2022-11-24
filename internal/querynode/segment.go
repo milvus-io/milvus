@@ -415,6 +415,9 @@ func (s *Segment) retrieve(plan *RetrievePlan) (*segcorepb.RetrieveResults, erro
 	if err := HandleCProto(&retrieveResult.cRetrieveResult, result); err != nil {
 		return nil, err
 	}
+	log.Info("retrive id num",
+		zap.Any("segmentID", s.segmentID),
+		zap.Any("id nums", typeutil.GetSizeOfIDs(result.GetIds())))
 
 	sort.Sort(&byPK{result})
 	return result, nil

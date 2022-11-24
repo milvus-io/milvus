@@ -122,6 +122,10 @@ func (dNode *deleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		}
 		offset := segment.segmentPreDelete(len(pks))
 		delData.deleteOffset[segmentID] = offset
+		log.Info("pre delete offset",
+			zap.Any("segment", segmentID),
+			zap.Any("offset", offset),
+			zap.Any("channel", dNode.vchannel))
 	}
 
 	// 3. do delete
