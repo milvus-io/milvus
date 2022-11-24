@@ -48,7 +48,7 @@ cppcheck:
 	@(env bash ${PWD}/scripts/core_build.sh -l)
 
 # put generate proto as a separated target because build cpp have different cases like with unittest.
-generated-proto-go-without-cpp: export protoc:=${PWD}/cmake_build/thirdparty/protobuf/protobuf-build/protoc
+generated-proto-go-without-cpp: export protoc:=${PWD}/cmake_build/bin/protoc
 generated-proto-go-without-cpp: 
 	@mkdir -p ${GOPATH}/bin
 	@which protoc-gen-go 1>/dev/null || (echo "Installing protoc-gen-go" && cd /tmp && go install github.com/golang/protobuf/protoc-gen-go@v1.3.2)
