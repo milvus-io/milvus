@@ -585,17 +585,18 @@ func (m *meta) UpdateDropChannelSegmentInfo(channel string, segments []*SegmentI
 
 // mergeDropSegment merges drop segment information with meta segments
 func (m *meta) mergeDropSegment(seg2Drop *SegmentInfo) (*SegmentInfo, *segMetricMutation) {
+	metricMutation := &segMetricMutation{
+		stateChange: make(map[string]int),
+	}
+
 	segment := m.segments.GetSegment(seg2Drop.ID)
 	// healthy check makes sure the Idempotence
 	if segment == nil || !isSegmentHealthy(segment) {
 		log.Warn("UpdateDropChannel skipping nil or unhealthy", zap.Bool("is nil", segment == nil),
 			zap.Bool("isHealthy", isSegmentHealthy(segment)))
-		return nil, nil
+		return nil, metricMutation
 	}
 
-	metricMutation := &segMetricMutation{
-		stateChange: make(map[string]int),
-	}
 	clonedSegment := segment.Clone()
 	updateSegStateAndPrepareMetrics(clonedSegment, commonpb.SegmentState_Dropped, metricMutation)
 
