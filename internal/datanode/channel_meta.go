@@ -23,6 +23,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/samber/lo"
+
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
@@ -539,18 +541,14 @@ func (c *ChannelMeta) mergeFlushedSegments(seg *Segment, planID UniqueID, compac
 		return fmt.Errorf("mismatch collection, ID=%d", seg.collectionID)
 	}
 
-	var inValidSegments []UniqueID
-	for _, ID := range compactedFrom {
-		// no such segments in channel or the segments are unflushed.
-		if !c.hasSegment(ID, true) || c.hasSegment(ID, false) {
-			inValidSegments = append(inValidSegments, ID)
+	compactedFrom = lo.Filter[int64](compactedFrom, func(segID int64, _ int) bool {
+		// which means the segment is the `flushed` state
+		has := c.hasSegment(segID, true) && !c.hasSegment(segID, false)
+		if !has {
+			log.Warn("invalid segment", zap.Int64("segment_id", segID))
 		}
-	}
-
-	if len(inValidSegments) > 0 {
-		log.Warn("no match flushed segments to merge from", zap.Int64s("invalid segmentIDs", inValidSegments))
-		return fmt.Errorf("invalid compactedFrom segments: %v", inValidSegments)
-	}
+		return has
+	})
 
 	log.Info("merge flushed segments")
 	c.segMu.Lock()

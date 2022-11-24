@@ -668,7 +668,7 @@ func TestDataNode(t *testing.T) {
 		err = node.flowgraphManager.addAndStart(node, &datapb.VchannelInfo{
 			ChannelName:         chanName,
 			UnflushedSegmentIds: []int64{},
-			FlushedSegmentIds:   []int64{},
+			FlushedSegmentIds:   []int64{100, 200, 300},
 		}, nil)
 		require.NoError(t, err)
 		fg, ok := node.flowgraphManager.getFlowgraphService(chanName)
@@ -687,24 +687,26 @@ func TestDataNode(t *testing.T) {
 		}
 
 		t.Run("invalid compacted from", func(t *testing.T) {
-			invalidCompactedFroms := [][]UniqueID{
-				{},
-				{101, 201},
+			req := &datapb.SyncSegmentsRequest{
+				CompactedTo: 400,
+				NumOfRows:   100,
 			}
-			req := &datapb.SyncSegmentsRequest{}
 
-			for _, invalid := range invalidCompactedFroms {
-				req.CompactedFrom = invalid
-				status, err := node.SyncSegments(ctx, req)
-				assert.NoError(t, err)
-				assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
-			}
+			req.CompactedFrom = []UniqueID{}
+			status, err := node.SyncSegments(ctx, req)
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
+
+			req.CompactedFrom = []UniqueID{101, 201}
+			status, err = node.SyncSegments(ctx, req)
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
 		})
 
 		t.Run("valid request numRows>0", func(t *testing.T) {
 			req := &datapb.SyncSegmentsRequest{
-				CompactedFrom: []int64{100, 200},
-				CompactedTo:   101,
+				CompactedFrom: []UniqueID{100, 200, 101, 201},
+				CompactedTo:   102,
 				NumOfRows:     100,
 			}
 			status, err := node.SyncSegments(ctx, req)

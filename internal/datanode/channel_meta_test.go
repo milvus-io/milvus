@@ -609,27 +609,29 @@ func TestChannelMeta_InterfaceMethod(t *testing.T) {
 			stored      bool
 
 			inCompactedFrom []UniqueID
+			expectedFrom    []UniqueID
 			inSeg           *Segment
 		}{
-			{"mismatch collection", false, false, []UniqueID{1, 2}, &Segment{
+			{"mismatch collection", false, false, []UniqueID{1, 2}, []UniqueID{1, 2}, &Segment{
 				segmentID:    3,
 				collectionID: -1,
 			}},
-			{"no match flushed segment", false, false, []UniqueID{1, 6}, &Segment{
-				segmentID:    3,
-				collectionID: 1,
-			}},
-			{"numRows==0", true, false, []UniqueID{1, 2}, &Segment{
-				segmentID:    3,
-				collectionID: 1,
-				numRows:      0,
-			}},
-			{"numRows>0", true, true, []UniqueID{1, 2}, &Segment{
+			{"no match flushed segment", true, true, []UniqueID{1, 6}, []UniqueID{1}, &Segment{
 				segmentID:    3,
 				collectionID: 1,
 				numRows:      15,
 			}},
-			{"segment exists but not flushed", false, false, []UniqueID{1, 4}, &Segment{
+			{"numRows==0", true, false, []UniqueID{1, 2}, []UniqueID{1, 2}, &Segment{
+				segmentID:    3,
+				collectionID: 1,
+				numRows:      0,
+			}},
+			{"numRows>0", true, true, []UniqueID{1, 2}, []UniqueID{1, 2}, &Segment{
+				segmentID:    3,
+				collectionID: 1,
+				numRows:      15,
+			}},
+			{"segment exists but not flushed", true, true, []UniqueID{1, 4}, []UniqueID{1}, &Segment{
 				segmentID:    3,
 				collectionID: 1,
 				numRows:      15,
@@ -682,7 +684,7 @@ func TestChannelMeta_InterfaceMethod(t *testing.T) {
 
 					from, ok := to2from[3]
 					assert.True(t, ok)
-					assert.ElementsMatch(t, []UniqueID{1, 2}, from)
+					assert.ElementsMatch(t, test.expectedFrom, from)
 				} else {
 					assert.False(t, channel.hasSegment(3, true))
 				}

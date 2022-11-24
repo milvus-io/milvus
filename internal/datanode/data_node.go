@@ -913,28 +913,27 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 		return status, nil
 	}
 
-	oneSegment := req.GetCompactedFrom()[0]
-	channel, err := node.flowgraphManager.getChannel(oneSegment)
-	if err != nil {
-		status.Reason = fmt.Sprintf("invalid request, err=%s", err.Error())
+	getChannel := func() (int64, Channel) {
+		for _, segmentFrom := range req.GetCompactedFrom() {
+			channel, err := node.flowgraphManager.getChannel(segmentFrom)
+			if err != nil {
+				log.Warn("invalid segmentID", zap.Int64("segment_from", segmentFrom), zap.Error(err))
+				continue
+			}
+			return segmentFrom, channel
+		}
+		return 0, nil
+	}
+	oneSegment, channel := getChannel()
+	if channel == nil {
+		log.Warn("no available channel")
+		status.ErrorCode = commonpb.ErrorCode_Success
 		return status, nil
 	}
 
 	ds, ok := node.flowgraphManager.getFlowgraphService(channel.getChannelName(oneSegment))
 	if !ok {
-		status.Reason = fmt.Sprintf("failed to find flow graph service, err=%s", err.Error())
-		return status, nil
-	}
-
-	// check if all compactedFrom segments are valid
-	var invalidSegIDs []UniqueID
-	for _, segID := range req.GetCompactedFrom() {
-		if !channel.hasSegment(segID, true) {
-			invalidSegIDs = append(invalidSegIDs, segID)
-		}
-	}
-	if len(invalidSegIDs) > 0 {
-		status.Reason = fmt.Sprintf("invalid request, some segments are not in the same channel: %v", invalidSegIDs)
+		status.Reason = fmt.Sprintf("failed to find flow graph service, segmentID: %d", oneSegment)
 		return status, nil
 	}
 
@@ -947,7 +946,7 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 		numRows:      req.GetNumOfRows(),
 	}
 
-	err = channel.InitPKstats(ctx, targetSeg, req.GetStatsLogs(), tsoutil.GetCurrentTime())
+	err := channel.InitPKstats(ctx, targetSeg, req.GetStatsLogs(), tsoutil.GetCurrentTime())
 	if err != nil {
 		status.Reason = fmt.Sprintf("init pk stats fail, err=%s", err.Error())
 		return status, nil
