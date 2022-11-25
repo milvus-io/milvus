@@ -142,7 +142,6 @@ func startEmbedEtcdServer() (*embed.Etcd, error) {
 }
 
 func TestMain(m *testing.M) {
-	setup()
 	var err error
 	rateCol, err = newRateCollector()
 	if err != nil {
@@ -153,7 +152,11 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		os.Exit(1)
 	}
+
 	defer embedetcdServer.Close()
+	// setup env for etcd endpoint
+	os.Setenv("etcd.endpoints", "127.0.0.1:8989")
+	setup()
 	exitCode := m.Run()
 	os.Exit(exitCode)
 }
