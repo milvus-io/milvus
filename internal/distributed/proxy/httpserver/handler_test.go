@@ -19,6 +19,21 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func Test_WrappedInsertRequest_JSONMarshal_AsInsertRequest(t *testing.T) {
+	// https://github.com/milvus-io/milvus/issues/20415
+	insertRaw := []byte(`{
+		"collection_name": "seller_tag",
+		"fields_data": [{ "field_name":"kid","type":5,"field":[9999999999999999] },{ "field_name":"seller_id","type":5,"field":[5625300123280813090] },{ "field_name":"vector","type":101,"field":[[0.08090433, 0.19154754, 0.16858263, 0.027101958, 0.07229418, 0.15223257, -0.024227709, 0.13302892, 0.05951315, 0.03572949, -0.015721956, -0.21992287, 0.08134472, 0.18640009, -0.09814235, -0.11117617, 0.10464557, -0.092037976, -0.19489805, -0.069008306, -0.039415136, -0.17841195, 0.076126315, 0.031378396, 0.22680397, 0.045089707, 0.12307317, 0.06711619, 0.15067382, -0.213569, 0.066602595, -0.021743167, -0.2727193, -0.112709574, 0.09504322, 0.02386695, 0.04574049, -0.055642836, -0.16812482, -0.051256, -0.11399734, 0.29519975, 0.109542266, 0.18452083, 0.05543076, -0.064969495, -0.14457555, -0.034600936, 0.045484997, -0.15677887, -0.12983392, 0.20921704, -0.049788076, 0.050687622, -0.23369887, -0.022488454, 0.06089106, 0.14699098, -0.08140416, -0.008949298, -0.14867777, 0.07415456, -0.0027948048, 0.0060837376]] }],
+		"num_rows": 1
+		}`)
+	wrappedInsert := new(WrappedInsertRequest)
+	err := json.Unmarshal(insertRaw, &wrappedInsert)
+	assert.NoError(t, err)
+	insertReq, err := wrappedInsert.AsInsertRequest()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(9999999999999999), insertReq.FieldsData[0].GetScalars().GetLongData().Data[0])
+}
+
 type mockProxyComponent struct {
 	// wrap the interface to avoid implement not used func.
 	// and to let not implemented call panics
