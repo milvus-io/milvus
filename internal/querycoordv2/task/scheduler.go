@@ -38,8 +38,6 @@ const (
 	TaskTypeGrow Type = iota + 1
 	TaskTypeReduce
 	TaskTypeMove
-
-	taskPoolSize = 256
 )
 
 var (
@@ -55,8 +53,6 @@ var (
 
 	// No enough memory to load segment
 	ErrResourceNotEnough = errors.New("ResourceNotEnough")
-
-	ErrTaskQueueFull = errors.New("TaskQueueFull")
 
 	ErrFailedResponse  = errors.New("RpcFailed")
 	ErrTaskAlreadyDone = errors.New("TaskAlreadyDone")
@@ -85,17 +81,17 @@ type replicaChannelIndex struct {
 }
 
 type taskQueue struct {
-	// TaskPriority -> Tasks
-	buckets [][]Task
-
-	cap int
+	// TaskPriority -> TaskID -> Task
+	buckets []map[int64]Task
 }
 
-func newTaskQueue(cap int) *taskQueue {
+func newTaskQueue() *taskQueue {
+	buckets := make([]map[int64]Task, len(TaskPriorities))
+	for i := range buckets {
+		buckets[i] = make(map[int64]Task)
+	}
 	return &taskQueue{
-		buckets: make([][]Task, len(TaskPriorities)),
-
-		cap: cap,
+		buckets: buckets,
 	}
 }
 
@@ -108,35 +104,21 @@ func (queue *taskQueue) Len() int {
 	return taskNum
 }
 
-func (queue *taskQueue) Cap() int {
-	return queue.cap
-}
-
-func (queue *taskQueue) Add(task Task) bool {
-	if queue.Len() >= queue.Cap() {
-		return false
-	}
-
-	queue.buckets[task.Priority()] = append(queue.buckets[task.Priority()], task)
-	return true
+func (queue *taskQueue) Add(task Task) {
+	bucket := queue.buckets[task.Priority()]
+	bucket[task.ID()] = task
 }
 
 func (queue *taskQueue) Remove(task Task) {
-	bucket := &queue.buckets[task.Priority()]
-
-	for i := range *bucket {
-		if (*bucket)[i].ID() == task.ID() {
-			*bucket = append((*bucket)[:i], (*bucket)[i+1:]...)
-			break
-		}
-	}
+	bucket := queue.buckets[task.Priority()]
+	delete(bucket, task.ID())
 }
 
 // Range iterates all tasks in the queue ordered by priority from high to low
 func (queue *taskQueue) Range(fn func(task Task) bool) {
 	for priority := len(queue.buckets) - 1; priority >= 0; priority-- {
-		for i := range queue.buckets[priority] {
-			if !fn(queue.buckets[priority][i]) {
+		for _, task := range queue.buckets[priority] {
+			if !fn(task) {
 				return
 			}
 		}
@@ -146,6 +128,8 @@ func (queue *taskQueue) Range(fn func(task Task) bool) {
 type Scheduler interface {
 	Start(ctx context.Context)
 	Stop()
+	AddExecutor(nodeID int64)
+	RemoveExecutor(nodeID int64)
 	Add(task Task) error
 	Dispatch(node int64)
 	RemoveByNode(node int64)
@@ -156,13 +140,14 @@ type Scheduler interface {
 type taskScheduler struct {
 	rwmutex     sync.RWMutex
 	ctx         context.Context
-	executor    *Executor
+	executors   map[int64]*Executor // NodeID -> Executor
 	idAllocator func() UniqueID
 
 	distMgr   *meta.DistributionManager
 	meta      *meta.Meta
 	targetMgr *meta.TargetManager
 	broker    meta.Broker
+	cluster   session.Cluster
 	nodeMgr   *session.NodeManager
 
 	tasks        UniqueSet
@@ -181,8 +166,8 @@ func NewScheduler(ctx context.Context,
 	nodeMgr *session.NodeManager) *taskScheduler {
 	id := int64(0)
 	return &taskScheduler{
-		ctx:      ctx,
-		executor: NewExecutor(meta, distMgr, broker, targetMgr, cluster, nodeMgr),
+		ctx:       ctx,
+		executors: make(map[int64]*Executor),
 		idAllocator: func() UniqueID {
 			id++
 			return id
@@ -192,22 +177,59 @@ func NewScheduler(ctx context.Context,
 		meta:      meta,
 		targetMgr: targetMgr,
 		broker:    broker,
+		cluster:   cluster,
 		nodeMgr:   nodeMgr,
 
 		tasks:        make(UniqueSet),
 		segmentTasks: make(map[replicaSegmentIndex]Task),
 		channelTasks: make(map[replicaChannelIndex]Task),
-		processQueue: newTaskQueue(taskPoolSize),
-		waitQueue:    newTaskQueue(taskPoolSize * 10),
+		processQueue: newTaskQueue(),
+		waitQueue:    newTaskQueue(),
 	}
 }
 
-func (scheduler *taskScheduler) Start(ctx context.Context) {
-	scheduler.executor.Start(ctx)
-}
+func (scheduler *taskScheduler) Start(ctx context.Context) {}
 
 func (scheduler *taskScheduler) Stop() {
-	scheduler.executor.Stop()
+	scheduler.rwmutex.Lock()
+	defer scheduler.rwmutex.Unlock()
+
+	for nodeID, executor := range scheduler.executors {
+		executor.Stop()
+		delete(scheduler.executors, nodeID)
+	}
+}
+
+func (scheduler *taskScheduler) AddExecutor(nodeID int64) {
+	scheduler.rwmutex.Lock()
+	defer scheduler.rwmutex.Unlock()
+
+	if _, exist := scheduler.executors[nodeID]; exist {
+		return
+	}
+
+	executor := NewExecutor(scheduler.meta,
+		scheduler.distMgr,
+		scheduler.broker,
+		scheduler.targetMgr,
+		scheduler.cluster,
+		scheduler.nodeMgr)
+
+	scheduler.executors[nodeID] = executor
+	executor.Start(scheduler.ctx)
+	log.Info("add executor for new QueryNode", zap.Int64("nodeID", nodeID))
+}
+
+func (scheduler *taskScheduler) RemoveExecutor(nodeID int64) {
+	scheduler.rwmutex.Lock()
+	defer scheduler.rwmutex.Unlock()
+
+	executor, ok := scheduler.executors[nodeID]
+	if ok {
+		executor.Stop()
+		delete(scheduler.executors, nodeID)
+		log.Info("remove executor of offline QueryNode", zap.Int64("nodeID", nodeID))
+	}
 }
 
 func (scheduler *taskScheduler) Add(task Task) error {
@@ -219,12 +241,8 @@ func (scheduler *taskScheduler) Add(task Task) error {
 		return err
 	}
 
-	if !scheduler.waitQueue.Add(task) {
-		log.Warn("failed to add task", zap.String("task", task.String()))
-		return ErrTaskQueueFull
-	}
-
 	task.SetID(scheduler.idAllocator())
+	scheduler.waitQueue.Add(task)
 	scheduler.tasks.Insert(task.ID())
 	switch task := task.(type) {
 	case *SegmentTask:
@@ -317,33 +335,35 @@ func (scheduler *taskScheduler) promote(task Task) error {
 		return err
 	}
 
-	if scheduler.processQueue.Add(task) {
-		task.SetStatus(TaskStatusStarted)
-		return nil
-	}
-
-	return ErrTaskQueueFull
+	scheduler.processQueue.Add(task)
+	task.SetStatus(TaskStatusStarted)
+	return nil
 }
 
 func (scheduler *taskScheduler) tryPromoteAll() {
 	// Promote waiting tasks
-	toPromote := make([]Task, 0, scheduler.processQueue.Cap()-scheduler.processQueue.Len())
+	toPromote := make([]Task, 0, scheduler.waitQueue.Len())
 	toRemove := make([]Task, 0)
 	scheduler.waitQueue.Range(func(task Task) bool {
 		err := scheduler.promote(task)
-		if errors.Is(err, ErrTaskStale) { // Task canceled or stale
-			task.SetStatus(TaskStatusStale)
-			task.SetErr(err)
-			toRemove = append(toRemove, task)
-		} else if errors.Is(err, ErrTaskCanceled) {
+
+		if err != nil {
 			task.SetStatus(TaskStatusCanceled)
+			if errors.Is(err, ErrTaskStale) { // Task canceled or stale
+				task.SetStatus(TaskStatusStale)
+			}
+
+			log.Warn("failed to promote task",
+				zap.Int64("taskID", task.ID()),
+				zap.Error(err),
+			)
 			task.SetErr(err)
 			toRemove = append(toRemove, task)
-		} else if err == nil {
+		} else {
 			toPromote = append(toPromote, task)
 		}
 
-		return !errors.Is(err, ErrTaskQueueFull)
+		return true
 	})
 
 	for _, task := range toPromote {
@@ -527,7 +547,28 @@ func (scheduler *taskScheduler) process(task Task) bool {
 		zap.Int64("source", task.SourceID()),
 	)
 
-	if !scheduler.executor.Exist(task.ID()) && task.IsFinished(scheduler.distMgr) {
+	actions, step := task.Actions(), task.Step()
+	for step < len(actions) && actions[step].IsFinished(scheduler.distMgr) {
+		task.StepUp()
+		step++
+	}
+
+	if step == len(actions) {
+		step--
+	}
+
+	executor, ok := scheduler.executors[actions[step].Node()]
+	if !ok {
+		log.Warn("no executor for QueryNode",
+			zap.Int("step", step),
+			zap.Int64("nodeID", actions[step].Node()))
+		return false
+	}
+
+	if task.IsFinished(scheduler.distMgr) {
+		if executor.Exist(task.ID()) {
+			return false
+		}
 		task.SetStatus(TaskStatusSucceeded)
 	} else if scheduler.checkCanceled(task) {
 		task.SetStatus(TaskStatusCanceled)
@@ -539,11 +580,10 @@ func (scheduler *taskScheduler) process(task Task) bool {
 		task.SetErr(ErrTaskStale)
 	}
 
-	step := task.Step()
 	log = log.With(zap.Int("step", step))
 	switch task.Status() {
 	case TaskStatusStarted:
-		if scheduler.executor.Execute(task, step) {
+		if executor.Execute(task, step) {
 			return true
 		}
 

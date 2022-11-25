@@ -132,6 +132,9 @@ func (suite *TaskSuite) SetupTest() {
 
 	suite.scheduler = suite.newScheduler()
 	suite.scheduler.Start(context.Background())
+	suite.scheduler.AddExecutor(1)
+	suite.scheduler.AddExecutor(2)
+	suite.scheduler.AddExecutor(3)
 }
 
 func (suite *TaskSuite) BeforeTest(suiteName, testName string) {
@@ -147,7 +150,8 @@ func (suite *TaskSuite) BeforeTest(suiteName, testName string) {
 		"TestTaskCanceled",
 		"TestMoveSegmentTask",
 		"TestSubmitDuplicateLoadSegmentTask",
-		"TestSubmitDuplicateSubscribeChannelTask":
+		"TestSubmitDuplicateSubscribeChannelTask",
+		"TestNoExecutor":
 		suite.meta.PutCollection(&meta.Collection{
 			CollectionLoadInfo: &querypb.CollectionLoadInfo{
 				CollectionID:  suite.collection,
@@ -367,7 +371,7 @@ func (suite *TaskSuite) TestLoadSegmentTask() {
 
 	// Expect
 	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, suite.collection).Return(&schemapb.CollectionSchema{
-		Name: "TestSubscribeChannelTask",
+		Name: "TestLoadSegmentTask",
 	}, nil)
 	suite.broker.EXPECT().GetPartitions(mock.Anything, suite.collection).Return([]int64{100, 101}, nil)
 	for _, segment := range suite.loadSegments {
@@ -496,7 +500,7 @@ func (suite *TaskSuite) TestLoadSegmentTaskFailed() {
 
 	// Expect
 	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, suite.collection).Return(&schemapb.CollectionSchema{
-		Name: "TestSubscribeChannelTask",
+		Name: "TestLoadSegmentTask",
 	}, nil)
 	suite.broker.EXPECT().GetPartitions(mock.Anything, suite.collection).Return([]int64{100, 101}, nil)
 	for _, segment := range suite.loadSegments {
@@ -1129,6 +1133,76 @@ func (suite *TaskSuite) TestSegmentTaskReplace() {
 	suite.AssertTaskNum(0, segmentNum, 0, segmentNum)
 }
 
+func (suite *TaskSuite) TestNoExecutor() {
+	ctx := context.Background()
+	timeout := 10 * time.Second
+	targetNode := int64(-1)
+	channel := &datapb.VchannelInfo{
+		CollectionID: suite.collection,
+		ChannelName:  Params.CommonCfg.RootCoordDml + "-test",
+	}
+	suite.nodeMgr.Add(session.NewNodeInfo(targetNode, "localhost"))
+	suite.meta.ReplicaManager.Put(
+		utils.CreateTestReplica(suite.replica, suite.collection, []int64{1, 2, 3, -1}))
+
+	// Test load segment task
+	suite.dist.ChannelDistManager.Update(targetNode, meta.DmChannelFromVChannel(&datapb.VchannelInfo{
+		CollectionID: suite.collection,
+		ChannelName:  channel.ChannelName,
+	}))
+	tasks := []Task{}
+	segments := make([]*datapb.SegmentBinlogs, 0)
+	for _, segment := range suite.loadSegments {
+		segments = append(segments, &datapb.SegmentBinlogs{
+			SegmentID:     segment,
+			InsertChannel: channel.ChannelName,
+		})
+		task, err := NewSegmentTask(
+			ctx,
+			timeout,
+			0,
+			suite.collection,
+			suite.replica,
+			NewSegmentAction(targetNode, ActionTypeGrow, channel.GetChannelName(), segment),
+		)
+		suite.NoError(err)
+		tasks = append(tasks, task)
+		err = suite.scheduler.Add(task)
+		suite.NoError(err)
+	}
+	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, suite.collection, int64(1)).Return(nil, segments, nil)
+	suite.target.UpdateCollectionNextTargetWithPartitions(suite.collection, int64(1))
+	segmentsNum := len(suite.loadSegments)
+	suite.AssertTaskNum(0, segmentsNum, 0, segmentsNum)
+
+	// Process tasks
+	suite.dispatchAndWait(targetNode)
+	suite.AssertTaskNum(segmentsNum, 0, 0, segmentsNum)
+
+	// Other nodes' HB can't trigger the procedure of tasks
+	suite.dispatchAndWait(targetNode + 1)
+	suite.AssertTaskNum(segmentsNum, 0, 0, segmentsNum)
+
+	// Process tasks done
+	// Dist contains channels
+	view := &meta.LeaderView{
+		ID:           targetNode,
+		CollectionID: suite.collection,
+		Segments:     map[int64]*querypb.SegmentDist{},
+	}
+	for _, segment := range suite.loadSegments {
+		view.Segments[segment] = &querypb.SegmentDist{NodeID: targetNode, Version: 0}
+	}
+	suite.dist.LeaderViewManager.Update(targetNode, view)
+	suite.dispatchAndWait(targetNode)
+	suite.AssertTaskNum(segmentsNum, 0, 0, segmentsNum)
+
+	for _, task := range tasks {
+		suite.Equal(TaskStatusStarted, task.Status())
+		suite.NoError(task.Err())
+	}
+}
+
 func (suite *TaskSuite) AssertTaskNum(process, wait, channel, segment int) {
 	scheduler := suite.scheduler
 
@@ -1148,11 +1222,15 @@ func (suite *TaskSuite) dispatchAndWait(node int64) {
 	for start := time.Now(); time.Since(start) < timeout; {
 		count = 0
 		keys = make([]any, 0)
-		suite.scheduler.executor.executingTasks.Range(func(key, value any) bool {
-			keys = append(keys, key)
-			count++
-			return true
-		})
+
+		for _, executor := range suite.scheduler.executors {
+			executor.executingTasks.Range(func(key, value any) bool {
+				keys = append(keys, key)
+				count++
+				return true
+			})
+		}
+
 		if count == 0 {
 			return
 		}

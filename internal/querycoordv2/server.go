@@ -311,6 +311,7 @@ func (s *Server) Start() error {
 	}
 	for _, node := range sessions {
 		s.nodeMgr.Add(session.NewNodeInfo(node.ServerID, node.Address))
+		s.taskScheduler.AddExecutor(node.ServerID)
 	}
 	s.checkReplicas()
 	for _, node := range sessions {
@@ -571,6 +572,7 @@ func (s *Server) watchNodes(revision int64) {
 
 func (s *Server) handleNodeUp(node int64) {
 	log := log.With(zap.Int64("nodeID", node))
+	s.taskScheduler.AddExecutor(node)
 	s.distController.StartDistInstance(s.ctx, node)
 
 	for _, collection := range s.meta.CollectionManager.GetAll() {
@@ -598,6 +600,7 @@ func (s *Server) handleNodeUp(node int64) {
 
 func (s *Server) handleNodeDown(node int64) {
 	log := log.With(zap.Int64("nodeID", node))
+	s.taskScheduler.RemoveExecutor(node)
 	s.distController.Remove(node)
 
 	// Refresh the targets, to avoid consuming messages too early from channel
