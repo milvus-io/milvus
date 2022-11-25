@@ -17,21 +17,18 @@
 package paramtable
 
 import (
+	"encoding/json"
 	"net/url"
 	"os"
 	"path"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
-	"github.com/streamnative/pulsarctl/pkg/cmdutils"
 	"go.uber.org/zap"
 )
-
-var pulsarOnce sync.Once
 
 const (
 	// SuggestPulsarMaxMessageSize defines the maximum size of Pulsar message.
@@ -72,7 +69,7 @@ func (p *ServiceParam) Init() {
 	p.MinioCfg.init(&p.BaseTable)
 }
 
-///////////////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////////////
 // --- etcd ---
 type EtcdConfig struct {
 	Base *BaseTable
@@ -230,7 +227,7 @@ func (p *MetaStoreConfig) initMetaStoreType() {
 	p.MetaStoreType = p.Base.LoadWithDefault("metastore.type", util.MetaStoreTypeEtcd)
 }
 
-///////////////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////////////
 // --- meta db ---
 type MetaDBConfig struct {
 	Base *BaseTable
@@ -306,7 +303,7 @@ func (p *MetaDBConfig) initMaxIdleConns() {
 	p.MaxIdleConns = maxIdleConns
 }
 
-///////////////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////////////
 // --- pulsar ---
 type PulsarConfig struct {
 	Base *BaseTable
@@ -314,6 +311,14 @@ type PulsarConfig struct {
 	Address        string
 	WebAddress     string
 	MaxMessageSize int
+
+	// support auth
+	AuthPlugin string
+	AuthParams string
+
+	// support tenant
+	Tenant    string
+	Namespace string
 }
 
 func (p *PulsarConfig) init(base *BaseTable) {
@@ -322,6 +327,10 @@ func (p *PulsarConfig) init(base *BaseTable) {
 	p.initAddress()
 	p.initWebAddress()
 	p.initMaxMessageSize()
+	p.initAuthPlugin()
+	p.initAuthParams()
+	p.initTenant()
+	p.initNamespace()
 }
 
 func (p *PulsarConfig) initAddress() {
@@ -350,9 +359,6 @@ func (p *PulsarConfig) initWebAddress() {
 		webport := p.Base.LoadWithDefault("pulsar.webport", "80")
 		p.WebAddress = "http://" + pulsarURL.Hostname() + ":" + webport
 	}
-	pulsarOnce.Do(func() {
-		cmdutils.PulsarCtlConfig.WebServiceURL = p.WebAddress
-	})
 }
 
 func (p *PulsarConfig) initMaxMessageSize() {
@@ -367,6 +373,41 @@ func (p *PulsarConfig) initMaxMessageSize() {
 			p.MaxMessageSize = maxMessageSize
 		}
 	}
+}
+
+func (p *PulsarConfig) initAuthPlugin() {
+	p.AuthPlugin = p.Base.LoadWithDefault("pulsar.authPlugin", "")
+}
+
+func (p *PulsarConfig) initAuthParams() {
+	paramString := p.Base.LoadWithDefault("pulsar.authParams", "")
+
+	// need to parse params to json due to .yaml config file doesn't support json format config item
+	// official pulsar client JWT config : {"token","fake_token_string"}
+	// milvus config: token:fake_token_string
+	jsonMap := make(map[string]string)
+	params := strings.Split(paramString, ",")
+	for _, param := range params {
+		kv := strings.Split(param, ":")
+		if len(kv) == 2 {
+			jsonMap[kv[0]] = kv[1]
+		}
+	}
+
+	if len(jsonMap) == 0 {
+		p.AuthParams = ""
+	} else {
+		jsonData, _ := json.Marshal(&jsonMap)
+		p.AuthParams = string(jsonData)
+	}
+}
+
+func (p *PulsarConfig) initTenant() {
+	p.Tenant = p.Base.LoadWithDefault("pulsar.tenant", "public")
+}
+
+func (p *PulsarConfig) initNamespace() {
+	p.Namespace = p.Base.LoadWithDefault("pulsar.namespace", "default")
 }
 
 // --- kafka ---
@@ -416,7 +457,7 @@ func (k *KafkaConfig) initExtraKafkaConfig() {
 	k.ProducerExtraConfig = k.Base.GetConfigSubSet(KafkaProducerConfigPrefix)
 }
 
-///////////////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////////////
 // --- rocksmq ---
 type RocksmqConfig struct {
 	Base *BaseTable
@@ -434,7 +475,7 @@ func (p *RocksmqConfig) initPath() {
 	p.Path = p.Base.LoadWithDefault("rocksmq.path", "")
 }
 
-///////////////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////////////
 // --- minio ---
 type MinioConfig struct {
 	Base *BaseTable

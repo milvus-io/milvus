@@ -34,10 +34,14 @@ import (
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
-	"github.com/streamnative/pulsarctl/pkg/cmdutils"
 	"github.com/streamnative/pulsarctl/pkg/pulsar/utils"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
+)
+
+const (
+	DefaultPulsarTenant    = "public"
+	DefaultPulsarNamespace = "default"
 )
 
 var Params paramtable.BaseTable
@@ -204,7 +208,7 @@ func Consume3(ctx context.Context, t *testing.T, pc *pulsarClient, topic string,
 
 func TestPulsarClient_Consume1(t *testing.T) {
 	pulsarAddress := getPulsarAddress()
-	pc, err := NewClient(pulsar.ClientOptions{URL: pulsarAddress})
+	pc, err := NewClient(DefaultPulsarTenant, DefaultPulsarNamespace, pulsar.ClientOptions{URL: pulsarAddress})
 	defer pc.Close()
 	assert.NoError(t, err)
 	assert.NotNil(t, pc)
@@ -355,7 +359,7 @@ func Consume23(ctx context.Context, t *testing.T, pc *pulsarClient, topic string
 
 func TestPulsarClient_Consume2(t *testing.T) {
 	pulsarAddress := getPulsarAddress()
-	pc, err := NewClient(pulsar.ClientOptions{URL: pulsarAddress})
+	pc, err := NewClient(DefaultPulsarTenant, DefaultPulsarNamespace, pulsar.ClientOptions{URL: pulsarAddress})
 	defer pc.Close()
 	assert.NoError(t, err)
 	assert.NotNil(t, pc)
@@ -405,7 +409,7 @@ func TestPulsarClient_Consume2(t *testing.T) {
 
 func TestPulsarClient_SeekPosition(t *testing.T) {
 	pulsarAddress := getPulsarAddress()
-	pc, err := NewClient(pulsar.ClientOptions{URL: pulsarAddress})
+	pc, err := NewClient(DefaultPulsarTenant, DefaultPulsarNamespace, pulsar.ClientOptions{URL: pulsarAddress})
 	defer pc.Close()
 	assert.NoError(t, err)
 	assert.NotNil(t, pc)
@@ -478,7 +482,7 @@ func TestPulsarClient_SeekPosition(t *testing.T) {
 
 func TestPulsarClient_SeekLatest(t *testing.T) {
 	pulsarAddress := getPulsarAddress()
-	pc, err := NewClient(pulsar.ClientOptions{URL: pulsarAddress})
+	pc, err := NewClient(DefaultPulsarTenant, DefaultPulsarNamespace, pulsar.ClientOptions{URL: pulsarAddress})
 	defer pc.Close()
 	assert.NoError(t, err)
 	assert.NotNil(t, pc)
@@ -541,7 +545,7 @@ func TestPulsarClient_SeekLatest(t *testing.T) {
 
 func TestPulsarClient_EarliestMessageID(t *testing.T) {
 	pulsarAddress := getPulsarAddress()
-	client, _ := NewClient(pulsar.ClientOptions{URL: pulsarAddress})
+	client, _ := NewClient(DefaultPulsarTenant, DefaultPulsarNamespace, pulsar.ClientOptions{URL: pulsarAddress})
 	defer client.Close()
 
 	mid := client.EarliestMessageID()
@@ -550,7 +554,7 @@ func TestPulsarClient_EarliestMessageID(t *testing.T) {
 
 func TestPulsarClient_StringToMsgID(t *testing.T) {
 	pulsarAddress := getPulsarAddress()
-	client, _ := NewClient(pulsar.ClientOptions{URL: pulsarAddress})
+	client, _ := NewClient(DefaultPulsarTenant, DefaultPulsarNamespace, pulsar.ClientOptions{URL: pulsarAddress})
 	defer client.Close()
 
 	mid := pulsar.EarliestMessageID()
@@ -568,7 +572,7 @@ func TestPulsarClient_StringToMsgID(t *testing.T) {
 
 func TestPulsarClient_BytesToMsgID(t *testing.T) {
 	pulsarAddress := getPulsarAddress()
-	client, _ := NewClient(pulsar.ClientOptions{URL: pulsarAddress})
+	client, _ := NewClient(DefaultPulsarTenant, DefaultPulsarNamespace, pulsar.ClientOptions{URL: pulsarAddress})
 	defer client.Close()
 
 	mid := pulsar.EarliestMessageID()
@@ -647,13 +651,44 @@ func (c *mockPulsarClient) Close() {
 func TestPulsarClient_SubscribeExclusiveFail(t *testing.T) {
 	t.Run("exclusive pulsar consumer failure", func(t *testing.T) {
 		pc := &pulsarClient{
-			client: &mockPulsarClient{},
+			tenant:    DefaultPulsarTenant,
+			namespace: DefaultPulsarNamespace,
+			client:    &mockPulsarClient{},
 		}
 
-		_, err := pc.Subscribe(mqwrapper.ConsumerOptions{})
+		_, err := pc.Subscribe(mqwrapper.ConsumerOptions{Topic: "test_topic_name"})
 		assert.Error(t, err)
 		assert.True(t, retry.IsUnRecoverable(err))
 	})
+}
+
+func TestPulsarClient_WithTenantAndNamespace(t *testing.T) {
+	tenant := "public"
+	namespace := "default"
+	topic := "test"
+	subName := "hello_world"
+
+	pulsarAddress := getPulsarAddress()
+	pc, err := NewClient(tenant, namespace, pulsar.ClientOptions{URL: pulsarAddress})
+	assert.Nil(t, err)
+	producer, err := pc.CreateProducer(mqwrapper.ProducerOptions{Topic: topic})
+	defer producer.Close()
+	assert.Nil(t, err)
+	assert.NotNil(t, producer)
+
+	fullTopicName, err := GetFullTopicName(tenant, namespace, topic)
+	assert.Nil(t, err)
+	assert.Equal(t, fullTopicName, producer.(*pulsarProducer).Topic())
+
+	consumer, err := pc.Subscribe(mqwrapper.ConsumerOptions{
+		Topic:                       topic,
+		SubscriptionName:            subName,
+		BufSize:                     1024,
+		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
+	})
+	defer consumer.Close()
+	assert.Nil(t, err)
+	assert.NotNil(t, consumer)
 }
 
 func TestPulsarCtl(t *testing.T) {
@@ -661,7 +696,7 @@ func TestPulsarCtl(t *testing.T) {
 	subName := "hello"
 
 	pulsarAddress := getPulsarAddress()
-	pc, err := NewClient(pulsar.ClientOptions{URL: pulsarAddress})
+	pc, err := NewClient(DefaultPulsarTenant, DefaultPulsarNamespace, pulsar.ClientOptions{URL: pulsarAddress})
 	assert.Nil(t, err)
 	consumer, err := pc.Subscribe(mqwrapper.ConsumerOptions{
 		Topic:                       topic,
@@ -690,7 +725,9 @@ func TestPulsarCtl(t *testing.T) {
 	})
 	assert.Error(t, err)
 
-	topicName, err := utils.GetTopicName(topic)
+	fullTopicName, err := GetFullTopicName(DefaultPulsarTenant, DefaultPulsarNamespace, topic)
+	assert.Nil(t, err)
+	topicName, err := utils.GetTopicName(fullTopicName)
 	assert.NoError(t, err)
 
 	pulsarURL, err := url.ParseRequestURI(pulsarAddress)
@@ -698,12 +735,14 @@ func TestPulsarCtl(t *testing.T) {
 		panic(err)
 	}
 	webport := Params.LoadWithDefault("pulsar.webport", "80")
-	cmdutils.PulsarCtlConfig.WebServiceURL = "http://" + pulsarURL.Hostname() + ":" + webport
-	admin := cmdutils.NewPulsarClient()
+	webServiceURL := "http://" + pulsarURL.Hostname() + ":" + webport
+	admin, err := NewAdminClient(webServiceURL, "", "")
+	assert.NoError(t, err)
 	err = admin.Subscriptions().Delete(*topicName, subName, true)
 	if err != nil {
-		cmdutils.PulsarCtlConfig.WebServiceURL = "http://" + pulsarURL.Hostname() + ":" + "8080"
-		admin := cmdutils.NewPulsarClient()
+		webServiceURL = "http://" + pulsarURL.Hostname() + ":" + "8080"
+		admin, err := NewAdminClient(webServiceURL, "", "")
+		assert.NoError(t, err)
 		err = admin.Subscriptions().Delete(*topicName, subName, true)
 		assert.NoError(t, err)
 	}
@@ -714,7 +753,29 @@ func TestPulsarCtl(t *testing.T) {
 		BufSize:                     1024,
 		SubscriptionInitialPosition: mqwrapper.SubscriptionPositionEarliest,
 	})
+	defer consumer2.Close()
 	assert.Nil(t, err)
 	assert.NotNil(t, consumer2)
-	defer consumer2.Close()
+}
+
+func NewPulsarAdminClient() {
+	panic("unimplemented")
+}
+
+func TestPulsarClient_GetFullTopicName(t *testing.T) {
+	fullTopicName, err := GetFullTopicName("", "", "topic")
+	assert.Error(t, err)
+	assert.Empty(t, fullTopicName)
+
+	fullTopicName, err = GetFullTopicName("tenant", "", "topic")
+	assert.Error(t, err)
+	assert.Empty(t, fullTopicName)
+
+	fullTopicName, err = GetFullTopicName("", "namespace", "topic")
+	assert.Error(t, err)
+	assert.Empty(t, fullTopicName)
+
+	fullTopicName, err = GetFullTopicName("tenant", "namespace", "topic")
+	assert.Nil(t, err)
+	assert.Equal(t, "tenant/namespace/topic", fullTopicName)
 }
