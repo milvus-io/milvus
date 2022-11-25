@@ -304,17 +304,14 @@ func TestDataSyncService_Start(t *testing.T) {
 	ddStream.AsProducer([]string{ddlChannelName})
 
 	var insertMsgStream msgstream.MsgStream = insertStream
-	insertMsgStream.Start()
-
 	var ddMsgStream msgstream.MsgStream = ddStream
-	ddMsgStream.Start()
 
 	err = insertMsgStream.Produce(&msgPack)
 	assert.NoError(t, err)
 
-	err = insertMsgStream.Broadcast(&timeTickMsgPack)
+	_, err = insertMsgStream.Broadcast(&timeTickMsgPack)
 	assert.NoError(t, err)
-	err = ddMsgStream.Broadcast(&timeTickMsgPack)
+	_, err = ddMsgStream.Broadcast(&timeTickMsgPack)
 	assert.NoError(t, err)
 
 	// dataSync
@@ -487,10 +484,6 @@ func TestGetChannelLatestMsgID(t *testing.T) {
 
 	insertStream, _ := factory.NewMsgStream(ctx)
 	insertStream.AsProducer([]string{dmlChannelName})
-
-	var insertMsgStream = insertStream
-	insertMsgStream.Start()
-
 	id, err := dsService.getChannelLatestMsgID(ctx, dmlChannelName, 0)
 	assert.NoError(t, err)
 	assert.NotNil(t, id)

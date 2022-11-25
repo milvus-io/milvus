@@ -209,29 +209,18 @@ type FailMsgStream struct {
 	errBroadcast bool
 }
 
-func (ms *FailMsgStream) Start()                                     {}
 func (ms *FailMsgStream) Close()                                     {}
 func (ms *FailMsgStream) Chan() <-chan *msgstream.MsgPack            { return nil }
 func (ms *FailMsgStream) AsProducer(channels []string)               {}
 func (ms *FailMsgStream) AsReader(channels []string, subName string) {}
 func (ms *FailMsgStream) AsConsumer(channels []string, subName string, position mqwrapper.SubscriptionInitialPosition) {
 }
-func (ms *FailMsgStream) SetRepackFunc(repackFunc msgstream.RepackFunc)                   {}
-func (ms *FailMsgStream) ComputeProduceChannelIndexes(tsMsgs []msgstream.TsMsg) [][]int32 { return nil }
-func (ms *FailMsgStream) GetProduceChannels() []string                                    { return nil }
-func (ms *FailMsgStream) Produce(*msgstream.MsgPack) error                                { return nil }
-func (ms *FailMsgStream) ProduceMark(*msgstream.MsgPack) (map[string][]msgstream.MessageID, error) {
-	return nil, nil
-}
-func (ms *FailMsgStream) Broadcast(*msgstream.MsgPack) error {
+func (ms *FailMsgStream) SetRepackFunc(repackFunc msgstream.RepackFunc) {}
+func (ms *FailMsgStream) GetProduceChannels() []string                  { return nil }
+func (ms *FailMsgStream) Produce(*msgstream.MsgPack) error              { return nil }
+func (ms *FailMsgStream) Broadcast(*msgstream.MsgPack) (map[string][]msgstream.MessageID, error) {
 	if ms.errBroadcast {
-		return errors.New("broadcast error")
-	}
-	return nil
-}
-func (ms *FailMsgStream) BroadcastMark(*msgstream.MsgPack) (map[string][]msgstream.MessageID, error) {
-	if ms.errBroadcast {
-		return nil, errors.New("broadcastMark error")
+		return nil, errors.New("broadcast error")
 	}
 	return nil, nil
 }

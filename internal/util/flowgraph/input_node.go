@@ -52,7 +52,6 @@ func (inNode *InputNode) IsInputNode() bool {
 
 // Start is used to start input msgstream
 func (inNode *InputNode) Start() {
-	inNode.inStream.Start()
 }
 
 // Close implements node

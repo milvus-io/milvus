@@ -15,10 +15,6 @@ func (m MockMsgStream) AsProducer(channels []string) {
 	m.AsProducerFunc(channels)
 }
 
-func (m MockMsgStream) BroadcastMark(pack *MsgPack) (map[string][]MessageID, error) {
+func (m MockMsgStream) Broadcast(pack *MsgPack) (map[string][]MessageID, error) {
 	return m.BroadcastMarkFunc(pack)
-}
-
-func (m MockMsgStream) Broadcast(pack *MsgPack) error {
-	return m.BroadcastFunc(pack)
 }

@@ -279,7 +279,7 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 		},
 	}
 
-	pos1, err := stream.ProduceMark(&msgstream.MsgPack{Msgs: []msgstream.TsMsg{timeTickMsg}})
+	pos1, err := stream.Broadcast(&msgstream.MsgPack{Msgs: []msgstream.TsMsg{timeTickMsg}})
 	assert.NoError(t, err)
 	msgIDs, ok := pos1[pDmChannel]
 	assert.True(t, ok)

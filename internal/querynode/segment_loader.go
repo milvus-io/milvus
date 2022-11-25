@@ -753,7 +753,6 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 	if err != nil {
 		return err
 	}
-	stream.Start()
 
 	delData := &deleteData{
 		deleteIDs:        make(map[UniqueID][]primaryKey),

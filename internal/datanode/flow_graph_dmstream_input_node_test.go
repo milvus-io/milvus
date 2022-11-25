@@ -65,7 +65,6 @@ func (mm *mockMsgStreamFactory) NewMsgStreamDisposer(ctx context.Context) func([
 type mockTtMsgStream struct {
 }
 
-func (mtm *mockTtMsgStream) Start() {}
 func (mtm *mockTtMsgStream) Close() {}
 func (mtm *mockTtMsgStream) Chan() <-chan *msgstream.MsgPack {
 	return make(chan *msgstream.MsgPack, 100)
@@ -75,9 +74,6 @@ func (mtm *mockTtMsgStream) AsProducer(channels []string) {}
 func (mtm *mockTtMsgStream) AsConsumer(channels []string, subName string, position mqwrapper.SubscriptionInitialPosition) {
 }
 func (mtm *mockTtMsgStream) SetRepackFunc(repackFunc msgstream.RepackFunc) {}
-func (mtm *mockTtMsgStream) ComputeProduceChannelIndexes(tsMsgs []msgstream.TsMsg) [][]int32 {
-	return make([][]int32, 0)
-}
 
 func (mtm *mockTtMsgStream) GetProduceChannels() []string {
 	return make([]string, 0)
@@ -85,14 +81,8 @@ func (mtm *mockTtMsgStream) GetProduceChannels() []string {
 func (mtm *mockTtMsgStream) Produce(*msgstream.MsgPack) error {
 	return nil
 }
-func (mtm *mockTtMsgStream) ProduceMark(*msgstream.MsgPack) (map[string][]msgstream.MessageID, error) {
-	return map[string][]msgstream.MessageID{}, nil
-}
-func (mtm *mockTtMsgStream) Broadcast(*msgstream.MsgPack) error {
-	return nil
-}
-func (mtm *mockTtMsgStream) BroadcastMark(*msgstream.MsgPack) (map[string][]msgstream.MessageID, error) {
-	return map[string][]msgstream.MessageID{}, nil
+func (mtm *mockTtMsgStream) Broadcast(*msgstream.MsgPack) (map[string][]msgstream.MessageID, error) {
+	return nil, nil
 }
 func (mtm *mockTtMsgStream) Seek(offset []*internalpb.MsgPosition) error {
 	return nil

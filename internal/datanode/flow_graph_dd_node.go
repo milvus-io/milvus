@@ -369,7 +369,6 @@ func newDDNode(ctx context.Context, collID UniqueID, vChannelName string, droppe
 	metrics.DataNodeNumProducers.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Inc()
 	log.Info("datanode AsProducer", zap.String("DeltaChannelName", deltaChannelName))
 	var deltaMsgStream msgstream.MsgStream = deltaStream
-	deltaMsgStream.Start()
 
 	dd := &ddNode{
 		ctx:                ctx,

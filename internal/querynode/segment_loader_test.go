@@ -947,8 +947,6 @@ func (ms *LoadDeleteMsgStream) GetLatestMsgID(channel string) (msgstream.Message
 	return msg.(msgstream.MessageID), err.(error)
 }
 
-func (ms *LoadDeleteMsgStream) Start() {}
-
 type getCollectionByIDFunc func(collectionID UniqueID) (*Collection, error)
 
 type mockReplicaInterface struct {
