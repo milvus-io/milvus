@@ -19,6 +19,18 @@
 
 namespace milvus::query {
 
+void
+CheckBruteForceSearchParam(const FieldMeta& field, const SearchInfo& search_info) {
+    auto data_type = field.get_data_type();
+    auto& metric_type = search_info.metric_type_;
+
+    AssertInfo(datatype_is_vector(data_type), "[BruteForceSearch] Data type isn't vector type");
+    bool is_float_data_type = (data_type == DataType::VECTOR_FLOAT);
+    bool is_float_metric_type =
+        IsMetricType(metric_type, knowhere::metric::IP) || IsMetricType(metric_type, knowhere::metric::L2);
+    AssertInfo(is_float_data_type == is_float_metric_type, "[BruteForceSearch] Data type and metric type mis-match");
+}
+
 SubSearchResult
 BruteForceSearch(const dataset::SearchDataset& dataset,
                  const void* chunk_data_raw,

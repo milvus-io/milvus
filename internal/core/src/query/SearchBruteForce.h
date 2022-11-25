@@ -12,10 +12,15 @@
 #pragma once
 
 #include "common/BitsetView.h"
+#include "common/FieldMeta.h"
+#include "common/QueryInfo.h"
 #include "query/SubSearchResult.h"
 #include "query/helper.h"
 
 namespace milvus::query {
+
+void
+CheckBruteForceSearchParam(const FieldMeta& field, const SearchInfo& search_info);
 
 SubSearchResult
 BruteForceSearch(const dataset::SearchDataset& dataset,
