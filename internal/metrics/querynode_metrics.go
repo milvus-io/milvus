@@ -73,9 +73,13 @@ var (
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
 			Name:      "segment_num",
-			Help:      "number of segments loaded",
+			Help:      "number of segments loaded, clustered by its collection, partition, state and # of indexed fields",
 		}, []string{
 			nodeIDLabelName,
+			collectionIDLabelName,
+			partitionIDLabelName,
+			segmentStateLabelName,
+			indexCountLabelName,
 		})
 
 	QueryNodeNumDmlChannels = prometheus.NewGaugeVec(
@@ -313,9 +317,12 @@ var (
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
 			Name:      "entity_num",
-			Help:      "number of entities which can be searched/queried",
+			Help:      "number of entities which can be searched/queried, clustered by collection, partition and state",
 		}, []string{
 			nodeIDLabelName,
+			collectionIDLabelName,
+			partitionIDLabelName,
+			segmentStateLabelName,
 		})
 
 	// QueryNodeConsumeCounter counts the bytes QueryNode consumed from message storage.
@@ -337,7 +344,7 @@ var (
 		}, []string{nodeIDLabelName, msgTypeLabelName})
 )
 
-//RegisterQueryNode registers QueryNode metrics
+// RegisterQueryNode registers QueryNode metrics
 func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeNumCollections)
 	registry.MustRegister(QueryNodeNumPartitions)
