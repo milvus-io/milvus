@@ -23,6 +23,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 	"github.com/streamnative/pulsarctl/pkg/pulsar/utils"
 
@@ -86,6 +87,7 @@ func TestComsumeCompressedMessage(t *testing.T) {
 
 	msg := []byte("test message")
 	compressedMsg := []byte("test compressed message")
+	traceValue := "test compressed message id"
 	_, err = producer.Send(context.Background(), &mqwrapper.ProducerMessage{
 		Payload:    msg,
 		Properties: map[string]string{},
@@ -97,14 +99,17 @@ func TestComsumeCompressedMessage(t *testing.T) {
 	assert.Equal(t, msg, recvMsg.Payload())
 
 	_, err = compressProducer.Send(context.Background(), &mqwrapper.ProducerMessage{
-		Payload:    compressedMsg,
-		Properties: map[string]string{},
+		Payload: compressedMsg,
+		Properties: map[string]string{
+			common.TraceIDKey: traceValue,
+		},
 	})
 	assert.NoError(t, err)
 	recvMsg, err = consumer.Receive(context.Background())
 	assert.NoError(t, err)
 	consumer.Ack(recvMsg)
 	assert.Equal(t, compressedMsg, recvMsg.Payload())
+	assert.Equal(t, traceValue, recvMsg.Properties()[common.TraceIDKey])
 
 	assert.Nil(t, err)
 	assert.NotNil(t, consumer)

@@ -12,6 +12,7 @@
 package server
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path"
@@ -26,6 +27,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/kv"
 	rocksdbkv "github.com/milvus-io/milvus/internal/kv/rocksdb"
 	"github.com/milvus-io/milvus/internal/log"
@@ -274,7 +276,7 @@ func (rmq *rocksmq) Close() {
 	log.Info("Successfully close rocksmq")
 }
 
-//print rmq consumer Info
+// print rmq consumer Info
 func (rmq *rocksmq) Info() bool {
 	rtn := true
 	rmq.consumers.Range(func(key, vals interface{}) bool {
@@ -594,6 +596,16 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) ([]Uni
 		msgID := idStart + UniqueID(i)
 		key := path.Join(topicName, strconv.FormatInt(msgID, 10))
 		batch.Put([]byte(key), messages[i].Payload)
+		properties, err := json.Marshal(messages[i].Properties)
+		if err != nil {
+			log.Warn("properties marshal failed",
+				zap.Int64("msgID", msgID),
+				zap.String("topicName", topicName),
+				zap.Error(err))
+			return nil, err
+		}
+		pKey := path.Join(common.PropertiesKey, topicName, strconv.FormatInt(msgID, 10))
+		batch.Put([]byte(pKey), properties)
 		msgIDs[i] = msgID
 		msgSizes[msgID] = int64(len(messages[i].Payload))
 	}
@@ -724,6 +736,17 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 			val.Free()
 			return nil, err
 		}
+		askedProperties := path.Join(common.PropertiesKey, topicName, strconv.FormatInt(msgID, 10))
+		opts := gorocksdb.NewDefaultReadOptions()
+		defer opts.Destroy()
+		propertiesValue, err := rmq.store.GetBytes(opts, []byte(askedProperties))
+		if err != nil {
+			return nil, err
+		}
+		var properties map[string]string
+		if err = json.Unmarshal(propertiesValue, &properties); err != nil {
+			return nil, err
+		}
 		msg := ConsumerMessage{
 			MsgID: msgID,
 		}
@@ -731,8 +754,10 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 		dataLen := len(origData)
 		if dataLen == 0 {
 			msg.Payload = nil
+			msg.Properties = nil
 		} else {
 			msg.Payload = make([]byte, dataLen)
+			msg.Properties = properties
 			copy(msg.Payload, origData)
 		}
 		consumerMessage = append(consumerMessage, msg)
@@ -850,7 +875,7 @@ func (rmq *rocksmq) Seek(topicName string, groupName string, msgID UniqueID) err
 	return nil
 }
 
-//Only for test
+// Only for test
 func (rmq *rocksmq) ForceSeek(topicName string, groupName string, msgID UniqueID) error {
 	log.Warn("Use method ForceSeek that only for test")
 	if rmq.isClosed() {

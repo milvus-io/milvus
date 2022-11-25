@@ -100,7 +100,7 @@ func TestInject(t *testing.T) {
 	id, sampled, found := InfoFromContext(ctx)
 	fmt.Printf("traceID = %s, sampled = %t, found = %t", id, sampled, found)
 	pp := PropertiesReaderWriter{PpMap: map[string]string{}}
-	InjectContextToPulsarMsgProperties(sp.Context(), pp.PpMap)
+	InjectContextToMsgProperties(sp.Context(), pp.PpMap)
 	tracer := opentracing.GlobalTracer()
 	sc, _ := tracer.Extract(opentracing.TextMap, pp)
 	assert.NotNil(t, sc)

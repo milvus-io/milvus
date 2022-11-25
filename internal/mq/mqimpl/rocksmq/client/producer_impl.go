@@ -52,7 +52,8 @@ func (p *producer) Topic() string {
 func (p *producer) Send(message *ProducerMessage) (UniqueID, error) {
 	ids, err := p.c.server.Produce(p.topic, []server.ProducerMessage{
 		{
-			Payload: message.Payload,
+			Payload:    message.Payload,
+			Properties: message.Properties,
 		},
 	})
 	if err != nil {

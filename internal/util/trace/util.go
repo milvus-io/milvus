@@ -186,13 +186,13 @@ func InfoFromContext(ctx context.Context) (traceID string, sampled, found bool) 
 	return "", false, false
 }
 
-// InjectContextToPulsarMsgProperties is a method inject span to pulsr message.
-func InjectContextToPulsarMsgProperties(sc opentracing.SpanContext, properties map[string]string) {
+// InjectContextToMsgProperties is a method inject span to pulsr message.
+func InjectContextToMsgProperties(sc opentracing.SpanContext, properties map[string]string) {
 	tracer := opentracing.GlobalTracer()
 	tracer.Inject(sc, opentracing.TextMap, PropertiesReaderWriter{properties})
 }
 
-// PropertiesReaderWriter is for saving trce in pulsar msg properties.
+// PropertiesReaderWriter is for saving trace in pulsar msg properties.
 // Implement Set and ForeachKey methods.
 type PropertiesReaderWriter struct {
 	PpMap map[string]string
