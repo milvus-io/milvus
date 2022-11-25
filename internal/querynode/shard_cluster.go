@@ -647,6 +647,9 @@ func (sc *ShardCluster) LoadSegments(ctx context.Context, req *querypb.LoadSegme
 		log.Warn("follower load segment failed", zap.String("reason", resp.GetReason()))
 		return fmt.Errorf("follower %d failed to load segment, reason %s", req.DstNodeID, resp.GetReason())
 	}
+	log.Debug("shardCluster has completed loading segments for:",
+		zap.Int64("collectionID:", req.CollectionID), zap.Int64("replicaID:", req.ReplicaID),
+		zap.Int64("sourceNodeId", req.SourceNodeID))
 
 	// update allocation
 	for _, info := range req.Infos {

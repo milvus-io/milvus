@@ -134,6 +134,11 @@ func (o *LeaderObserver) findNeedRemovedSegments(leaderView *meta.LeaderView, di
 		if ok || existInCurrentTarget || existInNextTarget {
 			continue
 		}
+		log.Debug("leader observer append a segment to remove:", zap.Int64("collectionID", leaderView.CollectionID),
+			zap.String("Channel", leaderView.Channel), zap.Int64("leaderViewID", leaderView.ID),
+			zap.Int64("segmentID", sid), zap.Bool("distMap_exist", ok),
+			zap.Bool("existInCurrentTarget", existInCurrentTarget),
+			zap.Bool("existInNextTarget", existInNextTarget))
 		ret = append(ret, &querypb.SyncAction{
 			Type:      querypb.SyncType_Remove,
 			SegmentID: sid,
