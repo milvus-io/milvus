@@ -197,32 +197,6 @@ func TestFlowGraphInsertNode_delete(t *testing.T) {
 	})
 }
 
-func TestFlowGraphInsertNode_processDeleteMessages(t *testing.T) {
-	t.Run("test processDeleteMessages", func(t *testing.T) {
-		streaming, err := genSimpleReplica()
-		assert.NoError(t, err)
-
-		dMsg := genDeleteMsg(defaultCollectionID, schemapb.DataType_Int64, defaultDelLength)
-		dData, err := genFlowGraphDeleteData()
-		assert.NoError(t, err)
-
-		err = processDeleteMessages(streaming, segmentTypeGrowing, dMsg, dData)
-		assert.NoError(t, err)
-	})
-
-	t.Run("test processDeleteMessages", func(t *testing.T) {
-		streaming, err := genSimpleReplica()
-		assert.NoError(t, err)
-
-		dMsg := genDeleteMsg(defaultCollectionID, schemapb.DataType_Int64, defaultDelLength)
-		dData, err := genFlowGraphDeleteData()
-		assert.NoError(t, err)
-
-		err = processDeleteMessages(streaming, segmentTypeGrowing, dMsg, dData)
-		assert.NoError(t, err)
-	})
-}
-
 func TestFlowGraphInsertNode_operate(t *testing.T) {
 	schema := genTestCollectionSchema()
 

@@ -93,7 +93,6 @@ func (dNode *deleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			zap.Int("numTS", len(delMsg.Timestamps)),
 			zap.Uint64("timestampBegin", delMsg.BeginTs()),
 			zap.Uint64("timestampEnd", delMsg.EndTs()),
-			zap.Int("segmentNum", dNode.metaReplica.getSegmentNum(segmentTypeSealed)),
 			zap.String("traceID", traceID),
 		)
 
