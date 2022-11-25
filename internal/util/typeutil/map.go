@@ -1,6 +1,10 @@
 package typeutil
 
-import "sync"
+import (
+	"sync"
+
+	"go.uber.org/atomic"
+)
 
 // MapEqual returns true if the two map contain the same keys and values
 func MapEqual(left, right map[int64]int64) bool {
@@ -35,14 +39,23 @@ func GetMapKeys(src map[string]string) []string {
 
 type ConcurrentMap[K comparable, V any] struct {
 	inner sync.Map
+	// Self-managed Len(), see: https://github.com/golang/go/issues/20680.
+	len atomic.Uint64
 }
 
 func NewConcurrentMap[K comparable, V any]() *ConcurrentMap[K, V] {
 	return &ConcurrentMap[K, V]{}
 }
 
-func (m *ConcurrentMap[K, V]) Insert(key K, value V) {
-	m.inner.Store(key, value)
+func (m *ConcurrentMap[K, V]) Len() uint64 {
+	return m.len.Load()
+}
+
+// InsertIfNotPresent inserts the key-value pair to the concurrent map if the key does not exist. It is otherwise a no-op.
+func (m *ConcurrentMap[K, V]) InsertIfNotPresent(key K, value V) {
+	if _, loaded := m.inner.LoadOrStore(key, value); !loaded {
+		m.len.Inc()
+	}
 }
 
 func (m *ConcurrentMap[K, V]) Get(key K) (V, bool) {
@@ -54,33 +67,24 @@ func (m *ConcurrentMap[K, V]) Get(key K) (V, bool) {
 	return value.(V), true
 }
 
-func (m *ConcurrentMap[K, V]) get(key K) (V, bool) {
-	var zeroValue V
-	value, ok := m.inner.Load(key)
-	if !ok {
-		return zeroValue, ok
-	}
-	return value.(V), true
-}
-
+// GetOrInsert returns the `value` and `loaded` on the given `key`, `value` set.
+// If the key already exists, return the value and set `loaded` to true.
+// If the key does not exist, insert the given `key` and `value` to map, return the value and set `loaded` to false.
 func (m *ConcurrentMap[K, V]) GetOrInsert(key K, value V) (V, bool) {
-	var zeroValue V
-	loaded, exist := m.inner.LoadOrStore(key, value)
-	if !exist {
-		return zeroValue, exist
+	stored, loaded := m.inner.LoadOrStore(key, value)
+	if !loaded {
+		m.len.Inc()
+		return stored.(V), false
 	}
-	return loaded.(V), true
+	return stored.(V), true
 }
 
 func (m *ConcurrentMap[K, V]) GetAndRemove(key K) (V, bool) {
 	var zeroValue V
-	value, ok := m.inner.LoadAndDelete(key)
-	if !ok {
-		return zeroValue, ok
+	value, loaded := m.inner.LoadAndDelete(key)
+	if !loaded {
+		return zeroValue, false
 	}
+	m.len.Dec()
 	return value.(V), true
-}
-
-func (m *ConcurrentMap[K, V]) Remove(key K) {
-	m.inner.Delete(key)
 }

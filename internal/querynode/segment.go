@@ -136,7 +136,7 @@ func (s *Segment) getType() segmentType {
 }
 
 func (s *Segment) setIndexedFieldInfo(fieldID UniqueID, info *IndexedFieldInfo) {
-	s.indexedFieldInfos.Insert(fieldID, info)
+	s.indexedFieldInfos.InsertIfNotPresent(fieldID, info)
 }
 
 func (s *Segment) getIndexedFieldInfo(fieldID UniqueID) (*IndexedFieldInfo, error) {
@@ -670,7 +670,7 @@ func (s *Segment) isPKExist(pk primaryKey) bool {
 	return false
 }
 
-//-------------------------------------------------------------------------------------- interfaces for growing segment
+// -------------------------------------------------------------------------------------- interfaces for growing segment
 func (s *Segment) segmentPreInsert(numOfRecords int) (int64, error) {
 	/*
 		long int
@@ -759,7 +759,12 @@ func (s *Segment) segmentInsert(offset int64, entityIDs []UniqueID, timestamps [
 	if err := HandleCStatus(&status, "Insert failed"); err != nil {
 		return err
 	}
-	metrics.QueryNodeNumEntities.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Add(float64(numOfRow))
+	metrics.QueryNodeNumEntities.WithLabelValues(
+		fmt.Sprint(paramtable.GetNodeID()),
+		fmt.Sprint(s.collectionID),
+		fmt.Sprint(s.partitionID),
+		s.segmentType.String(),
+	).Add(float64(numOfRow))
 	s.setRecentlyModified(true)
 	return nil
 }
@@ -837,7 +842,7 @@ func (s *Segment) segmentDelete(offset int64, entityIDs []primaryKey, timestamps
 	return nil
 }
 
-//-------------------------------------------------------------------------------------- interfaces for sealed segment
+// -------------------------------------------------------------------------------------- interfaces for sealed segment
 func (s *Segment) segmentLoadFieldData(fieldID int64, rowCount int64, data *schemapb.FieldData) error {
 	/*
 		CStatus

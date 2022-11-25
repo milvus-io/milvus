@@ -63,6 +63,7 @@ const (
 	indexTaskStatusLabelName = "index_task_status"
 	msgTypeLabelName         = "msg_type"
 	collectionIDLabelName    = "collection_id"
+	partitionIDLabelName     = "partition_id"
 	channelNameLabelName     = "channel_name"
 	functionLabelName        = "function_name"
 	queryTypeLabelName       = "query_type"
@@ -72,6 +73,7 @@ const (
 	roleNameLabelName        = "role_name"
 	cacheNameLabelName       = "cache_name"
 	cacheStateLabelName      = "cache_state"
+	indexCountLabelName      = "indexed_field_count"
 	requestScope             = "scope"
 )
 
