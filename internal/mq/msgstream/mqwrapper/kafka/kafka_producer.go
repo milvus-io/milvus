@@ -26,7 +26,7 @@ func (kp *kafkaProducer) Topic() string {
 }
 
 func (kp *kafkaProducer) Send(ctx context.Context, message *mqwrapper.ProducerMessage) (mqwrapper.MessageID, error) {
-	var headers []kafka.Header
+	headers := make([]kafka.Header, 0, len(message.Properties))
 	for key, value := range message.Properties {
 		header := kafka.Header{Key: key, Value: []byte(value)}
 		headers = append(headers, header)

@@ -48,7 +48,7 @@ func TestKafkaConsumer_SeekExclusive(t *testing.T) {
 	assert.Equal(t, "333", msg.Properties()[common.TraceIDKey])
 	assert.Equal(t, int64(2), msg.ID().(*kafkaID).messageID)
 	assert.Equal(t, topic, msg.Topic())
-	assert.True(t, len(msg.Properties()) == 0)
+	assert.True(t, len(msg.Properties()) == 1)
 }
 
 func TestKafkaConsumer_SeekInclusive(t *testing.T) {
@@ -74,7 +74,7 @@ func TestKafkaConsumer_SeekInclusive(t *testing.T) {
 	assert.Equal(t, "222", msg.Properties()[common.TraceIDKey])
 	assert.Equal(t, int64(1), msg.ID().(*kafkaID).messageID)
 	assert.Equal(t, topic, msg.Topic())
-	assert.True(t, len(msg.Properties()) == 0)
+	assert.True(t, len(msg.Properties()) == 1)
 }
 
 func TestKafkaConsumer_GetSeek(t *testing.T) {
