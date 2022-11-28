@@ -27,6 +27,7 @@ aws-sdk-cpp:transfer=False
 gtest:build_gmock=False
 
 [imports]
+bin, * -> ../bin
 lib, *.dylib -> ../lib
 lib, *.dll -> ../lib
 lib, *.so* -> ../lib
