@@ -23,11 +23,7 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/milvus-io/milvus/internal/util/commonpbutil"
-	"github.com/milvus-io/milvus/internal/util/errorutil"
-	"github.com/milvus-io/milvus/internal/util/paramtable"
-
-	"golang.org/x/sync/errgroup"
+	"github.com/milvus-io/milvus/internal/util/segmentutil"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
@@ -35,14 +31,18 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/commonpbutil"
+	"github.com/milvus-io/milvus/internal/util/errorutil"
 	"github.com/milvus-io/milvus/internal/util/logutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 )
 
 // checks whether server in Healthy State
@@ -335,6 +335,7 @@ func (s *Server) GetSegmentInfoChannel(ctx context.Context) (*milvuspb.StringRes
 }
 
 // GetSegmentInfo returns segment info requested, status, row count, etc included
+// Called by: QueryCoord, DataNode, IndexCoord, Proxy.
 func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
 	resp := &datapb.GetSegmentInfoResponse{
 		Status: &commonpb.Status{
@@ -345,7 +346,7 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 		resp.Status.Reason = serverNotServingErrMsg
 		return resp, nil
 	}
-	infos := make([]*datapb.SegmentInfo, 0, len(req.SegmentIDs))
+	infos := make([]*datapb.SegmentInfo, 0, len(req.GetSegmentIDs()))
 	for _, id := range req.SegmentIDs {
 		var info *SegmentInfo
 		if req.IncludeUnHealthy {
@@ -358,20 +359,22 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 			}
 
 			child := s.meta.GetCompactionTo(id)
+			clonedInfo := info.Clone()
 			if child != nil {
-				info = info.Clone()
-				info.Deltalogs = append(info.Deltalogs, child.GetDeltalogs()...)
-				info.DmlPosition = child.GetDmlPosition()
+				clonedInfo.Deltalogs = append(clonedInfo.Deltalogs, child.GetDeltalogs()...)
+				clonedInfo.DmlPosition = child.GetDmlPosition()
 			}
-
-			infos = append(infos, info.SegmentInfo)
+			segmentutil.ReCalcRowCount(info.SegmentInfo, clonedInfo.SegmentInfo)
+			infos = append(infos, clonedInfo.SegmentInfo)
 		} else {
 			info = s.meta.GetSegment(id)
 			if info == nil {
 				resp.Status.Reason = msgSegmentNotFound(id)
 				return resp, nil
 			}
-			infos = append(infos, info.SegmentInfo)
+			clonedInfo := info.Clone()
+			segmentutil.ReCalcRowCount(info.SegmentInfo, clonedInfo.SegmentInfo)
+			infos = append(infos, clonedInfo.SegmentInfo)
 		}
 	}
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
@@ -585,7 +588,8 @@ func (s *Server) GetComponentStates(ctx context.Context) (*milvuspb.ComponentSta
 	return resp, nil
 }
 
-// GetRecoveryInfo get recovery info for segment
+// GetRecoveryInfo get recovery info for segment.
+// Called by: QueryCoord.
 func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInfoRequest) (*datapb.GetRecoveryInfoResponse, error) {
 	collectionID := req.GetCollectionID()
 	partitionID := req.GetPartitionID()
@@ -672,7 +676,15 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 			segment2Binlogs[id] = append(segment2Binlogs[id], fieldBinlogs)
 		}
 
-		segmentsNumOfRows[id] = segment.NumOfRows
+		if newCount := segmentutil.CalcRowCountFromBinLog(segment.SegmentInfo); newCount != segment.NumOfRows {
+			log.Warn("segment row number meta inconsistent with bin log row count and will be corrected",
+				zap.Int64("segment ID", segment.GetID()),
+				zap.Int64("segment meta row count (wrong)", segment.GetNumOfRows()),
+				zap.Int64("segment bin log row count (correct)", newCount))
+			segmentsNumOfRows[id] = newCount
+		} else {
+			segmentsNumOfRows[id] = segment.NumOfRows
+		}
 
 		statsBinlogs := segment.GetStatslogs()
 		field2StatsBinlog := make(map[UniqueID][]*datapb.Binlog)
