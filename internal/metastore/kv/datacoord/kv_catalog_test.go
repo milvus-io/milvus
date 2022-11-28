@@ -24,8 +24,8 @@ type MockedTxnKV struct {
 	multiSave      func(kvs map[string]string) error
 	save           func(key, value string) error
 	loadWithPrefix func(key string) ([]string, []string, error)
-	multiRemove    func(keys []string) error
 	load           func(key string) (string, error)
+	multiRemove    func(keys []string) error
 	walkWithPrefix func(prefix string, paginationSize int, fn func([]byte, []byte) error) error
 	remove         func(key string) error
 }
@@ -311,15 +311,26 @@ func Test_AddSegments(t *testing.T) {
 
 	t.Run("save successfully", func(t *testing.T) {
 		txn := &MockedTxnKV{}
-		var savedKvs map[string]string
+		savedKvs := make(map[string]string)
 		txn.multiSave = func(kvs map[string]string) error {
 			savedKvs = kvs
 			return nil
+		}
+		txn.load = func(key string) (string, error) {
+			if v, ok := savedKvs[key]; ok {
+				return v, nil
+			}
+			return "", errors.New("key not found")
 		}
 
 		catalog := NewCatalog(txn, rootPath, "")
 		err := catalog.AddSegment(context.TODO(), segment1)
 		assert.Nil(t, err)
+		adjustedSeg, err := catalog.LoadFromSegmentPath(segment1.CollectionID, segment1.PartitionID, segment1.ID)
+		assert.NoError(t, err)
+		// Check that num of rows is corrected from 100 to 5.
+		assert.Equal(t, int64(100), segment1.GetNumOfRows())
+		assert.Equal(t, int64(5), adjustedSeg.GetNumOfRows())
 
 		_, ok := savedKvs[k4]
 		assert.False(t, ok)
@@ -387,6 +398,12 @@ func Test_AlterSegments(t *testing.T) {
 			opGroupCount++
 			return nil
 		}
+		txn.load = func(key string) (string, error) {
+			if v, ok := savedKvs[key]; ok {
+				return v, nil
+			}
+			return "", errors.New("key not found")
+		}
 
 		catalog := NewCatalog(txn, rootPath, "")
 		err := catalog.AlterSegments(context.TODO(), []*datapb.SegmentInfo{})
@@ -420,6 +437,12 @@ func Test_AlterSegments(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, 255+3, len(savedKvs))
 		assert.Equal(t, 5, opGroupCount)
+
+		adjustedSeg, err := catalog.LoadFromSegmentPath(segmentXL.CollectionID, segmentXL.PartitionID, segmentXL.ID)
+		assert.NoError(t, err)
+		// Check that num of rows is corrected from 100 to 1275.
+		assert.Equal(t, int64(100), segmentXL.GetNumOfRows())
+		assert.Equal(t, int64(5), adjustedSeg.GetNumOfRows())
 	})
 }
 
@@ -453,9 +476,14 @@ func Test_AlterSegmentsAndAddNewSegment(t *testing.T) {
 			maps.Copy(savedKvs, kvs)
 			return nil
 		}
-
 		txn.loadWithPrefix = func(key string) ([]string, []string, error) {
 			return []string{}, []string{}, nil
+		}
+		txn.load = func(key string) (string, error) {
+			if v, ok := savedKvs[key]; ok {
+				return v, nil
+			}
+			return "", errors.New("key not found")
 		}
 
 		catalog := NewCatalog(txn, rootPath, "")
@@ -465,6 +493,18 @@ func Test_AlterSegmentsAndAddNewSegment(t *testing.T) {
 		assert.Equal(t, 8, len(savedKvs))
 		verifySavedKvsForDroppedSegment(t, savedKvs)
 		verifySavedKvsForSegment(t, savedKvs)
+
+		adjustedSeg, err := catalog.LoadFromSegmentPath(droppedSegment.CollectionID, droppedSegment.PartitionID, droppedSegment.ID)
+		assert.NoError(t, err)
+		// Check that num of rows is corrected from 100 to 5.
+		assert.Equal(t, int64(100), droppedSegment.GetNumOfRows())
+		assert.Equal(t, int64(5), adjustedSeg.GetNumOfRows())
+
+		adjustedSeg, err = catalog.LoadFromSegmentPath(segment1.CollectionID, segment1.PartitionID, segment1.ID)
+		assert.NoError(t, err)
+		// Check that num of rows is corrected from 100 to 5.
+		assert.Equal(t, int64(100), droppedSegment.GetNumOfRows())
+		assert.Equal(t, int64(5), adjustedSeg.GetNumOfRows())
 	})
 }
 
