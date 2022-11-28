@@ -371,6 +371,26 @@ func (suite *CollectionObserverSuite) load(collection int64) {
 	suite.targetMgr.AddSegment(suite.segments[collection]...)
 }
 
+func (suite *CollectionObserverSuite) TestRecoverTimeout() {
+	const (
+		timeout = 1 * time.Second
+	)
+
+	Params.QueryCoordCfg.LoadTimeoutSeconds = timeout
+	suite.ob.Start(context.Background())
+
+	suite.dist.LeaderViewManager.Update(1, &meta.LeaderView{
+		ID:           1,
+		CollectionID: 100,
+		Channel:      "100-dmc0",
+		Segments:     map[int64]*querypb.SegmentDist{},
+	})
+
+	suite.Eventually(func() bool {
+		return suite.isCollectionTimeout(100)
+	}, timeout*2, timeout/10)
+}
+
 func TestCollectionObserver(t *testing.T) {
 	suite.Run(t, new(CollectionObserverSuite))
 }

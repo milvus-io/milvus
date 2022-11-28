@@ -101,7 +101,7 @@ func (ob *CollectionObserver) Observe() {
 func (ob *CollectionObserver) observeTimeout() {
 	collections := ob.meta.CollectionManager.GetAllCollections()
 	for _, collection := range collections {
-		if collection.GetStatus() != querypb.LoadStatus_Loading {
+		if collection.GetStatus() != querypb.LoadStatus_Loading && collection.LoadPercentage == 100 {
 			continue
 		}
 

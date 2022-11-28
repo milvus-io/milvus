@@ -225,5 +225,11 @@ func (m *ReplicaManager) RemoveNode(replicaID UniqueID, nodes ...UniqueID) error
 
 	replica = replica.Clone()
 	replica.RemoveNode(nodes...)
+	if len(replica.GetNodes()) == 0 {
+		log.Warn("All nodes in replica has been removed",
+			zap.Int64("collectionID", replica.GetCollectionID()),
+			zap.Int64("replicaID", replica.GetID()),
+		)
+	}
 	return m.put(replica)
 }
