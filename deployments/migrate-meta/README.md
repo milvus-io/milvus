@@ -6,22 +6,30 @@ Milvus 2.2 has changed the meta structure for segment index. To upgrade a Milvus
 
 
 > Note: 
-> 1. This script only applies to Milvus installed on a K8s cluster.
+> 1. This script only applies to Milvus installed on a K8s cluster which has storageclass.
+>    You can verify storageclass by running `kubectl get storageclass`. If you don't have a
+>    default storageclass, you need specify a storageclass via `-c <storage-class>` when running
+>    this script.
 > 2. This script only supports upgrading from Milvus v2.1.x to v2.2.0.
+> 3. If your milvus cluster use an external etcd service (which isn't installed with milvus), 
+>    you need specify etcd service explicitly via `-e <etcd-service-ip:etcd-service-port>` otherwise
+>    we use the default etcd service which installed with milvus.
 
 ## Parameters
 
-| Parameters   | Description                                                      | Default value                    | Required                |
-| ------------ | ---------------------------------------------------------------- | ---------------------------- | ----------------------- |
-| `i`          | The Milvus instance name.                                 | `None`                         | True                    |
-| `n`          | The namespace that Milvus is installed in.                | `default`                      | False                   |
-| `s`          | The source Milvus version.                                | `None`                         | True                    |
-| `t`          | The target Milvus version.                               | `None`                         | True                    |
-| `r`          | The root path of Milvus meta.                             | `by-dev`                       | False                   |
-| `w`          | The new Milvus image tag.                                 | `milvusdb/milvus:v2.2.0`       | False                   |
-| `m`          | The meta migration image tag.                             | `milvusdb/meta-migration:v2.2.0`       | False                   |
-| `o`          | The meta migration operation.                             | `migrate`                      | False                   |
-| `d`          | Whether to delete migration pod after the migration is completed.          | `false`                        | False                   |
+| Parameters   | Description                                               | Default value                    | Required                |
+| ------------ | ----------------------------------------------------------| -------------------------------- | ----------------------- |
+| `i`          | The Milvus instance name.                                 | `None`                           | True                    |
+| `n`          | The namespace that Milvus is installed in.                | `default`                        | False                   |
+| `s`          | The source Milvus version.                                | `None`                           | True                    |
+| `t`          | The target Milvus version.                                | `None`                           | True                    |
+| `r`          | The root path of Milvus meta.                             | `by-dev`                         | False                   |
+| `w`          | The new Milvus image tag.                                 | `milvusdb/milvus:v2.2.0`         | False                   |
+| `m`          | The meta migration image tag.                             | `milvusdb/meta-migration:v2.2.0` | False                   |
+| `o`          | The meta migration operation.                             | `migrate`                        | False                   |
+| `d`          | Whether to cleanup after migration is completed.          | `false`                          | False                   |
+| `c`          | The storage class for meta migration pvc.                 | `default storage class`          | False                   |
+| `e`          | The endpoints for etcd which used by milvus.              | `etcd svc installed with milvus` | False                   |
 > By default, the script only applies to migration from v2.1.x to v2.2.x. Rollback to the older version with the `rollback` operation first if an error occurs.
 
 
@@ -69,4 +77,16 @@ Milvus 2.2 has changed the meta structure for segment index. To upgrade a Milvus
 ```
 ./migrate.sh -i my-release -n milvus -s 2.1.1 -t 2.2.0 -r by-dev -o rollback -w <milvus-2-1-1-image>
 ./migrate.sh -i my-release -n milvus -s 2.1.1 -t 2.2.0 -r by-dev -o migrate -w <milvus-2-2-0-image>
+```
+
+7. Specify the storage class explicitly.
+
+```shell
+./migrate.sh -i my-release -n milvus -s 2.1.4 -t 2.2.0 -c <special-storage-class>
+```
+
+8. Specify external etcd service.
+
+```shell
+./migrate.sh -i my-release -n milvus -s 2.1.4 -t 2.2.0 -e <etcd-svc-ip:etcd-svc-port>
 ```
