@@ -84,6 +84,10 @@ class ExecExprVisitor : public ExprVisitor {
     auto
     ExecTermVisitorImpl(TermExpr& expr_raw) -> BitsetType;
 
+    template <typename T>
+    auto
+    ExecTermVisitorImplTemplate(TermExpr& expr_raw) -> BitsetType;
+
     template <typename CmpFunc>
     auto
     ExecCompareExprDispatcher(CompareExpr& expr, CmpFunc cmp_func) -> BitsetType;
