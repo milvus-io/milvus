@@ -27,6 +27,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/samber/lo"
+
 	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -2112,12 +2114,12 @@ func (c *Core) OperateUserRole(ctx context.Context, in *milvuspb.OperateUserRole
 	}
 
 	if _, err := c.meta.SelectRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: in.RoleName}, false); err != nil {
-		errMsg := "fail to check the role name"
+		errMsg := "not found the role: " + in.RoleName
 		log.Error(errMsg, zap.Any("in", in), zap.Error(err))
 		return failStatus(commonpb.ErrorCode_OperateUserRoleFailure, errMsg), nil
 	}
 	if _, err := c.meta.SelectUser(util.DefaultTenant, &milvuspb.UserEntity{Name: in.Username}, false); err != nil {
-		errMsg := "fail to check the username"
+		errMsg := "not found the user: " + in.Username
 		log.Error(errMsg, zap.Any("in", in), zap.Error(err))
 		return failStatus(commonpb.ErrorCode_OperateUserRoleFailure, errMsg), nil
 	}
@@ -2259,7 +2261,8 @@ func (c *Core) isValidRole(entity *milvuspb.RoleEntity) error {
 		return errors.New("the name in the role entity is empty")
 	}
 	if _, err := c.meta.SelectRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: entity.Name}, false); err != nil {
-		return err
+		log.Warn("fail to select the role", zap.Error(err))
+		return errors.New("not found the role: " + entity.Name)
 	}
 	return nil
 }
@@ -2269,7 +2272,7 @@ func (c *Core) isValidObject(entity *milvuspb.ObjectEntity) error {
 		return errors.New("the object entity is nil")
 	}
 	if _, ok := commonpb.ObjectType_value[entity.Name]; !ok {
-		return fmt.Errorf("the object type in the object entity[name: %s] is invalid", entity.Name)
+		return fmt.Errorf("not found the object type[name: %s], supported the object types: %v", entity.Name, lo.Keys(commonpb.ObjectType_value))
 	}
 	return nil
 }
@@ -2285,7 +2288,8 @@ func (c *Core) isValidGrantor(entity *milvuspb.GrantorEntity, object string) err
 		return errors.New("the name in the user entity of the grantor entity is empty")
 	}
 	if _, err := c.meta.SelectUser(util.DefaultTenant, &milvuspb.UserEntity{Name: entity.User.Name}, false); err != nil {
-		return err
+		log.Warn("fail to select the user", zap.Error(err))
+		return errors.New("not found the user: " + entity.User.Name)
 	}
 	if entity.Privilege == nil {
 		return errors.New("the privilege entity in the grantor entity is nil")
@@ -2294,18 +2298,18 @@ func (c *Core) isValidGrantor(entity *milvuspb.GrantorEntity, object string) err
 		return nil
 	}
 	if privilegeName := util.PrivilegeNameForMetastore(entity.Privilege.Name); privilegeName == "" {
-		return fmt.Errorf("the privilege name[%s] in the privilege entity is invalid", entity.Privilege.Name)
+		return fmt.Errorf("not found the privilege name[%s]", entity.Privilege.Name)
 	}
 	privileges, ok := util.ObjectPrivileges[object]
 	if !ok {
-		return fmt.Errorf("the object type[%s] is invalid", object)
+		return fmt.Errorf("not found the object type[name: %s], supported the object types: %v", object, lo.Keys(commonpb.ObjectType_value))
 	}
 	for _, privilege := range privileges {
 		if privilege == entity.Privilege.Name {
 			return nil
 		}
 	}
-	return fmt.Errorf("the privilege name[%s] is invalid", entity.Privilege.Name)
+	return fmt.Errorf("not found the privilege name[%s]", entity.Privilege.Name)
 }
 
 // OperatePrivilege operate the privilege, including grant and revoke
