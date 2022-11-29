@@ -51,7 +51,7 @@ type CgoIndex struct {
 }
 
 // TODO: use proto.Marshal instead of proto.MarshalTextString for better compatibility.
-func NewCgoIndex(dtype schemapb.DataType, typeParams, indexParams map[string]string, config *indexpb.StorageConfig) (*CgoIndex, error) {
+func NewCgoIndex(dtype schemapb.DataType, typeParams, indexParams map[string]string, config *indexpb.StorageConfig) (CodecIndex, error) {
 	protoTypeParams := &indexcgopb.TypeParams{
 		Params: make([]*commonpb.KeyValuePair, 0),
 	}

@@ -1474,7 +1474,7 @@ class TestCollectionSearch(TestcaseBase):
                                          "limit": limit,
                                          "_async": _async})
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index, params",
                              zip(ct.all_index_types[:7],
                                  ct.default_index_params[:7]))
