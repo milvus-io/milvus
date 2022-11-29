@@ -307,7 +307,7 @@ class TestCompactionParams(TestcaseBase):
         """
         pass
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_compact_max_time_interval(self):
         """
         target: test auto compact with max interval 60s
@@ -334,8 +334,17 @@ class TestCompactionParams(TestcaseBase):
         collection_w.load()
         replicas = collection_w.get_replicas()[0]
         replica_num = len(replicas.groups)
-        segment_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
-        assert len(segment_info) == 1*replica_num
+        cost = 60
+        start = time()
+        while time() - start < cost:
+            sleep(2.0)
+            collection_w.load()
+            segment_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
+            if len(segment_info) == 1*replica_num:
+                break
+            if time() - start > cost:
+                raise MilvusException(1, f"Waiting more than {cost}s for the compacted segment indexed")
+            collection_w.release()
 
     @pytest.mark.skip(reason="TODO")
     @pytest.mark.tags(CaseLabel.L2)
