@@ -1175,6 +1175,9 @@ type dataCoordConfig struct {
 	// --- ETCD ---
 	ChannelWatchSubPath string
 
+	// --- CHANNEL ---
+	MaxWatchDuration time.Duration
+
 	// --- SEGMENTS ---
 	SegmentMaxSize                 float64
 	DiskSegmentMaxSize             float64
@@ -1214,6 +1217,8 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	p.Base = base
 	p.initChannelWatchPrefix()
 
+	p.initMaxWatchDuration()
+
 	p.initSegmentMaxSize()
 	p.initDiskSegmentMaxSize()
 	p.initSegmentSealProportion()
@@ -1241,6 +1246,10 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	p.initGCMissingTolerance()
 	p.initGCDropTolerance()
 	p.initEnableActiveStandby()
+}
+
+func (p *dataCoordConfig) initMaxWatchDuration() {
+	p.MaxWatchDuration = time.Duration(p.Base.ParseInt64WithDefault("dataCoord.channel.maxWatchDuration", 60)) * time.Second
 }
 
 func (p *dataCoordConfig) initSegmentMaxSize() {
