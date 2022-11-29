@@ -243,7 +243,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 				zap.Int64("collectionID", delMsg.CollectionID),
 				zap.String("collectionName", delMsg.CollectionName),
 				zap.Int64("numPKs", delMsg.NumRows))
-			err := processDeleteMessages(iNode.metaReplica, segmentTypeGrowing, delMsg, delData)
+			err := processDeleteMessages(iNode.metaReplica, segmentTypeGrowing, delMsg, delData, iNode.vchannel)
 			if err != nil {
 				// error occurs when missing meta info or unexpected pk type, should not happen
 				err = fmt.Errorf("insertNode processDeleteMessages failed, collectionID = %d, err = %s, vchannel: %s", delMsg.CollectionID, err, iNode.vchannel)
@@ -303,7 +303,7 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 }
 
 // processDeleteMessages would execute delete operations for growing segments
-func processDeleteMessages(replica ReplicaInterface, segType segmentType, msg *msgstream.DeleteMsg, delData *deleteData) error {
+func processDeleteMessages(replica ReplicaInterface, segType segmentType, msg *msgstream.DeleteMsg, delData *deleteData, vchannelName string) error {
 	var partitionIDs []UniqueID
 	var err error
 	if msg.PartitionID != -1 {
@@ -318,17 +318,13 @@ func processDeleteMessages(replica ReplicaInterface, segType segmentType, msg *m
 			return err
 		}
 	}
-	resultSegmentIDs := make([]UniqueID, 0)
-	for _, partitionID := range partitionIDs {
-		segmentIDs, err := replica.getSegmentIDs(partitionID, segType)
-		if err != nil {
-			// Skip this partition
-			if errors.Is(err, ErrPartitionNotFound) {
-				continue
-			}
+	var resultSegmentIDs []UniqueID
+	resultSegmentIDs, err = replica.getSegmentIDsByVChannel(partitionIDs, vchannelName, segType)
+	log.Warn("processDeleteMessage", zap.String("vchannel", vchannelName), zap.Int64s("segmentIDs", resultSegmentIDs), zap.Int64s("paritions", partitionIDs))
+	if err != nil {
+		if !errors.Is(err, ErrPartitionNotFound) {
 			return err
 		}
-		resultSegmentIDs = append(resultSegmentIDs, segmentIDs...)
 	}
 
 	primaryKeys := storage.ParseIDs2PrimaryKeys(msg.PrimaryKeys)

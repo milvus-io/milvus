@@ -722,6 +722,7 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 		stream.Close()
 	}()
 
+	vchannelName := position.ChannelName
 	pChannelName := funcutil.ToPhysicalChannel(position.ChannelName)
 	position.ChannelName = pChannelName
 
@@ -796,7 +797,7 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 					if dmsg.CollectionID != collectionID {
 						continue
 					}
-					err = processDeleteMessages(loader.metaReplica, segmentTypeSealed, dmsg, delData)
+					err = processDeleteMessages(loader.metaReplica, segmentTypeSealed, dmsg, delData, vchannelName)
 					if err != nil {
 						// TODO: panic?
 						// error occurs when missing meta info or unexpected pk type, should not happen

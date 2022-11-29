@@ -73,8 +73,8 @@ const (
 	defaultMetricType   = L2
 	defaultNQ           = 10
 
-	defaultDMLChannel   = "query-node-unittest-DML-0"
-	defaultDeltaChannel = "query-node-unittest-delta-channel-0"
+	defaultDMLChannel   = "by-dev-rootcoord-dml-DML-0"
+	defaultDeltaChannel = "by-dev-rootcoord-delta-channel-0"
 	defaultSubName      = "query-node-unittest-sub-name-0"
 	defaultVersion      = 1
 
