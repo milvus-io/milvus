@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
 )
 
@@ -41,14 +42,15 @@ var newVarCharPrimaryKey = storage.NewVarCharPrimaryKey
 // deleteNode is the one of nodes in delta flow graph
 type deleteNode struct {
 	baseNode
-	collectionID UniqueID
-	metaReplica  ReplicaInterface // historical
-	vchannel     Channel
+	collectionID  UniqueID
+	metaReplica   ReplicaInterface // historical
+	deltaVchannel Channel
+	dmlVchannel   Channel
 }
 
 // Name returns the name of deleteNode
 func (dNode *deleteNode) Name() string {
-	return fmt.Sprintf("dNode-%s", dNode.vchannel)
+	return fmt.Sprintf("dNode-%s", dNode.deltaVchannel)
 }
 
 // Operate handles input messages, do delete operations
@@ -86,7 +88,7 @@ func (dNode *deleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	for i, delMsg := range dMsg.deleteMessages {
 		traceID, _, _ := trace.InfoFromSpan(spans[i])
 		log.Debug("delete in historical replica",
-			zap.String("vchannel", dNode.vchannel),
+			zap.String("vchannel", dNode.deltaVchannel),
 			zap.Int64("collectionID", delMsg.CollectionID),
 			zap.String("collectionName", delMsg.CollectionName),
 			zap.Int64("numPKs", delMsg.NumRows),
@@ -98,10 +100,10 @@ func (dNode *deleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		)
 
 		if dNode.metaReplica.getSegmentNum(segmentTypeSealed) != 0 {
-			err := processDeleteMessages(dNode.metaReplica, segmentTypeSealed, delMsg, delData)
+			err := processDeleteMessages(dNode.metaReplica, segmentTypeSealed, delMsg, delData, dNode.dmlVchannel)
 			if err != nil {
 				// error occurs when missing meta info or unexpected pk type, should not happen
-				err = fmt.Errorf("deleteNode processDeleteMessages failed, collectionID = %d, err = %s, channel = %s", delMsg.CollectionID, err, dNode.vchannel)
+				err = fmt.Errorf("deleteNode processDeleteMessages failed, collectionID = %d, err = %s, channel = %s", delMsg.CollectionID, err, dNode.deltaVchannel)
 				log.Error(err.Error())
 				panic(err)
 			}
@@ -116,7 +118,7 @@ func (dNode *deleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			log.Warn("failed to get segment",
 				zap.Int64("collectionID", dNode.collectionID),
 				zap.Int64("segmentID", segmentID),
-				zap.String("vchannel", dNode.vchannel),
+				zap.String("vchannel", dNode.deltaVchannel),
 			)
 			continue
 		}
@@ -183,12 +185,12 @@ func (dNode *deleteNode) delete(deleteData *deleteData, segmentID UniqueID, wg *
 	log.Debug("Do delete done", zap.Int("len", len(deleteData.deleteIDs[segmentID])),
 		zap.Int64("segmentID", segmentID),
 		zap.String("SegmentType", targetSegment.getType().String()),
-		zap.String("vchannel", dNode.vchannel))
+		zap.String("vchannel", dNode.deltaVchannel))
 	return nil
 }
 
 // newDeleteNode returns a new deleteNode
-func newDeleteNode(metaReplica ReplicaInterface, collectionID UniqueID, vchannel Channel) *deleteNode {
+func newDeleteNode(metaReplica ReplicaInterface, collectionID UniqueID, deltaVchannel Channel) (*deleteNode, error) {
 	maxQueueLength := Params.QueryNodeCfg.FlowGraphMaxQueueLength
 	maxParallelism := Params.QueryNodeCfg.FlowGraphMaxParallelism
 
@@ -196,10 +198,17 @@ func newDeleteNode(metaReplica ReplicaInterface, collectionID UniqueID, vchannel
 	baseNode.SetMaxQueueLength(maxQueueLength)
 	baseNode.SetMaxParallelism(maxParallelism)
 
-	return &deleteNode{
-		baseNode:     baseNode,
-		collectionID: collectionID,
-		metaReplica:  metaReplica,
-		vchannel:     vchannel,
+	dmlVChannel, err := funcutil.ConvertChannelName(deltaVchannel, Params.CommonCfg.RootCoordDelta, Params.CommonCfg.RootCoordDml)
+	if err != nil {
+		log.Error("failed to convert deltaVChannel to dmlVChannel", zap.String("deltaVChannel", deltaVchannel), zap.Error(err))
+		return nil, err
 	}
+
+	return &deleteNode{
+		baseNode:      baseNode,
+		collectionID:  collectionID,
+		metaReplica:   metaReplica,
+		deltaVchannel: deltaVchannel,
+		dmlVchannel:   dmlVChannel,
+	}, nil
 }

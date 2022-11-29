@@ -198,7 +198,7 @@ func TestFlowGraphInsertNode_delete(t *testing.T) {
 }
 
 func TestFlowGraphInsertNode_processDeleteMessages(t *testing.T) {
-	t.Run("test processDeleteMessages", func(t *testing.T) {
+	t.Run("test processDeleteMessages growing", func(t *testing.T) {
 		streaming, err := genSimpleReplica()
 		assert.NoError(t, err)
 
@@ -206,11 +206,11 @@ func TestFlowGraphInsertNode_processDeleteMessages(t *testing.T) {
 		dData, err := genFlowGraphDeleteData()
 		assert.NoError(t, err)
 
-		err = processDeleteMessages(streaming, segmentTypeGrowing, dMsg, dData)
+		err = processDeleteMessages(streaming, segmentTypeGrowing, dMsg, dData, defaultChannelName)
 		assert.NoError(t, err)
 	})
 
-	t.Run("test processDeleteMessages", func(t *testing.T) {
+	t.Run("test processDeleteMessages sealed", func(t *testing.T) {
 		streaming, err := genSimpleReplica()
 		assert.NoError(t, err)
 
@@ -218,7 +218,7 @@ func TestFlowGraphInsertNode_processDeleteMessages(t *testing.T) {
 		dData, err := genFlowGraphDeleteData()
 		assert.NoError(t, err)
 
-		err = processDeleteMessages(streaming, segmentTypeGrowing, dMsg, dData)
+		err = processDeleteMessages(streaming, segmentTypeSealed, dMsg, dData, defaultChannelName)
 		assert.NoError(t, err)
 	})
 }
