@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewLRU(t *testing.T) {
@@ -398,4 +399,42 @@ func TestLRU_Resize(t *testing.T) {
 	assert.Eventually(t, func() bool {
 		return atomic.LoadInt32(&evicted) == 1
 	}, 1*time.Second, 100*time.Millisecond)
+}
+
+func TestLRU_closed(t *testing.T) {
+	evicted := int32(0)
+	c, err := NewLRU(2, func(string, string) { atomic.AddInt32(&evicted, 1) })
+	require.NoError(t, err)
+
+	c.Close()
+
+	c.Add("testKey", "testValue")
+	assert.Equal(t, int32(1), evicted)
+
+	_, ok := c.Get("testKey")
+	assert.False(t, ok)
+
+	assert.NotPanics(t, func() {
+		c.Remove("testKey")
+	})
+
+	contains := c.Contains("testKey")
+	assert.False(t, contains)
+
+	keys := c.Keys()
+	assert.Nil(t, keys)
+
+	l := c.Len()
+	assert.Equal(t, 0, l)
+
+	diff := c.Resize(1)
+	assert.Equal(t, 0, diff)
+	assert.Equal(t, 2, c.Capacity())
+
+	_, _, ok = c.GetOldest()
+	assert.False(t, ok)
+
+	assert.NotPanics(t, func() {
+		c.Close()
+	}, "double close")
 }
