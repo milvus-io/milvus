@@ -909,7 +909,7 @@ class TestQueryParams(TestcaseBase):
         key_res = [item[key] for item in query_res for key in item]
         assert key_res == int_values[offset: pos+offset]
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_query_binary_pagination(self, offset):
         """
         target: test query binary pagination

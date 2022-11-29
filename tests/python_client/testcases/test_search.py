@@ -3851,7 +3851,7 @@ class TestsearchPagination(TestcaseBase):
             res = res.result()
         assert search_res[0].ids == res[0].ids[offset:]
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_search_binary_with_pagination(self, offset, auto_id):
         """
         target: test search binary with pagination
@@ -4203,7 +4203,8 @@ class TestsearchPaginationInvalid(TestcaseBase):
                             check_items={"err_code": 1,
                                          "err_msg": "offset [%d] is invalid, should be in range "
                                                     "[1, 16385], but got %d" % (offset, offset)})
-    
+
+
 class  TestsearchDiskann(TestcaseBase):
     """
     ******************************************************************
