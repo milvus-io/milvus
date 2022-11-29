@@ -743,9 +743,13 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 		if err != nil {
 			return nil, err
 		}
-		var properties map[string]string
-		if err = json.Unmarshal(propertiesValue, &properties); err != nil {
-			return nil, err
+		properties := make(map[string]string)
+		if len(propertiesValue) != 0 {
+			// before 2.2.0, there have no properties in ProducerMessage and ConsumerMessage in rocksmq
+			// when produce before 2.2.0, but consume in 2.2.0, propertiesValue will be []
+			if err = json.Unmarshal(propertiesValue, &properties); err != nil {
+				return nil, err
+			}
 		}
 		msg := ConsumerMessage{
 			MsgID: msgID,
