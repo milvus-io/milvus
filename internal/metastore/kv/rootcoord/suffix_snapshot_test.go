@@ -263,7 +263,14 @@ func Test_SuffixSnapshotLoad(t *testing.T) {
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 	sep := "_ts"
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	etcdCli, err := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
+		Params.EtcdCfg.Endpoints.GetAsStrings(),
+		Params.EtcdCfg.EtcdTLSCert.GetValue(),
+		Params.EtcdCfg.EtcdTLSKey.GetValue(),
+		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
+		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
 	require.Nil(t, err)
 	defer etcdCli.Close()
 	etcdkv := etcdkv.NewEtcdKV(etcdCli, rootPath)
@@ -315,7 +322,14 @@ func Test_SuffixSnapshotMultiSave(t *testing.T) {
 	Params.Init()
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 	sep := "_ts"
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	etcdCli, err := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
+		Params.EtcdCfg.Endpoints.GetAsStrings(),
+		Params.EtcdCfg.EtcdTLSCert.GetValue(),
+		Params.EtcdCfg.EtcdTLSKey.GetValue(),
+		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
+		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
 	require.Nil(t, err)
 	defer etcdCli.Close()
 	etcdkv := etcdkv.NewEtcdKV(etcdCli, rootPath)
@@ -391,7 +405,14 @@ func Test_SuffixSnapshotMultiSaveAndRemoveWithPrefix(t *testing.T) {
 	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
 	sep := "_ts"
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	etcdCli, err := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
+		Params.EtcdCfg.Endpoints.GetAsStrings(),
+		Params.EtcdCfg.EtcdTLSCert.GetValue(),
+		Params.EtcdCfg.EtcdTLSKey.GetValue(),
+		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
+		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
 	require.Nil(t, err)
 	defer etcdCli.Close()
 	etcdkv := etcdkv.NewEtcdKV(etcdCli, rootPath)

@@ -97,7 +97,14 @@ func (s *Server) init() error {
 	closer := trace.InitTracing("IndexCoord")
 	s.closer = closer
 
-	etcdCli, err := etcd.GetEtcdClient(&indexcoord.Params.EtcdCfg)
+	etcdCli, err := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
+		Params.EtcdCfg.Endpoints.GetAsStrings(),
+		Params.EtcdCfg.EtcdTLSCert.GetValue(),
+		Params.EtcdCfg.EtcdTLSKey.GetValue(),
+		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
+		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
 	if err != nil {
 		log.Debug("IndexCoord connect to etcd failed", zap.Error(err))
 		return err

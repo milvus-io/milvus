@@ -23,6 +23,7 @@ import (
 
 	config "github.com/milvus-io/milvus/internal/config"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
 )
@@ -142,28 +143,35 @@ func (gp *BaseTable) initConfigsFromLocal(formatter func(key string) string) {
 }
 
 func (gp *BaseTable) initConfigsFromRemote(formatter func(key string) string) {
-	endpoints, err := gp.mgr.GetConfig("etcd.endpoints")
-	if err != nil {
-		log.Info("cannot find etcd.endpoints")
+	etcdConfig := EtcdConfig{}
+	etcdConfig.Init(gp)
+	if etcdConfig.Endpoints.GetValue() == "" {
 		return
 	}
-	rootPath, err := gp.mgr.GetConfig("etcd.rootPath")
-	if err != nil {
-		log.Info("cannot find etcd.rootPath")
+	if etcdConfig.UseEmbedEtcd.GetAsBool() && !etcd.HasServer() {
 		return
+	}
+	info := &config.EtcdInfo{
+		UseEmbed:        etcdConfig.UseEmbedEtcd.GetAsBool(),
+		UseSSL:          etcdConfig.EtcdUseSSL.GetAsBool(),
+		Endpoints:       etcdConfig.Endpoints.GetAsStrings(),
+		CertFile:        etcdConfig.EtcdTLSCert.GetValue(),
+		KeyFile:         etcdConfig.EtcdTLSKey.GetValue(),
+		CaCertFile:      etcdConfig.EtcdTLSCACert.GetValue(),
+		MinVersion:      etcdConfig.EtcdTLSMinVersion.GetValue(),
+		KeyPrefix:       etcdConfig.RootPath.GetValue(),
+		RefreshInterval: 10 * time.Second,
 	}
 
 	configFilePath := gp.configDir + "/" + gp.YamlFile
-	gp.mgr, err = config.Init(config.WithEnvSource(formatter),
+	var err error
+	gp.mgr, err = config.Init(
+		config.WithEnvSource(formatter),
 		config.WithFilesSource(&config.FileInfo{
 			Filepath:        configFilePath,
 			RefreshInterval: 10 * time.Second,
 		}),
-		config.WithEtcdSource(&config.EtcdInfo{
-			Endpoints:       strings.Split(endpoints, ","),
-			KeyPrefix:       rootPath,
-			RefreshInterval: 10 * time.Second,
-		}))
+		config.WithEtcdSource(info))
 	if err != nil {
 		log.Info("init with etcd failed", zap.Error(err))
 		return

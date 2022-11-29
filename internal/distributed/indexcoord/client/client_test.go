@@ -44,7 +44,14 @@ func TestIndexCoordClient(t *testing.T) {
 	server, err := grpcindexcoord.NewServer(ctx, factory)
 	assert.NoError(t, err)
 	icm := indexcoord.NewIndexCoordMock()
-	etcdCli, err := etcd.GetEtcdClient(&ClientParams.EtcdCfg)
+	etcdCli, err := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
+		Params.EtcdCfg.Endpoints.GetAsStrings(),
+		Params.EtcdCfg.EtcdTLSCert.GetValue(),
+		Params.EtcdCfg.EtcdTLSKey.GetValue(),
+		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
+		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
 	assert.NoError(t, err)
 
 	var address string

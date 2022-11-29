@@ -21,8 +21,8 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-	"time"
 
+	"github.com/milvus-io/milvus/internal/util/etcd"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
@@ -37,11 +37,15 @@ type EtcdSource struct {
 	eh              EventHandler
 }
 
-func NewEtcdSource(remoteInfo *EtcdInfo) (*EtcdSource, error) {
-	etcdCli, err := clientv3.New(clientv3.Config{
-		Endpoints:   remoteInfo.Endpoints,
-		DialTimeout: 5 * time.Second,
-	})
+func NewEtcdSource(etcdInfo *EtcdInfo) (*EtcdSource, error) {
+	etcdCli, err := etcd.GetEtcdClient(
+		etcdInfo.UseEmbed,
+		etcdInfo.UseSSL,
+		etcdInfo.Endpoints,
+		etcdInfo.CertFile,
+		etcdInfo.KeyFile,
+		etcdInfo.CaCertFile,
+		etcdInfo.MinVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -49,9 +53,9 @@ func NewEtcdSource(remoteInfo *EtcdInfo) (*EtcdSource, error) {
 		etcdCli:       etcdCli,
 		ctx:           context.Background(),
 		currentConfig: make(map[string]string),
-		keyPrefix:     remoteInfo.KeyPrefix,
+		keyPrefix:     etcdInfo.KeyPrefix,
 	}
-	es.configRefresher = newRefresher(remoteInfo.RefreshInterval, es.refreshConfigurations)
+	es.configRefresher = newRefresher(etcdInfo.RefreshInterval, es.refreshConfigurations)
 	return es, nil
 }
 

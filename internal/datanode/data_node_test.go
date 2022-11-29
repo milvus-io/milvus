@@ -84,7 +84,14 @@ func TestDataNode(t *testing.T) {
 	defer cancel()
 
 	node := newIDLEDataNodeMock(ctx, schemapb.DataType_Int64)
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	etcdCli, err := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
+		Params.EtcdCfg.Endpoints.GetAsStrings(),
+		Params.EtcdCfg.EtcdTLSCert.GetValue(),
+		Params.EtcdCfg.EtcdTLSKey.GetValue(),
+		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
+		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 	node.SetEtcdClient(etcdCli)
@@ -655,7 +662,14 @@ func TestDataNode(t *testing.T) {
 		chanName := "fake-by-dev-rootcoord-dml-test-syncsegments-1"
 
 		node := newIDLEDataNodeMock(ctx, schemapb.DataType_Int64)
-		etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+		etcdCli, err := etcd.GetEtcdClient(
+			Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+			Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
+			Params.EtcdCfg.Endpoints.GetAsStrings(),
+			Params.EtcdCfg.EtcdTLSCert.GetValue(),
+			Params.EtcdCfg.EtcdTLSKey.GetValue(),
+			Params.EtcdCfg.EtcdTLSCACert.GetValue(),
+			Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
 		assert.Nil(t, err)
 		defer etcdCli.Close()
 		node.SetEtcdClient(etcdCli)
@@ -750,7 +764,14 @@ func TestDataNode_AddSegment(t *testing.T) {
 	defer cancel()
 
 	node := newIDLEDataNodeMock(ctx, schemapb.DataType_Int64)
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	etcdCli, err := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
+		Params.EtcdCfg.Endpoints.GetAsStrings(),
+		Params.EtcdCfg.EtcdTLSCert.GetValue(),
+		Params.EtcdCfg.EtcdTLSKey.GetValue(),
+		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
+		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 	node.SetEtcdClient(etcdCli)
@@ -819,7 +840,14 @@ func TestDataNode_AddSegment(t *testing.T) {
 func TestWatchChannel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	node := newIDLEDataNodeMock(ctx, schemapb.DataType_Int64)
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	etcdCli, err := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
+		Params.EtcdCfg.Endpoints.GetAsStrings(),
+		Params.EtcdCfg.EtcdTLSCert.GetValue(),
+		Params.EtcdCfg.EtcdTLSKey.GetValue(),
+		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
+		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 	node.SetEtcdClient(etcdCli)
@@ -1090,7 +1118,14 @@ func TestDataNode_GetComponentStates(t *testing.T) {
 }
 
 func TestDataNode_ResendSegmentStats(t *testing.T) {
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	etcdCli, err := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
+		Params.EtcdCfg.Endpoints.GetAsStrings(),
+		Params.EtcdCfg.EtcdTLSCert.GetValue(),
+		Params.EtcdCfg.EtcdTLSKey.GetValue(),
+		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
+		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 	dmChannelName := "fake-by-dev-rootcoord-dml-channel-test-ResendSegmentStats"
