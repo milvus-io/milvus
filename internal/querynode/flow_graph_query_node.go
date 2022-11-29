@@ -143,7 +143,10 @@ func newQueryNodeDeltaFlowGraph(ctx context.Context,
 		return nil, err
 	}
 	var filterDeleteNode node = newFilteredDeleteNode(metaReplica, collectionID, vchannel)
-	var deleteNode node = newDeleteNode(metaReplica, collectionID, vchannel)
+	deleteNode, err := newDeleteNode(metaReplica, collectionID, vchannel)
+	if err != nil {
+		return nil, err
+	}
 	var serviceTimeNode node = newServiceTimeNode(tSafeReplica, collectionID, vchannel)
 
 	q.flowGraph.AddNode(dmStreamNode)
