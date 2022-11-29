@@ -17,7 +17,9 @@
 package querynode
 
 import (
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -167,6 +169,42 @@ func TestMetaReplica_segment(t *testing.T) {
 			assert.Equal(t, UniqueID(i), targetSeg.segmentID)
 			replica.removeSegment(UniqueID(i), segmentTypeGrowing)
 		}
+	})
+
+	t.Run("test getNoSegmentChan", func(t *testing.T) {
+		replica, err := genSimpleReplica()
+		assert.NoError(t, err)
+		defer replica.freeAll()
+
+		select {
+		case <-replica.getNoSegmentChan():
+		default:
+			assert.FailNow(t, "fail to assert getNoSegmentChan")
+		}
+
+		const segmentNum = 3
+		c := replica.getNoSegmentChan()
+		w := sync.WaitGroup{}
+		w.Add(1)
+		go func() {
+			defer w.Done()
+			select {
+			case <-c:
+			case <-time.After(5 * time.Second):
+				assert.FailNow(t, "timeout getNoSegmentChan")
+			}
+		}()
+		for i := 0; i < segmentNum; i++ {
+			err := replica.addSegment(UniqueID(i), defaultPartitionID, defaultCollectionID, "", defaultSegmentVersion, defaultSegmentStartPosition, segmentTypeGrowing)
+			assert.NoError(t, err)
+			targetSeg, err := replica.getSegmentByID(UniqueID(i), segmentTypeGrowing)
+			assert.NoError(t, err)
+			assert.Equal(t, UniqueID(i), targetSeg.segmentID)
+		}
+		for i := 0; i < segmentNum; i++ {
+			replica.removeSegment(UniqueID(i), segmentTypeGrowing)
+		}
+		w.Wait()
 	})
 
 	t.Run("test hasSegment", func(t *testing.T) {

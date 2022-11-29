@@ -63,12 +63,11 @@ func (dc *Controller) SyncAll(ctx context.Context) {
 
 	wg := sync.WaitGroup{}
 	for _, h := range dc.handlers {
-		handler := h
 		wg.Add(1)
-		go func() {
+		go func(handler *distHandler) {
 			defer wg.Done()
-			handler.getDistribution(ctx)
-		}()
+			handler.getDistribution(ctx, nil)
+		}(h)
 	}
 	wg.Wait()
 }

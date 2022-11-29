@@ -440,7 +440,6 @@ func Test_AlterSegmentsAndAddNewSegment(t *testing.T) {
 			return []string{}, []string{}, nil
 		}
 
-		// TODO fubang
 		catalog := &Catalog{txn, "a"}
 		err := catalog.AlterSegmentsAndAddNewSegment(context.TODO(), []*datapb.SegmentInfo{droppedSegment}, segment1)
 		assert.NoError(t, err)

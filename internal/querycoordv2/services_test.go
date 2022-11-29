@@ -608,8 +608,6 @@ func (suite *ServiceSuite) TestLoadBalanceWithEmptySegmentList() {
 		replicas := suite.meta.ReplicaManager.GetByCollection(collection)
 		replicas[0].AddNode(srcNode)
 		replicas[0].AddNode(dstNode)
-		defer replicas[0].RemoveNode(srcNode)
-		defer replicas[0].RemoveNode(dstNode)
 		suite.updateCollectionStatus(collection, querypb.LoadStatus_Loaded)
 
 		for partition, segments := range suite.segments[collection] {
@@ -617,13 +615,21 @@ func (suite *ServiceSuite) TestLoadBalanceWithEmptySegmentList() {
 				metaSegments = append(metaSegments,
 					utils.CreateTestSegment(collection, partition, segment, srcNode, 1, "test-channel"))
 
-				if segmentOnCollection[collection] == nil {
-					segmentOnCollection[collection] = make([]int64, 0)
-				}
 				segmentOnCollection[collection] = append(segmentOnCollection[collection], segment)
 			}
 		}
 	}
+	suite.nodeMgr.Add(session.NewNodeInfo(1001, "localhost"))
+	suite.nodeMgr.Add(session.NewNodeInfo(1002, "localhost"))
+	defer func() {
+		for _, collection := range suite.collections {
+			replicas := suite.meta.ReplicaManager.GetByCollection(collection)
+			replicas[0].RemoveNode(srcNode)
+			replicas[0].RemoveNode(dstNode)
+		}
+		suite.nodeMgr.Remove(1001)
+		suite.nodeMgr.Remove(1002)
+	}()
 	suite.dist.SegmentDistManager.Update(srcNode, metaSegments...)
 
 	// expect each collection can only trigger its own segment's balance

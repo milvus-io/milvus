@@ -21,10 +21,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/shirou/gopsutil/v3/disk"
 	"go.uber.org/zap"
-
-	"github.com/milvus-io/milvus/internal/log"
 )
 
 const (
@@ -34,6 +33,7 @@ const (
 	// DefaultIndexSliceSize defines the default slice size of index file when serializing.
 	DefaultIndexSliceSize        = 16
 	DefaultGracefulTime          = 5000 //ms
+	DefaultGracefulStopTimeout   = 30   // s
 	DefaultThreadCoreCoefficient = 10
 
 	DefaultSessionTTL        = 60 //s
@@ -153,6 +153,7 @@ type commonConfig struct {
 	LoadNumThreadRatio       float64
 	BeamWidthRatio           float64
 	GracefulTime             int64
+	GracefulStopTimeout      int64 // unit: s
 	// Search limit, which applies on:
 	// maximum # of results to return (topK), and
 	// maximum # of search requests (nq).
@@ -210,6 +211,7 @@ func (p *commonConfig) init(base *BaseTable) {
 	p.initLoadNumThreadRatio()
 	p.initBeamWidthRatio()
 	p.initGracefulTime()
+	p.initGracefulStopTimeout()
 	p.initStorageType()
 	p.initThreadCoreCoefficient()
 
@@ -448,6 +450,10 @@ func (p *commonConfig) initSearchListSize() {
 
 func (p *commonConfig) initGracefulTime() {
 	p.GracefulTime = p.Base.ParseInt64WithDefault("common.gracefulTime", DefaultGracefulTime)
+}
+
+func (p *commonConfig) initGracefulStopTimeout() {
+	p.GracefulStopTimeout = p.Base.ParseInt64WithDefault("common.gracefulStopTimeout", DefaultGracefulStopTimeout)
 }
 
 func (p *commonConfig) initStorageType() {
@@ -967,6 +973,8 @@ type queryNodeConfig struct {
 	GCHelperEnabled   bool
 	MinimumGOGCConfig int
 	MaximumGOGCConfig int
+
+	GracefulStopTimeout int64
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -1001,6 +1009,7 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 	p.initMaximumGOGC()
 	p.initMinimumGOGC()
 
+	p.initGracefulStopTimeout()
 	p.initMaxTimestampLag()
 }
 
@@ -1184,6 +1193,16 @@ func (p *queryNodeConfig) initMinimumGOGC() {
 
 func (p *queryNodeConfig) initMaximumGOGC() {
 	p.MaximumGOGCConfig = p.Base.ParseIntWithDefault("queryNode.gchelper.maximumGoGC", 200)
+}
+
+func (p *queryNodeConfig) initGracefulStopTimeout() {
+	timeout := p.Base.LoadWithDefault2([]string{"queryNode.gracefulStopTimeout", "common.gracefulStopTimeout"},
+		strconv.FormatInt(DefaultGracefulStopTimeout, 10))
+	var err error
+	p.GracefulStopTimeout, err = strconv.ParseInt(timeout, 10, 64)
+	if err != nil {
+		panic(err)
+	}
 }
 
 func (p *queryNodeConfig) initMaxTimestampLag() {
