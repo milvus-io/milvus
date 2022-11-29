@@ -94,7 +94,7 @@ func (s *Server) init() error {
 
 	etcdCli, err := etcd.GetEtcdClient(&datacoord.Params.EtcdCfg)
 	if err != nil {
-		log.Debug("DataCoord connect to etcd failed", zap.Error(err))
+		log.Warn("DataCoord connect to etcd failed", zap.Error(err))
 		return err
 	}
 	s.etcdCli = etcdCli
@@ -102,26 +102,26 @@ func (s *Server) init() error {
 
 	if s.indexCoord == nil {
 		var err error
-		log.Debug("create IndexCoord client for DataCoord")
+		log.Info("create IndexCoord client for DataCoord")
 		s.indexCoord, err = icc.NewClient(s.ctx, Params.EtcdCfg.MetaRootPath, etcdCli)
 		if err != nil {
 			log.Warn("failed to create IndexCoord client for DataCoord", zap.Error(err))
 			return err
 		}
-		log.Debug("create IndexCoord client for DataCoord done")
+		log.Info("create IndexCoord client for DataCoord done")
 	}
 
-	log.Debug("init IndexCoord client for DataCoord")
+	log.Info("init IndexCoord client for DataCoord")
 	if err := s.indexCoord.Init(); err != nil {
 		log.Warn("failed to init IndexCoord client for DataCoord", zap.Error(err))
 		return err
 	}
-	log.Debug("init IndexCoord client for DataCoord done")
+	log.Info("init IndexCoord client for DataCoord done")
 	s.dataCoord.SetIndexCoord(s.indexCoord)
 
 	err = s.startGrpc()
 	if err != nil {
-		log.Debug("DataCoord startGrpc failed", zap.Error(err))
+		log.Warn("DataCoord startGrpc failed", zap.Error(err))
 		return err
 	}
 
@@ -144,7 +144,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 	defer logutil.LogPanic()
 	defer s.wg.Done()
 
-	log.Debug("network port", zap.Int("port", grpcPort))
+	log.Info("network port", zap.Int("port", grpcPort))
 	lis, err := net.Listen("tcp", ":"+strconv.Itoa(grpcPort))
 	if err != nil {
 		log.Error("grpc server failed to listen error", zap.Error(err))
@@ -192,7 +192,7 @@ func (s *Server) start() error {
 	}
 	err = s.dataCoord.Register()
 	if err != nil {
-		log.Debug("DataCoord register service failed", zap.Error(err))
+		log.Warn("DataCoord register service failed", zap.Error(err))
 		return err
 	}
 	return nil
@@ -201,7 +201,7 @@ func (s *Server) start() error {
 // Stop stops the DataCoord server gracefully.
 // Need to call the GracefulStop interface of grpc server and call the stop method of the inner DataCoord object.
 func (s *Server) Stop() error {
-	log.Debug("Datacoord stop", zap.String("Address", Params.GetAddress()))
+	log.Info("Datacoord stop", zap.String("Address", Params.GetAddress()))
 	var err error
 	if s.closer != nil {
 		if err = s.closer.Close(); err != nil {
@@ -214,7 +214,7 @@ func (s *Server) Stop() error {
 		defer s.etcdCli.Close()
 	}
 	if s.grpcServer != nil {
-		log.Debug("Graceful stop grpc server...")
+		log.Info("Graceful stop grpc server...")
 		s.grpcServer.GracefulStop()
 	}
 
@@ -233,12 +233,12 @@ func (s *Server) Run() error {
 	if err := s.init(); err != nil {
 		return err
 	}
-	log.Debug("DataCoord init done ...")
+	log.Info("DataCoord init done ...")
 
 	if err := s.start(); err != nil {
 		return err
 	}
-	log.Debug("DataCoord start done ...")
+	log.Info("DataCoord start done ...")
 	return nil
 }
 

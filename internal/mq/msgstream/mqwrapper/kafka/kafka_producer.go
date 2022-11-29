@@ -59,7 +59,7 @@ func (kp *kafkaProducer) Close() {
 
 		cost := time.Since(start).Milliseconds()
 		if cost > 500 {
-			log.Debug("kafka producer is closed", zap.Any("topic", kp.topic), zap.Int64("time cost(ms)", cost))
+			log.Info("kafka producer is closed", zap.Any("topic", kp.topic), zap.Int64("time cost(ms)", cost))
 		}
 	})
 }
