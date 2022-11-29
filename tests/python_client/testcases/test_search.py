@@ -3877,7 +3877,11 @@ class TestsearchPagination(TestcaseBase):
         search_binary_param = {"metric_type": "JACCARD", "params": {"nprobe": 10}}
         res = collection_w.search(binary_vectors[:default_nq], "binary_vector", search_binary_param,
                                   default_limit + offset)[0]
-        assert search_res[0].ids == res[0].ids[offset:]
+
+        assert res[0].distances == sorted(res[0].distances)
+        assert search_res[0].distances == sorted(search_res[0].distances)
+        assert search_res[0].distances == res[0].distances[offset:]
+        assert set(search_res[0].ids) == set(res[0].ids[offset:])
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("limit", [100, 3000, 10000])
