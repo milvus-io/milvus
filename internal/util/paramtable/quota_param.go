@@ -527,9 +527,9 @@ func (p *quotaConfig) initDiskQuota() {
 		p.DiskQuota = defaultDiskQuotaInMB
 	}
 	if p.DiskQuota < defaultDiskQuotaInMB {
-		log.Debug("init disk quota", zap.String("diskQuota(MB)", fmt.Sprintf("%v", p.DiskQuota)))
+		log.Info("init disk quota", zap.String("diskQuota(MB)", fmt.Sprintf("%v", p.DiskQuota)))
 	} else {
-		log.Debug("init disk quota", zap.String("diskQuota(MB)", "+inf"))
+		log.Info("init disk quota", zap.String("diskQuota(MB)", "+inf"))
 	}
 	// megabytes to bytes
 	p.DiskQuota = megaBytes2Bytes(p.DiskQuota)

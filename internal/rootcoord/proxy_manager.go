@@ -84,7 +84,7 @@ func (p *proxyManager) WatchProxy() error {
 	if err != nil {
 		return err
 	}
-	log.Debug("succeed to init sessions on etcd", zap.Any("sessions", sessions), zap.Int64("revision", rev))
+	log.Info("succeed to init sessions on etcd", zap.Any("sessions", sessions), zap.Int64("revision", rev))
 	// all init function should be clear meta firstly.
 	for _, f := range p.initSessionsFunc {
 		f(sessions)
@@ -103,7 +103,7 @@ func (p *proxyManager) WatchProxy() error {
 }
 
 func (p *proxyManager) startWatchEtcd(ctx context.Context, eventCh clientv3.WatchChan) {
-	log.Debug("start to watch etcd")
+	log.Info("start to watch etcd")
 	for {
 		select {
 		case <-ctx.Done():
@@ -149,7 +149,7 @@ func (p *proxyManager) handlePutEvent(e *clientv3.Event) error {
 	if err != nil {
 		return err
 	}
-	log.Debug("received proxy put event with session", zap.Any("session", session))
+	log.Info("received proxy put event with session", zap.Any("session", session))
 	for _, f := range p.addSessionsFunc {
 		f(session)
 	}
@@ -162,7 +162,7 @@ func (p *proxyManager) handleDeleteEvent(e *clientv3.Event) error {
 	if err != nil {
 		return err
 	}
-	log.Debug("received proxy delete event with session", zap.Any("session", session))
+	log.Info("received proxy delete event with session", zap.Any("session", session))
 	for _, f := range p.delSessionsFunc {
 		f(session)
 	}
@@ -194,7 +194,7 @@ func (p *proxyManager) getSessionsOnEtcd(ctx context.Context) ([]*sessionutil.Se
 	for _, v := range resp.Kvs {
 		session, err := p.parseSession(v.Value)
 		if err != nil {
-			log.Debug("failed to unmarshal session", zap.Error(err))
+			log.Warn("failed to unmarshal session", zap.Error(err))
 			return nil, 0, err
 		}
 		sessions = append(sessions, session)
@@ -226,7 +226,7 @@ func listProxyInEtcd(ctx context.Context, cli *clientv3.Client) (map[int64]*sess
 		var s sessionutil.Session
 		err := json.Unmarshal(v.Value, &s)
 		if err != nil {
-			log.Debug("unmarshal SvrSession failed", zap.Error(err))
+			log.Warn("unmarshal SvrSession failed", zap.Error(err))
 			continue
 		}
 		sess[s.ServerID] = &s

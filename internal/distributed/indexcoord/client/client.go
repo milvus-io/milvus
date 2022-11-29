@@ -52,7 +52,7 @@ func NewClient(ctx context.Context, metaRoot string, etcdCli *clientv3.Client) (
 	sess := sessionutil.NewSession(ctx, metaRoot, etcdCli)
 	if sess == nil {
 		err := fmt.Errorf("new session error, maybe can not connect to etcd")
-		log.Debug("IndexCoordClient NewClient failed", zap.Error(err))
+		log.Warn("IndexCoordClient NewClient failed", zap.Error(err))
 		return nil, err
 	}
 	ClientParams.InitOnce(typeutil.IndexCoordRole)
@@ -102,13 +102,13 @@ func (c *Client) getIndexCoordAddr() (string, error) {
 	key := c.grpcClient.GetRole()
 	msess, _, err := c.sess.GetSessions(key)
 	if err != nil {
-		log.Debug("IndexCoordClient GetSessions failed", zap.Any("key", key), zap.Error(err))
+		log.Warn("IndexCoordClient GetSessions failed", zap.Any("key", key), zap.Error(err))
 		return "", err
 	}
-	log.Debug("IndexCoordClient GetSessions success", zap.Any("key", key), zap.Any("msess", msess))
+	log.Info("IndexCoordClient GetSessions success", zap.Any("key", key), zap.Any("msess", msess))
 	ms, ok := msess[key]
 	if !ok {
-		log.Debug("IndexCoordClient msess key not existed", zap.Any("key", key), zap.Any("len of msess", len(msess)))
+		log.Warn("IndexCoordClient msess key not existed", zap.Any("key", key), zap.Any("len of msess", len(msess)))
 		return "", fmt.Errorf("find no available indexcoord, check indexcoord state")
 	}
 	return ms.Address, nil

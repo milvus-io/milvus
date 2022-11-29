@@ -93,7 +93,7 @@ func (rl *rateLimiter) printRates(rates []*internalpb.Rate) {
 	//	fmt.Printf("%s -> %v\n", r.GetRt().String(), r.GetR())
 	//}
 	//fmt.Printf("---------------------------------\n")
-	log.Debug("RateLimiter setRates", zap.Any("rates", rates))
+	log.Info("RateLimiter setRates", zap.Any("rates", rates))
 }
 
 // registerLimiters register limiter for all rate types.

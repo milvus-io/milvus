@@ -140,7 +140,7 @@ func (m *importManager) sendOutTasksLoop(wg *sync.WaitGroup) {
 	for {
 		select {
 		case <-m.ctx.Done():
-			log.Debug("import manager context done, exit check sendOutTasksLoop")
+			log.Info("import manager context done, exit check sendOutTasksLoop")
 			return
 		case <-ticker.C:
 			if err := m.sendOutTasks(m.ctx); err != nil {
@@ -158,10 +158,10 @@ func (m *importManager) flipTaskStateLoop(wg *sync.WaitGroup) {
 	for {
 		select {
 		case <-m.ctx.Done():
-			log.Debug("import manager context done, exit check flipTaskStateLoop")
+			log.Info("import manager context done, exit check flipTaskStateLoop")
 			return
 		case <-ticker.C:
-			log.Debug("start trying to flip task state")
+			log.Info("start trying to flip task state")
 			if err := m.flipTaskState(m.ctx); err != nil {
 				log.Error("failed to flip task state", zap.Error(err))
 			}
@@ -182,15 +182,15 @@ func (m *importManager) cleanupLoop(wg *sync.WaitGroup) {
 	for {
 		select {
 		case <-m.ctx.Done():
-			log.Debug("(in cleanupLoop) import manager context done, exit cleanupLoop")
+			log.Info("(in cleanupLoop) import manager context done, exit cleanupLoop")
 			return
 		case <-ticker.C:
-			log.Debug("(in cleanupLoop) trying to expire old tasks from memory and Etcd")
+			log.Info("(in cleanupLoop) trying to expire old tasks from memory and Etcd")
 			m.expireOldTasksFromMem()
 			m.expireOldTasksFromEtcd()
-			log.Debug("(in cleanupLoop) start removing bad import segments")
+			log.Info("(in cleanupLoop) start removing bad import segments")
 			m.removeBadImportSegments(m.ctx)
-			log.Debug("(in cleanupLoop) start cleaning hanging busy DataNode")
+			log.Info("(in cleanupLoop) start cleaning hanging busy DataNode")
 			m.releaseHangingBusyDataNode()
 		}
 	}
@@ -205,7 +205,7 @@ func (m *importManager) sendOutTasks(ctx context.Context) error {
 
 	// Trigger Import() action to DataCoord.
 	for len(m.pendingTasks) > 0 {
-		log.Debug("try to send out pending tasks", zap.Int("task_number", len(m.pendingTasks)))
+		log.Info("try to send out pending tasks", zap.Int("task_number", len(m.pendingTasks)))
 		task := m.pendingTasks[0]
 		// TODO: Use ImportTaskInfo directly.
 		it := &datapb.ImportTask{
@@ -242,7 +242,7 @@ func (m *importManager) sendOutTasks(ctx context.Context) error {
 
 		// Successfully assigned dataNode for the import task. Add task to working task list and update task store.
 		task.DatanodeId = resp.GetDatanodeId()
-		log.Debug("import task successfully assigned to dataNode",
+		log.Info("import task successfully assigned to dataNode",
 			zap.Int64("task ID", it.GetTaskId()),
 			zap.Int64("dataNode ID", task.GetDatanodeId()))
 		// Add new working dataNode to busyNodes.
@@ -250,7 +250,7 @@ func (m *importManager) sendOutTasks(ctx context.Context) error {
 		err = func() error {
 			m.workingLock.Lock()
 			defer m.workingLock.Unlock()
-			log.Debug("import task added as working task", zap.Int64("task ID", it.TaskId))
+			log.Info("import task added as working task", zap.Int64("task ID", it.TaskId))
 			task.State.StateCode = commonpb.ImportState_ImportStarted
 			task.StartTs = time.Now().Unix()
 			// first update the import task into meta store and then put it into working tasks
@@ -436,7 +436,7 @@ func (m *importManager) importJob(ctx context.Context, req *milvuspb.ImportReque
 		Tasks: make([]int64, 0),
 	}
 
-	log.Debug("receive import job",
+	log.Info("receive import job",
 		zap.String("collection name", req.GetCollectionName()),
 		zap.Int64("collection ID", cID),
 		zap.Int64("partition ID", pID))
@@ -559,7 +559,7 @@ func (m *importManager) updateTaskInfo(ir *rootcoordpb.ImportResult) (*datapb.Im
 	if ir == nil {
 		return nil, errors.New("import result is nil")
 	}
-	log.Debug("import manager update task import result", zap.Int64("taskID", ir.GetTaskId()))
+	log.Info("import manager update task import result", zap.Int64("taskID", ir.GetTaskId()))
 
 	found := false
 	var v *datapb.ImportTaskInfo
@@ -598,7 +598,7 @@ func (m *importManager) updateTaskInfo(ir *rootcoordpb.ImportResult) (*datapb.Im
 	}
 
 	if !found {
-		log.Debug("import manager update task import result failed", zap.Int64("task ID", ir.GetTaskId()))
+		log.Info("import manager update task import result failed", zap.Int64("task ID", ir.GetTaskId()))
 		return nil, errors.New("failed to update import task, ID not found: " + strconv.FormatInt(ir.TaskId, 10))
 	}
 	return toPersistImportTaskInfo, nil
@@ -726,7 +726,7 @@ func (m *importManager) getTaskState(tID int64) *milvuspb.GetImportStateResponse
 		},
 		Infos: make([]*commonpb.KeyValuePair, 0),
 	}
-	log.Debug("getting import task state", zap.Int64("task ID", tID))
+	log.Info("getting import task state", zap.Int64("task ID", tID))
 	// (1) Search in pending tasks list.
 	found := false
 	m.pendingLock.Lock()
@@ -768,7 +768,7 @@ func (m *importManager) getTaskState(tID int64) *milvuspb.GetImportStateResponse
 	if found {
 		return resp
 	}
-	log.Debug("get import task state failed", zap.Int64("taskID", tID))
+	log.Info("get import task state failed", zap.Int64("taskID", tID))
 	return resp
 }
 

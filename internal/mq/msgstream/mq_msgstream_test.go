@@ -1033,23 +1033,22 @@ func sendMsgPacks(ms MsgStream, msgPacks []*MsgPack) error {
 	return nil
 }
 
-//
 // This testcase will generate MsgPacks as following:
 //
-//       Insert     Insert     Insert     Insert     Insert     Insert
-//  c1 |----------|----------|----------|----------|----------|----------|
-//                ^          ^          ^          ^          ^          ^
-//              TT(10)     TT(20)     TT(30)     TT(40)     TT(50)     TT(100)
+//	     Insert     Insert     Insert     Insert     Insert     Insert
+//	c1 |----------|----------|----------|----------|----------|----------|
+//	              ^          ^          ^          ^          ^          ^
+//	            TT(10)     TT(20)     TT(30)     TT(40)     TT(50)     TT(100)
 //
-//       Insert     Insert     Insert     Insert     Insert     Insert
-//  c2 |----------|----------|----------|----------|----------|----------|
-//                ^          ^          ^          ^          ^          ^
-//              TT(10)     TT(20)     TT(30)     TT(40)     TT(50)     TT(100)
+//	     Insert     Insert     Insert     Insert     Insert     Insert
+//	c2 |----------|----------|----------|----------|----------|----------|
+//	              ^          ^          ^          ^          ^          ^
+//	            TT(10)     TT(20)     TT(30)     TT(40)     TT(50)     TT(100)
+//
 // Then check:
-//   1. For each msg in MsgPack received by ttMsgStream consumer, there should be
-//        msgPack.BeginTs < msg.BeginTs() <= msgPack.EndTs
-//   2. The count of consumed msg should be equal to the count of produced msg
-//
+//  1. For each msg in MsgPack received by ttMsgStream consumer, there should be
+//     msgPack.BeginTs < msg.BeginTs() <= msgPack.EndTs
+//  2. The count of consumed msg should be equal to the count of produced msg
 func TestStream_PulsarTtMsgStream_1(t *testing.T) {
 	pulsarAddr := getPulsarAddress()
 	c1 := funcutil.RandomString(8)
@@ -1097,22 +1096,25 @@ func TestStream_PulsarTtMsgStream_1(t *testing.T) {
 	outputStream.Close()
 }
 
-//
 // This testcase will generate MsgPacks as following:
 //
-//      Insert     Insert     Insert     Insert     Insert     Insert
+//	Insert     Insert     Insert     Insert     Insert     Insert
+//
 // c1 |----------|----------|----------|----------|----------|----------|
-//               ^          ^          ^          ^          ^          ^
-//             TT(10)     TT(20)     TT(30)     TT(40)     TT(50)     TT(100)
 //
-//      Insert     Insert     Insert     Insert     Insert     Insert
+//	         ^          ^          ^          ^          ^          ^
+//	       TT(10)     TT(20)     TT(30)     TT(40)     TT(50)     TT(100)
+//
+//	Insert     Insert     Insert     Insert     Insert     Insert
+//
 // c2 |----------|----------|----------|----------|----------|----------|
-//               ^          ^          ^          ^          ^          ^
-//             TT(10)     TT(20)     TT(30)     TT(40)     TT(50)     TT(100)
-// Then check:
-//   1. ttMsgStream consumer can seek to the right position and resume
-//   2. The count of consumed msg should be equal to the count of produced msg
 //
+//	  ^          ^          ^          ^          ^          ^
+//	TT(10)     TT(20)     TT(30)     TT(40)     TT(50)     TT(100)
+//
+// Then check:
+//  1. ttMsgStream consumer can seek to the right position and resume
+//  2. The count of consumed msg should be equal to the count of produced msg
 func TestStream_PulsarTtMsgStream_2(t *testing.T) {
 	pulsarAddr := getPulsarAddress()
 	c1 := funcutil.RandomString(8)

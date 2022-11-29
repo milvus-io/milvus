@@ -79,7 +79,7 @@ func (c *client) Subscribe(options ConsumerOptions) (Consumer, error) {
 		return nil, err
 	}
 	if exist {
-		log.Debug("ConsumerGroup already existed", zap.Any("topic", options.Topic), zap.Any("SubscriptionName", options.SubscriptionName))
+		log.Info("ConsumerGroup already existed", zap.Any("topic", options.Topic), zap.Any("SubscriptionName", options.SubscriptionName))
 		consumer, err := getExistedConsumer(c, options, con.MsgMutex)
 		if err != nil {
 			return nil, err
@@ -138,7 +138,7 @@ func (c *client) consume(consumer *consumer) {
 		case _, ok := <-consumer.MsgMutex():
 			if !ok {
 				// consumer MsgMutex closed, goroutine exit
-				log.Debug("Consumer MsgMutex closed")
+				log.Info("Consumer MsgMutex closed")
 				return
 			}
 			c.deliver(consumer, 100)

@@ -130,7 +130,7 @@ func GetPulsarConfig(protocol, ip, port, url string, args ...int64) (map[string]
 	var err error
 
 	getResp := func() error {
-		log.Debug("function util", zap.String("url", protocol+"://"+ip+":"+port+url))
+		log.Info("function util", zap.String("url", protocol+"://"+ip+":"+port+url))
 		resp, err = http.Get(protocol + "://" + ip + ":" + port + url)
 		return err
 	}
@@ -146,14 +146,14 @@ func GetPulsarConfig(protocol, ip, port, url string, args ...int64) (map[string]
 
 	err = retry.Do(context.TODO(), getResp, retry.Attempts(attempt), retry.Sleep(interval))
 	if err != nil {
-		log.Debug("failed to get config", zap.String("error", err.Error()))
+		log.Warn("failed to get config", zap.String("error", err.Error()))
 		return nil, err
 	}
 
 	defer resp.Body.Close()
 
 	body, err := ioutil.ReadAll(resp.Body)
-	log.Debug("get config", zap.String("config", string(body)))
+	log.Info("get config", zap.String("config", string(body)))
 	if err != nil {
 		return nil, err
 	}

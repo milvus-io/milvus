@@ -103,7 +103,7 @@ func (s *ShardClusterService) releaseShardCluster(vchannelName string) error {
 }
 
 func (s *ShardClusterService) close() error {
-	log.Debug("start to close shard cluster service")
+	log.Info("start to close shard cluster service")
 
 	isFinish := true
 	s.clusters.Range(func(key, value any) bool {

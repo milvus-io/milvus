@@ -184,7 +184,7 @@ func (s *Server) Run() error {
 
 // Stop stops Datanode's grpc service.
 func (s *Server) Stop() error {
-	log.Debug("Datanode stop", zap.String("Address", Params.GetAddress()))
+	log.Info("Datanode stop", zap.String("Address", Params.GetAddress()))
 	if s.closer != nil {
 		if err := s.closer.Close(); err != nil {
 			return err
@@ -195,7 +195,7 @@ func (s *Server) Stop() error {
 		defer s.etcdCli.Close()
 	}
 	if s.grpcServer != nil {
-		log.Debug("Graceful stop grpc server...")
+		log.Info("Graceful stop grpc server...")
 		// make graceful stop has a timeout
 		stopped := make(chan struct{})
 		go func() {
@@ -277,7 +277,7 @@ func (s *Server) init() error {
 
 	// --- DataCoord Client ---
 	if s.newDataCoordClient != nil {
-		log.Debug("starting DataCoord client for DataNode")
+		log.Info("starting DataCoord client for DataNode")
 		dataCoordClient, err := s.newDataCoordClient(dn.Params.EtcdCfg.MetaRootPath, s.etcdCli)
 		if err != nil {
 			log.Error("failed to create new DataCoord client", zap.Error(err))
@@ -318,7 +318,7 @@ func (s *Server) start() error {
 	}
 	err := s.datanode.Register()
 	if err != nil {
-		log.Debug("failed to register to Etcd", zap.Error(err))
+		log.Warn("failed to register to Etcd", zap.Error(err))
 		return err
 	}
 	return nil
