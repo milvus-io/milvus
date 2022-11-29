@@ -37,10 +37,7 @@ import (
 	"stathat.com/c/consistent"
 )
 
-const (
-	bgCheckInterval  = 3 * time.Second
-	maxWatchDuration = 20 * time.Second
-)
+const bgCheckInterval = 3 * time.Second
 
 // ChannelManager manages the allocation and the balance between channels and data nodes.
 type ChannelManager struct {
@@ -452,7 +449,7 @@ func (c *ChannelManager) fillChannelWatchInfo(op *ChannelOp) {
 			Vchan:     vcInfo,
 			StartTs:   time.Now().Unix(),
 			State:     datapb.ChannelWatchState_Uncomplete,
-			TimeoutTs: time.Now().Add(maxWatchDuration).UnixNano(),
+			TimeoutTs: time.Now().Add(Params.DataCoordCfg.MaxWatchDuration).UnixNano(),
 			Schema:    ch.Schema,
 		}
 		op.ChannelWatchInfos = append(op.ChannelWatchInfos, info)
@@ -463,7 +460,7 @@ func (c *ChannelManager) fillChannelWatchInfo(op *ChannelOp) {
 func (c *ChannelManager) fillChannelWatchInfoWithState(op *ChannelOp, state datapb.ChannelWatchState) []string {
 	var channelsWithTimer = []string{}
 	startTs := time.Now().Unix()
-	timeoutTs := time.Now().Add(maxWatchDuration).UnixNano()
+	timeoutTs := time.Now().Add(Params.DataCoordCfg.MaxWatchDuration).UnixNano()
 	for _, ch := range op.Channels {
 		vcInfo := c.h.GetDataVChanPositions(ch, allPartitionID)
 		info := &datapb.ChannelWatchInfo{
