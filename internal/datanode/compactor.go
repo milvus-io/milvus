@@ -423,7 +423,7 @@ func (t *compactionTask) merge(
 func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 	compactStart := time.Now()
 	if ok := funcutil.CheckCtxValid(t.ctx); !ok {
-		log.Error("compact wrong, task context done or timeout")
+		log.Warn("compact wrong, task context done or timeout")
 		return nil, errContext
 	}
 
@@ -435,17 +435,17 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 	switch {
 
 	case t.plan.GetType() == datapb.CompactionType_UndefinedCompaction:
-		log.Error("compact wrong, compaction type undefined")
+		log.Warn("compact wrong, compaction type undefined")
 		return nil, errCompactionTypeUndifined
 
 	case len(t.plan.GetSegmentBinlogs()) < 1:
-		log.Error("compact wrong, there's no segments in segment binlogs")
+		log.Warn("compact wrong, there's no segments in segment binlogs")
 		return nil, errIllegalCompactionPlan
 
 	case t.plan.GetType() == datapb.CompactionType_MergeCompaction || t.plan.GetType() == datapb.CompactionType_MixCompaction:
 		targetSegID, err = t.allocID()
 		if err != nil {
-			log.Error("compact wrong", zap.Error(err))
+			log.Warn("compact wrong", zap.Error(err))
 			return nil, err
 		}
 	}
@@ -458,7 +458,7 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 
 	_, partID, meta, err := t.getSegmentMeta(segIDs[0])
 	if err != nil {
-		log.Error("compact wrong", zap.Int64("planID", t.plan.GetPlanID()), zap.Error(err))
+		log.Warn("compact wrong", zap.Int64("planID", t.plan.GetPlanID()), zap.Error(err))
 		return nil, err
 	}
 
@@ -587,7 +587,7 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 		}
 		// Unable to deal with all empty segments cases, so return error
 		if binlogNum == 0 {
-			log.Error("compact wrong, all segments' binlogs are empty", zap.Int64("planID", t.plan.GetPlanID()))
+			log.Warn("compact wrong, all segments' binlogs are empty", zap.Int64("planID", t.plan.GetPlanID()))
 			return nil, errIllegalCompactionPlan
 		}
 
@@ -627,7 +627,7 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 	}()
 
 	if err != nil {
-		log.Error("compaction IO wrong", zap.Int64("planID", t.plan.GetPlanID()), zap.Error(err))
+		log.Warn("compaction IO wrong", zap.Int64("planID", t.plan.GetPlanID()), zap.Error(err))
 		return nil, err
 	}
 
@@ -638,14 +638,14 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 
 	inPaths, statsPaths, numRows, err := t.merge(ctxTimeout, allPs, targetSegID, partID, meta, deltaPk2Ts)
 	if err != nil {
-		log.Error("compact wrong", zap.Int64("planID", t.plan.GetPlanID()), zap.Error(err))
+		log.Warn("compact wrong", zap.Int64("planID", t.plan.GetPlanID()), zap.Error(err))
 		return nil, err
 	}
 
 	uploadDeltaStart := time.Now()
 	deltaInfo, err := t.uploadDeltaLog(ctxTimeout, targetSegID, partID, deltaBuf.delData, meta)
 	if err != nil {
-		log.Error("compact wrong", zap.Int64("planID", t.plan.GetPlanID()), zap.Error(err))
+		log.Warn("compact wrong", zap.Int64("planID", t.plan.GetPlanID()), zap.Error(err))
 		return nil, err
 	}
 	log.Info("upload delta log elapse in ms", zap.Int64("planID", t.plan.GetPlanID()), zap.Float64("elapse", nano2Milli(time.Since(uploadDeltaStart))))

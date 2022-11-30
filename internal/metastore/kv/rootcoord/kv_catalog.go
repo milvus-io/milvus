@@ -716,7 +716,7 @@ func (kc *Catalog) ListRole(ctx context.Context, tenant string, entity *milvuspb
 		roleKey := funcutil.HandleTenantForEtcdKey(RolePrefix, tenant, entity.Name)
 		_, err := kc.Txn.Load(roleKey)
 		if err != nil {
-			log.Error("fail to load a role", zap.String("key", roleKey), zap.Error(err))
+			log.Warn("fail to load a role", zap.String("key", roleKey), zap.Error(err))
 			return results, err
 		}
 		appendRoleResult(entity.Name)

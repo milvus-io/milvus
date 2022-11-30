@@ -125,7 +125,7 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context, req *querypb.LoadS
 
 	err := loader.checkSegmentSize(req.CollectionID, req.Infos, concurrencyLevel)
 	if err != nil {
-		log.Error("load failed, OOM if loaded",
+		log.Warn("load failed, OOM if loaded",
 			zap.Int64("loadSegmentRequest msgID", req.Base.MsgID),
 			zap.Error(err))
 		return nil, err
