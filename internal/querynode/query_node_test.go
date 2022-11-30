@@ -84,7 +84,14 @@ func newQueryNodeMock() *QueryNode {
 			cancel()
 		}()
 	}
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	etcdCli, err := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
+		Params.EtcdCfg.Endpoints.GetAsStrings(),
+		Params.EtcdCfg.EtcdTLSCert.GetValue(),
+		Params.EtcdCfg.EtcdTLSKey.GetValue(),
+		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
+		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
 	if err != nil {
 		panic(err)
 	}
@@ -177,7 +184,14 @@ func TestQueryNode_register(t *testing.T) {
 	require.NoError(t, err)
 	defer node.Stop()
 
-	etcdcli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	etcdcli, err := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
+		Params.EtcdCfg.Endpoints.GetAsStrings(),
+		Params.EtcdCfg.EtcdTLSCert.GetValue(),
+		Params.EtcdCfg.EtcdTLSKey.GetValue(),
+		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
+		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
 	assert.NoError(t, err)
 	defer etcdcli.Close()
 	node.SetEtcdClient(etcdcli)
@@ -197,7 +211,14 @@ func TestQueryNode_init(t *testing.T) {
 	require.NoError(t, err)
 	defer node.Stop()
 
-	etcdcli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	etcdcli, err := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
+		Params.EtcdCfg.Endpoints.GetAsStrings(),
+		Params.EtcdCfg.EtcdTLSCert.GetValue(),
+		Params.EtcdCfg.EtcdTLSKey.GetValue(),
+		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
+		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
 	assert.NoError(t, err)
 	defer etcdcli.Close()
 	node.SetEtcdClient(etcdcli)

@@ -109,7 +109,14 @@ func (suite *ServiceSuite) SetupSuite() {
 
 func (suite *ServiceSuite) SetupTest() {
 	config := params.GenerateEtcdConfig()
-	cli, err := etcd.GetEtcdClient(config)
+	cli, err := etcd.GetEtcdClient(
+		config.UseEmbedEtcd.GetAsBool(),
+		config.EtcdUseSSL.GetAsBool(),
+		config.Endpoints.GetAsStrings(),
+		config.EtcdTLSCert.GetValue(),
+		config.EtcdTLSKey.GetValue(),
+		config.EtcdTLSCACert.GetValue(),
+		config.EtcdTLSMinVersion.GetValue())
 	suite.Require().NoError(err)
 	suite.kv = etcdkv.NewEtcdKV(cli, config.MetaRootPath.GetValue())
 

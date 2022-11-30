@@ -51,7 +51,14 @@ func TestMockEtcd(t *testing.T) {
 	Params.InitOnce()
 	Params.BaseTable.Save("etcd.rootPath", "/test/datanode/root/indexcoord-mock")
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	etcdCli, err := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
+		Params.EtcdCfg.Endpoints.GetAsStrings(),
+		Params.EtcdCfg.EtcdTLSCert.GetValue(),
+		Params.EtcdCfg.EtcdTLSKey.GetValue(),
+		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
+		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
 	assert.NoError(t, err)
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath.GetValue())
 
@@ -98,7 +105,14 @@ func testIndexCoord(t *testing.T) {
 
 	// first start an IndexNode
 	inm0 := indexnode.NewIndexNodeMock()
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	etcdCli, err := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
+		Params.EtcdCfg.Endpoints.GetAsStrings(),
+		Params.EtcdCfg.EtcdTLSCert.GetValue(),
+		Params.EtcdCfg.EtcdTLSKey.GetValue(),
+		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
+		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
 	assert.NoError(t, err)
 
 	// start IndexCoord

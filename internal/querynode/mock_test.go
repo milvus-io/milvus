@@ -530,7 +530,14 @@ func genCollectionMeta(collectionID UniqueID, schema *schemapb.CollectionSchema)
 // ---------- unittest util functions ----------
 // functions of third-party
 func genEtcdKV() (*etcdkv.EtcdKV, error) {
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	etcdCli, err := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
+		Params.EtcdCfg.Endpoints.GetAsStrings(),
+		Params.EtcdCfg.EtcdTLSCert.GetValue(),
+		Params.EtcdCfg.EtcdTLSKey.GetValue(),
+		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
+		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
 	if err != nil {
 		return nil, err
 	}
@@ -1698,7 +1705,14 @@ func saveChangeInfo(key string, value string) error {
 
 func genSimpleQueryNodeWithMQFactory(ctx context.Context, fac dependency.Factory) (*QueryNode, error) {
 	node := NewQueryNode(ctx, fac)
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	etcdCli, err := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
+		Params.EtcdCfg.Endpoints.GetAsStrings(),
+		Params.EtcdCfg.EtcdTLSCert.GetValue(),
+		Params.EtcdCfg.EtcdTLSKey.GetValue(),
+		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
+		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
 	if err != nil {
 		return nil, err
 	}

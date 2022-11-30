@@ -118,7 +118,14 @@ func (suite *TaskSuite) SetupSuite() {
 
 func (suite *TaskSuite) SetupTest() {
 	config := GenerateEtcdConfig()
-	cli, err := etcd.GetEtcdClient(config)
+	cli, err := etcd.GetEtcdClient(
+		config.UseEmbedEtcd.GetAsBool(),
+		config.EtcdUseSSL.GetAsBool(),
+		config.Endpoints.GetAsStrings(),
+		config.EtcdTLSCert.GetValue(),
+		config.EtcdTLSKey.GetValue(),
+		config.EtcdTLSCACert.GetValue(),
+		config.EtcdTLSMinVersion.GetValue())
 	suite.Require().NoError(err)
 
 	suite.kv = etcdkv.NewEtcdKV(cli, config.MetaRootPath.GetValue())

@@ -48,7 +48,14 @@ func Test_garbageCollector_basic(t *testing.T) {
 	meta, err := newMemoryMeta()
 	assert.Nil(t, err)
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	etcdCli, err := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
+		Params.EtcdCfg.Endpoints.GetAsStrings(),
+		Params.EtcdCfg.EtcdTLSCert.GetValue(),
+		Params.EtcdCfg.EtcdTLSKey.GetValue(),
+		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
+		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
 	assert.Nil(t, err)
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath.GetValue())
 	segRefer, err := NewSegmentReferenceManager(etcdKV, nil)
@@ -110,7 +117,14 @@ func Test_garbageCollector_scan(t *testing.T) {
 	meta, err := newMemoryMeta()
 	assert.Nil(t, err)
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	etcdCli, err := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
+		Params.EtcdCfg.Endpoints.GetAsStrings(),
+		Params.EtcdCfg.EtcdTLSCert.GetValue(),
+		Params.EtcdCfg.EtcdTLSKey.GetValue(),
+		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
+		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
 	assert.Nil(t, err)
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath.GetValue())
 	segRefer, err := NewSegmentReferenceManager(etcdKV, nil)

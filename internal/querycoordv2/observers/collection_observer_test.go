@@ -145,7 +145,14 @@ func (suite *CollectionObserverSuite) SetupTest() {
 	suite.idAllocator = RandomIncrementIDAllocator()
 	log.Debug("create embedded etcd KV...")
 	config := GenerateEtcdConfig()
-	client, err := etcd.GetEtcdClient(config)
+	client, err := etcd.GetEtcdClient(
+		config.UseEmbedEtcd.GetAsBool(),
+		config.EtcdUseSSL.GetAsBool(),
+		config.Endpoints.GetAsStrings(),
+		config.EtcdTLSCert.GetValue(),
+		config.EtcdTLSKey.GetValue(),
+		config.EtcdTLSCACert.GetValue(),
+		config.EtcdTLSMinVersion.GetValue())
 	suite.Require().NoError(err)
 	suite.kv = etcdkv.NewEtcdKV(client, Params.EtcdCfg.MetaRootPath.GetValue()+"-"+RandomMetaRootPath())
 	suite.Require().NoError(err)
