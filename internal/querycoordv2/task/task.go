@@ -74,6 +74,7 @@ type Task interface {
 	Wait() error
 	Actions() []Action
 	Step() int
+	StepUp() int
 	IsFinished(dist *meta.DistributionManager) bool
 	String() string
 }
@@ -188,18 +189,16 @@ func (task *baseTask) Step() int {
 	return task.step
 }
 
+func (task *baseTask) StepUp() int {
+	task.step++
+	return task.step
+}
+
 func (task *baseTask) IsFinished(distMgr *meta.DistributionManager) bool {
 	if task.Status() != TaskStatusStarted {
 		return false
 	}
-
-	actions, step := task.Actions(), task.Step()
-	for step < len(actions) && actions[step].IsFinished(distMgr) {
-		task.step++
-		step++
-	}
-
-	return task.Step() >= len(actions)
+	return task.Step() >= len(task.Actions())
 }
 
 func (task *baseTask) String() string {
