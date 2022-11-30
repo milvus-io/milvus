@@ -987,7 +987,7 @@ func (sc *ShardCluster) Search(ctx context.Context, req *querypb.SearchRequest, 
 
 	wg.Wait()
 	if err != nil {
-		log.Error("failed to do search",
+		log.Warn("failed to do search",
 			zap.Int64("sourceID", req.GetReq().GetBase().GetSourceID()),
 			zap.Strings("channels", req.GetDmlChannels()),
 			zap.Int64s("segmentIDs", req.GetSegmentIDs()),

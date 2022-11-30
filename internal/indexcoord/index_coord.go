@@ -991,7 +991,7 @@ func (i *IndexCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReq
 		if err == nil && ret != nil {
 			return ret, nil
 		}
-		log.Error("failed to get system info metrics from cache, recompute instead",
+		log.Warn("failed to get system info metrics from cache, recompute instead",
 			zap.Error(err))
 
 		metrics, err := getSystemInfoMetrics(ctx, req, i)
