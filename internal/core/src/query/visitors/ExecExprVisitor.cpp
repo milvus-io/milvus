@@ -62,6 +62,10 @@ class ExecExprVisitor : ExprVisitor {
     auto
     ExecTermVisitorImpl(TermExpr& expr_raw) -> BitsetType;
 
+    template <typename T>
+    auto
+    ExecTermVisitorImplTemplate(TermExpr& expr_raw) -> BitsetType;
+
     template <typename CmpFunc>
     auto
     ExecCompareExprDispatcher(CompareExpr& expr, CmpFunc cmp_func) -> BitsetType;
@@ -795,34 +799,18 @@ ExecExprVisitor::ExecTermVisitorImpl(TermExpr& expr_raw) -> BitsetType {
         return bitset;
     }
 
-    // not use pk index
-    std::deque<BitsetType> bitsets;
-    auto size_per_chunk = segment_.size_per_chunk();
-    auto num_chunk = upper_div(row_count_, size_per_chunk);
-    std::unordered_set<T> term_set(expr.terms_.begin(), expr.terms_.end());
-    for (int64_t chunk_id = 0; chunk_id < num_chunk; ++chunk_id) {
-        Span<T> chunk = segment_.chunk_data<T>(field_id, chunk_id);
-        auto chunk_data = chunk.data();
-        auto size = (chunk_id == num_chunk - 1) ? row_count_ - chunk_id * size_per_chunk : size_per_chunk;
-        BitsetType bitset(size);
-        for (int i = 0; i < size; ++i) {
-            bitset[i] = (term_set.find(chunk_data[i]) != term_set.end());
-        }
-        bitsets.emplace_back(std::move(bitset));
-    }
-    auto final_result = Assemble(bitsets);
-    AssertInfo(final_result.size() == row_count_, "[ExecExprVisitor]Size of results not equal row count");
-    return final_result;
+    return ExecTermVisitorImplTemplate<T>(expr_raw);
 }
 
-// TODO: refactor this to use `scalar::ScalarIndex::In`.
-//      made a test to compare the performance.
-//      vector<bool> don't match the template.
-//      boost::container::vector<bool> match.
 template <>
 auto
 ExecExprVisitor::ExecTermVisitorImpl<std::string>(TermExpr& expr_raw) -> BitsetType {
-    using T = std::string;
+    return ExecTermVisitorImplTemplate<std::string>(expr_raw);
+}
+
+template <typename T>
+auto
+ExecExprVisitor::ExecTermVisitorImplTemplate(TermExpr& expr_raw) -> BitsetType {
     auto& expr = static_cast<TermExprImpl<T>&>(expr_raw);
     using Index = index::ScalarIndex<T>;
     const auto& terms = expr.terms_;
@@ -830,6 +818,37 @@ ExecExprVisitor::ExecTermVisitorImpl<std::string>(TermExpr& expr_raw) -> BitsetT
     std::unordered_set<T> term_set(expr.terms_.begin(), expr.terms_.end());
 
     auto index_func = [&terms, n](Index* index) { return index->In(n, terms.data()); };
+    auto elem_func = [&terms, &term_set](T x) {
+        //// terms has already been sorted.
+        // return std::binary_search(terms.begin(), terms.end(), x);
+        return term_set.find(x) != term_set.end();
+    };
+
+    return ExecRangeVisitorImpl<T>(expr.field_id_, index_func, elem_func);
+}
+
+// TODO: bool is so ugly here.
+template <>
+auto
+ExecExprVisitor::ExecTermVisitorImplTemplate<bool>(TermExpr& expr_raw) -> BitsetType {
+    using T = bool;
+    auto& expr = static_cast<TermExprImpl<T>&>(expr_raw);
+    using Index = index::ScalarIndex<T>;
+    const auto& terms = expr.terms_;
+    auto n = terms.size();
+    std::unordered_set<T> term_set(expr.terms_.begin(), expr.terms_.end());
+
+    auto index_func = [&terms, n](Index* index) {
+        auto bool_arr_copy = new bool[terms.size()];
+        int it = 0;
+        for (auto elem : terms) {
+            bool_arr_copy[it++] = elem;
+        }
+        auto bitset = index->In(n, bool_arr_copy);
+        delete[] bool_arr_copy;
+        return bitset;
+    };
+
     auto elem_func = [&terms, &term_set](T x) {
         //// terms has already been sorted.
         // return std::binary_search(terms.begin(), terms.end(), x);
