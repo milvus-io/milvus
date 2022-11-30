@@ -1495,7 +1495,7 @@ func (node *Proxy) GetLoadingProgress(ctx context.Context, request *milvuspb.Get
 		zap.Any("request", request))
 
 	getErrResponse := func(err error) *milvuspb.GetLoadingProgressResponse {
-		log.Error("fail to get loading progress",
+		log.Warn("fail to get loading progress",
 			zap.Error(err),
 			zap.String("collection_name", request.CollectionName),
 			zap.Strings("partition_name", request.PartitionNames))
@@ -3212,7 +3212,7 @@ func (node *Proxy) LoadBalance(ctx context.Context, req *milvuspb.LoadBalanceReq
 
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, req.GetCollectionName())
 	if err != nil {
-		log.Error("failed to get collection id",
+		log.Warn("failed to get collection id",
 			zap.String("collection name", req.GetCollectionName()),
 			zap.Error(err))
 		status.Reason = err.Error()
@@ -3231,14 +3231,14 @@ func (node *Proxy) LoadBalance(ctx context.Context, req *milvuspb.LoadBalanceReq
 		CollectionID:     collectionID,
 	})
 	if err != nil {
-		log.Error("Failed to LoadBalance from Query Coordinator",
+		log.Warn("Failed to LoadBalance from Query Coordinator",
 			zap.Any("req", req),
 			zap.Error(err))
 		status.Reason = err.Error()
 		return status, nil
 	}
 	if infoResp.ErrorCode != commonpb.ErrorCode_Success {
-		log.Error("Failed to LoadBalance from Query Coordinator",
+		log.Warn("Failed to LoadBalance from Query Coordinator",
 			zap.String("errMsg", infoResp.Reason))
 		status.Reason = infoResp.Reason
 		return status, nil
