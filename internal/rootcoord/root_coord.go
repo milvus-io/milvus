@@ -876,7 +876,7 @@ func (c *Core) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequ
 	}
 
 	if err := c.scheduler.AddTask(t); err != nil {
-		log.Error("failed to enqueue request to has collection", zap.Error(err))
+		log.Warn("failed to enqueue request to has collection", zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues("HasCollection", metrics.FailLabel).Inc()
 		return &milvuspb.BoolResponse{
 			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "HasCollection failed: "+err.Error()),
@@ -885,7 +885,7 @@ func (c *Core) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequ
 	}
 
 	if err := t.WaitToFinish(); err != nil {
-		log.Error("failed to has collection", zap.Error(err))
+		log.Warn("failed to has collection", zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues("HasCollection", metrics.FailLabel).Inc()
 		return &milvuspb.BoolResponse{
 			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "HasCollection failed: "+err.Error()),
@@ -962,7 +962,7 @@ func (c *Core) DescribeCollection(ctx context.Context, in *milvuspb.DescribeColl
 	}
 
 	if err := c.scheduler.AddTask(t); err != nil {
-		log.Error("failed to enqueue request to describe collection", zap.Error(err))
+		log.Warn("failed to enqueue request to describe collection", zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues("DescribeCollection", metrics.FailLabel).Inc()
 		return &milvuspb.DescribeCollectionResponse{
 			// TODO: use commonpb.ErrorCode_CollectionNotExists. SDK use commonpb.ErrorCode_UnexpectedError now.
@@ -971,7 +971,7 @@ func (c *Core) DescribeCollection(ctx context.Context, in *milvuspb.DescribeColl
 	}
 
 	if err := t.WaitToFinish(); err != nil {
-		log.Error("failed to describe collection", zap.Error(err))
+		log.Warn("failed to describe collection", zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues("DescribeCollection", metrics.FailLabel).Inc()
 		return &milvuspb.DescribeCollectionResponse{
 			// TODO: use commonpb.ErrorCode_CollectionNotExists. SDK use commonpb.ErrorCode_UnexpectedError now.
@@ -1010,7 +1010,7 @@ func (c *Core) ShowCollections(ctx context.Context, in *milvuspb.ShowCollections
 	}
 
 	if err := c.scheduler.AddTask(t); err != nil {
-		log.Error("failed to enqueue request to show collections", zap.Error(err))
+		log.Warn("failed to enqueue request to show collections", zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues("ShowCollections", metrics.FailLabel).Inc()
 		return &milvuspb.ShowCollectionsResponse{
 			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "ShowCollections failed: "+err.Error()),
@@ -1018,7 +1018,7 @@ func (c *Core) ShowCollections(ctx context.Context, in *milvuspb.ShowCollections
 	}
 
 	if err := t.WaitToFinish(); err != nil {
-		log.Error("failed to show collections", zap.Error(err))
+		log.Warn("failed to show collections", zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues("ShowCollections", metrics.FailLabel).Inc()
 		return &milvuspb.ShowCollectionsResponse{
 			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "ShowCollections failed: "+err.Error()),
@@ -1054,7 +1054,8 @@ func (c *Core) AlterCollection(ctx context.Context, in *milvuspb.AlterCollection
 	}
 
 	if err := c.scheduler.AddTask(t); err != nil {
-		log.Error("failed to enqueue request to alter collection", zap.String("role", typeutil.RootCoordRole),
+		log.Warn("failed to enqueue request to alter collection",
+			zap.String("role", typeutil.RootCoordRole),
 			zap.Error(err),
 			zap.String("name", in.GetCollectionName()), zap.Int64("msgID", in.GetBase().GetMsgID()))
 
@@ -1063,7 +1064,8 @@ func (c *Core) AlterCollection(ctx context.Context, in *milvuspb.AlterCollection
 	}
 
 	if err := t.WaitToFinish(); err != nil {
-		log.Error("failed to alter collection", zap.String("role", typeutil.RootCoordRole),
+		log.Warn("failed to alter collection",
+			zap.String("role", typeutil.RootCoordRole),
 			zap.Error(err),
 			zap.String("name", in.GetCollectionName()),
 			zap.Int64("msgID", in.GetBase().GetMsgID()), zap.Uint64("ts", t.GetTs()))
@@ -1208,7 +1210,7 @@ func (c *Core) HasPartition(ctx context.Context, in *milvuspb.HasPartitionReques
 	}
 
 	if err := c.scheduler.AddTask(t); err != nil {
-		log.Error("failed to enqueue request to has partition", zap.Error(err))
+		log.Warn("failed to enqueue request to has partition", zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues("HasPartition", metrics.FailLabel).Inc()
 		return &milvuspb.BoolResponse{
 			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "HasPartition failed: "+err.Error()),
@@ -1217,7 +1219,7 @@ func (c *Core) HasPartition(ctx context.Context, in *milvuspb.HasPartitionReques
 	}
 
 	if err := t.WaitToFinish(); err != nil {
-		log.Error("failed to has partition", zap.Error(err))
+		log.Warn("failed to has partition", zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues("HasPartition", metrics.FailLabel).Inc()
 		return &milvuspb.BoolResponse{
 			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "HasPartition failed: "+err.Error()),
@@ -1255,7 +1257,7 @@ func (c *Core) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionsRe
 	}
 
 	if err := c.scheduler.AddTask(t); err != nil {
-		log.Error("failed to enqueue request to show partitions", zap.Error(err))
+		log.Warn("failed to enqueue request to show partitions", zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues("ShowPartitions", metrics.FailLabel).Inc()
 		return &milvuspb.ShowPartitionsResponse{
 			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "ShowPartitions failed: "+err.Error()),
@@ -1263,7 +1265,7 @@ func (c *Core) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionsRe
 	}
 
 	if err := t.WaitToFinish(); err != nil {
-		log.Error("failed to show partitions", zap.Error(err))
+		log.Warn("failed to show partitions", zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues("ShowPartitions", metrics.FailLabel).Inc()
 		return &milvuspb.ShowPartitionsResponse{
 			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "ShowPartitions failed: "+err.Error()),
@@ -1462,7 +1464,8 @@ func (c *Core) CreateAlias(ctx context.Context, in *milvuspb.CreateAliasRequest)
 	}
 
 	if err := c.scheduler.AddTask(t); err != nil {
-		log.Error("failed to enqueue request to create alias", zap.String("role", typeutil.RootCoordRole),
+		log.Warn("failed to enqueue request to create alias",
+			zap.String("role", typeutil.RootCoordRole),
 			zap.Error(err),
 			zap.String("alias", in.GetAlias()), zap.String("collection", in.GetCollectionName()),
 			zap.Int64("msgID", in.GetBase().GetMsgID()))
@@ -1472,7 +1475,8 @@ func (c *Core) CreateAlias(ctx context.Context, in *milvuspb.CreateAliasRequest)
 	}
 
 	if err := t.WaitToFinish(); err != nil {
-		log.Error("failed to create alias", zap.String("role", typeutil.RootCoordRole),
+		log.Warn("failed to create alias",
+			zap.String("role", typeutil.RootCoordRole),
 			zap.Error(err),
 			zap.String("alias", in.GetAlias()), zap.String("collection", in.GetCollectionName()),
 			zap.Int64("msgID", in.GetBase().GetMsgID()), zap.Uint64("ts", t.GetTs()))
@@ -1512,7 +1516,8 @@ func (c *Core) DropAlias(ctx context.Context, in *milvuspb.DropAliasRequest) (*c
 	}
 
 	if err := c.scheduler.AddTask(t); err != nil {
-		log.Error("failed to enqueue request to drop alias", zap.String("role", typeutil.RootCoordRole),
+		log.Warn("failed to enqueue request to drop alias",
+			zap.String("role", typeutil.RootCoordRole),
 			zap.Error(err),
 			zap.String("alias", in.GetAlias()), zap.Int64("msgID", in.GetBase().GetMsgID()))
 
@@ -1521,7 +1526,8 @@ func (c *Core) DropAlias(ctx context.Context, in *milvuspb.DropAliasRequest) (*c
 	}
 
 	if err := t.WaitToFinish(); err != nil {
-		log.Error("failed to drop alias", zap.String("role", typeutil.RootCoordRole),
+		log.Warn("failed to drop alias",
+			zap.String("role", typeutil.RootCoordRole),
 			zap.Error(err),
 			zap.String("alias", in.GetAlias()),
 			zap.Int64("msgID", in.GetBase().GetMsgID()), zap.Uint64("ts", t.GetTs()))
@@ -1562,7 +1568,8 @@ func (c *Core) AlterAlias(ctx context.Context, in *milvuspb.AlterAliasRequest) (
 	}
 
 	if err := c.scheduler.AddTask(t); err != nil {
-		log.Error("failed to enqueue request to alter alias", zap.String("role", typeutil.RootCoordRole),
+		log.Warn("failed to enqueue request to alter alias",
+			zap.String("role", typeutil.RootCoordRole),
 			zap.Error(err),
 			zap.String("alias", in.GetAlias()), zap.String("collection", in.GetCollectionName()),
 			zap.Int64("msgID", in.GetBase().GetMsgID()))
@@ -1572,7 +1579,8 @@ func (c *Core) AlterAlias(ctx context.Context, in *milvuspb.AlterAliasRequest) (
 	}
 
 	if err := t.WaitToFinish(); err != nil {
-		log.Error("failed to alter alias", zap.String("role", typeutil.RootCoordRole),
+		log.Warn("failed to alter alias",
+			zap.String("role", typeutil.RootCoordRole),
 			zap.Error(err),
 			zap.String("alias", in.GetAlias()), zap.String("collection", in.GetCollectionName()),
 			zap.Int64("msgID", in.GetBase().GetMsgID()), zap.Uint64("ts", t.GetTs()))
