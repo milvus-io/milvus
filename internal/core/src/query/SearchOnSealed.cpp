@@ -86,7 +86,9 @@ SearchOnSealed(const Schema& schema,
     auto vec_data = record.get_field_data_base(field_id);
     AssertInfo(vec_data->num_chunk() == 1, "num chunk not equal to 1 for sealed segment");
     auto chunk_data = vec_data->get_chunk_data(0);
-    auto sub_qr = query::BruteForceSearch(dataset, chunk_data, row_count, bitset);
+
+    CheckBruteForceSearchParam(field, search_info);
+    auto sub_qr = BruteForceSearch(dataset, chunk_data, row_count, bitset);
 
     result.distances_ = std::move(sub_qr.mutable_distances());
     result.seg_offsets_ = std::move(sub_qr.mutable_seg_offsets());

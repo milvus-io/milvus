@@ -123,6 +123,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
         auto size_per_chunk = element_end - element_begin;
 
         auto sub_view = bitset.subview(element_begin, size_per_chunk);
+        CheckBruteForceSearchParam(field, info);
         auto sub_qr = BruteForceSearch(search_dataset, chunk_data, size_per_chunk, sub_view);
 
         // convert chunk uid to segment uid
