@@ -26,9 +26,11 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 )
 
@@ -45,7 +47,8 @@ type Executor struct {
 	// Merge load segment requests
 	merger *Merger[segmentIndex, *querypb.LoadSegmentsRequest]
 
-	executingTasks sync.Map
+	executingTasks   sync.Map
+	executingTaskNum atomic.Int32
 }
 
 func NewExecutor(meta *meta.Meta,
@@ -82,10 +85,14 @@ func (ex *Executor) Stop() {
 // does nothing and returns false if the action is already committed,
 // returns true otherwise.
 func (ex *Executor) Execute(task Task, step int) bool {
+	if ex.executingTaskNum.Load() > Params.QueryCoordCfg.TaskExecutionCap {
+		return false
+	}
 	_, exist := ex.executingTasks.LoadOrStore(task.ID(), struct{}{})
 	if exist {
 		return false
 	}
+	ex.executingTaskNum.Inc()
 
 	log := log.With(
 		zap.Int64("taskID", task.ID()),
@@ -137,7 +144,7 @@ func (ex *Executor) processMergeTask(mergeTask *LoadSegmentsTask) {
 	defer func() {
 		for i := range mergeTask.tasks {
 			mergeTask.tasks[i].SetErr(task.Err())
-			ex.removeAction(mergeTask.tasks[i], mergeTask.steps[i])
+			ex.removeTask(mergeTask.tasks[i], mergeTask.steps[i])
 		}
 	}()
 
@@ -180,7 +187,7 @@ func (ex *Executor) processMergeTask(mergeTask *LoadSegmentsTask) {
 	log.Info("load segments done", zap.Int64("taskID", task.ID()), zap.Duration("timeTaken", elapsed))
 }
 
-func (ex *Executor) removeAction(task Task, step int) {
+func (ex *Executor) removeTask(task Task, step int) {
 	if task.Err() != nil {
 		log.Info("excute action done, remove it",
 			zap.Int64("taskID", task.ID()),
@@ -189,6 +196,7 @@ func (ex *Executor) removeAction(task Task, step int) {
 	}
 
 	ex.executingTasks.Delete(task.ID())
+	ex.executingTaskNum.Dec()
 }
 
 func (ex *Executor) executeSegmentAction(task *SegmentTask, step int) {
@@ -218,7 +226,7 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 		if err != nil {
 			task.SetErr(err)
 			task.Cancel()
-			ex.removeAction(task, step)
+			ex.removeTask(task, step)
 		}
 	}()
 
@@ -270,7 +278,7 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 }
 
 func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
-	defer ex.removeAction(task, step)
+	defer ex.removeTask(task, step)
 	startTs := time.Now()
 	action := task.Actions()[step].(*SegmentAction)
 	defer action.isReleaseCommitted.Store(true)
@@ -343,7 +351,7 @@ func (ex *Executor) executeDmChannelAction(task *ChannelTask, step int) {
 }
 
 func (ex *Executor) subDmChannel(task *ChannelTask, step int) error {
-	defer ex.removeAction(task, step)
+	defer ex.removeTask(task, step)
 	startTs := time.Now()
 	action := task.Actions()[step].(*ChannelAction)
 	log := log.With(
@@ -415,7 +423,7 @@ func (ex *Executor) subDmChannel(task *ChannelTask, step int) error {
 }
 
 func (ex *Executor) unsubDmChannel(task *ChannelTask, step int) error {
-	defer ex.removeAction(task, step)
+	defer ex.removeTask(task, step)
 	startTs := time.Now()
 	action := task.Actions()[step].(*ChannelAction)
 	log := log.With(
