@@ -207,7 +207,7 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	var rowIDEnd UniqueID
 	tr := timerecord.NewTimeRecorder("applyPK")
 	rowIDBegin, rowIDEnd, _ = it.idAllocator.Alloc(rowNums)
-	metrics.ProxyApplyPrimaryKeyLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10)).Observe(float64(tr.ElapseSpan()))
+	metrics.ProxyApplyPrimaryKeyLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10)).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 	it.RowIDs = make([]UniqueID, rowNums)
 	for i := rowIDBegin; i < rowIDEnd; i++ {
