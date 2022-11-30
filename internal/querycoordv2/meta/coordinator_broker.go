@@ -99,13 +99,13 @@ func (broker *CoordinatorBroker) GetPartitions(ctx context.Context, collectionID
 	}
 	resp, err := broker.rootCoord.ShowPartitions(ctx, req)
 	if err != nil {
-		log.Error("showPartition failed", zap.Int64("collectionID", collectionID), zap.Error(err))
+		log.Warn("showPartition failed", zap.Int64("collectionID", collectionID), zap.Error(err))
 		return nil, err
 	}
 
 	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
 		err = errors.New(resp.Status.Reason)
-		log.Error("showPartition failed", zap.Int64("collectionID", collectionID), zap.Error(err))
+		log.Warn("showPartition failed", zap.Int64("collectionID", collectionID), zap.Error(err))
 		return nil, err
 	}
 
