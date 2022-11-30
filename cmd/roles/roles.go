@@ -214,7 +214,12 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 
 		if Params.EtcdCfg.UseEmbedEtcd {
 			// Start etcd server.
-			etcd.InitEtcdServer(&Params.EtcdCfg)
+			etcd.InitEtcdServer(
+				Params.EtcdCfg.UseEmbedEtcd,
+				Params.EtcdCfg.ConfigPath,
+				Params.EtcdCfg.DataDir,
+				Params.EtcdCfg.EtcdLogPath,
+				Params.EtcdCfg.EtcdLogLevel)
 			defer etcd.StopEtcdServer()
 		}
 	} else {

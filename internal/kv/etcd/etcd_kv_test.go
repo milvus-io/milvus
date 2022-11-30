@@ -40,7 +40,14 @@ func TestMain(m *testing.M) {
 }
 
 func TestEtcdKV_Load(te *testing.T) {
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	etcdCli, err := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd,
+		Params.EtcdCfg.EtcdUseSSL,
+		Params.EtcdCfg.Endpoints,
+		Params.EtcdCfg.EtcdTLSCert,
+		Params.EtcdCfg.EtcdTLSKey,
+		Params.EtcdCfg.EtcdTLSCACert,
+		Params.EtcdCfg.EtcdTLSMinVersion)
 	defer etcdCli.Close()
 	assert.NoError(te, err)
 	te.Run("EtcdKV SaveAndLoad", func(t *testing.T) {

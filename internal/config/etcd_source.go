@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/util/etcd"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
@@ -46,23 +47,28 @@ type EtcdSource struct {
 	eh               EventHandler
 }
 
-func NewEtcdSource(remoteInfo *EtcdInfo) (*EtcdSource, error) {
-	etcdCli, err := clientv3.New(clientv3.Config{
-		Endpoints:   remoteInfo.Endpoints,
-		DialTimeout: 5 * time.Second,
-	})
+func NewEtcdSource(etcdInfo *EtcdInfo) (*EtcdSource, error) {
+	etcdCli, err := etcd.GetEtcdClient(
+		etcdInfo.UseEmbed,
+		etcdInfo.UseSSL,
+		etcdInfo.Endpoints,
+		etcdInfo.CertFile,
+		etcdInfo.KeyFile,
+		etcdInfo.CaCertFile,
+		etcdInfo.MinVersion)
 	if err != nil {
 		return nil, err
 	}
-	return &EtcdSource{
+	es := &EtcdSource{
 		etcdCli:         etcdCli,
 		ctx:             context.Background(),
 		currentConfig:   make(map[string]string),
-		keyPrefix:       remoteInfo.KeyPrefix,
-		refreshMode:     remoteInfo.RefreshMode,
-		refreshInterval: remoteInfo.RefreshInterval,
+		keyPrefix:       etcdInfo.KeyPrefix,
+		refreshMode:     etcdInfo.RefreshMode,
+		refreshInterval: etcdInfo.RefreshInterval,
 		intervalDone:    make(chan bool, 1),
-	}, nil
+	}
+	return es, nil
 }
 
 // GetConfigurationByKey implements ConfigSource

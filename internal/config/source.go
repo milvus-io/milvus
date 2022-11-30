@@ -38,8 +38,14 @@ type EventHandler interface {
 
 // EtcdInfo has attribute for config center source initialization
 type EtcdInfo struct {
-	Endpoints []string
-	KeyPrefix string
+	UseEmbed   bool
+	UseSSL     bool
+	Endpoints  []string
+	KeyPrefix  string
+	CertFile   string
+	KeyFile    string
+	CaCertFile string
+	MinVersion string
 
 	RefreshMode int
 	//Pull Configuration interval, unit is second

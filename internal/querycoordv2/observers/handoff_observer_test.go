@@ -107,7 +107,14 @@ func (suite *HandoffObserverTestSuit) SetupTest() {
 	suite.idAllocator = RandomIncrementIDAllocator()
 	log.Debug("create embedded etcd KV...")
 	config := GenerateEtcdConfig()
-	client, err := etcd.GetEtcdClient(&config)
+	client, err := etcd.GetEtcdClient(
+		config.UseEmbedEtcd,
+		config.EtcdUseSSL,
+		config.Endpoints,
+		config.EtcdTLSCert,
+		config.EtcdTLSKey,
+		config.EtcdTLSCACert,
+		config.EtcdTLSMinVersion)
 	suite.Require().NoError(err)
 	suite.kv = etcdkv.NewEtcdKV(client, Params.EtcdCfg.MetaRootPath+"-"+RandomMetaRootPath())
 	suite.Require().NoError(err)

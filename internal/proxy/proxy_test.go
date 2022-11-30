@@ -298,7 +298,14 @@ func runIndexNode(ctx context.Context, localMsg bool, alias string) *grpcindexno
 			panic(err)
 		}
 		wg.Done()
-		etcd, err := etcd.GetEtcdClient(&indexnode.Params.EtcdCfg)
+		etcd, err := etcd.GetEtcdClient(
+			Params.EtcdCfg.UseEmbedEtcd,
+			Params.EtcdCfg.EtcdUseSSL,
+			Params.EtcdCfg.Endpoints,
+			Params.EtcdCfg.EtcdTLSCert,
+			Params.EtcdCfg.EtcdTLSKey,
+			Params.EtcdCfg.EtcdTLSCACert,
+			Params.EtcdCfg.EtcdTLSMinVersion)
 		if err != nil {
 			panic(err)
 		}
@@ -513,7 +520,14 @@ func TestProxy(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, proxy)
 
-	etcdcli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	etcdcli, err := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd,
+		Params.EtcdCfg.EtcdUseSSL,
+		Params.EtcdCfg.Endpoints,
+		Params.EtcdCfg.EtcdTLSCert,
+		Params.EtcdCfg.EtcdTLSKey,
+		Params.EtcdCfg.EtcdTLSCACert,
+		Params.EtcdCfg.EtcdTLSMinVersion)
 	defer etcdcli.Close()
 	assert.NoError(t, err)
 	proxy.SetEtcdClient(etcdcli)

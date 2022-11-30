@@ -33,7 +33,6 @@ func TestEtcdConfigLoad(te *testing.T) {
 	param := new(paramtable.ServiceParam)
 
 	te.Setenv("etcd.use.embed", "true")
-	// TODO, not sure if the relative path works for ci environment
 	te.Setenv("etcd.config.path", "../../../configs/advanced/etcd.yaml")
 	te.Setenv("etcd.data.dir", "etcd.test.data.dir")
 
