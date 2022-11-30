@@ -1677,7 +1677,7 @@ class TestqueryString(TestcaseBase):
         res, _ = collection_w.query(expr, output_fields=output_fields)
 
         assert len(res) == nb
-    
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_query_with_create_diskann_index(self):
         """
@@ -1712,4 +1712,37 @@ class TestqueryString(TestcaseBase):
         output_fields = [default_float_field_name, default_string_field_name]
         collection_w.query(default_mix_expr, output_fields=output_fields,
                                    check_task=CheckTasks.check_query_results, check_items={exp_res: res})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_query_with_scalar_field(self):
+        """
+        target: test query with Scalar field 
+        method: create collection , string field is primary
+                collection load and insert empty data with string field
+                collection query uses string expr in string field
+        expected: query successfully
+        """
+        # 1.  create a collection
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=False, is_index=True)[0:2]
+        
+        nb = 3000
+        df = cf.gen_default_list_data(nb)
+        df[2] = [""for _ in range(nb)] 
+
+        collection_w.insert(df)
+        assert collection_w.num_entities == nb
+        
+        collection_w.create_index(ct.default_float_vec_field_name, default_index_params)
+        assert collection_w.has_index()[0]
+        index_params = {}
+        collection_w.create_index(ct.default_int64_field_name, index_params=index_params)
+        
+        collection_w.load()
+        
+        output_fields = [default_int_field_name, default_float_field_name]
+        
+        expr = "int64 in [2,4,6,8]"
+        res, _ = collection_w.query(expr, output_fields=output_fields)
+
+        assert len(res) == 4
         
