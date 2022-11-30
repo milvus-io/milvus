@@ -143,7 +143,7 @@ class ApiUtilityWrapper:
         pending_tasks = self.get_bulk_insert_pending_list()
         log.info(f"after waiting, there are {len(pending_tasks)} pending tasks")
         log.info(f"task state distribution: {tasks_state_distribution}")
-        log.debug(tasks_state)
+        log.info(tasks_state)
         if len(tasks_state_distribution["success"]) == len(task_ids):
             log.info(f"wait for bulk load tasks completed successfully, cost time: {end-start}")
             return True, tasks_state
