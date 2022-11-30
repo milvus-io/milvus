@@ -14,10 +14,10 @@ package timerecord
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"go.uber.org/zap"
 )
 
 // TimeRecorder provides methods to record time duration
@@ -80,15 +80,11 @@ func (tr *TimeRecorder) CtxElapse(ctx context.Context, msg string) time.Duration
 }
 
 func (tr *TimeRecorder) printTimeRecord(ctx context.Context, msg string, span time.Duration) {
-	str := ""
-	if tr.header != "" {
-		str += tr.header + ": "
-	}
-	str += msg
-	str += " ("
-	str += strconv.Itoa(int(span.Milliseconds()))
-	str += "ms)"
-	log.Ctx(ctx).Debug(str)
+	log.Ctx(ctx).WithOptions(zap.AddCallerSkip(2)).
+		Debug(fmt.Sprintf("timerecorder %s: record elapsed duration", tr.header),
+			zap.String("msg", msg),
+			zap.Duration("duration", span),
+		)
 }
 
 // LongTermChecker checks we receive at least one msg in d duration. If not, checker
