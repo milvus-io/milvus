@@ -75,7 +75,7 @@ func (dn *deleteNode) Operate(in []Msg) []Msg {
 	}
 
 	if len(in) != 1 {
-		log.Error("Invalid operate message input in deleteNode", zap.Int("input length", len(in)))
+		log.Warn("Invalid operate message input in deleteNode", zap.Int("input length", len(in)))
 		return []Msg{}
 	}
 
