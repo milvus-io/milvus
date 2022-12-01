@@ -25,7 +25,6 @@ import (
 	"math/rand"
 	"path"
 	"path/filepath"
-	"runtime"
 	"strconv"
 
 	"github.com/golang/protobuf/proto"
@@ -1242,10 +1241,6 @@ func genSealedSegment(schema *schemapb.CollectionSchema,
 	vChannel Channel,
 	msgLength int) (*Segment, error) {
 	col := newCollection(collectionID, schema)
-	pool, err := concurrency.NewPool(runtime.GOMAXPROCS(0))
-	if err != nil {
-		return nil, err
-	}
 
 	seg, err := newSegment(col,
 		segmentID,
@@ -1254,8 +1249,7 @@ func genSealedSegment(schema *schemapb.CollectionSchema,
 		vChannel,
 		segmentTypeSealed,
 		defaultSegmentVersion,
-		defaultSegmentStartPosition,
-		pool)
+		defaultSegmentStartPosition)
 	if err != nil {
 		return nil, err
 	}
@@ -1292,28 +1286,20 @@ func genSimpleSealedSegment(msgLength int) (*Segment, error) {
 }
 
 func genSimpleReplica() (ReplicaInterface, error) {
-	pool, err := concurrency.NewPool(runtime.GOMAXPROCS(0))
-	if err != nil {
-		return nil, err
-	}
-	r := newCollectionReplica(pool)
+	r := newCollectionReplica()
 	schema := genTestCollectionSchema()
 	r.addCollection(defaultCollectionID, schema)
-	err = r.addPartition(defaultCollectionID, defaultPartitionID)
+	err := r.addPartition(defaultCollectionID, defaultPartitionID)
 	return r, err
 }
 
 func genSimpleSegmentLoaderWithMqFactory(metaReplica ReplicaInterface, factory msgstream.Factory) (*segmentLoader, error) {
-	pool, err := concurrency.NewPool(runtime.GOMAXPROCS(1))
-	if err != nil {
-		return nil, err
-	}
 	kv, err := genEtcdKV()
 	if err != nil {
 		return nil, err
 	}
 	cm := storage.NewLocalChunkManager(storage.RootPath(defaultLocalStorage))
-	return newSegmentLoader(metaReplica, kv, cm, factory, pool), nil
+	return newSegmentLoader(metaReplica, kv, cm, factory), nil
 }
 
 func genSimpleReplicaWithSealSegment(ctx context.Context) (ReplicaInterface, error) {
