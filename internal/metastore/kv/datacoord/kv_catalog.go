@@ -169,7 +169,10 @@ func (kc *Catalog) AlterSegment(ctx context.Context, newSegment *datapb.SegmentI
 	maps.Copy(kvs, segmentKvs)
 	if newSegment.State == commonpb.SegmentState_Flushed && oldSegment.State != commonpb.SegmentState_Flushed {
 		flushSegKey := buildFlushedSegmentPath(newSegment.GetCollectionID(), newSegment.GetPartitionID(), newSegment.GetID())
-		newSeg := &datapb.SegmentInfo{ID: newSegment.GetID()}
+		newSeg := &datapb.SegmentInfo{
+			ID:     newSegment.GetID(),
+			IsFake: newSegment.GetNumOfRows() == 0,
+		}
 		segBytes, err := marshalSegmentInfo(newSeg)
 		if err != nil {
 			return err
