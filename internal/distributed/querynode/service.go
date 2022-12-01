@@ -105,7 +105,14 @@ func (s *Server) init() error {
 
 	log.Info("QueryNode", zap.Int("port", Params.Port))
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	etcdCli, err := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd,
+		Params.EtcdCfg.EtcdUseSSL,
+		Params.EtcdCfg.Endpoints,
+		Params.EtcdCfg.EtcdTLSCert,
+		Params.EtcdCfg.EtcdTLSKey,
+		Params.EtcdCfg.EtcdTLSCACert,
+		Params.EtcdCfg.EtcdTLSMinVersion)
 	if err != nil {
 		log.Warn("QueryNode connect to etcd failed", zap.Error(err))
 		return err

@@ -34,7 +34,14 @@ import (
 func TestProxyManager(t *testing.T) {
 	Params.Init()
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	etcdCli, err := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd,
+		Params.EtcdCfg.EtcdUseSSL,
+		Params.EtcdCfg.Endpoints,
+		Params.EtcdCfg.EtcdTLSCert,
+		Params.EtcdCfg.EtcdTLSKey,
+		Params.EtcdCfg.EtcdTLSCACert,
+		Params.EtcdCfg.EtcdTLSMinVersion)
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -103,7 +110,14 @@ func TestProxyManager(t *testing.T) {
 func TestProxyManager_ErrCompacted(t *testing.T) {
 	Params.Init()
 
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	etcdCli, err := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd,
+		Params.EtcdCfg.EtcdUseSSL,
+		Params.EtcdCfg.Endpoints,
+		Params.EtcdCfg.EtcdTLSCert,
+		Params.EtcdCfg.EtcdTLSKey,
+		Params.EtcdCfg.EtcdTLSCACert,
+		Params.EtcdCfg.EtcdTLSMinVersion)
 	assert.Nil(t, err)
 	defer etcdCli.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

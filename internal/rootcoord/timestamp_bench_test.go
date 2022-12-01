@@ -21,7 +21,14 @@ import (
 
 func getTestEtcdCli() *clientv3.Client {
 	Params.InitOnce()
-	cli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	cli, err := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd,
+		Params.EtcdCfg.EtcdUseSSL,
+		Params.EtcdCfg.Endpoints,
+		Params.EtcdCfg.EtcdTLSCert,
+		Params.EtcdCfg.EtcdTLSKey,
+		Params.EtcdCfg.EtcdTLSCACert,
+		Params.EtcdCfg.EtcdTLSMinVersion)
 	if err != nil {
 		panic(err)
 	}

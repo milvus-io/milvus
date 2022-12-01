@@ -73,7 +73,14 @@ func (r *Runner) WatchSessions() {
 }
 
 func (r *Runner) initEtcdCli() {
-	cli, err := etcd.GetEtcdClient(r.cfg.EtcdCfg)
+	cli, err := etcd.GetEtcdClient(
+		r.cfg.EtcdCfg.UseEmbedEtcd,
+		r.cfg.EtcdCfg.EtcdUseSSL,
+		r.cfg.EtcdCfg.Endpoints,
+		r.cfg.EtcdCfg.EtcdTLSCert,
+		r.cfg.EtcdCfg.EtcdTLSKey,
+		r.cfg.EtcdCfg.EtcdTLSCACert,
+		r.cfg.EtcdCfg.EtcdTLSMinVersion)
 	console.AbnormalExitIf(err, r.backupFinished.Load())
 	r.etcdCli = cli
 }

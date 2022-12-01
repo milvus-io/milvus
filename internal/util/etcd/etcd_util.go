@@ -25,7 +25,6 @@ import (
 
 	"github.com/pkg/errors"
 
-	"github.com/milvus-io/milvus/internal/util/paramtable"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
@@ -34,14 +33,21 @@ var (
 )
 
 // GetEtcdClient returns etcd client
-func GetEtcdClient(cfg *paramtable.EtcdConfig) (*clientv3.Client, error) {
-	if cfg.UseEmbedEtcd {
+func GetEtcdClient(
+	useEmbedEtcd bool,
+	useSSL bool,
+	endpoints []string,
+	certFile string,
+	keyFile string,
+	caCertFile string,
+	minVersion string) (*clientv3.Client, error) {
+	if useEmbedEtcd {
 		return GetEmbedEtcdClient()
 	}
-	if cfg.EtcdUseSSL {
-		return GetRemoteEtcdSSLClient(cfg.Endpoints, cfg.EtcdTLSCert, cfg.EtcdTLSKey, cfg.EtcdTLSCACert, cfg.EtcdTLSMinVersion)
+	if useSSL {
+		return GetRemoteEtcdSSLClient(endpoints, certFile, keyFile, caCertFile, minVersion)
 	}
-	return GetRemoteEtcdClient(cfg.Endpoints)
+	return GetRemoteEtcdClient(endpoints)
 }
 
 // GetRemoteEtcdClient returns client of remote etcd by given endpoints

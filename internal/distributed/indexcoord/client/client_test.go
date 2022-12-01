@@ -41,8 +41,17 @@ func TestIndexCoordClient(t *testing.T) {
 	factory := dependency.NewDefaultFactory(true)
 	server, err := grpcindexcoord.NewServer(ctx, factory)
 	assert.NoError(t, err)
+
+	indexcoord.Params.InitOnce()
 	icm := indexcoord.NewIndexCoordMock()
-	etcdCli, err := etcd.GetEtcdClient(&ClientParams.EtcdCfg)
+	etcdCli, err := etcd.GetEtcdClient(
+		indexcoord.Params.EtcdCfg.UseEmbedEtcd,
+		indexcoord.Params.EtcdCfg.EtcdUseSSL,
+		indexcoord.Params.EtcdCfg.Endpoints,
+		indexcoord.Params.EtcdCfg.EtcdTLSCert,
+		indexcoord.Params.EtcdCfg.EtcdTLSKey,
+		indexcoord.Params.EtcdCfg.EtcdTLSCACert,
+		indexcoord.Params.EtcdCfg.EtcdTLSMinVersion)
 	assert.NoError(t, err)
 	icm.CallRegister = func() error {
 		session := sessionutil.NewSession(context.Background(), indexcoord.Params.EtcdCfg.MetaRootPath, etcdCli)

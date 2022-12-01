@@ -44,7 +44,14 @@ func (suite *ChannelCheckerTestSuite) SetupSuite() {
 func (suite *ChannelCheckerTestSuite) SetupTest() {
 	var err error
 	config := GenerateEtcdConfig()
-	cli, err := etcd.GetEtcdClient(&config)
+	cli, err := etcd.GetEtcdClient(
+		config.UseEmbedEtcd,
+		config.EtcdUseSSL,
+		config.Endpoints,
+		config.EtcdTLSCert,
+		config.EtcdTLSKey,
+		config.EtcdTLSCACert,
+		config.EtcdTLSMinVersion)
 	suite.Require().NoError(err)
 	suite.kv = etcdkv.NewEtcdKV(cli, config.MetaRootPath)
 

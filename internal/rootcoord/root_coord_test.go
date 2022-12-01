@@ -1332,7 +1332,14 @@ func TestRootcoord_EnableActiveStandby(t *testing.T) {
 
 	ctx := context.Background()
 	coreFactory := dependency.NewDefaultFactory(true)
-	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	etcdCli, err := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd,
+		Params.EtcdCfg.EtcdUseSSL,
+		Params.EtcdCfg.Endpoints,
+		Params.EtcdCfg.EtcdTLSCert,
+		Params.EtcdCfg.EtcdTLSKey,
+		Params.EtcdCfg.EtcdTLSCACert,
+		Params.EtcdCfg.EtcdTLSMinVersion)
 	assert.NoError(t, err)
 	defer etcdCli.Close()
 	core, err := NewCore(ctx, coreFactory)

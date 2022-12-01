@@ -19,26 +19,18 @@ package etcd
 import (
 	"context"
 	"errors"
-	"os"
 	"path"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/stretchr/testify/assert"
 )
 
-var Params paramtable.ServiceParam
-
 func TestEtcd(t *testing.T) {
-	Params.Init()
-	Params.EtcdCfg.UseEmbedEtcd = true
-	Params.EtcdCfg.DataDir = "/tmp/data"
-	err := InitEtcdServer(&Params.EtcdCfg)
+	err := InitEtcdServer(true, "", "/tmp/data", "stdout", "info")
 	assert.NoError(t, err)
-	defer os.RemoveAll(Params.EtcdCfg.DataDir)
 	defer StopEtcdServer()
 
-	etcdCli, err := GetEtcdClient(&Params.EtcdCfg)
+	etcdCli, err := GetEtcdClient(true, false, []string{}, "", "", "", "")
 	assert.NoError(t, err)
 
 	key := path.Join("test", "test")
@@ -50,26 +42,25 @@ func TestEtcd(t *testing.T) {
 	assert.False(t, resp.Count < 1)
 	assert.Equal(t, string(resp.Kvs[0].Value), "value")
 
-	Params.EtcdCfg.UseEmbedEtcd = false
-	Params.EtcdCfg.EtcdUseSSL = true
-	Params.EtcdCfg.EtcdTLSMinVersion = "1.3"
-	Params.EtcdCfg.EtcdTLSCACert = "../../../configs/cert/ca.pem"
-	Params.EtcdCfg.EtcdTLSCert = "../../../configs/cert/client.pem"
-	Params.EtcdCfg.EtcdTLSKey = "../../../configs/cert/client.key"
-	etcdCli, err = GetEtcdClient(&Params.EtcdCfg)
-	assert.NoError(t, err)
-
-	Params.EtcdCfg.EtcdTLSMinVersion = "some not right word"
-	etcdCli, err = GetEtcdClient(&Params.EtcdCfg)
+	etcdCli, err = GetEtcdClient(false, true, []string{},
+		"../../../configs/cert/client.pem",
+		"../../../configs/cert/client.key",
+		"../../../configs/cert/ca.pem",
+		"some not right word")
 	assert.NotNil(t, err)
 
-	Params.EtcdCfg.EtcdTLSMinVersion = "1.2"
-	Params.EtcdCfg.EtcdTLSCACert = "wrong/file"
-	etcdCli, err = GetEtcdClient(&Params.EtcdCfg)
+	etcdCli, err = GetEtcdClient(false, true, []string{},
+		"../../../configs/cert/client.pem",
+		"../../../configs/cert/client.key",
+		"wrong/file",
+		"1.2")
 	assert.NotNil(t, err)
 
-	Params.EtcdCfg.EtcdTLSCACert = "../../../configs/cert/ca.pem"
-	Params.EtcdCfg.EtcdTLSCert = "wrong/file"
+	etcdCli, err = GetEtcdClient(false, true, []string{},
+		"wrong/file",
+		"../../../configs/cert/client.key",
+		"../../../configs/cert/ca.pem",
+		"1.2")
 	assert.NotNil(t, err)
 
 }

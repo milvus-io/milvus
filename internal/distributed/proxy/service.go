@@ -324,7 +324,14 @@ func (s *Server) init() error {
 	s.closer = closer
 	log.Info("init Proxy's tracer done", zap.String("service name", serviceName))
 
-	etcdCli, err := etcd.GetEtcdClient(&proxy.Params.EtcdCfg)
+	etcdCli, err := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd,
+		Params.EtcdCfg.EtcdUseSSL,
+		Params.EtcdCfg.Endpoints,
+		Params.EtcdCfg.EtcdTLSCert,
+		Params.EtcdCfg.EtcdTLSKey,
+		Params.EtcdCfg.EtcdTLSCACert,
+		Params.EtcdCfg.EtcdTLSMinVersion)
 	if err != nil {
 		log.Warn("Proxy connect to etcd failed", zap.Error(err))
 		return err

@@ -33,7 +33,14 @@ func Test_NewClient(t *testing.T) {
 	proxy.Params.InitOnce()
 
 	ctx := context.Background()
-	etcdCli, err := etcd.GetEtcdClient(&proxy.Params.EtcdCfg)
+	etcdCli, err := etcd.GetEtcdClient(
+		proxy.Params.EtcdCfg.UseEmbedEtcd,
+		proxy.Params.EtcdCfg.EtcdUseSSL,
+		proxy.Params.EtcdCfg.Endpoints,
+		proxy.Params.EtcdCfg.EtcdTLSCert,
+		proxy.Params.EtcdCfg.EtcdTLSKey,
+		proxy.Params.EtcdCfg.EtcdTLSCACert,
+		proxy.Params.EtcdCfg.EtcdTLSMinVersion)
 	assert.Nil(t, err)
 	client, err := NewClient(ctx, proxy.Params.EtcdCfg.MetaRootPath, etcdCli)
 	assert.Nil(t, err)

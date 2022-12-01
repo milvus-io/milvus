@@ -50,7 +50,14 @@ func NewMetaKvFactory(rootPath string, etcdCfg *paramtable.EtcdConfig) (kv.MetaK
 		}
 		return metaKv, err
 	}
-	client, err := etcd.GetEtcdClient(etcdCfg)
+	client, err := etcd.GetEtcdClient(
+		etcdCfg.UseEmbedEtcd,
+		etcdCfg.EtcdUseSSL,
+		etcdCfg.Endpoints,
+		etcdCfg.EtcdTLSCert,
+		etcdCfg.EtcdTLSKey,
+		etcdCfg.EtcdTLSCACert,
+		etcdCfg.EtcdTLSMinVersion)
 	if err != nil {
 		return nil, err
 	}

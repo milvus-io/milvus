@@ -4,7 +4,6 @@ import (
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/util/paramtable"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.etcd.io/etcd/server/v3/etcdserver/api/v3client"
@@ -25,11 +24,17 @@ func GetEmbedEtcdClient() (*clientv3.Client, error) {
 }
 
 // InitEtcdServer initializes embedded etcd server singleton.
-func InitEtcdServer(etcdCfg *paramtable.EtcdConfig) error {
-	if etcdCfg.UseEmbedEtcd {
+func InitEtcdServer(
+	useEmbedEtcd bool,
+	configPath string,
+	dataDir string,
+	logPath string,
+	logLevel string,
+) error {
+	if useEmbedEtcd {
 		var initError error
 		initOnce.Do(func() {
-			path := etcdCfg.ConfigPath
+			path := configPath
 			var cfg *embed.Config
 			if len(path) > 0 {
 				cfgFromFile, err := embed.ConfigFromFile(path)
@@ -40,20 +45,24 @@ func InitEtcdServer(etcdCfg *paramtable.EtcdConfig) error {
 			} else {
 				cfg = embed.NewConfig()
 			}
-			cfg.Dir = etcdCfg.DataDir
-			cfg.LogOutputs = []string{etcdCfg.EtcdLogPath}
-			cfg.LogLevel = etcdCfg.EtcdLogLevel
+			cfg.Dir = dataDir
+			cfg.LogOutputs = []string{logPath}
+			cfg.LogLevel = logLevel
 			e, err := embed.StartEtcd(cfg)
 			if err != nil {
 				log.Error("failed to init embedded Etcd server", zap.Error(err))
 				initError = err
 			}
 			etcdServer = e
-			log.Info("finish init Etcd config", zap.String("path", path), zap.String("data", etcdCfg.DataDir))
+			log.Info("finish init Etcd config", zap.String("path", path), zap.String("data", dataDir))
 		})
 		return initError
 	}
 	return nil
+}
+
+func HasServer() bool {
+	return etcdServer != nil
 }
 
 // StopEtcdServer stops embedded etcd server singleton.

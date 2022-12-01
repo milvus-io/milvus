@@ -106,7 +106,14 @@ func TestProxyClientManager_GetProxyClients(t *testing.T) {
 
 	core, err := NewCore(context.Background(), nil)
 	assert.Nil(t, err)
-	cli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	cli, err := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd,
+		Params.EtcdCfg.EtcdUseSSL,
+		Params.EtcdCfg.Endpoints,
+		Params.EtcdCfg.EtcdTLSCert,
+		Params.EtcdCfg.EtcdTLSKey,
+		Params.EtcdCfg.EtcdTLSCACert,
+		Params.EtcdCfg.EtcdTLSMinVersion)
 	defer cli.Close()
 	assert.Nil(t, err)
 	core.etcdCli = cli
@@ -130,7 +137,14 @@ func TestProxyClientManager_AddProxyClient(t *testing.T) {
 
 	core, err := NewCore(context.Background(), nil)
 	assert.Nil(t, err)
-	cli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
+	cli, err := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd,
+		Params.EtcdCfg.EtcdUseSSL,
+		Params.EtcdCfg.Endpoints,
+		Params.EtcdCfg.EtcdTLSCert,
+		Params.EtcdCfg.EtcdTLSKey,
+		Params.EtcdCfg.EtcdTLSCACert,
+		Params.EtcdCfg.EtcdTLSMinVersion)
 	assert.Nil(t, err)
 	defer cli.Close()
 	core.etcdCli = cli
