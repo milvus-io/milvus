@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/util/trace"
 	"go.uber.org/zap"
 )
 
@@ -25,13 +26,22 @@ type TimeRecorder struct {
 	header string
 	start  time.Time
 	last   time.Time
-	ctx    context.Context
 }
 
 // NewTimeRecorder creates a new TimeRecorder
 func NewTimeRecorder(header string) *TimeRecorder {
 	return &TimeRecorder{
 		header: header,
+		start:  time.Now(),
+		last:   time.Now(),
+	}
+}
+
+// NewTimeRecorderWithCtx creates a new TimeRecorder with context's traceID,
+func NewTimeRecorderWithTrace(ctx context.Context, header string) *TimeRecorder {
+	traceID, _, _ := trace.InfoFromContext(ctx)
+	return &TimeRecorder{
+		header: fmt.Sprintf("%s(%s)", header, traceID),
 		start:  time.Now(),
 		last:   time.Now(),
 	}
