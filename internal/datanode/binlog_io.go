@@ -285,7 +285,7 @@ func (b *binlogIO) genInsertBlobs(data *InsertData, partID, segID UniqueID, meta
 		kvs[key] = value
 		inpaths[fID] = &datapb.FieldBinlog{
 			FieldID: fID,
-			Binlogs: []*datapb.Binlog{{LogSize: int64(fileLen), LogPath: key}},
+			Binlogs: []*datapb.Binlog{{LogSize: int64(fileLen), LogPath: key, EntriesNum: blob.RowNum}},
 		}
 	}
 
@@ -302,7 +302,7 @@ func (b *binlogIO) genInsertBlobs(data *InsertData, partID, segID UniqueID, meta
 		kvs[key] = value
 		statspaths[fID] = &datapb.FieldBinlog{
 			FieldID: fID,
-			Binlogs: []*datapb.Binlog{{LogSize: int64(fileLen), LogPath: key}},
+			Binlogs: []*datapb.Binlog{{LogSize: int64(fileLen), LogPath: key, EntriesNum: blob.RowNum}},
 		}
 	}
 

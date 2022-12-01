@@ -64,9 +64,10 @@ const InvalidUniqueID = UniqueID(-1)
 
 // Blob is a pack of key&value
 type Blob struct {
-	Key   string
-	Value []byte
-	Size  int64
+	Key    string
+	Value  []byte
+	Size   int64
+	RowNum int64
 }
 
 // BlobList implements sort.Interface for a list of Blob
@@ -277,6 +278,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 	if timeFieldData.RowNum() <= 0 {
 		return nil, nil, fmt.Errorf("there's no data in InsertData")
 	}
+	rowNum := int64(timeFieldData.RowNum())
 
 	ts := timeFieldData.(*Int64FieldData).Data
 	startTs := ts[0]
@@ -420,8 +422,9 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 		}
 		blobKey := fmt.Sprintf("%d", field.FieldID)
 		blobs = append(blobs, &Blob{
-			Key:   blobKey,
-			Value: buffer,
+			Key:    blobKey,
+			Value:  buffer,
+			RowNum: rowNum,
 		})
 		eventWriter.Close()
 		writer.Close()
@@ -435,8 +438,9 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 			}
 			statsBuffer := statsWriter.GetBuffer()
 			statsBlobs = append(statsBlobs, &Blob{
-				Key:   blobKey,
-				Value: statsBuffer,
+				Key:    blobKey,
+				Value:  statsBuffer,
+				RowNum: rowNum,
 			})
 		}
 	}
