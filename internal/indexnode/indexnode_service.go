@@ -77,7 +77,6 @@ func (i *IndexNode) CreateJob(ctx context.Context, req *indexpb.CreateJobRequest
 		nodeID:         i.GetNodeID(),
 		tr:             timerecord.NewTimeRecorder(fmt.Sprintf("IndexBuildID: %d, ClusterID: %s", req.BuildID, req.ClusterID)),
 		serializedSize: 0,
-		pool:           i.cgoPool,
 	}
 	ret := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,

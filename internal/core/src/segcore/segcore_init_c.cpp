@@ -39,6 +39,11 @@ SegcoreSetNprobe(const int64_t value) {
     config.set_nprobe(value);
 }
 
+extern "C" void
+SegcoreSetThreadPoolNum(const uint32_t num_threads) {
+    milvus::config::KnowhereInitThreadPool(num_threads);
+}
+
 // return value must be freed by the caller
 extern "C" char*
 SegcoreSetSimdType(const char* value) {

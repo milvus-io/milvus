@@ -25,4 +25,7 @@ KnowhereInitImpl(const char*);
 std::string
 KnowhereSetSimdType(const char*);
 
+void
+KnowhereInitThreadPool(const uint32_t);
+
 }  // namespace milvus::config

@@ -31,6 +31,9 @@ SegcoreSetNprobe(const int64_t);
 char*
 SegcoreSetSimdType(const char*);
 
+void
+SegcoreSetThreadPoolNum(const uint32_t num_threads);
+
 #ifdef __cplusplus
 }
 #endif
