@@ -123,7 +123,7 @@ func (q *orderFlushQueue) init() {
 }
 
 func (q *orderFlushQueue) getFlushTaskRunner(pos *internalpb.MsgPosition) *flushTaskRunner {
-	actual, loaded := q.working.LoadOrStore(string(pos.GetMsgID()), newFlushTaskRunner(q.segmentID, q.injectCh))
+	actual, loaded := q.working.LoadOrStore(getSyncTaskID(pos), newFlushTaskRunner(q.segmentID, q.injectCh))
 	t := actual.(*flushTaskRunner)
 	// not loaded means the task runner is new, do initializtion
 	if !loaded {
@@ -315,7 +315,7 @@ func (m *rendezvousFlushManager) handleDeleteTask(segmentID UniqueID, task flush
 	if m.dropping.Load() {
 		// preventing separate delete, check position exists in queue first
 		q := m.getFlushQueue(segmentID)
-		_, ok := q.working.Load(string(pos.MsgID))
+		_, ok := q.working.Load(getSyncTaskID(pos))
 		// if ok, means position insert data already in queue, just handle task in normal mode
 		// if not ok, means the insert buf should be handle in drop mode
 		if !ok {
@@ -547,6 +547,11 @@ func (m *rendezvousFlushManager) startDropping() {
 
 func (m *rendezvousFlushManager) notifyAllFlushed() {
 	close(m.dropHandler.allFlushed)
+}
+
+func getSyncTaskID(pos *internalpb.MsgPosition) string {
+	// use msgID & timestamp to generate unique taskID, see also #20926
+	return fmt.Sprintf("%s%d", string(pos.GetMsgID()), pos.GetTimestamp())
 }
 
 // close cleans up all the left members
