@@ -30,7 +30,6 @@ import "C"
 import (
 	"context"
 	"fmt"
-	"math"
 	"os"
 	"path"
 	"runtime"
@@ -78,9 +77,10 @@ var rateCol *rateCollector
 // services in querynode package.
 //
 // QueryNode implements `types.Component`, `types.QueryNode` interfaces.
-//  `rootCoord` is a grpc client of root coordinator.
-//  `indexCoord` is a grpc client of index coordinator.
-//  `stateCode` is current statement of this query node, indicating whether it's healthy.
+//
+//	`rootCoord` is a grpc client of root coordinator.
+//	`indexCoord` is a grpc client of index coordinator.
+//	`stateCode` is current statement of this query node, indicating whether it's healthy.
 type QueryNode struct {
 	queryNodeLoopCtx    context.Context
 	queryNodeLoopCancel context.CancelFunc
@@ -121,8 +121,6 @@ type QueryNode struct {
 	//shard query service, handles shard-level query & search
 	queryShardService *queryShardService
 
-	// cgoPool is the worker pool to control concurrency of cgo call
-	cgoPool *concurrency.Pool
 	// pool for load/release channel
 	taskPool *concurrency.Pool
 }
@@ -197,6 +195,9 @@ func (node *QueryNode) InitSegcore() {
 	C.SegcoreInit(cEasyloggingYaml)
 	C.free(unsafe.Pointer(cEasyloggingYaml))
 
+	cpuNum := runtime.GOMAXPROCS(0)
+	C.SegcoreSetThreadPoolNum(C.uint32_t(cpuNum))
+
 	// override segcore chunk size
 	cChunkRows := C.int64_t(Params.QueryNodeCfg.ChunkRows)
 	C.SegcoreSetChunkRows(cChunkRows)
@@ -261,13 +262,6 @@ func (node *QueryNode) Init() error {
 		log.Info("queryNode try to connect etcd success", zap.Any("MetaRootPath", Params.EtcdCfg.MetaRootPath))
 
 		cpuNum := runtime.GOMAXPROCS(0)
-		node.cgoPool, err = concurrency.NewPool(cpuNum, ants.WithPreAlloc(true),
-			ants.WithExpiryDuration(math.MaxInt64))
-		if err != nil {
-			log.Error("QueryNode init cgo pool failed", zap.Error(err))
-			initError = err
-			return
-		}
 
 		node.taskPool, err = concurrency.NewPool(cpuNum, ants.WithPreAlloc(true))
 		if err != nil {
@@ -276,30 +270,13 @@ func (node *QueryNode) Init() error {
 			return
 		}
 
-		// ensure every cgopool go routine is locked with a OS thread
-		// so openmp in knowhere won't create too much request
-		sig := make(chan struct{})
-		wg := sync.WaitGroup{}
-		wg.Add(cpuNum)
-		for i := 0; i < cpuNum; i++ {
-			node.cgoPool.Submit(func() (interface{}, error) {
-				runtime.LockOSThread()
-				wg.Done()
-				<-sig
-				return nil, nil
-			})
-		}
-		wg.Wait()
-		close(sig)
-
-		node.metaReplica = newCollectionReplica(node.cgoPool)
+		node.metaReplica = newCollectionReplica()
 
 		node.loader = newSegmentLoader(
 			node.metaReplica,
 			node.etcdKV,
 			node.vectorStorage,
-			node.factory,
-			node.cgoPool)
+			node.factory)
 
 		node.dataSyncService = newDataSyncService(node.queryNodeLoopCtx, node.metaReplica, node.tSafeReplica, node.factory)
 
