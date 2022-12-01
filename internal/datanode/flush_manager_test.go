@@ -424,11 +424,12 @@ func TestRendezvousFlushManager_dropMode(t *testing.T) {
 		for i := 1; i < 11; i++ {
 			target[int64(i)] = struct{}{}
 			m.flushBufferData(nil, int64(i), true, false, &internalpb.MsgPosition{
-				MsgID: []byte{1},
+				MsgID: []byte{byte(i)},
 			})
 			m.flushDelData(nil, int64(i), &internalpb.MsgPosition{
-				MsgID: []byte{1},
+				MsgID: []byte{byte(i)},
 			})
+			t.Log(i)
 		}
 
 		m.notifyAllFlushed()
@@ -485,10 +486,10 @@ func TestRendezvousFlushManager_dropMode(t *testing.T) {
 
 		for i := 1; i < 11; i++ {
 			m.flushBufferData(nil, int64(i), true, false, &internalpb.MsgPosition{
-				MsgID: []byte{1},
+				MsgID: []byte{byte(i)},
 			})
 			m.flushDelData(nil, int64(i), &internalpb.MsgPosition{
-				MsgID: []byte{1},
+				MsgID: []byte{byte(i)},
 			})
 		}
 
