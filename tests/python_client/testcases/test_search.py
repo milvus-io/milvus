@@ -4476,3 +4476,45 @@ class  TestsearchDiskann(TestcaseBase):
                                          "limit": default_limit,
                                          "_async": _async}  
                             )
+    
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_search_with_scalar_field(self, dim, _async):
+        """
+        target: test search with scalar field
+        method: 1.create collection , insert data
+                2.create more index ,then load
+                3.search with expr
+        expected: assert index and search successfully
+        """
+        # 1. initialize with data
+        collection_w, _, _, ids = \
+            self.init_collection_general(prefix, True, dim=dim, primary_field=ct.default_string_field_name, is_index=True)[0:4]
+        # 2. create index
+        default_index = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
+        collection_w.create_index(ct.default_float_vec_field_name, default_index)
+        index_params = {}
+        collection_w.create_index(ct.default_float_field_name, index_params=index_params)
+        collection_w.create_index(ct.default_int64_field_name, index_params=index_params)
+
+        collection_w.load()
+
+        default_expr = "int64 in [1, 2, 3, 4]"
+
+        limit = 4
+
+
+        default_search_params ={"metric_type": "L2", "params": {"nprobe": 64}}
+        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        output_fields = [default_int64_field_name, default_float_field_name,  default_string_field_name]
+        search_res = collection_w.search(vectors[:default_nq], default_search_field,
+                                default_search_params, limit, 
+                                default_expr,
+                                output_fields=output_fields,
+                                _async=_async,
+                                travel_timestamp=0,
+                                check_task=CheckTasks.check_search_results,
+                                check_items={"nq": default_nq,
+                                            "ids": ids,
+                                            "limit": limit,
+                                            "_async": _async}  
+                                )
