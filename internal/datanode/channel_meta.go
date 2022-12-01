@@ -209,6 +209,7 @@ func (c *ChannelMeta) addSegment(req addSegmentReq) error {
 		historyInsertBuf: make([]*BufferData, 0),
 		historyDeleteBuf: make([]*DelDataBuf, 0),
 		startPos:         req.startPos,
+		lastSyncTs:       req.recoverTs,
 	}
 	seg.setType(req.segType)
 	// Set up pk stats
