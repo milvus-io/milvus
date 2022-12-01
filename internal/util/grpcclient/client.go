@@ -146,7 +146,7 @@ func (c *ClientBase[T]) resetConnection(client T) {
 func (c *ClientBase[T]) connect(ctx context.Context) error {
 	addr, err := c.getAddrFunc()
 	if err != nil {
-		log.Error("failed to get client address", zap.Error(err))
+		log.Warn("failed to get client address", zap.Error(err))
 		return err
 	}
 
@@ -275,7 +275,7 @@ func (c *ClientBase[T]) Call(ctx context.Context, caller func(client T) (any, er
 	ret, err := c.callOnce(ctx, caller)
 	if err != nil {
 		traceErr := fmt.Errorf("err: %w\n, %s", err, trace.StackTrace())
-		log.Error("ClientBase Call grpc first call get error", zap.String("role", c.GetRole()), zap.Error(traceErr))
+		log.Warn("ClientBase Call grpc first call get error", zap.String("role", c.GetRole()), zap.Error(traceErr))
 		return generic.Zero[T](), traceErr
 	}
 	return ret, err
@@ -302,7 +302,7 @@ func (c *ClientBase[T]) ReCall(ctx context.Context, caller func(client T) (any, 
 	ret, err = c.callOnce(ctx, caller)
 	if err != nil {
 		traceErr = fmt.Errorf("err: %w\n, %s", err, trace.StackTrace())
-		log.Error("ClientBase ReCall grpc second call get error", zap.String("role", c.GetRole()), zap.Error(traceErr))
+		log.Warn("ClientBase ReCall grpc second call get error", zap.String("role", c.GetRole()), zap.Error(traceErr))
 		return generic.Zero[T](), traceErr
 	}
 	return ret, err
