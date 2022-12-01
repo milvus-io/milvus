@@ -686,7 +686,7 @@ class TestInsertOperation(TestcaseBase):
         schema = cf.gen_default_collection_schema(auto_id=True)
         collection_w = self.init_collection_wrap(name=c_name, schema=schema)
         df = cf.gen_default_dataframe_data(nb=100)
-        error = {ct.err_code: 0, ct.err_msg: 'Auto_id is True, primary field should not have data'}
+        error = {ct.err_code: 1, ct.err_msg: 'Please don\'t provide data for auto_id primary field: int64'}
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
         assert collection_w.is_empty
 
@@ -1058,7 +1058,7 @@ class TestInsertInvalidBinary(TestcaseBase):
         vec_field, _ = self.field_schema_wrap.init_field_schema(name=ct.default_binary_vec_field_name,
                                                                 dtype=DataType.BINARY_VECTOR)
         df = [field_one, field_two, vec_field]
-        error = {ct.err_code: 0, ct.err_msg: "Data type is not support."}
+        error = {ct.err_code: 1, ct.err_msg: "data should be a list of list"}
         mutation_res, _ = collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1132,7 +1132,7 @@ class TestInsertString(TestcaseBase):
         df = cf.gen_default_dataframe_data(nb)
         new_float_value = pd.Series(data=[float(i) for i in range(nb)], dtype="float64")
         df.iloc[:, 2] = new_float_value
-        error = {ct.err_code: 0, ct.err_msg: 'The types of schema and data do not match'}
+        error = {ct.err_code: 1, ct.err_msg: 'The data type of field varchar doesn\'t match, expected: VARCHAR, got DOUBLE'}
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -1146,7 +1146,7 @@ class TestInsertString(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
         df = [cf.gen_int64_field(), cf.gen_string_field(name=ct.get_invalid_strs), cf.gen_float_vec_field()]
-        error = {ct.err_code: 0, ct.err_msg: 'Data type is not support.'}
+        error = {ct.err_code: 1, ct.err_msg: 'data should be a list of list'}
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L0)
@@ -1165,7 +1165,7 @@ class TestInsertString(TestcaseBase):
         field_three = cf.gen_string_field(max_length=nums)
         vec_field = cf.gen_float_vec_field()
         df = [field_one, field_two, field_three, vec_field]
-        error = {ct.err_code: 0, ct.err_msg: 'Data type is not support.'}
+        error = {ct.err_code: 1, ct.err_msg: 'data should be a list of list'}
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1182,7 +1182,7 @@ class TestInsertString(TestcaseBase):
         int_field = cf.gen_int64_field(is_primary=True)
         vec_field = cf.gen_float_vec_field()
         df = [string_field, int_field, vec_field]
-        error = {ct.err_code: 0, ct.err_msg: 'Data type is not support.'}
+        error = {ct.err_code: 1, ct.err_msg: 'data should be a list of list'}
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1199,7 +1199,7 @@ class TestInsertString(TestcaseBase):
         vec_field = cf.gen_float_vec_field()
         string_field = cf.gen_string_field(is_primary=True, auto_id=True)
         df = [int_field, string_field, vec_field]
-        error = {ct.err_code: 0, ct.err_msg: 'Data type is not support.'}
+        error = {ct.err_code: 1, ct.err_msg: 'data should be a list of list'}
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
