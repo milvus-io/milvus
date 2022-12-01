@@ -118,19 +118,19 @@ func TestIndexCodec(t *testing.T) {
 	indexCodec := NewIndexCodec()
 	blobs := []*Blob{
 		{
-			"12345",
-			[]byte{1, 2, 3, 4, 5, 6, 7, 1, 2, 3, 4, 5, 6, 7},
-			14,
+			Key:   "12345",
+			Value: []byte{1, 2, 3, 4, 5, 6, 7, 1, 2, 3, 4, 5, 6, 7},
+			Size:  14,
 		},
 		{
-			"6666",
-			[]byte{6, 6, 6, 6, 6, 1, 2, 3, 4, 5, 6, 7},
-			12,
+			Key:   "6666",
+			Value: []byte{6, 6, 6, 6, 6, 1, 2, 3, 4, 5, 6, 7},
+			Size:  12,
 		},
 		{
-			"8885",
-			[]byte{8, 8, 8, 8, 8, 8, 8, 8, 2, 3, 4, 5, 6, 7},
-			14,
+			Key:   "8885",
+			Value: []byte{8, 8, 8, 8, 8, 8, 8, 8, 2, 3, 4, 5, 6, 7},
+			Size:  14,
 		},
 	}
 	indexParams := map[string]string{
