@@ -1820,3 +1820,21 @@ class TestIndexDiskann(TestcaseBase):
         for t in threads:
             t.join()
 
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("dim", [1,2, 8, 16, 24])
+    def test_create_index_with_small_dim(self, dim):
+        """
+        target: test create index with diskann
+        method: 1.create collection, when the dim of the vector Less than 32
+                2.create diskann index
+        expected: create index raise an error
+        """
+        c_name = cf.gen_unique_str(prefix)
+        fields = [cf.gen_int64_field(is_primary=True), cf.gen_float_field(), cf.gen_string_field(),
+                  cf.gen_float_vec_field(dim=dim)]
+        schema = cf.gen_collection_schema(fields=fields)
+        collection_w = self.init_collection_wrap(name=c_name, schema=schema)
+        collection_w.create_index(default_float_vec_field_name, ct.default_diskann_index,
+                                  check_task=CheckTasks.err_res,
+                                  check_items={ct.err_code: 1,
+                                               ct.err_msg: "invalid index params"})
