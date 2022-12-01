@@ -30,6 +30,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/metautil"
+
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
@@ -503,8 +505,28 @@ func TestGetSegmentInfo(t *testing.T) {
 		defer closeTestServer(t, svr)
 
 		segInfo := &datapb.SegmentInfo{
-			ID:    0,
-			State: commonpb.SegmentState_Flushed,
+			ID:        0,
+			State:     commonpb.SegmentState_Flushed,
+			NumOfRows: 100,
+			Binlogs: []*datapb.FieldBinlog{
+				{
+					FieldID: 1,
+					Binlogs: []*datapb.Binlog{
+						{
+							EntriesNum: 20,
+							LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 0, 1, 801),
+						},
+						{
+							EntriesNum: 20,
+							LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 0, 1, 802),
+						},
+						{
+							EntriesNum: 20,
+							LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 0, 1, 803),
+						},
+					},
+				},
+			},
 		}
 		err := svr.meta.AddSegment(NewSegmentInfo(segInfo))
 		assert.Nil(t, err)
@@ -513,6 +535,9 @@ func TestGetSegmentInfo(t *testing.T) {
 			SegmentIDs: []int64{0},
 		}
 		resp, err := svr.GetSegmentInfo(svr.ctx, req)
+		assert.Equal(t, 1, len(resp.GetInfos()))
+		// Check that # of rows is corrected from 100 to 60.
+		assert.EqualValues(t, 60, resp.GetInfos()[0].GetNumOfRows())
 		assert.Nil(t, err)
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
@@ -2225,7 +2250,41 @@ func TestGetRecoveryInfo(t *testing.T) {
 		assert.NoError(t, err)
 
 		seg1 := createSegment(0, 0, 0, 100, 10, "vchan1", commonpb.SegmentState_Flushed)
+		seg1.Binlogs = []*datapb.FieldBinlog{
+			{
+				FieldID: 1,
+				Binlogs: []*datapb.Binlog{
+					{
+						EntriesNum: 20,
+						LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 0, 1, 901),
+					},
+					{
+						EntriesNum: 20,
+						LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 0, 1, 902),
+					},
+					{
+						EntriesNum: 20,
+						LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 0, 1, 903),
+					},
+				},
+			},
+		}
 		seg2 := createSegment(1, 0, 0, 100, 20, "vchan1", commonpb.SegmentState_Flushed)
+		seg2.Binlogs = []*datapb.FieldBinlog{
+			{
+				FieldID: 1,
+				Binlogs: []*datapb.Binlog{
+					{
+						EntriesNum: 30,
+						LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 1, 1, 801),
+					},
+					{
+						EntriesNum: 70,
+						LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 1, 1, 802),
+					},
+				},
+			},
+		}
 		err = svr.meta.AddSegment(NewSegmentInfo(seg1))
 		assert.Nil(t, err)
 		err = svr.meta.AddSegment(NewSegmentInfo(seg2))
@@ -2269,8 +2328,11 @@ func TestGetRecoveryInfo(t *testing.T) {
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 		assert.EqualValues(t, 1, len(resp.GetChannels()))
 		assert.EqualValues(t, 0, len(resp.GetChannels()[0].GetUnflushedSegmentIds()))
-		//assert.ElementsMatch(t, []*datapb.SegmentInfo{trimSegmentInfo(seg1), trimSegmentInfo(seg2)}, resp.GetChannels()[0].GetFlushedSegments())
+		assert.ElementsMatch(t, []int64{0, 1}, resp.GetChannels()[0].GetFlushedSegmentIds())
 		assert.EqualValues(t, 10, resp.GetChannels()[0].GetSeekPosition().GetTimestamp())
+		assert.EqualValues(t, 2, len(resp.GetBinlogs()))
+		// Row count corrected from 100 + 100 -> 100 + 60.
+		assert.EqualValues(t, 160, resp.GetBinlogs()[0].GetNumOfRows()+resp.GetBinlogs()[1].GetNumOfRows())
 	})
 
 	t.Run("test get recovery of unflushed segments ", func(t *testing.T) {
@@ -2293,7 +2355,41 @@ func TestGetRecoveryInfo(t *testing.T) {
 		assert.NoError(t, err)
 
 		seg1 := createSegment(3, 0, 0, 100, 30, "vchan1", commonpb.SegmentState_Growing)
+		seg1.Binlogs = []*datapb.FieldBinlog{
+			{
+				FieldID: 1,
+				Binlogs: []*datapb.Binlog{
+					{
+						EntriesNum: 20,
+						LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 3, 1, 901),
+					},
+					{
+						EntriesNum: 20,
+						LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 3, 1, 902),
+					},
+					{
+						EntriesNum: 20,
+						LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 3, 1, 903),
+					},
+				},
+			},
+		}
 		seg2 := createSegment(4, 0, 0, 100, 40, "vchan1", commonpb.SegmentState_Growing)
+		seg2.Binlogs = []*datapb.FieldBinlog{
+			{
+				FieldID: 1,
+				Binlogs: []*datapb.Binlog{
+					{
+						EntriesNum: 30,
+						LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 4, 1, 801),
+					},
+					{
+						EntriesNum: 70,
+						LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 4, 1, 802),
+					},
+				},
+			},
+		}
 		err = svr.meta.AddSegment(NewSegmentInfo(seg1))
 		assert.Nil(t, err)
 		err = svr.meta.AddSegment(NewSegmentInfo(seg2))
@@ -2832,7 +2928,7 @@ type rootCoordSegFlushComplete struct {
 	flag bool
 }
 
-//SegmentFlushCompleted, override default behavior
+// SegmentFlushCompleted, override default behavior
 func (rc *rootCoordSegFlushComplete) SegmentFlushCompleted(ctx context.Context, req *datapb.SegmentFlushCompletedMsg) (*commonpb.Status, error) {
 	if rc.flag {
 		return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
