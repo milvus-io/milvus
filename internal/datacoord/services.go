@@ -741,7 +741,8 @@ func (s *Server) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedS
 		// if this segment == nil, we assume this segment has been gc
 		if segment == nil ||
 			(segment.GetState() != commonpb.SegmentState_Dropped &&
-				segment.GetState() != commonpb.SegmentState_Flushed) {
+				segment.GetState() != commonpb.SegmentState_Flushed &&
+				segment.GetState() != commonpb.SegmentState_Flushing) {
 			continue
 		}
 		if !req.GetIncludeUnhealthy() && segment.GetState() == commonpb.SegmentState_Dropped {
