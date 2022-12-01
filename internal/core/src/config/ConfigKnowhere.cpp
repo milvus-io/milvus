@@ -21,6 +21,7 @@
 #include "easyloggingpp/easylogging++.h"
 #include "log/Log.h"
 #include "knowhere/archive/KnowhereConfig.h"
+#include "knowhere/common/ThreadPool.h"
 
 namespace milvus::config {
 
@@ -71,6 +72,11 @@ KnowhereSetSimdType(const char* value) {
         LOG_SERVER_ERROR_ << e.what();
         PanicInfo(e.what());
     }
+}
+
+void
+KnowhereInitThreadPool(const uint32_t num_threads) {
+    knowhere::ThreadPool::InitGlobalThreadPool(num_threads);
 }
 
 }  // namespace milvus::config

@@ -21,7 +21,6 @@ import (
 	"io/ioutil"
 	"net/url"
 	"os"
-	"runtime"
 	"testing"
 	"time"
 
@@ -29,7 +28,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.etcd.io/etcd/server/v3/embed"
 
-	"github.com/milvus-io/milvus/internal/util/concurrency"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 
@@ -101,19 +99,14 @@ func newQueryNodeMock() *QueryNode {
 	svr := NewQueryNode(ctx, factory)
 	tsReplica := newTSafeReplica()
 
-	pool, err := concurrency.NewPool(runtime.GOMAXPROCS(0))
-	if err != nil {
-		panic(err)
-	}
-
-	replica := newCollectionReplica(pool)
+	replica := newCollectionReplica()
 	svr.metaReplica = replica
 	svr.dataSyncService = newDataSyncService(ctx, svr.metaReplica, tsReplica, factory)
 	svr.vectorStorage, err = factory.NewPersistentStorageChunkManager(ctx)
 	if err != nil {
 		panic(err)
 	}
-	svr.loader = newSegmentLoader(svr.metaReplica, etcdKV, svr.vectorStorage, factory, pool)
+	svr.loader = newSegmentLoader(svr.metaReplica, etcdKV, svr.vectorStorage, factory)
 	svr.etcdKV = etcdKV
 
 	return svr

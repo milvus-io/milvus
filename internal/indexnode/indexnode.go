@@ -29,18 +29,15 @@ import (
 	"context"
 	"errors"
 	"io"
-	"math"
 	"math/rand"
 	"os"
 	"path"
-	"runtime"
 	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
 	"unsafe"
 
-	"github.com/panjf2000/ants/v2"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
@@ -50,7 +47,6 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/concurrency"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/hardware"
 	"github.com/milvus-io/milvus/internal/util/initcore"
@@ -101,8 +97,6 @@ type IndexNode struct {
 	initOnce  sync.Once
 	stateLock sync.Mutex
 	tasks     map[taskKey]*taskInfo
-
-	cgoPool *concurrency.Pool
 }
 
 // NewIndexNode creates a new IndexNode component.
@@ -203,27 +197,6 @@ func (i *IndexNode) Init() error {
 		i.closer = trace.InitTracing("index_node")
 
 		i.initKnowhere()
-
-		// IndexNode will not execute tasks concurrently, so the size of goroutines pool is 1.
-		i.cgoPool, err = concurrency.NewPool(1, ants.WithPreAlloc(true),
-			ants.WithExpiryDuration(math.MaxInt64))
-		if err != nil {
-			log.Error("IndexNode init cgo pool failed", zap.Error(err))
-			initErr = err
-			return
-		}
-
-		sig := make(chan struct{})
-		wg := sync.WaitGroup{}
-		wg.Add(1)
-		i.cgoPool.Submit(func() (interface{}, error) {
-			runtime.LockOSThread()
-			wg.Done()
-			<-sig
-			return nil, nil
-		})
-		wg.Wait()
-		close(sig)
 	})
 
 	log.Info("Init IndexNode finished", zap.Error(initErr))
@@ -338,7 +311,7 @@ func (i *IndexNode) GetNodeID() int64 {
 	return paramtable.GetNodeID()
 }
 
-//ShowConfigurations returns the configurations of indexNode matching req.Pattern
+// ShowConfigurations returns the configurations of indexNode matching req.Pattern
 func (i *IndexNode) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
 	if !i.isHealthy() {
 		log.Warn("IndexNode.ShowConfigurations failed",

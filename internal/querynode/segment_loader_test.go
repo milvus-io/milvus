@@ -39,7 +39,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/util/concurrency"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
 
@@ -187,9 +186,6 @@ func TestSegmentLoader_loadSegmentFieldsData(t *testing.T) {
 		loader := node.loader
 		assert.NotNil(t, loader)
 
-		pool, err := concurrency.NewPool(runtime.GOMAXPROCS(0))
-		require.NoError(t, err)
-
 		var fieldPk *schemapb.FieldSchema
 		switch pkType {
 		case schemapb.DataType_Int64:
@@ -239,8 +235,7 @@ func TestSegmentLoader_loadSegmentFieldsData(t *testing.T) {
 			defaultDMLChannel,
 			segmentTypeSealed,
 			defaultSegmentVersion,
-			defaultSegmentStartPosition,
-			pool)
+			defaultSegmentStartPosition)
 		assert.Nil(t, err)
 
 		binlog, _, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, schema)
@@ -379,9 +374,6 @@ func TestSegmentLoader_invalid(t *testing.T) {
 		loader := node.loader
 		assert.NotNil(t, loader)
 
-		pool, err := concurrency.NewPool(runtime.GOMAXPROCS(0))
-		require.NoError(t, err)
-
 		cm := &mocks.ChunkManager{}
 		cm.EXPECT().Read(mock.Anything, mock.AnythingOfType("string")).Return(nil, errors.New("mocked"))
 
@@ -405,8 +397,7 @@ func TestSegmentLoader_invalid(t *testing.T) {
 			defaultDMLChannel,
 			segmentTypeSealed,
 			defaultSegmentVersion,
-			defaultSegmentStartPosition,
-			pool)
+			defaultSegmentStartPosition)
 		assert.Nil(t, err)
 
 		binlog, _, err := saveBinLog(ctx, defaultCollectionID, defaultPartitionID, defaultSegmentID, defaultMsgLength, schema)
@@ -424,9 +415,6 @@ func TestSegmentLoader_invalid(t *testing.T) {
 		loader := node.loader
 		assert.NotNil(t, loader)
 
-		pool, err := concurrency.NewPool(runtime.GOMAXPROCS(0))
-		require.NoError(t, err)
-
 		cm := &mocks.ChunkManager{}
 		cm.EXPECT().Read(mock.Anything, mock.AnythingOfType("string")).Return(nil, errors.New("mocked"))
 
@@ -450,8 +438,7 @@ func TestSegmentLoader_invalid(t *testing.T) {
 			defaultDMLChannel,
 			segmentTypeSealed,
 			defaultSegmentVersion,
-			defaultSegmentStartPosition,
-			pool)
+			defaultSegmentStartPosition)
 		assert.Nil(t, err)
 
 		err = loader.loadFieldIndexData(ctx, segment, &querypb.FieldIndexInfo{
@@ -495,7 +482,7 @@ func TestSegmentLoader_testLoadGrowing(t *testing.T) {
 		collection, err := node.metaReplica.getCollectionByID(defaultCollectionID)
 		assert.NoError(t, err)
 
-		segment, err := newSegment(collection, defaultSegmentID+1, defaultPartitionID, defaultCollectionID, defaultDMLChannel, segmentTypeGrowing, defaultSegmentVersion, defaultSegmentStartPosition, loader.cgoPool)
+		segment, err := newSegment(collection, defaultSegmentID+1, defaultPartitionID, defaultCollectionID, defaultDMLChannel, segmentTypeGrowing, defaultSegmentVersion, defaultSegmentStartPosition)
 		assert.Nil(t, err)
 
 		insertData, err := genInsertData(defaultMsgLength, collection.schema)
@@ -526,7 +513,7 @@ func TestSegmentLoader_testLoadGrowing(t *testing.T) {
 		collection, err := node.metaReplica.getCollectionByID(defaultCollectionID)
 		assert.NoError(t, err)
 
-		segment, err := newSegment(collection, defaultSegmentID+1, defaultPartitionID, defaultCollectionID, defaultDMLChannel, segmentTypeGrowing, defaultSegmentVersion, defaultSegmentStartPosition, node.loader.cgoPool)
+		segment, err := newSegment(collection, defaultSegmentID+1, defaultPartitionID, defaultCollectionID, defaultDMLChannel, segmentTypeGrowing, defaultSegmentVersion, defaultSegmentStartPosition)
 		assert.Nil(t, err)
 
 		insertData, err := genInsertData(defaultMsgLength, collection.schema)

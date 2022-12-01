@@ -36,7 +36,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/util/concurrency"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/samber/lo"
@@ -155,8 +154,6 @@ type metaReplica struct {
 
 	// segmentsBlackList stores segments which are still loading
 	segmentsBlackList typeutil.UniqueSet
-
-	cgoPool *concurrency.Pool
 }
 
 // getSegmentsMemSize get the memory size in bytes of all the Segments
@@ -577,7 +574,7 @@ func (replica *metaReplica) addSegment(segmentID UniqueID, partitionID UniqueID,
 	collection.mu.Lock()
 	defer collection.mu.Unlock()
 
-	seg, err := newSegment(collection, segmentID, partitionID, collectionID, vChannelID, segType, version, seekPosition, replica.cgoPool)
+	seg, err := newSegment(collection, segmentID, partitionID, collectionID, vChannelID, segType, version, seekPosition)
 	if err != nil {
 		return err
 	}
@@ -922,7 +919,7 @@ func (replica *metaReplica) removeCollectionVDeltaChannel(collectionID UniqueID,
 }
 
 // newCollectionReplica returns a new ReplicaInterface
-func newCollectionReplica(pool *concurrency.Pool) ReplicaInterface {
+func newCollectionReplica() ReplicaInterface {
 	var replica ReplicaInterface = &metaReplica{
 		collections:     make(map[UniqueID]*Collection),
 		partitions:      make(map[UniqueID]*Partition),
@@ -932,8 +929,6 @@ func newCollectionReplica(pool *concurrency.Pool) ReplicaInterface {
 		excludedSegments: make(map[UniqueID][]*datapb.SegmentInfo),
 
 		segmentsBlackList: make(typeutil.UniqueSet),
-
-		cgoPool: pool,
 	}
 
 	return replica
