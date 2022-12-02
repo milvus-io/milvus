@@ -75,9 +75,9 @@ func (b *baseReadTask) SetStep(step TaskStep) {
 	switch step {
 	case TaskStepEnqueue:
 		b.queueDur = 0
-		b.tr.Record("enqueueStart")
+		b.tr.Record("enqueue done")
 	case TaskStepPreExecute:
-		b.queueDur = b.tr.Record("enqueueEnd")
+		b.queueDur = b.tr.Record("start to process")
 	}
 }
 
@@ -109,6 +109,8 @@ func (b *baseReadTask) Notify(err error) {
 	switch b.step {
 	case TaskStepEnqueue:
 		b.queueDur = b.tr.Record("enqueueEnd")
+	case TaskStepPostExecute:
+		b.tr.Record("execute task done")
 	}
 	b.baseTask.Notify(err)
 }
@@ -175,6 +177,6 @@ func (b *baseReadTask) Ready() (bool, error) {
 		zap.Any("delta milliseconds", gt.Sub(st).Milliseconds()),
 		zap.Any("channel", channel),
 		zap.Any("msgID", b.ID()))
-	b.waitTsDur = b.waitTSafeTr.ElapseSpan()
+	b.waitTsDur = b.waitTSafeTr.Elapse("wait for tsafe done")
 	return true, nil
 }

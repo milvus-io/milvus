@@ -411,7 +411,7 @@ func newSearchTask(ctx context.Context, src *querypb.SearchRequest) (*searchTask
 			TravelTimestamp:    src.Req.GetTravelTimestamp(),
 			GuaranteeTimestamp: src.Req.GetGuaranteeTimestamp(),
 			TimeoutTimestamp:   src.Req.GetTimeoutTimestamp(),
-			tr:                 timerecord.NewTimeRecorder("searchTask"),
+			tr:                 timerecord.NewTimeRecorderWithTrace(ctx, "searchTask"),
 			DataScope:          src.GetScope(),
 		},
 		iReq:             src.Req,
