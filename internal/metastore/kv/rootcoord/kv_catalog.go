@@ -814,7 +814,7 @@ func (kc *Catalog) AlterGrant(ctx context.Context, tenant string, entity *milvus
 
 	v, err = kc.Txn.Load(k)
 	if err != nil {
-		log.Error("fail to load grant privilege entity", zap.String("key", k), zap.Any("type", operateType), zap.Error(err))
+		log.Warn("fail to load grant privilege entity", zap.String("key", k), zap.Any("type", operateType), zap.Error(err))
 		if funcutil.IsRevoke(operateType) {
 			if common.IsKeyNotExistError(err) {
 				return common.NewIgnorableError(fmt.Errorf("the grant[%s] isn't existed", k))
@@ -837,7 +837,7 @@ func (kc *Catalog) AlterGrant(ctx context.Context, tenant string, entity *milvus
 	k = funcutil.HandleTenantForEtcdKey(GranteeIDPrefix, tenant, fmt.Sprintf("%s/%s", idStr, privilegeName))
 	_, err = kc.Txn.Load(k)
 	if err != nil {
-		log.Error("fail to load the grantee id", zap.String("key", k), zap.Error(err))
+		log.Warn("fail to load the grantee id", zap.String("key", k), zap.Error(err))
 		if !common.IsKeyNotExistError(err) {
 			return err
 		}
