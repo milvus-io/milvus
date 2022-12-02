@@ -1612,6 +1612,8 @@ type indexNodeConfig struct {
 	EnableDisk             ParamItem
 	DiskCapacityLimit      ParamItem
 	MaxDiskUsagePercentage ParamItem
+
+	GracefulStopTimeout ParamItem
 }
 
 func (p *indexNodeConfig) init(base *BaseTable) {
@@ -1657,4 +1659,11 @@ func (p *indexNodeConfig) init(base *BaseTable) {
 		},
 	}
 	p.MaxDiskUsagePercentage.Init(base.mgr)
+
+	p.GracefulStopTimeout = ParamItem{
+		Key:          "indexNode.gracefulStopTimeout",
+		Version:      "2.2.1",
+		FallbackKeys: []string{"common.gracefulStopTimeout"},
+	}
+	p.GracefulStopTimeout.Init(base.mgr)
 }

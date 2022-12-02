@@ -34,16 +34,18 @@ import (
 
 // NodeManager is used by IndexCoord to manage the client of IndexNode.
 type NodeManager struct {
-	nodeClients map[UniqueID]types.IndexNode
-	pq          *PriorityQueue
-	lock        sync.RWMutex
-	ctx         context.Context
+	nodeClients   map[UniqueID]types.IndexNode
+	stoppingNodes map[UniqueID]struct{}
+	pq            *PriorityQueue
+	lock          sync.RWMutex
+	ctx           context.Context
 }
 
 // NewNodeManager is used to create a new NodeManager.
 func NewNodeManager(ctx context.Context) *NodeManager {
 	return &NodeManager{
-		nodeClients: make(map[UniqueID]types.IndexNode),
+		nodeClients:   make(map[UniqueID]types.IndexNode),
+		stoppingNodes: make(map[UniqueID]struct{}),
 		pq: &PriorityQueue{
 			policy: PeekClientV1,
 		},
@@ -73,9 +75,17 @@ func (nm *NodeManager) RemoveNode(nodeID UniqueID) {
 	log.Debug("IndexCoord", zap.Any("Remove node with ID", nodeID))
 	nm.lock.Lock()
 	delete(nm.nodeClients, nodeID)
+	delete(nm.stoppingNodes, nodeID)
 	nm.lock.Unlock()
 	nm.pq.Remove(nodeID)
 	metrics.IndexCoordIndexNodeNum.WithLabelValues().Dec()
+}
+
+func (nm *NodeManager) StoppingNode(nodeID UniqueID) {
+	log.Info("IndexCoord", zap.Any("Stopping node with ID", nodeID))
+	nm.lock.Lock()
+	defer nm.lock.Unlock()
+	nm.stoppingNodes[nodeID] = struct{}{}
 }
 
 // AddNode adds the client of IndexNode.
@@ -224,7 +234,9 @@ func (nm *NodeManager) GetAllClients() map[UniqueID]types.IndexNode {
 
 	allClients := make(map[UniqueID]types.IndexNode, len(nm.nodeClients))
 	for nodeID, client := range nm.nodeClients {
-		allClients[nodeID] = client
+		if _, ok := nm.stoppingNodes[nodeID]; !ok {
+			allClients[nodeID] = client
+		}
 	}
 
 	return allClients

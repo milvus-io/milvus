@@ -28,6 +28,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/typeutil"
+
 	"github.com/golang/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -523,6 +525,81 @@ func testIndexCoord(t *testing.T) {
 		resp, err := ic.GetMetrics(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	t.Run("WatchNodeState", func(t *testing.T) {
+		allClients := ic.nodeManager.GetAllClients()
+		nodeSession := sessionutil.NewSession(context.Background(), Params.EtcdCfg.MetaRootPath.GetValue(), etcdCli, sessionutil.WithResueNodeID(true))
+		originNodeID := paramtable.GetNodeID()
+		defer func() {
+			paramtable.SetNodeID(originNodeID)
+		}()
+		paramtable.SetNodeID(100)
+		nodeSession.Init(typeutil.IndexNodeRole, "127.0.0.1:11111", false, true)
+		nodeSession.Register()
+
+		addNodeChan := make(chan struct{})
+		go func() {
+			for {
+				time.Sleep(200 * time.Millisecond)
+				if len(ic.nodeManager.GetAllClients()) > len(allClients) {
+					close(addNodeChan)
+					break
+				}
+			}
+		}()
+		select {
+		case <-addNodeChan:
+		case <-time.After(10 * time.Second):
+			assert.Fail(t, "fail to add node")
+		}
+		var newNodeID UniqueID = -1
+		for id := range ic.nodeManager.GetAllClients() {
+			if _, ok := allClients[id]; !ok {
+				newNodeID = id
+				break
+			}
+		}
+
+		nodeSession.GoingStop()
+		stoppingNodeChan := make(chan struct{})
+		go func() {
+			for {
+				time.Sleep(200 * time.Millisecond)
+				ic.nodeManager.lock.RLock()
+				_, ok := ic.nodeManager.stoppingNodes[newNodeID]
+				ic.nodeManager.lock.RUnlock()
+				if ok {
+					close(stoppingNodeChan)
+					break
+				}
+			}
+		}()
+		select {
+		case <-stoppingNodeChan:
+		case <-time.After(10 * time.Second):
+			assert.Fail(t, "fail to stop node")
+		}
+
+		nodeSession.Revoke(time.Second)
+		deleteNodeChan := make(chan struct{})
+		go func() {
+			for {
+				time.Sleep(200 * time.Millisecond)
+				ic.nodeManager.lock.RLock()
+				_, ok := ic.nodeManager.stoppingNodes[newNodeID]
+				ic.nodeManager.lock.RUnlock()
+				if !ok {
+					close(deleteNodeChan)
+					break
+				}
+			}
+		}()
+		select {
+		case <-deleteNodeChan:
+		case <-time.After(10 * time.Second):
+			assert.Fail(t, "fail to stop node")
+		}
 	})
 
 	// Stop IndexCoord

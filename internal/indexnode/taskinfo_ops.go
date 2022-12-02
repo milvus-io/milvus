@@ -1,13 +1,14 @@
 package indexnode
 
 import (
-	"github.com/golang/protobuf/proto"
-	"github.com/milvus-io/milvus/internal/common"
-	"go.uber.org/zap"
+	"time"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"go.uber.org/zap"
 )
 
 func (i *IndexNode) loadOrStoreTask(ClusterID string, buildID UniqueID, info *taskInfo) *taskInfo {
@@ -90,4 +91,41 @@ func (i *IndexNode) deleteAllTasks() []*taskInfo {
 		deleted = append(deleted, info)
 	}
 	return deleted
+}
+
+func (i *IndexNode) hasInProgressTask() bool {
+	i.stateLock.Lock()
+	defer i.stateLock.Unlock()
+	for _, info := range i.tasks {
+		if info.state == commonpb.IndexState_InProgress {
+			return true
+		}
+	}
+	return false
+}
+
+func (i *IndexNode) waitTaskFinish() {
+	if !i.hasInProgressTask() {
+		return
+	}
+
+	gracefulTimeout := Params.IndexNodeCfg.GracefulStopTimeout
+	timer := time.NewTimer(gracefulTimeout.GetAsDuration(time.Second))
+
+	for {
+		select {
+		case <-time.Tick(time.Second):
+			if !i.hasInProgressTask() {
+				return
+			}
+		case <-timer.C:
+			log.Warn("timeout, the index node has some progress task")
+			for _, info := range i.tasks {
+				if info.state == commonpb.IndexState_InProgress {
+					log.Warn("progress task", zap.Any("info", info))
+				}
+			}
+			return
+		}
+	}
 }

@@ -38,15 +38,13 @@ import (
 	"time"
 	"unsafe"
 
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/hardware"
 	"github.com/milvus-io/milvus/internal/util/initcore"
@@ -54,6 +52,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
 )
 
 // TODO add comments
@@ -83,7 +83,8 @@ type IndexNode struct {
 
 	sched *TaskScheduler
 
-	once sync.Once
+	once     sync.Once
+	stopOnce sync.Once
 
 	factory        dependency.Factory
 	storageFactory StorageFactory
@@ -220,22 +221,34 @@ func (i *IndexNode) Start() error {
 
 // Stop closes the server.
 func (i *IndexNode) Stop() error {
-	// https://github.com/milvus-io/milvus/issues/12282
-	i.UpdateStateCode(commonpb.StateCode_Abnormal)
-	// cleanup all running tasks
-	deletedTasks := i.deleteAllTasks()
-	for _, task := range deletedTasks {
-		if task.cancel != nil {
-			task.cancel()
+	i.stopOnce.Do(func() {
+		i.UpdateStateCode(commonpb.StateCode_Stopping)
+		log.Info("Index node stopping")
+		err := i.session.GoingStop()
+		if err != nil {
+			log.Warn("session fail to go stopping state", zap.Error(err))
+		} else {
+			i.waitTaskFinish()
 		}
-	}
-	i.loopCancel()
-	if i.sched != nil {
-		i.sched.Close()
-	}
-	i.session.Revoke(time.Second)
 
-	log.Info("Index node stopped.")
+		// https://github.com/milvus-io/milvus/issues/12282
+		i.UpdateStateCode(commonpb.StateCode_Abnormal)
+		log.Info("Index node abnormal")
+		// cleanup all running tasks
+		deletedTasks := i.deleteAllTasks()
+		for _, task := range deletedTasks {
+			if task.cancel != nil {
+				task.cancel()
+			}
+		}
+		i.loopCancel()
+		if i.sched != nil {
+			i.sched.Close()
+		}
+		i.session.Revoke(time.Second)
+
+		log.Info("Index node stopped.")
+	})
 	return nil
 }
 
@@ -247,11 +260,6 @@ func (i *IndexNode) UpdateStateCode(code commonpb.StateCode) {
 // SetEtcdClient assigns parameter client to its member etcdCli
 func (i *IndexNode) SetEtcdClient(client *clientv3.Client) {
 	i.etcdCli = client
-}
-
-func (i *IndexNode) isHealthy() bool {
-	code := i.stateCode.Load().(commonpb.StateCode)
-	return code == commonpb.StateCode_Healthy
 }
 
 // GetComponentStates gets the component states of IndexNode.
@@ -310,7 +318,7 @@ func (i *IndexNode) GetNodeID() int64 {
 
 // ShowConfigurations returns the configurations of indexNode matching req.Pattern
 func (i *IndexNode) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
-	if !i.isHealthy() {
+	if !commonpbutil.IsHealthyOrStopping(i.stateCode) {
 		log.Warn("IndexNode.ShowConfigurations failed",
 			zap.Int64("nodeId", paramtable.GetNodeID()),
 			zap.String("req", req.Pattern),
