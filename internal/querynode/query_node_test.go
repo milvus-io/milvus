@@ -18,9 +18,8 @@ package querynode
 
 import (
 	"context"
-	"io/ioutil"
-	"net/url"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -28,6 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.etcd.io/etcd/server/v3/embed"
 
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 
@@ -116,46 +116,24 @@ func newMessageStreamFactory() dependency.Factory {
 	return dependency.NewDefaultFactory(true)
 }
 
-func startEmbedEtcdServer() (*embed.Etcd, error) {
-	dir, err := ioutil.TempDir(os.TempDir(), "milvus_ut")
-	if err != nil {
-		return nil, err
-	}
-	defer os.RemoveAll(dir)
-	config := embed.NewConfig()
-
-	config.Dir = os.TempDir()
-	config.LogLevel = "warn"
-	config.LogOutputs = []string{"default"}
-	u, err := url.Parse("http://localhost:8989")
-	if err != nil {
-		return nil, err
-	}
-	config.LCUrls = []url.URL{*u}
-	u, err = url.Parse("http://localhost:8990")
-	if err != nil {
-		return nil, err
-	}
-	config.LPUrls = []url.URL{*u}
-
-	return embed.StartEtcd(config)
-}
-
 func TestMain(m *testing.M) {
 	var err error
+	var tempDir string
 	rateCol, err = newRateCollector()
 	if err != nil {
 		panic("init test failed, err = " + err.Error())
 	}
 	// init embed etcd
-	embedetcdServer, err = startEmbedEtcdServer()
+	embedetcdServer, tempDir, err = etcd.StartTestEmbedEtcdServer()
 	if err != nil {
-		os.Exit(1)
+		log.Fatal(err.Error())
 	}
-
+	defer os.RemoveAll(tempDir)
 	defer embedetcdServer.Close()
+
+	addrs := etcd.GetEmbedEtcdEndpoints(embedetcdServer)
 	// setup env for etcd endpoint
-	os.Setenv("etcd.endpoints", "127.0.0.1:8989")
+	os.Setenv("etcd.endpoints", strings.Join(addrs, ","))
 	setup()
 	exitCode := m.Run()
 	os.Exit(exitCode)

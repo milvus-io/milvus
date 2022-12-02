@@ -49,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
 	"go.uber.org/zap"
 )
 
@@ -58,6 +59,18 @@ type ctxKey struct{}
 
 func TestMain(t *testing.M) {
 	rand.Seed(time.Now().Unix())
+	// init embed etcd
+	embedetcdServer, tempDir, err := etcd.StartTestEmbedEtcdServer()
+	if err != nil {
+		log.Fatal(err.Error())
+	}
+	defer os.RemoveAll(tempDir)
+	defer embedetcdServer.Close()
+
+	addrs := etcd.GetEmbedEtcdEndpoints(embedetcdServer)
+	// setup env for etcd endpoint
+	os.Setenv("etcd.endpoints", strings.Join(addrs, ","))
+
 	path := "/tmp/milvus_ut/rdb_data"
 	os.Setenv("ROCKSMQ_PATH", path)
 	defer os.RemoveAll(path)
@@ -67,7 +80,6 @@ func TestMain(t *testing.M) {
 	// change to specific channel for test
 	Params.CommonCfg.DataCoordTimeTick = Params.CommonCfg.DataCoordTimeTick + strconv.Itoa(rand.Int())
 
-	var err error
 	rateCol, err = newRateCollector()
 	if err != nil {
 		panic("init test failed, err = " + err.Error())
