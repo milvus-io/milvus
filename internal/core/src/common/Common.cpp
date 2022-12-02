@@ -21,6 +21,7 @@ namespace milvus {
 
 int64_t index_file_slice_size = DEFAULT_INDEX_FILE_SLICE_SIZE;
 int64_t thread_core_coefficient = DEFAULT_THREAD_CORE_COEFFICIENT;
+int64_t disk_index_max_memory_limit = DEFAULT_DISK_INDEX_MAX_MEMORY_LIMIT;
 int cpu_num = DEFAULT_CPU_NUM;
 
 void
@@ -33,6 +34,12 @@ void
 SetThreadCoreCoefficient(const int64_t coefficient) {
     thread_core_coefficient = coefficient;
     LOG_SEGCORE_DEBUG_ << "set thread pool core coefficient: " << thread_core_coefficient;
+}
+
+void
+SetDiskIndexMaxMemoryLimit(const int64_t max_memory) {
+    disk_index_max_memory_limit = max_memory;
+    LOG_SEGCORE_DEBUG_ << "set disk index max memory limit: " << disk_index_max_memory_limit << " MB";
 }
 
 void

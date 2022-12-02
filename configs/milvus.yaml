@@ -393,6 +393,8 @@ common:
     BeamWidthRatio: 4.0
   # This parameter specify how many times the number of threads is the number of cores
   threadCoreCoefficient : 10
+  # This parameter specify how much memory when caching index to local disk
+  diskIndexMaxMemoryLimit : 20 # MB
 
   # please adjust in embedded Milvus: local
   storageType: minio

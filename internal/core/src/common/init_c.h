@@ -30,6 +30,9 @@ void
 InitThreadCoreCoefficient(const int64_t);
 
 void
+InitDiskIndexMaxMemoryLimit(const int64_t);
+
+void
 InitCpuNum(const int);
 
 void

@@ -32,9 +32,10 @@ const (
 	DefaultRetentionDuration = 3600 * 24
 
 	// DefaultIndexSliceSize defines the default slice size of index file when serializing.
-	DefaultIndexSliceSize        = 16
-	DefaultGracefulTime          = 5000 //ms
-	DefaultThreadCoreCoefficient = 10
+	DefaultIndexSliceSize          = 16
+	DefaultGracefulTime            = 5000 //ms
+	DefaultThreadCoreCoefficient   = 10
+	DefaultDiskIndexMaxMemoryLimit = 20 // 20M
 
 	DefaultSessionTTL        = 60 //s
 	DefaultSessionRetryTimes = 30
@@ -145,6 +146,7 @@ type commonConfig struct {
 
 	IndexSliceSize           int64
 	ThreadCoreCoefficient    int64
+	DiskIndexMaxMemoryLimit  int64
 	MaxDegree                int64
 	SearchListSize           int64
 	PQCodeBudgetGBRatio      float64
@@ -206,6 +208,7 @@ func (p *commonConfig) init(base *BaseTable) {
 	p.initGracefulTime()
 	p.initStorageType()
 	p.initThreadCoreCoefficient()
+	p.initDiskIndexMaxMemoryLimit()
 
 	p.initEnableAuthorization()
 
@@ -406,6 +409,10 @@ func (p *commonConfig) initIndexSliceSize() {
 
 func (p *commonConfig) initThreadCoreCoefficient() {
 	p.ThreadCoreCoefficient = p.Base.ParseInt64WithDefault("common.threadCoreCoefficient", DefaultThreadCoreCoefficient)
+}
+
+func (p *commonConfig) initDiskIndexMaxMemoryLimit() {
+	p.DiskIndexMaxMemoryLimit = p.Base.ParseInt64WithDefault("common.diskIndexMaxMemoryLimit", DefaultDiskIndexMaxMemoryLimit)
 }
 
 func (p *commonConfig) initPQCodeBudgetGBRatio() {

@@ -160,6 +160,9 @@ func (i *IndexNode) initKnowhere() {
 	cThreadCoreCoefficient := C.int64_t(Params.CommonCfg.ThreadCoreCoefficient)
 	C.InitThreadCoreCoefficient(cThreadCoreCoefficient)
 
+	cDiskIndexMaxMemoryLimit := C.int64_t(Params.CommonCfg.DiskIndexMaxMemoryLimit)
+	C.InitDiskIndexMaxMemoryLimit(cDiskIndexMaxMemoryLimit)
+
 	cCpuNum := C.int(hardware.GetCPUNum())
 	C.InitCpuNum(cCpuNum)
 

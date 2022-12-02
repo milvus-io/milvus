@@ -23,7 +23,7 @@
 #include "common/Slice.h"
 #include "common/Common.h"
 
-std::once_flag flag1, flag2, flag3, flag4;
+std::once_flag flag1, flag2, flag3, flag4, flag5;
 
 void
 InitLocalRootPath(const char* root_path) {
@@ -48,4 +48,10 @@ void
 InitCpuNum(const int value) {
     std::call_once(
         flag4, [](int value) { milvus::SetCpuNum(value); }, value);
+}
+
+void
+InitDiskIndexMaxMemoryLimit(const int64_t value) {
+    std::call_once(
+        flag5, [](int64_t value) { milvus::SetDiskIndexMaxMemoryLimit(value); }, value);
 }
