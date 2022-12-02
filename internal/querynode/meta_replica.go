@@ -26,9 +26,6 @@ import "C"
 import (
 	"errors"
 	"fmt"
-	"strconv"
-	"sync"
-
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
@@ -40,6 +37,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
+	"strconv"
+	"sync"
 )
 
 var (

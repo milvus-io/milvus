@@ -23,12 +23,14 @@ import (
 
 // Msg is an interface which has a function named TimeTick
 type Msg = flowgraph.Msg
+type BaseMsg = flowgraph.BaseMsg
 
 // MsgStreamMsg is an implementation of interface Msg
 type MsgStreamMsg = flowgraph.MsgStreamMsg
 
 // insertMsg is an implementation of interface Msg
 type insertMsg struct {
+	BaseMsg
 	insertMessages []*msgstream.InsertMsg
 	deleteMessages []*msgstream.DeleteMsg
 	timeRange      TimeRange
@@ -36,12 +38,14 @@ type insertMsg struct {
 
 // deleteMsg is an implementation of interface Msg
 type deleteMsg struct {
+	BaseMsg
 	deleteMessages []*msgstream.DeleteMsg
 	timeRange      TimeRange
 }
 
 // serviceTimeMsg is an implementation of interface Msg
 type serviceTimeMsg struct {
+	BaseMsg
 	timeRange TimeRange
 }
 

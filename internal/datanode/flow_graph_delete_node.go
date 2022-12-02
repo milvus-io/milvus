@@ -67,22 +67,23 @@ func (dn *deleteNode) showDelBuf(segIDs []UniqueID, ts Timestamp) {
 	}
 }
 
-// Operate implementing flowgraph.Node, performs delete data process
-func (dn *deleteNode) Operate(in []Msg) []Msg {
-	if in == nil {
-		log.Debug("type assertion failed for flowGraphMsg because it's nil")
-		return []Msg{}
+func (dn *deleteNode) IsValidInMsg(in []Msg) bool {
+	if !dn.BaseNode.IsValidInMsg(in) {
+		return false
 	}
-
-	if len(in) != 1 {
-		log.Warn("Invalid operate message input in deleteNode", zap.Int("input length", len(in)))
-		return []Msg{}
-	}
-
-	fgMsg, ok := in[0].(*flowGraphMsg)
+	_, ok := in[0].(*flowGraphMsg)
 	if !ok {
 		log.Warn("type assertion failed for flowGraphMsg", zap.String("name", reflect.TypeOf(in[0]).Name()))
-		return []Msg{}
+		return false
+	}
+	return true
+}
+
+// Operate implementing flowgraph.Node, performs delete data process
+func (dn *deleteNode) Operate(in []Msg) []Msg {
+	fgMsg := in[0].(*flowGraphMsg)
+	if fgMsg.IsCloseMsg() {
+		return in
 	}
 
 	var spans []opentracing.Span

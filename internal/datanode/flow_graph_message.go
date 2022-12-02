@@ -25,7 +25,8 @@ import (
 
 type (
 	// Msg is flowgraph.Msg
-	Msg = flowgraph.Msg
+	Msg     = flowgraph.Msg
+	BaseMsg = flowgraph.BaseMsg
 
 	// MsgStreamMsg is flowgraph.MsgStreamMsg
 	MsgStreamMsg = flowgraph.MsgStreamMsg
@@ -41,6 +42,7 @@ type (
 )
 
 type flowGraphMsg struct {
+	BaseMsg
 	insertMessages []*msgstream.InsertMsg
 	deleteMessages []*msgstream.DeleteMsg
 	timeRange      TimeRange

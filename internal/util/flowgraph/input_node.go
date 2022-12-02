@@ -72,13 +72,17 @@ func (inNode *InputNode) InStream() msgstream.MsgStream {
 	return inNode.inStream
 }
 
+func (inNode *InputNode) IsValidInMsg(in []Msg) bool {
+	return true
+}
+
 // Operate consume a message pack from msgstream and return
 func (inNode *InputNode) Operate(in []Msg) []Msg {
 	msgPack, ok := <-inNode.inStream.Chan()
 	if !ok {
 		log.Warn("MsgStream closed", zap.Any("input node", inNode.Name()))
 		return []Msg{&MsgStreamMsg{
-			isCloseMsg: true,
+			BaseMsg: NewBaseMsg(true),
 		}}
 	}
 
@@ -116,13 +120,8 @@ func (inNode *InputNode) Operate(in []Msg) []Msg {
 		msg.SetTraceCtx(ctx)
 	}
 
-	var msgStreamMsg Msg = &MsgStreamMsg{
-		tsMessages:     msgPack.Msgs,
-		timestampMin:   msgPack.BeginTs,
-		timestampMax:   msgPack.EndTs,
-		startPositions: msgPack.StartPositions,
-		endPositions:   msgPack.EndPositions,
-	}
+	var msgStreamMsg Msg = GenerateMsgStreamMsg(msgPack.Msgs, msgPack.BeginTs,
+		msgPack.EndTs, msgPack.StartPositions, msgPack.EndPositions)
 
 	for _, span := range spans {
 		span.Finish()

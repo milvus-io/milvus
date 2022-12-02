@@ -150,8 +150,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		for _, test := range invalidInTests {
 			te.Run(test.desc, func(t *testing.T) {
 				dn := deleteNode{}
-				rt := dn.Operate(test.in)
-				assert.Empty(t, rt)
+				assert.False(t, dn.IsValidInMsg(test.in))
 			})
 		}
 	})

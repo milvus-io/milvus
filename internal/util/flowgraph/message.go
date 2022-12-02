@@ -23,20 +23,36 @@ import (
 // Msg is an abstract class that contains a method to get the time tick of this message
 type Msg interface {
 	TimeTick() Timestamp
+	IsCloseMsg() bool
+}
+
+type BaseMsg struct {
+	isCloseMsg bool
+}
+
+func (msg BaseMsg) IsCloseMsg() bool {
+	return msg.isCloseMsg
+}
+
+func NewBaseMsg(isCloseMsg bool) BaseMsg {
+	return BaseMsg{
+		isCloseMsg: isCloseMsg,
+	}
 }
 
 // MsgStreamMsg is a wrapper of TsMsg in flowgraph
 type MsgStreamMsg struct {
+	BaseMsg
 	tsMessages     []msgstream.TsMsg
 	timestampMin   Timestamp
 	timestampMax   Timestamp
 	startPositions []*MsgPosition
 	endPositions   []*MsgPosition
-	isCloseMsg     bool
 }
 
 // GenerateMsgStreamMsg is used to create a new MsgStreamMsg object
-func GenerateMsgStreamMsg(tsMessages []msgstream.TsMsg, timestampMin, timestampMax Timestamp, startPos []*MsgPosition, endPos []*MsgPosition) *MsgStreamMsg {
+func GenerateMsgStreamMsg(tsMessages []msgstream.TsMsg, timestampMin,
+	timestampMax Timestamp, startPos []*MsgPosition, endPos []*MsgPosition) *MsgStreamMsg {
 	return &MsgStreamMsg{
 		tsMessages:     tsMessages,
 		timestampMin:   timestampMin,

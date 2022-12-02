@@ -102,10 +102,22 @@ func (ibNode *insertBufferNode) Close() {
 	}
 }
 
-func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
-	fgMsg, ok := ibNode.verifyInMsg(in)
+func (ibNode *insertBufferNode) IsValidInMsg(in []Msg) bool {
+	if !ibNode.BaseNode.IsValidInMsg(in) {
+		return false
+	}
+	_, ok := in[0].(*flowGraphMsg)
 	if !ok {
-		return []Msg{}
+		log.Warn("type assertion failed for flowGraphMsg", zap.String("name", reflect.TypeOf(in[0]).Name()))
+		return false
+	}
+	return true
+}
+
+func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
+	fgMsg := in[0].(*flowGraphMsg)
+	if fgMsg.IsCloseMsg() {
+		return in
 	}
 
 	if fgMsg.dropCollection {
@@ -186,25 +198,6 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 
 	// send delete msg to DeleteNode
 	return []Msg{&res}
-}
-
-func (ibNode *insertBufferNode) verifyInMsg(in []Msg) (*flowGraphMsg, bool) {
-	// while closing
-	if in == nil {
-		log.Warn("type assertion failed for flowGraphMsg because it's nil")
-		return nil, false
-	}
-
-	if len(in) != 1 {
-		log.Warn("Invalid operate message input in insertBufferNode", zap.Int("input length", len(in)))
-		return nil, false
-	}
-
-	fgMsg, ok := in[0].(*flowGraphMsg)
-	if !ok {
-		log.Warn("type assertion failed for flowGraphMsg", zap.String("name", reflect.TypeOf(in[0]).Name()))
-	}
-	return fgMsg, ok
 }
 
 func (ibNode *insertBufferNode) GetBufferIfFull(segID UniqueID) (*BufferData, bool) {

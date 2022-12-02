@@ -122,7 +122,9 @@ func TestFlowGraphInsertBufferNodeCreate(t *testing.T) {
 	assert.Error(t, err)
 }
 
-type mockMsg struct{}
+type mockMsg struct {
+	BaseMsg
+}
 
 func (*mockMsg) TimeTick() Timestamp {
 	return 0
@@ -147,8 +149,7 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 				ibn := &insertBufferNode{
 					ttMerger: newMergedTimeTickerSender(func(Timestamp, []int64) error { return nil }),
 				}
-				rt := ibn.Operate(test.in)
-				assert.Empty(t0, rt)
+				assert.False(t0, ibn.IsValidInMsg(test.in))
 			})
 		}
 	})

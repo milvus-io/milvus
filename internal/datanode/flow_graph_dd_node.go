@@ -86,29 +86,39 @@ func (ddn *ddNode) Name() string {
 	return fmt.Sprintf("ddNode-%d-%s", ddn.collectionID, ddn.vChannelName)
 }
 
-// Operate handles input messages, implementing flowgrpah.Node
-func (ddn *ddNode) Operate(in []Msg) []Msg {
-	if in == nil {
-		log.Debug("type assertion failed for MsgStreamMsg because it's nil")
-		return []Msg{}
+func (ddn *ddNode) IsValidInMsg(in []Msg) bool {
+	if !ddn.BaseNode.IsValidInMsg(in) {
+		return false
 	}
-
-	if len(in) != 1 {
-		log.Warn("Invalid operate message input in ddNode", zap.Int("input length", len(in)))
-		return []Msg{}
-	}
-
-	msMsg, ok := in[0].(*MsgStreamMsg)
+	_, ok := in[0].(*MsgStreamMsg)
 	if !ok {
 		log.Warn("type assertion failed for MsgStreamMsg", zap.String("name", reflect.TypeOf(in[0]).Name()))
-		return []Msg{}
+		return false
 	}
+	return true
+}
+
+// Operate handles input messages, implementing flowgrpah.Node
+func (ddn *ddNode) Operate(in []Msg) []Msg {
+	msMsg := in[0].(*MsgStreamMsg)
 
 	var spans []opentracing.Span
 	for _, msg := range msMsg.TsMessages() {
 		sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
 		spans = append(spans, sp)
 		msg.SetTraceCtx(ctx)
+	}
+
+	defer func() {
+		for _, sp := range spans {
+			sp.Finish()
+		}
+	}()
+
+	if msMsg.IsCloseMsg() {
+		return []Msg{
+			&flowGraphMsg{BaseMsg: flowgraph.NewBaseMsg(true)},
+		}
 	}
 
 	if load := ddn.dropMode.Load(); load != nil && load.(bool) {
@@ -230,10 +240,6 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 
 	fgMsg.startPositions = append(fgMsg.startPositions, msMsg.StartPositions()...)
 	fgMsg.endPositions = append(fgMsg.endPositions, msMsg.EndPositions()...)
-
-	for _, sp := range spans {
-		sp.Finish()
-	}
 
 	return []Msg{&fgMsg}
 }

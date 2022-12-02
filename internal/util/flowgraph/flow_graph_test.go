@@ -49,6 +49,7 @@ type nodeC struct {
 }
 
 type numMsg struct {
+	BaseMsg
 	num float64
 }
 

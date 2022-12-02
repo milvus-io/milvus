@@ -101,13 +101,7 @@ func TestMsgStreamMsg(t *testing.T) {
 
 	var timestampMin Timestamp
 	var timestampMax Timestamp = 100
-	streamMsg := &MsgStreamMsg{
-		tsMessages:     messages,
-		timestampMin:   timestampMin,
-		timestampMax:   timestampMax,
-		startPositions: nil,
-		endPositions:   nil,
-	}
+	streamMsg := GenerateMsgStreamMsg(messages, timestampMin, timestampMax, nil, nil)
 
 	tt := streamMsg.TimeTick()
 	assert.Equal(t, tt, timestampMax)
