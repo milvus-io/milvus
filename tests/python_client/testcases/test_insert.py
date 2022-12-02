@@ -81,7 +81,7 @@ class TestInsertParams(TestcaseBase):
         """
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
-        error = {ct.err_code: 0, ct.err_msg: "Data type is not support"}
+        error = {ct.err_code: 1, ct.err_msg: "The type of data should be list or pandas.DataFrame"}
         collection_w.insert(data=get_non_data_type, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -94,7 +94,8 @@ class TestInsertParams(TestcaseBase):
         """
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
-        error = {ct.err_code: 0, ct.err_msg: "The data fields number is not match with schema"}
+        error = {ct.err_code: 1, ct.err_msg: "The fields don't match with schema fields, "
+                                             "expected: ['int64', 'float', 'varchar', 'float_vector'], got []"}
         collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -122,7 +123,7 @@ class TestInsertParams(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         df = cf.gen_default_dataframe_data(10)
         df.rename(columns={ct.default_int64_field_name: ' '}, inplace=True)
-        error = {ct.err_code: 0, ct.err_msg: "The types of schema and data do not match"}
+        error = {ct.err_code: 1, ct.err_msg: "The name of field don't match, expected: int64, got "}
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -136,7 +137,7 @@ class TestInsertParams(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         df = cf.gen_default_dataframe_data(10)
         df.rename(columns={ct.default_int64_field_name: get_invalid_field_name}, inplace=True)
-        error = {ct.err_code: 0, ct.err_msg: "The types of schema and data do not match"}
+        error = {ct.err_code: 1, ct.err_msg: "The name of field don't match, expected: int64, got %s" % get_invalid_field_name}
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     def test_insert_dataframe_index(self):
@@ -260,7 +261,7 @@ class TestInsertParams(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         df = cf.gen_default_dataframe_data(10)
         df.rename(columns={ct.default_float_field_name: "int"}, inplace=True)
-        error = {ct.err_code: 0, ct.err_msg: 'The types of schema and data do not match'}
+        error = {ct.err_code: 1, ct.err_msg: "The name of field don't match, expected: float, got int"}
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -325,7 +326,8 @@ class TestInsertParams(TestcaseBase):
         df = cf.gen_default_dataframe_data(ct.default_nb)
         new_values = [i for i in range(ct.default_nb)]
         df.insert(3, 'new', new_values)
-        error = {ct.err_code: 0, ct.err_msg: 'The data fields number is not match with schema.'}
+        error = {ct.err_code: 1, ct.err_msg: "The fields don't match with schema fields, expected: ['int64', 'float', "
+                                             "'varchar', 'float_vector'], got ['int64', 'float', 'varchar', 'new', 'float_vector']"}
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -339,7 +341,8 @@ class TestInsertParams(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         df = cf.gen_default_dataframe_data(ct.default_nb)
         df.drop(ct.default_float_vec_field_name, axis=1, inplace=True)
-        error = {ct.err_code: 0, ct.err_msg: 'The data fields number is not match with schema.'}
+        error = {ct.err_code: 1, ct.err_msg: "The fields don't match with schema fields, expected: "
+                                             "['int64', 'float', 'varchar', 'float_vector'], got ['int64', 'float', 'varchar']"}
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -486,7 +489,7 @@ class TestInsertOperation(TestcaseBase):
         """
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
         df = cf.gen_collection_schema_all_datatype
-        error = {ct.err_code: 0, ct.err_msg: "Data type is not support"}
+        error = {ct.err_code: 1, ct.err_msg: "The type of data should be list or pandas.DataFrame"}
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -528,7 +531,7 @@ class TestInsertOperation(TestcaseBase):
         field_one = cf.gen_int64_field(is_primary=True)
         field_two = cf.gen_int64_field()
         df = [field_one, field_two, vec_field]
-        error = {ct.err_code: 0, ct.err_msg: "Data type is not support."}
+        error = {ct.err_code: 1, ct.err_msg: "data should be a list of list"}
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -701,7 +704,8 @@ class TestInsertOperation(TestcaseBase):
         schema = cf.gen_default_collection_schema(auto_id=True)
         collection_w = self.init_collection_wrap(name=c_name, schema=schema)
         data = cf.gen_default_list_data(nb=100)
-        error = {ct.err_code: 0, ct.err_msg: 'The data fields number is not match with schema'}
+        error = {ct.err_code: 1, ct.err_msg: "The fields don't match with schema fields, expected: "
+                                             "['float', 'varchar', 'float_vector'], got ['', '', '', '']"}
         collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
         assert collection_w.is_empty
 
