@@ -710,6 +710,15 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 		zap.Uint64("guaranteeTimestamp", req.GetReq().GetGuaranteeTimestamp()),
 		zap.Uint64("timeTravel", req.GetReq().GetTravelTimestamp()))
 
+	if req.GetReq().GetBase().GetTargetID() != paramtable.GetNodeID() {
+		return &internalpb.SearchResults{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_NodeIDNotMatch,
+				Reason:    common.WrapNodeIDNotMatchMsg(req.GetReq().GetBase().GetTargetID(), paramtable.GetNodeID()),
+			},
+		}, nil
+	}
+
 	failRet := &internalpb.SearchResults{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
@@ -1064,6 +1073,15 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
 		zap.Uint64("guaranteeTimestamp", req.Req.GetGuaranteeTimestamp()),
 		zap.Uint64("timeTravel", req.GetReq().GetTravelTimestamp()))
+
+	if req.GetReq().GetBase().GetTargetID() != paramtable.GetNodeID() {
+		return &internalpb.RetrieveResults{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_NodeIDNotMatch,
+				Reason:    common.WrapNodeIDNotMatchMsg(req.GetReq().GetBase().GetTargetID(), paramtable.GetNodeID()),
+			},
+		}, nil
+	}
 
 	failRet := &internalpb.RetrieveResults{
 		Status: &commonpb.Status{
