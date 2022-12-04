@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
@@ -657,12 +658,13 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 		addrs := make([]string, 0, len(leaders))
 		for _, leader := range leaders {
 			info := s.nodeMgr.Get(leader.ID)
-			if info == nil {
+			if info == nil || time.Since(info.LastHeartbeat()) > Params.QueryCoordCfg.HeartbeatAvailableInterval {
 				continue
 			}
 			isAllNodeAvailable := true
 			for _, version := range leader.Segments {
-				if s.nodeMgr.Get(version.NodeID) == nil {
+				info := s.nodeMgr.Get(version.NodeID)
+				if info == nil || time.Since(info.LastHeartbeat()) > Params.QueryCoordCfg.HeartbeatAvailableInterval {
 					isAllNodeAvailable = false
 					break
 				}

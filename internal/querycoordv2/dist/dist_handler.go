@@ -81,6 +81,13 @@ func (dh *distHandler) start(ctx context.Context) {
 			if err != nil || resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 				failures++
 				dh.logFailureInfo(resp, err)
+				node := dh.nodeManager.Get(dh.nodeID)
+				if node != nil {
+					log.RatedDebug(30.0, "failed to get node's data distribution",
+						zap.Int64("nodeID", dh.nodeID),
+						zap.Time("lastHeartbeat", node.LastHeartbeat()),
+					)
+				}
 			} else {
 				failures = 0
 				dh.handleDistResp(resp)
@@ -115,6 +122,7 @@ func (dh *distHandler) handleDistResp(resp *querypb.GetDataDistributionResponse)
 			session.WithSegmentCnt(len(resp.GetSegments())),
 			session.WithChannelCnt(len(resp.GetChannels())),
 		)
+		node.SetLastHeartbeat(time.Now())
 	}
 
 	dh.updateSegmentsDistribution(resp)
