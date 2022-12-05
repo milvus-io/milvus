@@ -30,21 +30,49 @@ type RootCoordCatalog interface {
 	AlterAlias(ctx context.Context, alias *model.Alias, ts typeutil.Timestamp) error
 	ListAliases(ctx context.Context, ts typeutil.Timestamp) ([]*model.Alias, error)
 
+	// GetCredential gets the credential info for the username, returns error if no credential exists for this username.
 	GetCredential(ctx context.Context, username string) (*model.Credential, error)
+	// CreateCredential creates credential by Username and EncryptedPassword in crediential. Please make sure credential.Username isn't empty before calling this API. Credentials already exists will be altered.
 	CreateCredential(ctx context.Context, credential *model.Credential) error
+	// AlterCredential does exactly the same as CreateCredential
 	AlterCredential(ctx context.Context, credential *model.Credential) error
+	// DropCredential removes the credential of this username
 	DropCredential(ctx context.Context, username string) error
+	// ListCredentials gets all usernames.
 	ListCredentials(ctx context.Context) ([]string, error)
 
+	// CreateRole creates role by the entity for the tenant. Please make sure the tenent and entity.Name aren't empty. Empty entity.Name may end up with deleting all roles
+	// Returns common.IgnorableError if the role already existes
 	CreateRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity) error
+	// DropRole removes a role by name
 	DropRole(ctx context.Context, tenant string, roleName string) error
+	// AlterUserRole changes the role of a user for the tenant. Please make sure the userEntity.Name and roleEntity.Name aren't empty before calling this API.
+	// Returns common.IgnorableError
+	// - if user has the role when AddUserToRole
+	// - if user doen't have the role when RemoveUserFromRole
 	AlterUserRole(ctx context.Context, tenant string, userEntity *milvuspb.UserEntity, roleEntity *milvuspb.RoleEntity, operateType milvuspb.OperateUserRoleType) error
+	// ListRole returns lists of RoleResults for the tenant
+	// Returns all role results if entity is nill
+	// Returns only role results if entity.Name is provided
+	// Returns UserInfo inside each RoleResult if includeUserInfo is True
 	ListRole(ctx context.Context, tenant string, entity *milvuspb.RoleEntity, includeUserInfo bool) ([]*milvuspb.RoleResult, error)
+	// ListUser returns list of UserResults for the tenant
+	// Returns all users if entity is nill
+	// Returns the specific user if enitity is provided
+	// Returns RoleInfo inside each UserResult if includeRoleInfo is True
 	ListUser(ctx context.Context, tenant string, entity *milvuspb.UserEntity, includeRoleInfo bool) ([]*milvuspb.UserResult, error)
+	// AlterGrant  grants or revokes a grant of a role to an object, according to the operateType.
+	// Please make sure entity and operateType are valid before calling this API
 	AlterGrant(ctx context.Context, tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error
+	// DeleteGrant deletes all the grant for a role.
+	// Please make sure the role.Name isn't empty before call this API.
 	DeleteGrant(ctx context.Context, tenant string, role *milvuspb.RoleEntity) error
+	// ListGrant lists all grant infos accoording to entity for the tenant
+	// Please make sure entity valid before calling this API
 	ListGrant(ctx context.Context, tenant string, entity *milvuspb.GrantEntity) ([]*milvuspb.GrantEntity, error)
 	ListPolicy(ctx context.Context, tenant string) ([]string, error)
+	// List all user role pair in string for the tenant
+	// For example []string{"user1/role1"}
 	ListUserRole(ctx context.Context, tenant string) ([]string, error)
 
 	Close()
