@@ -854,6 +854,23 @@ class TestQueryParams(TestcaseBase):
         collection_w.query(default_term_expr, partition_names=[ct.default_partition_name],
                            check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_query_empty_partition_names(self):
+        """
+        target: test query with empty partition_names
+        method: query with partition_names=[]
+        expected: query from all partitions
+        """
+        # insert [0, half) into partition_w, [half, nb) into _default
+        half = ct.default_nb // 2
+        collection_w, partition_w, _, _ = self.insert_entities_into_two_partitions_in_half(half)
+
+        # query from empty partition_names
+        term_expr = f'{ct.default_int64_field_name} in [0, {half}, {ct.default_nb}-1]'
+        res = [{'int64': 0}, {'int64': half}, {'int64': ct.default_nb-1}]
+        collection_w.query(term_expr, partition_names=[], check_task=CheckTasks.check_query_results,
+                           check_items={exp_res: res})
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_query_empty_partition(self):
         """
