@@ -338,7 +338,7 @@ func printFieldsDataInfo(fieldsData map[storage.FieldID]storage.FieldData, msg s
 	}
 
 	if len(files) > 0 {
-		stats = append(stats, zap.Any("files", files))
+		stats = append(stats, zap.Any(Files, files))
 	}
 	log.Info(msg, stats...)
 }

@@ -20,6 +20,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"strconv"
 
 	"go.uber.org/zap"
 
@@ -57,6 +58,13 @@ const (
 	// if the shard number is a large number, although single segment size is small, but there are lot of in-memory segments,
 	// the total memory size might cause OOM.
 	MaxTotalSizeInMemory = 2 * 1024 * 1024 * 1024 // 2GB
+
+	// keywords of import task informations
+	FailedReason    = "failed_reason"
+	Files           = "files"
+	CollectionName  = "collection"
+	PartitionName   = "partition"
+	PersistTimeCost = "persist_cost"
 )
 
 // ReportImportAttempts is the maximum # of attempts to retry when import fails.
@@ -294,6 +302,7 @@ func (p *ImportWrapper) fileValidation(filePaths []string) (bool, error) {
 // if onlyValidate is true, this process only do validation, no data generated, flushFunc will not be called
 func (p *ImportWrapper) Import(filePaths []string, options ImportOptions) error {
 	log.Info("import wrapper: begin import", zap.Any("filePaths", filePaths), zap.Any("options", options))
+
 	// data restore function to import milvus native binlog files(for backup/restore tools)
 	// the backup/restore tool provide two paths for a partition, the first path is binlog path, the second is deltalog path
 	if options.IsBackup && p.isBinlogImport(filePaths) {
@@ -306,6 +315,7 @@ func (p *ImportWrapper) Import(filePaths []string, options ImportOptions) error 
 		return err
 	}
 
+	tr := timerecord.NewTimeRecorder("Import task")
 	if rowBased {
 		// parse and consume row-based files
 		// for row-based files, the JSONRowConsumer will generate autoid for primary key, and split rows into segments
@@ -346,9 +356,6 @@ func (p *ImportWrapper) Import(filePaths []string, options ImportOptions) error 
 			}
 
 			printFieldsDataInfo(fields, "import wrapper: combine field data", nil)
-			tr := timerecord.NewTimeRecorder("combine field data")
-			defer tr.Elapse("finished")
-
 			for k, v := range fields {
 				// ignore 0 row field
 				if v.RowNum() == 0 {
@@ -411,15 +418,21 @@ func (p *ImportWrapper) Import(filePaths []string, options ImportOptions) error 
 		triggerGC()
 	}
 
-	return p.reportPersisted(p.reportImportAttempts)
+	return p.reportPersisted(p.reportImportAttempts, tr)
 }
 
 // reportPersisted notify the rootcoord to mark the task state to be ImportPersisted
-func (p *ImportWrapper) reportPersisted(reportAttempts uint) error {
+func (p *ImportWrapper) reportPersisted(reportAttempts uint, tr *timerecord.TimeRecorder) error {
 	// force close all segments
 	err := p.closeAllWorkingSegments()
 	if err != nil {
 		return err
+	}
+
+	if tr != nil {
+		ts := tr.Elapse("persist finished").Seconds()
+		p.importResult.Infos = append(p.importResult.Infos,
+			&commonpb.KeyValuePair{Key: PersistTimeCost, Value: strconv.FormatFloat(ts, 'f', 2, 64)})
 	}
 
 	// report file process state
@@ -480,6 +493,8 @@ func (p *ImportWrapper) isBinlogImport(filePaths []string) bool {
 
 // doBinlogImport is the entry of binlog import operation
 func (p *ImportWrapper) doBinlogImport(filePaths []string, tsStartPoint uint64, tsEndPoint uint64) error {
+	tr := timerecord.NewTimeRecorder("Import task")
+
 	flushFunc := func(fields map[storage.FieldID]storage.FieldData, shardID int) error {
 		printFieldsDataInfo(fields, "import wrapper: prepare to flush binlog data", filePaths)
 		return p.flushFunc(fields, shardID)
@@ -495,7 +510,7 @@ func (p *ImportWrapper) doBinlogImport(filePaths []string, tsStartPoint uint64, 
 		return err
 	}
 
-	return p.reportPersisted(p.reportImportAttempts)
+	return p.reportPersisted(p.reportImportAttempts, tr)
 }
 
 // parseRowBasedJSON is the entry of row-based json import operation

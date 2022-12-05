@@ -41,10 +41,6 @@ import (
 )
 
 const (
-	FailedReason    = "failed_reason"
-	Files           = "files"
-	CollectionName  = "collection"
-	PartitionName   = "partition"
 	MaxPendingCount = 32
 	delimiter       = "/"
 )
@@ -290,50 +286,68 @@ func (m *importManager) flipTaskState(ctx context.Context) error {
 			// we need to set the task to failed, because the checkIndexingDone() cannot know
 			// whether the collection has been dropped.
 
-			resp := m.getTaskState(task.GetId())
-			ok, err := m.checkIndexingDone(ctx, resp.GetCollectionId(), resp.GetSegmentIds())
-			if err != nil {
-				log.Error("an error occurred while checking index state of segments",
-					zap.Int64("task ID", task.GetId()),
-					zap.Error(err))
-				// Failed to check indexing state of segments. Skip this task.
-				continue
-			}
-			if ok {
-				if err := m.setImportTaskState(resp.GetId(), commonpb.ImportState_ImportCompleted); err != nil {
-					log.Error("failed to set import task state",
-						zap.Int64("task ID", resp.GetId()),
-						zap.Any("target state", commonpb.ImportState_ImportCompleted),
-						zap.Error(err))
-					// Failed to update task's state. Skip this task.
-					continue
-				}
-				log.Info("indexes are successfully built and the import task has complete!",
-					zap.Int64("task ID", resp.GetId()))
-				log.Info("now start unsetting isImporting state of segments",
-					zap.Int64("task ID", resp.GetId()),
-					zap.Int64s("segment IDs", resp.GetSegmentIds()))
-				// Remove the `isImport` states of these segments only when the import task reaches `ImportState_ImportCompleted` state.
-				status, err := m.callUnsetIsImportingState(ctx, &datapb.UnsetIsImportingStateRequest{
-					SegmentIds: resp.GetSegmentIds(),
-				})
-				if err != nil {
-					log.Error("failed to unset importing state of all segments (could be partial failure)",
-						zap.Error(err))
-				}
-				if status.GetErrorCode() != commonpb.ErrorCode_Success {
-					log.Error("failed to unset importing state of all segments (could be partial failure)",
-						zap.Error(errors.New(status.GetReason())))
-				}
-			}
+			// if this method failed, skip this task, try again in next round
+			m.flipTaskIndexState(ctx, task.GetId())
 		}
 	}
+	return nil
+}
+
+func (m *importManager) flipTaskIndexState(ctx context.Context, taskID int64) error {
+	resp := m.getTaskState(taskID)
+	ok, err := m.checkIndexingDone(ctx, resp.GetCollectionId(), resp.GetSegmentIds())
+	if err != nil {
+		log.Error("an error occurred while checking index state of segments",
+			zap.Int64("task ID", taskID),
+			zap.Error(err))
+		// Failed to check indexing state of segments
+		return err
+	}
+	if ok {
+		if err := m.setImportTaskState(resp.GetId(), commonpb.ImportState_ImportCompleted); err != nil {
+			log.Error("failed to set import task state",
+				zap.Int64("task ID", resp.GetId()),
+				zap.Any("target state", commonpb.ImportState_ImportCompleted),
+				zap.Error(err))
+			// Failed to update task's state
+			return err
+		}
+		log.Info("indexes are successfully built and the import task has complete!",
+			zap.Int64("task ID", resp.GetId()))
+		log.Info("now start unsetting isImporting state of segments",
+			zap.Int64("task ID", resp.GetId()),
+			zap.Int64s("segment IDs", resp.GetSegmentIds()))
+		// Remove the `isImport` states of these segments only when the import task reaches `ImportState_ImportCompleted` state.
+		if m.callUnsetIsImportingState == nil {
+			log.Error("callUnsetIsImportingState function of importManager is nil")
+			return fmt.Errorf("failed to describe index: segment state method of import manager is nil")
+		}
+		status, err := m.callUnsetIsImportingState(ctx, &datapb.UnsetIsImportingStateRequest{
+			SegmentIds: resp.GetSegmentIds(),
+		})
+		if err != nil {
+			log.Error("failed to unset importing state of all segments (could be partial failure)",
+				zap.Error(err))
+			return err
+		}
+		if status.GetErrorCode() != commonpb.ErrorCode_Success {
+			log.Error("failed to unset importing state of all segments (could be partial failure)",
+				zap.Error(errors.New(status.GetReason())))
+			return errors.New(status.GetReason())
+		}
+	}
+
 	return nil
 }
 
 // checkIndexingDone checks if indexes are successfully built on segments in `allSegmentIDs`.
 // It returns error on errors. It returns true if indexes are successfully built on all segments and returns false otherwise.
 func (m *importManager) checkIndexingDone(ctx context.Context, collID UniqueID, allSegmentIDs []UniqueID) (bool, error) {
+	if m.callDescribeIndex == nil {
+		log.Error("callDescribeIndex function of importManager is nil")
+		return false, fmt.Errorf("failed to describe index: describe index method of import manager is nil")
+	}
+
 	// Check if collection has indexed fields.
 	var descIdxResp *indexpb.DescribeIndexResponse
 	var err error
@@ -561,47 +575,70 @@ func (m *importManager) updateTaskInfo(ir *rootcoordpb.ImportResult) (*datapb.Im
 	}
 	log.Debug("import manager update task import result", zap.Int64("taskID", ir.GetTaskId()))
 
-	found := false
-	var v *datapb.ImportTaskInfo
-	m.workingLock.Lock()
-	defer m.workingLock.Unlock()
-	ok := false
-	var toPersistImportTaskInfo *datapb.ImportTaskInfo
-	if v, ok = m.workingTasks[ir.GetTaskId()]; ok {
-		// If the task has already been marked failed. Prevent further state updating and return an error.
-		if v.GetState().GetStateCode() == commonpb.ImportState_ImportFailed ||
-			v.GetState().GetStateCode() == commonpb.ImportState_ImportFailedAndCleaned {
-			log.Warn("trying to update an already failed task which will end up being a no-op")
-			return nil, errors.New("trying to update an already failed task " + strconv.FormatInt(ir.GetTaskId(), 10))
-		}
-		found = true
-		// Meta persist should be done before memory objs change.
-		toPersistImportTaskInfo = cloneImportTaskInfo(v)
-		toPersistImportTaskInfo.State.StateCode = ir.GetState()
-		toPersistImportTaskInfo.State.Segments = ir.GetSegments()
-		toPersistImportTaskInfo.State.RowCount = ir.GetRowCount()
-		toPersistImportTaskInfo.State.RowIds = ir.GetAutoIds()
-		for _, kv := range ir.GetInfos() {
-			if kv.GetKey() == FailedReason {
-				toPersistImportTaskInfo.State.ErrorMessage = kv.GetValue()
-				break
+	updatedInfo, err := func() (*datapb.ImportTaskInfo, error) {
+		found := false
+		var v *datapb.ImportTaskInfo
+		m.workingLock.Lock()
+		defer m.workingLock.Unlock()
+		ok := false
+		var toPersistImportTaskInfo *datapb.ImportTaskInfo
+
+		if v, ok = m.workingTasks[ir.GetTaskId()]; ok {
+			// If the task has already been marked failed. Prevent further state updating and return an error.
+			if v.GetState().GetStateCode() == commonpb.ImportState_ImportFailed ||
+				v.GetState().GetStateCode() == commonpb.ImportState_ImportFailedAndCleaned {
+				log.Warn("trying to update an already failed task which will end up being a no-op")
+				return nil, errors.New("trying to update an already failed task " + strconv.FormatInt(ir.GetTaskId(), 10))
 			}
+			found = true
+
+			// Meta persist should be done before memory objs change.
+			toPersistImportTaskInfo = cloneImportTaskInfo(v)
+			toPersistImportTaskInfo.State.StateCode = ir.GetState()
+			toPersistImportTaskInfo.State.Segments = ir.GetSegments()
+			toPersistImportTaskInfo.State.RowCount = ir.GetRowCount()
+			toPersistImportTaskInfo.State.RowIds = ir.GetAutoIds()
+			for _, kv := range ir.GetInfos() {
+				if kv.GetKey() == importutil.FailedReason {
+					toPersistImportTaskInfo.State.ErrorMessage = kv.GetValue()
+					break
+				} else if kv.GetKey() == importutil.PersistTimeCost {
+					toPersistImportTaskInfo.Infos = append(toPersistImportTaskInfo.Infos, kv)
+				}
+			}
+			// Update task in task store.
+			if err := m.persistTaskInfo(toPersistImportTaskInfo); err != nil {
+				log.Error("failed to update import task",
+					zap.Int64("task ID", v.GetId()),
+					zap.Error(err))
+				return nil, err
+			}
+			m.workingTasks[ir.GetTaskId()] = toPersistImportTaskInfo
 		}
-		// Update task in task store.
-		if err := m.persistTaskInfo(toPersistImportTaskInfo); err != nil {
-			log.Error("failed to update import task",
-				zap.Int64("task ID", v.GetId()),
-				zap.Error(err))
-			return nil, err
+
+		if !found {
+			log.Debug("import manager update task import result failed", zap.Int64("task ID", ir.GetTaskId()))
+			return nil, errors.New("failed to update import task, ID not found: " + strconv.FormatInt(ir.TaskId, 10))
 		}
-		m.workingTasks[ir.GetTaskId()] = toPersistImportTaskInfo
+
+		return toPersistImportTaskInfo, nil
+	}()
+
+	if err != nil {
+		return nil, err
 	}
 
-	if !found {
-		log.Debug("import manager update task import result failed", zap.Int64("task ID", ir.GetTaskId()))
-		return nil, errors.New("failed to update import task, ID not found: " + strconv.FormatInt(ir.TaskId, 10))
+	// if is ImportState_ImportPersisted, and index is FLAT, set the task to be complated immediately
+	// this method is called from importWrapper.reportPersisted() to rootCoord.ReportImport(),
+	// if flipTaskIndexState failed, the outer caller(importWrapper) will retry 3 times
+	if ir.GetState() == commonpb.ImportState_ImportPersisted {
+		err = m.flipTaskIndexState(m.ctx, updatedInfo.GetId())
+		if err != nil {
+			return nil, err
+		}
 	}
-	return toPersistImportTaskInfo, nil
+
+	return updatedInfo, nil
 }
 
 // setImportTaskState sets the task state of an import task. Changes to the import task state will be persisted.
@@ -708,13 +745,14 @@ func (m *importManager) copyTaskInfo(input *datapb.ImportTaskInfo, output *milvu
 	output.IdList = input.GetState().GetRowIds()
 	output.SegmentIds = input.GetState().GetSegments()
 	output.CreateTs = input.GetCreateTs()
-	output.Infos = append(output.Infos, &commonpb.KeyValuePair{Key: Files, Value: strings.Join(input.GetFiles(), ",")})
-	output.Infos = append(output.Infos, &commonpb.KeyValuePair{Key: CollectionName, Value: input.GetCollectionName()})
-	output.Infos = append(output.Infos, &commonpb.KeyValuePair{Key: PartitionName, Value: input.GetPartitionName()})
+	output.Infos = append(output.Infos, &commonpb.KeyValuePair{Key: importutil.Files, Value: strings.Join(input.GetFiles(), ",")})
+	output.Infos = append(output.Infos, &commonpb.KeyValuePair{Key: importutil.CollectionName, Value: input.GetCollectionName()})
+	output.Infos = append(output.Infos, &commonpb.KeyValuePair{Key: importutil.PartitionName, Value: input.GetPartitionName()})
 	output.Infos = append(output.Infos, &commonpb.KeyValuePair{
-		Key:   FailedReason,
+		Key:   importutil.FailedReason,
 		Value: input.GetState().GetErrorMessage(),
 	})
+	output.Infos = append(output.Infos, input.Infos...)
 }
 
 // getTaskState looks for task with the given ID and returns its import state.

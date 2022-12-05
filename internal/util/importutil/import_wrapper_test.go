@@ -1119,6 +1119,7 @@ func Test_ImportWrapperSplitFieldsData(t *testing.T) {
 
 func Test_ImportWrapperReportPersisted(t *testing.T) {
 	ctx := context.Background()
+	tr := timerecord.NewTimeRecorder("test")
 
 	importResult := &rootcoordpb.ImportResult{
 		Status: &commonpb.Status{
@@ -1143,15 +1144,16 @@ func Test_ImportWrapperReportPersisted(t *testing.T) {
 	assert.Nil(t, err)
 
 	// success
-	err = wrapper.reportPersisted(2)
+	err = wrapper.reportPersisted(2, tr)
 	assert.Nil(t, err)
+	assert.NotEmpty(t, wrapper.importResult.GetInfos())
 
 	// error when closing segments
 	wrapper.saveSegmentFunc = func(fieldsInsert []*datapb.FieldBinlog, fieldsStats []*datapb.FieldBinlog, segmentID int64, targetChName string, rowCount int64) error {
 		return errors.New("error")
 	}
 	wrapper.workingSegments[0] = &WorkingSegment{}
-	err = wrapper.reportPersisted(2)
+	err = wrapper.reportPersisted(2, tr)
 	assert.Error(t, err)
 
 	// failed to report
@@ -1161,6 +1163,6 @@ func Test_ImportWrapperReportPersisted(t *testing.T) {
 	wrapper.reportFunc = func(res *rootcoordpb.ImportResult) error {
 		return errors.New("error")
 	}
-	err = wrapper.reportPersisted(2)
+	err = wrapper.reportPersisted(2, tr)
 	assert.Error(t, err)
 }

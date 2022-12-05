@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
@@ -1127,6 +1128,20 @@ func TestCore_ReportImport(t *testing.T) {
 		}, nil
 	}
 
+	callDescribeIndex := func(ctx context.Context, colID UniqueID) (*indexpb.DescribeIndexResponse, error) {
+		return &indexpb.DescribeIndexResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_IndexNotExist,
+			},
+		}, nil
+	}
+
+	callUnsetIsImportingState := func(context.Context, *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error) {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		}, nil
+	}
+
 	t.Run("not healthy", func(t *testing.T) {
 		ctx := context.Background()
 		c := newTestCore(withAbnormalCode())
@@ -1188,7 +1203,8 @@ func TestCore_ReportImport(t *testing.T) {
 			withTtSynchronizer(ticker),
 			withDataCoord(dc))
 		c.broker = newServerBroker(c)
-		c.importManager = newImportManager(ctx, mockKv, idAlloc, callImportServiceFn, callMarkSegmentsDropped, nil, nil, nil, nil)
+		c.importManager = newImportManager(ctx, mockKv, idAlloc, callImportServiceFn, callMarkSegmentsDropped, nil,
+			callDescribeIndex, nil, callUnsetIsImportingState)
 		c.importManager.loadFromTaskStore(true)
 		c.importManager.sendOutTasks(ctx)
 
