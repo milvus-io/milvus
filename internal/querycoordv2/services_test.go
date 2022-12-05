@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
@@ -891,6 +892,8 @@ func (suite *ServiceSuite) TestGetShardLeaders() {
 		req := &querypb.GetShardLeadersRequest{
 			CollectionID: collection,
 		}
+
+		suite.fetchHeartbeats()
 		resp, err := server.GetShardLeaders(ctx, req)
 		suite.NoError(err)
 		suite.Equal(commonpb.ErrorCode_Success, resp.Status.ErrorCode)
@@ -1106,6 +1109,13 @@ func (suite *ServiceSuite) updateCollectionStatus(collectionID int64, status que
 			partition.PartitionLoadInfo.Status = status
 			suite.meta.UpdatePartition(partition)
 		}
+	}
+}
+
+func (suite *ServiceSuite) fetchHeartbeats() {
+	for _, node := range suite.nodes {
+		node := suite.nodeMgr.Get(node)
+		node.SetLastHeartbeat(time.Now())
 	}
 }
 
