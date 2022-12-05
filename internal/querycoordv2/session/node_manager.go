@@ -18,8 +18,10 @@ package session
 
 import (
 	"sync"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/metrics"
+	"go.uber.org/atomic"
 )
 
 type Manager interface {
@@ -72,9 +74,10 @@ func NewNodeManager() *NodeManager {
 
 type NodeInfo struct {
 	stats
-	mu   sync.RWMutex
-	id   int64
-	addr string
+	mu            sync.RWMutex
+	id            int64
+	addr          string
+	lastHeartbeat *atomic.Int64
 }
 
 func (n *NodeInfo) ID() int64 {
@@ -97,6 +100,14 @@ func (n *NodeInfo) ChannelCnt() int {
 	return n.stats.getChannelCnt()
 }
 
+func (n *NodeInfo) SetLastHeartbeat(time time.Time) {
+	n.lastHeartbeat.Store(time.UnixNano())
+}
+
+func (n *NodeInfo) LastHeartbeat() time.Time {
+	return time.Unix(0, n.lastHeartbeat.Load())
+}
+
 func (n *NodeInfo) UpdateStats(opts ...StatsOption) {
 	n.mu.Lock()
 	for _, opt := range opts {
@@ -107,9 +118,10 @@ func (n *NodeInfo) UpdateStats(opts ...StatsOption) {
 
 func NewNodeInfo(id int64, addr string) *NodeInfo {
 	return &NodeInfo{
-		stats: newStats(),
-		id:    id,
-		addr:  addr,
+		stats:         newStats(),
+		id:            id,
+		addr:          addr,
+		lastHeartbeat: atomic.NewInt64(0),
 	}
 }
 

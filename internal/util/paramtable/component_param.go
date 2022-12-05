@@ -718,6 +718,7 @@ type queryCoordConfig struct {
 	ChannelTaskTimeout                  time.Duration
 	SegmentTaskTimeout                  time.Duration
 	DistPullInterval                    time.Duration
+	HeartbeatAvailableInterval          time.Duration
 	LoadTimeoutSeconds                  time.Duration
 	CheckHandoffInterval                time.Duration
 	EnableActiveStandby                 bool
@@ -746,6 +747,7 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 	p.initChannelTaskTimeout()
 	p.initSegmentTaskTimeout()
 	p.initDistPullInterval()
+	p.initHeartbeatAvailableInterval()
 	p.initLoadTimeoutSeconds()
 	p.initCheckHandoffInterval()
 	p.initEnableActiveStandby()
@@ -853,6 +855,11 @@ func (p *queryCoordConfig) initDistPullInterval() {
 		panic(err)
 	}
 	p.DistPullInterval = time.Duration(pullInterval) * time.Millisecond
+}
+
+func (p *queryCoordConfig) initHeartbeatAvailableInterval() {
+	interval := p.Base.ParseInt32WithDefault("queryCoord.heartbeatAvailableInterval", 10000)
+	p.HeartbeatAvailableInterval = time.Duration(interval) * time.Millisecond
 }
 
 func (p *queryCoordConfig) initLoadTimeoutSeconds() {
