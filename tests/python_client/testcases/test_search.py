@@ -3812,7 +3812,10 @@ class TestsearchPagination(TestcaseBase):
             search_res = search_res.result()
             res.done()
             res = res.result()
-        assert search_res[0].ids == res[0].ids[offset:]
+        assert res[0].distances == sorted(res[0].distances)
+        assert search_res[0].distances == sorted(search_res[0].distances)
+        assert search_res[0].distances == res[0].distances[offset:]
+        assert set(search_res[0].ids) == set(res[0].ids[offset:])
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_string_with_pagination(self, offset, auto_id, _async):
@@ -3849,7 +3852,10 @@ class TestsearchPagination(TestcaseBase):
             search_res = search_res.result()
             res.done()
             res = res.result()
-        assert search_res[0].ids == res[0].ids[offset:]
+        assert res[0].distances == sorted(res[0].distances)
+        assert search_res[0].distances == sorted(search_res[0].distances)
+        assert search_res[0].distances == res[0].distances[offset:]
+        assert set(search_res[0].ids) == set(res[0].ids[offset:])
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_binary_with_pagination(self, offset, auto_id):
@@ -3916,7 +3922,10 @@ class TestsearchPagination(TestcaseBase):
             search_res = search_res.result()
             res.done()
             res = res.result()
-        assert search_res[0].ids == res[0].ids[offset:]
+        assert res[0].distances == sorted(res[0].distances)
+        assert search_res[0].distances == sorted(search_res[0].distances)
+        assert search_res[0].distances == res[0].distances[offset:]
+        assert set(search_res[0].ids) == set(res[0].ids[offset:])
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("expression", cf.gen_normal_expressions())
@@ -3969,7 +3978,10 @@ class TestsearchPagination(TestcaseBase):
         for hits in search_res:
             ids = hits.ids
             assert set(ids).issubset(filter_ids_set)
-        assert search_res[0].ids == res[0].ids[offset:]
+        assert res[0].distances == sorted(res[0].distances)
+        assert search_res[0].distances == sorted(search_res[0].distances)
+        assert search_res[0].distances == res[0].distances[offset:]
+        assert set(search_res[0].ids) == set(res[0].ids[offset:])
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_pagination_with_index_partition(self, offset, auto_id, _async):
@@ -4009,9 +4021,13 @@ class TestsearchPagination(TestcaseBase):
             search_res = search_res.result()
             res.done()
             res = res.result()
-        assert search_res[0].ids == res[0].ids[offset:]
+        assert res[0].distances == sorted(res[0].distances)
+        assert search_res[0].distances == sorted(search_res[0].distances)
+        assert search_res[0].distances == res[0].distances[offset:]
+        assert set(search_res[0].ids) == set(res[0].ids[offset:])
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("Same with the previous, collection must have index now")
     def test_search_pagination_with_partition(self, offset, auto_id, _async):
         """
         target: test search pagination with partition
@@ -4045,7 +4061,10 @@ class TestsearchPagination(TestcaseBase):
             search_res = search_res.result()
             res.done()
             res = res.result()
-        assert search_res[0].ids == res[0].ids[offset:]
+        assert res[0].distances == sorted(res[0].distances)
+        assert search_res[0].distances == sorted(search_res[0].distances)
+        assert search_res[0].distances == res[0].distances[offset:]
+        assert set(search_res[0].ids) == set(res[0].ids[offset:])
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_pagination_with_inserted_data(self, offset, dim, _async):
@@ -4079,7 +4098,10 @@ class TestsearchPagination(TestcaseBase):
             search_res = search_res.result()
             res.done()
             res = res.result()
-        assert search_res[0].ids == res[0].ids[offset:]
+        assert res[0].distances == sorted(res[0].distances)
+        assert search_res[0].distances == sorted(search_res[0].distances)
+        assert search_res[0].distances == res[0].distances[offset:]
+        assert set(search_res[0].ids) == set(res[0].ids[offset:])
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_pagination_empty(self, offset, dim, auto_id, _async):
@@ -4151,7 +4173,10 @@ class TestsearchPagination(TestcaseBase):
                 search_res = search_res.result()
                 res.done()
                 res = res.result()
-            assert search_res[0].ids == res[0].ids[offset:]
+            assert res[0].distances == sorted(res[0].distances)
+            assert search_res[0].distances == sorted(search_res[0].distances)
+            assert search_res[0].distances == res[0].distances[offset:]
+            assert set(search_res[0].ids) == set(res[0].ids[offset:])
 
 
 class TestsearchPaginationInvalid(TestcaseBase):
@@ -4207,7 +4232,8 @@ class TestsearchPaginationInvalid(TestcaseBase):
                             check_items={"err_code": 1,
                                          "err_msg": "offset [%d] is invalid, should be in range "
                                                     "[1, 16385], but got %d" % (offset, offset)})
-    
+
+
 class  TestsearchDiskann(TestcaseBase):
     """
     ******************************************************************
