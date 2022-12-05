@@ -332,13 +332,18 @@ func (ddb *DelDataBuf) updateStartAndEndPosition(startPos *internalpb.MsgPositio
 func newBufferData(collSchema *schemapb.CollectionSchema) (*BufferData, error) {
 	// Get Dimension
 	// TODO GOOSE: under assumption that there's only 1 Vector field in one collection schema
-	var dimension int
-	var err error
+	var vectorSize int
 	for _, field := range collSchema.Fields {
 		if field.DataType == schemapb.DataType_FloatVector ||
 			field.DataType == schemapb.DataType_BinaryVector {
 
-			dimension, err = storage.GetDimFromParams(field.TypeParams)
+			dimension, err := storage.GetDimFromParams(field.TypeParams)
+			switch field.DataType {
+			case schemapb.DataType_FloatVector:
+				vectorSize = dimension * 4
+			case schemapb.DataType_BinaryVector:
+				vectorSize = dimension / 8
+			}
 			if err != nil {
 				log.Error("failed to get dim from field", zap.Error(err))
 				return nil, err
@@ -347,11 +352,11 @@ func newBufferData(collSchema *schemapb.CollectionSchema) (*BufferData, error) {
 		}
 	}
 
-	if dimension == 0 {
+	if vectorSize == 0 {
 		return nil, errors.New("Invalid dimension")
 	}
 
-	limit := Params.DataNodeCfg.FlushInsertBufferSize / (int64(dimension) * 4)
+	limit := Params.DataNodeCfg.FlushInsertBufferSize / int64(vectorSize)
 
 	//TODO::xige-16 eval vec and string field
 	return &BufferData{
