@@ -71,7 +71,7 @@ PayloadWriter::finish() {
     AssertInfo(output_ == nullptr, "payload writer has been finished");
     std::shared_ptr<arrow::Array> array;
     auto ast = builder_->Finish(&array);
-    AssertInfo(ast.ok(), "builder failed to finish");
+    AssertInfo(ast.ok(), ast.ToString());
 
     auto table = arrow::Table::Make(schema_, {array});
     output_ = std::make_shared<storage::PayloadOutputStream>();
@@ -79,7 +79,7 @@ PayloadWriter::finish() {
     ast = parquet::arrow::WriteTable(
         *table, mem_pool, output_, 1024 * 1024 * 1024,
         parquet::WriterProperties::Builder().compression(arrow::Compression::ZSTD)->compression_level(3)->build());
-    AssertInfo(ast.ok(), "write data to output stream failed");
+    AssertInfo(ast.ok(), ast.ToString());
 }
 
 bool

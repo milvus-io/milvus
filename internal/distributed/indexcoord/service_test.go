@@ -37,7 +37,7 @@ func TestIndexCoordinateServer(t *testing.T) {
 	server, err := NewServer(ctx, factory)
 	assert.NoError(t, err)
 	assert.NotNil(t, server)
-	Params.Init()
+	Params.InitOnce(typeutil.IndexCoordRole)
 
 	indexCoordClient := indexcoord.NewIndexCoordMock()
 	err = server.SetClient(indexCoordClient)
