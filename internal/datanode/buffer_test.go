@@ -30,11 +30,11 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 )
 
-func genTestCollectionSchema(dim int64) *schemapb.CollectionSchema {
+func genTestCollectionSchema(dim int64, vectorType schemapb.DataType) *schemapb.CollectionSchema {
 	floatVecFieldSchema := &schemapb.FieldSchema{
 		FieldID:  100,
 		Name:     "vec",
-		DataType: schemapb.DataType_FloatVector,
+		DataType: vectorType,
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
@@ -59,18 +59,20 @@ func TestBufferData(t *testing.T) {
 
 		indim         int64
 		expectedLimit int64
+		vectorType    schemapb.DataType
 
 		description string
 	}{
-		{true, 1, 4194304, "Smallest of the DIM"},
-		{true, 128, 32768, "Normal DIM"},
-		{true, 32768, 128, "Largest DIM"},
-		{false, 0, 0, "Illegal DIM"},
+		{true, 1, 4194304, schemapb.DataType_FloatVector, "Smallest of the DIM"},
+		{true, 128, 32768, schemapb.DataType_FloatVector, "Normal DIM"},
+		{true, 32768, 128, schemapb.DataType_FloatVector, "Largest DIM"},
+		{true, 4096, 32768, schemapb.DataType_BinaryVector, "Normal binary"},
+		{false, 0, 0, schemapb.DataType_FloatVector, "Illegal DIM"},
 	}
 
 	for _, test := range tests {
 		t.Run(test.description, func(t *testing.T) {
-			idata, err := newBufferData(genTestCollectionSchema(test.indim))
+			idata, err := newBufferData(genTestCollectionSchema(test.indim, test.vectorType))
 
 			if test.isValid {
 				assert.NoError(t, err)
@@ -128,7 +130,7 @@ func TestBufferData_updateTimeRange(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.tag, func(t *testing.T) {
-			bd, err := newBufferData(genTestCollectionSchema(16))
+			bd, err := newBufferData(genTestCollectionSchema(16, schemapb.DataType_FloatVector))
 			require.NoError(t, err)
 			for _, tr := range tc.trs {
 				bd.updateTimeRange(tr)
