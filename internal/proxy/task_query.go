@@ -386,8 +386,10 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 }
 
 func (t *queryTask) queryShard(ctx context.Context, nodeID int64, qn types.QueryNode, channelIDs []string) error {
+	retrieveReq := typeutil.Clone(t.RetrieveRequest)
+	retrieveReq.GetBase().TargetID = nodeID
 	req := &querypb.QueryRequest{
-		Req:         t.RetrieveRequest,
+		Req:         retrieveReq,
 		DmlChannels: channelIDs,
 		Scope:       querypb.DataScope_All,
 	}
