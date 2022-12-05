@@ -515,10 +515,7 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 		inMsg.endPositions = []*internalpb.MsgPosition{{Timestamp: 434}}
 
 		// trigger manual flush
-		flushChan <- flushMsg{
-			segmentID: 10,
-			flushed:   true,
-		}
+		flushChan <- flushMsg{segmentID: 10}
 
 		// trigger auto flush since buffer full
 		output := iBNode.Operate([]flowgraph.Msg{iMsg})
@@ -812,7 +809,6 @@ func (s *InsertBufferNodeSuit) TestFillInSyncTasks() {
 			msg := flushMsg{
 				segmentID:    UniqueID(i),
 				collectionID: s.collID,
-				flushed:      i%2 == 0, // segID=2, flushed = true
 			}
 
 			flushCh <- msg
@@ -821,13 +817,8 @@ func (s *InsertBufferNodeSuit) TestFillInSyncTasks() {
 		syncTasks := node.FillInSyncTasks(&flowGraphMsg{endPositions: []*internalpb.MsgPosition{{Timestamp: 100}}}, nil)
 		s.Assert().NotEmpty(syncTasks)
 
-		for segID, task := range syncTasks {
-			if segID == UniqueID(2) {
-				s.Assert().True(task.flushed)
-			} else {
-				s.Assert().False(task.flushed)
-			}
-
+		for _, task := range syncTasks {
+			s.Assert().True(task.flushed)
 			s.Assert().False(task.auto)
 			s.Assert().False(task.dropped)
 		}
@@ -845,11 +836,6 @@ func (s *InsertBufferNodeSuit) TestFillInSyncTasks() {
 			msg := flushMsg{
 				segmentID:    UniqueID(i),
 				collectionID: s.collID,
-				flushed:      false,
-			}
-
-			if i == 2 {
-				msg.flushed = true
 			}
 
 			flushCh <- msg
@@ -859,13 +845,8 @@ func (s *InsertBufferNodeSuit) TestFillInSyncTasks() {
 		s.Assert().NotEmpty(syncTasks)
 		s.Assert().Equal(10, len(syncTasks)) // 10 is max batch
 
-		for segID, task := range syncTasks {
-			if segID == UniqueID(2) {
-				s.Assert().True(task.flushed)
-			} else {
-				s.Assert().False(task.flushed)
-			}
-
+		for _, task := range syncTasks {
+			s.Assert().True(task.flushed)
 			s.Assert().False(task.auto)
 			s.Assert().False(task.dropped)
 		}
@@ -1074,14 +1055,11 @@ func TestInsertBufferNode_collectSegmentsToSync(t *testing.T) {
 			}
 
 			for i := 0; i < test.inFlushMsgNum; i++ {
-				flushCh <- flushMsg{
-					segmentID: UniqueID(i),
-					flushed:   i%2 == 0,
-				}
+				flushCh <- flushMsg{segmentID: UniqueID(i)}
 			}
 
-			flushedSegs, staleSegs := node.CollectSegmentsToSync()
-			assert.Equal(t, test.expectedOutNum, len(flushedSegs)+len(staleSegs))
+			flushedSegs := node.CollectSegmentsToSync()
+			assert.Equal(t, test.expectedOutNum, len(flushedSegs))
 		})
 	}
 }

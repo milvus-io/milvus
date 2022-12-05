@@ -225,7 +225,7 @@ func (ibNode *insertBufferNode) GetBuffer(segID UniqueID) *BufferData {
 }
 
 // CollectSegmentsToSync collects segments from flushChan from DataCoord
-func (ibNode *insertBufferNode) CollectSegmentsToSync() (flushedSegments, staleSegments []UniqueID) {
+func (ibNode *insertBufferNode) CollectSegmentsToSync() (flushedSegments []UniqueID) {
 	var (
 		maxBatch    = 10
 		targetBatch int
@@ -240,23 +240,18 @@ func (ibNode *insertBufferNode) CollectSegmentsToSync() (flushedSegments, staleS
 
 	for i := 1; i <= targetBatch; i++ {
 		fmsg := <-ibNode.flushChan
-		if fmsg.flushed {
-			flushedSegments = append(flushedSegments, fmsg.segmentID)
-		} else {
-			staleSegments = append(staleSegments, fmsg.segmentID)
-		}
+		flushedSegments = append(flushedSegments, fmsg.segmentID)
 	}
 
 	if targetBatch > 0 {
 		log.Info("(Manual Sync) batch processing flush messages",
 			zap.Int("batchSize", targetBatch),
 			zap.Int64s("flushedSegments", flushedSegments),
-			zap.Int64s("staleSegments", staleSegments),
 			zap.String("channel", ibNode.channelName),
 		)
 	}
 
-	return flushedSegments, staleSegments
+	return flushedSegments
 }
 
 // DisplayStatistics logs the statistic changes of segment in mem
@@ -371,8 +366,7 @@ func (ibNode *insertBufferNode) FillInSyncTasks(fgMsg *flowGraphMsg, seg2Upload 
 		}
 	}
 
-	flushedSegments, staleSegments := ibNode.CollectSegmentsToSync()
-	mergeSyncTask(staleSegments, syncTasks, func(task *syncTask) {})
+	flushedSegments := ibNode.CollectSegmentsToSync()
 	mergeSyncTask(flushedSegments, syncTasks, func(task *syncTask) {
 		task.flushed = true
 	})
