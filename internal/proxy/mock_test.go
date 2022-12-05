@@ -236,9 +236,6 @@ type simpleMockMsgStream struct {
 	msgCountMtx sync.RWMutex
 }
 
-func (ms *simpleMockMsgStream) Start() {
-}
-
 func (ms *simpleMockMsgStream) Close() {
 }
 
@@ -257,26 +254,6 @@ func (ms *simpleMockMsgStream) AsProducer(channels []string) {
 }
 
 func (ms *simpleMockMsgStream) AsConsumer(channels []string, subName string, position mqwrapper.SubscriptionInitialPosition) {
-}
-
-func (ms *simpleMockMsgStream) ComputeProduceChannelIndexes(tsMsgs []msgstream.TsMsg) [][]int32 {
-	if len(tsMsgs) <= 0 {
-		return nil
-	}
-	reBucketValues := make([][]int32, len(tsMsgs))
-	channelNum := uint32(1)
-	if channelNum == 0 {
-		return nil
-	}
-	for idx, tsMsg := range tsMsgs {
-		hashValues := tsMsg.HashKeys()
-		bucketValues := make([]int32, len(hashValues))
-		for index, hashValue := range hashValues {
-			bucketValues[index] = int32(hashValue % channelNum)
-		}
-		reBucketValues[idx] = bucketValues
-	}
-	return reBucketValues
 }
 
 func (ms *simpleMockMsgStream) SetRepackFunc(repackFunc msgstream.RepackFunc) {
@@ -308,18 +285,7 @@ func (ms *simpleMockMsgStream) Produce(pack *msgstream.MsgPack) error {
 	return nil
 }
 
-func (ms *simpleMockMsgStream) ProduceMark(pack *msgstream.MsgPack) (map[string][]msgstream.MessageID, error) {
-	defer ms.increaseMsgCount(1)
-	ms.msgChan <- pack
-
-	return map[string][]msgstream.MessageID{}, nil
-}
-
-func (ms *simpleMockMsgStream) Broadcast(pack *msgstream.MsgPack) error {
-	return nil
-}
-
-func (ms *simpleMockMsgStream) BroadcastMark(pack *msgstream.MsgPack) (map[string][]msgstream.MessageID, error) {
+func (ms *simpleMockMsgStream) Broadcast(pack *msgstream.MsgPack) (map[string][]msgstream.MessageID, error) {
 	return map[string][]msgstream.MessageID{}, nil
 }
 

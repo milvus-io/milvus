@@ -492,7 +492,6 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 	log.Info("DataCoord creates the timetick channel consumer",
 		zap.String("timeTickChannel", Params.CommonCfg.DataCoordTimeTick),
 		zap.String("subscription", subName))
-	ttMsgStream.Start()
 
 	go s.handleDataNodeTimetickMsgstream(ctx, ttMsgStream)
 }

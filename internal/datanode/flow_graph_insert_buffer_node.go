@@ -615,7 +615,6 @@ func newInsertBufferNode(ctx context.Context, collID UniqueID, flushCh <-chan fl
 	metrics.DataNodeNumProducers.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Inc()
 	log.Info("datanode AsProducer", zap.String("TimeTickChannelName", Params.CommonCfg.DataCoordTimeTick))
 	var wTtMsgStream msgstream.MsgStream = wTt
-	wTtMsgStream.Start()
 
 	mt := newMergedTimeTickerSender(func(ts Timestamp, segmentIDs []int64) error {
 		stats := make([]*datapb.SegmentStats, 0, len(segmentIDs))

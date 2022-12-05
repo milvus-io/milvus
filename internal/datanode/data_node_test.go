@@ -293,13 +293,12 @@ func TestDataNode(t *testing.T) {
 			insertStream, err := factory.NewMsgStream(node1.ctx)
 			assert.NoError(t, err)
 			insertStream.AsProducer([]string{dmChannelName})
-			insertStream.Start()
 			defer insertStream.Close()
 
-			err = insertStream.Broadcast(&timeTickMsgPack)
+			_, err = insertStream.Broadcast(&timeTickMsgPack)
 			assert.NoError(t, err)
 
-			err = insertStream.Broadcast(&timeTickMsgPack)
+			_, err = insertStream.Broadcast(&timeTickMsgPack)
 			assert.NoError(t, err)
 		}()
 

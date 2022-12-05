@@ -231,7 +231,7 @@ func (d *dmlChannels) broadcast(chanNames []string, pack *msgstream.MsgPack) err
 
 		dms.mutex.RLock()
 		if dms.refcnt > 0 {
-			if err := dms.ms.Broadcast(pack); err != nil {
+			if _, err := dms.ms.Broadcast(pack); err != nil {
 				log.Error("Broadcast failed", zap.Error(err), zap.String("chanName", chanName))
 				dms.mutex.RUnlock()
 				return err
@@ -254,7 +254,7 @@ func (d *dmlChannels) broadcastMark(chanNames []string, pack *msgstream.MsgPack)
 
 		dms.mutex.RLock()
 		if dms.refcnt > 0 {
-			ids, err := dms.ms.BroadcastMark(pack)
+			ids, err := dms.ms.Broadcast(pack)
 			if err != nil {
 				log.Error("BroadcastMark failed", zap.Error(err), zap.String("chanName", chanName))
 				dms.mutex.RUnlock()

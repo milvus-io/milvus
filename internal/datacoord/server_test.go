@@ -1487,7 +1487,6 @@ func TestDataNodeTtChannel(t *testing.T) {
 		ttMsgStream, err := svr.factory.NewMsgStream(context.TODO())
 		assert.Nil(t, err)
 		ttMsgStream.AsProducer([]string{Params.CommonCfg.DataCoordTimeTick})
-		ttMsgStream.Start()
 		defer ttMsgStream.Close()
 		info := &NodeInfo{
 			Address: "localhost:7777",
@@ -1555,7 +1554,6 @@ func TestDataNodeTtChannel(t *testing.T) {
 		ttMsgStream, err := svr.factory.NewMsgStream(context.TODO())
 		assert.Nil(t, err)
 		ttMsgStream.AsProducer([]string{Params.CommonCfg.DataCoordTimeTick})
-		ttMsgStream.Start()
 		defer ttMsgStream.Close()
 		info := &NodeInfo{
 			Address: "localhost:7777",
@@ -1637,7 +1635,6 @@ func TestDataNodeTtChannel(t *testing.T) {
 		ttMsgStream, err := svr.factory.NewMsgStream(context.TODO())
 		assert.Nil(t, err)
 		ttMsgStream.AsProducer([]string{Params.CommonCfg.DataCoordTimeTick})
-		ttMsgStream.Start()
 		defer ttMsgStream.Close()
 		node := &NodeInfo{
 			NodeID:  0,
