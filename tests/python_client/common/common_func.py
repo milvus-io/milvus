@@ -2,6 +2,8 @@ import os
 import random
 import math
 import string
+import json
+from functools import singledispatch
 import numpy as np
 import pandas as pd
 from sklearn import preprocessing
@@ -14,6 +16,17 @@ from customize.milvus_operator import MilvusOperator
 
 """" Methods of processing data """
 
+
+@singledispatch
+def to_serializable(val):
+    """Used by default."""
+    return str(val)
+
+
+@to_serializable.register(np.float32)
+def ts_float32(val):
+    """Used if *val* is an instance of numpy.float32."""
+    return np.float64(val)
 
 class ParamInfo:
     def __init__(self):
@@ -321,11 +334,39 @@ def gen_default_list_data(nb=ct.default_nb, dim=ct.default_dim):
 
 def gen_default_list_data_for_bulk_insert(nb=ct.default_nb, dim=ct.default_dim):
     int_values = [i for i in range(nb)]
-    float_values = [float(i) for i in range(nb)]
+    float_values = [np.float32(i) for i in range(nb)]
     string_values = [str(i) for i in range(nb)]
     float_vec_values = gen_vectors(nb, dim)
     data = [int_values, float_values, string_values, float_vec_values]
     return data
+
+
+def gen_json_files_for_bulk_insert(data, schema, data_dir):
+    nb = len(data[0])
+    fields_name = [field.name for field in schema.fields]
+    entities = []
+    for i in range(nb):
+        entity_value = [field_values[i] for field_values in data]
+        entity = dict(zip(fields_name, entity_value))
+        entities.append(entity)
+    data_dict = {"rows": entities}
+    file_name = "bulk_insert_data_source.json"
+    files = ["bulk_insert_data_source.json"]
+    data_source = os.path.join(data_dir, file_name)
+    with open(data_source, "w") as f:
+        f.write(json.dumps(data_dict, indent=4, default=to_serializable))
+    return files
+
+
+def gen_npy_files_for_bulk_insert(data, schema, data_dir):
+    fields_name = [field.name for field in schema.fields]
+    files = []
+    for field in fields_name:
+        files.append(f"{field}.npy")
+    for i, file in enumerate(files):
+        data_source = os.path.join(data_dir, file)
+        np.save(data_source, np.array(data[i]))
+    return files
 
 
 def gen_default_tuple_data(nb=ct.default_nb, dim=ct.default_dim):

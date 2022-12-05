@@ -1,5 +1,8 @@
 import pytest
-import json
+import os
+import time
+import threading
+from pathlib import Path
 from time import sleep
 from minio import Minio
 from pymilvus import connections
@@ -58,6 +61,11 @@ class TestChaosBase:
 
 class TestChaos(TestChaosBase):
 
+
+    def teardown(self):
+        sleep(10)
+        log.info(f'Alive threads: {threading.enumerate()}')
+
     @pytest.fixture(scope="function", autouse=True)
     def connection(self, host, port, milvus_ns):
         connections.add_connection(default={"host": host, "port": port})
@@ -74,17 +82,16 @@ class TestChaos(TestChaosBase):
         self.release_name = get_milvus_instance_name(self.milvus_ns, milvus_sys=self.milvus_sys)
         self.deploy_by = get_milvus_deploy_tool(self.milvus_ns, self.milvus_sys)
 
-    @pytest.fixture(scope="function", autouse=True)
-    def init_health_checkers(self, collection_name=None):
+    def init_health_checkers(self, collection_name=None, create_index=True, dim=2048):
         log.info("init health checkers")
         c_name = collection_name if collection_name else cf.gen_unique_str("Checker_")
         checkers = {
-            Op.bulk_insert: BulkInsertChecker(collection_name=c_name, use_one_collection=True),
+            Op.bulk_insert: BulkInsertChecker(collection_name=c_name, use_one_collection=False,
+                                              dim=dim, create_index=create_index),
         }
         self.health_checkers = checkers
 
-    @pytest.fixture(scope="function", autouse=True)
-    def prepare_bulk_insert(self, nb=100000):
+    def prepare_bulk_insert(self, nb=3000, file_type="json",dim=2048):
         if Op.bulk_insert not in self.health_checkers:
             log.info("bulk_insert checker is not in  health checkers, skip prepare bulk load")
             return
@@ -100,40 +107,53 @@ class TestChaos(TestChaosBase):
         minio_port = "9000"
         minio_endpoint = f"{minio_ip}:{minio_port}"
         bucket_name = ms.index_nodes[0]["infos"]["system_configurations"]["minio_bucket_name"]
-        schema = cf.gen_default_collection_schema()
-        data = cf.gen_default_list_data_for_bulk_insert(nb=nb)
-        fields_name = [field.name for field in schema.fields]
-        entities = []
-        for i in range(nb):
-            entity_value = [field_values[i] for field_values in data]
-            entity = dict(zip(fields_name, entity_value))
-            entities.append(entity)
-        data_dict = {"rows": entities}
-        data_source = "/tmp/ci_logs/bulk_insert_data_source.json"
-        file_name = "bulk_insert_data_source.json"
-        files = ["bulk_insert_data_source.json"]
-        # TODO: npy file type is not supported so far
-        log.info("generate bulk load file")
-        with open(data_source, "w") as f:
-            f.write(json.dumps(data_dict, indent=4))
+        schema = cf.gen_default_collection_schema(dim=dim)
+        data = cf.gen_default_list_data_for_bulk_insert(nb=nb, dim=dim)
+        data_dir = "/tmp/bulk_insert_data"
+        Path(data_dir).mkdir(parents=True, exist_ok=True)
+        files = []
+        if file_type == "json":
+            files = cf.gen_json_files_for_bulk_insert(data, schema, data_dir)
+        if file_type == "npy":
+            files = cf.gen_npy_files_for_bulk_insert(data, schema, data_dir)
         log.info("upload file to minio")
         client = Minio(minio_endpoint, access_key="minioadmin", secret_key="minioadmin", secure=False)
-        client.fput_object(bucket_name, file_name, data_source)
+        for file_name in files:
+            file_size = os.path.getsize(os.path.join(data_dir, file_name)) / 1024 / 1024
+            t0 = time.time()
+            client.fput_object(bucket_name, file_name, os.path.join(data_dir, file_name))
+            log.info(f"upload file {file_name} to minio, size: {file_size:.2f} MB, cost {time.time() - t0:.2f} s")
         self.health_checkers[Op.bulk_insert].update(schema=schema, files=files)
         log.info("prepare data for bulk load done")
 
     @pytest.mark.tags(CaseLabel.L3)
-    def test_bulk_insert(self):
+    def test_bulk_insert_perf(self, file_type, create_index, nb, dim):
         # start the monitor threads to check the milvus ops
         log.info("*********************Test Start**********************")
         log.info(connections.get_connection_addr('default'))
-        # c_name = cf.gen_unique_str("BulkInsertChecker_")
-        # self.init_health_checkers(collection_name=c_name)
+        log.info(f"file_type: {file_type}, create_index: {create_index}")
+        if create_index == "create_index":
+            create_index = True
+        else:
+            create_index = False
+        self.init_health_checkers(create_index=create_index, dim=int(dim))
+        if nb=="None":
+            nb = 3000
+            if file_type == "json":
+                nb = 13800
+            if file_type == "npy":
+                nb = 65000
+        else:
+            nb = int(nb)
+        self.prepare_bulk_insert(file_type=file_type, nb=nb, dim=int(dim))
         cc.start_monitor_threads(self.health_checkers)
         # wait 600s
-        sleep(constants.WAIT_PER_OP * 60)
+        sleep(constants.WAIT_PER_OP * 30)
         assert_statistic(self.health_checkers)
 
         assert_expectations()
+        for k, checker in self.health_checkers.items():
+            checker.check_result()
+            checker.terminate()
 
         log.info("*********************Test Completed**********************")
