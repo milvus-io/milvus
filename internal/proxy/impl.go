@@ -1433,11 +1433,12 @@ func (node *Proxy) getCollectionProgress(ctx context.Context, request *milvuspb.
 		CollectionIDs: []int64{collectionID},
 	})
 	if err != nil {
-		return 0, err
+		log.Warn("fail to show collections from the querycoord", zap.Int64("collection_id", collectionID), zap.Error(err))
+		return -1, nil
 	}
-
 	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
-		return 0, errors.New(resp.Status.Reason)
+		log.Warn("the ShowCollections response of isn't success", zap.Any("status", resp.Status))
+		return -1, nil
 	}
 
 	if len(resp.InMemoryPercentages) == 0 {
@@ -1465,6 +1466,17 @@ func (node *Proxy) getPartitionProgress(ctx context.Context, request *milvuspb.G
 		CollectionID: collectionID,
 		PartitionIDs: partitionIDs,
 	})
+
+	if err != nil {
+		log.Warn("fail to show partitions from the querycoord", zap.Int64("collection_id", collectionID),
+			zap.Int64s("partition_ids", partitionIDs), zap.Error(err))
+		return -1, nil
+	}
+	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+		log.Warn("the ShowPartitions response isn't success", zap.Any("status", resp.Status))
+		return -1, nil
+	}
+
 	if err != nil {
 		return 0, err
 	}
@@ -1525,6 +1537,12 @@ func (node *Proxy) GetLoadingProgress(ctx context.Context, request *milvuspb.Get
 		request.Base.MsgID = msgBase.MsgID
 		request.Base.Timestamp = msgBase.Timestamp
 		request.Base.SourceID = msgBase.SourceID
+	}
+
+	if statesResp, err := node.queryCoord.GetComponentStates(ctx); err != nil {
+		return getErrResponse(err), nil
+	} else if statesResp.State == nil || statesResp.State.StateCode != commonpb.StateCode_Healthy {
+		return getErrResponse(fmt.Errorf("the querycoord server isn't healthy, state: %v", statesResp.State)), nil
 	}
 
 	var progress int64

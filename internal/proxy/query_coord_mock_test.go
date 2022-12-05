@@ -40,6 +40,8 @@ type queryCoordShowPartitionsFuncType func(ctx context.Context, request *querypb
 
 type queryCoordShowConfigurationsFuncType func(ctx context.Context, request *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error)
 
+type queryCoordGetComponentStatesFuncType func(ctx context.Context) (*milvuspb.ComponentStates, error)
+
 func SetQueryCoordShowCollectionsFunc(f queryCoordShowCollectionsFuncType) QueryCoordMockOption {
 	return func(mock *QueryCoordMock) {
 		mock.showCollectionsFunc = f
@@ -49,6 +51,12 @@ func SetQueryCoordShowCollectionsFunc(f queryCoordShowCollectionsFuncType) Query
 func SetQueryCoordShowPartitionsFunc(f queryCoordShowPartitionsFuncType) QueryCoordMockOption {
 	return func(mock *QueryCoordMock) {
 		mock.showPartitionsFunc = f
+	}
+}
+
+func SetQueryCoordGetComponentStatesFunc(f queryCoordGetComponentStatesFuncType) QueryCoordMockOption {
+	return func(mock *QueryCoordMock) {
+		mock.getComponentStates = f
 	}
 }
 
@@ -72,6 +80,7 @@ type QueryCoordMock struct {
 	showCollectionsFunc    queryCoordShowCollectionsFuncType
 	getMetricsFunc         getMetricsFuncType
 	showPartitionsFunc     queryCoordShowPartitionsFuncType
+	getComponentStates     queryCoordGetComponentStatesFuncType
 
 	statisticsChannel string
 	timeTickChannel   string
@@ -117,6 +126,9 @@ func (coord *QueryCoordMock) Stop() error {
 }
 
 func (coord *QueryCoordMock) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
+	if coord.getComponentStates != nil {
+		return coord.getComponentStates(ctx)
+	}
 	return &milvuspb.ComponentStates{
 		State: &milvuspb.ComponentInfo{
 			NodeID:    coord.nodeID,
