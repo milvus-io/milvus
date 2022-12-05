@@ -1,0 +1,2 @@
+decorest~=0.1.0
+pydantic~=1.10.2
