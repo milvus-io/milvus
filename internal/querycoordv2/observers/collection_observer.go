@@ -34,9 +34,11 @@ import (
 type CollectionObserver struct {
 	stopCh chan struct{}
 
-	dist      *meta.DistributionManager
-	meta      *meta.Meta
-	targetMgr *meta.TargetManager
+	dist                  *meta.DistributionManager
+	meta                  *meta.Meta
+	targetMgr             *meta.TargetManager
+	collectionLoadedCount map[int64]int
+	partitionLoadedCount  map[int64]int
 
 	stopOnce sync.Once
 }
@@ -47,10 +49,12 @@ func NewCollectionObserver(
 	targetMgr *meta.TargetManager,
 ) *CollectionObserver {
 	return &CollectionObserver{
-		stopCh:    make(chan struct{}),
-		dist:      dist,
-		meta:      meta,
-		targetMgr: targetMgr,
+		stopCh:                make(chan struct{}),
+		dist:                  dist,
+		meta:                  meta,
+		targetMgr:             targetMgr,
+		collectionLoadedCount: make(map[int64]int),
+		partitionLoadedCount:  make(map[int64]int),
 	}
 }
 
@@ -134,6 +138,7 @@ func (ob *CollectionObserver) observeLoadStatus() {
 	collections := ob.meta.CollectionManager.GetAllCollections()
 	for _, collection := range collections {
 		if collection.LoadPercentage == 100 {
+			delete(ob.collectionLoadedCount, collection.GetCollectionID())
 			continue
 		}
 		ob.observeCollectionLoadStatus(collection)
@@ -145,6 +150,7 @@ func (ob *CollectionObserver) observeLoadStatus() {
 	}
 	for _, partition := range partitions {
 		if partition.LoadPercentage == 100 {
+			delete(ob.partitionLoadedCount, partition.GetPartitionID())
 			continue
 		}
 		ob.observePartitionLoadStatus(partition)
@@ -195,10 +201,10 @@ func (ob *CollectionObserver) observeCollectionLoadStatus(collection *meta.Colle
 		updated.LoadPercentage = int32(loadedCount * 100 / targetNum)
 	}
 
-	if updated.LoadPercentage <= collection.LoadPercentage {
+	if loadedCount <= ob.collectionLoadedCount[collection.GetCollectionID()] && updated.LoadPercentage != 100 {
 		return
 	}
-
+	ob.collectionLoadedCount[collection.GetCollectionID()] = loadedCount
 	if loadedCount >= targetNum {
 		ob.targetMgr.UpdateCollectionCurrentTarget(updated.CollectionID)
 		updated.Status = querypb.LoadStatus_Loaded
@@ -260,10 +266,10 @@ func (ob *CollectionObserver) observePartitionLoadStatus(partition *meta.Partiti
 
 	}
 
-	if updated.LoadPercentage <= partition.LoadPercentage {
+	if loadedCount <= ob.partitionLoadedCount[partition.GetPartitionID()] && updated.LoadPercentage != 100 {
 		return
 	}
-
+	ob.partitionLoadedCount[partition.GetPartitionID()] = loadedCount
 	if loadedCount >= targetNum {
 		ob.targetMgr.UpdateCollectionCurrentTarget(partition.GetCollectionID(), partition.GetPartitionID())
 		updated.Status = querypb.LoadStatus_Loaded
