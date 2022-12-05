@@ -1164,6 +1164,9 @@ func TestShardCluster_Search(t *testing.T) {
 		require.EqualValues(t, available, sc.state.Load())
 
 		result, err := sc.Search(ctx, &querypb.SearchRequest{
+			Req: &internalpb.SearchRequest{
+				Base: &commonpb.MsgBase{},
+			},
 			DmlChannels: []string{vchannelName},
 		}, streamingDoNothing)
 		assert.NoError(t, err)
@@ -1215,6 +1218,9 @@ func TestShardCluster_Search(t *testing.T) {
 		require.EqualValues(t, available, sc.state.Load())
 
 		_, err := sc.Search(ctx, &querypb.SearchRequest{
+			Req: &internalpb.SearchRequest{
+				Base: &commonpb.MsgBase{},
+			},
 			DmlChannels: []string{vchannelName},
 		}, func(ctx context.Context) error { return errors.New("mocked") })
 		assert.Error(t, err)
@@ -1273,6 +1279,9 @@ func TestShardCluster_Search(t *testing.T) {
 		require.EqualValues(t, available, sc.state.Load())
 
 		_, err := sc.Search(ctx, &querypb.SearchRequest{
+			Req: &internalpb.SearchRequest{
+				Base: &commonpb.MsgBase{},
+			},
 			DmlChannels: []string{vchannelName},
 		}, streamingDoNothing)
 		assert.Error(t, err)
@@ -1325,6 +1334,9 @@ func TestShardCluster_Search(t *testing.T) {
 		require.EqualValues(t, available, sc.state.Load())
 
 		_, err := sc.Search(ctx, &querypb.SearchRequest{
+			Req: &internalpb.SearchRequest{
+				Base: &commonpb.MsgBase{},
+			},
 			DmlChannels: []string{vchannelName},
 		}, streamingDoNothing)
 		assert.Error(t, err)
@@ -1385,6 +1397,9 @@ func TestShardCluster_Query(t *testing.T) {
 		require.EqualValues(t, unavailable, sc.state.Load())
 
 		_, err := sc.Query(ctx, &querypb.QueryRequest{
+			Req: &internalpb.RetrieveRequest{
+				Base: &commonpb.MsgBase{},
+			},
 			DmlChannels: []string{vchannelName},
 		}, streamingDoNothing)
 		assert.Error(t, err)
@@ -1398,6 +1413,9 @@ func TestShardCluster_Query(t *testing.T) {
 		sc.SetupFirstVersion()
 
 		_, err := sc.Query(ctx, &querypb.QueryRequest{
+			Req: &internalpb.RetrieveRequest{
+				Base: &commonpb.MsgBase{},
+			},
 			DmlChannels: []string{vchannelName + "_suffix"},
 		}, streamingDoNothing)
 		assert.Error(t, err)
@@ -1447,6 +1465,9 @@ func TestShardCluster_Query(t *testing.T) {
 		require.EqualValues(t, available, sc.state.Load())
 
 		result, err := sc.Query(ctx, &querypb.QueryRequest{
+			Req: &internalpb.RetrieveRequest{
+				Base: &commonpb.MsgBase{},
+			},
 			DmlChannels: []string{vchannelName},
 		}, streamingDoNothing)
 		assert.NoError(t, err)
@@ -1497,6 +1518,9 @@ func TestShardCluster_Query(t *testing.T) {
 		require.EqualValues(t, available, sc.state.Load())
 
 		_, err := sc.Query(ctx, &querypb.QueryRequest{
+			Req: &internalpb.RetrieveRequest{
+				Base: &commonpb.MsgBase{},
+			},
 			DmlChannels: []string{vchannelName},
 		}, func(ctx context.Context) error { return errors.New("mocked") })
 		assert.Error(t, err)
@@ -1555,6 +1579,9 @@ func TestShardCluster_Query(t *testing.T) {
 		require.EqualValues(t, available, sc.state.Load())
 
 		_, err := sc.Query(ctx, &querypb.QueryRequest{
+			Req: &internalpb.RetrieveRequest{
+				Base: &commonpb.MsgBase{},
+			},
 			DmlChannels: []string{vchannelName},
 		}, streamingDoNothing)
 		assert.Error(t, err)
@@ -1608,6 +1635,9 @@ func TestShardCluster_Query(t *testing.T) {
 		require.EqualValues(t, available, sc.state.Load())
 
 		_, err := sc.Query(ctx, &querypb.QueryRequest{
+			Req: &internalpb.RetrieveRequest{
+				Base: &commonpb.MsgBase{},
+			},
 			DmlChannels: []string{vchannelName},
 		}, streamingDoNothing)
 		assert.Error(t, err)
