@@ -612,10 +612,10 @@ func (kc *Catalog) save(k string) error {
 
 func (kc *Catalog) remove(k string) error {
 	var err error
-	if _, err = kc.Txn.Load(k); err != nil {
+	if _, err = kc.Txn.Load(k); err != nil && !common.IsKeyNotExistError(err) {
 		return err
 	}
-	if common.IsKeyNotExistError(err) {
+	if err != nil && common.IsKeyNotExistError(err) {
 		return common.NewIgnorableError(fmt.Errorf("the key[%s] isn't existed", k))
 	}
 	return kc.Txn.Remove(k)
