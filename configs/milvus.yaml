@@ -276,6 +276,10 @@ dataCoord:
     # `minSizeFromIdleToSealed`, Milvus will automatically seal it.
     maxIdleTime: 600 # The max idle time of segment in seconds, 10*60.
     minSizeFromIdleToSealed: 16 # The min size in MB of segment which can be idle from sealed.
+    smallProportion: 0.5 # The segment is considered as "small segment" when its # of rows is smaller than
+    # (smallProportion * segment max # of rows).
+    compactableProportion: 0.5 # A compaction will happen on small segments if the segment after compaction will have
+    # over (compactableProportion * segment max # of rows) rows.
 
   compaction:
     enableAutoCompaction: true
