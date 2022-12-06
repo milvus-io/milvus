@@ -579,10 +579,9 @@ func (node *DataNode) ReadyToFlush() error {
 
 // FlushSegments packs flush messages into flowGraph through flushChan.
 //
+//  DataCoord calls FlushSegments if the segment is seal&flush only.
 //	If DataNode receives a valid segment to flush, new flush message for the segment should be ignored.
 //	So if receiving calls to flush segment A, DataNode should guarantee the segment to be flushed.
-//
-//	One precondition: The segmentID in req is in ascending order.
 func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmentsRequest) (*commonpb.Status, error) {
 	metrics.DataNodeFlushReqCounter.WithLabelValues(
 		fmt.Sprint(paramtable.GetNodeID()),
@@ -610,64 +609,50 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 	}
 
 	log.Info("receiving FlushSegments request",
-		zap.Int64("collection ID", req.GetCollectionID()),
-		zap.Int64s("segments", req.GetSegmentIDs()),
+		zap.Int64("collectionID", req.GetCollectionID()),
+		zap.Int64s("sealedSegments", req.GetSegmentIDs()),
 	)
 
-	// TODO: Here and in other places, replace `flushed` param with a more meaningful name.
-	processSegments := func(segmentIDs []UniqueID, flushed bool) ([]UniqueID, bool) {
-		noErr := true
-		var flushedSeg []UniqueID
-		for _, segID := range segmentIDs {
-			// if the segment in already being flushed, skip it.
-			if node.segmentCache.checkIfCached(segID) {
-				logDupFlush(req.GetCollectionID(), segID)
-				continue
-			}
-			// Get the flush channel for the given segment ID.
-			// If no flush channel is found, report an error.
-			flushCh, err := node.flowgraphManager.getFlushCh(segID)
-			if err != nil {
-				errStatus.Reason = "no flush channel found for the segment, unable to flush"
-				log.Error(errStatus.Reason, zap.Int64("segment ID", segID), zap.Error(err))
-				noErr = false
-				continue
-			}
-
-			// Double check that the segment is still not cached.
-			// Skip this flush if segment ID is cached, otherwise cache the segment ID and proceed.
-			exist := node.segmentCache.checkOrCache(segID)
-			if exist {
-				logDupFlush(req.GetCollectionID(), segID)
-				continue
-			}
-			// flushedSeg is only for logging purpose.
-			flushedSeg = append(flushedSeg, segID)
-			// Send the segment to its flush channel.
-			flushCh <- flushMsg{
-				msgID:        req.GetBase().GetMsgID(),
-				timestamp:    req.GetBase().GetTimestamp(),
-				segmentID:    segID,
-				collectionID: req.GetCollectionID(),
-				flushed:      flushed,
-			}
+	segmentIDs := req.GetSegmentIDs()
+	var flushedSeg []UniqueID
+	for _, segID := range segmentIDs {
+		// if the segment in already being flushed, skip it.
+		if node.segmentCache.checkIfCached(segID) {
+			logDupFlush(req.GetCollectionID(), segID)
+			continue
 		}
-		log.Info("flow graph flushSegment tasks triggered",
-			zap.Bool("flushed", flushed),
-			zap.Int64("collection ID", req.GetCollectionID()),
-			zap.Int64s("segments sending to flush channel", flushedSeg))
-		return flushedSeg, noErr
+		// Get the flush channel for the given segment ID.
+		// If no flush channel is found, report an error.
+		flushCh, err := node.flowgraphManager.getFlushCh(segID)
+		if err != nil {
+			errStatus.Reason = "no flush channel found for the segment, unable to flush"
+			log.Error(errStatus.Reason, zap.Int64("segmentID", segID), zap.Error(err))
+			return errStatus, nil
+		}
+
+		// Double check that the segment is still not cached.
+		// Skip this flush if segment ID is cached, otherwise cache the segment ID and proceed.
+		exist := node.segmentCache.checkOrCache(segID)
+		if exist {
+			logDupFlush(req.GetCollectionID(), segID)
+			continue
+		}
+		// flushedSeg is only for logging purpose.
+		flushedSeg = append(flushedSeg, segID)
+		// Send the segment to its flush channel.
+		flushCh <- flushMsg{
+			msgID:        req.GetBase().GetMsgID(),
+			timestamp:    req.GetBase().GetTimestamp(),
+			segmentID:    segID,
+			collectionID: req.GetCollectionID(),
+		}
 	}
 
-	seg, noErr1 := processSegments(req.GetSegmentIDs(), true)
 	// Log success flushed segments.
-	if len(seg) > 0 {
+	if len(flushedSeg) > 0 {
 		log.Info("sending segments to flush channel",
-			zap.Any("newly sealed segment IDs", seg))
-	}
-	// Fail FlushSegments call if at least one segment fails to get flushed.
-	if !noErr1 {
-		return errStatus, nil
+			zap.Int64("collectionID", req.GetCollectionID()),
+			zap.Int64s("sealedSegments", flushedSeg))
 	}
 
 	metrics.DataNodeFlushReqCounter.WithLabelValues(
