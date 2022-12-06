@@ -67,10 +67,11 @@ type CollectionObserverSuite struct {
 func (suite *CollectionObserverSuite) SetupSuite() {
 	Params.Init()
 
-	suite.collections = []int64{100, 101}
+	suite.collections = []int64{100, 101, 102}
 	suite.partitions = map[int64][]int64{
 		100: {10},
 		101: {11, 12},
+		102: {13},
 	}
 	suite.channels = map[int64][]*meta.DmChannel{
 		100: {
@@ -91,6 +92,12 @@ func (suite *CollectionObserverSuite) SetupSuite() {
 			meta.DmChannelFromVChannel(&datapb.VchannelInfo{
 				CollectionID: 101,
 				ChannelName:  "101-dmc1",
+			}),
+		},
+		102: {
+			meta.DmChannelFromVChannel(&datapb.VchannelInfo{
+				CollectionID: 102,
+				ChannelName:  "102-dmc0",
 			}),
 		},
 	}
@@ -123,18 +130,22 @@ func (suite *CollectionObserverSuite) SetupSuite() {
 				InsertChannel: "101-dmc1",
 			},
 		},
+		102: genSegmentsInfo(999, 5, 102, 13, "102-dmc0"),
 	}
 	suite.loadTypes = map[int64]querypb.LoadType{
 		100: querypb.LoadType_LoadCollection,
 		101: querypb.LoadType_LoadPartition,
+		102: querypb.LoadType_LoadCollection,
 	}
 	suite.replicaNumber = map[int64]int32{
 		100: 1,
 		101: 1,
+		102: 1,
 	}
 	suite.loadPercentage = map[int64]int32{
 		100: 0,
 		101: 50,
+		102: 0,
 	}
 	suite.nodes = []int64{1, 2, 3}
 }
@@ -184,6 +195,8 @@ func (suite *CollectionObserverSuite) TestObserve() {
 	const (
 		timeout = 2 * time.Second
 	)
+	// time before load
+	time := suite.meta.GetCollection(suite.collections[2]).UpdatedAt
 	// Not timeout
 	Params.QueryCoordCfg.LoadTimeoutSeconds = timeout
 	suite.ob.Start(context.Background())
@@ -202,8 +215,18 @@ func (suite *CollectionObserverSuite) TestObserve() {
 		Channel:      "100-dmc1",
 		Segments:     map[int64]*querypb.SegmentDist{2: {NodeID: 2, Version: 0}},
 	})
+	suite.dist.LeaderViewManager.Update(3, &meta.LeaderView{
+		ID:           3,
+		CollectionID: 102,
+		Channel:      "102-dmc0",
+		Segments:     map[int64]*querypb.SegmentDist{2: {NodeID: 5, Version: 0}},
+	})
 	suite.Eventually(func() bool {
 		return suite.isCollectionLoaded(suite.collections[0])
+	}, timeout*2, timeout/10)
+
+	suite.Eventually(func() bool {
+		return suite.isCollectionLoadedContinue(suite.collections[2], time)
 	}, timeout*2, timeout/10)
 
 	suite.Eventually(func() bool {
@@ -232,11 +255,15 @@ func (suite *CollectionObserverSuite) isCollectionTimeout(collection int64) bool
 	replicas := suite.meta.ReplicaManager.GetByCollection(collection)
 	channels := suite.targetMgr.GetDmChannelsByCollection(collection, meta.CurrentTarget)
 	segments := suite.targetMgr.GetHistoricalSegmentsByCollection(collection, meta.CurrentTarget)
-
 	return !(exist ||
 		len(replicas) > 0 ||
 		len(channels) > 0 ||
 		len(segments) > 0)
+}
+
+func (suite *CollectionObserverSuite) isCollectionLoadedContinue(collection int64, beforeTime time.Time) bool {
+	return suite.meta.GetCollection(collection).UpdatedAt.After(beforeTime)
+
 }
 
 func (suite *CollectionObserverSuite) loadAll() {
@@ -244,6 +271,7 @@ func (suite *CollectionObserverSuite) loadAll() {
 		suite.load(collection)
 	}
 	suite.targetMgr.UpdateCollectionCurrentTarget(suite.collections[0])
+	suite.targetMgr.UpdateCollectionCurrentTarget(suite.collections[2])
 }
 
 func (suite *CollectionObserverSuite) load(collection int64) {
@@ -303,4 +331,18 @@ func (suite *CollectionObserverSuite) load(collection int64) {
 
 func TestCollectionObserver(t *testing.T) {
 	suite.Run(t, new(CollectionObserverSuite))
+}
+
+func genSegmentsInfo(count int, start int, collID int64, partitionID int64, insertChannel string) []*datapb.SegmentInfo {
+	ret := make([]*datapb.SegmentInfo, 0, count)
+	for i := 0; i < count; i++ {
+		segment := &datapb.SegmentInfo{
+			ID:            int64(start + i),
+			CollectionID:  collID,
+			PartitionID:   partitionID,
+			InsertChannel: insertChannel,
+		}
+		ret = append(ret, segment)
+	}
+	return ret
 }
