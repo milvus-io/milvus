@@ -376,39 +376,53 @@ func TestWithAsyncInitPreLoader(t *testing.T) {
 		"3": "1",
 	}
 
-	wg.Add(1)
-	cnt := len(data)
-	i := 0
-	insFunc := func(k string, v string) {
-		r, ok := data[k]
-		assert.True(t, ok)
-		assert.Equal(t, v, r)
-		i++
-		if i == cnt {
-			wg.Done()
-		}
-	}
-
 	loader := func(k string) (string, error) {
 		assert.Fail(t, "should not reach here!")
 		return "", nil
 	}
 
-	preLoaderFunc := func() (map[string]string, error) {
-		return data, nil
-	}
+	t.Run("get preload data fail", func(t *testing.T) {
+		wg.Add(1)
+		preLoaderFunc := func() (map[string]string, error) {
+			wg.Done()
+			return data, errors.New("get preload data error")
+		}
 
-	c := NewLoadingCache(loader, WithMaximumSize[string, string](3),
-		WithInsertionListener(insFunc), WithAsyncInitPreLoader(preLoaderFunc))
-	defer c.Close()
-	wg.Wait()
+		c := NewLoadingCache(loader, WithAsyncInitPreLoader(preLoaderFunc))
+		defer c.Close()
+		wg.Wait()
+	})
 
-	_, ok := c.GetIfPresent("1")
-	assert.True(t, ok)
-	_, ok = c.GetIfPresent("2")
-	assert.True(t, ok)
-	_, ok = c.GetIfPresent("3")
-	assert.True(t, ok)
+	t.Run("test ok", func(t *testing.T) {
+		wg.Add(1)
+		cnt := len(data)
+		i := 0
+		insFunc := func(k string, v string) {
+			r, ok := data[k]
+			assert.True(t, ok)
+			assert.Equal(t, v, r)
+			i++
+			if i == cnt {
+				wg.Done()
+			}
+		}
+
+		preLoaderFunc := func() (map[string]string, error) {
+			return data, nil
+		}
+
+		c := NewLoadingCache(loader, WithMaximumSize[string, string](3),
+			WithInsertionListener(insFunc), WithAsyncInitPreLoader(preLoaderFunc))
+		defer c.Close()
+		wg.Wait()
+
+		_, ok := c.GetIfPresent("1")
+		assert.True(t, ok)
+		_, ok = c.GetIfPresent("2")
+		assert.True(t, ok)
+		_, ok = c.GetIfPresent("3")
+		assert.True(t, ok)
+	})
 }
 
 func TestSynchronousReload(t *testing.T) {

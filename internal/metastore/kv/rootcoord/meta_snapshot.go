@@ -24,10 +24,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 const (
@@ -322,7 +324,7 @@ func (ms *MetaSnapshot) Load(key string, ts typeutil.Timestamp) (string, error) 
 		}
 	}
 	if len(resp.Kvs) == 0 {
-		return "", fmt.Errorf("there is no value on key = %s, ts = %d", key, ts)
+		return "", common.NewKeyNotExistError(fmt.Sprintf("key: %s does not exist!, ts = %d", key, ts))
 	}
 	return string(resp.Kvs[0].Value), nil
 }

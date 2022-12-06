@@ -57,6 +57,8 @@ type localCache[K comparable, V any] struct {
 
 	loader         LoaderFunc[K, V]
 	getPreLoadData GetPreLoadDataFunc[K, V]
+	// It indicates preload has finished if v is true
+	isLoaded atomic.Value
 
 	stats StatsCounter
 
@@ -104,6 +106,7 @@ func (c *localCache[K, V]) init() {
 	c.closeWG.Add(1)
 	go c.processEntries()
 
+	c.isLoaded.Store(false)
 	if c.getPreLoadData != nil {
 		c.asyncPreload()
 	}
@@ -186,6 +189,15 @@ func (c *localCache[K, V]) InvalidateAll() {
 
 // Scan entries list with a filter function
 func (c *localCache[K, V]) Scan(filter func(K, V) bool) map[K]V {
+	for c.getPreLoadData != nil {
+		v := c.isLoaded.Load()
+		if v != nil && v.(bool) {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+		log.RatedInfo(10, "waiting for preloading finished...")
+	}
+
 	ret := make(map[K]V)
 	c.cache.walk(func(en *entry) {
 		k := en.key.(K)
@@ -248,21 +260,33 @@ func (c *localCache[K, V]) Stats() *Stats {
 }
 
 // asyncPreload async preload cache by Put
-func (c *localCache[K, V]) asyncPreload() error {
-	var err error
+func (c *localCache[K, V]) asyncPreload() {
 	go func() {
-		var data map[K]V
-		data, err = c.getPreLoadData()
-		if err != nil {
-			return
-		}
-
-		for k, v := range data {
-			c.Put(k, v)
-		}
+		c.preload()
+		c.isLoaded.Store(true)
 	}()
+}
 
-	return nil
+// preload async load cache by Put
+func (c *localCache[K, V]) preload() {
+	var data map[K]V
+	data, err := c.getPreLoadData()
+	if err != nil {
+		log.Warn("get preload data fail", zap.Error(err))
+		return
+	}
+
+	for k, v := range data {
+		h := sum(k)
+		en := newEntry(k, v, h)
+		// preload data will not set cache if the entry has already been populated,
+		// or it may cause cache inconsistent issue.
+		cen := c.cache.getOrSet(en)
+		// returns value is nil if the value was not loaded.
+		if cen == nil {
+			c.sendEvent(eventWrite, en)
+		}
+	}
 }
 
 func (c *localCache[K, V]) processEntries() {

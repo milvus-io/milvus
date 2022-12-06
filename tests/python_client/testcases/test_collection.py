@@ -1,3 +1,5 @@
+import time
+
 import numpy
 import pandas as pd
 import pytest
@@ -1080,6 +1082,9 @@ class TestCollectionOperation(TestcaseBase):
                                                  check_items={exp_name: c_name, exp_schema: default_schema})
         collection_w.drop()
         assert not self.utility_wrap.has_collection(collection_w.name)[0]
+
+        # due to drop is async operation, try to create collection again after 5 seconds.
+        time.sleep(5)
         self.init_collection_wrap(name=c_name, check_task=CheckTasks.check_collection_property,
                                   check_items={exp_name: c_name, exp_schema: default_schema})
         assert self.utility_wrap.has_collection(c_name)[0]

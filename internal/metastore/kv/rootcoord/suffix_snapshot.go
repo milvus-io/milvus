@@ -29,11 +29,12 @@ import (
 
 	"github.com/milvus-io/milvus/internal/common"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"go.uber.org/zap"
 )
 
 var (
@@ -356,12 +357,12 @@ func (ss *SuffixSnapshot) Load(key string, ts typeutil.Timestamp) (string, error
 	value, found := binarySearchRecords(records, ts)
 	if !found {
 		log.Warn("not found")
-		return "", errors.New("no value found")
+		return "", common.NewKeyNotExistError(fmt.Sprintf("key: %s does not exist!, ts = %d", key, ts))
 	}
 	// check whether value is tombstone
 	if ss.isTombstone(value) {
 		log.Warn("tombstone", zap.String("value", value))
-		return "", errors.New("not value found")
+		return "", common.NewKeyNotExistError(fmt.Sprintf("key: %s does not exist!, ts = %d", key, ts))
 	}
 	return value, nil
 }

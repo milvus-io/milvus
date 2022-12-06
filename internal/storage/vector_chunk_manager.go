@@ -89,11 +89,11 @@ func (vcm *VectorChunkManager) initCache(ctx context.Context) error {
 		size := v.Len()
 		err := v.Close()
 		if err != nil {
-			log.Error("close mmap file failed", zap.Any("file", filePath))
+			log.Warn("close mmap file failed", zap.Any("file", filePath))
 		}
 		err = vcm.cacheStorage.Remove(ctx, filePath)
 		if err != nil {
-			log.Error("cache storage remove file failed", zap.Any("file", filePath))
+			log.Warn("cache storage remove file failed", zap.Any("file", filePath))
 		}
 
 		vcm.cacheSizeMutex.Lock()

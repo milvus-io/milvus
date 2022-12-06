@@ -21,21 +21,23 @@ import (
 	"errors"
 	"math/rand"
 	"testing"
+	"time"
 
-	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
-	"github.com/milvus-io/milvus/internal/metastore/mocks"
-	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 
 	"github.com/milvus-io/milvus/internal/common"
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
+	"github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
+	"github.com/milvus-io/milvus/internal/metastore/mocks"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util"
+	"github.com/milvus-io/milvus/internal/util/cache"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -410,6 +412,35 @@ func TestRbacListPolicy(t *testing.T) {
 	assert.Equal(t, 0, len(userRoles))
 }
 
+func buildCollID2metaCache(data map[typeutil.UniqueID]*model.Collection, loadErr error) cache.LoadingCache[typeutil.UniqueID, *model.Collection] {
+	onLoadFn := func(collectionID int64) (*model.Collection, error) {
+		if data != nil {
+			return data[collectionID], loadErr
+		}
+
+		return nil, loadErr
+	}
+	return cache.NewLoadingCache(onLoadFn)
+}
+
+func getCacheSize(cache cache.LoadingCache[typeutil.UniqueID, *model.Collection]) int {
+	count := 0
+	fn := func(typeutil.UniqueID, *model.Collection) bool {
+		count++
+		return true
+	}
+	cache.Scan(fn)
+	return count
+}
+
+func buildCollName2IDCache(data map[string]UniqueID) *typeutil.ConcurrentMap[string, UniqueID] {
+	collName2ID := typeutil.NewConcurrentMap[string, UniqueID]()
+	for k, v := range data {
+		collName2ID.InsertIfNotPresent(k, v)
+	}
+	return collName2ID
+}
+
 func TestMetaTable_getCollectionByIDInternal(t *testing.T) {
 	t.Run("failed to get from catalog", func(t *testing.T) {
 		catalog := mocks.NewRootCoordCatalog(t)
@@ -418,11 +449,16 @@ func TestMetaTable_getCollectionByIDInternal(t *testing.T) {
 			mock.AnythingOfType("int64"),
 			mock.AnythingOfType("uint64"),
 		).Return(nil, errors.New("error mock GetCollectionByID"))
+		catalog.On("ListCollections",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("uint64"),
+		).Return(map[string]*model.Collection{}, nil).Maybe()
 		meta := &MetaTable{
 			catalog:     catalog,
-			collID2Meta: map[typeutil.UniqueID]*model.Collection{},
+			collName2ID: buildCollName2IDCache(nil),
 		}
 		ctx := context.Background()
+		meta.initCollectionCache()
 		_, err := meta.getCollectionByIDInternal(ctx, 100, 101)
 		assert.Error(t, err)
 	})
@@ -434,11 +470,16 @@ func TestMetaTable_getCollectionByIDInternal(t *testing.T) {
 			mock.AnythingOfType("int64"),
 			mock.AnythingOfType("uint64"),
 		).Return(&model.Collection{State: pb.CollectionState_CollectionDropped}, nil)
+		catalog.On("ListCollections",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("uint64"),
+		).Return(map[string]*model.Collection{}, nil).Maybe()
 		meta := &MetaTable{
 			catalog:     catalog,
-			collID2Meta: map[typeutil.UniqueID]*model.Collection{},
+			collName2ID: buildCollName2IDCache(nil),
 		}
 		ctx := context.Background()
+		meta.initCollectionCache()
 		_, err := meta.getCollectionByIDInternal(ctx, 100, 101)
 		assert.Error(t, err)
 		assert.True(t, common.IsCollectionNotExistError(err))
@@ -447,7 +488,7 @@ func TestMetaTable_getCollectionByIDInternal(t *testing.T) {
 	t.Run("normal case, filter unavailable partitions", func(t *testing.T) {
 		Params.InitOnce()
 		meta := &MetaTable{
-			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+			collID2Meta: buildCollID2metaCache(map[typeutil.UniqueID]*model.Collection{
 				100: {
 					State:      pb.CollectionState_CollectionCreated,
 					CreateTime: 99,
@@ -456,7 +497,7 @@ func TestMetaTable_getCollectionByIDInternal(t *testing.T) {
 						{PartitionID: 22, PartitionName: "dropped", State: pb.PartitionState_PartitionDropped},
 					},
 				},
-			},
+			}, nil),
 		}
 		ctx := context.Background()
 		coll, err := meta.getCollectionByIDInternal(ctx, 100, 101)
@@ -469,7 +510,7 @@ func TestMetaTable_getCollectionByIDInternal(t *testing.T) {
 	t.Run("get latest version", func(t *testing.T) {
 		Params.InitOnce()
 		meta := &MetaTable{
-			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+			collID2Meta: buildCollID2metaCache(map[typeutil.UniqueID]*model.Collection{
 				100: {
 					State:      pb.CollectionState_CollectionCreated,
 					CreateTime: 99,
@@ -478,7 +519,7 @@ func TestMetaTable_getCollectionByIDInternal(t *testing.T) {
 						{PartitionID: 22, PartitionName: "dropped", State: pb.PartitionState_PartitionDropped},
 					},
 				},
-			},
+			}, nil),
 		}
 		ctx := context.Background()
 		coll, err := meta.getCollectionByIDInternal(ctx, 100, typeutil.MaxTimestamp)
@@ -490,12 +531,12 @@ func TestMetaTable_getCollectionByIDInternal(t *testing.T) {
 }
 
 func TestMetaTable_GetCollectionByName(t *testing.T) {
-	t.Run("get by alias", func(t *testing.T) {
+	t.Run("get by alias with max ts", func(t *testing.T) {
 		meta := &MetaTable{
 			collAlias2ID: map[string]typeutil.UniqueID{
 				"alias": 100,
 			},
-			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+			collID2Meta: buildCollID2metaCache(map[typeutil.UniqueID]*model.Collection{
 				100: {
 					State:      pb.CollectionState_CollectionCreated,
 					CreateTime: 99,
@@ -504,7 +545,31 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 						{PartitionID: 22, PartitionName: "dropped", State: pb.PartitionState_PartitionDropped},
 					},
 				},
-			},
+			}, nil),
+		}
+		ctx := context.Background()
+		coll, err := meta.GetCollectionByName(ctx, "alias", typeutil.MaxTimestamp)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(coll.Partitions))
+		assert.Equal(t, UniqueID(11), coll.Partitions[0].PartitionID)
+		assert.Equal(t, Params.CommonCfg.DefaultPartitionName.GetValue(), coll.Partitions[0].PartitionName)
+	})
+
+	t.Run("get by alias with historical ts", func(t *testing.T) {
+		meta := &MetaTable{
+			collName2ID: buildCollName2IDCache(map[string]typeutil.UniqueID{
+				"alias": 99,
+			}),
+			collID2Meta: buildCollID2metaCache(map[typeutil.UniqueID]*model.Collection{
+				99: {
+					State:      pb.CollectionState_CollectionCreated,
+					CreateTime: 99,
+					Partitions: []*model.Partition{
+						{PartitionID: 11, PartitionName: Params.CommonCfg.DefaultPartitionName.GetValue(), State: pb.PartitionState_PartitionCreated},
+						{PartitionID: 22, PartitionName: "dropped", State: pb.PartitionState_PartitionDropped},
+					},
+				},
+			}, nil),
 		}
 		ctx := context.Background()
 		coll, err := meta.GetCollectionByName(ctx, "alias", 101)
@@ -514,12 +579,12 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 		assert.Equal(t, Params.CommonCfg.DefaultPartitionName.GetValue(), coll.Partitions[0].PartitionName)
 	})
 
-	t.Run("get by name", func(t *testing.T) {
+	t.Run("get by name with max ts", func(t *testing.T) {
 		meta := &MetaTable{
-			collName2ID: map[string]typeutil.UniqueID{
+			collName2ID: buildCollName2IDCache(map[string]typeutil.UniqueID{
 				"name": 100,
-			},
-			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+			}),
+			collID2Meta: buildCollID2metaCache(map[typeutil.UniqueID]*model.Collection{
 				100: {
 					State:      pb.CollectionState_CollectionCreated,
 					CreateTime: 99,
@@ -528,7 +593,31 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 						{PartitionID: 22, PartitionName: "dropped", State: pb.PartitionState_PartitionDropped},
 					},
 				},
-			},
+			}, nil),
+		}
+		ctx := context.Background()
+		coll, err := meta.GetCollectionByName(ctx, "name", typeutil.MaxTimestamp)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(coll.Partitions))
+		assert.Equal(t, UniqueID(11), coll.Partitions[0].PartitionID)
+		assert.Equal(t, Params.CommonCfg.DefaultPartitionName.GetValue(), coll.Partitions[0].PartitionName)
+	})
+
+	t.Run("get by name with historical ts", func(t *testing.T) {
+		meta := &MetaTable{
+			collName2ID: buildCollName2IDCache(map[string]typeutil.UniqueID{
+				"name": 99,
+			}),
+			collID2Meta: buildCollID2metaCache(map[typeutil.UniqueID]*model.Collection{
+				99: {
+					State:      pb.CollectionState_CollectionCreated,
+					CreateTime: 99,
+					Partitions: []*model.Partition{
+						{PartitionID: 11, PartitionName: Params.CommonCfg.DefaultPartitionName.GetValue(), State: pb.PartitionState_PartitionCreated},
+						{PartitionID: 22, PartitionName: "dropped", State: pb.PartitionState_PartitionDropped},
+					},
+				},
+			}, nil),
 		}
 		ctx := context.Background()
 		coll, err := meta.GetCollectionByName(ctx, "name", 101)
@@ -545,20 +634,32 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("uint64"),
 		).Return(nil, errors.New("error mock GetCollectionByName"))
-		meta := &MetaTable{catalog: catalog}
+		catalog.On("ListCollections",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("uint64"),
+		).Return(map[string]*model.Collection{}, nil).Maybe()
+		meta := &MetaTable{
+			catalog:     catalog,
+			collName2ID: buildCollName2IDCache(nil),
+		}
 		ctx := context.Background()
+		meta.initCollectionCache()
 		_, err := meta.GetCollectionByName(ctx, "name", 101)
 		assert.Error(t, err)
 	})
 
 	t.Run("collection not available", func(t *testing.T) {
-		catalog := mocks.NewRootCoordCatalog(t)
-		catalog.On("GetCollectionByName",
-			mock.Anything, // context.Context
-			mock.AnythingOfType("string"),
-			mock.AnythingOfType("uint64"),
-		).Return(&model.Collection{State: pb.CollectionState_CollectionDropped}, nil)
-		meta := &MetaTable{catalog: catalog}
+		meta := &MetaTable{
+			collName2ID: buildCollName2IDCache(map[string]typeutil.UniqueID{
+				"name": 99,
+			}),
+			collID2Meta: buildCollID2metaCache(map[typeutil.UniqueID]*model.Collection{
+				99: {
+					State: pb.CollectionState_CollectionDropped,
+				},
+			}, nil),
+		}
+
 		ctx := context.Background()
 		_, err := meta.GetCollectionByName(ctx, "name", 101)
 		assert.Error(t, err)
@@ -566,20 +667,20 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 	})
 
 	t.Run("normal case, filter unavailable partitions", func(t *testing.T) {
-		catalog := mocks.NewRootCoordCatalog(t)
-		catalog.On("GetCollectionByName",
-			mock.Anything, // context.Context
-			mock.AnythingOfType("string"),
-			mock.AnythingOfType("uint64"),
-		).Return(&model.Collection{
-			State:      pb.CollectionState_CollectionCreated,
-			CreateTime: 99,
-			Partitions: []*model.Partition{
-				{PartitionID: 11, PartitionName: Params.CommonCfg.DefaultPartitionName.GetValue(), State: pb.PartitionState_PartitionCreated},
-				{PartitionID: 22, PartitionName: "dropped", State: pb.PartitionState_PartitionDropped},
-			},
-		}, nil)
-		meta := &MetaTable{catalog: catalog}
+		meta := &MetaTable{
+			collName2ID: buildCollName2IDCache(map[string]typeutil.UniqueID{
+				"name": 99,
+			}),
+			collID2Meta: buildCollID2metaCache(map[typeutil.UniqueID]*model.Collection{
+				99: {
+					State:      pb.CollectionState_CollectionCreated,
+					CreateTime: 99,
+					Partitions: []*model.Partition{
+						{PartitionID: 11, PartitionName: Params.CommonCfg.DefaultPartitionName.GetValue(), State: pb.PartitionState_PartitionCreated},
+						{PartitionID: 22, PartitionName: "dropped", State: pb.PartitionState_PartitionDropped},
+					}},
+			}, nil),
+		}
 		ctx := context.Background()
 		coll, err := meta.GetCollectionByName(ctx, "name", 101)
 		assert.NoError(t, err)
@@ -589,8 +690,17 @@ func TestMetaTable_GetCollectionByName(t *testing.T) {
 	})
 
 	t.Run("get latest version", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("GetCollectionByName",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("uint64"),
+		).Return(nil, common.NewCollectionNotExistError("none"))
 		ctx := context.Background()
-		meta := &MetaTable{collName2ID: nil}
+		meta := &MetaTable{
+			catalog:     catalog,
+			collName2ID: buildCollName2IDCache(nil),
+		}
 		_, err := meta.GetCollectionByName(ctx, "not_exist", typeutil.MaxTimestamp)
 		assert.Error(t, err)
 		assert.True(t, common.IsCollectionNotExistError(err))
@@ -609,7 +719,7 @@ func TestMetaTable_AlterCollection(t *testing.T) {
 		).Return(errors.New("error"))
 		meta := &MetaTable{
 			catalog:     catalog,
-			collID2Meta: map[typeutil.UniqueID]*model.Collection{},
+			collID2Meta: buildCollID2metaCache(map[typeutil.UniqueID]*model.Collection{}, nil),
 		}
 		ctx := context.Background()
 		err := meta.AlterCollection(ctx, nil, nil, 0)
@@ -627,7 +737,7 @@ func TestMetaTable_AlterCollection(t *testing.T) {
 		).Return(nil)
 		meta := &MetaTable{
 			catalog:     catalog,
-			collID2Meta: map[typeutil.UniqueID]*model.Collection{},
+			collID2Meta: buildCollID2metaCache(map[typeutil.UniqueID]*model.Collection{}, nil),
 		}
 		ctx := context.Background()
 
@@ -635,7 +745,9 @@ func TestMetaTable_AlterCollection(t *testing.T) {
 		newColl := &model.Collection{CollectionID: 1}
 		err := meta.AlterCollection(ctx, oldColl, newColl, 0)
 		assert.NoError(t, err)
-		assert.Equal(t, meta.collID2Meta[1], newColl)
+		c, exists := meta.collID2Meta.GetIfPresent(1)
+		assert.True(t, exists)
+		assert.Equal(t, c, newColl)
 	})
 }
 
@@ -653,7 +765,7 @@ func Test_filterUnavailable(t *testing.T) {
 		}
 		coll.Partitions = append(coll.Partitions, partition)
 	}
-	clone := filterUnavailable(coll)
+	clone := filterUnavailablePartitions(coll)
 	assert.Equal(t, nAvailablePartition, len(clone.Partitions))
 	for _, p := range clone.Partitions {
 		assert.True(t, p.Available())
@@ -662,8 +774,23 @@ func Test_filterUnavailable(t *testing.T) {
 
 func TestMetaTable_getLatestCollectionByIDInternal(t *testing.T) {
 	t.Run("not exist", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("GetCollectionByID",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("int64"),
+			mock.AnythingOfType("uint64"),
+		).Return(nil, common.NewCollectionNotExistError("none"))
+		catalog.On("ListCollections",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("uint64"),
+		).Return(
+			map[string]*model.Collection{},
+			nil).Maybe()
 		ctx := context.Background()
-		mt := &MetaTable{collID2Meta: nil}
+		mt := &MetaTable{
+			catalog: catalog,
+		}
+		mt.initCollectionCache()
 		_, err := mt.getLatestCollectionByIDInternal(ctx, 100)
 		assert.Error(t, err)
 		assert.True(t, common.IsCollectionNotExistError(err))
@@ -671,9 +798,9 @@ func TestMetaTable_getLatestCollectionByIDInternal(t *testing.T) {
 
 	t.Run("nil case", func(t *testing.T) {
 		ctx := context.Background()
-		mt := &MetaTable{collID2Meta: map[typeutil.UniqueID]*model.Collection{
+		mt := &MetaTable{collID2Meta: buildCollID2metaCache(map[typeutil.UniqueID]*model.Collection{
 			100: nil,
-		}}
+		}, nil)}
 		_, err := mt.getLatestCollectionByIDInternal(ctx, 100)
 		assert.Error(t, err)
 		assert.True(t, common.IsCollectionNotExistError(err))
@@ -681,9 +808,9 @@ func TestMetaTable_getLatestCollectionByIDInternal(t *testing.T) {
 
 	t.Run("unavailable", func(t *testing.T) {
 		ctx := context.Background()
-		mt := &MetaTable{collID2Meta: map[typeutil.UniqueID]*model.Collection{
+		mt := &MetaTable{collID2Meta: buildCollID2metaCache(map[typeutil.UniqueID]*model.Collection{
 			100: {State: pb.CollectionState_CollectionDropping},
-		}}
+		}, nil)}
 		_, err := mt.getLatestCollectionByIDInternal(ctx, 100)
 		assert.Error(t, err)
 		assert.True(t, common.IsCollectionNotExistError(err))
@@ -691,7 +818,7 @@ func TestMetaTable_getLatestCollectionByIDInternal(t *testing.T) {
 
 	t.Run("normal case", func(t *testing.T) {
 		ctx := context.Background()
-		mt := &MetaTable{collID2Meta: map[typeutil.UniqueID]*model.Collection{
+		mt := &MetaTable{collID2Meta: buildCollID2metaCache(map[typeutil.UniqueID]*model.Collection{
 			100: {
 				State: pb.CollectionState_CollectionCreated,
 				Partitions: []*model.Partition{
@@ -699,10 +826,10 @@ func TestMetaTable_getLatestCollectionByIDInternal(t *testing.T) {
 					{State: pb.PartitionState_PartitionDropping},
 				},
 			},
-		}}
+		}, nil)}
 		coll, err := mt.getLatestCollectionByIDInternal(ctx, 100)
 		assert.NoError(t, err)
-		assert.Equal(t, 1, len(coll.Partitions))
+		assert.Equal(t, 2, len(coll.Partitions))
 	})
 }
 
@@ -733,12 +860,12 @@ func TestMetaTable_RemoveCollection(t *testing.T) {
 				"alias1": 100,
 				"alias2": 100,
 			},
-			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+			collID2Meta: buildCollID2metaCache(map[typeutil.UniqueID]*model.Collection{
 				100: {Name: "collection"},
-			},
-			collName2ID: map[string]typeutil.UniqueID{
+			}, nil),
+			collName2ID: buildCollName2IDCache(map[string]typeutil.UniqueID{
 				"collection": 100,
-			},
+			}),
 		}
 		ctx := context.Background()
 		err := meta.RemoveCollection(ctx, 100, 9999)
@@ -753,10 +880,17 @@ func TestMetaTable_reload(t *testing.T) {
 			mock.Anything, // context.Context
 			mock.AnythingOfType("uint64"),
 		).Return(nil, errors.New("error mock ListCollections"))
+		catalog.On("ListAliases",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("uint64"),
+		).Return(
+			[]*model.Alias{},
+			nil)
 		meta := &MetaTable{catalog: catalog}
 		err := meta.reload()
-		assert.Error(t, err)
-		assert.Empty(t, meta.collID2Meta)
+		assert.NoError(t, err)
+		time.Sleep(1 * time.Second)
+		assert.Equal(t, 0, getCacheSize(meta.collID2Meta))
 		assert.Empty(t, meta.collName2ID)
 		assert.Empty(t, meta.collAlias2ID)
 	})
@@ -775,7 +909,9 @@ func TestMetaTable_reload(t *testing.T) {
 		).Return(nil, errors.New("error mock ListAliases"))
 		meta := &MetaTable{catalog: catalog}
 		err := meta.reload()
+		time.Sleep(1 * time.Second)
 		assert.Error(t, err)
+		assert.Equal(t, 1, getCacheSize(meta.collID2Meta))
 		assert.Empty(t, meta.collAlias2ID)
 	})
 
@@ -799,17 +935,20 @@ func TestMetaTable_reload(t *testing.T) {
 		meta := &MetaTable{catalog: catalog}
 		err := meta.reload()
 		assert.NoError(t, err)
-		assert.Equal(t, 1, len(meta.collID2Meta))
-		assert.Equal(t, 1, len(meta.collName2ID))
+		time.Sleep(1 * time.Second)
+		assert.Equal(t, 1, getCacheSize(meta.collID2Meta))
+		assert.Equal(t, uint64(1), meta.collName2ID.Len())
 		assert.Equal(t, 1, len(meta.collAlias2ID))
 	})
 }
 
 func TestMetaTable_ChangeCollectionState(t *testing.T) {
 	t.Run("not exist", func(t *testing.T) {
-		meta := &MetaTable{}
+		meta := &MetaTable{
+			collID2Meta: buildCollID2metaCache(nil, errors.New("none")),
+		}
 		err := meta.ChangeCollectionState(context.TODO(), 100, pb.CollectionState_CollectionCreated, 100)
-		assert.NoError(t, err)
+		assert.Error(t, err)
 	})
 
 	t.Run("failed to alter collection", func(t *testing.T) {
@@ -823,9 +962,9 @@ func TestMetaTable_ChangeCollectionState(t *testing.T) {
 		).Return(errors.New("error mock AlterCollection"))
 		meta := &MetaTable{
 			catalog: catalog,
-			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+			collID2Meta: buildCollID2metaCache(map[typeutil.UniqueID]*model.Collection{
 				100: {Name: "test", CollectionID: 100},
-			},
+			}, nil),
 		}
 		err := meta.ChangeCollectionState(context.TODO(), 100, pb.CollectionState_CollectionCreated, 1000)
 		assert.Error(t, err)
@@ -842,9 +981,9 @@ func TestMetaTable_ChangeCollectionState(t *testing.T) {
 		).Return(nil)
 		meta := &MetaTable{
 			catalog: catalog,
-			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+			collID2Meta: buildCollID2metaCache(map[typeutil.UniqueID]*model.Collection{
 				100: {Name: "test", CollectionID: 100},
-			},
+			}, nil),
 		}
 		err := meta.ChangeCollectionState(context.TODO(), 100, pb.CollectionState_CollectionCreated, 1000)
 		assert.NoError(t, err)
@@ -855,19 +994,23 @@ func TestMetaTable_ChangeCollectionState(t *testing.T) {
 
 func TestMetaTable_AddPartition(t *testing.T) {
 	t.Run("collection not available", func(t *testing.T) {
-		meta := &MetaTable{}
+		meta := &MetaTable{
+			collID2Meta: buildCollID2metaCache(map[typeutil.UniqueID]*model.Collection{
+				100: {Name: "test", State: pb.CollectionState_CollectionDropping},
+			}, nil),
+		}
 		err := meta.AddPartition(context.TODO(), &model.Partition{CollectionID: 100})
 		assert.Error(t, err)
 	})
 
 	t.Run("add not-created partition", func(t *testing.T) {
 		meta := &MetaTable{
-			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+			collID2Meta: buildCollID2metaCache(map[typeutil.UniqueID]*model.Collection{
 				100: {
 					Name:         "test",
 					CollectionID: 100,
 				},
-			},
+			}, nil),
 		}
 		err := meta.AddPartition(context.TODO(), &model.Partition{CollectionID: 100, State: pb.PartitionState_PartitionDropping})
 		assert.Error(t, err)
@@ -882,9 +1025,9 @@ func TestMetaTable_AddPartition(t *testing.T) {
 		).Return(errors.New("error mock CreatePartition"))
 		meta := &MetaTable{
 			catalog: catalog,
-			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+			collID2Meta: buildCollID2metaCache(map[typeutil.UniqueID]*model.Collection{
 				100: {Name: "test", CollectionID: 100},
-			},
+			}, nil),
 		}
 		err := meta.AddPartition(context.TODO(), &model.Partition{CollectionID: 100, State: pb.PartitionState_PartitionCreated})
 		assert.Error(t, err)
@@ -899,27 +1042,80 @@ func TestMetaTable_AddPartition(t *testing.T) {
 		).Return(nil)
 		meta := &MetaTable{
 			catalog: catalog,
-			collID2Meta: map[typeutil.UniqueID]*model.Collection{
-				100: {Name: "test", CollectionID: 100},
-			},
+			collID2Meta: buildCollID2metaCache(map[typeutil.UniqueID]*model.Collection{
+				100: {Name: "test", CollectionID: 100, Partitions: []*model.Partition{}},
+			}, nil),
 		}
 		err := meta.AddPartition(context.TODO(), &model.Partition{CollectionID: 100, State: pb.PartitionState_PartitionCreated})
+		assert.NoError(t, err)
+		c, err := meta.collID2Meta.Get(100)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(c.Partitions))
 		assert.NoError(t, err)
 	})
 }
 
+func TestMetaTable_initCollectionCache(t *testing.T) {
+	catalog := mocks.NewRootCoordCatalog(t)
+	catalog.On("GetCollectionByID",
+		mock.Anything, // context.Context
+		mock.AnythingOfType("int64"),
+		mock.AnythingOfType("uint64"),
+	).Return(&model.Collection{
+		CollectionID: 103,
+		Name:         "c4",
+	}, nil).Times(1)
+
+	catalog.On("ListCollections",
+		mock.Anything, // context.Context
+		mock.AnythingOfType("uint64"),
+	).Return(
+		map[string]*model.Collection{
+			"c1": {CollectionID: 100, Name: "c1", State: pb.CollectionState_CollectionDropping},
+			"c2": {CollectionID: 101, Name: "c2", State: pb.CollectionState_CollectionCreated},
+			"c3": {CollectionID: 102, Name: "c3", State: pb.CollectionState_CollectionCreating},
+		}, nil).Times(1)
+	meta := &MetaTable{
+		catalog:     catalog,
+		collName2ID: typeutil.NewConcurrentMap[string, UniqueID](),
+	}
+
+	meta.initCollectionCache()
+	time.Sleep(1 * time.Second)
+
+	_, ok := meta.collID2Meta.GetIfPresent(100)
+	assert.True(t, ok)
+	_, ok = meta.collID2Meta.GetIfPresent(101)
+	assert.True(t, ok)
+	_, ok = meta.collID2Meta.GetIfPresent(102)
+	assert.True(t, ok)
+	col, err := meta.collID2Meta.Get(103)
+	assert.NoError(t, err)
+	assert.NotNil(t, col)
+	time.Sleep(1 * time.Second)
+	assert.Equal(t, uint64(4), meta.collName2ID.Len())
+
+	meta.collID2Meta.Invalidate(103)
+	time.Sleep(1 * time.Second)
+	_, ok = meta.collID2Meta.GetIfPresent(103)
+	assert.False(t, ok)
+	assert.Equal(t, uint64(3), meta.collName2ID.Len())
+}
+
 func TestMetaTable_ChangePartitionState(t *testing.T) {
 	t.Run("collection not exist", func(t *testing.T) {
-		meta := &MetaTable{}
+		meta := &MetaTable{
+			collID2Meta: buildCollID2metaCache(nil, errors.New("none")),
+		}
 		err := meta.ChangePartitionState(context.TODO(), 100, 500, pb.PartitionState_PartitionDropping, 1000)
-		assert.NoError(t, err)
+		assert.Error(t, err)
 	})
 
 	t.Run("partition not exist", func(t *testing.T) {
 		meta := &MetaTable{
-			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+			collID2Meta: buildCollID2metaCache(map[typeutil.UniqueID]*model.Collection{
 				100: {Name: "test", CollectionID: 100},
-			},
+			}, nil),
 		}
 		err := meta.ChangePartitionState(context.TODO(), 100, 500, pb.PartitionState_PartitionDropping, 1000)
 		assert.Error(t, err)
@@ -936,14 +1132,15 @@ func TestMetaTable_ChangePartitionState(t *testing.T) {
 		).Return(errors.New("error mock AlterPartition"))
 		meta := &MetaTable{
 			catalog: catalog,
-			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+			collID2Meta: buildCollID2metaCache(map[typeutil.UniqueID]*model.Collection{
 				100: {
-					Name: "test", CollectionID: 100,
+					Name:         "test",
+					CollectionID: 100,
 					Partitions: []*model.Partition{
 						{CollectionID: 100, PartitionID: 500},
 					},
 				},
-			},
+			}, nil),
 		}
 		err := meta.ChangePartitionState(context.TODO(), 100, 500, pb.PartitionState_PartitionDropping, 1000)
 		assert.Error(t, err)
@@ -960,18 +1157,238 @@ func TestMetaTable_ChangePartitionState(t *testing.T) {
 		).Return(nil)
 		meta := &MetaTable{
 			catalog: catalog,
-			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+			collID2Meta: buildCollID2metaCache(map[typeutil.UniqueID]*model.Collection{
 				100: {
-					Name: "test", CollectionID: 100,
+					Name:         "test",
+					CollectionID: 100,
 					Partitions: []*model.Partition{
 						{CollectionID: 100, PartitionID: 500},
 					},
 				},
-			},
+			}, nil),
 		}
 		err := meta.ChangePartitionState(context.TODO(), 100, 500, pb.PartitionState_PartitionCreated, 1000)
 		assert.NoError(t, err)
 		err = meta.ChangePartitionState(context.TODO(), 100, 500, pb.PartitionState_PartitionDropping, 1000)
 		assert.NoError(t, err)
+	})
+}
+
+func TestMetaTable_getCollectionIDByNameWithMaxTs(t *testing.T) {
+	t.Run("collection name already exists", func(t *testing.T) {
+		meta := &MetaTable{
+			collName2ID: buildCollName2IDCache(map[string]typeutil.UniqueID{
+				"c1": 100,
+			}),
+		}
+		ctx := context.Background()
+		id, err := meta.getLatestCollectionIDByName(ctx, "c1")
+		assert.NoError(t, err)
+		assert.Equal(t, int64(100), id)
+	})
+
+	t.Run("get collection fail from catalog", func(t *testing.T) {
+		mockedErr := errors.New("error mock GetCollectionByName")
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("GetCollectionByName",
+			mock.Anything,
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("uint64"),
+		).Return(nil, mockedErr)
+
+		meta := &MetaTable{
+			catalog:     catalog,
+			collName2ID: buildCollName2IDCache(nil),
+		}
+		ctx := context.Background()
+		id, err := meta.getLatestCollectionIDByName(ctx, "c1")
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, mockedErr)
+		assert.Equal(t, int64(-1), id)
+	})
+
+	t.Run("collection is not available", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("GetCollectionByName",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("uint64"),
+		).Return(&model.Collection{
+			CollectionID: 100,
+			State:        pb.CollectionState_CollectionDropping,
+		}, nil)
+
+		meta := &MetaTable{
+			catalog:     catalog,
+			collName2ID: buildCollName2IDCache(nil),
+		}
+		ctx := context.Background()
+		id, err := meta.getLatestCollectionIDByName(ctx, "c1")
+		assert.True(t, common.IsCollectionNotExistError(err))
+		assert.Equal(t, int64(-1), id)
+	})
+
+	t.Run("get a available collection from catalog", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("GetCollectionByName",
+			mock.Anything,
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("uint64"),
+		).Return(&model.Collection{
+			CollectionID: 100,
+			State:        pb.CollectionState_CollectionCreated,
+		}, nil)
+
+		meta := &MetaTable{
+			catalog:     catalog,
+			collName2ID: buildCollName2IDCache(nil),
+			collID2Meta: buildCollID2metaCache(nil, nil),
+		}
+		ctx := context.Background()
+		id, err := meta.getLatestCollectionIDByName(ctx, "c1")
+		assert.NoError(t, err)
+		assert.Equal(t, int64(100), id)
+		_, ok := meta.collID2Meta.GetIfPresent(100)
+		assert.True(t, ok)
+	})
+}
+
+func TestMetaTable_GetCollectionNameByID(t *testing.T) {
+	t.Run("get collection fail", func(t *testing.T) {
+		meta := &MetaTable{
+			collID2Meta: buildCollID2metaCache(map[typeutil.UniqueID]*model.Collection{
+				100: {
+					Name:  "test",
+					State: pb.CollectionState_CollectionCreating,
+				},
+			}, nil),
+		}
+		name, err := meta.GetCollectionNameByID(100)
+		assert.True(t, common.IsCollectionNotExistError(err))
+		assert.Equal(t, "", name)
+	})
+
+	t.Run("get collection ok", func(t *testing.T) {
+		meta := &MetaTable{
+			collID2Meta: buildCollID2metaCache(map[typeutil.UniqueID]*model.Collection{
+				100: {
+					Name:  "test",
+					State: pb.CollectionState_CollectionCreated,
+				},
+			}, nil),
+		}
+		name, err := meta.GetCollectionNameByID(100)
+		assert.NoError(t, err)
+		assert.Equal(t, "test", name)
+	})
+}
+
+func TestMetaTable_GetPartitionByName(t *testing.T) {
+	t.Run("get collection fail", func(t *testing.T) {
+		meta := &MetaTable{
+			collID2Meta: buildCollID2metaCache(map[typeutil.UniqueID]*model.Collection{
+				100: {
+					Name:  "test",
+					State: pb.CollectionState_CollectionCreating,
+				},
+			}, nil),
+		}
+		pid, err := meta.GetPartitionByName(100, "", typeutil.MaxTimestamp)
+		assert.True(t, common.IsCollectionNotExistError(err))
+		assert.Equal(t, common.InvalidPartitionID, pid)
+	})
+
+	t.Run("get partition hit cache", func(t *testing.T) {
+		meta := &MetaTable{
+			collID2Meta: buildCollID2metaCache(map[typeutil.UniqueID]*model.Collection{
+				100: {
+					Name:  "test",
+					State: pb.CollectionState_CollectionCreated,
+					Partitions: []*model.Partition{
+						{
+							State:                     pb.PartitionState_PartitionCreated,
+							PartitionID:               int64(1),
+							PartitionName:             "pn",
+							PartitionCreatedTimestamp: uint64(100),
+						},
+					},
+				},
+			}, nil),
+		}
+		pid, err := meta.GetPartitionByName(100, "pn", typeutil.MaxTimestamp)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(1), pid)
+	})
+
+	t.Run("get collection from catalog fail", func(t *testing.T) {
+		mockedErr := errors.New("error mock GetCollectionByName")
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("GetCollectionByID",
+			mock.Anything,
+			mock.AnythingOfType("int64"),
+			mock.AnythingOfType("uint64"),
+		).Return(nil, mockedErr).Times(1)
+		meta := &MetaTable{
+			catalog: catalog,
+			collID2Meta: buildCollID2metaCache(map[typeutil.UniqueID]*model.Collection{
+				100: {
+					State:      pb.CollectionState_CollectionCreated,
+					CreateTime: 1000,
+				},
+			}, nil),
+		}
+		pid, err := meta.GetPartitionByName(100, "pn", 100)
+		assert.ErrorIs(t, err, mockedErr)
+		assert.Equal(t, common.InvalidPartitionID, pid)
+	})
+
+	t.Run("get collection from catalog ok, but collection is unavailable", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("GetCollectionByID",
+			mock.Anything,
+			mock.AnythingOfType("int64"),
+			mock.AnythingOfType("uint64"),
+		).Return(&model.Collection{
+			CollectionID: 100,
+			State:        pb.CollectionState_CollectionCreating,
+		}, nil).Times(1)
+
+		meta := &MetaTable{
+			catalog: catalog,
+			collID2Meta: buildCollID2metaCache(map[typeutil.UniqueID]*model.Collection{
+				100: {
+					State:      pb.CollectionState_CollectionCreated,
+					CreateTime: 1000,
+				},
+			}, nil),
+		}
+		pid, err := meta.GetPartitionByName(100, "pn", 100)
+		assert.Error(t, err)
+		assert.Equal(t, common.InvalidPartitionID, pid)
+	})
+
+	t.Run("get collection from catalog ok and collection is available", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("GetCollectionByID",
+			mock.Anything,
+			mock.AnythingOfType("int64"),
+			mock.AnythingOfType("uint64"),
+		).Return(&model.Collection{
+			CollectionID: 100,
+			State:        pb.CollectionState_CollectionCreated,
+		}, nil).Times(1)
+
+		meta := &MetaTable{
+			catalog: catalog,
+			collID2Meta: buildCollID2metaCache(map[typeutil.UniqueID]*model.Collection{
+				100: {
+					State:      pb.CollectionState_CollectionCreated,
+					CreateTime: 1000,
+				},
+			}, nil),
+		}
+		pid, err := meta.GetPartitionByName(100, "pn", 100)
+		assert.Error(t, err)
+		assert.Equal(t, common.InvalidPartitionID, pid)
 	})
 }
