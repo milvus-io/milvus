@@ -144,6 +144,20 @@ func TestImpl_WatchDmChannels(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
 	})
 
+	t.Run("server stopping", func(t *testing.T) {
+		req := &queryPb.WatchDmChannelsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_WatchDmChannels,
+				MsgID:   rand.Int63(),
+			},
+		}
+		node.UpdateStateCode(commonpb.StateCode_Stopping)
+		defer node.UpdateStateCode(commonpb.StateCode_Healthy)
+		status, err := node.WatchDmChannels(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
+	})
+
 	t.Run("mock release after loaded", func(t *testing.T) {
 
 		mockTSReplica := &MockTSafeReplicaInterface{}
@@ -253,6 +267,15 @@ func TestImpl_LoadSegments(t *testing.T) {
 
 	t.Run("server unhealthy", func(t *testing.T) {
 		node.UpdateStateCode(commonpb.StateCode_Abnormal)
+		defer node.UpdateStateCode(commonpb.StateCode_Healthy)
+		status, err := node.LoadSegments(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
+	})
+
+	t.Run("server stopping", func(t *testing.T) {
+		node.UpdateStateCode(commonpb.StateCode_Stopping)
+		defer node.UpdateStateCode(commonpb.StateCode_Healthy)
 		status, err := node.LoadSegments(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)

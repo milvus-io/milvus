@@ -473,7 +473,6 @@ func Test_AlterSegmentsAndAddNewSegment(t *testing.T) {
 			return "", errors.New("key not found")
 		}
 
-		// TODO fubang
 		catalog := &Catalog{txn, "a"}
 		err := catalog.AlterSegmentsAndAddNewSegment(context.TODO(), []*datapb.SegmentInfo{droppedSegment}, segment1)
 		assert.NoError(t, err)

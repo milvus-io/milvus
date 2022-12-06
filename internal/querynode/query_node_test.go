@@ -108,6 +108,7 @@ func newQueryNodeMock() *QueryNode {
 	}
 	svr.loader = newSegmentLoader(svr.metaReplica, etcdKV, svr.vectorStorage, factory)
 	svr.etcdKV = etcdKV
+	svr.etcdCli = etcdCli
 
 	return svr
 }

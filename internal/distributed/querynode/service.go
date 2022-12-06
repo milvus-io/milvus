@@ -221,6 +221,11 @@ func (s *Server) Run() error {
 // Stop stops QueryNode's grpc service.
 func (s *Server) Stop() error {
 	log.Debug("QueryNode stop", zap.String("Address", Params.GetAddress()))
+	err := s.querynode.Stop()
+	if err != nil {
+		return err
+	}
+
 	if s.closer != nil {
 		if err := s.closer.Close(); err != nil {
 			return err
@@ -234,11 +239,6 @@ func (s *Server) Stop() error {
 	if s.grpcServer != nil {
 		log.Debug("Graceful stop grpc server...")
 		s.grpcServer.GracefulStop()
-	}
-
-	err := s.querynode.Stop()
-	if err != nil {
-		return err
 	}
 	s.wg.Wait()
 	return nil

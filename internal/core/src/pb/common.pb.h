@@ -564,12 +564,13 @@ enum StateCode : int {
   Healthy = 1,
   Abnormal = 2,
   StandBy = 3,
+  Stopping = 4,
   StateCode_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
   StateCode_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
 };
 bool StateCode_IsValid(int value);
 constexpr StateCode StateCode_MIN = Initializing;
-constexpr StateCode StateCode_MAX = StandBy;
+constexpr StateCode StateCode_MAX = Stopping;
 constexpr int StateCode_ARRAYSIZE = StateCode_MAX + 1;
 
 const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* StateCode_descriptor();

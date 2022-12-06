@@ -68,6 +68,13 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, Params.GracefulTime, int64(DefaultGracefulTime))
 		t.Logf("default grafeful time = %d", Params.GracefulTime)
 
+		assert.Equal(t, Params.GracefulStopTimeout, int64(DefaultGracefulStopTimeout))
+		assert.Equal(t, params.QueryNodeCfg.GracefulStopTimeout, Params.GracefulStopTimeout)
+		t.Logf("default grafeful stop timeout = %d", Params.GracefulStopTimeout)
+		Params.Base.Save("common.gracefulStopTimeout", "50")
+		Params.initGracefulStopTimeout()
+		assert.Equal(t, Params.GracefulStopTimeout, int64(50))
+
 		// -- proxy --
 		assert.Equal(t, Params.ProxySubName, "by-dev-proxy")
 		t.Logf("ProxySubName: %s", Params.ProxySubName)
@@ -291,6 +298,11 @@ func TestComponentParam(t *testing.T) {
 
 		nprobe = Params.SmallIndexNProbe
 		assert.Equal(t, int64(4), nprobe)
+
+		Params.Base.Save("queryNode.gracefulStopTimeout", "100")
+		Params.initGracefulStopTimeout()
+		gracefulStopTimeout := Params.GracefulStopTimeout
+		assert.Equal(t, int64(100), gracefulStopTimeout)
 	})
 
 	t.Run("test dataCoordConfig", func(t *testing.T) {

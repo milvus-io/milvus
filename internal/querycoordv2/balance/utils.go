@@ -56,6 +56,7 @@ func CreateSegmentTasksFromPlans(ctx context.Context, checkerID int64, timeout t
 			)
 			continue
 		}
+		task.SetPriority(GetTaskPriorityFromWeight(p.Weight))
 		ret = append(ret, task)
 	}
 	return ret
@@ -85,6 +86,7 @@ func CreateChannelTasksFromPlans(ctx context.Context, checkerID int64, timeout t
 			)
 			continue
 		}
+		task.SetPriority(GetTaskPriorityFromWeight(p.Weight))
 		ret = append(ret, task)
 	}
 	return ret

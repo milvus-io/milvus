@@ -374,6 +374,7 @@ common:
   entityExpiration: -1     # Entity expiration in seconds, CAUTION make sure entityExpiration >= retentionDuration and -1 means never expire
 
   gracefulTime: 5000 # milliseconds. it represents the interval (in ms) by which the request arrival time needs to be subtracted in the case of Bounded Consistency.
+  gracefulStopTimeout: 30 # seconds. it will force quit the server if the graceful stop process is not completed during this time.
 
   # Default value: auto
   # Valid values: [auto, avx512, avx2, avx, sse4_2]

@@ -53,6 +53,7 @@ func TestCollection_schema(t *testing.T) {
 }
 
 func TestCollection_vChannel(t *testing.T) {
+	Params.Init()
 	collectionID := UniqueID(0)
 	schema := genTestCollectionSchema()
 

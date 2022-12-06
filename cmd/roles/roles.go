@@ -199,6 +199,10 @@ func (mr *MilvusRoles) setupLogger() {
 func (mr *MilvusRoles) Run(local bool, alias string) {
 	log.Info("starting running Milvus components")
 	ctx, cancel := context.WithCancel(context.Background())
+	defer func() {
+		// some deferred Stop has race with context cancel
+		cancel()
+	}()
 	mr.printLDPreLoad()
 
 	// only standalone enable localMsg
@@ -322,7 +326,4 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 		syscall.SIGQUIT)
 	sig := <-sc
 	log.Error("Get signal to exit\n", zap.String("signal", sig.String()))
-
-	// some deferred Stop has race with context cancel
-	cancel()
 }
