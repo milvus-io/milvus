@@ -54,16 +54,6 @@ type Segment struct {
 	startPos   *internalpb.MsgPosition // TODO readonly
 }
 
-type addSegmentReq struct {
-	segType                    datapb.SegmentType
-	segID, collID, partitionID UniqueID
-	numOfRows                  int64
-	startPos, endPos           *internalpb.MsgPosition
-	statsBinLogs               []*datapb.FieldBinlog
-	recoverTs                  Timestamp
-	importing                  bool
-}
-
 func (s *Segment) isValid() bool {
 	return s.getType() != datapb.SegmentType_Compacted
 }
