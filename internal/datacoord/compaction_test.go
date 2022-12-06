@@ -124,6 +124,8 @@ func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
 				parallelCh: make(map[int64]chan struct{}),
 				allocator:  newMockAllocator(),
 			}
+			Params.DataCoordCfg.CompactionCheckIntervalInSeconds = 1
+			c.start()
 			err := c.execCompactionPlan(tt.args.signal, tt.args.plan)
 			assert.Equal(t, tt.err, err)
 			if err == nil {
@@ -134,6 +136,7 @@ func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
 					assert.Equal(t, tt.args.signal, task.triggerInfo)
 					assert.Equal(t, 1, c.executingTaskNum)
 				} else {
+
 					assert.Eventually(t,
 						func() bool {
 							c.mu.RLock()
@@ -143,6 +146,7 @@ func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
 						5*time.Second, 100*time.Millisecond)
 				}
 			}
+			c.stop()
 		})
 	}
 }
