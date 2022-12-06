@@ -183,7 +183,7 @@ func (mgr *LeaderViewManager) GetGrowingSegmentDistByCollectionAndNode(collectio
 	return segments
 }
 
-// GetSegmentDist returns the list of nodes the given segment on
+// GetSegmentDist returns the list of nodes the given channel on
 func (mgr *LeaderViewManager) GetChannelDist(channel string) []int64 {
 	mgr.rwmutex.RLock()
 	defer mgr.rwmutex.RUnlock()
