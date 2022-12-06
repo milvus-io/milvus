@@ -893,7 +893,7 @@ func (suite *ServiceSuite) TestGetShardLeaders() {
 			CollectionID: collection,
 		}
 
-		suite.fetchHeartbeats()
+		suite.fetchHeartbeats(time.Now())
 		resp, err := server.GetShardLeaders(ctx, req)
 		suite.NoError(err)
 		suite.Equal(commonpb.ErrorCode_Success, resp.Status.ErrorCode)
@@ -911,6 +911,33 @@ func (suite *ServiceSuite) TestGetShardLeaders() {
 	resp, err := server.GetShardLeaders(ctx, req)
 	suite.NoError(err)
 	suite.Contains(resp.Status.Reason, ErrNotHealthy.Error())
+}
+
+func (suite *ServiceSuite) TestGetShardLeadersFailed() {
+	suite.loadAll()
+	ctx := context.Background()
+	server := suite.server
+
+	for _, collection := range suite.collections {
+		suite.updateCollectionStatus(collection, querypb.LoadStatus_Loaded)
+		suite.updateChannelDist(collection)
+		req := &querypb.GetShardLeadersRequest{
+			CollectionID: collection,
+		}
+
+		// Last heartbeat response time too old
+		suite.fetchHeartbeats(time.Now().Add(-Params.QueryCoordCfg.HeartbeatAvailableInterval - 1))
+		resp, err := server.GetShardLeaders(ctx, req)
+		suite.NoError(err)
+		suite.Equal(commonpb.ErrorCode_NoReplicaAvailable, resp.Status.ErrorCode)
+
+		// Segment not fully loaded
+		suite.updateChannelDistWithoutSegment(collection)
+		suite.fetchHeartbeats(time.Now())
+		resp, err = server.GetShardLeaders(ctx, req)
+		suite.NoError(err)
+		suite.Equal(commonpb.ErrorCode_NoReplicaAvailable, resp.Status.ErrorCode)
+	}
 }
 
 func (suite *ServiceSuite) loadAll() {
@@ -1067,6 +1094,38 @@ func (suite *ServiceSuite) updateSegmentDist(collection, node int64) {
 
 func (suite *ServiceSuite) updateChannelDist(collection int64) {
 	channels := suite.channels[collection]
+	segments := lo.Flatten(lo.Values(suite.segments[collection]))
+
+	replicas := suite.meta.ReplicaManager.GetByCollection(collection)
+	for _, replica := range replicas {
+		i := 0
+		for _, node := range replica.GetNodes() {
+			suite.dist.ChannelDistManager.Update(node, meta.DmChannelFromVChannel(&datapb.VchannelInfo{
+				CollectionID: collection,
+				ChannelName:  channels[i],
+			}))
+			suite.dist.LeaderViewManager.Update(node, &meta.LeaderView{
+				ID:           node,
+				CollectionID: collection,
+				Channel:      channels[i],
+				Segments: lo.SliceToMap(segments, func(segment int64) (int64, *querypb.SegmentDist) {
+					return segment, &querypb.SegmentDist{
+						NodeID:  node,
+						Version: time.Now().Unix(),
+					}
+				}),
+			})
+			i++
+			if i >= len(channels) {
+				break
+			}
+		}
+	}
+}
+
+func (suite *ServiceSuite) updateChannelDistWithoutSegment(collection int64) {
+	channels := suite.channels[collection]
+
 	replicas := suite.meta.ReplicaManager.GetByCollection(collection)
 	for _, replica := range replicas {
 		i := 0
@@ -1112,10 +1171,10 @@ func (suite *ServiceSuite) updateCollectionStatus(collectionID int64, status que
 	}
 }
 
-func (suite *ServiceSuite) fetchHeartbeats() {
+func (suite *ServiceSuite) fetchHeartbeats(time time.Time) {
 	for _, node := range suite.nodes {
 		node := suite.nodeMgr.Get(node)
-		node.SetLastHeartbeat(time.Now())
+		node.SetLastHeartbeat(time)
 	}
 }
 

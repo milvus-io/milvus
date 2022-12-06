@@ -650,28 +650,53 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 		return resp, nil
 	}
 
+	currentTargets := s.targetMgr.GetHistoricalSegmentsByCollection(req.GetCollectionID(), meta.CurrentTarget)
 	for _, channel := range channels {
 		log := log.With(zap.String("channel", channel.GetChannelName()))
 
 		leaders := s.dist.LeaderViewManager.GetLeadersByShard(channel.GetChannelName())
 		ids := make([]int64, 0, len(leaders))
 		addrs := make([]string, 0, len(leaders))
+
+		// In a replica, a shard is available, if and only if:
+		// 1. The leader is online
+		// 2. All QueryNodes in the distribution are online
+		// 3. The last heartbeat response time is within HeartbeatAvailableInterval for all QueryNodes(include leader) in the distribution
+		// 4. All segments of the shard in target should be in the distribution
 		for _, leader := range leaders {
 			info := s.nodeMgr.Get(leader.ID)
+
+			// Check whether leader is online
 			if info == nil || time.Since(info.LastHeartbeat()) > Params.QueryCoordCfg.HeartbeatAvailableInterval {
 				continue
 			}
-			isAllNodeAvailable := true
+
+			// Check whether QueryNodes are online and available
+			isAvailable := true
 			for _, version := range leader.Segments {
 				info := s.nodeMgr.Get(version.NodeID)
 				if info == nil || time.Since(info.LastHeartbeat()) > Params.QueryCoordCfg.HeartbeatAvailableInterval {
-					isAllNodeAvailable = false
+					isAvailable = false
 					break
 				}
 			}
-			if !isAllNodeAvailable {
+
+			// Check whether segments are fully loaded
+			for segmentID, info := range currentTargets {
+				if info.GetInsertChannel() != leader.Channel {
+					continue
+				}
+
+				_, exist := leader.Segments[segmentID]
+				if !exist {
+					isAvailable = false
+					break
+				}
+			}
+			if !isAvailable {
 				continue
 			}
+
 			ids = append(ids, info.ID())
 			addrs = append(addrs, info.Addr())
 		}
@@ -690,6 +715,7 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 			NodeAddrs:   addrs,
 		})
 	}
+
 	return resp, nil
 }
 
