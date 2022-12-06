@@ -13,7 +13,6 @@ package paramtable
 
 import (
 	"fmt"
-	"math"
 	"strconv"
 	"sync"
 	"time"
@@ -25,10 +24,10 @@ import (
 
 const (
 	// DefaultServerMaxSendSize defines the maximum size of data per grpc request can send by server side.
-	DefaultServerMaxSendSize = math.MaxInt32
+	DefaultServerMaxSendSize = 512 * 1024 * 1024
 
 	// DefaultServerMaxRecvSize defines the maximum size of data per grpc request can receive by server side.
-	DefaultServerMaxRecvSize = math.MaxInt32
+	DefaultServerMaxRecvSize = 512 * 1024 * 1024
 
 	// DefaultClientMaxSendSize defines the maximum size of data per grpc request can send by client side.
 	DefaultClientMaxSendSize = 100 * 1024 * 1024
@@ -122,60 +121,55 @@ type GrpcServerConfig struct {
 // InitOnce initialize grpc server config once
 func (p *GrpcServerConfig) InitOnce(domain string) {
 	p.once.Do(func() {
-		p.init(domain)
+		p.Init(domain)
 	})
 }
 
-func (p *GrpcServerConfig) init(domain string) {
+func (p *GrpcServerConfig) Init(domain string) {
 	p.grpcConfig.init(domain)
 
-	p.initServerMaxSendSize()
-	p.initServerMaxRecvSize()
+	p.InitServerMaxSendSize()
+	p.InitServerMaxRecvSize()
 }
 
-func (p *GrpcServerConfig) initServerMaxSendSize() {
+func (p *GrpcServerConfig) InitServerMaxSendSize() {
 	var err error
 
-	valueStr, err := p.Load("grpc.serverMaxSendSize")
-	if err != nil {
-		valueStr, err = p.Load(p.Domain + ".grpc.serverMaxSendSize")
-	}
+	valueStr, err := p.LoadWithPriority([]string{p.Domain + ".grpc.serverMaxSendSize", "grpc.serverMaxSendSize"})
 	if err != nil {
 		p.ServerMaxSendSize = DefaultServerMaxSendSize
+	}
+
+	value, err := strconv.Atoi(valueStr)
+	if err != nil {
+		log.Warn("Failed to parse grpc.serverMaxSendSize, set to default",
+			zap.String("role", p.Domain), zap.String("grpc.serverMaxSendSize", valueStr),
+			zap.Error(err))
+		p.ServerMaxSendSize = DefaultServerMaxSendSize
 	} else {
-		value, err := strconv.Atoi(valueStr)
-		if err != nil {
-			log.Warn("Failed to parse grpc.serverMaxSendSize, set to default",
-				zap.String("role", p.Domain), zap.String("grpc.serverMaxSendSize", valueStr),
-				zap.Error(err))
-			p.ServerMaxSendSize = DefaultServerMaxSendSize
-		} else {
-			p.ServerMaxSendSize = value
-		}
+		p.ServerMaxSendSize = value
 	}
 
 	log.Debug("initServerMaxSendSize",
 		zap.String("role", p.Domain), zap.Int("grpc.serverMaxSendSize", p.ServerMaxSendSize))
 }
 
-func (p *GrpcServerConfig) initServerMaxRecvSize() {
+func (p *GrpcServerConfig) InitServerMaxRecvSize() {
 	var err error
-	valueStr, err := p.Load("grpc.serverMaxRecvSize")
-	if err != nil {
-		valueStr, err = p.Load(p.Domain + ".grpc.serverMaxRecvSize")
-	}
+
+	valueStr, err := p.LoadWithPriority([]string{p.Domain + ".grpc.serverMaxRecvSize", "grpc.serverMaxRecvSize"})
 	if err != nil {
 		p.ServerMaxRecvSize = DefaultServerMaxRecvSize
+	}
+
+	value, err := strconv.Atoi(valueStr)
+	if err != nil {
+		log.Warn("Failed to parse grpc.serverMaxRecvSize, set to default",
+			zap.String("role", p.Domain), zap.String("grpc.serverMaxRecvSize", valueStr),
+			zap.Error(err))
+		p.ServerMaxRecvSize = DefaultServerMaxRecvSize
 	} else {
-		value, err := strconv.Atoi(valueStr)
-		if err != nil {
-			log.Warn("Failed to parse grpc.serverMaxRecvSize, set to default",
-				zap.String("role", p.Domain), zap.String("grpc.serverMaxRecvSize", valueStr),
-				zap.Error(err))
-			p.ServerMaxRecvSize = DefaultServerMaxRecvSize
-		} else {
-			p.ServerMaxRecvSize = value
-		}
+		p.ServerMaxRecvSize = value
 	}
 
 	log.Debug("initServerMaxRecvSize",
