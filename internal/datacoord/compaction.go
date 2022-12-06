@@ -194,12 +194,12 @@ func (c *compactionPlanHandler) execCompactionPlan(signal *compactionSignal, pla
 
 		err = c.sessions.Compaction(nodeID, plan)
 		if err != nil {
-			log.Warn("Try to Compaction but DataNode rejected", zap.Any("TargetNodeId", nodeID), zap.Any("planId", plan.GetPlanID()))
-			c.mu.Lock()
-			delete(c.plans, plan.PlanID)
-			c.executingTaskNum--
-			c.releaseQueue(nodeID)
-			c.mu.Unlock()
+			log.Warn("try to Compaction but DataNode rejected",
+				zap.Int64("targetNodeID", nodeID),
+				zap.Int64("planID", plan.GetPlanID()),
+			)
+			// do nothing here, prevent double release, see issue#21014
+			// release queue will be done in `updateCompaction`
 			return
 		}
 
