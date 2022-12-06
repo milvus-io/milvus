@@ -334,7 +334,17 @@ class TestCompactionParams(TestcaseBase):
         collection_w.load()
         replicas = collection_w.get_replicas()[0]
         replica_num = len(replicas.groups)
-        segment_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
+        cost = 60
+        start = time()
+        while time() - start < cost:
+            sleep(2.0)
+            collection_w.load()
+            segment_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
+            if len(segment_info) == 1 * replica_num:
+                break
+            if time() - start > cost:
+                raise MilvusException(1, f"Waiting more than {cost}s for the compacted segment indexed")
+            collection_w.release()
         assert len(segment_info) == 1*replica_num
 
     @pytest.mark.skip(reason="TODO")
