@@ -338,6 +338,7 @@ func (s *Server) init() error {
 	}
 	s.etcdCli = etcdCli
 	s.proxy.SetEtcdClient(s.etcdCli)
+	proxy.InitPolicyModel()
 
 	errChan := make(chan error, 1)
 	{
