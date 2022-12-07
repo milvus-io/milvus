@@ -19,6 +19,7 @@ func TestUnaryServerInterceptor(t *testing.T) {
 
 func TestPrivilegeInterceptor(t *testing.T) {
 	ctx := context.Background()
+	InitPolicyModel()
 	t.Run("Authorization Disabled", func(t *testing.T) {
 		Params.CommonCfg.AuthorizationEnabled = false
 		_, err := PrivilegeInterceptor(ctx, &milvuspb.LoadCollectionRequest{
