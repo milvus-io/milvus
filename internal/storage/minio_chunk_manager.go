@@ -389,9 +389,9 @@ func (mcm *MinioChunkManager) ListWithPrefix(ctx context.Context, prefix string,
 			}
 
 			// with tailing "/", object is a "directory"
-			if strings.HasSuffix(object.Key, "/") {
+			if strings.HasSuffix(object.Key, "/") && recursive {
 				// enqueue when recursive is true
-				if recursive && object.Key != pre {
+				if object.Key != pre {
 					tasks.PushBack(object.Key)
 				}
 				continue
