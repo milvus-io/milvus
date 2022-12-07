@@ -434,7 +434,7 @@ func EmptyBgChecker(channels []*NodeChannelInfo, ts time.Time) ([]*NodeChannelIn
 	return nil, nil
 }
 
-// BgCheckWithMaxWatchDuration returns a ChannelBGChecker with the maxWatchDuration
+// BgCheckWithMaxWatchDuration returns a ChannelBGChecker with `Params.DataCoordCfg.MaxWatchDuration`.
 func BgCheckWithMaxWatchDuration(kv kv.TxnKV) ChannelBGChecker {
 	return func(channels []*NodeChannelInfo, ts time.Time) ([]*NodeChannelInfo, error) {
 		reAllocations := make([]*NodeChannelInfo, 0, len(channels))
@@ -461,7 +461,7 @@ func BgCheckWithMaxWatchDuration(kv kv.TxnKV) ChannelBGChecker {
 				}
 				startTime := time.Unix(watchInfo.StartTs, 0)
 				d := ts.Sub(startTime)
-				if d >= maxWatchDuration {
+				if d >= Params.DataCoordCfg.MaxWatchDuration {
 					cinfo.Channels = append(cinfo.Channels, c)
 				}
 			}
