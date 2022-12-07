@@ -125,7 +125,10 @@ func (gc *garbageCollector) recycleUnusedIndexes() {
 }
 
 func (gc *garbageCollector) recycleSegIndexesMeta() {
+	gc.indexCoordClient.indexGCLock.Lock()
 	segIndexes := gc.metaTable.GetAllSegIndexes()
+	gc.indexCoordClient.indexGCLock.Unlock()
+
 	collID2segID := make(map[int64]map[int64]struct{})
 	for segID, segIdx := range segIndexes {
 		if _, ok := collID2segID[segIdx.CollectionID]; !ok {
