@@ -333,12 +333,8 @@ func (s *proxyTestServer) GetStatisticsChannel(ctx context.Context, request *int
 	return s.Proxy.GetStatisticsChannel(ctx)
 }
 
-func (s *proxyTestServer) startGrpc(ctx context.Context, wg *sync.WaitGroup) {
+func (s *proxyTestServer) startGrpc(ctx context.Context, wg *sync.WaitGroup, p *paramtable.GrpcServerConfig) {
 	defer wg.Done()
-
-	var p paramtable.GrpcServerConfig
-	p.InitOnce(typeutil.ProxyRole)
-	s.Proxy.SetAddress(p.GetAddress())
 
 	var kaep = keepalive.EnforcementPolicy{
 		MinTime:             5 * time.Second, // If a client pings more than once every 5 seconds, terminate the connection
@@ -517,7 +513,12 @@ func TestProxy(t *testing.T) {
 
 	testServer := newProxyTestServer(proxy)
 	wg.Add(1)
-	go testServer.startGrpc(ctx, &wg)
+
+	var p paramtable.GrpcServerConfig
+	p.InitOnce(typeutil.ProxyRole)
+	testServer.Proxy.SetAddress(p.GetAddress())
+
+	go testServer.startGrpc(ctx, &wg, &p)
 	assert.NoError(t, testServer.waitForGrpcReady())
 
 	rootCoordClient, err := rcc.NewClient(ctx, Params.EtcdCfg.MetaRootPath.GetValue(), etcdcli)
