@@ -2,9 +2,11 @@ package proxy
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -44,24 +46,23 @@ m = r.sub == p.sub && globMatch(r.obj, p.obj) && globMatch(r.act, p.act) || r.su
 	ModelKey = "casbin"
 )
 
-var modelStore = make(map[string]model.Model, 1)
+var (
+	casbinModel model.Model
+	initOnce    sync.Once
+)
 
-func initPolicyModel() (model.Model, error) {
-	if policyModel, ok := modelStore[ModelStr]; ok {
-		return policyModel, nil
-	}
-	policyModel, err := model.NewModelFromString(ModelStr)
-	if err != nil {
-		log.Error("NewModelFromString fail", zap.String("model", ModelStr), zap.Error(err))
-		return nil, err
-	}
-	modelStore[ModelKey] = policyModel
-	return modelStore[ModelKey], nil
+func InitPolicyModel() {
+	initOnce.Do(func() {
+		var err error
+		casbinModel, err = model.NewModelFromString(ModelStr)
+		if err != nil {
+			log.Panic("NewModelFromString fail", zap.String("model", ModelStr), zap.Error(err))
+		}
+	})
 }
 
 // UnaryServerInterceptor returns a new unary server interceptors that performs per-request privilege access.
 func UnaryServerInterceptor(privilegeFunc PrivilegeFunc) grpc.UnaryServerInterceptor {
-	initPolicyModel()
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		newCtx, err := privilegeFunc(ctx, req)
 		if err != nil {
@@ -115,13 +116,13 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 	policy := fmt.Sprintf("[%s]", policyInfo)
 	b := []byte(policy)
 	a := jsonadapter.NewAdapter(&b)
-	policyModel, err := initPolicyModel()
-	if err != nil {
+	if casbinModel == nil {
 		errStr := "fail to get policy model"
-		log.Error(errStr, zap.Error(err))
+		err = errors.New(errStr)
+		log.Panic(errStr, zap.Error(err))
 		return ctx, err
 	}
-	e, err := casbin.NewEnforcer(policyModel, a)
+	e, err := casbin.NewEnforcer(casbinModel, a)
 	if err != nil {
 		log.Error("NewEnforcer fail", zap.String("policy", policy), zap.Error(err))
 		return ctx, err
