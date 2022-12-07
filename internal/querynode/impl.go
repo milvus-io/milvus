@@ -732,7 +732,9 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 		return &internalpb.SearchResults{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_NodeIDNotMatch,
-				Reason:    common.WrapNodeIDNotMatchMsg(req.GetReq().GetBase().GetTargetID(), paramtable.GetNodeID()),
+				Reason: fmt.Sprintf("QueryNode %d can't serve, recovering: %s",
+					paramtable.GetNodeID(),
+					common.WrapNodeIDNotMatchMsg(req.GetReq().GetBase().GetTargetID(), paramtable.GetNodeID())),
 			},
 		}, nil
 	}
@@ -1100,7 +1102,9 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 		return &internalpb.RetrieveResults{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_NodeIDNotMatch,
-				Reason:    common.WrapNodeIDNotMatchMsg(req.GetReq().GetBase().GetTargetID(), paramtable.GetNodeID()),
+				Reason: fmt.Sprintf("QueryNode %d can't serve, recovering: %s",
+					paramtable.GetNodeID(),
+					common.WrapNodeIDNotMatchMsg(req.GetReq().GetBase().GetTargetID(), paramtable.GetNodeID())),
 			},
 		}, nil
 	}
@@ -1303,7 +1307,9 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 	if req.GetBase().GetTargetID() != paramtable.GetNodeID() {
 		status := &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_NodeIDNotMatch,
-			Reason:    common.WrapNodeIDNotMatchMsg(req.GetBase().GetTargetID(), paramtable.GetNodeID()),
+			Reason: fmt.Sprintf("QueryNode %d can't serve, recovering: %s",
+				paramtable.GetNodeID(),
+				common.WrapNodeIDNotMatchMsg(req.GetBase().GetTargetID(), paramtable.GetNodeID())),
 		}
 		return &querypb.GetDataDistributionResponse{Status: status}, nil
 	}
