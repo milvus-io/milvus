@@ -931,9 +931,21 @@ func (suite *ServiceSuite) TestGetShardLeadersFailed() {
 			CollectionID: collection,
 		}
 
+		// Node offline
+		suite.fetchHeartbeats(time.Now())
+		for _, node := range suite.nodes {
+			suite.nodeMgr.Remove(node)
+		}
+		resp, err := server.GetShardLeaders(ctx, req)
+		suite.NoError(err)
+		suite.Equal(commonpb.ErrorCode_NoReplicaAvailable, resp.Status.ErrorCode)
+		for _, node := range suite.nodes {
+			suite.nodeMgr.Add(session.NewNodeInfo(node, "localhost"))
+		}
+
 		// Last heartbeat response time too old
 		suite.fetchHeartbeats(time.Now().Add(-Params.QueryCoordCfg.HeartbeatAvailableInterval.GetAsDuration(time.Millisecond) - 1))
-		resp, err := server.GetShardLeaders(ctx, req)
+		resp, err = server.GetShardLeaders(ctx, req)
 		suite.NoError(err)
 		suite.Equal(commonpb.ErrorCode_NoReplicaAvailable, resp.Status.ErrorCode)
 

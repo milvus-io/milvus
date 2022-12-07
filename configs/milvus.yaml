@@ -186,7 +186,7 @@ queryCoord:
   channelTaskTimeout: 60000 # 1 minute
   segmentTaskTimeout: 120000 # 2 minute
   distPullInterval: 500
-  heartbeatAvailableInterval: 2500 # Only QueryNodes which fetched heartbeats within the duration are available
+  heartbeatAvailableInterval: 10000 # 10s, Only QueryNodes which fetched heartbeats within the duration are available
   loadTimeoutSeconds: 600
   checkHandoffInterval: 5000
   taskMergeCap: 16
