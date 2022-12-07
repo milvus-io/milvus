@@ -978,7 +978,7 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 	defer cancel()
 	// func to report import state to RootCoord.
 	reportFunc := func(res *rootcoordpb.ImportResult) error {
-		status, err := node.rootCoord.ReportImport(newCtx, res)
+		status, err := node.rootCoord.ReportImport(ctx, res)
 		if err != nil {
 			log.Error("fail to report import state to RootCoord", zap.Error(err))
 			return err
@@ -1017,7 +1017,7 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 		msg := "DataNode alloc ts failed"
 		log.Warn(msg)
 		importResult.State = commonpb.ImportState_ImportFailed
-		importResult.Infos = append(importResult.Infos, &commonpb.KeyValuePair{Key: "failed_reason", Value: msg})
+		importResult.Infos = append(importResult.Infos, &commonpb.KeyValuePair{Key: importutil.FailedReason, Value: msg})
 		if reportErr := reportFunc(importResult); reportErr != nil {
 			log.Warn("fail to report import state to RootCoord", zap.Error(reportErr))
 		}
@@ -1040,7 +1040,7 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 			zap.Int64("collection ID", req.GetImportTask().GetCollectionId()),
 			zap.Error(err))
 		importResult.State = commonpb.ImportState_ImportFailed
-		importResult.Infos = append(importResult.Infos, &commonpb.KeyValuePair{Key: "failed_reason", Value: err.Error()})
+		importResult.Infos = append(importResult.Infos, &commonpb.KeyValuePair{Key: importutil.FailedReason, Value: err.Error()})
 		reportErr := reportFunc(importResult)
 		if reportErr != nil {
 			log.Warn("fail to report import state to RootCoord", zap.Error(err))
@@ -1056,7 +1056,7 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 			zap.Int64("task ID", req.GetImportTask().GetTaskId()),
 			zap.Error(inputErr))
 		importResult.State = commonpb.ImportState_ImportFailed
-		importResult.Infos = append(importResult.Infos, &commonpb.KeyValuePair{Key: "failed_reason", Value: inputErr.Error()})
+		importResult.Infos = append(importResult.Infos, &commonpb.KeyValuePair{Key: importutil.FailedReason, Value: inputErr.Error()})
 		reportErr := reportFunc(importResult)
 		if reportErr != nil {
 			log.Warn("fail to report import state to RootCoord", zap.Error(inputErr))
