@@ -103,6 +103,16 @@ type ChannelMeta struct {
 	chunkManager storage.ChunkManager
 }
 
+type addSegmentReq struct {
+	segType                    datapb.SegmentType
+	segID, collID, partitionID UniqueID
+	numOfRows                  int64
+	startPos, endPos           *internalpb.MsgPosition
+	statsBinLogs               []*datapb.FieldBinlog
+	recoverTs                  Timestamp
+	importing                  bool
+}
+
 var _ Channel = &ChannelMeta{}
 
 func newChannel(channelName string, collID UniqueID, schema *schemapb.CollectionSchema, rc types.RootCoord, cm storage.ChunkManager) *ChannelMeta {
