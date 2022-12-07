@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -44,17 +45,25 @@ m = r.sub == p.sub && globMatch(r.obj, p.obj) && globMatch(r.act, p.act) || r.su
 	ModelKey = "casbin"
 )
 
-var modelStore = make(map[string]model.Model, 1)
+var (
+	modelStore = make(map[string]model.Model, 1)
+	l          sync.RWMutex
+)
 
 func initPolicyModel() (model.Model, error) {
+	l.RLock()
 	if policyModel, ok := modelStore[ModelStr]; ok {
+		l.RUnlock()
 		return policyModel, nil
 	}
+	l.RUnlock()
 	policyModel, err := model.NewModelFromString(ModelStr)
 	if err != nil {
 		log.Error("NewModelFromString fail", zap.String("model", ModelStr), zap.Error(err))
 		return nil, err
 	}
+	l.Lock()
+	defer l.Unlock()
 	modelStore[ModelKey] = policyModel
 	return modelStore[ModelKey], nil
 }
