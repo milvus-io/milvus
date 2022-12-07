@@ -19,10 +19,11 @@ var (
 
 func Connect(cfg *paramtable.MetaDBConfig) error {
 	// load config
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8mb4&parseTime=True&loc=Local", cfg.Username, cfg.Password, cfg.Address, cfg.Port, cfg.DBName)
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8mb4&parseTime=True&loc=Local",
+		cfg.Username.GetValue(), cfg.Password.GetValue(), cfg.Address.GetValue(), cfg.Port.GetAsInt(), cfg.DBName.GetValue())
 
 	var ormLogger logger.Interface
-	if cfg.Base.Log.Level == "debug" {
+	if cfg.LogLevel.GetValue() == "debug" {
 		ormLogger = logger.Default.LogMode(logger.Info)
 	} else {
 		ormLogger = logger.Default
@@ -33,21 +34,33 @@ func Connect(cfg *paramtable.MetaDBConfig) error {
 		CreateBatchSize: 100,
 	})
 	if err != nil {
-		log.Error("fail to connect db", zap.String("host", cfg.Address), zap.Int("port", cfg.Port), zap.String("database", cfg.DBName), zap.Error(err))
+		log.Error("fail to connect db",
+			zap.String("host", cfg.Address.GetValue()),
+			zap.Int("port", cfg.Port.GetAsInt()),
+			zap.String("database", cfg.DBName.GetValue()),
+			zap.Error(err))
 		return err
 	}
 
 	idb, err := db.DB()
 	if err != nil {
-		log.Error("fail to create db instance", zap.String("host", cfg.Address), zap.Int("port", cfg.Port), zap.String("database", cfg.DBName), zap.Error(err))
+		log.Error("fail to create db instance",
+			zap.String("host", cfg.Address.GetValue()),
+			zap.Int("port", cfg.Port.GetAsInt()),
+			zap.String("database", cfg.DBName.GetValue()),
+			zap.Error(err))
 		return err
 	}
-	idb.SetMaxIdleConns(cfg.MaxIdleConns)
-	idb.SetMaxOpenConns(cfg.MaxOpenConns)
+	idb.SetMaxIdleConns(cfg.MaxIdleConns.GetAsInt())
+	idb.SetMaxOpenConns(cfg.MaxOpenConns.GetAsInt())
 
 	globalDB = db
 
-	log.Info("db connected success", zap.String("host", cfg.Address), zap.Int("port", cfg.Port), zap.String("database", cfg.DBName))
+	log.Info("db connected success",
+		zap.String("host", cfg.Address.GetValue()),
+		zap.Int("port", cfg.Port.GetAsInt()),
+		zap.String("database", cfg.DBName.GetValue()),
+		zap.Error(err))
 
 	return nil
 }

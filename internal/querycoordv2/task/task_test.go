@@ -373,7 +373,7 @@ func (suite *TaskSuite) TestLoadSegmentTask() {
 	partition := int64(100)
 	channel := &datapb.VchannelInfo{
 		CollectionID: suite.collection,
-		ChannelName:  Params.CommonCfg.RootCoordDml + "-test",
+		ChannelName:  Params.CommonCfg.RootCoordDml.GetValue() + "-test",
 	}
 
 	// Expect
@@ -460,7 +460,7 @@ func (suite *TaskSuite) TestSubmitDuplicateLoadSegmentTask() {
 	targetNode := int64(3)
 	channel := &datapb.VchannelInfo{
 		CollectionID: suite.collection,
-		ChannelName:  Params.CommonCfg.RootCoordDml + "-test",
+		ChannelName:  Params.CommonCfg.RootCoordDml.GetValue() + "-test",
 	}
 
 	tasks := []Task{}
@@ -502,7 +502,7 @@ func (suite *TaskSuite) TestLoadSegmentTaskFailed() {
 	partition := int64(100)
 	channel := &datapb.VchannelInfo{
 		CollectionID: suite.collection,
-		ChannelName:  Params.CommonCfg.RootCoordDml + "-test",
+		ChannelName:  Params.CommonCfg.RootCoordDml.GetValue() + "-test",
 	}
 
 	// Expect
@@ -578,7 +578,7 @@ func (suite *TaskSuite) TestReleaseSegmentTask() {
 	partition := int64(100)
 	channel := &datapb.VchannelInfo{
 		CollectionID: suite.collection,
-		ChannelName:  Params.CommonCfg.RootCoordDml + "-test",
+		ChannelName:  Params.CommonCfg.RootCoordDml.GetValue() + "-test",
 	}
 
 	// Expect
@@ -707,7 +707,7 @@ func (suite *TaskSuite) TestMoveSegmentTask() {
 	partition := int64(100)
 	channel := &datapb.VchannelInfo{
 		CollectionID: suite.collection,
-		ChannelName:  Params.CommonCfg.RootCoordDml + "-test",
+		ChannelName:  Params.CommonCfg.RootCoordDml.GetValue() + "-test",
 	}
 
 	// Expect
@@ -810,7 +810,7 @@ func (suite *TaskSuite) TestTaskCanceled() {
 	partition := int64(100)
 	channel := &datapb.VchannelInfo{
 		CollectionID: suite.collection,
-		ChannelName:  Params.CommonCfg.RootCoordDml + "-test",
+		ChannelName:  Params.CommonCfg.RootCoordDml.GetValue() + "-test",
 	}
 
 	// Expect
@@ -892,7 +892,7 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 	partition := int64(100)
 	channel := &datapb.VchannelInfo{
 		CollectionID: suite.collection,
-		ChannelName:  Params.CommonCfg.RootCoordDml + "-test",
+		ChannelName:  Params.CommonCfg.RootCoordDml.GetValue() + "-test",
 	}
 
 	// Expect
@@ -1146,7 +1146,7 @@ func (suite *TaskSuite) TestNoExecutor() {
 	targetNode := int64(-1)
 	channel := &datapb.VchannelInfo{
 		CollectionID: suite.collection,
-		ChannelName:  Params.CommonCfg.RootCoordDml + "-test",
+		ChannelName:  Params.CommonCfg.RootCoordDml.GetValue() + "-test",
 	}
 	suite.nodeMgr.Add(session.NewNodeInfo(targetNode, "localhost"))
 	suite.meta.ReplicaManager.Put(

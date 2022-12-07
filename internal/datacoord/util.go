@@ -88,14 +88,14 @@ func GetCompactTime(ctx context.Context, allocator allocator) (*compactTime, err
 	}
 
 	pts, _ := tsoutil.ParseTS(ts)
-	ttRetention := pts.Add(-time.Duration(Params.CommonCfg.RetentionDuration) * time.Second)
+	ttRetention := pts.Add(-1 * Params.CommonCfg.RetentionDuration.GetAsDuration(time.Second))
 	ttRetentionLogic := tsoutil.ComposeTS(ttRetention.UnixNano()/int64(time.Millisecond), 0)
 
 	// TODO, change to collection level
-	if Params.CommonCfg.EntityExpirationTTL > 0 {
-		ttexpired := pts.Add(-Params.CommonCfg.EntityExpirationTTL)
+	if Params.CommonCfg.EntityExpirationTTL.GetAsInt() > 0 {
+		ttexpired := pts.Add(-1 * Params.CommonCfg.EntityExpirationTTL.GetAsDuration(time.Second))
 		ttexpiredLogic := tsoutil.ComposeTS(ttexpired.UnixNano()/int64(time.Millisecond), 0)
-		return &compactTime{ttRetentionLogic, ttexpiredLogic, Params.CommonCfg.EntityExpirationTTL}, nil
+		return &compactTime{ttRetentionLogic, ttexpiredLogic, Params.CommonCfg.EntityExpirationTTL.GetAsDuration(time.Second)}, nil
 	}
 	// no expiration time
 	return &compactTime{ttRetentionLogic, 0, 0}, nil
@@ -207,5 +207,5 @@ func getCollectionTTL(properties map[string]string) (time.Duration, error) {
 		return time.Duration(ttl) * time.Second, nil
 	}
 
-	return Params.CommonCfg.EntityExpirationTTL, nil
+	return Params.CommonCfg.EntityExpirationTTL.GetAsDuration(time.Second), nil
 }

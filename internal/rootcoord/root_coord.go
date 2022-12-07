@@ -146,7 +146,7 @@ func NewCore(c context.Context, factory dependency.Factory) (*Core, error) {
 		ctx:                 ctx,
 		cancel:              cancel,
 		factory:             factory,
-		enableActiveStandBy: Params.RootCoordCfg.EnableActiveStandby,
+		enableActiveStandBy: Params.RootCoordCfg.EnableActiveStandby.GetAsBool(),
 	}
 
 	core.UpdateStateCode(commonpb.StateCode_Abnormal)
@@ -227,7 +227,7 @@ func (c *Core) sendMinDdlTsAsTt() {
 
 func (c *Core) startTimeTickLoop() {
 	defer c.wg.Done()
-	ticker := time.NewTicker(Params.ProxyCfg.TimeTickInterval)
+	ticker := time.NewTicker(Params.ProxyCfg.TimeTickInterval.GetAsDuration(time.Millisecond))
 	for {
 		select {
 		case <-c.ctx.Done():
@@ -353,7 +353,7 @@ func (c *Core) initMetaTable() error {
 		var catalog metastore.RootCoordCatalog
 		var err error
 
-		switch Params.MetaStoreCfg.MetaStoreType {
+		switch Params.MetaStoreCfg.MetaStoreType.GetValue() {
 		case util.MetaStoreTypeEtcd:
 			var metaKV kv.MetaKv
 			var ss *kvmetestore.SuffixSnapshot
@@ -377,7 +377,7 @@ func (c *Core) initMetaTable() error {
 
 			catalog = rootcoord.NewTableCatalog(dbcore.NewTxImpl(), dao.NewMetaDomain())
 		default:
-			return retry.Unrecoverable(fmt.Errorf("not supported meta store: %s", Params.MetaStoreCfg.MetaStoreType))
+			return retry.Unrecoverable(fmt.Errorf("not supported meta store: %s", Params.MetaStoreCfg.MetaStoreType.GetValue()))
 		}
 
 		if c.meta, err = NewMetaTable(c.ctx, catalog); err != nil {
@@ -633,18 +633,13 @@ func (c *Core) startInternal() error {
 	go c.importManager.cleanupLoop(&c.wg)
 	go c.importManager.sendOutTasksLoop(&c.wg)
 	go c.importManager.flipTaskStateLoop(&c.wg)
-	Params.RootCoordCfg.CreatedTime = time.Now()
-	Params.RootCoordCfg.UpdatedTime = time.Now()
 
-	if Params.QuotaConfig.QuotaAndLimitsEnabled {
+	if Params.QuotaConfig.QuotaAndLimitsEnabled.GetAsBool() {
 		go c.quotaCenter.run()
 	}
 
 	c.scheduler.Start()
 	c.stepExecutor.Start()
-
-	Params.RootCoordCfg.CreatedTime = time.Now()
-	Params.RootCoordCfg.UpdatedTime = time.Now()
 
 	if c.enableActiveStandBy {
 		c.activateFunc = func() {
@@ -745,7 +740,7 @@ func (c *Core) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse
 			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",
 		},
-		Value: Params.CommonCfg.RootCoordTimeTick,
+		Value: Params.CommonCfg.RootCoordTimeTick.GetValue(),
 	}, nil
 }
 
@@ -756,7 +751,7 @@ func (c *Core) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringRespon
 			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",
 		},
-		Value: Params.CommonCfg.RootCoordStatistics,
+		Value: Params.CommonCfg.RootCoordStatistics.GetValue(),
 	}, nil
 }
 
@@ -1665,7 +1660,7 @@ func (c *Core) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvus
 	cID := colInfo.CollectionID
 	req.ChannelNames = c.meta.GetCollectionVirtualChannels(cID)
 	if req.GetPartitionName() == "" {
-		req.PartitionName = Params.CommonCfg.DefaultPartitionName
+		req.PartitionName = Params.CommonCfg.DefaultPartitionName.GetValue()
 	}
 	var pID UniqueID
 	if pID, err = c.meta.GetPartitionByName(cID, req.GetPartitionName(), typeutil.MaxTimestamp); err != nil {

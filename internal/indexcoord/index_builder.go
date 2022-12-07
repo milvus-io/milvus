@@ -213,7 +213,7 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 			return true
 		}
 		indexParams := ib.meta.GetIndexParams(meta.CollectionID, meta.IndexID)
-		if isFlatIndex(getIndexType(indexParams)) || meta.NumRows < Params.IndexCoordCfg.MinSegmentNumRowsToEnableIndex {
+		if isFlatIndex(getIndexType(indexParams)) || meta.NumRows < Params.IndexCoordCfg.MinSegmentNumRowsToEnableIndex.GetAsInt64() {
 			log.Ctx(ib.ctx).Debug("segment does not need index really", zap.Int64("buildID", buildID),
 				zap.Int64("segID", meta.SegmentID), zap.Int64("num rows", meta.NumRows))
 			if err := ib.meta.FinishTask(&indexpb.IndexTaskInfo{
@@ -274,10 +274,10 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 		typeParams := ib.meta.GetTypeParams(meta.CollectionID, meta.IndexID)
 
 		var storageConfig *indexpb.StorageConfig
-		if Params.CommonCfg.StorageType == "local" {
+		if Params.CommonCfg.StorageType.GetValue() == "local" {
 			storageConfig = &indexpb.StorageConfig{
 				RootPath:    Params.LocalStorageCfg.Path.GetValue(),
-				StorageType: Params.CommonCfg.StorageType,
+				StorageType: Params.CommonCfg.StorageType.GetValue(),
 			}
 		} else {
 			storageConfig = &indexpb.StorageConfig{
@@ -289,11 +289,11 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 				RootPath:        Params.MinioCfg.RootPath.GetValue(),
 				UseIAM:          Params.MinioCfg.UseIAM.GetAsBool(),
 				IAMEndpoint:     Params.MinioCfg.IAMEndpoint.GetValue(),
-				StorageType:     Params.CommonCfg.StorageType,
+				StorageType:     Params.CommonCfg.StorageType.GetValue(),
 			}
 		}
 		req := &indexpb.CreateJobRequest{
-			ClusterID:       Params.CommonCfg.ClusterPrefix,
+			ClusterID:       Params.CommonCfg.ClusterPrefix.GetValue(),
 			IndexFilePrefix: path.Join(ib.ic.chunkManager.RootPath(), common.SegmentIndexPath),
 			BuildID:         buildID,
 			DataPaths:       binLogs,
@@ -390,7 +390,7 @@ func (ib *indexBuilder) getTaskState(buildID, nodeID UniqueID) indexTaskState {
 		ctx1, cancel := context.WithTimeout(ib.ctx, reqTimeoutInterval)
 		defer cancel()
 		response, err := client.QueryJobs(ctx1, &indexpb.QueryJobsRequest{
-			ClusterID: Params.CommonCfg.ClusterPrefix,
+			ClusterID: Params.CommonCfg.ClusterPrefix.GetValue(),
 			BuildIDs:  []int64{buildID},
 		})
 		if err != nil {
@@ -439,7 +439,7 @@ func (ib *indexBuilder) dropIndexTask(buildID, nodeID UniqueID) bool {
 		ctx1, cancel := context.WithTimeout(ib.ctx, reqTimeoutInterval)
 		defer cancel()
 		status, err := client.DropJobs(ctx1, &indexpb.DropJobsRequest{
-			ClusterID: Params.CommonCfg.ClusterPrefix,
+			ClusterID: Params.CommonCfg.ClusterPrefix.GetValue(),
 			BuildIDs:  []UniqueID{buildID},
 		})
 		if err != nil {

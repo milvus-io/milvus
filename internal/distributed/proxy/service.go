@@ -117,7 +117,7 @@ func (s *Server) registerHTTPServer() {
 	// (Embedded Milvus Only) Discard gin logs if logging is disabled.
 	// We might need to put these logs in some files in the further.
 	// But we don't care about these logs now, at least not in embedded Milvus.
-	if !proxy.Params.ProxyCfg.GinLogging {
+	if !proxy.Params.ProxyCfg.GinLogging.GetAsBool() {
 		gin.DefaultWriter = io.Discard
 		gin.DefaultErrorWriter = io.Discard
 	}

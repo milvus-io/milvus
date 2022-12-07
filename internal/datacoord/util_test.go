@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/stretchr/testify/suite"
 )
@@ -117,11 +118,11 @@ func (suite *UtilSuite) TestVerifyResponse() {
 }
 
 func (suite *UtilSuite) TestGetCompactTime() {
-	Params.Init()
-	Params.CommonCfg.RetentionDuration = 43200 // 5 days
+	paramtable.Get().Save(Params.CommonCfg.RetentionDuration.Key, "43200") // 5 days
+	defer paramtable.Get().Reset(Params.CommonCfg.RetentionDuration.Key)   // 5 days
 
 	tFixed := time.Date(2021, 11, 15, 0, 0, 0, 0, time.Local)
-	tBefore := tFixed.Add(-time.Duration(Params.CommonCfg.RetentionDuration) * time.Second)
+	tBefore := tFixed.Add(-1 * Params.CommonCfg.RetentionDuration.GetAsDuration(time.Second))
 
 	type args struct {
 		allocator allocator
@@ -192,5 +193,5 @@ func (suite *UtilSuite) TestGetCollectionTTL() {
 
 	ttl, err = getCollectionTTL(map[string]string{})
 	suite.NoError(err)
-	suite.Equal(ttl, Params.CommonCfg.EntityExpirationTTL)
+	suite.Equal(ttl, Params.CommonCfg.EntityExpirationTTL.GetAsDuration(time.Second))
 }

@@ -134,7 +134,7 @@ func NewChannelStore(kv kv.TxnKV) *ChannelStore {
 // Reload restores the buffer channels and node-channels mapping from kv.
 func (c *ChannelStore) Reload() error {
 	record := timerecord.NewTimeRecorder("datacoord")
-	keys, values, err := c.store.LoadWithPrefix(Params.DataCoordCfg.ChannelWatchSubPath)
+	keys, values, err := c.store.LoadWithPrefix(Params.CommonCfg.DataCoordWatchSubPath.GetValue())
 	if err != nil {
 		return err
 	}
@@ -368,12 +368,12 @@ func (c *ChannelStore) txn(opSet ChannelOpSet) error {
 
 // buildNodeChannelKey generates a key for kv store, where the key is a concatenation of ChannelWatchSubPath, nodeID and channel name.
 func buildNodeChannelKey(nodeID int64, chName string) string {
-	return fmt.Sprintf("%s%s%d%s%s", Params.DataCoordCfg.ChannelWatchSubPath, delimiter, nodeID, delimiter, chName)
+	return fmt.Sprintf("%s%s%d%s%s", Params.CommonCfg.DataCoordWatchSubPath.GetValue(), delimiter, nodeID, delimiter, chName)
 }
 
 // buildKeyPrefix generates a key *prefix* for kv store, where the key prefix is a concatenation of ChannelWatchSubPath and nodeID.
 func buildKeyPrefix(nodeID int64) string {
-	return fmt.Sprintf("%s%s%d", Params.DataCoordCfg.ChannelWatchSubPath, delimiter, nodeID)
+	return fmt.Sprintf("%s%s%d", Params.CommonCfg.DataCoordWatchSubPath.GetValue(), delimiter, nodeID)
 }
 
 // parseNodeKey validates a given node key, then extracts and returns the corresponding node id on success.

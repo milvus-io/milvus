@@ -944,7 +944,7 @@ func (loader *segmentLoader) checkSegmentSize(collectionID UniqueID, segmentLoad
 
 	// when load segment, data will be copied from go memory to c++ memory
 	memLoadingUsage := usedMemAfterLoad + uint64(
-		float64(maxSegmentSize)*float64(concurrency)*Params.QueryNodeCfg.LoadMemoryUsageFactor)
+		float64(maxSegmentSize)*float64(concurrency)*Params.QueryNodeCfg.LoadMemoryUsageFactor.GetAsFloat())
 	log.Info("predict memory and disk usage while loading (in MiB)",
 		zap.Int64("collectionID", collectionID),
 		zap.Int("concurrency", concurrency),
@@ -952,22 +952,22 @@ func (loader *segmentLoader) checkSegmentSize(collectionID UniqueID, segmentLoad
 		zap.Uint64("memUsageAfterLoad", toMB(usedMemAfterLoad)),
 		zap.Uint64("diskUsageAfterLoad", toMB(usedLocalSizeAfterLoad)))
 
-	if memLoadingUsage > uint64(float64(totalMem)*Params.QueryNodeCfg.OverloadedMemoryThresholdPercentage) {
+	if memLoadingUsage > uint64(float64(totalMem)*Params.QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat()) {
 		return fmt.Errorf("load segment failed, OOM if load, collectionID = %d, maxSegmentSize = %v MB, concurrency = %d, usedMemAfterLoad = %v MB, totalMem = %v MB, thresholdFactor = %f",
 			collectionID,
 			toMB(maxSegmentSize),
 			concurrency,
 			toMB(usedMemAfterLoad),
 			toMB(totalMem),
-			Params.QueryNodeCfg.OverloadedMemoryThresholdPercentage)
+			Params.QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat())
 	}
 
-	if usedLocalSizeAfterLoad > uint64(float64(Params.QueryNodeCfg.DiskCapacityLimit)*Params.QueryNodeCfg.MaxDiskUsagePercentage) {
+	if usedLocalSizeAfterLoad > uint64(Params.QueryNodeCfg.DiskCapacityLimit.GetAsFloat()*Params.QueryNodeCfg.MaxDiskUsagePercentage.GetAsFloat()) {
 		return fmt.Errorf("load segment failed, disk space is not enough, collectionID = %d, usedDiskAfterLoad = %v MB, totalDisk = %v MB, thresholdFactor = %f",
 			collectionID,
 			toMB(usedLocalSizeAfterLoad),
-			toMB(uint64(Params.QueryNodeCfg.DiskCapacityLimit)),
-			Params.QueryNodeCfg.MaxDiskUsagePercentage)
+			toMB(uint64(Params.QueryNodeCfg.DiskCapacityLimit.GetAsFloat())),
+			Params.QueryNodeCfg.MaxDiskUsagePercentage.GetAsFloat())
 	}
 
 	return nil

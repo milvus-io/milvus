@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -273,7 +274,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 		t.Run("Merge without expiration", func(t *testing.T) {
 			alloc := NewAllocatorFactory(1)
 			mockbIO := &binlogIO{cm, alloc}
-			Params.CommonCfg.EntityExpirationTTL = 0
+			paramtable.Get().Save(Params.CommonCfg.EntityExpirationTTL.Key, "0")
 			iData := genInsertDataWithExpiredTS()
 
 			var allPaths [][]string
@@ -305,12 +306,12 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 		t.Run("Merge without expiration2", func(t *testing.T) {
 			alloc := NewAllocatorFactory(1)
 			mockbIO := &binlogIO{cm, alloc}
-			Params.CommonCfg.EntityExpirationTTL = 0
+			paramtable.Get().Save(Params.CommonCfg.EntityExpirationTTL.Key, "0")
 			flushInsertBufferSize := Params.DataNodeCfg.FlushInsertBufferSize
 			defer func() {
 				Params.DataNodeCfg.FlushInsertBufferSize = flushInsertBufferSize
 			}()
-			Params.DataNodeCfg.FlushInsertBufferSize = 128
+			paramtable.Get().Save(Params.DataNodeCfg.FlushInsertBufferSize.Key, "128")
 			iData := genInsertDataWithExpiredTS()
 			meta := NewMetaFactory().GetCollectionMeta(1, "test", schemapb.DataType_Int64)
 
@@ -385,7 +386,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 		t.Run("Merge with meta error", func(t *testing.T) {
 			alloc := NewAllocatorFactory(1)
 			mockbIO := &binlogIO{cm, alloc}
-			Params.CommonCfg.EntityExpirationTTL = 0
+			paramtable.Get().Save(Params.CommonCfg.EntityExpirationTTL.Key, "0")
 			iData := genInsertDataWithExpiredTS()
 			meta := NewMetaFactory().GetCollectionMeta(1, "test", schemapb.DataType_Int64)
 
@@ -422,7 +423,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 		t.Run("Merge with meta type param error", func(t *testing.T) {
 			alloc := NewAllocatorFactory(1)
 			mockbIO := &binlogIO{cm, alloc}
-			Params.CommonCfg.EntityExpirationTTL = 0
+			paramtable.Get().Save(Params.CommonCfg.EntityExpirationTTL.Key, "0")
 			iData := genInsertDataWithExpiredTS()
 			meta := NewMetaFactory().GetCollectionMeta(1, "test", schemapb.DataType_Int64)
 
@@ -561,7 +562,7 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 		Field2StatslogPaths: nil,
 		Deltalogs:           nil,
 	}}
-	Params.CommonCfg.EntityExpirationTTL = 0 // Turn off auto expiration
+	paramtable.Get().Save(Params.CommonCfg.EntityExpirationTTL.Key, "0") // Turn off auto expiration
 
 	t.Run("Test compact invalid", func(t *testing.T) {
 		invalidAlloc := NewAllocatorFactory(-1)

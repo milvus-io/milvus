@@ -17,6 +17,7 @@
 package indexparams
 
 import (
+	"encoding/json"
 	"strconv"
 	"testing"
 
@@ -58,20 +59,26 @@ func TestDiskIndexParams(t *testing.T) {
 
 	t.Run("fill index params with auto index", func(t *testing.T) {
 		var params paramtable.ComponentParam
-		params.AutoIndexConfig.Enable = true
+		params.Init()
+		params.Save(params.AutoIndexConfig.Enable.Key, "true")
 
 		mapString := make(map[string]string)
 		mapString[autoindex.BuildRatioKey] = "{\"pq_code_budget_gb\": 0.125, \"num_threads\": 1}"
 		mapString[autoindex.PrepareRatioKey] = "{\"search_cache_budget_gb\": 0.225, \"num_threads\": 4}"
 		extraParams, err := autoindex.NewBigDataExtraParamsFromMap(mapString)
 		assert.NoError(t, err)
-		params.AutoIndexConfig.BigDataExtraParams = extraParams
-		params.AutoIndexConfig.IndexParams = make(map[string]string)
-		params.AutoIndexConfig.IndexParams["max_degree"] = "56"
-		params.AutoIndexConfig.IndexParams["search_list_size"] = "100"
-		params.AutoIndexConfig.IndexParams["index_type"] = "DISKANN"
-
+		str, err := json.Marshal(extraParams)
+		assert.NoError(t, err)
+		params.Save(params.AutoIndexConfig.ExtraParams.Key, string(str))
 		indexParams := make(map[string]string)
+		indexParams["max_degree"] = "56"
+		indexParams["search_list_size"] = "100"
+		indexParams["index_type"] = "DISKANN"
+		str, err = json.Marshal(indexParams)
+		assert.NoError(t, err)
+		params.Save(params.AutoIndexConfig.IndexParams.Key, string(str))
+
+		indexParams = make(map[string]string)
 		err = FillDiskIndexParams(&params, indexParams)
 		assert.NoError(t, err)
 

@@ -57,7 +57,7 @@ func waitAndStore(t *testing.T, metakv kv.MetaKv, key string, waitState, storeSt
 // waitAndCheckState checks if the DataCoord writes expected state into Etcd
 func waitAndCheckState(t *testing.T, kv kv.MetaKv, expectedState datapb.ChannelWatchState, nodeID UniqueID, channelName string, collectionID UniqueID) {
 	for {
-		prefix := Params.DataCoordCfg.ChannelWatchSubPath
+		prefix := Params.CommonCfg.DataCoordWatchSubPath.GetValue()
 		v, err := kv.Load(path.Join(prefix, strconv.FormatInt(nodeID, 10), channelName))
 		if err == nil && len(v) > 0 {
 			watchInfo, err := parseWatchInfo("fake", []byte(v))
@@ -93,7 +93,7 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 	p := "/tmp/milvus_ut/rdb_data"
 	t.Setenv("ROCKSMQ_PATH", p)
 
-	prefix := Params.DataCoordCfg.ChannelWatchSubPath
+	prefix := Params.CommonCfg.DataCoordWatchSubPath.GetValue()
 
 	var (
 		collectionID      = UniqueID(9)
@@ -376,7 +376,7 @@ func TestChannelManager(t *testing.T) {
 		metakv.Close()
 	}()
 
-	prefix := Params.DataCoordCfg.ChannelWatchSubPath
+	prefix := Params.CommonCfg.DataCoordWatchSubPath.GetValue()
 	t.Run("test AddNode with avalible node", func(t *testing.T) {
 		// Note: this test is based on the default registerPolicy
 		defer metakv.RemoveWithPrefix("")
@@ -574,7 +574,7 @@ func TestChannelManager(t *testing.T) {
 				bufferID: {bufferID, []*channel{}},
 			},
 		}
-		chManager.stateTimer.startOne(datapb.ChannelWatchState_ToRelease, "channel-1", 1, time.Now().Add(Params.DataCoordCfg.MaxWatchDuration).UnixNano())
+		chManager.stateTimer.startOne(datapb.ChannelWatchState_ToRelease, "channel-1", 1, time.Now().Add(Params.DataCoordCfg.MaxWatchDuration.GetAsDuration(time.Second)).UnixNano())
 
 		err = chManager.DeleteNode(1)
 		assert.NoError(t, err)
@@ -736,7 +736,7 @@ func TestChannelManager_Reload(t *testing.T) {
 		collectionID = UniqueID(2)
 		channelName  = "channel-checkOldNodes"
 	)
-	prefix := Params.DataCoordCfg.ChannelWatchSubPath
+	prefix := Params.CommonCfg.DataCoordWatchSubPath.GetValue()
 
 	getWatchInfoWithState := func(state datapb.ChannelWatchState, collectionID UniqueID, channelName string) *datapb.ChannelWatchInfo {
 		return &datapb.ChannelWatchInfo{
@@ -904,7 +904,7 @@ func TestChannelManager_BalanceBehaviour(t *testing.T) {
 		metakv.Close()
 	}()
 
-	prefix := Params.DataCoordCfg.ChannelWatchSubPath
+	prefix := Params.CommonCfg.DataCoordWatchSubPath.GetValue()
 
 	t.Run("one node with three channels add a new node", func(t *testing.T) {
 		defer metakv.RemoveWithPrefix("")

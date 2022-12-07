@@ -75,7 +75,7 @@ func TestGetSegmentInfoChannel(t *testing.T) {
 		resp, err := svr.GetSegmentInfoChannel(context.TODO())
 		assert.Nil(t, err)
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-		assert.EqualValues(t, Params.CommonCfg.DataCoordSegmentInfo, resp.Value)
+		assert.EqualValues(t, Params.CommonCfg.DataCoordSegmentInfo.GetValue(), resp.Value)
 	})
 }
 
@@ -301,7 +301,7 @@ func TestGetTimeTickChannel(t *testing.T) {
 	resp, err := svr.GetTimeTickChannel(context.TODO())
 	assert.Nil(t, err)
 	assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-	assert.EqualValues(t, Params.CommonCfg.DataCoordTimeTick, resp.Value)
+	assert.EqualValues(t, Params.CommonCfg.DataCoordTimeTick.GetValue(), resp.Value)
 }
 
 func TestGetSegmentStates(t *testing.T) {
@@ -1486,7 +1486,7 @@ func TestDataNodeTtChannel(t *testing.T) {
 
 		ttMsgStream, err := svr.factory.NewMsgStream(context.TODO())
 		assert.Nil(t, err)
-		ttMsgStream.AsProducer([]string{Params.CommonCfg.DataCoordTimeTick})
+		ttMsgStream.AsProducer([]string{Params.CommonCfg.DataCoordTimeTick.GetValue()})
 		defer ttMsgStream.Close()
 		info := &NodeInfo{
 			Address: "localhost:7777",
@@ -1553,7 +1553,7 @@ func TestDataNodeTtChannel(t *testing.T) {
 		})
 		ttMsgStream, err := svr.factory.NewMsgStream(context.TODO())
 		assert.Nil(t, err)
-		ttMsgStream.AsProducer([]string{Params.CommonCfg.DataCoordTimeTick})
+		ttMsgStream.AsProducer([]string{Params.CommonCfg.DataCoordTimeTick.GetValue()})
 		defer ttMsgStream.Close()
 		info := &NodeInfo{
 			Address: "localhost:7777",
@@ -1634,7 +1634,7 @@ func TestDataNodeTtChannel(t *testing.T) {
 
 		ttMsgStream, err := svr.factory.NewMsgStream(context.TODO())
 		assert.Nil(t, err)
-		ttMsgStream.AsProducer([]string{Params.CommonCfg.DataCoordTimeTick})
+		ttMsgStream.AsProducer([]string{Params.CommonCfg.DataCoordTimeTick.GetValue()})
 		defer ttMsgStream.Close()
 		node := &NodeInfo{
 			NodeID:  0,
@@ -2600,7 +2600,8 @@ func TestGetRecoveryInfo(t *testing.T) {
 }
 
 func TestGetCompactionState(t *testing.T) {
-	Params.DataCoordCfg.EnableCompaction = true
+	paramtable.Get().Save(Params.DataCoordCfg.EnableCompaction.Key, "true")
+	defer paramtable.Get().Reset(Params.DataCoordCfg.EnableCompaction.Key)
 	t.Run("test get compaction state with new compactionhandler", func(t *testing.T) {
 		svr := &Server{}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
@@ -2665,7 +2666,8 @@ func TestGetCompactionState(t *testing.T) {
 }
 
 func TestManualCompaction(t *testing.T) {
-	Params.DataCoordCfg.EnableCompaction = true
+	paramtable.Get().Save(Params.DataCoordCfg.EnableCompaction.Key, "true")
+	defer paramtable.Get().Reset(Params.DataCoordCfg.EnableCompaction.Key)
 	t.Run("test manual compaction successfully", func(t *testing.T) {
 		svr := &Server{allocator: &MockAllocator{}}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
@@ -3457,8 +3459,7 @@ func (ms *MockClosePanicMsgstream) Chan() <-chan *msgstream.MsgPack {
 
 func newTestServer(t *testing.T, receiveCh chan any, opts ...Option) *Server {
 	var err error
-	Params.Init()
-	Params.CommonCfg.DataCoordTimeTick = Params.CommonCfg.DataCoordTimeTick + strconv.Itoa(rand.Int())
+	paramtable.Get().Save(Params.CommonCfg.DataCoordTimeTick.Key, Params.CommonCfg.DataCoordTimeTick.GetValue()+strconv.Itoa(rand.Int()))
 	factory := dependency.NewDefaultFactory(true)
 
 	etcdCli, err := etcd.GetEtcdClient(
@@ -3503,8 +3504,7 @@ func newTestServer(t *testing.T, receiveCh chan any, opts ...Option) *Server {
 
 func newTestServerWithMeta(t *testing.T, receiveCh chan any, meta *meta, opts ...Option) *Server {
 	var err error
-	Params.Init()
-	Params.CommonCfg.DataCoordTimeTick = Params.CommonCfg.DataCoordTimeTick + strconv.Itoa(rand.Int())
+	paramtable.Get().Save(Params.CommonCfg.DataCoordTimeTick.Key, Params.CommonCfg.DataCoordTimeTick.GetValue()+strconv.Itoa(rand.Int()))
 	factory := dependency.NewDefaultFactory(true)
 
 	etcdCli, err := etcd.GetEtcdClient(
@@ -3558,8 +3558,8 @@ func closeTestServer(t *testing.T, svr *Server) {
 
 func newTestServer2(t *testing.T, receiveCh chan any, opts ...Option) *Server {
 	var err error
-	Params.Init()
-	Params.CommonCfg.DataCoordTimeTick = Params.CommonCfg.DataCoordTimeTick + strconv.Itoa(rand.Int())
+	paramtable.Init()
+	paramtable.Get().Save(Params.CommonCfg.DataCoordTimeTick.Key, Params.CommonCfg.DataCoordTimeTick.GetValue()+strconv.Itoa(rand.Int()))
 	factory := dependency.NewDefaultFactory(true)
 
 	etcdCli, err := etcd.GetEtcdClient(
@@ -3714,12 +3714,11 @@ func Test_initServiceDiscovery(t *testing.T) {
 
 func Test_newChunkManagerFactory(t *testing.T) {
 	server := newTestServer2(t, nil)
-	Params.DataCoordCfg.EnableGarbageCollection = true
+	paramtable.Get().Save(Params.DataCoordCfg.EnableGarbageCollection.Key, "true")
 
 	t.Run("err_minio_bad_address", func(t *testing.T) {
-		os.Setenv("minio.address", "host:9000:bad")
-		defer os.Unsetenv("minio.address")
-		Params.Init()
+		paramtable.Get().Save(Params.MinioCfg.Address.Key, "host:9000:bad")
+		defer paramtable.Get().Reset(Params.MinioCfg.Address.Key)
 		storageCli, err := server.newChunkManagerFactory()
 		assert.Nil(t, storageCli)
 		assert.Error(t, err)
@@ -3727,22 +3726,19 @@ func Test_newChunkManagerFactory(t *testing.T) {
 	})
 
 	t.Run("local storage init", func(t *testing.T) {
-		Params.CommonCfg.StorageType = "local"
+		paramtable.Get().Save(Params.CommonCfg.StorageType.Key, "local")
+		defer paramtable.Get().Reset(Params.CommonCfg.StorageType.Key)
 		storageCli, err := server.newChunkManagerFactory()
 		assert.NotNil(t, storageCli)
 		assert.NoError(t, err)
 	})
-	t.Run("bad storage type", func(t *testing.T) {
-		Params.CommonCfg.StorageType = "bad"
-		storageCli, err := server.newChunkManagerFactory()
-		assert.Nil(t, storageCli)
-		assert.Error(t, err)
-	})
 }
 
 func Test_initGarbageCollection(t *testing.T) {
+	paramtable.Get().Save(Params.DataCoordCfg.EnableGarbageCollection.Key, "true")
+	defer paramtable.Get().Reset(Params.DataCoordCfg.EnableGarbageCollection.Key)
+
 	server := newTestServer2(t, nil)
-	Params.DataCoordCfg.EnableGarbageCollection = true
 
 	t.Run("ok", func(t *testing.T) {
 		storageCli, err := server.newChunkManagerFactory()
@@ -3751,10 +3747,9 @@ func Test_initGarbageCollection(t *testing.T) {
 		server.initGarbageCollection(storageCli)
 	})
 	t.Run("err_minio_bad_address", func(t *testing.T) {
-		Params.CommonCfg.StorageType = "minio"
-		os.Setenv("minio.address", "host:9000:bad")
-		defer os.Unsetenv("minio.address")
-		Params.Init()
+		paramtable.Get().Save(Params.CommonCfg.StorageType.Key, "minio")
+		paramtable.Get().Save(Params.MinioCfg.Address.Key, "host:9000:bad")
+		defer paramtable.Get().Reset(Params.MinioCfg.Address.Key)
 		storageCli, err := server.newChunkManagerFactory()
 		assert.Nil(t, storageCli)
 		assert.Error(t, err)
@@ -3764,7 +3759,7 @@ func Test_initGarbageCollection(t *testing.T) {
 
 func testDataCoordBase(t *testing.T, opts ...Option) *Server {
 	var err error
-	Params.CommonCfg.DataCoordTimeTick = Params.CommonCfg.DataCoordTimeTick + strconv.Itoa(rand.Int())
+	paramtable.Get().Save(Params.CommonCfg.DataCoordTimeTick.Key, Params.CommonCfg.DataCoordTimeTick.GetValue()+strconv.Itoa(rand.Int()))
 	factory := dependency.NewDefaultFactory(true)
 
 	etcdCli, err := etcd.GetEtcdClient(
@@ -3810,16 +3805,15 @@ func testDataCoordBase(t *testing.T, opts ...Option) *Server {
 }
 
 func TestDataCoord_DisableActiveStandby(t *testing.T) {
-	Params.Init()
-	Params.DataCoordCfg.EnableActiveStandby = false
+	paramtable.Get().Save(Params.DataCoordCfg.EnableActiveStandby.Key, "false")
 	svr := testDataCoordBase(t)
 	defer closeTestServer(t, svr)
 }
 
 // make sure the main functions work well when EnableActiveStandby=true
 func TestDataCoord_EnableActiveStandby(t *testing.T) {
-	Params.Init()
-	Params.DataCoordCfg.EnableActiveStandby = true
+	paramtable.Get().Save(Params.DataCoordCfg.EnableActiveStandby.Key, "true")
+	defer paramtable.Get().Reset(Params.DataCoordCfg.EnableActiveStandby.Key)
 	svr := testDataCoordBase(t)
 	defer closeTestServer(t, svr)
 }

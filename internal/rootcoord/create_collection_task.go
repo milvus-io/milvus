@@ -244,7 +244,7 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 		Partitions: []*model.Partition{
 			{
 				PartitionID:               partID,
-				PartitionName:             Params.CommonCfg.DefaultPartitionName,
+				PartitionName:             Params.CommonCfg.DefaultPartitionName.GetValue(),
 				PartitionCreatedTimestamp: ts,
 				CollectionID:              collID,
 				State:                     pb.PartitionState_PartitionCreated,
@@ -257,7 +257,7 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 	// if add collection successfully due to idempotency check. Some steps may be risky to be duplicate executed if they
 	// are not promised idempotent.
 	clone := collInfo.Clone()
-	clone.Partitions = []*model.Partition{{PartitionName: Params.CommonCfg.DefaultPartitionName}}
+	clone.Partitions = []*model.Partition{{PartitionName: Params.CommonCfg.DefaultPartitionName.GetValue()}}
 	// need double check in meta table if we can't promise the sequence execution.
 	existedCollInfo, err := t.core.meta.GetCollectionByName(ctx, t.Req.GetCollectionName(), typeutil.MaxTimestamp)
 	if err == nil {

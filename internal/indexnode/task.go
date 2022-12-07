@@ -306,10 +306,10 @@ func (it *indexBuildTask) BuildIndex(ctx context.Context) error {
 
 func (it *indexBuildTask) BuildDiskAnnIndex(ctx context.Context) error {
 	// check index node support disk index
-	if !Params.IndexNodeCfg.EnableDisk {
+	if !Params.IndexNodeCfg.EnableDisk.GetAsBool() {
 		log.Ctx(ctx).Error("IndexNode don't support build disk index",
 			zap.String("index type", it.newIndexParams["index_type"]),
-			zap.Bool("enable disk", Params.IndexNodeCfg.EnableDisk))
+			zap.Bool("enable disk", Params.IndexNodeCfg.EnableDisk.GetAsBool()))
 		return errors.New("index node don't support build disk index")
 	}
 
@@ -321,7 +321,7 @@ func (it *indexBuildTask) BuildDiskAnnIndex(ctx context.Context) error {
 	}
 
 	usedLocalSizeWhenBuild := int64(float64(it.fieldData.GetMemorySize())*diskUsageRatio) + localUsedSize
-	maxUsedLocalSize := int64(float64(Params.IndexNodeCfg.DiskCapacityLimit) * Params.IndexNodeCfg.MaxDiskUsagePercentage)
+	maxUsedLocalSize := int64(Params.IndexNodeCfg.DiskCapacityLimit.GetAsFloat() * Params.IndexNodeCfg.MaxDiskUsagePercentage.GetAsFloat())
 
 	if usedLocalSizeWhenBuild > maxUsedLocalSize {
 		log.Ctx(ctx).Error("IndexNode don't has enough disk size to build disk ann index",

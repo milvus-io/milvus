@@ -318,7 +318,7 @@ func (t *compactionTask) merge(
 	numRows = 0
 	numBinlogs = 0
 	currentTs := t.GetCurrentTime()
-	maxRowsPerBinlog = int(Params.DataNodeCfg.FlushInsertBufferSize / (int64(dim) * 4))
+	maxRowsPerBinlog = int(Params.DataNodeCfg.FlushInsertBufferSize.GetAsInt64() / (int64(dim) * 4))
 	currentRows := 0
 	downloadTimeCost := time.Duration(0)
 	uploadInsertTimeCost := time.Duration(0)

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
@@ -20,7 +21,7 @@ func TestUnaryServerInterceptor(t *testing.T) {
 func TestPrivilegeInterceptor(t *testing.T) {
 	ctx := context.Background()
 	t.Run("Authorization Disabled", func(t *testing.T) {
-		Params.CommonCfg.AuthorizationEnabled = false
+		paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "false")
 		_, err := PrivilegeInterceptor(ctx, &milvuspb.LoadCollectionRequest{
 			DbName:         "db_test",
 			CollectionName: "col1",
@@ -29,7 +30,7 @@ func TestPrivilegeInterceptor(t *testing.T) {
 	})
 
 	t.Run("Authorization Enabled", func(t *testing.T) {
-		Params.CommonCfg.AuthorizationEnabled = true
+		paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
 
 		_, err := PrivilegeInterceptor(ctx, &milvuspb.HasCollectionRequest{})
 		assert.Nil(t, err)

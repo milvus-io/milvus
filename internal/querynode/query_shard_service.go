@@ -66,7 +66,7 @@ func newQueryShardService(ctx context.Context, metaReplica ReplicaInterface, tSa
 		shardClusterService: clusterService,
 		localChunkManager:   localChunkManager,
 		remoteChunkManager:  remoteChunkManager,
-		localCacheEnabled:   Params.QueryNodeCfg.CacheEnabled,
+		localCacheEnabled:   Params.QueryNodeCfg.CacheEnabled.GetAsBool(),
 		factory:             factory,
 		scheduler:           scheduler,
 	}

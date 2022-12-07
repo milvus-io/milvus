@@ -27,13 +27,14 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/hardware"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 //getComponentConfigurations returns the configurations of rootcoord matching req.Pattern
 func getComponentConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) *internalpb.ShowConfigurationsResponse {
 	prefix := "rootcoord."
-	matchedConfig := Params.RootCoordCfg.Base.GetByPattern(prefix + req.Pattern)
+	matchedConfig := Params.GetByPattern(prefix + req.Pattern)
 	configList := make([]*commonpb.KeyValuePair, 0, len(matchedConfig))
 	for key, value := range matchedConfig {
 		configList = append(configList,
@@ -67,13 +68,13 @@ func (c *Core) getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetric
 					DiskUsage:    hardware.GetDiskUsage(),
 				},
 				SystemInfo:  metricsinfo.DeployMetrics{},
-				CreatedTime: Params.RootCoordCfg.CreatedTime.String(),
-				UpdatedTime: Params.RootCoordCfg.UpdatedTime.String(),
+				CreatedTime: paramtable.GetCreateTime().String(),
+				UpdatedTime: paramtable.GetUpdateTime().String(),
 				Type:        typeutil.RootCoordRole,
 				ID:          c.session.ServerID,
 			},
 			SystemConfigurations: metricsinfo.RootCoordConfiguration{
-				MinSegmentSizeToEnableIndex: Params.RootCoordCfg.MinSegmentSizeToEnableIndex,
+				MinSegmentSizeToEnableIndex: Params.RootCoordCfg.MinSegmentSizeToEnableIndex.GetAsInt64(),
 			},
 		},
 		Connections: metricsinfo.ConnTopology{

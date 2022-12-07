@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -143,13 +144,13 @@ func TestQuotaCenter(t *testing.T) {
 
 		now := time.Now()
 
-		Params.QuotaConfig.TtProtectionEnabled = true
-		Params.QuotaConfig.MaxTimeTickDelay = 3 * time.Second
+		paramtable.Get().Save(Params.QuotaConfig.TtProtectionEnabled.Key, "true")
+		paramtable.Get().Save(Params.QuotaConfig.MaxTimeTickDelay.Key, "3")
 
 		// test force deny writing
 		alloc := newMockTsoAllocator()
 		alloc.GenerateTSOF = func(count uint32) (typeutil.Timestamp, error) {
-			added := now.Add(Params.QuotaConfig.MaxTimeTickDelay)
+			added := now.Add(Params.QuotaConfig.MaxTimeTickDelay.GetAsDuration(time.Second))
 			ts := tsoutil.ComposeTSByTime(added, 0)
 			return ts, nil
 		}
@@ -166,7 +167,7 @@ func TestQuotaCenter(t *testing.T) {
 
 		// test one-third time tick delay
 		alloc.GenerateTSOF = func(count uint32) (typeutil.Timestamp, error) {
-			oneThirdDelay := Params.QuotaConfig.MaxTimeTickDelay / 3
+			oneThirdDelay := Params.QuotaConfig.MaxTimeTickDelay.GetAsDuration(time.Second) / 3
 			added := now.Add(oneThirdDelay)
 			oneThirdTs := tsoutil.ComposeTSByTime(added, 0)
 			return oneThirdTs, nil
@@ -207,7 +208,7 @@ func TestQuotaCenter(t *testing.T) {
 		backup := Params.QuotaConfig.MaxTimeTickDelay
 
 		for i, c := range ttCases {
-			Params.QuotaConfig.MaxTimeTickDelay = c.maxTtDelay
+			paramtable.Get().Save(Params.QuotaConfig.MaxTimeTickDelay.Key, fmt.Sprintf("%f", c.maxTtDelay.Seconds()))
 			fgTs := tsoutil.ComposeTSByTime(c.fgTt, 0)
 			quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{1: {Fgm: metricsinfo.FlowGraphMetric{NumFlowGraph: 1, MinFlowGraphTt: fgTs}}}
 			curTs := tsoutil.ComposeTSByTime(c.curTt, 0)
@@ -227,19 +228,19 @@ func TestQuotaCenter(t *testing.T) {
 		assert.Equal(t, float64(1), factor)
 
 		// test cool off
-		Params.QuotaConfig.QueueProtectionEnabled = true
-		Params.QuotaConfig.NQInQueueThreshold = 100
+		paramtable.Get().Save(Params.QuotaConfig.QueueProtectionEnabled.Key, "true")
+		paramtable.Get().Save(Params.QuotaConfig.NQInQueueThreshold.Key, "100")
 		quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{
 			1: {SearchQueue: metricsinfo.ReadInfoInQueue{
-				UnsolvedQueue: Params.QuotaConfig.NQInQueueThreshold,
+				UnsolvedQueue: Params.QuotaConfig.NQInQueueThreshold.GetAsInt64(),
 			}}}
 		factor = quotaCenter.getNQInQueryFactor()
-		assert.Equal(t, Params.QuotaConfig.CoolOffSpeed, factor)
+		assert.Equal(t, Params.QuotaConfig.CoolOffSpeed.GetAsFloat(), factor)
 
 		// test no cool off
 		quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{
 			1: {SearchQueue: metricsinfo.ReadInfoInQueue{
-				UnsolvedQueue: Params.QuotaConfig.NQInQueueThreshold - 1,
+				UnsolvedQueue: Params.QuotaConfig.NQInQueueThreshold.GetAsInt64() - 1,
 			}}}
 		factor = quotaCenter.getNQInQueryFactor()
 		assert.Equal(t, 1.0, factor)
@@ -253,15 +254,15 @@ func TestQuotaCenter(t *testing.T) {
 		assert.Equal(t, float64(1), factor)
 
 		// test cool off
-		Params.QuotaConfig.QueueProtectionEnabled = true
-		Params.QuotaConfig.QueueLatencyThreshold = float64(3 * time.Second)
+		paramtable.Get().Save(Params.QuotaConfig.QueueProtectionEnabled.Key, "true")
+		paramtable.Get().Save(Params.QuotaConfig.QueueLatencyThreshold.Key, "3")
 
 		quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{
 			1: {SearchQueue: metricsinfo.ReadInfoInQueue{
-				AvgQueueDuration: time.Duration(Params.QuotaConfig.QueueLatencyThreshold),
+				AvgQueueDuration: Params.QuotaConfig.QueueLatencyThreshold.GetAsDuration(time.Second),
 			}}}
 		factor = quotaCenter.getQueryLatencyFactor()
-		assert.Equal(t, Params.QuotaConfig.CoolOffSpeed, factor)
+		assert.Equal(t, Params.QuotaConfig.CoolOffSpeed.GetAsFloat(), factor)
 
 		// test no cool off
 		quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{
@@ -278,15 +279,15 @@ func TestQuotaCenter(t *testing.T) {
 		assert.Equal(t, float64(1), factor)
 
 		// test cool off
-		Params.QuotaConfig.ResultProtectionEnabled = true
-		Params.QuotaConfig.MaxReadResultRate = 1
+		paramtable.Get().Save(Params.QuotaConfig.ResultProtectionEnabled.Key, "true")
+		paramtable.Get().Save(Params.QuotaConfig.MaxReadResultRate.Key, fmt.Sprintf("%f", 1.0/1024/1024))
 
 		quotaCenter.proxyMetrics = map[UniqueID]*metricsinfo.ProxyQuotaMetrics{
 			1: {Rms: []metricsinfo.RateMetric{
 				{Label: metricsinfo.ReadResultThroughput, Rate: 1.2},
 			}}}
 		factor = quotaCenter.getReadResultFactor()
-		assert.Equal(t, Params.QuotaConfig.CoolOffSpeed, factor)
+		assert.Equal(t, Params.QuotaConfig.CoolOffSpeed.GetAsFloat(), factor)
 
 		// test no cool off
 		quotaCenter.proxyMetrics = map[UniqueID]*metricsinfo.ProxyQuotaMetrics{
@@ -305,28 +306,28 @@ func TestQuotaCenter(t *testing.T) {
 				{Label: internalpb.RateType_DQLQuery.String(), Rate: 100},
 			}}}
 
-		Params.QuotaConfig.ForceDenyReading = false
-		Params.QuotaConfig.QueueProtectionEnabled = true
-		Params.QuotaConfig.QueueLatencyThreshold = 100
+		paramtable.Get().Save(Params.QuotaConfig.ForceDenyReading.Key, "false")
+		paramtable.Get().Save(Params.QuotaConfig.QueueProtectionEnabled.Key, "true")
+		paramtable.Get().Save(Params.QuotaConfig.QueueLatencyThreshold.Key, "100")
 		quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{
 			1: {SearchQueue: metricsinfo.ReadInfoInQueue{
-				AvgQueueDuration: time.Duration(Params.QuotaConfig.QueueLatencyThreshold),
+				AvgQueueDuration: Params.QuotaConfig.QueueLatencyThreshold.GetAsDuration(time.Second),
 			}}}
 		quotaCenter.calculateReadRates()
 		assert.Equal(t, Limit(100.0*0.9), quotaCenter.currentRates[internalpb.RateType_DQLSearch])
 		assert.Equal(t, Limit(100.0*0.9), quotaCenter.currentRates[internalpb.RateType_DQLQuery])
 
-		Params.QuotaConfig.NQInQueueThreshold = 100
+		paramtable.Get().Save(Params.QuotaConfig.NQInQueueThreshold.Key, "100")
 		quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{
 			1: {SearchQueue: metricsinfo.ReadInfoInQueue{
-				UnsolvedQueue: Params.QuotaConfig.NQInQueueThreshold,
+				UnsolvedQueue: Params.QuotaConfig.NQInQueueThreshold.GetAsInt64(),
 			}}}
 		quotaCenter.calculateReadRates()
 		assert.Equal(t, Limit(100.0*0.9), quotaCenter.currentRates[internalpb.RateType_DQLSearch])
 		assert.Equal(t, Limit(100.0*0.9), quotaCenter.currentRates[internalpb.RateType_DQLQuery])
 
-		Params.QuotaConfig.ResultProtectionEnabled = true
-		Params.QuotaConfig.MaxReadResultRate = 1
+		paramtable.Get().Save(Params.QuotaConfig.ResultProtectionEnabled.Key, "true")
+		paramtable.Get().Save(Params.QuotaConfig.MaxReadResultRate.Key, "1")
 		quotaCenter.proxyMetrics = map[UniqueID]*metricsinfo.ProxyQuotaMetrics{
 			1: {Rms: []metricsinfo.RateMetric{
 				{Label: internalpb.RateType_DQLSearch.String(), Rate: 100},
@@ -346,7 +347,7 @@ func TestQuotaCenter(t *testing.T) {
 
 		// DiskQuota exceeded
 		quotaBackup := Params.QuotaConfig.DiskQuota
-		Params.QuotaConfig.DiskQuota = 99
+		paramtable.Get().Save(Params.QuotaConfig.DiskQuota.Key, "99")
 		quotaCenter.dataCoordMetrics = &metricsinfo.DataCoordQuotaMetrics{TotalBinlogSize: 100}
 		err = quotaCenter.calculateWriteRates()
 		assert.NoError(t, err)
@@ -356,7 +357,7 @@ func TestQuotaCenter(t *testing.T) {
 
 		// force deny
 		forceBak := Params.QuotaConfig.ForceDenyWriting
-		Params.QuotaConfig.ForceDenyWriting = true
+		paramtable.Get().Save(Params.QuotaConfig.ForceDenyWriting.Key, "true")
 		err = quotaCenter.calculateWriteRates()
 		assert.NoError(t, err)
 		assert.Equal(t, Limit(0), quotaCenter.currentRates[internalpb.RateType_DMLInsert])
@@ -401,12 +402,9 @@ func TestQuotaCenter(t *testing.T) {
 			{0.85, 0.95, 95, 100, 0},
 		}
 
-		lowBackup := Params.QuotaConfig.DataNodeMemoryLowWaterLevel
-		highBackup := Params.QuotaConfig.DataNodeMemoryHighWaterLevel
-
 		for i, c := range memCases {
-			Params.QuotaConfig.QueryNodeMemoryLowWaterLevel = c.lowWater
-			Params.QuotaConfig.QueryNodeMemoryHighWaterLevel = c.highWater
+			paramtable.Get().Save(Params.QuotaConfig.QueryNodeMemoryLowWaterLevel.Key, fmt.Sprintf("%f", c.lowWater))
+			paramtable.Get().Save(Params.QuotaConfig.QueryNodeMemoryHighWaterLevel.Key, fmt.Sprintf("%f", c.highWater))
 			quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{1: {Hms: metricsinfo.HardwareMetrics{MemoryUsage: c.memUsage, Memory: c.memTotal}}}
 			factor := quotaCenter.getMemoryFactor()
 			if math.Abs(factor-c.expectedFactor) > 0.000001 {
@@ -415,25 +413,25 @@ func TestQuotaCenter(t *testing.T) {
 			}
 		}
 
-		Params.QuotaConfig.QueryNodeMemoryLowWaterLevel = lowBackup
-		Params.QuotaConfig.QueryNodeMemoryHighWaterLevel = highBackup
+		paramtable.Get().Reset(Params.QuotaConfig.QueryNodeMemoryLowWaterLevel.Key)
+		paramtable.Get().Reset(Params.QuotaConfig.QueryNodeMemoryHighWaterLevel.Key)
 	})
 
 	t.Run("test ifDiskQuotaExceeded", func(t *testing.T) {
 		quotaCenter := NewQuotaCenter(pcm, &queryCoordMockForQuota{}, &dataCoordMockForQuota{}, core.tsoAllocator)
 
-		Params.QuotaConfig.DiskProtectionEnabled = false
+		paramtable.Get().Save(Params.QuotaConfig.DiskProtectionEnabled.Key, "false")
 		ok := quotaCenter.ifDiskQuotaExceeded()
 		assert.False(t, ok)
-		Params.QuotaConfig.DiskProtectionEnabled = true
+		paramtable.Get().Save(Params.QuotaConfig.DiskProtectionEnabled.Key, "true")
 
 		quotaBackup := Params.QuotaConfig.DiskQuota
-		Params.QuotaConfig.DiskQuota = 99
+		paramtable.Get().Save(Params.QuotaConfig.DiskQuota.Key, fmt.Sprintf("%f", 99.0/1024/1024))
 		quotaCenter.dataCoordMetrics = &metricsinfo.DataCoordQuotaMetrics{TotalBinlogSize: 100}
 		ok = quotaCenter.ifDiskQuotaExceeded()
 		assert.True(t, ok)
 
-		Params.QuotaConfig.DiskQuota = 101
+		paramtable.Get().Save(Params.QuotaConfig.DiskQuota.Key, fmt.Sprintf("%f", 101.0/1024/1024))
 		quotaCenter.dataCoordMetrics = &metricsinfo.DataCoordQuotaMetrics{TotalBinlogSize: 100}
 		ok = quotaCenter.ifDiskQuotaExceeded()
 		assert.False(t, ok)

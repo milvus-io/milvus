@@ -118,7 +118,7 @@ func (ticker *channelsTimeTickerImpl) tick() error {
 		} else {
 			if stat.minTs > current {
 				ticker.minTsStatistics[pchan] = stat.minTs - 1
-				next := now + Timestamp(Params.ProxyCfg.TimeTickInterval)
+				next := now + Timestamp(Params.ProxyCfg.TimeTickInterval.GetAsDuration(time.Millisecond))
 				if next > stat.maxTs {
 					next = stat.maxTs
 				}

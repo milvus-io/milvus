@@ -19,6 +19,8 @@ package autoindex
 import (
 	"encoding/json"
 	"strconv"
+
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
 
 type BigDataIndexExtraParams struct {
@@ -52,8 +54,7 @@ func NewBigDataIndexExtraParams() *BigDataIndexExtraParams {
 }
 
 func NewBigDataExtraParamsFromJSON(jsonStr string) (*BigDataIndexExtraParams, error) {
-	buffer := make(map[string]string)
-	err := json.Unmarshal([]byte(jsonStr), &buffer)
+	buffer, err := funcutil.JSONToMap(jsonStr)
 	if err != nil {
 		return nil, err
 	}

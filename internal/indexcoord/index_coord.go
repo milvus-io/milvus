@@ -129,7 +129,7 @@ func NewIndexCoord(ctx context.Context, factory dependency.Factory) (*IndexCoord
 		loopCancel:          cancel,
 		reqTimeoutInterval:  time.Second * 10,
 		factory:             factory,
-		enableActiveStandBy: Params.IndexCoordCfg.EnableActiveStandby,
+		enableActiveStandBy: Params.IndexCoordCfg.EnableActiveStandby.GetAsBool(),
 	}
 	i.UpdateStateCode(commonpb.StateCode_Abnormal)
 	return i, nil
@@ -205,19 +205,20 @@ func (i *IndexCoord) Init() error {
 			initErr = err
 			return
 		}
-		log.Info("IndexCoord get node sessions from etcd", zap.Bool("bind mode", Params.IndexCoordCfg.BindIndexNodeMode),
-			zap.String("node address", Params.IndexCoordCfg.IndexNodeAddress))
+		log.Info("IndexCoord get node sessions from etcd",
+			zap.String("bind mode", Params.IndexCoordCfg.BindIndexNodeMode.GetValue()),
+			zap.String("node address", Params.IndexCoordCfg.IndexNodeAddress.GetValue()))
 		aliveNodeID := make([]UniqueID, 0)
-		if Params.IndexCoordCfg.BindIndexNodeMode {
-			if err = i.nodeManager.AddNode(Params.IndexCoordCfg.IndexNodeID, Params.IndexCoordCfg.IndexNodeAddress); err != nil {
-				log.Error("IndexCoord add node fail", zap.Int64("ServerID", Params.IndexCoordCfg.IndexNodeID),
-					zap.String("address", Params.IndexCoordCfg.IndexNodeAddress), zap.Error(err))
+		if Params.IndexCoordCfg.BindIndexNodeMode.GetAsBool() {
+			if err = i.nodeManager.AddNode(Params.IndexCoordCfg.IndexNodeID.GetAsInt64(), Params.IndexCoordCfg.IndexNodeAddress.GetValue()); err != nil {
+				log.Error("IndexCoord add node fail", zap.Int64("ServerID", Params.IndexCoordCfg.IndexNodeID.GetAsInt64()),
+					zap.String("address", Params.IndexCoordCfg.IndexNodeAddress.GetValue()), zap.Error(err))
 				initErr = err
 				return
 			}
-			log.Info("IndexCoord add node success", zap.String("IndexNode address", Params.IndexCoordCfg.IndexNodeAddress),
-				zap.Int64("nodeID", Params.IndexCoordCfg.IndexNodeID))
-			aliveNodeID = append(aliveNodeID, Params.IndexCoordCfg.IndexNodeID)
+			log.Info("IndexCoord add node success", zap.String("IndexNode address", Params.IndexCoordCfg.IndexNodeAddress.GetValue()),
+				zap.Int64("nodeID", Params.IndexCoordCfg.IndexNodeID.GetAsInt64()))
+			aliveNodeID = append(aliveNodeID, Params.IndexCoordCfg.IndexNodeID.GetAsInt64())
 			metrics.IndexCoordIndexNodeNum.WithLabelValues().Inc()
 		} else {
 			for _, session := range sessions {
@@ -292,9 +293,6 @@ func (i *IndexCoord) Start() error {
 	for _, cb := range i.startCallbacks {
 		cb()
 	}
-
-	Params.IndexCoordCfg.CreatedTime = time.Now()
-	Params.IndexCoordCfg.UpdatedTime = time.Now()
 
 	if i.enableActiveStandBy {
 		i.activateFunc = func() {
@@ -1085,7 +1083,7 @@ func (i *IndexCoord) watchNodeLoop() {
 				}
 				return
 			}
-			if Params.IndexCoordCfg.BindIndexNodeMode {
+			if Params.IndexCoordCfg.BindIndexNodeMode.GetAsBool() {
 				continue
 			}
 			switch event.EventType {

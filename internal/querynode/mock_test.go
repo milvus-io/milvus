@@ -595,7 +595,7 @@ func genVectorChunkManager(ctx context.Context, col *Collection) (*storage.Vecto
 	vcm, err := storage.NewVectorChunkManager(ctx, lcm, rcm, &etcdpb.CollectionMeta{
 		ID:     col.id,
 		Schema: col.schema,
-	}, Params.QueryNodeCfg.CacheMemoryLimit, false)
+	}, Params.QueryNodeCfg.CacheMemoryLimit.GetAsInt64(), false)
 	if err != nil {
 		return nil, err
 	}

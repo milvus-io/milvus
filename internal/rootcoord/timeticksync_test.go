@@ -21,6 +21,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 
 	"github.com/stretchr/testify/assert"
@@ -40,9 +41,9 @@ func TestTimetickSync(t *testing.T) {
 	//	int64(1): {"rootcoord-dml_0"},
 	//}
 
-	Params.RootCoordCfg.DmlChannelNum = 2
-	Params.CommonCfg.RootCoordDml = "rootcoord-dml"
-	Params.CommonCfg.RootCoordDelta = "rootcoord-delta"
+	paramtable.Get().Save(Params.RootCoordCfg.DmlChannelNum.Key, "2")
+	paramtable.Get().Save(Params.CommonCfg.RootCoordDml.Key, "rootcoord-dml")
+	paramtable.Get().Save(Params.CommonCfg.RootCoordDelta.Key, "rootcoord-delta")
 	ttSync := newTimeTickSync(ctx, sourceID, factory, nil)
 
 	var wg sync.WaitGroup
@@ -119,9 +120,9 @@ func TestMultiTimetickSync(t *testing.T) {
 	//	int64(1): {"rootcoord-dml_0"},
 	//}
 
-	Params.RootCoordCfg.DmlChannelNum = 1
-	Params.CommonCfg.RootCoordDml = "rootcoord-dml"
-	Params.CommonCfg.RootCoordDelta = "rootcoord-delta"
+	paramtable.Get().Save(Params.RootCoordCfg.DmlChannelNum.Key, "1")
+	paramtable.Get().Save(Params.CommonCfg.RootCoordDml.Key, "rootcoord-dml")
+	paramtable.Get().Save(Params.CommonCfg.RootCoordDelta.Key, "rootcoord-delta")
 	ttSync := newTimeTickSync(ctx, UniqueID(0), factory, nil)
 
 	var wg sync.WaitGroup

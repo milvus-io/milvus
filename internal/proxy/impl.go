@@ -2008,7 +2008,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 	}
 
 	if len(it.PartitionName) <= 0 {
-		it.PartitionName = Params.CommonCfg.DefaultPartitionName
+		it.PartitionName = Params.CommonCfg.DefaultPartitionName.GetValue()
 	}
 
 	constructFailedResponse := func(err error) *milvuspb.MutationResult {

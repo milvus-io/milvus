@@ -80,7 +80,7 @@ func NewCheckerController(
 
 func (controller *CheckerController) Start(ctx context.Context) {
 	go func() {
-		ticker := time.NewTicker(Params.QueryCoordCfg.CheckInterval)
+		ticker := time.NewTicker(Params.QueryCoordCfg.CheckInterval.GetAsDuration(time.Millisecond))
 		defer ticker.Stop()
 		for {
 			select {
@@ -98,7 +98,7 @@ func (controller *CheckerController) Start(ctx context.Context) {
 			case <-controller.checkCh:
 				ticker.Stop()
 				controller.check(ctx)
-				ticker.Reset(Params.QueryCoordCfg.CheckInterval)
+				ticker.Reset(Params.QueryCoordCfg.CheckInterval.GetAsDuration(time.Millisecond))
 			}
 		}
 	}()

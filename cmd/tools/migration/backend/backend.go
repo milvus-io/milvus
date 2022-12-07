@@ -23,8 +23,8 @@ type Backend interface {
 }
 
 func NewBackend(cfg *configs.MilvusConfig, version string) (Backend, error) {
-	if cfg.MetaStoreCfg.MetaStoreType != util.MetaStoreTypeEtcd {
-		return nil, fmt.Errorf("%s is not supported now", cfg.MetaStoreCfg.MetaStoreType)
+	if cfg.MetaStoreCfg.MetaStoreType.GetValue() != util.MetaStoreTypeEtcd {
+		return nil, fmt.Errorf("%s is not supported now", cfg.MetaStoreCfg.MetaStoreType.GetValue())
 	}
 	v, err := semver.Parse(version)
 	if err != nil {

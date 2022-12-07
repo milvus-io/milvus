@@ -112,9 +112,9 @@ func WaitForComponentHealthy(ctx context.Context, service types.Component, servi
 	return WaitForComponentStates(ctx, service, serviceName, []commonpb.StateCode{commonpb.StateCode_Healthy}, attempts, sleep)
 }
 
-// ParseIndexParamsMap parse the jsonic index parameters to map
-func ParseIndexParamsMap(mStr string) (map[string]string, error) {
-	buffer := make(map[string]interface{})
+// JSONToMap parse the jsonic index parameters to map
+func JSONToMap(mStr string) (map[string]string, error) {
+	buffer := make(map[string]any)
 	err := json.Unmarshal([]byte(mStr), &buffer)
 	if err != nil {
 		return nil, fmt.Errorf("unmarshal params failed, %w", err)

@@ -32,7 +32,7 @@ import (
 //getComponentConfigurations returns the configurations of queryNode matching req.Pattern
 func getComponentConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) *internalpb.ShowConfigurationsResponse {
 	prefix := "querynode."
-	matchedConfig := Params.QueryNodeCfg.Base.GetByPattern(prefix + req.Pattern)
+	matchedConfig := Params.GetByPattern(prefix + req.Pattern)
 	configList := make([]*commonpb.KeyValuePair, 0, len(matchedConfig))
 	for key, value := range matchedConfig {
 		configList = append(configList,
@@ -119,13 +119,13 @@ func getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, 
 			Name:          metricsinfo.ConstructComponentName(typeutil.QueryNodeRole, paramtable.GetNodeID()),
 			HardwareInfos: hardwareInfos,
 			SystemInfo:    metricsinfo.DeployMetrics{},
-			CreatedTime:   Params.QueryNodeCfg.CreatedTime.String(),
-			UpdatedTime:   Params.QueryNodeCfg.UpdatedTime.String(),
+			CreatedTime:   paramtable.GetCreateTime().String(),
+			UpdatedTime:   paramtable.GetUpdateTime().String(),
 			Type:          typeutil.QueryNodeRole,
 			ID:            node.session.ServerID,
 		},
 		SystemConfigurations: metricsinfo.QueryNodeConfiguration{
-			SimdType: Params.CommonCfg.SimdType,
+			SimdType: Params.CommonCfg.SimdType.GetValue(),
 		},
 		QuotaMetrics: quotaMetrics,
 	}

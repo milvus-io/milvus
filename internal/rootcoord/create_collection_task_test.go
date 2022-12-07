@@ -257,7 +257,7 @@ func Test_createCollectionTask_Prepare(t *testing.T) {
 				Schema:         marshaledSchema,
 			},
 		}
-		task.Req.ShardsNum = int32(Params.RootCoordCfg.DmlChannelNum + 1) // no enough channels.
+		task.Req.ShardsNum = int32(Params.RootCoordCfg.DmlChannelNum.GetAsInt() + 1) // no enough channels.
 		err = task.Prepare(context.Background())
 		assert.Error(t, err)
 		task.Req.ShardsNum = 1
@@ -317,7 +317,7 @@ func Test_createCollectionTask_Execute(t *testing.T) {
 			Fields:               model.UnmarshalFieldModels(schema.GetFields()),
 			VirtualChannelNames:  channels.virtualChannels,
 			PhysicalChannelNames: channels.physicalChannels,
-			Partitions:           []*model.Partition{{PartitionName: Params.CommonCfg.DefaultPartitionName}},
+			Partitions:           []*model.Partition{{PartitionName: Params.CommonCfg.DefaultPartitionName.GetValue()}},
 		}
 
 		meta := newMockMetaTable()

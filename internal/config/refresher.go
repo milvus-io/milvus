@@ -40,10 +40,10 @@ func newRefresher(interval time.Duration, fetchFunc func() error) refresher {
 	}
 }
 
-func (r refresher) start() {
+func (r refresher) start(name string) {
 	if r.refreshInterval > 0 {
 		r.intervalInitOnce.Do(func() {
-			go r.refreshPeriodically()
+			go r.refreshPeriodically(name)
 		})
 	}
 }
@@ -52,9 +52,9 @@ func (r refresher) stop() {
 	r.intervalDone <- true
 }
 
-func (r refresher) refreshPeriodically() {
+func (r refresher) refreshPeriodically(name string) {
 	ticker := time.NewTicker(r.refreshInterval)
-	log.Info("start refreshing configurations")
+	log.Info("start refreshing configurations", zap.String("source", name))
 	for {
 		select {
 		case <-ticker.C:

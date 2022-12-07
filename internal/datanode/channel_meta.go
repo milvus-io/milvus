@@ -172,7 +172,7 @@ func (c *ChannelMeta) maxRowCountPerSegment(ts Timestamp) (int64, error) {
 		log.Warn("failed to estimate size per record", zap.Error(err))
 		return 0, err
 	}
-	threshold := Params.DataCoordCfg.SegmentMaxSize * 1024 * 1024
+	threshold := Params.DataCoordCfg.SegmentMaxSize.GetAsFloat() * 1024 * 1024
 	return int64(threshold / float64(sizePerRecord)), nil
 }
 

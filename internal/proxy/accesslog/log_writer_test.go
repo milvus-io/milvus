@@ -22,8 +22,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
 )
 
 func getText(size int) []byte {
@@ -38,9 +40,9 @@ func TestRotateLogger_Basic(t *testing.T) {
 	var Params paramtable.ComponentParam
 	Params.Init()
 	testPath := "/tmp/accesstest"
-	Params.ProxyCfg.AccessLog.LocalPath = testPath
-	Params.ProxyCfg.AccessLog.MinioEnable = true
-	Params.ProxyCfg.AccessLog.RemotePath = "access_log/"
+	Params.Save(Params.ProxyCfg.AccessLog.LocalPath.Key, testPath)
+	Params.Save(Params.ProxyCfg.AccessLog.MinioEnable.Key, "true")
+	Params.Save(Params.ProxyCfg.AccessLog.RemotePath.Key, "access_log/")
 	defer os.RemoveAll(testPath)
 
 	logger, err := NewRotateLogger(&Params.ProxyCfg.AccessLog, &Params.MinioCfg)
@@ -67,12 +69,11 @@ func TestRotateLogger_TimeRotate(t *testing.T) {
 	var Params paramtable.ComponentParam
 	Params.Init()
 	testPath := "/tmp/accesstest"
-	Params.ProxyCfg.AccessLog.LocalPath = testPath
-	Params.ProxyCfg.AccessLog.MinioEnable = true
-	Params.ProxyCfg.AccessLog.RemotePath = "access_log/"
-	Params.ProxyCfg.AccessLog.RotatedTime = 2
-	//close file retention
-	Params.ProxyCfg.AccessLog.MaxBackups = 0
+	Params.Save(Params.ProxyCfg.AccessLog.LocalPath.Key, testPath)
+	Params.Save(Params.ProxyCfg.AccessLog.MinioEnable.Key, "true")
+	Params.Save(Params.ProxyCfg.AccessLog.RemotePath.Key, "access_log/")
+	Params.Save(Params.ProxyCfg.AccessLog.RotatedTime.Key, "2")
+	Params.Save(Params.ProxyCfg.AccessLog.MaxBackups.Key, "0")
 	defer os.RemoveAll(testPath)
 
 	logger, err := NewRotateLogger(&Params.ProxyCfg.AccessLog, &Params.MinioCfg)
@@ -96,10 +97,10 @@ func TestRotateLogger_SizeRotate(t *testing.T) {
 	var Params paramtable.ComponentParam
 	Params.Init()
 	testPath := "/tmp/accesstest"
-	Params.ProxyCfg.AccessLog.LocalPath = testPath
-	Params.ProxyCfg.AccessLog.MinioEnable = true
-	Params.ProxyCfg.AccessLog.RemotePath = "access_log/"
-	Params.ProxyCfg.AccessLog.MaxSize = 1
+	Params.Save(Params.ProxyCfg.AccessLog.LocalPath.Key, testPath)
+	Params.Save(Params.ProxyCfg.AccessLog.MinioEnable.Key, "true")
+	Params.Save(Params.ProxyCfg.AccessLog.RemotePath.Key, "access_log/")
+	Params.Save(Params.ProxyCfg.AccessLog.MaxSize.Key, "1")
 	defer os.RemoveAll(testPath)
 
 	logger, err := NewRotateLogger(&Params.ProxyCfg.AccessLog, &Params.MinioCfg)
@@ -110,6 +111,7 @@ func TestRotateLogger_SizeRotate(t *testing.T) {
 	num := 1024 * 1024
 	text := getText(num + 1)
 	_, err = logger.Write(text)
+	log.Error("write failed", zap.Error(err))
 	assert.Error(t, err)
 
 	for i := 1; i <= 2; i++ {
@@ -129,8 +131,8 @@ func TestRotateLogger_LocalRetention(t *testing.T) {
 	var Params paramtable.ComponentParam
 	Params.Init()
 	testPath := "/tmp/accesstest"
-	Params.ProxyCfg.AccessLog.LocalPath = testPath
-	Params.ProxyCfg.AccessLog.MaxBackups = 1
+	Params.Save(Params.ProxyCfg.AccessLog.LocalPath.Key, testPath)
+	Params.Save(Params.ProxyCfg.AccessLog.MaxBackups.Key, "1")
 	defer os.RemoveAll(testPath)
 
 	logger, err := NewRotateLogger(&Params.ProxyCfg.AccessLog, &Params.MinioCfg)
@@ -150,7 +152,7 @@ func TestRotateLogger_BasicError(t *testing.T) {
 	var Params paramtable.ComponentParam
 	Params.Init()
 	testPath := ""
-	Params.ProxyCfg.AccessLog.LocalPath = testPath
+	Params.Save(Params.ProxyCfg.AccessLog.LocalPath.Key, testPath)
 
 	logger, err := NewRotateLogger(&Params.ProxyCfg.AccessLog, &Params.MinioCfg)
 	assert.NoError(t, err)
@@ -174,8 +176,8 @@ func TestRotateLogger_InitError(t *testing.T) {
 	var params paramtable.ComponentParam
 	params.Init()
 	testPath := ""
-	params.ProxyCfg.AccessLog.LocalPath = testPath
-	params.ProxyCfg.AccessLog.MinioEnable = true
+	params.Save(params.ProxyCfg.AccessLog.LocalPath.Key, testPath)
+	params.Save(params.ProxyCfg.AccessLog.MinioEnable.Key, "true")
 	params.Save(params.MinioCfg.Address.Key, "")
 	//init err with invalid minio address
 	_, err := NewRotateLogger(&params.ProxyCfg.AccessLog, &params.MinioCfg)

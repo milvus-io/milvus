@@ -159,12 +159,12 @@ func (cct *createCollectionTask) PreExecute(ctx context.Context) error {
 	}
 	cct.schema.AutoID = false
 
-	if cct.ShardsNum > Params.ProxyCfg.MaxShardNum {
-		return fmt.Errorf("maximum shards's number should be limited to %d", Params.ProxyCfg.MaxShardNum)
+	if cct.ShardsNum > Params.ProxyCfg.MaxShardNum.GetAsInt32() {
+		return fmt.Errorf("maximum shards's number should be limited to %d", Params.ProxyCfg.MaxShardNum.GetAsInt())
 	}
 
-	if int64(len(cct.schema.Fields)) > Params.ProxyCfg.MaxFieldNum {
-		return fmt.Errorf("maximum field's number should be limited to %d", Params.ProxyCfg.MaxFieldNum)
+	if len(cct.schema.Fields) > Params.ProxyCfg.MaxFieldNum.GetAsInt() {
+		return fmt.Errorf("maximum field's number should be limited to %d", Params.ProxyCfg.MaxFieldNum.GetAsInt())
 	}
 
 	// validate collection name

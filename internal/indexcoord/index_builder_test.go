@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 
@@ -629,7 +630,7 @@ func TestIndexBuilder_Error(t *testing.T) {
 	})
 
 	t.Run("assign task fail", func(t *testing.T) {
-		Params.CommonCfg.StorageType = "local"
+		paramtable.Get().Save(Params.CommonCfg.StorageType.Key, "local")
 		ib.tasks[buildID] = indexTaskInit
 		ib.ic.dataCoordClient = NewDataCoordMock()
 		ib.meta = createMetaTable(&indexcoord.Catalog{

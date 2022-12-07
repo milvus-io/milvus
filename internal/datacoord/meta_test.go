@@ -691,7 +691,7 @@ func TestMeta_alterMetaStore(t *testing.T) {
 		}},
 	}
 
-	toAlterInfo := lo.Map[*datapb.SegmentInfo, *SegmentInfo](toAlter, func(item *datapb.SegmentInfo, _ int) *SegmentInfo {
+	toAlterInfo := lo.Map(toAlter, func(item *datapb.SegmentInfo, _ int) *SegmentInfo {
 		return &SegmentInfo{SegmentInfo: item}
 	})
 

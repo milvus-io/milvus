@@ -17,6 +17,8 @@
 package datanode
 
 import (
+	"time"
+
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 )
 
@@ -28,7 +30,7 @@ func syncPeriodically() segmentSyncPolicy {
 	return func(segment *Segment, ts Timestamp) bool {
 		endTime := tsoutil.PhysicalTime(ts)
 		lastSyncTime := tsoutil.PhysicalTime(segment.lastSyncTs)
-		return endTime.Sub(lastSyncTime) >= Params.DataNodeCfg.SyncPeriod &&
+		return endTime.Sub(lastSyncTime) >= Params.DataNodeCfg.SyncPeriod.GetAsDuration(time.Second) &&
 			!segment.isBufferEmpty()
 	}
 }

@@ -21,6 +21,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -164,10 +165,9 @@ func TestTaskScheduler_tryEvictUnsolvedReadTask(t *testing.T) {
 		ts.unsolvedReadTasks.PushBack(taskCanceled)
 
 		// set max len to 2
-		tmp := Params.QueryNodeCfg.MaxUnsolvedQueueSize
-		Params.QueryNodeCfg.MaxUnsolvedQueueSize = 2
+		paramtable.Get().Save(Params.QueryNodeCfg.MaxUnsolvedQueueSize.Key, "2")
 		ts.tryEvictUnsolvedReadTask(1)
-		Params.QueryNodeCfg.MaxUnsolvedQueueSize = tmp
+		paramtable.Get().Reset(Params.QueryNodeCfg.MaxUnsolvedQueueSize.Key)
 
 		err := <-taskCanceled.done
 		assert.ErrorIs(t, err, context.Canceled)

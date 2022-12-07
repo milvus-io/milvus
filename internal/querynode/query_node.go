@@ -200,25 +200,25 @@ func (node *QueryNode) InitSegcore() {
 	C.SegcoreSetThreadPoolNum(C.uint32_t(cpuNum))
 
 	// override segcore chunk size
-	cChunkRows := C.int64_t(Params.QueryNodeCfg.ChunkRows)
+	cChunkRows := C.int64_t(Params.QueryNodeCfg.ChunkRows.GetAsInt64())
 	C.SegcoreSetChunkRows(cChunkRows)
 
-	nlist := C.int64_t(Params.QueryNodeCfg.SmallIndexNlist)
+	nlist := C.int64_t(Params.QueryNodeCfg.SmallIndexNlist.GetAsInt64())
 	C.SegcoreSetNlist(nlist)
 
-	nprobe := C.int64_t(Params.QueryNodeCfg.SmallIndexNProbe)
+	nprobe := C.int64_t(Params.QueryNodeCfg.SmallIndexNProbe.GetAsInt64())
 	C.SegcoreSetNprobe(nprobe)
 
 	// override segcore SIMD type
-	cSimdType := C.CString(Params.CommonCfg.SimdType)
+	cSimdType := C.CString(Params.CommonCfg.SimdType.GetValue())
 	C.SegcoreSetSimdType(cSimdType)
 	C.free(unsafe.Pointer(cSimdType))
 
 	// override segcore index slice size
-	cIndexSliceSize := C.int64_t(Params.CommonCfg.IndexSliceSize)
+	cIndexSliceSize := C.int64_t(Params.CommonCfg.IndexSliceSize.GetAsInt64())
 	C.InitIndexSliceSize(cIndexSliceSize)
 
-	cThreadCoreCoefficient := C.int64_t(Params.CommonCfg.ThreadCoreCoefficient)
+	cThreadCoreCoefficient := C.int64_t(Params.CommonCfg.ThreadCoreCoefficient.GetAsInt64())
 	C.InitThreadCoreCoefficient(cThreadCoreCoefficient)
 
 	cCPUNum := C.int(hardware.GetCPUNum())
@@ -281,14 +281,14 @@ func (node *QueryNode) Init() error {
 
 		node.InitSegcore()
 
-		if Params.QueryNodeCfg.GCHelperEnabled {
+		if Params.QueryNodeCfg.GCHelperEnabled.GetAsBool() {
 			action := func(GOGC uint32) {
 				debug.SetGCPercent(int(GOGC))
 			}
-			gc.NewTuner(Params.QueryNodeCfg.OverloadedMemoryThresholdPercentage, uint32(Params.QueryNodeCfg.MinimumGOGCConfig), uint32(Params.QueryNodeCfg.MaximumGOGCConfig), action)
+			gc.NewTuner(Params.QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat(), uint32(Params.QueryNodeCfg.MinimumGOGCConfig.GetAsInt()), uint32(Params.QueryNodeCfg.MaximumGOGCConfig.GetAsInt()), action)
 		} else {
 			action := func(uint32) {}
-			gc.NewTuner(Params.QueryNodeCfg.OverloadedMemoryThresholdPercentage, uint32(Params.QueryNodeCfg.MinimumGOGCConfig), uint32(Params.QueryNodeCfg.MaximumGOGCConfig), action)
+			gc.NewTuner(Params.QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat(), uint32(Params.QueryNodeCfg.MinimumGOGCConfig.GetAsInt()), uint32(Params.QueryNodeCfg.MaximumGOGCConfig.GetAsInt()), action)
 		}
 
 		log.Info("query node init successfully",
@@ -315,9 +315,6 @@ func (node *QueryNode) Start() error {
 	}
 	node.queryShardService = queryShardService
 
-	Params.QueryNodeCfg.CreatedTime = time.Now()
-	Params.QueryNodeCfg.UpdatedTime = time.Now()
-
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 	log.Info("query node start successfully",
 		zap.Int64("queryNodeID", paramtable.GetNodeID()),
@@ -342,12 +339,12 @@ func (node *QueryNode) Stop() error {
 		noSegmentChan := node.metaReplica.getNoSegmentChan()
 		select {
 		case <-noSegmentChan:
-		case <-time.After(time.Duration(Params.QueryNodeCfg.GracefulStopTimeout) * time.Second):
+		case <-time.After(Params.QueryNodeCfg.GracefulStopTimeout.GetAsDuration(time.Second)):
 			log.Warn("migrate data timed out", zap.Int64("server_id", paramtable.GetNodeID()),
-				zap.Int64s("sealed_segment", lo.Map[*Segment, int64](node.metaReplica.getSealedSegments(), func(t *Segment, i int) int64 {
+				zap.Int64s("sealed_segment", lo.Map(node.metaReplica.getSealedSegments(), func(t *Segment, i int) int64 {
 					return t.ID()
 				})),
-				zap.Int64s("growing_segment", lo.Map[*Segment, int64](node.metaReplica.getGrowingSegments(), func(t *Segment, i int) int64 {
+				zap.Int64s("growing_segment", lo.Map(node.metaReplica.getGrowingSegments(), func(t *Segment, i int) int64 {
 					return t.ID()
 				})),
 			)

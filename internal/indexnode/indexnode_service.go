@@ -221,7 +221,7 @@ func (i *IndexNode) GetJobStats(ctx context.Context, req *indexpb.GetJobStatsReq
 		EnqueueJobNum:    int64(unissued),
 		TaskSlots:        int64(slots),
 		JobInfos:         jobInfos,
-		EnableDisk:       Params.IndexNodeCfg.EnableDisk,
+		EnableDisk:       Params.IndexNodeCfg.EnableDisk.GetAsBool(),
 	}, nil
 }
 

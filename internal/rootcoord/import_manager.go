@@ -816,7 +816,7 @@ func (m *importManager) getTaskState(tID int64) *milvuspb.GetImportStateResponse
 // loadFromTaskStore instead returns a list of all import tasks if `load2Mem` is set to `false`.
 func (m *importManager) loadFromTaskStore(load2Mem bool) ([]*datapb.ImportTaskInfo, error) {
 	log.Info("import manager starts loading from Etcd")
-	_, v, err := m.taskStore.LoadWithPrefix(Params.RootCoordCfg.ImportTaskSubPath)
+	_, v, err := m.taskStore.LoadWithPrefix(Params.RootCoordCfg.ImportTaskSubPath.GetValue())
 	if err != nil {
 		log.Error("import manager failed to load from Etcd", zap.Error(err))
 		return nil, err
@@ -915,7 +915,7 @@ func (m *importManager) expireOldTasksFromMem() {
 				log.Info("a working task has expired and will be marked as failed",
 					zap.Int64("task ID", v.GetId()),
 					zap.Int64("startTs", v.GetStartTs()),
-					zap.Float64("ImportTaskExpiration", Params.RootCoordCfg.ImportTaskExpiration))
+					zap.Float64("ImportTaskExpiration", Params.RootCoordCfg.ImportTaskExpiration.GetAsFloat()))
 				taskID := v.GetId()
 				m.workingLock.Unlock()
 				// Remove DataNode from busy node list, so it can serve other tasks again.
@@ -946,7 +946,7 @@ func (m *importManager) expireOldTasksFromEtcd() {
 	var vs []string
 	var err error
 	// Collect all import task records.
-	if _, vs, err = m.taskStore.LoadWithPrefix(Params.RootCoordCfg.ImportTaskSubPath); err != nil {
+	if _, vs, err = m.taskStore.LoadWithPrefix(Params.RootCoordCfg.ImportTaskSubPath.GetValue()); err != nil {
 		log.Error("failed to load import tasks from Etcd during task cleanup")
 		return
 	}
@@ -962,7 +962,7 @@ func (m *importManager) expireOldTasksFromEtcd() {
 			log.Info("an import task has passed retention period and will be removed from Etcd",
 				zap.Int64("task ID", ti.GetId()),
 				zap.Int64("createTs", ti.GetCreateTs()),
-				zap.Float64("ImportTaskRetention", Params.RootCoordCfg.ImportTaskRetention))
+				zap.Float64("ImportTaskRetention", Params.RootCoordCfg.ImportTaskRetention.GetAsFloat()))
 			if err = m.yieldTaskInfo(ti.GetId()); err != nil {
 				log.Error("failed to remove import task from Etcd",
 					zap.Int64("task ID", ti.GetId()),
@@ -981,7 +981,7 @@ func (m *importManager) releaseHangingBusyDataNode() {
 			zap.Int64("node ID", nodeID),
 			zap.Int64("busy duration (seconds)", time.Now().Unix()-ts),
 		)
-		if Params.RootCoordCfg.ImportTaskExpiration <= float64(time.Now().Unix()-ts) {
+		if Params.RootCoordCfg.ImportTaskExpiration.GetAsFloat() <= float64(time.Now().Unix()-ts) {
 			log.Warn("release a hanging busy DataNode",
 				zap.Int64("node ID", nodeID))
 			delete(m.busyNodes, nodeID)
@@ -1067,17 +1067,17 @@ func (m *importManager) removeBadImportSegments(ctx context.Context) {
 
 // BuildImportTaskKey constructs and returns an Etcd key with given task ID.
 func BuildImportTaskKey(taskID int64) string {
-	return fmt.Sprintf("%s%s%d", Params.RootCoordCfg.ImportTaskSubPath, delimiter, taskID)
+	return fmt.Sprintf("%s%s%d", Params.RootCoordCfg.ImportTaskSubPath.GetValue(), delimiter, taskID)
 }
 
 // taskExpired returns true if the in-mem task is considered expired.
 func taskExpired(ti *datapb.ImportTaskInfo) bool {
-	return Params.RootCoordCfg.ImportTaskExpiration <= float64(time.Now().Unix()-ti.GetStartTs())
+	return Params.RootCoordCfg.ImportTaskExpiration.GetAsFloat() <= float64(time.Now().Unix()-ti.GetStartTs())
 }
 
 // taskPastRetention returns true if the task is considered expired in Etcd.
 func taskPastRetention(ti *datapb.ImportTaskInfo) bool {
-	return Params.RootCoordCfg.ImportTaskRetention <= float64(time.Now().Unix()-ti.GetCreateTs())
+	return Params.RootCoordCfg.ImportTaskRetention.GetAsFloat() <= float64(time.Now().Unix()-ti.GetCreateTs())
 }
 
 func tryUpdateErrMsg(errReason string, toPersistImportTaskInfo *datapb.ImportTaskInfo) {

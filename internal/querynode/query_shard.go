@@ -72,7 +72,7 @@ func newQueryShard(
 		&etcdpb.CollectionMeta{
 			ID:     collectionID,
 			Schema: collection.schema,
-		}, Params.QueryNodeCfg.CacheMemoryLimit, localCacheEnabled)
+		}, Params.QueryNodeCfg.CacheMemoryLimit.GetAsInt64(), localCacheEnabled)
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +87,7 @@ func newQueryShard(
 		vectorChunkManager: vectorChunkManager,
 		tSafeReplica:       tSafeReplica,
 	}
-	deltaChannel, err := funcutil.ConvertChannelName(channel, Params.CommonCfg.RootCoordDml, Params.CommonCfg.RootCoordDelta)
+	deltaChannel, err := funcutil.ConvertChannelName(channel, Params.CommonCfg.RootCoordDml.GetValue(), Params.CommonCfg.RootCoordDelta.GetValue())
 	if err != nil {
 		log.Warn("failed to convert dm channel to delta", zap.String("channel", channel), zap.Error(err))
 	}

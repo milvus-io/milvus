@@ -13,7 +13,7 @@ type ChunkManagerFactory struct {
 }
 
 func NewChunkManagerFactoryWithParam(params *paramtable.ComponentParam) *ChunkManagerFactory {
-	if params.CommonCfg.StorageType == "local" {
+	if params.CommonCfg.StorageType.GetValue() == "local" {
 		return NewChunkManagerFactory("local", RootPath(params.LocalStorageCfg.Path.GetValue()))
 	}
 	return NewChunkManagerFactory("minio",

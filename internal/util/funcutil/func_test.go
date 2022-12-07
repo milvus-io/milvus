@@ -190,12 +190,12 @@ func Test_ParseIndexParamsMap(t *testing.T) {
 	assert.Equal(t, err, nil)
 	paramsStr := string(paramsBytes)
 
-	parsedParams, err := ParseIndexParamsMap(paramsStr)
+	parsedParams, err := JSONToMap(paramsStr)
 	assert.Equal(t, err, nil)
 	assert.Equal(t, parsedParams, params)
 
 	invalidStr := "invalid string"
-	_, err = ParseIndexParamsMap(invalidStr)
+	_, err = JSONToMap(invalidStr)
 	assert.NotEqual(t, err, nil)
 }
 

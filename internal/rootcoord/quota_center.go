@@ -121,8 +121,8 @@ func NewQuotaCenter(proxies *proxyClientManager, queryCoord types.QueryCoord, da
 
 // run starts the service of QuotaCenter.
 func (q *QuotaCenter) run() {
-	log.Info("Start QuotaCenter", zap.Float64("collectInterval/s", Params.QuotaConfig.QuotaCenterCollectInterval))
-	ticker := time.NewTicker(time.Duration(Params.QuotaConfig.QuotaCenterCollectInterval * float64(time.Second)))
+	log.Info("Start QuotaCenter", zap.Float64("collectInterval/s", Params.QuotaConfig.QuotaCenterCollectInterval.GetAsFloat()))
+	ticker := time.NewTicker(time.Duration(Params.QuotaConfig.QuotaCenterCollectInterval.GetAsFloat() * float64(time.Second)))
 	defer ticker.Stop()
 	for {
 		select {
@@ -287,12 +287,12 @@ func (q *QuotaCenter) guaranteeMinRate(minRate float64, rateType internalpb.Rate
 
 // calculateReadRates calculates and sets dql rates.
 func (q *QuotaCenter) calculateReadRates() {
-	if Params.QuotaConfig.ForceDenyReading {
+	if Params.QuotaConfig.ForceDenyReading.GetAsBool() {
 		q.forceDenyReading(ManualForceDeny)
 		return
 	}
 
-	coolOffSpeed := Params.QuotaConfig.CoolOffSpeed
+	coolOffSpeed := Params.QuotaConfig.CoolOffSpeed.GetAsFloat()
 	coolOff := func(realTimeSearchRate float64, realTimeQueryRate float64) {
 		if q.currentRates[internalpb.RateType_DQLSearch] != Inf && realTimeSearchRate > 0 {
 			q.currentRates[internalpb.RateType_DQLSearch] = Limit(realTimeSearchRate * coolOffSpeed)
@@ -300,8 +300,8 @@ func (q *QuotaCenter) calculateReadRates() {
 		if q.currentRates[internalpb.RateType_DQLQuery] != Inf && realTimeSearchRate > 0 {
 			q.currentRates[internalpb.RateType_DQLQuery] = Limit(realTimeQueryRate * coolOffSpeed)
 		}
-		q.guaranteeMinRate(Params.QuotaConfig.DQLMinSearchRate, internalpb.RateType_DQLSearch)
-		q.guaranteeMinRate(Params.QuotaConfig.DQLMinQueryRate, internalpb.RateType_DQLQuery)
+		q.guaranteeMinRate(Params.QuotaConfig.DQLMinSearchRate.GetAsFloat(), internalpb.RateType_DQLSearch)
+		q.guaranteeMinRate(Params.QuotaConfig.DQLMinQueryRate.GetAsFloat(), internalpb.RateType_DQLQuery)
 		log.Warn("QuotaCenter cool read rates off done",
 			zap.Any("searchRate", q.currentRates[internalpb.RateType_DQLSearch]),
 			zap.Any("queryRate", q.currentRates[internalpb.RateType_DQLQuery]))
@@ -332,7 +332,7 @@ func (q *QuotaCenter) calculateReadRates() {
 
 // calculateWriteRates calculates and sets dml rates.
 func (q *QuotaCenter) calculateWriteRates() error {
-	if Params.QuotaConfig.ForceDenyWriting {
+	if Params.QuotaConfig.ForceDenyWriting.GetAsBool() {
 		q.forceDenyWriting(ManualForceDeny)
 		return nil
 	}
@@ -369,8 +369,8 @@ func (q *QuotaCenter) calculateWriteRates() error {
 	if q.currentRates[internalpb.RateType_DMLDelete] != Inf {
 		q.currentRates[internalpb.RateType_DMLDelete] *= Limit(ttFactor)
 	}
-	q.guaranteeMinRate(Params.QuotaConfig.DMLMinInsertRate, internalpb.RateType_DMLInsert)
-	q.guaranteeMinRate(Params.QuotaConfig.DMLMinDeleteRate, internalpb.RateType_DMLDelete)
+	q.guaranteeMinRate(Params.QuotaConfig.DMLMinInsertRate.GetAsFloat(), internalpb.RateType_DMLInsert)
+	q.guaranteeMinRate(Params.QuotaConfig.DMLMinDeleteRate.GetAsFloat(), internalpb.RateType_DMLDelete)
 	return nil
 }
 
@@ -394,15 +394,15 @@ func (q *QuotaCenter) resetCurrentRates() {
 		rt := internalpb.RateType(rateType)
 		switch rt {
 		case internalpb.RateType_DMLInsert:
-			q.currentRates[rt] = Limit(Params.QuotaConfig.DMLMaxInsertRate)
+			q.currentRates[rt] = Limit(Params.QuotaConfig.DMLMaxInsertRate.GetAsFloat())
 		case internalpb.RateType_DMLDelete:
-			q.currentRates[rt] = Limit(Params.QuotaConfig.DMLMaxDeleteRate)
+			q.currentRates[rt] = Limit(Params.QuotaConfig.DMLMaxDeleteRate.GetAsFloat())
 		case internalpb.RateType_DMLBulkLoad:
-			q.currentRates[rt] = Limit(Params.QuotaConfig.DMLMaxBulkLoadRate)
+			q.currentRates[rt] = Limit(Params.QuotaConfig.DMLMaxBulkLoadRate.GetAsFloat())
 		case internalpb.RateType_DQLSearch:
-			q.currentRates[rt] = Limit(Params.QuotaConfig.DQLMaxSearchRate)
+			q.currentRates[rt] = Limit(Params.QuotaConfig.DQLMaxSearchRate.GetAsFloat())
 		case internalpb.RateType_DQLQuery:
-			q.currentRates[rt] = Limit(Params.QuotaConfig.DQLMaxQueryRate)
+			q.currentRates[rt] = Limit(Params.QuotaConfig.DQLMaxQueryRate.GetAsFloat())
 		}
 		if q.currentRates[rt] < 0 {
 			q.currentRates[rt] = Inf // no limit
@@ -445,11 +445,11 @@ func (q *QuotaCenter) getTimeTickDelayFactor(ts Timestamp) float64 {
 		}
 	}
 
-	if !Params.QuotaConfig.TtProtectionEnabled {
+	if !Params.QuotaConfig.TtProtectionEnabled.GetAsBool() {
 		return 1
 	}
 
-	maxDelay := Params.QuotaConfig.MaxTimeTickDelay
+	maxDelay := Params.QuotaConfig.MaxTimeTickDelay.GetAsDuration(time.Second)
 	if maxDelay < 0 {
 		// < 0 means disable tt protection
 		return 1
@@ -485,7 +485,7 @@ func (q *QuotaCenter) getTimeTickDelayFactor(ts Timestamp) float64 {
 // getNQInQueryFactor checks search&query nq in QueryNode,
 // and return the factor according to NQInQueueThreshold.
 func (q *QuotaCenter) getNQInQueryFactor() float64 {
-	if !Params.QuotaConfig.QueueProtectionEnabled {
+	if !Params.QuotaConfig.QueueProtectionEnabled.GetAsBool() {
 		return 1
 	}
 
@@ -493,7 +493,7 @@ func (q *QuotaCenter) getNQInQueryFactor() float64 {
 		return ri.UnsolvedQueue + ri.ReadyQueue + ri.ReceiveChan + ri.ExecuteChan
 	}
 
-	nqInQueueThreshold := Params.QuotaConfig.NQInQueueThreshold
+	nqInQueueThreshold := Params.QuotaConfig.NQInQueueThreshold.GetAsInt64()
 	if nqInQueueThreshold < 0 {
 		// < 0 means disable queue length protection
 		return 1
@@ -503,7 +503,7 @@ func (q *QuotaCenter) getNQInQueryFactor() float64 {
 		queryTasksSum := sum(metric.QueryQueue)
 		nqInQueue := searchNQSum + queryTasksSum // We think of the NQ of query request as 1.
 		if nqInQueue >= nqInQueueThreshold {
-			return Params.QuotaConfig.CoolOffSpeed
+			return Params.QuotaConfig.CoolOffSpeed.GetAsFloat()
 		}
 	}
 	return 1
@@ -512,11 +512,11 @@ func (q *QuotaCenter) getNQInQueryFactor() float64 {
 // getQueryLatencyFactor checks queueing latency in QueryNode for search&query requests,
 // and return the factor according to QueueLatencyThreshold.
 func (q *QuotaCenter) getQueryLatencyFactor() float64 {
-	if !Params.QuotaConfig.QueueProtectionEnabled {
+	if !Params.QuotaConfig.QueueProtectionEnabled.GetAsBool() {
 		return 1
 	}
 
-	queueLatencyThreshold := Params.QuotaConfig.QueueLatencyThreshold
+	queueLatencyThreshold := Params.QuotaConfig.QueueLatencyThreshold.GetAsDuration(time.Second)
 	if queueLatencyThreshold < 0 {
 		// < 0 means disable queue latency protection
 		return 1
@@ -524,8 +524,8 @@ func (q *QuotaCenter) getQueryLatencyFactor() float64 {
 	for _, metric := range q.queryNodeMetrics {
 		searchLatency := metric.SearchQueue.AvgQueueDuration
 		queryLatency := metric.QueryQueue.AvgQueueDuration
-		if float64(searchLatency) >= queueLatencyThreshold || float64(queryLatency) >= queueLatencyThreshold {
-			return Params.QuotaConfig.CoolOffSpeed
+		if searchLatency >= queueLatencyThreshold || queryLatency >= queueLatencyThreshold {
+			return Params.QuotaConfig.CoolOffSpeed.GetAsFloat()
 		}
 	}
 	return 1
@@ -534,11 +534,11 @@ func (q *QuotaCenter) getQueryLatencyFactor() float64 {
 // getReadResultFactor checks search result rate in Proxy,
 // and return the factor according to MaxReadResultRate.
 func (q *QuotaCenter) getReadResultFactor() float64 {
-	if !Params.QuotaConfig.ResultProtectionEnabled {
+	if !Params.QuotaConfig.ResultProtectionEnabled.GetAsBool() {
 		return 1
 	}
 
-	maxRate := Params.QuotaConfig.MaxReadResultRate
+	maxRate := Params.QuotaConfig.MaxReadResultRate.GetAsFloat()
 	rateCount := float64(0)
 	for _, metric := range q.proxyMetrics {
 		for _, rm := range metric.Rms {
@@ -548,7 +548,7 @@ func (q *QuotaCenter) getReadResultFactor() float64 {
 		}
 	}
 	if rateCount >= maxRate {
-		return Params.QuotaConfig.CoolOffSpeed
+		return Params.QuotaConfig.CoolOffSpeed.GetAsFloat()
 	}
 	return 1
 }
@@ -557,14 +557,14 @@ func (q *QuotaCenter) getReadResultFactor() float64 {
 // and return the factor according to max memory water level.
 func (q *QuotaCenter) getMemoryFactor() float64 {
 	factor := float64(1)
-	if !Params.QuotaConfig.MemProtectionEnabled {
+	if !Params.QuotaConfig.MemProtectionEnabled.GetAsBool() {
 		return 1
 	}
 
-	dataNodeMemoryLowWaterLevel := Params.QuotaConfig.DataNodeMemoryLowWaterLevel
-	dataNodeMemoryHighWaterLevel := Params.QuotaConfig.DataNodeMemoryHighWaterLevel
-	queryNodeMemoryLowWaterLevel := Params.QuotaConfig.QueryNodeMemoryLowWaterLevel
-	queryNodeMemoryHighWaterLevel := Params.QuotaConfig.QueryNodeMemoryHighWaterLevel
+	dataNodeMemoryLowWaterLevel := Params.QuotaConfig.DataNodeMemoryLowWaterLevel.GetAsFloat()
+	dataNodeMemoryHighWaterLevel := Params.QuotaConfig.DataNodeMemoryHighWaterLevel.GetAsFloat()
+	queryNodeMemoryLowWaterLevel := Params.QuotaConfig.QueryNodeMemoryLowWaterLevel.GetAsFloat()
+	queryNodeMemoryHighWaterLevel := Params.QuotaConfig.QueryNodeMemoryHighWaterLevel.GetAsFloat()
 
 	for nodeID, metric := range q.queryNodeMetrics {
 		memoryWaterLevel := float64(metric.Hms.MemoryUsage) / float64(metric.Hms.Memory)
@@ -621,13 +621,13 @@ func (q *QuotaCenter) getMemoryFactor() float64 {
 
 // ifDiskQuotaExceeded checks if disk quota exceeded.
 func (q *QuotaCenter) ifDiskQuotaExceeded() bool {
-	if !Params.QuotaConfig.DiskProtectionEnabled {
+	if !Params.QuotaConfig.DiskProtectionEnabled.GetAsBool() {
 		return false
 	}
 	if q.dataCoordMetrics == nil {
 		return false
 	}
-	diskQuota := Params.QuotaConfig.DiskQuota
+	diskQuota := Params.QuotaConfig.DiskQuota.GetAsFloat()
 	totalSize := q.dataCoordMetrics.TotalBinlogSize
 	if float64(totalSize) >= diskQuota {
 		log.Warn("QuotaCenter: disk quota exceeded",

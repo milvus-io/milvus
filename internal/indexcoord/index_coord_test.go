@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"os"
 	"path"
 	"strconv"
 	"sync"
@@ -43,9 +44,16 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/stretchr/testify/assert"
 )
+
+func TestMain(m *testing.M) {
+	paramtable.Init()
+	rand.Seed(time.Now().UnixNano())
+	os.Exit(m.Run())
+}
 
 func TestMockEtcd(t *testing.T) {
 	Params.InitOnce()
@@ -528,16 +536,16 @@ func testIndexCoord(t *testing.T) {
 
 func TestIndexCoord_DisableActiveStandby(t *testing.T) {
 	Params.InitOnce()
-	indexnode.Params.InitOnce()
-	Params.IndexCoordCfg.EnableActiveStandby = false
+	// indexnode.Params.InitOnce()
+	paramtable.Get().Save(Params.IndexCoordCfg.EnableActiveStandby.Key, "false")
 	testIndexCoord(t)
 }
 
 // make sure the main functions work well when EnableActiveStandby=true
 func TestIndexCoord_EnableActiveStandby(t *testing.T) {
 	Params.InitOnce()
-	indexnode.Params.InitOnce()
-	Params.IndexCoordCfg.EnableActiveStandby = true
+	// indexnode.Params.InitOnce()
+	paramtable.Get().Save(Params.IndexCoordCfg.EnableActiveStandby.Key, "true")
 	testIndexCoord(t)
 }
 

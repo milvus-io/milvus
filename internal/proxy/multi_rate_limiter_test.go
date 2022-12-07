@@ -17,10 +17,12 @@
 package proxy
 
 import (
+	"fmt"
 	"math"
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/ratelimitutil"
 	"github.com/stretchr/testify/assert"
 )
@@ -28,7 +30,7 @@ import (
 func TestMultiRateLimiter(t *testing.T) {
 	t.Run("test multiRateLimiter", func(t *testing.T) {
 		bak := Params.QuotaConfig.QuotaAndLimitsEnabled
-		Params.QuotaConfig.QuotaAndLimitsEnabled = true
+		paramtable.Get().Save(Params.QuotaConfig.QuotaAndLimitsEnabled.Key, "true")
 		multiLimiter := NewMultiRateLimiter()
 		for _, rt := range internalpb.RateType_value {
 			multiLimiter.globalRateLimiter.limiters[internalpb.RateType(rt)] = ratelimitutil.NewLimiter(ratelimitutil.Limit(1000), 1)
@@ -47,7 +49,7 @@ func TestMultiRateLimiter(t *testing.T) {
 	t.Run("not enable quotaAndLimit", func(t *testing.T) {
 		multiLimiter := NewMultiRateLimiter()
 		bak := Params.QuotaConfig.QuotaAndLimitsEnabled
-		Params.QuotaConfig.QuotaAndLimitsEnabled = false
+		paramtable.Get().Save(Params.QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
 		for _, rt := range internalpb.RateType_value {
 			ok, r := multiLimiter.Limit(internalpb.RateType(rt), 1)
 			assert.False(t, ok)
@@ -59,10 +61,10 @@ func TestMultiRateLimiter(t *testing.T) {
 	t.Run("test limit", func(t *testing.T) {
 		run := func(insertRate float64) {
 			bakInsertRate := Params.QuotaConfig.DMLMaxInsertRate
-			Params.QuotaConfig.DMLMaxInsertRate = insertRate
+			paramtable.Get().Save(Params.QuotaConfig.DMLMaxInsertRate.Key, fmt.Sprintf("%f", insertRate))
 			multiLimiter := NewMultiRateLimiter()
 			bak := Params.QuotaConfig.QuotaAndLimitsEnabled
-			Params.QuotaConfig.QuotaAndLimitsEnabled = true
+			paramtable.Get().Save(Params.QuotaConfig.QuotaAndLimitsEnabled.Key, "true")
 			ok, r := multiLimiter.Limit(internalpb.RateType_DMLInsert, 1*1024*1024)
 			assert.False(t, ok)
 			assert.NotEqual(t, float64(0), r)

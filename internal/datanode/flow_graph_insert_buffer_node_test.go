@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -35,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/samber/lo"
@@ -371,7 +373,7 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 	t.Run("Pure auto flush", func(t *testing.T) {
 		// iBNode.insertBuffer.maxSize = 2
 		tmp := Params.DataNodeCfg.FlushInsertBufferSize
-		Params.DataNodeCfg.FlushInsertBufferSize = 4 * 4
+		paramtable.Get().Save(Params.DataNodeCfg.FlushInsertBufferSize.Key, "16")
 		defer func() {
 			Params.DataNodeCfg.FlushInsertBufferSize = tmp
 		}()
@@ -463,7 +465,7 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 
 	t.Run("Auto with manual flush", func(t *testing.T) {
 		tmp := Params.DataNodeCfg.FlushInsertBufferSize
-		Params.DataNodeCfg.FlushInsertBufferSize = 4 * 4
+		paramtable.Get().Save(Params.DataNodeCfg.FlushInsertBufferSize.Key, "16")
 		defer func() {
 			Params.DataNodeCfg.FlushInsertBufferSize = tmp
 		}()
@@ -605,7 +607,7 @@ func TestRollBF(t *testing.T) {
 
 	t.Run("Pure roll BF", func(t *testing.T) {
 		tmp := Params.DataNodeCfg.FlushInsertBufferSize
-		Params.DataNodeCfg.FlushInsertBufferSize = 4 * 4
+		paramtable.Get().Save(Params.DataNodeCfg.FlushInsertBufferSize.Key, "16")
 		defer func() {
 			Params.DataNodeCfg.FlushInsertBufferSize = tmp
 		}()
@@ -693,14 +695,14 @@ func (s *InsertBufferNodeSuit) SetupSuite() {
 	s.channel = newChannel("channel", s.collID, nil, rc, s.cm)
 	s.cm = storage.NewLocalChunkManager(storage.RootPath(insertBufferNodeTestDir))
 
-	s.originalConfig = Params.DataNodeCfg.FlushInsertBufferSize
+	s.originalConfig = Params.DataNodeCfg.FlushInsertBufferSize.GetAsInt64()
 	// change flushing size to 2
-	Params.DataNodeCfg.FlushInsertBufferSize = 4 * 4
+	paramtable.Get().Save(Params.DataNodeCfg.FlushInsertBufferSize.Key, "16")
 }
 
 func (s *InsertBufferNodeSuit) TearDownSuite() {
 	s.cm.RemoveWithPrefix(context.Background(), s.cm.RootPath())
-	Params.DataNodeCfg.FlushInsertBufferSize = s.originalConfig
+	paramtable.Get().Save(Params.DataNodeCfg.FlushInsertBufferSize.Key, strconv.FormatInt(s.originalConfig, 10))
 }
 
 func (s *InsertBufferNodeSuit) SetupTest() {

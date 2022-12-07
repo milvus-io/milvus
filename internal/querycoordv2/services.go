@@ -509,7 +509,7 @@ func (s *Server) ShowConfigurations(ctx context.Context, req *internalpb.ShowCon
 	}
 
 	prefix := "querycoord."
-	matchedConfig := Params.QueryCoordCfg.Base.GetByPattern(prefix + req.Pattern)
+	matchedConfig := Params.GetByPattern(prefix + req.Pattern)
 	configList := make([]*commonpb.KeyValuePair, 0, len(matchedConfig))
 	for key, value := range matchedConfig {
 		configList = append(configList,
@@ -667,7 +667,7 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 			info := s.nodeMgr.Get(leader.ID)
 
 			// Check whether leader is online
-			if info == nil || time.Since(info.LastHeartbeat()) > Params.QueryCoordCfg.HeartbeatAvailableInterval {
+			if info == nil || time.Since(info.LastHeartbeat()) > Params.QueryCoordCfg.HeartbeatAvailableInterval.GetAsDuration(time.Millisecond) {
 				continue
 			}
 
@@ -675,7 +675,7 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 			isAvailable := true
 			for _, version := range leader.Segments {
 				info := s.nodeMgr.Get(version.NodeID)
-				if info == nil || time.Since(info.LastHeartbeat()) > Params.QueryCoordCfg.HeartbeatAvailableInterval {
+				if info == nil || time.Since(info.LastHeartbeat()) > Params.QueryCoordCfg.HeartbeatAvailableInterval.GetAsDuration(time.Millisecond) {
 					isAvailable = false
 					break
 				}

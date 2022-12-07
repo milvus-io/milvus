@@ -29,7 +29,7 @@ func Test_dropPartitionTask_Prepare(t *testing.T) {
 		task := &dropPartitionTask{
 			Req: &milvuspb.DropPartitionRequest{
 				Base:          &commonpb.MsgBase{MsgType: commonpb.MsgType_DropPartition},
-				PartitionName: Params.CommonCfg.DefaultPartitionName,
+				PartitionName: Params.CommonCfg.DefaultPartitionName.GetValue(),
 			},
 		}
 		err := task.Prepare(context.Background())

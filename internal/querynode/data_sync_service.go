@@ -252,7 +252,7 @@ func (dsService *dataSyncService) removeEmptyFlowGraphByChannel(collectionID int
 	defer dsService.mu.Unlock()
 
 	// convert dml channel name to delta channel name
-	dc, err := funcutil.ConvertChannelName(channel, Params.CommonCfg.RootCoordDml, Params.CommonCfg.RootCoordDelta)
+	dc, err := funcutil.ConvertChannelName(channel, Params.CommonCfg.RootCoordDml.GetValue(), Params.CommonCfg.RootCoordDelta.GetValue())
 	if err != nil {
 		log.Warn("removeEmptyFGByDelta failed to convert channel to delta", zap.Error(err))
 		return

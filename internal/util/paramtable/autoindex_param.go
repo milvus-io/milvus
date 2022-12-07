@@ -17,106 +17,63 @@
 package paramtable
 
 import (
-	"fmt"
-	"strconv"
-
 	"github.com/milvus-io/milvus/internal/common"
-	"github.com/milvus-io/milvus/internal/util/autoindex"
-	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
 
 ///////////////////////////////////////////////////////////////////////////////
 // --- common ---
 type autoIndexConfig struct {
-	Base *BaseTable
+	Enable ParamItem
 
-	Enable bool
-
-	indexParamsStr string
-	IndexParams    map[string]string
-
-	extraParamsStr     string
-	BigDataExtraParams *autoindex.BigDataIndexExtraParams
-
-	SearchParamsYamlStr string
-
-	IndexType         string
-	AutoIndexTypeName string
-	Parser            *autoindex.Parser
+	IndexParams         ParamItem
+	ExtraParams         ParamItem
+	SearchParamsYamlStr ParamItem
+	IndexType           ParamItem
+	AutoIndexTypeName   ParamItem
 }
 
 func (p *autoIndexConfig) init(base *BaseTable) {
-	p.Base = base
-	p.initEnable() // must call at first
-	p.initParams()
-}
+	p.Enable = ParamItem{
+		Key:          "autoIndex.enable",
+		Version:      "2.2.0",
+		DefaultValue: "false",
+		PanicIfEmpty: true,
+	}
+	p.Enable.Init(base.mgr)
 
-func (p *autoIndexConfig) initEnable() {
-	var err error
-	enable := p.Base.LoadWithDefault("autoIndex.enable", "false")
-	p.Enable, err = strconv.ParseBool(enable)
-	if err != nil {
-		panic(err)
+	p.IndexParams = ParamItem{
+		Key:     "autoIndex.params.build",
+		Version: "2.2.0",
 	}
-}
+	p.IndexParams.Init(base.mgr)
 
-func (p *autoIndexConfig) initParams() {
-	if !p.Enable {
-		// init a default ExtraParams
-		p.BigDataExtraParams = autoindex.NewBigDataIndexExtraParams()
-		return
+	p.ExtraParams = ParamItem{
+		Key:     "autoIndex.params.extra",
+		Version: "2.2.0",
 	}
-	p.indexParamsStr = p.Base.LoadWithDefault("autoIndex.params.build", "")
-	p.parseBuildParams(p.indexParamsStr)
+	p.ExtraParams.Init(base.mgr)
 
-	p.SearchParamsYamlStr = p.Base.LoadWithDefault("autoIndex.params.search", "")
-	p.parseSearchParams(p.SearchParamsYamlStr)
-	p.AutoIndexTypeName = p.Base.LoadWithDefault("autoIndex.type", "")
-	p.extraParamsStr = p.Base.LoadWithDefault("autoIndex.params.extra", "")
-	p.parseExtraParams(p.extraParamsStr)
-}
+	p.IndexType = ParamItem{
+		Version: "2.2.0",
+		Formatter: func(v string) string {
+			m := p.IndexParams.GetAsJSONMap()
+			if m == nil {
+				return ""
+			}
+			return m[common.IndexTypeKey]
+		},
+	}
+	p.IndexType.Init(base.mgr)
 
-func (p *autoIndexConfig) parseBuildParams(paramsStr string) {
-	var err error
-	p.IndexParams, err = funcutil.ParseIndexParamsMap(paramsStr)
-	if err != nil {
-		err2 := fmt.Errorf("parse autoindex build params failed:%w", err)
-		panic(err2)
+	p.SearchParamsYamlStr = ParamItem{
+		Key:     "autoIndex.params.search",
+		Version: "2.2.0",
 	}
-	var ok bool
-	p.IndexType, ok = p.IndexParams[common.IndexTypeKey]
-	if !ok {
-		err2 := fmt.Errorf("parse autoindex %s failed:%w", common.IndexTypeKey, err)
-		panic(err2)
-	}
-}
+	p.SearchParamsYamlStr.Init(base.mgr)
 
-func (p *autoIndexConfig) parseExtraParams(paramsStr string) {
-	var err error
-	p.BigDataExtraParams, err = autoindex.NewBigDataExtraParamsFromJSON(paramsStr)
-	if err != nil {
-		err2 := fmt.Errorf("parse auto index extra params failed:%w", err)
-		panic(err2)
+	p.AutoIndexTypeName = ParamItem{
+		Key:     "autoIndex.type",
+		Version: "2.2.0",
 	}
-}
-
-func (p *autoIndexConfig) parseSearchParams(paramsStr string) {
-	p.Parser = autoindex.NewParser()
-	err := p.Parser.InitFromJSONStr(paramsStr)
-	if err != nil {
-		err2 := fmt.Errorf("parse autoindex search params failed:%w", err)
-		panic(err2)
-	}
-}
-
-// GetSearchParamStrCalculator return a method which can calculate searchParams
-func (p *autoIndexConfig) GetSearchParamStrCalculator(level int) autoindex.Calculator {
-	if !p.Enable {
-		return nil
-	}
-	m, ok := p.Parser.GetMethodByLevel(level)
-	if !ok {
-		return nil
-	}
-	return m
+	p.AutoIndexTypeName.Init(base.mgr)
 }

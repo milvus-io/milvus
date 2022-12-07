@@ -59,7 +59,7 @@ func (p *ServiceParam) Init() {
 	p.LocalStorageCfg.Init(&p.BaseTable)
 	p.MetaStoreCfg.Init(&p.BaseTable)
 	p.EtcdCfg.Init(&p.BaseTable)
-	if p.MetaStoreCfg.MetaStoreType == util.MetaStoreTypeMysql {
+	if p.MetaStoreCfg.MetaStoreType.GetValue() == util.MetaStoreTypeMysql {
 		log.Debug("Mysql protocol is used as meta store")
 		p.DBCfg.Init(&p.BaseTable)
 	}
@@ -114,9 +114,8 @@ func (p *EtcdConfig) Init(base *BaseTable) {
 
 	if p.UseEmbedEtcd.GetAsBool() {
 		p.ConfigPath = ParamItem{
-			Key:          "etcd.config.path",
-			DefaultValue: "",
-			Version:      "2.1.0",
+			Key:     "etcd.config.path",
+			Version: "2.1.0",
 		}
 		p.ConfigPath.Init(base.mgr)
 
@@ -152,7 +151,7 @@ func (p *EtcdConfig) Init(base *BaseTable) {
 	p.MetaRootPath = CompositeParamItem{
 		Items: []*ParamItem{&p.RootPath, &p.MetaSubPath},
 		Format: func(kvs map[string]string) string {
-			return path.Join(kvs["etcd.rootPath"], kvs["etcd.metaSubPath"])
+			return path.Join(kvs[p.RootPath.Key], kvs[p.MetaSubPath.Key])
 		},
 	}
 
@@ -166,7 +165,7 @@ func (p *EtcdConfig) Init(base *BaseTable) {
 	p.KvRootPath = CompositeParamItem{
 		Items: []*ParamItem{&p.RootPath, &p.KvSubPath},
 		Format: func(kvs map[string]string) string {
-			return path.Join(kvs["etcd.rootPath"], kvs["etcd.kvSubPath"])
+			return path.Join(kvs[p.RootPath.Key], kvs[p.KvSubPath.Key])
 		},
 	}
 
@@ -231,98 +230,87 @@ func (p *LocalStorageConfig) Init(base *BaseTable) {
 }
 
 type MetaStoreConfig struct {
-	Base *BaseTable
-
-	MetaStoreType string
+	MetaStoreType ParamItem
 }
 
 func (p *MetaStoreConfig) Init(base *BaseTable) {
-	p.Base = base
-	p.LoadCfgToMemory()
-}
-
-func (p *MetaStoreConfig) LoadCfgToMemory() {
-	p.initMetaStoreType()
-}
-
-func (p *MetaStoreConfig) initMetaStoreType() {
-	p.MetaStoreType = p.Base.LoadWithDefault("metastore.type", util.MetaStoreTypeEtcd)
+	p.MetaStoreType = ParamItem{
+		Key:          "metastore.type",
+		Version:      "2.2.0",
+		DefaultValue: util.MetaStoreTypeEtcd,
+	}
+	p.MetaStoreType.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
 // --- meta db ---
 type MetaDBConfig struct {
-	Base *BaseTable
-
-	Username     string
-	Password     string
-	Address      string
-	Port         int
-	DBName       string
-	MaxOpenConns int
-	MaxIdleConns int
+	Username     ParamItem
+	Password     ParamItem
+	Address      ParamItem
+	Port         ParamItem
+	DBName       ParamItem
+	MaxOpenConns ParamItem
+	MaxIdleConns ParamItem
+	LogLevel     ParamItem
 }
 
 func (p *MetaDBConfig) Init(base *BaseTable) {
-	p.Base = base
-	p.LoadCfgToMemory()
-}
-
-func (p *MetaDBConfig) LoadCfgToMemory() {
-	p.initUsername()
-	p.initPassword()
-	p.initAddress()
-	p.initPort()
-	p.initDbName()
-	p.initMaxOpenConns()
-	p.initMaxIdleConns()
-}
-
-func (p *MetaDBConfig) initUsername() {
-	username, err := p.Base.Load("mysql.username")
-	if err != nil {
-		panic(err)
+	p.Username = ParamItem{
+		Key:          "mysql.username",
+		Version:      "2.2.0",
+		PanicIfEmpty: true,
 	}
-	p.Username = username
-}
+	p.Username.Init(base.mgr)
 
-func (p *MetaDBConfig) initPassword() {
-	password, err := p.Base.Load("mysql.password")
-	if err != nil {
-		panic(err)
+	p.Password = ParamItem{
+		Key:          "mysql.password",
+		Version:      "2.2.0",
+		PanicIfEmpty: true,
 	}
-	p.Password = password
-}
+	p.Password.Init(base.mgr)
 
-func (p *MetaDBConfig) initAddress() {
-	address, err := p.Base.Load("mysql.address")
-	if err != nil {
-		panic(err)
+	p.Address = ParamItem{
+		Key:          "mysql.address",
+		Version:      "2.2.0",
+		PanicIfEmpty: true,
 	}
-	p.Address = address
-}
+	p.Address.Init(base.mgr)
 
-func (p *MetaDBConfig) initPort() {
-	port := p.Base.ParseIntWithDefault("mysql.port", 3306)
-	p.Port = port
-}
-
-func (p *MetaDBConfig) initDbName() {
-	dbName, err := p.Base.Load("mysql.dbName")
-	if err != nil {
-		panic(err)
+	p.Port = ParamItem{
+		Key:          "mysql.port",
+		Version:      "2.2.0",
+		DefaultValue: "3306",
 	}
-	p.DBName = dbName
-}
+	p.Port.Init(base.mgr)
 
-func (p *MetaDBConfig) initMaxOpenConns() {
-	maxOpenConns := p.Base.ParseIntWithDefault("mysql.maxOpenConns", 20)
-	p.MaxOpenConns = maxOpenConns
-}
+	p.DBName = ParamItem{
+		Key:          "mysql.dbName",
+		Version:      "2.2.0",
+		PanicIfEmpty: true,
+	}
+	p.DBName.Init(base.mgr)
 
-func (p *MetaDBConfig) initMaxIdleConns() {
-	maxIdleConns := p.Base.ParseIntWithDefault("mysql.maxIdleConns", 5)
-	p.MaxIdleConns = maxIdleConns
+	p.MaxOpenConns = ParamItem{
+		Key:          "mysql.maxOpenConns",
+		Version:      "2.2.0",
+		DefaultValue: "20",
+	}
+	p.MaxOpenConns.Init(base.mgr)
+
+	p.MaxIdleConns = ParamItem{
+		Key:          "mysql.maxIdleConns",
+		Version:      "2.2.0",
+		DefaultValue: "5",
+	}
+	p.MaxIdleConns.Init(base.mgr)
+
+	p.LogLevel = ParamItem{
+		Key:          "log.level",
+		Version:      "2.0.0",
+		DefaultValue: "debug",
+	}
+	p.LogLevel.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

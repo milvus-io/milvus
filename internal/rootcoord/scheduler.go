@@ -73,7 +73,7 @@ func (s *scheduler) execute(task task) {
 
 func (s *scheduler) taskLoop() {
 	defer s.wg.Done()
-	ticker := time.NewTicker(Params.ProxyCfg.TimeTickInterval)
+	ticker := time.NewTicker(Params.ProxyCfg.TimeTickInterval.GetAsDuration(time.Millisecond))
 	defer ticker.Stop()
 	for {
 		select {

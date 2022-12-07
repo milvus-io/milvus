@@ -11,10 +11,13 @@
 package paramtable
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/config"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
 
 type ParamItem struct {
@@ -22,6 +25,7 @@ type ParamItem struct {
 	Version      string
 	Doc          string
 	DefaultValue string
+	FallbackKeys []string
 	PanicIfEmpty bool
 
 	Formatter func(originValue string) string
@@ -35,14 +39,28 @@ func (pi *ParamItem) Init(manager *config.Manager) {
 
 // Get original value with error
 func (pi *ParamItem) get() (string, error) {
+	if pi.manager == nil {
+		panic(fmt.Sprintf("manager is nil %s", pi.Key))
+	}
 	ret, err := pi.manager.GetConfig(pi.Key)
+	if err != nil {
+		for _, key := range pi.FallbackKeys {
+			ret, err = pi.manager.GetConfig(key)
+			if err == nil {
+				break
+			}
+		}
+	}
 	if err != nil {
 		ret = pi.DefaultValue
 	}
-	if pi.Formatter == nil {
-		return ret, err
+	if pi.Formatter != nil {
+		ret = pi.Formatter(ret)
 	}
-	return pi.Formatter(ret), err
+	if ret == "" && pi.PanicIfEmpty {
+		panic(fmt.Sprintf("%s is empty", pi.Key))
+	}
+	return ret, err
 }
 
 func (pi *ParamItem) GetValue() string {
@@ -51,17 +69,35 @@ func (pi *ParamItem) GetValue() string {
 }
 
 func (pi *ParamItem) GetAsStrings() []string {
-	return getAndConvert(pi, func(value string) ([]string, error) {
-		return strings.Split(value, ","), nil
-	}, []string{})
+	return getAsStrings(pi.GetValue())
 }
 
 func (pi *ParamItem) GetAsBool() bool {
-	return getAndConvert(pi, strconv.ParseBool, false)
+	return getAsBool(pi.GetValue())
 }
 
 func (pi *ParamItem) GetAsInt() int {
-	return getAndConvert(pi, strconv.Atoi, 0)
+	return getAsInt(pi.GetValue())
+}
+
+func (pi *ParamItem) GetAsInt32() int32 {
+	return int32(getAsInt64(pi.GetValue()))
+}
+
+func (pi *ParamItem) GetAsInt64() int64 {
+	return getAsInt64(pi.GetValue())
+}
+
+func (pi *ParamItem) GetAsFloat() float64 {
+	return getAsFloat(pi.GetValue())
+}
+
+func (pi *ParamItem) GetAsDuration(unit time.Duration) time.Duration {
+	return getAsDuration(pi.GetValue(), unit)
+}
+
+func (pi *ParamItem) GetAsJSONMap() map[string]string {
+	return getAndConvert(pi.GetValue(), funcutil.JSONToMap, nil)
 }
 
 type CompositeParamItem struct {
@@ -99,8 +135,43 @@ func (pg *ParamGroup) GetValue() map[string]string {
 	return values
 }
 
-func getAndConvert[T any](pi *ParamItem, converter func(input string) (T, error), defaultValue T) T {
-	v, _ := pi.get()
+func getAsStrings(v string) []string {
+	return getAndConvert(v, func(value string) ([]string, error) {
+		return strings.Split(value, ","), nil
+	}, []string{})
+}
+
+func getAsBool(v string) bool {
+	return getAndConvert(v, strconv.ParseBool, false)
+}
+
+func getAsInt(v string) int {
+	return getAndConvert(v, strconv.Atoi, 0)
+}
+
+func getAsInt64(v string) int64 {
+	return getAndConvert(v, func(value string) (int64, error) {
+		return strconv.ParseInt(value, 10, 64)
+	}, 0)
+}
+
+func getAsFloat(v string) float64 {
+	return getAndConvert(v, func(value string) (float64, error) {
+		return strconv.ParseFloat(value, 64)
+	}, 0.0)
+}
+
+func getAsDuration(v string, unit time.Duration) time.Duration {
+	return getAndConvert(v, func(value string) (time.Duration, error) {
+		v, err := strconv.ParseInt(value, 10, 64)
+		if err != nil {
+			fv, err := strconv.ParseFloat(value, 64)
+			return time.Duration(fv * float64(unit)), err
+		}
+		return time.Duration(v) * unit, err
+	}, 0)
+}
+func getAndConvert[T any](v string, converter func(input string) (T, error), defaultValue T) T {
 	t, err := converter(v)
 	if err != nil {
 		return defaultValue

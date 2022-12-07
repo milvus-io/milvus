@@ -52,7 +52,7 @@ func newGarbageCollector(ctx context.Context, meta *metaTable, chunkManager stor
 	return &garbageCollector{
 		ctx:              ctx,
 		cancel:           cancel,
-		gcFileDuration:   Params.IndexCoordCfg.GCInterval,
+		gcFileDuration:   Params.IndexCoordCfg.GCInterval.GetAsDuration(time.Second),
 		gcMetaDuration:   time.Minute,
 		metaTable:        meta,
 		chunkManager:     chunkManager,

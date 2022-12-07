@@ -30,6 +30,7 @@ import (
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/etcd"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
 
 type TargetObserverSuite struct {
@@ -51,8 +52,8 @@ type TargetObserverSuite struct {
 }
 
 func (suite *TargetObserverSuite) SetupSuite() {
-	Params.Init()
-	Params.QueryCoordCfg.UpdateNextTargetInterval = 3 * time.Second
+	paramtable.Init()
+	paramtable.Get().Save(Params.QueryCoordCfg.UpdateNextTargetInterval.Key, "3")
 }
 
 func (suite *TargetObserverSuite) SetupTest() {
