@@ -130,7 +130,7 @@ func (s *Segment) getType() segmentType {
 }
 
 func (s *Segment) setIndexedFieldInfo(fieldID UniqueID, info *IndexedFieldInfo) {
-	s.indexedFieldInfos.Insert(fieldID, info)
+	s.indexedFieldInfos.InsertIfNotPresent(fieldID, info)
 }
 
 func (s *Segment) getIndexedFieldInfo(fieldID UniqueID) (*IndexedFieldInfo, error) {
@@ -704,7 +704,12 @@ func (s *Segment) segmentInsert(offset int64, entityIDs []UniqueID, timestamps [
 	if err := HandleCStatus(&status, "Insert failed"); err != nil {
 		return err
 	}
-	metrics.QueryNodeNumEntities.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Add(float64(numOfRow))
+	metrics.QueryNodeNumEntities.WithLabelValues(
+		fmt.Sprint(Params.QueryNodeCfg.GetNodeID()),
+		fmt.Sprint(s.collectionID),
+		fmt.Sprint(s.partitionID),
+		s.segmentType.String(),
+	).Add(float64(numOfRow))
 	s.setRecentlyModified(true)
 	return nil
 }
