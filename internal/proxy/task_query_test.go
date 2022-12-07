@@ -657,3 +657,9 @@ func getFieldData(fieldName string, fieldID int64, fieldType schemapb.DataType, 
 
 	return fieldData
 }
+
+func Test_filterSystemFields(t *testing.T) {
+	outputFieldIDs := []UniqueID{common.RowIDField, common.TimeStampField, common.StartOfUserFieldID}
+	filtered := filterSystemFields(outputFieldIDs)
+	assert.ElementsMatch(t, []UniqueID{common.StartOfUserFieldID}, filtered)
+}
