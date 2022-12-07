@@ -99,7 +99,7 @@ type IndexCoord struct {
 
 	metricsCacheManager *metricsinfo.MetricsCacheManager
 
-	nodeLock sync.RWMutex
+	indexGCLock sync.RWMutex
 
 	initOnce  sync.Once
 	startOnce sync.Once
@@ -130,6 +130,7 @@ func NewIndexCoord(ctx context.Context, factory dependency.Factory) (*IndexCoord
 		reqTimeoutInterval:  time.Second * 10,
 		factory:             factory,
 		enableActiveStandBy: Params.IndexCoordCfg.EnableActiveStandby,
+		indexGCLock:         sync.RWMutex{},
 	}
 	i.UpdateStateCode(commonpb.StateCode_Abnormal)
 	return i, nil
