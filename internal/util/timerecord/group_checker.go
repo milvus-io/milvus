@@ -51,6 +51,7 @@ func (gc *GroupChecker) init() {
 // work is the main procedure logic
 func (gc *GroupChecker) work() {
 	gc.t = time.NewTicker(gc.d)
+	defer gc.t.Stop()
 	var name string
 	var ts time.Time
 
