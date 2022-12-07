@@ -81,11 +81,11 @@ func (s *Server) Run() error {
 	if err := s.init(); err != nil {
 		return err
 	}
-	log.Debug("IndexCoord init done ...")
+	log.Info("IndexCoord init done ...")
 	if err := s.start(); err != nil {
 		return err
 	}
-	log.Debug("IndexCoord start done ...")
+	log.Info("IndexCoord start done ...")
 	return nil
 }
 
@@ -102,7 +102,7 @@ func (s *Server) init() error {
 
 	etcdCli, err := etcd.GetEtcdClient(&indexcoord.Params.EtcdCfg)
 	if err != nil {
-		log.Debug("IndexCoord connect to etcd failed", zap.Error(err))
+		log.Warn("IndexCoord connect to etcd failed", zap.Error(err))
 		return err
 	}
 	s.etcdCli = etcdCli
@@ -124,23 +124,23 @@ func (s *Server) init() error {
 	if s.rootCoord == nil {
 		s.rootCoord, err = rcc.NewClient(s.loopCtx, ic.Params.EtcdCfg.MetaRootPath, s.etcdCli)
 		if err != nil {
-			log.Debug("IndexCoord try to new RootCoord client failed", zap.Error(err))
+			log.Error("IndexCoord try to new RootCoord client failed", zap.Error(err))
 			panic(err)
 		}
 	}
 
 	if err = s.rootCoord.Init(); err != nil {
-		log.Debug("IndexCoord RootCoord client init failed", zap.Error(err))
+		log.Error("IndexCoord RootCoord client init failed", zap.Error(err))
 		panic(err)
 	}
 	if err = s.rootCoord.Start(); err != nil {
-		log.Debug("IndexCoord RootCoord client start failed", zap.Error(err))
+		log.Error("IndexCoord RootCoord client start failed", zap.Error(err))
 		panic(err)
 	}
-	log.Debug("IndexCoord try to wait for RootCoord ready")
+	log.Info("IndexCoord try to wait for RootCoord ready")
 	err = funcutil.WaitForComponentHealthy(s.loopCtx, s.rootCoord, typeutil.RootCoordRole, 1000000, time.Millisecond*200)
 	if err != nil {
-		log.Debug("IndexCoord wait for RootCoord ready failed", zap.Error(err))
+		log.Error("IndexCoord wait for RootCoord ready failed", zap.Error(err))
 		panic(err)
 	}
 
@@ -152,23 +152,23 @@ func (s *Server) init() error {
 	if s.dataCoord == nil {
 		s.dataCoord, err = dcc.NewClient(s.loopCtx, ic.Params.EtcdCfg.MetaRootPath, s.etcdCli)
 		if err != nil {
-			log.Debug("IndexCoord try to new DataCoord client failed", zap.Error(err))
+			log.Info("IndexCoord try to new DataCoord client failed", zap.Error(err))
 			panic(err)
 		}
 	}
 
 	if err = s.dataCoord.Init(); err != nil {
-		log.Debug("IndexCoord DataCoordClient Init failed", zap.Error(err))
+		log.Error("IndexCoord DataCoordClient Init failed", zap.Error(err))
 		panic(err)
 	}
 	if err = s.dataCoord.Start(); err != nil {
-		log.Debug("IndexCoord DataCoordClient Start failed", zap.Error(err))
+		log.Error("IndexCoord DataCoordClient Start failed", zap.Error(err))
 		panic(err)
 	}
-	log.Debug("IndexCoord try to wait for DataCoord ready")
+	log.Info("IndexCoord try to wait for DataCoord ready")
 	err = funcutil.WaitForComponentHealthy(s.loopCtx, s.dataCoord, typeutil.DataCoordRole, 1000000, time.Millisecond*200)
 	if err != nil {
-		log.Debug("IndexCoord wait for DataCoord ready failed", zap.Error(err))
+		log.Warn("IndexCoord wait for DataCoord ready failed", zap.Error(err))
 		panic(err)
 	}
 
@@ -184,18 +184,18 @@ func (s *Server) start() error {
 	if err := s.indexcoord.Start(); err != nil {
 		return err
 	}
-	log.Debug("indexCoord started")
+	log.Info("indexCoord started")
 	if err := s.indexcoord.Register(); err != nil {
 		log.Error("IndexCoord", zap.Any("register session error", err))
 		return err
 	}
-	log.Debug("IndexCoord registers service successfully")
+	log.Info("IndexCoord registers service successfully")
 	return nil
 }
 
 // Stop stops IndexCoord's grpc service.
 func (s *Server) Stop() error {
-	log.Debug("Indexcoord stop", zap.String("Address", Params.GetAddress()))
+	log.Info("Indexcoord stop", zap.String("Address", Params.GetAddress()))
 	if s.closer != nil {
 		if err := s.closer.Close(); err != nil {
 			return err
@@ -209,7 +209,7 @@ func (s *Server) Stop() error {
 	}
 	s.loopCancel()
 	if s.grpcServer != nil {
-		log.Debug("Graceful stop grpc server...")
+		log.Info("Graceful stop grpc server...")
 		s.grpcServer.GracefulStop()
 	}
 
@@ -308,7 +308,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 		Timeout: 10 * time.Second, // Wait 10 second for the ping ack before assuming the connection is dead
 	}
 
-	log.Debug("IndexCoord", zap.String("network address", Params.IP), zap.Int("network port", grpcPort))
+	log.Info("IndexCoord", zap.String("network address", Params.IP), zap.Int("network port", grpcPort))
 	lis, err := net.Listen("tcp", ":"+strconv.Itoa(grpcPort))
 	if err != nil {
 		log.Warn("IndexCoord", zap.String("GrpcServer:failed to listen", err.Error()))
@@ -337,7 +337,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 	if err := s.grpcServer.Serve(lis); err != nil {
 		s.grpcErrChan <- err
 	}
-	log.Debug("IndexCoord grpcServer loop exit")
+	log.Info("IndexCoord grpcServer loop exit")
 }
 
 // NewServer create a new IndexCoord grpc server.

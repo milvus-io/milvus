@@ -96,7 +96,7 @@ func (ri *retentionInfo) startRetentionInfo() {
 
 // retention do time ticker and trigger retention check and operation for each topic
 func (ri *retentionInfo) retention() error {
-	log.Debug("Rocksmq retention goroutine start!")
+	log.Info("Rocksmq retention goroutine start!")
 	// Do retention check every 10 mins
 	ticker := time.NewTicker(time.Duration(atomic.LoadInt64(&TickerTimeInSeconds) * int64(time.Second)))
 	defer ticker.Stop()
@@ -166,7 +166,7 @@ func (ri *retentionInfo) expiredCleanUp(topic string) error {
 	}
 	// Quick Path, No page to check
 	if totalAckedSize == 0 {
-		log.Debug("All messages are not expired, skip retention because no ack", zap.Any("topic", topic),
+		log.Info("All messages are not expired, skip retention because no ack", zap.Any("topic", topic),
 			zap.Any("time taken", time.Since(start).Milliseconds()))
 		return nil
 	}
@@ -219,7 +219,7 @@ func (ri *retentionInfo) expiredCleanUp(topic string) error {
 		return err
 	}
 
-	log.Debug("Expired check by retention time", zap.Any("topic", topic),
+	log.Info("Expired check by retention time", zap.Any("topic", topic),
 		zap.Any("pageEndID", pageEndID), zap.Any("deletedAckedSize", deletedAckedSize),
 		zap.Any("pageCleaned", pageCleaned), zap.Any("time taken", time.Since(start).Milliseconds()))
 
@@ -254,11 +254,11 @@ func (ri *retentionInfo) expiredCleanUp(topic string) error {
 	}
 
 	if pageEndID == 0 {
-		log.Debug("All messages are not expired, skip retention", zap.Any("topic", topic), zap.Any("time taken", time.Since(start).Milliseconds()))
+		log.Info("All messages are not expired, skip retention", zap.Any("topic", topic), zap.Any("time taken", time.Since(start).Milliseconds()))
 		return nil
 	}
 	expireTime := time.Since(start).Milliseconds()
-	log.Debug("Expired check by message size: ", zap.Any("topic", topic),
+	log.Info("Expired check by message size: ", zap.Any("topic", topic),
 		zap.Any("pageEndID", pageEndID), zap.Any("deletedAckedSize", deletedAckedSize),
 		zap.Any("pageCleaned", pageCleaned), zap.Any("time taken", expireTime))
 	return ri.cleanData(topic, pageEndID)

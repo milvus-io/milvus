@@ -98,12 +98,12 @@ func (s *Server) Run() error {
 	if err := s.init(); err != nil {
 		return err
 	}
-	log.Debug("QueryCoord init done ...")
+	log.Info("QueryCoord init done ...")
 
 	if err := s.start(); err != nil {
 		return err
 	}
-	log.Debug("QueryCoord start done ...")
+	log.Info("QueryCoord start done ...")
 	return nil
 }
 
@@ -120,7 +120,7 @@ func (s *Server) init() error {
 
 	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
 	if err != nil {
-		log.Debug("QueryCoord connect to etcd failed", zap.Error(err))
+		log.Warn("QueryCoord connect to etcd failed", zap.Error(err))
 		return err
 	}
 	s.etcdCli = etcdCli
@@ -138,94 +138,94 @@ func (s *Server) init() error {
 	if s.rootCoord == nil {
 		s.rootCoord, err = rcc.NewClient(s.loopCtx, qc.Params.EtcdCfg.MetaRootPath, s.etcdCli)
 		if err != nil {
-			log.Debug("QueryCoord try to new RootCoord client failed", zap.Error(err))
+			log.Warn("QueryCoord try to new RootCoord client failed", zap.Error(err))
 			panic(err)
 		}
 	}
 
 	if err = s.rootCoord.Init(); err != nil {
-		log.Debug("QueryCoord RootCoordClient Init failed", zap.Error(err))
+		log.Warn("QueryCoord RootCoordClient Init failed", zap.Error(err))
 		panic(err)
 	}
 
 	if err = s.rootCoord.Start(); err != nil {
-		log.Debug("QueryCoord RootCoordClient Start failed", zap.Error(err))
+		log.Warn("QueryCoord RootCoordClient Start failed", zap.Error(err))
 		panic(err)
 	}
 	// wait for master init or healthy
-	log.Debug("QueryCoord try to wait for RootCoord ready")
+	log.Info("QueryCoord try to wait for RootCoord ready")
 	err = funcutil.WaitForComponentHealthy(s.loopCtx, s.rootCoord, "RootCoord", 1000000, time.Millisecond*200)
 	if err != nil {
-		log.Debug("QueryCoord wait for RootCoord ready failed", zap.Error(err))
+		log.Warn("QueryCoord wait for RootCoord ready failed", zap.Error(err))
 		panic(err)
 	}
 
 	if err := s.SetRootCoord(s.rootCoord); err != nil {
 		panic(err)
 	}
-	log.Debug("QueryCoord report RootCoord ready")
+	log.Info("QueryCoord report RootCoord ready")
 
 	// --- Data service client ---
 	if s.dataCoord == nil {
 		s.dataCoord, err = dcc.NewClient(s.loopCtx, qc.Params.EtcdCfg.MetaRootPath, s.etcdCli)
 		if err != nil {
-			log.Debug("QueryCoord try to new DataCoord client failed", zap.Error(err))
+			log.Warn("QueryCoord try to new DataCoord client failed", zap.Error(err))
 			panic(err)
 		}
 	}
 
 	if err = s.dataCoord.Init(); err != nil {
-		log.Debug("QueryCoord DataCoordClient Init failed", zap.Error(err))
+		log.Warn("QueryCoord DataCoordClient Init failed", zap.Error(err))
 		panic(err)
 	}
 	if err = s.dataCoord.Start(); err != nil {
-		log.Debug("QueryCoord DataCoordClient Start failed", zap.Error(err))
+		log.Warn("QueryCoord DataCoordClient Start failed", zap.Error(err))
 		panic(err)
 	}
-	log.Debug("QueryCoord try to wait for DataCoord ready")
+	log.Info("QueryCoord try to wait for DataCoord ready")
 	err = funcutil.WaitForComponentHealthy(s.loopCtx, s.dataCoord, "DataCoord", 1000000, time.Millisecond*200)
 	if err != nil {
-		log.Debug("QueryCoord wait for DataCoord ready failed", zap.Error(err))
+		log.Warn("QueryCoord wait for DataCoord ready failed", zap.Error(err))
 		panic(err)
 	}
 	if err := s.SetDataCoord(s.dataCoord); err != nil {
 		panic(err)
 	}
-	log.Debug("QueryCoord report DataCoord ready")
+	log.Info("QueryCoord report DataCoord ready")
 
 	// --- IndexCoord ---
 	if s.indexCoord == nil {
 		s.indexCoord, err = icc.NewClient(s.loopCtx, qc.Params.EtcdCfg.MetaRootPath, s.etcdCli)
 		if err != nil {
-			log.Debug("QueryCoord try to new IndexCoord client failed", zap.Error(err))
+			log.Warn("QueryCoord try to new IndexCoord client failed", zap.Error(err))
 			panic(err)
 		}
 	}
 
 	if err := s.indexCoord.Init(); err != nil {
-		log.Debug("QueryCoord IndexCoordClient Init failed", zap.Error(err))
+		log.Warn("QueryCoord IndexCoordClient Init failed", zap.Error(err))
 		panic(err)
 	}
 
 	if err := s.indexCoord.Start(); err != nil {
-		log.Debug("QueryCoord IndexCoordClient Start failed", zap.Error(err))
+		log.Warn("QueryCoord IndexCoordClient Start failed", zap.Error(err))
 		panic(err)
 	}
 	// wait IndexCoord healthy
-	log.Debug("QueryCoord try to wait for IndexCoord ready")
+	log.Info("QueryCoord try to wait for IndexCoord ready")
 	err = funcutil.WaitForComponentHealthy(s.loopCtx, s.indexCoord, "IndexCoord", 1000000, time.Millisecond*200)
 	if err != nil {
-		log.Debug("QueryCoord wait for IndexCoord ready failed", zap.Error(err))
+		log.Warn("QueryCoord wait for IndexCoord ready failed", zap.Error(err))
 		panic(err)
 	}
-	log.Debug("QueryCoord report IndexCoord is ready")
+	log.Info("QueryCoord report IndexCoord is ready")
 
 	if err := s.SetIndexCoord(s.indexCoord); err != nil {
 		panic(err)
 	}
 
 	s.queryCoord.UpdateStateCode(commonpb.StateCode_Initializing)
-	log.Debug("QueryCoord", zap.Any("State", commonpb.StateCode_Initializing))
+	log.Info("QueryCoord", zap.Any("State", commonpb.StateCode_Initializing))
 	if err := s.queryCoord.Init(); err != nil {
 		return err
 	}
@@ -244,10 +244,10 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 		Time:    60 * time.Second, // Ping the client if it is idle for 60 seconds to ensure the connection is still active
 		Timeout: 10 * time.Second, // Wait 10 second for the ping ack before assuming the connection is dead
 	}
-	log.Debug("network", zap.String("port", strconv.Itoa(grpcPort)))
+	log.Info("network", zap.String("port", strconv.Itoa(grpcPort)))
 	lis, err := net.Listen("tcp", ":"+strconv.Itoa(grpcPort))
 	if err != nil {
-		log.Debug("GrpcServer:failed to listen:", zap.String("error", err.Error()))
+		log.Warn("GrpcServer:failed to listen:", zap.String("error", err.Error()))
 		s.grpcErrChan <- err
 		return
 	}
@@ -286,7 +286,7 @@ func (s *Server) start() error {
 
 // Stop stops QueryCoord's grpc service.
 func (s *Server) Stop() error {
-	log.Debug("QueryCoord stop", zap.String("Address", Params.GetAddress()))
+	log.Info("QueryCoord stop", zap.String("Address", Params.GetAddress()))
 	if s.closer != nil {
 		if err := s.closer.Close(); err != nil {
 			return err
@@ -298,7 +298,7 @@ func (s *Server) Stop() error {
 	err := s.queryCoord.Stop()
 	s.loopCancel()
 	if s.grpcServer != nil {
-		log.Debug("Graceful stop grpc server...")
+		log.Info("Graceful stop grpc server...")
 		s.grpcServer.GracefulStop()
 	}
 	return err

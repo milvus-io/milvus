@@ -115,7 +115,7 @@ func (ms *MetaSnapshot) loadTs() error {
 			return nil
 		}
 		if curVer == version {
-			log.Debug("Snapshot found save version with different revision", zap.Int64("revision", revision), zap.Int64("version", version))
+			log.Info("Snapshot found save version with different revision", zap.Int64("revision", revision), zap.Int64("version", version))
 		}
 		strTs := string(resp.Kvs[0].Value)
 		if strTs == "0" {
@@ -148,7 +148,7 @@ func (ms *MetaSnapshot) minTs() typeutil.Timestamp {
 }
 
 func (ms *MetaSnapshot) initTs(rev int64, ts typeutil.Timestamp) {
-	log.Debug("init meta Snapshot ts", zap.Int64("rev", rev), zap.Uint64("ts", ts))
+	log.Info("init meta Snapshot ts", zap.Int64("rev", rev), zap.Uint64("ts", ts))
 	if ms.numTs == 0 {
 		ms.maxPos = len(ms.ts2Rev) - 1
 		ms.minPos = len(ms.ts2Rev) - 1
@@ -164,7 +164,7 @@ func (ms *MetaSnapshot) initTs(rev int64, ts typeutil.Timestamp) {
 }
 
 func (ms *MetaSnapshot) putTs(rev int64, ts typeutil.Timestamp) {
-	log.Debug("put meta snapshto ts", zap.Int64("rev", rev), zap.Uint64("ts", ts))
+	log.Info("put meta snapshto ts", zap.Int64("rev", rev), zap.Uint64("ts", ts))
 	ms.maxPos++
 	if ms.maxPos == len(ms.ts2Rev) {
 		ms.maxPos = 0
@@ -246,7 +246,7 @@ func (ms *MetaSnapshot) getRevOnEtcd(ts typeutil.Timestamp, rev int64) int64 {
 	for rev--; rev >= 2; rev-- {
 		resp, err := ms.cli.Get(ctx, path.Join(ms.root, ms.tsKey), clientv3.WithRev(rev))
 		if err != nil {
-			log.Debug("get ts from etcd failed", zap.Error(err))
+			log.Info("get ts from etcd failed", zap.Error(err))
 			return 0
 		}
 		if len(resp.Kvs) <= 0 {
@@ -255,7 +255,7 @@ func (ms *MetaSnapshot) getRevOnEtcd(ts typeutil.Timestamp, rev int64) int64 {
 		rev = resp.Kvs[0].ModRevision
 		curTs, err := strconv.ParseUint(string(resp.Kvs[0].Value), 10, 64)
 		if err != nil {
-			log.Debug("parse timestam error", zap.String("input", string(resp.Kvs[0].Value)), zap.Error(err))
+			log.Info("parse timestam error", zap.String("input", string(resp.Kvs[0].Value)), zap.Error(err))
 			return 0
 		}
 		if curTs <= ts {

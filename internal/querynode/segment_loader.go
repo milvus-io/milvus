@@ -587,7 +587,7 @@ func (loader *segmentLoader) loadGrowingSegments(segment *Segment,
 	if err != nil {
 		return err
 	}
-	log.Debug("insertNode operator", zap.Int("insert size", numOfRecords), zap.Int64("insert offset", offset), zap.Int64("segment id", segment.ID()))
+	log.Info("insertNode operator", zap.Int("insert size", numOfRecords), zap.Int64("insert offset", offset), zap.Int64("segment id", segment.ID()))
 
 	// 2. update bloom filter
 	insertRecord, err := storage.TransferInsertDataToInsertRecord(insertData)
@@ -770,7 +770,7 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 	for hasMore {
 		select {
 		case <-ctx.Done():
-			log.Debug("read delta msg from seek position done", zap.Error(ctx.Err()))
+			log.Info("read delta msg from seek position done", zap.Error(ctx.Err()))
 			return ctx.Err()
 		case msgPack, ok := <-stream.Chan():
 			if !ok {

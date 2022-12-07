@@ -42,8 +42,9 @@ import (
 	"go.uber.org/zap"
 )
 
-//go:generate mockery --name=Allocator --outpkg=mocktso
 // Allocator is a Timestamp Oracle allocator.
+//
+//go:generate mockery --name=Allocator --outpkg=mocktso
 type Allocator interface {
 	// Initialize is used to initialize a TSO allocator.
 	// It will synchronize TSO with etcd and initialize the

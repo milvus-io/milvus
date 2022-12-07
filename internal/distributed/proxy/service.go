@@ -151,14 +151,14 @@ func (s *Server) startExternalGrpc(grpcPort int, errChan chan error) {
 		Timeout: 10 * time.Second, // Wait 10 second for the ping ack before assuming the connection is dead
 	}
 
-	log.Debug("Proxy server listen on tcp", zap.Int("port", grpcPort))
+	log.Info("Proxy server listen on tcp", zap.Int("port", grpcPort))
 	lis, err := net.Listen("tcp", ":"+strconv.Itoa(grpcPort))
 	if err != nil {
 		log.Warn("Proxy server failed to listen on", zap.Error(err), zap.Int("port", grpcPort))
 		errChan <- err
 		return
 	}
-	log.Debug("Proxy server already listen on tcp", zap.Int("port", grpcPort))
+	log.Info("Proxy server already listen on tcp", zap.Int("port", grpcPort))
 
 	limiter, err := s.proxy.GetRateLimiter()
 	if err != nil {
@@ -166,7 +166,7 @@ func (s *Server) startExternalGrpc(grpcPort int, errChan chan error) {
 		errChan <- err
 		return
 	}
-	log.Debug("Get proxy rate limiter done", zap.Int("port", grpcPort))
+	log.Info("Get proxy rate limiter done", zap.Int("port", grpcPort))
 
 	opts := trace.GetInterceptorOpts()
 	grpcOpts := []grpc.ServerOption{
@@ -227,7 +227,7 @@ func (s *Server) startExternalGrpc(grpcPort int, errChan chan error) {
 	grpc_health_v1.RegisterHealthServer(s.grpcExternalServer, s)
 	errChan <- nil
 
-	log.Debug("create Proxy grpc server",
+	log.Info("create Proxy grpc server",
 		zap.Any("enforcement policy", kaep),
 		zap.Any("server parameters", kasp))
 
@@ -250,14 +250,14 @@ func (s *Server) startInternalGrpc(grpcPort int, errChan chan error) {
 		Timeout: 10 * time.Second, // Wait 10 second for the ping ack before assuming the connection is dead
 	}
 
-	log.Debug("Proxy internal server listen on tcp", zap.Int("port", grpcPort))
+	log.Info("Proxy internal server listen on tcp", zap.Int("port", grpcPort))
 	lis, err := net.Listen("tcp", ":"+strconv.Itoa(grpcPort))
 	if err != nil {
 		log.Warn("Proxy internal server failed to listen on", zap.Error(err), zap.Int("port", grpcPort))
 		errChan <- err
 		return
 	}
-	log.Debug("Proxy internal server already listen on tcp", zap.Int("port", grpcPort))
+	log.Info("Proxy internal server already listen on tcp", zap.Int("port", grpcPort))
 
 	opts := trace.GetInterceptorOpts()
 	s.grpcInternalServer = grpc.NewServer(
@@ -275,7 +275,7 @@ func (s *Server) startInternalGrpc(grpcPort int, errChan chan error) {
 	grpc_health_v1.RegisterHealthServer(s.grpcInternalServer, s)
 	errChan <- nil
 
-	log.Debug("create Proxy internal grpc server",
+	log.Info("create Proxy internal grpc server",
 		zap.Any("enforcement policy", kaep),
 		zap.Any("server parameters", kasp))
 
@@ -288,28 +288,27 @@ func (s *Server) startInternalGrpc(grpcPort int, errChan chan error) {
 
 // Start start the Proxy Server
 func (s *Server) Run() error {
-	log.Debug("init Proxy server")
+	log.Info("init Proxy server")
 	if err := s.init(); err != nil {
 		log.Warn("init Proxy server failed", zap.Error(err))
 		return err
 	}
-	log.Debug("init Proxy server done")
 
-	log.Debug("start Proxy server")
+	log.Info("start Proxy server")
 	if err := s.start(); err != nil {
 		log.Warn("start Proxy server failed", zap.Error(err))
 		return err
 	}
-	log.Debug("start Proxy server done")
+	log.Info("start Proxy server done")
 
 	return nil
 }
 
 func (s *Server) init() error {
 	Params.InitOnce(typeutil.ProxyRole)
-	log.Debug("Proxy init service's parameter table done")
+	log.Info("Proxy init service's parameter table done")
 	HTTPParams.InitOnce()
-	log.Debug("Proxy init http server's parameter table done")
+	log.Info("Proxy init http server's parameter table done")
 
 	if !funcutil.CheckPortAvailable(Params.Port) {
 		Params.Port = funcutil.GetAvailablePort()
@@ -318,16 +317,16 @@ func (s *Server) init() error {
 
 	proxy.Params.InitOnce()
 	proxy.Params.ProxyCfg.NetworkAddress = Params.GetInternalAddress()
-	log.Debug("init Proxy's parameter table done", zap.String("internal address", Params.GetInternalAddress()), zap.String("external address", Params.GetAddress()))
+	log.Info("init Proxy's parameter table done", zap.String("internal address", Params.GetInternalAddress()), zap.String("external address", Params.GetAddress()))
 
 	serviceName := fmt.Sprintf("Proxy ip: %s, port: %d", Params.IP, Params.Port)
 	closer := trace.InitTracing(serviceName)
 	s.closer = closer
-	log.Debug("init Proxy's tracer done", zap.String("service name", serviceName))
+	log.Info("init Proxy's tracer done", zap.String("service name", serviceName))
 
 	etcdCli, err := etcd.GetEtcdClient(&proxy.Params.EtcdCfg)
 	if err != nil {
-		log.Debug("Proxy connect to etcd failed", zap.Error(err))
+		log.Warn("Proxy connect to etcd failed", zap.Error(err))
 		return err
 	}
 	s.etcdCli = etcdCli
@@ -358,129 +357,121 @@ func (s *Server) init() error {
 
 	if s.rootCoordClient == nil {
 		var err error
-		log.Debug("create RootCoord client for Proxy")
+		log.Info("create RootCoord client for Proxy")
 		s.rootCoordClient, err = rcc.NewClient(s.ctx, proxy.Params.EtcdCfg.MetaRootPath, etcdCli)
 		if err != nil {
 			log.Warn("failed to create RootCoord client for Proxy", zap.Error(err))
 			return err
 		}
-		log.Debug("create RootCoord client for Proxy done")
+		log.Info("create RootCoord client for Proxy done")
 	}
 
-	log.Debug("init RootCoord client for Proxy")
+	log.Info("init RootCoord client for Proxy")
 	if err := s.rootCoordClient.Init(); err != nil {
 		log.Warn("failed to init RootCoord client for Proxy", zap.Error(err))
 		return err
 	}
-	log.Debug("init RootCoord client for Proxy done")
+	log.Info("init RootCoord client for Proxy done")
 
-	log.Debug("Proxy wait for RootCoord to be healthy")
+	log.Info("Proxy wait for RootCoord to be healthy")
 	if err := funcutil.WaitForComponentHealthy(s.ctx, s.rootCoordClient, "RootCoord", 1000000, time.Millisecond*200); err != nil {
 		log.Warn("Proxy failed to wait for RootCoord to be healthy", zap.Error(err))
 		return err
 	}
-	log.Debug("Proxy wait for RootCoord to be healthy done")
+	log.Info("Proxy wait for RootCoord to be healthy done")
 
-	log.Debug("set RootCoord client for Proxy")
 	s.proxy.SetRootCoordClient(s.rootCoordClient)
-	log.Debug("set RootCoord client for Proxy done")
+	log.Info("set RootCoord client for Proxy done")
 
 	if s.dataCoordClient == nil {
 		var err error
-		log.Debug("create DataCoord client for Proxy")
+		log.Info("create DataCoord client for Proxy")
 		s.dataCoordClient, err = dcc.NewClient(s.ctx, proxy.Params.EtcdCfg.MetaRootPath, etcdCli)
 		if err != nil {
 			log.Warn("failed to create DataCoord client for Proxy", zap.Error(err))
 			return err
 		}
-		log.Debug("create DataCoord client for Proxy done")
+		log.Info("create DataCoord client for Proxy done")
 	}
 
-	log.Debug("init DataCoord client for Proxy")
+	log.Info("init DataCoord client for Proxy")
 	if err := s.dataCoordClient.Init(); err != nil {
 		log.Warn("failed to init DataCoord client for Proxy", zap.Error(err))
 		return err
 	}
-	log.Debug("init DataCoord client for Proxy done")
-
-	log.Debug("Proxy wait for DataCoord to be healthy")
+	log.Info("Proxy wait for DataCoord to be healthy")
 	if err := funcutil.WaitForComponentHealthy(s.ctx, s.dataCoordClient, "DataCoord", 1000000, time.Millisecond*200); err != nil {
 		log.Warn("Proxy failed to wait for DataCoord to be healthy", zap.Error(err))
 		return err
 	}
-	log.Debug("Proxy wait for DataCoord to be healthy done")
+	log.Info("Proxy wait for DataCoord to be healthy done")
 
-	log.Debug("set DataCoord client for Proxy")
 	s.proxy.SetDataCoordClient(s.dataCoordClient)
-	log.Debug("set DataCoord client for Proxy done")
+	log.Info("set DataCoord client for Proxy done")
 
 	if s.indexCoordClient == nil {
 		var err error
-		log.Debug("create IndexCoord client for Proxy")
+		log.Info("create IndexCoord client for Proxy")
 		s.indexCoordClient, err = icc.NewClient(s.ctx, proxy.Params.EtcdCfg.MetaRootPath, etcdCli)
 		if err != nil {
 			log.Warn("failed to create IndexCoord client for Proxy", zap.Error(err))
 			return err
 		}
-		log.Debug("create IndexCoord client for Proxy done")
+		log.Info("create IndexCoord client for Proxy done")
 	}
 
-	log.Debug("init IndexCoord client for Proxy")
+	log.Info("init IndexCoord client for Proxy")
 	if err := s.indexCoordClient.Init(); err != nil {
 		log.Warn("failed to init IndexCoord client for Proxy", zap.Error(err))
 		return err
 	}
-	log.Debug("init IndexCoord client for Proxy done")
+	log.Info("init IndexCoord client for Proxy done")
 
-	log.Debug("Proxy wait for IndexCoord to be healthy")
 	if err := funcutil.WaitForComponentHealthy(s.ctx, s.indexCoordClient, "IndexCoord", 1000000, time.Millisecond*200); err != nil {
 		log.Warn("Proxy failed to wait for IndexCoord to be healthy", zap.Error(err))
 		return err
 	}
-	log.Debug("Proxy wait for IndexCoord to be healthy done")
+	log.Info("Proxy wait for IndexCoord to be healthy done")
 
-	log.Debug("set IndexCoord client for Proxy")
 	s.proxy.SetIndexCoordClient(s.indexCoordClient)
-	log.Debug("set IndexCoord client for Proxy done")
+	log.Info("set IndexCoord client for Proxy done")
 
 	if s.queryCoordClient == nil {
 		var err error
-		log.Debug("create QueryCoord client for Proxy")
+		log.Info("create QueryCoord client for Proxy")
 		s.queryCoordClient, err = qcc.NewClient(s.ctx, proxy.Params.EtcdCfg.MetaRootPath, etcdCli)
 		if err != nil {
 			log.Warn("failed to create QueryCoord client for Proxy", zap.Error(err))
 			return err
 		}
-		log.Debug("create QueryCoord client for Proxy done")
+		log.Info("create QueryCoord client for Proxy done")
 	}
 
-	log.Debug("init QueryCoord client for Proxy")
+	log.Info("init QueryCoord client for Proxy")
 	if err := s.queryCoordClient.Init(); err != nil {
 		log.Warn("failed to init QueryCoord client for Proxy", zap.Error(err))
 		return err
 	}
-	log.Debug("init QueryCoord client for Proxy done")
+	log.Info("init QueryCoord client for Proxy done")
 
-	log.Debug("Proxy wait for QueryCoord to be healthy")
 	if err := funcutil.WaitForComponentHealthy(s.ctx, s.queryCoordClient, "QueryCoord", 1000000, time.Millisecond*200); err != nil {
 		log.Warn("Proxy failed to wait for QueryCoord to be healthy", zap.Error(err))
 		return err
 	}
-	log.Debug("Proxy wait for QueryCoord to be healthy done")
+	log.Info("Proxy wait for QueryCoord to be healthy done")
 
-	log.Debug("set QueryCoord client for Proxy")
 	s.proxy.SetQueryCoordClient(s.queryCoordClient)
-	log.Debug("set QueryCoord client for Proxy done")
+	log.Info("set QueryCoord client for Proxy done")
 
-	log.Debug(fmt.Sprintf("update Proxy's state to %s", commonpb.StateCode_Initializing.String()))
+	log.Info(fmt.Sprintf("update Proxy's state to %s", commonpb.StateCode_Initializing.String()))
 	s.proxy.UpdateStateCode(commonpb.StateCode_Initializing)
 
-	log.Debug("init Proxy")
+	log.Info("init Proxy")
 	if err := s.proxy.Init(); err != nil {
 		log.Warn("failed to init Proxy", zap.Error(err))
 		return err
 	}
-	log.Debug("init Proxy done")
+	log.Info("init Proxy done")
 	// Intentionally print to stdout, which is usually a sign that Milvus is ready to serve.
 	fmt.Println("---Milvus Proxy successfully initialized and ready to serve!---")
 
@@ -503,7 +494,7 @@ func (s *Server) start() error {
 
 // Stop stop the Proxy Server
 func (s *Server) Stop() error {
-	log.Debug("Proxy stop", zap.String("internal address", Params.GetInternalAddress()), zap.String("external address", Params.GetInternalAddress()))
+	log.Info("Proxy stop", zap.String("internal address", Params.GetInternalAddress()), zap.String("external address", Params.GetInternalAddress()))
 	var err error
 	if s.closer != nil {
 		if err = s.closer.Close(); err != nil {
@@ -521,11 +512,11 @@ func (s *Server) Stop() error {
 	go func() {
 		defer gracefulWg.Done()
 		if s.grpcInternalServer != nil {
-			log.Debug("Graceful stop grpc internal server...")
+			log.Info("Graceful stop grpc internal server...")
 			s.grpcInternalServer.GracefulStop()
 		}
 		if s.grpcExternalServer != nil {
-			log.Debug("Graceful stop grpc external server...")
+			log.Info("Graceful stop grpc external server...")
 			s.grpcExternalServer.GracefulStop()
 		}
 	}()

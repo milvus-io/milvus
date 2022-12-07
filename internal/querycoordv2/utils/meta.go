@@ -154,7 +154,7 @@ func FetchTargets(ctx context.Context,
 	segments := make([]*datapb.SegmentInfo, 0)
 
 	for _, partitionID := range partitions {
-		log.Debug("get recovery info...",
+		log.Info("get recovery info...",
 			zap.Int64("collectionID", collection),
 			zap.Int64("partitionID", partitionID))
 		vChannelInfos, binlogs, err := broker.GetRecoveryInfo(ctx, collection, partitionID)

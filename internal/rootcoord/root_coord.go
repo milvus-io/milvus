@@ -297,7 +297,7 @@ func (c *Core) Register() error {
 		c.session.ProcessActiveStandBy(c.activateFunc)
 	} else {
 		c.UpdateStateCode(commonpb.StateCode_Healthy)
-		log.Debug("RootCoord start successfully ", zap.String("State Code", commonpb.StateCode_Healthy.String()))
+		log.Info("RootCoord start successfully ", zap.String("State Code", commonpb.StateCode_Healthy.String()))
 	}
 	log.Info("RootCoord Register Finished")
 	go c.session.LivenessCheck(c.ctx, func() {
@@ -470,7 +470,7 @@ func (c *Core) initInternal() error {
 	c.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
 
 	c.quotaCenter = NewQuotaCenter(c.proxyClientManager, c.queryCoord, c.dataCoord, c.tsoAllocator)
-	log.Debug("RootCoord init QuotaCenter done")
+	log.Info("RootCoord init QuotaCenter done")
 
 	if err := c.initImportManager(); err != nil {
 		return err
@@ -499,7 +499,7 @@ func (c *Core) Init() error {
 func (c *Core) initCredentials() error {
 	credInfo, _ := c.meta.GetCredential(util.UserRoot)
 	if credInfo == nil {
-		log.Debug("RootCoord init user root")
+		log.Info("RootCoord init user root")
 		encryptedRootPassword, _ := crypto.PasswordEncrypt(util.DefaultRootPassword)
 		err := c.meta.AddCredential(&internalpb.CredentialInfo{Username: util.UserRoot, EncryptedPassword: encryptedRootPassword})
 		return err
@@ -1739,7 +1739,7 @@ func (c *Core) ReportImport(ctx context.Context, ir *rootcoordpb.ImportResult) (
 			zap.Int64("task ID", ir.GetTaskId()))
 		resendTaskFunc()
 	} else if ir.GetState() != commonpb.ImportState_ImportPersisted {
-		log.Debug("unexpected import task state reported, return immediately (this should not happen)",
+		log.Warn("unexpected import task state reported, return immediately (this should not happen)",
 			zap.Any("task ID", ir.GetTaskId()),
 			zap.Any("import state", ir.GetState()))
 		resendTaskFunc()
@@ -1798,7 +1798,7 @@ func (c *Core) CreateCredential(ctx context.Context, credInfo *internalpb.Creden
 	method := "CreateCredential"
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder(method)
-	log.Debug("CreateCredential", zap.String("role", typeutil.RootCoordRole),
+	log.Info("CreateCredential", zap.String("role", typeutil.RootCoordRole),
 		zap.String("username", credInfo.Username))
 
 	// insert to db
@@ -1816,7 +1816,7 @@ func (c *Core) CreateCredential(ctx context.Context, credInfo *internalpb.Creden
 			zap.String("username", credInfo.Username), zap.Error(err))
 		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
 	}
-	log.Debug("CreateCredential success", zap.String("role", typeutil.RootCoordRole),
+	log.Info("CreateCredential success", zap.String("role", typeutil.RootCoordRole),
 		zap.String("username", credInfo.Username))
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
@@ -1830,7 +1830,7 @@ func (c *Core) GetCredential(ctx context.Context, in *rootcoordpb.GetCredentialR
 	method := "GetCredential"
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder(method)
-	log.Debug("GetCredential", zap.String("role", typeutil.RootCoordRole),
+	log.Info("GetCredential", zap.String("role", typeutil.RootCoordRole),
 		zap.String("username", in.Username))
 
 	credInfo, err := c.meta.GetCredential(in.Username)
@@ -1842,7 +1842,7 @@ func (c *Core) GetCredential(ctx context.Context, in *rootcoordpb.GetCredentialR
 			Status: failStatus(commonpb.ErrorCode_GetCredentialFailure, "GetCredential failed: "+err.Error()),
 		}, err
 	}
-	log.Debug("GetCredential success", zap.String("role", typeutil.RootCoordRole),
+	log.Info("GetCredential success", zap.String("role", typeutil.RootCoordRole),
 		zap.String("username", in.Username))
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
@@ -1859,7 +1859,7 @@ func (c *Core) UpdateCredential(ctx context.Context, credInfo *internalpb.Creden
 	method := "UpdateCredential"
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder(method)
-	log.Debug("UpdateCredential", zap.String("role", typeutil.RootCoordRole),
+	log.Info("UpdateCredential", zap.String("role", typeutil.RootCoordRole),
 		zap.String("username", credInfo.Username))
 	// update data on storage
 	err := c.meta.AlterCredential(credInfo)
@@ -1877,7 +1877,7 @@ func (c *Core) UpdateCredential(ctx context.Context, credInfo *internalpb.Creden
 		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
 		return failStatus(commonpb.ErrorCode_UpdateCredentialFailure, "UpdateCredential failed: "+err.Error()), nil
 	}
-	log.Debug("UpdateCredential success", zap.String("role", typeutil.RootCoordRole),
+	log.Info("UpdateCredential success", zap.String("role", typeutil.RootCoordRole),
 		zap.String("username", credInfo.Username))
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
@@ -1907,7 +1907,7 @@ func (c *Core) DeleteCredential(ctx context.Context, in *milvuspb.DeleteCredenti
 		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
 		return failStatus(commonpb.ErrorCode_DeleteCredentialFailure, "DeleteCredential failed: "+err.Error()), nil
 	}
-	log.Debug("DeleteCredential success", zap.String("role", typeutil.RootCoordRole),
+	log.Info("DeleteCredential success", zap.String("role", typeutil.RootCoordRole),
 		zap.String("username", in.Username))
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
@@ -1931,7 +1931,7 @@ func (c *Core) ListCredUsers(ctx context.Context, in *milvuspb.ListCredUsersRequ
 			Status: failStatus(commonpb.ErrorCode_ListCredUsersFailure, "ListCredUsers failed: "+err.Error()),
 		}, err
 	}
-	log.Debug("ListCredUsers success", zap.String("role", typeutil.RootCoordRole))
+	log.Info("ListCredUsers success", zap.String("role", typeutil.RootCoordRole))
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
