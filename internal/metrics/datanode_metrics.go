@@ -112,16 +112,6 @@ var (
 			collectionIDLabelName,
 		})
 
-	DataNodeNumUnflushedSegments = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: milvusNamespace,
-			Subsystem: typeutil.DataNodeRole,
-			Name:      "unflushed_segment_num",
-			Help:      "number of unflushed segments",
-		}, []string{
-			nodeIDLabelName,
-		})
-
 	DataNodeEncodeBufferLatency = prometheus.NewHistogramVec( // TODO: arguably
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
@@ -209,7 +199,7 @@ var (
 		}, []string{nodeIDLabelName})
 )
 
-//RegisterDataNode registers DataNode metrics
+// RegisterDataNode registers DataNode metrics
 func RegisterDataNode(registry *prometheus.Registry) {
 	registry.MustRegister(DataNodeNumFlowGraphs)
 	registry.MustRegister(DataNodeConsumeMsgRowsCount)
@@ -217,7 +207,6 @@ func RegisterDataNode(registry *prometheus.Registry) {
 	registry.MustRegister(DataNodeNumConsumers)
 	registry.MustRegister(DataNodeNumProducers)
 	registry.MustRegister(DataNodeConsumeTimeTickLag)
-	registry.MustRegister(DataNodeNumUnflushedSegments)
 	registry.MustRegister(DataNodeEncodeBufferLatency)
 	registry.MustRegister(DataNodeSave2StorageLatency)
 	registry.MustRegister(DataNodeFlushBufferCount)

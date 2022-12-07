@@ -23,17 +23,15 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"go.uber.org/zap"
 )
 
 type (
@@ -135,7 +133,6 @@ func (c *ChannelMeta) segmentFlushed(segID UniqueID) {
 	if seg, ok := c.segments[segID]; ok {
 		seg.setType(datapb.SegmentType_Flushed)
 	}
-	metrics.DataNodeNumUnflushedSegments.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID())).Dec()
 }
 
 // new2NormalSegment transfers a segment from *New* to *Normal*.
@@ -221,9 +218,6 @@ func (c *ChannelMeta) addSegment(req addSegmentReq) error {
 	c.segMu.Lock()
 	c.segments[req.segID] = seg
 	c.segMu.Unlock()
-	if req.segType == datapb.SegmentType_New || req.segType == datapb.SegmentType_Normal {
-		metrics.DataNodeNumUnflushedSegments.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID())).Inc()
-	}
 	return nil
 }
 
@@ -438,7 +432,6 @@ func (c *ChannelMeta) removeSegments(segIDs ...UniqueID) {
 
 		delete(c.segments, segID)
 	}
-	metrics.DataNodeNumUnflushedSegments.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID())).Sub(float64(cnt))
 }
 
 // hasSegment checks whether this channel has a segment according to segment ID.
