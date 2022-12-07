@@ -39,14 +39,30 @@ func TestGrpcServerParams(t *testing.T) {
 	t.Logf("ServerMaxRecvSize = %d", Params.ServerMaxRecvSize)
 
 	Params.Remove(role + ".grpc.serverMaxRecvSize")
-	Params.initServerMaxRecvSize()
+	Params.InitServerMaxRecvSize()
 	assert.Equal(t, Params.ServerMaxRecvSize, DefaultServerMaxRecvSize)
+
+	Params.Remove("grpc.serverMaxRecvSize")
+	Params.InitServerMaxRecvSize()
+	assert.Equal(t, Params.ServerMaxRecvSize, DefaultServerMaxRecvSize)
+
+	Params.Save("grpc.serverMaxRecvSize", "a")
+	Params.InitServerMaxRecvSize()
+	assert.Equal(t, Params.ServerMaxSendSize, DefaultServerMaxRecvSize)
 
 	assert.NotZero(t, Params.ServerMaxSendSize)
 	t.Logf("ServerMaxSendSize = %d", Params.ServerMaxSendSize)
 
 	Params.Remove(role + ".grpc.serverMaxSendSize")
-	Params.initServerMaxSendSize()
+	Params.InitServerMaxSendSize()
+	assert.Equal(t, Params.ServerMaxSendSize, DefaultServerMaxSendSize)
+
+	Params.Remove("grpc.serverMaxSendSize")
+	Params.InitServerMaxRecvSize()
+	assert.Equal(t, Params.ServerMaxSendSize, DefaultServerMaxSendSize)
+
+	Params.Save("grpc.serverMaxSendSize", "a")
+	Params.InitServerMaxRecvSize()
 	assert.Equal(t, Params.ServerMaxSendSize, DefaultServerMaxSendSize)
 }
 
