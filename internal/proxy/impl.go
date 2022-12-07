@@ -1983,7 +1983,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
 		// req:       request,
-		BaseInsertTask: BaseInsertTask{
+		insertMsg: &msgstream.InsertMsg{
 			BaseMsg: msgstream.BaseMsg{
 				HashValues: request.HashKeys,
 			},
@@ -2007,8 +2007,8 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 		chTicker:      node.chTicker,
 	}
 
-	if len(it.PartitionName) <= 0 {
-		it.PartitionName = Params.CommonCfg.DefaultPartitionName.GetValue()
+	if len(it.insertMsg.PartitionName) <= 0 {
+		it.insertMsg.PartitionName = Params.CommonCfg.DefaultPartitionName.GetValue()
 	}
 
 	constructFailedResponse := func(err error) *milvuspb.MutationResult {
@@ -2045,7 +2045,6 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 
 	log.Debug("Detail of insert request in Proxy",
 		zap.String("role", typeutil.ProxyRole),
-		zap.Int64("msgID", it.Base.MsgID),
 		zap.Uint64("BeginTS", it.BeginTs()),
 		zap.Uint64("EndTS", it.EndTs()),
 		zap.String("db", request.DbName),
@@ -2082,6 +2081,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 	metrics.ProxyInsertVectors.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Add(float64(successCnt))
 	metrics.ProxyMutationLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.InsertLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	metrics.ProxyCollectionMutationLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.InsertLabel, request.CollectionName).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	log.Debug("lxg debug", zap.Any("insertResult", it.result))
 	return it.result, nil
 }
 
@@ -2112,7 +2112,7 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 		ctx:        ctx,
 		Condition:  NewTaskCondition(ctx),
 		deleteExpr: request.Expr,
-		BaseDeleteTask: BaseDeleteTask{
+		deleteMsg: &BaseDeleteTask{
 			BaseMsg: msgstream.BaseMsg{
 				HashValues: request.HashKeys,
 			},
@@ -2154,7 +2154,7 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 
 	log.Debug("Detail of delete request in Proxy",
 		zap.String("role", typeutil.ProxyRole),
-		zap.Uint64("timestamp", dt.Base.Timestamp),
+		zap.Uint64("timestamp", dt.deleteMsg.Base.Timestamp),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 		zap.String("partition", request.PartitionName),

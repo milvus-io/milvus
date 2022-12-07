@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 
@@ -871,4 +872,70 @@ func isPartitionLoaded(ctx context.Context, qc types.QueryCoord, collID int64, p
 		}
 	}
 	return false, nil
+}
+
+func checkLengthOfFieldsData(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) error {
+	neededFieldsNum := 0
+	for _, field := range schema.Fields {
+		if !field.AutoID {
+			neededFieldsNum++
+		}
+	}
+
+	if len(insertMsg.FieldsData) < neededFieldsNum {
+		return errFieldsLessThanNeeded(len(insertMsg.FieldsData), neededFieldsNum)
+	}
+
+	return nil
+}
+
+func checkPrimaryFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) (*schemapb.IDs, error) {
+	rowNums := uint32(insertMsg.NRows())
+	// TODO(dragondriver): in fact, NumRows is not trustable, we should check all input fields
+	if insertMsg.NRows() <= 0 {
+		return nil, errNumRowsLessThanOrEqualToZero(rowNums)
+	}
+
+	if err := checkLengthOfFieldsData(schema, insertMsg); err != nil {
+		return nil, err
+	}
+
+	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(schema)
+	if err != nil {
+		log.Error("get primary field schema failed", zap.String("collectionName", insertMsg.CollectionName), zap.Any("schema", schema), zap.Error(err))
+		return nil, err
+	}
+
+	// get primaryFieldData whether autoID is true or not
+	var primaryFieldData *schemapb.FieldData
+	if !primaryFieldSchema.AutoID {
+		primaryFieldData, err = typeutil.GetPrimaryFieldData(insertMsg.GetFieldsData(), primaryFieldSchema)
+		if err != nil {
+			log.Error("get primary field data failed", zap.String("collectionName", insertMsg.CollectionName), zap.Error(err))
+			return nil, err
+		}
+	} else {
+		// check primary key data not exist
+		if typeutil.IsPrimaryFieldDataExist(insertMsg.GetFieldsData(), primaryFieldSchema) {
+			return nil, fmt.Errorf("can not assign primary field data when auto id enabled %v", primaryFieldSchema.Name)
+		}
+		// if autoID == true, currently only support autoID for int64 PrimaryField
+		primaryFieldData, err = autoGenPrimaryFieldData(primaryFieldSchema, insertMsg.GetRowIDs())
+		if err != nil {
+			log.Error("generate primary field data failed when autoID == true", zap.String("collectionName", insertMsg.CollectionName), zap.Error(err))
+			return nil, err
+		}
+		// if autoID == true, set the primary field data
+		// insertMsg.fieldsData need append primaryFieldData
+		insertMsg.FieldsData = append(insertMsg.FieldsData, primaryFieldData)
+	}
+
+	// parse primaryFieldData to result.IDs, and as returned primary keys
+	ids, err := parsePrimaryFieldData2IDs(primaryFieldData)
+	if err != nil {
+		log.Error("parse primary field data to IDs failed", zap.String("collectionName", insertMsg.CollectionName), zap.Error(err))
+		return nil, err
+	}
+
+	return ids, nil
 }

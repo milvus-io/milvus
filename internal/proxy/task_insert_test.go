@@ -9,140 +9,12 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestInsertTask_checkLengthOfFieldsData(t *testing.T) {
-	var err error
-
-	// schema is empty, though won't happen in system
-	case1 := insertTask{
-		schema: &schemapb.CollectionSchema{
-			Name:        "TestInsertTask_checkLengthOfFieldsData",
-			Description: "TestInsertTask_checkLengthOfFieldsData",
-			AutoID:      false,
-			Fields:      []*schemapb.FieldSchema{},
-		},
-		BaseInsertTask: BaseInsertTask{
-			InsertRequest: internalpb.InsertRequest{
-				Base: &commonpb.MsgBase{
-					MsgType: commonpb.MsgType_Insert,
-				},
-				DbName:         "TestInsertTask_checkLengthOfFieldsData",
-				CollectionName: "TestInsertTask_checkLengthOfFieldsData",
-				PartitionName:  "TestInsertTask_checkLengthOfFieldsData",
-			},
-		},
-	}
-
-	err = case1.checkLengthOfFieldsData()
-	assert.Equal(t, nil, err)
-
-	// schema has two fields, neither of them are autoID
-	case2 := insertTask{
-		schema: &schemapb.CollectionSchema{
-			Name:        "TestInsertTask_checkLengthOfFieldsData",
-			Description: "TestInsertTask_checkLengthOfFieldsData",
-			AutoID:      false,
-			Fields: []*schemapb.FieldSchema{
-				{
-					AutoID:   false,
-					DataType: schemapb.DataType_Int64,
-				},
-				{
-					AutoID:   false,
-					DataType: schemapb.DataType_Int64,
-				},
-			},
-		},
-	}
-	// passed fields is empty
-	// case2.BaseInsertTask = BaseInsertTask{
-	// 	InsertRequest: internalpb.InsertRequest{
-	// 		Base: &commonpb.MsgBase{
-	// 			MsgType:  commonpb.MsgType_Insert,
-	// 			MsgID:    0,
-	// 			SourceID: paramtable.GetNodeID(),
-	// 		},
-	// 	},
-	// }
-	err = case2.checkLengthOfFieldsData()
-	assert.NotEqual(t, nil, err)
-	// the num of passed fields is less than needed
-	case2.FieldsData = []*schemapb.FieldData{
-		{
-			Type: schemapb.DataType_Int64,
-		},
-	}
-	err = case2.checkLengthOfFieldsData()
-	assert.NotEqual(t, nil, err)
-	// satisfied
-	case2.FieldsData = []*schemapb.FieldData{
-		{
-			Type: schemapb.DataType_Int64,
-		},
-		{
-			Type: schemapb.DataType_Int64,
-		},
-	}
-	err = case2.checkLengthOfFieldsData()
-	assert.Equal(t, nil, err)
-
-	// schema has two field, one of them are autoID
-	case3 := insertTask{
-		schema: &schemapb.CollectionSchema{
-			Name:        "TestInsertTask_checkLengthOfFieldsData",
-			Description: "TestInsertTask_checkLengthOfFieldsData",
-			AutoID:      false,
-			Fields: []*schemapb.FieldSchema{
-				{
-					AutoID:   true,
-					DataType: schemapb.DataType_Int64,
-				},
-				{
-					AutoID:   false,
-					DataType: schemapb.DataType_Int64,
-				},
-			},
-		},
-	}
-	// passed fields is empty
-	// case3.req = &milvuspb.InsertRequest{}
-	err = case3.checkLengthOfFieldsData()
-	assert.NotEqual(t, nil, err)
-	// satisfied
-	case3.FieldsData = []*schemapb.FieldData{
-		{
-			Type: schemapb.DataType_Int64,
-		},
-	}
-	err = case3.checkLengthOfFieldsData()
-	assert.Equal(t, nil, err)
-
-	// schema has one field which is autoID
-	case4 := insertTask{
-		schema: &schemapb.CollectionSchema{
-			Name:        "TestInsertTask_checkLengthOfFieldsData",
-			Description: "TestInsertTask_checkLengthOfFieldsData",
-			AutoID:      false,
-			Fields: []*schemapb.FieldSchema{
-				{
-					AutoID:   true,
-					DataType: schemapb.DataType_Int64,
-				},
-			},
-		},
-	}
-	// passed fields is empty
-	// satisfied
-	// case4.req = &milvuspb.InsertRequest{}
-	err = case4.checkLengthOfFieldsData()
-	assert.Equal(t, nil, err)
-}
-
 func TestInsertTask_CheckAligned(t *testing.T) {
 	var err error
 
 	// passed NumRows is less than 0
 	case1 := insertTask{
-		BaseInsertTask: BaseInsertTask{
+		insertMsg: &BaseInsertTask{
 			InsertRequest: internalpb.InsertRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_Insert,
@@ -151,7 +23,7 @@ func TestInsertTask_CheckAligned(t *testing.T) {
 			},
 		},
 	}
-	err = case1.CheckAligned()
+	err = case1.insertMsg.CheckAligned()
 	assert.NoError(t, err)
 
 	// checkLengthOfFieldsData was already checked by TestInsertTask_checkLengthOfFieldsData
@@ -170,7 +42,7 @@ func TestInsertTask_CheckAligned(t *testing.T) {
 	numRows := 20
 	dim := 128
 	case2 := insertTask{
-		BaseInsertTask: BaseInsertTask{
+		insertMsg: &BaseInsertTask{
 			InsertRequest: internalpb.InsertRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_Insert,
@@ -200,8 +72,8 @@ func TestInsertTask_CheckAligned(t *testing.T) {
 	}
 
 	// satisfied
-	case2.NumRows = uint64(numRows)
-	case2.FieldsData = []*schemapb.FieldData{
+	case2.insertMsg.NumRows = uint64(numRows)
+	case2.insertMsg.FieldsData = []*schemapb.FieldData{
 		newScalarFieldData(boolFieldSchema, "Bool", numRows),
 		newScalarFieldData(int8FieldSchema, "Int8", numRows),
 		newScalarFieldData(int16FieldSchema, "Int16", numRows),
@@ -213,136 +85,136 @@ func TestInsertTask_CheckAligned(t *testing.T) {
 		newBinaryVectorFieldData("BinaryVector", numRows, dim),
 		newScalarFieldData(varCharFieldSchema, "VarChar", numRows),
 	}
-	err = case2.CheckAligned()
+	err = case2.insertMsg.CheckAligned()
 	assert.NoError(t, err)
 
 	// less bool data
-	case2.FieldsData[0] = newScalarFieldData(boolFieldSchema, "Bool", numRows/2)
-	err = case2.CheckAligned()
+	case2.insertMsg.FieldsData[0] = newScalarFieldData(boolFieldSchema, "Bool", numRows/2)
+	err = case2.insertMsg.CheckAligned()
 	assert.Error(t, err)
 	// more bool data
-	case2.FieldsData[0] = newScalarFieldData(boolFieldSchema, "Bool", numRows*2)
-	err = case2.CheckAligned()
+	case2.insertMsg.FieldsData[0] = newScalarFieldData(boolFieldSchema, "Bool", numRows*2)
+	err = case2.insertMsg.CheckAligned()
 	assert.Error(t, err)
 	// revert
-	case2.FieldsData[0] = newScalarFieldData(boolFieldSchema, "Bool", numRows)
-	err = case2.CheckAligned()
+	case2.insertMsg.FieldsData[0] = newScalarFieldData(boolFieldSchema, "Bool", numRows)
+	err = case2.insertMsg.CheckAligned()
 	assert.NoError(t, err)
 
 	// less int8 data
-	case2.FieldsData[1] = newScalarFieldData(int8FieldSchema, "Int8", numRows/2)
-	err = case2.CheckAligned()
+	case2.insertMsg.FieldsData[1] = newScalarFieldData(int8FieldSchema, "Int8", numRows/2)
+	err = case2.insertMsg.CheckAligned()
 	assert.Error(t, err)
 	// more int8 data
-	case2.FieldsData[1] = newScalarFieldData(int8FieldSchema, "Int8", numRows*2)
-	err = case2.CheckAligned()
+	case2.insertMsg.FieldsData[1] = newScalarFieldData(int8FieldSchema, "Int8", numRows*2)
+	err = case2.insertMsg.CheckAligned()
 	assert.Error(t, err)
 	// revert
-	case2.FieldsData[1] = newScalarFieldData(int8FieldSchema, "Int8", numRows)
-	err = case2.CheckAligned()
+	case2.insertMsg.FieldsData[1] = newScalarFieldData(int8FieldSchema, "Int8", numRows)
+	err = case2.insertMsg.CheckAligned()
 	assert.NoError(t, err)
 
 	// less int16 data
-	case2.FieldsData[2] = newScalarFieldData(int16FieldSchema, "Int16", numRows/2)
-	err = case2.CheckAligned()
+	case2.insertMsg.FieldsData[2] = newScalarFieldData(int16FieldSchema, "Int16", numRows/2)
+	err = case2.insertMsg.CheckAligned()
 	assert.Error(t, err)
 	// more int16 data
-	case2.FieldsData[2] = newScalarFieldData(int16FieldSchema, "Int16", numRows*2)
-	err = case2.CheckAligned()
+	case2.insertMsg.FieldsData[2] = newScalarFieldData(int16FieldSchema, "Int16", numRows*2)
+	err = case2.insertMsg.CheckAligned()
 	assert.Error(t, err)
 	// revert
-	case2.FieldsData[2] = newScalarFieldData(int16FieldSchema, "Int16", numRows)
-	err = case2.CheckAligned()
+	case2.insertMsg.FieldsData[2] = newScalarFieldData(int16FieldSchema, "Int16", numRows)
+	err = case2.insertMsg.CheckAligned()
 	assert.NoError(t, err)
 
 	// less int32 data
-	case2.FieldsData[3] = newScalarFieldData(int32FieldSchema, "Int32", numRows/2)
-	err = case2.CheckAligned()
+	case2.insertMsg.FieldsData[3] = newScalarFieldData(int32FieldSchema, "Int32", numRows/2)
+	err = case2.insertMsg.CheckAligned()
 	assert.Error(t, err)
 	// more int32 data
-	case2.FieldsData[3] = newScalarFieldData(int32FieldSchema, "Int32", numRows*2)
-	err = case2.CheckAligned()
+	case2.insertMsg.FieldsData[3] = newScalarFieldData(int32FieldSchema, "Int32", numRows*2)
+	err = case2.insertMsg.CheckAligned()
 	assert.Error(t, err)
 	// revert
-	case2.FieldsData[3] = newScalarFieldData(int32FieldSchema, "Int32", numRows)
-	err = case2.CheckAligned()
+	case2.insertMsg.FieldsData[3] = newScalarFieldData(int32FieldSchema, "Int32", numRows)
+	err = case2.insertMsg.CheckAligned()
 	assert.NoError(t, err)
 
 	// less int64 data
-	case2.FieldsData[4] = newScalarFieldData(int64FieldSchema, "Int64", numRows/2)
-	err = case2.CheckAligned()
+	case2.insertMsg.FieldsData[4] = newScalarFieldData(int64FieldSchema, "Int64", numRows/2)
+	err = case2.insertMsg.CheckAligned()
 	assert.Error(t, err)
 	// more int64 data
-	case2.FieldsData[4] = newScalarFieldData(int64FieldSchema, "Int64", numRows*2)
-	err = case2.CheckAligned()
+	case2.insertMsg.FieldsData[4] = newScalarFieldData(int64FieldSchema, "Int64", numRows*2)
+	err = case2.insertMsg.CheckAligned()
 	assert.Error(t, err)
 	// revert
-	case2.FieldsData[4] = newScalarFieldData(int64FieldSchema, "Int64", numRows)
-	err = case2.CheckAligned()
+	case2.insertMsg.FieldsData[4] = newScalarFieldData(int64FieldSchema, "Int64", numRows)
+	err = case2.insertMsg.CheckAligned()
 	assert.NoError(t, err)
 
 	// less float data
-	case2.FieldsData[5] = newScalarFieldData(floatFieldSchema, "Float", numRows/2)
-	err = case2.CheckAligned()
+	case2.insertMsg.FieldsData[5] = newScalarFieldData(floatFieldSchema, "Float", numRows/2)
+	err = case2.insertMsg.CheckAligned()
 	assert.Error(t, err)
 	// more float data
-	case2.FieldsData[5] = newScalarFieldData(floatFieldSchema, "Float", numRows*2)
-	err = case2.CheckAligned()
+	case2.insertMsg.FieldsData[5] = newScalarFieldData(floatFieldSchema, "Float", numRows*2)
+	err = case2.insertMsg.CheckAligned()
 	assert.Error(t, err)
 	// revert
-	case2.FieldsData[5] = newScalarFieldData(floatFieldSchema, "Float", numRows)
-	err = case2.CheckAligned()
+	case2.insertMsg.FieldsData[5] = newScalarFieldData(floatFieldSchema, "Float", numRows)
+	err = case2.insertMsg.CheckAligned()
 	assert.NoError(t, nil, err)
 
 	// less double data
-	case2.FieldsData[6] = newScalarFieldData(doubleFieldSchema, "Double", numRows/2)
-	err = case2.CheckAligned()
+	case2.insertMsg.FieldsData[6] = newScalarFieldData(doubleFieldSchema, "Double", numRows/2)
+	err = case2.insertMsg.CheckAligned()
 	assert.Error(t, err)
 	// more double data
-	case2.FieldsData[6] = newScalarFieldData(doubleFieldSchema, "Double", numRows*2)
-	err = case2.CheckAligned()
+	case2.insertMsg.FieldsData[6] = newScalarFieldData(doubleFieldSchema, "Double", numRows*2)
+	err = case2.insertMsg.CheckAligned()
 	assert.Error(t, err)
 	// revert
-	case2.FieldsData[6] = newScalarFieldData(doubleFieldSchema, "Double", numRows)
-	err = case2.CheckAligned()
+	case2.insertMsg.FieldsData[6] = newScalarFieldData(doubleFieldSchema, "Double", numRows)
+	err = case2.insertMsg.CheckAligned()
 	assert.NoError(t, nil, err)
 
 	// less float vectors
-	case2.FieldsData[7] = newFloatVectorFieldData("FloatVector", numRows/2, dim)
-	err = case2.CheckAligned()
+	case2.insertMsg.FieldsData[7] = newFloatVectorFieldData("FloatVector", numRows/2, dim)
+	err = case2.insertMsg.CheckAligned()
 	assert.Error(t, err)
 	// more float vectors
-	case2.FieldsData[7] = newFloatVectorFieldData("FloatVector", numRows*2, dim)
-	err = case2.CheckAligned()
+	case2.insertMsg.FieldsData[7] = newFloatVectorFieldData("FloatVector", numRows*2, dim)
+	err = case2.insertMsg.CheckAligned()
 	assert.Error(t, err)
 	// revert
-	case2.FieldsData[7] = newFloatVectorFieldData("FloatVector", numRows, dim)
-	err = case2.CheckAligned()
+	case2.insertMsg.FieldsData[7] = newFloatVectorFieldData("FloatVector", numRows, dim)
+	err = case2.insertMsg.CheckAligned()
 	assert.NoError(t, err)
 
 	// less binary vectors
-	case2.FieldsData[7] = newBinaryVectorFieldData("BinaryVector", numRows/2, dim)
-	err = case2.CheckAligned()
+	case2.insertMsg.FieldsData[7] = newBinaryVectorFieldData("BinaryVector", numRows/2, dim)
+	err = case2.insertMsg.CheckAligned()
 	assert.Error(t, err)
 	// more binary vectors
-	case2.FieldsData[7] = newBinaryVectorFieldData("BinaryVector", numRows*2, dim)
-	err = case2.CheckAligned()
+	case2.insertMsg.FieldsData[7] = newBinaryVectorFieldData("BinaryVector", numRows*2, dim)
+	err = case2.insertMsg.CheckAligned()
 	assert.Error(t, err)
 	// revert
-	case2.FieldsData[7] = newBinaryVectorFieldData("BinaryVector", numRows, dim)
-	err = case2.CheckAligned()
+	case2.insertMsg.FieldsData[7] = newBinaryVectorFieldData("BinaryVector", numRows, dim)
+	err = case2.insertMsg.CheckAligned()
 	assert.NoError(t, err)
 
 	// less double data
-	case2.FieldsData[8] = newScalarFieldData(varCharFieldSchema, "VarChar", numRows/2)
-	err = case2.CheckAligned()
+	case2.insertMsg.FieldsData[8] = newScalarFieldData(varCharFieldSchema, "VarChar", numRows/2)
+	err = case2.insertMsg.CheckAligned()
 	assert.Error(t, err)
 	// more double data
-	case2.FieldsData[8] = newScalarFieldData(varCharFieldSchema, "VarChar", numRows*2)
-	err = case2.CheckAligned()
+	case2.insertMsg.FieldsData[8] = newScalarFieldData(varCharFieldSchema, "VarChar", numRows*2)
+	err = case2.insertMsg.CheckAligned()
 	assert.Error(t, err)
 	// revert
-	case2.FieldsData[8] = newScalarFieldData(varCharFieldSchema, "VarChar", numRows)
-	err = case2.CheckAligned()
+	case2.insertMsg.FieldsData[8] = newScalarFieldData(varCharFieldSchema, "VarChar", numRows)
+	err = case2.insertMsg.CheckAligned()
 	assert.NoError(t, err)
 }
