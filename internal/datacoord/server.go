@@ -302,8 +302,10 @@ func (s *Server) Init() error {
 //     datanodes etcd watch, etcd alive check and flush completed status check
 //  4. set server state to Healthy
 func (s *Server) Start() error {
-	s.compactionHandler.start()
-	s.compactionTrigger.start()
+	if Params.DataCoordCfg.EnableCompaction {
+		s.compactionHandler.start()
+		s.compactionTrigger.start()
+	}
 
 	if s.enableActiveStandBy {
 		s.activateFunc = func() {
