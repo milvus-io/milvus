@@ -337,6 +337,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 					Type:             datapb.CompactionType_MixCompaction,
 					Timetravel:       timeTravel,
 					Channel:          "ch1",
+					TotalRows:        200,
 				},
 			},
 		},
@@ -845,7 +846,7 @@ func Test_compactionTrigger_noplan(t *testing.T) {
 									CollectionID:   2,
 									PartitionID:    1,
 									LastExpireTime: 100,
-									NumOfRows:      1,
+									NumOfRows:      200,
 									MaxRowNum:      300,
 									InsertChannel:  "ch1",
 									State:          commonpb.SegmentState_Flushed,
@@ -885,66 +886,6 @@ func Test_compactionTrigger_noplan(t *testing.T) {
 									},
 								},
 								lastFlushTime: time.Now(),
-							},
-							3: {
-								SegmentInfo: &datapb.SegmentInfo{
-									ID:             3,
-									CollectionID:   2,
-									PartitionID:    1,
-									LastExpireTime: 100,
-									NumOfRows:      2,
-									MaxRowNum:      300,
-									InsertChannel:  "ch1",
-									State:          commonpb.SegmentState_Flushed,
-									Binlogs: []*datapb.FieldBinlog{
-										{
-											Binlogs: []*datapb.Binlog{
-												{EntriesNum: 5, LogPath: "log1", LogSize: 100},
-											},
-										},
-									},
-								},
-								lastFlushTime: time.Now(),
-							},
-							4: {
-								SegmentInfo: &datapb.SegmentInfo{
-									ID:             4,
-									CollectionID:   2,
-									PartitionID:    1,
-									LastExpireTime: 100,
-									NumOfRows:      3,
-									MaxRowNum:      300,
-									InsertChannel:  "ch1",
-									State:          commonpb.SegmentState_Flushed,
-									Binlogs: []*datapb.FieldBinlog{
-										{
-											Binlogs: []*datapb.Binlog{
-												{EntriesNum: 5, LogPath: "log1", LogSize: 100},
-											},
-										},
-									},
-								},
-								lastFlushTime: time.Now(),
-							},
-							5: {
-								SegmentInfo: &datapb.SegmentInfo{
-									ID:             4,
-									CollectionID:   2,
-									PartitionID:    1,
-									LastExpireTime: 100,
-									NumOfRows:      3,
-									MaxRowNum:      300,
-									InsertChannel:  "ch1",
-									State:          commonpb.SegmentState_Flushed,
-									Binlogs: []*datapb.FieldBinlog{
-										{
-											Binlogs: []*datapb.Binlog{
-												{EntriesNum: 5, LogPath: "log1", LogSize: 100},
-											},
-										},
-									},
-								},
-								lastFlushTime: time.Unix(0, 0),
 							},
 						},
 					},
@@ -1005,8 +946,8 @@ func Test_compactionTrigger_noplan(t *testing.T) {
 	}
 }
 
-// Test compaction with small files
-func Test_compactionTrigger_smallfiles(t *testing.T) {
+// Test compaction with prioritized candi
+func Test_compactionTrigger_PrioritizedCandi(t *testing.T) {
 	type fields struct {
 		meta              *meta
 		allocator         allocator
@@ -1020,6 +961,33 @@ func Test_compactionTrigger_smallfiles(t *testing.T) {
 	}
 	Params.Init()
 	vecFieldID := int64(201)
+
+	genSeg := func(segID, numRows int64) *datapb.SegmentInfo {
+		return &datapb.SegmentInfo{
+			ID:             segID,
+			CollectionID:   2,
+			PartitionID:    1,
+			LastExpireTime: 100,
+			NumOfRows:      numRows,
+			MaxRowNum:      110,
+			InsertChannel:  "ch1",
+			State:          commonpb.SegmentState_Flushed,
+			Binlogs: []*datapb.FieldBinlog{
+				{
+					Binlogs: []*datapb.Binlog{
+						{EntriesNum: 5, LogPath: "log1", LogSize: 100},
+					},
+				},
+			},
+			Deltalogs: []*datapb.FieldBinlog{
+				{
+					Binlogs: []*datapb.Binlog{
+						{EntriesNum: 5, LogPath: "deltalog1"},
+					},
+				},
+			},
+		}
+	}
 	tests := []struct {
 		name      string
 		fields    fields
@@ -1035,111 +1003,35 @@ func Test_compactionTrigger_smallfiles(t *testing.T) {
 					segments: &SegmentsInfo{
 						map[int64]*SegmentInfo{
 							1: {
-								SegmentInfo: &datapb.SegmentInfo{
-									ID:             1,
-									CollectionID:   2,
-									PartitionID:    1,
-									LastExpireTime: 100,
-									NumOfRows:      50,
-									MaxRowNum:      300,
-									InsertChannel:  "ch1",
-									State:          commonpb.SegmentState_Flushed,
-									Binlogs: []*datapb.FieldBinlog{
-										{
-											Binlogs: []*datapb.Binlog{
-												{EntriesNum: 5, LogPath: "log1", LogSize: 100},
-											},
-										},
-									},
-									Deltalogs: []*datapb.FieldBinlog{
-										{
-											Binlogs: []*datapb.Binlog{
-												{EntriesNum: 5, LogPath: "deltalog1"},
-											},
-										},
-									},
-								},
+								SegmentInfo:   genSeg(1, 20),
 								lastFlushTime: time.Now().Add(-100 * time.Minute),
 							},
 							2: {
-								SegmentInfo: &datapb.SegmentInfo{
-									ID:             2,
-									CollectionID:   2,
-									PartitionID:    1,
-									LastExpireTime: 100,
-									NumOfRows:      50,
-									MaxRowNum:      300,
-									InsertChannel:  "ch1",
-									State:          commonpb.SegmentState_Flushed,
-									Binlogs: []*datapb.FieldBinlog{
-										{
-											Binlogs: []*datapb.Binlog{
-												{EntriesNum: 5, LogPath: "log2", LogSize: 800},
-											},
-										},
-									},
-									Deltalogs: []*datapb.FieldBinlog{
-										{
-											Binlogs: []*datapb.Binlog{
-												{EntriesNum: 5, LogPath: "deltalog2"},
-											},
-										},
-									},
-								},
+								SegmentInfo:   genSeg(2, 20),
 								lastFlushTime: time.Now(),
 							},
 							3: {
-								SegmentInfo: &datapb.SegmentInfo{
-									ID:             3,
-									CollectionID:   2,
-									PartitionID:    1,
-									LastExpireTime: 100,
-									NumOfRows:      50,
-									MaxRowNum:      300,
-									InsertChannel:  "ch1",
-									State:          commonpb.SegmentState_Flushed,
-									Binlogs: []*datapb.FieldBinlog{
-										{
-											Binlogs: []*datapb.Binlog{
-												{EntriesNum: 5, LogPath: "log1", LogSize: 100},
-											},
-										},
-									},
-									Deltalogs: []*datapb.FieldBinlog{
-										{
-											Binlogs: []*datapb.Binlog{
-												{EntriesNum: 5, LogPath: "deltalog1"},
-											},
-										},
-									},
-								},
+								SegmentInfo:   genSeg(3, 20),
 								lastFlushTime: time.Now(),
 							},
 							4: {
-								SegmentInfo: &datapb.SegmentInfo{
-									ID:             4,
-									CollectionID:   2,
-									PartitionID:    1,
-									LastExpireTime: 100,
-									NumOfRows:      50,
-									MaxRowNum:      300,
-									InsertChannel:  "ch1",
-									State:          commonpb.SegmentState_Flushed,
-									Binlogs: []*datapb.FieldBinlog{
-										{
-											Binlogs: []*datapb.Binlog{
-												{EntriesNum: 5, LogPath: "log1", LogSize: 100},
-											},
-										},
-									},
-									Deltalogs: []*datapb.FieldBinlog{
-										{
-											Binlogs: []*datapb.Binlog{
-												{EntriesNum: 5, LogPath: "deltalog1"},
-											},
-										},
-									},
-								},
+								SegmentInfo:   genSeg(4, 20),
+								lastFlushTime: time.Now(),
+							},
+							5: {
+								SegmentInfo:   genSeg(5, 20),
+								lastFlushTime: time.Now(),
+							},
+							6: {
+								SegmentInfo:   genSeg(6, 20),
+								lastFlushTime: time.Now(),
+							},
+							7: {
+								SegmentInfo:   genSeg(7, 20),
+								lastFlushTime: time.Now(),
+							},
+							8: {
+								SegmentInfo:   genSeg(8, 20),
 								lastFlushTime: time.Now(),
 							},
 						},
@@ -1192,8 +1084,283 @@ func Test_compactionTrigger_smallfiles(t *testing.T) {
 			spy := (tt.fields.compactionHandler).(*spyCompactionHandler)
 			select {
 			case val := <-spy.spyChan:
-				// 4 segments in the final pick list
-				assert.Equal(t, len(val.SegmentBinlogs), 4)
+				// 5 segments in the final pick list
+				assert.Equal(t, len(val.SegmentBinlogs), 5)
+				return
+			case <-time.After(3 * time.Second):
+				assert.Fail(t, "failed to get plan")
+				return
+			}
+		})
+	}
+}
+
+// Test compaction with small candi
+func Test_compactionTrigger_SmallCandi(t *testing.T) {
+	type fields struct {
+		meta              *meta
+		allocator         allocator
+		signals           chan *compactionSignal
+		compactionHandler compactionPlanContext
+		globalTrigger     *time.Ticker
+	}
+	type args struct {
+		collectionID int64
+		compactTime  *compactTime
+	}
+	Params.Init()
+	vecFieldID := int64(201)
+
+	genSeg := func(segID, numRows int64) *datapb.SegmentInfo {
+		return &datapb.SegmentInfo{
+			ID:             segID,
+			CollectionID:   2,
+			PartitionID:    1,
+			LastExpireTime: 100,
+			NumOfRows:      numRows,
+			MaxRowNum:      110,
+			InsertChannel:  "ch1",
+			State:          commonpb.SegmentState_Flushed,
+			Binlogs: []*datapb.FieldBinlog{
+				{
+					Binlogs: []*datapb.Binlog{
+						{EntriesNum: 5, LogPath: "log1", LogSize: 100},
+					},
+				},
+			},
+		}
+	}
+	tests := []struct {
+		name      string
+		fields    fields
+		args      args
+		wantErr   bool
+		wantPlans []*datapb.CompactionPlan
+	}{
+		{
+			"test small segment",
+			fields{
+				&meta{
+					// 4 small segments
+					segments: &SegmentsInfo{
+						map[int64]*SegmentInfo{
+							1: {
+								SegmentInfo:   genSeg(1, 20),
+								lastFlushTime: time.Now().Add(-100 * time.Minute),
+							},
+							2: {
+								SegmentInfo:   genSeg(2, 20),
+								lastFlushTime: time.Now(),
+							},
+							3: {
+								SegmentInfo:   genSeg(3, 20),
+								lastFlushTime: time.Now(),
+							},
+							4: {
+								SegmentInfo:   genSeg(4, 20),
+								lastFlushTime: time.Now(),
+							},
+							5: {
+								SegmentInfo:   genSeg(5, 20),
+								lastFlushTime: time.Now(),
+							},
+							6: {
+								SegmentInfo:   genSeg(6, 20),
+								lastFlushTime: time.Now(),
+							},
+							7: {
+								SegmentInfo:   genSeg(7, 20),
+								lastFlushTime: time.Now(),
+							},
+						},
+					},
+					collections: map[int64]*collectionInfo{
+						2: {
+							ID: 2,
+							Schema: &schemapb.CollectionSchema{
+								Fields: []*schemapb.FieldSchema{
+									{
+										FieldID:  vecFieldID,
+										DataType: schemapb.DataType_FloatVector,
+									},
+								},
+							},
+						},
+					},
+				},
+				newMockAllocator(),
+				make(chan *compactionSignal, 1),
+				&spyCompactionHandler{spyChan: make(chan *datapb.CompactionPlan, 1)},
+				nil,
+			},
+			args{
+				2,
+				&compactTime{travelTime: 200, expireTime: 0},
+			},
+			false,
+			nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			indexCoord := newMockIndexCoord()
+
+			tr := &compactionTrigger{
+				meta:              tt.fields.meta,
+				handler:           newMockHandlerWithMeta(tt.fields.meta),
+				allocator:         tt.fields.allocator,
+				signals:           tt.fields.signals,
+				compactionHandler: tt.fields.compactionHandler,
+				globalTrigger:     tt.fields.globalTrigger,
+				segRefer:          &SegmentReferenceManager{segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{}},
+				indexCoord:        indexCoord,
+			}
+			tr.start()
+			defer tr.stop()
+			err := tr.triggerCompaction()
+			assert.Equal(t, tt.wantErr, err != nil)
+			spy := (tt.fields.compactionHandler).(*spyCompactionHandler)
+			select {
+			case val := <-spy.spyChan:
+				// 6 segments in the final pick list.
+				// 5 generated by the origin plan, 1 was added as additional segment.
+				assert.Equal(t, len(val.SegmentBinlogs), 6)
+				return
+			case <-time.After(3 * time.Second):
+				assert.Fail(t, "failed to get plan")
+				return
+			}
+		})
+	}
+}
+
+// Test compaction with small candi
+func Test_compactionTrigger_SqueezeNonPlannedSegs(t *testing.T) {
+	type fields struct {
+		meta              *meta
+		allocator         allocator
+		signals           chan *compactionSignal
+		compactionHandler compactionPlanContext
+		globalTrigger     *time.Ticker
+	}
+	type args struct {
+		collectionID int64
+		compactTime  *compactTime
+	}
+	Params.Init()
+	vecFieldID := int64(201)
+
+	genSeg := func(segID, numRows int64) *datapb.SegmentInfo {
+		return &datapb.SegmentInfo{
+			ID:             segID,
+			CollectionID:   2,
+			PartitionID:    1,
+			LastExpireTime: 100,
+			NumOfRows:      numRows,
+			MaxRowNum:      110,
+			InsertChannel:  "ch1",
+			State:          commonpb.SegmentState_Flushed,
+			Binlogs: []*datapb.FieldBinlog{
+				{
+					Binlogs: []*datapb.Binlog{
+						{EntriesNum: 5, LogPath: "log1", LogSize: 100},
+					},
+				},
+			},
+		}
+	}
+	tests := []struct {
+		name      string
+		fields    fields
+		args      args
+		wantErr   bool
+		wantPlans []*datapb.CompactionPlan
+	}{
+		{
+			"test small segment",
+			fields{
+				&meta{
+					// 4 small segments
+					segments: &SegmentsInfo{
+						map[int64]*SegmentInfo{
+							1: {
+								SegmentInfo:   genSeg(1, 60),
+								lastFlushTime: time.Now().Add(-100 * time.Minute),
+							},
+							2: {
+								SegmentInfo:   genSeg(2, 60),
+								lastFlushTime: time.Now(),
+							},
+							3: {
+								SegmentInfo:   genSeg(3, 60),
+								lastFlushTime: time.Now(),
+							},
+							4: {
+								SegmentInfo:   genSeg(4, 60),
+								lastFlushTime: time.Now(),
+							},
+							5: {
+								SegmentInfo:   genSeg(5, 26),
+								lastFlushTime: time.Now(),
+							},
+							6: {
+								SegmentInfo:   genSeg(6, 26),
+								lastFlushTime: time.Now(),
+							},
+						},
+					},
+					collections: map[int64]*collectionInfo{
+						2: {
+							ID: 2,
+							Schema: &schemapb.CollectionSchema{
+								Fields: []*schemapb.FieldSchema{
+									{
+										FieldID:  vecFieldID,
+										DataType: schemapb.DataType_FloatVector,
+									},
+								},
+							},
+						},
+					},
+				},
+				newMockAllocator(),
+				make(chan *compactionSignal, 1),
+				&spyCompactionHandler{spyChan: make(chan *datapb.CompactionPlan, 1)},
+				nil,
+			},
+			args{
+				2,
+				&compactTime{travelTime: 200, expireTime: 0},
+			},
+			false,
+			nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			indexCoord := newMockIndexCoord()
+
+			tr := &compactionTrigger{
+				meta:              tt.fields.meta,
+				handler:           newMockHandlerWithMeta(tt.fields.meta),
+				allocator:         tt.fields.allocator,
+				signals:           tt.fields.signals,
+				compactionHandler: tt.fields.compactionHandler,
+				globalTrigger:     tt.fields.globalTrigger,
+				segRefer:          &SegmentReferenceManager{segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{}},
+				indexCoord:        indexCoord,
+			}
+			tr.start()
+			defer tr.stop()
+			err := tr.triggerCompaction()
+			assert.Equal(t, tt.wantErr, err != nil)
+			spy := (tt.fields.compactionHandler).(*spyCompactionHandler)
+			select {
+			case val := <-spy.spyChan:
+				// max # of rows == 110, expansion rate == 1.25.
+				// segment 5 and 6 are squeezed into a non-planned segment. Total # of rows: 60 + 26 + 26 == 112,
+				// which is greater than 110 but smaller than 110 * 1.25
+				assert.Equal(t, len(val.SegmentBinlogs), 3)
 				return
 			case <-time.After(3 * time.Second):
 				assert.Fail(t, "failed to get plan")
@@ -1321,7 +1488,7 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 				select {
 				case val := <-spy.spyChan:
 					plans = append(plans, val)
-				case <-time.After(1 * time.Second):
+				case <-time.After(3 * time.Second):
 					break WAIT
 				}
 			}
@@ -1334,13 +1501,15 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 				}
 				fmt.Println("target ", len(plan.SegmentBinlogs))
 			}
-			assert.Equal(t, len(plans), 3)
+			assert.Equal(t, 4, len(plans))
 			// plan 1: 250 + 20 * 10 + 3 * 20
 			// plan 2: 200 + 7 * 20 + 4 * 40
-			// plan 3  128 + 6 * 40 + 127
-			assert.Equal(t, len(plans[0].SegmentBinlogs), 24)
-			assert.Equal(t, len(plans[1].SegmentBinlogs), 12)
-			assert.Equal(t, len(plans[2].SegmentBinlogs), 8)
+			// plan 3: 128 + 6 * 40 + 127
+			// plan 4: 300 + 128 + 128  ( < 512 * 1.25)
+			assert.Equal(t, 24, len(plans[0].SegmentBinlogs))
+			assert.Equal(t, 12, len(plans[1].SegmentBinlogs))
+			assert.Equal(t, 8, len(plans[2].SegmentBinlogs))
+			assert.Equal(t, 3, len(plans[3].SegmentBinlogs))
 		})
 	}
 }

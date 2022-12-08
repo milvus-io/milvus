@@ -23,8 +23,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/util/tsoutil"
-
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -33,6 +31,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/logutil"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 )
 
@@ -472,6 +472,7 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, force bool, c
 	// TODO add low priority candidates, for example if the segment is smaller than full 0.9 * max segment size but larger than small segment boundary, we only execute compaction when there are no compaction running actively
 	var prioritizedCandidates []*SegmentInfo
 	var smallCandidates []*SegmentInfo
+	var nonPlannedSegments []*SegmentInfo
 
 	// TODO, currently we lack of the measurement of data distribution, there should be another compaction help on redistributing segment based on scalar/vector field distribution
 	for _, segment := range segments {
@@ -481,9 +482,10 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, force bool, c
 			prioritizedCandidates = append(prioritizedCandidates, segment)
 		} else if t.isSmallSegment(segment) {
 			smallCandidates = append(smallCandidates, segment)
+		} else {
+			nonPlannedSegments = append(nonPlannedSegments, segment)
 		}
 	}
-
 	var plans []*datapb.CompactionPlan
 	// sort segment from large to small
 	sort.Slice(prioritizedCandidates, func(i, j int) bool {
@@ -500,6 +502,17 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, force bool, c
 		return smallCandidates[i].GetID() < smallCandidates[j].GetID()
 	})
 
+	// Sort non-planned from small to large.
+	sort.Slice(nonPlannedSegments, func(i, j int) bool {
+		if nonPlannedSegments[i].GetNumOfRows() != nonPlannedSegments[j].GetNumOfRows() {
+			return nonPlannedSegments[i].GetNumOfRows() < nonPlannedSegments[j].GetNumOfRows()
+		}
+		return nonPlannedSegments[i].GetID() > nonPlannedSegments[j].GetID()
+	})
+
+	getSegmentIDs := func(segment *SegmentInfo, _ int) int64 {
+		return segment.GetID()
+	}
 	// greedy pick from large segment to small, the goal is to fill each segment to reach 512M
 	// we must ensure all prioritized candidates is in a plan
 	//TODO the compaction policy should consider segment with similar timestamp together so timetravel and data expiration could work better.
@@ -537,6 +550,14 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, force bool, c
 		plans = append(plans, plan)
 	}
 
+	getSegIDsFromPlan := func(plan *datapb.CompactionPlan) []int64 {
+		var segmentIDs []int64
+		for _, binLog := range plan.GetSegmentBinlogs() {
+			segmentIDs = append(segmentIDs, binLog.GetSegmentID())
+		}
+		return segmentIDs
+	}
+	var remainingSmallSegs []*SegmentInfo
 	// check if there are small candidates left can be merged into large segments
 	for len(smallCandidates) > 0 {
 		var bucket []*SegmentInfo
@@ -560,14 +581,68 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, force bool, c
 			targetRow += s.GetNumOfRows()
 		}
 		// only merge if candidate number is large than MinSegmentToMerge or if target row is large enough
-		if len(bucket) >= Params.DataCoordCfg.MinSegmentToMerge.GetAsInt() || targetRow > int64(float64(segment.GetMaxRowNum())*Params.DataCoordCfg.SegmentCompactableProportion.GetAsFloat()) {
+		if len(bucket) >= Params.DataCoordCfg.MinSegmentToMerge.GetAsInt() ||
+			targetRow > int64(float64(segment.GetMaxRowNum())*Params.DataCoordCfg.SegmentCompactableProportion.GetAsFloat()) {
 			plan := segmentsToPlan(bucket, compactTime)
-			log.Info("generate a plan for small candidates", zap.Any("plan", plan),
-				zap.Int64("target segment row", targetRow), zap.Int64("target segment size", size))
+			log.Info("generate a plan for small candidates",
+				zap.Int64s("plan segment IDs", lo.Map(bucket, getSegmentIDs)),
+				zap.Int64("target segment row", targetRow),
+				zap.Int64("target segment size", size))
 			plans = append(plans, plan)
+		} else {
+			remainingSmallSegs = append(remainingSmallSegs, bucket...)
 		}
 	}
+	// Try adding remaining segments to existing plans.
+	for i := len(remainingSmallSegs) - 1; i >= 0; i-- {
+		s := remainingSmallSegs[i]
+		if !isExpandableSmallSegment(s) {
+			continue
+		}
+		// Try squeeze this segment into existing plans. This could cause segment size to exceed maxSize.
+		for _, plan := range plans {
+			if plan.TotalRows+s.GetNumOfRows() <= int64(Params.DataCoordCfg.SegmentExpansionRate.GetAsFloat()*float64(s.GetMaxRowNum())) {
+				segmentBinLogs := &datapb.CompactionSegmentBinlogs{
+					SegmentID:           s.GetID(),
+					FieldBinlogs:        s.GetBinlogs(),
+					Field2StatslogPaths: s.GetStatslogs(),
+					Deltalogs:           s.GetDeltalogs(),
+				}
+				plan.TotalRows += s.GetNumOfRows()
+				plan.SegmentBinlogs = append(plan.SegmentBinlogs, segmentBinLogs)
+				log.Info("small segment appended on existing plan",
+					zap.Int64("segment ID", s.GetID()),
+					zap.Int64("target rows", plan.GetTotalRows()),
+					zap.Int64s("plan segment ID", getSegIDsFromPlan(plan)),
+				)
 
+				remainingSmallSegs = append(remainingSmallSegs[:i], remainingSmallSegs[i+1:]...)
+				break
+			}
+		}
+	}
+	// If there are still remaining small segments, try adding them to non-planned segments.
+	for _, npSeg := range nonPlannedSegments {
+		bucket := []*SegmentInfo{npSeg}
+		targetRow := npSeg.GetNumOfRows()
+		for i := len(remainingSmallSegs) - 1; i >= 0; i-- {
+			// Note: could also simply use MaxRowNum as limit.
+			if targetRow+remainingSmallSegs[i].GetNumOfRows() <=
+				int64(Params.DataCoordCfg.SegmentExpansionRate.GetAsFloat()*float64(npSeg.GetMaxRowNum())) {
+				bucket = append(bucket, remainingSmallSegs[i])
+				targetRow += remainingSmallSegs[i].GetNumOfRows()
+				remainingSmallSegs = append(remainingSmallSegs[:i], remainingSmallSegs[i+1:]...)
+			}
+		}
+		if len(bucket) > 1 {
+			plan := segmentsToPlan(bucket, compactTime)
+			plans = append(plans, plan)
+			log.Info("generate a plan for to squeeze small candidates into non-planned segment",
+				zap.Int64s("plan segment IDs", lo.Map(bucket, getSegmentIDs)),
+				zap.Int64("target segment row", targetRow),
+			)
+		}
+	}
 	return plans
 }
 
@@ -586,6 +661,7 @@ func segmentsToPlan(segments []*SegmentInfo, compactTime *compactTime) *datapb.C
 			Field2StatslogPaths: s.GetStatslogs(),
 			Deltalogs:           s.GetDeltalogs(),
 		}
+		plan.TotalRows += s.GetNumOfRows()
 		plan.SegmentBinlogs = append(plan.SegmentBinlogs, segmentBinlogs)
 	}
 
@@ -646,6 +722,10 @@ func (t *compactionTrigger) isSmallSegment(segment *SegmentInfo) bool {
 	return segment.GetNumOfRows() < int64(float64(segment.GetMaxRowNum())*Params.DataCoordCfg.SegmentSmallProportion.GetAsFloat())
 }
 
+func isExpandableSmallSegment(segment *SegmentInfo) bool {
+	return segment.GetNumOfRows() < int64(float64(segment.GetMaxRowNum())*(Params.DataCoordCfg.SegmentExpansionRate.GetAsFloat()-1))
+}
+
 func (t *compactionTrigger) fillOriginPlan(plan *datapb.CompactionPlan) error {
 	// TODO context
 	id, err := t.allocator.allocID(context.TODO())
@@ -696,7 +776,7 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compa
 	}
 
 	if float64(totalExpiredRows)/float64(segment.GetNumOfRows()) >= Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat() || totalExpiredSize > Params.DataCoordCfg.SingleCompactionExpiredLogMaxSize.GetAsInt64() {
-		log.Info("total expired entities is too much, trigger compation", zap.Int64("segment", segment.ID),
+		log.Info("total expired entities is too much, trigger compaction", zap.Int64("segment", segment.ID),
 			zap.Int("expired rows", totalExpiredRows), zap.Int64("expired log size", totalExpiredSize))
 		return true
 	}
@@ -722,7 +802,7 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compa
 
 	// currently delta log size and delete ratio policy is applied
 	if float64(totalDeletedRows)/float64(segment.GetNumOfRows()) >= Params.DataCoordCfg.SingleCompactionRatioThreshold.GetAsFloat() || totalDeleteLogSize > Params.DataCoordCfg.SingleCompactionDeltaLogMaxSize.GetAsInt64() {
-		log.Info("total delete entities is too much, trigger compation", zap.Int64("segment", segment.ID),
+		log.Info("total delete entities is too much, trigger compaction", zap.Int64("segment", segment.ID),
 			zap.Int("deleted rows", totalDeletedRows), zap.Int64("delete log size", totalDeleteLogSize))
 		return true
 	}
