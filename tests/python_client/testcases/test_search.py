@@ -759,7 +759,6 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                          "err_msg": "unsupported"})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="issue 15407")
     def test_search_binary_flat_with_L2(self):
         """
         target: search binary collection using FlAT with L2
@@ -775,7 +774,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             search_params, default_limit, "int64 >= 0",
                             check_task=CheckTasks.err_res,
                             check_items={"err_code": 1,
-                                         "err_msg": "Search failed"})
+                                         "err_msg": "Data type and metric type mis-match"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_with_output_fields_not_exist(self):
