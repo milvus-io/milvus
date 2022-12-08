@@ -412,10 +412,6 @@ func (mcm *MinioChunkManager) ListWithPrefix(ctx context.Context, prefix string,
 func Read(r io.Reader, size int64) ([]byte, error) {
 	data := make([]byte, 0, size)
 	for {
-		if len(data) >= cap(data) {
-			d := append(data[:cap(data)], 0)
-			data = d[:len(data)]
-		}
 		n, err := r.Read(data[len(data):cap(data)])
 		data = data[:len(data)+n]
 		if err != nil {
@@ -423,6 +419,9 @@ func Read(r io.Reader, size int64) ([]byte, error) {
 				err = nil
 			}
 			return data, err
+		}
+		if len(data) == cap(data) {
+			return data, nil
 		}
 	}
 }
