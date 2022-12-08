@@ -20,7 +20,9 @@ func TestUnaryServerInterceptor(t *testing.T) {
 
 func TestPrivilegeInterceptor(t *testing.T) {
 	ctx := context.Background()
+
 	t.Run("Authorization Disabled", func(t *testing.T) {
+		InitPolicyModel()
 		paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "false")
 		_, err := PrivilegeInterceptor(ctx, &milvuspb.LoadCollectionRequest{
 			DbName:         "db_test",
@@ -30,6 +32,7 @@ func TestPrivilegeInterceptor(t *testing.T) {
 	})
 
 	t.Run("Authorization Enabled", func(t *testing.T) {
+		InitPolicyModel()
 		paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
 
 		_, err := PrivilegeInterceptor(ctx, &milvuspb.HasCollectionRequest{})
@@ -110,6 +113,14 @@ func TestPrivilegeInterceptor(t *testing.T) {
 			CollectionName: "col1",
 		})
 		assert.Nil(t, err)
+
+		casbinModel = nil
+		assert.Panics(t, func() {
+			PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.LoadCollectionRequest{
+				DbName:         "db_test",
+				CollectionName: "col1",
+			})
+		})
 	})
 
 }
