@@ -19,6 +19,7 @@ package grpcindexcoordclient
 import (
 	"context"
 	"fmt"
+	"time"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
@@ -37,8 +38,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
-var ClientParams paramtable.GrpcClientConfig
-
 var Params *paramtable.ComponentParam = paramtable.Get()
 
 // Client is the grpc client of IndexCoord.
@@ -55,19 +54,19 @@ func NewClient(ctx context.Context, metaRoot string, etcdCli *clientv3.Client) (
 		log.Debug("IndexCoordClient NewClient failed", zap.Error(err))
 		return nil, err
 	}
-	ClientParams.InitOnce(typeutil.IndexCoordRole)
+	ClientParams := &Params.IndexCoordGrpcClientCfg
 	client := &Client{
 		grpcClient: &grpcclient.ClientBase[indexpb.IndexCoordClient]{
-			ClientMaxRecvSize:      ClientParams.ClientMaxRecvSize,
-			ClientMaxSendSize:      ClientParams.ClientMaxSendSize,
-			DialTimeout:            ClientParams.DialTimeout,
-			KeepAliveTime:          ClientParams.KeepAliveTime,
-			KeepAliveTimeout:       ClientParams.KeepAliveTimeout,
+			ClientMaxRecvSize:      ClientParams.ClientMaxRecvSize.GetAsInt(),
+			ClientMaxSendSize:      ClientParams.ClientMaxSendSize.GetAsInt(),
+			DialTimeout:            ClientParams.DialTimeout.GetAsDuration(time.Millisecond),
+			KeepAliveTime:          ClientParams.KeepAliveTime.GetAsDuration(time.Millisecond),
+			KeepAliveTimeout:       ClientParams.KeepAliveTimeout.GetAsDuration(time.Millisecond),
 			RetryServiceNameConfig: "milvus.proto.index.IndexCoord",
-			MaxAttempts:            ClientParams.MaxAttempts,
-			InitialBackoff:         ClientParams.InitialBackoff,
-			MaxBackoff:             ClientParams.MaxBackoff,
-			BackoffMultiplier:      ClientParams.BackoffMultiplier,
+			MaxAttempts:            ClientParams.MaxAttempts.GetAsInt(),
+			InitialBackoff:         float32(ClientParams.InitialBackoff.GetAsFloat()),
+			MaxBackoff:             float32(ClientParams.MaxBackoff.GetAsFloat()),
+			BackoffMultiplier:      float32(ClientParams.BackoffMultiplier.GetAsFloat()),
 		},
 		sess: sess,
 	}

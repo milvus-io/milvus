@@ -48,7 +48,7 @@ func newMockClient() *client {
 func newRocksMQ(t *testing.T, rmqPath string) server.RocksMQ {
 	rocksdbPath := rmqPath
 	var params paramtable.BaseTable
-	params.Init()
+	params.Init(0)
 	rmq, err := server.NewRocksMQ(params, rocksdbPath, nil)
 	assert.NoError(t, err)
 	return rmq

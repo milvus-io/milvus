@@ -37,7 +37,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 type proxyMock struct {
@@ -160,8 +159,8 @@ func TestRun(t *testing.T) {
 		cancel:      cancel,
 		grpcErrChan: make(chan error),
 	}
-	Params.InitOnce(typeutil.RootCoordRole)
-	Params.Port = 1000000
+	rcServerConfig := &paramtable.Get().RootCoordGrpcServerCfg
+	paramtable.Get().Save(rcServerConfig.Port.Key, "1000000")
 	err := svr.Run()
 	assert.NotNil(t, err)
 	assert.EqualError(t, err, "listen tcp: address 1000000: invalid port")
@@ -176,7 +175,8 @@ func TestRun(t *testing.T) {
 		return &mockQuery{}
 	}
 
-	Params.Port = rand.Int()%100 + 10000
+	paramtable.Get().Save(rcServerConfig.Port.Key, fmt.Sprintf("%d", rand.Int()%100+10000))
+	etcdConfig := &paramtable.Get().EtcdCfg
 
 	rand.Seed(time.Now().UnixNano())
 	randVal := rand.Int()
@@ -185,13 +185,13 @@ func TestRun(t *testing.T) {
 	rootcoord.Params.Init()
 
 	etcdCli, err := etcd.GetEtcdClient(
-		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
-		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
-		Params.EtcdCfg.Endpoints.GetAsStrings(),
-		Params.EtcdCfg.EtcdTLSCert.GetValue(),
-		Params.EtcdCfg.EtcdTLSKey.GetValue(),
-		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
-		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
+		etcdConfig.UseEmbedEtcd.GetAsBool(),
+		etcdConfig.EtcdUseSSL.GetAsBool(),
+		etcdConfig.Endpoints.GetAsStrings(),
+		etcdConfig.EtcdTLSCert.GetValue(),
+		etcdConfig.EtcdTLSKey.GetValue(),
+		etcdConfig.EtcdTLSCACert.GetValue(),
+		etcdConfig.EtcdTLSMinVersion.GetValue())
 	assert.Nil(t, err)
 	sessKey := path.Join(rootcoord.Params.EtcdCfg.MetaRootPath.GetValue(), sessionutil.DefaultServiceRoot)
 	_, err = etcdCli.Delete(ctx, sessKey, clientv3.WithPrefix())

@@ -19,7 +19,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	config "github.com/milvus-io/milvus/internal/config"
@@ -63,28 +62,14 @@ func globalConfigPrefixs() []string {
 
 var defaultYaml = DefaultMilvusYaml
 
-// Base abstracts BaseTable
-// TODO: it's never used, consider to substitute BaseTable or to remove it
-type Base interface {
-	Load(key string) (string, error)
-	LoadRange(key, endKey string, limit int) ([]string, []string, error)
-	LoadYaml(fileName string) error
-	Remove(key string) error
-	Save(key, value string) error
-	Init()
-}
-
 // BaseTable the basics of paramtable
 type BaseTable struct {
-	once sync.Once
-	mgr  *config.Manager
-	// params    *memkv.MemoryKV
+	mgr *config.Manager
 
 	configDir string
+	YamlFile  string
 
 	Log log.Config
-
-	YamlFile string
 }
 
 // NewBaseTableFromYamlOnly only used in migration tool.
@@ -98,19 +83,9 @@ func NewBaseTableFromYamlOnly(yaml string) *BaseTable {
 	return gp
 }
 
-// GlobalInitWithYaml initializes the param table with the given yaml.
-// We will update the global DefaultYaml variable directly, once and for all.
-// GlobalInitWithYaml shall be called at the very beginning before initiating the base table.
-// GlobalInitWithYaml should be called only in standalone and embedded Milvus.
-func (gp *BaseTable) GlobalInitWithYaml(yaml string) {
-	gp.once.Do(func() {
-		defaultYaml = yaml
-		gp.Init()
-	})
-}
-
 // Init initializes the param table.
-func (gp *BaseTable) Init() {
+// if refreshInterval greater than 0 will auto refresh config from source
+func (gp *BaseTable) Init(refreshInterval int) {
 	formatter := func(key string) string {
 		ret := strings.ToLower(key)
 		ret = strings.TrimPrefix(ret, "milvus.")
@@ -120,35 +95,32 @@ func (gp *BaseTable) Init() {
 		return ret
 	}
 	if gp.YamlFile == "" {
-		gp.YamlFile = defaultYaml
+		gp.YamlFile = DefaultMilvusYaml
 	}
-	gp.initConfigsFromLocal(formatter)
-	gp.initConfigsFromRemote(formatter)
-	gp.InitLogCfg()
-}
-
-func (gp *BaseTable) initConfigsFromLocal(formatter func(key string) string) {
 	var err error
 	gp.mgr, err = config.Init(config.WithEnvSource(formatter))
 	if err != nil {
 		return
 	}
+	gp.initConfigsFromLocal(refreshInterval)
+	gp.initConfigsFromRemote(refreshInterval)
+	gp.InitLogCfg()
+}
 
+func (gp *BaseTable) initConfigsFromLocal(refreshInterval int) {
 	gp.configDir = gp.initConfPath()
 	configFilePath := gp.configDir + "/" + gp.YamlFile
-	gp.mgr, err = config.Init(
-		config.WithEnvSource(formatter),
-		config.WithFilesSource(&config.FileInfo{
-			Filepath:        configFilePath,
-			RefreshInterval: 10 * time.Second,
-		}))
+	err := gp.mgr.AddSource(config.NewFileSource(&config.FileInfo{
+		Filepath:        configFilePath,
+		RefreshInterval: time.Duration(refreshInterval) * time.Second,
+	}))
 	if err != nil {
 		log.Warn("init baseTable with file failed", zap.String("configFile", configFilePath), zap.Error(err))
 		return
 	}
 }
 
-func (gp *BaseTable) initConfigsFromRemote(formatter func(key string) string) {
+func (gp *BaseTable) initConfigsFromRemote(refreshInterval int) {
 	etcdConfig := EtcdConfig{}
 	etcdConfig.Init(gp)
 	etcdConfig.Endpoints.PanicIfEmpty = false
@@ -168,7 +140,7 @@ func (gp *BaseTable) initConfigsFromRemote(formatter func(key string) string) {
 		CaCertFile:      etcdConfig.EtcdTLSCACert.GetValue(),
 		MinVersion:      etcdConfig.EtcdTLSMinVersion.GetValue(),
 		KeyPrefix:       etcdConfig.RootPath.GetValue(),
-		RefreshInterval: 10 * time.Second,
+		RefreshInterval: time.Duration(refreshInterval) * time.Second,
 	}
 
 	s, err := config.NewEtcdSource(info)
@@ -211,18 +183,6 @@ func (gp *BaseTable) Load(key string) (string, error) {
 	return gp.mgr.GetConfig(key)
 }
 
-// LoadWithPriority loads an object with multiple @keys, return the first successful value.
-// If all keys not exist, return error.
-// This is to be compatible with old configuration file.
-func (gp *BaseTable) LoadWithPriority(keys []string) (string, error) {
-	for _, key := range keys {
-		if str, err := gp.mgr.GetConfig(key); err == nil {
-			return str, nil
-		}
-	}
-	return "", fmt.Errorf("invalid keys: %v", keys)
-}
-
 // LoadWithDefault loads an object with @key. If the object does not exist, @defaultValue will be returned.
 func (gp *BaseTable) LoadWithDefault(key, defaultValue string) string {
 	str, err := gp.mgr.GetConfig(key)
@@ -230,19 +190,6 @@ func (gp *BaseTable) LoadWithDefault(key, defaultValue string) string {
 		return defaultValue
 	}
 	return str
-}
-
-// LoadWithDefault2 loads an object with multiple @keys, return the first successful value.
-// If all keys not exist, return @defaultValue.
-// This is to be compatible with old configuration file.
-func (gp *BaseTable) LoadWithDefault2(keys []string, defaultValue string) string {
-	for _, key := range keys {
-		str, err := gp.mgr.GetConfig(key)
-		if err == nil {
-			return str
-		}
-	}
-	return defaultValue
 }
 
 func (gp *BaseTable) Get(key string) string {
@@ -293,33 +240,9 @@ func (gp *BaseTable) ParseBool(key string, defaultValue bool) bool {
 	return value
 }
 
-func (gp *BaseTable) ParseFloat(key string) float64 {
-	valueStr, err := gp.Load(key)
-	if err != nil {
-		panic(err)
-	}
-	value, err := strconv.ParseFloat(valueStr, 64)
-	if err != nil {
-		panic(err)
-	}
-	return value
-}
-
 func (gp *BaseTable) ParseFloatWithDefault(key string, defaultValue float64) float64 {
 	valueStr := gp.LoadWithDefault(key, fmt.Sprintf("%f", defaultValue))
 	value, err := strconv.ParseFloat(valueStr, 64)
-	if err != nil {
-		panic(err)
-	}
-	return value
-}
-
-func (gp *BaseTable) ParseInt64(key string) int64 {
-	valueStr, err := gp.Load(key)
-	if err != nil {
-		panic(err)
-	}
-	value, err := strconv.ParseInt(valueStr, 10, 64)
 	if err != nil {
 		panic(err)
 	}
@@ -335,18 +258,6 @@ func (gp *BaseTable) ParseInt64WithDefault(key string, defaultValue int64) int64
 	return value
 }
 
-func (gp *BaseTable) ParseInt32(key string) int32 {
-	valueStr, err := gp.Load(key)
-	if err != nil {
-		panic(err)
-	}
-	value, err := strconv.ParseInt(valueStr, 10, 32)
-	if err != nil {
-		panic(err)
-	}
-	return int32(value)
-}
-
 func (gp *BaseTable) ParseInt32WithDefault(key string, defaultValue int32) int32 {
 	valueStr := gp.LoadWithDefault(key, strconv.FormatInt(int64(defaultValue), 10))
 	value, err := strconv.ParseInt(valueStr, 10, 32)
@@ -356,18 +267,6 @@ func (gp *BaseTable) ParseInt32WithDefault(key string, defaultValue int32) int32
 	return int32(value)
 }
 
-func (gp *BaseTable) ParseInt(key string) int {
-	valueStr, err := gp.Load(key)
-	if err != nil {
-		panic(err)
-	}
-	value, err := strconv.Atoi(valueStr)
-	if err != nil {
-		panic(err)
-	}
-	return value
-}
-
 func (gp *BaseTable) ParseIntWithDefault(key string, defaultValue int) int {
 	valueStr := gp.LoadWithDefault(key, strconv.FormatInt(int64(defaultValue), 10))
 	value, err := strconv.Atoi(valueStr)
@@ -375,45 +274,6 @@ func (gp *BaseTable) ParseIntWithDefault(key string, defaultValue int) int {
 		panic(err)
 	}
 	return value
-}
-
-// package methods
-// ConvertRangeToIntRange converts a range of strings to a range of ints.
-func ConvertRangeToIntRange(rangeStr, sep string) []int {
-	items := strings.Split(rangeStr, sep)
-	if len(items) != 2 {
-		panic("Illegal range ")
-	}
-
-	startStr := items[0]
-	endStr := items[1]
-	start, err := strconv.Atoi(startStr)
-	if err != nil {
-		panic(err)
-	}
-	end, err := strconv.Atoi(endStr)
-	if err != nil {
-		panic(err)
-	}
-
-	if start < 0 || end < 0 {
-		panic("Illegal range value")
-	}
-	if start > end {
-		panic("Illegal range value, start > end")
-	}
-	return []int{start, end}
-}
-
-// ConvertRangeToIntSlice convert given @rangeStr & @sep to a slice of ints.
-func ConvertRangeToIntSlice(rangeStr, sep string) []int {
-	rangeSlice := ConvertRangeToIntRange(rangeStr, sep)
-	start, end := rangeSlice[0], rangeSlice[1]
-	var ret []int
-	for i := start; i < end; i++ {
-		ret = append(ret, i)
-	}
-	return ret
 }
 
 // InitLogCfg init log of the base table

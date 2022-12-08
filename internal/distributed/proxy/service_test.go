@@ -54,6 +54,12 @@ import (
 	"google.golang.org/grpc/health/grpc_health_v1"
 )
 
+func TestMain(m *testing.M) {
+	paramtable.Init()
+	code := m.Run()
+	os.Exit(code)
+}
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type MockBase struct {
 	mock.Mock
@@ -984,6 +990,7 @@ func withCredential(clientPemPath, clientKeyPath, clientCaPath string) (credenti
 
 // waitForGrpcReady block until service available or panic after times out.
 func waitForGrpcReady(opt *WaitOption) {
+	Params := &paramtable.Get().ProxyGrpcServerCfg
 	ticker := time.NewTicker(opt.Duration)
 	ch := make(chan error, 1)
 
@@ -995,7 +1002,7 @@ func waitForGrpcReady(opt *WaitOption) {
 		if opt.TLSMode == 1 || opt.TLSMode == 2 {
 			var creds credentials.TransportCredentials
 			if opt.TLSMode == 1 {
-				creds, err = credentials.NewClientTLSFromFile(Params.ServerPemPath, "localhost")
+				creds, err = credentials.NewClientTLSFromFile(Params.ServerPemPath.GetValue(), "localhost")
 			} else {
 				creds, err = withCredential(opt.ClientPemPath, opt.ClientKeyPath, opt.CaPath)
 			}
@@ -1034,8 +1041,9 @@ var clientKeyPath = "../../../configs/cert/client.key"
 
 // waitForServerReady wait for internal grpc service and external service to be ready, according to the params.
 func waitForServerReady() {
-	waitForGrpcReady(newWaitOption(waitDuration, Params.InternalPort, 0, "", "", ""))
-	waitForGrpcReady(newWaitOption(waitDuration, Params.Port, Params.TLSMode, clientPemPath, clientKeyPath, Params.CaPemPath))
+	Params := &paramtable.Get().ProxyGrpcServerCfg
+	waitForGrpcReady(newWaitOption(waitDuration, Params.InternalPort.GetAsInt(), 0, "", "", ""))
+	waitForGrpcReady(newWaitOption(waitDuration, Params.Port.GetAsInt(), Params.TLSMode.GetAsInt(), clientPemPath, clientKeyPath, Params.CaPemPath.GetValue()))
 }
 
 func runAndWaitForServerReady(server *Server) error {
@@ -1502,8 +1510,7 @@ func Test_NewServer_HTTPServer_Enabled(t *testing.T) {
 	server.queryCoordClient = &MockQueryCoord{}
 	server.dataCoordClient = &MockDataCoord{}
 
-	HTTPParams.InitOnce()
-	HTTPParams.Enabled = true
+	paramtable.Get().Save(proxy.Params.HTTPCfg.Enabled.Key, "true")
 
 	err = runAndWaitForServerReady(server)
 	assert.Nil(t, err)
@@ -1536,13 +1543,13 @@ func getServer(t *testing.T) *Server {
 
 func Test_NewServer_TLS_TwoWay(t *testing.T) {
 	server := getServer(t)
+	Params := &paramtable.Get().ProxyGrpcServerCfg
 
-	Params.InitOnce("proxy")
-	Params.TLSMode = 2
-	Params.ServerPemPath = "../../../configs/cert/server.pem"
-	Params.ServerKeyPath = "../../../configs/cert/server.key"
-	Params.CaPemPath = "../../../configs/cert/ca.pem"
-	HTTPParams.Enabled = false
+	paramtable.Get().Save(Params.TLSMode.Key, "2")
+	paramtable.Get().Save(Params.ServerPemPath.Key, "../../../configs/cert/server.pem")
+	paramtable.Get().Save(Params.ServerKeyPath.Key, "../../../configs/cert/server.key")
+	paramtable.Get().Save(Params.CaPemPath.Key, "../../../configs/cert/ca.pem")
+	paramtable.Get().Save(proxy.Params.HTTPCfg.Enabled.Key, "false")
 
 	err := runAndWaitForServerReady(server)
 	assert.Nil(t, err)
@@ -1553,12 +1560,12 @@ func Test_NewServer_TLS_TwoWay(t *testing.T) {
 
 func Test_NewServer_TLS_OneWay(t *testing.T) {
 	server := getServer(t)
+	Params := &paramtable.Get().ProxyGrpcServerCfg
 
-	Params.InitOnce("proxy")
-	Params.TLSMode = 1
-	Params.ServerPemPath = "../../../configs/cert/server.pem"
-	Params.ServerKeyPath = "../../../configs/cert/server.key"
-	HTTPParams.Enabled = false
+	paramtable.Get().Save(Params.TLSMode.Key, "1")
+	paramtable.Get().Save(Params.ServerPemPath.Key, "../../../configs/cert/server.pem")
+	paramtable.Get().Save(Params.ServerKeyPath.Key, "../../../configs/cert/server.key")
+	paramtable.Get().Save(proxy.Params.HTTPCfg.Enabled.Key, "false")
 
 	err := runAndWaitForServerReady(server)
 	assert.Nil(t, err)
@@ -1569,31 +1576,30 @@ func Test_NewServer_TLS_OneWay(t *testing.T) {
 
 func Test_NewServer_TLS_FileNotExisted(t *testing.T) {
 	server := getServer(t)
+	Params := &paramtable.Get().ProxyGrpcServerCfg
 
-	Params.InitOnce("proxy")
-	Params.TLSMode = 1
-	Params.ServerPemPath = "../not/existed/server.pem"
-	Params.ServerKeyPath = "../../../configs/cert/server.key"
-	HTTPParams.Enabled = false
+	paramtable.Get().Save(Params.TLSMode.Key, "1")
+	paramtable.Get().Save(Params.ServerPemPath.Key, "../not/existed/server.pem")
+	paramtable.Get().Save(Params.ServerKeyPath.Key, "../../../configs/cert/server.key")
+	paramtable.Get().Save(proxy.Params.HTTPCfg.Enabled.Key, "false")
 	err := runAndWaitForServerReady(server)
 	assert.NotNil(t, err)
 	server.Stop()
 
-	Params.TLSMode = 2
-	Params.ServerPemPath = "../not/existed/server.pem"
-	Params.CaPemPath = "../../../configs/cert/ca.pem"
+	paramtable.Get().Save(Params.TLSMode.Key, "2")
+	paramtable.Get().Save(Params.ServerPemPath.Key, "../not/existed/server.pem")
+	paramtable.Get().Save(Params.CaPemPath.Key, "../../../configs/cert/ca.pem")
 	err = runAndWaitForServerReady(server)
 	assert.NotNil(t, err)
 	server.Stop()
 
-	Params.ServerPemPath = "../../../configs/cert/server.pem"
-	Params.CaPemPath = "../not/existed/ca.pem"
+	paramtable.Get().Save(Params.ServerPemPath.Key, "../../../configs/cert/server.pem")
+	paramtable.Get().Save(Params.CaPemPath.Key, "../not/existed/ca.pem")
 	err = runAndWaitForServerReady(server)
 	assert.NotNil(t, err)
 	server.Stop()
 
-	Params.ServerPemPath = "../../../configs/cert/server.pem"
-	Params.CaPemPath = "service.go"
+	paramtable.Get().Save(Params.CaPemPath.Key, "service.go")
 	err = runAndWaitForServerReady(server)
 	assert.NotNil(t, err)
 	server.Stop()

@@ -1,35 +1,22 @@
 package paramtable
 
-import (
-	"sync"
-)
-
-type HTTPConfig struct {
-	BaseTable
-
-	once      sync.Once
-	Enabled   bool
-	DebugMode bool
+type httpConfig struct {
+	Enabled   ParamItem `refreshable:"false"`
+	DebugMode ParamItem `refreshable:"false"`
 }
 
-// InitOnce initialize HTTPConfig
-func (p *HTTPConfig) InitOnce() {
-	p.once.Do(func() {
-		p.init()
-	})
-}
+func (p *httpConfig) init(base *BaseTable) {
+	p.Enabled = ParamItem{
+		Key:          "proxy.http.enabled",
+		DefaultValue: "true",
+		Version:      "2.1.0",
+	}
+	p.Enabled.Init(base.mgr)
 
-func (p *HTTPConfig) init() {
-	p.BaseTable.Init()
-
-	p.initHTTPEnabled()
-	p.initHTTPDebugMode()
-}
-
-func (p *HTTPConfig) initHTTPEnabled() {
-	p.Enabled = p.ParseBool("proxy.http.enabled", true)
-}
-
-func (p *HTTPConfig) initHTTPDebugMode() {
-	p.DebugMode = p.ParseBool("proxy.http.debug_mode", false)
+	p.DebugMode = ParamItem{
+		Key:          "proxy.http.debug_mode",
+		DefaultValue: "false",
+		Version:      "2.1.0",
+	}
+	p.DebugMode.Init(base.mgr)
 }

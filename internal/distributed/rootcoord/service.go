@@ -18,7 +18,6 @@ package grpcrootcoord
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"net"
 	"strconv"
@@ -46,14 +45,11 @@ import (
 	"github.com/milvus-io/milvus/internal/util/logutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/trace"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 
 	dcc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
 	icc "github.com/milvus-io/milvus/internal/distributed/indexcoord/client"
 	qcc "github.com/milvus-io/milvus/internal/distributed/querycoord/client"
 )
-
-var Params paramtable.GrpcServerConfig
 
 // Server grpc wrapper
 type Server struct {
@@ -153,30 +149,31 @@ func (s *Server) Run() error {
 }
 
 func (s *Server) init() error {
-	Params.InitOnce(typeutil.RootCoordRole)
+	etcdConfig := &paramtable.Get().EtcdCfg
+	Params := &paramtable.Get().RootCoordGrpcServerCfg
 	log.Debug("init params done..")
 
 	closer := trace.InitTracing("root_coord")
 	s.closer = closer
 
 	etcdCli, err := etcd.GetEtcdClient(
-		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
-		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
-		Params.EtcdCfg.Endpoints.GetAsStrings(),
-		Params.EtcdCfg.EtcdTLSCert.GetValue(),
-		Params.EtcdCfg.EtcdTLSKey.GetValue(),
-		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
-		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
+		etcdConfig.UseEmbedEtcd.GetAsBool(),
+		etcdConfig.EtcdUseSSL.GetAsBool(),
+		etcdConfig.Endpoints.GetAsStrings(),
+		etcdConfig.EtcdTLSCert.GetValue(),
+		etcdConfig.EtcdTLSKey.GetValue(),
+		etcdConfig.EtcdTLSCACert.GetValue(),
+		etcdConfig.EtcdTLSMinVersion.GetValue())
 	if err != nil {
 		log.Debug("RootCoord connect to etcd failed", zap.Error(err))
 		return err
 	}
 	s.etcdCli = etcdCli
 	s.rootCoord.SetEtcdClient(s.etcdCli)
-	s.rootCoord.SetAddress(fmt.Sprintf("%s:%d", Params.IP, Params.Port))
+	s.rootCoord.SetAddress(Params.GetAddress())
 	log.Debug("etcd connect done ...")
 
-	err = s.startGrpc(Params.Port)
+	err = s.startGrpc(Params.Port.GetAsInt())
 	if err != nil {
 		return err
 	}
@@ -223,6 +220,7 @@ func (s *Server) startGrpc(port int) error {
 
 func (s *Server) startGrpcLoop(port int) {
 	defer s.wg.Done()
+	Params := &paramtable.Get().RootCoordGrpcServerCfg
 	var kaep = keepalive.EnforcementPolicy{
 		MinTime:             5 * time.Second, // If a client pings more than once every 5 seconds, terminate the connection
 		PermitWithoutStream: true,            // Allow pings even when there are no active streams
@@ -247,8 +245,8 @@ func (s *Server) startGrpcLoop(port int) {
 	s.grpcServer = grpc.NewServer(
 		grpc.KeepaliveEnforcementPolicy(kaep),
 		grpc.KeepaliveParams(kasp),
-		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize),
-		grpc.MaxSendMsgSize(Params.ServerMaxSendSize),
+		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize.GetAsInt()),
+		grpc.MaxSendMsgSize(Params.ServerMaxSendSize.GetAsInt()),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
 			ot.UnaryServerInterceptor(opts...),
 			logutil.UnaryTraceLoggerInterceptor)),
@@ -278,6 +276,7 @@ func (s *Server) start() error {
 }
 
 func (s *Server) Stop() error {
+	Params := &paramtable.Get().RootCoordGrpcServerCfg
 	log.Debug("Rootcoord stop", zap.String("Address", Params.GetAddress()))
 	if s.closer != nil {
 		if err := s.closer.Close(); err != nil {

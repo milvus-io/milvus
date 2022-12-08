@@ -143,7 +143,7 @@ var Params paramtable.BaseTable
 var localPath = "/tmp/milvus_test/chunkmanager/"
 
 func TestMain(m *testing.M) {
-	Params.Init()
+	Params.Init(0)
 	exitCode := m.Run()
 	err := os.RemoveAll(localPath)
 	if err != nil {

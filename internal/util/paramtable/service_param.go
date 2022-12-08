@@ -54,15 +54,12 @@ type ServiceParam struct {
 }
 
 func (p *ServiceParam) Init() {
-	p.BaseTable.Init()
+	p.BaseTable.Init(10)
 
 	p.LocalStorageCfg.Init(&p.BaseTable)
 	p.MetaStoreCfg.Init(&p.BaseTable)
 	p.EtcdCfg.Init(&p.BaseTable)
-	if p.MetaStoreCfg.MetaStoreType.GetValue() == util.MetaStoreTypeMysql {
-		log.Debug("Mysql protocol is used as meta store")
-		p.DBCfg.Init(&p.BaseTable)
-	}
+	p.DBCfg.Init(&p.BaseTable)
 	p.PulsarCfg.Init(&p.BaseTable)
 	p.KafkaCfg.Init(&p.BaseTable)
 	p.RocksmqCfg.Init(&p.BaseTable)
@@ -73,24 +70,24 @@ func (p *ServiceParam) Init() {
 // --- etcd ---
 type EtcdConfig struct {
 	// --- ETCD ---
-	Endpoints         ParamItem
-	RootPath          ParamItem
-	MetaSubPath       ParamItem
-	KvSubPath         ParamItem
-	MetaRootPath      CompositeParamItem
-	KvRootPath        CompositeParamItem
-	EtcdLogLevel      ParamItem
-	EtcdLogPath       ParamItem
-	EtcdUseSSL        ParamItem
-	EtcdTLSCert       ParamItem
-	EtcdTLSKey        ParamItem
-	EtcdTLSCACert     ParamItem
-	EtcdTLSMinVersion ParamItem
+	Endpoints         ParamItem          `refreshable:"false"`
+	RootPath          ParamItem          `refreshable:"false"`
+	MetaSubPath       ParamItem          `refreshable:"false"`
+	KvSubPath         ParamItem          `refreshable:"false"`
+	MetaRootPath      CompositeParamItem `refreshable:"false"`
+	KvRootPath        CompositeParamItem `refreshable:"false"`
+	EtcdLogLevel      ParamItem          `refreshable:"false"`
+	EtcdLogPath       ParamItem          `refreshable:"false"`
+	EtcdUseSSL        ParamItem          `refreshable:"false"`
+	EtcdTLSCert       ParamItem          `refreshable:"false"`
+	EtcdTLSKey        ParamItem          `refreshable:"false"`
+	EtcdTLSCACert     ParamItem          `refreshable:"false"`
+	EtcdTLSMinVersion ParamItem          `refreshable:"false"`
 
 	// --- Embed ETCD ---
-	UseEmbedEtcd ParamItem
-	ConfigPath   ParamItem
-	DataDir      ParamItem
+	UseEmbedEtcd ParamItem `refreshable:"false"`
+	ConfigPath   ParamItem `refreshable:"false"`
+	DataDir      ParamItem `refreshable:"false"`
 }
 
 func (p *EtcdConfig) Init(base *BaseTable) {
@@ -112,27 +109,25 @@ func (p *EtcdConfig) Init(base *BaseTable) {
 		panic("embedded etcd can not be used under distributed mode")
 	}
 
-	if p.UseEmbedEtcd.GetAsBool() {
-		p.ConfigPath = ParamItem{
-			Key:     "etcd.config.path",
-			Version: "2.1.0",
-		}
-		p.ConfigPath.Init(base.mgr)
-
-		p.DataDir = ParamItem{
-			Key:          "etcd.data.dir",
-			DefaultValue: "default.etcd",
-			Version:      "2.1.0",
-		}
-		p.DataDir.Init(base.mgr)
-	} else {
-		p.Endpoints = ParamItem{
-			Key:          "etcd.endpoints",
-			Version:      "2.0.0",
-			PanicIfEmpty: true,
-		}
-		p.Endpoints.Init(base.mgr)
+	p.ConfigPath = ParamItem{
+		Key:     "etcd.config.path",
+		Version: "2.1.0",
 	}
+	p.ConfigPath.Init(base.mgr)
+
+	p.DataDir = ParamItem{
+		Key:          "etcd.data.dir",
+		DefaultValue: "default.etcd",
+		Version:      "2.1.0",
+	}
+	p.DataDir.Init(base.mgr)
+
+	p.Endpoints = ParamItem{
+		Key:          "etcd.endpoints",
+		Version:      "2.0.0",
+		PanicIfEmpty: true,
+	}
+	p.Endpoints.Init(base.mgr)
 
 	p.RootPath = ParamItem{
 		Key:          "etcd.rootPath",
@@ -217,7 +212,7 @@ func (p *EtcdConfig) Init(base *BaseTable) {
 }
 
 type LocalStorageConfig struct {
-	Path ParamItem
+	Path ParamItem `refreshable:"false"`
 }
 
 func (p *LocalStorageConfig) Init(base *BaseTable) {
@@ -230,7 +225,7 @@ func (p *LocalStorageConfig) Init(base *BaseTable) {
 }
 
 type MetaStoreConfig struct {
-	MetaStoreType ParamItem
+	MetaStoreType ParamItem `refreshable:"false"`
 }
 
 func (p *MetaStoreConfig) Init(base *BaseTable) {
@@ -245,14 +240,14 @@ func (p *MetaStoreConfig) Init(base *BaseTable) {
 // /////////////////////////////////////////////////////////////////////////////
 // --- meta db ---
 type MetaDBConfig struct {
-	Username     ParamItem
-	Password     ParamItem
-	Address      ParamItem
-	Port         ParamItem
-	DBName       ParamItem
-	MaxOpenConns ParamItem
-	MaxIdleConns ParamItem
-	LogLevel     ParamItem
+	Username     ParamItem `refreshable:"false"`
+	Password     ParamItem `refreshable:"false"`
+	Address      ParamItem `refreshable:"false"`
+	Port         ParamItem `refreshable:"false"`
+	DBName       ParamItem `refreshable:"false"`
+	MaxOpenConns ParamItem `refreshable:"false"`
+	MaxIdleConns ParamItem `refreshable:"false"`
+	LogLevel     ParamItem `refreshable:"false"`
 }
 
 func (p *MetaDBConfig) Init(base *BaseTable) {
@@ -316,19 +311,19 @@ func (p *MetaDBConfig) Init(base *BaseTable) {
 // /////////////////////////////////////////////////////////////////////////////
 // --- pulsar ---
 type PulsarConfig struct {
-	Address        ParamItem
-	Port           ParamItem
-	WebAddress     ParamItem
-	WebPort        ParamItem
-	MaxMessageSize ParamItem
+	Address        ParamItem `refreshable:"false"`
+	Port           ParamItem `refreshable:"false"`
+	WebAddress     ParamItem `refreshable:"false"`
+	WebPort        ParamItem `refreshable:"false"`
+	MaxMessageSize ParamItem `refreshable:"true"`
 
 	// support auth
-	AuthPlugin ParamItem
-	AuthParams ParamItem
+	AuthPlugin ParamItem `refreshable:"false"`
+	AuthParams ParamItem `refreshable:"false"`
 
 	// support tenant
-	Tenant    ParamItem
-	Namespace ParamItem
+	Tenant    ParamItem `refreshable:"false"`
+	Namespace ParamItem `refreshable:"false"`
 }
 
 func (p *PulsarConfig) Init(base *BaseTable) {
@@ -432,13 +427,13 @@ func (p *PulsarConfig) Init(base *BaseTable) {
 
 // --- kafka ---
 type KafkaConfig struct {
-	Address             ParamItem
-	SaslUsername        ParamItem
-	SaslPassword        ParamItem
-	SaslMechanisms      ParamItem
-	SecurityProtocol    ParamItem
-	ConsumerExtraConfig ParamGroup
-	ProducerExtraConfig ParamGroup
+	Address             ParamItem  `refreshable:"false"`
+	SaslUsername        ParamItem  `refreshable:"false"`
+	SaslPassword        ParamItem  `refreshable:"false"`
+	SaslMechanisms      ParamItem  `refreshable:"false"`
+	SecurityProtocol    ParamItem  `refreshable:"false"`
+	ConsumerExtraConfig ParamGroup `refreshable:"false"`
+	ProducerExtraConfig ParamGroup `refreshable:"false"`
 }
 
 func (k *KafkaConfig) Init(base *BaseTable) {
@@ -494,7 +489,7 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 // /////////////////////////////////////////////////////////////////////////////
 // --- rocksmq ---
 type RocksmqConfig struct {
-	Path ParamItem
+	Path ParamItem `refreshable:"false"`
 }
 
 func (r *RocksmqConfig) Init(base *BaseTable) {
@@ -509,16 +504,16 @@ func (r *RocksmqConfig) Init(base *BaseTable) {
 // /////////////////////////////////////////////////////////////////////////////
 // --- minio ---
 type MinioConfig struct {
-	Address         ParamItem
-	Port            ParamItem
-	AccessKeyID     ParamItem
-	SecretAccessKey ParamItem
-	UseSSL          ParamItem
-	BucketName      ParamItem
-	RootPath        ParamItem
-	UseIAM          ParamItem
-	CloudProvider   ParamItem
-	IAMEndpoint     ParamItem
+	Address         ParamItem `refreshable:"false"`
+	Port            ParamItem `refreshable:"false"`
+	AccessKeyID     ParamItem `refreshable:"false"`
+	SecretAccessKey ParamItem `refreshable:"false"`
+	UseSSL          ParamItem `refreshable:"false"`
+	BucketName      ParamItem `refreshable:"false"`
+	RootPath        ParamItem `refreshable:"false"`
+	UseIAM          ParamItem `refreshable:"false"`
+	CloudProvider   ParamItem `refreshable:"false"`
+	IAMEndpoint     ParamItem `refreshable:"false"`
 }
 
 func (p *MinioConfig) Init(base *BaseTable) {

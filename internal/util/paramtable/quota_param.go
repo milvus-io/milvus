@@ -43,60 +43,62 @@ const (
 
 // quotaConfig is configuration for quota and limitations.
 type quotaConfig struct {
-	QuotaAndLimitsEnabled      ParamItem
-	QuotaCenterCollectInterval ParamItem
+	QuotaAndLimitsEnabled      ParamItem `refreshable:"false"`
+	QuotaCenterCollectInterval ParamItem `refreshable:"false"`
 
 	// ddl
-	DDLLimitEnabled   ParamItem
-	DDLCollectionRate ParamItem
-	DDLPartitionRate  ParamItem
+	DDLLimitEnabled   ParamItem `refreshable:"true"`
+	DDLCollectionRate ParamItem `refreshable:"false"`
+	DDLPartitionRate  ParamItem `refreshable:"false"`
 
-	IndexLimitEnabled      ParamItem
-	MaxIndexRate           ParamItem
-	FlushLimitEnabled      ParamItem
-	MaxFlushRate           ParamItem
-	CompactionLimitEnabled ParamItem
-	MaxCompactionRate      ParamItem
+	IndexLimitEnabled ParamItem `refreshable:"true"`
+	MaxIndexRate      ParamItem `refreshable:"false"`
+
+	FlushLimitEnabled ParamItem `refreshable:"true"`
+	MaxFlushRate      ParamItem `refreshable:"false"`
+
+	CompactionLimitEnabled ParamItem `refreshable:"true"`
+	MaxCompactionRate      ParamItem `refreshable:"false"`
 
 	// dml
-	DMLLimitEnabled    ParamItem
-	DMLMaxInsertRate   ParamItem
-	DMLMinInsertRate   ParamItem
-	DMLMaxDeleteRate   ParamItem
-	DMLMinDeleteRate   ParamItem
-	DMLMaxBulkLoadRate ParamItem
-	DMLMinBulkLoadRate ParamItem
+	DMLLimitEnabled    ParamItem `refreshable:"true"`
+	DMLMaxInsertRate   ParamItem `refreshable:"false"`
+	DMLMinInsertRate   ParamItem `refreshable:"false"`
+	DMLMaxDeleteRate   ParamItem `refreshable:"false"`
+	DMLMinDeleteRate   ParamItem `refreshable:"false"`
+	DMLMaxBulkLoadRate ParamItem `refreshable:"false"`
+	DMLMinBulkLoadRate ParamItem `refreshable:"false"`
 
 	// dql
-	DQLLimitEnabled  ParamItem
-	DQLMaxSearchRate ParamItem
-	DQLMinSearchRate ParamItem
-	DQLMaxQueryRate  ParamItem
-	DQLMinQueryRate  ParamItem
+	DQLLimitEnabled  ParamItem `refreshable:"true"`
+	DQLMaxSearchRate ParamItem `refreshable:"false"`
+	DQLMinSearchRate ParamItem `refreshable:"false"`
+	DQLMaxQueryRate  ParamItem `refreshable:"false"`
+	DQLMinQueryRate  ParamItem `refreshable:"false"`
 
 	// limits
-	MaxCollectionNum ParamItem
+	MaxCollectionNum ParamItem `refreshable:"true"`
 
 	// limit writing
-	ForceDenyWriting              ParamItem
-	TtProtectionEnabled           ParamItem
-	MaxTimeTickDelay              ParamItem
-	MemProtectionEnabled          ParamItem
-	DataNodeMemoryLowWaterLevel   ParamItem
-	DataNodeMemoryHighWaterLevel  ParamItem
-	QueryNodeMemoryLowWaterLevel  ParamItem
-	QueryNodeMemoryHighWaterLevel ParamItem
-	DiskProtectionEnabled         ParamItem
-	DiskQuota                     ParamItem
+	ForceDenyWriting              ParamItem `refreshable:"true"`
+	TtProtectionEnabled           ParamItem `refreshable:"true"`
+	MaxTimeTickDelay              ParamItem `refreshable:"true"`
+	MemProtectionEnabled          ParamItem `refreshable:"true"`
+	DataNodeMemoryLowWaterLevel   ParamItem `refreshable:"true"`
+	DataNodeMemoryHighWaterLevel  ParamItem `refreshable:"true"`
+	QueryNodeMemoryLowWaterLevel  ParamItem `refreshable:"true"`
+	QueryNodeMemoryHighWaterLevel ParamItem `refreshable:"true"`
+	DiskProtectionEnabled         ParamItem `refreshable:"true"`
+	DiskQuota                     ParamItem `refreshable:"true"`
 
 	// limit reading
-	ForceDenyReading        ParamItem
-	QueueProtectionEnabled  ParamItem
-	NQInQueueThreshold      ParamItem
-	QueueLatencyThreshold   ParamItem
-	ResultProtectionEnabled ParamItem
-	MaxReadResultRate       ParamItem
-	CoolOffSpeed            ParamItem
+	ForceDenyReading        ParamItem `refreshable:"true"`
+	QueueProtectionEnabled  ParamItem `refreshable:"true"`
+	NQInQueueThreshold      ParamItem `refreshable:"true"`
+	QueueLatencyThreshold   ParamItem `refreshable:"true"`
+	ResultProtectionEnabled ParamItem `refreshable:"true"`
+	MaxReadResultRate       ParamItem `refreshable:"true"`
+	CoolOffSpeed            ParamItem `refreshable:"true"`
 }
 
 func (p *quotaConfig) init(base *BaseTable) {

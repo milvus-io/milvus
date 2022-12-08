@@ -45,10 +45,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/logutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/trace"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
-
-var Params paramtable.GrpcServerConfig
 
 // Server is the grpc wrapper of IndexNode.
 type Server struct {
@@ -82,6 +79,7 @@ func (s *Server) Run() error {
 func (s *Server) startGrpcLoop(grpcPort int) {
 	defer s.loopWg.Done()
 
+	Params := &paramtable.Get().IndexNodeGrpcServerCfg
 	log.Debug("IndexNode", zap.String("network address", Params.GetAddress()), zap.Int("network port: ", grpcPort))
 	lis, err := net.Listen("tcp", ":"+strconv.Itoa(grpcPort))
 	if err != nil {
@@ -107,8 +105,8 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 	s.grpcServer = grpc.NewServer(
 		grpc.KeepaliveEnforcementPolicy(kaep),
 		grpc.KeepaliveParams(kasp),
-		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize),
-		grpc.MaxSendMsgSize(Params.ServerMaxSendSize),
+		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize.GetAsInt()),
+		grpc.MaxSendMsgSize(Params.ServerMaxSendSize.GetAsInt()),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
 			ot.UnaryServerInterceptor(opts...),
 			logutil.UnaryTraceLoggerInterceptor)),
@@ -124,11 +122,12 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 
 // init initializes IndexNode's grpc service.
 func (s *Server) init() error {
+	etcdConfig := &paramtable.Get().EtcdCfg
+	Params := &paramtable.Get().IndexNodeGrpcServerCfg
 	var err error
-	Params.InitOnce(typeutil.IndexNodeRole)
-	if !funcutil.CheckPortAvailable(Params.Port) {
-		Params.Port = funcutil.GetAvailablePort()
-		log.Warn("IndexNode get available port when init", zap.Int("Port", Params.Port))
+	if !funcutil.CheckPortAvailable(Params.Port.GetAsInt()) {
+		paramtable.Get().Save(Params.Port.Key, fmt.Sprintf("%d", funcutil.GetAvailablePort()))
+		log.Warn("IndexNode get available port when init", zap.Int("Port", Params.Port.GetAsInt()))
 	}
 
 	closer := trace.InitTracing(fmt.Sprintf("IndexNode-%d", paramtable.GetNodeID()))
@@ -144,7 +143,7 @@ func (s *Server) init() error {
 	}()
 
 	s.loopWg.Add(1)
-	go s.startGrpcLoop(Params.Port)
+	go s.startGrpcLoop(Params.Port.GetAsInt())
 	// wait for grpc server loop start
 	err = <-s.grpcErrChan
 	if err != nil {
@@ -153,20 +152,20 @@ func (s *Server) init() error {
 	}
 
 	etcdCli, err := etcd.GetEtcdClient(
-		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
-		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
-		Params.EtcdCfg.Endpoints.GetAsStrings(),
-		Params.EtcdCfg.EtcdTLSCert.GetValue(),
-		Params.EtcdCfg.EtcdTLSKey.GetValue(),
-		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
-		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
+		etcdConfig.UseEmbedEtcd.GetAsBool(),
+		etcdConfig.EtcdUseSSL.GetAsBool(),
+		etcdConfig.Endpoints.GetAsStrings(),
+		etcdConfig.EtcdTLSCert.GetValue(),
+		etcdConfig.EtcdTLSKey.GetValue(),
+		etcdConfig.EtcdTLSCACert.GetValue(),
+		etcdConfig.EtcdTLSMinVersion.GetValue())
 	if err != nil {
 		log.Debug("IndexNode connect to etcd failed", zap.Error(err))
 		return err
 	}
 	s.etcdCli = etcdCli
 	s.indexnode.SetEtcdClient(etcdCli)
-	s.indexnode.SetAddress(fmt.Sprintf("%s:%d", Params.IP, Params.Port))
+	s.indexnode.SetAddress(Params.GetAddress())
 	err = s.indexnode.Init()
 	if err != nil {
 		log.Error("IndexNode Init failed", zap.Error(err))
@@ -193,6 +192,7 @@ func (s *Server) start() error {
 
 // Stop stops IndexNode's grpc service.
 func (s *Server) Stop() error {
+	Params := &paramtable.Get().IndexNodeGrpcServerCfg
 	log.Debug("IndexNode stop", zap.String("Address", Params.GetAddress()))
 	if s.closer != nil {
 		if err := s.closer.Close(); err != nil {

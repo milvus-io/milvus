@@ -19,6 +19,7 @@ package grpcquerynodeclient
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"google.golang.org/grpc"
 
@@ -33,8 +34,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
-var ClientParams paramtable.GrpcClientConfig
-
 var Params *paramtable.ComponentParam = paramtable.Get()
 
 // Client is the grpc client of QueryNode.
@@ -48,20 +47,20 @@ func NewClient(ctx context.Context, addr string) (*Client, error) {
 	if addr == "" {
 		return nil, fmt.Errorf("addr is empty")
 	}
-	ClientParams.InitOnce(typeutil.QueryNodeRole)
+	clientParams := &Params.QueryNodeGrpcClientCfg
 	client := &Client{
 		addr: addr,
 		grpcClient: &grpcclient.ClientBase[querypb.QueryNodeClient]{
-			ClientMaxRecvSize:      ClientParams.ClientMaxRecvSize,
-			ClientMaxSendSize:      ClientParams.ClientMaxSendSize,
-			DialTimeout:            ClientParams.DialTimeout,
-			KeepAliveTime:          ClientParams.KeepAliveTime,
-			KeepAliveTimeout:       ClientParams.KeepAliveTimeout,
+			ClientMaxRecvSize:      clientParams.ClientMaxRecvSize.GetAsInt(),
+			ClientMaxSendSize:      clientParams.ClientMaxSendSize.GetAsInt(),
+			DialTimeout:            clientParams.DialTimeout.GetAsDuration(time.Millisecond),
+			KeepAliveTime:          clientParams.KeepAliveTime.GetAsDuration(time.Millisecond),
+			KeepAliveTimeout:       clientParams.KeepAliveTimeout.GetAsDuration(time.Millisecond),
 			RetryServiceNameConfig: "milvus.proto.query.QueryNode",
-			MaxAttempts:            ClientParams.MaxAttempts,
-			InitialBackoff:         ClientParams.InitialBackoff,
-			MaxBackoff:             ClientParams.MaxBackoff,
-			BackoffMultiplier:      ClientParams.BackoffMultiplier,
+			MaxAttempts:            clientParams.MaxAttempts.GetAsInt(),
+			InitialBackoff:         float32(clientParams.InitialBackoff.GetAsFloat()),
+			MaxBackoff:             float32(clientParams.MaxBackoff.GetAsFloat()),
+			BackoffMultiplier:      float32(clientParams.BackoffMultiplier.GetAsFloat()),
 		},
 	}
 	client.grpcClient.SetRole(typeutil.QueryNodeRole)

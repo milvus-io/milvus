@@ -24,14 +24,12 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/mock"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc"
 )
 
 func Test_NewClient(t *testing.T) {
 	paramtable.Init()
-	ClientParams.InitOnce(typeutil.QueryNodeRole)
 
 	ctx := context.Background()
 	client, err := NewClient(ctx, "")
@@ -41,8 +39,6 @@ func Test_NewClient(t *testing.T) {
 	client, err = NewClient(ctx, "test")
 	assert.Nil(t, err)
 	assert.NotNil(t, client)
-
-	ClientParams.InitOnce(typeutil.QueryNodeRole)
 
 	err = client.Start()
 	assert.Nil(t, err)

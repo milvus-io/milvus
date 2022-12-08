@@ -45,7 +45,7 @@ func TestRmqRetention_Basic(t *testing.T) {
 	defer os.RemoveAll(metaPath)
 
 	var params paramtable.BaseTable
-	params.Init()
+	params.Init(0)
 
 	checkTimeInterval := 2
 	atomic.StoreInt64(&RocksmqPageSize, 10)
@@ -141,7 +141,7 @@ func TestRmqRetention_NotConsumed(t *testing.T) {
 	defer os.RemoveAll(metaPath)
 
 	var params paramtable.BaseTable
-	params.Init()
+	params.Init(0)
 	atomic.StoreInt64(&RocksmqPageSize, 10)
 	atomic.StoreInt64(&TickerTimeInSeconds, 2)
 	rmq, err := NewRocksMQ(params, rocksdbPath, nil)
@@ -251,7 +251,7 @@ func TestRmqRetention_MultipleTopic(t *testing.T) {
 	var params paramtable.BaseTable
 	atomic.StoreInt64(&RocksmqPageSize, 10)
 	atomic.StoreInt64(&TickerTimeInSeconds, 1)
-	params.Init()
+	params.Init(0)
 	rmq, err := NewRocksMQ(params, rocksdbPath, idAllocator)
 	assert.Nil(t, err)
 	defer rmq.Close()
@@ -415,7 +415,7 @@ func TestRetentionInfo_InitRetentionInfo(t *testing.T) {
 	defer os.RemoveAll(metaPath)
 
 	var params paramtable.BaseTable
-	params.Init()
+	params.Init(0)
 	rmq, err := NewRocksMQ(params, rocksdbPath, idAllocator)
 	assert.Nil(t, err)
 	assert.NotNil(t, rmq)
@@ -470,7 +470,7 @@ func TestRmqRetention_PageTimeExpire(t *testing.T) {
 	os.RemoveAll(metaPath)
 
 	var params paramtable.BaseTable
-	params.Init()
+	params.Init(0)
 	atomic.StoreInt64(&RocksmqPageSize, 10)
 	atomic.StoreInt64(&TickerTimeInSeconds, 1)
 	rmq, err := NewRocksMQ(params, rocksdbPath, idAllocator)
@@ -594,7 +594,7 @@ func TestRmqRetention_PageSizeExpire(t *testing.T) {
 	os.RemoveAll(metaPath)
 
 	var params paramtable.BaseTable
-	params.Init()
+	params.Init(0)
 	atomic.StoreInt64(&RocksmqPageSize, 10)
 	atomic.StoreInt64(&TickerTimeInSeconds, 1)
 	rmq, err := NewRocksMQ(params, rocksdbPath, idAllocator)

@@ -3,13 +3,13 @@ package paramtable
 const hookYamlFile = "hook.yaml"
 
 type hookConfig struct {
-	SoPath   ParamItem
-	SoConfig ParamGroup
+	SoPath   ParamItem  `refreshable:"false"`
+	SoConfig ParamGroup `refreshable:"false"`
 }
 
 func (h *hookConfig) init() {
 	base := &BaseTable{YamlFile: hookYamlFile}
-	base.Init()
+	base.Init(0)
 
 	h.SoPath = ParamItem{
 		Key:          "soPath",

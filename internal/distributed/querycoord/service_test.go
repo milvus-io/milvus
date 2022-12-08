@@ -19,10 +19,12 @@ package grpcquerycoord
 import (
 	"context"
 	"errors"
+	"os"
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
@@ -261,6 +263,13 @@ func (m *MockIndexCoord) GetComponentStates(ctx context.Context) (*milvuspb.Comp
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+func TestMain(m *testing.M) {
+	paramtable.Init()
+	code := m.Run()
+	os.Exit(code)
+}
+
 func Test_NewServer(t *testing.T) {
 	ctx := context.Background()
 	server, err := NewServer(ctx, nil)

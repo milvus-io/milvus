@@ -84,7 +84,7 @@ func TestMinIOCMFail(t *testing.T) {
 }
 
 func TestMinIOCM(t *testing.T) {
-	Params.Init()
+	Params.Init(0)
 	testBucket, err := Params.Load("minio.bucketName")
 	require.NoError(t, err)
 

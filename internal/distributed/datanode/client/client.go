@@ -19,6 +19,7 @@ package grpcdatanodeclient
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
@@ -31,8 +32,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"google.golang.org/grpc"
 )
-
-var ClientParams paramtable.GrpcClientConfig
 
 var Params *paramtable.ComponentParam = paramtable.Get()
 
@@ -47,20 +46,20 @@ func NewClient(ctx context.Context, addr string) (*Client, error) {
 	if addr == "" {
 		return nil, fmt.Errorf("address is empty")
 	}
-	ClientParams.InitOnce(typeutil.DataNodeRole)
+	clientParams := &Params.DataNodeGrpcClientCfg
 	client := &Client{
 		addr: addr,
 		grpcClient: &grpcclient.ClientBase[datapb.DataNodeClient]{
-			ClientMaxRecvSize:      ClientParams.ClientMaxRecvSize,
-			ClientMaxSendSize:      ClientParams.ClientMaxSendSize,
-			DialTimeout:            ClientParams.DialTimeout,
-			KeepAliveTime:          ClientParams.KeepAliveTime,
-			KeepAliveTimeout:       ClientParams.KeepAliveTimeout,
+			ClientMaxRecvSize:      clientParams.ClientMaxRecvSize.GetAsInt(),
+			ClientMaxSendSize:      clientParams.ClientMaxSendSize.GetAsInt(),
+			DialTimeout:            clientParams.DialTimeout.GetAsDuration(time.Millisecond),
+			KeepAliveTime:          clientParams.KeepAliveTime.GetAsDuration(time.Millisecond),
+			KeepAliveTimeout:       clientParams.KeepAliveTimeout.GetAsDuration(time.Millisecond),
 			RetryServiceNameConfig: "milvus.proto.data.DataNode",
-			MaxAttempts:            ClientParams.MaxAttempts,
-			InitialBackoff:         ClientParams.InitialBackoff,
-			MaxBackoff:             ClientParams.MaxBackoff,
-			BackoffMultiplier:      ClientParams.BackoffMultiplier,
+			MaxAttempts:            clientParams.MaxAttempts.GetAsInt(),
+			InitialBackoff:         float32(clientParams.InitialBackoff.GetAsFloat()),
+			MaxBackoff:             float32(clientParams.MaxBackoff.GetAsFloat()),
+			BackoffMultiplier:      float32(clientParams.BackoffMultiplier.GetAsFloat()),
 		},
 	}
 	client.grpcClient.SetRole(typeutil.DataNodeRole)

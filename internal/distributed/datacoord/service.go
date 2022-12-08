@@ -19,7 +19,6 @@ package grpcdatacoord
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"net"
 	"strconv"
@@ -47,11 +46,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/logutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/trace"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
-
-// Params is the parameters for DataCoord grpc server
-var Params paramtable.GrpcServerConfig
 
 // Server is the grpc server of datacoord
 type Server struct {
@@ -83,31 +78,32 @@ func NewServer(ctx context.Context, factory dependency.Factory, opts ...datacoor
 }
 
 func (s *Server) init() error {
-	Params.InitOnce(typeutil.DataCoordRole)
+	etcdConfig := &paramtable.Get().EtcdCfg
+	Params := &paramtable.Get().DataCoordGrpcServerCfg
 
 	closer := trace.InitTracing("datacoord")
 	s.closer = closer
 
 	etcdCli, err := etcd.GetEtcdClient(
-		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
-		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
-		Params.EtcdCfg.Endpoints.GetAsStrings(),
-		Params.EtcdCfg.EtcdTLSCert.GetValue(),
-		Params.EtcdCfg.EtcdTLSKey.GetValue(),
-		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
-		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
+		etcdConfig.UseEmbedEtcd.GetAsBool(),
+		etcdConfig.EtcdUseSSL.GetAsBool(),
+		etcdConfig.Endpoints.GetAsStrings(),
+		etcdConfig.EtcdTLSCert.GetValue(),
+		etcdConfig.EtcdTLSKey.GetValue(),
+		etcdConfig.EtcdTLSCACert.GetValue(),
+		etcdConfig.EtcdTLSMinVersion.GetValue())
 	if err != nil {
 		log.Debug("DataCoord connect to etcd failed", zap.Error(err))
 		return err
 	}
 	s.etcdCli = etcdCli
 	s.dataCoord.SetEtcdClient(etcdCli)
-	s.dataCoord.SetAddress(fmt.Sprintf("%s:%d", Params.IP, Params.Port))
+	s.dataCoord.SetAddress(Params.GetAddress())
 
 	if s.indexCoord == nil {
 		var err error
 		log.Debug("create IndexCoord client for DataCoord")
-		s.indexCoord, err = icc.NewClient(s.ctx, Params.EtcdCfg.MetaRootPath.GetValue(), etcdCli)
+		s.indexCoord, err = icc.NewClient(s.ctx, etcdConfig.MetaRootPath.GetValue(), etcdCli)
 		if err != nil {
 			log.Warn("failed to create IndexCoord client for DataCoord", zap.Error(err))
 			return err
@@ -137,8 +133,9 @@ func (s *Server) init() error {
 }
 
 func (s *Server) startGrpc() error {
+	Params := &paramtable.Get().DataCoordGrpcServerCfg
 	s.wg.Add(1)
-	go s.startGrpcLoop(Params.Port)
+	go s.startGrpcLoop(Params.Port.GetAsInt())
 	// wait for grpc server loop start
 	err := <-s.grpcErrChan
 	return err
@@ -148,6 +145,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 	defer logutil.LogPanic()
 	defer s.wg.Done()
 
+	Params := &paramtable.Get().DataCoordGrpcServerCfg
 	log.Debug("network port", zap.Int("port", grpcPort))
 	lis, err := net.Listen("tcp", ":"+strconv.Itoa(grpcPort))
 	if err != nil {
@@ -173,8 +171,8 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 	s.grpcServer = grpc.NewServer(
 		grpc.KeepaliveEnforcementPolicy(kaep),
 		grpc.KeepaliveParams(kasp),
-		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize),
-		grpc.MaxSendMsgSize(Params.ServerMaxSendSize),
+		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize.GetAsInt()),
+		grpc.MaxSendMsgSize(Params.ServerMaxSendSize.GetAsInt()),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
 			ot.UnaryServerInterceptor(opts...),
 			logutil.UnaryTraceLoggerInterceptor)),
@@ -205,6 +203,7 @@ func (s *Server) start() error {
 // Stop stops the DataCoord server gracefully.
 // Need to call the GracefulStop interface of grpc server and call the stop method of the inner DataCoord object.
 func (s *Server) Stop() error {
+	Params := &paramtable.Get().DataCoordGrpcServerCfg
 	log.Debug("Datacoord stop", zap.String("Address", Params.GetAddress()))
 	var err error
 	if s.closer != nil {

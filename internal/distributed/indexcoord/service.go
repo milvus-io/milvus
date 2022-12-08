@@ -51,9 +51,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
-// Params contains parameters for indexcoord grpc server.
-var Params paramtable.GrpcServerConfig
-
 // UniqueID is an alias of int64, is used as a unique identifier for the request.
 type UniqueID = typeutil.UniqueID
 
@@ -92,29 +89,30 @@ func (s *Server) Run() error {
 
 // init initializes IndexCoord's grpc service.
 func (s *Server) init() error {
-	Params.InitOnce(typeutil.IndexCoordRole)
+	etcdConfig := &paramtable.Get().EtcdCfg
+	Params := &paramtable.Get().IndexCoordGrpcServerCfg
 
 	closer := trace.InitTracing("IndexCoord")
 	s.closer = closer
 
 	etcdCli, err := etcd.GetEtcdClient(
-		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
-		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
-		Params.EtcdCfg.Endpoints.GetAsStrings(),
-		Params.EtcdCfg.EtcdTLSCert.GetValue(),
-		Params.EtcdCfg.EtcdTLSKey.GetValue(),
-		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
-		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
+		etcdConfig.UseEmbedEtcd.GetAsBool(),
+		etcdConfig.EtcdUseSSL.GetAsBool(),
+		etcdConfig.Endpoints.GetAsStrings(),
+		etcdConfig.EtcdTLSCert.GetValue(),
+		etcdConfig.EtcdTLSKey.GetValue(),
+		etcdConfig.EtcdTLSCACert.GetValue(),
+		etcdConfig.EtcdTLSMinVersion.GetValue())
 	if err != nil {
 		log.Debug("IndexCoord connect to etcd failed", zap.Error(err))
 		return err
 	}
 	s.etcdCli = etcdCli
 	s.indexcoord.SetEtcdClient(s.etcdCli)
-	s.indexcoord.SetAddress(fmt.Sprintf("%s:%d", Params.IP, Params.Port))
+	s.indexcoord.SetAddress(fmt.Sprintf("%s:%d", Params.IP, Params.Port.GetAsInt()))
 
 	s.loopWg.Add(1)
-	go s.startGrpcLoop(Params.Port)
+	go s.startGrpcLoop(Params.Port.GetAsInt())
 	// wait for grpc IndexCoord loop start
 	if err := <-s.grpcErrChan; err != nil {
 		log.Error("IndexCoord", zap.Any("init error", err))
@@ -200,6 +198,7 @@ func (s *Server) start() error {
 
 // Stop stops IndexCoord's grpc service.
 func (s *Server) Stop() error {
+	Params := &paramtable.Get().DataCoordGrpcServerCfg
 	log.Debug("Indexcoord stop", zap.String("Address", Params.GetAddress()))
 	if s.closer != nil {
 		if err := s.closer.Close(); err != nil {
@@ -301,8 +300,8 @@ func (s *Server) CheckHealth(ctx context.Context, request *milvuspb.CheckHealthR
 
 // startGrpcLoop starts the grep loop of IndexCoord component.
 func (s *Server) startGrpcLoop(grpcPort int) {
-
 	defer s.loopWg.Done()
+	Params := &paramtable.Get().DataCoordGrpcServerCfg
 	var kaep = keepalive.EnforcementPolicy{
 		MinTime:             5 * time.Second, // If a client pings more than once every 5 seconds, terminate the connection
 		PermitWithoutStream: true,            // Allow pings even when there are no active streams
@@ -328,8 +327,8 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 	s.grpcServer = grpc.NewServer(
 		grpc.KeepaliveEnforcementPolicy(kaep),
 		grpc.KeepaliveParams(kasp),
-		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize),
-		grpc.MaxSendMsgSize(Params.ServerMaxSendSize),
+		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize.GetAsInt()),
+		grpc.MaxSendMsgSize(Params.ServerMaxSendSize.GetAsInt()),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
 			ot.UnaryServerInterceptor(opts...),
 			logutil.UnaryTraceLoggerInterceptor)),

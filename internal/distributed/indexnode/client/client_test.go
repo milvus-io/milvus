@@ -34,14 +34,10 @@ import (
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/mock"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
-
-var ParamsGlobal paramtable.ComponentParam
 
 func Test_NewClient(t *testing.T) {
 	paramtable.Init()
-	ClientParams.InitOnce(typeutil.IndexNodeRole)
 	ctx := context.Background()
 	client, err := NewClient(ctx, "", false)
 	assert.Nil(t, client)
@@ -126,6 +122,7 @@ func Test_NewClient(t *testing.T) {
 }
 
 func TestIndexNodeClient(t *testing.T) {
+	paramtable.Init()
 	ctx := context.Background()
 
 	factory := dependency.NewDefaultFactory(true)
@@ -134,7 +131,6 @@ func TestIndexNodeClient(t *testing.T) {
 	assert.NotNil(t, ins)
 
 	inm := indexnode.NewIndexNodeMock()
-	ParamsGlobal.InitOnce()
 	etcdCli, err := etcd.GetEtcdClient(
 		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
 		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),

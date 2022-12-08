@@ -18,7 +18,6 @@ package grpcquerycoord
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"net"
 	"strconv"
@@ -48,10 +47,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/logutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/trace"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
-
-var Params paramtable.GrpcServerConfig
 
 // Server is the grpc server of QueryCoord.
 type Server struct {
@@ -110,29 +106,30 @@ func (s *Server) Run() error {
 
 // init initializes QueryCoord's grpc service.
 func (s *Server) init() error {
-	Params.InitOnce(typeutil.QueryCoordRole)
+	etcdConfig := &paramtable.Get().EtcdCfg
+	Params := &paramtable.Get().QueryCoordGrpcServerCfg
 
 	closer := trace.InitTracing("querycoord")
 	s.closer = closer
 
 	etcdCli, err := etcd.GetEtcdClient(
-		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
-		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
-		Params.EtcdCfg.Endpoints.GetAsStrings(),
-		Params.EtcdCfg.EtcdTLSCert.GetValue(),
-		Params.EtcdCfg.EtcdTLSKey.GetValue(),
-		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
-		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
+		etcdConfig.UseEmbedEtcd.GetAsBool(),
+		etcdConfig.EtcdUseSSL.GetAsBool(),
+		etcdConfig.Endpoints.GetAsStrings(),
+		etcdConfig.EtcdTLSCert.GetValue(),
+		etcdConfig.EtcdTLSKey.GetValue(),
+		etcdConfig.EtcdTLSCACert.GetValue(),
+		etcdConfig.EtcdTLSMinVersion.GetValue())
 	if err != nil {
 		log.Debug("QueryCoord connect to etcd failed", zap.Error(err))
 		return err
 	}
 	s.etcdCli = etcdCli
 	s.SetEtcdClient(etcdCli)
-	s.queryCoord.SetAddress(fmt.Sprintf("%s:%d", Params.IP, Params.Port))
+	s.queryCoord.SetAddress(Params.GetAddress())
 
 	s.wg.Add(1)
-	go s.startGrpcLoop(Params.Port)
+	go s.startGrpcLoop(Params.Port.GetAsInt())
 	// wait for grpc server loop start
 	err = <-s.grpcErrChan
 	if err != nil {
@@ -238,8 +235,8 @@ func (s *Server) init() error {
 }
 
 func (s *Server) startGrpcLoop(grpcPort int) {
-
 	defer s.wg.Done()
+	Params := &paramtable.Get().QueryCoordGrpcServerCfg
 	var kaep = keepalive.EnforcementPolicy{
 		MinTime:             5 * time.Second, // If a client pings more than once every 5 seconds, terminate the connection
 		PermitWithoutStream: true,            // Allow pings even when there are no active streams
@@ -264,8 +261,8 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 	s.grpcServer = grpc.NewServer(
 		grpc.KeepaliveEnforcementPolicy(kaep),
 		grpc.KeepaliveParams(kasp),
-		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize),
-		grpc.MaxSendMsgSize(Params.ServerMaxSendSize),
+		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize.GetAsInt()),
+		grpc.MaxSendMsgSize(Params.ServerMaxSendSize.GetAsInt()),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
 			ot.UnaryServerInterceptor(opts...),
 			logutil.UnaryTraceLoggerInterceptor)),
@@ -291,6 +288,7 @@ func (s *Server) start() error {
 
 // Stop stops QueryCoord's grpc service.
 func (s *Server) Stop() error {
+	Params := &paramtable.Get().QueryCoordGrpcServerCfg
 	log.Debug("QueryCoord stop", zap.String("Address", Params.GetAddress()))
 	if s.closer != nil {
 		if err := s.closer.Close(); err != nil {
