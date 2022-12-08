@@ -946,7 +946,22 @@ func (i *IndexCoord) ShowConfigurations(ctx context.Context, req *internalpb.Sho
 		}, nil
 	}
 
-	return getComponentConfigurations(ctx, req), nil
+	configList := make([]*commonpb.KeyValuePair, 0)
+	for key, value := range Params.GetComponentConfigurations(ctx, "indexcoord", req.Pattern) {
+		configList = append(configList,
+			&commonpb.KeyValuePair{
+				Key:   key,
+				Value: value,
+			})
+	}
+
+	return &internalpb.ShowConfigurationsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
+		},
+		Configuations: configList,
+	}, nil
 }
 
 // GetMetrics gets the metrics info of IndexCoord.

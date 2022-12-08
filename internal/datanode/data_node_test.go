@@ -387,7 +387,7 @@ func TestDataNode(t *testing.T) {
 	})
 
 	t.Run("Test ShowConfigurations", func(t *testing.T) {
-		pattern := "Port"
+		pattern := "datanode.Port"
 		req := &internalpb.ShowConfigurationsRequest{
 			Base: &commonpb.MsgBase{
 				MsgType: commonpb.MsgType_WatchQueryChannels,

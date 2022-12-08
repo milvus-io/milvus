@@ -131,7 +131,7 @@ func (pg *ParamGroup) GetValue() map[string]string {
 	if pg.GetFunc != nil {
 		return pg.GetFunc()
 	}
-	values := pg.manager.GetConfigsByPattern(pg.KeyPrefix, false)
+	values := pg.manager.GetBy(config.WithPrefix(pg.KeyPrefix), config.RemovePrefix(pg.KeyPrefix))
 	return values
 }
 

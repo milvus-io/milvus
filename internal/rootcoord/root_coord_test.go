@@ -693,7 +693,7 @@ func TestRootCoord_ShowConfigurations(t *testing.T) {
 	t.Run("normal case", func(t *testing.T) {
 		Params.InitOnce()
 
-		pattern := "Port"
+		pattern := "rootcoord.Port"
 		req := &internalpb.ShowConfigurationsRequest{
 			Base: &commonpb.MsgBase{
 				MsgID: rand.Int63(),

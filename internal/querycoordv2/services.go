@@ -507,11 +507,8 @@ func (s *Server) ShowConfigurations(ctx context.Context, req *internalpb.ShowCon
 			Status: utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg, ErrNotHealthy),
 		}, nil
 	}
-
-	prefix := "querycoord."
-	matchedConfig := Params.GetByPattern(prefix + req.Pattern)
-	configList := make([]*commonpb.KeyValuePair, 0, len(matchedConfig))
-	for key, value := range matchedConfig {
+	configList := make([]*commonpb.KeyValuePair, 0)
+	for key, value := range Params.GetComponentConfigurations(ctx, "querycoord", req.Pattern) {
 		configList = append(configList,
 			&commonpb.KeyValuePair{
 				Key:   key,

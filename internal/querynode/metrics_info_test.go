@@ -25,7 +25,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -64,33 +63,4 @@ func TestGetSystemInfoMetrics(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	rateCol.Register(metricsinfo.NQPerSecond)
-}
-
-func TestGetComponentConfigurationsFailed(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	node, err := genSimpleQueryNode(ctx)
-	require.NoError(t, err)
-	defer node.Stop()
-
-	etcdCli, err := etcd.GetEtcdClient(
-		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
-		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
-		Params.EtcdCfg.Endpoints.GetAsStrings(),
-		Params.EtcdCfg.EtcdTLSCert.GetValue(),
-		Params.EtcdCfg.EtcdTLSKey.GetValue(),
-		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
-		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
-	assert.NoError(t, err)
-	defer etcdCli.Close()
-	node.session = sessionutil.NewSession(node.queryNodeLoopCtx, Params.EtcdCfg.MetaRootPath.GetValue(), etcdCli)
-
-	req := &internalpb.ShowConfigurationsRequest{
-		Base:    genCommonMsgBase(commonpb.MsgType_WatchQueryChannels, node.session.ServerID),
-		Pattern: "Cache",
-	}
-
-	resq := getComponentConfigurations(ctx, req)
-	assert.Equal(t, resq.Status.ErrorCode, commonpb.ErrorCode_Success)
 }

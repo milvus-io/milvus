@@ -736,8 +736,22 @@ func (node *DataNode) ShowConfigurations(ctx context.Context, req *internalpb.Sh
 			Configuations: nil,
 		}, nil
 	}
+	configList := make([]*commonpb.KeyValuePair, 0)
+	for key, value := range Params.GetComponentConfigurations(ctx, "datanode", req.Pattern) {
+		configList = append(configList,
+			&commonpb.KeyValuePair{
+				Key:   key,
+				Value: value,
+			})
+	}
 
-	return getComponentConfigurations(ctx, req), nil
+	return &internalpb.ShowConfigurationsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
+		},
+		Configuations: configList,
+	}, nil
 }
 
 // GetMetrics return datanode metrics

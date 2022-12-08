@@ -830,7 +830,22 @@ func (s *Server) ShowConfigurations(ctx context.Context, req *internalpb.ShowCon
 		}, nil
 	}
 
-	return getComponentConfigurations(ctx, req), nil
+	configList := make([]*commonpb.KeyValuePair, 0)
+	for key, value := range Params.GetComponentConfigurations(ctx, "datacoord", req.Pattern) {
+		configList = append(configList,
+			&commonpb.KeyValuePair{
+				Key:   key,
+				Value: value,
+			})
+	}
+
+	return &internalpb.ShowConfigurationsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
+		},
+		Configuations: configList,
+	}, nil
 }
 
 // GetMetrics returns DataCoord metrics info

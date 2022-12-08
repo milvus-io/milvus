@@ -24,35 +24,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/hardware"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/internal/util/uniquegenerator"
 )
-
-//getComponentConfigurations returns the configurations of indexCoord matching req.Pattern
-func getComponentConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) *internalpb.ShowConfigurationsResponse {
-	prefix := "indexcoord."
-	matchedConfig := Params.GetByPattern(prefix + req.Pattern)
-	configList := make([]*commonpb.KeyValuePair, 0, len(matchedConfig))
-	for key, value := range matchedConfig {
-		configList = append(configList,
-			&commonpb.KeyValuePair{
-				Key:   key,
-				Value: value,
-			})
-	}
-
-	return &internalpb.ShowConfigurationsResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-			Reason:    "",
-		},
-		Configuations: configList,
-	}
-}
 
 // TODO(dragondriver): add more detailed metrics
 func getSystemInfoMetrics(
