@@ -196,14 +196,14 @@ func (ob *CollectionObserver) observeCollectionLoadStatus(collection *meta.Colle
 			)
 		}
 
-		updated.LoadPercentage = int32(loadedCount * 100 / targetNum * int(collection.GetReplicaNumber()))
+		updated.LoadPercentage = int32(loadedCount * 100 / (targetNum * int(collection.GetReplicaNumber())))
 	}
 
 	if loadedCount <= ob.collectionLoadedCount[collection.GetCollectionID()] && updated.LoadPercentage != 100 {
 		return
 	}
 	ob.collectionLoadedCount[collection.GetCollectionID()] = loadedCount
-	if loadedCount >= targetNum {
+	if updated.LoadPercentage == 100 {
 		ob.targetMgr.UpdateCollectionCurrentTarget(updated.CollectionID)
 		updated.Status = querypb.LoadStatus_Loaded
 		ob.meta.CollectionManager.UpdateCollection(updated)
@@ -258,7 +258,7 @@ func (ob *CollectionObserver) observePartitionLoadStatus(partition *meta.Partiti
 				zap.Int("subChannelCount", subChannelCount),
 				zap.Int("loadSegmentCount", loadedCount-subChannelCount))
 		}
-		updated.LoadPercentage = int32(loadedCount * 100 / targetNum * int(partition.GetReplicaNumber()))
+		updated.LoadPercentage = int32(loadedCount * 100 / (targetNum * int(partition.GetReplicaNumber())))
 
 	}
 
@@ -266,7 +266,7 @@ func (ob *CollectionObserver) observePartitionLoadStatus(partition *meta.Partiti
 		return
 	}
 	ob.partitionLoadedCount[partition.GetPartitionID()] = loadedCount
-	if loadedCount >= targetNum {
+	if updated.LoadPercentage == 100 {
 		ob.targetMgr.UpdateCollectionCurrentTarget(partition.GetCollectionID(), partition.GetPartitionID())
 		updated.Status = querypb.LoadStatus_Loaded
 		ob.meta.CollectionManager.PutPartition(updated)
