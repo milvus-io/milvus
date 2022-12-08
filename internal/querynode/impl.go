@@ -1073,7 +1073,7 @@ func (node *QueryNode) queryWithDmlChannel(ctx context.Context, req *querypb.Que
 		traceID, req.GetFromShardLeader(), dmlChannel, req.GetSegmentIDs()))
 
 	results = append(results, streamingResult)
-	ret, err2 := mergeInternalRetrieveResult(ctx, results, req.Req.GetLimit())
+	ret, err2 := mergeInternalRetrieveResultsAndFillIfEmpty(ctx, results, req.Req.GetLimit(), req.GetReq().GetOutputFieldsId(), qs.collection.Schema())
 	if err2 != nil {
 		failRet.Status.Reason = err2.Error()
 		return failRet, nil
@@ -1115,6 +1115,13 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 		},
 	}
 
+	coll, err := node.metaReplica.getCollectionByID(req.GetReq().GetCollectionID())
+	if err != nil {
+		failRet.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		failRet.Status.Reason = err.Error()
+		return failRet, nil
+	}
+
 	toMergeResults := make([]*internalpb.RetrieveResults, 0)
 	runningGp, runningCtx := errgroup.WithContext(ctx)
 	mu := &sync.Mutex{}
@@ -1149,7 +1156,7 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 	if err := runningGp.Wait(); err != nil {
 		return failRet, nil
 	}
-	ret, err := mergeInternalRetrieveResult(ctx, toMergeResults, req.GetReq().GetLimit())
+	ret, err := mergeInternalRetrieveResultsAndFillIfEmpty(ctx, toMergeResults, req.GetReq().GetLimit(), req.GetReq().GetOutputFieldsId(), coll.Schema())
 	if err != nil {
 		failRet.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		failRet.Status.Reason = err.Error()

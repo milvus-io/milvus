@@ -377,6 +377,46 @@ func mergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 	return ret, nil
 }
 
+func mergeSegcoreRetrieveResultsAndFillIfEmpty(
+	ctx context.Context,
+	retrieveResults []*segcorepb.RetrieveResults,
+	limit int64,
+	outputFieldsID []int64,
+	schema *schemapb.CollectionSchema,
+) (*segcorepb.RetrieveResults, error) {
+
+	mergedResult, err := mergeSegcoreRetrieveResults(ctx, retrieveResults, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := typeutil.FillRetrieveResultIfEmpty(typeutil.NewSegcoreResults(mergedResult), outputFieldsID, schema); err != nil {
+		return nil, fmt.Errorf("failed to fill segcore retrieve results: %s", err.Error())
+	}
+
+	return mergedResult, nil
+}
+
+func mergeInternalRetrieveResultsAndFillIfEmpty(
+	ctx context.Context,
+	retrieveResults []*internalpb.RetrieveResults,
+	limit int64,
+	outputFieldsID []int64,
+	schema *schemapb.CollectionSchema,
+) (*internalpb.RetrieveResults, error) {
+
+	mergedResult, err := mergeInternalRetrieveResult(ctx, retrieveResults, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := typeutil.FillRetrieveResultIfEmpty(typeutil.NewInternalResult(mergedResult), outputFieldsID, schema); err != nil {
+		return nil, fmt.Errorf("failed to fill internal retrieve results: %s", err.Error())
+	}
+
+	return mergedResult, nil
+}
+
 // func printSearchResultData(data *schemapb.SearchResultData, header string) {
 // 	size := len(data.Ids.GetIntId().Data)
 // 	if size != len(data.Scores) {
