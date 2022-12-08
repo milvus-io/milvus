@@ -634,6 +634,7 @@ func (replica *metaReplica) addSegmentPrivate(segment *Segment) error {
 			fmt.Sprint(segment.collectionID),
 			fmt.Sprint(segment.partitionID),
 			segType.String(),
+			fmt.Sprint(segment.indexedFieldInfos.Len()),
 		).Add(float64(rowCount))
 	}
 	return nil
@@ -742,6 +743,7 @@ func (replica *metaReplica) removeSegmentPrivate(segmentID UniqueID, segType seg
 				fmt.Sprint(segment.collectionID),
 				fmt.Sprint(segment.partitionID),
 				segType.String(),
+				fmt.Sprint(segment.indexedFieldInfos.Len()),
 			).Sub(float64(rowCount))
 		}
 	}
