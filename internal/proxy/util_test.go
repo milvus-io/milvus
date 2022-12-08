@@ -924,3 +924,305 @@ func Test_isPartitionIsLoaded(t *testing.T) {
 		assert.False(t, loaded)
 	})
 }
+
+func Test_InsertTaskCheckLengthOfFieldsData(t *testing.T) {
+	var err error
+
+	// schema is empty, though won't happen in system
+	case1 := insertTask{
+		schema: &schemapb.CollectionSchema{
+			Name:        "TestInsertTask_checkLengthOfFieldsData",
+			Description: "TestInsertTask_checkLengthOfFieldsData",
+			AutoID:      false,
+			Fields:      []*schemapb.FieldSchema{},
+		},
+		insertMsg: &BaseInsertTask{
+			InsertRequest: internalpb.InsertRequest{
+				Base: &commonpb.MsgBase{
+					MsgType: commonpb.MsgType_Insert,
+				},
+				DbName:         "TestInsertTask_checkLengthOfFieldsData",
+				CollectionName: "TestInsertTask_checkLengthOfFieldsData",
+				PartitionName:  "TestInsertTask_checkLengthOfFieldsData",
+			},
+		},
+	}
+
+	err = checkLengthOfFieldsData(case1.schema, case1.insertMsg)
+	assert.Equal(t, nil, err)
+
+	// schema has two fields, neither of them are autoID
+	case2 := insertTask{
+		schema: &schemapb.CollectionSchema{
+			Name:        "TestInsertTask_checkLengthOfFieldsData",
+			Description: "TestInsertTask_checkLengthOfFieldsData",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{
+					AutoID:   false,
+					DataType: schemapb.DataType_Int64,
+				},
+				{
+					AutoID:   false,
+					DataType: schemapb.DataType_Int64,
+				},
+			},
+		},
+		insertMsg: &BaseInsertTask{
+			InsertRequest: internalpb.InsertRequest{
+				Base: &commonpb.MsgBase{
+					MsgType: commonpb.MsgType_Insert,
+				},
+			},
+		},
+	}
+	// passed fields is empty
+	// case2.BaseInsertTask = BaseInsertTask{
+	// 	InsertRequest: internalpb.insertRequest{
+	// 		Base: &commonpb.MsgBase{
+	// 			MsgType:  commonpb.MsgType_Insert,
+	// 			MsgID:    0,
+	// 			SourceID: paramtable.GetNodeID(),
+	// 		},
+	// 	},
+	// }
+	err = checkLengthOfFieldsData(case2.schema, case2.insertMsg)
+	assert.NotEqual(t, nil, err)
+	// the num of passed fields is less than needed
+	case2.insertMsg.FieldsData = []*schemapb.FieldData{
+		{
+			Type: schemapb.DataType_Int64,
+		},
+	}
+	err = checkLengthOfFieldsData(case2.schema, case2.insertMsg)
+	assert.NotEqual(t, nil, err)
+	// satisfied
+	case2.insertMsg.FieldsData = []*schemapb.FieldData{
+		{
+			Type: schemapb.DataType_Int64,
+		},
+		{
+			Type: schemapb.DataType_Int64,
+		},
+	}
+	err = checkLengthOfFieldsData(case2.schema, case2.insertMsg)
+	assert.Equal(t, nil, err)
+
+	// schema has two field, one of them are autoID
+	case3 := insertTask{
+		schema: &schemapb.CollectionSchema{
+			Name:        "TestInsertTask_checkLengthOfFieldsData",
+			Description: "TestInsertTask_checkLengthOfFieldsData",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{
+					AutoID:   true,
+					DataType: schemapb.DataType_Int64,
+				},
+				{
+					AutoID:   false,
+					DataType: schemapb.DataType_Int64,
+				},
+			},
+		},
+		insertMsg: &BaseInsertTask{
+			InsertRequest: internalpb.InsertRequest{
+				Base: &commonpb.MsgBase{
+					MsgType: commonpb.MsgType_Insert,
+				},
+			},
+		},
+	}
+	// passed fields is empty
+	// case3.req = &milvuspb.InsertRequest{}
+	err = checkLengthOfFieldsData(case3.schema, case3.insertMsg)
+	assert.NotEqual(t, nil, err)
+	// satisfied
+	case3.insertMsg.FieldsData = []*schemapb.FieldData{
+		{
+			Type: schemapb.DataType_Int64,
+		},
+	}
+	err = checkLengthOfFieldsData(case3.schema, case3.insertMsg)
+	assert.Equal(t, nil, err)
+
+	// schema has one field which is autoID
+	case4 := insertTask{
+		schema: &schemapb.CollectionSchema{
+			Name:        "TestInsertTask_checkLengthOfFieldsData",
+			Description: "TestInsertTask_checkLengthOfFieldsData",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{
+					AutoID:   true,
+					DataType: schemapb.DataType_Int64,
+				},
+			},
+		},
+		insertMsg: &BaseInsertTask{
+			InsertRequest: internalpb.InsertRequest{
+				Base: &commonpb.MsgBase{
+					MsgType: commonpb.MsgType_Insert,
+				},
+			},
+		},
+	}
+	// passed fields is empty
+	// satisfied
+	// case4.req = &milvuspb.InsertRequest{}
+	err = checkLengthOfFieldsData(case4.schema, case4.insertMsg)
+	assert.Equal(t, nil, err)
+}
+
+func Test_InsertTaskCheckPrimaryFieldData(t *testing.T) {
+	// schema is empty, though won't happen in system
+	// num_rows(0) should be greater than 0
+	case1 := insertTask{
+		schema: &schemapb.CollectionSchema{
+			Name:        "TestInsertTask_checkPrimaryFieldData",
+			Description: "TestInsertTask_checkPrimaryFieldData",
+			AutoID:      false,
+			Fields:      []*schemapb.FieldSchema{},
+		},
+		insertMsg: &BaseInsertTask{
+			InsertRequest: internalpb.InsertRequest{
+				Base: &commonpb.MsgBase{
+					MsgType: commonpb.MsgType_Insert,
+				},
+				DbName:         "TestInsertTask_checkPrimaryFieldData",
+				CollectionName: "TestInsertTask_checkPrimaryFieldData",
+				PartitionName:  "TestInsertTask_checkPrimaryFieldData",
+			},
+		},
+	}
+
+	_, err := checkPrimaryFieldData(case1.schema, case1.insertMsg)
+	assert.NotEqual(t, nil, err)
+
+	// the num of passed fields is less than needed
+	case2 := insertTask{
+		schema: &schemapb.CollectionSchema{
+			Name:        "TestInsertTask_checkPrimaryFieldData",
+			Description: "TestInsertTask_checkPrimaryFieldData",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{
+					AutoID:   false,
+					DataType: schemapb.DataType_Int64,
+				},
+				{
+					AutoID:   false,
+					DataType: schemapb.DataType_Int64,
+				},
+			},
+		},
+		insertMsg: &BaseInsertTask{
+			InsertRequest: internalpb.InsertRequest{
+				Base: &commonpb.MsgBase{
+					MsgType: commonpb.MsgType_Insert,
+				},
+				RowData: []*commonpb.Blob{
+					{},
+					{},
+				},
+				FieldsData: []*schemapb.FieldData{
+					{
+						Type: schemapb.DataType_Int64,
+					},
+				},
+				Version: internalpb.InsertDataVersion_RowBased,
+			},
+		},
+	}
+	_, err = checkPrimaryFieldData(case2.schema, case2.insertMsg)
+	assert.NotEqual(t, nil, err)
+
+	// autoID == false, no primary field schema
+	// primary field is not found
+	case3 := insertTask{
+		schema: &schemapb.CollectionSchema{
+			Name:        "TestInsertTask_checkPrimaryFieldData",
+			Description: "TestInsertTask_checkPrimaryFieldData",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:     "int64Field",
+					DataType: schemapb.DataType_Int64,
+				},
+				{
+					Name:     "floatField",
+					DataType: schemapb.DataType_Float,
+				},
+			},
+		},
+		insertMsg: &BaseInsertTask{
+			InsertRequest: internalpb.InsertRequest{
+				Base: &commonpb.MsgBase{
+					MsgType: commonpb.MsgType_Insert,
+				},
+				RowData: []*commonpb.Blob{
+					{},
+					{},
+				},
+				FieldsData: []*schemapb.FieldData{
+					{},
+					{},
+				},
+			},
+		},
+	}
+	_, err = checkPrimaryFieldData(case3.schema, case3.insertMsg)
+	assert.NotEqual(t, nil, err)
+
+	// autoID == true, has primary field schema, but primary field data exist
+	// can not assign primary field data when auto id enabled int64Field
+	case4 := insertTask{
+		schema: &schemapb.CollectionSchema{
+			Name:        "TestInsertTask_checkPrimaryFieldData",
+			Description: "TestInsertTask_checkPrimaryFieldData",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:     "int64Field",
+					FieldID:  1,
+					DataType: schemapb.DataType_Int64,
+				},
+				{
+					Name:     "floatField",
+					FieldID:  2,
+					DataType: schemapb.DataType_Float,
+				},
+			},
+		},
+		insertMsg: &BaseInsertTask{
+			InsertRequest: internalpb.InsertRequest{
+				Base: &commonpb.MsgBase{
+					MsgType: commonpb.MsgType_Insert,
+				},
+				RowData: []*commonpb.Blob{
+					{},
+					{},
+				},
+				FieldsData: []*schemapb.FieldData{
+					{
+						Type:      schemapb.DataType_Int64,
+						FieldName: "int64Field",
+					},
+				},
+			},
+		},
+	}
+	case4.schema.Fields[0].IsPrimaryKey = true
+	case4.schema.Fields[0].AutoID = true
+	case4.insertMsg.FieldsData[0] = newScalarFieldData(case4.schema.Fields[0], case4.schema.Fields[0].Name, 10)
+	_, err = checkPrimaryFieldData(case4.schema, case4.insertMsg)
+	assert.NotEqual(t, nil, err)
+
+	// autoID == true, has primary field schema, but DataType don't match
+	// the data type of the data and the schema do not match
+	case4.schema.Fields[0].IsPrimaryKey = false
+	case4.schema.Fields[1].IsPrimaryKey = true
+	case4.schema.Fields[1].AutoID = true
+	_, err = checkPrimaryFieldData(case4.schema, case4.insertMsg)
+	assert.NotEqual(t, nil, err)
+}

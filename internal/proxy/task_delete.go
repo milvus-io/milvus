@@ -27,7 +27,7 @@ type BaseDeleteTask = msgstream.DeleteMsg
 
 type deleteTask struct {
 	Condition
-	BaseDeleteTask
+	deleteMsg  *BaseDeleteTask
 	ctx        context.Context
 	deleteExpr string
 	//req       *milvuspb.DeleteRequest
@@ -46,15 +46,15 @@ func (dt *deleteTask) TraceCtx() context.Context {
 }
 
 func (dt *deleteTask) ID() UniqueID {
-	return dt.Base.MsgID
+	return dt.deleteMsg.Base.MsgID
 }
 
 func (dt *deleteTask) SetID(uid UniqueID) {
-	dt.Base.MsgID = uid
+	dt.deleteMsg.Base.MsgID = uid
 }
 
 func (dt *deleteTask) Type() commonpb.MsgType {
-	return dt.Base.MsgType
+	return dt.deleteMsg.Base.MsgType
 }
 
 func (dt *deleteTask) Name() string {
@@ -62,19 +62,19 @@ func (dt *deleteTask) Name() string {
 }
 
 func (dt *deleteTask) BeginTs() Timestamp {
-	return dt.Base.Timestamp
+	return dt.deleteMsg.Base.Timestamp
 }
 
 func (dt *deleteTask) EndTs() Timestamp {
-	return dt.Base.Timestamp
+	return dt.deleteMsg.Base.Timestamp
 }
 
 func (dt *deleteTask) SetTs(ts Timestamp) {
-	dt.Base.Timestamp = ts
+	dt.deleteMsg.Base.Timestamp = ts
 }
 
 func (dt *deleteTask) OnEnqueue() error {
-	dt.DeleteRequest.Base = commonpbutil.NewMsgBase()
+	dt.deleteMsg.Base = commonpbutil.NewMsgBase()
 	return nil
 }
 
@@ -99,7 +99,7 @@ func (dt *deleteTask) getPChanStats() (map[pChan]pChanStatistics, error) {
 }
 
 func (dt *deleteTask) getChannels() ([]pChan, error) {
-	collID, err := globalMetaCache.GetCollectionID(dt.ctx, dt.CollectionName)
+	collID, err := globalMetaCache.GetCollectionID(dt.ctx, dt.deleteMsg.CollectionName)
 	if err != nil {
 		return nil, err
 	}
@@ -154,8 +154,8 @@ func getPrimaryKeysFromExpr(schema *schemapb.CollectionSchema, expr string) (res
 }
 
 func (dt *deleteTask) PreExecute(ctx context.Context) error {
-	dt.Base.MsgType = commonpb.MsgType_Delete
-	dt.Base.SourceID = paramtable.GetNodeID()
+	dt.deleteMsg.Base.MsgType = commonpb.MsgType_Delete
+	dt.deleteMsg.Base.SourceID = paramtable.GetNodeID()
 
 	dt.result = &milvuspb.MutationResult{
 		Status: &commonpb.Status{
@@ -167,7 +167,7 @@ func (dt *deleteTask) PreExecute(ctx context.Context) error {
 		Timestamp: dt.BeginTs(),
 	}
 
-	collName := dt.CollectionName
+	collName := dt.deleteMsg.CollectionName
 	if err := validateCollectionName(collName); err != nil {
 		log.Info("Invalid collection name", zap.String("collectionName", collName), zap.Error(err))
 		return err
@@ -177,12 +177,12 @@ func (dt *deleteTask) PreExecute(ctx context.Context) error {
 		log.Info("Failed to get collection id", zap.String("collectionName", collName), zap.Error(err))
 		return err
 	}
-	dt.DeleteRequest.CollectionID = collID
+	dt.deleteMsg.CollectionID = collID
 	dt.collectionID = collID
 
 	// If partitionName is not empty, partitionID will be set.
-	if len(dt.PartitionName) > 0 {
-		partName := dt.PartitionName
+	if len(dt.deleteMsg.PartitionName) > 0 {
+		partName := dt.deleteMsg.PartitionName
 		if err := validatePartitionTag(partName, true); err != nil {
 			log.Info("Invalid partition name", zap.String("partitionName", partName), zap.Error(err))
 			return err
@@ -192,9 +192,9 @@ func (dt *deleteTask) PreExecute(ctx context.Context) error {
 			log.Info("Failed to get partition id", zap.String("collectionName", collName), zap.String("partitionName", partName), zap.Error(err))
 			return err
 		}
-		dt.DeleteRequest.PartitionID = partID
+		dt.deleteMsg.PartitionID = partID
 	} else {
-		dt.DeleteRequest.PartitionID = common.InvalidPartitionID
+		dt.deleteMsg.PartitionID = common.InvalidPartitionID
 	}
 
 	schema, err := globalMetaCache.GetCollectionSchema(ctx, collName)
@@ -211,17 +211,17 @@ func (dt *deleteTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	dt.DeleteRequest.NumRows = numRow
-	dt.DeleteRequest.PrimaryKeys = primaryKeys
-	log.Debug("get primary keys from expr", zap.Int64("len of primary keys", dt.DeleteRequest.NumRows))
+	dt.deleteMsg.NumRows = numRow
+	dt.deleteMsg.PrimaryKeys = primaryKeys
+	log.Debug("get primary keys from expr", zap.Int64("len of primary keys", dt.deleteMsg.NumRows))
 
 	// set result
 	dt.result.IDs = primaryKeys
-	dt.result.DeleteCnt = dt.DeleteRequest.NumRows
+	dt.result.DeleteCnt = dt.deleteMsg.NumRows
 
-	dt.Timestamps = make([]uint64, numRow)
-	for index := range dt.Timestamps {
-		dt.Timestamps[index] = dt.BeginTs()
+	dt.deleteMsg.Timestamps = make([]uint64, numRow)
+	for index := range dt.deleteMsg.Timestamps {
+		dt.deleteMsg.Timestamps[index] = dt.BeginTs()
 	}
 
 	return nil
@@ -233,7 +233,7 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute delete %d", dt.ID()))
 
-	collID := dt.DeleteRequest.CollectionID
+	collID := dt.deleteMsg.CollectionID
 	stream, err := dt.chMgr.getOrCreateDmlStream(collID)
 	if err != nil {
 		return err
@@ -247,10 +247,10 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 		dt.result.Status.Reason = err.Error()
 		return err
 	}
-	dt.HashValues = typeutil.HashPK2Channels(dt.result.IDs, channelNames)
+	dt.deleteMsg.HashValues = typeutil.HashPK2Channels(dt.result.IDs, channelNames)
 
 	log.Debug("send delete request to virtual channels",
-		zap.String("collection", dt.GetCollectionName()),
+		zap.String("collection", dt.deleteMsg.GetCollectionName()),
 		zap.Int64("collection_id", collID),
 		zap.Strings("virtual_channels", channelNames),
 		zap.Int64("task_id", dt.ID()))
@@ -258,19 +258,19 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 	tr.Record("get vchannels")
 	// repack delete msg by dmChannel
 	result := make(map[uint32]msgstream.TsMsg)
-	collectionName := dt.CollectionName
-	collectionID := dt.CollectionID
-	partitionID := dt.PartitionID
-	partitionName := dt.PartitionName
-	proxyID := dt.Base.SourceID
-	for index, key := range dt.HashValues {
-		ts := dt.Timestamps[index]
+	collectionName := dt.deleteMsg.CollectionName
+	collectionID := dt.deleteMsg.CollectionID
+	partitionID := dt.deleteMsg.PartitionID
+	partitionName := dt.deleteMsg.PartitionName
+	proxyID := dt.deleteMsg.Base.SourceID
+	for index, key := range dt.deleteMsg.HashValues {
+		ts := dt.deleteMsg.Timestamps[index]
 		_, ok := result[key]
 		if !ok {
 			sliceRequest := internalpb.DeleteRequest{
 				Base: commonpbutil.NewMsgBase(
 					commonpbutil.WithMsgType(commonpb.MsgType_Delete),
-					commonpbutil.WithMsgID(dt.Base.MsgID),
+					commonpbutil.WithMsgID(dt.deleteMsg.Base.MsgID),
 					commonpbutil.WithTimeStamp(ts),
 					commonpbutil.WithSourceID(proxyID),
 				),
@@ -289,9 +289,9 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 			result[key] = deleteMsg
 		}
 		curMsg := result[key].(*msgstream.DeleteMsg)
-		curMsg.HashValues = append(curMsg.HashValues, dt.HashValues[index])
-		curMsg.Timestamps = append(curMsg.Timestamps, dt.Timestamps[index])
-		typeutil.AppendIDs(curMsg.PrimaryKeys, dt.PrimaryKeys, index)
+		curMsg.HashValues = append(curMsg.HashValues, dt.deleteMsg.HashValues[index])
+		curMsg.Timestamps = append(curMsg.Timestamps, dt.deleteMsg.Timestamps[index])
+		typeutil.AppendIDs(curMsg.PrimaryKeys, dt.deleteMsg.PrimaryKeys, index)
 		curMsg.NumRows++
 	}
 

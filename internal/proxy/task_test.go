@@ -1390,7 +1390,7 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 	t.Run("insert", func(t *testing.T) {
 		hash := generateHashKeys(nb)
 		task := &insertTask{
-			BaseInsertTask: BaseInsertTask{
+			insertMsg: &BaseInsertTask{
 				BaseMsg: msgstream.BaseMsg{
 					HashValues: hash,
 				},
@@ -1434,7 +1434,7 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 		}
 
 		for fieldName, dataType := range fieldName2Types {
-			task.FieldsData = append(task.FieldsData, generateFieldData(dataType, fieldName, nb))
+			task.insertMsg.FieldsData = append(task.insertMsg.FieldsData, generateFieldData(dataType, fieldName, nb))
 		}
 
 		assert.NoError(t, task.OnEnqueue())
@@ -1446,7 +1446,7 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 	t.Run("delete", func(t *testing.T) {
 		task := &deleteTask{
 			Condition: NewTaskCondition(ctx),
-			BaseDeleteTask: msgstream.DeleteMsg{
+			deleteMsg: &msgstream.DeleteMsg{
 				BaseMsg: msgstream.BaseMsg{},
 				DeleteRequest: internalpb.DeleteRequest{
 					Base: &commonpb.MsgBase{
@@ -1486,7 +1486,7 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 		task.SetID(id)
 		assert.Equal(t, id, task.ID())
 
-		task.Base.MsgType = commonpb.MsgType_Delete
+		task.deleteMsg.Base.MsgType = commonpb.MsgType_Delete
 		assert.Equal(t, commonpb.MsgType_Delete, task.Type())
 
 		ts := Timestamp(time.Now().UnixNano())
@@ -1500,7 +1500,7 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 
 		task2 := &deleteTask{
 			Condition: NewTaskCondition(ctx),
-			BaseDeleteTask: msgstream.DeleteMsg{
+			deleteMsg: &msgstream.DeleteMsg{
 				BaseMsg: msgstream.BaseMsg{},
 				DeleteRequest: internalpb.DeleteRequest{
 					Base: &commonpb.MsgBase{
@@ -1643,7 +1643,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 	t.Run("insert", func(t *testing.T) {
 		hash := generateHashKeys(nb)
 		task := &insertTask{
-			BaseInsertTask: BaseInsertTask{
+			insertMsg: &BaseInsertTask{
 				BaseMsg: msgstream.BaseMsg{
 					HashValues: hash,
 				},
@@ -1688,7 +1688,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 
 		fieldID := common.StartOfUserFieldID
 		for fieldName, dataType := range fieldName2Types {
-			task.FieldsData = append(task.FieldsData, generateFieldData(dataType, fieldName, nb))
+			task.insertMsg.FieldsData = append(task.insertMsg.FieldsData, generateFieldData(dataType, fieldName, nb))
 			fieldID++
 		}
 
@@ -1701,7 +1701,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 	t.Run("delete", func(t *testing.T) {
 		task := &deleteTask{
 			Condition: NewTaskCondition(ctx),
-			BaseDeleteTask: msgstream.DeleteMsg{
+			deleteMsg: &msgstream.DeleteMsg{
 				BaseMsg: msgstream.BaseMsg{},
 				DeleteRequest: internalpb.DeleteRequest{
 					Base: &commonpb.MsgBase{
@@ -1741,7 +1741,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 		task.SetID(id)
 		assert.Equal(t, id, task.ID())
 
-		task.Base.MsgType = commonpb.MsgType_Delete
+		task.deleteMsg.Base.MsgType = commonpb.MsgType_Delete
 		assert.Equal(t, commonpb.MsgType_Delete, task.Type())
 
 		ts := Timestamp(time.Now().UnixNano())
@@ -1755,7 +1755,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 
 		task2 := &deleteTask{
 			Condition: NewTaskCondition(ctx),
-			BaseDeleteTask: msgstream.DeleteMsg{
+			deleteMsg: &msgstream.DeleteMsg{
 				BaseMsg: msgstream.BaseMsg{},
 				DeleteRequest: internalpb.DeleteRequest{
 					Base: &commonpb.MsgBase{
