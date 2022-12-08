@@ -135,9 +135,6 @@ func (cit *CreateIndexTask) PreExecute(ctx context.Context) error {
 }
 
 func (cit *CreateIndexTask) createIndexAtomic(index *model.Index, segmentsInfo []*datapb.SegmentInfo) ([]UniqueID, []*datapb.SegmentInfo, error) {
-	cit.indexCoordClient.indexGCLock.RLock()
-	defer cit.indexCoordClient.indexGCLock.RUnlock()
-
 	buildIDs := make([]UniqueID, 0)
 	segments := make([]*datapb.SegmentInfo, 0)
 	for _, segmentInfo := range segmentsInfo {
@@ -191,6 +188,11 @@ func (cit *CreateIndexTask) Execute(ctx context.Context) error {
 		IsAutoIndex:     cit.req.GetIsAutoIndex(),
 		UserIndexParams: cit.req.GetUserIndexParams(),
 	}
+
+	// lock before GetFlushedSegments,
+	// prevent the flush watcher watches the new flushed segment just after getting the flushed segments, and it locks firstly.
+	cit.indexCoordClient.indexGCLock.RLock()
+	defer cit.indexCoordClient.indexGCLock.RUnlock()
 
 	// Get flushed segments
 	flushedSegments, err := cit.dataCoordClient.GetFlushedSegments(cit.ctx, &datapb.GetFlushedSegmentsRequest{
