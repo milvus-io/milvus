@@ -51,12 +51,6 @@ jobs:
           path: .docker/amd64-ubuntu20.04-ccache
           key: ubuntu20.04-ccache-${{ env.corehash }}
           restore-keys: ubuntu20.04-ccache-
-      - name: Cache Third Party
-        uses: actions/cache@v3
-        with:
-          path: .docker/thirdparty
-          key: ubuntu20.04-thirdparty-${{ hashFiles('internal/core/thirdparty/**') }}
-          restore-keys: ubuntu20.04-thirdparty-
       - name: Cache Go Mod Volumes
         uses: actions/cache@v3
         with:
@@ -67,7 +61,7 @@ jobs:
         uses: actions/cache@v3
         with:
           path: .docker/amd64-ubuntu20.04-conan
-          key: ubuntu20.04-conan-${{ hashFiles('internal/core/conanfile.txt') }}
+          key: ubuntu20.04-conan-${{ hashFiles('internal/core/conanfile.*') }}
           restore-keys: ubuntu20.04-conan-
       - name: Code Check
         env:

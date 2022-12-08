@@ -34,9 +34,14 @@ ROOT_DIR="$( cd -P "$( dirname "$SOURCE" )/.." && pwd )"
 
 unameOut="$(uname -s)"
 
-
 case "${unameOut}" in
     Linux*)     
+      LIBJEMALLOC=$PWD/internal/core/output/lib/libjemalloc.so
+      if test -f "$LIBJEMALLOC"; then
+        export LD_PRELOAD="$LIBJEMALLOC"
+      else
+        echo "WARN: Cannot find $LIBJEMALLOC"
+      fi
       export PKG_CONFIG_PATH="${PKG_CONFIG_PATH}:$ROOT_DIR/internal/core/output/lib/pkgconfig:$ROOT_DIR/internal/core/output/lib64/pkgconfig"
       export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:$ROOT_DIR/internal/core/output/lib:$ROOT_DIR/internal/core/output/lib64"
       export RPATH=$LD_LIBRARY_PATH;;

@@ -58,12 +58,6 @@ jobs:
           path: .docker/amd64-ubuntu${{ matrix.ubuntu }}-ccache
           key: ubuntu${{ matrix.ubuntu }}-ccache-${{ env.corehash }}
           restore-keys: ubuntu${{ matrix.ubuntu }}-ccache-
-      - name: Cache Third Party
-        uses: actions/cache@v3
-        with:
-          path: .docker/thirdparty
-          key: ubuntu${{ matrix.ubuntu }}-thirdparty-${{ hashFiles('internal/core/thirdparty/**') }}
-          restore-keys: ubuntu${{ matrix.ubuntu }}-thirdparty-
       - name: Cache Go Mod Volumes
         uses: actions/cache@v3
         with:
@@ -74,7 +68,7 @@ jobs:
         uses: actions/cache@v3
         with:
           path: .docker/amd64-ubuntu${{ matrix.ubuntu }}-conan
-          key: ubuntu${{ matrix.ubuntu }}-conan-${{ hashFiles('internal/core/conanfile.txt') }}
+          key: ubuntu${{ matrix.ubuntu }}-conan-${{ hashFiles('internal/core/conanfile.*') }}
           restore-keys: ubuntu${{ matrix.ubuntu }}-conan-
       - name: Start Service
         shell: bash
@@ -114,7 +108,7 @@ jobs:
       - name: Display structure of code coverage results
         run: |
           ls -lah
-          
+
       - name: Upload coverage to Codecov
         if: "github.repository == 'milvus-io/milvus'"
         uses: codecov/codecov-action@v3.1.1
