@@ -87,3 +87,7 @@ const (
 const (
 	CollectionTTLConfigKey = "collection.ttl.seconds"
 )
+
+func IsSystemField(fieldID int64) bool {
+	return fieldID < StartOfUserFieldID
+}
