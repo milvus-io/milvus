@@ -353,3 +353,12 @@ func errCode(err error) commonpb.ErrorCode {
 	}
 	return commonpb.ErrorCode_UnexpectedError
 }
+
+func checkNodeAvailable(nodeID int64, info *session.NodeInfo) error {
+	if info == nil {
+		return WrapErrNodeOffline(nodeID)
+	} else if time.Since(info.LastHeartbeat()) > Params.QueryCoordCfg.HeartbeatAvailableInterval.GetAsDuration(time.Millisecond) {
+		return WrapErrNodeHeartbeatOutdated(nodeID, info.LastHeartbeat())
+	}
+	return nil
+}

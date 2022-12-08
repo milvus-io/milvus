@@ -896,7 +896,7 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 	p.HeartbeatAvailableInterval = ParamItem{
 		Key:          "queryCoord.heartbeatAvailableInterval",
 		Version:      "2.2.1",
-		DefaultValue: "2500",
+		DefaultValue: "10000",
 		PanicIfEmpty: true,
 	}
 	p.HeartbeatAvailableInterval.Init(base.mgr)
