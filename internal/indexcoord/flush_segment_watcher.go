@@ -275,6 +275,9 @@ func (fsw *flushedSegmentWatcher) internalProcess(segID UniqueID) {
 }
 
 func (fsw *flushedSegmentWatcher) constructTask(t *internalTask) error {
+	// Make sure index is not being written.
+	fsw.ic.indexGCLock.Lock()
+	defer fsw.ic.indexGCLock.Unlock()
 	fieldIndexes := fsw.meta.GetIndexesForCollection(t.segmentInfo.CollectionID, "")
 	if len(fieldIndexes) == 0 {
 		log.Ctx(fsw.ctx).Debug("segment no need to build index", zap.Int64("segmentID", t.segmentInfo.ID),
