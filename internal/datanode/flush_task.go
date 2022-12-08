@@ -138,6 +138,7 @@ func (t *flushTaskRunner) runFlushInsert(task flushInsertTask,
 			zap.Any("position", pos),
 			zap.Time("PosTime", tsoutil.PhysicalTime(pos.GetTimestamp())),
 		)
+		t.Add(1)
 		go func() {
 			err := retry.Do(context.Background(), func() error {
 				return task.flushInsertData()
@@ -166,6 +167,7 @@ func (t *flushTaskRunner) runFlushDel(task flushDeleteTask, deltaLogs *DelDataBu
 				},
 			}
 		}
+		t.Add(1)
 		go func() {
 			err := retry.Do(context.Background(), func() error {
 				return task.flushDeleteData()
@@ -234,7 +236,5 @@ func newFlushTaskRunner(segmentID UniqueID, injectCh <-chan *taskInjection) *flu
 		segmentID:    segmentID,
 		injectSignal: injectCh,
 	}
-	// insert & del
-	t.Add(2)
 	return t
 }

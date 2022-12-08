@@ -297,7 +297,6 @@ func (m *rendezvousFlushManager) handleInsertTask(segmentID UniqueID, task flush
 			WaitGroup: sync.WaitGroup{},
 			segmentID: segmentID,
 		}
-		r.WaitGroup.Add(1) // insert and delete are not bound in drop mode
 		r.runFlushInsert(task, binlogs, statslogs, flushed, dropped, pos)
 		r.WaitGroup.Wait()
 
@@ -324,7 +323,6 @@ func (m *rendezvousFlushManager) handleDeleteTask(segmentID UniqueID, task flush
 				WaitGroup: sync.WaitGroup{},
 				segmentID: segmentID,
 			}
-			r.WaitGroup.Add(1) // insert and delete are not bound in drop mode
 			r.runFlushDel(task, deltaLogs)
 			r.WaitGroup.Wait()
 
