@@ -18,7 +18,9 @@ package accesslog
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/golang/protobuf/proto"
@@ -40,6 +42,24 @@ func UnaryAccessLoggerInterceptor(ctx context.Context, req interface{}, info *gr
 	resp, err := handler(ctx, req)
 	PrintAccessInfo(ctx, resp, err, info, time.Since(starttime).Milliseconds())
 	return resp, err
+}
+
+func Join(path1, path2 string) string {
+	if strings.HasSuffix(path1, "/") {
+		return path1 + path2
+	}
+	return path1 + "/" + path2
+}
+
+func timeFromName(filename, prefix, ext string) (time.Time, error) {
+	if !strings.HasPrefix(filename, prefix) {
+		return time.Time{}, errors.New("mismatched prefix")
+	}
+	if !strings.HasSuffix(filename, ext) {
+		return time.Time{}, errors.New("mismatched extension")
+	}
+	ts := filename[len(prefix) : len(filename)-len(ext)]
+	return time.Parse(timeFormat, ts)
 }
 
 func getAccessAddr(ctx context.Context) string {

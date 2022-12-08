@@ -166,9 +166,9 @@ func TestRotateLogger_BasicError(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, 0, len(logfile))
 
-	_, err = logger.timeFromName("a.b", "a", "c")
+	_, err = timeFromName("a.b", "a", "c")
 	assert.Error(t, err)
-	_, err = logger.timeFromName("a.b", "d", "c")
+	_, err = timeFromName("a.b", "d", "c")
 	assert.Error(t, err)
 }
 
