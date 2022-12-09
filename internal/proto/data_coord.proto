@@ -455,6 +455,7 @@ message CompactionPlan {
   uint64 timetravel = 6;
   string channel = 7;
   int64 collection_ttl = 8;
+  int64 total_rows = 9;
 }
 
 message CompactionResult {
