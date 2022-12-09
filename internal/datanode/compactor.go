@@ -307,6 +307,12 @@ func (t *compactionTask) merge(
 						log.Warn("strconv wrong on get dim", zap.Error(err))
 						return nil, nil, 0, err
 					}
+					switch fs.GetDataType() {
+					case schemapb.DataType_FloatVector:
+						maxRowsPerBinlog = int(Params.DataNodeCfg.FlushInsertBufferSize / (int64(dim) * 4))
+					case schemapb.DataType_BinaryVector:
+						maxRowsPerBinlog = int(Params.DataNodeCfg.FlushInsertBufferSize / (int64(dim) / 8))
+					}
 					break
 				}
 			}
@@ -317,7 +323,6 @@ func (t *compactionTask) merge(
 	numRows = 0
 	numBinlogs = 0
 	currentTs := t.GetCurrentTime()
-	maxRowsPerBinlog = int(Params.DataNodeCfg.FlushInsertBufferSize / (int64(dim) * 4))
 	currentRows := 0
 	downloadTimeCost := time.Duration(0)
 	uploadInsertTimeCost := time.Duration(0)
