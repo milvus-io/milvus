@@ -164,7 +164,7 @@ proxy:
   # please adjust in embedded Milvus: false
   ginLogging: true # Whether to produce gin logs.
   accessLog:
-    localPath: /tmp/accesslog
+    localPath: /tmp/milvus_accesslog
     filename: milvus_access_log.log
   grpc:
     serverMaxRecvSize: 67108864 # 64M

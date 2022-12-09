@@ -295,7 +295,7 @@ func (l *RotateLogger) max() int64 {
 
 func (l *RotateLogger) dir() string {
 	if l.localPath == "" {
-		l.localPath = path.Join(os.TempDir(), "accesslog")
+		l.localPath = path.Join(os.TempDir(), "milvus_accesslog")
 	}
 	return l.localPath
 }
