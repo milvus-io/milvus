@@ -12,6 +12,7 @@
 package paramtable
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path"
@@ -54,6 +55,11 @@ const (
 	DefaultMaxAge          = 10
 	DefaultMaxBackups      = 20
 )
+
+//Const of Global Config List
+func globalConfigPrefixs() []string {
+	return []string{"metastore.", "localStorage.", "etcd.", "mysql.", "minio.", "pulsar.", "kafka.", "rocksmq.", "log.", "grpc.", "common.", "quotaAndLimits."}
+}
 
 var defaultYaml = DefaultMilvusYaml
 
@@ -247,12 +253,13 @@ func (gp *BaseTable) Get(key string) string {
 	return value
 }
 
-func (gp *BaseTable) GetByPattern(pattern string) map[string]string {
-	return gp.mgr.GetConfigsByPattern(pattern, true)
+func (gp *BaseTable) GetConfigSubSet(pattern string) map[string]string {
+	return gp.mgr.GetBy(config.WithPrefix(pattern), config.RemovePrefix(pattern))
 }
 
-func (gp *BaseTable) GetConfigSubSet(pattern string) map[string]string {
-	return gp.mgr.GetConfigsByPattern(pattern, false)
+func (gp *BaseTable) GetComponentConfigurations(ctx context.Context, componentName string, sub string) map[string]string {
+	allownPrefixs := append(globalConfigPrefixs(), componentName+".")
+	return gp.mgr.GetBy(config.WithSubstr(sub), config.WithOneOfPrefixs(allownPrefixs...))
 }
 
 func (gp *BaseTable) GetAll() map[string]string {

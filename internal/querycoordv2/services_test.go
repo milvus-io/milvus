@@ -753,7 +753,7 @@ func (suite *ServiceSuite) TestShowConfigurations() {
 	server := suite.server
 
 	req := &internalpb.ShowConfigurationsRequest{
-		Pattern: "Port",
+		Pattern: "querycoord.Port",
 	}
 	resp, err := server.ShowConfigurations(ctx, req)
 	suite.NoError(err)
@@ -764,7 +764,7 @@ func (suite *ServiceSuite) TestShowConfigurations() {
 	// Test when server is not healthy
 	server.UpdateStateCode(commonpb.StateCode_Initializing)
 	req = &internalpb.ShowConfigurationsRequest{
-		Pattern: "Port",
+		Pattern: "querycoord.Port",
 	}
 	resp, err = server.ShowConfigurations(ctx, req)
 	suite.NoError(err)

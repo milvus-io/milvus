@@ -1009,7 +1009,7 @@ func TestServer_watchQueryCoord(t *testing.T) {
 func TestServer_ShowConfigurations(t *testing.T) {
 	svr := newTestServer(t, nil)
 	defer closeTestServer(t, svr)
-	pattern := "Port"
+	pattern := "datacoord.Port"
 	req := &internalpb.ShowConfigurationsRequest{
 		Base: &commonpb.MsgBase{
 			MsgType: commonpb.MsgType_WatchQueryChannels,

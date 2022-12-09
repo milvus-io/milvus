@@ -29,6 +29,54 @@ const (
 	TombValue = "TOMB_VAULE"
 )
 
+type Filter func(key string) (string, bool)
+
+func WithSubstr(substring string) Filter {
+	substring = strings.ToLower(substring)
+	return func(key string) (string, bool) {
+		return key, strings.Contains(key, substring)
+	}
+}
+
+func WithPrefix(prefix string) Filter {
+	prefix = strings.ToLower(prefix)
+	return func(key string) (string, bool) {
+		return key, strings.HasPrefix(key, prefix)
+	}
+}
+
+func WithOneOfPrefixs(prefixs ...string) Filter {
+	for id, prefix := range prefixs {
+		prefixs[id] = strings.ToLower(prefix)
+	}
+	return func(key string) (string, bool) {
+		for _, prefix := range prefixs {
+			if strings.HasPrefix(key, prefix) {
+				return key, true
+			}
+		}
+		return key, false
+	}
+}
+
+func RemovePrefix(prefix string) Filter {
+	prefix = strings.ToLower(prefix)
+	return func(key string) (string, bool) {
+		return strings.Replace(key, prefix, "", 1), true
+	}
+}
+
+func filterate(key string, filters ...Filter) (string, bool) {
+	var ok bool
+	for _, filter := range filters {
+		key, ok = filter(key)
+		if !ok {
+			return key, ok
+		}
+	}
+	return key, ok
+}
+
 type Manager struct {
 	sync.RWMutex
 	Dispatcher     *EventDispatcher
@@ -64,34 +112,23 @@ func (m *Manager) GetConfig(key string) (string, error) {
 	return m.getConfigValueBySource(realKey, sourceName)
 }
 
-//GetConfigsByPattern returns key values that matched pattern
-// withPrefix : whether key include the prefix of pattern
-func (m *Manager) GetConfigsByPattern(pattern string, withPrefix bool) map[string]string {
-
+func (m *Manager) GetBy(filters ...Filter) map[string]string {
 	m.RLock()
 	defer m.RUnlock()
 	matchedConfig := make(map[string]string)
-	pattern = strings.ToLower(pattern)
-	for key, value := range m.keySourceMap {
-		result := strings.HasPrefix(key, pattern)
 
-		if result {
+	for key, value := range m.keySourceMap {
+		newkey, ok := filterate(key, filters...)
+		if ok {
 			sValue, err := m.getConfigValueBySource(key, value)
 			if err != nil {
+				log.Error("Get some invalid config", zap.String("key", key))
 				continue
 			}
-
-			checkAndCutOffKey := func() string {
-				if withPrefix {
-					return key
-				}
-				return strings.Replace(key, pattern, "", 1)
-			}
-
-			finalKey := checkAndCutOffKey()
-			matchedConfig[finalKey] = sValue
+			matchedConfig[newkey] = sValue
 		}
 	}
+
 	return matchedConfig
 }
 

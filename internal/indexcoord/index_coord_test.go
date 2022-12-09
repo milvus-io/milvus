@@ -479,7 +479,7 @@ func testIndexCoord(t *testing.T) {
 	})
 
 	t.Run("Showconfigurations, port", func(t *testing.T) {
-		pattern := "Port"
+		pattern := "indexcoord.Port"
 		req := &internalpb.ShowConfigurationsRequest{
 			Base: &commonpb.MsgBase{
 				MsgType: commonpb.MsgType_WatchQueryChannels,
