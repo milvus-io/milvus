@@ -31,6 +31,7 @@
 #include "test_utils/DataGen.h"
 #include "index/IndexFactory.h"
 #include "test_utils/indexbuilder_test_utils.h"
+#include "test_utils/PbHelper.h"
 
 namespace chrono = std::chrono;
 
@@ -223,6 +224,7 @@ TEST(CApiTest, GetCollectionNameTest) {
     auto name = GetCollectionName(collection);
     assert(strcmp(name, "default-collection") == 0);
     DeleteCollection(collection);
+    free((void*)(name));
 }
 
 TEST(CApiTest, SegmentTest) {
@@ -270,16 +272,7 @@ TEST(CApiTest, CPlan) {
     assert(field_id != -1);
 
     DeleteSearchPlan(plan);
-}
-
-template <typename Message>
-std::vector<uint8_t>
-serialize(const Message* msg) {
-    auto l = msg->ByteSizeLong();
-    std::vector<uint8_t> ret(l);
-    auto ok = msg->SerializeToArray(ret.data(), l);
-    assert(ok);
-    return ret;
+    DeleteCollection(collection);
 }
 
 TEST(CApiTest, InsertTest) {
@@ -364,6 +357,7 @@ TEST(CApiTest, MultiDeleteGrowingSegment) {
     auto suc = query_result->ParseFromArray(retrieve_result.proto_blob, retrieve_result.proto_size);
     ASSERT_TRUE(suc);
     ASSERT_EQ(query_result->ids().int_id().data().size(), 0);
+    DeleteRetrieveResult(&retrieve_result);
 
     // retrieve pks = {2}
     retrive_pks = {2};
@@ -374,6 +368,7 @@ TEST(CApiTest, MultiDeleteGrowingSegment) {
     suc = query_result->ParseFromArray(retrieve_result.proto_blob, retrieve_result.proto_size);
     ASSERT_TRUE(suc);
     ASSERT_EQ(query_result->ids().int_id().data().size(), 1);
+    DeleteRetrieveResult(&retrieve_result);
 
     // delete pks = {2}
     delete_pks = {2};
@@ -466,6 +461,7 @@ TEST(CApiTest, MultiDeleteSealedSegment) {
     auto suc = query_result->ParseFromArray(retrieve_result.proto_blob, retrieve_result.proto_size);
     ASSERT_TRUE(suc);
     ASSERT_EQ(query_result->ids().int_id().data().size(), 0);
+    DeleteRetrieveResult(&retrieve_result);
 
     // retrieve pks = {2}
     retrive_pks = {2};
@@ -476,6 +472,7 @@ TEST(CApiTest, MultiDeleteSealedSegment) {
     suc = query_result->ParseFromArray(retrieve_result.proto_blob, retrieve_result.proto_size);
     ASSERT_TRUE(suc);
     ASSERT_EQ(query_result->ids().int_id().data().size(), 1);
+    DeleteRetrieveResult(&retrieve_result);
 
     // delete pks = {2}
     delete_pks = {2};
@@ -540,6 +537,7 @@ TEST(CApiTest, DeleteRepeatedPksFromGrowingSegment) {
     auto suc = query_result->ParseFromArray(retrieve_result.proto_blob, retrieve_result.proto_size);
     ASSERT_TRUE(suc);
     ASSERT_EQ(query_result->ids().int_id().data().size(), 6);
+    DeleteRetrieveResult(&retrieve_result);
 
     // delete data pks = {1, 2, 3}
     std::vector<int64_t> delete_row_ids = {1, 2, 3};
@@ -623,6 +621,7 @@ TEST(CApiTest, DeleteRepeatedPksFromSealedSegment) {
     auto suc = query_result->ParseFromArray(retrieve_result.proto_blob, retrieve_result.proto_size);
     ASSERT_TRUE(suc);
     ASSERT_EQ(query_result->ids().int_id().data().size(), 6);
+    DeleteRetrieveResult(&retrieve_result);
 
     // delete data pks = {1, 2, 3}
     std::vector<int64_t> delete_row_ids = {1, 2, 3};
@@ -698,6 +697,7 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnGrowingSegment) {
     auto suc = query_result->ParseFromArray(retrieve_result.proto_blob, retrieve_result.proto_size);
     ASSERT_TRUE(suc);
     ASSERT_EQ(query_result->ids().int_id().data().size(), 0);
+    DeleteRetrieveResult(&retrieve_result);
 
     // second insert data
     // insert data with pks = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9} , timestamps = {10, 11, 12, 13, 14, 15, 16, 17, 18, 19}
@@ -1166,6 +1166,7 @@ TEST(CApiTest, ReudceNullResult) {
         EXPECT_EQ(size, num_queries / 2);
 
         DeleteSearchResult(res);
+        DeleteSearchResultDataBlobs(cSearchResultData);
     }
 
     DeleteSearchPlan(plan);
@@ -1246,6 +1247,7 @@ TEST(CApiTest, ReduceRemoveDuplicates) {
 
         DeleteSearchResult(res1);
         DeleteSearchResult(res2);
+        DeleteSearchResultDataBlobs(cSearchResultData);
     }
     {
         int nq1 = num_queries / 3;
@@ -1274,6 +1276,7 @@ TEST(CApiTest, ReduceRemoveDuplicates) {
         DeleteSearchResult(res1);
         DeleteSearchResult(res2);
         DeleteSearchResult(res3);
+        DeleteSearchResultDataBlobs(cSearchResultData);
     }
 
     DeleteSearchPlan(plan);
@@ -2739,6 +2742,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
     DeleteSearchResult(c_search_result_on_bigIndex);
     DeleteCollection(collection);
     DeleteSegment(segment);
+    DeleteSearchResultDataBlobs(cSearchResultData);
 }
 
 TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
@@ -2899,6 +2903,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     DeleteSearchResult(c_search_result_on_bigIndex);
     DeleteCollection(collection);
     DeleteSegment(segment);
+    DeleteSearchResultDataBlobs(cSearchResultData);
 }
 
 TEST(CApiTest, SealedSegmentTest) {

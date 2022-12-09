@@ -29,6 +29,8 @@
 #include "segcore/SegmentSealedImpl.h"
 #include "segcore/Utils.h"
 
+#include "PbHelper.h"
+
 using boost::algorithm::starts_with;
 
 namespace milvus::segcore {
@@ -39,6 +41,42 @@ struct GeneratedData {
     InsertData* raw_;
     std::vector<FieldId> field_ids;
     SchemaPtr schema_;
+
+    void
+    DeepCopy(const GeneratedData& data) {
+        row_ids_ = data.row_ids_;
+        timestamps_ = data.timestamps_;
+        raw_ = clone_msg(data.raw_).release();
+        field_ids = data.field_ids;
+        schema_ = data.schema_;
+    }
+
+    GeneratedData(const GeneratedData& data) {
+        DeepCopy(data);
+    }
+
+    GeneratedData&
+    operator=(const GeneratedData& data) {
+        if (this != &data) {
+            delete raw_;
+            DeepCopy(data);
+        }
+        return *this;
+    }
+
+    GeneratedData(GeneratedData&& data)
+        : row_ids_(std::move(data.row_ids_)),
+          timestamps_(std::move(data.timestamps_)),
+          raw_(data.raw_),
+          field_ids(std::move(data.field_ids)),
+          schema_(std::move(data.schema_)) {
+        data.raw_ = nullptr;
+    }
+
+    ~GeneratedData() {
+        delete raw_;
+    }
+
     template <typename T>
     std::vector<T>
     get_col(FieldId field_id) const {
@@ -394,7 +432,7 @@ SealedLoadFieldData(const GeneratedData& dataset, SegmentSealed& seg, const std:
         LoadFieldDataInfo info;
         FieldMeta field_meta(FieldName("RowID"), RowFieldID, DataType::INT64);
         auto array = CreateScalarDataArrayFrom(dataset.row_ids_.data(), row_count, field_meta);
-        info.field_data = array.release();
+        info.field_data = array.get();
         info.row_count = dataset.row_ids_.size();
         info.field_id = RowFieldID.get();  // field id for RowId
         seg.LoadFieldData(info);
@@ -403,7 +441,7 @@ SealedLoadFieldData(const GeneratedData& dataset, SegmentSealed& seg, const std:
         LoadFieldDataInfo info;
         FieldMeta field_meta(FieldName("Timestamp"), TimestampFieldID, DataType::INT64);
         auto array = CreateScalarDataArrayFrom(dataset.timestamps_.data(), row_count, field_meta);
-        info.field_data = array.release();
+        info.field_data = array.get();
         info.row_count = dataset.timestamps_.size();
         info.field_id = TimestampFieldID.get();
         seg.LoadFieldData(info);
