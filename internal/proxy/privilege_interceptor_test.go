@@ -2,13 +2,13 @@ package proxy
 
 import (
 	"context"
+	"sync"
 	"testing"
-
-	"github.com/milvus-io/milvus/internal/util/funcutil"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -19,7 +19,7 @@ func TestUnaryServerInterceptor(t *testing.T) {
 
 func TestPrivilegeInterceptor(t *testing.T) {
 	ctx := context.Background()
-	InitPolicyModel()
+
 	t.Run("Authorization Disabled", func(t *testing.T) {
 		Params.CommonCfg.AuthorizationEnabled = false
 		_, err := PrivilegeInterceptor(ctx, &milvuspb.LoadCollectionRequest{
@@ -110,6 +110,19 @@ func TestPrivilegeInterceptor(t *testing.T) {
 			CollectionName: "col1",
 		})
 		assert.Nil(t, err)
+
+		g := sync.WaitGroup{}
+		for i := 0; i < 20; i++ {
+			g.Add(1)
+			go func() {
+				defer g.Done()
+				PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.LoadCollectionRequest{
+					DbName:         "db_test",
+					CollectionName: "col1",
+				})
+			}()
+		}
+		g.Wait()
 	})
 
 }
