@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"sync"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
@@ -32,16 +34,23 @@ import (
 // searchOnSegments performs search on listed segments
 // all segment ids are validated before calling this function
 func searchSegments(ctx context.Context, replica ReplicaInterface, segType segmentType, searchReq *searchRequest, segIDs []UniqueID) ([]*SearchResult, error) {
-	// results variables
-	resultCh := make(chan *SearchResult, len(segIDs))
-	errs := make([]error, len(segIDs))
+	var (
+		// results variables
+		resultCh = make(chan *SearchResult, len(segIDs))
+		errs     = make([]error, len(segIDs))
+		wg       sync.WaitGroup
+
+		// For log only
+		mu                   sync.Mutex
+		segmentsWithoutIndex []UniqueID
+	)
+
 	searchLabel := metrics.SealedSegmentLabel
 	if segType == commonpb.SegmentState_Growing {
 		searchLabel = metrics.GrowingSegmentLabel
 	}
 
 	// calling segment search in goroutines
-	var wg sync.WaitGroup
 	for i, segID := range segIDs {
 		wg.Add(1)
 		go func(segID UniqueID, i int) {
@@ -54,9 +63,15 @@ func searchSegments(ctx context.Context, replica ReplicaInterface, segType segme
 				log.Error(err.Error()) // should not happen but still ignore it since the result is still correct
 				return
 			}
+
+			if !seg.hasLoadIndexForIndexedField(searchReq.searchFieldID) {
+				mu.Lock()
+				segmentsWithoutIndex = append(segmentsWithoutIndex, segID)
+				mu.Unlock()
+			}
 			// record search time
 			tr := timerecord.NewTimeRecorder("searchOnSegments")
-			searchResult, err := seg.search(searchReq)
+			searchResult, err := seg.search(ctx, searchReq)
 			errs[i] = err
 			resultCh <- searchResult
 			// update metrics
@@ -77,6 +92,10 @@ func searchSegments(ctx context.Context, replica ReplicaInterface, segType segme
 			deleteSearchResults(searchResults)
 			return nil, err
 		}
+	}
+
+	if len(segmentsWithoutIndex) > 0 {
+		log.Ctx(ctx).Info("search growing/sealed segments without indexes", zap.Int64s("segmentIDs", segmentsWithoutIndex))
 	}
 
 	return searchResults, nil

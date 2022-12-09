@@ -425,7 +425,7 @@ func TestSegment_segmentSearch(t *testing.T) {
 	req, err := parseSearchRequest(plan, placeGroupByte)
 	assert.NoError(t, err)
 
-	searchResult, err := segment.search(req)
+	searchResult, err := segment.search(ctx, req)
 	assert.NoError(t, err)
 
 	err = checkSearchResult(nq, plan, searchResult)
