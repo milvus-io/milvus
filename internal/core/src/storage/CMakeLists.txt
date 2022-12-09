@@ -49,7 +49,7 @@ add_library(milvus_storage SHARED ${STORAGE_FILES})
 find_package(Boost REQUIRED COMPONENTS filesystem)
 
 if(BUILD_DISK_ANN STREQUAL "ON")
-    target_link_libraries(milvus_storage PUBLIC milvus_common Boost::filesystem aws-cpp-sdk-s3 pthread)
+    target_link_libraries(milvus_storage PUBLIC milvus_common Boost::filesystem aws-cpp-sdk-s3 google_cloud_cpp_storage google_cloud_cpp_common google_cloud_cpp_rest_internal pthread)
 else()
     target_link_libraries(milvus_storage PUBLIC milvus_common Boost::filesystem pthread)
 endif()

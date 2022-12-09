@@ -36,7 +36,8 @@ macro(build_aws_sdk_s3)
         # BINARY_DIR aws-s3-bin
         PREFIX ${CMAKE_BINARY_DIR}/3rdparty_download/aws-sdk-subbuild
         BUILD_IN_SOURCE 1
-        #PATCH_COMMAND sh prefetch_crt_dependency.sh
+
+        # PATCH_COMMAND sh prefetch_crt_dependency.sh
         LIST_SEPARATOR "|"
         BUILD_COMMAND ${AWS_SDK_BUILD_COMMAND}
         INSTALL_COMMAND ${AWS_SDK_INSTALL_COMMAND}
