@@ -50,6 +50,7 @@ type queryTask struct {
 	ids            *schemapb.IDs
 	collectionName string
 	queryParams    *queryParams
+	schema         *schemapb.CollectionSchema
 
 	resultBuf       chan *internalpb.RetrieveResults
 	toReduceResults []*internalpb.RetrieveResults
@@ -108,6 +109,16 @@ func translateToOutputFieldIDs(outputFields []string, schema *schemapb.Collectio
 
 	}
 	return outputFieldIDs, nil
+}
+
+func filterSystemFields(outputFieldIDs []UniqueID) []UniqueID {
+	filtered := make([]UniqueID, 0, len(outputFieldIDs))
+	for _, outputFieldID := range outputFieldIDs {
+		if !common.IsSystemField(outputFieldID) {
+			filtered = append(filtered, outputFieldID)
+		}
+	}
+	return filtered
 }
 
 // parseQueryParams get limit and offset from queryParamsPair, both are optional.
@@ -225,6 +236,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	}
 
 	schema, _ := globalMetaCache.GetCollectionSchema(ctx, collectionName)
+	t.schema = schema
 
 	if t.ids != nil {
 		pkField := ""
@@ -348,7 +360,7 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 
 	metrics.ProxyDecodeResultLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), metrics.QueryLabel).Observe(0.0)
 	tr.CtxRecord(ctx, "reduceResultStart")
-	t.result, err = reduceRetrieveResults(ctx, t.toReduceResults, t.queryParams)
+	t.result, err = reduceRetrieveResultsAndFillIfEmpty(ctx, t.toReduceResults, t.queryParams, t.GetOutputFieldsId(), t.schema)
 	if err != nil {
 		return err
 	}
@@ -491,6 +503,21 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 	}
 
 	return ret, nil
+}
+
+func reduceRetrieveResultsAndFillIfEmpty(ctx context.Context, retrieveResults []*internalpb.RetrieveResults, queryParams *queryParams, outputFieldsID []int64, schema *schemapb.CollectionSchema) (*milvuspb.QueryResults, error) {
+	result, err := reduceRetrieveResults(ctx, retrieveResults, queryParams)
+	if err != nil {
+		return nil, err
+	}
+
+	// filter system fields.
+	filtered := filterSystemFields(outputFieldsID)
+	if err := typeutil.FillRetrieveResultIfEmpty(typeutil.NewMilvusResult(result), filtered, schema); err != nil {
+		return nil, fmt.Errorf("failed to fill retrieve results: %s", err.Error())
+	}
+
+	return result, nil
 }
 
 func (t *queryTask) TraceCtx() context.Context {

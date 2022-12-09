@@ -61,7 +61,7 @@ func (q *queryTask) queryOnStreaming() error {
 	}
 
 	// check if collection has been released, check streaming since it's released first
-	_, err := q.QS.metaReplica.getCollectionByID(q.CollectionID)
+	coll, err := q.QS.metaReplica.getCollectionByID(q.CollectionID)
 	if err != nil {
 		return err
 	}
@@ -85,7 +85,7 @@ func (q *queryTask) queryOnStreaming() error {
 	}
 
 	q.tr.RecordSpan()
-	mergedResult, err := mergeSegcoreRetrieveResults(ctx, sResults, q.iReq.GetLimit())
+	mergedResult, err := mergeSegcoreRetrieveResultsAndFillIfEmpty(ctx, sResults, q.iReq.GetLimit(), q.iReq.GetOutputFieldsId(), coll.Schema())
 	if err != nil {
 		return err
 	}
@@ -107,7 +107,7 @@ func (q *queryTask) queryOnHistorical() error {
 	}
 
 	// check if collection has been released, check historical since it's released first
-	_, err := q.QS.metaReplica.getCollectionByID(q.CollectionID)
+	coll, err := q.QS.metaReplica.getCollectionByID(q.CollectionID)
 	if err != nil {
 		return err
 	}
@@ -129,10 +129,11 @@ func (q *queryTask) queryOnHistorical() error {
 		return err
 	}
 
-	mergedResult, err := mergeSegcoreRetrieveResults(ctx, retrieveResults, q.req.GetReq().GetLimit())
+	mergedResult, err := mergeSegcoreRetrieveResultsAndFillIfEmpty(ctx, retrieveResults, q.req.GetReq().GetLimit(), q.iReq.GetOutputFieldsId(), coll.Schema())
 	if err != nil {
 		return err
 	}
+
 	q.Ret = &internalpb.RetrieveResults{
 		Status:     &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 		Ids:        mergedResult.Ids,
