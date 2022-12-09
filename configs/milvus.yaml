@@ -403,6 +403,10 @@ common:
 
   security:
     authorizationEnabled: false
+    # The superusers will ignore some system check processes,
+    # like the old password verification when updating the credential
+    superUsers:
+      - "root"
     # tls mode values [0, 1, 2]
     # 0 is close, 1 is one-way authentication, 2 is two-way authentication.
     tlsMode: 0

@@ -149,6 +149,7 @@ type commonConfig struct {
 	SimdType    ParamItem
 
 	AuthorizationEnabled ParamItem
+	SuperUsers           ParamItem
 
 	ClusterName ParamItem
 
@@ -451,6 +452,12 @@ func (p *commonConfig) init(base *BaseTable) {
 		DefaultValue: "false",
 	}
 	p.AuthorizationEnabled.Init(base.mgr)
+
+	p.SuperUsers = ParamItem{
+		Key:     "common.security.superUsers",
+		Version: "2.2.1",
+	}
+	p.SuperUsers.Init(base.mgr)
 
 	p.ClusterName = ParamItem{
 		Key:          "common.cluster.name",

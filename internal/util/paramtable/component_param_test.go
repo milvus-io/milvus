@@ -124,6 +124,12 @@ func TestComponentParam(t *testing.T) {
 		t.Logf("default session TTL time = %d", Params.SessionTTL.GetAsInt64())
 		assert.Equal(t, Params.SessionRetryTimes.GetAsInt64(), int64(DefaultSessionRetryTimes))
 		t.Logf("default session retry times = %d", Params.SessionRetryTimes.GetAsInt64())
+
+		params.Save("common.security.superUsers", "super1,super2,super3")
+		assert.Equal(t, []string{"super1", "super2", "super3"}, Params.SuperUsers.GetAsStrings())
+
+		params.Save("common.security.superUsers", "")
+		assert.Equal(t, []string{""}, Params.SuperUsers.GetAsStrings())
 	})
 
 	t.Run("test rootCoordConfig", func(t *testing.T) {
