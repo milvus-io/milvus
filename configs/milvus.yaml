@@ -157,7 +157,9 @@ proxy:
     timeTick:
       bufSize: 512
   maxNameLength: 255  # Maximum length of name for a collection or alias
-  maxFieldNum: 256     # Maximum number of fields in a collection
+  maxFieldNum: 96     # Maximum number of fields in a collection.
+  # NOTE!! Setting <maxFieldNum> over 127 leads to non-atomic Etcd save operations.
+  # We strongly suggest that this value is set <= 127 (as in Milvus 2.2.1). Adjust at your risk!
   maxDimension: 32768 # Maximum dimension of a vector
   maxShardNum: 256 # Maximum number of shards in a collection
   maxTaskNum: 1024 # max task number of proxy task queue

@@ -32,7 +32,7 @@ import (
 )
 
 var (
-	maxTxnNum = 64
+	maxTxnNum = 128
 )
 
 // GetEtcdClient returns etcd client
@@ -110,7 +110,7 @@ func min(a, b int) int {
 	return b
 }
 
-//SaveByBatch there will not guarantee atomicity
+// SaveByBatch there will not guarantee atomicity
 func SaveByBatch(kvs map[string]string, op func(partialKvs map[string]string) error) error {
 	if len(kvs) == 0 {
 		return nil

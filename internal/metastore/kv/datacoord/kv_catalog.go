@@ -38,7 +38,7 @@ import (
 	"golang.org/x/exp/maps"
 )
 
-const maxEtcdTxnNum = 64
+const maxEtcdTxnNum = 128
 
 type Catalog struct {
 	Txn                  kv.TxnKV
@@ -150,6 +150,10 @@ func (kc *Catalog) AlterSegments(ctx context.Context, newSegments []*datapb.Segm
 		}
 		maps.Copy(kvsPiece, kvs)
 		currSize += len(kvs)
+		if len(kvs) >= maxEtcdTxnNum {
+			log.Warn("a single segment's Etcd save has over maxEtcdTxnNum operations." +
+				" Please double check your <proxy.maxFieldNum> config")
+		}
 	}
 	if currSize > 0 {
 		if err := etcd.SaveByBatch(kvsPiece, saveFn); err != nil {
