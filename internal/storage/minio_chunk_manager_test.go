@@ -19,6 +19,8 @@ package storage
 import (
 	"context"
 	"errors"
+	"io"
+	"math/rand"
 	"path"
 	"strconv"
 	"strings"
@@ -570,4 +572,64 @@ func TestMinioChunkManager_normalizeRootPath(t *testing.T) {
 			assert.Equal(t, test.expected, mcm.normalizeRootPath(test.input))
 		})
 	}
+}
+
+func TestMinioChunkManager_Read(t *testing.T) {
+	var reader MockReader
+	reader.offset = new(int)
+	reader.value = make([]byte, 10)
+	reader.lastEOF = true
+	for i := 0; i < 10; i++ {
+		reader.value[i] = byte(i)
+	}
+	value, err := Read(reader, 10)
+	assert.Equal(t, len(value), 10)
+	for i := 0; i < 10; i++ {
+		assert.Equal(t, value[i], byte(i))
+	}
+
+	assert.Nil(t, err)
+}
+
+func TestMinioChunkManager_ReadEOF(t *testing.T) {
+	var reader MockReader
+	reader.offset = new(int)
+	reader.value = make([]byte, 10)
+	reader.lastEOF = false
+	for i := 0; i < 10; i++ {
+		reader.value[i] = byte(i)
+	}
+	value, err := Read(reader, 10)
+	assert.Equal(t, len(value), 10)
+	for i := 0; i < 10; i++ {
+		assert.Equal(t, value[i], byte(i))
+	}
+	assert.Nil(t, err)
+}
+
+type MockReader struct {
+	value   []byte
+	offset  *int
+	lastEOF bool
+}
+
+func (r MockReader) Read(p []byte) (n int, err error) {
+	if len(r.value) == *r.offset {
+		return 0, io.EOF
+	}
+
+	cap := len(r.value) - *r.offset
+	if cap < 5 {
+		copy(p, r.value[*r.offset:])
+		*r.offset = len(r.value)
+		if r.lastEOF {
+			return cap, io.EOF
+		}
+		return cap, nil
+	}
+
+	n = rand.Intn(5)
+	copy(p, r.value[*r.offset:(*r.offset+n)])
+	*r.offset += n
+	return n, nil
 }
