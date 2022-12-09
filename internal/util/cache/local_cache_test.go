@@ -218,6 +218,7 @@ func TestExpireAfterAccess(t *testing.T) {
 	}
 	mockTime := newMockTime()
 	currentTime = mockTime.now
+	defer resetCurrentTime()
 	c := NewCache(WithExpireAfterAccess[uint, uint](1*time.Second), WithRemovalListener(fn),
 		WithInsertionListener(fn)).(*localCache[uint, uint])
 	defer c.Close()
@@ -258,6 +259,7 @@ func TestExpireAfterWrite(t *testing.T) {
 
 	mockTime := newMockTime()
 	currentTime = mockTime.now
+	defer resetCurrentTime()
 	c := NewLoadingCache(loader, WithExpireAfterWrite[string, int](1*time.Second))
 	defer c.Close()
 
@@ -306,6 +308,7 @@ func TestRefreshAterWrite(t *testing.T) {
 	}
 	mockTime := newMockTime()
 	currentTime = mockTime.now
+	defer resetCurrentTime()
 	c := NewLoadingCache(loader,
 		WithExpireAfterAccess[int, int](4*time.Second),
 		WithRefreshAfterWrite[int, int](2*time.Second),
@@ -347,6 +350,7 @@ func TestGetIfPresentExpired(t *testing.T) {
 	c := NewCache(WithExpireAfterWrite[int, string](1*time.Second), WithInsertionListener(insFunc))
 	mockTime := newMockTime()
 	currentTime = mockTime.now
+	defer resetCurrentTime()
 
 	v, ok := c.GetIfPresent(0)
 	assert.False(t, ok)
@@ -409,20 +413,20 @@ func TestWithAsyncInitPreLoader(t *testing.T) {
 func TestSynchronousReload(t *testing.T) {
 	var val string
 	loader := func(k int) (string, error) {
-		time.Sleep(1 * time.Millisecond)
 		if val == "" {
 			return "", errors.New("empty")
 		}
 		return val, nil
 	}
 
-	c := NewLoadingCache(loader, WithExpireAfterWrite[int, string](1*time.Second))
+	c := NewLoadingCache(loader, WithExpireAfterWrite[int, string](200*time.Millisecond))
 	val = "a"
 	v, err := c.Get(1)
 	assert.NoError(t, err)
 	assert.Equal(t, val, v)
 
 	val = "b"
+	time.Sleep(300 * time.Millisecond)
 	v, err = c.Get(1)
 	assert.NoError(t, err)
 	assert.Equal(t, val, v)
@@ -499,4 +503,8 @@ func (t *mockTime) now() time.Time {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	return t.value
+}
+
+func resetCurrentTime() {
+	currentTime = time.Now
 }

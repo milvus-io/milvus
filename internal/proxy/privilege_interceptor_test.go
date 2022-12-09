@@ -2,14 +2,14 @@ package proxy
 
 import (
 	"context"
+	"sync"
 	"testing"
-
-	"github.com/milvus-io/milvus/internal/util/funcutil"
-	"github.com/milvus-io/milvus/internal/util/paramtable"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -22,7 +22,6 @@ func TestPrivilegeInterceptor(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("Authorization Disabled", func(t *testing.T) {
-		InitPolicyModel()
 		paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "false")
 		_, err := PrivilegeInterceptor(ctx, &milvuspb.LoadCollectionRequest{
 			DbName:         "db_test",
@@ -32,7 +31,6 @@ func TestPrivilegeInterceptor(t *testing.T) {
 	})
 
 	t.Run("Authorization Enabled", func(t *testing.T) {
-		InitPolicyModel()
 		paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
 
 		_, err := PrivilegeInterceptor(ctx, &milvuspb.HasCollectionRequest{})
@@ -114,12 +112,23 @@ func TestPrivilegeInterceptor(t *testing.T) {
 		})
 		assert.Nil(t, err)
 
-		casbinModel = nil
+		g := sync.WaitGroup{}
+		for i := 0; i < 20; i++ {
+			g.Add(1)
+			go func() {
+				defer g.Done()
+				assert.NotPanics(t, func() {
+					PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.LoadCollectionRequest{
+						DbName:         "db_test",
+						CollectionName: "col1",
+					})
+				})
+			}()
+		}
+		g.Wait()
+
 		assert.Panics(t, func() {
-			PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.LoadCollectionRequest{
-				DbName:         "db_test",
-				CollectionName: "col1",
-			})
+			getPolicyModel("foo")
 		})
 	})
 
