@@ -69,10 +69,18 @@ ConvertFromAwsString(const Aws::String& aws_str) {
 }
 
 void
-MinioChunkManager::InitSDKAPI() {
+MinioChunkManager::InitSDKAPI(RemoteStorageType type) {
     std::scoped_lock lock{client_mutex_};
     const size_t initCount = init_count_++;
     if (initCount == 0) {
+        if (type == STORAGE_GOOGLE_CLOUD) {
+            sdk_options_.httpOptions.httpClientFactory_create_fn = []() {
+                // auto credentials = google::cloud::oauth2_internal::GOOGLE_CLOUD_CPP_NS::GoogleDefaultCredentials();
+                auto credentials =
+                    std::make_shared<google::cloud::oauth2_internal::GOOGLE_CLOUD_CPP_NS::ComputeEngineCredentials>();
+                return Aws::MakeShared<GoogleHttpClientFactory>(GOOGLE_CLIENT_FACTORY_ALLOCATION_TAG, credentials);
+            };
+        }
         Aws::InitAPI(sdk_options_);
     }
 }
@@ -86,20 +94,8 @@ MinioChunkManager::ShutdownSDKAPI() {
     }
 }
 
-MinioChunkManager::MinioChunkManager(const StorageConfig& storage_config)
-    : default_bucket_name_(storage_config.bucket_name) {
-    InitSDKAPI();
-    Aws::Client::ClientConfiguration config;
-    config.endpointOverride = ConvertToAwsString(storage_config.address);
-
-    if (storage_config.useSSL) {
-        config.scheme = Aws::Http::Scheme::HTTPS;
-        config.verifySSL = true;
-    } else {
-        config.scheme = Aws::Http::Scheme::HTTP;
-        config.verifySSL = false;
-    }
-
+void
+MinioChunkManager::BuildS3Client(const StorageConfig& storage_config, const Aws::Client::ClientConfiguration& config) {
     if (storage_config.useIAM) {
         auto provider = std::make_shared<Aws::Auth::DefaultAWSCredentialsProviderChain>();
         auto aws_credentials = provider->GetAWSCredentials();
@@ -117,6 +113,46 @@ MinioChunkManager::MinioChunkManager(const StorageConfig& storage_config)
             Aws::Auth::AWSCredentials(ConvertToAwsString(storage_config.access_key_id),
                                       ConvertToAwsString(storage_config.access_key_value)),
             config, Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never, false);
+    }
+}
+
+void
+MinioChunkManager::BuildGoogleCloudClient(const StorageConfig& storage_config,
+                                          const Aws::Client::ClientConfiguration& config) {
+    if (storage_config.useIAM) {
+        // Using S3 client instead of google client because of compatible protocol
+        client_ = std::make_shared<Aws::S3::S3Client>(config, Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,
+                                                      false);
+    } else {
+        throw std::runtime_error("google cloud only support iam mode now");
+    }
+}
+
+MinioChunkManager::MinioChunkManager(const StorageConfig& storage_config)
+    : default_bucket_name_(storage_config.bucket_name) {
+    RemoteStorageType storageType;
+    if (storage_config.address.find("google") != std::string::npos) {
+        storageType = STORAGE_GOOGLE_CLOUD;
+    } else {
+        storageType = STORAGE_S3;
+    }
+
+    InitSDKAPI(storageType);
+
+    Aws::Client::ClientConfiguration config;
+    config.endpointOverride = ConvertToAwsString(storage_config.address);
+    if (storage_config.useSSL) {
+        config.scheme = Aws::Http::Scheme::HTTPS;
+        config.verifySSL = true;
+    } else {
+        config.scheme = Aws::Http::Scheme::HTTP;
+        config.verifySSL = false;
+    }
+
+    if (storageType == STORAGE_S3) {
+        BuildS3Client(storage_config, config);
+    } else if (storageType == STORAGE_GOOGLE_CLOUD) {
+        BuildGoogleCloudClient(storage_config, config);
     }
 
     // TODO ::BucketExist and CreateBucket func not work, should be fixed

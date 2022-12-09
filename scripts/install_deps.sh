@@ -53,6 +53,19 @@ function install_linux_deps() {
       echo "Error Install Dependencies ..."
       exit 1
   fi
+
+  # Install google abseil used by google-cloud-cpp-sdk
+  wget https://github.com/abseil/abseil-cpp/archive/20220623.1.tar.gz && \
+       tar zxf 20220623.1.tar.gz && cd abseil-cpp-20220623.1
+       sed -i 's/^#define ABSL_OPTION_USE_\(.*\) 2/#define ABSL_OPTION_USE_\1 0/' "absl/base/options.h" && \
+       cmake \
+       -DCMAKE_BUILD_TYPE=Release \
+       -DABSL_BUILD_TESTING=OFF \
+       -DBUILD_SHARED_LIBS=yes \
+       -H. -Bcmake-out && \
+       cmake --build cmake-out -- && \
+       sudo cmake --build cmake-out --target install -- && \
+       cd ../ && rm -rf ./abseil-cpp-20220623.1* && rm -rf 20220623.1.tar.gz*
 }
 
 function install_mac_deps() {
