@@ -247,12 +247,12 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 		task.CollectionID(),
 		partitions...,
 	)
-	segments, err := ex.broker.GetSegmentInfo(ctx, task.SegmentID())
-	if err != nil || len(segments) == 0 {
+	resp, err := ex.broker.GetSegmentInfo(ctx, task.SegmentID())
+	if err != nil || len(resp.GetInfos()) == 0 {
 		log.Warn("failed to get segment info from DataCoord", zap.Error(err))
 		return err
 	}
-	segment := segments[0]
+	segment := resp.GetInfos()[0]
 	indexes, err := ex.broker.GetIndexInfo(ctx, task.CollectionID(), segment.GetID())
 	if err != nil {
 		log.Warn("failed to get index of segment", zap.Error(err))
@@ -270,7 +270,7 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 	}
 	log = log.With(zap.Int64("shardLeader", leader))
 
-	req := packLoadSegmentRequest(task, action, schema, loadMeta, loadInfo, segment)
+	req := packLoadSegmentRequest(task, action, schema, loadMeta, loadInfo, resp)
 	loadTask := NewLoadSegmentsTask(task, step, req)
 	ex.merger.Add(loadTask)
 	log.Info("load segment task committed")

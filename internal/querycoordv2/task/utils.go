@@ -20,13 +20,17 @@ import (
 	"context"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -83,11 +87,37 @@ func packLoadSegmentRequest(
 	schema *schemapb.CollectionSchema,
 	loadMeta *querypb.LoadMetaInfo,
 	loadInfo *querypb.SegmentLoadInfo,
-	segment *datapb.SegmentInfo,
+	resp *datapb.GetSegmentInfoResponse,
 ) *querypb.LoadSegmentsRequest {
-	deltaPosition := segment.GetDmlPosition()
-	if deltaPosition == nil {
+	var deltaPosition *internalpb.MsgPosition
+	segment := resp.GetInfos()[0]
+
+	var posSrcStr string
+	if resp.GetChannelCheckpoint() != nil && resp.ChannelCheckpoint[segment.InsertChannel] != nil {
+		deltaPosition = resp.ChannelCheckpoint[segment.InsertChannel]
+		posSrcStr = "channelCheckpoint"
+	} else if segment.GetDmlPosition() != nil {
+		deltaPosition = segment.GetDmlPosition()
+		posSrcStr = "segmentDMLPos"
+	} else {
 		deltaPosition = segment.GetStartPosition()
+		posSrcStr = "segmentStartPos"
+	}
+
+	posTime := tsoutil.PhysicalTime(deltaPosition.GetTimestamp())
+	tsLag := time.Since(posTime)
+	if tsLag >= 10*time.Minute {
+		log.Warn("deltaPosition is quite stale when packLoadSegmentRequest",
+			zap.Int64("taskID", task.ID()),
+			zap.Int64("collectionID", task.CollectionID()),
+			zap.Int64("segmentID", task.SegmentID()),
+			zap.Int64("node", action.Node()),
+			zap.Int64("source", task.SourceID()),
+			zap.String("channel", segment.InsertChannel),
+			zap.String("posSource", posSrcStr),
+			zap.Uint64("posTs", deltaPosition.GetTimestamp()),
+			zap.Time("posTime", posTime),
+			zap.Duration("tsLag", tsLag))
 	}
 
 	return &querypb.LoadSegmentsRequest{
@@ -173,7 +203,7 @@ func fillSubDmChannelRequest(
 		return err
 	}
 	segmentInfos := make(map[int64]*datapb.SegmentInfo)
-	for _, info := range resp {
+	for _, info := range resp.GetInfos() {
 		segmentInfos[info.GetID()] = info
 	}
 	req.SegmentInfos = segmentInfos

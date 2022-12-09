@@ -347,6 +347,7 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 		return resp, nil
 	}
 	infos := make([]*datapb.SegmentInfo, 0, len(req.GetSegmentIDs()))
+	channelCPs := make(map[string]*internalpb.MsgPosition)
 	for _, id := range req.SegmentIDs {
 		var info *SegmentInfo
 		if req.IncludeUnHealthy {
@@ -376,9 +377,14 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 			segmentutil.ReCalcRowCount(info.SegmentInfo, clonedInfo.SegmentInfo)
 			infos = append(infos, clonedInfo.SegmentInfo)
 		}
+		vchannel := info.InsertChannel
+		if _, ok := channelCPs[vchannel]; vchannel != "" && !ok {
+			channelCPs[vchannel] = s.meta.GetChannelCheckpoint(vchannel)
+		}
 	}
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 	resp.Infos = infos
+	resp.ChannelCheckpoint = channelCPs
 	return resp, nil
 }
 
