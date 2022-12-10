@@ -1252,7 +1252,7 @@ type dataCoordConfig struct {
 	SingleCompactionRatioThreshold    ParamItem
 	SingleCompactionDeltaLogMaxSize   ParamItem
 	SingleCompactionExpiredLogMaxSize ParamItem
-	SingleCompactionBinlogMaxNum      ParamItem
+	SingleCompactionDeltalogMaxNum    ParamItem
 	GlobalCompactionInterval          ParamItem
 
 	// Garbage Collection
@@ -1338,7 +1338,7 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	p.MinSegmentToMerge = ParamItem{
 		Key:          "dataCoord.compaction.min.segment",
 		Version:      "2.0.0",
-		DefaultValue: "4",
+		DefaultValue: "3",
 	}
 	p.MinSegmentToMerge.Init(base.mgr)
 
@@ -1405,12 +1405,12 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	}
 	p.SingleCompactionExpiredLogMaxSize.Init(base.mgr)
 
-	p.SingleCompactionBinlogMaxNum = ParamItem{
-		Key:          "dataCoord.compaction.single.binlog.maxnum",
+	p.SingleCompactionDeltalogMaxNum = ParamItem{
+		Key:          "dataCoord.compaction.single.deltalog.maxnum",
 		Version:      "2.0.0",
 		DefaultValue: "1000",
 	}
-	p.SingleCompactionBinlogMaxNum.Init(base.mgr)
+	p.SingleCompactionDeltalogMaxNum.Init(base.mgr)
 
 	p.GlobalCompactionInterval = ParamItem{
 		Key:          "dataCoord.compaction.global.interval",
@@ -1464,6 +1464,7 @@ type dataNodeConfig struct {
 	// segment
 	FlushInsertBufferSize  ParamItem
 	FlushDeleteBufferBytes ParamItem
+	BinLogMaxSize          ParamItem
 	SyncPeriod             ParamItem
 
 	// io concurrency to fetch stats logs
@@ -1500,6 +1501,13 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		DefaultValue: "67108864",
 	}
 	p.FlushDeleteBufferBytes.Init(base.mgr)
+
+	p.BinLogMaxSize = ParamItem{
+		Key:          "datanode.segment.binlog.maxsize",
+		Version:      "2.0.0",
+		DefaultValue: "67108864",
+	}
+	p.BinLogMaxSize.Init(base.mgr)
 
 	p.SyncPeriod = ParamItem{
 		Key:          "datanode.segment.syncPeriod",

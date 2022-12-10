@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 // DelBufferManager is in charge of managing insertBuf and delBuf from an overall prospect
@@ -332,32 +333,20 @@ func (ddb *DelDataBuf) updateStartAndEndPosition(startPos *internalpb.MsgPositio
 // * This need to change for string field support and multi-vector fields support.
 func newBufferData(collSchema *schemapb.CollectionSchema) (*BufferData, error) {
 	// Get Dimension
-	// TODO GOOSE: under assumption that there's only 1 Vector field in one collection schema
-	var vectorSize int
-	for _, field := range collSchema.Fields {
-		if field.DataType == schemapb.DataType_FloatVector ||
-			field.DataType == schemapb.DataType_BinaryVector {
-
-			dimension, err := storage.GetDimFromParams(field.TypeParams)
-			switch field.DataType {
-			case schemapb.DataType_FloatVector:
-				vectorSize = dimension * 4
-			case schemapb.DataType_BinaryVector:
-				vectorSize = dimension / 8
-			}
-			if err != nil {
-				log.Error("failed to get dim from field", zap.Error(err))
-				return nil, err
-			}
-			break
-		}
+	size, err := typeutil.EstimateSizePerRecord(collSchema)
+	if err != nil {
+		log.Warn("failed to estimate size per record", zap.Error(err))
+		return nil, err
 	}
 
-	if vectorSize == 0 {
-		return nil, errors.New("Invalid dimension")
+	if size == 0 {
+		return nil, errors.New("Invalid schema")
 	}
 
-	limit := Params.DataNodeCfg.FlushInsertBufferSize.GetAsInt64() / int64(vectorSize)
+	limit := Params.DataNodeCfg.FlushInsertBufferSize.GetAsInt64() / int64(size)
+	if Params.DataNodeCfg.FlushInsertBufferSize.GetAsInt64()%int64(size) != 0 {
+		limit++
+	}
 
 	//TODO::xige-16 eval vec and string field
 	return &BufferData{

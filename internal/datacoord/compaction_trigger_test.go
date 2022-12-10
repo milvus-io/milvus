@@ -825,6 +825,7 @@ func Test_compactionTrigger_noplan(t *testing.T) {
 		compactTime  *compactTime
 	}
 	Params.Init()
+	Params.DataCoordCfg.MinSegmentToMerge.DefaultValue = "4"
 	vecFieldID := int64(201)
 	tests := []struct {
 		name      string
@@ -1522,9 +1523,9 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 	trigger := newCompactionTrigger(&meta{}, &compactionPlanHandler{}, newMockAllocator(),
 		&SegmentReferenceManager{segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{}}, indexCoord, newMockHandler())
 
-	// Test too many files.
+	// Test too many deltalogs.
 	var binlogs []*datapb.FieldBinlog
-	for i := UniqueID(0); i < 5000; i++ {
+	for i := UniqueID(0); i < 1000; i++ {
 		binlogs = append(binlogs, &datapb.FieldBinlog{
 			Binlogs: []*datapb.Binlog{
 				{EntriesNum: 5, LogPath: "log1", LogSize: 100},
@@ -1541,12 +1542,45 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 			MaxRowNum:      300,
 			InsertChannel:  "ch1",
 			State:          commonpb.SegmentState_Flushed,
-			Binlogs:        binlogs,
+			Deltalogs:      binlogs,
 		},
 	}
 
-	couldDo := trigger.ShouldDoSingleCompaction(info, &compactTime{travelTime: 200, expireTime: 0})
+	couldDo := trigger.ShouldDoSingleCompaction(info, false, &compactTime{travelTime: 200, expireTime: 0})
 	assert.True(t, couldDo)
+
+	//Test too many stats log
+	info = &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             1,
+			CollectionID:   2,
+			PartitionID:    1,
+			LastExpireTime: 100,
+			NumOfRows:      100,
+			MaxRowNum:      300,
+			InsertChannel:  "ch1",
+			State:          commonpb.SegmentState_Flushed,
+			Statslogs:      binlogs,
+		},
+	}
+
+	couldDo = trigger.ShouldDoSingleCompaction(info, false, &compactTime{travelTime: 200, expireTime: 0})
+	assert.True(t, couldDo)
+
+	couldDo = trigger.ShouldDoSingleCompaction(info, true, &compactTime{travelTime: 200, expireTime: 0})
+	assert.True(t, couldDo)
+
+	// if only 10 bin logs, then disk index won't trigger compaction
+	info.Statslogs = binlogs[0:20]
+	couldDo = trigger.ShouldDoSingleCompaction(info, false, &compactTime{travelTime: 200, expireTime: 0})
+	assert.True(t, couldDo)
+
+	couldDo = trigger.ShouldDoSingleCompaction(info, true, &compactTime{travelTime: 200, expireTime: 0})
+	assert.False(t, couldDo)
+	//Test too many stats log but compacted
+	info.CompactionFrom = []int64{0, 1}
+	couldDo = trigger.ShouldDoSingleCompaction(info, false, &compactTime{travelTime: 200, expireTime: 0})
+	assert.False(t, couldDo)
 
 	//Test expire triggered  compaction
 	var binlogs2 []*datapb.FieldBinlog
@@ -1580,15 +1614,15 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 	}
 
 	// expire time < Timestamp To
-	couldDo = trigger.ShouldDoSingleCompaction(info2, &compactTime{travelTime: 200, expireTime: 300})
+	couldDo = trigger.ShouldDoSingleCompaction(info2, false, &compactTime{travelTime: 200, expireTime: 300})
 	assert.False(t, couldDo)
 
 	// didn't reach single compaction size 10 * 1024 * 1024
-	couldDo = trigger.ShouldDoSingleCompaction(info2, &compactTime{travelTime: 200, expireTime: 600})
+	couldDo = trigger.ShouldDoSingleCompaction(info2, false, &compactTime{travelTime: 200, expireTime: 600})
 	assert.False(t, couldDo)
 
 	// expire time < Timestamp False
-	couldDo = trigger.ShouldDoSingleCompaction(info2, &compactTime{travelTime: 200, expireTime: 1200})
+	couldDo = trigger.ShouldDoSingleCompaction(info2, false, &compactTime{travelTime: 200, expireTime: 1200})
 	assert.True(t, couldDo)
 
 	// Test Delete triggered compaction
@@ -1623,11 +1657,11 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 	}
 
 	// expire time < Timestamp To
-	couldDo = trigger.ShouldDoSingleCompaction(info3, &compactTime{travelTime: 600, expireTime: 0})
+	couldDo = trigger.ShouldDoSingleCompaction(info3, false, &compactTime{travelTime: 600, expireTime: 0})
 	assert.False(t, couldDo)
 
 	// deltalog is large enough, should do compaction
-	couldDo = trigger.ShouldDoSingleCompaction(info3, &compactTime{travelTime: 800, expireTime: 0})
+	couldDo = trigger.ShouldDoSingleCompaction(info3, false, &compactTime{travelTime: 800, expireTime: 0})
 	assert.True(t, couldDo)
 }
 

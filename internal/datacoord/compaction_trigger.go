@@ -271,11 +271,11 @@ func (t *compactionTrigger) estimateDiskSegmentMaxNumOfRows(collectionID UniqueI
 	return t.estimateDiskSegmentPolicy(collMeta.Schema)
 }
 
-func (t *compactionTrigger) updateSegmentMaxSize(segments []*SegmentInfo) error {
+func (t *compactionTrigger) updateSegmentMaxSize(segments []*SegmentInfo) (bool, error) {
 	ctx := context.Background()
 
 	if len(segments) == 0 {
-		return nil
+		return false, nil
 	}
 
 	collectionID := segments[0].GetCollectionID()
@@ -284,24 +284,26 @@ func (t *compactionTrigger) updateSegmentMaxSize(segments []*SegmentInfo) error 
 		IndexName:    "",
 	})
 	if err != nil {
-		return err
+		return false, err
 	}
 
+	isDiskIndex := false
 	for _, indexInfo := range resp.IndexInfos {
 		indexParamsMap := funcutil.KeyValuePair2Map(indexInfo.IndexParams)
 		if indexType, ok := indexParamsMap["index_type"]; ok {
 			if indexType == indexparamcheck.IndexDISKANN {
 				diskSegmentMaxRows, err := t.estimateDiskSegmentMaxNumOfRows(collectionID)
 				if err != nil {
-					return err
+					return false, err
 				}
 				for _, segment := range segments {
 					segment.MaxRowNum = int64(diskSegmentMaxRows)
 				}
+				isDiskIndex = true
 			}
 		}
 	}
-	return nil
+	return isDiskIndex, nil
 }
 
 func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) {
@@ -336,7 +338,7 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) {
 
 		group.segments = FilterInIndexedSegments(t.handler, t.indexCoord, group.segments...)
 
-		err := t.updateSegmentMaxSize(group.segments)
+		isDiskIndex, err := t.updateSegmentMaxSize(group.segments)
 		if err != nil {
 			log.Warn("failed to update segment max size,", zap.Error(err))
 			continue
@@ -351,7 +353,7 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) {
 			return
 		}
 
-		plans := t.generatePlans(group.segments, signal.isForce, ct)
+		plans := t.generatePlans(group.segments, signal.isForce, isDiskIndex, ct)
 		for _, plan := range plans {
 			segIDs := fetchSegIDs(plan.GetSegmentBinlogs())
 
@@ -419,7 +421,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 		return
 	}
 
-	err := t.updateSegmentMaxSize(segments)
+	isDiskIndex, err := t.updateSegmentMaxSize(segments)
 	if err != nil {
 		log.Warn("failed to update segment max size", zap.Error(err))
 	}
@@ -438,7 +440,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 		return
 	}
 
-	plans := t.generatePlans(segments, signal.isForce, ct)
+	plans := t.generatePlans(segments, signal.isForce, isDiskIndex, ct)
 	for _, plan := range plans {
 		if t.compactionHandler.isFull() {
 			log.Warn("compaction plan skipped due to handler full", zap.Int64("collection", signal.collectionID), zap.Int64("planID", plan.PlanID))
@@ -467,7 +469,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 	}
 }
 
-func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, force bool, compactTime *compactTime) []*datapb.CompactionPlan {
+func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, force bool, isDiskIndex bool, compactTime *compactTime) []*datapb.CompactionPlan {
 	// find segments need internal compaction
 	// TODO add low priority candidates, for example if the segment is smaller than full 0.9 * max segment size but larger than small segment boundary, we only execute compaction when there are no compaction running actively
 	var prioritizedCandidates []*SegmentInfo
@@ -478,7 +480,7 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, force bool, c
 	for _, segment := range segments {
 		segment := segment.ShadowClone()
 		// TODO should we trigger compaction periodically even if the segment has no obvious reason to be compacted?
-		if force || t.ShouldDoSingleCompaction(segment, compactTime) {
+		if force || t.ShouldDoSingleCompaction(segment, isDiskIndex, compactTime) {
 			prioritizedCandidates = append(prioritizedCandidates, segment)
 		} else if t.isSmallSegment(segment) {
 			smallCandidates = append(smallCandidates, segment)
@@ -741,24 +743,43 @@ func (t *compactionTrigger) isStaleSegment(segment *SegmentInfo) bool {
 	return time.Since(segment.lastFlushTime).Minutes() >= segmentTimedFlushDuration
 }
 
-func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compactTime *compactTime) bool {
-	// count all the binlog file count
-	var totalLogNum int
+func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, isDiskIndex bool, compactTime *compactTime) bool {
+	// no longer restricted binlog numbers because this is now related to field numbers
+	var binLog int
 	for _, binlogs := range segment.GetBinlogs() {
-		totalLogNum += len(binlogs.GetBinlogs())
+		binLog += len(binlogs.GetBinlogs())
 	}
 
+	// count all the statlog file count, only for flush generated segments
+	if len(segment.CompactionFrom) == 0 {
+		var statsLog int
+		for _, statsLogs := range segment.GetStatslogs() {
+			statsLog += len(statsLogs.GetBinlogs())
+		}
+
+		var maxSize int
+		if isDiskIndex {
+			maxSize = int(Params.DataCoordCfg.DiskSegmentMaxSize.GetAsInt64() * 1024 * 1024 / Params.DataNodeCfg.BinLogMaxSize.GetAsInt64())
+		} else {
+			maxSize = int(Params.DataCoordCfg.SegmentMaxSize.GetAsInt64() * 1024 * 1024 / Params.DataNodeCfg.BinLogMaxSize.GetAsInt64())
+		}
+
+		// if stats log is more than expected, trigger compaction to reduce stats log size.
+		// TODO maybe we want to compact to single statslog to reduce watch dml channel cost
+		// TODO avoid rebuild index twice.
+		if statsLog > maxSize*2.0 {
+			log.Info("stats number is too much, trigger compaction", zap.Int64("segment", segment.ID), zap.Int("Bin logs", binLog), zap.Int("Stat logs", statsLog))
+			return true
+		}
+	}
+
+	var deltaLog int
 	for _, deltaLogs := range segment.GetDeltalogs() {
-		totalLogNum += len(deltaLogs.GetBinlogs())
+		deltaLog += len(deltaLogs.GetBinlogs())
 	}
 
-	for _, statsLogs := range segment.GetStatslogs() {
-		totalLogNum += len(statsLogs.GetBinlogs())
-	}
-	// avoid segment has too many bin logs and the etcd meta is too large, force trigger compaction
-	if totalLogNum > Params.DataCoordCfg.SingleCompactionBinlogMaxNum.GetAsInt() {
-		log.Info("total binlog number is too much, trigger compaction", zap.Int64("segment", segment.ID),
-			zap.Int("Delta logs", len(segment.GetDeltalogs())), zap.Int("Bin Logs", len(segment.GetBinlogs())), zap.Int("Stat logs", len(segment.GetStatslogs())))
+	if deltaLog > Params.DataCoordCfg.SingleCompactionDeltalogMaxNum.GetAsInt() {
+		log.Info("total delta number is too much, trigger compaction", zap.Int64("segment", segment.ID), zap.Int("Bin logs", binLog), zap.Int("Delta logs", deltaLog))
 		return true
 	}
 

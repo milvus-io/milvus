@@ -373,7 +373,7 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 	t.Run("Pure auto flush", func(t *testing.T) {
 		// iBNode.insertBuffer.maxSize = 2
 		tmp := Params.DataNodeCfg.FlushInsertBufferSize
-		paramtable.Get().Save(Params.DataNodeCfg.FlushInsertBufferSize.Key, "16")
+		paramtable.Get().Save(Params.DataNodeCfg.FlushInsertBufferSize.Key, "200")
 		defer func() {
 			Params.DataNodeCfg.FlushInsertBufferSize = tmp
 		}()
@@ -465,7 +465,7 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 
 	t.Run("Auto with manual flush", func(t *testing.T) {
 		tmp := Params.DataNodeCfg.FlushInsertBufferSize
-		paramtable.Get().Save(Params.DataNodeCfg.FlushInsertBufferSize.Key, "16")
+		paramtable.Get().Save(Params.DataNodeCfg.FlushInsertBufferSize.Key, "200")
 		defer func() {
 			Params.DataNodeCfg.FlushInsertBufferSize = tmp
 		}()
@@ -607,7 +607,7 @@ func TestRollBF(t *testing.T) {
 
 	t.Run("Pure roll BF", func(t *testing.T) {
 		tmp := Params.DataNodeCfg.FlushInsertBufferSize
-		paramtable.Get().Save(Params.DataNodeCfg.FlushInsertBufferSize.Key, "16")
+		paramtable.Get().Save(Params.DataNodeCfg.FlushInsertBufferSize.Key, "200")
 		defer func() {
 			Params.DataNodeCfg.FlushInsertBufferSize = tmp
 		}()
@@ -697,7 +697,7 @@ func (s *InsertBufferNodeSuit) SetupSuite() {
 
 	s.originalConfig = Params.DataNodeCfg.FlushInsertBufferSize.GetAsInt64()
 	// change flushing size to 2
-	paramtable.Get().Save(Params.DataNodeCfg.FlushInsertBufferSize.Key, "16")
+	paramtable.Get().Save(Params.DataNodeCfg.FlushInsertBufferSize.Key, "200")
 }
 
 func (s *InsertBufferNodeSuit) TearDownSuite() {
