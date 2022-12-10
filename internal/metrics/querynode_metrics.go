@@ -323,6 +323,7 @@ var (
 			collectionIDLabelName,
 			partitionIDLabelName,
 			segmentStateLabelName,
+			indexCountLabelName,
 		})
 
 	// QueryNodeConsumeCounter counts the bytes QueryNode consumed from message storage.

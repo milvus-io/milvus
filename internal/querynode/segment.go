@@ -713,6 +713,7 @@ func (s *Segment) segmentInsert(offset int64, entityIDs []UniqueID, timestamps [
 		fmt.Sprint(s.collectionID),
 		fmt.Sprint(s.partitionID),
 		s.segmentType.String(),
+		fmt.Sprint(0),
 	).Add(float64(numOfRow))
 	s.setRecentlyModified(true)
 	return nil
