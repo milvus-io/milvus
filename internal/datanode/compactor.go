@@ -239,12 +239,10 @@ func (t *compactionTask) merge(
 	mergeStart := time.Now()
 
 	var (
-		dim              int   // dimension of float/binary vector field
 		maxRowsPerBinlog int   // maximum rows populating one binlog
 		numBinlogs       int   // binlog number
 		numRows          int64 // the number of rows uploaded
 		expired          int64 // the number of expired entity
-		err              error
 
 		// statslog generation
 		pkID   UniqueID
@@ -292,32 +290,29 @@ func (t *compactionTask) merge(
 		}
 	}
 
-	// get pkID, pkType, dim
+	// get pkID, pkType
 	for _, fs := range meta.GetSchema().GetFields() {
 		fID2Type[fs.GetFieldID()] = fs.GetDataType()
 		if fs.GetIsPrimaryKey() && fs.GetFieldID() >= 100 && typeutil.IsPrimaryFieldType(fs.GetDataType()) {
 			pkID = fs.GetFieldID()
 			pkType = fs.GetDataType()
 		}
-		if fs.GetDataType() == schemapb.DataType_FloatVector ||
-			fs.GetDataType() == schemapb.DataType_BinaryVector {
-			for _, t := range fs.GetTypeParams() {
-				if t.Key == "dim" {
-					if dim, err = strconv.Atoi(t.Value); err != nil {
-						log.Warn("strconv wrong on get dim", zap.Error(err))
-						return nil, nil, 0, err
-					}
-					break
-				}
-			}
-		}
 	}
-
+	// estimate Rows per binlog
+	// TODO should not convert size to row because we already know the size, this is especially important on varchar types.
+	size, err := typeutil.EstimateSizePerRecord(meta.GetSchema())
+	if err != nil {
+		log.Warn("failed to estimate size per record", zap.Error(err))
+		return nil, nil, 0, err
+	}
+	maxRowsPerBinlog = int(Params.DataNodeCfg.BinLogMaxSize / int64(size))
+	if Params.DataNodeCfg.BinLogMaxSize%int64(size) != 0 {
+		maxRowsPerBinlog++
+	}
 	expired = 0
 	numRows = 0
 	numBinlogs = 0
 	currentTs := t.GetCurrentTime()
-	maxRowsPerBinlog = int(Params.DataNodeCfg.FlushInsertBufferSize / (int64(dim) * 4))
 	currentRows := 0
 	downloadTimeCost := time.Duration(0)
 	uploadInsertTimeCost := time.Duration(0)
@@ -326,14 +321,14 @@ func (t *compactionTask) merge(
 		downloadStart := time.Now()
 		data, err := t.download(ctxTimeout, path)
 		if err != nil {
-			log.Warn("download insertlogs wrong")
+			log.Warn("download insertlogs wrong", zap.Error(err))
 			return nil, nil, 0, err
 		}
 		downloadTimeCost += time.Since(downloadStart)
 
 		iter, err := storage.NewInsertBinlogIterator(data, pkID, pkType)
 		if err != nil {
-			log.Warn("new insert binlogs Itr wrong")
+			log.Warn("new insert binlogs Itr wrong", zap.Error(err))
 			return nil, nil, 0, err
 		}
 		for iter.HasNext() {
@@ -369,11 +364,11 @@ func (t *compactionTask) merge(
 			}
 
 			currentRows++
-
-			if currentRows == maxRowsPerBinlog {
+			if currentRows >= maxRowsPerBinlog {
 				uploadInsertStart := time.Now()
 				inPaths, statsPaths, err := t.uploadSingleInsertLog(ctxTimeout, targetSegID, partID, meta, fID2Content, fID2Type)
 				if err != nil {
+					log.Warn("failed to upload single insert log", zap.Error(err))
 					return nil, nil, 0, err
 				}
 				uploadInsertTimeCost += time.Since(uploadInsertStart)
@@ -391,6 +386,7 @@ func (t *compactionTask) merge(
 		uploadInsertStart := time.Now()
 		inPaths, statsPaths, err := t.uploadSingleInsertLog(ctxTimeout, targetSegID, partID, meta, fID2Content, fID2Type)
 		if err != nil {
+			log.Warn("failed to upload single insert log", zap.Error(err))
 			return nil, nil, 0, err
 		}
 		uploadInsertTimeCost += time.Since(uploadInsertStart)

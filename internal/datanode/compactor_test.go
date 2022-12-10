@@ -306,11 +306,11 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			alloc := NewAllocatorFactory(1)
 			mockbIO := &binlogIO{cm, alloc}
 			Params.CommonCfg.EntityExpirationTTL = 0
-			flushInsertBufferSize := Params.DataNodeCfg.FlushInsertBufferSize
+			flushInsertBufferSize := Params.DataNodeCfg.BinLogMaxSize
 			defer func() {
-				Params.DataNodeCfg.FlushInsertBufferSize = flushInsertBufferSize
+				Params.DataNodeCfg.BinLogMaxSize = flushInsertBufferSize
 			}()
-			Params.DataNodeCfg.FlushInsertBufferSize = 128
+			Params.DataNodeCfg.BinLogMaxSize = 128
 			iData := genInsertDataWithExpiredTS()
 			meta := NewMetaFactory().GetCollectionMeta(1, "test", schemapb.DataType_Int64)
 
