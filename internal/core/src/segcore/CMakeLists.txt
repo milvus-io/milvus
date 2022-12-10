@@ -41,6 +41,7 @@ add_library(milvus_segcore SHARED ${SEGCORE_FILES})
 find_library(TBB NAMES tbb)
 set(PLATFORM_LIBS dl)
 if (MSYS)
+find_library(TBB NAMES tbb12)
 set(PLATFORM_LIBS )
 endif ()
 

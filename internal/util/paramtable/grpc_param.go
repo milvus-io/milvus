@@ -17,8 +17,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-basic/ipv4"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"go.uber.org/zap"
 )
 
@@ -81,7 +81,7 @@ func (p *grpcConfig) init(domain string) {
 
 // LoadFromEnv is used to initialize configuration items from env.
 func (p *grpcConfig) LoadFromEnv() {
-	p.IP = ipv4.LocalIP()
+	p.IP = funcutil.GetLocalIP()
 }
 
 // LoadFromArgs is used to initialize configuration items from args.

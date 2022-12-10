@@ -44,9 +44,10 @@ case "${unameOut}" in
       export PKG_CONFIG_PATH="${PKG_CONFIG_PATH}:$ROOT_DIR/internal/core/output/lib/pkgconfig"
       export DYLD_LIBRARY_PATH=$ROOT_DIR/internal/core/output/lib
       export RPATH=$DYLD_LIBRARY_PATH;;
-    MINGW*)          
-      extra_path=$(cygpath -w "$ROOT_DIR/internal/core/output/lib")
-      export PKG_CONFIG_PATH="${PKG_CONFIG_PATH};${extra_path}\pkgconfig"
+    MINGW*)
+      # for make requiues cygpath -u, for mgwin32-make requires cygpath -w
+      extra_path=$(cygpath -u "$ROOT_DIR/internal/core/output/lib")
+      export PKG_CONFIG_PATH="${PKG_CONFIG_PATH}:${extra_path}/pkgconfig"
       export LD_LIBRARY_PATH=$extra_path
       export RPATH=$LD_LIBRARY_PATH;;
     *)
