@@ -512,6 +512,36 @@ func TestMinIOCM(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	t.Run("test Prefix recursive false", func(t *testing.T) {
+		testPrefix := path.Join(testMinIOKVRoot, "prefix-false")
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		testCM, err := newMinIOChunkManager(ctx, testBucket, testPrefix)
+		require.NoError(t, err)
+		defer testCM.RemoveWithPrefix(ctx, testPrefix)
+
+		pathB := path.Join("a", "b")
+
+		key := path.Join(testPrefix, pathB)
+		value := []byte("a")
+
+		err = testCM.Write(ctx, key, value)
+		assert.NoError(t, err)
+
+		pathC := path.Join("c", "d")
+
+		keyC := path.Join(testPrefix, pathC)
+		valueC := []byte("c")
+
+		err = testCM.Write(ctx, keyC, valueC)
+		assert.NoError(t, err)
+
+		keys, _, err := testCM.ListWithPrefix(ctx, testPrefix+"/", false)
+		assert.NoError(t, err)
+		assert.ElementsMatch(t, []string{testPrefix + "/a/", testPrefix + "/c/"}, keys)
+	})
+
 	t.Run("test NoSuchKey", func(t *testing.T) {
 		testPrefix := path.Join(testMinIOKVRoot, "nokey")
 		ctx, cancel := context.WithCancel(context.Background())
