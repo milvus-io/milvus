@@ -35,11 +35,13 @@ import (
 type CollectionObserver struct {
 	stopCh chan struct{}
 
-	dist      *meta.DistributionManager
-	meta      *meta.Meta
-	targetMgr *meta.TargetManager
-	broker    meta.Broker
-	handoffOb *HandoffObserver
+	dist                  *meta.DistributionManager
+	meta                  *meta.Meta
+	targetMgr             *meta.TargetManager
+	broker                meta.Broker
+	handoffOb             *HandoffObserver
+	collectionLoadedCount map[int64]int
+	partitionLoadedCount  map[int64]int
 
 	refreshed map[int64]time.Time
 
@@ -54,12 +56,14 @@ func NewCollectionObserver(
 	handoffObserver *HandoffObserver,
 ) *CollectionObserver {
 	return &CollectionObserver{
-		stopCh:    make(chan struct{}),
-		dist:      dist,
-		meta:      meta,
-		targetMgr: targetMgr,
-		broker:    broker,
-		handoffOb: handoffObserver,
+		stopCh:                make(chan struct{}),
+		dist:                  dist,
+		meta:                  meta,
+		targetMgr:             targetMgr,
+		broker:                broker,
+		handoffOb:             handoffObserver,
+		collectionLoadedCount: make(map[int64]int),
+		partitionLoadedCount:  make(map[int64]int),
 
 		refreshed: make(map[int64]time.Time),
 	}
@@ -266,11 +270,13 @@ func (ob *CollectionObserver) observeCollectionLoadStatus(collection *meta.Colle
 
 	updated := collection.Clone()
 	updated.LoadPercentage = int32(loadedCount * 100 / targetNum)
-	if updated.LoadPercentage <= collection.LoadPercentage {
+	if loadedCount <= ob.collectionLoadedCount[collection.GetCollectionID()] {
 		return
 	}
 
+	ob.collectionLoadedCount[collection.GetCollectionID()] = loadedCount
 	if loadedCount >= len(segmentTargets)+len(channelTargets) {
+		delete(ob.collectionLoadedCount, collection.GetCollectionID())
 		updated.Status = querypb.LoadStatus_Loaded
 		ob.meta.CollectionManager.UpdateCollection(updated)
 		ob.handoffOb.StartHandoff(updated.GetCollectionID())
@@ -329,11 +335,13 @@ func (ob *CollectionObserver) observePartitionLoadStatus(partition *meta.Partiti
 
 	updated := partition.Clone()
 	updated.LoadPercentage = int32(loadedCount * 100 / targetNum)
-	if updated.LoadPercentage <= partition.LoadPercentage {
+	if loadedCount <= ob.partitionLoadedCount[partition.GetPartitionID()] {
 		return
 	}
 
+	ob.partitionLoadedCount[partition.GetPartitionID()] = loadedCount
 	if loadedCount >= len(segmentTargets)+len(channelTargets) {
+		delete(ob.partitionLoadedCount, partition.GetPartitionID())
 		updated.Status = querypb.LoadStatus_Loaded
 		ob.meta.CollectionManager.UpdatePartition(updated)
 		ob.handoffOb.StartHandoff(updated.GetCollectionID())
