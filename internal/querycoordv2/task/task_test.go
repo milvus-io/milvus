@@ -236,13 +236,13 @@ func (suite *TaskSuite) TestSubscribeChannelTask() {
 	}
 	for channel, segment := range suite.growingSegments {
 		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).
-			Return([]*datapb.SegmentInfo{
+			Return(&datapb.GetSegmentInfoResponse{Infos: []*datapb.SegmentInfo{
 				{
 					ID:            segment,
 					CollectionID:  suite.collection,
 					PartitionID:   partitions[0],
 					InsertChannel: channel,
-				},
+				}},
 			}, nil)
 	}
 	// for _, partition := range partitions {
@@ -375,13 +375,13 @@ func (suite *TaskSuite) TestLoadSegmentTask() {
 	}, nil)
 	suite.broker.EXPECT().GetPartitions(mock.Anything, suite.collection).Return([]int64{100, 101}, nil)
 	for _, segment := range suite.loadSegments {
-		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).Return([]*datapb.SegmentInfo{
+		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).Return(&datapb.GetSegmentInfoResponse{Infos: []*datapb.SegmentInfo{
 			{
 				ID:            segment,
 				CollectionID:  suite.collection,
 				PartitionID:   partition,
 				InsertChannel: channel.ChannelName,
-			},
+			}},
 		}, nil)
 		suite.broker.EXPECT().GetIndexInfo(mock.Anything, suite.collection, segment).Return(nil, nil)
 	}
@@ -503,13 +503,13 @@ func (suite *TaskSuite) TestLoadSegmentTaskFailed() {
 	}, nil)
 	suite.broker.EXPECT().GetPartitions(mock.Anything, suite.collection).Return([]int64{100, 101}, nil)
 	for _, segment := range suite.loadSegments {
-		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).Return([]*datapb.SegmentInfo{
+		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).Return(&datapb.GetSegmentInfoResponse{Infos: []*datapb.SegmentInfo{
 			{
 				ID:            segment,
 				CollectionID:  suite.collection,
 				PartitionID:   partition,
 				InsertChannel: channel.ChannelName,
-			},
+			}},
 		}, nil)
 		suite.broker.EXPECT().GetIndexInfo(mock.Anything, suite.collection, segment).Return(nil, errors.New("index not ready"))
 	}
@@ -702,13 +702,13 @@ func (suite *TaskSuite) TestMoveSegmentTask() {
 	}, nil)
 	suite.broker.EXPECT().GetPartitions(mock.Anything, suite.collection).Return([]int64{100, 101}, nil)
 	for _, segment := range suite.moveSegments {
-		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).Return([]*datapb.SegmentInfo{
+		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).Return(&datapb.GetSegmentInfoResponse{Infos: []*datapb.SegmentInfo{
 			{
 				ID:            segment,
 				CollectionID:  suite.collection,
 				PartitionID:   partition,
 				InsertChannel: channel.ChannelName,
-			},
+			}},
 		}, nil)
 		suite.broker.EXPECT().GetIndexInfo(mock.Anything, suite.collection, segment).Return(nil, nil)
 	}
@@ -802,13 +802,13 @@ func (suite *TaskSuite) TestTaskCanceled() {
 	}, nil)
 	suite.broker.EXPECT().GetPartitions(mock.Anything, suite.collection).Return([]int64{100, 101}, nil)
 	for _, segment := range suite.loadSegments {
-		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).Return([]*datapb.SegmentInfo{
+		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).Return(&datapb.GetSegmentInfoResponse{Infos: []*datapb.SegmentInfo{
 			{
 				ID:            segment,
 				CollectionID:  suite.collection,
 				PartitionID:   partition,
 				InsertChannel: channel.ChannelName,
-			},
+			}},
 		}, nil)
 		suite.broker.EXPECT().GetIndexInfo(mock.Anything, suite.collection, segment).Return(nil, nil)
 	}
@@ -883,13 +883,13 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 	}, nil)
 	suite.broker.EXPECT().GetPartitions(mock.Anything, suite.collection).Return([]int64{100, 101}, nil)
 	for _, segment := range suite.loadSegments {
-		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).Return([]*datapb.SegmentInfo{
+		suite.broker.EXPECT().GetSegmentInfo(mock.Anything, segment).Return(&datapb.GetSegmentInfoResponse{Infos: []*datapb.SegmentInfo{
 			{
 				ID:            segment,
 				CollectionID:  suite.collection,
 				PartitionID:   partition,
 				InsertChannel: channel.ChannelName,
-			},
+			}},
 		}, nil)
 		suite.broker.EXPECT().GetIndexInfo(mock.Anything, suite.collection, segment).Return(nil, nil)
 	}
