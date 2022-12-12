@@ -1203,7 +1203,7 @@ type dataCoordConfig struct {
 	SingleCompactionRatioThreshold    float32
 	SingleCompactionDeltaLogMaxSize   int64
 	SingleCompactionExpiredLogMaxSize int64
-	SingleCompactionBinlogMaxNum      int64
+	SingleCompactionDeltalogMaxNum    int64
 	GlobalCompactionInterval          time.Duration
 
 	// Garbage Collection
@@ -1240,7 +1240,7 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	p.initSingleCompactionRatioThreshold()
 	p.initSingleCompactionDeltaLogMaxSize()
 	p.initSingleCompactionExpiredLogMaxSize()
-	p.initSingleCompactionBinlogMaxNum()
+	p.initSingleCompactionDeltalogMaxNum()
 	p.initGlobalCompactionInterval()
 
 	p.initEnableGarbageCollection()
@@ -1299,7 +1299,7 @@ func (p *dataCoordConfig) initEnableAutoCompaction() {
 }
 
 func (p *dataCoordConfig) initCompactionMinSegment() {
-	p.MinSegmentToMerge = p.Base.ParseIntWithDefault("dataCoord.compaction.min.segment", 4)
+	p.MinSegmentToMerge = p.Base.ParseIntWithDefault("dataCoord.compaction.min.segment", 3)
 }
 
 func (p *dataCoordConfig) initCompactionMaxSegment() {
@@ -1338,9 +1338,9 @@ func (p *dataCoordConfig) initSingleCompactionExpiredLogMaxSize() {
 	p.SingleCompactionExpiredLogMaxSize = p.Base.ParseInt64WithDefault("dataCoord.compaction.single.expiredlog.maxsize", 10*1024*1024)
 }
 
-// if total binlog number > SingleCompactionBinlogMaxNum, trigger single compaction to ensure binlog number per segment is limited
-func (p *dataCoordConfig) initSingleCompactionBinlogMaxNum() {
-	p.SingleCompactionBinlogMaxNum = p.Base.ParseInt64WithDefault("dataCoord.compaction.single.binlog.maxnum", 1000)
+// if total delta log number > SingleCompactionDeltalogMaxNum, trigger single compaction to ensure delta number per segment is limited
+func (p *dataCoordConfig) initSingleCompactionDeltalogMaxNum() {
+	p.SingleCompactionDeltalogMaxNum = p.Base.ParseInt64WithDefault("dataCoord.compaction.single.deltalog.maxnum", 200)
 }
 
 // interval we check and trigger global compaction
@@ -1412,6 +1412,7 @@ type dataNodeConfig struct {
 	// segment
 	FlushInsertBufferSize  int64
 	FlushDeleteBufferBytes int64
+	BinLogMaxSize          int64
 	SyncPeriod             time.Duration
 
 	Alias string // Different datanode in one machine
@@ -1433,6 +1434,7 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	p.initFlowGraphMaxParallelism()
 	p.initFlushInsertBufferSize()
 	p.initFlushDeleteBufferSize()
+	p.initBinlogMaxSize()
 	p.initSyncPeriod()
 	p.initIOConcurrency()
 
@@ -1465,6 +1467,15 @@ func (p *dataNodeConfig) initFlushDeleteBufferSize() {
 	deleteBufBytes := p.Base.ParseInt64WithDefault("datanode.segment.deleteBufBytes",
 		64*1024*1024)
 	p.FlushDeleteBufferBytes = deleteBufBytes
+}
+
+func (p *dataNodeConfig) initBinlogMaxSize() {
+	size := p.Base.LoadWithDefault("datanode.segment.binlog.maxsize", "67108864")
+	bs, err := strconv.ParseInt(size, 10, 64)
+	if err != nil {
+		panic(err)
+	}
+	p.BinLogMaxSize = bs
 }
 
 func (p *dataNodeConfig) initSyncPeriod() {
