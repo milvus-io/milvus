@@ -80,26 +80,20 @@ func reduceStatisticResponse(results []*internalpb.GetStatisticsResponse) (*inte
 func reduceSearchResults(ctx context.Context, results []*internalpb.SearchResults, nq int64, topk int64, metricType string) (*internalpb.SearchResults, error) {
 	searchResultData, err := decodeSearchResults(results)
 	if err != nil {
-		log.Ctx(ctx).Warn("shard leader decode search results errors", zap.Error(err))
+		log.Ctx(ctx).Warn("decode search results errors", zap.Error(err))
 		return nil, err
 	}
-	log.Ctx(ctx).Debug("shard leader get valid search results", zap.Int("numbers", len(searchResultData)))
-
-	for i, sData := range searchResultData {
-		log.Ctx(ctx).Debug("reduceSearchResultData",
-			zap.Int("result No.", i),
-			zap.Int64("nq", sData.NumQueries),
-			zap.Int64("topk", sData.TopK))
-	}
+	log.Ctx(ctx).Debug("reduceSearchResultData",
+		zap.Int("numbers", len(searchResultData)), zap.Int64("targetNq", nq), zap.Int64("targetTopk", topk))
 
 	reducedResultData, err := reduceSearchResultData(ctx, searchResultData, nq, topk)
 	if err != nil {
-		log.Ctx(ctx).Warn("shard leader reduce errors", zap.Error(err))
+		log.Ctx(ctx).Warn("reduce search results error", zap.Error(err))
 		return nil, err
 	}
 	searchResults, err := encodeSearchResultData(reducedResultData, nq, topk, metricType)
 	if err != nil {
-		log.Warn("shard leader encode search result errors", zap.Error(err))
+		log.Ctx(ctx).Warn("encode search results error", zap.Error(err))
 		return nil, err
 	}
 	//if searchResults.SlicedBlob == nil {
@@ -178,7 +172,10 @@ func reduceSearchResultData(ctx context.Context, searchResultData []*schemapb.Se
 		// }
 		ret.Topks = append(ret.Topks, j)
 	}
-	log.Ctx(ctx).Debug("skip duplicated search result", zap.Int64("count", skipDupCnt))
+
+	if skipDupCnt > 0 {
+		log.Ctx(ctx).Debug("skip duplicated search result", zap.Int64("count", skipDupCnt))
+	}
 	return ret, nil
 }
 

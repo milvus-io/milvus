@@ -310,7 +310,7 @@ func (s *Segment) getMemSize() int64 {
 	return int64(memoryUsageInBytes)
 }
 
-func (s *Segment) search(searchReq *searchRequest) (*SearchResult, error) {
+func (s *Segment) search(ctx context.Context, searchReq *searchRequest) (*SearchResult, error) {
 	/*
 		CStatus
 		Search(void* plan,
@@ -332,7 +332,7 @@ func (s *Segment) search(searchReq *searchRequest) (*SearchResult, error) {
 
 	loadIndex := s.hasLoadIndexForIndexedField(searchReq.searchFieldID)
 	var searchResult SearchResult
-	log.Debug("start do search on segment",
+	log.Ctx(ctx).Debug("start do search on segment",
 		zap.Int64("msgID", searchReq.msgID),
 		zap.Int64("segmentID", s.segmentID),
 		zap.String("segmentType", s.segmentType.String()),
@@ -345,7 +345,7 @@ func (s *Segment) search(searchReq *searchRequest) (*SearchResult, error) {
 	if err := HandleCStatus(&status, "Search failed"); err != nil {
 		return nil, err
 	}
-	log.Debug("do search on segment done",
+	log.Ctx(ctx).Debug("do search on segment done",
 		zap.Int64("msgID", searchReq.msgID),
 		zap.Int64("segmentID", s.segmentID),
 		zap.String("segmentType", s.segmentType.String()),

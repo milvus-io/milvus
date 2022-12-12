@@ -47,7 +47,7 @@ func validateOnHistoricalReplica(ctx context.Context, replica ReplicaInterface, 
 		}
 	}
 
-	log.Ctx(ctx).Debug("read target partitions", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", searchPartIDs))
+	log.Ctx(ctx).Debug("read target partitions on historical replica", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", searchPartIDs))
 	col, err2 := replica.getCollectionByID(collectionID)
 	if err2 != nil {
 		return searchPartIDs, segmentIDs, err2
@@ -55,8 +55,8 @@ func validateOnHistoricalReplica(ctx context.Context, replica ReplicaInterface, 
 
 	// all partitions have been released
 	if len(searchPartIDs) == 0 && col.getLoadType() == loadTypePartition {
-		return searchPartIDs, segmentIDs, errors.New("partitions have been released , collectionID = " +
-			fmt.Sprintln(collectionID) + "target partitionIDs = " + fmt.Sprintln(searchPartIDs))
+		return searchPartIDs, segmentIDs,
+			fmt.Errorf("partitions have been released , collectionID = %d, target partitionID = %v", collectionID, searchPartIDs)
 	}
 	if len(searchPartIDs) == 0 && col.getLoadType() == loadTypeCollection {
 		return searchPartIDs, segmentIDs, nil
@@ -112,7 +112,7 @@ func validateOnStreamReplica(ctx context.Context, replica ReplicaInterface, coll
 		}
 	}
 
-	log.Ctx(ctx).Debug("read target partitions", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", searchPartIDs))
+	log.Ctx(ctx).Debug("read target partitions on stream replica", zap.Int64("collectionID", collectionID), zap.Int64s("partitionIDs", searchPartIDs))
 	col, err2 := replica.getCollectionByID(collectionID)
 	if err2 != nil {
 		return searchPartIDs, segmentIDs, err2
@@ -120,19 +120,13 @@ func validateOnStreamReplica(ctx context.Context, replica ReplicaInterface, coll
 
 	// all partitions have been released
 	if len(searchPartIDs) == 0 && col.getLoadType() == loadTypePartition {
-		return searchPartIDs, segmentIDs, errors.New("partitions have been released , collectionID = " +
-			fmt.Sprintln(collectionID) + "target partitionIDs = " + fmt.Sprintln(searchPartIDs))
+		return searchPartIDs, segmentIDs,
+			fmt.Errorf("partitions have been released , collectionID = %d, target partitionIDs = %v", collectionID, searchPartIDs)
 	}
 	if len(searchPartIDs) == 0 && col.getLoadType() == loadTypeCollection {
 		return searchPartIDs, segmentIDs, nil
 	}
 
 	segmentIDs, err = replica.getSegmentIDsByVChannel(searchPartIDs, vChannel, segmentTypeGrowing)
-	log.Ctx(ctx).Debug("validateOnStreamReplica getSegmentIDsByVChannel",
-		zap.Any("collectionID", collectionID),
-		zap.Any("vChannel", vChannel),
-		zap.Any("partitionIDs", searchPartIDs),
-		zap.Any("segmentIDs", segmentIDs),
-		zap.Error(err))
-	return searchPartIDs, segmentIDs, nil
+	return searchPartIDs, segmentIDs, err
 }
