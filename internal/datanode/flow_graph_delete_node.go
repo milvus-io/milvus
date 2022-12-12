@@ -117,32 +117,13 @@ func (dn *deleteNode) Operate(in []Msg) []Msg {
 		dn.showDelBuf(segIDs, fgMsg.timeRange.timestampMax)
 	}
 
-	//here we adopt a quite radical strategy:
-	//every time we make sure that the N biggest delDataBuf can be flushed
-	//when memsize usage reaches a certain level
-	//then we will add all segments in the fgMsg.segmentsToFlush into the toFlushSeg and remove duplicate segments
-	//the aim for taking all these actions is to guarantee that the memory consumed by delBuf will not exceed a limit
-	segmentsToFlush := dn.delBufferManager.ShouldFlushSegments()
-	for _, msgSegmentID := range fgMsg.segmentsToSync {
-		existed := false
-		for _, autoFlushSegment := range segmentsToFlush {
-			if msgSegmentID == autoFlushSegment {
-				existed = true
-				break
-			}
-		}
-		if !existed {
-			segmentsToFlush = append(segmentsToFlush, msgSegmentID)
-		}
-	}
-
 	// process flush messages
-	if len(segmentsToFlush) > 0 {
+	if len(fgMsg.segmentsToSync) > 0 {
 		log.Debug("DeleteNode receives flush message",
-			zap.Int64s("segIDs", segmentsToFlush),
+			zap.Int64s("segIDs", fgMsg.segmentsToSync),
 			zap.String("vChannelName", dn.channelName),
 			zap.Time("posTime", tsoutil.PhysicalTime(fgMsg.endPositions[0].Timestamp)))
-		for _, segmentToFlush := range segmentsToFlush {
+		for _, segmentToFlush := range fgMsg.segmentsToSync {
 			buf, ok := dn.delBufferManager.Load(segmentToFlush)
 			if !ok {
 				// no related delta data to flush, send empty buf to complete flush life-cycle
@@ -239,23 +220,19 @@ func (dn *deleteNode) filterSegmentByPK(partID UniqueID, pks []primaryKey, tss [
 	return segID2Pks, segID2Tss
 }
 
-func newDeleteNode(ctx context.Context, fm flushManager, sig chan<- string, config *nodeConfig) (*deleteNode, error) {
+func newDeleteNode(ctx context.Context, fm flushManager, delBufManager *DelBufferManager, sig chan<- string, config *nodeConfig) (*deleteNode, error) {
 	baseNode := BaseNode{}
 	baseNode.SetMaxQueueLength(config.maxQueueLength)
 	baseNode.SetMaxParallelism(config.maxParallelism)
 
 	return &deleteNode{
-		ctx:      ctx,
-		BaseNode: baseNode,
-		delBufferManager: &DelBufferManager{
-			channel:       config.channel,
-			delMemorySize: 0,
-			delBufHeap:    &PriorityQueue{},
-		},
-		channel:      config.channel,
-		idAllocator:  config.allocator,
-		channelName:  config.vChannelName,
-		flushManager: fm,
-		clearSignal:  sig,
+		ctx:              ctx,
+		BaseNode:         baseNode,
+		delBufferManager: delBufManager,
+		channel:          config.channel,
+		idAllocator:      config.allocator,
+		channelName:      config.vChannelName,
+		flushManager:     fm,
+		clearSignal:      sig,
 	}, nil
 }

@@ -46,10 +46,11 @@ import (
 type insertBufferNode struct {
 	BaseNode
 
-	ctx         context.Context
-	channelName string
-	channel     Channel
-	idAllocator allocatorInterface
+	ctx              context.Context
+	channelName      string
+	delBufferManager *DelBufferManager // manager of delete msg
+	channel          Channel
+	idAllocator      allocatorInterface
 
 	flushMap         sync.Map
 	flushChan        <-chan flushMsg
@@ -330,6 +331,19 @@ func (ibNode *insertBufferNode) FillInSyncTasks(fgMsg *flowGraphMsg, seg2Upload 
 		}
 	}
 
+	// sync delete
+	//here we adopt a quite radical strategy:
+	//every time we make sure that the N biggest delDataBuf can be flushed
+	//when memsize usage reaches a certain level
+	//the aim for taking all these actions is to guarantee that the memory consumed by delBuf will not exceed a limit
+	segmentsToFlush := ibNode.delBufferManager.ShouldFlushSegments()
+	for _, segID := range segmentsToFlush {
+		syncTasks[segID] = &syncTask{
+			buffer:    nil, // nil is valid
+			segmentID: segID,
+		}
+	}
+
 	syncSegmentIDs := ibNode.channel.listSegmentIDsToSync(fgMsg.endPositions[0].Timestamp)
 	for _, segID := range syncSegmentIDs {
 		buf := ibNode.GetBuffer(segID)
@@ -593,7 +607,7 @@ func (ibNode *insertBufferNode) getCollectionandPartitionIDbySegID(segmentID Uni
 	return ibNode.channel.getCollectionAndPartitionID(segmentID)
 }
 
-func newInsertBufferNode(ctx context.Context, collID UniqueID, flushCh <-chan flushMsg, resendTTCh <-chan resendTTMsg,
+func newInsertBufferNode(ctx context.Context, collID UniqueID, delBufManager *DelBufferManager, flushCh <-chan flushMsg, resendTTCh <-chan resendTTMsg,
 	fm flushManager, flushingSegCache *Cache, config *nodeConfig) (*insertBufferNode, error) {
 
 	baseNode := BaseNode{}
@@ -659,10 +673,11 @@ func newInsertBufferNode(ctx context.Context, collID UniqueID, flushCh <-chan fl
 		flushingSegCache: flushingSegCache,
 		flushManager:     fm,
 
-		channel:     config.channel,
-		idAllocator: config.allocator,
-		channelName: config.vChannelName,
-		ttMerger:    mt,
-		ttLogger:    &timeTickLogger{vChannelName: config.vChannelName},
+		delBufferManager: delBufManager,
+		channel:          config.channel,
+		idAllocator:      config.allocator,
+		channelName:      config.vChannelName,
+		ttMerger:         mt,
+		ttLogger:         &timeTickLogger{vChannelName: config.vChannelName},
 	}, nil
 }
