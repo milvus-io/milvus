@@ -133,7 +133,13 @@ func (ob *TargetObserver) updateNextTargetTimestamp(collectionID int64) {
 }
 
 func (ob *TargetObserver) shouldUpdateCurrentTarget(collectionID int64) bool {
-	replicaNum := len(ob.meta.ReplicaManager.GetByCollection(collectionID))
+	// Collection observer will update the current target as loading done,
+	// avoid double updating, which will cause update current target to a unfinished next target
+	if !ob.targetMgr.IsCurrentTargetExist(collectionID) {
+		return false
+	}
+
+	replicaNum := ob.meta.CollectionManager.GetReplicaNumber(collectionID)
 
 	// check channel first
 	channelNames := ob.targetMgr.GetDmChannelsByCollection(collectionID, meta.NextTarget)
@@ -146,7 +152,7 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(collectionID int64) bool {
 		group := utils.GroupNodesByReplica(ob.meta.ReplicaManager,
 			collectionID,
 			ob.distMgr.LeaderViewManager.GetChannelDist(channel.GetChannelName()))
-		if len(group) < replicaNum {
+		if int32(len(group)) < replicaNum {
 			return false
 		}
 	}
@@ -157,7 +163,7 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(collectionID int64) bool {
 		group := utils.GroupNodesByReplica(ob.meta.ReplicaManager,
 			collectionID,
 			ob.distMgr.LeaderViewManager.GetSealedSegmentDist(segment.GetID()))
-		if len(group) < replicaNum {
+		if int32(len(group)) < replicaNum {
 			return false
 		}
 	}

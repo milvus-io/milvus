@@ -127,7 +127,6 @@ func (suite *TargetManagerSuite) SetupTest() {
 		}
 
 		suite.mgr.UpdateCollectionNextTargetWithPartitions(collection, suite.partitions[collection]...)
-
 	}
 }
 
