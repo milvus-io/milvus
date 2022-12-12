@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/samber/lo"
+	"go.uber.org/multierr"
 	"go.uber.org/zap"
 )
 
@@ -668,35 +669,70 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 		return resp, nil
 	}
 
+	currentTargets := s.targetMgr.GetSegmentsByCollection(req.GetCollectionID())
 	for _, channel := range channels {
 		log := log.With(zap.String("channel", channel.GetChannelName()))
 
 		leaders := s.dist.LeaderViewManager.GetLeadersByShard(channel.GetChannelName())
 		ids := make([]int64, 0, len(leaders))
 		addrs := make([]string, 0, len(leaders))
+
+		var channelErr error
+
+		// In a replica, a shard is available, if and only if:
+		// 1. The leader is online
+		// 2. All QueryNodes in the distribution are online
+		// 3. All segments of the shard in target should be in the distribution
 		for _, leader := range leaders {
+			log := log.With(zap.Int64("leaderID", leader.ID))
 			info := s.nodeMgr.Get(leader.ID)
 			if info == nil {
+				log.Info("leader is not available", zap.Int64("leaderID", leader.ID))
+				multierr.AppendInto(&channelErr, WrapErrNodeOffline(leader.ID))
 				continue
 			}
-			isAllNodeAvailable := true
+			// Check whether QueryNodes are online and available
+			isAvailable := true
 			for _, version := range leader.Segments {
 				if s.nodeMgr.Get(version.NodeID) == nil {
-					isAllNodeAvailable = false
+					log.Info("leader is not available due to QueryNode not available", zap.Int64("nodeID", version.GetNodeID()))
+					isAvailable = false
+					multierr.AppendInto(&channelErr, WrapErrNodeOffline(version.GetNodeID()))
 					break
 				}
 			}
-			if !isAllNodeAvailable {
+
+			// Avoid iterating all segments if any QueryNode unavailable
+			if !isAvailable {
 				continue
 			}
+
+			// Check whether segments are fully loaded
+			for _, segment := range currentTargets {
+				if segment.GetInsertChannel() != leader.Channel {
+					continue
+				}
+
+				_, exist := leader.Segments[segment.GetID()]
+				if !exist {
+					log.Info("leader is not available due to lack of segment", zap.Int64("segmentID", segment.GetID()))
+					multierr.AppendInto(&channelErr, WrapErrLackSegment(segment.GetID()))
+					isAvailable = false
+					break
+				}
+			}
+			if !isAvailable {
+				continue
+			}
+
 			ids = append(ids, info.ID())
 			addrs = append(addrs, info.Addr())
 		}
 
 		if len(ids) == 0 {
 			msg := fmt.Sprintf("channel %s is not available in any replica", channel.GetChannelName())
-			log.Warn(msg)
-			resp.Status = utils.WrapStatus(commonpb.ErrorCode_NoReplicaAvailable, msg)
+			log.Warn(msg, zap.Error(channelErr))
+			resp.Status = utils.WrapStatus(commonpb.ErrorCode_NoReplicaAvailable, msg, channelErr)
 			resp.Shards = nil
 			return resp, nil
 		}
@@ -707,6 +743,7 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 			NodeAddrs:   addrs,
 		})
 	}
+
 	return resp, nil
 }
 

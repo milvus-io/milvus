@@ -16,8 +16,23 @@
 
 package querycoordv2
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 var (
 	ErrNotHealthy = errors.New("NotHealthy")
+
+	// Node Availability
+	ErrLackSegment = errors.New("LackSegment")
+	ErrNodeOffline = errors.New("NodeOffline")
 )
+
+func WrapErrLackSegment(segmentID int64) error {
+	return fmt.Errorf("%w(segmentID=%v)", ErrLackSegment, segmentID)
+}
+
+func WrapErrNodeOffline(nodeID int64) error {
+	return fmt.Errorf("%w(nodeID=%v)", ErrNodeOffline, nodeID)
+}

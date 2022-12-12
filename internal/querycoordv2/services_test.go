@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
@@ -901,6 +902,7 @@ func (suite *ServiceSuite) TestGetShardLeaders() {
 		req := &querypb.GetShardLeadersRequest{
 			CollectionID: collection,
 		}
+
 		resp, err := server.GetShardLeaders(ctx, req)
 		suite.NoError(err)
 		suite.Equal(commonpb.ErrorCode_Success, resp.Status.ErrorCode)
@@ -918,6 +920,37 @@ func (suite *ServiceSuite) TestGetShardLeaders() {
 	resp, err := server.GetShardLeaders(ctx, req)
 	suite.NoError(err)
 	suite.Contains(resp.Status.Reason, ErrNotHealthy.Error())
+}
+
+func (suite *ServiceSuite) TestGetShardLeadersFailed() {
+	suite.loadAll()
+	ctx := context.Background()
+	server := suite.server
+
+	for _, collection := range suite.collections {
+		suite.updateCollectionStatus(collection, querypb.LoadStatus_Loaded)
+		suite.updateChannelDist(collection)
+		req := &querypb.GetShardLeadersRequest{
+			CollectionID: collection,
+		}
+
+		// Node offline
+		for _, node := range suite.nodes {
+			suite.nodeMgr.Remove(node)
+		}
+		resp, err := server.GetShardLeaders(ctx, req)
+		suite.NoError(err)
+		suite.Equal(commonpb.ErrorCode_NoReplicaAvailable, resp.Status.ErrorCode)
+		for _, node := range suite.nodes {
+			suite.nodeMgr.Add(session.NewNodeInfo(node, "localhost"))
+		}
+
+		// Segment not fully loaded
+		suite.updateChannelDistWithoutSegment(collection)
+		resp, err = server.GetShardLeaders(ctx, req)
+		suite.NoError(err)
+		suite.Equal(commonpb.ErrorCode_NoReplicaAvailable, resp.Status.ErrorCode)
+	}
 }
 
 func (suite *ServiceSuite) loadAll() {
@@ -1073,6 +1106,38 @@ func (suite *ServiceSuite) updateSegmentDist(collection, node int64) {
 
 func (suite *ServiceSuite) updateChannelDist(collection int64) {
 	channels := suite.channels[collection]
+	segments := lo.Flatten(lo.Values(suite.segments[collection]))
+
+	replicas := suite.meta.ReplicaManager.GetByCollection(collection)
+	for _, replica := range replicas {
+		i := 0
+		for _, node := range replica.GetNodes() {
+			suite.dist.ChannelDistManager.Update(node, meta.DmChannelFromVChannel(&datapb.VchannelInfo{
+				CollectionID: collection,
+				ChannelName:  channels[i],
+			}))
+			suite.dist.LeaderViewManager.Update(node, &meta.LeaderView{
+				ID:           node,
+				CollectionID: collection,
+				Channel:      channels[i],
+				Segments: lo.SliceToMap(segments, func(segment int64) (int64, *querypb.SegmentDist) {
+					return segment, &querypb.SegmentDist{
+						NodeID:  node,
+						Version: time.Now().Unix(),
+					}
+				}),
+			})
+			i++
+			if i >= len(channels) {
+				break
+			}
+		}
+	}
+}
+
+func (suite *ServiceSuite) updateChannelDistWithoutSegment(collection int64) {
+	channels := suite.channels[collection]
+
 	replicas := suite.meta.ReplicaManager.GetByCollection(collection)
 	for _, replica := range replicas {
 		i := 0
