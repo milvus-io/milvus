@@ -38,7 +38,7 @@ import (
 	"golang.org/x/exp/maps"
 )
 
-const maxEtcdTxnNum = 64
+var maxEtcdTxnNum = 128
 
 type Catalog struct {
 	Txn                  kv.TxnKV
@@ -150,6 +150,10 @@ func (kc *Catalog) AlterSegments(ctx context.Context, newSegments []*datapb.Segm
 		}
 		maps.Copy(kvsPiece, kvs)
 		currSize += len(kvs)
+		if len(kvs) >= maxEtcdTxnNum {
+			log.Warn("a single segment's Etcd save has over maxEtcdTxnNum operations." +
+				" Please double check your <proxy.maxFieldNum> config")
+		}
 	}
 	if currSize > 0 {
 		if err := etcd.SaveByBatch(kvsPiece, saveFn); err != nil {
@@ -643,10 +647,12 @@ func buildFieldBinlogPath(collectionID typeutil.UniqueID, partitionID typeutil.U
 	return fmt.Sprintf("%s/%d/%d/%d/%d", SegmentBinlogPathPrefix, collectionID, partitionID, segmentID, fieldID)
 }
 
+// TODO: There's no need to include fieldID in the delta log path key.
 func buildFieldDeltalogPath(collectionID typeutil.UniqueID, partitionID typeutil.UniqueID, segmentID typeutil.UniqueID, fieldID typeutil.UniqueID) string {
 	return fmt.Sprintf("%s/%d/%d/%d/%d", SegmentDeltalogPathPrefix, collectionID, partitionID, segmentID, fieldID)
 }
 
+// TODO: There's no need to include fieldID in the stats log path key.
 func buildFieldStatslogPath(collectionID typeutil.UniqueID, partitionID typeutil.UniqueID, segmentID typeutil.UniqueID, fieldID typeutil.UniqueID) string {
 	return fmt.Sprintf("%s/%d/%d/%d/%d", SegmentStatslogPathPrefix, collectionID, partitionID, segmentID, fieldID)
 }

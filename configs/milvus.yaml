@@ -157,7 +157,9 @@ proxy:
     timeTick:
       bufSize: 512
   maxNameLength: 255  # Maximum length of name for a collection or alias
-  maxFieldNum: 256     # Maximum number of fields in a collection
+  maxFieldNum: 64     # Maximum number of fields in a collection.
+  # As of today (2.2.0 and after) it is strongly DISCOURAGED to set maxFieldNum >= 64.
+  # So adjust at your risk!
   maxDimension: 32768 # Maximum dimension of a vector
   maxShardNum: 256 # Maximum number of shards in a collection
   maxTaskNum: 1024 # max task number of proxy task queue
