@@ -138,7 +138,6 @@ func (ob *CollectionObserver) observeLoadStatus() {
 	collections := ob.meta.CollectionManager.GetAllCollections()
 	for _, collection := range collections {
 		if collection.LoadPercentage == 100 {
-			delete(ob.collectionLoadedCount, collection.GetCollectionID())
 			continue
 		}
 		ob.observeCollectionLoadStatus(collection)
@@ -150,7 +149,6 @@ func (ob *CollectionObserver) observeLoadStatus() {
 	}
 	for _, partition := range partitions {
 		if partition.LoadPercentage == 100 {
-			delete(ob.partitionLoadedCount, partition.GetPartitionID())
 			continue
 		}
 		ob.observePartitionLoadStatus(partition)
@@ -204,6 +202,7 @@ func (ob *CollectionObserver) observeCollectionLoadStatus(collection *meta.Colle
 	}
 	ob.collectionLoadedCount[collection.GetCollectionID()] = loadedCount
 	if updated.LoadPercentage == 100 {
+		delete(ob.collectionLoadedCount, collection.GetCollectionID())
 		ob.targetMgr.UpdateCollectionCurrentTarget(updated.CollectionID)
 		updated.Status = querypb.LoadStatus_Loaded
 		ob.meta.CollectionManager.UpdateCollection(updated)
@@ -267,6 +266,7 @@ func (ob *CollectionObserver) observePartitionLoadStatus(partition *meta.Partiti
 	}
 	ob.partitionLoadedCount[partition.GetPartitionID()] = loadedCount
 	if updated.LoadPercentage == 100 {
+		delete(ob.partitionLoadedCount, partition.GetPartitionID())
 		ob.targetMgr.UpdateCollectionCurrentTarget(partition.GetCollectionID(), partition.GetPartitionID())
 		updated.Status = querypb.LoadStatus_Loaded
 		ob.meta.CollectionManager.PutPartition(updated)
