@@ -34,7 +34,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	dcc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
-	icc "github.com/milvus-io/milvus/internal/distributed/indexcoord/client"
 	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -64,9 +63,8 @@ type Server struct {
 
 	etcdCli *clientv3.Client
 
-	dataCoord  types.DataCoord
-	rootCoord  types.RootCoord
-	indexCoord types.IndexCoord
+	dataCoord types.DataCoord
+	rootCoord types.RootCoord
 
 	closer io.Closer
 }
@@ -194,37 +192,6 @@ func (s *Server) init() error {
 		panic(err)
 	}
 	log.Debug("QueryCoord report DataCoord ready")
-
-	// --- IndexCoord ---
-	if s.indexCoord == nil {
-		s.indexCoord, err = icc.NewClient(s.loopCtx, qc.Params.EtcdCfg.MetaRootPath.GetValue(), s.etcdCli)
-		if err != nil {
-			log.Debug("QueryCoord try to new IndexCoord client failed", zap.Error(err))
-			panic(err)
-		}
-	}
-
-	if err := s.indexCoord.Init(); err != nil {
-		log.Debug("QueryCoord IndexCoordClient Init failed", zap.Error(err))
-		panic(err)
-	}
-
-	if err := s.indexCoord.Start(); err != nil {
-		log.Debug("QueryCoord IndexCoordClient Start failed", zap.Error(err))
-		panic(err)
-	}
-	// wait IndexCoord healthy
-	log.Debug("QueryCoord try to wait for IndexCoord ready")
-	err = funcutil.WaitForComponentHealthy(s.loopCtx, s.indexCoord, "IndexCoord", 1000000, time.Millisecond*200)
-	if err != nil {
-		log.Debug("QueryCoord wait for IndexCoord ready failed", zap.Error(err))
-		panic(err)
-	}
-	log.Debug("QueryCoord report IndexCoord is ready")
-
-	if err := s.SetIndexCoord(s.indexCoord); err != nil {
-		panic(err)
-	}
 
 	s.queryCoord.UpdateStateCode(commonpb.StateCode_Initializing)
 	log.Debug("QueryCoord", zap.Any("State", commonpb.StateCode_Initializing))

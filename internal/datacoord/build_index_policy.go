@@ -16,19 +16,13 @@
 
 package datacoord
 
-// segment reference lock
-const (
-	// segmentReferPrefix is the prefix of the segment reference lock path
-	segmentReferPrefix = "segmentRefer"
-)
+import "sort"
 
-const (
-	moduleName = "DataCoord"
-)
+type buildIndexPolicy func(buildIDs []UniqueID)
 
-const (
-	flatIndex    = "FLAT"
-	binFlatIndex = "BIN_FLAT"
-	diskAnnIndex = "DISKANN"
-	invalidIndex = "invalid"
-)
+func defaultBuildIndexPolicy(buildIDs []UniqueID) {
+	sort.Slice(buildIDs, func(i, j int) bool {
+		return buildIDs[i] < buildIDs[j]
+	})
+
+}

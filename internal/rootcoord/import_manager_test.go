@@ -30,7 +30,6 @@ import (
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/util/importutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
@@ -469,6 +468,7 @@ func TestImportManager_TestFlipTaskStateLoop(t *testing.T) {
 			ErrorCode: commonpb.ErrorCode_Success,
 		}, nil
 	}
+
 	callGetSegmentStates := func(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error) {
 		return &datapb.GetSegmentStatesResponse{
 			Status: &commonpb.Status{
@@ -476,19 +476,20 @@ func TestImportManager_TestFlipTaskStateLoop(t *testing.T) {
 			},
 		}, nil
 	}
-	callDescribeIndex := func(ctx context.Context, colID UniqueID) (*indexpb.DescribeIndexResponse, error) {
-		return &indexpb.DescribeIndexResponse{
+
+	callDescribeIndex := func(ctx context.Context, colID UniqueID) (*datapb.DescribeIndexResponse, error) {
+		return &datapb.DescribeIndexResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_Success,
 			},
-			IndexInfos: []*indexpb.IndexInfo{
+			IndexInfos: []*datapb.IndexInfo{
 				{},
 			},
 		}, nil
 	}
 	callGetSegmentIndexState := func(ctx context.Context, collID UniqueID, indexName string,
-		segIDs []UniqueID) ([]*indexpb.SegmentIndexState, error) {
-		return []*indexpb.SegmentIndexState{
+		segIDs []UniqueID) ([]*datapb.SegmentIndexState, error) {
+		return []*datapb.SegmentIndexState{
 			{
 				SegmentID: 201,
 				State:     commonpb.IndexState_Finished,
@@ -544,8 +545,8 @@ func TestImportManager_TestFlipTaskStateLoop(t *testing.T) {
 		defer wg.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		callDescribeIndex = func(ctx context.Context, colID UniqueID) (*indexpb.DescribeIndexResponse, error) {
-			return &indexpb.DescribeIndexResponse{
+		callDescribeIndex = func(ctx context.Context, colID UniqueID) (*datapb.DescribeIndexResponse, error) {
+			return &datapb.DescribeIndexResponse{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				},
@@ -566,8 +567,8 @@ func TestImportManager_TestFlipTaskStateLoop(t *testing.T) {
 		defer wg.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		callDescribeIndex = func(ctx context.Context, colID UniqueID) (*indexpb.DescribeIndexResponse, error) {
-			return &indexpb.DescribeIndexResponse{
+		callDescribeIndex = func(ctx context.Context, colID UniqueID) (*datapb.DescribeIndexResponse, error) {
+			return &datapb.DescribeIndexResponse{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_IndexNotExist,
 				},
@@ -1233,10 +1234,10 @@ func TestImportManager_checkIndexingDone(t *testing.T) {
 	ctx := context.Background()
 
 	mgr := &importManager{
-		callDescribeIndex: func(ctx context.Context, colID UniqueID) (*indexpb.DescribeIndexResponse, error) {
+		callDescribeIndex: func(ctx context.Context, colID UniqueID) (*datapb.DescribeIndexResponse, error) {
 			return nil, errors.New("error")
 		},
-		callGetSegmentIndexState: func(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*indexpb.SegmentIndexState, error) {
+		callGetSegmentIndexState: func(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*datapb.SegmentIndexState, error) {
 			return nil, errors.New("error")
 		},
 		callGetSegmentStates: func(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error) {
@@ -1255,8 +1256,8 @@ func TestImportManager_checkIndexingDone(t *testing.T) {
 	assert.False(t, done)
 	assert.Error(t, err)
 
-	mgr.callDescribeIndex = func(ctx context.Context, colID UniqueID) (*indexpb.DescribeIndexResponse, error) {
-		return &indexpb.DescribeIndexResponse{
+	mgr.callDescribeIndex = func(ctx context.Context, colID UniqueID) (*datapb.DescribeIndexResponse, error) {
+		return &datapb.DescribeIndexResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			},
@@ -1271,8 +1272,8 @@ func TestImportManager_checkIndexingDone(t *testing.T) {
 	assert.False(t, done)
 	assert.Error(t, err)
 
-	mgr.callDescribeIndex = func(ctx context.Context, colID UniqueID) (*indexpb.DescribeIndexResponse, error) {
-		return &indexpb.DescribeIndexResponse{
+	mgr.callDescribeIndex = func(ctx context.Context, colID UniqueID) (*datapb.DescribeIndexResponse, error) {
+		return &datapb.DescribeIndexResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_IndexNotExist,
 			},
@@ -1308,12 +1309,12 @@ func TestImportManager_checkIndexingDone(t *testing.T) {
 	assert.True(t, done)
 	assert.Nil(t, err)
 
-	mgr.callDescribeIndex = func(ctx context.Context, colID UniqueID) (*indexpb.DescribeIndexResponse, error) {
-		return &indexpb.DescribeIndexResponse{
+	mgr.callDescribeIndex = func(ctx context.Context, colID UniqueID) (*datapb.DescribeIndexResponse, error) {
+		return &datapb.DescribeIndexResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_Success,
 			},
-			IndexInfos: []*indexpb.IndexInfo{
+			IndexInfos: []*datapb.IndexInfo{
 				{
 					State: commonpb.IndexState_Finished,
 				},
@@ -1329,8 +1330,8 @@ func TestImportManager_checkIndexingDone(t *testing.T) {
 	assert.False(t, done)
 	assert.Error(t, err)
 
-	mgr.callGetSegmentIndexState = func(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*indexpb.SegmentIndexState, error) {
-		return []*indexpb.SegmentIndexState{
+	mgr.callGetSegmentIndexState = func(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*datapb.SegmentIndexState, error) {
+		return []*datapb.SegmentIndexState{
 			{
 				State: commonpb.IndexState_Finished,
 			},
@@ -1345,8 +1346,8 @@ func TestImportManager_checkIndexingDone(t *testing.T) {
 	assert.False(t, done)
 	assert.Nil(t, err)
 
-	mgr.callGetSegmentIndexState = func(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*indexpb.SegmentIndexState, error) {
-		return []*indexpb.SegmentIndexState{
+	mgr.callGetSegmentIndexState = func(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*datapb.SegmentIndexState, error) {
+		return []*datapb.SegmentIndexState{
 			{
 				State: commonpb.IndexState_Finished,
 			},

@@ -284,7 +284,7 @@ func TestCatalog_ListSegmentIndexes(t *testing.T) {
 			Txn: txn,
 		}
 
-		segIdxes, err := catalog.ListIndexes(context.Background())
+		segIdxes, err := catalog.ListSegmentIndexes(context.Background())
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(segIdxes))
 	})
@@ -299,7 +299,7 @@ func TestCatalog_ListSegmentIndexes(t *testing.T) {
 			Txn: txn,
 		}
 
-		_, err := catalog.ListIndexes(context.Background())
+		_, err := catalog.ListSegmentIndexes(context.Background())
 		assert.Error(t, err)
 	})
 
@@ -313,7 +313,7 @@ func TestCatalog_ListSegmentIndexes(t *testing.T) {
 			Txn: txn,
 		}
 
-		_, err := catalog.ListIndexes(context.Background())
+		_, err := catalog.ListSegmentIndexes(context.Background())
 		assert.Error(t, err)
 	})
 }

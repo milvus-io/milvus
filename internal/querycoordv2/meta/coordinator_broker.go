@@ -27,7 +27,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 
@@ -167,7 +166,7 @@ func (broker *CoordinatorBroker) GetIndexInfo(ctx context.Context, collectionID 
 	ctx, cancel := context.WithTimeout(ctx, brokerRPCTimeout)
 	defer cancel()
 
-	resp, err := broker.indexCoord.GetIndexInfos(ctx, &indexpb.GetIndexInfoRequest{
+	resp, err := broker.dataCoord.GetIndexInfos(ctx, &datapb.GetIndexInfoRequest{
 		CollectionID: collectionID,
 		SegmentIDs:   []int64{segmentID},
 	})

@@ -27,7 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
@@ -49,8 +49,8 @@ func TestGetIndexStateTask_Execute(t *testing.T) {
 	ctx := context.Background()
 
 	rootCoord := newMockRootCoord()
-	indexCoord := newMockIndexCoord()
 	queryCoord := NewQueryCoordMock()
+	datacoord := NewDataCoordMock()
 
 	gist := &getIndexStateTask{
 		GetIndexStateRequest: &milvuspb.GetIndexStateRequest{
@@ -60,9 +60,9 @@ func TestGetIndexStateTask_Execute(t *testing.T) {
 			FieldName:      fieldName,
 			IndexName:      indexName,
 		},
-		ctx:        ctx,
-		indexCoord: indexCoord,
-		rootCoord:  rootCoord,
+		ctx:       ctx,
+		rootCoord: rootCoord,
+		dataCoord: datacoord,
 		result: &milvuspb.GetIndexStateResponse{
 			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError, Reason: "mock"},
 			State:  commonpb.IndexState_Unissued,
@@ -86,8 +86,8 @@ func TestGetIndexStateTask_Execute(t *testing.T) {
 		}, nil
 	}
 
-	indexCoord.GetIndexStateFunc = func(ctx context.Context, request *indexpb.GetIndexStateRequest) (*indexpb.GetIndexStateResponse, error) {
-		return &indexpb.GetIndexStateResponse{
+	datacoord.GetIndexStateFunc = func(ctx context.Context, request *datapb.GetIndexStateRequest) (*datapb.GetIndexStateResponse, error) {
+		return &datapb.GetIndexStateResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_Success,
 			},
@@ -116,7 +116,7 @@ func TestDropIndexTask_PreExecute(t *testing.T) {
 		}, nil
 	}
 	qc := NewQueryCoordMock(withValidShardLeaders(), SetQueryCoordShowCollectionsFunc(showCollectionMock))
-	ic := newMockIndexCoord()
+	dc := NewDataCoordMock()
 	ctx := context.Background()
 	qc.updateState(commonpb.StateCode_Healthy)
 
@@ -140,7 +140,7 @@ func TestDropIndexTask_PreExecute(t *testing.T) {
 			FieldName:      fieldName,
 			IndexName:      indexName,
 		},
-		indexCoord:   ic,
+		dataCoord:    dc,
 		queryCoord:   qc,
 		result:       nil,
 		collectionID: collectionID,
@@ -218,7 +218,7 @@ func TestCreateIndexTask_PreExecute(t *testing.T) {
 	collectionID := UniqueID(1)
 	fieldName := newTestSchema().Fields[0].Name
 
-	ic := newMockIndexCoord()
+	dc := NewDataCoordMock()
 	ctx := context.Background()
 
 	mockCache := newMockCache()
@@ -239,7 +239,7 @@ func TestCreateIndexTask_PreExecute(t *testing.T) {
 			CollectionName: collectionName,
 			FieldName:      fieldName,
 		},
-		indexCoord:   ic,
+		datacoord:    dc,
 		queryCoord:   nil,
 		result:       nil,
 		collectionID: collectionID,
@@ -260,38 +260,5 @@ func TestCreateIndexTask_PreExecute(t *testing.T) {
 
 		err := cit.PreExecute(ctx)
 		assert.NoError(t, err)
-	})
-
-	t.Run("coll has been loaded", func(t *testing.T) {
-		showCollectionMock := func(ctx context.Context, request *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
-			return &querypb.ShowCollectionsResponse{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-				},
-				CollectionIDs: []int64{collectionID},
-			}, nil
-		}
-		qc := NewQueryCoordMock(withValidShardLeaders(), SetQueryCoordShowCollectionsFunc(showCollectionMock))
-		qc.updateState(commonpb.StateCode_Healthy)
-		cit.queryCoord = qc
-		err := cit.PreExecute(ctx)
-		assert.Error(t, err)
-	})
-
-	t.Run("check load error", func(t *testing.T) {
-		showCollectionMock := func(ctx context.Context, request *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
-			return &querypb.ShowCollectionsResponse{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_UnexpectedError,
-					Reason:    "fail reason",
-				},
-				CollectionIDs: nil,
-			}, errors.New("error")
-		}
-		qc := NewQueryCoordMock(withValidShardLeaders(), SetQueryCoordShowCollectionsFunc(showCollectionMock))
-		qc.updateState(commonpb.StateCode_Healthy)
-		cit.queryCoord = qc
-		err := cit.PreExecute(ctx)
-		assert.Error(t, err)
 	})
 }

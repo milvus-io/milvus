@@ -32,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/util/importutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -86,8 +85,8 @@ type importManager struct {
 	getCollectionName         func(collID, partitionID typeutil.UniqueID) (string, string, error)
 	callMarkSegmentsDropped   func(ctx context.Context, segIDs []typeutil.UniqueID) (*commonpb.Status, error)
 	callGetSegmentStates      func(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error)
-	callDescribeIndex         func(ctx context.Context, colID UniqueID) (*indexpb.DescribeIndexResponse, error)
-	callGetSegmentIndexState  func(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*indexpb.SegmentIndexState, error)
+	callDescribeIndex         func(ctx context.Context, colID UniqueID) (*datapb.DescribeIndexResponse, error)
+	callGetSegmentIndexState  func(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*datapb.SegmentIndexState, error)
 	callUnsetIsImportingState func(context.Context, *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error)
 }
 
@@ -98,8 +97,8 @@ func newImportManager(ctx context.Context, client kv.TxnKV,
 	markSegmentsDropped func(ctx context.Context, segIDs []typeutil.UniqueID) (*commonpb.Status, error),
 	getSegmentStates func(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error),
 	getCollectionName func(collID, partitionID typeutil.UniqueID) (string, string, error),
-	describeIndex func(ctx context.Context, colID UniqueID) (*indexpb.DescribeIndexResponse, error),
-	getSegmentIndexState func(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*indexpb.SegmentIndexState, error),
+	describeIndex func(ctx context.Context, colID UniqueID) (*datapb.DescribeIndexResponse, error),
+	getSegmentIndexState func(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*datapb.SegmentIndexState, error),
 	unsetIsImportingState func(context.Context, *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error)) *importManager {
 	mgr := &importManager{
 		ctx:                       ctx,
@@ -456,7 +455,7 @@ func (m *importManager) checkIndexingDone(ctx context.Context, collID UniqueID, 
 	}
 
 	// Check if collection has indexed fields.
-	var descIdxResp *indexpb.DescribeIndexResponse
+	var descIdxResp *datapb.DescribeIndexResponse
 	var err error
 	if descIdxResp, err = m.callDescribeIndex(ctx, collID); err != nil {
 		log.Error("failed to describe index",

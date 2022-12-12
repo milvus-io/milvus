@@ -25,6 +25,8 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/samber/lo"
+	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -34,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -42,8 +45,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/samber/lo"
-	"go.uber.org/zap"
 )
 
 type meta struct {
@@ -54,6 +55,13 @@ type meta struct {
 	segments     *SegmentsInfo                      // segment id to segment info
 	channelCPs   map[string]*internalpb.MsgPosition // vChannel -> channel checkpoint/see position
 	chunkManager storage.ChunkManager
+
+	// collectionIndexes records which indexes are on the collection
+	// collID -> indexID -> index
+	indexes map[UniqueID]map[UniqueID]*model.Index
+	// buildID2Meta records the meta information of the segment
+	// buildID -> segmentIndex
+	buildID2SegmentIndex map[UniqueID]*model.SegmentIndex
 }
 
 // A local cache of segment metric update. Must call commit() to take effect.
@@ -74,12 +82,14 @@ type collectionInfo struct {
 // NewMeta creates meta from provided `kv.TxnKV`
 func newMeta(ctx context.Context, kv kv.TxnKV, chunkManagerRootPath string, chunkManager storage.ChunkManager) (*meta, error) {
 	mt := &meta{
-		ctx:          ctx,
-		catalog:      &datacoord.Catalog{Txn: kv, ChunkManagerRootPath: chunkManagerRootPath},
-		collections:  make(map[UniqueID]*collectionInfo),
-		segments:     NewSegmentsInfo(),
-		channelCPs:   make(map[string]*internalpb.MsgPosition),
-		chunkManager: chunkManager,
+		ctx:                  ctx,
+		catalog:              &datacoord.Catalog{Txn: kv, ChunkManagerRootPath: chunkManagerRootPath},
+		collections:          make(map[UniqueID]*collectionInfo),
+		segments:             NewSegmentsInfo(),
+		channelCPs:           make(map[string]*internalpb.MsgPosition),
+		chunkManager:         chunkManager,
+		indexes:              make(map[UniqueID]map[UniqueID]*model.Index),
+		buildID2SegmentIndex: make(map[UniqueID]*model.SegmentIndex),
 	}
 	err := mt.reloadFromKV()
 	if err != nil {
@@ -120,6 +130,25 @@ func (m *meta) reloadFromKV() error {
 	for vChannel, pos := range channelCPs {
 		m.channelCPs[vChannel] = pos
 	}
+
+	// load field indexes
+	fieldIndexes, err := m.catalog.ListIndexes(m.ctx)
+	if err != nil {
+		log.Error("DataCoord meta reloadFromKV load field indexes fail", zap.Error(err))
+		return err
+	}
+	for _, fieldIndex := range fieldIndexes {
+		m.updateCollectionIndex(fieldIndex)
+	}
+	segmentIndexes, err := m.catalog.ListSegmentIndexes(m.ctx)
+	if err != nil {
+		log.Error("DataCoord meta reloadFromKV load segment indexes fail", zap.Error(err))
+		return err
+	}
+	for _, segIdx := range segmentIndexes {
+		m.updateSegmentIndex(segIdx)
+	}
+
 	record.Record("meta reloadFromKV")
 	return nil
 }

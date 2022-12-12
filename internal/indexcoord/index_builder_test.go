@@ -19,7 +19,6 @@ package indexcoord
 import (
 	"context"
 	"errors"
-	"sync"
 	"testing"
 	"time"
 
@@ -585,18 +584,18 @@ func TestIndexBuilder_Error(t *testing.T) {
 		ib.process(buildID)
 	})
 
-	t.Run("acquire lock fail", func(t *testing.T) {
-		ib.tasks[buildID] = indexTaskInit
-		ib.meta = createMetaTable(&indexcoord.Catalog{
-			Txn: NewMockEtcdKV(),
-		})
-		dataMock := NewDataCoordMock()
-		dataMock.CallAcquireSegmentLock = func(ctx context.Context, req *datapb.AcquireSegmentLockRequest) (*commonpb.Status, error) {
-			return nil, errors.New("error")
-		}
-		ib.ic.dataCoordClient = dataMock
-		ib.process(buildID)
-	})
+	//t.Run("acquire lock fail", func(t *testing.T) {
+	//	ib.tasks[buildID] = indexTaskInit
+	//	ib.meta = createMetaTable(&indexcoord.Catalog{
+	//		Txn: NewMockEtcdKV(),
+	//	})
+	//	dataMock := NewDataCoordMock()
+	//	dataMock.CallAcquireSegmentLock = func(ctx context.Context, req *datapb.AcquireSegmentLockRequest) (*commonpb.Status, error) {
+	//		return nil, errors.New("error")
+	//	}
+	//	ib.ic.dataCoordClient = dataMock
+	//	ib.process(buildID)
+	//})
 
 	t.Run("get segment info error", func(t *testing.T) {
 		ib.tasks[buildID] = indexTaskInit
@@ -1124,62 +1123,62 @@ func Test_indexBuilder_getTaskState(t *testing.T) {
 	})
 }
 
-func Test_indexBuilder_releaseLockAndResetNode_error(t *testing.T) {
-	Params.Init()
-	ctx, cancel := context.WithCancel(context.Background())
-	ib := &indexBuilder{
-		ctx:    ctx,
-		cancel: cancel,
-		tasks: map[int64]indexTaskState{
-			buildID: indexTaskInit,
-		},
-		meta: createMetaTable(&indexcoord.Catalog{Txn: NewMockEtcdKV()}),
-		ic: &IndexCoord{
-			dataCoordClient: &DataCoordMock{
-				CallReleaseSegmentLock: func(ctx context.Context, req *datapb.ReleaseSegmentLockRequest) (*commonpb.Status, error) {
-					return nil, errors.New("error")
-				},
-			},
-		},
-	}
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		err := ib.releaseLockAndResetNode(buildID, nodeID)
-		assert.Error(t, err)
-	}()
-	time.Sleep(time.Second)
-	ib.cancel()
-	wg.Wait()
-}
+//func Test_indexBuilder_releaseLockAndResetNode_error(t *testing.T) {
+//	Params.Init()
+//	ctx, cancel := context.WithCancel(context.Background())
+//	ib := &indexBuilder{
+//		ctx:    ctx,
+//		cancel: cancel,
+//		tasks: map[int64]indexTaskState{
+//			buildID: indexTaskInit,
+//		},
+//		meta: createMetaTable(&indexcoord.Catalog{Txn: NewMockEtcdKV()}),
+//		ic: &IndexCoord{
+//			dataCoordClient: &DataCoordMock{
+//				CallReleaseSegmentLock: func(ctx context.Context, req *datapb.ReleaseSegmentLockRequest) (*commonpb.Status, error) {
+//					return nil, errors.New("error")
+//				},
+//			},
+//		},
+//	}
+//	var wg sync.WaitGroup
+//	wg.Add(1)
+//	go func() {
+//		defer wg.Done()
+//		err := ib.releaseLockAndResetNode(buildID, nodeID)
+//		assert.Error(t, err)
+//	}()
+//	time.Sleep(time.Second)
+//	ib.cancel()
+//	wg.Wait()
+//}
 
-func Test_indexBuilder_releaseLockAndResetTask_error(t *testing.T) {
-	Params.Init()
-	ctx, cancel := context.WithCancel(context.Background())
-	ib := &indexBuilder{
-		ctx:    ctx,
-		cancel: cancel,
-		tasks: map[int64]indexTaskState{
-			buildID: indexTaskInit,
-		},
-		meta: createMetaTable(&indexcoord.Catalog{Txn: NewMockEtcdKV()}),
-		ic: &IndexCoord{
-			dataCoordClient: &DataCoordMock{
-				CallReleaseSegmentLock: func(ctx context.Context, req *datapb.ReleaseSegmentLockRequest) (*commonpb.Status, error) {
-					return nil, errors.New("error")
-				},
-			},
-		},
-	}
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		err := ib.releaseLockAndResetTask(buildID, nodeID)
-		assert.Error(t, err)
-	}()
-	time.Sleep(time.Second)
-	ib.cancel()
-	wg.Wait()
-}
+//func Test_indexBuilder_releaseLockAndResetTask_error(t *testing.T) {
+//	Params.Init()
+//	ctx, cancel := context.WithCancel(context.Background())
+//	ib := &indexBuilder{
+//		ctx:    ctx,
+//		cancel: cancel,
+//		tasks: map[int64]indexTaskState{
+//			buildID: indexTaskInit,
+//		},
+//		meta: createMetaTable(&indexcoord.Catalog{Txn: NewMockEtcdKV()}),
+//		ic: &IndexCoord{
+//			dataCoordClient: &DataCoordMock{
+//				CallReleaseSegmentLock: func(ctx context.Context, req *datapb.ReleaseSegmentLockRequest) (*commonpb.Status, error) {
+//					return nil, errors.New("error")
+//				},
+//			},
+//		},
+//	}
+//	var wg sync.WaitGroup
+//	wg.Add(1)
+//	go func() {
+//		defer wg.Done()
+//		err := ib.releaseLockAndResetTask(buildID, nodeID)
+//		assert.Error(t, err)
+//	}()
+//	time.Sleep(time.Second)
+//	ib.cancel()
+//	wg.Wait()
+//}

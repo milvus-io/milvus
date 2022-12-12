@@ -19,24 +19,22 @@ package datacoord
 import (
 	"context"
 	"fmt"
-	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/common"
+	"github.com/samber/lo"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/kv"
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util"
-	"github.com/samber/lo"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 type mockEtcdKv struct {
@@ -63,11 +61,63 @@ func (mek *mockEtcdKv) LoadWithPrefix(key string) ([]string, []string, error) {
 			Timestamp: 1000,
 		}
 		val, _ = proto.Marshal(channelCP)
+	case strings.Contains(key, util.FieldIndexPrefix):
+		index := &datapb.FieldIndex{
+			IndexInfo: &datapb.IndexInfo{
+				CollectionID:    0,
+				FieldID:         1,
+				IndexName:       "_default_idx_101",
+				IndexID:         0,
+				TypeParams:      []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}},
+				IndexParams:     []*commonpb.KeyValuePair{{Key: "index_type", Value: "HNSW"}},
+				IsAutoIndex:     false,
+				UserIndexParams: nil,
+			},
+			Deleted:    false,
+			CreateTime: 0,
+		}
+		val, _ = proto.Marshal(index)
+	case strings.Contains(key, util.SegmentIndexPrefix):
+		segIndex := &datapb.SegmentIndex{
+			CollectionID:  0,
+			PartitionID:   0,
+			SegmentID:     1,
+			NumRows:       1025,
+			IndexID:       0,
+			BuildID:       0,
+			NodeID:        0,
+			IndexVersion:  0,
+			State:         commonpb.IndexState_Unissued,
+			FailReason:    "",
+			IndexFileKeys: nil,
+			Deleted:       false,
+			CreateTime:    0,
+			SerializeSize: 0,
+			WriteHandoff:  false,
+		}
+		val, _ = proto.Marshal(segIndex)
+
 	default:
 		return nil, nil, fmt.Errorf("invalid key")
 	}
 
 	return nil, []string{string(val)}, nil
+}
+
+func (mek *mockEtcdKv) Save(key, value string) error {
+	return nil
+}
+
+func (mek *mockEtcdKv) MultiSave(kvs map[string]string) error {
+	return nil
+}
+
+func (mek *mockEtcdKv) Remove(key string) error {
+	return nil
+}
+
+func (mek *mockEtcdKv) MultiRemove(keys []string) error {
+	return nil
 }
 
 type mockKvLoadSegmentError struct {
@@ -185,6 +235,31 @@ func (mek *mockKvIllegalStatslog) LoadWithPrefix(key string) ([]string, []string
 	return nil, []string{string(val)}, nil
 }
 
+type mockLoadIndexError struct {
+	kv.TxnKV
+}
+
+func (mek *mockLoadIndexError) LoadWithPrefix(key string) ([]string, []string, error) {
+	switch {
+	case strings.Contains(key, util.FieldIndexPrefix):
+		return nil, nil, fmt.Errorf("LoadWithPrefix for index error")
+	}
+	return nil, nil, nil
+}
+
+type mockLoadSegmentIndexError struct {
+	kv.TxnKV
+}
+
+func (mek *mockLoadSegmentIndexError) LoadWithPrefix(key string) ([]string, []string, error) {
+	switch {
+	case strings.Contains(key, util.SegmentIndexPrefix):
+		return nil, nil, fmt.Errorf("LoadWithPrefix for segment index error")
+
+	}
+	return nil, nil, nil
+}
+
 func TestMetaReloadFromKV(t *testing.T) {
 	t.Run("Test ReloadFromKV success", func(t *testing.T) {
 		fkv := &mockEtcdKv{}
@@ -238,6 +313,16 @@ func TestMetaReloadFromKV(t *testing.T) {
 		fkv := &mockKvIllegalStatslog{}
 		_, err := newMeta(context.TODO(), fkv, "", nil)
 		assert.NotNil(t, err)
+	})
+	t.Run("Test ReloadFromKV load index fails", func(t *testing.T) {
+		fkv := &mockLoadIndexError{}
+		_, err := newMeta(context.TODO(), fkv, "", nil)
+		assert.Error(t, err)
+	})
+	t.Run("Test ReloadFromKV load segment index fails", func(t *testing.T) {
+		fkv := &mockLoadSegmentIndexError{}
+		_, err := newMeta(context.TODO(), fkv, "", nil)
+		assert.Error(t, err)
 	})
 }
 
@@ -611,43 +696,6 @@ func TestUpdateFlushSegmentsInfo(t *testing.T) {
 		assert.Nil(t, segmentInfo.Binlogs)
 		assert.Nil(t, segmentInfo.StartPosition)
 	})
-}
-
-func TestSaveHandoffMeta(t *testing.T) {
-	kvClient := memkv.NewMemoryKV()
-	meta, err := newMeta(context.TODO(), kvClient, "", nil)
-	assert.Nil(t, err)
-
-	info := &datapb.SegmentInfo{
-		ID:    100,
-		State: commonpb.SegmentState_Flushing,
-	}
-	segmentInfo := &SegmentInfo{
-		SegmentInfo: info,
-	}
-
-	err = meta.catalog.AddSegment(context.TODO(), segmentInfo.SegmentInfo)
-	assert.Nil(t, err)
-
-	keys, _, err := kvClient.LoadWithPrefix(util.FlushedSegmentPrefix)
-	assert.Nil(t, err)
-	assert.Equal(t, 0, len(keys))
-
-	newInfo := &datapb.SegmentInfo{
-		ID:    100,
-		State: commonpb.SegmentState_Flushed,
-	}
-
-	err = meta.catalog.AlterSegment(context.TODO(), newInfo, segmentInfo.SegmentInfo)
-	assert.Nil(t, err)
-
-	keys, _, err = kvClient.LoadWithPrefix(util.FlushedSegmentPrefix)
-	assert.Nil(t, err)
-	assert.Equal(t, 1, len(keys))
-
-	segmentID, err := strconv.ParseInt(filepath.Base(keys[0]), 10, 64)
-	assert.Nil(t, err)
-	assert.Equal(t, 100, int(segmentID))
 }
 
 func TestMeta_alterMetaStore(t *testing.T) {

@@ -27,7 +27,6 @@ import (
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	ot "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
-	icc "github.com/milvus-io/milvus/internal/distributed/indexcoord/client"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -56,8 +55,7 @@ type Server struct {
 	wg        sync.WaitGroup
 	dataCoord types.DataCoordComponent
 
-	etcdCli    *clientv3.Client
-	indexCoord types.IndexCoord
+	etcdCli *clientv3.Client
 
 	grpcErrChan chan error
 	grpcServer  *grpc.Server
@@ -99,25 +97,6 @@ func (s *Server) init() error {
 	s.etcdCli = etcdCli
 	s.dataCoord.SetEtcdClient(etcdCli)
 	s.dataCoord.SetAddress(Params.GetAddress())
-
-	if s.indexCoord == nil {
-		var err error
-		log.Debug("create IndexCoord client for DataCoord")
-		s.indexCoord, err = icc.NewClient(s.ctx, etcdConfig.MetaRootPath.GetValue(), etcdCli)
-		if err != nil {
-			log.Warn("failed to create IndexCoord client for DataCoord", zap.Error(err))
-			return err
-		}
-		log.Debug("create IndexCoord client for DataCoord done")
-	}
-
-	log.Debug("init IndexCoord client for DataCoord")
-	if err := s.indexCoord.Init(); err != nil {
-		log.Warn("failed to init IndexCoord client for DataCoord", zap.Error(err))
-		return err
-	}
-	log.Debug("init IndexCoord client for DataCoord done")
-	s.dataCoord.SetIndexCoord(s.indexCoord)
 
 	err = s.startGrpc()
 	if err != nil {
@@ -380,16 +359,6 @@ func (s *Server) UpdateChannelCheckpoint(ctx context.Context, req *datapb.Update
 	return s.dataCoord.UpdateChannelCheckpoint(ctx, req)
 }
 
-// AcquireSegmentLock acquire the reference lock of the segments.
-func (s *Server) AcquireSegmentLock(ctx context.Context, req *datapb.AcquireSegmentLockRequest) (*commonpb.Status, error) {
-	return s.dataCoord.AcquireSegmentLock(ctx, req)
-}
-
-// ReleaseSegmentLock release the reference lock of the segments.
-func (s *Server) ReleaseSegmentLock(ctx context.Context, req *datapb.ReleaseSegmentLockRequest) (*commonpb.Status, error) {
-	return s.dataCoord.ReleaseSegmentLock(ctx, req)
-}
-
 // SaveImportSegment saves the import segment binlog paths data and then looks for the right DataNode to add the
 // segment to that DataNode.
 func (s *Server) SaveImportSegment(ctx context.Context, request *datapb.SaveImportSegmentRequest) (*commonpb.Status, error) {
@@ -412,4 +381,39 @@ func (s *Server) BroadcastAlteredCollection(ctx context.Context, request *datapb
 
 func (s *Server) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
 	return s.dataCoord.CheckHealth(ctx, req)
+}
+
+// CreateIndex sends the build index request to DataCoord.
+func (s *Server) CreateIndex(ctx context.Context, req *datapb.CreateIndexRequest) (*commonpb.Status, error) {
+	return s.dataCoord.CreateIndex(ctx, req)
+}
+
+// GetIndexState gets the index states from DataCoord.
+// Deprecated: use DescribeIndex instead
+func (s *Server) GetIndexState(ctx context.Context, req *datapb.GetIndexStateRequest) (*datapb.GetIndexStateResponse, error) {
+	return s.dataCoord.GetIndexState(ctx, req)
+}
+
+func (s *Server) GetSegmentIndexState(ctx context.Context, req *datapb.GetSegmentIndexStateRequest) (*datapb.GetSegmentIndexStateResponse, error) {
+	return s.dataCoord.GetSegmentIndexState(ctx, req)
+}
+
+// GetIndexInfos gets the index file paths from DataCoord.
+func (s *Server) GetIndexInfos(ctx context.Context, req *datapb.GetIndexInfoRequest) (*datapb.GetIndexInfoResponse, error) {
+	return s.dataCoord.GetIndexInfos(ctx, req)
+}
+
+// DescribeIndex gets all indexes of the collection.
+func (s *Server) DescribeIndex(ctx context.Context, req *datapb.DescribeIndexRequest) (*datapb.DescribeIndexResponse, error) {
+	return s.dataCoord.DescribeIndex(ctx, req)
+}
+
+// DropIndex sends the drop index request to DataCoord.
+func (s *Server) DropIndex(ctx context.Context, request *datapb.DropIndexRequest) (*commonpb.Status, error) {
+	return s.dataCoord.DropIndex(ctx, request)
+}
+
+// Deprecated: use DescribeIndex instead
+func (s *Server) GetIndexBuildProgress(ctx context.Context, req *datapb.GetIndexBuildProgressRequest) (*datapb.GetIndexBuildProgressResponse, error) {
+	return s.dataCoord.GetIndexBuildProgress(ctx, req)
 }

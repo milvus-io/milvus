@@ -47,7 +47,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/trace"
 
 	dcc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
-	icc "github.com/milvus-io/milvus/internal/distributed/indexcoord/client"
 	qcc "github.com/milvus-io/milvus/internal/distributed/querycoord/client"
 )
 
@@ -64,10 +63,8 @@ type Server struct {
 
 	etcdCli    *clientv3.Client
 	dataCoord  types.DataCoord
-	indexCoord types.IndexCoord
 	queryCoord types.QueryCoord
 
-	newIndexCoordClient func(string, *clientv3.Client) types.IndexCoord
 	newDataCoordClient  func(string, *clientv3.Client) types.DataCoord
 	newQueryCoordClient func(string, *clientv3.Client) types.QueryCoord
 
@@ -118,13 +115,7 @@ func (s *Server) setClient() {
 		}
 		return dsClient
 	}
-	s.newIndexCoordClient = func(metaRootPath string, etcdCli *clientv3.Client) types.IndexCoord {
-		isClient, err := icc.NewClient(s.ctx, metaRootPath, etcdCli)
-		if err != nil {
-			panic(err)
-		}
-		return isClient
-	}
+
 	s.newQueryCoordClient = func(metaRootPath string, etcdCli *clientv3.Client) types.QueryCoord {
 		qsClient, err := qcc.NewClient(s.ctx, metaRootPath, etcdCli)
 		if err != nil {
@@ -190,14 +181,7 @@ func (s *Server) init() error {
 		}
 		s.dataCoord = dataCoord
 	}
-	if s.newIndexCoordClient != nil {
-		log.Debug("RootCoord start to create IndexCoord client")
-		indexCoord := s.newIndexCoordClient(rootcoord.Params.EtcdCfg.MetaRootPath.GetValue(), s.etcdCli)
-		if err := s.rootCoord.SetIndexCoord(indexCoord); err != nil {
-			panic(err)
-		}
-		s.indexCoord = indexCoord
-	}
+
 	if s.newQueryCoordClient != nil {
 		log.Debug("RootCoord start to create QueryCoord client")
 		queryCoord := s.newQueryCoordClient(rootcoord.Params.EtcdCfg.MetaRootPath.GetValue(), s.etcdCli)
@@ -285,11 +269,6 @@ func (s *Server) Stop() error {
 	}
 	if s.etcdCli != nil {
 		defer s.etcdCli.Close()
-	}
-	if s.indexCoord != nil {
-		if err := s.indexCoord.Stop(); err != nil {
-			log.Error("Failed to close indexCoord client", zap.Error(err))
-		}
 	}
 	if s.dataCoord != nil {
 		if err := s.dataCoord.Stop(); err != nil {

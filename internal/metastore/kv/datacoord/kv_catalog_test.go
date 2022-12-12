@@ -1,3 +1,19 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package datacoord
 
 import (
@@ -14,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/kv/mocks"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/metautil"
@@ -26,6 +43,7 @@ type MockedTxnKV struct {
 	loadWithPrefix func(key string) ([]string, []string, error)
 	load           func(key string) (string, error)
 	multiRemove    func(keys []string) error
+	remove         func(key string) error
 }
 
 var (
@@ -174,6 +192,10 @@ func (mc *MockedTxnKV) MultiRemove(keys []string) error {
 
 func (mc *MockedTxnKV) Load(key string) (string, error) {
 	return mc.load(key)
+}
+
+func (mc *MockedTxnKV) Remove(key string) error {
+	return mc.remove(key)
 }
 
 func Test_ListSegments(t *testing.T) {
@@ -773,4 +795,380 @@ func verifySavedKvsForDroppedSegment(t *testing.T, savedKvs map[string]string) {
 	ret, ok := savedKvs[k4]
 	assert.True(t, ok)
 	verifySegmentInfo2(t, []byte(ret))
+}
+
+func TestCatalog_CreateIndex(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		txn := &MockedTxnKV{
+			save: func(key, value string) error {
+				return nil
+			},
+		}
+
+		catalog := &Catalog{
+			Txn: txn,
+		}
+
+		err := catalog.CreateIndex(context.Background(), &model.Index{})
+		assert.NoError(t, err)
+	})
+
+	t.Run("failed", func(t *testing.T) {
+		txn := &MockedTxnKV{
+			save: func(key, value string) error {
+				return errors.New("error")
+			},
+		}
+
+		catalog := &Catalog{
+			Txn: txn,
+		}
+
+		err := catalog.CreateIndex(context.Background(), &model.Index{})
+		assert.Error(t, err)
+	})
+}
+
+func TestCatalog_ListIndexes(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		txn := &MockedTxnKV{
+			loadWithPrefix: func(key string) ([]string, []string, error) {
+				i := &datapb.FieldIndex{
+					IndexInfo: &datapb.IndexInfo{
+						CollectionID: 0,
+						FieldID:      0,
+						IndexName:    "",
+						IndexID:      0,
+						TypeParams:   nil,
+						IndexParams:  nil,
+					},
+					Deleted:    false,
+					CreateTime: 0,
+				}
+				v, err := proto.Marshal(i)
+				assert.NoError(t, err)
+				return []string{"1"}, []string{string(v)}, nil
+			},
+		}
+		catalog := &Catalog{
+			Txn: txn,
+		}
+		indexes, err := catalog.ListIndexes(context.Background())
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(indexes))
+	})
+
+	t.Run("failed", func(t *testing.T) {
+		txn := &MockedTxnKV{
+			loadWithPrefix: func(key string) ([]string, []string, error) {
+				return []string{}, []string{}, errors.New("error")
+			},
+		}
+		catalog := &Catalog{
+			Txn: txn,
+		}
+		_, err := catalog.ListIndexes(context.Background())
+		assert.Error(t, err)
+	})
+
+	t.Run("unmarshal failed", func(t *testing.T) {
+		txn := &MockedTxnKV{
+			loadWithPrefix: func(key string) ([]string, []string, error) {
+				return []string{"1"}, []string{"invalid"}, nil
+			},
+		}
+		catalog := &Catalog{
+			Txn: txn,
+		}
+		_, err := catalog.ListIndexes(context.Background())
+		assert.Error(t, err)
+	})
+}
+
+func TestCatalog_AlterIndex(t *testing.T) {
+	i := &model.Index{
+		CollectionID: 0,
+		FieldID:      0,
+		IndexID:      0,
+		IndexName:    "",
+		IsDeleted:    false,
+		CreateTime:   0,
+		TypeParams:   nil,
+		IndexParams:  nil,
+	}
+	t.Run("add", func(t *testing.T) {
+		txn := &MockedTxnKV{
+			save: func(key, value string) error {
+				return nil
+			},
+		}
+		catalog := &Catalog{
+			Txn: txn,
+		}
+
+		err := catalog.AlterIndex(context.Background(), i)
+		assert.NoError(t, err)
+	})
+}
+
+func TestCatalog_AlterIndexes(t *testing.T) {
+	i := &model.Index{
+		CollectionID: 0,
+		FieldID:      0,
+		IndexID:      0,
+		IndexName:    "",
+		IsDeleted:    false,
+		CreateTime:   0,
+		TypeParams:   nil,
+		IndexParams:  nil,
+	}
+
+	txn := &MockedTxnKV{
+		multiSave: func(kvs map[string]string) error {
+			return nil
+		},
+	}
+	catalog := &Catalog{
+		Txn: txn,
+	}
+
+	err := catalog.AlterIndexes(context.Background(), []*model.Index{i})
+	assert.NoError(t, err)
+}
+
+func TestCatalog_DropIndex(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		txn := &MockedTxnKV{
+			remove: func(key string) error {
+				return nil
+			},
+		}
+		catalog := &Catalog{
+			Txn: txn,
+		}
+
+		err := catalog.DropIndex(context.Background(), 0, 0)
+		assert.NoError(t, err)
+	})
+
+	t.Run("failed", func(t *testing.T) {
+		txn := &MockedTxnKV{
+			remove: func(key string) error {
+				return errors.New("error")
+			},
+		}
+		catalog := &Catalog{
+			Txn: txn,
+		}
+
+		err := catalog.DropIndex(context.Background(), 0, 0)
+		assert.Error(t, err)
+	})
+}
+
+func TestCatalog_CreateSegmentIndex(t *testing.T) {
+	segIdx := &model.SegmentIndex{
+		SegmentID:     1,
+		CollectionID:  2,
+		PartitionID:   3,
+		NumRows:       1024,
+		IndexID:       4,
+		BuildID:       5,
+		NodeID:        6,
+		IndexState:    commonpb.IndexState_Finished,
+		FailReason:    "",
+		IndexVersion:  0,
+		IsDeleted:     false,
+		CreateTime:    0,
+		IndexFileKeys: nil,
+		IndexSize:     0,
+	}
+
+	t.Run("success", func(t *testing.T) {
+		txn := &MockedTxnKV{
+			save: func(key, value string) error {
+				return nil
+			},
+		}
+		catalog := &Catalog{
+			Txn: txn,
+		}
+
+		err := catalog.CreateSegmentIndex(context.Background(), segIdx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("failed", func(t *testing.T) {
+		txn := &MockedTxnKV{
+			save: func(key, value string) error {
+				return errors.New("error")
+			},
+		}
+		catalog := &Catalog{
+			Txn: txn,
+		}
+
+		err := catalog.CreateSegmentIndex(context.Background(), segIdx)
+		assert.Error(t, err)
+	})
+}
+
+func TestCatalog_ListSegmentIndexes(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		segIdx := &datapb.SegmentIndex{
+			CollectionID:  0,
+			PartitionID:   0,
+			SegmentID:     0,
+			NumRows:       0,
+			IndexID:       0,
+			BuildID:       0,
+			NodeID:        0,
+			IndexVersion:  0,
+			State:         0,
+			FailReason:    "",
+			IndexFileKeys: nil,
+			Deleted:       false,
+			CreateTime:    0,
+			SerializeSize: 0,
+		}
+		v, err := proto.Marshal(segIdx)
+		assert.NoError(t, err)
+
+		txn := &MockedTxnKV{
+			loadWithPrefix: func(key string) ([]string, []string, error) {
+				return []string{"key"}, []string{string(v)}, nil
+			},
+		}
+		catalog := &Catalog{
+			Txn: txn,
+		}
+
+		segIdxes, err := catalog.ListSegmentIndexes(context.Background())
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(segIdxes))
+	})
+
+	t.Run("failed", func(t *testing.T) {
+		txn := &MockedTxnKV{
+			loadWithPrefix: func(key string) ([]string, []string, error) {
+				return []string{}, []string{}, errors.New("error")
+			},
+		}
+		catalog := &Catalog{
+			Txn: txn,
+		}
+
+		_, err := catalog.ListSegmentIndexes(context.Background())
+		assert.Error(t, err)
+	})
+
+	t.Run("unmarshal failed", func(t *testing.T) {
+		txn := &MockedTxnKV{
+			loadWithPrefix: func(key string) ([]string, []string, error) {
+				return []string{"key"}, []string{"invalid"}, nil
+			},
+		}
+		catalog := &Catalog{
+			Txn: txn,
+		}
+
+		_, err := catalog.ListSegmentIndexes(context.Background())
+		assert.Error(t, err)
+	})
+}
+
+func TestCatalog_AlterSegmentIndex(t *testing.T) {
+	segIdx := &model.SegmentIndex{
+		SegmentID:     0,
+		CollectionID:  0,
+		PartitionID:   0,
+		NumRows:       0,
+		IndexID:       0,
+		BuildID:       0,
+		NodeID:        0,
+		IndexState:    0,
+		FailReason:    "",
+		IndexVersion:  0,
+		IsDeleted:     false,
+		CreateTime:    0,
+		IndexFileKeys: nil,
+		IndexSize:     0,
+	}
+
+	t.Run("add", func(t *testing.T) {
+		txn := &MockedTxnKV{
+			save: func(key, value string) error {
+				return nil
+			},
+		}
+		catalog := &Catalog{
+			Txn: txn,
+		}
+
+		err := catalog.AlterSegmentIndex(context.Background(), segIdx)
+		assert.NoError(t, err)
+	})
+}
+
+func TestCatalog_AlterSegmentIndexes(t *testing.T) {
+	segIdx := &model.SegmentIndex{
+		SegmentID:     0,
+		CollectionID:  0,
+		PartitionID:   0,
+		NumRows:       0,
+		IndexID:       0,
+		BuildID:       0,
+		NodeID:        0,
+		IndexState:    0,
+		FailReason:    "",
+		IndexVersion:  0,
+		IsDeleted:     false,
+		CreateTime:    0,
+		IndexFileKeys: nil,
+		IndexSize:     0,
+	}
+
+	t.Run("add", func(t *testing.T) {
+		txn := &MockedTxnKV{
+			multiSave: func(kvs map[string]string) error {
+				return nil
+			},
+		}
+		catalog := &Catalog{
+			Txn: txn,
+		}
+
+		err := catalog.AlterSegmentIndexes(context.Background(), []*model.SegmentIndex{segIdx})
+		assert.NoError(t, err)
+	})
+}
+
+func TestCatalog_DropSegmentIndex(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		txn := &MockedTxnKV{
+			remove: func(key string) error {
+				return nil
+			},
+		}
+		catalog := &Catalog{
+			Txn: txn,
+		}
+
+		err := catalog.DropSegmentIndex(context.Background(), 0, 0, 0, 0)
+		assert.NoError(t, err)
+	})
+
+	t.Run("fail", func(t *testing.T) {
+		txn := &MockedTxnKV{
+			remove: func(key string) error {
+				return errors.New("error")
+			},
+		}
+		catalog := &Catalog{
+			Txn: txn,
+		}
+
+		err := catalog.DropSegmentIndex(context.Background(), 0, 0, 0, 0)
+		assert.Error(t, err)
+	})
 }

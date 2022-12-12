@@ -69,12 +69,6 @@ func (t *dropPartitionTask) Execute(ctx context.Context) error {
 		ts:           t.GetTs(),
 	})
 
-	redoTask.AddAsyncStep(&dropIndexStep{
-		baseStep: baseStep{core: t.core},
-		collID:   t.collMeta.CollectionID,
-		partIDs:  []UniqueID{partID},
-	})
-
 	// TODO: release partition when query coord is ready.
 	redoTask.AddAsyncStep(&deletePartitionDataStep{
 		baseStep: baseStep{core: t.core},

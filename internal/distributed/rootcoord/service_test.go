@@ -168,9 +168,6 @@ func TestRun(t *testing.T) {
 	svr.newDataCoordClient = func(string, *clientv3.Client) types.DataCoord {
 		return &mockDataCoord{}
 	}
-	svr.newIndexCoordClient = func(string, *clientv3.Client) types.IndexCoord {
-		return &mockIndex{}
-	}
 	svr.newQueryCoordClient = func(string, *clientv3.Client) types.QueryCoord {
 		return &mockQuery{}
 	}

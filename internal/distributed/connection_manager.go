@@ -54,8 +54,6 @@ type ConnectionManager struct {
 	queryCoordMu sync.RWMutex
 	dataCoord    datapb.DataCoordClient
 	dataCoordMu  sync.RWMutex
-	indexCoord   indexpb.IndexCoordClient
-	indexCoordMu sync.RWMutex
 	queryNodes   map[int64]querypb.QueryNodeClient
 	queryNodesMu sync.RWMutex
 	dataNodes    map[int64]datapb.DataNodeClient
@@ -161,18 +159,6 @@ func (cm *ConnectionManager) GetDataCoordClient() (datapb.DataCoordClient, bool)
 	}
 
 	return cm.dataCoord, true
-}
-
-func (cm *ConnectionManager) GetIndexCoordClient() (indexpb.IndexCoordClient, bool) {
-	cm.indexCoordMu.RLock()
-	defer cm.indexCoordMu.RUnlock()
-	_, ok := cm.dependencies[typeutil.IndexCoordRole]
-	if !ok {
-		log.Error("IndeCoord dependency has not been added yet")
-		return nil, false
-	}
-
-	return cm.indexCoord, true
 }
 
 func (cm *ConnectionManager) GetQueryNodeClients() (map[int64]querypb.QueryNodeClient, bool) {
@@ -291,10 +277,6 @@ func (cm *ConnectionManager) buildClients(session *sessionutil.Session, connecti
 		cm.dataCoordMu.Lock()
 		defer cm.dataCoordMu.Unlock()
 		cm.dataCoord = datapb.NewDataCoordClient(connection)
-	case typeutil.IndexCoordRole:
-		cm.indexCoordMu.Lock()
-		defer cm.indexCoordMu.Unlock()
-		cm.indexCoord = indexpb.NewIndexCoordClient(connection)
 	case typeutil.QueryCoordRole:
 		cm.queryCoordMu.Lock()
 		defer cm.queryCoordMu.Unlock()

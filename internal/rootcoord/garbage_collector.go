@@ -118,11 +118,6 @@ func (c *bgGarbageCollector) ReDropPartition(pChannels []string, partition *mode
 		baseStep:  baseStep{core: c.s},
 		pChannels: pChannels,
 	})
-	redo.AddAsyncStep(&dropIndexStep{
-		baseStep: baseStep{core: c.s},
-		collID:   partition.CollectionID,
-		partIDs:  []UniqueID{partition.PartitionID},
-	})
 	redo.AddAsyncStep(&removePartitionMetaStep{
 		baseStep:     baseStep{core: c.s},
 		collectionID: partition.CollectionID,

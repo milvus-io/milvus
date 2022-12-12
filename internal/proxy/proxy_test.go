@@ -39,15 +39,12 @@ import (
 	grpcdatacoordclient "github.com/milvus-io/milvus/internal/distributed/datacoord"
 	grpcdatacoordclient2 "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
 	grpcdatanode "github.com/milvus-io/milvus/internal/distributed/datanode"
-	grpcindexcoord "github.com/milvus-io/milvus/internal/distributed/indexcoord"
-	grpcindexcoordclient "github.com/milvus-io/milvus/internal/distributed/indexcoord/client"
 	grpcindexnode "github.com/milvus-io/milvus/internal/distributed/indexnode"
 	grpcquerycoord "github.com/milvus-io/milvus/internal/distributed/querycoord"
 	grpcquerycoordclient "github.com/milvus-io/milvus/internal/distributed/querycoord/client"
 	grpcquerynode "github.com/milvus-io/milvus/internal/distributed/querynode"
 	grpcrootcoord "github.com/milvus-io/milvus/internal/distributed/rootcoord"
 	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
-	"github.com/milvus-io/milvus/internal/indexcoord"
 	"github.com/milvus-io/milvus/internal/indexnode"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
@@ -230,35 +227,6 @@ func runDataNode(ctx context.Context, localMsg bool, alias string) *grpcdatanode
 
 	metrics.RegisterDataNode(Registry)
 	return dn
-}
-
-func runIndexCoord(ctx context.Context, localMsg bool) *grpcindexcoord.Server {
-	var is *grpcindexcoord.Server
-	var wg sync.WaitGroup
-
-	wg.Add(1)
-	go func() {
-		if !localMsg {
-			logutil.SetupLogger(&indexcoord.Params.Log)
-			defer log.Sync()
-		}
-
-		factory := dependency.NewDefaultFactory(localMsg)
-		var err error
-		is, err = grpcindexcoord.NewServer(ctx, factory)
-		if err != nil {
-			panic(err)
-		}
-		wg.Done()
-		err = is.Run()
-		if err != nil {
-			panic(err)
-		}
-	}()
-	wg.Wait()
-
-	metrics.RegisterIndexCoord(Registry)
-	return is
 }
 
 func runIndexNode(ctx context.Context, localMsg bool, alias string) *grpcindexnode.Server {
@@ -468,17 +436,6 @@ func TestProxy(t *testing.T) {
 		}()
 	}
 
-	ic := runIndexCoord(ctx, localMsg)
-	log.Info("running IndexCoord ...")
-
-	if ic != nil {
-		defer func() {
-			err := ic.Stop()
-			assert.NoError(t, err)
-			log.Info("stop IndexCoord")
-		}()
-	}
-
 	in := runIndexNode(ctx, localMsg, alias)
 	log.Info("running IndexNode ...")
 
@@ -546,15 +503,6 @@ func TestProxy(t *testing.T) {
 	assert.NoError(t, err)
 	proxy.SetQueryCoordClient(queryCoordClient)
 	log.Info("Proxy set query coordinator client")
-
-	indexCoordClient, err := grpcindexcoordclient.NewClient(ctx, Params.EtcdCfg.MetaRootPath.GetValue(), etcdcli)
-	assert.NoError(t, err)
-	err = indexCoordClient.Init()
-	assert.NoError(t, err)
-	err = funcutil.WaitForComponentHealthy(ctx, indexCoordClient, typeutil.IndexCoordRole, attempts, sleepDuration)
-	assert.NoError(t, err)
-	proxy.SetIndexCoordClient(indexCoordClient)
-	log.Info("Proxy set index coordinator client")
 
 	proxy.UpdateStateCode(commonpb.StateCode_Initializing)
 	err = proxy.Init()

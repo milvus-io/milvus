@@ -23,7 +23,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
-	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/types"
@@ -64,12 +63,18 @@ type MockDataCoord struct {
 	importResp                *datapb.ImportTaskResponse
 	updateSegStatResp         *commonpb.Status
 	updateChanPos             *commonpb.Status
-	acquireSegLockResp        *commonpb.Status
-	releaseSegLockResp        *commonpb.Status
 	addSegmentResp            *commonpb.Status
 	unsetIsImportingStateResp *commonpb.Status
 	markSegmentsDroppedResp   *commonpb.Status
 	broadCastResp             *commonpb.Status
+
+	createIndexResp           *commonpb.Status
+	describeIndexResp         *datapb.DescribeIndexResponse
+	dropIndexResp             *commonpb.Status
+	getIndexStateResp         *datapb.GetIndexStateResponse
+	getIndexBuildProgressResp *datapb.GetIndexBuildProgressResponse
+	getSegmentIndexStateResp  *datapb.GetSegmentIndexStateResponse
+	getIndexInfosResp         *datapb.GetIndexInfoResponse
 }
 
 func (m *MockDataCoord) Init() error {
@@ -209,14 +214,6 @@ func (m *MockDataCoord) UpdateChannelCheckpoint(ctx context.Context, req *datapb
 	return m.updateChanPos, m.err
 }
 
-func (m *MockDataCoord) AcquireSegmentLock(ctx context.Context, req *datapb.AcquireSegmentLockRequest) (*commonpb.Status, error) {
-	return m.acquireSegLockResp, m.err
-}
-
-func (m *MockDataCoord) ReleaseSegmentLock(ctx context.Context, req *datapb.ReleaseSegmentLockRequest) (*commonpb.Status, error) {
-	return m.releaseSegLockResp, m.err
-}
-
 func (m *MockDataCoord) SaveImportSegment(ctx context.Context, req *datapb.SaveImportSegmentRequest) (*commonpb.Status, error) {
 	return m.addSegmentResp, m.err
 }
@@ -239,6 +236,34 @@ func (m *MockDataCoord) CheckHealth(ctx context.Context, req *milvuspb.CheckHeal
 	}, nil
 }
 
+func (m *MockDataCoord) CreateIndex(ctx context.Context, req *datapb.CreateIndexRequest) (*commonpb.Status, error) {
+	return m.createIndexResp, m.err
+}
+
+func (m *MockDataCoord) DescribeIndex(ctx context.Context, req *datapb.DescribeIndexRequest) (*datapb.DescribeIndexResponse, error) {
+	return m.describeIndexResp, m.err
+}
+
+func (m *MockDataCoord) GetIndexInfos(ctx context.Context, req *datapb.GetIndexInfoRequest) (*datapb.GetIndexInfoResponse, error) {
+	return m.getIndexInfosResp, m.err
+}
+
+func (m *MockDataCoord) GetIndexState(ctx context.Context, req *datapb.GetIndexStateRequest) (*datapb.GetIndexStateResponse, error) {
+	return m.getIndexStateResp, m.err
+}
+
+func (m *MockDataCoord) GetIndexBuildProgress(ctx context.Context, req *datapb.GetIndexBuildProgressRequest) (*datapb.GetIndexBuildProgressResponse, error) {
+	return m.getIndexBuildProgressResp, m.err
+}
+
+func (m *MockDataCoord) GetSegmentIndexState(ctx context.Context, req *datapb.GetSegmentIndexStateRequest) (*datapb.GetSegmentIndexStateResponse, error) {
+	return m.getSegmentIndexStateResp, m.err
+}
+
+func (m *MockDataCoord) DropIndex(ctx context.Context, req *datapb.DropIndexRequest) (*commonpb.Status, error) {
+	return m.dropIndexResp, m.err
+}
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 func Test_NewServer(t *testing.T) {
 	paramtable.Init()
@@ -248,9 +273,9 @@ func Test_NewServer(t *testing.T) {
 
 	t.Run("Run", func(t *testing.T) {
 		server.dataCoord = &MockDataCoord{}
-		indexCoord := mocks.NewMockIndexCoord(t)
-		indexCoord.EXPECT().Init().Return(nil)
-		server.indexCoord = indexCoord
+		//indexCoord := mocks.NewMockIndexCoord(t)
+		//indexCoord.EXPECT().Init().Return(nil)
+		//server.indexCoord = indexCoord
 
 		err := server.Run()
 		assert.Nil(t, err)
@@ -496,28 +521,6 @@ func Test_NewServer(t *testing.T) {
 		assert.NotNil(t, resp)
 	})
 
-	t.Run("acquire segment reference lock", func(t *testing.T) {
-		server.dataCoord = &MockDataCoord{
-			acquireSegLockResp: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
-		}
-		resp, err := server.AcquireSegmentLock(ctx, nil)
-		assert.Nil(t, err)
-		assert.NotNil(t, resp)
-	})
-
-	t.Run("release segment reference lock", func(t *testing.T) {
-		server.dataCoord = &MockDataCoord{
-			releaseSegLockResp: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
-		}
-		resp, err := server.ReleaseSegmentLock(ctx, nil)
-		assert.Nil(t, err)
-		assert.NotNil(t, resp)
-	})
-
 	t.Run("save import segment", func(t *testing.T) {
 		server.dataCoord = &MockDataCoord{
 			addSegmentResp: &commonpb.Status{
@@ -565,6 +568,69 @@ func Test_NewServer(t *testing.T) {
 		ret, err := server.CheckHealth(ctx, nil)
 		assert.Nil(t, err)
 		assert.Equal(t, true, ret.IsHealthy)
+	})
+
+	t.Run("CreateIndex", func(t *testing.T) {
+		server.dataCoord = &MockDataCoord{
+			createIndexResp: &commonpb.Status{},
+		}
+		ret, err := server.CreateIndex(ctx, nil)
+		assert.NoError(t, err)
+		assert.NotNil(t, ret)
+	})
+
+	t.Run("DescribeIndex", func(t *testing.T) {
+		server.dataCoord = &MockDataCoord{
+			describeIndexResp: &datapb.DescribeIndexResponse{},
+		}
+		ret, err := server.DescribeIndex(ctx, nil)
+		assert.NoError(t, err)
+		assert.NotNil(t, ret)
+	})
+
+	t.Run("DropIndex", func(t *testing.T) {
+		server.dataCoord = &MockDataCoord{
+			dropIndexResp: &commonpb.Status{},
+		}
+		ret, err := server.DropIndex(ctx, nil)
+		assert.NoError(t, err)
+		assert.NotNil(t, ret)
+	})
+
+	t.Run("GetIndexState", func(t *testing.T) {
+		server.dataCoord = &MockDataCoord{
+			getIndexStateResp: &datapb.GetIndexStateResponse{},
+		}
+		ret, err := server.GetIndexState(ctx, nil)
+		assert.NoError(t, err)
+		assert.NotNil(t, ret)
+	})
+
+	t.Run("GetIndexBuildProgress", func(t *testing.T) {
+		server.dataCoord = &MockDataCoord{
+			getIndexBuildProgressResp: &datapb.GetIndexBuildProgressResponse{},
+		}
+		ret, err := server.GetIndexBuildProgress(ctx, nil)
+		assert.NoError(t, err)
+		assert.NotNil(t, ret)
+	})
+
+	t.Run("GetSegmentIndexState", func(t *testing.T) {
+		server.dataCoord = &MockDataCoord{
+			getSegmentIndexStateResp: &datapb.GetSegmentIndexStateResponse{},
+		}
+		ret, err := server.GetSegmentIndexState(ctx, nil)
+		assert.NoError(t, err)
+		assert.NotNil(t, ret)
+	})
+
+	t.Run("GetIndexInfos", func(t *testing.T) {
+		server.dataCoord = &MockDataCoord{
+			getIndexInfosResp: &datapb.GetIndexInfoResponse{},
+		}
+		ret, err := server.GetIndexInfos(ctx, nil)
+		assert.NoError(t, err)
+		assert.NotNil(t, ret)
 	})
 
 	err := server.Stop()

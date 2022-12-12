@@ -100,20 +100,20 @@ type compactionPlanHandler struct {
 	quit             chan struct{}
 	wg               sync.WaitGroup
 	flushCh          chan UniqueID
-	segRefer         *SegmentReferenceManager
-	parallelCh       map[int64]chan struct{}
+	//segRefer         *SegmentReferenceManager
+	parallelCh map[int64]chan struct{}
 }
 
 func newCompactionPlanHandler(sessions *SessionManager, cm *ChannelManager, meta *meta,
-	allocator allocator, flush chan UniqueID, segRefer *SegmentReferenceManager) *compactionPlanHandler {
+	allocator allocator, flush chan UniqueID) *compactionPlanHandler {
 	return &compactionPlanHandler{
-		plans:      make(map[int64]*compactionTask),
-		chManager:  cm,
-		meta:       meta,
-		sessions:   sessions,
-		allocator:  allocator,
-		flushCh:    flush,
-		segRefer:   segRefer,
+		plans:     make(map[int64]*compactionTask),
+		chManager: cm,
+		meta:      meta,
+		sessions:  sessions,
+		allocator: allocator,
+		flushCh:   flush,
+		//segRefer:   segRefer,
 		parallelCh: make(map[int64]chan struct{}),
 	}
 }

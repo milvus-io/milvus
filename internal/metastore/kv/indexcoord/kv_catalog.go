@@ -60,7 +60,19 @@ func (kc *Catalog) ListIndexes(ctx context.Context) ([]*model.Index, error) {
 			return nil, err
 		}
 
-		indexes = append(indexes, model.UnmarshalIndexModel(meta))
+		indexes = append(indexes, &model.Index{
+			TenantID:        "",
+			CollectionID:    meta.IndexInfo.CollectionID,
+			FieldID:         meta.IndexInfo.FieldID,
+			IndexID:         meta.IndexInfo.IndexID,
+			IndexName:       meta.IndexInfo.IndexName,
+			IsDeleted:       meta.Deleted,
+			CreateTime:      meta.GetCreateTime(),
+			TypeParams:      meta.IndexInfo.TypeParams,
+			IndexParams:     meta.IndexInfo.IndexParams,
+			IsAutoIndex:     meta.IndexInfo.IsAutoIndex,
+			UserIndexParams: meta.IndexInfo.UserIndexParams,
+		})
 	}
 
 	return indexes, nil
@@ -127,10 +139,26 @@ func (kc *Catalog) ListSegmentIndexes(ctx context.Context) ([]*model.SegmentInde
 		err = proto.Unmarshal([]byte(value), segmentIndexInfo)
 		if err != nil {
 			log.Warn("unmarshal segment index info failed", zap.Error(err))
-			continue
+			return segIndexes, err
 		}
 
-		segIndexes = append(segIndexes, model.UnmarshalSegmentIndexModel(segmentIndexInfo))
+		segIndexes = append(segIndexes, &model.SegmentIndex{
+			SegmentID:     segmentIndexInfo.SegmentID,
+			CollectionID:  segmentIndexInfo.CollectionID,
+			PartitionID:   segmentIndexInfo.PartitionID,
+			NumRows:       segmentIndexInfo.NumRows,
+			IndexID:       segmentIndexInfo.IndexID,
+			BuildID:       segmentIndexInfo.BuildID,
+			NodeID:        segmentIndexInfo.NodeID,
+			IndexVersion:  segmentIndexInfo.IndexVersion,
+			IndexState:    segmentIndexInfo.State,
+			FailReason:    segmentIndexInfo.FailReason,
+			IsDeleted:     segmentIndexInfo.Deleted,
+			CreateTime:    segmentIndexInfo.CreateTime,
+			IndexFileKeys: segmentIndexInfo.IndexFileKeys,
+			IndexSize:     segmentIndexInfo.SerializeSize,
+			WriteHandoff:  segmentIndexInfo.WriteHandoff,
+		})
 	}
 
 	return segIndexes, nil

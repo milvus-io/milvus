@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -171,15 +172,6 @@ func (kc *Catalog) AlterSegment(ctx context.Context, newSegment *datapb.SegmentI
 		return err
 	}
 	maps.Copy(kvs, segmentKvs)
-	if newSegment.State == commonpb.SegmentState_Flushed && oldSegment.State != commonpb.SegmentState_Flushed {
-		flushSegKey := buildFlushedSegmentPath(newSegment.GetCollectionID(), newSegment.GetPartitionID(), newSegment.GetID())
-		newSeg := &datapb.SegmentInfo{ID: newSegment.GetID()}
-		segBytes, err := marshalSegmentInfo(newSeg)
-		if err != nil {
-			return err
-		}
-		kvs[flushSegKey] = segBytes
-	}
 
 	return kc.Txn.MultiSave(kvs)
 }
@@ -247,16 +239,6 @@ func (kc *Catalog) AlterSegmentsAndAddNewSegment(ctx context.Context, segments [
 				return err
 			}
 			maps.Copy(kvs, segmentKvs)
-		} else {
-			// should be a faked segment, we create flush path directly here
-			flushSegKey := buildFlushedSegmentPath(newSegment.GetCollectionID(), newSegment.GetPartitionID(), newSegment.GetID())
-			clonedSegment := proto.Clone(newSegment).(*datapb.SegmentInfo)
-			clonedSegment.IsFake = true
-			segBytes, err := marshalSegmentInfo(clonedSegment)
-			if err != nil {
-				return err
-			}
-			kvs[flushSegKey] = segBytes
 		}
 	}
 	return kc.Txn.MultiSave(kvs)
@@ -433,6 +415,142 @@ func (kc *Catalog) unmarshalBinlog(binlogType storage.BinlogType, collectionID, 
 		result[i] = fieldBinlog
 	}
 	return result, nil
+}
+
+func (kc *Catalog) CreateIndex(ctx context.Context, index *model.Index) error {
+	key := BuildIndexKey(index.CollectionID, index.IndexID)
+
+	value, err := proto.Marshal(model.MarshalIndexModel(index))
+	if err != nil {
+		return err
+	}
+
+	err = kc.Txn.Save(key, string(value))
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (kc *Catalog) ListIndexes(ctx context.Context) ([]*model.Index, error) {
+	_, values, err := kc.Txn.LoadWithPrefix(util.FieldIndexPrefix)
+	if err != nil {
+		log.Error("list index meta fail", zap.String("prefix", util.FieldIndexPrefix), zap.Error(err))
+		return nil, err
+	}
+
+	indexes := make([]*model.Index, 0)
+	for _, value := range values {
+		meta := &datapb.FieldIndex{}
+		err = proto.Unmarshal([]byte(value), meta)
+		if err != nil {
+			log.Warn("unmarshal index info failed", zap.Error(err))
+			return nil, err
+		}
+
+		indexes = append(indexes, model.UnmarshalIndexModel(meta))
+	}
+
+	return indexes, nil
+}
+
+func (kc *Catalog) AlterIndex(ctx context.Context, index *model.Index) error {
+	return kc.CreateIndex(ctx, index)
+}
+
+func (kc *Catalog) AlterIndexes(ctx context.Context, indexes []*model.Index) error {
+	kvs := make(map[string]string)
+	for _, index := range indexes {
+		key := BuildIndexKey(index.CollectionID, index.IndexID)
+
+		value, err := proto.Marshal(model.MarshalIndexModel(index))
+		if err != nil {
+			return err
+		}
+
+		kvs[key] = string(value)
+	}
+	return kc.Txn.MultiSave(kvs)
+}
+
+func (kc *Catalog) DropIndex(ctx context.Context, collID typeutil.UniqueID, dropIdxID typeutil.UniqueID) error {
+	key := BuildIndexKey(collID, dropIdxID)
+
+	err := kc.Txn.Remove(key)
+	if err != nil {
+		log.Error("drop collection index meta fail", zap.Int64("collectionID", collID),
+			zap.Int64("indexID", dropIdxID), zap.Error(err))
+		return err
+	}
+
+	return nil
+}
+
+func (kc *Catalog) CreateSegmentIndex(ctx context.Context, segIdx *model.SegmentIndex) error {
+	key := BuildSegmentIndexKey(segIdx.CollectionID, segIdx.PartitionID, segIdx.SegmentID, segIdx.BuildID)
+
+	value, err := proto.Marshal(model.MarshalSegmentIndexModel(segIdx))
+	if err != nil {
+		return err
+	}
+	err = kc.Txn.Save(key, string(value))
+	if err != nil {
+		log.Error("failed to save segment index meta in etcd", zap.Int64("buildID", segIdx.BuildID),
+			zap.Int64("segmentID", segIdx.SegmentID), zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+func (kc *Catalog) ListSegmentIndexes(ctx context.Context) ([]*model.SegmentIndex, error) {
+	_, values, err := kc.Txn.LoadWithPrefix(util.SegmentIndexPrefix)
+	if err != nil {
+		log.Error("list segment index meta fail", zap.String("prefix", util.SegmentIndexPrefix), zap.Error(err))
+		return nil, err
+	}
+
+	segIndexes := make([]*model.SegmentIndex, 0)
+	for _, value := range values {
+		segmentIndexInfo := &datapb.SegmentIndex{}
+		err = proto.Unmarshal([]byte(value), segmentIndexInfo)
+		if err != nil {
+			log.Warn("unmarshal segment index info failed", zap.Error(err))
+			return segIndexes, err
+		}
+
+		segIndexes = append(segIndexes, model.UnmarshalSegmentIndexModel(segmentIndexInfo))
+	}
+
+	return segIndexes, nil
+}
+
+func (kc *Catalog) AlterSegmentIndex(ctx context.Context, segIdx *model.SegmentIndex) error {
+	return kc.CreateSegmentIndex(ctx, segIdx)
+}
+
+func (kc *Catalog) AlterSegmentIndexes(ctx context.Context, segIdxes []*model.SegmentIndex) error {
+	kvs := make(map[string]string)
+	for _, segIdx := range segIdxes {
+		key := BuildSegmentIndexKey(segIdx.CollectionID, segIdx.PartitionID, segIdx.SegmentID, segIdx.BuildID)
+		value, err := proto.Marshal(model.MarshalSegmentIndexModel(segIdx))
+		if err != nil {
+			return err
+		}
+		kvs[key] = string(value)
+	}
+	return kc.Txn.MultiSave(kvs)
+}
+
+func (kc *Catalog) DropSegmentIndex(ctx context.Context, collID, partID, segID, buildID typeutil.UniqueID) error {
+	key := BuildSegmentIndexKey(collID, partID, segID, buildID)
+
+	err := kc.Txn.Remove(key)
+	if err != nil {
+		log.Error("drop segment index meta fail", zap.Int64("buildID", buildID), zap.Error(err))
+		return err
+	}
+
+	return nil
 }
 
 func fillLogPathByLogID(chunkManagerRootPath string, binlogType storage.BinlogType, collectionID, partitionID,
@@ -672,7 +790,8 @@ func buildFieldStatslogPath(collectionID typeutil.UniqueID, partitionID typeutil
 	return fmt.Sprintf("%s/%d/%d/%d/%d", SegmentStatslogPathPrefix, collectionID, partitionID, segmentID, fieldID)
 }
 
-// buildFlushedSegmentPath common logic mapping segment info to corresponding key of IndexCoord in kv store
+//buildFlushedSegmentPath common logic mapping segment info to corresponding key of IndexCoord in kv store
+// TODO @cai.zhang: remove this
 func buildFlushedSegmentPath(collectionID typeutil.UniqueID, partitionID typeutil.UniqueID, segmentID typeutil.UniqueID) string {
 	return fmt.Sprintf("%s/%d/%d/%d", util.FlushedSegmentPrefix, collectionID, partitionID, segmentID)
 }
@@ -696,4 +815,12 @@ func buildChannelRemovePath(channel string) string {
 
 func buildChannelCPKey(vChannel string) string {
 	return fmt.Sprintf("%s/%s", ChannelCheckpointPrefix, vChannel)
+}
+
+func BuildIndexKey(collectionID, indexID int64) string {
+	return fmt.Sprintf("%s/%d/%d", util.FieldIndexPrefix, collectionID, indexID)
+}
+
+func BuildSegmentIndexKey(collectionID, partitionID, segmentID, buildID int64) string {
+	return fmt.Sprintf("%s/%d/%d/%d/%d", util.SegmentIndexPrefix, collectionID, partitionID, segmentID, buildID)
 }

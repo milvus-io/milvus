@@ -3,7 +3,7 @@ package model
 import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/common"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 )
 
 type SegmentIndex struct {
@@ -21,10 +21,11 @@ type SegmentIndex struct {
 	CreateTime    uint64
 	IndexFileKeys []string
 	IndexSize     uint64
-	WriteHandoff  bool
+	// deprecated
+	WriteHandoff bool
 }
 
-func UnmarshalSegmentIndexModel(segIndex *indexpb.SegmentIndex) *SegmentIndex {
+func UnmarshalSegmentIndexModel(segIndex *datapb.SegmentIndex) *SegmentIndex {
 	if segIndex == nil {
 		return nil
 	}
@@ -48,12 +49,12 @@ func UnmarshalSegmentIndexModel(segIndex *indexpb.SegmentIndex) *SegmentIndex {
 	}
 }
 
-func MarshalSegmentIndexModel(segIdx *SegmentIndex) *indexpb.SegmentIndex {
+func MarshalSegmentIndexModel(segIdx *SegmentIndex) *datapb.SegmentIndex {
 	if segIdx == nil {
 		return nil
 	}
 
-	return &indexpb.SegmentIndex{
+	return &datapb.SegmentIndex{
 		CollectionID:  segIdx.CollectionID,
 		PartitionID:   segIdx.PartitionID,
 		SegmentID:     segIdx.SegmentID,
