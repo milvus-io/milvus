@@ -75,7 +75,7 @@ func (handler *HealthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 			Name: in.GetName(),
 			Code: code,
 		})
-		if code != commonpb.StateCode_Healthy {
+		if code != commonpb.StateCode_Healthy && code != commonpb.StateCode_StandBy {
 			resp.State = fmt.Sprintf("component %s state is %s", in.GetName(), code.String())
 		}
 	}
