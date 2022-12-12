@@ -112,7 +112,7 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset, const SearchInfo& search_
     AssertInfo(search_list_size.has_value(), "param " + std::string(DISK_ANN_QUERY_LIST) + "is empty");
     query_config.search_list_size = search_list_size.value();
 
-    AssertInfo(query_config.search_list_size > topk, "search_list should be greater than topk");
+    AssertInfo(query_config.search_list_size >= topk, "search_list should be greater than or equal to topk");
     AssertInfo(query_config.search_list_size <= std::max(uint32_t(topk * 10), uint32_t(kSearchListMaxValue1)) &&
                    query_config.search_list_size <= uint32_t(kSearchListMaxValue2),
                "search_list should be less than max(topk*10, 200) and less than 65535");
