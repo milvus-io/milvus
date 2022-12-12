@@ -99,7 +99,7 @@ func getErrCode(resp interface{}) (int, bool) {
 	}
 
 	status := baseResp.GetStatus()
-	return int(status.ErrorCode), true
+	return int(status.GetErrorCode()), true
 }
 
 func getGrpcStatus(err error) string {
