@@ -28,7 +28,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -58,11 +57,7 @@ func Test_AdjustBufSize(t *testing.T) {
 	schema := sampleSchema()
 	parser := NewJSONParser(ctx, schema)
 	assert.NotNil(t, parser)
-
-	sizePerRecord, err := typeutil.EstimateSizePerRecord(schema)
-	assert.Nil(t, err)
-	assert.Greater(t, sizePerRecord, 0)
-	assert.Equal(t, MaxBatchCount, MaxFileSize/(sizePerRecord*int(parser.bufSize)))
+	assert.Greater(t, parser.bufRowCount, 0)
 
 	// huge row
 	schema.Fields[9].TypeParams = []*commonpb.KeyValuePair{
@@ -70,9 +65,7 @@ func Test_AdjustBufSize(t *testing.T) {
 	}
 	parser = NewJSONParser(ctx, schema)
 	assert.NotNil(t, parser)
-	sizePerRecord, _ = typeutil.EstimateSizePerRecord(schema)
-
-	assert.Equal(t, 16, MaxFileSize/(sizePerRecord*int(parser.bufSize)))
+	assert.Greater(t, parser.bufRowCount, 0)
 
 	// no change
 	schema = &schemapb.CollectionSchema{
@@ -83,8 +76,7 @@ func Test_AdjustBufSize(t *testing.T) {
 	}
 	parser = NewJSONParser(ctx, schema)
 	assert.NotNil(t, parser)
-
-	assert.Equal(t, int64(MinBufferSize), parser.bufSize)
+	assert.Greater(t, parser.bufRowCount, 0)
 }
 
 func Test_JSONParserParseRows_IntPK(t *testing.T) {
@@ -127,8 +119,8 @@ func Test_JSONParserParseRows_IntPK(t *testing.T) {
 	}
 
 	t.Run("parse success", func(t *testing.T) {
-		// set bufSize = 4, means call handle() after reading 4 rows
-		parser.bufSize = 4
+		// set bufRowCount = 4, means call handle() after reading 4 rows
+		parser.bufRowCount = 4
 		err = parser.ParseRows(reader, consumer)
 		assert.Nil(t, err)
 		assert.Equal(t, len(content.Rows), len(consumer.rows))
@@ -285,12 +277,12 @@ func Test_JSONParserParseRows_IntPK(t *testing.T) {
 		}`
 		consumer.handleErr = errors.New("error")
 		reader = strings.NewReader(content)
-		parser.bufSize = 2
+		parser.bufRowCount = 2
 		err = parser.ParseRows(reader, consumer)
 		assert.NotNil(t, err)
 
 		reader = strings.NewReader(content)
-		parser.bufSize = 5
+		parser.bufRowCount = 5
 		err = parser.ParseRows(reader, consumer)
 		assert.NotNil(t, err)
 

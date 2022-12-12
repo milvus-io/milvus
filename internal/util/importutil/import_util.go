@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 func isCanceled(ctx context.Context) bool {
@@ -518,4 +519,23 @@ func getTypeName(dt schemapb.DataType) string {
 	default:
 		return "InvalidType"
 	}
+}
+
+func pkToShard(pk interface{}, shardNum uint32) (uint32, error) {
+	var shard uint32
+	strPK, ok := interface{}(pk).(string)
+	if ok {
+		hash := typeutil.HashString2Uint32(strPK)
+		shard = hash % shardNum
+	} else {
+		intPK, ok := interface{}(pk).(int64)
+		if !ok {
+			log.Error("Numpy parser: primary key field must be int64 or varchar")
+			return 0, fmt.Errorf("primary key field must be int64 or varchar")
+		}
+		hash, _ := typeutil.Hash32Int64(intPK)
+		shard = hash % shardNum
+	}
+
+	return shard, nil
 }

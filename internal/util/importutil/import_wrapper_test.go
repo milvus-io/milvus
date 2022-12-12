@@ -579,79 +579,6 @@ func Test_ImportWrapperRowBased_perf(t *testing.T) {
 	tr.Record("parse large json file " + filePath)
 }
 
-func Test_ImportWrapperValidateColumnBasedFiles(t *testing.T) {
-	ctx := context.Background()
-
-	cm := &MockChunkManager{
-		size: 1,
-	}
-
-	idAllocator := newIDAllocator(ctx, t, nil)
-	shardNum := 2
-	segmentSize := 512 // unit: MB
-
-	schema := &schemapb.CollectionSchema{
-		Name:        "schema",
-		Description: "schema",
-		AutoID:      true,
-		Fields: []*schemapb.FieldSchema{
-			{
-				FieldID:      101,
-				Name:         "ID",
-				IsPrimaryKey: true,
-				AutoID:       true,
-				DataType:     schemapb.DataType_Int64,
-			},
-			{
-				FieldID:      102,
-				Name:         "Age",
-				IsPrimaryKey: false,
-				DataType:     schemapb.DataType_Int64,
-			},
-			{
-				FieldID:      103,
-				Name:         "Vector",
-				IsPrimaryKey: false,
-				DataType:     schemapb.DataType_FloatVector,
-				TypeParams: []*commonpb.KeyValuePair{
-					{Key: "dim", Value: "10"},
-				},
-			},
-		},
-	}
-
-	wrapper := NewImportWrapper(ctx, schema, int32(shardNum), int64(segmentSize), idAllocator, cm, nil, nil)
-
-	// file for PK is redundant
-	files := []string{"ID.npy", "Age.npy", "Vector.npy"}
-	err := wrapper.validateColumnBasedFiles(files, schema)
-	assert.NotNil(t, err)
-
-	// file for PK is not redundant
-	schema.Fields[0].AutoID = false
-	err = wrapper.validateColumnBasedFiles(files, schema)
-	assert.Nil(t, err)
-
-	// file missed
-	files = []string{"Age.npy", "Vector.npy"}
-	err = wrapper.validateColumnBasedFiles(files, schema)
-	assert.NotNil(t, err)
-
-	files = []string{"ID.npy", "Vector.npy"}
-	err = wrapper.validateColumnBasedFiles(files, schema)
-	assert.NotNil(t, err)
-
-	// redundant file
-	files = []string{"ID.npy", "Age.npy", "Vector.npy", "dummy.npy"}
-	err = wrapper.validateColumnBasedFiles(files, schema)
-	assert.NotNil(t, err)
-
-	// correct input
-	files = []string{"ID.npy", "Age.npy", "Vector.npy"}
-	err = wrapper.validateColumnBasedFiles(files, schema)
-	assert.Nil(t, err)
-}
-
 func Test_ImportWrapperFileValidation(t *testing.T) {
 	ctx := context.Background()
 
@@ -668,7 +595,7 @@ func Test_ImportWrapperFileValidation(t *testing.T) {
 				FieldID:      101,
 				Name:         "uid",
 				IsPrimaryKey: true,
-				AutoID:       false,
+				AutoID:       true,
 				DataType:     schemapb.DataType_Int64,
 			},
 			{
@@ -684,84 +611,76 @@ func Test_ImportWrapperFileValidation(t *testing.T) {
 
 	wrapper := NewImportWrapper(ctx, schema, int32(shardNum), int64(segmentSize), idAllocator, cm, nil, nil)
 
-	// unsupported file type
-	files := []string{"uid.txt"}
-	rowBased, err := wrapper.fileValidation(files)
-	assert.NotNil(t, err)
-	assert.False(t, rowBased)
+	t.Run("unsupported file type", func(t *testing.T) {
+		files := []string{"uid.txt"}
+		rowBased, err := wrapper.fileValidation(files)
+		assert.Error(t, err)
+		assert.False(t, rowBased)
+	})
 
-	// file missed
-	files = []string{"uid.npy"}
-	rowBased, err = wrapper.fileValidation(files)
-	assert.NotNil(t, err)
-	assert.False(t, rowBased)
+	t.Run("duplicate files", func(t *testing.T) {
+		files := []string{"a/1.json", "b/1.json"}
+		rowBased, err := wrapper.fileValidation(files)
+		assert.Error(t, err)
+		assert.True(t, rowBased)
 
-	// redundant file
-	files = []string{"uid.npy", "b/bol.npy", "c/no.npy"}
-	rowBased, err = wrapper.fileValidation(files)
-	assert.NotNil(t, err)
-	assert.False(t, rowBased)
+		files = []string{"a/uid.npy", "uid.npy", "b/bol.npy"}
+		rowBased, err = wrapper.fileValidation(files)
+		assert.Error(t, err)
+		assert.False(t, rowBased)
+	})
 
-	// duplicate files
-	files = []string{"a/1.json", "b/1.json"}
-	rowBased, err = wrapper.fileValidation(files)
-	assert.NotNil(t, err)
-	assert.True(t, rowBased)
+	t.Run("unsupported file for row-based", func(t *testing.T) {
+		files := []string{"a/uid.json", "b/bol.npy"}
+		rowBased, err := wrapper.fileValidation(files)
+		assert.Error(t, err)
+		assert.True(t, rowBased)
+	})
 
-	files = []string{"a/uid.npy", "uid.npy", "b/bol.npy"}
-	rowBased, err = wrapper.fileValidation(files)
-	assert.NotNil(t, err)
-	assert.False(t, rowBased)
+	t.Run("unsupported file for column-based", func(t *testing.T) {
+		files := []string{"a/uid.npy", "b/bol.json"}
+		rowBased, err := wrapper.fileValidation(files)
+		assert.Error(t, err)
+		assert.False(t, rowBased)
+	})
 
-	// unsupported file for row-based
-	files = []string{"a/uid.json", "b/bol.npy"}
-	rowBased, err = wrapper.fileValidation(files)
-	assert.NotNil(t, err)
-	assert.True(t, rowBased)
+	t.Run("valid cases", func(t *testing.T) {
+		files := []string{"a/1.json", "b/2.json"}
+		rowBased, err := wrapper.fileValidation(files)
+		assert.NoError(t, err)
+		assert.True(t, rowBased)
 
-	// unsupported file for column-based
-	files = []string{"a/uid.npy", "b/bol.json"}
-	rowBased, err = wrapper.fileValidation(files)
-	assert.NotNil(t, err)
-	assert.False(t, rowBased)
+		files = []string{"a/uid.npy", "b/bol.npy"}
+		rowBased, err = wrapper.fileValidation(files)
+		assert.NoError(t, err)
+		assert.False(t, rowBased)
+	})
 
-	// valid cases
-	files = []string{"a/1.json", "b/2.json"}
-	rowBased, err = wrapper.fileValidation(files)
-	assert.Nil(t, err)
-	assert.True(t, rowBased)
+	t.Run("empty file", func(t *testing.T) {
+		files := []string{}
+		cm.size = 0
+		wrapper = NewImportWrapper(ctx, schema, int32(shardNum), int64(segmentSize), idAllocator, cm, nil, nil)
+		rowBased, err := wrapper.fileValidation(files)
+		assert.NoError(t, err)
+		assert.False(t, rowBased)
+	})
 
-	files = []string{"a/uid.npy", "b/bol.npy"}
-	rowBased, err = wrapper.fileValidation(files)
-	assert.Nil(t, err)
-	assert.False(t, rowBased)
+	t.Run("file size exceed MaxFileSize limit", func(t *testing.T) {
+		files := []string{"a/1.json"}
+		cm.size = MaxFileSize + 1
+		wrapper = NewImportWrapper(ctx, schema, int32(shardNum), int64(segmentSize), idAllocator, cm, nil, nil)
+		rowBased, err := wrapper.fileValidation(files)
+		assert.NotNil(t, err)
+		assert.True(t, rowBased)
+	})
 
-	// empty file
-	cm.size = 0
-	wrapper = NewImportWrapper(ctx, schema, int32(shardNum), int64(segmentSize), idAllocator, cm, nil, nil)
-	rowBased, err = wrapper.fileValidation(files)
-	assert.NotNil(t, err)
-	assert.False(t, rowBased)
-
-	// file size exceed MaxFileSize limit
-	cm.size = MaxFileSize + 1
-	wrapper = NewImportWrapper(ctx, schema, int32(shardNum), int64(segmentSize), idAllocator, cm, nil, nil)
-	rowBased, err = wrapper.fileValidation(files)
-	assert.NotNil(t, err)
-	assert.False(t, rowBased)
-
-	// total files size exceed MaxTotalSizeInMemory limit
-	cm.size = MaxFileSize - 1
-	files = append(files, "3.npy")
-	rowBased, err = wrapper.fileValidation(files)
-	assert.NotNil(t, err)
-	assert.False(t, rowBased)
-
-	// failed to get file size
-	cm.sizeErr = errors.New("error")
-	rowBased, err = wrapper.fileValidation(files)
-	assert.NotNil(t, err)
-	assert.False(t, rowBased)
+	t.Run("failed to get file size", func(t *testing.T) {
+		files := []string{"a/1.json"}
+		cm.sizeErr = errors.New("error")
+		rowBased, err := wrapper.fileValidation(files)
+		assert.NotNil(t, err)
+		assert.True(t, rowBased)
+	})
 }
 
 func Test_ImportWrapperReportFailRowBased(t *testing.T) {
@@ -999,122 +918,6 @@ func Test_ImportWrapperDoBinlogImport(t *testing.T) {
 	// succeed
 	err = wrapper.doBinlogImport(paths, 0, math.MaxUint64)
 	assert.Nil(t, err)
-}
-
-func Test_ImportWrapperSplitFieldsData(t *testing.T) {
-	ctx := context.Background()
-
-	cm := &MockChunkManager{}
-
-	idAllocator := newIDAllocator(ctx, t, nil)
-
-	rowCounter := &rowCounterTest{}
-	assignSegmentFunc, flushFunc, saveSegmentFunc := createMockCallbackFunctions(t, rowCounter)
-
-	importResult := &rootcoordpb.ImportResult{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-		TaskId:     1,
-		DatanodeId: 1,
-		State:      commonpb.ImportState_ImportStarted,
-		Segments:   make([]int64, 0),
-		AutoIds:    make([]int64, 0),
-		RowCount:   0,
-	}
-	reportFunc := func(res *rootcoordpb.ImportResult) error {
-		return nil
-	}
-
-	schema := &schemapb.CollectionSchema{
-		Name:   "schema",
-		AutoID: true,
-		Fields: []*schemapb.FieldSchema{
-			{
-				FieldID:      101,
-				Name:         "uid",
-				IsPrimaryKey: true,
-				AutoID:       true,
-				DataType:     schemapb.DataType_Int64,
-			},
-			{
-				FieldID:      102,
-				Name:         "flag",
-				IsPrimaryKey: false,
-				DataType:     schemapb.DataType_Bool,
-			},
-		},
-	}
-
-	wrapper := NewImportWrapper(ctx, schema, 2, 1024*1024, idAllocator, cm, importResult, reportFunc)
-	wrapper.SetCallbackFunctions(assignSegmentFunc, flushFunc, saveSegmentFunc)
-
-	// nil input
-	err := wrapper.splitFieldsData(nil, 0)
-	assert.NotNil(t, err)
-
-	// split 100 rows to 4 blocks, success
-	rowCount := 100
-	input := initSegmentData(schema)
-	for j := 0; j < rowCount; j++ {
-		pkField := input[101].(*storage.Int64FieldData)
-		pkField.Data = append(pkField.Data, int64(j))
-
-		flagField := input[102].(*storage.BoolFieldData)
-		flagField.Data = append(flagField.Data, true)
-	}
-
-	err = wrapper.splitFieldsData(input, 512)
-	assert.Nil(t, err)
-	assert.Equal(t, 2, len(importResult.AutoIds))
-	assert.Equal(t, 4, rowCounter.callTime)
-	assert.Equal(t, rowCount, rowCounter.rowCount)
-
-	// alloc id failed
-	wrapper.rowIDAllocator = newIDAllocator(ctx, t, errors.New("error"))
-	err = wrapper.splitFieldsData(input, 512)
-	assert.NotNil(t, err)
-	wrapper.rowIDAllocator = newIDAllocator(ctx, t, nil)
-
-	// row count of fields are unequal
-	schema.Fields[0].AutoID = false
-	input = initSegmentData(schema)
-	for j := 0; j < rowCount; j++ {
-		pkField := input[101].(*storage.Int64FieldData)
-		pkField.Data = append(pkField.Data, int64(j))
-		if j%2 == 0 {
-			continue
-		}
-		flagField := input[102].(*storage.BoolFieldData)
-		flagField.Data = append(flagField.Data, true)
-	}
-	err = wrapper.splitFieldsData(input, 512)
-	assert.NotNil(t, err)
-
-	// primary key not found
-	wrapper.collectionSchema.Fields[0].IsPrimaryKey = false
-	err = wrapper.splitFieldsData(input, 512)
-	assert.NotNil(t, err)
-	wrapper.collectionSchema.Fields[0].IsPrimaryKey = true
-
-	// primary key is varchar, success
-	wrapper.collectionSchema.Fields[0].DataType = schemapb.DataType_VarChar
-	input = initSegmentData(schema)
-	for j := 0; j < rowCount; j++ {
-		pkField := input[101].(*storage.StringFieldData)
-		pkField.Data = append(pkField.Data, strconv.FormatInt(int64(j), 10))
-
-		flagField := input[102].(*storage.BoolFieldData)
-		flagField.Data = append(flagField.Data, true)
-	}
-	rowCounter.callTime = 0
-	rowCounter.rowCount = 0
-	importResult.AutoIds = []int64{}
-	err = wrapper.splitFieldsData(input, 1024)
-	assert.Nil(t, err)
-	assert.Equal(t, 0, len(importResult.AutoIds))
-	assert.Equal(t, 2, rowCounter.callTime)
-	assert.Equal(t, rowCount, rowCounter.rowCount)
 }
 
 func Test_ImportWrapperReportPersisted(t *testing.T) {
