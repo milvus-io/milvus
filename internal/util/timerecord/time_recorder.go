@@ -91,7 +91,7 @@ func (tr *TimeRecorder) CtxElapse(ctx context.Context, msg string) time.Duration
 
 func (tr *TimeRecorder) printTimeRecord(ctx context.Context, msg string, span time.Duration) {
 	log.Ctx(ctx).WithOptions(zap.AddCallerSkip(2)).
-		Debug(fmt.Sprintf("timerecorder %s: record elapsed duration", tr.header),
+		Debug(fmt.Sprintf("tr/%s", tr.header),
 			zap.String("msg", msg),
 			zap.Duration("duration", span),
 		)
