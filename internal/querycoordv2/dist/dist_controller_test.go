@@ -73,7 +73,7 @@ func (suite *DistControllerTestSuite) SetupTest() {
 	suite.broker = meta.NewMockBroker(suite.T())
 	targetManager := meta.NewTargetManager(suite.broker, suite.meta)
 	suite.mockScheduler = task.NewMockScheduler(suite.T())
-	suite.controller = NewDistController(suite.mockCluster, nodeManager, distManager, targetManager, suite.mockScheduler)
+	suite.controller = NewDistController(suite.kv, suite.mockCluster, nodeManager, distManager, targetManager, suite.mockScheduler)
 }
 
 func (suite *DistControllerTestSuite) TearDownSuite() {

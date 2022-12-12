@@ -18,10 +18,8 @@ package session
 
 import (
 	"sync"
-	"time"
 
 	"github.com/milvus-io/milvus/internal/metrics"
-	"go.uber.org/atomic"
 )
 
 type Manager interface {
@@ -35,6 +33,12 @@ type Manager interface {
 type NodeManager struct {
 	mu    sync.RWMutex
 	nodes map[int64]*NodeInfo
+}
+
+func NewNodeManager() *NodeManager {
+	return &NodeManager{
+		nodes: make(map[int64]*NodeInfo),
+	}
 }
 
 func (m *NodeManager) Add(node *NodeInfo) {
@@ -75,12 +79,6 @@ func (m *NodeManager) GetAll() []*NodeInfo {
 	return ret
 }
 
-func NewNodeManager() *NodeManager {
-	return &NodeManager{
-		nodes: make(map[int64]*NodeInfo),
-	}
-}
-
 type State int
 
 const (
@@ -90,11 +88,10 @@ const (
 
 type NodeInfo struct {
 	stats
-	mu            sync.RWMutex
-	id            int64
-	addr          string
-	state         State
-	lastHeartbeat *atomic.Int64
+	mu    sync.RWMutex
+	id    int64
+	addr  string
+	state State
 }
 
 func (n *NodeInfo) ID() int64 {
@@ -115,14 +112,6 @@ func (n *NodeInfo) ChannelCnt() int {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 	return n.stats.getChannelCnt()
-}
-
-func (n *NodeInfo) SetLastHeartbeat(time time.Time) {
-	n.lastHeartbeat.Store(time.UnixNano())
-}
-
-func (n *NodeInfo) LastHeartbeat() time.Time {
-	return time.Unix(0, n.lastHeartbeat.Load())
 }
 
 func (n *NodeInfo) IsStoppingState() bool {
@@ -147,10 +136,9 @@ func (n *NodeInfo) UpdateStats(opts ...StatsOption) {
 
 func NewNodeInfo(id int64, addr string) *NodeInfo {
 	return &NodeInfo{
-		stats:         newStats(),
-		id:            id,
-		addr:          addr,
-		lastHeartbeat: atomic.NewInt64(0),
+		stats: newStats(),
+		id:    id,
+		addr:  addr,
 	}
 }
 

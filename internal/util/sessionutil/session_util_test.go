@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"go.etcd.io/etcd/api/v3/mvccpb"
@@ -183,9 +184,12 @@ func TestUpdateSessions(t *testing.T) {
 }
 
 func TestSessionLivenessCheck(t *testing.T) {
-	s := &Session{}
+	paramtable.Init()
+	params := paramtable.Get()
+
+	s := &Session{sessionTTL: params.CommonCfg.SessionTTL.GetAsInt64()}
 	ctx := context.Background()
-	ch := make(chan bool)
+	ch := make(chan struct{})
 	s.liveCh = ch
 	signal := make(chan struct{}, 1)
 
@@ -197,17 +201,17 @@ func TestSessionLivenessCheck(t *testing.T) {
 	})
 
 	assert.False(t, flag)
-	ch <- true
+	ch <- struct{}{}
 
 	assert.False(t, flag)
-	close(ch)
+	s.stop()
 
 	<-signal
 	assert.True(t, flag)
 
 	ctx, cancel := context.WithCancel(ctx)
 	cancel()
-	ch = make(chan bool)
+	ch = make(chan struct{})
 	s.liveCh = ch
 	flag = false
 
@@ -217,6 +221,43 @@ func TestSessionLivenessCheck(t *testing.T) {
 	})
 
 	assert.False(t, flag)
+}
+
+func TestSessionSuicide(t *testing.T) {
+	ctx := context.Background()
+	paramtable.Init()
+	params := paramtable.Get()
+
+	endpoints := params.LoadWithDefault("etcd.endpoints", paramtable.DefaultEtcdEndpoints)
+	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
+
+	etcdEndpoints := strings.Split(endpoints, ",")
+	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
+	require.NoError(t, err)
+	etcdKV := etcdkv.NewEtcdKV(etcdCli, metaRoot)
+	err = etcdKV.RemoveWithPrefix("")
+	assert.NoError(t, err)
+
+	defer etcdKV.Close()
+	defer etcdKV.RemoveWithPrefix("")
+
+	s := NewSession(ctx, metaRoot, etcdCli)
+	s.Init("suicide_test", "testAddr", false, false)
+	assert.NotEqual(t, int64(0), s.leaseID)
+	assert.NotEqual(t, int64(0), s.ServerID)
+	s.Register()
+	stopped := atomic.NewBool(false)
+	s.sessionTTL = 1
+	go s.LivenessCheck(ctx, func() {
+		stopped.Store(true)
+	})
+
+	etcdKV = etcdkv.NewEtcdKV(etcdCli, "")
+	err = etcdKV.Remove(s.getCompleteKey())
+	assert.NoError(t, err)
+	assert.Eventually(t, func() bool {
+		return stopped.Load()
+	}, 5*time.Second, time.Second)
 }
 
 func TestWatcherHandleWatchResp(t *testing.T) {
@@ -633,7 +674,7 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 	defer etcdKV.RemoveWithPrefix("")
 
 	var wg sync.WaitGroup
-	ch := make(chan bool)
+	ch := make(chan struct{})
 	signal := make(chan struct{}, 1)
 	flag := false
 
@@ -673,9 +714,9 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 	// stop session 1, session 2 will take over primary service
 	log.Debug("Stop session 1, session 2 will take over primary service")
 	assert.False(t, flag)
-	ch <- true
+	ch <- struct{}{}
 	assert.False(t, flag)
-	close(ch)
+	s1.stop()
 	<-signal
 	assert.True(t, flag)
 

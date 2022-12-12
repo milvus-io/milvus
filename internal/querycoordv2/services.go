@@ -664,24 +664,23 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 		// 4. All segments of the shard in target should be in the distribution
 		for _, leader := range leaders {
 			log := log.With(zap.Int64("leaderID", leader.ID))
-			info := s.nodeMgr.Get(leader.ID)
 
 			// Check whether leader is online
-			err := checkNodeAvailable(leader.ID, info)
-			if err != nil {
-				log.Info("leader is not available", zap.Error(err))
-				multierr.AppendInto(&channelErr, fmt.Errorf("leader not available: %w", err))
+			info := s.nodeMgr.Get(leader.ID)
+			if info == nil {
+				log.Info("leader is not available")
+				multierr.AppendInto(&channelErr, WrapErrNodeOffline(leader.ID))
 				continue
 			}
 			// Check whether QueryNodes are online and available
 			isAvailable := true
 			for _, version := range leader.Segments {
 				info := s.nodeMgr.Get(version.GetNodeID())
-				err = checkNodeAvailable(version.GetNodeID(), info)
-				if err != nil {
-					log.Info("leader is not available due to QueryNode unavailable", zap.Error(err))
+				if info == nil {
+					log.Info("leader is not available due to QueryNode not available",
+						zap.Int64("nodeID", version.GetNodeID()))
 					isAvailable = false
-					multierr.AppendInto(&channelErr, err)
+					multierr.AppendInto(&channelErr, WrapErrNodeOffline(version.GetNodeID()))
 					break
 				}
 			}

@@ -188,7 +188,7 @@ queryCoord:
   channelTaskTimeout: 60000 # 1 minute
   segmentTaskTimeout: 120000 # 2 minute
   distPullInterval: 500
-  heartbeatAvailableInterval: 10000 # 10s, Only QueryNodes which fetched heartbeats within the duration are available
+  heartbeatsFailThreshold: 3 # Kill QueryNode if failed to fetch heartbeats for the number of times
   loadTimeoutSeconds: 600
   checkHandoffInterval: 5000
   taskMergeCap: 16
@@ -417,6 +417,7 @@ common:
   session:
     ttl: 60 # ttl value when session granting a lease to register service
     retryTimes: 30 # retry times when session sending etcd requests
+    aliveCheckFailThreshold: 3 # Kill session if reach the number of failures of checking alive
 
 # QuotaConfig, configurations of Milvus quota and limits.
 # By default, we enable:

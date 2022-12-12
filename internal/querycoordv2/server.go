@@ -205,6 +205,7 @@ func (s *Server) Init() error {
 	// Init heartbeat
 	log.Info("init dist controller")
 	s.distController = dist.NewDistController(
+		s.kv,
 		s.cluster,
 		s.nodeMgr,
 		s.dist,

@@ -899,7 +899,6 @@ func (suite *ServiceSuite) TestGetShardLeaders() {
 			CollectionID: collection,
 		}
 
-		suite.fetchHeartbeats(time.Now())
 		resp, err := server.GetShardLeaders(ctx, req)
 		suite.NoError(err)
 		suite.Equal(commonpb.ErrorCode_Success, resp.Status.ErrorCode)
@@ -932,7 +931,6 @@ func (suite *ServiceSuite) TestGetShardLeadersFailed() {
 		}
 
 		// Node offline
-		suite.fetchHeartbeats(time.Now())
 		for _, node := range suite.nodes {
 			suite.nodeMgr.Remove(node)
 		}
@@ -943,15 +941,8 @@ func (suite *ServiceSuite) TestGetShardLeadersFailed() {
 			suite.nodeMgr.Add(session.NewNodeInfo(node, "localhost"))
 		}
 
-		// Last heartbeat response time too old
-		suite.fetchHeartbeats(time.Now().Add(-Params.QueryCoordCfg.HeartbeatAvailableInterval.GetAsDuration(time.Millisecond) - 1))
-		resp, err = server.GetShardLeaders(ctx, req)
-		suite.NoError(err)
-		suite.Equal(commonpb.ErrorCode_NoReplicaAvailable, resp.Status.ErrorCode)
-
 		// Segment not fully loaded
 		suite.updateChannelDistWithoutSegment(collection)
-		suite.fetchHeartbeats(time.Now())
 		resp, err = server.GetShardLeaders(ctx, req)
 		suite.NoError(err)
 		suite.Equal(commonpb.ErrorCode_NoReplicaAvailable, resp.Status.ErrorCode)
@@ -1186,13 +1177,6 @@ func (suite *ServiceSuite) updateCollectionStatus(collectionID int64, status que
 			partition.PartitionLoadInfo.Status = status
 			suite.meta.UpdatePartition(partition)
 		}
-	}
-}
-
-func (suite *ServiceSuite) fetchHeartbeats(time time.Time) {
-	for _, node := range suite.nodes {
-		node := suite.nodeMgr.Get(node)
-		node.SetLastHeartbeat(time)
 	}
 }
 

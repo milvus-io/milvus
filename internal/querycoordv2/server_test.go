@@ -388,6 +388,7 @@ func (suite *ServerSuite) hackServer() {
 		suite.server.nodeMgr,
 	)
 	suite.server.distController = dist.NewDistController(
+		suite.server.kv,
 		suite.server.cluster,
 		suite.server.nodeMgr,
 		suite.server.dist,

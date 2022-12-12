@@ -20,6 +20,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
@@ -29,12 +30,32 @@ import (
 
 type Controller struct {
 	mu          sync.RWMutex
+	kv          kv.MetaKv
 	handlers    map[int64]*distHandler
 	client      session.Cluster
 	nodeManager *session.NodeManager
 	dist        *meta.DistributionManager
 	targetMgr   *meta.TargetManager
 	scheduler   task.Scheduler
+}
+
+func NewDistController(
+	kv kv.MetaKv,
+	client session.Cluster,
+	nodeManager *session.NodeManager,
+	dist *meta.DistributionManager,
+	targetMgr *meta.TargetManager,
+	scheduler task.Scheduler,
+) *Controller {
+	return &Controller{
+		kv:          kv,
+		handlers:    make(map[int64]*distHandler),
+		client:      client,
+		nodeManager: nodeManager,
+		dist:        dist,
+		targetMgr:   targetMgr,
+		scheduler:   scheduler,
+	}
 }
 
 func (dc *Controller) StartDistInstance(ctx context.Context, nodeID int64) {
@@ -44,7 +65,7 @@ func (dc *Controller) StartDistInstance(ctx context.Context, nodeID int64) {
 		log.Info("node has started", zap.Int64("nodeID", nodeID))
 		return
 	}
-	h := newDistHandler(ctx, nodeID, dc.client, dc.nodeManager, dc.scheduler, dc.dist, dc.targetMgr)
+	h := newDistHandler(ctx, nodeID, dc.kv, dc.client, dc.nodeManager, dc.scheduler, dc.dist, dc.targetMgr)
 	dc.handlers[nodeID] = h
 }
 
@@ -77,22 +98,5 @@ func (dc *Controller) Stop() {
 	defer dc.mu.Unlock()
 	for _, h := range dc.handlers {
 		h.stop()
-	}
-}
-
-func NewDistController(
-	client session.Cluster,
-	nodeManager *session.NodeManager,
-	dist *meta.DistributionManager,
-	targetMgr *meta.TargetManager,
-	scheduler task.Scheduler,
-) *Controller {
-	return &Controller{
-		handlers:    make(map[int64]*distHandler),
-		client:      client,
-		nodeManager: nodeManager,
-		dist:        dist,
-		targetMgr:   targetMgr,
-		scheduler:   scheduler,
 	}
 }

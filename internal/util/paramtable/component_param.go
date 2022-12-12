@@ -202,8 +202,9 @@ type commonConfig struct {
 
 	ClusterName ParamItem `refreshable:"false"`
 
-	SessionTTL        ParamItem `refreshable:"false"`
-	SessionRetryTimes ParamItem `refreshable:"false"`
+	SessionTTL              ParamItem `refreshable:"false"`
+	SessionRetryTimes       ParamItem `refreshable:"false"`
+	AliveCheckFailThreshold ParamItem `refreshable:"false"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -541,6 +542,12 @@ func (p *commonConfig) init(base *BaseTable) {
 	}
 	p.SessionRetryTimes.Init(base.mgr)
 
+	p.AliveCheckFailThreshold = ParamItem{
+		Key:          "common.session.aliveCheckFailThreshold",
+		Version:      "2.2.0",
+		DefaultValue: "30",
+	}
+	p.AliveCheckFailThreshold.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -846,7 +853,7 @@ type queryCoordConfig struct {
 	ChannelTaskTimeout                  ParamItem `refreshable:"true"`
 	SegmentTaskTimeout                  ParamItem `refreshable:"true"`
 	DistPullInterval                    ParamItem `refreshable:"false"`
-	HeartbeatAvailableInterval          ParamItem `refreshable:"true"`
+	HeartbeatsFailThreshold             ParamItem `refreshable:"true"`
 	LoadTimeoutSeconds                  ParamItem `refreshable:"true"`
 	//Deprecated: Since 2.2.2, QueryCoord do not use HandOff logic anymore
 	CheckHandoffInterval ParamItem `refreshable:"true"`
@@ -958,6 +965,14 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 	}
 	p.DistPullInterval.Init(base.mgr)
 
+	p.HeartbeatsFailThreshold = ParamItem{
+		Key:          "queryCoord.heartbeatsFailThreshold",
+		Version:      "2.2.0",
+		DefaultValue: "3",
+		PanicIfEmpty: true,
+	}
+	p.HeartbeatsFailThreshold.Init(base.mgr)
+
 	p.LoadTimeoutSeconds = ParamItem{
 		Key:          "queryCoord.loadTimeoutSeconds",
 		Version:      "2.0.0",
@@ -965,14 +980,6 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		PanicIfEmpty: true,
 	}
 	p.LoadTimeoutSeconds.Init(base.mgr)
-
-	p.HeartbeatAvailableInterval = ParamItem{
-		Key:          "queryCoord.heartbeatAvailableInterval",
-		Version:      "2.2.1",
-		DefaultValue: "10000",
-		PanicIfEmpty: true,
-	}
-	p.HeartbeatAvailableInterval.Init(base.mgr)
 
 	p.CheckHandoffInterval = ParamItem{
 		Key:          "queryCoord.checkHandoffInterval",

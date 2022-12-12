@@ -19,11 +19,13 @@ package dist
 import (
 	"context"
 	"fmt"
+	"path"
 	"sync"
 	"time"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -32,18 +34,20 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
 )
 
 const (
-	distReqTimeout  = 3 * time.Second
-	maxFailureTimes = 3
+	distReqTimeout = 3 * time.Second
 )
 
 type distHandler struct {
 	nodeID      int64
 	c           chan struct{}
 	wg          sync.WaitGroup
+	kv          kv.MetaKv
 	client      session.Cluster
 	nodeManager *session.NodeManager
 	scheduler   task.Scheduler
@@ -51,6 +55,31 @@ type distHandler struct {
 	target      *meta.TargetManager
 	mu          sync.Mutex
 	stopOnce    sync.Once
+}
+
+func newDistHandler(
+	ctx context.Context,
+	nodeID int64,
+	kv kv.MetaKv,
+	client session.Cluster,
+	nodeManager *session.NodeManager,
+	scheduler task.Scheduler,
+	dist *meta.DistributionManager,
+	targetMgr *meta.TargetManager,
+) *distHandler {
+	h := &distHandler{
+		nodeID:      nodeID,
+		c:           make(chan struct{}),
+		kv:          kv,
+		client:      client,
+		nodeManager: nodeManager,
+		scheduler:   scheduler,
+		dist:        dist,
+		target:      targetMgr,
+	}
+	h.wg.Add(1)
+	go h.start(ctx)
+	return h
 }
 
 func (dh *distHandler) start(ctx context.Context) {
@@ -75,16 +104,25 @@ func (dh *distHandler) start(ctx context.Context) {
 					if node != nil {
 						log.RatedDebug(30.0, "failed to get node's data distribution",
 							zap.Int64("nodeID", dh.nodeID),
-							zap.Time("lastHeartbeat", node.LastHeartbeat()),
 						)
 					}
 				} else {
 					failures = 0
 				}
 
-				if failures >= maxFailureTimes {
-					log.RatedInfo(30.0, fmt.Sprintf("can not get data distribution from node %d for %d times", dh.nodeID, failures))
-					// TODO: kill the querynode server and stop the loop?
+				if failures >= Params.QueryCoordCfg.HeartbeatsFailThreshold.GetAsInt() {
+					log.Warn("can not get data distribution from node for many times, kill it",
+						zap.Int64("nodeID", dh.nodeID),
+						zap.Int("failCount", failures),
+					)
+					err := dh.kill()
+					if err != nil {
+						log.Warn("failed to kill QueryNode, will retry later",
+							zap.Int64("nodeID", dh.nodeID),
+							zap.Error(err),
+						)
+					}
+					return
 				}
 			})
 		}
@@ -110,7 +148,6 @@ func (dh *distHandler) handleDistResp(resp *querypb.GetDataDistributionResponse)
 			session.WithSegmentCnt(len(resp.GetSegments())),
 			session.WithChannelCnt(len(resp.GetChannels())),
 		)
-		node.SetLastHeartbeat(time.Now())
 	}
 
 	dh.updateSegmentsDistribution(resp)
@@ -118,6 +155,15 @@ func (dh *distHandler) handleDistResp(resp *querypb.GetDataDistributionResponse)
 	dh.updateLeaderView(resp)
 
 	dh.scheduler.Dispatch(dh.nodeID)
+}
+
+func (dh *distHandler) kill() error {
+	return dh.kv.Remove(
+		path.Join(
+			Params.EtcdCfg.MetaRootPath.GetValue(),
+			sessionutil.DefaultServiceRoot,
+			fmt.Sprintf("%s-%d", typeutil.QueryNodeRole, dh.nodeID),
+		))
 }
 
 func (dh *distHandler) updateSegmentsDistribution(resp *querypb.GetDataDistributionResponse) {
@@ -235,27 +281,4 @@ func (dh *distHandler) stop() {
 		close(dh.c)
 		dh.wg.Wait()
 	})
-}
-
-func newDistHandler(
-	ctx context.Context,
-	nodeID int64,
-	client session.Cluster,
-	nodeManager *session.NodeManager,
-	scheduler task.Scheduler,
-	dist *meta.DistributionManager,
-	targetMgr *meta.TargetManager,
-) *distHandler {
-	h := &distHandler{
-		nodeID:      nodeID,
-		c:           make(chan struct{}),
-		client:      client,
-		nodeManager: nodeManager,
-		scheduler:   scheduler,
-		dist:        dist,
-		target:      targetMgr,
-	}
-	h.wg.Add(1)
-	go h.start(ctx)
-	return h
 }

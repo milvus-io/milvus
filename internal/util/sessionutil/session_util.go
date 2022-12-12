@@ -24,7 +24,6 @@ import (
 	"path"
 	"strconv"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/blang/semver/v4"
@@ -35,6 +34,7 @@ import (
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 )
 
@@ -94,9 +94,10 @@ type Session struct {
 	TriggerKill bool
 	Version     semver.Version `json:"Version,omitempty"`
 
-	liveCh  <-chan bool
-	etcdCli *clientv3.Client
-	leaseID *clientv3.LeaseID
+	stopOnce sync.Once
+	liveCh   chan struct{}
+	etcdCli  *clientv3.Client
+	leaseID  *clientv3.LeaseID
 
 	metaRoot string
 
@@ -202,6 +203,8 @@ func NewSession(ctx context.Context, metaRoot string, client *clientv3.Client, o
 		metaRoot: metaRoot,
 		Version:  common.Version,
 
+		liveCh: make(chan struct{}),
+
 		// options
 		useCustomConfig:   false,
 		sessionTTL:        60,
@@ -261,7 +264,7 @@ func (s *Session) Register() {
 		log.Error("Register failed", zap.Error(err))
 		panic(err)
 	}
-	s.liveCh = s.processKeepAliveResponse(ch)
+	s.processKeepAliveResponse(ch)
 	s.UpdateRegistered(true)
 }
 
@@ -427,8 +430,7 @@ func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, er
 
 // processKeepAliveResponse processes the response of etcd keepAlive interface
 // If keepAlive fails for unexpected error, it will send a signal to the channel.
-func (s *Session) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveResponse) (failChannel <-chan bool) {
-	failCh := make(chan bool)
+func (s *Session) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveResponse) {
 	go func() {
 		for {
 			select {
@@ -441,19 +443,18 @@ func (s *Session) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveRes
 			case resp, ok := <-ch:
 				if !ok {
 					log.Warn("session keepalive channel closed")
-					close(failCh)
+					s.stop()
 					return
 				}
 				if resp == nil {
 					log.Warn("session keepalive response failed")
-					close(failCh)
+					s.stop()
 					return
 				}
 				//failCh <- true
 			}
 		}
 	}()
-	return failCh
 }
 
 // GetSessions will get all sessions registered in etcd.
@@ -699,8 +700,31 @@ func (w *sessionWatcher) handleWatchErr(err error) error {
 // ch is the liveness signal channel, ch is closed only when the session is expired
 // callback is the function to call when ch is closed, note that callback will not be invoked when loop exits due to context
 func (s *Session) LivenessCheck(ctx context.Context, callback func()) {
+	ticker := time.NewTicker(time.Duration(s.sessionTTL) * time.Second)
+	defer ticker.Stop()
+	failCount := atomic.NewInt32(0)
 	for {
 		select {
+		case <-ticker.C:
+			go func() {
+				resp, err := s.etcdCli.Get(ctx, s.getCompleteKey(), clientv3.WithCountOnly())
+				if err != nil {
+					log.Warn("failed to get session", zap.Error(err))
+					if failCount.Inc() >= paramtable.Get().CommonCfg.AliveCheckFailThreshold.GetAsInt32() {
+						log.Fatal("failed to get sessions for many times", zap.Int32("failCount", failCount.Load()))
+					}
+					return
+				}
+				failCount.Store(0)
+
+				log.Debug("cy: get alive check response", zap.Int64("count", resp.Count))
+
+				if resp.Count == 0 {
+					log.Error("session has been removed, exit...", zap.String("key", s.getCompleteKey()))
+					s.stop()
+				}
+			}()
+
 		case _, ok := <-s.liveCh:
 			// ok, still alive
 			if ok {
@@ -854,4 +878,12 @@ func (s *Session) ProcessActiveStandBy(activateFunc func()) error {
 		activateFunc()
 	}
 	return nil
+}
+
+func (s *Session) stop() {
+	s.stopOnce.Do(func() {
+		if s.liveCh != nil {
+			close(s.liveCh)
+		}
+	})
 }
