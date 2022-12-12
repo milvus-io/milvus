@@ -35,15 +35,11 @@ import (
 const (
 	// root field of row-based json format
 	RowRootNode = "rows"
-	// minimal size of a buffer
-	MinBufferSize = 1024
-	// split file into batches no more than this count
-	MaxBatchCount = 16
 )
 
 type JSONParser struct {
 	ctx          context.Context  // for canceling parse process
-	bufSize      int64            // max rows in a buffer
+	bufRowCount  int              // max rows in a buffer
 	fields       map[string]int64 // fields need to be parsed
 	name2FieldID map[string]storage.FieldID
 }
@@ -69,7 +65,7 @@ func NewJSONParser(ctx context.Context, collectionSchema *schemapb.CollectionSch
 
 	parser := &JSONParser{
 		ctx:          ctx,
-		bufSize:      MinBufferSize,
+		bufRowCount:  1024,
 		fields:       fields,
 		name2FieldID: name2FieldID,
 	}
@@ -84,19 +80,24 @@ func adjustBufSize(parser *JSONParser, collectionSchema *schemapb.CollectionSche
 		return
 	}
 
-	// split the file into no more than MaxBatchCount batches to parse
 	// for high dimensional vector, the bufSize is a small value, read few rows each time
 	// for low dimensional vector, the bufSize is a large value, read more rows each time
-	maxRows := MaxFileSize / sizePerRecord
-	bufSize := maxRows / MaxBatchCount
-
-	// bufSize should not be less than MinBufferSize
-	if bufSize < MinBufferSize {
-		bufSize = MinBufferSize
+	bufRowCount := parser.bufRowCount
+	for {
+		if bufRowCount*sizePerRecord > SingleBlockSize {
+			bufRowCount--
+		} else {
+			break
+		}
 	}
 
-	log.Info("JSON parser: reset bufSize", zap.Int("sizePerRecord", sizePerRecord), zap.Int("bufSize", bufSize))
-	parser.bufSize = int64(bufSize)
+	// at least one row per buffer
+	if bufRowCount <= 0 {
+		bufRowCount = 1
+	}
+
+	log.Info("JSON parser: reset bufRowCount", zap.Int("sizePerRecord", sizePerRecord), zap.Int("bufRowCount", bufRowCount))
+	parser.bufRowCount = bufRowCount
 }
 
 func (p *JSONParser) verifyRow(raw interface{}) (map[storage.FieldID]interface{}, error) {
@@ -185,7 +186,7 @@ func (p *JSONParser) ParseRows(r io.Reader, handler JSONRowHandler) error {
 		}
 
 		// read buffer
-		buf := make([]map[storage.FieldID]interface{}, 0, MinBufferSize)
+		buf := make([]map[storage.FieldID]interface{}, 0, p.bufRowCount)
 		for dec.More() {
 			var value interface{}
 			if err := dec.Decode(&value); err != nil {
@@ -199,7 +200,7 @@ func (p *JSONParser) ParseRows(r io.Reader, handler JSONRowHandler) error {
 			}
 
 			buf = append(buf, row)
-			if len(buf) >= int(p.bufSize) {
+			if len(buf) >= p.bufRowCount {
 				isEmpty = false
 				if err = handler.Handle(buf); err != nil {
 					log.Error("JSON parser: failed to convert row value to entity", zap.Error(err))
@@ -207,7 +208,7 @@ func (p *JSONParser) ParseRows(r io.Reader, handler JSONRowHandler) error {
 				}
 
 				// clear the buffer
-				buf = make([]map[storage.FieldID]interface{}, 0, MinBufferSize)
+				buf = make([]map[storage.FieldID]interface{}, 0, p.bufRowCount)
 			}
 		}
 
