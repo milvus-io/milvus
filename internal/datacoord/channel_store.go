@@ -156,6 +156,7 @@ func (c *ChannelStore) Reload() error {
 		channel := &channel{
 			Name:         cw.GetVchan().GetChannelName(),
 			CollectionID: cw.GetVchan().GetCollectionID(),
+			Schema:       cw.GetSchema(),
 		}
 		c.channelsInfo[nodeID].Channels = append(c.channelsInfo[nodeID].Channels, channel)
 	}
