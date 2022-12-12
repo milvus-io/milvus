@@ -135,6 +135,41 @@ func (cit *CreateIndexTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
+func (cit *CreateIndexTask) createIndexAtomic(index *model.Index, segmentsInfo []*datapb.SegmentInfo) ([]UniqueID, []*datapb.SegmentInfo, error) {
+	buildIDs := make([]UniqueID, 0)
+	segments := make([]*datapb.SegmentInfo, 0)
+	for _, segmentInfo := range segmentsInfo {
+		segIdx := &model.SegmentIndex{
+			SegmentID:    segmentInfo.ID,
+			CollectionID: segmentInfo.CollectionID,
+			PartitionID:  segmentInfo.PartitionID,
+			NumRows:      segmentInfo.NumOfRows,
+			IndexID:      cit.indexID,
+			CreateTime:   cit.req.GetTimestamp(),
+		}
+		have, buildID, err := cit.indexCoordClient.createIndexForSegment(segIdx)
+		if err != nil {
+			log.Error("IndexCoord create index on segment fail", zap.Int64("collectionID", cit.req.CollectionID),
+				zap.Int64("fieldID", cit.req.FieldID), zap.String("indexName", cit.req.IndexName),
+				zap.Int64("segmentID", segIdx.SegmentID), zap.Error(err))
+			return nil, nil, err
+		}
+		if have || buildID == 0 {
+			continue
+		}
+		segments = append(segments, segmentInfo)
+		buildIDs = append(buildIDs, buildID)
+	}
+
+	err := cit.table.CreateIndex(index)
+	if err != nil {
+		log.Error("IndexCoord create index fail", zap.Int64("collectionID", cit.req.CollectionID),
+			zap.Int64("fieldID", cit.req.FieldID), zap.String("indexName", cit.req.IndexName), zap.Error(err))
+		return nil, nil, err
+	}
+	return buildIDs, segments, nil
+}
+
 // Execute adds the index task to meta table.
 func (cit *CreateIndexTask) Execute(ctx context.Context) error {
 	log.Info("IndexCoord CreateIndexTask Execute", zap.Int64("collectionID", cit.req.CollectionID),
@@ -154,6 +189,11 @@ func (cit *CreateIndexTask) Execute(ctx context.Context) error {
 		IsAutoIndex:     cit.req.GetIsAutoIndex(),
 		UserIndexParams: cit.req.GetUserIndexParams(),
 	}
+
+	// lock before GetFlushedSegments,
+	// prevent the flush watcher watches the new flushed segment just after getting the flushed segments, and it locks firstly.
+	cit.indexCoordClient.indexGCLock.RLock()
+	defer cit.indexCoordClient.indexGCLock.RUnlock()
 
 	// Get flushed segments
 	flushedSegments, err := cit.dataCoordClient.GetFlushedSegments(cit.ctx, &datapb.GetFlushedSegmentsRequest{
@@ -185,36 +225,7 @@ func (cit *CreateIndexTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	buildIDs := make([]UniqueID, 0)
-	segments := make([]*datapb.SegmentInfo, 0)
-	for _, segmentInfo := range segmentsInfo.Infos {
-		if segmentInfo.State != commonpb.SegmentState_Flushed {
-			continue
-		}
-
-		segIdx := &model.SegmentIndex{
-			SegmentID:    segmentInfo.ID,
-			CollectionID: segmentInfo.CollectionID,
-			PartitionID:  segmentInfo.PartitionID,
-			NumRows:      segmentInfo.NumOfRows,
-			IndexID:      cit.indexID,
-			CreateTime:   cit.req.GetTimestamp(),
-		}
-		have, buildID, err := cit.indexCoordClient.createIndexForSegment(segIdx)
-		if err != nil {
-			log.Error("IndexCoord create index on segment fail", zap.Int64("collectionID", cit.req.CollectionID),
-				zap.Int64("fieldID", cit.req.FieldID), zap.String("indexName", cit.req.IndexName),
-				zap.Int64("segmentID", segIdx.SegmentID), zap.Error(err))
-			return err
-		}
-		if have || buildID == 0 {
-			continue
-		}
-		segments = append(segments, segmentInfo)
-		buildIDs = append(buildIDs, buildID)
-	}
-
-	err = cit.table.CreateIndex(index)
+	buildIDs, segments, err := cit.createIndexAtomic(index, segmentsInfo.GetInfos())
 	if err != nil {
 		log.Error("IndexCoord create index fail", zap.Int64("collectionID", cit.req.CollectionID),
 			zap.Int64("fieldID", cit.req.FieldID), zap.String("indexName", cit.req.IndexName), zap.Error(err))
