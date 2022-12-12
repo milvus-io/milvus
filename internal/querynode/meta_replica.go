@@ -625,7 +625,7 @@ func (replica *metaReplica) addSegmentPrivate(segment *Segment) error {
 		fmt.Sprint(paramtable.GetNodeID()),
 		fmt.Sprint(segment.collectionID),
 		fmt.Sprint(segment.partitionID),
-		string(segType),
+		segType.String(),
 		fmt.Sprint(segment.indexedFieldInfos.Len()),
 	).Inc()
 	if rowCount > 0 {
@@ -733,7 +733,7 @@ func (replica *metaReplica) removeSegmentPrivate(segmentID UniqueID, segType seg
 			fmt.Sprint(paramtable.GetNodeID()),
 			fmt.Sprint(segment.collectionID),
 			fmt.Sprint(segment.partitionID),
-			string(segType),
+			segType.String(),
 			// Note: this field is mutable after segment is loaded.
 			fmt.Sprint(segment.indexedFieldInfos.Len()),
 		).Dec()
