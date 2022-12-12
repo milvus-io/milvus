@@ -672,7 +672,7 @@ func TestRollBF(t *testing.T) {
 	})
 }
 
-type InsertBufferNodeSuit struct {
+type InsertBufferNodeSuite struct {
 	suite.Suite
 
 	channel *ChannelMeta
@@ -684,7 +684,7 @@ type InsertBufferNodeSuit struct {
 	originalConfig int64
 }
 
-func (s *InsertBufferNodeSuit) SetupSuite() {
+func (s *InsertBufferNodeSuite) SetupSuite() {
 	insertBufferNodeTestDir := "/tmp/milvus_test/insert_buffer_node"
 	rc := &RootCoordFactory{
 		pkType: schemapb.DataType_Int64,
@@ -700,12 +700,12 @@ func (s *InsertBufferNodeSuit) SetupSuite() {
 	paramtable.Get().Save(Params.DataNodeCfg.FlushInsertBufferSize.Key, "200")
 }
 
-func (s *InsertBufferNodeSuit) TearDownSuite() {
+func (s *InsertBufferNodeSuite) TearDownSuite() {
 	s.cm.RemoveWithPrefix(context.Background(), s.cm.RootPath())
 	paramtable.Get().Save(Params.DataNodeCfg.FlushInsertBufferSize.Key, strconv.FormatInt(s.originalConfig, 10))
 }
 
-func (s *InsertBufferNodeSuit) SetupTest() {
+func (s *InsertBufferNodeSuite) SetupTest() {
 	segs := []struct {
 		segID UniqueID
 		sType datapb.SegmentType
@@ -728,11 +728,11 @@ func (s *InsertBufferNodeSuit) SetupTest() {
 	}
 }
 
-func (s *InsertBufferNodeSuit) TearDownTest() {
+func (s *InsertBufferNodeSuite) TearDownTest() {
 	s.channel.removeSegments(1, 2, 3)
 }
 
-func (s *InsertBufferNodeSuit) TestFillInSyncTasks() {
+func (s *InsertBufferNodeSuite) TestFillInSyncTasks() {
 	s.Run("drop collection", func() {
 		fgMsg := &flowGraphMsg{dropCollection: true}
 
@@ -857,7 +857,7 @@ func (s *InsertBufferNodeSuit) TestFillInSyncTasks() {
 }
 
 func TestInsertBufferNodeSuite(t *testing.T) {
-	suite.Run(t, new(InsertBufferNodeSuit))
+	suite.Run(t, new(InsertBufferNodeSuite))
 }
 
 // CompactedRootCoord has meta info compacted at ts
