@@ -2171,7 +2171,7 @@ class TestLoadCollection(TestcaseBase):
         collection_wr.load(check_task=CheckTasks.err_res, check_items=error)
         collection_wr.release(check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L2)
     def test_release_collection_after_drop(self):
         """
         target: test release collection after drop
@@ -2187,6 +2187,33 @@ class TestLoadCollection(TestcaseBase):
         error = {ct.err_code: 0,
                  ct.err_msg: "can't find collection"}
         collection_wr.release(check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_load_partition_names_empty(self):
+        """
+        target: test query another partition
+        method: 1. insert entities into two partitions
+                2.query on one partition and query result empty
+        expected: query result is empty
+        """
+        self._connect()
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+        partition_w = self.init_partition_wrap(collection_wrap=collection_w)
+
+        # insert [0, half) into partition_w
+        half = ct.default_nb // 2
+        df_partition = cf.gen_default_dataframe_data(nb=half)
+        partition_w.insert(df_partition)
+        # insert [half, nb) into _default
+        df_default = cf.gen_default_dataframe_data(nb=half, start=half)
+        collection_w.insert(df_default)
+        # flush
+        collection_w.num_entities
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
+
+        # load
+        error = {ct.err_code: 0, ct.err_msg: "due to no partition specified"}
+        collection_w.load(partition_names=[], check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_load_partitions_release_collection(self):
