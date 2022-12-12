@@ -99,6 +99,9 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 		collectionID      = UniqueID(9)
 		nodeID            = UniqueID(119)
 		channelNamePrefix = t.Name()
+
+		waitFor = time.Second
+		tick    = time.Millisecond * 10
 	)
 
 	t.Run("ToWatch-WatchSuccess", func(t *testing.T) {
@@ -123,11 +126,13 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 		waitAndStore(t, metakv, key, datapb.ChannelWatchState_ToWatch, datapb.ChannelWatchState_WatchSuccess)
 		waitAndCheckState(t, metakv, datapb.ChannelWatchState_WatchSuccess, nodeID, cName, collectionID)
 
+		assert.Eventually(t, func() bool {
+			_, loaded := chManager.stateTimer.runningTimers.Load(cName)
+			return !loaded
+		}, waitFor, tick)
+
 		cancel()
 		wg.Wait()
-
-		_, loaded := chManager.stateTimer.runningTimers.Load(cName)
-		assert.False(t, loaded)
 	})
 
 	t.Run("ToWatch-WatchFail-ToRelease", func(t *testing.T) {
@@ -151,11 +156,13 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 		waitAndStore(t, metakv, key, datapb.ChannelWatchState_ToWatch, datapb.ChannelWatchState_WatchFailure)
 		waitAndCheckState(t, metakv, datapb.ChannelWatchState_ToRelease, nodeID, cName, collectionID)
 
+		assert.Eventually(t, func() bool {
+			_, loaded := chManager.stateTimer.runningTimers.Load(cName)
+			return loaded
+		}, waitFor, tick)
+
 		cancel()
 		wg.Wait()
-
-		_, loaded := chManager.stateTimer.runningTimers.Load(cName)
-		assert.True(t, loaded)
 		chManager.stateTimer.removeTimers([]string{cName})
 	})
 
@@ -186,11 +193,13 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 		chManager.stateTimer.stopIfExist(e)
 
 		waitAndCheckState(t, metakv, datapb.ChannelWatchState_ToRelease, nodeID, cName, collectionID)
+		assert.Eventually(t, func() bool {
+			_, loaded := chManager.stateTimer.runningTimers.Load(cName)
+			return loaded
+		}, waitFor, tick)
+
 		cancel()
 		wg.Wait()
-
-		_, loaded := chManager.stateTimer.runningTimers.Load(cName)
-		assert.True(t, loaded)
 		chManager.stateTimer.removeTimers([]string{cName})
 	})
 
@@ -270,11 +279,13 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 
 		waitAndCheckState(t, metakv, datapb.ChannelWatchState_ToWatch, nodeID, cName, collectionID)
 
+		assert.Eventually(t, func() bool {
+			_, loaded := chManager.stateTimer.runningTimers.Load(cName)
+			return loaded
+		}, waitFor, tick)
 		cancel()
 		wg.Wait()
 
-		_, loaded := chManager.stateTimer.runningTimers.Load(cName)
-		assert.True(t, loaded)
 		chManager.stateTimer.removeTimers([]string{cName})
 	})
 
@@ -359,12 +370,13 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 		waitAndStore(t, metakv, key, datapb.ChannelWatchState_ToRelease, datapb.ChannelWatchState_ReleaseFailure)
 
 		waitAndCheckState(t, metakv, datapb.ChannelWatchState_ToWatch, nodeID, cName, collectionID)
+		assert.Eventually(t, func() bool {
+			_, loaded := chManager.stateTimer.runningTimers.Load(cName)
+			return loaded
+		}, waitFor, tick)
 
 		cancel()
 		wg.Wait()
-
-		_, loaded := chManager.stateTimer.runningTimers.Load(cName)
-		assert.True(t, loaded)
 		chManager.stateTimer.removeTimers([]string{cName})
 	})
 }
