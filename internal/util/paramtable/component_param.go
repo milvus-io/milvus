@@ -153,6 +153,11 @@ type commonConfig struct {
 	LoadNumThreadRatio       float64
 	BeamWidthRatio           float64
 	GracefulTime             int64
+	// Search limit, which applies on:
+	// maximum # of results to return (topK), and
+	// maximum # of search requests (nq).
+	// Check https://milvus.io/docs/limitations.md for more details.
+	TopKLimit int64
 
 	StorageType string
 	SimdType    string
@@ -197,6 +202,7 @@ func (p *commonConfig) init(base *BaseTable) {
 	p.initSimdType()
 	p.initIndexSliceSize()
 	p.initMaxDegree()
+	p.initTopKLimit()
 	p.initSearchListSize()
 	p.initPQCodeBudgetGBRatio()
 	p.initBuildNumThreadsRatio()
@@ -430,6 +436,10 @@ func (p *commonConfig) initBeamWidthRatio() {
 
 func (p *commonConfig) initMaxDegree() {
 	p.MaxDegree = p.Base.ParseInt64WithDefault("common.DiskIndex.MaxDegree", DefaultMaxDegree)
+}
+
+func (p *commonConfig) initTopKLimit() {
+	p.TopKLimit = p.Base.ParseInt64WithDefault("common.topKLimit", 16384)
 }
 
 func (p *commonConfig) initSearchListSize() {

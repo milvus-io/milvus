@@ -344,6 +344,7 @@ func Test_translateToOutputFieldIDs(t *testing.T) {
 }
 
 func TestTaskQuery_functions(t *testing.T) {
+	Params.Init()
 	t.Run("test parseQueryParams", func(t *testing.T) {
 		tests := []struct {
 			description string
