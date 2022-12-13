@@ -22,7 +22,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/distance"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
-	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/trace"
@@ -407,10 +406,10 @@ func (t *searchTask) Execute(ctx context.Context) error {
 	}
 
 	err := executeSearch(WithCache)
-	if errors.Is(err, errInvalidShardLeaders) || funcutil.IsGrpcErr(err) || errors.Is(err, grpcclient.ErrConnect) {
+	if err != nil {
 		log.Ctx(ctx).Warn("first search failed, updating shardleader caches and retry search",
 			zap.Error(err))
-		return executeSearch(WithoutCache)
+		err = executeSearch(WithoutCache)
 	}
 	if err != nil {
 		return fmt.Errorf("fail to search on all shard leaders, err=%v", err)
