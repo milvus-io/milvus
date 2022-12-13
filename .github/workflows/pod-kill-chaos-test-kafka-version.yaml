@@ -92,8 +92,20 @@ jobs:
           sleep 20s
           # check whether port-forward success
           nc -vz 127.0.0.1 19530
-          # check whether milvus server is healthy
-          python scripts/hello_milvus.py
+
+      - name: Run e2e test before chaos
+        timeout-minutes: 5
+        shell: bash
+        working-directory: tests/python_client
+        run: |
+          pytest -s -v testcases/test_e2e.py --host 127.0.0.1 --log-cli-level=INFO --capture=no
+
+      - name: Run data presistence test before chaos
+        timeout-minutes: 5
+        shell: bash
+        working-directory: tests/python_client/chaos
+        run: |
+          pytest -s -v testcases/test_data_persistence.py --host 127.0.0.1 --log-cli-level=INFO --capture=no      
 
       - name: Chaos Test
         timeout-minutes: 15
@@ -139,19 +151,22 @@ jobs:
 
           pytest -s -v testcases/test_e2e.py --host 127.0.0.1 --log-cli-level=INFO --capture=no
 
-      - name: Run hello_milvus after chaos
+      - name: Run data presistence test after chaos
         timeout-minutes: 5
         shell: bash
-        working-directory: tests/python_client
+        working-directory: tests/python_client/chaos
         run: |
-          python chaos/scripts/hello_milvus.py --host 127.0.0.1
+          pytest -s -v testcases/test_data_persistence.py --host 127.0.0.1 --log-cli-level=INFO --capture=no    
 
       - name: Verify all collections after chaos
         timeout-minutes: 15
         shell: bash
-        working-directory: tests/python_client
+        working-directory: tests/python_client/chaos
         run: |
-          python chaos/scripts/verify_all_collections.py --host 127.0.0.1
+          
+          pytest -s -v testcases/test_get_collections.py --host 127.0.0.1 --log-cli-level=INFO --capture=no
+          sleep 2s
+          pytest -s -v testcases/test_all_collections_after_chaos.py --host 127.0.0.1 -n 4 --log-cli-level=INFO --capture=no
 
       - name: Export logs
         if: ${{ always() }}
@@ -162,65 +177,7 @@ jobs:
           kubectl get po -n chaos-testing
           # export k8s log for chaos mesh and milvus
           bash ../../scripts/export_log_k8s.sh chaos-testing ${{ env.RELEASE }} k8s_logs/chaos-test
-
-      - name: Deploy Milvus Again If Previous E2E Test Failed
-        timeout-minutes: 15
-        if: ${{ failure() }}
-        shell: bash
-        working-directory: tests/python_client/chaos
-        run: |
-          kubectl config set-context --current --namespace=chaos-testing
-          bash scripts/uninstall_milvus.sh ${{ env.RELEASE }}
-          if [ ${{ matrix.pod }} != "standalone" ]; then helm install --wait --timeout 720s ${{ env.RELEASE }} milvus/milvus --set image.all.repository=${{ env.IMAGE_REPO }} --set image.all.tag=${{ env.IMAGE_TAG }} -f cluster-values.yaml  -n=chaos-testing; fi
-          if [ ${{ matrix.pod }} == "standalone" ]; then helm install --wait --timeout 720s ${{ env.RELEASE }} milvus/milvus --set image.all.repository=${{ env.IMAGE_REPO }} --set image.all.tag=${{ env.IMAGE_TAG }} --set cluster.enabled=false --set etcd.replicaCount=1 --set minio.mode=standalone --set pulsar.enabled=false -n=chaos-testing; fi
-          kubectl get pods -n chaos-testing
-          sleep 20s
-          kubectl get pods -n chaos-testing
-          ps aux|grep forward|grep -v grep|awk '{print $2}'|xargs kill -9
-          kubectl port-forward service/${{ env.RELEASE }}-milvus 19530 -n chaos-testing >/dev/null 2>&1 &
-          sleep 20s
-          # check whether port-forward success
-          nc -vz 127.0.0.1 19530
-          # check whether milvus server is healthy
-          python scripts/hello_milvus.py
-
-      - name: Data Consist Test
-        timeout-minutes: 5
-        if: ${{ always() }}
-        shell: bash
-        working-directory: tests/python_client/chaos
-        run: |
-          pytest -s -v test_chaos_data_consist.py --host 127.0.0.1 --log-cli-level=INFO --capture=no
-
-      - name: Milvus E2E Test
-        timeout-minutes: 10
-        if: ${{ always() }}
-        shell: bash
-        working-directory: tests/python_client
-        run: |
-          kubectl get pod -n chaos-testing
-          kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=${{ env.RELEASE }} -n chaos-testing --timeout=360s
-          kubectl wait --for=condition=Ready pod -l release=${{ env.RELEASE }} -n chaos-testing --timeout=360s
-          kubectl get pod -n chaos-testing
-          ps aux|grep forward|grep -v grep|awk '{print $2}'|xargs kill -9
-          kubectl port-forward service/${{ env.RELEASE }}-milvus 19530 -n chaos-testing >/dev/null 2>&1 &
-          sleep 20s
-          nc -vz 127.0.0.1 19530
-
-          pytest -s -v testcases/test_e2e.py --host 127.0.0.1 --log-cli-level=INFO --capture=no
-          python chaos/scripts/hello_milvus.py --host 127.0.0.1
-
-      - name: Export logs
-        if: ${{ always() }}
-        shell: bash
-        working-directory: tests/python_client/chaos
-        run: |
-          #in this step, verify whether pod has been killed by pod's age
-          kubectl get po -n chaos-testing
-          # export k8s log for chaos mesh and milvus
-          bash ../../scripts/export_log_k8s.sh chaos-testing ${{ env.RELEASE }} k8s_logs/data-consist-test
-          bash ../../scripts/export_log_k8s.sh chaos-testing chaos-daemon k8s_logs/chaos-mesh-daemon
-
+      
       - name: Upload logs
         if: ${{ ! success() }}
         uses: actions/upload-artifact@v2
