@@ -85,7 +85,7 @@ pull_request_rules:
       - or:
         - base=master
         - base~=^2(\.\d+){2}$
-      - -files~=^(?=.*((\.(go|h|cpp)|CMakeLists.txt))).*$
+      - -files~=^(?=.*((\.(go|h|cpp)|CMakeLists.txt|conanfile\.*))).*$
       - "status-success=cpu-e2e"
     actions:
       label:
