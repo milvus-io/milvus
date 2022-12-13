@@ -167,6 +167,7 @@ message GetSegmentInfoRequest {
 message GetSegmentInfoResponse {
   common.Status status = 1;
   repeated SegmentInfo infos = 2;
+  map<string, internal.MsgPosition> channel_checkpoint = 3;
 }
 
 message GetInsertBinlogPathsRequest {

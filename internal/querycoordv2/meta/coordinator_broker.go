@@ -45,7 +45,7 @@ type Broker interface {
 	GetCollectionSchema(ctx context.Context, collectionID UniqueID) (*schemapb.CollectionSchema, error)
 	GetPartitions(ctx context.Context, collectionID UniqueID) ([]UniqueID, error)
 	GetRecoveryInfo(ctx context.Context, collectionID UniqueID, partitionID UniqueID) ([]*datapb.VchannelInfo, []*datapb.SegmentBinlogs, error)
-	GetSegmentInfo(ctx context.Context, segmentID ...UniqueID) ([]*datapb.SegmentInfo, error)
+	GetSegmentInfo(ctx context.Context, segmentID ...UniqueID) (*datapb.GetSegmentInfoResponse, error)
 	GetIndexInfo(ctx context.Context, collectionID UniqueID, segmentID UniqueID) ([]*querypb.FieldIndexInfo, error)
 }
 
@@ -138,7 +138,7 @@ func (broker *CoordinatorBroker) GetRecoveryInfo(ctx context.Context, collection
 	return recoveryInfo.Channels, recoveryInfo.Binlogs, nil
 }
 
-func (broker *CoordinatorBroker) GetSegmentInfo(ctx context.Context, ids ...UniqueID) ([]*datapb.SegmentInfo, error) {
+func (broker *CoordinatorBroker) GetSegmentInfo(ctx context.Context, ids ...UniqueID) (*datapb.GetSegmentInfoResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, brokerRPCTimeout)
 	defer cancel()
 
@@ -160,7 +160,7 @@ func (broker *CoordinatorBroker) GetSegmentInfo(ctx context.Context, ids ...Uniq
 		return nil, fmt.Errorf("no such segment in DataCoord")
 	}
 
-	return resp.GetInfos(), nil
+	return resp, nil
 }
 
 func (broker *CoordinatorBroker) GetIndexInfo(ctx context.Context, collectionID UniqueID, segmentID UniqueID) ([]*querypb.FieldIndexInfo, error) {

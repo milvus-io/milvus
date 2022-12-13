@@ -596,6 +596,57 @@ func TestGetSegmentInfo(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, 1, len(resp2.Infos))
 	})
+
+	t.Run("with channel checkpoint", func(t *testing.T) {
+		mockVChannel := "fake-by-dev-rootcoord-dml-1-testgetsegmentinfo-v0"
+		mockPChannel := "fake-by-dev-rootcoord-dml-1"
+
+		pos := &internalpb.MsgPosition{
+			ChannelName: mockPChannel,
+			MsgID:       []byte{},
+			Timestamp:   1000,
+		}
+
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+
+		segInfo := &datapb.SegmentInfo{
+			ID:    0,
+			State: commonpb.SegmentState_Flushed,
+		}
+		err := svr.meta.AddSegment(NewSegmentInfo(segInfo))
+		assert.NoError(t, err)
+
+		req := &datapb.GetSegmentInfoRequest{
+			SegmentIDs: []int64{0},
+		}
+		// no channel checkpoint
+		resp, err := svr.GetSegmentInfo(svr.ctx, req)
+		assert.NoError(t, err)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, 0, len(resp.GetChannelCheckpoint()))
+
+		// with nil insert channel of segment
+		err = svr.meta.UpdateChannelCheckpoint(mockVChannel, pos)
+		assert.NoError(t, err)
+		resp, err = svr.GetSegmentInfo(svr.ctx, req)
+		assert.NoError(t, err)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, 0, len(resp.GetChannelCheckpoint()))
+
+		// normal test
+		segInfo.InsertChannel = mockVChannel
+		segInfo.ID = 2
+		req.SegmentIDs = []int64{2}
+		err = svr.meta.AddSegment(NewSegmentInfo(segInfo))
+		assert.NoError(t, err)
+		resp, err = svr.GetSegmentInfo(svr.ctx, req)
+		assert.NoError(t, err)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.Equal(t, 1, len(resp.GetChannelCheckpoint()))
+		assert.Equal(t, mockPChannel, resp.ChannelCheckpoint[mockVChannel].ChannelName)
+		assert.Equal(t, Timestamp(1000), resp.ChannelCheckpoint[mockVChannel].Timestamp)
+	})
 }
 
 func TestGetComponentStates(t *testing.T) {
