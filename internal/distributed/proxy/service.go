@@ -645,6 +645,10 @@ func (s *Server) GetLoadingProgress(ctx context.Context, request *milvuspb.GetLo
 	return s.proxy.GetLoadingProgress(ctx, request)
 }
 
+func (s *Server) GetLoadState(ctx context.Context, request *milvuspb.GetLoadStateRequest) (*milvuspb.GetLoadStateResponse, error) {
+	return s.proxy.GetLoadState(ctx, request)
+}
+
 // CreateIndex notifies Proxy to create index
 func (s *Server) CreateIndex(ctx context.Context, request *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
 	return s.proxy.CreateIndex(ctx, request)

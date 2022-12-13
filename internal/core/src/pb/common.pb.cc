@@ -226,7 +226,7 @@ static void InitDefaultsscc_info_Status_common_2eproto() {
     {{ATOMIC_VAR_INIT(::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase::kUninitialized), 0, InitDefaultsscc_info_Status_common_2eproto}, {}};
 
 static ::PROTOBUF_NAMESPACE_ID::Metadata file_level_metadata_common_2eproto[11];
-static const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* file_level_enum_descriptors_common_2eproto[12];
+static const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* file_level_enum_descriptors_common_2eproto[13];
 static constexpr ::PROTOBUF_NAMESPACE_ID::ServiceDescriptor const** file_level_service_descriptors_common_2eproto = nullptr;
 
 const ::PROTOBUF_NAMESPACE_ID::uint32 TableStruct_common_2eproto::offsets[] PROTOBUF_SECTION_VARIABLE(protodesc_cold) = {
@@ -470,11 +470,14 @@ const char descriptor_table_protodef_common_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "ManageOwnership\020\027\022\027\n\023PrivilegeSelectUser"
   "\020\030*S\n\tStateCode\022\020\n\014Initializing\020\000\022\013\n\007Hea"
   "lthy\020\001\022\014\n\010Abnormal\020\002\022\013\n\007StandBy\020\003\022\014\n\010Sto"
-  "pping\020\004:^\n\021privilege_ext_obj\022\037.google.pr"
-  "otobuf.MessageOptions\030\351\007 \001(\0132!.milvus.pr"
-  "oto.common.PrivilegeExtBU\n\016io.milvus.grp"
-  "cB\013CommonProtoP\001Z1github.com/milvus-io/m"
-  "ilvus-proto/go-api/commonpb\240\001\001b\006proto3"
+  "pping\020\004*c\n\tLoadState\022\025\n\021LoadStateNotExis"
+  "t\020\000\022\024\n\020LoadStateNotLoad\020\001\022\024\n\020LoadStateLo"
+  "ading\020\002\022\023\n\017LoadStateLoaded\020\003:^\n\021privileg"
+  "e_ext_obj\022\037.google.protobuf.MessageOptio"
+  "ns\030\351\007 \001(\0132!.milvus.proto.common.Privileg"
+  "eExtBf\n\016io.milvus.grpcB\013CommonProtoP\001Z1g"
+  "ithub.com/milvus-io/milvus-proto/go-api/"
+  "commonpb\240\001\001\252\002\016IO.Milvus.Grpcb\006proto3"
   ;
 static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_common_2eproto_deps[1] = {
   &::descriptor_table_google_2fprotobuf_2fdescriptor_2eproto,
@@ -495,7 +498,7 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_com
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_common_2eproto_once;
 static bool descriptor_table_common_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_common_2eproto = {
-  &descriptor_table_common_2eproto_initialized, descriptor_table_protodef_common_2eproto, "common.proto", 5398,
+  &descriptor_table_common_2eproto_initialized, descriptor_table_protodef_common_2eproto, "common.proto", 5516,
   &descriptor_table_common_2eproto_once, descriptor_table_common_2eproto_sccs, descriptor_table_common_2eproto_deps, 11, 1,
   schemas, file_default_instances, TableStruct_common_2eproto::offsets,
   file_level_metadata_common_2eproto, 11, file_level_enum_descriptors_common_2eproto, file_level_service_descriptors_common_2eproto,
@@ -843,6 +846,22 @@ bool StateCode_IsValid(int value) {
     case 2:
     case 3:
     case 4:
+      return true;
+    default:
+      return false;
+  }
+}
+
+const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* LoadState_descriptor() {
+  ::PROTOBUF_NAMESPACE_ID::internal::AssignDescriptors(&descriptor_table_common_2eproto);
+  return file_level_enum_descriptors_common_2eproto[12];
+}
+bool LoadState_IsValid(int value) {
+  switch (value) {
+    case 0:
+    case 1:
+    case 2:
+    case 3:
       return true;
     default:
       return false;
