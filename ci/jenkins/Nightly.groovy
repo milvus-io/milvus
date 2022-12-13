@@ -103,13 +103,17 @@ pipeline {
                                         script {
                                             sh 'printenv'
                                             def clusterEnabled = "false"
+                                            def mysqlEnabled = "false"
                                             // def setMemoryResourceLimitArgs="--set standalone.resources.limits.memory=4Gi"
                                             def mqMode='pulsar' // default using is pulsar
+                                            def mysql_architecture = "standalone"
                                             if ("${MILVUS_SERVER_TYPE}" == "distributed-pulsar") {
                                                 clusterEnabled = "true"
                                             } else if ("${MILVUS_SERVER_TYPE}" == "distributed-kafka") {
                                                 clusterEnabled = "true"
+                                                mysqlEnabled = "true"
                                                 mqMode='kafka'
+                                                mysql_architecture = "replication"
                                             }
                                             if ("${MILVUS_CLIENT}" == "pymilvus") {
                                                 if ("${imageTag}"==''){
@@ -141,6 +145,8 @@ pipeline {
                                                     --set queryNode.replicas=2 \
                                                     --set indexNode.replicas=2 \
                                                     --set dataNode.replicas=2 \
+                                                    --set mysql.enabled=${mysqlEnabled} \
+                                                    --set mysql.architecture=${mysql_architecture} \
                                                     --set dataCoordinator.gc.missingTolerance=86400 \
                                                     --set dataCoordinator.gc.dropTolerance=86400 \
                                                     --set indexCoordinator.gc.interval=1 \
@@ -156,6 +162,7 @@ pipeline {
                                                     --set standalone.disk.enabled=true \
                                                     --version ${chart_version} \
                                                     -f values/${mqMode}.yaml \
+                                                    -f values/mysql.yaml \
                                                     -f values/ci/nightly.yaml "
                                                     """
                                                 }

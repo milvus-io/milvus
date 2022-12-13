@@ -174,7 +174,7 @@ mysql:
           index_build_id BIGINT,
           enable_index BOOL NOT NULL,
           create_time bigint unsigned,
-          index_file_paths VARCHAR(4096),
+          index_file_keys VARCHAR(4096),
           index_size BIGINT UNSIGNED,
           `version` INT UNSIGNED,
           is_deleted BOOL DEFAULT FALSE COMMENT 'as mark_deleted',
