@@ -54,6 +54,19 @@ RUN mkdir -p /usr/local/go && wget -qO- "https://golang.org/dl/go1.18.3.linux-am
     go clean --modcache && \
     chmod -R 777 "$GOPATH" && chmod -R a+w $(go env GOTOOLDIR)
 
+# Install google abseil
+RUN wget https://github.com/abseil/abseil-cpp/archive/20220623.1.tar.gz && \
+   tar zxf 20220623.1.tar.gz && cd abseil-cpp-20220623.1 && \
+   sed -i 's/^#define ABSL_OPTION_USE_\(.*\) 2/#define ABSL_OPTION_USE_\1 0/' "absl/base/options.h" && \
+   cmake \
+   -DCMAKE_BUILD_TYPE=Release \
+   -DABSL_BUILD_TESTING=OFF \
+   -DBUILD_SHARED_LIBS=yes \
+   -H. -Bcmake-out && \
+   cmake --build cmake-out -- && \
+   cmake --build cmake-out --target install -- && \
+   cd ../ && rm -rf ./abseil-cpp-20220623.1* && rm -rf 20220623.1.tar.gz*
+
 RUN ln -s /go/bin/dlv /go/bin/dlv-dap
 
 RUN echo 'root:root' | chpasswd
