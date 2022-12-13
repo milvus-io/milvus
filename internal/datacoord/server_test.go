@@ -46,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+
 	"github.com/milvus-io/milvus/internal/common"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
@@ -3236,6 +3237,7 @@ func TestDataCoord_Import(t *testing.T) {
 	t.Run("no datanode available", func(t *testing.T) {
 		svr := newTestServer(t, nil)
 		Params.BaseTable.Save("minio.address", "minio:9000")
+		defer Params.BaseTable.Reset("minio.address")
 		resp, err := svr.Import(svr.ctx, &datapb.ImportTaskRequest{
 			ImportTask: &datapb.ImportTask{
 				CollectionId: 100,
