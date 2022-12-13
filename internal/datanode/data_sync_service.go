@@ -54,6 +54,7 @@ type dataSyncService struct {
 	dataCoord    types.DataCoord // DataCoord instance to interact with
 	clearSignal  chan<- string   // signal channel to notify flowgraph close for collection/partition drop msg consumed
 
+	delBufferManager *DelBufferManager
 	flushingSegCache *Cache       // a guarding cache stores currently flushing segment ids
 	flushManager     flushManager // flush manager handles flush process
 	chunkManager     storage.ChunkManager
@@ -80,6 +81,12 @@ func newDataSyncService(ctx context.Context,
 
 	ctx1, cancel := context.WithCancel(ctx)
 
+	delBufferManager := &DelBufferManager{
+		channel:       channel,
+		delMemorySize: 0,
+		delBufHeap:    &PriorityQueue{},
+	}
+
 	service := &dataSyncService{
 		ctx:              ctx1,
 		cancelFn:         cancel,
@@ -93,6 +100,7 @@ func newDataSyncService(ctx context.Context,
 		vchannelName:     vchan.GetChannelName(),
 		dataCoord:        dataCoord,
 		clearSignal:      clearSignal,
+		delBufferManager: delBufferManager,
 		flushingSegCache: flushingSegCache,
 		chunkManager:     chunkManager,
 		compactor:        compactor,
@@ -287,6 +295,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 	insertBufferNode, err = newInsertBufferNode(
 		dsService.ctx,
 		dsService.collectionID,
+		dsService.delBufferManager,
 		dsService.flushCh,
 		dsService.resendTTCh,
 		dsService.flushManager,
@@ -298,7 +307,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 	}
 
 	var deleteNode Node
-	deleteNode, err = newDeleteNode(dsService.ctx, dsService.flushManager, dsService.clearSignal, c)
+	deleteNode, err = newDeleteNode(dsService.ctx, dsService.flushManager, dsService.delBufferManager, dsService.clearSignal, c)
 	if err != nil {
 		return err
 	}

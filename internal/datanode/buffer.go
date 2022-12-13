@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sync"
 
 	"go.uber.org/zap"
 
@@ -40,6 +41,7 @@ import (
 // but at the first stage, this struct is only used for delete buff
 type DelBufferManager struct {
 	channel       Channel
+	mu            sync.Mutex // guards delMemorySize and delBufHeap
 	delMemorySize int64
 	delBufHeap    *PriorityQueue
 }
@@ -97,6 +99,8 @@ func (bm *DelBufferManager) StoreNewDeletes(segID UniqueID, pks []primaryKey,
 	delDataBuf.updateStartAndEndPosition(startPos, endPos)
 
 	//4. update and sync memory size with priority queue
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
 	if !loaded {
 		delDataBuf.item.segmentID = segID
 		delDataBuf.item.memorySize = bufSize
@@ -120,6 +124,8 @@ func (bm *DelBufferManager) Load(segID UniqueID) (delDataBuf *DelDataBuf, ok boo
 }
 
 func (bm *DelBufferManager) Delete(segID UniqueID) {
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
 	if buf, ok := bm.channel.getCurDeleteBuffer(segID); ok {
 		item := buf.item
 		bm.delMemorySize -= item.memorySize
@@ -141,6 +147,8 @@ func (bm *DelBufferManager) CompactSegBuf(compactedToSegID UniqueID, compactedFr
 			bm.Delete(segID)
 		}
 	}
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
 	// only store delBuf if EntriesNum > 0
 	if compactToDelBuff.EntriesNum > 0 {
 		if loaded {
@@ -156,6 +164,8 @@ func (bm *DelBufferManager) CompactSegBuf(compactedToSegID UniqueID, compactedFr
 }
 
 func (bm *DelBufferManager) ShouldFlushSegments() []UniqueID {
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
 	var shouldFlushSegments []UniqueID
 	if bm.delMemorySize < Params.DataNodeCfg.FlushDeleteBufferBytes.GetAsInt64() {
 		return shouldFlushSegments
