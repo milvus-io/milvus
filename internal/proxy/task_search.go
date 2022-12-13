@@ -648,10 +648,13 @@ func selectHighestScoreIndex(subSearchResultData []*schemapb.SearchResultData, s
 			resultDataIdx = sIdx
 			maxScore = sScore
 		} else if sScore == maxScore {
-			sID := typeutil.GetPK(subSearchResultData[i].GetIds(), sIdx)
-			tmpID := typeutil.GetPK(subSearchResultData[subSearchIdx].GetIds(), resultDataIdx)
-
-			if typeutil.ComparePK(sID, tmpID) {
+			if subSearchIdx == -1 {
+				// A bad case happens where Knowhere returns distance/score == +/-maxFloat32
+				// by mistake.
+				log.Error("a bad score is returned, something is wrong here!", zap.Float32("score", sScore))
+			} else if typeutil.ComparePK(
+				typeutil.GetPK(subSearchResultData[i].GetIds(), sIdx),
+				typeutil.GetPK(subSearchResultData[subSearchIdx].GetIds(), resultDataIdx)) {
 				subSearchIdx = i
 				resultDataIdx = sIdx
 				maxScore = sScore
