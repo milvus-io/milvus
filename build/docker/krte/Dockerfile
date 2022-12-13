@@ -53,6 +53,8 @@ RUN echo "Installing Packages ..." \
             software-properties-common \
             unzip \
             jq \
+            wget \
+        && wget -qO- "https://cmake.org/files/v3.24/cmake-3.24.0-linux-x86_64.tar.gz" | tar --strip-components=1 -xz -C /usr/local \
         && python3 -m pip install --no-cache-dir --upgrade pip \
         && rm -rf /var/lib/apt/lists/* \
     && echo "Installing Go ..." \
@@ -61,6 +63,18 @@ RUN echo "Installing Packages ..." \
         && tar xzf "${GO_TARBALL}" -C /usr/local \
         && rm "${GO_TARBALL}"\
         && mkdir -p "${GOPATH}/bin" \
+    && echo "Install google abseil ..." &&\
+        wget https://github.com/abseil/abseil-cpp/archive/20220623.1.tar.gz && \
+        tar zxf 20220623.1.tar.gz && cd abseil-cpp-20220623.1 && \
+        sed -i 's/^#define ABSL_OPTION_USE_\(.*\) 2/#define ABSL_OPTION_USE_\1 0/' "absl/base/options.h" && \
+        cmake \
+       -DCMAKE_BUILD_TYPE=Release \
+       -DABSL_BUILD_TESTING=OFF \
+       -DBUILD_SHARED_LIBS=yes \
+       -H. -Bcmake-out && \
+       cmake --build cmake-out -- && \
+       cmake --build cmake-out --target install -- && \
+       cd ../ && rm -rf ./abseil-cpp-20220623.1* && rm -rf 20220623.1.tar.gz* \
     && echo "Installing kubectl, helm ..." \
         && curl -fsSL "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" --output /usr/local/bin/kubectl \
         && chmod 755 /usr/local/bin/kubectl \
