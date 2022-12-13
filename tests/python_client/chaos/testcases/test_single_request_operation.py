@@ -1,7 +1,8 @@
 import pytest
 from time import sleep
 from pymilvus import connections
-from chaos.checker import (InsertChecker,
+from chaos.checker import (CreateChecker,
+                           InsertChecker,
                            FlushChecker, 
                            SearchChecker,
                            QueryChecker,
@@ -48,6 +49,7 @@ class TestOperations(TestBase):
     def init_health_checkers(self, collection_name=None):
         c_name = collection_name
         checkers = {
+            Op.create: CreateChecker(collection_name=c_name),
             Op.insert: InsertChecker(collection_name=c_name),
             Op.flush: FlushChecker(collection_name=c_name),
             Op.index: IndexChecker(collection_name=c_name),
