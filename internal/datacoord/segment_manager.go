@@ -24,12 +24,13 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
-	"go.uber.org/zap"
 )
 
 var (

@@ -1289,7 +1289,7 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	p.SegmentSealProportion = ParamItem{
 		Key:          "dataCoord.segment.sealProportion",
 		Version:      "2.0.0",
-		DefaultValue: "0",
+		DefaultValue: "0.25",
 	}
 	p.SegmentSealProportion.Init(base.mgr)
 
@@ -1303,7 +1303,7 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	p.SegmentMaxLifetime = ParamItem{
 		Key:          "dataCoord.segment.maxLife",
 		Version:      "2.0.0",
-		DefaultValue: "24",
+		DefaultValue: "86400",
 	}
 	p.SegmentMaxLifetime.Init(base.mgr)
 
