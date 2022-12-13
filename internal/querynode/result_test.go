@@ -18,6 +18,7 @@ package querynode
 
 import (
 	"context"
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -424,51 +425,104 @@ func TestResult_selectSearchResultData_int(t *testing.T) {
 		nq            int64
 		qi            int64
 	}
-	tests := []struct {
-		name string
-		args args
-		want int
-	}{
-		{
-			args: args{
-				dataArray: []*schemapb.SearchResultData{
-					{
-						Ids: &schemapb.IDs{
-							IdField: &schemapb.IDs_IntId{
-								IntId: &schemapb.LongArray{
-									Data: []int64{11, 9, 7, 5, 3, 1},
+	t.Run("Integer ID", func(t *testing.T) {
+		tests := []struct {
+			name string
+			args args
+			want int
+		}{
+			{
+				args: args{
+					dataArray: []*schemapb.SearchResultData{
+						{
+							Ids: &schemapb.IDs{
+								IdField: &schemapb.IDs_IntId{
+									IntId: &schemapb.LongArray{
+										Data: []int64{11, 9, 7, 5, 3, 1},
+									},
 								},
 							},
+							Scores: []float32{1.1, 0.9, 0.7, 0.5, 0.3, 0.1},
+							Topks:  []int64{2, 2, 2},
 						},
-						Scores: []float32{1.1, 0.9, 0.7, 0.5, 0.3, 0.1},
-						Topks:  []int64{2, 2, 2},
-					},
-					{
-						Ids: &schemapb.IDs{
-							IdField: &schemapb.IDs_IntId{
-								IntId: &schemapb.LongArray{
-									Data: []int64{12, 10, 8, 6, 4, 2},
+						{
+							Ids: &schemapb.IDs{
+								IdField: &schemapb.IDs_IntId{
+									IntId: &schemapb.LongArray{
+										Data: []int64{12, 10, 8, 6, 4, 2},
+									},
 								},
 							},
+							Scores: []float32{1.2, 1.0, 0.8, 0.6, 0.4, 0.2},
+							Topks:  []int64{2, 2, 2},
 						},
-						Scores: []float32{1.2, 1.0, 0.8, 0.6, 0.4, 0.2},
-						Topks:  []int64{2, 2, 2},
 					},
+					resultOffsets: [][]int64{{0, 2, 4}, {0, 2, 4}},
+					offsets:       []int64{0, 1},
+					topk:          2,
+					nq:            3,
+					qi:            0,
 				},
-				resultOffsets: [][]int64{{0, 2, 4}, {0, 2, 4}},
-				offsets:       []int64{0, 1},
-				topk:          2,
-				nq:            3,
-				qi:            0,
+				want: 0,
 			},
-			want: 0,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := selectSearchResultData(tt.args.dataArray, tt.args.resultOffsets, tt.args.offsets, tt.args.qi); got != tt.want {
-				t.Errorf("selectSearchResultData() = %v, want %v", got, tt.want)
-			}
-		})
-	}
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				if got := selectSearchResultData(tt.args.dataArray, tt.args.resultOffsets, tt.args.offsets, tt.args.qi); got != tt.want {
+					t.Errorf("selectSearchResultData() = %v, want %v", got, tt.want)
+				}
+			})
+		}
+	})
+
+	t.Run("Integer ID with bad score", func(t *testing.T) {
+		tests := []struct {
+			name string
+			args args
+			want int
+		}{
+			{
+				args: args{
+					dataArray: []*schemapb.SearchResultData{
+						{
+							Ids: &schemapb.IDs{
+								IdField: &schemapb.IDs_IntId{
+									IntId: &schemapb.LongArray{
+										Data: []int64{11, 9, 7, 5, 3, 1},
+									},
+								},
+							},
+							Scores: []float32{-math.MaxFloat32, -math.MaxFloat32, -math.MaxFloat32, -math.MaxFloat32, -math.MaxFloat32, -math.MaxFloat32},
+							Topks:  []int64{2, 2, 2},
+						},
+						{
+							Ids: &schemapb.IDs{
+								IdField: &schemapb.IDs_IntId{
+									IntId: &schemapb.LongArray{
+										Data: []int64{12, 10, 8, 6, 4, 2},
+									},
+								},
+							},
+							Scores: []float32{-math.MaxFloat32, -math.MaxFloat32, -math.MaxFloat32, -math.MaxFloat32, -math.MaxFloat32, -math.MaxFloat32},
+							Topks:  []int64{2, 2, 2},
+						},
+					},
+					resultOffsets: [][]int64{{0, 2, 4}, {0, 2, 4}},
+					offsets:       []int64{0, 1},
+					topk:          2,
+					nq:            3,
+					qi:            0,
+				},
+				want: -1,
+			},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				if got := selectSearchResultData(tt.args.dataArray, tt.args.resultOffsets, tt.args.offsets, tt.args.qi); got != tt.want {
+					t.Errorf("selectSearchResultData() = %v, want %v", got, tt.want)
+				}
+			})
+		}
+	})
+
 }
