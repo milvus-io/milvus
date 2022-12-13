@@ -46,7 +46,7 @@ const (
 	// this limitation is to avoid this OOM risk:
 	// for column-based file, we read all its data into memory, if user input a large file, the read() method may
 	// cost extra memory and lear to OOM.
-	MaxFileSize = 1 * 1024 * 1024 * 1024 // 1GB
+	MaxFileSize = 2 * 1024 * 1024 * 1024 // 2GB
 
 	// this limitation is to avoid this OOM risk:
 	// simetimes system segment max size is a large number, a single segment fields data might cause OOM.
@@ -424,6 +424,7 @@ func (p *ImportWrapper) reportPersisted(reportAttempts uint) error {
 
 	// report file process state
 	p.importResult.State = commonpb.ImportState_ImportPersisted
+
 	// persist state task is valuable, retry more times in case fail this task only because of network error
 	reportErr := retry.Do(p.ctx, func() error {
 		return p.reportFunc(p.importResult)
