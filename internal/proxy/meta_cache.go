@@ -89,6 +89,10 @@ type collectionInfo struct {
 	isLoaded            bool
 }
 
+func (info *collectionInfo) isCollectionCached() bool {
+	return info != nil && info.collID != UniqueID(0) && info.schema != nil
+}
+
 // shardLeaders wraps shard leader mapping for iteration.
 type shardLeaders struct {
 	idx *atomic.Int64
@@ -166,7 +170,7 @@ func InitMetaCache(ctx context.Context, rootCoord types.RootCoord, queryCoord ty
 		return err
 	}
 	globalMetaCache.InitPolicyInfo(resp.PolicyInfos, resp.UserRoles)
-	log.Debug("success to init meta cache", zap.Strings("policy_infos", resp.PolicyInfos))
+	log.Info("success to init meta cache", zap.Strings("policy_infos", resp.PolicyInfos))
 	return nil
 }
 
@@ -188,7 +192,7 @@ func (m *MetaCache) GetCollectionID(ctx context.Context, collectionName string) 
 	m.mu.RLock()
 	collInfo, ok := m.collInfo[collectionName]
 
-	if !ok {
+	if !ok || !collInfo.isCollectionCached() {
 		metrics.ProxyCacheStatsCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "GeCollectionID", metrics.CacheMissLabel).Inc()
 		tr := timerecord.NewTimeRecorder("UpdateCache")
 		m.mu.RUnlock()
@@ -217,7 +221,7 @@ func (m *MetaCache) GetCollectionInfo(ctx context.Context, collectionName string
 	collInfo, ok := m.collInfo[collectionName]
 	m.mu.RUnlock()
 
-	if !ok {
+	if !ok || !collInfo.isCollectionCached() {
 		tr := timerecord.NewTimeRecorder("UpdateCache")
 		metrics.ProxyCacheStatsCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "GetCollectionInfo", metrics.CacheMissLabel).Inc()
 		coll, err := m.describeCollection(ctx, collectionName)
@@ -273,7 +277,7 @@ func (m *MetaCache) GetCollectionSchema(ctx context.Context, collectionName stri
 	m.mu.RLock()
 	collInfo, ok := m.collInfo[collectionName]
 
-	if !ok {
+	if !ok || !collInfo.isCollectionCached() {
 		metrics.ProxyCacheStatsCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "GetCollectionSchema", metrics.CacheMissLabel).Inc()
 		tr := timerecord.NewTimeRecorder("UpdateCache")
 		m.mu.RUnlock()
