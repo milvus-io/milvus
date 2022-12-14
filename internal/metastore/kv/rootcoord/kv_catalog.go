@@ -625,7 +625,7 @@ func (kc *Catalog) CreateRole(ctx context.Context, tenant string, entity *milvus
 	k := funcutil.HandleTenantForEtcdKey(RolePrefix, tenant, entity.Name)
 	err := kc.save(k)
 	if err != nil {
-		log.Error("fail to save the role", zap.String("key", k), zap.Error(err))
+		log.Warn("fail to save the role", zap.String("key", k), zap.Error(err))
 	}
 	return err
 }

@@ -40,16 +40,14 @@ m = r.sub == p.sub && globMatch(r.obj, p.obj) && globMatch(r.act, p.act) || r.su
 `
 )
 
-var (
-	casbinModel model.Model
-)
+var templateModel = getPolicyModel(ModelStr)
 
-func InitPolicyModel() {
-	var err error
-	casbinModel, err = model.NewModelFromString(ModelStr)
+func getPolicyModel(modelString string) model.Model {
+	m, err := model.NewModelFromString(modelString)
 	if err != nil {
 		log.Panic("NewModelFromString fail", zap.String("model", ModelStr), zap.Error(err))
 	}
+	return m
 }
 
 // UnaryServerInterceptor returns a new unary server interceptors that performs per-request privilege access.
@@ -107,9 +105,8 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 	policy := fmt.Sprintf("[%s]", policyInfo)
 	b := []byte(policy)
 	a := jsonadapter.NewAdapter(&b)
-	if casbinModel == nil {
-		log.Panic("fail to get policy model")
-	}
+	// the `templateModel` object isn't safe in the concurrent situation
+	casbinModel := templateModel.Copy()
 	e, err := casbin.NewEnforcer(casbinModel, a)
 	if err != nil {
 		log.Error("NewEnforcer fail", zap.String("policy", policy), zap.Error(err))
