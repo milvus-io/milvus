@@ -32,7 +32,7 @@ import (
 )
 
 var (
-	maxTxnNum = 64
+	maxTxnNum = 128
 )
 
 // GetEtcdClient returns etcd client
@@ -110,8 +110,8 @@ func min(a, b int) int {
 	return b
 }
 
-//SaveByBatch there will not guarantee atomicity
-func SaveByBatch(kvs map[string]string, op func(partialKvs map[string]string) error) error {
+// SaveByBatchWithLimit is SaveByBatch with customized limit.
+func SaveByBatchWithLimit(kvs map[string]string, limit int, op func(partialKvs map[string]string) error) error {
 	if len(kvs) == 0 {
 		return nil
 	}
@@ -124,8 +124,8 @@ func SaveByBatch(kvs map[string]string, op func(partialKvs map[string]string) er
 		values = append(values, v)
 	}
 
-	for i := 0; i < len(kvs); i = i + maxTxnNum {
-		end := min(i+maxTxnNum, len(keys))
+	for i := 0; i < len(kvs); i = i + limit {
+		end := min(i+limit, len(keys))
 		batch, err := buildKvGroup(keys[i:end], values[i:end])
 		if err != nil {
 			return err
@@ -136,6 +136,11 @@ func SaveByBatch(kvs map[string]string, op func(partialKvs map[string]string) er
 		}
 	}
 	return nil
+}
+
+// SaveByBatch there will not guarantee atomicity.
+func SaveByBatch(kvs map[string]string, op func(partialKvs map[string]string) error) error {
+	return SaveByBatchWithLimit(kvs, maxTxnNum, op)
 }
 
 func RemoveByBatch(removals []string, op func(partialKeys []string) error) error {

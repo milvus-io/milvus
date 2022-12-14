@@ -423,7 +423,7 @@ func Test_AlterSegments(t *testing.T) {
 		err = catalog.AlterSegments(context.TODO(), []*datapb.SegmentInfo{segmentXL})
 		assert.Nil(t, err)
 		assert.Equal(t, 255+3, len(savedKvs))
-		assert.Equal(t, 5, opGroupCount)
+		assert.Equal(t, 3, opGroupCount)
 
 		adjustedSeg, err := catalog.LoadFromSegmentPath(segmentXL.CollectionID, segmentXL.PartitionID, segmentXL.ID)
 		assert.NoError(t, err)
@@ -587,8 +587,8 @@ func Test_SaveDroppedSegmentsInBatch_MultiSave(t *testing.T) {
 
 	// testing for reaching max operation
 	{
-		segments2 := make([]*datapb.SegmentInfo, 65)
-		for i := 0; i < 65; i++ {
+		segments2 := make([]*datapb.SegmentInfo, 129)
+		for i := 0; i < 129; i++ {
 			segments2[i] = &datapb.SegmentInfo{
 				ID:           int64(i),
 				CollectionID: 1000,
@@ -601,7 +601,7 @@ func Test_SaveDroppedSegmentsInBatch_MultiSave(t *testing.T) {
 		err := catalog.SaveDroppedSegmentsInBatch(context.TODO(), segments2)
 		assert.Nil(t, err)
 		assert.Equal(t, 2, count)
-		assert.Equal(t, 65, kvSize)
+		assert.Equal(t, 129, kvSize)
 	}
 }
 
