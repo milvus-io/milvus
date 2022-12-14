@@ -1056,6 +1056,8 @@ type ProxyComponent interface {
 
 	// GetLoadingProgress get the collection or partitions loading progress
 	GetLoadingProgress(ctx context.Context, request *milvuspb.GetLoadingProgressRequest) (*milvuspb.GetLoadingProgressResponse, error)
+	// GetLoadState get the collection or partitions load state
+	GetLoadState(ctx context.Context, request *milvuspb.GetLoadStateRequest) (*milvuspb.GetLoadStateResponse, error)
 
 	// CreateIndex notifies Proxy to create index of a field
 	//

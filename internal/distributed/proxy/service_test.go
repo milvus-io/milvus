@@ -712,6 +712,10 @@ func (m *MockProxy) GetLoadingProgress(ctx context.Context, request *milvuspb.Ge
 	return nil, nil
 }
 
+func (m *MockProxy) GetLoadState(ctx context.Context, request *milvuspb.GetLoadStateRequest) (*milvuspb.GetLoadStateResponse, error) {
+	return nil, nil
+}
+
 func (m *MockProxy) CreateIndex(ctx context.Context, request *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
 	return nil, nil
 }
