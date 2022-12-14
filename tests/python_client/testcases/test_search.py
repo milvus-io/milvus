@@ -330,6 +330,30 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                     check_items={"err_code": 1,
                                                  "err_msg": message})
 
+    @pytest.mark.skip("not fixed yet")
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("search_k", [-10, -1, 0, 10, 125])
+    def test_search_param_invalid_annoy_index(self, search_k):
+        """
+        target: test search with invalid search params matched with annoy index
+        method: search with invalid param search_k out of [top_k, ∞)
+        expected: raise exception and report the error
+        """
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix, True, 3000, is_index=True)[0]
+        # 2. create annoy index and load
+        index_annoy = {"index_type": "ANNOY", "params": {"n_trees": 512}, "metric_type": "L2"}
+        collection_w.create_index("float_vector", index_annoy)
+        collection_w.load()
+        # 3. search
+        annoy_search_param = {"index_type": "ANNOY", "search_params": {"search_k": search_k}}
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            annoy_search_param, default_limit,
+                            default_search_exp,
+                            check_task=CheckTasks.err_res,
+                            check_items={"err_code": 1,
+                                         "err_msg": "Search params check failed"})
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_param_invalid_limit_type(self, get_invalid_limit):
         """

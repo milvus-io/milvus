@@ -1264,6 +1264,22 @@ class TestIndexInvalid(TestcaseBase):
                                              "err_msg": "index cannot be dropped, collection is "
                                                         "loaded, please release it first"})
 
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("n_trees", [-1, 1025, 'a', {34}])
+    def test_annoy_index_with_invalid_params(self, n_trees):
+        """
+        target: test create index with invalid params
+        method: 1. set annoy index param n_trees out of range [1, 1024]
+                2. set annoy index param n_trees type invalid(not int)
+        expected: raise exception
+        """
+        collection_w = self.init_collection_general(prefix, True, is_index=True)[0]
+        index_annoy = {"index_type": "ANNOY", "params": {"n_trees": n_trees}, "metric_type": "L2"}
+        collection_w.create_index("float_vector", index_annoy,
+                                  check_task=CheckTasks.err_res,
+                                  check_items={"err_code": 1,
+                                               "err_msg": "invalid index params"})
+
 
 class TestNewIndexAsync(TestcaseBase):
     @pytest.fixture(scope="function", params=[False, True])
@@ -1553,7 +1569,8 @@ class TestIndexString(TestcaseBase):
         assert collection_w.has_index(index_name=index_name2)[0] == True
         collection_w.drop_index(index_name=index_name2)
         assert len(collection_w.indexes) == 0
-    
+
+
 class TestIndexDiskann(TestcaseBase):
     """
     ******************************************************************
