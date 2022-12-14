@@ -9,7 +9,7 @@ from utils import *
 def task_1(data_size, host):
     """
     task_1:
-        before upgrade: create collection and insert data with flush, load and search
+        before upgrade: create collection and insert data with flush, create index, load and search
         after upgrade: get collection, load, search, insert data with flush, release, create index, load, and search
     """
     prefix = "task_1_"
