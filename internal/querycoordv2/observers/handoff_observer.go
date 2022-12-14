@@ -18,6 +18,7 @@ package observers
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"time"
@@ -33,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/samber/lo"
 	"go.etcd.io/etcd/api/v3/mvccpb"
+	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	"go.uber.org/zap"
 )
 
@@ -206,6 +208,17 @@ func (ob *HandoffObserver) schedule(ctx context.Context) {
 			}
 
 			if err := resp.Err(); err != nil {
+				if errors.Is(err, v3rpc.ErrCompacted) {
+					log.Info("Etcd Revision compacted error met, restart observer")
+					err := ob.Start(ctx)
+					if err != nil {
+						log.Fatal("fail to restart handoff observer, aborting querycoord",
+							zap.Error(err),
+						)
+					}
+					return
+				}
+				// etcd problem, shall be handled by session keep alive
 				log.Warn("receive error handoff event from etcd",
 					zap.Error(err))
 			}
