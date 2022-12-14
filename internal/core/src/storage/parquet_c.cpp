@@ -14,6 +14,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <mutex>
+
 #include "storage/parquet_c.h"
 #include "storage/PayloadReader.h"
 #include "storage/PayloadWriter.h"
@@ -22,6 +24,19 @@
 using Payload = milvus::storage::Payload;
 using PayloadWriter = milvus::storage::PayloadWriter;
 using PayloadReader = milvus::storage::PayloadReader;
+
+void
+ReleaseArrowUnused() {
+    static std::mutex release_mutex;
+
+    // While multiple threads are releasing memory,
+    // we don't need everyone do releasing,
+    // just let some of them do this also works well
+    if (release_mutex.try_lock()) {
+        arrow::default_memory_pool()->ReleaseUnused();
+        release_mutex.unlock();
+    }
+}
 
 static const char*
 ErrorMsg(const std::string& msg) {
@@ -174,9 +189,10 @@ GetPayloadLengthFromWriter(CPayloadWriter payloadWriter) {
 extern "C" void
 ReleasePayloadWriter(CPayloadWriter handler) {
     auto p = reinterpret_cast<PayloadWriter*>(handler);
-    if (p != nullptr)
+    if (p != nullptr) {
         delete p;
-    arrow::default_memory_pool()->ReleaseUnused();
+        ReleaseArrowUnused();
+    }
 }
 
 extern "C" CPayloadReader
@@ -350,5 +366,5 @@ extern "C" void
 ReleasePayloadReader(CPayloadReader payloadReader) {
     auto p = reinterpret_cast<PayloadReader*>(payloadReader);
     delete (p);
-    arrow::default_memory_pool()->ReleaseUnused();
+    ReleaseArrowUnused();
 }
