@@ -536,6 +536,7 @@ def gen_normal_expressions():
     ]
     return expressions
 
+
 def gen_field_compare_expressions():
     expressions = [
         "int64_1 | int64_2 == 1",
@@ -550,6 +551,7 @@ def gen_field_compare_expressions():
         "int64_1 + int64_2 >= 10"
     ]
     return expressions
+
 
 def gen_normal_string_expressions(field):
     expressions = [
