@@ -347,10 +347,11 @@ func TestGetIfPresentExpired(t *testing.T) {
 	insFunc := func(int, string) {
 		wg.Done()
 	}
-	c := NewCache(WithExpireAfterWrite[int, string](1*time.Second), WithInsertionListener(insFunc))
 	mockTime := newMockTime()
 	currentTime = mockTime.now
 	defer resetCurrentTime()
+	c := NewCache(WithExpireAfterWrite[int, string](1*time.Second), WithInsertionListener(insFunc))
+	defer c.Close()
 
 	v, ok := c.GetIfPresent(0)
 	assert.False(t, ok)
@@ -471,6 +472,7 @@ func TestCloseMultiple(t *testing.T) {
 
 func BenchmarkGetSame(b *testing.B) {
 	c := NewCache[string, string]()
+	defer c.Close()
 	c.Put("*", "*")
 	b.ReportAllocs()
 	b.ResetTimer()
