@@ -8,7 +8,7 @@ spec:
   enableServiceLinks: false
   containers:
   - name: main
-    image: milvusdb/krte:20211213-dcc15e9
+    image: milvusdb/krte:20221214-66bf02d
     env:
     - name: DOCKER_IN_DOCKER_ENABLED
       value: "true"
