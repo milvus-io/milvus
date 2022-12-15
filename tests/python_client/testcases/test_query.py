@@ -1036,6 +1036,22 @@ class TestQueryParams(TestcaseBase):
         assert query_res == res
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("issue #21223")
+    @pytest.mark.parametrize("offset", [3000, 5000])
+    def test_query_pagination_with_offset_over_num_entities(self, offset):
+        """
+        target: test query pagination with offset over num_entities
+        method: query with offset over num_entities
+        expected: return an empty list
+        """
+        # create collection, insert default_nb, load collection
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
+        int_values = vectors[0][ct.default_int64_field_name].values.tolist()
+        pos = 10
+        term_expr = f'{ct.default_int64_field_name} in {int_values[10: pos + 10]}'
+        collection_w.query(term_expr, offset=offset, limit=10)
+
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("limit", ["12 s", " ", [0, 1], {2}])
     def test_query_pagination_with_invalid_limit_type(self, limit):
         """
