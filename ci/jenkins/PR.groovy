@@ -47,6 +47,7 @@ pipeline {
                     dir ('tests/scripts') {
                         script {
                             sh 'printenv'
+                            sh 'git config --global --add safe.directory /home/jenkins/agent/workspace'
                             def date = sh(returnStdout: true, script: 'date +%Y%m%d').trim()
                             def gitShortCommit = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()    
                             imageTag="${env.BRANCH_NAME}-${date}-${gitShortCommit}"
