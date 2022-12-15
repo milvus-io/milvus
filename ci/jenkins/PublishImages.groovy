@@ -35,6 +35,7 @@ pipeline {
                             script {
                                 sh './build/set_docker_mirror.sh'
                                 sh "build/builder.sh /bin/bash -c \"make install\""
+                                sh 'git config --global --add safe.directory /home/jenkins/agent/workspace'
 
                                 def date = sh(returnStdout: true, script: 'date +%Y%m%d').trim()
                                 def gitShortCommit = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
