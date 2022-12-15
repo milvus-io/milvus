@@ -535,7 +535,9 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, force bool, i
 			targetRow += s.GetNumOfRows()
 		}
 		// only merge if candidate number is large than MinSegmentToMerge or if target row is large enough
-		if len(bucket) >= Params.DataCoordCfg.MinSegmentToMerge || targetRow > int64(float64(segment.GetMaxRowNum())*Params.DataCoordCfg.SegmentCompactableProportion) {
+		if len(bucket) >= Params.DataCoordCfg.MinSegmentToMerge ||
+			len(bucket) > 1 &&
+				targetRow > int64(float64(segment.GetMaxRowNum())*Params.DataCoordCfg.SegmentCompactableProportion) {
 			plan := segmentsToPlan(bucket, compactTime)
 			log.Info("generate a plan for small candidates", zap.Any("plan", plan),
 				zap.Int64("target segment row", targetRow), zap.Int64("target segment size", size))
