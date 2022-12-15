@@ -536,7 +536,7 @@ class TestQueryParams(TestcaseBase):
         method: query with output field=None, field=[]
         expected: return primary field
         """
-        collection_w, vectors = self.init_collection_general(prefix, insert_data=True)[0:2]
+        collection_w = self.init_collection_general(prefix, insert_data=True)[0]
         for fields in [None, []]:
             res, _ = collection_w.query(default_term_expr, output_fields=fields)
             assert res[0].keys() == {ct.default_int64_field_name}

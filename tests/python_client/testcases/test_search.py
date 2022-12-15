@@ -2371,6 +2371,7 @@ class TestCollectionSearch(TestcaseBase):
             res.done()
             res = res.result()
         assert len(res[0][0].entity._row_data) == 0
+        assert res[0][0].entity.fields == []
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_with_output_field(self, auto_id, _async):
