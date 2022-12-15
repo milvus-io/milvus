@@ -91,22 +91,28 @@ def task_5(data_size, host):
 
 if __name__ == '__main__':
     import argparse
+    import threading
     parser = argparse.ArgumentParser(description='config for deploy test')
     parser.add_argument('--host', type=str, default="127.0.0.1", help='milvus server ip')
     parser.add_argument('--data_size', type=int, default=3000, help='data size')
     args = parser.parse_args()
     data_size = args.data_size
     host = args.host
-    print(f"data size: {data_size}")
+    logger.info(f"data size: {data_size}")
     connections.connect(host=host, port=19530, timeout=60)
     ms = MilvusSys()
     # create index for flat
-    print("create index for flat start")
+    logger.info("create index for flat start")
     create_index_flat()
-    print("create index for flat done")
-    task_1(data_size, host)
-    task_2(data_size, host)
+    logger.info("create index for flat done")
+    tasks = []
+    tasks.append(threading.Thread(target=task_1, args=(data_size, host)))
+    tasks.append(threading.Thread(target=task_2, args=(data_size, host)))
     if len(ms.query_nodes) >= NUM_REPLICAS:
-        task_3(data_size, host)
-        task_4(data_size, host)
-        task_5(data_size, host)
+        tasks.append(threading.Thread(target=task_3, args=(data_size, host)))
+        tasks.append(threading.Thread(target=task_4, args=(data_size, host)))
+        tasks.append(threading.Thread(target=task_5, args=(data_size, host)))
+    for task in tasks:
+        task.start()
+    for task in tasks:
+        task.join()
