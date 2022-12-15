@@ -18,7 +18,6 @@ package proxy
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -1424,61 +1423,6 @@ func (node *Proxy) ShowPartitions(ctx context.Context, request *milvuspb.ShowPar
 	return spt.result, nil
 }
 
-func (node *Proxy) getCollectionProgress(ctx context.Context, request *milvuspb.GetLoadingProgressRequest, collectionID int64) (int64, error) {
-	resp, err := node.queryCoord.ShowCollections(ctx, &querypb.ShowCollectionsRequest{
-		Base: commonpbutil.UpdateMsgBase(
-			request.Base,
-			commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection),
-		),
-		CollectionIDs: []int64{collectionID},
-	})
-	if err != nil {
-		return 0, err
-	}
-
-	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
-		return 0, errors.New(resp.Status.Reason)
-	}
-
-	if len(resp.InMemoryPercentages) == 0 {
-		return 0, errors.New("fail to show collections from the querycoord, no data")
-	}
-	return resp.InMemoryPercentages[0], nil
-}
-
-func (node *Proxy) getPartitionProgress(ctx context.Context, request *milvuspb.GetLoadingProgressRequest, collectionID int64) (int64, error) {
-	IDs2Names := make(map[int64]string)
-	partitionIDs := make([]int64, 0)
-	for _, partitionName := range request.PartitionNames {
-		partitionID, err := globalMetaCache.GetPartitionID(ctx, request.CollectionName, partitionName)
-		if err != nil {
-			return 0, err
-		}
-		IDs2Names[partitionID] = partitionName
-		partitionIDs = append(partitionIDs, partitionID)
-	}
-	resp, err := node.queryCoord.ShowPartitions(ctx, &querypb.ShowPartitionsRequest{
-		Base: commonpbutil.UpdateMsgBase(
-			request.Base,
-			commonpbutil.WithMsgType(commonpb.MsgType_ShowPartitions),
-		),
-		CollectionID: collectionID,
-		PartitionIDs: partitionIDs,
-	})
-	if err != nil {
-		return 0, err
-	}
-	if len(resp.InMemoryPercentages) != len(partitionIDs) {
-		return 0, errors.New("fail to show partitions from the querycoord, invalid data num")
-	}
-	var progress int64
-	for _, p := range resp.InMemoryPercentages {
-		progress += p
-	}
-	progress /= int64(len(partitionIDs))
-	return progress, nil
-}
-
 func (node *Proxy) GetLoadingProgress(ctx context.Context, request *milvuspb.GetLoadingProgressRequest) (*milvuspb.GetLoadingProgressResponse, error) {
 	if !node.checkHealthy() {
 		return &milvuspb.GetLoadingProgressResponse{Status: unhealthyStatus()}, nil
@@ -1496,9 +1440,9 @@ func (node *Proxy) GetLoadingProgress(ctx context.Context, request *milvuspb.Get
 
 	getErrResponse := func(err error) *milvuspb.GetLoadingProgressResponse {
 		log.Warn("fail to get loading progress",
-			zap.Error(err),
 			zap.String("collection_name", request.CollectionName),
-			zap.Strings("partition_name", request.PartitionNames))
+			zap.Strings("partition_name", request.PartitionNames),
+			zap.Error(err))
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel).Inc()
 		return &milvuspb.GetLoadingProgressResponse{
 			Status: &commonpb.Status{
@@ -1514,6 +1458,13 @@ func (node *Proxy) GetLoadingProgress(ctx context.Context, request *milvuspb.Get
 	if err != nil {
 		return getErrResponse(err), nil
 	}
+
+	if statesResp, err := node.queryCoord.GetComponentStates(ctx); err != nil {
+		return getErrResponse(err), nil
+	} else if statesResp.State == nil || statesResp.State.StateCode != commonpb.StateCode_Healthy {
+		return getErrResponse(fmt.Errorf("the querycoord server isn't healthy, state: %v", statesResp.State)), nil
+	}
+
 	msgBase := commonpbutil.NewMsgBase(
 		commonpbutil.WithMsgType(commonpb.MsgType_SystemInfo),
 		commonpbutil.WithMsgID(0),
@@ -1529,11 +1480,12 @@ func (node *Proxy) GetLoadingProgress(ctx context.Context, request *milvuspb.Get
 
 	var progress int64
 	if len(request.GetPartitionNames()) == 0 {
-		if progress, err = node.getCollectionProgress(ctx, request, collectionID); err != nil {
+		if progress, err = getCollectionProgress(ctx, node.queryCoord, request.GetBase(), collectionID); err != nil {
 			return getErrResponse(err), nil
 		}
 	} else {
-		if progress, err = node.getPartitionProgress(ctx, request, collectionID); err != nil {
+		if progress, err = getPartitionProgress(ctx, node.queryCoord, request.GetBase(),
+			request.GetPartitionNames(), request.GetCollectionName(), collectionID); err != nil {
 			return getErrResponse(err), nil
 		}
 	}
@@ -1552,7 +1504,95 @@ func (node *Proxy) GetLoadingProgress(ctx context.Context, request *milvuspb.Get
 }
 
 func (node *Proxy) GetLoadState(ctx context.Context, request *milvuspb.GetLoadStateRequest) (*milvuspb.GetLoadStateResponse, error) {
-	return nil, nil
+	if !node.checkHealthy() {
+		return &milvuspb.GetLoadStateResponse{Status: unhealthyStatus()}, nil
+	}
+	method := "GetLoadState"
+	tr := timerecord.NewTimeRecorder(method)
+	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-GetLoadState")
+	defer sp.Finish()
+	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel).Inc()
+	log := log.Ctx(ctx)
+
+	log.Debug(
+		rpcReceived(method),
+		zap.Any("request", request))
+
+	getErrResponse := func(err error) *milvuspb.GetLoadStateResponse {
+		log.Warn("fail to get load state",
+			zap.String("collection_name", request.CollectionName),
+			zap.Strings("partition_name", request.PartitionNames),
+			zap.Error(err))
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel).Inc()
+		return &milvuspb.GetLoadStateResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+		}
+	}
+
+	if err := validateCollectionName(request.CollectionName); err != nil {
+		return getErrResponse(err), nil
+	}
+
+	if statesResp, err := node.queryCoord.GetComponentStates(ctx); err != nil {
+		return getErrResponse(err), nil
+	} else if statesResp.State == nil || statesResp.State.StateCode != commonpb.StateCode_Healthy {
+		return getErrResponse(fmt.Errorf("the querycoord server isn't healthy, state: %v", statesResp.State)), nil
+	}
+
+	successResponse := &milvuspb.GetLoadStateResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+	}
+	defer func() {
+		log.Debug(
+			rpcDone(method),
+			zap.Any("request", request))
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.SuccessLabel).Inc()
+		metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	}()
+
+	collectionID, err := globalMetaCache.GetCollectionID(ctx, request.CollectionName)
+	if err != nil {
+		successResponse.State = commonpb.LoadState_LoadStateNotExist
+		return successResponse, nil
+	}
+
+	msgBase := commonpbutil.NewMsgBase(
+		commonpbutil.WithMsgType(commonpb.MsgType_SystemInfo),
+		commonpbutil.WithMsgID(0),
+		commonpbutil.WithSourceID(paramtable.GetNodeID()),
+	)
+	if request.Base == nil {
+		request.Base = msgBase
+	} else {
+		request.Base.MsgID = msgBase.MsgID
+		request.Base.Timestamp = msgBase.Timestamp
+		request.Base.SourceID = msgBase.SourceID
+	}
+
+	var progress int64
+	if len(request.GetPartitionNames()) == 0 {
+		if progress, err = getCollectionProgress(ctx, node.queryCoord, request.GetBase(), collectionID); err != nil {
+			successResponse.State = commonpb.LoadState_LoadStateNotLoad
+			return successResponse, nil
+		}
+	} else {
+		if progress, err = getPartitionProgress(ctx, node.queryCoord, request.GetBase(),
+			request.GetPartitionNames(), request.GetCollectionName(), collectionID); err != nil {
+			successResponse.State = commonpb.LoadState_LoadStateNotLoad
+			return successResponse, nil
+		}
+	}
+	if progress >= 100 {
+		successResponse.State = commonpb.LoadState_LoadStateLoaded
+	} else {
+		successResponse.State = commonpb.LoadState_LoadStateLoading
+	}
+	return successResponse, nil
 }
 
 // CreateIndex create index for collection.
