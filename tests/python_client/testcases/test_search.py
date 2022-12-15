@@ -4118,14 +4118,14 @@ class TestsearchPagination(TestcaseBase):
         assert set(search_res[0].ids) == set(res[0].ids[offset:])
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_search_pagination_empty(self, offset, dim, auto_id, _async):
+    def test_search_pagination_empty(self, offset, auto_id, _async):
         """
         target: test search pagination empty
         method: connect, create collection, insert data and search
         expected: search successfully
         """
         # 1. initialize without data
-        collection_w = self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim)[0]
+        collection_w = self.init_collection_general(prefix, True, auto_id=auto_id, dim=default_dim)[0]
         # 2. search collection without data
         search_param = {"metric_type": "L2", "params": {"nprobe": 10}, "offset": offset}
         search_res = collection_w.search([], default_search_field, search_param,
@@ -4137,6 +4137,27 @@ class TestsearchPagination(TestcaseBase):
             search_res.done()
             search_res = search_res.result()
         assert len(search_res) == 0
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("offset", [3000, 5000])
+    def test_search_pagination_with_offset_over_num_entities(self, offset):
+        """
+        target: test search pagination with offset over num_entities
+        method: create connection, collection, insert 3000 entities and search with offset over 3000
+        expected: return an empty list
+        """
+        # 1. initialize
+        collection_w = self.init_collection_general(prefix, True, dim=default_dim)[0]
+        # 2. search
+        search_param = {"metric_type": "L2", "params": {"nprobe": 10}, "offset": offset}
+        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
+        res = collection_w.search(vectors[:default_nq], default_search_field,
+                                  search_param, default_limit,
+                                  default_search_exp,
+                                  check_task=CheckTasks.check_search_results,
+                                  check_items={"nq": default_nq,
+                                               "limit": 0})[0]
+        assert res[0].ids == []
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index, params",
