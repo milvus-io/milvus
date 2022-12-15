@@ -58,12 +58,6 @@ const (
 
 	// DefaultStringIndexType name of default index type for varChar/string field
 	DefaultStringIndexType = "Trie"
-
-	// Search limit, which applies on:
-	// maximum # of results to return (topK), and
-	// maximum # of search requests (nq).
-	// Check https://milvus.io/docs/limitations.md for more details.
-	searchCountLimit = 16384
 )
 
 var logger = log.L().WithOptions(zap.Fields(zap.String("role", typeutil.ProxyRole)))
@@ -85,9 +79,8 @@ func isNumber(c uint8) bool {
 }
 
 func validateLimit(limit int64) error {
-	// TODO make this configurable
-	if limit <= 0 || limit > searchCountLimit {
-		return fmt.Errorf("should be in range [1, %d], but got %d", searchCountLimit, limit)
+	if limit <= 0 || limit > Params.CommonCfg.TopKLimit.GetAsInt64() {
+		return fmt.Errorf("should be in range [1, %d], but got %d", Params.CommonCfg.TopKLimit.GetAsInt64(), limit)
 	}
 	return nil
 }

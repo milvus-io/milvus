@@ -145,6 +145,12 @@ type commonConfig struct {
 	GracefulTime             ParamItem
 	GracefulStopTimeout      ParamItem // unit: s
 
+	// Search limit, which applies on:
+	// maximum # of results to return (topK), and
+	// maximum # of search requests (nq).
+	// Check https://milvus.io/docs/limitations.md for more details.
+	TopKLimit ParamItem
+
 	StorageType ParamItem
 	SimdType    ParamItem
 
@@ -417,6 +423,13 @@ func (p *commonConfig) init(base *BaseTable) {
 		DefaultValue: "30",
 	}
 	p.GracefulStopTimeout.Init(base.mgr)
+
+	p.TopKLimit = ParamItem{
+		Key:          "common.topKLimit",
+		Version:      "2.2.1",
+		DefaultValue: "16384",
+	}
+	p.TopKLimit.Init(base.mgr)
 
 	p.BeamWidthRatio = ParamItem{
 		Key:          "common.DiskIndex.BeamWidthRatio",
