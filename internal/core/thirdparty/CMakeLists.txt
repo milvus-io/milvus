@@ -43,3 +43,6 @@ add_subdirectory( knowhere )
 add_subdirectory( boost_ext )
 add_subdirectory( rocksdb )
 
+if ( LINUX )
+    add_subdirectory( jemalloc )
+endif()
