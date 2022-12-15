@@ -21,7 +21,7 @@ default_int64_field_name = ct.default_int64_field_name
 default_float_field_name = ct.default_float_field_name
 default_bool_field_name = ct.default_bool_field_name
 default_string_field_name = ct.default_string_field_name
-binary_field_name = default_binary_vec_field_name
+binary_field_name = ct.default_binary_vec_field_name
 default_search_exp = "int64 >= 0"
 default_term_expr = f'{ct.default_int64_field_name} in [0, 1]'
 
