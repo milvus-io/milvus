@@ -21,12 +21,10 @@ import (
 	"fmt"
 	"math/rand"
 
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/samber/lo"
+
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
-	"github.com/samber/lo"
-	"go.uber.org/zap"
 )
 
 func GetReplicaNodesInfo(replicaMgr *meta.ReplicaManager, nodeMgr *session.NodeManager, replicaID int64) []*session.NodeInfo {
@@ -124,62 +122,4 @@ func SpawnReplicas(replicaMgr *meta.ReplicaManager, nodeMgr *session.NodeManager
 	}
 	AssignNodesToReplicas(nodeMgr, replicas...)
 	return replicas, replicaMgr.Put(replicas...)
-}
-
-// RegisterTargets fetch channels and segments of given collection(partitions) from DataCoord,
-// and then registers them on Target Manager
-func RegisterTargets(ctx context.Context,
-	targetMgr *meta.TargetManager,
-	broker meta.Broker,
-	collection int64,
-	partitions []int64,
-) error {
-	channels, segments, err := FetchTargets(ctx, targetMgr, broker, collection, partitions)
-	if err != nil {
-		return err
-	}
-
-	targetMgr.AddDmChannel(channels...)
-	targetMgr.AddSegment(segments...)
-	return nil
-}
-
-func FetchTargets(ctx context.Context,
-	targetMgr *meta.TargetManager,
-	broker meta.Broker,
-	collection int64,
-	partitions []int64,
-) ([]*meta.DmChannel, []*datapb.SegmentInfo, error) {
-	channels := make(map[string][]*datapb.VchannelInfo)
-	segments := make([]*datapb.SegmentInfo, 0)
-
-	for _, partitionID := range partitions {
-		log.Info("get recovery info...",
-			zap.Int64("collectionID", collection),
-			zap.Int64("partitionID", partitionID))
-		vChannelInfos, binlogs, err := broker.GetRecoveryInfo(ctx, collection, partitionID)
-		if err != nil {
-			return nil, nil, err
-		}
-
-		// Register segments
-		for _, segmentBinlogs := range binlogs {
-			segments = append(segments, SegmentBinlogs2SegmentInfo(
-				collection,
-				partitionID,
-				segmentBinlogs))
-		}
-
-		for _, info := range vChannelInfos {
-			channelName := info.GetChannelName()
-			channels[channelName] = append(channels[channelName], info)
-		}
-	}
-	// Merge and register channels
-	dmChannels := make([]*meta.DmChannel, 0, len(channels))
-	for _, channels := range channels {
-		dmChannel := MergeDmChannelInfo(channels)
-		dmChannels = append(dmChannels, dmChannel)
-	}
-	return dmChannels, segments, nil
 }

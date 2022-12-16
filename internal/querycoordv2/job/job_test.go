@@ -21,17 +21,17 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/suite"
+
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
-	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/util/etcd"
-	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/suite"
 )
 
 const (
@@ -50,14 +50,13 @@ type JobSuite struct {
 	loadTypes   map[int64]querypb.LoadType
 
 	// Dependencies
-	kv              kv.MetaKv
-	store           meta.Store
-	dist            *meta.DistributionManager
-	meta            *meta.Meta
-	targetMgr       *meta.TargetManager
-	broker          *meta.MockBroker
-	nodeMgr         *session.NodeManager
-	handoffObserver *observers.HandoffObserver
+	kv        kv.MetaKv
+	store     meta.Store
+	dist      *meta.DistributionManager
+	meta      *meta.Meta
+	targetMgr *meta.TargetManager
+	broker    *meta.MockBroker
+	nodeMgr   *session.NodeManager
 
 	// Test objects
 	scheduler *Scheduler
@@ -131,16 +130,9 @@ func (suite *JobSuite) SetupTest() {
 	suite.store = meta.NewMetaStore(suite.kv)
 	suite.dist = meta.NewDistributionManager()
 	suite.meta = meta.NewMeta(RandomIncrementIDAllocator(), suite.store)
-	suite.targetMgr = meta.NewTargetManager()
+	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta)
 	suite.nodeMgr = session.NewNodeManager()
 	suite.nodeMgr.Add(&session.NodeInfo{})
-	suite.handoffObserver = observers.NewHandoffObserver(
-		suite.store,
-		suite.meta,
-		suite.dist,
-		suite.targetMgr,
-		suite.broker,
-	)
 	suite.scheduler = NewScheduler()
 
 	suite.scheduler.Start(context.Background())
@@ -187,12 +179,12 @@ func (suite *JobSuite) TestLoadCollection() {
 			suite.targetMgr,
 			suite.broker,
 			suite.nodeMgr,
-			suite.handoffObserver,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
 		suite.NoError(err)
 		suite.EqualValues(1, suite.meta.GetReplicaNumber(collection))
+		suite.targetMgr.UpdateCollectionCurrentTarget(collection)
 		suite.assertLoaded(collection)
 	}
 
@@ -212,7 +204,6 @@ func (suite *JobSuite) TestLoadCollection() {
 			suite.targetMgr,
 			suite.broker,
 			suite.nodeMgr,
-			suite.handoffObserver,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -236,7 +227,6 @@ func (suite *JobSuite) TestLoadCollection() {
 			suite.targetMgr,
 			suite.broker,
 			suite.nodeMgr,
-			suite.handoffObserver,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -262,7 +252,6 @@ func (suite *JobSuite) TestLoadCollection() {
 			suite.targetMgr,
 			suite.broker,
 			suite.nodeMgr,
-			suite.handoffObserver,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -291,7 +280,6 @@ func (suite *JobSuite) TestLoadCollectionWithReplicas() {
 			suite.targetMgr,
 			suite.broker,
 			suite.nodeMgr,
-			suite.handoffObserver,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -322,12 +310,12 @@ func (suite *JobSuite) TestLoadCollectionWithDiffIndex() {
 			suite.targetMgr,
 			suite.broker,
 			suite.nodeMgr,
-			suite.handoffObserver,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
 		suite.NoError(err)
 		suite.EqualValues(1, suite.meta.GetReplicaNumber(collection))
+		suite.targetMgr.UpdateCollectionCurrentTarget(collection, suite.partitions[collection]...)
 		suite.assertLoaded(collection)
 	}
 
@@ -350,7 +338,6 @@ func (suite *JobSuite) TestLoadCollectionWithDiffIndex() {
 			suite.targetMgr,
 			suite.broker,
 			suite.nodeMgr,
-			suite.handoffObserver,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -368,9 +355,9 @@ func (suite *JobSuite) TestLoadPartition() {
 		}
 		// Load with 1 replica
 		req := &querypb.LoadPartitionsRequest{
-			CollectionID: collection,
-			PartitionIDs: suite.partitions[collection],
-			// ReplicaNumber: 1,
+			CollectionID:  collection,
+			PartitionIDs:  suite.partitions[collection],
+			ReplicaNumber: 1,
 		}
 		job := NewLoadPartitionJob(
 			ctx,
@@ -380,12 +367,12 @@ func (suite *JobSuite) TestLoadPartition() {
 			suite.targetMgr,
 			suite.broker,
 			suite.nodeMgr,
-			suite.handoffObserver,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
 		suite.NoError(err)
 		suite.EqualValues(1, suite.meta.GetReplicaNumber(collection))
+		suite.targetMgr.UpdateCollectionCurrentTarget(collection, suite.partitions[collection]...)
 		suite.assertLoaded(collection)
 	}
 
@@ -408,7 +395,6 @@ func (suite *JobSuite) TestLoadPartition() {
 			suite.targetMgr,
 			suite.broker,
 			suite.nodeMgr,
-			suite.handoffObserver,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -434,7 +420,6 @@ func (suite *JobSuite) TestLoadPartition() {
 			suite.targetMgr,
 			suite.broker,
 			suite.nodeMgr,
-			suite.handoffObserver,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -460,7 +445,6 @@ func (suite *JobSuite) TestLoadPartition() {
 			suite.targetMgr,
 			suite.broker,
 			suite.nodeMgr,
-			suite.handoffObserver,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -485,7 +469,6 @@ func (suite *JobSuite) TestLoadPartition() {
 			suite.targetMgr,
 			suite.broker,
 			suite.nodeMgr,
-			suite.handoffObserver,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -515,7 +498,6 @@ func (suite *JobSuite) TestLoadPartitionWithReplicas() {
 			suite.targetMgr,
 			suite.broker,
 			suite.nodeMgr,
-			suite.handoffObserver,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -547,12 +529,12 @@ func (suite *JobSuite) TestLoadPartitionWithDiffIndex() {
 			suite.targetMgr,
 			suite.broker,
 			suite.nodeMgr,
-			suite.handoffObserver,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
 		suite.NoError(err)
 		suite.EqualValues(1, suite.meta.GetReplicaNumber(collection))
+		suite.targetMgr.UpdateCollectionCurrentTarget(collection, suite.partitions[collection]...)
 		suite.assertLoaded(collection)
 	}
 
@@ -577,7 +559,6 @@ func (suite *JobSuite) TestLoadPartitionWithDiffIndex() {
 			suite.targetMgr,
 			suite.broker,
 			suite.nodeMgr,
-			suite.handoffObserver,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -601,7 +582,6 @@ func (suite *JobSuite) TestReleaseCollection() {
 			suite.dist,
 			suite.meta,
 			suite.targetMgr,
-			suite.handoffObserver,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -620,7 +600,6 @@ func (suite *JobSuite) TestReleaseCollection() {
 			suite.dist,
 			suite.meta,
 			suite.targetMgr,
-			suite.handoffObserver,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -646,7 +625,6 @@ func (suite *JobSuite) TestReleasePartition() {
 			suite.dist,
 			suite.meta,
 			suite.targetMgr,
-			suite.handoffObserver,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -671,7 +649,6 @@ func (suite *JobSuite) TestReleasePartition() {
 			suite.dist,
 			suite.meta,
 			suite.targetMgr,
-			suite.handoffObserver,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -698,7 +675,6 @@ func (suite *JobSuite) TestReleasePartition() {
 			suite.dist,
 			suite.meta,
 			suite.targetMgr,
-			suite.handoffObserver,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -744,7 +720,6 @@ func (suite *JobSuite) TestLoadCollectionStoreFailed() {
 			suite.targetMgr,
 			suite.broker,
 			suite.nodeMgr,
-			suite.handoffObserver,
 		)
 		suite.scheduler.Add(job)
 		loadErr := job.Wait()
@@ -778,7 +753,6 @@ func (suite *JobSuite) TestLoadPartitionStoreFailed() {
 			suite.targetMgr,
 			suite.broker,
 			suite.nodeMgr,
-			suite.handoffObserver,
 		)
 		suite.scheduler.Add(job)
 		loadErr := job.Wait()
@@ -801,7 +775,6 @@ func (suite *JobSuite) TestLoadCreateReplicaFailed() {
 			suite.targetMgr,
 			suite.broker,
 			suite.nodeMgr,
-			suite.handoffObserver,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -824,7 +797,6 @@ func (suite *JobSuite) loadAll() {
 				suite.targetMgr,
 				suite.broker,
 				suite.nodeMgr,
-				suite.handoffObserver,
 			)
 			suite.scheduler.Add(job)
 			err := job.Wait()
@@ -832,6 +804,7 @@ func (suite *JobSuite) loadAll() {
 			suite.EqualValues(1, suite.meta.GetReplicaNumber(collection))
 			suite.True(suite.meta.Exist(collection))
 			suite.NotNil(suite.meta.GetCollection(collection))
+			suite.targetMgr.UpdateCollectionCurrentTarget(collection)
 		} else {
 			req := &querypb.LoadPartitionsRequest{
 				CollectionID: collection,
@@ -845,7 +818,6 @@ func (suite *JobSuite) loadAll() {
 				suite.targetMgr,
 				suite.broker,
 				suite.nodeMgr,
-				suite.handoffObserver,
 			)
 			suite.scheduler.Add(job)
 			err := job.Wait()
@@ -853,6 +825,7 @@ func (suite *JobSuite) loadAll() {
 			suite.EqualValues(1, suite.meta.GetReplicaNumber(collection))
 			suite.True(suite.meta.Exist(collection))
 			suite.NotNil(suite.meta.GetPartitionsByCollection(collection))
+			suite.targetMgr.UpdateCollectionCurrentTarget(collection)
 		}
 	}
 }
@@ -869,7 +842,6 @@ func (suite *JobSuite) releaseAll() {
 			suite.dist,
 			suite.meta,
 			suite.targetMgr,
-			suite.handoffObserver,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -881,11 +853,11 @@ func (suite *JobSuite) releaseAll() {
 func (suite *JobSuite) assertLoaded(collection int64) {
 	suite.True(suite.meta.Exist(collection))
 	for _, channel := range suite.channels[collection] {
-		suite.NotNil(suite.targetMgr.GetDmChannel(channel))
+		suite.NotNil(suite.targetMgr.GetDmChannel(collection, channel, meta.CurrentTarget))
 	}
 	for _, partitions := range suite.segments[collection] {
 		for _, segment := range partitions {
-			suite.NotNil(suite.targetMgr.GetSegment(segment))
+			suite.NotNil(suite.targetMgr.GetHistoricalSegment(collection, segment, meta.CurrentTarget))
 		}
 	}
 }
@@ -893,11 +865,11 @@ func (suite *JobSuite) assertLoaded(collection int64) {
 func (suite *JobSuite) assertReleased(collection int64) {
 	suite.False(suite.meta.Exist(collection))
 	for _, channel := range suite.channels[collection] {
-		suite.Nil(suite.targetMgr.GetDmChannel(channel))
+		suite.Nil(suite.targetMgr.GetDmChannel(collection, channel, meta.CurrentTarget))
 	}
 	for _, partitions := range suite.segments[collection] {
 		for _, segment := range partitions {
-			suite.Nil(suite.targetMgr.GetSegment(segment))
+			suite.Nil(suite.targetMgr.GetHistoricalSegment(collection, segment, meta.CurrentTarget))
 		}
 	}
 }

@@ -23,6 +23,9 @@ import (
 	"runtime"
 	"sync"
 
+	"go.uber.org/atomic"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -31,8 +34,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	. "github.com/milvus-io/milvus/internal/util/typeutil"
-	"go.uber.org/atomic"
-	"go.uber.org/zap"
 )
 
 const (
@@ -443,7 +444,7 @@ func (scheduler *taskScheduler) GetNodeSegmentCntDelta(nodeID int64) int {
 				continue
 			}
 			segmentAction := action.(*SegmentAction)
-			segment := scheduler.targetMgr.GetSegment(segmentAction.SegmentID())
+			segment := scheduler.targetMgr.GetHistoricalSegment(task.CollectionID(), segmentAction.SegmentID(), meta.NextTarget)
 			if action.Type() == ActionTypeGrow {
 				delta += int(segment.GetNumOfRows())
 			} else {
@@ -527,7 +528,7 @@ func (scheduler *taskScheduler) isRelated(task Task, node int64) bool {
 			return true
 		}
 		if task, ok := task.(*SegmentTask); ok {
-			segment := scheduler.targetMgr.GetSegment(task.SegmentID())
+			segment := scheduler.targetMgr.GetHistoricalSegment(task.CollectionID(), task.SegmentID(), meta.NextTarget)
 			if segment == nil {
 				continue
 			}
@@ -732,7 +733,7 @@ func (scheduler *taskScheduler) checkSegmentTaskStale(task *SegmentTask) bool {
 	for _, action := range task.Actions() {
 		switch action.Type() {
 		case ActionTypeGrow:
-			segment := scheduler.targetMgr.GetSegment(task.SegmentID())
+			segment := scheduler.targetMgr.GetHistoricalSegment(task.CollectionID(), task.SegmentID(), meta.NextTarget)
 			if segment == nil {
 				log.Warn("task stale due tu the segment to load not exists in targets",
 					zap.Int64("segment", task.segmentID))
@@ -766,7 +767,7 @@ func (scheduler *taskScheduler) checkChannelTaskStale(task *ChannelTask) bool {
 	for _, action := range task.Actions() {
 		switch action.Type() {
 		case ActionTypeGrow:
-			if !scheduler.targetMgr.ContainDmChannel(task.Channel()) {
+			if scheduler.targetMgr.GetDmChannel(task.collectionID, task.Channel(), meta.NextTarget) == nil {
 				log.Warn("the task is stale, the channel to subscribe not exists in targets",
 					zap.String("channel", task.Channel()))
 				return true

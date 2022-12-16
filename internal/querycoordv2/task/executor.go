@@ -18,6 +18,7 @@ package task
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -387,7 +388,12 @@ func (ex *Executor) subDmChannel(task *ChannelTask, step int) error {
 		partitions...,
 	)
 
-	dmChannel := ex.targetMgr.GetDmChannel(action.ChannelName())
+	dmChannel := ex.targetMgr.GetDmChannel(task.CollectionID(), action.ChannelName(), meta.NextTarget)
+	if dmChannel == nil {
+		msg := "channel does not exist in next target, skip it"
+		log.Warn(msg, zap.String("channelName", action.ChannelName()))
+		return errors.New(msg)
+	}
 	req := packSubDmChannelRequest(task, action, schema, loadMeta, dmChannel)
 	err = fillSubDmChannelRequest(ctx, req, ex.broker)
 	if err != nil {

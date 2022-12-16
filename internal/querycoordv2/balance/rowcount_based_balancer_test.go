@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/etcd"
+	mock "github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -59,7 +60,7 @@ func (suite *RowCountBasedBalancerTestSuite) SetupTest() {
 	store := meta.NewMetaStore(suite.kv)
 	idAllocator := RandomIncrementIDAllocator()
 	testMeta := meta.NewMeta(idAllocator, store)
-	testTarget := meta.NewTargetManager()
+	testTarget := meta.NewTargetManager(suite.broker, testMeta)
 
 	distManager := meta.NewDistributionManager()
 	nodeManager := session.NewNodeManager()
@@ -156,9 +157,27 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalance() {
 			defer suite.TearDownTest()
 			balancer := suite.balancer
 			collection := utils.CreateTestCollection(1, 1)
-			balancer.targetMgr.AddSegment(utils.CreateTestSegmentInfo(1, 1, 1, "test-insert-channel"))
-			balancer.targetMgr.AddSegment(utils.CreateTestSegmentInfo(1, 1, 2, "test-insert-channel"))
-			balancer.targetMgr.AddSegment(utils.CreateTestSegmentInfo(1, 1, 3, "test-insert-channel"))
+			segments := []*datapb.SegmentBinlogs{
+				{
+					SegmentID: 1,
+				},
+				{
+					SegmentID: 2,
+				},
+				{
+					SegmentID: 3,
+				},
+				{
+					SegmentID: 4,
+				},
+				{
+					SegmentID: 5,
+				},
+			}
+			suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, int64(1), int64(1)).Return(
+				nil, segments, nil)
+			balancer.targetMgr.UpdateCollectionNextTargetWithPartitions(int64(1), int64(1))
+			balancer.targetMgr.UpdateCollectionCurrentTarget(1, 1)
 			collection.LoadPercentage = 100
 			collection.Status = querypb.LoadStatus_Loaded
 			balancer.meta.CollectionManager.PutCollection(collection)

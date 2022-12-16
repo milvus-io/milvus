@@ -93,6 +93,12 @@ const (
 	defaultChannelName = "default-channel"
 )
 
+var defaultSegmentStartPosition = &internalpb.MsgPosition{
+	ChannelName: defaultChannelName,
+	MsgID:       []byte{},
+	Timestamp:   0,
+}
+
 const (
 	defaultMsgLength = 100
 	defaultDelLength = 10
@@ -1241,7 +1247,9 @@ func genSealedSegment(schema *schemapb.CollectionSchema,
 		collectionID,
 		vChannel,
 		segmentTypeSealed,
-		defaultSegmentVersion)
+		defaultSegmentVersion,
+		defaultSegmentStartPosition,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -1324,6 +1332,7 @@ func genSimpleReplicaWithGrowingSegment() (ReplicaInterface, error) {
 		defaultCollectionID,
 		defaultDMLChannel,
 		defaultSegmentVersion,
+		defaultSegmentStartPosition,
 		segmentTypeGrowing)
 	if err != nil {
 		return nil, err

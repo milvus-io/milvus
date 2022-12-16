@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
@@ -134,8 +135,16 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 			panic(err)
 		}
 		if !has {
-			log.Info("Add growing segment", zap.Int64("collectionID", insertMsg.CollectionID), zap.Int64("segmentID", insertMsg.SegmentID))
-			err = iNode.metaReplica.addSegment(insertMsg.SegmentID, insertMsg.PartitionID, insertMsg.CollectionID, insertMsg.ShardName, 0, segmentTypeGrowing)
+			log.Info("Add growing segment",
+				zap.Int64("collectionID", insertMsg.CollectionID),
+				zap.Int64("segmentID", insertMsg.SegmentID),
+				zap.Uint64("startPosition", insertMsg.BeginTs()),
+			)
+			startPosition := &internalpb.MsgPosition{
+				ChannelName: insertMsg.ShardName,
+				Timestamp:   insertMsg.BeginTs(),
+			}
+			err = iNode.metaReplica.addSegment(insertMsg.SegmentID, insertMsg.PartitionID, insertMsg.CollectionID, insertMsg.ShardName, 0, startPosition, segmentTypeGrowing)
 			if err != nil {
 				// error occurs when collection or partition cannot be found, collection and partition should be created before
 				err = fmt.Errorf("insertNode addSegment failed, err = %s", err)
