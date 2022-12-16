@@ -343,14 +343,14 @@ func (s *proxyTestServer) startGrpc(ctx context.Context, wg *sync.WaitGroup, p *
 		Timeout: 10 * time.Second, // Wait 10 second for the ping ack before assuming the connection is dead
 	}
 
-	log.Debug("Proxy server listen on tcp", zap.Int("port", p.Port))
-	lis, err := net.Listen("tcp", ":"+strconv.Itoa(p.Port))
+	log.Debug("Proxy server listen on tcp", zap.Int("port", p.Port.GetAsInt()))
+	lis, err := net.Listen("tcp", ":"+p.Port.GetValue())
 	if err != nil {
-		log.Warn("Proxy server failed to listen on", zap.Error(err), zap.Int("port", p.Port))
+		log.Warn("Proxy server failed to listen on", zap.Error(err), zap.Int("port", p.Port.GetAsInt()))
 		s.ch <- err
 		return
 	}
-	log.Debug("Proxy server already listen on tcp", zap.Int("port", p.Port))
+	log.Debug("Proxy server already listen on tcp", zap.Int("port", p.Port.GetAsInt()))
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -362,8 +362,8 @@ func (s *proxyTestServer) startGrpc(ctx context.Context, wg *sync.WaitGroup, p *
 	s.grpcServer = grpc.NewServer(
 		grpc.KeepaliveEnforcementPolicy(kaep),
 		grpc.KeepaliveParams(kasp),
-		grpc.MaxRecvMsgSize(p.ServerMaxRecvSize),
-		grpc.MaxSendMsgSize(p.ServerMaxSendSize),
+		grpc.MaxRecvMsgSize(p.ServerMaxRecvSize.GetAsInt()),
+		grpc.MaxSendMsgSize(p.ServerMaxSendSize.GetAsInt()),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
 			ot.UnaryServerInterceptor(opts...),
 			RateLimitInterceptor(multiLimiter),
@@ -511,8 +511,10 @@ func TestProxy(t *testing.T) {
 	testServer := newProxyTestServer(proxy)
 	wg.Add(1)
 
+	base := paramtable.BaseTable{}
+	base.Init(0)
 	var p paramtable.GrpcServerConfig
-	p.InitOnce(typeutil.ProxyRole)
+	p.Init(typeutil.ProxyRole, &base)
 	testServer.Proxy.SetAddress(p.GetAddress())
 
 	go testServer.startGrpc(ctx, &wg, &p)

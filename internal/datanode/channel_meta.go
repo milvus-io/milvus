@@ -543,7 +543,7 @@ func (c *ChannelMeta) mergeFlushedSegments(seg *Segment, planID UniqueID, compac
 		return fmt.Errorf("mismatch collection, ID=%d", seg.collectionID)
 	}
 
-	compactedFrom = lo.Filter[int64](compactedFrom, func(segID int64, _ int) bool {
+	compactedFrom = lo.Filter(compactedFrom, func(segID int64, _ int) bool {
 		// which means the segment is the `flushed` state
 		has := c.hasSegment(segID, true) && !c.hasSegment(segID, false)
 		if !has {

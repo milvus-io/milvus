@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/shirou/gopsutil/v3/disk"
 )
 
@@ -62,7 +63,26 @@ type ComponentParam struct {
 	DataNodeCfg   dataNodeConfig
 	IndexCoordCfg indexCoordConfig
 	IndexNodeCfg  indexNodeConfig
+	HTTPCfg       httpConfig
 	HookCfg       hookConfig
+
+	RootCoordGrpcServerCfg  GrpcServerConfig
+	ProxyGrpcServerCfg      GrpcServerConfig
+	QueryCoordGrpcServerCfg GrpcServerConfig
+	QueryNodeGrpcServerCfg  GrpcServerConfig
+	DataCoordGrpcServerCfg  GrpcServerConfig
+	DataNodeGrpcServerCfg   GrpcServerConfig
+	IndexCoordGrpcServerCfg GrpcServerConfig
+	IndexNodeGrpcServerCfg  GrpcServerConfig
+
+	RootCoordGrpcClientCfg  GrpcClientConfig
+	ProxyGrpcClientCfg      GrpcClientConfig
+	QueryCoordGrpcClientCfg GrpcClientConfig
+	QueryNodeGrpcClientCfg  GrpcClientConfig
+	DataCoordGrpcClientCfg  GrpcClientConfig
+	DataNodeGrpcClientCfg   GrpcClientConfig
+	IndexCoordGrpcClientCfg GrpcClientConfig
+	IndexNodeGrpcClientCfg  GrpcClientConfig
 }
 
 // InitOnce initialize once
@@ -88,7 +108,26 @@ func (p *ComponentParam) Init() {
 	p.DataNodeCfg.init(&p.BaseTable)
 	p.IndexCoordCfg.init(&p.BaseTable)
 	p.IndexNodeCfg.init(&p.BaseTable)
+	p.HTTPCfg.init(&p.BaseTable)
 	p.HookCfg.init()
+
+	p.RootCoordGrpcServerCfg.Init(typeutil.RootCoordRole, &p.BaseTable)
+	p.ProxyGrpcServerCfg.Init(typeutil.ProxyRole, &p.BaseTable)
+	p.QueryCoordGrpcServerCfg.Init(typeutil.QueryCoordRole, &p.BaseTable)
+	p.QueryNodeGrpcServerCfg.Init(typeutil.QueryNodeRole, &p.BaseTable)
+	p.DataCoordGrpcServerCfg.Init(typeutil.DataCoordRole, &p.BaseTable)
+	p.DataNodeGrpcServerCfg.Init(typeutil.DataNodeRole, &p.BaseTable)
+	p.IndexCoordGrpcServerCfg.Init(typeutil.IndexCoordRole, &p.BaseTable)
+	p.IndexNodeGrpcServerCfg.Init(typeutil.IndexNodeRole, &p.BaseTable)
+
+	p.RootCoordGrpcClientCfg.Init(typeutil.RootCoordRole, &p.BaseTable)
+	p.ProxyGrpcClientCfg.Init(typeutil.ProxyRole, &p.BaseTable)
+	p.QueryCoordGrpcClientCfg.Init(typeutil.QueryCoordRole, &p.BaseTable)
+	p.QueryNodeGrpcClientCfg.Init(typeutil.QueryNodeRole, &p.BaseTable)
+	p.DataCoordGrpcClientCfg.Init(typeutil.DataCoordRole, &p.BaseTable)
+	p.DataNodeGrpcClientCfg.Init(typeutil.DataNodeRole, &p.BaseTable)
+	p.IndexCoordGrpcClientCfg.Init(typeutil.IndexCoordRole, &p.BaseTable)
+	p.IndexNodeGrpcClientCfg.Init(typeutil.IndexNodeRole, &p.BaseTable)
 }
 
 func (p *ComponentParam) RocksmqEnable() bool {
@@ -106,61 +145,65 @@ func (p *ComponentParam) KafkaEnable() bool {
 // /////////////////////////////////////////////////////////////////////////////
 // --- common ---
 type commonConfig struct {
-	ClusterPrefix ParamItem
+	ClusterPrefix ParamItem `refreshable:"true"`
 
-	ProxySubName ParamItem
+	// Deprecated: do not use it anymore
+	ProxySubName ParamItem `refreshable:"true"`
 
-	RootCoordTimeTick   ParamItem
-	RootCoordStatistics ParamItem
-	RootCoordDml        ParamItem
-	RootCoordDelta      ParamItem
-	RootCoordSubName    ParamItem
+	RootCoordTimeTick   ParamItem `refreshable:"true"`
+	RootCoordStatistics ParamItem `refreshable:"true"`
+	RootCoordDml        ParamItem `refreshable:"false"`
+	RootCoordDelta      ParamItem `refreshable:"false"`
+	// Deprecated: do not use it anymore
+	RootCoordSubName ParamItem `refreshable:"true"`
 
-	QueryCoordSearch       ParamItem
-	QueryCoordSearchResult ParamItem
-	QueryCoordTimeTick     ParamItem
-	QueryNodeSubName       ParamItem
+	// Deprecated: only used in metrics as ID
+	QueryCoordSearch ParamItem `refreshable:"true"`
+	// Deprecated: only used in metrics as ID
+	QueryCoordSearchResult ParamItem `refreshable:"true"`
+	QueryCoordTimeTick     ParamItem `refreshable:"true"`
+	QueryNodeSubName       ParamItem `refreshable:"false"`
 
-	DataCoordStatistic    ParamItem
-	DataCoordTimeTick     ParamItem
-	DataCoordSegmentInfo  ParamItem
-	DataCoordSubName      ParamItem
-	DataCoordWatchSubPath ParamItem
-	DataNodeSubName       ParamItem
+	// Deprecated: do not use it anymore
+	DataCoordStatistic    ParamItem `refreshable:"true"`
+	DataCoordTimeTick     ParamItem `refreshable:"false"`
+	DataCoordSegmentInfo  ParamItem `refreshable:"true"`
+	DataCoordSubName      ParamItem `refreshable:"false"`
+	DataCoordWatchSubPath ParamItem `refreshable:"false"`
+	DataNodeSubName       ParamItem `refreshable:"false"`
 
-	DefaultPartitionName ParamItem
-	DefaultIndexName     ParamItem
-	RetentionDuration    ParamItem
-	EntityExpirationTTL  ParamItem
+	DefaultPartitionName ParamItem `refreshable:"true"`
+	DefaultIndexName     ParamItem `refreshable:"true"`
+	RetentionDuration    ParamItem `refreshable:"true"`
+	EntityExpirationTTL  ParamItem `refreshable:"true"`
 
-	IndexSliceSize           ParamItem
-	ThreadCoreCoefficient    ParamItem
-	MaxDegree                ParamItem
-	SearchListSize           ParamItem
-	PQCodeBudgetGBRatio      ParamItem
-	BuildNumThreadsRatio     ParamItem
-	SearchCacheBudgetGBRatio ParamItem
-	LoadNumThreadRatio       ParamItem
-	BeamWidthRatio           ParamItem
-	GracefulTime             ParamItem
-	GracefulStopTimeout      ParamItem // unit: s
+	IndexSliceSize           ParamItem `refreshable:"false"`
+	ThreadCoreCoefficient    ParamItem `refreshable:"false"`
+	MaxDegree                ParamItem `refreshable:"true"`
+	SearchListSize           ParamItem `refreshable:"true"`
+	PQCodeBudgetGBRatio      ParamItem `refreshable:"true"`
+	BuildNumThreadsRatio     ParamItem `refreshable:"true"`
+	SearchCacheBudgetGBRatio ParamItem `refreshable:"true"`
+	LoadNumThreadRatio       ParamItem `refreshable:"true"`
+	BeamWidthRatio           ParamItem `refreshable:"true"`
+	GracefulTime             ParamItem `refreshable:"true"`
+	GracefulStopTimeout      ParamItem `refreshable:"true"`
 
 	// Search limit, which applies on:
 	// maximum # of results to return (topK), and
 	// maximum # of search requests (nq).
 	// Check https://milvus.io/docs/limitations.md for more details.
-	TopKLimit ParamItem
+	TopKLimit   ParamItem `refreshable:"true"`
+	StorageType ParamItem `refreshable:"false"`
+	SimdType    ParamItem `refreshable:"false"`
 
-	StorageType ParamItem
-	SimdType    ParamItem
+	AuthorizationEnabled ParamItem `refreshable:"false"`
+	SuperUsers           ParamItem `refreshable:"true"`
 
-	AuthorizationEnabled ParamItem
-	SuperUsers           ParamItem
+	ClusterName ParamItem `refreshable:"false"`
 
-	ClusterName ParamItem
-
-	SessionTTL        ParamItem
-	SessionRetryTimes ParamItem
+	SessionTTL        ParamItem `refreshable:"false"`
+	SessionRetryTimes ParamItem `refreshable:"false"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -210,6 +253,7 @@ func (p *commonConfig) init(base *BaseTable) {
 		FallbackKeys: []string{"msgChannel.chanNamePrefix.rootCoordDml"},
 		PanicIfEmpty: true,
 		Formatter:    chanNamePrefix,
+		Doc:          "It is not refreshable currently",
 	}
 	p.RootCoordDml.Init(base.mgr)
 
@@ -219,6 +263,7 @@ func (p *commonConfig) init(base *BaseTable) {
 		FallbackKeys: []string{"msgChannel.chanNamePrefix.rootCoordDelta"},
 		PanicIfEmpty: true,
 		Formatter:    chanNamePrefix,
+		Doc:          "It is not refreshable currently",
 	}
 	p.RootCoordDelta.Init(base.mgr)
 
@@ -228,6 +273,7 @@ func (p *commonConfig) init(base *BaseTable) {
 		FallbackKeys: []string{"msgChannel.subNamePrefix.rootCoordSubNamePrefix"},
 		PanicIfEmpty: true,
 		Formatter:    chanNamePrefix,
+		Doc:          "It is deprecated",
 	}
 	p.RootCoordSubName.Init(base.mgr)
 
@@ -237,6 +283,7 @@ func (p *commonConfig) init(base *BaseTable) {
 		FallbackKeys: []string{"msgChannel.chanNamePrefix.search"},
 		PanicIfEmpty: true,
 		Formatter:    chanNamePrefix,
+		Doc:          "It is deprecated",
 	}
 	p.QueryCoordSearch.Init(base.mgr)
 
@@ -246,6 +293,7 @@ func (p *commonConfig) init(base *BaseTable) {
 		FallbackKeys: []string{"msgChannel.chanNamePrefix.searchResult"},
 		PanicIfEmpty: true,
 		Formatter:    chanNamePrefix,
+		Doc:          "It is deprecated",
 	}
 	p.QueryCoordSearchResult.Init(base.mgr)
 
@@ -498,15 +546,13 @@ func (p *commonConfig) init(base *BaseTable) {
 // /////////////////////////////////////////////////////////////////////////////
 // --- rootcoord ---
 type rootCoordConfig struct {
-	DmlChannelNum               ParamItem
-	MaxPartitionNum             ParamItem
-	MinSegmentSizeToEnableIndex ParamItem
-	ImportTaskExpiration        ParamItem
-	ImportTaskRetention         ParamItem
-	ImportTaskSubPath           ParamItem
-	// CreatedTime                 ParamItem
-	// UpdatedTime                 ParamItem
-	EnableActiveStandby ParamItem
+	DmlChannelNum               ParamItem `refreshable:"false"`
+	MaxPartitionNum             ParamItem `refreshable:"true"`
+	MinSegmentSizeToEnableIndex ParamItem `refreshable:"true"`
+	ImportTaskExpiration        ParamItem `refreshable:"true"`
+	ImportTaskRetention         ParamItem `refreshable:"true"`
+	ImportTaskSubPath           ParamItem `refreshable:"true"`
+	EnableActiveStandby         ParamItem `refreshable:"false"`
 }
 
 func (p *rootCoordConfig) init(base *BaseTable) {
@@ -565,48 +611,43 @@ func (p *rootCoordConfig) init(base *BaseTable) {
 // --- proxy ---
 type AccessLogConfig struct {
 	// if use access log
-	Enable ParamItem
+	Enable ParamItem `refreshable:"false"`
 	// if upload sealed access log file to minio
-	MinioEnable ParamItem
+	MinioEnable ParamItem `refreshable:"false"`
 	// Log path
-	LocalPath ParamItem
+	LocalPath ParamItem `refreshable:"false"`
 	// Log filename, leave empty to disable file log.
-	Filename ParamItem
+	Filename ParamItem `refreshable:"false"`
 	// Max size for a single file, in MB.
-	MaxSize ParamItem
+	MaxSize ParamItem `refreshable:"false"`
 	// Max time for single access log file in seconds
-	RotatedTime ParamItem
+	RotatedTime ParamItem `refreshable:"false"`
 	// Maximum number of old log files to retain.
-	MaxBackups ParamItem
+	MaxBackups ParamItem `refreshable:"false"`
 	//File path in minIO
-	RemotePath ParamItem
+	RemotePath ParamItem `refreshable:"false"`
 	//Max time for log file in minIO, in hours
-	RemoteMaxTime ParamItem
+	RemoteMaxTime ParamItem `refreshable:"false"`
 }
 
 type proxyConfig struct {
 	// Alias  string
-	SoPath ParamItem
+	SoPath ParamItem `refreshable:"false"`
 
-	TimeTickInterval         ParamItem
-	MsgStreamTimeTickBufSize ParamItem
-	MaxNameLength            ParamItem
-	MaxUsernameLength        ParamItem
-	MinPasswordLength        ParamItem
-	MaxPasswordLength        ParamItem
-	MaxFieldNum              ParamItem
-	MaxShardNum              ParamItem
-	MaxDimension             ParamItem
-	GinLogging               ParamItem
-	MaxUserNum               ParamItem
-	MaxRoleNum               ParamItem
+	TimeTickInterval         ParamItem `refreshable:"false"`
+	MsgStreamTimeTickBufSize ParamItem `refreshable:"true"`
+	MaxNameLength            ParamItem `refreshable:"true"`
+	MaxUsernameLength        ParamItem `refreshable:"true"`
+	MinPasswordLength        ParamItem `refreshable:"true"`
+	MaxPasswordLength        ParamItem `refreshable:"true"`
+	MaxFieldNum              ParamItem `refreshable:"true"`
+	MaxShardNum              ParamItem `refreshable:"true"`
+	MaxDimension             ParamItem `refreshable:"true"`
+	GinLogging               ParamItem `refreshable:"false"`
+	MaxUserNum               ParamItem `refreshable:"true"`
+	MaxRoleNum               ParamItem `refreshable:"true"`
+	MaxTaskNum               ParamItem `refreshable:"false"`
 	AccessLog                AccessLogConfig
-
-	// required from QueryCoord
-	SearchResultChannelNames   ParamItem
-	RetrieveResultChannelNames ParamItem
-
-	MaxTaskNum ParamItem
 }
 
 func (p *proxyConfig) init(base *BaseTable) {
@@ -785,31 +826,34 @@ func (p *proxyConfig) init(base *BaseTable) {
 // /////////////////////////////////////////////////////////////////////////////
 // --- querycoord ---
 type queryCoordConfig struct {
-	//---- Task ---
-	RetryNum         ParamItem
-	RetryInterval    ParamItem
-	TaskMergeCap     ParamItem
-	TaskExecutionCap ParamItem
+	//Deprecated: Since 2.2.0
+	RetryNum ParamItem `refreshable:"true"`
+	//Deprecated: Since 2.2.0
+	RetryInterval    ParamItem `refreshable:"true"`
+	TaskMergeCap     ParamItem `refreshable:"false"`
+	TaskExecutionCap ParamItem `refreshable:"true"`
 
 	//---- Handoff ---
-	AutoHandoff ParamItem
+	//Deprecated: Since 2.2.2
+	AutoHandoff ParamItem `refreshable:"true"`
 
 	//---- Balance ---
-	AutoBalance                         ParamItem
-	OverloadedMemoryThresholdPercentage ParamItem
-	BalanceIntervalSeconds              ParamItem
-	MemoryUsageMaxDifferencePercentage  ParamItem
-	CheckInterval                       ParamItem
-	ChannelTaskTimeout                  ParamItem
-	SegmentTaskTimeout                  ParamItem
-	DistPullInterval                    ParamItem
-	HeartbeatAvailableInterval          ParamItem
-	LoadTimeoutSeconds                  ParamItem
-	CheckHandoffInterval                ParamItem
-	EnableActiveStandby                 ParamItem
+	AutoBalance                         ParamItem `refreshable:"true"`
+	OverloadedMemoryThresholdPercentage ParamItem `refreshable:"true"`
+	BalanceIntervalSeconds              ParamItem `refreshable:"true"`
+	MemoryUsageMaxDifferencePercentage  ParamItem `refreshable:"true"`
+	CheckInterval                       ParamItem `refreshable:"true"`
+	ChannelTaskTimeout                  ParamItem `refreshable:"true"`
+	SegmentTaskTimeout                  ParamItem `refreshable:"true"`
+	DistPullInterval                    ParamItem `refreshable:"false"`
+	HeartbeatAvailableInterval          ParamItem `refreshable:"true"`
+	LoadTimeoutSeconds                  ParamItem `refreshable:"true"`
+	//Deprecated: Since 2.2.2, QueryCoord do not use HandOff logic anymore
+	CheckHandoffInterval ParamItem `refreshable:"true"`
+	EnableActiveStandby  ParamItem `refreshable:"false"`
 
-	NextTargetSurviveTime    ParamItem
-	UpdateNextTargetInterval ParamItem
+	NextTargetSurviveTime    ParamItem `refreshable:"true"`
+	UpdateNextTargetInterval ParamItem `refreshable:"false"`
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -930,6 +974,14 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 	}
 	p.HeartbeatAvailableInterval.Init(base.mgr)
 
+	p.CheckHandoffInterval = ParamItem{
+		Key:          "queryCoord.checkHandoffInterval",
+		DefaultValue: "5000",
+		Version:      "2.2.0",
+		PanicIfEmpty: true,
+	}
+	p.CheckHandoffInterval.Init(base.mgr)
+
 	p.EnableActiveStandby = ParamItem{
 		Key:          "queryCoord.enableActiveStandby",
 		Version:      "2.2.0",
@@ -957,47 +1009,43 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 // /////////////////////////////////////////////////////////////////////////////
 // --- querynode ---
 type queryNodeConfig struct {
-	FlowGraphMaxQueueLength ParamItem
-	FlowGraphMaxParallelism ParamItem
+	FlowGraphMaxQueueLength ParamItem `refreshable:"false"`
+	FlowGraphMaxParallelism ParamItem `refreshable:"false"`
 
 	// stats
-	StatsPublishInterval ParamItem
-
-	SliceIndex ParamItem
+	//Deprecated: Never used
+	StatsPublishInterval ParamItem `refreshable:"true"`
 
 	// segcore
-	ChunkRows        ParamItem
-	SmallIndexNlist  ParamItem
-	SmallIndexNProbe ParamItem
-
-	CreatedTime ParamItem
-	UpdatedTime ParamItem
+	ChunkRows        ParamItem `refreshable:"false"`
+	SmallIndexNlist  ParamItem `refreshable:"false"`
+	SmallIndexNProbe ParamItem `refreshable:"false"`
 
 	// memory limit
-	LoadMemoryUsageFactor               ParamItem
-	OverloadedMemoryThresholdPercentage ParamItem
+	LoadMemoryUsageFactor               ParamItem `refreshable:"true"`
+	OverloadedMemoryThresholdPercentage ParamItem `refreshable:"false"`
 
 	// enable disk
-	EnableDisk             ParamItem
-	DiskCapacityLimit      ParamItem
-	MaxDiskUsagePercentage ParamItem
+	EnableDisk             ParamItem `refreshable:"true"`
+	DiskCapacityLimit      ParamItem `refreshable:"true"`
+	MaxDiskUsagePercentage ParamItem `refreshable:"true"`
 
 	// cache limit
-	CacheEnabled     ParamItem
-	CacheMemoryLimit ParamItem
+	CacheEnabled     ParamItem `refreshable:"false"`
+	CacheMemoryLimit ParamItem `refreshable:"false"`
 
-	GroupEnabled         ParamItem
-	MaxReceiveChanSize   ParamItem
-	MaxUnsolvedQueueSize ParamItem
-	MaxReadConcurrency   ParamItem
-	MaxGroupNQ           ParamItem
-	TopKMergeRatio       ParamItem
-	CPURatio             ParamItem
+	GroupEnabled         ParamItem `refreshable:"true"`
+	MaxReceiveChanSize   ParamItem `refreshable:"false"`
+	MaxUnsolvedQueueSize ParamItem `refreshable:"true"`
+	MaxReadConcurrency   ParamItem `refreshable:"true"`
+	MaxGroupNQ           ParamItem `refreshable:"true"`
+	TopKMergeRatio       ParamItem `refreshable:"true"`
+	CPURatio             ParamItem `refreshable:"true"`
 
-	GCHelperEnabled     ParamItem
-	MinimumGOGCConfig   ParamItem
-	MaximumGOGCConfig   ParamItem
-	GracefulStopTimeout ParamItem
+	GCHelperEnabled     ParamItem `refreshable:"false"`
+	MinimumGOGCConfig   ParamItem `refreshable:"false"`
+	MaximumGOGCConfig   ParamItem `refreshable:"false"`
+	GracefulStopTimeout ParamItem `refreshable:"false"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -1240,40 +1288,40 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 type dataCoordConfig struct {
 
 	// --- CHANNEL ---
-	MaxWatchDuration ParamItem
+	MaxWatchDuration ParamItem `refreshable:"false"`
 
 	// --- SEGMENTS ---
-	SegmentMaxSize                 ParamItem
-	DiskSegmentMaxSize             ParamItem
-	SegmentSealProportion          ParamItem
-	SegAssignmentExpiration        ParamItem
-	SegmentMaxLifetime             ParamItem
-	SegmentMaxIdleTime             ParamItem
-	SegmentMinSizeFromIdleToSealed ParamItem
+	SegmentMaxSize                 ParamItem `refreshable:"false"`
+	DiskSegmentMaxSize             ParamItem `refreshable:"true"`
+	SegmentSealProportion          ParamItem `refreshable:"false"`
+	SegAssignmentExpiration        ParamItem `refreshable:"true"`
+	SegmentMaxLifetime             ParamItem `refreshable:"false"`
+	SegmentMaxIdleTime             ParamItem `refreshable:"false"`
+	SegmentMinSizeFromIdleToSealed ParamItem `refreshable:"false"`
 
 	// compaction
-	EnableCompaction     ParamItem
-	EnableAutoCompaction ParamItem
+	EnableCompaction     ParamItem `refreshable:"false"`
+	EnableAutoCompaction ParamItem `refreshable:"true"`
 
-	MinSegmentToMerge                 ParamItem
-	MaxSegmentToMerge                 ParamItem
-	SegmentSmallProportion            ParamItem
-	SegmentCompactableProportion      ParamItem
-	SegmentExpansionRate              ParamItem
-	CompactionTimeoutInSeconds        ParamItem
-	CompactionCheckIntervalInSeconds  ParamItem
-	SingleCompactionRatioThreshold    ParamItem
-	SingleCompactionDeltaLogMaxSize   ParamItem
-	SingleCompactionExpiredLogMaxSize ParamItem
-	SingleCompactionDeltalogMaxNum    ParamItem
-	GlobalCompactionInterval          ParamItem
+	MinSegmentToMerge                 ParamItem `refreshable:"true"`
+	MaxSegmentToMerge                 ParamItem `refreshable:"true"`
+	SegmentSmallProportion            ParamItem `refreshable:"true"`
+	SegmentCompactableProportion      ParamItem `refreshable:"true"`
+	SegmentExpansionRate              ParamItem `refreshable:"true"`
+	CompactionTimeoutInSeconds        ParamItem `refreshable:"true"`
+	CompactionCheckIntervalInSeconds  ParamItem `refreshable:"false"`
+	SingleCompactionRatioThreshold    ParamItem `refreshable:"true"`
+	SingleCompactionDeltaLogMaxSize   ParamItem `refreshable:"true"`
+	SingleCompactionExpiredLogMaxSize ParamItem `refreshable:"true"`
+	SingleCompactionDeltalogMaxNum    ParamItem `refreshable:"true"`
+	GlobalCompactionInterval          ParamItem `refreshable:"false"`
 
 	// Garbage Collection
-	EnableGarbageCollection ParamItem
-	GCInterval              ParamItem
-	GCMissingTolerance      ParamItem
-	GCDropTolerance         ParamItem
-	EnableActiveStandby     ParamItem
+	EnableGarbageCollection ParamItem `refreshable:"false"`
+	GCInterval              ParamItem `refreshable:"false"`
+	GCMissingTolerance      ParamItem `refreshable:"false"`
+	GCDropTolerance         ParamItem `refreshable:"false"`
+	EnableActiveStandby     ParamItem `refreshable:"false"`
 }
 
 func (p *dataCoordConfig) init(base *BaseTable) {
@@ -1471,17 +1519,17 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 // /////////////////////////////////////////////////////////////////////////////
 // --- datanode ---
 type dataNodeConfig struct {
-	FlowGraphMaxQueueLength ParamItem
-	FlowGraphMaxParallelism ParamItem
+	FlowGraphMaxQueueLength ParamItem `refreshable:"false"`
+	FlowGraphMaxParallelism ParamItem `refreshable:"false"`
 
 	// segment
-	FlushInsertBufferSize  ParamItem
-	FlushDeleteBufferBytes ParamItem
-	BinLogMaxSize          ParamItem
-	SyncPeriod             ParamItem
+	FlushInsertBufferSize  ParamItem `refreshable:"true"`
+	FlushDeleteBufferBytes ParamItem `refreshable:"true"`
+	BinLogMaxSize          ParamItem `refreshable:"true"`
+	SyncPeriod             ParamItem `refreshable:"true"`
 
 	// io concurrency to fetch stats logs
-	IOConcurrency ParamItem
+	IOConcurrency ParamItem `refreshable:"false"`
 }
 
 func (p *dataNodeConfig) init(base *BaseTable) {
@@ -1541,16 +1589,16 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 // /////////////////////////////////////////////////////////////////////////////
 // --- indexcoord ---
 type indexCoordConfig struct {
-	BindIndexNodeMode ParamItem
-	IndexNodeAddress  ParamItem
-	WithCredential    ParamItem
-	IndexNodeID       ParamItem
+	BindIndexNodeMode ParamItem `refreshable:"false"`
+	IndexNodeAddress  ParamItem `refreshable:"false"`
+	WithCredential    ParamItem `refreshable:"false"`
+	IndexNodeID       ParamItem `refreshable:"false"`
 
-	MinSegmentNumRowsToEnableIndex ParamItem
+	MinSegmentNumRowsToEnableIndex ParamItem `refreshable:"true"`
 
-	GCInterval ParamItem
+	GCInterval ParamItem `refreshable:"false"`
 
-	EnableActiveStandby ParamItem
+	EnableActiveStandby ParamItem `refreshable:"false"`
 }
 
 func (p *indexCoordConfig) init(base *BaseTable) {
@@ -1607,13 +1655,13 @@ func (p *indexCoordConfig) init(base *BaseTable) {
 // /////////////////////////////////////////////////////////////////////////////
 // --- indexnode ---
 type indexNodeConfig struct {
-	BuildParallel ParamItem
+	BuildParallel ParamItem `refreshable:"false"`
 	// enable disk
-	EnableDisk             ParamItem
-	DiskCapacityLimit      ParamItem
-	MaxDiskUsagePercentage ParamItem
+	EnableDisk             ParamItem `refreshable:"false"`
+	DiskCapacityLimit      ParamItem `refreshable:"true"`
+	MaxDiskUsagePercentage ParamItem `refreshable:"true"`
 
-	GracefulStopTimeout ParamItem
+	GracefulStopTimeout ParamItem `refreshable:"false"`
 }
 
 func (p *indexNodeConfig) init(base *BaseTable) {

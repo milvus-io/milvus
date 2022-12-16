@@ -38,7 +38,6 @@ import (
 
 func TestIndexCoordClient(t *testing.T) {
 	paramtable.Init()
-	ClientParams.InitOnce(typeutil.IndexCoordRole)
 	ctx := context.Background()
 	factory := dependency.NewDefaultFactory(true)
 	server, err := grpcindexcoord.NewServer(ctx, factory)

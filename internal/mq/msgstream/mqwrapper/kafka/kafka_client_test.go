@@ -25,7 +25,7 @@ import (
 var Params paramtable.BaseTable
 
 func TestMain(m *testing.M) {
-	Params.Init()
+	Params.Init(0)
 	mockCluster, err := kafka.NewMockCluster(1)
 	defer mockCluster.Close()
 	if err != nil {

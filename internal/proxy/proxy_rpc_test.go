@@ -2,7 +2,6 @@ package proxy
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"strings"
 	"sync"
@@ -33,13 +32,14 @@ func TestProxyRpcLimit(t *testing.T) {
 	localMsg := true
 	factory := dependency.NewDefaultFactory(localMsg)
 
+	base := paramtable.BaseTable{}
+	base.Init(0)
 	var p paramtable.GrpcServerConfig
 	assert.NoError(t, err)
-	p.InitOnce(typeutil.ProxyRole)
-	p.Save("proxy.grpc.serverMaxRecvSize", "1")
+	p.Init(typeutil.ProxyRole, &base)
+	base.Save("proxy.grpc.serverMaxRecvSize", "1")
 
-	p.InitServerMaxRecvSize()
-	assert.Equal(t, p.ServerMaxRecvSize, 1)
+	assert.Equal(t, p.ServerMaxRecvSize.GetAsInt(), 1)
 	log.Info("Initialize parameter table of Proxy")
 
 	proxy, err := NewProxy(ctx, factory)
@@ -52,7 +52,7 @@ func TestProxyRpcLimit(t *testing.T) {
 	go testServer.startGrpc(ctx, &wg, &p)
 	assert.NoError(t, testServer.waitForGrpcReady())
 	defer testServer.grpcServer.Stop()
-	client, err := grpcproxyclient.NewClient(ctx, "localhost:"+fmt.Sprint(p.Port))
+	client, err := grpcproxyclient.NewClient(ctx, "localhost:"+p.Port.GetValue())
 	assert.NoError(t, err)
 	proxy.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -69,7 +69,4 @@ func TestProxyRpcLimit(t *testing.T) {
 	// should be limited because of the rpc limit
 	assert.Error(t, err)
 	assert.True(t, strings.Contains(err.Error(), "ResourceExhausted"))
-
-	p.Remove("proxy.grpc.serverMaxRecvSize")
-	p.Init(typeutil.ProxyRole)
 }

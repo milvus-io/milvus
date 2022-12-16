@@ -42,7 +42,7 @@ var params paramtable.BaseTable
 // InitRmq is deprecate implementation of global rocksmq. will be removed later
 func InitRmq(rocksdbName string, idAllocator allocator.Interface) error {
 	var err error
-	params.Init()
+	params.Init(0)
 	Rmq, err = NewRocksMQ(params, rocksdbName, idAllocator)
 	return err
 }
@@ -51,7 +51,7 @@ func InitRmq(rocksdbName string, idAllocator allocator.Interface) error {
 func InitRocksMQ(path string) error {
 	var finalErr error
 	once.Do(func() {
-		params.Init()
+		params.Init(0)
 		log.Debug("initializing global rmq", zap.String("path", path))
 		var fi os.FileInfo
 		fi, finalErr = os.Stat(path)

@@ -183,6 +183,7 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 		if err := os.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode); err != nil {
 			log.Error("Failed to set deploy mode: ", zap.Error(err))
 		}
+
 		paramtable.Init()
 		params := paramtable.Get()
 

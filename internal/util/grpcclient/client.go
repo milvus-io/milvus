@@ -293,7 +293,7 @@ func (c *ClientBase[T]) ReCall(ctx context.Context, caller func(client T) (any, 
 	}
 
 	traceErr := fmt.Errorf("err: %w\n, %s", err, trace.StackTrace())
-	log.Warn(c.GetRole()+" ClientBase ReCall grpc first call get error ", zap.Error(traceErr))
+	log.Warn("ClientBase ReCall grpc first call get error ", zap.String("role", c.GetRole()), zap.Error(traceErr))
 
 	if !funcutil.CheckCtxValid(ctx) {
 		return generic.Zero[T](), ctx.Err()

@@ -7,8 +7,9 @@ import (
 )
 
 func TestHTTPConfig_Init(t *testing.T) {
-	cf := new(HTTPConfig)
-	cf.InitOnce()
-	assert.Equal(t, cf.Enabled, true)
-	assert.Equal(t, cf.DebugMode, false)
+	params := ComponentParam{}
+	params.InitOnce()
+	cf := params.HTTPCfg
+	assert.Equal(t, cf.Enabled.GetAsBool(), true)
+	assert.Equal(t, cf.DebugMode.GetAsBool(), false)
 }

@@ -23,13 +23,13 @@ import (
 ///////////////////////////////////////////////////////////////////////////////
 // --- common ---
 type autoIndexConfig struct {
-	Enable ParamItem
+	Enable ParamItem `refreshable:"true"`
 
-	IndexParams         ParamItem
-	ExtraParams         ParamItem
-	SearchParamsYamlStr ParamItem
-	IndexType           ParamItem
-	AutoIndexTypeName   ParamItem
+	IndexParams         ParamItem `refreshable:"true"`
+	ExtraParams         ParamItem `refreshable:"true"`
+	SearchParamsYamlStr ParamItem `refreshable:"true"`
+	IndexType           ParamItem `refreshable:"true"`
+	AutoIndexTypeName   ParamItem `refreshable:"true"`
 }
 
 func (p *autoIndexConfig) init(base *BaseTable) {

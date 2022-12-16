@@ -55,7 +55,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/logutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/trace"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/opentracing/opentracing-go"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
@@ -66,9 +65,6 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/status"
 )
-
-var Params paramtable.GrpcServerConfig
-var HTTPParams paramtable.HTTPConfig
 
 var (
 	errMissingMetadata = status.Errorf(codes.InvalidArgument, "missing metadata")
@@ -121,7 +117,7 @@ func (s *Server) registerHTTPServer() {
 		gin.DefaultWriter = io.Discard
 		gin.DefaultErrorWriter = io.Discard
 	}
-	if !HTTPParams.DebugMode {
+	if !proxy.Params.HTTPCfg.DebugMode.GetAsBool() {
 		gin.SetMode(gin.ReleaseMode)
 	}
 	ginHandler := gin.Default()
@@ -142,6 +138,7 @@ func (s *Server) startExternalRPCServer(grpcExternalPort int, errChan chan error
 
 func (s *Server) startExternalGrpc(grpcPort int, errChan chan error) {
 	defer s.wg.Done()
+	Params := &paramtable.Get().ProxyGrpcServerCfg
 	var kaep = keepalive.EnforcementPolicy{
 		MinTime:             5 * time.Second, // If a client pings more than once every 5 seconds, terminate the connection
 		PermitWithoutStream: true,            // Allow pings even when there are no active streams
@@ -173,8 +170,8 @@ func (s *Server) startExternalGrpc(grpcPort int, errChan chan error) {
 	grpcOpts := []grpc.ServerOption{
 		grpc.KeepaliveEnforcementPolicy(kaep),
 		grpc.KeepaliveParams(kasp),
-		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize),
-		grpc.MaxSendMsgSize(Params.ServerMaxSendSize),
+		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize.GetAsInt()),
+		grpc.MaxSendMsgSize(Params.ServerMaxSendSize.GetAsInt()),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
 			ot.UnaryServerInterceptor(opts...),
 			grpc_auth.UnaryServerInterceptor(proxy.AuthenticationInterceptor),
@@ -186,16 +183,16 @@ func (s *Server) startExternalGrpc(grpcPort int, errChan chan error) {
 		)),
 	}
 
-	if Params.TLSMode == 1 {
-		creds, err := credentials.NewServerTLSFromFile(Params.ServerPemPath, Params.ServerKeyPath)
+	if Params.TLSMode.GetAsInt() == 1 {
+		creds, err := credentials.NewServerTLSFromFile(Params.ServerPemPath.GetValue(), Params.ServerKeyPath.GetValue())
 		if err != nil {
 			log.Warn("proxy can't create creds", zap.Error(err))
 			errChan <- err
 			return
 		}
 		grpcOpts = append(grpcOpts, grpc.Creds(creds))
-	} else if Params.TLSMode == 2 {
-		cert, err := tls.LoadX509KeyPair(Params.ServerPemPath, Params.ServerKeyPath)
+	} else if Params.TLSMode.GetAsInt() == 2 {
+		cert, err := tls.LoadX509KeyPair(Params.ServerPemPath.GetValue(), Params.ServerKeyPath.GetValue())
 		if err != nil {
 			log.Warn("proxy cant load x509 key pair", zap.Error(err))
 			errChan <- err
@@ -203,7 +200,7 @@ func (s *Server) startExternalGrpc(grpcPort int, errChan chan error) {
 		}
 
 		certPool := x509.NewCertPool()
-		rootBuf, err := ioutil.ReadFile(Params.CaPemPath)
+		rootBuf, err := ioutil.ReadFile(Params.CaPemPath.GetValue())
 		if err != nil {
 			log.Warn("failed read ca pem", zap.Error(err))
 			errChan <- err
@@ -241,6 +238,7 @@ func (s *Server) startExternalGrpc(grpcPort int, errChan chan error) {
 
 func (s *Server) startInternalGrpc(grpcPort int, errChan chan error) {
 	defer s.wg.Done()
+	Params := &paramtable.Get().ProxyGrpcServerCfg
 	var kaep = keepalive.EnforcementPolicy{
 		MinTime:             5 * time.Second, // If a client pings more than once every 5 seconds, terminate the connection
 		PermitWithoutStream: true,            // Allow pings even when there are no active streams
@@ -264,8 +262,8 @@ func (s *Server) startInternalGrpc(grpcPort int, errChan chan error) {
 	s.grpcInternalServer = grpc.NewServer(
 		grpc.KeepaliveEnforcementPolicy(kaep),
 		grpc.KeepaliveParams(kasp),
-		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize),
-		grpc.MaxSendMsgSize(Params.ServerMaxSendSize),
+		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize.GetAsInt()),
+		grpc.MaxSendMsgSize(Params.ServerMaxSendSize.GetAsInt()),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
 			ot.UnaryServerInterceptor(opts...),
 			logutil.UnaryTraceLoggerInterceptor,
@@ -306,56 +304,57 @@ func (s *Server) Run() error {
 }
 
 func (s *Server) init() error {
-	Params.InitOnce(typeutil.ProxyRole)
+	etcdConfig := &paramtable.Get().EtcdCfg
+	Params := &paramtable.Get().ProxyGrpcServerCfg
 	log.Debug("Proxy init service's parameter table done")
-	HTTPParams.InitOnce()
+	HTTPParams := paramtable.Get().HTTPCfg
 	log.Debug("Proxy init http server's parameter table done")
 
-	if !funcutil.CheckPortAvailable(Params.Port) {
-		Params.Port = funcutil.GetAvailablePort()
-		log.Warn("Proxy get available port when init", zap.Int("Port", Params.Port))
+	if !funcutil.CheckPortAvailable(Params.Port.GetAsInt()) {
+		paramtable.Get().Save(Params.Port.Key, fmt.Sprintf("%d", funcutil.GetAvailablePort()))
+		log.Warn("Proxy get available port when init", zap.Int("Port", Params.Port.GetAsInt()))
 	}
 
 	log.Debug("init Proxy's parameter table done", zap.String("internal address", Params.GetInternalAddress()), zap.String("external address", Params.GetAddress()))
 
-	serviceName := fmt.Sprintf("Proxy ip: %s, port: %d", Params.IP, Params.Port)
+	serviceName := fmt.Sprintf("Proxy ip: %s, port: %d", Params.IP, Params.Port.GetAsInt())
 	closer := trace.InitTracing(serviceName)
 	s.closer = closer
 	log.Debug("init Proxy's tracer done", zap.String("service name", serviceName))
 
 	etcdCli, err := etcd.GetEtcdClient(
-		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
-		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
-		Params.EtcdCfg.Endpoints.GetAsStrings(),
-		Params.EtcdCfg.EtcdTLSCert.GetValue(),
-		Params.EtcdCfg.EtcdTLSKey.GetValue(),
-		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
-		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
+		etcdConfig.UseEmbedEtcd.GetAsBool(),
+		etcdConfig.EtcdUseSSL.GetAsBool(),
+		etcdConfig.Endpoints.GetAsStrings(),
+		etcdConfig.EtcdTLSCert.GetValue(),
+		etcdConfig.EtcdTLSKey.GetValue(),
+		etcdConfig.EtcdTLSCACert.GetValue(),
+		etcdConfig.EtcdTLSMinVersion.GetValue())
 	if err != nil {
 		log.Debug("Proxy connect to etcd failed", zap.Error(err))
 		return err
 	}
 	s.etcdCli = etcdCli
 	s.proxy.SetEtcdClient(s.etcdCli)
-	s.proxy.SetAddress(fmt.Sprintf("%s:%d", Params.IP, Params.InternalPort))
+	s.proxy.SetAddress(Params.GetInternalAddress())
 
 	errChan := make(chan error, 1)
 	{
-		s.startInternalRPCServer(Params.InternalPort, errChan)
+		s.startInternalRPCServer(Params.InternalPort.GetAsInt(), errChan)
 		if err := <-errChan; err != nil {
 			log.Error("failed to create internal rpc server", zap.Error(err))
 			return err
 		}
 	}
 	{
-		s.startExternalRPCServer(Params.Port, errChan)
+		s.startExternalRPCServer(Params.Port.GetAsInt(), errChan)
 		if err := <-errChan; err != nil {
 			log.Error("failed to create external rpc server", zap.Error(err))
 			return err
 		}
 	}
 
-	if HTTPParams.Enabled {
+	if HTTPParams.Enabled.GetAsBool() {
 		registerHTTPHandlerOnce.Do(func() {
 			log.Info("register http server of proxy")
 			s.registerHTTPServer()
@@ -509,6 +508,7 @@ func (s *Server) start() error {
 
 // Stop stop the Proxy Server
 func (s *Server) Stop() error {
+	Params := &paramtable.Get().ProxyGrpcServerCfg
 	log.Debug("Proxy stop", zap.String("internal address", Params.GetInternalAddress()), zap.String("external address", Params.GetInternalAddress()))
 	var err error
 	if s.closer != nil {
