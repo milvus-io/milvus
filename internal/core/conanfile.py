@@ -26,20 +26,17 @@ class MilvusConan(ConanFile):
         "arrow:parquet": True,
         "arrow:compute": True,
         "arrow:with_zstd": True,
+        "arrow:shared": False,
+        "arrow:with_jemalloc": True,
         "aws-sdk-cpp:text-to-speech": False,
         "aws-sdk-cpp:transfer": False,
         "gtest:build_gmock": False,
-        "jemalloc:shared": True,
     }
     should_build = False
 
-    def configure(self):
-
-        # Macos M1 cannot use jemalloc
-        if self.settings.os != "Macos" or self.settings.arch in ("x86_64", "x86"):
-            self.requires("jemalloc/5.3.0")
-
     def imports(self):
+        self.copy("librocksdb.a", "../lib", "lib")
+        self.copy("libarrow.a", "../lib", "lib")
         self.copy("*.dylib", "../lib", "lib")
         self.copy("*.dll", "../lib", "lib")
         self.copy("*.so*", "../lib", "lib")
