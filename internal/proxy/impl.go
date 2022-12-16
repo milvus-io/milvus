@@ -18,13 +18,10 @@ package proxy
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"strconv"
 	"sync"
-
-	"golang.org/x/sync/errgroup"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -49,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"golang.org/x/sync/errgroup"
 )
 
 const moduleName = "Proxy"
@@ -1785,61 +1783,6 @@ func (node *Proxy) ShowPartitions(ctx context.Context, request *milvuspb.ShowPar
 	return spt.result, nil
 }
 
-func (node *Proxy) getCollectionProgress(ctx context.Context, request *milvuspb.GetLoadingProgressRequest, collectionID int64) (int64, error) {
-	resp, err := node.queryCoord.ShowCollections(ctx, &querypb.ShowCollectionsRequest{
-		Base: commonpbutil.UpdateMsgBase(
-			request.Base,
-			commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection),
-		),
-		CollectionIDs: []int64{collectionID},
-	})
-	if err != nil {
-		return 0, err
-	}
-
-	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
-		return 0, errors.New(resp.Status.Reason)
-	}
-
-	if len(resp.InMemoryPercentages) == 0 {
-		return 0, errors.New("fail to show collections from the querycoord, no data")
-	}
-	return resp.InMemoryPercentages[0], nil
-}
-
-func (node *Proxy) getPartitionProgress(ctx context.Context, request *milvuspb.GetLoadingProgressRequest, collectionID int64) (int64, error) {
-	IDs2Names := make(map[int64]string)
-	partitionIDs := make([]int64, 0)
-	for _, partitionName := range request.PartitionNames {
-		partitionID, err := globalMetaCache.GetPartitionID(ctx, request.CollectionName, partitionName)
-		if err != nil {
-			return 0, err
-		}
-		IDs2Names[partitionID] = partitionName
-		partitionIDs = append(partitionIDs, partitionID)
-	}
-	resp, err := node.queryCoord.ShowPartitions(ctx, &querypb.ShowPartitionsRequest{
-		Base: commonpbutil.UpdateMsgBase(
-			request.Base,
-			commonpbutil.WithMsgType(commonpb.MsgType_ShowPartitions),
-		),
-		CollectionID: collectionID,
-		PartitionIDs: partitionIDs,
-	})
-	if err != nil {
-		return 0, err
-	}
-	if len(resp.InMemoryPercentages) != len(partitionIDs) {
-		return 0, errors.New("fail to show partitions from the querycoord, invalid data num")
-	}
-	var progress int64
-	for _, p := range resp.InMemoryPercentages {
-		progress += p
-	}
-	progress /= int64(len(partitionIDs))
-	return progress, nil
-}
-
 func (node *Proxy) GetLoadingProgress(ctx context.Context, request *milvuspb.GetLoadingProgressRequest) (*milvuspb.GetLoadingProgressResponse, error) {
 	if !node.checkHealthy() {
 		return &milvuspb.GetLoadingProgressResponse{Status: unhealthyStatus()}, nil
@@ -1850,16 +1793,16 @@ func (node *Proxy) GetLoadingProgress(ctx context.Context, request *milvuspb.Get
 	defer sp.Finish()
 	traceID, _, _ := trace.InfoFromSpan(sp)
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method, metrics.TotalLabel).Inc()
-	logger.Info(
+	log.Info(
 		rpcReceived(method),
 		zap.String("traceID", traceID),
 		zap.Any("request", request))
 
 	getErrResponse := func(err error) *milvuspb.GetLoadingProgressResponse {
 		log.Warn("fail to get loading progress",
-			zap.Error(err),
 			zap.String("collection_name", request.CollectionName),
-			zap.Strings("partition_name", request.PartitionNames))
+			zap.Strings("partition_name", request.PartitionNames),
+			zap.Error(err))
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method, metrics.FailLabel).Inc()
 		return &milvuspb.GetLoadingProgressResponse{
 			Status: &commonpb.Status{
@@ -1875,6 +1818,7 @@ func (node *Proxy) GetLoadingProgress(ctx context.Context, request *milvuspb.Get
 	if err != nil {
 		return getErrResponse(err), nil
 	}
+
 	msgBase := commonpbutil.NewMsgBase(
 		commonpbutil.WithMsgType(commonpb.MsgType_SystemInfo),
 		commonpbutil.WithMsgID(0),
@@ -1891,16 +1835,17 @@ func (node *Proxy) GetLoadingProgress(ctx context.Context, request *milvuspb.Get
 
 	var progress int64
 	if len(request.GetPartitionNames()) == 0 {
-		if progress, err = node.getCollectionProgress(ctx, request, collectionID); err != nil {
+		if progress, err = getCollectionProgress(ctx, node.queryCoord, request.GetBase(), collectionID); err != nil {
 			return getErrResponse(err), nil
 		}
 	} else {
-		if progress, err = node.getPartitionProgress(ctx, request, collectionID); err != nil {
+		if progress, err = getPartitionProgress(ctx, node.queryCoord, request.GetBase(),
+			request.GetPartitionNames(), request.GetCollectionName(), collectionID); err != nil {
 			return getErrResponse(err), nil
 		}
 	}
 
-	logger.Info(
+	log.Info(
 		rpcDone(method),
 		zap.String("traceID", traceID),
 		zap.Any("request", request))
@@ -1915,7 +1860,95 @@ func (node *Proxy) GetLoadingProgress(ctx context.Context, request *milvuspb.Get
 }
 
 func (node *Proxy) GetLoadState(ctx context.Context, request *milvuspb.GetLoadStateRequest) (*milvuspb.GetLoadStateResponse, error) {
-	return nil, nil
+	if !node.checkHealthy() {
+		return &milvuspb.GetLoadStateResponse{Status: unhealthyStatus()}, nil
+	}
+	method := "GetLoadState"
+	tr := timerecord.NewTimeRecorder(method)
+	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-GetLoadState")
+	defer sp.Finish()
+	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method, metrics.TotalLabel).Inc()
+	log := log.Ctx(ctx)
+
+	log.Debug(
+		rpcReceived(method),
+		zap.Any("request", request))
+
+	getErrResponse := func(err error) *milvuspb.GetLoadStateResponse {
+		log.Warn("fail to get load state",
+			zap.String("collection_name", request.CollectionName),
+			zap.Strings("partition_name", request.PartitionNames),
+			zap.Error(err))
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method, metrics.FailLabel).Inc()
+		return &milvuspb.GetLoadStateResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+		}
+	}
+
+	if err := validateCollectionName(request.CollectionName); err != nil {
+		return getErrResponse(err), nil
+	}
+
+	if statesResp, err := node.queryCoord.GetComponentStates(ctx); err != nil {
+		return getErrResponse(err), nil
+	} else if statesResp.State == nil || statesResp.State.StateCode != commonpb.StateCode_Healthy {
+		return getErrResponse(fmt.Errorf("the querycoord server isn't healthy, state: %v", statesResp.State)), nil
+	}
+
+	successResponse := &milvuspb.GetLoadStateResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+	}
+	defer func() {
+		log.Debug(
+			rpcDone(method),
+			zap.Any("request", request))
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method, metrics.SuccessLabel).Inc()
+		metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	}()
+
+	collectionID, err := globalMetaCache.GetCollectionID(ctx, request.CollectionName)
+	if err != nil {
+		successResponse.State = commonpb.LoadState_LoadStateNotExist
+		return successResponse, nil
+	}
+
+	msgBase := commonpbutil.NewMsgBase(
+		commonpbutil.WithMsgType(commonpb.MsgType_SystemInfo),
+		commonpbutil.WithMsgID(0),
+		commonpbutil.WithSourceID(Params.ProxyCfg.GetNodeID()),
+	)
+	if request.Base == nil {
+		request.Base = msgBase
+	} else {
+		request.Base.MsgID = msgBase.MsgID
+		request.Base.Timestamp = msgBase.Timestamp
+		request.Base.SourceID = msgBase.SourceID
+	}
+
+	var progress int64
+	if len(request.GetPartitionNames()) == 0 {
+		if progress, err = getCollectionProgress(ctx, node.queryCoord, request.GetBase(), collectionID); err != nil {
+			successResponse.State = commonpb.LoadState_LoadStateNotLoad
+			return successResponse, nil
+		}
+	} else {
+		if progress, err = getPartitionProgress(ctx, node.queryCoord, request.GetBase(),
+			request.GetPartitionNames(), request.GetCollectionName(), collectionID); err != nil {
+			successResponse.State = commonpb.LoadState_LoadStateNotLoad
+			return successResponse, nil
+		}
+	}
+	if progress >= 100 {
+		successResponse.State = commonpb.LoadState_LoadStateLoaded
+	} else {
+		successResponse.State = commonpb.LoadState_LoadStateLoading
+	}
+	return successResponse, nil
 }
 
 // CreateIndex create index for collection.
@@ -4294,7 +4327,7 @@ func (node *Proxy) ListCredUsers(ctx context.Context, req *milvuspb.ListCredUser
 }
 
 func (node *Proxy) CreateRole(ctx context.Context, req *milvuspb.CreateRoleRequest) (*commonpb.Status, error) {
-	logger.Info("CreateRole", zap.Any("req", req))
+	log.Info("CreateRole", zap.Any("req", req))
 	if code, ok := node.checkHealthyAndReturnCode(); !ok {
 		return errorutil.UnhealthyStatus(code), nil
 	}
@@ -4312,7 +4345,7 @@ func (node *Proxy) CreateRole(ctx context.Context, req *milvuspb.CreateRoleReque
 
 	result, err := node.rootCoord.CreateRole(ctx, req)
 	if err != nil {
-		logger.Error("fail to create role", zap.Error(err))
+		log.Error("fail to create role", zap.Error(err))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
@@ -4322,7 +4355,7 @@ func (node *Proxy) CreateRole(ctx context.Context, req *milvuspb.CreateRoleReque
 }
 
 func (node *Proxy) DropRole(ctx context.Context, req *milvuspb.DropRoleRequest) (*commonpb.Status, error) {
-	logger.Info("DropRole", zap.Any("req", req))
+	log.Info("DropRole", zap.Any("req", req))
 	if code, ok := node.checkHealthyAndReturnCode(); !ok {
 		return errorutil.UnhealthyStatus(code), nil
 	}
@@ -4341,7 +4374,7 @@ func (node *Proxy) DropRole(ctx context.Context, req *milvuspb.DropRoleRequest) 
 	}
 	result, err := node.rootCoord.DropRole(ctx, req)
 	if err != nil {
-		logger.Error("fail to drop role", zap.String("role_name", req.RoleName), zap.Error(err))
+		log.Error("fail to drop role", zap.String("role_name", req.RoleName), zap.Error(err))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
@@ -4351,7 +4384,7 @@ func (node *Proxy) DropRole(ctx context.Context, req *milvuspb.DropRoleRequest) 
 }
 
 func (node *Proxy) OperateUserRole(ctx context.Context, req *milvuspb.OperateUserRoleRequest) (*commonpb.Status, error) {
-	logger.Info("OperateUserRole", zap.Any("req", req))
+	log.Info("OperateUserRole", zap.Any("req", req))
 	if code, ok := node.checkHealthyAndReturnCode(); !ok {
 		return errorutil.UnhealthyStatus(code), nil
 	}
@@ -4370,7 +4403,7 @@ func (node *Proxy) OperateUserRole(ctx context.Context, req *milvuspb.OperateUse
 
 	result, err := node.rootCoord.OperateUserRole(ctx, req)
 	if err != nil {
-		logger.Error("fail to operate user role", zap.Error(err))
+		log.Error("fail to operate user role", zap.Error(err))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
@@ -4380,7 +4413,7 @@ func (node *Proxy) OperateUserRole(ctx context.Context, req *milvuspb.OperateUse
 }
 
 func (node *Proxy) SelectRole(ctx context.Context, req *milvuspb.SelectRoleRequest) (*milvuspb.SelectRoleResponse, error) {
-	logger.Info("SelectRole", zap.Any("req", req))
+	log.Info("SelectRole", zap.Any("req", req))
 	if code, ok := node.checkHealthyAndReturnCode(); !ok {
 		return &milvuspb.SelectRoleResponse{Status: errorutil.UnhealthyStatus(code)}, nil
 	}
@@ -4398,7 +4431,7 @@ func (node *Proxy) SelectRole(ctx context.Context, req *milvuspb.SelectRoleReque
 
 	result, err := node.rootCoord.SelectRole(ctx, req)
 	if err != nil {
-		logger.Error("fail to select role", zap.Error(err))
+		log.Error("fail to select role", zap.Error(err))
 		return &milvuspb.SelectRoleResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -4410,7 +4443,7 @@ func (node *Proxy) SelectRole(ctx context.Context, req *milvuspb.SelectRoleReque
 }
 
 func (node *Proxy) SelectUser(ctx context.Context, req *milvuspb.SelectUserRequest) (*milvuspb.SelectUserResponse, error) {
-	logger.Info("SelectUser", zap.Any("req", req))
+	log.Info("SelectUser", zap.Any("req", req))
 	if code, ok := node.checkHealthyAndReturnCode(); !ok {
 		return &milvuspb.SelectUserResponse{Status: errorutil.UnhealthyStatus(code)}, nil
 	}
@@ -4428,7 +4461,7 @@ func (node *Proxy) SelectUser(ctx context.Context, req *milvuspb.SelectUserReque
 
 	result, err := node.rootCoord.SelectUser(ctx, req)
 	if err != nil {
-		logger.Error("fail to select user", zap.Error(err))
+		log.Error("fail to select user", zap.Error(err))
 		return &milvuspb.SelectUserResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -4472,7 +4505,7 @@ func (node *Proxy) validPrivilegeParams(req *milvuspb.OperatePrivilegeRequest) e
 }
 
 func (node *Proxy) OperatePrivilege(ctx context.Context, req *milvuspb.OperatePrivilegeRequest) (*commonpb.Status, error) {
-	logger.Info("OperatePrivilege", zap.Any("req", req))
+	log.Info("OperatePrivilege", zap.Any("req", req))
 	if code, ok := node.checkHealthyAndReturnCode(); !ok {
 		return errorutil.UnhealthyStatus(code), nil
 	}
@@ -4492,7 +4525,7 @@ func (node *Proxy) OperatePrivilege(ctx context.Context, req *milvuspb.OperatePr
 	req.Entity.Grantor.User = &milvuspb.UserEntity{Name: curUser}
 	result, err := node.rootCoord.OperatePrivilege(ctx, req)
 	if err != nil {
-		logger.Error("fail to operate privilege", zap.Error(err))
+		log.Error("fail to operate privilege", zap.Error(err))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
@@ -4528,7 +4561,7 @@ func (node *Proxy) validGrantParams(req *milvuspb.SelectGrantRequest) error {
 }
 
 func (node *Proxy) SelectGrant(ctx context.Context, req *milvuspb.SelectGrantRequest) (*milvuspb.SelectGrantResponse, error) {
-	logger.Info("SelectGrant", zap.Any("req", req))
+	log.Info("SelectGrant", zap.Any("req", req))
 	if code, ok := node.checkHealthyAndReturnCode(); !ok {
 		return &milvuspb.SelectGrantResponse{Status: errorutil.UnhealthyStatus(code)}, nil
 	}
@@ -4544,7 +4577,7 @@ func (node *Proxy) SelectGrant(ctx context.Context, req *milvuspb.SelectGrantReq
 
 	result, err := node.rootCoord.SelectGrant(ctx, req)
 	if err != nil {
-		logger.Error("fail to select grant", zap.Error(err))
+		log.Error("fail to select grant", zap.Error(err))
 		return &milvuspb.SelectGrantResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -4556,7 +4589,7 @@ func (node *Proxy) SelectGrant(ctx context.Context, req *milvuspb.SelectGrantReq
 }
 
 func (node *Proxy) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.RefreshPolicyInfoCacheRequest) (*commonpb.Status, error) {
-	logger.Info("RefreshPrivilegeInfoCache", zap.Any("req", req))
+	log.Info("RefreshPrivilegeInfoCache", zap.Any("req", req))
 	if code, ok := node.checkHealthyAndReturnCode(); !ok {
 		return errorutil.UnhealthyStatus(code), errorutil.UnhealthyError()
 	}
@@ -4574,7 +4607,7 @@ func (node *Proxy) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.Refr
 			}, err
 		}
 	}
-	logger.Info("RefreshPrivilegeInfoCache success")
+	log.Info("RefreshPrivilegeInfoCache success")
 
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
