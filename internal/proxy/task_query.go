@@ -2,7 +2,6 @@ package proxy
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -17,7 +16,6 @@ import (
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
-	"github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
@@ -318,6 +316,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 func (t *queryTask) Execute(ctx context.Context) error {
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute query %d", t.ID()))
 	defer tr.CtxElapse(ctx, "done")
+	log := log.Ctx(ctx)
 
 	executeQuery := func(withCache bool) error {
 		shards, err := globalMetaCache.GetShards(ctx, withCache, t.collectionName)
@@ -334,17 +333,17 @@ func (t *queryTask) Execute(ctx context.Context) error {
 	}
 
 	err := executeQuery(WithCache)
-	if errors.Is(err, errInvalidShardLeaders) || funcutil.IsGrpcErr(err) || errors.Is(err, grpcclient.ErrConnect) {
-		log.Ctx(ctx).Warn("invalid shard leaders cache, updating shardleader caches and retry search",
+	if err != nil {
+		log.Warn("invalid shard leaders cache, updating shardleader caches and retry query",
 			zap.Error(err))
-		return executeQuery(WithoutCache)
+		err = executeQuery(WithoutCache)
 	}
 	if err != nil {
-		return fmt.Errorf("fail to search on all shard leaders, err=%s", err.Error())
+		return fmt.Errorf("fail to query on all shard leaders, err=%s", err.Error())
 	}
 
-	log.Ctx(ctx).Debug("Query Execute done.",
-		zap.Any("requestType", "query"))
+	log.Debug("Query Execute done.",
+		zap.String("requestType", "query"))
 	return nil
 }
 
