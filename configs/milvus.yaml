@@ -283,6 +283,7 @@ dataCoord:
     # (smallProportion * segment max # of rows).
     compactableProportion: 0.5 # A compaction will happen on small segments if the segment after compaction will have
     # over (compactableProportion * segment max # of rows) rows.
+    # MUST BE GREATER THAN OR EQUAL TO <smallProportion>!!!
 
   compaction:
     enableAutoCompaction: true
