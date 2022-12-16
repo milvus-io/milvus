@@ -24,6 +24,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/commonpbutil"
+
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
@@ -940,4 +942,74 @@ func checkPrimaryFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstre
 	}
 
 	return ids, nil
+}
+
+func getCollectionProgress(ctx context.Context, queryCoord types.QueryCoord,
+	msgBase *commonpb.MsgBase, collectionID int64) (int64, error) {
+	resp, err := queryCoord.ShowCollections(ctx, &querypb.ShowCollectionsRequest{
+		Base: commonpbutil.UpdateMsgBase(
+			msgBase,
+			commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection),
+		),
+		CollectionIDs: []int64{collectionID},
+	})
+	if err != nil {
+		log.Warn("fail to show collections", zap.Int64("collection_id", collectionID), zap.Error(err))
+		return 0, err
+	}
+
+	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+		log.Warn("fail to show collections", zap.Int64("collection_id", collectionID),
+			zap.String("reason", resp.Status.Reason))
+		return 0, errors.New(resp.Status.Reason)
+	}
+
+	if len(resp.InMemoryPercentages) == 0 {
+		errMsg := "fail to show collections from the querycoord, no data"
+		log.Warn(errMsg, zap.Int64("collection_id", collectionID))
+		return 0, errors.New(errMsg)
+	}
+	return resp.InMemoryPercentages[0], nil
+}
+
+func getPartitionProgress(ctx context.Context, queryCoord types.QueryCoord,
+	msgBase *commonpb.MsgBase, partitionNames []string, collectionName string, collectionID int64) (int64, error) {
+	IDs2Names := make(map[int64]string)
+	partitionIDs := make([]int64, 0)
+	for _, partitionName := range partitionNames {
+		partitionID, err := globalMetaCache.GetPartitionID(ctx, collectionName, partitionName)
+		if err != nil {
+			return 0, err
+		}
+		IDs2Names[partitionID] = partitionName
+		partitionIDs = append(partitionIDs, partitionID)
+	}
+	resp, err := queryCoord.ShowPartitions(ctx, &querypb.ShowPartitionsRequest{
+		Base: commonpbutil.UpdateMsgBase(
+			msgBase,
+			commonpbutil.WithMsgType(commonpb.MsgType_ShowPartitions),
+		),
+		CollectionID: collectionID,
+		PartitionIDs: partitionIDs,
+	})
+	if err != nil {
+		log.Warn("fail to show partitions", zap.Int64("collection_id", collectionID),
+			zap.String("collection_name", collectionName),
+			zap.Strings("partition_names", partitionNames),
+			zap.Error(err))
+		return 0, err
+	}
+	if len(resp.InMemoryPercentages) != len(partitionIDs) {
+		errMsg := "fail to show partitions from the querycoord, invalid data num"
+		log.Warn(errMsg, zap.Int64("collection_id", collectionID),
+			zap.String("collection_name", collectionName),
+			zap.Strings("partition_names", partitionNames))
+		return 0, errors.New(errMsg)
+	}
+	var progress int64
+	for _, p := range resp.InMemoryPercentages {
+		progress += p
+	}
+	progress /= int64(len(partitionIDs))
+	return progress, nil
 }
