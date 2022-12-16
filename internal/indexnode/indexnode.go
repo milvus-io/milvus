@@ -39,15 +39,13 @@ import (
 	"time"
 	"unsafe"
 
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/hardware"
 	"github.com/milvus-io/milvus/internal/util/initcore"
@@ -55,6 +53,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
 )
 
 // TODO add comments
@@ -84,7 +84,8 @@ type IndexNode struct {
 
 	sched *TaskScheduler
 
-	once sync.Once
+	once     sync.Once
+	stopOnce sync.Once
 
 	factory        dependency.Factory
 	storageFactory StorageFactory
@@ -229,22 +230,34 @@ func (i *IndexNode) Start() error {
 
 // Stop closes the server.
 func (i *IndexNode) Stop() error {
-	// https://github.com/milvus-io/milvus/issues/12282
-	i.UpdateStateCode(commonpb.StateCode_Abnormal)
-	// cleanup all running tasks
-	deletedTasks := i.deleteAllTasks()
-	for _, task := range deletedTasks {
-		if task.cancel != nil {
-			task.cancel()
+	i.stopOnce.Do(func() {
+		i.UpdateStateCode(commonpb.StateCode_Stopping)
+		log.Info("Index node stopping")
+		err := i.session.GoingStop()
+		if err != nil {
+			log.Warn("session fail to go stopping state", zap.Error(err))
+		} else {
+			i.waitTaskFinish()
 		}
-	}
-	i.loopCancel()
-	if i.sched != nil {
-		i.sched.Close()
-	}
-	i.session.Revoke(time.Second)
 
-	log.Debug("Index node stopped.")
+		// https://github.com/milvus-io/milvus/issues/12282
+		i.UpdateStateCode(commonpb.StateCode_Abnormal)
+		log.Info("Index node abnormal")
+		// cleanup all running tasks
+		deletedTasks := i.deleteAllTasks()
+		for _, task := range deletedTasks {
+			if task.cancel != nil {
+				task.cancel()
+			}
+		}
+		i.loopCancel()
+		if i.sched != nil {
+			i.sched.Close()
+		}
+		i.session.Revoke(time.Second)
+
+		log.Info("Index node stopped.")
+	})
 	return nil
 }
 
@@ -257,86 +270,6 @@ func (i *IndexNode) UpdateStateCode(code commonpb.StateCode) {
 func (i *IndexNode) SetEtcdClient(client *clientv3.Client) {
 	i.etcdCli = client
 }
-
-func (i *IndexNode) isHealthy() bool {
-	code := i.stateCode.Load().(commonpb.StateCode)
-	return code == commonpb.StateCode_Healthy
-}
-
-//// BuildIndex receives request from IndexCoordinator to build an index.
-//// Index building is asynchronous, so when an index building request comes, IndexNode records the task and returns.
-//func (i *IndexNode) BuildIndex(ctx context.Context, request *indexpb.BuildIndexRequest) (*commonpb.Status, error) {
-//	if i.stateCode.Load().(commonpb.StateCode) != commonpb.StateCode_Healthy {
-//		return &commonpb.Status{
-//			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-//			Reason:    "state code is not healthy",
-//		}, nil
-//	}
-//	log.Info("IndexNode building index ...",
-//		zap.Int64("clusterID", request.ClusterID),
-//		zap.Int64("IndexBuildID", request.IndexBuildID),
-//		zap.Int64("Version", request.IndexVersion),
-//		zap.Int("binlog paths num", len(request.DataPaths)),
-//		zap.Any("TypeParams", request.TypeParams),
-//		zap.Any("IndexParams", request.IndexParams))
-//
-//	sp, ctx2 := trace.StartSpanFromContextWithOperationName(i.loopCtx, "IndexNode-CreateIndex")
-//	defer sp.Finish()
-//	sp.SetTag("IndexBuildID", strconv.FormatInt(request.IndexBuildID, 10))
-//	metrics.IndexNodeBuildIndexTaskCounter.WithLabelValues(strconv.FormatInt(Params.IndexNodeCfg.GetNodeID(), 10), metrics.TotalLabel).Inc()
-//
-//	t := &IndexBuildTask{
-//		BaseTask: BaseTask{
-//			ctx:  ctx2,
-//			done: make(chan error),
-//		},
-//		req:            request,
-//		cm:             i.chunkManager,
-//		etcdKV:         i.etcdKV,
-//		nodeID:         Params.IndexNodeCfg.GetNodeID(),
-//		serializedSize: 0,
-//	}
-//
-//	ret := &commonpb.Status{
-//		ErrorCode: commonpb.ErrorCode_Success,
-//	}
-//
-//	err := i.sched.IndexBuildQueue.Enqueue(t)
-//	if err != nil {
-//		log.Warn("IndexNode failed to schedule", zap.Int64("indexBuildID", request.IndexBuildID), zap.Error(err))
-//		ret.ErrorCode = commonpb.ErrorCode_UnexpectedError
-//		ret.Reason = err.Error()
-//		metrics.IndexNodeBuildIndexTaskCounter.WithLabelValues(strconv.FormatInt(Params.IndexNodeCfg.GetNodeID(), 10), metrics.FailLabel).Inc()
-//		return ret, nil
-//	}
-//	log.Info("IndexNode successfully scheduled", zap.Int64("indexBuildID", request.IndexBuildID))
-//
-//	metrics.IndexNodeBuildIndexTaskCounter.WithLabelValues(strconv.FormatInt(Params.IndexNodeCfg.GetNodeID(), 10), metrics.SuccessLabel).Inc()
-//	return ret, nil
-//}
-//
-//// GetTaskSlots gets how many task the IndexNode can still perform.
-//func (i *IndexNode) GetTaskSlots(ctx context.Context, req *indexpb.GetTaskSlotsRequest) (*indexpb.GetTaskSlotsResponse, error) {
-//	if i.stateCode.Load().(commonpb.StateCode) != commonpb.StateCode_Healthy {
-//		return &indexpb.GetTaskSlotsResponse{
-//			Status: &commonpb.Status{
-//				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-//				Reason:    "state code is not healthy",
-//			},
-//		}, nil
-//	}
-//
-//	log.Info("IndexNode GetTaskSlots received")
-//	ret := &indexpb.GetTaskSlotsResponse{
-//		Status: &commonpb.Status{
-//			ErrorCode: commonpb.ErrorCode_Success,
-//		},
-//	}
-//
-//	ret.Slots = int64(i.sched.GetTaskSlots())
-//	log.Info("IndexNode GetTaskSlots success", zap.Int64("slots", ret.Slots))
-//	return ret, nil
-//}
 
 // GetComponentStates gets the component states of IndexNode.
 func (i *IndexNode) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
@@ -394,7 +327,7 @@ func (i *IndexNode) GetNodeID() int64 {
 
 // ShowConfigurations returns the configurations of indexNode matching req.Pattern
 func (i *IndexNode) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
-	if !i.isHealthy() {
+	if !commonpbutil.IsHealthyOrStopping(i.stateCode) {
 		log.Warn("IndexNode.ShowConfigurations failed",
 			zap.Int64("nodeId", Params.IndexNodeCfg.GetNodeID()),
 			zap.String("req", req.Pattern),

@@ -1661,6 +1661,8 @@ type indexNodeConfig struct {
 	EnableDisk             bool
 	DiskCapacityLimit      int64
 	MaxDiskUsagePercentage float64
+
+	GracefulStopTimeout int64
 }
 
 func (p *indexNodeConfig) init(base *BaseTable) {
@@ -1670,6 +1672,7 @@ func (p *indexNodeConfig) init(base *BaseTable) {
 	p.initEnableDisk()
 	p.initDiskCapacity()
 	p.initMaxDiskUsagePercentage()
+	p.initGracefulStopTimeout()
 }
 
 // InitAlias initializes an alias for the IndexNode role.
@@ -1728,4 +1731,14 @@ func (p *indexNodeConfig) initMaxDiskUsagePercentage() {
 		panic(err)
 	}
 	p.MaxDiskUsagePercentage = float64(maxDiskUsagePercentage) / 100
+}
+
+func (p *indexNodeConfig) initGracefulStopTimeout() {
+	timeout := p.Base.LoadWithDefault2([]string{"indexNode.gracefulStopTimeout", "common.gracefulStopTimeout"},
+		strconv.FormatInt(DefaultGracefulStopTimeout, 10))
+	var err error
+	p.GracefulStopTimeout, err = strconv.ParseInt(timeout, 10, 64)
+	if err != nil {
+		panic(err)
+	}
 }
