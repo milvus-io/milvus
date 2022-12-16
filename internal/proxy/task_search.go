@@ -387,6 +387,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 func (t *searchTask) Execute(ctx context.Context) error {
 	sp, ctx := trace.StartSpanFromContextWithOperationName(t.TraceCtx(), "Proxy-Search-Execute")
 	defer sp.Finish()
+	log := log.Ctx(ctx)
 
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute search %d", t.ID()))
 	defer tr.CtxElapse(ctx, "done")
@@ -399,7 +400,7 @@ func (t *searchTask) Execute(ctx context.Context) error {
 		t.resultBuf = make(chan *internalpb.SearchResults, len(shard2Leaders))
 		t.toReduceResults = make([]*internalpb.SearchResults, 0, len(shard2Leaders))
 		if err := t.searchShardPolicy(ctx, t.shardMgr, t.searchShard, shard2Leaders); err != nil {
-			log.Ctx(ctx).Warn("failed to do search", zap.Error(err), zap.String("Shards", fmt.Sprintf("%v", shard2Leaders)))
+			log.Warn("failed to do search", zap.Error(err), zap.String("Shards", fmt.Sprintf("%v", shard2Leaders)))
 			return err
 		}
 		return nil
@@ -407,7 +408,7 @@ func (t *searchTask) Execute(ctx context.Context) error {
 
 	err := executeSearch(WithCache)
 	if err != nil {
-		log.Ctx(ctx).Warn("first search failed, updating shardleader caches and retry search",
+		log.Warn("first search failed, updating shardleader caches and retry search",
 			zap.Error(err))
 		err = executeSearch(WithoutCache)
 	}
@@ -415,7 +416,7 @@ func (t *searchTask) Execute(ctx context.Context) error {
 		return fmt.Errorf("fail to search on all shard leaders, err=%v", err)
 	}
 
-	log.Ctx(ctx).Debug("Search Execute done.")
+	log.Debug("Search Execute done.")
 	return nil
 }
 
