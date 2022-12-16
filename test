@@ -1,0 +1,53 @@
+diff --git a/internal/querynode/shard_cluster_service.go b/internal/querynode/shard_cluster_service.go
+index 8446e08cf..0d537827a 100644
+--- a/internal/querynode/shard_cluster_service.go
++++ b/internal/querynode/shard_cluster_service.go
+@@ -98,6 +98,7 @@ func (s *ShardClusterService) releaseShardCluster(vchannelName string) error {
+ 	}
+ 
+ 	cs := raw.(*ShardCluster)
++	log.Info("release shard cluster", zap.String("channel", vchannelName))
+ 	cs.Close()
+ 	return nil
+ }
+diff --git a/internal/util/cache/lru_cache.go b/internal/util/cache/lru_cache.go
+index 263bab3ec..322194c6c 100644
+--- a/internal/util/cache/lru_cache.go
++++ b/internal/util/cache/lru_cache.go
+@@ -21,6 +21,8 @@ import (
+ 	"errors"
+ 	"fmt"
+ 	"sync"
++
++	"github.com/milvus-io/milvus/internal/log"
+ )
+ 
+ // LRU generic utility for lru cache.
+@@ -287,21 +289,23 @@ func (c *LRU[K, V]) GetOldest() (K, V, bool) {
+ // Close cleans up the cache resources.
+ func (c *LRU[K, V]) Close() {
+ 	c.closeOnce.Do(func() {
++		log.Info("start to close LRU cache...")
+ 		// fetch lock to
+ 		// - wait on-going operations done
+ 		// - block incoming operations
+ 		c.m.Lock()
+ 		close(c.closeCh)
+-		c.m.Unlock()
++		defer c.m.Unlock()
+ 
+ 		// execute purge in a goroutine, otherwise Purge may block forever putting evictedCh
+ 		go func() {
++			log.Info("begin to evict LRU cache...")
+ 			c.Purge()
+ 			close(c.evictedCh)
++			for e := range c.evictedCh {
++				c.onEvicted(e.key, e.value)
++			}
+ 		}()
+-		for e := range c.evictedCh {
+-			c.onEvicted(e.key, e.value)
+-		}
+ 	})
+ }
+ 

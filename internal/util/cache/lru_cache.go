@@ -21,6 +21,8 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+
+	"github.com/milvus-io/milvus/internal/log"
 )
 
 // LRU generic utility for lru cache.
@@ -287,6 +289,7 @@ func (c *LRU[K, V]) GetOldest() (K, V, bool) {
 // Close cleans up the cache resources.
 func (c *LRU[K, V]) Close() {
 	c.closeOnce.Do(func() {
+		log.Info("start to close LRU cache...")
 		// fetch lock to
 		// - wait on-going operations done
 		// - block incoming operations
@@ -296,12 +299,13 @@ func (c *LRU[K, V]) Close() {
 
 		// execute purge in a goroutine, otherwise Purge may block forever putting evictedCh
 		go func() {
+			log.Info("begin to evict LRU cache...")
 			c.Purge()
 			close(c.evictedCh)
+			for e := range c.evictedCh {
+				c.onEvicted(e.key, e.value)
+			}
 		}()
-		for e := range c.evictedCh {
-			c.onEvicted(e.key, e.value)
-		}
 	})
 }
 

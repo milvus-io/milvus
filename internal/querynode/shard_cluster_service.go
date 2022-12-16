@@ -98,6 +98,7 @@ func (s *ShardClusterService) releaseShardCluster(vchannelName string) error {
 	}
 
 	cs := raw.(*ShardCluster)
+	log.Info("release shard cluster", zap.String("channel", vchannelName))
 	cs.Close()
 	return nil
 }
