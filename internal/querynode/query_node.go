@@ -40,14 +40,7 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/samber/lo"
-
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
-
-	"github.com/panjf2000/ants/v2"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
-
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -61,6 +54,10 @@ import (
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/panjf2000/ants/v2"
+	"github.com/samber/lo"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
 )
 
 // make sure QueryNode implements types.QueryNode
@@ -326,6 +323,7 @@ func (node *QueryNode) Start() error {
 func (node *QueryNode) Stop() error {
 	node.stopOnce.Do(func() {
 		log.Warn("Query node stop..")
+		node.UpdateStateCode(commonpb.StateCode_Stopping)
 		err := node.session.GoingStop()
 		if err != nil {
 			log.Warn("session fail to go stopping state", zap.Error(err))

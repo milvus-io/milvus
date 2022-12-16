@@ -20,6 +20,7 @@ import (
 	"context"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/stretchr/testify/assert"
@@ -481,6 +482,7 @@ func TestComponentState(t *testing.T) {
 	assert.Equal(t, state.State.StateCode, commonpb.StateCode_Healthy)
 
 	assert.Nil(t, in.Stop())
+	assert.Nil(t, in.Stop())
 	state, err = in.GetComponentStates(ctx)
 	assert.Nil(t, err)
 	assert.Equal(t, state.Status.ErrorCode, commonpb.ErrorCode_Success)
@@ -516,6 +518,41 @@ func TestGetStatisticChannel(t *testing.T) {
 	ret, err := in.GetStatisticsChannel(ctx)
 	assert.Nil(t, err)
 	assert.Equal(t, ret.Status.ErrorCode, commonpb.ErrorCode_Success)
+}
+
+func TestIndexTaskWhenStoppingNode(t *testing.T) {
+	var (
+		factory = &mockFactory{
+			chunkMgr: &mockChunkmgr{},
+		}
+		ctx = context.TODO()
+	)
+	Params.Init()
+	in, err := NewIndexNode(ctx, factory)
+	assert.Nil(t, err)
+
+	in.loadOrStoreTask("cluster-1", 1, &taskInfo{
+		state: commonpb.IndexState_InProgress,
+	})
+	in.loadOrStoreTask("cluster-2", 2, &taskInfo{
+		state: commonpb.IndexState_Finished,
+	})
+
+	assert.True(t, in.hasInProgressTask())
+	go func() {
+		time.Sleep(2 * time.Second)
+		in.storeTaskState("cluster-1", 1, commonpb.IndexState_Finished, "")
+	}()
+	noTaskChan := make(chan struct{})
+	go func() {
+		in.waitTaskFinish()
+		close(noTaskChan)
+	}()
+	select {
+	case <-noTaskChan:
+	case <-time.After(5 * time.Second):
+		assert.Fail(t, "timeout task chan")
+	}
 }
 
 func TestInitErr(t *testing.T) {

@@ -69,6 +69,7 @@ func TestComponentParam(t *testing.T) {
 
 		assert.Equal(t, Params.GracefulStopTimeout.GetAsInt64(), int64(DefaultGracefulStopTimeout))
 		assert.Equal(t, params.QueryNodeCfg.GracefulStopTimeout.GetAsInt64(), Params.GracefulStopTimeout.GetAsInt64())
+		assert.Equal(t, params.IndexNodeCfg.GracefulStopTimeout.GetAsInt64(), Params.GracefulStopTimeout.GetAsInt64())
 		t.Logf("default grafeful stop timeout = %d", Params.GracefulStopTimeout.GetAsInt())
 		params.Save(Params.GracefulStopTimeout.Key, "50")
 		assert.Equal(t, Params.GracefulStopTimeout.GetAsInt64(), int64(50))
@@ -344,6 +345,12 @@ func TestComponentParam(t *testing.T) {
 
 		assert.Equal(t, Params.EnableActiveStandby.GetAsBool(), false)
 		t.Logf("indexCoord EnableActiveStandby = %t", Params.EnableActiveStandby.GetAsBool())
+	})
+
+	t.Run("test indexNodeConfig", func(t *testing.T) {
+		Params := params.IndexNodeCfg
+		params.Save(Params.GracefulStopTimeout.Key, "50")
+		assert.Equal(t, Params.GracefulStopTimeout.GetAsInt64(), int64(50))
 	})
 
 }

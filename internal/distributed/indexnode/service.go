@@ -199,10 +199,10 @@ func (s *Server) Stop() error {
 			return err
 		}
 	}
-	s.loopCancel()
 	if s.indexnode != nil {
 		s.indexnode.Stop()
 	}
+	s.loopCancel()
 	if s.etcdCli != nil {
 		defer s.etcdCli.Close()
 	}

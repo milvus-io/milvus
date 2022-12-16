@@ -249,3 +249,18 @@ func TestNodeManager_ClientSupportDisk(t *testing.T) {
 		assert.False(t, support)
 	})
 }
+
+func TestNodeManager_StoppingNode(t *testing.T) {
+	nm := NewNodeManager(context.Background())
+	err := nm.AddNode(1, "indexnode-1")
+	assert.NoError(t, err)
+	assert.Equal(t, 1, len(nm.GetAllClients()))
+
+	nm.StoppingNode(1)
+	assert.Equal(t, 0, len(nm.GetAllClients()))
+	assert.Equal(t, 1, len(nm.stoppingNodes))
+
+	nm.RemoveNode(1)
+	assert.Equal(t, 0, len(nm.GetAllClients()))
+	assert.Equal(t, 0, len(nm.stoppingNodes))
+}
