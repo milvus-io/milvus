@@ -29,7 +29,7 @@ func FillRetrieveResultIfEmpty(result RetrieveResults, outputFieldIds []int64, s
 			return err
 		}
 
-		emptyFieldData, err := genEmptyFieldData(field)
+		emptyFieldData, err := GenEmptyFieldData(field)
 		if err != nil {
 			return err
 		}
