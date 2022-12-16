@@ -39,3 +39,6 @@ minio==7.1.5
 
 # for benchmark
 h5py==3.1.0
+
+# for log
+loguru==0.5.3

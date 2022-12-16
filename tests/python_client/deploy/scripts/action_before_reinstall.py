@@ -36,12 +36,18 @@ def task_2(data_size, host):
 
 if __name__ == '__main__':
     import argparse
+    import threading
     parser = argparse.ArgumentParser(description='config for deploy test')
     parser.add_argument('--host', type=str, default="127.0.0.1", help='milvus server ip')
     parser.add_argument('--data_size', type=int, default=3000, help='data size')
     args = parser.parse_args()
     data_size = args.data_size
     host = args.host
-    print(f"data_size: {data_size}")
-    task_1(data_size, host)
-    task_2(data_size, host)
+    logger.info(f"data_size: {data_size}")
+    tasks = []
+    tasks.append(threading.Thread(target=task_1, args=(data_size, host)))
+    tasks.append(threading.Thread(target=task_2, args=(data_size, host)))
+    for task in tasks:
+        task.start()
+    for task in tasks:
+        task.join()
