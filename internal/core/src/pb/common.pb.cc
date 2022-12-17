@@ -447,37 +447,38 @@ const char descriptor_table_protodef_common_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "\r\n\tExecuting\020\001\022\r\n\tCompleted\020\002*X\n\020Consist"
   "encyLevel\022\n\n\006Strong\020\000\022\013\n\007Session\020\001\022\013\n\007Bo"
   "unded\020\002\022\016\n\nEventually\020\003\022\016\n\nCustomized\020\004*"
-  "\213\001\n\013ImportState\022\021\n\rImportPending\020\000\022\020\n\014Im"
+  "\236\001\n\013ImportState\022\021\n\rImportPending\020\000\022\020\n\014Im"
   "portFailed\020\001\022\021\n\rImportStarted\020\002\022\023\n\017Impor"
-  "tPersisted\020\005\022\023\n\017ImportCompleted\020\006\022\032\n\026Imp"
-  "ortFailedAndCleaned\020\007*2\n\nObjectType\022\016\n\nC"
-  "ollection\020\000\022\n\n\006Global\020\001\022\010\n\004User\020\002*\206\005\n\017Ob"
-  "jectPrivilege\022\020\n\014PrivilegeAll\020\000\022\035\n\031Privi"
-  "legeCreateCollection\020\001\022\033\n\027PrivilegeDropC"
-  "ollection\020\002\022\037\n\033PrivilegeDescribeCollecti"
-  "on\020\003\022\034\n\030PrivilegeShowCollections\020\004\022\021\n\rPr"
-  "ivilegeLoad\020\005\022\024\n\020PrivilegeRelease\020\006\022\027\n\023P"
-  "rivilegeCompaction\020\007\022\023\n\017PrivilegeInsert\020"
-  "\010\022\023\n\017PrivilegeDelete\020\t\022\032\n\026PrivilegeGetSt"
-  "atistics\020\n\022\030\n\024PrivilegeCreateIndex\020\013\022\030\n\024"
-  "PrivilegeIndexDetail\020\014\022\026\n\022PrivilegeDropI"
-  "ndex\020\r\022\023\n\017PrivilegeSearch\020\016\022\022\n\016Privilege"
-  "Flush\020\017\022\022\n\016PrivilegeQuery\020\020\022\030\n\024Privilege"
-  "LoadBalance\020\021\022\023\n\017PrivilegeImport\020\022\022\034\n\030Pr"
-  "ivilegeCreateOwnership\020\023\022\027\n\023PrivilegeUpd"
-  "ateUser\020\024\022\032\n\026PrivilegeDropOwnership\020\025\022\034\n"
-  "\030PrivilegeSelectOwnership\020\026\022\034\n\030Privilege"
-  "ManageOwnership\020\027\022\027\n\023PrivilegeSelectUser"
-  "\020\030*S\n\tStateCode\022\020\n\014Initializing\020\000\022\013\n\007Hea"
-  "lthy\020\001\022\014\n\010Abnormal\020\002\022\013\n\007StandBy\020\003\022\014\n\010Sto"
-  "pping\020\004*c\n\tLoadState\022\025\n\021LoadStateNotExis"
-  "t\020\000\022\024\n\020LoadStateNotLoad\020\001\022\024\n\020LoadStateLo"
-  "ading\020\002\022\023\n\017LoadStateLoaded\020\003:^\n\021privileg"
-  "e_ext_obj\022\037.google.protobuf.MessageOptio"
-  "ns\030\351\007 \001(\0132!.milvus.proto.common.Privileg"
-  "eExtBf\n\016io.milvus.grpcB\013CommonProtoP\001Z1g"
-  "ithub.com/milvus-io/milvus-proto/go-api/"
-  "commonpb\240\001\001\252\002\016IO.Milvus.Grpcb\006proto3"
+  "tPersisted\020\005\022\021\n\rImportFlushed\020\010\022\023\n\017Impor"
+  "tCompleted\020\006\022\032\n\026ImportFailedAndCleaned\020\007"
+  "*2\n\nObjectType\022\016\n\nCollection\020\000\022\n\n\006Global"
+  "\020\001\022\010\n\004User\020\002*\206\005\n\017ObjectPrivilege\022\020\n\014Priv"
+  "ilegeAll\020\000\022\035\n\031PrivilegeCreateCollection\020"
+  "\001\022\033\n\027PrivilegeDropCollection\020\002\022\037\n\033Privil"
+  "egeDescribeCollection\020\003\022\034\n\030PrivilegeShow"
+  "Collections\020\004\022\021\n\rPrivilegeLoad\020\005\022\024\n\020Priv"
+  "ilegeRelease\020\006\022\027\n\023PrivilegeCompaction\020\007\022"
+  "\023\n\017PrivilegeInsert\020\010\022\023\n\017PrivilegeDelete\020"
+  "\t\022\032\n\026PrivilegeGetStatistics\020\n\022\030\n\024Privile"
+  "geCreateIndex\020\013\022\030\n\024PrivilegeIndexDetail\020"
+  "\014\022\026\n\022PrivilegeDropIndex\020\r\022\023\n\017PrivilegeSe"
+  "arch\020\016\022\022\n\016PrivilegeFlush\020\017\022\022\n\016PrivilegeQ"
+  "uery\020\020\022\030\n\024PrivilegeLoadBalance\020\021\022\023\n\017Priv"
+  "ilegeImport\020\022\022\034\n\030PrivilegeCreateOwnershi"
+  "p\020\023\022\027\n\023PrivilegeUpdateUser\020\024\022\032\n\026Privileg"
+  "eDropOwnership\020\025\022\034\n\030PrivilegeSelectOwner"
+  "ship\020\026\022\034\n\030PrivilegeManageOwnership\020\027\022\027\n\023"
+  "PrivilegeSelectUser\020\030*S\n\tStateCode\022\020\n\014In"
+  "itializing\020\000\022\013\n\007Healthy\020\001\022\014\n\010Abnormal\020\002\022"
+  "\013\n\007StandBy\020\003\022\014\n\010Stopping\020\004*c\n\tLoadState\022"
+  "\025\n\021LoadStateNotExist\020\000\022\024\n\020LoadStateNotLo"
+  "ad\020\001\022\024\n\020LoadStateLoading\020\002\022\023\n\017LoadStateL"
+  "oaded\020\003:^\n\021privilege_ext_obj\022\037.google.pr"
+  "otobuf.MessageOptions\030\351\007 \001(\0132!.milvus.pr"
+  "oto.common.PrivilegeExtBf\n\016io.milvus.grp"
+  "cB\013CommonProtoP\001Z1github.com/milvus-io/m"
+  "ilvus-proto/go-api/commonpb\240\001\001\252\002\016IO.Milv"
+  "us.Grpcb\006proto3"
   ;
 static const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable*const descriptor_table_common_2eproto_deps[1] = {
   &::descriptor_table_google_2fprotobuf_2fdescriptor_2eproto,
@@ -498,7 +499,7 @@ static ::PROTOBUF_NAMESPACE_ID::internal::SCCInfoBase*const descriptor_table_com
 static ::PROTOBUF_NAMESPACE_ID::internal::once_flag descriptor_table_common_2eproto_once;
 static bool descriptor_table_common_2eproto_initialized = false;
 const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_common_2eproto = {
-  &descriptor_table_common_2eproto_initialized, descriptor_table_protodef_common_2eproto, "common.proto", 5516,
+  &descriptor_table_common_2eproto_initialized, descriptor_table_protodef_common_2eproto, "common.proto", 5535,
   &descriptor_table_common_2eproto_once, descriptor_table_common_2eproto_sccs, descriptor_table_common_2eproto_deps, 11, 1,
   schemas, file_default_instances, TableStruct_common_2eproto::offsets,
   file_level_metadata_common_2eproto, 11, file_level_enum_descriptors_common_2eproto, file_level_service_descriptors_common_2eproto,
@@ -777,6 +778,7 @@ bool ImportState_IsValid(int value) {
     case 5:
     case 6:
     case 7:
+    case 8:
       return true;
     default:
       return false;
