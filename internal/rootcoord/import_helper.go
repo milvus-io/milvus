@@ -15,6 +15,7 @@ type GetCollectionNameFunc func(collID, partitionID UniqueID) (string, string, e
 type IDAllocator func(count uint32) (UniqueID, UniqueID, error)
 type ImportFunc func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error)
 type MarkSegmentsDroppedFunc func(ctx context.Context, segIDs []int64) (*commonpb.Status, error)
+type GetSegmentStatesFunc func(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error)
 type DescribeIndexFunc func(ctx context.Context, colID UniqueID) (*indexpb.DescribeIndexResponse, error)
 type GetSegmentIndexStateFunc func(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*indexpb.SegmentIndexState, error)
 type UnsetIsImportingStateFunc func(context.Context, *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error)
@@ -24,6 +25,7 @@ type ImportFactory interface {
 	NewIDAllocator() IDAllocator
 	NewImportFunc() ImportFunc
 	NewMarkSegmentsDroppedFunc() MarkSegmentsDroppedFunc
+	NewGetSegmentStatesFunc() GetSegmentStatesFunc
 	NewDescribeIndexFunc() DescribeIndexFunc
 	NewGetSegmentIndexStateFunc() GetSegmentIndexStateFunc
 	NewUnsetIsImportingStateFunc() UnsetIsImportingStateFunc
@@ -47,6 +49,10 @@ func (f ImportFactoryImpl) NewImportFunc() ImportFunc {
 
 func (f ImportFactoryImpl) NewMarkSegmentsDroppedFunc() MarkSegmentsDroppedFunc {
 	return MarkSegmentsDroppedWithCore(f.c)
+}
+
+func (f ImportFactoryImpl) NewGetSegmentStatesFunc() GetSegmentStatesFunc {
+	return GetSegmentStatesWithCore(f.c)
 }
 
 func (f ImportFactoryImpl) NewDescribeIndexFunc() DescribeIndexFunc {
@@ -99,6 +105,12 @@ func MarkSegmentsDroppedWithCore(c *Core) MarkSegmentsDroppedFunc {
 		return c.broker.MarkSegmentsDropped(ctx, &datapb.MarkSegmentsDroppedRequest{
 			SegmentIds: segIDs,
 		})
+	}
+}
+
+func GetSegmentStatesWithCore(c *Core) GetSegmentStatesFunc {
+	return func(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error) {
+		return c.broker.GetSegmentStates(ctx, req)
 	}
 }
 
