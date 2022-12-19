@@ -24,6 +24,7 @@ body:
     value: |
       - Milvus version:
       - Deployment mode(standalone or cluster):
+      - MQ type(rocksmq, pulsar or kafka):    
       - SDK version(e.g. pymilvus v2.0.0rc2):
       - OS(Ubuntu or CentOS): 
       - CPU/Memory: 
