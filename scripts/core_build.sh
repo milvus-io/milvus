@@ -187,33 +187,17 @@ case "${unameOut}" in
     export CXX="${llvm_prefix}/bin/clang++"
     export LDFLAGS="-L${llvm_prefix}/lib -L/usr/local/opt/libomp/lib"
     export CXXFLAGS="-I${llvm_prefix}/include -I/usr/local/include -I/usr/local/opt/libomp/include"
-    conan install ${CPP_SRC_DIR} --install-folder conan --build=missing -s compiler=clang -s compiler.libcxx=libc++
+    conan install ${CPP_SRC_DIR} --install-folder conan --build=missing -s compiler=clang -s compiler.libcxx=libc++ || { echo 'conan install failed'; exit 1; }
     ;;
   Linux*)
     if [[ `gcc -v 2>&1 | sed -n 's/.*\(--with-default-libstdcxx-abi\)=\(\w*\).*/\2/p'` == "gcc4" ]]; then
-      conan install ${CPP_SRC_DIR} --install-folder conan --build=missing
+      conan install ${CPP_SRC_DIR} --install-folder conan --build=missing || { echo 'conan install failed'; exit 1; }
     else 
-      conan install ${CPP_SRC_DIR} --install-folder conan --build=missing -s compiler.libcxx=libstdc++11
+      conan install ${CPP_SRC_DIR} --install-folder conan --build=missing -s compiler.libcxx=libstdc++11 || { echo 'conan install failed'; exit 1; }
     fi 
     ;;
   *)   
-    cat << EOF >> msys2_profile
-[tool_requires]
-mingw-w64/8.1
-
-[settings]
-os_build=Windows
-os=Windows
-arch=x86_64
-arch_build=x86_64
-compiler=gcc
-compiler.version=8.4
-compiler.exception=seh
-compiler.libcxx=libstdc++11
-compiler.threads=posix
-build_type=Release
-EOF
-    conan install ${CPP_SRC_DIR} --install-folder conan --build=missing --profile msys2_profile
+    echo "Cannot build on windows"
     ;;
 esac
 

@@ -34,6 +34,11 @@ class MilvusConan(ConanFile):
     }
     should_build = False
 
+    def configure(self):
+        # Macos M1 cannot use jemalloc
+        if self.settings.os == "Macos" and self.settings.arch not in ("x86_64", "x86"):
+            self.options["arrow"].with_jemalloc = False
+
     def imports(self):
         self.copy("librocksdb.a", "../lib", "lib")
         self.copy("libarrow.a", "../lib", "lib")
