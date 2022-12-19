@@ -395,6 +395,12 @@ func (mgr *TargetManager) GetHistoricalSegment(collectionID int64, id int64, sco
 	return collectionTarget.GetAllSegments()[id]
 }
 
+func (mgr *TargetManager) IsCurrentTargetExist(collectionID int64) bool {
+	newChannels := mgr.GetDmChannelsByCollection(collectionID, CurrentTarget)
+
+	return len(newChannels) > 0
+}
+
 func (mgr *TargetManager) IsNextTargetExist(collectionID int64) bool {
 	newChannels := mgr.GetDmChannelsByCollection(collectionID, NextTarget)
 
