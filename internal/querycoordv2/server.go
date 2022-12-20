@@ -252,9 +252,11 @@ func (s *Server) initMeta() error {
 		log.Error("failed to recover collections")
 		return err
 	}
-	metrics.QueryCoordNumCollections.WithLabelValues().Set(float64(len(s.meta.GetAll())))
+	collections := s.meta.GetAll()
+	log.Info("recovering collections...", zap.Int64s("collections", collections))
+	metrics.QueryCoordNumCollections.WithLabelValues().Set(float64(len(collections)))
 
-	err = s.meta.ReplicaManager.Recover(s.meta.CollectionManager.GetAll())
+	err = s.meta.ReplicaManager.Recover(collections)
 	if err != nil {
 		log.Error("failed to recover replicas")
 		return err

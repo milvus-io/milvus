@@ -327,8 +327,9 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 
 func (scheduler *taskScheduler) promote(task Task) error {
 	log := log.With(
-		zap.Int64("collectionID", task.CollectionID()),
 		zap.Int64("taskID", task.ID()),
+		zap.Int64("collectionID", task.CollectionID()),
+		zap.Int64("replicaID", task.ReplicaID()),
 		zap.Int64("source", task.SourceID()),
 	)
 	err := scheduler.prePromote(task)
@@ -562,6 +563,8 @@ func (scheduler *taskScheduler) preProcess(task Task) bool {
 	log := log.With(
 		zap.Int64("taskID", task.ID()),
 		zap.Int32("type", GetTaskType(task)),
+		zap.Int64("collectionID", task.CollectionID()),
+		zap.Int64("replicaID", task.ReplicaID()),
 		zap.Int64("source", task.SourceID()),
 	)
 
@@ -606,6 +609,8 @@ func (scheduler *taskScheduler) preProcess(task Task) bool {
 func (scheduler *taskScheduler) process(task Task) bool {
 	log := log.With(
 		zap.Int64("taskID", task.ID()),
+		zap.Int64("collectionID", task.CollectionID()),
+		zap.Int64("replicaID", task.ReplicaID()),
 		zap.Int32("type", GetTaskType(task)),
 		zap.Int64("source", task.SourceID()),
 	)
@@ -656,6 +661,8 @@ func (scheduler *taskScheduler) RemoveByNode(node int64) {
 func (scheduler *taskScheduler) remove(task Task) {
 	log := log.With(
 		zap.Int64("taskID", task.ID()),
+		zap.Int64("collectionID", task.CollectionID()),
+		zap.Int64("replicaID", task.ReplicaID()),
 		zap.Int32("taskStatus", task.Status()),
 	)
 	task.Cancel()
@@ -682,6 +689,8 @@ func (scheduler *taskScheduler) remove(task Task) {
 func (scheduler *taskScheduler) checkCanceled(task Task) bool {
 	log := log.With(
 		zap.Int64("taskID", task.ID()),
+		zap.Int64("collectionID", task.CollectionID()),
+		zap.Int64("replicaID", task.ReplicaID()),
 		zap.Int64("source", task.SourceID()),
 	)
 
@@ -698,6 +707,8 @@ func (scheduler *taskScheduler) checkCanceled(task Task) bool {
 func (scheduler *taskScheduler) checkStale(task Task) bool {
 	log := log.With(
 		zap.Int64("taskID", task.ID()),
+		zap.Int64("collectionID", task.CollectionID()),
+		zap.Int64("replicaID", task.ReplicaID()),
 		zap.Int64("source", task.SourceID()),
 	)
 
@@ -733,6 +744,8 @@ func (scheduler *taskScheduler) checkStale(task Task) bool {
 func (scheduler *taskScheduler) checkSegmentTaskStale(task *SegmentTask) bool {
 	log := log.With(
 		zap.Int64("taskID", task.ID()),
+		zap.Int64("collectionID", task.CollectionID()),
+		zap.Int64("replicaID", task.ReplicaID()),
 		zap.Int64("source", task.SourceID()),
 	)
 
@@ -776,6 +789,8 @@ func (scheduler *taskScheduler) checkSegmentTaskStale(task *SegmentTask) bool {
 func (scheduler *taskScheduler) checkChannelTaskStale(task *ChannelTask) bool {
 	log := log.With(
 		zap.Int64("taskID", task.ID()),
+		zap.Int64("collectionID", task.CollectionID()),
+		zap.Int64("replicaID", task.ReplicaID()),
 		zap.Int64("source", task.SourceID()),
 	)
 
