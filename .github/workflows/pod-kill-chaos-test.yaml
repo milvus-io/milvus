@@ -166,7 +166,7 @@ jobs:
           
           pytest -s -v testcases/test_get_collections.py --host 127.0.0.1 --log-cli-level=INFO --capture=no
           sleep 2s
-          pytest -s -v testcases/test_all_collections_after_chaos.py --host 127.0.0.1 -n 4 --log-cli-level=INFO --capture=no
+          pytest -s -v testcases/test_all_collections_after_chaos.py --host 127.0.0.1 --log-cli-level=INFO --capture=no
 
       - name: Export logs
         if: ${{ always() }}
