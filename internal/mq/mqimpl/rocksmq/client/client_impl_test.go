@@ -17,10 +17,17 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/stretchr/testify/assert"
 )
 
 var rmqPath = "/tmp/rocksmq_client"
+
+func TestMain(m *testing.M) {
+	paramtable.Init()
+	code := m.Run()
+	os.Exit(code)
+}
 
 func TestClient(t *testing.T) {
 	client, err := NewClient(Options{})

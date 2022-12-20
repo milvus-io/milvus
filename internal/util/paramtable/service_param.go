@@ -489,16 +489,67 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 // /////////////////////////////////////////////////////////////////////////////
 // --- rocksmq ---
 type RocksmqConfig struct {
-	Path ParamItem `refreshable:"false"`
+	Path          ParamItem `refreshable:"false"`
+	LRUCacheRatio ParamItem `refreshable:"false"`
+	PageSize      ParamItem `refreshable:"false"`
+	// RetentionTimeInMinutes is the time of retention
+	RetentionTimeInMinutes ParamItem `refreshable:"false"`
+	// RetentionSizeInMB is the size of retention
+	RetentionSizeInMB ParamItem `refreshable:"false"`
+	// CompactionInterval is the Interval we trigger compaction,
+	CompactionInterval ParamItem `refreshable:"false"`
+	// TickerTimeInSeconds is the time of expired check, default 10 minutes
+	TickerTimeInSeconds ParamItem `refreshable:"false"`
 }
 
 func (r *RocksmqConfig) Init(base *BaseTable) {
 	r.Path = ParamItem{
-		Key:          "rocksmq.path",
-		DefaultValue: "",
-		Version:      "2.0.0",
+		Key:     "rocksmq.path",
+		Version: "2.0.0",
 	}
 	r.Path.Init(base.mgr)
+
+	r.LRUCacheRatio = ParamItem{
+		Key:          "rocksmq.lrucacheratio",
+		DefaultValue: "0.0.6",
+		Version:      "2.0.0",
+	}
+	r.LRUCacheRatio.Init(base.mgr)
+
+	r.PageSize = ParamItem{
+		Key:          "rocksmq.rocksmqPageSize",
+		DefaultValue: strconv.FormatInt(256<<20, 10),
+		Version:      "2.0.0",
+	}
+	r.PageSize.Init(base.mgr)
+
+	r.RetentionTimeInMinutes = ParamItem{
+		Key:          "rocksmq.retentionTimeInMinutes",
+		DefaultValue: "7200",
+		Version:      "2.0.0",
+	}
+	r.RetentionTimeInMinutes.Init(base.mgr)
+
+	r.RetentionSizeInMB = ParamItem{
+		Key:          "rocksmq.retentionSizeInMB",
+		DefaultValue: "7200",
+		Version:      "2.0.0",
+	}
+	r.RetentionSizeInMB.Init(base.mgr)
+
+	r.CompactionInterval = ParamItem{
+		Key:          "rocksmq.compactionInterval",
+		DefaultValue: "86400",
+		Version:      "2.0.0",
+	}
+	r.CompactionInterval.Init(base.mgr)
+
+	r.TickerTimeInSeconds = ParamItem{
+		Key:          "rocksmq.timtickerInterval",
+		DefaultValue: "600",
+		Version:      "2.2.2",
+	}
+	r.TickerTimeInSeconds.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

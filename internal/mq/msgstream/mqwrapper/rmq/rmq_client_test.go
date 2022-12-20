@@ -34,11 +34,10 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-var Params paramtable.BaseTable
-
 func TestMain(m *testing.M) {
 	path := "/tmp/milvus/rdb_data"
 	defer os.RemoveAll(path)
+	paramtable.Init()
 	_ = rocksmqimplserver.InitRocksMQ(path)
 	exitCode := m.Run()
 	defer rocksmqimplserver.CloseRocksMQ()

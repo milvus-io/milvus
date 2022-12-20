@@ -74,8 +74,8 @@ func TestMain(m *testing.M) {
 }
 
 func getPulsarAddress() string {
-	pulsarHost := Params.LoadWithDefault("pulsar.address", "")
-	port := Params.LoadWithDefault("pulsar.port", "")
+	pulsarHost := Params.GetWithDefault("pulsar.address", "")
+	port := Params.GetWithDefault("pulsar.port", "")
 	if len(pulsarHost) != 0 && len(port) != 0 {
 		return "pulsar://" + pulsarHost + ":" + port
 	}

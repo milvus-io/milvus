@@ -279,7 +279,7 @@ func initSession(ctx context.Context) *sessionutil.Session {
 	}
 	metaRootPath := rootPath + "/" + subPath
 
-	endpoints := baseTable.LoadWithDefault("etcd.endpoints", paramtable.DefaultEtcdEndpoints)
+	endpoints := baseTable.GetWithDefault("etcd.endpoints", paramtable.DefaultEtcdEndpoints)
 	etcdEndpoints := strings.Split(endpoints, ",")
 
 	log.Debug("metaRootPath", zap.Any("metaRootPath", metaRootPath))

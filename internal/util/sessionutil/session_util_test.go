@@ -38,7 +38,7 @@ func TestGetServerIDConcurrently(t *testing.T) {
 	paramtable.Init()
 	params := paramtable.Get()
 
-	endpoints := params.LoadWithDefault("etcd.endpoints", paramtable.DefaultEtcdEndpoints)
+	endpoints := params.GetWithDefault("etcd.endpoints", paramtable.DefaultEtcdEndpoints)
 	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
 
 	etcdEndpoints := strings.Split(endpoints, ",")
@@ -81,7 +81,7 @@ func TestInit(t *testing.T) {
 	paramtable.Init()
 	params := paramtable.Get()
 
-	endpoints := params.LoadWithDefault("etcd.endpoints", paramtable.DefaultEtcdEndpoints)
+	endpoints := params.GetWithDefault("etcd.endpoints", paramtable.DefaultEtcdEndpoints)
 	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
 
 	etcdEndpoints := strings.Split(endpoints, ",")
@@ -109,7 +109,7 @@ func TestUpdateSessions(t *testing.T) {
 	paramtable.Init()
 	params := paramtable.Get()
 
-	endpoints := params.LoadWithDefault("etcd.endpoints", paramtable.DefaultEtcdEndpoints)
+	endpoints := params.GetWithDefault("etcd.endpoints", paramtable.DefaultEtcdEndpoints)
 	etcdEndpoints := strings.Split(endpoints, ",")
 	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
 	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
@@ -224,7 +224,7 @@ func TestWatcherHandleWatchResp(t *testing.T) {
 	paramtable.Init()
 	params := paramtable.Get()
 
-	endpoints := params.LoadWithDefault("etcd.endpoints", paramtable.DefaultEtcdEndpoints)
+	endpoints := params.GetWithDefault("etcd.endpoints", paramtable.DefaultEtcdEndpoints)
 	etcdEndpoints := strings.Split(endpoints, ",")
 	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
 
@@ -375,7 +375,7 @@ func TestSessionRevoke(t *testing.T) {
 	paramtable.Init()
 	params := paramtable.Get()
 
-	endpoints := params.LoadWithDefault("etcd.endpoints", paramtable.DefaultEtcdEndpoints)
+	endpoints := params.GetWithDefault("etcd.endpoints", paramtable.DefaultEtcdEndpoints)
 	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
 
 	etcdEndpoints := strings.Split(endpoints, ",")

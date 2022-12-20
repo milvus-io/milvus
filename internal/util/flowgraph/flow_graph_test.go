@@ -20,9 +20,11 @@ import (
 	"context"
 	"math"
 	"math/rand"
+	"os"
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -153,6 +155,12 @@ func createExampleFlowGraph() (*TimeTickedFlowGraph, chan float64, chan float64,
 	}
 
 	return fg, inputChan, outputChan, cancel, nil
+}
+
+func TestMain(m *testing.M) {
+	paramtable.Init()
+	code := m.Run()
+	os.Exit(code)
 }
 
 func TestTimeTickedFlowGraph_AddNode(t *testing.T) {
