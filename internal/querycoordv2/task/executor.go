@@ -85,17 +85,20 @@ func (ex *Executor) Stop() {
 // does nothing and returns false if the action is already committed,
 // returns true otherwise.
 func (ex *Executor) Execute(task Task, step int) bool {
-	if ex.executingTaskNum.Load() > Params.QueryCoordCfg.TaskExecutionCap.GetAsInt32() {
-		return false
-	}
 	_, exist := ex.executingTasks.LoadOrStore(task.ID(), struct{}{})
 	if exist {
 		return false
 	}
-	ex.executingTaskNum.Inc()
+	if ex.executingTaskNum.Inc() > Params.QueryCoordCfg.TaskExecutionCap.GetAsInt32() {
+		ex.executingTasks.Delete(task.ID())
+		ex.executingTaskNum.Dec()
+		return false
+	}
 
 	log := log.With(
 		zap.Int64("taskID", task.ID()),
+		zap.Int64("collectionID", task.CollectionID()),
+		zap.Int64("replicaID", task.ReplicaID()),
 		zap.Int("step", step),
 		zap.Int64("source", task.SourceID()),
 	)
@@ -127,6 +130,7 @@ func (ex *Executor) scheduleRequests() {
 			task := mergeTask.(*LoadSegmentsTask)
 			log.Info("get merge task, process it",
 				zap.Int64("collectionID", task.req.GetCollectionID()),
+				zap.Int64("replicaID", task.req.GetReplicaID()),
 				zap.String("shard", task.req.GetInfos()[0].GetInsertChannel()),
 				zap.Int64("nodeID", task.req.GetDstNodeID()),
 				zap.Int("taskNum", len(task.tasks)),
@@ -157,6 +161,7 @@ func (ex *Executor) processMergeTask(mergeTask *LoadSegmentsTask) {
 	log := log.With(
 		zap.Int64s("taskIDs", taskIDs),
 		zap.Int64("collectionID", task.CollectionID()),
+		zap.Int64("replicaID", task.ReplicaID()),
 		zap.String("shard", task.Shard()),
 		zap.Int64s("segmentIDs", segments),
 		zap.Int64("nodeID", action.Node()),
@@ -216,6 +221,7 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 	log := log.With(
 		zap.Int64("taskID", task.ID()),
 		zap.Int64("collectionID", task.CollectionID()),
+		zap.Int64("replicaID", task.ReplicaID()),
 		zap.Int64("segmentID", task.segmentID),
 		zap.Int64("node", action.Node()),
 		zap.Int64("source", task.SourceID()),
@@ -286,6 +292,7 @@ func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
 	log := log.With(
 		zap.Int64("taskID", task.ID()),
 		zap.Int64("collectionID", task.CollectionID()),
+		zap.Int64("replicaID", task.ReplicaID()),
 		zap.Int64("segmentID", task.segmentID),
 		zap.Int64("node", action.Node()),
 		zap.Int64("source", task.SourceID()),
@@ -357,6 +364,7 @@ func (ex *Executor) subDmChannel(task *ChannelTask, step int) error {
 	log := log.With(
 		zap.Int64("taskID", task.ID()),
 		zap.Int64("collectionID", task.CollectionID()),
+		zap.Int64("replicaID", task.ReplicaID()),
 		zap.String("channel", task.Channel()),
 		zap.Int64("node", action.Node()),
 		zap.Int64("source", task.SourceID()),
@@ -429,6 +437,7 @@ func (ex *Executor) unsubDmChannel(task *ChannelTask, step int) error {
 	log := log.With(
 		zap.Int64("taskID", task.ID()),
 		zap.Int64("collectionID", task.CollectionID()),
+		zap.Int64("replicaID", task.ReplicaID()),
 		zap.String("channel", task.Channel()),
 		zap.Int64("node", action.Node()),
 		zap.Int64("source", task.SourceID()),
