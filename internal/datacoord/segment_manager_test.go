@@ -23,12 +23,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/stretchr/testify/assert"
+	"github.com/milvus-io/milvus/internal/util/metautil"
 )
 
 func TestManagerOptions(t *testing.T) {
@@ -484,6 +486,91 @@ func TestTryToSealSegment(t *testing.T) {
 
 		for _, seg := range segmentManager.meta.segments.segments {
 			assert.Equal(t, commonpb.SegmentState_Sealed, seg.GetState())
+		}
+	})
+
+	t.Run("test sealByMaxBinlogFileNumberPolicy", func(t *testing.T) {
+		Params.Init()
+		mockAllocator := newMockAllocator()
+		meta, err := newMemoryMeta()
+		assert.Nil(t, err)
+
+		schema := newTestSchema()
+		collID, err := mockAllocator.allocID(context.Background())
+		assert.Nil(t, err)
+		meta.AddCollection(&collectionInfo{ID: collID, Schema: schema})
+		segmentManager := newSegmentManager(meta, mockAllocator, nil)
+		allocations, err := segmentManager.AllocSegment(context.TODO(), collID, 0, "c1", 2)
+		assert.Nil(t, err)
+		assert.EqualValues(t, 1, len(allocations))
+
+		ts, err := segmentManager.allocator.allocTimestamp(context.Background())
+		assert.Nil(t, err)
+
+		// No seal polices
+		{
+			err = segmentManager.tryToSealSegment(ts, "c1")
+			assert.Nil(t, err)
+			segments := segmentManager.meta.segments.segments
+			assert.Equal(t, 1, len(segments))
+			for _, seg := range segments {
+				assert.Equal(t, commonpb.SegmentState_Growing, seg.GetState())
+			}
+		}
+
+		// Not trigger seal
+		{
+			segmentManager.segmentSealPolicies = []segmentSealPolicy{sealByMaxBinlogFileNumberPolicy(2)}
+			segments := segmentManager.meta.segments.segments
+			assert.Equal(t, 1, len(segments))
+			for _, seg := range segments {
+				seg.Binlogs = []*datapb.FieldBinlog{
+					{
+						FieldID: 2,
+						Binlogs: []*datapb.Binlog{
+							{
+								EntriesNum: 10,
+								LogID:      3,
+								LogPath:    metautil.BuildInsertLogPath("", 1, 1, seg.ID, 2, 3),
+							},
+						},
+					},
+				}
+				err = segmentManager.tryToSealSegment(ts, "c1")
+				assert.Nil(t, err)
+				seg = segmentManager.meta.segments.segments[seg.ID]
+				assert.Equal(t, commonpb.SegmentState_Growing, seg.GetState())
+			}
+		}
+
+		// Trigger seal
+		{
+			segmentManager.segmentSealPolicies = []segmentSealPolicy{sealByMaxBinlogFileNumberPolicy(2)}
+			segments := segmentManager.meta.segments.segments
+			assert.Equal(t, 1, len(segments))
+			for _, seg := range segments {
+				seg.Binlogs = []*datapb.FieldBinlog{
+					{
+						FieldID: 1,
+						Binlogs: []*datapb.Binlog{
+							{
+								EntriesNum: 10,
+								LogID:      1,
+								LogPath:    metautil.BuildInsertLogPath("", 1, 1, seg.ID, 1, 3),
+							},
+							{
+								EntriesNum: 20,
+								LogID:      2,
+								LogPath:    metautil.BuildInsertLogPath("", 1, 1, seg.ID, 1, 2),
+							},
+						},
+					},
+				}
+				err = segmentManager.tryToSealSegment(ts, "c1")
+				assert.Nil(t, err)
+				seg = segmentManager.meta.segments.segments[seg.ID]
+				assert.Equal(t, commonpb.SegmentState_Sealed, seg.GetState())
+			}
 		}
 	})
 

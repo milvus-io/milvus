@@ -1298,6 +1298,7 @@ type dataCoordConfig struct {
 	SegmentMaxLifetime             ParamItem `refreshable:"false"`
 	SegmentMaxIdleTime             ParamItem `refreshable:"false"`
 	SegmentMinSizeFromIdleToSealed ParamItem `refreshable:"false"`
+	SegmentMaxBinlogFileNumber     ParamItem `refreshable:"false"`
 
 	// compaction
 	EnableCompaction     ParamItem `refreshable:"false"`
@@ -1381,6 +1382,13 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 		DefaultValue: "16.0",
 	}
 	p.SegmentMinSizeFromIdleToSealed.Init(base.mgr)
+
+	p.SegmentMaxBinlogFileNumber = ParamItem{
+		Key:          "dataCoord.segment.maxBinlogFileNumber",
+		Version:      "2.0.0",
+		DefaultValue: "256",
+	}
+	p.SegmentMaxBinlogFileNumber.Init(base.mgr)
 
 	p.EnableCompaction = ParamItem{
 		Key:          "dataCoord.enableCompaction",
