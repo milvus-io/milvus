@@ -40,9 +40,9 @@ const (
 )
 
 const (
-	TaskPriorityLow = iota
-	TaskPriorityNormal
-	TaskPriorityHigh
+	TaskPriorityLow    int32 = iota // for balance checker
+	TaskPriorityNormal              // for segment checker
+	TaskPriorityHigh                // for channel checker
 )
 
 var (
