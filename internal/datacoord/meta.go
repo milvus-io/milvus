@@ -1017,6 +1017,10 @@ func (m *meta) alterMetaStoreAfterCompaction(modSegments []*SegmentInfo, newSegm
 	}
 	log.Info("meta update: alter meta store for compaction updates",
 		zap.Int64s("compact from segments (segments to be updated as dropped)", modSegIDs),
+		zap.Int64("new segmentId", newSegment.GetID()),
+		zap.Int("binlog", len(newSegment.GetBinlogs())),
+		zap.Int("stats log", len(newSegment.GetStatslogs())),
+		zap.Int("delta logs", len(newSegment.GetDeltalogs())),
 		zap.Int64("compact to segment", newSegment.GetID()))
 
 	m.Lock()
