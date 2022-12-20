@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/samber/lo"
 )
 
@@ -103,8 +104,10 @@ func (ob *CollectionObserver) Observe() {
 }
 
 func (ob *CollectionObserver) observeTimeout() {
+	obColls := typeutil.NewUniqueSet(lo.Keys(ob.collectionLoadedCount)...)
 	collections := ob.meta.CollectionManager.GetAllCollections()
 	for _, collection := range collections {
+		obColls.Remove(collection.CollectionID)
 		if collection.GetStatus() != querypb.LoadStatus_Loading {
 			continue
 		}
@@ -130,7 +133,12 @@ func (ob *CollectionObserver) observeTimeout() {
 			}
 		}
 	}
+	// Remove released collection
+	for collID := range obColls {
+		delete(ob.collectionLoadedCount, collID)
+	}
 
+	obParts := typeutil.NewUniqueSet(lo.Keys(ob.partitionLoadedCount)...)
 	partitions := utils.GroupPartitionsByCollection(
 		ob.meta.CollectionManager.GetAllPartitions())
 	if len(partitions) > 0 {
@@ -141,6 +149,7 @@ func (ob *CollectionObserver) observeTimeout() {
 			zap.Int64("collectionID", collection),
 		)
 		for _, partition := range partitions {
+			obParts.Remove(partition.PartitionID)
 			if partition.GetStatus() != querypb.LoadStatus_Loading {
 				continue
 			}
@@ -172,6 +181,11 @@ func (ob *CollectionObserver) observeTimeout() {
 				break
 			}
 		}
+	}
+
+	// Remove released partition
+	for partID := range obParts {
+		delete(ob.partitionLoadedCount, partID)
 	}
 }
 
