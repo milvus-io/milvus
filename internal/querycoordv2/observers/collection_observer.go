@@ -108,6 +108,7 @@ func (ob *CollectionObserver) observeTimeout() {
 		if collection.GetStatus() != querypb.LoadStatus_Loading {
 			continue
 		}
+		log := log.With(zap.Int64("collectionID", collection.GetCollectionID()))
 
 		refreshTime := collection.UpdatedAt.Add(Params.QueryCoordCfg.RefreshTargetsIntervalSeconds)
 		timeoutTime := collection.UpdatedAt.Add(Params.QueryCoordCfg.LoadTimeoutSeconds)
@@ -115,13 +116,14 @@ func (ob *CollectionObserver) observeTimeout() {
 		now := time.Now()
 		if now.After(timeoutTime) {
 			log.Info("load collection timeout, cancel it",
-				zap.Int64("collectionID", collection.GetCollectionID()),
 				zap.Duration("loadTime", time.Since(collection.CreatedAt)))
+			delete(ob.collectionLoadedCount, collection.GetCollectionID())
 			ob.meta.CollectionManager.RemoveCollection(collection.GetCollectionID())
 			ob.meta.ReplicaManager.RemoveCollection(collection.GetCollectionID())
 			ob.targetMgr.RemoveCollection(collection.GetCollectionID())
 		} else if now.After(refreshTime) {
 			if ob.refreshTargets(collection.UpdatedAt, collection.GetCollectionID()) {
+				delete(ob.collectionLoadedCount, collection.GetCollectionID())
 				log.Info("load for long time, refresh targets of collection",
 					zap.Duration("loadTime", time.Since(collection.CreatedAt)),
 				)
@@ -142,6 +144,7 @@ func (ob *CollectionObserver) observeTimeout() {
 			if partition.GetStatus() != querypb.LoadStatus_Loading {
 				continue
 			}
+			log := log.With(zap.Int64("partitionID", partition.GetPartitionID()))
 
 			refreshTime := partition.UpdatedAt.Add(Params.QueryCoordCfg.RefreshTargetsIntervalSeconds)
 			timeoutTime := partition.UpdatedAt.Add(Params.QueryCoordCfg.LoadTimeoutSeconds)
@@ -149,9 +152,9 @@ func (ob *CollectionObserver) observeTimeout() {
 			now := time.Now()
 			if now.After(timeoutTime) {
 				log.Info("load partition timeout, cancel all partitions",
-					zap.Int64("partitionID", partition.GetPartitionID()),
 					zap.Duration("loadTime", time.Since(partition.CreatedAt)))
 				// TODO(yah01): Now, releasing part of partitions is not allowed
+				delete(ob.partitionLoadedCount, partition.GetPartitionID())
 				ob.meta.CollectionManager.RemoveCollection(partition.GetCollectionID())
 				ob.meta.ReplicaManager.RemoveCollection(partition.GetCollectionID())
 				ob.targetMgr.RemoveCollection(partition.GetCollectionID())
@@ -161,6 +164,7 @@ func (ob *CollectionObserver) observeTimeout() {
 					return partition.GetPartitionID()
 				})
 				if ob.refreshTargets(partition.UpdatedAt, partition.GetCollectionID(), partitionIDs...) {
+					delete(ob.partitionLoadedCount, partition.GetPartitionID())
 					log.Info("load for long time, refresh targets of partitions",
 						zap.Duration("loadTime", time.Since(partition.CreatedAt)),
 					)
@@ -269,7 +273,7 @@ func (ob *CollectionObserver) observeCollectionLoadStatus(collection *meta.Colle
 	updated := collection.Clone()
 	targetNum *= int(collection.GetReplicaNumber())
 	updated.LoadPercentage = int32(loadedCount * 100 / targetNum)
-	if loadedCount <= ob.collectionLoadedCount[collection.GetCollectionID()] {
+	if loadedCount <= ob.collectionLoadedCount[collection.GetCollectionID()] && updated.LoadPercentage != 100 {
 		return
 	}
 
@@ -333,7 +337,7 @@ func (ob *CollectionObserver) observePartitionLoadStatus(partition *meta.Partiti
 	updated := partition.Clone()
 	targetNum *= int(partition.GetReplicaNumber())
 	updated.LoadPercentage = int32(loadedCount * 100 / targetNum)
-	if loadedCount <= ob.partitionLoadedCount[partition.GetPartitionID()] {
+	if loadedCount <= ob.partitionLoadedCount[partition.GetPartitionID()] && updated.LoadPercentage != 100 {
 		return
 	}
 
