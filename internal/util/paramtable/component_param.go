@@ -1243,8 +1243,7 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 
 	p.initCompactionMinSegment()
 	p.initCompactionMaxSegment()
-	p.initSegmentSmallProportion()
-	p.initSegmentCompactableProportion()
+	p.initSegmentProportion()
 	p.initCompactionTimeoutInSeconds()
 	p.initCompactionCheckIntervalInSeconds()
 	p.initSingleCompactionRatioThreshold()
@@ -1321,7 +1320,17 @@ func (p *dataCoordConfig) initSegmentSmallProportion() {
 }
 
 func (p *dataCoordConfig) initSegmentCompactableProportion() {
-	p.SegmentCompactableProportion = p.Base.ParseFloatWithDefault("dataCoord.segment.compactableProportion", 0.5)
+	p.SegmentCompactableProportion = p.Base.ParseFloatWithDefault("dataCoord.segment.compactableProportion", 0.85)
+}
+
+func (p *dataCoordConfig) initSegmentProportion() {
+	p.initSegmentSmallProportion()
+	p.initSegmentCompactableProportion()
+
+	// avoid invalid single compaction
+	if p.SegmentCompactableProportion < p.SegmentSmallProportion {
+		p.SegmentCompactableProportion = p.SegmentSmallProportion
+	}
 }
 
 // compaction execution timeout
