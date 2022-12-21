@@ -1528,6 +1528,7 @@ class TestUtilityAdvanced(TestcaseBase):
         collection_w.insert(df)
         collection_w.load()
         # prepare load balance params
+        time.sleep(0.5)
         res, _ = self.utility_wrap.get_query_segment_info(c_name)
         segment_distribution = cf.get_segment_distribution(res)
         all_querynodes = [node["identifier"] for node in ms.query_nodes]
