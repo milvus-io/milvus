@@ -54,7 +54,6 @@ func (t *createCollectionTask) validate() error {
 	if t.Req.GetShardsNum() >= maxShardNum {
 		return fmt.Errorf("shard num (%d) exceeds limit (%d)", t.Req.GetShardsNum(), maxShardNum)
 	}
-
 	return nil
 }
 
@@ -67,12 +66,25 @@ func hasSystemFields(schema *schemapb.CollectionSchema, systemFields []string) b
 	return false
 }
 
+func hasBinaryVecField(schema *schemapb.CollectionSchema) bool {
+	for _, field := range schema.GetFields() {
+		if field.GetDataType() == schemapb.DataType_BinaryVector {
+			return true
+		}
+	}
+	return false
+}
+
 func (t *createCollectionTask) validateSchema(schema *schemapb.CollectionSchema) error {
 	if t.Req.GetCollectionName() != schema.GetName() {
 		return fmt.Errorf("collection name = %s, schema.Name=%s", t.Req.GetCollectionName(), schema.Name)
 	}
 	if hasSystemFields(schema, []string{RowIDFieldName, TimeStampFieldName}) {
 		return fmt.Errorf("schema contains system field: %s, %s", RowIDFieldName, TimeStampFieldName)
+	}
+
+	if Params.AutoIndexConfig.Enable && hasBinaryVecField(schema) {
+		return fmt.Errorf("can not speficy binary vector when enabled with AutoIndex")
 	}
 	return nil
 }

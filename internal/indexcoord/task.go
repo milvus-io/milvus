@@ -19,6 +19,9 @@ package indexcoord
 import (
 	"context"
 	"errors"
+	"fmt"
+
+	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 
 	"go.uber.org/zap"
 
@@ -131,6 +134,11 @@ func (cit *CreateIndexTask) PreExecute(ctx context.Context) error {
 	if getIndexType(cit.req.GetIndexParams()) == diskAnnIndex && !cit.indexCoordClient.nodeManager.ClientSupportDisk() {
 		return errors.New("all IndexNodes do not support disk indexes, please verify")
 	}
+
+	if cit.req.GetFieldDataType() == schemapb.DataType_BinaryVector && Params.AutoIndexConfig.Enable {
+		return fmt.Errorf("can not create AutoIndex on binary vector")
+	}
+
 	return nil
 }
 

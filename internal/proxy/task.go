@@ -202,6 +202,9 @@ func (cct *createCollectionTask) PreExecute(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
+			if Params.AutoIndexConfig.Enable && field.DataType == schemapb.DataType_BinaryVector {
+				return fmt.Errorf("can not speficy binary vector when enabled with AutoIndex")
+			}
 		}
 		// valid max length per row parameters
 		// if max_length not specified, return error
