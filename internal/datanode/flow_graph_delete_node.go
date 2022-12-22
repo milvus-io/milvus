@@ -183,7 +183,10 @@ func (dn *deleteNode) bufferDeleteMsg(msg *msgstream.DeleteMsg, tr TimeRange, st
 	log.Debug("bufferDeleteMsg", zap.Any("primary keys", msg.PrimaryKeys), zap.String("vChannelName", dn.channelName))
 
 	primaryKeys := storage.ParseIDs2PrimaryKeys(msg.PrimaryKeys)
-	segIDToPks, segIDToTss := dn.filterSegmentByPK(msg.PartitionID, primaryKeys, msg.Timestamps)
+	segIDToPks, segIDToTss, err := dn.filterSegmentByPK(msg.PartitionID, primaryKeys, msg.Timestamps)
+	if err != nil {
+		return nil, err
+	}
 
 	segIDs := make([]UniqueID, 0, len(segIDToPks))
 	for segID, pks := range segIDToPks {
@@ -203,21 +206,25 @@ func (dn *deleteNode) bufferDeleteMsg(msg *msgstream.DeleteMsg, tr TimeRange, st
 // If the key may exist in the segment, returns it in map.
 // If the key not exist in the segment, the segment is filter out.
 func (dn *deleteNode) filterSegmentByPK(partID UniqueID, pks []primaryKey, tss []Timestamp) (
-	map[UniqueID][]primaryKey, map[UniqueID][]uint64) {
+	map[UniqueID][]primaryKey, map[UniqueID][]uint64, error) {
 	segID2Pks := make(map[UniqueID][]primaryKey)
 	segID2Tss := make(map[UniqueID][]uint64)
 	segments := dn.channel.filterSegments(partID)
 	for index, pk := range pks {
 		for _, segment := range segments {
 			segmentID := segment.segmentID
-			if segment.isPKExist(pk) {
+			exist, err := dn.channel.isPKExistInSegment(segment, pk)
+			if err != nil {
+				return nil, nil, err
+			}
+			if exist {
 				segID2Pks[segmentID] = append(segID2Pks[segmentID], pk)
 				segID2Tss[segmentID] = append(segID2Tss[segmentID], tss[index])
 			}
 		}
 	}
 
-	return segID2Pks, segID2Tss
+	return segID2Pks, segID2Tss, nil
 }
 
 func newDeleteNode(ctx context.Context, fm flushManager, delBufManager *DelBufferManager, sig chan<- string, config *nodeConfig) (*deleteNode, error) {

@@ -198,7 +198,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		dn, err := newDeleteNode(context.Background(), fm, delBufManager, make(chan string, 1), c)
 		assert.Nil(t, err)
 
-		segID2Pks, _ := dn.filterSegmentByPK(0, varCharPks, tss)
+		segID2Pks, _, _ := dn.filterSegmentByPK(0, varCharPks, tss)
 		expected := map[int64][]primaryKey{
 			segIDs[0]: varCharPks[0:3],
 			segIDs[1]: varCharPks[0:3],
@@ -233,7 +233,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		dn, err := newDeleteNode(context.Background(), fm, delBufManager, make(chan string, 1), c)
 		assert.Nil(t, err)
 
-		segID2Pks, _ := dn.filterSegmentByPK(0, int64Pks, tss)
+		segID2Pks, _, _ := dn.filterSegmentByPK(0, int64Pks, tss)
 		fmt.Println(segID2Pks)
 		expected := map[int64][]primaryKey{
 			segIDs[0]: int64Pks[0:3],

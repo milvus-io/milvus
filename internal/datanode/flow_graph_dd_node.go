@@ -50,7 +50,7 @@ var _ flowgraph.Node = (*ddNode)(nil)
 
 // ddNode filters messages from message streams.
 //
-// ddNode recives all the messages from message stream dml channels, including insert messages,
+// ddNode receives all the messages from message stream dml channels, including insert messages,
 //
 //	delete messages and ddl messages like CreateCollectionMsg and DropCollectionMsg.
 //
@@ -71,7 +71,10 @@ type ddNode struct {
 	collectionID UniqueID
 	vChannelName string
 
-	deltaMsgStream     msgstream.MsgStream
+	// todo create it lazy
+	deltaMsgStream msgstream.MsgStream
+	// dropMode: initial value is false. After receiving a Drop Collection Message, will set to true.
+	// All the following data will be ignored.
 	dropMode           atomic.Value
 	compactionExecutor *compactionExecutor
 
@@ -86,7 +89,7 @@ func (ddn *ddNode) Name() string {
 	return fmt.Sprintf("ddNode-%d-%s", ddn.collectionID, ddn.vChannelName)
 }
 
-// Operate handles input messages, implementing flowgrpah.Node
+// Operate handles input messages, implementing flowgraph.Node
 func (ddn *ddNode) Operate(in []Msg) []Msg {
 	if in == nil {
 		log.Debug("type assertion failed for MsgStreamMsg because it's nil")
@@ -347,6 +350,7 @@ func newDDNode(ctx context.Context, collID UniqueID, vChannelName string, droppe
 	msFactory msgstream.Factory, compactor *compactionExecutor) (*ddNode, error) {
 
 	baseNode := BaseNode{}
+	// todo seems useless
 	baseNode.SetMaxQueueLength(Params.DataNodeCfg.FlowGraphMaxQueueLength.GetAsInt32())
 	baseNode.SetMaxParallelism(Params.DataNodeCfg.FlowGraphMaxParallelism.GetAsInt32())
 

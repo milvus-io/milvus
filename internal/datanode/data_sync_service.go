@@ -261,7 +261,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 		return err
 	}
 
-	c := &nodeConfig{
+	nodeConfig := &nodeConfig{
 		msFactory:    dsService.msFactory,
 		collectionID: vchanInfo.GetCollectionID(),
 		vChannelName: vchanInfo.GetChannelName(),
@@ -272,15 +272,17 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 	}
 
 	var dmStreamNode Node
-	dmStreamNode, err = newDmInputNode(dsService.ctx, vchanInfo.GetSeekPosition(), c)
+	dmStreamNode, err = newDmInputNode(dsService.ctx, vchanInfo.GetSeekPosition(), nodeConfig)
 	if err != nil {
 		return err
 	}
 
+	// what the hell ddNode means?
 	var ddNode Node
 	ddNode, err = newDDNode(
 		dsService.ctx,
 		dsService.collectionID,
+		// todo use channel_meta instead
 		vchanInfo.GetChannelName(),
 		vchanInfo.GetDroppedSegmentIds(),
 		flushedSegmentInfos,
@@ -300,20 +302,20 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 		dsService.resendTTCh,
 		dsService.flushManager,
 		dsService.flushingSegCache,
-		c,
+		nodeConfig,
 	)
 	if err != nil {
 		return err
 	}
 
 	var deleteNode Node
-	deleteNode, err = newDeleteNode(dsService.ctx, dsService.flushManager, dsService.delBufferManager, dsService.clearSignal, c)
+	deleteNode, err = newDeleteNode(dsService.ctx, dsService.flushManager, dsService.delBufferManager, dsService.clearSignal, nodeConfig)
 	if err != nil {
 		return err
 	}
 
 	var ttNode Node
-	ttNode, err = newTTNode(c, dsService.dataCoord)
+	ttNode, err = newTTNode(nodeConfig, dsService.dataCoord)
 	if err != nil {
 		return err
 	}
@@ -324,6 +326,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 	dsService.fg.AddNode(deleteNode)
 	dsService.fg.AddNode(ttNode)
 
+	// dmStreamNode -> ddNode -> insertBufferNode -> deleteNode -> ttNode
 	// ddStreamNode
 	err = dsService.fg.SetEdges(dmStreamNode.Name(),
 		[]string{ddNode.Name()},

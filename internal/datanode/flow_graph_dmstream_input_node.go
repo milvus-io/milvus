@@ -34,9 +34,9 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
-// DmInputNode receives messages from message streams, packs messages between two timeticks, and passes all
-//  messages between two timeticks to the following flowgraph node. In DataNode, the following flow graph node is
-//  flowgraph ddNode.
+// DmInputNode receives messages from message stream and passes all messages to the following flowgraph node.
+//
+//	In DataNode, the following flow graph node is flowgraph ddNode.
 func newDmInputNode(ctx context.Context, seekPos *internalpb.MsgPosition, dmNodeConfig *nodeConfig) (*flowgraph.InputNode, error) {
 	// subName should be unique, since pchannelName is shared among several collections
 	// use vchannel in case of reuse pchannel for same collection

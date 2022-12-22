@@ -70,7 +70,7 @@ type Channel interface {
 
 	updateStatistics(segID UniqueID, numRows int64)
 	InitPKstats(ctx context.Context, s *Segment, statsBinlogs []*datapb.FieldBinlog, ts Timestamp) error
-	RollPKstats(segID UniqueID, stats []*storage.PrimaryKeyStats)
+	RollPKstats(segID UniqueID, stats []*storage.PrimaryKeyStats) error
 	getSegmentStatisticsUpdates(segID UniqueID) (*datapb.SegmentStats, error)
 	segmentFlushed(segID UniqueID)
 
@@ -85,6 +85,8 @@ type Channel interface {
 	setCurDeleteBuffer(segmentID UniqueID, buf *DelDataBuf)
 	rollDeleteBuffer(segmentID UniqueID)
 	evictHistoryDeleteBuffer(segmentID UniqueID, endPos *internalpb.MsgPosition)
+
+	isPKExistInSegment(s *Segment, pk primaryKey) (bool, error)
 }
 
 // ChannelMeta contains channel meta and the latest segments infos of the channel.
@@ -217,14 +219,11 @@ func (c *ChannelMeta) addSegment(req addSegmentReq) error {
 		lastSyncTs:       req.recoverTs,
 	}
 	seg.setType(req.segType)
-	// Set up pk stats
-	err := c.InitPKstats(context.TODO(), seg, req.statsBinLogs, req.recoverTs)
-	if err != nil {
-		log.Error("failed to init bloom filter",
-			zap.Int64("segment ID", req.segID),
-			zap.Error(err))
-		return err
-	}
+
+	// fill PK Stats, load lazily when needed
+	seg.historyStatsLazyLoaded = false
+	seg.historyStatsBinlogs = req.statsBinLogs
+	seg.historyStatsTs = req.recoverTs
 
 	c.segMu.Lock()
 	c.segments[req.segID] = seg
@@ -289,6 +288,7 @@ func (c *ChannelMeta) filterSegments(partitionID UniqueID) []*Segment {
 	return results
 }
 
+// InitPKstats initial segment's stats with given statsBinlogs
 func (c *ChannelMeta) InitPKstats(ctx context.Context, s *Segment, statsBinlogs []*datapb.FieldBinlog, ts Timestamp) error {
 	startTs := time.Now()
 	log := log.With(zap.Int64("segmentID", s.segmentID))
@@ -356,7 +356,7 @@ func (c *ChannelMeta) InitPKstats(ctx context.Context, s *Segment, statsBinlogs 
 	return nil
 }
 
-func (c *ChannelMeta) RollPKstats(segID UniqueID, stats []*storage.PrimaryKeyStats) {
+func (c *ChannelMeta) RollPKstats(segID UniqueID, stats []*storage.PrimaryKeyStats) error {
 	c.segMu.Lock()
 	defer c.segMu.Unlock()
 	seg, ok := c.segments[segID]
@@ -368,10 +368,17 @@ func (c *ChannelMeta) RollPKstats(segID UniqueID, stats []*storage.PrimaryKeySta
 				MinPK:    stat.MinPk,
 				MaxPK:    stat.MaxPk,
 			}
-			seg.historyStats = append(seg.historyStats, pkStat)
+			historyStats, err := c.LazyGetHistoryStats(seg)
+			if err != nil {
+				log.Error("failed to lazy init segment PK stats",
+					zap.Int64("segment ID", seg.segmentID),
+					zap.Error(err))
+				return err
+			}
+			seg.historyStats = append(historyStats, pkStat)
 		}
 		seg.currentStat = nil
-		return
+		return nil
 	}
 	// should not happen at all
 	if ok {
@@ -379,6 +386,44 @@ func (c *ChannelMeta) RollPKstats(segID UniqueID, stats []*storage.PrimaryKeySta
 	} else {
 		log.Warn("can not find segment", zap.Int64("segment", segID))
 	}
+	return nil
+}
+
+func (c *ChannelMeta) LazyGetHistoryStats(s *Segment) ([]*storage.PkStatistics, error) {
+	if !s.historyStatsLazyLoaded && len(s.historyStatsBinlogs) > 0 {
+		err := c.InitPKstats(context.TODO(), s, s.historyStatsBinlogs, s.historyStatsTs)
+		if err != nil {
+			log.Error("failed to lazy init segment PK stats",
+				zap.Int64("segment ID", s.segmentID),
+				zap.Error(err))
+			return nil, err
+		}
+		s.historyStatsLazyLoaded = true
+	}
+	return s.historyStats, nil
+}
+
+// check if PK exists in given Segment
+func (c *ChannelMeta) isPKExistInSegment(s *Segment, pk primaryKey) (bool, error) {
+	s.statLock.Lock()
+	defer s.statLock.Unlock()
+	if s.currentStat != nil && s.currentStat.PkExist(pk) {
+		return true, nil
+	}
+
+	historyStats, err := c.LazyGetHistoryStats(s)
+	if err != nil {
+		log.Error("failed to lazy init segment PK stats",
+			zap.Int64("segment ID", s.segmentID),
+			zap.Error(err))
+		return false, err
+	}
+	for _, historyStat := range historyStats {
+		if historyStat.PkExist(pk) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // listNewSegmentsStartPositions gets all *New Segments* start positions and

@@ -50,6 +50,10 @@ type Segment struct {
 	currentStat  *storage.PkStatistics
 	historyStats []*storage.PkStatistics
 
+	historyStatsLazyLoaded bool
+	historyStatsBinlogs    []*datapb.FieldBinlog
+	historyStatsTs         Timestamp
+
 	lastSyncTs Timestamp
 	startPos   *internalpb.MsgPosition // TODO readonly
 }
