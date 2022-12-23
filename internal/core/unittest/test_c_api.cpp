@@ -732,7 +732,7 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnSealedSegment) {
     int N = 10;
     auto dataset = DataGen(col->get_schema(), N, 42, 0, 2);
 
-    // insert data with pks = {0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5} , timestamps = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
+    // insert data with pks = {0, 0, 1, 1, 2, 2, 3, 3, 4, 4} , timestamps = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
     for (auto& [field_id, field_meta] : col->get_schema()->get_fields()) {
         auto array = dataset.get_col(field_id);
         auto data = serialize(array.get());
