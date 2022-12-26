@@ -45,6 +45,7 @@ func TestFlowGraphManager(t *testing.T) {
 	defer etcdCli.Close()
 
 	node := newIDLEDataNodeMock(ctx, schemapb.DataType_Int64)
+	defer node.Stop()
 	node.SetEtcdClient(etcdCli)
 	err = node.Init()
 	require.Nil(t, err)
