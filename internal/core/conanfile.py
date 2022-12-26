@@ -31,6 +31,13 @@ class MilvusConan(ConanFile):
         "aws-sdk-cpp:text-to-speech": False,
         "aws-sdk-cpp:transfer": False,
         "gtest:build_gmock": False,
+        "boost:without_fiber": True,
+        "boost:without_json": True,
+        "boost:without_wave": True,
+        "boost:without_math": True,
+        "boost:without_graph": True,
+        "boost:without_graph_parallel": True,
+        "boost:without_nowide": True,
     }
     should_build = False
 
