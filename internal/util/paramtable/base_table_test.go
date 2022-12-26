@@ -118,35 +118,6 @@ func TestBaseTable_Pulsar(t *testing.T) {
 	assert.NotEqual(t, "", port)
 }
 
-// func TestBaseTable_ConfDir(t *testing.T) {
-// 	rightConfig := baseParams.configDir
-// 	// fake dir
-// 	baseParams.configDir = "./"
-
-// 	assert.Panics(t, func() { baseParams.loadFromYaml(defaultYaml) })
-
-// 	baseParams.configDir = rightConfig
-// 	baseParams.loadFromYaml(defaultYaml)
-// 	baseParams.GlobalInitWithYaml(defaultYaml)
-// }
-
-// func TestBateTable_ConfPath(t *testing.T) {
-// 	os.Setenv("MILVUSCONF", "test")
-// 	config := baseParams.initConfPath()
-// 	assert.Equal(t, config, "test")
-
-// 	os.Unsetenv("MILVUSCONF")
-// 	dir, _ := os.Getwd()
-// 	config = baseParams.initConfPath()
-// 	assert.Equal(t, filepath.Clean(config), filepath.Clean(dir+"/../../../configs/"))
-
-// 	// test use get dir
-// 	os.Chdir(dir + "/../../../")
-// 	defer os.Chdir(dir)
-// 	config = baseParams.initConfPath()
-// 	assert.Equal(t, filepath.Clean(config), filepath.Clean(dir+"/../../../configs/"))
-// }
-
 func TestBaseTable_Env(t *testing.T) {
 	t.Setenv("milvus.test", "test")
 	t.Setenv("milvus.test.test2", "test2")
@@ -163,47 +134,6 @@ func TestBaseTable_Env(t *testing.T) {
 	baseParams.Init(0)
 	result, _ = baseParams.Load("invalid")
 	assert.Equal(t, result, "xxx=test")
-}
-
-func TestBaseTable_Parse(t *testing.T) {
-	t.Run("ParseBool", func(t *testing.T) {
-		assert.Nil(t, baseParams.Save("key", "true"))
-		assert.True(t, baseParams.ParseBool("key", false))
-		assert.False(t, baseParams.ParseBool("not_exist_key", false))
-
-		assert.Nil(t, baseParams.Save("key", "rand"))
-		assert.Panics(t, func() { baseParams.ParseBool("key", false) })
-	})
-
-	t.Run("ParseFloatWithDefault", func(t *testing.T) {
-		baseParams.Remove("key")
-		assert.Equal(t, float64(0.0), baseParams.ParseFloatWithDefault("key", 0.0))
-		assert.Equal(t, float64(3.14), baseParams.ParseFloatWithDefault("key", 3.14))
-
-		assert.Nil(t, baseParams.Save("key", "2"))
-		assert.Equal(t, float64(2.0), baseParams.ParseFloatWithDefault("key", 3.14))
-	})
-
-	t.Run("ParseInt32WithDefault", func(t *testing.T) {
-		baseParams.Remove("key")
-		assert.Equal(t, int32(1), baseParams.ParseInt32WithDefault("key", 1))
-		assert.Nil(t, baseParams.Save("key", "2"))
-		assert.Equal(t, int32(2), baseParams.ParseInt32WithDefault("key", 1))
-	})
-
-	t.Run("ParseInt64WithDefault", func(t *testing.T) {
-		baseParams.Remove("key")
-		assert.Equal(t, int64(1), baseParams.ParseInt64WithDefault("key", 1))
-		assert.Nil(t, baseParams.Save("key", "2"))
-		assert.Equal(t, int64(2), baseParams.ParseInt64WithDefault("key", 1))
-	})
-
-	t.Run("ParseIntWithDefault", func(t *testing.T) {
-		baseParams.Remove("key")
-		assert.Equal(t, int(1), baseParams.ParseIntWithDefault("key", 1))
-		assert.Nil(t, baseParams.Save("key", "2"))
-		assert.Equal(t, int(2), baseParams.ParseIntWithDefault("key", 1))
-	})
 }
 
 func TestNewBaseTableFromYamlOnly(t *testing.T) {

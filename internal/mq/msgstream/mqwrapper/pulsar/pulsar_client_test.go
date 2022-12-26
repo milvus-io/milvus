@@ -53,8 +53,8 @@ func TestMain(m *testing.M) {
 }
 
 func getPulsarAddress() string {
-	pulsarHost := Params.LoadWithDefault("pulsar.address", "")
-	port := Params.LoadWithDefault("pulsar.port", "")
+	pulsarHost := Params.GetWithDefault("pulsar.address", "")
+	port := Params.GetWithDefault("pulsar.port", "")
 	log.Info("pulsar address", zap.String("host", pulsarHost), zap.String("port", port))
 	if len(pulsarHost) != 0 && len(port) != 0 {
 		return "pulsar://" + pulsarHost + ":" + port
@@ -739,7 +739,7 @@ func TestPulsarCtl(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
-	webport := Params.LoadWithDefault("pulsar.webport", "80")
+	webport := Params.GetWithDefault("pulsar.webport", "80")
 	webServiceURL := "http://" + pulsarURL.Hostname() + ":" + webport
 	admin, err := NewAdminClient(webServiceURL, "", "")
 	assert.NoError(t, err)

@@ -13,7 +13,6 @@ package paramtable
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path"
 	"runtime"
@@ -44,15 +43,10 @@ const (
 	DefaultMinioCloudProvider   = "aws"
 	DefaultMinioIAMEndpoint     = ""
 	DefaultEtcdEndpoints        = "localhost:2379"
-	DefaultInsertBufferSize     = "16777216"
-	DefaultEnvPrefix            = "milvus"
 
 	DefaultLogFormat       = "text"
 	DefaultLogLevelForBase = "debug"
 	DefaultRootPath        = ""
-	DefaultMaxSize         = 300
-	DefaultMaxAge          = 10
-	DefaultMaxBackups      = 20
 )
 
 //Const of Global Config List
@@ -183,21 +177,17 @@ func (gp *BaseTable) Load(key string) (string, error) {
 	return gp.mgr.GetConfig(key)
 }
 
-// LoadWithDefault loads an object with @key. If the object does not exist, @defaultValue will be returned.
-func (gp *BaseTable) LoadWithDefault(key, defaultValue string) string {
+func (gp *BaseTable) Get(key string) string {
+	return gp.GetWithDefault(key, "")
+}
+
+// GetWithDefault loads an object with @key. If the object does not exist, @defaultValue will be returned.
+func (gp *BaseTable) GetWithDefault(key, defaultValue string) string {
 	str, err := gp.mgr.GetConfig(key)
 	if err != nil {
 		return defaultValue
 	}
 	return str
-}
-
-func (gp *BaseTable) Get(key string) string {
-	value, err := gp.mgr.GetConfig(key)
-	if err != nil {
-		return ""
-	}
-	return value
 }
 
 func (gp *BaseTable) GetConfigSubSet(pattern string) map[string]string {
@@ -231,62 +221,17 @@ func (gp *BaseTable) Reset(key string) error {
 	return nil
 }
 
-func (gp *BaseTable) ParseBool(key string, defaultValue bool) bool {
-	valueStr := gp.LoadWithDefault(key, strconv.FormatBool(defaultValue))
-	value, err := strconv.ParseBool(valueStr)
-	if err != nil {
-		panic(err)
-	}
-	return value
-}
-
-func (gp *BaseTable) ParseFloatWithDefault(key string, defaultValue float64) float64 {
-	valueStr := gp.LoadWithDefault(key, fmt.Sprintf("%f", defaultValue))
-	value, err := strconv.ParseFloat(valueStr, 64)
-	if err != nil {
-		panic(err)
-	}
-	return value
-}
-
-func (gp *BaseTable) ParseInt64WithDefault(key string, defaultValue int64) int64 {
-	valueStr := gp.LoadWithDefault(key, strconv.FormatInt(defaultValue, 10))
-	value, err := strconv.ParseInt(valueStr, 10, 64)
-	if err != nil {
-		panic(err)
-	}
-	return value
-}
-
-func (gp *BaseTable) ParseInt32WithDefault(key string, defaultValue int32) int32 {
-	valueStr := gp.LoadWithDefault(key, strconv.FormatInt(int64(defaultValue), 10))
-	value, err := strconv.ParseInt(valueStr, 10, 32)
-	if err != nil {
-		panic(err)
-	}
-	return int32(value)
-}
-
-func (gp *BaseTable) ParseIntWithDefault(key string, defaultValue int) int {
-	valueStr := gp.LoadWithDefault(key, strconv.FormatInt(int64(defaultValue), 10))
-	value, err := strconv.Atoi(valueStr)
-	if err != nil {
-		panic(err)
-	}
-	return value
-}
-
 // InitLogCfg init log of the base table
 func (gp *BaseTable) InitLogCfg() {
 	gp.Log = log.Config{}
-	format := gp.LoadWithDefault("log.format", DefaultLogFormat)
+	format := gp.GetWithDefault("log.format", DefaultLogFormat)
 	gp.Log.Format = format
-	level := gp.LoadWithDefault("log.level", DefaultLogLevelForBase)
+	level := gp.GetWithDefault("log.level", DefaultLogLevelForBase)
 	gp.Log.Level = level
-	gp.Log.File.MaxSize = gp.ParseIntWithDefault("log.file.maxSize", DefaultMaxSize)
-	gp.Log.File.MaxBackups = gp.ParseIntWithDefault("log.file.maxBackups", DefaultMaxBackups)
-	gp.Log.File.MaxDays = gp.ParseIntWithDefault("log.file.maxAge", DefaultMaxAge)
-	gp.Log.File.RootPath = gp.LoadWithDefault("log.file.rootPath", DefaultRootPath)
+	gp.Log.File.MaxSize, _ = strconv.Atoi(gp.GetWithDefault("log.file.maxSize", "300"))
+	gp.Log.File.MaxBackups, _ = strconv.Atoi(gp.GetWithDefault("log.file.maxBackups", "10"))
+	gp.Log.File.MaxDays, _ = strconv.Atoi(gp.GetWithDefault("log.file.maxAge", "20"))
+	gp.Log.File.RootPath = gp.GetWithDefault("log.file.rootPath", DefaultRootPath)
 
 	grpclog, err := gp.Load("grpc.log.level")
 	if err != nil {

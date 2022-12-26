@@ -176,7 +176,7 @@ func TestPulsarClientCloseUnsubscribeError(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
-	webport := Params.LoadWithDefault("pulsar.webport", "80")
+	webport := Params.GetWithDefault("pulsar.webport", "80")
 	webServiceURL := "http://" + pulsarURL.Hostname() + ":" + webport
 	admin, err := NewAdminClient(webServiceURL, "", "")
 	assert.NoError(t, err)

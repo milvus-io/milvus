@@ -76,6 +76,10 @@ func (es EnvSource) GetSourceName() string {
 	return "EnvironmentSource"
 }
 
+func (es EnvSource) SetEventHandler(eh EventHandler) {
+
+}
+
 func (es EnvSource) Close() {
 
 }

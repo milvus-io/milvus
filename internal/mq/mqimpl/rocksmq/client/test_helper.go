@@ -19,7 +19,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
-	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/stretchr/testify/assert"
 
 	"go.uber.org/zap"
@@ -47,9 +46,7 @@ func newMockClient() *client {
 
 func newRocksMQ(t *testing.T, rmqPath string) server.RocksMQ {
 	rocksdbPath := rmqPath
-	var params paramtable.BaseTable
-	params.Init(0)
-	rmq, err := server.NewRocksMQ(params, rocksdbPath, nil)
+	rmq, err := server.NewRocksMQ(rocksdbPath, nil)
 	assert.NoError(t, err)
 	return rmq
 }

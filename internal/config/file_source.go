@@ -111,7 +111,7 @@ func (fs *FileSource) loadFromFile() error {
 		str, err := cast.ToStringE(val)
 		if err != nil {
 			switch val := val.(type) {
-			case []interface{}:
+			case []any:
 				str = str[:0]
 				for _, v := range val {
 					ss, err := cast.ToStringE(v)

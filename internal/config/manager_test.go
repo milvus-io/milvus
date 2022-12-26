@@ -71,3 +71,7 @@ func (ErrSource) GetPriority() int {
 func (ErrSource) GetSourceName() string {
 	return "ErrSource"
 }
+
+func (e ErrSource) SetEventHandler(eh EventHandler) {
+
+}

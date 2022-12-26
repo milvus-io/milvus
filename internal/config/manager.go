@@ -173,6 +173,8 @@ func (m *Manager) AddSource(source Source) error {
 		return err
 	}
 
+	source.SetEventHandler(m)
+
 	return nil
 }
 

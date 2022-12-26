@@ -2,6 +2,7 @@ package configs
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/milvus-io/milvus/cmd/tools/migration/console"
 	"github.com/milvus-io/milvus/internal/util"
@@ -55,11 +56,11 @@ func (c *RunConfig) show() {
 func (c *RunConfig) init(base *paramtable.BaseTable) {
 	c.base = base
 
-	c.Cmd = c.base.LoadWithDefault("cmd.type", "")
-	c.RunWithBackup = c.base.ParseBool("cmd.runWithBackup", false)
-	c.SourceVersion = c.base.LoadWithDefault("config.sourceVersion", "")
-	c.TargetVersion = c.base.LoadWithDefault("config.targetVersion", "")
-	c.BackupFilePath = c.base.LoadWithDefault("config.backupFilePath", "")
+	c.Cmd = c.base.GetWithDefault("cmd.type", "")
+	c.RunWithBackup, _ = strconv.ParseBool(c.base.GetWithDefault("cmd.runWithBackup", "false"))
+	c.SourceVersion = c.base.GetWithDefault("config.sourceVersion", "")
+	c.TargetVersion = c.base.GetWithDefault("config.targetVersion", "")
+	c.BackupFilePath = c.base.GetWithDefault("config.backupFilePath", "")
 }
 
 type MilvusConfig struct {

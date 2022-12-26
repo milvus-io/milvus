@@ -45,7 +45,6 @@ type UniqueID = typeutil.UniqueID
 type RmqState = int64
 
 // RocksmqPageSize is the size of a message page, default 256MB
-var RocksmqPageSize int64 = 256 << 20
 
 // RocksDB cache size limitation(TODO config it)
 var RocksDBLRUCacheMinCapacity = uint64(1 << 29)
@@ -108,7 +107,8 @@ func parsePageID(key string) (int64, error) {
 }
 
 func checkRetention() bool {
-	return RocksmqRetentionTimeInSecs != -1 || RocksmqRetentionSizeInMB != -1
+	params := paramtable.Get()
+	return params.RocksmqCfg.RetentionSizeInMB.GetAsInt64() != -1 || params.RocksmqCfg.RetentionTimeInMinutes.GetAsInt64() != -1
 }
 
 var topicMu = sync.Map{}
@@ -130,7 +130,7 @@ type rocksmq struct {
 // 1. New rocksmq instance based on rocksdb with name and rocksdbkv with kvname
 // 2. Init retention info, load retention info to memory
 // 3. Start retention goroutine
-func NewRocksMQ(params paramtable.BaseTable, name string, idAllocator allocator.Interface) (*rocksmq, error) {
+func NewRocksMQ(name string, idAllocator allocator.Interface) (*rocksmq, error) {
 	// TODO we should use same rocksdb instance with different cfs
 	maxProcs := runtime.GOMAXPROCS(0)
 	parallelism := 1
@@ -143,7 +143,8 @@ func NewRocksMQ(params paramtable.BaseTable, name string, idAllocator allocator.
 	// default rocks db cache is set with memory
 	rocksDBLRUCacheCapacity := RocksDBLRUCacheMinCapacity
 	if memoryCount > 0 {
-		ratio := params.ParseFloatWithDefault("rocksmq.lrucacheratio", 0.06)
+		params := paramtable.Get()
+		ratio := params.RocksmqCfg.LRUCacheRatio.GetAsFloat()
 		calculatedCapacity := uint64(float64(memoryCount) * ratio)
 		if calculatedCapacity < RocksDBLRUCacheMinCapacity {
 			rocksDBLRUCacheCapacity = RocksDBLRUCacheMinCapacity
@@ -211,7 +212,7 @@ func NewRocksMQ(params paramtable.BaseTable, name string, idAllocator allocator.
 		readers:     sync.Map{},
 	}
 
-	ri, err := initRetentionInfo(params, kv, db)
+	ri, err := initRetentionInfo(kv, db)
 	if err != nil {
 		return nil, err
 	}
@@ -649,6 +650,7 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) ([]Uni
 }
 
 func (rmq *rocksmq) updatePageInfo(topicName string, msgIDs []UniqueID, msgSizes map[UniqueID]int64) error {
+	params := paramtable.Get()
 	msgSizeKey := MessageSizeTitle + topicName
 	msgSizeVal, err := rmq.kv.Load(msgSizeKey)
 	if err != nil {
@@ -664,7 +666,7 @@ func (rmq *rocksmq) updatePageInfo(topicName string, msgIDs []UniqueID, msgSizes
 	mutateBuffer := make(map[string]string)
 	for _, id := range msgIDs {
 		msgSize := msgSizes[id]
-		if curMsgSize+msgSize > RocksmqPageSize {
+		if curMsgSize+msgSize > params.RocksmqCfg.PageSize.GetAsInt64() {
 			// Current page is full
 			newPageSize := curMsgSize + msgSize
 			pageEndID := id

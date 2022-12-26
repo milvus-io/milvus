@@ -28,6 +28,7 @@ type Source interface {
 	GetConfigurationByKey(string) (string, error)
 	GetPriority() int
 	GetSourceName() string
+	SetEventHandler(eh EventHandler)
 	Close()
 }
 
