@@ -454,6 +454,7 @@ func (ex *Executor) unsubDmChannel(task *ChannelTask, step int) error {
 	ctx := task.Context()
 
 	req := packUnsubDmChannelRequest(task, action)
+	log.Info("unsubscribe channel...")
 	status, err := ex.cluster.UnsubDmChannel(ctx, action.Node(), req)
 	if err != nil {
 		log.Warn("failed to unsubscribe DmChannel, it may be a false failure", zap.Error(err))
