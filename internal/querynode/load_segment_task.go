@@ -38,7 +38,10 @@ type loadSegmentsTask struct {
 
 // loadSegmentsTask
 func (l *loadSegmentsTask) PreExecute(ctx context.Context) error {
-	log.Ctx(ctx).Info("LoadSegmentTask PreExecute start")
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", l.req.GetCollectionID()),
+	)
+	log.Info("LoadSegmentTask PreExecute start")
 	var err error
 	// init meta
 	collectionID := l.req.GetCollectionID()
@@ -60,16 +63,22 @@ func (l *loadSegmentsTask) PreExecute(ctx context.Context) error {
 		if !has {
 			filteredInfos = append(filteredInfos, info)
 		} else {
-			log.Info("ignore segment that is already loaded", zap.Int64("collectionID", info.CollectionID), zap.Int64("segmentID", info.SegmentID))
+			log.Info("ignore segment that is already loaded", zap.Int64("segmentID", info.SegmentID))
 		}
 	}
 	l.req.Infos = filteredInfos
-	log.Info("LoadSegmentTask PreExecute done")
+	log.Info("LoadSegmentTask PreExecute done", zap.Int64s("loadSegmentIDs", lo.Map(filteredInfos, func(info *queryPb.SegmentLoadInfo, _ int) int64 {
+		return info.GetSegmentID()
+	})))
 	return nil
 }
 
 func (l *loadSegmentsTask) Execute(ctx context.Context) error {
-	log.Ctx(ctx).Info("LoadSegmentTask Execute start")
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", l.req.CollectionID),
+		zap.Int64("replicaID", l.req.ReplicaID),
+	)
+	log.Info("LoadSegmentTask Execute start")
 
 	if len(l.req.Infos) == 0 {
 		log.Info("all segments loaded")
@@ -93,8 +102,7 @@ func (l *loadSegmentsTask) Execute(ctx context.Context) error {
 			for _, segment := range l.req.Infos {
 				l.node.metaReplica.removeSegment(segment.SegmentID, segmentTypeSealed)
 			}
-			log.Warn("failed to watch Delta channel while load segment", zap.Int64("collectionID", l.req.CollectionID),
-				zap.Int64("replicaID", l.req.ReplicaID), zap.Error(err))
+			log.Warn("failed to watch Delta channel while load segment", zap.Error(err))
 			return err
 		}
 
@@ -117,19 +125,16 @@ func (l *loadSegmentsTask) Execute(ctx context.Context) error {
 			for _, vchannel := range vchanName {
 				l.node.dataSyncService.removeEmptyFlowGraphByChannel(l.req.CollectionID, vchannel)
 			}
-			log.Warn("failed to load delete data while load segment", zap.Int64("collectionID", l.req.CollectionID),
-				zap.Int64("replicaID", l.req.ReplicaID), zap.Error(err))
+			log.Warn("failed to load delete data while load segment", zap.Error(err))
 			return err
 		}
 	}
 	if loadErr != nil {
-		log.Warn("failed to load segment", zap.Int64("collectionID", l.req.CollectionID),
-			zap.Int64("replicaID", l.req.ReplicaID), zap.Error(loadErr))
+		log.Warn("failed to load segment", zap.Error(loadErr))
 		return loadErr
 	}
 
-	log.Info("LoadSegmentTask Execute done", zap.Int64("collectionID", l.req.CollectionID),
-		zap.Int64("replicaID", l.req.ReplicaID))
+	log.Info("LoadSegmentTask Execute done")
 	return nil
 }
 
@@ -242,5 +247,38 @@ func (l *loadSegmentsTask) watchDeltaChannel(deltaChannels []string) error {
 	}
 
 	log.Info("WatchDeltaChannels done", zap.Int64("collectionID", collectionID), zap.String("ChannelIDs", fmt.Sprintln(vDeltaChannels)))
+	return nil
+}
+
+// PostExecute for load segment task.
+// checks all info loaded in meta to return partial loaded error to shard leader.
+func (l *loadSegmentsTask) PostExecute(ctx context.Context) error {
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", l.req.CollectionID),
+		zap.Int64("replicaID", l.req.ReplicaID),
+	)
+	log.Info("LoadSegmentTask PostExecute")
+
+	var failSegments []int64
+	for _, info := range l.req.GetInfos() {
+		has, err := l.node.metaReplica.hasSegment(info.GetSegmentID(), segmentTypeSealed)
+		if err != nil {
+			log.Warn("check load segment return error",
+				zap.Int64("segmentID", info.GetSegmentID()),
+				zap.Error(err),
+			)
+			return err
+		}
+		if !has {
+			failSegments = append(failSegments, info.GetSegmentID())
+		}
+	}
+
+	if len(failSegments) > 0 {
+		log.Warn("LoadSegment partial failed", zap.Int64s("failedSegments", failSegments))
+		return fmt.Errorf("some segments are not loaded(%v)", failSegments)
+	}
+
+	log.Info("LoadSegmentTask PostExecute all segment loaded")
 	return nil
 }

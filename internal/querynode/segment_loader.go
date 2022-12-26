@@ -24,6 +24,7 @@ import (
 	"path"
 	"runtime"
 	"runtime/debug"
+	"sort"
 	"strconv"
 	"time"
 
@@ -121,12 +122,32 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context, req *querypb.LoadS
 		}
 	}
 
+	infos := req.Infos
 	err := loader.checkSegmentSize(req.CollectionID, req.Infos, concurrencyLevel)
 	if err != nil {
 		log.Warn("load failed, OOM if loaded",
 			zap.Int64("loadSegmentRequest msgID", req.Base.MsgID),
 			zap.Error(err))
-		return nil, err
+		// try best to load as many as possible
+		sort.Slice(infos, func(i, j int) bool {
+			// ignore error here
+			memI, _, _ := estimateSegmentSize(req.Infos[i])
+			memJ, _, _ := estimateSegmentSize(req.Infos[j])
+			return memI > memJ
+		})
+
+		for len(infos) > 0 {
+			infos = infos[:len(infos)-1]
+			if err := loader.checkSegmentSize(req.CollectionID, infos, 1); err == nil {
+				break
+			}
+		}
+		if len(infos) == 0 {
+			log.Warn("no segment could be loaded, each will cause OOM",
+				zap.Int64("loadSegmentRequest msgID", req.Base.MsgID),
+			)
+			return nil, err
+		}
 	}
 
 	newSegments := make(map[UniqueID]*Segment, segmentNum)
@@ -140,7 +161,7 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context, req *querypb.LoadS
 		debug.FreeOSMemory()
 	}
 
-	for _, info := range req.Infos {
+	for _, info := range infos {
 		segmentID := info.SegmentID
 		partitionID := info.PartitionID
 		collectionID := info.CollectionID
@@ -876,6 +897,44 @@ func GetStorageSizeByIndexInfo(indexInfo *querypb.FieldIndexInfo) (uint64, uint6
 	return uint64(indexInfo.IndexSize), 0, nil
 }
 
+func estimateSegmentSize(loadInfo *querypb.SegmentLoadInfo) (memUsage, diskUsage uint64, err error) {
+	vecFieldID2IndexInfo := make(map[int64]*querypb.FieldIndexInfo)
+	for _, fieldIndexInfo := range loadInfo.IndexInfos {
+		if fieldIndexInfo.EnableIndex {
+			fieldID := fieldIndexInfo.FieldID
+			vecFieldID2IndexInfo[fieldID] = fieldIndexInfo
+		}
+	}
+
+	for _, fieldBinlog := range loadInfo.BinlogPaths {
+		fieldID := fieldBinlog.FieldID
+		if fieldIndexInfo, ok := vecFieldID2IndexInfo[fieldID]; ok {
+			neededMemSize, neededDiskSize, err := GetStorageSizeByIndexInfo(fieldIndexInfo)
+			if err != nil {
+				log.Error(err.Error(), zap.Int64("collectionID", loadInfo.CollectionID),
+					zap.Int64("segmentID", loadInfo.SegmentID),
+					zap.Int64("indexBuildID", fieldIndexInfo.BuildID))
+				return 0, 0, err
+			}
+			memUsage += neededMemSize
+			diskUsage += neededDiskSize
+		} else {
+			memUsage += uint64(funcutil.GetFieldSizeFromFieldBinlog(fieldBinlog))
+		}
+	}
+
+	// get size of state data
+	for _, fieldBinlog := range loadInfo.Statslogs {
+		memUsage += uint64(funcutil.GetFieldSizeFromFieldBinlog(fieldBinlog))
+	}
+
+	// get size of delete data
+	for _, fieldBinlog := range loadInfo.Deltalogs {
+		memUsage += uint64(funcutil.GetFieldSizeFromFieldBinlog(fieldBinlog))
+	}
+	return
+}
+
 func (loader *segmentLoader) checkSegmentSize(collectionID UniqueID, segmentLoadInfos []*querypb.SegmentLoadInfo, concurrency int) error {
 	usedMem := hardware.GetUsedMemoryCount()
 	totalMem := hardware.GetMemoryCount()
@@ -897,44 +956,16 @@ func (loader *segmentLoader) checkSegmentSize(collectionID UniqueID, segmentLoad
 	usedLocalSizeAfterLoad := uint64(localUsedSize)
 
 	for _, loadInfo := range segmentLoadInfos {
-		oldUsedMem := usedMemAfterLoad
-		vecFieldID2IndexInfo := make(map[int64]*querypb.FieldIndexInfo)
-		for _, fieldIndexInfo := range loadInfo.IndexInfos {
-			if fieldIndexInfo.EnableIndex {
-				fieldID := fieldIndexInfo.FieldID
-				vecFieldID2IndexInfo[fieldID] = fieldIndexInfo
-			}
+		// estimate memory and disk usage based on load info
+		memUsage, diskUsage, err := estimateSegmentSize(loadInfo)
+		if err != nil {
+			return err
 		}
 
-		for _, fieldBinlog := range loadInfo.BinlogPaths {
-			fieldID := fieldBinlog.FieldID
-			if fieldIndexInfo, ok := vecFieldID2IndexInfo[fieldID]; ok {
-				neededMemSize, neededDiskSize, err := GetStorageSizeByIndexInfo(fieldIndexInfo)
-				if err != nil {
-					log.Error(err.Error(), zap.Int64("collectionID", loadInfo.CollectionID),
-						zap.Int64("segmentID", loadInfo.SegmentID),
-						zap.Int64("indexBuildID", fieldIndexInfo.BuildID))
-					return err
-				}
-				usedMemAfterLoad += neededMemSize
-				usedLocalSizeAfterLoad += neededDiskSize
-			} else {
-				usedMemAfterLoad += uint64(funcutil.GetFieldSizeFromFieldBinlog(fieldBinlog))
-			}
-		}
-
-		// get size of state data
-		for _, fieldBinlog := range loadInfo.Statslogs {
-			usedMemAfterLoad += uint64(funcutil.GetFieldSizeFromFieldBinlog(fieldBinlog))
-		}
-
-		// get size of delete data
-		for _, fieldBinlog := range loadInfo.Deltalogs {
-			usedMemAfterLoad += uint64(funcutil.GetFieldSizeFromFieldBinlog(fieldBinlog))
-		}
-
-		if usedMemAfterLoad-oldUsedMem > maxSegmentSize {
-			maxSegmentSize = usedMemAfterLoad - oldUsedMem
+		usedLocalSizeAfterLoad += diskUsage
+		usedMemAfterLoad += memUsage
+		if memUsage > maxSegmentSize {
+			maxSegmentSize = memUsage
 		}
 	}
 
