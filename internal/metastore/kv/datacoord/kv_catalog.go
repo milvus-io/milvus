@@ -519,6 +519,21 @@ func buildBinlogKvsWithLogID(collectionID, partitionID, segmentID typeutil.Uniqu
 	checkBinlogs(storage.InsertBinlog, segmentID, binlogs)
 	checkBinlogs(storage.DeleteBinlog, segmentID, deltalogs)
 	checkBinlogs(storage.StatsBinlog, segmentID, statslogs)
+	// check stats log and bin log size match
+	if len(binlogs) != 0 && len(statslogs) != 0 {
+		if len(statslogs[0].GetBinlogs()) != len(binlogs[0].GetBinlogs()) {
+			log.Warn("find invalid segment while bin log size didn't match stat log size",
+				zap.Int64("collection", collectionID),
+				zap.Int64("partition", partitionID),
+				zap.Int64("segment", segmentID),
+				zap.Any("binlogs", binlogs),
+				zap.Any("stats", statslogs),
+				zap.Any("delta", deltalogs),
+			)
+			return nil, fmt.Errorf("Segment can not be saved because of binlog "+
+				"file not match stat log number: collection %v, segment %v", collectionID, segmentID)
+		}
+	}
 
 	fillLogIDByLogPath(binlogs, deltalogs, statslogs)
 	kvs, err := buildBinlogKvs(collectionID, partitionID, segmentID, binlogs, deltalogs, statslogs)
