@@ -726,7 +726,7 @@ func filterSegmentInfo(segmentInfos []*querypb.SegmentInfo, segmentIDs map[int64
 
 // Search performs replica search tasks.
 func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error) {
-	if req.GetReq().GetBase().GetTargetID() != node.session.ServerID {
+	if !node.IsStandAlone && req.GetReq().GetBase().GetTargetID() != node.session.ServerID {
 		return &internalpb.SearchResults{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_NodeIDNotMatch,
@@ -1201,7 +1201,7 @@ func (node *QueryNode) SyncReplicaSegments(ctx context.Context, req *querypb.Syn
 	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
 }
 
-//ShowConfigurations returns the configurations of queryNode matching req.Pattern
+// ShowConfigurations returns the configurations of queryNode matching req.Pattern
 func (node *QueryNode) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
 	if !node.isHealthyOrStopping() {
 		log.Warn("QueryNode.ShowConfigurations failed",
