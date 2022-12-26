@@ -123,22 +123,32 @@ type QueryNode struct {
 
 	// pool for load/release channel
 	taskPool *concurrency.Pool
+
+	IsStandAlone bool
+}
+
+var queryNode *QueryNode = nil
+
+func GetQueryNode() *QueryNode {
+	return queryNode
 }
 
 // NewQueryNode will return a QueryNode with abnormal state.
 func NewQueryNode(ctx context.Context, factory dependency.Factory) *QueryNode {
 	ctx1, cancel := context.WithCancel(ctx)
-	node := &QueryNode{
+
+	queryNode = &QueryNode{
 		queryNodeLoopCtx:    ctx1,
 		queryNodeLoopCancel: cancel,
 		factory:             factory,
+		IsStandAlone:        os.Getenv(metricsinfo.DeployModeEnvKey) == metricsinfo.StandaloneDeployMode,
 	}
 
-	node.tSafeReplica = newTSafeReplica()
-	node.scheduler = newTaskScheduler(ctx1, node.tSafeReplica)
-	node.UpdateStateCode(commonpb.StateCode_Abnormal)
+	queryNode.tSafeReplica = newTSafeReplica()
+	queryNode.scheduler = newTaskScheduler(ctx1, queryNode.tSafeReplica)
+	queryNode.UpdateStateCode(commonpb.StateCode_Abnormal)
 
-	return node
+	return queryNode
 }
 
 func (node *QueryNode) initSession() error {
