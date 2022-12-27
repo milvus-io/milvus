@@ -328,7 +328,6 @@ func (node *QueryNode) Stop() error {
 		if err != nil {
 			log.Warn("session fail to go stopping state", zap.Error(err))
 		} else {
-			node.UpdateStateCode(commonpb.StateCode_Stopping)
 			noSegmentChan := node.metaReplica.getNoSegmentChan()
 			select {
 			case <-noSegmentChan:
