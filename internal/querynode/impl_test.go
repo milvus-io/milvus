@@ -20,13 +20,10 @@ import (
 	"context"
 	"encoding/json"
 	"math/rand"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
@@ -35,9 +32,14 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	queryPb "github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/concurrency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/panjf2000/ants/v2"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 func TestImpl_GetComponentStates(t *testing.T) {
@@ -115,6 +117,16 @@ func TestImpl_WatchDmChannels(t *testing.T) {
 		status, err := node.WatchDmChannels(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+
+		originPool := node.taskPool
+		defer func() {
+			node.taskPool = originPool
+		}()
+		node.taskPool, _ = concurrency.NewPool(runtime.GOMAXPROCS(0), ants.WithPreAlloc(true))
+		node.taskPool.Release()
+		status, err = node.WatchDmChannels(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
 	})
 
 	t.Run("target not match", func(t *testing.T) {
@@ -192,7 +204,6 @@ func TestImpl_WatchDmChannels(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
 	})
-
 }
 
 func TestImpl_UnsubDmChannel(t *testing.T) {

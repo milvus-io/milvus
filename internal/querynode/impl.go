@@ -377,8 +377,14 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, in *querypb.WatchDmC
 			ErrorCode: commonpb.ErrorCode_Success,
 		}, nil
 	})
-	ret, _ := future.Await()
-	return ret.(*commonpb.Status), nil
+	ret, err := future.Await()
+	if status, ok := ret.(*commonpb.Status); ok {
+		return status, nil
+	}
+	log.Warn("fail to convert the *commonpb.Status", zap.Any("ret", ret), zap.Error(err))
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+	}, nil
 }
 
 func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmChannelRequest) (*commonpb.Status, error) {
