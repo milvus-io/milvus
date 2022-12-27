@@ -120,7 +120,7 @@ func TestProxyManager_ErrCompacted(t *testing.T) {
 		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
 	assert.Nil(t, err)
 	defer etcdCli.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	sessKey := path.Join(Params.EtcdCfg.MetaRootPath.GetValue(), sessionutil.DefaultServiceRoot)
