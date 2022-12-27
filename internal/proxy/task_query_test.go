@@ -200,6 +200,10 @@ func TestQueryTask_all(t *testing.T) {
 
 	assert.NoError(t, task.Execute(ctx))
 
+	task.queryParams = &queryParams{
+		limit:  100,
+		offset: 100,
+	}
 	assert.NoError(t, task.PostExecute(ctx))
 
 	for i := 0; i < len(task.result.FieldsData); i++ {

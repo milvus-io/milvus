@@ -140,7 +140,7 @@ func genEmptyFloatVectorFieldData(field *schemapb.FieldSchema) (*schemapb.FieldD
 	}, nil
 }
 
-func genEmptyFieldData(field *schemapb.FieldSchema) (*schemapb.FieldData, error) {
+func GenEmptyFieldData(field *schemapb.FieldSchema) (*schemapb.FieldData, error) {
 	dataType := field.GetDataType()
 	switch dataType {
 	case schemapb.DataType_Bool:

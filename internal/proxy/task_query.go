@@ -403,6 +403,13 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 		}
 		for _, field := range schema.Fields {
 			if field.FieldID == t.OutputFieldsId[i] {
+				// deal with the situation that offset equal to or greater than the number of entities
+				if t.result.FieldsData[i] == nil {
+					t.result.FieldsData[i], err = typeutil.GenEmptyFieldData(field)
+					if err != nil {
+						return err
+					}
+				}
 				t.result.FieldsData[i].FieldName = field.Name
 				t.result.FieldsData[i].FieldId = field.FieldID
 				t.result.FieldsData[i].Type = field.DataType
