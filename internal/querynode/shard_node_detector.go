@@ -18,6 +18,7 @@ package querynode
 
 import (
 	"context"
+	"errors"
 	"sync"
 
 	"github.com/golang/protobuf/proto"
@@ -177,6 +178,11 @@ func (nd *etcdShardNodeDetector) handlePutEvent(e *clientv3.Event, collectionID,
 
 	idAddr, err := nd.idAddr()
 	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			// session canceled, query node is stopping.
+			log.Warn("EtcdNodeDetector id resolve failed", zap.Error(err))
+			return
+		}
 		log.Error("Etcd NodeDetector session map failed", zap.Error(err))
 		panic(err)
 	}
@@ -253,6 +259,11 @@ func (nd *etcdShardNodeDetector) handleDelEvent(e *clientv3.Event, collectionID,
 	}
 	idAddr, err := nd.idAddr()
 	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			// session canceled, query node is stopping.
+			log.Warn("EtcdNodeDetector id resolve failed", zap.Error(err))
+			return
+		}
 		log.Error("Etcd NodeDetector session map failed", zap.Error(err))
 		panic(err)
 	}

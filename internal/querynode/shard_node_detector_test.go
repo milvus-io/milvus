@@ -18,6 +18,7 @@ package querynode
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path"
 	"strconv"
@@ -31,6 +32,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"go.etcd.io/etcd/api/v3/mvccpb"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/etcdserver/api/v3client"
 )
 
@@ -323,4 +326,82 @@ func TestEtcdShardNodeDetector_watch(t *testing.T) {
 			assert.ElementsMatch(t, tc.expectupdateEvents, newEvents)
 		})
 	}
+}
+
+func TestNodeDetectorHandleWithError(t *testing.T) {
+	t.Run("unexpected error type", func(t *testing.T) {
+		collectionID := int64(1)
+		replicaID := int64(1001)
+		nd := &etcdShardNodeDetector{
+			idAddr: func() (map[int64]string, error) {
+				return nil, errors.New("unexpected error")
+			},
+		}
+
+		replica := &querypb.Replica{
+			ID:           replicaID,
+			CollectionID: collectionID,
+		}
+		bs, err := proto.Marshal(replica)
+		require.NoError(t, err)
+
+		assert.Panics(t, func() {
+			nd.handlePutEvent(&clientv3.Event{
+				Type: mvccpb.PUT,
+				Kv: &mvccpb.KeyValue{
+					Value: bs,
+				},
+			}, collectionID, replicaID)
+		})
+
+		assert.Panics(t, func() {
+			nd.handleDelEvent(&clientv3.Event{
+				Type: mvccpb.DELETE,
+				Kv: &mvccpb.KeyValue{
+					Value: bs,
+				},
+				PrevKv: &mvccpb.KeyValue{
+					Value: bs,
+				},
+			}, collectionID, replicaID)
+		})
+	})
+
+	t.Run("context canceled", func(t *testing.T) {
+		collectionID := int64(1)
+		replicaID := int64(1001)
+		nd := &etcdShardNodeDetector{
+			idAddr: func() (map[int64]string, error) {
+				return nil, context.Canceled
+			},
+		}
+
+		replica := &querypb.Replica{
+			ID:           replicaID,
+			CollectionID: collectionID,
+		}
+		bs, err := proto.Marshal(replica)
+		require.NoError(t, err)
+
+		assert.NotPanics(t, func() {
+			nd.handlePutEvent(&clientv3.Event{
+				Type: mvccpb.PUT,
+				Kv: &mvccpb.KeyValue{
+					Value: bs,
+				},
+			}, collectionID, replicaID)
+		})
+
+		assert.NotPanics(t, func() {
+			nd.handleDelEvent(&clientv3.Event{
+				Type: mvccpb.DELETE,
+				Kv: &mvccpb.KeyValue{
+					Value: bs,
+				},
+				PrevKv: &mvccpb.KeyValue{
+					Value: bs,
+				},
+			}, collectionID, replicaID)
+		})
+	})
 }
