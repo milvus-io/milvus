@@ -325,6 +325,25 @@ func (s *Server) Start() error {
 		return err
 	}
 
+	if s.enableActiveStandBy {
+		s.activateFunc = func() {
+			log.Info("querycoord switch from standby to active, activating")
+			s.startServerLoop()
+			s.UpdateStateCode(commonpb.StateCode_Healthy)
+		}
+		s.UpdateStateCode(commonpb.StateCode_StandBy)
+	} else {
+		s.startServerLoop()
+		s.UpdateStateCode(commonpb.StateCode_Healthy)
+	}
+	log.Info("QueryCoord started")
+
+	s.afterStart()
+
+	return nil
+}
+
+func (s *Server) startServerLoop() {
 	log.Info("start cluster...")
 	s.cluster.Start(s.ctx)
 
@@ -341,23 +360,6 @@ func (s *Server) Start() error {
 	s.collectionObserver.Start(s.ctx)
 	s.leaderObserver.Start(s.ctx)
 	s.targetObserver.Start(s.ctx)
-
-	if s.enableActiveStandBy {
-		s.activateFunc = func() {
-			// todo to complete
-			log.Info("querycoord switch from standby to active, activating")
-			s.initMeta()
-			s.UpdateStateCode(commonpb.StateCode_Healthy)
-		}
-		s.UpdateStateCode(commonpb.StateCode_StandBy)
-	} else {
-		s.UpdateStateCode(commonpb.StateCode_Healthy)
-	}
-	log.Info("QueryCoord started")
-
-	s.afterStart()
-
-	return nil
 }
 
 func (s *Server) Stop() error {
