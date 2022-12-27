@@ -39,7 +39,7 @@ func TestGenEmptyFieldData(t *testing.T) {
 	field := &schemapb.FieldSchema{Name: "field_name", FieldID: 100}
 	for _, dataType := range allTypes {
 		field.DataType = dataType
-		fieldData, err := genEmptyFieldData(field)
+		fieldData, err := GenEmptyFieldData(field)
 		assert.NoError(t, err)
 		assert.Equal(t, dataType, fieldData.GetType())
 		assert.Equal(t, field.GetName(), fieldData.GetFieldName())
@@ -49,21 +49,21 @@ func TestGenEmptyFieldData(t *testing.T) {
 
 	for _, dataType := range allUnsupportedTypes {
 		field.DataType = dataType
-		_, err := genEmptyFieldData(field)
+		_, err := GenEmptyFieldData(field)
 		assert.Error(t, err)
 	}
 
 	// dim not found
 	for _, dataType := range vectorTypes {
 		field.DataType = dataType
-		_, err := genEmptyFieldData(field)
+		_, err := GenEmptyFieldData(field)
 		assert.Error(t, err)
 	}
 
 	field.TypeParams = []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}}
 	for _, dataType := range vectorTypes {
 		field.DataType = dataType
-		fieldData, err := genEmptyFieldData(field)
+		fieldData, err := GenEmptyFieldData(field)
 		assert.NoError(t, err)
 		assert.Equal(t, dataType, fieldData.GetType())
 		assert.Equal(t, field.GetName(), fieldData.GetFieldName())
