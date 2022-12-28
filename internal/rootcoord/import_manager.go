@@ -36,12 +36,12 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/util/importutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 )
 
 const (
-	MaxPendingCount = 32
+	MaxPendingCount = 5000 // TODO: Make this configurable.
 	delimiter       = "/"
 )
 
@@ -54,10 +54,16 @@ var checkPendingTasksInterval = 60 * 1000
 // default 5*60*1000 milliseconds (5 minutes)
 var cleanUpLoopInterval = 5 * 60 * 1000
 
-// flipTaskStateInterval is the default interval to loop through tasks and check if their states needs to be
-// flipped/updated, for example, from `ImportPersisted` to `ImportCompleted`.
-// default 15 * 1000 milliseconds (15 seconds)
-var flipTaskStateInterval = 15 * 1000
+// flipPersistedTaskInterval is the default interval to loop through tasks and check if their states needs to be
+// flipped/updated from `ImportPersisted` to `ImportFlushed`.
+// default 2 * 1000 milliseconds (2 seconds)
+// TODO: Make this configurable.
+var flipPersistedTaskInterval = 2 * 1000
+
+// flipFlushedTaskInterval is the default interval to loop through tasks and check if their states needs to be
+// flipped/updated from `ImportFlushed` to `ImportCompleted`.
+// default 5 * 1000 milliseconds (5 seconds)
+var flipFlushedTaskInterval = 5 * 1000
 
 // importManager manager for import tasks
 type importManager struct {
@@ -79,6 +85,7 @@ type importManager struct {
 	callImportService         func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error)
 	getCollectionName         func(collID, partitionID typeutil.UniqueID) (string, string, error)
 	callMarkSegmentsDropped   func(ctx context.Context, segIDs []typeutil.UniqueID) (*commonpb.Status, error)
+	callGetSegmentStates      func(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error)
 	callDescribeIndex         func(ctx context.Context, colID UniqueID) (*indexpb.DescribeIndexResponse, error)
 	callGetSegmentIndexState  func(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*indexpb.SegmentIndexState, error)
 	callUnsetIsImportingState func(context.Context, *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error)
@@ -89,6 +96,7 @@ func newImportManager(ctx context.Context, client kv.TxnKV,
 	idAlloc func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error),
 	importService func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error),
 	markSegmentsDropped func(ctx context.Context, segIDs []typeutil.UniqueID) (*commonpb.Status, error),
+	getSegmentStates func(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error),
 	getCollectionName func(collID, partitionID typeutil.UniqueID) (string, string, error),
 	describeIndex func(ctx context.Context, colID UniqueID) (*indexpb.DescribeIndexResponse, error),
 	getSegmentIndexState func(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*indexpb.SegmentIndexState, error),
@@ -106,6 +114,7 @@ func newImportManager(ctx context.Context, client kv.TxnKV,
 		idAllocator:               idAlloc,
 		callImportService:         importService,
 		callMarkSegmentsDropped:   markSegmentsDropped,
+		callGetSegmentStates:      getSegmentStates,
 		getCollectionName:         getCollectionName,
 		callDescribeIndex:         describeIndex,
 		callGetSegmentIndexState:  getSegmentIndexState,
@@ -149,17 +158,24 @@ func (m *importManager) sendOutTasksLoop(wg *sync.WaitGroup) {
 // flipTaskStateLoop periodically calls `flipTaskState` to check if states of the tasks need to be updated.
 func (m *importManager) flipTaskStateLoop(wg *sync.WaitGroup) {
 	defer wg.Done()
-	ticker := time.NewTicker(time.Duration(flipTaskStateInterval) * time.Millisecond)
-	defer ticker.Stop()
+	flipPersistedTicker := time.NewTicker(time.Duration(flipPersistedTaskInterval) * time.Millisecond)
+	flipFlushedTicker := time.NewTicker(time.Duration(flipFlushedTaskInterval) * time.Millisecond)
+	defer flipPersistedTicker.Stop()
+	defer flipFlushedTicker.Stop()
 	for {
 		select {
 		case <-m.ctx.Done():
 			log.Debug("import manager context done, exit check flipTaskStateLoop")
 			return
-		case <-ticker.C:
-			log.Debug("start trying to flip task state")
-			if err := m.flipTaskState(m.ctx); err != nil {
-				log.Error("failed to flip task state", zap.Error(err))
+		case <-flipPersistedTicker.C:
+			log.Debug("start trying to flip ImportPersisted task")
+			if err := m.loadAndFlipPersistedTasks(m.ctx); err != nil {
+				log.Error("failed to flip ImportPersisted task", zap.Error(err))
+			}
+		case <-flipFlushedTicker.C:
+			log.Debug("start trying to flip ImportFlushed task")
+			if err := m.loadAndFlipFlushedTasks(m.ctx); err != nil {
+				log.Error("failed to flip ImportPersisted task", zap.Error(err))
 			}
 		}
 	}
@@ -269,61 +285,127 @@ func (m *importManager) sendOutTasks(ctx context.Context) error {
 	return nil
 }
 
-// flipTaskState checks every import task and flips their import state if eligible.
-func (m *importManager) flipTaskState(ctx context.Context) error {
+// loadAndFlipPersistedTasks checks every import task in `ImportPersisted` state and flips their import state to
+// `ImportFlushed` if eligible.
+func (m *importManager) loadAndFlipPersistedTasks(ctx context.Context) error {
 	var importTasks []*datapb.ImportTaskInfo
 	var err error
 	if importTasks, err = m.loadFromTaskStore(false); err != nil {
 		log.Error("failed to load from task store", zap.Error(err))
 		return err
 	}
+
 	for _, task := range importTasks {
+		// Checking if ImportPersisted --> ImportFlushed ready.
 		if task.GetState().GetStateCode() == commonpb.ImportState_ImportPersisted {
-			log.Info("<ImportPersisted> task found, checking if it is eligible to become <ImportCompleted>",
+			log.Info("<ImportPersisted> task found, checking if it is eligible to become <ImportFlushed>",
 				zap.Int64("task ID", task.GetId()))
+			importTask := m.getTaskState(task.GetId())
+
+			// if this method failed, skip this task, try again in next round
+			if err = m.flipTaskFlushedState(ctx, importTask, task.GetDatanodeId()); err != nil {
+				log.Error("failed to flip task flushed state",
+					zap.Int64("task ID", task.GetId()),
+					zap.Error(err))
+			}
+		}
+	}
+	return nil
+}
+
+// loadAndFlipFlushedTasks checks every import task in `ImportFlushed` state and flips their import state to
+// `ImportComplete` if eligible.
+func (m *importManager) loadAndFlipFlushedTasks(ctx context.Context) error {
+	var importTasks []*datapb.ImportTaskInfo
+	var err error
+	if importTasks, err = m.loadFromTaskStore(false); err != nil {
+		log.Error("failed to load from task store", zap.Error(err))
+		return err
+	}
+
+	for _, task := range importTasks {
+		if task.GetState().GetStateCode() == commonpb.ImportState_ImportFlushed {
+			log.Info("<ImportFlushed> task found, checking if it is eligible to become <ImportCompleted>",
+				zap.Int64("task ID", task.GetId()))
+			importTask := m.getTaskState(task.GetId())
 
 			// TODO: if collection or partition has been dropped before the task complete,
 			// we need to set the task to failed, because the checkIndexingDone() cannot know
 			// whether the collection has been dropped.
 
 			// if this method failed, skip this task, try again in next round
-			m.flipTaskIndexState(ctx, task.GetId())
+			if err = m.flipTaskIndexState(ctx, importTask); err != nil {
+				log.Error("failed to flip task index state",
+					zap.Int64("task ID", task.GetId()),
+					zap.Error(err))
+			}
 		}
 	}
 	return nil
 }
 
-func (m *importManager) flipTaskIndexState(ctx context.Context, taskID int64) error {
-	resp := m.getTaskState(taskID)
-	ok, err := m.checkIndexingDone(ctx, resp.GetCollectionId(), resp.GetSegmentIds())
+func (m *importManager) flipTaskFlushedState(ctx context.Context, importTask *milvuspb.GetImportStateResponse, dataNodeID int64) error {
+	ok, err := m.checkFlushDone(ctx, importTask.GetSegmentIds())
 	if err != nil {
-		log.Error("an error occurred while checking index state of segments",
-			zap.Int64("task ID", taskID),
+		log.Error("an error occurred while checking flush state of segments",
+			zap.Int64("task ID", importTask.GetId()),
 			zap.Error(err))
-		// Failed to check indexing state of segments
 		return err
 	}
 	if ok {
-		if err := m.setImportTaskState(resp.GetId(), commonpb.ImportState_ImportCompleted); err != nil {
+		// All segments are flushed. DataNode becomes available.
+		func() {
+			m.busyNodesLock.Lock()
+			defer m.busyNodesLock.Unlock()
+			delete(m.busyNodes, dataNodeID)
+			log.Info("a DataNode is no longer busy after processing task",
+				zap.Int64("dataNode ID", dataNodeID),
+				zap.Int64("task ID", importTask.GetId()))
+
+		}()
+		if err := m.setImportTaskState(importTask.GetId(), commonpb.ImportState_ImportFlushed); err != nil {
 			log.Error("failed to set import task state",
-				zap.Int64("task ID", resp.GetId()),
+				zap.Int64("task ID", importTask.GetId()),
+				zap.Any("target state", commonpb.ImportState_ImportFlushed),
+				zap.Error(err))
+			return err
+		}
+		if err = m.sendOutTasks(m.ctx); err != nil {
+			log.Error("fail to send out import task to DataNodes",
+				zap.Int64("task ID", importTask.GetId()))
+		}
+	}
+	return nil
+}
+
+func (m *importManager) flipTaskIndexState(ctx context.Context, importTask *milvuspb.GetImportStateResponse) error {
+	ok, err := m.checkIndexingDone(ctx, importTask.GetCollectionId(), importTask.GetSegmentIds())
+	if err != nil {
+		log.Error("an error occurred while checking index state of segments",
+			zap.Int64("task ID", importTask.GetId()),
+			zap.Error(err))
+		return err
+	}
+	if ok {
+		if err := m.setImportTaskState(importTask.GetId(), commonpb.ImportState_ImportCompleted); err != nil {
+			log.Error("failed to set import task state",
+				zap.Int64("task ID", importTask.GetId()),
 				zap.Any("target state", commonpb.ImportState_ImportCompleted),
 				zap.Error(err))
-			// Failed to update task's state
 			return err
 		}
 		log.Info("indexes are successfully built and the import task has complete!",
-			zap.Int64("task ID", resp.GetId()))
+			zap.Int64("task ID", importTask.GetId()))
 		log.Info("now start unsetting isImporting state of segments",
-			zap.Int64("task ID", resp.GetId()),
-			zap.Int64s("segment IDs", resp.GetSegmentIds()))
+			zap.Int64("task ID", importTask.GetId()),
+			zap.Int64s("segment IDs", importTask.GetSegmentIds()))
 		// Remove the `isImport` states of these segments only when the import task reaches `ImportState_ImportCompleted` state.
 		if m.callUnsetIsImportingState == nil {
 			log.Error("callUnsetIsImportingState function of importManager is nil")
 			return fmt.Errorf("failed to describe index: segment state method of import manager is nil")
 		}
 		status, err := m.callUnsetIsImportingState(ctx, &datapb.UnsetIsImportingStateRequest{
-			SegmentIds: resp.GetSegmentIds(),
+			SegmentIds: importTask.GetSegmentIds(),
 		})
 		if err != nil {
 			log.Error("failed to unset importing state of all segments (could be partial failure)",
@@ -338,6 +420,31 @@ func (m *importManager) flipTaskIndexState(ctx context.Context, taskID int64) er
 	}
 
 	return nil
+}
+
+// checkFlushDone checks if flush is done on given segments.
+func (m *importManager) checkFlushDone(ctx context.Context, segIDs []UniqueID) (bool, error) {
+	resp, err := m.callGetSegmentStates(ctx, &datapb.GetSegmentStatesRequest{
+		SegmentIDs: segIDs,
+	})
+	if err != nil {
+		log.Error("failed to get import task segment states",
+			zap.Int64s("segment IDs", segIDs))
+		return false, err
+	}
+	getSegmentStates := func(segment *datapb.SegmentStateInfo, _ int) string {
+		return segment.GetState().String()
+	}
+	log.Debug("checking import segment states",
+		zap.Strings("segment states", lo.Map(resp.GetStates(), getSegmentStates)))
+	for _, states := range resp.GetStates() {
+		// Flushed segment could get compacted, so only returns false if there are still importing segments.
+		if states.GetState() == commonpb.SegmentState_Importing ||
+			states.GetState() == commonpb.SegmentState_Sealed {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // checkIndexingDone checks if indexes are successfully built on segments in `allSegmentIDs`.
@@ -627,17 +734,6 @@ func (m *importManager) updateTaskInfo(ir *rootcoordpb.ImportResult) (*datapb.Im
 	if err != nil {
 		return nil, err
 	}
-
-	// if is ImportState_ImportPersisted, and index is FLAT, set the task to be complated immediately
-	// this method is called from importWrapper.reportPersisted() to rootCoord.ReportImport(),
-	// if flipTaskIndexState failed, the outer caller(importWrapper) will retry 3 times
-	if ir.GetState() == commonpb.ImportState_ImportPersisted {
-		err = m.flipTaskIndexState(m.ctx, updatedInfo.GetId())
-		if err != nil {
-			return nil, err
-		}
-	}
-
 	return updatedInfo, nil
 }
 
