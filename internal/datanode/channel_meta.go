@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
 )
@@ -203,7 +204,7 @@ func (c *ChannelMeta) addSegment(req addSegmentReq) error {
 		historyInsertBuf: make([]*BufferData, 0),
 		historyDeleteBuf: make([]*DelDataBuf, 0),
 		startPos:         req.startPos,
-		lastSyncTs:       req.recoverTs,
+		lastSyncTs:       tsoutil.GetCurrentTime(),
 	}
 	seg.setType(req.segType)
 	// Set up pk stats
