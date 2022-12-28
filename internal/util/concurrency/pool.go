@@ -67,3 +67,7 @@ func (pool *Pool) Cap() int {
 func (pool *Pool) Running() int {
 	return pool.inner.Running()
 }
+
+func (pool *Pool) Release() {
+	pool.inner.Release()
+}
