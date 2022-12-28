@@ -214,7 +214,7 @@ func (s *Server) Init() error {
 
 	// Init balancer
 	log.Info("init balancer")
-	s.balancer = balance.NewRowCountBasedBalancer(
+	s.balancer = balance.NewShardRowCountBasedBalancer(
 		s.taskScheduler,
 		s.nodeMgr,
 		s.dist,
