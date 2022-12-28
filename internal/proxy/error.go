@@ -24,6 +24,8 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/types"
 )
 
 // TODO(dragondriver): add more common error type
@@ -89,4 +91,23 @@ func ErrProxyNotReady() error {
 
 func ErrPartitionNotExist(partitionName string) error {
 	return fmt.Errorf("partition is not exist: %s", partitionName)
+}
+
+var (
+	ErrRateLimit = errors.New("RequestLimited")
+	ErrForceDeny = errors.New("RequestDenied")
+)
+
+func wrapRateLimitError() error {
+	return fmt.Errorf("[%w] request is rejected by grpc RateLimiter middleware, please retry later", ErrRateLimit)
+}
+
+func wrapForceDenyError(rt internalpb.RateType, limiter types.Limiter) error {
+	switch rt {
+	case internalpb.RateType_DMLInsert, internalpb.RateType_DMLDelete, internalpb.RateType_DMLBulkLoad:
+		return fmt.Errorf("[%w] deny to write, reason: %s", ErrForceDeny, limiter.GetWriteStateReason())
+	case internalpb.RateType_DQLSearch, internalpb.RateType_DQLQuery:
+		return fmt.Errorf("[%w] deny to read, reason: %s", ErrForceDeny, limiter.GetReadStateReason())
+	}
+	return nil
 }

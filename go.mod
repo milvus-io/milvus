@@ -11,7 +11,7 @@ require (
 	github.com/antonmedv/expr v1.8.9
 	github.com/apache/arrow/go/v8 v8.0.0-20220322092137-778b1772fd20
 	github.com/apache/pulsar-client-go v0.6.1-0.20210728062540-29414db801a7
-	github.com/apache/thrift v0.15.0 // indirect
+	github.com/apache/thrift v0.15.0
 	github.com/bits-and-blooms/bloom/v3 v3.0.1
 	github.com/casbin/casbin/v2 v2.44.2
 	github.com/casbin/json-adapter/v2 v2.0.0
@@ -28,7 +28,7 @@ require (
 	github.com/klauspost/compress v1.14.2
 	github.com/lingdor/stackerror v0.0.0-20191119040541-976d8885ed76
 	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d
-	github.com/milvus-io/milvus-proto/go-api v0.0.0-20230104082730-4b155032ce0c
+	github.com/milvus-io/milvus-proto/go-api v0.0.0-20221226093525-ce18c3347db0
 	github.com/minio/minio-go/v7 v7.0.17
 	github.com/opentracing/opentracing-go v1.2.0
 	github.com/panjf2000/ants/v2 v2.4.8
@@ -187,6 +187,8 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	sigs.k8s.io/yaml v1.2.0 // indirect
 )
+
+require github.com/golang/mock v1.5.0
 
 replace (
 	github.com/apache/pulsar-client-go => github.com/milvus-io/pulsar-client-go v0.6.8
