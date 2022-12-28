@@ -22,21 +22,20 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/util/metautil"
-	"github.com/milvus-io/milvus/internal/util/paramtable"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
-
-	"github.com/milvus-io/milvus-proto/go-api/commonpb"
-	memkv "github.com/milvus-io/milvus/internal/kv/mem"
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
-	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
+	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/util/metautil"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
@@ -299,7 +298,7 @@ func TestCompactionPlanHandler_handleMergeCompactionResult(t *testing.T) {
 	plans := map[int64]*compactionTask{1: task}
 
 	errMeta := &meta{
-		catalog: &datacoord.Catalog{Txn: &saveFailKV{TxnKV: memkv.NewMemoryKV()}},
+		catalog: &datacoord.Catalog{MetaKv: &saveFailKV{MetaKv: NewMetaMemoryKV()}},
 		segments: &SegmentsInfo{
 			map[int64]*SegmentInfo{
 				seg1.ID: {SegmentInfo: seg1},
@@ -309,7 +308,7 @@ func TestCompactionPlanHandler_handleMergeCompactionResult(t *testing.T) {
 	}
 
 	meta := &meta{
-		catalog: &datacoord.Catalog{Txn: memkv.NewMemoryKV()},
+		catalog: &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
 		segments: &SegmentsInfo{
 			map[int64]*SegmentInfo{
 				seg1.ID: {SegmentInfo: seg1},
@@ -445,7 +444,7 @@ func TestCompactionPlanHandler_completeCompaction(t *testing.T) {
 		plans := map[int64]*compactionTask{1: task}
 
 		meta := &meta{
-			catalog: &datacoord.Catalog{Txn: memkv.NewMemoryKV()},
+			catalog: &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
 			segments: &SegmentsInfo{
 				map[int64]*SegmentInfo{
 					seg1.ID: {SegmentInfo: seg1},
@@ -537,7 +536,7 @@ func TestCompactionPlanHandler_completeCompaction(t *testing.T) {
 		plans := map[int64]*compactionTask{1: task}
 
 		meta := &meta{
-			catalog: &datacoord.Catalog{Txn: memkv.NewMemoryKV()},
+			catalog: &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
 			segments: &SegmentsInfo{
 				map[int64]*SegmentInfo{
 					seg1.ID: {SegmentInfo: seg1},

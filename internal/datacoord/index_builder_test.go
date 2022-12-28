@@ -22,17 +22,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/indexnode"
 	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
+	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
-	"github.com/stretchr/testify/assert"
 )
 
 var (
@@ -601,7 +603,17 @@ func TestIndexBuilder(t *testing.T) {
 
 	Params.InitOnce()
 	ctx := context.Background()
-	mt := createMetaTable(&datacoord.Catalog{Txn: &mockEtcdKv{}})
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	catalog.On("CreateSegmentIndex",
+		mock.Anything,
+		mock.Anything,
+	).Return(nil)
+	catalog.On("AlterSegmentIndexes",
+		mock.Anything,
+		mock.Anything,
+	).Return(nil)
+
+	mt := createMetaTable(catalog)
 	nodeManager := &IndexNodeManager{
 		ctx: ctx,
 		nodeClients: map[UniqueID]types.IndexNode{
@@ -664,6 +676,17 @@ func TestIndexBuilder(t *testing.T) {
 func TestIndexBuilder_Error(t *testing.T) {
 	Params.Init()
 
+	sc := catalogmocks.NewDataCoordCatalog(t)
+	sc.On("AlterSegmentIndexes",
+		mock.Anything,
+		mock.Anything,
+	).Return(nil)
+	ec := catalogmocks.NewDataCoordCatalog(t)
+	ec.On("AlterSegmentIndexes",
+		mock.Anything,
+		mock.Anything,
+	).Return(errors.New("fail"))
+
 	chunkManager := &mocks.ChunkManager{}
 	chunkManager.EXPECT().RootPath().Return("root")
 	ib := &indexBuilder{
@@ -671,8 +694,7 @@ func TestIndexBuilder_Error(t *testing.T) {
 		tasks: map[int64]indexTaskState{
 			buildID: indexTaskInit,
 		},
-		meta: createMetaTable(&datacoord.Catalog{
-			Txn: &saveFailKV{}}),
+		meta:         createMetaTable(ec),
 		chunkManager: chunkManager,
 	}
 
@@ -728,7 +750,7 @@ func TestIndexBuilder_Error(t *testing.T) {
 	t.Run("assign task error", func(t *testing.T) {
 		paramtable.Get().Save(Params.CommonCfg.StorageType.Key, "local")
 		ib.tasks[buildID] = indexTaskInit
-		ib.meta.catalog = &datacoord.Catalog{Txn: &mockEtcdKv{}}
+		ib.meta.catalog = sc
 		ib.nodeManager = &IndexNodeManager{
 			ctx: context.Background(),
 			nodeClients: map[UniqueID]types.IndexNode{
@@ -756,7 +778,7 @@ func TestIndexBuilder_Error(t *testing.T) {
 	})
 	t.Run("assign task fail", func(t *testing.T) {
 		paramtable.Get().Save(Params.CommonCfg.StorageType.Key, "local")
-		ib.meta.catalog = &datacoord.Catalog{Txn: &mockEtcdKv{}}
+		ib.meta.catalog = sc
 		ib.nodeManager = &IndexNodeManager{
 			ctx: context.Background(),
 			nodeClients: map[UniqueID]types.IndexNode{
@@ -789,7 +811,7 @@ func TestIndexBuilder_Error(t *testing.T) {
 
 	t.Run("drop job error", func(t *testing.T) {
 		ib.meta.buildID2SegmentIndex[buildID].NodeID = nodeID
-		ib.meta.catalog = &datacoord.Catalog{Txn: &mockEtcdKv{}}
+		ib.meta.catalog = sc
 		ib.nodeManager = &IndexNodeManager{
 			ctx: context.Background(),
 			nodeClients: map[UniqueID]types.IndexNode{
@@ -819,7 +841,7 @@ func TestIndexBuilder_Error(t *testing.T) {
 
 	t.Run("drop job fail", func(t *testing.T) {
 		ib.meta.buildID2SegmentIndex[buildID].NodeID = nodeID
-		ib.meta.catalog = &datacoord.Catalog{Txn: &mockEtcdKv{}}
+		ib.meta.catalog = sc
 		ib.nodeManager = &IndexNodeManager{
 			ctx: context.Background(),
 			nodeClients: map[UniqueID]types.IndexNode{
@@ -850,7 +872,7 @@ func TestIndexBuilder_Error(t *testing.T) {
 
 	t.Run("get state error", func(t *testing.T) {
 		ib.meta.buildID2SegmentIndex[buildID].NodeID = nodeID
-		ib.meta.catalog = &datacoord.Catalog{Txn: &mockEtcdKv{}}
+		ib.meta.catalog = sc
 		ib.nodeManager = &IndexNodeManager{
 			ctx: context.Background(),
 			nodeClients: map[UniqueID]types.IndexNode{
@@ -872,7 +894,7 @@ func TestIndexBuilder_Error(t *testing.T) {
 
 	t.Run("get state fail", func(t *testing.T) {
 		ib.meta.buildID2SegmentIndex[buildID].NodeID = nodeID
-		ib.meta.catalog = &datacoord.Catalog{Txn: &mockEtcdKv{}}
+		ib.meta.catalog = sc
 		ib.nodeManager = &IndexNodeManager{
 			ctx: context.Background(),
 			nodeClients: map[UniqueID]types.IndexNode{
@@ -899,7 +921,7 @@ func TestIndexBuilder_Error(t *testing.T) {
 
 	t.Run("finish task fail", func(t *testing.T) {
 		ib.meta.buildID2SegmentIndex[buildID].NodeID = nodeID
-		ib.meta.catalog = &datacoord.Catalog{Txn: &saveFailKV{}}
+		ib.meta.catalog = ec
 		ib.nodeManager = &IndexNodeManager{
 			ctx: context.Background(),
 			nodeClients: map[UniqueID]types.IndexNode{
@@ -935,7 +957,7 @@ func TestIndexBuilder_Error(t *testing.T) {
 
 	t.Run("task still in progress", func(t *testing.T) {
 		ib.meta.buildID2SegmentIndex[buildID].NodeID = nodeID
-		ib.meta.catalog = &datacoord.Catalog{Txn: &saveFailKV{}}
+		ib.meta.catalog = ec
 		ib.nodeManager = &IndexNodeManager{
 			ctx: context.Background(),
 			nodeClients: map[UniqueID]types.IndexNode{
@@ -971,7 +993,7 @@ func TestIndexBuilder_Error(t *testing.T) {
 
 	t.Run("indexNode has no task", func(t *testing.T) {
 		ib.meta.buildID2SegmentIndex[buildID].NodeID = nodeID
-		ib.meta.catalog = &datacoord.Catalog{Txn: &mockEtcdKv{}}
+		ib.meta.catalog = sc
 		ib.nodeManager = &IndexNodeManager{
 			ctx: context.Background(),
 			nodeClients: map[UniqueID]types.IndexNode{
@@ -999,7 +1021,7 @@ func TestIndexBuilder_Error(t *testing.T) {
 
 	t.Run("node not exist", func(t *testing.T) {
 		ib.meta.buildID2SegmentIndex[buildID].NodeID = nodeID
-		ib.meta.catalog = &datacoord.Catalog{Txn: &mockEtcdKv{}}
+		ib.meta.catalog = sc
 		ib.nodeManager = &IndexNodeManager{
 			ctx:         context.Background(),
 			nodeClients: map[UniqueID]types.IndexNode{},

@@ -18,13 +18,17 @@ package datacoord
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
+	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -60,14 +64,21 @@ func TestServer_CreateIndex(t *testing.T) {
 		}
 		ctx = context.Background()
 	)
+
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	catalog.On("CreateIndex",
+		mock.Anything,
+		mock.Anything,
+	).Return(nil)
 	s := &Server{
 		meta: &meta{
-			catalog: &datacoord.Catalog{Txn: &mockEtcdKv{}},
+			catalog: catalog,
 			indexes: map[UniqueID]map[UniqueID]*model.Index{},
 		},
 		allocator:       newMockAllocator(),
 		notifyIndexChan: make(chan UniqueID, 1),
 	}
+
 	s.stateCode.Store(commonpb.StateCode_Healthy)
 	t.Run("success", func(t *testing.T) {
 		resp, err := s.CreateIndex(ctx, req)
@@ -116,7 +127,7 @@ func TestServer_CreateIndex(t *testing.T) {
 
 	t.Run("save index fail", func(t *testing.T) {
 		s.meta.indexes = map[UniqueID]map[UniqueID]*model.Index{}
-		s.meta.catalog = &datacoord.Catalog{Txn: &saveFailKV{}}
+		s.meta.catalog = &datacoord.Catalog{MetaKv: &saveFailKV{}}
 		req.IndexParams = []*commonpb.KeyValuePair{
 			{
 				Key:   "index_type",
@@ -158,7 +169,7 @@ func TestServer_GetIndexState(t *testing.T) {
 	)
 	s := &Server{
 		meta: &meta{
-			catalog: &datacoord.Catalog{Txn: &mockEtcdKv{}},
+			catalog: &datacoord.Catalog{MetaKv: mocks.NewMetaKv(t)},
 		},
 		allocator:       newMockAllocator(),
 		notifyIndexChan: make(chan UniqueID, 1),
@@ -179,7 +190,7 @@ func TestServer_GetIndexState(t *testing.T) {
 	})
 
 	s.meta = &meta{
-		catalog: &datacoord.Catalog{Txn: &mockEtcdKv{}},
+		catalog: &datacoord.Catalog{MetaKv: mocks.NewMetaKv(t)},
 		indexes: map[UniqueID]map[UniqueID]*model.Index{
 			collID: {
 				indexID: {
@@ -276,7 +287,7 @@ func TestServer_GetSegmentIndexState(t *testing.T) {
 	)
 	s := &Server{
 		meta: &meta{
-			catalog:  &datacoord.Catalog{Txn: &mockEtcdKv{}},
+			catalog:  &datacoord.Catalog{MetaKv: mocks.NewMetaKv(t)},
 			indexes:  map[UniqueID]map[UniqueID]*model.Index{},
 			segments: &SegmentsInfo{map[UniqueID]*SegmentInfo{}},
 		},
@@ -413,7 +424,7 @@ func TestServer_GetIndexBuildProgress(t *testing.T) {
 
 	s := &Server{
 		meta: &meta{
-			catalog:  &datacoord.Catalog{Txn: &mockEtcdKv{}},
+			catalog:  &datacoord.Catalog{MetaKv: mocks.NewMetaKv(t)},
 			indexes:  map[UniqueID]map[UniqueID]*model.Index{},
 			segments: &SegmentsInfo{map[UniqueID]*SegmentInfo{}},
 		},
@@ -561,9 +572,15 @@ func TestServer_DescribeIndex(t *testing.T) {
 		}
 	)
 
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	catalog.On("AlterIndexes",
+		mock.Anything,
+		mock.Anything,
+	).Return(nil)
+
 	s := &Server{
 		meta: &meta{
-			catalog: &datacoord.Catalog{Txn: &mockEtcdKv{}},
+			catalog: catalog,
 			indexes: map[UniqueID]map[UniqueID]*model.Index{
 				collID: {
 					//finished
@@ -817,9 +834,15 @@ func TestServer_DropIndex(t *testing.T) {
 		}
 	)
 
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	catalog.On("AlterIndexes",
+		mock.Anything,
+		mock.Anything,
+	).Return(nil)
+
 	s := &Server{
 		meta: &meta{
-			catalog: &datacoord.Catalog{Txn: &mockEtcdKv{}},
+			catalog: catalog,
 			indexes: map[UniqueID]map[UniqueID]*model.Index{
 				collID: {
 					//finished
@@ -923,14 +946,19 @@ func TestServer_DropIndex(t *testing.T) {
 	s.stateCode.Store(commonpb.StateCode_Healthy)
 
 	t.Run("drop fail", func(t *testing.T) {
-		s.meta.catalog = &datacoord.Catalog{Txn: &saveFailKV{}}
+		catalog := catalogmocks.NewDataCoordCatalog(t)
+		catalog.On("AlterIndexes",
+			mock.Anything,
+			mock.Anything,
+		).Return(errors.New("fail"))
+		s.meta.catalog = catalog
 		resp, err := s.DropIndex(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
 	})
 
 	t.Run("drop one index", func(t *testing.T) {
-		s.meta.catalog = &datacoord.Catalog{Txn: &mockEtcdKv{}}
+		s.meta.catalog = catalog
 		resp, err := s.DropIndex(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
@@ -1009,7 +1037,7 @@ func TestServer_GetIndexInfos(t *testing.T) {
 
 	s := &Server{
 		meta: &meta{
-			catalog: &datacoord.Catalog{Txn: &mockEtcdKv{}},
+			catalog: &datacoord.Catalog{MetaKv: mocks.NewMetaKv(t)},
 			indexes: map[UniqueID]map[UniqueID]*model.Index{
 				collID: {
 					//finished

@@ -18,311 +18,127 @@ package datacoord
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"strings"
 	"testing"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/kv"
-	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
+	"github.com/milvus-io/milvus/internal/metastore/mocks"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/util"
 )
 
-type mockEtcdKv struct {
-	kv.TxnKV
-}
-
-func (mek *mockEtcdKv) LoadWithPrefix(key string) ([]string, []string, error) {
-	var val []byte
-	switch {
-	case strings.Contains(key, datacoord.SegmentPrefix):
-		segInfo := &datapb.SegmentInfo{ID: 1, Binlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "log1")}}
-		val, _ = proto.Marshal(segInfo)
-	case strings.Contains(key, datacoord.SegmentBinlogPathPrefix):
-		segInfo := getFieldBinlogPaths(1, "binlog1")
-		val, _ = proto.Marshal(segInfo)
-	case strings.Contains(key, datacoord.SegmentDeltalogPathPrefix):
-		segInfo := getFieldBinlogPaths(1, "deltalog1")
-		val, _ = proto.Marshal(segInfo)
-	case strings.Contains(key, datacoord.SegmentStatslogPathPrefix):
-		segInfo := getFieldBinlogPaths(1, "statslog1")
-		val, _ = proto.Marshal(segInfo)
-	case strings.Contains(key, datacoord.ChannelCheckpointPrefix):
-		channelCP := &internalpb.MsgPosition{
-			Timestamp: 1000,
-		}
-		val, _ = proto.Marshal(channelCP)
-	case strings.Contains(key, util.FieldIndexPrefix):
-		index := &datapb.FieldIndex{
-			IndexInfo: &datapb.IndexInfo{
-				CollectionID:    0,
-				FieldID:         1,
-				IndexName:       "_default_idx_101",
-				IndexID:         0,
-				TypeParams:      []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}},
-				IndexParams:     []*commonpb.KeyValuePair{{Key: "index_type", Value: "HNSW"}},
-				IsAutoIndex:     false,
-				UserIndexParams: nil,
-			},
-			Deleted:    false,
-			CreateTime: 0,
-		}
-		val, _ = proto.Marshal(index)
-	case strings.Contains(key, util.SegmentIndexPrefix):
-		segIndex := &datapb.SegmentIndex{
-			CollectionID:  0,
-			PartitionID:   0,
-			SegmentID:     1,
-			NumRows:       1025,
-			IndexID:       0,
-			BuildID:       0,
-			NodeID:        0,
-			IndexVersion:  0,
-			State:         commonpb.IndexState_Unissued,
-			FailReason:    "",
-			IndexFileKeys: nil,
-			Deleted:       false,
-			CreateTime:    0,
-			SerializeSize: 0,
-			WriteHandoff:  false,
-		}
-		val, _ = proto.Marshal(segIndex)
-
-	default:
-		return nil, nil, fmt.Errorf("invalid key")
-	}
-
-	return nil, []string{string(val)}, nil
-}
-
-func (mek *mockEtcdKv) Save(key, value string) error {
-	return nil
-}
-
-func (mek *mockEtcdKv) MultiSave(kvs map[string]string) error {
-	return nil
-}
-
-func (mek *mockEtcdKv) Remove(key string) error {
-	return nil
-}
-
-func (mek *mockEtcdKv) MultiRemove(keys []string) error {
-	return nil
-}
-
-type mockKvLoadSegmentError struct {
-	kv.TxnKV
-}
-
-func (mek *mockKvLoadSegmentError) LoadWithPrefix(key string) ([]string, []string, error) {
-	if strings.Contains(key, datacoord.SegmentPrefix) {
-		return nil, nil, fmt.Errorf("segment LoadWithPrefix error")
-	}
-	return nil, nil, nil
-}
-
-type mockKvLoadBinlogError struct {
-	kv.TxnKV
-}
-
-func (mek *mockKvLoadBinlogError) LoadWithPrefix(key string) ([]string, []string, error) {
-	var val []byte
-	switch {
-	case strings.Contains(key, datacoord.SegmentPrefix):
-		segInfo := &datapb.SegmentInfo{ID: 1, Deltalogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "delta_log_1")}}
-		val, _ = proto.Marshal(segInfo)
-	case strings.Contains(key, datacoord.SegmentBinlogPathPrefix):
-		return nil, nil, fmt.Errorf("LoadWithPrefix for binlogs error")
-	}
-	return nil, []string{string(val)}, nil
-}
-
-type mockKvLoadDeltaBinlogError struct {
-	kv.TxnKV
-}
-
-func (mek *mockKvLoadDeltaBinlogError) LoadWithPrefix(key string) ([]string, []string, error) {
-	var val []byte
-	switch {
-	case strings.Contains(key, datacoord.SegmentPrefix):
-		segInfo := &datapb.SegmentInfo{ID: 1, Binlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "binlog_1")}}
-		val, _ = proto.Marshal(segInfo)
-	case strings.Contains(key, datacoord.SegmentDeltalogPathPrefix):
-		return nil, nil, fmt.Errorf("LoadWithPrefix for deltalog error")
-	}
-	return nil, []string{string(val)}, nil
-}
-
-type mockKvLoadStatsBinlogError struct {
-	kv.TxnKV
-}
-
-func (mek *mockKvLoadStatsBinlogError) LoadWithPrefix(key string) ([]string, []string, error) {
-	var val []byte
-	switch {
-	case strings.Contains(key, datacoord.SegmentPrefix+"/"):
-		segInfo := &datapb.SegmentInfo{ID: 1, Binlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, "binlog_1")}}
-		val, _ = proto.Marshal(segInfo)
-	case strings.Contains(key, datacoord.SegmentStatslogPathPrefix):
-		return nil, nil, fmt.Errorf("LoadWithPrefix for statslog error")
-	}
-	return nil, []string{string(val)}, nil
-}
-
-type mockKvIllegalSegment struct {
-	kv.TxnKV
-}
-
-func (mek *mockKvIllegalSegment) LoadWithPrefix(key string) ([]string, []string, error) {
-	var val []byte
-	switch {
-	case strings.Contains(key, datacoord.SegmentPrefix):
-		val = []byte{'i', 'l', 'l', 'e', 'g', 'a', 'l'}
-	}
-
-	return nil, []string{string(val)}, nil
-}
-
-type mockKvIllegalBinlog struct {
-	kv.TxnKV
-}
-
-func (mek *mockKvIllegalBinlog) LoadWithPrefix(key string) ([]string, []string, error) {
-	var val []byte
-	switch {
-	case strings.Contains(key, datacoord.SegmentBinlogPathPrefix):
-		val = []byte{'i', 'l', 'l', 'e', 'g', 'a', 'l'}
-	}
-
-	return nil, []string{string(val)}, nil
-}
-
-type mockKvIllegalDeltalog struct {
-	kv.TxnKV
-}
-
-func (mek *mockKvIllegalDeltalog) LoadWithPrefix(key string) ([]string, []string, error) {
-	var val []byte
-	switch {
-	case strings.Contains(key, datacoord.SegmentDeltalogPathPrefix):
-		val = []byte{'i', 'l', 'l', 'e', 'g', 'a', 'l'}
-	}
-
-	return nil, []string{string(val)}, nil
-}
-
-type mockKvIllegalStatslog struct {
-	kv.TxnKV
-}
-
-func (mek *mockKvIllegalStatslog) LoadWithPrefix(key string) ([]string, []string, error) {
-	var val []byte
-	switch {
-	case strings.Contains(key, datacoord.SegmentStatslogPathPrefix):
-		val = []byte{'i', 'l', 'l', 'e', 'g', 'a', 'l'}
-	}
-
-	return nil, []string{string(val)}, nil
-}
-
-type mockLoadIndexError struct {
-	kv.TxnKV
-}
-
-func (mek *mockLoadIndexError) LoadWithPrefix(key string) ([]string, []string, error) {
-	switch {
-	case strings.Contains(key, util.FieldIndexPrefix):
-		return nil, nil, fmt.Errorf("LoadWithPrefix for index error")
-	}
-	return nil, nil, nil
-}
-
-type mockLoadSegmentIndexError struct {
-	kv.TxnKV
-}
-
-func (mek *mockLoadSegmentIndexError) LoadWithPrefix(key string) ([]string, []string, error) {
-	switch {
-	case strings.Contains(key, util.SegmentIndexPrefix):
-		return nil, nil, fmt.Errorf("LoadWithPrefix for segment index error")
-
-	}
-	return nil, nil, nil
-}
-
 func TestMetaReloadFromKV(t *testing.T) {
-	t.Run("Test ReloadFromKV success", func(t *testing.T) {
-		fkv := &mockEtcdKv{}
-		_, err := newMeta(context.TODO(), fkv, "", nil)
-		assert.Nil(t, err)
-	})
+	t.Run("ListSegments fail", func(t *testing.T) {
+		catalog := mocks.NewDataCoordCatalog(t)
+		catalog.On("ListSegments",
+			mock.Anything,
+		).Return(nil, errors.New("error"))
 
-	// load segment error
-	t.Run("Test ReloadFromKV load segment fails", func(t *testing.T) {
-		fkv := &mockKvLoadSegmentError{}
-		_, err := newMeta(context.TODO(), fkv, "", nil)
-		assert.NotNil(t, err)
-	})
-
-	// illegal segment info
-	t.Run("Test ReloadFromKV unmarshal segment fails", func(t *testing.T) {
-		fkv := &mockKvIllegalSegment{}
-		_, err := newMeta(context.TODO(), fkv, "", nil)
-		assert.NotNil(t, err)
-	})
-
-	// load binlog/deltalog/statslog error
-	t.Run("Test ReloadFromKV load binlog fails", func(t *testing.T) {
-		fkv := &mockKvLoadBinlogError{}
-		_, err := newMeta(context.TODO(), fkv, "", nil)
-		assert.NotNil(t, err)
-	})
-	t.Run("Test ReloadFromKV load deltalog fails", func(t *testing.T) {
-		fkv := &mockKvLoadDeltaBinlogError{}
-		_, err := newMeta(context.TODO(), fkv, "", nil)
-		assert.NotNil(t, err)
-	})
-	t.Run("Test ReloadFromKV load statslog fails", func(t *testing.T) {
-		fkv := &mockKvLoadStatsBinlogError{}
-		_, err := newMeta(context.TODO(), fkv, "", nil)
-		assert.NotNil(t, err)
-	})
-
-	// illegal binlog/deltalog/statslog info
-	t.Run("Test ReloadFromKV unmarshal binlog fails", func(t *testing.T) {
-		fkv := &mockKvIllegalBinlog{}
-		_, err := newMeta(context.TODO(), fkv, "", nil)
-		assert.NotNil(t, err)
-	})
-	t.Run("Test ReloadFromKV unmarshal deltalog fails", func(t *testing.T) {
-		fkv := &mockKvIllegalDeltalog{}
-		_, err := newMeta(context.TODO(), fkv, "", nil)
-		assert.NotNil(t, err)
-	})
-	t.Run("Test ReloadFromKV unmarshal statslog fails", func(t *testing.T) {
-		fkv := &mockKvIllegalStatslog{}
-		_, err := newMeta(context.TODO(), fkv, "", nil)
-		assert.NotNil(t, err)
-	})
-	t.Run("Test ReloadFromKV load index fails", func(t *testing.T) {
-		fkv := &mockLoadIndexError{}
-		_, err := newMeta(context.TODO(), fkv, "", nil)
+		_, err := newMeta(context.TODO(), catalog, nil)
 		assert.Error(t, err)
 	})
-	t.Run("Test ReloadFromKV load segment index fails", func(t *testing.T) {
-		fkv := &mockLoadSegmentIndexError{}
-		_, err := newMeta(context.TODO(), fkv, "", nil)
+
+	t.Run("ListChannelCheckpoint fail", func(t *testing.T) {
+		catalog := mocks.NewDataCoordCatalog(t)
+		catalog.On("ListSegments",
+			mock.Anything,
+		).Return([]*datapb.SegmentInfo{}, nil)
+		catalog.On("ListChannelCheckpoint",
+			mock.Anything,
+		).Return(nil, errors.New("error"))
+		_, err := newMeta(context.TODO(), catalog, nil)
 		assert.Error(t, err)
+	})
+
+	t.Run("ListIndexes fail", func(t *testing.T) {
+		catalog := mocks.NewDataCoordCatalog(t)
+		catalog.On("ListSegments",
+			mock.Anything,
+		).Return([]*datapb.SegmentInfo{}, nil)
+		catalog.On("ListChannelCheckpoint",
+			mock.Anything,
+		).Return(map[string]*internalpb.MsgPosition{}, nil)
+		catalog.On("ListIndexes",
+			mock.Anything,
+		).Return(nil, errors.New("error"))
+		_, err := newMeta(context.TODO(), catalog, nil)
+		assert.Error(t, err)
+	})
+
+	t.Run("ListSegmentIndexes fails", func(t *testing.T) {
+		catalog := mocks.NewDataCoordCatalog(t)
+		catalog.On("ListSegments",
+			mock.Anything,
+		).Return([]*datapb.SegmentInfo{}, nil)
+		catalog.On("ListChannelCheckpoint",
+			mock.Anything,
+		).Return(map[string]*internalpb.MsgPosition{}, nil)
+		catalog.On("ListIndexes",
+			mock.Anything,
+		).Return([]*model.Index{}, nil)
+		catalog.On("ListSegmentIndexes",
+			mock.Anything,
+		).Return(nil, errors.New("error"))
+		_, err := newMeta(context.TODO(), catalog, nil)
+		assert.Error(t, err)
+	})
+
+	t.Run("ok", func(t *testing.T) {
+		catalog := mocks.NewDataCoordCatalog(t)
+		catalog.On("ListSegments",
+			mock.Anything,
+		).Return([]*datapb.SegmentInfo{
+			{
+				ID:           1,
+				CollectionID: 1,
+				PartitionID:  1,
+				State:        commonpb.SegmentState_Flushed,
+			},
+		}, nil)
+
+		catalog.On("ListChannelCheckpoint",
+			mock.Anything,
+		).Return(map[string]*internalpb.MsgPosition{
+			"ch": {
+				ChannelName: "cn",
+				MsgID:       []byte{},
+				Timestamp:   1000,
+			},
+		}, nil)
+
+		catalog.On("ListIndexes",
+			mock.Anything,
+		).Return([]*model.Index{
+			{
+				CollectionID: 1,
+				IndexID:      1,
+				IndexName:    "dix",
+				CreateTime:   1,
+			},
+		}, nil)
+
+		catalog.On("ListSegmentIndexes",
+			mock.Anything,
+		).Return([]*model.SegmentIndex{
+			{
+				SegmentID: 1,
+				IndexID:   1,
+			},
+		}, nil)
+
+		_, err := newMeta(context.TODO(), catalog, nil)
+		assert.NoError(t, err)
 	})
 }
 
@@ -454,16 +270,18 @@ func TestMeta_Basic(t *testing.T) {
 
 	t.Run("Test segment with kv fails", func(t *testing.T) {
 		// inject error for `Save`
-		memoryKV := memkv.NewMemoryKV()
-		fkv := &saveFailKV{TxnKV: memoryKV}
-		meta, err := newMeta(context.TODO(), fkv, "", nil)
+		memoryKV := NewMetaMemoryKV()
+		fkv := &saveFailKV{MetaKv: memoryKV}
+		catalog := datacoord.NewCatalog(fkv, "", "")
+		meta, err := newMeta(context.TODO(), catalog, nil)
 		assert.Nil(t, err)
 
 		err = meta.AddSegment(NewSegmentInfo(&datapb.SegmentInfo{}))
 		assert.NotNil(t, err)
 
-		fkv2 := &removeFailKV{TxnKV: memoryKV}
-		meta, err = newMeta(context.TODO(), fkv2, "", nil)
+		fkv2 := &removeFailKV{MetaKv: memoryKV}
+		catalog = datacoord.NewCatalog(fkv2, "", "")
+		meta, err = newMeta(context.TODO(), catalog, nil)
 		assert.Nil(t, err)
 		// nil, since no segment yet
 		err = meta.DropSegment(0)
@@ -475,7 +293,8 @@ func TestMeta_Basic(t *testing.T) {
 		err = meta.DropSegment(0)
 		assert.NotNil(t, err)
 
-		meta, err = newMeta(context.TODO(), fkv, "", nil)
+		catalog = datacoord.NewCatalog(fkv, "", "")
+		meta, err = newMeta(context.TODO(), catalog, nil)
 		assert.Nil(t, err)
 	})
 
@@ -609,7 +428,7 @@ func TestGetUnFlushedSegments(t *testing.T) {
 
 func TestUpdateFlushSegmentsInfo(t *testing.T) {
 	t.Run("normal", func(t *testing.T) {
-		meta, err := newMeta(context.TODO(), memkv.NewMemoryKV(), "", nil)
+		meta, err := newMemoryMeta()
 		assert.Nil(t, err)
 
 		segment1 := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 1, State: commonpb.SegmentState_Growing, Binlogs: []*datapb.FieldBinlog{getFieldBinlogPaths(1, getInsertLogPath("binlog0", 1))},
@@ -647,7 +466,7 @@ func TestUpdateFlushSegmentsInfo(t *testing.T) {
 	})
 
 	t.Run("update non-existed segment", func(t *testing.T) {
-		meta, err := newMeta(context.TODO(), memkv.NewMemoryKV(), "", nil)
+		meta, err := newMemoryMeta()
 		assert.Nil(t, err)
 
 		err = meta.UpdateFlushSegmentsInfo(1, false, false, false, nil, nil, nil, nil, nil)
@@ -655,7 +474,7 @@ func TestUpdateFlushSegmentsInfo(t *testing.T) {
 	})
 
 	t.Run("update checkpoints and start position of non existed segment", func(t *testing.T) {
-		meta, err := newMeta(context.TODO(), memkv.NewMemoryKV(), "", nil)
+		meta, err := newMemoryMeta()
 		assert.Nil(t, err)
 
 		segment1 := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 1, State: commonpb.SegmentState_Growing}}
@@ -670,9 +489,10 @@ func TestUpdateFlushSegmentsInfo(t *testing.T) {
 	})
 
 	t.Run("test save etcd failed", func(t *testing.T) {
-		kv := memkv.NewMemoryKV()
+		kv := NewMetaMemoryKV()
 		failedKv := &saveFailKV{kv}
-		meta, err := newMeta(context.TODO(), failedKv, "", nil)
+		catalog := datacoord.NewCatalog(failedKv, "", "")
+		meta, err := newMeta(context.TODO(), catalog, nil)
 		assert.Nil(t, err)
 
 		segmentInfo := &SegmentInfo{
@@ -728,7 +548,7 @@ func TestMeta_alterMetaStore(t *testing.T) {
 	}
 
 	m := &meta{
-		catalog: &datacoord.Catalog{Txn: memkv.NewMemoryKV()},
+		catalog: &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
 		segments: &SegmentsInfo{map[int64]*SegmentInfo{
 			1: {SegmentInfo: &datapb.SegmentInfo{
 				ID:        1,
@@ -777,7 +597,7 @@ func TestMeta_PrepareCompleteCompactionMutation(t *testing.T) {
 	}
 
 	m := &meta{
-		catalog:  &datacoord.Catalog{Txn: memkv.NewMemoryKV()},
+		catalog:  &datacoord.Catalog{MetaKv: NewMetaMemoryKV()},
 		segments: prepareSegments,
 	}
 
@@ -838,7 +658,7 @@ func TestMeta_PrepareCompleteCompactionMutation(t *testing.T) {
 
 func Test_meta_SetSegmentCompacting(t *testing.T) {
 	type fields struct {
-		client   kv.TxnKV
+		client   kv.MetaKv
 		segments *SegmentsInfo
 	}
 	type args struct {
@@ -853,7 +673,7 @@ func Test_meta_SetSegmentCompacting(t *testing.T) {
 		{
 			"test set segment compacting",
 			fields{
-				memkv.NewMemoryKV(),
+				NewMetaMemoryKV(),
 				&SegmentsInfo{
 					map[int64]*SegmentInfo{
 						1: {
@@ -875,7 +695,7 @@ func Test_meta_SetSegmentCompacting(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := &meta{
-				catalog:  &datacoord.Catalog{Txn: tt.fields.client},
+				catalog:  &datacoord.Catalog{MetaKv: tt.fields.client},
 				segments: tt.fields.segments,
 			}
 			m.SetSegmentCompacting(tt.args.segmentID, tt.args.compacting)
@@ -887,7 +707,7 @@ func Test_meta_SetSegmentCompacting(t *testing.T) {
 
 func Test_meta_SetSegmentImporting(t *testing.T) {
 	type fields struct {
-		client   kv.TxnKV
+		client   kv.MetaKv
 		segments *SegmentsInfo
 	}
 	type args struct {
@@ -902,7 +722,7 @@ func Test_meta_SetSegmentImporting(t *testing.T) {
 		{
 			"test set segment importing",
 			fields{
-				memkv.NewMemoryKV(),
+				NewMetaMemoryKV(),
 				&SegmentsInfo{
 					map[int64]*SegmentInfo{
 						1: {
@@ -924,7 +744,7 @@ func Test_meta_SetSegmentImporting(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := &meta{
-				catalog:  &datacoord.Catalog{Txn: tt.fields.client},
+				catalog:  &datacoord.Catalog{MetaKv: tt.fields.client},
 				segments: tt.fields.segments,
 			}
 			m.SetSegmentCompacting(tt.args.segmentID, tt.args.importing)
@@ -1086,7 +906,7 @@ func TestChannelCP(t *testing.T) {
 	}
 
 	t.Run("UpdateChannelCheckpoint", func(t *testing.T) {
-		meta, err := newMeta(context.TODO(), memkv.NewMemoryKV(), "", nil)
+		meta, err := newMemoryMeta()
 		assert.NoError(t, err)
 
 		// nil position
@@ -1098,7 +918,7 @@ func TestChannelCP(t *testing.T) {
 	})
 
 	t.Run("GetChannelCheckpoint", func(t *testing.T) {
-		meta, err := newMeta(context.TODO(), memkv.NewMemoryKV(), "", nil)
+		meta, err := newMemoryMeta()
 		assert.NoError(t, err)
 
 		position := meta.GetChannelCheckpoint(mockVChannel)
@@ -1113,7 +933,7 @@ func TestChannelCP(t *testing.T) {
 	})
 
 	t.Run("DropChannelCheckpoint", func(t *testing.T) {
-		meta, err := newMeta(context.TODO(), memkv.NewMemoryKV(), "", nil)
+		meta, err := newMemoryMeta()
 		assert.NoError(t, err)
 
 		err = meta.DropChannelCheckpoint(mockVChannel)
