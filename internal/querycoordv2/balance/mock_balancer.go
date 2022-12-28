@@ -61,7 +61,7 @@ func (_c *MockBalancer_AssignChannel_Call) Return(_a0 []ChannelAssignPlan) *Mock
 }
 
 // AssignSegment provides a mock function with given fields: segments, nodes
-func (_m *MockBalancer) AssignSegment(segments []*meta.Segment, nodes []int64) []SegmentAssignPlan {
+func (_m *MockBalancer) AssignSegment(segments []*meta.Segment, nodes []int64, replica *meta.Replica) []SegmentAssignPlan {
 	ret := _m.Called(segments, nodes)
 
 	var r0 []SegmentAssignPlan

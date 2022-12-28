@@ -35,7 +35,7 @@ type RowCountBasedBalancer struct {
 	targetMgr *meta.TargetManager
 }
 
-func (b *RowCountBasedBalancer) AssignSegment(segments []*meta.Segment, nodes []int64) []SegmentAssignPlan {
+func (b *RowCountBasedBalancer) AssignSegment(segments []*meta.Segment, nodes []int64, replcia *meta.Replica) []SegmentAssignPlan {
 	nodeItems := b.convertToNodeItems(nodes)
 	if len(nodeItems) == 0 {
 		return nil
@@ -61,7 +61,7 @@ func (b *RowCountBasedBalancer) AssignSegment(segments []*meta.Segment, nodes []
 		plans = append(plans, plan)
 		// change node's priority and push back
 		p := ni.getPriority()
-		ni.setPriority(p + int(s.GetNumOfRows()))
+		ni.setPriority(p + s.GetNumOfRows())
 		queue.push(ni)
 	}
 	return plans
@@ -72,9 +72,9 @@ func (b *RowCountBasedBalancer) convertToNodeItems(nodeIDs []int64) []*nodeItem 
 	for _, nodeInfo := range b.getNodes(nodeIDs) {
 		node := nodeInfo.ID()
 		segments := b.dist.SegmentDistManager.GetByNode(node)
-		rowcnt := 0
+		rowcnt := int64(0)
 		for _, s := range segments {
-			rowcnt += int(s.GetNumOfRows())
+			rowcnt += s.GetNumOfRows()
 		}
 		// more row count, less priority
 		nodeItem := newNodeItem(rowcnt, node)
@@ -108,11 +108,11 @@ func (b *RowCountBasedBalancer) balanceReplica(replica *meta.Replica) ([]Segment
 	if len(nodes) == 0 {
 		return nil, nil
 	}
-	nodesRowCnt := make(map[int64]int)
+	nodesRowCnt := make(map[int64]int64)
 	nodesSegments := make(map[int64][]*meta.Segment)
 	stoppingNodesSegments := make(map[int64][]*meta.Segment)
 
-	totalCnt := 0
+	totalCnt := int64(0)
 	for _, nid := range nodes {
 		segments := b.dist.SegmentDistManager.GetByCollectionAndNode(replica.GetCollectionID(), nid)
 		// Only balance segments in targets
@@ -129,9 +129,9 @@ func (b *RowCountBasedBalancer) balanceReplica(replica *meta.Replica) ([]Segment
 			nodesSegments[nid] = segments
 		}
 
-		cnt := 0
+		cnt := int64(0)
 		for _, s := range segments {
-			cnt += int(s.GetNumOfRows())
+			cnt += s.GetNumOfRows()
 		}
 		nodesRowCnt[nid] = cnt
 		totalCnt += cnt
@@ -141,8 +141,8 @@ func (b *RowCountBasedBalancer) balanceReplica(replica *meta.Replica) ([]Segment
 		return b.handleStoppingNodes(replica, stoppingNodesSegments)
 	}
 
-	average := totalCnt / len(nodesSegments)
-	neededRowCnt := 0
+	average := totalCnt / int64(len(nodesSegments))
+	neededRowCnt := int64(0)
 	for nodeID := range nodesSegments {
 		rowcnt := nodesRowCnt[nodeID]
 		if rowcnt < average {
@@ -172,12 +172,12 @@ outer:
 		})
 
 		for _, s := range segments {
-			if rowcnt-int(s.GetNumOfRows()) < average {
+			if rowcnt-s.GetNumOfRows() < average {
 				continue
 			}
-			rowcnt -= int(s.GetNumOfRows())
+			rowcnt -= s.GetNumOfRows()
 			segmentsToMove = append(segmentsToMove, s)
-			neededRowCnt -= int(s.GetNumOfRows())
+			neededRowCnt -= s.GetNumOfRows()
 			if neededRowCnt <= 0 {
 				break outer
 			}
@@ -217,7 +217,7 @@ outer:
 			Weight:    getPlanWeight(s.Node),
 		}
 		plans = append(plans, plan)
-		node.setPriority(node.getPriority() + int(s.GetNumOfRows()))
+		node.setPriority(node.getPriority() + s.GetNumOfRows())
 		queue.push(node)
 	}
 	return plans, b.getChannelPlan(replica, stoppingNodesSegments)
@@ -252,16 +252,16 @@ func (b *RowCountBasedBalancer) handleStoppingNodes(replica *meta.Replica, nodeS
 	return segmentPlans, channelPlans
 }
 
-func (b *RowCountBasedBalancer) collectionStoppingSegments(stoppingNodesSegments map[int64][]*meta.Segment) ([]*meta.Segment, int) {
+func (b *RowCountBasedBalancer) collectionStoppingSegments(stoppingNodesSegments map[int64][]*meta.Segment) ([]*meta.Segment, int64) {
 	var (
 		segments     []*meta.Segment
-		removeRowCnt int
+		removeRowCnt int64
 	)
 
 	for _, stoppingSegments := range stoppingNodesSegments {
 		for _, segment := range stoppingSegments {
 			segments = append(segments, segment)
-			removeRowCnt += int(segment.GetNumOfRows())
+			removeRowCnt += segment.GetNumOfRows()
 		}
 	}
 	return segments, removeRowCnt
@@ -308,7 +308,7 @@ type nodeItem struct {
 	nodeID int64
 }
 
-func newNodeItem(priority int, nodeID int64) nodeItem {
+func newNodeItem(priority int64, nodeID int64) nodeItem {
 	return nodeItem{
 		baseItem: baseItem{
 			priority: priority,

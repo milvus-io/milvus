@@ -124,7 +124,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestAssignSegment() {
 				nodeInfo.SetState(c.states[i])
 				suite.balancer.nodeManager.Add(nodeInfo)
 			}
-			plans := balancer.AssignSegment(c.assignments, c.nodes)
+			plans := balancer.AssignSegment(c.assignments, c.nodes, nil)
 			suite.ElementsMatch(c.expectPlans, plans)
 		})
 	}

@@ -85,6 +85,22 @@ func (m *ChannelDistManager) GetAll() []*DmChannel {
 	return result
 }
 
+// GetShardLeadersByShard returns the nodes which subscribing the given shard,
+// returns nil if not found.
+func (m *ChannelDistManager) GetShardLeadersByShard(shard string) []int64 {
+	m.rwmutex.RLock()
+	defer m.rwmutex.RUnlock()
+	var ret []int64
+	for node, channels := range m.channels {
+		for _, dmc := range channels {
+			if dmc.ChannelName == shard {
+				ret = append(ret, node)
+			}
+		}
+	}
+	return ret
+}
+
 // GetShardLeader returns the node whthin the given replicaNodes and subscribing the given shard,
 // returns (0, false) if not found.
 func (m *ChannelDistManager) GetShardLeader(replica *Replica, shard string) (int64, bool) {

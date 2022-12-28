@@ -69,7 +69,7 @@ type ChannelAssignPlan struct {
 }
 
 type Balance interface {
-	AssignSegment(segments []*meta.Segment, nodes []int64) []SegmentAssignPlan
+	AssignSegment(segments []*meta.Segment, nodes []int64, replica *meta.Replica) []SegmentAssignPlan
 	AssignChannel(channels []*meta.DmChannel, nodes []int64) []ChannelAssignPlan
 	Balance() ([]SegmentAssignPlan, []ChannelAssignPlan)
 }
@@ -79,7 +79,7 @@ type RoundRobinBalancer struct {
 	nodeManager *session.NodeManager
 }
 
-func (b *RoundRobinBalancer) AssignSegment(segments []*meta.Segment, nodes []int64) []SegmentAssignPlan {
+func (b *RoundRobinBalancer) AssignSegment(segments []*meta.Segment, nodes []int64, replica *meta.Replica) []SegmentAssignPlan {
 	nodesInfo := b.getNodes(nodes)
 	if len(nodesInfo) == 0 {
 		return nil

@@ -18,6 +18,7 @@ package balance
 
 import (
 	"context"
+	"math"
 	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -102,4 +103,17 @@ func CreateChannelTasksFromPlans(ctx context.Context, checkerID int64, timeout t
 		ret = append(ret, task)
 	}
 	return ret
+}
+
+func calcVariance(numbers []int64) float64 {
+	var sum, mean, sd float64
+	for _, num := range numbers {
+		sum += float64(num)
+	}
+	n := float64(len(numbers))
+	mean = sum / n
+	for j := 0; j < len(numbers); j++ {
+		sd += math.Pow(float64(numbers[j])-mean, 2)
+	}
+	return math.Sqrt(sd / n)
 }

@@ -21,19 +21,19 @@ import (
 )
 
 type item interface {
-	getPriority() int
-	setPriority(priority int)
+	getPriority() int64
+	setPriority(priority int64)
 }
 
 type baseItem struct {
-	priority int
+	priority int64
 }
 
-func (b *baseItem) getPriority() int {
+func (b *baseItem) getPriority() int64 {
 	return b.priority
 }
 
-func (b *baseItem) setPriority(priority int) {
+func (b *baseItem) setPriority(priority int64) {
 	b.priority = priority
 }
 
