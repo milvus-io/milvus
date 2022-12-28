@@ -1,3 +1,19 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package proxy
 
 import (
@@ -43,6 +59,7 @@ func TestProxy_InvalidateCollectionMetaCache_remove_stream(t *testing.T) {
 func TestProxy_CheckHealth(t *testing.T) {
 	t.Run("not healthy", func(t *testing.T) {
 		node := &Proxy{session: &sessionutil.Session{ServerID: 1}}
+		node.multiRateLimiter = NewMultiRateLimiter()
 		node.stateCode.Store(commonpb.StateCode_Abnormal)
 		ctx := context.Background()
 		resp, err := node.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
@@ -59,6 +76,7 @@ func TestProxy_CheckHealth(t *testing.T) {
 			indexCoord: NewIndexCoordMock(),
 			session:    &sessionutil.Session{ServerID: 1},
 		}
+		node.multiRateLimiter = NewMultiRateLimiter()
 		node.stateCode.Store(commonpb.StateCode_Healthy)
 		ctx := context.Background()
 		resp, err := node.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
@@ -96,11 +114,37 @@ func TestProxy_CheckHealth(t *testing.T) {
 			}),
 			dataCoord:  dataCoordMock,
 			indexCoord: indexCoordMock}
+		node.multiRateLimiter = NewMultiRateLimiter()
 		node.stateCode.Store(commonpb.StateCode_Healthy)
 		ctx := context.Background()
 		resp, err := node.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, false, resp.IsHealthy)
 		assert.Equal(t, 4, len(resp.Reasons))
+	})
+
+	t.Run("check quota state", func(t *testing.T) {
+		node := &Proxy{
+			rootCoord:  NewRootCoordMock(),
+			dataCoord:  NewDataCoordMock(),
+			queryCoord: NewQueryCoordMock(),
+			indexCoord: NewIndexCoordMock(),
+		}
+		node.multiRateLimiter = NewMultiRateLimiter()
+		node.stateCode.Store(commonpb.StateCode_Healthy)
+		resp, err := node.CheckHealth(context.Background(), &milvuspb.CheckHealthRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, true, resp.IsHealthy)
+		assert.Equal(t, 0, len(resp.GetQuotaStates()))
+		assert.Equal(t, 0, len(resp.GetReasons()))
+
+		states := []milvuspb.QuotaState{milvuspb.QuotaState_DenyToWrite, milvuspb.QuotaState_DenyToRead}
+		reasons := []string{"memory quota exhausted", "manually deny to read"}
+		node.multiRateLimiter.SetQuotaStates(states, reasons)
+		resp, err = node.CheckHealth(context.Background(), &milvuspb.CheckHealthRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, true, resp.IsHealthy)
+		assert.Equal(t, 2, len(resp.GetQuotaStates()))
+		assert.Equal(t, 2, len(resp.GetReasons()))
 	})
 }

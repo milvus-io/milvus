@@ -18,10 +18,12 @@ package proxy
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -34,6 +36,8 @@ import (
 type MultiRateLimiter struct {
 	globalRateLimiter *rateLimiter
 	// TODO: add collection level rateLimiter
+	quotaStatesMu sync.RWMutex
+	quotaStates   map[milvuspb.QuotaState]string
 }
 
 // NewMultiRateLimiter returns a new MultiRateLimiter.
@@ -43,14 +47,54 @@ func NewMultiRateLimiter() *MultiRateLimiter {
 	return m
 }
 
-// Limit returns true, the request will be rejected.
-// Otherwise, the request will pass. Limit also returns limit of limiter.
-func (m *MultiRateLimiter) Limit(rt internalpb.RateType, n int) (bool, float64) {
+// Check checks if request would be limited or denied.
+func (m *MultiRateLimiter) Check(rt internalpb.RateType, n int) error {
 	if !Params.QuotaConfig.QuotaAndLimitsEnabled.GetAsBool() {
-		return false, 1 // no limit
+		return nil
 	}
-	// TODO: call other rate limiters
-	return m.globalRateLimiter.limit(rt, n)
+	limit, rate := m.globalRateLimiter.limit(rt, n)
+	if rate == 0 {
+		return wrapForceDenyError(rt, m)
+	}
+	if limit {
+		return wrapRateLimitError()
+	}
+	return nil
+}
+
+// GetQuotaStates returns quota states.
+func (m *MultiRateLimiter) GetQuotaStates() ([]milvuspb.QuotaState, []string) {
+	m.quotaStatesMu.RLock()
+	defer m.quotaStatesMu.RUnlock()
+	states := make([]milvuspb.QuotaState, 0, len(m.quotaStates))
+	reasons := make([]string, 0, len(m.quotaStates))
+	for k, v := range m.quotaStates {
+		states = append(states, k)
+		reasons = append(reasons, v)
+	}
+	return states, reasons
+}
+
+func (m *MultiRateLimiter) GetReadStateReason() string {
+	m.quotaStatesMu.RLock()
+	defer m.quotaStatesMu.RUnlock()
+	return m.quotaStates[milvuspb.QuotaState_DenyToRead]
+}
+
+func (m *MultiRateLimiter) GetWriteStateReason() string {
+	m.quotaStatesMu.RLock()
+	defer m.quotaStatesMu.RUnlock()
+	return m.quotaStates[milvuspb.QuotaState_DenyToWrite]
+}
+
+// SetQuotaStates sets quota states for MultiRateLimiter.
+func (m *MultiRateLimiter) SetQuotaStates(states []milvuspb.QuotaState, reasons []string) {
+	m.quotaStatesMu.Lock()
+	defer m.quotaStatesMu.Unlock()
+	m.quotaStates = make(map[milvuspb.QuotaState]string, len(states))
+	for i := 0; i < len(states); i++ {
+		m.quotaStates[states[i]] = reasons[i]
+	}
 }
 
 // rateLimiter implements Limiter.
@@ -83,7 +127,7 @@ func (rl *rateLimiter) setRates(rates []*internalpb.Rate) error {
 			return fmt.Errorf("unregister rateLimiter for rateType %s", r.GetRt().String())
 		}
 	}
-	rl.printRates(rates)
+	// rl.printRates(rates)
 	return nil
 }
 
