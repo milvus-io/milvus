@@ -19,11 +19,13 @@ package balance
 import (
 	"sort"
 
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/samber/lo"
+	"go.uber.org/zap"
 )
 
 type RowCountBasedBalancer struct {
@@ -117,17 +119,21 @@ func (b *RowCountBasedBalancer) balanceReplica(replica *meta.Replica) ([]Segment
 		segments = lo.Filter(segments, func(segment *meta.Segment, _ int) bool {
 			return b.targetMgr.GetHistoricalSegment(segment.GetCollectionID(), segment.GetID(), meta.CurrentTarget) != nil
 		})
+
+		if isStopping, err := b.nodeManager.IsStoppingNode(nid); err != nil {
+			log.Info("not existed node", zap.Int64("nid", nid), zap.Any("segments", segments), zap.Error(err))
+			continue
+		} else if isStopping {
+			stoppingNodesSegments[nid] = segments
+		} else {
+			nodesSegments[nid] = segments
+		}
+
 		cnt := 0
 		for _, s := range segments {
 			cnt += int(s.GetNumOfRows())
 		}
 		nodesRowCnt[nid] = cnt
-
-		if nodeInfo := b.nodeManager.Get(nid); nodeInfo.IsStoppingState() {
-			stoppingNodesSegments[nid] = segments
-		} else {
-			nodesSegments[nid] = segments
-		}
 		totalCnt += cnt
 	}
 
