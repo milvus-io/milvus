@@ -24,13 +24,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/common"
-
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.etcd.io/etcd/server/v3/etcdserver/api/v3client"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 )
@@ -84,6 +83,40 @@ func (kv *EmbedEtcdKV) Close() {
 // GetPath returns the full path by given key
 func (kv *EmbedEtcdKV) GetPath(key string) string {
 	return path.Join(kv.rootPath, key)
+}
+
+func (kv *EmbedEtcdKV) WalkWithPrefix(prefix string, paginationSize int, fn func([]byte, []byte) error) error {
+	prefix = path.Join(kv.rootPath, prefix)
+	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
+	defer cancel()
+
+	batch := int64(paginationSize)
+	opts := []clientv3.OpOption{
+		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend),
+		clientv3.WithLimit(batch),
+		clientv3.WithRange(clientv3.GetPrefixRangeEnd(prefix)),
+	}
+
+	key := prefix
+	for {
+		resp, err := kv.client.Get(ctx, key, opts...)
+		if err != nil {
+			return err
+		}
+
+		for _, kv := range resp.Kvs {
+			if err = fn(kv.Key, kv.Value); err != nil {
+				return err
+			}
+		}
+
+		if !resp.More {
+			break
+		}
+		// move to next key
+		key = string(append(resp.Kvs[len(resp.Kvs)-1].Key, 0))
+	}
+	return nil
 }
 
 // LoadWithPrefix returns all the keys and values with the given key prefix
