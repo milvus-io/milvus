@@ -89,11 +89,15 @@ func (s *DataNodeServicesSuite) SetupTest() {
 	paramtable.SetNodeID(1)
 }
 
+func (s *DataNodeServicesSuite) TearDownTest() {
+	s.node.Stop()
+	s.node = nil
+}
+
 func (s *DataNodeServicesSuite) TearDownSuite() {
 	s.cancel()
 	err := s.etcdCli.Close()
 	s.Require().NoError(err)
-	s.node.Stop()
 }
 
 func (s *DataNodeServicesSuite) TestNotInUseAPIs() {
