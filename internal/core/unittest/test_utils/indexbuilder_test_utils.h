@@ -98,39 +98,98 @@ get_default_storage_config() {
     return StorageConfig{endpoint, bucketName, accessKey, accessValue, rootPath, "minio", iamEndPoint, useSSL, useIam};
 }
 
+void
+delete_cstorage_config(CStorageConfig config) {
+    delete[] config.address;
+    delete[] config.bucket_name;
+    delete[] config.access_key_id;
+    delete[] config.access_key_value;
+    delete[] config.remote_root_path;
+    delete[] config.storage_type;
+    delete[] config.iam_endpoint;
+}
+
+class TestConfigWrapper {
+ public:
+    TestConfigWrapper() = default;
+
+    TestConfigWrapper(const TestConfigWrapper&) = delete;
+
+    TestConfigWrapper
+    operator=(const TestConfigWrapper&) = delete;
+
+    ~TestConfigWrapper() {
+        delete_cstorage_config(config_);
+    }
+
+ public:
+    static TestConfigWrapper&
+    GetInstance() {
+        // thread-safe enough after c++11
+        static TestConfigWrapper instance;
+        return instance;
+    }
+
+    CStorageConfig
+    get_default_cstorage_config() {
+        auto init = [&] { this->init_default_cstorage_config(); };
+        call_once(once_, init);
+        return config_;
+    }
+
+ private:
+    void
+    init_default_cstorage_config() {
+        char testPath[1000];
+        auto pwd = std::string(getcwd(testPath, sizeof(testPath)));
+        path filepath;
+        auto currentPath = path(pwd);
+        while (!find_file(currentPath, "milvus.yaml", filepath)) {
+            currentPath = currentPath.append("../");
+        }
+        auto configPath = filepath.string();
+        YAML::Node config;
+        config = YAML::LoadFile(configPath);
+        auto minioConfig = config["minio"];
+        auto address = minioConfig["address"].as<std::string>();
+        auto port = minioConfig["port"].as<std::string>();
+        auto endpoint = address + ":" + port;
+        auto accessKey = minioConfig["accessKeyID"].as<std::string>();
+        auto accessValue = minioConfig["secretAccessKey"].as<std::string>();
+        auto rootPath = minioConfig["rootPath"].as<std::string>();
+        auto useSSL = minioConfig["useSSL"].as<bool>();
+        auto useIam = minioConfig["useIAM"].as<bool>();
+        auto iamEndPoint = minioConfig["iamEndpoint"].as<std::string>();
+        auto bucketName = minioConfig["bucketName"].as<std::string>();
+        std::string storage_type = "minio";
+
+        config_.address = new char[address.length() + 1];
+        config_.bucket_name = new char[bucketName.length() + 1];
+        config_.access_key_id = new char[accessKey.length() + 1];
+        config_.access_key_value = new char[accessValue.length() + 1];
+        config_.remote_root_path = new char[rootPath.length() + 1];
+        config_.storage_type = new char[storage_type.length() + 1];
+        config_.iam_endpoint = new char[iamEndPoint.length() + 1];
+        config_.useSSL = useSSL;
+        config_.useIAM = useIam;
+
+        strcpy(const_cast<char*>(config_.address), address.c_str());
+        strcpy(const_cast<char*>(config_.bucket_name), bucketName.c_str());
+        strcpy(const_cast<char*>(config_.access_key_id), accessKey.c_str());
+        strcpy(const_cast<char*>(config_.access_key_value), accessValue.c_str());
+        strcpy(const_cast<char*>(config_.remote_root_path), rootPath.c_str());
+        strcpy(const_cast<char*>(config_.storage_type), storage_type.c_str());
+        strcpy(const_cast<char*>(config_.iam_endpoint), iamEndPoint.c_str());
+    }
+
+ private:
+    CStorageConfig config_;
+    std::once_flag once_;
+};
+
 CStorageConfig
 get_default_cstorage_config() {
-    char testPath[100];
-    auto pwd = std::string(getcwd(testPath, sizeof(testPath)));
-    path filepath;
-    auto currentPath = path(pwd);
-    while (!find_file(currentPath, "milvus.yaml", filepath)) {
-        currentPath = currentPath.append("../");
-    }
-    auto configPath = filepath.string();
-    YAML::Node config;
-    config = YAML::LoadFile(configPath);
-    auto minioConfig = config["minio"];
-    auto address = minioConfig["address"].as<std::string>();
-    auto port = minioConfig["port"].as<std::string>();
-    auto endpoint = address + ":" + port;
-    auto accessKey = minioConfig["accessKeyID"].as<std::string>();
-    auto accessValue = minioConfig["secretAccessKey"].as<std::string>();
-    auto rootPath = minioConfig["rootPath"].as<std::string>();
-    auto useSSL = minioConfig["useSSL"].as<bool>();
-    auto useIam = minioConfig["useIAM"].as<bool>();
-    auto iamEndPoint = minioConfig["iamEndpoint"].as<std::string>();
-    auto bucketName = minioConfig["bucketName"].as<std::string>();
-
-    return CStorageConfig{endpoint.c_str(),
-                          bucketName.c_str(),
-                          accessKey.c_str(),
-                          accessValue.c_str(),
-                          rootPath.c_str(),
-                          "minio",
-                          iamEndPoint.c_str(),
-                          useSSL,
-                          useIam};
+    return TestConfigWrapper::GetInstance().get_default_cstorage_config();
 }
 
 auto

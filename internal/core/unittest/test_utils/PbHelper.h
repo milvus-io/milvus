@@ -9,16 +9,27 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <gtest/gtest.h>
+#pragma once
 
-#include "segcore/segcore_init_c.h"
-#include "test_utils/DataGen.h"
+#include <vector>
+#include <stdint.h>
 
-TEST(Init, Naive) {
-    using namespace milvus;
-    using namespace milvus::segcore;
-    SegcoreInit(nullptr);
-    SegcoreSetChunkRows(32768);
-    auto simd_type = SegcoreSetSimdType("auto");
-    free(simd_type);
+namespace {
+template <typename Message>
+std::vector<uint8_t>
+serialize(const Message* msg) {
+    auto l = msg->ByteSizeLong();
+    std::vector<uint8_t> ret(l);
+    auto ok = msg->SerializeToArray(ret.data(), l);
+    assert(ok);
+    return ret;
 }
+
+template <class Msg>
+std::unique_ptr<Msg>
+clone_msg(const Msg* msg) {
+    std::unique_ptr<Msg> p(msg->New());
+    p->CopyFrom(*msg);
+    return p;
+}
+}  // namespace

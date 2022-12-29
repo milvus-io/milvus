@@ -74,6 +74,7 @@ TEST(FloatVecIndex, All) {
         status = DeleteIndex(copy_index);
         ASSERT_EQ(Success, status.error_code);
     }
+    { DeleteBinarySet(binary_set); }
 }
 
 TEST(BinaryVecIndex, All) {
@@ -125,6 +126,7 @@ TEST(BinaryVecIndex, All) {
         status = DeleteIndex(copy_index);
         ASSERT_EQ(Success, status.error_code);
     }
+    { DeleteBinarySet(binary_set); }
 }
 
 TEST(CBoolIndexTest, All) {
@@ -178,6 +180,7 @@ TEST(CBoolIndexTest, All) {
             status = DeleteIndex(copy_index);
             ASSERT_EQ(Success, status.error_code);
         }
+        { DeleteBinarySet(binary_set); }
     }
 
     delete[](char*) knowhere::GetDatasetTensor(half_ds);
@@ -229,6 +232,7 @@ TEST(CInt64IndexTest, All) {
             status = DeleteIndex(copy_index);
             ASSERT_EQ(Success, status.error_code);
         }
+        { DeleteBinarySet(binary_set); }
     }
 }
 
@@ -282,6 +286,7 @@ TEST(CStringIndexTest, All) {
             status = DeleteIndex(copy_index);
             ASSERT_EQ(Success, status.error_code);
         }
+        { DeleteBinarySet(binary_set); }
     }
 
     delete[](char*) knowhere::GetDatasetTensor(str_ds);
