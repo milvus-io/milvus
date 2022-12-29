@@ -745,6 +745,26 @@ func (suite *ServiceSuite) TestLoadBalanceFailed() {
 		suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.ErrorCode)
 		suite.Contains(resp.Reason, "failed to balance segments")
 		suite.Contains(resp.Reason, task.ErrTaskCanceled.Error())
+
+		suite.meta.ReplicaManager.AddNode(replicas[0].ID, 10)
+		req.SourceNodeIDs = []int64{10}
+		resp, err = server.LoadBalance(ctx, req)
+		suite.NoError(err)
+		suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.ErrorCode)
+
+		req.SourceNodeIDs = []int64{srcNode}
+		req.DstNodeIDs = []int64{10}
+		resp, err = server.LoadBalance(ctx, req)
+		suite.NoError(err)
+		suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.ErrorCode)
+
+		suite.nodeMgr.Add(session.NewNodeInfo(10, "localhost"))
+		suite.nodeMgr.Stopping(10)
+		resp, err = server.LoadBalance(ctx, req)
+		suite.NoError(err)
+		suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.ErrorCode)
+		suite.nodeMgr.Remove(10)
+		suite.meta.ReplicaManager.RemoveNode(replicas[0].ID, 10)
 	}
 }
 

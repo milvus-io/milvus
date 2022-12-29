@@ -444,6 +444,20 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfo
 	}, nil
 }
 
+func (s *Server) isStoppingNode(nodeID int64) error {
+	isStopping, err := s.nodeMgr.IsStoppingNode(nodeID)
+	if err != nil {
+		log.Warn("fail to check whether the node is stopping", zap.Int64("node_id", nodeID), zap.Error(err))
+		return err
+	}
+	if isStopping {
+		msg := fmt.Sprintf("failed to balance due to the source/destination node[%d] is stopping", nodeID)
+		log.Warn(msg)
+		return errors.New(msg)
+	}
+	return nil
+}
+
 func (s *Server) LoadBalance(ctx context.Context, req *querypb.LoadBalanceRequest) (*commonpb.Status, error) {
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
@@ -478,11 +492,19 @@ func (s *Server) LoadBalance(ctx context.Context, req *querypb.LoadBalanceReques
 		log.Warn(msg)
 		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg), nil
 	}
+	if err := s.isStoppingNode(srcNode); err != nil {
+		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError,
+			fmt.Sprintf("can't balance, because the source node[%d] is invalid", srcNode), err), nil
+	}
 	for _, dstNode := range req.GetDstNodeIDs() {
 		if !replica.Nodes.Contain(dstNode) {
 			msg := "destination nodes have to be in the same replica of source node"
 			log.Warn(msg)
 			return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg), nil
+		}
+		if err := s.isStoppingNode(dstNode); err != nil {
+			return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError,
+				fmt.Sprintf("can't balance, because the destination node[%d] is invalid", dstNode), err), nil
 		}
 	}
 
