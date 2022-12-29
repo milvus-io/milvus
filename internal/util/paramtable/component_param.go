@@ -962,6 +962,7 @@ type queryNodeConfig struct {
 	MaxGroupNQ           int64
 	TopKMergeRatio       float64
 	CPURatio             float64
+	MaxTimestampLag      time.Duration
 
 	GCHelperEnabled   bool
 	MinimumGOGCConfig int
@@ -999,6 +1000,8 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 	p.initGCTunerEnbaled()
 	p.initMaximumGOGC()
 	p.initMinimumGOGC()
+
+	p.initMaxTimestampLag()
 }
 
 // InitAlias initializes an alias for the QueryNode role.
@@ -1181,6 +1184,11 @@ func (p *queryNodeConfig) initMinimumGOGC() {
 
 func (p *queryNodeConfig) initMaximumGOGC() {
 	p.MaximumGOGCConfig = p.Base.ParseIntWithDefault("queryNode.gchelper.maximumGoGC", 200)
+}
+
+func (p *queryNodeConfig) initMaxTimestampLag() {
+	maxTsLagSeconds := p.Base.ParseIntWithDefault("queryNode.scheduler.maxTimestampLag", 86400)
+	p.MaxTimestampLag = time.Duration(maxTsLagSeconds) * time.Second
 }
 
 // /////////////////////////////////////////////////////////////////////////////
