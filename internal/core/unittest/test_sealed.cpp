@@ -520,7 +520,7 @@ TEST(Sealed, LoadScalarIndex) {
     LoadFieldDataInfo row_id_info;
     FieldMeta row_id_field_meta(FieldName("RowID"), RowFieldID, DataType::INT64);
     auto array = CreateScalarDataArrayFrom(dataset.row_ids_.data(), N, row_id_field_meta);
-    row_id_info.field_data = array.release();
+    row_id_info.field_data = array.get();
     row_id_info.row_count = dataset.row_ids_.size();
     row_id_info.field_id = RowFieldID.get();  // field id for RowId
     segment->LoadFieldData(row_id_info);
@@ -528,7 +528,7 @@ TEST(Sealed, LoadScalarIndex) {
     LoadFieldDataInfo ts_info;
     FieldMeta ts_field_meta(FieldName("Timestamp"), TimestampFieldID, DataType::INT64);
     array = CreateScalarDataArrayFrom(dataset.timestamps_.data(), N, ts_field_meta);
-    ts_info.field_data = array.release();
+    ts_info.field_data = array.get();
     ts_info.row_count = dataset.timestamps_.size();
     ts_info.field_id = TimestampFieldID.get();
     segment->LoadFieldData(ts_info);

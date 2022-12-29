@@ -190,6 +190,8 @@ func TestSegmentLoader_loadSegmentFieldsData(t *testing.T) {
 		default:
 			panic("unsupported pk type")
 		}
+
+		fieldPk.FieldID = common.StartOfUserFieldID
 		schema := &schemapb.CollectionSchema{
 			Name:   defaultCollectionName,
 			AutoID: true,
@@ -218,6 +220,8 @@ func TestSegmentLoader_loadSegmentFieldsData(t *testing.T) {
 		case schemapb.DataType_BinaryVector:
 			schema.Fields = append(schema.Fields, genVectorFieldSchema(simpleBinVecField))
 		}
+
+		schema.Fields[1].FieldID = common.StartOfUserFieldID + 1
 
 		loader.metaReplica.removeSegment(defaultSegmentID, segmentTypeSealed)
 

@@ -114,8 +114,17 @@ TEST_P(IndexWrapperTest, BuildAndQuery) {
         vec_field_data_type, type_params_str.c_str(), index_params_str.c_str(), storage_config_);
 
     auto dataset = GenDataset(NB, metric_type, is_binary);
-    auto xb_data = dataset.get_col<float>(milvus::FieldId(100));
-    auto xb_dataset = knowhere::GenDataset(NB, DIM, xb_data.data());
+    knowhere::DatasetPtr xb_dataset;
+    std::vector<uint8_t> bin_vecs;
+    std::vector<float> f_vecs;
+    if (is_binary) {
+        bin_vecs = dataset.get_col<uint8_t>(milvus::FieldId(100));
+        xb_dataset = knowhere::GenDataset(NB, DIM, bin_vecs.data());
+    } else {
+        f_vecs = dataset.get_col<float>(milvus::FieldId(100));
+        xb_dataset = knowhere::GenDataset(NB, DIM, f_vecs.data());
+    }
+
     ASSERT_NO_THROW(index->Build(xb_dataset));
     auto binary_set = index->Serialize();
     auto copy_index = milvus::indexbuilder::IndexFactory::GetInstance().CreateIndex(

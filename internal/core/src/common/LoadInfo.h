@@ -31,6 +31,10 @@ struct LoadFieldDataInfo {
     //    const void* blob = nullptr;
     const milvus::DataArray* field_data;
     int64_t row_count = -1;
+
+    // ~LoadFieldDataInfo() {
+    //     delete field_data;
+    // }
 };
 
 struct LoadDeletedRecordInfo {

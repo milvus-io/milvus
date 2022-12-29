@@ -101,11 +101,13 @@ merge_into(int64_t queries,
 TEST(Indexing, SmartBruteForce) {
     int64_t N = 1000;
     auto [raw_data, timestamps, uids] = generate_data<DIM>(N);
-    auto total_count = DIM * K;
+
+    constexpr int64_t queries = 3;
+    auto total_count = queries * K;
+
     auto raw = (const float*)raw_data.data();
     EXPECT_NE(raw, nullptr);
 
-    constexpr int64_t queries = 3;
     auto query_data = raw;
 
     std::vector<int64_t> final_uids(total_count, -1);
