@@ -1041,6 +1041,7 @@ type queryNodeConfig struct {
 	MaxGroupNQ           ParamItem `refreshable:"true"`
 	TopKMergeRatio       ParamItem `refreshable:"true"`
 	CPURatio             ParamItem `refreshable:"true"`
+	MaxTimestampLag      ParamItem `refreshable:"true"`
 
 	GCHelperEnabled     ParamItem `refreshable:"false"`
 	MinimumGOGCConfig   ParamItem `refreshable:"false"`
@@ -1253,6 +1254,13 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		},
 	}
 	p.MaxDiskUsagePercentage.Init(base.mgr)
+
+	p.MaxTimestampLag = ParamItem{
+		Key:          "queryNode.scheduler.maxTimestampLag",
+		Version:      "2.2.3",
+		DefaultValue: "86400",
+	}
+	p.MaxTimestampLag.Init(base.mgr)
 
 	p.GCHelperEnabled = ParamItem{
 		Key:          "queryNode.gchelper.enabled",

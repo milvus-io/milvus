@@ -19,14 +19,24 @@ package querynode
 import (
 	"errors"
 	"fmt"
+	"time"
 )
 
 var (
+	// ErrShardNotAvailable shard not available error base.
 	ErrShardNotAvailable = errors.New("ShardNotAvailable")
+	// ErrTsLagTooLarge serviceable and guarantee lag too large.
+	ErrTsLagTooLarge = errors.New("Timestamp lag too large")
 )
 
+// WrapErrShardNotAvailable wraps ErrShardNotAvailable with replica id and channel name.
 func WrapErrShardNotAvailable(replicaID int64, shard string) error {
 	return fmt.Errorf("%w(replica=%d, shard=%s)", ErrShardNotAvailable, replicaID, shard)
+}
+
+// WrapErrTsLagTooLarge wraps ErrTsLagTooLarge with lag and max value.
+func WrapErrTsLagTooLarge(duration time.Duration, maxLag time.Duration) error {
+	return fmt.Errorf("%w lag(%s) max(%s)", ErrTsLagTooLarge, duration, maxLag)
 }
 
 // msgQueryNodeIsUnhealthy is the error msg of unhealthy query node
