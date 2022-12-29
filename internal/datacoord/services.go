@@ -124,7 +124,7 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.Int64s("sealSegments", sealedSegmentIDs),
 		zap.Int64s("flushSegments", flushSegmentIDs),
-		zap.Int64("timeOfSeal", timeOfSeal.Unix()))
+		zap.Time("timeOfSeal", timeOfSeal))
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 	resp.DbID = req.GetDbID()
 	resp.CollectionID = req.GetCollectionID()
@@ -1136,7 +1136,7 @@ func (s *Server) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateR
 	}
 
 	if len(unflushed) != 0 {
-		log.Info("DataCoord receive GetFlushState request, Flushed is false", zap.Int64s("segmentIDs", unflushed), zap.Int("len", len(unflushed)))
+		log.RatedInfo(10, "DataCoord receive GetFlushState request, Flushed is false", zap.Int64s("segmentIDs", unflushed), zap.Int("len", len(unflushed)))
 		resp.Flushed = false
 	} else {
 		log.Info("DataCoord receive GetFlushState request, Flushed is true", zap.Int64s("segmentIDs", req.GetSegmentIDs()), zap.Int("len", len(req.GetSegmentIDs())))
