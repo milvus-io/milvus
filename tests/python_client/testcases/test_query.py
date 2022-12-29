@@ -748,7 +748,7 @@ class TestQueryParams(TestcaseBase):
         expected: verify query result
         """
         # init collection with fields: int64, float, float_vec
-        collection_w, vectors = self.init_collection_general(prefix, insert_data=True, is_index=True)[0:2]
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True, is_index=False)[0:2]
         df = vectors[0]
 
         # query with output_fields=["*", float_vector)
@@ -1287,7 +1287,7 @@ class TestQueryOperation(TestcaseBase):
                 3. query
         expected: query result is correct
         """
-        collection_w, vectors, binary_raw_vectors = self.init_collection_general(prefix, insert_data=True, is_index=True)[0:3]
+        collection_w, vectors, binary_raw_vectors = self.init_collection_general(prefix, insert_data=True, is_index=False)[0:3]
 
         default_field_name = ct.default_float_vec_field_name
         collection_w.create_index(default_field_name, default_index_params)
@@ -1354,7 +1354,7 @@ class TestQueryOperation(TestcaseBase):
         method: create index and specify vec field as output field
         expected: return primary field and vec field
         """
-        collection_w, vectors = self.init_collection_general(prefix, insert_data=True, is_binary=True, is_index=True)[0:2]
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True, is_binary=True, is_index=False)[0:2]
         fields = [ct.default_int64_field_name, ct.default_binary_vec_field_name]
         collection_w.create_index(ct.default_binary_vec_field_name, binary_index_params)
         assert collection_w.has_index()[0]
@@ -1538,7 +1538,7 @@ class TestqueryString(TestcaseBase):
         method: query string expr with binary
         expected: verify query successfully
         """
-        collection_w, vectors= self.init_collection_general(prefix, insert_data=True, is_binary=True, is_index=True)[0:2]
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True, is_binary=True, is_index=False)[0:2]
         collection_w.create_index(ct.default_binary_vec_field_name, binary_index_params)
         collection_w.load()
         assert collection_w.has_index()[0]
@@ -1685,7 +1685,7 @@ class TestqueryString(TestcaseBase):
         expected: query successfully
         """
         # 1.  create a collection
-        collection_w, vectors = self.init_collection_general(prefix, insert_data=False, is_index=True)[0:2]
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=False, is_index=False)[0:2]
         
         nb = 3000
         df = cf.gen_default_list_data(nb)
@@ -1712,7 +1712,7 @@ class TestqueryString(TestcaseBase):
         method: create a collection and build diskann index 
         expected: verify query result
         """
-        collection_w, vectors = self.init_collection_general(prefix, insert_data=True, is_index=True)[0:2]
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True, is_index=False)[0:2]
     
         collection_w.create_index(ct.default_float_vec_field_name, ct.default_diskann_index)
         assert collection_w.has_index()[0]
@@ -1731,7 +1731,7 @@ class TestqueryString(TestcaseBase):
         method: create a collection with string pk and build diskann index 
         expected: verify query result
         """
-        collection_w, vectors = self.init_collection_general(prefix, insert_data=True,  primary_field=ct.default_string_field_name, is_index=True)[0:2]
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True,  primary_field=ct.default_string_field_name, is_index=False)[0:2]
         collection_w.create_index(ct.default_float_vec_field_name, ct.default_diskann_index)
         assert collection_w.has_index()[0]
         collection_w.load()
@@ -1750,7 +1750,7 @@ class TestqueryString(TestcaseBase):
         expected: query successfully
         """
         # 1.  create a collection
-        collection_w, vectors = self.init_collection_general(prefix, insert_data=False, is_index=True)[0:2]
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=False, is_index=False)[0:2]
         
         nb = 3000
         df = cf.gen_default_list_data(nb)

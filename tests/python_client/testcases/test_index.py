@@ -222,7 +222,7 @@ class TestIndexOperation(TestcaseBase):
         method: create two different indexes with default index name
         expected: create successfully
         """
-        collection_w = self.init_collection_general(prefix, True, is_index=True)[0]
+        collection_w = self.init_collection_general(prefix, True, is_index=False)[0]
         default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
         collection_w.create_index(default_field_name, default_index)
         collection_w.create_index(ct.default_int64_field_name, {})
@@ -234,7 +234,7 @@ class TestIndexOperation(TestcaseBase):
         method: create index on scalar field and load
         expected: raise exception
         """
-        collection_w = self.init_collection_general(prefix, True, is_index=True)[0]
+        collection_w = self.init_collection_general(prefix, True, is_index=False)[0]
         collection_w.create_index(ct.default_int64_field_name, {})
         collection_w.load(check_task=CheckTasks.err_res,
                           check_items={ct.err_code: 1, ct.err_msg: "there is no vector index on collection, "
@@ -1255,7 +1255,7 @@ class TestIndexInvalid(TestcaseBase):
                 2. drop the index
         expected: raise exception
         """
-        collection_w = self.init_collection_general(prefix, True, is_index=True)[0]
+        collection_w = self.init_collection_general(prefix, True, is_index=False)[0]
         default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
         collection_w.create_index("float_vector", default_index)
         collection_w.load()
@@ -1273,7 +1273,7 @@ class TestIndexInvalid(TestcaseBase):
                 2. set annoy index param n_trees type invalid(not int)
         expected: raise exception
         """
-        collection_w = self.init_collection_general(prefix, True, is_index=True)[0]
+        collection_w = self.init_collection_general(prefix, True, is_index=False)[0]
         index_annoy = {"index_type": "ANNOY", "params": {"n_trees": n_trees}, "metric_type": "L2"}
         collection_w.create_index("float_vector", index_annoy,
                                   check_task=CheckTasks.err_res,

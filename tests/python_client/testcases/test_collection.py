@@ -2573,7 +2573,7 @@ class TestLoadCollection(TestcaseBase):
         method: create a collection without index, then load
         expected: raise exception
         """
-        collection_w = self.init_collection_general(prefix, True, is_index=True)[0]
+        collection_w = self.init_collection_general(prefix, True, is_index=False)[0]
         collection_w.load(check_task=CheckTasks.err_res,
                           check_items={"err_code": 1,
                                        "err_msg": "index not exist"})
@@ -2611,7 +2611,7 @@ class TestReleaseAdvanced(TestcaseBase):
         """
         self._connect()
         partition_num = 1
-        collection_w = self.init_collection_general(prefix, True, 10, partition_num, is_index=True)[0]
+        collection_w = self.init_collection_general(prefix, True, 10, partition_num, is_index=False)[0]
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         par = collection_w.partitions
         par_name = par[partition_num].name
@@ -2637,7 +2637,7 @@ class TestReleaseAdvanced(TestcaseBase):
         """
         self._connect()
         partition_num = 1
-        collection_w = self.init_collection_general(prefix, True, 10, partition_num, is_index=True)[0]
+        collection_w = self.init_collection_general(prefix, True, 10, partition_num, is_index=False)[0]
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         par = collection_w.partitions
         par_name = par[partition_num].name
@@ -2692,7 +2692,7 @@ class TestLoadPartition(TestcaseBase):
         self._connect()
         partition_num = 1
         collection_w = self.init_collection_general(prefix, True, ct.default_nb, partition_num,
-                                                    is_binary=True, is_index=True)[0]
+                                                    is_binary=True, is_index=False)[0]
 
         # for metric_type in ct.binary_metrics:
         binary_index["metric_type"] = metric_type
