@@ -230,6 +230,10 @@ queryNode:
     # Max read concurrency must greater than or equal to 1, and less than or equal to runtime.NumCPU * 100.
     maxReadConcurrentRatio: 2.0 # (0, 100]
     cpuRatio: 10.0 # ratio used to estimate read task cpu usage.
+    # maxTimestampLag is the max ts lag between serviceable and guarantee timestamp.
+    # if the lag is larger than this config, scheduler will return error without waiting.
+    # the valid value is [3600, infinite)
+    maxTimestampLag: 86400
 
   grouping:
     enabled: true

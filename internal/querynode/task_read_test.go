@@ -6,7 +6,10 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -30,6 +33,7 @@ func (s *baseReadTaskSuite) SetupSuite() {
 	lcm := &mocks.ChunkManager{}
 
 	tsafe := &MockTSafeReplicaInterface{}
+	s.tsafe = tsafe
 
 	qs, err := newQueryShard(context.Background(), defaultCollectionID, defaultDMLChannel, defaultReplicaID, nil, meta, tsafe, lcm, rcm, false)
 	s.Require().NoError(err)
@@ -107,7 +111,49 @@ func (s *baseReadTaskSuite) TestTimeoutError() {
 
 		s.Assert().ErrorIs(s.task.TimeoutError(), context.DeadlineExceeded)
 	})
+}
 
+func (s *baseReadTaskSuite) TestReady() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s.task.ctx = ctx
+	baseTime := time.Now()
+	serviceable := tsoutil.ComposeTSByTime(baseTime, 0)
+	s.tsafe.EXPECT().getTSafe(mock.AnythingOfType("string")).Return(serviceable, nil)
+	s.Run("lag too large", func() {
+		tooLargeGuarantee := baseTime.Add(Params.QueryNodeCfg.MaxTimestampLag.GetAsDuration(time.Second)).Add(time.Second)
+		guaranteeTs := tsoutil.ComposeTSByTime(tooLargeGuarantee, 0)
+		s.task.GuaranteeTimestamp = guaranteeTs
+		s.task.DataScope = querypb.DataScope_Historical
+
+		ready, err := s.task.Ready()
+		s.False(ready)
+		s.Error(err)
+		s.ErrorIs(err, ErrTsLagTooLarge)
+	})
+
+	s.Run("not ready", func() {
+		guarantee := baseTime.Add(Params.QueryNodeCfg.MaxTimestampLag.GetAsDuration(time.Second)).Add(-time.Second)
+		guaranteeTs := tsoutil.ComposeTSByTime(guarantee, 0)
+		s.task.GuaranteeTimestamp = guaranteeTs
+		s.task.DataScope = querypb.DataScope_Historical
+
+		ready, err := s.task.Ready()
+		s.False(ready)
+		s.NoError(err)
+	})
+
+	s.Run("ready", func() {
+		guarantee := baseTime.Add(-time.Second)
+		guaranteeTs := tsoutil.ComposeTSByTime(guarantee, 0)
+		s.task.GuaranteeTimestamp = guaranteeTs
+		s.task.DataScope = querypb.DataScope_Historical
+
+		ready, err := s.task.Ready()
+		s.True(ready)
+		s.NoError(err)
+	})
 }
 
 func TestBaseReadTask(t *testing.T) {
