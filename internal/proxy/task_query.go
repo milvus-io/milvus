@@ -336,6 +336,8 @@ func (t *queryTask) Execute(ctx context.Context) error {
 	if err != nil {
 		log.Warn("invalid shard leaders cache, updating shardleader caches and retry query",
 			zap.Error(err))
+		// invalidate cache first, since ctx may be canceled or timeout here
+		globalMetaCache.ClearShards(t.collectionName)
 		err = executeQuery(WithoutCache)
 	}
 	if err != nil {

@@ -410,6 +410,8 @@ func (t *searchTask) Execute(ctx context.Context) error {
 	if err != nil {
 		log.Warn("first search failed, updating shardleader caches and retry search",
 			zap.Error(err))
+		// invalidate cache first, since ctx may be canceled or timeout here
+		globalMetaCache.ClearShards(t.collectionName)
 		err = executeSearch(WithoutCache)
 	}
 	if err != nil {
