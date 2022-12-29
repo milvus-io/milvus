@@ -54,6 +54,7 @@ func (pi *ParamItem) get() (string, error) {
 	if err != nil {
 		ret = pi.DefaultValue
 	}
+	// test
 	if pi.Formatter != nil {
 		ret = pi.Formatter(ret)
 	}
