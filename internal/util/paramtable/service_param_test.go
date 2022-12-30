@@ -110,7 +110,14 @@ func TestServiceParam(t *testing.T) {
 		Params := SParams.PulsarCfg
 
 		assert.Equal(t, "", Params.AuthPlugin.GetValue())
-		assert.Equal(t, "", Params.AuthParams.GetValue())
+		assert.Equal(t, "{}", Params.AuthParams.GetValue())
+	})
+
+	t.Run("test pulsar auth config formatter", func(t *testing.T) {
+		Params := SParams.PulsarCfg
+
+		assert.Equal(t, "{}", Params.AuthParams.Formatter(""))
+		assert.Equal(t, "{\"a\":\"b\"}", Params.AuthParams.Formatter("a:b"))
 	})
 
 	t.Run("test pulsar tenant/namespace config", func(t *testing.T) {

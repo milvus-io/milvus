@@ -414,9 +414,6 @@ func (p *PulsarConfig) Init(base *BaseTable) {
 				}
 			}
 
-			if len(jsonMap) == 0 {
-				return ""
-			}
 			jsonData, _ := json.Marshal(&jsonMap)
 			return string(jsonData)
 		},
