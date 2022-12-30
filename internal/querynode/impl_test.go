@@ -212,6 +212,54 @@ func TestImpl_UnsubDmChannel(t *testing.T) {
 	node, err := genSimpleQueryNode(ctx)
 	assert.NoError(t, err)
 
+	t.Run("normal run", func(t *testing.T) {
+		schema := genTestCollectionSchema()
+		req := &queryPb.WatchDmChannelsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:  commonpb.MsgType_WatchDmChannels,
+				MsgID:    rand.Int63(),
+				TargetID: node.session.ServerID,
+			},
+			NodeID:       0,
+			CollectionID: defaultCollectionID,
+			PartitionIDs: []UniqueID{defaultPartitionID},
+			Schema:       schema,
+			Infos: []*datapb.VchannelInfo{
+				{
+					CollectionID: 1000,
+					ChannelName:  "1000-dmc0",
+				},
+			},
+		}
+
+		status, err := node.WatchDmChannels(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+
+		{
+			req := &queryPb.UnsubDmChannelRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:  commonpb.MsgType_UnsubDmChannel,
+					MsgID:    rand.Int63(),
+					TargetID: node.session.ServerID,
+				},
+				NodeID:       0,
+				CollectionID: defaultCollectionID,
+				ChannelName:  "1000-dmc0",
+			}
+			originMetaReplica := node.metaReplica
+			node.metaReplica = newMockReplicaInterface()
+			status, err := node.UnsubDmChannel(ctx, req)
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
+
+			node.metaReplica = originMetaReplica
+			status, err = node.UnsubDmChannel(ctx, req)
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+		}
+	})
+
 	t.Run("target not match", func(t *testing.T) {
 		req := &queryPb.UnsubDmChannelRequest{
 			Base: &commonpb.MsgBase{
