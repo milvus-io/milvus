@@ -351,6 +351,11 @@ func (s *Server) DescribeCollection(ctx context.Context, in *milvuspb.DescribeCo
 	return s.rootCoord.DescribeCollection(ctx, in)
 }
 
+// DescribeCollectionInternal gets meta info of a collection
+func (s *Server) DescribeCollectionInternal(ctx context.Context, in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+	return s.rootCoord.DescribeCollectionInternal(ctx, in)
+}
+
 // ShowCollections gets all collections
 func (s *Server) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
 	return s.rootCoord.ShowCollections(ctx, in)
@@ -374,6 +379,11 @@ func (s *Server) HasPartition(ctx context.Context, in *milvuspb.HasPartitionRequ
 // ShowPartitions gets all partitions for the specified collection.
 func (s *Server) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
 	return s.rootCoord.ShowPartitions(ctx, in)
+}
+
+// ShowPartitionsInternal gets all partitions for the specified collection.
+func (s *Server) ShowPartitionsInternal(ctx context.Context, in *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
+	return s.rootCoord.ShowPartitionsInternal(ctx, in)
 }
 
 // AllocTimestamp global timestamp allocator

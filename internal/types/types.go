@@ -507,6 +507,10 @@ type RootCoord interface {
 	// error is always nil
 	DescribeCollection(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error)
 
+	// DescribeCollectionInternal same to DescribeCollection, only used in internal RPC.
+	// Besides, it'll also return unavailable collection, for example, creating, dropping.
+	DescribeCollectionInternal(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error)
+
 	// ShowCollections notifies RootCoord to list all collection names and other info in database at specified timestamp
 	//
 	// ctx is the context to control request deadline and cancellation
@@ -570,6 +574,9 @@ type RootCoord interface {
 	// created times, created UTC times, and so on.
 	// error is always nil
 	ShowPartitions(ctx context.Context, req *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error)
+
+	// ShowPartitionsInternal same to ShowPartitions, but will return unavailable resources and only used in internal.
+	ShowPartitionsInternal(ctx context.Context, req *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error)
 
 	// CreateIndex notifies RootCoord to create an index for the specified field in the collection
 	//

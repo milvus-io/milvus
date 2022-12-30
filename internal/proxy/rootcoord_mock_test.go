@@ -495,6 +495,10 @@ func (coord *RootCoordMock) DescribeCollection(ctx context.Context, req *milvusp
 	}, nil
 }
 
+func (coord *RootCoordMock) DescribeCollectionInternal(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+	return coord.DescribeCollection(ctx, req)
+}
+
 func (coord *RootCoordMock) ShowCollections(ctx context.Context, req *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
 	code := coord.state.Load().(commonpb.StateCode)
 	if code != commonpb.StateCode_Healthy {
@@ -718,6 +722,10 @@ func (coord *RootCoordMock) ShowPartitions(ctx context.Context, req *milvuspb.Sh
 		CreatedUtcTimestamps: createdUtcTimestamps,
 		InMemoryPercentages:  nil,
 	}, nil
+}
+
+func (coord *RootCoordMock) ShowPartitionsInternal(ctx context.Context, req *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
+	return coord.ShowPartitions(ctx, req)
 }
 
 //func (coord *RootCoordMock) CreateIndex(ctx context.Context, req *milvuspb.CreateIndexRequest) (*commonpb.Status, error) {
@@ -1167,11 +1175,19 @@ func (m *mockRootCoord) DescribeCollection(ctx context.Context, request *milvusp
 	return nil, errors.New("mock")
 }
 
+func (m *mockRootCoord) DescribeCollectionInternal(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+	return m.DescribeCollection(ctx, request)
+}
+
 func (m *mockRootCoord) ShowPartitions(ctx context.Context, request *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
 	if m.ShowPartitionsFunc != nil {
 		return m.ShowPartitionsFunc(ctx, request)
 	}
 	return nil, errors.New("mock")
+}
+
+func (m *mockRootCoord) ShowPartitionsInternal(ctx context.Context, request *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
+	return m.ShowPartitions(ctx, request)
 }
 
 func (m *mockRootCoord) ShowSegments(ctx context.Context, request *milvuspb.ShowSegmentsRequest) (*milvuspb.ShowSegmentsResponse, error) {

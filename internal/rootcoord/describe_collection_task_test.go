@@ -78,7 +78,7 @@ func Test_describeCollectionTask_Execute(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		meta := newMockMetaTable()
-		meta.GetCollectionByIDFunc = func(ctx context.Context, collectionID UniqueID, ts Timestamp) (*model.Collection, error) {
+		meta.GetCollectionByIDFunc = func(ctx context.Context, collectionID UniqueID, ts Timestamp, allowUnavailable bool) (*model.Collection, error) {
 			return &model.Collection{
 				CollectionID: 1,
 				Name:         "test coll",

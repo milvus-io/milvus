@@ -72,7 +72,7 @@ type IMetaTable interface {
 	ChangeCollectionState(ctx context.Context, collectionID UniqueID, state pb.CollectionState, ts Timestamp) error
 	RemoveCollection(ctx context.Context, collectionID UniqueID, ts Timestamp) error
 	GetCollectionByName(ctx context.Context, collectionName string, ts Timestamp) (*model.Collection, error)
-	GetCollectionByID(ctx context.Context, collectionID UniqueID, ts Timestamp) (*model.Collection, error)
+	GetCollectionByID(ctx context.Context, collectionID UniqueID, ts Timestamp, allowUnavailable bool) (*model.Collection, error)
 	ListCollections(ctx context.Context, ts Timestamp) ([]*model.Collection, error)
 	ListAbnormalCollections(ctx context.Context, ts Timestamp) ([]*model.Collection, error)
 	ListCollectionPhysicalChannels() map[typeutil.UniqueID][]string
@@ -304,18 +304,24 @@ func filterUnavailable(coll *model.Collection) *model.Collection {
 }
 
 // getLatestCollectionByIDInternal should be called with ts = typeutil.MaxTimestamp
-func (mt *MetaTable) getLatestCollectionByIDInternal(ctx context.Context, collectionID UniqueID) (*model.Collection, error) {
+func (mt *MetaTable) getLatestCollectionByIDInternal(ctx context.Context, collectionID UniqueID, allowAvailable bool) (*model.Collection, error) {
 	coll, ok := mt.collID2Meta[collectionID]
-	if !ok || coll == nil || !coll.Available() {
+	if !ok || coll == nil {
+		return nil, common.NewCollectionNotExistError(fmt.Sprintf("can't find collection: %d", collectionID))
+	}
+	if allowAvailable {
+		return coll.Clone(), nil
+	}
+	if !coll.Available() {
 		return nil, common.NewCollectionNotExistError(fmt.Sprintf("can't find collection: %d", collectionID))
 	}
 	return filterUnavailable(coll), nil
 }
 
 // getCollectionByIDInternal get collection by collection id without lock.
-func (mt *MetaTable) getCollectionByIDInternal(ctx context.Context, collectionID UniqueID, ts Timestamp) (*model.Collection, error) {
+func (mt *MetaTable) getCollectionByIDInternal(ctx context.Context, collectionID UniqueID, ts Timestamp, allowUnavailable bool) (*model.Collection, error) {
 	if isMaxTs(ts) {
-		return mt.getLatestCollectionByIDInternal(ctx, collectionID)
+		return mt.getLatestCollectionByIDInternal(ctx, collectionID, allowUnavailable)
 	}
 
 	var coll *model.Collection
@@ -331,7 +337,16 @@ func (mt *MetaTable) getCollectionByIDInternal(ctx context.Context, collectionID
 		}
 	}
 
-	if coll == nil || !coll.Available() {
+	if coll == nil {
+		// use coll.Name to match error message of regression. TODO: remove this after error code is ready.
+		return nil, common.NewCollectionNotExistError(fmt.Sprintf("can't find collection: %s", coll.Name))
+	}
+
+	if allowUnavailable {
+		return coll.Clone(), nil
+	}
+
+	if !coll.Available() {
 		// use coll.Name to match error message of regression. TODO: remove this after error code is ready.
 		return nil, common.NewCollectionNotExistError(fmt.Sprintf("can't find collection: %s", coll.Name))
 	}
@@ -347,12 +362,12 @@ func (mt *MetaTable) GetCollectionByName(ctx context.Context, collectionName str
 
 	collectionID, ok := mt.collAlias2ID[collectionName]
 	if ok {
-		return mt.getCollectionByIDInternal(ctx, collectionID, ts)
+		return mt.getCollectionByIDInternal(ctx, collectionID, ts, false)
 	}
 
 	collectionID, ok = mt.collName2ID[collectionName]
 	if ok {
-		return mt.getCollectionByIDInternal(ctx, collectionID, ts)
+		return mt.getCollectionByIDInternal(ctx, collectionID, ts, false)
 	}
 
 	if isMaxTs(ts) {
@@ -371,11 +386,11 @@ func (mt *MetaTable) GetCollectionByName(ctx context.Context, collectionName str
 	return filterUnavailable(coll), nil
 }
 
-func (mt *MetaTable) GetCollectionByID(ctx context.Context, collectionID UniqueID, ts Timestamp) (*model.Collection, error) {
+func (mt *MetaTable) GetCollectionByID(ctx context.Context, collectionID UniqueID, ts Timestamp, allowUnavailable bool) (*model.Collection, error) {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
 
-	return mt.getCollectionByIDInternal(ctx, collectionID, ts)
+	return mt.getCollectionByIDInternal(ctx, collectionID, ts, allowUnavailable)
 }
 
 func (mt *MetaTable) ListCollections(ctx context.Context, ts Timestamp) ([]*model.Collection, error) {

@@ -97,6 +97,10 @@ func (m *GrpcRootCoordClient) DescribeCollection(ctx context.Context, in *milvus
 	return &milvuspb.DescribeCollectionResponse{}, m.Err
 }
 
+func (m *GrpcRootCoordClient) DescribeCollectionInternal(ctx context.Context, in *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
+	return &milvuspb.DescribeCollectionResponse{}, m.Err
+}
+
 func (m *GrpcRootCoordClient) CreateAlias(ctx context.Context, in *milvuspb.CreateAliasRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }
@@ -126,6 +130,10 @@ func (m *GrpcRootCoordClient) HasPartition(ctx context.Context, in *milvuspb.Has
 }
 
 func (m *GrpcRootCoordClient) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowPartitionsResponse, error) {
+	return &milvuspb.ShowPartitionsResponse{}, m.Err
+}
+
+func (m *GrpcRootCoordClient) ShowPartitionsInternal(ctx context.Context, in *milvuspb.ShowPartitionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowPartitionsResponse, error) {
 	return &milvuspb.ShowPartitionsResponse{}, m.Err
 }
 
