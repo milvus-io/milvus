@@ -123,6 +123,10 @@ func getPrimaryKeysFromExpr(schema *schemapb.CollectionSchema, expr string) (res
 		return res, 0, fmt.Errorf("invalid plan node type, only pk in [1, 2] supported")
 	}
 
+	if !termExpr.TermExpr.GetColumnInfo().GetIsPrimaryKey() {
+		return res, 0, fmt.Errorf("invalid expression, we only support to delete by pk, expr: %s", expr)
+	}
+
 	res = &schemapb.IDs{}
 	rowNum = int64(len(termExpr.TermExpr.Values))
 	switch termExpr.TermExpr.ColumnInfo.GetDataType() {
