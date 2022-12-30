@@ -115,10 +115,10 @@ func TestQuotaCenter(t *testing.T) {
 
 	t.Run("test forceDeny", func(t *testing.T) {
 		quotaCenter := NewQuotaCenter(pcm, &queryCoordMockForQuota{}, &dataCoordMockForQuota{}, core.tsoAllocator)
-		quotaCenter.forceDenyReading(ManualForceDeny)
+		quotaCenter.forceDenyReading(ManuallyDenyToRead)
 		assert.Equal(t, Limit(0), quotaCenter.currentRates[internalpb.RateType_DQLQuery])
 		assert.Equal(t, Limit(0), quotaCenter.currentRates[internalpb.RateType_DQLQuery])
-		quotaCenter.forceDenyWriting(ManualForceDeny)
+		quotaCenter.forceDenyWriting(ManuallyDenyToWrite)
 		assert.Equal(t, Limit(0), quotaCenter.currentRates[internalpb.RateType_DMLInsert])
 		assert.Equal(t, Limit(0), quotaCenter.currentRates[internalpb.RateType_DMLDelete])
 	})
@@ -441,8 +441,17 @@ func TestQuotaCenter(t *testing.T) {
 	t.Run("test setRates", func(t *testing.T) {
 		quotaCenter := NewQuotaCenter(pcm, &queryCoordMockForQuota{}, &dataCoordMockForQuota{}, core.tsoAllocator)
 		quotaCenter.currentRates[internalpb.RateType_DMLInsert] = 100
+		quotaCenter.quotaStates[milvuspb.QuotaState_DenyToWrite] = TriggerReasonString[MemoryQuotaExhausted]
+		quotaCenter.quotaStates[milvuspb.QuotaState_DenyToRead] = TriggerReasonString[ManuallyDenyToRead]
 		err = quotaCenter.setRates()
 		assert.NoError(t, err)
+	})
+
+	t.Run("test recordMetrics", func(t *testing.T) {
+		quotaCenter := NewQuotaCenter(pcm, &queryCoordMockForQuota{}, &dataCoordMockForQuota{}, core.tsoAllocator)
+		quotaCenter.quotaStates[milvuspb.QuotaState_DenyToWrite] = TriggerReasonString[MemoryQuotaExhausted]
+		quotaCenter.quotaStates[milvuspb.QuotaState_DenyToRead] = TriggerReasonString[ManuallyDenyToRead]
+		quotaCenter.recordMetrics()
 	})
 
 	t.Run("test guaranteeMinRate", func(t *testing.T) {

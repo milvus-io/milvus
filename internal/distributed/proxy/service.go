@@ -684,6 +684,10 @@ func (s *Server) Delete(ctx context.Context, request *milvuspb.DeleteRequest) (*
 	return s.proxy.Delete(ctx, request)
 }
 
+func (s *Server) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) (*milvuspb.MutationResult, error) {
+	panic("TODO: not implement")
+}
+
 func (s *Server) Search(ctx context.Context, request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 	return s.proxy.Search(ctx, request)
 }

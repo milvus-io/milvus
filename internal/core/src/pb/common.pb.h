@@ -163,6 +163,7 @@ enum ErrorCode : int {
   ForceDeny = 48,
   RateLimit = 49,
   NodeIDNotMatch = 50,
+  UpsertAutoIDTrue = 51,
   DataCoordNA = 100,
   DDRequestRace = 1000,
   ErrorCode_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
@@ -308,6 +309,7 @@ enum MsgType : int {
   Delete = 401,
   Flush = 402,
   ResendSegmentStats = 403,
+  Upsert = 404,
   Search = 500,
   SearchResult = 501,
   GetIndexState = 502,
@@ -538,12 +540,13 @@ enum ObjectPrivilege : int {
   PrivilegeSelectOwnership = 22,
   PrivilegeManageOwnership = 23,
   PrivilegeSelectUser = 24,
+  PrivilegeUpsert = 25,
   ObjectPrivilege_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::min(),
   ObjectPrivilege_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<::PROTOBUF_NAMESPACE_ID::int32>::max()
 };
 bool ObjectPrivilege_IsValid(int value);
 constexpr ObjectPrivilege ObjectPrivilege_MIN = PrivilegeAll;
-constexpr ObjectPrivilege ObjectPrivilege_MAX = PrivilegeSelectUser;
+constexpr ObjectPrivilege ObjectPrivilege_MAX = PrivilegeUpsert;
 constexpr int ObjectPrivilege_ARRAYSIZE = ObjectPrivilege_MAX + 1;
 
 const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* ObjectPrivilege_descriptor();

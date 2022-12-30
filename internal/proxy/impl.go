@@ -2128,6 +2128,10 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 	return it.result, nil
 }
 
+func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) (*milvuspb.MutationResult, error) {
+	panic("TODO: not implement")
+}
+
 // Delete delete records from collection, then these records cannot be searched.
 func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) (*milvuspb.MutationResult, error) {
 	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-Delete")
@@ -4185,6 +4189,13 @@ func (node *Proxy) SetRates(ctx context.Context, request *proxypb.SetRatesReques
 		resp.Reason = err.Error()
 		return resp, nil
 	}
+	node.multiRateLimiter.SetQuotaStates(request.GetStates(), request.GetStateReasons())
+	log.Info("current rates in proxy", zap.Int64("proxyNodeID", paramtable.GetNodeID()), zap.Any("rates", request.GetRates()))
+	if len(request.GetStates()) != 0 {
+		for i := range request.GetStates() {
+			log.Warn("Proxy set quota states", zap.String("state", request.GetStates()[i].String()), zap.String("reason", request.GetStateReasons()[i]))
+		}
+	}
 	resp.ErrorCode = commonpb.ErrorCode_Success
 	return resp, nil
 }
@@ -4248,16 +4259,22 @@ func (node *Proxy) CheckHealth(ctx context.Context, request *milvuspb.CheckHealt
 	err := group.Wait()
 	if err != nil || len(errReasons) != 0 {
 		return &milvuspb.CheckHealthResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
 			IsHealthy: false,
 			Reasons:   errReasons,
 		}, nil
 	}
 
+	states, reasons := node.multiRateLimiter.GetQuotaStates()
 	return &milvuspb.CheckHealthResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",
 		},
-		IsHealthy: true,
+		QuotaStates: states,
+		Reasons:     reasons,
+		IsHealthy:   true,
 	}, nil
 }
