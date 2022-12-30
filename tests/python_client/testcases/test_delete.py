@@ -158,6 +158,34 @@ class TestDeleteParams(TestcaseBase):
 
         collection_w.query(expr, check_task=CheckTasks.check_query_empty)
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_delete_expr_non_primary_key(self):
+        """
+        target: test delete with non-pk field
+        method: delete with expr field not pk
+        expected: raise exception
+        """
+        collection_w = self.init_collection_general(prefix, nb=tmp_nb, insert_data=True, is_all_data_type=True, is_index=True)[0]
+        exprs = [
+            f"{ct.default_int32_field_name} in [1]",
+            f"{ct.default_int16_field_name} in [1]",
+            f"{ct.default_int8_field_name} in [1]",
+            f"{ct.default_bool_field_name} in [True]",
+            f"{ct.default_float_field_name} in [1.0]",
+            f"{ct.default_double_field_name} in [1.0]",
+            f"{ct.default_string_field_name} in [ \"0\"]",
+            f"{ct.default_float_vec_field_name} in [[0.1]]"
+        ]
+        error = {ct.err_code: 1,
+                 ct.err_msg: f"invalid expression, we only support to delete by pk"}
+        for expr in exprs:
+            collection_w.delete(expr, check_task=CheckTasks.err_res, check_items=error)
+
+        # query
+        _query_res_tmp_expr = [{ct.default_int64_field_name: 0, ct.default_string_field_name: '0'}]
+        collection_w.query(tmp_expr, output_fields=[ct.default_string_field_name], check_task=CheckTasks.check_query_results,
+                           check_items={exp_res: _query_res_tmp_expr})
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_delete_not_existed_values(self):
         """
@@ -784,21 +812,23 @@ class TestDeleteOperation(TestcaseBase):
         collection_w.insert(df)
 
         # delete
-        del_res, _ = collection_w.delete(tmp_expr)
+        del_expr = f"{ct.default_int64_field_name} in [0, 1, 3, 5]"
+        del_res, _ = collection_w.delete(del_expr)
         log.debug(f'to_query:{to_query}')
         if to_query:
-            collection_w.query(tmp_expr, check_task=CheckTasks.check_query_empty)
+            collection_w.query(del_expr, check_task=CheckTasks.check_query_empty)
 
-        # insert entity with primary key 0
-        df_new = cf.gen_default_dataframe_data(1)
+        # insert entity with primary key 0, new scalar field data, new vector data
+        df_new = cf.gen_default_dataframe_data(4, start=tmp_nb)
+        df_new[ct.default_int64_field_name] = [0, 1, 3, 5]
         collection_w.insert(df_new)
         log.debug(f'to_flush:{to_flush}')
         if to_flush:
             log.debug(collection_w.num_entities)
 
-        # query entity one
-        res = df_new.iloc[[0], [0, -1]].to_dict('records')
-        collection_w.query(tmp_expr, output_fields=[ct.default_float_vec_field_name],
+        # query entity
+        res = df_new.iloc[:, [0, 1, -1]].to_dict('records')
+        collection_w.query(del_expr, output_fields=[ct.default_float_vec_field_name, ct.default_float_field_name],
                            check_task=CheckTasks.check_query_results, check_items={'exp_res': res, 'with_vec': True})
         search_res, _ = collection_w.search(data=[df_new[ct.default_float_vec_field_name][0]],
                                             anns_field=ct.default_float_vec_field_name,
@@ -821,7 +851,8 @@ class TestDeleteOperation(TestcaseBase):
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
 
         # insert
-        df = cf.gen_default_dataframe_data(1000)
+        nb = 1000
+        df = cf.gen_default_dataframe_data(nb)
         collection_w.insert(df)
         log.debug(collection_w.num_entities)
 
@@ -838,14 +869,15 @@ class TestDeleteOperation(TestcaseBase):
         if to_query:
             collection_w.query(tmp_expr, check_task=CheckTasks.check_query_empty)
 
-        # re-insert
-        df_new = cf.gen_default_dataframe_data(nb=1)
+        # re-insert same pk, new scalar field data, new vector data
+        df_new = cf.gen_default_dataframe_data(nb=1, start=nb)
+        df_new[ct.default_int64_field_name] = [0]
         collection_w.insert(df_new)
         log.debug(collection_w.num_entities)
 
         # re-query
-        res = df_new.iloc[[0], [0, -1]].to_dict('records')
-        collection_w.query(tmp_expr, output_fields=[ct.default_float_vec_field_name],
+        res = df_new.iloc[[0], [0, 1, -1]].to_dict('records')
+        collection_w.query(tmp_expr, output_fields=[ct.default_float_vec_field_name, ct.default_float_field_name],
                            check_task=CheckTasks.check_query_results, check_items={'exp_res': res, 'with_vec': True})
         search_res, _ = collection_w.search(data=[df_new[ct.default_float_vec_field_name][0]],
                                             anns_field=ct.default_float_vec_field_name,
