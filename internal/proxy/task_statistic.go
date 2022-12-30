@@ -273,7 +273,11 @@ func (g *getStatisticsTask) getStatisticsFromQueryNode(ctx context.Context) erro
 	err := executeGetStatistics(WithCache)
 	if errors.Is(err, errInvalidShardLeaders) || funcutil.IsGrpcErr(err) || errors.Is(err, grpcclient.ErrConnect) {
 		log.Warn("first get statistics failed, updating shard leader caches and retry",
-			zap.Int64("msgID", g.ID()), zap.Error(err))
+			zap.Int64("msgID", g.ID()),
+			zap.Error(err),
+		)
+		// invalidate cache first, since ctx may be canceled or timeout here
+		globalMetaCache.ClearShards(g.collectionName)
 		err = executeGetStatistics(WithoutCache)
 	}
 	if err != nil {
