@@ -68,8 +68,8 @@ func (dh *distHandler) start(ctx context.Context) {
 			logger.Info("close dist handelr")
 			return
 		case <-ticker.C:
-			dh.getDistribution(ctx, func(isSuccess bool) {
-				if !isSuccess {
+			dh.getDistribution(ctx, func(isFail bool) {
+				if isFail {
 					failures++
 					node := dh.nodeManager.Get(dh.nodeID)
 					if node != nil {
@@ -207,7 +207,7 @@ func (dh *distHandler) updateLeaderView(resp *querypb.GetDataDistributionRespons
 	dh.dist.LeaderViewManager.Update(resp.GetNodeID(), updates...)
 }
 
-func (dh *distHandler) getDistribution(ctx context.Context, fn func(isSuccess bool)) {
+func (dh *distHandler) getDistribution(ctx context.Context, fn func(isFail bool)) {
 	dh.mu.Lock()
 	defer dh.mu.Unlock()
 	cctx, cancel := context.WithTimeout(ctx, distReqTimeout)
@@ -218,15 +218,15 @@ func (dh *distHandler) getDistribution(ctx context.Context, fn func(isSuccess bo
 	})
 	cancel()
 
-	isSuccess := err != nil || resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success
-	if isSuccess {
+	isFail := err != nil || resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success
+	if isFail {
 		dh.logFailureInfo(resp, err)
 	} else {
 		dh.handleDistResp(resp)
 	}
 
 	if fn != nil {
-		fn(isSuccess)
+		fn(isFail)
 	}
 }
 
