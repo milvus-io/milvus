@@ -394,12 +394,8 @@ func (p *PulsarConfig) initAuthParams() {
 		}
 	}
 
-	if len(jsonMap) == 0 {
-		p.AuthParams = ""
-	} else {
-		jsonData, _ := json.Marshal(&jsonMap)
-		p.AuthParams = string(jsonData)
-	}
+	jsonData, _ := json.Marshal(&jsonMap)
+	p.AuthParams = string(jsonData)
 }
 
 func (p *PulsarConfig) initTenant() {
