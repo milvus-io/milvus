@@ -433,19 +433,19 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 	}
 	log.Info("unsubDmChannel(ReleaseCollection) enqueue done", zap.Int64("collectionID", req.GetCollectionID()))
 
-	func() {
-		err = dct.WaitToFinish()
-		if err != nil {
-			log.Warn("failed to do subscribe channel task successfully", zap.Error(err))
-			return
-		}
-		log.Info("unsubDmChannel(ReleaseCollection) WaitToFinish done", zap.Int64("collectionID", req.GetCollectionID()))
-	}()
-
-	status := &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_Success,
+	err = dct.WaitToFinish()
+	if err != nil {
+		log.Warn("failed to do subscribe channel task successfully", zap.Error(err))
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}, nil
 	}
-	return status, nil
+
+	log.Info("unsubDmChannel(ReleaseCollection) WaitToFinish done", zap.Int64("collectionID", req.GetCollectionID()))
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}, nil
 }
 
 // LoadSegments load historical data into query node, historical data can be vector data or index
