@@ -62,7 +62,7 @@ func (suite *RowCountBasedBalancerTestSuite) SetupTest() {
 
 	store := meta.NewMetaStore(suite.kv)
 	idAllocator := RandomIncrementIDAllocator()
-	testMeta := meta.NewMeta(idAllocator, store)
+	testMeta := meta.NewMeta(idAllocator, store, session.NewNodeManager())
 	testTarget := meta.NewTargetManager(suite.broker, testMeta)
 
 	distManager := meta.NewDistributionManager()
@@ -272,6 +272,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalance() {
 			for i := range c.nodes {
 				nodeInfo := session.NewNodeInfo(c.nodes[i], "127.0.0.1:0")
 				nodeInfo.UpdateStats(session.WithSegmentCnt(c.segmentCnts[i]))
+				nodeInfo.UpdateStats(session.WithChannelCnt(len(c.distributionChannels[c.nodes[i]])))
 				nodeInfo.SetState(c.states[i])
 				suite.balancer.nodeManager.Add(nodeInfo)
 			}

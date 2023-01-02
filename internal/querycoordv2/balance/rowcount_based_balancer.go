@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 )
@@ -112,6 +113,8 @@ func (b *RowCountBasedBalancer) balanceReplica(replica *meta.Replica) ([]Segment
 	nodesSegments := make(map[int64][]*meta.Segment)
 	stoppingNodesSegments := make(map[int64][]*meta.Segment)
 
+	outboundNodes := CheckReplicaUseOutboundsNode(replica, b.meta)
+
 	totalCnt := 0
 	for _, nid := range nodes {
 		segments := b.dist.SegmentDistManager.GetByCollectionAndNode(replica.GetCollectionID(), nid)
@@ -123,7 +126,8 @@ func (b *RowCountBasedBalancer) balanceReplica(replica *meta.Replica) ([]Segment
 		if isStopping, err := b.nodeManager.IsStoppingNode(nid); err != nil {
 			log.Info("not existed node", zap.Int64("nid", nid), zap.Any("segments", segments), zap.Error(err))
 			continue
-		} else if isStopping {
+		} else if isStopping || outboundNodes.Contain(nid) {
+			// if node is stop or transfer to other rg
 			stoppingNodesSegments[nid] = segments
 		} else {
 			nodesSegments[nid] = segments
@@ -137,7 +141,7 @@ func (b *RowCountBasedBalancer) balanceReplica(replica *meta.Replica) ([]Segment
 		totalCnt += cnt
 	}
 
-	if len(nodes) == len(stoppingNodesSegments) {
+	if len(outboundNodes) == 0 && len(nodes) == len(stoppingNodesSegments) {
 		return b.handleStoppingNodes(replica, stoppingNodesSegments)
 	}
 
@@ -220,7 +224,7 @@ outer:
 		node.setPriority(node.getPriority() + int(s.GetNumOfRows()))
 		queue.push(node)
 	}
-	return plans, b.getChannelPlan(replica, stoppingNodesSegments)
+	return plans, b.getChannelPlan(replica, lo.Keys(nodesSegments), lo.Keys(stoppingNodesSegments))
 }
 
 func (b *RowCountBasedBalancer) handleStoppingNodes(replica *meta.Replica, nodeSegments map[int64][]*meta.Segment) ([]SegmentAssignPlan, []ChannelAssignPlan) {
@@ -252,6 +256,25 @@ func (b *RowCountBasedBalancer) handleStoppingNodes(replica *meta.Replica, nodeS
 	return segmentPlans, channelPlans
 }
 
+func CheckReplicaUseOutboundsNode(replica *meta.Replica, meta *meta.Meta) typeutil.UniqueSet {
+	nodesInRG, err := meta.ResourceManager.GetNodes(replica.GetResourceGroup())
+
+	if err != nil {
+		return typeutil.NewUniqueSet()
+	}
+
+	nodeSetInRG := typeutil.NewUniqueSet(nodesInRG...)
+
+	ret := typeutil.NewUniqueSet()
+	for _, node := range replica.GetNodes() {
+		if !nodeSetInRG.Contain(node) {
+			ret.Insert(node)
+		}
+	}
+
+	return ret
+}
+
 func (b *RowCountBasedBalancer) collectionStoppingSegments(stoppingNodesSegments map[int64][]*meta.Segment) ([]*meta.Segment, int) {
 	var (
 		segments     []*meta.Segment
@@ -267,17 +290,11 @@ func (b *RowCountBasedBalancer) collectionStoppingSegments(stoppingNodesSegments
 	return segments, removeRowCnt
 }
 
-func (b *RowCountBasedBalancer) getChannelPlan(replica *meta.Replica, stoppingNodesSegments map[int64][]*meta.Segment) []ChannelAssignPlan {
-	// maybe it will have some strategies to balance the channel in the future
-	// but now, only balance the channel for the stopping nodes.
-	return b.getChannelPlanForStoppingNodes(replica, stoppingNodesSegments)
-}
-
-func (b *RowCountBasedBalancer) getChannelPlanForStoppingNodes(replica *meta.Replica, stoppingNodesSegments map[int64][]*meta.Segment) []ChannelAssignPlan {
+func (b *RowCountBasedBalancer) getChannelPlan(replica *meta.Replica, onlineNodes []int64, offlineNodes []int64) []ChannelAssignPlan {
 	channelPlans := make([]ChannelAssignPlan, 0)
-	for nodeID := range stoppingNodesSegments {
+	for _, nodeID := range offlineNodes {
 		dmChannels := b.dist.ChannelDistManager.GetByCollectionAndNode(replica.GetCollectionID(), nodeID)
-		plans := b.AssignChannel(dmChannels, replica.Replica.GetNodes())
+		plans := b.AssignChannel(dmChannels, onlineNodes)
 		for i := range plans {
 			plans[i].From = nodeID
 			plans[i].ReplicaID = replica.ID

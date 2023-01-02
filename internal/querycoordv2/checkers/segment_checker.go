@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 )
 
@@ -266,7 +267,11 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 		}
 		packedSegments = append(packedSegments, &meta.Segment{SegmentInfo: s})
 	}
-	plans := c.balancer.AssignSegment(packedSegments, replica.Replica.GetNodes())
+	outboundNodes := balance.CheckReplicaUseOutboundsNode(replica, c.meta)
+	availableNodes := lo.Filter(replica.Replica.GetNodes(), func(node int64, _ int) bool {
+		return !outboundNodes.Contain(node)
+	})
+	plans := c.balancer.AssignSegment(packedSegments, availableNodes)
 	for i := range plans {
 		plans[i].ReplicaID = replica.GetID()
 	}

@@ -1380,6 +1380,13 @@ type QueryCoord interface {
 	GetShardLeaders(ctx context.Context, req *querypb.GetShardLeadersRequest) (*querypb.GetShardLeadersResponse, error)
 
 	CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error)
+
+	// CreateResourceGroup(ctx context.Context, req *querypb.CreateResourceGroupRequest) (*commonpb.Status, error)
+	// DropResourceGroup(ctx context.Context, req *querypb.DropResourceGroupRequest) (*commonpb.Status, error)
+	// AddNodeToResourceGroup(ctx context.Context, req *querypb.AddNodeToResourceGroupRequest) (*commonpb.Status, error)
+	// RemoveNodeFromResourceGroup(ctx context.Context, req *querypb.RemoveNodeFromResourceGroupRequest) (*commonpb.Status, error)
+	// TransferNodeBetweenResourceGroup(ctx context.Context, req *querypb.TransferNodeBetweenResourceGroupRequest) (*commonpb.Status, error)
+	// ListResourceGroup(ctx context.Context, req *querypb.ListResourceGroupRequest) (*querypb.ListResourceGroupResponse, error)
 }
 
 // QueryCoordComponent is used by grpc server of QueryCoord

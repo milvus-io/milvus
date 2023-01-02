@@ -76,14 +76,14 @@ func (suite *ReplicaManagerSuite) TestSpawn() {
 	mgr := suite.mgr
 
 	for i, collection := range suite.collections {
-		replicas, err := mgr.Spawn(collection, suite.replicaNumbers[i])
+		replicas, err := mgr.Spawn(collection, suite.replicaNumbers[i], DefaultResourceGroupName)
 		suite.NoError(err)
 		suite.Len(replicas, int(suite.replicaNumbers[i]))
 	}
 
 	mgr.idAllocator = ErrorIDAllocator()
 	for i, collection := range suite.collections {
-		_, err := mgr.Spawn(collection, suite.replicaNumbers[i])
+		_, err := mgr.Spawn(collection, suite.replicaNumbers[i], DefaultResourceGroupName)
 		suite.Error(err)
 	}
 }
@@ -201,7 +201,7 @@ func (suite *ReplicaManagerSuite) spawnAndPutAll() {
 	mgr := suite.mgr
 
 	for i, collection := range suite.collections {
-		replicas, err := mgr.Spawn(collection, suite.replicaNumbers[i])
+		replicas, err := mgr.Spawn(collection, suite.replicaNumbers[i], DefaultResourceGroupName)
 		suite.NoError(err)
 		suite.Len(replicas, int(suite.replicaNumbers[i]))
 		for j, replica := range replicas {

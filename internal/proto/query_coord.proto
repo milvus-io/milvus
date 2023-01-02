@@ -100,6 +100,8 @@ message LoadCollectionRequest {
   int32 replica_number = 5;
   // fieldID -> indexID
   map<int64, int64> field_indexID = 6;
+  // rg name -> replica num
+  map<string, int32> replicasInRG = 7;
 }
 
 message ReleaseCollectionRequest {
@@ -126,6 +128,8 @@ message LoadPartitionsRequest {
   int32 replica_number = 6;
   // fieldID -> indexID
   map<int64, int64> field_indexID = 7;
+  // rg name -> replica num
+  map<string, int32> replicasInRG = 8;
 }
 
 message ReleasePartitionsRequest {
@@ -486,6 +490,7 @@ message Replica {
   int64 ID = 1;
   int64 collectionID = 2;
   repeated int64 nodes = 3;
+  string resource_group = 4;
 }
 
 enum SyncType {
@@ -508,3 +513,48 @@ message SyncDistributionRequest {
   repeated SyncAction actions = 4;
 }
 
+message ResourceGroup {
+  string name = 1;
+  int32 capacity = 2;
+  repeated int64 nodes = 3;
+}
+
+message CreateResourceGroupRequest {
+  common.MsgBase base = 1;
+  string resource_group = 2;
+}
+
+message DropResourceGroupRequest {
+  common.MsgBase base = 1;
+  string resource_group = 2;
+}
+
+message AddNodeToResourceGroupRequest {
+  common.MsgBase base = 1;
+  string resource_group = 2;
+  int64 node = 3;
+}
+
+message RemoveNodeFromResourceGroupRequest {
+  common.MsgBase base = 1;
+  string resource_group = 2;
+  int64 node = 3;
+}
+
+message TransferNodeBetweenResourceGroupRequest {
+  common.MsgBase base = 1;
+  string from_resource_group = 2;
+  string to_resource_group = 3;
+  int64  node = 4;
+}
+
+message ListResourceGroupRequest {
+  common.MsgBase base = 1;
+  string resource_group = 2;
+  bool listAll = 3;
+}
+
+message ListResourceGroupResponse {
+  common.Status status = 1;
+  repeated ResourceGroup  resouse_groups = 2;
+}

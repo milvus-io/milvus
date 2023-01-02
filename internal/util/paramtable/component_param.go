@@ -852,8 +852,9 @@ type queryCoordConfig struct {
 	CheckHandoffInterval ParamItem `refreshable:"true"`
 	EnableActiveStandby  ParamItem `refreshable:"false"`
 
-	NextTargetSurviveTime    ParamItem `refreshable:"true"`
-	UpdateNextTargetInterval ParamItem `refreshable:"false"`
+	NextTargetSurviveTime      ParamItem `refreshable:"true"`
+	UpdateNextTargetInterval   ParamItem `refreshable:"false"`
+	CheckNodeInReplicaInterval ParamItem `refreshable:"false"`
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -1004,6 +1005,14 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		PanicIfEmpty: true,
 	}
 	p.UpdateNextTargetInterval.Init(base.mgr)
+
+	p.CheckNodeInReplicaInterval = ParamItem{
+		Key:          "queryCoord.checkNodeInReplicaInterval",
+		Version:      "2.2.0",
+		DefaultValue: "60",
+		PanicIfEmpty: true,
+	}
+	p.CheckNodeInReplicaInterval.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

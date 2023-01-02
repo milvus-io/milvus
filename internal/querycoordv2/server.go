@@ -105,6 +105,7 @@ type Server struct {
 	collectionObserver *observers.CollectionObserver
 	leaderObserver     *observers.LeaderObserver
 	targetObserver     *observers.TargetObserver
+	replicaObserver    *observers.ReplicaObserver
 
 	balancer balance.Balance
 
@@ -180,13 +181,13 @@ func (s *Server) Init() error {
 	s.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
 
 	// Init meta
+	s.nodeMgr = session.NewNodeManager()
 	err = s.initMeta()
 	if err != nil {
 		return err
 	}
 	// Init session
 	log.Info("init session")
-	s.nodeMgr = session.NewNodeManager()
 	s.cluster = session.NewCluster(s.nodeMgr)
 
 	// Init schedulers
@@ -244,7 +245,7 @@ func (s *Server) initMeta() error {
 
 	log.Info("init meta")
 	s.store = meta.NewMetaStore(s.kv)
-	s.meta = meta.NewMeta(s.idAllocator, s.store)
+	s.meta = meta.NewMeta(s.idAllocator, s.store, s.nodeMgr)
 
 	log.Info("recover meta...")
 	err := s.meta.CollectionManager.Recover()
@@ -259,6 +260,12 @@ func (s *Server) initMeta() error {
 	err = s.meta.ReplicaManager.Recover(collections)
 	if err != nil {
 		log.Error("failed to recover replicas")
+		return err
+	}
+
+	err = s.meta.ResourceManager.Recover()
+	if err != nil {
+		log.Error("failed to recover resource groups")
 		return err
 	}
 
@@ -296,6 +303,11 @@ func (s *Server) initObserver() {
 		s.targetMgr,
 		s.dist,
 		s.broker,
+	)
+
+	s.replicaObserver = observers.NewReplicaObserver(
+		s.meta,
+		s.dist,
 	)
 }
 
@@ -360,6 +372,7 @@ func (s *Server) startServerLoop() {
 	s.collectionObserver.Start(s.ctx)
 	s.leaderObserver.Start(s.ctx)
 	s.targetObserver.Start(s.ctx)
+	s.replicaObserver.Start(s.ctx)
 }
 
 func (s *Server) Stop() error {
@@ -402,6 +415,9 @@ func (s *Server) Stop() error {
 	}
 	if s.targetObserver != nil {
 		s.targetObserver.Stop()
+	}
+	if s.replicaObserver != nil {
+		s.replicaObserver.Stop()
 	}
 
 	s.wg.Wait()
@@ -586,17 +602,32 @@ func (s *Server) handleNodeUp(node int64) {
 	s.taskScheduler.AddExecutor(node)
 	s.distController.StartDistInstance(s.ctx, node)
 
+	// need assign to new rg and replica
+	rgName, err := s.meta.ResourceManager.HandleNodeUp(node)
+	if err != nil {
+		log.Warn("HandleNodeUp: failed to assign node to resource group",
+			zap.Error(err),
+		)
+	}
+
+	log.Info("HandleNodeUp: assign node to resource group",
+		zap.String("resourceGroup", rgName),
+	)
+
 	for _, collection := range s.meta.CollectionManager.GetAll() {
 		log := log.With(zap.Int64("collectionID", collection))
 		replica := s.meta.ReplicaManager.GetByCollectionAndNode(collection, node)
 		if replica == nil {
-			replicas := s.meta.ReplicaManager.GetByCollection(collection)
+			replicas := s.meta.ReplicaManager.GetByCollectionAndRG(collection, rgName)
+			if len(replicas) == 0 {
+				continue
+			}
 			sort.Slice(replicas, func(i, j int) bool {
 				return replicas[i].Nodes.Len() < replicas[j].Nodes.Len()
 			})
 			replica := replicas[0]
 			// TODO(yah01): this may fail, need a component to check whether a node is assigned
-			err := s.meta.ReplicaManager.AddNode(replica.GetID(), node)
+			err = s.meta.ReplicaManager.AddNode(replica.GetID(), node)
 			if err != nil {
 				log.Warn("failed to assign node to replicas",
 					zap.Int64("replicaID", replica.GetID()),
@@ -613,20 +644,6 @@ func (s *Server) handleNodeDown(node int64) {
 	log := log.With(zap.Int64("nodeID", node))
 	s.taskScheduler.RemoveExecutor(node)
 	s.distController.Remove(node)
-
-	// Refresh the targets, to avoid consuming messages too early from channel
-	// FIXME(yah01): the leads to miss data, the segments flushed between the two check points
-	// are missed, it will recover for a while.
-	channels := s.dist.ChannelDistManager.GetByNode(node)
-	for _, channel := range channels {
-		err := s.targetMgr.UpdateCollectionNextTarget(channel.GetCollectionID())
-		if err != nil {
-			msg := "failed to update next targets for collection"
-			log.Error(msg,
-				zap.Error(err))
-			continue
-		}
-	}
 
 	// Clear dist
 	s.dist.LeaderViewManager.Update(node)
@@ -650,6 +667,18 @@ func (s *Server) handleNodeDown(node int64) {
 		log.Info("remove node from replica",
 			zap.Int64("replicaID", replica.GetID()))
 	}
+
+	rgName, err := s.meta.ResourceManager.HandleNodeDown(node)
+	if err != nil {
+		log.Warn("HandleNodeDown: failed to remove node from resource group",
+			zap.String("resourceGroup", rgName),
+			zap.Error(err),
+		)
+	}
+
+	log.Info("HandleNodeDown: remove node from resource group",
+		zap.String("resourceGroup", rgName),
+	)
 
 	// Clear tasks
 	s.taskScheduler.RemoveByNode(node)

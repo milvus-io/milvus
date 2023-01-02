@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
@@ -94,7 +95,11 @@ func (s *Server) balanceSegments(ctx context.Context, req *querypb.LoadBalanceRe
 	srcNode := req.GetSourceNodeIDs()[0]
 	dstNodeSet := typeutil.NewUniqueSet(req.GetDstNodeIDs()...)
 	if dstNodeSet.Len() == 0 {
-		dstNodeSet.Insert(replica.GetNodes()...)
+		outboundNodes := balance.CheckReplicaUseOutboundsNode(replica, s.meta)
+		availableNodes := lo.Filter(replica.Replica.GetNodes(), func(node int64, _ int) bool {
+			return !outboundNodes.Contain(node)
+		})
+		dstNodeSet.Insert(availableNodes...)
 	}
 	dstNodeSet.Remove(srcNode)
 
@@ -302,7 +307,11 @@ func (s *Server) tryGetNodesMetrics(ctx context.Context, req *milvuspb.GetMetric
 }
 
 func (s *Server) fillReplicaInfo(replica *meta.Replica, withShardNodes bool) (*milvuspb.ReplicaInfo, error) {
-	info := utils.Replica2ReplicaInfo(replica.Replica)
+	info := &milvuspb.ReplicaInfo{
+		ReplicaID:    replica.GetID(),
+		CollectionID: replica.GetCollectionID(),
+		NodeIds:      replica.GetNodes(),
+	}
 
 	channels := s.targetMgr.GetDmChannelsByCollection(replica.GetCollectionID(), meta.CurrentTarget)
 	if len(channels) == 0 {

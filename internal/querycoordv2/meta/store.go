@@ -28,7 +28,6 @@ import (
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/util"
 )
 
 var (
@@ -41,6 +40,7 @@ const (
 	ReplicaPrefix            = "querycoord-replica"
 	CollectionMetaPrefixV1   = "queryCoord-collectionMeta"
 	ReplicaMetaPrefixV1      = "queryCoord-ReplicaMeta"
+	ResourceGroupPrefix      = "queryCoord-ResourceGroup"
 )
 
 type WatchStoreChan = clientv3.WatchChan
@@ -88,6 +88,16 @@ func (s metaStore) SaveReplica(replica *querypb.Replica) error {
 	if err != nil {
 		return err
 	}
+	return s.cli.Save(key, string(value))
+}
+
+func (s metaStore) SaveResourceGroup(rgName string, rg *querypb.ResourceGroup) error {
+	key := encodeResourceGroupKey(rgName)
+	value, err := proto.Marshal(rg)
+	if err != nil {
+		return err
+	}
+
 	return s.cli.Save(key, string(value))
 }
 
@@ -171,6 +181,25 @@ func (s metaStore) getReplicasFromV1() ([]*querypb.Replica, error) {
 	return ret, nil
 }
 
+func (s metaStore) GetResourceGroups() ([]*querypb.ResourceGroup, error) {
+	_, rgs, err := s.cli.LoadWithPrefix(ResourceGroupPrefix)
+	if err != nil {
+		return nil, err
+	}
+
+	ret := make([]*querypb.ResourceGroup, 0, len(rgs))
+	for _, value := range rgs {
+		rg := querypb.ResourceGroup{}
+		err := proto.Unmarshal([]byte(value), &rg)
+		if err != nil {
+			return nil, err
+		}
+
+		ret = append(ret, &rg)
+	}
+	return ret, nil
+}
+
 func (s metaStore) ReleaseCollection(id int64) error {
 	k := encodeCollectionLoadInfoKey(id)
 	return s.cli.Remove(k)
@@ -209,6 +238,6 @@ func encodeCollectionReplicaKey(collection int64) string {
 	return fmt.Sprintf("%s/%d", ReplicaPrefix, collection)
 }
 
-func encodeHandoffEventKey(collection, partition, segment int64) string {
-	return fmt.Sprintf("%s/%d/%d/%d", util.HandoffSegmentPrefix, collection, partition, segment)
+func encodeResourceGroupKey(rgName string) string {
+	return fmt.Sprintf("%s/%s", ResourceGroupPrefix, rgName)
 }

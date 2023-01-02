@@ -30,20 +30,36 @@ import (
 
 type Replica struct {
 	*querypb.Replica
-	Nodes UniqueSet // a helper field for manipulating replica's Nodes slice field
+	Nodes   UniqueSet // a helper field for manipulating replica's Nodes slice field
+	rwmutex sync.RWMutex
 }
 
 func (replica *Replica) AddNode(nodes ...int64) {
+	replica.rwmutex.Lock()
+	defer replica.rwmutex.Unlock()
 	replica.Nodes.Insert(nodes...)
 	replica.Replica.Nodes = replica.Nodes.Collect()
 }
 
+func (replica *Replica) GetNodes() []int64 {
+	replica.rwmutex.RLock()
+	defer replica.rwmutex.RUnlock()
+	if replica != nil {
+		return replica.Nodes.Collect()
+	}
+	return nil
+}
+
 func (replica *Replica) RemoveNode(nodes ...int64) {
+	replica.rwmutex.Lock()
+	defer replica.rwmutex.Unlock()
 	replica.Nodes.Remove(nodes...)
 	replica.Replica.Nodes = replica.Nodes.Collect()
 }
 
 func (replica *Replica) Clone() *Replica {
+	replica.rwmutex.RLock()
+	defer replica.rwmutex.RUnlock()
 	return &Replica{
 		Replica: proto.Clone(replica.Replica).(*querypb.Replica),
 		Nodes:   NewUniqueSet(replica.Replica.Nodes...),
@@ -75,6 +91,10 @@ func (m *ReplicaManager) Recover(collections []int64) error {
 
 	collectionSet := typeutil.NewUniqueSet(collections...)
 	for _, replica := range replicas {
+		if len(replica.GetResourceGroup()) == 0 {
+			replica.ResourceGroup = DefaultResourceGroupName
+		}
+
 		if collectionSet.Contain(replica.GetCollectionID()) {
 			m.replicas[replica.GetID()] = &Replica{
 				Replica: replica,
@@ -109,13 +129,13 @@ func (m *ReplicaManager) Get(id UniqueID) *Replica {
 
 // Spawn spawns replicas of the given number, for given collection,
 // this doesn't store these replicas and assign nodes to them.
-func (m *ReplicaManager) Spawn(collection int64, replicaNumber int32) ([]*Replica, error) {
+func (m *ReplicaManager) Spawn(collection int64, replicaNumber int32, rgName string) ([]*Replica, error) {
 	var (
 		replicas = make([]*Replica, replicaNumber)
 		err      error
 	)
 	for i := range replicas {
-		replicas[i], err = m.spawn(collection)
+		replicas[i], err = m.spawn(collection, rgName)
 		if err != nil {
 			return nil, err
 		}
@@ -130,15 +150,16 @@ func (m *ReplicaManager) Put(replicas ...*Replica) error {
 	return m.put(replicas...)
 }
 
-func (m *ReplicaManager) spawn(collectionID UniqueID) (*Replica, error) {
+func (m *ReplicaManager) spawn(collectionID UniqueID, rgName string) (*Replica, error) {
 	id, err := m.idAllocator()
 	if err != nil {
 		return nil, err
 	}
 	return &Replica{
 		Replica: &querypb.Replica{
-			ID:           id,
-			CollectionID: collectionID,
+			ID:            id,
+			CollectionID:  collectionID,
+			ResourceGroup: rgName,
 		},
 		Nodes: make(UniqueSet),
 	}, nil
@@ -200,6 +221,20 @@ func (m *ReplicaManager) GetByCollectionAndNode(collectionID, nodeID UniqueID) *
 	return nil
 }
 
+func (m *ReplicaManager) GetByCollectionAndRG(collectionID int64, rgName string) []*Replica {
+	m.rwmutex.RLock()
+	defer m.rwmutex.RUnlock()
+
+	ret := make([]*Replica, 0)
+	for _, replica := range m.replicas {
+		if replica.GetCollectionID() == collectionID && replica.GetResourceGroup() == rgName {
+			ret = append(ret, replica)
+		}
+	}
+
+	return ret
+}
+
 func (m *ReplicaManager) AddNode(replicaID UniqueID, nodes ...UniqueID) error {
 	m.rwmutex.Lock()
 	defer m.rwmutex.Unlock()
@@ -226,4 +261,34 @@ func (m *ReplicaManager) RemoveNode(replicaID UniqueID, nodes ...UniqueID) error
 	replica = replica.Clone()
 	replica.RemoveNode(nodes...)
 	return m.put(replica)
+}
+
+func (m *ReplicaManager) RemoveNodeByRG(rgName string, node UniqueID) error {
+	m.rwmutex.Lock()
+	defer m.rwmutex.Unlock()
+
+	ret := make([]*Replica, 0)
+	for _, old := range m.replicas {
+		if old.GetResourceGroup() == rgName {
+			newReplica := old.Clone()
+			newReplica.RemoveNode(node)
+			ret = append(ret, newReplica)
+		}
+	}
+
+	return m.put(ret...)
+}
+
+func (m *ReplicaManager) GetRGByCollection(collection UniqueID) typeutil.Set[string] {
+	m.rwmutex.Lock()
+	defer m.rwmutex.Unlock()
+
+	ret := typeutil.NewSet[string]()
+	for _, r := range m.replicas {
+		if r.GetCollectionID() == collection {
+			ret.Insert(r.GetResourceGroup())
+		}
+	}
+
+	return ret
 }
