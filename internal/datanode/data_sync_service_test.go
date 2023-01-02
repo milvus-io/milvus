@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"math"
+	"os"
 	"testing"
 	"time"
 
@@ -37,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
 )
 
 var dataSyncServiceTestDir = "/tmp/milvus_test/data_sync_service"
@@ -190,38 +192,36 @@ func TestDataSyncService_newDataSyncService(te *testing.T) {
 
 // NOTE: start pulsar before test
 func TestDataSyncService_Start(t *testing.T) {
-	t.Skip()
-	const ctxTimeInMillisecond = 2000
+	const ctxTimeInMillisecond = 10000
 
 	delay := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
 	ctx, cancel := context.WithDeadline(context.Background(), delay)
 	defer cancel()
 
 	// init data node
-
-	insertChannelName := "data_sync_service_test_dml"
-	ddlChannelName := "data_sync_service_test_ddl"
+	insertChannelName := "by-dev-rootcoord-dml"
+	ddlChannelName := "by-dev-rootcoord-ddl"
 
 	Factory := &MetaFactory{}
 	collMeta := Factory.GetCollectionMeta(UniqueID(0), "coll1", schemapb.DataType_Int64)
 	mockRootCoord := &RootCoordFactory{
 		pkType: schemapb.DataType_Int64,
 	}
-	collectionID := UniqueID(1)
 
 	flushChan := make(chan flushMsg, 100)
 	resendTTChan := make(chan resendTTMsg, 100)
 	cm := storage.NewLocalChunkManager(storage.RootPath(dataSyncServiceTestDir))
 	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
-	channel := newChannel(insertChannelName, collectionID, collMeta.GetSchema(), mockRootCoord, cm)
+	channel := newChannel(insertChannelName, collMeta.ID, collMeta.GetSchema(), mockRootCoord, cm)
 
 	allocFactory := NewAllocatorFactory(1)
 	factory := dependency.NewDefaultFactory(true)
-
+	defer os.RemoveAll("/tmp/milvus")
 	paramtable.Get().Save(Params.DataNodeCfg.FlushInsertBufferSize.Key, "1")
 
 	ufs := []*datapb.SegmentInfo{{
 		CollectionID:  collMeta.ID,
+		PartitionID:   1,
 		InsertChannel: insertChannelName,
 		ID:            0,
 		NumOfRows:     0,
@@ -251,18 +251,38 @@ func TestDataSyncService_Start(t *testing.T) {
 	}
 
 	signalCh := make(chan string, 100)
-	sync, err := newDataSyncService(ctx, flushChan, resendTTChan, channel, allocFactory, factory, vchan, signalCh, &DataCoordFactory{}, newCache(), cm, newCompactionExecutor())
 
+	dataCoord := &DataCoordFactory{}
+	dataCoord.UserSegmentInfo = map[int64]*datapb.SegmentInfo{
+		0: {
+			ID:            0,
+			CollectionID:  collMeta.ID,
+			PartitionID:   1,
+			InsertChannel: insertChannelName,
+		},
+
+		1: {
+			ID:            1,
+			CollectionID:  collMeta.ID,
+			PartitionID:   1,
+			InsertChannel: insertChannelName,
+		},
+	}
+
+	sync, err := newDataSyncService(ctx, flushChan, resendTTChan, channel, allocFactory, factory, vchan, signalCh, dataCoord, newCache(), cm, newCompactionExecutor())
 	assert.Nil(t, err)
-	// sync.channel.addCollection(collMeta.ID, collMeta.Schema)
+
+	sync.flushListener = make(chan *segmentFlushPack)
+	defer close(sync.flushListener)
 	sync.start()
+	defer sync.close()
 
 	timeRange := TimeRange{
 		timestampMin: 0,
 		timestampMax: math.MaxUint64,
 	}
 	dataFactory := NewDataFactory()
-	insertMessages := dataFactory.GetMsgStreamTsInsertMsgs(2, insertChannelName)
+	insertMessages := dataFactory.GetMsgStreamTsInsertMsgs(2, insertChannelName, tsoutil.GetCurrentTime())
 
 	msgPack := msgstream.MsgPack{
 		BeginTs: timeRange.timestampMin,
@@ -315,10 +335,213 @@ func TestDataSyncService_Start(t *testing.T) {
 	_, err = ddMsgStream.Broadcast(&timeTickMsgPack)
 	assert.NoError(t, err)
 
-	// dataSync
-	<-sync.ctx.Done()
+	select {
+	case flushPack := <-sync.flushListener:
+		assert.True(t, flushPack.segmentID == 1)
+		return
+	case <-sync.ctx.Done():
+		assert.Fail(t, "test timeout")
+	}
+}
 
+func TestDataSyncService_Close(t *testing.T) {
+	const ctxTimeInMillisecond = 1000000
+
+	delay := time.Now().Add(ctxTimeInMillisecond * time.Millisecond)
+	ctx, cancel := context.WithDeadline(context.Background(), delay)
+	defer cancel()
+
+	os.RemoveAll("/tmp/milvus")
+
+	// init data node
+	insertChannelName := "by-dev-rootcoord-dml2"
+	ddlChannelName := "by-dev-rootcoord-ddl2"
+
+	Factory := &MetaFactory{}
+	collMeta := Factory.GetCollectionMeta(UniqueID(0), "coll1", schemapb.DataType_Int64)
+	mockRootCoord := &RootCoordFactory{
+		pkType: schemapb.DataType_Int64,
+	}
+
+	flushChan := make(chan flushMsg, 100)
+	resendTTChan := make(chan resendTTMsg, 100)
+	cm := storage.NewLocalChunkManager(storage.RootPath(dataSyncServiceTestDir))
+	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
+	channel := newChannel(insertChannelName, collMeta.ID, collMeta.GetSchema(), mockRootCoord, cm)
+
+	allocFactory := NewAllocatorFactory(1)
+	factory := dependency.NewDefaultFactory(true)
+	defer os.RemoveAll("/tmp/milvus")
+
+	paramtable.Get().Remove(Params.DataNodeCfg.FlushInsertBufferSize.Key)
+	ufs := []*datapb.SegmentInfo{{
+		CollectionID:  collMeta.ID,
+		PartitionID:   1,
+		InsertChannel: insertChannelName,
+		ID:            0,
+		NumOfRows:     0,
+		DmlPosition:   &internalpb.MsgPosition{},
+	}}
+	fs := []*datapb.SegmentInfo{{
+		CollectionID:  collMeta.ID,
+		PartitionID:   1,
+		InsertChannel: insertChannelName,
+		ID:            1,
+		NumOfRows:     0,
+		DmlPosition:   &internalpb.MsgPosition{},
+	}}
+	var ufsIds []int64
+	var fsIds []int64
+	for _, segmentInfo := range ufs {
+		ufsIds = append(ufsIds, segmentInfo.ID)
+	}
+	for _, segmentInfo := range fs {
+		fsIds = append(fsIds, segmentInfo.ID)
+	}
+	vchan := &datapb.VchannelInfo{
+		CollectionID:        collMeta.ID,
+		ChannelName:         insertChannelName,
+		UnflushedSegmentIds: ufsIds,
+		FlushedSegmentIds:   fsIds,
+	}
+
+	signalCh := make(chan string, 100)
+
+	dataCoord := &DataCoordFactory{}
+	dataCoord.UserSegmentInfo = map[int64]*datapb.SegmentInfo{
+		0: {
+			ID:            0,
+			CollectionID:  collMeta.ID,
+			PartitionID:   1,
+			InsertChannel: insertChannelName,
+		},
+
+		1: {
+			ID:            1,
+			CollectionID:  collMeta.ID,
+			PartitionID:   1,
+			InsertChannel: insertChannelName,
+		},
+	}
+
+	sync, err := newDataSyncService(ctx, flushChan, resendTTChan, channel, allocFactory, factory, vchan, signalCh, dataCoord, newCache(), cm, newCompactionExecutor())
+	assert.Nil(t, err)
+
+	sync.flushListener = make(chan *segmentFlushPack, 10)
+	defer close(sync.flushListener)
+	sync.start()
+
+	dataFactory := NewDataFactory()
+	ts := tsoutil.GetCurrentTime()
+	insertMessages := dataFactory.GetMsgStreamTsInsertMsgs(2, insertChannelName, ts)
+	msgPack := msgstream.MsgPack{
+		BeginTs: ts,
+		EndTs:   ts,
+		Msgs:    insertMessages,
+		StartPositions: []*internalpb.MsgPosition{{
+			ChannelName: insertChannelName,
+		}},
+		EndPositions: []*internalpb.MsgPosition{{
+			ChannelName: insertChannelName,
+		}},
+	}
+
+	// 400 is the actual data
+	int64Pks := []primaryKey{
+		newInt64PrimaryKey(400),
+	}
+	deleteMessages := dataFactory.GenMsgStreamDeleteMsgWithTs(0, int64Pks, insertChannelName, ts+1)
+	inMsgs := make([]msgstream.TsMsg, 0)
+	inMsgs = append(inMsgs, deleteMessages)
+
+	msgPackDelete := msgstream.MsgPack{
+		BeginTs: ts + 1,
+		EndTs:   ts + 1,
+		Msgs:    inMsgs,
+		StartPositions: []*internalpb.MsgPosition{{
+			ChannelName: insertChannelName,
+		}},
+		EndPositions: []*internalpb.MsgPosition{{
+			ChannelName: insertChannelName,
+		}},
+	}
+
+	// generate timeTick
+	timeTickMsg := &msgstream.TimeTickMsg{
+		BaseMsg: msgstream.BaseMsg{
+			BeginTimestamp: ts,
+			EndTimestamp:   ts + 2,
+			HashValues:     []uint32{0},
+		},
+		TimeTickMsg: internalpb.TimeTickMsg{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_TimeTick,
+				MsgID:     UniqueID(2),
+				Timestamp: ts + 2,
+				SourceID:  0,
+			},
+		},
+	}
+
+	timeTickMsgPack := msgstream.MsgPack{
+		BeginTs: ts + 2,
+		EndTs:   ts + 2,
+		StartPositions: []*internalpb.MsgPosition{{
+			ChannelName: insertChannelName,
+		}},
+		EndPositions: []*internalpb.MsgPosition{{
+			ChannelName: insertChannelName,
+		}},
+	}
+	timeTickMsgPack.Msgs = append(timeTickMsgPack.Msgs, timeTickMsg)
+
+	// pulsar produce
+	assert.NoError(t, err)
+	insertStream, _ := factory.NewMsgStream(ctx)
+	insertStream.AsProducer([]string{insertChannelName})
+
+	ddStream, _ := factory.NewMsgStream(ctx)
+	ddStream.AsProducer([]string{ddlChannelName})
+
+	var insertMsgStream msgstream.MsgStream = insertStream
+	var ddMsgStream msgstream.MsgStream = ddStream
+
+	err = insertMsgStream.Produce(&msgPack)
+	assert.NoError(t, err)
+
+	err = insertMsgStream.Produce(&msgPackDelete)
+	assert.NoError(t, err)
+
+	_, err = insertMsgStream.Broadcast(&timeTickMsgPack)
+	assert.NoError(t, err)
+	_, err = ddMsgStream.Broadcast(&timeTickMsgPack)
+	assert.NoError(t, err)
+
+	// wait for delete
+	for sync.delBufferManager.GetEntriesNum(1) == 0 {
+		time.Sleep(100)
+	}
+
+	// close and wait for flush
 	sync.close()
+	for {
+		select {
+		case flushPack, ok := <-sync.flushListener:
+			assert.True(t, ok)
+			if flushPack.segmentID == 1 {
+				assert.True(t, len(flushPack.insertLogs) == 12)
+				assert.True(t, len(flushPack.statsLogs) == 1)
+				assert.True(t, len(flushPack.deltaLogs) == 1)
+				return
+			}
+			if flushPack.segmentID == 0 {
+				assert.True(t, len(flushPack.insertLogs) == 0)
+				assert.True(t, len(flushPack.statsLogs) == 0)
+				assert.True(t, len(flushPack.deltaLogs) == 0)
+			}
+		case <-sync.ctx.Done():
+		}
+	}
 }
 
 func genBytes() (rawData []byte) {
@@ -405,6 +628,22 @@ func TestGetSegmentInfos(t *testing.T) {
 	segmentInfos3, err := dsService.getSegmentInfos([]int64{1})
 	assert.Error(t, err)
 	assert.Empty(t, segmentInfos3)
+
+	dataCoord.GetSegmentInfosError = false
+	dataCoord.GetSegmentInfosNotSuccess = false
+	dataCoord.UserSegmentInfo = map[int64]*datapb.SegmentInfo{
+		5: {
+			ID:            100,
+			CollectionID:  101,
+			PartitionID:   102,
+			InsertChannel: "by-dev-rootcoord-dml-test_v1",
+		},
+	}
+
+	segmentInfos, err = dsService.getSegmentInfos([]int64{5})
+	assert.NoError(t, err)
+	assert.Equal(t, 1, len(segmentInfos))
+	assert.Equal(t, int64(100), segmentInfos[0].ID)
 }
 
 func TestClearGlobalFlushingCache(t *testing.T) {

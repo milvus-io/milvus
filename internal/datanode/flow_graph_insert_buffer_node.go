@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
+	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
@@ -103,10 +104,36 @@ func (ibNode *insertBufferNode) Close() {
 	}
 }
 
-func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
-	fgMsg, ok := ibNode.verifyInMsg(in)
+func (ibNode *insertBufferNode) IsValidInMsg(in []Msg) bool {
+	if !ibNode.BaseNode.IsValidInMsg(in) {
+		return false
+	}
+	_, ok := in[0].(*flowGraphMsg)
 	if !ok {
-		return []Msg{}
+		log.Warn("type assertion failed for flowGraphMsg", zap.String("name", reflect.TypeOf(in[0]).Name()))
+		return false
+	}
+	return true
+}
+
+func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
+	fgMsg := in[0].(*flowGraphMsg)
+	if fgMsg.IsCloseMsg() {
+		if len(fgMsg.endPositions) != 0 {
+			// try to sync all segments
+			segmentsToSync := ibNode.Sync(fgMsg, make([]UniqueID, 0), fgMsg.endPositions[0])
+			res := flowGraphMsg{
+				deleteMessages: []*msgstream.DeleteMsg{},
+				timeRange:      fgMsg.timeRange,
+				startPositions: fgMsg.startPositions,
+				endPositions:   fgMsg.endPositions,
+				segmentsToSync: segmentsToSync,
+				dropCollection: fgMsg.dropCollection,
+				BaseMsg:        flowgraph.NewBaseMsg(true),
+			}
+			return []Msg{&res}
+		}
+		return in
 	}
 
 	if fgMsg.dropCollection {
@@ -119,6 +146,12 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 		spans = append(spans, sp)
 		msg.SetTraceCtx(ctx)
 	}
+
+	defer func() {
+		for _, sp := range spans {
+			sp.Finish()
+		}
+	}()
 
 	// replace pchannel with vchannel
 	startPositions := make([]*internalpb.MsgPosition, 0, len(fgMsg.startPositions))
@@ -181,31 +214,8 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 		dropCollection: fgMsg.dropCollection,
 	}
 
-	for _, sp := range spans {
-		sp.Finish()
-	}
-
 	// send delete msg to DeleteNode
 	return []Msg{&res}
-}
-
-func (ibNode *insertBufferNode) verifyInMsg(in []Msg) (*flowGraphMsg, bool) {
-	// while closing
-	if in == nil {
-		log.Warn("type assertion failed for flowGraphMsg because it's nil")
-		return nil, false
-	}
-
-	if len(in) != 1 {
-		log.Warn("Invalid operate message input in insertBufferNode", zap.Int("input length", len(in)))
-		return nil, false
-	}
-
-	fgMsg, ok := in[0].(*flowGraphMsg)
-	if !ok {
-		log.Warn("type assertion failed for flowGraphMsg", zap.String("name", reflect.TypeOf(in[0]).Name()))
-	}
-	return fgMsg, ok
 }
 
 func (ibNode *insertBufferNode) GetBufferIfFull(segID UniqueID) (*BufferData, bool) {
@@ -301,12 +311,37 @@ func (ibNode *insertBufferNode) FillInSyncTasks(fgMsg *flowGraphMsg, seg2Upload 
 
 		for _, segID := range segmentIDs {
 			buf := ibNode.GetBuffer(segID)
-
 			syncTasks[segID] = &syncTask{
 				buffer:    buf, // nil is valid
 				segmentID: segID,
 				flushed:   false,
 				dropped:   true,
+			}
+		}
+		return syncTasks
+	}
+
+	if fgMsg.IsCloseMsg() {
+		// All segments in the collection will be synced, not matter empty buffer or not
+		segmentIDs := ibNode.channel.listAllSegmentIDs()
+		log.Info("Receive close request and syncing all segments",
+			zap.Int64s("segments", segmentIDs),
+			zap.String("channel", ibNode.channelName),
+		)
+
+		for _, segID := range segmentIDs {
+			// if segment has data or delete then force sync
+			insertBuf, hasInsert := ibNode.channel.getCurInsertBuffer(segID)
+			deleteEntry := ibNode.delBufferManager.GetEntriesNum(segID)
+			// if insert buf or or delete buf is not empty, trigger sync
+			if (hasInsert && insertBuf.size > 0) || (deleteEntry > 0) {
+				syncTasks[segID] = &syncTask{
+					buffer:    insertBuf, // nil is valid
+					segmentID: segID,
+					flushed:   false,
+					dropped:   false,
+					auto:      true,
+				}
 			}
 		}
 		return syncTasks
@@ -353,7 +388,7 @@ func (ibNode *insertBufferNode) FillInSyncTasks(fgMsg *flowGraphMsg, seg2Upload 
 		}
 	}
 	if len(syncSegmentIDs) > 0 {
-		log.Debug("sync segments", zap.String("vChannel", ibNode.channelName),
+		log.Info("sync segments", zap.String("vChannel", ibNode.channelName),
 			zap.Int64s("segIDs", syncSegmentIDs)) // TODO: maybe too many prints here
 	}
 
@@ -418,6 +453,7 @@ func (ibNode *insertBufferNode) Sync(fgMsg *flowGraphMsg, seg2Upload []UniqueID,
 		)
 		// use the flushed pk stats to take current stat
 		var pkStats []*storage.PrimaryKeyStats
+		// TODO, this has to be async flush, no need to block here.
 		err := retry.Do(ibNode.ctx, func() error {
 			statBlobs, err := ibNode.flushManager.flushBufferData(task.buffer,
 				task.segmentID,

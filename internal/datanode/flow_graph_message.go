@@ -27,6 +27,8 @@ type (
 	// Msg is flowgraph.Msg
 	Msg = flowgraph.Msg
 
+	BaseMsg = flowgraph.BaseMsg
+
 	// MsgStreamMsg is flowgraph.MsgStreamMsg
 	MsgStreamMsg = flowgraph.MsgStreamMsg
 
@@ -41,6 +43,7 @@ type (
 )
 
 type flowGraphMsg struct {
+	BaseMsg
 	insertMessages []*msgstream.InsertMsg
 	deleteMessages []*msgstream.DeleteMsg
 	timeRange      TimeRange
@@ -56,12 +59,18 @@ func (fgMsg *flowGraphMsg) TimeTick() Timestamp {
 	return fgMsg.timeRange.timestampMax
 }
 
+func (fgMsg *flowGraphMsg) IsClose() bool {
+	return fgMsg.BaseMsg.IsCloseMsg()
+}
+
 // flush Msg is used in flowgraph insertBufferNode to flush the given segment
 type flushMsg struct {
 	msgID        UniqueID
 	timestamp    Timestamp
 	segmentID    UniqueID
 	collectionID UniqueID
+	//isFlush illustrates if this is a flush or normal sync
+	isFlush bool
 }
 
 type resendTTMsg struct {

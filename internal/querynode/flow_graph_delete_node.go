@@ -53,28 +53,24 @@ func (dNode *deleteNode) Name() string {
 	return fmt.Sprintf("dNode-%s", dNode.deltaVchannel)
 }
 
+func (dNode *deleteNode) IsValidInMsg(in []Msg) bool {
+	if !dNode.baseNode.IsValidInMsg(in) {
+		return false
+	}
+	_, ok := in[0].(*deleteMsg)
+	if !ok {
+		log.Warn("type assertion failed for deleteMsg", zap.String("msgType", reflect.TypeOf(in[0]).Name()), zap.String("name", dNode.Name()))
+		return false
+	}
+	return true
+}
+
 // Operate handles input messages, do delete operations
 func (dNode *deleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
-	if in == nil {
-		log.Debug("type assertion failed for deleteMsg because it's nil", zap.String("name", dNode.Name()))
-		return []Msg{}
-	}
-
-	if len(in) != 1 {
-		log.Warn("Invalid operate message input in deleteNode", zap.Int("input length", len(in)), zap.String("name", dNode.Name()))
-		return []Msg{}
-	}
-
 	dMsg, ok := in[0].(*deleteMsg)
 	if !ok {
 		log.Warn("type assertion failed for deleteMsg", zap.String("msgType", reflect.TypeOf(in[0]).Name()), zap.String("name", dNode.Name()))
 		return []Msg{}
-	}
-
-	delData := &deleteData{
-		deleteIDs:        map[UniqueID][]primaryKey{},
-		deleteTimestamps: map[UniqueID][]Timestamp{},
-		deleteOffset:     map[UniqueID]int64{},
 	}
 
 	var spans []opentracing.Span
@@ -82,6 +78,24 @@ func (dNode *deleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
 		spans = append(spans, sp)
 		msg.SetTraceCtx(ctx)
+	}
+
+	defer func() {
+		for _, sp := range spans {
+			sp.Finish()
+		}
+	}()
+
+	if dMsg.IsCloseMsg() {
+		return []Msg{
+			&serviceTimeMsg{BaseMsg: flowgraph.NewBaseMsg(true)},
+		}
+	}
+
+	delData := &deleteData{
+		deleteIDs:        map[UniqueID][]primaryKey{},
+		deleteTimestamps: map[UniqueID][]Timestamp{},
+		deleteOffset:     map[UniqueID]int64{},
 	}
 
 	// 1. filter segment by bloom filter
@@ -153,9 +167,6 @@ func (dNode *deleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 	var res Msg = &serviceTimeMsg{
 		timeRange: dMsg.timeRange,
-	}
-	for _, sp := range spans {
-		sp.Finish()
 	}
 
 	return []Msg{res}

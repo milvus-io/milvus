@@ -207,6 +207,7 @@ type DataCoordFactory struct {
 
 	GetSegmentInfosError      bool
 	GetSegmentInfosNotSuccess bool
+	UserSegmentInfo           map[int64]*datapb.SegmentInfo
 
 	AddSegmentError      bool
 	AddSegmentNotSuccess bool
@@ -310,7 +311,9 @@ func (ds *DataCoordFactory) GetSegmentInfo(ctx context.Context, req *datapb.GetS
 	}
 	var segmentInfos []*datapb.SegmentInfo
 	for _, segmentID := range req.SegmentIDs {
-		if segInfo, ok := segID2SegInfo[segmentID]; ok {
+		if segInfo, ok := ds.UserSegmentInfo[segmentID]; ok {
+			segmentInfos = append(segmentInfos, segInfo)
+		} else if segInfo, ok := segID2SegInfo[segmentID]; ok {
 			segmentInfos = append(segmentInfos, segInfo)
 		} else {
 			segmentInfos = append(segmentInfos, &datapb.SegmentInfo{
@@ -780,9 +783,39 @@ func (df *DataFactory) GenMsgStreamInsertMsg(idx int, chanName string) *msgstrea
 	return msg
 }
 
-func (df *DataFactory) GetMsgStreamTsInsertMsgs(n int, chanName string) (inMsgs []msgstream.TsMsg) {
+func (df *DataFactory) GenMsgStreamInsertMsgWithTs(idx int, chanName string, ts Timestamp) *msgstream.InsertMsg {
+	var msg = &msgstream.InsertMsg{
+		BaseMsg: msgstream.BaseMsg{
+			HashValues:     []uint32{uint32(idx)},
+			BeginTimestamp: ts,
+			EndTimestamp:   ts,
+		},
+		InsertRequest: internalpb.InsertRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_Insert,
+				MsgID:     0,
+				Timestamp: ts,
+				SourceID:  0,
+			},
+			CollectionName: "col1",
+			PartitionName:  "default",
+			SegmentID:      1,
+			CollectionID:   UniqueID(0),
+			ShardName:      chanName,
+			Timestamps:     []Timestamp{ts},
+			RowIDs:         []UniqueID{UniqueID(idx)},
+			// RowData:        []*commonpb.Blob{{Value: df.rawData}},
+			FieldsData: df.columnData,
+			Version:    internalpb.InsertDataVersion_ColumnBased,
+			NumRows:    1,
+		},
+	}
+	return msg
+}
+
+func (df *DataFactory) GetMsgStreamTsInsertMsgs(n int, chanName string, ts Timestamp) (inMsgs []msgstream.TsMsg) {
 	for i := 0; i < n; i++ {
-		var msg = df.GenMsgStreamInsertMsg(i, chanName)
+		var msg = df.GenMsgStreamInsertMsgWithTs(i, chanName, ts)
 		var tsMsg msgstream.TsMsg = msg
 		inMsgs = append(inMsgs, tsMsg)
 	}
@@ -816,9 +849,37 @@ func (df *DataFactory) GenMsgStreamDeleteMsg(pks []primaryKey, chanName string) 
 			},
 			CollectionName: "col1",
 			PartitionName:  "default",
+			PartitionID:    1,
 			ShardName:      chanName,
 			PrimaryKeys:    s.ParsePrimaryKeys2IDs(pks),
 			Timestamps:     timestamps,
+			NumRows:        int64(len(pks)),
+		},
+	}
+	return msg
+}
+
+func (df *DataFactory) GenMsgStreamDeleteMsgWithTs(idx int, pks []primaryKey, chanName string, ts Timestamp) *msgstream.DeleteMsg {
+	var msg = &msgstream.DeleteMsg{
+		BaseMsg: msgstream.BaseMsg{
+			HashValues:     []uint32{uint32(idx)},
+			BeginTimestamp: ts,
+			EndTimestamp:   ts,
+		},
+		DeleteRequest: internalpb.DeleteRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_Delete,
+				MsgID:     1,
+				Timestamp: ts,
+				SourceID:  0,
+			},
+			CollectionName: "col1",
+			PartitionName:  "default",
+			PartitionID:    1,
+			CollectionID:   UniqueID(0),
+			ShardName:      chanName,
+			PrimaryKeys:    s.ParsePrimaryKeys2IDs(pks),
+			Timestamps:     []Timestamp{ts},
 			NumRows:        int64(len(pks)),
 		},
 	}

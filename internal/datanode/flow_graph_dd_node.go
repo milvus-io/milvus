@@ -86,21 +86,46 @@ func (ddn *ddNode) Name() string {
 	return fmt.Sprintf("ddNode-%d-%s", ddn.collectionID, ddn.vChannelName)
 }
 
+func (ddn *ddNode) IsValidInMsg(in []Msg) bool {
+	if !ddn.BaseNode.IsValidInMsg(in) {
+		return false
+	}
+	_, ok := in[0].(*MsgStreamMsg)
+	if !ok {
+		log.Warn("type assertion failed for MsgStreamMsg", zap.String("name", reflect.TypeOf(in[0]).Name()))
+		return false
+	}
+	return true
+}
+
 // Operate handles input messages, implementing flowgrpah.Node
 func (ddn *ddNode) Operate(in []Msg) []Msg {
-	if in == nil {
-		log.Debug("type assertion failed for MsgStreamMsg because it's nil")
-		return []Msg{}
-	}
-
-	if len(in) != 1 {
-		log.Warn("Invalid operate message input in ddNode", zap.Int("input length", len(in)))
-		return []Msg{}
-	}
-
 	msMsg, ok := in[0].(*MsgStreamMsg)
 	if !ok {
 		log.Warn("type assertion failed for MsgStreamMsg", zap.String("name", reflect.TypeOf(in[0]).Name()))
+		return []Msg{}
+	}
+
+	if msMsg.IsCloseMsg() {
+		var fgMsg = flowGraphMsg{
+			BaseMsg:        flowgraph.NewBaseMsg(true),
+			insertMessages: make([]*msgstream.InsertMsg, 0),
+			timeRange: TimeRange{
+				timestampMin: msMsg.TimestampMin(),
+				timestampMax: msMsg.TimestampMax(),
+			},
+			startPositions: msMsg.StartPositions(),
+			endPositions:   msMsg.EndPositions(),
+			dropCollection: false,
+		}
+		log.Warn("MsgStream closed", zap.Any("ddNode node", ddn.Name()), zap.Int64("collection", ddn.collectionID), zap.String("channel", ddn.vChannelName))
+		return []Msg{&fgMsg}
+	}
+
+	if load := ddn.dropMode.Load(); load != nil && load.(bool) {
+		log.Debug("ddNode in dropMode",
+			zap.String("vChannelName", ddn.vChannelName),
+			zap.Int64("collection ID", ddn.collectionID))
 		return []Msg{}
 	}
 
@@ -110,13 +135,11 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 		spans = append(spans, sp)
 		msg.SetTraceCtx(ctx)
 	}
-
-	if load := ddn.dropMode.Load(); load != nil && load.(bool) {
-		log.Debug("ddNode in dropMode",
-			zap.String("vChannelName", ddn.vChannelName),
-			zap.Int64("collection ID", ddn.collectionID))
-		return []Msg{}
-	}
+	defer func() {
+		for _, sp := range spans {
+			sp.Finish()
+		}
+	}()
 
 	var fgMsg = flowGraphMsg{
 		insertMessages: make([]*msgstream.InsertMsg, 0),
@@ -193,7 +216,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 		case commonpb.MsgType_Delete:
 			dmsg := msg.(*msgstream.DeleteMsg)
 			log.Debug("DDNode receive delete messages",
-				zap.Int64("num", dmsg.NumRows),
+				zap.Int64("numRows", dmsg.NumRows),
 				zap.String("vChannelName", ddn.vChannelName))
 			for i := int64(0); i < dmsg.NumRows; i++ {
 				dmsg.HashValues = append(dmsg.HashValues, uint32(0))
@@ -230,10 +253,6 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 
 	fgMsg.startPositions = append(fgMsg.startPositions, msMsg.StartPositions()...)
 	fgMsg.endPositions = append(fgMsg.endPositions, msMsg.EndPositions()...)
-
-	for _, sp := range spans {
-		sp.Finish()
-	}
 
 	return []Msg{&fgMsg}
 }

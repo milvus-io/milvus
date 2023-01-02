@@ -48,28 +48,38 @@ func (fdmNode *filterDmNode) Name() string {
 	return fmt.Sprintf("fdmNode-%s", fdmNode.vchannel)
 }
 
-// Operate handles input messages, to filter invalid insert messages
-func (fdmNode *filterDmNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
-	if in == nil {
-		log.Debug("type assertion failed for MsgStreamMsg because it's nil", zap.String("name", fdmNode.Name()))
-		return []Msg{}
+func (fdmNode *filterDmNode) IsValidInMsg(in []Msg) bool {
+	if !fdmNode.baseNode.IsValidInMsg(in) {
+		return false
 	}
-	if len(in) != 1 {
-		log.Warn("Invalid operate message input in filterDmNode", zap.Int("input length", len(in)), zap.String("name", fdmNode.Name()))
-		return []Msg{}
-	}
-
-	msgStreamMsg, ok := in[0].(*MsgStreamMsg)
+	_, ok := in[0].(*MsgStreamMsg)
 	if !ok {
 		log.Warn("type assertion failed for MsgStreamMsg", zap.String("msgType", reflect.TypeOf(in[0]).Name()), zap.String("name", fdmNode.Name()))
-		return []Msg{}
+		return false
 	}
+	return true
+}
+
+// Operate handles input messages, to filter invalid insert messages
+func (fdmNode *filterDmNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
+	msgStreamMsg := in[0].(*MsgStreamMsg)
 
 	var spans []opentracing.Span
 	for _, msg := range msgStreamMsg.TsMessages() {
 		sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
 		spans = append(spans, sp)
 		msg.SetTraceCtx(ctx)
+	}
+	defer func() {
+		for _, sp := range spans {
+			sp.Finish()
+		}
+	}()
+
+	if msgStreamMsg.IsCloseMsg() {
+		return []Msg{
+			&insertMsg{BaseMsg: flowgraph.NewBaseMsg(true)},
+		}
 	}
 
 	var iMsg = insertMsg{
@@ -125,11 +135,7 @@ func (fdmNode *filterDmNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		}
 	}
 
-	var res Msg = &iMsg
-	for _, sp := range spans {
-		sp.Finish()
-	}
-	return []Msg{res}
+	return []Msg{&iMsg}
 }
 
 // filterInvalidDeleteMessage would filter out invalid delete messages
@@ -231,7 +237,6 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 
 // newFilteredDmNode returns a new filterDmNode
 func newFilteredDmNode(metaReplica ReplicaInterface, collectionID UniqueID, vchannel Channel) *filterDmNode {
-
 	maxQueueLength := Params.QueryNodeCfg.FlowGraphMaxQueueLength.GetAsInt32()
 	maxParallelism := Params.QueryNodeCfg.FlowGraphMaxParallelism.GetAsInt32()
 

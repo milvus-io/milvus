@@ -191,10 +191,10 @@ func (c *ChannelMeta) maxRowCountPerSegment(ts Timestamp) (int64, error) {
 // Make sure to verify `channel.hasSegment(segID)` == false before calling `channel.addSegment()`.
 func (c *ChannelMeta) addSegment(req addSegmentReq) error {
 	if req.collID != c.collectionID {
-		log.Warn("collection mismatch",
+		log.Warn("failed to addSegment, collection mismatch",
 			zap.Int64("current collection ID", req.collID),
 			zap.Int64("expected collection ID", c.collectionID))
-		return fmt.Errorf("mismatch collection, ID=%d", req.collID)
+		return fmt.Errorf("failed to addSegment, mismatch collection, ID=%d", req.collID)
 	}
 	log.Info("adding segment",
 		zap.String("type", req.segType.String()),
@@ -500,8 +500,11 @@ func (c *ChannelMeta) getCollectionID() UniqueID {
 //
 //	If you want the latest collection schema, ts should be 0.
 func (c *ChannelMeta) getCollectionSchema(collID UniqueID, ts Timestamp) (*schemapb.CollectionSchema, error) {
-	if !c.validCollection(collID) {
-		return nil, fmt.Errorf("mismatch collection, want %d, actual %d", c.collectionID, collID)
+	if collID != c.collectionID {
+		log.Warn("failed to getCollectionSchema, collection mismatch",
+			zap.Int64("current collection ID", collID),
+			zap.Int64("expected collection ID", c.collectionID))
+		return nil, fmt.Errorf("failed to getCollectionSchema, mismatch collection, want %d, actual %d", c.collectionID, collID)
 	}
 
 	c.schemaMut.RLock()
@@ -524,12 +527,7 @@ func (c *ChannelMeta) getCollectionSchema(collID UniqueID, ts Timestamp) (*schem
 	return c.collSchema, nil
 }
 
-func (c *ChannelMeta) validCollection(collID UniqueID) bool {
-	return collID == c.collectionID
-}
-
 func (c *ChannelMeta) mergeFlushedSegments(seg *Segment, planID UniqueID, compactedFrom []UniqueID) error {
-
 	log := log.With(
 		zap.Int64("segment ID", seg.segmentID),
 		zap.Int64("collection ID", seg.collectionID),
@@ -539,9 +537,10 @@ func (c *ChannelMeta) mergeFlushedSegments(seg *Segment, planID UniqueID, compac
 		zap.String("channel name", c.channelName))
 
 	if seg.collectionID != c.collectionID {
-		log.Warn("Mismatch collection",
-			zap.Int64("expected collectionID", c.collectionID))
-		return fmt.Errorf("mismatch collection, ID=%d", seg.collectionID)
+		log.Warn("failed to mergeFlushedSegments, collection mismatch",
+			zap.Int64("current collection ID", seg.collectionID),
+			zap.Int64("expected collection ID", c.collectionID))
+		return fmt.Errorf("failed to mergeFlushedSegments, mismatch collection, ID=%d", seg.collectionID)
 	}
 
 	compactedFrom = lo.Filter(compactedFrom, func(segID int64, _ int) bool {
@@ -578,10 +577,10 @@ func (c *ChannelMeta) mergeFlushedSegments(seg *Segment, planID UniqueID, compac
 // for tests only
 func (c *ChannelMeta) addFlushedSegmentWithPKs(segID, collID, partID UniqueID, numOfRows int64, ids storage.FieldData) error {
 	if collID != c.collectionID {
-		log.Warn("Mismatch collection",
-			zap.Int64("input ID", collID),
-			zap.Int64("expected ID", c.collectionID))
-		return fmt.Errorf("mismatch collection, ID=%d", collID)
+		log.Warn("failed to addFlushedSegmentWithPKs, collection mismatch",
+			zap.Int64("current collection ID", collID),
+			zap.Int64("expected collection ID", c.collectionID))
+		return fmt.Errorf("failed to addFlushedSegmentWithPKs, mismatch collection, ID=%d", collID)
 	}
 
 	log.Info("Add Flushed segment",

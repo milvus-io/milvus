@@ -129,10 +129,16 @@ func TestFlowGraphInsertBufferNodeCreate(t *testing.T) {
 	assert.Error(t, err)
 }
 
-type mockMsg struct{}
+type mockMsg struct {
+	BaseMsg
+}
 
 func (*mockMsg) TimeTick() Timestamp {
 	return 0
+}
+
+func (*mockMsg) IsClose() bool {
+	return false
 }
 
 func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
@@ -154,8 +160,7 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 				ibn := &insertBufferNode{
 					ttMerger: newMergedTimeTickerSender(func(Timestamp, []int64) error { return nil }),
 				}
-				rt := ibn.Operate(test.in)
-				assert.Empty(t0, rt)
+				assert.False(t0, ibn.IsValidInMsg(test.in))
 			})
 		}
 	})
@@ -711,16 +716,15 @@ func (s *InsertBufferNodeSuite) SetupSuite() {
 		pkType: schemapb.DataType_Int64,
 	}
 
-	delBufManager := &DelBufferManager{
+	s.collID = 1
+	s.partID = 10
+	s.channel = newChannel("channel", s.collID, nil, rc, s.cm)
+
+	s.delBufManager = &DelBufferManager{
 		channel:       s.channel,
 		delMemorySize: 0,
 		delBufHeap:    &PriorityQueue{},
 	}
-
-	s.collID = 1
-	s.partID = 10
-	s.channel = newChannel("channel", s.collID, nil, rc, s.cm)
-	s.delBufManager = delBufManager
 	s.cm = storage.NewLocalChunkManager(storage.RootPath(insertBufferNodeTestDir))
 
 	s.originalConfig = Params.DataNodeCfg.FlushInsertBufferSize.GetAsInt64()
@@ -886,6 +890,27 @@ func (s *InsertBufferNodeSuite) TestFillInSyncTasks() {
 			s.Assert().False(task.dropped)
 		}
 	})
+
+	s.Run("test close", func() {
+		fgMsg := &flowGraphMsg{BaseMsg: flowgraph.NewBaseMsg(true)}
+
+		node := &insertBufferNode{
+			channelName:      s.channel.channelName,
+			channel:          s.channel,
+			delBufferManager: s.delBufManager,
+			flushChan:        make(chan flushMsg, 100),
+		}
+
+		syncTasks := node.FillInSyncTasks(fgMsg, nil)
+		s.Assert().Equal(1, len(syncTasks))
+		for _, task := range syncTasks {
+			s.Assert().Equal(task.segmentID, int64(1))
+			s.Assert().False(task.dropped)
+			s.Assert().False(task.flushed)
+			s.Assert().True(task.auto)
+		}
+	})
+
 }
 
 func TestInsertBufferNodeSuite(t *testing.T) {

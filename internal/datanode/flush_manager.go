@@ -312,6 +312,7 @@ func (m *rendezvousFlushManager) handleInsertTask(segmentID UniqueID, task flush
 }
 
 func (m *rendezvousFlushManager) handleDeleteTask(segmentID UniqueID, task flushDeleteTask, deltaLogs *DelDataBuf, pos *internalpb.MsgPosition) {
+	log.Info("handling delete task", zap.Int64("segment ID", segmentID))
 	// in dropping mode
 	if m.dropping.Load() {
 		// preventing separate delete, check position exists in queue first
@@ -567,6 +568,7 @@ func (m *rendezvousFlushManager) close() {
 		queue.injectMut.Unlock()
 		return true
 	})
+	m.waitForAllFlushQueue()
 }
 
 type flushBufferInsertTask struct {
@@ -788,6 +790,7 @@ func flushNotifyFunc(dsService *dataSyncService, opts ...retry.Option) notifyMet
 			zap.Int64("SegmentID", pack.segmentID),
 			zap.Int64("CollectionID", dsService.collectionID),
 			zap.Any("startPos", startPos),
+			zap.Any("checkPoints", checkPoints),
 			zap.Int("Length of Field2BinlogPaths", len(fieldInsert)),
 			zap.Int("Length of Field2Stats", len(fieldStats)),
 			zap.Int("Length of Field2Deltalogs", len(deltaInfos[0].GetBinlogs())),
@@ -816,7 +819,7 @@ func flushNotifyFunc(dsService *dataSyncService, opts ...retry.Option) notifyMet
 			rsp, err := dsService.dataCoord.SaveBinlogPaths(context.Background(), req)
 			// should be network issue, return error and retry
 			if err != nil {
-				return fmt.Errorf(err.Error())
+				return err
 			}
 
 			// Segment not found during stale segment flush. Segment might get compacted already.
@@ -853,6 +856,10 @@ func flushNotifyFunc(dsService *dataSyncService, opts ...retry.Option) notifyMet
 		}
 		if pack.flushed || pack.dropped {
 			dsService.channel.segmentFlushed(pack.segmentID)
+		}
+
+		if dsService.flushListener != nil {
+			dsService.flushListener <- pack
 		}
 		dsService.flushingSegCache.Remove(req.GetSegmentID())
 		dsService.channel.evictHistoryInsertBuffer(req.GetSegmentID(), pack.pos)

@@ -37,6 +37,7 @@ import (
 type InputNode struct {
 	BaseNode
 	inStream     msgstream.MsgStream
+	lastMsg      *msgstream.MsgPack
 	name         string
 	role         string
 	nodeID       int64
@@ -61,6 +62,10 @@ func (inNode *InputNode) Close() {
 	})
 }
 
+func (inNode *InputNode) IsValidInMsg(in []Msg) bool {
+	return true
+}
+
 // Name returns node name
 func (inNode *InputNode) Name() string {
 	return inNode.name
@@ -76,8 +81,19 @@ func (inNode *InputNode) Operate(in []Msg) []Msg {
 	msgPack, ok := <-inNode.inStream.Chan()
 	if !ok {
 		log.Warn("MsgStream closed", zap.Any("input node", inNode.Name()))
+		if inNode.lastMsg != nil {
+			log.Info("trigger force sync", zap.Int64("collection", inNode.collectionID), zap.Any("position", inNode.lastMsg))
+			return []Msg{&MsgStreamMsg{
+				BaseMsg:        NewBaseMsg(true),
+				tsMessages:     []msgstream.TsMsg{},
+				timestampMin:   inNode.lastMsg.BeginTs,
+				timestampMax:   inNode.lastMsg.EndTs,
+				startPositions: inNode.lastMsg.StartPositions,
+				endPositions:   inNode.lastMsg.EndPositions,
+			}}
+		}
 		return []Msg{&MsgStreamMsg{
-			isCloseMsg: true,
+			BaseMsg: NewBaseMsg(true),
 		}}
 	}
 
@@ -86,6 +102,7 @@ func (inNode *InputNode) Operate(in []Msg) []Msg {
 		return []Msg{}
 	}
 
+	inNode.lastMsg = msgPack
 	sub := tsoutil.SubByNow(msgPack.EndTs)
 	if inNode.role == typeutil.QueryNodeRole {
 		metrics.QueryNodeConsumerMsgCount.

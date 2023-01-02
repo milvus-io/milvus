@@ -47,6 +47,8 @@ type DelBufferManager struct {
 }
 
 func (bm *DelBufferManager) GetSegDelBufMemSize(segID UniqueID) int64 {
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
 	if delDataBuf, ok := bm.channel.getCurDeleteBuffer(segID); ok {
 		return delDataBuf.item.memorySize
 	}
@@ -54,6 +56,8 @@ func (bm *DelBufferManager) GetSegDelBufMemSize(segID UniqueID) int64 {
 }
 
 func (bm *DelBufferManager) GetEntriesNum(segID UniqueID) int64 {
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
 	if delDataBuf, ok := bm.channel.getCurDeleteBuffer(segID); ok {
 		return delDataBuf.GetEntriesNum()
 	}
