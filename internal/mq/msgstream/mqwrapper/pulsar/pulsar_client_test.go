@@ -637,6 +637,10 @@ func (c *mockPulsarClient) CreateReader(_ pulsar.ReaderOptions) (pulsar.Reader, 
 	return nil, hackPulsarError(pulsar.ConnectError)
 }
 
+func (c *mockPulsarClient) CreateTableView(pulsar.TableViewOptions) (pulsar.TableView, error) {
+	return nil, hackPulsarError(pulsar.ConnectError)
+}
+
 // TopicPartitions Fetches the list of partitions for a given topic
 //
 // If the topic is partitioned, this will return a list of partition names.

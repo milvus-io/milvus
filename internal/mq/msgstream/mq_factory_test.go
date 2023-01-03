@@ -26,6 +26,7 @@ import (
 )
 
 func TestPmsFactory(t *testing.T) {
+	Params.Init()
 	pmsFactory := NewPmsFactory(&Params.PulsarCfg)
 
 	ctx := context.Background()
