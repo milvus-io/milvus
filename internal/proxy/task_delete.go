@@ -58,7 +58,7 @@ func (dt *deleteTask) Type() commonpb.MsgType {
 }
 
 func (dt *deleteTask) Name() string {
-	return deleteTaskName
+	return DeleteTaskName
 }
 
 func (dt *deleteTask) BeginTs() Timestamp {

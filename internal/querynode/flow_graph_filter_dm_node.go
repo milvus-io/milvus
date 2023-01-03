@@ -135,7 +135,7 @@ func (fdmNode *filterDmNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 // filterInvalidDeleteMessage would filter out invalid delete messages
 func (fdmNode *filterDmNode) filterInvalidDeleteMessage(msg *msgstream.DeleteMsg, loadType loadType) (*msgstream.DeleteMsg, error) {
 	if err := msg.CheckAligned(); err != nil {
-		return nil, fmt.Errorf("CheckAligned failed, err = %s", err)
+		return nil, fmt.Errorf("DeleteMessage CheckAligned failed, err = %s", err)
 	}
 
 	if len(msg.Timestamps) <= 0 {
@@ -168,7 +168,7 @@ func (fdmNode *filterDmNode) filterInvalidDeleteMessage(msg *msgstream.DeleteMsg
 // filterInvalidInsertMessage would filter out invalid insert messages
 func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg, loadType loadType) (*msgstream.InsertMsg, error) {
 	if err := msg.CheckAligned(); err != nil {
-		return nil, fmt.Errorf("CheckAligned failed, err = %s", err)
+		return nil, fmt.Errorf("InsertMessage CheckAligned failed, err = %s", err)
 	}
 
 	if len(msg.Timestamps) <= 0 {

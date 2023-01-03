@@ -107,7 +107,7 @@ get_deleted_bitmap(int64_t del_barrier,
 
             // insert after delete with same pk, delete will not task effect on this insert record
             // and reset bitmap to 0
-            if (insert_record.timestamps_[insert_row_offset] > delete_timestamp) {
+            if (insert_record.timestamps_[insert_row_offset] >= delete_timestamp) {
                 bitmap->reset(insert_row_offset);
                 continue;
             }

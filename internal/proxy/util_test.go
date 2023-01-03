@@ -29,6 +29,7 @@ import (
 	"google.golang.org/grpc/metadata"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -1224,5 +1225,266 @@ func Test_InsertTaskCheckPrimaryFieldData(t *testing.T) {
 	case4.schema.Fields[1].IsPrimaryKey = true
 	case4.schema.Fields[1].AutoID = true
 	_, err = checkPrimaryFieldData(case4.schema, case4.insertMsg)
+	assert.NotEqual(t, nil, err)
+}
+
+func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
+	// schema is empty, though won't happen in system
+	// num_rows(0) should be greater than 0
+	case1 := insertTask{
+		schema: &schemapb.CollectionSchema{
+			Name:        "TestUpsertTask_checkPrimaryFieldData",
+			Description: "TestUpsertTask_checkPrimaryFieldData",
+			AutoID:      false,
+			Fields:      []*schemapb.FieldSchema{},
+		},
+		insertMsg: &BaseInsertTask{
+			InsertRequest: internalpb.InsertRequest{
+				Base: &commonpb.MsgBase{
+					MsgType: commonpb.MsgType_Insert,
+				},
+				DbName:         "TestUpsertTask_checkPrimaryFieldData",
+				CollectionName: "TestUpsertTask_checkPrimaryFieldData",
+				PartitionName:  "TestUpsertTask_checkPrimaryFieldData",
+			},
+		},
+		result: &milvuspb.MutationResult{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+		},
+	}
+	_, err := upsertCheckPrimaryFieldData(case1.schema, case1.result, case1.insertMsg)
+	assert.NotEqual(t, nil, err)
+
+	// the num of passed fields is less than needed
+	case2 := insertTask{
+		schema: &schemapb.CollectionSchema{
+			Name:        "TestUpsertTask_checkPrimaryFieldData",
+			Description: "TestUpsertTask_checkPrimaryFieldData",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:     "int64Field",
+					FieldID:  1,
+					DataType: schemapb.DataType_Int64,
+				},
+				{
+					Name:     "floatField",
+					FieldID:  2,
+					DataType: schemapb.DataType_Float,
+				},
+			},
+		},
+		insertMsg: &BaseInsertTask{
+			InsertRequest: internalpb.InsertRequest{
+				Base: &commonpb.MsgBase{
+					MsgType: commonpb.MsgType_Insert,
+				},
+				RowData: []*commonpb.Blob{
+					{},
+					{},
+				},
+				FieldsData: []*schemapb.FieldData{
+					{
+						Type:      schemapb.DataType_Int64,
+						FieldName: "int64Field",
+					},
+				},
+			},
+		},
+		result: &milvuspb.MutationResult{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+		},
+	}
+	_, err = upsertCheckPrimaryFieldData(case2.schema, case2.result, case2.insertMsg)
+	assert.NotEqual(t, nil, err)
+
+	// autoID == false, no primary field schema
+	// primary field is not found
+	case3 := insertTask{
+		schema: &schemapb.CollectionSchema{
+			Name:        "TestUpsertTask_checkPrimaryFieldData",
+			Description: "TestUpsertTask_checkPrimaryFieldData",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:     "int64Field",
+					DataType: schemapb.DataType_Int64,
+				},
+				{
+					Name:     "floatField",
+					DataType: schemapb.DataType_Float,
+				},
+			},
+		},
+		insertMsg: &BaseInsertTask{
+			InsertRequest: internalpb.InsertRequest{
+				Base: &commonpb.MsgBase{
+					MsgType: commonpb.MsgType_Insert,
+				},
+				RowData: []*commonpb.Blob{
+					{},
+					{},
+				},
+				FieldsData: []*schemapb.FieldData{
+					{},
+					{},
+				},
+			},
+		},
+		result: &milvuspb.MutationResult{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+		},
+	}
+	_, err = upsertCheckPrimaryFieldData(case3.schema, case3.result, case3.insertMsg)
+	assert.NotEqual(t, nil, err)
+
+	// autoID == true, upsert don't support it
+	case4 := insertTask{
+		schema: &schemapb.CollectionSchema{
+			Name:        "TestUpsertTask_checkPrimaryFieldData",
+			Description: "TestUpsertTask_checkPrimaryFieldData",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:     "int64Field",
+					FieldID:  1,
+					DataType: schemapb.DataType_Int64,
+				},
+				{
+					Name:     "floatField",
+					FieldID:  2,
+					DataType: schemapb.DataType_Float,
+				},
+			},
+		},
+		insertMsg: &BaseInsertTask{
+			InsertRequest: internalpb.InsertRequest{
+				Base: &commonpb.MsgBase{
+					MsgType: commonpb.MsgType_Insert,
+				},
+				RowData: []*commonpb.Blob{
+					{},
+					{},
+				},
+				FieldsData: []*schemapb.FieldData{
+					{
+						Type:      schemapb.DataType_Int64,
+						FieldName: "int64Field",
+					},
+				},
+			},
+		},
+		result: &milvuspb.MutationResult{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+		},
+	}
+	case4.schema.Fields[0].IsPrimaryKey = true
+	case4.schema.Fields[0].AutoID = true
+	_, err = upsertCheckPrimaryFieldData(case4.schema, case4.result, case4.insertMsg)
+	assert.Equal(t, commonpb.ErrorCode_UpsertAutoIDTrue, case4.result.Status.ErrorCode)
+	assert.NotEqual(t, nil, err)
+
+	// primary field data is nil, GetPrimaryFieldData fail
+	case5 := insertTask{
+		schema: &schemapb.CollectionSchema{
+			Name:        "TestUpsertTask_checkPrimaryFieldData",
+			Description: "TestUpsertTask_checkPrimaryFieldData",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:     "int64Field",
+					FieldID:  1,
+					DataType: schemapb.DataType_Int64,
+				},
+				{
+					Name:     "floatField",
+					FieldID:  2,
+					DataType: schemapb.DataType_Float,
+				},
+			},
+		},
+		insertMsg: &BaseInsertTask{
+			InsertRequest: internalpb.InsertRequest{
+				Base: &commonpb.MsgBase{
+					MsgType: commonpb.MsgType_Insert,
+				},
+				RowData: []*commonpb.Blob{
+					{},
+					{},
+				},
+				FieldsData: []*schemapb.FieldData{
+					{},
+					{},
+				},
+			},
+		},
+		result: &milvuspb.MutationResult{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+		},
+	}
+	case5.schema.Fields[0].IsPrimaryKey = true
+	case5.schema.Fields[0].AutoID = false
+	_, err = upsertCheckPrimaryFieldData(case5.schema, case5.result, case5.insertMsg)
+	assert.NotEqual(t, nil, err)
+
+	// only support DataType Int64 or VarChar as PrimaryField
+	case6 := insertTask{
+		schema: &schemapb.CollectionSchema{
+			Name:        "TestUpsertTask_checkPrimaryFieldData",
+			Description: "TestUpsertTask_checkPrimaryFieldData",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:     "floatVectorField",
+					FieldID:  1,
+					DataType: schemapb.DataType_FloatVector,
+				},
+				{
+					Name:     "floatField",
+					FieldID:  2,
+					DataType: schemapb.DataType_Float,
+				},
+			},
+		},
+		insertMsg: &BaseInsertTask{
+			InsertRequest: internalpb.InsertRequest{
+				Base: &commonpb.MsgBase{
+					MsgType: commonpb.MsgType_Insert,
+				},
+				RowData: []*commonpb.Blob{
+					{},
+					{},
+				},
+				FieldsData: []*schemapb.FieldData{
+					{
+						Type:      schemapb.DataType_FloatVector,
+						FieldName: "floatVectorField",
+					},
+					{
+						Type:      schemapb.DataType_Int64,
+						FieldName: "floatField",
+					},
+				},
+			},
+		},
+		result: &milvuspb.MutationResult{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+		},
+	}
+	case6.schema.Fields[0].IsPrimaryKey = true
+	case6.schema.Fields[0].AutoID = false
+	_, err = upsertCheckPrimaryFieldData(case6.schema, case6.result, case6.insertMsg)
 	assert.NotEqual(t, nil, err)
 }
