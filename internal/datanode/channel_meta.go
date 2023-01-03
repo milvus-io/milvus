@@ -654,6 +654,9 @@ func (c *ChannelMeta) getChannelCheckpoint(ttPos *internalpb.MsgPosition) *inter
 	channelCP := &internalpb.MsgPosition{Timestamp: math.MaxUint64}
 	// 1. find the earliest startPos in current buffer and history buffer
 	for _, seg := range c.segments {
+		if !seg.isValid() {
+			continue
+		}
 		if seg.curInsertBuf != nil && seg.curInsertBuf.startPos != nil && seg.curInsertBuf.startPos.Timestamp < channelCP.Timestamp {
 			channelCP = seg.curInsertBuf.startPos
 		}
@@ -670,7 +673,6 @@ func (c *ChannelMeta) getChannelCheckpoint(ttPos *internalpb.MsgPosition) *inter
 				channelCP = db.startPos
 			}
 		}
-		// TODO: maybe too many logs would print
 		log.Debug("getChannelCheckpoint for segment", zap.Int64("segmentID", seg.segmentID),
 			zap.Bool("isCurIBEmpty", seg.curInsertBuf == nil),
 			zap.Bool("isCurDBEmpty", seg.curDeleteBuf == nil),

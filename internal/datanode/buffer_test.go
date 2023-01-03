@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
@@ -159,9 +160,12 @@ func Test_CompactSegBuff(t *testing.T) {
 	compactedFromSegIDs[0] = segID1
 	compactedFromSegIDs[1] = segID2
 	channelSegments[segID1] = &Segment{}
+	channelSegments[segID1].setType(datapb.SegmentType_Compacted)
 	channelSegments[segID2] = &Segment{}
+	channelSegments[segID2].setType(datapb.SegmentType_Compacted)
 	var compactedToSegID UniqueID = 3333
 	channelSegments[compactedToSegID] = &Segment{}
+	channelSegments[compactedToSegID].setType(datapb.SegmentType_Flushed)
 
 	//2. set up deleteDataBuf for seg1 and seg2
 	delDataBuf1 := newDelDataBuf()

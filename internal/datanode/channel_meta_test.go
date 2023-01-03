@@ -856,6 +856,42 @@ func TestChannelMeta_ChannelCP(t *testing.T) {
 			nil, nil,
 			&internalpb.MsgPosition{Timestamp: 100}, &internalpb.MsgPosition{Timestamp: 100})
 	})
+
+	t.Run("with invalid segment", func(t *testing.T) {
+		segmentID := UniqueID(1)
+		channel := newChannel(mockVChannel, collID, nil, rc, cm)
+		channel.chunkManager = &mockDataCM{}
+		err := channel.addSegment(
+			addSegmentReq{
+				segType: datapb.SegmentType_New,
+				segID:   segmentID,
+				collID:  collID,
+			})
+		assert.NoError(t, err)
+		curInsertPos := &internalpb.MsgPosition{Timestamp: 100, MsgID: []byte{1}}
+		channel.setCurInsertBuffer(segmentID, &BufferData{
+			startPos: curInsertPos,
+		})
+		ttPos := &internalpb.MsgPosition{Timestamp: 200, MsgID: []byte{1}}
+		resPos := channel.getChannelCheckpoint(ttPos)
+		assert.NotNil(t, resPos)
+		// should return buffer's position
+		assert.True(t, resPos.ChannelName == curInsertPos.ChannelName)
+		assert.True(t, resPos.Timestamp == curInsertPos.Timestamp)
+
+		channel.removeSegments(segmentID)
+		err = channel.addSegment(addSegmentReq{
+			segType: datapb.SegmentType_Compacted,
+			segID:   segmentID,
+			collID:  collID,
+		})
+		assert.NoError(t, err)
+		resPos = channel.getChannelCheckpoint(ttPos)
+		assert.NotNil(t, resPos)
+		// should return ttPos because segment is invalid
+		assert.True(t, resPos.ChannelName == ttPos.ChannelName)
+		assert.True(t, resPos.Timestamp == ttPos.Timestamp)
+	})
 }
 
 // ChannelMetaSuite setup test suite for ChannelMeta
