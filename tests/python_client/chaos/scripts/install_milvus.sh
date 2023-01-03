@@ -1,7 +1,7 @@
 
 release=${1:-"milvs-chaos"}
 milvus_mode=${2:-"cluster"}
-ns=${2:-"chaos-testing"}
+ns=${3:-"chaos-testing"}
 bash uninstall_milvus.sh ${release} ${ns}|| true
 
 helm repo add milvus https://milvus-io.github.io/milvus-helm/

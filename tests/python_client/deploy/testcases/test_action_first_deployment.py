@@ -104,7 +104,7 @@ class TestActionFirstDeployment(TestDeployBase):
 
         # init collection and insert with small size data without flush to get growing segment
         collection_w = self.init_collection_general(insert_data=True, is_binary=is_binary, nb=3000,
-                                                    is_flush=False, is_index=True, name=name)[0]
+                                                    is_flush=False, is_index=False, name=name)[0]
         # params for creating index
         if is_binary:
             default_index_field = ct.default_binary_vec_field_name
@@ -155,7 +155,7 @@ class TestActionFirstDeployment(TestDeployBase):
         # insert with flush multiple times to generate multiple sealed segment
         for i in range(5):
             self.init_collection_general(insert_data=True, is_binary=is_binary, nb=data_size,
-                                         is_flush=False, is_index=True, name=name)
+                                         is_flush=False, is_index=False, name=name)
             # at this step, all segment are sealed
             if pymilvus_version >= "2.2.0":
                 collection_w.flush()
@@ -175,7 +175,7 @@ class TestActionFirstDeployment(TestDeployBase):
         # get growing segment before reload
         if segment_status == "all":
             self.init_collection_general(insert_data=True, is_binary=is_binary, nb=3000,
-                                         is_flush=False, is_index=True, name=name)
+                                         is_flush=False, is_index=False, name=name)
         # reload after flush and creating index
         if replica_number > 0:
             collection_w.release()
@@ -185,7 +185,7 @@ class TestActionFirstDeployment(TestDeployBase):
         # insert data to get growing segment after reload
         if segment_status == "all":
             self.init_collection_general(insert_data=True, is_binary=is_binary, nb=3000,
-                                         is_flush=False, is_index=True, name=name)
+                                         is_flush=False, is_index=False, name=name)
         
         # search and query for sealed and growing segment
         if replica_number > 0:
