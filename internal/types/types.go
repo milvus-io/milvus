@@ -1145,6 +1145,18 @@ type ProxyComponent interface {
 	// error is always nil
 	Delete(ctx context.Context, request *milvuspb.DeleteRequest) (*milvuspb.MutationResult, error)
 
+	// Upsert notifies Proxy to upsert rows
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the request params, including database name(reserved), collection name, partition name(optional), fields data
+	//
+	// The `Status` in response struct `MutationResult` indicates if this operation is processed successfully or fail cause;
+	// the `IDs` in `MutationResult` return the id list of upserted rows.
+	// the `SuccIndex` in `MutationResult` return the succeed number of upserted rows.
+	// the `ErrIndex` in `MutationResult` return the failed number of upsert rows.
+	// error is always nil
+	Upsert(ctx context.Context, request *milvuspb.UpsertRequest) (*milvuspb.MutationResult, error)
+
 	// Search notifies Proxy to do search
 	//
 	// ctx is the context to control request deadline and cancellation

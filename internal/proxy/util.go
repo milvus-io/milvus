@@ -35,6 +35,7 @@ import (
 	"google.golang.org/grpc/metadata"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util"
@@ -932,6 +933,49 @@ func checkPrimaryFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstre
 		// if autoID == true, set the primary field data
 		// insertMsg.fieldsData need append primaryFieldData
 		insertMsg.FieldsData = append(insertMsg.FieldsData, primaryFieldData)
+	}
+
+	// parse primaryFieldData to result.IDs, and as returned primary keys
+	ids, err := parsePrimaryFieldData2IDs(primaryFieldData)
+	if err != nil {
+		log.Error("parse primary field data to IDs failed", zap.String("collectionName", insertMsg.CollectionName), zap.Error(err))
+		return nil, err
+	}
+
+	return ids, nil
+}
+
+// TODO(smellthemoon): can merge it with checkPrimaryFieldData
+func upsertCheckPrimaryFieldData(schema *schemapb.CollectionSchema, result *milvuspb.MutationResult, insertMsg *msgstream.InsertMsg) (*schemapb.IDs, error) {
+	rowNums := uint32(insertMsg.NRows())
+	// TODO(dragondriver): in fact, NumRows is not trustable, we should check all input fields
+	if insertMsg.NRows() <= 0 {
+		return nil, errNumRowsLessThanOrEqualToZero(rowNums)
+	}
+
+	if err := checkLengthOfFieldsData(schema, insertMsg); err != nil {
+		return nil, err
+	}
+
+	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(schema)
+	if err != nil {
+		log.Error("get primary field schema failed", zap.String("collectionName", insertMsg.CollectionName), zap.Any("schema", schema), zap.Error(err))
+		return nil, err
+	}
+
+	// get primaryFieldData whether autoID is true or not
+	var primaryFieldData *schemapb.FieldData
+	if primaryFieldSchema.AutoID {
+		// upsert has not supported when autoID == true
+		log.Info("can not upsert when auto id enabled",
+			zap.String("primaryFieldSchemaName", primaryFieldSchema.Name))
+		result.Status.ErrorCode = commonpb.ErrorCode_UpsertAutoIDTrue
+		return nil, fmt.Errorf("upsert can not assign primary field data when auto id enabled %v", primaryFieldSchema.Name)
+	}
+	primaryFieldData, err = typeutil.GetPrimaryFieldData(insertMsg.GetFieldsData(), primaryFieldSchema)
+	if err != nil {
+		log.Error("get primary field data failed when upsert", zap.String("collectionName", insertMsg.CollectionName), zap.Error(err))
+		return nil, err
 	}
 
 	// parse primaryFieldData to result.IDs, and as returned primary keys

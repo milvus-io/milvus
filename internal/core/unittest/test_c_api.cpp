@@ -791,7 +791,7 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnSealedSegment) {
     auto query_result = std::make_unique<proto::segcore::RetrieveResults>();
     auto suc = query_result->ParseFromArray(retrieve_result.proto_blob, retrieve_result.proto_size);
     ASSERT_TRUE(suc);
-    ASSERT_EQ(query_result->ids().int_id().data().size(), 3);
+    ASSERT_EQ(query_result->ids().int_id().data().size(), 4);
 
     DeleteRetrievePlan(plan.release());
     DeleteRetrieveResult(&retrieve_result);

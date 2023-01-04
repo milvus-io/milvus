@@ -1698,6 +1698,94 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 		assert.NoError(t, task.PostExecute(ctx))
 	})
 
+	t.Run("upsert", func(t *testing.T) {
+		hash := generateHashKeys(nb)
+		task := &upsertTask{
+			upsertMsg: &msgstream.UpsertMsg{
+				InsertMsg: &BaseInsertTask{
+					BaseMsg: msgstream.BaseMsg{
+						HashValues: hash,
+					},
+					InsertRequest: internalpb.InsertRequest{
+						Base: &commonpb.MsgBase{
+							MsgType:  commonpb.MsgType_Insert,
+							MsgID:    0,
+							SourceID: paramtable.GetNodeID(),
+						},
+						DbName:         dbName,
+						CollectionName: collectionName,
+						PartitionName:  partitionName,
+						NumRows:        uint64(nb),
+						Version:        internalpb.InsertDataVersion_ColumnBased,
+					},
+				},
+				DeleteMsg: &msgstream.DeleteMsg{
+					BaseMsg: msgstream.BaseMsg{
+						HashValues: hash,
+					},
+					DeleteRequest: internalpb.DeleteRequest{
+						Base: &commonpb.MsgBase{
+							MsgType:   commonpb.MsgType_Delete,
+							MsgID:     0,
+							Timestamp: 0,
+							SourceID:  paramtable.GetNodeID(),
+						},
+						DbName:         dbName,
+						CollectionName: collectionName,
+						PartitionName:  partitionName,
+					},
+				},
+			},
+
+			Condition: NewTaskCondition(ctx),
+			req: &milvuspb.UpsertRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:  commonpb.MsgType_Insert,
+					MsgID:    0,
+					SourceID: paramtable.GetNodeID(),
+				},
+				DbName:         dbName,
+				CollectionName: collectionName,
+				PartitionName:  partitionName,
+				HashKeys:       hash,
+				NumRows:        uint32(nb),
+			},
+			ctx: ctx,
+			result: &milvuspb.MutationResult{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+					Reason:    "",
+				},
+				IDs:          nil,
+				SuccIndex:    nil,
+				ErrIndex:     nil,
+				Acknowledged: false,
+				InsertCnt:    0,
+				DeleteCnt:    0,
+				UpsertCnt:    0,
+				Timestamp:    0,
+			},
+			idAllocator:   idAllocator,
+			segIDAssigner: segAllocator,
+			chMgr:         chMgr,
+			chTicker:      ticker,
+			vChannels:     nil,
+			pChannels:     nil,
+			schema:        nil,
+		}
+
+		fieldID := common.StartOfUserFieldID
+		for fieldName, dataType := range fieldName2Types {
+			task.req.FieldsData = append(task.req.FieldsData, generateFieldData(dataType, fieldName, nb))
+			fieldID++
+		}
+
+		assert.NoError(t, task.OnEnqueue())
+		assert.NoError(t, task.PreExecute(ctx))
+		assert.NoError(t, task.Execute(ctx))
+		assert.NoError(t, task.PostExecute(ctx))
+	})
+
 	t.Run("delete", func(t *testing.T) {
 		task := &deleteTask{
 			Condition: NewTaskCondition(ctx),

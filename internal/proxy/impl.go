@@ -28,6 +28,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
@@ -2018,11 +2019,9 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 	}
 	method := "Insert"
 	tr := timerecord.NewTimeRecorder(method)
-	receiveSize := proto.Size(request)
-	rateCol.Add(internalpb.RateType_DMLInsert.String(), float64(receiveSize))
-	metrics.ProxyReceiveBytes.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.InsertLabel).Add(float64(receiveSize))
-
+	metrics.ProxyReceiveBytes.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.InsertLabel).Add(float64(proto.Size(request)))
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel).Inc()
+
 	it := &insertTask{
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
@@ -2119,6 +2118,9 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 	// InsertCnt always equals to the number of entities in the request
 	it.result.InsertCnt = int64(request.NumRows)
 
+	receiveSize := proto.Size(it.insertMsg)
+	rateCol.Add(internalpb.RateType_DMLInsert.String(), float64(receiveSize))
+
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 		metrics.SuccessLabel).Inc()
 	successCnt := it.result.InsertCnt - int64(len(it.result.ErrIndex))
@@ -2126,10 +2128,6 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 	metrics.ProxyMutationLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.InsertLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	metrics.ProxyCollectionMutationLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.InsertLabel, request.CollectionName).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return it.result, nil
-}
-
-func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) (*milvuspb.MutationResult, error) {
-	panic("TODO: not implement")
 }
 
 // Delete delete records from collection, then these records cannot be searched.
@@ -2140,9 +2138,7 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 	log.Debug("Start processing delete request in Proxy")
 	defer log.Debug("Finish processing delete request in Proxy")
 
-	receiveSize := proto.Size(request)
-	rateCol.Add(internalpb.RateType_DMLDelete.String(), float64(receiveSize))
-	metrics.ProxyReceiveBytes.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.DeleteLabel).Add(float64(receiveSize))
+	metrics.ProxyReceiveBytes.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.DeleteLabel).Add(float64(proto.Size(request)))
 
 	if !node.checkHealthy() {
 		return &milvuspb.MutationResult{
@@ -2219,11 +2215,148 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 		}, nil
 	}
 
+	receiveSize := proto.Size(dt.deleteMsg)
+	rateCol.Add(internalpb.RateType_DMLDelete.String(), float64(receiveSize))
+
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 		metrics.SuccessLabel).Inc()
 	metrics.ProxyMutationLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.DeleteLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	metrics.ProxyCollectionMutationLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.DeleteLabel, request.CollectionName).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return dt.result, nil
+}
+
+// Upsert upsert records into collection.
+func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) (*milvuspb.MutationResult, error) {
+	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-Upsert")
+	defer sp.Finish()
+
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName),
+		zap.String("partition", request.PartitionName),
+		zap.Uint32("NumRows", request.NumRows),
+	)
+	log.Debug("Start processing upsert request in Proxy")
+
+	if !node.checkHealthy() {
+		return &milvuspb.MutationResult{
+			Status: unhealthyStatus(),
+		}, nil
+	}
+	method := "Upsert"
+	tr := timerecord.NewTimeRecorder(method)
+
+	metrics.ProxyReceiveBytes.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.UpsertLabel).Add(float64(proto.Size(request)))
+	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel).Inc()
+
+	it := &upsertTask{
+		baseMsg: msgstream.BaseMsg{
+			HashValues: request.HashKeys,
+		},
+		ctx:       ctx,
+		Condition: NewTaskCondition(ctx),
+
+		req: &milvuspb.UpsertRequest{
+			Base: commonpbutil.NewMsgBase(
+				commonpbutil.WithMsgType(commonpb.MsgType(commonpb.MsgType_Upsert)),
+				commonpbutil.WithSourceID(paramtable.GetNodeID()),
+			),
+			CollectionName: request.CollectionName,
+			PartitionName:  request.PartitionName,
+			FieldsData:     request.FieldsData,
+			NumRows:        request.NumRows,
+		},
+
+		result: &milvuspb.MutationResult{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+			IDs: &schemapb.IDs{
+				IdField: nil,
+			},
+		},
+
+		idAllocator:   node.rowIDAllocator,
+		segIDAssigner: node.segAssigner,
+		chMgr:         node.chMgr,
+		chTicker:      node.chTicker,
+	}
+
+	if len(it.req.PartitionName) <= 0 {
+		it.req.PartitionName = Params.CommonCfg.DefaultPartitionName.GetValue()
+	}
+
+	constructFailedResponse := func(err error, errCode commonpb.ErrorCode) *milvuspb.MutationResult {
+		numRows := request.NumRows
+		errIndex := make([]uint32, numRows)
+		for i := uint32(0); i < numRows; i++ {
+			errIndex[i] = i
+		}
+
+		return &milvuspb.MutationResult{
+			Status: &commonpb.Status{
+				ErrorCode: errCode,
+				Reason:    err.Error(),
+			},
+			ErrIndex: errIndex,
+		}
+	}
+
+	log.Debug("Enqueue upsert request in Proxy",
+		zap.Int("len(FieldsData)", len(request.FieldsData)),
+		zap.Int("len(HashKeys)", len(request.HashKeys)))
+
+	if err := node.sched.dmQueue.Enqueue(it); err != nil {
+		log.Info("Failed to enqueue upsert task",
+			zap.Error(err))
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
+			metrics.AbandonLabel).Inc()
+		return &milvuspb.MutationResult{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+		}, nil
+	}
+
+	log.Debug("Detail of upsert request in Proxy",
+		zap.Uint64("BeginTS", it.BeginTs()),
+		zap.Uint64("EndTS", it.EndTs()))
+
+	if err := it.WaitToFinish(); err != nil {
+		log.Info("Failed to execute insert task in task scheduler",
+			zap.Error(err))
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
+			metrics.FailLabel).Inc()
+		return constructFailedResponse(err, it.result.Status.ErrorCode), nil
+	}
+
+	if it.result.Status.ErrorCode != commonpb.ErrorCode_Success {
+		setErrorIndex := func() {
+			numRows := request.NumRows
+			errIndex := make([]uint32, numRows)
+			for i := uint32(0); i < numRows; i++ {
+				errIndex[i] = i
+			}
+			it.result.ErrIndex = errIndex
+		}
+		setErrorIndex()
+	}
+
+	insertReceiveSize := proto.Size(it.upsertMsg.InsertMsg)
+	deleteReceiveSize := proto.Size(it.upsertMsg.DeleteMsg)
+
+	rateCol.Add(internalpb.RateType_DMLDelete.String(), float64(deleteReceiveSize))
+	rateCol.Add(internalpb.RateType_DMLInsert.String(), float64(insertReceiveSize))
+
+	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
+		metrics.SuccessLabel).Inc()
+	metrics.ProxyMutationLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.UpsertLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.ProxyCollectionMutationLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.UpsertLabel, request.CollectionName).Observe(float64(tr.ElapseSpan().Milliseconds()))
+
+	log.Debug("Finish processing upsert request in Proxy")
+	return it.result, nil
 }
 
 // Search search the most similar records of requests.

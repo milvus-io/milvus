@@ -685,7 +685,7 @@ func (s *Server) Delete(ctx context.Context, request *milvuspb.DeleteRequest) (*
 }
 
 func (s *Server) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) (*milvuspb.MutationResult, error) {
-	panic("TODO: not implement")
+	return s.proxy.Upsert(ctx, request)
 }
 
 func (s *Server) Search(ctx context.Context, request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
@@ -708,12 +708,12 @@ func (s *Server) GetDdChannel(ctx context.Context, request *internalpb.GetDdChan
 	return s.proxy.GetDdChannel(ctx, request)
 }
 
-//GetPersistentSegmentInfo notifies Proxy to get persistent segment info.
+// GetPersistentSegmentInfo notifies Proxy to get persistent segment info.
 func (s *Server) GetPersistentSegmentInfo(ctx context.Context, request *milvuspb.GetPersistentSegmentInfoRequest) (*milvuspb.GetPersistentSegmentInfoResponse, error) {
 	return s.proxy.GetPersistentSegmentInfo(ctx, request)
 }
 
-//GetQuerySegmentInfo notifies Proxy to get query segment info.
+// GetQuerySegmentInfo notifies Proxy to get query segment info.
 func (s *Server) GetQuerySegmentInfo(ctx context.Context, request *milvuspb.GetQuerySegmentInfoRequest) (*milvuspb.GetQuerySegmentInfoResponse, error) {
 	return s.proxy.GetQuerySegmentInfo(ctx, request)
 

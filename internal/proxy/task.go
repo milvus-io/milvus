@@ -65,11 +65,12 @@ const (
 	ReleaseCollectionTaskName  = "ReleaseCollectionTask"
 	LoadPartitionTaskName      = "LoadPartitionsTask"
 	ReleasePartitionTaskName   = "ReleasePartitionsTask"
-	deleteTaskName             = "DeleteTask"
+	DeleteTaskName             = "DeleteTask"
 	CreateAliasTaskName        = "CreateAliasTask"
 	DropAliasTaskName          = "DropAliasTask"
 	AlterAliasTaskName         = "AlterAliasTask"
 	AlterCollectionTaskName    = "AlterCollectionTask"
+	UpsertTaskName             = "UpsertTask"
 
 	// minFloat32 minimum float.
 	minFloat32 = -1 * float32(math.MaxFloat32)

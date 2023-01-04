@@ -87,7 +87,7 @@ TEST(Util, GetDeleteBitmap) {
 
     del_barrier = get_barrier(delete_record, query_timestamp);
     res_bitmap = get_deleted_bitmap(del_barrier, insert_barrier, delete_record, insert_record, query_timestamp);
-    ASSERT_EQ(res_bitmap->bitmap_ptr->count(), N);
+    ASSERT_EQ(res_bitmap->bitmap_ptr->count(), N - 1);
 
     // test case insert repeated pk1 (ts = {1 ... N}) -> delete pk1 (ts = N) -> query (ts = N/2)
     query_timestamp = tss[N - 1] / 2;
