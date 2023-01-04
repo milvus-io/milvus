@@ -760,14 +760,14 @@ func (node *DataNode) ShowConfigurations(ctx context.Context, req *internalpb.Sh
 func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	if !node.isHealthy() {
 		log.Warn("DataNode.GetMetrics failed",
-			zap.Int64("node_id", Params.DataNodeCfg.GetNodeID()),
+			zap.Int64("nodeID", node.session.ServerID),
 			zap.String("req", req.Request),
-			zap.Error(errDataNodeIsUnhealthy(Params.DataNodeCfg.GetNodeID())))
+			zap.Error(errDataNodeIsUnhealthy(node.session.ServerID)))
 
 		return &milvuspb.GetMetricsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    msgDataNodeIsUnhealthy(Params.DataNodeCfg.GetNodeID()),
+				Reason:    msgDataNodeIsUnhealthy(node.session.ServerID),
 			},
 		}, nil
 	}
@@ -775,14 +775,14 @@ func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 	metricType, err := metricsinfo.ParseMetricType(req.Request)
 	if err != nil {
 		log.Warn("DataNode.GetMetrics failed to parse metric type",
-			zap.Int64("node_id", Params.DataNodeCfg.GetNodeID()),
+			zap.Int64("nodeID", node.session.ServerID),
 			zap.String("req", req.Request),
 			zap.Error(err))
 
 		return &milvuspb.GetMetricsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    fmt.Sprintf("datanode GetMetrics failed, nodeID=%d, err=%s", Params.DataNodeCfg.GetNodeID(), err.Error()),
+				Reason:    fmt.Sprintf("datanode GetMetrics failed, nodeID=%d, err=%s", node.session.ServerID, err.Error()),
 			},
 		}, nil
 	}
@@ -790,11 +790,11 @@ func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 	if metricType == metricsinfo.SystemInfoMetrics {
 		systemInfoMetrics, err := node.getSystemInfoMetrics(ctx, req)
 		if err != nil {
-			log.Warn("DataNode GetMetrics failed", zap.Int64("nodeID", Params.DataNodeCfg.GetNodeID()), zap.Error(err))
+			log.Warn("DataNode GetMetrics failed", zap.Int64("nodeID", node.session.ServerID), zap.Error(err))
 			return &milvuspb.GetMetricsResponse{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,
-					Reason:    fmt.Sprintf("datanode GetMetrics failed, nodeID=%d, err=%s", Params.DataNodeCfg.GetNodeID(), err.Error()),
+					Reason:    fmt.Sprintf("datanode GetMetrics failed, nodeID=%d, err=%s", node.session.ServerID, err.Error()),
 				},
 			}, nil
 		}
@@ -802,8 +802,8 @@ func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 		return systemInfoMetrics, nil
 	}
 
-	log.Debug("DataNode.GetMetrics failed, request metric type is not implemented yet",
-		zap.Int64("node_id", Params.DataNodeCfg.GetNodeID()),
+	log.RatedWarn(60, "DataNode.GetMetrics failed, request metric type is not implemented yet",
+		zap.Int64("nodeID", node.session.ServerID),
 		zap.String("req", req.Request),
 		zap.String("metric_type", metricType))
 
