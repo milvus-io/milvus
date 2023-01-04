@@ -710,7 +710,7 @@ func (loader *segmentLoader) loadDeltaLogs(ctx context.Context, segment *Segment
 func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collectionID int64, position *internalpb.MsgPosition,
 	segmentIDs []int64) error {
 	startTs := time.Now()
-	stream, err := loader.factory.NewMsgStream(ctx)
+	stream, err := loader.factory.NewTtMsgStream(ctx)
 	if err != nil {
 		return err
 	}
@@ -764,6 +764,7 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 		zap.String("seekPos", position.String()),
 		zap.Any("lastMsg", lastMsgID), // use any in case of nil
 	)
+
 	hasMore := true
 	for hasMore {
 		select {
@@ -803,21 +804,19 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 						return err
 					}
 				}
-
-				ret, err := lastMsgID.LessOrEqualThan(tsMsg.Position().MsgID)
-				if err != nil {
-					log.Warn("check whether current MsgID less than last MsgID failed",
-						zap.Int64("collectionID", collectionID),
-						zap.String("channel", pChannelName),
-						zap.Error(err),
-					)
-					return err
-				}
-
-				if ret {
-					hasMore = false
-					break
-				}
+			}
+			ret, err := lastMsgID.LessOrEqualThan(msgPack.EndPositions[0].MsgID)
+			if err != nil {
+				log.Warn("check whether current MsgID less than last MsgID failed",
+					zap.Int64("collectionID", collectionID),
+					zap.String("channel", pChannelName),
+					zap.Error(err),
+				)
+				return err
+			}
+			if ret {
+				hasMore = false
+				break
 			}
 		}
 	}
