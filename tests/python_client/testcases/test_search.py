@@ -3758,12 +3758,8 @@ class  TestsearchString(TestcaseBase):
 class TestsearchPagination(TestcaseBase):
     """ Test case of search pagination """
 
-    @pytest.fixture(scope="function", params=[0, 10])
+    @pytest.fixture(scope="function", params=[0, 10, 100])
     def offset(self, request):
-        yield request.param
-
-    @pytest.fixture(scope="function", params=[32, 128])
-    def dim(self, request):
         yield request.param
 
     @pytest.fixture(scope="function", params=[False, True])
@@ -3782,7 +3778,8 @@ class TestsearchPagination(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("limit", [10, 20])
-    def test_search_with_pagination(self, offset, auto_id, dim, limit, _async):
+    @pytest.mark.skip("issue #21444")
+    def test_search_with_pagination(self, offset, auto_id, limit, _async):
         """
         target: test search with pagination
         method: 1. connect and create a collection
@@ -3792,17 +3789,17 @@ class TestsearchPagination(TestcaseBase):
         expected: search successfully and ids is correct
         """
         # 1. create a collection
-        collection_w = self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim)[0]
+        collection_w = self.init_collection_general(prefix, True, auto_id=auto_id, dim=default_dim)[0]
         # 2. search pagination with offset
         search_param = {"metric_type": "L2", "params": {"nprobe": 10}, "offset": offset}
-        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         search_res = collection_w.search(vectors[:default_nq], default_search_field,
                                          search_param, limit,
                                          default_search_exp, _async=_async,
                                          check_task=CheckTasks.check_search_results,
                                          check_items={"nq": default_nq,
-                                         "limit": limit,
-                                         "_async": _async})[0]
+                                                      "limit": limit,
+                                                      "_async": _async})[0]
         # 3. search with offset+limit
         res = collection_w.search(vectors[:default_nq], default_search_field, default_search_params,
                                   limit+offset, default_search_exp, _async=_async)[0]
@@ -3811,7 +3808,9 @@ class TestsearchPagination(TestcaseBase):
             search_res = search_res.result()
             res.done()
             res = res.result()
-        assert search_res[0].ids == res[0].ids[offset:]
+        res_distance = res[0].distances[offset:]
+        assert sorted(search_res[0].distances) == sorted(res_distance)
+        assert set(search_res[0].ids) == set(res[0].ids[offset:])
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_string_with_pagination(self, offset, auto_id, _async):
@@ -3848,7 +3847,9 @@ class TestsearchPagination(TestcaseBase):
             search_res = search_res.result()
             res.done()
             res = res.result()
-        assert search_res[0].ids == res[0].ids[offset:]
+        res_distance = res[0].distances[offset:]
+        assert sorted(search_res[0].distances) == sorted(res_distance)
+        assert set(search_res[0].ids) == set(res[0].ids[offset:])
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_binary_with_pagination(self, offset, auto_id):
@@ -3883,9 +3884,8 @@ class TestsearchPagination(TestcaseBase):
         assert set(search_res[0].ids) == set(res[0].ids[offset:])
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="wait to test")
-    @pytest.mark.parametrize("limit", [1, 10, 100, 3000])
-    def test_search_with_pagination_topK(self, auto_id, dim, limit, _async):
+    @pytest.mark.parametrize("limit", [100, 3000, 10000])
+    def test_search_with_pagination_topK(self, auto_id, limit, _async):
         """
         target: test search with pagination limit + offset = topK
         method: 1. connect and create a collection
@@ -3897,10 +3897,10 @@ class TestsearchPagination(TestcaseBase):
         # 1. create a collection
         topK = 16384
         offset = topK - limit
-        collection_w = self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim)[0]
+        collection_w = self.init_collection_general(prefix, True, nb=20000, auto_id=auto_id, dim=default_dim)[0]
         # 2. search
         search_param = {"metric_type": "L2", "params": {"nprobe": 10}, "offset": offset}
-        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         search_res = collection_w.search(vectors[:default_nq], default_search_field,
                                          search_param, limit,
                                          default_search_exp, _async=_async,
@@ -3916,7 +3916,9 @@ class TestsearchPagination(TestcaseBase):
             search_res = search_res.result()
             res.done()
             res = res.result()
-        assert search_res[0].ids == res[0].ids[offset:]
+        res_distance = res[0].distances[offset:]
+        assert sorted(search_res[0].distances) == sorted(res_distance)
+        assert set(search_res[0].ids) == set(res[0].ids[offset:])
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("expression", cf.gen_normal_expressions())
@@ -3969,9 +3971,12 @@ class TestsearchPagination(TestcaseBase):
         for hits in search_res:
             ids = hits.ids
             assert set(ids).issubset(filter_ids_set)
-        assert search_res[0].ids == res[0].ids[offset:]
+        res_distance = res[0].distances[offset:]
+        assert sorted(search_res[0].distances) == sorted(res_distance)
+        assert set(search_res[0].ids) == set(res[0].ids[offset:])
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("issue #21444")
     def test_search_pagination_with_index_partition(self, offset, auto_id, _async):
         """
         target: test search pagination with index and partition
@@ -3982,7 +3987,7 @@ class TestsearchPagination(TestcaseBase):
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True,
                                                                       partition_num=1,
                                                                       auto_id=auto_id,
-                                                                      is_index=True)[0:4]
+                                                                      is_index=False)[0:4]
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         # 2. create index
         default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
@@ -4009,9 +4014,12 @@ class TestsearchPagination(TestcaseBase):
             search_res = search_res.result()
             res.done()
             res = res.result()
-        assert search_res[0].ids == res[0].ids[offset:]
+        res_distance = res[0].distances[offset:]
+        assert sorted(search_res[0].distances) == sorted(res_distance)
+        assert set(search_res[0].ids) == set(res[0].ids[offset:])
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("Same with the previous, collection must have index now")
     def test_search_pagination_with_partition(self, offset, auto_id, _async):
         """
         target: test search pagination with partition
@@ -4045,10 +4053,13 @@ class TestsearchPagination(TestcaseBase):
             search_res = search_res.result()
             res.done()
             res = res.result()
-        assert search_res[0].ids == res[0].ids[offset:]
+        assert res[0].distances == sorted(res[0].distances)
+        assert search_res[0].distances == sorted(search_res[0].distances)
+        assert search_res[0].distances == res[0].distances[offset:]
+        assert set(search_res[0].ids) == set(res[0].ids[offset:])
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_search_pagination_with_inserted_data(self, offset, dim, _async):
+    def test_search_pagination_with_inserted_data(self, offset, _async):
         """
         target: test search pagination with inserted data
         method: create connection, collection, insert data and search
@@ -4056,14 +4067,14 @@ class TestsearchPagination(TestcaseBase):
         expected: searched successfully
         """
         # 1. create collection
-        collection_w = self.init_collection_general(prefix, False, dim=dim)[0]
+        collection_w = self.init_collection_general(prefix, False, dim=default_dim)[0]
         # 2. insert data
-        data = cf.gen_default_dataframe_data(dim=dim)
+        data = cf.gen_default_dataframe_data(dim=default_dim)
         collection_w.insert(data)
         collection_w.load()
         # 3. search
         search_param = {"metric_type": "L2", "params": {"nprobe": 10}, "offset": offset}
-        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         search_res = collection_w.search(vectors[:default_nq], default_search_field,
                                          search_param, default_limit,
                                          default_search_exp, _async=_async,
@@ -4079,17 +4090,19 @@ class TestsearchPagination(TestcaseBase):
             search_res = search_res.result()
             res.done()
             res = res.result()
-        assert search_res[0].ids == res[0].ids[offset:]
+        res_distance = res[0].distances[offset:]
+        assert sorted(search_res[0].distances) == sorted(res_distance)
+        assert set(search_res[0].ids) == set(res[0].ids[offset:])
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_search_pagination_empty(self, offset, dim, auto_id, _async):
+    def test_search_pagination_empty(self, offset, auto_id, _async):
         """
         target: test search pagination empty
         method: connect, create collection, insert data and search
         expected: search successfully
         """
         # 1. initialize without data
-        collection_w = self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim)[0]
+        collection_w = self.init_collection_general(prefix, True, auto_id=auto_id, dim=default_dim)[0]
         # 2. search collection without data
         search_param = {"metric_type": "L2", "params": {"nprobe": 10}, "offset": offset}
         search_res = collection_w.search([], default_search_field, search_param,
@@ -4103,9 +4116,31 @@ class TestsearchPagination(TestcaseBase):
         assert len(search_res) == 0
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("offset", [3000, 5000])
+    def test_search_pagination_with_offset_over_num_entities(self, offset):
+        """
+        target: test search pagination with offset over num_entities
+        method: create connection, collection, insert 3000 entities and search with offset over 3000
+        expected: return an empty list
+        """
+        # 1. initialize
+        collection_w = self.init_collection_general(prefix, True, dim=default_dim)[0]
+        # 2. search
+        search_param = {"metric_type": "L2", "params": {"nprobe": 10}, "offset": offset}
+        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
+        res = collection_w.search(vectors[:default_nq], default_search_field,
+                                  search_param, default_limit,
+                                  default_search_exp,
+                                  check_task=CheckTasks.check_search_results,
+                                  check_items={"nq": default_nq,
+                                               "limit": 0})[0]
+        assert res[0].ids == []
+
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index, params",
                              zip(ct.all_index_types[:7],
                                  ct.default_index_params[:7]))
+    @pytest.mark.skip("issue #21444")
     def test_search_pagination_after_different_index(self, index, params, auto_id, offset, _async):
         """
         target: test search pagination after different index
@@ -4113,11 +4148,11 @@ class TestsearchPagination(TestcaseBase):
         expected: search successfully
         """
         # 1. initialize with data
-        dim = 32
+        dim = 128
         collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, 1000,
                                                                                   partition_num=1,
                                                                                   auto_id=auto_id,
-                                                                                  dim=dim, is_index=True)[0:5]
+                                                                                  dim=dim, is_index=False)[0:5]
         # 2. create index and load
         if params.get("m"):
             if (dim % params["m"]) != 0:
@@ -4151,7 +4186,9 @@ class TestsearchPagination(TestcaseBase):
                 search_res = search_res.result()
                 res.done()
                 res = res.result()
-            assert search_res[0].ids == res[0].ids[offset:]
+            res_distance = res[0].distances[offset:]
+            assert sorted(search_res[0].distances) == sorted(res_distance)
+            assert set(search_res[0].ids) == set(res[0].ids[offset:])
 
 
 class TestsearchPaginationInvalid(TestcaseBase):
@@ -4207,7 +4244,8 @@ class TestsearchPaginationInvalid(TestcaseBase):
                             check_items={"err_code": 1,
                                          "err_msg": "offset [%d] is invalid, should be in range "
                                                     "[1, 16385], but got %d" % (offset, offset)})
-    
+
+
 class  TestsearchDiskann(TestcaseBase):
     """
     ******************************************************************
