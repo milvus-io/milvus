@@ -286,12 +286,10 @@ func (sched *TaskScheduler) indexAddLoop() {
 }
 
 // Start stats the task scheduler of indexing tasks.
-func (sched *TaskScheduler) Start() error {
+func (sched *TaskScheduler) Start() {
 
 	sched.wg.Add(1)
 	go sched.indexAddLoop()
-
-	return nil
 }
 
 // Close closes the task scheduler of indexing tasks.

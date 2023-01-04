@@ -99,6 +99,7 @@ type Server struct {
 	etcdCli          *clientv3.Client
 	address          string
 	kvClient         *etcdkv.EtcdKV
+	storageCli       storage.ChunkManager
 	meta             *meta
 	segmentManager   Manager
 	allocator        allocator
@@ -126,7 +127,7 @@ type Server struct {
 	//qcEventCh <-chan *sessionutil.SessionEvent
 
 	enableActiveStandBy bool
-	activateFunc        func()
+	activateFunc        sessionutil.ActivateFunc
 
 	dataNodeCreator        dataNodeCreatorFunc
 	rootCoordClientCreator rootCoordCreatorFunc
@@ -267,6 +268,7 @@ func (s *Server) Init() error {
 	if err != nil {
 		return err
 	}
+	s.storageCli = storageCli
 
 	if err = s.initMeta(storageCli.RootPath(), storageCli); err != nil {
 		return err
@@ -315,12 +317,22 @@ func (s *Server) Start() error {
 	}
 
 	if s.enableActiveStandBy {
-		s.activateFunc = func() {
+		s.activateFunc = func() error {
 			// todo complete the activateFunc
 			log.Info("datacoord switch from standby to active, activating")
+			err := s.initMeta(s.storageCli.RootPath(), s.storageCli)
+			if err != nil {
+				return err
+			}
+			s.initGarbageCollection(s.storageCli)
+			s.sessionManager = nil
+			s.initSegmentManager()
+			s.indexBuilder = nil
+			s.initIndexBuilder(s.storageCli)
 			s.startServerLoop()
 			s.stateCode.Store(commonpb.StateCode_Healthy)
 			logutil.Logger(s.ctx).Info("startup success")
+			return nil
 		}
 		s.stateCode.Store(commonpb.StateCode_StandBy)
 		logutil.Logger(s.ctx).Info("DataCoord enter standby mode successfully")

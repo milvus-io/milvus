@@ -110,7 +110,7 @@ type Server struct {
 
 	// Active-standby
 	enableActiveStandBy bool
-	activateFunc        func()
+	activateFunc        sessionutil.ActivateFunc
 }
 
 func NewQueryCoord(ctx context.Context, factory dependency.Factory) (*Server, error) {
@@ -192,6 +192,17 @@ func (s *Server) Init() error {
 	// Init schedulers
 	log.Info("init schedulers")
 	s.jobScheduler = job.NewScheduler()
+	s.initTaskScheduler()
+	s.initHeartBeat()
+	s.initBalancer()
+	s.initCheckerController()
+	s.initObserver()
+
+	log.Info("QueryCoord init success")
+	return err
+}
+
+func (s *Server) initTaskScheduler() {
 	s.taskScheduler = task.NewScheduler(
 		s.ctx,
 		s.meta,
@@ -201,18 +212,10 @@ func (s *Server) Init() error {
 		s.cluster,
 		s.nodeMgr,
 	)
+}
 
-	// Init heartbeat
-	log.Info("init dist controller")
-	s.distController = dist.NewDistController(
-		s.cluster,
-		s.nodeMgr,
-		s.dist,
-		s.targetMgr,
-		s.taskScheduler,
-	)
-
-	// Init balancer
+// Init balancer
+func (s *Server) initBalancer() {
 	log.Info("init balancer")
 	s.balancer = balance.NewRowCountBasedBalancer(
 		s.taskScheduler,
@@ -221,8 +224,22 @@ func (s *Server) Init() error {
 		s.meta,
 		s.targetMgr,
 	)
+}
 
-	// Init checker controller
+// Init heartbeat
+func (s *Server) initHeartBeat() {
+	log.Info("init dist controller")
+	s.distController = dist.NewDistController(
+		s.cluster,
+		s.nodeMgr,
+		s.dist,
+		s.targetMgr,
+		s.taskScheduler,
+	)
+}
+
+// Init checker controller
+func (s *Server) initCheckerController() {
 	log.Info("init checker controller")
 	s.checkerController = checkers.NewCheckerController(
 		s.meta,
@@ -231,12 +248,6 @@ func (s *Server) Init() error {
 		s.balancer,
 		s.taskScheduler,
 	)
-
-	// Init observers
-	s.initObserver()
-
-	log.Info("QueryCoord init success")
-	return err
 }
 
 func (s *Server) initMeta() error {
@@ -326,10 +337,21 @@ func (s *Server) Start() error {
 	}
 
 	if s.enableActiveStandBy {
-		s.activateFunc = func() {
+		s.activateFunc = func() error {
 			log.Info("querycoord switch from standby to active, activating")
+			// re initial
+			err = s.initMeta()
+			if err != nil {
+				return err
+			}
+			s.initTaskScheduler()
+			s.initHeartBeat()
+			s.initBalancer()
+			s.initCheckerController()
+			s.initObserver()
 			s.startServerLoop()
 			s.UpdateStateCode(commonpb.StateCode_Healthy)
+			return nil
 		}
 		s.UpdateStateCode(commonpb.StateCode_StandBy)
 	} else {

@@ -133,7 +133,7 @@ type Core struct {
 	importManager *importManager
 
 	enableActiveStandBy bool
-	activateFunc        func()
+	activateFunc        sessionutil.ActivateFunc
 }
 
 // --------------------- function --------------------------
@@ -621,11 +621,16 @@ func (c *Core) startInternal() error {
 	c.stepExecutor.Start()
 
 	if c.enableActiveStandBy {
-		c.activateFunc = func() {
+		c.activateFunc = func() error {
 			// todo to complete
 			log.Info("rootcoord switch from standby to active, activating")
+			err := c.initMetaTable()
+			if err != nil {
+				return err
+			}
 			c.startServerLoop()
 			c.UpdateStateCode(commonpb.StateCode_Healthy)
+			return nil
 		}
 		c.UpdateStateCode(commonpb.StateCode_StandBy)
 		logutil.Logger(c.ctx).Info("rootcoord enter standby mode successfully")

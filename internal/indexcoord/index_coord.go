@@ -58,6 +58,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/logutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -111,8 +112,9 @@ type IndexCoord struct {
 	rootCoordClient types.RootCoord
 
 	enableActiveStandBy bool
-	activateFunc        func()
+	activateFunc        sessionutil.ActivateFunc
 
+	// todo seems no use now
 	// Add callback functions at different stages
 	startCallbacks []func()
 	closeCallbacks []func()
@@ -184,87 +186,7 @@ func (i *IndexCoord) Init() error {
 			return
 		}
 
-		connectEtcdFn := func() error {
-			i.etcdKV = etcdkv.NewEtcdKV(i.etcdCli, Params.EtcdCfg.MetaRootPath.GetValue())
-			i.metaTable, err = NewMetaTable(i.etcdKV)
-			return err
-		}
-		log.Info("IndexCoord try to connect etcd")
-		err = retry.Do(i.loopCtx, connectEtcdFn, retry.Attempts(100))
-		if err != nil {
-			log.Error("IndexCoord try to connect etcd failed", zap.Error(err))
-			initErr = err
-			return
-		}
-
-		log.Info("IndexCoord try to connect etcd success")
-		i.nodeManager = NewNodeManager(i.loopCtx)
-
-		sessions, revision, err := i.session.GetSessions(typeutil.IndexNodeRole)
-		log.Info("IndexCoord", zap.Int("session number", len(sessions)), zap.Int64("revision", revision))
-		if err != nil {
-			log.Error("IndexCoord Get IndexNode Sessions error", zap.Error(err))
-			initErr = err
-			return
-		}
-		log.Info("IndexCoord get node sessions from etcd",
-			zap.String("bind mode", Params.IndexCoordCfg.BindIndexNodeMode.GetValue()),
-			zap.String("node address", Params.IndexCoordCfg.IndexNodeAddress.GetValue()))
-		aliveNodeID := make([]UniqueID, 0)
-		if Params.IndexCoordCfg.BindIndexNodeMode.GetAsBool() {
-			if err = i.nodeManager.AddNode(Params.IndexCoordCfg.IndexNodeID.GetAsInt64(), Params.IndexCoordCfg.IndexNodeAddress.GetValue()); err != nil {
-				log.Error("IndexCoord add node fail", zap.Int64("ServerID", Params.IndexCoordCfg.IndexNodeID.GetAsInt64()),
-					zap.String("address", Params.IndexCoordCfg.IndexNodeAddress.GetValue()), zap.Error(err))
-				initErr = err
-				return
-			}
-			log.Info("IndexCoord add node success", zap.String("IndexNode address", Params.IndexCoordCfg.IndexNodeAddress.GetValue()),
-				zap.Int64("nodeID", Params.IndexCoordCfg.IndexNodeID.GetAsInt64()))
-			aliveNodeID = append(aliveNodeID, Params.IndexCoordCfg.IndexNodeID.GetAsInt64())
-			metrics.IndexCoordIndexNodeNum.WithLabelValues().Inc()
-		} else {
-			for _, session := range sessions {
-				session := session
-				if err := i.nodeManager.AddNode(session.ServerID, session.Address); err != nil {
-					log.Error("IndexCoord", zap.Int64("ServerID", session.ServerID),
-						zap.Error(err))
-					continue
-				}
-				aliveNodeID = append(aliveNodeID, session.ServerID)
-			}
-		}
-		log.Info("IndexCoord", zap.Int("IndexNode number", len(i.nodeManager.GetAllClients())))
-		i.indexBuilder = newIndexBuilder(i.loopCtx, i, i.metaTable, aliveNodeID)
-
-		// TODO silverxia add Rewatch logic
-		i.eventChan = i.session.WatchServices(typeutil.IndexNodeRole, revision+1, nil)
-
-		chunkManager, err := i.factory.NewPersistentStorageChunkManager(i.loopCtx)
-		if err != nil {
-			log.Error("IndexCoord new minio chunkManager failed", zap.Error(err))
-			initErr = err
-			return
-		}
-		log.Info("IndexCoord new minio chunkManager success")
-		i.chunkManager = chunkManager
-
-		i.garbageCollector = newGarbageCollector(i.loopCtx, i.metaTable, i.chunkManager, i)
-		i.handoff = newHandoff(i.loopCtx, i.metaTable, i.etcdKV, i)
-		i.flushedSegmentWatcher, err = newFlushSegmentWatcher(i.loopCtx, i.etcdKV, i.metaTable, i.indexBuilder, i.handoff, i)
-		if err != nil {
-			initErr = err
-			return
-		}
-
-		i.sched, err = NewTaskScheduler(i.loopCtx, i.rootCoordClient, i.chunkManager, i.metaTable)
-		if err != nil {
-			log.Error("IndexCoord new task scheduler failed", zap.Error(err))
-			initErr = err
-			return
-		}
-		log.Info("IndexCoord new task scheduler success")
-
-		i.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
+		initErr = i.initInternal()
 	})
 
 	log.Info("IndexCoord init finished", zap.Error(initErr))
@@ -272,44 +194,124 @@ func (i *IndexCoord) Init() error {
 	return initErr
 }
 
+func (i *IndexCoord) initInternal() error {
+	var err error
+	//var initErr error
+	connectEtcdFn := func() error {
+		i.etcdKV = etcdkv.NewEtcdKV(i.etcdCli, Params.EtcdCfg.MetaRootPath.GetValue())
+		i.metaTable, err = NewMetaTable(i.etcdKV)
+		return err
+	}
+	log.Info("IndexCoord try to connect etcd")
+	err = retry.Do(i.loopCtx, connectEtcdFn, retry.Attempts(100))
+	if err != nil {
+		log.Error("IndexCoord try to connect etcd failed", zap.Error(err))
+		return err
+	}
+
+	log.Info("IndexCoord try to connect etcd success")
+	i.nodeManager = NewNodeManager(i.loopCtx)
+
+	sessions, revision, err := i.session.GetSessions(typeutil.IndexNodeRole)
+	log.Info("IndexCoord", zap.Int("session number", len(sessions)), zap.Int64("revision", revision))
+	if err != nil {
+		log.Error("IndexCoord Get IndexNode Sessions error", zap.Error(err))
+		return err
+	}
+	log.Info("IndexCoord get node sessions from etcd",
+		zap.String("bind mode", Params.IndexCoordCfg.BindIndexNodeMode.GetValue()),
+		zap.String("node address", Params.IndexCoordCfg.IndexNodeAddress.GetValue()))
+	aliveNodeID := make([]UniqueID, 0)
+	if Params.IndexCoordCfg.BindIndexNodeMode.GetAsBool() {
+		if err = i.nodeManager.AddNode(Params.IndexCoordCfg.IndexNodeID.GetAsInt64(), Params.IndexCoordCfg.IndexNodeAddress.GetValue()); err != nil {
+			log.Error("IndexCoord add node fail", zap.Int64("ServerID", Params.IndexCoordCfg.IndexNodeID.GetAsInt64()),
+				zap.String("address", Params.IndexCoordCfg.IndexNodeAddress.GetValue()), zap.Error(err))
+			return err
+		}
+		log.Info("IndexCoord add node success", zap.String("IndexNode address", Params.IndexCoordCfg.IndexNodeAddress.GetValue()),
+			zap.Int64("nodeID", Params.IndexCoordCfg.IndexNodeID.GetAsInt64()))
+		aliveNodeID = append(aliveNodeID, Params.IndexCoordCfg.IndexNodeID.GetAsInt64())
+		metrics.IndexCoordIndexNodeNum.WithLabelValues().Inc()
+	} else {
+		for _, session := range sessions {
+			session := session
+			if err := i.nodeManager.AddNode(session.ServerID, session.Address); err != nil {
+				log.Error("IndexCoord", zap.Int64("ServerID", session.ServerID),
+					zap.Error(err))
+				continue
+			}
+			aliveNodeID = append(aliveNodeID, session.ServerID)
+		}
+	}
+	log.Info("IndexCoord", zap.Int("IndexNode number", len(i.nodeManager.GetAllClients())))
+	i.indexBuilder = newIndexBuilder(i.loopCtx, i, i.metaTable, aliveNodeID)
+
+	// TODO silverxia add Rewatch logic
+	i.eventChan = i.session.WatchServices(typeutil.IndexNodeRole, revision+1, nil)
+
+	chunkManager, err := i.factory.NewPersistentStorageChunkManager(i.loopCtx)
+	if err != nil {
+		log.Error("IndexCoord new minio chunkManager failed", zap.Error(err))
+		return err
+	}
+	log.Info("IndexCoord new minio chunkManager success")
+	i.chunkManager = chunkManager
+
+	i.garbageCollector = newGarbageCollector(i.loopCtx, i.metaTable, i.chunkManager, i)
+	i.handoff = newHandoff(i.loopCtx, i.metaTable, i.etcdKV, i)
+	i.flushedSegmentWatcher, err = newFlushSegmentWatcher(i.loopCtx, i.etcdKV, i.metaTable, i.indexBuilder, i.handoff, i)
+	if err != nil {
+		return err
+	}
+
+	i.sched, err = NewTaskScheduler(i.loopCtx, i.rootCoordClient, i.chunkManager, i.metaTable)
+	if err != nil {
+		log.Error("IndexCoord new task scheduler failed", zap.Error(err))
+		return err
+	}
+	log.Info("IndexCoord new task scheduler success")
+
+	i.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
+	return err
+}
+
 // Start starts the IndexCoord component.
 func (i *IndexCoord) Start() error {
 	var startErr error
-	i.startOnce.Do(func() {
-		i.loopWg.Add(1)
-		go i.watchNodeLoop()
-
-		i.loopWg.Add(1)
-		go i.watchFlushedSegmentLoop()
-
-		startErr = i.sched.Start()
-
-		i.indexBuilder.Start()
-		i.garbageCollector.Start()
-		i.handoff.Start()
-		i.flushedSegmentWatcher.Start()
-
-		i.UpdateStateCode(commonpb.StateCode_Healthy)
-	})
-	// Start callbacks
-	for _, cb := range i.startCallbacks {
-		cb()
-	}
-
 	if i.enableActiveStandBy {
-		i.activateFunc = func() {
-			log.Info("IndexCoord switch from standby to active, reload the KV")
-			//i.metaTable.reloadFromKV()
+		i.activateFunc = func() error {
+			log.Info("IndexCoord switch from standby to active, re initial")
+			err := i.initInternal()
+			if err != nil {
+				return err
+			}
+			i.startServerLoop()
 			i.UpdateStateCode(commonpb.StateCode_Healthy)
+			return nil
 		}
 		i.UpdateStateCode(commonpb.StateCode_StandBy)
-		log.Info("IndexCoord start successfully", zap.Any("state", i.stateCode.Load()))
+		logutil.Logger(i.loopCtx).Info("IndexCoord enter standby mode successfully")
 	} else {
+		i.startOnce.Do(func() {
+			i.startServerLoop()
+		})
 		i.UpdateStateCode(commonpb.StateCode_Healthy)
-		log.Info("IndexCoord start successfully", zap.Any("state", i.stateCode.Load()))
+		logutil.Logger(i.loopCtx).Info("IndexCoord start successfully")
 	}
 
 	return startErr
+}
+
+func (i *IndexCoord) startServerLoop() {
+	i.loopWg.Add(1)
+	go i.watchNodeLoop()
+	i.loopWg.Add(1)
+	go i.watchFlushedSegmentLoop()
+	i.sched.Start()
+	i.indexBuilder.Start()
+	i.garbageCollector.Start()
+	i.handoff.Start()
+	i.flushedSegmentWatcher.Start()
 }
 
 // Stop stops the IndexCoord component.
