@@ -220,7 +220,6 @@ func (i *IndexCoord) Init() error {
 			log.Info("IndexCoord add node success", zap.String("IndexNode address", Params.IndexCoordCfg.IndexNodeAddress.GetValue()),
 				zap.Int64("nodeID", Params.IndexCoordCfg.IndexNodeID.GetAsInt64()))
 			aliveNodeID = append(aliveNodeID, Params.IndexCoordCfg.IndexNodeID.GetAsInt64())
-			metrics.IndexCoordIndexNodeNum.WithLabelValues().Inc()
 		} else {
 			for _, session := range sessions {
 				session := session
