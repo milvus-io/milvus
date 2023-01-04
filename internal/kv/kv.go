@@ -17,8 +17,9 @@
 package kv
 
 import (
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 	clientv3 "go.etcd.io/etcd/client/v3"
+
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 // CompareFailedError is a helper type for checking MetaKv CompareAndSwap series func error type
@@ -46,7 +47,6 @@ type BaseKV interface {
 	Remove(key string) error
 	MultiRemove(keys []string) error
 	RemoveWithPrefix(key string) error
-
 	Close()
 }
 
@@ -59,6 +59,7 @@ type TxnKV interface {
 	MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string) error
 }
 
+//go:generate mockery --name=MetaKv --with-expecter
 // MetaKv is TxnKV for metadata. It should save data with lease.
 type MetaKv interface {
 	TxnKV
@@ -76,6 +77,7 @@ type MetaKv interface {
 	KeepAlive(id clientv3.LeaseID) (<-chan *clientv3.LeaseKeepAliveResponse, error)
 	CompareValueAndSwap(key, value, target string, opts ...clientv3.OpOption) (bool, error)
 	CompareVersionAndSwap(key string, version int64, target string, opts ...clientv3.OpOption) (bool, error)
+	WalkWithPrefix(prefix string, paginationSize int, fn func([]byte, []byte) error) error
 }
 
 //go:generate mockery --name=SnapShotKV --with-expecter

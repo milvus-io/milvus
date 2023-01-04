@@ -17,21 +17,36 @@
 package rootcoord
 
 import (
+	"errors"
 	"fmt"
 	"math/rand"
+	"os"
 	"testing"
 	"time"
 
-	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	"github.com/milvus-io/milvus/internal/util/etcd"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/kv/mocks"
+	"github.com/milvus-io/milvus/internal/util/etcd"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 var (
 	snapshotPrefix = "snapshots"
 )
+
+var Params = paramtable.Get()
+
+func TestMain(m *testing.M) {
+	Params.Init()
+	code := m.Run()
+	os.Exit(code)
+}
 
 func Test_binarySearchRecords(t *testing.T) {
 	type testcase struct {
@@ -173,6 +188,8 @@ func Test_ComposeIsTsKey(t *testing.T) {
 	sep := "_ts"
 	ss, err := NewSuffixSnapshot((*etcdkv.EtcdKV)(nil), sep, "", snapshotPrefix)
 	require.Nil(t, err)
+	defer ss.Close()
+
 	type testcase struct {
 		key         string
 		expected    uint64
@@ -211,6 +228,8 @@ func Test_SuffixSnaphotIsTSOfKey(t *testing.T) {
 	sep := "_ts"
 	ss, err := NewSuffixSnapshot((*etcdkv.EtcdKV)(nil), sep, "", snapshotPrefix)
 	require.Nil(t, err)
+	defer ss.Close()
+
 	type testcase struct {
 		key         string
 		target      string
@@ -284,6 +303,7 @@ func Test_SuffixSnapshotLoad(t *testing.T) {
 	ss, err := NewSuffixSnapshot(etcdkv, sep, rootPath, snapshotPrefix)
 	assert.Nil(t, err)
 	assert.NotNil(t, ss)
+	defer ss.Close()
 
 	for i := 0; i < 20; i++ {
 		vtso = typeutil.Timestamp(100 + i*5)
@@ -301,10 +321,6 @@ func Test_SuffixSnapshotLoad(t *testing.T) {
 	val, err := ss.Load("key", 0)
 	assert.Nil(t, err)
 	assert.Equal(t, "value-19", val)
-
-	ss, err = NewSuffixSnapshot(etcdkv, sep, rootPath, snapshotPrefix)
-	assert.Nil(t, err)
-	assert.NotNil(t, ss)
 
 	for i := 0; i < 20; i++ {
 		val, err := ss.Load("key", typeutil.Timestamp(100+i*5+2))
@@ -343,6 +359,7 @@ func Test_SuffixSnapshotMultiSave(t *testing.T) {
 	ss, err := NewSuffixSnapshot(etcdkv, sep, rootPath, snapshotPrefix)
 	assert.Nil(t, err)
 	assert.NotNil(t, ss)
+	defer ss.Close()
 
 	for i := 0; i < 20; i++ {
 		saves := map[string]string{"k1": fmt.Sprintf("v1-%d", i), "k2": fmt.Sprintf("v2-%d", i)}
@@ -372,9 +389,6 @@ func Test_SuffixSnapshotMultiSave(t *testing.T) {
 	assert.Equal(t, vals[0], "v1-19")
 	assert.Equal(t, vals[1], "v2-19")
 
-	ss, err = NewSuffixSnapshot(etcdkv, sep, rootPath, snapshotPrefix)
-	assert.Nil(t, err)
-	assert.NotNil(t, ss)
 	for i := 0; i < 20; i++ {
 		keys, vals, err := ss.LoadWithPrefix("k", typeutil.Timestamp(100+i*5+2))
 		assert.Nil(t, err)
@@ -395,6 +409,181 @@ func Test_SuffixSnapshotMultiSave(t *testing.T) {
 
 	// clean up
 	ss.RemoveWithPrefix("")
+}
+
+func Test_SuffixSnapshotRemoveExpiredKvs(t *testing.T) {
+	rand.Seed(time.Now().UnixNano())
+	randVal := rand.Int()
+
+	Params.Init()
+	rootPath := fmt.Sprintf("/test/meta/remove-expired-test-%d", randVal)
+	sep := "_ts"
+
+	etcdCli, err := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
+		Params.EtcdCfg.Endpoints.GetAsStrings(),
+		Params.EtcdCfg.EtcdTLSCert.GetValue(),
+		Params.EtcdCfg.EtcdTLSKey.GetValue(),
+		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
+		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
+	assert.NoError(t, err)
+	defer etcdCli.Close()
+	etcdkv := etcdkv.NewEtcdKV(etcdCli, rootPath)
+	assert.NoError(t, err)
+	defer etcdkv.Close()
+
+	ss, err := NewSuffixSnapshot(etcdkv, sep, rootPath, snapshotPrefix)
+	assert.NoError(t, err)
+	assert.NotNil(t, ss)
+	defer ss.Close()
+
+	saveFn := func(key, value string, ts typeutil.Timestamp) {
+		err = ss.Save(key, value, ts)
+		assert.NoError(t, err)
+	}
+
+	multiSaveFn := func(kvs map[string]string, ts typeutil.Timestamp) {
+		err = ss.MultiSave(kvs, ts)
+		assert.NoError(t, err)
+	}
+
+	now := time.Now()
+	ftso := func(ts int) typeutil.Timestamp {
+		return tsoutil.ComposeTS(now.Add(-1*time.Duration(ts)*time.Millisecond).UnixMilli(), 0)
+	}
+
+	getKey := func(prefix string, id int) string {
+		return fmt.Sprintf("%s-%d", prefix, id)
+	}
+
+	generateTestData := func(prefix string, kCnt int, kVersion int, expiredKeyCnt int) {
+		var value string
+		cnt := 0
+		for i := 0; i < kVersion; i++ {
+			kvs := make(map[string]string)
+			ts := ftso((i + 1) * 100)
+			for v := 0; v < kCnt; v++ {
+				if i == 0 && v%2 == 0 && cnt < expiredKeyCnt {
+					value = string(SuffixSnapshotTombstone)
+					cnt++
+				} else {
+					value = "v"
+				}
+
+				kvs[getKey(prefix, v)] = value
+				if v%25 == 0 {
+					multiSaveFn(kvs, ts)
+					kvs = make(map[string]string)
+				}
+			}
+			multiSaveFn(kvs, ts)
+		}
+	}
+
+	countPrefix := func(prefix string) int {
+		cnt := 0
+		err := etcdkv.WalkWithPrefix("", 10, func(key []byte, value []byte) error {
+			cnt++
+			return nil
+		})
+		assert.NoError(t, err)
+		return cnt
+	}
+
+	t.Run("Mixed test ", func(t *testing.T) {
+		prefix := fmt.Sprintf("prefix%d", rand.Int())
+		keyCnt := 500
+		keyVersion := 3
+		expiredKCnt := 100
+		generateTestData(prefix, keyCnt, keyVersion, expiredKCnt)
+
+		cnt := countPrefix(prefix)
+		assert.Equal(t, keyCnt*keyVersion+keyCnt, cnt)
+
+		err = ss.removeExpiredKvs(now, time.Duration(50)*time.Millisecond)
+		assert.NoError(t, err)
+
+		cnt = countPrefix(prefix)
+		assert.Equal(t, keyCnt*keyVersion+keyCnt-(expiredKCnt*keyVersion+expiredKCnt), cnt)
+
+		// clean all data
+		err := etcdkv.RemoveWithPrefix("")
+		assert.NoError(t, err)
+	})
+
+	t.Run("partial expired and all expired", func(t *testing.T) {
+		prefix := fmt.Sprintf("prefix%d", rand.Int())
+		value := "v"
+		ts := ftso(100)
+		saveFn(getKey(prefix, 0), value, ts)
+		ts = ftso(200)
+		saveFn(getKey(prefix, 0), value, ts)
+		ts = ftso(300)
+		saveFn(getKey(prefix, 0), value, ts)
+
+		// insert partial expired kv
+		ts = ftso(25)
+		saveFn(getKey(prefix, 1), string(SuffixSnapshotTombstone), ts)
+		ts = ftso(50)
+		saveFn(getKey(prefix, 1), value, ts)
+		ts = ftso(70)
+		saveFn(getKey(prefix, 1), value, ts)
+
+		// insert all expired kv
+		ts = ftso(100)
+		saveFn(getKey(prefix, 2), string(SuffixSnapshotTombstone), ts)
+		ts = ftso(200)
+		saveFn(getKey(prefix, 2), value, ts)
+		ts = ftso(300)
+		saveFn(getKey(prefix, 2), value, ts)
+
+		cnt := countPrefix(prefix)
+		assert.Equal(t, 12, cnt)
+
+		err = ss.removeExpiredKvs(now, time.Duration(50)*time.Millisecond)
+		assert.NoError(t, err)
+
+		cnt = countPrefix(prefix)
+		assert.Equal(t, 6, cnt)
+
+		// clean all data
+		err := etcdkv.RemoveWithPrefix("")
+		assert.NoError(t, err)
+	})
+
+	t.Run("parse ts fail", func(t *testing.T) {
+		prefix := fmt.Sprintf("prefix%d", rand.Int())
+		key := fmt.Sprintf("%s-%s", prefix, "ts_error-ts")
+		err = etcdkv.Save(ss.composeSnapshotPrefix(key), "")
+		assert.NoError(t, err)
+
+		err = ss.removeExpiredKvs(now, time.Duration(50)*time.Millisecond)
+		assert.NoError(t, err)
+
+		cnt := countPrefix(prefix)
+		assert.Equal(t, 1, cnt)
+
+		// clean all data
+		err := etcdkv.RemoveWithPrefix("")
+		assert.NoError(t, err)
+	})
+
+	t.Run("test walk kv data fail", func(t *testing.T) {
+		sep := "_ts"
+		rootPath := "root/"
+		kv := mocks.NewMetaKv(t)
+		kv.EXPECT().
+			WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything).
+			Return(errors.New("error"))
+
+		ss, err := NewSuffixSnapshot(kv, sep, rootPath, snapshotPrefix)
+		assert.NotNil(t, ss)
+		assert.NoError(t, err)
+
+		err = ss.removeExpiredKvs(time.Now(), time.Duration(100))
+		assert.Error(t, err)
+	})
 }
 
 func Test_SuffixSnapshotMultiSaveAndRemoveWithPrefix(t *testing.T) {
@@ -427,6 +616,7 @@ func Test_SuffixSnapshotMultiSaveAndRemoveWithPrefix(t *testing.T) {
 	ss, err := NewSuffixSnapshot(etcdkv, sep, rootPath, snapshotPrefix)
 	assert.Nil(t, err)
 	assert.NotNil(t, ss)
+	defer ss.Close()
 
 	for i := 0; i < 20; i++ {
 		vtso = typeutil.Timestamp(100 + i*5)
@@ -461,10 +651,6 @@ func Test_SuffixSnapshotMultiSaveAndRemoveWithPrefix(t *testing.T) {
 		assert.Equal(t, 39-i, len(vals))
 	}
 
-	ss, err = NewSuffixSnapshot(etcdkv, sep, rootPath, snapshotPrefix)
-	assert.Nil(t, err)
-	assert.NotNil(t, ss)
-
 	for i := 0; i < 20; i++ {
 		val, err := ss.Load(fmt.Sprintf("kd-%04d", i), typeutil.Timestamp(100+i*5+2))
 		assert.Nil(t, err)
@@ -491,4 +677,31 @@ func Test_SuffixSnapshotMultiSaveAndRemoveWithPrefix(t *testing.T) {
 
 	// cleanup
 	ss.MultiSaveAndRemoveWithPrefix(map[string]string{}, []string{""}, 0)
+}
+
+func Test_getOriginalKey(t *testing.T) {
+	sep := "_ts"
+	rootPath := "root/"
+	kv := mocks.NewMetaKv(t)
+	ss, err := NewSuffixSnapshot(kv, sep, rootPath, snapshotPrefix)
+	assert.NotNil(t, ss)
+	assert.NoError(t, err)
+
+	t.Run("match prefix fail", func(t *testing.T) {
+		ret, err := ss.getOriginalKey("non-snapshots/k1")
+		assert.Equal(t, "", ret)
+		assert.Error(t, err)
+	})
+
+	t.Run("find separator fail", func(t *testing.T) {
+		ret, err := ss.getOriginalKey("snapshots/k1")
+		assert.Equal(t, "", ret)
+		assert.Error(t, err)
+	})
+
+	t.Run("ok", func(t *testing.T) {
+		ret, err := ss.getOriginalKey("snapshots/prefix-1_ts438497159122780160")
+		assert.Equal(t, "prefix-1", ret)
+		assert.NoError(t, err)
+	})
 }

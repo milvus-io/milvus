@@ -520,6 +520,7 @@ type mockETCDKV struct {
 	loadWithPrefix              func(key string) ([]string, []string, error)
 	loadWithRevision            func(key string) ([]string, []string, int64, error)
 	removeWithPrefix            func(key string) error
+	walkWithPrefix              func(prefix string, paginationSize int, fn func([]byte, []byte) error) error
 }
 
 func NewMockEtcdKV() *mockETCDKV {
@@ -549,6 +550,9 @@ func NewMockEtcdKV() *mockETCDKV {
 			return []string{}, []string{}, 0, nil
 		},
 		removeWithPrefix: func(key string) error {
+			return nil
+		},
+		walkWithPrefix: func(prefix string, paginationSize int, fn func([]byte, []byte) error) error {
 			return nil
 		},
 	}
@@ -587,6 +591,10 @@ func NewMockEtcdKVWithReal(real kv.MetaKv) *mockETCDKV {
 			return real.RemoveWithPrefix(key)
 		},
 	}
+}
+
+func (mk *mockETCDKV) WalkWithPrefix(prefix string, paginationSize int, fn func([]byte, []byte) error) error {
+	return mk.walkWithPrefix(prefix, paginationSize, fn)
 }
 
 func (mk *mockETCDKV) Save(key string, value string) error {

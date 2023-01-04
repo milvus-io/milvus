@@ -17,18 +17,22 @@
 package etcdkv_test
 
 import (
+	"errors"
+	"fmt"
 	"os"
+	"sort"
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/util/funcutil"
-
-	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
-	"github.com/milvus-io/milvus/internal/util/etcd"
-	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"golang.org/x/exp/maps"
+
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/util/etcd"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
 
 var Params paramtable.ComponentParam
@@ -906,6 +910,91 @@ func TestEtcdKV_Load(te *testing.T) {
 			err = etcdKV.SaveBytesWithLease(k, v, clientv3.LeaseID(999))
 			assert.Error(t, err)
 		}
+	})
+}
+
+func Test_WalkWithPagination(t *testing.T) {
+	etcdCli, err := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
+		Params.EtcdCfg.Endpoints.GetAsStrings(),
+		Params.EtcdCfg.EtcdTLSCert.GetValue(),
+		Params.EtcdCfg.EtcdTLSKey.GetValue(),
+		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
+		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
+	defer etcdCli.Close()
+	assert.NoError(t, err)
+
+	rootPath := "/etcd/test/root/pagination"
+	etcdKV := etcdkv.NewEtcdKV(etcdCli, rootPath)
+
+	defer etcdKV.Close()
+	defer etcdKV.RemoveWithPrefix("")
+
+	kvs := map[string]string{
+		"A/100":    "v1",
+		"AA/100":   "v2",
+		"AB/100":   "v3",
+		"AB/2/100": "v4",
+		"B/100":    "v5",
+	}
+
+	err = etcdKV.MultiSave(kvs)
+	assert.NoError(t, err)
+	for k, v := range kvs {
+		actualV, err := etcdKV.Load(k)
+		assert.NoError(t, err)
+		assert.Equal(t, v, actualV)
+	}
+
+	t.Run("apply function error ", func(t *testing.T) {
+		err = etcdKV.WalkWithPrefix("A", 5, func(key []byte, value []byte) error {
+			return errors.New("error")
+		})
+		assert.Error(t, err)
+	})
+
+	t.Run("get with non-exist prefix ", func(t *testing.T) {
+		err = etcdKV.WalkWithPrefix("non-exist-prefix", 5, func(key []byte, value []byte) error {
+			return nil
+		})
+		assert.NoError(t, err)
+	})
+
+	t.Run("with different pagination", func(t *testing.T) {
+		testFn := func(pagination int) {
+			expected := map[string]string{
+				"A/100":    "v1",
+				"AA/100":   "v2",
+				"AB/100":   "v3",
+				"AB/2/100": "v4",
+			}
+
+			expectedSortedKey := maps.Keys(expected)
+			sort.Strings(expectedSortedKey)
+
+			ret := make(map[string]string)
+			actualSortedKey := make([]string, 0)
+
+			err = etcdKV.WalkWithPrefix("A", pagination, func(key []byte, value []byte) error {
+				k := string(key)
+				k = k[len(rootPath)+1:]
+				ret[k] = string(value)
+				actualSortedKey = append(actualSortedKey, k)
+				return nil
+			})
+
+			assert.NoError(t, err)
+			assert.Equal(t, expected, ret, fmt.Errorf("pagination: %d", pagination))
+			assert.Equal(t, expectedSortedKey, actualSortedKey, fmt.Errorf("pagination: %d", pagination))
+		}
+
+		testFn(-100)
+		testFn(-1)
+		testFn(0)
+		testFn(1)
+		testFn(5)
+		testFn(100)
 	})
 }
 
