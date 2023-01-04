@@ -1403,41 +1403,36 @@ func (c *Core) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) (
 	metricType, err := metricsinfo.ParseMetricType(in.Request)
 	if err != nil {
 		log.Warn("ParseMetricType failed", zap.String("role", typeutil.RootCoordRole),
-			zap.Int64("node_id", c.session.ServerID), zap.String("req", in.Request), zap.Error(err))
+			zap.Int64("nodeID", c.session.ServerID), zap.String("req", in.Request), zap.Error(err))
 		return &milvuspb.GetMetricsResponse{
 			Status:   failStatus(commonpb.ErrorCode_UnexpectedError, "ParseMetricType failed: "+err.Error()),
 			Response: "",
 		}, nil
 	}
 
-	log.Debug("GetMetrics success", zap.String("role", typeutil.RootCoordRole),
-		zap.String("metric_type", metricType), zap.Int64("msgID", in.GetBase().GetMsgID()))
-
 	if metricType == metricsinfo.SystemInfoMetrics {
-		ret, err := c.metricsCacheManager.GetSystemInfoMetrics()
-		if err == nil && ret != nil {
-			return ret, nil
+		metrics, err := c.metricsCacheManager.GetSystemInfoMetrics()
+		if err != nil {
+			metrics, err = c.getSystemInfoMetrics(ctx, in)
 		}
 
-		log.Debug("GetSystemInfoMetrics from cache failed, recompute instead", zap.String("role", typeutil.RootCoordRole),
-			zap.Int64("msgID", in.GetBase().GetMsgID()), zap.Error(err))
-
-		systemInfoMetrics, err := c.getSystemInfoMetrics(ctx, in)
 		if err != nil {
-			log.Warn("GetSystemInfoMetrics failed", zap.String("role", typeutil.RootCoordRole),
-				zap.String("metric_type", metricType), zap.Int64("msgID", in.GetBase().GetMsgID()), zap.Error(err))
+			log.Warn("GetSystemInfoMetrics failed",
+				zap.String("role", typeutil.RootCoordRole),
+				zap.String("metricType", metricType),
+				zap.Error(err))
 			return &milvuspb.GetMetricsResponse{
 				Status:   failStatus(commonpb.ErrorCode_UnexpectedError, fmt.Sprintf("getSystemInfoMetrics failed: %s", err.Error())),
 				Response: "",
 			}, nil
 		}
 
-		c.metricsCacheManager.UpdateSystemInfoMetrics(systemInfoMetrics)
-		return systemInfoMetrics, err
+		c.metricsCacheManager.UpdateSystemInfoMetrics(metrics)
+		return metrics, err
 	}
 
-	log.Warn("GetMetrics failed, metric type not implemented", zap.String("role", typeutil.RootCoordRole),
-		zap.String("metric_type", metricType), zap.Int64("msgID", in.GetBase().GetMsgID()))
+	log.RatedWarn(60, "GetMetrics failed, metric type not implemented", zap.String("role", typeutil.RootCoordRole),
+		zap.String("metricType", metricType))
 
 	return &milvuspb.GetMetricsResponse{
 		Status:   failStatus(commonpb.ErrorCode_UnexpectedError, metricsinfo.MsgUnimplementedMetric),
