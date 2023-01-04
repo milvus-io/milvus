@@ -240,7 +240,7 @@ func (node *DataNode) ShowConfigurations(ctx context.Context, req *internalpb.Sh
 func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	if !node.isHealthy() {
 		log.Warn("DataNode.GetMetrics failed",
-			zap.Int64("node_id", paramtable.GetNodeID()),
+			zap.Int64("nodeID", paramtable.GetNodeID()),
 			zap.String("req", req.Request),
 			zap.Error(errDataNodeIsUnhealthy(paramtable.GetNodeID())))
 
@@ -255,7 +255,7 @@ func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 	metricType, err := metricsinfo.ParseMetricType(req.Request)
 	if err != nil {
 		log.Warn("DataNode.GetMetrics failed to parse metric type",
-			zap.Int64("node_id", paramtable.GetNodeID()),
+			zap.Int64("nodeID", paramtable.GetNodeID()),
 			zap.String("req", req.Request),
 			zap.Error(err))
 
@@ -282,8 +282,8 @@ func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 		return systemInfoMetrics, nil
 	}
 
-	log.Debug("DataNode.GetMetrics failed, request metric type is not implemented yet",
-		zap.Int64("node_id", paramtable.GetNodeID()),
+	log.RatedWarn(60, "DataNode.GetMetrics failed, request metric type is not implemented yet",
+		zap.Int64("nodeID", paramtable.GetNodeID()),
 		zap.String("req", req.Request),
 		zap.String("metric_type", metricType))
 

@@ -967,7 +967,7 @@ func (i *IndexCoord) ShowConfigurations(ctx context.Context, req *internalpb.Sho
 
 // GetMetrics gets the metrics info of IndexCoord.
 func (i *IndexCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	log.RatedInfo(5, "IndexCoord.GetMetrics", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("req", req.Request))
+	log.RatedInfo(60, "IndexCoord.GetMetrics", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("req", req.Request))
 
 	if !i.isHealthy() {
 		log.Warn(msgIndexCoordIsUnhealthy(paramtable.GetNodeID()))
@@ -984,7 +984,7 @@ func (i *IndexCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReq
 	metricType, err := metricsinfo.ParseMetricType(req.Request)
 	if err != nil {
 		log.Error("IndexCoord.GetMetrics failed to parse metric type",
-			zap.Int64("node id", i.session.ServerID),
+			zap.Int64("nodeID", i.session.ServerID),
 			zap.String("req", req.Request),
 			zap.Error(err))
 
@@ -997,35 +997,30 @@ func (i *IndexCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReq
 		}, nil
 	}
 
-	log.Debug("IndexCoord.GetMetrics",
-		zap.String("metric type", metricType))
-
 	if metricType == metricsinfo.SystemInfoMetrics {
-		ret, err := i.metricsCacheManager.GetSystemInfoMetrics()
-		if err == nil && ret != nil {
-			return ret, nil
+		metrics, err := i.metricsCacheManager.GetSystemInfoMetrics()
+		if err != nil {
+			// Miss cache
+			metrics, err = getSystemInfoMetrics(ctx, req, i)
 		}
-		log.Warn("failed to get system info metrics from cache, recompute instead",
-			zap.Error(err))
 
-		metrics, err := getSystemInfoMetrics(ctx, req, i)
-
-		log.Debug("IndexCoord.GetMetrics",
-			zap.Int64("node id", i.session.ServerID),
+		log.RatedDebug(60, "IndexCoord.GetMetrics",
+			zap.Int64("nodeID", i.session.ServerID),
 			zap.String("req", req.Request),
-			zap.String("metric type", metricType),
+			zap.String("metricType", metricType),
 			zap.String("metrics", metrics.Response), // TODO(dragondriver): necessary? may be very large
-			zap.Error(err))
+			zap.Error(err),
+		)
 
 		i.metricsCacheManager.UpdateSystemInfoMetrics(metrics)
 
 		return metrics, nil
 	}
 
-	log.Warn("IndexCoord.GetMetrics failed, request metric type is not implemented yet",
-		zap.Int64("node id", i.session.ServerID),
+	log.RatedWarn(60, "IndexCoord.GetMetrics failed, request metric type is not implemented yet",
+		zap.Int64("nodeID", i.session.ServerID),
 		zap.String("req", req.Request),
-		zap.String("metric type", metricType))
+		zap.String("metricType", metricType))
 
 	return &milvuspb.GetMetricsResponse{
 		Status: &commonpb.Status{

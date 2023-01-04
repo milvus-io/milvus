@@ -230,7 +230,7 @@ func (i *IndexNode) GetJobStats(ctx context.Context, req *indexpb.GetJobStatsReq
 func (i *IndexNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	if !commonpbutil.IsHealthyOrStopping(i.stateCode) {
 		log.Ctx(ctx).Warn("IndexNode.GetMetrics failed",
-			zap.Int64("node_id", paramtable.GetNodeID()),
+			zap.Int64("nodeID", paramtable.GetNodeID()),
 			zap.String("req", req.Request),
 			zap.Error(errIndexNodeIsUnhealthy(paramtable.GetNodeID())))
 
@@ -246,7 +246,7 @@ func (i *IndexNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequ
 	metricType, err := metricsinfo.ParseMetricType(req.Request)
 	if err != nil {
 		log.Ctx(ctx).Warn("IndexNode.GetMetrics failed to parse metric type",
-			zap.Int64("node_id", paramtable.GetNodeID()),
+			zap.Int64("nodeID", paramtable.GetNodeID()),
 			zap.String("req", req.Request),
 			zap.Error(err))
 
@@ -262,8 +262,8 @@ func (i *IndexNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequ
 	if metricType == metricsinfo.SystemInfoMetrics {
 		metrics, err := getSystemInfoMetrics(ctx, req, i)
 
-		log.Ctx(ctx).Debug("IndexNode.GetMetrics",
-			zap.Int64("node_id", paramtable.GetNodeID()),
+		log.Ctx(ctx).RatedDebug(60, "IndexNode.GetMetrics",
+			zap.Int64("nodeID", paramtable.GetNodeID()),
 			zap.String("req", req.Request),
 			zap.String("metric_type", metricType),
 			zap.Error(err))
@@ -271,8 +271,8 @@ func (i *IndexNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequ
 		return metrics, nil
 	}
 
-	log.Ctx(ctx).Warn("IndexNode.GetMetrics failed, request metric type is not implemented yet",
-		zap.Int64("node_id", paramtable.GetNodeID()),
+	log.Ctx(ctx).RatedWarn(60, "IndexNode.GetMetrics failed, request metric type is not implemented yet",
+		zap.Int64("nodeID", paramtable.GetNodeID()),
 		zap.String("req", req.Request),
 		zap.String("metric_type", metricType))
 

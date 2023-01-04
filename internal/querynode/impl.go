@@ -1208,7 +1208,7 @@ func (node *QueryNode) SyncReplicaSegments(ctx context.Context, req *querypb.Syn
 func (node *QueryNode) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
 	if !node.isHealthyOrStopping() {
 		log.Warn("QueryNode.ShowConfigurations failed",
-			zap.Int64("nodeId", paramtable.GetNodeID()),
+			zap.Int64("nodeID", paramtable.GetNodeID()),
 			zap.String("req", req.Pattern),
 			zap.Error(errQueryNodeIsUnhealthy(paramtable.GetNodeID())))
 
@@ -1245,7 +1245,7 @@ func (node *QueryNode) ShowConfigurations(ctx context.Context, req *internalpb.S
 func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	if !node.isHealthyOrStopping() {
 		log.Ctx(ctx).Warn("QueryNode.GetMetrics failed",
-			zap.Int64("nodeId", paramtable.GetNodeID()),
+			zap.Int64("nodeID", paramtable.GetNodeID()),
 			zap.String("req", req.Request),
 			zap.Error(errQueryNodeIsUnhealthy(paramtable.GetNodeID())))
 
@@ -1263,7 +1263,7 @@ func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 	metricType, err := metricsinfo.ParseMetricType(req.Request)
 	if err != nil {
 		log.Ctx(ctx).Warn("QueryNode.GetMetrics failed to parse metric type",
-			zap.Int64("nodeId", paramtable.GetNodeID()),
+			zap.Int64("nodeID", paramtable.GetNodeID()),
 			zap.String("req", req.Request),
 			zap.Error(err))
 
@@ -1279,7 +1279,7 @@ func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 		queryNodeMetrics, err := getSystemInfoMetrics(ctx, req, node)
 		if err != nil {
 			log.Ctx(ctx).Warn("QueryNode.GetMetrics failed",
-				zap.Int64("nodeId", paramtable.GetNodeID()),
+				zap.Int64("nodeID", paramtable.GetNodeID()),
 				zap.String("req", req.Request),
 				zap.String("metricType", metricType),
 				zap.Error(err))
@@ -1293,8 +1293,8 @@ func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 		return queryNodeMetrics, nil
 	}
 
-	log.Ctx(ctx).Debug("QueryNode.GetMetrics failed, request metric type is not implemented yet",
-		zap.Int64("nodeId", paramtable.GetNodeID()),
+	log.Ctx(ctx).RatedDebug(60, "QueryNode.GetMetrics failed, request metric type is not implemented yet",
+		zap.Int64("nodeID", paramtable.GetNodeID()),
 		zap.String("req", req.Request),
 		zap.String("metricType", metricType))
 

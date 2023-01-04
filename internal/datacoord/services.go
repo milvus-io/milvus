@@ -860,7 +860,7 @@ func (s *Server) ShowConfigurations(ctx context.Context, req *internalpb.ShowCon
 func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	if s.isClosed() {
 		log.Warn("DataCoord.GetMetrics failed",
-			zap.Int64("node_id", paramtable.GetNodeID()),
+			zap.Int64("nodeID", paramtable.GetNodeID()),
 			zap.String("req", req.Request),
 			zap.Error(errDataCoordIsUnhealthy(paramtable.GetNodeID())))
 
@@ -877,7 +877,7 @@ func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 	metricType, err := metricsinfo.ParseMetricType(req.Request)
 	if err != nil {
 		log.Warn("DataCoord.GetMetrics failed to parse metric type",
-			zap.Int64("node_id", paramtable.GetNodeID()),
+			zap.Int64("nodeID", paramtable.GetNodeID()),
 			zap.String("req", req.Request),
 			zap.Error(err))
 
@@ -903,10 +903,10 @@ func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 			}, nil
 		}
 
-		log.Debug("DataCoord.GetMetrics",
-			zap.Int64("node_id", paramtable.GetNodeID()),
+		log.RatedDebug(60, "DataCoord.GetMetrics",
+			zap.Int64("nodeID", paramtable.GetNodeID()),
 			zap.String("req", req.Request),
-			zap.String("metric_type", metricType),
+			zap.String("metricType", metricType),
 			zap.Any("metrics", metrics), // TODO(dragondriver): necessary? may be very large
 			zap.Error(err))
 
@@ -914,9 +914,9 @@ func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 	}
 
 	log.RatedWarn(60.0, "DataCoord.GetMetrics failed, request metric type is not implemented yet",
-		zap.Int64("node_id", paramtable.GetNodeID()),
+		zap.Int64("nodeID", paramtable.GetNodeID()),
 		zap.String("req", req.Request),
-		zap.String("metric_type", metricType))
+		zap.String("metricType", metricType))
 
 	return &milvuspb.GetMetricsResponse{
 		ComponentName: metricsinfo.ConstructComponentName(typeutil.DataCoordRole, paramtable.GetNodeID()),

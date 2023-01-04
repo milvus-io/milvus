@@ -3220,13 +3220,13 @@ func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReque
 
 	log := log.Ctx(ctx)
 
-	log.Debug("Proxy.GetMetrics",
-		zap.Int64("node_id", paramtable.GetNodeID()),
+	log.RatedDebug(60, "Proxy.GetMetrics",
+		zap.Int64("nodeID", paramtable.GetNodeID()),
 		zap.String("req", req.Request))
 
 	if !node.checkHealthy() {
 		log.Warn("Proxy.GetMetrics failed",
-			zap.Int64("node_id", paramtable.GetNodeID()),
+			zap.Int64("nodeID", paramtable.GetNodeID()),
 			zap.String("req", req.Request),
 			zap.Error(errProxyIsUnhealthy(paramtable.GetNodeID())))
 
@@ -3242,7 +3242,7 @@ func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReque
 	metricType, err := metricsinfo.ParseMetricType(req.Request)
 	if err != nil {
 		log.Warn("Proxy.GetMetrics failed to parse metric type",
-			zap.Int64("node_id", paramtable.GetNodeID()),
+			zap.Int64("nodeID", paramtable.GetNodeID()),
 			zap.String("req", req.Request),
 			zap.Error(err))
 
@@ -3255,28 +3255,21 @@ func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReque
 		}, nil
 	}
 
-	log.Debug("Proxy.GetMetrics",
-		zap.String("metric_type", metricType))
-
 	req.Base = commonpbutil.NewMsgBase(
 		commonpbutil.WithMsgType(commonpb.MsgType_SystemInfo),
 		commonpbutil.WithMsgID(0),
 		commonpbutil.WithSourceID(paramtable.GetNodeID()),
 	)
 	if metricType == metricsinfo.SystemInfoMetrics {
-		ret, err := node.metricsCacheManager.GetSystemInfoMetrics()
-		if err == nil && ret != nil {
-			return ret, nil
+		metrics, err := node.metricsCacheManager.GetSystemInfoMetrics()
+		if err != nil {
+			metrics, err = getSystemInfoMetrics(ctx, req, node)
 		}
-		log.Debug("failed to get system info metrics from cache, recompute instead",
-			zap.Error(err))
 
-		metrics, err := getSystemInfoMetrics(ctx, req, node)
-
-		log.Debug("Proxy.GetMetrics",
-			zap.Int64("node_id", paramtable.GetNodeID()),
+		log.RatedDebug(60, "Proxy.GetMetrics",
+			zap.Int64("nodeID", paramtable.GetNodeID()),
 			zap.String("req", req.Request),
-			zap.String("metric_type", metricType),
+			zap.String("metricType", metricType),
 			zap.Any("metrics", metrics), // TODO(dragondriver): necessary? may be very large
 			zap.Error(err))
 
@@ -3285,10 +3278,10 @@ func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReque
 		return metrics, nil
 	}
 
-	log.Warn("Proxy.GetMetrics failed, request metric type is not implemented yet",
-		zap.Int64("node_id", paramtable.GetNodeID()),
+	log.RatedWarn(60, "Proxy.GetMetrics failed, request metric type is not implemented yet",
+		zap.Int64("nodeID", paramtable.GetNodeID()),
 		zap.String("req", req.Request),
-		zap.String("metric_type", metricType))
+		zap.String("metricType", metricType))
 
 	return &milvuspb.GetMetricsResponse{
 		Status: &commonpb.Status{
@@ -3306,7 +3299,7 @@ func (node *Proxy) GetProxyMetrics(ctx context.Context, req *milvuspb.GetMetrics
 	defer sp.Finish()
 
 	log := log.Ctx(ctx).With(
-		zap.Int64("node_id", paramtable.GetNodeID()),
+		zap.Int64("nodeID", paramtable.GetNodeID()),
 		zap.String("req", req.Request))
 
 	if !node.checkHealthy() {
@@ -3355,13 +3348,13 @@ func (node *Proxy) GetProxyMetrics(ctx context.Context, req *milvuspb.GetMetrics
 		}
 
 		log.Debug("Proxy.GetProxyMetrics",
-			zap.String("metric_type", metricType))
+			zap.String("metricType", metricType))
 
 		return proxyMetrics, nil
 	}
 
 	log.Warn("Proxy.GetProxyMetrics failed, request metric type is not implemented yet",
-		zap.String("metric_type", metricType))
+		zap.String("metricType", metricType))
 
 	return &milvuspb.GetMetricsResponse{
 		Status: &commonpb.Status{
