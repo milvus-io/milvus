@@ -408,6 +408,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 	isDiskIndex, err := t.updateSegmentMaxSize(segments)
 	if err != nil {
 		log.Warn("failed to update segment max size", zap.Error(err))
+		return
 	}
 
 	ts, err := t.allocTs()

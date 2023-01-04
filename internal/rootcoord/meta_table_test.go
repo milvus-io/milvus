@@ -425,7 +425,7 @@ func TestMetaTable_getCollectionByIDInternal(t *testing.T) {
 			collID2Meta: map[typeutil.UniqueID]*model.Collection{},
 		}
 		ctx := context.Background()
-		_, err := meta.getCollectionByIDInternal(ctx, 100, 101)
+		_, err := meta.getCollectionByIDInternal(ctx, 100, 101, false)
 		assert.Error(t, err)
 	})
 
@@ -441,9 +441,12 @@ func TestMetaTable_getCollectionByIDInternal(t *testing.T) {
 			collID2Meta: map[typeutil.UniqueID]*model.Collection{},
 		}
 		ctx := context.Background()
-		_, err := meta.getCollectionByIDInternal(ctx, 100, 101)
+		_, err := meta.getCollectionByIDInternal(ctx, 100, 101, false)
 		assert.Error(t, err)
 		assert.True(t, common.IsCollectionNotExistError(err))
+		coll, err := meta.getCollectionByIDInternal(ctx, 100, 101, true)
+		assert.NoError(t, err)
+		assert.False(t, coll.Available())
 	})
 
 	t.Run("normal case, filter unavailable partitions", func(t *testing.T) {
@@ -461,7 +464,7 @@ func TestMetaTable_getCollectionByIDInternal(t *testing.T) {
 			},
 		}
 		ctx := context.Background()
-		coll, err := meta.getCollectionByIDInternal(ctx, 100, 101)
+		coll, err := meta.getCollectionByIDInternal(ctx, 100, 101, false)
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(coll.Partitions))
 		assert.Equal(t, UniqueID(11), coll.Partitions[0].PartitionID)
@@ -483,7 +486,7 @@ func TestMetaTable_getCollectionByIDInternal(t *testing.T) {
 			},
 		}
 		ctx := context.Background()
-		coll, err := meta.getCollectionByIDInternal(ctx, 100, typeutil.MaxTimestamp)
+		coll, err := meta.getCollectionByIDInternal(ctx, 100, typeutil.MaxTimestamp, false)
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(coll.Partitions))
 		assert.Equal(t, UniqueID(11), coll.Partitions[0].PartitionID)
@@ -666,7 +669,7 @@ func TestMetaTable_getLatestCollectionByIDInternal(t *testing.T) {
 	t.Run("not exist", func(t *testing.T) {
 		ctx := context.Background()
 		mt := &MetaTable{collID2Meta: nil}
-		_, err := mt.getLatestCollectionByIDInternal(ctx, 100)
+		_, err := mt.getLatestCollectionByIDInternal(ctx, 100, false)
 		assert.Error(t, err)
 		assert.True(t, common.IsCollectionNotExistError(err))
 	})
@@ -676,7 +679,7 @@ func TestMetaTable_getLatestCollectionByIDInternal(t *testing.T) {
 		mt := &MetaTable{collID2Meta: map[typeutil.UniqueID]*model.Collection{
 			100: nil,
 		}}
-		_, err := mt.getLatestCollectionByIDInternal(ctx, 100)
+		_, err := mt.getLatestCollectionByIDInternal(ctx, 100, false)
 		assert.Error(t, err)
 		assert.True(t, common.IsCollectionNotExistError(err))
 	})
@@ -686,9 +689,12 @@ func TestMetaTable_getLatestCollectionByIDInternal(t *testing.T) {
 		mt := &MetaTable{collID2Meta: map[typeutil.UniqueID]*model.Collection{
 			100: {State: pb.CollectionState_CollectionDropping},
 		}}
-		_, err := mt.getLatestCollectionByIDInternal(ctx, 100)
+		_, err := mt.getLatestCollectionByIDInternal(ctx, 100, false)
 		assert.Error(t, err)
 		assert.True(t, common.IsCollectionNotExistError(err))
+		coll, err := mt.getLatestCollectionByIDInternal(ctx, 100, true)
+		assert.NoError(t, err)
+		assert.False(t, coll.Available())
 	})
 
 	t.Run("normal case", func(t *testing.T) {
@@ -702,7 +708,7 @@ func TestMetaTable_getLatestCollectionByIDInternal(t *testing.T) {
 				},
 			},
 		}}
-		coll, err := mt.getLatestCollectionByIDInternal(ctx, 100)
+		coll, err := mt.getLatestCollectionByIDInternal(ctx, 100, false)
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(coll.Partitions))
 	})

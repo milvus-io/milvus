@@ -70,7 +70,7 @@ func (mService *metaService) getCollectionInfo(ctx context.Context, collID Uniqu
 		TimeStamp:    timestamp,
 	}
 
-	response, err := mService.rootCoord.DescribeCollection(ctx, req)
+	response, err := mService.rootCoord.DescribeCollectionInternal(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("grpc error when describe collection %v from rootcoord: %s", collID, err.Error())
 	}

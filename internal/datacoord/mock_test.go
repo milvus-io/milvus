@@ -442,6 +442,10 @@ func (m *mockRootCoordService) DescribeCollection(ctx context.Context, req *milv
 	}, nil
 }
 
+func (m *mockRootCoordService) DescribeCollectionInternal(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+	return m.DescribeCollection(ctx, req)
+}
+
 func (m *mockRootCoordService) ShowCollections(ctx context.Context, req *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
 	return &milvuspb.ShowCollectionsResponse{
 		Status: &commonpb.Status{
@@ -477,6 +481,10 @@ func (m *mockRootCoordService) ShowPartitions(ctx context.Context, req *milvuspb
 		PartitionNames: []string{"_default"},
 		PartitionIDs:   []int64{0},
 	}, nil
+}
+
+func (m *mockRootCoordService) ShowPartitionsInternal(ctx context.Context, req *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
+	return m.ShowPartitions(ctx, req)
 }
 
 //global timestamp allocator

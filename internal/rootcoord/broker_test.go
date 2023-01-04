@@ -303,7 +303,7 @@ func TestServerBroker_BroadcastAlteredCollection(t *testing.T) {
 	t.Run("get meta fail", func(t *testing.T) {
 		c := newTestCore(withInvalidDataCoord())
 		c.meta = &mockMetaTable{
-			GetCollectionByIDFunc: func(ctx context.Context, collectionID UniqueID, ts Timestamp) (*model.Collection, error) {
+			GetCollectionByIDFunc: func(ctx context.Context, collectionID UniqueID, ts Timestamp, allowUnavailable bool) (*model.Collection, error) {
 				return nil, errors.New("err")
 			},
 		}
@@ -316,7 +316,7 @@ func TestServerBroker_BroadcastAlteredCollection(t *testing.T) {
 	t.Run("failed to execute", func(t *testing.T) {
 		c := newTestCore(withInvalidDataCoord())
 		c.meta = &mockMetaTable{
-			GetCollectionByIDFunc: func(ctx context.Context, collectionID UniqueID, ts Timestamp) (*model.Collection, error) {
+			GetCollectionByIDFunc: func(ctx context.Context, collectionID UniqueID, ts Timestamp, allowUnavailable bool) (*model.Collection, error) {
 				return collMeta, nil
 			},
 		}
@@ -329,7 +329,7 @@ func TestServerBroker_BroadcastAlteredCollection(t *testing.T) {
 	t.Run("non success error code on execute", func(t *testing.T) {
 		c := newTestCore(withFailedDataCoord())
 		c.meta = &mockMetaTable{
-			GetCollectionByIDFunc: func(ctx context.Context, collectionID UniqueID, ts Timestamp) (*model.Collection, error) {
+			GetCollectionByIDFunc: func(ctx context.Context, collectionID UniqueID, ts Timestamp, allowUnavailable bool) (*model.Collection, error) {
 				return collMeta, nil
 			},
 		}
@@ -342,7 +342,7 @@ func TestServerBroker_BroadcastAlteredCollection(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		c := newTestCore(withValidDataCoord())
 		c.meta = &mockMetaTable{
-			GetCollectionByIDFunc: func(ctx context.Context, collectionID UniqueID, ts Timestamp) (*model.Collection, error) {
+			GetCollectionByIDFunc: func(ctx context.Context, collectionID UniqueID, ts Timestamp, allowUnavailable bool) (*model.Collection, error) {
 				return collMeta, nil
 			},
 		}

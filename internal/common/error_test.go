@@ -61,3 +61,21 @@ func Test_IsCollectionNotExistError(t *testing.T) {
 	assert.True(t, IsCollectionNotExistError(NewCollectionNotExistError("collection not exist")))
 	assert.False(t, IsCollectionNotExistError(NewStatusError(commonpb.ErrorCode_BuildIndexError, "")))
 }
+
+func TestIsCollectionNotExistErrorV2(t *testing.T) {
+	assert.False(t, IsCollectionNotExistErrorV2(nil))
+	assert.False(t, IsCollectionNotExistErrorV2(errors.New("not status error")))
+	assert.True(t, IsCollectionNotExistErrorV2(NewCollectionNotExistError("collection not exist")))
+	assert.False(t, IsCollectionNotExistErrorV2(NewStatusError(commonpb.ErrorCode_BuildIndexError, "")))
+}
+
+func TestStatusFromError(t *testing.T) {
+	var status *commonpb.Status
+	status = StatusFromError(nil)
+	assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
+	status = StatusFromError(errors.New("not status error"))
+	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
+	assert.Equal(t, "not status error", status.GetReason())
+	status = StatusFromError(NewCollectionNotExistError("collection not exist"))
+	assert.Equal(t, commonpb.ErrorCode_CollectionNotExists, status.GetErrorCode())
+}
