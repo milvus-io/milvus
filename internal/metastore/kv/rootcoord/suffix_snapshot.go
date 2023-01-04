@@ -26,13 +26,17 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/util/etcd"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -80,6 +84,8 @@ type SuffixSnapshot struct {
 	// exp is the shortcut format checker for ts-key
 	// composed with separator only
 	exp *regexp.Regexp
+
+	closeGC chan struct{}
 }
 
 // tsv struct stores kv with timestamp
@@ -114,7 +120,10 @@ func NewSuffixSnapshot(metaKV kv.MetaKv, sep, root, snapshot string) (*SuffixSna
 		snapshotLen:    snapshotLen,
 		rootPrefix:     root,
 		rootLen:        rootLen,
+		closeGC:        make(chan struct{}, 1),
 	}
+
+	go ss.startBackgroundGC()
 	return ss, nil
 }
 
@@ -540,6 +549,35 @@ func (ss *SuffixSnapshot) MultiSaveAndRemoveWithPrefix(saves map[string]string, 
 	return err
 }
 
+func (ss *SuffixSnapshot) Close() {
+	close(ss.closeGC)
+}
+
+// startBackgroundGC the data will clean up if key ts!=0 and expired
+func (ss *SuffixSnapshot) startBackgroundGC() {
+	log.Debug("suffix snapshot GC goroutine start!")
+
+	var params paramtable.ComponentParam
+	params.Init()
+
+	ticker := time.NewTicker(60 * time.Minute)
+	defer ticker.Stop()
+
+	retentionDuration := time.Duration(params.CommonCfg.RetentionDuration) * time.Second
+	for {
+		select {
+		case <-ss.closeGC:
+			log.Warn("quit suffix snapshot GC goroutine!")
+			return
+		case now := <-ticker.C:
+			err := ss.removeExpiredKvs(now, retentionDuration)
+			if err != nil {
+				log.Warn("remove expired data fail during GC", zap.Error(err))
+			}
+		}
+	}
+}
+
 func (ss *SuffixSnapshot) getOriginalKey(snapshotKey string) (string, error) {
 	if !strings.HasPrefix(snapshotKey, ss.snapshotPrefix) {
 		return "", fmt.Errorf("get original key failed, invailed snapshot key:%s", snapshotKey)
@@ -551,4 +589,84 @@ func (ss *SuffixSnapshot) getOriginalKey(snapshotKey string) (string, error) {
 	}
 	prefix := snapshotKey[:idx]
 	return prefix[ss.snapshotLen:], nil
+}
+
+func (ss *SuffixSnapshot) batchRemoveExpiredKvs(keyGroup []string, originalKey string, includeOriginalKey bool) error {
+	if includeOriginalKey {
+		keyGroup = append(keyGroup, originalKey)
+	}
+
+	// to protect txn finished with ascend order, reverse the latest kv with tombstone to tail of array
+	sort.Strings(keyGroup)
+	removeFn := func(partialKeys []string) error {
+		return ss.MetaKv.MultiRemove(keyGroup)
+	}
+	return etcd.RemoveByBatch(keyGroup, removeFn)
+}
+
+func (ss *SuffixSnapshot) removeExpiredKvs(now time.Time, retentionDuration time.Duration) error {
+	keyGroup := make([]string, 0)
+	latestOriginalKey := ""
+	latestValue := ""
+	groupCnt := 0
+
+	removeFn := func(curOriginalKey string) error {
+		if !ss.isTombstone(latestValue) {
+			return nil
+		}
+		return ss.batchRemoveExpiredKvs(keyGroup, curOriginalKey, groupCnt == len(keyGroup))
+	}
+
+	// walk all kvs with SortAsc, we need walk to the latest key for each key group to check the kv
+	// whether contains tombstone, then if so, it represents the original key has been removed.
+	// TODO: walk with Desc
+	err := ss.MetaKv.WalkWithPrefix(ss.snapshotPrefix, PaginationSize, func(k []byte, v []byte) error {
+		key := string(k)
+		value := string(v)
+
+		key = ss.hideRootPrefix(key)
+		ts, ok := ss.isTSKey(key)
+		// it is original key if the key doesn't contain ts
+		if !ok {
+			log.Warn("skip key because it doesn't contain ts", zap.String("key", key))
+			return nil
+		}
+
+		curOriginalKey, err := ss.getOriginalKey(key)
+		if err != nil {
+			return err
+		}
+
+		// reset if starting look up a new key group
+		if latestOriginalKey != "" && latestOriginalKey != curOriginalKey {
+			// it indicates all keys need to remove that the prefix is original key
+			// it means the latest original kvs has already been removed if the latest kv has tombstone marker.
+			if err := removeFn(latestOriginalKey); err != nil {
+				return err
+			}
+
+			keyGroup = make([]string, 0)
+			groupCnt = 0
+		}
+
+		latestValue = value
+		groupCnt++
+		latestOriginalKey = curOriginalKey
+
+		// record keys if the kv is expired
+		pts, _ := tsoutil.ParseTS(ts)
+		expireTime := pts.Add(retentionDuration)
+		// break loop if it reaches expire time
+		if expireTime.Before(now) {
+			keyGroup = append(keyGroup, key)
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return err
+	}
+
+	return removeFn(latestOriginalKey)
 }
