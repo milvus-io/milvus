@@ -64,6 +64,43 @@ func (kv *EtcdKV) GetPath(key string) string {
 	return path.Join(kv.rootPath, key)
 }
 
+func (kv *EtcdKV) WalkWithPrefix(prefix string, paginationSize int, fn func([]byte, []byte) error) error {
+	start := time.Now()
+	prefix = path.Join(kv.rootPath, prefix)
+	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
+	defer cancel()
+
+	batch := int64(paginationSize)
+	opts := []clientv3.OpOption{
+		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend),
+		clientv3.WithLimit(batch),
+		clientv3.WithRange(clientv3.GetPrefixRangeEnd(prefix)),
+	}
+
+	key := prefix
+	for {
+		resp, err := kv.client.Get(ctx, key, opts...)
+		if err != nil {
+			return err
+		}
+
+		for _, kv := range resp.Kvs {
+			if err = fn(kv.Key, kv.Value); err != nil {
+				return err
+			}
+		}
+
+		if !resp.More {
+			break
+		}
+		// move to next key
+		key = string(append(resp.Kvs[len(resp.Kvs)-1].Key, 0))
+	}
+
+	CheckElapseAndWarn(start, "Slow etcd operation(WalkWithPagination)", zap.String("prefix", prefix))
+	return nil
+}
+
 // LoadWithPrefix returns all the keys and values with the given key prefix.
 func (kv *EtcdKV) LoadWithPrefix(key string) ([]string, []string, error) {
 	start := time.Now()
