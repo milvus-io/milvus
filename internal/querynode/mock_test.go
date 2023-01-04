@@ -1903,7 +1903,7 @@ func (mm *mockMsgStreamFactory) NewMsgStream(ctx context.Context) (msgstream.Msg
 }
 
 func (mm *mockMsgStreamFactory) NewTtMsgStream(ctx context.Context) (msgstream.MsgStream, error) {
-	return nil, nil
+	return mm.mockMqStream, nil
 }
 
 func (mm *mockMsgStreamFactory) NewQueryMsgStream(ctx context.Context) (msgstream.MsgStream, error) {
