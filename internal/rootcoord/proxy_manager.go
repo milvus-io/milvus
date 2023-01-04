@@ -23,16 +23,16 @@ import (
 	"path"
 	"sync"
 
-	"github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
+	"go.etcd.io/etcd/api/v3/mvccpb"
 	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
 
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"go.etcd.io/etcd/api/v3/mvccpb"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 )
 
 // proxyManager manages proxy connected to the rootcoord
@@ -77,7 +77,7 @@ func (p *proxyManager) DelSessionFunc(fns ...func(*sessionutil.Session)) {
 
 // WatchProxy starts a goroutine to watch proxy session changes on etcd
 func (p *proxyManager) WatchProxy() error {
-	ctx, cancel := context.WithTimeout(p.ctx, rootcoord.RequestTimeout)
+	ctx, cancel := context.WithTimeout(p.ctx, etcdkv.RequestTimeout)
 	defer cancel()
 
 	sessions, rev, err := p.getSessionsOnEtcd(ctx)
@@ -210,7 +210,7 @@ func (p *proxyManager) Stop() {
 
 // listProxyInEtcd helper function lists proxy in etcd
 func listProxyInEtcd(ctx context.Context, cli *clientv3.Client) (map[int64]*sessionutil.Session, error) {
-	ctx2, cancel := context.WithTimeout(ctx, rootcoord.RequestTimeout)
+	ctx2, cancel := context.WithTimeout(ctx, etcdkv.RequestTimeout)
 	defer cancel()
 	resp, err := cli.Get(
 		ctx2,

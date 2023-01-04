@@ -17,16 +17,20 @@
 package etcdkv_test
 
 import (
+	"errors"
+	"fmt"
+	"sort"
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/util/metricsinfo"
-
-	embed_etcd_kv "github.com/milvus-io/milvus/internal/kv/etcd"
-	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"golang.org/x/exp/maps"
+
+	embed_etcd_kv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
 
 func TestEmbedEtcd(te *testing.T) {
@@ -953,5 +957,80 @@ func TestEmbedEtcd(te *testing.T) {
 			_, err = metaKv.Load(k)
 			assert.Error(t, err)
 		}
+	})
+
+	te.Run("Etcd WalkWithPagination", func(t *testing.T) {
+		rootPath := "/etcd/test/root/walkWithPagination"
+		metaKv, err := embed_etcd_kv.NewMetaKvFactory(rootPath, &param.EtcdCfg)
+		assert.Nil(t, err)
+
+		defer metaKv.Close()
+		defer metaKv.RemoveWithPrefix("")
+
+		kvs := map[string]string{
+			"A/100":    "v1",
+			"AA/100":   "v2",
+			"AB/100":   "v3",
+			"AB/2/100": "v4",
+			"B/100":    "v5",
+		}
+
+		err = metaKv.MultiSave(kvs)
+		assert.NoError(t, err)
+		for k, v := range kvs {
+			actualV, err := metaKv.Load(k)
+			assert.NoError(t, err)
+			assert.Equal(t, v, actualV)
+		}
+
+		t.Run("apply function error ", func(t *testing.T) {
+			err = metaKv.WalkWithPrefix("A", 5, func(key []byte, value []byte) error {
+				return errors.New("error")
+			})
+			assert.Error(t, err)
+		})
+
+		t.Run("get with non-exist prefix ", func(t *testing.T) {
+			err = metaKv.WalkWithPrefix("non-exist-prefix", 5, func(key []byte, value []byte) error {
+				return nil
+			})
+			assert.NoError(t, err)
+		})
+
+		t.Run("with different pagination", func(t *testing.T) {
+			testFn := func(pagination int) {
+				expected := map[string]string{
+					"A/100":    "v1",
+					"AA/100":   "v2",
+					"AB/100":   "v3",
+					"AB/2/100": "v4",
+				}
+
+				expectedSortedKey := maps.Keys(expected)
+				sort.Strings(expectedSortedKey)
+
+				ret := make(map[string]string)
+				actualSortedKey := make([]string, 0)
+
+				err = metaKv.WalkWithPrefix("A", pagination, func(key []byte, value []byte) error {
+					k := string(key)
+					k = k[len(rootPath)+1:]
+					ret[k] = string(value)
+					actualSortedKey = append(actualSortedKey, k)
+					return nil
+				})
+
+				assert.NoError(t, err)
+				assert.Equal(t, expected, ret, fmt.Errorf("pagination: %d", pagination))
+				assert.Equal(t, expectedSortedKey, actualSortedKey, fmt.Errorf("pagination: %d", pagination))
+			}
+
+			testFn(-100)
+			testFn(-1)
+			testFn(0)
+			testFn(1)
+			testFn(5)
+			testFn(100)
+		})
 	})
 }
