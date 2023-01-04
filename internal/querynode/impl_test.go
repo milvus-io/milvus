@@ -227,7 +227,7 @@ func TestImpl_UnsubDmChannel(t *testing.T) {
 			Infos: []*datapb.VchannelInfo{
 				{
 					CollectionID: 1000,
-					ChannelName:  "1000-dmc0",
+					ChannelName:  Params.CommonCfg.RootCoordDml.GetValue() + "-dmc0",
 				},
 			},
 		}
@@ -245,7 +245,7 @@ func TestImpl_UnsubDmChannel(t *testing.T) {
 				},
 				NodeID:       0,
 				CollectionID: defaultCollectionID,
-				ChannelName:  "1000-dmc0",
+				ChannelName:  Params.CommonCfg.RootCoordDml.GetValue() + "-dmc0",
 			}
 			originMetaReplica := node.metaReplica
 			node.metaReplica = newMockReplicaInterface()
