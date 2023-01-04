@@ -119,3 +119,22 @@ func IsCollectionNotExistError(e error) bool {
 	}
 	return false
 }
+
+func IsCollectionNotExistErrorV2(e error) bool {
+	statusError, ok := e.(*statusError)
+	if !ok {
+		return false
+	}
+	return statusError.GetErrorCode() == commonpb.ErrorCode_CollectionNotExists
+}
+
+func StatusFromError(e error) *commonpb.Status {
+	if e == nil {
+		return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
+	}
+	statusError, ok := e.(*statusError)
+	if !ok {
+		return &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError, Reason: e.Error()}
+	}
+	return &commonpb.Status{ErrorCode: statusError.GetErrorCode(), Reason: statusError.GetReason()}
+}

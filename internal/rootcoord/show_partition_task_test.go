@@ -80,7 +80,7 @@ func Test_showPartitionTask_Execute(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		meta := newMockMetaTable()
-		meta.GetCollectionByIDFunc = func(ctx context.Context, collectionID typeutil.UniqueID, ts Timestamp) (*model.Collection, error) {
+		meta.GetCollectionByIDFunc = func(ctx context.Context, collectionID typeutil.UniqueID, ts Timestamp, allowUnavailable bool) (*model.Collection, error) {
 			return &model.Collection{
 				CollectionID: collectionID,
 				Name:         "test coll",

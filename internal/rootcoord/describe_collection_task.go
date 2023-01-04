@@ -10,8 +10,9 @@ import (
 // describeCollectionTask describe collection request task
 type describeCollectionTask struct {
 	baseTask
-	Req *milvuspb.DescribeCollectionRequest
-	Rsp *milvuspb.DescribeCollectionResponse
+	Req              *milvuspb.DescribeCollectionRequest
+	Rsp              *milvuspb.DescribeCollectionResponse
+	allowUnavailable bool
 }
 
 func (t *describeCollectionTask) Prepare(ctx context.Context) error {
@@ -23,7 +24,7 @@ func (t *describeCollectionTask) Prepare(ctx context.Context) error {
 
 // Execute task execution
 func (t *describeCollectionTask) Execute(ctx context.Context) (err error) {
-	coll, err := t.core.describeCollection(ctx, t.Req)
+	coll, err := t.core.describeCollection(ctx, t.Req, t.allowUnavailable)
 	if err != nil {
 		return err
 	}

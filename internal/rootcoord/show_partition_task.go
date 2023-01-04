@@ -13,8 +13,9 @@ import (
 // showPartitionTask show partition request task
 type showPartitionTask struct {
 	baseTask
-	Req *milvuspb.ShowPartitionsRequest
-	Rsp *milvuspb.ShowPartitionsResponse
+	Req              *milvuspb.ShowPartitionsRequest
+	Rsp              *milvuspb.ShowPartitionsResponse
+	allowUnavailable bool
 }
 
 func (t *showPartitionTask) Prepare(ctx context.Context) error {
@@ -30,7 +31,7 @@ func (t *showPartitionTask) Execute(ctx context.Context) error {
 	var err error
 	t.Rsp.Status = succStatus()
 	if t.Req.GetCollectionName() == "" {
-		coll, err = t.core.meta.GetCollectionByID(ctx, t.Req.GetCollectionID(), typeutil.MaxTimestamp)
+		coll, err = t.core.meta.GetCollectionByID(ctx, t.Req.GetCollectionID(), typeutil.MaxTimestamp, t.allowUnavailable)
 	} else {
 		coll, err = t.core.meta.GetCollectionByName(ctx, t.Req.GetCollectionName(), typeutil.MaxTimestamp)
 	}

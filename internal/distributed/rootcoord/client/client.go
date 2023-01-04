@@ -239,6 +239,25 @@ func (c *Client) DescribeCollection(ctx context.Context, in *milvuspb.DescribeCo
 	return ret.(*milvuspb.DescribeCollectionResponse), err
 }
 
+// DescribeCollectionInternal return collection info
+func (c *Client) DescribeCollectionInternal(ctx context.Context, in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+	in = typeutil.Clone(in)
+	commonpbutil.UpdateMsgBase(
+		in.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.sess.ServerID)),
+	)
+	ret, err := c.grpcClient.ReCall(ctx, func(client rootcoordpb.RootCoordClient) (any, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.DescribeCollectionInternal(ctx, in)
+	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
+	return ret.(*milvuspb.DescribeCollectionResponse), err
+}
+
 // ShowCollections list all collection names
 func (c *Client) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
 	in = typeutil.Clone(in)
@@ -345,6 +364,25 @@ func (c *Client) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitions
 			return nil, ctx.Err()
 		}
 		return client.ShowPartitions(ctx, in)
+	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
+	return ret.(*milvuspb.ShowPartitionsResponse), err
+}
+
+// ShowPartitionsInternal list all partitions in collection
+func (c *Client) ShowPartitionsInternal(ctx context.Context, in *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
+	in = typeutil.Clone(in)
+	commonpbutil.UpdateMsgBase(
+		in.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.sess.ServerID)),
+	)
+	ret, err := c.grpcClient.ReCall(ctx, func(client rootcoordpb.RootCoordClient) (any, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.ShowPartitionsInternal(ctx, in)
 	})
 	if err != nil || ret == nil {
 		return nil, err

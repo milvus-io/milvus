@@ -38,7 +38,7 @@ type mockMetaTable struct {
 	ListCollectionsFunc              func(ctx context.Context, ts Timestamp) ([]*model.Collection, error)
 	AddCollectionFunc                func(ctx context.Context, coll *model.Collection) error
 	GetCollectionByNameFunc          func(ctx context.Context, collectionName string, ts Timestamp) (*model.Collection, error)
-	GetCollectionByIDFunc            func(ctx context.Context, collectionID UniqueID, ts Timestamp) (*model.Collection, error)
+	GetCollectionByIDFunc            func(ctx context.Context, collectionID UniqueID, ts Timestamp, allowUnavailable bool) (*model.Collection, error)
 	ChangeCollectionStateFunc        func(ctx context.Context, collectionID UniqueID, state pb.CollectionState, ts Timestamp) error
 	RemoveCollectionFunc             func(ctx context.Context, collectionID UniqueID, ts Timestamp) error
 	AddPartitionFunc                 func(ctx context.Context, partition *model.Partition) error
@@ -67,8 +67,8 @@ func (m mockMetaTable) GetCollectionByName(ctx context.Context, collectionName s
 	return m.GetCollectionByNameFunc(ctx, collectionName, ts)
 }
 
-func (m mockMetaTable) GetCollectionByID(ctx context.Context, collectionID UniqueID, ts Timestamp) (*model.Collection, error) {
-	return m.GetCollectionByIDFunc(ctx, collectionID, ts)
+func (m mockMetaTable) GetCollectionByID(ctx context.Context, collectionID UniqueID, ts Timestamp, allowUnavailable bool) (*model.Collection, error) {
+	return m.GetCollectionByIDFunc(ctx, collectionID, ts, allowUnavailable)
 }
 
 func (m mockMetaTable) ChangeCollectionState(ctx context.Context, collectionID UniqueID, state pb.CollectionState, ts Timestamp) error {
@@ -361,7 +361,7 @@ func withInvalidMeta() Opt {
 	meta.GetCollectionByNameFunc = func(ctx context.Context, collectionName string, ts Timestamp) (*model.Collection, error) {
 		return nil, errors.New("error mock GetCollectionByName")
 	}
-	meta.GetCollectionByIDFunc = func(ctx context.Context, collectionID typeutil.UniqueID, ts Timestamp) (*model.Collection, error) {
+	meta.GetCollectionByIDFunc = func(ctx context.Context, collectionID typeutil.UniqueID, ts Timestamp, allowUnavailable bool) (*model.Collection, error) {
 		return nil, errors.New("error mock GetCollectionByID")
 	}
 	meta.AddPartitionFunc = func(ctx context.Context, partition *model.Partition) error {

@@ -595,6 +595,53 @@ func (_c *RootCoord_DescribeCollection_Call) Return(_a0 *milvuspb.DescribeCollec
 	return _c
 }
 
+// DescribeCollectionInternal provides a mock function with given fields: ctx, req
+func (_m *RootCoord) DescribeCollectionInternal(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+	ret := _m.Called(ctx, req)
+
+	var r0 *milvuspb.DescribeCollectionResponse
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DescribeCollectionRequest) *milvuspb.DescribeCollectionResponse); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.DescribeCollectionResponse)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DescribeCollectionRequest) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// RootCoord_DescribeCollectionInternal_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DescribeCollectionInternal'
+type RootCoord_DescribeCollectionInternal_Call struct {
+	*mock.Call
+}
+
+// DescribeCollectionInternal is a helper method to define mock.On call
+//  - ctx context.Context
+//  - req *milvuspb.DescribeCollectionRequest
+func (_e *RootCoord_Expecter) DescribeCollectionInternal(ctx interface{}, req interface{}) *RootCoord_DescribeCollectionInternal_Call {
+	return &RootCoord_DescribeCollectionInternal_Call{Call: _e.mock.On("DescribeCollectionInternal", ctx, req)}
+}
+
+func (_c *RootCoord_DescribeCollectionInternal_Call) Run(run func(ctx context.Context, req *milvuspb.DescribeCollectionRequest)) *RootCoord_DescribeCollectionInternal_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.DescribeCollectionRequest))
+	})
+	return _c
+}
+
+func (_c *RootCoord_DescribeCollectionInternal_Call) Return(_a0 *milvuspb.DescribeCollectionResponse, _a1 error) *RootCoord_DescribeCollectionInternal_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
 // DropAlias provides a mock function with given fields: ctx, req
 func (_m *RootCoord) DropAlias(ctx context.Context, req *milvuspb.DropAliasRequest) (*commonpb.Status, error) {
 	ret := _m.Called(ctx, req)
@@ -1882,6 +1929,53 @@ func (_c *RootCoord_ShowPartitions_Call) Run(run func(ctx context.Context, req *
 }
 
 func (_c *RootCoord_ShowPartitions_Call) Return(_a0 *milvuspb.ShowPartitionsResponse, _a1 error) *RootCoord_ShowPartitions_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+// ShowPartitionsInternal provides a mock function with given fields: ctx, req
+func (_m *RootCoord) ShowPartitionsInternal(ctx context.Context, req *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
+	ret := _m.Called(ctx, req)
+
+	var r0 *milvuspb.ShowPartitionsResponse
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ShowPartitionsRequest) *milvuspb.ShowPartitionsResponse); ok {
+		r0 = rf(ctx, req)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.ShowPartitionsResponse)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ShowPartitionsRequest) error); ok {
+		r1 = rf(ctx, req)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// RootCoord_ShowPartitionsInternal_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ShowPartitionsInternal'
+type RootCoord_ShowPartitionsInternal_Call struct {
+	*mock.Call
+}
+
+// ShowPartitionsInternal is a helper method to define mock.On call
+//  - ctx context.Context
+//  - req *milvuspb.ShowPartitionsRequest
+func (_e *RootCoord_Expecter) ShowPartitionsInternal(ctx interface{}, req interface{}) *RootCoord_ShowPartitionsInternal_Call {
+	return &RootCoord_ShowPartitionsInternal_Call{Call: _e.mock.On("ShowPartitionsInternal", ctx, req)}
+}
+
+func (_c *RootCoord_ShowPartitionsInternal_Call) Run(run func(ctx context.Context, req *milvuspb.ShowPartitionsRequest)) *RootCoord_ShowPartitionsInternal_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.ShowPartitionsRequest))
+	})
+	return _c
+}
+
+func (_c *RootCoord_ShowPartitionsInternal_Call) Return(_a0 *milvuspb.ShowPartitionsResponse, _a1 error) *RootCoord_ShowPartitionsInternal_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }

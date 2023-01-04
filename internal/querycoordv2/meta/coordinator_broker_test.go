@@ -34,12 +34,12 @@ import (
 )
 
 func TestCoordinatorBroker_GetCollectionSchema(t *testing.T) {
-	t.Run("got error on DescribeCollection", func(t *testing.T) {
+	t.Run("got error on DescribeCollectionInternal", func(t *testing.T) {
 		rootCoord := mocks.NewRootCoord(t)
-		rootCoord.On("DescribeCollection",
+		rootCoord.On("DescribeCollectionInternal",
 			mock.Anything,
 			mock.Anything,
-		).Return(nil, errors.New("error mock DescribeCollection"))
+		).Return(nil, errors.New("error mock DescribeCollectionInternal"))
 		ctx := context.Background()
 		broker := &CoordinatorBroker{rootCoord: rootCoord}
 		_, err := broker.GetCollectionSchema(ctx, 100)
@@ -48,7 +48,7 @@ func TestCoordinatorBroker_GetCollectionSchema(t *testing.T) {
 
 	t.Run("non-success code", func(t *testing.T) {
 		rootCoord := mocks.NewRootCoord(t)
-		rootCoord.On("DescribeCollection",
+		rootCoord.On("DescribeCollectionInternal",
 			mock.Anything,
 			mock.Anything,
 		).Return(&milvuspb.DescribeCollectionResponse{
@@ -62,7 +62,7 @@ func TestCoordinatorBroker_GetCollectionSchema(t *testing.T) {
 
 	t.Run("normal case", func(t *testing.T) {
 		rootCoord := mocks.NewRootCoord(t)
-		rootCoord.On("DescribeCollection",
+		rootCoord.On("DescribeCollectionInternal",
 			mock.Anything,
 			mock.Anything,
 		).Return(&milvuspb.DescribeCollectionResponse{

@@ -143,6 +143,10 @@ func (m *MockRootCoord) DescribeCollection(ctx context.Context, req *milvuspb.De
 	return nil, nil
 }
 
+func (m *MockRootCoord) DescribeCollectionInternal(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+	return nil, nil
+}
+
 func (m *MockRootCoord) ShowCollections(ctx context.Context, req *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
 	return nil, nil
 }
@@ -164,6 +168,10 @@ func (m *MockRootCoord) HasPartition(ctx context.Context, req *milvuspb.HasParti
 }
 
 func (m *MockRootCoord) ShowPartitions(ctx context.Context, req *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
+	return nil, nil
+}
+
+func (m *MockRootCoord) ShowPartitionsInternal(ctx context.Context, req *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
 	return nil, nil
 }
 
