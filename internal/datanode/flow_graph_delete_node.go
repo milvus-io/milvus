@@ -93,9 +93,7 @@ func (dn *deleteNode) Operate(in []Msg) []Msg {
 	}
 
 	// update compacted segment before operation
-	if len(fgMsg.deleteMessages) > 0 || len(fgMsg.segmentsToSync) > 0 {
-		dn.updateCompactedSegments()
-	}
+	dn.updateCompactedSegments()
 
 	// process delete messages
 	var segIDs []UniqueID
