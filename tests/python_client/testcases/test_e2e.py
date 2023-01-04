@@ -79,17 +79,21 @@ class TestE2e(TestcaseBase):
         collection_w.load()
         tt = time.time() - t0
         log.info(f"assert load: {tt}")
-        search_vectors = cf.gen_vectors(1, ct.default_dim)
+        nq = 5
+        topk = 5
+        search_vectors = cf.gen_vectors(nq, ct.default_dim)
         t0 = time.time()
-        res_1, _ = collection_w.search(data=search_vectors,
-                                       anns_field=ct.default_float_vec_field_name,
-                                       param=search_params, limit=1)
+        res, _ = collection_w.search(data=search_vectors,
+                                     anns_field=ct.default_float_vec_field_name,
+                                     param=search_params, limit=topk)
         tt = time.time() - t0
         log.info(f"assert search: {tt}")
-
+        assert len(res) == nq
+        assert len(res[0]) <= topk
         # query
-        term_expr = f'{ct.default_int64_field_name} in [1001,1201,4999,2999]'
+        term_expr = f'{ct.default_int64_field_name} in [1, 2, 3, 4]'
         t0 = time.time()
         res, _ = collection_w.query(term_expr)
         tt = time.time() - t0
         log.info(f"assert query result {len(res)}: {tt}")
+        assert len(res) >= 4
