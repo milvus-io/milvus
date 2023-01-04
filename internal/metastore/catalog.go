@@ -117,6 +117,18 @@ type DataCoordCatalog interface {
 	ListChannelCheckpoint(ctx context.Context) (map[string]*internalpb.MsgPosition, error)
 	SaveChannelCheckpoint(ctx context.Context, vChannel string, pos *internalpb.MsgPosition) error
 	DropChannelCheckpoint(ctx context.Context, vChannel string) error
+
+	CreateIndex(ctx context.Context, index *model.Index) error
+	ListIndexes(ctx context.Context) ([]*model.Index, error)
+	AlterIndex(ctx context.Context, newIndex *model.Index) error
+	AlterIndexes(ctx context.Context, newIndexes []*model.Index) error
+	DropIndex(ctx context.Context, collID, dropIdxID typeutil.UniqueID) error
+
+	CreateSegmentIndex(ctx context.Context, segIdx *model.SegmentIndex) error
+	ListSegmentIndexes(ctx context.Context) ([]*model.SegmentIndex, error)
+	AlterSegmentIndex(ctx context.Context, newSegIndex *model.SegmentIndex) error
+	AlterSegmentIndexes(ctx context.Context, newSegIdxes []*model.SegmentIndex) error
+	DropSegmentIndex(ctx context.Context, collID, partID, segID, buildID typeutil.UniqueID) error
 }
 
 type IndexCoordCatalog interface {

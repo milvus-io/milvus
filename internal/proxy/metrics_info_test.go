@@ -51,15 +51,10 @@ func TestProxy_metrics(t *testing.T) {
 	dc.Start()
 	defer dc.Stop()
 
-	ic := NewIndexCoordMock()
-	ic.Start()
-	defer ic.Stop()
-
 	proxy := &Proxy{
 		rootCoord:  rc,
 		queryCoord: qc,
 		dataCoord:  dc,
-		indexCoord: ic,
 		session:    &sessionutil.Session{Address: funcutil.GenRandomStr()},
 	}
 
@@ -221,63 +216,6 @@ func TestProxy_metrics(t *testing.T) {
 
 	}
 
-	ic.getMetricsFunc = func(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-		id := typeutil.UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
-
-		clusterTopology := metricsinfo.IndexClusterTopology{
-			Self: metricsinfo.IndexCoordInfos{
-				BaseComponentInfos: metricsinfo.BaseComponentInfos{
-					Name:          metricsinfo.ConstructComponentName(typeutil.IndexCoordRole, id),
-					HardwareInfos: metricsinfo.HardwareMetrics{},
-					SystemInfo:    metricsinfo.DeployMetrics{},
-					Type:          typeutil.IndexCoordRole,
-					ID:            id,
-				},
-				SystemConfigurations: metricsinfo.IndexCoordConfiguration{},
-			},
-			ConnectedNodes: make([]metricsinfo.IndexNodeInfos, 0),
-		}
-
-		infos := metricsinfo.IndexNodeInfos{
-			BaseComponentInfos:   metricsinfo.BaseComponentInfos{},
-			SystemConfigurations: metricsinfo.IndexNodeConfiguration{},
-		}
-		clusterTopology.ConnectedNodes = append(clusterTopology.ConnectedNodes, infos)
-
-		coordTopology := metricsinfo.IndexCoordTopology{
-			Cluster: clusterTopology,
-			Connections: metricsinfo.ConnTopology{
-				Name: metricsinfo.ConstructComponentName(typeutil.IndexCoordRole, id),
-				ConnectedComponents: []metricsinfo.ConnectionInfo{
-					{
-						TargetName: metricsinfo.ConstructComponentName(typeutil.RootCoordRole, id),
-						TargetType: typeutil.RootCoordRole,
-					},
-					{
-						TargetName: metricsinfo.ConstructComponentName(typeutil.QueryCoordRole, id),
-						TargetType: typeutil.QueryCoordRole,
-					},
-					{
-						TargetName: metricsinfo.ConstructComponentName(typeutil.DataCoordRole, id),
-						TargetType: typeutil.DataCoordRole,
-					},
-				},
-			},
-		}
-
-		resp, _ := metricsinfo.MarshalTopology(coordTopology)
-
-		return &milvuspb.GetMetricsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-				Reason:    "",
-			},
-			Response:      resp,
-			ComponentName: metricsinfo.ConstructComponentName(typeutil.IndexCoordRole, id),
-		}, nil
-
-	}
-
 	req, _ := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
 	resp, err := getSystemInfoMetrics(ctx, req, proxy)
 	assert.NoError(t, err)
@@ -286,5 +224,4 @@ func TestProxy_metrics(t *testing.T) {
 	rc.getMetricsFunc = nil
 	qc.getMetricsFunc = nil
 	dc.getMetricsFunc = nil
-	ic.getMetricsFunc = nil
 }

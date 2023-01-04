@@ -230,40 +230,6 @@ func (m *MockDataCoord) GetComponentStates(ctx context.Context) (*milvuspb.Compo
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-type MockIndexCoord struct {
-	types.IndexCoord
-	initErr  error
-	startErr error
-	stopErr  error
-	regErr   error
-	stateErr commonpb.ErrorCode
-}
-
-func (m *MockIndexCoord) Init() error {
-	return m.initErr
-}
-
-func (m *MockIndexCoord) Start() error {
-	return m.startErr
-}
-
-func (m *MockIndexCoord) Stop() error {
-	return m.stopErr
-}
-
-func (m *MockIndexCoord) Register() error {
-	return m.regErr
-}
-
-func (m *MockIndexCoord) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
-	return &milvuspb.ComponentStates{
-		State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Healthy},
-		Status: &commonpb.Status{ErrorCode: m.stateErr},
-	}, nil
-}
-
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
 func TestMain(m *testing.M) {
 	paramtable.Init()
 	code := m.Run()
@@ -300,15 +266,10 @@ func Test_NewServer(t *testing.T) {
 		stateErr: commonpb.ErrorCode_Success,
 	}
 
-	mic := &MockIndexCoord{
-		stateErr: commonpb.ErrorCode_Success,
-	}
-
 	t.Run("Run", func(t *testing.T) {
 		server.queryCoord = mqc
 		server.dataCoord = mdc
 		server.rootCoord = mrc
-		server.indexCoord = mic
 
 		err = server.Run()
 		assert.Nil(t, err)
@@ -443,7 +404,6 @@ func TestServer_Run2(t *testing.T) {
 	server.rootCoord = &MockRootCoord{
 		initErr: errors.New("error"),
 	}
-	server.indexCoord = &MockIndexCoord{}
 	assert.Panics(t, func() { server.Run() })
 	err = server.Stop()
 	assert.Nil(t, err)
@@ -459,7 +419,6 @@ func TestServer_Run3(t *testing.T) {
 	server.rootCoord = &MockRootCoord{
 		startErr: errors.New("error"),
 	}
-	server.indexCoord = &MockIndexCoord{}
 	assert.Panics(t, func() { server.Run() })
 	err = server.Stop()
 	assert.Nil(t, err)
@@ -477,7 +436,6 @@ func TestServer_Run4(t *testing.T) {
 	server.dataCoord = &MockDataCoord{
 		initErr: errors.New("error"),
 	}
-	server.indexCoord = &MockIndexCoord{}
 	assert.Panics(t, func() { server.Run() })
 	err = server.Stop()
 	assert.Nil(t, err)
@@ -494,7 +452,6 @@ func TestServer_Run5(t *testing.T) {
 	server.dataCoord = &MockDataCoord{
 		startErr: errors.New("error"),
 	}
-	server.indexCoord = &MockIndexCoord{}
 	assert.Panics(t, func() { server.Run() })
 	err = server.Stop()
 	assert.Nil(t, err)

@@ -4,7 +4,7 @@ import (
 	"github.com/blang/semver/v4"
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/cmd/tools/migration/versions"
-	"github.com/milvus-io/milvus/internal/metastore/kv/indexcoord"
+	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -188,7 +188,7 @@ func (meta *CollectionIndexesMeta220) GenerateSaves() (map[string]string, error)
 
 	for collectionID := range *meta {
 		for indexID := range (*meta)[collectionID] {
-			ckey := indexcoord.BuildIndexKey(collectionID, indexID)
+			ckey := datacoord.BuildIndexKey(collectionID, indexID)
 			index := (*meta)[collectionID][indexID]
 			var value string
 			indexPb := model.MarshalIndexModel(index)
@@ -210,7 +210,7 @@ func (meta *SegmentIndexesMeta220) GenerateSaves() (map[string]string, error) {
 	for segmentID := range *meta {
 		for indexID := range (*meta)[segmentID] {
 			index := (*meta)[segmentID][indexID]
-			ckey := indexcoord.BuildSegmentIndexKey(index.CollectionID, index.PartitionID, index.SegmentID, index.BuildID)
+			ckey := datacoord.BuildSegmentIndexKey(index.CollectionID, index.PartitionID, index.SegmentID, index.BuildID)
 			var value string
 			indexPb := model.MarshalSegmentIndexModel(index)
 			marshaledIndexPb, err := proto.Marshal(indexPb)

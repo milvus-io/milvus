@@ -19,12 +19,13 @@ package types
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
+
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -318,9 +319,6 @@ type DataCoord interface {
 	// UpdateChannelCheckpoint updates channel checkpoint in dataCoord.
 	UpdateChannelCheckpoint(ctx context.Context, req *datapb.UpdateChannelCheckpointRequest) (*commonpb.Status, error)
 
-	AcquireSegmentLock(ctx context.Context, req *datapb.AcquireSegmentLockRequest) (*commonpb.Status, error)
-	ReleaseSegmentLock(ctx context.Context, req *datapb.ReleaseSegmentLockRequest) (*commonpb.Status, error)
-
 	// SaveImportSegment saves the import segment binlog paths data and then looks for the right DataNode to add the
 	// segment to that DataNode.
 	SaveImportSegment(ctx context.Context, req *datapb.SaveImportSegmentRequest) (*commonpb.Status, error)
@@ -334,6 +332,34 @@ type DataCoord interface {
 	BroadcastAlteredCollection(ctx context.Context, req *datapb.AlterCollectionRequest) (*commonpb.Status, error)
 
 	CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error)
+
+	// CreateIndex create an index on collection.
+	// Index building is asynchronous, so when an index building request comes, an IndexID is assigned to the task and
+	// will get all flushed segments from DataCoord and record tasks with these segments. The background process
+	// indexBuilder will find this task and assign it to IndexNode for execution.
+	CreateIndex(ctx context.Context, req *datapb.CreateIndexRequest) (*commonpb.Status, error)
+
+	// GetIndexState gets the index state of the index name in the request from Proxy.
+	// Deprecated: use DescribeIndex instead
+	GetIndexState(ctx context.Context, req *datapb.GetIndexStateRequest) (*datapb.GetIndexStateResponse, error)
+
+	// GetSegmentIndexState gets the index state of the segments in the request from RootCoord.
+	GetSegmentIndexState(ctx context.Context, req *datapb.GetSegmentIndexStateRequest) (*datapb.GetSegmentIndexStateResponse, error)
+
+	// GetIndexInfos gets the index files of the IndexBuildIDs in the request from RootCoordinator.
+	GetIndexInfos(ctx context.Context, req *datapb.GetIndexInfoRequest) (*datapb.GetIndexInfoResponse, error)
+
+	// DescribeIndex describe the index info of the collection.
+	DescribeIndex(ctx context.Context, req *datapb.DescribeIndexRequest) (*datapb.DescribeIndexResponse, error)
+
+	// GetIndexBuildProgress get the index building progress by num rows.
+	// Deprecated: use DescribeIndex instead
+	GetIndexBuildProgress(ctx context.Context, req *datapb.GetIndexBuildProgressRequest) (*datapb.GetIndexBuildProgressResponse, error)
+
+	// DropIndex deletes indexes based on IndexID. One IndexID corresponds to the index of an entire column. A column is
+	// divided into many segments, and each segment corresponds to an IndexBuildID. IndexCoord uses IndexBuildID to record
+	// index tasks. Therefore, when DropIndex is called, delete all tasks corresponding to IndexBuildID corresponding to IndexID.
+	DropIndex(ctx context.Context, req *datapb.DropIndexRequest) (*commonpb.Status, error)
 }
 
 // DataCoordComponent defines the interface of DataCoord component.
@@ -344,8 +370,6 @@ type DataCoordComponent interface {
 	// SetEtcdClient set EtcdClient for DataCoord
 	// `etcdClient` is a client of etcd
 	SetEtcdClient(etcdClient *clientv3.Client)
-
-	SetIndexCoord(indexCoord IndexCoord)
 }
 
 // IndexNode is the interface `indexnode` package implements
@@ -355,8 +379,8 @@ type IndexNode interface {
 
 	// BuildIndex receives request from IndexCoordinator to build an index.
 	// Index building is asynchronous, so when an index building request comes, IndexNode records the task and returns.
-	//BuildIndex(ctx context.Context, req *indexpb.BuildIndexRequest) (*commonpb.Status, error)
-	//GetTaskSlots(ctx context.Context, req *indexpb.GetTaskSlotsRequest) (*indexpb.GetTaskSlotsResponse, error)
+	//BuildIndex(ctx context.Context, req *datapb.BuildIndexRequest) (*commonpb.Status, error)
+	//GetTaskSlots(ctx context.Context, req *datapb.GetTaskSlotsRequest) (*datapb.GetTaskSlotsResponse, error)
 	//
 	//// GetMetrics gets the metrics about IndexNode.
 	//GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
@@ -808,12 +832,6 @@ type RootCoordComponent interface {
 	// Always return nil.
 	SetDataCoord(ctx context.Context, dataCoord DataCoord) error
 
-	// SetIndexCoord set IndexCoord for RootCoord
-	//  `indexCoord` is a client of index coordinator.
-	//
-	// Always return nil.
-	SetIndexCoord(indexCoord IndexCoord) error
-
 	// SetQueryCoord set QueryCoord for RootCoord
 	//  `queryCoord` is a client of query coordinator.
 	//
@@ -886,7 +904,7 @@ type ProxyComponent interface {
 
 	// SetIndexCoordClient set IndexCoord for Proxy
 	//  `indexCoord` is a client of index coordinator.
-	SetIndexCoordClient(indexCoord IndexCoord)
+	//SetIndexCoordClient(indexCoord IndexCoord)
 
 	// SetQueryCoordClient set QueryCoord for Proxy
 	//  `queryCoord` is a client of query coordinator.

@@ -14,7 +14,6 @@ import (
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/tso"
@@ -131,28 +130,28 @@ func newMockMetaTable() *mockMetaTable {
 	return &mockMetaTable{}
 }
 
-type mockIndexCoord struct {
-	types.IndexCoord
-	GetComponentStatesFunc   func(ctx context.Context) (*milvuspb.ComponentStates, error)
-	GetSegmentIndexStateFunc func(ctx context.Context, req *indexpb.GetSegmentIndexStateRequest) (*indexpb.GetSegmentIndexStateResponse, error)
-	DropIndexFunc            func(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error)
-}
-
-func newMockIndexCoord() *mockIndexCoord {
-	return &mockIndexCoord{}
-}
-
-func (m mockIndexCoord) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
-	return m.GetComponentStatesFunc(ctx)
-}
-
-func (m mockIndexCoord) GetSegmentIndexState(ctx context.Context, req *indexpb.GetSegmentIndexStateRequest) (*indexpb.GetSegmentIndexStateResponse, error) {
-	return m.GetSegmentIndexStateFunc(ctx, req)
-}
-
-func (m mockIndexCoord) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
-	return m.DropIndexFunc(ctx, req)
-}
+//type mockIndexCoord struct {
+//	types.IndexCoord
+//	GetComponentStatesFunc   func(ctx context.Context) (*milvuspb.ComponentStates, error)
+//	GetSegmentIndexStateFunc func(ctx context.Context, req *indexpb.GetSegmentIndexStateRequest) (*indexpb.GetSegmentIndexStateResponse, error)
+//	DropIndexFunc            func(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error)
+//}
+//
+//func newMockIndexCoord() *mockIndexCoord {
+//	return &mockIndexCoord{}
+//}
+//
+//func (m mockIndexCoord) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
+//	return m.GetComponentStatesFunc(ctx)
+//}
+//
+//func (m mockIndexCoord) GetSegmentIndexState(ctx context.Context, req *indexpb.GetSegmentIndexStateRequest) (*indexpb.GetSegmentIndexStateResponse, error) {
+//	return m.GetSegmentIndexStateFunc(ctx, req)
+//}
+//
+//func (m mockIndexCoord) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
+//	return m.DropIndexFunc(ctx, req)
+//}
 
 type mockDataCoord struct {
 	types.DataCoord
@@ -164,6 +163,8 @@ type mockDataCoord struct {
 	ImportFunc                     func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error)
 	UnsetIsImportingStateFunc      func(ctx context.Context, req *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error)
 	broadCastAlteredCollectionFunc func(ctx context.Context, req *datapb.AlterCollectionRequest) (*commonpb.Status, error)
+	GetSegmentIndexStateFunc       func(ctx context.Context, req *datapb.GetSegmentIndexStateRequest) (*datapb.GetSegmentIndexStateResponse, error)
+	DropIndexFunc                  func(ctx context.Context, req *datapb.DropIndexRequest) (*commonpb.Status, error)
 }
 
 func newMockDataCoord() *mockDataCoord {
@@ -206,6 +207,14 @@ func (m *mockDataCoord) CheckHealth(ctx context.Context, req *milvuspb.CheckHeal
 	return &milvuspb.CheckHealthResponse{
 		IsHealthy: true,
 	}, nil
+}
+
+func (m *mockDataCoord) GetSegmentIndexState(ctx context.Context, req *datapb.GetSegmentIndexStateRequest) (*datapb.GetSegmentIndexStateResponse, error) {
+	return m.GetSegmentIndexStateFunc(ctx, req)
+}
+
+func (m *mockDataCoord) DropIndex(ctx context.Context, req *datapb.DropIndexRequest) (*commonpb.Status, error) {
+	return m.DropIndexFunc(ctx, req)
 }
 
 type mockQueryCoord struct {
@@ -479,74 +488,6 @@ func withValidQueryCoord() Opt {
 	return withQueryCoord(qc)
 }
 
-func withIndexCoord(ic types.IndexCoord) Opt {
-	return func(c *Core) {
-		c.indexCoord = ic
-	}
-}
-
-func withUnhealthyIndexCoord() Opt {
-	ic := newMockIndexCoord()
-	ic.GetComponentStatesFunc = func(ctx context.Context) (*milvuspb.ComponentStates, error) {
-		return &milvuspb.ComponentStates{
-			State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Abnormal},
-			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "error mock GetComponentStates"),
-		}, retry.Unrecoverable(errors.New("error mock GetComponentStates"))
-	}
-	return withIndexCoord(ic)
-}
-
-func withInvalidIndexCoord() Opt {
-	ic := newMockIndexCoord()
-	ic.GetComponentStatesFunc = func(ctx context.Context) (*milvuspb.ComponentStates, error) {
-		return &milvuspb.ComponentStates{
-			State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Healthy},
-			Status: succStatus(),
-		}, nil
-	}
-	ic.GetSegmentIndexStateFunc = func(ctx context.Context, req *indexpb.GetSegmentIndexStateRequest) (*indexpb.GetSegmentIndexStateResponse, error) {
-		return &indexpb.GetSegmentIndexStateResponse{}, errors.New("error mock GetSegmentIndexState")
-	}
-	ic.DropIndexFunc = func(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
-		return succStatus(), errors.New("error mock DropIndex")
-	}
-	return withIndexCoord(ic)
-}
-
-func withFailedIndexCoord() Opt {
-	ic := newMockIndexCoord()
-	ic.GetComponentStatesFunc = func(ctx context.Context) (*milvuspb.ComponentStates, error) {
-		return &milvuspb.ComponentStates{
-			State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Healthy},
-			Status: succStatus(),
-		}, nil
-	}
-	ic.GetSegmentIndexStateFunc = func(ctx context.Context, req *indexpb.GetSegmentIndexStateRequest) (*indexpb.GetSegmentIndexStateResponse, error) {
-		return &indexpb.GetSegmentIndexStateResponse{Status: failStatus(commonpb.ErrorCode_UnexpectedError, "reason mock GetSegmentIndexState")}, nil
-	}
-	ic.DropIndexFunc = func(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
-		return failStatus(commonpb.ErrorCode_UnexpectedError, "reason mock DropIndex"), nil
-	}
-	return withIndexCoord(ic)
-}
-
-func withValidIndexCoord() Opt {
-	ic := newMockIndexCoord()
-	ic.GetComponentStatesFunc = func(ctx context.Context) (*milvuspb.ComponentStates, error) {
-		return &milvuspb.ComponentStates{
-			State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Healthy},
-			Status: succStatus(),
-		}, nil
-	}
-	ic.GetSegmentIndexStateFunc = func(ctx context.Context, req *indexpb.GetSegmentIndexStateRequest) (*indexpb.GetSegmentIndexStateResponse, error) {
-		return &indexpb.GetSegmentIndexStateResponse{Status: succStatus()}, nil
-	}
-	ic.DropIndexFunc = func(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
-		return succStatus(), nil
-	}
-	return withIndexCoord(ic)
-}
-
 // cleanTestEnv clean test environment, for example, files generated by rocksmq.
 func cleanTestEnv() {
 	path := "/tmp/milvus"
@@ -627,6 +568,12 @@ func withInvalidDataCoord() Opt {
 	dc.broadCastAlteredCollectionFunc = func(ctx context.Context, req *datapb.AlterCollectionRequest) (*commonpb.Status, error) {
 		return nil, errors.New("error mock broadCastAlteredCollection")
 	}
+	dc.GetSegmentIndexStateFunc = func(ctx context.Context, req *datapb.GetSegmentIndexStateRequest) (*datapb.GetSegmentIndexStateResponse, error) {
+		return nil, errors.New("error mock GetSegmentIndexStateFunc")
+	}
+	dc.DropIndexFunc = func(ctx context.Context, req *datapb.DropIndexRequest) (*commonpb.Status, error) {
+		return nil, errors.New("error mock DropIndexFunc")
+	}
 	return withDataCoord(dc)
 }
 
@@ -668,6 +615,14 @@ func withFailedDataCoord() Opt {
 	dc.broadCastAlteredCollectionFunc = func(ctx context.Context, req *datapb.AlterCollectionRequest) (*commonpb.Status, error) {
 		return failStatus(commonpb.ErrorCode_UnexpectedError, "mock broadcast altered collection error"), nil
 	}
+	dc.GetSegmentIndexStateFunc = func(ctx context.Context, req *datapb.GetSegmentIndexStateRequest) (*datapb.GetSegmentIndexStateResponse, error) {
+		return &datapb.GetSegmentIndexStateResponse{
+			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "mock GetSegmentIndexStateFunc fail"),
+		}, nil
+	}
+	dc.DropIndexFunc = func(ctx context.Context, req *datapb.DropIndexRequest) (*commonpb.Status, error) {
+		return failStatus(commonpb.ErrorCode_UnexpectedError, "mock DropIndexFunc fail"), nil
+	}
 	return withDataCoord(dc)
 }
 
@@ -704,6 +659,14 @@ func withValidDataCoord() Opt {
 		return succStatus(), nil
 	}
 	dc.broadCastAlteredCollectionFunc = func(ctx context.Context, req *datapb.AlterCollectionRequest) (*commonpb.Status, error) {
+		return succStatus(), nil
+	}
+	dc.GetSegmentIndexStateFunc = func(ctx context.Context, req *datapb.GetSegmentIndexStateRequest) (*datapb.GetSegmentIndexStateResponse, error) {
+		return &datapb.GetSegmentIndexStateResponse{
+			Status: succStatus(),
+		}, nil
+	}
+	dc.DropIndexFunc = func(ctx context.Context, req *datapb.DropIndexRequest) (*commonpb.Status, error) {
 		return succStatus(), nil
 	}
 	return withDataCoord(dc)
@@ -824,8 +787,8 @@ type mockBroker struct {
 	ImportFunc            func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error)
 
 	DropCollectionIndexFunc  func(ctx context.Context, collID UniqueID, partIDs []UniqueID) error
-	DescribeIndexFunc        func(ctx context.Context, colID UniqueID) (*indexpb.DescribeIndexResponse, error)
-	GetSegmentIndexStateFunc func(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*indexpb.SegmentIndexState, error)
+	DescribeIndexFunc        func(ctx context.Context, colID UniqueID) (*datapb.DescribeIndexResponse, error)
+	GetSegmentIndexStateFunc func(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*datapb.SegmentIndexState, error)
 
 	BroadcastAlteredCollectionFunc func(ctx context.Context, req *milvuspb.AlterCollectionRequest) error
 }
@@ -850,11 +813,11 @@ func (b mockBroker) DropCollectionIndex(ctx context.Context, collID UniqueID, pa
 	return b.DropCollectionIndexFunc(ctx, collID, partIDs)
 }
 
-func (b mockBroker) DescribeIndex(ctx context.Context, colID UniqueID) (*indexpb.DescribeIndexResponse, error) {
+func (b mockBroker) DescribeIndex(ctx context.Context, colID UniqueID) (*datapb.DescribeIndexResponse, error) {
 	return b.DescribeIndexFunc(ctx, colID)
 }
 
-func (b mockBroker) GetSegmentIndexState(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*indexpb.SegmentIndexState, error) {
+func (b mockBroker) GetSegmentIndexState(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*datapb.SegmentIndexState, error) {
 	return b.GetSegmentIndexStateFunc(ctx, collID, indexName, segIDs)
 }
 

@@ -61,14 +61,14 @@ func newGarbageCollector(ctx context.Context, meta *metaTable, chunkManager stor
 }
 
 func (gc *garbageCollector) Start() {
-	gc.wg.Add(1)
-	go gc.recycleUnusedIndexes()
-
-	gc.wg.Add(1)
-	go gc.recycleUnusedSegIndexes()
-
-	gc.wg.Add(1)
-	go gc.recycleUnusedIndexFiles()
+	//gc.wg.Add(1)
+	//go gc.recycleUnusedIndexes()
+	//
+	//gc.wg.Add(1)
+	//go gc.recycleUnusedSegIndexes()
+	//
+	//gc.wg.Add(1)
+	//go gc.recycleUnusedIndexFiles()
 }
 
 func (gc *garbageCollector) Stop() {

@@ -28,6 +28,9 @@ import (
 	"syscall"
 	"time"
 
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/util/retry"
+
 	"github.com/golang/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/util/metautil"
@@ -45,7 +48,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/kv"
-	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/metrics"
@@ -58,7 +60,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
-	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -298,7 +299,7 @@ func (i *IndexCoord) Start() error {
 	if i.enableActiveStandBy {
 		i.activateFunc = func() {
 			log.Info("IndexCoord switch from standby to active, reload the KV")
-			i.metaTable.reloadFromKV()
+			//i.metaTable.reloadFromKV()
 			i.UpdateStateCode(commonpb.StateCode_Healthy)
 		}
 		i.UpdateStateCode(commonpb.StateCode_StandBy)
@@ -1129,23 +1130,23 @@ func (i *IndexCoord) tryAcquireSegmentReferLock(ctx context.Context, buildID Uni
 	// IndexCoord use buildID instead of taskID.
 	log.Info("try to acquire segment reference lock", zap.Int64("buildID", buildID),
 		zap.Int64("nodeID", nodeID), zap.Int64s("segIDs", segIDs))
-	ctx1, cancel := context.WithTimeout(ctx, reqTimeoutInterval)
-	defer cancel()
-	status, err := i.dataCoordClient.AcquireSegmentLock(ctx1, &datapb.AcquireSegmentLockRequest{
-		TaskID:     buildID,
-		NodeID:     nodeID,
-		SegmentIDs: segIDs,
-	})
-	if err != nil {
-		log.Error("IndexCoord try to acquire segment reference lock failed", zap.Int64("buildID", buildID),
-			zap.Int64("nodeID", nodeID), zap.Int64s("segIDs", segIDs), zap.Error(err))
-		return err
-	}
-	if status.ErrorCode != commonpb.ErrorCode_Success {
-		log.Error("IndexCoord try to acquire segment reference lock failed", zap.Int64("buildID", buildID),
-			zap.Int64("nodeID", nodeID), zap.Int64s("segIDs", segIDs), zap.Error(errors.New(status.Reason)))
-		return errors.New(status.Reason)
-	}
+	//ctx1, cancel := context.WithTimeout(ctx, reqTimeoutInterval)
+	//defer cancel()
+	//status, err := i.dataCoordClient.AcquireSegmentLock(ctx1, &datapb.AcquireSegmentLockRequest{
+	//	TaskID:     buildID,
+	//	NodeID:     nodeID,
+	//	SegmentIDs: segIDs,
+	//})
+	//if err != nil {
+	//	log.Error("IndexCoord try to acquire segment reference lock failed", zap.Int64("buildID", buildID),
+	//		zap.Int64("nodeID", nodeID), zap.Int64s("segIDs", segIDs), zap.Error(err))
+	//	return err
+	//}
+	//if status.ErrorCode != commonpb.ErrorCode_Success {
+	//	log.Error("IndexCoord try to acquire segment reference lock failed", zap.Int64("buildID", buildID),
+	//		zap.Int64("nodeID", nodeID), zap.Int64s("segIDs", segIDs), zap.Error(errors.New(status.Reason)))
+	//	return errors.New(status.Reason)
+	//}
 	log.Info("try to acquire segment reference lock success", zap.Int64("buildID", buildID),
 		zap.Int64("ndoeID", nodeID), zap.Int64s("segIDs", segIDs))
 	return nil
@@ -1154,27 +1155,27 @@ func (i *IndexCoord) tryAcquireSegmentReferLock(ctx context.Context, buildID Uni
 func (i *IndexCoord) tryReleaseSegmentReferLock(ctx context.Context, buildID UniqueID, nodeID UniqueID) error {
 	log.Info("IndexCoord tryReleaseSegmentReferLock", zap.Int64("buildID", buildID),
 		zap.Int64("nodeID", nodeID))
-	releaseLock := func() error {
-		ctx1, cancel := context.WithTimeout(ctx, reqTimeoutInterval)
-		defer cancel()
-		status, err := i.dataCoordClient.ReleaseSegmentLock(ctx1, &datapb.ReleaseSegmentLockRequest{
-			TaskID: buildID,
-			NodeID: nodeID,
-		})
-		if err != nil {
-			return err
-		}
-		if status.ErrorCode != commonpb.ErrorCode_Success {
-			return errors.New(status.Reason)
-		}
-		return nil
-	}
-	err := retry.Do(ctx, releaseLock, retry.Attempts(100))
-	if err != nil {
-		log.Error("IndexCoord try to release segment reference lock failed", zap.Int64("buildID", buildID),
-			zap.Int64("nodeID", nodeID), zap.Error(err))
-		return err
-	}
+	//releaseLock := func() error {
+	//	ctx1, cancel := context.WithTimeout(ctx, reqTimeoutInterval)
+	//	defer cancel()
+	//	status, err := i.dataCoordClient.ReleaseSegmentLock(ctx1, &datapb.ReleaseSegmentLockRequest{
+	//		TaskID: buildID,
+	//		NodeID: nodeID,
+	//	})
+	//	if err != nil {
+	//		return err
+	//	}
+	//	if status.ErrorCode != commonpb.ErrorCode_Success {
+	//		return errors.New(status.Reason)
+	//	}
+	//	return nil
+	//}
+	//err := retry.Do(ctx, releaseLock, retry.Attempts(100))
+	//if err != nil {
+	//	log.Error("IndexCoord try to release segment reference lock failed", zap.Int64("buildID", buildID),
+	//		zap.Int64("nodeID", nodeID), zap.Error(err))
+	//	return err
+	//}
 	log.Info("IndexCoord tryReleaseSegmentReferLock successfully", zap.Int64("buildID", buildID),
 		zap.Int64("ndoeID", nodeID))
 	return nil

@@ -120,7 +120,6 @@ type Core struct {
 
 	dataCoord  types.DataCoord
 	queryCoord types.QueryCoord
-	indexCoord types.IndexCoord
 
 	quotaCenter *QuotaCenter
 
@@ -272,17 +271,6 @@ func (c *Core) SetDataCoord(ctx context.Context, s types.DataCoord) error {
 		return err
 	}
 	c.dataCoord = s
-	return nil
-}
-
-func (c *Core) SetIndexCoord(s types.IndexCoord) error {
-	if err := s.Init(); err != nil {
-		return err
-	}
-	if err := s.Start(); err != nil {
-		return err
-	}
-	c.indexCoord = s
 	return nil
 }
 

@@ -43,3 +43,7 @@ func errDataCoordIsUnhealthy(coordID UniqueID) error {
 func msgSegmentNotFound(segID UniqueID) string {
 	return fmt.Sprintf("failed to get segment %d", segID)
 }
+
+func msgAmbiguousIndexName() string {
+	return "there are multiple indexes, please specify the index_name"
+}

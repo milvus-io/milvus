@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/milvus-io/milvus/internal/proto/datapb"
+
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -29,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
@@ -55,7 +56,7 @@ type createIndexTask struct {
 	req        *milvuspb.CreateIndexRequest
 	ctx        context.Context
 	rootCoord  types.RootCoord
-	indexCoord types.IndexCoord
+	datacoord  types.DataCoord
 	queryCoord types.QueryCoord
 	result     *commonpb.Status
 
@@ -290,14 +291,6 @@ func (cit *createIndexTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	loaded, err := isCollectionLoaded(ctx, cit.queryCoord, collID)
-	if err != nil {
-		return err
-	}
-
-	if loaded {
-		return fmt.Errorf("create index failed, collection is loaded, please release it first")
-	}
 	return nil
 }
 
@@ -310,7 +303,7 @@ func (cit *createIndexTask) Execute(ctx context.Context) error {
 		cit.req.IndexName = Params.CommonCfg.DefaultIndexName.GetValue() + "_" + strconv.FormatInt(cit.fieldSchema.GetFieldID(), 10)
 	}
 	var err error
-	req := &indexpb.CreateIndexRequest{
+	req := &datapb.CreateIndexRequest{
 		CollectionID:    cit.collectionID,
 		FieldID:         cit.fieldSchema.GetFieldID(),
 		IndexName:       cit.req.GetIndexName(),
@@ -320,7 +313,7 @@ func (cit *createIndexTask) Execute(ctx context.Context) error {
 		UserIndexParams: cit.req.GetExtraParams(),
 		Timestamp:       cit.BeginTs(),
 	}
-	cit.result, err = cit.indexCoord.CreateIndex(ctx, req)
+	cit.result, err = cit.datacoord.CreateIndex(ctx, req)
 	if err != nil {
 		return err
 	}
@@ -337,9 +330,9 @@ func (cit *createIndexTask) PostExecute(ctx context.Context) error {
 type describeIndexTask struct {
 	Condition
 	*milvuspb.DescribeIndexRequest
-	ctx        context.Context
-	indexCoord types.IndexCoord
-	result     *milvuspb.DescribeIndexResponse
+	ctx       context.Context
+	datacoord types.DataCoord
+	result    *milvuspb.DescribeIndexResponse
 
 	collectionID UniqueID
 }
@@ -409,7 +402,7 @@ func (dit *describeIndexTask) Execute(ctx context.Context) error {
 		return fmt.Errorf("failed to parse collection schema: %s", err)
 	}
 
-	resp, err := dit.indexCoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{CollectionID: dit.collectionID, IndexName: dit.IndexName})
+	resp, err := dit.datacoord.DescribeIndex(ctx, &datapb.DescribeIndexRequest{CollectionID: dit.collectionID, IndexName: dit.IndexName})
 	if err != nil || resp == nil {
 		return err
 	}
@@ -451,7 +444,7 @@ type dropIndexTask struct {
 	Condition
 	ctx context.Context
 	*milvuspb.DropIndexRequest
-	indexCoord types.IndexCoord
+	dataCoord  types.DataCoord
 	queryCoord types.QueryCoord
 	result     *commonpb.Status
 
@@ -531,7 +524,7 @@ func (dit *dropIndexTask) PreExecute(ctx context.Context) error {
 
 func (dit *dropIndexTask) Execute(ctx context.Context) error {
 	var err error
-	dit.result, err = dit.indexCoord.DropIndex(ctx, &indexpb.DropIndexRequest{
+	dit.result, err = dit.dataCoord.DropIndex(ctx, &datapb.DropIndexRequest{
 		CollectionID: dit.collectionID,
 		PartitionIDs: nil,
 		IndexName:    dit.IndexName,
@@ -554,11 +547,10 @@ func (dit *dropIndexTask) PostExecute(ctx context.Context) error {
 type getIndexBuildProgressTask struct {
 	Condition
 	*milvuspb.GetIndexBuildProgressRequest
-	ctx        context.Context
-	indexCoord types.IndexCoord
-	rootCoord  types.RootCoord
-	dataCoord  types.DataCoord
-	result     *milvuspb.GetIndexBuildProgressResponse
+	ctx       context.Context
+	rootCoord types.RootCoord
+	dataCoord types.DataCoord
+	result    *milvuspb.GetIndexBuildProgressResponse
 
 	collectionID UniqueID
 }
@@ -623,7 +615,7 @@ func (gibpt *getIndexBuildProgressTask) Execute(ctx context.Context) error {
 		gibpt.IndexName = Params.CommonCfg.DefaultIndexName.GetValue()
 	}
 
-	resp, err := gibpt.indexCoord.GetIndexBuildProgress(ctx, &indexpb.GetIndexBuildProgressRequest{
+	resp, err := gibpt.dataCoord.GetIndexBuildProgress(ctx, &datapb.GetIndexBuildProgressRequest{
 		CollectionID: collectionID,
 		IndexName:    gibpt.IndexName,
 	})
@@ -648,10 +640,10 @@ func (gibpt *getIndexBuildProgressTask) PostExecute(ctx context.Context) error {
 type getIndexStateTask struct {
 	Condition
 	*milvuspb.GetIndexStateRequest
-	ctx        context.Context
-	indexCoord types.IndexCoord
-	rootCoord  types.RootCoord
-	result     *milvuspb.GetIndexStateResponse
+	ctx       context.Context
+	dataCoord types.DataCoord
+	rootCoord types.RootCoord
+	result    *milvuspb.GetIndexStateResponse
 
 	collectionID UniqueID
 }
@@ -714,7 +706,7 @@ func (gist *getIndexStateTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	state, err := gist.indexCoord.GetIndexState(ctx, &indexpb.GetIndexStateRequest{
+	state, err := gist.dataCoord.GetIndexState(ctx, &datapb.GetIndexStateRequest{
 		CollectionID: collectionID,
 		IndexName:    gist.IndexName,
 	})

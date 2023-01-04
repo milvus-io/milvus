@@ -4,10 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
-	"github.com/stretchr/testify/assert"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 )
 
 func TestBroadcastAlteredCollection(t *testing.T) {

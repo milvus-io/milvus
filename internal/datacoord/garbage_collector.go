@@ -23,15 +23,17 @@ import (
 	"sync"
 	"time"
 
-	"github.com/milvus-io/milvus-proto/go-api/commonpb"
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/minio/minio-go/v7"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/metautil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 const (
@@ -53,11 +55,9 @@ type GcOption struct {
 // garbageCollector handles garbage files in object storage
 // which could be dropped collection remanent or data node failure traces
 type garbageCollector struct {
-	option     GcOption
-	meta       *meta
-	handler    Handler
-	segRefer   *SegmentReferenceManager
-	indexCoord types.IndexCoord
+	option  GcOption
+	meta    *meta
+	handler Handler
 
 	startOnce sync.Once
 	stopOnce  sync.Once
@@ -66,16 +66,14 @@ type garbageCollector struct {
 }
 
 // newGarbageCollector create garbage collector with meta and option
-func newGarbageCollector(meta *meta, handler Handler, segRefer *SegmentReferenceManager, indexCoord types.IndexCoord, opt GcOption) *garbageCollector {
+func newGarbageCollector(meta *meta, handler Handler, opt GcOption) *garbageCollector {
 	log.Info("GC with option", zap.Bool("enabled", opt.enabled), zap.Duration("interval", opt.checkInterval),
 		zap.Duration("missingTolerance", opt.missingTolerance), zap.Duration("dropTolerance", opt.dropTolerance))
 	return &garbageCollector{
-		meta:       meta,
-		handler:    handler,
-		segRefer:   segRefer,
-		indexCoord: indexCoord,
-		option:     opt,
-		closeCh:    make(chan struct{}),
+		meta:    meta,
+		handler: handler,
+		option:  opt,
+		closeCh: make(chan struct{}),
 	}
 }
 
@@ -101,7 +99,10 @@ func (gc *garbageCollector) work() {
 		select {
 		case <-ticker:
 			gc.clearEtcd()
+			gc.recycleUnusedIndexes()
+			gc.recycleUnusedSegIndexes()
 			gc.scan()
+			gc.recycleUnusedIndexFiles()
 		case <-gc.closeCh:
 			log.Warn("garbage collector quit")
 			return
@@ -170,11 +171,6 @@ func (gc *garbageCollector) scan() {
 				continue
 			}
 
-			if gc.segRefer.HasSegmentLock(segmentID) {
-				valid++
-				continue
-			}
-
 			if strings.Contains(prefix, statsLogPrefix) &&
 				segmentMap.Contain(segmentID) {
 				valid++
@@ -207,9 +203,10 @@ func (gc *garbageCollector) clearEtcd() {
 	drops := make(map[int64]*SegmentInfo, 0)
 	compactTo := make(map[int64]*SegmentInfo)
 	for _, segment := range all {
-		if segment.GetState() == commonpb.SegmentState_Dropped && !gc.segRefer.HasSegmentLock(segment.ID) {
+		if segment.GetState() == commonpb.SegmentState_Dropped {
 			drops[segment.GetID()] = segment
-			continue
+			//continue
+			// A(indexed), B(indexed) -> C(no indexed), D(no indexed) -> E(no indexed), A, B can not be GC
 		}
 		for _, from := range segment.GetCompactionFrom() {
 			compactTo[from] = segment
@@ -222,7 +219,7 @@ func (gc *garbageCollector) clearEtcd() {
 			droppedCompactTo[to] = struct{}{}
 		}
 	}
-	indexedSegments := FilterInIndexedSegments(gc.handler, gc.indexCoord, lo.Keys(droppedCompactTo)...)
+	indexedSegments := FilterInIndexedSegments(gc.handler, gc.meta, lo.Keys(droppedCompactTo)...)
 	indexedSet := make(typeutil.UniqueSet)
 	for _, segment := range indexedSegments {
 		indexedSet.Insert(segment.GetID())
@@ -286,4 +283,101 @@ func (gc *garbageCollector) removeLogs(logs []*datapb.Binlog) bool {
 		}
 	}
 	return delFlag
+}
+
+func (gc *garbageCollector) recycleUnusedIndexes() {
+	log.Info("start recycleUnusedIndexes")
+	deletedIndexes := gc.meta.GetDeletedIndexes()
+	for _, index := range deletedIndexes {
+		if err := gc.meta.RemoveIndex(index.CollectionID, index.IndexID); err != nil {
+			log.Warn("remove index on collection fail", zap.Int64("collID", index.CollectionID),
+				zap.Int64("indexID", index.IndexID), zap.Error(err))
+			continue
+		}
+	}
+}
+
+func (gc *garbageCollector) recycleUnusedSegIndexes() {
+	segIndexes := gc.meta.GetAllSegIndexes()
+	for _, segIdx := range segIndexes {
+		if gc.meta.GetSegmentUnsafe(segIdx.SegmentID) == nil || !gc.meta.IsIndexExist(segIdx.CollectionID, segIdx.IndexID) {
+			if err := gc.meta.RemoveSegmentIndex(segIdx.CollectionID, segIdx.PartitionID, segIdx.SegmentID, segIdx.IndexID, segIdx.BuildID); err != nil {
+				log.Warn("delete index meta from etcd failed, wait to retry", zap.Int64("buildID", segIdx.BuildID),
+					zap.Int64("nodeID", segIdx.NodeID), zap.Error(err))
+				continue
+			}
+			log.Info("index meta recycle success", zap.Int64("buildID", segIdx.BuildID),
+				zap.Int64("segID", segIdx.SegmentID))
+		}
+	}
+}
+
+// recycleUnusedIndexFiles is used to delete those index files that no longer exist in the meta.
+func (gc *garbageCollector) recycleUnusedIndexFiles() {
+	log.Info("start recycleUnusedIndexFiles")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	prefix := path.Join(gc.option.cli.RootPath(), common.SegmentIndexPath) + "/"
+	// list dir first
+	keys, _, err := gc.option.cli.ListWithPrefix(ctx, prefix, false)
+	if err != nil {
+		log.Error("garbageCollector recycleUnusedIndexFiles list keys from chunk manager failed", zap.Error(err))
+		return
+	}
+	for _, key := range keys {
+		log.Debug("indexFiles keys", zap.String("key", key))
+		buildID, err := parseBuildIDFromFilePath(key)
+		if err != nil {
+			log.Error("garbageCollector recycleUnusedIndexFiles parseIndexFileKey", zap.String("key", key), zap.Error(err))
+			continue
+		}
+		log.Info("garbageCollector will recycle index files", zap.Int64("buildID", buildID))
+		canRecycle, segIdx := gc.meta.CleanSegmentIndex(buildID)
+		if !canRecycle {
+			// Even if the index is marked as deleted, the index file will not be recycled, wait for the next gc,
+			// and delete all index files about the buildID at one time.
+			log.Warn("garbageCollector can not recycle index files", zap.Int64("buildID", buildID))
+			continue
+		}
+		if segIdx == nil {
+			// buildID no longer exists in meta, remove all index files
+			log.Info("garbageCollector recycleUnusedIndexFiles find meta has not exist, remove index files",
+				zap.Int64("buildID", buildID))
+			err = gc.option.cli.RemoveWithPrefix(ctx, key)
+			if err != nil {
+				log.Warn("garbageCollector recycleUnusedIndexFiles remove index files failed",
+					zap.Int64("buildID", buildID), zap.String("prefix", key), zap.Error(err))
+				continue
+			}
+			continue
+		}
+		filesMap := make(map[string]struct{})
+		for _, fileID := range segIdx.IndexFileKeys {
+			filepath := metautil.BuildSegmentIndexFilePath(gc.option.cli.RootPath(), segIdx.BuildID, segIdx.IndexVersion,
+				segIdx.PartitionID, segIdx.SegmentID, fileID)
+			filesMap[filepath] = struct{}{}
+		}
+		files, _, err := gc.option.cli.ListWithPrefix(ctx, key, true)
+		if err != nil {
+			log.Warn("garbageCollector recycleUnusedIndexFiles list files failed",
+				zap.Int64("buildID", buildID), zap.String("prefix", key), zap.Error(err))
+			continue
+		}
+		log.Info("recycle index files", zap.Int64("buildID", buildID), zap.Int("meta files num", len(filesMap)),
+			zap.Int("chunkManager files num", len(files)))
+		deletedFilesNum := 0
+		for _, file := range files {
+			if _, ok := filesMap[file]; !ok {
+				if err = gc.option.cli.Remove(ctx, file); err != nil {
+					log.Warn("garbageCollector recycleUnusedIndexFiles remove file failed",
+						zap.Int64("buildID", buildID), zap.String("file", file), zap.Error(err))
+					continue
+				}
+				deletedFilesNum++
+			}
+		}
+		log.Info("index files recycle success", zap.Int64("buildID", buildID),
+			zap.Int("delete index files num", deletedFilesNum))
+	}
 }

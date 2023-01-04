@@ -20,18 +20,16 @@ import (
 	"context"
 	"errors"
 	"strconv"
-	"sync"
+	"strings"
 	"time"
+
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
-	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"go.uber.org/zap"
 )
 
 // Response response interface for verification
@@ -101,7 +99,7 @@ func GetCompactTime(ctx context.Context, allocator allocator) (*compactTime, err
 	return &compactTime{ttRetentionLogic, 0, 0}, nil
 }
 
-func FilterInIndexedSegments(handler Handler, indexCoord types.IndexCoord, segments ...*SegmentInfo) []*SegmentInfo {
+func FilterInIndexedSegments(handler Handler, mt *meta, segments ...*SegmentInfo) []*SegmentInfo {
 	if len(segments) == 0 {
 		return nil
 	}
@@ -133,62 +131,15 @@ func FilterInIndexedSegments(handler Handler, indexCoord types.IndexCoord, segme
 		}
 	}
 
-	wg := sync.WaitGroup{}
-	indexedSegmentCh := make(chan []int64, len(segments))
-	for _, segment := range segments {
-		segment := segment
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			resp, err := indexCoord.GetIndexInfos(ctx, &indexpb.GetIndexInfoRequest{
-				CollectionID: segment.GetCollectionID(),
-				SegmentIDs:   []int64{segment.GetID()},
-			})
-			if err != nil || resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-				log.Warn("failed to get index of collection",
-					zap.Int64("collectionID", segment.GetCollectionID()),
-					zap.Int64("segmentID", segment.GetID()))
-				return
-			}
-			indexed := extractSegmentsWithVectorIndex(vecFieldID, resp.GetSegmentInfo())
-			if len(indexed) == 0 {
-				log.Info("no vector index for the segment",
-					zap.Int64("collectionID", segment.GetCollectionID()),
-					zap.Int64("segmentID", segment.GetID()))
-				return
-			}
-			indexedSegmentCh <- indexed
-		}()
-	}
-	wg.Wait()
-	close(indexedSegmentCh)
-
 	indexedSegments := make([]*SegmentInfo, 0)
-	for segments := range indexedSegmentCh {
-		for _, segment := range segments {
-			if info, ok := segmentMap[segment]; ok {
-				delete(segmentMap, segment)
-				indexedSegments = append(indexedSegments, info)
-			}
+	for _, segment := range segments {
+		segmentState := mt.GetSegmentIndexStateOnField(segment.GetCollectionID(), segment.GetID(), vecFieldID[segment.GetCollectionID()])
+		if segmentState.state == commonpb.IndexState_Finished {
+			indexedSegments = append(indexedSegments, segment)
 		}
 	}
 
 	return indexedSegments
-}
-
-func extractSegmentsWithVectorIndex(vecFieldID map[int64]int64, segentIndexInfo map[int64]*indexpb.SegmentInfo) []int64 {
-	indexedSegments := make(typeutil.UniqueSet)
-	for _, indexInfo := range segentIndexInfo {
-		for _, index := range indexInfo.GetIndexInfos() {
-			if index.GetFieldID() == vecFieldID[indexInfo.GetCollectionID()] {
-				indexedSegments.Insert(indexInfo.GetSegmentID())
-				break
-			}
-		}
-	}
-	return indexedSegments.Collect()
 }
 
 func getZeroTime() time.Time {
@@ -208,4 +159,25 @@ func getCollectionTTL(properties map[string]string) (time.Duration, error) {
 	}
 
 	return Params.CommonCfg.EntityExpirationTTL.GetAsDuration(time.Second), nil
+}
+
+func getIndexType(indexParams []*commonpb.KeyValuePair) string {
+	for _, param := range indexParams {
+		if param.Key == "index_type" {
+			return param.Value
+		}
+	}
+	return invalidIndex
+}
+
+func isFlatIndex(indexType string) bool {
+	return indexType == flatIndex || indexType == binFlatIndex
+}
+
+func parseBuildIDFromFilePath(key string) (UniqueID, error) {
+	ss := strings.Split(key, "/")
+	if strings.HasSuffix(key, "/") {
+		return strconv.ParseInt(ss[len(ss)-2], 10, 64)
+	}
+	return strconv.ParseInt(ss[len(ss)-1], 10, 64)
 }

@@ -9,8 +9,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
-
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/stretchr/testify/assert"
@@ -109,58 +107,6 @@ func TestServerBroker_UnwatchChannels(t *testing.T) {
 	b.UnwatchChannels(ctx, &watchInfo{})
 }
 
-func TestServerBroker_AddSegRefLock(t *testing.T) {
-	t.Run("failed to execute", func(t *testing.T) {
-		c := newTestCore(withInvalidDataCoord())
-		b := newServerBroker(c)
-		ctx := context.Background()
-		err := b.AddSegRefLock(ctx, 1, []int64{1, 2})
-		assert.Error(t, err)
-	})
-
-	t.Run("non success error code on execute", func(t *testing.T) {
-		c := newTestCore(withFailedDataCoord())
-		b := newServerBroker(c)
-		ctx := context.Background()
-		err := b.AddSegRefLock(ctx, 1, []int64{1, 2})
-		assert.Error(t, err)
-	})
-
-	t.Run("success", func(t *testing.T) {
-		c := newTestCore(withValidDataCoord())
-		b := newServerBroker(c)
-		ctx := context.Background()
-		err := b.AddSegRefLock(ctx, 1, []int64{1, 2})
-		assert.NoError(t, err)
-	})
-}
-
-func TestServerBroker_ReleaseSegRefLock(t *testing.T) {
-	t.Run("failed to execute", func(t *testing.T) {
-		c := newTestCore(withInvalidDataCoord())
-		b := newServerBroker(c)
-		ctx := context.Background()
-		err := b.ReleaseSegRefLock(ctx, 1, []int64{1, 2})
-		assert.Error(t, err)
-	})
-
-	t.Run("non success error code on execute", func(t *testing.T) {
-		c := newTestCore(withFailedDataCoord())
-		b := newServerBroker(c)
-		ctx := context.Background()
-		err := b.ReleaseSegRefLock(ctx, 1, []int64{1, 2})
-		assert.Error(t, err)
-	})
-
-	t.Run("success", func(t *testing.T) {
-		c := newTestCore(withValidDataCoord())
-		b := newServerBroker(c)
-		ctx := context.Background()
-		err := b.ReleaseSegRefLock(ctx, 1, []int64{1, 2})
-		assert.NoError(t, err)
-	})
-}
-
 func TestServerBroker_Flush(t *testing.T) {
 	t.Run("failed to execute", func(t *testing.T) {
 		c := newTestCore(withInvalidDataCoord())
@@ -218,7 +164,7 @@ func TestServerBroker_Import(t *testing.T) {
 
 func TestServerBroker_DropCollectionIndex(t *testing.T) {
 	t.Run("failed to execute", func(t *testing.T) {
-		c := newTestCore(withInvalidIndexCoord())
+		c := newTestCore(withInvalidDataCoord())
 		b := newServerBroker(c)
 		ctx := context.Background()
 		err := b.DropCollectionIndex(ctx, 1, nil)
@@ -226,7 +172,7 @@ func TestServerBroker_DropCollectionIndex(t *testing.T) {
 	})
 
 	t.Run("non success error code on execute", func(t *testing.T) {
-		c := newTestCore(withFailedIndexCoord())
+		c := newTestCore(withFailedDataCoord())
 		b := newServerBroker(c)
 		ctx := context.Background()
 		err := b.DropCollectionIndex(ctx, 1, nil)
@@ -234,7 +180,7 @@ func TestServerBroker_DropCollectionIndex(t *testing.T) {
 	})
 
 	t.Run("success", func(t *testing.T) {
-		c := newTestCore(withValidIndexCoord())
+		c := newTestCore(withValidDataCoord())
 		b := newServerBroker(c)
 		ctx := context.Background()
 		err := b.DropCollectionIndex(ctx, 1, nil)
@@ -244,7 +190,7 @@ func TestServerBroker_DropCollectionIndex(t *testing.T) {
 
 func TestServerBroker_GetSegmentIndexState(t *testing.T) {
 	t.Run("failed to execute", func(t *testing.T) {
-		c := newTestCore(withInvalidIndexCoord())
+		c := newTestCore(withInvalidDataCoord())
 		b := newServerBroker(c)
 		ctx := context.Background()
 		_, err := b.GetSegmentIndexState(ctx, 1, "index_name", []UniqueID{1, 2})
@@ -252,7 +198,7 @@ func TestServerBroker_GetSegmentIndexState(t *testing.T) {
 	})
 
 	t.Run("non success error code on execute", func(t *testing.T) {
-		c := newTestCore(withFailedIndexCoord())
+		c := newTestCore(withFailedDataCoord())
 		b := newServerBroker(c)
 		ctx := context.Background()
 		_, err := b.GetSegmentIndexState(ctx, 1, "index_name", []UniqueID{1, 2})
@@ -260,11 +206,11 @@ func TestServerBroker_GetSegmentIndexState(t *testing.T) {
 	})
 
 	t.Run("success", func(t *testing.T) {
-		c := newTestCore(withValidIndexCoord())
-		c.indexCoord.(*mockIndexCoord).GetSegmentIndexStateFunc = func(ctx context.Context, req *indexpb.GetSegmentIndexStateRequest) (*indexpb.GetSegmentIndexStateResponse, error) {
-			return &indexpb.GetSegmentIndexStateResponse{
+		c := newTestCore(withValidDataCoord())
+		c.dataCoord.(*mockDataCoord).GetSegmentIndexStateFunc = func(ctx context.Context, req *datapb.GetSegmentIndexStateRequest) (*datapb.GetSegmentIndexStateResponse, error) {
+			return &datapb.GetSegmentIndexStateResponse{
 				Status: succStatus(),
-				States: []*indexpb.SegmentIndexState{
+				States: []*datapb.SegmentIndexState{
 					{
 						SegmentID:  1,
 						State:      commonpb.IndexState_Finished,

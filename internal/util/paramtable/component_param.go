@@ -1331,6 +1331,13 @@ type dataCoordConfig struct {
 	GCMissingTolerance      ParamItem `refreshable:"false"`
 	GCDropTolerance         ParamItem `refreshable:"false"`
 	EnableActiveStandby     ParamItem `refreshable:"false"`
+
+	BindIndexNodeMode ParamItem `refreshable:"false"`
+	IndexNodeAddress  ParamItem `refreshable:"false"`
+	WithCredential    ParamItem `refreshable:"false"`
+	IndexNodeID       ParamItem `refreshable:"false"`
+
+	MinSegmentNumRowsToEnableIndex ParamItem `refreshable:"true"`
 }
 
 func (p *dataCoordConfig) init(base *BaseTable) {
@@ -1530,6 +1537,41 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 		DefaultValue: "false",
 	}
 	p.EnableActiveStandby.Init(base.mgr)
+
+	p.MinSegmentNumRowsToEnableIndex = ParamItem{
+		Key:          "dataCoord.segment.minSegmentNumRowsToEnableIndex",
+		Version:      "2.0.0",
+		DefaultValue: "1024",
+	}
+	p.MinSegmentNumRowsToEnableIndex.Init(base.mgr)
+
+	p.BindIndexNodeMode = ParamItem{
+		Key:          "dataCoord.bindIndexNodeMode.enable",
+		Version:      "2.0.0",
+		DefaultValue: "false",
+	}
+	p.BindIndexNodeMode.Init(base.mgr)
+
+	p.IndexNodeAddress = ParamItem{
+		Key:          "dataCoord.bindIndexNodeMode.address",
+		Version:      "2.0.0",
+		DefaultValue: "localhost:22930",
+	}
+	p.IndexNodeAddress.Init(base.mgr)
+
+	p.WithCredential = ParamItem{
+		Key:          "dataCoord.bindIndexNodeMode.withCred",
+		Version:      "2.0.0",
+		DefaultValue: "false",
+	}
+	p.WithCredential.Init(base.mgr)
+
+	p.IndexNodeID = ParamItem{
+		Key:          "dataCoord.bindIndexNodeMode.nodeID",
+		Version:      "2.0.0",
+		DefaultValue: "0",
+	}
+	p.IndexNodeID.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

@@ -73,7 +73,6 @@ func TestProxy_CheckHealth(t *testing.T) {
 			rootCoord:  NewRootCoordMock(),
 			queryCoord: NewQueryCoordMock(),
 			dataCoord:  NewDataCoordMock(),
-			indexCoord: NewIndexCoordMock(),
 			session:    &sessionutil.Session{ServerID: 1},
 		}
 		node.multiRateLimiter = NewMultiRateLimiter()
@@ -101,9 +100,6 @@ func TestProxy_CheckHealth(t *testing.T) {
 
 		dataCoordMock := NewDataCoordMock()
 		dataCoordMock.checkHealthFunc = checkHealthFunc1
-
-		indexCoordMock := NewIndexCoordMock()
-		indexCoordMock.checkHealthFunc = checkHealthFunc2
 		node := &Proxy{
 			session: &sessionutil.Session{ServerID: 1},
 			rootCoord: NewRootCoordMock(func(mock *RootCoordMock) {
@@ -112,15 +108,14 @@ func TestProxy_CheckHealth(t *testing.T) {
 			queryCoord: NewQueryCoordMock(func(mock *QueryCoordMock) {
 				mock.checkHealthFunc = checkHealthFunc2
 			}),
-			dataCoord:  dataCoordMock,
-			indexCoord: indexCoordMock}
+			dataCoord: dataCoordMock}
 		node.multiRateLimiter = NewMultiRateLimiter()
 		node.stateCode.Store(commonpb.StateCode_Healthy)
 		ctx := context.Background()
 		resp, err := node.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, false, resp.IsHealthy)
-		assert.Equal(t, 4, len(resp.Reasons))
+		assert.Equal(t, 3, len(resp.Reasons))
 	})
 
 	t.Run("check quota state", func(t *testing.T) {
@@ -128,7 +123,6 @@ func TestProxy_CheckHealth(t *testing.T) {
 			rootCoord:  NewRootCoordMock(),
 			dataCoord:  NewDataCoordMock(),
 			queryCoord: NewQueryCoordMock(),
-			indexCoord: NewIndexCoordMock(),
 		}
 		node.multiRateLimiter = NewMultiRateLimiter()
 		node.stateCode.Store(commonpb.StateCode_Healthy)

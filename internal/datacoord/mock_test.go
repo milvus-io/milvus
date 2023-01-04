@@ -28,7 +28,6 @@ import (
 	"github.com/milvus-io/milvus/internal/kv"
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
@@ -109,6 +108,10 @@ type removeFailKV struct{ kv.TxnKV }
 
 // Remove override behavior, inject error
 func (kv *removeFailKV) MultiRemove(key []string) error {
+	return errors.New("mocked fail")
+}
+
+func (kv *removeFailKV) Remove(key string) error {
 	return errors.New("mocked fail")
 }
 
@@ -801,7 +804,7 @@ func (m *mockIndexCoord) Start() error {
 	return nil
 }
 
-func (m *mockIndexCoord) DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRequest) (*indexpb.DescribeIndexResponse, error) {
+func (m *mockIndexCoord) DescribeIndex(ctx context.Context, req *datapb.DescribeIndexRequest) (*datapb.DescribeIndexResponse, error) {
 	if req.CollectionID == 10000 {
 		return nil, errors.New("server down")
 	}
@@ -809,11 +812,11 @@ func (m *mockIndexCoord) DescribeIndex(ctx context.Context, req *indexpb.Describ
 	// Has diskann index
 	if req.CollectionID == 1000 || req.CollectionID == 2000 ||
 		req.CollectionID == 3000 || req.CollectionID == 4000 {
-		return &indexpb.DescribeIndexResponse{
+		return &datapb.DescribeIndexResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_Success,
 			},
-			IndexInfos: []*indexpb.IndexInfo{
+			IndexInfos: []*datapb.IndexInfo{
 				{
 					CollectionID: req.CollectionID,
 					FieldID:      0,
@@ -832,11 +835,11 @@ func (m *mockIndexCoord) DescribeIndex(ctx context.Context, req *indexpb.Describ
 	}
 
 	// Has common index
-	return &indexpb.DescribeIndexResponse{
+	return &datapb.DescribeIndexResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
-		IndexInfos: []*indexpb.IndexInfo{
+		IndexInfos: []*datapb.IndexInfo{
 			{
 				CollectionID: 1,
 				FieldID:      0,
@@ -849,17 +852,17 @@ func (m *mockIndexCoord) DescribeIndex(ctx context.Context, req *indexpb.Describ
 	}, nil
 }
 
-func (m *mockIndexCoord) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoRequest) (*indexpb.GetIndexInfoResponse, error) {
+func (m *mockIndexCoord) GetIndexInfos(ctx context.Context, req *datapb.GetIndexInfoRequest) (*datapb.GetIndexInfoResponse, error) {
 	segmentID := req.GetSegmentIDs()[0]
 	collectionID := req.GetCollectionID()
-	return &indexpb.GetIndexInfoResponse{
+	return &datapb.GetIndexInfoResponse{
 		Status: &commonpb.Status{},
-		SegmentInfo: map[int64]*indexpb.SegmentInfo{
+		SegmentInfo: map[int64]*datapb.SegmentIndexInfo{
 			segmentID: {
 				EnableIndex:  true,
 				CollectionID: collectionID,
 				SegmentID:    segmentID,
-				IndexInfos: []*indexpb.IndexFilePathInfo{
+				IndexInfos: []*datapb.IndexFilePathInfo{
 					{
 						FieldID: int64(201),
 					},

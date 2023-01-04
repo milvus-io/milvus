@@ -205,15 +205,6 @@ func getSystemInfoMetrics(
 	go func() {
 		defer wg.Done()
 
-		indexCoordResp, indexCoordErr = node.indexCoord.GetMetrics(ctx, request)
-		indexCoordRoleName = indexCoordResp.GetComponentName()
-		indexCoordErr = metricsinfo.UnmarshalTopology(indexCoordResp.Response, &indexCoordTopology)
-	}()
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-
 		rootCoordResp, rootCoordErr = node.rootCoord.GetMetrics(ctx, request)
 		rootCoordRoleName = rootCoordResp.GetComponentName()
 		rootCoordErr = metricsinfo.UnmarshalTopology(rootCoordResp.Response, &rootCoordTopology)

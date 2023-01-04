@@ -6,14 +6,14 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 )
 
 var (
 	segmentID = int64(1)
 	buildID   = int64(1)
 
-	segmentIdxPb = &indexpb.SegmentIndex{
+	segmentIdxPb = &datapb.SegmentIndex{
 		CollectionID:  colID,
 		PartitionID:   partID,
 		SegmentID:     segmentID,

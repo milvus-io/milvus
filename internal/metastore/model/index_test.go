@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 )
 
 var (
@@ -27,8 +27,8 @@ var (
 		CreateTime:  1,
 	}
 
-	indexPb = &indexpb.FieldIndex{
-		IndexInfo: &indexpb.IndexInfo{
+	indexPb = &datapb.FieldIndex{
+		IndexInfo: &datapb.IndexInfo{
 			CollectionID: colID,
 			FieldID:      fieldID,
 			IndexName:    indexName,

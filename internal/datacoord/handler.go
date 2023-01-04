@@ -104,7 +104,7 @@ func (h *ServerHandler) GetQueryVChanPositions(channel *channel, partitionID Uni
 		return s.InsertChannel == channel.Name && !s.GetIsFake()
 	})
 	segmentInfos := make(map[int64]*SegmentInfo)
-	indexedSegments := FilterInIndexedSegments(h, h.s.indexCoord, segments...)
+	indexedSegments := FilterInIndexedSegments(h, h.s.meta, segments...)
 	indexed := make(typeutil.UniqueSet)
 	for _, segment := range indexedSegments {
 		indexed.Insert(segment.GetID())
@@ -113,6 +113,7 @@ func (h *ServerHandler) GetQueryVChanPositions(channel *channel, partitionID Uni
 		zap.Int64("collectionID", channel.CollectionID),
 		zap.String("channel", channel.Name),
 		zap.Int("numOfSegments", len(segments)),
+		zap.Int("indexed segment", len(indexedSegments)),
 	)
 	var (
 		indexedIDs   = make(typeutil.UniqueSet)
@@ -148,6 +149,68 @@ func (h *ServerHandler) GetQueryVChanPositions(channel *channel, partitionID Uni
 		}
 	}
 
+	//var (
+	//	indexedIDs   = make(typeutil.UniqueSet)
+	//	unIndexedIDs = make(typeutil.UniqueSet)
+	//	growingIDs   = make(typeutil.UniqueSet)
+	//	droppedIDs   = make(typeutil.UniqueSet)
+	//)
+	//for _, s := range segments {
+	//	if (partitionID > allPartitionID && s.PartitionID != partitionID) ||
+	//		(s.GetStartPosition() == nil && s.GetDmlPosition() == nil) {
+	//		continue
+	//	}
+	//	if s.GetIsImporting() {
+	//		// Skip bulk insert segments.
+	//		continue
+	//	}
+	//	segmentInfos[s.GetID()] = s
+	//	if s.GetState() == commonpb.SegmentState_Dropped {
+	//		droppedIDs.Insert(s.GetID())
+	//	} else if s.GetState() == commonpb.SegmentState_Growing {
+	//		growingIDs.Insert(s.GetID())
+	//	} else if indexed.Contain(s.GetID()) {
+	//		indexedIDs.Insert(s.GetID())
+	//	} else {
+	//		unIndexedIDs.Insert(s.GetID())
+	//	}
+	//}
+	//hasUnIndexed := true
+	//for hasUnIndexed {
+	//	hasUnIndexed = false
+	//	for id := range unIndexedIDs {
+	//		// Indexed segments are compacted to a raw segment,
+	//		// replace it with the indexed ones
+	//		if indexed.Contain(id) {
+	//			unIndexedIDs.Remove(id)
+	//			indexedIDs.Insert(id)
+	//			continue
+	//		}
+	//		if len(segmentInfos[id].GetCompactionFrom()) > 0 {
+	//			unIndexedIDs.Remove(id)
+	//			for _, segID := range segmentInfos[id].GetCompactionFrom() {
+	//				if indexed.Contain(segID) {
+	//					indexedIDs.Insert(segID)
+	//				} else {
+	//					unIndexedIDs.Insert(id)
+	//					hasUnIndexed = true
+	//				}
+	//			}
+	//			droppedIDs.Remove(segmentInfos[id].GetCompactionFrom()...)
+	//		}
+	//	}
+	//}
+	//
+	//return &datapb.VchannelInfo{
+	//	CollectionID:        channel.CollectionID,
+	//	ChannelName:         channel.Name,
+	//	SeekPosition:        h.GetChannelSeekPosition(channel, partitionID),
+	//	IndexedSegmentIds:   indexed.Collect(),
+	//	FlushedSegmentIds:   unIndexedIDs.Collect(),
+	//	UnflushedSegmentIds: growingIDs.Collect(),
+	//	DroppedSegmentIds:   droppedIDs.Collect(),
+	//}
+
 	return &datapb.VchannelInfo{
 		CollectionID:        channel.CollectionID,
 		ChannelName:         channel.Name,
@@ -155,6 +218,7 @@ func (h *ServerHandler) GetQueryVChanPositions(channel *channel, partitionID Uni
 		FlushedSegmentIds:   indexedIDs.Collect(),
 		UnflushedSegmentIds: unIndexedIDs.Collect(),
 		DroppedSegmentIds:   droppedIDs.Collect(),
+		// IndexedSegmentIds: indexed.Collect(),
 	}
 }
 

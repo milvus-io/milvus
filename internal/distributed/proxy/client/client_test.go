@@ -23,11 +23,10 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
-	"github.com/milvus-io/milvus/internal/util/mock"
-	"google.golang.org/grpc"
-
 	"github.com/milvus-io/milvus/internal/proxy"
+	"github.com/milvus-io/milvus/internal/util/mock"
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/grpc"
 )
 
 func Test_NewClient(t *testing.T) {

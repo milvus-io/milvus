@@ -30,8 +30,12 @@ const (
 	SegmentMetaPrefix    = "queryCoord-segmentMeta"
 	ChangeInfoMetaPrefix = "queryCoord-sealedSegmentChangeInfo"
 
+	// FlushedSegmentPrefix TODO @cai.zhang: remove this
 	FlushedSegmentPrefix = "flushed-segment"
+	// HandoffSegmentPrefix TODO @cai.zhang: remove this
 	HandoffSegmentPrefix = "querycoord-handoff"
+	// SegmentReferPrefix TODO @cai.zhang: remove this
+	SegmentReferPrefix = "segmentRefer"
 
 	SegmentIndexPrefix = "segment-index"
 	FieldIndexPrefix   = "field-index"

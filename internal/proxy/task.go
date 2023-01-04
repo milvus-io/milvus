@@ -32,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
@@ -1243,7 +1242,7 @@ type loadCollectionTask struct {
 	*milvuspb.LoadCollectionRequest
 	ctx        context.Context
 	queryCoord types.QueryCoord
-	indexCoord types.IndexCoord
+	datacoord  types.DataCoord
 	result     *commonpb.Status
 
 	collectionID UniqueID
@@ -1324,7 +1323,7 @@ func (lct *loadCollectionTask) Execute(ctx context.Context) (err error) {
 		return err
 	}
 	// check index
-	indexResponse, err := lct.indexCoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
+	indexResponse, err := lct.datacoord.DescribeIndex(ctx, &datapb.DescribeIndexRequest{
 		CollectionID: collID,
 		IndexName:    "",
 	})
@@ -1474,7 +1473,7 @@ type loadPartitionsTask struct {
 	*milvuspb.LoadPartitionsRequest
 	ctx        context.Context
 	queryCoord types.QueryCoord
-	indexCoord types.IndexCoord
+	datacoord  types.DataCoord
 	result     *commonpb.Status
 
 	collectionID UniqueID
@@ -1542,7 +1541,7 @@ func (lpt *loadPartitionsTask) Execute(ctx context.Context) error {
 		return err
 	}
 	// check index
-	indexResponse, err := lpt.indexCoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
+	indexResponse, err := lpt.datacoord.DescribeIndex(ctx, &datapb.DescribeIndexRequest{
 		CollectionID: collID,
 		IndexName:    "",
 	})

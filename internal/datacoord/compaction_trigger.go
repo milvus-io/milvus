@@ -23,17 +23,15 @@ import (
 	"sync"
 	"time"
 
+	"github.com/samber/lo"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
-	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/logutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
-	"github.com/samber/lo"
-	"go.uber.org/zap"
 )
 
 type compactTime struct {
@@ -66,17 +64,17 @@ type compactionSignal struct {
 var _ trigger = (*compactionTrigger)(nil)
 
 type compactionTrigger struct {
-	handler                      Handler
-	meta                         *meta
-	allocator                    allocator
-	signals                      chan *compactionSignal
-	compactionHandler            compactionPlanContext
-	globalTrigger                *time.Ticker
-	forceMu                      sync.Mutex
-	quit                         chan struct{}
-	wg                           sync.WaitGroup
-	segRefer                     *SegmentReferenceManager
-	indexCoord                   types.IndexCoord
+	handler           Handler
+	meta              *meta
+	allocator         allocator
+	signals           chan *compactionSignal
+	compactionHandler compactionPlanContext
+	globalTrigger     *time.Ticker
+	forceMu           sync.Mutex
+	quit              chan struct{}
+	wg                sync.WaitGroup
+	//segRefer                     *SegmentReferenceManager
+	//indexCoord                   types.IndexCoord
 	estimateNonDiskSegmentPolicy calUpperLimitPolicy
 	estimateDiskSegmentPolicy    calUpperLimitPolicy
 	// A sloopy hack, so we can test with different segment row count without worrying that
@@ -88,17 +86,17 @@ func newCompactionTrigger(
 	meta *meta,
 	compactionHandler compactionPlanContext,
 	allocator allocator,
-	segRefer *SegmentReferenceManager,
-	indexCoord types.IndexCoord,
+	//segRefer *SegmentReferenceManager,
+	//indexCoord types.IndexCoord,
 	handler Handler,
 ) *compactionTrigger {
 	return &compactionTrigger{
-		meta:                         meta,
-		allocator:                    allocator,
-		signals:                      make(chan *compactionSignal, 100),
-		compactionHandler:            compactionHandler,
-		segRefer:                     segRefer,
-		indexCoord:                   indexCoord,
+		meta:              meta,
+		allocator:         allocator,
+		signals:           make(chan *compactionSignal, 100),
+		compactionHandler: compactionHandler,
+		//segRefer:                     segRefer,
+		//indexCoord:                   indexCoord,
 		estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
 		estimateNonDiskSegmentPolicy: calBySchemaPolicy,
 		handler:                      handler,
@@ -280,39 +278,29 @@ func (t *compactionTrigger) reCalcSegmentMaxNumOfRows(collectionID UniqueID, isD
 
 // TODO: Update segment info should be written back to Etcd.
 func (t *compactionTrigger) updateSegmentMaxSize(segments []*SegmentInfo) (bool, error) {
-	ctx := context.Background()
-
 	if len(segments) == 0 {
 		return false, nil
 	}
 
 	collectionID := segments[0].GetCollectionID()
-	resp, err := t.indexCoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
-		CollectionID: collectionID,
-		IndexName:    "",
-	})
-	if err != nil {
-		return false, err
-	}
+	indexInfos := t.meta.GetIndexesForCollection(segments[0].GetCollectionID(), "")
 
 	isDiskANN := false
-	for _, indexInfo := range resp.IndexInfos {
-		indexParamsMap := funcutil.KeyValuePair2Map(indexInfo.IndexParams)
-		if indexType, ok := indexParamsMap["index_type"]; ok {
-			if indexType == indexparamcheck.IndexDISKANN {
-				// If index type is DiskANN, recalc segment max size here.
-				isDiskANN = true
-				newMaxRows, err := t.reCalcSegmentMaxNumOfRows(collectionID, true)
-				if err != nil {
-					return false, err
-				}
-				if len(segments) > 0 && int64(newMaxRows) != segments[0].GetMaxRowNum() {
-					log.Info("segment max rows recalculated for DiskANN collection",
-						zap.Int64("old max rows", segments[0].GetMaxRowNum()),
-						zap.Int64("new max rows", int64(newMaxRows)))
-					for _, segment := range segments {
-						segment.MaxRowNum = int64(newMaxRows)
-					}
+	for _, indexInfo := range indexInfos {
+		indexType := getIndexType(indexInfo.IndexParams)
+		if indexType == indexparamcheck.IndexDISKANN {
+			// If index type is DiskANN, recalc segment max size here.
+			isDiskANN = true
+			newMaxRows, err := t.reCalcSegmentMaxNumOfRows(collectionID, true)
+			if err != nil {
+				return false, err
+			}
+			if len(segments) > 0 && int64(newMaxRows) != segments[0].GetMaxRowNum() {
+				log.Info("segment max rows recalculated for DiskANN collection",
+					zap.Int64("old max rows", segments[0].GetMaxRowNum()),
+					zap.Int64("new max rows", int64(newMaxRows)))
+				for _, segment := range segments {
+					segment.MaxRowNum = int64(newMaxRows)
 				}
 			}
 		}
@@ -365,7 +353,7 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) {
 			break
 		}
 
-		group.segments = FilterInIndexedSegments(t.handler, t.indexCoord, group.segments...)
+		//group.segments = FilterInIndexedSegments(t.handler, t.meta, group.segments...)
 
 		isDiskIndex, err := t.updateSegmentMaxSize(group.segments)
 		if err != nil {
@@ -734,7 +722,7 @@ func reverseGreedySelect(candidates []*SegmentInfo, free int64, maxSegment int) 
 
 func (t *compactionTrigger) getCandidateSegments(channel string, partitionID UniqueID) []*SegmentInfo {
 	segments := t.meta.GetSegmentsByChannel(channel)
-	segments = FilterInIndexedSegments(t.handler, t.indexCoord, segments...)
+	segments = FilterInIndexedSegments(t.handler, t.meta, segments...)
 	var res []*SegmentInfo
 	for _, s := range segments {
 		if !isSegmentHealthy(s) ||

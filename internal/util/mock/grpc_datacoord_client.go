@@ -173,3 +173,35 @@ func (m *GrpcDataCoordClient) BroadcastAlteredCollection(ctx context.Context, in
 	return &commonpb.Status{}, m.Err
 
 }
+
+func (m *GrpcDataCoordClient) CreateIndex(ctx context.Context, req *datapb.CreateIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
+func (m *GrpcDataCoordClient) DropIndex(ctx context.Context, req *datapb.DropIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
+func (m *GrpcDataCoordClient) GetIndexState(ctx context.Context, req *datapb.GetIndexStateRequest, opts ...grpc.CallOption) (*datapb.GetIndexStateResponse, error) {
+	return &datapb.GetIndexStateResponse{}, m.Err
+}
+
+// GetSegmentIndexState gets the index state of the segments in the request from RootCoord.
+func (m *GrpcDataCoordClient) GetSegmentIndexState(ctx context.Context, req *datapb.GetSegmentIndexStateRequest, opts ...grpc.CallOption) (*datapb.GetSegmentIndexStateResponse, error) {
+	return &datapb.GetSegmentIndexStateResponse{}, m.Err
+}
+
+// GetIndexInfos gets the index files of the IndexBuildIDs in the request from RootCoordinator.
+func (m *GrpcDataCoordClient) GetIndexInfos(ctx context.Context, req *datapb.GetIndexInfoRequest, opts ...grpc.CallOption) (*datapb.GetIndexInfoResponse, error) {
+	return &datapb.GetIndexInfoResponse{}, m.Err
+}
+
+// DescribeIndex describe the index info of the collection.
+func (m *GrpcDataCoordClient) DescribeIndex(ctx context.Context, req *datapb.DescribeIndexRequest, opts ...grpc.CallOption) (*datapb.DescribeIndexResponse, error) {
+	return &datapb.DescribeIndexResponse{}, m.Err
+}
+
+// GetIndexBuildProgress get the index building progress by num rows.
+func (m *GrpcDataCoordClient) GetIndexBuildProgress(ctx context.Context, req *datapb.GetIndexBuildProgressRequest, opts ...grpc.CallOption) (*datapb.GetIndexBuildProgressResponse, error) {
+	return &datapb.GetIndexBuildProgressResponse{}, m.Err
+}

@@ -7,7 +7,7 @@ import (
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/commonpb"
 
-	indexpb "github.com/milvus-io/milvus/internal/proto/indexpb"
+	datapb "github.com/milvus-io/milvus/internal/proto/datapb"
 
 	internalpb "github.com/milvus-io/milvus/internal/proto/internalpb"
 
@@ -77,11 +77,11 @@ func (_c *MockIndexCoord_CheckHealth_Call) Return(_a0 *milvuspb.CheckHealthRespo
 }
 
 // CreateIndex provides a mock function with given fields: ctx, req
-func (_m *MockIndexCoord) CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error) {
+func (_m *MockIndexCoord) CreateIndex(ctx context.Context, req *datapb.CreateIndexRequest) (*commonpb.Status, error) {
 	ret := _m.Called(ctx, req)
 
 	var r0 *commonpb.Status
-	if rf, ok := ret.Get(0).(func(context.Context, *indexpb.CreateIndexRequest) *commonpb.Status); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CreateIndexRequest) *commonpb.Status); ok {
 		r0 = rf(ctx, req)
 	} else {
 		if ret.Get(0) != nil {
@@ -90,7 +90,7 @@ func (_m *MockIndexCoord) CreateIndex(ctx context.Context, req *indexpb.CreateIn
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(context.Context, *indexpb.CreateIndexRequest) error); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.CreateIndexRequest) error); ok {
 		r1 = rf(ctx, req)
 	} else {
 		r1 = ret.Error(1)
@@ -106,14 +106,14 @@ type MockIndexCoord_CreateIndex_Call struct {
 
 // CreateIndex is a helper method to define mock.On call
 //  - ctx context.Context
-//  - req *indexpb.CreateIndexRequest
+//  - req *datapb.CreateIndexRequest
 func (_e *MockIndexCoord_Expecter) CreateIndex(ctx interface{}, req interface{}) *MockIndexCoord_CreateIndex_Call {
 	return &MockIndexCoord_CreateIndex_Call{Call: _e.mock.On("CreateIndex", ctx, req)}
 }
 
-func (_c *MockIndexCoord_CreateIndex_Call) Run(run func(ctx context.Context, req *indexpb.CreateIndexRequest)) *MockIndexCoord_CreateIndex_Call {
+func (_c *MockIndexCoord_CreateIndex_Call) Run(run func(ctx context.Context, req *datapb.CreateIndexRequest)) *MockIndexCoord_CreateIndex_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*indexpb.CreateIndexRequest))
+		run(args[0].(context.Context), args[1].(*datapb.CreateIndexRequest))
 	})
 	return _c
 }
@@ -124,20 +124,20 @@ func (_c *MockIndexCoord_CreateIndex_Call) Return(_a0 *commonpb.Status, _a1 erro
 }
 
 // DescribeIndex provides a mock function with given fields: ctx, req
-func (_m *MockIndexCoord) DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRequest) (*indexpb.DescribeIndexResponse, error) {
+func (_m *MockIndexCoord) DescribeIndex(ctx context.Context, req *datapb.DescribeIndexRequest) (*datapb.DescribeIndexResponse, error) {
 	ret := _m.Called(ctx, req)
 
-	var r0 *indexpb.DescribeIndexResponse
-	if rf, ok := ret.Get(0).(func(context.Context, *indexpb.DescribeIndexRequest) *indexpb.DescribeIndexResponse); ok {
+	var r0 *datapb.DescribeIndexResponse
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.DescribeIndexRequest) *datapb.DescribeIndexResponse); ok {
 		r0 = rf(ctx, req)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*indexpb.DescribeIndexResponse)
+			r0 = ret.Get(0).(*datapb.DescribeIndexResponse)
 		}
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(context.Context, *indexpb.DescribeIndexRequest) error); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.DescribeIndexRequest) error); ok {
 		r1 = rf(ctx, req)
 	} else {
 		r1 = ret.Error(1)
@@ -153,29 +153,29 @@ type MockIndexCoord_DescribeIndex_Call struct {
 
 // DescribeIndex is a helper method to define mock.On call
 //  - ctx context.Context
-//  - req *indexpb.DescribeIndexRequest
+//  - req *datapb.DescribeIndexRequest
 func (_e *MockIndexCoord_Expecter) DescribeIndex(ctx interface{}, req interface{}) *MockIndexCoord_DescribeIndex_Call {
 	return &MockIndexCoord_DescribeIndex_Call{Call: _e.mock.On("DescribeIndex", ctx, req)}
 }
 
-func (_c *MockIndexCoord_DescribeIndex_Call) Run(run func(ctx context.Context, req *indexpb.DescribeIndexRequest)) *MockIndexCoord_DescribeIndex_Call {
+func (_c *MockIndexCoord_DescribeIndex_Call) Run(run func(ctx context.Context, req *datapb.DescribeIndexRequest)) *MockIndexCoord_DescribeIndex_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*indexpb.DescribeIndexRequest))
+		run(args[0].(context.Context), args[1].(*datapb.DescribeIndexRequest))
 	})
 	return _c
 }
 
-func (_c *MockIndexCoord_DescribeIndex_Call) Return(_a0 *indexpb.DescribeIndexResponse, _a1 error) *MockIndexCoord_DescribeIndex_Call {
+func (_c *MockIndexCoord_DescribeIndex_Call) Return(_a0 *datapb.DescribeIndexResponse, _a1 error) *MockIndexCoord_DescribeIndex_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
 // DropIndex provides a mock function with given fields: ctx, req
-func (_m *MockIndexCoord) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
+func (_m *MockIndexCoord) DropIndex(ctx context.Context, req *datapb.DropIndexRequest) (*commonpb.Status, error) {
 	ret := _m.Called(ctx, req)
 
 	var r0 *commonpb.Status
-	if rf, ok := ret.Get(0).(func(context.Context, *indexpb.DropIndexRequest) *commonpb.Status); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.DropIndexRequest) *commonpb.Status); ok {
 		r0 = rf(ctx, req)
 	} else {
 		if ret.Get(0) != nil {
@@ -184,7 +184,7 @@ func (_m *MockIndexCoord) DropIndex(ctx context.Context, req *indexpb.DropIndexR
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(context.Context, *indexpb.DropIndexRequest) error); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.DropIndexRequest) error); ok {
 		r1 = rf(ctx, req)
 	} else {
 		r1 = ret.Error(1)
@@ -200,14 +200,14 @@ type MockIndexCoord_DropIndex_Call struct {
 
 // DropIndex is a helper method to define mock.On call
 //  - ctx context.Context
-//  - req *indexpb.DropIndexRequest
+//  - req *datapb.DropIndexRequest
 func (_e *MockIndexCoord_Expecter) DropIndex(ctx interface{}, req interface{}) *MockIndexCoord_DropIndex_Call {
 	return &MockIndexCoord_DropIndex_Call{Call: _e.mock.On("DropIndex", ctx, req)}
 }
 
-func (_c *MockIndexCoord_DropIndex_Call) Run(run func(ctx context.Context, req *indexpb.DropIndexRequest)) *MockIndexCoord_DropIndex_Call {
+func (_c *MockIndexCoord_DropIndex_Call) Run(run func(ctx context.Context, req *datapb.DropIndexRequest)) *MockIndexCoord_DropIndex_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*indexpb.DropIndexRequest))
+		run(args[0].(context.Context), args[1].(*datapb.DropIndexRequest))
 	})
 	return _c
 }
@@ -264,20 +264,20 @@ func (_c *MockIndexCoord_GetComponentStates_Call) Return(_a0 *milvuspb.Component
 }
 
 // GetIndexBuildProgress provides a mock function with given fields: ctx, req
-func (_m *MockIndexCoord) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetIndexBuildProgressRequest) (*indexpb.GetIndexBuildProgressResponse, error) {
+func (_m *MockIndexCoord) GetIndexBuildProgress(ctx context.Context, req *datapb.GetIndexBuildProgressRequest) (*datapb.GetIndexBuildProgressResponse, error) {
 	ret := _m.Called(ctx, req)
 
-	var r0 *indexpb.GetIndexBuildProgressResponse
-	if rf, ok := ret.Get(0).(func(context.Context, *indexpb.GetIndexBuildProgressRequest) *indexpb.GetIndexBuildProgressResponse); ok {
+	var r0 *datapb.GetIndexBuildProgressResponse
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.GetIndexBuildProgressRequest) *datapb.GetIndexBuildProgressResponse); ok {
 		r0 = rf(ctx, req)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*indexpb.GetIndexBuildProgressResponse)
+			r0 = ret.Get(0).(*datapb.GetIndexBuildProgressResponse)
 		}
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(context.Context, *indexpb.GetIndexBuildProgressRequest) error); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.GetIndexBuildProgressRequest) error); ok {
 		r1 = rf(ctx, req)
 	} else {
 		r1 = ret.Error(1)
@@ -293,38 +293,38 @@ type MockIndexCoord_GetIndexBuildProgress_Call struct {
 
 // GetIndexBuildProgress is a helper method to define mock.On call
 //  - ctx context.Context
-//  - req *indexpb.GetIndexBuildProgressRequest
+//  - req *datapb.GetIndexBuildProgressRequest
 func (_e *MockIndexCoord_Expecter) GetIndexBuildProgress(ctx interface{}, req interface{}) *MockIndexCoord_GetIndexBuildProgress_Call {
 	return &MockIndexCoord_GetIndexBuildProgress_Call{Call: _e.mock.On("GetIndexBuildProgress", ctx, req)}
 }
 
-func (_c *MockIndexCoord_GetIndexBuildProgress_Call) Run(run func(ctx context.Context, req *indexpb.GetIndexBuildProgressRequest)) *MockIndexCoord_GetIndexBuildProgress_Call {
+func (_c *MockIndexCoord_GetIndexBuildProgress_Call) Run(run func(ctx context.Context, req *datapb.GetIndexBuildProgressRequest)) *MockIndexCoord_GetIndexBuildProgress_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*indexpb.GetIndexBuildProgressRequest))
+		run(args[0].(context.Context), args[1].(*datapb.GetIndexBuildProgressRequest))
 	})
 	return _c
 }
 
-func (_c *MockIndexCoord_GetIndexBuildProgress_Call) Return(_a0 *indexpb.GetIndexBuildProgressResponse, _a1 error) *MockIndexCoord_GetIndexBuildProgress_Call {
+func (_c *MockIndexCoord_GetIndexBuildProgress_Call) Return(_a0 *datapb.GetIndexBuildProgressResponse, _a1 error) *MockIndexCoord_GetIndexBuildProgress_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
 // GetIndexInfos provides a mock function with given fields: ctx, req
-func (_m *MockIndexCoord) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoRequest) (*indexpb.GetIndexInfoResponse, error) {
+func (_m *MockIndexCoord) GetIndexInfos(ctx context.Context, req *datapb.GetIndexInfoRequest) (*datapb.GetIndexInfoResponse, error) {
 	ret := _m.Called(ctx, req)
 
-	var r0 *indexpb.GetIndexInfoResponse
-	if rf, ok := ret.Get(0).(func(context.Context, *indexpb.GetIndexInfoRequest) *indexpb.GetIndexInfoResponse); ok {
+	var r0 *datapb.GetIndexInfoResponse
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.GetIndexInfoRequest) *datapb.GetIndexInfoResponse); ok {
 		r0 = rf(ctx, req)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*indexpb.GetIndexInfoResponse)
+			r0 = ret.Get(0).(*datapb.GetIndexInfoResponse)
 		}
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(context.Context, *indexpb.GetIndexInfoRequest) error); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.GetIndexInfoRequest) error); ok {
 		r1 = rf(ctx, req)
 	} else {
 		r1 = ret.Error(1)
@@ -340,38 +340,38 @@ type MockIndexCoord_GetIndexInfos_Call struct {
 
 // GetIndexInfos is a helper method to define mock.On call
 //  - ctx context.Context
-//  - req *indexpb.GetIndexInfoRequest
+//  - req *datapb.GetIndexInfoRequest
 func (_e *MockIndexCoord_Expecter) GetIndexInfos(ctx interface{}, req interface{}) *MockIndexCoord_GetIndexInfos_Call {
 	return &MockIndexCoord_GetIndexInfos_Call{Call: _e.mock.On("GetIndexInfos", ctx, req)}
 }
 
-func (_c *MockIndexCoord_GetIndexInfos_Call) Run(run func(ctx context.Context, req *indexpb.GetIndexInfoRequest)) *MockIndexCoord_GetIndexInfos_Call {
+func (_c *MockIndexCoord_GetIndexInfos_Call) Run(run func(ctx context.Context, req *datapb.GetIndexInfoRequest)) *MockIndexCoord_GetIndexInfos_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*indexpb.GetIndexInfoRequest))
+		run(args[0].(context.Context), args[1].(*datapb.GetIndexInfoRequest))
 	})
 	return _c
 }
 
-func (_c *MockIndexCoord_GetIndexInfos_Call) Return(_a0 *indexpb.GetIndexInfoResponse, _a1 error) *MockIndexCoord_GetIndexInfos_Call {
+func (_c *MockIndexCoord_GetIndexInfos_Call) Return(_a0 *datapb.GetIndexInfoResponse, _a1 error) *MockIndexCoord_GetIndexInfos_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
 // GetIndexState provides a mock function with given fields: ctx, req
-func (_m *MockIndexCoord) GetIndexState(ctx context.Context, req *indexpb.GetIndexStateRequest) (*indexpb.GetIndexStateResponse, error) {
+func (_m *MockIndexCoord) GetIndexState(ctx context.Context, req *datapb.GetIndexStateRequest) (*datapb.GetIndexStateResponse, error) {
 	ret := _m.Called(ctx, req)
 
-	var r0 *indexpb.GetIndexStateResponse
-	if rf, ok := ret.Get(0).(func(context.Context, *indexpb.GetIndexStateRequest) *indexpb.GetIndexStateResponse); ok {
+	var r0 *datapb.GetIndexStateResponse
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.GetIndexStateRequest) *datapb.GetIndexStateResponse); ok {
 		r0 = rf(ctx, req)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*indexpb.GetIndexStateResponse)
+			r0 = ret.Get(0).(*datapb.GetIndexStateResponse)
 		}
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(context.Context, *indexpb.GetIndexStateRequest) error); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.GetIndexStateRequest) error); ok {
 		r1 = rf(ctx, req)
 	} else {
 		r1 = ret.Error(1)
@@ -387,19 +387,19 @@ type MockIndexCoord_GetIndexState_Call struct {
 
 // GetIndexState is a helper method to define mock.On call
 //  - ctx context.Context
-//  - req *indexpb.GetIndexStateRequest
+//  - req *datapb.GetIndexStateRequest
 func (_e *MockIndexCoord_Expecter) GetIndexState(ctx interface{}, req interface{}) *MockIndexCoord_GetIndexState_Call {
 	return &MockIndexCoord_GetIndexState_Call{Call: _e.mock.On("GetIndexState", ctx, req)}
 }
 
-func (_c *MockIndexCoord_GetIndexState_Call) Run(run func(ctx context.Context, req *indexpb.GetIndexStateRequest)) *MockIndexCoord_GetIndexState_Call {
+func (_c *MockIndexCoord_GetIndexState_Call) Run(run func(ctx context.Context, req *datapb.GetIndexStateRequest)) *MockIndexCoord_GetIndexState_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*indexpb.GetIndexStateRequest))
+		run(args[0].(context.Context), args[1].(*datapb.GetIndexStateRequest))
 	})
 	return _c
 }
 
-func (_c *MockIndexCoord_GetIndexState_Call) Return(_a0 *indexpb.GetIndexStateResponse, _a1 error) *MockIndexCoord_GetIndexState_Call {
+func (_c *MockIndexCoord_GetIndexState_Call) Return(_a0 *datapb.GetIndexStateResponse, _a1 error) *MockIndexCoord_GetIndexState_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
@@ -452,20 +452,20 @@ func (_c *MockIndexCoord_GetMetrics_Call) Return(_a0 *milvuspb.GetMetricsRespons
 }
 
 // GetSegmentIndexState provides a mock function with given fields: ctx, req
-func (_m *MockIndexCoord) GetSegmentIndexState(ctx context.Context, req *indexpb.GetSegmentIndexStateRequest) (*indexpb.GetSegmentIndexStateResponse, error) {
+func (_m *MockIndexCoord) GetSegmentIndexState(ctx context.Context, req *datapb.GetSegmentIndexStateRequest) (*datapb.GetSegmentIndexStateResponse, error) {
 	ret := _m.Called(ctx, req)
 
-	var r0 *indexpb.GetSegmentIndexStateResponse
-	if rf, ok := ret.Get(0).(func(context.Context, *indexpb.GetSegmentIndexStateRequest) *indexpb.GetSegmentIndexStateResponse); ok {
+	var r0 *datapb.GetSegmentIndexStateResponse
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.GetSegmentIndexStateRequest) *datapb.GetSegmentIndexStateResponse); ok {
 		r0 = rf(ctx, req)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*indexpb.GetSegmentIndexStateResponse)
+			r0 = ret.Get(0).(*datapb.GetSegmentIndexStateResponse)
 		}
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(context.Context, *indexpb.GetSegmentIndexStateRequest) error); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.GetSegmentIndexStateRequest) error); ok {
 		r1 = rf(ctx, req)
 	} else {
 		r1 = ret.Error(1)
@@ -481,19 +481,19 @@ type MockIndexCoord_GetSegmentIndexState_Call struct {
 
 // GetSegmentIndexState is a helper method to define mock.On call
 //  - ctx context.Context
-//  - req *indexpb.GetSegmentIndexStateRequest
+//  - req *datapb.GetSegmentIndexStateRequest
 func (_e *MockIndexCoord_Expecter) GetSegmentIndexState(ctx interface{}, req interface{}) *MockIndexCoord_GetSegmentIndexState_Call {
 	return &MockIndexCoord_GetSegmentIndexState_Call{Call: _e.mock.On("GetSegmentIndexState", ctx, req)}
 }
 
-func (_c *MockIndexCoord_GetSegmentIndexState_Call) Run(run func(ctx context.Context, req *indexpb.GetSegmentIndexStateRequest)) *MockIndexCoord_GetSegmentIndexState_Call {
+func (_c *MockIndexCoord_GetSegmentIndexState_Call) Run(run func(ctx context.Context, req *datapb.GetSegmentIndexStateRequest)) *MockIndexCoord_GetSegmentIndexState_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*indexpb.GetSegmentIndexStateRequest))
+		run(args[0].(context.Context), args[1].(*datapb.GetSegmentIndexStateRequest))
 	})
 	return _c
 }
 
-func (_c *MockIndexCoord_GetSegmentIndexState_Call) Return(_a0 *indexpb.GetSegmentIndexStateResponse, _a1 error) *MockIndexCoord_GetSegmentIndexState_Call {
+func (_c *MockIndexCoord_GetSegmentIndexState_Call) Return(_a0 *datapb.GetSegmentIndexStateResponse, _a1 error) *MockIndexCoord_GetSegmentIndexState_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }

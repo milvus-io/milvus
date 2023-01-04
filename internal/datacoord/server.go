@@ -115,22 +115,26 @@ type Server struct {
 
 	metricsCacheManager *metricsinfo.MetricsCacheManager
 
-	flushCh chan UniqueID
-	factory dependency.Factory
+	flushCh         chan UniqueID
+	buildIndexCh    chan UniqueID
+	notifyIndexChan chan UniqueID
+	factory         dependency.Factory
 
 	session   *sessionutil.Session
 	dnEventCh <-chan *sessionutil.SessionEvent
-	//icEventCh <-chan *sessionutil.SessionEvent
-	qcEventCh <-chan *sessionutil.SessionEvent
+	inEventCh <-chan *sessionutil.SessionEvent
+	//qcEventCh <-chan *sessionutil.SessionEvent
 
 	enableActiveStandBy bool
 	activateFunc        func()
 
 	dataNodeCreator        dataNodeCreatorFunc
 	rootCoordClientCreator rootCoordCreatorFunc
-	indexCoord             types.IndexCoord
+	//indexCoord             types.IndexCoord
 
-	segReferManager *SegmentReferenceManager
+	//segReferManager  *SegmentReferenceManager
+	indexBuilder     *indexBuilder
+	indexNodeManager *IndexNodeManager
 }
 
 // ServerHelper datacoord server injection helper
@@ -190,6 +194,8 @@ func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Optio
 		quitCh:                 make(chan struct{}),
 		factory:                factory,
 		flushCh:                make(chan UniqueID, 1024),
+		buildIndexCh:           make(chan UniqueID, 1024),
+		notifyIndexChan:        make(chan UniqueID),
 		dataNodeCreator:        defaultDataNodeCreatorFunc,
 		rootCoordClientCreator: defaultRootCoordCreatorFunc,
 		helper:                 defaultServerHelper(),
@@ -277,6 +283,7 @@ func (s *Server) Init() error {
 	if err = s.initSession(); err != nil {
 		return err
 	}
+	s.initIndexNodeManager()
 
 	if err = s.initServiceDiscovery(); err != nil {
 		return err
@@ -289,6 +296,7 @@ func (s *Server) Init() error {
 	s.initSegmentManager()
 
 	s.initGarbageCollection(storageCli)
+	s.initIndexBuilder(storageCli)
 
 	return nil
 }
@@ -356,12 +364,8 @@ func (s *Server) SetEtcdClient(client *clientv3.Client) {
 	s.etcdCli = client
 }
 
-func (s *Server) SetIndexCoord(indexCoord types.IndexCoord) {
-	s.indexCoord = indexCoord
-}
-
 func (s *Server) createCompactionHandler() {
-	s.compactionHandler = newCompactionPlanHandler(s.sessionManager, s.channelManager, s.meta, s.allocator, s.flushCh, s.segReferManager)
+	s.compactionHandler = newCompactionPlanHandler(s.sessionManager, s.channelManager, s.meta, s.allocator, s.flushCh)
 }
 
 func (s *Server) stopCompactionHandler() {
@@ -369,7 +373,7 @@ func (s *Server) stopCompactionHandler() {
 }
 
 func (s *Server) createCompactionTrigger() {
-	s.compactionTrigger = newCompactionTrigger(s.meta, s.compactionHandler, s.allocator, s.segReferManager, s.indexCoord, s.handler)
+	s.compactionTrigger = newCompactionTrigger(s.meta, s.compactionHandler, s.allocator, s.handler)
 }
 
 func (s *Server) stopCompactionTrigger() {
@@ -387,7 +391,7 @@ func (s *Server) newChunkManagerFactory() (storage.ChunkManager, error) {
 }
 
 func (s *Server) initGarbageCollection(cli storage.ChunkManager) {
-	s.garbageCollector = newGarbageCollector(s.meta, s.handler, s.segReferManager, s.indexCoord, GcOption{
+	s.garbageCollector = newGarbageCollector(s.meta, s.handler, GcOption{
 		cli:              cli,
 		enabled:          Params.DataCoordCfg.EnableGarbageCollection.GetAsBool(),
 		checkInterval:    Params.DataCoordCfg.GCInterval.GetAsDuration(time.Second),
@@ -419,30 +423,29 @@ func (s *Server) initServiceDiscovery() error {
 	// TODO implement rewatch logic
 	s.dnEventCh = s.session.WatchServicesWithVersionRange(typeutil.DataNodeRole, r, rev+1, nil)
 
-	//icSessions, icRevision, err := s.session.GetSessions(typeutil.IndexCoordRole)
-	//if err != nil {
-	//	log.Error("DataCoord get IndexCoord session failed", zap.Error(err))
-	//	return err
-	//}
-	//serverIDs := make([]UniqueID, 0, len(icSessions))
-	//for _, session := range icSessions {
-	//	serverIDs = append(serverIDs, session.ServerID)
-	//}
-	//s.icEventCh = s.session.WatchServices(typeutil.IndexCoordRole, icRevision+1, nil)
-
-	qcSessions, qcRevision, err := s.session.GetSessions(typeutil.QueryCoordRole)
+	inSessions, inRevision, err := s.session.GetSessions(typeutil.IndexNodeRole)
 	if err != nil {
 		log.Error("DataCoord get QueryCoord session failed", zap.Error(err))
 		return err
 	}
-	serverIDs := make([]UniqueID, 0, len(qcSessions))
-	for _, session := range qcSessions {
-		serverIDs = append(serverIDs, session.ServerID)
+	if Params.DataCoordCfg.BindIndexNodeMode.GetAsBool() {
+		if err = s.indexNodeManager.AddNode(Params.DataCoordCfg.IndexNodeID.GetAsInt64(), Params.DataCoordCfg.IndexNodeAddress.GetValue()); err != nil {
+			log.Error("add indexNode fail", zap.Int64("ServerID", Params.DataCoordCfg.IndexNodeID.GetAsInt64()),
+				zap.String("address", Params.DataCoordCfg.IndexNodeAddress.GetValue()), zap.Error(err))
+			return err
+		}
+		log.Info("add indexNode success", zap.String("IndexNode address", Params.DataCoordCfg.IndexNodeAddress.GetValue()),
+			zap.Int64("nodeID", Params.DataCoordCfg.IndexNodeID.GetAsInt64()))
+	} else {
+		for _, session := range inSessions {
+			if err := s.indexNodeManager.AddNode(session.ServerID, session.Address); err != nil {
+				return err
+			}
+		}
 	}
-	s.qcEventCh = s.session.WatchServices(typeutil.QueryCoordRole, qcRevision+1, nil)
+	s.inEventCh = s.session.WatchServices(typeutil.IndexNodeRole, inRevision+1, nil)
 
-	s.segReferManager, err = NewSegmentReferenceManager(s.kvClient, serverIDs)
-	return err
+	return nil
 }
 
 func (s *Server) initSegmentManager() {
@@ -466,12 +469,25 @@ func (s *Server) initMeta(chunkManagerRootPath string, chunkManager storage.Chun
 	return retry.Do(s.ctx, reloadEtcdFn, retry.Attempts(connEtcdMaxRetryTime))
 }
 
+func (s *Server) initIndexBuilder(manager storage.ChunkManager) {
+	if s.indexBuilder == nil {
+		s.indexBuilder = newIndexBuilder(s.ctx, s.meta, s.indexNodeManager, manager)
+	}
+}
+
+func (s *Server) initIndexNodeManager() {
+	if s.indexNodeManager == nil {
+		s.indexNodeManager = NewNodeManager(s.ctx)
+	}
+}
+
 func (s *Server) startServerLoop() {
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
 	s.serverLoopWg.Add(3)
 	s.startDataNodeTtLoop(s.serverLoopCtx)
 	s.startWatchService(s.serverLoopCtx)
 	s.startFlushLoop(s.serverLoopCtx)
+	s.startIndexService(s.serverLoopCtx)
 	s.garbageCollector.start()
 }
 
@@ -644,25 +660,6 @@ func (s *Server) stopServiceWatch() {
 	}
 }
 
-func (s *Server) processSessionEvent(ctx context.Context, role string, event *sessionutil.SessionEvent) {
-	switch event.EventType {
-	case sessionutil.SessionAddEvent:
-		log.Info("there is a new service online",
-			zap.String("server role", role),
-			zap.Int64("server ID", event.Session.ServerID))
-
-	case sessionutil.SessionDelEvent:
-		log.Warn("there is service offline",
-			zap.String("server role", role),
-			zap.Int64("server ID", event.Session.ServerID))
-		if err := retry.Do(ctx, func() error {
-			return s.segReferManager.ReleaseSegmentsLockByNodeID(event.Session.ServerID)
-		}, retry.Attempts(100)); err != nil {
-			panic(err)
-		}
-	}
-}
-
 // watchService watches services.
 func (s *Server) watchService(ctx context.Context) {
 	defer logutil.LogPanic()
@@ -677,7 +674,7 @@ func (s *Server) watchService(ctx context.Context) {
 				s.stopServiceWatch()
 				return
 			}
-			if err := s.handleSessionEvent(ctx, event); err != nil {
+			if err := s.handleSessionEvent(ctx, typeutil.DataNodeRole, event); err != nil {
 				go func() {
 					if err := s.Stop(); err != nil {
 						log.Warn("DataCoord server stop error", zap.Error(err))
@@ -685,59 +682,84 @@ func (s *Server) watchService(ctx context.Context) {
 				}()
 				return
 			}
-		//case event, ok := <-s.icEventCh:
-		//	if !ok {
-		//		s.stopServiceWatch()
-		//		return
-		//	}
-		//	s.processSessionEvent(ctx, "IndexCoord", event)
-		case event, ok := <-s.qcEventCh:
+		case event, ok := <-s.inEventCh:
 			if !ok {
 				s.stopServiceWatch()
 				return
 			}
-			s.processSessionEvent(ctx, "QueryCoord", event)
+			if err := s.handleSessionEvent(ctx, typeutil.IndexNodeRole, event); err != nil {
+				go func() {
+					if err := s.Stop(); err != nil {
+						log.Warn("DataCoord server stop error", zap.Error(err))
+					}
+				}()
+				return
+			}
 		}
 	}
 }
 
 // handles session events - DataNodes Add/Del
-func (s *Server) handleSessionEvent(ctx context.Context, event *sessionutil.SessionEvent) error {
+func (s *Server) handleSessionEvent(ctx context.Context, role string, event *sessionutil.SessionEvent) error {
 	if event == nil {
 		return nil
 	}
-	info := &datapb.DataNodeInfo{
-		Address:  event.Session.Address,
-		Version:  event.Session.ServerID,
-		Channels: []*datapb.ChannelStatus{},
-	}
-	node := &NodeInfo{
-		NodeID:  event.Session.ServerID,
-		Address: event.Session.Address,
-	}
-	switch event.EventType {
-	case sessionutil.SessionAddEvent:
-		log.Info("received datanode register",
-			zap.String("address", info.Address),
-			zap.Int64("serverID", info.Version))
-		if err := s.cluster.Register(node); err != nil {
-			log.Warn("failed to register node", zap.Int64("id", node.NodeID), zap.String("address", node.Address), zap.Error(err))
-			return err
+	switch role {
+	case typeutil.DataNodeRole:
+		info := &datapb.DataNodeInfo{
+			Address:  event.Session.Address,
+			Version:  event.Session.ServerID,
+			Channels: []*datapb.ChannelStatus{},
 		}
-		s.metricsCacheManager.InvalidateSystemInfoMetrics()
-	case sessionutil.SessionDelEvent:
-		log.Info("received datanode unregister",
-			zap.String("address", info.Address),
-			zap.Int64("serverID", info.Version))
-		if err := s.cluster.UnRegister(node); err != nil {
-			log.Warn("failed to deregister node", zap.Int64("id", node.NodeID), zap.String("address", node.Address), zap.Error(err))
-			return err
+		node := &NodeInfo{
+			NodeID:  event.Session.ServerID,
+			Address: event.Session.Address,
 		}
-		s.metricsCacheManager.InvalidateSystemInfoMetrics()
-	default:
-		log.Warn("receive unknown service event type",
-			zap.Any("type", event.EventType))
+		switch event.EventType {
+		case sessionutil.SessionAddEvent:
+			log.Info("received datanode register",
+				zap.String("address", info.Address),
+				zap.Int64("serverID", info.Version))
+			if err := s.cluster.Register(node); err != nil {
+				log.Warn("failed to register node", zap.Int64("id", node.NodeID), zap.String("address", node.Address), zap.Error(err))
+				return err
+			}
+			s.metricsCacheManager.InvalidateSystemInfoMetrics()
+		case sessionutil.SessionDelEvent:
+			log.Info("received datanode unregister",
+				zap.String("address", info.Address),
+				zap.Int64("serverID", info.Version))
+			if err := s.cluster.UnRegister(node); err != nil {
+				log.Warn("failed to deregister node", zap.Int64("id", node.NodeID), zap.String("address", node.Address), zap.Error(err))
+				return err
+			}
+			s.metricsCacheManager.InvalidateSystemInfoMetrics()
+		default:
+			log.Warn("receive unknown service event type",
+				zap.Any("type", event.EventType))
+		}
+	case typeutil.IndexNodeRole:
+		switch event.EventType {
+		case sessionutil.SessionAddEvent:
+			log.Info("received indexnode register",
+				zap.String("address", event.Session.Address),
+				zap.Int64("serverID", event.Session.ServerID))
+			return s.indexNodeManager.AddNode(event.Session.ServerID, event.Session.Address)
+		case sessionutil.SessionDelEvent:
+			log.Info("received indexnode unregister",
+				zap.String("address", event.Session.Address),
+				zap.Int64("serverID", event.Session.ServerID))
+			s.indexNodeManager.RemoveNode(event.Session.ServerID)
+		case sessionutil.SessionUpdateEvent:
+			serverID := event.Session.ServerID
+			log.Info("received indexnode SessionUpdateEvent", zap.Int64("serverID", serverID))
+			s.indexNodeManager.StoppingNode(serverID)
+		default:
+			log.Warn("receive unknown service event type",
+				zap.Any("type", event.EventType))
+		}
 	}
+
 	return nil
 }
 
@@ -782,6 +804,7 @@ func (s *Server) postFlush(ctx context.Context, segmentID UniqueID) error {
 		log.Error("flush segment complete failed", zap.Error(err))
 		return err
 	}
+	s.buildIndexCh <- segmentID
 	log.Info("flush segment complete", zap.Int64("id", segmentID))
 	return nil
 }

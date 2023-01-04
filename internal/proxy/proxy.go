@@ -81,7 +81,6 @@ type Proxy struct {
 	etcdCli    *clientv3.Client
 	address    string
 	rootCoord  types.RootCoord
-	indexCoord types.IndexCoord
 	dataCoord  types.DataCoord
 	queryCoord types.QueryCoord
 
@@ -447,11 +446,6 @@ func (node *Proxy) SetEtcdClient(client *clientv3.Client) {
 // SetRootCoordClient sets RootCoord client for proxy.
 func (node *Proxy) SetRootCoordClient(cli types.RootCoord) {
 	node.rootCoord = cli
-}
-
-// SetIndexCoordClient sets IndexCoord client for proxy.
-func (node *Proxy) SetIndexCoordClient(cli types.IndexCoord) {
-	node.indexCoord = cli
 }
 
 // SetDataCoordClient sets DataCoord client for proxy.

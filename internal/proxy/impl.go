@@ -375,7 +375,7 @@ func (node *Proxy) LoadCollection(ctx context.Context, request *milvuspb.LoadCol
 		Condition:             NewTaskCondition(ctx),
 		LoadCollectionRequest: request,
 		queryCoord:            node.queryCoord,
-		indexCoord:            node.indexCoord,
+		datacoord:             node.dataCoord,
 	}
 
 	log := log.Ctx(ctx).With(
@@ -1120,7 +1120,7 @@ func (node *Proxy) LoadPartitions(ctx context.Context, request *milvuspb.LoadPar
 		Condition:             NewTaskCondition(ctx),
 		LoadPartitionsRequest: request,
 		queryCoord:            node.queryCoord,
-		indexCoord:            node.indexCoord,
+		datacoord:             node.dataCoord,
 	}
 
 	log := log.Ctx(ctx).With(
@@ -1610,7 +1610,7 @@ func (node *Proxy) CreateIndex(ctx context.Context, request *milvuspb.CreateInde
 		Condition:  NewTaskCondition(ctx),
 		req:        request,
 		rootCoord:  node.rootCoord,
-		indexCoord: node.indexCoord,
+		datacoord:  node.dataCoord,
 		queryCoord: node.queryCoord,
 	}
 
@@ -1689,7 +1689,7 @@ func (node *Proxy) DescribeIndex(ctx context.Context, request *milvuspb.Describe
 		ctx:                  ctx,
 		Condition:            NewTaskCondition(ctx),
 		DescribeIndexRequest: request,
-		indexCoord:           node.indexCoord,
+		datacoord:            node.dataCoord,
 	}
 
 	method := "DescribeIndex"
@@ -1774,7 +1774,7 @@ func (node *Proxy) DropIndex(ctx context.Context, request *milvuspb.DropIndexReq
 		ctx:              ctx,
 		Condition:        NewTaskCondition(ctx),
 		DropIndexRequest: request,
-		indexCoord:       node.indexCoord,
+		dataCoord:        node.dataCoord,
 		queryCoord:       node.queryCoord,
 	}
 
@@ -1854,7 +1854,6 @@ func (node *Proxy) GetIndexBuildProgress(ctx context.Context, request *milvuspb.
 		ctx:                          ctx,
 		Condition:                    NewTaskCondition(ctx),
 		GetIndexBuildProgressRequest: request,
-		indexCoord:                   node.indexCoord,
 		rootCoord:                    node.rootCoord,
 		dataCoord:                    node.dataCoord,
 	}
@@ -1937,7 +1936,7 @@ func (node *Proxy) GetIndexState(ctx context.Context, request *milvuspb.GetIndex
 		ctx:                  ctx,
 		Condition:            NewTaskCondition(ctx),
 		GetIndexStateRequest: request,
-		indexCoord:           node.indexCoord,
+		dataCoord:            node.dataCoord,
 		rootCoord:            node.rootCoord,
 	}
 
@@ -4375,11 +4374,6 @@ func (node *Proxy) CheckHealth(ctx context.Context, request *milvuspb.CheckHealt
 	group.Go(func() error {
 		resp, err := node.dataCoord.CheckHealth(ctx, request)
 		return fn("datacoord", resp, err)
-	})
-
-	group.Go(func() error {
-		resp, err := node.indexCoord.CheckHealth(ctx, request)
-		return fn("indexcoord", resp, err)
 	})
 
 	err := group.Wait()
