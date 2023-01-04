@@ -403,9 +403,9 @@ func Test_SuffixSnapshotMultiSave(t *testing.T) {
 	keys, vals, err = ss.LoadWithPrefix("k", typeutil.Timestamp(300))
 	assert.Nil(t, err)
 	assert.Equal(t, len(keys), len(vals))
-	assert.Equal(t, len(keys), 3)
-	assert.ElementsMatch(t, keys, []string{"k1", "k2", "kextra"})
-	assert.ElementsMatch(t, vals, []string{"v1-19", "v2-19", "extra-value"})
+	assert.Equal(t, len(keys), 2)
+	assert.ElementsMatch(t, keys, []string{"k1", "k2"})
+	assert.ElementsMatch(t, vals, []string{"v1-19", "v2-19"})
 
 	// clean up
 	ss.RemoveWithPrefix("")
@@ -677,6 +677,68 @@ func Test_SuffixSnapshotMultiSaveAndRemoveWithPrefix(t *testing.T) {
 
 	// cleanup
 	ss.MultiSaveAndRemoveWithPrefix(map[string]string{}, []string{""}, 0)
+}
+
+func TestSuffixSnapshot_LoadWithPrefix(t *testing.T) {
+	rand.Seed(time.Now().UnixNano())
+	randVal := rand.Int()
+
+	Params.Init()
+	rootPath := fmt.Sprintf("/test/meta/loadWithPrefix-test-%d", randVal)
+	sep := "_ts"
+
+	etcdCli, err := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
+		Params.EtcdCfg.Endpoints.GetAsStrings(),
+		Params.EtcdCfg.EtcdTLSCert.GetValue(),
+		Params.EtcdCfg.EtcdTLSKey.GetValue(),
+		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
+		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
+	assert.NoError(t, err)
+	defer etcdCli.Close()
+	etcdkv := etcdkv.NewEtcdKV(etcdCli, rootPath)
+	assert.NoError(t, err)
+	defer etcdkv.Close()
+
+	ss, err := NewSuffixSnapshot(etcdkv, sep, rootPath, snapshotPrefix)
+	assert.NoError(t, err)
+	assert.NotNil(t, ss)
+	defer ss.Close()
+
+	t.Run("parse ts fail", func(t *testing.T) {
+		prefix := fmt.Sprintf("prefix%d", rand.Int())
+		key := fmt.Sprintf("%s-%s", prefix, "ts_error-ts")
+		err = etcdkv.Save(ss.composeSnapshotPrefix(key), "")
+		assert.NoError(t, err)
+
+		keys, values, err := ss.LoadWithPrefix(prefix, 100)
+		assert.NoError(t, err)
+		assert.Equal(t, 0, len(keys))
+		assert.Equal(t, 0, len(values))
+
+		// clean all data
+		err = etcdkv.RemoveWithPrefix("")
+		assert.NoError(t, err)
+	})
+
+	t.Run("test walk kv data fail", func(t *testing.T) {
+		sep := "_ts"
+		rootPath := "root/"
+		kv := mocks.NewMetaKv(t)
+		kv.EXPECT().
+			WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything).
+			Return(errors.New("error"))
+
+		ss, err := NewSuffixSnapshot(kv, sep, rootPath, snapshotPrefix)
+		assert.NotNil(t, ss)
+		assert.NoError(t, err)
+
+		keys, values, err := ss.LoadWithPrefix("t", 100)
+		assert.Error(t, err)
+		assert.Nil(t, keys)
+		assert.Nil(t, values)
+	})
 }
 
 func Test_getOriginalKey(t *testing.T) {

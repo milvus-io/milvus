@@ -451,61 +451,55 @@ func (ss *SuffixSnapshot) LoadWithPrefix(key string, ts typeutil.Timestamp) ([]s
 	ss.Lock()
 	defer ss.Unlock()
 
-	keys, values, err := ss.MetaKv.LoadWithPrefix(key)
+	resultKeys := make([]string, 0)
+	resultValues := make([]string, 0)
+
+	latestOriginalKey := ""
+	tValueGroups := make([]tsv, 0)
+
+	prefix := path.Join(ss.snapshotPrefix, key)
+	appendResultFn := func(ts typeutil.Timestamp) {
+		value, ok := binarySearchRecords(tValueGroups, ts)
+		if !ok || ss.isTombstone(value) {
+			return
+		}
+
+		resultKeys = append(resultKeys, latestOriginalKey)
+		resultValues = append(resultValues, value)
+	}
+
+	err := ss.MetaKv.WalkWithPrefix(prefix, PaginationSize, func(k []byte, v []byte) error {
+		sKey := string(k)
+		sValue := string(v)
+
+		snapshotKey := ss.hideRootPrefix(sKey)
+		curOriginalKey, err := ss.getOriginalKey(snapshotKey)
+		if err != nil {
+			return err
+		}
+
+		// reset if starting look up a new key group
+		if latestOriginalKey != "" && latestOriginalKey != curOriginalKey {
+			appendResultFn(ts)
+			tValueGroups = make([]tsv, 0)
+		}
+
+		targetTs, ok := ss.isTSKey(snapshotKey)
+		if !ok {
+			log.Warn("skip key because it doesn't contain ts", zap.String("key", key))
+			return nil
+		}
+
+		tValueGroups = append(tValueGroups, tsv{value: sValue, ts: targetTs})
+		latestOriginalKey = curOriginalKey
+		return nil
+	})
+
 	if err != nil {
 		return nil, nil, err
 	}
 
-	// kv group stands for
-	type kvgroup struct {
-		key, value string
-		processed  bool
-		tsRecords  []tsv
-	}
-	groups := make([]kvgroup, 0, len(keys))
-	for i, key := range keys {
-		group := kvgroup{key: key, value: values[i]}
-		// load prefix keys contains rootPrefix
-		sKeys, sValues, err := ss.MetaKv.LoadWithPrefix(ss.composeSnapshotPrefix(ss.hideRootPrefix(key)))
-		if err != nil {
-			return nil, nil, err
-		}
-		group.tsRecords = make([]tsv, 0, len(sKeys))
-		for j, sKey := range sKeys {
-			ts, ok := ss.isTSOfKey(ss.hideRootPrefix(sKey), ss.hideRootPrefix(key))
-			if ok {
-				group.tsRecords = append(group.tsRecords, tsv{ts: ts, value: sValues[j]})
-			}
-		}
-		groups = append(groups, group)
-	}
-
-	resultKeys := make([]string, 0, len(groups))
-	resultValues := make([]string, 0, len(groups))
-	// for each group, do ts travel logic if appliable
-	for _, group := range groups {
-		if len(group.tsRecords) == 0 {
-			// not ts maybe, just use k,v
-			resultKeys = append(resultKeys, group.key)
-			resultValues = append(resultValues, group.value)
-			continue
-		}
-		value, ok := binarySearchRecords(group.tsRecords, ts)
-		if ok {
-			// tombstone found, skip entry
-			if ss.isTombstone(value) {
-				continue
-			}
-			resultKeys = append(resultKeys, group.key)
-			resultValues = append(resultValues, value)
-		}
-	}
-
-	// hide rootPrefix from return value
-	for i, k := range resultKeys {
-		resultKeys[i] = ss.hideRootPrefix(k)
-	}
-
+	appendResultFn(ts)
 	return resultKeys, resultValues, nil
 }
 
