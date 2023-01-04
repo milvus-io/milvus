@@ -580,7 +580,7 @@ func (p *rootCoordConfig) init(base *BaseTable) {
 	p.ImportTaskExpiration = ParamItem{
 		Key:          "rootCoord.importTaskExpiration",
 		Version:      "2.2.0",
-		DefaultValue: "15",
+		DefaultValue: "900", // 15 * 60 seconds
 	}
 	p.ImportTaskExpiration.Init(base.mgr)
 
