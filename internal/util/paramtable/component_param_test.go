@@ -335,18 +335,6 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 10*time.Minute, Params.SyncPeriod.GetAsDuration(time.Second))
 	})
 
-	t.Run("test indexCoordConfig", func(t *testing.T) {
-		Params := params.IndexCoordCfg
-
-		assert.False(t, Params.BindIndexNodeMode.GetAsBool())
-		assert.Equal(t, "localhost:22930", Params.IndexNodeAddress.GetValue())
-		assert.False(t, Params.WithCredential.GetAsBool())
-		assert.Equal(t, int64(0), Params.IndexNodeID.GetAsInt64())
-
-		assert.Equal(t, Params.EnableActiveStandby.GetAsBool(), false)
-		t.Logf("indexCoord EnableActiveStandby = %t", Params.EnableActiveStandby.GetAsBool())
-	})
-
 	t.Run("test indexNodeConfig", func(t *testing.T) {
 		Params := params.IndexNodeCfg
 		params.Save(Params.GracefulStopTimeout.Key, "50")

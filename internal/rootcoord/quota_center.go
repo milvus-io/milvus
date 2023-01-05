@@ -229,7 +229,7 @@ func (q *QuotaCenter) syncMetrics() error {
 		if err != nil {
 			return err
 		}
-		for _, dataNodeMetric := range dataCoordTopology.Cluster.ConnectedNodes {
+		for _, dataNodeMetric := range dataCoordTopology.Cluster.ConnectedDataNodes {
 			if dataNodeMetric.QuotaMetrics != nil {
 				q.dataNodeMetrics[dataNodeMetric.ID] = dataNodeMetric.QuotaMetrics
 			}

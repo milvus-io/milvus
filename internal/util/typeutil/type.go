@@ -41,11 +41,11 @@ const (
 	// IndexCoordRole is a constant represent IndexCoord
 	IndexCoordRole = "indexcoord"
 	// IndexNodeRole is a constant represent IndexNode
-	IndexNodeRole = "indexnode"
-	// DataCoordRole is a constant represent DataCoord
 	DataCoordRole = "datacoord"
 	// DataNodeRole is a constant represent DataNode
 	DataNodeRole = "datanode"
+	// IndexNodeRole is a constant represent IndexNode
+	IndexNodeRole = "indexnode"
 )
 
 const Unlimited int64 = -1
@@ -58,7 +58,6 @@ func ServerTypeMap() map[string]interface{} {
 		ProxyRole:      nil,
 		QueryCoordRole: nil,
 		QueryNodeRole:  nil,
-		IndexCoordRole: nil,
 		IndexNodeRole:  nil,
 		DataCoordRole:  nil,
 		DataNodeRole:   nil,

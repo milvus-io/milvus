@@ -80,7 +80,7 @@ func NewIndexNodeMock() *Mock {
 			return &milvuspb.ComponentStates{
 				State: &milvuspb.ComponentInfo{
 					NodeID:    1,
-					Role:      typeutil.IndexCoordRole,
+					Role:      typeutil.IndexNodeRole,
 					StateCode: commonpb.StateCode_Healthy,
 				},
 				SubcomponentStates: nil,

@@ -415,70 +415,6 @@ type IndexNodeComponent interface {
 	UpdateStateCode(stateCode commonpb.StateCode)
 }
 
-// IndexCoord is the interface `indexcoord` package implements
-type IndexCoord interface {
-	Component
-	//TimeTickProvider
-
-	// CreateIndex create an index on collection.
-	// Index building is asynchronous, so when an index building request comes, an IndexID is assigned to the task and
-	// will get all flushed segments from DataCoord and record tasks with these segments. The background process
-	// indexBuilder will find this task and assign it to IndexNode for execution.
-	CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error)
-
-	// GetIndexState gets the index state of the index name in the request from Proxy.
-	// Deprecated: use DescribeIndex instead
-	GetIndexState(ctx context.Context, req *indexpb.GetIndexStateRequest) (*indexpb.GetIndexStateResponse, error)
-
-	// GetSegmentIndexState gets the index state of the segments in the request from RootCoord.
-	GetSegmentIndexState(ctx context.Context, req *indexpb.GetSegmentIndexStateRequest) (*indexpb.GetSegmentIndexStateResponse, error)
-
-	// GetIndexInfos gets the index files of the IndexBuildIDs in the request from RootCoordinator.
-	GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoRequest) (*indexpb.GetIndexInfoResponse, error)
-
-	// DescribeIndex describe the index info of the collection.
-	DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRequest) (*indexpb.DescribeIndexResponse, error)
-
-	// GetIndexBuildProgress get the index building progress by num rows.
-	// Deprecated: use DescribeIndex instead
-	GetIndexBuildProgress(ctx context.Context, req *indexpb.GetIndexBuildProgressRequest) (*indexpb.GetIndexBuildProgressResponse, error)
-
-	// DropIndex deletes indexes based on IndexID. One IndexID corresponds to the index of an entire column. A column is
-	// divided into many segments, and each segment corresponds to an IndexBuildID. IndexCoord uses IndexBuildID to record
-	// index tasks. Therefore, when DropIndex is called, delete all tasks corresponding to IndexBuildID corresponding to IndexID.
-	DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error)
-
-	//// GetIndexStates gets the index states of the IndexBuildIDs in the request from RootCoordinator.
-	//GetIndexStates(ctx context.Context, req *indexpb.GetIndexStatesRequest) (*indexpb.GetIndexStatesResponse, error)
-	//
-	//// GetIndexFilePaths gets the index files of the IndexBuildIDs in the request from RootCoordinator.
-	//GetIndexFilePaths(ctx context.Context, req *indexpb.GetIndexFilePathsRequest) (*indexpb.GetIndexFilePathsResponse, error)
-
-	// ShowConfigurations gets specified configurations para of IndexCoord
-	ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error)
-
-	// GetMetrics gets the metrics about IndexCoord.
-	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
-
-	CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error)
-}
-
-// IndexCoordComponent is used by grpc server of IndexCoord
-type IndexCoordComponent interface {
-	IndexCoord
-
-	SetAddress(address string)
-	// SetEtcdClient set etcd client for IndexCoordComponent
-	SetEtcdClient(etcdClient *clientv3.Client)
-
-	SetDataCoord(dataCoord DataCoord) error
-	SetRootCoord(rootCoord RootCoord) error
-
-	// UpdateStateCode updates state code for IndexCoordComponent
-	//  `stateCode` is current statement of this IndexCoordComponent, indicating whether it's healthy.
-	UpdateStateCode(stateCode commonpb.StateCode)
-}
-
 // RootCoord is the interface `rootcoord` package implements
 type RootCoord interface {
 	Component
@@ -1449,13 +1385,4 @@ type QueryCoordComponent interface {
 	// Return nil in status:
 	//     The rootCoord is not nil.
 	SetRootCoord(rootCoord RootCoord) error
-
-	// SetIndexCoord set IndexCoord for QueryCoord
-	// `IndexCoord` is a client of index coordinator.
-	//
-	// Return a generic error in status:
-	//     If the indexCoord is nil.
-	// Return nil in status:
-	//     The indexCoord is not nil.
-	SetIndexCoord(indexCoord IndexCoord) error
 }

@@ -19,57 +19,38 @@ package components
 import (
 	"context"
 
-	"github.com/milvus-io/milvus-proto/go-api/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
-
-	grpcindexcoord "github.com/milvus-io/milvus/internal/distributed/indexcoord"
 	"github.com/milvus-io/milvus/internal/log"
+
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 // IndexCoord implements IndexCoord grpc server
 type IndexCoord struct {
-	svr *grpcindexcoord.Server
 }
 
 // NewIndexCoord creates a new IndexCoord
 func NewIndexCoord(ctx context.Context, factory dependency.Factory) (*IndexCoord, error) {
-	var err error
-	s := &IndexCoord{}
-	svr, err := grpcindexcoord.NewServer(ctx, factory)
-
-	if err != nil {
-		return nil, err
-	}
-	s.svr = svr
-	return s, nil
+	return &IndexCoord{}, nil
 }
 
 // Run starts service
 func (s *IndexCoord) Run() error {
-	if err := s.svr.Run(); err != nil {
-		return err
-	}
-	log.Debug("IndexCoord successfully started")
+	log.Info("IndexCoord running ...")
 	return nil
 }
 
 // Stop terminates service
 func (s *IndexCoord) Stop() error {
-	if err := s.svr.Stop(); err != nil {
-		return err
-	}
+	log.Info("IndexCoord stopping ...")
 	return nil
 }
 
 // GetComponentStates returns indexnode's states
 func (s *IndexCoord) Health(ctx context.Context) commonpb.StateCode {
-	resp, err := s.svr.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
-	if err != nil {
-		return commonpb.StateCode_Abnormal
-	}
-	return resp.State.GetStateCode()
+	log.Info("IndexCoord is healthy")
+	return commonpb.StateCode_Healthy
 }
 
 func (s *IndexCoord) GetName() string {

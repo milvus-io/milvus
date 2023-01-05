@@ -41,6 +41,18 @@ func (c *mockMetricDataNodeClient) GetMetrics(ctx context.Context, req *milvuspb
 	return c.mock()
 }
 
+type mockMetricIndexNodeClient struct {
+	types.IndexNode
+	mock func() (*milvuspb.GetMetricsResponse, error)
+}
+
+func (m *mockMetricIndexNodeClient) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	if m.mock == nil {
+		return m.IndexNode.GetMetrics(ctx, req)
+	}
+	return m.mock()
+}
+
 func TestGetDataNodeMetrics(t *testing.T) {
 	svr := newTestServer(t, nil)
 	defer closeTestServer(t, svr)
@@ -111,4 +123,94 @@ func TestGetDataNodeMetrics(t *testing.T) {
 	assert.Nil(t, err)
 	assert.True(t, info.HasError)
 
+}
+
+func TestGetIndexNodeMetrics(t *testing.T) {
+	svr := newTestServer(t, nil)
+	defer closeTestServer(t, svr)
+
+	ctx := context.Background()
+	req := &milvuspb.GetMetricsRequest{}
+	// nil node
+	_, err := svr.getIndexNodeMetrics(ctx, req, nil)
+	assert.NotNil(t, err)
+
+	// return error
+	info, err := svr.getIndexNodeMetrics(ctx, req, &mockMetricIndexNodeClient{mock: func() (*milvuspb.GetMetricsResponse, error) {
+		return nil, errors.New("mock error")
+	}})
+	assert.Nil(t, err)
+	assert.True(t, info.HasError)
+
+	// failed
+	info, err = svr.getIndexNodeMetrics(ctx, req, &mockMetricIndexNodeClient{
+		mock: func() (*milvuspb.GetMetricsResponse, error) {
+			return &milvuspb.GetMetricsResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_UnexpectedError,
+					Reason:    "mock fail",
+				},
+				Response:      "",
+				ComponentName: "indexnode100",
+			}, nil
+		},
+	})
+	assert.Nil(t, err)
+	assert.True(t, info.HasError)
+	assert.Equal(t, metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, 100), info.BaseComponentInfos.Name)
+
+	// return unexpected
+	info, err = svr.getIndexNodeMetrics(ctx, req, &mockMetricIndexNodeClient{
+		mock: func() (*milvuspb.GetMetricsResponse, error) {
+			return &milvuspb.GetMetricsResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+					Reason:    "",
+				},
+				Response:      "XXXXXXXXXXXXX",
+				ComponentName: "indexnode100",
+			}, nil
+		},
+	})
+	assert.Nil(t, err)
+	assert.True(t, info.HasError)
+	assert.Equal(t, metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, 100), info.BaseComponentInfos.Name)
+
+	// success
+	info, err = svr.getIndexNodeMetrics(ctx, req, &mockMetricIndexNodeClient{
+		mock: func() (*milvuspb.GetMetricsResponse, error) {
+			nodeID = UniqueID(100)
+
+			nodeInfos := metricsinfo.DataNodeInfos{
+				BaseComponentInfos: metricsinfo.BaseComponentInfos{
+					Name: metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, nodeID),
+					ID:   nodeID,
+				},
+			}
+			resp, err := metricsinfo.MarshalComponentInfos(nodeInfos)
+			if err != nil {
+				return &milvuspb.GetMetricsResponse{
+					Status: &commonpb.Status{
+						ErrorCode: commonpb.ErrorCode_UnexpectedError,
+						Reason:    err.Error(),
+					},
+					Response:      "",
+					ComponentName: metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, nodeID),
+				}, nil
+			}
+
+			return &milvuspb.GetMetricsResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+					Reason:    "",
+				},
+				Response:      resp,
+				ComponentName: metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, nodeID),
+			}, nil
+		},
+	})
+
+	assert.Nil(t, err)
+	assert.False(t, info.HasError)
+	assert.Equal(t, metricsinfo.ConstructComponentName(typeutil.IndexNodeRole, 100), info.BaseComponentInfos.Name)
 }

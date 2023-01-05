@@ -61,7 +61,6 @@ type ComponentParam struct {
 	QueryNodeCfg  queryNodeConfig
 	DataCoordCfg  dataCoordConfig
 	DataNodeCfg   dataNodeConfig
-	IndexCoordCfg indexCoordConfig
 	IndexNodeCfg  indexNodeConfig
 	HTTPCfg       httpConfig
 	HookCfg       hookConfig
@@ -106,7 +105,6 @@ func (p *ComponentParam) Init() {
 	p.QueryNodeCfg.init(&p.BaseTable)
 	p.DataCoordCfg.init(&p.BaseTable)
 	p.DataNodeCfg.init(&p.BaseTable)
-	p.IndexCoordCfg.init(&p.BaseTable)
 	p.IndexNodeCfg.init(&p.BaseTable)
 	p.HTTPCfg.init(&p.BaseTable)
 	p.HookCfg.init()
@@ -117,7 +115,6 @@ func (p *ComponentParam) Init() {
 	p.QueryNodeGrpcServerCfg.Init(typeutil.QueryNodeRole, &p.BaseTable)
 	p.DataCoordGrpcServerCfg.Init(typeutil.DataCoordRole, &p.BaseTable)
 	p.DataNodeGrpcServerCfg.Init(typeutil.DataNodeRole, &p.BaseTable)
-	p.IndexCoordGrpcServerCfg.Init(typeutil.IndexCoordRole, &p.BaseTable)
 	p.IndexNodeGrpcServerCfg.Init(typeutil.IndexNodeRole, &p.BaseTable)
 
 	p.RootCoordGrpcClientCfg.Init(typeutil.RootCoordRole, &p.BaseTable)
@@ -126,7 +123,6 @@ func (p *ComponentParam) Init() {
 	p.QueryNodeGrpcClientCfg.Init(typeutil.QueryNodeRole, &p.BaseTable)
 	p.DataCoordGrpcClientCfg.Init(typeutil.DataCoordRole, &p.BaseTable)
 	p.DataNodeGrpcClientCfg.Init(typeutil.DataNodeRole, &p.BaseTable)
-	p.IndexCoordGrpcClientCfg.Init(typeutil.IndexCoordRole, &p.BaseTable)
 	p.IndexNodeGrpcClientCfg.Init(typeutil.IndexNodeRole, &p.BaseTable)
 }
 
@@ -1642,72 +1638,6 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	}
 	p.IOConcurrency.Init(base.mgr)
 
-}
-
-// /////////////////////////////////////////////////////////////////////////////
-// --- indexcoord ---
-type indexCoordConfig struct {
-	BindIndexNodeMode ParamItem `refreshable:"false"`
-	IndexNodeAddress  ParamItem `refreshable:"false"`
-	WithCredential    ParamItem `refreshable:"false"`
-	IndexNodeID       ParamItem `refreshable:"false"`
-
-	MinSegmentNumRowsToEnableIndex ParamItem `refreshable:"true"`
-
-	GCInterval ParamItem `refreshable:"false"`
-
-	EnableActiveStandby ParamItem `refreshable:"false"`
-}
-
-func (p *indexCoordConfig) init(base *BaseTable) {
-	p.GCInterval = ParamItem{
-		Key:          "indexCoord.gc.interval",
-		Version:      "2.0.0",
-		DefaultValue: "600",
-	}
-	p.GCInterval.Init(base.mgr)
-
-	p.MinSegmentNumRowsToEnableIndex = ParamItem{
-		Key:          "indexCoord.minSegmentNumRowsToEnableIndex",
-		Version:      "2.0.0",
-		DefaultValue: "1024",
-	}
-	p.MinSegmentNumRowsToEnableIndex.Init(base.mgr)
-
-	p.BindIndexNodeMode = ParamItem{
-		Key:          "indexCoord.bindIndexNodeMode.enable",
-		Version:      "2.0.0",
-		DefaultValue: "false",
-	}
-	p.BindIndexNodeMode.Init(base.mgr)
-
-	p.IndexNodeAddress = ParamItem{
-		Key:          "indexCoord.bindIndexNodeMode.address",
-		Version:      "2.0.0",
-		DefaultValue: "localhost:22930",
-	}
-	p.IndexNodeAddress.Init(base.mgr)
-
-	p.WithCredential = ParamItem{
-		Key:          "indexCoord.bindIndexNodeMode.withCred",
-		Version:      "2.0.0",
-		DefaultValue: "false",
-	}
-	p.WithCredential.Init(base.mgr)
-
-	p.IndexNodeID = ParamItem{
-		Key:          "indexCoord.bindIndexNodeMode.nodeID",
-		Version:      "2.0.0",
-		DefaultValue: "0",
-	}
-	p.IndexNodeID.Init(base.mgr)
-
-	p.EnableActiveStandby = ParamItem{
-		Key:          "indexCoord.enableActiveStandby",
-		Version:      "2.0.0",
-		DefaultValue: "false",
-	}
-	p.EnableActiveStandby.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

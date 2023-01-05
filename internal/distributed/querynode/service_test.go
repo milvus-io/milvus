@@ -138,10 +138,6 @@ func (m *MockQueryNode) SetRootCoord(rc types.RootCoord) error {
 	return m.err
 }
 
-func (m *MockQueryNode) SetIndexCoord(index types.IndexCoord) error {
-	return m.err
-}
-
 func (m *MockQueryNode) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
 	return m.configResp, m.err
 }
@@ -185,42 +181,6 @@ func (m *MockRootCoord) SetEtcdClient(client *clientv3.Client) {
 }
 
 func (m *MockRootCoord) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
-	return &milvuspb.ComponentStates{
-		State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Healthy},
-		Status: &commonpb.Status{ErrorCode: m.stateErr},
-	}, nil
-}
-
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-type MockIndexCoord struct {
-	types.IndexCoord
-	initErr  error
-	startErr error
-	regErr   error
-	stopErr  error
-	stateErr commonpb.ErrorCode
-}
-
-func (m *MockIndexCoord) Init() error {
-	return m.initErr
-}
-
-func (m *MockIndexCoord) Start() error {
-	return m.startErr
-}
-
-func (m *MockIndexCoord) Stop() error {
-	return m.stopErr
-}
-
-func (m *MockIndexCoord) Register() error {
-	return m.regErr
-}
-
-func (m *MockIndexCoord) SetEtcdClient(client *clientv3.Client) {
-}
-
-func (m *MockIndexCoord) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
 	return &milvuspb.ComponentStates{
 		State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Healthy},
 		Status: &commonpb.Status{ErrorCode: m.stateErr},

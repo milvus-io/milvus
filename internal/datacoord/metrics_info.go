@@ -20,6 +20,8 @@ import (
 	"context"
 	"errors"
 
+	"github.com/milvus-io/milvus/internal/types"
+
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -49,8 +51,9 @@ func (s *Server) getSystemInfoMetrics(
 	// get datacoord info
 	nodes := s.cluster.GetSessions()
 	clusterTopology := metricsinfo.DataClusterTopology{
-		Self:           s.getDataCoordMetrics(),
-		ConnectedNodes: make([]metricsinfo.DataNodeInfos, 0, len(nodes)),
+		Self:                s.getDataCoordMetrics(),
+		ConnectedDataNodes:  make([]metricsinfo.DataNodeInfos, 0, len(nodes)),
+		ConnectedIndexNodes: make([]metricsinfo.IndexNodeInfos, 0),
 	}
 
 	// for each data node, fetch metrics info
@@ -60,7 +63,17 @@ func (s *Server) getSystemInfoMetrics(
 			log.Warn("fails to get DataNode metrics", zap.Error(err))
 			continue
 		}
-		clusterTopology.ConnectedNodes = append(clusterTopology.ConnectedNodes, infos)
+		clusterTopology.ConnectedDataNodes = append(clusterTopology.ConnectedDataNodes, infos)
+	}
+
+	indexNodes := s.indexNodeManager.GetAllClients()
+	for _, node := range indexNodes {
+		infos, err := s.getIndexNodeMetrics(ctx, req, node)
+		if err != nil {
+			log.Warn("fails to get IndexNode metrics", zap.Error(err))
+			continue
+		}
+		clusterTopology.ConnectedIndexNodes = append(clusterTopology.ConnectedIndexNodes, infos)
 	}
 
 	// compose topolgoy struct
@@ -161,6 +174,46 @@ func (s *Server) getDataNodeMetrics(ctx context.Context, req *milvuspb.GetMetric
 	err = metricsinfo.UnmarshalComponentInfos(metrics.GetResponse(), &infos)
 	if err != nil {
 		log.Warn("invalid metrics of DataNode found",
+			zap.Error(err))
+		infos.BaseComponentInfos.ErrorReason = err.Error()
+		return infos, nil
+	}
+	infos.BaseComponentInfos.HasError = false
+	return infos, nil
+}
+
+func (s *Server) getIndexNodeMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, node types.IndexNode) (metricsinfo.IndexNodeInfos, error) {
+	infos := metricsinfo.IndexNodeInfos{
+		BaseComponentInfos: metricsinfo.BaseComponentInfos{
+			HasError: true,
+			ID:       int64(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
+		},
+	}
+	if node == nil {
+		return infos, errors.New("IndexNode is nil")
+	}
+
+	metrics, err := node.GetMetrics(ctx, req)
+	if err != nil {
+		log.Warn("invalid metrics of IndexNode was found",
+			zap.Error(err))
+		infos.BaseComponentInfos.ErrorReason = err.Error()
+		// err handled, returns nil
+		return infos, nil
+	}
+	infos.BaseComponentInfos.Name = metrics.GetComponentName()
+
+	if metrics.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+		log.Warn("invalid metrics of DataNode was found",
+			zap.Any("error_code", metrics.Status.ErrorCode),
+			zap.Any("error_reason", metrics.Status.Reason))
+		infos.BaseComponentInfos.ErrorReason = metrics.GetStatus().GetReason()
+		return infos, nil
+	}
+
+	err = metricsinfo.UnmarshalComponentInfos(metrics.GetResponse(), &infos)
+	if err != nil {
+		log.Warn("invalid metrics of IndexNode found",
 			zap.Error(err))
 		infos.BaseComponentInfos.ErrorReason = err.Error()
 		return infos, nil

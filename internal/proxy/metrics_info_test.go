@@ -76,10 +76,6 @@ func TestProxy_metrics(t *testing.T) {
 				Name: metricsinfo.ConstructComponentName(typeutil.RootCoordRole, id),
 				ConnectedComponents: []metricsinfo.ConnectionInfo{
 					{
-						TargetName: metricsinfo.ConstructComponentName(typeutil.IndexCoordRole, id),
-						TargetType: typeutil.IndexCoordRole,
-					},
-					{
 						TargetName: metricsinfo.ConstructComponentName(typeutil.QueryCoordRole, id),
 						TargetType: typeutil.QueryCoordRole,
 					},
@@ -139,10 +135,6 @@ func TestProxy_metrics(t *testing.T) {
 						TargetName: metricsinfo.ConstructComponentName(typeutil.DataCoordRole, id),
 						TargetType: typeutil.DataCoordRole,
 					},
-					{
-						TargetName: metricsinfo.ConstructComponentName(typeutil.IndexCoordRole, id),
-						TargetType: typeutil.IndexCoordRole,
-					},
 				},
 			},
 		}
@@ -173,14 +165,21 @@ func TestProxy_metrics(t *testing.T) {
 				},
 				SystemConfigurations: metricsinfo.DataCoordConfiguration{},
 			},
-			ConnectedNodes: make([]metricsinfo.DataNodeInfos, 0),
+			ConnectedDataNodes:  make([]metricsinfo.DataNodeInfos, 0),
+			ConnectedIndexNodes: make([]metricsinfo.IndexNodeInfos, 0),
 		}
 
 		infos := metricsinfo.DataNodeInfos{
 			BaseComponentInfos:   metricsinfo.BaseComponentInfos{},
 			SystemConfigurations: metricsinfo.DataNodeConfiguration{},
 		}
-		clusterTopology.ConnectedNodes = append(clusterTopology.ConnectedNodes, infos)
+		clusterTopology.ConnectedDataNodes = append(clusterTopology.ConnectedDataNodes, infos)
+
+		indexNodeInfos := metricsinfo.IndexNodeInfos{
+			BaseComponentInfos:   metricsinfo.BaseComponentInfos{},
+			SystemConfigurations: metricsinfo.IndexNodeConfiguration{},
+		}
+		clusterTopology.ConnectedIndexNodes = append(clusterTopology.ConnectedIndexNodes, indexNodeInfos)
 
 		coordTopology := metricsinfo.DataCoordTopology{
 			Cluster: clusterTopology,
@@ -194,10 +193,6 @@ func TestProxy_metrics(t *testing.T) {
 					{
 						TargetName: metricsinfo.ConstructComponentName(typeutil.QueryCoordRole, id),
 						TargetType: typeutil.QueryCoordRole,
-					},
-					{
-						TargetName: metricsinfo.ConstructComponentName(typeutil.IndexCoordRole, id),
-						TargetType: typeutil.IndexCoordRole,
 					},
 				},
 			},

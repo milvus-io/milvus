@@ -140,6 +140,32 @@ var (
 		}, []string{statusLabelName})
 	*/
 
+	// IndexRequestCounter records the number of the index requests.
+	IndexRequestCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "index_req_count",
+			Help:      "number of building index requests ",
+		}, []string{statusLabelName})
+
+	// IndexTaskNum records the number of index tasks of each type.
+	IndexTaskNum = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "index_task_count",
+			Help:      "number of index tasks of each type",
+		}, []string{collectionIDLabelName, indexTaskStatusLabelName})
+
+	// IndexNodeNum records the number of IndexNodes managed by IndexCoord.
+	IndexNodeNum = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "index_node_num",
+			Help:      "number of IndexNodes managed by IndexCoord",
+		}, []string{})
 )
 
 // RegisterDataCoord registers DataCoord metrics
@@ -151,4 +177,7 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(DataCoordNumStoredRowsCounter)
 	registry.MustRegister(DataCoordConsumeDataNodeTimeTickLag)
 	registry.MustRegister(DataCoordStoredBinlogSize)
+	registry.MustRegister(IndexRequestCounter)
+	registry.MustRegister(IndexTaskNum)
+	registry.MustRegister(IndexNodeNum)
 }
