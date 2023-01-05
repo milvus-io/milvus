@@ -321,7 +321,7 @@ class TestDeleteOperation(TestcaseBase):
         expected: assert index and deleted id not in search result
         """
         # create collection, insert tmp_nb, flush and load
-        collection_w, vectors = self.init_collection_general(prefix, insert_data=True, is_index=True)[0:2]
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True, is_index=False)[0:2]
 
         # create index
         index_params = {"index_type": "IVF_SQ8",
@@ -1140,7 +1140,7 @@ class TestDeleteString(TestcaseBase):
         expected: assert index and deleted id not in search result
         """
         # create collection, insert tmp_nb, flush and load
-        collection_w, vectors = self.init_collection_general(prefix, insert_data=True, is_index=True,
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True, is_index=False,
                                                              primary_field=ct.default_string_field_name)[0:2]
 
         # create index

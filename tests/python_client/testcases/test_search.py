@@ -312,7 +312,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
             pytest.skip("skip in FLAT index")
         # 1. initialize with data
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, 5000,
-                                                                      is_index=True)[0:4]
+                                                                      is_index=False)[0:4]
         # 2. create index and load
         default_index = {"index_type": index, "params": params, "metric_type": "L2"}
         collection_w.create_index("float_vector", default_index)
@@ -478,7 +478,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         dim = 8
         collection_w, _vectors, _, insert_ids = self.init_collection_general(prefix, True,
                                                                              nb, dim=dim,
-                                                                             is_index=True)[0:4]
+                                                                             is_index=False)[0:4]
         index_param = {"index_type": "IVF_FLAT", "metric_type": "L2", "params": {"nlist": 100}}
         collection_w.create_index("float_vector", index_param)
         collection_w.load()
@@ -562,7 +562,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         """
         # 1. initialize with data
         partition_num = 1
-        collection_w = self.init_collection_general(prefix, True, 10, partition_num, is_index=True)[0]
+        collection_w = self.init_collection_general(prefix, True, 10, partition_num, is_index=False)[0]
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         par = collection_w.partitions
         par_name = par[partition_num].name
@@ -665,7 +665,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         """
         # 1. initialize with data
         partition_num = 1
-        collection_w = self.init_collection_general(prefix, True, 1000, partition_num, is_index=True)[0]
+        collection_w = self.init_collection_general(prefix, True, 1000, partition_num, is_index=False)[0]
         # 2. delete partitions
         log.info("test_search_partition_deleted: deleting a partition")
         par = collection_w.partitions
@@ -696,7 +696,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         # 1. initialize with data
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, 5000,
                                                                       partition_num=1,
-                                                                      is_index=True)[0:4]
+                                                                      is_index=False)[0:4]
         # 2. create different index
         if params.get("m"):
             if (default_dim % params["m"]) != 0:
@@ -724,7 +724,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         expected: raise exception and report the error
         """
         # 1. initialize with data
-        collection_w = self.init_collection_general(prefix, True, is_index=True)[0]
+        collection_w = self.init_collection_general(prefix, True, is_index=False)[0]
         # 2. create index
         default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
         collection_w.create_index("float_vector", default_index)
@@ -745,7 +745,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         expected: raise exception and report the error
         """
         # 1. initialize with binary data
-        collection_w = self.init_collection_general(prefix, True, is_binary=True, is_index=True)[0]
+        collection_w = self.init_collection_general(prefix, True, is_binary=True, is_index=False)[0]
         # 2. create index
         default_index = {"index_type": "BIN_IVF_FLAT", "params": {"nlist": 128}, "metric_type": "JACCARD"}
         collection_w.create_index("binary_vector", default_index)
@@ -1292,7 +1292,7 @@ class TestCollectionSearch(TestcaseBase):
         """
         # 1. connect, create collection and insert data
         self._connect()
-        collection_w = self.init_collection_general(prefix, False, dim=dim, is_index=True)[0]
+        collection_w = self.init_collection_general(prefix, False, dim=dim, is_index=False)[0]
         dataframe = cf.gen_default_dataframe_data(dim=dim, start=-1500)
         collection_w.insert(dataframe)
 
@@ -1423,7 +1423,7 @@ class TestCollectionSearch(TestcaseBase):
         collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True,
                                                                                   partition_num=1,
                                                                                   auto_id=auto_id,
-                                                                                  dim=dim, is_index=True)[0:5]
+                                                                                  dim=dim, is_index=False)[0:5]
         HNSW_index_params = {"M": M, "efConstruction": efConstruction}
         HNSW_index = {"index_type": "HNSW", "params": HNSW_index_params, "metric_type": "L2"}
         collection_w.create_index("float_vector", HNSW_index)
@@ -1456,7 +1456,7 @@ class TestCollectionSearch(TestcaseBase):
         collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True,
                                                                                   partition_num=1,
                                                                                   auto_id=auto_id,
-                                                                                  dim=dim, is_index=True)[0:5]
+                                                                                  dim=dim, is_index=False)[0:5]
         HNSW_index_params = {"M": M, "efConstruction": efConstruction}
         HNSW_index = {"index_type": "HNSW", "params": HNSW_index_params, "metric_type": "L2"}
         collection_w.create_index("float_vector", HNSW_index)
@@ -1487,7 +1487,7 @@ class TestCollectionSearch(TestcaseBase):
         collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, 5000,
                                                                                   partition_num=1,
                                                                                   auto_id=auto_id,
-                                                                                  dim=dim, is_index=True)[0:5]
+                                                                                  dim=dim, is_index=False)[0:5]
         # 2. create index and load
         if params.get("m"):
             if (dim % params["m"]) != 0:
@@ -1527,7 +1527,7 @@ class TestCollectionSearch(TestcaseBase):
         collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, 5000,
                                                                                   partition_num=1,
                                                                                   auto_id=auto_id,
-                                                                                  dim=min_dim, is_index=True)[0:5]
+                                                                                  dim=min_dim, is_index=False)[0:5]
         # 2. create index and load
         if params.get("m"):
             params["m"] = min_dim
@@ -1565,7 +1565,7 @@ class TestCollectionSearch(TestcaseBase):
         collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, 5000,
                                                                                   partition_num=1,
                                                                                   auto_id=auto_id,
-                                                                                  dim=dim, is_index=True)[0:5]
+                                                                                  dim=dim, is_index=False)[0:5]
         # 2. create different index
         if params.get("m"):
             if (dim % params["m"]) != 0:
@@ -1685,7 +1685,7 @@ class TestCollectionSearch(TestcaseBase):
         collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, nb,
                                                                                   partition_num=1,
                                                                                   auto_id=auto_id,
-                                                                                  is_index=True)[0:5]
+                                                                                  is_index=False)[0:5]
 
         # 2. create index
         default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
@@ -1722,7 +1722,7 @@ class TestCollectionSearch(TestcaseBase):
                                                                       partition_num=1,
                                                                       auto_id=auto_id,
                                                                       dim=dim,
-                                                                      is_index=True)[0:4]
+                                                                      is_index=False)[0:4]
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         # 2. create index
         default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
@@ -1757,7 +1757,7 @@ class TestCollectionSearch(TestcaseBase):
                                                                       partition_num=1,
                                                                       auto_id=auto_id,
                                                                       dim=dim,
-                                                                      is_index=True)[0:4]
+                                                                      is_index=False)[0:4]
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         # 2. create index
         nlist = 128
@@ -1792,7 +1792,7 @@ class TestCollectionSearch(TestcaseBase):
         """
         # 1. initialize with data
         collection_w = self.init_collection_general(prefix, True, auto_id=auto_id,
-                                                    dim=dim, is_index=True)[0]
+                                                    dim=dim, is_index=False)[0]
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         # 2. create empty partition
         partition_name = "search_partition_empty"
@@ -1829,7 +1829,7 @@ class TestCollectionSearch(TestcaseBase):
                                                                                                   is_binary=True,
                                                                                                   auto_id=auto_id,
                                                                                                   dim=dim,
-                                                                                                  is_index=True,
+                                                                                                  is_index=False,
                                                                                                   is_flush=is_flush)[0:5]
         # 2. create index
         default_index = {"index_type": index, "params": {"nlist": 128}, "metric_type": "JACCARD"}
@@ -1868,7 +1868,7 @@ class TestCollectionSearch(TestcaseBase):
                                                                                       is_binary=True,
                                                                                       auto_id=auto_id,
                                                                                       dim=dim,
-                                                                                      is_index=True,
+                                                                                      is_index=False,
                                                                                       is_flush=is_flush)[0:4]
         # 2. create index
         default_index = {"index_type": index, "params": {"nlist": 128}, "metric_type": "HAMMING"}
@@ -1907,7 +1907,7 @@ class TestCollectionSearch(TestcaseBase):
                                                                                       is_binary=True,
                                                                                       auto_id=auto_id,
                                                                                       dim=dim,
-                                                                                      is_index=True,
+                                                                                      is_index=False,
                                                                                       is_flush=is_flush)[0:4]
         log.info("auto_id= %s, _async= %s" % (auto_id, _async))
         # 2. create index
@@ -1950,7 +1950,7 @@ class TestCollectionSearch(TestcaseBase):
         dim = 8
         collection_w, _, binary_raw_vector, insert_ids, time_stamp \
             = self.init_collection_general(prefix, True, default_nb, is_binary=True, auto_id=auto_id,
-                                           dim=dim, is_index=True, is_flush=is_flush)[0:5]
+                                           dim=dim, is_index=False, is_flush=is_flush)[0:5]
         # 2. create index
         default_index = {"index_type": index, "params": {"nlist": 128}, "metric_type": "SUBSTRUCTURE"}
         collection_w.create_index("binary_vector", default_index)
@@ -1986,7 +1986,7 @@ class TestCollectionSearch(TestcaseBase):
         dim = 8
         collection_w, _, binary_raw_vector, insert_ids, time_stamp \
             = self.init_collection_general(prefix, True, default_nb, is_binary=True, auto_id=auto_id,
-                                           dim=dim, is_index=True, is_flush=is_flush)[0:5]
+                                           dim=dim, is_index=False, is_flush=is_flush)[0:5]
         # 2. create index
         default_index = {"index_type": index, "params": {"nlist": 128}, "metric_type": "SUPERSTRUCTURE"}
         collection_w.create_index("binary_vector", default_index)
@@ -2098,7 +2098,7 @@ class TestCollectionSearch(TestcaseBase):
         nb = 1000
         collection_w, _vectors, _, insert_ids = self.init_collection_general(prefix, True,
                                                                              nb, dim=dim,
-                                                                             is_index=True)[0:4]
+                                                                             is_index=False)[0:4]
 
         # filter result with expression in collection
         _vectors = _vectors[0]
@@ -2148,7 +2148,7 @@ class TestCollectionSearch(TestcaseBase):
         collection_w, _vectors, _, insert_ids = self.init_collection_general(prefix, True, nb,
                                                                              is_all_data_type=True,
                                                                              auto_id=auto_id,
-                                                                             dim=dim, is_index=True)[0:4]
+                                                                             dim=dim, is_index=False)[0:4]
 
         # 2. create index
         index_param = {"index_type": "IVF_FLAT", "metric_type": "L2", "params": {"nlist": 100}}
@@ -2201,7 +2201,7 @@ class TestCollectionSearch(TestcaseBase):
         collection_w, _vectors, _, insert_ids = self.init_collection_general(prefix, True, nb,
                                                                              auto_id=True,
                                                                              dim=dim,
-                                                                             is_index=True)[0:4]
+                                                                             is_index=False)[0:4]
 
         # filter result with expression in collection
         _vectors = _vectors[0]
@@ -2581,7 +2581,7 @@ class TestCollectionSearch(TestcaseBase):
         nb = 10000
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True,
                                                                       nb, dim=dim,
-                                                                      is_index=True)[0:4]
+                                                                      is_index=False)[0:4]
 
 
         # 2. create index
@@ -2614,8 +2614,8 @@ class TestCollectionSearch(TestcaseBase):
         # 1. initialize with data
         nb = 10000
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True,
-                                                                               nb, dim=dim,
-                                                                               is_index=True)[0:4]
+                                                                      nb, dim=dim,
+                                                                      is_index=False)[0:4]
 
 
         # 2. create index
@@ -2893,7 +2893,7 @@ class TestCollectionSearch(TestcaseBase):
         self._connect()
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, False, nb,
                                                                       auto_id=auto_id,
-                                                                      dim=dim, is_index=True)[0:4]
+                                                                      dim=dim, is_index=False)[0:4]
         collection_w.create_partition(partition_name)
         insert_ids = cf.insert_data(collection_w, nb, auto_id=auto_id, dim=dim)[3]
         collection_w.create_index(default_search_field, default_index_params, index_name=index_name)
@@ -2973,7 +2973,7 @@ class TestSearchBase(TestcaseBase):
         # 1. initialize with data
         collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, nq,
                                                                                   partition_num=1,
-                                                                                  dim=dim, is_index=True)[0:5]
+                                                                                  dim=dim, is_index=False)[0:5]
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         # 2. create patition
         partition_name = "search_partition_empty"
@@ -3022,7 +3022,7 @@ class TestSearchBase(TestcaseBase):
         # 1. initialize with data
         collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, nq,
                                                                                   partition_num=1,
-                                                                                  dim=dim, is_index=True)[0:5]
+                                                                                  dim=dim, is_index=False)[0:5]
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         # 2. create patition
         partition_name = ct.default_partition_name
@@ -3055,7 +3055,7 @@ class TestSearchBase(TestcaseBase):
         dim = ct.default_dim
         # 1. initialize with data
         collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, nq,
-                                                                                  dim=dim, is_index=True)[0:5]
+                                                                                  dim=dim, is_index=False)[0:5]
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         # 2. create ip index
         default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "IP"}
@@ -3082,7 +3082,7 @@ class TestSearchBase(TestcaseBase):
 
         # 1. initialize with data
         collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, nq,
-                                                                                  dim=dim, is_index=True)[0:5]
+                                                                                  dim=dim, is_index=False)[0:5]
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         # 2. create ip index
         default_index = {"index_type": index, "params": params, "metric_type": "IP"}
@@ -3139,7 +3139,7 @@ class TestSearchBase(TestcaseBase):
         # 1. initialize with data
         collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, nq,
                                                                                   partition_num=1,
-                                                                                  dim=dim, is_index=True)[0:5]
+                                                                                  dim=dim, is_index=False)[0:5]
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         # 2. create patition
         partition_name = "search_partition_empty"
@@ -3182,7 +3182,7 @@ class TestSearchBase(TestcaseBase):
         # 1. initialize with data
         collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, nq,
                                                                                   partition_num=1,
-                                                                                  dim=dim, is_index=True)[0:5]
+                                                                                  dim=dim, is_index=False)[0:5]
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         # 2. create patition
         par_name = collection_w.partitions[0].name
@@ -3456,7 +3456,7 @@ class  TestsearchString(TestcaseBase):
         nb = 1000
         collection_w, _vectors, _, insert_ids = self.init_collection_general(prefix, True,
                                                                              nb, dim=dim,
-                                                                             is_index=True)[0:4]
+                                                                             is_index=False)[0:4]
 
         # filter result with expression in collection
         _vectors = _vectors[0]
@@ -3507,7 +3507,7 @@ class  TestsearchString(TestcaseBase):
         collection_w, _, binary_raw_vector, insert_ids = self.init_collection_general(prefix, True, 2,
                                                                                       is_binary=True,
                                                                                       dim=dim,
-                                                                                      is_index=True,
+                                                                                      is_index=False,
                                                                                       primary_field=ct.default_string_field_name)[0:4]
         # 2. create index
         default_index = {"index_type": "BIN_IVF_FLAT", "params": {"nlist": 128}, "metric_type": "JACCARD"}
@@ -3542,7 +3542,7 @@ class  TestsearchString(TestcaseBase):
                                                                                       is_binary=True,
                                                                                       auto_id=auto_id,
                                                                                       dim=dim,
-                                                                                      is_index=True)[0:4]
+                                                                                      is_index=False)[0:4]
         # 2. create index
         default_index = {"index_type": "BIN_IVF_FLAT", "params": {"nlist": 128}, "metric_type": "JACCARD"}
         collection_w.create_index("binary_vector", default_index)
@@ -3571,7 +3571,7 @@ class  TestsearchString(TestcaseBase):
         """
         # 1. initialize with data
         collection_w, _, _, insert_ids = \
-            self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim, is_binary=True, is_index=True)[0:4]
+            self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim, is_binary=True, is_index=False)[0:4]
         # 2. create index
         default_index = {"index_type": "BIN_IVF_FLAT", "params": {"nlist": 128}, "metric_type": "JACCARD"}
         collection_w.create_index("binary_vector", default_index)
@@ -3604,10 +3604,10 @@ class  TestsearchString(TestcaseBase):
         """
         # 1. initialize with data
         collection_w, _, _, insert_ids = \
-            self.init_collection_general(prefix, True, auto_id=auto_id, dim=default_dim, is_index=True)[0:4]
+            self.init_collection_general(prefix, True, auto_id=auto_id, dim=default_dim, is_index=False)[0:4]
         index_param = {"index_type": "IVF_FLAT", "metric_type": "L2", "params": {"nlist": 100}}
         collection_w.create_index("float_vector", index_param, index_name="a")
-        index_param_two ={}
+        index_param_two = {}
         collection_w.create_index("varchar", index_param_two, index_name="b")
         collection_w.load()
         # 2. search
@@ -3640,12 +3640,12 @@ class  TestsearchString(TestcaseBase):
         # create collection, insert tmp_nb, flush and load
         collection_w, vectors, _, insert_ids = self.init_collection_general(prefix, insert_data=True,
                                                                             primary_field=ct.default_string_field_name,
-                                                                            is_index=True)[0:4]
+                                                                            is_index=False)[0:4]
 
         # create index
         index_params_one = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
         collection_w.create_index(ct.default_float_vec_field_name, index_params_one, index_name=index_name1)
-        index_params_two ={}
+        index_params_two = {}
         collection_w.create_index(ct.default_string_field_name, index_params=index_params_two, index_name=index_name2)
         assert collection_w.has_index(index_name=index_name2)
 
@@ -3720,7 +3720,7 @@ class  TestsearchString(TestcaseBase):
         """
         # 1. initialize with data
         collection_w, _, _, _= \
-            self.init_collection_general(prefix, False, primary_field=ct.default_int64_field_name, is_index=True)[0:4]
+            self.init_collection_general(prefix, False, primary_field=ct.default_int64_field_name, is_index=False)[0:4]
 
         nb = 3000
         data = cf.gen_default_list_data(nb)
@@ -3982,7 +3982,7 @@ class TestsearchPagination(TestcaseBase):
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True,
                                                                       partition_num=1,
                                                                       auto_id=auto_id,
-                                                                      is_index=True)[0:4]
+                                                                      is_index=False)[0:4]
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         # 2. create index
         default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
@@ -4117,7 +4117,7 @@ class TestsearchPagination(TestcaseBase):
         collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, 1000,
                                                                                   partition_num=1,
                                                                                   auto_id=auto_id,
-                                                                                  dim=dim, is_index=True)[0:5]
+                                                                                  dim=dim, is_index=False)[0:5]
         # 2. create index and load
         if params.get("m"):
             if (dim % params["m"]) != 0:
@@ -4239,8 +4239,8 @@ class  TestsearchDiskann(TestcaseBase):
 
         nb = 2000
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, auto_id=auto_id,
-                                                                             nb=nb, dim=dim,
-                                                                             is_index=True)[0:4]
+                                                                      nb=nb, dim=dim,
+                                                                      is_index=False)[0:4]
         
         # 2. create index
         default_index = {"index_type": "DISKANN", "metric_type":"L2", "params": {}}
@@ -4278,7 +4278,7 @@ class  TestsearchDiskann(TestcaseBase):
         """
         # 1. initialize with data
         collection_w, _, _, insert_ids = \
-            self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim, is_index=True)[0:4]
+            self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim, is_index=False)[0:4]
         # 2. create index
         default_index = {"index_type": "DISKANN", "metric_type":"L2", "params": {}}
         collection_w.create_index(ct.default_float_vec_field_name, default_index)
@@ -4309,7 +4309,7 @@ class  TestsearchDiskann(TestcaseBase):
         """
         # 1. initialize with data
         collection_w, _, _, insert_ids = \
-            self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim, is_index=True)[0:4]
+            self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim, is_index=False)[0:4]
         # 2. create index
         default_index = {"index_type": "DISKANN", "metric_type":"L2", "params": {}}
         collection_w.create_index(ct.default_float_vec_field_name, default_index)
@@ -4340,7 +4340,7 @@ class  TestsearchDiskann(TestcaseBase):
         """
         # 1. initialize with data
         collection_w, _, _, insert_ids = \
-            self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim, is_index=True)[0:4]
+            self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim, is_index=False)[0:4]
         # 2. create index
         default_index = {"index_type": "DISKANN", "metric_type":"L2", "params": {}}
         collection_w.create_index(ct.default_float_vec_field_name, default_index)
@@ -4368,7 +4368,7 @@ class  TestsearchDiskann(TestcaseBase):
         """
         # 1. initialize with data
         collection_w, _, _, insert_ids = \
-            self.init_collection_general(prefix, True, auto_id=False, dim=dim, is_index=True, primary_field=ct.default_string_field_name)[0:4]
+            self.init_collection_general(prefix, True, auto_id=False, dim=dim, is_index=False, primary_field=ct.default_string_field_name)[0:4]
         # 2. create index
         default_index = {"index_type": "DISKANN", "metric_type":"L2", "params": {}}
         collection_w.create_index(ct.default_float_vec_field_name, default_index)
@@ -4400,7 +4400,7 @@ class  TestsearchDiskann(TestcaseBase):
         """
         # 1. initialize with data
         collection_w, _, _, ids = \
-            self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim, is_index=True)[0:4]
+            self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim, is_index=False)[0:4]
         # 2. create index
         default_index = {"index_type": "DISKANN", "metric_type":"L2", "params": {}}
         collection_w.create_index(ct.default_float_vec_field_name, default_index)
@@ -4442,9 +4442,9 @@ class  TestsearchDiskann(TestcaseBase):
         """
         # 1. initialize with data
         collection_w, _, _, ids = \
-            self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim, is_index=True)[0:4]
+            self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim, is_index=False)[0:4]
         # 2. create index
-        default_index = {"index_type": "DISKANN", "metric_type":"L2", "params": {}}
+        default_index = {"index_type": "DISKANN", "metric_type": "L2", "params": {}}
         collection_w.create_index(ct.default_float_vec_field_name, default_index, index_name=index_name1)
         index_params_one = {}
         collection_w.create_index("float", index_params_one, index_name="a")
@@ -4488,7 +4488,8 @@ class  TestsearchDiskann(TestcaseBase):
         """
         # 1. initialize with data
         collection_w, _, _, ids = \
-            self.init_collection_general(prefix, True, dim=dim, primary_field=ct.default_string_field_name, is_index=True)[0:4]
+            self.init_collection_general(prefix, True, dim=dim, primary_field=ct.default_string_field_name, 
+                                         is_index=False)[0:4]
         # 2. create index
         default_index = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
         collection_w.create_index(ct.default_float_vec_field_name, default_index)

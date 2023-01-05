@@ -168,7 +168,7 @@ class TestcaseBase(Base):
 
     def init_collection_general(self, prefix="test", insert_data=False, nb=ct.default_nb,
                                 partition_num=0, is_binary=False, is_all_data_type=False,
-                                auto_id=False, dim=ct.default_dim, is_index=False,
+                                auto_id=False, dim=ct.default_dim, is_index=True,
                                 primary_field=ct.default_int64_field_name, is_flush=True, name=None, **kwargs):
         """
         target: create specified collections
@@ -209,13 +209,13 @@ class TestcaseBase(Base):
                 assert collection_w.is_empty is False
                 assert collection_w.num_entities == nb
             # This condition will be removed after auto index feature
-            if not is_index:
+            if is_index:
                 if is_binary:
                     collection_w.create_index(ct.default_binary_vec_field_name, ct.default_bin_flat_index)
                 else:
                     collection_w.create_index(ct.default_float_vec_field_name, ct.default_flat_index)
                 collection_w.load()
-        elif not is_index:
+        elif is_index:
             if is_binary:
                 collection_w.create_index(ct.default_binary_vec_field_name, ct.default_bin_flat_index)
             else:
