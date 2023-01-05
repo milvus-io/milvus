@@ -796,8 +796,9 @@ func TestImportManager_TaskState(t *testing.T) {
 	info := &rootcoordpb.ImportResult{
 		TaskId: 10000,
 	}
+	// the task id doesn't exist
 	_, err := mgr.updateTaskInfo(info)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 
 	info = &rootcoordpb.ImportResult{
 		TaskId:   2,
@@ -809,18 +810,71 @@ func TestImportManager_TaskState(t *testing.T) {
 				Value: "value1",
 			},
 			{
-				Key:   "failed_reason",
+				Key:   importutil.FailedReason,
 				Value: "some_reason",
 			},
 		},
 	}
+
+	// callDescribeIndex method is nil
+	_, err = mgr.updateTaskInfo(info)
+	assert.Error(t, err)
+
+	mgr.callDescribeIndex = func(ctx context.Context, colID UniqueID) (*indexpb.DescribeIndexResponse, error) {
+		return &indexpb.DescribeIndexResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			},
+		}, nil
+	}
+
+	// describe index failed, return error
+	_, err = mgr.updateTaskInfo(info)
+	assert.Error(t, err)
+
+	mgr.callDescribeIndex = func(ctx context.Context, colID UniqueID) (*indexpb.DescribeIndexResponse, error) {
+		return &indexpb.DescribeIndexResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_IndexNotExist,
+			},
+		}, nil
+	}
+	// index doesn't exist, but callUnsetIsImportingState is nil, return error
+	_, err = mgr.updateTaskInfo(info)
+	assert.Error(t, err)
+
+	mgr.callUnsetIsImportingState = func(context.Context, *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error) {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		}, nil
+	}
+	// index doesn't exist, but failed to unset importing state, return error
+	_, err = mgr.updateTaskInfo(info)
+	assert.Error(t, err)
+
+	mgr.callUnsetIsImportingState = func(context.Context, *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error) {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		}, errors.New("error to unset importing state")
+	}
+	// index doesn't exist, but failed to unset importing state, return error
+	_, err = mgr.updateTaskInfo(info)
+	assert.Error(t, err)
+
+	mgr.callUnsetIsImportingState = func(context.Context, *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error) {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		}, nil
+	}
+	// index doesn't exist, the persist task will be set to completed
 	ti, err := mgr.updateTaskInfo(info)
 	assert.NoError(t, err)
+
 	assert.Equal(t, int64(2), ti.GetId())
 	assert.Equal(t, int64(100), ti.GetCollectionId())
 	assert.Equal(t, int64(0), ti.GetPartitionId())
 	assert.Equal(t, []string{"f2.json"}, ti.GetFiles())
-	assert.Equal(t, commonpb.ImportState_ImportPersisted, ti.GetState().GetStateCode())
+	assert.Equal(t, commonpb.ImportState_ImportCompleted, ti.GetState().GetStateCode())
 	assert.Equal(t, int64(1000), ti.GetState().GetRowCount())
 
 	resp := mgr.getTaskState(10000)
@@ -828,7 +882,7 @@ func TestImportManager_TaskState(t *testing.T) {
 
 	resp = mgr.getTaskState(2)
 	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
-	assert.Equal(t, commonpb.ImportState_ImportPersisted, resp.State)
+	assert.Equal(t, commonpb.ImportState_ImportCompleted, resp.State)
 
 	resp = mgr.getTaskState(1)
 	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
@@ -844,7 +898,7 @@ func TestImportManager_TaskState(t *testing.T) {
 				Value: "value1",
 			},
 			{
-				Key:   "failed_reason",
+				Key:   importutil.FailedReason,
 				Value: "some_reason",
 			},
 		},
@@ -981,11 +1035,11 @@ func TestImportManager_ListAllTasks(t *testing.T) {
 			compareReq = rowReq2
 		}
 		for _, kv := range task.GetInfos() {
-			if kv.GetKey() == CollectionName {
+			if kv.GetKey() == importutil.CollectionName {
 				assert.Equal(t, compareReq.GetCollectionName(), kv.GetValue())
-			} else if kv.GetKey() == PartitionName {
+			} else if kv.GetKey() == importutil.PartitionName {
 				assert.Equal(t, compareReq.GetPartitionName(), kv.GetValue())
-			} else if kv.GetKey() == Files {
+			} else if kv.GetKey() == importutil.Files {
 				assert.Equal(t, strings.Join(compareReq.GetFiles(), ","), kv.GetValue())
 			}
 		}
