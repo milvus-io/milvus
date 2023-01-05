@@ -849,7 +849,9 @@ func testConsumingDeltaMsg(ctx context.Context, t *testing.T, position *msgstrea
 		msgChan <- nil
 		deleteMsg1 := genDeleteMsg(defaultCollectionID+1, schemapb.DataType_Int64, defaultDelLength)
 		deleteMsg2 := genDeleteMsg(defaultCollectionID, schemapb.DataType_Int64, defaultDelLength)
-		msgChan <- &msgstream.MsgPack{Msgs: []msgstream.TsMsg{deleteMsg1, deleteMsg2}}
+		msgChan <- &msgstream.MsgPack{Msgs: []msgstream.TsMsg{deleteMsg1, deleteMsg2},
+			StartPositions: []*internalpb.MsgPosition{genMsgStreamBaseMsg().MsgPosition},
+			EndPositions:   []*internalpb.MsgPosition{genMsgStreamBaseMsg().MsgPosition}}
 	}
 	if closedStream {
 		close(msgChan)
