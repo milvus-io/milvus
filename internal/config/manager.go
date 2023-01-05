@@ -117,10 +117,10 @@ func (m *Manager) GetBy(filters ...Filter) map[string]string {
 	defer m.RUnlock()
 	matchedConfig := make(map[string]string)
 
-	for key, value := range m.keySourceMap {
+	for key := range m.keySourceMap {
 		newkey, ok := filterate(key, filters...)
 		if ok {
-			sValue, err := m.getConfigValueBySource(key, value)
+			sValue, err := m.GetConfig(key)
 			if err != nil {
 				log.Error("Get some invalid config", zap.String("key", key))
 				continue
@@ -138,8 +138,8 @@ func (m *Manager) GetConfigs() map[string]string {
 	defer m.RUnlock()
 	config := make(map[string]string)
 
-	for key, value := range m.keySourceMap {
-		sValue, err := m.getConfigValueBySource(key, value)
+	for key := range m.keySourceMap {
+		sValue, err := m.GetConfig(key)
 		if err != nil {
 			continue
 		}
