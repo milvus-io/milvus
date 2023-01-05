@@ -47,7 +47,8 @@ const (
 	// this limitation is to avoid this OOM risk:
 	// for column-based file, we read all its data into memory, if user input a large file, the read() method may
 	// cost extra memory and lear to OOM.
-	MaxFileSize = 1 * 1024 * 1024 * 1024 // 1GB
+	// TODO: make it configurable.
+	MaxFileSize = 3 * 1024 * 1024 * 1024 // 3GB
 
 	// this limitation is to avoid this OOM risk:
 	// simetimes system segment max size is a large number, a single segment fields data might cause OOM.
@@ -57,7 +58,8 @@ const (
 	// this limitation is to avoid this OOM risk:
 	// if the shard number is a large number, although single segment size is small, but there are lot of in-memory segments,
 	// the total memory size might cause OOM.
-	MaxTotalSizeInMemory = 2 * 1024 * 1024 * 1024 // 2GB
+	// TODO: make it configurable.
+	MaxTotalSizeInMemory = 6 * 1024 * 1024 * 1024 // 6GB
 
 	// keywords of import task informations
 	FailedReason    = "failed_reason"

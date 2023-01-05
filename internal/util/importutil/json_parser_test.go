@@ -72,7 +72,7 @@ func Test_AdjustBufSize(t *testing.T) {
 	assert.NotNil(t, parser)
 	sizePerRecord, _ = typeutil.EstimateSizePerRecord(schema)
 
-	assert.Equal(t, 7, MaxFileSize/(sizePerRecord*int(parser.bufSize)))
+	assert.Equal(t, 16, MaxFileSize/(sizePerRecord*int(parser.bufSize)))
 
 	// no change
 	schema = &schemapb.CollectionSchema{
