@@ -6,6 +6,14 @@ type MLogger struct {
 	*zap.Logger
 }
 
+// With encapsulates zap.Logger With method to return MLogger instance.
+func (l *MLogger) With(fields ...zap.Field) *MLogger {
+	nl := &MLogger{
+		Logger: l.Logger.With(fields...),
+	}
+	return nl
+}
+
 func (l *MLogger) RatedDebug(cost float64, msg string, fields ...zap.Field) bool {
 	if R().CheckCredit(cost) {
 		l.Debug(msg, fields...)
