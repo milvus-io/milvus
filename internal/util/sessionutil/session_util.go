@@ -39,6 +39,8 @@ func (t SessionEventType) String() string {
 		return "SessionAddEvent"
 	case SessionDelEvent:
 		return "SessionDelEvent"
+	case SessionUpdateEvent:
+		return "SessionUpdateEvent"
 	default:
 		return ""
 	}
@@ -56,6 +58,8 @@ const (
 	SessionAddEvent
 	// SessionDelEvent event type for a Session deleted
 	SessionDelEvent
+	// SessionUpdateEvent event type for a Session stopping
+	SessionUpdateEvent
 )
 
 // Session is a struct to store service's session, including ServerID, ServerName,
@@ -71,6 +75,7 @@ type Session struct {
 	ServerName  string `json:"ServerName,omitempty"`
 	Address     string `json:"Address,omitempty"`
 	Exclusive   bool   `json:"Exclusive,omitempty"`
+	Stopping    bool   `json:"Stopping,omitempty"`
 	TriggerKill bool
 	Version     semver.Version `json:"Version,omitempty"`
 
@@ -118,6 +123,7 @@ func (s *Session) UnmarshalJSON(data []byte) error {
 		ServerName  string `json:"ServerName,omitempty"`
 		Address     string `json:"Address,omitempty"`
 		Exclusive   bool   `json:"Exclusive,omitempty"`
+		Stopping    bool   `json:"Stopping,omitempty"`
 		TriggerKill bool
 		Version     string `json:"Version"`
 	}
@@ -137,6 +143,7 @@ func (s *Session) UnmarshalJSON(data []byte) error {
 	s.ServerName = raw.ServerName
 	s.Address = raw.Address
 	s.Exclusive = raw.Exclusive
+	s.Stopping = raw.Stopping
 	s.TriggerKill = raw.TriggerKill
 	return nil
 }
@@ -150,6 +157,7 @@ func (s *Session) MarshalJSON() ([]byte, error) {
 		ServerName  string `json:"ServerName,omitempty"`
 		Address     string `json:"Address,omitempty"`
 		Exclusive   bool   `json:"Exclusive,omitempty"`
+		Stopping    bool   `json:"Stopping,omitempty"`
 		TriggerKill bool
 		Version     string `json:"Version"`
 	}{
@@ -157,6 +165,7 @@ func (s *Session) MarshalJSON() ([]byte, error) {
 		ServerName:  s.ServerName,
 		Address:     s.Address,
 		Exclusive:   s.Exclusive,
+		Stopping:    s.Stopping,
 		TriggerKill: s.TriggerKill,
 		Version:     verStr,
 	})
@@ -284,6 +293,14 @@ func (s *Session) getServerIDWithKey(key string) (int64, error) {
 	}
 }
 
+func (s *Session) getCompleteKey() string {
+	key := s.ServerName
+	if !s.Exclusive || (s.enableActiveStandBy && s.isStandby.Load().(bool)) {
+		key = fmt.Sprintf("%s-%d", key, s.ServerID)
+	}
+	return path.Join(s.metaRoot, DefaultServiceRoot, key)
+}
+
 // registerService registers the service to etcd so that other services
 // can find that the service is online and issue subsequent operations
 // RegisterService will save a key-value in etcd
@@ -301,11 +318,7 @@ func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, er
 	if s.enableActiveStandBy {
 		s.updateStandby(true)
 	}
-	key := s.ServerName
-	if !s.Exclusive || s.enableActiveStandBy {
-		key = fmt.Sprintf("%s-%d", key, s.ServerID)
-	}
-	completeKey := path.Join(s.metaRoot, DefaultServiceRoot, key)
+	completeKey := s.getCompleteKey()
 	var ch <-chan *clientv3.LeaseKeepAliveResponse
 	log.Info("service begin to register to etcd", zap.String("serverName", s.ServerName), zap.Int64("ServerID", s.ServerID))
 
@@ -342,7 +355,7 @@ func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, er
 		}
 
 		if !txnResp.Succeeded {
-			return fmt.Errorf("function CompareAndSwap error for compare is false for key: %s", key)
+			return fmt.Errorf("function CompareAndSwap error for compare is false for key: %s", s.ServerName)
 		}
 		log.Info("put session key into etcd", zap.String("key", completeKey), zap.String("value", string(sessionJSON)))
 
@@ -456,6 +469,34 @@ func (s *Session) GetSessionsWithVersionRange(prefix string, r semver.Range) (ma
 	return res, resp.Header.Revision, nil
 }
 
+func (s *Session) GoingStop() error {
+	if s == nil || s.etcdCli == nil || s.leaseID == nil {
+		return errors.New("the session hasn't been init")
+	}
+
+	completeKey := s.getCompleteKey()
+	resp, err := s.etcdCli.Get(s.ctx, completeKey, clientv3.WithCountOnly())
+	if err != nil {
+		log.Error("fail to get the session", zap.String("key", completeKey), zap.Error(err))
+		return err
+	}
+	if resp.Count == 0 {
+		return nil
+	}
+	s.Stopping = true
+	sessionJSON, err := json.Marshal(s)
+	if err != nil {
+		log.Error("fail to marshal the session", zap.String("key", completeKey))
+		return err
+	}
+	_, err = s.etcdCli.Put(s.ctx, completeKey, string(sessionJSON), clientv3.WithLease(*s.leaseID))
+	if err != nil {
+		log.Error("fail to update the session to stopping state", zap.String("key", completeKey))
+		return err
+	}
+	return nil
+}
+
 // SessionEvent indicates the changes of other servers.
 // if a server is up, EventType is SessAddEvent.
 // if a server is down, EventType is SessDelEvent.
@@ -555,7 +596,11 @@ func (w *sessionWatcher) handleWatchResponse(wresp clientv3.WatchResponse) {
 			if !w.validate(session) {
 				continue
 			}
-			eventType = SessionAddEvent
+			if session.Stopping {
+				eventType = SessionUpdateEvent
+			} else {
+				eventType = SessionAddEvent
+			}
 		case mvccpb.DELETE:
 			log.Info("watch services",
 				zap.Any("delete kv", ev.PrevKv))
