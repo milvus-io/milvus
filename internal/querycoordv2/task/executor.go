@@ -19,6 +19,7 @@ package task
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -146,8 +147,12 @@ func (ex *Executor) processMergeTask(mergeTask *LoadSegmentsTask) {
 	action := task.Actions()[mergeTask.steps[0]]
 
 	defer func() {
+		canceled := task.canceled.Load()
 		for i := range mergeTask.tasks {
 			mergeTask.tasks[i].SetErr(task.Err())
+			if canceled {
+				mergeTask.tasks[i].Cancel()
+			}
 			ex.removeTask(mergeTask.tasks[i], mergeTask.steps[i])
 		}
 	}()
@@ -182,6 +187,12 @@ func (ex *Executor) processMergeTask(mergeTask *LoadSegmentsTask) {
 	status, err := ex.cluster.LoadSegments(task.Context(), leader, mergeTask.req)
 	if err != nil {
 		log.Warn("failed to load segment, it may be a false failure", zap.Error(err))
+		return
+	}
+	if status.ErrorCode == commonpb.ErrorCode_InsufficientMemoryToLoad {
+		log.Warn("insufficient memory to load segment", zap.String("err", status.GetReason()))
+		task.SetErr(fmt.Errorf("%w, err:%s", ErrInsufficientMemory, status.GetReason()))
+		task.Cancel()
 		return
 	}
 	if status.ErrorCode != commonpb.ErrorCode_Success {

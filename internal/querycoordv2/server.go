@@ -234,6 +234,9 @@ func (s *Server) Init() error {
 	// Init observers
 	s.initObserver()
 
+	// Init load status cache
+	meta.GlobalFailedLoadCache = meta.NewFailedLoadCache()
+
 	log.Info("QueryCoord init success")
 	return err
 }

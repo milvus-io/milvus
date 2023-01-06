@@ -1002,6 +1002,11 @@ func getCollectionProgress(ctx context.Context, queryCoord types.QueryCoord,
 		return 0, err
 	}
 
+	if resp.Status.ErrorCode == commonpb.ErrorCode_InsufficientMemoryToLoad {
+		log.Warn("detected insufficientMemoryError when getCollectionProgress", zap.Int64("collection_id", collectionID), zap.String("reason", resp.GetStatus().GetReason()))
+		return 0, ErrInsufficientMemory
+	}
+
 	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
 		log.Warn("fail to show collections", zap.Int64("collection_id", collectionID),
 			zap.String("reason", resp.Status.Reason))
@@ -1042,6 +1047,11 @@ func getPartitionProgress(ctx context.Context, queryCoord types.QueryCoord,
 			zap.Strings("partition_names", partitionNames),
 			zap.Error(err))
 		return 0, err
+	}
+	if resp.GetStatus().GetErrorCode() == commonpb.ErrorCode_InsufficientMemoryToLoad {
+		log.Warn("detected insufficientMemoryError when getPartitionProgress", zap.Int64("collection_id", collectionID),
+			zap.String("collection_name", collectionName), zap.Strings("partition_names", partitionNames), zap.String("reason", resp.GetStatus().GetReason()))
+		return 0, ErrInsufficientMemory
 	}
 	if len(resp.InMemoryPercentages) != len(partitionIDs) {
 		errMsg := "fail to show partitions from the querycoord, invalid data num"

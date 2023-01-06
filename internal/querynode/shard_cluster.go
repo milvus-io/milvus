@@ -643,6 +643,10 @@ func (sc *ShardCluster) LoadSegments(ctx context.Context, req *querypb.LoadSegme
 		log.Warn("failed to dispatch load segment request", zap.Error(err))
 		return err
 	}
+	if resp.GetErrorCode() == commonpb.ErrorCode_InsufficientMemoryToLoad {
+		log.Warn("insufficient memory when follower load segment", zap.String("reason", resp.GetReason()))
+		return fmt.Errorf("%w, reason:%s", ErrInsufficientMemory, resp.GetReason())
+	}
 	if resp.GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn("follower load segment failed", zap.String("reason", resp.GetReason()))
 		return fmt.Errorf("follower %d failed to load segment, reason %s", req.DstNodeID, resp.GetReason())

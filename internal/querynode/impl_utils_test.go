@@ -157,6 +157,39 @@ func (s *ImplUtilsSuite) TestTransferLoad() {
 		s.NoError(err)
 		s.Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
 	})
+
+	s.Run("insufficient memory", func() {
+		cs, ok := s.querynode.ShardClusterService.getShardCluster(defaultChannelName)
+		s.Require().True(ok)
+		cs.nodes[100] = &shardNode{
+			nodeID:   100,
+			nodeAddr: "test",
+			client: &mockShardQueryNode{
+				loadSegmentsResults: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_InsufficientMemoryToLoad,
+					Reason:    "mock InsufficientMemoryToLoad",
+				},
+			},
+		}
+
+		status, err := s.querynode.TransferLoad(ctx, &querypb.LoadSegmentsRequest{
+			Base: &commonpb.MsgBase{
+				TargetID: s.querynode.session.ServerID,
+			},
+			DstNodeID: 100,
+			Infos: []*querypb.SegmentLoadInfo{
+				{
+					SegmentID:     defaultSegmentID,
+					InsertChannel: defaultChannelName,
+					CollectionID:  defaultCollectionID,
+					PartitionID:   defaultPartitionID,
+				},
+			},
+		})
+
+		s.NoError(err)
+		s.Equal(commonpb.ErrorCode_InsufficientMemoryToLoad, status.GetErrorCode())
+	})
 }
 
 func (s *ImplUtilsSuite) TestTransferRelease() {
