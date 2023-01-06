@@ -110,11 +110,9 @@ func TestFlowGraph_DDNode_Operate(t *testing.T) {
 		for _, test := range invalidInTests {
 			t.Run(test.description, func(t *testing.T) {
 				ddn := ddNode{}
-				rt := ddn.Operate(test.in)
-				assert.Empty(t, rt)
+				assert.False(t, ddn.IsValidInMsg(test.in))
 			})
 		}
-
 		// valid inputs
 		tests := []struct {
 			ddnCollID UniqueID
