@@ -31,20 +31,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
-type MockedTxnKV struct {
-	kv.TxnKV
-	loadWithPrefixFn func(key string) ([]string, []string, error)
-}
-
-func (mc *MockedTxnKV) LoadWithPrefix(key string) ([]string, []string, error) {
-	return mc.loadWithPrefixFn(key)
-}
-
-type MockedSnapShotKV struct {
-	mock.Mock
-	kv.SnapShotKV
-}
-
 var (
 	indexName = "idx"
 	IndexID   = 1
@@ -58,29 +44,152 @@ var (
 	}
 )
 
-func getStrIndexPb(t *testing.T) string {
-	idxPB := model.MarshalIndexModel(&index)
-	msg, err := proto.Marshal(idxPB)
-	assert.Nil(t, err)
-	return string(msg)
-}
+func TestCatalog_ListCollections(t *testing.T) {
+	ctx := context.Background()
 
-func getStrSegIdxPb(idx model.Index, newSegIdx model.SegmentIndex) (string, error) {
-	segIdxInfo := &pb.SegmentIndexInfo{
-		CollectionID: idx.CollectionID,
-		PartitionID:  newSegIdx.PartitionID,
-		SegmentID:    newSegIdx.SegmentID,
-		BuildID:      newSegIdx.BuildID,
-		//EnableIndex:  newSegIdx.EnableIndex,
-		CreateTime: newSegIdx.CreateTime,
-		FieldID:    idx.FieldID,
-		IndexID:    idx.IndexID,
+	coll1 := &pb.CollectionInfo{
+		ID:                         1,
+		PartitionIDs:               []int64{100},
+		PartitionNames:             []string{"0"},
+		PartitionCreatedTimestamps: []uint64{1},
+		Schema: &schemapb.CollectionSchema{
+			Name: "c1",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID: 1,
+					Name:    "f1",
+				},
+			},
+		},
 	}
-	msg, err := proto.Marshal(segIdxInfo)
-	if err != nil {
-		return "", err
+
+	coll2 := &pb.CollectionInfo{
+		ID: 2,
+		Schema: &schemapb.CollectionSchema{
+			Name: "c1",
+			Fields: []*schemapb.FieldSchema{
+				{},
+			},
+		},
 	}
-	return string(msg), nil
+
+	targetErr := errors.New("fail")
+
+	t.Run("load collection with prefix fail", func(t *testing.T) {
+		kv := mocks.NewSnapShotKV(t)
+		ts := uint64(1)
+		kv.On("LoadWithPrefix", CollectionMetaPrefix, ts).
+			Return(nil, nil, targetErr)
+
+		kc := Catalog{Snapshot: kv}
+		ret, err := kc.ListCollections(ctx, ts)
+		assert.ErrorIs(t, err, targetErr)
+		assert.Nil(t, ret)
+	})
+
+	t.Run("list partition fail", func(t *testing.T) {
+		kv := mocks.NewSnapShotKV(t)
+		ts := uint64(1)
+
+		bColl, err := proto.Marshal(coll2)
+		assert.NoError(t, err)
+		kv.On("LoadWithPrefix", CollectionMetaPrefix, ts).
+			Return(nil, []string{string(bColl)}, nil)
+		kv.On("LoadWithPrefix", mock.MatchedBy(
+			func(prefix string) bool {
+				return strings.HasPrefix(prefix, PartitionMetaPrefix)
+			}), ts).
+			Return(nil, nil, targetErr)
+		kc := Catalog{Snapshot: kv}
+
+		ret, err := kc.ListCollections(ctx, ts)
+		assert.ErrorIs(t, err, targetErr)
+		assert.Nil(t, ret)
+	})
+
+	t.Run("list fields fail", func(t *testing.T) {
+		kv := mocks.NewSnapShotKV(t)
+		ts := uint64(1)
+
+		bColl, err := proto.Marshal(coll2)
+		assert.NoError(t, err)
+		kv.On("LoadWithPrefix", CollectionMetaPrefix, ts).
+			Return(nil, []string{string(bColl)}, nil)
+
+		partitionMeta := &pb.PartitionInfo{}
+		pm, err := proto.Marshal(partitionMeta)
+		assert.NoError(t, err)
+
+		kv.On("LoadWithPrefix", mock.MatchedBy(
+			func(prefix string) bool {
+				return strings.HasPrefix(prefix, PartitionMetaPrefix)
+			}), ts).
+			Return(nil, []string{string(pm)}, nil)
+
+		kv.On("LoadWithPrefix", mock.MatchedBy(
+			func(prefix string) bool {
+				return strings.HasPrefix(prefix, FieldMetaPrefix)
+			}), ts).
+			Return(nil, nil, targetErr)
+		kc := Catalog{Snapshot: kv}
+
+		ret, err := kc.ListCollections(ctx, ts)
+		assert.ErrorIs(t, err, targetErr)
+		assert.Nil(t, ret)
+	})
+
+	t.Run("list collection ok for 210 version", func(t *testing.T) {
+		kv := mocks.NewSnapShotKV(t)
+		ts := uint64(1)
+
+		bColl, err := proto.Marshal(coll1)
+		assert.NoError(t, err)
+		kv.On("LoadWithPrefix", CollectionMetaPrefix, ts).
+			Return(nil, []string{string(bColl)}, nil)
+		kc := Catalog{Snapshot: kv}
+
+		ret, err := kc.ListCollections(ctx, ts)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(ret))
+		modCol := ret["c1"]
+		assert.Equal(t, coll1.ID, modCol.CollectionID)
+	})
+
+	t.Run("list collection ok for the newest version", func(t *testing.T) {
+		kv := mocks.NewSnapShotKV(t)
+		ts := uint64(1)
+
+		bColl, err := proto.Marshal(coll2)
+		assert.NoError(t, err)
+		kv.On("LoadWithPrefix", CollectionMetaPrefix, ts).
+			Return(nil, []string{string(bColl)}, nil)
+
+		partitionMeta := &pb.PartitionInfo{}
+		pm, err := proto.Marshal(partitionMeta)
+		assert.NoError(t, err)
+
+		kv.On("LoadWithPrefix", mock.MatchedBy(
+			func(prefix string) bool {
+				return strings.HasPrefix(prefix, PartitionMetaPrefix)
+			}), ts).
+			Return(nil, []string{string(pm)}, nil)
+
+		fieldMeta := &schemapb.FieldSchema{}
+		fm, err := proto.Marshal(fieldMeta)
+		assert.NoError(t, err)
+
+		kv.On("LoadWithPrefix", mock.MatchedBy(
+			func(prefix string) bool {
+				return strings.HasPrefix(prefix, FieldMetaPrefix)
+			}), ts).
+			Return(nil, []string{string(fm)}, nil)
+		kc := Catalog{Snapshot: kv}
+
+		ret, err := kc.ListCollections(ctx, ts)
+		assert.NoError(t, err)
+		assert.NotNil(t, ret)
+		assert.Equal(t, 1, len(ret))
+	})
 }
 
 func TestCatalog_loadCollection(t *testing.T) {

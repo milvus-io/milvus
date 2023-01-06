@@ -274,11 +274,8 @@ func (kc *Catalog) listFieldsAfter210(ctx context.Context, collectionID typeutil
 	return fields, nil
 }
 
-func (kc *Catalog) GetCollectionByID(ctx context.Context, collectionID typeutil.UniqueID, ts typeutil.Timestamp) (*model.Collection, error) {
-	collMeta, err := kc.loadCollection(ctx, collectionID, ts)
-	if err != nil {
-		return nil, err
-	}
+func (kc *Catalog) appendPartitionAndFieldsInfo(ctx context.Context, collMeta *pb.CollectionInfo,
+	ts typeutil.Timestamp) (*model.Collection, error) {
 
 	collection := model.UnmarshalCollectionModel(collMeta)
 
@@ -286,19 +283,29 @@ func (kc *Catalog) GetCollectionByID(ctx context.Context, collectionID typeutil.
 		return collection, nil
 	}
 
-	partitions, err := kc.listPartitionsAfter210(ctx, collectionID, ts)
+	partitions, err := kc.listPartitionsAfter210(ctx, collection.CollectionID, ts)
 	if err != nil {
 		return nil, err
 	}
 	collection.Partitions = partitions
 
-	fields, err := kc.listFieldsAfter210(ctx, collectionID, ts)
+	fields, err := kc.listFieldsAfter210(ctx, collection.CollectionID, ts)
 	if err != nil {
 		return nil, err
 	}
 	collection.Fields = fields
 
 	return collection, nil
+}
+
+func (kc *Catalog) GetCollectionByID(ctx context.Context, collectionID typeutil.UniqueID,
+	ts typeutil.Timestamp) (*model.Collection, error) {
+	collMeta, err := kc.loadCollection(ctx, collectionID, ts)
+	if err != nil {
+		return nil, err
+	}
+
+	return kc.appendPartitionAndFieldsInfo(ctx, collMeta, ts)
 }
 
 func (kc *Catalog) CollectionExists(ctx context.Context, collectionID typeutil.UniqueID, ts typeutil.Timestamp) bool {
@@ -501,7 +508,7 @@ func (kc *Catalog) ListCollections(ctx context.Context, ts typeutil.Timestamp) (
 			zap.String("prefix", CollectionMetaPrefix),
 			zap.Uint64("timestamp", ts),
 			zap.Error(err))
-		return nil, nil
+		return nil, err
 	}
 
 	colls := make(map[string]*model.Collection)
@@ -512,7 +519,7 @@ func (kc *Catalog) ListCollections(ctx context.Context, ts typeutil.Timestamp) (
 			log.Warn("unmarshal collection info failed", zap.Error(err))
 			continue
 		}
-		collection, err := kc.GetCollectionByID(ctx, collMeta.GetID(), ts)
+		collection, err := kc.appendPartitionAndFieldsInfo(ctx, &collMeta, ts)
 		if err != nil {
 			return nil, err
 		}
