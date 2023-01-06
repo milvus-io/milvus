@@ -70,7 +70,7 @@ jobs:
         uses: pat-s/always-upload-cache@v3
         with:
           path: ~/.conan
-          key: macos-conan-${{ hashFiles('internal/core/conanfile.txt') }}
+          key: macos-conan-${{ hashFiles('internal/core/conanfile.*') }}
           restore-keys: macos-conan-
       - name: Code Check
         env:
@@ -84,7 +84,7 @@ jobs:
           if [[ ! -d "/var/tmp/ccache" ]];then
             mkdir -p /var/tmp/ccache
           fi
-          brew install boost libomp ninja tbb openblas ccache conan
+          brew install libomp ninja openblas ccache conan
           if [[ ! -d "/usr/local/opt/llvm" ]]; then
             ln -s /usr/local/opt/llvm@14 /usr/local/opt/llvm
           fi
