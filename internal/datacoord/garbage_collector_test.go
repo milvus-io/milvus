@@ -30,6 +30,11 @@ import (
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
+
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
@@ -40,9 +45,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
@@ -772,6 +775,11 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 
 	m := &meta{
 		catalog: catalog,
+		channelCPs: map[string]*internalpb.MsgPosition{
+			"dmlChannel": {
+				Timestamp: 1000,
+			},
+		},
 		segments: &SegmentsInfo{
 			map[UniqueID]*SegmentInfo{
 				segID: {
@@ -878,6 +886,23 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 					},
 					segmentIndexes: map[UniqueID]*model.SegmentIndex{},
 				},
+				// before channel cp,
+				segID + 5: {
+					SegmentInfo: &datapb.SegmentInfo{
+						ID:             segID + 5,
+						CollectionID:   collID,
+						PartitionID:    partID,
+						InsertChannel:  "dmlChannel",
+						NumOfRows:      2000,
+						State:          commonpb.SegmentState_Dropped,
+						MaxRowNum:      65535,
+						DroppedAt:      0,
+						CompactionFrom: nil,
+						DmlPosition: &internalpb.MsgPosition{
+							Timestamp: 1200,
+						},
+					},
+				},
 			},
 		},
 		buildID2SegmentIndex: map[UniqueID]*model.SegmentIndex{
@@ -982,6 +1007,8 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 	assert.NotNil(t, segD)
 	segE := gc.meta.GetSegmentUnsafe(segID + 4)
 	assert.NotNil(t, segE)
+	segF := gc.meta.GetSegmentUnsafe(segID + 5)
+	assert.NotNil(t, segF)
 
 	err := gc.meta.AddSegmentIndex(&model.SegmentIndex{
 		SegmentID:    segID + 4,
@@ -1013,10 +1040,15 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 	assert.Nil(t, segD)
 	segE = gc.meta.GetSegmentUnsafe(segID + 4)
 	assert.NotNil(t, segE)
+	segF = gc.meta.GetSegmentUnsafe(segID + 5)
+	assert.NotNil(t, segF)
 
 	gc.clearEtcd()
 	segA = gc.meta.GetSegmentUnsafe(segID)
 	assert.Nil(t, segA)
 	segB = gc.meta.GetSegmentUnsafe(segID + 1)
 	assert.Nil(t, segB)
+	segF = gc.meta.GetSegmentUnsafe(segID + 5)
+	assert.NotNil(t, segF)
+
 }

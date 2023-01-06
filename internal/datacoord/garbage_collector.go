@@ -202,9 +202,11 @@ func (gc *garbageCollector) clearEtcd() {
 	all := gc.meta.SelectSegments(func(si *SegmentInfo) bool { return true })
 	drops := make(map[int64]*SegmentInfo, 0)
 	compactTo := make(map[int64]*SegmentInfo)
+	channels := typeutil.NewSet[string]()
 	for _, segment := range all {
 		if segment.GetState() == commonpb.SegmentState_Dropped {
 			drops[segment.GetID()] = segment
+			channels.Insert(segment.GetInsertChannel())
 			//continue
 			// A(indexed), B(indexed) -> C(no indexed), D(no indexed) -> E(no indexed), A, B can not be GC
 		}
@@ -225,8 +227,22 @@ func (gc *garbageCollector) clearEtcd() {
 		indexedSet.Insert(segment.GetID())
 	}
 
+	channelCPs := make(map[string]uint64)
+	for channel := range channels {
+		pos := gc.meta.GetChannelCheckpoint(channel)
+		channelCPs[channel] = pos.GetTimestamp()
+	}
+
 	for _, segment := range drops {
 		if !gc.isExpire(segment.GetDroppedAt()) {
+			continue
+		}
+		// segment gc shall only happen when channel cp is after segment dml cp.
+		if segment.GetDmlPosition().GetTimestamp() > channelCPs[segment.GetInsertChannel()] {
+			log.RatedInfo(60, "dropped segment dml position after channel cp, skip meta gc",
+				zap.Uint64("dmlPosTs", segment.GetDmlPosition().GetTimestamp()),
+				zap.Uint64("channelCpTs", channelCPs[segment.GetInsertChannel()]),
+			)
 			continue
 		}
 		// For compact A, B -> C, don't GC A or B if C is not indexed,
