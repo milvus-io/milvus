@@ -17,6 +17,7 @@
 package session
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/metrics"
@@ -55,6 +56,17 @@ func (m *NodeManager) Stopping(nodeID int64) {
 	if nodeInfo, ok := m.nodes[nodeID]; ok {
 		nodeInfo.SetState(NodeStateStopping)
 	}
+}
+
+func (m *NodeManager) IsStoppingNode(nodeID int64) (bool, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	node := m.nodes[nodeID]
+	if node == nil {
+		return false, fmt.Errorf("nodeID[%d] isn't existed", nodeID)
+	}
+	return node.IsStoppingState(), nil
 }
 
 func (m *NodeManager) Get(nodeID int64) *NodeInfo {
