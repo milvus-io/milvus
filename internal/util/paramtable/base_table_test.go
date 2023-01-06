@@ -16,6 +16,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/config"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -44,6 +45,26 @@ func TestBaseTable_GetConfigSubSet(t *testing.T) {
 		assert.Equal(t, subSet[k], configs[prefix+k])
 	}
 	assert.Equal(t, len(subSet), len(configsWithPrefix))
+}
+
+func TestBaseTable_DuplicateValues(t *testing.T) {
+	baseParams.Save("rootcoord.dmlchannelnum", "10")
+	baseParams.Save("rootcoorddmlchannelnum", "11")
+
+	prefix := "rootcoord."
+	configs := baseParams.mgr.GetConfigs()
+
+	configsWithPrefix := make(map[string]string)
+	for k, v := range configs {
+		if strings.HasPrefix(k, prefix) {
+			configsWithPrefix[k] = v
+		}
+	}
+
+	rootconfigs := baseParams.mgr.GetBy(config.WithPrefix(prefix))
+
+	assert.Equal(t, len(rootconfigs), len(configsWithPrefix))
+	assert.Equal(t, "11", rootconfigs["rootcoord.dmlchannelnum"])
 }
 
 func TestBaseTable_SaveAndLoad(t *testing.T) {
