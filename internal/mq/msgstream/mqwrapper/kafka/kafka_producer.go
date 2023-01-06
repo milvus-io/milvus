@@ -26,9 +26,15 @@ func (kp *kafkaProducer) Topic() string {
 }
 
 func (kp *kafkaProducer) Send(ctx context.Context, message *mqwrapper.ProducerMessage) (mqwrapper.MessageID, error) {
+	headers := make([]kafka.Header, 0, len(message.Properties))
+	for key, value := range message.Properties {
+		header := kafka.Header{Key: key, Value: []byte(value)}
+		headers = append(headers, header)
+	}
 	err := kp.p.Produce(&kafka.Message{
 		TopicPartition: kafka.TopicPartition{Topic: &kp.topic, Partition: mqwrapper.DefaultPartitionIdx},
 		Value:          message.Payload,
+		Headers:        headers,
 	}, kp.deliveryChan)
 
 	if err != nil {

@@ -33,7 +33,7 @@ func (rp *rmqProducer) Topic() string {
 
 // Send send the producer messages to rocksmq
 func (rp *rmqProducer) Send(ctx context.Context, message *mqwrapper.ProducerMessage) (mqwrapper.MessageID, error) {
-	pm := &client.ProducerMessage{Payload: message.Payload}
+	pm := &client.ProducerMessage{Payload: message.Payload, Properties: message.Properties}
 	id, err := rp.p.Send(pm)
 	return &rmqID{messageID: id}, err
 }

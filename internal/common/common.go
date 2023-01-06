@@ -85,7 +85,9 @@ const (
 //  Collection properties key
 
 const (
-	CollectionTTLConfigKey = "collection.ttl.seconds"
+	CollectionTTLConfigKey        = "collection.ttl.seconds"
+	PropertiesKey          string = "properties"
+	TraceIDKey             string = "uber-trace-id"
 )
 
 func IsSystemField(fieldID int64) bool {

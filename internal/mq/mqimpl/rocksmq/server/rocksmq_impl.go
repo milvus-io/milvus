@@ -12,6 +12,7 @@
 package server
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path"
@@ -26,6 +27,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/kv"
 	rocksdbkv "github.com/milvus-io/milvus/internal/kv/rocksdb"
 	"github.com/milvus-io/milvus/internal/log"
@@ -594,6 +596,16 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) ([]Uni
 		msgID := idStart + UniqueID(i)
 		key := path.Join(topicName, strconv.FormatInt(msgID, 10))
 		batch.Put([]byte(key), messages[i].Payload)
+		properties, err := json.Marshal(messages[i].Properties)
+		if err != nil {
+			log.Warn("properties marshal failed",
+				zap.Int64("msgID", msgID),
+				zap.String("topicName", topicName),
+				zap.Error(err))
+			return nil, err
+		}
+		pKey := path.Join(common.PropertiesKey, topicName, strconv.FormatInt(msgID, 10))
+		batch.Put([]byte(pKey), properties)
 		msgIDs[i] = msgID
 		msgSizes[msgID] = int64(len(messages[i].Payload))
 	}
@@ -724,6 +736,21 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 			val.Free()
 			return nil, err
 		}
+		askedProperties := path.Join(common.PropertiesKey, topicName, strconv.FormatInt(msgID, 10))
+		opts := gorocksdb.NewDefaultReadOptions()
+		defer opts.Destroy()
+		propertiesValue, err := rmq.store.GetBytes(opts, []byte(askedProperties))
+		if err != nil {
+			return nil, err
+		}
+		properties := make(map[string]string)
+		if len(propertiesValue) != 0 {
+			// before 2.2.0, there have no properties in ProducerMessage and ConsumerMessage in rocksmq
+			// when produce before 2.2.0, but consume in 2.2.0, propertiesValue will be []
+			if err = json.Unmarshal(propertiesValue, &properties); err != nil {
+				return nil, err
+			}
+		}
 		msg := ConsumerMessage{
 			MsgID: msgID,
 		}
@@ -731,8 +758,10 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 		dataLen := len(origData)
 		if dataLen == 0 {
 			msg.Payload = nil
+			msg.Properties = nil
 		} else {
 			msg.Payload = make([]byte, dataLen)
+			msg.Properties = properties
 			copy(msg.Payload, origData)
 		}
 		consumerMessage = append(consumerMessage, msg)

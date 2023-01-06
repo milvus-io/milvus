@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 	"github.com/stretchr/testify/assert"
 )
@@ -34,8 +35,9 @@ func TestKafkaConsumer_SeekExclusive(t *testing.T) {
 	assert.NoError(t, err)
 	defer consumer.Close()
 
-	data := []int{111, 222, 333}
-	testKafkaConsumerProduceData(t, topic, data)
+	data1 := []int{111, 222, 333}
+	data2 := []string{"111", "222", "333"}
+	testKafkaConsumerProduceData(t, topic, data1, data2)
 
 	msgID := &kafkaID{messageID: 1}
 	err = consumer.Seek(msgID, false)
@@ -43,9 +45,10 @@ func TestKafkaConsumer_SeekExclusive(t *testing.T) {
 
 	msg := <-consumer.Chan()
 	assert.Equal(t, 333, BytesToInt(msg.Payload()))
+	assert.Equal(t, "333", msg.Properties()[common.TraceIDKey])
 	assert.Equal(t, int64(2), msg.ID().(*kafkaID).messageID)
 	assert.Equal(t, topic, msg.Topic())
-	assert.True(t, len(msg.Properties()) == 0)
+	assert.True(t, len(msg.Properties()) == 1)
 }
 
 func TestKafkaConsumer_SeekInclusive(t *testing.T) {
@@ -58,8 +61,9 @@ func TestKafkaConsumer_SeekInclusive(t *testing.T) {
 	assert.NoError(t, err)
 	defer consumer.Close()
 
-	data := []int{111, 222, 333}
-	testKafkaConsumerProduceData(t, topic, data)
+	data1 := []int{111, 222, 333}
+	data2 := []string{"111", "222", "333"}
+	testKafkaConsumerProduceData(t, topic, data1, data2)
 
 	msgID := &kafkaID{messageID: 1}
 	err = consumer.Seek(msgID, true)
@@ -67,9 +71,10 @@ func TestKafkaConsumer_SeekInclusive(t *testing.T) {
 
 	msg := <-consumer.Chan()
 	assert.Equal(t, 222, BytesToInt(msg.Payload()))
+	assert.Equal(t, "222", msg.Properties()[common.TraceIDKey])
 	assert.Equal(t, int64(1), msg.ID().(*kafkaID).messageID)
 	assert.Equal(t, topic, msg.Topic())
-	assert.True(t, len(msg.Properties()) == 0)
+	assert.True(t, len(msg.Properties()) == 1)
 }
 
 func TestKafkaConsumer_GetSeek(t *testing.T) {
@@ -99,8 +104,9 @@ func TestKafkaConsumer_ChanWithNoAssign(t *testing.T) {
 	assert.NoError(t, err)
 	defer consumer.Close()
 
-	data := []int{111}
-	testKafkaConsumerProduceData(t, topic, data)
+	data1 := []int{111}
+	data2 := []string{"111"}
+	testKafkaConsumerProduceData(t, topic, data1, data2)
 	assert.Panics(t, func() {
 		<-consumer.Chan()
 	})
@@ -135,10 +141,12 @@ func TestKafkaConsumer_SeekAfterChan(t *testing.T) {
 	assert.NoError(t, err)
 	defer consumer.Close()
 
-	data := []int{111}
-	testKafkaConsumerProduceData(t, topic, data)
+	data1 := []int{111}
+	data2 := []string{"111"}
+	testKafkaConsumerProduceData(t, topic, data1, data2)
 	msg := <-consumer.Chan()
 	assert.Equal(t, 111, BytesToInt(msg.Payload()))
+	assert.Equal(t, "111", msg.Properties()[common.TraceIDKey])
 
 	err = consumer.Seek(mockMsgID{}, false)
 	assert.Error(t, err)
@@ -158,8 +166,9 @@ func TestKafkaConsumer_GetLatestMsgID(t *testing.T) {
 	assert.Equal(t, int64(0), latestMsgID.(*kafkaID).messageID)
 	assert.Nil(t, err)
 
-	data := []int{111, 222, 333}
-	testKafkaConsumerProduceData(t, topic, data)
+	data1 := []int{111, 222, 333}
+	data2 := []string{"111", "222", "333"}
+	testKafkaConsumerProduceData(t, topic, data1, data2)
 
 	latestMsgID, err = consumer.GetLatestMsgID()
 	assert.Equal(t, int64(2), latestMsgID.(*kafkaID).messageID)
@@ -171,20 +180,24 @@ func TestKafkaConsumer_ConsumeFromLatest(t *testing.T) {
 	groupID := fmt.Sprintf("test-groupid-%d", rand.Int())
 	topic := fmt.Sprintf("test-topicName-%d", rand.Int())
 
-	data := []int{111, 222, 333}
-	testKafkaConsumerProduceData(t, topic, data)
+	data1 := []int{111, 222, 333}
+	data2 := []string{"111", "222", "333"}
+	testKafkaConsumerProduceData(t, topic, data1, data2)
 
 	config := createConfig(groupID)
 	consumer, err := newKafkaConsumer(config, topic, groupID, mqwrapper.SubscriptionPositionLatest)
 	assert.NoError(t, err)
 	defer consumer.Close()
-	data = []int{444, 555}
-	testKafkaConsumerProduceData(t, topic, data)
+	data1 = []int{444, 555}
+	data2 = []string{"444", "555"}
+	testKafkaConsumerProduceData(t, topic, data1, data2)
 
 	msg := <-consumer.Chan()
 	assert.Equal(t, 444, BytesToInt(msg.Payload()))
+	assert.Equal(t, "444", msg.Properties()[common.TraceIDKey])
 	msg = <-consumer.Chan()
 	assert.Equal(t, 555, BytesToInt(msg.Payload()))
+	assert.Equal(t, "555", msg.Properties()[common.TraceIDKey])
 }
 
 func TestKafkaConsumer_ConsumeFromEarliest(t *testing.T) {
@@ -192,14 +205,16 @@ func TestKafkaConsumer_ConsumeFromEarliest(t *testing.T) {
 	groupID := fmt.Sprintf("test-groupid-%d", rand.Int())
 	topic := fmt.Sprintf("test-topicName-%d", rand.Int())
 
-	data := []int{111, 222, 333}
-	testKafkaConsumerProduceData(t, topic, data)
+	data1 := []int{111, 222, 333}
+	data2 := []string{"111", "222", "333"}
+	testKafkaConsumerProduceData(t, topic, data1, data2)
 
 	config := createConfig(groupID)
 	consumer, err := newKafkaConsumer(config, topic, groupID, mqwrapper.SubscriptionPositionEarliest)
 	assert.NoError(t, err)
 	msg := <-consumer.Chan()
 	assert.Equal(t, 111, BytesToInt(msg.Payload()))
+	assert.Equal(t, "111", msg.Properties()[common.TraceIDKey])
 	consumer.Ack(msg)
 	defer consumer.Close()
 
@@ -208,6 +223,7 @@ func TestKafkaConsumer_ConsumeFromEarliest(t *testing.T) {
 	assert.NoError(t, err)
 	msg = <-consumer2.Chan()
 	assert.Equal(t, 111, BytesToInt(msg.Payload()))
+	assert.Equal(t, "111", msg.Properties()[common.TraceIDKey])
 	consumer2.Ack(msg)
 	defer consumer2.Close()
 }
@@ -218,14 +234,14 @@ func TestKafkaConsumer_createKafkaConsumer(t *testing.T) {
 	assert.NotNil(t, err)
 }
 
-func testKafkaConsumerProduceData(t *testing.T, topic string, data []int) {
+func testKafkaConsumerProduceData(t *testing.T, topic string, data []int, arr []string) {
 	ctx := context.Background()
 	kc := createKafkaClient(t)
 	defer kc.Close()
 	producer := createProducer(t, kc, topic)
 	defer producer.Close()
 
-	produceData(ctx, t, producer, data)
+	produceData(ctx, t, producer, data, arr)
 
 	producer.(*kafkaProducer).p.Flush(500)
 }

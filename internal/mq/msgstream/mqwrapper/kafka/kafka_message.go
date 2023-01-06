@@ -14,7 +14,11 @@ func (km *kafkaMessage) Topic() string {
 }
 
 func (km *kafkaMessage) Properties() map[string]string {
-	return nil
+	properties := make(map[string]string)
+	for _, header := range km.msg.Headers {
+		properties[header.Key] = string(header.Value)
+	}
+	return properties
 }
 
 func (km *kafkaMessage) Payload() []byte {
