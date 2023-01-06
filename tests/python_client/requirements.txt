@@ -3,7 +3,7 @@ pytest-cov==2.8.1
 requests==2.26.0
 scikit-learn==1.1.2
 timeout_decorator==0.5.0
-ujson==4.2.0
+ujson==5.4.0
 pytest==7.2.0
 pytest-assume==2.4.3
 pytest-timeout==1.3.3
@@ -30,9 +30,6 @@ pytest-random-order
 # for customize config test
 python-benedict==0.24.3
 timeout-decorator==0.5.0
-
-# version need to be consistent with protobuf used in pymilvus
-protobuf==3.17.1
 
 # for bulk load test
 minio==7.1.5
