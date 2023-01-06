@@ -46,31 +46,6 @@ const (
 	SetRatesTimeout   = 10 * time.Second
 )
 
-type TriggerReason int32
-
-const (
-	ManuallyDenyToRead   TriggerReason = 0
-	ManuallyDenyToWrite  TriggerReason = 1
-	MemoryQuotaExhausted TriggerReason = 2
-	DiskQuotaExhausted   TriggerReason = 3
-	TimeTickLongDelay    TriggerReason = 4
-)
-
-var TriggerReasonString = map[TriggerReason]string{
-	ManuallyDenyToRead:   "manually deny to read",
-	ManuallyDenyToWrite:  "manually deny to write",
-	MemoryQuotaExhausted: "memory quota exhausted, please allocate more resources",
-	DiskQuotaExhausted:   "disk quota exhausted, please allocate more resources",
-	TimeTickLongDelay:    "time tick long delay",
-}
-
-func (t TriggerReason) String() string {
-	if s, ok := TriggerReasonString[t]; ok {
-		return s
-	}
-	return ""
-}
-
 type RateAllocateStrategy int32
 
 const (
@@ -114,7 +89,7 @@ type QuotaCenter struct {
 	dataCoordMetrics *metricsinfo.DataCoordQuotaMetrics
 
 	currentRates map[internalpb.RateType]Limit
-	quotaStates  map[milvuspb.QuotaState]string
+	quotaStates  map[milvuspb.QuotaState]commonpb.ErrorCode
 	tsoAllocator tso.Allocator
 
 	rateAllocateStrategy RateAllocateStrategy
@@ -130,7 +105,7 @@ func NewQuotaCenter(proxies *proxyClientManager, queryCoord types.QueryCoord, da
 		queryCoord:   queryCoord,
 		dataCoord:    dataCoord,
 		currentRates: make(map[internalpb.RateType]Limit),
-		quotaStates:  make(map[milvuspb.QuotaState]string),
+		quotaStates:  make(map[milvuspb.QuotaState]commonpb.ErrorCode),
 		tsoAllocator: tsoAllocator,
 
 		rateAllocateStrategy: DefaultRateAllocateStrategy,
@@ -271,20 +246,20 @@ func (q *QuotaCenter) syncMetrics() error {
 }
 
 // forceDenyWriting sets dml rates to 0 to reject all dml requests.
-func (q *QuotaCenter) forceDenyWriting(reason TriggerReason) {
+func (q *QuotaCenter) forceDenyWriting(errorCode commonpb.ErrorCode) {
 	q.currentRates[internalpb.RateType_DMLInsert] = 0
 	q.currentRates[internalpb.RateType_DMLDelete] = 0
 	q.currentRates[internalpb.RateType_DMLBulkLoad] = 0
-	log.Warn("QuotaCenter force to deny writing", zap.String("reason", reason.String()))
-	q.quotaStates[milvuspb.QuotaState_DenyToWrite] = reason.String()
+	log.Warn("QuotaCenter force to deny writing", zap.String("reason", errorCode.String()))
+	q.quotaStates[milvuspb.QuotaState_DenyToWrite] = errorCode
 }
 
 // forceDenyWriting sets dql rates to 0 to reject all dql requests.
-func (q *QuotaCenter) forceDenyReading(reason TriggerReason) {
+func (q *QuotaCenter) forceDenyReading(errorCode commonpb.ErrorCode) {
 	q.currentRates[internalpb.RateType_DQLSearch] = 0
 	q.currentRates[internalpb.RateType_DQLQuery] = 0
-	log.Warn("QuotaCenter force to deny reading", zap.String("reason", reason.String()))
-	q.quotaStates[milvuspb.QuotaState_DenyToRead] = reason.String()
+	log.Warn("QuotaCenter force to deny reading", zap.String("reason", errorCode.String()))
+	q.quotaStates[milvuspb.QuotaState_DenyToRead] = errorCode
 }
 
 // getRealTimeRate return real time rate in Proxy.
@@ -310,7 +285,7 @@ func (q *QuotaCenter) guaranteeMinRate(minRate float64, rateType internalpb.Rate
 // calculateReadRates calculates and sets dql rates.
 func (q *QuotaCenter) calculateReadRates() {
 	if Params.QuotaConfig.ForceDenyReading.GetAsBool() {
-		q.forceDenyReading(ManuallyDenyToRead)
+		q.forceDenyReading(commonpb.ErrorCode_ForceDeny)
 		return
 	}
 
@@ -355,13 +330,13 @@ func (q *QuotaCenter) calculateReadRates() {
 // calculateWriteRates calculates and sets dml rates.
 func (q *QuotaCenter) calculateWriteRates() error {
 	if Params.QuotaConfig.ForceDenyWriting.GetAsBool() {
-		q.forceDenyWriting(ManuallyDenyToWrite)
+		q.forceDenyWriting(commonpb.ErrorCode_ForceDeny)
 		return nil
 	}
 
 	exceeded := q.ifDiskQuotaExceeded()
 	if exceeded {
-		q.forceDenyWriting(DiskQuotaExhausted) // disk quota protection
+		q.forceDenyWriting(commonpb.ErrorCode_DiskQuotaExhausted) // disk quota protection
 		return nil
 	}
 
@@ -371,13 +346,13 @@ func (q *QuotaCenter) calculateWriteRates() error {
 	}
 	ttFactor := q.getTimeTickDelayFactor(ts)
 	if ttFactor <= 0 {
-		q.forceDenyWriting(TimeTickLongDelay) // tt protection
+		q.forceDenyWriting(commonpb.ErrorCode_TimeTickLongDelay) // tt protection
 		return nil
 	}
 
 	memFactor := q.getMemoryFactor()
 	if memFactor <= 0 {
-		q.forceDenyWriting(MemoryQuotaExhausted) // memory protection
+		q.forceDenyWriting(commonpb.ErrorCode_MemoryQuotaExhausted) // memory protection
 		return nil
 	}
 
@@ -430,7 +405,7 @@ func (q *QuotaCenter) resetCurrentRates() {
 			q.currentRates[rt] = Inf // no limit
 		}
 	}
-	q.quotaStates = make(map[milvuspb.QuotaState]string)
+	q.quotaStates = make(map[milvuspb.QuotaState]commonpb.ErrorCode)
 }
 
 // getTimeTickDelayFactor gets time tick delay of DataNodes and QueryNodes,
@@ -689,10 +664,10 @@ func (q *QuotaCenter) setRates() error {
 		// TODO: support ByRateWeight
 	}
 	states := make([]milvuspb.QuotaState, 0, len(q.quotaStates))
-	stateReasons := make([]string, 0, len(q.quotaStates))
+	codes := make([]commonpb.ErrorCode, 0, len(q.quotaStates))
 	for k, v := range q.quotaStates {
 		states = append(states, k)
-		stateReasons = append(stateReasons, v)
+		codes = append(codes, v)
 	}
 	timestamp := tsoutil.ComposeTSByTime(time.Now(), 0)
 	req := &proxypb.SetRatesRequest{
@@ -700,26 +675,25 @@ func (q *QuotaCenter) setRates() error {
 			commonpbutil.WithMsgID(int64(timestamp)),
 			commonpbutil.WithTimeStamp(timestamp),
 		),
-		Rates:        map2List(),
-		States:       states,
-		StateReasons: stateReasons,
+		Rates:  map2List(),
+		States: states,
+		Codes:  codes,
 	}
 	return q.proxies.SetRates(ctx, req)
 }
 
 // recordMetrics records metrics of quota states.
 func (q *QuotaCenter) recordMetrics() {
-	for _, reason := range TriggerReasonString {
-		hit := false
+	record := func(errorCode commonpb.ErrorCode) {
 		for _, v := range q.quotaStates {
-			if v == reason {
-				hit = true
+			if v == errorCode {
+				metrics.RootCoordQuotaStates.WithLabelValues(errorCode.String()).Set(1)
+				return
 			}
 		}
-		if hit {
-			metrics.RootCoordQuotaStates.WithLabelValues(reason).Set(1)
-		} else {
-			metrics.RootCoordQuotaStates.WithLabelValues(reason).Set(0)
-		}
+		metrics.RootCoordQuotaStates.WithLabelValues(errorCode.String()).Set(0)
 	}
+	record(commonpb.ErrorCode_MemoryQuotaExhausted)
+	record(commonpb.ErrorCode_DiskQuotaExhausted)
+	record(commonpb.ErrorCode_TimeTickLongDelay)
 }
