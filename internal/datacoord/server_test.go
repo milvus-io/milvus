@@ -3234,6 +3234,8 @@ func TestDataCoord_Import(t *testing.T) {
 
 	t.Run("no datanode available", func(t *testing.T) {
 		svr := newTestServer(t, nil)
+		Params.BaseTable.Save("minio.address", "minio:9000")
+		defer Params.BaseTable.Reset("minio.address")
 		resp, err := svr.Import(svr.ctx, &datapb.ImportTaskRequest{
 			ImportTask: &datapb.ImportTask{
 				CollectionId: 100,
@@ -3244,9 +3246,6 @@ func TestDataCoord_Import(t *testing.T) {
 		assert.EqualValues(t, commonpb.ErrorCode_UnexpectedError, resp.Status.GetErrorCode())
 		closeTestServer(t, svr)
 	})
-
-	// just passed for ci, if test locally, need to replace it with localhost:9000
-	Params.BaseTable.Save("minio.address", "minio:9000")
 
 	t.Run("with closed server", func(t *testing.T) {
 		svr := newTestServer(t, nil)

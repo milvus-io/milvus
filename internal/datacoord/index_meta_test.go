@@ -19,14 +19,18 @@ package datacoord
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
+	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
@@ -52,12 +56,17 @@ func TestMeta_CanCreateIndex(t *testing.T) {
 			},
 		}
 	)
+
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	catalog.On("CreateIndex",
+		mock.Anything,
+		mock.Anything,
+	).Return(nil)
+
 	m := &meta{
-		RWMutex: sync.RWMutex{},
-		ctx:     context.Background(),
-		catalog: &datacoord.Catalog{
-			Txn: &mockEtcdKv{},
-		},
+		RWMutex:              sync.RWMutex{},
+		ctx:                  context.Background(),
+		catalog:              catalog,
 		collections:          nil,
 		segments:             nil,
 		channelCPs:           nil,
@@ -169,11 +178,9 @@ func TestMeta_HasSameReq(t *testing.T) {
 		}
 	)
 	m := &meta{
-		RWMutex: sync.RWMutex{},
-		ctx:     context.Background(),
-		catalog: &datacoord.Catalog{
-			Txn: &mockEtcdKv{},
-		},
+		RWMutex:              sync.RWMutex{},
+		ctx:                  context.Background(),
+		catalog:              catalogmocks.NewDataCoordCatalog(t),
 		collections:          nil,
 		segments:             nil,
 		channelCPs:           nil,
@@ -257,10 +264,16 @@ func TestMeta_CreateIndex(t *testing.T) {
 	}
 
 	t.Run("success", func(t *testing.T) {
+		sc := catalogmocks.NewDataCoordCatalog(t)
+		sc.On("CreateIndex",
+			mock.Anything,
+			mock.Anything,
+		).Return(nil)
+
 		m := &meta{
 			RWMutex:              sync.RWMutex{},
 			ctx:                  context.Background(),
-			catalog:              &datacoord.Catalog{Txn: &mockEtcdKv{}},
+			catalog:              sc,
 			indexes:              make(map[UniqueID]map[UniqueID]*model.Index),
 			buildID2SegmentIndex: make(map[UniqueID]*model.SegmentIndex),
 		}
@@ -270,10 +283,16 @@ func TestMeta_CreateIndex(t *testing.T) {
 	})
 
 	t.Run("save fail", func(t *testing.T) {
+		ec := catalogmocks.NewDataCoordCatalog(t)
+		ec.On("CreateIndex",
+			mock.Anything,
+			mock.Anything,
+		).Return(errors.New("fail"))
+
 		m := &meta{
 			RWMutex:              sync.RWMutex{},
 			ctx:                  context.Background(),
-			catalog:              &datacoord.Catalog{Txn: &saveFailKV{}},
+			catalog:              ec,
 			indexes:              make(map[UniqueID]map[UniqueID]*model.Index),
 			buildID2SegmentIndex: make(map[UniqueID]*model.SegmentIndex),
 		}
@@ -284,10 +303,22 @@ func TestMeta_CreateIndex(t *testing.T) {
 }
 
 func TestMeta_AddSegmentIndex(t *testing.T) {
+	sc := catalogmocks.NewDataCoordCatalog(t)
+	sc.On("CreateSegmentIndex",
+		mock.Anything,
+		mock.Anything,
+	).Return(nil)
+
+	ec := catalogmocks.NewDataCoordCatalog(t)
+	ec.On("CreateSegmentIndex",
+		mock.Anything,
+		mock.Anything,
+	).Return(errors.New("fail"))
+
 	m := &meta{
 		RWMutex:              sync.RWMutex{},
 		ctx:                  context.Background(),
-		catalog:              &datacoord.Catalog{Txn: &saveFailKV{}},
+		catalog:              ec,
 		indexes:              make(map[UniqueID]map[UniqueID]*model.Index),
 		buildID2SegmentIndex: make(map[UniqueID]*model.SegmentIndex),
 		segments: &SegmentsInfo{
@@ -330,7 +361,7 @@ func TestMeta_AddSegmentIndex(t *testing.T) {
 	})
 
 	t.Run("success", func(t *testing.T) {
-		m.catalog = &datacoord.Catalog{Txn: &mockEtcdKv{}}
+		m.catalog = sc
 		err := m.AddSegmentIndex(segmentIndex)
 		assert.NoError(t, err)
 	})
@@ -359,7 +390,7 @@ func TestMeta_GetIndexIDByName(t *testing.T) {
 	m := &meta{
 		RWMutex:              sync.RWMutex{},
 		ctx:                  context.Background(),
-		catalog:              &datacoord.Catalog{Txn: &saveFailKV{}},
+		catalog:              &datacoord.Catalog{MetaKv: &saveFailKV{}},
 		indexes:              make(map[UniqueID]map[UniqueID]*model.Index),
 		buildID2SegmentIndex: make(map[UniqueID]*model.SegmentIndex),
 	}
@@ -417,7 +448,7 @@ func TestMeta_GetSegmentIndexState(t *testing.T) {
 	m := &meta{
 		RWMutex:              sync.RWMutex{},
 		ctx:                  context.Background(),
-		catalog:              &datacoord.Catalog{Txn: &saveFailKV{}},
+		catalog:              &datacoord.Catalog{MetaKv: &saveFailKV{}},
 		indexes:              map[UniqueID]map[UniqueID]*model.Index{},
 		buildID2SegmentIndex: make(map[UniqueID]*model.SegmentIndex),
 		segments: &SegmentsInfo{
@@ -628,8 +659,19 @@ func TestMeta_GetSegmentIndexStateOnField(t *testing.T) {
 }
 
 func TestMeta_MarkIndexAsDeleted(t *testing.T) {
+	sc := catalogmocks.NewDataCoordCatalog(t)
+	sc.On("AlterIndexes",
+		mock.Anything,
+		mock.Anything,
+	).Return(nil)
+	ec := catalogmocks.NewDataCoordCatalog(t)
+	ec.On("AlterIndexes",
+		mock.Anything,
+		mock.Anything,
+	).Return(errors.New("fail"))
+
 	m := &meta{
-		catalog: &datacoord.Catalog{Txn: &mockEtcdKv{}},
+		catalog: sc,
 		indexes: map[UniqueID]map[UniqueID]*model.Index{
 			collID: {
 				indexID: {
@@ -663,13 +705,13 @@ func TestMeta_MarkIndexAsDeleted(t *testing.T) {
 	}
 
 	t.Run("fail", func(t *testing.T) {
-		m.catalog = &datacoord.Catalog{Txn: &saveFailKV{}}
+		m.catalog = ec
 		err := m.MarkIndexAsDeleted(collID, []UniqueID{indexID, indexID + 1, indexID + 2})
 		assert.Error(t, err)
 	})
 
 	t.Run("success", func(t *testing.T) {
-		m.catalog = &datacoord.Catalog{Txn: &mockEtcdKv{}}
+		m.catalog = sc
 		err := m.MarkIndexAsDeleted(collID, []UniqueID{indexID, indexID + 1, indexID + 2})
 		assert.NoError(t, err)
 
@@ -682,7 +724,7 @@ func TestMeta_MarkIndexAsDeleted(t *testing.T) {
 }
 
 func TestMeta_GetSegmentIndexes(t *testing.T) {
-	m := createMetaTable(&datacoord.Catalog{Txn: &mockEtcdKv{}})
+	m := createMetaTable(&datacoord.Catalog{MetaKv: mocks.NewMetaKv(t)})
 
 	t.Run("success", func(t *testing.T) {
 		segIndexes := m.GetSegmentIndexes(segID)
@@ -960,9 +1002,15 @@ func TestMeta_IsIndexExist(t *testing.T) {
 	})
 }
 
-func updateSegmentIndexMeta() *meta {
+func updateSegmentIndexMeta(t *testing.T) *meta {
+	sc := catalogmocks.NewDataCoordCatalog(t)
+	sc.On("AlterSegmentIndexes",
+		mock.Anything,
+		mock.Anything,
+	).Return(nil)
+
 	return &meta{
-		catalog: &datacoord.Catalog{Txn: &mockEtcdKv{}},
+		catalog: sc,
 		segments: &SegmentsInfo{
 			segments: map[UniqueID]*SegmentInfo{
 				segID: {
@@ -1036,7 +1084,12 @@ func updateSegmentIndexMeta() *meta {
 }
 
 func TestMeta_UpdateVersion(t *testing.T) {
-	m := updateSegmentIndexMeta()
+	m := updateSegmentIndexMeta(t)
+	ec := catalogmocks.NewDataCoordCatalog(t)
+	ec.On("AlterSegmentIndexes",
+		mock.Anything,
+		mock.Anything,
+	).Return(errors.New("fail"))
 
 	t.Run("success", func(t *testing.T) {
 		err := m.UpdateVersion(buildID, nodeID)
@@ -1044,7 +1097,7 @@ func TestMeta_UpdateVersion(t *testing.T) {
 	})
 
 	t.Run("fail", func(t *testing.T) {
-		m.catalog = &datacoord.Catalog{Txn: &saveFailKV{}}
+		m.catalog = ec
 		err := m.UpdateVersion(buildID, nodeID)
 		assert.Error(t, err)
 	})
@@ -1056,7 +1109,7 @@ func TestMeta_UpdateVersion(t *testing.T) {
 }
 
 func TestMeta_FinishTask(t *testing.T) {
-	m := updateSegmentIndexMeta()
+	m := updateSegmentIndexMeta(t)
 
 	t.Run("success", func(t *testing.T) {
 		err := m.FinishTask(&indexpb.IndexTaskInfo{
@@ -1071,7 +1124,7 @@ func TestMeta_FinishTask(t *testing.T) {
 
 	t.Run("fail", func(t *testing.T) {
 		m.catalog = &datacoord.Catalog{
-			Txn: &saveFailKV{},
+			MetaKv: &saveFailKV{},
 		}
 		err := m.FinishTask(&indexpb.IndexTaskInfo{
 			BuildID:        buildID,
@@ -1096,7 +1149,12 @@ func TestMeta_FinishTask(t *testing.T) {
 }
 
 func TestMeta_BuildIndex(t *testing.T) {
-	m := updateSegmentIndexMeta()
+	m := updateSegmentIndexMeta(t)
+	ec := catalogmocks.NewDataCoordCatalog(t)
+	ec.On("AlterSegmentIndexes",
+		mock.Anything,
+		mock.Anything,
+	).Return(errors.New("fail"))
 
 	t.Run("success", func(t *testing.T) {
 		err := m.BuildIndex(buildID)
@@ -1104,7 +1162,7 @@ func TestMeta_BuildIndex(t *testing.T) {
 	})
 
 	t.Run("fail", func(t *testing.T) {
-		m.catalog = &datacoord.Catalog{Txn: &saveFailKV{}}
+		m.catalog = ec
 		err := m.BuildIndex(buildID)
 		assert.Error(t, err)
 	})

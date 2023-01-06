@@ -27,7 +27,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
-	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/util/metautil"
@@ -577,10 +576,10 @@ func TestTryToSealSegment(t *testing.T) {
 	t.Run("seal with segment policy with kv fails", func(t *testing.T) {
 		Params.Init()
 		mockAllocator := newMockAllocator()
-		memoryKV := memkv.NewMemoryKV()
-		fkv := &saveFailKV{TxnKV: memoryKV}
-		meta, err := newMeta(context.TODO(), memoryKV, "", nil)
-
+		memoryKV := NewMetaMemoryKV()
+		fkv := &saveFailKV{MetaKv: memoryKV}
+		catalog := datacoord.NewCatalog(memoryKV, "", "")
+		meta, err := newMeta(context.TODO(), catalog, nil)
 		assert.Nil(t, err)
 
 		schema := newTestSchema()
@@ -592,7 +591,7 @@ func TestTryToSealSegment(t *testing.T) {
 		assert.Nil(t, err)
 		assert.EqualValues(t, 1, len(allocations))
 
-		segmentManager.meta.catalog = &datacoord.Catalog{Txn: fkv}
+		segmentManager.meta.catalog = &datacoord.Catalog{MetaKv: fkv}
 
 		ts, err := segmentManager.allocator.allocTimestamp(context.Background())
 		assert.Nil(t, err)
@@ -603,10 +602,10 @@ func TestTryToSealSegment(t *testing.T) {
 	t.Run("seal with channel policy with kv fails", func(t *testing.T) {
 		Params.Init()
 		mockAllocator := newMockAllocator()
-		memoryKV := memkv.NewMemoryKV()
-		fkv := &saveFailKV{TxnKV: memoryKV}
-		meta, err := newMeta(context.TODO(), memoryKV, "", nil)
-
+		memoryKV := NewMetaMemoryKV()
+		fkv := &saveFailKV{MetaKv: memoryKV}
+		catalog := datacoord.NewCatalog(memoryKV, "", "")
+		meta, err := newMeta(context.TODO(), catalog, nil)
 		assert.Nil(t, err)
 
 		schema := newTestSchema()
@@ -618,7 +617,7 @@ func TestTryToSealSegment(t *testing.T) {
 		assert.Nil(t, err)
 		assert.EqualValues(t, 1, len(allocations))
 
-		segmentManager.meta.catalog = &datacoord.Catalog{Txn: fkv}
+		segmentManager.meta.catalog = &datacoord.Catalog{MetaKv: fkv}
 
 		ts, err := segmentManager.allocator.allocTimestamp(context.Background())
 		assert.Nil(t, err)

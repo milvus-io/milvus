@@ -27,25 +27,24 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus-proto/go-api/schemapb"
-
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
-
-	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/stretchr/testify/mock"
-
-	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
-
-	"github.com/milvus-io/milvus/internal/metastore/model"
-
-	"github.com/milvus-io/milvus-proto/go-api/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	kvmocks "github.com/milvus-io/milvus/internal/kv/mocks"
+	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
+	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
+	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
 
 func Test_garbageCollector_basic(t *testing.T) {
@@ -327,7 +326,7 @@ func cleanupOSS(cli *minio.Client, bucket, root string) {
 	cli.RemoveBucket(context.TODO(), bucket)
 }
 
-func createMetaForRecycleUnusedIndexes(catalog *datacoord.Catalog) *meta {
+func createMetaForRecycleUnusedIndexes(catalog metastore.DataCoordCatalog) *meta {
 	var (
 		ctx    = context.Background()
 		collID = UniqueID(100)
@@ -394,21 +393,33 @@ func createMetaForRecycleUnusedIndexes(catalog *datacoord.Catalog) *meta {
 
 func TestGarbageCollector_recycleUnusedIndexes(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
+		catalog := catalogmocks.NewDataCoordCatalog(t)
+		catalog.On("DropIndex",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(nil)
 		gc := &garbageCollector{
-			meta: createMetaForRecycleUnusedIndexes(&datacoord.Catalog{Txn: &mockEtcdKv{}}),
+			meta: createMetaForRecycleUnusedIndexes(catalog),
 		}
 		gc.recycleUnusedIndexes()
 	})
 
 	t.Run("fail", func(t *testing.T) {
+		catalog := catalogmocks.NewDataCoordCatalog(t)
+		catalog.On("DropIndex",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(errors.New("fail"))
 		gc := &garbageCollector{
-			meta: createMetaForRecycleUnusedIndexes(&datacoord.Catalog{Txn: &removeFailKV{}}),
+			meta: createMetaForRecycleUnusedIndexes(catalog),
 		}
 		gc.recycleUnusedIndexes()
 	})
 }
 
-func createMetaForRecycleUnusedSegIndexes(catalog *datacoord.Catalog) *meta {
+func createMetaForRecycleUnusedSegIndexes(catalog metastore.DataCoordCatalog) *meta {
 	var (
 		ctx    = context.Background()
 		collID = UniqueID(100)
@@ -521,15 +532,31 @@ func createMetaForRecycleUnusedSegIndexes(catalog *datacoord.Catalog) *meta {
 
 func TestGarbageCollector_recycleUnusedSegIndexes(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
+		catalog := catalogmocks.NewDataCoordCatalog(t)
+		catalog.On("DropSegmentIndex",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(nil)
 		gc := &garbageCollector{
-			meta: createMetaForRecycleUnusedSegIndexes(&datacoord.Catalog{Txn: &mockEtcdKv{}}),
+			meta: createMetaForRecycleUnusedSegIndexes(catalog),
 		}
 		gc.recycleUnusedSegIndexes()
 	})
 
 	t.Run("fail", func(t *testing.T) {
+		catalog := catalogmocks.NewDataCoordCatalog(t)
+		catalog.On("DropSegmentIndex",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(errors.New("fail"))
 		gc := &garbageCollector{
-			meta: createMetaForRecycleUnusedSegIndexes(&datacoord.Catalog{Txn: &removeFailKV{}}),
+			meta: createMetaForRecycleUnusedSegIndexes(catalog),
 		}
 		gc.recycleUnusedSegIndexes()
 	})
@@ -676,7 +703,7 @@ func TestGarbageCollector_recycleUnusedIndexFiles(t *testing.T) {
 		cm.EXPECT().RemoveWithPrefix(mock.Anything, mock.Anything).Return(nil)
 		cm.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil)
 		gc := &garbageCollector{
-			meta: createMetaTableForRecycleUnusedIndexFiles(&datacoord.Catalog{Txn: &mockEtcdKv{}}),
+			meta: createMetaTableForRecycleUnusedIndexFiles(&datacoord.Catalog{MetaKv: kvmocks.NewMetaKv(t)}),
 			option: GcOption{
 				cli: cm,
 			},
@@ -689,7 +716,7 @@ func TestGarbageCollector_recycleUnusedIndexFiles(t *testing.T) {
 		cm.EXPECT().RootPath().Return("root")
 		cm.EXPECT().ListWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil, errors.New("error"))
 		gc := &garbageCollector{
-			meta: createMetaTableForRecycleUnusedIndexFiles(&datacoord.Catalog{Txn: &mockEtcdKv{}}),
+			meta: createMetaTableForRecycleUnusedIndexFiles(&datacoord.Catalog{MetaKv: kvmocks.NewMetaKv(t)}),
 			option: GcOption{
 				cli: cm,
 			},
@@ -704,7 +731,7 @@ func TestGarbageCollector_recycleUnusedIndexFiles(t *testing.T) {
 		cm.EXPECT().ListWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return([]string{"a/b/c/", "a/b/600/", "a/b/601/", "a/b/602/"}, nil, nil)
 		cm.EXPECT().RemoveWithPrefix(mock.Anything, mock.Anything).Return(nil)
 		gc := &garbageCollector{
-			meta: createMetaTableForRecycleUnusedIndexFiles(&datacoord.Catalog{Txn: &mockEtcdKv{}}),
+			meta: createMetaTableForRecycleUnusedIndexFiles(&datacoord.Catalog{MetaKv: kvmocks.NewMetaKv(t)}),
 			option: GcOption{
 				cli: cm,
 			},
@@ -719,7 +746,7 @@ func TestGarbageCollector_recycleUnusedIndexFiles(t *testing.T) {
 		cm.EXPECT().ListWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return([]string{"a/b/c/", "a/b/600/", "a/b/601/", "a/b/602/"}, nil, nil)
 		cm.EXPECT().RemoveWithPrefix(mock.Anything, mock.Anything).Return(errors.New("error"))
 		gc := &garbageCollector{
-			meta: createMetaTableForRecycleUnusedIndexFiles(&datacoord.Catalog{Txn: &mockEtcdKv{}}),
+			meta: createMetaTableForRecycleUnusedIndexFiles(&datacoord.Catalog{MetaKv: kvmocks.NewMetaKv(t)}),
 			option: GcOption{
 				cli: cm,
 			},
@@ -729,8 +756,22 @@ func TestGarbageCollector_recycleUnusedIndexFiles(t *testing.T) {
 }
 
 func TestGarbageCollector_clearETCD(t *testing.T) {
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	catalog.On("CreateSegmentIndex",
+		mock.Anything,
+		mock.Anything,
+	).Return(nil)
+	catalog.On("AlterSegmentIndexes",
+		mock.Anything,
+		mock.Anything,
+	).Return(nil)
+	catalog.On("DropSegment",
+		mock.Anything,
+		mock.Anything,
+	).Return(nil)
+
 	m := &meta{
-		catalog: &datacoord.Catalog{Txn: &mockEtcdKv{}},
+		catalog: catalog,
 		segments: &SegmentsInfo{
 			map[UniqueID]*SegmentInfo{
 				segID: {

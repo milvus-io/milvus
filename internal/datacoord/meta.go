@@ -32,10 +32,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/common"
-	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -80,10 +78,10 @@ type collectionInfo struct {
 }
 
 // NewMeta creates meta from provided `kv.TxnKV`
-func newMeta(ctx context.Context, kv kv.TxnKV, chunkManagerRootPath string, chunkManager storage.ChunkManager) (*meta, error) {
+func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManager storage.ChunkManager) (*meta, error) {
 	mt := &meta{
 		ctx:                  ctx,
-		catalog:              &datacoord.Catalog{Txn: kv, ChunkManagerRootPath: chunkManagerRootPath},
+		catalog:              catalog,
 		collections:          make(map[UniqueID]*collectionInfo),
 		segments:             NewSegmentsInfo(),
 		channelCPs:           make(map[string]*internalpb.MsgPosition),

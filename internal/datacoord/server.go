@@ -37,6 +37,7 @@ import (
 	rootcoordclient "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
@@ -268,7 +269,7 @@ func (s *Server) Init() error {
 		return err
 	}
 
-	if err = s.initMeta(storageCli.RootPath(), storageCli); err != nil {
+	if err = s.initMeta(storageCli); err != nil {
 		return err
 	}
 
@@ -454,13 +455,14 @@ func (s *Server) initSegmentManager() {
 	}
 }
 
-func (s *Server) initMeta(chunkManagerRootPath string, chunkManager storage.ChunkManager) error {
+func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	etcdKV := etcdkv.NewEtcdKV(s.etcdCli, Params.EtcdCfg.MetaRootPath.GetValue())
 
 	s.kvClient = etcdKV
 	reloadEtcdFn := func() error {
 		var err error
-		s.meta, err = newMeta(s.ctx, s.kvClient, chunkManagerRootPath, chunkManager)
+		catalog := datacoord.NewCatalog(etcdKV, chunkManager.RootPath(), Params.EtcdCfg.MetaRootPath.GetValue())
+		s.meta, err = newMeta(s.ctx, catalog, chunkManager)
 		if err != nil {
 			return err
 		}

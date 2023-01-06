@@ -22,11 +22,14 @@ import (
 	"sync/atomic"
 	"time"
 
+	clientv3 "go.etcd.io/etcd/client/v3"
+
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/kv"
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
+	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
@@ -36,9 +39,83 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
+type metaMemoryKV struct {
+	memkv.MemoryKV
+}
+
+func NewMetaMemoryKV() *metaMemoryKV {
+	return &metaMemoryKV{MemoryKV: *memkv.NewMemoryKV()}
+}
+
+func (mm *metaMemoryKV) WalkWithPrefix(prefix string, paginationSize int, fn func([]byte, []byte) error) error {
+	keys, values, err := mm.MemoryKV.LoadWithPrefix(prefix)
+	if err != nil {
+		return err
+	}
+
+	for i, k := range keys {
+		if err := fn([]byte(k), []byte(values[i])); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (mm *metaMemoryKV) GetPath(key string) string {
+	panic("implement me")
+}
+
+func (mm *metaMemoryKV) LoadWithPrefix2(key string) ([]string, []string, []int64, error) {
+	panic("implement me")
+}
+
+func (mm *metaMemoryKV) LoadWithRevisionAndVersions(key string) ([]string, []string, []int64, int64, error) {
+	panic("implement me")
+}
+
+func (mm *metaMemoryKV) LoadWithRevision(key string) ([]string, []string, int64, error) {
+	panic("implement me")
+}
+
+func (mm *metaMemoryKV) Watch(key string) clientv3.WatchChan {
+	panic("implement me")
+}
+
+func (mm *metaMemoryKV) WatchWithPrefix(key string) clientv3.WatchChan {
+	panic("implement me")
+}
+
+func (mm *metaMemoryKV) WatchWithRevision(key string, revision int64) clientv3.WatchChan {
+	panic("implement me")
+}
+
+func (mm *metaMemoryKV) SaveWithLease(key, value string, id clientv3.LeaseID) error {
+	panic("implement me")
+}
+
+func (mm *metaMemoryKV) SaveWithIgnoreLease(key, value string) error {
+	panic("implement me")
+}
+
+func (mm *metaMemoryKV) Grant(ttl int64) (id clientv3.LeaseID, err error) {
+	panic("implement me")
+}
+
+func (mm *metaMemoryKV) KeepAlive(id clientv3.LeaseID) (<-chan *clientv3.LeaseKeepAliveResponse, error) {
+	panic("implement me")
+}
+
+func (mm *metaMemoryKV) CompareValueAndSwap(key, value, target string, opts ...clientv3.OpOption) (bool, error) {
+	panic("implement me")
+}
+
+func (mm *metaMemoryKV) CompareVersionAndSwap(key string, version int64, target string, opts ...clientv3.OpOption) (bool, error) {
+	panic("implement me")
+}
+
 func newMemoryMeta() (*meta, error) {
-	memoryKV := memkv.NewMemoryKV()
-	return newMeta(context.TODO(), memoryKV, "", nil)
+	catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
+	return newMeta(context.TODO(), catalog, nil)
 }
 
 var _ allocator = (*MockAllocator)(nil)
@@ -91,7 +168,7 @@ func (a *FailsAllocator) allocID(_ context.Context) (UniqueID, error) {
 }
 
 // a mock kv that always fail when do `Save`
-type saveFailKV struct{ kv.TxnKV }
+type saveFailKV struct{ kv.MetaKv }
 
 // Save override behavior
 func (kv *saveFailKV) Save(key, value string) error {
@@ -103,7 +180,7 @@ func (kv *saveFailKV) MultiSave(kvs map[string]string) error {
 }
 
 // a mock kv that always fail when do `Remove`
-type removeFailKV struct{ kv.TxnKV }
+type removeFailKV struct{ kv.MetaKv }
 
 // Remove override behavior, inject error
 func (kv *removeFailKV) MultiRemove(key []string) error {

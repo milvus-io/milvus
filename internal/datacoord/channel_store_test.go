@@ -17,67 +17,16 @@
 package datacoord
 
 import (
-	"errors"
 	"fmt"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/kv"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+
+	"github.com/milvus-io/milvus/internal/kv"
+	"github.com/milvus-io/milvus/internal/kv/mocks"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 )
-
-type mockTxnKv struct{}
-
-func (m *mockTxnKv) Load(key string) (string, error) {
-	panic("not implemented") // TODO: Implement
-}
-
-func (m *mockTxnKv) MultiLoad(keys []string) ([]string, error) {
-	panic("not implemented") // TODO: Implement
-}
-
-func (m *mockTxnKv) LoadWithPrefix(key string) ([]string, []string, error) {
-	panic("not implemented") // TODO: Implement
-}
-
-func (m *mockTxnKv) Save(key string, value string) error {
-	panic("not implemented") // TODO: Implement
-}
-
-func (m *mockTxnKv) MultiSave(kvs map[string]string) error {
-	panic("not implemented") // TODO: Implement
-}
-
-func (m *mockTxnKv) Remove(key string) error {
-	panic("not implemented") // TODO: Implement
-}
-
-func (m *mockTxnKv) MultiRemove(keys []string) error {
-	panic("not implemented") // TODO: Implement
-}
-
-func (m *mockTxnKv) RemoveWithPrefix(key string) error {
-	panic("not implemented") // TODO: Implement
-}
-
-func (m *mockTxnKv) Close() {
-	panic("not implemented") // TODO: Implement
-}
-
-func (m *mockTxnKv) MultiSaveAndRemove(saves map[string]string, removals []string) error {
-	if len(saves)+len(removals) > 128 {
-		return errors.New("too many operations")
-	}
-	return nil
-}
-
-func (m *mockTxnKv) MultiRemoveWithPrefix(keys []string) error {
-	panic("not implemented") // TODO: Implement
-}
-
-func (m *mockTxnKv) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string) error {
-	panic("not implemented") // TODO: Implement
-}
 
 func genNodeChannelInfos(id int64, num int) *NodeChannelInfo {
 	channels := make([]*channel, 0, num)
@@ -118,6 +67,16 @@ func genChannelOperations(from, to int64, num int) ChannelOpSet {
 }
 
 func TestChannelStore_Update(t *testing.T) {
+	txnKv := mocks.NewTxnKV(t)
+	txnKv.On("MultiSaveAndRemove",
+		mock.Anything,
+		mock.Anything,
+	).Run(func(args mock.Arguments) {
+		saves := args.Get(0).(map[string]string)
+		removals := args.Get(1).([]string)
+		assert.False(t, len(saves)+len(removals) > 128, "too many operations")
+	}).Return(nil)
+
 	type fields struct {
 		store        kv.TxnKV
 		channelsInfo map[int64]*NodeChannelInfo
@@ -134,7 +93,7 @@ func TestChannelStore_Update(t *testing.T) {
 		{
 			"test more than 128 operations",
 			fields{
-				&mockTxnKv{},
+				txnKv,
 				map[int64]*NodeChannelInfo{
 					1: genNodeChannelInfos(1, 500),
 					2: {NodeID: 2},
