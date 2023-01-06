@@ -145,6 +145,17 @@ var (
 			roleNameLabelName,
 			nodeIDLabelName,
 		})
+
+	// RootCoordQuotaStates records the quota states of cluster.
+	RootCoordQuotaStates = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.RootCoordRole,
+			Name:      "quota_states",
+			Help:      "The quota states of cluster",
+		}, []string{
+			"quota_states",
+		})
 )
 
 //RegisterRootCoord registers RootCoord metrics
@@ -176,4 +187,5 @@ func RegisterRootCoord(registry *prometheus.Registry) {
 
 	registry.MustRegister(RootCoordNumOfRoles)
 	registry.MustRegister(RootCoordTtDelay)
+	registry.MustRegister(RootCoordQuotaStates)
 }

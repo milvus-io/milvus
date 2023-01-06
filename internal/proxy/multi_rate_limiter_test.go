@@ -17,9 +17,11 @@
 package proxy
 
 import (
+	"errors"
 	"math"
 	"testing"
 
+	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/ratelimitutil"
 	"github.com/stretchr/testify/assert"
@@ -35,12 +37,12 @@ func TestMultiRateLimiter(t *testing.T) {
 			multiLimiter.globalRateLimiter.limiters[internalpb.RateType(rt)] = ratelimitutil.NewLimiter(ratelimitutil.Limit(1000), 1)
 		}
 		for _, rt := range internalpb.RateType_value {
-			ok, _ := multiLimiter.Limit(internalpb.RateType(rt), 1)
-			assert.False(t, ok)
-			ok, _ = multiLimiter.Limit(internalpb.RateType(rt), math.MaxInt)
-			assert.False(t, ok)
-			ok, _ = multiLimiter.Limit(internalpb.RateType(rt), math.MaxInt)
-			assert.True(t, ok)
+			err := multiLimiter.Check(internalpb.RateType(rt), 1)
+			assert.NoError(t, err)
+			err = multiLimiter.Check(internalpb.RateType(rt), math.MaxInt)
+			assert.NoError(t, err)
+			err = multiLimiter.Check(internalpb.RateType(rt), math.MaxInt)
+			assert.True(t, errors.Is(err, ErrRateLimit))
 		}
 		Params.QuotaConfig.QuotaAndLimitsEnabled = bak
 	})
@@ -50,9 +52,8 @@ func TestMultiRateLimiter(t *testing.T) {
 		bak := Params.QuotaConfig.QuotaAndLimitsEnabled
 		Params.QuotaConfig.QuotaAndLimitsEnabled = false
 		for _, rt := range internalpb.RateType_value {
-			ok, r := multiLimiter.Limit(internalpb.RateType(rt), 1)
-			assert.False(t, ok)
-			assert.NotEqual(t, float64(0), r)
+			err := multiLimiter.Check(internalpb.RateType(rt), 1)
+			assert.NoError(t, err)
 		}
 		Params.QuotaConfig.QuotaAndLimitsEnabled = bak
 	})
@@ -64,9 +65,8 @@ func TestMultiRateLimiter(t *testing.T) {
 			multiLimiter := NewMultiRateLimiter()
 			bak := Params.QuotaConfig.QuotaAndLimitsEnabled
 			Params.QuotaConfig.QuotaAndLimitsEnabled = true
-			ok, r := multiLimiter.Limit(internalpb.RateType_DMLInsert, 1*1024*1024)
-			assert.False(t, ok)
-			assert.NotEqual(t, float64(0), r)
+			err := multiLimiter.Check(internalpb.RateType_DMLInsert, 1*1024*1024)
+			assert.NoError(t, err)
 			Params.QuotaConfig.QuotaAndLimitsEnabled = bak
 			Params.QuotaConfig.DMLMaxInsertRate = bakInsertRate
 		}
@@ -75,6 +75,17 @@ func TestMultiRateLimiter(t *testing.T) {
 		run(math.MaxFloat64 / 2)
 		run(math.MaxFloat64 / 3)
 		run(math.MaxFloat64 / 10000)
+	})
+
+	t.Run("test GetReadStateReason and GetWriteStateReason", func(t *testing.T) {
+		multiLimiter := NewMultiRateLimiter()
+		states := []milvuspb.QuotaState{milvuspb.QuotaState_DenyToWrite, milvuspb.QuotaState_DenyToRead}
+		writeReason := "memory quota exhausted"
+		readReason := "manually deny to read"
+		reasons := []string{writeReason, readReason}
+		multiLimiter.SetQuotaStates(states, reasons)
+		assert.Equal(t, writeReason, multiLimiter.GetWriteStateReason())
+		assert.Equal(t, readReason, multiLimiter.GetReadStateReason())
 	})
 }
 

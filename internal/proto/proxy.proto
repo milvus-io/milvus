@@ -53,4 +53,6 @@ message RefreshPolicyInfoCacheRequest {
 message SetRatesRequest {
   common.MsgBase base = 1;
   repeated internal.Rate rates = 2;
+  repeated milvus.QuotaState states = 3;
+  repeated string state_reasons = 4;
 }

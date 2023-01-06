@@ -18,6 +18,7 @@ package proxy
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/golang/protobuf/proto"
@@ -30,12 +31,38 @@ import (
 )
 
 type limiterMock struct {
-	limit bool
-	rate  float64
+	limit             bool
+	rate              float64
+	quotaStates       []milvuspb.QuotaState
+	quotaStateReasons []string
 }
 
-func (l *limiterMock) Limit(_ internalpb.RateType, _ int) (bool, float64) {
-	return l.limit, l.rate
+func (l *limiterMock) Check(rt internalpb.RateType, n int) error {
+	if l.rate == 0 {
+		return ErrForceDeny
+	}
+	if l.limit {
+		return ErrRateLimit
+	}
+	return nil
+}
+
+func (l *limiterMock) GetReadStateReason() string {
+	for i := range l.quotaStates {
+		if l.quotaStates[i] == milvuspb.QuotaState_DenyToRead {
+			return l.quotaStateReasons[i]
+		}
+	}
+	return ""
+}
+
+func (l *limiterMock) GetWriteStateReason() string {
+	for i := range l.quotaStates {
+		if l.quotaStates[i] == milvuspb.QuotaState_DenyToWrite {
+			return l.quotaStateReasons[i]
+		}
+	}
+	return ""
 }
 
 func TestRateLimitInterceptor(t *testing.T) {
@@ -93,8 +120,8 @@ func TestRateLimitInterceptor(t *testing.T) {
 
 	t.Run("test getFailedResponse", func(t *testing.T) {
 		testGetFailedResponse := func(req interface{}) {
-			_, err := getFailedResponse(req, commonpb.ErrorCode_UnexpectedError, "mock")
-			assert.NoError(t, err)
+			rsp := getFailedResponse(req, commonpb.ErrorCode_UnexpectedError, "method", fmt.Errorf("mock err"))
+			assert.NotNil(t, rsp)
 		}
 
 		testGetFailedResponse(&milvuspb.DeleteRequest{})
@@ -106,10 +133,10 @@ func TestRateLimitInterceptor(t *testing.T) {
 		testGetFailedResponse(&milvuspb.ManualCompactionRequest{})
 
 		// test illegal
-		_, err := getFailedResponse(&milvuspb.SearchResults{}, commonpb.ErrorCode_UnexpectedError, "mock")
-		assert.Error(t, err)
-		_, err = getFailedResponse(nil, commonpb.ErrorCode_UnexpectedError, "mock")
-		assert.Error(t, err)
+		rsp := getFailedResponse(&milvuspb.SearchResults{}, commonpb.ErrorCode_UnexpectedError, "method", fmt.Errorf("mock err"))
+		assert.Nil(t, rsp)
+		rsp = getFailedResponse(nil, commonpb.ErrorCode_UnexpectedError, "method", fmt.Errorf("mock err"))
+		assert.Nil(t, rsp)
 	})
 
 	t.Run("test RateLimitInterceptor", func(t *testing.T) {

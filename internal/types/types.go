@@ -40,7 +40,9 @@ type TimeTickProvider interface {
 // If Limit function return true, the request will be rejected.
 // Otherwise, the request will pass. Limit also returns limit of limiter.
 type Limiter interface {
-	Limit(rt internalpb.RateType, n int) (bool, float64)
+	Check(rt internalpb.RateType, n int) error
+	GetReadStateReason() string
+	GetWriteStateReason() string
 }
 
 // Component is the interface all services implement
