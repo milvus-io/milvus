@@ -134,6 +134,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalance() {
 	cases := []struct {
 		name                 string
 		nodes                []int64
+		notExistedNodes      []int64
 		segmentCnts          []int
 		states               []session.State
 		shouldMock           bool
@@ -212,16 +213,18 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalance() {
 			},
 		},
 		{
-			name:        "already balanced",
-			nodes:       []int64{1, 2},
-			segmentCnts: []int{1, 2},
-			states:      []session.State{session.NodeStateNormal, session.NodeStateNormal},
+			name:            "already balanced",
+			nodes:           []int64{1, 2},
+			notExistedNodes: []int64{10},
+			segmentCnts:     []int{1, 2},
+			states:          []session.State{session.NodeStateNormal, session.NodeStateNormal},
 			distributions: map[int64][]*meta.Segment{
 				1: {{SegmentInfo: &datapb.SegmentInfo{ID: 1, CollectionID: 1, NumOfRows: 30}, Node: 1}},
 				2: {
 					{SegmentInfo: &datapb.SegmentInfo{ID: 2, CollectionID: 1, NumOfRows: 20}, Node: 2},
 					{SegmentInfo: &datapb.SegmentInfo{ID: 3, CollectionID: 1, NumOfRows: 30}, Node: 2},
 				},
+				10: {{SegmentInfo: &datapb.SegmentInfo{ID: 4, CollectionID: 1, NumOfRows: 30}, Node: 10}},
 			},
 			expectPlans:        []SegmentAssignPlan{},
 			expectChannelPlans: []ChannelAssignPlan{},
@@ -259,7 +262,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalance() {
 			collection.LoadPercentage = 100
 			collection.Status = querypb.LoadStatus_Loaded
 			balancer.meta.CollectionManager.PutCollection(collection)
-			balancer.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, c.nodes))
+			balancer.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, append(c.nodes, c.notExistedNodes...)))
 			for node, s := range c.distributions {
 				balancer.dist.SegmentDistManager.Update(node, s...)
 			}

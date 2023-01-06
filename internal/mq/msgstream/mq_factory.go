@@ -143,13 +143,6 @@ func (f *PmsFactory) NewMsgStreamDisposer(ctx context.Context) func([]string, st
 				}
 				log.Warn("failed to clean up subscriptions", zap.String("pulsar web", f.PulsarWebAddress),
 					zap.String("topic", channel), zap.Any("subname", subname), zap.Error(err))
-				// fallback to original way
-				msgstream, err := f.NewMsgStream(ctx)
-				if err != nil {
-					return err
-				}
-				msgstream.AsConsumer(channels, subname, mqwrapper.SubscriptionPositionUnknown)
-				msgstream.Close()
 			}
 		}
 		return nil
