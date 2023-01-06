@@ -151,8 +151,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		for _, test := range invalidInTests {
 			te.Run(test.desc, func(t *testing.T) {
 				dn := deleteNode{}
-				rt := dn.Operate(test.in)
-				assert.Empty(t, rt)
+				assert.False(t, dn.IsValidInMsg(test.in))
 			})
 		}
 	})
@@ -439,6 +438,11 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		//2. here we set flushing segments inside fgmsg to empty
 		//in order to verify the validity of auto flush function
 		msg := genFlowGraphDeleteMsg(int64Pks, chanName)
+
+		// delete has to match segment partition ID
+		for _, msg := range msg.deleteMessages {
+			msg.PartitionID = 0
+		}
 		msg.segmentsToSync = []UniqueID{}
 
 		var fgMsg flowgraph.Msg = &msg

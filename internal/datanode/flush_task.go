@@ -218,7 +218,14 @@ func (t *flushTaskRunner) getFlushPack() *segmentFlushPack {
 		dropped:    t.dropped,
 	}
 	log.Debug("flush pack composed",
-		zap.Any("pack", pack))
+		zap.Int64("segmentID", t.segmentID),
+		zap.Int("insertLogs", len(t.insertLogs)),
+		zap.Int("statsLogs", len(t.statsLogs)),
+		zap.Int("deleteLogs", len(t.deltaLogs)),
+		zap.Bool("flushed", t.flushed),
+		zap.Bool("dropped", t.dropped),
+	)
+
 	if t.insertErr != nil || t.deleteErr != nil {
 		log.Warn("flush task error detected", zap.Error(t.insertErr), zap.Error(t.deleteErr))
 		pack.err = errors.New("execution failed")

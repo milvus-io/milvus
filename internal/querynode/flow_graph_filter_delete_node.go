@@ -43,29 +43,39 @@ func (fddNode *filterDeleteNode) Name() string {
 	return fmt.Sprintf("fdNode-%s", fddNode.vchannel)
 }
 
-// Operate handles input messages, to filter invalid delete messages
-func (fddNode *filterDeleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
-	if in == nil {
-		log.Debug("type assertion failed for MsgStreamMsg because it's nil", zap.String("name", fddNode.Name()))
-		return []Msg{}
+func (fddNode *filterDeleteNode) IsValidInMsg(in []Msg) bool {
+	if !fddNode.baseNode.IsValidInMsg(in) {
+		return false
 	}
-
-	if len(in) != 1 {
-		log.Warn("Invalid operate message input in filterDDNode", zap.Int("input length", len(in)), zap.String("name", fddNode.Name()))
-		return []Msg{}
-	}
-
-	msgStreamMsg, ok := in[0].(*MsgStreamMsg)
+	_, ok := in[0].(*MsgStreamMsg)
 	if !ok {
 		log.Warn("type assertion failed for MsgStreamMsg", zap.String("msgType", reflect.TypeOf(in[0]).Name()), zap.String("name", fddNode.Name()))
-		return []Msg{}
+		return false
 	}
+	return true
+}
+
+// Operate handles input messages, to filter invalid delete messages
+func (fddNode *filterDeleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
+	msgStreamMsg := in[0].(*MsgStreamMsg)
 
 	var spans []opentracing.Span
 	for _, msg := range msgStreamMsg.TsMessages() {
 		sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
 		spans = append(spans, sp)
 		msg.SetTraceCtx(ctx)
+	}
+
+	defer func() {
+		for _, sp := range spans {
+			sp.Finish()
+		}
+	}()
+
+	if msgStreamMsg.IsCloseMsg() {
+		return []Msg{
+			&deleteMsg{BaseMsg: flowgraph.NewBaseMsg(true)},
+		}
 	}
 
 	var dMsg = deleteMsg{
@@ -102,11 +112,8 @@ func (fddNode *filterDeleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 				zap.String("vchannel", fddNode.vchannel))
 		}
 	}
-	var res Msg = &dMsg
-	for _, sp := range spans {
-		sp.Finish()
-	}
-	return []Msg{res}
+
+	return []Msg{&dMsg}
 }
 
 // filterInvalidDeleteMessage would filter invalid delete messages
@@ -142,7 +149,6 @@ func (fddNode *filterDeleteNode) filterInvalidDeleteMessage(msg *msgstream.Delet
 
 // newFilteredDeleteNode returns a new filterDeleteNode
 func newFilteredDeleteNode(metaReplica ReplicaInterface, collectionID UniqueID, vchannel Channel) *filterDeleteNode {
-
 	maxQueueLength := Params.QueryNodeCfg.FlowGraphMaxQueueLength.GetAsInt32()
 	maxParallelism := Params.QueryNodeCfg.FlowGraphMaxParallelism.GetAsInt32()
 

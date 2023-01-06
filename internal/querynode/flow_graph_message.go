@@ -23,12 +23,14 @@ import (
 
 // Msg is an interface which has a function named TimeTick
 type Msg = flowgraph.Msg
+type BaseMsg = flowgraph.BaseMsg
 
 // MsgStreamMsg is an implementation of interface Msg
 type MsgStreamMsg = flowgraph.MsgStreamMsg
 
 // insertMsg is an implementation of interface Msg
 type insertMsg struct {
+	BaseMsg
 	insertMessages []*msgstream.InsertMsg
 	deleteMessages []*msgstream.DeleteMsg
 	timeRange      TimeRange
@@ -36,12 +38,14 @@ type insertMsg struct {
 
 // deleteMsg is an implementation of interface Msg
 type deleteMsg struct {
+	BaseMsg
 	deleteMessages []*msgstream.DeleteMsg
 	timeRange      TimeRange
 }
 
 // serviceTimeMsg is an implementation of interface Msg
 type serviceTimeMsg struct {
+	BaseMsg
 	timeRange TimeRange
 }
 
@@ -50,12 +54,24 @@ func (iMsg *insertMsg) TimeTick() Timestamp {
 	return iMsg.timeRange.timestampMax
 }
 
+func (iMsg *insertMsg) IsClose() bool {
+	return iMsg.IsCloseMsg()
+}
+
 // TimeTick returns timestamp of deleteMsg
 func (dMsg *deleteMsg) TimeTick() Timestamp {
 	return dMsg.timeRange.timestampMax
 }
 
+func (dMsg *deleteMsg) IsClose() bool {
+	return dMsg.IsCloseMsg()
+}
+
 // TimeTick returns timestamp of serviceTimeMsg
 func (stMsg *serviceTimeMsg) TimeTick() Timestamp {
 	return stMsg.timeRange.timestampMax
+}
+
+func (stMsg *serviceTimeMsg) IsClose() bool {
+	return stMsg.IsCloseMsg()
 }

@@ -71,22 +71,38 @@ func (iNode *insertNode) Name() string {
 	return fmt.Sprintf("iNode-%s", iNode.vchannel)
 }
 
-// Operate handles input messages, to execute insert operations
-func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
-	if in == nil {
-		log.Debug("type assertion failed for insertMsg because it's nil", zap.String("name", iNode.Name()))
-		return []Msg{}
+func (iNode *insertNode) IsValidInMsg(in []Msg) bool {
+	if !iNode.baseNode.IsValidInMsg(in) {
+		return false
 	}
-
-	if len(in) != 1 {
-		log.Warn("Invalid operate message input in insertNode", zap.Int("input length", len(in)), zap.String("name", iNode.Name()))
-		return []Msg{}
-	}
-
-	iMsg, ok := in[0].(*insertMsg)
+	_, ok := in[0].(*insertMsg)
 	if !ok {
 		log.Warn("type assertion failed for insertMsg", zap.String("msgType", reflect.TypeOf(in[0]).Name()), zap.String("name", iNode.Name()))
-		return []Msg{}
+		return false
+	}
+	return true
+}
+
+// Operate handles input messages, to execute insert operations
+func (iNode *insertNode) Operate(in []Msg) []Msg {
+	iMsg := in[0].(*insertMsg)
+
+	var spans []opentracing.Span
+	for _, msg := range iMsg.insertMessages {
+		sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
+		spans = append(spans, sp)
+		msg.SetTraceCtx(ctx)
+	}
+	defer func() {
+		for _, sp := range spans {
+			sp.Finish()
+		}
+	}()
+
+	if iMsg.IsCloseMsg() {
+		return []Msg{
+			&serviceTimeMsg{BaseMsg: flowgraph.NewBaseMsg(true)},
+		}
 	}
 
 	iData := insertData{
@@ -95,13 +111,6 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		insertRecords:    make(map[UniqueID][]*schemapb.FieldData),
 		insertOffset:     make(map[UniqueID]int64),
 		insertPKs:        make(map[UniqueID][]primaryKey),
-	}
-
-	var spans []opentracing.Span
-	for _, msg := range iMsg.insertMessages {
-		sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
-		spans = append(spans, sp)
-		msg.SetTraceCtx(ctx)
 	}
 
 	collection, err := iNode.metaReplica.getCollectionByID(iNode.collectionID)
@@ -294,9 +303,6 @@ func (iNode *insertNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 
 	var res Msg = &serviceTimeMsg{
 		timeRange: iMsg.timeRange,
-	}
-	for _, sp := range spans {
-		sp.Finish()
 	}
 
 	return []Msg{res}

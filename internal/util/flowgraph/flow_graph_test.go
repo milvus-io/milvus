@@ -58,12 +58,16 @@ func (m *numMsg) TimeTick() Timestamp {
 	return Timestamp(0)
 }
 
+func (m *numMsg) IsClose() bool {
+	return false
+}
+
 func (n *nodeA) Name() string {
 	return "NodeA"
 }
 
 func (n *nodeA) Operate(in []Msg) []Msg {
-	// ignore `in` because nodeA doesn't have any upstream node.
+	// ignore `in` because nodeA doesn't have any upstream node.git s
 	a := <-n.inputChan
 	var res Msg = &numMsg{
 		num: a,

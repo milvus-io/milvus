@@ -38,6 +38,7 @@ type Node interface {
 	Name() string
 	MaxQueueLength() int32
 	MaxParallelism() int32
+	IsValidInMsg(in []Msg) bool
 	Operate(in []Msg) []Msg
 	IsInputNode() bool
 	Start()
@@ -85,8 +86,7 @@ func (nodeCtx *nodeCtx) Unblock() {
 
 func isCloseMsg(msgs []Msg) bool {
 	if len(msgs) == 1 {
-		msg, ok := msgs[0].(*MsgStreamMsg)
-		return ok && msg.isCloseMsg
+		return msgs[0].IsClose()
 	}
 	return false
 }
@@ -118,15 +118,14 @@ func (nodeCtx *nodeCtx) work() {
 				input = <-nodeCtx.inputChannel
 			}
 			// the input message decides whether the operate method is executed
-			if isCloseMsg(input) {
-				output = input
-			}
-			if len(output) == 0 {
-				n := nodeCtx.node
-				nodeCtx.blockMutex.RLock()
-				output = n.Operate(input)
+			n := nodeCtx.node
+			nodeCtx.blockMutex.RLock()
+			if !n.IsValidInMsg(input) {
 				nodeCtx.blockMutex.RUnlock()
+				continue
 			}
+			output = n.Operate(input)
+			nodeCtx.blockMutex.RUnlock()
 			// the output decide whether the node should be closed.
 			if isCloseMsg(output) {
 				close(nodeCtx.closeCh)
@@ -186,3 +185,24 @@ func (node *BaseNode) Start() {}
 
 // Close implementing Node, base node does nothing when stops
 func (node *BaseNode) Close() {}
+
+func (node *BaseNode) Name() string {
+	return "BaseNode"
+}
+
+func (node *BaseNode) Operate(in []Msg) []Msg {
+	return in
+}
+
+func (node *BaseNode) IsValidInMsg(in []Msg) bool {
+	if in == nil {
+		log.Info("type assertion failed because it's nil")
+		return false
+	}
+
+	if len(in) != 1 {
+		log.Warn("Invalid operate message input", zap.Int("input length", len(in)))
+		return false
+	}
+	return true
+}
