@@ -2,6 +2,8 @@ package querynode
 
 import (
 	"context"
+	"errors"
+	"fmt"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/log"
@@ -38,6 +40,13 @@ func (node *QueryNode) TransferLoad(ctx context.Context, req *querypb.LoadSegmen
 	req.NeedTransfer = false
 	err := shardCluster.LoadSegments(ctx, req)
 	if err != nil {
+		if errors.Is(err, ErrInsufficientMemory) {
+			log.Warn("insufficient memory when shard cluster load segments", zap.Error(err))
+			return &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_InsufficientMemoryToLoad,
+				Reason:    fmt.Sprintf("insufficient memory when shard cluster load segments, err:%s", err.Error()),
+			}, nil
+		}
 		log.Warn("shard cluster failed to load segments", zap.Error(err))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,

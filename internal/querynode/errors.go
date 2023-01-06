@@ -27,6 +27,8 @@ var (
 	ErrShardNotAvailable = errors.New("ShardNotAvailable")
 	// ErrTsLagTooLarge serviceable and guarantee lag too large.
 	ErrTsLagTooLarge = errors.New("Timestamp lag too large")
+	// ErrInsufficientMemory returns insufficient memory error.
+	ErrInsufficientMemory = errors.New("InsufficientMemoryToLoad")
 )
 
 // WrapErrShardNotAvailable wraps ErrShardNotAvailable with replica id and channel name.
