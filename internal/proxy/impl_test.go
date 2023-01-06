@@ -133,8 +133,8 @@ func TestProxy_CheckHealth(t *testing.T) {
 		assert.Equal(t, 0, len(resp.GetReasons()))
 
 		states := []milvuspb.QuotaState{milvuspb.QuotaState_DenyToWrite, milvuspb.QuotaState_DenyToRead}
-		reasons := []string{"memory quota exhausted", "manually deny to read"}
-		node.multiRateLimiter.SetQuotaStates(states, reasons)
+		codes := []commonpb.ErrorCode{commonpb.ErrorCode_MemoryQuotaExhausted, commonpb.ErrorCode_ForceDeny}
+		node.multiRateLimiter.SetQuotaStates(states, codes)
 		resp, err = node.CheckHealth(context.Background(), &milvuspb.CheckHealthRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, true, resp.IsHealthy)

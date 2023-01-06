@@ -23,6 +23,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
@@ -31,13 +32,24 @@ import (
 	"github.com/milvus-io/milvus/internal/util/ratelimitutil"
 )
 
+var QuotaErrorString = map[commonpb.ErrorCode]string{
+	commonpb.ErrorCode_ForceDeny:            "manually force deny",
+	commonpb.ErrorCode_MemoryQuotaExhausted: "memory quota exhausted, please allocate more resources",
+	commonpb.ErrorCode_DiskQuotaExhausted:   "disk quota exhausted, please allocate more resources",
+	commonpb.ErrorCode_TimeTickLongDelay:    "time tick long delay",
+}
+
+func GetQuotaErrorString(errCode commonpb.ErrorCode) string {
+	return QuotaErrorString[errCode]
+}
+
 // MultiRateLimiter includes multilevel rate limiters, such as global rateLimiter,
 // collection level rateLimiter and so on. It also implements Limiter interface.
 type MultiRateLimiter struct {
 	globalRateLimiter *rateLimiter
 	// TODO: add collection level rateLimiter
 	quotaStatesMu sync.RWMutex
-	quotaStates   map[milvuspb.QuotaState]string
+	quotaStates   map[milvuspb.QuotaState]commonpb.ErrorCode
 }
 
 // NewMultiRateLimiter returns a new MultiRateLimiter.
@@ -48,18 +60,32 @@ func NewMultiRateLimiter() *MultiRateLimiter {
 }
 
 // Check checks if request would be limited or denied.
-func (m *MultiRateLimiter) Check(rt internalpb.RateType, n int) error {
+func (m *MultiRateLimiter) Check(rt internalpb.RateType, n int) commonpb.ErrorCode {
 	if !Params.QuotaConfig.QuotaAndLimitsEnabled.GetAsBool() {
-		return nil
+		return commonpb.ErrorCode_Success
 	}
 	limit, rate := m.globalRateLimiter.limit(rt, n)
 	if rate == 0 {
-		return wrapForceDenyError(rt, m)
+		return m.GetErrorCode(rt)
 	}
 	if limit {
-		return wrapRateLimitError()
+		return commonpb.ErrorCode_RateLimit
 	}
-	return nil
+	return commonpb.ErrorCode_Success
+}
+
+func (m *MultiRateLimiter) GetErrorCode(rt internalpb.RateType) commonpb.ErrorCode {
+	switch rt {
+	case internalpb.RateType_DMLInsert, internalpb.RateType_DMLDelete, internalpb.RateType_DMLBulkLoad:
+		m.quotaStatesMu.RLock()
+		defer m.quotaStatesMu.RUnlock()
+		return m.quotaStates[milvuspb.QuotaState_DenyToWrite]
+	case internalpb.RateType_DQLSearch, internalpb.RateType_DQLQuery:
+		m.quotaStatesMu.RLock()
+		defer m.quotaStatesMu.RUnlock()
+		return m.quotaStates[milvuspb.QuotaState_DenyToRead]
+	}
+	return commonpb.ErrorCode_Success
 }
 
 // GetQuotaStates returns quota states.
@@ -70,30 +96,18 @@ func (m *MultiRateLimiter) GetQuotaStates() ([]milvuspb.QuotaState, []string) {
 	reasons := make([]string, 0, len(m.quotaStates))
 	for k, v := range m.quotaStates {
 		states = append(states, k)
-		reasons = append(reasons, v)
+		reasons = append(reasons, GetQuotaErrorString(v))
 	}
 	return states, reasons
 }
 
-func (m *MultiRateLimiter) GetReadStateReason() string {
-	m.quotaStatesMu.RLock()
-	defer m.quotaStatesMu.RUnlock()
-	return m.quotaStates[milvuspb.QuotaState_DenyToRead]
-}
-
-func (m *MultiRateLimiter) GetWriteStateReason() string {
-	m.quotaStatesMu.RLock()
-	defer m.quotaStatesMu.RUnlock()
-	return m.quotaStates[milvuspb.QuotaState_DenyToWrite]
-}
-
 // SetQuotaStates sets quota states for MultiRateLimiter.
-func (m *MultiRateLimiter) SetQuotaStates(states []milvuspb.QuotaState, reasons []string) {
+func (m *MultiRateLimiter) SetQuotaStates(states []milvuspb.QuotaState, codes []commonpb.ErrorCode) {
 	m.quotaStatesMu.Lock()
 	defer m.quotaStatesMu.Unlock()
-	m.quotaStates = make(map[milvuspb.QuotaState]string, len(states))
+	m.quotaStates = make(map[milvuspb.QuotaState]commonpb.ErrorCode, len(states))
 	for i := 0; i < len(states); i++ {
-		m.quotaStates[states[i]] = reasons[i]
+		m.quotaStates[states[i]] = codes[i]
 	}
 }
 

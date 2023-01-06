@@ -4310,11 +4310,11 @@ func (node *Proxy) SetRates(ctx context.Context, request *proxypb.SetRatesReques
 		resp.Reason = err.Error()
 		return resp, nil
 	}
-	node.multiRateLimiter.SetQuotaStates(request.GetStates(), request.GetStateReasons())
+	node.multiRateLimiter.SetQuotaStates(request.GetStates(), request.GetCodes())
 	log.Info("current rates in proxy", zap.Int64("proxyNodeID", paramtable.GetNodeID()), zap.Any("rates", request.GetRates()))
 	if len(request.GetStates()) != 0 {
 		for i := range request.GetStates() {
-			log.Warn("Proxy set quota states", zap.String("state", request.GetStates()[i].String()), zap.String("reason", request.GetStateReasons()[i]))
+			log.Warn("Proxy set quota states", zap.String("state", request.GetStates()[i].String()), zap.String("reason", request.GetCodes()[i].String()))
 		}
 	}
 	resp.ErrorCode = commonpb.ErrorCode_Success

@@ -17,14 +17,12 @@
 package proxy
 
 import (
-	"errors"
 	"testing"
+
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/stretchr/testify/assert"
-	"go.uber.org/zap"
 )
 
 func Test_errInvalidNumRows(t *testing.T) {
@@ -151,17 +149,4 @@ func Test_errProxyIsUnhealthy(t *testing.T) {
 		log.Info("Test_errProxyIsUnhealthy",
 			zap.Error(errProxyIsUnhealthy(id)))
 	}
-}
-
-func Test_ErrRateLimitAndErrForceDeny(t *testing.T) {
-	err := wrapRateLimitError()
-	assert.True(t, errors.Is(err, ErrRateLimit))
-
-	limiter := NewMultiRateLimiter()
-	err = wrapForceDenyError(internalpb.RateType_DMLInsert, limiter)
-	assert.True(t, errors.Is(err, ErrForceDeny))
-	err = wrapForceDenyError(internalpb.RateType_DMLDelete, limiter)
-	assert.True(t, errors.Is(err, ErrForceDeny))
-	err = wrapForceDenyError(internalpb.RateType_DQLSearch, limiter)
-	assert.True(t, errors.Is(err, ErrForceDeny))
 }

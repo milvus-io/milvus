@@ -18,7 +18,6 @@ package proxy
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"reflect"
 
@@ -38,15 +37,9 @@ func RateLimitInterceptor(limiter types.Limiter) grpc.UnaryServerInterceptor {
 		if err != nil {
 			return handler(ctx, req)
 		}
-		err = limiter.Check(rt, n)
-		if errors.Is(err, ErrForceDeny) {
-			rsp := getFailedResponse(req, commonpb.ErrorCode_ForceDeny, info.FullMethod, err)
-			if rsp != nil {
-				return rsp, nil
-			}
-		}
-		if errors.Is(err, ErrRateLimit) {
-			rsp := getFailedResponse(req, commonpb.ErrorCode_RateLimit, info.FullMethod, err)
+		code := limiter.Check(rt, n)
+		if code != commonpb.ErrorCode_Success {
+			rsp := getFailedResponse(req, rt, code, info.FullMethod)
 			if rsp != nil {
 				return rsp, nil
 			}
@@ -113,37 +106,53 @@ func failedBoolResponse(code commonpb.ErrorCode, reason string) *milvuspb.BoolRe
 	}
 }
 
+func wrapQuotaError(rt internalpb.RateType, errCode commonpb.ErrorCode, fullMethod string) error {
+	if errCode == commonpb.ErrorCode_RateLimit {
+		return fmt.Errorf("request is rejected by grpc RateLimiter middleware, please retry later, req: %s", fullMethod)
+	}
+
+	// deny to write/read
+	var op string
+	switch rt {
+	case internalpb.RateType_DMLInsert, internalpb.RateType_DMLDelete, internalpb.RateType_DMLBulkLoad:
+		op = "write"
+	case internalpb.RateType_DQLSearch, internalpb.RateType_DQLQuery:
+		op = "read"
+	}
+	return fmt.Errorf("deny to %s, reason: %s, req: %s", op, GetQuotaErrorString(errCode), fullMethod)
+}
+
 // getFailedResponse returns failed response.
-func getFailedResponse(req interface{}, code commonpb.ErrorCode, fullMethod string, err error) interface{} {
-	reason := fmt.Sprintf("%s, req: %s", err, fullMethod)
+func getFailedResponse(req interface{}, rt internalpb.RateType, errCode commonpb.ErrorCode, fullMethod string) interface{} {
+	err := wrapQuotaError(rt, errCode, fullMethod)
 	switch req.(type) {
 	case *milvuspb.InsertRequest, *milvuspb.DeleteRequest:
-		return failedMutationResult(code, reason)
+		return failedMutationResult(errCode, err.Error())
 	case *milvuspb.ImportRequest:
 		return &milvuspb.ImportResponse{
-			Status: failedStatus(code, reason),
+			Status: failedStatus(errCode, err.Error()),
 		}
 	case *milvuspb.SearchRequest:
 		return &milvuspb.SearchResults{
-			Status: failedStatus(code, reason),
+			Status: failedStatus(errCode, err.Error()),
 		}
 	case *milvuspb.QueryRequest:
 		return &milvuspb.QueryResults{
-			Status: failedStatus(code, reason),
+			Status: failedStatus(errCode, err.Error()),
 		}
 	case *milvuspb.CreateCollectionRequest, *milvuspb.DropCollectionRequest,
 		*milvuspb.LoadCollectionRequest, *milvuspb.ReleaseCollectionRequest,
 		*milvuspb.CreatePartitionRequest, *milvuspb.DropPartitionRequest,
 		*milvuspb.LoadPartitionsRequest, *milvuspb.ReleasePartitionsRequest,
 		*milvuspb.CreateIndexRequest, *milvuspb.DropIndexRequest:
-		return failedStatus(code, reason)
+		return failedStatus(errCode, err.Error())
 	case *milvuspb.FlushRequest:
 		return &milvuspb.FlushResponse{
-			Status: failedStatus(code, reason),
+			Status: failedStatus(errCode, err.Error()),
 		}
 	case *milvuspb.ManualCompactionRequest:
 		return &milvuspb.ManualCompactionResponse{
-			Status: failedStatus(code, reason),
+			Status: failedStatus(errCode, err.Error()),
 		}
 	}
 	return nil

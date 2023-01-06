@@ -27,7 +27,7 @@ require (
 	github.com/klauspost/compress v1.14.4
 	github.com/lingdor/stackerror v0.0.0-20191119040541-976d8885ed76
 	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d
-	github.com/milvus-io/milvus-proto/go-api v0.0.0-20221226093525-ce18c3347db0
+	github.com/milvus-io/milvus-proto/go-api v0.0.0-20230105121931-9f9303dcc729
 	github.com/minio/minio-go/v7 v7.0.17
 	github.com/opentracing/opentracing-go v1.2.0
 	github.com/panjf2000/ants/v2 v2.4.8
