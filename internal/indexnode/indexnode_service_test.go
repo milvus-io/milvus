@@ -8,14 +8,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/util/metautil"
-
-	"github.com/stretchr/testify/assert"
-
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/metautil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/stretchr/testify/assert"
 )
 
 func genStorageConfig() *indexpb.StorageConfig {
@@ -358,6 +357,10 @@ func TestAbnormalIndexNode(t *testing.T) {
 	metricsResp, err := in.GetMetrics(ctx, &milvuspb.GetMetricsRequest{})
 	assert.Nil(t, err)
 	assert.Equal(t, metricsResp.Status.ErrorCode, commonpb.ErrorCode_UnexpectedError)
+
+	configurationResp, err := in.ShowConfigurations(ctx, &internalpb.ShowConfigurationsRequest{})
+	assert.Nil(t, err)
+	assert.Equal(t, configurationResp.Status.ErrorCode, commonpb.ErrorCode_UnexpectedError)
 }
 
 func TestGetMetrics(t *testing.T) {

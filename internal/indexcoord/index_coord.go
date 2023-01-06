@@ -1084,6 +1084,10 @@ func (i *IndexCoord) watchNodeLoop() {
 					}
 				}()
 				i.metricsCacheManager.InvalidateSystemInfoMetrics()
+			case sessionutil.SessionUpdateEvent:
+				serverID := event.Session.ServerID
+				log.Info("IndexCoord watchNodeLoop SessionUpdateEvent", zap.Int64("serverID", serverID))
+				i.nodeManager.StoppingNode(serverID)
 			case sessionutil.SessionDelEvent:
 				serverID := event.Session.ServerID
 				log.Info("IndexCoord watchNodeLoop SessionDelEvent", zap.Int64("serverID", serverID))

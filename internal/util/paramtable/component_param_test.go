@@ -70,12 +70,15 @@ func TestComponentParam(t *testing.T) {
 
 		assert.Equal(t, Params.GracefulStopTimeout, int64(DefaultGracefulStopTimeout))
 		assert.Equal(t, CParams.QueryNodeCfg.GracefulStopTimeout, Params.GracefulStopTimeout)
+		assert.Equal(t, CParams.IndexNodeCfg.GracefulStopTimeout, Params.GracefulStopTimeout)
 		t.Logf("default grafeful stop timeout = %d", Params.GracefulStopTimeout)
 		Params.Base.Save("common.gracefulStopTimeout", "50")
 		Params.initGracefulStopTimeout()
 		assert.Equal(t, Params.GracefulStopTimeout, int64(50))
 		CParams.QueryNodeCfg.initGracefulStopTimeout()
 		assert.Equal(t, CParams.QueryNodeCfg.GracefulStopTimeout, int64(50))
+		CParams.IndexNodeCfg.initGracefulStopTimeout()
+		assert.Equal(t, CParams.IndexNodeCfg.GracefulStopTimeout, int64(50))
 
 		// -- proxy --
 		assert.Equal(t, Params.ProxySubName, "by-dev-proxy")
@@ -379,5 +382,9 @@ func TestComponentParam(t *testing.T) {
 
 		Params.UpdatedTime = time.Now()
 		t.Logf("UpdatedTime: %v", Params.UpdatedTime)
+
+		Params.Base.Save("indexNode.gracefulStopTimeout", "100")
+		Params.initGracefulStopTimeout()
+		assert.Equal(t, Params.GracefulStopTimeout, int64(100))
 	})
 }
