@@ -93,6 +93,8 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
     // step 1.2: get which vector field to search
     auto vecfield_id = info.field_id_;
     auto& field = schema[vecfield_id];
+    CheckBruteForceSearchParam(field, info);
+
     auto data_type = field.get_data_type();
     AssertInfo(datatype_is_vector(data_type), "[SearchOnGrowing]Data type isn't vector type");
 
@@ -123,7 +125,6 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
         auto size_per_chunk = element_end - element_begin;
 
         auto sub_view = bitset.subview(element_begin, size_per_chunk);
-        CheckBruteForceSearchParam(field, info);
         auto sub_qr = BruteForceSearch(search_dataset, chunk_data, size_per_chunk, sub_view);
 
         // convert chunk uid to segment uid
