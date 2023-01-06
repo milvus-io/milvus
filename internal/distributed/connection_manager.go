@@ -427,7 +427,6 @@ var roles = map[string]struct{}{
 	typeutil.RootCoordRole:  {},
 	typeutil.QueryCoordRole: {},
 	typeutil.DataCoordRole:  {},
-	typeutil.IndexCoordRole: {},
 	typeutil.QueryNodeRole:  {},
 	typeutil.DataNodeRole:   {},
 	typeutil.IndexNodeRole:  {},

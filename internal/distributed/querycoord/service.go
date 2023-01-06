@@ -291,12 +291,6 @@ func (s *Server) SetDataCoord(d types.DataCoord) error {
 	return nil
 }
 
-// SetIndexCoord sets the IndexCoord's client for QueryCoord component.
-func (s *Server) SetIndexCoord(d types.IndexCoord) error {
-	s.queryCoord.SetIndexCoord(d)
-	return nil
-}
-
 // GetComponentStates gets the component states of QueryCoord.
 func (s *Server) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
 	return s.queryCoord.GetComponentStates(ctx)

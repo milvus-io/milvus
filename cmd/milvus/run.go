@@ -26,8 +26,8 @@ type run struct {
 	svrAlias         string
 	enableRootCoord  bool
 	enableQueryCoord bool
-	enableIndexCoord bool
 	enableDataCoord  bool
+	enableIndexCoord bool
 	enableQueryNode  bool
 	enableDataNode   bool
 	enableIndexNode  bool

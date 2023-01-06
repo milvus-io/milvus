@@ -88,10 +88,6 @@ func (m *MockQueryCoord) SetDataCoord(types.DataCoord) error {
 	return nil
 }
 
-func (m *MockQueryCoord) SetIndexCoord(coord types.IndexCoord) error {
-	return nil
-}
-
 func (m *MockQueryCoord) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
 	log.Debug("MockQueryCoord::WaitForComponentStates")
 	return m.states, m.err

@@ -795,10 +795,6 @@ func (m *MockProxy) SetDataCoordClient(dataCoord types.DataCoord) {
 
 }
 
-func (m *MockProxy) SetIndexCoordClient(indexCoord types.IndexCoord) {
-
-}
-
 func (m *MockProxy) SetQueryCoordClient(queryCoord types.QueryCoord) {
 
 }

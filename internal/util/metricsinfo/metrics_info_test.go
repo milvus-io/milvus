@@ -185,47 +185,6 @@ func TestIndexNodeInfos_Codec(t *testing.T) {
 	assert.Equal(t, infos1, infos2)
 }
 
-func TestIndexCoordInfos_Codec(t *testing.T) {
-	infos1 := IndexCoordInfos{
-		BaseComponentInfos: BaseComponentInfos{
-			HasError:    false,
-			ErrorReason: "",
-			Name:        ConstructComponentName(typeutil.IndexCoordRole, 1),
-			HardwareInfos: HardwareMetrics{
-				IP:           "193.168.1.2",
-				CPUCoreCount: 4,
-				CPUCoreUsage: 0.5,
-				Memory:       32 * 1024,
-				MemoryUsage:  4 * 1024,
-				Disk:         100 * 1024,
-				DiskUsage:    2 * 1024,
-			},
-			SystemInfo: DeployMetrics{
-				SystemVersion: "8b1ae98fa97ce1c7ba853e8b9ff1c7ce24458dc1",
-				DeployMode:    ClusterDeployMode,
-				BuildVersion:  "2.0.0-rc8",
-				BuildTime:     "2021-11-24, 11:37:25",
-				UsedGoVersion: "go version go1.16.9 linux/amd64",
-			},
-			CreatedTime: time.Now().String(),
-			UpdatedTime: time.Now().String(),
-			Type:        typeutil.IndexCoordRole,
-			ID:          1,
-		},
-		SystemConfigurations: IndexCoordConfiguration{
-			MinioBucketName: "a-bucket",
-		},
-	}
-	s, err := MarshalComponentInfos(infos1)
-	assert.Equal(t, nil, err)
-	log.Info("TestIndexCoordInfos_Codec",
-		zap.String("marshaled_result", s))
-	var infos2 IndexCoordInfos
-	err = UnmarshalComponentInfos(s, &infos2)
-	assert.Equal(t, nil, err)
-	assert.Equal(t, infos1, infos2)
-}
-
 func TestDataNodeInfos_Codec(t *testing.T) {
 	infos1 := DataNodeInfos{
 		BaseComponentInfos: BaseComponentInfos{

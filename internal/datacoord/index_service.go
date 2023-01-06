@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/util/metautil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
@@ -140,11 +141,13 @@ func (s *Server) CreateIndex(ctx context.Context, req *datapb.CreateIndexRequest
 		errResp.Reason = msgDataCoordIsUnhealthy(paramtable.GetNodeID())
 		return errResp, nil
 	}
+	metrics.IndexRequestCounter.WithLabelValues(metrics.TotalLabel).Inc()
 
 	indexID, err := s.meta.CanCreateIndex(req)
 	if err != nil {
 		log.Error("CreateIndex failed", zap.Error(err))
 		errResp.Reason = err.Error()
+		metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
 		return errResp, nil
 	}
 
@@ -153,12 +156,14 @@ func (s *Server) CreateIndex(ctx context.Context, req *datapb.CreateIndexRequest
 		if err != nil {
 			log.Warn("failed to alloc indexID", zap.Error(err))
 			errResp.Reason = "failed to alloc indexID"
+			metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
 			return errResp, nil
 		}
 		if getIndexType(req.GetIndexParams()) == diskAnnIndex && !s.indexNodeManager.ClientSupportDisk() {
 			errMsg := "all IndexNodes do not support disk indexes, please verify"
 			log.Warn(errMsg)
 			errResp.Reason = errMsg
+			metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
 			return errResp, nil
 		}
 	}
@@ -182,6 +187,7 @@ func (s *Server) CreateIndex(ctx context.Context, req *datapb.CreateIndexRequest
 		log.Error("CreateIndex fail", zap.Int64("collectionID", req.GetCollectionID()),
 			zap.Int64("fieldID", req.GetFieldID()), zap.String("indexName", req.GetIndexName()), zap.Error(err))
 		errResp.Reason = err.Error()
+		metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
 		return errResp, nil
 	}
 
@@ -194,6 +200,7 @@ func (s *Server) CreateIndex(ctx context.Context, req *datapb.CreateIndexRequest
 		zap.String("IndexName", req.GetIndexName()), zap.Int64("fieldID", req.GetFieldID()),
 		zap.Int64("IndexID", indexID))
 	errResp.ErrorCode = commonpb.ErrorCode_Success
+	metrics.IndexRequestCounter.WithLabelValues(metrics.SuccessLabel).Inc()
 	return errResp, nil
 }
 

@@ -49,7 +49,6 @@ func TestConnectionManager(t *testing.T) {
 	cm.AddDependency(typeutil.RootCoordRole)
 	cm.AddDependency(typeutil.QueryCoordRole)
 	cm.AddDependency(typeutil.DataCoordRole)
-	cm.AddDependency(typeutil.IndexCoordRole)
 	cm.AddDependency(typeutil.QueryNodeRole)
 	cm.AddDependency(typeutil.DataNodeRole)
 	cm.AddDependency(typeutil.IndexNodeRole)

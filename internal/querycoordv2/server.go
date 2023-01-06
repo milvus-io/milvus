@@ -76,9 +76,8 @@ type Server struct {
 	metricsCacheManager *metricsinfo.MetricsCacheManager
 
 	// Coordinators
-	dataCoord  types.DataCoord
-	rootCoord  types.RootCoord
-	indexCoord types.IndexCoord
+	dataCoord types.DataCoord
+	rootCoord types.RootCoord
 
 	// Meta
 	store     meta.Store
@@ -270,7 +269,6 @@ func (s *Server) initMeta() error {
 	s.broker = meta.NewCoordinatorBroker(
 		s.dataCoord,
 		s.rootCoord,
-		s.indexCoord,
 	)
 	s.targetMgr = meta.NewTargetManager(s.broker, s.meta)
 
@@ -479,16 +477,6 @@ func (s *Server) SetDataCoord(dataCoord types.DataCoord) error {
 	}
 
 	s.dataCoord = dataCoord
-	return nil
-}
-
-// SetIndexCoord sets index coordinator's client
-func (s *Server) SetIndexCoord(indexCoord types.IndexCoord) error {
-	if indexCoord == nil {
-		return errors.New("null IndexCoord interface")
-	}
-
-	s.indexCoord = indexCoord
 	return nil
 }
 

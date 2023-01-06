@@ -1136,8 +1136,8 @@ func TestServer_getSystemInfoMetrics(t *testing.T) {
 	var coordTopology metricsinfo.DataCoordTopology
 	err = metricsinfo.UnmarshalTopology(resp.Response, &coordTopology)
 	assert.Nil(t, err)
-	assert.Equal(t, len(svr.cluster.GetSessions()), len(coordTopology.Cluster.ConnectedNodes))
-	for _, nodeMetrics := range coordTopology.Cluster.ConnectedNodes {
+	assert.Equal(t, len(svr.cluster.GetSessions()), len(coordTopology.Cluster.ConnectedDataNodes))
+	for _, nodeMetrics := range coordTopology.Cluster.ConnectedDataNodes {
 		assert.Equal(t, false, nodeMetrics.HasError)
 		assert.Equal(t, 0, len(nodeMetrics.ErrorReason))
 		_, err = metricsinfo.MarshalComponentInfos(nodeMetrics)
@@ -3600,14 +3600,6 @@ func newTestServer2(t *testing.T, receiveCh chan any, opts ...Option) *Server {
 	sessKey := path.Join(Params.EtcdCfg.MetaRootPath.GetValue(), sessionutil.DefaultServiceRoot)
 	_, err = etcdCli.Delete(context.Background(), sessKey, clientv3.WithPrefix())
 	assert.Nil(t, err)
-
-	icSession := sessionutil.NewSession(context.Background(), Params.EtcdCfg.MetaRootPath.GetValue(), etcdCli)
-	icSession.Init(typeutil.IndexCoordRole, "localhost:31000", true, true)
-	icSession.Register()
-
-	qcSession := sessionutil.NewSession(context.Background(), Params.EtcdCfg.MetaRootPath.GetValue(), etcdCli)
-	qcSession.Init(typeutil.QueryCoordRole, "localhost:19532", true, true)
-	qcSession.Register()
 
 	svr := CreateServer(context.TODO(), factory, opts...)
 	svr.SetEtcdClient(etcdCli)

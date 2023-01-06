@@ -66,7 +66,7 @@ func (nm *IndexNodeManager) RemoveNode(nodeID UniqueID) {
 	defer nm.lock.Unlock()
 	delete(nm.nodeClients, nodeID)
 	delete(nm.stoppingNodes, nodeID)
-	metrics.IndexCoordIndexNodeNum.WithLabelValues().Dec()
+	metrics.IndexNodeNum.WithLabelValues().Dec()
 }
 
 func (nm *IndexNodeManager) StoppingNode(nodeID UniqueID) {
@@ -84,13 +84,13 @@ func (nm *IndexNodeManager) AddNode(nodeID UniqueID, address string) error {
 		err        error
 	)
 
-	nodeClient, err = grpcindexnodeclient.NewClient(context.TODO(), address, Params.IndexCoordCfg.WithCredential.GetAsBool())
+	nodeClient, err = grpcindexnodeclient.NewClient(context.TODO(), address, Params.DataCoordCfg.WithCredential.GetAsBool())
 	if err != nil {
 		log.Error("create IndexNode client fail", zap.Error(err))
 		return err
 	}
 
-	metrics.IndexCoordIndexNodeNum.WithLabelValues().Inc()
+	metrics.IndexNodeNum.WithLabelValues().Inc()
 	nm.setClient(nodeID, nodeClient)
 	return nil
 }

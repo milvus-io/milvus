@@ -69,9 +69,6 @@ func (m *mockCore) SetEtcdClient(etcdClient *clientv3.Client) {
 func (m *mockCore) SetDataCoord(context.Context, types.DataCoord) error {
 	return nil
 }
-func (m *mockCore) SetIndexCoord(types.IndexCoord) error {
-	return nil
-}
 
 func (m *mockCore) SetQueryCoord(types.QueryCoord) error {
 	return nil
@@ -119,18 +116,6 @@ func (m *mockDataCoord) GetComponentStates(ctx context.Context) (*milvuspb.Compo
 	}, nil
 }
 func (m *mockDataCoord) Stop() error {
-	return fmt.Errorf("stop error")
-}
-
-type mockIndex struct {
-	types.IndexCoord
-}
-
-func (m *mockIndex) Init() error {
-	return nil
-}
-
-func (m *mockIndex) Stop() error {
 	return fmt.Errorf("stop error")
 }
 
