@@ -71,7 +71,7 @@ func TestImportManager_NewImportManager(t *testing.T) {
 	ti3 := &datapb.ImportTaskInfo{
 		Id: 300,
 		State: &datapb.ImportTaskState{
-			StateCode: commonpb.ImportState_ImportFlushed,
+			StateCode: commonpb.ImportState_ImportCompleted,
 		},
 		CreateTs: time.Now().Unix() - 100,
 	}
@@ -119,7 +119,7 @@ func TestImportManager_NewImportManager(t *testing.T) {
 		defer wg.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
-		mgr := newImportManager(ctx, mockKv, idAlloc, callImportServiceFn, callMarkSegmentsDropped, callGetSegmentStates, nil, nil, nil, nil)
+		mgr := newImportManager(ctx, mockKv, idAlloc, callImportServiceFn, callMarkSegmentsDropped, callGetSegmentStates, nil, nil)
 		assert.NotNil(t, mgr)
 
 		// there are 2 tasks read from store, one is pending, the other is persisted.
@@ -151,7 +151,7 @@ func TestImportManager_NewImportManager(t *testing.T) {
 		defer wg.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
 		defer cancel()
-		mgr := newImportManager(ctx, mockKv, idAlloc, callImportServiceFn, callMarkSegmentsDropped, callGetSegmentStates, nil, nil, nil, nil)
+		mgr := newImportManager(ctx, mockKv, idAlloc, callImportServiceFn, callMarkSegmentsDropped, callGetSegmentStates, nil, nil)
 		assert.NotNil(t, mgr)
 		mgr.init(context.TODO())
 		var wgLoop sync.WaitGroup
@@ -170,7 +170,7 @@ func TestImportManager_NewImportManager(t *testing.T) {
 
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
 		defer cancel()
-		mgr := newImportManager(ctx, mockTxnKV, idAlloc, callImportServiceFn, callMarkSegmentsDropped, callGetSegmentStates, nil, nil, nil, nil)
+		mgr := newImportManager(ctx, mockTxnKV, idAlloc, callImportServiceFn, callMarkSegmentsDropped, callGetSegmentStates, nil, nil)
 		assert.NotNil(t, mgr)
 		assert.Panics(t, func() {
 			mgr.init(context.TODO())
@@ -187,7 +187,7 @@ func TestImportManager_NewImportManager(t *testing.T) {
 
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
 		defer cancel()
-		mgr := newImportManager(ctx, mockTxnKV, idAlloc, callImportServiceFn, callMarkSegmentsDropped, callGetSegmentStates, nil, nil, nil, nil)
+		mgr := newImportManager(ctx, mockTxnKV, idAlloc, callImportServiceFn, callMarkSegmentsDropped, callGetSegmentStates, nil, nil)
 		assert.NotNil(t, mgr)
 		mgr.init(context.TODO())
 	})
@@ -201,7 +201,7 @@ func TestImportManager_NewImportManager(t *testing.T) {
 
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
 		defer cancel()
-		mgr := newImportManager(ctx, mockTxnKV, idAlloc, callImportServiceFn, callMarkSegmentsDropped, callGetSegmentStates, nil, nil, nil, nil)
+		mgr := newImportManager(ctx, mockTxnKV, idAlloc, callImportServiceFn, callMarkSegmentsDropped, callGetSegmentStates, nil, nil)
 		assert.NotNil(t, mgr)
 		mgr.init(context.TODO())
 		func() {
@@ -221,7 +221,7 @@ func TestImportManager_NewImportManager(t *testing.T) {
 		defer wg.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		mgr := newImportManager(ctx, mockKv, idAlloc, callImportServiceFn, callMarkSegmentsDropped, callGetSegmentStates, nil, nil, nil, nil)
+		mgr := newImportManager(ctx, mockKv, idAlloc, callImportServiceFn, callMarkSegmentsDropped, callGetSegmentStates, nil, nil)
 		assert.NotNil(t, mgr)
 		mgr.init(ctx)
 		var wgLoop sync.WaitGroup
@@ -279,7 +279,7 @@ func TestImportManager_TestSetImportTaskState(t *testing.T) {
 		defer wg.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
-		mgr := newImportManager(ctx, mockKv, idAlloc, nil, nil, nil, nil, nil, nil, nil)
+		mgr := newImportManager(ctx, mockKv, idAlloc, nil, nil, nil, nil, nil)
 		assert.NotNil(t, mgr)
 		_, err := mgr.loadFromTaskStore(true)
 		assert.NoError(t, err)
@@ -381,7 +381,7 @@ func TestImportManager_TestEtcdCleanUp(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	mgr := newImportManager(ctx, mockKv, idAlloc, callImportServiceFn, callMarkSegmentsDropped, callGetSegmentStates, nil, nil, nil, nil)
+	mgr := newImportManager(ctx, mockKv, idAlloc, callImportServiceFn, callMarkSegmentsDropped, callGetSegmentStates, nil, nil)
 	assert.NotNil(t, mgr)
 	_, err = mgr.loadFromTaskStore(true)
 	assert.NoError(t, err)
@@ -433,7 +433,7 @@ func TestImportManager_TestFlipTaskStateLoop(t *testing.T) {
 	ti3 := &datapb.ImportTaskInfo{
 		Id: 300,
 		State: &datapb.ImportTaskState{
-			StateCode: commonpb.ImportState_ImportFlushed,
+			StateCode: commonpb.ImportState_ImportCompleted,
 			Segments:  []int64{204, 205, 206},
 		},
 		CreateTs: time.Now().Unix() - 100,
@@ -477,45 +477,6 @@ func TestImportManager_TestFlipTaskStateLoop(t *testing.T) {
 		}, nil
 	}
 
-	callDescribeIndex := func(ctx context.Context, colID UniqueID) (*datapb.DescribeIndexResponse, error) {
-		return &datapb.DescribeIndexResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
-			IndexInfos: []*datapb.IndexInfo{
-				{},
-			},
-		}, nil
-	}
-	callGetSegmentIndexState := func(ctx context.Context, collID UniqueID, indexName string,
-		segIDs []UniqueID) ([]*datapb.SegmentIndexState, error) {
-		return []*datapb.SegmentIndexState{
-			{
-				SegmentID: 201,
-				State:     commonpb.IndexState_Finished,
-			},
-			{
-				SegmentID: 202,
-				State:     commonpb.IndexState_Finished,
-			},
-			{
-				SegmentID: 203,
-				State:     commonpb.IndexState_Finished,
-			},
-			{
-				SegmentID: 204,
-				State:     commonpb.IndexState_Finished,
-			},
-			{
-				SegmentID: 205,
-				State:     commonpb.IndexState_Finished,
-			},
-			{
-				SegmentID: 206,
-				State:     commonpb.IndexState_Finished,
-			},
-		}, nil
-	}
 	callUnsetIsImportingState := func(context.Context, *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error) {
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
@@ -523,7 +484,6 @@ func TestImportManager_TestFlipTaskStateLoop(t *testing.T) {
 	}
 
 	flipPersistedTaskInterval = 20
-	flipFlushedTaskInterval = 50
 	var wg sync.WaitGroup
 	wg.Add(1)
 	t.Run("normal case", func(t *testing.T) {
@@ -531,7 +491,7 @@ func TestImportManager_TestFlipTaskStateLoop(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		mgr := newImportManager(ctx, mockKv, idAlloc, callImportServiceFn, callMarkSegmentsDropped,
-			callGetSegmentStates, nil, callDescribeIndex, callGetSegmentIndexState, callUnsetIsImportingState)
+			callGetSegmentStates, nil, callUnsetIsImportingState)
 		assert.NotNil(t, mgr)
 		var wgLoop sync.WaitGroup
 		wgLoop.Add(1)
@@ -545,15 +505,8 @@ func TestImportManager_TestFlipTaskStateLoop(t *testing.T) {
 		defer wg.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		callDescribeIndex = func(ctx context.Context, colID UniqueID) (*datapb.DescribeIndexResponse, error) {
-			return &datapb.DescribeIndexResponse{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				},
-			}, nil
-		}
 		mgr := newImportManager(ctx, mockKv, idAlloc, callImportServiceFn, callMarkSegmentsDropped,
-			callGetSegmentStates, nil, callDescribeIndex, callGetSegmentIndexState, callUnsetIsImportingState)
+			callGetSegmentStates, nil, callUnsetIsImportingState)
 		assert.NotNil(t, mgr)
 		var wgLoop sync.WaitGroup
 		wgLoop.Add(1)
@@ -567,15 +520,8 @@ func TestImportManager_TestFlipTaskStateLoop(t *testing.T) {
 		defer wg.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		callDescribeIndex = func(ctx context.Context, colID UniqueID) (*datapb.DescribeIndexResponse, error) {
-			return &datapb.DescribeIndexResponse{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_IndexNotExist,
-				},
-			}, nil
-		}
 		mgr := newImportManager(ctx, mockKv, idAlloc, callImportServiceFn, callMarkSegmentsDropped,
-			callGetSegmentStates, nil, callDescribeIndex, callGetSegmentIndexState, callUnsetIsImportingState)
+			callGetSegmentStates, nil, callUnsetIsImportingState)
 		assert.NotNil(t, mgr)
 		var wgLoop sync.WaitGroup
 		wgLoop.Add(1)
@@ -612,7 +558,7 @@ func TestImportManager_ImportJob(t *testing.T) {
 		}, nil
 	}
 	// nil request
-	mgr := newImportManager(context.TODO(), mockKv, idAlloc, nil, callMarkSegmentsDropped, callGetSegmentStates, nil, nil, nil, nil)
+	mgr := newImportManager(context.TODO(), mockKv, idAlloc, nil, callMarkSegmentsDropped, callGetSegmentStates, nil, nil)
 	resp := mgr.importJob(context.TODO(), nil, colID, 0)
 	assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 
@@ -641,7 +587,7 @@ func TestImportManager_ImportJob(t *testing.T) {
 	// row-based case, task count equal to file count
 	// since the importServiceFunc return error, tasks will be kept in pending list
 	rowReq.Files = []string{"f1.json"}
-	mgr = newImportManager(context.TODO(), mockKv, idAlloc, importServiceFunc, callMarkSegmentsDropped, callGetSegmentStates, nil, nil, nil, nil)
+	mgr = newImportManager(context.TODO(), mockKv, idAlloc, importServiceFunc, callMarkSegmentsDropped, callGetSegmentStates, nil, nil)
 	resp = mgr.importJob(context.TODO(), rowReq, colID, 0)
 	assert.Equal(t, len(rowReq.Files), len(mgr.pendingTasks))
 	assert.Equal(t, 0, len(mgr.workingTasks))
@@ -654,7 +600,7 @@ func TestImportManager_ImportJob(t *testing.T) {
 
 	// column-based case, one quest one task
 	// since the importServiceFunc return error, tasks will be kept in pending list
-	mgr = newImportManager(context.TODO(), mockKv, idAlloc, importServiceFunc, callMarkSegmentsDropped, callGetSegmentStates, nil, nil, nil, nil)
+	mgr = newImportManager(context.TODO(), mockKv, idAlloc, importServiceFunc, callMarkSegmentsDropped, callGetSegmentStates, nil, nil)
 	resp = mgr.importJob(context.TODO(), colReq, colID, 0)
 	assert.Equal(t, 1, len(mgr.pendingTasks))
 	assert.Equal(t, 0, len(mgr.workingTasks))
@@ -668,13 +614,13 @@ func TestImportManager_ImportJob(t *testing.T) {
 	}
 
 	// row-based case, since the importServiceFunc return success, tasks will be sent to working list
-	mgr = newImportManager(context.TODO(), mockKv, idAlloc, importServiceFunc, callMarkSegmentsDropped, callGetSegmentStates, nil, nil, nil, nil)
+	mgr = newImportManager(context.TODO(), mockKv, idAlloc, importServiceFunc, callMarkSegmentsDropped, callGetSegmentStates, nil, nil)
 	resp = mgr.importJob(context.TODO(), rowReq, colID, 0)
 	assert.Equal(t, 0, len(mgr.pendingTasks))
 	assert.Equal(t, len(rowReq.Files), len(mgr.workingTasks))
 
 	// column-based case, since the importServiceFunc return success, tasks will be sent to working list
-	mgr = newImportManager(context.TODO(), mockKv, idAlloc, importServiceFunc, callMarkSegmentsDropped, callGetSegmentStates, nil, nil, nil, nil)
+	mgr = newImportManager(context.TODO(), mockKv, idAlloc, importServiceFunc, callMarkSegmentsDropped, callGetSegmentStates, nil, nil)
 	resp = mgr.importJob(context.TODO(), colReq, colID, 0)
 	assert.Equal(t, 0, len(mgr.pendingTasks))
 	assert.Equal(t, 1, len(mgr.workingTasks))
@@ -698,7 +644,7 @@ func TestImportManager_ImportJob(t *testing.T) {
 
 	// row-based case, since the importServiceFunc return success for 1 task
 	// the first task is sent to working list, and 1 task left in pending list
-	mgr = newImportManager(context.TODO(), mockKv, idAlloc, importServiceFunc, callMarkSegmentsDropped, callGetSegmentStates, nil, nil, nil, nil)
+	mgr = newImportManager(context.TODO(), mockKv, idAlloc, importServiceFunc, callMarkSegmentsDropped, callGetSegmentStates, nil, nil)
 	resp = mgr.importJob(context.TODO(), rowReq, colID, 0)
 	assert.Equal(t, 0, len(mgr.pendingTasks))
 	assert.Equal(t, 1, len(mgr.workingTasks))
@@ -781,7 +727,7 @@ func TestImportManager_AllDataNodesBusy(t *testing.T) {
 	}
 
 	// each data node owns one task
-	mgr := newImportManager(context.TODO(), mockKv, idAlloc, importServiceFunc, callMarkSegmentsDropped, callGetSegmentStates, nil, nil, nil, nil)
+	mgr := newImportManager(context.TODO(), mockKv, idAlloc, importServiceFunc, callMarkSegmentsDropped, callGetSegmentStates, nil, nil)
 	for i := 0; i < len(dnList); i++ {
 		resp := mgr.importJob(context.TODO(), rowReq, colID, 0)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
@@ -790,7 +736,7 @@ func TestImportManager_AllDataNodesBusy(t *testing.T) {
 	}
 
 	// all data nodes are busy, new task waiting in pending list
-	mgr = newImportManager(context.TODO(), mockKv, idAlloc, importServiceFunc, callMarkSegmentsDropped, callGetSegmentStates, nil, nil, nil, nil)
+	mgr = newImportManager(context.TODO(), mockKv, idAlloc, importServiceFunc, callMarkSegmentsDropped, callGetSegmentStates, nil, nil)
 	resp := mgr.importJob(context.TODO(), rowReq, colID, 0)
 	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	assert.Equal(t, len(rowReq.Files), len(mgr.pendingTasks))
@@ -798,7 +744,7 @@ func TestImportManager_AllDataNodesBusy(t *testing.T) {
 
 	// now all data nodes are free again, new task is executed instantly
 	count = 0
-	mgr = newImportManager(context.TODO(), mockKv, idAlloc, importServiceFunc, callMarkSegmentsDropped, callGetSegmentStates, nil, nil, nil, nil)
+	mgr = newImportManager(context.TODO(), mockKv, idAlloc, importServiceFunc, callMarkSegmentsDropped, callGetSegmentStates, nil, nil)
 	resp = mgr.importJob(context.TODO(), colReq, colID, 0)
 	assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	assert.Equal(t, 0, len(mgr.pendingTasks))
@@ -862,7 +808,7 @@ func TestImportManager_TaskState(t *testing.T) {
 	}
 
 	// add 3 tasks, their ID is 10000, 10001, 10002, make sure updateTaskInfo() works correctly
-	mgr := newImportManager(context.TODO(), mockKv, idAlloc, importServiceFunc, callMarkSegmentsDropped, callGetSegmentStates, nil, nil, nil, nil)
+	mgr := newImportManager(context.TODO(), mockKv, idAlloc, importServiceFunc, callMarkSegmentsDropped, callGetSegmentStates, nil, nil)
 	mgr.importJob(context.TODO(), rowReq, colID, 0)
 	rowReq.Files = []string{"f2.json"}
 	mgr.importJob(context.TODO(), rowReq, colID, 0)
@@ -976,7 +922,7 @@ func TestImportManager_AllocFail(t *testing.T) {
 			},
 		}, nil
 	}
-	mgr := newImportManager(context.TODO(), mockKv, idAlloc, importServiceFunc, callMarkSegmentsDropped, callGetSegmentStates, nil, nil, nil, nil)
+	mgr := newImportManager(context.TODO(), mockKv, idAlloc, importServiceFunc, callMarkSegmentsDropped, callGetSegmentStates, nil, nil)
 	resp := mgr.importJob(context.TODO(), rowReq, colID, 0)
 	assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	assert.Equal(t, 0, len(mgr.pendingTasks))
@@ -1044,7 +990,7 @@ func TestImportManager_ListAllTasks(t *testing.T) {
 	}
 
 	mockKv := memkv.NewMemoryKV()
-	mgr := newImportManager(context.TODO(), mockKv, idAlloc, fn, callMarkSegmentsDropped, callGetSegmentStates, getCollectionName, nil, nil, nil)
+	mgr := newImportManager(context.TODO(), mockKv, idAlloc, fn, callMarkSegmentsDropped, callGetSegmentStates, getCollectionName, nil)
 
 	// add 10 tasks for collection1, id from 1 to 10
 	file1 := "f1.json"
@@ -1228,168 +1174,4 @@ func TestImportManager_isRowbased(t *testing.T) {
 	rb, err = mgr.isRowbased(files)
 	assert.Nil(t, err)
 	assert.False(t, rb)
-}
-
-func TestImportManager_checkIndexingDone(t *testing.T) {
-	ctx := context.Background()
-
-	mgr := &importManager{
-		callDescribeIndex: func(ctx context.Context, colID UniqueID) (*datapb.DescribeIndexResponse, error) {
-			return nil, errors.New("error")
-		},
-		callGetSegmentIndexState: func(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*datapb.SegmentIndexState, error) {
-			return nil, errors.New("error")
-		},
-		callGetSegmentStates: func(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error) {
-			return nil, errors.New("error")
-		},
-	}
-
-	segmentsID := []typeutil.UniqueID{1, 2, 3}
-
-	done, err := mgr.checkFlushDone(ctx, segmentsID)
-	assert.False(t, done)
-	assert.Error(t, err)
-	// check index of 3 segments
-	// callDescribeIndex() failed
-	done, err = mgr.checkIndexingDone(ctx, 1, segmentsID)
-	assert.False(t, done)
-	assert.Error(t, err)
-
-	mgr.callDescribeIndex = func(ctx context.Context, colID UniqueID) (*datapb.DescribeIndexResponse, error) {
-		return &datapb.DescribeIndexResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			},
-		}, nil
-	}
-
-	done, err = mgr.checkFlushDone(ctx, segmentsID)
-	assert.False(t, done)
-	assert.Error(t, err)
-	// callDescribeIndex() unexpected error
-	done, err = mgr.checkIndexingDone(ctx, 1, segmentsID)
-	assert.False(t, done)
-	assert.Error(t, err)
-
-	mgr.callDescribeIndex = func(ctx context.Context, colID UniqueID) (*datapb.DescribeIndexResponse, error) {
-		return &datapb.DescribeIndexResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_IndexNotExist,
-			},
-		}, nil
-	}
-	mgr.callGetSegmentStates = func(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error) {
-		return &datapb.GetSegmentStatesResponse{
-			States: []*datapb.SegmentStateInfo{
-				{
-					SegmentID: 1,
-					State:     commonpb.SegmentState_Flushed,
-				},
-				{
-					SegmentID: 1,
-					State:     commonpb.SegmentState_Flushed,
-				},
-				{
-					SegmentID: 1,
-					State:     commonpb.SegmentState_Flushed,
-				},
-			},
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
-		}, nil
-	}
-
-	done, err = mgr.checkFlushDone(ctx, segmentsID)
-	assert.True(t, done)
-	assert.NoError(t, err)
-	// callDescribeIndex() index not exist
-	done, err = mgr.checkIndexingDone(ctx, 1, segmentsID)
-	assert.True(t, done)
-	assert.Nil(t, err)
-
-	mgr.callDescribeIndex = func(ctx context.Context, colID UniqueID) (*datapb.DescribeIndexResponse, error) {
-		return &datapb.DescribeIndexResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
-			IndexInfos: []*datapb.IndexInfo{
-				{
-					State: commonpb.IndexState_Finished,
-				},
-			},
-		}, nil
-	}
-
-	done, err = mgr.checkFlushDone(ctx, segmentsID)
-	assert.True(t, done)
-	assert.NoError(t, err)
-	// callGetSegmentIndexState() failed
-	done, err = mgr.checkIndexingDone(ctx, 1, segmentsID)
-	assert.False(t, done)
-	assert.Error(t, err)
-
-	mgr.callGetSegmentIndexState = func(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*datapb.SegmentIndexState, error) {
-		return []*datapb.SegmentIndexState{
-			{
-				State: commonpb.IndexState_Finished,
-			},
-		}, nil
-	}
-
-	done, err = mgr.checkFlushDone(ctx, segmentsID)
-	assert.True(t, done)
-	assert.NoError(t, err)
-	// only 1 segment indexed
-	done, err = mgr.checkIndexingDone(ctx, 1, segmentsID)
-	assert.False(t, done)
-	assert.Nil(t, err)
-
-	mgr.callGetSegmentIndexState = func(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*datapb.SegmentIndexState, error) {
-		return []*datapb.SegmentIndexState{
-			{
-				State: commonpb.IndexState_Finished,
-			},
-			{
-				State: commonpb.IndexState_Finished,
-			},
-			{
-				State: commonpb.IndexState_Finished,
-			},
-		}, nil
-	}
-
-	done, err = mgr.checkFlushDone(ctx, segmentsID)
-	assert.True(t, done)
-	assert.NoError(t, err)
-	// all segments indexed
-	done, err = mgr.checkIndexingDone(ctx, 1, segmentsID)
-	assert.True(t, done)
-	assert.Nil(t, err)
-
-	mgr.callGetSegmentStates = func(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error) {
-		return &datapb.GetSegmentStatesResponse{
-			States: []*datapb.SegmentStateInfo{
-				{
-					SegmentID: 1,
-					State:     commonpb.SegmentState_Flushed,
-				},
-				{
-					SegmentID: 1,
-					State:     commonpb.SegmentState_Flushed,
-				},
-				{
-					SegmentID: 1,
-					State:     commonpb.SegmentState_Importing,
-				},
-			},
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
-		}, nil
-	}
-	done, err = mgr.checkFlushDone(ctx, segmentsID)
-	assert.False(t, done)
-	assert.NoError(t, err)
 }

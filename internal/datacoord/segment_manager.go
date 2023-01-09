@@ -436,6 +436,10 @@ func (s *SegmentManager) SealAllSegments(ctx context.Context, collectionID Uniqu
 			ret = append(ret, id)
 			continue
 		}
+		if info.State == commonpb.SegmentState_Flushing ||
+			info.State == commonpb.SegmentState_Flushed {
+			continue
+		}
 		if err := s.meta.SetState(id, commonpb.SegmentState_Sealed); err != nil {
 			return nil, err
 		}
@@ -526,7 +530,9 @@ func (s *SegmentManager) tryToSealSegment(ts Timestamp, channel string) error {
 			continue
 		}
 		channelInfo[info.InsertChannel] = append(channelInfo[info.InsertChannel], info)
-		if info.State == commonpb.SegmentState_Sealed {
+		if info.State == commonpb.SegmentState_Sealed ||
+			info.State == commonpb.SegmentState_Flushing ||
+			info.State == commonpb.SegmentState_Flushed {
 			continue
 		}
 		// change shouldSeal to segment seal policy logic
@@ -543,7 +549,9 @@ func (s *SegmentManager) tryToSealSegment(ts Timestamp, channel string) error {
 		for _, policy := range s.channelSealPolicies {
 			vs := policy(channel, segmentInfos, ts)
 			for _, info := range vs {
-				if info.State == commonpb.SegmentState_Sealed {
+				if info.State == commonpb.SegmentState_Sealed ||
+					info.State == commonpb.SegmentState_Flushing ||
+					info.State == commonpb.SegmentState_Flushed {
 					continue
 				}
 				if err := s.meta.SetState(info.GetID(), commonpb.SegmentState_Sealed); err != nil {

@@ -412,8 +412,6 @@ func (c *Core) initImportManager() error {
 		f.NewMarkSegmentsDroppedFunc(),
 		f.NewGetSegmentStatesFunc(),
 		f.NewGetCollectionNameFunc(),
-		f.NewDescribeIndexFunc(),
-		f.NewGetSegmentIndexStateFunc(),
 		f.NewUnsetIsImportingStateFunc(),
 	)
 	c.importManager.init(c.ctx)
