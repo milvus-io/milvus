@@ -41,22 +41,28 @@ func (stNode *serviceTimeNode) Name() string {
 	return fmt.Sprintf("stNode-%s", stNode.vChannel)
 }
 
-// Operate handles input messages, to execute insert operations
-func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
-	if in == nil {
-		log.Debug("type assertion failed for serviceTimeMsg because it's nil", zap.String("name", stNode.Name()))
-		return []Msg{}
+func (stNode *serviceTimeNode) IsValidInMsg(in []Msg) bool {
+	if !stNode.baseNode.IsValidInMsg(in) {
+		return false
 	}
-
-	if len(in) != 1 {
-		log.Warn("Invalid operate message input in serviceTimeNode, input length = ", zap.Int("input node", len(in)), zap.String("name", stNode.Name()))
-		return []Msg{}
-	}
-
-	serviceTimeMsg, ok := in[0].(*serviceTimeMsg)
+	_, ok := in[0].(*serviceTimeMsg)
 	if !ok {
 		log.Warn("type assertion failed for serviceTimeMsg", zap.String("msgType", reflect.TypeOf(in[0]).Name()), zap.String("name", stNode.Name()))
-		return []Msg{}
+		return false
+	}
+	return true
+}
+
+// Operate handles input messages, to execute insert operations
+func (stNode *serviceTimeNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
+	serviceTimeMsg := in[0].(*serviceTimeMsg)
+	if serviceTimeMsg.IsCloseMsg() {
+		log.Info("service node hit close msg",
+			zap.Int64("collectionID", stNode.collectionID),
+			zap.Uint64("tSafe", serviceTimeMsg.timeRange.timestampMax),
+			zap.String("channel", stNode.vChannel),
+		)
+		return in
 	}
 
 	// update service time
