@@ -290,7 +290,7 @@ def gen_dataframe_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0):
     int32_values = pd.Series(data=[np.int32(i) for i in range(start, start + nb)], dtype="int32")
     int16_values = pd.Series(data=[np.int16(i) for i in range(start, start + nb)], dtype="int16")
     int8_values = pd.Series(data=[np.int8(i) for i in range(start, start + nb)], dtype="int8")
-    bool_values = pd.Series(data=[np.bool(i) for i in range(start, start + nb)], dtype="bool")
+    bool_values = pd.Series(data=[np.bool_(i) for i in range(start, start + nb)], dtype="bool")
     float_values = pd.Series(data=[np.float32(i) for i in range(start, start + nb)], dtype="float32")
     double_values = pd.Series(data=[np.double(i) for i in range(start, start + nb)], dtype="double")
     string_values = pd.Series(data=[str(i) for i in range(start, start + nb)], dtype="string")
@@ -381,7 +381,7 @@ def gen_default_tuple_data(nb=ct.default_nb, dim=ct.default_dim):
 def gen_numpy_data(nb=ct.default_nb, dim=ct.default_dim):
     int_values = np.arange(nb, dtype='int64')
     float_values = np.arange(nb, dtype='float32')
-    string_values = [np.str(i) for i in range(nb)]
+    string_values = [np.str_(i) for i in range(nb)]
     float_vec_values = gen_vectors(nb, dim)
     data = [int_values, float_values, string_values, float_vec_values]
     return data
