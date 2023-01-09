@@ -13,12 +13,13 @@ from utils.util_log import test_log as log
 
 class TestGetCollections(TestcaseBase):
     """ Test case of getting all collections """
-
-    @pytest.mark.tags(CaseLabel.L1)
+    
+    @pytest.mark.tags(CaseLabel.L3)
     def test_get_collections_by_prefix(self,):
         self._connect()
         all_collections = self.utility_wrap.list_collections()[0]
         all_collections = [c_name for c_name in all_collections if "Checker" in c_name]
+        log.info(f"all_collections: {all_collections}")
         selected_collections_map = {}
         for c_name in all_collections:
             prefix = c_name.split("_")[0]
@@ -31,6 +32,7 @@ class TestGetCollections(TestcaseBase):
         selected_collections = []
         for value in selected_collections_map.values():
             selected_collections.extend(value)
+        assert len(selected_collections) > 0
         log.info(f"find {len(selected_collections)} collections:")
         log.info(selected_collections)
         data = {

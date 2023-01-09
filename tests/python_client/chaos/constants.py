@@ -12,7 +12,7 @@ CHAOS_GROUP = 'chaos-mesh.org'  # chao mesh group
 CHAOS_VERSION = 'v1alpha1'  # chao mesh version
 SUCC = 'succ'
 FAIL = 'fail'
-DELTA_PER_INS = 10  # entities per insert
+DELTA_PER_INS = 300  # entities per insert
 ENTITIES_FOR_SEARCH = 3000  # entities for search_collection
 
 CHAOS_CONFIG_ENV = 'CHAOS_CONFIG_PATH'  # env variables for chao path
