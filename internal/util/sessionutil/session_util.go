@@ -241,11 +241,14 @@ func (s *Session) Init(serverName, address string, exclusive bool, triggerKill b
 	s.Exclusive = exclusive
 	s.TriggerKill = triggerKill
 	s.checkIDExist()
-	serverID, err := s.getServerID()
-	if err != nil {
-		panic(err)
+	// TO AVOID PANIC IN MIGRATION SCRIPT.
+	if !s.useCustomConfig {
+		serverID, err := s.getServerID()
+		if err != nil {
+			panic(err)
+		}
+		s.ServerID = serverID
 	}
-	s.ServerID = serverID
 	log.Info("start server", zap.String("name", serverName), zap.String("address", address), zap.Int64("id", s.ServerID))
 }
 
