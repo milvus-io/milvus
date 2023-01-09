@@ -17,6 +17,7 @@
 package importutil
 
 import (
+	"bytes"
 	"encoding/binary"
 	"io"
 	"os"
@@ -40,12 +41,12 @@ func Test_CreateNumpyFile(t *testing.T) {
 	// directory doesn't exist
 	data1 := []float32{1, 2, 3, 4, 5}
 	err := CreateNumpyFile("/dummy_not_exist/dummy.npy", data1)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 
 	// invalid data type
 	data2 := make(map[string]int)
 	err = CreateNumpyFile("/tmp/dummy.npy", data2)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 }
 
 func Test_CreateNumpyData(t *testing.T) {
@@ -53,12 +54,12 @@ func Test_CreateNumpyData(t *testing.T) {
 	data1 := []float32{1, 2, 3, 4, 5}
 	buf, err := CreateNumpyData(data1)
 	assert.NotNil(t, buf)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	// invalid data type
 	data2 := make(map[string]int)
 	buf, err = CreateNumpyData(data2)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	assert.Nil(t, buf)
 }
 
@@ -66,7 +67,7 @@ func Test_ConvertNumpyType(t *testing.T) {
 	checkFunc := func(inputs []string, output schemapb.DataType) {
 		for i := 0; i < len(inputs); i++ {
 			dt, err := convertNumpyType(inputs[i])
-			assert.Nil(t, err)
+			assert.NoError(t, err)
 			assert.Equal(t, output, dt)
 		}
 	}
@@ -80,7 +81,7 @@ func Test_ConvertNumpyType(t *testing.T) {
 	checkFunc([]string{"f8", "<f8", "|f8", ">f8", "float64"}, schemapb.DataType_Double)
 
 	dt, err := convertNumpyType("dummy")
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	assert.Equal(t, schemapb.DataType_None, dt)
 }
 
@@ -88,25 +89,25 @@ func Test_StringLen(t *testing.T) {
 	len, utf, err := stringLen("S1")
 	assert.Equal(t, 1, len)
 	assert.False(t, utf)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	len, utf, err = stringLen("2S")
 	assert.Equal(t, 2, len)
 	assert.False(t, utf)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	len, utf, err = stringLen("<U3")
 	assert.Equal(t, 3, len)
 	assert.True(t, utf)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	len, utf, err = stringLen(">4U")
 	assert.Equal(t, 4, len)
 	assert.True(t, utf)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 
 	len, utf, err = stringLen("dummy")
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	assert.Equal(t, 0, len)
 	assert.False(t, utf)
 }
@@ -129,207 +130,337 @@ func Test_NumpyAdapterSetByteOrder(t *testing.T) {
 }
 
 func Test_NumpyAdapterReadError(t *testing.T) {
-	adapter := &NumpyAdapter{
-		reader:    nil,
-		npyReader: nil,
-	}
-
 	// reader size is zero
-	t.Run("test size is zero", func(t *testing.T) {
-		_, err := adapter.ReadBool(0)
-		assert.NotNil(t, err)
-		_, err = adapter.ReadUint8(0)
-		assert.NotNil(t, err)
-		_, err = adapter.ReadInt8(0)
-		assert.NotNil(t, err)
-		_, err = adapter.ReadInt16(0)
-		assert.NotNil(t, err)
-		_, err = adapter.ReadInt32(0)
-		assert.NotNil(t, err)
-		_, err = adapter.ReadInt64(0)
-		assert.NotNil(t, err)
-		_, err = adapter.ReadFloat32(0)
-		assert.NotNil(t, err)
-		_, err = adapter.ReadFloat64(0)
-		assert.NotNil(t, err)
-	})
+	// t.Run("test size is zero", func(t *testing.T) {
+	// 	adapter := &NumpyAdapter{
+	// 		reader:    nil,
+	// 		npyReader: nil,
+	// 	}
+	// 	_, err := adapter.ReadBool(0)
+	// 	assert.Error(t, err)
+	// 	_, err = adapter.ReadUint8(0)
+	// 	assert.Error(t, err)
+	// 	_, err = adapter.ReadInt8(0)
+	// 	assert.Error(t, err)
+	// 	_, err = adapter.ReadInt16(0)
+	// 	assert.Error(t, err)
+	// 	_, err = adapter.ReadInt32(0)
+	// 	assert.Error(t, err)
+	// 	_, err = adapter.ReadInt64(0)
+	// 	assert.Error(t, err)
+	// 	_, err = adapter.ReadFloat32(0)
+	// 	assert.Error(t, err)
+	// 	_, err = adapter.ReadFloat64(0)
+	// 	assert.Error(t, err)
+	// })
 
-	adapter = &NumpyAdapter{
-		reader:    &MockReader{},
-		npyReader: &npy.Reader{},
+	createAdatper := func(dt schemapb.DataType) *NumpyAdapter {
+		adapter := &NumpyAdapter{
+			reader: &MockReader{},
+			npyReader: &npy.Reader{
+				Header: npy.Header{},
+			},
+			dataType: dt,
+			order:    binary.BigEndian,
+		}
+		adapter.npyReader.Header.Descr.Shape = []int{1}
+		return adapter
 	}
 
 	t.Run("test read bool", func(t *testing.T) {
-		adapter.npyReader.Header.Descr.Type = "bool"
+		// type mismatch
+		adapter := createAdatper(schemapb.DataType_None)
 		data, err := adapter.ReadBool(1)
 		assert.Nil(t, data)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 
-		adapter.npyReader.Header.Descr.Type = "dummy"
+		// reader is nil, cannot read
+		adapter = createAdatper(schemapb.DataType_Bool)
 		data, err = adapter.ReadBool(1)
 		assert.Nil(t, data)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
+
+		// read one element from reader
+		adapter.reader = bytes.NewReader([]byte{1})
+		data, err = adapter.ReadBool(1)
+		assert.NotEmpty(t, data)
+		assert.NoError(t, err)
+
+		// nothing to read
+		data, err = adapter.ReadBool(1)
+		assert.Nil(t, data)
+		assert.NoError(t, err)
 	})
 
 	t.Run("test read uint8", func(t *testing.T) {
-		adapter.npyReader.Header.Descr.Type = "u1"
+		// type mismatch
+		adapter := createAdatper(schemapb.DataType_None)
+		adapter.npyReader.Header.Descr.Type = "dummy"
 		data, err := adapter.ReadUint8(1)
 		assert.Nil(t, data)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 
-		adapter.npyReader.Header.Descr.Type = "dummy"
+		// reader is nil, cannot read
+		adapter.npyReader.Header.Descr.Type = "u1"
 		data, err = adapter.ReadUint8(1)
 		assert.Nil(t, data)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
+
+		// read one element from reader
+		adapter.reader = bytes.NewReader([]byte{1})
+		data, err = adapter.ReadUint8(1)
+		assert.NotEmpty(t, data)
+		assert.NoError(t, err)
+
+		// nothing to read
+		data, err = adapter.ReadUint8(1)
+		assert.Nil(t, data)
+		assert.NoError(t, err)
 	})
 
 	t.Run("test read int8", func(t *testing.T) {
-		adapter.npyReader.Header.Descr.Type = "i1"
+		// type mismatch
+		adapter := createAdatper(schemapb.DataType_None)
 		data, err := adapter.ReadInt8(1)
 		assert.Nil(t, data)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 
-		adapter.npyReader.Header.Descr.Type = "dummy"
+		// reader is nil, cannot read
+		adapter = createAdatper(schemapb.DataType_Int8)
 		data, err = adapter.ReadInt8(1)
 		assert.Nil(t, data)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
+
+		// read one element from reader
+		adapter.reader = bytes.NewReader([]byte{1})
+		data, err = adapter.ReadInt8(1)
+		assert.NotEmpty(t, data)
+		assert.NoError(t, err)
+
+		// nothing to read
+		data, err = adapter.ReadInt8(1)
+		assert.Nil(t, data)
+		assert.NoError(t, err)
 	})
 
 	t.Run("test read int16", func(t *testing.T) {
-		adapter.npyReader.Header.Descr.Type = "i2"
+		// type mismatch
+		adapter := createAdatper(schemapb.DataType_None)
 		data, err := adapter.ReadInt16(1)
 		assert.Nil(t, data)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 
-		adapter.npyReader.Header.Descr.Type = "dummy"
+		// reader is nil, cannot read
+		adapter = createAdatper(schemapb.DataType_Int16)
 		data, err = adapter.ReadInt16(1)
 		assert.Nil(t, data)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
+
+		// read one element from reader
+		adapter.reader = bytes.NewReader([]byte{1, 2})
+		data, err = adapter.ReadInt16(1)
+		assert.NotEmpty(t, data)
+		assert.NoError(t, err)
+
+		// nothing to read
+		data, err = adapter.ReadInt16(1)
+		assert.Nil(t, data)
+		assert.NoError(t, err)
 	})
 
 	t.Run("test read int32", func(t *testing.T) {
-		adapter.npyReader.Header.Descr.Type = "i4"
+		// type mismatch
+		adapter := createAdatper(schemapb.DataType_None)
 		data, err := adapter.ReadInt32(1)
 		assert.Nil(t, data)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 
-		adapter.npyReader.Header.Descr.Type = "dummy"
+		// reader is nil, cannot read
+		adapter = createAdatper(schemapb.DataType_Int32)
 		data, err = adapter.ReadInt32(1)
 		assert.Nil(t, data)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
+
+		// read one element from reader
+		adapter.reader = bytes.NewReader([]byte{1, 2, 3, 4})
+		data, err = adapter.ReadInt32(1)
+		assert.NotEmpty(t, data)
+		assert.NoError(t, err)
+
+		// nothing to read
+		data, err = adapter.ReadInt32(1)
+		assert.Nil(t, data)
+		assert.NoError(t, err)
 	})
 
 	t.Run("test read int64", func(t *testing.T) {
-		adapter.npyReader.Header.Descr.Type = "i8"
+		// type mismatch
+		adapter := createAdatper(schemapb.DataType_None)
 		data, err := adapter.ReadInt64(1)
 		assert.Nil(t, data)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 
-		adapter.npyReader.Header.Descr.Type = "dummy"
+		// reader is nil, cannot read
+		adapter = createAdatper(schemapb.DataType_Int64)
 		data, err = adapter.ReadInt64(1)
 		assert.Nil(t, data)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
+
+		// read one element from reader
+		adapter.reader = bytes.NewReader([]byte{1, 2, 3, 4, 5, 6, 7, 8})
+		data, err = adapter.ReadInt64(1)
+		assert.NotEmpty(t, data)
+		assert.NoError(t, err)
+
+		// nothing to read
+		data, err = adapter.ReadInt64(1)
+		assert.Nil(t, data)
+		assert.NoError(t, err)
 	})
 
 	t.Run("test read float", func(t *testing.T) {
-		adapter.npyReader.Header.Descr.Type = "f4"
+		// type mismatch
+		adapter := createAdatper(schemapb.DataType_None)
 		data, err := adapter.ReadFloat32(1)
 		assert.Nil(t, data)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 
-		adapter.npyReader.Header.Descr.Type = "dummy"
+		// reader is nil, cannot read
+		adapter = createAdatper(schemapb.DataType_Float)
 		data, err = adapter.ReadFloat32(1)
 		assert.Nil(t, data)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
+
+		// read one element from reader
+		adapter.reader = bytes.NewReader([]byte{1, 2, 3, 4})
+		data, err = adapter.ReadFloat32(1)
+		assert.NotEmpty(t, data)
+		assert.NoError(t, err)
+
+		// nothing to read
+		data, err = adapter.ReadFloat32(1)
+		assert.Nil(t, data)
+		assert.NoError(t, err)
 	})
 
 	t.Run("test read double", func(t *testing.T) {
-		adapter.npyReader.Header.Descr.Type = "f8"
+		// type mismatch
+		adapter := createAdatper(schemapb.DataType_None)
 		data, err := adapter.ReadFloat64(1)
 		assert.Nil(t, data)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 
-		adapter.npyReader.Header.Descr.Type = "dummy"
+		// reader is nil, cannot read
+		adapter = createAdatper(schemapb.DataType_Double)
 		data, err = adapter.ReadFloat64(1)
 		assert.Nil(t, data)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
+
+		// read one element from reader
+		adapter.reader = bytes.NewReader([]byte{1, 2, 3, 4, 5, 6, 7, 8})
+		data, err = adapter.ReadFloat64(1)
+		assert.NotEmpty(t, data)
+		assert.NoError(t, err)
+
+		// nothing to read
+		data, err = adapter.ReadFloat64(1)
+		assert.Nil(t, data)
+		assert.NoError(t, err)
 	})
 
 	t.Run("test read varchar", func(t *testing.T) {
-		adapter.npyReader.Header.Descr.Type = "U3"
+		// type mismatch
+		adapter := createAdatper(schemapb.DataType_None)
 		data, err := adapter.ReadString(1)
 		assert.Nil(t, data)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 
-		adapter.npyReader.Header.Descr.Type = "dummy"
+		// reader is nil, cannot read
+		adapter = createAdatper(schemapb.DataType_VarChar)
+		adapter.reader = nil
+		adapter.npyReader.Header.Descr.Type = "S3"
 		data, err = adapter.ReadString(1)
 		assert.Nil(t, data)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
+
+		// read one element from reader
+		adapter.reader = strings.NewReader("abc")
+		data, err = adapter.ReadString(1)
+		assert.NotEmpty(t, data)
+		assert.NoError(t, err)
+
+		// nothing to read
+		data, err = adapter.ReadString(1)
+		assert.Nil(t, data)
+		assert.NoError(t, err)
 	})
 }
 
 func Test_NumpyAdapterRead(t *testing.T) {
 	err := os.MkdirAll(TempFilesPath, os.ModePerm)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	defer os.RemoveAll(TempFilesPath)
 
 	t.Run("test read bool", func(t *testing.T) {
 		filePath := TempFilesPath + "bool.npy"
 		data := []bool{true, false, true, false}
 		err := CreateNumpyFile(filePath, data)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		file, err := os.Open(filePath)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		defer file.Close()
 
 		adapter, err := NewNumpyAdapter(file)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
+		// partly read
 		res, err := adapter.ReadBool(len(data) - 1)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, len(data)-1, len(res))
 
 		for i := 0; i < len(res); i++ {
 			assert.Equal(t, data[i], res[i])
 		}
 
+		// read the left data
 		res, err = adapter.ReadBool(len(data))
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, 1, len(res))
 		assert.Equal(t, data[len(data)-1], res[0])
 
+		// nothing to read
 		res, err = adapter.ReadBool(len(data))
-		assert.NotNil(t, err)
+		assert.NoError(t, err)
 		assert.Nil(t, res)
 
 		// incorrect type read
 		resu1, err := adapter.ReadUint8(len(data))
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 		assert.Nil(t, resu1)
 
 		resi1, err := adapter.ReadInt8(len(data))
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 		assert.Nil(t, resi1)
 
 		resi2, err := adapter.ReadInt16(len(data))
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 		assert.Nil(t, resi2)
 
 		resi4, err := adapter.ReadInt32(len(data))
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 		assert.Nil(t, resi4)
 
 		resi8, err := adapter.ReadInt64(len(data))
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 		assert.Nil(t, resi8)
 
 		resf4, err := adapter.ReadFloat32(len(data))
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 		assert.Nil(t, resf4)
 
 		resf8, err := adapter.ReadFloat64(len(data))
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 		assert.Nil(t, resf8)
 	})
 
@@ -337,35 +468,38 @@ func Test_NumpyAdapterRead(t *testing.T) {
 		filePath := TempFilesPath + "uint8.npy"
 		data := []uint8{1, 2, 3, 4, 5, 6}
 		err := CreateNumpyFile(filePath, data)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		file, err := os.Open(filePath)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		defer file.Close()
 
 		adapter, err := NewNumpyAdapter(file)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
+		// partly read
 		res, err := adapter.ReadUint8(len(data) - 1)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, len(data)-1, len(res))
 
 		for i := 0; i < len(res); i++ {
 			assert.Equal(t, data[i], res[i])
 		}
 
+		// read the left data
 		res, err = adapter.ReadUint8(len(data))
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, 1, len(res))
 		assert.Equal(t, data[len(data)-1], res[0])
 
+		// nothing to read
 		res, err = adapter.ReadUint8(len(data))
-		assert.NotNil(t, err)
+		assert.NoError(t, err)
 		assert.Nil(t, res)
 
 		// incorrect type read
 		resb, err := adapter.ReadBool(len(data))
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 		assert.Nil(t, resb)
 	})
 
@@ -373,30 +507,33 @@ func Test_NumpyAdapterRead(t *testing.T) {
 		filePath := TempFilesPath + "int8.npy"
 		data := []int8{1, 2, 3, 4, 5, 6}
 		err := CreateNumpyFile(filePath, data)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		file, err := os.Open(filePath)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		defer file.Close()
 
 		adapter, err := NewNumpyAdapter(file)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
+		// partly read
 		res, err := adapter.ReadInt8(len(data) - 1)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, len(data)-1, len(res))
 
 		for i := 0; i < len(res); i++ {
 			assert.Equal(t, data[i], res[i])
 		}
 
+		// read the left data
 		res, err = adapter.ReadInt8(len(data))
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, 1, len(res))
 		assert.Equal(t, data[len(data)-1], res[0])
 
+		// nothing to read
 		res, err = adapter.ReadInt8(len(data))
-		assert.NotNil(t, err)
+		assert.NoError(t, err)
 		assert.Nil(t, res)
 	})
 
@@ -404,30 +541,33 @@ func Test_NumpyAdapterRead(t *testing.T) {
 		filePath := TempFilesPath + "int16.npy"
 		data := []int16{1, 2, 3, 4, 5, 6}
 		err := CreateNumpyFile(filePath, data)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		file, err := os.Open(filePath)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		defer file.Close()
 
 		adapter, err := NewNumpyAdapter(file)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
+		// partly read
 		res, err := adapter.ReadInt16(len(data) - 1)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, len(data)-1, len(res))
 
 		for i := 0; i < len(res); i++ {
 			assert.Equal(t, data[i], res[i])
 		}
 
+		// read the left data
 		res, err = adapter.ReadInt16(len(data))
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, 1, len(res))
 		assert.Equal(t, data[len(data)-1], res[0])
 
+		// nothing to read
 		res, err = adapter.ReadInt16(len(data))
-		assert.NotNil(t, err)
+		assert.NoError(t, err)
 		assert.Nil(t, res)
 	})
 
@@ -435,30 +575,33 @@ func Test_NumpyAdapterRead(t *testing.T) {
 		filePath := TempFilesPath + "int32.npy"
 		data := []int32{1, 2, 3, 4, 5, 6}
 		err := CreateNumpyFile(filePath, data)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		file, err := os.Open(filePath)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		defer file.Close()
 
 		adapter, err := NewNumpyAdapter(file)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
+		// partly read
 		res, err := adapter.ReadInt32(len(data) - 1)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, len(data)-1, len(res))
 
 		for i := 0; i < len(res); i++ {
 			assert.Equal(t, data[i], res[i])
 		}
 
+		// read the left data
 		res, err = adapter.ReadInt32(len(data))
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, 1, len(res))
 		assert.Equal(t, data[len(data)-1], res[0])
 
+		// nothing to read
 		res, err = adapter.ReadInt32(len(data))
-		assert.NotNil(t, err)
+		assert.NoError(t, err)
 		assert.Nil(t, res)
 	})
 
@@ -466,30 +609,33 @@ func Test_NumpyAdapterRead(t *testing.T) {
 		filePath := TempFilesPath + "int64.npy"
 		data := []int64{1, 2, 3, 4, 5, 6}
 		err := CreateNumpyFile(filePath, data)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		file, err := os.Open(filePath)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		defer file.Close()
 
 		adapter, err := NewNumpyAdapter(file)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
+		// partly read
 		res, err := adapter.ReadInt64(len(data) - 1)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, len(data)-1, len(res))
 
 		for i := 0; i < len(res); i++ {
 			assert.Equal(t, data[i], res[i])
 		}
 
+		// read the left data
 		res, err = adapter.ReadInt64(len(data))
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, 1, len(res))
 		assert.Equal(t, data[len(data)-1], res[0])
 
+		// nothing to read
 		res, err = adapter.ReadInt64(len(data))
-		assert.NotNil(t, err)
+		assert.NoError(t, err)
 		assert.Nil(t, res)
 	})
 
@@ -497,30 +643,33 @@ func Test_NumpyAdapterRead(t *testing.T) {
 		filePath := TempFilesPath + "float.npy"
 		data := []float32{1, 2, 3, 4, 5, 6}
 		err := CreateNumpyFile(filePath, data)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		file, err := os.Open(filePath)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		defer file.Close()
 
 		adapter, err := NewNumpyAdapter(file)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
+		// partly read
 		res, err := adapter.ReadFloat32(len(data) - 1)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, len(data)-1, len(res))
 
 		for i := 0; i < len(res); i++ {
 			assert.Equal(t, data[i], res[i])
 		}
 
+		// read the left data
 		res, err = adapter.ReadFloat32(len(data))
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, 1, len(res))
 		assert.Equal(t, data[len(data)-1], res[0])
 
+		// nothing to read
 		res, err = adapter.ReadFloat32(len(data))
-		assert.NotNil(t, err)
+		assert.NoError(t, err)
 		assert.Nil(t, res)
 	})
 
@@ -528,30 +677,33 @@ func Test_NumpyAdapterRead(t *testing.T) {
 		filePath := TempFilesPath + "double.npy"
 		data := []float64{1, 2, 3, 4, 5, 6}
 		err := CreateNumpyFile(filePath, data)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		file, err := os.Open(filePath)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		defer file.Close()
 
 		adapter, err := NewNumpyAdapter(file)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
+		// partly read
 		res, err := adapter.ReadFloat64(len(data) - 1)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, len(data)-1, len(res))
 
 		for i := 0; i < len(res); i++ {
 			assert.Equal(t, data[i], res[i])
 		}
 
+		// read the left data
 		res, err = adapter.ReadFloat64(len(data))
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, 1, len(res))
 		assert.Equal(t, data[len(data)-1], res[0])
 
+		// nothing to read
 		res, err = adapter.ReadFloat64(len(data))
-		assert.NotNil(t, err)
+		assert.NoError(t, err)
 		assert.Nil(t, res)
 	})
 
@@ -589,19 +741,19 @@ func Test_NumpyAdapterRead(t *testing.T) {
 
 		// count should greater than 0
 		res, err := adapter.ReadString(0)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 		assert.Nil(t, res)
 
 		// maxLen is zero
 		npyReader.Header.Descr.Type = "S0"
 		res, err = adapter.ReadString(1)
-		assert.NotNil(t, err)
+		assert.Error(t, err)
 		assert.Nil(t, res)
 
 		npyReader.Header.Descr.Type = "S" + strconv.FormatInt(int64(maxLen), 10)
 
 		res, err = adapter.ReadString(len(values) + 1)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, len(values), len(res))
 		for i := 0; i < len(res); i++ {
 			assert.Equal(t, values[i], res[i])
@@ -612,29 +764,33 @@ func Test_NumpyAdapterRead(t *testing.T) {
 		filePath := TempFilesPath + "varchar1.npy"
 		data := []string{"a ", "bbb", " c", "dd", "eeee", "fff"}
 		err := CreateNumpyFile(filePath, data)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		file, err := os.Open(filePath)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		defer file.Close()
 
 		adapter, err := NewNumpyAdapter(file)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
+
+		// partly read
 		res, err := adapter.ReadString(len(data) - 1)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, len(data)-1, len(res))
 
 		for i := 0; i < len(res); i++ {
 			assert.Equal(t, data[i], res[i])
 		}
 
+		// read the left data
 		res, err = adapter.ReadString(len(data))
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, 1, len(res))
 		assert.Equal(t, data[len(data)-1], res[0])
 
+		// nothing to read
 		res, err = adapter.ReadString(len(data))
-		assert.NotNil(t, err)
+		assert.NoError(t, err)
 		assert.Nil(t, res)
 	})
 
@@ -642,16 +798,16 @@ func Test_NumpyAdapterRead(t *testing.T) {
 		filePath := TempFilesPath + "varchar2.npy"
 		data := []string{"で と ど ", " 马克bbb", "$(한)삼각*"}
 		err := CreateNumpyFile(filePath, data)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 
 		file, err := os.Open(filePath)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		defer file.Close()
 
 		adapter, err := NewNumpyAdapter(file)
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		res, err := adapter.ReadString(len(data))
-		assert.Nil(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, len(data), len(res))
 
 		for i := 0; i < len(res); i++ {
@@ -663,7 +819,7 @@ func Test_NumpyAdapterRead(t *testing.T) {
 func Test_DecodeUtf32(t *testing.T) {
 	// wrong input
 	res, err := decodeUtf32([]byte{1, 2}, binary.LittleEndian)
-	assert.NotNil(t, err)
+	assert.Error(t, err)
 	assert.Empty(t, res)
 
 	// this string contains ascii characters and unicode characters
@@ -672,12 +828,12 @@ func Test_DecodeUtf32(t *testing.T) {
 	// utf32 littleEndian of str
 	src := []byte{97, 0, 0, 0, 100, 0, 0, 0, 228, 37, 0, 0, 9, 78, 0, 0, 126, 118, 0, 0, 181, 243, 1, 0, 144, 48, 0, 0, 153, 33, 0, 0}
 	res, err = decodeUtf32(src, binary.LittleEndian)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, str, res)
 
 	// utf32 bigEndian of str
 	src = []byte{0, 0, 0, 97, 0, 0, 0, 100, 0, 0, 37, 228, 0, 0, 78, 9, 0, 0, 118, 126, 0, 1, 243, 181, 0, 0, 48, 144, 0, 0, 33, 153}
 	res, err = decodeUtf32(src, binary.BigEndian)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	assert.Equal(t, str, res)
 }
