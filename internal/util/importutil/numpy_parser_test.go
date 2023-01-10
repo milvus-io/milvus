@@ -52,7 +52,7 @@ func createNumpyParser(t *testing.T) *NumpyParser {
 		return nil
 	}
 
-	parser, err := NewNumpyParser(ctx, schema, idAllocator, 2, 100, cm, flushFunc)
+	parser, err := NewNumpyParser(ctx, schema, idAllocator, 2, 100, cm, flushFunc, nil)
 	assert.NoError(t, err)
 	assert.NotNil(t, parser)
 	return parser
@@ -71,30 +71,30 @@ func findSchema(schema *schemapb.CollectionSchema, dt schemapb.DataType) *schema
 func Test_NewNumpyParser(t *testing.T) {
 	ctx := context.Background()
 
-	parser, err := NewNumpyParser(ctx, nil, nil, 2, 100, nil, nil)
+	parser, err := NewNumpyParser(ctx, nil, nil, 2, 100, nil, nil, nil)
 	assert.Error(t, err)
 	assert.Nil(t, parser)
 
 	schema := sampleSchema()
-	parser, err = NewNumpyParser(ctx, schema, nil, 2, 100, nil, nil)
+	parser, err = NewNumpyParser(ctx, schema, nil, 2, 100, nil, nil, nil)
 	assert.Error(t, err)
 	assert.Nil(t, parser)
 
 	idAllocator := newIDAllocator(ctx, t, nil)
-	parser, err = NewNumpyParser(ctx, schema, idAllocator, 2, 100, nil, nil)
+	parser, err = NewNumpyParser(ctx, schema, idAllocator, 2, 100, nil, nil, nil)
 	assert.Error(t, err)
 	assert.Nil(t, parser)
 
 	cm := createLocalChunkManager(t)
 
-	parser, err = NewNumpyParser(ctx, schema, idAllocator, 2, 100, cm, nil)
+	parser, err = NewNumpyParser(ctx, schema, idAllocator, 2, 100, cm, nil, nil)
 	assert.Error(t, err)
 	assert.Nil(t, parser)
 
 	flushFunc := func(fields map[storage.FieldID]storage.FieldData, shardID int) error {
 		return nil
 	}
-	parser, err = NewNumpyParser(ctx, schema, idAllocator, 2, 100, cm, flushFunc)
+	parser, err = NewNumpyParser(ctx, schema, idAllocator, 2, 100, cm, flushFunc, nil)
 	assert.NoError(t, err)
 	assert.NotNil(t, parser)
 }
@@ -878,7 +878,10 @@ func Test_NumpyParserParse_perf(t *testing.T) {
 	}
 
 	idAllocator := newIDAllocator(ctx, t, nil)
-	parser, err := NewNumpyParser(ctx, perfSchema(dim), idAllocator, shardNum, 16*1024*1024, cm, callFlushFunc)
+	updateProgress := func(percent int64) {
+		assert.Greater(t, percent, int64(0))
+	}
+	parser, err := NewNumpyParser(ctx, perfSchema(dim), idAllocator, shardNum, 16*1024*1024, cm, callFlushFunc, updateProgress)
 	assert.NoError(t, err)
 	assert.NotNil(t, parser)
 	parser.collectionSchema = perfSchema(dim)
