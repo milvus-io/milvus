@@ -98,6 +98,7 @@ func (t AlterType) String() string {
 	return ""
 }
 
+//go:generate mockery --name=DataCoordCatalog --with-expecter
 type DataCoordCatalog interface {
 	ListSegments(ctx context.Context) ([]*datapb.SegmentInfo, error)
 	AddSegment(ctx context.Context, segment *datapb.SegmentInfo) error
