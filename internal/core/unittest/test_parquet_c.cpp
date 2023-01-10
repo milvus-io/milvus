@@ -104,7 +104,9 @@ TEST(storage, boolean) {
     auto nums = GetPayloadLengthFromWriter(payload);
     ASSERT_EQ(nums, 4);
 
-    auto reader = NewPayloadReader(int(milvus::DataType::BOOL), (uint8_t*)cb.data, cb.length);
+    CPayloadReader reader;
+    st = NewPayloadReader(int(milvus::DataType::BOOL), (uint8_t*)cb.data, cb.length, &reader);
+    ASSERT_EQ(st.error_code, ErrorCode::Success);
     bool* values;
     int length = GetPayloadLengthFromReader(reader);
     ASSERT_EQ(length, 4);
@@ -116,7 +118,8 @@ TEST(storage, boolean) {
     }
 
     ReleasePayloadWriter(payload);
-    ReleasePayloadReader(reader);
+    st = ReleasePayloadReader(reader);
+    ASSERT_EQ(st.error_code, ErrorCode::Success);
 }
 
 #define NUMERIC_TEST(TEST_NAME, COLUMN_TYPE, DATA_TYPE, ADD_FUNC, GET_FUNC, ARRAY_TYPE) \
@@ -134,7 +137,9 @@ TEST(storage, boolean) {
         auto nums = GetPayloadLengthFromWriter(payload);                                \
         ASSERT_EQ(nums, 4);                                                             \
                                                                                         \
-        auto reader = NewPayloadReader(COLUMN_TYPE, (uint8_t*)cb.data, cb.length);      \
+        CPayloadReader reader;                                                          \
+        st = NewPayloadReader(COLUMN_TYPE, (uint8_t*)cb.data, cb.length, &reader);      \
+        ASSERT_EQ(st.error_code, ErrorCode::Success);                                   \
         DATA_TYPE* values;                                                              \
         int length;                                                                     \
         st = GET_FUNC(reader, &values, &length);                                        \
@@ -149,7 +154,8 @@ TEST(storage, boolean) {
         }                                                                               \
                                                                                         \
         ReleasePayloadWriter(payload);                                                  \
-        ReleasePayloadReader(reader);                                                   \
+        st = ReleasePayloadReader(reader);                                              \
+        ASSERT_EQ(st.error_code, ErrorCode::Success);                                   \
     }
 
 NUMERIC_TEST(int8, int(milvus::DataType::INT8), int8_t, AddInt8ToPayload, GetInt8FromPayload, arrow::Int8Array)
@@ -179,7 +185,9 @@ TEST(storage, stringarray) {
     auto nums = GetPayloadLengthFromWriter(payload);
     ASSERT_EQ(nums, 3);
 
-    auto reader = NewPayloadReader(int(milvus::DataType::VARCHAR), (uint8_t*)cb.data, cb.length);
+    CPayloadReader reader;
+    st = NewPayloadReader(int(milvus::DataType::VARCHAR), (uint8_t*)cb.data, cb.length, &reader);
+    ASSERT_EQ(st.error_code, ErrorCode::Success);
     int length = GetPayloadLengthFromReader(reader);
     ASSERT_EQ(length, 3);
     char *v0, *v1, *v2;
@@ -209,7 +217,8 @@ TEST(storage, stringarray) {
     ASSERT_EQ(v2[2], 0);
 
     ReleasePayloadWriter(payload);
-    ReleasePayloadReader(reader);
+    st = ReleasePayloadReader(reader);
+    ASSERT_EQ(st.error_code, ErrorCode::Success);
 }
 
 TEST(storage, binary_vector) {
@@ -227,7 +236,9 @@ TEST(storage, binary_vector) {
     auto nums = GetPayloadLengthFromWriter(payload);
     ASSERT_EQ(nums, 4);
 
-    auto reader = NewPayloadReader(int(milvus::DataType::VECTOR_BINARY), (uint8_t*)cb.data, cb.length);
+    CPayloadReader reader;
+    st = NewPayloadReader(int(milvus::DataType::VECTOR_BINARY), (uint8_t*)cb.data, cb.length, &reader);
+    ASSERT_EQ(st.error_code, ErrorCode::Success);
     uint8_t* values;
     int length;
     int dim;
@@ -244,7 +255,8 @@ TEST(storage, binary_vector) {
     }
 
     ReleasePayloadWriter(payload);
-    ReleasePayloadReader(reader);
+    st = ReleasePayloadReader(reader);
+    ASSERT_EQ(st.error_code, ErrorCode::Success);
 }
 
 TEST(storage, binary_vector_empty) {
@@ -257,11 +269,15 @@ TEST(storage, binary_vector_empty) {
     //    ASSERT_EQ(cb.data, nullptr);
     auto nums = GetPayloadLengthFromWriter(payload);
     ASSERT_EQ(nums, 0);
-    auto reader = NewPayloadReader(int(milvus::DataType::VECTOR_BINARY), (uint8_t*)cb.data, cb.length);
+
+    CPayloadReader reader;
+    st = NewPayloadReader(int(milvus::DataType::VECTOR_BINARY), (uint8_t*)cb.data, cb.length, &reader);
+    ASSERT_EQ(st.error_code, ErrorCode::Success);
     ASSERT_EQ(0, GetPayloadLengthFromReader(reader));
     //    ASSERT_EQ(reader, nullptr);
     ReleasePayloadWriter(payload);
-    ReleasePayloadReader(reader);
+    st = ReleasePayloadReader(reader);
+    ASSERT_EQ(st.error_code, ErrorCode::Success);
 }
 
 TEST(storage, float_vector) {
@@ -279,7 +295,9 @@ TEST(storage, float_vector) {
     auto nums = GetPayloadLengthFromWriter(payload);
     ASSERT_EQ(nums, 4);
 
-    auto reader = NewPayloadReader(int(milvus::DataType::VECTOR_FLOAT), (uint8_t*)cb.data, cb.length);
+    CPayloadReader reader;
+    st = NewPayloadReader(int(milvus::DataType::VECTOR_FLOAT), (uint8_t*)cb.data, cb.length, &reader);
+    ASSERT_EQ(st.error_code, ErrorCode::Success);
     float* values;
     int length;
     int dim;
@@ -296,7 +314,8 @@ TEST(storage, float_vector) {
     }
 
     ReleasePayloadWriter(payload);
-    ReleasePayloadReader(reader);
+    st = ReleasePayloadReader(reader);
+    ASSERT_EQ(st.error_code, ErrorCode::Success);
 }
 
 TEST(storage, float_vector_empty) {
@@ -309,11 +328,15 @@ TEST(storage, float_vector_empty) {
     //    ASSERT_EQ(cb.data, nullptr);
     auto nums = GetPayloadLengthFromWriter(payload);
     ASSERT_EQ(nums, 0);
-    auto reader = NewPayloadReader(int(milvus::DataType::VECTOR_FLOAT), (uint8_t*)cb.data, cb.length);
+
+    CPayloadReader reader;
+    st = NewPayloadReader(int(milvus::DataType::VECTOR_FLOAT), (uint8_t*)cb.data, cb.length, &reader);
+    ASSERT_EQ(st.error_code, ErrorCode::Success);
     ASSERT_EQ(0, GetPayloadLengthFromReader(reader));
     //    ASSERT_EQ(reader, nullptr);
     ReleasePayloadWriter(payload);
-    ReleasePayloadReader(reader);
+    st = ReleasePayloadReader(reader);
+    ASSERT_EQ(st.error_code, ErrorCode::Success);
 }
 
 TEST(storage, int8_2) {

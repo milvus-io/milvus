@@ -16,33 +16,42 @@
 
 #pragma once
 
-#include <vector>
 #include <memory>
+#include <utility>
 
-#include "storage/DataCodec.h"
+#include "utils/Status.h"
+#include "exceptions/EasyAssert.h"
 
 namespace milvus::storage {
 
-class InsertData : public DataCodec {
+class BinlogReader {
  public:
-    explicit InsertData(FieldDataPtr data) : DataCodec(data, CodecType::InsertDataType) {
+    explicit BinlogReader(const std::shared_ptr<uint8_t[]> binlog_data, int64_t length)
+        : data_(binlog_data), size_(length), tell_(0) {
     }
 
-    std::vector<uint8_t>
-    Serialize(StorageType medium) override;
+    explicit BinlogReader(const uint8_t* binlog_data, int64_t length) : size_(length), tell_(0) {
+        data_ = std::shared_ptr<uint8_t[]>(new uint8_t[length]);
+        std::memcpy(data_.get(), binlog_data, length);
+    }
 
-    void
-    SetFieldDataMeta(const FieldDataMeta& meta) override;
+    Status
+    Read(int64_t nbytes, void* out);
 
- public:
-    std::vector<uint8_t>
-    serialize_to_remote_file();
+    std::pair<Status, std::shared_ptr<uint8_t[]>>
+    Read(int64_t nbytes);
 
-    std::vector<uint8_t>
-    serialize_to_local_file();
+    int64_t
+    Tell() const {
+        return tell_;
+    }
 
  private:
-    std::optional<FieldDataMeta> field_data_meta_;
+    int64_t size_;
+    int64_t tell_;
+    std::shared_ptr<uint8_t[]> data_;
 };
+
+using BinlogReaderPtr = std::shared_ptr<BinlogReader>;
 
 }  // namespace milvus::storage

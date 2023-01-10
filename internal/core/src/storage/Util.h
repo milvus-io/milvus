@@ -22,12 +22,13 @@
 
 #include "storage/PayloadStream.h"
 #include "storage/FileManager.h"
+#include "storage/BinlogReader.h"
 #include "knowhere/index/IndexType.h"
 
 namespace milvus::storage {
 
 StorageType
-ReadMediumType(PayloadInputStream* input_stream);
+ReadMediumType(BinlogReaderPtr reader);
 
 void
 AddPayloadToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder, const Payload& payload);

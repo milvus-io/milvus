@@ -81,7 +81,7 @@ IndexData::serialize_to_remote_file() {
     for (auto i = int8_t(EventType::DescriptorEvent); i < int8_t(EventType::EventTypeEnd); i++) {
         des_event_data.post_header_lengths.push_back(GetEventFixPartSize(EventType(i)));
     }
-    des_event_data.extras[ORIGIN_SIZE_KEY] = std::to_string(field_data_->get_data_size());
+    des_event_data.extras[ORIGIN_SIZE_KEY] = std::to_string(field_data_->Size());
     des_event_data.extras[INDEX_BUILD_ID_KEY] = std::to_string(index_meta_->build_id);
 
     auto& des_event_header = descriptor_event.event_header;
