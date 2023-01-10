@@ -969,3 +969,20 @@ func Test_ImportWrapperReportPersisted(t *testing.T) {
 	err = wrapper.reportPersisted(2, tr)
 	assert.Error(t, err)
 }
+
+func Test_ImportWrapperUpdateProgressPercent(t *testing.T) {
+	ctx := context.Background()
+
+	wrapper := NewImportWrapper(ctx, sampleSchema(), 2, 1, nil, nil, nil, nil)
+	assert.NotNil(t, wrapper)
+	assert.Equal(t, int64(0), wrapper.progressPercent)
+
+	wrapper.updateProgressPercent(5)
+	assert.Equal(t, int64(5), wrapper.progressPercent)
+
+	wrapper.updateProgressPercent(200)
+	assert.Equal(t, int64(5), wrapper.progressPercent)
+
+	wrapper.updateProgressPercent(100)
+	assert.Equal(t, int64(100), wrapper.progressPercent)
+}

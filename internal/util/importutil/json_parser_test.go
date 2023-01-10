@@ -55,7 +55,7 @@ func Test_AdjustBufSize(t *testing.T) {
 
 	// small row
 	schema := sampleSchema()
-	parser := NewJSONParser(ctx, schema)
+	parser := NewJSONParser(ctx, schema, nil)
 	assert.NotNil(t, parser)
 	assert.Greater(t, parser.bufRowCount, 0)
 
@@ -63,7 +63,7 @@ func Test_AdjustBufSize(t *testing.T) {
 	schema.Fields[9].TypeParams = []*commonpb.KeyValuePair{
 		{Key: "dim", Value: "32768"},
 	}
-	parser = NewJSONParser(ctx, schema)
+	parser = NewJSONParser(ctx, schema, nil)
 	assert.NotNil(t, parser)
 	assert.Greater(t, parser.bufRowCount, 0)
 
@@ -74,7 +74,7 @@ func Test_AdjustBufSize(t *testing.T) {
 		AutoID:      true,
 		Fields:      []*schemapb.FieldSchema{},
 	}
-	parser = NewJSONParser(ctx, schema)
+	parser = NewJSONParser(ctx, schema, nil)
 	assert.NotNil(t, parser)
 	assert.Greater(t, parser.bufRowCount, 0)
 }
@@ -84,7 +84,7 @@ func Test_JSONParserParseRows_IntPK(t *testing.T) {
 	defer cancel()
 
 	schema := sampleSchema()
-	parser := NewJSONParser(ctx, schema)
+	parser := NewJSONParser(ctx, schema, nil)
 	assert.NotNil(t, parser)
 
 	// prepare test data
@@ -121,7 +121,7 @@ func Test_JSONParserParseRows_IntPK(t *testing.T) {
 	t.Run("parse success", func(t *testing.T) {
 		// set bufRowCount = 4, means call handle() after reading 4 rows
 		parser.bufRowCount = 4
-		err = parser.ParseRows(reader, consumer)
+		err = parser.ParseRows(&IOReader{r: reader, fileSize: int64(len(strContent))}, consumer)
 		assert.Nil(t, err)
 		assert.Equal(t, len(content.Rows), len(consumer.rows))
 		for i := 0; i < len(consumer.rows); i++ {
@@ -188,7 +188,7 @@ func Test_JSONParserParseRows_IntPK(t *testing.T) {
 
 	t.Run("error cases", func(t *testing.T) {
 		// handler is nil
-		err = parser.ParseRows(reader, nil)
+		err = parser.ParseRows(&IOReader{r: reader, fileSize: int64(0)}, nil)
 		assert.NotNil(t, err)
 
 		// not a row-based format
@@ -196,7 +196,7 @@ func Test_JSONParserParseRows_IntPK(t *testing.T) {
 			"dummy":[]
 		}`)
 
-		err = parser.ParseRows(reader, consumer)
+		err = parser.ParseRows(&IOReader{r: reader, fileSize: int64(10)}, consumer)
 		assert.NotNil(t, err)
 
 		// rows is not a list
@@ -204,7 +204,7 @@ func Test_JSONParserParseRows_IntPK(t *testing.T) {
 			"rows":
 		}`)
 
-		err = parser.ParseRows(reader, consumer)
+		err = parser.ParseRows(&IOReader{r: reader, fileSize: int64(5)}, consumer)
 		assert.NotNil(t, err)
 
 		// typo
@@ -212,7 +212,7 @@ func Test_JSONParserParseRows_IntPK(t *testing.T) {
 			"rows": [}
 		}`)
 
-		err = parser.ParseRows(reader, consumer)
+		err = parser.ParseRows(&IOReader{r: reader, fileSize: int64(6)}, consumer)
 		assert.NotNil(t, err)
 
 		// rows is not a list
@@ -220,7 +220,7 @@ func Test_JSONParserParseRows_IntPK(t *testing.T) {
 			"rows": {}
 		}`)
 
-		err = parser.ParseRows(reader, consumer)
+		err = parser.ParseRows(&IOReader{r: reader, fileSize: int64(8)}, consumer)
 		assert.NotNil(t, err)
 
 		// rows is not a list of list
@@ -228,25 +228,25 @@ func Test_JSONParserParseRows_IntPK(t *testing.T) {
 			"rows": [[]]
 		}`)
 
-		err = parser.ParseRows(reader, consumer)
+		err = parser.ParseRows(&IOReader{r: reader, fileSize: int64(10)}, consumer)
 		assert.NotNil(t, err)
 
 		// not valid json format
 		reader = strings.NewReader(`[]`)
 
-		err = parser.ParseRows(reader, consumer)
+		err = parser.ParseRows(&IOReader{r: reader, fileSize: int64(2)}, consumer)
 		assert.NotNil(t, err)
 
 		// empty content
 		reader = strings.NewReader(`{}`)
 
-		err = parser.ParseRows(reader, consumer)
+		err = parser.ParseRows(&IOReader{r: reader, fileSize: int64(2)}, consumer)
 		assert.NotNil(t, err)
 
 		// empty content
 		reader = strings.NewReader(``)
 
-		err = parser.ParseRows(reader, consumer)
+		err = parser.ParseRows(&IOReader{r: reader, fileSize: int64(0)}, consumer)
 		assert.NotNil(t, err)
 
 		// redundant field
@@ -255,7 +255,7 @@ func Test_JSONParserParseRows_IntPK(t *testing.T) {
 				{"dummy": 1, "FieldBool": true, "FieldInt8": 10, "FieldInt16": 101, "FieldInt32": 1001, "FieldInt64": 10001, "FieldFloat": 3.14, "FieldDouble": 1.56, "FieldString": "hello world", "FieldBinaryVector": [254, 0], "FieldFloatVector": [1.1, 1.2, 1.3, 1.4]}
 			]
 		}`)
-		err = parser.ParseRows(reader, consumer)
+		err = parser.ParseRows(&IOReader{r: reader, fileSize: int64(100)}, consumer)
 		assert.NotNil(t, err)
 
 		// field missed
@@ -264,7 +264,7 @@ func Test_JSONParserParseRows_IntPK(t *testing.T) {
 				{"FieldInt8": 10, "FieldInt16": 101, "FieldInt32": 1001, "FieldInt64": 10001, "FieldFloat": 3.14, "FieldDouble": 1.56, "FieldString": "hello world", "FieldBinaryVector": [254, 0], "FieldFloatVector": [1.1, 1.2, 1.3, 1.4]}
 			]
 		}`)
-		err = parser.ParseRows(reader, consumer)
+		err = parser.ParseRows(&IOReader{r: reader, fileSize: int64(100)}, consumer)
 		assert.NotNil(t, err)
 
 		// handle() error
@@ -278,26 +278,26 @@ func Test_JSONParserParseRows_IntPK(t *testing.T) {
 		consumer.handleErr = errors.New("error")
 		reader = strings.NewReader(content)
 		parser.bufRowCount = 2
-		err = parser.ParseRows(reader, consumer)
+		err = parser.ParseRows(&IOReader{r: reader, fileSize: int64(100)}, consumer)
 		assert.NotNil(t, err)
 
 		reader = strings.NewReader(content)
 		parser.bufRowCount = 5
-		err = parser.ParseRows(reader, consumer)
+		err = parser.ParseRows(&IOReader{r: reader, fileSize: int64(100)}, consumer)
 		assert.NotNil(t, err)
 
 		// row count is 0
 		reader = strings.NewReader(`{
 			"rows":[]
 		}`)
-		err = parser.ParseRows(reader, consumer)
+		err = parser.ParseRows(&IOReader{r: reader, fileSize: int64(100)}, consumer)
 		assert.NotNil(t, err)
 
 		// canceled
 		consumer.handleErr = nil
 		cancel()
 		reader = strings.NewReader(content)
-		err = parser.ParseRows(reader, consumer)
+		err = parser.ParseRows(&IOReader{r: reader, fileSize: int64(100)}, consumer)
 		assert.NotNil(t, err)
 	})
 }
@@ -307,7 +307,10 @@ func Test_JSONParserParseRows_StrPK(t *testing.T) {
 	defer cancel()
 
 	schema := strKeySchema()
-	parser := NewJSONParser(ctx, schema)
+	updateProgress := func(percent int64) {
+		assert.Greater(t, percent, int64(0))
+	}
+	parser := NewJSONParser(ctx, schema, updateProgress)
 	assert.NotNil(t, parser)
 
 	// prepare test data
@@ -337,7 +340,7 @@ func Test_JSONParserParseRows_StrPK(t *testing.T) {
 		handleCount: 0,
 	}
 
-	err = parser.ParseRows(reader, consumer)
+	err = parser.ParseRows(&IOReader{r: reader, fileSize: int64(len(binContent))}, consumer)
 	assert.Nil(t, err)
 	assert.Equal(t, len(content.Rows), len(consumer.rows))
 	for i := 0; i < len(consumer.rows); i++ {
