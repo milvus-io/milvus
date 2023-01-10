@@ -618,10 +618,6 @@ func (gibpt *getIndexBuildProgressTask) Execute(ctx context.Context) error {
 	}
 	gibpt.collectionID = collectionID
 
-	if gibpt.IndexName == "" {
-		gibpt.IndexName = Params.CommonCfg.DefaultIndexName
-	}
-
 	resp, err := gibpt.indexCoord.GetIndexBuildProgress(ctx, &indexpb.GetIndexBuildProgressRequest{
 		CollectionID: collectionID,
 		IndexName:    gibpt.IndexName,
@@ -704,10 +700,6 @@ func (gist *getIndexStateTask) PreExecute(ctx context.Context) error {
 }
 
 func (gist *getIndexStateTask) Execute(ctx context.Context) error {
-
-	if gist.IndexName == "" {
-		gist.IndexName = Params.CommonCfg.DefaultIndexName
-	}
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, gist.CollectionName)
 	if err != nil {
 		return err
