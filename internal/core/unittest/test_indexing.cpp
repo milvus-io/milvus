@@ -288,6 +288,10 @@ class IndexTest : public ::testing::TestWithParam<Param> {
     SetUp() override {
         knowhere::KnowhereConfig::SetStatisticsLevel(3);
         storage_config_ = get_default_storage_config();
+        // auto rcm = std::make_shared<storage::MinioChunkManager>(storage_config_);
+        // if (!rcm->BucketExists(storage_config_.bucket_name)) {
+        //     rcm->CreateBucket(storage_config_.bucket_name);
+        // }
 
         auto param = GetParam();
         index_type = param.first;
@@ -437,6 +441,10 @@ TEST_P(IndexTest, BuildAndQuery) {
 //    create_index_info.field_type = milvus::DataType::VECTOR_FLOAT;
 //
 //    StorageConfig storage_config = get_default_storage_config();
+//    auto rcm = std::make_shared<storage::MinioChunkManager>(storage_config);
+//    if (!rcm->BucketExists(storage_config.bucket_name)) {
+//        rcm->CreateBucket(storage_config.bucket_name);
+//    }
 //    milvus::storage::FieldDataMeta field_data_meta{1, 2, 3, 100};
 //    milvus::storage::IndexMeta index_meta{3, 100, 1000, 1};
 //    auto file_manager =

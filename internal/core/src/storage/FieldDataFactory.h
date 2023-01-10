@@ -16,33 +16,33 @@
 
 #pragma once
 
-#include <vector>
-#include <memory>
+#include <string>
 
-#include "storage/DataCodec.h"
+#include "storage/FieldData.h"
 
 namespace milvus::storage {
 
-class InsertData : public DataCodec {
+class FieldDataFactory {
+ private:
+    FieldDataFactory() = default;
+    FieldDataFactory(const FieldDataFactory&) = delete;
+    FieldDataFactory
+    operator=(const FieldDataFactory&) = delete;
+
  public:
-    explicit InsertData(FieldDataPtr data) : DataCodec(data, CodecType::InsertDataType) {
+    static FieldDataFactory&
+    GetInstance() {
+        static FieldDataFactory inst;
+        return inst;
     }
 
-    std::vector<uint8_t>
-    Serialize(StorageType medium) override;
+    std::string
+    GetName() const {
+        return "FieldDataFactory";
+    }
 
-    void
-    SetFieldDataMeta(const FieldDataMeta& meta) override;
-
- public:
-    std::vector<uint8_t>
-    serialize_to_remote_file();
-
-    std::vector<uint8_t>
-    serialize_to_local_file();
-
- private:
-    std::optional<FieldDataMeta> field_data_meta_;
+    FieldDataPtr
+    CreateFieldData(const DataType& type, const int64_t dim = 1);
 };
 
 }  // namespace milvus::storage
