@@ -18,11 +18,13 @@ package cache
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/milvus-io/milvus/internal/log"
 )
@@ -55,6 +57,7 @@ type localCache[K comparable, V any] struct {
 	onInsertion Func[K, V]
 	onRemoval   Func[K, V]
 
+	singleflight   singleflight.Group
 	loader         LoaderFunc[K, V]
 	getPreLoadData GetPreLoadDataFunc[K, V]
 
@@ -345,20 +348,29 @@ func (c *localCache[K, V]) load(k K) (v V, err error) {
 		var ret V
 		return ret, errors.New("cache loader function must be set")
 	}
-	// TODO: Poll the value instead when the entry is loading.
-	start := currentTime()
-	v, err = c.loader(k)
-	now := currentTime()
-	loadTime := now.Sub(start)
+
+	// use singleflight here
+	val, err, _ := c.singleflight.Do(fmt.Sprintf("%v", k), func() (any, error) {
+		start := currentTime()
+		v, err := c.loader(k)
+		now := currentTime()
+		loadTime := now.Sub(start)
+		if err != nil {
+			c.stats.RecordLoadError(loadTime)
+			return v, err
+		}
+		c.stats.RecordLoadSuccess(loadTime)
+		en := newEntry(k, v, sum(k))
+		c.setEntryWriteTime(en, now)
+		c.setEntryAccessTime(en, now)
+		c.sendEvent(eventWrite, en)
+
+		return v, err
+	})
 	if err != nil {
-		c.stats.RecordLoadError(loadTime)
 		return v, err
 	}
-	c.stats.RecordLoadSuccess(loadTime)
-	en := newEntry(k, v, sum(k))
-	c.setEntryWriteTime(en, now)
-	c.setEntryAccessTime(en, now)
-	c.sendEvent(eventWrite, en)
+	v = val.(V)
 	return v, nil
 }
 
