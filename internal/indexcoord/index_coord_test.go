@@ -101,7 +101,8 @@ func TestMockEtcd(t *testing.T) {
 
 func testIndexCoord(t *testing.T) {
 	ctx := context.Background()
-	Params.EtcdCfg.MetaRootPath = "indexcoord-ut"
+	testPath := fmt.Sprintf("/test/datanode/root/indexcoord-ut-%d", time.Now().Unix())
+	Params.BaseTable.Save("etcd.rootPath", testPath)
 
 	// first start an IndexNode
 	inm0 := indexnode.NewIndexNodeMock()
@@ -192,10 +193,10 @@ func testIndexCoord(t *testing.T) {
 	}
 	assert.NoError(t, err)
 
-	err = ic.Register()
+	err = ic.Start()
 	assert.NoError(t, err)
 
-	err = ic.Start()
+	err = ic.Register()
 	assert.NoError(t, err)
 
 	ic.UpdateStateCode(commonpb.StateCode_Healthy)
@@ -612,6 +613,57 @@ func TestIndexCoord_EnableActiveStandby(t *testing.T) {
 	Params.InitOnce()
 	Params.IndexCoordCfg.EnableActiveStandby = true
 	testIndexCoord(t)
+}
+
+func TestIndexCoordProcessActiveStandby(t *testing.T) {
+	Params.InitOnce()
+	Params.IndexCoordCfg.EnableActiveStandby = true
+	ctx := context.Background()
+	testPath := fmt.Sprintf("/test/datanode/root/indexcoord-ut-%d", time.Now().Unix())
+	Params.BaseTable.Save("etcd.rootPath", testPath)
+
+	etcdCli, err := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd,
+		Params.EtcdCfg.EtcdUseSSL,
+		Params.EtcdCfg.Endpoints,
+		Params.EtcdCfg.EtcdTLSCert,
+		Params.EtcdCfg.EtcdTLSKey,
+		Params.EtcdCfg.EtcdTLSCACert,
+		Params.EtcdCfg.EtcdTLSMinVersion)
+	assert.NoError(t, err)
+
+	// start IndexCoord
+	factory := dependency.NewDefaultFactory(true)
+	ic, err := NewIndexCoord(ctx, factory)
+	assert.NoError(t, err)
+
+	rcm := NewRootCoordMock()
+	err = ic.SetRootCoord(rcm)
+	assert.NoError(t, err)
+
+	dcm := &DataCoordMock{}
+	err = ic.SetDataCoord(dcm)
+	assert.Nil(t, err)
+
+	ic.SetEtcdClient(etcdCli)
+
+	err = ic.Init()
+	assert.NoError(t, err)
+
+	mockKv := NewMockEtcdKVWithReal(ic.etcdKV)
+	ic.metaTable.catalog = &indexcoord.Catalog{
+		Txn: mockKv,
+	}
+	assert.NoError(t, err)
+
+	err = ic.Start()
+	assert.NoError(t, err)
+
+	ic.activateFunc = func() error {
+		return errors.New("mock err")
+	}
+	err = ic.Register()
+	assert.Error(t, err)
 }
 
 func TestIndexCoord_GetComponentStates(t *testing.T) {

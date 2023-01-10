@@ -2840,7 +2840,7 @@ type rootCoordSegFlushComplete struct {
 	flag bool
 }
 
-//SegmentFlushCompleted, override default behavior
+// SegmentFlushCompleted, override default behavior
 func (rc *rootCoordSegFlushComplete) SegmentFlushCompleted(ctx context.Context, req *datapb.SegmentFlushCompletedMsg) (*commonpb.Status, error) {
 	if rc.flag {
 		return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
@@ -3732,5 +3732,39 @@ func TestDataCoord_EnableActiveStandby(t *testing.T) {
 	Params.Init()
 	Params.DataCoordCfg.EnableActiveStandby = true
 	svr := testDataCoordBase(t)
+	defer closeTestServer(t, svr)
+}
+
+func TestDataCoordProcessActiveStandby(t *testing.T) {
+	Params.Init()
+	Params.DataCoordCfg.EnableActiveStandby = true
+	var err error
+	Params.CommonCfg.DataCoordTimeTick = Params.CommonCfg.DataCoordTimeTick + strconv.Itoa(rand.Int())
+	factory := dependency.NewDefaultFactory(true)
+
+	etcdCli, err := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd,
+		Params.EtcdCfg.EtcdUseSSL,
+		Params.EtcdCfg.Endpoints,
+		Params.EtcdCfg.EtcdTLSCert,
+		Params.EtcdCfg.EtcdTLSKey,
+		Params.EtcdCfg.EtcdTLSCACert,
+		Params.EtcdCfg.EtcdTLSMinVersion)
+	assert.Nil(t, err)
+	sessKey := path.Join(Params.EtcdCfg.MetaRootPath, sessionutil.DefaultServiceRoot)
+	_, err = etcdCli.Delete(context.Background(), sessKey, clientv3.WithPrefix())
+	assert.Nil(t, err)
+
+	svr := CreateServer(context.TODO(), factory)
+	svr.SetEtcdClient(etcdCli)
+	err = svr.Init()
+	assert.NoError(t, err)
+	err = svr.Start()
+	assert.NoError(t, err)
+	svr.activateFunc = func() error {
+		return errors.New("mock err")
+	}
+	err = svr.Register()
+	assert.Error(t, err)
 	defer closeTestServer(t, svr)
 }

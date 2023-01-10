@@ -135,7 +135,7 @@ type Core struct {
 	importManager *importManager
 
 	enableActiveStandBy bool
-	activateFunc        func()
+	activateFunc        sessionutil.ActivateFunc
 }
 
 // --------------------- function --------------------------
@@ -297,7 +297,11 @@ func (c *Core) SetQueryCoord(s types.QueryCoord) error {
 func (c *Core) Register() error {
 	c.session.Register()
 	if c.enableActiveStandBy {
-		c.session.ProcessActiveStandBy(c.activateFunc)
+		err := c.session.ProcessActiveStandBy(c.activateFunc)
+		if err != nil {
+			log.Warn("rootcoord ProcessActiveStandBy failed", zap.Error(err))
+			return err
+		}
 	}
 	log.Info("RootCoord Register Finished")
 	go c.session.LivenessCheck(c.ctx, func() {
@@ -448,9 +452,7 @@ func (c *Core) initInternal() error {
 
 	c.factory.Init(&Params)
 
-	chanMap := c.meta.ListCollectionPhysicalChannels()
-	c.chanTimeTick = newTimeTickSync(c.ctx, c.session.ServerID, c.factory, chanMap)
-	c.chanTimeTick.addSession(c.session)
+	c.initChanTimeTick()
 	c.proxyClientManager = newProxyClientManager(c.proxyCreator)
 
 	c.broker = newServerBroker(c)
@@ -458,14 +460,7 @@ func (c *Core) initInternal() error {
 	c.garbageCollector = newBgGarbageCollector(c)
 	c.stepExecutor = newBgStepExecutor(c.ctx)
 
-	c.proxyManager = newProxyManager(
-		c.ctx,
-		c.etcdCli,
-		c.chanTimeTick.initSessions,
-		c.proxyClientManager.GetProxyClients,
-	)
-	c.proxyManager.AddSessionFunc(c.chanTimeTick.addSession, c.proxyClientManager.AddProxyClient)
-	c.proxyManager.DelSessionFunc(c.chanTimeTick.delSession, c.proxyClientManager.DelProxyClient)
+	c.initProxyManager()
 
 	c.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
 
@@ -505,6 +500,23 @@ func (c *Core) initCredentials() error {
 		return err
 	}
 	return nil
+}
+
+func (c *Core) initChanTimeTick() {
+	chanMap := c.meta.ListCollectionPhysicalChannels()
+	c.chanTimeTick = newTimeTickSync(c.ctx, c.session.ServerID, c.factory, chanMap)
+	c.chanTimeTick.addSession(c.session)
+}
+
+func (c *Core) initProxyManager() {
+	c.proxyManager = newProxyManager(
+		c.ctx,
+		c.etcdCli,
+		c.chanTimeTick.initSessions,
+		c.proxyClientManager.GetProxyClients,
+	)
+	c.proxyManager.AddSessionFunc(c.chanTimeTick.addSession, c.proxyClientManager.AddProxyClient)
+	c.proxyManager.DelSessionFunc(c.chanTimeTick.delSession, c.proxyClientManager.DelProxyClient)
 }
 
 func (c *Core) initRbac() (initError error) {
@@ -608,12 +620,6 @@ func (c *Core) restore(ctx context.Context) error {
 }
 
 func (c *Core) startInternal() error {
-	if err := c.proxyManager.WatchProxy(); err != nil {
-		log.Fatal("rootcoord failed to watch proxy", zap.Error(err))
-		// you can not just stuck here,
-		panic(err)
-	}
-
 	if err := c.restore(c.ctx); err != nil {
 		panic(err)
 	}
@@ -629,11 +635,27 @@ func (c *Core) startInternal() error {
 	Params.RootCoordCfg.UpdatedTime = time.Now()
 
 	if c.enableActiveStandBy {
-		c.activateFunc = func() {
+		c.activateFunc = func() error {
 			// todo to complete
 			log.Info("rootcoord switch from standby to active, activating")
+			err := c.initMetaTable()
+			if err != nil {
+				return err
+			}
+			c.initChanTimeTick()
+			// proxyManager use chanTimeTick so it needs to re-initial
+			c.initProxyManager()
+			err = c.initRbac()
+			if err != nil {
+				return err
+			}
+			err = c.initCredentials()
+			if err != nil {
+				return err
+			}
 			c.startServerLoop()
 			c.UpdateStateCode(commonpb.StateCode_Healthy)
+			return nil
 		}
 		c.UpdateStateCode(commonpb.StateCode_StandBy)
 		logutil.Logger(c.ctx).Info("rootcoord enter standby mode successfully")
@@ -647,6 +669,11 @@ func (c *Core) startInternal() error {
 
 func (c *Core) startServerLoop() {
 	c.wg.Add(6)
+	if err := c.proxyManager.WatchProxy(); err != nil {
+		log.Fatal("rootcoord failed to watch proxy", zap.Error(err))
+		// you can not just stuck here,
+		panic(err)
+	}
 	go c.startTimeTickLoop()
 	go c.tsLoop()
 	go c.chanTimeTick.startWatch(&c.wg)

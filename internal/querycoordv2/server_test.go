@@ -18,6 +18,7 @@ package querycoordv2
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -234,6 +235,25 @@ func (suite *ServerSuite) TestEnableActiveStandby() {
 	suite.NoError(err)
 	suite.Equal(commonpb.StateCode_Healthy, states2.GetState().GetStateCode())
 
+	Params.QueryCoordCfg.EnableActiveStandby = false
+}
+
+func (suite *ServerSuite) TestProcessActiveStandby() {
+	Params.QueryCoordCfg.EnableActiveStandby = true
+
+	err := suite.server.Stop()
+	suite.NoError(err)
+
+	suite.server, err = newQueryCoord()
+	suite.NoError(err)
+	suite.hackServer()
+	err = suite.server.Start()
+	suite.NoError(err)
+	suite.server.activateFunc = func() error {
+		return errors.New("mock err")
+	}
+	err = suite.server.Register()
+	suite.Error(err)
 	Params.QueryCoordCfg.EnableActiveStandby = false
 }
 

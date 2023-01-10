@@ -51,6 +51,9 @@ func (t SessionEventType) String() string {
 // and returns err if meta error or anything else goes wrong
 type Rewatch func(sessions map[string]*Session) error
 
+// ActivateFunc defines the behavior after coord switch from standby to active
+type ActivateFunc func() error
+
 const (
 	// SessionNoneEvent place holder for zero value
 	SessionNoneEvent SessionEventType = iota
@@ -306,12 +309,14 @@ func (s *Session) getCompleteKey() string {
 // RegisterService will save a key-value in etcd
 // key: metaRootPath + "/services" + "/ServerName-ServerID"
 // value: json format
-// {
-//   ServerID   int64  `json:"ServerID,omitempty"`
-//	 ServerName string `json:"ServerName,omitempty"`
-//	 Address    string `json:"Address,omitempty"`
-//   Exclusive  bool   `json:"Exclusive,omitempty"`
-// }
+//
+//	{
+//	  ServerID   int64  `json:"ServerID,omitempty"`
+//	  ServerName string `json:"ServerName,omitempty"`
+//	  Address    string `json:"Address,omitempty"`
+//	  Exclusive  bool   `json:"Exclusive,omitempty"`
+//	}
+//
 // Exclusive means whether this service can exist two at the same time, if so,
 // it is false. Otherwise, set it to true.
 func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, error) {
@@ -726,9 +731,11 @@ func (s *Session) updateStandby(b bool) {
 // 2, Try to register to active key.
 // 3, If 2. return true, this service becomes ACTIVE. Exit STANDBY mode.
 // 4, If 2. return false, which means an ACTIVE service already exist.
-//    Start watching the active key. Whenever active key disappears, STANDBY node will go backup to 2.
+//
+//	Start watching the active key. Whenever active key disappears, STANDBY node will go backup to 2.
+//
 // activateFunc is the function to re-active the service.
-func (s *Session) ProcessActiveStandBy(activateFunc func()) error {
+func (s *Session) ProcessActiveStandBy(activateFunc ActivateFunc) error {
 	s.activeKey = path.Join(s.metaRoot, DefaultServiceRoot, s.ServerName)
 
 	// try to register to the active_key.
@@ -743,12 +750,9 @@ func (s *Session) ProcessActiveStandBy(activateFunc func()) error {
 			log.Error("json marshal error", zap.Error(err))
 			return false, -1, err
 		}
-		txnResp, err := s.etcdCli.Txn(s.ctx).If(
-			clientv3.Compare(
-				clientv3.Version(s.activeKey),
-				"=",
-				0)).
+		txnResp, err := s.etcdCli.Txn(s.ctx).If(clientv3.Compare(clientv3.Version(s.activeKey), "=", 0)).
 			Then(clientv3.OpPut(s.activeKey, string(sessionJSON), clientv3.WithLease(*s.leaseID))).Commit()
+		log.Info("registerActiveKey Tnx Resp", zap.Int64("ServerID", s.ServerID), zap.String("activeKey", s.activeKey), zap.Any("resp", txnResp))
 		if err != nil {
 			log.Error("register active key to etcd failed", zap.Error(err))
 			return false, -1, err
@@ -810,7 +814,10 @@ func (s *Session) ProcessActiveStandBy(activateFunc func()) error {
 	s.updateStandby(false)
 	log.Info(fmt.Sprintf("serverName: %v quit STANDBY mode, this node will become ACTIVE", s.ServerName))
 	if activateFunc != nil {
-		activateFunc()
+		err := activateFunc()
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }
