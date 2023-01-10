@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -610,4 +611,32 @@ func Test_GetTypeName(t *testing.T) {
 	assert.NotEmpty(t, str)
 	str = getTypeName(schemapb.DataType_None)
 	assert.Equal(t, "InvalidType", str)
+}
+
+func Test_PkToShard(t *testing.T) {
+	a := int32(99)
+	shard, err := pkToShard(a, 2)
+	assert.Error(t, err)
+	assert.Zero(t, shard)
+
+	s := "abcdef"
+	shardNum := uint32(3)
+	shard, err = pkToShard(s, shardNum)
+	assert.NoError(t, err)
+	hash := typeutil.HashString2Uint32(s)
+	assert.Equal(t, hash%shardNum, shard)
+
+	pk := int64(100)
+	shardNum = uint32(4)
+	shard, err = pkToShard(pk, shardNum)
+	assert.NoError(t, err)
+	hash, _ = typeutil.Hash32Int64(pk)
+	assert.Equal(t, hash%shardNum, shard)
+
+	pk = int64(99999)
+	shardNum = uint32(5)
+	shard, err = pkToShard(pk, shardNum)
+	assert.NoError(t, err)
+	hash, _ = typeutil.Hash32Int64(pk)
+	assert.Equal(t, hash%shardNum, shard)
 }
