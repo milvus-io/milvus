@@ -560,7 +560,12 @@ func (m *importManager) updateTaskInfo(ir *rootcoordpb.ImportResult) (*datapb.Im
 			// Meta persist should be done before memory objs change.
 			toPersistImportTaskInfo = cloneImportTaskInfo(v)
 			toPersistImportTaskInfo.State.StateCode = ir.GetState()
-			toPersistImportTaskInfo.State.Segments = ir.GetSegments()
+			// if is started state, append the new created segment id
+			if v.GetState().GetStateCode() == commonpb.ImportState_ImportStarted {
+				toPersistImportTaskInfo.State.Segments = append(toPersistImportTaskInfo.State.Segments, ir.GetSegments()...)
+			} else {
+				toPersistImportTaskInfo.State.Segments = ir.GetSegments()
+			}
 			toPersistImportTaskInfo.State.RowCount = ir.GetRowCount()
 			toPersistImportTaskInfo.State.RowIds = ir.GetAutoIds()
 			for _, kv := range ir.GetInfos() {
@@ -571,6 +576,8 @@ func (m *importManager) updateTaskInfo(ir *rootcoordpb.ImportResult) (*datapb.Im
 					toPersistImportTaskInfo.Infos = append(toPersistImportTaskInfo.Infos, kv)
 				}
 			}
+			log.Info("importManager update task info", zap.Any("toPersistImportTaskInfo", toPersistImportTaskInfo))
+
 			// Update task in task store.
 			if err := m.persistTaskInfo(toPersistImportTaskInfo); err != nil {
 				log.Error("failed to update import task",

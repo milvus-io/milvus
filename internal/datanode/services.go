@@ -713,6 +713,32 @@ func assignSegmentFunc(node *DataNode, req *datapb.ImportTaskRequest) importutil
 			zap.Int64("segmentID", segmentID),
 			zap.Int("shard ID", shardID),
 			zap.String("target channel name", targetChName))
+
+		// call report to notify the rootcoord update the segment id list for this task
+		// ignore the returned error, since even report failed the segments still can be cleaned
+		retry.Do(context.Background(), func() error {
+			importResult := &rootcoordpb.ImportResult{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+				},
+				TaskId:     req.GetImportTask().TaskId,
+				DatanodeId: paramtable.GetNodeID(),
+				State:      commonpb.ImportState_ImportStarted,
+				Segments:   []int64{segmentID},
+				AutoIds:    make([]int64, 0),
+				RowCount:   0,
+			}
+			status, err := node.rootCoord.ReportImport(context.Background(), importResult)
+			if err != nil {
+				log.Error("fail to report import state to RootCoord", zap.Error(err))
+				return err
+			}
+			if status != nil && status.ErrorCode != commonpb.ErrorCode_Success {
+				return errors.New(status.GetReason())
+			}
+			return nil
+		})
+
 		return segmentID, targetChName, nil
 	}
 }
