@@ -150,7 +150,7 @@ func (m *SegmentDistManager) GetByShardWithReplica(shard string, replica *Replic
 
 	ret := make([]*Segment, 0)
 	for nodeID, segments := range m.segments {
-		if !replica.Nodes.Contain(nodeID) {
+		if !replica.Contains(nodeID) {
 			continue
 		}
 		for _, segment := range segments {

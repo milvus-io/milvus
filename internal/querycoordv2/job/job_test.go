@@ -131,7 +131,7 @@ func (suite *JobSuite) SetupTest() {
 
 	suite.store = meta.NewMetaStore(suite.kv)
 	suite.dist = meta.NewDistributionManager()
-	suite.meta = meta.NewMeta(RandomIncrementIDAllocator(), suite.store)
+	suite.meta = meta.NewMeta(RandomIncrementIDAllocator(), suite.store, session.NewNodeManager())
 	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta)
 	suite.targetObserver = observers.NewTargetObserver(suite.meta,
 		suite.targetMgr,
@@ -265,6 +265,48 @@ func (suite *JobSuite) TestLoadCollection() {
 		err := job.Wait()
 		suite.ErrorIs(err, ErrLoadParameterMismatched)
 	}
+
+	suite.meta.ResourceManager.AddResourceGroup("rg1")
+	suite.meta.ResourceManager.AddResourceGroup("rg2")
+	suite.meta.ResourceManager.AddResourceGroup("rg3")
+
+	// Load with 3 replica on 1 rg
+	req := &querypb.LoadCollectionRequest{
+		CollectionID:   1001,
+		ReplicaNumber:  3,
+		ResourceGroups: []string{"rg1"},
+	}
+	job := NewLoadCollectionJob(
+		ctx,
+		req,
+		suite.dist,
+		suite.meta,
+		suite.targetMgr,
+		suite.broker,
+		suite.nodeMgr,
+	)
+	suite.scheduler.Add(job)
+	err := job.Wait()
+	suite.ErrorIs(err, ErrNoEnoughNode)
+
+	// Load with 3 replica on 3 rg
+	req = &querypb.LoadCollectionRequest{
+		CollectionID:   1002,
+		ReplicaNumber:  3,
+		ResourceGroups: []string{"rg1", "rg2", "rg3"},
+	}
+	job = NewLoadCollectionJob(
+		ctx,
+		req,
+		suite.dist,
+		suite.meta,
+		suite.targetMgr,
+		suite.broker,
+		suite.nodeMgr,
+	)
+	suite.scheduler.Add(job)
+	err = job.Wait()
+	suite.ErrorIs(err, ErrNoEnoughNode)
 }
 
 func (suite *JobSuite) TestLoadCollectionWithReplicas() {
@@ -482,6 +524,45 @@ func (suite *JobSuite) TestLoadPartition() {
 		err := job.Wait()
 		suite.ErrorIs(err, ErrLoadParameterMismatched)
 	}
+	// test load 3 replica in 1 rg, should pass rg check
+	req := &querypb.LoadPartitionsRequest{
+		CollectionID:   100,
+		PartitionIDs:   []int64{1001},
+		ReplicaNumber:  3,
+		ResourceGroups: []string{"rg1"},
+	}
+	job := NewLoadPartitionJob(
+		ctx,
+		req,
+		suite.dist,
+		suite.meta,
+		suite.targetMgr,
+		suite.broker,
+		suite.nodeMgr,
+	)
+	suite.scheduler.Add(job)
+	err := job.Wait()
+	suite.ErrorIs(err, ErrNoEnoughNode)
+
+	// test load 3 replica in 3 rg, should pass rg check
+	req = &querypb.LoadPartitionsRequest{
+		CollectionID:   102,
+		PartitionIDs:   []int64{1001},
+		ReplicaNumber:  3,
+		ResourceGroups: []string{"rg1", "rg2", "rg3"},
+	}
+	job = NewLoadPartitionJob(
+		ctx,
+		req,
+		suite.dist,
+		suite.meta,
+		suite.targetMgr,
+		suite.broker,
+		suite.nodeMgr,
+	)
+	suite.scheduler.Add(job)
+	err = job.Wait()
+	suite.ErrorIs(err, ErrNoEnoughNode)
 }
 
 func (suite *JobSuite) TestLoadPartitionWithReplicas() {
@@ -707,7 +788,7 @@ func (suite *JobSuite) TestReleasePartition() {
 func (suite *JobSuite) TestLoadCollectionStoreFailed() {
 	// Store collection failed
 	store := meta.NewMockStore(suite.T())
-	suite.meta = meta.NewMeta(RandomIncrementIDAllocator(), store)
+	suite.meta = meta.NewMeta(RandomIncrementIDAllocator(), store, session.NewNodeManager())
 	for _, collection := range suite.collections {
 		if suite.loadTypes[collection] != querypb.LoadType_LoadCollection {
 			continue
@@ -743,7 +824,7 @@ func (suite *JobSuite) TestLoadCollectionStoreFailed() {
 func (suite *JobSuite) TestLoadPartitionStoreFailed() {
 	// Store partition failed
 	store := meta.NewMockStore(suite.T())
-	suite.meta = meta.NewMeta(RandomIncrementIDAllocator(), store)
+	suite.meta = meta.NewMeta(RandomIncrementIDAllocator(), store, session.NewNodeManager())
 	err := errors.New("failed to store collection")
 	for _, collection := range suite.collections {
 		if suite.loadTypes[collection] != querypb.LoadType_LoadPartition {
@@ -775,7 +856,7 @@ func (suite *JobSuite) TestLoadPartitionStoreFailed() {
 
 func (suite *JobSuite) TestLoadCreateReplicaFailed() {
 	// Store replica failed
-	suite.meta = meta.NewMeta(ErrorIDAllocator(), suite.store)
+	suite.meta = meta.NewMeta(ErrorIDAllocator(), suite.store, session.NewNodeManager())
 	for _, collection := range suite.collections {
 		req := &querypb.LoadCollectionRequest{
 			CollectionID: collection,

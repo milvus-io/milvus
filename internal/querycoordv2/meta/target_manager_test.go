@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
+	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -101,7 +102,7 @@ func (suite *TargetManagerSuite) SetupTest() {
 	// meta
 	store := NewMetaStore(suite.kv)
 	idAllocator := RandomIncrementIDAllocator()
-	suite.meta = NewMeta(idAllocator, store)
+	suite.meta = NewMeta(idAllocator, store, session.NewNodeManager())
 	suite.broker = NewMockBroker(suite.T())
 	suite.mgr = NewTargetManager(suite.broker, suite.meta)
 

@@ -18,13 +18,24 @@ package utils
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 
 	"github.com/samber/lo"
+	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+)
+
+var (
+	ErrGetNodesFromRG       = errors.New("failed to get node from rg")
+	ErrNodesNotEnough       = errors.New("nodes is not enough")
+	ErrNoReplicaFound       = errors.New("no replica found during assign nodes")
+	ErrReplicasInconsistent = errors.New("all replicas should belong to same collection during assign nodes")
+	ErrUseWrongNumRG        = errors.New("resource num can only be 0, 1 or same as replica number")
 )
 
 func GetReplicaNodesInfo(replicaMgr *meta.ReplicaManager, nodeMgr *session.NodeManager, replicaID int64) []*session.NodeInfo {
@@ -33,8 +44,8 @@ func GetReplicaNodesInfo(replicaMgr *meta.ReplicaManager, nodeMgr *session.NodeM
 		return nil
 	}
 
-	nodes := make([]*session.NodeInfo, 0, len(replica.Nodes))
-	for node := range replica.Nodes {
+	nodes := make([]*session.NodeInfo, 0, len(replica.GetNodes()))
+	for _, node := range replica.GetNodes() {
 		nodes = append(nodes, nodeMgr.Get(node))
 	}
 	return nodes
@@ -65,7 +76,7 @@ func GroupNodesByReplica(replicaMgr *meta.ReplicaManager, collectionID int64, no
 	replicas := replicaMgr.GetByCollection(collectionID)
 	for _, replica := range replicas {
 		for _, node := range nodes {
-			if replica.Nodes.Contain(node) {
+			if replica.Contains(node) {
 				ret[replica.ID] = append(ret[replica.ID], node)
 			}
 		}
@@ -91,7 +102,7 @@ func GroupSegmentsByReplica(replicaMgr *meta.ReplicaManager, collectionID int64,
 	replicas := replicaMgr.GetByCollection(collectionID)
 	for _, replica := range replicas {
 		for _, segment := range segments {
-			if replica.Nodes.Contain(segment.Node) {
+			if replica.Contains(segment.Node) {
 				ret[replica.ID] = append(ret[replica.ID], segment)
 			}
 		}
@@ -102,24 +113,85 @@ func GroupSegmentsByReplica(replicaMgr *meta.ReplicaManager, collectionID int64,
 // AssignNodesToReplicas assigns nodes to the given replicas,
 // all given replicas must be the same collection,
 // the given replicas have to be not in ReplicaManager
-func AssignNodesToReplicas(nodeMgr *session.NodeManager, replicas ...*meta.Replica) {
-	replicaNumber := len(replicas)
-	nodes := nodeMgr.GetAll()
-	rand.Shuffle(len(nodes), func(i, j int) {
-		nodes[i], nodes[j] = nodes[j], nodes[i]
+func AssignNodesToReplicas(m *meta.Meta, rgName string, replicas ...*meta.Replica) {
+	replicaIDs := lo.Map(replicas, func(r *meta.Replica, _ int) int64 { return r.GetID() })
+	log := log.With(zap.Int64("collectionID", replicas[0].GetCollectionID()),
+		zap.Int64s("replicas", replicaIDs),
+		zap.String("rgName", rgName),
+	)
+	if len(replicaIDs) == 0 {
+
+		return
+	}
+
+	nodeGroup, err := m.ResourceManager.GetNodes(rgName)
+	if err != nil {
+		log.Error("failed to get nodes", zap.Error(err))
+		return
+	}
+
+	if len(nodeGroup) < len(replicaIDs) {
+		log.Error(ErrNodesNotEnough.Error())
+		return
+	}
+
+	rand.Shuffle(len(nodeGroup), func(i, j int) {
+		nodeGroup[i], nodeGroup[j] = nodeGroup[j], nodeGroup[i]
 	})
 
-	for i, node := range nodes {
-		replicas[i%replicaNumber].AddNode(node.ID())
+	log.Info("assign nodes to replicas",
+		zap.Int64s("nodes", nodeGroup),
+	)
+	for i, node := range nodeGroup {
+		replicas[i%len(replicas)].AddNode(node)
 	}
 }
 
 // SpawnReplicas spawns replicas for given collection, assign nodes to them, and save them
-func SpawnReplicas(replicaMgr *meta.ReplicaManager, nodeMgr *session.NodeManager, collection int64, replicaNumber int32) ([]*meta.Replica, error) {
-	replicas, err := replicaMgr.Spawn(collection, replicaNumber)
+func SpawnAllReplicasInRG(m *meta.Meta, collection int64, replicaNumber int32, rgName string) ([]*meta.Replica, error) {
+	replicas, err := m.ReplicaManager.Spawn(collection, replicaNumber, rgName)
 	if err != nil {
 		return nil, err
 	}
-	AssignNodesToReplicas(nodeMgr, replicas...)
-	return replicas, replicaMgr.Put(replicas...)
+	AssignNodesToReplicas(m, rgName, replicas...)
+	return replicas, m.ReplicaManager.Put(replicas...)
+}
+
+func checkResourceGroup(collectionID int64, replicaNumber int32, resourceGroups []string) error {
+	if len(resourceGroups) != 0 && len(resourceGroups) != 1 && len(resourceGroups) != int(replicaNumber) {
+		return ErrUseWrongNumRG
+	}
+
+	return nil
+}
+
+func SpawnReplicasWithRG(m *meta.Meta, collection int64, resourceGroups []string, replicaNumber int32) ([]*meta.Replica, error) {
+	if err := checkResourceGroup(collection, replicaNumber, resourceGroups); err != nil {
+		return nil, err
+	}
+
+	if len(resourceGroups) == 0 {
+		return SpawnAllReplicasInRG(m, collection, replicaNumber, meta.DefaultResourceGroupName)
+	}
+
+	if len(resourceGroups) == 1 {
+		return SpawnAllReplicasInRG(m, collection, replicaNumber, resourceGroups[0])
+	}
+
+	replicaSet := make([]*meta.Replica, 0)
+	for _, rgName := range resourceGroups {
+		if !m.ResourceManager.ContainResourceGroup(rgName) {
+			return nil, meta.ErrRGNotExist
+		}
+
+		replicas, err := m.ReplicaManager.Spawn(collection, 1, rgName)
+		if err != nil {
+			return nil, err
+		}
+
+		AssignNodesToReplicas(m, rgName, replicas...)
+		replicaSet = append(replicaSet, replicas...)
+	}
+
+	return replicaSet, m.ReplicaManager.Put(replicaSet...)
 }

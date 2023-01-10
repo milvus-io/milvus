@@ -126,7 +126,8 @@ func (suite *ServiceSuite) SetupTest() {
 
 	suite.store = meta.NewMetaStore(suite.kv)
 	suite.dist = meta.NewDistributionManager()
-	suite.meta = meta.NewMeta(params.RandomIncrementIDAllocator(), suite.store)
+	suite.nodeMgr = session.NewNodeManager()
+	suite.meta = meta.NewMeta(params.RandomIncrementIDAllocator(), suite.store, suite.nodeMgr)
 	suite.broker = meta.NewMockBroker(suite.T())
 	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta)
 	suite.targetObserver = observers.NewTargetObserver(
@@ -135,9 +136,10 @@ func (suite *ServiceSuite) SetupTest() {
 		suite.dist,
 		suite.broker,
 	)
-	suite.nodeMgr = session.NewNodeManager()
 	for _, node := range suite.nodes {
 		suite.nodeMgr.Add(session.NewNodeInfo(node, "localhost"))
+		err := suite.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, node)
+		suite.NoError(err)
 	}
 	suite.cluster = session.NewMockCluster(suite.T())
 	suite.jobScheduler = job.NewScheduler()
@@ -354,6 +356,19 @@ func (suite *ServiceSuite) TestLoadCollectionFailed() {
 		suite.NoError(err)
 		suite.Equal(commonpb.ErrorCode_IllegalArgument, resp.ErrorCode)
 		suite.Contains(resp.Reason, job.ErrLoadParameterMismatched.Error())
+	}
+
+	// Test load with wrong rg num
+	for _, collection := range suite.collections {
+		req := &querypb.LoadCollectionRequest{
+			CollectionID:   collection,
+			ReplicaNumber:  suite.replicaNumber[collection] + 1,
+			ResourceGroups: []string{"rg1", "rg2"},
+		}
+		resp, err := server.LoadCollection(ctx, req)
+		suite.NoError(err)
+		suite.Equal(commonpb.ErrorCode_IllegalArgument, resp.ErrorCode)
+		suite.Contains(resp.Reason, ErrLoadUseWrongRG.Error())
 	}
 }
 
@@ -604,8 +619,9 @@ func (suite *ServiceSuite) TestLoadBalance() {
 	// Test get balance first segment
 	for _, collection := range suite.collections {
 		replicas := suite.meta.ReplicaManager.GetByCollection(collection)
-		srcNode := replicas[0].GetNodes()[0]
-		dstNode := replicas[0].GetNodes()[1]
+		nodes := replicas[0].GetNodes()
+		srcNode := nodes[0]
+		dstNode := nodes[1]
 		suite.updateCollectionStatus(collection, querypb.LoadStatus_Loaded)
 		suite.updateSegmentDist(collection, srcNode)
 		segments := suite.getAllSegments(collection)
@@ -731,8 +747,9 @@ func (suite *ServiceSuite) TestLoadBalanceFailed() {
 	// Test load balance with not fully loaded
 	for _, collection := range suite.collections {
 		replicas := suite.meta.ReplicaManager.GetByCollection(collection)
-		srcNode := replicas[0].GetNodes()[0]
-		dstNode := replicas[0].GetNodes()[1]
+		nodes := replicas[0].GetNodes()
+		srcNode := nodes[0]
+		dstNode := nodes[1]
 		suite.updateCollectionStatus(collection, querypb.LoadStatus_Loading)
 		segments := suite.getAllSegments(collection)
 		req := &querypb.LoadBalanceRequest{
@@ -774,8 +791,9 @@ func (suite *ServiceSuite) TestLoadBalanceFailed() {
 	// Test balance task failed
 	for _, collection := range suite.collections {
 		replicas := suite.meta.ReplicaManager.GetByCollection(collection)
-		srcNode := replicas[0].GetNodes()[0]
-		dstNode := replicas[0].GetNodes()[1]
+		nodes := replicas[0].GetNodes()
+		srcNode := nodes[0]
+		dstNode := nodes[1]
 		suite.updateCollectionStatus(collection, querypb.LoadStatus_Loaded)
 		suite.updateSegmentDist(collection, srcNode)
 		segments := suite.getAllSegments(collection)
@@ -1019,6 +1037,11 @@ func (suite *ServiceSuite) TestGetShardLeadersFailed() {
 		suite.Equal(commonpb.ErrorCode_NoReplicaAvailable, resp.Status.ErrorCode)
 
 		// Segment not fully loaded
+		for _, node := range suite.nodes {
+			suite.dist.SegmentDistManager.Update(node)
+			suite.dist.ChannelDistManager.Update(node)
+			suite.dist.LeaderViewManager.Update(node)
+		}
 		suite.updateChannelDistWithoutSegment(collection)
 		suite.fetchHeartbeats(time.Now())
 		resp, err = server.GetShardLeaders(ctx, req)

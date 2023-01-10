@@ -44,6 +44,16 @@ import (
 
 var (
 	successStatus = utils.WrapStatus(commonpb.ErrorCode_Success, "")
+
+	ErrCreateResourceGroupFailed   = errors.New("failed to create resource group")
+	ErrDropResourceGroupFailed     = errors.New("failed to drop resource group")
+	ErrAddNodeToRGFailed           = errors.New("failed to add node to resource group")
+	ErrRemoveNodeFromRGFailed      = errors.New("failed to remove node from resource group")
+	ErrTransferNodeFailed          = errors.New("failed to transfer node between resource group")
+	ErrTransferReplicaFailed       = errors.New("failed to transfer replica between resource group")
+	ErrListResourceGroupFailed     = errors.New("failed to list resource group")
+	ErrDescribeResourceGroupFailed = errors.New("failed to describe resource group")
+	ErrLoadUseWrongRG              = errors.New("load operation should use collection's resource group")
 )
 
 func (s *Server) ShowCollections(ctx context.Context, req *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
@@ -212,6 +222,13 @@ func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg, ErrNotHealthy), nil
 	}
 
+	if err := s.checkResourceGroup(req.GetCollectionID(), req.GetResourceGroups()); err != nil {
+		msg := "failed to load collection"
+		log.Warn(msg, zap.Error(err))
+		metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
+		return utils.WrapStatus(commonpb.ErrorCode_IllegalArgument, msg, err), nil
+	}
+
 	loadJob := job.NewLoadCollectionJob(ctx,
 		req,
 		s.dist,
@@ -276,6 +293,8 @@ func (s *Server) ReleaseCollection(ctx context.Context, req *querypb.ReleaseColl
 func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitionsRequest) (*commonpb.Status, error) {
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
+		zap.Int32("replicaNumber", req.GetReplicaNumber()),
+		zap.Strings("resourceGroups", req.GetResourceGroups()),
 	)
 
 	log.Info("received load partitions request",
@@ -289,6 +308,13 @@ func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitions
 		log.Warn(msg, zap.Error(ErrNotHealthy))
 		metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
 		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg, ErrNotHealthy), nil
+	}
+
+	if err := s.checkResourceGroup(req.GetCollectionID(), req.GetResourceGroups()); err != nil {
+		msg := "failed to load partitions"
+		log.Warn(msg, zap.Error(ErrLoadUseWrongRG))
+		metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
+		return utils.WrapStatus(commonpb.ErrorCode_IllegalArgument, msg, ErrLoadUseWrongRG), nil
 	}
 
 	loadJob := job.NewLoadPartitionJob(ctx,
@@ -310,6 +336,19 @@ func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitions
 
 	metrics.QueryCoordLoadCount.WithLabelValues(metrics.SuccessLabel).Inc()
 	return successStatus, nil
+}
+
+func (s *Server) checkResourceGroup(collectionID int64, resourceGroups []string) error {
+	if len(resourceGroups) != 0 {
+		collectionUsedRG := s.meta.ReplicaManager.GetRGByCollection(collectionID)
+		for _, rgName := range resourceGroups {
+			if !collectionUsedRG.Contain(rgName) {
+				return ErrLoadUseWrongRG
+			}
+		}
+	}
+
+	return nil
 }
 
 func (s *Server) ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error) {
@@ -519,7 +558,7 @@ func (s *Server) LoadBalance(ctx context.Context, req *querypb.LoadBalanceReques
 			fmt.Sprintf("can't balance, because the source node[%d] is invalid", srcNode), err), nil
 	}
 	for _, dstNode := range req.GetDstNodeIDs() {
-		if !replica.Nodes.Contain(dstNode) {
+		if !replica.Contains(dstNode) {
 			msg := "destination nodes have to be in the same replica of source node"
 			log.Warn(msg)
 			return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg), nil

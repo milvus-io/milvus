@@ -91,7 +91,7 @@ func (m *ChannelDistManager) GetShardLeader(replica *Replica, shard string) (int
 	m.rwmutex.RLock()
 	defer m.rwmutex.RUnlock()
 
-	for node := range replica.Nodes {
+	for _, node := range replica.GetNodes() {
 		channels := m.channels[node]
 		for _, dmc := range channels {
 			if dmc.ChannelName == shard {
@@ -108,7 +108,7 @@ func (m *ChannelDistManager) GetShardLeadersByReplica(replica *Replica) map[stri
 	defer m.rwmutex.RUnlock()
 
 	ret := make(map[string]int64)
-	for node := range replica.Nodes {
+	for _, node := range replica.GetNodes() {
 		channels := m.channels[node]
 		for _, dmc := range channels {
 			if dmc.GetCollectionID() == replica.GetCollectionID() {
