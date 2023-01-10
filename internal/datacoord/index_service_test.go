@@ -543,6 +543,40 @@ func TestServer_GetIndexBuildProgress(t *testing.T) {
 		assert.Equal(t, int64(10250), resp.GetTotalRows())
 		assert.Equal(t, int64(10250), resp.GetIndexedRows())
 	})
+
+	t.Run("multiple index", func(t *testing.T) {
+		s.meta.indexes[collID] = map[UniqueID]*model.Index{
+			indexID: {
+				TenantID:        "",
+				CollectionID:    collID,
+				FieldID:         fieldID,
+				IndexID:         indexID,
+				IndexName:       indexName,
+				IsDeleted:       false,
+				CreateTime:      createTS,
+				TypeParams:      typeParams,
+				IndexParams:     indexParams,
+				IsAutoIndex:     false,
+				UserIndexParams: nil,
+			},
+			indexID + 1: {
+				TenantID:        "",
+				CollectionID:    collID,
+				FieldID:         fieldID + 1,
+				IndexID:         indexID + 1,
+				IndexName:       "_default_idx_102",
+				IsDeleted:       false,
+				CreateTime:      0,
+				TypeParams:      nil,
+				IndexParams:     nil,
+				IsAutoIndex:     false,
+				UserIndexParams: nil,
+			},
+		}
+		resp, err := s.GetIndexBuildProgress(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+	})
 }
 
 func TestServer_DescribeIndex(t *testing.T) {

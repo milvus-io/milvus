@@ -403,6 +403,15 @@ func (s *Server) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetInde
 			},
 		}, nil
 	}
+
+	if len(indexes) > 1 {
+		log.Warn(msgAmbiguousIndexName())
+		errResp.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		errResp.Reason = msgAmbiguousIndexName()
+		return &indexpb.GetIndexBuildProgressResponse{
+			Status: errResp,
+		}, nil
+	}
 	indexInfo := &indexpb.IndexInfo{
 		IndexedRows: 0,
 		TotalRows:   0,
