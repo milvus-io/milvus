@@ -164,6 +164,7 @@ type commonConfig struct {
 	SimdType    string
 
 	AuthorizationEnabled bool
+	SuperUsers           []string
 
 	ClusterName string
 
@@ -216,6 +217,7 @@ func (p *commonConfig) init(base *BaseTable) {
 	p.initThreadCoreCoefficient()
 
 	p.initEnableAuthorization()
+	p.initSuperUsers()
 
 	p.initClusterName()
 
@@ -462,6 +464,16 @@ func (p *commonConfig) initStorageType() {
 
 func (p *commonConfig) initEnableAuthorization() {
 	p.AuthorizationEnabled = p.Base.ParseBool("common.security.authorizationEnabled", false)
+}
+
+func (p *commonConfig) initSuperUsers() {
+	users, err := p.Base.Load("common.security.superUsers")
+	if err != nil {
+		log.Warn("fail to load common.security.superUsers", zap.Error(err))
+		p.SuperUsers = []string{}
+		return
+	}
+	p.SuperUsers = strings.Split(users, ",")
 }
 
 func (p *commonConfig) initClusterName() {
