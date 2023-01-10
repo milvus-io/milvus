@@ -51,6 +51,8 @@ import (
 type Cache interface {
 	// GetCollectionID get collection's id by name.
 	GetCollectionID(ctx context.Context, collectionName string) (typeutil.UniqueID, error)
+	// GetCollectionName get collection's name by id
+	GetCollectionName(ctx context.Context, collectionID int64) (string, error)
 	// GetCollectionInfo get collection's information by name, such as collection id, schema, and etc.
 	GetCollectionInfo(ctx context.Context, collectionName string) (*collectionInfo, error)
 	// GetPartitionID get partition's identifier of specific collection.
@@ -196,7 +198,7 @@ func (m *MetaCache) GetCollectionID(ctx context.Context, collectionName string) 
 		metrics.ProxyCacheStatsCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "GeCollectionID", metrics.CacheMissLabel).Inc()
 		tr := timerecord.NewTimeRecorder("UpdateCache")
 		m.mu.RUnlock()
-		coll, err := m.describeCollection(ctx, collectionName)
+		coll, err := m.describeCollection(ctx, collectionName, 0)
 		if err != nil {
 			return 0, err
 		}
@@ -213,6 +215,37 @@ func (m *MetaCache) GetCollectionID(ctx context.Context, collectionName string) 
 	return collInfo.collID, nil
 }
 
+// GetCollectionName returns the corresponding collection name for provided collection id
+func (m *MetaCache) GetCollectionName(ctx context.Context, collectionID int64) (string, error) {
+	m.mu.RLock()
+	var collInfo *collectionInfo
+	for _, coll := range m.collInfo {
+		if coll.collID == collectionID {
+			collInfo = coll
+			break
+		}
+	}
+
+	if collInfo == nil || !collInfo.isCollectionCached() {
+		metrics.ProxyCacheStatsCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "GeCollectionName", metrics.CacheMissLabel).Inc()
+		tr := timerecord.NewTimeRecorder("UpdateCache")
+		m.mu.RUnlock()
+		coll, err := m.describeCollection(ctx, "", collectionID)
+		if err != nil {
+			return "", err
+		}
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		m.updateCollection(coll, coll.Schema.Name)
+		metrics.ProxyUpdateCacheLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(float64(tr.ElapseSpan().Milliseconds()))
+		return coll.Schema.Name, nil
+	}
+	defer m.mu.RUnlock()
+	metrics.ProxyCacheStatsCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "GeCollectionName", metrics.CacheHitLabel).Inc()
+
+	return collInfo.schema.Name, nil
+}
+
 // GetCollectionInfo returns the collection information related to provided collection name
 // If the information is not found, proxy will try to fetch information for other source (RootCoord for now)
 func (m *MetaCache) GetCollectionInfo(ctx context.Context, collectionName string) (*collectionInfo, error) {
@@ -224,7 +257,7 @@ func (m *MetaCache) GetCollectionInfo(ctx context.Context, collectionName string
 	if !ok || !collInfo.isCollectionCached() {
 		tr := timerecord.NewTimeRecorder("UpdateCache")
 		metrics.ProxyCacheStatsCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "GetCollectionInfo", metrics.CacheMissLabel).Inc()
-		coll, err := m.describeCollection(ctx, collectionName)
+		coll, err := m.describeCollection(ctx, collectionName, 0)
 		if err != nil {
 			return nil, err
 		}
@@ -281,7 +314,7 @@ func (m *MetaCache) GetCollectionSchema(ctx context.Context, collectionName stri
 		metrics.ProxyCacheStatsCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "GetCollectionSchema", metrics.CacheMissLabel).Inc()
 		tr := timerecord.NewTimeRecorder("UpdateCache")
 		m.mu.RUnlock()
-		coll, err := m.describeCollection(ctx, collectionName)
+		coll, err := m.describeCollection(ctx, collectionName, 0)
 		if err != nil {
 			log.Warn("Failed to load collection from rootcoord ",
 				zap.String("collection name ", collectionName),
@@ -294,7 +327,7 @@ func (m *MetaCache) GetCollectionSchema(ctx context.Context, collectionName stri
 		collInfo = m.collInfo[collectionName]
 		metrics.ProxyUpdateCacheLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(float64(tr.ElapseSpan().Milliseconds()))
 		log.Debug("Reload collection from root coordinator ",
-			zap.String("collection name ", collectionName),
+			zap.String("collection name", collectionName),
 			zap.Any("time (milliseconds) take ", tr.ElapseSpan().Milliseconds()))
 		return collInfo.schema, nil
 	}
@@ -424,12 +457,13 @@ func (m *MetaCache) GetPartitionInfo(ctx context.Context, collectionName string,
 }
 
 // Get the collection information from rootcoord.
-func (m *MetaCache) describeCollection(ctx context.Context, collectionName string) (*milvuspb.DescribeCollectionResponse, error) {
+func (m *MetaCache) describeCollection(ctx context.Context, collectionName string, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
 	req := &milvuspb.DescribeCollectionRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection),
 		),
 		CollectionName: collectionName,
+		CollectionID:   collectionID,
 	}
 	coll, err := m.rootCoord.DescribeCollection(ctx, req)
 	if err != nil {

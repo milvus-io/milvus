@@ -20,7 +20,6 @@ import (
 	"fmt"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -147,12 +146,4 @@ func MergeDmChannelInfo(infos []*datapb.VchannelInfo) *meta.DmChannel {
 	}
 
 	return dmChannel
-}
-
-func Replica2ReplicaInfo(replica *querypb.Replica) *milvuspb.ReplicaInfo {
-	return &milvuspb.ReplicaInfo{
-		ReplicaID:    replica.GetID(),
-		CollectionID: replica.GetCollectionID(),
-		NodeIds:      replica.GetNodes(),
-	}
 }

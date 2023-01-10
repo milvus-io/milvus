@@ -124,6 +124,24 @@ func Test_NewClient(t *testing.T) {
 
 		r20, err := client.CheckHealth(ctx, nil)
 		retCheck(retNotNil, r20, err)
+
+		r21, err := client.CreateResourceGroup(ctx, nil)
+		retCheck(retNotNil, r21, err)
+
+		r22, err := client.DropResourceGroup(ctx, nil)
+		retCheck(retNotNil, r22, err)
+
+		r23, err := client.TransferNode(ctx, nil)
+		retCheck(retNotNil, r23, err)
+
+		r24, err := client.TransferReplica(ctx, nil)
+		retCheck(retNotNil, r24, err)
+
+		r26, err := client.ListResourceGroups(ctx, nil)
+		retCheck(retNotNil, r26, err)
+
+		r27, err := client.DescribeResourceGroup(ctx, nil)
+		retCheck(retNotNil, r27, err)
 	}
 
 	client.grpcClient = &mock.GRPCClientBase[querypb.QueryCoordClient]{

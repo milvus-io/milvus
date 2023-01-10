@@ -130,7 +130,7 @@ func (suite *TaskSuite) SetupTest() {
 
 	suite.kv = etcdkv.NewEtcdKV(cli, config.MetaRootPath.GetValue())
 	suite.store = meta.NewMetaStore(suite.kv)
-	suite.meta = meta.NewMeta(RandomIncrementIDAllocator(), suite.store)
+	suite.meta = meta.NewMeta(RandomIncrementIDAllocator(), suite.store, session.NewNodeManager())
 	suite.dist = meta.NewDistributionManager()
 	suite.broker = meta.NewMockBroker(suite.T())
 	suite.target = meta.NewTargetManager(suite.broker, suite.meta)
@@ -1260,14 +1260,14 @@ func (suite *TaskSuite) newScheduler() *taskScheduler {
 }
 
 func createReplica(collection int64, nodes ...int64) *meta.Replica {
-	return &meta.Replica{
-		Replica: &querypb.Replica{
+	return meta.NewReplica(
+		&querypb.Replica{
 			ID:           rand.Int63()/2 + 1,
 			CollectionID: collection,
 			Nodes:        nodes,
 		},
-		Nodes: typeutil.NewUniqueSet(nodes...),
-	}
+		typeutil.NewUniqueSet(nodes...),
+	)
 }
 
 func TestTask(t *testing.T) {

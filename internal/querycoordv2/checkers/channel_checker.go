@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 )
 
@@ -134,7 +135,7 @@ func (c *ChannelChecker) getDmChannelDiff(targetMgr *meta.TargetManager,
 
 func (c *ChannelChecker) getChannelDist(distMgr *meta.DistributionManager, replica *meta.Replica) []*meta.DmChannel {
 	dist := make([]*meta.DmChannel, 0)
-	for _, nodeID := range replica.Nodes.Collect() {
+	for _, nodeID := range replica.GetNodes() {
 		dist = append(dist, distMgr.ChannelDistManager.GetByCollectionAndNode(replica.GetCollectionID(), nodeID)...)
 	}
 	return dist
@@ -170,7 +171,11 @@ func (c *ChannelChecker) findRepeatedChannels(distMgr *meta.DistributionManager,
 }
 
 func (c *ChannelChecker) createChannelLoadTask(ctx context.Context, channels []*meta.DmChannel, replica *meta.Replica) []task.Task {
-	plans := c.balancer.AssignChannel(channels, replica.Replica.GetNodes())
+	outboundNodes := c.meta.ResourceManager.CheckOutboundNodes(replica)
+	availableNodes := lo.Filter(replica.Replica.GetNodes(), func(node int64, _ int) bool {
+		return !outboundNodes.Contain(node)
+	})
+	plans := c.balancer.AssignChannel(channels, availableNodes)
 	for i := range plans {
 		plans[i].ReplicaID = replica.GetID()
 	}

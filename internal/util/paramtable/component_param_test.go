@@ -243,6 +243,28 @@ func TestComponentParam(t *testing.T) {
 		Params := params.QueryCoordCfg
 		assert.Equal(t, Params.EnableActiveStandby.GetAsBool(), false)
 		t.Logf("queryCoord EnableActiveStandby = %t", Params.EnableActiveStandby.GetAsBool())
+
+		params.Save("queryCoord.NextTargetSurviveTime", "100")
+		NextTargetSurviveTime := Params.NextTargetSurviveTime
+		assert.Equal(t, int64(100), NextTargetSurviveTime.GetAsInt64())
+
+		params.Save("queryCoord.UpdateNextTargetInterval", "100")
+		UpdateNextTargetInterval := Params.UpdateNextTargetInterval
+		assert.Equal(t, int64(100), UpdateNextTargetInterval.GetAsInt64())
+
+		params.Save("queryCoord.checkNodeInReplicaInterval", "100")
+		checkNodeInReplicaInterval := Params.CheckNodeInReplicaInterval
+		assert.Equal(t, 100, checkNodeInReplicaInterval.GetAsInt())
+
+		params.Save("queryCoord.checkResourceGroupInterval", "10")
+		checkResourceGroupInterval := Params.CheckResourceGroupInterval
+		assert.Equal(t, 10, checkResourceGroupInterval.GetAsInt())
+
+		enableResourceGroupAutoRecover := Params.EnableRGAutoRecover
+		assert.Equal(t, true, enableResourceGroupAutoRecover.GetAsBool())
+		params.Save("queryCoord.enableRGAutoRecover", "false")
+		enableResourceGroupAutoRecover = Params.EnableRGAutoRecover
+		assert.Equal(t, false, enableResourceGroupAutoRecover.GetAsBool())
 	})
 
 	t.Run("test queryNodeConfig", func(t *testing.T) {

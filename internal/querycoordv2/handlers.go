@@ -48,7 +48,7 @@ import (
 func (s *Server) checkAnyReplicaAvailable(collectionID int64) bool {
 	for _, replica := range s.meta.ReplicaManager.GetByCollection(collectionID) {
 		isAvailable := true
-		for node := range replica.Nodes {
+		for _, node := range replica.GetNodes() {
 			if s.nodeMgr.Get(node) == nil {
 				isAvailable = false
 				break
@@ -94,7 +94,11 @@ func (s *Server) balanceSegments(ctx context.Context, req *querypb.LoadBalanceRe
 	srcNode := req.GetSourceNodeIDs()[0]
 	dstNodeSet := typeutil.NewUniqueSet(req.GetDstNodeIDs()...)
 	if dstNodeSet.Len() == 0 {
-		dstNodeSet.Insert(replica.GetNodes()...)
+		outboundNodes := s.meta.ResourceManager.CheckOutboundNodes(replica)
+		availableNodes := lo.Filter(replica.Replica.GetNodes(), func(node int64, _ int) bool {
+			return !outboundNodes.Contain(node)
+		})
+		dstNodeSet.Insert(availableNodes...)
 	}
 	dstNodeSet.Remove(srcNode)
 
@@ -302,7 +306,13 @@ func (s *Server) tryGetNodesMetrics(ctx context.Context, req *milvuspb.GetMetric
 }
 
 func (s *Server) fillReplicaInfo(replica *meta.Replica, withShardNodes bool) (*milvuspb.ReplicaInfo, error) {
-	info := utils.Replica2ReplicaInfo(replica.Replica)
+	info := &milvuspb.ReplicaInfo{
+		ReplicaID:         replica.GetID(),
+		CollectionID:      replica.GetCollectionID(),
+		NodeIds:           replica.GetNodes(),
+		ResourceGroupName: replica.GetResourceGroup(),
+		NumOutboundNode:   s.meta.GetOutgoingNodeNumByReplica(replica),
+	}
 
 	channels := s.targetMgr.GetDmChannelsByCollection(replica.GetCollectionID(), meta.CurrentTarget)
 	if len(channels) == 0 {
@@ -335,7 +345,7 @@ func (s *Server) fillReplicaInfo(replica *meta.Replica, withShardNodes bool) (*m
 		}
 		if withShardNodes {
 			shardNodes := lo.FilterMap(segments, func(segment *meta.Segment, _ int) (int64, bool) {
-				if replica.Nodes.Contain(segment.Node) {
+				if replica.Contains(segment.Node) {
 					return segment.Node, true
 				}
 				return 0, false

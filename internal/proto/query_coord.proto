@@ -36,6 +36,13 @@ service QueryCoord {
   rpc GetShardLeaders(GetShardLeadersRequest) returns (GetShardLeadersResponse) {}
 
   rpc CheckHealth(milvus.CheckHealthRequest) returns (milvus.CheckHealthResponse) {}
+
+  rpc CreateResourceGroup(milvus.CreateResourceGroupRequest) returns (common.Status) {}
+  rpc DropResourceGroup(milvus.DropResourceGroupRequest) returns (common.Status) {}
+  rpc TransferNode(milvus.TransferNodeRequest) returns (common.Status) {}
+  rpc TransferReplica(TransferReplicaRequest) returns (common.Status) {}
+  rpc ListResourceGroups(milvus.ListResourceGroupsRequest) returns (milvus.ListResourceGroupsResponse) {}
+  rpc DescribeResourceGroup(DescribeResourceGroupRequest) returns (DescribeResourceGroupResponse) {}
 }
 
 service QueryNode {
@@ -101,6 +108,8 @@ message LoadCollectionRequest {
   // fieldID -> indexID
   map<int64, int64> field_indexID = 6;
   bool refresh = 7;
+  // resource group names
+  repeated string resource_groups = 8;
 }
 
 message ReleaseCollectionRequest {
@@ -128,6 +137,8 @@ message LoadPartitionsRequest {
   // fieldID -> indexID
   map<int64, int64> field_indexID = 7;
   bool refresh = 8;
+  // resource group names
+  repeated string resource_groups = 9;
 }
 
 message ReleasePartitionsRequest {
@@ -488,6 +499,7 @@ message Replica {
   int64 ID = 1;
   int64 collectionID = 2;
   repeated int64 nodes = 3;
+  string resource_group = 4;
 }
 
 enum SyncType {
@@ -510,3 +522,39 @@ message SyncDistributionRequest {
   repeated SyncAction actions = 4;
 }
 
+message ResourceGroup {
+  string name = 1;
+  int32 capacity = 2;
+  repeated int64 nodes = 3;
+}
+
+// transfer `replicaNum` replicas in `collectionID` from `source_resource_group` to `target_resource_groups`
+message TransferReplicaRequest {
+  common.MsgBase base = 1;
+  string source_resource_group = 2;
+  string target_resource_group = 3;
+  int64  collectionID = 4;
+  int64  num_replica = 5;
+}
+
+message DescribeResourceGroupRequest {
+  common.MsgBase base = 1;
+  string resource_group = 2;
+}
+
+message DescribeResourceGroupResponse {
+  common.Status status = 1;
+  ResourceGroupInfo resource_group = 2;
+}
+
+message ResourceGroupInfo {
+  string name = 1;
+  int32 capacity = 2;
+  int32 num_available_node = 3;
+  // collection id -> loaded replica num
+  map<int64, int32> num_loaded_replica = 4;
+  // collection id -> accessed other rg's node num 
+  map<int64, int32> num_outgoing_node = 5;
+   // collection id -> be accessed node num by other rg
+  map<int64, int32> num_incoming_node = 6;
+}

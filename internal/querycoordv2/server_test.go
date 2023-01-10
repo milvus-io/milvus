@@ -110,6 +110,7 @@ func (suite *ServerSuite) SetupTest() {
 		suite.Require().NoError(err)
 		ok := suite.waitNodeUp(suite.nodes[i], 5*time.Second)
 		suite.Require().True(ok)
+		suite.server.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, suite.nodes[i].ID)
 	}
 
 	suite.loadAll()
@@ -184,7 +185,6 @@ func (suite *ServerSuite) TestNodeUp() {
 		}
 		return true
 	}, 5*time.Second, time.Second)
-
 }
 
 func (suite *ServerSuite) TestNodeUpdate() {

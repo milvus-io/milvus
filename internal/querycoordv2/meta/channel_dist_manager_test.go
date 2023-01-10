@@ -100,18 +100,18 @@ func (suite *ChannelDistManagerSuite) TestGetBy() {
 
 func (suite *ChannelDistManagerSuite) TestGetShardLeader() {
 	replicas := []*Replica{
-		{
-			Replica: &querypb.Replica{
+		NewReplica(
+			&querypb.Replica{
 				CollectionID: suite.collection,
 			},
-			Nodes: typeutil.NewUniqueSet(suite.nodes[0], suite.nodes[2]),
-		},
-		{
-			Replica: &querypb.Replica{
+			typeutil.NewUniqueSet(suite.nodes[0], suite.nodes[2]),
+		),
+		NewReplica(
+			&querypb.Replica{
 				CollectionID: suite.collection,
 			},
-			Nodes: typeutil.NewUniqueSet(suite.nodes[1]),
-		},
+			typeutil.NewUniqueSet(suite.nodes[1]),
+		),
 	}
 
 	// Test on replica 0

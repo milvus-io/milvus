@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -2537,4 +2538,249 @@ func Test_loadPartitionTask_Execute(t *testing.T) {
 		err := lpt.Execute(ctx)
 		assert.Error(t, err)
 	})
+}
+
+func TestCreateResourceGroupTask(t *testing.T) {
+	rc := NewRootCoordMock()
+	rc.Start()
+	defer rc.Stop()
+	qc := NewQueryCoordMock()
+	qc.Start()
+	defer qc.Stop()
+	ctx := context.Background()
+	mgr := newShardClientMgr()
+	InitMetaCache(ctx, rc, qc, mgr)
+
+	createRGReq := &milvuspb.CreateResourceGroupRequest{
+		Base: &commonpb.MsgBase{
+			MsgID:     1,
+			Timestamp: 2,
+			TargetID:  3,
+		},
+		ResourceGroup: "rg",
+	}
+
+	task := &CreateResourceGroupTask{
+		CreateResourceGroupRequest: createRGReq,
+		ctx:                        ctx,
+		queryCoord:                 qc,
+	}
+	task.PreExecute(ctx)
+
+	assert.Equal(t, commonpb.MsgType_CreateResourceGroup, task.Type())
+	assert.Equal(t, UniqueID(1), task.ID())
+	assert.Equal(t, Timestamp(2), task.BeginTs())
+	assert.Equal(t, Timestamp(2), task.EndTs())
+	assert.Equal(t, paramtable.GetNodeID(), task.Base.GetSourceID())
+	assert.Equal(t, UniqueID(3), task.Base.GetTargetID())
+
+	err := task.Execute(ctx)
+	assert.Nil(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, task.result.ErrorCode)
+}
+
+func TestDropResourceGroupTask(t *testing.T) {
+	rc := NewRootCoordMock()
+	rc.Start()
+	defer rc.Stop()
+	qc := NewQueryCoordMock()
+	qc.Start()
+	defer qc.Stop()
+	ctx := context.Background()
+	mgr := newShardClientMgr()
+	InitMetaCache(ctx, rc, qc, mgr)
+
+	dropRGReq := &milvuspb.DropResourceGroupRequest{
+		Base: &commonpb.MsgBase{
+			MsgID:     1,
+			Timestamp: 2,
+			TargetID:  3,
+		},
+		ResourceGroup: "rg",
+	}
+
+	task := &DropResourceGroupTask{
+		DropResourceGroupRequest: dropRGReq,
+		ctx:                      ctx,
+		queryCoord:               qc,
+	}
+	task.PreExecute(ctx)
+
+	assert.Equal(t, commonpb.MsgType_DropResourceGroup, task.Type())
+	assert.Equal(t, UniqueID(1), task.ID())
+	assert.Equal(t, Timestamp(2), task.BeginTs())
+	assert.Equal(t, Timestamp(2), task.EndTs())
+	assert.Equal(t, paramtable.GetNodeID(), task.Base.GetSourceID())
+	assert.Equal(t, UniqueID(3), task.Base.GetTargetID())
+
+	err := task.Execute(ctx)
+	assert.Nil(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, task.result.ErrorCode)
+}
+
+func TestTransferNodeTask(t *testing.T) {
+	rc := NewRootCoordMock()
+	rc.Start()
+	defer rc.Stop()
+	qc := NewQueryCoordMock()
+	qc.Start()
+	defer qc.Stop()
+	ctx := context.Background()
+	mgr := newShardClientMgr()
+	InitMetaCache(ctx, rc, qc, mgr)
+
+	req := &milvuspb.TransferNodeRequest{
+		Base: &commonpb.MsgBase{
+			MsgID:     1,
+			Timestamp: 2,
+			TargetID:  3,
+		},
+		SourceResourceGroup: "rg1",
+		TargetResourceGroup: "rg2",
+		NumNode:             1,
+	}
+
+	task := &TransferNodeTask{
+		TransferNodeRequest: req,
+		ctx:                 ctx,
+		queryCoord:          qc,
+	}
+	task.PreExecute(ctx)
+
+	assert.Equal(t, commonpb.MsgType_TransferNode, task.Type())
+	assert.Equal(t, UniqueID(1), task.ID())
+	assert.Equal(t, Timestamp(2), task.BeginTs())
+	assert.Equal(t, Timestamp(2), task.EndTs())
+	assert.Equal(t, paramtable.GetNodeID(), task.Base.GetSourceID())
+	assert.Equal(t, UniqueID(3), task.Base.GetTargetID())
+
+	err := task.Execute(ctx)
+	assert.Nil(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, task.result.ErrorCode)
+}
+
+func TestTransferReplicaTask(t *testing.T) {
+	rc := &MockRootCoordClientInterface{}
+	qc := NewQueryCoordMock()
+	qc.Start()
+	defer qc.Stop()
+	ctx := context.Background()
+	mgr := newShardClientMgr()
+	InitMetaCache(ctx, rc, qc, mgr)
+	// make it avoid remote call on rc
+	globalMetaCache.GetCollectionSchema(context.Background(), "collection1")
+
+	req := &milvuspb.TransferReplicaRequest{
+		Base: &commonpb.MsgBase{
+			MsgID:     1,
+			Timestamp: 2,
+			TargetID:  3,
+		},
+		CollectionName:      "collection1",
+		SourceResourceGroup: "rg1",
+		TargetResourceGroup: "rg2",
+		NumReplica:          1,
+	}
+
+	task := &TransferReplicaTask{
+		TransferReplicaRequest: req,
+		ctx:                    ctx,
+		queryCoord:             qc,
+	}
+	task.PreExecute(ctx)
+
+	assert.Equal(t, commonpb.MsgType_TransferReplica, task.Type())
+	assert.Equal(t, UniqueID(1), task.ID())
+	assert.Equal(t, Timestamp(2), task.BeginTs())
+	assert.Equal(t, Timestamp(2), task.EndTs())
+	assert.Equal(t, paramtable.GetNodeID(), task.Base.GetSourceID())
+	assert.Equal(t, UniqueID(3), task.Base.GetTargetID())
+
+	err := task.Execute(ctx)
+	assert.Nil(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, task.result.ErrorCode)
+}
+
+func TestListResourceGroupsTask(t *testing.T) {
+	rc := &MockRootCoordClientInterface{}
+	qc := NewQueryCoordMock()
+	qc.Start()
+	defer qc.Stop()
+	ctx := context.Background()
+	mgr := newShardClientMgr()
+	InitMetaCache(ctx, rc, qc, mgr)
+
+	req := &milvuspb.ListResourceGroupsRequest{
+		Base: &commonpb.MsgBase{
+			MsgID:     1,
+			Timestamp: 2,
+			TargetID:  3,
+		},
+	}
+
+	task := &ListResourceGroupsTask{
+		ListResourceGroupsRequest: req,
+		ctx:                       ctx,
+		queryCoord:                qc,
+	}
+	task.PreExecute(ctx)
+
+	assert.Equal(t, commonpb.MsgType_ListResourceGroups, task.Type())
+	assert.Equal(t, UniqueID(1), task.ID())
+	assert.Equal(t, Timestamp(2), task.BeginTs())
+	assert.Equal(t, Timestamp(2), task.EndTs())
+	assert.Equal(t, paramtable.GetNodeID(), task.Base.GetSourceID())
+	assert.Equal(t, UniqueID(3), task.Base.GetTargetID())
+
+	err := task.Execute(ctx)
+	assert.Nil(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, task.result.Status.ErrorCode)
+	groups := task.result.GetResourceGroups()
+	assert.Contains(t, groups, meta.DefaultResourceGroupName)
+	assert.Contains(t, groups, "rg")
+}
+
+func TestDescribeResourceGroupTask(t *testing.T) {
+	rc := &MockRootCoordClientInterface{}
+	qc := NewQueryCoordMock()
+	qc.Start()
+	defer qc.Stop()
+	ctx := context.Background()
+	mgr := newShardClientMgr()
+	InitMetaCache(ctx, rc, qc, mgr)
+	// make it avoid remote call on rc
+	globalMetaCache.GetCollectionSchema(context.Background(), "collection1")
+	globalMetaCache.GetCollectionSchema(context.Background(), "collection2")
+
+	req := &milvuspb.DescribeResourceGroupRequest{
+		Base: &commonpb.MsgBase{
+			MsgID:     1,
+			Timestamp: 2,
+			TargetID:  3,
+		},
+		ResourceGroup: "rg",
+	}
+
+	task := &DescribeResourceGroupTask{
+		DescribeResourceGroupRequest: req,
+		ctx:                          ctx,
+		queryCoord:                   qc,
+	}
+	task.PreExecute(ctx)
+
+	assert.Equal(t, commonpb.MsgType_DescribeResourceGroup, task.Type())
+	assert.Equal(t, UniqueID(1), task.ID())
+	assert.Equal(t, Timestamp(2), task.BeginTs())
+	assert.Equal(t, Timestamp(2), task.EndTs())
+	assert.Equal(t, paramtable.GetNodeID(), task.Base.GetSourceID())
+	assert.Equal(t, UniqueID(3), task.Base.GetTargetID())
+
+	err := task.Execute(ctx)
+	assert.Nil(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, task.result.Status.ErrorCode)
+	groupInfo := task.result.GetResourceGroup()
+	outgoingNodeNum := groupInfo.GetNumOutgoingNode()
+	incomingNodeNum := groupInfo.GetNumIncomingNode()
+	assert.NotNil(t, outgoingNodeNum["collection1"])
+	assert.NotNil(t, incomingNodeNum["collection2"])
 }
