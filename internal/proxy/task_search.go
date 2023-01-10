@@ -10,6 +10,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/internal/querynode"
 
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
@@ -488,7 +489,16 @@ func (t *searchTask) searchShard(ctx context.Context, nodeID int64, qn types.Que
 		DmlChannels: channelIDs,
 		Scope:       querypb.DataScope_All,
 	}
-	result, err := qn.Search(ctx, req)
+
+	queryNode := querynode.GetQueryNode()
+	var result *internalpb.SearchResults
+	var err error
+
+	if queryNode != nil && queryNode.IsStandAlone {
+		result, err = queryNode.Search(ctx, req)
+	} else {
+		result, err = qn.Search(ctx, req)
+	}
 	if err != nil {
 		log.Ctx(ctx).Warn("QueryNode search return error",
 			zap.Int64("nodeID", nodeID),

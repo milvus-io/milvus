@@ -977,7 +977,17 @@ func (sc *ShardCluster) Search(ctx context.Context, req *querypb.SearchRequest, 
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			partialResult, nodeErr := node.client.Search(reqCtx, nodeReq)
+
+			queryNode := GetQueryNode()
+			var partialResult *internalpb.SearchResults
+			var nodeErr error
+
+			if queryNode != nil && queryNode.IsStandAlone {
+				partialResult, nodeErr = queryNode.Search(reqCtx, nodeReq)
+			} else {
+				partialResult, nodeErr = node.client.Search(reqCtx, nodeReq)
+			}
+
 			resultMut.Lock()
 			defer resultMut.Unlock()
 			if nodeErr != nil || partialResult.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
