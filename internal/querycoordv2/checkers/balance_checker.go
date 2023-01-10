@@ -42,6 +42,9 @@ func (b *BalanceChecker) Description() string {
 
 func (b *BalanceChecker) Check(ctx context.Context) []task.Task {
 	ret := make([]task.Task, 0)
+	if !Params.QueryCoordCfg.AutoBalance {
+		return ret
+	}
 	segmentPlans, channelPlans := b.Balance.Balance()
 
 	tasks := balance.CreateSegmentTasksFromPlans(ctx, b.ID(), Params.QueryCoordCfg.SegmentTaskTimeout, segmentPlans)
