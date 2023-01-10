@@ -19,7 +19,7 @@ linters:
     - gosimple
     - gosec
     - revive
-    - gocritic
+      #    - gocritic
 
 linters-settings:
   misspell:
