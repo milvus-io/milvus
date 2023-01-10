@@ -267,12 +267,13 @@ func (s *Server) startGrpcLoop(port int) {
 
 func (s *Server) start() error {
 	log.Info("RootCoord Core start ...")
-	if err := s.rootCoord.Start(); err != nil {
-		log.Error(err.Error())
-		return err
-	}
 	if err := s.rootCoord.Register(); err != nil {
 		log.Error("RootCoord registers service failed", zap.Error(err))
+		return err
+	}
+
+	if err := s.rootCoord.Start(); err != nil {
+		log.Error("RootCoord start service failed", zap.Error(err))
 		return err
 	}
 

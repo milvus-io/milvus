@@ -186,12 +186,6 @@ func testIndexCoord(t *testing.T) {
 	err = ic.Init()
 	assert.NoError(t, err)
 
-	mockKv := NewMockEtcdKVWithReal(ic.etcdKV)
-	ic.metaTable.catalog = &indexcoord.Catalog{
-		Txn: mockKv,
-	}
-	assert.NoError(t, err)
-
 	err = ic.Register()
 	assert.NoError(t, err)
 
@@ -199,6 +193,12 @@ func testIndexCoord(t *testing.T) {
 	assert.NoError(t, err)
 
 	ic.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	mockKv := NewMockEtcdKVWithReal(ic.etcdKV)
+	ic.metaTable.catalog = &indexcoord.Catalog{
+		Txn: mockKv,
+	}
+	assert.NoError(t, err)
 
 	ic.nodeManager.setClient(1, inm0)
 

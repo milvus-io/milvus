@@ -171,110 +171,134 @@ func (i *IndexCoord) initSession() error {
 
 // Init initializes the IndexCoord component.
 func (i *IndexCoord) Init() error {
+	i.UpdateStateCode(commonpb.StateCode_Initializing)
+	log.Info("IndexCoord init", zap.Any("stateCode", i.stateCode.Load().(commonpb.StateCode)))
+
 	var initErr error
 	Params.InitOnce()
-	i.initOnce.Do(func() {
-		i.UpdateStateCode(commonpb.StateCode_Initializing)
-		log.Info("IndexCoord init", zap.Any("stateCode", i.stateCode.Load().(commonpb.StateCode)))
+	i.factory.Init(&Params)
+	initErr = i.initSession()
+	if initErr != nil {
+		log.Error(initErr.Error())
+		return initErr
+	}
 
-		i.factory.Init(&Params)
-
-		err := i.initSession()
-		if err != nil {
-			log.Error(err.Error())
-			initErr = err
-			return
-		}
-
-		connectEtcdFn := func() error {
-			i.etcdKV = etcdkv.NewEtcdKV(i.etcdCli, Params.EtcdCfg.MetaRootPath)
-			i.metaTable, err = NewMetaTable(i.etcdKV)
-			return err
-		}
-		log.Info("IndexCoord try to connect etcd")
-		err = retry.Do(i.loopCtx, connectEtcdFn, retry.Attempts(100))
-		if err != nil {
-			log.Error("IndexCoord try to connect etcd failed", zap.Error(err))
-			initErr = err
-			return
-		}
-
-		log.Info("IndexCoord try to connect etcd success")
-		i.nodeManager = NewNodeManager(i.loopCtx)
-
-		sessions, revision, err := i.session.GetSessions(typeutil.IndexNodeRole)
-		log.Info("IndexCoord", zap.Int("session number", len(sessions)), zap.Int64("revision", revision))
-		if err != nil {
-			log.Error("IndexCoord Get IndexNode Sessions error", zap.Error(err))
-			initErr = err
-			return
-		}
-		log.Info("IndexCoord get node sessions from etcd", zap.Bool("bind mode", Params.IndexCoordCfg.BindIndexNodeMode),
-			zap.String("node address", Params.IndexCoordCfg.IndexNodeAddress))
-		aliveNodeID := make([]UniqueID, 0)
-		if Params.IndexCoordCfg.BindIndexNodeMode {
-			if err = i.nodeManager.AddNode(Params.IndexCoordCfg.IndexNodeID, Params.IndexCoordCfg.IndexNodeAddress); err != nil {
-				log.Error("IndexCoord add node fail", zap.Int64("ServerID", Params.IndexCoordCfg.IndexNodeID),
-					zap.String("address", Params.IndexCoordCfg.IndexNodeAddress), zap.Error(err))
-				initErr = err
-				return
+	if i.enableActiveStandBy {
+		i.activateFunc = func() {
+			log.Info("IndexCoord switch from standby to active, activating")
+			if err := i.initIndexCoord(); err != nil {
+				log.Warn("IndexCoord init failed", zap.Error(err))
+				// TODO: panic if error occurred?
 			}
-			log.Info("IndexCoord add node success", zap.String("IndexNode address", Params.IndexCoordCfg.IndexNodeAddress),
-				zap.Int64("nodeID", Params.IndexCoordCfg.IndexNodeID))
-			aliveNodeID = append(aliveNodeID, Params.IndexCoordCfg.IndexNodeID)
-		} else {
-			for _, session := range sessions {
-				session := session
-				if err := i.nodeManager.AddNode(session.ServerID, session.Address); err != nil {
-					log.Error("IndexCoord", zap.Int64("ServerID", session.ServerID),
-						zap.Error(err))
-					continue
-				}
-				aliveNodeID = append(aliveNodeID, session.ServerID)
-			}
+			i.startIndexCoord()
+			i.stateCode.Store(commonpb.StateCode_Healthy)
+			log.Info("IndexCoord startup success")
 		}
-		log.Info("IndexCoord", zap.Int("IndexNode number", len(i.nodeManager.GetAllClients())))
-		i.indexBuilder = newIndexBuilder(i.loopCtx, i, i.metaTable, aliveNodeID)
-
-		// TODO silverxia add Rewatch logic
-		i.eventChan = i.session.WatchServices(typeutil.IndexNodeRole, revision+1, nil)
-
-		chunkManager, err := i.factory.NewPersistentStorageChunkManager(i.loopCtx)
-		if err != nil {
-			log.Error("IndexCoord new minio chunkManager failed", zap.Error(err))
-			initErr = err
-			return
-		}
-		log.Info("IndexCoord new minio chunkManager success")
-		i.chunkManager = chunkManager
-
-		i.garbageCollector = newGarbageCollector(i.loopCtx, i.metaTable, i.chunkManager, i)
-		i.handoff = newHandoff(i.loopCtx, i.metaTable, i.etcdKV, i)
-		i.flushedSegmentWatcher, err = newFlushSegmentWatcher(i.loopCtx, i.etcdKV, i.metaTable, i.indexBuilder, i.handoff, i)
-		if err != nil {
-			initErr = err
-			return
-		}
-
-		i.sched, err = NewTaskScheduler(i.loopCtx, i.rootCoordClient, i.chunkManager, i.metaTable)
-		if err != nil {
-			log.Error("IndexCoord new task scheduler failed", zap.Error(err))
-			initErr = err
-			return
-		}
-		log.Info("IndexCoord new task scheduler success")
-
-		i.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
-	})
-
-	log.Info("IndexCoord init finished", zap.Error(initErr))
+		i.stateCode.Store(commonpb.StateCode_StandBy)
+		log.Info("IndexCoord enter standby mode successfully")
+	} else {
+		i.initOnce.Do(func() {
+			initErr = i.initIndexCoord()
+		})
+	}
 
 	return initErr
 }
 
+func (i *IndexCoord) initIndexCoord() error {
+	var err error
+	connectEtcdFn := func() error {
+		i.etcdKV = etcdkv.NewEtcdKV(i.etcdCli, Params.EtcdCfg.MetaRootPath)
+		i.metaTable, err = NewMetaTable(i.etcdKV)
+		return err
+	}
+	log.Info("IndexCoord try to connect etcd")
+	err = retry.Do(i.loopCtx, connectEtcdFn, retry.Attempts(100))
+	if err != nil {
+		log.Error("IndexCoord try to connect etcd failed", zap.Error(err))
+		return err
+	}
+
+	log.Info("IndexCoord try to connect etcd success")
+	i.nodeManager = NewNodeManager(i.loopCtx)
+
+	sessions, revision, err := i.session.GetSessions(typeutil.IndexNodeRole)
+	log.Info("IndexCoord", zap.Int("session number", len(sessions)), zap.Int64("revision", revision))
+	if err != nil {
+		log.Error("IndexCoord Get IndexNode Sessions error", zap.Error(err))
+		return err
+	}
+	log.Info("IndexCoord get node sessions from etcd", zap.Bool("bind mode", Params.IndexCoordCfg.BindIndexNodeMode),
+		zap.String("node address", Params.IndexCoordCfg.IndexNodeAddress))
+	aliveNodeID := make([]UniqueID, 0)
+	if Params.IndexCoordCfg.BindIndexNodeMode {
+		if err = i.nodeManager.AddNode(Params.IndexCoordCfg.IndexNodeID, Params.IndexCoordCfg.IndexNodeAddress); err != nil {
+			log.Error("IndexCoord add node fail", zap.Int64("ServerID", Params.IndexCoordCfg.IndexNodeID),
+				zap.String("address", Params.IndexCoordCfg.IndexNodeAddress), zap.Error(err))
+			return err
+		}
+		log.Info("IndexCoord add node success", zap.String("IndexNode address", Params.IndexCoordCfg.IndexNodeAddress),
+			zap.Int64("nodeID", Params.IndexCoordCfg.IndexNodeID))
+		aliveNodeID = append(aliveNodeID, Params.IndexCoordCfg.IndexNodeID)
+	} else {
+		for _, session := range sessions {
+			session := session
+			if err := i.nodeManager.AddNode(session.ServerID, session.Address); err != nil {
+				log.Error("IndexCoord", zap.Int64("ServerID", session.ServerID),
+					zap.Error(err))
+				continue
+			}
+			aliveNodeID = append(aliveNodeID, session.ServerID)
+		}
+	}
+	log.Info("IndexCoord", zap.Int("IndexNode number", len(i.nodeManager.GetAllClients())))
+	i.indexBuilder = newIndexBuilder(i.loopCtx, i, i.metaTable, aliveNodeID)
+
+	// TODO silverxia add Rewatch logic
+	i.eventChan = i.session.WatchServices(typeutil.IndexNodeRole, revision+1, nil)
+
+	chunkManager, err := i.factory.NewPersistentStorageChunkManager(i.loopCtx)
+	if err != nil {
+		log.Error("IndexCoord new minio chunkManager failed", zap.Error(err))
+		return err
+	}
+	log.Info("IndexCoord new minio chunkManager success")
+	i.chunkManager = chunkManager
+
+	i.garbageCollector = newGarbageCollector(i.loopCtx, i.metaTable, i.chunkManager, i)
+	i.handoff = newHandoff(i.loopCtx, i.metaTable, i.etcdKV, i)
+	i.flushedSegmentWatcher, err = newFlushSegmentWatcher(i.loopCtx, i.etcdKV, i.metaTable, i.indexBuilder, i.handoff, i)
+	if err != nil {
+		return err
+	}
+
+	i.sched, err = NewTaskScheduler(i.loopCtx, i.rootCoordClient, i.chunkManager, i.metaTable)
+	if err != nil {
+		log.Error("IndexCoord new task scheduler failed", zap.Error(err))
+		return err
+	}
+	log.Info("IndexCoord new task scheduler success")
+
+	i.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
+	log.Info("IndexCoord init finished")
+
+	return nil
+}
+
 // Start starts the IndexCoord component.
 func (i *IndexCoord) Start() error {
-	var startErr error
+	if !i.enableActiveStandBy {
+		i.startIndexCoord()
+		i.UpdateStateCode(commonpb.StateCode_Healthy)
+		log.Info("IndexCoord start successfully", zap.Any("state", i.stateCode.Load()))
+	}
+
+	Params.IndexCoordCfg.CreatedTime = time.Now()
+	Params.IndexCoordCfg.UpdatedTime = time.Now()
+	return nil
+}
+
+func (i *IndexCoord) startIndexCoord() {
 	i.startOnce.Do(func() {
 		i.loopWg.Add(1)
 		go i.watchNodeLoop()
@@ -282,7 +306,7 @@ func (i *IndexCoord) Start() error {
 		i.loopWg.Add(1)
 		go i.watchFlushedSegmentLoop()
 
-		startErr = i.sched.Start()
+		i.sched.Start()
 
 		i.indexBuilder.Start()
 		i.garbageCollector.Start()
@@ -295,24 +319,6 @@ func (i *IndexCoord) Start() error {
 	for _, cb := range i.startCallbacks {
 		cb()
 	}
-
-	Params.IndexCoordCfg.CreatedTime = time.Now()
-	Params.IndexCoordCfg.UpdatedTime = time.Now()
-
-	if i.enableActiveStandBy {
-		i.activateFunc = func() {
-			log.Info("IndexCoord switch from standby to active, reload the KV")
-			i.metaTable.reloadFromKV()
-			i.UpdateStateCode(commonpb.StateCode_Healthy)
-		}
-		i.UpdateStateCode(commonpb.StateCode_StandBy)
-		log.Info("IndexCoord start successfully", zap.Any("state", i.stateCode.Load()))
-	} else {
-		i.UpdateStateCode(commonpb.StateCode_Healthy)
-		log.Info("IndexCoord start successfully", zap.Any("state", i.stateCode.Load()))
-	}
-
-	return startErr
 }
 
 // Stop stops the IndexCoord component.
