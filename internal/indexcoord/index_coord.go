@@ -513,6 +513,15 @@ func (i *IndexCoord) GetIndexState(ctx context.Context, req *indexpb.GetIndexSta
 			},
 		}, nil
 	}
+	if req.GetIndexName() == "" && len(indexID2CreateTs) > 1 {
+		log.Warn(ErrMsgAmbiguousIndexName)
+		return &indexpb.GetIndexStateResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    ErrMsgAmbiguousIndexName,
+			},
+		}, nil
+	}
 	ret := &indexpb.GetIndexStateResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
@@ -638,6 +647,28 @@ func (i *IndexCoord) GetIndexBuildProgress(ctx context.Context, req *indexpb.Get
 		}, nil
 	}
 
+	indexID2CreateTs := i.metaTable.GetIndexIDByName(req.CollectionID, req.IndexName)
+	if len(indexID2CreateTs) == 0 {
+		errMsg := fmt.Sprintf("there is no index on collection: %d with the index name: %s", req.CollectionID, req.IndexName)
+		log.Error("IndexCoord get index state fail", zap.Int64("collectionID", req.CollectionID),
+			zap.String("indexName", req.IndexName), zap.String("fail reason", errMsg))
+		return &indexpb.GetIndexBuildProgressResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    errMsg,
+			},
+		}, nil
+	}
+	if req.GetIndexName() == "" && len(indexID2CreateTs) > 1 {
+		log.Warn(ErrMsgAmbiguousIndexName)
+		return &indexpb.GetIndexBuildProgressResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    ErrMsgAmbiguousIndexName,
+			},
+		}, nil
+	}
+
 	flushSegments, err := i.dataCoordClient.GetFlushedSegments(ctx, &datapb.GetFlushedSegmentsRequest{
 		CollectionID:     req.CollectionID,
 		PartitionID:      -1,
@@ -668,25 +699,12 @@ func (i *IndexCoord) GetIndexBuildProgress(ctx context.Context, req *indexpb.Get
 		totalRows += seg.NumOfRows
 	}
 
-	indexID2CreateTs := i.metaTable.GetIndexIDByName(req.CollectionID, req.IndexName)
-	if len(indexID2CreateTs) == 0 {
-		errMsg := fmt.Sprintf("there is no index on collection: %d with the index name: %s", req.CollectionID, req.IndexName)
-		log.Error("IndexCoord get index state fail", zap.Int64("collectionID", req.CollectionID),
-			zap.String("indexName", req.IndexName), zap.String("fail reason", errMsg))
-		return &indexpb.GetIndexBuildProgressResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    errMsg,
-			},
-		}, nil
-	}
-
 	for indexID := range indexID2CreateTs {
 		indexRows = i.metaTable.GetIndexBuildProgress(indexID, flushSegments.Segments)
 		break
 	}
 
-	log.RatedInfo(5, "IndexCoord get index build progress success", zap.Int64("collID", req.CollectionID),
+	log.Info("IndexCoord get index build progress success", zap.Int64("collID", req.CollectionID),
 		zap.Int64("totalRows", totalRows), zap.Int64("indexRows", indexRows),
 		zap.Int("seg num", len(flushSegments.Segments)))
 	return &indexpb.GetIndexBuildProgressResponse{
@@ -911,6 +929,9 @@ func (i *IndexCoord) DescribeIndex(ctx context.Context, req *indexpb.DescribeInd
 				},
 			}, nil
 		}
+		log.Info("IndexCoord describe index success", zap.Int64("collectionID", req.CollectionID),
+			zap.Int64("indexID", indexInfo.IndexID), zap.Int64("total rows", indexInfo.TotalRows),
+			zap.Int64("index rows", indexInfo.IndexedRows), zap.String("index state", indexInfo.State.String()))
 		indexInfos = append(indexInfos, indexInfo)
 	}
 
