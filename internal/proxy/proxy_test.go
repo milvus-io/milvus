@@ -2104,6 +2104,15 @@ func TestProxy(t *testing.T) {
 	wg.Add(1)
 	t.Run("credential UPDATE api", func(t *testing.T) {
 		defer wg.Done()
+		rootCtx := ctx
+		fooCtx := GetContext(context.Background(), "foo:123456")
+		ctx = fooCtx
+		originUsers := Params.CommonCfg.SuperUsers
+		Params.CommonCfg.SuperUsers = []string{"root"}
+		defer func() {
+			ctx = rootCtx
+			Params.CommonCfg.SuperUsers = originUsers
+		}()
 
 		// 2. update credential
 		newPassword := "new_password"
@@ -2155,6 +2164,14 @@ func TestProxy(t *testing.T) {
 		updateResp, err = proxy.UpdateCredential(ctx, updateCredentialReq)
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, updateResp.ErrorCode)
+
+		// super user
+		updateCredentialReq.OldPassword = crypto.Base64Encode("wrong_password")
+		updateCredentialReq.NewPassword = crypto.Base64Encode(newPassword)
+		updateResp, err = proxy.UpdateCredential(rootCtx, updateCredentialReq)
+		assert.NoError(t, err)
+		fmt.Println("simfg fubang:", updateResp)
+		assert.Equal(t, commonpb.ErrorCode_Success, updateResp.ErrorCode)
 	})
 
 	wg.Add(1)

@@ -724,6 +724,14 @@ func passwordVerify(ctx context.Context, username, rawPwd string, globalMetaCach
 		return false
 	}
 
+	if currentUser, _ := GetCurUserFromContext(ctx); currentUser != "" {
+		for _, s := range Params.CommonCfg.SuperUsers {
+			if s == currentUser {
+				return true
+			}
+		}
+	}
+
 	// hit cache
 	sha256Pwd := crypto.SHA256(rawPwd, credInfo.Username)
 	if credInfo.Sha256Password != "" {
