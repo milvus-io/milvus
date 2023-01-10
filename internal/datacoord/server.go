@@ -122,6 +122,7 @@ type Server struct {
 	factory         dependency.Factory
 
 	session   *sessionutil.Session
+	icSession *sessionutil.Session
 	dnEventCh <-chan *sessionutil.SessionEvent
 	inEventCh <-chan *sessionutil.SessionEvent
 	//qcEventCh <-chan *sessionutil.SessionEvent
@@ -225,6 +226,8 @@ func (s *Server) QuitSignal() <-chan struct{} {
 
 // Register registers data service at etcd
 func (s *Server) Register() error {
+	// first register indexCoord
+	s.icSession.Register()
 	s.session.Register()
 	if s.enableActiveStandBy {
 		s.session.ProcessActiveStandBy(s.activateFunc)
@@ -245,6 +248,12 @@ func (s *Server) Register() error {
 }
 
 func (s *Server) initSession() error {
+	s.icSession = sessionutil.NewSession(s.ctx, Params.EtcdCfg.MetaRootPath.GetValue(), s.etcdCli)
+	if s.icSession == nil {
+		return errors.New("failed to initialize IndexCoord session")
+	}
+	s.icSession.Init(typeutil.IndexCoordRole, s.address, true, true)
+
 	s.session = sessionutil.NewSession(s.ctx, Params.EtcdCfg.MetaRootPath.GetValue(), s.etcdCli)
 	if s.session == nil {
 		return errors.New("failed to initialize session")
