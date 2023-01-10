@@ -3,7 +3,7 @@ package model
 import (
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 )
 
 type Index struct {
@@ -20,7 +20,7 @@ type Index struct {
 	UserIndexParams []*commonpb.KeyValuePair
 }
 
-func UnmarshalIndexModel(indexInfo *datapb.FieldIndex) *Index {
+func UnmarshalIndexModel(indexInfo *indexpb.FieldIndex) *Index {
 	if indexInfo == nil {
 		return nil
 	}
@@ -39,13 +39,13 @@ func UnmarshalIndexModel(indexInfo *datapb.FieldIndex) *Index {
 	}
 }
 
-func MarshalIndexModel(index *Index) *datapb.FieldIndex {
+func MarshalIndexModel(index *Index) *indexpb.FieldIndex {
 	if index == nil {
 		return nil
 	}
 
-	return &datapb.FieldIndex{
-		IndexInfo: &datapb.IndexInfo{
+	return &indexpb.FieldIndex{
+		IndexInfo: &indexpb.IndexInfo{
 			CollectionID:    index.CollectionID,
 			FieldID:         index.FieldID,
 			IndexName:       index.IndexName,

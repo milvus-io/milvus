@@ -20,6 +20,8 @@ import (
 	"context"
 	"sync/atomic"
 
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
+
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -40,8 +42,8 @@ type DataCoordMock struct {
 	statisticsChannel      string
 	timeTickChannel        string
 	checkHealthFunc        func(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error)
-	GetIndexStateFunc      func(ctx context.Context, request *datapb.GetIndexStateRequest) (*datapb.GetIndexStateResponse, error)
-	DescribeIndexFunc      func(ctx context.Context, request *datapb.DescribeIndexRequest) (*datapb.DescribeIndexResponse, error)
+	GetIndexStateFunc      func(ctx context.Context, request *indexpb.GetIndexStateRequest) (*indexpb.GetIndexStateResponse, error)
+	DescribeIndexFunc      func(ctx context.Context, request *indexpb.DescribeIndexRequest) (*indexpb.DescribeIndexResponse, error)
 }
 
 func (coord *DataCoordMock) updateState(state commonpb.StateCode) {
@@ -280,22 +282,22 @@ func (coord *DataCoordMock) UpdateChannelCheckpoint(ctx context.Context, req *da
 	}, nil
 }
 
-func (coord *DataCoordMock) CreateIndex(ctx context.Context, req *datapb.CreateIndexRequest) (*commonpb.Status, error) {
+func (coord *DataCoordMock) CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error) {
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",
 	}, nil
 }
 
-func (coord *DataCoordMock) DropIndex(ctx context.Context, req *datapb.DropIndexRequest) (*commonpb.Status, error) {
+func (coord *DataCoordMock) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",
 	}, nil
 }
 
-func (coord *DataCoordMock) GetIndexState(ctx context.Context, req *datapb.GetIndexStateRequest) (*datapb.GetIndexStateResponse, error) {
-	return &datapb.GetIndexStateResponse{
+func (coord *DataCoordMock) GetIndexState(ctx context.Context, req *indexpb.GetIndexStateRequest) (*indexpb.GetIndexStateResponse, error) {
+	return &indexpb.GetIndexStateResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",
@@ -306,8 +308,8 @@ func (coord *DataCoordMock) GetIndexState(ctx context.Context, req *datapb.GetIn
 }
 
 // GetSegmentIndexState gets the index state of the segments in the request from RootCoord.
-func (coord *DataCoordMock) GetSegmentIndexState(ctx context.Context, req *datapb.GetSegmentIndexStateRequest) (*datapb.GetSegmentIndexStateResponse, error) {
-	return &datapb.GetSegmentIndexStateResponse{
+func (coord *DataCoordMock) GetSegmentIndexState(ctx context.Context, req *indexpb.GetSegmentIndexStateRequest) (*indexpb.GetSegmentIndexStateResponse, error) {
+	return &indexpb.GetSegmentIndexStateResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",
@@ -316,8 +318,8 @@ func (coord *DataCoordMock) GetSegmentIndexState(ctx context.Context, req *datap
 }
 
 // GetIndexInfos gets the index files of the IndexBuildIDs in the request from RootCoordinator.
-func (coord *DataCoordMock) GetIndexInfos(ctx context.Context, req *datapb.GetIndexInfoRequest) (*datapb.GetIndexInfoResponse, error) {
-	return &datapb.GetIndexInfoResponse{
+func (coord *DataCoordMock) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoRequest) (*indexpb.GetIndexInfoResponse, error) {
+	return &indexpb.GetIndexInfoResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 			Reason:    "",
@@ -326,8 +328,8 @@ func (coord *DataCoordMock) GetIndexInfos(ctx context.Context, req *datapb.GetIn
 }
 
 // DescribeIndex describe the index info of the collection.
-func (coord *DataCoordMock) DescribeIndex(ctx context.Context, req *datapb.DescribeIndexRequest) (*datapb.DescribeIndexResponse, error) {
-	return &datapb.DescribeIndexResponse{
+func (coord *DataCoordMock) DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRequest) (*indexpb.DescribeIndexResponse, error) {
+	return &indexpb.DescribeIndexResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
@@ -336,8 +338,8 @@ func (coord *DataCoordMock) DescribeIndex(ctx context.Context, req *datapb.Descr
 }
 
 // GetIndexBuildProgress get the index building progress by num rows.
-func (coord *DataCoordMock) GetIndexBuildProgress(ctx context.Context, req *datapb.GetIndexBuildProgressRequest) (*datapb.GetIndexBuildProgressResponse, error) {
-	return &datapb.GetIndexBuildProgressResponse{
+func (coord *DataCoordMock) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetIndexBuildProgressRequest) (*indexpb.GetIndexBuildProgressResponse, error) {
+	return &indexpb.GetIndexBuildProgressResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},

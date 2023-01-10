@@ -57,7 +57,7 @@ ${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./indexcgopb index_cgo
 ${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./rootcoordpb root_coord.proto
 ${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./internalpb internal.proto
 ${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./proxypb proxy.proto
-${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./indexpb index_node.proto
+${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./indexpb index_coord.proto
 ${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./datapb data_coord.proto
 ${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./querypb query_coord.proto
 ${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./planpb plan.proto

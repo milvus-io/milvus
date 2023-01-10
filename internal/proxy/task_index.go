@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 
 	"go.uber.org/zap"
 
@@ -303,7 +303,7 @@ func (cit *createIndexTask) Execute(ctx context.Context) error {
 		cit.req.IndexName = Params.CommonCfg.DefaultIndexName.GetValue() + "_" + strconv.FormatInt(cit.fieldSchema.GetFieldID(), 10)
 	}
 	var err error
-	req := &datapb.CreateIndexRequest{
+	req := &indexpb.CreateIndexRequest{
 		CollectionID:    cit.collectionID,
 		FieldID:         cit.fieldSchema.GetFieldID(),
 		IndexName:       cit.req.GetIndexName(),
@@ -402,7 +402,7 @@ func (dit *describeIndexTask) Execute(ctx context.Context) error {
 		return fmt.Errorf("failed to parse collection schema: %s", err)
 	}
 
-	resp, err := dit.datacoord.DescribeIndex(ctx, &datapb.DescribeIndexRequest{CollectionID: dit.collectionID, IndexName: dit.IndexName})
+	resp, err := dit.datacoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{CollectionID: dit.collectionID, IndexName: dit.IndexName})
 	if err != nil || resp == nil {
 		return err
 	}
@@ -524,7 +524,7 @@ func (dit *dropIndexTask) PreExecute(ctx context.Context) error {
 
 func (dit *dropIndexTask) Execute(ctx context.Context) error {
 	var err error
-	dit.result, err = dit.dataCoord.DropIndex(ctx, &datapb.DropIndexRequest{
+	dit.result, err = dit.dataCoord.DropIndex(ctx, &indexpb.DropIndexRequest{
 		CollectionID: dit.collectionID,
 		PartitionIDs: nil,
 		IndexName:    dit.IndexName,
@@ -615,7 +615,7 @@ func (gibpt *getIndexBuildProgressTask) Execute(ctx context.Context) error {
 		gibpt.IndexName = Params.CommonCfg.DefaultIndexName.GetValue()
 	}
 
-	resp, err := gibpt.dataCoord.GetIndexBuildProgress(ctx, &datapb.GetIndexBuildProgressRequest{
+	resp, err := gibpt.dataCoord.GetIndexBuildProgress(ctx, &indexpb.GetIndexBuildProgressRequest{
 		CollectionID: collectionID,
 		IndexName:    gibpt.IndexName,
 	})
@@ -706,7 +706,7 @@ func (gist *getIndexStateTask) Execute(ctx context.Context) error {
 		return err
 	}
 
-	state, err := gist.dataCoord.GetIndexState(ctx, &datapb.GetIndexStateRequest{
+	state, err := gist.dataCoord.GetIndexState(ctx, &indexpb.GetIndexStateRequest{
 		CollectionID: collectionID,
 		IndexName:    gist.IndexName,
 	})

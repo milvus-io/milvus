@@ -335,29 +335,29 @@ type DataCoord interface {
 	// Index building is asynchronous, so when an index building request comes, an IndexID is assigned to the task and
 	// will get all flushed segments from DataCoord and record tasks with these segments. The background process
 	// indexBuilder will find this task and assign it to IndexNode for execution.
-	CreateIndex(ctx context.Context, req *datapb.CreateIndexRequest) (*commonpb.Status, error)
+	CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error)
 
 	// GetIndexState gets the index state of the index name in the request from Proxy.
 	// Deprecated: use DescribeIndex instead
-	GetIndexState(ctx context.Context, req *datapb.GetIndexStateRequest) (*datapb.GetIndexStateResponse, error)
+	GetIndexState(ctx context.Context, req *indexpb.GetIndexStateRequest) (*indexpb.GetIndexStateResponse, error)
 
 	// GetSegmentIndexState gets the index state of the segments in the request from RootCoord.
-	GetSegmentIndexState(ctx context.Context, req *datapb.GetSegmentIndexStateRequest) (*datapb.GetSegmentIndexStateResponse, error)
+	GetSegmentIndexState(ctx context.Context, req *indexpb.GetSegmentIndexStateRequest) (*indexpb.GetSegmentIndexStateResponse, error)
 
 	// GetIndexInfos gets the index files of the IndexBuildIDs in the request from RootCoordinator.
-	GetIndexInfos(ctx context.Context, req *datapb.GetIndexInfoRequest) (*datapb.GetIndexInfoResponse, error)
+	GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoRequest) (*indexpb.GetIndexInfoResponse, error)
 
 	// DescribeIndex describe the index info of the collection.
-	DescribeIndex(ctx context.Context, req *datapb.DescribeIndexRequest) (*datapb.DescribeIndexResponse, error)
+	DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRequest) (*indexpb.DescribeIndexResponse, error)
 
 	// GetIndexBuildProgress get the index building progress by num rows.
 	// Deprecated: use DescribeIndex instead
-	GetIndexBuildProgress(ctx context.Context, req *datapb.GetIndexBuildProgressRequest) (*datapb.GetIndexBuildProgressResponse, error)
+	GetIndexBuildProgress(ctx context.Context, req *indexpb.GetIndexBuildProgressRequest) (*indexpb.GetIndexBuildProgressResponse, error)
 
 	// DropIndex deletes indexes based on IndexID. One IndexID corresponds to the index of an entire column. A column is
 	// divided into many segments, and each segment corresponds to an IndexBuildID. IndexCoord uses IndexBuildID to record
 	// index tasks. Therefore, when DropIndex is called, delete all tasks corresponding to IndexBuildID corresponding to IndexID.
-	DropIndex(ctx context.Context, req *datapb.DropIndexRequest) (*commonpb.Status, error)
+	DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error)
 }
 
 // DataCoordComponent defines the interface of DataCoord component.

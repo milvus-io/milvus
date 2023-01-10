@@ -3,17 +3,18 @@ package model
 import (
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
+
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 )
 
 var (
 	segmentID = int64(1)
 	buildID   = int64(1)
 
-	segmentIdxPb = &datapb.SegmentIndex{
+	segmentIdxPb = &indexpb.SegmentIndex{
 		CollectionID:  colID,
 		PartitionID:   partID,
 		SegmentID:     segmentID,

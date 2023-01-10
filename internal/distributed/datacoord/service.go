@@ -25,6 +25,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
+
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	ot "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -158,6 +160,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
 			ot.StreamServerInterceptor(opts...),
 			logutil.StreamTraceLoggerInterceptor)))
+	indexpb.RegisterIndexCoordServer(s.grpcServer, s)
 	datapb.RegisterDataCoordServer(s.grpcServer, s)
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
 	if err := s.grpcServer.Serve(lis); err != nil {
@@ -384,36 +387,36 @@ func (s *Server) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthReque
 }
 
 // CreateIndex sends the build index request to DataCoord.
-func (s *Server) CreateIndex(ctx context.Context, req *datapb.CreateIndexRequest) (*commonpb.Status, error) {
+func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error) {
 	return s.dataCoord.CreateIndex(ctx, req)
 }
 
 // GetIndexState gets the index states from DataCoord.
 // Deprecated: use DescribeIndex instead
-func (s *Server) GetIndexState(ctx context.Context, req *datapb.GetIndexStateRequest) (*datapb.GetIndexStateResponse, error) {
+func (s *Server) GetIndexState(ctx context.Context, req *indexpb.GetIndexStateRequest) (*indexpb.GetIndexStateResponse, error) {
 	return s.dataCoord.GetIndexState(ctx, req)
 }
 
-func (s *Server) GetSegmentIndexState(ctx context.Context, req *datapb.GetSegmentIndexStateRequest) (*datapb.GetSegmentIndexStateResponse, error) {
+func (s *Server) GetSegmentIndexState(ctx context.Context, req *indexpb.GetSegmentIndexStateRequest) (*indexpb.GetSegmentIndexStateResponse, error) {
 	return s.dataCoord.GetSegmentIndexState(ctx, req)
 }
 
 // GetIndexInfos gets the index file paths from DataCoord.
-func (s *Server) GetIndexInfos(ctx context.Context, req *datapb.GetIndexInfoRequest) (*datapb.GetIndexInfoResponse, error) {
+func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoRequest) (*indexpb.GetIndexInfoResponse, error) {
 	return s.dataCoord.GetIndexInfos(ctx, req)
 }
 
 // DescribeIndex gets all indexes of the collection.
-func (s *Server) DescribeIndex(ctx context.Context, req *datapb.DescribeIndexRequest) (*datapb.DescribeIndexResponse, error) {
+func (s *Server) DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRequest) (*indexpb.DescribeIndexResponse, error) {
 	return s.dataCoord.DescribeIndex(ctx, req)
 }
 
 // DropIndex sends the drop index request to DataCoord.
-func (s *Server) DropIndex(ctx context.Context, request *datapb.DropIndexRequest) (*commonpb.Status, error) {
+func (s *Server) DropIndex(ctx context.Context, request *indexpb.DropIndexRequest) (*commonpb.Status, error) {
 	return s.dataCoord.DropIndex(ctx, request)
 }
 
 // Deprecated: use DescribeIndex instead
-func (s *Server) GetIndexBuildProgress(ctx context.Context, req *datapb.GetIndexBuildProgressRequest) (*datapb.GetIndexBuildProgressResponse, error) {
+func (s *Server) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetIndexBuildProgressRequest) (*indexpb.GetIndexBuildProgressResponse, error) {
 	return s.dataCoord.GetIndexBuildProgress(ctx, req)
 }

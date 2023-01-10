@@ -27,6 +27,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
+
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -893,8 +895,8 @@ func TestCatalog_ListIndexes(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		txn := &MockedTxnKV{
 			loadWithPrefix: func(key string) ([]string, []string, error) {
-				i := &datapb.FieldIndex{
-					IndexInfo: &datapb.IndexInfo{
+				i := &indexpb.FieldIndex{
+					IndexInfo: &indexpb.IndexInfo{
 						CollectionID: 0,
 						FieldID:      0,
 						IndexName:    "",
@@ -1075,7 +1077,7 @@ func TestCatalog_CreateSegmentIndex(t *testing.T) {
 
 func TestCatalog_ListSegmentIndexes(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
-		segIdx := &datapb.SegmentIndex{
+		segIdx := &indexpb.SegmentIndex{
 			CollectionID:  0,
 			PartitionID:   0,
 			SegmentID:     0,

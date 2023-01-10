@@ -5,20 +5,18 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/milvus-io/milvus/internal/metastore/model"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
-
-	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
-
-	"github.com/milvus-io/milvus/internal/util/commonpbutil"
-
-	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"go.uber.org/zap"
+	"github.com/milvus-io/milvus/internal/util/commonpbutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 type watchInfo struct {
@@ -44,8 +42,8 @@ type Broker interface {
 	GetSegmentStates(context.Context, *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error)
 
 	DropCollectionIndex(ctx context.Context, collID UniqueID, partIDs []UniqueID) error
-	GetSegmentIndexState(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*datapb.SegmentIndexState, error)
-	DescribeIndex(ctx context.Context, colID UniqueID) (*datapb.DescribeIndexResponse, error)
+	GetSegmentIndexState(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*indexpb.SegmentIndexState, error)
+	DescribeIndex(ctx context.Context, colID UniqueID) (*indexpb.DescribeIndexResponse, error)
 
 	BroadcastAlteredCollection(ctx context.Context, req *milvuspb.AlterCollectionRequest) error
 }
@@ -164,7 +162,7 @@ func (b *ServerBroker) GetSegmentStates(ctx context.Context, req *datapb.GetSegm
 }
 
 func (b *ServerBroker) DropCollectionIndex(ctx context.Context, collID UniqueID, partIDs []UniqueID) error {
-	rsp, err := b.s.dataCoord.DropIndex(ctx, &datapb.DropIndexRequest{
+	rsp, err := b.s.dataCoord.DropIndex(ctx, &indexpb.DropIndexRequest{
 		CollectionID: collID,
 		PartitionIDs: partIDs,
 		IndexName:    "",
@@ -179,8 +177,8 @@ func (b *ServerBroker) DropCollectionIndex(ctx context.Context, collID UniqueID,
 	return nil
 }
 
-func (b *ServerBroker) GetSegmentIndexState(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*datapb.SegmentIndexState, error) {
-	resp, err := b.s.dataCoord.GetSegmentIndexState(ctx, &datapb.GetSegmentIndexStateRequest{
+func (b *ServerBroker) GetSegmentIndexState(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*indexpb.SegmentIndexState, error) {
+	resp, err := b.s.dataCoord.GetSegmentIndexState(ctx, &indexpb.GetSegmentIndexStateRequest{
 		CollectionID: collID,
 		IndexName:    indexName,
 		SegmentIDs:   segIDs,
@@ -232,8 +230,8 @@ func (b *ServerBroker) BroadcastAlteredCollection(ctx context.Context, req *milv
 	return nil
 }
 
-func (b *ServerBroker) DescribeIndex(ctx context.Context, colID UniqueID) (*datapb.DescribeIndexResponse, error) {
-	return b.s.dataCoord.DescribeIndex(ctx, &datapb.DescribeIndexRequest{
+func (b *ServerBroker) DescribeIndex(ctx context.Context, colID UniqueID) (*indexpb.DescribeIndexResponse, error) {
+	return b.s.dataCoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
 		CollectionID: colID,
 	})
 }

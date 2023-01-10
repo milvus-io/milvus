@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
@@ -760,7 +761,7 @@ func (c *Client) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthReque
 }
 
 // CreateIndex sends the build index request to IndexCoord.
-func (c *Client) CreateIndex(ctx context.Context, req *datapb.CreateIndexRequest) (*commonpb.Status, error) {
+func (c *Client) CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error) {
 	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -774,7 +775,7 @@ func (c *Client) CreateIndex(ctx context.Context, req *datapb.CreateIndexRequest
 }
 
 // GetIndexState gets the index states from IndexCoord.
-func (c *Client) GetIndexState(ctx context.Context, req *datapb.GetIndexStateRequest) (*datapb.GetIndexStateResponse, error) {
+func (c *Client) GetIndexState(ctx context.Context, req *indexpb.GetIndexStateRequest) (*indexpb.GetIndexStateResponse, error) {
 	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -784,11 +785,11 @@ func (c *Client) GetIndexState(ctx context.Context, req *datapb.GetIndexStateReq
 	if err != nil || ret == nil {
 		return nil, err
 	}
-	return ret.(*datapb.GetIndexStateResponse), err
+	return ret.(*indexpb.GetIndexStateResponse), err
 }
 
 // GetSegmentIndexState gets the index states from IndexCoord.
-func (c *Client) GetSegmentIndexState(ctx context.Context, req *datapb.GetSegmentIndexStateRequest) (*datapb.GetSegmentIndexStateResponse, error) {
+func (c *Client) GetSegmentIndexState(ctx context.Context, req *indexpb.GetSegmentIndexStateRequest) (*indexpb.GetSegmentIndexStateResponse, error) {
 	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -798,11 +799,11 @@ func (c *Client) GetSegmentIndexState(ctx context.Context, req *datapb.GetSegmen
 	if err != nil || ret == nil {
 		return nil, err
 	}
-	return ret.(*datapb.GetSegmentIndexStateResponse), err
+	return ret.(*indexpb.GetSegmentIndexStateResponse), err
 }
 
 // GetIndexInfos gets the index file paths from IndexCoord.
-func (c *Client) GetIndexInfos(ctx context.Context, req *datapb.GetIndexInfoRequest) (*datapb.GetIndexInfoResponse, error) {
+func (c *Client) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoRequest) (*indexpb.GetIndexInfoResponse, error) {
 	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -812,11 +813,11 @@ func (c *Client) GetIndexInfos(ctx context.Context, req *datapb.GetIndexInfoRequ
 	if err != nil || ret == nil {
 		return nil, err
 	}
-	return ret.(*datapb.GetIndexInfoResponse), err
+	return ret.(*indexpb.GetIndexInfoResponse), err
 }
 
 // DescribeIndex describe the index info of the collection.
-func (c *Client) DescribeIndex(ctx context.Context, req *datapb.DescribeIndexRequest) (*datapb.DescribeIndexResponse, error) {
+func (c *Client) DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRequest) (*indexpb.DescribeIndexResponse, error) {
 	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -826,11 +827,11 @@ func (c *Client) DescribeIndex(ctx context.Context, req *datapb.DescribeIndexReq
 	if err != nil || ret == nil {
 		return nil, err
 	}
-	return ret.(*datapb.DescribeIndexResponse), err
+	return ret.(*indexpb.DescribeIndexResponse), err
 }
 
 // GetIndexBuildProgress describe the progress of the index.
-func (c *Client) GetIndexBuildProgress(ctx context.Context, req *datapb.GetIndexBuildProgressRequest) (*datapb.GetIndexBuildProgressResponse, error) {
+func (c *Client) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetIndexBuildProgressRequest) (*indexpb.GetIndexBuildProgressResponse, error) {
 	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()
@@ -840,11 +841,11 @@ func (c *Client) GetIndexBuildProgress(ctx context.Context, req *datapb.GetIndex
 	if err != nil || ret == nil {
 		return nil, err
 	}
-	return ret.(*datapb.GetIndexBuildProgressResponse), err
+	return ret.(*indexpb.GetIndexBuildProgressResponse), err
 }
 
 // DropIndex sends the drop index request to IndexCoord.
-func (c *Client) DropIndex(ctx context.Context, req *datapb.DropIndexRequest) (*commonpb.Status, error) {
+func (c *Client) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
 	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataCoordClient) (any, error) {
 		if !funcutil.CheckCtxValid(ctx) {
 			return nil, ctx.Err()

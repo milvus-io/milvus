@@ -6,6 +6,8 @@ import (
 	"math/rand"
 	"os"
 
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
+
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/allocator"
@@ -157,14 +159,12 @@ type mockDataCoord struct {
 	types.DataCoord
 	GetComponentStatesFunc         func(ctx context.Context) (*milvuspb.ComponentStates, error)
 	WatchChannelsFunc              func(ctx context.Context, req *datapb.WatchChannelsRequest) (*datapb.WatchChannelsResponse, error)
-	AcquireSegmentLockFunc         func(ctx context.Context, req *datapb.AcquireSegmentLockRequest) (*commonpb.Status, error)
-	ReleaseSegmentLockFunc         func(ctx context.Context, req *datapb.ReleaseSegmentLockRequest) (*commonpb.Status, error)
 	FlushFunc                      func(ctx context.Context, req *datapb.FlushRequest) (*datapb.FlushResponse, error)
 	ImportFunc                     func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error)
 	UnsetIsImportingStateFunc      func(ctx context.Context, req *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error)
 	broadCastAlteredCollectionFunc func(ctx context.Context, req *datapb.AlterCollectionRequest) (*commonpb.Status, error)
-	GetSegmentIndexStateFunc       func(ctx context.Context, req *datapb.GetSegmentIndexStateRequest) (*datapb.GetSegmentIndexStateResponse, error)
-	DropIndexFunc                  func(ctx context.Context, req *datapb.DropIndexRequest) (*commonpb.Status, error)
+	GetSegmentIndexStateFunc       func(ctx context.Context, req *indexpb.GetSegmentIndexStateRequest) (*indexpb.GetSegmentIndexStateResponse, error)
+	DropIndexFunc                  func(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error)
 }
 
 func newMockDataCoord() *mockDataCoord {
@@ -177,14 +177,6 @@ func (m *mockDataCoord) GetComponentStates(ctx context.Context) (*milvuspb.Compo
 
 func (m *mockDataCoord) WatchChannels(ctx context.Context, req *datapb.WatchChannelsRequest) (*datapb.WatchChannelsResponse, error) {
 	return m.WatchChannelsFunc(ctx, req)
-}
-
-func (m *mockDataCoord) AcquireSegmentLock(ctx context.Context, req *datapb.AcquireSegmentLockRequest) (*commonpb.Status, error) {
-	return m.AcquireSegmentLockFunc(ctx, req)
-}
-
-func (m *mockDataCoord) ReleaseSegmentLock(ctx context.Context, req *datapb.ReleaseSegmentLockRequest) (*commonpb.Status, error) {
-	return m.ReleaseSegmentLockFunc(ctx, req)
 }
 
 func (m *mockDataCoord) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.FlushResponse, error) {
@@ -209,11 +201,11 @@ func (m *mockDataCoord) CheckHealth(ctx context.Context, req *milvuspb.CheckHeal
 	}, nil
 }
 
-func (m *mockDataCoord) GetSegmentIndexState(ctx context.Context, req *datapb.GetSegmentIndexStateRequest) (*datapb.GetSegmentIndexStateResponse, error) {
+func (m *mockDataCoord) GetSegmentIndexState(ctx context.Context, req *indexpb.GetSegmentIndexStateRequest) (*indexpb.GetSegmentIndexStateResponse, error) {
 	return m.GetSegmentIndexStateFunc(ctx, req)
 }
 
-func (m *mockDataCoord) DropIndex(ctx context.Context, req *datapb.DropIndexRequest) (*commonpb.Status, error) {
+func (m *mockDataCoord) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
 	return m.DropIndexFunc(ctx, req)
 }
 
@@ -550,12 +542,6 @@ func withInvalidDataCoord() Opt {
 	dc.WatchChannelsFunc = func(ctx context.Context, req *datapb.WatchChannelsRequest) (*datapb.WatchChannelsResponse, error) {
 		return nil, errors.New("error mock WatchChannels")
 	}
-	dc.AcquireSegmentLockFunc = func(ctx context.Context, req *datapb.AcquireSegmentLockRequest) (*commonpb.Status, error) {
-		return nil, errors.New("error mock AddSegRefLock")
-	}
-	dc.ReleaseSegmentLockFunc = func(ctx context.Context, req *datapb.ReleaseSegmentLockRequest) (*commonpb.Status, error) {
-		return nil, errors.New("error mock ReleaseSegRefLock")
-	}
 	dc.FlushFunc = func(ctx context.Context, req *datapb.FlushRequest) (*datapb.FlushResponse, error) {
 		return nil, errors.New("error mock Flush")
 	}
@@ -568,10 +554,10 @@ func withInvalidDataCoord() Opt {
 	dc.broadCastAlteredCollectionFunc = func(ctx context.Context, req *datapb.AlterCollectionRequest) (*commonpb.Status, error) {
 		return nil, errors.New("error mock broadCastAlteredCollection")
 	}
-	dc.GetSegmentIndexStateFunc = func(ctx context.Context, req *datapb.GetSegmentIndexStateRequest) (*datapb.GetSegmentIndexStateResponse, error) {
+	dc.GetSegmentIndexStateFunc = func(ctx context.Context, req *indexpb.GetSegmentIndexStateRequest) (*indexpb.GetSegmentIndexStateResponse, error) {
 		return nil, errors.New("error mock GetSegmentIndexStateFunc")
 	}
-	dc.DropIndexFunc = func(ctx context.Context, req *datapb.DropIndexRequest) (*commonpb.Status, error) {
+	dc.DropIndexFunc = func(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
 		return nil, errors.New("error mock DropIndexFunc")
 	}
 	return withDataCoord(dc)
@@ -589,12 +575,6 @@ func withFailedDataCoord() Opt {
 		return &datapb.WatchChannelsResponse{
 			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "mock watch channels error"),
 		}, nil
-	}
-	dc.AcquireSegmentLockFunc = func(ctx context.Context, req *datapb.AcquireSegmentLockRequest) (*commonpb.Status, error) {
-		return failStatus(commonpb.ErrorCode_UnexpectedError, "mock add seg ref lock error"), nil
-	}
-	dc.ReleaseSegmentLockFunc = func(ctx context.Context, req *datapb.ReleaseSegmentLockRequest) (*commonpb.Status, error) {
-		return failStatus(commonpb.ErrorCode_UnexpectedError, "mock release seg ref lock error"), nil
 	}
 	dc.FlushFunc = func(ctx context.Context, req *datapb.FlushRequest) (*datapb.FlushResponse, error) {
 		return &datapb.FlushResponse{
@@ -615,12 +595,12 @@ func withFailedDataCoord() Opt {
 	dc.broadCastAlteredCollectionFunc = func(ctx context.Context, req *datapb.AlterCollectionRequest) (*commonpb.Status, error) {
 		return failStatus(commonpb.ErrorCode_UnexpectedError, "mock broadcast altered collection error"), nil
 	}
-	dc.GetSegmentIndexStateFunc = func(ctx context.Context, req *datapb.GetSegmentIndexStateRequest) (*datapb.GetSegmentIndexStateResponse, error) {
-		return &datapb.GetSegmentIndexStateResponse{
+	dc.GetSegmentIndexStateFunc = func(ctx context.Context, req *indexpb.GetSegmentIndexStateRequest) (*indexpb.GetSegmentIndexStateResponse, error) {
+		return &indexpb.GetSegmentIndexStateResponse{
 			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "mock GetSegmentIndexStateFunc fail"),
 		}, nil
 	}
-	dc.DropIndexFunc = func(ctx context.Context, req *datapb.DropIndexRequest) (*commonpb.Status, error) {
+	dc.DropIndexFunc = func(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
 		return failStatus(commonpb.ErrorCode_UnexpectedError, "mock DropIndexFunc fail"), nil
 	}
 	return withDataCoord(dc)
@@ -639,12 +619,6 @@ func withValidDataCoord() Opt {
 			Status: succStatus(),
 		}, nil
 	}
-	dc.AcquireSegmentLockFunc = func(ctx context.Context, req *datapb.AcquireSegmentLockRequest) (*commonpb.Status, error) {
-		return succStatus(), nil
-	}
-	dc.ReleaseSegmentLockFunc = func(ctx context.Context, req *datapb.ReleaseSegmentLockRequest) (*commonpb.Status, error) {
-		return succStatus(), nil
-	}
 	dc.FlushFunc = func(ctx context.Context, req *datapb.FlushRequest) (*datapb.FlushResponse, error) {
 		return &datapb.FlushResponse{
 			Status: succStatus(),
@@ -661,12 +635,12 @@ func withValidDataCoord() Opt {
 	dc.broadCastAlteredCollectionFunc = func(ctx context.Context, req *datapb.AlterCollectionRequest) (*commonpb.Status, error) {
 		return succStatus(), nil
 	}
-	dc.GetSegmentIndexStateFunc = func(ctx context.Context, req *datapb.GetSegmentIndexStateRequest) (*datapb.GetSegmentIndexStateResponse, error) {
-		return &datapb.GetSegmentIndexStateResponse{
+	dc.GetSegmentIndexStateFunc = func(ctx context.Context, req *indexpb.GetSegmentIndexStateRequest) (*indexpb.GetSegmentIndexStateResponse, error) {
+		return &indexpb.GetSegmentIndexStateResponse{
 			Status: succStatus(),
 		}, nil
 	}
-	dc.DropIndexFunc = func(ctx context.Context, req *datapb.DropIndexRequest) (*commonpb.Status, error) {
+	dc.DropIndexFunc = func(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
 		return succStatus(), nil
 	}
 	return withDataCoord(dc)
@@ -787,8 +761,8 @@ type mockBroker struct {
 	ImportFunc            func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error)
 
 	DropCollectionIndexFunc  func(ctx context.Context, collID UniqueID, partIDs []UniqueID) error
-	DescribeIndexFunc        func(ctx context.Context, colID UniqueID) (*datapb.DescribeIndexResponse, error)
-	GetSegmentIndexStateFunc func(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*datapb.SegmentIndexState, error)
+	DescribeIndexFunc        func(ctx context.Context, colID UniqueID) (*indexpb.DescribeIndexResponse, error)
+	GetSegmentIndexStateFunc func(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*indexpb.SegmentIndexState, error)
 
 	BroadcastAlteredCollectionFunc func(ctx context.Context, req *milvuspb.AlterCollectionRequest) error
 }
@@ -813,11 +787,11 @@ func (b mockBroker) DropCollectionIndex(ctx context.Context, collID UniqueID, pa
 	return b.DropCollectionIndexFunc(ctx, collID, partIDs)
 }
 
-func (b mockBroker) DescribeIndex(ctx context.Context, colID UniqueID) (*datapb.DescribeIndexResponse, error) {
+func (b mockBroker) DescribeIndex(ctx context.Context, colID UniqueID) (*indexpb.DescribeIndexResponse, error) {
 	return b.DescribeIndexFunc(ctx, colID)
 }
 
-func (b mockBroker) GetSegmentIndexState(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*datapb.SegmentIndexState, error) {
+func (b mockBroker) GetSegmentIndexState(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*indexpb.SegmentIndexState, error) {
 	return b.GetSegmentIndexStateFunc(ctx, collID, indexName, segIDs)
 }
 
