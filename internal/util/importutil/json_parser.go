@@ -37,15 +37,21 @@ const (
 	RowRootNode = "rows"
 )
 
+type IOReader struct {
+	r        io.Reader
+	fileSize int64
+}
+
 type JSONParser struct {
-	ctx          context.Context  // for canceling parse process
-	bufRowCount  int              // max rows in a buffer
-	fields       map[string]int64 // fields need to be parsed
-	name2FieldID map[string]storage.FieldID
+	ctx                context.Context  // for canceling parse process
+	bufRowCount        int              // max rows in a buffer
+	fields             map[string]int64 // fields need to be parsed
+	name2FieldID       map[string]storage.FieldID
+	updateProgressFunc func(percent int64) // update working progress percent value
 }
 
 // NewJSONParser helper function to create a JSONParser
-func NewJSONParser(ctx context.Context, collectionSchema *schemapb.CollectionSchema) *JSONParser {
+func NewJSONParser(ctx context.Context, collectionSchema *schemapb.CollectionSchema, updateProgressFunc func(percent int64)) *JSONParser {
 	fields := make(map[string]int64)
 	name2FieldID := make(map[string]storage.FieldID)
 	for i := 0; i < len(collectionSchema.Fields); i++ {
@@ -64,10 +70,11 @@ func NewJSONParser(ctx context.Context, collectionSchema *schemapb.CollectionSch
 	}
 
 	parser := &JSONParser{
-		ctx:          ctx,
-		bufRowCount:  1024,
-		fields:       fields,
-		name2FieldID: name2FieldID,
+		ctx:                ctx,
+		bufRowCount:        1024,
+		fields:             fields,
+		name2FieldID:       name2FieldID,
+		updateProgressFunc: updateProgressFunc,
 	}
 	adjustBufSize(parser, collectionSchema)
 
@@ -132,19 +139,31 @@ func (p *JSONParser) verifyRow(raw interface{}) (map[storage.FieldID]interface{}
 	return row, nil
 }
 
-func (p *JSONParser) ParseRows(r io.Reader, handler JSONRowHandler) error {
-	if handler == nil {
+func (p *JSONParser) ParseRows(reader *IOReader, handler JSONRowHandler) error {
+	if handler == nil || reader == nil {
 		log.Error("JSON parse handler is nil")
 		return errors.New("JSON parse handler is nil")
 	}
 
-	dec := json.NewDecoder(r)
+	dec := json.NewDecoder(reader.r)
+
+	oldPercent := int64(0)
+	updateProgress := func() {
+		if p.updateProgressFunc != nil && reader.fileSize > 0 {
+			percent := (dec.InputOffset() * ProgressValueForPersist) / reader.fileSize
+			if percent > oldPercent { // avoid too many log
+				log.Debug("JSON parser: working progress", zap.Int64("offset", dec.InputOffset()),
+					zap.Int64("fileSize", reader.fileSize), zap.Int64("percent", percent))
+			}
+			oldPercent = percent
+			p.updateProgressFunc(percent)
+		}
+	}
 
 	// treat number value as a string instead of a float64.
 	// by default, json lib treat all number values as float64, but if an int64 value
 	// has more than 15 digits, the value would be incorrect after converting from float64
 	dec.UseNumber()
-
 	t, err := dec.Token()
 	if err != nil {
 		log.Error("JSON parser: failed to decode the JSON file", zap.Error(err))
@@ -166,7 +185,6 @@ func (p *JSONParser) ParseRows(r io.Reader, handler JSONRowHandler) error {
 		}
 		key := t.(string)
 		keyLower := strings.ToLower(key)
-
 		// the root key should be RowRootNode
 		if keyLower != RowRootNode {
 			log.Error("JSON parser: invalid JSON format, the root key is not found", zap.String("RowRootNode", RowRootNode), zap.String("key", key))
@@ -198,6 +216,8 @@ func (p *JSONParser) ParseRows(r io.Reader, handler JSONRowHandler) error {
 			if err != nil {
 				return err
 			}
+
+			updateProgress()
 
 			buf = append(buf, row)
 			if len(buf) >= p.bufRowCount {
@@ -248,6 +268,8 @@ func (p *JSONParser) ParseRows(r io.Reader, handler JSONRowHandler) error {
 		log.Error("JSON parser: row count is 0")
 		return errors.New("row count is 0")
 	}
+
+	updateProgress()
 
 	// send nil to notify the handler all have done
 	return handler.Handle(nil)

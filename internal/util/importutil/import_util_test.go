@@ -640,3 +640,24 @@ func Test_PkToShard(t *testing.T) {
 	hash, _ = typeutil.Hash32Int64(pk)
 	assert.Equal(t, hash%shardNum, shard)
 }
+
+func Test_UpdateKVInfo(t *testing.T) {
+	err := UpdateKVInfo(nil, "a", "1")
+	assert.Error(t, err)
+
+	infos := make([]*commonpb.KeyValuePair, 0)
+
+	err = UpdateKVInfo(&infos, "a", "1")
+	assert.NoError(t, err)
+	assert.Equal(t, 1, len(infos))
+	assert.Equal(t, "1", infos[0].Value)
+
+	err = UpdateKVInfo(&infos, "a", "2")
+	assert.NoError(t, err)
+	assert.Equal(t, "2", infos[0].Value)
+
+	err = UpdateKVInfo(&infos, "b", "5")
+	assert.NoError(t, err)
+	assert.Equal(t, 2, len(infos))
+	assert.Equal(t, "5", infos[1].Value)
+}
