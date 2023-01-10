@@ -17,10 +17,14 @@
 package proxy
 
 import (
+	"errors"
+	"fmt"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/log"
 )
@@ -149,4 +153,12 @@ func Test_errProxyIsUnhealthy(t *testing.T) {
 		log.Info("Test_errProxyIsUnhealthy",
 			zap.Error(errProxyIsUnhealthy(id)))
 	}
+}
+
+func Test_ErrInsufficientMemory(t *testing.T) {
+	err := fmt.Errorf("%w, mock insufficient memory error", ErrInsufficientMemory)
+	assert.True(t, errors.Is(err, ErrInsufficientMemory))
+
+	status := InSufficientMemoryStatus("collection1")
+	assert.Equal(t, commonpb.ErrorCode_InsufficientMemoryToLoad, status.GetErrorCode())
 }

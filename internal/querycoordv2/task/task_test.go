@@ -142,6 +142,7 @@ func (suite *TaskSuite) SetupTest() {
 	suite.scheduler.AddExecutor(1)
 	suite.scheduler.AddExecutor(2)
 	suite.scheduler.AddExecutor(3)
+	meta.GlobalFailedLoadCache = meta.NewFailedLoadCache()
 }
 
 func (suite *TaskSuite) BeforeTest(suiteName, testName string) {

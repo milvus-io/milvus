@@ -18,6 +18,7 @@ package proxy
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -1445,6 +1446,11 @@ func (node *Proxy) GetLoadingProgress(ctx context.Context, request *milvuspb.Get
 			zap.Strings("partition_name", request.PartitionNames),
 			zap.Error(err))
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel).Inc()
+		if errors.Is(err, ErrInsufficientMemory) {
+			return &milvuspb.GetLoadingProgressResponse{
+				Status: InSufficientMemoryStatus(request.GetCollectionName()),
+			}
+		}
 		return &milvuspb.GetLoadingProgressResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -1574,12 +1580,22 @@ func (node *Proxy) GetLoadState(ctx context.Context, request *milvuspb.GetLoadSt
 	var progress int64
 	if len(request.GetPartitionNames()) == 0 {
 		if progress, err = getCollectionProgress(ctx, node.queryCoord, request.GetBase(), collectionID); err != nil {
+			if errors.Is(err, ErrInsufficientMemory) {
+				return &milvuspb.GetLoadStateResponse{
+					Status: InSufficientMemoryStatus(request.GetCollectionName()),
+				}, nil
+			}
 			successResponse.State = commonpb.LoadState_LoadStateNotLoad
 			return successResponse, nil
 		}
 	} else {
 		if progress, err = getPartitionProgress(ctx, node.queryCoord, request.GetBase(),
 			request.GetPartitionNames(), request.GetCollectionName(), collectionID); err != nil {
+			if errors.Is(err, ErrInsufficientMemory) {
+				return &milvuspb.GetLoadStateResponse{
+					Status: InSufficientMemoryStatus(request.GetCollectionName()),
+				}, nil
+			}
 			successResponse.State = commonpb.LoadState_LoadStateNotLoad
 			return successResponse, nil
 		}

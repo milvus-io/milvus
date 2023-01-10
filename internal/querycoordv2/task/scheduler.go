@@ -23,6 +23,7 @@ import (
 	"runtime"
 	"sync"
 
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -53,8 +54,8 @@ var (
 	// or the target channel is not in TargetManager
 	ErrTaskStale = errors.New("TaskStale")
 
-	// No enough memory to load segment
-	ErrResourceNotEnough = errors.New("ResourceNotEnough")
+	// ErrInsufficientMemory returns insufficient memory error.
+	ErrInsufficientMemory = errors.New("InsufficientMemoryToLoad")
 
 	ErrFailedResponse  = errors.New("RpcFailed")
 	ErrTaskAlreadyDone = errors.New("TaskAlreadyDone")
@@ -658,6 +659,16 @@ func (scheduler *taskScheduler) RemoveByNode(node int64) {
 	}
 }
 
+func (scheduler *taskScheduler) recordSegmentTaskError(task *SegmentTask) {
+	var errCode commonpb.ErrorCode
+	if errors.Is(task.Err(), ErrInsufficientMemory) {
+		errCode = commonpb.ErrorCode_InsufficientMemoryToLoad
+	} else {
+		errCode = commonpb.ErrorCode_UnexpectedError
+	}
+	meta.GlobalFailedLoadCache.Put(task.collectionID, errCode, task.Err())
+}
+
 func (scheduler *taskScheduler) remove(task Task) {
 	log := log.With(
 		zap.Int64("taskID", task.ID()),
@@ -675,6 +686,10 @@ func (scheduler *taskScheduler) remove(task Task) {
 		index := NewReplicaSegmentIndex(task)
 		delete(scheduler.segmentTasks, index)
 		log = log.With(zap.Int64("segmentID", task.SegmentID()))
+		if task.Err() != nil {
+			log.Warn("task scheduler recordSegmentTaskError", zap.Error(task.err))
+			scheduler.recordSegmentTaskError(task)
+		}
 
 	case *ChannelTask:
 		index := replicaChannelIndex{task.ReplicaID(), task.Channel()}

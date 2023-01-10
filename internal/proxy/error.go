@@ -23,10 +23,22 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 )
 
 // TODO(dragondriver): add more common error type
+
+// ErrInsufficientMemory returns insufficient memory error.
+var ErrInsufficientMemory = errors.New("InsufficientMemoryToLoad")
+
+// InSufficientMemoryStatus returns insufficient memory status.
+func InSufficientMemoryStatus(collectionName string) *commonpb.Status {
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_InsufficientMemoryToLoad,
+		Reason:    fmt.Sprintf("deny to load, insufficient memory, please allocate more resources, collectionName: %s", collectionName),
+	}
+}
 
 func errInvalidNumRows(numRows uint32) error {
 	return fmt.Errorf("invalid num_rows: %d", numRows)

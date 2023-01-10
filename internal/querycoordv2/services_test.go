@@ -19,6 +19,7 @@ package querycoordv2
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -141,6 +142,7 @@ func (suite *ServiceSuite) SetupTest() {
 		suite.meta,
 		suite.targetMgr,
 	)
+	meta.GlobalFailedLoadCache = meta.NewFailedLoadCache()
 
 	suite.server = &Server{
 		kv:                  suite.kv,
@@ -185,6 +187,18 @@ func (suite *ServiceSuite) TestShowCollections() {
 	suite.Len(resp.CollectionIDs, 1)
 	suite.Equal(collection, resp.CollectionIDs[0])
 
+	// Test insufficient memory
+	colBak := suite.meta.CollectionManager.GetCollection(collection)
+	err = suite.meta.CollectionManager.RemoveCollection(collection)
+	suite.NoError(err)
+	meta.GlobalFailedLoadCache.Put(collection, commonpb.ErrorCode_InsufficientMemoryToLoad, fmt.Errorf("mock insufficient memory reason"))
+	resp, err = server.ShowCollections(ctx, req)
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_InsufficientMemoryToLoad, resp.GetStatus().GetErrorCode())
+	meta.GlobalFailedLoadCache.Remove(collection)
+	err = suite.meta.CollectionManager.PutCollection(colBak)
+	suite.NoError(err)
+
 	// Test when server is not healthy
 	server.UpdateStateCode(commonpb.StateCode_Initializing)
 	resp, err = server.ShowCollections(ctx, req)
@@ -224,6 +238,32 @@ func (suite *ServiceSuite) TestShowPartitions() {
 		suite.Len(resp.PartitionIDs, 1)
 		for _, partition := range partitions[0:1] {
 			suite.Contains(resp.PartitionIDs, partition)
+		}
+
+		// Test insufficient memory
+		if suite.loadTypes[collection] == querypb.LoadType_LoadCollection {
+			colBak := suite.meta.CollectionManager.GetCollection(collection)
+			err = suite.meta.CollectionManager.RemoveCollection(collection)
+			suite.NoError(err)
+			meta.GlobalFailedLoadCache.Put(collection, commonpb.ErrorCode_InsufficientMemoryToLoad, fmt.Errorf("mock insufficient memory reason"))
+			resp, err = server.ShowPartitions(ctx, req)
+			suite.NoError(err)
+			suite.Equal(commonpb.ErrorCode_InsufficientMemoryToLoad, resp.GetStatus().GetErrorCode())
+			meta.GlobalFailedLoadCache.Remove(collection)
+			err = suite.meta.CollectionManager.PutCollection(colBak)
+			suite.NoError(err)
+		} else {
+			partitionID := partitions[0]
+			parBak := suite.meta.CollectionManager.GetPartition(partitionID)
+			err = suite.meta.CollectionManager.RemovePartition(partitionID)
+			suite.NoError(err)
+			meta.GlobalFailedLoadCache.Put(collection, commonpb.ErrorCode_InsufficientMemoryToLoad, fmt.Errorf("mock insufficient memory reason"))
+			resp, err = server.ShowPartitions(ctx, req)
+			suite.NoError(err)
+			suite.Equal(commonpb.ErrorCode_InsufficientMemoryToLoad, resp.GetStatus().GetErrorCode())
+			meta.GlobalFailedLoadCache.Remove(collection)
+			err = suite.meta.CollectionManager.PutPartition(parBak)
+			suite.NoError(err)
 		}
 	}
 
