@@ -181,6 +181,8 @@ func (job *LoadCollectionJob) Execute() error {
 		zap.Int64("collectionID", req.GetCollectionID()),
 	)
 
+	meta.GlobalFailedLoadCache.Remove(req.GetCollectionID())
+
 	// Clear stale replicas
 	err := job.meta.ReplicaManager.RemoveCollection(req.GetCollectionID())
 	if err != nil {
@@ -387,6 +389,8 @@ func (job *LoadPartitionJob) Execute() error {
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.Int64s("partitionIDs", req.GetPartitionIDs()),
 	)
+
+	meta.GlobalFailedLoadCache.Remove(req.GetCollectionID())
 
 	// Clear stale replicas
 	err := job.meta.ReplicaManager.RemoveCollection(req.GetCollectionID())

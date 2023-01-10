@@ -518,6 +518,9 @@ func (node *QueryNode) LoadSegments(ctx context.Context, in *querypb.LoadSegment
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
 				Reason:    err.Error(),
 			}
+			if errors.Is(err, ErrInsufficientMemory) {
+				status.ErrorCode = commonpb.ErrorCode_InsufficientMemoryToLoad
+			}
 			log.Warn(err.Error())
 			return status, nil
 		}

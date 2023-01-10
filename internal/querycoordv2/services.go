@@ -57,6 +57,7 @@ func (s *Server) ShowCollections(ctx context.Context, req *querypb.ShowCollectio
 			Status: utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg, ErrNotHealthy),
 		}, nil
 	}
+	defer meta.GlobalFailedLoadCache.TryExpire()
 
 	isGetAll := false
 	collectionSet := typeutil.NewUniqueSet(req.GetCollectionIDs()...)
@@ -87,6 +88,13 @@ func (s *Server) ShowCollections(ctx context.Context, req *querypb.ShowCollectio
 				// ignore it
 				continue
 			}
+			status := meta.GlobalFailedLoadCache.Get(collectionID)
+			if status.ErrorCode != commonpb.ErrorCode_Success {
+				log.Warn("show collection failed", zap.String("errCode", status.GetErrorCode().String()), zap.String("reason", status.GetReason()))
+				return &querypb.ShowCollectionsResponse{
+					Status: status,
+				}, nil
+			}
 			err := fmt.Errorf("collection %d has not been loaded to memory or load failed", collectionID)
 			log.Warn("show collection failed", zap.Error(err))
 			return &querypb.ShowCollectionsResponse{
@@ -116,6 +124,7 @@ func (s *Server) ShowPartitions(ctx context.Context, req *querypb.ShowPartitions
 			Status: utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg, ErrNotHealthy),
 		}, nil
 	}
+	defer meta.GlobalFailedLoadCache.TryExpire()
 
 	// TODO(yah01): now, for load collection, the percentage of partition is equal to the percentage of collection,
 	// we can calculates the real percentage of partitions
@@ -165,6 +174,13 @@ func (s *Server) ShowPartitions(ctx context.Context, req *querypb.ShowPartitions
 	}
 
 	if isReleased {
+		status := meta.GlobalFailedLoadCache.Get(req.GetCollectionID())
+		if status.ErrorCode != commonpb.ErrorCode_Success {
+			log.Warn("show collection failed", zap.String("errCode", status.GetErrorCode().String()), zap.String("reason", status.GetReason()))
+			return &querypb.ShowPartitionsResponse{
+				Status: status,
+			}, nil
+		}
 		msg := fmt.Sprintf("collection %v has not been loaded into QueryNode", req.GetCollectionID())
 		log.Warn(msg)
 		return &querypb.ShowPartitionsResponse{
@@ -255,6 +271,8 @@ func (s *Server) ReleaseCollection(ctx context.Context, req *querypb.ReleaseColl
 	log.Info("collection released")
 	metrics.QueryCoordReleaseCount.WithLabelValues(metrics.SuccessLabel).Inc()
 	metrics.QueryCoordReleaseLatency.WithLabelValues().Observe(float64(tr.ElapseSpan().Milliseconds()))
+	meta.GlobalFailedLoadCache.Remove(req.GetCollectionID())
+
 	return successStatus, nil
 }
 
@@ -339,6 +357,8 @@ func (s *Server) ReleasePartitions(ctx context.Context, req *querypb.ReleasePart
 
 	metrics.QueryCoordReleaseCount.WithLabelValues(metrics.SuccessLabel).Inc()
 	metrics.QueryCoordReleaseLatency.WithLabelValues().Observe(float64(tr.ElapseSpan().Milliseconds()))
+
+	meta.GlobalFailedLoadCache.Remove(req.GetCollectionID())
 	return successStatus, nil
 }
 
