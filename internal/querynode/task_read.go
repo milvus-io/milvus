@@ -170,7 +170,7 @@ func (b *baseReadTask) Ready() (bool, error) {
 	if guaranteeTs > serviceTime {
 		lag := gt.Sub(st)
 		maxLag := Params.QueryNodeCfg.MaxTimestampLag.GetAsDuration(time.Second)
-		if lag > maxLag {
+		if serviceTime != 0 && lag > maxLag {
 			log.Warn("guarantee and servicable ts larger than MaxLag",
 				zap.Time("guaranteeTime", gt),
 				zap.Time("serviceableTime", st),
