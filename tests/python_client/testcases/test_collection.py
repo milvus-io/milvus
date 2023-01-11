@@ -2579,6 +2579,43 @@ class TestLoadCollection(TestcaseBase):
                                        "err_msg": "index not exist"})
 
 
+class TestDescribeCollection(TestcaseBase):
+    """
+    ******************************************************************
+      The following cases are used to test `collection.describe` function
+    ******************************************************************
+    """
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_collection_describe(self):
+        """
+        target: test describe collection
+        method: create a collection and check its information when describe
+        expected: return correct information
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=c_name)
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
+        description = {'collection_name': c_name, 'auto_id': False, 'description': '',
+                       'fields': [{'field_id': 100, 'name': 'int64', 'description': '', 'type': 5,
+                                   'params': {}, 'is_primary': True, 'auto_id': False},
+                                  {'field_id': 101, 'name': 'float', 'description': '', 'type': 10,
+                                   'params': {}, 'is_primary': False, 'auto_id': False},
+                                  {'field_id': 102, 'name': 'varchar', 'description': '', 'type': 21,
+                                   'params': {'max_length': 65535}, 'is_primary': False, 'auto_id': False},
+                                  {'field_id': 103, 'name': 'float_vector', 'description': '', 'type': 101,
+                                   'params': {'dim': 128}, 'is_primary': False, 'auto_id': False}],
+                       'aliases': [], 'consistency_level': 0, 'properties': []}
+        res = collection_w.describe()[0]
+        del res['collection_id']
+        log.info(res)
+        assert description['fields'] == res['fields'], description['aliases'] == res['aliases']
+        del description['fields'], res['fields'], description['aliases'], res['aliases']
+        del description['properties'], res['properties']
+        assert description == res
+
+
 class TestReleaseAdvanced(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L0)
     def test_release_collection_during_searching(self):

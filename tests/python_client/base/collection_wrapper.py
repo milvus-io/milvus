@@ -340,3 +340,10 @@ class ApiCollectionWrapper:
         res, check = api_request([self.collection.get_replicas, timeout], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
         return res, check_result
+
+    def describe(self, timeout=None, check_task=None, check_items=None):
+        timeout = TIMEOUT if timeout is None else timeout
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.collection.describe, timeout])
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check).run()
+        return res, check_result
