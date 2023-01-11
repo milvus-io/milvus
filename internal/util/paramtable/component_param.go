@@ -467,9 +467,8 @@ func (p *commonConfig) initEnableAuthorization() {
 }
 
 func (p *commonConfig) initSuperUsers() {
-	users, err := p.Base.Load("common.security.superUsers")
-	if err != nil {
-		log.Warn("fail to load common.security.superUsers", zap.Error(err))
+	users := p.Base.LoadWithDefault("common.security.superUsers", "")
+	if users == "" {
 		p.SuperUsers = []string{}
 		return
 	}
