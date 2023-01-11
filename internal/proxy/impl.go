@@ -1898,6 +1898,8 @@ func (node *Proxy) GetLoadState(ctx context.Context, request *milvuspb.GetLoadSt
 		return getErrResponse(err), nil
 	}
 
+	// TODO(longjiquan): https://github.com/milvus-io/milvus/issues/21485, Remove `GetComponentStates` after error code
+	// 	is ready to distinguish case whether the querycoord is not healthy or the collection is not even loaded.
 	if statesResp, err := node.queryCoord.GetComponentStates(ctx); err != nil {
 		return getErrResponse(err), nil
 	} else if statesResp.State == nil || statesResp.State.StateCode != commonpb.StateCode_Healthy {
