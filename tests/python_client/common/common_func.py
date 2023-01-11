@@ -605,20 +605,20 @@ def ip(x, y):
 
 
 def jaccard(x, y):
-    x = np.asarray(x, np.bool)
-    y = np.asarray(y, np.bool)
+    x = np.asarray(x, np.bool_)
+    y = np.asarray(y, np.bool_)
     return 1 - np.double(np.bitwise_and(x, y).sum()) / np.double(np.bitwise_or(x, y).sum())
 
 
 def hamming(x, y):
-    x = np.asarray(x, np.bool)
-    y = np.asarray(y, np.bool)
+    x = np.asarray(x, np.bool_)
+    y = np.asarray(y, np.bool_)
     return np.bitwise_xor(x, y).sum()
 
 
 def tanimoto(x, y):
-    x = np.asarray(x, np.bool)
-    y = np.asarray(y, np.bool)
+    x = np.asarray(x, np.bool_)
+    y = np.asarray(y, np.bool_)
     res = np.double(np.bitwise_and(x, y).sum()) / np.double(np.bitwise_or(x, y).sum())
     if res == 0:
         value = 0
@@ -628,20 +628,20 @@ def tanimoto(x, y):
 
 
 def tanimoto_calc(x, y):
-    x = np.asarray(x, np.bool)
-    y = np.asarray(y, np.bool)
+    x = np.asarray(x, np.bool_)
+    y = np.asarray(y, np.bool_)
     return np.double((len(x) - np.bitwise_xor(x, y).sum())) / (len(y) + np.bitwise_xor(x, y).sum())
 
 
 def substructure(x, y):
-    x = np.asarray(x, np.bool)
-    y = np.asarray(y, np.bool)
+    x = np.asarray(x, np.bool_)
+    y = np.asarray(y, np.bool_)
     return 1 - np.double(np.bitwise_and(x, y).sum()) / np.count_nonzero(y)
 
 
 def superstructure(x, y):
-    x = np.asarray(x, np.bool)
-    y = np.asarray(y, np.bool)
+    x = np.asarray(x, np.bool_)
+    y = np.asarray(y, np.bool_)
     return 1 - np.double(np.bitwise_and(x, y).sum()) / np.count_nonzero(x)
 
 
