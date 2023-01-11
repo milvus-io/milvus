@@ -326,7 +326,7 @@ func (i *IndexNode) ShowConfigurations(ctx context.Context, req *internalpb.Show
 	}
 
 	configList := make([]*commonpb.KeyValuePair, 0)
-	for key, value := range Params.GetComponentConfigurations(ctx, "indexnode", req.Pattern) {
+	for key, value := range Params.GetComponentConfigurations("indexnode", req.Pattern) {
 		configList = append(configList,
 			&commonpb.KeyValuePair{
 				Key:   key,

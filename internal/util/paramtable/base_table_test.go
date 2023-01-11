@@ -28,25 +28,6 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-func TestBaseTable_GetConfigSubSet(t *testing.T) {
-	prefix := "rootcoord."
-	configs := baseParams.mgr.GetConfigs()
-
-	configsWithPrefix := make(map[string]string)
-	for k, v := range configs {
-		if strings.HasPrefix(k, prefix) {
-			configsWithPrefix[k] = v
-		}
-	}
-
-	subSet := baseParams.GetConfigSubSet(prefix)
-
-	for k := range configs {
-		assert.Equal(t, subSet[k], configs[prefix+k])
-	}
-	assert.Equal(t, len(subSet), len(configsWithPrefix))
-}
-
 func TestBaseTable_DuplicateValues(t *testing.T) {
 	baseParams.Save("rootcoord.dmlchannelnum", "10")
 	baseParams.Save("rootcoorddmlchannelnum", "11")

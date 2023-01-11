@@ -550,7 +550,7 @@ func (s *Server) ShowConfigurations(ctx context.Context, req *internalpb.ShowCon
 		}, nil
 	}
 	configList := make([]*commonpb.KeyValuePair, 0)
-	for key, value := range Params.GetComponentConfigurations(ctx, "querycoord", req.Pattern) {
+	for key, value := range Params.GetComponentConfigurations("querycoord", req.Pattern) {
 		configList = append(configList,
 			&commonpb.KeyValuePair{
 				Key:   key,

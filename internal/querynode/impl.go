@@ -1246,7 +1246,7 @@ func (node *QueryNode) ShowConfigurations(ctx context.Context, req *internalpb.S
 	defer node.wg.Done()
 
 	configList := make([]*commonpb.KeyValuePair, 0)
-	for key, value := range Params.GetComponentConfigurations(ctx, "querynode", req.Pattern) {
+	for key, value := range Params.GetComponentConfigurations("querynode", req.Pattern) {
 		configList = append(configList,
 			&commonpb.KeyValuePair{
 				Key:   key,

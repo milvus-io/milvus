@@ -1421,7 +1421,7 @@ func (c *Core) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfi
 	}
 
 	configList := make([]*commonpb.KeyValuePair, 0)
-	for key, value := range Params.GetComponentConfigurations(ctx, "rootcoord", req.Pattern) {
+	for key, value := range Params.GetComponentConfigurations("rootcoord", req.Pattern) {
 		configList = append(configList,
 			&commonpb.KeyValuePair{
 				Key:   key,

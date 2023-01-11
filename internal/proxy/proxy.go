@@ -183,7 +183,7 @@ func (node *Proxy) Init() error {
 	log.Info("init session for Proxy done")
 
 	node.factory.Init(Params)
-	log.Debug("init parameters for factory", zap.String("role", typeutil.ProxyRole), zap.Any("parameters", Params.BaseTable.GetAll()))
+	log.Debug("init parameters for factory", zap.String("role", typeutil.ProxyRole), zap.Any("parameters", Params.GetAll()))
 
 	accesslog.SetupAccseeLog(&Params.ProxyCfg.AccessLog, &Params.MinioCfg)
 	log.Debug("init access log for Proxy done")

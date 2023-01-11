@@ -79,18 +79,18 @@ func filterate(key string, filters ...Filter) (string, bool) {
 
 type Manager struct {
 	sync.RWMutex
-	Dispatcher     *EventDispatcher
-	sources        map[string]Source
-	keySourceMap   map[string]string
-	overlayConfigs map[string]string
+	Dispatcher   *EventDispatcher
+	sources      map[string]Source
+	keySourceMap map[string]string // store the key to config source, example: key is A.B.C and source is file which means the A.B.C's value is from file
+	overlays     map[string]string // store the highest priority configs which modified at runtime
 }
 
 func NewManager() *Manager {
 	return &Manager{
-		Dispatcher:     NewEventDispatcher(),
-		sources:        make(map[string]Source),
-		keySourceMap:   make(map[string]string),
-		overlayConfigs: make(map[string]string),
+		Dispatcher:   NewEventDispatcher(),
+		sources:      make(map[string]Source),
+		keySourceMap: make(map[string]string),
+		overlays:     make(map[string]string),
 	}
 }
 
@@ -98,7 +98,7 @@ func (m *Manager) GetConfig(key string) (string, error) {
 	m.RLock()
 	defer m.RUnlock()
 	realKey := formatKey(key)
-	v, ok := m.overlayConfigs[realKey]
+	v, ok := m.overlays[realKey]
 	if ok {
 		if v == TombValue {
 			return "", fmt.Errorf("key not found %s", key)
@@ -110,26 +110,6 @@ func (m *Manager) GetConfig(key string) (string, error) {
 		return "", fmt.Errorf("key not found: %s", key)
 	}
 	return m.getConfigValueBySource(realKey, sourceName)
-}
-
-func (m *Manager) GetBy(filters ...Filter) map[string]string {
-	m.RLock()
-	defer m.RUnlock()
-	matchedConfig := make(map[string]string)
-
-	for key := range m.keySourceMap {
-		newkey, ok := filterate(key, filters...)
-		if ok {
-			sValue, err := m.GetConfig(key)
-			if err != nil {
-				log.Error("Get some invalid config", zap.String("key", key))
-				continue
-			}
-			matchedConfig[newkey] = sValue
-		}
-	}
-
-	return matchedConfig
 }
 
 // GetConfigs returns all the key values
@@ -147,6 +127,21 @@ func (m *Manager) GetConfigs() map[string]string {
 	}
 
 	return config
+}
+
+func (m *Manager) GetBy(filters ...Filter) map[string]string {
+	m.RLock()
+	defer m.RUnlock()
+	matchedConfig := make(map[string]string)
+
+	for key, value := range m.GetConfigs() {
+		newkey, ok := filterate(key, filters...)
+		if ok {
+			matchedConfig[newkey] = value
+		}
+	}
+
+	return matchedConfig
 }
 
 func (m *Manager) Close() {
@@ -178,24 +173,22 @@ func (m *Manager) AddSource(source Source) error {
 	return nil
 }
 
-// For compatible reason, only visiable for Test
 func (m *Manager) SetConfig(key, value string) {
 	m.Lock()
 	defer m.Unlock()
-	m.overlayConfigs[formatKey(key)] = value
+	m.overlays[formatKey(key)] = value
 }
 
-// For compatible reason, only visiable for Test
 func (m *Manager) DeleteConfig(key string) {
 	m.Lock()
 	defer m.Unlock()
-	m.overlayConfigs[formatKey(key)] = TombValue
+	m.overlays[formatKey(key)] = TombValue
 }
 
 func (m *Manager) ResetConfig(key string) {
 	m.Lock()
 	defer m.Unlock()
-	delete(m.overlayConfigs, formatKey(key))
+	delete(m.overlays, formatKey(key))
 }
 
 // Do not use it directly, only used when add source and unittests.
