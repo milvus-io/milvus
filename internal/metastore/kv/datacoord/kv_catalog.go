@@ -23,6 +23,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
+
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
@@ -571,7 +573,7 @@ func (kc *Catalog) ListIndexes(ctx context.Context) ([]*model.Index, error) {
 
 	indexes := make([]*model.Index, 0)
 	for _, value := range values {
-		meta := &datapb.FieldIndex{}
+		meta := &indexpb.FieldIndex{}
 		err = proto.Unmarshal([]byte(value), meta)
 		if err != nil {
 			log.Warn("unmarshal index info failed", zap.Error(err))
@@ -641,7 +643,7 @@ func (kc *Catalog) ListSegmentIndexes(ctx context.Context) ([]*model.SegmentInde
 
 	segIndexes := make([]*model.SegmentIndex, 0)
 	for _, value := range values {
-		segmentIndexInfo := &datapb.SegmentIndex{}
+		segmentIndexInfo := &indexpb.SegmentIndex{}
 		err = proto.Unmarshal([]byte(value), segmentIndexInfo)
 		if err != nil {
 			log.Warn("unmarshal segment index info failed", zap.Error(err))

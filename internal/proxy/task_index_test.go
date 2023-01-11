@@ -22,12 +22,13 @@ import (
 	"os"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
+
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
@@ -86,8 +87,8 @@ func TestGetIndexStateTask_Execute(t *testing.T) {
 		}, nil
 	}
 
-	datacoord.GetIndexStateFunc = func(ctx context.Context, request *datapb.GetIndexStateRequest) (*datapb.GetIndexStateResponse, error) {
-		return &datapb.GetIndexStateResponse{
+	datacoord.GetIndexStateFunc = func(ctx context.Context, request *indexpb.GetIndexStateRequest) (*indexpb.GetIndexStateResponse, error) {
+		return &indexpb.GetIndexStateResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_Success,
 			},

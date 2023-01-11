@@ -29,7 +29,6 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/metrics"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -98,7 +97,7 @@ func (m *meta) updateIndexTasksMetrics() {
 	}
 }
 
-func checkParams(fieldIndex *model.Index, req *datapb.CreateIndexRequest) bool {
+func checkParams(fieldIndex *model.Index, req *indexpb.CreateIndexRequest) bool {
 	if len(fieldIndex.TypeParams) != len(req.TypeParams) {
 		return false
 	}
@@ -137,7 +136,7 @@ func checkParams(fieldIndex *model.Index, req *datapb.CreateIndexRequest) bool {
 	return !notEq
 }
 
-func (m *meta) CanCreateIndex(req *datapb.CreateIndexRequest) (UniqueID, error) {
+func (m *meta) CanCreateIndex(req *indexpb.CreateIndexRequest) (UniqueID, error) {
 	m.RLock()
 	defer m.RUnlock()
 
@@ -170,7 +169,7 @@ func (m *meta) CanCreateIndex(req *datapb.CreateIndexRequest) (UniqueID, error) 
 }
 
 // HasSameReq determine whether there are same indexing tasks.
-func (m *meta) HasSameReq(req *datapb.CreateIndexRequest) (bool, UniqueID) {
+func (m *meta) HasSameReq(req *indexpb.CreateIndexRequest) (bool, UniqueID) {
 	m.RLock()
 	defer m.RUnlock()
 

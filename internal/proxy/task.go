@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
+
 	"go.uber.org/zap"
 
 	"github.com/golang/protobuf/proto"
@@ -1323,7 +1325,7 @@ func (lct *loadCollectionTask) Execute(ctx context.Context) (err error) {
 		return err
 	}
 	// check index
-	indexResponse, err := lct.datacoord.DescribeIndex(ctx, &datapb.DescribeIndexRequest{
+	indexResponse, err := lct.datacoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
 		CollectionID: collID,
 		IndexName:    "",
 	})
@@ -1541,7 +1543,7 @@ func (lpt *loadPartitionsTask) Execute(ctx context.Context) error {
 		return err
 	}
 	// check index
-	indexResponse, err := lpt.datacoord.DescribeIndex(ctx, &datapb.DescribeIndexRequest{
+	indexResponse, err := lpt.datacoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
 		CollectionID: collID,
 		IndexName:    "",
 	})

@@ -3,10 +3,11 @@ package model
 import (
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
+
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 )
 
 var (
@@ -27,8 +28,8 @@ var (
 		CreateTime:  1,
 	}
 
-	indexPb = &datapb.FieldIndex{
-		IndexInfo: &datapb.IndexInfo{
+	indexPb = &indexpb.FieldIndex{
+		IndexInfo: &indexpb.IndexInfo{
 			CollectionID: colID,
 			FieldID:      fieldID,
 			IndexName:    indexName,

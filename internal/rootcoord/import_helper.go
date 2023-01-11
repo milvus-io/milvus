@@ -3,6 +3,8 @@ package rootcoord
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
+
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -15,8 +17,8 @@ type IDAllocator func(count uint32) (UniqueID, UniqueID, error)
 type ImportFunc func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error)
 type MarkSegmentsDroppedFunc func(ctx context.Context, segIDs []int64) (*commonpb.Status, error)
 type GetSegmentStatesFunc func(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error)
-type DescribeIndexFunc func(ctx context.Context, colID UniqueID) (*datapb.DescribeIndexResponse, error)
-type GetSegmentIndexStateFunc func(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*datapb.SegmentIndexState, error)
+type DescribeIndexFunc func(ctx context.Context, colID UniqueID) (*indexpb.DescribeIndexResponse, error)
+type GetSegmentIndexStateFunc func(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*indexpb.SegmentIndexState, error)
 type UnsetIsImportingStateFunc func(context.Context, *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error)
 
 type ImportFactory interface {
@@ -114,13 +116,13 @@ func GetSegmentStatesWithCore(c *Core) GetSegmentStatesFunc {
 }
 
 func DescribeIndexWithCore(c *Core) DescribeIndexFunc {
-	return func(ctx context.Context, colID UniqueID) (*datapb.DescribeIndexResponse, error) {
+	return func(ctx context.Context, colID UniqueID) (*indexpb.DescribeIndexResponse, error) {
 		return c.broker.DescribeIndex(ctx, colID)
 	}
 }
 
 func GetSegmentIndexStateWithCore(c *Core) GetSegmentIndexStateFunc {
-	return func(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*datapb.SegmentIndexState, error) {
+	return func(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*indexpb.SegmentIndexState, error) {
 		return c.broker.GetSegmentIndexState(ctx, collID, indexName, segIDs)
 	}
 }

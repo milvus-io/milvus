@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
+
 	"github.com/milvus-io/milvus/internal/metastore/model"
 
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
@@ -207,10 +209,10 @@ func TestServerBroker_GetSegmentIndexState(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		c := newTestCore(withValidDataCoord())
-		c.dataCoord.(*mockDataCoord).GetSegmentIndexStateFunc = func(ctx context.Context, req *datapb.GetSegmentIndexStateRequest) (*datapb.GetSegmentIndexStateResponse, error) {
-			return &datapb.GetSegmentIndexStateResponse{
+		c.dataCoord.(*mockDataCoord).GetSegmentIndexStateFunc = func(ctx context.Context, req *indexpb.GetSegmentIndexStateRequest) (*indexpb.GetSegmentIndexStateResponse, error) {
+			return &indexpb.GetSegmentIndexStateResponse{
 				Status: succStatus(),
-				States: []*datapb.SegmentIndexState{
+				States: []*indexpb.SegmentIndexState{
 					{
 						SegmentID:  1,
 						State:      commonpb.IndexState_Finished,

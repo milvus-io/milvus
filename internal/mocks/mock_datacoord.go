@@ -29,53 +29,6 @@ func (_m *DataCoord) EXPECT() *DataCoord_Expecter {
 	return &DataCoord_Expecter{mock: &_m.Mock}
 }
 
-// AcquireSegmentLock provides a mock function with given fields: ctx, req
-func (_m *DataCoord) AcquireSegmentLock(ctx context.Context, req *datapb.AcquireSegmentLockRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
-
-	var r0 *commonpb.Status
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.AcquireSegmentLockRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*commonpb.Status)
-		}
-	}
-
-	var r1 error
-	if rf, ok := ret.Get(1).(func(context.Context, *datapb.AcquireSegmentLockRequest) error); ok {
-		r1 = rf(ctx, req)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// DataCoord_AcquireSegmentLock_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AcquireSegmentLock'
-type DataCoord_AcquireSegmentLock_Call struct {
-	*mock.Call
-}
-
-// AcquireSegmentLock is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *datapb.AcquireSegmentLockRequest
-func (_e *DataCoord_Expecter) AcquireSegmentLock(ctx interface{}, req interface{}) *DataCoord_AcquireSegmentLock_Call {
-	return &DataCoord_AcquireSegmentLock_Call{Call: _e.mock.On("AcquireSegmentLock", ctx, req)}
-}
-
-func (_c *DataCoord_AcquireSegmentLock_Call) Run(run func(ctx context.Context, req *datapb.AcquireSegmentLockRequest)) *DataCoord_AcquireSegmentLock_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*datapb.AcquireSegmentLockRequest))
-	})
-	return _c
-}
-
-func (_c *DataCoord_AcquireSegmentLock_Call) Return(_a0 *commonpb.Status, _a1 error) *DataCoord_AcquireSegmentLock_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
 // AssignSegmentID provides a mock function with given fields: ctx, req
 func (_m *DataCoord) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error) {
 	ret := _m.Called(ctx, req)
@@ -1269,53 +1222,6 @@ func (_c *DataCoord_Register_Call) Run(run func()) *DataCoord_Register_Call {
 
 func (_c *DataCoord_Register_Call) Return(_a0 error) *DataCoord_Register_Call {
 	_c.Call.Return(_a0)
-	return _c
-}
-
-// ReleaseSegmentLock provides a mock function with given fields: ctx, req
-func (_m *DataCoord) ReleaseSegmentLock(ctx context.Context, req *datapb.ReleaseSegmentLockRequest) (*commonpb.Status, error) {
-	ret := _m.Called(ctx, req)
-
-	var r0 *commonpb.Status
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ReleaseSegmentLockRequest) *commonpb.Status); ok {
-		r0 = rf(ctx, req)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*commonpb.Status)
-		}
-	}
-
-	var r1 error
-	if rf, ok := ret.Get(1).(func(context.Context, *datapb.ReleaseSegmentLockRequest) error); ok {
-		r1 = rf(ctx, req)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// DataCoord_ReleaseSegmentLock_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ReleaseSegmentLock'
-type DataCoord_ReleaseSegmentLock_Call struct {
-	*mock.Call
-}
-
-// ReleaseSegmentLock is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *datapb.ReleaseSegmentLockRequest
-func (_e *DataCoord_Expecter) ReleaseSegmentLock(ctx interface{}, req interface{}) *DataCoord_ReleaseSegmentLock_Call {
-	return &DataCoord_ReleaseSegmentLock_Call{Call: _e.mock.On("ReleaseSegmentLock", ctx, req)}
-}
-
-func (_c *DataCoord_ReleaseSegmentLock_Call) Run(run func(ctx context.Context, req *datapb.ReleaseSegmentLockRequest)) *DataCoord_ReleaseSegmentLock_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*datapb.ReleaseSegmentLockRequest))
-	})
-	return _c
-}
-
-func (_c *DataCoord_ReleaseSegmentLock_Call) Return(_a0 *commonpb.Status, _a1 error) *DataCoord_ReleaseSegmentLock_Call {
-	_c.Call.Return(_a0, _a1)
 	return _c
 }
 

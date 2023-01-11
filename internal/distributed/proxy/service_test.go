@@ -28,6 +28,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -544,14 +546,6 @@ func (m *MockDataCoord) UpdateChannelCheckpoint(ctx context.Context, req *datapb
 	return nil, nil
 }
 
-func (m *MockDataCoord) AcquireSegmentLock(ctx context.Context, req *datapb.AcquireSegmentLockRequest) (*commonpb.Status, error) {
-	return nil, nil
-}
-
-func (m *MockDataCoord) ReleaseSegmentLock(ctx context.Context, req *datapb.ReleaseSegmentLockRequest) (*commonpb.Status, error) {
-	return nil, nil
-}
-
 func (m *MockDataCoord) BroadcastAlteredCollection(ctx context.Context, req *datapb.AlterCollectionRequest) (*commonpb.Status, error) {
 	return nil, nil
 }
@@ -560,31 +554,31 @@ func (m *MockDataCoord) CheckHealth(ctx context.Context, req *milvuspb.CheckHeal
 	return nil, nil
 }
 
-func (m *MockDataCoord) CreateIndex(ctx context.Context, req *datapb.CreateIndexRequest) (*commonpb.Status, error) {
+func (m *MockDataCoord) CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error) {
 	return nil, nil
 }
 
-func (m *MockDataCoord) DropIndex(ctx context.Context, req *datapb.DropIndexRequest) (*commonpb.Status, error) {
+func (m *MockDataCoord) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
 	return nil, nil
 }
 
-func (m *MockDataCoord) GetIndexState(ctx context.Context, req *datapb.GetIndexStateRequest) (*datapb.GetIndexStateResponse, error) {
+func (m *MockDataCoord) GetIndexState(ctx context.Context, req *indexpb.GetIndexStateRequest) (*indexpb.GetIndexStateResponse, error) {
 	return nil, nil
 }
 
-func (m *MockDataCoord) GetSegmentIndexState(ctx context.Context, req *datapb.GetSegmentIndexStateRequest) (*datapb.GetSegmentIndexStateResponse, error) {
+func (m *MockDataCoord) GetSegmentIndexState(ctx context.Context, req *indexpb.GetSegmentIndexStateRequest) (*indexpb.GetSegmentIndexStateResponse, error) {
 	return nil, nil
 }
 
-func (m *MockDataCoord) GetIndexInfos(ctx context.Context, req *datapb.GetIndexInfoRequest) (*datapb.GetIndexInfoResponse, error) {
+func (m *MockDataCoord) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoRequest) (*indexpb.GetIndexInfoResponse, error) {
 	return nil, nil
 }
 
-func (m *MockDataCoord) DescribeIndex(ctx context.Context, req *datapb.DescribeIndexRequest) (*datapb.DescribeIndexResponse, error) {
+func (m *MockDataCoord) DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRequest) (*indexpb.DescribeIndexResponse, error) {
 	return nil, nil
 }
 
-func (m *MockDataCoord) GetIndexBuildProgress(ctx context.Context, req *datapb.GetIndexBuildProgressRequest) (*datapb.GetIndexBuildProgressResponse, error) {
+func (m *MockDataCoord) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetIndexBuildProgressRequest) (*indexpb.GetIndexBuildProgressResponse, error) {
 	return nil, nil
 }
 

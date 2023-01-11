@@ -27,6 +27,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
+
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
@@ -35,7 +37,6 @@ import (
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/distance"
@@ -2398,8 +2399,8 @@ func Test_loadCollectionTask_Execute(t *testing.T) {
 	})
 
 	t.Run("indexcoord describe index not success", func(t *testing.T) {
-		dc.DescribeIndexFunc = func(ctx context.Context, request *datapb.DescribeIndexRequest) (*datapb.DescribeIndexResponse, error) {
-			return &datapb.DescribeIndexResponse{
+		dc.DescribeIndexFunc = func(ctx context.Context, request *indexpb.DescribeIndexRequest) (*indexpb.DescribeIndexResponse, error) {
+			return &indexpb.DescribeIndexResponse{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,
 					Reason:    "fail reason",
@@ -2412,12 +2413,12 @@ func Test_loadCollectionTask_Execute(t *testing.T) {
 	})
 
 	t.Run("no vector index", func(t *testing.T) {
-		dc.DescribeIndexFunc = func(ctx context.Context, request *datapb.DescribeIndexRequest) (*datapb.DescribeIndexResponse, error) {
-			return &datapb.DescribeIndexResponse{
+		dc.DescribeIndexFunc = func(ctx context.Context, request *indexpb.DescribeIndexRequest) (*indexpb.DescribeIndexResponse, error) {
+			return &indexpb.DescribeIndexResponse{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_Success,
 				},
-				IndexInfos: []*datapb.IndexInfo{
+				IndexInfos: []*indexpb.IndexInfo{
 					{
 						CollectionID:         collectionID,
 						FieldID:              100,
@@ -2495,8 +2496,8 @@ func Test_loadPartitionTask_Execute(t *testing.T) {
 	})
 
 	t.Run("indexcoord describe index not success", func(t *testing.T) {
-		dc.DescribeIndexFunc = func(ctx context.Context, request *datapb.DescribeIndexRequest) (*datapb.DescribeIndexResponse, error) {
-			return &datapb.DescribeIndexResponse{
+		dc.DescribeIndexFunc = func(ctx context.Context, request *indexpb.DescribeIndexRequest) (*indexpb.DescribeIndexResponse, error) {
+			return &indexpb.DescribeIndexResponse{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,
 					Reason:    "fail reason",
@@ -2509,12 +2510,12 @@ func Test_loadPartitionTask_Execute(t *testing.T) {
 	})
 
 	t.Run("no vector index", func(t *testing.T) {
-		dc.DescribeIndexFunc = func(ctx context.Context, request *datapb.DescribeIndexRequest) (*datapb.DescribeIndexResponse, error) {
-			return &datapb.DescribeIndexResponse{
+		dc.DescribeIndexFunc = func(ctx context.Context, request *indexpb.DescribeIndexRequest) (*indexpb.DescribeIndexResponse, error) {
+			return &indexpb.DescribeIndexResponse{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_Success,
 				},
-				IndexInfos: []*datapb.IndexInfo{
+				IndexInfos: []*indexpb.IndexInfo{
 					{
 						CollectionID:         collectionID,
 						FieldID:              100,

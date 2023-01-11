@@ -75,7 +75,7 @@ func TestMeta_CanCreateIndex(t *testing.T) {
 		buildID2SegmentIndex: map[UniqueID]*model.SegmentIndex{},
 	}
 
-	req := &datapb.CreateIndexRequest{
+	req := &indexpb.CreateIndexRequest{
 		CollectionID:    collID,
 		FieldID:         fieldID,
 		IndexName:       indexName,
@@ -189,7 +189,7 @@ func TestMeta_HasSameReq(t *testing.T) {
 		buildID2SegmentIndex: map[UniqueID]*model.SegmentIndex{},
 	}
 
-	req := &datapb.CreateIndexRequest{
+	req := &indexpb.CreateIndexRequest{
 		CollectionID:    collID,
 		FieldID:         fieldID,
 		IndexName:       indexName,
