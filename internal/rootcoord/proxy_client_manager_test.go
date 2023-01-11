@@ -117,7 +117,7 @@ func TestProxyClientManager_GetProxyClients(t *testing.T) {
 	defer cli.Close()
 	assert.Nil(t, err)
 	core.etcdCli = cli
-	core.proxyCreator = func(se *sessionutil.Session) (types.Proxy, error) {
+	core.proxyCreator = func(ctx context.Context, addr string) (types.Proxy, error) {
 		return nil, errors.New("failed")
 	}
 
@@ -149,7 +149,7 @@ func TestProxyClientManager_AddProxyClient(t *testing.T) {
 	defer cli.Close()
 	core.etcdCli = cli
 
-	core.proxyCreator = func(se *sessionutil.Session) (types.Proxy, error) {
+	core.proxyCreator = func(ctx context.Context, addr string) (types.Proxy, error) {
 		return nil, errors.New("failed")
 	}
 

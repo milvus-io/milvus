@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/internal/indexnode"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
@@ -1302,7 +1303,7 @@ func TestSaveBinlogPaths(t *testing.T) {
 	/*
 		t.Run("test save dropped segment and remove channel", func(t *testing.T) {
 			spyCh := make(chan struct{}, 1)
-			svr := newTestServer(t, nil, SetSegmentManager(&spySegmentManager{spyCh: spyCh}))
+			svr := newTestServer(t, nil, WithSegmentManager(&spySegmentManager{spyCh: spyCh}))
 			defer closeTestServer(t, svr)
 
 			svr.meta.AddCollection(&collectionInfo{ID: 1})
@@ -1333,7 +1334,7 @@ func TestSaveBinlogPaths(t *testing.T) {
 func TestDropVirtualChannel(t *testing.T) {
 	t.Run("normal DropVirtualChannel", func(t *testing.T) {
 		spyCh := make(chan struct{}, 1)
-		svr := newTestServer(t, nil, SetSegmentManager(&spySegmentManager{spyCh: spyCh}))
+		svr := newTestServer(t, nil, WithSegmentManager(&spySegmentManager{spyCh: spyCh}))
 
 		defer closeTestServer(t, svr)
 
@@ -1668,7 +1669,7 @@ func TestDataNodeTtChannel(t *testing.T) {
 		helper := ServerHelper{
 			eventAfterHandleDataNodeTt: func() { ch <- struct{}{} },
 		}
-		svr := newTestServer(t, nil, SetServerHelper(helper))
+		svr := newTestServer(t, nil, WithServerHelper(helper))
 		defer closeTestServer(t, svr)
 
 		svr.meta.AddCollection(&collectionInfo{
@@ -2835,13 +2836,13 @@ func TestOptions(t *testing.T) {
 		kv.Close()
 	}()
 
-	t.Run("SetRootCoordCreator", func(t *testing.T) {
+	t.Run("WithRootCoordCreator", func(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 		var crt rootCoordCreatorFunc = func(ctx context.Context, metaRoot string, etcdClient *clientv3.Client) (types.RootCoord, error) {
 			return nil, errors.New("dummy")
 		}
-		opt := SetRootCoordCreator(crt)
+		opt := WithRootCoordCreator(crt)
 		assert.NotNil(t, opt)
 		svr.rootCoordClientCreator = nil
 		opt(svr)
@@ -2850,7 +2851,7 @@ func TestOptions(t *testing.T) {
 		assert.NotNil(t, crt)
 		assert.NotNil(t, svr.rootCoordClientCreator)
 	})
-	t.Run("SetCluster", func(t *testing.T) {
+	t.Run("WithCluster", func(t *testing.T) {
 		defer kv.RemoveWithPrefix("")
 
 		sessionManager := NewSessionManager()
@@ -2859,17 +2860,17 @@ func TestOptions(t *testing.T) {
 
 		cluster := NewCluster(sessionManager, channelManager)
 		assert.Nil(t, err)
-		opt := SetCluster(cluster)
+		opt := WithCluster(cluster)
 		assert.NotNil(t, opt)
 		svr := newTestServer(t, nil, opt)
 		defer closeTestServer(t, svr)
 
 		assert.Same(t, cluster, svr.cluster)
 	})
-	t.Run("SetDataNodeCreator", func(t *testing.T) {
+	t.Run("WithDataNodeCreator", func(t *testing.T) {
 		var target int64
 		var val = rand.Int63()
-		opt := SetDataNodeCreator(func(context.Context, string) (types.DataNode, error) {
+		opt := WithDataNodeCreator(func(context.Context, string) (types.DataNode, error) {
 			target = val
 			return nil, nil
 		})
@@ -2918,7 +2919,7 @@ func TestHandleSessionEvent(t *testing.T) {
 	assert.Nil(t, err)
 	defer cluster.Close()
 
-	svr := newTestServer(t, nil, SetCluster(cluster))
+	svr := newTestServer(t, nil, WithCluster(cluster))
 	defer closeTestServer(t, svr)
 	t.Run("handle events", func(t *testing.T) {
 		// None event
@@ -3779,6 +3780,7 @@ func testDataCoordBase(t *testing.T, opts ...Option) *Server {
 	paramtable.Get().Save(Params.CommonCfg.DataCoordTimeTick.Key, Params.CommonCfg.DataCoordTimeTick.GetValue()+strconv.Itoa(rand.Int()))
 	factory := dependency.NewDefaultFactory(true)
 
+	ctx := context.Background()
 	etcdCli, err := etcd.GetEtcdClient(
 		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
 		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
@@ -3789,17 +3791,18 @@ func testDataCoordBase(t *testing.T, opts ...Option) *Server {
 		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
 	assert.Nil(t, err)
 	sessKey := path.Join(Params.EtcdCfg.MetaRootPath.GetValue(), sessionutil.DefaultServiceRoot)
-	_, err = etcdCli.Delete(context.Background(), sessKey, clientv3.WithPrefix())
+	_, err = etcdCli.Delete(ctx, sessKey, clientv3.WithPrefix())
 	assert.Nil(t, err)
 
-	svr := CreateServer(context.TODO(), factory, opts...)
+	svr := CreateServer(ctx, factory, opts...)
 	svr.SetEtcdClient(etcdCli)
-	svr.dataNodeCreator = func(ctx context.Context, addr string) (types.DataNode, error) {
+	svr.SetDataNodeCreator(func(ctx context.Context, addr string) (types.DataNode, error) {
 		return newMockDataNodeClient(0, nil)
-	}
-	svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoord, error) {
-		return newMockRootCoordService(), nil
-	}
+	})
+	svr.SetIndexNodeCreator(func(ctx context.Context, addr string) (types.IndexNode, error) {
+		return indexnode.NewMockIndexNodeComponent(ctx)
+	})
+	svr.SetRootCoord(newMockRootCoordService())
 
 	err = svr.Init()
 	assert.Nil(t, err)

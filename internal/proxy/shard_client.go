@@ -106,7 +106,7 @@ func withShardClientCreator(creator queryNodeCreatorFunc) shardClientMgrOpt {
 	return func(s *shardClientMgr) { s.clientCreator = creator }
 }
 
-func defaultShardClientCreator(ctx context.Context, addr string) (types.QueryNode, error) {
+func defaultQueryNodeClientCreator(ctx context.Context, addr string) (types.QueryNode, error) {
 	return qnClient.NewClient(ctx, addr)
 }
 
@@ -117,7 +117,7 @@ func newShardClientMgr(options ...shardClientMgrOpt) *shardClientMgr {
 			sync.RWMutex
 			data map[UniqueID]*shardClient
 		}{data: make(map[UniqueID]*shardClient)},
-		clientCreator: defaultShardClientCreator,
+		clientCreator: defaultQueryNodeClientCreator,
 	}
 	for _, opt := range options {
 		opt(s)

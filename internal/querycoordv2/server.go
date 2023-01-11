@@ -87,8 +87,9 @@ type Server struct {
 	broker    meta.Broker
 
 	// Session
-	cluster session.Cluster
-	nodeMgr *session.NodeManager
+	cluster          session.Cluster
+	nodeMgr          *session.NodeManager
+	queryNodeCreator session.QueryNodeCreator
 
 	// Schedulers
 	jobScheduler  *job.Scheduler
@@ -120,6 +121,7 @@ func NewQueryCoord(ctx context.Context, factory dependency.Factory) (*Server, er
 		factory: factory,
 	}
 	server.UpdateStateCode(commonpb.StateCode_Abnormal)
+	server.queryNodeCreator = session.DefaultQueryNodeCreator
 	return server, nil
 }
 
@@ -186,7 +188,7 @@ func (s *Server) Init() error {
 	// Init session
 	log.Info("init session")
 	s.nodeMgr = session.NewNodeManager()
-	s.cluster = session.NewCluster(s.nodeMgr)
+	s.cluster = session.NewCluster(s.nodeMgr, s.queryNodeCreator)
 
 	// Init schedulers
 	log.Info("init schedulers")
@@ -481,6 +483,10 @@ func (s *Server) SetDataCoord(dataCoord types.DataCoord) error {
 
 	s.dataCoord = dataCoord
 	return nil
+}
+
+func (s *Server) SetQueryNodeCreator(f func(ctx context.Context, addr string) (types.QueryNode, error)) {
+	s.queryNodeCreator = f
 }
 
 func (s *Server) recover() error {

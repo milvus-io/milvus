@@ -438,6 +438,10 @@ func (node *Proxy) SetAddress(address string) {
 	node.address = address
 }
 
+func (node *Proxy) GetAddress() string {
+	return node.address
+}
+
 // SetEtcdClient sets etcd client for proxy.
 func (node *Proxy) SetEtcdClient(client *clientv3.Client) {
 	node.etcdCli = client
@@ -456,6 +460,10 @@ func (node *Proxy) SetDataCoordClient(cli types.DataCoord) {
 // SetQueryCoordClient sets QueryCoord client for proxy.
 func (node *Proxy) SetQueryCoordClient(cli types.QueryCoord) {
 	node.queryCoord = cli
+}
+
+func (node *Proxy) SetQueryNodeCreator(f func(ctx context.Context, addr string) (types.QueryNode, error)) {
+	node.shardMgr.clientCreator = f
 }
 
 // GetRateLimiter returns the rateLimiter in Proxy.

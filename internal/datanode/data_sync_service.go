@@ -61,6 +61,7 @@ type dataSyncService struct {
 	chunkManager     storage.ChunkManager
 	compactor        *compactionExecutor // reference to compaction executor
 
+	serverID      int64
 	stopOnce      sync.Once
 	flushListener chan *segmentFlushPack // chan to listen flush event
 }
@@ -77,6 +78,7 @@ func newDataSyncService(ctx context.Context,
 	flushingSegCache *Cache,
 	chunkManager storage.ChunkManager,
 	compactor *compactionExecutor,
+	serverID int64,
 ) (*dataSyncService, error) {
 
 	if channel == nil {
@@ -108,6 +110,7 @@ func newDataSyncService(ctx context.Context,
 		flushingSegCache: flushingSegCache,
 		chunkManager:     chunkManager,
 		compactor:        compactor,
+		serverID:         serverID,
 	}
 
 	if err := service.initNodes(vchan); err != nil {
@@ -127,7 +130,7 @@ type nodeConfig struct {
 	vChannelName string
 	channel      Channel // Channel info
 	allocator    allocatorInterface
-
+	serverID     int64
 	// defaults
 	parallelConfig
 }
@@ -280,6 +283,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 		allocator:    dsService.idAllocator,
 
 		parallelConfig: newParallelConfig(),
+		serverID:       dsService.serverID,
 	}
 
 	var dmStreamNode Node

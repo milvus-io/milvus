@@ -172,7 +172,7 @@ type TaskScheduler struct {
 }
 
 // NewTaskScheduler creates a new task scheduler of indexing tasks.
-func NewTaskScheduler(ctx context.Context) (*TaskScheduler, error) {
+func NewTaskScheduler(ctx context.Context) *TaskScheduler {
 	ctx1, cancel := context.WithCancel(ctx)
 	s := &TaskScheduler{
 		ctx:           ctx1,
@@ -181,7 +181,7 @@ func NewTaskScheduler(ctx context.Context) (*TaskScheduler, error) {
 	}
 	s.IndexBuildQueue = NewIndexBuildTaskQueue(s)
 
-	return s, nil
+	return s
 }
 
 func (sched *TaskScheduler) scheduleIndexBuildTask() []task {

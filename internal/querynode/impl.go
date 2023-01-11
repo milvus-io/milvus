@@ -39,7 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
-	"github.com/milvus-io/milvus/internal/util/paramtable"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -74,7 +74,7 @@ func (node *QueryNode) GetComponentStates(ctx context.Context) (*milvuspb.Compon
 	}
 	nodeID := common.NotRegisteredID
 	if node.session != nil && node.session.Registered() {
-		nodeID = paramtable.GetNodeID()
+		nodeID = node.GetSession().ServerID
 	}
 	info := &milvuspb.ComponentInfo{
 		NodeID:    nodeID,
@@ -171,7 +171,7 @@ func (node *QueryNode) getStatisticsWithDmlChannel(ctx context.Context, req *que
 	}
 
 	if !node.isHealthyOrStopping() {
-		failRet.Status.Reason = msgQueryNodeIsUnhealthy(paramtable.GetNodeID())
+		failRet.Status.Reason = msgQueryNodeIsUnhealthy(node.GetSession().ServerID)
 		return failRet, nil
 	}
 	node.wg.Add(1)
@@ -298,9 +298,10 @@ func (node *QueryNode) getStatisticsWithDmlChannel(ctx context.Context, req *que
 
 // WatchDmChannels create consumers on dmChannels to receive Incremental data，which is the important part of real-time query
 func (node *QueryNode) WatchDmChannels(ctx context.Context, in *querypb.WatchDmChannelsRequest) (*commonpb.Status, error) {
+	nodeID := node.GetSession().ServerID
 	// check node healthy
 	if !node.isHealthy() {
-		err := fmt.Errorf("query node %d is not ready", paramtable.GetNodeID())
+		err := fmt.Errorf("query node %d is not ready", nodeID)
 		status := &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
@@ -311,17 +312,17 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, in *querypb.WatchDmC
 	defer node.wg.Done()
 
 	// check target matches
-	if in.GetBase().GetTargetID() != paramtable.GetNodeID() {
+	if in.GetBase().GetTargetID() != nodeID {
 		status := &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_NodeIDNotMatch,
-			Reason:    common.WrapNodeIDNotMatchMsg(in.GetBase().GetTargetID(), paramtable.GetNodeID()),
+			Reason:    common.WrapNodeIDNotMatchMsg(in.GetBase().GetTargetID(), nodeID),
 		}
 		return status, nil
 	}
 
 	log := log.With(
 		zap.Int64("collectionID", in.GetCollectionID()),
-		zap.Int64("nodeID", paramtable.GetNodeID()),
+		zap.Int64("nodeID", nodeID),
 		zap.Strings("channels", lo.Map(in.GetInfos(), func(info *datapb.VchannelInfo, _ int) string {
 			return info.GetChannelName()
 		})),
@@ -389,8 +390,9 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, in *querypb.WatchDmC
 
 func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmChannelRequest) (*commonpb.Status, error) {
 	// check node healthy
+	nodeID := node.GetSession().ServerID
 	if !node.isHealthyOrStopping() {
-		err := fmt.Errorf("query node %d is not ready", paramtable.GetNodeID())
+		err := fmt.Errorf("query node %d is not ready", nodeID)
 		status := &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
@@ -401,10 +403,10 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 	defer node.wg.Done()
 
 	// check target matches
-	if req.GetBase().GetTargetID() != paramtable.GetNodeID() {
+	if req.GetBase().GetTargetID() != nodeID {
 		status := &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_NodeIDNotMatch,
-			Reason:    common.WrapNodeIDNotMatchMsg(req.GetBase().GetTargetID(), paramtable.GetNodeID()),
+			Reason:    common.WrapNodeIDNotMatchMsg(req.GetBase().GetTargetID(), nodeID),
 		}
 		return status, nil
 	}
@@ -450,9 +452,10 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 
 // LoadSegments load historical data into query node, historical data can be vector data or index
 func (node *QueryNode) LoadSegments(ctx context.Context, in *querypb.LoadSegmentsRequest) (*commonpb.Status, error) {
+	nodeID := node.GetSession().ServerID
 	// check node healthy
 	if !node.isHealthy() {
-		err := fmt.Errorf("query node %d is not ready", paramtable.GetNodeID())
+		err := fmt.Errorf("query node %d is not ready", nodeID)
 		status := &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
@@ -463,10 +466,10 @@ func (node *QueryNode) LoadSegments(ctx context.Context, in *querypb.LoadSegment
 	defer node.wg.Done()
 
 	// check target matches
-	if in.GetBase().GetTargetID() != paramtable.GetNodeID() {
+	if in.GetBase().GetTargetID() != nodeID {
 		status := &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_NodeIDNotMatch,
-			Reason:    common.WrapNodeIDNotMatchMsg(in.GetBase().GetTargetID(), paramtable.GetNodeID()),
+			Reason:    common.WrapNodeIDNotMatchMsg(in.GetBase().GetTargetID(), nodeID),
 		}
 		return status, nil
 	}
@@ -495,7 +498,7 @@ func (node *QueryNode) LoadSegments(ctx context.Context, in *querypb.LoadSegment
 	startTs := time.Now()
 	log.Info("loadSegmentsTask init", zap.Int64("collectionID", in.CollectionID),
 		zap.Int64s("segmentIDs", segmentIDs),
-		zap.Int64("nodeID", paramtable.GetNodeID()))
+		zap.Int64("nodeID", nodeID))
 
 	// TODO remove concurrent load segment for now, unless we solve the memory issue
 	log.Info("loadSegmentsTask start ", zap.Int64("collectionID", in.CollectionID),
@@ -511,7 +514,7 @@ func (node *QueryNode) LoadSegments(ctx context.Context, in *querypb.LoadSegment
 		return status, nil
 	}
 
-	log.Info("loadSegmentsTask Enqueue done", zap.Int64("collectionID", in.CollectionID), zap.Int64s("segmentIDs", segmentIDs), zap.Int64("nodeID", paramtable.GetNodeID()))
+	log.Info("loadSegmentsTask Enqueue done", zap.Int64("collectionID", in.CollectionID), zap.Int64s("segmentIDs", segmentIDs), zap.Int64("nodeID", nodeID))
 
 	waitFunc := func() (*commonpb.Status, error) {
 		err = task.WaitToFinish()
@@ -526,7 +529,7 @@ func (node *QueryNode) LoadSegments(ctx context.Context, in *querypb.LoadSegment
 			log.Warn(err.Error())
 			return status, nil
 		}
-		log.Info("loadSegmentsTask WaitToFinish done", zap.Int64("collectionID", in.CollectionID), zap.Int64s("segmentIDs", segmentIDs), zap.Int64("nodeID", paramtable.GetNodeID()))
+		log.Info("loadSegmentsTask WaitToFinish done", zap.Int64("collectionID", in.CollectionID), zap.Int64s("segmentIDs", segmentIDs), zap.Int64("nodeID", nodeID))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		}, nil
@@ -538,7 +541,7 @@ func (node *QueryNode) LoadSegments(ctx context.Context, in *querypb.LoadSegment
 // ReleaseCollection clears all data related to this collection on the querynode
 func (node *QueryNode) ReleaseCollection(ctx context.Context, in *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
 	if !node.isHealthyOrStopping() {
-		err := fmt.Errorf("query node %d is not ready", paramtable.GetNodeID())
+		err := fmt.Errorf("query node %d is not ready", node.GetSession().ServerID)
 		status := &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
@@ -586,7 +589,7 @@ func (node *QueryNode) ReleaseCollection(ctx context.Context, in *querypb.Releas
 // ReleasePartitions clears all data related to this partition on the querynode
 func (node *QueryNode) ReleasePartitions(ctx context.Context, in *querypb.ReleasePartitionsRequest) (*commonpb.Status, error) {
 	if !node.isHealthyOrStopping() {
-		err := fmt.Errorf("query node %d is not ready", paramtable.GetNodeID())
+		err := fmt.Errorf("query node %d is not ready", node.GetSession().ServerID)
 		status := &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
@@ -633,8 +636,9 @@ func (node *QueryNode) ReleasePartitions(ctx context.Context, in *querypb.Releas
 
 // ReleaseSegments remove the specified segments from query node according segmentIDs, partitionIDs, and collectionID
 func (node *QueryNode) ReleaseSegments(ctx context.Context, in *querypb.ReleaseSegmentsRequest) (*commonpb.Status, error) {
+	nodeID := node.GetSession().ServerID
 	if !node.isHealthyOrStopping() {
-		err := fmt.Errorf("query node %d is not ready", paramtable.GetNodeID())
+		err := fmt.Errorf("query node %d is not ready", nodeID)
 		status := &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
@@ -645,10 +649,10 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, in *querypb.ReleaseS
 	defer node.wg.Done()
 
 	// check target matches
-	if in.GetBase().GetTargetID() != paramtable.GetNodeID() {
+	if in.GetBase().GetTargetID() != nodeID {
 		status := &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_NodeIDNotMatch,
-			Reason:    common.WrapNodeIDNotMatchMsg(in.GetBase().GetTargetID(), paramtable.GetNodeID()),
+			Reason:    common.WrapNodeIDNotMatchMsg(in.GetBase().GetTargetID(), nodeID),
 		}
 		return status, nil
 	}
@@ -683,7 +687,7 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, in *querypb.ReleaseS
 // GetSegmentInfo returns segment information of the collection on the queryNode, and the information includes memSize, numRow, indexName, indexID ...
 func (node *QueryNode) GetSegmentInfo(ctx context.Context, in *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
 	if !node.isHealthyOrStopping() {
-		err := fmt.Errorf("query node %d is not ready", paramtable.GetNodeID())
+		err := fmt.Errorf("query node %d is not ready", node.GetSession().ServerID)
 		res := &querypb.GetSegmentInfoResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -731,13 +735,14 @@ func filterSegmentInfo(segmentInfos []*querypb.SegmentInfo, segmentIDs map[int64
 
 // Search performs replica search tasks.
 func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error) {
-	if !node.IsStandAlone && req.GetReq().GetBase().GetTargetID() != paramtable.GetNodeID() {
+	nodeID := node.GetSession().ServerID
+	if !node.IsStandAlone && req.GetReq().GetBase().GetTargetID() != nodeID {
 		return &internalpb.SearchResults{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_NodeIDNotMatch,
 				Reason: fmt.Sprintf("QueryNode %d can't serve, recovering: %s",
-					paramtable.GetNodeID(),
-					common.WrapNodeIDNotMatchMsg(req.GetReq().GetBase().GetTargetID(), paramtable.GetNodeID())),
+					nodeID,
+					common.WrapNodeIDNotMatchMsg(req.GetReq().GetBase().GetTargetID(), nodeID)),
 			},
 		}, nil
 	}
@@ -802,13 +807,14 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 		tr.CtxElapse(ctx, "search done in all shards")
 		rateCol.Add(metricsinfo.NQPerSecond, float64(req.GetReq().GetNq()))
 		rateCol.Add(metricsinfo.SearchThroughput, float64(proto.Size(req)))
-		metrics.QueryNodeExecuteCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.SearchLabel).Add(float64(proto.Size(req)))
+		metrics.QueryNodeExecuteCounter.WithLabelValues(strconv.FormatInt(nodeID, 10), metrics.SearchLabel).Add(float64(proto.Size(req)))
 	}
 	return ret, nil
 }
 
 func (node *QueryNode) searchWithDmlChannel(ctx context.Context, req *querypb.SearchRequest, dmlChannel string) (*internalpb.SearchResults, error) {
-	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.TotalLabel).Inc()
+	nodeID := node.GetSession().ServerID
+	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(nodeID), metrics.SearchLabel, metrics.TotalLabel).Inc()
 	failRet := &internalpb.SearchResults{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -817,11 +823,11 @@ func (node *QueryNode) searchWithDmlChannel(ctx context.Context, req *querypb.Se
 
 	defer func() {
 		if failRet.Status.ErrorCode != commonpb.ErrorCode_Success {
-			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.FailLabel).Inc()
+			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(nodeID), metrics.SearchLabel, metrics.FailLabel).Inc()
 		}
 	}()
 	if !node.isHealthyOrStopping() {
-		failRet.Status.Reason = msgQueryNodeIsUnhealthy(paramtable.GetNodeID())
+		failRet.Status.Reason = msgQueryNodeIsUnhealthy(nodeID)
 		return failRet, nil
 	}
 	node.wg.Add(1)
@@ -871,13 +877,13 @@ func (node *QueryNode) searchWithDmlChannel(ctx context.Context, req *querypb.Se
 		tr.CtxElapse(ctx, fmt.Sprintf("do subsearch done, vChannel = %s, segmentIDs = %v", dmlChannel, req.GetSegmentIDs()))
 
 		failRet.Status.ErrorCode = commonpb.ErrorCode_Success
-		metrics.QueryNodeSQLatencyInQueue.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+		metrics.QueryNodeSQLatencyInQueue.WithLabelValues(fmt.Sprint(nodeID),
 			metrics.SearchLabel).Observe(float64(historicalTask.queueDur.Milliseconds()))
-		metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+		metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(nodeID),
 			metrics.SearchLabel).Observe(float64(historicalTask.reduceDur.Milliseconds()))
 		latency := tr.ElapseSpan()
-		metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.FromLeader).Observe(float64(latency.Milliseconds()))
-		metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.SuccessLabel).Inc()
+		metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(nodeID), metrics.SearchLabel, metrics.FromLeader).Observe(float64(latency.Milliseconds()))
+		metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(nodeID), metrics.SearchLabel, metrics.SuccessLabel).Inc()
 		return historicalTask.Ret, nil
 	}
 
@@ -918,9 +924,9 @@ func (node *QueryNode) searchWithDmlChannel(ctx context.Context, req *querypb.Se
 		if err != nil {
 			return err
 		}
-		metrics.QueryNodeSQLatencyInQueue.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+		metrics.QueryNodeSQLatencyInQueue.WithLabelValues(fmt.Sprint(nodeID),
 			metrics.SearchLabel).Observe(float64(streamingTask.queueDur.Milliseconds()))
-		metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+		metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(nodeID),
 			metrics.SearchLabel).Observe(float64(streamingTask.reduceDur.Milliseconds()))
 		streamingResult = streamingTask.Ret
 		return nil
@@ -946,16 +952,17 @@ func (node *QueryNode) searchWithDmlChannel(ctx context.Context, req *querypb.Se
 	tr.CtxElapse(ctx, fmt.Sprintf("do reduce done in shard cluster, vChannel = %s, segmentIDs = %v", dmlChannel, req.GetSegmentIDs()))
 
 	failRet.Status.ErrorCode = commonpb.ErrorCode_Success
-	metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.Leader).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.SuccessLabel).Inc()
-	metrics.QueryNodeSearchNQ.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(req.Req.GetNq()))
-	metrics.QueryNodeSearchTopK.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(req.Req.GetTopk()))
+	metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(nodeID), metrics.SearchLabel, metrics.Leader).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(nodeID), metrics.SearchLabel, metrics.SuccessLabel).Inc()
+	metrics.QueryNodeSearchNQ.WithLabelValues(fmt.Sprint(nodeID)).Observe(float64(req.Req.GetNq()))
+	metrics.QueryNodeSearchTopK.WithLabelValues(fmt.Sprint(nodeID)).Observe(float64(req.Req.GetTopk()))
 
 	return ret, nil
 }
 
 func (node *QueryNode) queryWithDmlChannel(ctx context.Context, req *querypb.QueryRequest, dmlChannel string) (*internalpb.RetrieveResults, error) {
-	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.TotalLabel).Inc()
+	nodeID := node.GetSession().ServerID
+	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(nodeID), metrics.QueryLabel, metrics.TotalLabel).Inc()
 	failRet := &internalpb.RetrieveResults{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -964,11 +971,11 @@ func (node *QueryNode) queryWithDmlChannel(ctx context.Context, req *querypb.Que
 
 	defer func() {
 		if failRet.Status.ErrorCode != commonpb.ErrorCode_Success {
-			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.FailLabel).Inc()
+			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(nodeID), metrics.SearchLabel, metrics.FailLabel).Inc()
 		}
 	}()
 	if !node.isHealthyOrStopping() {
-		failRet.Status.Reason = msgQueryNodeIsUnhealthy(paramtable.GetNodeID())
+		failRet.Status.Reason = msgQueryNodeIsUnhealthy(nodeID)
 		return failRet, nil
 	}
 	node.wg.Add(1)
@@ -1023,13 +1030,13 @@ func (node *QueryNode) queryWithDmlChannel(ctx context.Context, req *querypb.Que
 			traceID, req.GetFromShardLeader(), dmlChannel, req.GetSegmentIDs()))
 
 		failRet.Status.ErrorCode = commonpb.ErrorCode_Success
-		metrics.QueryNodeSQLatencyInQueue.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+		metrics.QueryNodeSQLatencyInQueue.WithLabelValues(fmt.Sprint(nodeID),
 			metrics.QueryLabel).Observe(float64(queryTask.queueDur.Milliseconds()))
-		metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+		metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(nodeID),
 			metrics.QueryLabel).Observe(float64(queryTask.reduceDur.Milliseconds()))
 		latency := tr.ElapseSpan()
-		metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.FromLeader).Observe(float64(latency.Milliseconds()))
-		metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.SuccessLabel).Inc()
+		metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(nodeID), metrics.QueryLabel, metrics.FromLeader).Observe(float64(latency.Milliseconds()))
+		metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(nodeID), metrics.QueryLabel, metrics.SuccessLabel).Inc()
 		return queryTask.Ret, nil
 	}
 
@@ -1060,9 +1067,9 @@ func (node *QueryNode) queryWithDmlChannel(ctx context.Context, req *querypb.Que
 		if err != nil {
 			return err
 		}
-		metrics.QueryNodeSQLatencyInQueue.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+		metrics.QueryNodeSQLatencyInQueue.WithLabelValues(fmt.Sprint(nodeID),
 			metrics.QueryLabel).Observe(float64(streamingTask.queueDur.Milliseconds()))
-		metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+		metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(nodeID),
 			metrics.QueryLabel).Observe(float64(streamingTask.reduceDur.Milliseconds()))
 		streamingResult = streamingTask.Ret
 		return nil
@@ -1094,8 +1101,8 @@ func (node *QueryNode) queryWithDmlChannel(ctx context.Context, req *querypb.Que
 
 	failRet.Status.ErrorCode = commonpb.ErrorCode_Success
 	latency := tr.ElapseSpan()
-	metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.Leader).Observe(float64(latency.Milliseconds()))
-	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.QueryLabel, metrics.SuccessLabel).Inc()
+	metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(nodeID), metrics.QueryLabel, metrics.Leader).Observe(float64(latency.Milliseconds()))
+	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(nodeID), metrics.QueryLabel, metrics.SuccessLabel).Inc()
 	return ret, nil
 }
 
@@ -1108,13 +1115,14 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 		zap.Uint64("guaranteeTimestamp", req.Req.GetGuaranteeTimestamp()),
 		zap.Uint64("timeTravel", req.GetReq().GetTravelTimestamp()))
 
-	if req.GetReq().GetBase().GetTargetID() != paramtable.GetNodeID() {
+	nodeID := node.GetSession().ServerID
+	if req.GetReq().GetBase().GetTargetID() != nodeID {
 		return &internalpb.RetrieveResults{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_NodeIDNotMatch,
 				Reason: fmt.Sprintf("QueryNode %d can't serve, recovering: %s",
-					paramtable.GetNodeID(),
-					common.WrapNodeIDNotMatchMsg(req.GetReq().GetBase().GetTargetID(), paramtable.GetNodeID())),
+					nodeID,
+					common.WrapNodeIDNotMatchMsg(req.GetReq().GetBase().GetTargetID(), nodeID)),
 			},
 		}, nil
 	}
@@ -1175,7 +1183,7 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 
 	if !req.FromShardLeader {
 		rateCol.Add(metricsinfo.NQPerSecond, 1)
-		metrics.QueryNodeExecuteCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.QueryLabel).Add(float64(proto.Size(req)))
+		metrics.QueryNodeExecuteCounter.WithLabelValues(strconv.FormatInt(nodeID, 10), metrics.QueryLabel).Add(float64(proto.Size(req)))
 	}
 	return ret, nil
 }
@@ -1185,7 +1193,7 @@ func (node *QueryNode) SyncReplicaSegments(ctx context.Context, req *querypb.Syn
 	if !node.isHealthy() {
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    msgQueryNodeIsUnhealthy(paramtable.GetNodeID()),
+			Reason:    msgQueryNodeIsUnhealthy(node.GetSession().ServerID),
 		}, nil
 	}
 	node.wg.Add(1)
@@ -1209,16 +1217,17 @@ func (node *QueryNode) SyncReplicaSegments(ctx context.Context, req *querypb.Syn
 
 // ShowConfigurations returns the configurations of queryNode matching req.Pattern
 func (node *QueryNode) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
+	nodeID := node.GetSession().ServerID
 	if !node.isHealthyOrStopping() {
 		log.Warn("QueryNode.ShowConfigurations failed",
-			zap.Int64("nodeID", paramtable.GetNodeID()),
+			zap.Int64("nodeId", nodeID),
 			zap.String("req", req.Pattern),
-			zap.Error(errQueryNodeIsUnhealthy(paramtable.GetNodeID())))
+			zap.Error(errQueryNodeIsUnhealthy(nodeID)))
 
 		return &internalpb.ShowConfigurationsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    msgQueryNodeIsUnhealthy(paramtable.GetNodeID()),
+				Reason:    msgQueryNodeIsUnhealthy(nodeID),
 			},
 			Configuations: nil,
 		}, nil
@@ -1246,16 +1255,17 @@ func (node *QueryNode) ShowConfigurations(ctx context.Context, req *internalpb.S
 
 // GetMetrics return system infos of the query node, such as total memory, memory usage, cpu usage ...
 func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	nodeID := node.GetSession().ServerID
 	if !node.isHealthyOrStopping() {
 		log.Ctx(ctx).Warn("QueryNode.GetMetrics failed",
-			zap.Int64("nodeID", paramtable.GetNodeID()),
+			zap.Int64("nodeId", nodeID),
 			zap.String("req", req.Request),
-			zap.Error(errQueryNodeIsUnhealthy(paramtable.GetNodeID())))
+			zap.Error(errQueryNodeIsUnhealthy(nodeID)))
 
 		return &milvuspb.GetMetricsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    msgQueryNodeIsUnhealthy(paramtable.GetNodeID()),
+				Reason:    msgQueryNodeIsUnhealthy(nodeID),
 			},
 			Response: "",
 		}, nil
@@ -1266,7 +1276,7 @@ func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 	metricType, err := metricsinfo.ParseMetricType(req.Request)
 	if err != nil {
 		log.Ctx(ctx).Warn("QueryNode.GetMetrics failed to parse metric type",
-			zap.Int64("nodeID", paramtable.GetNodeID()),
+			zap.Int64("nodeId", nodeID),
 			zap.String("req", req.Request),
 			zap.Error(err))
 
@@ -1282,7 +1292,7 @@ func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 		queryNodeMetrics, err := getSystemInfoMetrics(ctx, req, node)
 		if err != nil {
 			log.Ctx(ctx).Warn("QueryNode.GetMetrics failed",
-				zap.Int64("nodeID", paramtable.GetNodeID()),
+				zap.Int64("nodeId", nodeID),
 				zap.String("req", req.Request),
 				zap.String("metricType", metricType),
 				zap.Error(err))
@@ -1297,7 +1307,7 @@ func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 	}
 
 	log.Ctx(ctx).RatedDebug(60, "QueryNode.GetMetrics failed, request metric type is not implemented yet",
-		zap.Int64("nodeID", paramtable.GetNodeID()),
+		zap.Int64("nodeId", nodeID),
 		zap.String("req", req.Request),
 		zap.String("metricType", metricType))
 
@@ -1311,18 +1321,19 @@ func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 }
 
 func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.GetDataDistributionRequest) (*querypb.GetDataDistributionResponse, error) {
+	nodeID := node.GetSession().ServerID
 	log := log.With(
 		zap.Int64("msg-id", req.GetBase().GetMsgID()),
-		zap.Int64("node-id", paramtable.GetNodeID()),
+		zap.Int64("node-id", nodeID),
 	)
 	if !node.isHealthyOrStopping() {
 		log.Warn("QueryNode.GetMetrics failed",
-			zap.Error(errQueryNodeIsUnhealthy(paramtable.GetNodeID())))
+			zap.Error(errQueryNodeIsUnhealthy(nodeID)))
 
 		return &querypb.GetDataDistributionResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    msgQueryNodeIsUnhealthy(paramtable.GetNodeID()),
+				Reason:    msgQueryNodeIsUnhealthy(nodeID),
 			},
 		}, nil
 	}
@@ -1330,12 +1341,12 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 	defer node.wg.Done()
 
 	// check target matches
-	if req.GetBase().GetTargetID() != paramtable.GetNodeID() {
+	if req.GetBase().GetTargetID() != nodeID {
 		status := &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_NodeIDNotMatch,
 			Reason: fmt.Sprintf("QueryNode %d can't serve, recovering: %s",
-				paramtable.GetNodeID(),
-				common.WrapNodeIDNotMatchMsg(req.GetBase().GetTargetID(), paramtable.GetNodeID())),
+				nodeID,
+				common.WrapNodeIDNotMatchMsg(req.GetBase().GetTargetID(), nodeID)),
 		}
 		return &querypb.GetDataDistributionResponse{Status: status}, nil
 	}
@@ -1397,7 +1408,7 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 
 	return &querypb.GetDataDistributionResponse{
 		Status:      &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
-		NodeID:      paramtable.GetNodeID(),
+		NodeID:      nodeID,
 		Segments:    segmentVersionInfos,
 		Channels:    channelVersionInfos,
 		LeaderViews: leaderViews,
@@ -1406,9 +1417,10 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 
 func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDistributionRequest) (*commonpb.Status, error) {
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", req.GetCollectionID()), zap.String("channel", req.GetChannel()))
+	nodeID := node.GetSession().ServerID
 	// check node healthy
 	if !node.isHealthyOrStopping() {
-		err := fmt.Errorf("query node %d is not ready", paramtable.GetNodeID())
+		err := fmt.Errorf("query node %d is not ready", nodeID)
 		status := &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    err.Error(),
@@ -1419,11 +1431,11 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 	defer node.wg.Done()
 
 	// check target matches
-	if req.GetBase().GetTargetID() != paramtable.GetNodeID() {
-		log.Warn("failed to do match target id when sync ", zap.Int64("expect", req.GetBase().GetTargetID()), zap.Int64("actual", node.session.ServerID))
+	if req.GetBase().GetTargetID() != nodeID {
+		log.Warn("failed to do match target id when sync ", zap.Int64("expect", req.GetBase().GetTargetID()), zap.Int64("actual", nodeID))
 		status := &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_NodeIDNotMatch,
-			Reason:    common.WrapNodeIDNotMatchMsg(req.GetBase().GetTargetID(), paramtable.GetNodeID()),
+			Reason:    common.WrapNodeIDNotMatchMsg(req.GetBase().GetTargetID(), nodeID),
 		}
 		return status, nil
 	}
@@ -1465,4 +1477,18 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 		ErrorCode: commonpb.ErrorCode_Success,
 		Reason:    "",
 	}, nil
+}
+
+// to fix data race
+func (node *QueryNode) SetSession(session *sessionutil.Session) {
+	node.sessionMu.Lock()
+	defer node.sessionMu.Unlock()
+	node.session = session
+}
+
+// to fix data race
+func (node *QueryNode) GetSession() *sessionutil.Session {
+	node.sessionMu.Lock()
+	defer node.sessionMu.Unlock()
+	return node.session
 }

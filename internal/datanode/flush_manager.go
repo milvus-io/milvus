@@ -801,7 +801,7 @@ func flushNotifyFunc(dsService *dataSyncService, opts ...retry.Option) notifyMet
 			Base: commonpbutil.NewMsgBase(
 				commonpbutil.WithMsgType(0),
 				commonpbutil.WithMsgID(0),
-				commonpbutil.WithSourceID(paramtable.GetNodeID()),
+				commonpbutil.WithSourceID(dsService.serverID),
 			),
 			SegmentID:           pack.segmentID,
 			CollectionID:        dsService.collectionID,

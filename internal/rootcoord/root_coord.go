@@ -36,7 +36,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/common"
-	pnc "github.com/milvus-io/milvus/internal/distributed/proxy/client"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
@@ -150,19 +149,7 @@ func NewCore(c context.Context, factory dependency.Factory) (*Core, error) {
 	}
 
 	core.UpdateStateCode(commonpb.StateCode_Abnormal)
-	core.proxyCreator = func(se *sessionutil.Session) (types.Proxy, error) {
-		cli, err := pnc.NewClient(c, se.Address)
-		if err != nil {
-			return nil, err
-		}
-		if err := cli.Init(); err != nil {
-			return nil, err
-		}
-		if err := cli.Start(); err != nil {
-			return nil, err
-		}
-		return cli, nil
-	}
+	core.SetProxyCreator(DefaultProxyCreator)
 
 	return core, nil
 }
@@ -263,23 +250,21 @@ func (c *Core) tsLoop() {
 	}
 }
 
-func (c *Core) SetDataCoord(ctx context.Context, s types.DataCoord) error {
-	if err := s.Init(); err != nil {
-		return err
-	}
-	if err := s.Start(); err != nil {
-		return err
+func (c *Core) SetProxyCreator(f func(ctx context.Context, addr string) (types.Proxy, error)) {
+	c.proxyCreator = f
+}
+
+func (c *Core) SetDataCoord(s types.DataCoord) error {
+	if s == nil {
+		return errors.New("null DataCoord interface")
 	}
 	c.dataCoord = s
 	return nil
 }
 
 func (c *Core) SetQueryCoord(s types.QueryCoord) error {
-	if err := s.Init(); err != nil {
-		return err
-	}
-	if err := s.Start(); err != nil {
-		return err
+	if s == nil {
+		return errors.New("null QueryCoord interface")
 	}
 	c.queryCoord = s
 	return nil

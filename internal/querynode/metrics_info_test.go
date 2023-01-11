@@ -48,10 +48,10 @@ func TestGetSystemInfoMetrics(t *testing.T) {
 		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
 	assert.NoError(t, err)
 	defer etcdCli.Close()
-	node.session = sessionutil.NewSession(node.queryNodeLoopCtx, Params.EtcdCfg.MetaRootPath.GetValue(), etcdCli)
+	node.SetSession(sessionutil.NewSession(node.queryNodeLoopCtx, Params.EtcdCfg.MetaRootPath.GetValue(), etcdCli))
 
 	req := &milvuspb.GetMetricsRequest{
-		Base: genCommonMsgBase(commonpb.MsgType_WatchQueryChannels, node.session.ServerID),
+		Base: genCommonMsgBase(commonpb.MsgType_WatchQueryChannels, node.GetSession().ServerID),
 	}
 	resp, err := getSystemInfoMetrics(ctx, req, node)
 	assert.NoError(t, err)

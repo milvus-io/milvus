@@ -157,8 +157,7 @@ func newTask(cancelStage fakeTaskState, reterror map[fakeTaskState]error, expect
 func TestIndexTaskScheduler(t *testing.T) {
 	Params.Init()
 
-	scheduler, err := NewTaskScheduler(context.TODO())
-	assert.Nil(t, err)
+	scheduler := NewTaskScheduler(context.TODO())
 	scheduler.Start()
 
 	tasks := make([]task, 0)
@@ -188,15 +187,14 @@ func TestIndexTaskScheduler(t *testing.T) {
 	assert.Equal(t, tasks[len(tasks)-1].GetState(), tasks[len(tasks)-1].(*fakeTask).expectedState)
 	assert.Equal(t, tasks[len(tasks)-1].Ctx().(*stagectx).curstate, fakeTaskState(fakeTaskSavedIndexes))
 
-	scheduler, err = NewTaskScheduler(context.TODO())
-	assert.Nil(t, err)
+	scheduler = NewTaskScheduler(context.TODO())
 	tasks = make([]task, 0, 1024)
 	for i := 0; i < 1024; i++ {
 		tasks = append(tasks, newTask(fakeTaskSavedIndexes, nil, commonpb.IndexState_Finished))
 		assert.Nil(t, scheduler.IndexBuildQueue.Enqueue(tasks[len(tasks)-1]))
 	}
 	failTask := newTask(fakeTaskSavedIndexes, nil, commonpb.IndexState_Finished)
-	err = scheduler.IndexBuildQueue.Enqueue(failTask)
+	err := scheduler.IndexBuildQueue.Enqueue(failTask)
 	assert.Error(t, err)
 	failTask.Reset()
 

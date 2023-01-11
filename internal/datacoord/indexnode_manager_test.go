@@ -31,7 +31,7 @@ import (
 )
 
 func TestIndexNodeManager_AddNode(t *testing.T) {
-	nm := NewNodeManager(context.Background())
+	nm := NewNodeManager(context.Background(), defaultIndexNodeCreatorFunc)
 	nodeID, client := nm.PeekClient(&model.SegmentIndex{})
 	assert.Equal(t, int64(-1), nodeID)
 	assert.Nil(t, client)
@@ -255,7 +255,7 @@ func TestIndexNodeManager_ClientSupportDisk(t *testing.T) {
 }
 
 func TestNodeManager_StoppingNode(t *testing.T) {
-	nm := NewNodeManager(context.Background())
+	nm := NewNodeManager(context.Background(), defaultIndexNodeCreatorFunc)
 	err := nm.AddNode(1, "indexnode-1")
 	assert.NoError(t, err)
 	assert.Equal(t, 1, len(nm.GetAllClients()))

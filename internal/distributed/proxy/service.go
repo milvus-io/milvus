@@ -48,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
@@ -378,7 +379,7 @@ func (s *Server) init() error {
 	log.Debug("init RootCoord client for Proxy done")
 
 	log.Debug("Proxy wait for RootCoord to be healthy")
-	if err := funcutil.WaitForComponentHealthy(s.ctx, s.rootCoordClient, "RootCoord", 1000000, time.Millisecond*200); err != nil {
+	if err := componentutil.WaitForComponentHealthy(s.ctx, s.rootCoordClient, "RootCoord", 1000000, time.Millisecond*200); err != nil {
 		log.Warn("Proxy failed to wait for RootCoord to be healthy", zap.Error(err))
 		return err
 	}
@@ -407,7 +408,7 @@ func (s *Server) init() error {
 	log.Debug("init DataCoord client for Proxy done")
 
 	log.Debug("Proxy wait for DataCoord to be healthy")
-	if err := funcutil.WaitForComponentHealthy(s.ctx, s.dataCoordClient, "DataCoord", 1000000, time.Millisecond*200); err != nil {
+	if err := componentutil.WaitForComponentHealthy(s.ctx, s.dataCoordClient, "DataCoord", 1000000, time.Millisecond*200); err != nil {
 		log.Warn("Proxy failed to wait for DataCoord to be healthy", zap.Error(err))
 		return err
 	}
@@ -436,7 +437,7 @@ func (s *Server) init() error {
 	log.Debug("init QueryCoord client for Proxy done")
 
 	log.Debug("Proxy wait for QueryCoord to be healthy")
-	if err := funcutil.WaitForComponentHealthy(s.ctx, s.queryCoordClient, "QueryCoord", 1000000, time.Millisecond*200); err != nil {
+	if err := componentutil.WaitForComponentHealthy(s.ctx, s.queryCoordClient, "QueryCoord", 1000000, time.Millisecond*200); err != nil {
 		log.Warn("Proxy failed to wait for QueryCoord to be healthy", zap.Error(err))
 		return err
 	}

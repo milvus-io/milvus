@@ -121,7 +121,7 @@ func TestServer_CreateIndex(t *testing.T) {
 				Value: "DISKANN",
 			},
 		}
-		s.indexNodeManager = NewNodeManager(ctx)
+		s.indexNodeManager = NewNodeManager(ctx, defaultIndexNodeCreatorFunc)
 		resp, err := s.CreateIndex(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())

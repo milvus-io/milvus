@@ -18,10 +18,7 @@ func NewMockIndexNodeComponent(ctx context.Context) (types.IndexNodeComponent, e
 		chunkMgr: &mockChunkmgr{},
 	}
 
-	node, err := NewIndexNode(ctx, factory)
-	if err != nil {
-		return nil, err
-	}
+	node := NewIndexNode(ctx, factory)
 
 	startEmbedEtcd()
 	etcdCli := getEtcdClient()

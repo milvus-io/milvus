@@ -89,7 +89,7 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 		node.metaReplica.removeSegment(defaultSegmentID, segmentTypeSealed)
 
 		req := &querypb.LoadSegmentsRequest{
-			Base:   genCommonMsgBase(commonpb.MsgType_LoadSegments, node.session.ServerID),
+			Base:   genCommonMsgBase(commonpb.MsgType_LoadSegments, node.GetSession().ServerID),
 			Schema: schema,
 			Infos: []*querypb.SegmentLoadInfo{
 				{
@@ -117,7 +117,7 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 		node.metaReplica.removeSegment(defaultSegmentID, segmentTypeSealed)
 
 		req := &querypb.LoadSegmentsRequest{
-			Base:   genCommonMsgBase(commonpb.MsgType_LoadSegments, node.session.ServerID),
+			Base:   genCommonMsgBase(commonpb.MsgType_LoadSegments, node.GetSession().ServerID),
 			Schema: schema,
 			Infos: []*querypb.SegmentLoadInfo{
 				{
@@ -210,7 +210,7 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 			CollectionID: defaultCollectionID,
 		}
 		req := &querypb.LoadSegmentsRequest{
-			Base:   genCommonMsgBase(commonpb.MsgType_LoadSegments, node.session.ServerID),
+			Base:   genCommonMsgBase(commonpb.MsgType_LoadSegments, node.GetSession().ServerID),
 			Schema: schema,
 			Infos:  []*querypb.SegmentLoadInfo{segmentLoadInfo},
 			DeltaPositions: []*internalpb.MsgPosition{
@@ -305,7 +305,7 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 		node.metaReplica.removeSegment(defaultSegmentID, segmentTypeSealed)
 
 		req := &querypb.LoadSegmentsRequest{
-			Base:   genCommonMsgBase(commonpb.MsgType_LoadSegments, node.session.ServerID),
+			Base:   genCommonMsgBase(commonpb.MsgType_LoadSegments, node.GetSession().ServerID),
 			Schema: schema,
 			Infos: []*querypb.SegmentLoadInfo{
 				{
@@ -360,7 +360,7 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 		segmentID1 := defaultSegmentID
 		segmentID2 := defaultSegmentID + 1
 		req := &querypb.LoadSegmentsRequest{
-			Base:   genCommonMsgBase(commonpb.MsgType_LoadSegments, node.session.ServerID),
+			Base:   genCommonMsgBase(commonpb.MsgType_LoadSegments, node.GetSession().ServerID),
 			Schema: schema,
 			Infos: []*querypb.SegmentLoadInfo{
 				{
@@ -428,7 +428,7 @@ func TestTask_loadSegmentsTaskLoadDelta(t *testing.T) {
 			CollectionID: defaultCollectionID,
 		}
 		loadReq := &querypb.LoadSegmentsRequest{
-			Base:   genCommonMsgBase(commonpb.MsgType_LoadSegments, node.session.ServerID),
+			Base:   genCommonMsgBase(commonpb.MsgType_LoadSegments, node.GetSession().ServerID),
 			Schema: schema,
 			Infos:  []*querypb.SegmentLoadInfo{segmentLoadInfo},
 			DeltaPositions: []*internalpb.MsgPosition{
@@ -458,7 +458,7 @@ func TestTask_loadSegmentsTaskLoadDelta(t *testing.T) {
 
 		// load second segments with same channel
 		loadReq = &querypb.LoadSegmentsRequest{
-			Base:   genCommonMsgBase(commonpb.MsgType_LoadSegments, node.session.ServerID),
+			Base:   genCommonMsgBase(commonpb.MsgType_LoadSegments, node.GetSession().ServerID),
 			Schema: schema,
 			Infos: []*querypb.SegmentLoadInfo{
 				{

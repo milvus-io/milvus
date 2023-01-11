@@ -27,12 +27,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/stretchr/testify/assert"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type MockDataCoord struct {
 	states                    *milvuspb.ComponentStates
 	status                    *commonpb.Status
@@ -98,6 +98,15 @@ func (*MockDataCoord) SetAddress(address string) {
 }
 
 func (m *MockDataCoord) SetEtcdClient(etcdClient *clientv3.Client) {
+}
+
+func (m *MockDataCoord) SetRootCoord(rootCoord types.RootCoord) {
+}
+
+func (m *MockDataCoord) SetDataNodeCreator(func(context.Context, string) (types.DataNode, error)) {
+}
+
+func (m *MockDataCoord) SetIndexNodeCreator(func(context.Context, string) (types.IndexNode, error)) {
 }
 
 func (m *MockDataCoord) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
@@ -262,7 +271,6 @@ func (m *MockDataCoord) DropIndex(ctx context.Context, req *indexpb.DropIndexReq
 	return m.dropIndexResp, m.err
 }
 
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 func Test_NewServer(t *testing.T) {
 	paramtable.Init()
 	ctx := context.Background()

@@ -90,7 +90,7 @@ func (suite *ClusterTestSuite) setupCluster() {
 		node := NewNodeInfo(int64(i), lis.Addr().String())
 		suite.nodeManager.Add(node)
 	}
-	suite.cluster = NewCluster(suite.nodeManager)
+	suite.cluster = NewCluster(suite.nodeManager, DefaultQueryNodeCreator)
 }
 
 func (suite *ClusterTestSuite) createTestServers() []querypb.QueryNodeServer {

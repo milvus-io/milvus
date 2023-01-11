@@ -38,7 +38,7 @@ type ImplUtilsSuite struct {
 func (s *ImplUtilsSuite) SetupSuite() {
 	s.querynode = newQueryNodeMock()
 	client := v3client.New(embedetcdServer.Server)
-	s.querynode.session = sessionutil.NewSession(context.Background(), "milvus_ut/sessions", client)
+	s.querynode.SetSession(sessionutil.NewSession(context.Background(), "milvus_ut/sessions", client))
 	s.querynode.UpdateStateCode(commonpb.StateCode_Healthy)
 
 	s.querynode.ShardClusterService = newShardClusterService(client, s.querynode.session, s.querynode)
@@ -52,8 +52,8 @@ func (s *ImplUtilsSuite) SetupTest() {
 
 	nodeEvent := []nodeEvent{
 		{
-			nodeID:   s.querynode.session.ServerID,
-			nodeAddr: s.querynode.session.ServerName,
+			nodeID:   s.querynode.GetSession().ServerID,
+			nodeAddr: s.querynode.GetSession().ServerName,
 			isLeader: true,
 		},
 	}
@@ -75,9 +75,9 @@ func (s *ImplUtilsSuite) TestTransferLoad() {
 	s.Run("normal transfer load", func() {
 		status, err := s.querynode.TransferLoad(ctx, &querypb.LoadSegmentsRequest{
 			Base: &commonpb.MsgBase{
-				TargetID: s.querynode.session.ServerID,
+				TargetID: s.querynode.GetSession().ServerID,
 			},
-			DstNodeID: s.querynode.session.ServerID,
+			DstNodeID: s.querynode.GetSession().ServerID,
 			Infos: []*querypb.SegmentLoadInfo{
 				{
 					SegmentID:     defaultSegmentID,
@@ -95,9 +95,9 @@ func (s *ImplUtilsSuite) TestTransferLoad() {
 	s.Run("transfer non-exist channel load", func() {
 		status, err := s.querynode.TransferLoad(ctx, &querypb.LoadSegmentsRequest{
 			Base: &commonpb.MsgBase{
-				TargetID: s.querynode.session.ServerID,
+				TargetID: s.querynode.GetSession().ServerID,
 			},
-			DstNodeID: s.querynode.session.ServerID,
+			DstNodeID: s.querynode.GetSession().ServerID,
 			Infos: []*querypb.SegmentLoadInfo{
 				{
 					SegmentID:     defaultSegmentID,
@@ -115,9 +115,9 @@ func (s *ImplUtilsSuite) TestTransferLoad() {
 	s.Run("transfer empty load segments", func() {
 		status, err := s.querynode.TransferLoad(ctx, &querypb.LoadSegmentsRequest{
 			Base: &commonpb.MsgBase{
-				TargetID: s.querynode.session.ServerID,
+				TargetID: s.querynode.GetSession().ServerID,
 			},
-			DstNodeID: s.querynode.session.ServerID,
+			DstNodeID: s.querynode.GetSession().ServerID,
 			Infos:     []*querypb.SegmentLoadInfo{},
 		})
 
@@ -141,7 +141,7 @@ func (s *ImplUtilsSuite) TestTransferLoad() {
 
 		status, err := s.querynode.TransferLoad(ctx, &querypb.LoadSegmentsRequest{
 			Base: &commonpb.MsgBase{
-				TargetID: s.querynode.session.ServerID,
+				TargetID: s.querynode.GetSession().ServerID,
 			},
 			DstNodeID: 100,
 			Infos: []*querypb.SegmentLoadInfo{
@@ -197,12 +197,12 @@ func (s *ImplUtilsSuite) TestTransferRelease() {
 	s.Run("normal transfer release", func() {
 		status, err := s.querynode.TransferRelease(ctx, &querypb.ReleaseSegmentsRequest{
 			Base: &commonpb.MsgBase{
-				TargetID: s.querynode.session.ServerID,
+				TargetID: s.querynode.GetSession().ServerID,
 			},
 			SegmentIDs: []int64{},
 			Scope:      querypb.DataScope_All,
 			Shard:      defaultChannelName,
-			NodeID:     s.querynode.session.ServerID,
+			NodeID:     s.querynode.GetSession().ServerID,
 		})
 
 		s.NoError(err)
@@ -212,12 +212,12 @@ func (s *ImplUtilsSuite) TestTransferRelease() {
 	s.Run("transfer non-exist channel release", func() {
 		status, err := s.querynode.TransferRelease(ctx, &querypb.ReleaseSegmentsRequest{
 			Base: &commonpb.MsgBase{
-				TargetID: s.querynode.session.ServerID,
+				TargetID: s.querynode.GetSession().ServerID,
 			},
 			SegmentIDs: []int64{},
 			Scope:      querypb.DataScope_All,
 			Shard:      "invalid_channel",
-			NodeID:     s.querynode.session.ServerID,
+			NodeID:     s.querynode.GetSession().ServerID,
 		})
 
 		s.NoError(err)
@@ -239,7 +239,7 @@ func (s *ImplUtilsSuite) TestTransferRelease() {
 
 		status, err := s.querynode.TransferRelease(ctx, &querypb.ReleaseSegmentsRequest{
 			Base: &commonpb.MsgBase{
-				TargetID: s.querynode.session.ServerID,
+				TargetID: s.querynode.GetSession().ServerID,
 			},
 			SegmentIDs: []int64{},
 			Scope:      querypb.DataScope_All,
