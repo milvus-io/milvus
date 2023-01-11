@@ -35,35 +35,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/contextutil"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-)
-
-const (
-	// TimestampPrefix prefix for timestamp
-	TimestampPrefix = rootcoord.ComponentPrefix + "/timestamp"
-
-	// CreateCollectionDDType name of DD type for create collection
-	CreateCollectionDDType = "CreateCollection"
-
-	// DropCollectionDDType name of DD type for drop collection
-	DropCollectionDDType = "DropCollection"
-
-	// CreatePartitionDDType name of DD type for create partition
-	CreatePartitionDDType = "CreatePartition"
-
-	// DropPartitionDDType name of DD type for drop partition
-	DropPartitionDDType = "DropPartition"
-
-	// DefaultIndexType name of default index type for scalar field
-	DefaultIndexType = "STL_SORT"
-
-	// DefaultStringIndexType name of default index type for varChar/string field
-	DefaultStringIndexType = "Trie"
 )
 
 //go:generate mockery --name=IMetaTable --outpkg=mockrootcoord

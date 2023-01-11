@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/common"
 
@@ -148,6 +149,9 @@ func Test_dropCollectionTask_Execute(t *testing.T) {
 	t.Run("normal case, redo", func(t *testing.T) {
 		defer cleanTestEnv()
 
+		confirmGCInterval = time.Millisecond
+		defer restoreConfirmGCInterval()
+
 		collectionName := funcutil.GenRandomStr()
 		shardNum := 2
 
@@ -187,7 +191,11 @@ func Test_dropCollectionTask_Execute(t *testing.T) {
 		broker.DropCollectionIndexFunc = func(ctx context.Context, collID UniqueID, partIDs []UniqueID) error {
 			dropIndexCalled = true
 			dropIndexChan <- struct{}{}
+			time.Sleep(confirmGCInterval)
 			return nil
+		}
+		broker.GCConfirmFunc = func(ctx context.Context, collectionID, partitionID UniqueID) bool {
+			return true
 		}
 
 		gc := newMockGarbageCollector()

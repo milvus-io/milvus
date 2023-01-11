@@ -386,6 +386,10 @@ func (s *Server) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthReque
 	return s.dataCoord.CheckHealth(ctx, req)
 }
 
+func (s *Server) GcConfirm(ctx context.Context, request *datapb.GcConfirmRequest) (*datapb.GcConfirmResponse, error) {
+	return s.dataCoord.GcConfirm(ctx, request)
+}
+
 // CreateIndex sends the build index request to DataCoord.
 func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error) {
 	return s.dataCoord.CreateIndex(ctx, req)
