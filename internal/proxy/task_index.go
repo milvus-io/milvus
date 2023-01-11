@@ -282,6 +282,11 @@ func (cit *createIndexTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
+	if field.GetDataType() == schemapb.DataType_BinaryVector && Params.AutoIndexConfig.Enable {
+		return fmt.Errorf("can not create AutoIndex on binary vector")
+	}
+
 	cit.fieldSchema = field
 	// check index param, not accurate, only some static rules
 	err = cit.parseIndexParams()
@@ -318,6 +323,7 @@ func (cit *createIndexTask) Execute(ctx context.Context) error {
 		IsAutoIndex:     cit.isAutoIndex,
 		UserIndexParams: cit.req.GetExtraParams(),
 		Timestamp:       cit.BeginTs(),
+		FieldDataType:   cit.fieldSchema.GetDataType(),
 	}
 	cit.result, err = cit.indexCoord.CreateIndex(ctx, req)
 	if err != nil {
