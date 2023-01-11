@@ -53,14 +53,15 @@ func closeReaders(columnReaders []*NumpyColumnReader) {
 }
 
 type NumpyParser struct {
-	ctx              context.Context            // for canceling parse process
-	collectionSchema *schemapb.CollectionSchema // collection schema
-	rowIDAllocator   *allocator.IDAllocator     // autoid allocator
-	shardNum         int32                      // sharding number of the collection
-	blockSize        int64                      // maximum size of a read block(unit:byte)
-	chunkManager     storage.ChunkManager       // storage interfaces to browse/read the files
-	autoIDRange      []int64                    // auto-generated id range, for example: [1, 10, 20, 25] means id from 1 to 10 and 20 to 25
-	callFlushFunc    ImportFlushFunc            // call back function to flush segment
+	ctx                context.Context            // for canceling parse process
+	collectionSchema   *schemapb.CollectionSchema // collection schema
+	rowIDAllocator     *allocator.IDAllocator     // autoid allocator
+	shardNum           int32                      // sharding number of the collection
+	blockSize          int64                      // maximum size of a read block(unit:byte)
+	chunkManager       storage.ChunkManager       // storage interfaces to browse/read the files
+	autoIDRange        []int64                    // auto-generated id range, for example: [1, 10, 20, 25] means id from 1 to 10 and 20 to 25
+	callFlushFunc      ImportFlushFunc            // call back function to flush segment
+	updateProgressFunc func(percent int64)        // update working progress percent value
 }
 
 // NewNumpyParser is helper function to create a NumpyParser
@@ -70,7 +71,8 @@ func NewNumpyParser(ctx context.Context,
 	shardNum int32,
 	blockSize int64,
 	chunkManager storage.ChunkManager,
-	flushFunc ImportFlushFunc) (*NumpyParser, error) {
+	flushFunc ImportFlushFunc,
+	updateProgressFunc func(percent int64)) (*NumpyParser, error) {
 	if collectionSchema == nil {
 		log.Error("Numper parser: collection schema is nil")
 		return nil, errors.New("collection schema is nil")
@@ -92,14 +94,15 @@ func NewNumpyParser(ctx context.Context,
 	}
 
 	parser := &NumpyParser{
-		ctx:              ctx,
-		collectionSchema: collectionSchema,
-		rowIDAllocator:   idAlloc,
-		shardNum:         shardNum,
-		blockSize:        blockSize,
-		chunkManager:     chunkManager,
-		autoIDRange:      make([]int64, 0),
-		callFlushFunc:    flushFunc,
+		ctx:                ctx,
+		collectionSchema:   collectionSchema,
+		rowIDAllocator:     idAlloc,
+		shardNum:           shardNum,
+		blockSize:          blockSize,
+		chunkManager:       chunkManager,
+		autoIDRange:        make([]int64, 0),
+		callFlushFunc:      flushFunc,
+		updateProgressFunc: updateProgressFunc,
 	}
 
 	return parser, nil
@@ -362,12 +365,21 @@ func (p *NumpyParser) consume(columnReaders []*NumpyColumnReader) error {
 		return err
 	}
 
+	updateProgress := func(readRowCount int) {
+		if p.updateProgressFunc != nil && len(columnReaders) != 0 && columnReaders[0].rowCount > 0 {
+			percent := (readRowCount * ProgressValueForPersist) / columnReaders[0].rowCount
+			log.Debug("Numper parser: working progress", zap.Int("readRowCount", readRowCount),
+				zap.Int("totalRowCount", columnReaders[0].rowCount), zap.Int("percent", percent))
+			p.updateProgressFunc(int64(percent))
+		}
+	}
+
 	// prepare shards
 	shards := make([]map[storage.FieldID]storage.FieldData, 0, p.shardNum)
 	for i := 0; i < int(p.shardNum); i++ {
 		segmentData := initSegmentData(p.collectionSchema)
 		if segmentData == nil {
-			log.Error("import wrapper: failed to initialize FieldData list")
+			log.Error("Numper parser: failed to initialize FieldData list")
 			return fmt.Errorf("failed to initialize FieldData list")
 		}
 		shards = append(shards, segmentData)
@@ -399,6 +411,7 @@ func (p *NumpyParser) consume(columnReaders []*NumpyColumnReader) error {
 		if readRowCount == 0 {
 			break
 		}
+		updateProgress(readRowCount)
 		tr.Record("readData")
 		// split data to shards
 		err = p.splitFieldsData(segmentData, shards)

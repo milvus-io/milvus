@@ -30,6 +30,7 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
@@ -538,4 +539,23 @@ func pkToShard(pk interface{}, shardNum uint32) (uint32, error) {
 	}
 
 	return shard, nil
+}
+
+func UpdateKVInfo(infos *[]*commonpb.KeyValuePair, k string, v string) error {
+	if infos == nil {
+		return errors.New("Import util: kv array pointer is nil")
+	}
+
+	found := false
+	for _, kv := range *infos {
+		if kv.GetKey() == k {
+			kv.Value = v
+			found = true
+		}
+	}
+	if !found {
+		*infos = append(*infos, &commonpb.KeyValuePair{Key: k, Value: v})
+	}
+
+	return nil
 }

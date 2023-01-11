@@ -465,6 +465,7 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 		AutoIds:    make([]int64, 0),
 		RowCount:   0,
 	}
+	importResult.Infos = append(importResult.Infos, &commonpb.KeyValuePair{Key: importutil.ProgressPercent, Value: "0"})
 
 	// Spawn a new context to ignore cancellation from parental context.
 	newCtx, cancel := context.WithTimeout(context.TODO(), ImportCallTimeout)

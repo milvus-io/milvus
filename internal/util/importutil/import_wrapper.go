@@ -59,12 +59,16 @@ const (
 	// TODO: make it configurable.
 	MaxTotalSizeInMemory = 6 * 1024 * 1024 * 1024 // 6GB
 
+	// progress percent value of persist state
+	ProgressValueForPersist = 90
+
 	// keywords of import task informations
 	FailedReason    = "failed_reason"
 	Files           = "files"
 	CollectionName  = "collection"
 	PartitionName   = "partition"
 	PersistTimeCost = "persist_cost"
+	ProgressPercent = "progress_percent"
 )
 
 // ReportImportAttempts is the maximum # of attempts to retry when import fails.
@@ -103,6 +107,7 @@ type ImportWrapper struct {
 	reportImportAttempts uint                                      // attempts count if report function get error
 
 	workingSegments map[int]*WorkingSegment // a map shard id to working segments
+	progressPercent int64                   // working progress percent
 }
 
 func NewImportWrapper(ctx context.Context, collectionSchema *schemapb.CollectionSchema, shardNum int32, segmentSize int64,
@@ -292,7 +297,8 @@ func (p *ImportWrapper) Import(filePaths []string, options ImportOptions) error 
 			printFieldsDataInfo(fields, "import wrapper: prepare to flush binlog data", filePaths)
 			return p.flushFunc(fields, shardID)
 		}
-		parser, err := NewNumpyParser(p.ctx, p.collectionSchema, p.rowIDAllocator, p.shardNum, SingleBlockSize, p.chunkManager, flushFunc)
+		parser, err := NewNumpyParser(p.ctx, p.collectionSchema, p.rowIDAllocator, p.shardNum, SingleBlockSize,
+			p.chunkManager, flushFunc, p.updateProgressPercent)
 		if err != nil {
 			return err
 		}
@@ -327,6 +333,9 @@ func (p *ImportWrapper) reportPersisted(reportAttempts uint, tr *timerecord.Time
 
 	// report file process state
 	p.importResult.State = commonpb.ImportState_ImportPersisted
+	progressValue := strconv.Itoa(ProgressValueForPersist)
+	UpdateKVInfo(&p.importResult.Infos, ProgressPercent, progressValue)
+
 	log.Info("import wrapper: report import result", zap.Any("importResult", p.importResult))
 	// persist state task is valuable, retry more times in case fail this task only because of network error
 	reportErr := retry.Do(p.ctx, func() error {
@@ -391,7 +400,7 @@ func (p *ImportWrapper) doBinlogImport(filePaths []string, tsStartPoint uint64, 
 		return p.flushFunc(fields, shardID)
 	}
 	parser, err := NewBinlogParser(p.ctx, p.collectionSchema, p.shardNum, SingleBlockSize, p.chunkManager, flushFunc,
-		tsStartPoint, tsEndPoint)
+		p.updateProgressPercent, tsStartPoint, tsEndPoint)
 	if err != nil {
 		return err
 	}
@@ -416,9 +425,14 @@ func (p *ImportWrapper) parseRowBasedJSON(filePath string, onlyValidate bool) er
 	}
 	defer file.Close()
 
+	size, err := p.chunkManager.Size(p.ctx, filePath)
+	if err != nil {
+		return err
+	}
+
 	// parse file
 	reader := bufio.NewReader(file)
-	parser := NewJSONParser(p.ctx, p.collectionSchema)
+	parser := NewJSONParser(p.ctx, p.collectionSchema, p.updateProgressPercent)
 
 	// if only validate, we input a empty flushFunc so that the consumer do nothing but only validation.
 	var flushFunc ImportFlushFunc
@@ -439,7 +453,7 @@ func (p *ImportWrapper) parseRowBasedJSON(filePath string, onlyValidate bool) er
 		return err
 	}
 
-	err = parser.ParseRows(reader, consumer)
+	err = parser.ParseRows(&IOReader{r: reader, fileSize: size}, consumer)
 	if err != nil {
 		return err
 	}
@@ -517,6 +531,17 @@ func (p *ImportWrapper) flushFunc(fields map[storage.FieldID]storage.FieldData, 
 	segment.rowCount += int64(rowNum)
 	segment.memSize += memSize
 
+	// report working progress percent value to rootcoord
+	// if failed to report, ignore the error, the percent value might be improper but the task can be succeed
+	progressValue := strconv.Itoa(int(p.progressPercent))
+	UpdateKVInfo(&p.importResult.Infos, ProgressPercent, progressValue)
+	reportErr := retry.Do(p.ctx, func() error {
+		return p.reportFunc(p.importResult)
+	}, retry.Attempts(p.reportImportAttempts))
+	if reportErr != nil {
+		log.Warn("import wrapper: fail to report working progress percent value to RootCoord", zap.Error(reportErr))
+	}
+
 	return nil
 }
 
@@ -555,4 +580,12 @@ func (p *ImportWrapper) closeAllWorkingSegments() error {
 	p.workingSegments = make(map[int]*WorkingSegment)
 
 	return nil
+}
+
+func (p *ImportWrapper) updateProgressPercent(percent int64) {
+	// ignore illegal percent value
+	if percent < 0 || percent > 100 {
+		return
+	}
+	p.progressPercent = percent
 }

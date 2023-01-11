@@ -572,8 +572,9 @@ func (m *importManager) updateTaskInfo(ir *rootcoordpb.ImportResult) (*datapb.Im
 				if kv.GetKey() == importutil.FailedReason {
 					toPersistImportTaskInfo.State.ErrorMessage = kv.GetValue()
 					break
-				} else if kv.GetKey() == importutil.PersistTimeCost {
-					toPersistImportTaskInfo.Infos = append(toPersistImportTaskInfo.Infos, kv)
+				} else if kv.GetKey() == importutil.PersistTimeCost ||
+					kv.GetKey() == importutil.ProgressPercent {
+					importutil.UpdateKVInfo(&toPersistImportTaskInfo.Infos, kv.GetKey(), kv.GetValue())
 				}
 			}
 			log.Info("importManager update task info", zap.Any("toPersistImportTaskInfo", toPersistImportTaskInfo))
@@ -621,6 +622,9 @@ func (m *importManager) setImportTaskStateAndReason(taskID int64, targetState co
 			// Meta persist should be done before memory objs change.
 			toPersistImportTaskInfo := cloneImportTaskInfo(t)
 			toPersistImportTaskInfo.State.StateCode = targetState
+			if targetState == commonpb.ImportState_ImportCompleted {
+				importutil.UpdateKVInfo(&toPersistImportTaskInfo.Infos, importutil.ProgressPercent, "100")
+			}
 			tryUpdateErrMsg(errReason, toPersistImportTaskInfo)
 			// Update task in task store.
 			if err := m.persistTaskInfo(toPersistImportTaskInfo); err != nil {
@@ -638,6 +642,9 @@ func (m *importManager) setImportTaskStateAndReason(taskID int64, targetState co
 		// Meta persist should be done before memory objs change.
 		toPersistImportTaskInfo := cloneImportTaskInfo(v)
 		toPersistImportTaskInfo.State.StateCode = targetState
+		if targetState == commonpb.ImportState_ImportCompleted {
+			importutil.UpdateKVInfo(&toPersistImportTaskInfo.Infos, importutil.ProgressPercent, "100")
+		}
 		tryUpdateErrMsg(errReason, toPersistImportTaskInfo)
 		// Update task in task store.
 		if err := m.persistTaskInfo(toPersistImportTaskInfo); err != nil {
@@ -658,6 +665,9 @@ func (m *importManager) setImportTaskStateAndReason(taskID int64, targetState co
 			} else {
 				toPersistImportTaskInfo := cloneImportTaskInfo(ti)
 				toPersistImportTaskInfo.State.StateCode = targetState
+				if targetState == commonpb.ImportState_ImportCompleted {
+					importutil.UpdateKVInfo(&toPersistImportTaskInfo.Infos, importutil.ProgressPercent, "100")
+				}
 				tryUpdateErrMsg(errReason, toPersistImportTaskInfo)
 				// Update task in task store.
 				if err := m.persistTaskInfo(toPersistImportTaskInfo); err != nil {
