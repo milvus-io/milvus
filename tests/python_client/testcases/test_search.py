@@ -1918,7 +1918,6 @@ class TestCollectionSearch(TestcaseBase):
         assert abs(res[0].distances[0] - min(distance_0, distance_1)) <= epsilon
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="issue 6843")
     @pytest.mark.parametrize("index", ["BIN_FLAT", "BIN_IVF_FLAT"])
     def test_search_binary_tanimoto_flat_index(self, nq, dim, auto_id, _async, index, is_flush):
         """
