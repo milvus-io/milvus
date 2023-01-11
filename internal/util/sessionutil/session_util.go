@@ -79,9 +79,10 @@ type Session struct {
 	TriggerKill bool
 	Version     semver.Version `json:"Version,omitempty"`
 
-	liveCh  <-chan bool
-	etcdCli *clientv3.Client
-	leaseID *clientv3.LeaseID
+	liveCh            <-chan bool
+	etcdCli           *clientv3.Client
+	leaseID           *clientv3.LeaseID
+	watchSessionKeyCh clientv3.WatchChan
 
 	metaRoot string
 
@@ -296,6 +297,14 @@ func (s *Session) getServerIDWithKey(key string) (int64, error) {
 func (s *Session) getCompleteKey() string {
 	key := s.ServerName
 	if !s.Exclusive || (s.enableActiveStandBy && s.isStandby.Load().(bool)) {
+		key = fmt.Sprintf("%s-%d", key, s.ServerID)
+	}
+	return path.Join(s.metaRoot, DefaultServiceRoot, key)
+}
+
+func (s *Session) getSessionKey() string {
+	key := s.ServerName
+	if !s.Exclusive {
 		key = fmt.Sprintf("%s-%d", key, s.ServerID)
 	}
 	return path.Join(s.metaRoot, DefaultServiceRoot, key)
@@ -655,6 +664,11 @@ func (w *sessionWatcher) handleWatchErr(err error) error {
 // ch is the liveness signal channel, ch is closed only when the session is expired
 // callback is the function to call when ch is closed, note that callback will not be invoked when loop exits due to context
 func (s *Session) LivenessCheck(ctx context.Context, callback func()) {
+	getResp, err := s.etcdCli.Get(context.Background(), s.getSessionKey())
+	if err != nil {
+		panic(err)
+	}
+	s.watchSessionKeyCh = s.etcdCli.Watch(context.Background(), s.getSessionKey(), clientv3.WithRev(getResp.Header.Revision))
 	for {
 		select {
 		case _, ok := <-s.liveCh:
@@ -675,6 +689,46 @@ func (s *Session) LivenessCheck(ctx context.Context, callback func()) {
 				s.keepAliveCancel()
 			}
 			return
+		case resp, ok := <-s.watchSessionKeyCh:
+			if !ok {
+				log.Warn("watch session key channel closed")
+				if s.keepAliveCancel != nil {
+					s.keepAliveCancel()
+				}
+				return
+			}
+			if resp.Err() != nil {
+				// if not ErrCompacted, just close the channel
+				if resp.Err() != v3rpc.ErrCompacted {
+					//close event channel
+					log.Warn("Watch service found error", zap.Error(resp.Err()))
+					if s.keepAliveCancel != nil {
+						s.keepAliveCancel()
+					}
+					return
+				}
+				log.Warn("Watch service found compacted error", zap.Error(resp.Err()))
+				getResp, err := s.etcdCli.Get(s.ctx, s.getSessionKey())
+				if err != nil || len(getResp.Kvs) == 0 {
+					if s.keepAliveCancel != nil {
+						s.keepAliveCancel()
+					}
+					return
+				}
+				s.watchSessionKeyCh = s.etcdCli.Watch(s.ctx, s.getSessionKey(), clientv3.WithRev(getResp.Header.Revision))
+				continue
+			}
+			for _, event := range resp.Events {
+				switch event.Type {
+				case mvccpb.PUT:
+					log.Info("register session success", zap.String("role", s.ServerName), zap.String("key", string(event.Kv.Key)))
+				case mvccpb.DELETE:
+					log.Info("session key is deleted, exit...", zap.String("role", s.ServerName), zap.String("key", string(event.Kv.Key)))
+					if s.keepAliveCancel != nil {
+						s.keepAliveCancel()
+					}
+				}
+			}
 		}
 	}
 }
