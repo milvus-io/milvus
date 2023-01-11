@@ -25,13 +25,9 @@ pipeline {
     stages {
             stage('Publish Meta Migration Images') {
                 steps {
-                    container(name: 'build',shell: '/bin/sh') {
-                        script {
-                            sh "make meta-migration"
-                        }
-                    }
                     container('main'){
                         script {
+                            sh "make meta-migration"
                             date=sh(returnStdout: true, script: 'date +%Y%m%d').trim()
                             gitShortCommit=sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
                             sh 'printenv'
@@ -60,7 +56,7 @@ pipeline {
                     recipientProviders: [developers(), culprits()],
                     replyTo: '$DEFAULT_REPLYTO',
                     // to: "${authorEmail},qa@zilliz.com,devops@zilliz.com"
-                    to: "jing.li@zilliz.com"
+                    to: "devops@zilliz.com"
                 }
             }
         }
