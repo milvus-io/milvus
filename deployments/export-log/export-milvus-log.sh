@@ -28,8 +28,8 @@ do
     	m) minio="true";;
     	p) pulsar="true";;
     	k) kafka="true";;
-      o) operator="true";;
-      s) since=$OPTARG;;
+        o) operator="true";;
+        s) since=$OPTARG;;
     	*) echo "Unkonwen parameters";;
     esac
 done
@@ -40,9 +40,11 @@ then
 	exit 1
 fi
 
-if [ ! -d $log_path ];
+if [ ! -d $log_path/pod_log ] || [ ! -d $log_dir/pod_log_previous ] || [ ! -d $log_dir/pod_describe ];
 then
-	mkdir -p $log_path
+    mkdir -p $log_path/pod_log
+    mkdir -p $log_path/pod_log_previous
+    mkdir -p $log_path/pod_describe
 fi
 
 if [ $since ];
@@ -61,12 +63,14 @@ function export_log(){
 		if [ $(kubectl get pod $pod -n $namespace --output=jsonpath={.status.containerStatuses[0].restartCount}) == 0 ];
 		then
 			echo "Export log of $pod"
-			kubectl logs $pod -n $namespace ${since_args}> $log_path/$pod.log
+			kubectl logs $pod -n $namespace ${since_args}> $log_path/pod_log/$pod.log
 		else
 			echo "Export log of $pod"
-			kubectl logs $pod -n $namespace -p ${since_args}> $log_path/$pod-pre.log
-			kubectl logs $pod -n $namespace ${since_args}> $log_path/$pod.log
+			kubectl logs $pod -n $namespace -p ${since_args}> $log_path/pod_log_previous/$pod.log
+			kubectl logs $pod -n $namespace ${since_args}> $log_path/pod_log/$pod.log
 		fi
+		echo "Export describe of $pod"
+		kubectl describe pod $pod -n $namespace > $log_path/pod_describe/$pod.log
 	done
 }
 
