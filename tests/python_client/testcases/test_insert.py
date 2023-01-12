@@ -276,7 +276,7 @@ class TestInsertParams(TestcaseBase):
         nb = 10
         df = cf.gen_default_dataframe_data(nb)
         new_float_value = pd.Series(data=[float(i) for i in range(nb)], dtype="float64")
-        df.iloc[:, 1] = new_float_value
+        df[df.columns[1]] = new_float_value
         error = {ct.err_code: 1, ct.err_msg: 'The data fields number is not match with schema.'}
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
@@ -1137,7 +1137,7 @@ class TestInsertString(TestcaseBase):
         nb = 10
         df = cf.gen_default_dataframe_data(nb)
         new_float_value = pd.Series(data=[float(i) for i in range(nb)], dtype="float64")
-        df.iloc[:, 2] = new_float_value
+        df[df.columns[2]] = new_float_value
         error = {ct.err_code: 1, ct.err_msg: "The data type of field varchar doesn't match, expected: VARCHAR, got DOUBLE"}
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
