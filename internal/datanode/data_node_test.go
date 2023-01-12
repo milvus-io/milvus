@@ -102,6 +102,9 @@ func TestDataNode(t *testing.T) {
 	assert.Nil(t, err)
 	err = node.Start()
 	assert.Nil(t, err)
+	assert.Empty(t, node.GetAddress())
+	node.SetAddress("address")
+	assert.Equal(t, "address", node.GetAddress())
 	defer node.Stop()
 
 	node.chunkManager = storage.NewLocalChunkManager(storage.RootPath("/tmp/milvus_test/datanode"))
@@ -155,7 +158,7 @@ func TestDataNode(t *testing.T) {
 
 	t.Run("Test getSystemInfoMetrics", func(t *testing.T) {
 		emptyNode := &DataNode{}
-		emptyNode.session = &sessionutil.Session{ServerID: 1}
+		emptyNode.SetSession(&sessionutil.Session{ServerID: 1})
 		emptyNode.flowgraphManager = newFlowgraphManager()
 
 		req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
@@ -170,7 +173,7 @@ func TestDataNode(t *testing.T) {
 
 	t.Run("Test getSystemInfoMetrics with quotaMetric error", func(t *testing.T) {
 		emptyNode := &DataNode{}
-		emptyNode.session = &sessionutil.Session{ServerID: 1}
+		emptyNode.SetSession(&sessionutil.Session{ServerID: 1})
 		emptyNode.flowgraphManager = newFlowgraphManager()
 
 		req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)

@@ -461,8 +461,7 @@ func TestComponentState(t *testing.T) {
 		ctx = context.TODO()
 	)
 	Params.Init()
-	in, err := NewIndexNode(ctx, factory)
-	assert.Nil(t, err)
+	in := NewIndexNode(ctx, factory)
 	in.SetEtcdClient(getEtcdClient())
 	state, err := in.GetComponentStates(ctx)
 	assert.Nil(t, err)
@@ -497,8 +496,7 @@ func TestGetTimeTickChannel(t *testing.T) {
 		ctx = context.TODO()
 	)
 	Params.Init()
-	in, err := NewIndexNode(ctx, factory)
-	assert.Nil(t, err)
+	in := NewIndexNode(ctx, factory)
 	ret, err := in.GetTimeTickChannel(ctx)
 	assert.Nil(t, err)
 	assert.Equal(t, ret.Status.ErrorCode, commonpb.ErrorCode_Success)
@@ -512,8 +510,7 @@ func TestGetStatisticChannel(t *testing.T) {
 		ctx = context.TODO()
 	)
 	Params.Init()
-	in, err := NewIndexNode(ctx, factory)
-	assert.Nil(t, err)
+	in := NewIndexNode(ctx, factory)
 
 	ret, err := in.GetStatisticsChannel(ctx)
 	assert.Nil(t, err)
@@ -528,8 +525,7 @@ func TestIndexTaskWhenStoppingNode(t *testing.T) {
 		ctx = context.TODO()
 	)
 	Params.Init()
-	in, err := NewIndexNode(ctx, factory)
-	assert.Nil(t, err)
+	in := NewIndexNode(ctx, factory)
 
 	in.loadOrStoreTask("cluster-1", 1, &taskInfo{
 		state: commonpb.IndexState_InProgress,
@@ -553,6 +549,19 @@ func TestIndexTaskWhenStoppingNode(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		assert.Fail(t, "timeout task chan")
 	}
+}
+
+func TestGetSetAddress(t *testing.T) {
+	var (
+		factory = &mockFactory{
+			chunkMgr: &mockChunkmgr{},
+		}
+		ctx = context.TODO()
+	)
+	Params.Init()
+	in := NewIndexNode(ctx, factory)
+	in.SetAddress("address")
+	assert.Equal(t, "address", in.GetAddress())
 }
 
 func TestInitErr(t *testing.T) {

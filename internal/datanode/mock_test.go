@@ -37,6 +37,7 @@ import (
 	s "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 
@@ -79,6 +80,7 @@ var emptyFlushAndDropFunc flushAndDropFunc = func(_ []*segmentFlushPack) {}
 func newIDLEDataNodeMock(ctx context.Context, pkType schemapb.DataType) *DataNode {
 	factory := dependency.NewDefaultFactory(true)
 	node := NewDataNode(ctx, factory)
+	node.SetSession(&sessionutil.Session{ServerID: 1})
 
 	rc := &RootCoordFactory{
 		ID:             0,

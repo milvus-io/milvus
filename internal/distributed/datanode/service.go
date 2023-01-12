@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/tracer"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
@@ -260,7 +261,7 @@ func (s *Server) init() error {
 			log.Error("failed to start RootCoord client", zap.Error(err))
 			panic(err)
 		}
-		if err = funcutil.WaitForComponentHealthy(ctx, rootCoordClient, "RootCoord", 1000000, time.Millisecond*200); err != nil {
+		if err = componentutil.WaitForComponentHealthy(ctx, rootCoordClient, "RootCoord", 1000000, time.Millisecond*200); err != nil {
 			log.Error("failed to wait for RootCoord client to be ready", zap.Error(err))
 			panic(err)
 		}
@@ -286,7 +287,7 @@ func (s *Server) init() error {
 			log.Error("failed to start DataCoord client", zap.Error(err))
 			panic(err)
 		}
-		if err = funcutil.WaitForComponentInitOrHealthy(ctx, dataCoordClient, "DataCoord", 1000000, time.Millisecond*200); err != nil {
+		if err = componentutil.WaitForComponentInitOrHealthy(ctx, dataCoordClient, "DataCoord", 1000000, time.Millisecond*200); err != nil {
 			log.Error("failed to wait for DataCoord client to be ready", zap.Error(err))
 			panic(err)
 		}

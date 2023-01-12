@@ -117,6 +117,9 @@ type DataNode struct {
 	rootCoord types.RootCoord
 	dataCoord types.DataCoord
 
+	//call once
+	initOnce       sync.Once
+	sessionMu      sync.Mutex // to fix data race
 	session        *sessionutil.Session
 	watchKv        kv.MetaKv
 	chunkManager   storage.ChunkManager
@@ -153,6 +156,10 @@ func (node *DataNode) SetAddress(address string) {
 	node.address = address
 }
 
+func (node *DataNode) GetAddress() string {
+	return node.address
+}
+
 // SetEtcdClient sets etcd client for DataNode
 func (node *DataNode) SetEtcdClient(etcdCli *clientv3.Client) {
 	node.etcdCli = etcdCli
@@ -186,7 +193,7 @@ func (node *DataNode) Register() error {
 
 	// Start liveness check
 	go node.session.LivenessCheck(node.ctx, func() {
-		log.Error("Data Node disconnected from etcd, process will exit", zap.Int64("Server Id", node.session.ServerID))
+		log.Error("Data Node disconnected from etcd, process will exit", zap.Int64("Server Id", node.GetSession().ServerID))
 		if err := node.Stop(); err != nil {
 			log.Fatal("failed to stop server", zap.Error(err))
 		}
@@ -222,37 +229,42 @@ func (node *DataNode) initRateCollector() error {
 	return nil
 }
 
-// Init function does nothing now.
 func (node *DataNode) Init() error {
-	log.Info("DataNode server initializing",
-		zap.String("TimeTickChannelName", Params.CommonCfg.DataCoordTimeTick.GetValue()),
-	)
-	if err := node.initSession(); err != nil {
-		log.Error("DataNode server init session failed", zap.Error(err))
-		return err
-	}
+	var initError error
+	node.initOnce.Do(func() {
+		logutil.Logger(node.ctx).Info("DataNode server initializing",
+			zap.String("TimeTickChannelName", Params.CommonCfg.DataCoordTimeTick.GetValue()),
+		)
+		if err := node.initSession(); err != nil {
+			log.Error("DataNode server init session failed", zap.Error(err))
+			initError = err
+			return
+		}
 
-	err := node.initRateCollector()
-	if err != nil {
-		log.Error("DataNode server init rateCollector failed", zap.Int64("node ID", paramtable.GetNodeID()), zap.Error(err))
-		return err
-	}
-	log.Info("DataNode server init rateCollector done", zap.Int64("node ID", paramtable.GetNodeID()))
+		err := node.initRateCollector()
+		if err != nil {
+			log.Error("DataNode server init rateCollector failed", zap.Int64("node ID", paramtable.GetNodeID()), zap.Error(err))
+			initError = err
+			return
+		}
+		log.Info("DataNode server init rateCollector done", zap.Int64("node ID", paramtable.GetNodeID()))
 
-	idAllocator, err := allocator2.NewIDAllocator(node.ctx, node.rootCoord, paramtable.GetNodeID())
-	if err != nil {
-		log.Error("failed to create id allocator",
-			zap.Error(err),
-			zap.String("role", typeutil.DataNodeRole), zap.Int64("DataNode ID", paramtable.GetNodeID()))
-		return err
-	}
-	node.rowIDAllocator = idAllocator
+		idAllocator, err := allocator2.NewIDAllocator(node.ctx, node.rootCoord, paramtable.GetNodeID())
+		if err != nil {
+			log.Error("failed to create id allocator",
+				zap.Error(err),
+				zap.String("role", typeutil.DataNodeRole), zap.Int64("DataNode ID", paramtable.GetNodeID()))
+			initError = err
+			return
+		}
+		node.rowIDAllocator = idAllocator
 
-	node.factory.Init(Params)
-	log.Info("DataNode server init succeeded",
-		zap.String("MsgChannelSubName", Params.CommonCfg.DataNodeSubName.GetValue()))
+		node.factory.Init(Params)
+		log.Info("DataNode server init succeeded",
+			zap.String("MsgChannelSubName", Params.CommonCfg.DataNodeSubName.GetValue()))
 
-	return nil
+	})
+	return initError
 }
 
 // StartWatchChannels start loop to watch channel allocation status via kv(etcd for now)
@@ -260,7 +272,8 @@ func (node *DataNode) StartWatchChannels(ctx context.Context) {
 	defer logutil.LogPanic()
 	// REF MEP#7 watch path should be [prefix]/channel/{node_id}/{channel_name}
 	// TODO, this is risky, we'd better watch etcd with revision rather simply a path
-	watchPrefix := path.Join(Params.CommonCfg.DataCoordWatchSubPath.GetValue(), fmt.Sprintf("%d", paramtable.GetNodeID()))
+	watchPrefix := path.Join(Params.CommonCfg.DataCoordWatchSubPath.GetValue(), fmt.Sprintf("%d", node.GetSession().ServerID))
+	log.Info("Start watch channel", zap.String("prefix", watchPrefix))
 	evtChan := node.watchKv.WatchWithPrefix(watchPrefix)
 	// after watch, first check all exists nodes first
 	err := node.checkWatchedList()
@@ -412,7 +425,7 @@ func (node *DataNode) handlePutEvent(watchInfo *datapb.ChannelWatchInfo, version
 		return fmt.Errorf("fail to marshal watchInfo with state, vChanName: %s, state: %s ,err: %w", vChanName, watchInfo.State.String(), err)
 	}
 
-	key := path.Join(Params.CommonCfg.DataCoordWatchSubPath.GetValue(), fmt.Sprintf("%d", paramtable.GetNodeID()), vChanName)
+	key := path.Join(Params.CommonCfg.DataCoordWatchSubPath.GetValue(), fmt.Sprintf("%d", node.GetSession().ServerID), vChanName)
 
 	success, err := node.watchKv.CompareVersionAndSwap(key, version, string(v))
 	// etcd error, retrying
@@ -557,4 +570,18 @@ func (node *DataNode) Stop() error {
 	node.session.Revoke(time.Second)
 
 	return nil
+}
+
+// to fix data race
+func (node *DataNode) SetSession(session *sessionutil.Session) {
+	node.sessionMu.Lock()
+	defer node.sessionMu.Unlock()
+	node.session = session
+}
+
+// to fix data race
+func (node *DataNode) GetSession() *sessionutil.Session {
+	node.sessionMu.Lock()
+	defer node.sessionMu.Unlock()
+	return node.session
 }

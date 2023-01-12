@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/mocks"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
+	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
@@ -429,7 +430,7 @@ func newQueryCoord() (*Server, error) {
 		return nil, err
 	}
 	server.SetEtcdClient(etcdCli)
-
+	server.SetQueryNodeCreator(session.DefaultQueryNodeCreator)
 	err = server.Init()
 	return server, err
 }

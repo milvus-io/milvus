@@ -58,6 +58,7 @@ import (
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/tracer"
 	"github.com/milvus-io/milvus/internal/util"
+	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/crypto"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/distance"
@@ -474,6 +475,7 @@ func TestProxy(t *testing.T) {
 	var p paramtable.GrpcServerConfig
 	p.Init(typeutil.ProxyRole, &base)
 	testServer.Proxy.SetAddress(p.GetAddress())
+	assert.Equal(t, p.GetAddress(), testServer.Proxy.GetAddress())
 
 	go testServer.startGrpc(ctx, &wg, &p)
 	assert.NoError(t, testServer.waitForGrpcReady())
@@ -482,7 +484,7 @@ func TestProxy(t *testing.T) {
 	assert.NoError(t, err)
 	err = rootCoordClient.Init()
 	assert.NoError(t, err)
-	err = funcutil.WaitForComponentHealthy(ctx, rootCoordClient, typeutil.RootCoordRole, attempts, sleepDuration)
+	err = componentutil.WaitForComponentHealthy(ctx, rootCoordClient, typeutil.RootCoordRole, attempts, sleepDuration)
 	assert.NoError(t, err)
 	proxy.SetRootCoordClient(rootCoordClient)
 	log.Info("Proxy set root coordinator client")
@@ -491,7 +493,7 @@ func TestProxy(t *testing.T) {
 	assert.NoError(t, err)
 	err = dataCoordClient.Init()
 	assert.NoError(t, err)
-	err = funcutil.WaitForComponentHealthy(ctx, dataCoordClient, typeutil.DataCoordRole, attempts, sleepDuration)
+	err = componentutil.WaitForComponentHealthy(ctx, dataCoordClient, typeutil.DataCoordRole, attempts, sleepDuration)
 	assert.NoError(t, err)
 	proxy.SetDataCoordClient(dataCoordClient)
 	log.Info("Proxy set data coordinator client")
@@ -500,9 +502,10 @@ func TestProxy(t *testing.T) {
 	assert.NoError(t, err)
 	err = queryCoordClient.Init()
 	assert.NoError(t, err)
-	err = funcutil.WaitForComponentHealthy(ctx, queryCoordClient, typeutil.QueryCoordRole, attempts, sleepDuration)
+	err = componentutil.WaitForComponentHealthy(ctx, queryCoordClient, typeutil.QueryCoordRole, attempts, sleepDuration)
 	assert.NoError(t, err)
 	proxy.SetQueryCoordClient(queryCoordClient)
+	proxy.SetQueryNodeCreator(defaultQueryNodeClientCreator)
 	log.Info("Proxy set query coordinator client")
 
 	proxy.UpdateStateCode(commonpb.StateCode_Initializing)

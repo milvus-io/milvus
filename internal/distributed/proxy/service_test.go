@@ -797,6 +797,10 @@ func (m *MockProxy) SetQueryCoordClient(queryCoord types.QueryCoord) {
 
 }
 
+func (m *MockProxy) SetQueryNodeCreator(func(ctx context.Context, addr string) (types.QueryNode, error)) {
+
+}
+
 func (m *MockProxy) GetRateLimiter() (types.Limiter, error) {
 	return nil, nil
 }
@@ -806,6 +810,10 @@ func (m *MockProxy) UpdateStateCode(stateCode commonpb.StateCode) {
 }
 
 func (m *MockProxy) SetAddress(address string) {
+}
+
+func (m *MockProxy) GetAddress() string {
+	return ""
 }
 
 func (m *MockProxy) SetEtcdClient(etcdClient *clientv3.Client) {

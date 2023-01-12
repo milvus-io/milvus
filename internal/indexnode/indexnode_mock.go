@@ -183,6 +183,11 @@ func (m *Mock) Register() error {
 func (m *Mock) SetAddress(address string) {
 	m.CallSetAddress(address)
 }
+
+func (m *Mock) GetAddress() string {
+	return ""
+}
+
 func (m *Mock) SetEtcdClient(etcdClient *clientv3.Client) {
 }
 
@@ -209,7 +214,7 @@ func (m *Mock) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) 
 	return m.CallGetMetrics(ctx, req)
 }
 
-//ShowConfigurations returns the configurations of Mock indexNode matching req.Pattern
+// ShowConfigurations returns the configurations of Mock indexNode matching req.Pattern
 func (m *Mock) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
 	return m.CallShowConfigurations(ctx, req)
 }

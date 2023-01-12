@@ -40,6 +40,7 @@ import (
 	qc "github.com/milvus-io/milvus/internal/querycoordv2"
 	"github.com/milvus-io/milvus/internal/tracer"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
@@ -132,25 +133,25 @@ func (s *Server) init() error {
 	if s.rootCoord == nil {
 		s.rootCoord, err = rcc.NewClient(s.loopCtx, qc.Params.EtcdCfg.MetaRootPath.GetValue(), s.etcdCli)
 		if err != nil {
-			log.Debug("QueryCoord try to new RootCoord client failed", zap.Error(err))
+			log.Error("QueryCoord try to new RootCoord client failed", zap.Error(err))
 			panic(err)
 		}
 	}
 
 	if err = s.rootCoord.Init(); err != nil {
-		log.Debug("QueryCoord RootCoordClient Init failed", zap.Error(err))
+		log.Error("QueryCoord RootCoordClient Init failed", zap.Error(err))
 		panic(err)
 	}
 
 	if err = s.rootCoord.Start(); err != nil {
-		log.Debug("QueryCoord RootCoordClient Start failed", zap.Error(err))
+		log.Error("QueryCoord RootCoordClient Start failed", zap.Error(err))
 		panic(err)
 	}
 	// wait for master init or healthy
 	log.Debug("QueryCoord try to wait for RootCoord ready")
-	err = funcutil.WaitForComponentHealthy(s.loopCtx, s.rootCoord, "RootCoord", 1000000, time.Millisecond*200)
+	err = componentutil.WaitForComponentHealthy(s.loopCtx, s.rootCoord, "RootCoord", 1000000, time.Millisecond*200)
 	if err != nil {
-		log.Debug("QueryCoord wait for RootCoord ready failed", zap.Error(err))
+		log.Error("QueryCoord wait for RootCoord ready failed", zap.Error(err))
 		panic(err)
 	}
 
@@ -163,23 +164,23 @@ func (s *Server) init() error {
 	if s.dataCoord == nil {
 		s.dataCoord, err = dcc.NewClient(s.loopCtx, qc.Params.EtcdCfg.MetaRootPath.GetValue(), s.etcdCli)
 		if err != nil {
-			log.Debug("QueryCoord try to new DataCoord client failed", zap.Error(err))
+			log.Error("QueryCoord try to new DataCoord client failed", zap.Error(err))
 			panic(err)
 		}
 	}
 
 	if err = s.dataCoord.Init(); err != nil {
-		log.Debug("QueryCoord DataCoordClient Init failed", zap.Error(err))
+		log.Error("QueryCoord DataCoordClient Init failed", zap.Error(err))
 		panic(err)
 	}
 	if err = s.dataCoord.Start(); err != nil {
-		log.Debug("QueryCoord DataCoordClient Start failed", zap.Error(err))
+		log.Error("QueryCoord DataCoordClient Start failed", zap.Error(err))
 		panic(err)
 	}
 	log.Debug("QueryCoord try to wait for DataCoord ready")
-	err = funcutil.WaitForComponentHealthy(s.loopCtx, s.dataCoord, "DataCoord", 1000000, time.Millisecond*200)
+	err = componentutil.WaitForComponentHealthy(s.loopCtx, s.dataCoord, "DataCoord", 1000000, time.Millisecond*200)
 	if err != nil {
-		log.Debug("QueryCoord wait for DataCoord ready failed", zap.Error(err))
+		log.Error("QueryCoord wait for DataCoord ready failed", zap.Error(err))
 		panic(err)
 	}
 	if err := s.SetDataCoord(s.dataCoord); err != nil {

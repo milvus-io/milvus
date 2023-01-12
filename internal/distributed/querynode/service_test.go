@@ -34,7 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 )
 
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type MockQueryNode struct {
 	states     *milvuspb.ComponentStates
 	status     *commonpb.Status
@@ -126,6 +126,10 @@ func (m *MockQueryNode) SyncReplicaSegments(ctx context.Context, req *querypb.Sy
 }
 
 func (m *MockQueryNode) SetAddress(address string) {
+}
+
+func (m *MockQueryNode) GetAddress() string {
+	return ""
 }
 
 func (m *MockQueryNode) SetEtcdClient(client *clientv3.Client) {

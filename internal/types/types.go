@@ -52,6 +52,8 @@ type Component interface {
 	GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error)
 	GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error)
 	Register() error
+	//SetAddress(address string)
+	//GetAddress() string
 }
 
 // DataNode is the interface `datanode` package implements
@@ -112,6 +114,7 @@ type DataNodeComponent interface {
 	GetStateCode() commonpb.StateCode
 
 	SetAddress(address string)
+	GetAddress() string
 
 	// SetEtcdClient set etcd client for DataNode
 	SetEtcdClient(etcdClient *clientv3.Client)
@@ -370,6 +373,14 @@ type DataCoordComponent interface {
 	// SetEtcdClient set EtcdClient for DataCoord
 	// `etcdClient` is a client of etcd
 	SetEtcdClient(etcdClient *clientv3.Client)
+
+	SetRootCoord(rootCoord RootCoord)
+
+	// SetDataNodeCreator set DataNode client creator func for DataCoord
+	SetDataNodeCreator(func(context.Context, string) (DataNode, error))
+
+	//SetIndexNodeCreator set Index client creator func for DataCoord
+	SetIndexNodeCreator(func(context.Context, string) (IndexNode, error))
 }
 
 // IndexNode is the interface `indexnode` package implements
@@ -406,7 +417,7 @@ type IndexNodeComponent interface {
 	IndexNode
 
 	SetAddress(address string)
-
+	GetAddress() string
 	// SetEtcdClient set etcd client for IndexNodeComponent
 	SetEtcdClient(etcdClient *clientv3.Client)
 
@@ -763,16 +774,18 @@ type RootCoordComponent interface {
 
 	// SetDataCoord set DataCoord for RootCoord
 	// `dataCoord` is a client of data coordinator.
-	// `ctx` is the context pass to DataCoord api.
 	//
 	// Always return nil.
-	SetDataCoord(ctx context.Context, dataCoord DataCoord) error
+	SetDataCoord(dataCoord DataCoord) error
 
 	// SetQueryCoord set QueryCoord for RootCoord
 	//  `queryCoord` is a client of query coordinator.
 	//
 	// Always return nil.
 	SetQueryCoord(queryCoord QueryCoord) error
+
+	// SetProxyCreator set Proxy client creator func for RootCoord
+	SetProxyCreator(func(ctx context.Context, addr string) (Proxy, error))
 
 	// GetMetrics notifies RootCoordComponent to collect metrics for specified component
 	GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
@@ -826,6 +839,7 @@ type ProxyComponent interface {
 	Proxy
 
 	SetAddress(address string)
+	GetAddress() string
 	// SetEtcdClient set EtcdClient for Proxy
 	// `etcdClient` is a client of etcd
 	SetEtcdClient(etcdClient *clientv3.Client)
@@ -845,6 +859,9 @@ type ProxyComponent interface {
 	// SetQueryCoordClient set QueryCoord for Proxy
 	//  `queryCoord` is a client of query coordinator.
 	SetQueryCoordClient(queryCoord QueryCoord)
+
+	// SetQueryNodeCreator set QueryNode client creator func for Proxy
+	SetQueryNodeCreator(func(ctx context.Context, addr string) (QueryNode, error))
 
 	// GetRateLimiter returns the rateLimiter in Proxy
 	GetRateLimiter() (Limiter, error)
@@ -1326,6 +1343,7 @@ type QueryNodeComponent interface {
 	UpdateStateCode(stateCode commonpb.StateCode)
 
 	SetAddress(address string)
+	GetAddress() string
 
 	// SetEtcdClient set etcd client for QueryNode
 	SetEtcdClient(etcdClient *clientv3.Client)
@@ -1385,4 +1403,7 @@ type QueryCoordComponent interface {
 	// Return nil in status:
 	//     The rootCoord is not nil.
 	SetRootCoord(rootCoord RootCoord) error
+
+	// SetQueryNodeCreator set QueryNode client creator func for QueryCoord
+	SetQueryNodeCreator(func(ctx context.Context, addr string) (QueryNode, error))
 }

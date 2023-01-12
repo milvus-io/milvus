@@ -110,8 +110,9 @@ type QueryNode struct {
 	factory   dependency.Factory
 	scheduler *taskScheduler
 
-	session *sessionutil.Session
-	eventCh <-chan *sessionutil.SessionEvent
+	sessionMu sync.Mutex
+	session   *sessionutil.Session
+	eventCh   <-chan *sessionutil.SessionEvent
 
 	vectorStorage storage.ChunkManager
 	etcdKV        *etcdkv.EtcdKV
@@ -392,4 +393,8 @@ func (node *QueryNode) SetEtcdClient(client *clientv3.Client) {
 
 func (node *QueryNode) SetAddress(address string) {
 	node.address = address
+}
+
+func (node *QueryNode) GetAddress() string {
+	return node.address
 }

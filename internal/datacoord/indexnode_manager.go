@@ -24,7 +24,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
-	grpcindexnodeclient "github.com/milvus-io/milvus/internal/distributed/indexnode/client"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/metrics"
@@ -34,19 +33,21 @@ import (
 
 // IndexNodeManager is used to manage the client of IndexNode.
 type IndexNodeManager struct {
-	nodeClients   map[UniqueID]types.IndexNode
-	stoppingNodes map[UniqueID]struct{}
-	lock          sync.RWMutex
-	ctx           context.Context
+	nodeClients      map[UniqueID]types.IndexNode
+	stoppingNodes    map[UniqueID]struct{}
+	lock             sync.RWMutex
+	ctx              context.Context
+	indexNodeCreator indexNodeCreatorFunc
 }
 
 // NewNodeManager is used to create a new IndexNodeManager.
-func NewNodeManager(ctx context.Context) *IndexNodeManager {
+func NewNodeManager(ctx context.Context, indexNodeCreator indexNodeCreatorFunc) *IndexNodeManager {
 	return &IndexNodeManager{
-		nodeClients:   make(map[UniqueID]types.IndexNode),
-		stoppingNodes: make(map[UniqueID]struct{}),
-		lock:          sync.RWMutex{},
-		ctx:           ctx,
+		nodeClients:      make(map[UniqueID]types.IndexNode),
+		stoppingNodes:    make(map[UniqueID]struct{}),
+		lock:             sync.RWMutex{},
+		ctx:              ctx,
+		indexNodeCreator: indexNodeCreator,
 	}
 }
 
@@ -84,7 +85,7 @@ func (nm *IndexNodeManager) AddNode(nodeID UniqueID, address string) error {
 		err        error
 	)
 
-	nodeClient, err = grpcindexnodeclient.NewClient(context.TODO(), address, Params.DataCoordCfg.WithCredential.GetAsBool())
+	nodeClient, err = nm.indexNodeCreator(context.TODO(), address)
 	if err != nil {
 		log.Error("create IndexNode client fail", zap.Error(err))
 		return err

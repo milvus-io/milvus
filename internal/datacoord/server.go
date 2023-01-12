@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	datanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
+	indexnodeclient "github.com/milvus-io/milvus/internal/distributed/indexnode/client"
 	rootcoordclient "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
@@ -79,6 +80,7 @@ type (
 )
 
 type dataNodeCreatorFunc func(ctx context.Context, addr string) (types.DataNode, error)
+type indexNodeCreatorFunc func(ctx context.Context, addr string) (types.IndexNode, error)
 type rootCoordCreatorFunc func(ctx context.Context, metaRootPath string, etcdClient *clientv3.Client) (types.RootCoord, error)
 
 // makes sure Server implements `DataCoord`
@@ -131,6 +133,7 @@ type Server struct {
 	activateFunc        func()
 
 	dataNodeCreator        dataNodeCreatorFunc
+	indexNodeCreator       indexNodeCreatorFunc
 	rootCoordClientCreator rootCoordCreatorFunc
 	//indexCoord             types.IndexCoord
 
@@ -153,36 +156,36 @@ func defaultServerHelper() ServerHelper {
 // Option utility function signature to set DataCoord server attributes
 type Option func(svr *Server)
 
-// SetRootCoordCreator returns an `Option` setting RootCoord creator with provided parameter
-func SetRootCoordCreator(creator rootCoordCreatorFunc) Option {
+// WithRootCoordCreator returns an `Option` setting RootCoord creator with provided parameter
+func WithRootCoordCreator(creator rootCoordCreatorFunc) Option {
 	return func(svr *Server) {
 		svr.rootCoordClientCreator = creator
 	}
 }
 
-// SetServerHelper returns an `Option` setting ServerHelp with provided parameter
-func SetServerHelper(helper ServerHelper) Option {
+// WithServerHelper returns an `Option` setting ServerHelp with provided parameter
+func WithServerHelper(helper ServerHelper) Option {
 	return func(svr *Server) {
 		svr.helper = helper
 	}
 }
 
-// SetCluster returns an `Option` setting Cluster with provided parameter
-func SetCluster(cluster *Cluster) Option {
+// WithCluster returns an `Option` setting Cluster with provided parameter
+func WithCluster(cluster *Cluster) Option {
 	return func(svr *Server) {
 		svr.cluster = cluster
 	}
 }
 
-// SetDataNodeCreator returns an `Option` setting DataNode create function
-func SetDataNodeCreator(creator dataNodeCreatorFunc) Option {
+// WithDataNodeCreator returns an `Option` setting DataNode create function
+func WithDataNodeCreator(creator dataNodeCreatorFunc) Option {
 	return func(svr *Server) {
 		svr.dataNodeCreator = creator
 	}
 }
 
-// SetSegmentManager returns an Option to set SegmentManager
-func SetSegmentManager(manager Manager) Option {
+// WithSegmentManager returns an Option to set SegmentManager
+func WithSegmentManager(manager Manager) Option {
 	return func(svr *Server) {
 		svr.segmentManager = manager
 	}
@@ -199,6 +202,7 @@ func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Optio
 		buildIndexCh:           make(chan UniqueID, 1024),
 		notifyIndexChan:        make(chan UniqueID),
 		dataNodeCreator:        defaultDataNodeCreatorFunc,
+		indexNodeCreator:       defaultIndexNodeCreatorFunc,
 		rootCoordClientCreator: defaultRootCoordCreatorFunc,
 		helper:                 defaultServerHelper(),
 		metricsCacheManager:    metricsinfo.NewMetricsCacheManager(),
@@ -213,6 +217,10 @@ func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Optio
 
 func defaultDataNodeCreatorFunc(ctx context.Context, addr string) (types.DataNode, error) {
 	return datanodeclient.NewClient(ctx, addr)
+}
+
+func defaultIndexNodeCreatorFunc(ctx context.Context, addr string) (types.IndexNode, error) {
+	return indexnodeclient.NewClient(context.TODO(), addr, Params.DataCoordCfg.WithCredential.GetAsBool())
 }
 
 func defaultRootCoordCreatorFunc(ctx context.Context, metaRootPath string, client *clientv3.Client) (types.RootCoord, error) {
@@ -374,6 +382,18 @@ func (s *Server) SetEtcdClient(client *clientv3.Client) {
 	s.etcdCli = client
 }
 
+func (s *Server) SetRootCoord(rootCoord types.RootCoord) {
+	s.rootCoordClient = rootCoord
+}
+
+func (s *Server) SetDataNodeCreator(f func(context.Context, string) (types.DataNode, error)) {
+	s.dataNodeCreator = f
+}
+
+func (s *Server) SetIndexNodeCreator(f func(context.Context, string) (types.IndexNode, error)) {
+	s.indexNodeCreator = f
+}
+
 func (s *Server) createCompactionHandler() {
 	s.compactionHandler = newCompactionPlanHandler(s.sessionManager, s.channelManager, s.meta, s.allocator, s.flushCh)
 }
@@ -465,6 +485,9 @@ func (s *Server) initSegmentManager() {
 }
 
 func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
+	if s.meta != nil {
+		return nil
+	}
 	etcdKV := etcdkv.NewEtcdKV(s.etcdCli, Params.EtcdCfg.MetaRootPath.GetValue())
 
 	s.kvClient = etcdKV
@@ -488,7 +511,7 @@ func (s *Server) initIndexBuilder(manager storage.ChunkManager) {
 
 func (s *Server) initIndexNodeManager() {
 	if s.indexNodeManager == nil {
-		s.indexNodeManager = NewNodeManager(s.ctx)
+		s.indexNodeManager = NewNodeManager(s.ctx, s.indexNodeCreator)
 	}
 }
 
@@ -834,8 +857,10 @@ func (s *Server) handleFlushingSegments(ctx context.Context) {
 
 func (s *Server) initRootCoordClient() error {
 	var err error
-	if s.rootCoordClient, err = s.rootCoordClientCreator(s.ctx, Params.EtcdCfg.MetaRootPath.GetValue(), s.etcdCli); err != nil {
-		return err
+	if s.rootCoordClient == nil {
+		if s.rootCoordClient, err = s.rootCoordClientCreator(s.ctx, Params.EtcdCfg.MetaRootPath.GetValue(), s.etcdCli); err != nil {
+			return err
+		}
 	}
 	if err = s.rootCoordClient.Init(); err != nil {
 		return err

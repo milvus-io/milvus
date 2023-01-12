@@ -197,6 +197,9 @@ func TestQueryNode_init(t *testing.T) {
 	node.SetEtcdClient(etcdcli)
 	err = node.Init()
 	assert.Nil(t, err)
+	assert.Empty(t, node.GetAddress())
+	node.SetAddress("address")
+	assert.Equal(t, "address", node.GetAddress())
 }
 
 func genSimpleQueryNodeToTestWatchChangeInfo(ctx context.Context) (*QueryNode, error) {

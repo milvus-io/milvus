@@ -681,7 +681,7 @@ func newInsertBufferNode(ctx context.Context, collID UniqueID, delBufManager *De
 					commonpbutil.WithMsgType(commonpb.MsgType_DataNodeTt),
 					commonpbutil.WithMsgID(0),
 					commonpbutil.WithTimeStamp(ts),
-					commonpbutil.WithSourceID(paramtable.GetNodeID()),
+					commonpbutil.WithSourceID(config.serverID),
 				),
 				ChannelName:   config.vChannelName,
 				Timestamp:     ts,

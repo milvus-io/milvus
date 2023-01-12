@@ -123,7 +123,7 @@ func (s *DataNodeServicesSuite) TestGetComponentStates() {
 	s.Assert().Equal(commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	s.Assert().Equal(common.NotRegisteredID, resp.State.NodeID)
 
-	s.node.session = &sessionutil.Session{}
+	s.node.SetSession(&sessionutil.Session{})
 	s.node.session.UpdateRegistered(true)
 	resp, err = s.node.GetComponentStates(context.Background())
 	s.Assert().NoError(err)
@@ -203,7 +203,7 @@ func (s *DataNodeServicesSuite) TestFlushSegments() {
 
 	req := &datapb.FlushSegmentsRequest{
 		Base: &commonpb.MsgBase{
-			TargetID: s.node.session.ServerID,
+			TargetID: s.node.GetSession().ServerID,
 		},
 		DbID:         0,
 		CollectionID: 1,
@@ -277,7 +277,7 @@ func (s *DataNodeServicesSuite) TestFlushSegments() {
 
 	req = &datapb.FlushSegmentsRequest{
 		Base: &commonpb.MsgBase{
-			TargetID: s.node.session.ServerID,
+			TargetID: s.node.GetSession().ServerID,
 		},
 		DbID:         0,
 		CollectionID: 1,
@@ -290,7 +290,7 @@ func (s *DataNodeServicesSuite) TestFlushSegments() {
 
 	req = &datapb.FlushSegmentsRequest{
 		Base: &commonpb.MsgBase{
-			TargetID: s.node.session.ServerID,
+			TargetID: s.node.GetSession().ServerID,
 		},
 		DbID:         0,
 		CollectionID: 1,
@@ -314,7 +314,7 @@ func (s *DataNodeServicesSuite) TestShowConfigurations() {
 
 	//test closed server
 	node := &DataNode{}
-	node.session = &sessionutil.Session{ServerID: 1}
+	node.SetSession(&sessionutil.Session{ServerID: 1})
 	node.stateCode.Store(commonpb.StateCode_Abnormal)
 
 	resp, err := node.ShowConfigurations(s.ctx, req)
@@ -331,7 +331,7 @@ func (s *DataNodeServicesSuite) TestShowConfigurations() {
 
 func (s *DataNodeServicesSuite) TestGetMetrics() {
 	node := &DataNode{}
-	node.session = &sessionutil.Session{ServerID: 1}
+	node.SetSession(&sessionutil.Session{ServerID: 1})
 	node.flowgraphManager = newFlowgraphManager()
 	// server is closed
 	node.stateCode.Store(commonpb.StateCode_Abnormal)

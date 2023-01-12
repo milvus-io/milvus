@@ -709,3 +709,28 @@ func TestSession_apply(t *testing.T) {
 	assert.Equal(t, int64(100), session.sessionTTL)
 	assert.Equal(t, int64(200), session.sessionRetryTimes)
 }
+
+func TestIntegrationMode(t *testing.T) {
+	ctx := context.Background()
+	params := paramtable.Get()
+	params.Init()
+	params.Save(params.IntegrationTestCfg.IntegrationMode.Key, "true")
+
+	endpoints := params.GetWithDefault("etcd.endpoints", paramtable.DefaultEtcdEndpoints)
+	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
+
+	etcdEndpoints := strings.Split(endpoints, ",")
+	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
+	require.NoError(t, err)
+	etcdKV := etcdkv.NewEtcdKV(etcdCli, metaRoot)
+	err = etcdKV.RemoveWithPrefix("")
+	assert.NoError(t, err)
+
+	s1 := NewSession(ctx, metaRoot, etcdCli)
+	assert.Equal(t, false, s1.reuseNodeID)
+	s2 := NewSession(ctx, metaRoot, etcdCli)
+	assert.Equal(t, false, s2.reuseNodeID)
+	s1.Init("inittest1", "testAddr1", false, false)
+	s1.Init("inittest2", "testAddr2", false, false)
+	assert.NotEqual(t, s1.ServerID, s2.ServerID)
+}

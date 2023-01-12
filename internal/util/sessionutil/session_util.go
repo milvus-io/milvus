@@ -209,6 +209,11 @@ func NewSession(ctx context.Context, metaRoot string, client *clientv3.Client, o
 		reuseNodeID:       true,
 	}
 
+	// integration test create cluster with different nodeId in one process
+	if paramtable.Get().IntegrationTestCfg.IntegrationMode.GetAsBool() {
+		session.reuseNodeID = false
+	}
+
 	session.apply(opts...)
 
 	session.UpdateRegistered(false)

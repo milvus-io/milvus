@@ -84,6 +84,10 @@ func (m *MockDataNode) GetStateCode() commonpb.StateCode {
 func (m *MockDataNode) SetAddress(address string) {
 }
 
+func (m *MockDataNode) GetAddress() string {
+	return ""
+}
+
 func (m *MockDataNode) SetRootCoord(rc types.RootCoord) error {
 	return m.err
 }

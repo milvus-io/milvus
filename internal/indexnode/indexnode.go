@@ -97,7 +97,7 @@ type IndexNode struct {
 }
 
 // NewIndexNode creates a new IndexNode component.
-func NewIndexNode(ctx context.Context, factory dependency.Factory) (*IndexNode, error) {
+func NewIndexNode(ctx context.Context, factory dependency.Factory) *IndexNode {
 	log.Debug("New IndexNode ...")
 	rand.Seed(time.Now().UnixNano())
 	ctx1, cancel := context.WithCancel(ctx)
@@ -109,13 +109,10 @@ func NewIndexNode(ctx context.Context, factory dependency.Factory) (*IndexNode, 
 		tasks:          map[taskKey]*taskInfo{},
 	}
 	b.UpdateStateCode(commonpb.StateCode_Abnormal)
-	sc, err := NewTaskScheduler(b.loopCtx)
-	if err != nil {
-		return nil, err
-	}
+	sc := NewTaskScheduler(b.loopCtx)
 
 	b.sched = sc
-	return b, nil
+	return b
 }
 
 // Register register index node at etcd.
@@ -348,4 +345,8 @@ func (i *IndexNode) ShowConfigurations(ctx context.Context, req *internalpb.Show
 
 func (i *IndexNode) SetAddress(address string) {
 	i.address = address
+}
+
+func (i *IndexNode) GetAddress() string {
+	return i.address
 }

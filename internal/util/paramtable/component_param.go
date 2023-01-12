@@ -83,6 +83,8 @@ type ComponentParam struct {
 	DataNodeGrpcClientCfg   GrpcClientConfig
 	IndexCoordGrpcClientCfg GrpcClientConfig
 	IndexNodeGrpcClientCfg  GrpcClientConfig
+
+	IntegrationTestCfg integrationTestConfig
 }
 
 // InitOnce initialize once
@@ -126,6 +128,8 @@ func (p *ComponentParam) Init() {
 	p.DataCoordGrpcClientCfg.Init(typeutil.DataCoordRole, &p.BaseTable)
 	p.DataNodeGrpcClientCfg.Init(typeutil.DataNodeRole, &p.BaseTable)
 	p.IndexNodeGrpcClientCfg.Init(typeutil.IndexNodeRole, &p.BaseTable)
+
+	p.IntegrationTestCfg.init(&p.BaseTable)
 }
 
 func (p *ComponentParam) RocksmqEnable() bool {
@@ -1731,4 +1735,18 @@ func (p *indexNodeConfig) init(base *BaseTable) {
 		FallbackKeys: []string{"common.gracefulStopTimeout"},
 	}
 	p.GracefulStopTimeout.Init(base.mgr)
+}
+
+type integrationTestConfig struct {
+	IntegrationMode ParamItem `refreshable:"false"`
+}
+
+func (p *integrationTestConfig) init(base *BaseTable) {
+	p.IntegrationMode = ParamItem{
+		Key:          "integration.test.mode",
+		Version:      "2.2.0",
+		DefaultValue: "false",
+		PanicIfEmpty: true,
+	}
+	p.IntegrationMode.Init(base.mgr)
 }

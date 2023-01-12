@@ -100,7 +100,7 @@ func TestImpl_WatchDmChannels(t *testing.T) {
 			Base: &commonpb.MsgBase{
 				MsgType:  commonpb.MsgType_WatchDmChannels,
 				MsgID:    rand.Int63(),
-				TargetID: node.session.ServerID,
+				TargetID: node.GetSession().ServerID,
 			},
 			NodeID:       0,
 			CollectionID: defaultCollectionID,
@@ -187,7 +187,7 @@ func TestImpl_WatchDmChannels(t *testing.T) {
 			Base: &commonpb.MsgBase{
 				MsgType:  commonpb.MsgType_WatchDmChannels,
 				MsgID:    rand.Int63(),
-				TargetID: node.session.ServerID,
+				TargetID: node.GetSession().ServerID,
 			},
 			CollectionID: defaultCollectionID,
 			PartitionIDs: []UniqueID{defaultPartitionID},
@@ -218,7 +218,7 @@ func TestImpl_UnsubDmChannel(t *testing.T) {
 			Base: &commonpb.MsgBase{
 				MsgType:  commonpb.MsgType_WatchDmChannels,
 				MsgID:    rand.Int63(),
-				TargetID: node.session.ServerID,
+				TargetID: node.GetSession().ServerID,
 			},
 			NodeID:       0,
 			CollectionID: defaultCollectionID,
@@ -241,7 +241,7 @@ func TestImpl_UnsubDmChannel(t *testing.T) {
 				Base: &commonpb.MsgBase{
 					MsgType:  commonpb.MsgType_UnsubDmChannel,
 					MsgID:    rand.Int63(),
-					TargetID: node.session.ServerID,
+					TargetID: node.GetSession().ServerID,
 				},
 				NodeID:       0,
 				CollectionID: defaultCollectionID,
@@ -299,7 +299,7 @@ func TestImpl_LoadSegments(t *testing.T) {
 		Base: &commonpb.MsgBase{
 			MsgType:  commonpb.MsgType_WatchQueryChannels,
 			MsgID:    rand.Int63(),
-			TargetID: node.session.ServerID,
+			TargetID: node.GetSession().ServerID,
 		},
 		DstNodeID: 0,
 		Schema:    schema,
@@ -540,11 +540,11 @@ func TestImpl_ShowConfigurations(t *testing.T) {
 	t.Run("test ShowConfigurations", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
-		node.session = sessionutil.NewSession(node.queryNodeLoopCtx, Params.EtcdCfg.MetaRootPath.GetValue(), etcdCli)
+		node.SetSession(sessionutil.NewSession(node.queryNodeLoopCtx, Params.EtcdCfg.MetaRootPath.GetValue(), etcdCli))
 
 		pattern := "Cache"
 		req := &internalpb.ShowConfigurationsRequest{
-			Base:    genCommonMsgBase(commonpb.MsgType_WatchQueryChannels, node.session.ServerID),
+			Base:    genCommonMsgBase(commonpb.MsgType_WatchQueryChannels, node.GetSession().ServerID),
 			Pattern: pattern,
 		}
 
@@ -556,12 +556,12 @@ func TestImpl_ShowConfigurations(t *testing.T) {
 	t.Run("test ShowConfigurations node failed", func(t *testing.T) {
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
-		node.session = sessionutil.NewSession(node.queryNodeLoopCtx, Params.EtcdCfg.MetaRootPath.GetValue(), etcdCli)
+		node.SetSession(sessionutil.NewSession(node.queryNodeLoopCtx, Params.EtcdCfg.MetaRootPath.GetValue(), etcdCli))
 		node.UpdateStateCode(commonpb.StateCode_Abnormal)
 
 		pattern := "Cache"
 		req := &internalpb.ShowConfigurationsRequest{
-			Base:    genCommonMsgBase(commonpb.MsgType_WatchQueryChannels, node.session.ServerID),
+			Base:    genCommonMsgBase(commonpb.MsgType_WatchQueryChannels, node.GetSession().ServerID),
 			Pattern: pattern,
 		}
 
@@ -592,7 +592,7 @@ func TestImpl_GetMetrics(t *testing.T) {
 		defer wg.Done()
 		node, err := genSimpleQueryNode(ctx)
 		assert.NoError(t, err)
-		node.session = sessionutil.NewSession(node.queryNodeLoopCtx, Params.EtcdCfg.MetaRootPath.GetValue(), etcdCli)
+		node.SetSession(sessionutil.NewSession(node.queryNodeLoopCtx, Params.EtcdCfg.MetaRootPath.GetValue(), etcdCli))
 
 		metricReq := make(map[string]string)
 		metricReq[metricsinfo.MetricTypeKey] = "system_info"
@@ -644,7 +644,7 @@ func TestImpl_ReleaseSegments(t *testing.T) {
 		defer node.Stop()
 
 		req := &queryPb.ReleaseSegmentsRequest{
-			Base:         genCommonMsgBase(commonpb.MsgType_ReleaseSegments, node.session.ServerID),
+			Base:         genCommonMsgBase(commonpb.MsgType_ReleaseSegments, node.GetSession().ServerID),
 			CollectionID: defaultCollectionID,
 			PartitionIDs: []UniqueID{defaultPartitionID},
 			SegmentIDs:   []UniqueID{defaultSegmentID},
@@ -669,7 +669,7 @@ func TestImpl_ReleaseSegments(t *testing.T) {
 		defer node.Stop()
 
 		req := &queryPb.ReleaseSegmentsRequest{
-			Base:         genCommonMsgBase(commonpb.MsgType_ReleaseSegments, node.session.ServerID),
+			Base:         genCommonMsgBase(commonpb.MsgType_ReleaseSegments, node.GetSession().ServerID),
 			CollectionID: defaultCollectionID,
 			PartitionIDs: []UniqueID{defaultPartitionID},
 			SegmentIDs:   []UniqueID{defaultSegmentID},
@@ -704,7 +704,7 @@ func TestImpl_ReleaseSegments(t *testing.T) {
 		defer node.Stop()
 
 		req := &queryPb.ReleaseSegmentsRequest{
-			Base:         genCommonMsgBase(commonpb.MsgType_ReleaseSegments, node.session.ServerID),
+			Base:         genCommonMsgBase(commonpb.MsgType_ReleaseSegments, node.GetSession().ServerID),
 			CollectionID: defaultCollectionID,
 			PartitionIDs: []UniqueID{defaultPartitionID},
 			SegmentIDs:   []UniqueID{defaultSegmentID},
@@ -725,7 +725,7 @@ func TestImpl_ReleaseSegments(t *testing.T) {
 		assert.NoError(t, err)
 
 		req := &queryPb.ReleaseSegmentsRequest{
-			Base:         genCommonMsgBase(commonpb.MsgType_ReleaseSegments, node.session.ServerID),
+			Base:         genCommonMsgBase(commonpb.MsgType_ReleaseSegments, node.GetSession().ServerID),
 			CollectionID: defaultCollectionID,
 		}
 
@@ -1056,7 +1056,7 @@ func TestSyncDistribution(t *testing.T) {
 		defer node.Stop()
 
 		resp, err := node.SyncDistribution(ctx, &querypb.SyncDistributionRequest{
-			Base:         &commonpb.MsgBase{TargetID: node.session.ServerID},
+			Base:         &commonpb.MsgBase{TargetID: node.GetSession().ServerID},
 			CollectionID: defaultCollectionID,
 			Channel:      defaultDMLChannel,
 			Actions: []*querypb.SyncAction{
@@ -1086,7 +1086,7 @@ func TestSyncDistribution(t *testing.T) {
 		cs.SetupFirstVersion()
 
 		resp, err := node.SyncDistribution(ctx, &querypb.SyncDistributionRequest{
-			Base:         &commonpb.MsgBase{TargetID: node.session.ServerID},
+			Base:         &commonpb.MsgBase{TargetID: node.GetSession().ServerID},
 			CollectionID: defaultCollectionID,
 			Channel:      defaultDMLChannel,
 			Actions: []*querypb.SyncAction{
@@ -1109,7 +1109,7 @@ func TestSyncDistribution(t *testing.T) {
 		assert.Equal(t, segmentStateLoaded, segment.state)
 		assert.EqualValues(t, 1, segment.version)
 		resp, err = node.SyncDistribution(ctx, &querypb.SyncDistributionRequest{
-			Base:         &commonpb.MsgBase{TargetID: node.session.ServerID},
+			Base:         &commonpb.MsgBase{TargetID: node.GetSession().ServerID},
 			CollectionID: defaultCollectionID,
 			Channel:      defaultDMLChannel,
 			Actions: []*querypb.SyncAction{

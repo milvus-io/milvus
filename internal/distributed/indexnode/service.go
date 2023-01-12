@@ -259,11 +259,7 @@ func (s *Server) GetMetrics(ctx context.Context, request *milvuspb.GetMetricsReq
 // NewServer create a new IndexNode grpc server.
 func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error) {
 	ctx1, cancel := context.WithCancel(ctx)
-	node, err := indexnode.NewIndexNode(ctx1, factory)
-	if err != nil {
-		defer cancel()
-		return nil, err
-	}
+	node := indexnode.NewIndexNode(ctx1, factory)
 
 	return &Server{
 		loopCtx:     ctx1,

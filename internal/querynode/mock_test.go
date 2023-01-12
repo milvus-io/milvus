@@ -1741,7 +1741,7 @@ func genSimpleQueryNodeWithMQFactory(ctx context.Context, fac dependency.Factory
 	}
 
 	// init shard cluster service
-	node.ShardClusterService = newShardClusterService(node.etcdCli, node.session, node)
+	node.ShardClusterService = newShardClusterService(node.etcdCli, node.GetSession(), node)
 
 	node.queryShardService, err = newQueryShardService(node.queryNodeLoopCtx,
 		node.metaReplica, node.tSafeReplica,

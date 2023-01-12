@@ -170,19 +170,35 @@ func (s *Server) init() error {
 	if s.newDataCoordClient != nil {
 		log.Debug("RootCoord start to create DataCoord client")
 		dataCoord := s.newDataCoordClient(rootcoord.Params.EtcdCfg.MetaRootPath.GetValue(), s.etcdCli)
-		if err := s.rootCoord.SetDataCoord(s.ctx, dataCoord); err != nil {
+		s.dataCoord = dataCoord
+		if err = s.dataCoord.Init(); err != nil {
+			log.Error("RootCoord DataCoordClient Init failed", zap.Error(err))
 			panic(err)
 		}
-		s.dataCoord = dataCoord
+		if err = s.dataCoord.Start(); err != nil {
+			log.Error("RootCoord DataCoordClient Start failed", zap.Error(err))
+			panic(err)
+		}
+		if err := s.rootCoord.SetDataCoord(dataCoord); err != nil {
+			panic(err)
+		}
 	}
 
 	if s.newQueryCoordClient != nil {
 		log.Debug("RootCoord start to create QueryCoord client")
 		queryCoord := s.newQueryCoordClient(rootcoord.Params.EtcdCfg.MetaRootPath.GetValue(), s.etcdCli)
+		s.queryCoord = queryCoord
+		if err := s.queryCoord.Init(); err != nil {
+			log.Error("RootCoord QueryCoordClient Init failed", zap.Error(err))
+			panic(err)
+		}
+		if err := s.queryCoord.Start(); err != nil {
+			log.Error("RootCoord QueryCoordClient Start failed", zap.Error(err))
+			panic(err)
+		}
 		if err := s.rootCoord.SetQueryCoord(queryCoord); err != nil {
 			panic(err)
 		}
-		s.queryCoord = queryCoord
 	}
 
 	return s.rootCoord.Init()
