@@ -1228,10 +1228,12 @@ func (node *QueryNode) ShowConfigurations(ctx context.Context, req *internalpb.S
 
 // GetMetrics return system infos of the query node, such as total memory, memory usage, cpu usage ...
 func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	log := log.Ctx(ctx).With(
+		zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()),
+		zap.String("req", req.GetRequest()))
+
 	if !node.isHealthyOrStopping() {
 		log.Warn("QueryNode.GetMetrics failed",
-			zap.Int64("nodeId", Params.QueryNodeCfg.GetNodeID()),
-			zap.String("req", req.Request),
 			zap.Error(errQueryNodeIsUnhealthy(Params.QueryNodeCfg.GetNodeID())))
 
 		return &milvuspb.GetMetricsResponse{
@@ -1247,9 +1249,7 @@ func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 
 	metricType, err := metricsinfo.ParseMetricType(req.Request)
 	if err != nil {
-		log.Ctx(ctx).Warn("QueryNode.GetMetrics failed to parse metric type",
-			zap.Int64("nodeID", node.session.ServerID),
-			zap.String("req", req.Request),
+		log.Warn("QueryNode.GetMetrics failed to parse metric type",
 			zap.Error(err))
 
 		return &milvuspb.GetMetricsResponse{
@@ -1263,9 +1263,7 @@ func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 	if metricType == metricsinfo.SystemInfoMetrics {
 		queryNodeMetrics, err := getSystemInfoMetrics(ctx, req, node)
 		if err != nil {
-			log.Ctx(ctx).Warn("QueryNode.GetMetrics failed",
-				zap.Int64("nodeID", node.session.ServerID),
-				zap.String("req", req.Request),
+			log.Warn("QueryNode.GetMetrics failed",
 				zap.String("metricType", metricType),
 				zap.Error(err))
 			return &milvuspb.GetMetricsResponse{
@@ -1278,9 +1276,7 @@ func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 		return queryNodeMetrics, nil
 	}
 
-	log.Ctx(ctx).RatedDebug(60, "QueryNode.GetMetrics failed, request metric type is not implemented yet",
-		zap.Int64("nodeID", node.session.ServerID),
-		zap.String("req", req.Request),
+	log.RatedDebug(60, "QueryNode.GetMetrics failed, request metric type is not implemented yet",
 		zap.String("metricType", metricType))
 
 	return &milvuspb.GetMetricsResponse{

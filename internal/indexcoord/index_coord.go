@@ -971,7 +971,10 @@ func (i *IndexCoord) ShowConfigurations(ctx context.Context, req *internalpb.Sho
 
 // GetMetrics gets the metrics info of IndexCoord.
 func (i *IndexCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	log.RatedInfo(60, "IndexCoord.GetMetrics", zap.Int64("nodeID", i.serverID), zap.String("req", req.Request))
+	log := log.Ctx(ctx).With(
+		zap.Int64("nodeID", Params.IndexCoordCfg.GetNodeID()),
+		zap.String("req", req.GetRequest()))
+	log.RatedInfo(60, "IndexCoord.GetMetrics")
 
 	if !i.isHealthy() {
 		log.Warn(msgIndexCoordIsUnhealthy(i.serverID))
@@ -988,8 +991,6 @@ func (i *IndexCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReq
 	metricType, err := metricsinfo.ParseMetricType(req.Request)
 	if err != nil {
 		log.Error("IndexCoord.GetMetrics failed to parse metric type",
-			zap.Int64("nodeID", i.session.ServerID),
-			zap.String("req", req.Request),
 			zap.Error(err))
 
 		return &milvuspb.GetMetricsResponse{
@@ -1009,8 +1010,6 @@ func (i *IndexCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReq
 		}
 
 		log.RatedDebug(60, "IndexCoord.GetMetrics",
-			zap.Int64("nodeID", i.session.ServerID),
-			zap.String("req", req.Request),
 			zap.String("metricType", metricType),
 			zap.String("metrics", metrics.Response), // TODO(dragondriver): necessary? may be very large
 			zap.Error(err),
@@ -1022,8 +1021,6 @@ func (i *IndexCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReq
 	}
 
 	log.RatedWarn(60, "IndexCoord.GetMetrics failed, request metric type is not implemented yet",
-		zap.Int64("nodeID", i.session.ServerID),
-		zap.String("req", req.Request),
 		zap.String("metricType", metricType))
 
 	return &milvuspb.GetMetricsResponse{
