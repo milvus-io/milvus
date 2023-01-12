@@ -1475,3 +1475,21 @@ func (s *Server) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthReque
 
 	return &milvuspb.CheckHealthResponse{IsHealthy: true, Reasons: errReasons}, nil
 }
+
+func (s *Server) GcConfirm(ctx context.Context, request *datapb.GcConfirmRequest) (*datapb.GcConfirmResponse, error) {
+	resp := &datapb.GcConfirmResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		},
+		GcFinished: false,
+	}
+
+	if s.isClosed() {
+		resp.Status.Reason = msgDataCoordIsUnhealthy(Params.DataCoordCfg.GetNodeID())
+		return resp, nil
+	}
+
+	resp.GcFinished = s.meta.GcConfirm(ctx, request.GetCollectionId(), request.GetPartitionId())
+	resp.Status.ErrorCode = commonpb.ErrorCode_Success
+	return resp, nil
+}

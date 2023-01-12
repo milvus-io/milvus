@@ -311,6 +311,53 @@ func (_c *DataCoord_Flush_Call) Return(_a0 *datapb.FlushResponse, _a1 error) *Da
 	return _c
 }
 
+// GcConfirm provides a mock function with given fields: ctx, request
+func (_m *DataCoord) GcConfirm(ctx context.Context, request *datapb.GcConfirmRequest) (*datapb.GcConfirmResponse, error) {
+	ret := _m.Called(ctx, request)
+
+	var r0 *datapb.GcConfirmResponse
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.GcConfirmRequest) *datapb.GcConfirmResponse); ok {
+		r0 = rf(ctx, request)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.GcConfirmResponse)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.GcConfirmRequest) error); ok {
+		r1 = rf(ctx, request)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// DataCoord_GcConfirm_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GcConfirm'
+type DataCoord_GcConfirm_Call struct {
+	*mock.Call
+}
+
+// GcConfirm is a helper method to define mock.On call
+//  - ctx context.Context
+//  - request *datapb.GcConfirmRequest
+func (_e *DataCoord_Expecter) GcConfirm(ctx interface{}, request interface{}) *DataCoord_GcConfirm_Call {
+	return &DataCoord_GcConfirm_Call{Call: _e.mock.On("GcConfirm", ctx, request)}
+}
+
+func (_c *DataCoord_GcConfirm_Call) Run(run func(ctx context.Context, request *datapb.GcConfirmRequest)) *DataCoord_GcConfirm_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.GcConfirmRequest))
+	})
+	return _c
+}
+
+func (_c *DataCoord_GcConfirm_Call) Return(_a0 *datapb.GcConfirmResponse, _a1 error) *DataCoord_GcConfirm_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
 // GetCollectionStatistics provides a mock function with given fields: ctx, req
 func (_m *DataCoord) GetCollectionStatistics(ctx context.Context, req *datapb.GetCollectionStatisticsRequest) (*datapb.GetCollectionStatisticsResponse, error) {
 	ret := _m.Called(ctx, req)

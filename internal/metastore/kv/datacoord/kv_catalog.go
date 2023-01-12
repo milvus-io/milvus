@@ -23,11 +23,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/golang/protobuf/proto"
-	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
-	"golang.org/x/sync/errgroup"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
@@ -38,6 +36,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/metautil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 )
 
 var maxEtcdTxnNum = 128
@@ -538,6 +538,23 @@ func (kc *Catalog) unmarshalBinlog(binlogType storage.BinlogType, collectionID, 
 	return result, nil
 }
 
+const allPartitionID = -1
+
+// GcConfirm returns true if related collection/partition is not found.
+// DataCoord will remove all the meta eventually after GC is finished.
+func (kc *Catalog) GcConfirm(ctx context.Context, collectionID, partitionID typeutil.UniqueID) bool {
+	prefix := buildCollectionPrefix(collectionID)
+	if partitionID != allPartitionID {
+		prefix = buildPartitionPrefix(collectionID, partitionID)
+	}
+	keys, values, err := kc.MetaKv.LoadWithPrefix(prefix)
+	if err != nil {
+		// error case can be regarded as not finished.
+		return false
+	}
+	return len(keys) == 0 && len(values) == 0
+}
+
 func fillLogPathByLogID(chunkManagerRootPath string, binlogType storage.BinlogType, collectionID, partitionID,
 	segmentID typeutil.UniqueID, fieldBinlog *datapb.FieldBinlog) error {
 	for _, binlog := range fieldBinlog.Binlogs {
@@ -795,4 +812,12 @@ func buildChannelRemovePath(channel string) string {
 
 func buildChannelCPKey(vChannel string) string {
 	return fmt.Sprintf("%s/%s", ChannelCheckpointPrefix, vChannel)
+}
+
+func buildCollectionPrefix(collectionID typeutil.UniqueID) string {
+	return fmt.Sprintf("%s/%d", SegmentPrefix, collectionID)
+}
+
+func buildPartitionPrefix(collectionID, partitionID typeutil.UniqueID) string {
+	return fmt.Sprintf("%s/%d/%d", SegmentPrefix, collectionID, partitionID)
 }

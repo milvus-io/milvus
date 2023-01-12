@@ -33,6 +33,8 @@ import (
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type MockDataCoord struct {
+	types.DataCoord
+
 	states                    *milvuspb.ComponentStates
 	status                    *commonpb.Status
 	err                       error

@@ -118,6 +118,8 @@ type DataCoordCatalog interface {
 	ListChannelCheckpoint(ctx context.Context) (map[string]*internalpb.MsgPosition, error)
 	SaveChannelCheckpoint(ctx context.Context, vChannel string, pos *internalpb.MsgPosition) error
 	DropChannelCheckpoint(ctx context.Context, vChannel string) error
+
+	GcConfirm(ctx context.Context, collectionID, partitionID typeutil.UniqueID) bool
 }
 
 type IndexCoordCatalog interface {

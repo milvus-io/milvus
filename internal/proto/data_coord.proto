@@ -69,6 +69,8 @@ service DataCoord {
   rpc BroadcastAlteredCollection(AlterCollectionRequest) returns (common.Status) {}
 
   rpc CheckHealth(milvus.CheckHealthRequest) returns (milvus.CheckHealthResponse) {}
+
+  rpc GcConfirm(GcConfirmRequest) returns (GcConfirmResponse) {}
 }
 
 service DataNode {
@@ -644,4 +646,14 @@ message AlterCollectionRequest {
   repeated int64 partitionIDs = 3;
   repeated common.KeyDataPair start_positions = 4;
   repeated common.KeyValuePair properties = 5;
+}
+
+message GcConfirmRequest {
+  int64 collection_id = 1;
+  int64 partition_id = 2; // -1 means whole collection.
+}
+
+message GcConfirmResponse {
+  common.Status status = 1;
+  bool gc_finished = 2;
 }
