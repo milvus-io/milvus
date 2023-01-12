@@ -47,7 +47,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
@@ -72,7 +71,6 @@ type Server struct {
 	session             *sessionutil.Session
 	kv                  kv.MetaKv
 	idAllocator         func() (int64, error)
-	factory             dependency.Factory
 	metricsCacheManager *metricsinfo.MetricsCacheManager
 
 	// Coordinators
@@ -112,12 +110,11 @@ type Server struct {
 	activateFunc        func()
 }
 
-func NewQueryCoord(ctx context.Context, factory dependency.Factory) (*Server, error) {
+func NewQueryCoord(ctx context.Context) (*Server, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	server := &Server{
-		ctx:     ctx,
-		cancel:  cancel,
-		factory: factory,
+		ctx:    ctx,
+		cancel: cancel,
 	}
 	server.UpdateStateCode(commonpb.StateCode_Abnormal)
 	return server, nil
@@ -156,7 +153,6 @@ func (s *Server) Init() error {
 	s.session.Init(typeutil.QueryCoordRole, s.address, true, true)
 	s.enableActiveStandBy = Params.QueryCoordCfg.EnableActiveStandby.GetAsBool()
 	s.session.SetEnableActiveStandBy(s.enableActiveStandBy)
-	s.factory.Init(Params)
 
 	// Init KV
 	etcdKV := etcdkv.NewEtcdKV(s.etcdCli, Params.EtcdCfg.MetaRootPath.GetValue())
