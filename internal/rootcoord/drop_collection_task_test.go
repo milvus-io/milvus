@@ -72,8 +72,8 @@ func Test_dropCollectionTask_Execute(t *testing.T) {
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.On("GetCollectionByName",
 			mock.Anything, // context.Context.
-			mock.AnythingOfType("string"),
-			mock.AnythingOfType("uint64"),
+			mock.Anything,
+			mock.Anything,
 		).Return(nil, func(ctx context.Context, name string, ts Timestamp) error {
 			if collectionName == name {
 				return common.NewCollectionNotExistError("collection not exist")
@@ -102,8 +102,8 @@ func Test_dropCollectionTask_Execute(t *testing.T) {
 		meta := mockrootcoord.NewIMetaTable(t)
 		meta.On("GetCollectionByName",
 			mock.Anything, // context.Context
-			mock.AnythingOfType("string"),
-			mock.AnythingOfType("uint64"),
+			mock.Anything,
+			mock.Anything,
 		).Return(coll.Clone(), nil)
 		meta.On("ListAliasesByID",
 			mock.AnythingOfType("int64"),

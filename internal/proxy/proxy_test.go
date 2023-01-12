@@ -292,6 +292,10 @@ func (s *proxyTestServer) GetVersion(ctx context.Context, request *milvuspb.GetV
 	}, nil
 }
 
+func (s *proxyTestServer) RenameCollection(ctx context.Context, request *milvuspb.RenameCollectionRequest) (*commonpb.Status, error) {
+	return s.Proxy.RenameCollection(ctx, request)
+}
+
 func (s *proxyTestServer) GetComponentStates(ctx context.Context, request *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
 	return s.Proxy.GetComponentStates(ctx)
 }

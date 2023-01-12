@@ -21,14 +21,16 @@ import (
 	"testing"
 
 	"github.com/pkg/errors"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestProxy_InvalidateCollectionMetaCache_remove_stream(t *testing.T) {
@@ -140,5 +142,59 @@ func TestProxy_CheckHealth(t *testing.T) {
 		assert.Equal(t, true, resp.IsHealthy)
 		assert.Equal(t, 2, len(resp.GetQuotaStates()))
 		assert.Equal(t, 2, len(resp.GetReasons()))
+	})
+}
+
+func TestProxyRenameCollection(t *testing.T) {
+	t.Run("not healthy", func(t *testing.T) {
+		node := &Proxy{session: &sessionutil.Session{ServerID: 1}}
+		node.stateCode.Store(commonpb.StateCode_Abnormal)
+		ctx := context.Background()
+		resp, err := node.RenameCollection(ctx, &milvuspb.RenameCollectionRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
+	})
+
+	t.Run("rename with illegal new collection name", func(t *testing.T) {
+		node := &Proxy{session: &sessionutil.Session{ServerID: 1}}
+		node.stateCode.Store(commonpb.StateCode_Healthy)
+		ctx := context.Background()
+		resp, err := node.RenameCollection(ctx, &milvuspb.RenameCollectionRequest{NewName: "$#^%#&#$*!)#@!"})
+		assert.Error(t, err)
+		assert.Equal(t, commonpb.ErrorCode_IllegalCollectionName, resp.GetErrorCode())
+	})
+
+	t.Run("rename fail", func(t *testing.T) {
+		rc := mocks.NewRootCoord(t)
+		rc.On("RenameCollection", mock.Anything, mock.Anything).
+			Return(nil, errors.New("fail"))
+		node := &Proxy{
+			session:   &sessionutil.Session{ServerID: 1},
+			rootCoord: rc,
+		}
+		node.stateCode.Store(commonpb.StateCode_Healthy)
+		ctx := context.Background()
+
+		resp, err := node.RenameCollection(ctx, &milvuspb.RenameCollectionRequest{NewName: "new"})
+		assert.Error(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
+	})
+
+	t.Run("rename ok", func(t *testing.T) {
+		rc := mocks.NewRootCoord(t)
+		rc.On("RenameCollection", mock.Anything, mock.Anything).
+			Return(&commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			}, nil)
+		node := &Proxy{
+			session:   &sessionutil.Session{ServerID: 1},
+			rootCoord: rc,
+		}
+		node.stateCode.Store(commonpb.StateCode_Healthy)
+		ctx := context.Background()
+
+		resp, err := node.RenameCollection(ctx, &milvuspb.RenameCollectionRequest{NewName: "new"})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
 	})
 }

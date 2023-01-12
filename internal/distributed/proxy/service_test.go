@@ -289,7 +289,11 @@ func (m *MockRootCoord) CheckHealth(ctx context.Context, req *milvuspb.CheckHeal
 	}, nil
 }
 
-// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+func (m *MockRootCoord) RenameCollection(ctx context.Context, req *milvuspb.RenameCollectionRequest) (*commonpb.Status, error) {
+	return nil, nil
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type MockQueryCoord struct {
 	MockBase
 	initErr  error
@@ -935,6 +939,10 @@ func (m *MockProxy) ListResourceGroup(ctx context.Context, req *milvuspb.ListRes
 	return nil, nil
 }
 
+func (m *MockProxy) RenameCollection(ctx context.Context, req *milvuspb.RenameCollectionRequest) (*commonpb.Status, error) {
+	return nil, nil
+}
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 type WaitOption struct {
@@ -1364,6 +1372,11 @@ func Test_NewServer(t *testing.T) {
 
 	t.Run("CheckHealth", func(t *testing.T) {
 		_, err := server.CheckHealth(ctx, nil)
+		assert.Nil(t, err)
+	})
+
+	t.Run("RenameCollection", func(t *testing.T) {
+		_, err := server.RenameCollection(ctx, nil)
 		assert.Nil(t, err)
 	})
 
