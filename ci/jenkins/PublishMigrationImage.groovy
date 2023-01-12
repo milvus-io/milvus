@@ -27,7 +27,11 @@ pipeline {
                 steps {
                     container('main'){
                         script {
-                            sh "make meta-migration"
+                            sh 'ls -lah'
+                            sh './build/set_docker_mirror.sh'
+                            sh """
+                               build/builder.sh /bin/bash -c \"make install && make meta-migration \"
+                            """
                             date=sh(returnStdout: true, script: 'date +%Y%m%d').trim()
                             gitShortCommit=sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
                             sh 'printenv'
