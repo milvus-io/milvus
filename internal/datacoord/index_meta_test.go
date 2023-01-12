@@ -1234,3 +1234,21 @@ func TestMeta_GetHasUnindexTaskSegments(t *testing.T) {
 		assert.Equal(t, segID, segments[0].ID)
 	})
 }
+
+// see also: https://github.com/milvus-io/milvus/issues/21660
+func TestUpdateSegmentIndexNotExists(t *testing.T) {
+	m := &meta{
+		segments: &SegmentsInfo{
+			segments: map[UniqueID]*SegmentInfo{},
+		},
+		indexes:              map[UniqueID]map[UniqueID]*model.Index{},
+		buildID2SegmentIndex: make(map[UniqueID]*model.SegmentIndex),
+	}
+
+	assert.NotPanics(t, func() {
+		m.updateSegmentIndex(&model.SegmentIndex{
+			SegmentID: 1,
+			IndexID:   2,
+		})
+	})
+}

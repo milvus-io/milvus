@@ -19,7 +19,9 @@ package datacoord
 import (
 	"time"
 
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"go.uber.org/zap"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -99,10 +101,18 @@ func (s *SegmentsInfo) SetSegment(segmentID UniqueID, segment *SegmentInfo) {
 
 // SetSegmentIndex sets SegmentIndex with segmentID, perform overwrite if already exists
 func (s *SegmentsInfo) SetSegmentIndex(segmentID UniqueID, segIndex *model.SegmentIndex) {
-	if s.segments[segmentID].segmentIndexes == nil {
-		s.segments[segmentID].segmentIndexes = make(map[UniqueID]*model.SegmentIndex)
+	segment, ok := s.segments[segmentID]
+	if !ok {
+		log.Warn("segment missing for set segment index",
+			zap.Int64("segmentID", segmentID),
+			zap.Int64("indexID", segIndex.IndexID),
+		)
+		return
 	}
-	s.segments[segmentID].segmentIndexes[segIndex.IndexID] = segIndex
+	if segment.segmentIndexes == nil {
+		segment.segmentIndexes = make(map[UniqueID]*model.SegmentIndex)
+	}
+	segment.segmentIndexes[segIndex.IndexID] = segIndex
 }
 
 func (s *SegmentsInfo) DropSegmentIndex(segmentID UniqueID, indexID UniqueID) {
