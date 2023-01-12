@@ -387,6 +387,7 @@ func (p *NumpyParser) consume(columnReaders []*NumpyColumnReader) error {
 	tr := timerecord.NewTimeRecorder("consume performance")
 	defer tr.Elapse("end")
 	// read data from files, batch by batch
+	totalRead := 0
 	for {
 		readRowCount := 0
 		segmentData := make(map[storage.FieldID]storage.FieldData)
@@ -411,7 +412,8 @@ func (p *NumpyParser) consume(columnReaders []*NumpyColumnReader) error {
 		if readRowCount == 0 {
 			break
 		}
-		updateProgress(readRowCount)
+		totalRead += readRowCount
+		updateProgress(totalRead)
 		tr.Record("readData")
 		// split data to shards
 		err = p.splitFieldsData(segmentData, shards)
