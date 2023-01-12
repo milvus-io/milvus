@@ -238,6 +238,7 @@ func (s *Server) Register() error {
 	s.icSession.Register()
 	s.session.Register()
 	if s.enableActiveStandBy {
+		s.icSession.ProcessActiveStandBy(nil)
 		s.session.ProcessActiveStandBy(s.activateFunc)
 	}
 	go s.session.LivenessCheck(s.serverLoopCtx, func() {
@@ -261,6 +262,7 @@ func (s *Server) initSession() error {
 		return errors.New("failed to initialize IndexCoord session")
 	}
 	s.icSession.Init(typeutil.IndexCoordRole, s.address, true, true)
+	s.icSession.SetEnableActiveStandBy(s.enableActiveStandBy)
 
 	s.session = sessionutil.NewSession(s.ctx, Params.EtcdCfg.MetaRootPath.GetValue(), s.etcdCli)
 	if s.session == nil {
@@ -276,7 +278,30 @@ func (s *Server) Init() error {
 	var err error
 	s.stateCode.Store(commonpb.StateCode_Initializing)
 	s.factory.Init(Params)
+	if err = s.initSession(); err != nil {
+		return err
+	}
+	if s.enableActiveStandBy {
+		s.activateFunc = func() {
+			log.Info("DataCoord switch from standby to active, activating")
+			if err := s.initDataCoord(); err != nil {
+				log.Warn("DataCoord init failed", zap.Error(err))
+				// TODO: panic if error occurred?
+			}
+			s.startDataCoord()
+			s.stateCode.Store(commonpb.StateCode_Healthy)
+			log.Info("DataCoord startup success")
+		}
+		s.stateCode.Store(commonpb.StateCode_StandBy)
+		log.Info("DataCoord enter standby mode successfully")
+		return nil
+	}
 
+	return s.initDataCoord()
+}
+
+func (s *Server) initDataCoord() error {
+	var err error
 	if err = s.initRootCoordClient(); err != nil {
 		return err
 	}
@@ -316,6 +341,8 @@ func (s *Server) Init() error {
 	s.initGarbageCollection(storageCli)
 	s.initIndexBuilder(storageCli)
 
+	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
+
 	return nil
 }
 
@@ -327,35 +354,27 @@ func (s *Server) Init() error {
 //     datanodes etcd watch, etcd alive check and flush completed status check
 //  4. set server state to Healthy
 func (s *Server) Start() error {
+	if !s.enableActiveStandBy {
+		s.startDataCoord()
+		s.stateCode.Store(commonpb.StateCode_Healthy)
+		log.Info("DataCoord startup successfully")
+	}
+
+	return nil
+}
+
+func (s *Server) startDataCoord() {
 	if Params.DataCoordCfg.EnableCompaction.GetAsBool() {
 		s.compactionHandler.start()
 		s.compactionTrigger.start()
 	}
-
-	if s.enableActiveStandBy {
-		s.activateFunc = func() {
-			// todo complete the activateFunc
-			log.Info("datacoord switch from standby to active, activating")
-			s.startServerLoop()
-			s.stateCode.Store(commonpb.StateCode_Healthy)
-			logutil.Logger(s.ctx).Info("startup success")
-		}
-		s.stateCode.Store(commonpb.StateCode_StandBy)
-		logutil.Logger(s.ctx).Info("DataCoord enter standby mode successfully")
-	} else {
-		s.startServerLoop()
-		s.stateCode.Store(commonpb.StateCode_Healthy)
-		logutil.Logger(s.ctx).Info("DataCoord startup successfully")
-	}
-
+	s.startServerLoop()
 	// DataCoord (re)starts successfully and starts to collection segment stats
 	// data from all DataNode.
 	// This will prevent DataCoord from missing out any important segment stats
 	// data while offline.
 	log.Info("DataCoord (re)starts successfully and re-collecting segment stats from DataNodes")
 	s.reCollectSegmentStats(s.ctx)
-
-	return nil
 }
 
 func (s *Server) initCluster() error {
@@ -516,7 +535,6 @@ func (s *Server) initIndexNodeManager() {
 }
 
 func (s *Server) startServerLoop() {
-	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
 	s.serverLoopWg.Add(3)
 	s.startDataNodeTtLoop(s.serverLoopCtx)
 	s.startWatchService(s.serverLoopCtx)

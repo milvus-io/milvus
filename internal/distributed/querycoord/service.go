@@ -241,11 +241,11 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 
 // start starts QueryCoord's grpc service.
 func (s *Server) start() error {
-	err := s.queryCoord.Start()
+	err := s.queryCoord.Register()
 	if err != nil {
 		return err
 	}
-	return s.queryCoord.Register()
+	return s.queryCoord.Start()
 }
 
 // Stop stops QueryCoord's grpc service.
