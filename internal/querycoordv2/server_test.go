@@ -22,12 +22,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/commonpbutil"
+
+	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
+
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/log"
+	coordMocks "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
@@ -221,13 +226,40 @@ func (suite *ServerSuite) TestEnableActiveStandby() {
 
 	suite.server, err = newQueryCoord()
 	suite.NoError(err)
-	suite.hackServer()
-	err = suite.server.Start()
+	mockRootCoord := coordMocks.NewRootCoord(suite.T())
+	mockDataCoord := coordMocks.NewDataCoord(suite.T())
+
+	mockRootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		Status: successStatus,
+		Schema: &schemapb.CollectionSchema{},
+	}, nil).Maybe()
+	for _, collection := range suite.collections {
+		if suite.loadTypes[collection] == querypb.LoadType_LoadCollection {
+			req := &milvuspb.ShowPartitionsRequest{
+				Base: commonpbutil.NewMsgBase(
+					commonpbutil.WithMsgType(commonpb.MsgType_ShowPartitions),
+				),
+				CollectionID: collection,
+			}
+			mockRootCoord.EXPECT().ShowPartitions(mock.Anything, req).Return(&milvuspb.ShowPartitionsResponse{
+				Status:       successStatus,
+				PartitionIDs: suite.partitions[collection],
+			}, nil).Maybe()
+		}
+		suite.expectGetRecoverInfoByMockDataCoord(collection, mockDataCoord)
+
+	}
+	err = suite.server.SetRootCoord(mockRootCoord)
 	suite.NoError(err)
+	err = suite.server.SetDataCoord(mockDataCoord)
+	suite.NoError(err)
+	//suite.hackServer()
 	states1, err := suite.server.GetComponentStates(context.Background())
 	suite.NoError(err)
 	suite.Equal(commonpb.StateCode_StandBy, states1.GetState().GetStateCode())
 	err = suite.server.Register()
+	suite.NoError(err)
+	err = suite.server.Start()
 	suite.NoError(err)
 
 	states2, err := suite.server.GetComponentStates(context.Background())
@@ -325,6 +357,43 @@ func (suite *ServerSuite) expectGetRecoverInfo(collection int64) {
 				return nil
 			},
 		)
+	}
+}
+
+func (suite *ServerSuite) expectGetRecoverInfoByMockDataCoord(collection int64, dataCoord *coordMocks.DataCoord) {
+	var (
+		vChannels      []*datapb.VchannelInfo
+		segmentBinlogs []*datapb.SegmentBinlogs
+	)
+
+	for partition, segments := range suite.segments[collection] {
+		segments := segments
+		getRecoveryInfoRequest := &datapb.GetRecoveryInfoRequest{
+			Base: commonpbutil.NewMsgBase(
+				commonpbutil.WithMsgType(commonpb.MsgType_GetRecoveryInfo),
+			),
+			CollectionID: collection,
+			PartitionID:  partition,
+		}
+		vChannels = []*datapb.VchannelInfo{}
+		for _, channel := range suite.channels[collection] {
+			vChannels = append(vChannels, &datapb.VchannelInfo{
+				CollectionID: collection,
+				ChannelName:  channel,
+			})
+		}
+		segmentBinlogs = []*datapb.SegmentBinlogs{}
+		for _, segment := range segments {
+			segmentBinlogs = append(segmentBinlogs, &datapb.SegmentBinlogs{
+				SegmentID:     segment,
+				InsertChannel: suite.channels[collection][segment%2],
+			})
+		}
+		dataCoord.EXPECT().GetRecoveryInfo(mock.Anything, getRecoveryInfoRequest).Maybe().Return(&datapb.GetRecoveryInfoResponse{
+			Status:   successStatus,
+			Channels: vChannels,
+			Binlogs:  segmentBinlogs,
+		}, nil)
 	}
 }
 

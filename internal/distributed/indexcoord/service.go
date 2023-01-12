@@ -188,15 +188,16 @@ func (s *Server) init() error {
 
 // start starts IndexCoord's grpc service.
 func (s *Server) start() error {
-	if err := s.indexcoord.Start(); err != nil {
-		return err
-	}
-	log.Info("indexCoord started")
 	if err := s.indexcoord.Register(); err != nil {
 		log.Error("IndexCoord", zap.Any("register session error", err))
 		return err
 	}
 	log.Info("IndexCoord registers service successfully")
+
+	if err := s.indexcoord.Start(); err != nil {
+		return err
+	}
+	log.Info("indexCoord started")
 	return nil
 }
 
