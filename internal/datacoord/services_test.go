@@ -4,6 +4,9 @@ import (
 	"context"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/stretchr/testify/mock"
+
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -52,5 +55,37 @@ func TestBroadcastAlteredCollection(t *testing.T) {
 		assert.NotNil(t, resp)
 		assert.NoError(t, err)
 		assert.NotNil(t, s.meta.collections[1].Properties)
+	})
+}
+
+func TestServer_GcConfirm(t *testing.T) {
+	t.Run("closed server", func(t *testing.T) {
+		s := &Server{}
+		s.stateCode.Store(commonpb.StateCode_Initializing)
+		resp, err := s.GcConfirm(context.TODO(), &datapb.GcConfirmRequest{CollectionId: 100, PartitionId: 10000})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	t.Run("normal case", func(t *testing.T) {
+		s := &Server{}
+		s.stateCode.Store(commonpb.StateCode_Healthy)
+
+		m := &meta{}
+		catalog := mocks.NewDataCoordCatalog(t)
+		m.catalog = catalog
+
+		catalog.On("GcConfirm",
+			mock.Anything,
+			mock.AnythingOfType("int64"),
+			mock.AnythingOfType("int64")).
+			Return(false)
+
+		s.meta = m
+
+		resp, err := s.GcConfirm(context.TODO(), &datapb.GcConfirmRequest{CollectionId: 100, PartitionId: 10000})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.False(t, resp.GetGcFinished())
 	})
 }

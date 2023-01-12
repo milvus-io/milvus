@@ -331,6 +331,8 @@ type DataCoord interface {
 
 	CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error)
 
+	GcConfirm(ctx context.Context, request *datapb.GcConfirmRequest) (*datapb.GcConfirmResponse, error)
+
 	// CreateIndex create an index on collection.
 	// Index building is asynchronous, so when an index building request comes, an IndexID is assigned to the task and
 	// will get all flushed segments from DataCoord and record tasks with these segments. The background process

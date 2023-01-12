@@ -40,6 +40,7 @@ type Broker interface {
 	UnsetIsImportingState(context.Context, *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error)
 	MarkSegmentsDropped(context.Context, *datapb.MarkSegmentsDroppedRequest) (*commonpb.Status, error)
 	GetSegmentStates(context.Context, *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error)
+	GcConfirm(ctx context.Context, collectionID, partitionID UniqueID) bool
 
 	DropCollectionIndex(ctx context.Context, collID UniqueID, partIDs []UniqueID) error
 	GetSegmentIndexState(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*indexpb.SegmentIndexState, error)
@@ -234,4 +235,16 @@ func (b *ServerBroker) DescribeIndex(ctx context.Context, colID UniqueID) (*inde
 	return b.s.dataCoord.DescribeIndex(ctx, &indexpb.DescribeIndexRequest{
 		CollectionID: colID,
 	})
+}
+
+func (b *ServerBroker) GcConfirm(ctx context.Context, collectionID, partitionID UniqueID) bool {
+	req := &datapb.GcConfirmRequest{CollectionId: collectionID, PartitionId: partitionID}
+	resp, err := b.s.dataCoord.GcConfirm(ctx, req)
+	if err != nil {
+		return false
+	}
+	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+		return false
+	}
+	return resp.GetGcFinished()
 }

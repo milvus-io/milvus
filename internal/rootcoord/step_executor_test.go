@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/util/retry"
-
 	"github.com/stretchr/testify/assert"
 )
 
@@ -128,7 +127,7 @@ func Test_randomSelect(t *testing.T) {
 
 func Test_bgStepExecutor_scheduleLoop(t *testing.T) {
 	bg := newBgStepExecutor(context.Background(),
-		withSelectStepPolicy(defaultSelectPolicy()),
+		withSelectStepPolicy(randomSelectPolicy(defaultBgExecutingParallel)),
 		withBgInterval(time.Millisecond*10))
 	bg.Start()
 	n := 20
@@ -172,4 +171,44 @@ func Test_bgStepExecutor_scheduleLoop(t *testing.T) {
 		}
 	}
 	bg.Stop()
+}
+
+func Test_selectByPriorityPolicy(t *testing.T) {
+	policy := selectByPriorityPolicy(4)
+
+	t.Run("select all", func(t *testing.T) {
+		m := map[*stepStack]struct{}{
+			{steps: []nestedStep{}}: {},
+			{steps: []nestedStep{}}: {},
+		}
+		selected := policy(m)
+		assert.Equal(t, 2, len(selected))
+	})
+
+	t.Run("select by priority", func(t *testing.T) {
+		steps := []nestedStep{
+			&releaseCollectionStep{},
+			&releaseCollectionStep{},
+			&releaseCollectionStep{},
+			&releaseCollectionStep{},
+			&releaseCollectionStep{},
+		}
+		s1 := &stepStack{steps: steps[0:1]}
+		s2 := &stepStack{steps: steps[0:2]}
+		s3 := &stepStack{steps: steps[0:3]}
+		s4 := &stepStack{steps: steps[0:4]}
+		s5 := &stepStack{steps: steps[0:5]}
+		m := map[*stepStack]struct{}{
+			s1: {},
+			s2: {},
+			s3: {},
+			s4: {},
+			s5: {},
+		}
+		selected := policy(m)
+		assert.Equal(t, 4, len(selected))
+		for i := 1; i < len(selected); i++ {
+			assert.True(t, selected[i].totalPriority() <= selected[i-1].totalPriority())
+		}
+	})
 }

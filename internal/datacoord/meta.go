@@ -1269,6 +1269,10 @@ func (m *meta) DropChannelCheckpoint(vChannel string) error {
 	return nil
 }
 
+func (m *meta) GcConfirm(ctx context.Context, collectionID, partitionID UniqueID) bool {
+	return m.catalog.GcConfirm(ctx, collectionID, partitionID)
+}
+
 // addNewSeg update metrics update for a new segment.
 func (s *segMetricMutation) addNewSeg(state commonpb.SegmentState, rowCount int64) {
 	s.stateChange[state.String()]++

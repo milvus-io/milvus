@@ -130,6 +130,8 @@ type DataCoordCatalog interface {
 	AlterSegmentIndex(ctx context.Context, newSegIndex *model.SegmentIndex) error
 	AlterSegmentIndexes(ctx context.Context, newSegIdxes []*model.SegmentIndex) error
 	DropSegmentIndex(ctx context.Context, collID, partID, segID, buildID typeutil.UniqueID) error
+
+	GcConfirm(ctx context.Context, collectionID, partitionID typeutil.UniqueID) bool
 }
 
 type IndexCoordCatalog interface {

@@ -36,6 +36,10 @@ type GrpcDataCoordClient struct {
 	Err error
 }
 
+func (m *GrpcDataCoordClient) GcConfirm(ctx context.Context, in *datapb.GcConfirmRequest, opts ...grpc.CallOption) (*datapb.GcConfirmResponse, error) {
+	return &datapb.GcConfirmResponse{}, m.Err
+}
+
 func (m *GrpcDataCoordClient) CheckHealth(ctx context.Context, in *milvuspb.CheckHealthRequest, opts ...grpc.CallOption) (*milvuspb.CheckHealthResponse, error) {
 	return &milvuspb.CheckHealthResponse{}, m.Err
 }

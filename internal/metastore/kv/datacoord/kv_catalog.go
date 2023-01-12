@@ -685,6 +685,23 @@ func (kc *Catalog) DropSegmentIndex(ctx context.Context, collID, partID, segID, 
 	return nil
 }
 
+const allPartitionID = -1
+
+// GcConfirm returns true if related collection/partition is not found.
+// DataCoord will remove all the meta eventually after GC is finished.
+func (kc *Catalog) GcConfirm(ctx context.Context, collectionID, partitionID typeutil.UniqueID) bool {
+	prefix := buildCollectionPrefix(collectionID)
+	if partitionID != allPartitionID {
+		prefix = buildPartitionPrefix(collectionID, partitionID)
+	}
+	keys, values, err := kc.MetaKv.LoadWithPrefix(prefix)
+	if err != nil {
+		// error case can be regarded as not finished.
+		return false
+	}
+	return len(keys) == 0 && len(values) == 0
+}
+
 func fillLogPathByLogID(chunkManagerRootPath string, binlogType storage.BinlogType, collectionID, partitionID,
 	segmentID typeutil.UniqueID, fieldBinlog *datapb.FieldBinlog) error {
 	for _, binlog := range fieldBinlog.Binlogs {
@@ -955,4 +972,12 @@ func BuildIndexKey(collectionID, indexID int64) string {
 
 func BuildSegmentIndexKey(collectionID, partitionID, segmentID, buildID int64) string {
 	return fmt.Sprintf("%s/%d/%d/%d/%d", util.SegmentIndexPrefix, collectionID, partitionID, segmentID, buildID)
+}
+
+func buildCollectionPrefix(collectionID typeutil.UniqueID) string {
+	return fmt.Sprintf("%s/%d", SegmentPrefix, collectionID)
+}
+
+func buildPartitionPrefix(collectionID, partitionID typeutil.UniqueID) string {
+	return fmt.Sprintf("%s/%d/%d", SegmentPrefix, collectionID, partitionID)
 }

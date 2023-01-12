@@ -23,19 +23,18 @@ import (
 	"testing"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/samber/lo"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/require"
-
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
-	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/samber/lo"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 func TestMetaReloadFromKV(t *testing.T) {
@@ -944,4 +943,18 @@ func TestChannelCP(t *testing.T) {
 		err = meta.DropChannelCheckpoint(mockVChannel)
 		assert.NoError(t, err)
 	})
+}
+
+func Test_meta_GcConfirm(t *testing.T) {
+	m := &meta{}
+	catalog := mocks.NewDataCoordCatalog(t)
+	m.catalog = catalog
+
+	catalog.On("GcConfirm",
+		mock.Anything,
+		mock.AnythingOfType("int64"),
+		mock.AnythingOfType("int64")).
+		Return(false)
+
+	assert.False(t, m.GcConfirm(context.TODO(), 100, 10000))
 }

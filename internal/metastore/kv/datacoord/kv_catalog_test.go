@@ -1346,3 +1346,20 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 	os.Exit(code)
 }
+
+func TestCatalog_GcConfirm(t *testing.T) {
+	kc := &Catalog{}
+	txn := mocks.NewMetaKv(t)
+	kc.MetaKv = txn
+
+	txn.On("LoadWithPrefix",
+		mock.AnythingOfType("string")).
+		Return(nil, nil, errors.New("error mock LoadWithPrefix")).
+		Once()
+	assert.False(t, kc.GcConfirm(context.TODO(), 100, 10000))
+
+	txn.On("LoadWithPrefix",
+		mock.AnythingOfType("string")).
+		Return(nil, nil, nil)
+	assert.True(t, kc.GcConfirm(context.TODO(), 100, 10000))
+}
