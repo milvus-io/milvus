@@ -20,14 +20,15 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/opentracing/opentracing-go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
-	"github.com/milvus-io/milvus/internal/util/trace"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 // filterDeleteNode is one of the nodes in delta flow graph
@@ -59,16 +60,16 @@ func (fddNode *filterDeleteNode) IsValidInMsg(in []Msg) bool {
 func (fddNode *filterDeleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 	msgStreamMsg := in[0].(*MsgStreamMsg)
 
-	var spans []opentracing.Span
+	var spans []trace.Span
 	for _, msg := range msgStreamMsg.TsMessages() {
-		sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
+		ctx, sp := otel.Tracer(typeutil.QueryCoordRole).Start(msg.TraceCtx(), "FilterDelete_Node")
 		spans = append(spans, sp)
 		msg.SetTraceCtx(ctx)
 	}
 
 	defer func() {
 		for _, sp := range spans {
-			sp.Finish()
+			sp.End()
 		}
 	}()
 
@@ -122,9 +123,9 @@ func (fddNode *filterDeleteNode) filterInvalidDeleteMessage(msg *msgstream.Delet
 		return nil, fmt.Errorf("CheckAligned failed, err = %s", err)
 	}
 
-	sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
+	ctx, sp := otel.Tracer(typeutil.QueryCoordRole).Start(msg.TraceCtx(), "FilterDelete_Node")
 	msg.SetTraceCtx(ctx)
-	defer sp.Finish()
+	defer sp.End()
 
 	if msg.CollectionID != fddNode.collectionID {
 		return nil, nil

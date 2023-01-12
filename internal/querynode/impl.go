@@ -27,6 +27,8 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
@@ -41,7 +43,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
-	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -177,7 +178,7 @@ func (node *QueryNode) getStatisticsWithDmlChannel(ctx context.Context, req *que
 	node.wg.Add(1)
 	defer node.wg.Done()
 
-	traceID, _, _ := trace.InfoFromContext(ctx)
+	traceID := trace.SpanFromContext(ctx).SpanContext().TraceID()
 	log.Ctx(ctx).Debug("received GetStatisticRequest",
 		zap.Bool("fromShardLeader", req.GetFromShardLeader()),
 		zap.String("vChannel", dmlChannel),
@@ -742,6 +743,10 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 		}, nil
 	}
 
+	ctx, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "QueryNode-Search")
+	defer sp.End()
+	log := log.Ctx(ctx)
+
 	failRet := &internalpb.SearchResults{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
@@ -750,7 +755,7 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 
 	tr := timerecord.NewTimeRecorder("Search")
 	if !req.GetFromShardLeader() {
-		log.Ctx(ctx).Debug("Received SearchRequest",
+		log.Debug("Received SearchRequest",
 			zap.Strings("vChannels", req.GetDmlChannels()),
 			zap.Int64s("segmentIDs", req.GetSegmentIDs()),
 			zap.Uint64("guaranteeTimestamp", req.GetReq().GetGuaranteeTimestamp()),
@@ -962,6 +967,9 @@ func (node *QueryNode) queryWithDmlChannel(ctx context.Context, req *querypb.Que
 		},
 	}
 
+	ctx, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "QueryNode-QueryWithDMLChannel")
+	defer sp.End()
+
 	defer func() {
 		if failRet.Status.ErrorCode != commonpb.ErrorCode_Success {
 			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel, metrics.FailLabel).Inc()
@@ -974,7 +982,6 @@ func (node *QueryNode) queryWithDmlChannel(ctx context.Context, req *querypb.Que
 	node.wg.Add(1)
 	defer node.wg.Done()
 
-	traceID, _, _ := trace.InfoFromContext(ctx)
 	log.Ctx(ctx).Debug("queryWithDmlChannel receives query request",
 		zap.Bool("fromShardLeader", req.GetFromShardLeader()),
 		zap.String("vChannel", dmlChannel),
@@ -1019,8 +1026,8 @@ func (node *QueryNode) queryWithDmlChannel(ctx context.Context, req *querypb.Que
 			return failRet, nil
 		}
 
-		tr.CtxElapse(ctx, fmt.Sprintf("do query done, traceID = %s, fromSharedLeader = %t, vChannel = %s, segmentIDs = %v",
-			traceID, req.GetFromShardLeader(), dmlChannel, req.GetSegmentIDs()))
+		tr.CtxElapse(ctx, fmt.Sprintf("do query done, fromSharedLeader = %t, vChannel = %s, segmentIDs = %v",
+			req.GetFromShardLeader(), dmlChannel, req.GetSegmentIDs()))
 
 		failRet.Status.ErrorCode = commonpb.ErrorCode_Success
 		metrics.QueryNodeSQLatencyInQueue.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
@@ -1079,8 +1086,8 @@ func (node *QueryNode) queryWithDmlChannel(ctx context.Context, req *querypb.Que
 		return failRet, nil
 	}
 
-	tr.CtxElapse(ctx, fmt.Sprintf("start reduce query result, traceID = %s, fromSharedLeader = %t, vChannel = %s, segmentIDs = %v",
-		traceID, req.GetFromShardLeader(), dmlChannel, req.GetSegmentIDs()))
+	tr.CtxElapse(ctx, fmt.Sprintf("start reduce query result, fromSharedLeader = %t, vChannel = %s, segmentIDs = %v",
+		req.GetFromShardLeader(), dmlChannel, req.GetSegmentIDs()))
 
 	results = append(results, streamingResult)
 	ret, err2 := mergeInternalRetrieveResultsAndFillIfEmpty(ctx, results, req.Req.GetLimit(), req.GetReq().GetOutputFieldsId(), qs.collection.Schema())
@@ -1089,8 +1096,8 @@ func (node *QueryNode) queryWithDmlChannel(ctx context.Context, req *querypb.Que
 		return failRet, nil
 	}
 
-	tr.CtxElapse(ctx, fmt.Sprintf("do query done, traceID = %s, fromSharedLeader = %t, vChannel = %s, segmentIDs = %v",
-		traceID, req.GetFromShardLeader(), dmlChannel, req.GetSegmentIDs()))
+	tr.CtxElapse(ctx, fmt.Sprintf("do query done, fromSharedLeader = %t, vChannel = %s, segmentIDs = %v",
+		req.GetFromShardLeader(), dmlChannel, req.GetSegmentIDs()))
 
 	failRet.Status.ErrorCode = commonpb.ErrorCode_Success
 	latency := tr.ElapseSpan()
@@ -1118,6 +1125,9 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 			},
 		}, nil
 	}
+
+	ctx, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "QueryNode-Query")
+	defer sp.End()
 
 	failRet := &internalpb.RetrieveResults{
 		Status: &commonpb.Status{

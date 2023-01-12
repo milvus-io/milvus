@@ -18,15 +18,14 @@ package grpcquerycoord
 
 import (
 	"context"
-	"io"
 	"net"
 	"strconv"
 	"sync"
 	"time"
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
-	ot "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
@@ -39,13 +38,13 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	qc "github.com/milvus-io/milvus/internal/querycoordv2"
+	"github.com/milvus-io/milvus/internal/tracer"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/logutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
-	"github.com/milvus-io/milvus/internal/util/trace"
 )
 
 // Server is the grpc server of QueryCoord.
@@ -65,8 +64,6 @@ type Server struct {
 
 	dataCoord types.DataCoord
 	rootCoord types.RootCoord
-
-	closer io.Closer
 }
 
 // NewServer create a new QueryCoord grpc server.
@@ -106,9 +103,6 @@ func (s *Server) Run() error {
 func (s *Server) init() error {
 	etcdConfig := &paramtable.Get().EtcdCfg
 	Params := &paramtable.Get().QueryCoordGrpcServerCfg
-
-	closer := trace.InitTracing("querycoord")
-	s.closer = closer
 
 	etcdCli, err := etcd.GetEtcdClient(
 		etcdConfig.UseEmbedEtcd.GetAsBool(),
@@ -224,17 +218,17 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 	ctx, cancel := context.WithCancel(s.loopCtx)
 	defer cancel()
 
-	opts := trace.GetInterceptorOpts()
+	opts := tracer.GetInterceptorOpts()
 	s.grpcServer = grpc.NewServer(
 		grpc.KeepaliveEnforcementPolicy(kaep),
 		grpc.KeepaliveParams(kasp),
 		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize.GetAsInt()),
 		grpc.MaxSendMsgSize(Params.ServerMaxSendSize.GetAsInt()),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
-			ot.UnaryServerInterceptor(opts...),
+			otelgrpc.UnaryServerInterceptor(opts...),
 			logutil.UnaryTraceLoggerInterceptor)),
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
-			ot.StreamServerInterceptor(opts...),
+			otelgrpc.StreamServerInterceptor(opts...),
 			logutil.StreamTraceLoggerInterceptor)))
 	querypb.RegisterQueryCoordServer(s.grpcServer, s)
 
@@ -257,11 +251,6 @@ func (s *Server) start() error {
 func (s *Server) Stop() error {
 	Params := &paramtable.Get().QueryCoordGrpcServerCfg
 	log.Debug("QueryCoord stop", zap.String("Address", Params.GetAddress()))
-	if s.closer != nil {
-		if err := s.closer.Close(); err != nil {
-			return err
-		}
-	}
 	if s.etcdCli != nil {
 		defer s.etcdCli.Close()
 	}

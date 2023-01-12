@@ -22,6 +22,11 @@ import (
 	"strconv"
 
 	"github.com/golang/protobuf/proto"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/common"
@@ -32,8 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
-	"github.com/milvus-io/milvus/internal/util/trace"
-	"go.uber.org/zap"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 func (i *IndexNode) CreateJob(ctx context.Context, req *indexpb.CreateJobRequest) (*commonpb.Status, error) {
@@ -56,10 +60,11 @@ func (i *IndexNode) CreateJob(ctx context.Context, req *indexpb.CreateJobRequest
 		zap.Any("TypeParams", req.TypeParams),
 		zap.Any("IndexParams", req.IndexParams),
 		zap.Int64("num_rows", req.GetNumRows()))
-	sp, _ := trace.StartSpanFromContextWithOperationName(ctx, "IndexNode-CreateIndex")
-	defer sp.Finish()
-	sp.SetTag("IndexBuildID", strconv.FormatInt(req.BuildID, 10))
-	sp.SetTag("ClusterID", req.ClusterID)
+	ctx, sp := otel.Tracer(typeutil.IndexNodeRole).Start(ctx, "IndexNode-CreateIndex", trace.WithAttributes(
+		attribute.Int64("IndexBuildID", req.BuildID),
+		attribute.String("ClusterID", req.ClusterID),
+	))
+	defer sp.End()
 	metrics.IndexNodeBuildIndexTaskCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.TotalLabel).Inc()
 
 	taskCtx, taskCancel := context.WithCancel(i.loopCtx)

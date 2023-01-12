@@ -14,26 +14,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package trace
+package tracer
 
 import (
-	"context"
-
-	grpc_opentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
-	"github.com/opentracing/opentracing-go"
-	"google.golang.org/grpc"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+	"go.opentelemetry.io/otel"
 )
 
-// InterceptorSuite contains client option and server option
-type InterceptorSuite struct {
-	ClientOpts []grpc.DialOption
-	ServerOpts []grpc.ServerOption
-}
-
 var (
-	filterFunc = func(ctx context.Context, fullMethodName string) bool {
-		if fullMethodName == `/milvus.proto.rootcoord.RootCoord/UpdateChannelTimeTick` ||
-			fullMethodName == `/milvus.proto.rootcoord.RootCoord/AllocTimestamp` {
+	filterFunc = func(info *otelgrpc.InterceptorInfo) bool {
+		var fullMethod string
+		if info.UnaryServerInfo != nil {
+			fullMethod = info.UnaryServerInfo.FullMethod
+		} else if info.StreamServerInfo != nil {
+			fullMethod = info.StreamServerInfo.FullMethod
+		}
+		if fullMethod == `/milvus.proto.rootcoord.RootCoord/UpdateChannelTimeTick` ||
+			fullMethod == `/milvus.proto.rootcoord.RootCoord/AllocTimestamp` {
 			return false
 		}
 		return true
@@ -41,11 +38,10 @@ var (
 )
 
 // GetInterceptorOpts returns the Option of gRPC open-tracing
-func GetInterceptorOpts() []grpc_opentracing.Option {
-	tracer := opentracing.GlobalTracer()
-	opts := []grpc_opentracing.Option{
-		grpc_opentracing.WithTracer(tracer),
-		grpc_opentracing.WithFilterFunc(filterFunc),
+func GetInterceptorOpts() []otelgrpc.Option {
+	opts := []otelgrpc.Option{
+		otelgrpc.WithTracerProvider(otel.GetTracerProvider()),
+		otelgrpc.WithInterceptorFilter(filterFunc),
 	}
 	return opts
 }

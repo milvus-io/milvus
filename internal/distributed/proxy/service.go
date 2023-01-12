@@ -31,12 +31,13 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
+	"github.com/milvus-io/milvus/internal/tracer"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 
 	"github.com/gin-gonic/gin"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_auth "github.com/grpc-ecosystem/go-grpc-middleware/auth"
-	ot "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	dcc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
@@ -53,8 +54,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/logutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
-	"github.com/milvus-io/milvus/internal/util/trace"
-	"github.com/opentracing/opentracing-go"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -86,9 +85,6 @@ type Server struct {
 	rootCoordClient  types.RootCoord
 	dataCoordClient  types.DataCoord
 	queryCoordClient types.QueryCoord
-
-	tracer opentracing.Tracer
-	closer io.Closer
 }
 
 // NewServer create a Proxy server.
@@ -164,14 +160,14 @@ func (s *Server) startExternalGrpc(grpcPort int, errChan chan error) {
 	}
 	log.Debug("Get proxy rate limiter done", zap.Int("port", grpcPort))
 
-	opts := trace.GetInterceptorOpts()
+	opts := tracer.GetInterceptorOpts()
 	grpcOpts := []grpc.ServerOption{
 		grpc.KeepaliveEnforcementPolicy(kaep),
 		grpc.KeepaliveParams(kasp),
 		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize.GetAsInt()),
 		grpc.MaxSendMsgSize(Params.ServerMaxSendSize.GetAsInt()),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
-			ot.UnaryServerInterceptor(opts...),
+			otelgrpc.UnaryServerInterceptor(opts...),
 			grpc_auth.UnaryServerInterceptor(proxy.AuthenticationInterceptor),
 			proxy.UnaryServerHookInterceptor(),
 			proxy.UnaryServerInterceptor(proxy.PrivilegeInterceptor),
@@ -256,14 +252,14 @@ func (s *Server) startInternalGrpc(grpcPort int, errChan chan error) {
 	}
 	log.Debug("Proxy internal server already listen on tcp", zap.Int("port", grpcPort))
 
-	opts := trace.GetInterceptorOpts()
+	opts := tracer.GetInterceptorOpts()
 	s.grpcInternalServer = grpc.NewServer(
 		grpc.KeepaliveEnforcementPolicy(kaep),
 		grpc.KeepaliveParams(kasp),
 		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize.GetAsInt()),
 		grpc.MaxSendMsgSize(Params.ServerMaxSendSize.GetAsInt()),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
-			ot.UnaryServerInterceptor(opts...),
+			otelgrpc.UnaryServerInterceptor(opts...),
 			logutil.UnaryTraceLoggerInterceptor,
 		)),
 	)
@@ -316,8 +312,6 @@ func (s *Server) init() error {
 	log.Debug("init Proxy's parameter table done", zap.String("internal address", Params.GetInternalAddress()), zap.String("external address", Params.GetAddress()))
 
 	serviceName := fmt.Sprintf("Proxy ip: %s, port: %d", Params.IP, Params.Port.GetAsInt())
-	closer := trace.InitTracing(serviceName)
-	s.closer = closer
 	log.Debug("init Proxy's tracer done", zap.String("service name", serviceName))
 
 	etcdCli, err := etcd.GetEtcdClient(
@@ -480,11 +474,6 @@ func (s *Server) Stop() error {
 	Params := &paramtable.Get().ProxyGrpcServerCfg
 	log.Debug("Proxy stop", zap.String("internal address", Params.GetInternalAddress()), zap.String("external address", Params.GetInternalAddress()))
 	var err error
-	if s.closer != nil {
-		if err = s.closer.Close(); err != nil {
-			return err
-		}
-	}
 
 	if s.etcdCli != nil {
 		defer s.etcdCli.Close()

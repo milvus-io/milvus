@@ -18,15 +18,14 @@ package grpcrootcoord
 
 import (
 	"context"
-	"io"
 	"net"
 	"strconv"
 	"sync"
 	"time"
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
-	ot "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
@@ -38,13 +37,13 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/rootcoord"
+	"github.com/milvus-io/milvus/internal/tracer"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/logutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
-	"github.com/milvus-io/milvus/internal/util/trace"
 
 	dcc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
 	qcc "github.com/milvus-io/milvus/internal/distributed/querycoord/client"
@@ -67,8 +66,6 @@ type Server struct {
 
 	newDataCoordClient  func(string, *clientv3.Client) types.DataCoord
 	newQueryCoordClient func(string, *clientv3.Client) types.QueryCoord
-
-	closer io.Closer
 }
 
 func (s *Server) CheckHealth(ctx context.Context, request *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
@@ -143,9 +140,6 @@ func (s *Server) init() error {
 	etcdConfig := &paramtable.Get().EtcdCfg
 	Params := &paramtable.Get().RootCoordGrpcServerCfg
 	log.Debug("init params done..")
-
-	closer := trace.InitTracing("root_coord")
-	s.closer = closer
 
 	etcdCli, err := etcd.GetEtcdClient(
 		etcdConfig.UseEmbedEtcd.GetAsBool(),
@@ -225,17 +219,17 @@ func (s *Server) startGrpcLoop(port int) {
 	ctx, cancel := context.WithCancel(s.ctx)
 	defer cancel()
 
-	opts := trace.GetInterceptorOpts()
+	opts := tracer.GetInterceptorOpts()
 	s.grpcServer = grpc.NewServer(
 		grpc.KeepaliveEnforcementPolicy(kaep),
 		grpc.KeepaliveParams(kasp),
 		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize.GetAsInt()),
 		grpc.MaxSendMsgSize(Params.ServerMaxSendSize.GetAsInt()),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
-			ot.UnaryServerInterceptor(opts...),
+			otelgrpc.UnaryServerInterceptor(opts...),
 			logutil.UnaryTraceLoggerInterceptor)),
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
-			ot.StreamServerInterceptor(opts...),
+			otelgrpc.StreamServerInterceptor(opts...),
 			logutil.StreamTraceLoggerInterceptor)))
 	rootcoordpb.RegisterRootCoordServer(s.grpcServer, s)
 
@@ -262,11 +256,6 @@ func (s *Server) start() error {
 func (s *Server) Stop() error {
 	Params := &paramtable.Get().RootCoordGrpcServerCfg
 	log.Debug("Rootcoord stop", zap.String("Address", Params.GetAddress()))
-	if s.closer != nil {
-		if err := s.closer.Close(); err != nil {
-			log.Error("Failed to close opentracing", zap.Error(err))
-		}
-	}
 	if s.etcdCli != nil {
 		defer s.etcdCli.Close()
 	}

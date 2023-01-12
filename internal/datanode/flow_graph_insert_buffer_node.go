@@ -24,7 +24,7 @@ import (
 	"sync"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/opentracing/opentracing-go"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
@@ -40,7 +40,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
-	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 )
 
@@ -140,16 +139,16 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 		ibNode.flushManager.startDropping()
 	}
 
-	var spans []opentracing.Span
+	var spans []trace.Span
 	for _, msg := range fgMsg.insertMessages {
-		sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
+		ctx, sp := startTracer(msg, "InsertBuffer-Node")
 		spans = append(spans, sp)
 		msg.SetTraceCtx(ctx)
 	}
 
 	defer func() {
 		for _, sp := range spans {
-			sp.Finish()
+			sp.End()
 		}
 	}()
 

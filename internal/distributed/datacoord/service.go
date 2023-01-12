@@ -19,7 +19,6 @@ package grpcdatacoord
 
 import (
 	"context"
-	"io"
 	"net"
 	"strconv"
 	"sync"
@@ -28,8 +27,9 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
-	ot "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
+	"github.com/milvus-io/milvus/internal/tracer"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
@@ -46,7 +46,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/logutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
-	"github.com/milvus-io/milvus/internal/util/trace"
 )
 
 // Server is the grpc server of datacoord
@@ -61,7 +60,6 @@ type Server struct {
 
 	grpcErrChan chan error
 	grpcServer  *grpc.Server
-	closer      io.Closer
 }
 
 // NewServer new data service grpc server
@@ -80,9 +78,6 @@ func NewServer(ctx context.Context, factory dependency.Factory, opts ...datacoor
 func (s *Server) init() error {
 	etcdConfig := &paramtable.Get().EtcdCfg
 	Params := &paramtable.Get().DataCoordGrpcServerCfg
-
-	closer := trace.InitTracing("datacoord")
-	s.closer = closer
 
 	etcdCli, err := etcd.GetEtcdClient(
 		etcdConfig.UseEmbedEtcd.GetAsBool(),
@@ -148,17 +143,17 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 		Timeout: 10 * time.Second, // Wait 10 second for the ping ack before assuming the connection is dead
 	}
 
-	opts := trace.GetInterceptorOpts()
+	opts := tracer.GetInterceptorOpts()
 	s.grpcServer = grpc.NewServer(
 		grpc.KeepaliveEnforcementPolicy(kaep),
 		grpc.KeepaliveParams(kasp),
 		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize.GetAsInt()),
 		grpc.MaxSendMsgSize(Params.ServerMaxSendSize.GetAsInt()),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
-			ot.UnaryServerInterceptor(opts...),
+			otelgrpc.UnaryServerInterceptor(opts...),
 			logutil.UnaryTraceLoggerInterceptor)),
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
-			ot.StreamServerInterceptor(opts...),
+			otelgrpc.StreamServerInterceptor(opts...),
 			logutil.StreamTraceLoggerInterceptor)))
 	indexpb.RegisterIndexCoordServer(s.grpcServer, s)
 	datapb.RegisterDataCoordServer(s.grpcServer, s)
@@ -188,11 +183,6 @@ func (s *Server) Stop() error {
 	Params := &paramtable.Get().DataCoordGrpcServerCfg
 	log.Debug("Datacoord stop", zap.String("Address", Params.GetAddress()))
 	var err error
-	if s.closer != nil {
-		if err = s.closer.Close(); err != nil {
-			return err
-		}
-	}
 	s.cancel()
 
 	if s.etcdCli != nil {

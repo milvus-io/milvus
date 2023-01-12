@@ -17,19 +17,19 @@
 package flowgraph
 
 import (
+	"context"
 	"fmt"
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
-	"github.com/milvus-io/milvus/internal/util/trace"
-	"github.com/opentracing/opentracing-go"
-	oplog "github.com/opentracing/opentracing-go/log"
 	"go.uber.org/zap"
 )
 
@@ -124,10 +124,14 @@ func (inNode *InputNode) Operate(in []Msg) []Msg {
 			Set(float64(sub))
 	}
 
-	var spans []opentracing.Span
+	var spans []trace.Span
 	for _, msg := range msgPack.Msgs {
-		sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
-		sp.LogFields(oplog.String("input_node name", inNode.Name()))
+		ctx := msg.TraceCtx()
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		ctx, sp := otel.Tracer(inNode.role).Start(ctx, "Operate")
+		sp.AddEvent("input_node name" + inNode.Name())
 		spans = append(spans, sp)
 		msg.SetTraceCtx(ctx)
 	}
@@ -141,10 +145,9 @@ func (inNode *InputNode) Operate(in []Msg) []Msg {
 	}
 
 	for _, span := range spans {
-		span.Finish()
+		span.End()
 	}
 
-	// TODO batch operate msg
 	return []Msg{msgStreamMsg}
 }
 

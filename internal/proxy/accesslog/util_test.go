@@ -23,8 +23,12 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
-	"github.com/milvus-io/milvus/internal/util/trace"
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/tracer"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/stretchr/testify/assert"
+	"go.opentelemetry.io/otel"
+	"go.uber.org/zap"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
 )
@@ -48,12 +52,17 @@ func TestGetAccessAddr(t *testing.T) {
 }
 
 func TestGetTraceID(t *testing.T) {
+	paramtable.Init()
+	tracer.Init()
+
 	ctx := context.Background()
-	_, ok := getTraceID(ctx)
+	traceID, ok := getTraceID(ctx)
+	log.Debug("traceID", zap.String("id", traceID))
 	assert.False(t, ok)
 
-	traceSpan, traceContext := trace.StartSpanFromContext(ctx)
-	trueTraceID, _, _ := trace.InfoFromSpan(traceSpan)
+	traceContext, traceSpan := otel.Tracer("proxy").Start(ctx, "demo")
+	trueTraceID := traceSpan.SpanContext().TraceID().String()
+	log.Debug("traceID", zap.String("trueTraceID", trueTraceID))
 	ID, ok := getTraceID(traceContext)
 	assert.True(t, ok)
 	assert.Equal(t, trueTraceID, ID)

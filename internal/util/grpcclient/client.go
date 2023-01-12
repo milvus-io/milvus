@@ -23,19 +23,19 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
 
-	grpcopentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/tracer"
 	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/crypto"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/generic"
-	"github.com/milvus-io/milvus/internal/util/trace"
 )
 
 // GrpcClient abstracts client of grpc
@@ -150,7 +150,7 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 		return err
 	}
 
-	opts := trace.GetInterceptorOpts()
+	opts := tracer.GetInterceptorOpts()
 	dialContext, cancel := context.WithTimeout(ctx, c.DialTimeout)
 
 	// refer to https://github.com/grpc/grpc-proto/blob/master/grpc/service_config/service_config.proto
@@ -179,8 +179,8 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 				grpc.MaxCallRecvMsgSize(c.ClientMaxRecvSize),
 				grpc.MaxCallSendMsgSize(c.ClientMaxSendSize),
 			),
-			grpc.WithUnaryInterceptor(grpcopentracing.UnaryClientInterceptor(opts...)),
-			grpc.WithStreamInterceptor(grpcopentracing.StreamClientInterceptor(opts...)),
+			grpc.WithUnaryInterceptor(otelgrpc.UnaryClientInterceptor(opts...)),
+			grpc.WithStreamInterceptor(otelgrpc.StreamClientInterceptor(opts...)),
 			grpc.WithDefaultServiceConfig(retryPolicy),
 			grpc.WithKeepaliveParams(keepalive.ClientParameters{
 				Time:                c.KeepAliveTime,
@@ -209,8 +209,8 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 				grpc.MaxCallRecvMsgSize(c.ClientMaxRecvSize),
 				grpc.MaxCallSendMsgSize(c.ClientMaxSendSize),
 			),
-			grpc.WithUnaryInterceptor(grpcopentracing.UnaryClientInterceptor(opts...)),
-			grpc.WithStreamInterceptor(grpcopentracing.StreamClientInterceptor(opts...)),
+			grpc.WithUnaryInterceptor(otelgrpc.UnaryClientInterceptor(opts...)),
+			grpc.WithStreamInterceptor(otelgrpc.StreamClientInterceptor(opts...)),
 			grpc.WithDefaultServiceConfig(retryPolicy),
 			grpc.WithKeepaliveParams(keepalive.ClientParameters{
 				Time:                c.KeepAliveTime,
@@ -274,7 +274,7 @@ func (c *ClientBase[T]) Call(ctx context.Context, caller func(client T) (any, er
 
 	ret, err := c.callOnce(ctx, caller)
 	if err != nil {
-		traceErr := fmt.Errorf("err: %w\n, %s", err, trace.StackTrace())
+		traceErr := fmt.Errorf("err: %w\n, %s", err, tracer.StackTrace())
 		log.Warn("ClientBase Call grpc first call get error", zap.String("role", c.GetRole()), zap.Error(traceErr))
 		return generic.Zero[T](), traceErr
 	}
@@ -292,7 +292,7 @@ func (c *ClientBase[T]) ReCall(ctx context.Context, caller func(client T) (any, 
 		return ret, nil
 	}
 
-	traceErr := fmt.Errorf("err: %w\n, %s", err, trace.StackTrace())
+	traceErr := fmt.Errorf("err: %w\n, %s", err, tracer.StackTrace())
 	log.Warn("ClientBase ReCall grpc first call get error ", zap.String("role", c.GetRole()), zap.Error(traceErr))
 
 	if !funcutil.CheckCtxValid(ctx) {
@@ -301,7 +301,7 @@ func (c *ClientBase[T]) ReCall(ctx context.Context, caller func(client T) (any, 
 
 	ret, err = c.callOnce(ctx, caller)
 	if err != nil {
-		traceErr = fmt.Errorf("err: %w\n, %s", err, trace.StackTrace())
+		traceErr = fmt.Errorf("err: %w\n, %s", err, tracer.StackTrace())
 		log.Warn("ClientBase ReCall grpc second call get error", zap.String("role", c.GetRole()), zap.Error(traceErr))
 		return generic.Zero[T](), traceErr
 	}

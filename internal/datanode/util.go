@@ -14,39 +14,41 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package trace
+package datanode
 
 import (
-	"fmt"
-	"runtime"
+	"context"
+
+	"github.com/milvus-io/milvus/internal/mq/msgstream"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/trace"
 )
 
-const (
-	numFuncsInStack = 10
-	frameNumToSkip  = 2
+type (
+	// UniqueID is type int64
+	UniqueID = typeutil.UniqueID
+
+	// Timestamp is type uint64
+	Timestamp = typeutil.Timestamp
+
+	// IntPrimaryKey is type int64
+	IntPrimaryKey = typeutil.IntPrimaryKey
+
+	// DSL is type string
+	DSL = string
 )
 
-// StackTraceMsg returns the stack information, which numFuncs means how many functions do you want to show in the stack
-// information.
-func StackTraceMsg(numFuncs uint) string {
-	pc := make([]uintptr, numFuncs)
-	n := runtime.Callers(frameNumToSkip, pc)
-	frames := runtime.CallersFrames(pc[:n])
-
-	ret := ""
-
-	for {
-		frame, more := frames.Next()
-		ret += fmt.Sprintf("%s:%d %s\n", frame.File, frame.Line, frame.Function)
-		if !more {
-			break
-		}
-	}
-
-	return ret
+// TimeRange is a range of timestamp contains the min-timestamp and max-timestamp
+type TimeRange struct {
+	timestampMin Timestamp
+	timestampMax Timestamp
 }
 
-// StackTrace returns the stack trace information.
-func StackTrace() string {
-	return StackTraceMsg(numFuncsInStack)
+func startTracer(msg msgstream.TsMsg, name string) (context.Context, trace.Span) {
+	ctx := msg.TraceCtx()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return otel.Tracer(typeutil.DataNodeRole).Start(ctx, name)
 }

@@ -24,6 +24,7 @@ import (
 	"strconv"
 	"sync"
 
+	"go.opentelemetry.io/otel"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/golang/protobuf/proto"
@@ -47,7 +48,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
-	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
 )
@@ -106,8 +106,9 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 		return unhealthyStatus(), nil
 	}
 	ctx = logutil.WithModule(ctx, moduleName)
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-InvalidateCollectionMetaCache")
-	defer sp.Finish()
+
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-InvalidateCollectionMetaCache")
+	defer sp.End()
 	log := log.Ctx(ctx).With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
@@ -152,8 +153,8 @@ func (node *Proxy) CreateCollection(ctx context.Context, request *milvuspb.Creat
 		return unhealthyStatus(), nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-CreateCollection")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-CreateCollection")
+	defer sp.End()
 	method := "CreateCollection"
 	tr := timerecord.NewTimeRecorder(method)
 
@@ -227,8 +228,8 @@ func (node *Proxy) DropCollection(ctx context.Context, request *milvuspb.DropCol
 		return unhealthyStatus(), nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-DropCollection")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-DropCollection")
+	defer sp.End()
 	method := "DropCollection"
 	tr := timerecord.NewTimeRecorder(method)
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel).Inc()
@@ -294,8 +295,8 @@ func (node *Proxy) HasCollection(ctx context.Context, request *milvuspb.HasColle
 		}, nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-HasCollection")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-HasCollection")
+	defer sp.End()
 	method := "HasCollection"
 	tr := timerecord.NewTimeRecorder(method)
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
@@ -365,8 +366,8 @@ func (node *Proxy) LoadCollection(ctx context.Context, request *milvuspb.LoadCol
 		return unhealthyStatus(), nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-LoadCollection")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-LoadCollection")
+	defer sp.End()
 	method := "LoadCollection"
 	tr := timerecord.NewTimeRecorder(method)
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
@@ -431,8 +432,8 @@ func (node *Proxy) ReleaseCollection(ctx context.Context, request *milvuspb.Rele
 		return unhealthyStatus(), nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-ReleaseCollection")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-ReleaseCollection")
+	defer sp.End()
 	method := "ReleaseCollection"
 	tr := timerecord.NewTimeRecorder(method)
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
@@ -504,8 +505,8 @@ func (node *Proxy) DescribeCollection(ctx context.Context, request *milvuspb.Des
 		}, nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-DescribeCollection")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-DescribeCollection")
+	defer sp.End()
 	method := "DescribeCollection"
 	tr := timerecord.NewTimeRecorder(method)
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
@@ -579,8 +580,8 @@ func (node *Proxy) GetStatistics(ctx context.Context, request *milvuspb.GetStati
 		}, nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-GetStatistics")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetStatistics")
+	defer sp.End()
 	method := "GetStatistics"
 	tr := timerecord.NewTimeRecorder(method)
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
@@ -665,8 +666,8 @@ func (node *Proxy) GetCollectionStatistics(ctx context.Context, request *milvusp
 		}, nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-GetCollectionStatistics")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetCollectionStatistics")
+	defer sp.End()
 	method := "GetCollectionStatistics"
 	tr := timerecord.NewTimeRecorder(method)
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
@@ -742,8 +743,8 @@ func (node *Proxy) ShowCollections(ctx context.Context, request *milvuspb.ShowCo
 			Status: unhealthyStatus(),
 		}, nil
 	}
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-ShowCollections")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-ShowCollections")
+	defer sp.End()
 	method := "ShowCollections"
 	tr := timerecord.NewTimeRecorder(method)
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel).Inc()
@@ -813,8 +814,8 @@ func (node *Proxy) AlterCollection(ctx context.Context, request *milvuspb.AlterC
 		return unhealthyStatus(), nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-AlterCollection")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AlterCollection")
+	defer sp.End()
 	method := "AlterCollection"
 	tr := timerecord.NewTimeRecorder(method)
 
@@ -883,8 +884,8 @@ func (node *Proxy) CreatePartition(ctx context.Context, request *milvuspb.Create
 		return unhealthyStatus(), nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-CreatePartition")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-CreatePartition")
+	defer sp.End()
 	method := "CreatePartition"
 	tr := timerecord.NewTimeRecorder(method)
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel).Inc()
@@ -954,8 +955,8 @@ func (node *Proxy) DropPartition(ctx context.Context, request *milvuspb.DropPart
 		return unhealthyStatus(), nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-DropPartition")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-DropPartition")
+	defer sp.End()
 	method := "DropPartition"
 	tr := timerecord.NewTimeRecorder(method)
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel).Inc()
@@ -1028,8 +1029,8 @@ func (node *Proxy) HasPartition(ctx context.Context, request *milvuspb.HasPartit
 		}, nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-HasPartition")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-HasPartition")
+	defer sp.End()
 	method := "HasPartition"
 	tr := timerecord.NewTimeRecorder(method)
 	//TODO: use collectionID instead of collectionName
@@ -1110,8 +1111,8 @@ func (node *Proxy) LoadPartitions(ctx context.Context, request *milvuspb.LoadPar
 		return unhealthyStatus(), nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-LoadPartitions")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-LoadPartitions")
+	defer sp.End()
 	method := "LoadPartitions"
 	tr := timerecord.NewTimeRecorder(method)
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
@@ -1184,8 +1185,8 @@ func (node *Proxy) ReleasePartitions(ctx context.Context, request *milvuspb.Rele
 		return unhealthyStatus(), nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-ReleasePartitions")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-ReleasePartitions")
+	defer sp.End()
 
 	rpt := &releasePartitionsTask{
 		ctx:                      ctx,
@@ -1261,8 +1262,8 @@ func (node *Proxy) GetPartitionStatistics(ctx context.Context, request *milvuspb
 		}, nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-GetPartitionStatistics")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetPartitionStatistics")
+	defer sp.End()
 	method := "GetPartitionStatistics"
 	tr := timerecord.NewTimeRecorder(method)
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
@@ -1341,8 +1342,8 @@ func (node *Proxy) ShowPartitions(ctx context.Context, request *milvuspb.ShowPar
 		}, nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-ShowPartitions")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-ShowPartitions")
+	defer sp.End()
 
 	spt := &showPartitionsTask{
 		ctx:                   ctx,
@@ -1431,8 +1432,8 @@ func (node *Proxy) GetLoadingProgress(ctx context.Context, request *milvuspb.Get
 	}
 	method := "GetLoadingProgress"
 	tr := timerecord.NewTimeRecorder(method)
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-GetLoadingProgress")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetLoadingProgress")
+	defer sp.End()
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel).Inc()
 	log := log.Ctx(ctx)
 
@@ -1510,8 +1511,8 @@ func (node *Proxy) GetLoadState(ctx context.Context, request *milvuspb.GetLoadSt
 	}
 	method := "GetLoadState"
 	tr := timerecord.NewTimeRecorder(method)
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-GetLoadState")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetLoadState")
+	defer sp.End()
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel).Inc()
 	log := log.Ctx(ctx)
 
@@ -1614,8 +1615,8 @@ func (node *Proxy) CreateIndex(ctx context.Context, request *milvuspb.CreateInde
 		return unhealthyStatus(), nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-CreateIndex")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-CreateIndex")
+	defer sp.End()
 
 	cit := &createIndexTask{
 		ctx:        ctx,
@@ -1694,8 +1695,8 @@ func (node *Proxy) DescribeIndex(ctx context.Context, request *milvuspb.Describe
 		}, nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-DescribeIndex")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-DescribeIndex")
+	defer sp.End()
 
 	dit := &describeIndexTask{
 		ctx:                  ctx,
@@ -1779,8 +1780,8 @@ func (node *Proxy) DropIndex(ctx context.Context, request *milvuspb.DropIndexReq
 		return unhealthyStatus(), nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-DropIndex")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-DropIndex")
+	defer sp.End()
 
 	dit := &dropIndexTask{
 		ctx:              ctx,
@@ -1859,8 +1860,8 @@ func (node *Proxy) GetIndexBuildProgress(ctx context.Context, request *milvuspb.
 		}, nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-GetIndexBuildProgress")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetIndexBuildProgress")
+	defer sp.End()
 
 	gibpt := &getIndexBuildProgressTask{
 		ctx:                          ctx,
@@ -1941,8 +1942,8 @@ func (node *Proxy) GetIndexState(ctx context.Context, request *milvuspb.GetIndex
 		}, nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-Insert")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Insert")
+	defer sp.End()
 
 	dipt := &getIndexStateTask{
 		ctx:                  ctx,
@@ -2017,11 +2018,8 @@ func (node *Proxy) GetIndexState(ctx context.Context, request *milvuspb.GetIndex
 
 // Insert insert records into collection.
 func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) (*milvuspb.MutationResult, error) {
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-Insert")
-	defer sp.Finish()
-	log := log.Ctx(ctx)
-	log.Debug("Start processing insert request in Proxy")
-	defer log.Debug("Finish processing insert request in Proxy")
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Insert")
+	defer sp.End()
 
 	if !node.checkHealthy() {
 		return &milvuspb.MutationResult{
@@ -2143,8 +2141,8 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 
 // Delete delete records from collection, then these records cannot be searched.
 func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) (*milvuspb.MutationResult, error) {
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-Delete")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Delete")
+	defer sp.End()
 	log := log.Ctx(ctx)
 	log.Debug("Start processing delete request in Proxy")
 	defer log.Debug("Finish processing delete request in Proxy")
@@ -2238,8 +2236,8 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 
 // Upsert upsert records into collection.
 func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) (*milvuspb.MutationResult, error) {
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-Upsert")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Upsert")
+	defer sp.End()
 
 	log := log.Ctx(ctx).With(
 		zap.String("role", typeutil.ProxyRole),
@@ -2387,8 +2385,8 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 		metrics.TotalLabel).Inc()
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-Search")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Search")
+	defer sp.End()
 
 	qt := &searchTask{
 		ctx:       ctx,
@@ -2496,8 +2494,8 @@ func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*
 		return resp, nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-Flush")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Flush")
+	defer sp.End()
 
 	ft := &flushTask{
 		ctx:          ctx,
@@ -2570,8 +2568,8 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		}, nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-Query")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Query")
+	defer sp.End()
 	tr := timerecord.NewTimeRecorder("Query")
 
 	qt := &queryTask{
@@ -2672,8 +2670,8 @@ func (node *Proxy) CreateAlias(ctx context.Context, request *milvuspb.CreateAlia
 		return unhealthyStatus(), nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-CreateAlias")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-CreateAlias")
+	defer sp.End()
 
 	cat := &CreateAliasTask{
 		ctx:                ctx,
@@ -2742,8 +2740,8 @@ func (node *Proxy) DropAlias(ctx context.Context, request *milvuspb.DropAliasReq
 		return unhealthyStatus(), nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-DropAlias")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-DropAlias")
+	defer sp.End()
 
 	dat := &DropAliasTask{
 		ctx:              ctx,
@@ -2811,8 +2809,8 @@ func (node *Proxy) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasR
 		return unhealthyStatus(), nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-AlterAlias")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AlterAlias")
+	defer sp.End()
 
 	aat := &AlterAliasTask{
 		ctx:               ctx,
@@ -2883,9 +2881,8 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 		}, nil
 	}
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-CalcDistance")
-	defer sp.Finish()
-	traceID, _, _ := trace.InfoFromSpan(sp)
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-CalcDistance")
+	defer sp.End()
 
 	query := func(ids *milvuspb.VectorIDs) (*milvuspb.QueryResults, error) {
 		outputFields := []string{ids.FieldName}
@@ -2958,7 +2955,7 @@ func (node *Proxy) CalcDistance(ctx context.Context, request *milvuspb.CalcDista
 
 	// calcDistanceTask is not a standard task, no need to enqueue
 	task := &calcDistanceTask{
-		traceID:   traceID,
+		traceID:   sp.SpanContext().TraceID().String(),
 		queryFunc: query,
 	}
 
@@ -2972,8 +2969,8 @@ func (node *Proxy) GetDdChannel(ctx context.Context, request *internalpb.GetDdCh
 
 // GetPersistentSegmentInfo get the information of sealed segment.
 func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.GetPersistentSegmentInfoRequest) (*milvuspb.GetPersistentSegmentInfoResponse, error) {
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-GetPersistentSegmentInfo")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetPersistentSegmentInfo")
+	defer sp.End()
 
 	log := log.Ctx(ctx)
 
@@ -3062,8 +3059,8 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 
 // GetQuerySegmentInfo gets segment information from QueryCoord.
 func (node *Proxy) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.GetQuerySegmentInfoRequest) (*milvuspb.GetQuerySegmentInfoResponse, error) {
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-GetQuerySegmentInfo")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetQuerySegmentInfo")
+	defer sp.End()
 
 	log := log.Ctx(ctx)
 
@@ -3149,8 +3146,8 @@ func (node *Proxy) Dummy(ctx context.Context, req *milvuspb.DummyRequest) (*milv
 	// TODO(wxyu): change name RequestType to Request
 	drt, err := parseDummyRequestType(req.RequestType)
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-Dummy")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Dummy")
+	defer sp.End()
 
 	log := log.Ctx(ctx)
 
@@ -3195,8 +3192,8 @@ func (node *Proxy) Dummy(ctx context.Context, req *milvuspb.DummyRequest) (*milv
 func (node *Proxy) RegisterLink(ctx context.Context, req *milvuspb.RegisterLinkRequest) (*milvuspb.RegisterLinkResponse, error) {
 	code := node.stateCode.Load().(commonpb.StateCode)
 
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-RegisterLink")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-RegisterLink")
+	defer sp.End()
 
 	log := log.Ctx(ctx).With(
 		zap.String("role", typeutil.ProxyRole),
@@ -3226,8 +3223,8 @@ func (node *Proxy) RegisterLink(ctx context.Context, req *milvuspb.RegisterLinkR
 // GetMetrics gets the metrics of proxy
 // TODO(dragondriver): cache the Metrics and set a retention to the cache
 func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-GetMetrics")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetMetrics")
+	defer sp.End()
 
 	log := log.Ctx(ctx)
 
@@ -3306,8 +3303,8 @@ func (node *Proxy) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReque
 // GetProxyMetrics gets the metrics of proxy, it's an internal interface which is different from GetMetrics interface,
 // because it only obtains the metrics of Proxy, not including the topological metrics of Query cluster and Data cluster.
 func (node *Proxy) GetProxyMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-GetProxyMetrics")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetProxyMetrics")
+	defer sp.End()
 
 	log := log.Ctx(ctx).With(
 		zap.Int64("nodeID", paramtable.GetNodeID()),
@@ -3377,8 +3374,8 @@ func (node *Proxy) GetProxyMetrics(ctx context.Context, req *milvuspb.GetMetrics
 
 // LoadBalance would do a load balancing operation between query nodes
 func (node *Proxy) LoadBalance(ctx context.Context, req *milvuspb.LoadBalanceRequest) (*commonpb.Status, error) {
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-LoadBalance")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-LoadBalance")
+	defer sp.End()
 
 	log := log.Ctx(ctx)
 
@@ -3436,8 +3433,8 @@ func (node *Proxy) LoadBalance(ctx context.Context, req *milvuspb.LoadBalanceReq
 
 // GetReplicas gets replica info
 func (node *Proxy) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasRequest) (*milvuspb.GetReplicasResponse, error) {
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-GetReplicas")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetReplicas")
+	defer sp.End()
 
 	log := log.Ctx(ctx)
 
@@ -3471,8 +3468,8 @@ func (node *Proxy) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasReq
 
 // GetCompactionState gets the compaction state of multiple segments
 func (node *Proxy) GetCompactionState(ctx context.Context, req *milvuspb.GetCompactionStateRequest) (*milvuspb.GetCompactionStateResponse, error) {
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-GetCompactionState")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetCompactionState")
+	defer sp.End()
 
 	log := log.Ctx(ctx).With(
 		zap.Int64("compactionID", req.GetCompactionID()))
@@ -3493,8 +3490,8 @@ func (node *Proxy) GetCompactionState(ctx context.Context, req *milvuspb.GetComp
 
 // ManualCompaction invokes compaction on specified collection
 func (node *Proxy) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompactionRequest) (*milvuspb.ManualCompactionResponse, error) {
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-ManualCompaction")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-ManualCompaction")
+	defer sp.End()
 
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()))
@@ -3515,8 +3512,8 @@ func (node *Proxy) ManualCompaction(ctx context.Context, req *milvuspb.ManualCom
 
 // GetCompactionStateWithPlans returns the compactions states with the given plan ID
 func (node *Proxy) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.GetCompactionPlansRequest) (*milvuspb.GetCompactionPlansResponse, error) {
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-GetCompactionStateWithPlans")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetCompactionStateWithPlans")
+	defer sp.End()
 
 	log := log.Ctx(ctx).With(
 		zap.Int64("compactionID", req.GetCompactionID()))
@@ -3537,8 +3534,8 @@ func (node *Proxy) GetCompactionStateWithPlans(ctx context.Context, req *milvusp
 
 // GetFlushState gets the flush state of multiple segments
 func (node *Proxy) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-GetFlushState")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetFlushState")
+	defer sp.End()
 
 	log := log.Ctx(ctx)
 
@@ -3584,8 +3581,8 @@ func unhealthyStatus() *commonpb.Status {
 
 // Import data files(json, numpy, etc.) on MinIO/S3 storage, read and parse them into sealed segments
 func (node *Proxy) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-Import")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Import")
+	defer sp.End()
 
 	log := log.Ctx(ctx)
 
@@ -3636,8 +3633,8 @@ func (node *Proxy) Import(ctx context.Context, req *milvuspb.ImportRequest) (*mi
 
 // GetImportState checks import task state from RootCoord.
 func (node *Proxy) GetImportState(ctx context.Context, req *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error) {
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-GetImportState")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetImportState")
+	defer sp.End()
 
 	log := log.Ctx(ctx)
 
@@ -3673,8 +3670,8 @@ func (node *Proxy) GetImportState(ctx context.Context, req *milvuspb.GetImportSt
 
 // ListImportTasks get id array of all import tasks from rootcoord
 func (node *Proxy) ListImportTasks(ctx context.Context, req *milvuspb.ListImportTasksRequest) (*milvuspb.ListImportTasksResponse, error) {
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-ListImportTasks")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-ListImportTasks")
+	defer sp.End()
 
 	log := log.Ctx(ctx)
 
@@ -3708,10 +3705,8 @@ func (node *Proxy) ListImportTasks(ctx context.Context, req *milvuspb.ListImport
 
 // InvalidateCredentialCache invalidate the credential cache of specified username.
 func (node *Proxy) InvalidateCredentialCache(ctx context.Context, request *proxypb.InvalidateCredCacheRequest) (*commonpb.Status, error) {
-	ctx = logutil.WithModule(ctx, moduleName)
-
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-InvalidateCredentialCache")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-InvalidateCredentialCache")
+	defer sp.End()
 
 	log := log.Ctx(ctx).With(
 		zap.String("role", typeutil.ProxyRole),
@@ -3736,10 +3731,8 @@ func (node *Proxy) InvalidateCredentialCache(ctx context.Context, request *proxy
 
 // UpdateCredentialCache update the credential cache of specified username.
 func (node *Proxy) UpdateCredentialCache(ctx context.Context, request *proxypb.UpdateCredCacheRequest) (*commonpb.Status, error) {
-	ctx = logutil.WithModule(ctx, moduleName)
-
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-UpdateCredentialCache")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-UpdateCredentialCache")
+	defer sp.End()
 
 	log := log.Ctx(ctx).With(
 		zap.String("role", typeutil.ProxyRole),
@@ -3765,9 +3758,10 @@ func (node *Proxy) UpdateCredentialCache(ctx context.Context, request *proxypb.U
 	}, nil
 }
 
+//
 func (node *Proxy) CreateCredential(ctx context.Context, req *milvuspb.CreateCredentialRequest) (*commonpb.Status, error) {
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-CreateCredential")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-CreateCredential")
+	defer sp.End()
 
 	log := log.Ctx(ctx).With(
 		zap.String("username", req.Username))
@@ -3829,9 +3823,10 @@ func (node *Proxy) CreateCredential(ctx context.Context, req *milvuspb.CreateCre
 	return result, err
 }
 
+//
 func (node *Proxy) UpdateCredential(ctx context.Context, req *milvuspb.UpdateCredentialRequest) (*commonpb.Status, error) {
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-UpdateCredential")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-UpdateCredential")
+	defer sp.End()
 
 	log := log.Ctx(ctx).With(
 		zap.String("username", req.Username))
@@ -3902,9 +3897,10 @@ func (node *Proxy) UpdateCredential(ctx context.Context, req *milvuspb.UpdateCre
 	return result, err
 }
 
+//
 func (node *Proxy) DeleteCredential(ctx context.Context, req *milvuspb.DeleteCredentialRequest) (*commonpb.Status, error) {
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-DeleteCredential")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-DeleteCredential")
+	defer sp.End()
 
 	log := log.Ctx(ctx).With(
 		zap.String("username", req.Username))
@@ -3934,8 +3930,8 @@ func (node *Proxy) DeleteCredential(ctx context.Context, req *milvuspb.DeleteCre
 }
 
 func (node *Proxy) ListCredUsers(ctx context.Context, req *milvuspb.ListCredUsersRequest) (*milvuspb.ListCredUsersResponse, error) {
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-ListCredUsers")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-ListCredUsers")
+	defer sp.End()
 
 	log := log.Ctx(ctx).With(
 		zap.String("role", typeutil.ProxyRole))
@@ -3967,8 +3963,8 @@ func (node *Proxy) ListCredUsers(ctx context.Context, req *milvuspb.ListCredUser
 }
 
 func (node *Proxy) CreateRole(ctx context.Context, req *milvuspb.CreateRoleRequest) (*commonpb.Status, error) {
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-CreateRole")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-CreateRole")
+	defer sp.End()
 
 	log := log.Ctx(ctx)
 
@@ -4002,8 +3998,8 @@ func (node *Proxy) CreateRole(ctx context.Context, req *milvuspb.CreateRoleReque
 }
 
 func (node *Proxy) DropRole(ctx context.Context, req *milvuspb.DropRoleRequest) (*commonpb.Status, error) {
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-DropRole")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-DropRole")
+	defer sp.End()
 
 	log := log.Ctx(ctx)
 
@@ -4039,8 +4035,8 @@ func (node *Proxy) DropRole(ctx context.Context, req *milvuspb.DropRoleRequest) 
 }
 
 func (node *Proxy) OperateUserRole(ctx context.Context, req *milvuspb.OperateUserRoleRequest) (*commonpb.Status, error) {
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-OperateUserRole")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-OperateUserRole")
+	defer sp.End()
 
 	log := log.Ctx(ctx)
 
@@ -4075,8 +4071,8 @@ func (node *Proxy) OperateUserRole(ctx context.Context, req *milvuspb.OperateUse
 }
 
 func (node *Proxy) SelectRole(ctx context.Context, req *milvuspb.SelectRoleRequest) (*milvuspb.SelectRoleResponse, error) {
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-SelectRole")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-SelectRole")
+	defer sp.End()
 
 	log := log.Ctx(ctx)
 
@@ -4111,8 +4107,8 @@ func (node *Proxy) SelectRole(ctx context.Context, req *milvuspb.SelectRoleReque
 }
 
 func (node *Proxy) SelectUser(ctx context.Context, req *milvuspb.SelectUserRequest) (*milvuspb.SelectUserResponse, error) {
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-SelectUser")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-SelectUser")
+	defer sp.End()
 
 	log := log.Ctx(ctx)
 
@@ -4180,8 +4176,8 @@ func (node *Proxy) validPrivilegeParams(req *milvuspb.OperatePrivilegeRequest) e
 }
 
 func (node *Proxy) OperatePrivilege(ctx context.Context, req *milvuspb.OperatePrivilegeRequest) (*commonpb.Status, error) {
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-OperatePrivilege")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-OperatePrivilege")
+	defer sp.End()
 
 	log := log.Ctx(ctx)
 
@@ -4243,8 +4239,8 @@ func (node *Proxy) validGrantParams(req *milvuspb.SelectGrantRequest) error {
 }
 
 func (node *Proxy) SelectGrant(ctx context.Context, req *milvuspb.SelectGrantRequest) (*milvuspb.SelectGrantResponse, error) {
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-SelectGrant")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-SelectGrant")
+	defer sp.End()
 
 	log := log.Ctx(ctx)
 
@@ -4278,8 +4274,8 @@ func (node *Proxy) SelectGrant(ctx context.Context, req *milvuspb.SelectGrantReq
 }
 
 func (node *Proxy) RefreshPolicyInfoCache(ctx context.Context, req *proxypb.RefreshPolicyInfoCacheRequest) (*commonpb.Status, error) {
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-RefreshPolicyInfoCache")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-RefreshPolicyInfoCache")
+	defer sp.End()
 
 	log := log.Ctx(ctx)
 
@@ -4354,8 +4350,8 @@ func (node *Proxy) CheckHealth(ctx context.Context, request *milvuspb.CheckHealt
 		mu.Lock()
 		defer mu.Unlock()
 
-		sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-RefreshPolicyInfoCache")
-		defer sp.Finish()
+		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-RefreshPolicyInfoCache")
+		defer sp.End()
 
 		log := log.Ctx(ctx).With(zap.String("role", role))
 

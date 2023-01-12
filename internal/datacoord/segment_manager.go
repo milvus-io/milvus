@@ -23,14 +23,16 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel"
+
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"go.uber.org/zap"
 )
 
 var (
@@ -230,8 +232,9 @@ func (s *SegmentManager) loadSegmentsFromMeta() {
 // AllocSegment allocate segment per request collcation, partication, channel and rows
 func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID,
 	partitionID UniqueID, channelName string, requestRows int64) ([]*Allocation, error) {
-	sp, _ := trace.StartSpanFromContext(ctx)
-	defer sp.Finish()
+
+	_, sp := otel.Tracer(typeutil.DataCoordRole).Start(ctx, "Alloc-Segment")
+	defer sp.End()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -339,8 +342,8 @@ func (s *SegmentManager) genExpireTs(ctx context.Context) (Timestamp, error) {
 
 func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID UniqueID, partitionID UniqueID,
 	channelName string, segmentState commonpb.SegmentState) (*SegmentInfo, error) {
-	sp, _ := trace.StartSpanFromContext(ctx)
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.DataCoordRole).Start(ctx, "open-Segment")
+	defer sp.End()
 	id, err := s.allocator.allocID(ctx)
 	if err != nil {
 		log.Error("failed to open new segment while allocID", zap.Error(err))
@@ -391,8 +394,8 @@ func (s *SegmentManager) estimateMaxNumOfRows(collectionID UniqueID) (int, error
 
 // DropSegment drop the segment from manager.
 func (s *SegmentManager) DropSegment(ctx context.Context, segmentID UniqueID) {
-	sp, _ := trace.StartSpanFromContext(ctx)
-	defer sp.Finish()
+	_, sp := otel.Tracer(typeutil.DataCoordRole).Start(ctx, "Drop-Segment")
+	defer sp.End()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for i, id := range s.segments {
@@ -414,8 +417,8 @@ func (s *SegmentManager) DropSegment(ctx context.Context, segmentID UniqueID) {
 
 // SealAllSegments seals all segments of collection with collectionID and return sealed segments
 func (s *SegmentManager) SealAllSegments(ctx context.Context, collectionID UniqueID, segIDs []UniqueID) ([]UniqueID, error) {
-	sp, _ := trace.StartSpanFromContext(ctx)
-	defer sp.Finish()
+	_, sp := otel.Tracer(typeutil.DataCoordRole).Start(ctx, "Seal-Segments")
+	defer sp.End()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var ret []UniqueID
@@ -450,10 +453,10 @@ func (s *SegmentManager) SealAllSegments(ctx context.Context, collectionID Uniqu
 
 // GetFlushableSegments get segment ids with Sealed State and flushable (meets flushPolicy)
 func (s *SegmentManager) GetFlushableSegments(ctx context.Context, channel string, t Timestamp) ([]UniqueID, error) {
+	_, sp := otel.Tracer(typeutil.DataCoordRole).Start(ctx, "Get-Segments")
+	defer sp.End()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	sp, _ := trace.StartSpanFromContext(ctx)
-	defer sp.Finish()
 	// TODO:move tryToSealSegment and dropEmptySealedSegment outside
 	if err := s.tryToSealSegment(t, channel); err != nil {
 		return nil, err

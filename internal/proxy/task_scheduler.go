@@ -23,13 +23,12 @@ import (
 	"fmt"
 	"sync"
 
+	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
-	"github.com/milvus-io/milvus/internal/util/trace"
-	"github.com/opentracing/opentracing-go"
-	oplog "github.com/opentracing/opentracing-go/log"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 type taskQueue interface {
@@ -426,22 +425,17 @@ func (sched *taskScheduler) getTaskByReqID(reqID UniqueID) task {
 }
 
 func (sched *taskScheduler) processTask(t task, q taskQueue) {
-	span, ctx := trace.StartSpanFromContext(t.TraceCtx(),
-		opentracing.Tags{
-			"Type": t.Name(),
-			"ID":   t.ID(),
-		})
-	defer span.Finish()
-	log := log.Ctx(ctx)
+	ctx, span := otel.Tracer(typeutil.ProxyRole).Start(t.TraceCtx(), t.Name())
+	defer span.End()
 
-	span.LogFields(oplog.Int64("scheduler process AddActiveTask", t.ID()))
+	span.AddEvent("scheduler process AddActiveTask")
 	q.AddActiveTask(t)
 
 	defer func() {
-		span.LogFields(oplog.Int64("scheduler process PopActiveTask", t.ID()))
+		span.AddEvent("scheduler process PopActiveTask")
 		q.PopActiveTask(t.ID())
 	}()
-	span.LogFields(oplog.Int64("scheduler process PreExecute", t.ID()))
+	span.AddEvent("scheduler process PreExecute")
 
 	err := t.PreExecute(ctx)
 
@@ -449,25 +443,25 @@ func (sched *taskScheduler) processTask(t task, q taskQueue) {
 		t.Notify(err)
 	}()
 	if err != nil {
-		trace.LogError(span, err)
-		log.Warn("Failed to pre-execute task: " + err.Error())
+		span.RecordError(err)
+		log.Ctx(ctx).Error("Failed to pre-execute task: " + err.Error())
 		return
 	}
 
-	span.LogFields(oplog.Int64("scheduler process Execute", t.ID()))
+	span.AddEvent("scheduler process Execute")
 	err = t.Execute(ctx)
 	if err != nil {
-		trace.LogError(span, err)
-		log.Warn("Failed to execute task: ", zap.Error(err))
+		span.RecordError(err)
+		log.Ctx(ctx).Error("Failed to execute task: ", zap.Error(err))
 		return
 	}
 
-	span.LogFields(oplog.Int64("scheduler process PostExecute", t.ID()))
+	span.AddEvent("scheduler process PostExecute")
 	err = t.PostExecute(ctx)
 
 	if err != nil {
-		trace.LogError(span, err)
-		log.Warn("Failed to post-execute task: ", zap.Error(err))
+		span.RecordError(err)
+		log.Ctx(ctx).Error("Failed to post-execute task: ", zap.Error(err))
 		return
 	}
 }

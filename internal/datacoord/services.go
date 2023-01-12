@@ -24,6 +24,7 @@ import (
 	"sync"
 
 	"github.com/samber/lo"
+	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
@@ -39,7 +40,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
-	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -74,8 +74,8 @@ func (s *Server) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResp
 // these segments will be flushed only after the Flush policy is fulfilled
 func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.FlushResponse, error) {
 	log.Info("receive flush request", zap.Int64("dbID", req.GetDbID()), zap.Int64("collectionID", req.GetCollectionID()))
-	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "DataCoord-Flush")
-	defer sp.Finish()
+	ctx, sp := otel.Tracer(typeutil.DataCoordRole).Start(ctx, "DataCoord-Flush")
+	defer sp.End()
 	resp := &datapb.FlushResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,

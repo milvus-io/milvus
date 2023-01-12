@@ -18,72 +18,59 @@ package msgstream
 
 import (
 	"context"
-	"errors"
-	"runtime"
-
-	"github.com/opentracing/opentracing-go"
-	"github.com/opentracing/opentracing-go/ext"
-	"github.com/opentracing/opentracing-go/log"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
-	"github.com/milvus-io/milvus/internal/util/trace"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 )
 
-// ExtractFromMsgProperties extracts trace span from msg.properties.
+// ExtractCtx extracts trace span from msg.properties.
 // And it will attach some default tags to the span.
-func ExtractFromMsgProperties(msg TsMsg, properties map[string]string) (opentracing.Span, bool) {
-	if !allowTrace(msg) {
-		return trace.NoopSpan(), false
+func ExtractCtx(msg TsMsg, properties map[string]string) (context.Context, trace.Span) {
+	ctx := msg.TraceCtx()
+	if ctx == nil {
+		return ctx, trace.SpanFromContext(ctx)
 	}
-	tracer := opentracing.GlobalTracer()
-	sc, _ := tracer.Extract(opentracing.TextMap, trace.PropertiesReaderWriter{PpMap: properties})
-	name := "receive pulsar msg"
-	opts := []opentracing.StartSpanOption{
-		ext.RPCServerOption(sc),
-		opentracing.Tags{
-			"ID":       msg.ID(),
-			"Type":     msg.Type(),
-			"HashKeys": msg.HashKeys(),
-			"Position": msg.Position(),
-		}}
-	return opentracing.StartSpan(name, opts...), true
+	if !allowTrace(msg) {
+		return ctx, trace.SpanFromContext(ctx)
+	}
+	ctx = otel.GetTextMapPropagator().Extract(msg.TraceCtx(), propagation.MapCarrier(properties))
+	name := "receive msg"
+	return otel.Tracer(name).Start(ctx, name, trace.WithAttributes(
+		attribute.Int64("ID", msg.ID()),
+		attribute.String("Type", msg.Type().String()),
+		// attribute.Int64Value("HashKeys", msg.HashKeys()),
+		attribute.String("Position", msg.Position().String()),
+	))
+}
+
+// InjectCtx is a method inject span to pulsr message.
+func InjectCtx(sc context.Context, properties map[string]string) {
+	if sc == nil {
+		return
+	}
+	otel.GetTextMapPropagator().Inject(sc, propagation.MapCarrier(properties))
 }
 
 // MsgSpanFromCtx extracts the span from context.
 // And it will attach some default tags to the span.
-func MsgSpanFromCtx(ctx context.Context, msg TsMsg, opts ...opentracing.StartSpanOption) (opentracing.Span, context.Context) {
+func MsgSpanFromCtx(ctx context.Context, msg TsMsg) (context.Context, trace.Span) {
 	if ctx == nil {
-		return trace.NoopSpan(), ctx
+		return ctx, trace.SpanFromContext(ctx)
 	}
 	if !allowTrace(msg) {
-		return trace.NoopSpan(), ctx
+		return ctx, trace.SpanFromContext(ctx)
 	}
-	operationName := "send pulsar msg"
-	opts = append(opts, opentracing.Tags{
-		"ID":       msg.ID(),
-		"Type":     msg.Type(),
-		"HashKeys": msg.HashKeys(),
-		"Position": msg.Position(),
-	})
-
-	var pcs [1]uintptr
-	n := runtime.Callers(2, pcs[:])
-	if n < 1 {
-		span, ctx := opentracing.StartSpanFromContext(ctx, operationName, opts...)
-		span.LogFields(log.Error(errors.New("runtime.Callers failed")))
-		return span, ctx
-	}
-	file, line := runtime.FuncForPC(pcs[0]).FileLine(pcs[0])
-
-	if parentSpan := opentracing.SpanFromContext(ctx); parentSpan != nil {
-		opts = append(opts, opentracing.ChildOf(parentSpan.Context()))
-	}
-	span := opentracing.StartSpan(operationName, opts...)
-	ctx = opentracing.ContextWithSpan(ctx, span)
-
-	span.LogFields(log.String("filename", file), log.Int("line", line))
-
-	return span, ctx
+	operationName := "send msg"
+	opts := trace.WithAttributes(
+		attribute.Int64("ID", msg.ID()),
+		attribute.String("Type", msg.Type().String()),
+		// attribute.Int64Value("HashKeys", msg.HashKeys()),
+		attribute.String("Position", msg.Position().String()),
+	)
+	return otel.Tracer(operationName).Start(ctx, operationName, opts)
 }
 
 func allowTrace(in interface{}) bool {

@@ -20,15 +20,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"strconv"
 	"sync"
 	"time"
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
-	ot "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
@@ -41,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/tracer"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
@@ -48,7 +48,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/logutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
-	"github.com/milvus-io/milvus/internal/util/trace"
 )
 
 type Server struct {
@@ -66,8 +65,6 @@ type Server struct {
 
 	newRootCoordClient func(string, *clientv3.Client) (types.RootCoord, error)
 	newDataCoordClient func(string, *clientv3.Client) (types.DataCoord, error)
-
-	closer io.Closer
 }
 
 // NewServer new DataNode grpc server
@@ -128,17 +125,17 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 		return
 	}
 
-	opts := trace.GetInterceptorOpts()
+	opts := tracer.GetInterceptorOpts()
 	s.grpcServer = grpc.NewServer(
 		grpc.KeepaliveEnforcementPolicy(kaep),
 		grpc.KeepaliveParams(kasp),
 		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize.GetAsInt()),
 		grpc.MaxSendMsgSize(Params.ServerMaxSendSize.GetAsInt()),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
-			ot.UnaryServerInterceptor(opts...),
+			otelgrpc.UnaryServerInterceptor(opts...),
 			logutil.UnaryTraceLoggerInterceptor)),
 		grpc.StreamInterceptor(grpc_middleware.ChainStreamServer(
-			ot.StreamServerInterceptor(opts...),
+			otelgrpc.StreamServerInterceptor(opts...),
 			logutil.StreamTraceLoggerInterceptor)))
 	datapb.RegisterDataNodeServer(s.grpcServer, s)
 
@@ -184,11 +181,6 @@ func (s *Server) Run() error {
 func (s *Server) Stop() error {
 	Params := &paramtable.Get().DataNodeGrpcServerCfg
 	log.Debug("Datanode stop", zap.String("Address", Params.GetAddress()))
-	if s.closer != nil {
-		if err := s.closer.Close(); err != nil {
-			return err
-		}
-	}
 	s.cancel()
 	if s.etcdCli != nil {
 		defer s.etcdCli.Close()
@@ -245,8 +237,6 @@ func (s *Server) init() error {
 	s.etcdCli = etcdCli
 	s.SetEtcdClient(s.etcdCli)
 	s.datanode.SetAddress(Params.GetAddress())
-	closer := trace.InitTracing(fmt.Sprintf("DataNode IP: %s, port: %d", Params.IP, Params.Port.GetAsInt()))
-	s.closer = closer
 	log.Info("DataNode address", zap.String("address", Params.IP+":"+strconv.Itoa(Params.Port.GetAsInt())))
 
 	err = s.startGrpc()

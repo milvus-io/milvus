@@ -22,14 +22,15 @@ import (
 	"reflect"
 	"sync"
 
-	"github.com/opentracing/opentracing-go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
-	"github.com/milvus-io/milvus/internal/util/trace"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 type primaryKey = storage.PrimaryKey
@@ -73,16 +74,22 @@ func (dNode *deleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		return []Msg{}
 	}
 
-	var spans []opentracing.Span
+	delData := &deleteData{
+		deleteIDs:        map[UniqueID][]primaryKey{},
+		deleteTimestamps: map[UniqueID][]Timestamp{},
+		deleteOffset:     map[UniqueID]int64{},
+	}
+
+	var spans []trace.Span
 	for _, msg := range dMsg.deleteMessages {
-		sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
+		ctx, sp := otel.Tracer(typeutil.QueryNodeRole).Start(msg.TraceCtx(), "Delete_Node")
 		spans = append(spans, sp)
 		msg.SetTraceCtx(ctx)
 	}
 
 	defer func() {
 		for _, sp := range spans {
-			sp.Finish()
+			sp.End()
 		}
 	}()
 
@@ -92,15 +99,9 @@ func (dNode *deleteNode) Operate(in []flowgraph.Msg) []flowgraph.Msg {
 		}
 	}
 
-	delData := &deleteData{
-		deleteIDs:        map[UniqueID][]primaryKey{},
-		deleteTimestamps: map[UniqueID][]Timestamp{},
-		deleteOffset:     map[UniqueID]int64{},
-	}
-
 	// 1. filter segment by bloom filter
 	for i, delMsg := range dMsg.deleteMessages {
-		traceID, _, _ := trace.InfoFromSpan(spans[i])
+		traceID := spans[i].SpanContext().TraceID().String()
 		log.Debug("delete in historical replica",
 			zap.String("vchannel", dNode.deltaVchannel),
 			zap.Int64("collectionID", delMsg.CollectionID),

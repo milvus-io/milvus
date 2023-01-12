@@ -21,7 +21,8 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/opentracing/opentracing-go"
+	"go.opentelemetry.io/otel/trace"
+
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -29,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/retry"
-	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 )
 
@@ -83,9 +83,9 @@ func (dn *deleteNode) IsValidInMsg(in []Msg) bool {
 func (dn *deleteNode) Operate(in []Msg) []Msg {
 	fgMsg := in[0].(*flowGraphMsg)
 
-	var spans []opentracing.Span
+	var spans []trace.Span
 	for _, msg := range fgMsg.deleteMessages {
-		sp, ctx := trace.StartSpanFromContext(msg.TraceCtx())
+		ctx, sp := startTracer(msg, "Delete-Node")
 		spans = append(spans, sp)
 		msg.SetTraceCtx(ctx)
 	}
@@ -96,7 +96,7 @@ func (dn *deleteNode) Operate(in []Msg) []Msg {
 	// process delete messages
 	var segIDs []UniqueID
 	for i, msg := range fgMsg.deleteMessages {
-		traceID, _, _ := trace.InfoFromSpan(spans[i])
+		traceID := spans[i].SpanContext().TraceID().String()
 		log.Debug("Buffer delete request in DataNode", zap.String("traceID", traceID))
 		tmpSegIDs, err := dn.bufferDeleteMsg(msg, fgMsg.timeRange, fgMsg.startPositions[0], fgMsg.endPositions[0])
 		if err != nil {
@@ -148,7 +148,7 @@ func (dn *deleteNode) Operate(in []Msg) []Msg {
 	}
 
 	for _, sp := range spans {
-		sp.Finish()
+		sp.End()
 	}
 	return in
 }

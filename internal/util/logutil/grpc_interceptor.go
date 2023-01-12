@@ -5,7 +5,7 @@ import (
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/util/trace"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap/zapcore"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
@@ -33,7 +33,7 @@ func StreamTraceLoggerInterceptor(srv interface{}, ss grpc.ServerStream, info *g
 
 func withLevelAndTrace(ctx context.Context) context.Context {
 	newctx := ctx
-	var traceID string
+	var traceID trace.TraceID
 	if md, ok := metadata.FromIncomingContext(ctx); ok {
 		levels := md.Get(logLevelRPCMetaKey)
 		// get log level
@@ -63,16 +63,15 @@ func withLevelAndTrace(ctx context.Context) context.Context {
 		// client request id
 		requestID := md.Get(clientRequestIDKey)
 		if len(requestID) >= 1 {
-			traceID = requestID[0]
 			// inject traceid in order to pass client request id
-			newctx = metadata.AppendToOutgoingContext(newctx, clientRequestIDKey, traceID)
+			newctx = metadata.AppendToOutgoingContext(newctx, clientRequestIDKey, requestID[0])
 		}
 	}
-	if traceID == "" {
-		traceID, _, _ = trace.InfoFromContext(newctx)
+	if !traceID.IsValid() {
+		traceID = trace.SpanContextFromContext(newctx).TraceID()
 	}
-	if traceID != "" {
-		newctx = log.WithTraceID(newctx, traceID)
+	if traceID.IsValid() {
+		newctx = log.WithTraceID(newctx, traceID.String())
 	}
 	return newctx
 }

@@ -29,7 +29,8 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
-	ot "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
@@ -55,6 +56,7 @@ import (
 	querycoord "github.com/milvus-io/milvus/internal/querycoordv2"
 	"github.com/milvus-io/milvus/internal/querynode"
 	"github.com/milvus-io/milvus/internal/rootcoord"
+	"github.com/milvus-io/milvus/internal/tracer"
 	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/crypto"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -66,7 +68,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
@@ -326,17 +327,17 @@ func (s *proxyTestServer) startGrpc(ctx context.Context, wg *sync.WaitGroup, p *
 	multiLimiter := NewMultiRateLimiter()
 	s.multiRateLimiter = multiLimiter
 
-	opts := trace.GetInterceptorOpts()
+	opts := tracer.GetInterceptorOpts()
 	s.grpcServer = grpc.NewServer(
 		grpc.KeepaliveEnforcementPolicy(kaep),
 		grpc.KeepaliveParams(kasp),
 		grpc.MaxRecvMsgSize(p.ServerMaxRecvSize.GetAsInt()),
 		grpc.MaxSendMsgSize(p.ServerMaxSendSize.GetAsInt()),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
-			ot.UnaryServerInterceptor(opts...),
+			otelgrpc.UnaryServerInterceptor(opts...),
 			RateLimitInterceptor(multiLimiter),
 		)),
-		grpc.StreamInterceptor(ot.StreamServerInterceptor(opts...)))
+		grpc.StreamInterceptor(otelgrpc.StreamServerInterceptor(opts...)))
 	proxypb.RegisterProxyServer(s.grpcServer, s)
 	milvuspb.RegisterMilvusServiceServer(s.grpcServer, s)
 
