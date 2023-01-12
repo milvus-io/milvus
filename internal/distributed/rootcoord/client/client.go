@@ -35,6 +35,8 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	grpcCodes "google.golang.org/grpc/codes"
+	grpcStatus "google.golang.org/grpc/status"
 )
 
 var ClientParams paramtable.GrpcClientConfig
@@ -240,8 +242,8 @@ func (c *Client) DescribeCollection(ctx context.Context, in *milvuspb.DescribeCo
 	return ret.(*milvuspb.DescribeCollectionResponse), err
 }
 
-// DescribeCollectionInternal return collection info
-func (c *Client) DescribeCollectionInternal(ctx context.Context, in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+// describeCollectionInternal return collection info
+func (c *Client) describeCollectionInternal(ctx context.Context, in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 	in = typeutil.Clone(in)
 	commonpbutil.UpdateMsgBase(
 		in.GetBase(),
@@ -257,6 +259,15 @@ func (c *Client) DescribeCollectionInternal(ctx context.Context, in *milvuspb.De
 		return nil, err
 	}
 	return ret.(*milvuspb.DescribeCollectionResponse), err
+}
+
+func (c *Client) DescribeCollectionInternal(ctx context.Context, in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+	resp, err := c.describeCollectionInternal(ctx, in)
+	status, ok := grpcStatus.FromError(err)
+	if ok && status.Code() == grpcCodes.Unimplemented {
+		return c.DescribeCollection(ctx, in)
+	}
+	return resp, err
 }
 
 // ShowCollections list all collection names
@@ -372,8 +383,8 @@ func (c *Client) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitions
 	return ret.(*milvuspb.ShowPartitionsResponse), err
 }
 
-// ShowPartitionsInternal list all partitions in collection
-func (c *Client) ShowPartitionsInternal(ctx context.Context, in *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
+// showPartitionsInternal list all partitions in collection
+func (c *Client) showPartitionsInternal(ctx context.Context, in *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
 	in = typeutil.Clone(in)
 	commonpbutil.UpdateMsgBase(
 		in.GetBase(),
@@ -389,6 +400,15 @@ func (c *Client) ShowPartitionsInternal(ctx context.Context, in *milvuspb.ShowPa
 		return nil, err
 	}
 	return ret.(*milvuspb.ShowPartitionsResponse), err
+}
+
+func (c *Client) ShowPartitionsInternal(ctx context.Context, in *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
+	resp, err := c.showPartitionsInternal(ctx, in)
+	status, ok := grpcStatus.FromError(err)
+	if ok && status.Code() == grpcCodes.Unimplemented {
+		return c.ShowPartitions(ctx, in)
+	}
+	return resp, err
 }
 
 // AllocTimestamp global timestamp allocator
