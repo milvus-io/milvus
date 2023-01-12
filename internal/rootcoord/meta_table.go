@@ -864,7 +864,7 @@ func (mt *MetaTable) CreateRole(tenant string, entity *milvuspb.RoleEntity) erro
 		return err
 	}
 	if len(results) >= Params.ProxyCfg.MaxRoleNum.GetAsInt() {
-		errMsg := "unable to add role because the number of roles has reached the limit"
+		errMsg := "unable to create role because the number of roles has reached the limit"
 		log.Error(errMsg, zap.Int("max_role_num", Params.ProxyCfg.MaxRoleNum.GetAsInt()))
 		return errors.New(errMsg)
 	}

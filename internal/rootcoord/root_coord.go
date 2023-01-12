@@ -2030,7 +2030,7 @@ func (c *Core) CreateRole(ctx context.Context, in *milvuspb.CreateRoleRequest) (
 	if err != nil {
 		errMsg := "fail to create role"
 		log.Error(errMsg, zap.Any("in", in), zap.Error(err))
-		return failStatus(commonpb.ErrorCode_CreateRoleFailure, errMsg), nil
+		return failStatus(commonpb.ErrorCode_CreateRoleFailure, fmt.Sprintf("%s, error: %s", errMsg, err.Error())), nil
 	}
 
 	logger.Debug(method+" success", zap.String("role_name", entity.Name))
@@ -2058,7 +2058,7 @@ func (c *Core) DropRole(ctx context.Context, in *milvuspb.DropRoleRequest) (*com
 		return errorutil.UnhealthyStatus(code), errorutil.UnhealthyError()
 	}
 	if _, err := c.meta.SelectRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: in.RoleName}, false); err != nil {
-		errMsg := "the role isn't existed"
+		errMsg := "not found the role, maybe the role isn't existed or internal system error"
 		log.Error(errMsg, zap.Any("in", in), zap.Error(err))
 		return failStatus(commonpb.ErrorCode_DropRoleFailure, errMsg), nil
 	}
@@ -2073,7 +2073,7 @@ func (c *Core) DropRole(ctx context.Context, in *milvuspb.DropRoleRequest) (*com
 	}
 	roleResults, err := c.meta.SelectRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: in.RoleName}, true)
 	if err != nil {
-		errMsg := "fail to select a role by role name"
+		errMsg := "fail to find the role by role name, maybe the role isn't existed or internal system error"
 		log.Error(errMsg, zap.Any("in", in), zap.Error(err))
 		return failStatus(commonpb.ErrorCode_DropRoleFailure, errMsg), nil
 	}
@@ -2127,12 +2127,12 @@ func (c *Core) OperateUserRole(ctx context.Context, in *milvuspb.OperateUserRole
 	}
 
 	if _, err := c.meta.SelectRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: in.RoleName}, false); err != nil {
-		errMsg := "not found the role: " + in.RoleName
+		errMsg := "not found the role, maybe the role isn't existed or internal system error"
 		log.Error(errMsg, zap.Any("in", in), zap.Error(err))
 		return failStatus(commonpb.ErrorCode_OperateUserRoleFailure, errMsg), nil
 	}
 	if _, err := c.meta.SelectUser(util.DefaultTenant, &milvuspb.UserEntity{Name: in.Username}, false); err != nil {
-		errMsg := "not found the user: " + in.Username
+		errMsg := "not found the user, maybe the user isn't existed or internal system error"
 		log.Error(errMsg, zap.Any("in", in), zap.Error(err))
 		return failStatus(commonpb.ErrorCode_OperateUserRoleFailure, errMsg), nil
 	}
@@ -2274,8 +2274,8 @@ func (c *Core) isValidRole(entity *milvuspb.RoleEntity) error {
 		return errors.New("the name in the role entity is empty")
 	}
 	if _, err := c.meta.SelectRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: entity.Name}, false); err != nil {
-		log.Warn("fail to select the role", zap.Error(err))
-		return errors.New("not found the role: " + entity.Name)
+		log.Warn("fail to select the role", zap.String("role_name", entity.Name), zap.Error(err))
+		return errors.New("not found the role, maybe the role isn't existed or internal system error")
 	}
 	return nil
 }
@@ -2301,8 +2301,8 @@ func (c *Core) isValidGrantor(entity *milvuspb.GrantorEntity, object string) err
 		return errors.New("the name in the user entity of the grantor entity is empty")
 	}
 	if _, err := c.meta.SelectUser(util.DefaultTenant, &milvuspb.UserEntity{Name: entity.User.Name}, false); err != nil {
-		log.Warn("fail to select the user", zap.Error(err))
-		return errors.New("not found the user: " + entity.User.Name)
+		log.Warn("fail to select the user", zap.String("username", entity.User.Name), zap.Error(err))
+		return errors.New("not found the user, maybe the user isn't existed or internal system error")
 	}
 	if entity.Privilege == nil {
 		return errors.New("the privilege entity in the grantor entity is nil")
