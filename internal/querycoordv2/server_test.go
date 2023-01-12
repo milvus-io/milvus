@@ -37,7 +37,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/mocks"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
-	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
@@ -413,7 +412,7 @@ func (suite *ServerSuite) hackServer() {
 }
 
 func newQueryCoord() (*Server, error) {
-	server, err := NewQueryCoord(context.Background(), dependency.NewDefaultFactory(true))
+	server, err := NewQueryCoord(context.Background())
 	if err != nil {
 		return nil, err
 	}

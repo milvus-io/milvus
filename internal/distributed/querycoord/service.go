@@ -72,7 +72,7 @@ type Server struct {
 // NewServer create a new QueryCoord grpc server.
 func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error) {
 	ctx1, cancel := context.WithCancel(ctx)
-	svr, err := qc.NewQueryCoord(ctx1, factory)
+	svr, err := qc.NewQueryCoord(ctx1)
 	if err != nil {
 		cancel()
 		return nil, err
