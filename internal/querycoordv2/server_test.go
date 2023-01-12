@@ -241,7 +241,7 @@ func (suite *ServerSuite) TestEnableActiveStandby() {
 				),
 				CollectionID: collection,
 			}
-			mockRootCoord.EXPECT().ShowPartitions(mock.Anything, req).Return(&milvuspb.ShowPartitionsResponse{
+			mockRootCoord.EXPECT().ShowPartitionsInternal(mock.Anything, req).Return(&milvuspb.ShowPartitionsResponse{
 				Status:       successStatus,
 				PartitionIDs: suite.partitions[collection],
 			}, nil).Maybe()
