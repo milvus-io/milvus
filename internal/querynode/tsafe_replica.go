@@ -23,14 +23,13 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 // TSafeReplicaInterface is the interface wrapper of tSafeReplica
 type TSafeReplicaInterface interface {
 	getTSafe(vChannel Channel) (Timestamp, error)
 	setTSafe(vChannel Channel, timestamp Timestamp) error
-	addTSafe(vChannel Channel)
+	addTSafe(vChannel Channel, timestamp Timestamp)
 	removeTSafe(vChannel Channel)
 	Watch() Listener
 	WatchChannel(channel Channel) Listener
@@ -67,10 +66,10 @@ func (ts *tSafe) set(t Timestamp) {
 	ts.tSafe = t
 }
 
-func newTSafe(channel Channel) *tSafe {
+func newTSafe(channel Channel, timestamp Timestamp) *tSafe {
 	return &tSafe{
 		channel: channel,
-		tSafe:   typeutil.ZeroTimestamp,
+		tSafe:   timestamp,
 	}
 }
 
@@ -132,13 +131,13 @@ func (t *tSafeReplica) getTSafePrivate(vChannel Channel) (*tSafe, error) {
 	return t.tSafes[vChannel], nil
 }
 
-func (t *tSafeReplica) addTSafe(vChannel Channel) {
+func (t *tSafeReplica) addTSafe(vChannel Channel, timestamp Timestamp) {
 	log.Info("add tSafe done",
 		zap.String("channel", vChannel))
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if _, ok := t.tSafes[vChannel]; !ok {
-		t.tSafes[vChannel] = newTSafe(vChannel)
+		t.tSafes[vChannel] = newTSafe(vChannel, timestamp)
 	}
 }
 

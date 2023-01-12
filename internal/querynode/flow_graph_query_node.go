@@ -241,8 +241,6 @@ func (q *queryNodeFlowGraph) consumeFlowGraphFromPosition(position *internalpb.M
 
 	start := time.Now()
 	err := q.dmlStream.Seek([]*internalpb.MsgPosition{position})
-	// setup first ts
-	q.tSafeReplica.setTSafe(q.vchannel, position.GetTimestamp())
 
 	ts, _ := tsoutil.ParseTS(position.GetTimestamp())
 	log.Info("query node flow graph seeks from position",

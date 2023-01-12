@@ -132,8 +132,8 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 	log.Info("watchDMChannel, init replica done")
 
 	// create tSafe
-	for _, channel := range vChannels {
-		w.node.tSafeReplica.addTSafe(channel)
+	for _, channel := range w.req.Infos {
+		w.node.tSafeReplica.addTSafe(channel.GetChannelName(), channel.GetSeekPosition().GetTimestamp())
 	}
 
 	// add tsafe watch in query shard if exists
