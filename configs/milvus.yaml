@@ -171,8 +171,8 @@ proxy:
   grpc:
     serverMaxRecvSize: 67108864 # 64M
     serverMaxSendSize: 67108864 # 64M
-    clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
-    clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
+    clientMaxRecvSize: 268435456 # 256 MB
+    clientMaxSendSize: 268435456 # 256 MB
 
 
 # Related configuration of queryCoord, used to manage topology and load balancing for the query nodes, and handoff from growing segments to sealed segments.
@@ -333,8 +333,8 @@ grpc:
 
   serverMaxRecvSize: 536870912 # 512MB
   serverMaxSendSize: 536870912 # 512MB
-  clientMaxRecvSize: 104857600 # 100 MB, 100 * 1024 * 1024
-  clientMaxSendSize: 104857600 # 100 MB, 100 * 1024 * 1024
+  clientMaxRecvSize: 268435456 # 256 MB
+  clientMaxSendSize: 268435456 # 256 MB
 
   client:
     dialTimeout: 5000
@@ -344,6 +344,7 @@ grpc:
     initialBackOff: 1.0
     maxBackoff: 60.0
     backoffMultiplier: 2.0
+    compressionEnabled: false
 
 # Configure the proxy tls enable.
 tls:

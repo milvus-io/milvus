@@ -28,10 +28,10 @@ const (
 	DefaultServerMaxRecvSize = 512 * 1024 * 1024
 
 	// DefaultClientMaxSendSize defines the maximum size of data per grpc request can send by client side.
-	DefaultClientMaxSendSize = 100 * 1024 * 1024
+	DefaultClientMaxSendSize = 256 * 1024 * 1024
 
 	// DefaultClientMaxRecvSize defines the maximum size of data per grpc request can receive by client side.
-	DefaultClientMaxRecvSize = 100 * 1024 * 1024
+	DefaultClientMaxRecvSize = 256 * 1024 * 1024
 
 	// DefaultLogLevel defines the log level of grpc
 	DefaultLogLevel = "WARNING"
@@ -46,6 +46,8 @@ const (
 	DefaultInitialBackoff    float64 = 1.0
 	DefaultMaxBackoff        float64 = 60.0
 	DefaultBackoffMultiplier float64 = 2.0
+
+	DefaultCompressionEnabled bool = false
 
 	ProxyInternalPort = 19529
 	ProxyExternalPort = 19530
@@ -174,6 +176,8 @@ func (p *GrpcServerConfig) Init(domain string, base *BaseTable) {
 // GrpcClientConfig is configuration for grpc client.
 type GrpcClientConfig struct {
 	grpcConfig
+
+	CompressionEnabled ParamItem `refreshable:"false"`
 
 	ClientMaxSendSize ParamItem `refreshable:"false"`
 	ClientMaxRecvSize ParamItem `refreshable:"false"`
@@ -378,4 +382,24 @@ func (p *GrpcClientConfig) Init(domain string, base *BaseTable) {
 		},
 	}
 	p.BackoffMultiplier.Init(base.mgr)
+
+	compressionEnabled := fmt.Sprintf("%t", DefaultCompressionEnabled)
+	p.CompressionEnabled = ParamItem{
+		Key:     "grpc.client.compressionEnabled",
+		Version: "2.0.0",
+		Formatter: func(v string) string {
+			if v == "" {
+				return compressionEnabled
+			}
+			_, err := strconv.ParseBool(v)
+			if err != nil {
+				log.Warn("Failed to convert int when parsing grpc.client.compressionEnabled, set to default",
+					zap.String("role", p.Domain),
+					zap.String("grpc.client.compressionEnabled", v))
+				return backoffMultiplier
+			}
+			return v
+		},
+	}
+	p.CompressionEnabled.Init(base.mgr)
 }
