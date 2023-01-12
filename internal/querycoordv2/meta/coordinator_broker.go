@@ -76,7 +76,7 @@ func (broker *CoordinatorBroker) GetCollectionSchema(ctx context.Context, collec
 		),
 		CollectionID: collectionID,
 	}
-	resp, err := broker.rootCoord.DescribeCollection(ctx, req)
+	resp, err := broker.rootCoord.DescribeCollectionInternal(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -97,7 +97,7 @@ func (broker *CoordinatorBroker) GetPartitions(ctx context.Context, collectionID
 		),
 		CollectionID: collectionID,
 	}
-	resp, err := broker.rootCoord.ShowPartitions(ctx, req)
+	resp, err := broker.rootCoord.ShowPartitionsInternal(ctx, req)
 	if err != nil {
 		log.Warn("showPartition failed", zap.Int64("collectionID", collectionID), zap.Error(err))
 		return nil, err

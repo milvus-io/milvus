@@ -73,7 +73,7 @@ func NewImportFactory(c *Core) ImportFactory {
 
 func GetCollectionNameWithCore(c *Core) GetCollectionNameFunc {
 	return func(collID, partitionID UniqueID) (string, string, error) {
-		colInfo, err := c.meta.GetCollectionByID(c.ctx, collID, typeutil.MaxTimestamp)
+		colInfo, err := c.meta.GetCollectionByID(c.ctx, collID, typeutil.MaxTimestamp, false)
 		if err != nil {
 			log.Error("Core failed to get collection name by id", zap.Int64("ID", collID), zap.Error(err))
 			return "", "", err

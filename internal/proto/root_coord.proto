@@ -49,6 +49,7 @@ service RootCoord {
      * @return CollectionSchema
      */
     rpc DescribeCollection(milvus.DescribeCollectionRequest) returns (milvus.DescribeCollectionResponse) {}
+    rpc DescribeCollectionInternal(milvus.DescribeCollectionRequest) returns (milvus.DescribeCollectionResponse) {}
 
     rpc CreateAlias(milvus.CreateAliasRequest) returns (common.Status) {}
     rpc DropAlias(milvus.DropAliasRequest) returns (common.Status) {}
@@ -92,6 +93,7 @@ service RootCoord {
      * @return StringListResponse
      */
     rpc ShowPartitions(milvus.ShowPartitionsRequest) returns (milvus.ShowPartitionsResponse) {}
+    rpc ShowPartitionsInternal(milvus.ShowPartitionsRequest) returns (milvus.ShowPartitionsResponse) {}
 
 //    rpc DescribeSegment(milvus.DescribeSegmentRequest) returns (milvus.DescribeSegmentResponse) {}
     rpc ShowSegments(milvus.ShowSegmentsRequest) returns (milvus.ShowSegmentsResponse) {}

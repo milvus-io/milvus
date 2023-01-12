@@ -216,13 +216,13 @@ func (_m *IMetaTable) DropRole(tenant string, roleName string) error {
 	return r0
 }
 
-// GetCollectionByID provides a mock function with given fields: ctx, collectionID, ts
-func (_m *IMetaTable) GetCollectionByID(ctx context.Context, collectionID int64, ts uint64) (*model.Collection, error) {
-	ret := _m.Called(ctx, collectionID, ts)
+// GetCollectionByID provides a mock function with given fields: ctx, collectionID, ts, allowUnavailable
+func (_m *IMetaTable) GetCollectionByID(ctx context.Context, collectionID int64, ts uint64, allowUnavailable bool) (*model.Collection, error) {
+	ret := _m.Called(ctx, collectionID, ts, allowUnavailable)
 
 	var r0 *model.Collection
-	if rf, ok := ret.Get(0).(func(context.Context, int64, uint64) *model.Collection); ok {
-		r0 = rf(ctx, collectionID, ts)
+	if rf, ok := ret.Get(0).(func(context.Context, int64, uint64, bool) *model.Collection); ok {
+		r0 = rf(ctx, collectionID, ts, allowUnavailable)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*model.Collection)
@@ -230,8 +230,8 @@ func (_m *IMetaTable) GetCollectionByID(ctx context.Context, collectionID int64,
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(context.Context, int64, uint64) error); ok {
-		r1 = rf(ctx, collectionID, ts)
+	if rf, ok := ret.Get(1).(func(context.Context, int64, uint64, bool) error); ok {
+		r1 = rf(ctx, collectionID, ts, allowUnavailable)
 	} else {
 		r1 = ret.Error(1)
 	}

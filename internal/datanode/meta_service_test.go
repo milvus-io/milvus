@@ -65,8 +65,8 @@ type RootCoordFails1 struct {
 	RootCoordFactory
 }
 
-// DescribeCollection override method that will fails
-func (rc *RootCoordFails1) DescribeCollection(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+// DescribeCollectionInternal override method that will fails
+func (rc *RootCoordFails1) DescribeCollectionInternal(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 	return nil, errors.New("always fail")
 }
 
@@ -75,8 +75,8 @@ type RootCoordFails2 struct {
 	RootCoordFactory
 }
 
-// DescribeCollection override method that will fails
-func (rc *RootCoordFails2) DescribeCollection(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+// DescribeCollectionInternal override method that will fails
+func (rc *RootCoordFails2) DescribeCollectionInternal(ctx context.Context, req *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
 	return &milvuspb.DescribeCollectionResponse{
 		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError},
 	}, nil

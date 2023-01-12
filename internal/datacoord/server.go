@@ -863,7 +863,7 @@ func (s *Server) stopServerLoop() {
 // loadCollectionFromRootCoord communicates with RootCoord and asks for collection information.
 // collection information will be added to server meta info.
 func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID int64) error {
-	resp, err := s.rootCoordClient.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
+	resp, err := s.rootCoordClient.DescribeCollectionInternal(ctx, &milvuspb.DescribeCollectionRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection),
 			commonpbutil.WithSourceID(Params.DataCoordCfg.GetNodeID()),
@@ -874,7 +874,7 @@ func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID i
 	if err = VerifyResponse(resp, err); err != nil {
 		return err
 	}
-	presp, err := s.rootCoordClient.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{
+	presp, err := s.rootCoordClient.ShowPartitionsInternal(ctx, &milvuspb.ShowPartitionsRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_ShowPartitions),
 			commonpbutil.WithMsgID(0),
