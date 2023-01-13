@@ -21,9 +21,14 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	clientv3 "go.etcd.io/etcd/client/v3"
+)
+
+const (
+	ReadConfigTimeout = 3 * time.Second
 )
 
 type EtcdSource struct {
@@ -108,7 +113,9 @@ func (es *EtcdSource) SetEventHandler(eh EventHandler) {
 
 func (es *EtcdSource) refreshConfigurations() error {
 	prefix := es.keyPrefix + "/config"
-	response, err := es.etcdCli.Get(es.ctx, prefix, clientv3.WithPrefix())
+	ctx, cancel := context.WithTimeout(es.ctx, ReadConfigTimeout)
+	defer cancel()
+	response, err := es.etcdCli.Get(ctx, prefix, clientv3.WithPrefix())
 	if err != nil {
 		return err
 	}
