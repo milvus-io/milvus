@@ -3,6 +3,7 @@ package rootcoord
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
@@ -125,6 +126,9 @@ func Test_dropPartitionTask_Execute(t *testing.T) {
 	})
 
 	t.Run("normal case", func(t *testing.T) {
+		confirmGCInterval = time.Millisecond
+		defer restoreConfirmGCInterval()
+
 		collectionName := funcutil.GenRandomStr()
 		partitionName := funcutil.GenRandomStr()
 		coll := &model.Collection{Name: collectionName, Partitions: []*model.Partition{{PartitionName: partitionName}}}
@@ -146,10 +150,23 @@ func Test_dropPartitionTask_Execute(t *testing.T) {
 		gc.GcPartitionDataFunc = func(ctx context.Context, pChannels []string, coll *model.Partition) (Timestamp, error) {
 			deletePartitionChan <- struct{}{}
 			deletePartitionCalled = true
+			time.Sleep(confirmGCInterval)
 			return 0, nil
 		}
 
-		core := newTestCore(withValidProxyManager(), withMeta(meta), withGarbageCollector(gc), withDropIndex())
+		broker := newMockBroker()
+		broker.GCConfirmFunc = func(ctx context.Context, collectionID, partitionID UniqueID) bool {
+			return true
+		}
+		broker.DropCollectionIndexFunc = func(ctx context.Context, collID UniqueID, partIDs []UniqueID) error {
+			return nil
+		}
+
+		core := newTestCore(
+			withValidProxyManager(),
+			withMeta(meta),
+			withGarbageCollector(gc),
+			withBroker(broker))
 
 		task := &dropPartitionTask{
 			baseTask: baseTask{core: core},

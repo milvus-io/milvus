@@ -418,3 +418,7 @@ func (s *Server) BroadcastAlteredCollection(ctx context.Context, request *datapb
 func (s *Server) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
 	return s.dataCoord.CheckHealth(ctx, req)
 }
+
+func (s *Server) GcConfirm(ctx context.Context, request *datapb.GcConfirmRequest) (*datapb.GcConfirmResponse, error) {
+	return s.dataCoord.GcConfirm(ctx, request)
+}

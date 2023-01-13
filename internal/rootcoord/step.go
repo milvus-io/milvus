@@ -3,6 +3,7 @@ package rootcoord
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 
@@ -14,10 +15,10 @@ import (
 type stepPriority int
 
 const (
-	stepPriorityLow = iota
-	stepPriorityNormal
-	stepPriorityImportant
-	stepPriorityUrgent
+	stepPriorityLow       = 0
+	stepPriorityNormal    = 1
+	stepPriorityImportant = 10
+	stepPriorityUrgent    = 1000
 )
 
 type nestedStep interface {
@@ -373,4 +374,51 @@ func (b *BroadcastAlteredCollectionStep) Execute(ctx context.Context) ([]nestedS
 
 func (b *BroadcastAlteredCollectionStep) Desc() string {
 	return fmt.Sprintf("broadcast altered collection, collectionID: %d", b.req.CollectionID)
+}
+
+var (
+	confirmGCInterval          = time.Minute * 20
+	allPartition      UniqueID = -1
+)
+
+type confirmGCStep struct {
+	baseStep
+	collectionID      UniqueID
+	partitionID       UniqueID
+	lastScheduledTime time.Time
+}
+
+func newConfirmGCStep(core *Core, collectionID, partitionID UniqueID) *confirmGCStep {
+	return &confirmGCStep{
+		baseStep:          baseStep{core: core},
+		collectionID:      collectionID,
+		partitionID:       partitionID,
+		lastScheduledTime: time.Now(),
+	}
+}
+
+func (b *confirmGCStep) Execute(ctx context.Context) ([]nestedStep, error) {
+	if time.Since(b.lastScheduledTime) < confirmGCInterval {
+		return nil, fmt.Errorf("wait for reschedule to confirm GC, collection: %d, partition: %d, last scheduled time: %s, now: %s",
+			b.collectionID, b.partitionID, b.lastScheduledTime.String(), time.Now().String())
+	}
+
+	finished := b.core.broker.GcConfirm(ctx, b.collectionID, b.partitionID)
+	if finished {
+		return nil, nil
+	}
+
+	b.lastScheduledTime = time.Now()
+
+	return nil, fmt.Errorf("GC is not finished, collection: %d, partition: %d, last scheduled time: %s, now: %s",
+		b.collectionID, b.partitionID, b.lastScheduledTime.String(), time.Now().String())
+}
+
+func (b *confirmGCStep) Desc() string {
+	return fmt.Sprintf("wait for GC finished, collection: %d, partition: %d, last scheduled time: %s, now: %s",
+		b.collectionID, b.partitionID, b.lastScheduledTime.String(), time.Now().String())
+}
+
+func (b *confirmGCStep) Weight() stepPriority {
+	return stepPriorityLow
 }
