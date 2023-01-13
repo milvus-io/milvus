@@ -79,8 +79,17 @@ func TestClientBase_connect(t *testing.T) {
 }
 
 func TestClientBase_Call(t *testing.T) {
+	testCall(t, false)
+}
+
+func TestClientBase_CompressCall(t *testing.T) {
+	testCall(t, true)
+}
+
+func testCall(t *testing.T, compressed bool) {
 	// mock client with nothing
 	base := ClientBase[any]{}
+	base.CompressionEnabled = compressed
 	base.grpcClientMtx.Lock()
 	base.grpcClient = struct{}{}
 	base.grpcClientMtx.Unlock()
@@ -275,9 +284,8 @@ func (s *server) SayHello(ctx context.Context, in *helloworld.HelloRequest) (*he
 
 func TestClientBase_RetryPolicy(t *testing.T) {
 	// server
-	port := ":50051"
-	address := "localhost:50051"
-	lis, err := net.Listen("tcp", port)
+	lis, err := net.Listen("tcp", "localhost:")
+	address := lis.Addr()
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	}
@@ -318,7 +326,68 @@ func TestClientBase_RetryPolicy(t *testing.T) {
 	}
 	clientBase.SetRole(typeutil.DataCoordRole)
 	clientBase.SetGetAddrFunc(func() (string, error) {
-		return address, nil
+		return address.String(), nil
+	})
+	clientBase.SetNewGrpcClientFunc(func(cc *grpc.ClientConn) helloworld.GreeterClient {
+		return helloworld.NewGreeterClient(cc)
+	})
+	defer clientBase.Close()
+
+	ctx := context.Background()
+	name := fmt.Sprintf("hello world %d", time.Now().Second())
+	res, err := clientBase.Call(ctx, func(client helloworld.GreeterClient) (any, error) {
+		fmt.Println("client base...")
+		return client.SayHello(ctx, &helloworld.HelloRequest{Name: name})
+	})
+	assert.Nil(t, err)
+	assert.Equal(t, res.(*helloworld.HelloReply).Message, strings.ToUpper(name))
+}
+
+func TestClientBase_Compression(t *testing.T) {
+	lis, err := net.Listen("tcp", "localhost:")
+	address := lis.Addr()
+	if err != nil {
+		log.Fatalf("failed to listen: %v", err)
+	}
+	var kaep = keepalive.EnforcementPolicy{
+		MinTime:             5 * time.Second,
+		PermitWithoutStream: true,
+	}
+	var kasp = keepalive.ServerParameters{
+		Time:    60 * time.Second,
+		Timeout: 60 * time.Second,
+	}
+
+	maxAttempts := 5
+	s := grpc.NewServer(
+		grpc.KeepaliveEnforcementPolicy(kaep),
+		grpc.KeepaliveParams(kasp),
+	)
+	helloworld.RegisterGreeterServer(s, &server{SuccessCount: uint(1)})
+	reflection.Register(s)
+	go func() {
+		if err := s.Serve(lis); err != nil {
+			log.Fatalf("failed to serve: %v", err)
+		}
+	}()
+	defer s.Stop()
+
+	clientBase := ClientBase[helloworld.GreeterClient]{
+		ClientMaxRecvSize:      1 * 1024 * 1024,
+		ClientMaxSendSize:      1 * 1024 * 1024,
+		DialTimeout:            60 * time.Second,
+		KeepAliveTime:          60 * time.Second,
+		KeepAliveTimeout:       60 * time.Second,
+		RetryServiceNameConfig: "helloworld.Greeter",
+		MaxAttempts:            maxAttempts,
+		InitialBackoff:         10.0,
+		MaxBackoff:             60.0,
+		BackoffMultiplier:      2.0,
+		CompressionEnabled:     true,
+	}
+	clientBase.SetRole(typeutil.DataCoordRole)
+	clientBase.SetGetAddrFunc(func() (string, error) {
+		return address.String(), nil
 	})
 	clientBase.SetNewGrpcClientFunc(func(cc *grpc.ClientConn) helloworld.GreeterClient {
 		return helloworld.NewGreeterClient(cc)

@@ -61,6 +61,7 @@ func NewClient(ctx context.Context, addr string, encryption bool) (*Client, erro
 			InitialBackoff:         float32(clientParams.InitialBackoff.GetAsFloat()),
 			MaxBackoff:             float32(clientParams.MaxBackoff.GetAsFloat()),
 			BackoffMultiplier:      float32(clientParams.BackoffMultiplier.GetAsFloat()),
+			CompressionEnabled:     clientParams.CompressionEnabled.GetAsBool(),
 		},
 	}
 	client.grpcClient.SetRole(typeutil.IndexNodeRole)

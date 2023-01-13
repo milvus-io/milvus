@@ -65,6 +65,7 @@ type ClientBase[T any] struct {
 	role                   string
 	ClientMaxSendSize      int
 	ClientMaxRecvSize      int
+	CompressionEnabled     bool
 	RetryServiceNameConfig string
 
 	DialTimeout      time.Duration
@@ -152,7 +153,6 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 
 	opts := tracer.GetInterceptorOpts()
 	dialContext, cancel := context.WithTimeout(ctx, c.DialTimeout)
-
 	// refer to https://github.com/grpc/grpc-proto/blob/master/grpc/service_config/service_config.proto
 	retryPolicy := fmt.Sprintf(`{
 		"methodConfig": [{
@@ -167,6 +167,10 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 		}]}`, c.RetryServiceNameConfig, c.MaxAttempts, c.InitialBackoff, c.MaxBackoff, c.BackoffMultiplier)
 
 	var conn *grpc.ClientConn
+	compress := None
+	if c.CompressionEnabled {
+		compress = Zstd
+	}
 	if c.encryption {
 		conn, err = grpc.DialContext(
 			dialContext,
@@ -178,6 +182,7 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 			grpc.WithDefaultCallOptions(
 				grpc.MaxCallRecvMsgSize(c.ClientMaxRecvSize),
 				grpc.MaxCallSendMsgSize(c.ClientMaxSendSize),
+				grpc.UseCompressor(compress),
 			),
 			grpc.WithUnaryInterceptor(otelgrpc.UnaryClientInterceptor(opts...)),
 			grpc.WithStreamInterceptor(otelgrpc.StreamClientInterceptor(opts...)),
@@ -208,6 +213,7 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 			grpc.WithDefaultCallOptions(
 				grpc.MaxCallRecvMsgSize(c.ClientMaxRecvSize),
 				grpc.MaxCallSendMsgSize(c.ClientMaxSendSize),
+				grpc.UseCompressor(compress),
 			),
 			grpc.WithUnaryInterceptor(otelgrpc.UnaryClientInterceptor(opts...)),
 			grpc.WithStreamInterceptor(otelgrpc.StreamClientInterceptor(opts...)),

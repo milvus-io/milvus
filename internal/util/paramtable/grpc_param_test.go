@@ -142,6 +142,12 @@ func TestGrpcClientParams(t *testing.T) {
 	base.Save("grpc.client.backoffMultiplier", "3.0")
 	assert.Equal(t, clientConfig.BackoffMultiplier.GetAsFloat(), 3.0)
 
+	assert.Equal(t, clientConfig.CompressionEnabled.GetAsBool(), DefaultCompressionEnabled)
+	base.Save("grpc.client.CompressionEnabled", "a")
+	assert.Equal(t, clientConfig.CompressionEnabled.GetAsBool(), DefaultCompressionEnabled)
+	base.Save("grpc.client.CompressionEnabled", "true")
+	assert.Equal(t, clientConfig.CompressionEnabled.GetAsBool(), true)
+
 	base.Save("common.security.tlsMode", "1")
 	base.Save("tls.serverPemPath", "/pem")
 	base.Save("tls.serverKeyPath", "/key")

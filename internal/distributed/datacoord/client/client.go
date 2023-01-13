@@ -73,6 +73,7 @@ func NewClient(ctx context.Context, metaRoot string, etcdCli *clientv3.Client) (
 			InitialBackoff:         float32(clientParams.InitialBackoff.GetAsFloat()),
 			MaxBackoff:             float32(clientParams.MaxBackoff.GetAsFloat()),
 			BackoffMultiplier:      float32(clientParams.BackoffMultiplier.GetAsFloat()),
+			CompressionEnabled:     clientParams.CompressionEnabled.GetAsBool(),
 		},
 		sess: sess,
 	}
