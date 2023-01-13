@@ -154,15 +154,24 @@ func (suite *TargetObserverSuite) TestTriggerUpdateTarget() {
 		SegmentID:     13,
 		InsertChannel: "channel-1",
 	})
-	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, mock.Anything, mock.Anything).Return(suite.nextTargetChannels, suite.nextTargetSegments, nil)
-	suite.broker.EXPECT().GetPartitions(mock.Anything, mock.Anything).Return([]int64{suite.partitionID}, nil)
 	suite.targetMgr.UpdateCollectionCurrentTarget(suite.collectionID)
 
 	// Pull next again
+	suite.broker.EXPECT().
+		GetRecoveryInfo(mock.Anything, mock.Anything, mock.Anything).
+		Return(suite.nextTargetChannels, suite.nextTargetSegments, nil)
+	suite.broker.EXPECT().
+		GetPartitions(mock.Anything, mock.Anything).
+		Return([]int64{suite.partitionID}, nil)
 	suite.Eventually(func() bool {
 		return len(suite.targetMgr.GetHistoricalSegmentsByCollection(suite.collectionID, meta.NextTarget)) == 3 &&
 			len(suite.targetMgr.GetDmChannelsByCollection(suite.collectionID, meta.NextTarget)) == 2
 	}, 7*time.Second, 1*time.Second)
+	suite.broker.AssertExpectations(suite.T())
+
+	// Manually update next target
+	ready, err := suite.observer.UpdateNextTarget(suite.collectionID)
+	suite.NoError(err)
 
 	suite.distMgr.LeaderViewManager.Update(2,
 		&meta.LeaderView{
@@ -186,7 +195,14 @@ func (suite *TargetObserverSuite) TestTriggerUpdateTarget() {
 
 	// Able to update current if it's not empty
 	suite.Eventually(func() bool {
-		return len(suite.targetMgr.GetHistoricalSegmentsByCollection(suite.collectionID, meta.CurrentTarget)) == 3 &&
+		isReady := false
+		select {
+		case <-ready:
+			isReady = true
+		default:
+		}
+		return isReady &&
+			len(suite.targetMgr.GetHistoricalSegmentsByCollection(suite.collectionID, meta.CurrentTarget)) == 3 &&
 			len(suite.targetMgr.GetDmChannelsByCollection(suite.collectionID, meta.CurrentTarget)) == 2
 	}, 7*time.Second, 1*time.Second)
 }

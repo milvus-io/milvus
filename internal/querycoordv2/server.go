@@ -612,7 +612,7 @@ func (s *Server) handleNodeDown(node int64) {
 	// are missed, it will recover for a while.
 	channels := s.dist.ChannelDistManager.GetByNode(node)
 	for _, channel := range channels {
-		err := s.targetMgr.UpdateCollectionNextTarget(channel.GetCollectionID())
+		_, err := s.targetObserver.UpdateNextTarget(channel.GetCollectionID())
 		if err != nil {
 			msg := "failed to update next targets for collection"
 			log.Error(msg,
