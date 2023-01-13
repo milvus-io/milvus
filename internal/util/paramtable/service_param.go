@@ -66,6 +66,18 @@ func (p *ServiceParam) Init() {
 	p.MinioCfg.Init(&p.BaseTable)
 }
 
+func (p *ServiceParam) RocksmqEnable() bool {
+	return p.RocksmqCfg.Path.GetValue() != ""
+}
+
+func (p *ServiceParam) PulsarEnable() bool {
+	return p.PulsarCfg.Address.GetValue() != ""
+}
+
+func (p *ServiceParam) KafkaEnable() bool {
+	return p.KafkaCfg.Address.GetValue() != ""
+}
+
 // /////////////////////////////////////////////////////////////////////////////
 // --- etcd ---
 type EtcdConfig struct {

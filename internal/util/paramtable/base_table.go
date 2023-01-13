@@ -12,7 +12,6 @@
 package paramtable
 
 import (
-	"context"
 	"os"
 	"path"
 	"runtime"
@@ -168,10 +167,6 @@ func (gp *BaseTable) initConfPath() string {
 	return configDir
 }
 
-func (gp *BaseTable) Configs() map[string]string {
-	return gp.mgr.GetConfigs()
-}
-
 // Load loads an object with @key.
 func (gp *BaseTable) Load(key string) (string, error) {
 	return gp.mgr.GetConfig(key)
@@ -188,19 +183,6 @@ func (gp *BaseTable) GetWithDefault(key, defaultValue string) string {
 		return defaultValue
 	}
 	return str
-}
-
-func (gp *BaseTable) GetConfigSubSet(pattern string) map[string]string {
-	return gp.mgr.GetBy(config.WithPrefix(pattern), config.RemovePrefix(pattern))
-}
-
-func (gp *BaseTable) GetComponentConfigurations(ctx context.Context, componentName string, sub string) map[string]string {
-	allownPrefixs := append(globalConfigPrefixs(), componentName+".")
-	return gp.mgr.GetBy(config.WithSubstr(sub), config.WithOneOfPrefixs(allownPrefixs...))
-}
-
-func (gp *BaseTable) GetAll() map[string]string {
-	return gp.mgr.GetConfigs()
 }
 
 // Remove Config by key

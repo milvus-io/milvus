@@ -21,6 +21,7 @@ class MilvusConan(ConanFile):
         "zlib/1.2.13",
         "libcurl/7.87.0",
     )
+
     generators = "cmake"
     default_options = {
         "rocksdb:shared": True,

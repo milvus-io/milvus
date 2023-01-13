@@ -220,7 +220,7 @@ func (node *DataNode) ShowConfigurations(ctx context.Context, req *internalpb.Sh
 		}, nil
 	}
 	configList := make([]*commonpb.KeyValuePair, 0)
-	for key, value := range Params.GetComponentConfigurations(ctx, "datanode", req.Pattern) {
+	for key, value := range Params.GetComponentConfigurations("datanode", req.Pattern) {
 		configList = append(configList,
 			&commonpb.KeyValuePair{
 				Key:   key,

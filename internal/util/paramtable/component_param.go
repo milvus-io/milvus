@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	config "github.com/milvus-io/milvus/internal/config"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/shirou/gopsutil/v3/disk"
 )
@@ -132,22 +133,19 @@ func (p *ComponentParam) Init() {
 	p.IntegrationTestCfg.init(&p.BaseTable)
 }
 
-func (p *ComponentParam) RocksmqEnable() bool {
-	return p.RocksmqCfg.Path.GetValue() != ""
+func (p *ComponentParam) GetComponentConfigurations(componentName string, sub string) map[string]string {
+	allownPrefixs := append(globalConfigPrefixs(), componentName+".")
+	return p.mgr.GetBy(config.WithSubstr(sub), config.WithOneOfPrefixs(allownPrefixs...))
 }
 
-func (p *ComponentParam) PulsarEnable() bool {
-	return p.PulsarCfg.Address.GetValue() != ""
-}
-
-func (p *ComponentParam) KafkaEnable() bool {
-	return p.KafkaCfg.Address.GetValue() != ""
+func (p *ComponentParam) GetAll() map[string]string {
+	return p.mgr.GetConfigs()
 }
 
 // /////////////////////////////////////////////////////////////////////////////
 // --- common ---
 type commonConfig struct {
-	ClusterPrefix ParamItem `refreshable:"true"`
+	ClusterPrefix ParamItem `refreshable:"false"`
 
 	// Deprecated: do not use it anymore
 	ProxySubName ParamItem `refreshable:"true"`
