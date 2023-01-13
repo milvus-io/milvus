@@ -30,6 +30,12 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
+type targetUpdateRequest struct {
+	CollectionID  int64
+	Notifier      chan error
+	ReadyNotifier chan struct{}
+}
+
 type TargetObserver struct {
 	c         chan struct{}
 	wg        sync.WaitGroup
@@ -39,7 +45,10 @@ type TargetObserver struct {
 	broker    meta.Broker
 
 	nextTargetLastUpdate map[int64]time.Time
-	stopOnce             sync.Once
+	updateChan           chan targetUpdateRequest
+	readyNotifiers       map[int64][]chan struct{} // CollectionID -> Notifiers
+
+	stopOnce sync.Once
 }
 
 func NewTargetObserver(meta *meta.Meta, targetMgr *meta.TargetManager, distMgr *meta.DistributionManager, broker meta.Broker) *TargetObserver {
@@ -50,6 +59,8 @@ func NewTargetObserver(meta *meta.Meta, targetMgr *meta.TargetManager, distMgr *
 		distMgr:              distMgr,
 		broker:               broker,
 		nextTargetLastUpdate: make(map[int64]time.Time),
+		updateChan:           make(chan targetUpdateRequest),
+		readyNotifiers:       make(map[int64][]chan struct{}),
 	}
 }
 
@@ -81,8 +92,34 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 
 		case <-ticker.C:
 			ob.tryUpdateTarget()
+
+		case request := <-ob.updateChan:
+			err := ob.updateNextTarget(request.CollectionID)
+			if err != nil {
+				close(request.ReadyNotifier)
+			} else {
+				ob.readyNotifiers[request.CollectionID] = append(ob.readyNotifiers[request.CollectionID], request.ReadyNotifier)
+			}
+
+			request.Notifier <- err
 		}
 	}
+}
+
+// UpdateNextTarget updates the next target,
+// returns a channel which will be closed when the next target is ready,
+// or returns error if failed to pull target
+func (ob *TargetObserver) UpdateNextTarget(collectionID int64) (chan struct{}, error) {
+	notifier := make(chan error)
+	readyCh := make(chan struct{})
+	defer close(notifier)
+
+	ob.updateChan <- targetUpdateRequest{
+		CollectionID:  collectionID,
+		Notifier:      notifier,
+		ReadyNotifier: readyCh,
+	}
+	return readyCh, <-notifier
 }
 
 func (ob *TargetObserver) tryUpdateTarget() {
@@ -94,7 +131,7 @@ func (ob *TargetObserver) tryUpdateTarget() {
 
 		if ob.shouldUpdateNextTarget(collectionID) {
 			// update next target in collection level
-			ob.UpdateNextTarget(collectionID)
+			ob.updateNextTarget(collectionID)
 		}
 	}
 
@@ -115,7 +152,7 @@ func (ob *TargetObserver) isNextTargetExpired(collectionID int64) bool {
 	return time.Since(ob.nextTargetLastUpdate[collectionID]) > params.Params.QueryCoordCfg.NextTargetSurviveTime.GetAsDuration(time.Second)
 }
 
-func (ob *TargetObserver) UpdateNextTarget(collectionID int64) {
+func (ob *TargetObserver) updateNextTarget(collectionID int64) error {
 	log := log.With(zap.Int64("collectionID", collectionID))
 
 	log.Warn("observer trigger update next target")
@@ -123,9 +160,10 @@ func (ob *TargetObserver) UpdateNextTarget(collectionID int64) {
 	if err != nil {
 		log.Error("failed to update next target for collection",
 			zap.Error(err))
-		return
+		return err
 	}
 	ob.updateNextTargetTimestamp(collectionID)
+	return nil
 }
 
 func (ob *TargetObserver) updateNextTargetTimestamp(collectionID int64) {
@@ -175,4 +213,12 @@ func (ob *TargetObserver) updateCurrentTarget(collectionID int64) {
 	log.Warn("observer trigger update current target",
 		zap.Int64("collectionID", collectionID))
 	ob.targetMgr.UpdateCollectionCurrentTarget(collectionID)
+	notifiers := ob.readyNotifiers[collectionID]
+	for _, notifier := range notifiers {
+		close(notifier)
+	}
+	// Reuse the capacity of notifiers slice
+	if notifiers != nil {
+		ob.readyNotifiers[collectionID] = notifiers[:0]
+	}
 }
