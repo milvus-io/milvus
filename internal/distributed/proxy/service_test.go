@@ -358,6 +358,14 @@ func (m *MockQueryCoord) ReleaseCollection(ctx context.Context, req *querypb.Rel
 	return nil, nil
 }
 
+func (m *MockQueryCoord) RefreshCollection(ctx context.Context, req *querypb.RefreshCollectionRequest) (*commonpb.Status, error) {
+	return nil, nil
+}
+
+func (m *MockQueryCoord) RefreshPartitions(ctx context.Context, req *querypb.RefreshPartitionsRequest) (*commonpb.Status, error) {
+	return nil, nil
+}
+
 func (m *MockQueryCoord) ShowPartitions(ctx context.Context, req *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
 	return nil, nil
 }

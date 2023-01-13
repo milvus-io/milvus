@@ -136,6 +136,14 @@ func (m *MockQueryCoord) GetSegmentInfo(ctx context.Context, req *querypb.GetSeg
 	return m.infoResp, m.err
 }
 
+func (m *MockQueryCoord) RefreshCollection(ctx context.Context, req *querypb.RefreshCollectionRequest) (*commonpb.Status, error) {
+	return m.status, m.err
+}
+
+func (m *MockQueryCoord) RefreshPartitions(ctx context.Context, req *querypb.RefreshPartitionsRequest) (*commonpb.Status, error) {
+	return m.status, m.err
+}
+
 func (m *MockQueryCoord) LoadBalance(ctx context.Context, req *querypb.LoadBalanceRequest) (*commonpb.Status, error) {
 	return m.status, m.err
 }
@@ -347,6 +355,20 @@ func Test_NewServer(t *testing.T) {
 		resp, err := server.GetSegmentInfo(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	t.Run("RefreshCollection", func(t *testing.T) {
+		req := &querypb.RefreshCollectionRequest{}
+		resp, err := server.RefreshCollection(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	t.Run("RefreshPartitions", func(t *testing.T) {
+		req := &querypb.RefreshPartitionsRequest{}
+		resp, err := server.RefreshPartitions(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
 	t.Run("LoadBalance", func(t *testing.T) {

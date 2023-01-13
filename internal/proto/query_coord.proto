@@ -23,9 +23,14 @@ service QueryCoord {
   rpc LoadCollection(LoadCollectionRequest) returns (common.Status) {}
   rpc ReleaseCollection(ReleaseCollectionRequest) returns (common.Status) {}
 
+  rpc RefreshCollection(RefreshCollectionRequest) returns (common.Status) {}
+  rpc RefreshPartitions(RefreshPartitionsRequest) returns (common.Status) {}
+
   rpc GetPartitionStates(GetPartitionStatesRequest) returns (GetPartitionStatesResponse) {}
   rpc GetSegmentInfo(GetSegmentInfoRequest) returns (GetSegmentInfoResponse) {}
+
   rpc LoadBalance(LoadBalanceRequest) returns (common.Status) {}
+
 
   rpc ShowConfigurations(internal.ShowConfigurationsRequest) returns (internal.ShowConfigurationsResponse){}
   // https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
@@ -157,6 +162,17 @@ message GetSegmentInfoRequest {
 message GetSegmentInfoResponse {
   common.Status status = 1;
   repeated SegmentInfo infos = 2;
+}
+
+message RefreshCollectionRequest {
+  common.MsgBase base = 1;
+  int64 collection_id = 2;
+}
+
+message RefreshPartitionsRequest {
+  common.MsgBase base = 1;
+  int64 collection_id = 2;
+  repeated int64 partition_ids = 3;
 }
 
 message GetShardLeadersRequest {

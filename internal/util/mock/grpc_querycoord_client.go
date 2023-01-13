@@ -74,6 +74,14 @@ func (m *GrpcQueryCoordClient) ReleaseCollection(ctx context.Context, in *queryp
 	return &commonpb.Status{}, m.Err
 }
 
+func (m *GrpcQueryCoordClient) RefreshCollection(ctx context.Context, in *querypb.RefreshCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
+func (m *GrpcQueryCoordClient) RefreshPartitions(ctx context.Context, in *querypb.RefreshPartitionsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
 func (m *GrpcQueryCoordClient) GetPartitionStates(ctx context.Context, in *querypb.GetPartitionStatesRequest, opts ...grpc.CallOption) (*querypb.GetPartitionStatesResponse, error) {
 	return &querypb.GetPartitionStatesResponse{}, m.Err
 }

@@ -18,13 +18,12 @@ package observers
 
 import (
 	"context"
+	"fmt"
+	"go.uber.org/zap"
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/suite"
-	clientv3 "go.etcd.io/etcd/client/v3"
-
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
@@ -34,6 +33,9 @@ import (
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/suite"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 type CollectionObserverSuite struct {
@@ -268,6 +270,102 @@ func (suite *CollectionObserverSuite) TestObserve() {
 	}, timeout*2, timeout/10)
 }
 
+func (suite *CollectionObserverSuite) TestObserveRefresh() {
+	const (
+		timeout = 2 * time.Second
+	)
+	// Not timeout
+	paramtable.Get().Save(Params.QueryCoordCfg.LoadTimeoutSeconds.Key, "10")
+
+	segments := []*datapb.SegmentBinlogs{}
+	for _, segment := range suite.segments[100] {
+		segments = append(segments, &datapb.SegmentBinlogs{
+			SegmentID:     segment.GetID(),
+			InsertChannel: segment.GetInsertChannel(),
+		})
+	}
+
+	log.Info("============  Before leader view update ============")
+	suite.expectRefreshCollection(100, false, commonpb.ErrorCode_UnexpectedError)
+	suite.expectRefreshCollection(102, false, commonpb.ErrorCode_UnexpectedError)
+	suite.expectRefreshCollection(103, false, commonpb.ErrorCode_UnexpectedError)
+	suite.expectRefreshCollection(99999, false, commonpb.ErrorCode_Success)
+
+	suite.expectRefreshPartition(101, []int64{11, 12}, false, commonpb.ErrorCode_UnexpectedError)
+	suite.expectRefreshPartition(101, []int64{11, 99999}, false, commonpb.ErrorCode_UnexpectedError)
+
+	suite.ob.Observe(nil)
+
+	// Collection 100 loaded before timeout,
+	// collection 101 timeout
+	suite.dist.LeaderViewManager.Update(1, &meta.LeaderView{
+		ID:           1,
+		CollectionID: 100,
+		Channel:      "100-dmc0",
+		Segments:     map[int64]*querypb.SegmentDist{1: {NodeID: 1, Version: 0}},
+	})
+	suite.dist.LeaderViewManager.Update(
+		1,
+		&meta.LeaderView{
+			ID:           1,
+			CollectionID: 101,
+			Channel:      "101-dmc0",
+			Segments:     map[int64]*querypb.SegmentDist{2: {NodeID: 7, Version: 0}},
+		}, &meta.LeaderView{
+			ID:           1,
+			CollectionID: 101,
+			Channel:      "101-dmc1",
+			Segments:     map[int64]*querypb.SegmentDist{3: {NodeID: 6, Version: 0}},
+		})
+	suite.dist.LeaderViewManager.Update(2, &meta.LeaderView{
+		ID:           2,
+		CollectionID: 100,
+		Channel:      "100-dmc1",
+		Segments:     map[int64]*querypb.SegmentDist{2: {NodeID: 2, Version: 0}},
+	})
+	suite.dist.LeaderViewManager.Update(3, &meta.LeaderView{
+		ID:           3,
+		CollectionID: 102,
+		Channel:      "102-dmc0",
+		Segments:     map[int64]*querypb.SegmentDist{2: {NodeID: 5, Version: 0}},
+	})
+
+	segmentsInfo, ok := suite.segments[103]
+	suite.True(ok)
+	lview := &meta.LeaderView{
+		ID:           3,
+		CollectionID: 13,
+		Channel:      "103-dmc0",
+		Segments:     make(map[int64]*querypb.SegmentDist),
+	}
+	for _, segment := range segmentsInfo {
+		lview.Segments[segment.GetID()] = &querypb.SegmentDist{
+			NodeID: 3, Version: 0,
+		}
+	}
+	suite.dist.LeaderViewManager.Update(3, lview)
+
+	log.Info("============  After leader view update ============")
+	suite.expectRefreshCollection(100, true, commonpb.ErrorCode_Success)
+	suite.expectRefreshCollection(102, true, commonpb.ErrorCode_Success)
+	suite.expectRefreshCollection(103, false, commonpb.ErrorCode_UnexpectedError)
+	suite.expectRefreshCollection(99999, false, commonpb.ErrorCode_Success)
+
+	suite.expectRefreshPartition(101, []int64{11, 12}, false, commonpb.ErrorCode_UnexpectedError)
+	suite.expectRefreshPartition(101, []int64{11, 99999}, false, commonpb.ErrorCode_UnexpectedError)
+
+	suite.ob.Observe(nil)
+
+	log.Info("============  After leader view update and observe ============")
+	suite.expectRefreshCollection(100, true, commonpb.ErrorCode_Success)
+	suite.expectRefreshCollection(102, true, commonpb.ErrorCode_Success)
+	suite.expectRefreshCollection(103, true, commonpb.ErrorCode_Success)
+	suite.expectRefreshCollection(99999, false, commonpb.ErrorCode_Success)
+
+	suite.expectRefreshPartition(101, []int64{11, 12}, true, commonpb.ErrorCode_Success)
+	suite.expectRefreshPartition(101, []int64{11, 99999}, false, commonpb.ErrorCode_UnexpectedError)
+}
+
 func (suite *CollectionObserverSuite) isCollectionLoaded(collection int64) bool {
 	exist := suite.meta.Exist(collection)
 	percentage := suite.meta.GetLoadPercentage(collection)
@@ -365,6 +463,58 @@ func (suite *CollectionObserverSuite) load(collection int64) {
 		suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, collection, partition).Return(dmChannels, allSegments, nil)
 	}
 	suite.targetMgr.UpdateCollectionNextTargetWithPartitions(collection, partitions...)
+}
+
+func (suite *CollectionObserverSuite) expectRefreshCollection(collID int64, expectedRefreshed bool, expectedErrorCode commonpb.ErrorCode) {
+	var refreshed bool
+	var status *commonpb.Status
+	collections := suite.ob.meta.CollectionManager.GetAllCollections()
+	for _, collection := range collections {
+		if collection.CollectionID == collID {
+			refreshed, status = suite.ob.observeCollectionLoadStatus(collection, true)
+		}
+	}
+	log.Info("refresh result", zap.Int64("collection", collID),
+		zap.Bool("refreshed", refreshed),
+		zap.String("error code", status.GetErrorCode().String()),
+		zap.String("reason", status.GetReason()))
+	suite.Equal(expectedRefreshed, refreshed)
+	suite.Equal(expectedErrorCode, status.GetErrorCode())
+}
+
+func (suite *CollectionObserverSuite) expectRefreshPartition(colID int64, partIDs []int64, expectedRefreshed bool, expectedErrorCode commonpb.ErrorCode) {
+	var refreshed bool
+	var state *commonpb.Status
+	partitions := suite.ob.meta.CollectionManager.GetAllPartitions()
+	if len(partitions) > 0 {
+		log.Info("observed partitions status", zap.Int("partitions count", len(partitions)))
+	}
+	for _, targetPartID := range partIDs {
+		found := false
+		for _, partition := range partitions {
+			if colID == partition.CollectionID && targetPartID == partition.PartitionID {
+				found = true
+				refreshed, state = suite.ob.observePartitionLoadStatus(partition, true)
+				if !refreshed || state.GetErrorCode() != commonpb.ErrorCode_Success {
+					break
+				}
+			}
+		}
+		if !found {
+			refreshed, state = false, &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    fmt.Sprintf("partition ID = %d not found", targetPartID),
+			}
+			break
+		}
+	}
+
+	log.Info("refresh result", zap.Int64("collection", colID),
+		zap.Int64s("partition IDs", partIDs),
+		zap.Bool("refreshed", refreshed),
+		zap.String("status", state.String()))
+	suite.Equal(expectedRefreshed, refreshed)
+	suite.Equal(expectedErrorCode, state.GetErrorCode())
 }
 
 func TestCollectionObserver(t *testing.T) {

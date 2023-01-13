@@ -80,19 +80,19 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 			return
 
 		case <-ticker.C:
-			ob.tryUpdateTarget()
+			ob.tryUpdateTarget(false)
 		}
 	}
 }
 
-func (ob *TargetObserver) tryUpdateTarget() {
+func (ob *TargetObserver) tryUpdateTarget(forceUpdateTarget bool) {
 	collections := ob.meta.GetAll()
 	for _, collectionID := range collections {
 		if ob.shouldUpdateCurrentTarget(collectionID) {
 			ob.updateCurrentTarget(collectionID)
 		}
-
-		if ob.shouldUpdateNextTarget(collectionID) {
+		if !forceUpdateTarget && ob.shouldUpdateNextTarget(collectionID) ||
+			forceUpdateTarget && !ob.targetMgr.IsNextTargetExist(collectionID) {
 			// update next target in collection level
 			ob.UpdateNextTarget(collectionID)
 		}

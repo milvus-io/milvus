@@ -251,6 +251,48 @@ func (coord *QueryCoordMock) ReleaseCollection(ctx context.Context, req *querypb
 	}, nil
 }
 
+func (coord *QueryCoordMock) RefreshCollection(ctx context.Context, req *querypb.RefreshCollectionRequest) (*commonpb.Status, error) {
+	if !coord.healthy() {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "unhealthy",
+		}, nil
+	}
+
+	coord.colMtx.Lock()
+	defer coord.colMtx.Unlock()
+
+	found := false
+	for _, colID := range coord.collectionIDs {
+		if req.CollectionID == colID {
+			found = true
+		}
+	}
+	if !found {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "collection must be loaded first",
+		}, nil
+	}
+
+	coord.collectionIDs = append(coord.collectionIDs, req.CollectionID)
+
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+	}, nil
+}
+
+func (coord *QueryCoordMock) RefreshPartitions(ctx context.Context, req *querypb.RefreshPartitionsRequest) (*commonpb.Status, error) {
+	if !coord.healthy() {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "unhealthy",
+		}, nil
+	}
+
+	panic("implement me")
+}
+
 func (coord *QueryCoordMock) SetShowPartitionsFunc(f queryCoordShowPartitionsFuncType) {
 	coord.showPartitionsFunc = f
 }

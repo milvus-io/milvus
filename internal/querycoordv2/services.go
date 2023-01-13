@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
@@ -30,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/errorutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
@@ -464,6 +466,105 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfo
 	}, nil
 }
 
+// RefreshCollection must be called after loading a collection. It looks for new segments that are not loaded yet and
+// tries to load them up. It returns when all segments of the given collection are loaded, or when error happens.
+// Note that a collection's loading progress always stays at 100% after a successful load and will not get updated
+// during RefreshCollection.
+func (s *Server) RefreshCollection(ctx context.Context, req *querypb.RefreshCollectionRequest) (*commonpb.Status, error) {
+	ctx, cancel := context.WithTimeout(ctx, Params.QueryCoordCfg.LoadTimeoutSeconds.GetAsDuration(time.Second))
+	defer cancel()
+
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", req.GetCollectionId()),
+	)
+	if s.status.Load() != commonpb.StateCode_Healthy {
+		msg := "failed to refresh collection"
+		log.Warn(msg, zap.Error(ErrNotHealthy))
+		metrics.QueryCoordReleaseCount.WithLabelValues(metrics.FailLabel).Inc()
+		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg, ErrNotHealthy), nil
+	}
+
+	// Pull the latest target.
+	s.targetObserver.UpdateNextTarget(req.GetCollectionId())
+
+	const observePeriod = time.Second
+	obTicker := time.NewTicker(observePeriod)
+	refreshTicker := time.NewTicker(observePeriod * 3)
+	defer obTicker.Stop()
+	defer refreshTicker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			log.Debug("RefreshCollection context canceled")
+			return &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    "context canceled",
+			}, nil
+		// Observe periodically.
+		case <-obTicker.C:
+			s.collectionObserver.ForceObCh <- &observers.ForceObReq{
+				CollectionID: req.GetCollectionId(),
+			}
+		// Periodically check if collection has been refreshed.
+		case <-refreshTicker.C:
+			// Check if the given collection has been refreshed.
+			if ok, status := s.collectionObserver.CheckCollectionRefreshed(req.GetCollectionId()); ok {
+				return status, nil
+			}
+		}
+	}
+}
+
+// RefreshPartitions must be called after loading a collection. It looks for new segments that are not loaded yet and
+// tries to load them up. It returns when all segments of the given collection are loaded, or when error happens.
+// Note that a collection's loading progress always stays at 100% after a successful load and will not get updated
+// during RefreshPartitions.
+func (s *Server) RefreshPartitions(ctx context.Context, req *querypb.RefreshPartitionsRequest) (*commonpb.Status, error) {
+	ctx, cancel := context.WithTimeout(ctx, Params.QueryCoordCfg.LoadTimeoutSeconds.GetAsDuration(time.Second))
+	defer cancel()
+
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", req.GetCollectionId()),
+		zap.Int64s("partitionIDs", req.GetPartitionIds()),
+	)
+	if s.status.Load() != commonpb.StateCode_Healthy {
+		msg := "failed to refresh partitions"
+		log.Warn(msg, zap.Error(ErrNotHealthy))
+		metrics.QueryCoordReleaseCount.WithLabelValues(metrics.FailLabel).Inc()
+		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg, ErrNotHealthy), nil
+	}
+
+	// Pull the latest target.
+	s.targetObserver.UpdateNextTarget(req.GetCollectionId())
+
+	const observePeriod = time.Second
+	ticker := time.NewTicker(observePeriod)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			log.Debug("RefreshPartitions context canceled")
+			return &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    "context canceled",
+			}, nil
+
+		// Observe periodically.
+		case <-ticker.C:
+			for _, partID := range req.GetPartitionIds() {
+				s.collectionObserver.ForceObCh <- &observers.ForceObReq{
+					CollectionID: req.GetCollectionId(),
+					PartitionID:  partID,
+				}
+			}
+			// Check if all given partitions have been refreshed.
+			if ok, status := s.collectionObserver.CheckPartitionsRefreshed(req.GetCollectionId(), req.GetPartitionIds()); ok {
+				return status, nil
+			}
+		}
+	}
+}
+
 func (s *Server) isStoppingNode(nodeID int64) error {
 	isStopping, err := s.nodeMgr.IsStoppingNode(nodeID)
 	if err != nil {
@@ -482,7 +583,6 @@ func (s *Server) LoadBalance(ctx context.Context, req *querypb.LoadBalanceReques
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
 	)
-
 	log.Info("load balance request received",
 		zap.Int64s("source", req.GetSourceNodeIDs()),
 		zap.Int64s("dest", req.GetDstNodeIDs()),
