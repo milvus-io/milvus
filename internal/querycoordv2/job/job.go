@@ -219,6 +219,7 @@ func (job *LoadCollectionJob) Execute() error {
 		return utils.WrapError(msg, err)
 	}
 
+	// It's safe here to call UpdateCollectionNextTargetWithPartitions, as the collection not existing
 	err = job.targetMgr.UpdateCollectionNextTargetWithPartitions(req.GetCollectionID(), partitionIDs...)
 	if err != nil {
 		msg := "failed to update next targets for collection"
@@ -420,6 +421,7 @@ func (job *LoadPartitionJob) Execute() error {
 			zap.Int64s("nodes", replica.GetNodes()))
 	}
 
+	// It's safe here to call UpdateCollectionNextTargetWithPartitions, as the collection not existing
 	err = job.targetMgr.UpdateCollectionNextTargetWithPartitions(req.GetCollectionID(), req.GetPartitionIDs()...)
 	if err != nil {
 		msg := "failed to update next targets for collection"

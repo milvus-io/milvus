@@ -56,6 +56,9 @@ func NewTargetManager(broker Broker, meta *Meta) *TargetManager {
 	}
 }
 
+// UpdateCollectionCurrentTarget updates the current target to next target,
+// WARN: DO NOT call this method for an existing collection as target observer running, or it will lead to a double-update,
+// which may make the current target not available
 func (mgr *TargetManager) UpdateCollectionCurrentTarget(collectionID int64, partitionIDs ...int64) {
 	mgr.rwMutex.Lock()
 	defer mgr.rwMutex.Unlock()
@@ -77,7 +80,9 @@ func (mgr *TargetManager) UpdateCollectionCurrentTarget(collectionID int64, part
 		zap.Strings("channels", newTarget.GetAllDmChannelNames()))
 }
 
-// UpdateCollectionNextTargetWithPartitions for collection_loading request, which offer partitionIDs outside
+// UpdateCollectionNextTargetWithPartitions pulls next target from DataCoord,
+// WARN: DO NOT call this method for an existing collection as target observer running, or it will lead to a double-update,
+// which may make the current target not available
 func (mgr *TargetManager) UpdateCollectionNextTargetWithPartitions(collectionID int64, partitionIDs ...int64) error {
 	mgr.rwMutex.Lock()
 	defer mgr.rwMutex.Unlock()
@@ -93,7 +98,9 @@ func (mgr *TargetManager) UpdateCollectionNextTargetWithPartitions(collectionID 
 	return mgr.updateCollectionNextTarget(collectionID, partitionIDs...)
 }
 
-// UpdateCollectionNextTarget for collection_loaded request, which use partition info from meta or broker
+// UpdateCollectionNextTarget updates the next target with new target pulled from DataCoord,
+// WARN: DO NOT call this method for an existing collection as target observer running, or it will lead to a double-update,
+// which may make the current target not available
 func (mgr *TargetManager) UpdateCollectionNextTarget(collectionID int64) error {
 	mgr.rwMutex.Lock()
 	defer mgr.rwMutex.Unlock()
