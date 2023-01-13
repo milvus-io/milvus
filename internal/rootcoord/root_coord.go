@@ -642,20 +642,10 @@ func (c *Core) startInternal() error {
 	Params.RootCoordCfg.CreatedTime = time.Now()
 	Params.RootCoordCfg.UpdatedTime = time.Now()
 
-	if c.enableActiveStandBy {
-		c.activateFunc = func() {
-			// todo to complete
-			log.Info("rootcoord switch from standby to active, activating")
-			c.startServerLoop()
-			c.UpdateStateCode(commonpb.StateCode_Healthy)
-		}
-		c.UpdateStateCode(commonpb.StateCode_StandBy)
-		logutil.Logger(c.ctx).Info("rootcoord enter standby mode successfully")
-	} else {
-		c.startServerLoop()
-		c.UpdateStateCode(commonpb.StateCode_Healthy)
-		logutil.Logger(c.ctx).Info("rootcoord startup successfully")
-	}
+	c.startServerLoop()
+	c.UpdateStateCode(commonpb.StateCode_Healthy)
+	logutil.Logger(c.ctx).Info("rootcoord startup successfully")
+
 	return nil
 }
 
