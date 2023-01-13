@@ -1448,6 +1448,10 @@ func (c *Core) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfi
 
 // GetMetrics get metrics
 func (c *Core) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	log := log.Ctx(ctx).With(
+		zap.Int64("nodeID", Params.RootCoordCfg.GetNodeID()),
+		zap.String("req", in.GetRequest()))
+
 	if code, ok := c.checkHealthy(); !ok {
 		return &milvuspb.GetMetricsResponse{
 			Status:   failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]),
@@ -1457,8 +1461,7 @@ func (c *Core) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) (
 
 	metricType, err := metricsinfo.ParseMetricType(in.Request)
 	if err != nil {
-		log.Warn("ParseMetricType failed", zap.String("role", typeutil.RootCoordRole),
-			zap.Int64("nodeID", c.session.ServerID), zap.String("req", in.Request), zap.Error(err))
+		log.Warn("ParseMetricType failed", zap.String("role", typeutil.RootCoordRole), zap.Error(err))
 		return &milvuspb.GetMetricsResponse{
 			Status:   failStatus(commonpb.ErrorCode_UnexpectedError, "ParseMetricType failed: "+err.Error()),
 			Response: "",
@@ -1474,7 +1477,6 @@ func (c *Core) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) (
 		if err != nil {
 			log.Warn("GetSystemInfoMetrics failed",
 				zap.String("role", typeutil.RootCoordRole),
-				zap.String("metricType", metricType),
 				zap.Error(err))
 			return &milvuspb.GetMetricsResponse{
 				Status:   failStatus(commonpb.ErrorCode_UnexpectedError, fmt.Sprintf("getSystemInfoMetrics failed: %s", err.Error())),
@@ -1486,8 +1488,7 @@ func (c *Core) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) (
 		return metrics, err
 	}
 
-	log.RatedWarn(60, "GetMetrics failed, metric type not implemented", zap.String("role", typeutil.RootCoordRole),
-		zap.String("metricType", metricType))
+	log.RatedWarn(60, "GetMetrics failed, metric type not implemented", zap.String("role", typeutil.RootCoordRole))
 
 	return &milvuspb.GetMetricsResponse{
 		Status:   failStatus(commonpb.ErrorCode_UnexpectedError, metricsinfo.MsgUnimplementedMetric),

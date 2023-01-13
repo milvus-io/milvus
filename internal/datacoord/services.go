@@ -830,10 +830,12 @@ func (s *Server) ShowConfigurations(ctx context.Context, req *internalpb.ShowCon
 // GetMetrics returns DataCoord metrics info
 // it may include SystemMetrics, Topology metrics, etc.
 func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	log := log.Ctx(ctx).With(
+		zap.Int64("nodeID", Params.DataCoordCfg.GetNodeID()),
+		zap.String("req", req.GetRequest()))
+
 	if s.isClosed() {
 		log.Warn("DataCoord.GetMetrics failed",
-			zap.Int64("nodeID", s.session.ServerID),
-			zap.String("req", req.Request),
 			zap.Error(errDataCoordIsUnhealthy(Params.DataCoordCfg.GetNodeID())))
 
 		return &milvuspb.GetMetricsResponse{
@@ -849,8 +851,6 @@ func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 	metricType, err := metricsinfo.ParseMetricType(req.Request)
 	if err != nil {
 		log.Warn("DataCoord.GetMetrics failed to parse metric type",
-			zap.Int64("nodeID", s.session.ServerID),
-			zap.String("req", req.Request),
 			zap.Error(err))
 
 		return &milvuspb.GetMetricsResponse{
@@ -866,7 +866,7 @@ func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 	if metricType == metricsinfo.SystemInfoMetrics {
 		metrics, err := s.getSystemInfoMetrics(ctx, req)
 		if err != nil {
-			log.Warn("DataCoord GetMetrics failed", zap.Int64("nodeID", Params.DataCoordCfg.GetNodeID()), zap.Error(err))
+			log.Warn("DataCoord GetMetrics failed", zap.Error(err))
 			return &milvuspb.GetMetricsResponse{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -876,8 +876,6 @@ func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 		}
 
 		log.RatedDebug(60, "DataCoord.GetMetrics",
-			zap.Int64("nodeID", s.session.ServerID),
-			zap.String("req", req.Request),
 			zap.String("metricType", metricType),
 			zap.Any("metrics", metrics), // TODO(dragondriver): necessary? may be very large
 			zap.Error(err))
@@ -886,8 +884,6 @@ func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 	}
 
 	log.RatedWarn(60.0, "DataCoord.GetMetrics failed, request metric type is not implemented yet",
-		zap.Int64("nodeID", s.session.ServerID),
-		zap.String("req", req.Request),
 		zap.String("metricType", metricType))
 
 	return &milvuspb.GetMetricsResponse{

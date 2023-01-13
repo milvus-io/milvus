@@ -3798,13 +3798,11 @@ func (node *Proxy) GetProxyMetrics(ctx context.Context, req *milvuspb.GetMetrics
 	defer sp.Finish()
 
 	log := log.Ctx(ctx).With(
-		zap.Int64("nodeID", node.session.ServerID),
-		zap.String("req", req.Request))
+		zap.Int64("nodeID", Params.ProxyCfg.GetNodeID()),
+		zap.String("req", req.GetRequest()))
 
 	if !node.checkHealthy() {
 		log.Warn("Proxy.GetProxyMetrics failed",
-			zap.Int64("node_id", Params.ProxyCfg.GetNodeID()),
-			zap.String("req", req.Request),
 			zap.Error(errProxyIsUnhealthy(Params.ProxyCfg.GetNodeID())))
 
 		return &milvuspb.GetMetricsResponse{
@@ -3818,8 +3816,6 @@ func (node *Proxy) GetProxyMetrics(ctx context.Context, req *milvuspb.GetMetrics
 	metricType, err := metricsinfo.ParseMetricType(req.Request)
 	if err != nil {
 		log.Warn("Proxy.GetProxyMetrics failed to parse metric type",
-			zap.Int64("node_id", Params.ProxyCfg.GetNodeID()),
-			zap.String("req", req.Request),
 			zap.Error(err))
 
 		return &milvuspb.GetMetricsResponse{
@@ -3841,8 +3837,6 @@ func (node *Proxy) GetProxyMetrics(ctx context.Context, req *milvuspb.GetMetrics
 		proxyMetrics, err := getProxyMetrics(ctx, req, node)
 		if err != nil {
 			log.Warn("Proxy.GetProxyMetrics failed to getProxyMetrics",
-				zap.Int64("node_id", Params.ProxyCfg.GetNodeID()),
-				zap.String("req", req.Request),
 				zap.Error(err))
 
 			return &milvuspb.GetMetricsResponse{

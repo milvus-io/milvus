@@ -582,8 +582,11 @@ func (s *Server) ShowConfigurations(ctx context.Context, req *internalpb.ShowCon
 }
 
 func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	log.RatedDebug(60, "get metrics request received",
-		zap.String("metricType", req.GetRequest()))
+	log := log.Ctx(ctx).With(
+		zap.Int64("nodeID", Params.QueryCoordCfg.GetNodeID()),
+		zap.String("req", req.GetRequest()))
+
+	log.RatedDebug(60, "get metrics request received")
 
 	if s.status.Load() != commonpb.StateCode_Healthy {
 		msg := "failed to get metrics"
