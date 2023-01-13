@@ -25,7 +25,7 @@ Milvus 2.2 has changed the meta structure for segment index. To upgrade a Milvus
 | `t`          | The target Milvus version.                                | `None`                           | True                    |
 | `r`          | The root path of Milvus meta.                             | `by-dev`                         | False                   |
 | `w`          | The new Milvus image tag.                                 | `milvusdb/milvus:v2.2.0`         | False                   |
-| `m`          | The meta migration image tag.                             | `milvusdb/meta-migration:v2.2.0` | False                   |
+| `m`          | The meta migration image tag.                             | `milvusdb/meta-migration:v2.2.0-bugfix-20220112` | False                   |
 | `o`          | The meta migration operation.                             | `migrate`                        | False                   |
 | `d`          | Whether to cleanup after migration is completed.          | `false`                          | False                   |
 | `c`          | The storage class for meta migration pvc.                 | `default storage class`          | False                   |
