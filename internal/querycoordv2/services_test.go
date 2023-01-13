@@ -326,6 +326,139 @@ func (suite *ServiceSuite) TestLoadCollection() {
 	suite.Contains(resp.Reason, ErrNotHealthy.Error())
 }
 
+func (suite *ServiceSuite) TestResourceGroup() {
+	ctx := context.Background()
+	server := suite.server
+
+	createRG := &milvuspb.CreateResourceGroupRequest{
+		ResourceGroup: "rg1",
+	}
+
+	resp, err := server.CreateResourceGroup(ctx, createRG)
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_Success, resp.ErrorCode)
+
+	resp, err = server.CreateResourceGroup(ctx, createRG)
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.ErrorCode)
+	suite.Contains(resp.Reason, ErrCreateResourceGroupFailed.Error())
+	suite.Contains(resp.Reason, meta.ErrRGAlreadyExist.Error())
+
+	listRG := &milvuspb.ListResourceGroupRequest{}
+	resp1, err := server.ListResourceGroup(ctx, listRG)
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_Success, resp1.Status.ErrorCode)
+	suite.Len(resp1.ResourceGroups, 2)
+
+	describeRG := &querypb.DescribeResourceGroupRequest{
+		ResourceGroup: "rg1",
+	}
+	resp2, err := server.DescribeResourceGroup(ctx, describeRG)
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_Success, resp2.Status.ErrorCode)
+	suite.Equal("rg1", resp2.GetResourceGroup().GetName())
+	suite.Equal(int32(0), resp2.GetResourceGroup().GetCapacity())
+	suite.Equal(int32(0), resp2.GetResourceGroup().GetNumAvailableNode())
+
+	dropRG := &milvuspb.DropResourceGroupRequest{
+		ResourceGroup: "rg1",
+	}
+
+	resp3, err := server.DropResourceGroup(ctx, dropRG)
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_Success, resp3.ErrorCode)
+
+	resp4, err := server.ListResourceGroup(ctx, listRG)
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_Success, resp4.Status.ErrorCode)
+	suite.Len(resp4.GetResourceGroups(), 1)
+}
+
+func (suite *ServiceSuite) TestTransferNode() {
+	ctx := context.Background()
+	server := suite.server
+
+	err := server.meta.ResourceManager.AddResourceGroup("rg1")
+	suite.NoError(err)
+	err = server.meta.ResourceManager.AddResourceGroup("rg2")
+	suite.NoError(err)
+	// test transfer node
+	resp, err := server.TransferNode(ctx, &milvuspb.TransferNodeRequest{
+		SourceResourceGroup: meta.DefaultResourceGroupName,
+		TargetResourceGroup: "rg1",
+	})
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_Success, resp.ErrorCode)
+	nodes, err := server.meta.ResourceManager.GetNodes("rg1")
+	suite.NoError(err)
+	suite.Len(nodes, 1)
+
+	// test transfer node meet non-exist rg
+	resp, err = server.TransferNode(ctx, &milvuspb.TransferNodeRequest{
+		SourceResourceGroup: meta.DefaultResourceGroupName,
+		TargetResourceGroup: "rgggg",
+	})
+	suite.NoError(err)
+	suite.Contains(resp.Reason, meta.ErrRGNotExist.Error())
+	suite.Equal(commonpb.ErrorCode_IllegalArgument, resp.ErrorCode)
+}
+
+func (suite *ServiceSuite) TestTransferReplica() {
+	ctx := context.Background()
+	server := suite.server
+
+	err := server.meta.ResourceManager.AddResourceGroup("rg1")
+	suite.NoError(err)
+	err = server.meta.ResourceManager.AddResourceGroup("rg2")
+	suite.NoError(err)
+
+	resp, err := suite.server.TransferReplica(ctx, &querypb.TransferReplicaRequest{
+		SourceResourceGroup:  meta.DefaultResourceGroupName,
+		TargetResourceGroups: []string{"rg1", "rg2"},
+		CollectionID:         1,
+		NumReplica:           2,
+	})
+	suite.NoError(err)
+	suite.Contains(resp.Reason, "found [0] replicas of collection[1] in source resource group")
+
+	resp, err = suite.server.TransferReplica(ctx, &querypb.TransferReplicaRequest{
+		SourceResourceGroup:  meta.DefaultResourceGroupName,
+		TargetResourceGroups: []string{"rg1", "rgg"},
+		CollectionID:         1,
+		NumReplica:           2,
+	})
+	suite.NoError(err)
+	suite.Contains(resp.Reason, meta.ErrRGNotExist.Error())
+
+	suite.server.meta.Put(meta.NewReplica(&querypb.Replica{
+		CollectionID:  1,
+		ID:            111,
+		ResourceGroup: meta.DefaultResourceGroupName,
+	}, typeutil.NewUniqueSet(1)))
+	suite.server.meta.Put(meta.NewReplica(&querypb.Replica{
+		CollectionID:  1,
+		ID:            222,
+		ResourceGroup: meta.DefaultResourceGroupName,
+	}, typeutil.NewUniqueSet(2)))
+
+	suite.server.nodeMgr.Add(session.NewNodeInfo(1001, "localhost"))
+	suite.server.nodeMgr.Add(session.NewNodeInfo(1002, "localhost"))
+	suite.server.meta.AssignNode("rg1", 1001)
+	suite.server.meta.AssignNode("rg2", 1002)
+
+	resp, err = suite.server.TransferReplica(ctx, &querypb.TransferReplicaRequest{
+		SourceResourceGroup:  meta.DefaultResourceGroupName,
+		TargetResourceGroups: []string{"rg1", "rg2"},
+		CollectionID:         1,
+		NumReplica:           2,
+	})
+
+	suite.NoError(err)
+	suite.Equal(resp.ErrorCode, commonpb.ErrorCode_Success)
+	suite.Len(suite.server.meta.GetByResourceGroup("rg1"), 1)
+	suite.Len(suite.server.meta.GetByResourceGroup("rg2"), 1)
+}
+
 func (suite *ServiceSuite) TestLoadCollectionFailed() {
 	suite.loadAll()
 	ctx := context.Background()

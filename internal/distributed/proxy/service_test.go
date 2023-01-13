@@ -404,6 +404,30 @@ func (m *MockQueryCoord) CheckHealth(ctx context.Context, req *milvuspb.CheckHea
 	}, nil
 }
 
+func (m *MockQueryCoord) CreateResourceGroup(ctx context.Context, req *milvuspb.CreateResourceGroupRequest) (*commonpb.Status, error) {
+	return nil, nil
+}
+
+func (m *MockQueryCoord) DropResourceGroup(ctx context.Context, req *milvuspb.DropResourceGroupRequest) (*commonpb.Status, error) {
+	return nil, nil
+}
+
+func (m *MockQueryCoord) DescribeResourceGroup(ctx context.Context, req *querypb.DescribeResourceGroupRequest) (*querypb.DescribeResourceGroupResponse, error) {
+	return nil, nil
+}
+
+func (m *MockQueryCoord) TransferNode(ctx context.Context, req *milvuspb.TransferNodeRequest) (*commonpb.Status, error) {
+	return nil, nil
+}
+
+func (m *MockQueryCoord) TransferReplica(ctx context.Context, req *querypb.TransferReplicaRequest) (*commonpb.Status, error) {
+	return nil, nil
+}
+
+func (m *MockQueryCoord) ListResourceGroup(ctx context.Context, req *milvuspb.ListResourceGroupRequest) (*milvuspb.ListResourceGroupResponse, error) {
+	return nil, nil
+}
+
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type MockDataCoord struct {
 	MockBase
@@ -1364,6 +1388,36 @@ func Test_NewServer(t *testing.T) {
 
 	t.Run("CheckHealth", func(t *testing.T) {
 		_, err := server.CheckHealth(ctx, nil)
+		assert.Nil(t, err)
+	})
+
+	t.Run("CreateResourceGroup", func(t *testing.T) {
+		_, err := server.CreateResourceGroup(ctx, nil)
+		assert.Nil(t, err)
+	})
+
+	t.Run("DropResourceGroup", func(t *testing.T) {
+		_, err := server.DropResourceGroup(ctx, nil)
+		assert.Nil(t, err)
+	})
+
+	t.Run("TransferNode", func(t *testing.T) {
+		_, err := server.TransferNode(ctx, nil)
+		assert.Nil(t, err)
+	})
+
+	t.Run("TransferReplica", func(t *testing.T) {
+		_, err := server.TransferReplica(ctx, nil)
+		assert.Nil(t, err)
+	})
+
+	t.Run("ListResourceGroup", func(t *testing.T) {
+		_, err := server.ListResourceGroup(ctx, nil)
+		assert.Nil(t, err)
+	})
+
+	t.Run("DescribeResourceGroup", func(t *testing.T) {
+		_, err := server.DescribeResourceGroup(ctx, nil)
 		assert.Nil(t, err)
 	})
 

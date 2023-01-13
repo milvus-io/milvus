@@ -307,9 +307,11 @@ func (s *Server) tryGetNodesMetrics(ctx context.Context, req *milvuspb.GetMetric
 
 func (s *Server) fillReplicaInfo(replica *meta.Replica, withShardNodes bool) (*milvuspb.ReplicaInfo, error) {
 	info := &milvuspb.ReplicaInfo{
-		ReplicaID:    replica.GetID(),
-		CollectionID: replica.GetCollectionID(),
-		NodeIds:      replica.GetNodes(),
+		ReplicaID:         replica.GetID(),
+		CollectionID:      replica.GetCollectionID(),
+		NodeIds:           replica.GetNodes(),
+		ResourceGroupName: replica.GetResourceGroup(),
+		NumOutboundNode:   s.meta.GetOutgoingNodeNumByReplica(replica),
 	}
 
 	channels := s.targetMgr.GetDmChannelsByCollection(replica.GetCollectionID(), meta.CurrentTarget)

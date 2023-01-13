@@ -845,3 +845,207 @@ func (s *Server) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthReque
 
 	return &milvuspb.CheckHealthResponse{IsHealthy: true, Reasons: errReasons}, nil
 }
+
+func (s *Server) CreateResourceGroup(ctx context.Context, req *milvuspb.CreateResourceGroupRequest) (*commonpb.Status, error) {
+	log := log.Ctx(ctx).With(
+		zap.String("rgName", req.GetResourceGroup()),
+	)
+
+	log.Info("create resource group request received")
+	if s.status.Load() != commonpb.StateCode_Healthy {
+		log.Warn(ErrCreateResourceGroupFailed.Error(), zap.Error(ErrNotHealthy))
+		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, ErrCreateResourceGroupFailed.Error(), ErrNotHealthy), nil
+	}
+
+	err := s.meta.ResourceManager.AddResourceGroup(req.GetResourceGroup())
+	if err != nil {
+		log.Warn(ErrCreateResourceGroupFailed.Error(), zap.Error(err))
+		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, ErrCreateResourceGroupFailed.Error(), err), nil
+	}
+	return successStatus, nil
+}
+
+func (s *Server) DropResourceGroup(ctx context.Context, req *milvuspb.DropResourceGroupRequest) (*commonpb.Status, error) {
+	log := log.Ctx(ctx).With(
+		zap.String("rgName", req.GetResourceGroup()),
+	)
+
+	log.Info("drop resource group request received")
+	if s.status.Load() != commonpb.StateCode_Healthy {
+		log.Warn(ErrDropResourceGroupFailed.Error(), zap.Error(ErrNotHealthy))
+		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, ErrDropResourceGroupFailed.Error(), ErrNotHealthy), nil
+	}
+
+	err := s.meta.ResourceManager.RemoveResourceGroup(req.GetResourceGroup())
+	if err != nil {
+		log.Warn(ErrDropResourceGroupFailed.Error(), zap.Error(err))
+		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, ErrDropResourceGroupFailed.Error(), err), nil
+	}
+	return successStatus, nil
+}
+
+func (s *Server) TransferNode(ctx context.Context, req *milvuspb.TransferNodeRequest) (*commonpb.Status, error) {
+	log := log.Ctx(ctx).With(
+		zap.String("source", req.GetSourceResourceGroup()),
+		zap.String("target", req.GetTargetResourceGroup()),
+	)
+
+	log.Info("transfer node between resource group request received")
+	if s.status.Load() != commonpb.StateCode_Healthy {
+		log.Warn(ErrTransferNodeFailed.Error(), zap.Error(ErrNotHealthy))
+		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, ErrTransferNodeFailed.Error(), ErrNotHealthy), nil
+	}
+
+	if ok := s.meta.ResourceManager.ContainResourceGroup(req.GetSourceResourceGroup()); !ok {
+		return utils.WrapStatus(commonpb.ErrorCode_IllegalArgument,
+			fmt.Sprintf("the source resource group[%s] doesn't exist", req.GetTargetResourceGroup()), meta.ErrRGNotExist), nil
+	}
+
+	if ok := s.meta.ResourceManager.ContainResourceGroup(req.GetTargetResourceGroup()); !ok {
+		return utils.WrapStatus(commonpb.ErrorCode_IllegalArgument,
+			fmt.Sprintf("the target resource group[%s] doesn't exist", req.GetTargetResourceGroup()), meta.ErrRGNotExist), nil
+	}
+
+	err := s.meta.ResourceManager.TransferNode(req.GetSourceResourceGroup(), req.GetTargetResourceGroup())
+	if err != nil {
+		log.Warn(ErrTransferNodeFailed.Error(), zap.Error(err))
+		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, ErrTransferNodeFailed.Error(), err), nil
+	}
+
+	return successStatus, nil
+}
+
+func (s *Server) TransferReplica(ctx context.Context, req *querypb.TransferReplicaRequest) (*commonpb.Status, error) {
+	log := log.Ctx(ctx).With(
+		zap.String("source", req.GetSourceResourceGroup()),
+		zap.Strings("target", req.GetTargetResourceGroups()),
+		zap.Int64("collectionID", req.GetCollectionID()),
+	)
+
+	log.Info("transfer replica request received")
+	if s.status.Load() != commonpb.StateCode_Healthy {
+		log.Warn(ErrTransferReplicaFailed.Error(), zap.Error(ErrNotHealthy))
+		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, ErrTransferReplicaFailed.Error(), ErrNotHealthy), nil
+	}
+
+	if ok := s.meta.ResourceManager.ContainResourceGroup(req.GetSourceResourceGroup()); !ok {
+		return utils.WrapStatus(commonpb.ErrorCode_IllegalArgument,
+			fmt.Sprintf("the source resource group[%s] doesn't exist", req.GetSourceResourceGroup()), meta.ErrRGNotExist), nil
+	}
+
+	for _, rgName := range req.GetTargetResourceGroups() {
+		if ok := s.meta.ResourceManager.ContainResourceGroup(rgName); !ok {
+			return utils.WrapStatus(commonpb.ErrorCode_IllegalArgument,
+				fmt.Sprintf("the target resource group[%s] doesn't exist", rgName), meta.ErrRGNotExist), nil
+		}
+	}
+
+	// for now, we don't support to transfer replica of same collection to same resource group
+	replicas := s.meta.ReplicaManager.GetByCollectionAndRG(req.GetCollectionID(), req.GetSourceResourceGroup())
+	if len(replicas) < int(req.GetNumReplica()) {
+		return utils.WrapStatus(commonpb.ErrorCode_IllegalArgument,
+			fmt.Sprintf("found [%d] replicas of collection[%d] in source resource group[%s]",
+				len(replicas), req.GetCollectionID(), req.GetSourceResourceGroup())), nil
+	}
+
+	if len(req.GetTargetResourceGroups()) != 1 && len(req.GetTargetResourceGroups()) != int(req.GetNumReplica()) {
+		return utils.WrapStatus(commonpb.ErrorCode_IllegalArgument, utils.ErrUseWrongNumRG.Error()), nil
+	}
+
+	err := s.transferReplica(req.GetTargetResourceGroups(), replicas[:req.GetNumReplica()])
+	if err != nil {
+		return utils.WrapStatus(commonpb.ErrorCode_IllegalArgument, ErrTransferReplicaFailed.Error(), err), nil
+	}
+
+	return successStatus, nil
+}
+
+func (s *Server) transferReplica(targetRG []string, replicas []*meta.Replica) error {
+	if len(targetRG) == 1 {
+		for _, replica := range replicas {
+			replica.ResourceGroup = targetRG[0]
+		}
+		utils.AssignNodesToReplicas(s.meta, targetRG[0], replicas...)
+	} else {
+		for i, replica := range replicas {
+			replica.ResourceGroup = targetRG[i]
+			utils.AssignNodesToReplicas(s.meta, targetRG[i], replicas[i])
+		}
+	}
+
+	return s.meta.ReplicaManager.Put(replicas...)
+}
+
+func (s *Server) ListResourceGroup(ctx context.Context, req *milvuspb.ListResourceGroupRequest) (*milvuspb.ListResourceGroupResponse, error) {
+	log := log.Ctx(ctx)
+
+	log.Info("list resource group request received")
+	resp := &milvuspb.ListResourceGroupResponse{
+		Status: successStatus,
+	}
+	if s.status.Load() != commonpb.StateCode_Healthy {
+		log.Warn(ErrListResourceGroupFailed.Error(), zap.Error(ErrNotHealthy))
+		resp.Status = utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, ErrListResourceGroupFailed.Error(), ErrNotHealthy)
+		return resp, nil
+	}
+
+	resp.ResourceGroups = s.meta.ResourceManager.ListResourceGroups()
+	return resp, nil
+}
+
+func (s *Server) DescribeResourceGroup(ctx context.Context, req *querypb.DescribeResourceGroupRequest) (*querypb.DescribeResourceGroupResponse, error) {
+	log := log.Ctx(ctx).With(
+		zap.String("rgName", req.GetResourceGroup()),
+	)
+
+	log.Info("describe resource group request received")
+	resp := &querypb.DescribeResourceGroupResponse{
+		Status: successStatus,
+	}
+	if s.status.Load() != commonpb.StateCode_Healthy {
+		log.Warn(ErrDescribeResourceGroupFailed.Error(), zap.Error(ErrNotHealthy))
+		resp.Status = utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, ErrDescribeResourceGroupFailed.Error(), ErrNotHealthy)
+		return resp, nil
+	}
+
+	rg, err := s.meta.ResourceManager.GetResourceGroup(req.GetResourceGroup())
+	if err != nil {
+		resp.Status = utils.WrapStatus(commonpb.ErrorCode_IllegalArgument, ErrDescribeResourceGroupFailed.Error(), err)
+		return resp, nil
+	}
+
+	loadedReplicas := make(map[int64]int32)
+	outgoingNodes := make(map[int64]int32)
+	replicasInRG := s.meta.GetByResourceGroup(req.GetResourceGroup())
+	for _, replica := range replicasInRG {
+		loadedReplicas[replica.GetCollectionID()]++
+		for _, node := range replica.GetNodes() {
+			if !s.meta.ContainsNode(replica.GetResourceGroup(), node) {
+				outgoingNodes[replica.GetCollectionID()]++
+			}
+		}
+	}
+	incomingNodes := make(map[int64]int32)
+	collections := s.meta.GetAll()
+	for _, collection := range collections {
+		replicas := s.meta.GetByCollection(collection)
+
+		for _, replica := range replicas {
+			for _, node := range replica.GetNodes() {
+				if s.meta.ContainsNode(req.GetResourceGroup(), node) {
+					incomingNodes[collection]++
+				}
+			}
+		}
+	}
+
+	resp.ResourceGroup = &querypb.ResourceGroupInfo{
+		Name:             req.GetResourceGroup(),
+		Capacity:         int32(rg.GetCapacity()),
+		NumAvailableNode: int32(len(rg.GetNodes())),
+		NumLoadedReplica: loadedReplicas,
+		NumOutgoingNode:  outgoingNodes,
+		NumIncomingNode:  incomingNodes,
+	}
+	return resp, nil
+}

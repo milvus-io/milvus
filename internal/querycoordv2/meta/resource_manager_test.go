@@ -234,6 +234,37 @@ func (suite *ResourceManagerSuite) TestCheckResourceGroup() {
 	suite.manager.checkRGNodeStatus("rg")
 	lackNodes = suite.manager.CheckLackOfNode("rg")
 	suite.Equal(lackNodes, 2)
+
+	rg, err := suite.manager.FindResourceGroupByNode(3)
+	suite.NoError(err)
+	suite.Equal(rg, "rg")
+}
+
+func (suite *ResourceManagerSuite) TestGetOutboundNode() {
+	suite.manager.nodeMgr.Add(session.NewNodeInfo(1, "localhost"))
+	suite.manager.nodeMgr.Add(session.NewNodeInfo(2, "localhost"))
+	suite.manager.nodeMgr.Add(session.NewNodeInfo(3, "localhost"))
+	suite.manager.AddResourceGroup("rg")
+	suite.manager.AddResourceGroup("rg1")
+	suite.manager.AssignNode("rg", 1)
+	suite.manager.AssignNode("rg", 2)
+	suite.manager.AssignNode("rg1", 3)
+
+	replica := NewReplica(
+		&querypb.Replica{
+			ID:            1,
+			CollectionID:  100,
+			ResourceGroup: "rg",
+			Nodes:         []int64{1, 2, 3},
+		},
+		typeutil.NewUniqueSet(1, 2, 3),
+	)
+
+	outgoingNodes := suite.manager.GetOutgoingNodeNumByReplica(replica)
+	suite.NotNil(outgoingNodes)
+	suite.Len(outgoingNodes, 1)
+	suite.NotNil(outgoingNodes["rg1"])
+	suite.Equal(outgoingNodes["rg1"], int32(1))
 }
 
 func (suite *ResourceManagerSuite) TestAutoRecover() {

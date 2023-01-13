@@ -332,6 +332,7 @@ func (rm *ResourceManager) GetNodes(rgName string) ([]int64, error) {
 	return rm.groups[rgName].GetNodes(), nil
 }
 
+// return all outbound node
 func (rm *ResourceManager) CheckOutboundNodes(replica *Replica) typeutil.UniqueSet {
 	rm.rwmutex.RLock()
 	defer rm.rwmutex.RUnlock()
@@ -345,6 +346,29 @@ func (rm *ResourceManager) CheckOutboundNodes(replica *Replica) typeutil.UniqueS
 	for _, node := range replica.GetNodes() {
 		if !rg.containsNode(node) {
 			ret.Insert(node)
+		}
+	}
+
+	return ret
+}
+
+// return outgoing node num on each rg from this replica
+func (rm *ResourceManager) GetOutgoingNodeNumByReplica(replica *Replica) map[string]int32 {
+	rm.rwmutex.RLock()
+	defer rm.rwmutex.RUnlock()
+
+	if rm.groups[replica.GetResourceGroup()] == nil {
+		return nil
+	}
+
+	rg := rm.groups[replica.GetResourceGroup()]
+	ret := make(map[string]int32)
+	for _, node := range replica.GetNodes() {
+		if !rg.containsNode(node) {
+			rgName, err := rm.findResourceGroupByNode(node)
+			if err == nil {
+				ret[rgName]++
+			}
 		}
 	}
 
@@ -385,6 +409,13 @@ func (rm *ResourceManager) ListResourceGroups() []string {
 	defer rm.rwmutex.RUnlock()
 
 	return lo.Keys(rm.groups)
+}
+
+func (rm *ResourceManager) FindResourceGroupByNode(node int64) (string, error) {
+	rm.rwmutex.RLock()
+	defer rm.rwmutex.RUnlock()
+
+	return rm.findResourceGroupByNode(node)
 }
 
 func (rm *ResourceManager) findResourceGroupByNode(node int64) (string, error) {

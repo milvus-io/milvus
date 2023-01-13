@@ -60,6 +60,72 @@ func (suite *StoreTestSuite) TearDownTest() {
 	}
 }
 
+func (suite *StoreTestSuite) TestCollection() {
+	suite.store.SaveCollection(&querypb.CollectionLoadInfo{
+		CollectionID: 1,
+	})
+
+	suite.store.SaveCollection(&querypb.CollectionLoadInfo{
+		CollectionID: 2,
+	})
+
+	suite.store.SaveCollection(&querypb.CollectionLoadInfo{
+		CollectionID: 3,
+	})
+
+	suite.store.ReleaseCollection(1)
+	suite.store.ReleaseCollection(2)
+
+	collections, err := suite.store.GetCollections()
+	suite.NoError(err)
+	suite.Len(collections, 1)
+}
+
+func (suite *StoreTestSuite) TestPartition() {
+	suite.store.SavePartition(&querypb.PartitionLoadInfo{
+		PartitionID: 1,
+	})
+
+	suite.store.SavePartition(&querypb.PartitionLoadInfo{
+		PartitionID: 2,
+	})
+
+	suite.store.SavePartition(&querypb.PartitionLoadInfo{
+		PartitionID: 3,
+	})
+
+	suite.store.ReleasePartition(1)
+	suite.store.ReleasePartition(2)
+
+	partitions, err := suite.store.GetPartitions()
+	suite.NoError(err)
+	suite.Len(partitions, 1)
+}
+
+func (suite *StoreTestSuite) TestReplica() {
+	suite.store.SaveReplica(&querypb.Replica{
+		CollectionID: 1,
+		ID:           1,
+	})
+
+	suite.store.SaveReplica(&querypb.Replica{
+		CollectionID: 1,
+		ID:           2,
+	})
+
+	suite.store.SaveReplica(&querypb.Replica{
+		CollectionID: 1,
+		ID:           3,
+	})
+
+	suite.store.ReleaseReplica(1, 1)
+	suite.store.ReleaseReplica(1, 2)
+
+	replicas, err := suite.store.GetReplicas()
+	suite.NoError(err)
+	suite.Len(replicas, 1)
+}
+
 func (suite *StoreTestSuite) TestResourceGroup() {
 	suite.store.SaveResourceGroup("rg1", &querypb.ResourceGroup{
 		Name:     "rg1",
