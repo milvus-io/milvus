@@ -241,11 +241,6 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 	defer sp.End()
 	log := log.Ctx(ctx).With(zap.String("collectionName", it.req.CollectionName))
 
-	it.req.Base = commonpbutil.NewMsgBase(
-		commonpbutil.WithMsgType(commonpb.MsgType(commonpb.MsgType_Upsert)),
-		commonpbutil.WithSourceID(paramtable.GetNodeID()),
-	)
-
 	it.result = &milvuspb.MutationResult{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
