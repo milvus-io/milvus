@@ -130,6 +130,7 @@ func (meta *CollectionLoadInfo210) to220() (CollectionLoadInfo220, PartitionLoad
 					LoadPercentage: 100,
 					Status:         querypb.LoadStatus_Loaded,
 					ReplicaNumber:  loadInfo.ReplicaNumber,
+					FieldIndexID:   make(map[UniqueID]UniqueID),
 				}
 			}
 		}
@@ -274,11 +275,13 @@ func combineToSegmentIndexesMeta220(segmentIndexes SegmentIndexesMeta210, indexB
 }
 
 func combineToLoadInfo220(collectionLoadInfo CollectionLoadInfo220, partitionLoadInto PartitionLoadInfo220, fieldIndexes FieldIndexes210) {
+	toBeReleased := make([]UniqueID, 0)
+
 	for collectionID, loadInfo := range collectionLoadInfo {
 		indexes, ok := fieldIndexes[collectionID]
 		if !ok || len(indexes.indexes) == 0 {
-			log.Warn("release the collection without index", zap.Int64("collectionID", collectionID))
-			delete(collectionLoadInfo, collectionID)
+			toBeReleased = append(toBeReleased, collectionID)
+			continue
 		}
 
 		for _, index := range indexes.indexes {
@@ -289,14 +292,20 @@ func combineToLoadInfo220(collectionLoadInfo CollectionLoadInfo220, partitionLoa
 	for collectionID, partitions := range partitionLoadInto {
 		indexes, ok := fieldIndexes[collectionID]
 		if !ok || len(indexes.indexes) == 0 {
-			log.Warn("release the collection without index", zap.Int64("collectionID", collectionID))
-			delete(collectionLoadInfo, collectionID)
+			toBeReleased = append(toBeReleased, collectionID)
+			continue
 		}
+
 		for _, loadInfo := range partitions {
 			for _, index := range indexes.indexes {
 				loadInfo.FieldIndexID[index.GetFiledID()] = index.GetIndexID()
 			}
 		}
+	}
+
+	for _, collectionID := range toBeReleased {
+		log.Warn("release the collection without index", zap.Int64("collectionID", collectionID))
+		delete(collectionLoadInfo, collectionID)
 	}
 }
 
