@@ -53,3 +53,7 @@ target_link_libraries(milvus_segcore
         )
 
 install(TARGETS milvus_segcore DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+
+add_executable(velox_demo VeloxDemo.cpp)
+target_link_libraries(velox_demo ${CONAN_LIBS} velox_bundled)
+install(TARGETS velox_demo DESTINATION "${CMAKE_INSTALL_BINDIR}")
