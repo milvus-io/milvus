@@ -2243,6 +2243,7 @@ class TestLoadCollection(TestcaseBase):
         yield request.param
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.xfail("issue #21618")
     def test_load_replica_non_number(self, get_non_number_replicas):
         """
         target: test load collection with non-number replicas
