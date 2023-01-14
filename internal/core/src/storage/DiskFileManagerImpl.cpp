@@ -119,7 +119,7 @@ DiskFileManagerImpl::AddFile(const std::string& file) noexcept {
     auto remotePrefix = GetRemoteIndexObjectPrefix();
     std::vector<std::future<std::pair<std::string, size_t>>> futures;
     for (int64_t offset = 0; offset < fileSize; slice_num++) {
-        auto batch_size = std::min(index_file_slice_size << 20, int64_t(fileSize) - offset);
+        auto batch_size = std::min(index_file_slice_size << 20, static_cast<int64_t>(fileSize) - offset);
 
         // Put file to remote
         char objectKey[200];
@@ -155,23 +155,23 @@ DiskFileManagerImpl::CacheIndexToDisk(std::vector<std::string> remote_files) {
 
     auto EstimateParalleDegree = [&](const std::string& file) -> uint64_t {
         auto fileSize = rcm_->Size(file);
-        return uint64_t(DEFAULT_DISK_INDEX_MAX_MEMORY_LIMIT / fileSize);
+        return static_cast<uint64_t>(DEFAULT_DISK_INDEX_MAX_MEMORY_LIMIT / fileSize);
     };
 
     for (auto& slices : index_slices) {
         auto prefix = slices.first;
-        auto local_index_file_name = GetLocalIndexObjectPrefix() + prefix.substr(prefix.find_last_of("/") + 1);
+        auto local_index_file_name = GetLocalIndexObjectPrefix() + prefix.substr(prefix.find_last_of('/') + 1);
         local_chunk_manager.CreateFile(local_index_file_name);
         int64_t offset = 0;
         std::vector<std::string> batch_remote_files;
         uint64_t max_parallel_degree = INT_MAX;
-        for (auto iter = slices.second.begin(); iter != slices.second.end(); iter++) {
+        for (int& iter : slices.second) {
             if (batch_remote_files.size() == max_parallel_degree) {
                 auto next_offset = CacheBatchIndexFilesToDisk(batch_remote_files, local_index_file_name, offset);
                 offset = next_offset;
                 batch_remote_files.clear();
             }
-            auto origin_file = prefix + "_" + std::to_string(*iter);
+            auto origin_file = prefix + "_" + std::to_string(iter);
             if (batch_remote_files.size() == 0) {
                 // Use first file size as average size to estimate
                 max_parallel_degree = EstimateParalleDegree(origin_file);
@@ -205,6 +205,7 @@ DiskFileManagerImpl::CacheBatchIndexFilesToDisk(const std::vector<std::string>& 
     int batch_size = remote_files.size();
 
     std::vector<std::future<std::unique_ptr<DataCodec>>> futures;
+    futures.reserve(batch_size);
     for (int i = 0; i < batch_size; ++i) {
         futures.push_back(pool.Submit(DownloadAndDecodeRemoteIndexfile, rcm_.get(), remote_files[i]));
     }

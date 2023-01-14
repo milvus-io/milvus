@@ -31,7 +31,7 @@ class SubSearchResult {
           distances_(num_queries * topk, init_value(metric_type)) {
     }
 
-    SubSearchResult(SubSearchResult&& other)
+    SubSearchResult(SubSearchResult&& other) noexcept
         : num_queries_(other.num_queries_),
           topk_(other.topk_),
           round_decimal_(other.round_decimal_),
@@ -47,17 +47,17 @@ class SubSearchResult {
     }
 
  public:
-    int64_t
+    [[nodiscard]] int64_t
     get_num_queries() const {
         return num_queries_;
     }
 
-    int64_t
+    [[nodiscard]] int64_t
     get_topk() const {
         return topk_;
     }
 
-    const int64_t*
+    [[nodiscard]] const int64_t*
     get_ids() const {
         return seg_offsets_.data();
     }
@@ -67,7 +67,7 @@ class SubSearchResult {
         return seg_offsets_.data();
     }
 
-    const float*
+    [[nodiscard]] const float*
     get_distances() const {
         return distances_.data();
     }

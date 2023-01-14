@@ -792,7 +792,7 @@ ExecExprVisitor::ExecTermVisitorImpl(TermExpr& expr_raw) -> BitsetType {
         auto [uids, seg_offsets] = segment_.search_ids(*id_array, timestamp_);
         BitsetType bitset(row_count_);
         for (const auto& offset : seg_offsets) {
-            auto _offset = (int64_t)offset.get();
+            auto _offset = static_cast<int64_t>(offset.get());
             bitset[_offset] = true;
         }
         AssertInfo(bitset.size() == row_count_, "[ExecExprVisitor]Size of results not equal row count");
@@ -818,7 +818,7 @@ ExecExprVisitor::ExecTermVisitorImplTemplate(TermExpr& expr_raw) -> BitsetType {
     std::unordered_set<T> term_set(expr.terms_.begin(), expr.terms_.end());
 
     auto index_func = [&terms, n](Index* index) { return index->In(n, terms.data()); };
-    auto elem_func = [&terms, &term_set](T x) {
+    auto elem_func = [&term_set](T x) {
         //// terms has already been sorted.
         // return std::binary_search(terms.begin(), terms.end(), x);
         return term_set.find(x) != term_set.end();
@@ -849,7 +849,7 @@ ExecExprVisitor::ExecTermVisitorImplTemplate<bool>(TermExpr& expr_raw) -> Bitset
         return bitset;
     };
 
-    auto elem_func = [&terms, &term_set](T x) {
+    auto elem_func = [&term_set](T x) {
         //// terms has already been sorted.
         // return std::binary_search(terms.begin(), terms.end(), x);
         return term_set.find(x) != term_set.end();

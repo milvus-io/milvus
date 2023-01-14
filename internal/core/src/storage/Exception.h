@@ -26,11 +26,11 @@ class NotImplementedException : public std::exception {
  public:
     explicit NotImplementedException(const std::string& msg) : std::exception(), exception_message_(msg) {
     }
-    const char*
-    what() const noexcept {
+    [[nodiscard]] const char*
+    what() const noexcept override {
         return exception_message_.c_str();
     }
-    virtual ~NotImplementedException() {
+    ~NotImplementedException() override {
     }
 
  private:
@@ -41,7 +41,7 @@ class LocalChunkManagerException : public std::runtime_error {
  public:
     explicit LocalChunkManagerException(const std::string& msg) : std::runtime_error(msg) {
     }
-    virtual ~LocalChunkManagerException() {
+    ~LocalChunkManagerException() override {
     }
 };
 
@@ -49,7 +49,7 @@ class InvalidPathException : public LocalChunkManagerException {
  public:
     explicit InvalidPathException(const std::string& msg) : LocalChunkManagerException(msg) {
     }
-    virtual ~InvalidPathException() {
+    ~InvalidPathException() override {
     }
 };
 
@@ -57,7 +57,7 @@ class OpenFileException : public LocalChunkManagerException {
  public:
     explicit OpenFileException(const std::string& msg) : LocalChunkManagerException(msg) {
     }
-    virtual ~OpenFileException() {
+    ~OpenFileException() override {
     }
 };
 
@@ -65,7 +65,7 @@ class CreateFileException : public LocalChunkManagerException {
  public:
     explicit CreateFileException(const std::string& msg) : LocalChunkManagerException(msg) {
     }
-    virtual ~CreateFileException() {
+    ~CreateFileException() override {
     }
 };
 
@@ -73,7 +73,7 @@ class ReadFileException : public LocalChunkManagerException {
  public:
     explicit ReadFileException(const std::string& msg) : LocalChunkManagerException(msg) {
     }
-    virtual ~ReadFileException() {
+    ~ReadFileException() override {
     }
 };
 
@@ -81,7 +81,7 @@ class WriteFileException : public LocalChunkManagerException {
  public:
     explicit WriteFileException(const std::string& msg) : LocalChunkManagerException(msg) {
     }
-    virtual ~WriteFileException() {
+    ~WriteFileException() override {
     }
 };
 
@@ -89,7 +89,7 @@ class PathAlreadyExistException : public LocalChunkManagerException {
  public:
     explicit PathAlreadyExistException(const std::string& msg) : LocalChunkManagerException(msg) {
     }
-    virtual ~PathAlreadyExistException() {
+    ~PathAlreadyExistException() override {
     }
 };
 
@@ -97,7 +97,7 @@ class DirNotExistException : public LocalChunkManagerException {
  public:
     explicit DirNotExistException(const std::string& msg) : LocalChunkManagerException(msg) {
     }
-    virtual ~DirNotExistException() {
+    ~DirNotExistException() override {
     }
 };
 
@@ -105,7 +105,7 @@ class MinioException : public std::runtime_error {
  public:
     explicit MinioException(const std::string& msg) : std::runtime_error(msg) {
     }
-    virtual ~MinioException() {
+    ~MinioException() override {
     }
 };
 
@@ -113,7 +113,7 @@ class InvalidBucketNameException : public MinioException {
  public:
     explicit InvalidBucketNameException(const std::string& msg) : MinioException(msg) {
     }
-    virtual ~InvalidBucketNameException() {
+    ~InvalidBucketNameException() override {
     }
 };
 
@@ -121,14 +121,14 @@ class ObjectNotExistException : public MinioException {
  public:
     explicit ObjectNotExistException(const std::string& msg) : MinioException(msg) {
     }
-    virtual ~ObjectNotExistException() {
+    ~ObjectNotExistException() override {
     }
 };
 class S3ErrorException : public MinioException {
  public:
     explicit S3ErrorException(const std::string& msg) : MinioException(msg) {
     }
-    virtual ~S3ErrorException() {
+    ~S3ErrorException() override {
     }
 };
 
@@ -136,7 +136,7 @@ class DiskANNFileManagerException : public std::runtime_error {
  public:
     explicit DiskANNFileManagerException(const std::string& msg) : std::runtime_error(msg) {
     }
-    virtual ~DiskANNFileManagerException() {
+    ~DiskANNFileManagerException() override {
     }
 };
 
@@ -144,7 +144,7 @@ class ArrowException : public std::runtime_error {
  public:
     explicit ArrowException(const std::string& msg) : std::runtime_error(msg) {
     }
-    virtual ~ArrowException() {
+    ~ArrowException() override {
     }
 };
 

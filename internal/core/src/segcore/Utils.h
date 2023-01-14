@@ -13,7 +13,7 @@
 #include <exception>
 #include <memory>
 #include <stdexcept>
-#include <stdlib.h>
+#include <cstdlib>
 #include <string>
 #include <utility>
 #include <vector>
@@ -96,9 +96,9 @@ get_deleted_bitmap(int64_t del_barrier,
         delete_timestamps[pk] = timestamp > delete_timestamps[pk] ? timestamp : delete_timestamps[pk];
     }
 
-    for (auto iter = delete_timestamps.begin(); iter != delete_timestamps.end(); iter++) {
-        auto pk = iter->first;
-        auto delete_timestamp = iter->second;
+    for (auto& iter : delete_timestamps) {
+        auto pk = iter.first;
+        auto delete_timestamp = iter.second;
         auto segOffsets = insert_record.search_pk(pk, insert_barrier);
         for (auto offset : segOffsets) {
             int64_t insert_row_offset = offset.get();

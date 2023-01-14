@@ -19,8 +19,7 @@
 #include <string>
 #include <vector>
 
-namespace milvus {
-namespace server {
+namespace milvus::server {
 
 constexpr int64_t QUERY_MAX_TOPK = 16384;
 constexpr int64_t GPU_QUERY_MAX_TOPK = 2048;
@@ -64,5 +63,4 @@ ValidateInsertDataSize(const InsertParam& insert_param);
 
 extern Status
 ValidateCompactThreshold(double threshold);
-}  // namespace server
-}  // namespace milvus
+}  // namespace milvus::server

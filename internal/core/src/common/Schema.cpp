@@ -54,7 +54,7 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
             continue;
         }
 
-        auto data_type = DataType(child.data_type());
+        auto data_type = static_cast<DataType>(child.data_type());
 
         if (datatype_is_vector(data_type)) {
             auto type_map = RepeatedKeyValToMap(child.type_params());

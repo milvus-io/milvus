@@ -45,22 +45,22 @@ class VectorIndex : public IndexBase {
     virtual std::unique_ptr<SearchResult>
     Query(const DatasetPtr dataset, const SearchInfo& search_info, const BitsetView& bitset) = 0;
 
-    IndexType
+    [[nodiscard]] IndexType
     GetIndexType() const {
         return index_type_;
     }
 
-    MetricType
+    [[nodiscard]] MetricType
     GetMetricType() const {
         return metric_type_;
     }
 
-    IndexMode
+    [[nodiscard]] IndexMode
     GetIndexMode() const {
         return index_mode_;
     }
 
-    int64_t
+    [[nodiscard]] int64_t
     GetDim() const {
         return dim_;
     }

@@ -100,7 +100,7 @@ VectorMemIndex::Query(const DatasetPtr dataset, const SearchInfo& search_info, c
     }();
 
     auto ids = knowhere::GetDatasetIDs(final);
-    float* distances = (float*)knowhere::GetDatasetDistance(final);
+    auto* distances = const_cast<float*>(knowhere::GetDatasetDistance(final));
 
     auto round_decimal = search_info.round_decimal_;
     auto total_num = num_queries * topk;

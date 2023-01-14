@@ -42,38 +42,38 @@ class MinioChunkManager : public RemoteChunkManager {
     operator=(const MinioChunkManager&);
 
  public:
-    virtual ~MinioChunkManager();
+    ~MinioChunkManager() override;
 
-    virtual bool
-    Exist(const std::string& filepath);
+    bool
+    Exist(const std::string& filepath) override;
 
-    virtual uint64_t
-    Size(const std::string& filepath);
+    uint64_t
+    Size(const std::string& filepath) override;
 
-    virtual uint64_t
-    Read(const std::string& filepath, uint64_t offset, void* buf, uint64_t len) {
+    uint64_t
+    Read(const std::string& filepath, uint64_t offset, void* buf, uint64_t len) override {
         throw NotImplementedException(GetName() + "Read with offset not implement");
     }
 
-    virtual void
-    Write(const std::string& filepath, uint64_t offset, void* buf, uint64_t len) {
+    void
+    Write(const std::string& filepath, uint64_t offset, void* buf, uint64_t len) override {
         throw NotImplementedException(GetName() + "Write with offset not implement");
     }
 
-    virtual uint64_t
-    Read(const std::string& filepath, void* buf, uint64_t len);
+    uint64_t
+    Read(const std::string& filepath, void* buf, uint64_t len) override;
 
-    virtual void
-    Write(const std::string& filepath, void* buf, uint64_t len);
+    void
+    Write(const std::string& filepath, void* buf, uint64_t len) override;
 
-    virtual std::vector<std::string>
-    ListWithPrefix(const std::string& filepath);
+    std::vector<std::string>
+    ListWithPrefix(const std::string& filepath) override;
 
-    virtual void
-    Remove(const std::string& filepath);
+    void
+    Remove(const std::string& filepath) override;
 
-    virtual std::string
-    GetName() const {
+    [[nodiscard]] std::string
+    GetName() const override {
         return "MinioChunkManager";
     }
 
@@ -111,7 +111,7 @@ class MinioChunkManager : public RemoteChunkManager {
     uint64_t
     GetObjectBuffer(const std::string& bucket_name, const std::string& object_name, void* buf, uint64_t size);
     std::vector<std::string>
-    ListObjects(const char* bucket_name, const char* prefix = NULL);
+    ListObjects(const char* bucket_name, const char* prefix = nullptr);
     void
     InitSDKAPI();
     void

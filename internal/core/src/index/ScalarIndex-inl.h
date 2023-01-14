@@ -24,7 +24,7 @@
 namespace milvus::index {
 template <typename T>
 const TargetBitmapPtr
-ScalarIndex<T>::Query(const DatasetPtr& dataset) {
+ScalarIndex<T>::Query(const knowhere::DatasetPtr& dataset) {
     auto op = dataset->Get<OpType>(OPERATOR_TYPE);
     switch (op) {
         case OpType::LessThan:

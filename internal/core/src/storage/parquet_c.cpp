@@ -40,9 +40,10 @@ ReleaseArrowUnused() {
 
 static const char*
 ErrorMsg(const std::string& msg) {
-    if (msg.empty())
+    if (msg.empty()) {
         return nullptr;
-    auto ret = (char*)malloc(msg.size() + 1);
+    }
+    auto ret = static_cast<char*>(malloc(msg.size() + 1));
     std::memcpy(ret, msg.c_str(), msg.size());
     ret[msg.size()] = '\0';
     return ret;
@@ -77,43 +78,43 @@ AddValuesToPayload(CPayloadWriter payloadWriter, const Payload& info) {
 
 extern "C" CStatus
 AddBooleanToPayload(CPayloadWriter payloadWriter, bool* values, int length) {
-    auto raw_data_info = Payload{milvus::DataType::BOOL, reinterpret_cast<const uint8_t*>(values), length};
+    auto raw_data_info = Payload{milvus::DataType::BOOL, reinterpret_cast<const uint8_t*>(values), length, {}};
     return AddValuesToPayload(payloadWriter, raw_data_info);
 }
 
 extern "C" CStatus
 AddInt8ToPayload(CPayloadWriter payloadWriter, int8_t* values, int length) {
-    auto raw_data_info = Payload{milvus::DataType::INT8, reinterpret_cast<const uint8_t*>(values), length};
+    auto raw_data_info = Payload{milvus::DataType::INT8, reinterpret_cast<const uint8_t*>(values), length, {}};
     return AddValuesToPayload(payloadWriter, raw_data_info);
 }
 
 extern "C" CStatus
 AddInt16ToPayload(CPayloadWriter payloadWriter, int16_t* values, int length) {
-    auto raw_data_info = Payload{milvus::DataType::INT16, reinterpret_cast<const uint8_t*>(values), length};
+    auto raw_data_info = Payload{milvus::DataType::INT16, reinterpret_cast<const uint8_t*>(values), length, {}};
     return AddValuesToPayload(payloadWriter, raw_data_info);
 }
 
 extern "C" CStatus
 AddInt32ToPayload(CPayloadWriter payloadWriter, int32_t* values, int length) {
-    auto raw_data_info = Payload{milvus::DataType::INT32, reinterpret_cast<const uint8_t*>(values), length};
+    auto raw_data_info = Payload{milvus::DataType::INT32, reinterpret_cast<const uint8_t*>(values), length, {}};
     return AddValuesToPayload(payloadWriter, raw_data_info);
 }
 
 extern "C" CStatus
 AddInt64ToPayload(CPayloadWriter payloadWriter, int64_t* values, int length) {
-    auto raw_data_info = Payload{milvus::DataType::INT64, reinterpret_cast<const uint8_t*>(values), length};
+    auto raw_data_info = Payload{milvus::DataType::INT64, reinterpret_cast<const uint8_t*>(values), length, {}};
     return AddValuesToPayload(payloadWriter, raw_data_info);
 }
 
 extern "C" CStatus
 AddFloatToPayload(CPayloadWriter payloadWriter, float* values, int length) {
-    auto raw_data_info = Payload{milvus::DataType::FLOAT, reinterpret_cast<const uint8_t*>(values), length};
+    auto raw_data_info = Payload{milvus::DataType::FLOAT, reinterpret_cast<const uint8_t*>(values), length, {}};
     return AddValuesToPayload(payloadWriter, raw_data_info);
 }
 
 extern "C" CStatus
 AddDoubleToPayload(CPayloadWriter payloadWriter, double* values, int length) {
-    auto raw_data_info = Payload{milvus::DataType::DOUBLE, reinterpret_cast<const uint8_t*>(values), length};
+    auto raw_data_info = Payload{milvus::DataType::DOUBLE, reinterpret_cast<const uint8_t*>(values), length, {}};
     return AddValuesToPayload(payloadWriter, raw_data_info);
 }
 

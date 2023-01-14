@@ -17,7 +17,7 @@
 
 CStatus
 CreateSearchPlan(CCollection c_col, const char* dsl, CSearchPlan* res_plan) {
-    auto col = (milvus::segcore::Collection*)c_col;
+    auto col = static_cast<milvus::segcore::Collection*>(c_col);
 
     try {
         auto res = milvus::query::CreatePlan(*col->get_schema(), dsl);
@@ -46,7 +46,7 @@ CreateSearchPlan(CCollection c_col, const char* dsl, CSearchPlan* res_plan) {
 // Note: serialized_expr_plan is of binary format
 CStatus
 CreateSearchPlanByExpr(CCollection c_col, const void* serialized_expr_plan, const int64_t size, CSearchPlan* res_plan) {
-    auto col = (milvus::segcore::Collection*)c_col;
+    auto col = static_cast<milvus::segcore::Collection*>(c_col);
 
     try {
         auto res = milvus::query::CreateSearchPlanByExpr(*col->get_schema(), serialized_expr_plan, size);
@@ -77,10 +77,11 @@ ParsePlaceholderGroup(CSearchPlan c_plan,
                       const void* placeholder_group_blob,
                       const int64_t blob_size,
                       CPlaceholderGroup* res_placeholder_group) {
-    auto plan = (milvus::query::Plan*)c_plan;
+    auto plan = static_cast<milvus::query::Plan*>(c_plan);
 
     try {
-        auto res = milvus::query::ParsePlaceholderGroup(plan, (const uint8_t*)(placeholder_group_blob), blob_size);
+        auto res =
+            milvus::query::ParsePlaceholderGroup(plan, static_cast<const uint8_t*>(placeholder_group_blob), blob_size);
 
         auto status = CStatus();
         status.error_code = Success;
@@ -99,13 +100,13 @@ ParsePlaceholderGroup(CSearchPlan c_plan,
 
 int64_t
 GetNumOfQueries(CPlaceholderGroup placeholder_group) {
-    auto res = milvus::query::GetNumOfQueries((milvus::query::PlaceholderGroup*)placeholder_group);
+    auto res = milvus::query::GetNumOfQueries(static_cast<milvus::query::PlaceholderGroup*>(placeholder_group));
     return res;
 }
 
 int64_t
 GetTopK(CSearchPlan plan) {
-    auto res = milvus::query::GetTopK((milvus::query::Plan*)plan);
+    auto res = milvus::query::GetTopK(static_cast<milvus::query::Plan*>(plan));
     return res;
 }
 
@@ -129,13 +130,13 @@ GetMetricType(CSearchPlan plan) {
 
 void
 DeleteSearchPlan(CSearchPlan cPlan) {
-    auto plan = (milvus::query::Plan*)cPlan;
+    auto plan = static_cast<milvus::query::Plan*>(cPlan);
     delete plan;
 }
 
 void
 DeletePlaceholderGroup(CPlaceholderGroup cPlaceholder_group) {
-    auto placeHolder_group = (milvus::query::PlaceholderGroup*)cPlaceholder_group;
+    auto placeHolder_group = static_cast<milvus::query::PlaceholderGroup*>(cPlaceholder_group);
     delete placeHolder_group;
 }
 
@@ -144,7 +145,7 @@ CreateRetrievePlanByExpr(CCollection c_col,
                          const void* serialized_expr_plan,
                          const int64_t size,
                          CRetrievePlan* res_plan) {
-    auto col = (milvus::segcore::Collection*)c_col;
+    auto col = static_cast<milvus::segcore::Collection*>(c_col);
 
     try {
         auto res = milvus::query::CreateRetrievePlanByExpr(*col->get_schema(), serialized_expr_plan, size);
@@ -172,6 +173,6 @@ CreateRetrievePlanByExpr(CCollection c_col,
 
 void
 DeleteRetrievePlan(CRetrievePlan c_plan) {
-    auto plan = (milvus::query::RetrievePlan*)c_plan;
+    auto plan = static_cast<milvus::query::RetrievePlan*>(c_plan);
     delete plan;
 }

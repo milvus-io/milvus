@@ -46,23 +46,23 @@ class Status {
 
     static Status
     OK() {
-        return Status();
+        return {};
     }
 
-    bool
+    [[nodiscard]] bool
     ok() const {
         return state_.empty() || code() == 0;
     }
 
-    StatusCode
+    [[nodiscard]] StatusCode
     code() const {
         return (state_.empty()) ? 0 : *(StatusCode*)(state_.data());
     }
 
-    std::string
+    [[nodiscard]] std::string
     message() const;
 
-    std::string
+    [[nodiscard]] std::string
     ToString() const;
 
  private:

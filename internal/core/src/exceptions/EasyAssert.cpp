@@ -29,7 +29,7 @@ EasyStackTrace() {
     auto stack_info = boost::stacktrace::stacktrace();
     std::ostringstream ss;
     ss << stack_info;
-    output = std::string(ss.str());
+    output = static_cast<std::string>(ss.str());
 #endif
     return output;
 }

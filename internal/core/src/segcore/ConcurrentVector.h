@@ -99,18 +99,18 @@ class VectorBase {
     void
     fill_chunk_data(ssize_t element_count, const DataArray* data, const FieldMeta& field_meta);
 
-    virtual SpanBase
+    [[nodiscard]] virtual SpanBase
     get_span_base(int64_t chunk_id) const = 0;
 
-    int64_t
+    [[nodiscard]] int64_t
     get_size_per_chunk() const {
         return size_per_chunk_;
     }
 
-    virtual const void*
+    [[nodiscard]] virtual const void*
     get_chunk_data(ssize_t chunk_index) const = 0;
 
-    virtual ssize_t
+    [[nodiscard]] virtual ssize_t
     num_chunk() const = 0;
 
     virtual bool
@@ -162,7 +162,7 @@ class ConcurrentVectorImpl : public VectorBase {
         }
     }
 
-    SpanBase
+    [[nodiscard]] SpanBase
     get_span_base(int64_t chunk_id) const override {
         return get_span(chunk_id);
     }
@@ -224,7 +224,7 @@ class ConcurrentVectorImpl : public VectorBase {
         return chunks_[chunk_index];
     }
 
-    const void*
+    [[nodiscard]] const void*
     get_chunk_data(ssize_t chunk_index) const override {
         return chunks_[chunk_index].data();
     }
@@ -245,7 +245,7 @@ class ConcurrentVectorImpl : public VectorBase {
         return get_chunk(chunk_id)[chunk_offset];
     }
 
-    ssize_t
+    [[nodiscard]] ssize_t
     num_chunk() const override {
         return chunks_.size();
     }
@@ -306,13 +306,9 @@ class ConcurrentVector<FloatVector> : public ConcurrentVectorImpl<float, false> 
 template <>
 class ConcurrentVector<BinaryVector> : public ConcurrentVectorImpl<uint8_t, false> {
  public:
-    explicit ConcurrentVector(int64_t dim, int64_t size_per_chunk)
-        : binary_dim_(dim), ConcurrentVectorImpl(dim / 8, size_per_chunk) {
+    explicit ConcurrentVector(int64_t dim, int64_t size_per_chunk) : ConcurrentVectorImpl(dim / 8, size_per_chunk) {
         Assert(dim % 8 == 0);
     }
-
- private:
-    int64_t binary_dim_;
 };
 
 }  // namespace milvus::segcore

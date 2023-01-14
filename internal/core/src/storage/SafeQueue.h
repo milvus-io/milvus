@@ -25,7 +25,7 @@ namespace milvus {
 template <typename T>
 class SafeQueue {
  public:
-    SafeQueue(void) {
+    SafeQueue() {
     }
     ~SafeQueue() {
     }

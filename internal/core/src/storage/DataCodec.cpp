@@ -28,7 +28,7 @@ namespace milvus::storage {
 std::unique_ptr<DataCodec>
 DeserializeRemoteFileData(PayloadInputStream* input_stream) {
     DescriptorEvent descriptor_event(input_stream);
-    DataType data_type = DataType(descriptor_event.event_data.fix_part.data_type);
+    auto data_type = static_cast<DataType>(descriptor_event.event_data.fix_part.data_type);
     auto descriptor_fix_part = descriptor_event.event_data.fix_part;
     FieldDataMeta data_meta{descriptor_fix_part.collection_id, descriptor_fix_part.partition_id,
                             descriptor_fix_part.segment_id, descriptor_fix_part.field_id};

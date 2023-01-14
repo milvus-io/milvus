@@ -16,8 +16,7 @@
 
 #include "BooleanQuery.h"
 
-namespace milvus {
-namespace query_old {
+namespace milvus::query_old {
 
 BinaryQueryPtr
 ConstructBinTree(std::vector<BooleanQueryPtr> clauses, QueryRelation relation, uint64_t idx);
@@ -37,5 +36,4 @@ ValidateBooleanQuery(BooleanQueryPtr& boolean_query);
 bool
 ValidateBinaryQuery(BinaryQueryPtr& binary_query);
 
-}  // namespace query_old
-}  // namespace milvus
+}  // namespace milvus::query_old

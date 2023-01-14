@@ -17,8 +17,8 @@
 #include <boost/uuid/uuid.hpp>
 #include <boost/uuid/uuid_io.hpp>
 #include <boost/uuid/uuid_generators.hpp>
-#include <stdlib.h>
-#include <stdio.h>
+#include <cstdlib>
+#include <cstdio>
 #include <fcntl.h>
 #include <knowhere/index/VecIndex.h>
 
@@ -183,7 +183,8 @@ StringIndexMarisa::Range(std::string value, OpType op) {
                 set = raw_data.compare(value) >= 0;
                 break;
             default:
-                throw std::invalid_argument(std::string("Invalid OperatorType: ") + std::to_string((int)op) + "!");
+                throw std::invalid_argument(std::string("Invalid OperatorType: ") +
+                                            std::to_string(static_cast<int>(op)) + "!");
         }
         if (set) {
             bitset->set(offset);
@@ -290,7 +291,7 @@ StringIndexMarisa::Reverse_Lookup(size_t offset) const {
     marisa::Agent agent;
     agent.set_query(str_ids_[offset]);
     trie_.reverse_lookup(agent);
-    return std::string(agent.key().ptr(), agent.key().length());
+    return {agent.key().ptr(), agent.key().length()};
 }
 
 #endif

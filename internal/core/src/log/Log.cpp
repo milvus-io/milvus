@@ -47,7 +47,7 @@ LogOut(const char* pattern, ...) {
     vsnprintf(str_p.get(), len, pattern, vl);  // NOLINT
     va_end(vl);
 
-    return std::string(str_p.get());
+    return {str_p.get()};
 }
 
 void
@@ -99,7 +99,7 @@ int64_t
 get_thread_starttime() {
 #ifdef __APPLE__
     uint64_t tid;
-    pthread_threadid_np(NULL, &tid);
+    pthread_threadid_np(nullptr, &tid);
 #elif __linux__
     int64_t tid = gettid();
 #else

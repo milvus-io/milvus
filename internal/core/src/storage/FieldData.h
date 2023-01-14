@@ -40,27 +40,27 @@ class FieldData {
 
     ~FieldData() = default;
 
-    DataType
+    [[nodiscard]] DataType
     get_data_type() const {
         return data_type_;
     }
 
-    bool
+    [[nodiscard]] bool
     get_bool_payload(int idx) const;
 
     void
     get_one_string_payload(int idx, char** cstr, int* str_size) const;
 
     // get the bytes stream of the arrow array data
-    std::unique_ptr<Payload>
+    [[nodiscard]] std::unique_ptr<Payload>
     get_payload() const;
 
-    int
+    [[nodiscard]] int
     get_payload_length() const {
         return array_->length();
     }
 
-    int
+    [[nodiscard]] int
     get_data_size() const;
 
  private:

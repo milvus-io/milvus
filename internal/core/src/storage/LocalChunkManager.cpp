@@ -198,12 +198,12 @@ LocalChunkManager::GetSizeOfDir(const std::string& dir) {
     copy(directory_iterator(dirPath), directory_iterator(), back_inserter(v));
 
     int64_t total_file_size = 0;
-    for (std::vector<directory_entry>::const_iterator it = v.begin(); it != v.end(); ++it) {
-        if (boost::filesystem::is_regular_file(it->path())) {
-            total_file_size += boost::filesystem::file_size(it->path());
+    for (auto& it : v) {
+        if (boost::filesystem::is_regular_file(it.path())) {
+            total_file_size += boost::filesystem::file_size(it.path());
         }
-        if (boost::filesystem::is_directory(it->path())) {
-            total_file_size += GetSizeOfDir(it->path().string());
+        if (boost::filesystem::is_directory(it.path())) {
+            total_file_size += GetSizeOfDir(it.path().string());
         }
     }
 

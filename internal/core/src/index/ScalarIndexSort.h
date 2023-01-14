@@ -73,7 +73,7 @@ class ScalarIndexSort : public ScalarIndex<T> {
         return data_;
     }
 
-    bool
+    [[nodiscard]] bool
     IsBuilt() const {
         return is_built_;
     }

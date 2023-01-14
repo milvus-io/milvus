@@ -35,10 +35,10 @@ class ReduceHelper {
                           int64_t* slice_nqs,
                           int64_t* slice_topKs,
                           int64_t slice_num)
-        : search_results_(search_results),
-          plan_(plan),
+        : slice_topKs_(slice_topKs, slice_topKs + slice_num),
           slice_nqs_(slice_nqs, slice_nqs + slice_num),
-          slice_topKs_(slice_topKs, slice_topKs + slice_num) {
+          plan_(plan),
+          search_results_(search_results) {
         Initialize();
     }
 

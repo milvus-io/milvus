@@ -47,19 +47,19 @@ class SystemProperty {
     operator=(SystemProperty&&) = default;
 
  public:
-    virtual bool
+    [[nodiscard]] virtual bool
     SystemFieldVerify(const FieldName& field_name, FieldId field_id) const = 0;
 
-    virtual SystemFieldType
+    [[nodiscard]] virtual SystemFieldType
     GetSystemFieldType(FieldId field_id) const = 0;
 
-    virtual SystemFieldType
+    [[nodiscard]] virtual SystemFieldType
     GetSystemFieldType(FieldName field_name) const = 0;
 
-    virtual bool
+    [[nodiscard]] virtual bool
     IsSystem(FieldId field_id) const = 0;
 
-    virtual bool
+    [[nodiscard]] virtual bool
     IsSystem(FieldName field_name) const = 0;
 };
 

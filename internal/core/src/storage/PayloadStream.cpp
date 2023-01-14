@@ -47,8 +47,9 @@ PayloadOutputStream::closed() const {
 
 arrow::Status
 PayloadOutputStream::Write(const void* data, int64_t nbytes) {
-    if (nbytes <= 0)
+    if (nbytes <= 0) {
         return arrow::Status::OK();
+    }
     auto size = buffer_.size();
     buffer_.resize(size + nbytes);
     std::memcpy(buffer_.data() + size, data, nbytes);
@@ -90,8 +91,9 @@ PayloadInputStream::Tell() const {
 
 arrow::Status
 PayloadInputStream::Seek(int64_t position) {
-    if (position < 0 || position >= size_)
+    if (position < 0 || position >= size_) {
         return arrow::Status::IOError("invalid position");
+    }
     tell_ = position;
     return arrow::Status::OK();
 }
@@ -99,8 +101,9 @@ PayloadInputStream::Seek(int64_t position) {
 arrow::Result<int64_t>
 PayloadInputStream::Read(int64_t nbytes, void* out) {
     auto remain = size_ - tell_;
-    if (nbytes > remain)
+    if (nbytes > remain) {
         nbytes = remain;
+    }
     std::memcpy(out, data_ + tell_, nbytes);
     tell_ += nbytes;
     return arrow::Result<int64_t>(nbytes);
@@ -109,8 +112,9 @@ PayloadInputStream::Read(int64_t nbytes, void* out) {
 arrow::Result<std::shared_ptr<arrow::Buffer>>
 PayloadInputStream::Read(int64_t nbytes) {
     auto remain = size_ - tell_;
-    if (nbytes > remain)
+    if (nbytes > remain) {
         nbytes = remain;
+    }
     auto buf = std::make_shared<arrow::Buffer>(data_ + tell_, nbytes);
     tell_ += nbytes;
     return arrow::Result<std::shared_ptr<arrow::Buffer>>(buf);

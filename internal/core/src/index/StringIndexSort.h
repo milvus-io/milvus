@@ -41,9 +41,9 @@ class StringIndexSort : public ScalarIndexSort<std::string> {
     PrefixMatch(std::string prefix) {
         auto data = GetData();
         TargetBitmapPtr bitset = std::make_unique<TargetBitmap>(data.size());
-        for (size_t i = 0; i < data.size(); i++) {
-            if (milvus::PrefixMatch(data[i].a_, prefix)) {
-                bitset->set(data[i].idx_);
+        for (auto& i : data) {
+            if (milvus::PrefixMatch(i.a_, prefix)) {
+                bitset->set(i.idx_);
             }
         }
         return bitset;

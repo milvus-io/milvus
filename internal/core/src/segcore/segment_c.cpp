@@ -25,7 +25,7 @@
 //////////////////////////////    common interfaces    //////////////////////////////
 CSegmentInterface
 NewSegment(CCollection collection, SegmentType seg_type, int64_t segment_id) {
-    auto col = (milvus::segcore::Collection*)collection;
+    auto col = static_cast<milvus::segcore::Collection*>(collection);
 
     std::unique_ptr<milvus::segcore::SegmentInterface> segment;
     switch (seg_type) {
@@ -40,7 +40,7 @@ NewSegment(CCollection collection, SegmentType seg_type, int64_t segment_id) {
             segment = milvus::segcore::CreateSealedSegment(col->get_schema(), segment_id);
             break;
         default:
-            LOG_SEGCORE_ERROR_ << "invalid segment type " << (int32_t)seg_type;
+            LOG_SEGCORE_ERROR_ << "invalid segment type " << static_cast<int32_t>(seg_type);
             break;
     }
 
@@ -50,13 +50,13 @@ NewSegment(CCollection collection, SegmentType seg_type, int64_t segment_id) {
 void
 DeleteSegment(CSegmentInterface c_segment) {
     // TODO: use dynamic cast, and return c status
-    auto s = (milvus::segcore::SegmentInterface*)c_segment;
+    auto s = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
     delete s;
 }
 
 void
 DeleteSearchResult(CSearchResult search_result) {
-    auto res = (milvus::SearchResult*)search_result;
+    auto res = static_cast<milvus::SearchResult*>(search_result);
     delete res;
 }
 
@@ -67,8 +67,8 @@ Search(CSegmentInterface c_segment,
        uint64_t timestamp,
        CSearchResult* result) {
     try {
-        auto segment = (milvus::segcore::SegmentInterface*)c_segment;
-        auto plan = (milvus::query::Plan*)c_plan;
+        auto segment = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
+        auto plan = static_cast<milvus::query::Plan*>(c_plan);
         auto phg_ptr = reinterpret_cast<const milvus::query::PlaceholderGroup*>(c_placeholder_group);
         auto search_result = segment->Search(plan, phg_ptr, timestamp);
         if (!milvus::PositivelyRelated(plan->plan_node_->search_info_.metric_type_)) {
@@ -85,14 +85,14 @@ Search(CSegmentInterface c_segment,
 
 void
 DeleteRetrieveResult(CRetrieveResult* retrieve_result) {
-    std::free((void*)(retrieve_result->proto_blob));
+    std::free(const_cast<void*>(retrieve_result->proto_blob));
 }
 
 CStatus
 Retrieve(CSegmentInterface c_segment, CRetrievePlan c_plan, uint64_t timestamp, CRetrieveResult* result) {
     try {
-        auto segment = (const milvus::segcore::SegmentInterface*)c_segment;
-        auto plan = (const milvus::query::RetrievePlan*)c_plan;
+        auto segment = static_cast<const milvus::segcore::SegmentInterface*>(c_segment);
+        auto plan = static_cast<const milvus::query::RetrievePlan*>(c_plan);
         auto retrieve_result = segment->Retrieve(plan, timestamp);
 
         auto size = retrieve_result->ByteSizeLong();
@@ -109,14 +109,14 @@ Retrieve(CSegmentInterface c_segment, CRetrievePlan c_plan, uint64_t timestamp, 
 
 int64_t
 GetMemoryUsageInBytes(CSegmentInterface c_segment) {
-    auto segment = (milvus::segcore::SegmentInterface*)c_segment;
+    auto segment = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
     auto mem_size = segment->GetMemoryUsageInBytes();
     return mem_size;
 }
 
 int64_t
 GetRowCount(CSegmentInterface c_segment) {
-    auto segment = (milvus::segcore::SegmentInterface*)c_segment;
+    auto segment = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
     auto row_count = segment->get_row_count();
     return row_count;
 }
@@ -147,7 +147,7 @@ Insert(CSegmentInterface c_segment,
        const uint8_t* data_info,
        const uint64_t data_info_len) {
     try {
-        auto segment = (milvus::segcore::SegmentGrowing*)c_segment;
+        auto segment = static_cast<milvus::segcore::SegmentGrowing*>(c_segment);
         auto insert_data = std::make_unique<milvus::InsertData>();
         auto suc = insert_data->ParseFromArray(data_info, data_info_len);
         AssertInfo(suc, "failed to parse insert data from records");
@@ -162,7 +162,7 @@ Insert(CSegmentInterface c_segment,
 CStatus
 PreInsert(CSegmentInterface c_segment, int64_t size, int64_t* offset) {
     try {
-        auto segment = (milvus::segcore::SegmentGrowing*)c_segment;
+        auto segment = static_cast<milvus::segcore::SegmentGrowing*>(c_segment);
         *offset = segment->PreInsert(size);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
@@ -177,7 +177,7 @@ Delete(CSegmentInterface c_segment,
        const uint8_t* ids,
        const uint64_t ids_size,
        const uint64_t* timestamps) {
-    auto segment = (milvus::segcore::SegmentInterface*)c_segment;
+    auto segment = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
     auto pks = std::make_unique<milvus::proto::schema::IDs>();
     auto suc = pks->ParseFromArray(ids, ids_size);
     AssertInfo(suc, "failed to parse pks from ids");
@@ -191,7 +191,7 @@ Delete(CSegmentInterface c_segment,
 
 int64_t
 PreDelete(CSegmentInterface c_segment, int64_t size) {
-    auto segment = (milvus::segcore::SegmentInterface*)c_segment;
+    auto segment = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
 
     return segment->PreDelete(size);
 }
@@ -238,7 +238,7 @@ UpdateSealedSegmentIndex(CSegmentInterface c_segment, CLoadIndexInfo c_load_inde
         auto segment_interface = reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
         auto segment = dynamic_cast<milvus::segcore::SegmentSealed*>(segment_interface);
         AssertInfo(segment != nullptr, "segment conversion failed");
-        auto load_index_info = (milvus::segcore::LoadIndexInfo*)c_load_index_info;
+        auto load_index_info = static_cast<milvus::segcore::LoadIndexInfo*>(c_load_index_info);
         segment->LoadIndex(*load_index_info);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {

@@ -18,8 +18,7 @@
 
 #include "BinaryQuery.h"
 
-namespace milvus {
-namespace query_old {
+namespace milvus::query_old {
 
 BinaryQueryPtr
 ConstructBinTree(std::vector<BooleanQueryPtr> queries, QueryRelation relation, uint64_t idx) {
@@ -303,5 +302,4 @@ ValidateBinaryQuery(BinaryQueryPtr& binary_query) {
     return height > 1;
 }
 
-}  // namespace query_old
-}  // namespace milvus
+}  // namespace milvus::query_old

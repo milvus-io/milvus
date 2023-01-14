@@ -16,7 +16,7 @@
 
 #pragma once
 
-#include <stdint.h>
+#include <cstdint>
 #include "Types.h"
 
 const int64_t INVALID_FIELD_ID = -1;

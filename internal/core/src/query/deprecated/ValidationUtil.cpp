@@ -21,8 +21,7 @@
 #include <set>
 #include <string>
 
-namespace milvus {
-namespace server {
+namespace milvus::server {
 
 namespace {
 
@@ -477,5 +476,4 @@ ValidateCompactThreshold(double threshold) {
     return Status::OK();
 }
 
-}  // namespace server
-}  // namespace milvus
+}  // namespace milvus::server

@@ -54,19 +54,19 @@ class SegmentInterface {
     Retrieve(const query::RetrievePlan* Plan, Timestamp timestamp) const = 0;
 
     // TODO: memory use is not correct when load string or load string index
-    virtual int64_t
+    [[nodiscard]] virtual int64_t
     GetMemoryUsageInBytes() const = 0;
 
-    virtual int64_t
+    [[nodiscard]] virtual int64_t
     get_row_count() const = 0;
 
-    virtual const Schema&
+    [[nodiscard]] virtual const Schema&
     get_schema() const = 0;
 
-    virtual int64_t
+    [[nodiscard]] virtual int64_t
     get_deleted_count() const = 0;
 
-    virtual int64_t
+    [[nodiscard]] virtual int64_t
     get_real_count() const = 0;
 
     virtual int64_t
@@ -78,7 +78,7 @@ class SegmentInterface {
     virtual void
     LoadDeletedRecord(const LoadDeletedRecordInfo& info) = 0;
 
-    virtual int64_t
+    [[nodiscard]] virtual int64_t
     get_segment_id() const = 0;
 };
 

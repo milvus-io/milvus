@@ -55,7 +55,7 @@ std::mutex MinioChunkManager::client_mutex_;
  */
 inline Aws::String
 ConvertToAwsString(const std::string& str) {
-    return Aws::String(str.c_str(), str.size());
+    return {str.c_str(), str.size()};
 }
 
 /**
@@ -65,7 +65,7 @@ ConvertToAwsString(const std::string& str) {
  */
 inline std::string
 ConvertFromAwsString(const Aws::String& aws_str) {
-    return std::string(aws_str.c_str(), aws_str.size());
+    return {aws_str.c_str(), aws_str.size()};
 }
 
 void
@@ -221,8 +221,8 @@ MinioChunkManager::CreateBucket(const std::string& bucket_name) {
 
     auto outcome = client_->CreateBucket(request);
 
-    if (!outcome.IsSuccess() &&
-        Aws::S3::S3Errors(outcome.GetError().GetErrorType()) != Aws::S3::S3Errors::BUCKET_ALREADY_OWNED_BY_YOU) {
+    if (!outcome.IsSuccess() && static_cast<Aws::S3::S3Errors>(outcome.GetError().GetErrorType()) !=
+                                    Aws::S3::S3Errors::BUCKET_ALREADY_OWNED_BY_YOU) {
         THROWS3ERROR(CreateBucket);
     }
     return true;
@@ -349,7 +349,7 @@ MinioChunkManager::ListObjects(const char* bucket_name, const char* prefix) {
     std::vector<std::string> objects_vec;
     Aws::S3::Model::ListObjectsRequest request;
     request.WithBucket(bucket_name);
-    if (prefix != NULL) {
+    if (prefix != nullptr) {
         request.SetPrefix(prefix);
     }
 

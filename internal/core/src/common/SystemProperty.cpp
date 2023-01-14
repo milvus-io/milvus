@@ -23,7 +23,7 @@
 namespace milvus {
 class SystemPropertyImpl : public SystemProperty {
  public:
-    bool
+    [[nodiscard]] bool
     SystemFieldVerify(const FieldName& field_name, FieldId field_id) const override {
         if (!IsSystem(field_name)) {
             return false;
@@ -36,24 +36,24 @@ class SystemPropertyImpl : public SystemProperty {
         return left_id == right_id;
     }
 
-    SystemFieldType
+    [[nodiscard]] SystemFieldType
     GetSystemFieldType(FieldName field_name) const override {
         Assert(IsSystem(field_name));
         return name_to_types_.at(field_name);
     }
 
-    SystemFieldType
+    [[nodiscard]] SystemFieldType
     GetSystemFieldType(FieldId field_id) const override {
         Assert(IsSystem(field_id));
         return id_to_types_.at(field_id);
     }
 
-    bool
+    [[nodiscard]] bool
     IsSystem(FieldId field_id) const override {
         return id_to_types_.count(field_id);
     }
 
-    bool
+    [[nodiscard]] bool
     IsSystem(FieldName field_name) const override {
         return name_to_types_.count(field_name);
     }

@@ -32,8 +32,8 @@ class FileManagerImpl : public knowhere::FileManager {
      * @param filename
      * @return false if any error, or return true.
      */
-    virtual bool
-    LoadFile(const std::string& filename) noexcept = 0;
+    bool
+    LoadFile(const std::string& filename) noexcept override = 0;
 
     /**
      * @brief Add file to FileManager to manipulate it.
@@ -41,8 +41,8 @@ class FileManagerImpl : public knowhere::FileManager {
      * @param filename
      * @return false if any error, or return true.
      */
-    virtual bool
-    AddFile(const std::string& filename) noexcept = 0;
+    bool
+    AddFile(const std::string& filename) noexcept override = 0;
 
     /**
      * @brief Check if a file exists.
@@ -50,8 +50,8 @@ class FileManagerImpl : public knowhere::FileManager {
      * @param filename
      * @return std::nullopt if any error, or return if the file exists.
      */
-    virtual std::optional<bool>
-    IsExisted(const std::string& filename) noexcept = 0;
+    std::optional<bool>
+    IsExisted(const std::string& filename) noexcept override = 0;
 
     /**
      * @brief Delete a file from FileManager.
@@ -59,8 +59,8 @@ class FileManagerImpl : public knowhere::FileManager {
      * @param filename
      * @return false if any error, or return true.
      */
-    virtual bool
-    RemoveFile(const std::string& filename) noexcept = 0;
+    bool
+    RemoveFile(const std::string& filename) noexcept override = 0;
 };
 
 using FileManagerImplPtr = std::shared_ptr<FileManagerImpl>;

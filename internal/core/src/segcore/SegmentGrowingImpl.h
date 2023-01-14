@@ -165,8 +165,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
     explicit SegmentGrowingImpl(SchemaPtr schema, const SegcoreConfig& segcore_config, int64_t segment_id)
         : segcore_config_(segcore_config),
           schema_(std::move(schema)),
-          insert_record_(*schema_, segcore_config.get_chunk_rows()),
           indexing_record_(*schema_, segcore_config_),
+          insert_record_(*schema_, segcore_config.get_chunk_rows()),
           id_(segment_id) {
     }
 

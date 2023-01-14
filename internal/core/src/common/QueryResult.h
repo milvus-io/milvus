@@ -33,7 +33,7 @@ namespace milvus {
 struct SearchResult {
     SearchResult() = default;
 
-    int64_t
+    [[nodiscard]] int64_t
     get_total_result_count() const {
         if (topk_per_nq_prefix_sum_.empty()) {
             return 0;

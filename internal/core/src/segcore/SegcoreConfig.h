@@ -49,13 +49,13 @@ class SegcoreConfig {
     void
     parse_from(const std::string& string_path);
 
-    const SmallIndexConf&
+    [[nodiscard]] const SmallIndexConf&
     at(const MetricType& metric_type) const {
         Assert(table_.count(metric_type));
         return table_.at(metric_type);
     }
 
-    int64_t
+    [[nodiscard]] int64_t
     get_chunk_rows() const {
         return chunk_rows_;
     }

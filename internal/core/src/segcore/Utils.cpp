@@ -17,7 +17,7 @@ namespace milvus::segcore {
 
 void
 ParsePksFromFieldData(std::vector<PkType>& pks, const DataArray& data) {
-    switch (DataType(data.type())) {
+    switch (static_cast<DataType>(data.type())) {
         case DataType::INT64: {
             auto source_data = reinterpret_cast<const int64_t*>(data.scalars().long_data().data().data());
             std::copy_n(source_data, pks.size(), pks.data());
@@ -74,13 +74,13 @@ CreateScalarDataArray(int64_t count, const FieldMeta& field_meta) {
     auto data_type = field_meta.get_data_type();
     auto data_array = std::make_unique<DataArray>();
     data_array->set_field_id(field_meta.get_id().get());
-    data_array->set_type(milvus::proto::schema::DataType(field_meta.get_data_type()));
+    data_array->set_type(static_cast<milvus::proto::schema::DataType>(field_meta.get_data_type()));
 
     auto scalar_array = data_array->mutable_scalars();
     switch (data_type) {
         case DataType::BOOL: {
             auto obj = scalar_array->mutable_bool_data();
-            obj->mutable_data()->Resize(count, 0);
+            obj->mutable_data()->Resize(count, false);
             break;
         }
         case DataType::INT8: {
@@ -132,7 +132,7 @@ CreateVectorDataArray(int64_t count, const FieldMeta& field_meta) {
     auto data_type = field_meta.get_data_type();
     auto data_array = std::make_unique<DataArray>();
     data_array->set_field_id(field_meta.get_id().get());
-    data_array->set_type(milvus::proto::schema::DataType(field_meta.get_data_type()));
+    data_array->set_type(static_cast<milvus::proto::schema::DataType>(field_meta.get_data_type()));
 
     auto vector_array = data_array->mutable_vectors();
     auto dim = field_meta.get_dim();
@@ -163,7 +163,7 @@ CreateScalarDataArrayFrom(const void* data_raw, int64_t count, const FieldMeta& 
     auto data_type = field_meta.get_data_type();
     auto data_array = std::make_unique<DataArray>();
     data_array->set_field_id(field_meta.get_id().get());
-    data_array->set_type(milvus::proto::schema::DataType(field_meta.get_data_type()));
+    data_array->set_type(static_cast<milvus::proto::schema::DataType>(field_meta.get_data_type()));
 
     auto scalar_array = data_array->mutable_scalars();
     switch (data_type) {
@@ -228,7 +228,7 @@ CreateVectorDataArrayFrom(const void* data_raw, int64_t count, const FieldMeta& 
     auto data_type = field_meta.get_data_type();
     auto data_array = std::make_unique<DataArray>();
     data_array->set_field_id(field_meta.get_id().get());
-    data_array->set_type(milvus::proto::schema::DataType(field_meta.get_data_type()));
+    data_array->set_type(static_cast<milvus::proto::schema::DataType>(field_meta.get_data_type()));
 
     auto vector_array = data_array->mutable_vectors();
     auto dim = field_meta.get_dim();
@@ -273,7 +273,7 @@ MergeDataArray(std::vector<std::pair<milvus::SearchResult*, int64_t>>& result_of
     auto data_type = field_meta.get_data_type();
     auto data_array = std::make_unique<DataArray>();
     data_array->set_field_id(field_meta.get_id().get());
-    data_array->set_type(milvus::proto::schema::DataType(field_meta.get_data_type()));
+    data_array->set_type(static_cast<milvus::proto::schema::DataType>(field_meta.get_data_type()));
 
     for (auto& result_pair : result_offsets) {
         auto src_field_data = result_pair.first->output_fields_data_[field_meta.get_id()].get();
@@ -357,7 +357,7 @@ ReverseDataFromIndex(const index::IndexBase* index,
     auto data_type = field_meta.get_data_type();
     auto data_array = std::make_unique<DataArray>();
     data_array->set_field_id(field_meta.get_id().get());
-    data_array->set_type(milvus::proto::schema::DataType(field_meta.get_data_type()));
+    data_array->set_type(static_cast<milvus::proto::schema::DataType>(field_meta.get_data_type()));
 
     auto scalar_array = data_array->mutable_scalars();
     switch (data_type) {

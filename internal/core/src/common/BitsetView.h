@@ -36,7 +36,7 @@ class BitsetView : public faiss::BitsetView {
     }
 
     BitsetView(const BitsetType& bitset)  // NOLINT
-        : BitsetView((uint8_t*)boost_ext::get_data(bitset), size_t(bitset.size())) {
+        : BitsetView((uint8_t*)boost_ext::get_data(bitset), static_cast<size_t>(bitset.size())) {
     }
 
     BitsetView(const BitsetTypePtr& bitset_ptr) {  // NOLINT
@@ -45,7 +45,7 @@ class BitsetView : public faiss::BitsetView {
         }
     }
 
-    BitsetView
+    [[nodiscard]] BitsetView
     subview(size_t offset, size_t size) const {
         if (empty()) {
             return {};

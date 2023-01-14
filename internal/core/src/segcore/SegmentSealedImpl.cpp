@@ -59,7 +59,6 @@ void
 SegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
     // NOTE: lock only when data is ready to avoid starvation
     auto field_id = FieldId(info.field_id);
-    auto& field_meta = schema_->operator[](field_id);
 
     AssertInfo(info.index_params.count("metric_type"), "Can't get metric_type in index_params");
     auto metric_type = info.index_params.at("metric_type");
@@ -273,8 +272,6 @@ SegmentSealedImpl::chunk_data_impl(FieldId field_id, int64_t chunk_id) const {
     std::shared_lock lck(mutex_);
     AssertInfo(get_bit(field_data_ready_bitset_, field_id),
                "Can't get bitset element at " + std::to_string(field_id.get()));
-    auto& field_meta = schema_->operator[](field_id);
-    auto element_sizeof = field_meta.get_sizeof();
     auto field_data = insert_record_.get_field_data_base(field_id);
     AssertInfo(field_data->num_chunk() == 1, "num chunk not equal to 1 for sealed segment");
     return field_data->get_span_base(0);
@@ -368,7 +365,6 @@ SegmentSealedImpl::DropFieldData(const FieldId field_id) {
         }
         lck.unlock();
     } else {
-        auto& field_meta = schema_->operator[](field_id);
         std::unique_lock lck(mutex_);
         set_bit(field_data_ready_bitset_, field_id, false);
         insert_record_.drop_field_data(field_id);
@@ -413,11 +409,11 @@ SegmentSealedImpl::check_search(const query::Plan* plan) const {
 }
 
 SegmentSealedImpl::SegmentSealedImpl(SchemaPtr schema, int64_t segment_id)
-    : schema_(schema),
-      insert_record_(*schema, MAX_ROW_COUNT),
-      field_data_ready_bitset_(schema->size()),
+    : field_data_ready_bitset_(schema->size()),
       index_ready_bitset_(schema->size()),
       scalar_indexings_(schema->size()),
+      insert_record_(*schema, MAX_ROW_COUNT),
+      schema_(schema),
       id_(segment_id) {
 }
 

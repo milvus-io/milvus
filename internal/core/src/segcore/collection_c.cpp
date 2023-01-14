@@ -26,12 +26,12 @@ NewCollection(const char* schema_proto_blob) {
 
 void
 DeleteCollection(CCollection collection) {
-    auto col = (milvus::segcore::Collection*)collection;
+    auto col = static_cast<milvus::segcore::Collection*>(collection);
     delete col;
 }
 
 const char*
 GetCollectionName(CCollection collection) {
-    auto col = (milvus::segcore::Collection*)collection;
+    auto col = static_cast<milvus::segcore::Collection*>(collection);
     return strdup(col->get_collection_name().data());
 }

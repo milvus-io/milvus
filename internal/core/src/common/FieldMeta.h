@@ -81,7 +81,7 @@ datatype_name(DataType data_type) {
             return "vector_binary";
         }
         default: {
-            auto err_msg = "Unsupported DataType(" + std::to_string((int)data_type) + ")";
+            auto err_msg = "Unsupported DataType(" + std::to_string(static_cast<int>(data_type)) + ")";
             PanicInfo(err_msg);
         }
     }
@@ -152,55 +152,55 @@ class FieldMeta {
         Assert(is_vector());
     }
 
-    bool
+    [[nodiscard]] bool
     is_vector() const {
         Assert(type_ != DataType::NONE);
         return type_ == DataType::VECTOR_BINARY || type_ == DataType::VECTOR_FLOAT;
     }
 
-    bool
+    [[nodiscard]] bool
     is_string() const {
         Assert(type_ != DataType::NONE);
         return type_ == DataType::VARCHAR || type_ == DataType::STRING;
     }
 
-    int64_t
+    [[nodiscard]] int64_t
     get_dim() const {
         Assert(is_vector());
         Assert(vector_info_.has_value());
         return vector_info_->dim_;
     }
 
-    int64_t
+    [[nodiscard]] int64_t
     get_max_len() const {
         Assert(is_string());
         Assert(string_info_.has_value());
         return string_info_->max_length;
     }
 
-    std::optional<knowhere::MetricType>
+    [[nodiscard]] std::optional<knowhere::MetricType>
     get_metric_type() const {
         Assert(is_vector());
         Assert(vector_info_.has_value());
         return vector_info_->metric_type_;
     }
 
-    const FieldName&
+    [[nodiscard]] const FieldName&
     get_name() const {
         return name_;
     }
 
-    const FieldId&
+    [[nodiscard]] const FieldId&
     get_id() const {
         return id_;
     }
 
-    DataType
+    [[nodiscard]] DataType
     get_data_type() const {
         return type_;
     }
 
-    int64_t
+    [[nodiscard]] int64_t
     get_sizeof() const {
         if (is_vector()) {
             return datatype_sizeof(type_, get_dim());

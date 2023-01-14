@@ -23,12 +23,12 @@ namespace milvus::segcore {
 
 class ScalarIndexBase {
  public:
-    virtual std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
+    [[nodiscard]] virtual std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
     do_search_ids(const IdArray& ids) const = 0;
-    virtual std::pair<std::vector<idx_t>, std::vector<SegOffset>>
+    [[nodiscard]] virtual std::pair<std::vector<idx_t>, std::vector<SegOffset>>
     do_search_ids(const std::vector<idx_t>& ids) const = 0;
     virtual ~ScalarIndexBase() = default;
-    virtual std::string
+    [[nodiscard]] virtual std::string
     debug() const = 0;
 };
 
@@ -43,13 +43,13 @@ class ScalarIndexVector : public ScalarIndexBase {
     void
     build();
 
-    std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
+    [[nodiscard]] std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
     do_search_ids(const IdArray& ids) const override;
 
-    std::pair<std::vector<idx_t>, std::vector<SegOffset>>
+    [[nodiscard]] std::pair<std::vector<idx_t>, std::vector<SegOffset>>
     do_search_ids(const std::vector<idx_t>& ids) const override;
 
-    std::string
+    [[nodiscard]] std::string
     debug() const override {
         std::string dbg_str;
         for (auto pr : mapping_) {

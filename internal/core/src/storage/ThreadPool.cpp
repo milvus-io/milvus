@@ -29,9 +29,9 @@ void
 ThreadPool::ShutDown() {
     shutdown_ = true;
     condition_lock_.notify_all();
-    for (int i = 0; i < threads_.size(); i++) {
-        if (threads_[i].joinable()) {
-            threads_[i].join();
+    for (auto& thread : threads_) {
+        if (thread.joinable()) {
+            thread.join();
         }
     }
 }

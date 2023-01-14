@@ -17,7 +17,7 @@
 #pragma once
 
 #include <string>
-#include <string.h>
+#include <cstring>
 
 #include "common/type_c.h"
 

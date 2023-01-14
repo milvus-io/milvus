@@ -49,8 +49,8 @@ class LocalChunkManager : public ChunkManager {
     virtual ~LocalChunkManager() {
     }
 
-    virtual bool
-    Exist(const std::string& filepath);
+    bool
+    Exist(const std::string& filepath) override;
 
     /**
      * @brief Get file's size
@@ -58,11 +58,11 @@ class LocalChunkManager : public ChunkManager {
      * @param filepath
      * @return uint64_t
      */
-    virtual uint64_t
-    Size(const std::string& filepath);
+    uint64_t
+    Size(const std::string& filepath) override;
 
-    virtual uint64_t
-    Read(const std::string& filepath, void* buf, uint64_t len);
+    uint64_t
+    Read(const std::string& filepath, void* buf, uint64_t len) override;
 
     /**
      * @brief Write buf to file
@@ -72,8 +72,8 @@ class LocalChunkManager : public ChunkManager {
      * @param buf
      * @param len
      */
-    virtual void
-    Write(const std::string& filepath, void* buf, uint64_t len);
+    void
+    Write(const std::string& filepath, void* buf, uint64_t len) override;
 
     /**
      * @brief Write buf to file with specified location.
@@ -84,25 +84,25 @@ class LocalChunkManager : public ChunkManager {
      * @param len
      * @return uint64_t
      */
-    virtual uint64_t
-    Read(const std::string& filepath, uint64_t offset, void* buf, uint64_t len);
+    uint64_t
+    Read(const std::string& filepath, uint64_t offset, void* buf, uint64_t len) override;
 
-    virtual void
-    Write(const std::string& filepath, uint64_t offset, void* buf, uint64_t len);
+    void
+    Write(const std::string& filepath, uint64_t offset, void* buf, uint64_t len) override;
 
-    virtual std::vector<std::string>
-    ListWithPrefix(const std::string& filepath);
+    std::vector<std::string>
+    ListWithPrefix(const std::string& filepath) override;
 
     /**
      * @brief Remove file no matter whether file exists
      *  or not
      * @param filepath
      */
-    virtual void
-    Remove(const std::string& filepath);
+    void
+    Remove(const std::string& filepath) override;
 
-    virtual std::string
-    GetName() const {
+    [[nodiscard]] std::string
+    GetName() const override {
         return "LocalChunkManager";
     }
 

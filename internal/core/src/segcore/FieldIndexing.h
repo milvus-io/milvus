@@ -48,12 +48,12 @@ class FieldIndexing {
         return field_meta_;
     }
 
-    int64_t
+    [[nodiscard]] int64_t
     get_size_per_chunk() const {
         return segcore_config_.get_chunk_rows();
     }
 
-    virtual index::IndexBase*
+    [[nodiscard]] virtual index::IndexBase*
     get_chunk_indexing(int64_t chunk_id) const = 0;
 
  protected:

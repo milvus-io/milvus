@@ -39,13 +39,13 @@ struct Payload {
 class PayloadOutputStream : public arrow::io::OutputStream {
  public:
     PayloadOutputStream();
-    ~PayloadOutputStream();
+    ~PayloadOutputStream() override;
 
     arrow::Status
     Close() override;
     arrow::Result<int64_t>
     Tell() const override;
-    bool
+    [[nodiscard]] bool
     closed() const override;
     arrow::Status
     Write(const void* data, int64_t nbytes) override;
@@ -53,7 +53,7 @@ class PayloadOutputStream : public arrow::io::OutputStream {
     Flush() override;
 
  public:
-    const std::vector<uint8_t>&
+    [[nodiscard]] const std::vector<uint8_t>&
     Buffer() const;
 
  private:
@@ -64,7 +64,7 @@ class PayloadOutputStream : public arrow::io::OutputStream {
 class PayloadInputStream : public arrow::io::RandomAccessFile {
  public:
     PayloadInputStream(const uint8_t* data, int64_t size);
-    ~PayloadInputStream();
+    ~PayloadInputStream() override;
 
     arrow::Status
     Close() override;

@@ -39,20 +39,20 @@ class DiskFileManagerImpl : public FileManagerImpl {
 
     virtual ~DiskFileManagerImpl();
 
-    virtual bool
-    LoadFile(const std::string& filename) noexcept;
+    bool
+    LoadFile(const std::string& filename) noexcept override;
 
-    virtual bool
-    AddFile(const std::string& filename) noexcept;
+    bool
+    AddFile(const std::string& filename) noexcept override;
 
-    virtual std::optional<bool>
-    IsExisted(const std::string& filename) noexcept;
+    std::optional<bool>
+    IsExisted(const std::string& filename) noexcept override;
 
-    virtual bool
-    RemoveFile(const std::string& filename) noexcept;
+    bool
+    RemoveFile(const std::string& filename) noexcept override;
 
  public:
-    virtual std::string
+    [[nodiscard]] virtual std::string
     GetName() const {
         return "DiskFileManagerImpl";
     }
@@ -66,12 +66,12 @@ class DiskFileManagerImpl : public FileManagerImpl {
     std::string
     GetLocalRawDataObjectPrefix();
 
-    std::map<std::string, int64_t>
+    [[nodiscard]] std::map<std::string, int64_t>
     GetRemotePathsToFileSize() const {
         return remote_paths_to_size_;
     }
 
-    std::vector<std::string>
+    [[nodiscard]] std::vector<std::string>
     GetLocalFilePaths() const {
         return local_paths_;
     }
@@ -84,12 +84,12 @@ class DiskFileManagerImpl : public FileManagerImpl {
                                const std::string& local_file_name,
                                uint64_t local_file_init_offfset);
 
-    FieldDataMeta
+    [[nodiscard]] FieldDataMeta
     GetFileDataMeta() const {
         return field_meta_;
     }
 
-    IndexMeta
+    [[nodiscard]] IndexMeta
     GetIndexMeta() const {
         return index_meta_;
     }

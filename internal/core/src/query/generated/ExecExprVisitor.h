@@ -46,7 +46,7 @@ class ExecExprVisitor : public ExprVisitor {
 
  public:
     ExecExprVisitor(const segcore::SegmentInternalInterface& segment, int64_t row_count, Timestamp timestamp)
-        : segment_(segment), row_count_(row_count), timestamp_(timestamp) {
+        : segment_(segment), timestamp_(timestamp), row_count_(row_count) {
     }
 
     BitsetType

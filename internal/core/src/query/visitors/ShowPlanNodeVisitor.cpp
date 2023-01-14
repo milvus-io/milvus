@@ -42,11 +42,6 @@ class ShowPlanNodeVisitorImpl : PlanNodeVisitor {
 
 using Json = nlohmann::json;
 
-static std::string
-get_indent(int indent) {
-    return std::string(10, '\t');
-}
-
 void
 ShowPlanNodeVisitor::visit(FloatVectorANNS& node) {
     // std::vector<float> data(node.data_.get(), node.data_.get() + node.total_nq_  * node.dim_);

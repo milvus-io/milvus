@@ -35,19 +35,19 @@ class PayloadReader {
     void
     init(std::shared_ptr<PayloadInputStream> input);
 
-    bool
+    [[nodiscard]] bool
     get_bool_payload(int idx) const;
 
     void
     get_one_string_Payload(int idx, char** cstr, int* str_size) const;
 
-    std::unique_ptr<Payload>
+    [[nodiscard]] std::unique_ptr<Payload>
     get_payload() const;
 
-    int
+    [[nodiscard]] int
     get_payload_length() const;
 
-    std::shared_ptr<FieldData>
+    [[nodiscard]] std::shared_ptr<FieldData>
     get_field_data() const {
         return field_data_;
     }

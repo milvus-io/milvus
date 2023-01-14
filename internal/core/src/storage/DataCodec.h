@@ -28,7 +28,7 @@ namespace milvus::storage {
 
 class DataCodec {
  public:
-    explicit DataCodec(std::shared_ptr<FieldData> data, CodecType type) : field_data_(data), codec_type_(type) {
+    explicit DataCodec(std::shared_ptr<FieldData> data, CodecType type) : codec_type_(type), field_data_(data) {
     }
 
     virtual ~DataCodec() = default;
@@ -46,12 +46,12 @@ class DataCodec {
         time_range_ = std::make_pair(start_timestamp, end_timestamp);
     }
 
-    std::pair<Timestamp, Timestamp>
+    [[nodiscard]] std::pair<Timestamp, Timestamp>
     GetTimeRage() const {
         return time_range_;
     }
 
-    CodecType
+    [[nodiscard]] CodecType
     GetCodecType() const {
         return codec_type_;
     }
@@ -61,7 +61,7 @@ class DataCodec {
         return field_data_->get_data_type();
     }
 
-    std::unique_ptr<Payload>
+    [[nodiscard]] std::unique_ptr<Payload>
     GetPayload() const {
         return field_data_->get_payload();
     }

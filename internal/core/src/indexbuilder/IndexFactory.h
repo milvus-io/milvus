@@ -44,8 +44,8 @@ class IndexFactory {
                 const char* type_params,
                 const char* index_params,
                 const storage::StorageConfig& storage_config) {
-        auto real_dtype = DataType(dtype);
-        auto invalid_dtype_msg = std::string("invalid data type: ") + std::to_string(int(real_dtype));
+        auto real_dtype = static_cast<DataType>(dtype);
+        auto invalid_dtype_msg = std::string("invalid data type: ") + std::to_string(static_cast<int>(real_dtype));
 
         switch (real_dtype) {
             case DataType::BOOL:

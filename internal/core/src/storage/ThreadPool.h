@@ -33,7 +33,7 @@ namespace milvus {
 
 class ThreadPool {
  public:
-    explicit ThreadPool(const int thread_core_coefficient) : shutdown_(false) {
+    explicit ThreadPool(const int thread_core_coefficient) {
         auto thread_num = cpu_num * thread_core_coefficient;
         LOG_SEGCORE_INFO_C << "Thread pool's worker num:" << thread_num;
         threads_ = std::vector<std::thread>(thread_num);
@@ -80,7 +80,7 @@ class ThreadPool {
     }
 
  public:
-    bool shutdown_;
+    bool shutdown_{false};
     SafeQueue<std::function<void()>> work_queue_;
     std::vector<std::thread> threads_;
     std::mutex mutex_;
@@ -93,7 +93,7 @@ class Worker {
     ThreadPool* pool_;
 
  public:
-    Worker(ThreadPool* pool, const int id) : pool_(pool), id_(id) {
+    Worker(ThreadPool* pool, const int id) : id_(id), pool_(pool) {
     }
 
     void

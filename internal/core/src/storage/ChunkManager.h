@@ -104,7 +104,7 @@ class ChunkManager {
      * Used for forming diagnosis messages
      * @return std::string
      */
-    virtual std::string
+    [[nodiscard]] virtual std::string
     GetName() const = 0;
 };
 
@@ -117,8 +117,8 @@ class RemoteChunkManager : public ChunkManager {
  public:
     virtual ~RemoteChunkManager() {
     }
-    virtual std::string
-    GetName() const {
+    [[nodiscard]] std::string
+    GetName() const override {
         return "RemoteChunkManager";
     }
 };

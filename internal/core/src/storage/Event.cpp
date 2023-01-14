@@ -133,8 +133,9 @@ DescriptorEventDataFixPart::Serialize() {
 
 DescriptorEventData::DescriptorEventData(PayloadInputStream* input) {
     fix_part = DescriptorEventDataFixPart(input);
-    for (auto i = int8_t(EventType::DescriptorEvent); i < int8_t(EventType::EventTypeEnd); i++) {
-        post_header_lengths.push_back(GetEventFixPartSize(EventType(i)));
+    for (auto i = static_cast<int8_t>(EventType::DescriptorEvent); i < static_cast<int8_t>(EventType::EventTypeEnd);
+         i++) {
+        post_header_lengths.push_back(GetEventFixPartSize(static_cast<EventType>(i)));
     }
     auto ast = input->Read(post_header_lengths.size(), post_header_lengths.data());
     assert(ast.ok());
@@ -157,7 +158,7 @@ std::vector<uint8_t>
 DescriptorEventData::Serialize() {
     auto fix_part_data = fix_part.Serialize();
     milvus::json extras_json;
-    for (auto v : extras) {
+    for (const auto& v : extras) {
         extras_json.emplace(v.first, v.second);
     }
     std::string extras_string = extras_json.dump();

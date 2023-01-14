@@ -33,7 +33,7 @@ SegmentInternalInterface::FillPrimaryKeys(const query::Plan* plan, SearchResult&
     AssertInfo(IsPrimaryKeyDataType(get_schema()[pk_field_id].get_data_type()),
                "Primary key field is not INT64 or VARCHAR type");
     auto field_data = bulk_subscript(pk_field_id, results.seg_offsets_.data(), size);
-    results.pk_type_ = DataType(field_data->type());
+    results.pk_type_ = static_cast<DataType>(field_data->type());
 
     ParsePksFromFieldData(results.primary_keys_, *field_data.get());
 }
@@ -116,8 +116,9 @@ SegmentInternalInterface::Retrieve(const query::RetrievePlan* plan, Timestamp ti
                 case DataType::VARCHAR: {
                     auto str_ids = ids->mutable_str_id();
                     auto src_data = col_data->scalars().string_data();
-                    for (auto i = 0; i < src_data.data_size(); ++i)
+                    for (auto i = 0; i < src_data.data_size(); ++i) {
                         *(str_ids->mutable_data()->Add()) = src_data.data(i);
+                    }
                     break;
                 }
                 default: {

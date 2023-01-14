@@ -77,9 +77,10 @@ IndexData::serialize_to_remote_file() {
     des_fix_part.field_id = field_data_meta_->field_id;
     des_fix_part.start_timestamp = time_range_.first;
     des_fix_part.end_timestamp = time_range_.second;
-    des_fix_part.data_type = milvus::proto::schema::DataType(data_type);
-    for (auto i = int8_t(EventType::DescriptorEvent); i < int8_t(EventType::EventTypeEnd); i++) {
-        des_event_data.post_header_lengths.push_back(GetEventFixPartSize(EventType(i)));
+    des_fix_part.data_type = static_cast<milvus::proto::schema::DataType>(data_type);
+    for (auto i = static_cast<int8_t>(EventType::DescriptorEvent); i < static_cast<int8_t>(EventType::EventTypeEnd);
+         i++) {
+        des_event_data.post_header_lengths.push_back(GetEventFixPartSize(static_cast<EventType>(i)));
     }
     des_event_data.extras[ORIGIN_SIZE_KEY] = std::to_string(field_data_->get_data_size());
     des_event_data.extras[INDEX_BUILD_ID_KEY] = std::to_string(index_meta_->build_id);

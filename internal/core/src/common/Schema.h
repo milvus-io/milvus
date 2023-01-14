@@ -84,17 +84,17 @@ class Schema {
         this->primary_field_id_opt_ = field_id;
     }
 
-    auto
+    [[nodiscard]] auto
     begin() const {
         return fields_.begin();
     }
 
-    auto
+    [[nodiscard]] auto
     end() const {
         return fields_.end();
     }
 
-    int
+    [[nodiscard]] int
     size() const {
         return fields_.size();
     }
@@ -107,23 +107,23 @@ class Schema {
         return fields_.at(field_id);
     }
 
-    auto
+    [[nodiscard]] auto
     get_total_sizeof() const {
         return total_sizeof_;
     }
 
-    FieldId
+    [[nodiscard]] FieldId
     get_field_id(const FieldName& field_name) const {
         AssertInfo(name_ids_.count(field_name), "Cannot find field_name");
         return name_ids_.at(field_name);
     }
 
-    const std::unordered_map<FieldId, FieldMeta>&
+    [[nodiscard]] const std::unordered_map<FieldId, FieldMeta>&
     get_fields() const {
         return fields_;
     }
 
-    const std::vector<FieldId>&
+    [[nodiscard]] const std::vector<FieldId>&
     get_field_ids() const {
         return field_ids_;
     }
@@ -135,7 +135,7 @@ class Schema {
         return fields_.at(id_iter->second);
     }
 
-    std::optional<FieldId>
+    [[nodiscard]] std::optional<FieldId>
     get_primary_field_id() const {
         return primary_field_id_opt_;
     }

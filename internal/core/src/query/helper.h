@@ -17,8 +17,7 @@
 #pragma once
 #include "common/Types.h"
 
-namespace milvus::query {
-namespace dataset {
+namespace milvus::query::dataset {
 
 struct SearchDataset {
     knowhere::MetricType metric_type;
@@ -29,5 +28,4 @@ struct SearchDataset {
     const void* query_data;
 };
 
-}  // namespace dataset
-}  // namespace milvus::query
+}  // namespace milvus::query::dataset

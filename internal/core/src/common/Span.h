@@ -31,17 +31,17 @@ class SpanBase {
         : data_(data), row_count_(row_count), element_sizeof_(element_sizeof) {
     }
 
-    int64_t
+    [[nodiscard]] int64_t
     row_count() const {
         return row_count_;
     }
 
-    int64_t
+    [[nodiscard]] int64_t
     element_sizeof() const {
         return element_sizeof_;
     }
 
-    const void*
+    [[nodiscard]] const void*
     data() const {
         return data_;
     }
@@ -71,7 +71,7 @@ class Span<T, typename std::enable_if_t<IsScalar<T> || std::is_same_v<T, PkType>
         assert(base.element_sizeof() == sizeof(T));
     }
 
-    int64_t
+    [[nodiscard]] int64_t
     element_sizeof() const {
         return sizeof(T);
     }
@@ -86,7 +86,7 @@ class Span<T, typename std::enable_if_t<IsScalar<T> || std::is_same_v<T, PkType>
         return data_[offset];
     }
 
-    int64_t
+    [[nodiscard]] int64_t
     row_count() const {
         return row_count_;
     }
@@ -102,7 +102,7 @@ class Span<VectorType, typename std::enable_if_t<std::is_base_of_v<VectorTrait, 
     using embedded_type = typename VectorType::embedded_type;
 
     Span(const embedded_type* data, int64_t row_count, int64_t element_sizeof)
-        : row_count_(row_count), data_(data), element_sizeof_(element_sizeof) {
+        : data_(data), row_count_(row_count), element_sizeof_(element_sizeof) {
     }
 
     explicit Span(const SpanBase& base)
@@ -115,7 +115,7 @@ class Span<VectorType, typename std::enable_if_t<std::is_base_of_v<VectorTrait, 
         return SpanBase(data_, row_count_, element_sizeof_);
     }
 
-    int64_t
+    [[nodiscard]] int64_t
     element_sizeof() const {
         return element_sizeof_;
     }
@@ -125,7 +125,7 @@ class Span<VectorType, typename std::enable_if_t<std::is_base_of_v<VectorTrait, 
         return data_;
     }
 
-    int64_t
+    [[nodiscard]] int64_t
     row_count() const {
         return row_count_;
     }

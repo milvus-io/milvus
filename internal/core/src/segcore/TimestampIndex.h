@@ -31,7 +31,7 @@ class TimestampIndex {
     // Return range [beg, end) that is undecided
     // [0, beg) shall be all OK
     // [end, size) shall be all not OK
-    std::pair<int64_t, int64_t>
+    [[nodiscard]] std::pair<int64_t, int64_t>
     get_active_range(Timestamp query_timestamp) const;
 
     static BitsetType
