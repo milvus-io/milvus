@@ -9,6 +9,9 @@ class MilvusConan(ConanFile):
         "boost/1.81.0",
         "onetbb/2021.7.0",
         "zstd/1.5.2",
+        "lz4/1.9.4",
+        "snappy/1.1.9",
+        "lzo/2.10",
         "arrow/8.0.1",
         "openssl/1.1.1q",
         "aws-sdk-cpp/1.9.234",
@@ -20,8 +23,17 @@ class MilvusConan(ConanFile):
         "marisa/0.2.6",
         "zlib/1.2.13",
         "libcurl/7.86.0",
+        "glog/0.6.0",
+        "fmt/8.0.1",
+        "gflags/2.2.2",
+        "double-conversion/3.2.1",
+        "libevent/2.1.12",
+        "libdwarf/20191104",
+        "libiberty/9.1.0",
+        "libsodium/cci.20220430",
+        "bison/3.5.3",
+        "flex/2.6.4",
     )
-
     generators = ("cmake", "cmake_find_package")
     default_options = {
         "rocksdb:shared": True,

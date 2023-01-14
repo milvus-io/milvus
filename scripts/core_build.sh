@@ -210,7 +210,11 @@ case "${unameOut}" in
     echo "Cannot build on windows"
     ;;
 esac
+rm conan/Findbison.cmake
+rm conan/Findflex.cmake
+rm conan/FindProtobuf.cmake
 
+arch=$(uname -m)
 CMAKE_CMD="cmake \
 ${CMAKE_EXTRA_ARGS} \
 -DBUILD_UNIT_TEST=${BUILD_UNITTEST} \
@@ -218,6 +222,7 @@ ${CMAKE_EXTRA_ARGS} \
 -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
 -DOpenBLAS_SOURCE=AUTO \
 -DCMAKE_CUDA_COMPILER=${CUDA_COMPILER} \
+-DCMAKE_LIBRARY_ARCHITECTURE=${arch} \
 -DBUILD_COVERAGE=${BUILD_COVERAGE} \
 -DMILVUS_DB_PATH=${DB_PATH} \
 -DENABLE_CPU_PROFILING=${PROFILING} \

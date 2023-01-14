@@ -90,7 +90,6 @@ set( CONAN_DISABLE_CHECK_COMPILER ON )
 conan_basic_setup( KEEP_RPATHS )
 
 set( CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH} ${CONAN_PROTOBUF_ROOT})
-message( STATUS "cmake prefix path ${CMAKE_PREFIX_PATH}")
 
 include( CTest )
 include( BuildUtils )

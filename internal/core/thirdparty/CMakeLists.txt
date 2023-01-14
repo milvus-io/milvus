@@ -12,37 +12,38 @@
 #-------------------------------------------------------------------------------
 # Using default c and cxx compiler in our build tree
 # Thirdpart cxx and c flags
-add_compile_options( -O3 -fPIC -Wno-error -fopenmp )
+add_compile_options(-O3 -fPIC -Wno-error -fopenmp)
 
-if ( NOT KNOWHERE_VERBOSE_THIRDPARTY_BUILD )
-    set( EP_LOG_OPTIONS LOG_CONFIGURE 1 LOG_BUILD 1 LOG_INSTALL 1 LOG_DOWNLOAD 1 )
+if (NOT KNOWHERE_VERBOSE_THIRDPARTY_BUILD)
+    set(EP_LOG_OPTIONS LOG_CONFIGURE 1 LOG_BUILD 1 LOG_INSTALL 1 LOG_DOWNLOAD 1)
 else ()
-    set( EP_LOG_OPTIONS )
+    set(EP_LOG_OPTIONS)
 endif ()
 
-set( MAKE_BUILD_ARGS "-j6" )
+set(MAKE_BUILD_ARGS "-j6")
 
-include( FetchContent )
-set( FETCHCONTENT_BASE_DIR  ${MILVUS_BINARY_DIR}/3rdparty_download )
-set( FETCHCONTENT_QUIET     OFF )
+include(FetchContent)
+set(FETCHCONTENT_BASE_DIR  ${MILVUS_BINARY_DIR}/3rdparty_download)
+set(FETCHCONTENT_QUIET     OFF)
 
-if( CUSTOM_THIRDPARTY_DOWNLOAD_PATH )
-    set( THIRDPARTY_DOWNLOAD_PATH ${CUSTOM_THIRDPARTY_DOWNLOAD_PATH} )
+if(CUSTOM_THIRDPARTY_DOWNLOAD_PATH)
+    set(THIRDPARTY_DOWNLOAD_PATH ${CUSTOM_THIRDPARTY_DOWNLOAD_PATH})
 else()
-    set( THIRDPARTY_DOWNLOAD_PATH ${CMAKE_BINARY_DIR}/3rdparty_download/download )
+    set(THIRDPARTY_DOWNLOAD_PATH ${CMAKE_BINARY_DIR}/3rdparty_download/download)
 endif()
-message( STATUS "Thirdparty downloaded file path: ${THIRDPARTY_DOWNLOAD_PATH}" )
+message(STATUS "Thirdparty downloaded file path: ${THIRDPARTY_DOWNLOAD_PATH}")
 # ----------------------------------------------------------------------
 # Find pthreads
 
-set( THREADS_PREFER_PTHREAD_FLAG ON )
-find_package( Threads REQUIRED )
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads REQUIRED)
 
-add_subdirectory( knowhere )
+add_subdirectory(knowhere)
 
-add_subdirectory( boost_ext )
-add_subdirectory( rocksdb )
+add_subdirectory(boost_ext)
+add_subdirectory(rocksdb)
+add_subdirectory(velox)
 
-if ( LINUX )
-    add_subdirectory( jemalloc )
+if (LINUX)
+    add_subdirectory(jemalloc)
 endif()
