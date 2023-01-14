@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
@@ -59,17 +60,18 @@ type ServiceSuite struct {
 	nodes         []int64
 
 	// Dependencies
-	kv            kv.MetaKv
-	store         meta.Store
-	dist          *meta.DistributionManager
-	meta          *meta.Meta
-	targetMgr     *meta.TargetManager
-	broker        *meta.MockBroker
-	cluster       *session.MockCluster
-	nodeMgr       *session.NodeManager
-	jobScheduler  *job.Scheduler
-	taskScheduler *task.MockScheduler
-	balancer      balance.Balance
+	kv             kv.MetaKv
+	store          meta.Store
+	dist           *meta.DistributionManager
+	meta           *meta.Meta
+	targetMgr      *meta.TargetManager
+	broker         *meta.MockBroker
+	targetObserver *observers.TargetObserver
+	cluster        *session.MockCluster
+	nodeMgr        *session.NodeManager
+	jobScheduler   *job.Scheduler
+	taskScheduler  *task.MockScheduler
+	balancer       balance.Balance
 
 	// Test object
 	server *Server
@@ -127,6 +129,12 @@ func (suite *ServiceSuite) SetupTest() {
 	suite.meta = meta.NewMeta(params.RandomIncrementIDAllocator(), suite.store)
 	suite.broker = meta.NewMockBroker(suite.T())
 	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta)
+	suite.targetObserver = observers.NewTargetObserver(
+		suite.meta,
+		suite.targetMgr,
+		suite.dist,
+		suite.broker,
+	)
 	suite.nodeMgr = session.NewNodeManager()
 	for _, node := range suite.nodes {
 		suite.nodeMgr.Add(session.NewNodeInfo(node, "localhost"))
@@ -153,6 +161,7 @@ func (suite *ServiceSuite) SetupTest() {
 		meta:                suite.meta,
 		targetMgr:           suite.targetMgr,
 		broker:              suite.broker,
+		targetObserver:      suite.targetObserver,
 		nodeMgr:             suite.nodeMgr,
 		cluster:             suite.cluster,
 		jobScheduler:        suite.jobScheduler,

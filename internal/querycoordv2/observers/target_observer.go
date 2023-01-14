@@ -46,6 +46,7 @@ type TargetObserver struct {
 
 	nextTargetLastUpdate map[int64]time.Time
 	updateChan           chan targetUpdateRequest
+	mut                  sync.Mutex                // Guard readyNotifiers
 	readyNotifiers       map[int64][]chan struct{} // CollectionID -> Notifiers
 
 	stopOnce sync.Once
@@ -91,6 +92,7 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 			return
 
 		case <-ticker.C:
+			ob.clean()
 			ob.tryUpdateTarget()
 
 		case request := <-ob.updateChan:
@@ -98,7 +100,9 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 			if err != nil {
 				close(request.ReadyNotifier)
 			} else {
+				ob.mut.Lock()
 				ob.readyNotifiers[request.CollectionID] = append(ob.readyNotifiers[request.CollectionID], request.ReadyNotifier)
+				ob.mut.Unlock()
 			}
 
 			request.Notifier <- err
@@ -122,6 +126,15 @@ func (ob *TargetObserver) UpdateNextTarget(collectionID int64) (chan struct{}, e
 	return readyCh, <-notifier
 }
 
+func (ob *TargetObserver) ReleaseCollection(collectionID int64) {
+	ob.mut.Lock()
+	defer ob.mut.Unlock()
+	for _, notifier := range ob.readyNotifiers[collectionID] {
+		close(notifier)
+	}
+	delete(ob.readyNotifiers, collectionID)
+}
+
 func (ob *TargetObserver) tryUpdateTarget() {
 	collections := ob.meta.GetAll()
 	for _, collectionID := range collections {
@@ -140,6 +153,21 @@ func (ob *TargetObserver) tryUpdateTarget() {
 	for collection := range ob.nextTargetLastUpdate {
 		if !collectionSet.Contain(collection) {
 			delete(ob.nextTargetLastUpdate, collection)
+		}
+	}
+}
+
+func (ob *TargetObserver) clean() {
+	collections := typeutil.NewSet(ob.meta.GetAll()...)
+
+	ob.mut.Lock()
+	defer ob.mut.Unlock()
+	for collectionID, notifiers := range ob.readyNotifiers {
+		if !collections.Contain(collectionID) {
+			for i := range notifiers {
+				close(notifiers[i])
+			}
+			delete(ob.readyNotifiers, collectionID)
 		}
 	}
 }
@@ -213,6 +241,9 @@ func (ob *TargetObserver) updateCurrentTarget(collectionID int64) {
 	log.Warn("observer trigger update current target",
 		zap.Int64("collectionID", collectionID))
 	ob.targetMgr.UpdateCollectionCurrentTarget(collectionID)
+
+	ob.mut.Lock()
+	defer ob.mut.Unlock()
 	notifiers := ob.readyNotifiers[collectionID]
 	for _, notifier := range notifiers {
 		close(notifier)
