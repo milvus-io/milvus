@@ -15,7 +15,6 @@
 #include "common/QueryResult.h"
 #include "exceptions/EasyAssert.h"
 #include "query/Plan.h"
-#include "segcore/ReduceStructure.h"
 #include "segcore/reduce_c.h"
 #include "segcore/Utils.h"
 
