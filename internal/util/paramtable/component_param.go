@@ -1490,7 +1490,8 @@ type dataNodeConfig struct {
 	ChannelWatchSubPath string
 
 	// io concurrency to fetch stats logs
-	IOConcurrency int
+	IOConcurrency         int
+	FileReaderConcurrency int
 
 	CreatedTime time.Time
 	UpdatedTime time.Time
@@ -1506,6 +1507,7 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	p.initBinlogMaxSize()
 	p.initSyncPeriod()
 	p.initIOConcurrency()
+	p.initFileReaderConcurrency()
 
 	p.initChannelWatchPath()
 }
@@ -1558,6 +1560,11 @@ func (p *dataNodeConfig) initChannelWatchPath() {
 
 func (p *dataNodeConfig) initIOConcurrency() {
 	p.IOConcurrency = p.Base.ParseIntWithDefault("dataNode.dataSync.ioConcurrency", 10)
+}
+
+func (p *dataNodeConfig) initFileReaderConcurrency() {
+	// by default file reader concurrency is cpu count * 4
+	p.FileReaderConcurrency = p.Base.ParseIntWithDefault("dataNode.dataSync.fileReaderConcurrency", runtime.GOMAXPROCS(0)*4)
 }
 
 func (p *dataNodeConfig) SetNodeID(id UniqueID) {

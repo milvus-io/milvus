@@ -231,3 +231,13 @@ func DeserializeStats(blobs []*Blob) ([]*PrimaryKeyStats, error) {
 	}
 	return results, nil
 }
+
+func DeserializeStat(blob *Blob) (*PrimaryKeyStats, error) {
+	sr := &StatsReader{}
+	sr.SetBuffer(blob.Value)
+	stat, err := sr.GetPrimaryKeyStats()
+	if err != nil {
+		return nil, err
+	}
+	return stat, nil
+}

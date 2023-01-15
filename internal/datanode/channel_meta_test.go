@@ -51,6 +51,17 @@ type mockDataCM struct {
 	storage.ChunkManager
 }
 
+func (kv *mockDataCM) Read(ctx context.Context, keys string) ([]byte, error) {
+	stats := &storage.PrimaryKeyStats{
+		FieldID: common.RowIDField,
+		Min:     0,
+		Max:     10,
+		BF:      bloom.NewWithEstimates(storage.BloomFilterSize, storage.MaxBloomFalsePositive),
+	}
+	buffer, _ := json.Marshal(stats)
+	return buffer, nil
+}
+
 func (kv *mockDataCM) MultiRead(ctx context.Context, keys []string) ([][]byte, error) {
 	stats := &storage.PrimaryKeyStats{
 		FieldID: common.RowIDField,
@@ -64,6 +75,10 @@ func (kv *mockDataCM) MultiRead(ctx context.Context, keys []string) ([][]byte, e
 
 type mockPkfilterMergeError struct {
 	storage.ChunkManager
+}
+
+func (kv *mockPkfilterMergeError) Read(ctx context.Context, filePath string) ([]byte, error) {
+	return nil, fmt.Errorf("mocked read error")
 }
 
 func (kv *mockPkfilterMergeError) MultiRead(ctx context.Context, keys []string) ([][]byte, error) {
@@ -83,12 +98,20 @@ type mockDataCMError struct {
 	storage.ChunkManager
 }
 
+func (kv *mockDataCMError) Read(ctx context.Context, filePath string) ([]byte, error) {
+	return nil, fmt.Errorf("mock error")
+}
+
 func (kv *mockDataCMError) MultiRead(ctx context.Context, keys []string) ([][]byte, error) {
 	return nil, fmt.Errorf("mock error")
 }
 
 type mockDataCMStatsError struct {
 	storage.ChunkManager
+}
+
+func (kv *mockDataCMStatsError) Read(ctx context.Context, key string) ([]byte, error) {
+	return []byte("3123123,error,test"), nil
 }
 
 func (kv *mockDataCMStatsError) MultiRead(ctx context.Context, keys []string) ([][]byte, error) {

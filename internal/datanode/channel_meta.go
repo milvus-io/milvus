@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/concurrency"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
@@ -315,24 +316,37 @@ func (c *ChannelMeta) InitPKstats(ctx context.Context, s *Segment, statsBinlogs 
 		return nil
 	}
 
-	// read historical PK filter
-	values, err := c.chunkManager.MultiRead(ctx, bloomFilterFiles)
-	if err != nil {
-		log.Warn("failed to load bloom filter files", zap.Error(err))
-		return err
-	}
-	blobs := make([]*Blob, 0)
-	for i := 0; i < len(values); i++ {
-		blobs = append(blobs, &Blob{Value: values[i]})
+	log.Info("begin to read on object storage", zap.Int("length of BF files", len(bloomFilterFiles)))
+	futures := make([]*concurrency.Future, 0, len(bloomFilterFiles))
+	for _, file := range bloomFilterFiles {
+		future := getOrCreateReaderPool().Submit(func() (interface{}, error) {
+			// read historical PK filter
+			value, err := c.chunkManager.Read(ctx, file)
+			if err != nil {
+				log.Warn("failed to load bloom filter files", zap.Error(err))
+				return nil, err
+			}
+
+			stat, err := storage.DeserializeStat(&Blob{Value: value})
+			if err != nil {
+				log.Warn("failed to deserialize bloom filter files", zap.Error(err))
+				return nil, err
+			}
+			return stat, nil
+		})
+		futures = append(futures, future)
 	}
 
-	stats, err := storage.DeserializeStats(blobs)
+	err = concurrency.AwaitAll(futures...)
 	if err != nil {
-		log.Warn("failed to deserialize bloom filter files", zap.Error(err))
+		log.Warn("failed to initPKBloomFilter, io errror", zap.Error(err))
 		return err
 	}
+
 	var size uint
-	for _, stat := range stats {
+	for _, future := range futures {
+		fmt.Println(future.Err())
+		stat := future.Value().(*storage.PrimaryKeyStats)
 		pkStat := &storage.PkStatistics{
 			PkFilter: stat.BF,
 			MinPK:    stat.MinPk,
