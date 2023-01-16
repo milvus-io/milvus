@@ -258,6 +258,7 @@ func (s *Server) ReleaseCollection(ctx context.Context, req *querypb.ReleaseColl
 		s.dist,
 		s.meta,
 		s.targetMgr,
+		s.targetObserver,
 	)
 	s.jobScheduler.Add(releaseJob)
 	err := releaseJob.Wait()
@@ -345,6 +346,7 @@ func (s *Server) ReleasePartitions(ctx context.Context, req *querypb.ReleasePart
 		s.dist,
 		s.meta,
 		s.targetMgr,
+		s.targetObserver,
 	)
 	s.jobScheduler.Add(releaseJob)
 	err := releaseJob.Wait()

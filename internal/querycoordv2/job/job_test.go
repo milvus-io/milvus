@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/util/etcd"
@@ -50,13 +51,14 @@ type JobSuite struct {
 	loadTypes   map[int64]querypb.LoadType
 
 	// Dependencies
-	kv        kv.MetaKv
-	store     meta.Store
-	dist      *meta.DistributionManager
-	meta      *meta.Meta
-	targetMgr *meta.TargetManager
-	broker    *meta.MockBroker
-	nodeMgr   *session.NodeManager
+	kv             kv.MetaKv
+	store          meta.Store
+	dist           *meta.DistributionManager
+	meta           *meta.Meta
+	targetMgr      *meta.TargetManager
+	targetObserver *observers.TargetObserver
+	broker         *meta.MockBroker
+	nodeMgr        *session.NodeManager
 
 	// Test objects
 	scheduler *Scheduler
@@ -131,6 +133,11 @@ func (suite *JobSuite) SetupTest() {
 	suite.dist = meta.NewDistributionManager()
 	suite.meta = meta.NewMeta(RandomIncrementIDAllocator(), suite.store)
 	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta)
+	suite.targetObserver = observers.NewTargetObserver(suite.meta,
+		suite.targetMgr,
+		suite.dist,
+		suite.broker,
+	)
 	suite.nodeMgr = session.NewNodeManager()
 	suite.nodeMgr.Add(&session.NodeInfo{})
 	suite.scheduler = NewScheduler()
@@ -583,6 +590,7 @@ func (suite *JobSuite) TestReleaseCollection() {
 			suite.dist,
 			suite.meta,
 			suite.targetMgr,
+			suite.targetObserver,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -601,6 +609,7 @@ func (suite *JobSuite) TestReleaseCollection() {
 			suite.dist,
 			suite.meta,
 			suite.targetMgr,
+			suite.targetObserver,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -626,6 +635,7 @@ func (suite *JobSuite) TestReleasePartition() {
 			suite.dist,
 			suite.meta,
 			suite.targetMgr,
+			suite.targetObserver,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -650,6 +660,7 @@ func (suite *JobSuite) TestReleasePartition() {
 			suite.dist,
 			suite.meta,
 			suite.targetMgr,
+			suite.targetObserver,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -676,6 +687,7 @@ func (suite *JobSuite) TestReleasePartition() {
 			suite.dist,
 			suite.meta,
 			suite.targetMgr,
+			suite.targetObserver,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
@@ -843,6 +855,7 @@ func (suite *JobSuite) releaseAll() {
 			suite.dist,
 			suite.meta,
 			suite.targetMgr,
+			suite.targetObserver,
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
