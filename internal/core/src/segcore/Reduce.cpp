@@ -17,7 +17,6 @@
 #include "Reduce.h"
 #include "pkVisitor.h"
 #include "SegmentInterface.h"
-#include "ReduceStructure.h"
 #include "Utils.h"
 
 namespace milvus::segcore {
@@ -157,7 +156,12 @@ ReduceHelper::FillEntryData() {
 
 int64_t
 ReduceHelper::ReduceSearchResultForOneNQ(int64_t qi, int64_t topk, int64_t& offset) {
-    std::vector<SearchResultPair> result_pairs;
+    while (!heap_.empty()) {
+        heap_.pop();
+    }
+    pk_set_.clear();
+
+    pairs_.reserve(num_segments_);
     for (int i = 0; i < num_segments_; i++) {
         auto search_result = search_results_[i];
         auto offset_beg = search_result->topk_per_nq_prefix_sum_[qi];
@@ -167,36 +171,39 @@ ReduceHelper::ReduceSearchResultForOneNQ(int64_t qi, int64_t topk, int64_t& offs
         }
         auto primary_key = search_result->primary_keys_[offset_beg];
         auto distance = search_result->distances_[offset_beg];
-        result_pairs.emplace_back(primary_key, distance, search_result, i, offset_beg, offset_end);
+
+        pairs_.emplace_back(primary_key, distance, search_result, i, offset_beg, offset_end);
+        heap_.push(&pairs_.back());
     }
 
     // nq has no results for all segments
-    if (result_pairs.size() == 0) {
+    if (heap_.size() == 0) {
         return 0;
     }
 
     int64_t dup_cnt = 0;
-    std::unordered_set<milvus::PkType> pk_set;
-    int64_t prev_offset = offset;
-    while (offset - prev_offset < topk) {
-        std::sort(result_pairs.begin(), result_pairs.end(), std::greater<>());
-        auto& pilot = result_pairs[0];
-        auto index = pilot.segment_index_;
-        auto pk = pilot.primary_key_;
+    auto start = offset;
+    while (offset - start < topk) {
+        auto pilot = heap_.top();
+        heap_.pop();
+
+        auto index = pilot->segment_index_;
+        auto pk = pilot->primary_key_;
         // no valid search result for this nq, break to next
         if (pk == INVALID_PK) {
             break;
         }
         // remove duplicates
-        if (pk_set.count(pk) == 0) {
-            pilot.search_result_->result_offsets_.push_back(offset++);
-            final_search_records_[index][qi].push_back(pilot.offset_);
-            pk_set.insert(pk);
+        if (pk_set_.count(pk) == 0) {
+            pilot->search_result_->result_offsets_.push_back(offset++);
+            final_search_records_[index][qi].push_back(pilot->offset_);
+            pk_set_.insert(pk);
         } else {
             // skip entity with same primary key
             dup_cnt++;
         }
-        pilot.reset();
+        pilot->advance();
+        heap_.push(pilot);
     }
     return dup_cnt;
 }
@@ -218,9 +225,9 @@ ReduceHelper::ReduceResultData() {
         auto nq_end = slice_nqs_prefix_sum_[slice_index + 1];
 
         // reduce search results
-        int64_t result_offset = 0;
+        int64_t offset = 0;
         for (int64_t qi = nq_begin; qi < nq_end; qi++) {
-            skip_dup_cnt += ReduceSearchResultForOneNQ(qi, slice_topKs_[slice_index], result_offset);
+            skip_dup_cnt += ReduceSearchResultForOneNQ(qi, slice_topKs_[slice_index], offset);
         }
     }
     if (skip_dup_cnt > 0) {
