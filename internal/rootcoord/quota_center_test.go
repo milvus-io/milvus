@@ -157,8 +157,9 @@ func TestQuotaCenter(t *testing.T) {
 		quotaCenter.tsoAllocator = alloc
 		quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{
 			1: {Fgm: metricsinfo.FlowGraphMetric{
-				MinFlowGraphTt: tsoutil.ComposeTSByTime(now, 0),
-				NumFlowGraph:   1,
+				MinFlowGraphTt:      tsoutil.ComposeTSByTime(now, 0),
+				NumFlowGraph:        1,
+				MinFlowGraphChannel: "dml",
 			}}}
 		ts, err := quotaCenter.tsoAllocator.GenerateTSO(1)
 		assert.NoError(t, err)
@@ -174,8 +175,9 @@ func TestQuotaCenter(t *testing.T) {
 		}
 		quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{
 			1: {Fgm: metricsinfo.FlowGraphMetric{
-				MinFlowGraphTt: tsoutil.ComposeTSByTime(now, 0),
-				NumFlowGraph:   1,
+				MinFlowGraphTt:      tsoutil.ComposeTSByTime(now, 0),
+				NumFlowGraph:        1,
+				MinFlowGraphChannel: "dml",
 			}}}
 		ts, err = quotaCenter.tsoAllocator.GenerateTSO(1)
 		assert.NoError(t, err)
@@ -210,7 +212,15 @@ func TestQuotaCenter(t *testing.T) {
 		for i, c := range ttCases {
 			paramtable.Get().Save(Params.QuotaConfig.MaxTimeTickDelay.Key, fmt.Sprintf("%f", c.maxTtDelay.Seconds()))
 			fgTs := tsoutil.ComposeTSByTime(c.fgTt, 0)
-			quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{1: {Fgm: metricsinfo.FlowGraphMetric{NumFlowGraph: 1, MinFlowGraphTt: fgTs}}}
+			quotaCenter.queryNodeMetrics = map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics{
+				1: {
+					Fgm: metricsinfo.FlowGraphMetric{
+						NumFlowGraph:        1,
+						MinFlowGraphTt:      fgTs,
+						MinFlowGraphChannel: "dml",
+					},
+				},
+			}
 			curTs := tsoutil.ComposeTSByTime(c.curTt, 0)
 			factor := quotaCenter.getTimeTickDelayFactor(curTs)
 			if math.Abs(factor-c.expectedFactor) > 0.000001 {
