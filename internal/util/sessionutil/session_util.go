@@ -829,9 +829,9 @@ func (s *Session) ProcessActiveStandBy(activateFunc func()) error {
 		if registered {
 			break
 		}
-		log.Info(fmt.Sprintf("%s start to watch ACTIVE key", s.ServerName))
+		log.Info(fmt.Sprintf("%s start to watch ACTIVE key %s", s.ServerName, s.activeKey))
 		ctx, cancel := context.WithCancel(s.ctx)
-		watchChan := s.etcdCli.Watch(ctx, s.activeKey, clientv3.WithPrefix(), clientv3.WithPrevKV(), clientv3.WithRev(revision))
+		watchChan := s.etcdCli.Watch(ctx, s.activeKey, clientv3.WithPrevKV(), clientv3.WithRev(revision))
 		select {
 		case <-ctx.Done():
 			cancel()
