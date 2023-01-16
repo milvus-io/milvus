@@ -67,7 +67,8 @@ inline void
 ScalarIndex<std::string>::BuildWithRawData(size_t n, const void* values, const Config& config) {
     // TODO :: use arrow
     proto::schema::StringArray arr;
-    arr.ParseFromArray(values, n);
+    auto ok = arr.ParseFromArray(values, n);
+    Assert(ok);
 
     // TODO :: optimize here. avoid memory copy.
     std::vector<std::string> vecs{arr.data().begin(), arr.data().end()};
@@ -78,7 +79,8 @@ template <>
 inline void
 ScalarIndex<bool>::BuildWithRawData(size_t n, const void* values, const Config& config) {
     proto::schema::BoolArray arr;
-    arr.ParseFromArray(values, n);
+    auto ok = arr.ParseFromArray(values, n);
+    Assert(ok);
     Build(arr.data_size(), arr.data().data());
 }
 
