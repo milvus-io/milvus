@@ -154,7 +154,6 @@ func (m *importManager) flipTaskStateLoop(wg *sync.WaitGroup) {
 			log.Info("import manager context done, exit check flipTaskStateLoop")
 			return
 		case <-flipPersistedTicker.C:
-			log.Debug("start trying to flip ImportPersisted task")
 			if err := m.loadAndFlipPersistedTasks(m.ctx); err != nil {
 				log.Error("failed to flip ImportPersisted task", zap.Error(err))
 			}
@@ -786,7 +785,6 @@ func (m *importManager) getTaskState(tID int64) *milvuspb.GetImportStateResponse
 // other in-progress tasks as failed, when `load2Mem` is set to `true`.
 // loadFromTaskStore instead returns a list of all import tasks if `load2Mem` is set to `false`.
 func (m *importManager) loadFromTaskStore(load2Mem bool) ([]*datapb.ImportTaskInfo, error) {
-	log.Info("import manager starts loading from Etcd")
 	_, v, err := m.taskStore.LoadWithPrefix(Params.RootCoordCfg.ImportTaskSubPath)
 	if err != nil {
 		log.Error("import manager failed to load from Etcd", zap.Error(err))
