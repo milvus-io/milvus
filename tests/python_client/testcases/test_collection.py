@@ -986,7 +986,6 @@ class TestCollectionParams(TestcaseBase):
                                              check_items={exp_name: c_name, exp_schema: schema})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="issue #21238")
     def test_create_collection_over_maximum_fields(self):
         """
         target: Test create collection with more than the maximum fields
@@ -1690,7 +1689,6 @@ class TestCreateCollectionInvalid(TestcaseBase):
     """
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="issue #21238")
     def test_create_collection_limit_fields(self):
         """
         target: test create collection with maximum fields
@@ -2243,7 +2241,7 @@ class TestLoadCollection(TestcaseBase):
         yield request.param
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail("issue #21618")
+    @pytest.mark.xfail(reason="issue #21618")
     def test_load_replica_non_number(self, get_non_number_replicas):
         """
         target: test load collection with non-number replicas

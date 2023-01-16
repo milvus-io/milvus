@@ -316,7 +316,7 @@ class TestPartitionParams(TestcaseBase):
         yield request.param
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail("issue #21618")
+    @pytest.mark.xfail(reason="issue #21618")
     def test_load_partition_replica_non_number(self, get_non_number_replicas):
         """
         target: test load partition with non-number replicas

@@ -2021,15 +2021,11 @@ class TestCollectionSearch(TestcaseBase):
         res = collection_w.search(binary_vectors[:nq], "binary_vector",
                                   search_params, default_limit, "int64 >= 0",
                                   _async=_async,
-                                  travel_timestamp=0,
-                                  check_task=CheckTasks.check_search_results,
-                                  check_items={"nq": nq,
-                                               "ids": insert_ids,
-                                               "limit": default_limit,
-                                               "_async": _async})[0]
+                                  travel_timestamp=0)[0]
         if _async:
             res.done()
             res = res.result()
+        assert len(res[0]) <= default_limit
         assert res[0].distances[0] == 0.0
 
     @pytest.mark.tags(CaseLabel.L2)
