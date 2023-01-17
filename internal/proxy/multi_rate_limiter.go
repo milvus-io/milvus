@@ -18,6 +18,7 @@ package proxy
 
 import (
 	"fmt"
+	"strconv"
 	"sync"
 	"time"
 
@@ -25,11 +26,13 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
+	"github.com/milvus-io/milvus/internal/config"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/ratelimitutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 var QuotaErrorString = map[commonpb.ErrorCode]string{
@@ -113,13 +116,13 @@ func (m *MultiRateLimiter) SetQuotaStates(states []milvuspb.QuotaState, codes []
 
 // rateLimiter implements Limiter.
 type rateLimiter struct {
-	limiters map[internalpb.RateType]*ratelimitutil.Limiter
+	limiters *typeutil.ConcurrentMap[internalpb.RateType, *ratelimitutil.Limiter]
 }
 
 // newRateLimiter returns a new RateLimiter.
 func newRateLimiter() *rateLimiter {
 	rl := &rateLimiter{
-		limiters: make(map[internalpb.RateType]*ratelimitutil.Limiter),
+		limiters: typeutil.NewConcurrentMap[internalpb.RateType, *ratelimitutil.Limiter](),
 	}
 	rl.registerLimiters()
 	return rl
@@ -128,14 +131,18 @@ func newRateLimiter() *rateLimiter {
 // limit returns true, the request will be rejected.
 // Otherwise, the request will pass.
 func (rl *rateLimiter) limit(rt internalpb.RateType, n int) (bool, float64) {
-	return !rl.limiters[rt].AllowN(time.Now(), n), float64(rl.limiters[rt].Limit())
+	limit, ok := rl.limiters.Get(rt)
+	if !ok {
+		return false, -1
+	}
+	return !limit.AllowN(time.Now(), n), float64(limit.Limit())
 }
 
 // setRates sets new rates for the limiters.
 func (rl *rateLimiter) setRates(rates []*internalpb.Rate) error {
 	for _, r := range rates {
-		if _, ok := rl.limiters[r.GetRt()]; ok {
-			rl.limiters[r.GetRt()].SetLimit(ratelimitutil.Limit(r.GetR()))
+		if limit, ok := rl.limiters.Get(r.GetRt()); ok {
+			limit.SetLimit(ratelimitutil.Limit(r.GetR()))
 			metrics.SetRateGaugeByRateType(r.GetRt(), paramtable.GetNodeID(), r.GetR())
 		} else {
 			return fmt.Errorf("unregister rateLimiter for rateType %s", r.GetRt().String())
@@ -157,36 +164,56 @@ func (rl *rateLimiter) printRates(rates []*internalpb.Rate) {
 
 // registerLimiters register limiter for all rate types.
 func (rl *rateLimiter) registerLimiters() {
+	quotaConfig := &Params.QuotaConfig
 	for rt := range internalpb.RateType_name {
-		var r float64
+		var r *paramtable.ParamItem
 		switch internalpb.RateType(rt) {
 		case internalpb.RateType_DDLCollection:
-			r = Params.QuotaConfig.DDLCollectionRate.GetAsFloat()
+			r = &quotaConfig.DDLCollectionRate
 		case internalpb.RateType_DDLPartition:
-			r = Params.QuotaConfig.DDLPartitionRate.GetAsFloat()
+			r = &quotaConfig.DDLPartitionRate
 		case internalpb.RateType_DDLIndex:
-			r = Params.QuotaConfig.MaxIndexRate.GetAsFloat()
+			r = &quotaConfig.MaxIndexRate
 		case internalpb.RateType_DDLFlush:
-			r = Params.QuotaConfig.MaxFlushRate.GetAsFloat()
+			r = &quotaConfig.MaxFlushRate
 		case internalpb.RateType_DDLCompaction:
-			r = Params.QuotaConfig.MaxCompactionRate.GetAsFloat()
+			r = &quotaConfig.MaxCompactionRate
 		case internalpb.RateType_DMLInsert:
-			r = Params.QuotaConfig.DMLMaxInsertRate.GetAsFloat()
+			r = &quotaConfig.DMLMaxInsertRate
 		case internalpb.RateType_DMLDelete:
-			r = Params.QuotaConfig.DMLMaxDeleteRate.GetAsFloat()
+			r = &quotaConfig.DMLMaxDeleteRate
 		case internalpb.RateType_DMLBulkLoad:
-			r = Params.QuotaConfig.DMLMaxBulkLoadRate.GetAsFloat()
+			r = &quotaConfig.DMLMaxBulkLoadRate
 		case internalpb.RateType_DQLSearch:
-			r = Params.QuotaConfig.DQLMaxSearchRate.GetAsFloat()
+			r = &quotaConfig.DQLMaxSearchRate
 		case internalpb.RateType_DQLQuery:
-			r = Params.QuotaConfig.DQLMaxQueryRate.GetAsFloat()
+			r = &quotaConfig.DQLMaxQueryRate
 		}
-		limit := ratelimitutil.Limit(r)
-		burst := r // use rate as burst, because Limiter is with punishment mechanism, burst is insignificant.
-		rl.limiters[internalpb.RateType(rt)] = ratelimitutil.NewLimiter(limit, burst)
+		limit := ratelimitutil.Limit(r.GetAsFloat())
+		burst := r.GetAsFloat() // use rate as burst, because Limiter is with punishment mechanism, burst is insignificant.
+		rl.limiters.InsertIfNotPresent(internalpb.RateType(rt), ratelimitutil.NewLimiter(limit, burst))
+		onEvent := func(rateType internalpb.RateType) func(*config.Event) {
+			return func(event *config.Event) {
+				f, err := strconv.ParseFloat(event.Value, 64)
+				if err != nil {
+					log.Info("Error format for rateLimit",
+						zap.String("rateType", rateType.String()),
+						zap.String("key", event.Key),
+						zap.String("value", event.Value),
+						zap.Error(err))
+					return
+				}
+				limit, ok := rl.limiters.Get(rateType)
+				if !ok {
+					return
+				}
+				limit.SetLimit(ratelimitutil.Limit(f))
+			}
+		}(internalpb.RateType(rt))
+		paramtable.Get().Watch(r.Key, config.NewHandler(fmt.Sprintf("rateLimiter-%d", rt), onEvent))
 		log.Info("RateLimiter register for rateType",
 			zap.String("rateType", internalpb.RateType_name[rt]),
-			zap.String("rate", ratelimitutil.Limit(r).String()),
+			zap.String("rate", ratelimitutil.Limit(r.GetAsFloat()).String()),
 			zap.String("burst", fmt.Sprintf("%v", burst)))
 	}
 }

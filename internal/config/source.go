@@ -32,12 +32,6 @@ type Source interface {
 	Close()
 }
 
-// EventHandler handles config change event
-type EventHandler interface {
-	OnEvent(event *Event)
-	GetIdentifier() string
-}
-
 // EtcdInfo has attribute for config center source initialization
 type EtcdInfo struct {
 	UseEmbed   bool
@@ -89,4 +83,28 @@ func WithEnvSource(keyFormatter func(string) string) Option {
 	return func(options *Options) {
 		options.EnvKeyFormatter = keyFormatter
 	}
+}
+
+// EventHandler handles config change event
+type EventHandler interface {
+	OnEvent(event *Event)
+	GetIdentifier() string
+}
+
+type simpleHandler struct {
+	identity string
+	onEvent  func(*Event)
+}
+
+func (s *simpleHandler) GetIdentifier() string {
+	return s.identity
+}
+
+// OnEvent implements EventHandler
+func (s *simpleHandler) OnEvent(event *Event) {
+	s.onEvent(event)
+}
+
+func NewHandler(ident string, onEvent func(*Event)) EventHandler {
+	return &simpleHandler{ident, onEvent}
 }

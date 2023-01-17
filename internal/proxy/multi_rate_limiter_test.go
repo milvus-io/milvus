@@ -17,12 +17,16 @@
 package proxy
 
 import (
+	"context"
 	"fmt"
 	"math"
+	"math/rand"
 	"testing"
+	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/ratelimitutil"
 	"github.com/stretchr/testify/assert"
@@ -34,7 +38,7 @@ func TestMultiRateLimiter(t *testing.T) {
 		paramtable.Get().Save(Params.QuotaConfig.QuotaAndLimitsEnabled.Key, "true")
 		multiLimiter := NewMultiRateLimiter()
 		for _, rt := range internalpb.RateType_value {
-			multiLimiter.globalRateLimiter.limiters[internalpb.RateType(rt)] = ratelimitutil.NewLimiter(ratelimitutil.Limit(1000), 1)
+			multiLimiter.globalRateLimiter.limiters.Insert(internalpb.RateType(rt), ratelimitutil.NewLimiter(ratelimitutil.Limit(1000), 1))
 		}
 		for _, rt := range internalpb.RateType_value {
 			errCode := multiLimiter.Check(internalpb.RateType(rt), 1)
@@ -81,9 +85,8 @@ func TestMultiRateLimiter(t *testing.T) {
 func TestRateLimiter(t *testing.T) {
 	t.Run("test limit", func(t *testing.T) {
 		limiter := newRateLimiter()
-		limiter.registerLimiters()
 		for _, rt := range internalpb.RateType_value {
-			limiter.limiters[internalpb.RateType(rt)] = ratelimitutil.NewLimiter(ratelimitutil.Limit(1000), 1)
+			limiter.limiters.Insert(internalpb.RateType(rt), ratelimitutil.NewLimiter(ratelimitutil.Limit(1000), 1))
 		}
 		for _, rt := range internalpb.RateType_value {
 			ok, _ := limiter.limit(internalpb.RateType(rt), 1)
@@ -98,7 +101,7 @@ func TestRateLimiter(t *testing.T) {
 	t.Run("test setRates", func(t *testing.T) {
 		limiter := newRateLimiter()
 		for _, rt := range internalpb.RateType_value {
-			limiter.limiters[internalpb.RateType(rt)] = ratelimitutil.NewLimiter(ratelimitutil.Limit(1000), 1)
+			limiter.limiters.Insert(internalpb.RateType(rt), ratelimitutil.NewLimiter(ratelimitutil.Limit(1000), 1))
 		}
 
 		zeroRates := make([]*internalpb.Rate, 0, len(internalpb.RateType_value))
@@ -115,5 +118,32 @@ func TestRateLimiter(t *testing.T) {
 				assert.True(t, ok)
 			}
 		}
+	})
+
+	t.Run("tests refresh rate by config", func(t *testing.T) {
+		limiter := newRateLimiter()
+
+		etcdCli, _ := etcd.GetEtcdClient(
+			Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+			Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
+			Params.EtcdCfg.Endpoints.GetAsStrings(),
+			Params.EtcdCfg.EtcdTLSCert.GetValue(),
+			Params.EtcdCfg.EtcdTLSKey.GetValue(),
+			Params.EtcdCfg.EtcdTLSCACert.GetValue(),
+			Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
+
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		newRate := fmt.Sprintf("%.4f", rand.Float64())
+		etcdCli.KV.Put(ctx, "by-dev/config/quotaAndLimits/ddl/collectionRate", newRate)
+		etcdCli.KV.Put(ctx, "by-dev/config/quotaAndLimits/ddl/partitionRate", "invalid")
+
+		assert.Eventually(t, func() bool {
+			limit, _ := limiter.limiters.Get(internalpb.RateType_DDLCollection)
+			return newRate == limit.Limit().String()
+		}, 20*time.Second, time.Second)
+
+		limit, _ := limiter.limiters.Get(internalpb.RateType_DDLPartition)
+		assert.Equal(t, "+inf", limit.Limit().String())
 	})
 }

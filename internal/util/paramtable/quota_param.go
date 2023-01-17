@@ -48,33 +48,33 @@ type quotaConfig struct {
 
 	// ddl
 	DDLLimitEnabled   ParamItem `refreshable:"true"`
-	DDLCollectionRate ParamItem `refreshable:"false"`
-	DDLPartitionRate  ParamItem `refreshable:"false"`
+	DDLCollectionRate ParamItem `refreshable:"true"`
+	DDLPartitionRate  ParamItem `refreshable:"true"`
 
 	IndexLimitEnabled ParamItem `refreshable:"true"`
-	MaxIndexRate      ParamItem `refreshable:"false"`
+	MaxIndexRate      ParamItem `refreshable:"true"`
 
 	FlushLimitEnabled ParamItem `refreshable:"true"`
-	MaxFlushRate      ParamItem `refreshable:"false"`
+	MaxFlushRate      ParamItem `refreshable:"true"`
 
 	CompactionLimitEnabled ParamItem `refreshable:"true"`
-	MaxCompactionRate      ParamItem `refreshable:"false"`
+	MaxCompactionRate      ParamItem `refreshable:"true"`
 
 	// dml
 	DMLLimitEnabled    ParamItem `refreshable:"true"`
-	DMLMaxInsertRate   ParamItem `refreshable:"false"`
-	DMLMinInsertRate   ParamItem `refreshable:"false"`
-	DMLMaxDeleteRate   ParamItem `refreshable:"false"`
-	DMLMinDeleteRate   ParamItem `refreshable:"false"`
-	DMLMaxBulkLoadRate ParamItem `refreshable:"false"`
-	DMLMinBulkLoadRate ParamItem `refreshable:"false"`
+	DMLMaxInsertRate   ParamItem `refreshable:"true"`
+	DMLMinInsertRate   ParamItem `refreshable:"true"`
+	DMLMaxDeleteRate   ParamItem `refreshable:"true"`
+	DMLMinDeleteRate   ParamItem `refreshable:"true"`
+	DMLMaxBulkLoadRate ParamItem `refreshable:"true"`
+	DMLMinBulkLoadRate ParamItem `refreshable:"true"`
 
 	// dql
 	DQLLimitEnabled  ParamItem `refreshable:"true"`
-	DQLMaxSearchRate ParamItem `refreshable:"false"`
-	DQLMinSearchRate ParamItem `refreshable:"false"`
-	DQLMaxQueryRate  ParamItem `refreshable:"false"`
-	DQLMinQueryRate  ParamItem `refreshable:"false"`
+	DQLMaxSearchRate ParamItem `refreshable:"true"`
+	DQLMinSearchRate ParamItem `refreshable:"true"`
+	DQLMaxQueryRate  ParamItem `refreshable:"true"`
+	DQLMinQueryRate  ParamItem `refreshable:"true"`
 
 	// limits
 	MaxCollectionNum ParamItem `refreshable:"true"`
