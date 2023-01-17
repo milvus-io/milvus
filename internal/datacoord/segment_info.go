@@ -109,10 +109,12 @@ func (s *SegmentsInfo) SetSegmentIndex(segmentID UniqueID, segIndex *model.Segme
 		)
 		return
 	}
+	segment = segment.Clone()
 	if segment.segmentIndexes == nil {
 		segment.segmentIndexes = make(map[UniqueID]*model.SegmentIndex)
 	}
 	segment.segmentIndexes[segIndex.IndexID] = segIndex
+	s.segments[segmentID] = segment
 }
 
 func (s *SegmentsInfo) DropSegmentIndex(segmentID UniqueID, indexID UniqueID) {
