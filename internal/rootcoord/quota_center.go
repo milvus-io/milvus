@@ -417,7 +417,7 @@ func (q *QuotaCenter) getTimeTickDelayFactor(ts Timestamp) float64 {
 
 	t1, _ := tsoutil.ParseTS(ts)
 	for nodeID, metric := range q.queryNodeMetrics {
-		if metric.Fgm.NumFlowGraph > 0 {
+		if metric.Fgm.NumFlowGraph > 0 && metric.Fgm.MinFlowGraphChannel != "" {
 			t2, _ := tsoutil.ParseTS(metric.Fgm.MinFlowGraphTt)
 			delay := t1.Sub(t2)
 			if delay.Nanoseconds() > curMaxDelay.Nanoseconds() {
@@ -430,7 +430,7 @@ func (q *QuotaCenter) getTimeTickDelayFactor(ts Timestamp) float64 {
 		}
 	}
 	for nodeID, metric := range q.dataNodeMetrics {
-		if metric.Fgm.NumFlowGraph > 0 {
+		if metric.Fgm.NumFlowGraph > 0 && metric.Fgm.MinFlowGraphChannel != "" {
 			t2, _ := tsoutil.ParseTS(metric.Fgm.MinFlowGraphTt)
 			delay := t1.Sub(t2)
 			if delay.Nanoseconds() > curMaxDelay.Nanoseconds() {
