@@ -37,7 +37,7 @@ type CollectionObserver struct {
 	dist                  *meta.DistributionManager
 	meta                  *meta.Meta
 	targetMgr             *meta.TargetManager
-	broker                meta.Broker
+	targetObserver        *TargetObserver
 	collectionLoadedCount map[int64]int
 	partitionLoadedCount  map[int64]int
 
@@ -50,14 +50,14 @@ func NewCollectionObserver(
 	dist *meta.DistributionManager,
 	meta *meta.Meta,
 	targetMgr *meta.TargetManager,
-	broker meta.Broker,
+	targetObserver *TargetObserver,
 ) *CollectionObserver {
 	return &CollectionObserver{
 		stopCh:                make(chan struct{}),
 		dist:                  dist,
 		meta:                  meta,
 		targetMgr:             targetMgr,
-		broker:                broker,
+		targetObserver:        targetObserver,
 		collectionLoadedCount: make(map[int64]int),
 		partitionLoadedCount:  make(map[int64]int),
 
@@ -208,9 +208,8 @@ func (ob *CollectionObserver) observeCollectionLoadStatus(collection *meta.Colle
 		return
 	}
 	ob.collectionLoadedCount[collection.GetCollectionID()] = loadedCount
-	if updated.LoadPercentage == 100 {
+	if updated.LoadPercentage == 100 && ob.targetObserver.Check(updated.GetCollectionID()) {
 		delete(ob.collectionLoadedCount, collection.GetCollectionID())
-		ob.targetMgr.UpdateCollectionCurrentTarget(updated.CollectionID)
 		updated.Status = querypb.LoadStatus_Loaded
 		ob.meta.CollectionManager.UpdateCollection(updated)
 
@@ -272,9 +271,8 @@ func (ob *CollectionObserver) observePartitionLoadStatus(partition *meta.Partiti
 		return
 	}
 	ob.partitionLoadedCount[partition.GetPartitionID()] = loadedCount
-	if updated.LoadPercentage == 100 {
+	if updated.LoadPercentage == 100 && ob.targetObserver.Check(updated.GetCollectionID()) {
 		delete(ob.partitionLoadedCount, partition.GetPartitionID())
-		ob.targetMgr.UpdateCollectionCurrentTarget(partition.GetCollectionID(), partition.GetPartitionID())
 		updated.Status = querypb.LoadStatus_Loaded
 		ob.meta.CollectionManager.PutPartition(updated)
 

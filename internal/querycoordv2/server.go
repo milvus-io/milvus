@@ -306,12 +306,6 @@ func (s *Server) initMeta() error {
 
 func (s *Server) initObserver() {
 	log.Info("init observers")
-	s.collectionObserver = observers.NewCollectionObserver(
-		s.dist,
-		s.meta,
-		s.targetMgr,
-		s.broker,
-	)
 	s.leaderObserver = observers.NewLeaderObserver(
 		s.dist,
 		s.meta,
@@ -323,6 +317,12 @@ func (s *Server) initObserver() {
 		s.targetMgr,
 		s.dist,
 		s.broker,
+	)
+	s.collectionObserver = observers.NewCollectionObserver(
+		s.dist,
+		s.meta,
+		s.targetMgr,
+		s.targetObserver,
 	)
 }
 
