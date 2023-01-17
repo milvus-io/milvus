@@ -19,7 +19,7 @@ class MilvusConan(ConanFile):
         "yaml-cpp/0.7.0",
         "marisa/0.2.6",
         "zlib/1.2.13",
-        "libcurl/7.87.0",
+        "libcurl/7.86.0",
     )
 
     generators = "cmake"
