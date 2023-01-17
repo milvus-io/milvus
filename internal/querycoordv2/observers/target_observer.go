@@ -30,6 +30,11 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
+type checkRequest struct {
+	CollectionID int64
+	Notifier     chan bool
+}
+
 type targetUpdateRequest struct {
 	CollectionID  int64
 	Notifier      chan error
@@ -44,6 +49,7 @@ type TargetObserver struct {
 	distMgr   *meta.DistributionManager
 	broker    meta.Broker
 
+	manualCheck          chan checkRequest
 	nextTargetLastUpdate map[int64]time.Time
 	updateChan           chan targetUpdateRequest
 	mut                  sync.Mutex                // Guard readyNotifiers
@@ -59,6 +65,7 @@ func NewTargetObserver(meta *meta.Meta, targetMgr *meta.TargetManager, distMgr *
 		targetMgr:            targetMgr,
 		distMgr:              distMgr,
 		broker:               broker,
+		manualCheck:          make(chan checkRequest, 10),
 		nextTargetLastUpdate: make(map[int64]time.Time),
 		updateChan:           make(chan targetUpdateRequest),
 		readyNotifiers:       make(map[int64][]chan struct{}),
@@ -95,18 +102,45 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 			ob.clean()
 			ob.tryUpdateTarget()
 
-		case request := <-ob.updateChan:
-			err := ob.updateNextTarget(request.CollectionID)
+		case req := <-ob.manualCheck:
+			ob.check(req.CollectionID)
+			req.Notifier <- ob.targetMgr.IsCurrentTargetExist(req.CollectionID)
+
+		case req := <-ob.updateChan:
+			err := ob.updateNextTarget(req.CollectionID)
 			if err != nil {
-				close(request.ReadyNotifier)
+				close(req.ReadyNotifier)
 			} else {
 				ob.mut.Lock()
-				ob.readyNotifiers[request.CollectionID] = append(ob.readyNotifiers[request.CollectionID], request.ReadyNotifier)
+				ob.readyNotifiers[req.CollectionID] = append(ob.readyNotifiers[req.CollectionID], req.ReadyNotifier)
 				ob.mut.Unlock()
 			}
 
-			request.Notifier <- err
+			req.Notifier <- err
 		}
+	}
+}
+
+// Check checks whether the next target is ready,
+// and updates the current target if it is,
+// returns true if current target is not nil
+func (ob *TargetObserver) Check(collectionID int64) bool {
+	notifier := make(chan bool)
+	ob.manualCheck <- checkRequest{
+		CollectionID: collectionID,
+		Notifier:     notifier,
+	}
+	return <-notifier
+}
+
+func (ob *TargetObserver) check(collectionID int64) {
+	if ob.shouldUpdateCurrentTarget(collectionID) {
+		ob.updateCurrentTarget(collectionID)
+	}
+
+	if ob.shouldUpdateNextTarget(collectionID) {
+		// update next target in collection level
+		ob.updateNextTarget(collectionID)
 	}
 }
 
@@ -138,14 +172,7 @@ func (ob *TargetObserver) ReleaseCollection(collectionID int64) {
 func (ob *TargetObserver) tryUpdateTarget() {
 	collections := ob.meta.GetAll()
 	for _, collectionID := range collections {
-		if ob.shouldUpdateCurrentTarget(collectionID) {
-			ob.updateCurrentTarget(collectionID)
-		}
-
-		if ob.shouldUpdateNextTarget(collectionID) {
-			// update next target in collection level
-			ob.updateNextTarget(collectionID)
-		}
+		ob.check(collectionID)
 	}
 
 	collectionSet := typeutil.NewUniqueSet(collections...)
@@ -199,12 +226,6 @@ func (ob *TargetObserver) updateNextTargetTimestamp(collectionID int64) {
 }
 
 func (ob *TargetObserver) shouldUpdateCurrentTarget(collectionID int64) bool {
-	// Collection observer will update the current target as loading done,
-	// avoid double updating, which will cause update current target to a unfinished next target
-	if !ob.targetMgr.IsCurrentTargetExist(collectionID) {
-		return false
-	}
-
 	replicaNum := ob.meta.CollectionManager.GetReplicaNumber(collectionID)
 
 	// check channel first

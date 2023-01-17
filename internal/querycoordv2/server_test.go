@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/dist"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/mocks"
+	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -447,6 +448,18 @@ func (suite *ServerSuite) hackServer() {
 		suite.server.targetMgr,
 		suite.server.balancer,
 		suite.server.taskScheduler,
+	)
+	suite.server.targetObserver = observers.NewTargetObserver(
+		suite.server.meta,
+		suite.server.targetMgr,
+		suite.server.dist,
+		suite.broker,
+	)
+	suite.server.collectionObserver = observers.NewCollectionObserver(
+		suite.server.dist,
+		suite.server.meta,
+		suite.server.targetMgr,
+		suite.server.targetObserver,
 	)
 
 	suite.broker.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything).Return(&schemapb.CollectionSchema{}, nil).Maybe()

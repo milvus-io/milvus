@@ -55,10 +55,11 @@ type CollectionObserverSuite struct {
 	store       meta.Store
 
 	// Dependencies
-	dist      *meta.DistributionManager
-	meta      *meta.Meta
-	targetMgr *meta.TargetManager
-	broker    *meta.MockBroker
+	dist           *meta.DistributionManager
+	meta           *meta.Meta
+	broker         *meta.MockBroker
+	targetMgr      *meta.TargetManager
+	targetObserver *TargetObserver
 
 	// Test object
 	ob *CollectionObserver
@@ -175,21 +176,30 @@ func (suite *CollectionObserverSuite) SetupTest() {
 	suite.meta = meta.NewMeta(suite.idAllocator, suite.store)
 	suite.broker = meta.NewMockBroker(suite.T())
 	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta)
+	suite.targetObserver = NewTargetObserver(suite.meta,
+		suite.targetMgr,
+		suite.dist,
+		suite.broker,
+	)
 
 	// Test object
 	suite.ob = NewCollectionObserver(
 		suite.dist,
 		suite.meta,
 		suite.targetMgr,
-		suite.broker,
+		suite.targetObserver,
 	)
 
-	Params.QueryCoordCfg.LoadTimeoutSeconds = 600 * time.Second
+	for _, collection := range suite.collections {
+		suite.broker.EXPECT().GetPartitions(mock.Anything, collection).Return(suite.partitions[collection], nil).Maybe()
+	}
+	suite.targetObserver.Start(context.Background())
 
 	suite.loadAll()
 }
 
 func (suite *CollectionObserverSuite) TearDownTest() {
+	suite.targetObserver.Stop()
 	suite.ob.Stop()
 	suite.kv.Close()
 }
@@ -356,8 +366,12 @@ func (suite *CollectionObserverSuite) load(collection int64) {
 		})
 
 	}
-	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, collection, int64(1)).Return(dmChannels, allSegments, nil)
-	suite.targetMgr.UpdateCollectionNextTargetWithPartitions(collection, int64(1))
+
+	partitions := suite.partitions[collection]
+	for _, partition := range partitions {
+		suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, collection, partition).Return(dmChannels, allSegments, nil)
+	}
+	suite.targetMgr.UpdateCollectionNextTargetWithPartitions(collection, partitions...)
 }
 
 func TestCollectionObserver(t *testing.T) {
