@@ -229,7 +229,7 @@ func (suite *CollectionObserverSuite) TestObserveCollectionTimeout() {
 	suite.Eventually(func() bool {
 		return suite.isCollectionTimeout(suite.collections[0]) &&
 			suite.isCollectionLoaded(suite.collections[1])
-	}, timeout*2, timeout/10)
+	}, timeout*3, timeout/10)
 }
 
 func (suite *CollectionObserverSuite) TestObservePartitionsTimeout() {

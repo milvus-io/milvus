@@ -304,13 +304,6 @@ func (m *CollectionManager) PutCollection(collection *Collection) error {
 	return m.putCollection(collection, true)
 }
 
-func (m *CollectionManager) PutCollectionWithoutSave(collection *Collection) {
-	m.rwmutex.Lock()
-	defer m.rwmutex.Unlock()
-
-	m.putCollection(collection, false)
-}
-
 func (m *CollectionManager) UpdateCollection(collection *Collection) error {
 	m.rwmutex.Lock()
 	defer m.rwmutex.Unlock()
