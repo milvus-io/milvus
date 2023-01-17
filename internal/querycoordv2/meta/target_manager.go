@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -400,6 +401,17 @@ func (mgr *TargetManager) GetHistoricalSegment(collectionID int64, id int64, sco
 		return nil
 	}
 	return collectionTarget.GetAllSegments()[id]
+}
+
+func (mgr *TargetManager) GetNextTargetCreateTime(collectionID int64) time.Time {
+	mgr.rwMutex.RLock()
+	defer mgr.rwMutex.RUnlock()
+	targetMap := mgr.getTarget(NextTarget)
+	collectionTarget := targetMap.getCollectionTarget(collectionID)
+	if collectionTarget == nil {
+		return time.Time{}
+	}
+	return collectionTarget.GetCreateTime()
 }
 
 func (mgr *TargetManager) IsCurrentTargetExist(collectionID int64) bool {

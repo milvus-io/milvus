@@ -34,12 +34,13 @@ import (
 type CollectionObserver struct {
 	stopCh chan struct{}
 
-	dist                  *meta.DistributionManager
-	meta                  *meta.Meta
-	targetMgr             *meta.TargetManager
-	targetObserver        *TargetObserver
-	collectionLoadedCount map[int64]int
-	partitionLoadedCount  map[int64]int
+	dist                     *meta.DistributionManager
+	meta                     *meta.Meta
+	targetMgr                *meta.TargetManager
+	targetObserver           *TargetObserver
+	collectionLoadedCount    map[int64]int
+	partitionLoadedCount     map[int64]int
+	collectionNextTargetTime map[int64]time.Time
 
 	stopOnce sync.Once
 }
@@ -51,13 +52,14 @@ func NewCollectionObserver(
 	targetObserver *TargetObserver,
 ) *CollectionObserver {
 	return &CollectionObserver{
-		stopCh:                make(chan struct{}),
-		dist:                  dist,
-		meta:                  meta,
-		targetMgr:             targetMgr,
-		targetObserver:        targetObserver,
-		collectionLoadedCount: make(map[int64]int),
-		partitionLoadedCount:  make(map[int64]int),
+		stopCh:                   make(chan struct{}),
+		dist:                     dist,
+		meta:                     meta,
+		targetMgr:                targetMgr,
+		targetObserver:           targetObserver,
+		collectionLoadedCount:    make(map[int64]int),
+		partitionLoadedCount:     make(map[int64]int),
+		collectionNextTargetTime: make(map[int64]time.Time),
 	}
 }
 
@@ -200,9 +202,16 @@ func (ob *CollectionObserver) observeCollectionLoadStatus(collection *meta.Colle
 		updated.LoadPercentage = int32(loadedCount * 100 / (targetNum * int(collection.GetReplicaNumber())))
 	}
 
-	if loadedCount <= ob.collectionLoadedCount[collection.GetCollectionID()] && updated.LoadPercentage != 100 {
+	targetTime := ob.targetMgr.GetNextTargetCreateTime(collection.CollectionID)
+	lastTime, ok := ob.collectionNextTargetTime[collection.CollectionID]
+
+	if ok && targetTime.Equal(lastTime) &&
+		loadedCount <= ob.collectionLoadedCount[collection.GetCollectionID()] &&
+		updated.LoadPercentage != 100 {
 		return
 	}
+
+	ob.collectionNextTargetTime[collection.GetCollectionID()] = targetTime
 	ob.collectionLoadedCount[collection.GetCollectionID()] = loadedCount
 	if updated.LoadPercentage == 100 && ob.targetObserver.Check(updated.GetCollectionID()) {
 		delete(ob.collectionLoadedCount, collection.GetCollectionID())
@@ -260,12 +269,17 @@ func (ob *CollectionObserver) observePartitionLoadStatus(partition *meta.Partiti
 				zap.Int("loadSegmentCount", loadedCount-subChannelCount))
 		}
 		updated.LoadPercentage = int32(loadedCount * 100 / (targetNum * int(partition.GetReplicaNumber())))
-
 	}
 
-	if loadedCount <= ob.partitionLoadedCount[partition.GetPartitionID()] && updated.LoadPercentage != 100 {
+	targetTime := ob.targetMgr.GetNextTargetCreateTime(partition.GetCollectionID())
+	lastTime, ok := ob.collectionNextTargetTime[partition.GetCollectionID()]
+
+	if ok && targetTime.Equal(lastTime) &&
+		loadedCount <= ob.partitionLoadedCount[partition.GetPartitionID()] &&
+		updated.LoadPercentage != 100 {
 		return
 	}
+	ob.collectionNextTargetTime[partition.GetCollectionID()] = targetTime
 	ob.partitionLoadedCount[partition.GetPartitionID()] = loadedCount
 	if updated.LoadPercentage == 100 && ob.targetObserver.Check(updated.GetCollectionID()) {
 		delete(ob.partitionLoadedCount, partition.GetPartitionID())
