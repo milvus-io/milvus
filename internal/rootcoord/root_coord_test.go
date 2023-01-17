@@ -1192,24 +1192,7 @@ func TestCore_ReportImport(t *testing.T) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
 	})
 
-	t.Run("report import started state", func(t *testing.T) {
-		ctx := context.Background()
-		c := newTestCore(withHealthyCode())
-		c.importManager = newImportManager(ctx, mockKv, idAlloc, callImportServiceFn, callMarkSegmentsDropped, callGetSegmentStates, nil, nil)
-		c.importManager.loadFromTaskStore(true)
-		c.importManager.sendOutTasks(ctx)
-		resp, err := c.ReportImport(ctx, &rootcoordpb.ImportResult{
-			TaskId: 100,
-			State:  commonpb.ImportState_ImportStarted,
-		})
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
-		// Change the state back.
-		err = c.importManager.setImportTaskState(100, commonpb.ImportState_ImportPending)
-		assert.NoError(t, err)
-	})
-
-	t.Run("report persisted import", func(t *testing.T) {
+	testFunc := func(state commonpb.ImportState) {
 		ctx := context.Background()
 		c := newTestCore(
 			withHealthyCode(),
@@ -1224,13 +1207,29 @@ func TestCore_ReportImport(t *testing.T) {
 
 		resp, err := c.ReportImport(ctx, &rootcoordpb.ImportResult{
 			TaskId: 100,
-			State:  commonpb.ImportState_ImportPersisted,
+			State:  state,
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
 		// Change the state back.
 		err = c.importManager.setImportTaskState(100, commonpb.ImportState_ImportPending)
 		assert.NoError(t, err)
+	}
+
+	t.Run("report import started state", func(t *testing.T) {
+		testFunc(commonpb.ImportState_ImportStarted)
+	})
+
+	t.Run("report import persisted state", func(t *testing.T) {
+		testFunc(commonpb.ImportState_ImportPersisted)
+	})
+
+	t.Run("report import completed state", func(t *testing.T) {
+		testFunc(commonpb.ImportState_ImportCompleted)
+	})
+
+	t.Run("report import failed state", func(t *testing.T) {
+		testFunc(commonpb.ImportState_ImportFailed)
 	})
 }
 

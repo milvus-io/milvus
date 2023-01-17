@@ -1793,14 +1793,16 @@ func (c *Core) ReportImport(ctx context.Context, ir *rootcoordpb.ImportResult) (
 		log.Info("an import task has failed, marking DataNode available and resending import task",
 			zap.Int64("task ID", ir.GetTaskId()))
 		resendTaskFunc()
-	} else if ir.GetState() != commonpb.ImportState_ImportPersisted {
-		log.Debug("unexpected import task state reported, return immediately (this should not happen)",
-			zap.Any("task ID", ir.GetTaskId()),
-			zap.Any("import state", ir.GetState()))
+	} else if ir.GetState() == commonpb.ImportState_ImportCompleted {
+		// When a DataNode completes importing, remove this DataNode from the busy node list and send out import tasks again.
+		log.Info("an import task has completed, marking DataNode available and resending import task",
+			zap.Int64("task ID", ir.GetTaskId()))
 		resendTaskFunc()
-	} else {
+	} else if ir.GetState() == commonpb.ImportState_ImportPersisted {
 		// Here ir.GetState() == commonpb.ImportState_ImportPersisted
 		// Seal these import segments, so they can be auto-flushed later.
+		log.Info("an import task turns to persisted state, flush segments to be sealed",
+			zap.Any("task ID", ir.GetTaskId()), zap.Any("segments", ir.GetSegments()))
 		if err := c.broker.Flush(ctx, ti.GetCollectionId(), ir.GetSegments()); err != nil {
 			log.Error("failed to call Flush on bulk insert segments",
 				zap.Int64("task ID", ir.GetTaskId()))
