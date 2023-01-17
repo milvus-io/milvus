@@ -14,7 +14,6 @@ import (
 type GetCollectionNameFunc func(collID, partitionID UniqueID) (string, string, error)
 type IDAllocator func(count uint32) (UniqueID, UniqueID, error)
 type ImportFunc func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error)
-type MarkSegmentsDroppedFunc func(ctx context.Context, segIDs []int64) (*commonpb.Status, error)
 type GetSegmentStatesFunc func(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error)
 type DescribeIndexFunc func(ctx context.Context, colID UniqueID) (*indexpb.DescribeIndexResponse, error)
 type GetSegmentIndexStateFunc func(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*indexpb.SegmentIndexState, error)
@@ -24,7 +23,6 @@ type ImportFactory interface {
 	NewGetCollectionNameFunc() GetCollectionNameFunc
 	NewIDAllocator() IDAllocator
 	NewImportFunc() ImportFunc
-	NewMarkSegmentsDroppedFunc() MarkSegmentsDroppedFunc
 	NewGetSegmentStatesFunc() GetSegmentStatesFunc
 	NewDescribeIndexFunc() DescribeIndexFunc
 	NewGetSegmentIndexStateFunc() GetSegmentIndexStateFunc
@@ -45,10 +43,6 @@ func (f ImportFactoryImpl) NewIDAllocator() IDAllocator {
 
 func (f ImportFactoryImpl) NewImportFunc() ImportFunc {
 	return ImportFuncWithCore(f.c)
-}
-
-func (f ImportFactoryImpl) NewMarkSegmentsDroppedFunc() MarkSegmentsDroppedFunc {
-	return MarkSegmentsDroppedWithCore(f.c)
 }
 
 func (f ImportFactoryImpl) NewGetSegmentStatesFunc() GetSegmentStatesFunc {
@@ -97,14 +91,6 @@ func IDAllocatorWithCore(c *Core) IDAllocator {
 func ImportFuncWithCore(c *Core) ImportFunc {
 	return func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
 		return c.broker.Import(ctx, req)
-	}
-}
-
-func MarkSegmentsDroppedWithCore(c *Core) MarkSegmentsDroppedFunc {
-	return func(ctx context.Context, segIDs []int64) (*commonpb.Status, error) {
-		return c.broker.MarkSegmentsDropped(ctx, &datapb.MarkSegmentsDroppedRequest{
-			SegmentIds: segIDs,
-		})
 	}
 }
 
