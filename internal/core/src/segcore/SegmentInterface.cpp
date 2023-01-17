@@ -10,6 +10,9 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "SegmentInterface.h"
+#include <cstdint>
+#include "common/SystemProperty.h"
+#include "common/Types.h"
 #include "query/generated/ExecPlanNodeVisitor.h"
 #include "Utils.h"
 
@@ -76,14 +79,34 @@ SegmentInternalInterface::Retrieve(const query::RetrievePlan* plan, Timestamp ti
     auto ids = results->mutable_ids();
     auto pk_field_id = plan->schema_.get_primary_field_id();
     for (auto field_id : plan->field_ids_) {
-        auto& field_mata = plan->schema_[field_id];
+        if (SystemProperty::Instance().IsSystem(field_id)) {
+            auto system_type = SystemProperty::Instance().GetSystemFieldType(field_id);
+
+            auto size = retrieve_results.result_offsets_.size();
+            FixedVector<int64_t> output(size);
+            bulk_subscript(system_type, retrieve_results.result_offsets_.data(), size, output.data());
+
+            auto data_array = std::make_unique<DataArray>();
+            data_array->set_field_id(field_id.get());
+            data_array->set_type(milvus::proto::schema::DataType::Int64);
+
+            auto scalar_array = data_array->mutable_scalars();
+            auto data = reinterpret_cast<const int64_t*>(output.data());
+            auto obj = scalar_array->mutable_long_data();
+            obj->mutable_data()->Add(data, data + size);
+
+            fields_data->AddAllocated(data_array.release());
+            continue;
+        }
+
+        auto& field_meta = plan->schema_[field_id];
 
         auto col =
             bulk_subscript(field_id, retrieve_results.result_offsets_.data(), retrieve_results.result_offsets_.size());
         auto col_data = col.release();
         fields_data->AddAllocated(col_data);
         if (pk_field_id.has_value() && pk_field_id.value() == field_id) {
-            switch (field_mata.get_data_type()) {
+            switch (field_meta.get_data_type()) {
                 case DataType::INT64: {
                     auto int_ids = ids->mutable_int_id();
                     auto src_data = col_data->scalars().long_data();
