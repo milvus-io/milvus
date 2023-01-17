@@ -188,6 +188,9 @@ if [[ ${MAKE_CLEAN} == "ON" ]]; then
   exit 0
 fi
 
+export CONAN_REVISIONS_ENABLED=1
+conan remote add default-conan-local https://milvus01.jfrog.io/artifactory/api/conan/default-conan-local
+conan user -p AKCp8nysD7JLfaJ3Q43EdJMVx5ZAig1zj4FswEM7EU9163gHEGAAXwVGR9BrYtdLELvenxyS7 -r default-conan-local enwei.jiao@zilliz.com
 unameOut="$(uname -s)"
 case "${unameOut}" in
   Darwin*)
@@ -195,8 +198,6 @@ case "${unameOut}" in
     export CLANG_TOOLS_PATH="${llvm_prefix}/bin"
     export CC="${llvm_prefix}/bin/clang"
     export CXX="${llvm_prefix}/bin/clang++"
-    export LDFLAGS="-L${llvm_prefix}/lib -L/usr/local/opt/libomp/lib"
-    export CXXFLAGS="-I${llvm_prefix}/include -I/usr/local/include -I/usr/local/opt/libomp/include"
     conan install ${CPP_SRC_DIR} --install-folder conan --build=missing -s compiler=clang -s compiler.libcxx=libc++ || { echo 'conan install failed'; exit 1; }
     ;;
   Linux*)

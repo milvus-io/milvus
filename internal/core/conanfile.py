@@ -33,6 +33,8 @@ class MilvusConan(ConanFile):
         "libsodium/cci.20220430",
         "bison/3.5.3",
         "flex/2.6.4",
+        "xsimd/9.0.1",
+        "folly/2022.10.31.00@milvus/dev",
     )
     generators = ("cmake", "cmake_find_package")
     default_options = {
@@ -53,6 +55,7 @@ class MilvusConan(ConanFile):
         if self.settings.os == "Macos":
             if self.settings.arch not in ("x86_64", "x86"):
                 self.options["arrow"].with_jemalloc = False
+                del self.options["folly"].use_sse4_2
             self.options["boost"].without_fiber = True
             self.options["boost"].without_json = True
             self.options["boost"].without_wave = True

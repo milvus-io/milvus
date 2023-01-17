@@ -11,27 +11,42 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
 set(VELOX_SOURCE_URL "https://github.com/jiaoew1991/velox")
-set(VELOX_COMMIT_ID "milvus")
+set(VELOX_COMMIT_ID "conan-it")
 
 macro(build_velox)
   message(STATUS "Building velox-${VELOX_COMMIT_ID} from source")
   set(VELOX_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX})
   set(VELOX_CMAKE_ARGS 
     ${EP_COMMON_CMAKE_ARGS}
-    -DVELOX_ENABLE_DUCKDB=OFF
-    -DVELOX_ENABLE_TPCH_CONNECTOR=OFF
-    -DVELOX_ENABLE_SPARK_FUNCTIONS=OFF
-    -DVELOX_ENABLE_PARSE=OFF
-    -DVELOX_BUILD_TESTING=OFF
     -DCMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX}
     -DCMAKE_PREFIX_PATH=${CONAN_BISON_ROOT}$<SEMICOLON>${CONAN_FLEX_ROOT}$<SEMICOLON>${CONAN_PROTOBUF_ROOT}
     -DCMAKE_MODULE_PATH=${CMAKE_BINARY_DIR}/conan/
     -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
     -DCMAKE_LIBRARY_ARCHITECTURE=${CMAKE_LIBRARY_ARCHITECTURE}
     )
-  if(APPLE) 
+  if (NOT ${BUILD_UNIT_TEST})
+    set(VELOX_CMAKE_ARGS 
+      ${VELOX_CMAKE_ARGS}
+      -DVELOX_ENABLE_DUCKDB=OFF
+      -DVELOX_ENABLE_TPCH_CONNECTOR=OFF
+      -DVELOX_ENABLE_SPARK_FUNCTIONS=OFF
+      -DVELOX_ENABLE_PARSE=OFF
+      -DVELOX_BUILD_TESTING=OFF
+      )
+  else()
+    set(VELOX_CMAKE_ARGS 
+      ${VELOX_CMAKE_ARGS}
+      -DVELOX_ENABLE_DUCKDB=ON
+      -DVELOX_ENABLE_TPCH_CONNECTOR=ON
+      -DVELOX_ENABLE_SPARK_FUNCTIONS=OFF
+      -DVELOX_ENABLE_PARSE=ON
+      -DVELOX_BUILD_TESTING=OFF
+      -DVELOX_BUILD_TEST_UTILS=ON
+      )
+  endif ()
+  if (APPLE) 
     set(VELOX_CMAKE_ARGS ${VELOX_CMAKE_ARGS} -DCMAKE_AR=/usr/local/opt/llvm/bin/llvm-ar)
-  endif()
+  endif ()
   message(STATUS ${CMAKE_BUILD_TYPE})
 
 
@@ -49,9 +64,9 @@ macro(build_velox)
 
   ExternalProject_Get_Property(velox_ep INSTALL_DIR)
 
-  if(NOT IS_DIRECTORY ${INSTALL_DIR}/include)
+  if (NOT IS_DIRECTORY ${INSTALL_DIR}/include)
     file(MAKE_DIRECTORY "${INSTALL_DIR}/include")
-  endif()
+  endif ()
 
   add_library(velox_bundled STATIC IMPORTED)
   set_target_properties(velox_bundled
@@ -62,9 +77,23 @@ macro(build_velox)
   add_dependencies(velox_bundled velox_ep)
   target_link_libraries(velox_bundled INTERFACE ${CONAN_LIBS})
 
-  if(APPLE)
+  if (APPLE)
     target_link_libraries(velox_bundled INTERFACE c++abi)
-  endif()
+  endif ()
+
+  if (${BUILD_UNIT_TEST})
+    add_library(velox_test_bundled STATIC IMPORTED)
+    set_target_properties(velox_test_bundled
+      PROPERTIES
+      IMPORTED_GLOBAL     TRUE
+      IMPORTED_LOCATION   ${CMAKE_BINARY_DIR}/thirdparty/velox/velox-bin/libvelox_test_bundled.a
+      INTERFACE_INCLUDE_DIRECTORIES ${INSTALL_DIR}/${CMAKE_INSTALL_INCLUDEDIR})
+    add_dependencies(velox_test_bundled velox_ep)
+    target_link_libraries(velox_test_bundled INTERFACE ${CONAN_LIBS})
+    if (APPLE)
+      target_link_libraries(velox_test_bundled INTERFACE c++abi)
+    endif ()
+  endif ()
 
   execute_process(
     COMMAND bash -c "( source ${CMAKE_BINARY_DIR}/3rdparty_download/velox-subbuild/src/velox_ep/scripts/setup-helper-functions.sh && echo -n $(get_cxx_flags $ENV{CPU_TARGET}))"
@@ -85,7 +114,7 @@ if (VELOX_SOURCE STREQUAL "AUTO")
         add_library(velox)
     else()
         build_velox()
-    endif()
+    endif ()
 elseif (VELOX_SOURCE STREQUAL "BUNDLED")
     build_velox()
 elseif (VELOX_SOURCE STREQUAL "SYSTEM")
