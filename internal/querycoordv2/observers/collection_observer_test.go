@@ -56,9 +56,10 @@ type CollectionObserverSuite struct {
 	broker      *meta.MockBroker
 
 	// Dependencies
-	dist      *meta.DistributionManager
-	meta      *meta.Meta
-	targetMgr *meta.TargetManager
+	dist           *meta.DistributionManager
+	meta           *meta.Meta
+	targetMgr      *meta.TargetManager
+	targetObserver *TargetObserver
 
 	// Test object
 	ob *CollectionObserver
@@ -180,18 +181,30 @@ func (suite *CollectionObserverSuite) SetupTest() {
 	suite.meta = meta.NewMeta(suite.idAllocator, suite.store)
 	suite.broker = meta.NewMockBroker(suite.T())
 	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta)
+	suite.targetObserver = NewTargetObserver(suite.meta,
+		suite.targetMgr,
+		suite.dist,
+		suite.broker,
+	)
 
 	// Test object
 	suite.ob = NewCollectionObserver(
 		suite.dist,
 		suite.meta,
 		suite.targetMgr,
+		suite.targetObserver,
 	)
+
+	for _, collection := range suite.collections {
+		suite.broker.EXPECT().GetPartitions(mock.Anything, collection).Return(suite.partitions[collection], nil).Maybe()
+	}
+	suite.targetObserver.Start(context.Background())
 
 	suite.loadAll()
 }
 
 func (suite *CollectionObserverSuite) TearDownTest() {
+	suite.targetObserver.Stop()
 	suite.ob.Stop()
 	suite.kv.Close()
 }
