@@ -16,6 +16,7 @@
 #include <memory>
 #include <vector>
 #include <queue>
+#include <unordered_set>
 
 #include "utils/Status.h"
 #include "common/type_c.h"
