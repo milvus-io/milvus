@@ -63,14 +63,12 @@ func generateTestData(t *testing.T, num int) []*Blob {
 		common.TimeStampField: &Int64FieldData{Data: field1},
 		101:                   &Int32FieldData{Data: field101},
 		102: &FloatVectorFieldData{
-			NumRows: []int64{int64(num)},
-			Data:    field102,
-			Dim:     8,
+			Data: field102,
+			Dim:  8,
 		},
 		103: &BinaryVectorFieldData{
-			NumRows: []int64{int64(num)},
-			Data:    field103,
-			Dim:     8,
+			Data: field103,
+			Dim:  8,
 		},
 	}}
 
