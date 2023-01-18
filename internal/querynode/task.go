@@ -28,6 +28,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
+var ErrChannelNotFound = errors.New("channel not found")
+
 type task interface {
 	ID() UniqueID // return ReqID
 	Ctx() context.Context
@@ -225,4 +227,72 @@ func (r *releasePartitionsTask) isAllPartitionsReleased(coll *Collection) bool {
 	}
 
 	return parts.Contain(coll.partitionIDs...)
+}
+
+type unsubDmChannelTask struct {
+	baseTask
+	node         *QueryNode
+	collectionID int64
+	channel      string
+}
+
+func (t *unsubDmChannelTask) Execute(ctx context.Context) error {
+	log.Info("start to execute unsubscribe dmchannel task", zap.Int64("collectionID", t.collectionID), zap.String("channel", t.channel))
+	collection, err := t.node.metaReplica.getCollectionByID(t.collectionID)
+	if err != nil {
+		if errors.Is(err, ErrCollectionNotFound) {
+			log.Info("collection has been released",
+				zap.Int64("collectionID", t.collectionID),
+				zap.Error(err),
+			)
+			return nil
+		}
+		return err
+	}
+
+	channels := collection.getVChannels()
+	var find bool
+	for _, c := range channels {
+		if c == t.channel {
+			find = true
+			break
+		}
+	}
+
+	if !find {
+		return ErrChannelNotFound
+	}
+
+	if err := t.releaseChannelResources(collection); err != nil {
+		return err
+	}
+	debug.FreeOSMemory()
+	return nil
+}
+
+func (t *unsubDmChannelTask) releaseChannelResources(collection *Collection) error {
+	log := log.With(zap.Int64("collectionID", t.collectionID), zap.String("channel", t.channel))
+	log.Info("start to release channel resources")
+
+	collection.removeVChannel(t.channel)
+	// release flowgraph resources
+	t.node.dataSyncService.removeFlowGraphsByDMLChannels([]string{t.channel})
+	t.node.queryShardService.releaseQueryShard(t.channel)
+	t.node.ShardClusterService.releaseShardCluster(t.channel)
+
+	t.node.tSafeReplica.removeTSafe(t.channel)
+	log.Info("release channel related resources successfully")
+
+	// release segment resources
+	segmentIDs, err := t.node.metaReplica.getSegmentIDsByVChannel(nil, t.channel, segmentTypeGrowing)
+	if err != nil {
+		return err
+	}
+	for _, segmentID := range segmentIDs {
+		t.node.metaReplica.removeSegment(segmentID, segmentTypeGrowing)
+	}
+
+	t.node.dataSyncService.removeEmptyFlowGraphByChannel(t.collectionID, t.channel)
+	log.Info("release segment resources successfully")
+	return nil
 }

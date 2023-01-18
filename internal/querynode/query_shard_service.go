@@ -148,3 +148,15 @@ func (q *queryShardService) releaseCollection(collectionID int64) {
 	q.queryShardsMu.Unlock()
 	log.Info("release collection in query shard service", zap.Int64("collectionId", collectionID))
 }
+
+func (q *queryShardService) releaseQueryShard(channel string) {
+	q.queryShardsMu.Lock()
+	defer q.queryShardsMu.Unlock()
+	for ch, queryShard := range q.queryShards {
+		if ch == channel {
+			queryShard.Close()
+			delete(q.queryShards, ch)
+			break
+		}
+	}
+}
