@@ -2,6 +2,7 @@ import h5py
 import numpy as np
 import time
 from pathlib import Path
+from loguru import logger
 from pymilvus import connections, Collection
 
 
@@ -27,32 +28,34 @@ def search_test(host="127.0.0.1"):
     nq = 10000
     topK = 100
     search_params = {"metric_type": "L2", "params": {"nprobe": 10}}
-    t0 = time.time()
-    print(f"\nSearch...")
-    # define output_fields of search result
-    res = collection.search(
-        test[:nq], "float_vector", search_params, topK, output_fields=["int64"], timeout=TIMEOUT
-    )
-    t1 = time.time()
-    print(f"search cost  {t1 - t0:.4f} seconds")
-    result_ids = []
-    for hits in res:
-        result_id = []
-        for hit in hits:
-            result_id.append(hit.entity.get("int64"))
-        result_ids.append(result_id)
+    for i in range(3):
+        t0 = time.time()
+        logger.info(f"\nSearch...")
+        # define output_fields of search result
+        res = collection.search(
+            test[:nq], "float_vector", search_params, topK, output_fields=["int64"], timeout=TIMEOUT
+        )
+        t1 = time.time()
+        logger.info(f"search cost  {t1 - t0:.4f} seconds")
+        result_ids = []
+        for hits in res:
+            result_id = []
+            for hit in hits:
+                result_id.append(hit.entity.get("int64"))
+            result_ids.append(result_id)
 
-    # calculate recall
-    true_ids = neighbors[:nq,:topK]
-    sum_radio = 0.0
-    for index, item in enumerate(result_ids):
-        # tmp = set(item).intersection(set(flat_id_list[index]))
-        assert len(item) == len(true_ids[index]), f"get {len(item)} but expect {len(true_ids[index])}"
-        tmp = set(true_ids[index]).intersection(set(item))
-        sum_radio = sum_radio + len(tmp) / len(item)
-    recall = round(sum_radio / len(result_ids), 3)
-    assert recall >= 0.95, f"recall is {recall}, less than 0.95"
-    print(f"recall={recall}")
+        # calculate recall
+        true_ids = neighbors[:nq, :topK]
+        sum_radio = 0.0
+        for index, item in enumerate(result_ids):
+            # tmp = set(item).intersection(set(flat_id_list[index]))
+            assert len(item) == len(true_ids[index]), f"get {len(item)} but expect {len(true_ids[index])}"
+            tmp = set(true_ids[index]).intersection(set(item))
+            sum_radio = sum_radio + len(tmp) / len(item)
+        recall = round(sum_radio / len(result_ids), 3)
+        logger.info(f"recall={recall}")
+        assert 0.95 <= recall < 1.0, f"recall is {recall}, less than 0.95"
+
 
 
 if __name__ == "__main__":
