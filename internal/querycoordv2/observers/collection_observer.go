@@ -122,7 +122,7 @@ func (ob *CollectionObserver) observeTimeout() {
 		)
 		for _, partition := range partitions {
 			if partition.GetStatus() != querypb.LoadStatus_Loading ||
-				time.Now().Before(partition.CreatedAt.Add(Params.QueryCoordCfg.LoadTimeoutSeconds.GetAsDuration(time.Second))) {
+				time.Now().Before(partition.UpdatedAt.Add(Params.QueryCoordCfg.LoadTimeoutSeconds.GetAsDuration(time.Second))) {
 				continue
 			}
 
