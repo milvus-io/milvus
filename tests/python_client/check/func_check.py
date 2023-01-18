@@ -99,7 +99,9 @@ class ResponseChecker:
         assert len(error_dict) > 0
         if isinstance(res, Error):
             error_code = error_dict[ct.err_code]
-            assert res.code == error_code or error_dict[ct.err_msg] in res.message
+            assert res.code == error_code or error_dict[ct.err_msg] in res.message, f"expected error code: {error_code} \
+            or error message: {error_dict[ct.err_msg]}, \
+            actual error code: {res.code}, actual error message: {res.message}"
         else:
             log.error("[CheckFunc] Response of API is not an error: %s" % str(res))
             assert False
@@ -227,8 +229,8 @@ class ResponseChecker:
                 log.error("search_results_check: limit(topK) searched (%d) "
                           "is not equal with expected (%d)"
                           % (len(hits), check_items["limit"]))
-                assert len(hits) == check_items["limit"]
-                assert len(hits.ids) == check_items["limit"]
+                assert len(hits) == check_items["limit"], f"expect {check_items['limit']}, but got {len(hits)}"
+                assert len(hits.ids) == check_items["limit"], f"expect {check_items['limit']}, but got {len(hits.ids)}"
             else:
                 if check_items.get("ids", None) is not None:
                     ids_match = pc.list_contain_check(list(hits.ids),
