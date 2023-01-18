@@ -27,7 +27,7 @@ import (
 
 const (
 	// DefaultRetentionDuration defines the default duration for retention which is 1 days in seconds.
-	DefaultRetentionDuration = 3600 * 24
+	DefaultRetentionDuration = 0
 
 	// DefaultIndexSliceSize defines the default slice size of index file when serializing.
 	DefaultIndexSliceSize        = 16
