@@ -128,54 +128,42 @@ func TestDataSorter(t *testing.T) {
 	insertDataFirst := &InsertData{
 		Data: map[int64]FieldData{
 			0: &Int64FieldData{
-				NumRows: []int64{3},
-				Data:    []int64{3, 4, 2},
+				Data: []int64{3, 4, 2},
 			},
 			1: &Int64FieldData{
-				NumRows: []int64{3},
-				Data:    []int64{3, 4, 5},
+				Data: []int64{3, 4, 5},
 			},
 			100: &BoolFieldData{
-				NumRows: []int64{3},
-				Data:    []bool{true, false, true},
+				Data: []bool{true, false, true},
 			},
 			101: &Int8FieldData{
-				NumRows: []int64{3},
-				Data:    []int8{3, 4, 5},
+				Data: []int8{3, 4, 5},
 			},
 			102: &Int16FieldData{
-				NumRows: []int64{3},
-				Data:    []int16{3, 4, 5},
+				Data: []int16{3, 4, 5},
 			},
 			103: &Int32FieldData{
-				NumRows: []int64{3},
-				Data:    []int32{3, 4, 5},
+				Data: []int32{3, 4, 5},
 			},
 			104: &Int64FieldData{
-				NumRows: []int64{3},
-				Data:    []int64{3, 4, 5},
+				Data: []int64{3, 4, 5},
 			},
 			105: &FloatFieldData{
-				NumRows: []int64{3},
-				Data:    []float32{3, 4, 5},
+				Data: []float32{3, 4, 5},
 			},
 			106: &DoubleFieldData{
-				NumRows: []int64{3},
-				Data:    []float64{3, 4, 5},
+				Data: []float64{3, 4, 5},
 			},
 			107: &StringFieldData{
-				NumRows: []int64{2},
-				Data:    []string{"3", "4", "5"},
+				Data: []string{"3", "4", "5"},
 			},
 			108: &BinaryVectorFieldData{
-				NumRows: []int64{3},
-				Data:    []byte{0, 255, 128},
-				Dim:     8,
+				Data: []byte{0, 255, 128},
+				Dim:  8,
 			},
 			109: &FloatVectorFieldData{
-				NumRows: []int64{3},
-				Data:    []float32{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23},
-				Dim:     8,
+				Data: []float32{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23},
+				Dim:  8,
 			},
 		},
 	}
@@ -244,8 +232,7 @@ func TestDataSorter_Len(t *testing.T) {
 	insertData := &InsertData{
 		Data: map[int64]FieldData{
 			1: &Int64FieldData{
-				NumRows: []int64{2},
-				Data:    []int64{6, 4},
+				Data: []int64{6, 4},
 			},
 		},
 	}
@@ -261,8 +248,7 @@ func TestDataSorter_Len(t *testing.T) {
 	insertData = &InsertData{
 		Data: map[int64]FieldData{
 			0: &Int8FieldData{
-				NumRows: []int64{2},
-				Data:    []int8{3, 4},
+				Data: []int8{3, 4},
 			},
 		},
 	}
@@ -280,8 +266,7 @@ func TestDataSorter_Less(t *testing.T) {
 	insertData := &InsertData{
 		Data: map[int64]FieldData{
 			1: &Int64FieldData{
-				NumRows: []int64{2},
-				Data:    []int64{6, 4},
+				Data: []int64{6, 4},
 			},
 		},
 	}
@@ -297,8 +282,7 @@ func TestDataSorter_Less(t *testing.T) {
 	insertData = &InsertData{
 		Data: map[int64]FieldData{
 			0: &Int8FieldData{
-				NumRows: []int64{2},
-				Data:    []int8{3, 4},
+				Data: []int8{3, 4},
 			},
 		},
 	}
@@ -314,8 +298,7 @@ func TestDataSorter_Less(t *testing.T) {
 	insertData = &InsertData{
 		Data: map[int64]FieldData{
 			0: &Int64FieldData{
-				NumRows: []int64{2},
-				Data:    []int64{6, 4},
+				Data: []int64{6, 4},
 			},
 		},
 	}

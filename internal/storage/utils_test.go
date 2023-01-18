@@ -68,16 +68,13 @@ func TestCheckNumRows(t *testing.T) {
 	assert.True(t, checkNumRows())
 
 	f1 := &Int64FieldData{
-		NumRows: nil,
-		Data:    []int64{1, 2, 3},
+		Data: []int64{1, 2, 3},
 	}
 	f2 := &Int64FieldData{
-		NumRows: nil,
-		Data:    []int64{1, 2, 3},
+		Data: []int64{1, 2, 3},
 	}
 	f3 := &Int64FieldData{
-		NumRows: nil,
-		Data:    []int64{1, 2, 3, 4},
+		Data: []int64{1, 2, 3, 4},
 	}
 
 	assert.True(t, checkNumRows(f1, f2))
@@ -88,16 +85,13 @@ func TestCheckNumRows(t *testing.T) {
 
 func TestSortFieldDataList(t *testing.T) {
 	f1 := &Int16FieldData{
-		NumRows: nil,
-		Data:    []int16{1, 2, 3},
+		Data: []int16{1, 2, 3},
 	}
 	f2 := &Int32FieldData{
-		NumRows: nil,
-		Data:    []int32{4, 5, 6},
+		Data: []int32{4, 5, 6},
 	}
 	f3 := &Int64FieldData{
-		NumRows: nil,
-		Data:    []int64{7, 8, 9},
+		Data: []int64{7, 8, 9},
 	}
 
 	ls := fieldDataList{
@@ -840,54 +834,42 @@ func TestMergeInsertData(t *testing.T) {
 	d1 := &InsertData{
 		Data: map[int64]FieldData{
 			common.RowIDField: &Int64FieldData{
-				NumRows: []int64{1},
-				Data:    []int64{1},
+				Data: []int64{1},
 			},
 			common.TimeStampField: &Int64FieldData{
-				NumRows: []int64{1},
-				Data:    []int64{1},
+				Data: []int64{1},
 			},
 			BoolField: &BoolFieldData{
-				NumRows: []int64{1},
-				Data:    []bool{true},
+				Data: []bool{true},
 			},
 			Int8Field: &Int8FieldData{
-				NumRows: []int64{1},
-				Data:    []int8{1},
+				Data: []int8{1},
 			},
 			Int16Field: &Int16FieldData{
-				NumRows: []int64{1},
-				Data:    []int16{1},
+				Data: []int16{1},
 			},
 			Int32Field: &Int32FieldData{
-				NumRows: []int64{1},
-				Data:    []int32{1},
+				Data: []int32{1},
 			},
 			Int64Field: &Int64FieldData{
-				NumRows: []int64{1},
-				Data:    []int64{1},
+				Data: []int64{1},
 			},
 			FloatField: &FloatFieldData{
-				NumRows: []int64{1},
-				Data:    []float32{0},
+				Data: []float32{0},
 			},
 			DoubleField: &DoubleFieldData{
-				NumRows: []int64{1},
-				Data:    []float64{0},
+				Data: []float64{0},
 			},
 			StringField: &StringFieldData{
-				NumRows: []int64{1},
-				Data:    []string{"1"},
+				Data: []string{"1"},
 			},
 			BinaryVectorField: &BinaryVectorFieldData{
-				NumRows: []int64{1},
-				Data:    []byte{0},
-				Dim:     8,
+				Data: []byte{0},
+				Dim:  8,
 			},
 			FloatVectorField: &FloatVectorFieldData{
-				NumRows: []int64{1},
-				Data:    []float32{0},
-				Dim:     1,
+				Data: []float32{0},
+				Dim:  1,
 			},
 		},
 		Infos: nil,
@@ -895,54 +877,42 @@ func TestMergeInsertData(t *testing.T) {
 	d2 := &InsertData{
 		Data: map[int64]FieldData{
 			common.RowIDField: &Int64FieldData{
-				NumRows: []int64{1},
-				Data:    []int64{2},
+				Data: []int64{2},
 			},
 			common.TimeStampField: &Int64FieldData{
-				NumRows: []int64{1},
-				Data:    []int64{2},
+				Data: []int64{2},
 			},
 			BoolField: &BoolFieldData{
-				NumRows: []int64{1},
-				Data:    []bool{false},
+				Data: []bool{false},
 			},
 			Int8Field: &Int8FieldData{
-				NumRows: []int64{1},
-				Data:    []int8{2},
+				Data: []int8{2},
 			},
 			Int16Field: &Int16FieldData{
-				NumRows: []int64{1},
-				Data:    []int16{2},
+				Data: []int16{2},
 			},
 			Int32Field: &Int32FieldData{
-				NumRows: []int64{1},
-				Data:    []int32{2},
+				Data: []int32{2},
 			},
 			Int64Field: &Int64FieldData{
-				NumRows: []int64{1},
-				Data:    []int64{2},
+				Data: []int64{2},
 			},
 			FloatField: &FloatFieldData{
-				NumRows: []int64{1},
-				Data:    []float32{0},
+				Data: []float32{0},
 			},
 			DoubleField: &DoubleFieldData{
-				NumRows: []int64{1},
-				Data:    []float64{0},
+				Data: []float64{0},
 			},
 			StringField: &StringFieldData{
-				NumRows: []int64{1},
-				Data:    []string{"2"},
+				Data: []string{"2"},
 			},
 			BinaryVectorField: &BinaryVectorFieldData{
-				NumRows: []int64{1},
-				Data:    []byte{0},
-				Dim:     8,
+				Data: []byte{0},
+				Dim:  8,
 			},
 			FloatVectorField: &FloatVectorFieldData{
-				NumRows: []int64{1},
-				Data:    []float32{0},
-				Dim:     1,
+				Data: []float32{0},
+				Dim:  1,
 			},
 		},
 		Infos: nil,
@@ -952,62 +922,50 @@ func TestMergeInsertData(t *testing.T) {
 
 	f, ok := merged.Data[common.RowIDField]
 	assert.True(t, ok)
-	assert.Equal(t, []int64{2}, f.(*Int64FieldData).NumRows)
 	assert.Equal(t, []int64{1, 2}, f.(*Int64FieldData).Data)
 
 	f, ok = merged.Data[common.TimeStampField]
 	assert.True(t, ok)
-	assert.Equal(t, []int64{2}, f.(*Int64FieldData).NumRows)
 	assert.Equal(t, []int64{1, 2}, f.(*Int64FieldData).Data)
 
 	f, ok = merged.Data[BoolField]
 	assert.True(t, ok)
-	assert.Equal(t, []int64{2}, f.(*BoolFieldData).NumRows)
 	assert.Equal(t, []bool{true, false}, f.(*BoolFieldData).Data)
 
 	f, ok = merged.Data[Int8Field]
 	assert.True(t, ok)
-	assert.Equal(t, []int64{2}, f.(*Int8FieldData).NumRows)
 	assert.Equal(t, []int8{1, 2}, f.(*Int8FieldData).Data)
 
 	f, ok = merged.Data[Int16Field]
 	assert.True(t, ok)
-	assert.Equal(t, []int64{2}, f.(*Int16FieldData).NumRows)
 	assert.Equal(t, []int16{1, 2}, f.(*Int16FieldData).Data)
 
 	f, ok = merged.Data[Int32Field]
 	assert.True(t, ok)
-	assert.Equal(t, []int64{2}, f.(*Int32FieldData).NumRows)
 	assert.Equal(t, []int32{1, 2}, f.(*Int32FieldData).Data)
 
 	f, ok = merged.Data[Int64Field]
 	assert.True(t, ok)
-	assert.Equal(t, []int64{2}, f.(*Int64FieldData).NumRows)
 	assert.Equal(t, []int64{1, 2}, f.(*Int64FieldData).Data)
 
 	f, ok = merged.Data[FloatField]
 	assert.True(t, ok)
-	assert.Equal(t, []int64{2}, f.(*FloatFieldData).NumRows)
 	assert.Equal(t, []float32{0, 0}, f.(*FloatFieldData).Data)
 
 	f, ok = merged.Data[DoubleField]
 	assert.True(t, ok)
-	assert.Equal(t, []int64{2}, f.(*DoubleFieldData).NumRows)
 	assert.Equal(t, []float64{0, 0}, f.(*DoubleFieldData).Data)
 
 	f, ok = merged.Data[StringField]
 	assert.True(t, ok)
-	assert.Equal(t, []int64{2}, f.(*StringFieldData).NumRows)
 	assert.Equal(t, []string{"1", "2"}, f.(*StringFieldData).Data)
 
 	f, ok = merged.Data[BinaryVectorField]
 	assert.True(t, ok)
-	assert.Equal(t, []int64{2}, f.(*BinaryVectorFieldData).NumRows)
 	assert.Equal(t, []byte{0, 0}, f.(*BinaryVectorFieldData).Data)
 
 	f, ok = merged.Data[FloatVectorField]
 	assert.True(t, ok)
-	assert.Equal(t, []int64{2}, f.(*FloatVectorFieldData).NumRows)
 	assert.Equal(t, []float32{0, 0}, f.(*FloatVectorFieldData).Data)
 }
 

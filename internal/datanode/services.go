@@ -894,8 +894,7 @@ func createBinLogs(rowNum int, schema *schemapb.CollectionSchema, ts Timestamp,
 		tsFieldData[i] = int64(ts)
 	}
 	fields[common.TimeStampField] = &storage.Int64FieldData{
-		Data:    tsFieldData,
-		NumRows: []int64{int64(rowNum)},
+		Data: tsFieldData,
 	}
 
 	if status, _ := node.dataCoord.UpdateSegmentStatistics(context.TODO(), &datapb.UpdateSegmentStatisticsRequest{

@@ -626,11 +626,6 @@ func (loader *segmentLoader) loadSealedSegments(segment *Segment, insertData *st
 	numRows := insertRecord.NumRows
 	for _, fieldData := range insertRecord.FieldsData {
 		fieldID := fieldData.FieldId
-		if fieldID == common.TimeStampField {
-			timestampsData := insertData.Data[fieldID].(*storage.Int64FieldData)
-			segment.setIDBinlogRowSizes(timestampsData.NumRows)
-		}
-
 		err := segment.segmentLoadFieldData(fieldID, numRows, fieldData)
 		if err != nil {
 			// TODO: return or continue?

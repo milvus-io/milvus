@@ -1159,54 +1159,42 @@ func genInsertData() *InsertData {
 	return &InsertData{
 		Data: map[int64]s.FieldData{
 			0: &s.Int64FieldData{
-				NumRows: []int64{2},
-				Data:    []int64{11, 22},
+				Data: []int64{1, 2},
 			},
 			1: &s.Int64FieldData{
-				NumRows: []int64{2},
-				Data:    []int64{3, 4},
+				Data: []int64{3, 4},
 			},
 			100: &s.FloatVectorFieldData{
-				NumRows: []int64{2},
-				Data:    []float32{1.0, 6.0, 7.0, 8.0},
-				Dim:     2,
+				Data: []float32{1.0, 6.0, 7.0, 8.0},
+				Dim:  2,
 			},
 			101: &s.BinaryVectorFieldData{
-				NumRows: []int64{2},
-				Data:    []byte{0, 255, 255, 255, 128, 128, 128, 0},
-				Dim:     32,
+				Data: []byte{0, 255, 255, 255, 128, 128, 128, 0},
+				Dim:  32,
 			},
 			102: &s.BoolFieldData{
-				NumRows: []int64{2},
-				Data:    []bool{true, false},
+				Data: []bool{true, false},
 			},
 			103: &s.Int8FieldData{
-				NumRows: []int64{2},
-				Data:    []int8{5, 6},
+				Data: []int8{5, 6},
 			},
 			104: &s.Int16FieldData{
-				NumRows: []int64{2},
-				Data:    []int16{7, 8},
+				Data: []int16{7, 8},
 			},
 			105: &s.Int32FieldData{
-				NumRows: []int64{2},
-				Data:    []int32{9, 10},
+				Data: []int32{9, 10},
 			},
 			106: &s.Int64FieldData{
-				NumRows: []int64{2},
-				Data:    []int64{1, 2},
+				Data: []int64{1, 2},
 			},
 			107: &s.FloatFieldData{
-				NumRows: []int64{2},
-				Data:    []float32{2.333, 2.334},
+				Data: []float32{2.333, 2.334},
 			},
 			108: &s.DoubleFieldData{
-				NumRows: []int64{2},
-				Data:    []float64{3.333, 3.334},
+				Data: []float64{3.333, 3.334},
 			},
 			109: &s.StringFieldData{
-				NumRows: []int64{2},
-				Data:    []string{"test1", "test2"},
+				Data: []string{"test1", "test2"},
 			},
 		}}
 }
@@ -1215,54 +1203,42 @@ func genEmptyInsertData() *InsertData {
 	return &InsertData{
 		Data: map[int64]s.FieldData{
 			0: &s.Int64FieldData{
-				NumRows: []int64{0},
-				Data:    []int64{},
+				Data: []int64{},
 			},
 			1: &s.Int64FieldData{
-				NumRows: []int64{0},
-				Data:    []int64{},
+				Data: []int64{},
 			},
 			100: &s.FloatVectorFieldData{
-				NumRows: []int64{0},
-				Data:    []float32{},
-				Dim:     2,
+				Data: []float32{},
+				Dim:  2,
 			},
 			101: &s.BinaryVectorFieldData{
-				NumRows: []int64{0},
-				Data:    []byte{},
-				Dim:     32,
+				Data: []byte{},
+				Dim:  32,
 			},
 			102: &s.BoolFieldData{
-				NumRows: []int64{0},
-				Data:    []bool{},
+				Data: []bool{},
 			},
 			103: &s.Int8FieldData{
-				NumRows: []int64{0},
-				Data:    []int8{},
+				Data: []int8{},
 			},
 			104: &s.Int16FieldData{
-				NumRows: []int64{0},
-				Data:    []int16{},
+				Data: []int16{},
 			},
 			105: &s.Int32FieldData{
-				NumRows: []int64{0},
-				Data:    []int32{},
+				Data: []int32{},
 			},
 			106: &s.Int64FieldData{
-				NumRows: []int64{0},
-				Data:    []int64{},
+				Data: []int64{},
 			},
 			107: &s.FloatFieldData{
-				NumRows: []int64{0},
-				Data:    []float32{},
+				Data: []float32{},
 			},
 			108: &s.DoubleFieldData{
-				NumRows: []int64{0},
-				Data:    []float64{},
+				Data: []float64{},
 			},
 			109: &s.StringFieldData{
-				NumRows: []int64{0},
-				Data:    []string{},
+				Data: []string{},
 			},
 		}}
 }
@@ -1271,54 +1247,42 @@ func genInsertDataWithExpiredTS() *InsertData {
 	return &InsertData{
 		Data: map[int64]s.FieldData{
 			0: &s.Int64FieldData{
-				NumRows: []int64{2},
-				Data:    []int64{11, 22},
+				Data: []int64{11, 22},
 			},
 			1: &s.Int64FieldData{
-				NumRows: []int64{2},
-				Data:    []int64{329749364736000000, 329500223078400000}, // 2009-11-10 23:00:00 +0000 UTC, 2009-10-31 23:00:00 +0000 UTC
+				Data: []int64{329749364736000000, 329500223078400000}, // 2009-11-10 23:00:00 +0000 UTC, 2009-10-31 23:00:00 +0000 UTC
 			},
 			100: &s.FloatVectorFieldData{
-				NumRows: []int64{2},
-				Data:    []float32{1.0, 6.0, 7.0, 8.0},
-				Dim:     2,
+				Data: []float32{1.0, 6.0, 7.0, 8.0},
+				Dim:  2,
 			},
 			101: &s.BinaryVectorFieldData{
-				NumRows: []int64{2},
-				Data:    []byte{0, 255, 255, 255, 128, 128, 128, 0},
-				Dim:     32,
+				Data: []byte{0, 255, 255, 255, 128, 128, 128, 0},
+				Dim:  32,
 			},
 			102: &s.BoolFieldData{
-				NumRows: []int64{2},
-				Data:    []bool{true, false},
+				Data: []bool{true, false},
 			},
 			103: &s.Int8FieldData{
-				NumRows: []int64{2},
-				Data:    []int8{5, 6},
+				Data: []int8{5, 6},
 			},
 			104: &s.Int16FieldData{
-				NumRows: []int64{2},
-				Data:    []int16{7, 8},
+				Data: []int16{7, 8},
 			},
 			105: &s.Int32FieldData{
-				NumRows: []int64{2},
-				Data:    []int32{9, 10},
+				Data: []int32{9, 10},
 			},
 			106: &s.Int64FieldData{
-				NumRows: []int64{2},
-				Data:    []int64{1, 2},
+				Data: []int64{1, 2},
 			},
 			107: &s.FloatFieldData{
-				NumRows: []int64{2},
-				Data:    []float32{2.333, 2.334},
+				Data: []float32{2.333, 2.334},
 			},
 			108: &s.DoubleFieldData{
-				NumRows: []int64{2},
-				Data:    []float64{3.333, 3.334},
+				Data: []float64{3.333, 3.334},
 			},
 			109: &s.StringFieldData{
-				NumRows: []int64{2},
-				Data:    []string{"test1", "test2"},
+				Data: []string{"test1", "test2"},
 			},
 		}}
 }

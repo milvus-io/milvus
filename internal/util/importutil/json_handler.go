@@ -240,7 +240,6 @@ func (v *JSONRowConsumer) Handle(rows []map[storage.FieldID]interface{}) error {
 			shard = hash % uint32(v.shardNum)
 			pkArray := v.segmentsData[shard][v.primaryKey].(*storage.StringFieldData)
 			pkArray.Data = append(pkArray.Data, pk)
-			pkArray.NumRows[0]++
 		} else {
 			// get/generate the row id
 			var pk int64
@@ -269,13 +268,11 @@ func (v *JSONRowConsumer) Handle(rows []map[storage.FieldID]interface{}) error {
 			shard = hash % uint32(v.shardNum)
 			pkArray := v.segmentsData[shard][v.primaryKey].(*storage.Int64FieldData)
 			pkArray.Data = append(pkArray.Data, pk)
-			pkArray.NumRows[0]++
 		}
 
 		// set rowid field
 		rowIDField := v.segmentsData[shard][common.RowIDField].(*storage.Int64FieldData)
 		rowIDField.Data = append(rowIDField.Data, rowIDBegin+int64(i))
-		rowIDField.NumRows[0]++
 
 		// convert value and consume
 		for name, validator := range v.validators {

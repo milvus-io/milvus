@@ -831,70 +831,58 @@ func genInsertData(msgLength int, schema *schemapb.CollectionSchema) (*storage.I
 
 	// set data for rowID field
 	insertData.Data[rowIDFieldID] = &storage.Int64FieldData{
-		NumRows: []int64{int64(msgLength)},
-		Data:    generateInt64Array(msgLength),
+		Data: generateInt64Array(msgLength),
 	}
 	// set data for ts field
 	insertData.Data[timestampFieldID] = &storage.Int64FieldData{
-		NumRows: []int64{int64(msgLength)},
-		Data:    genTimestampFieldData(msgLength),
+		Data: genTimestampFieldData(msgLength),
 	}
 
 	for _, f := range schema.Fields {
 		switch f.DataType {
 		case schemapb.DataType_Bool:
 			insertData.Data[f.FieldID] = &storage.BoolFieldData{
-				NumRows: []int64{int64(msgLength)},
-				Data:    generateBoolArray(msgLength),
+				Data: generateBoolArray(msgLength),
 			}
 		case schemapb.DataType_Int8:
 			insertData.Data[f.FieldID] = &storage.Int8FieldData{
-				NumRows: []int64{int64(msgLength)},
-				Data:    generateInt8Array(msgLength),
+				Data: generateInt8Array(msgLength),
 			}
 		case schemapb.DataType_Int16:
 			insertData.Data[f.FieldID] = &storage.Int16FieldData{
-				NumRows: []int64{int64(msgLength)},
-				Data:    generateInt16Array(msgLength),
+				Data: generateInt16Array(msgLength),
 			}
 		case schemapb.DataType_Int32:
 			insertData.Data[f.FieldID] = &storage.Int32FieldData{
-				NumRows: []int64{int64(msgLength)},
-				Data:    generateInt32Array(msgLength),
+				Data: generateInt32Array(msgLength),
 			}
 		case schemapb.DataType_Int64:
 			insertData.Data[f.FieldID] = &storage.Int64FieldData{
-				NumRows: []int64{int64(msgLength)},
-				Data:    generateInt64Array(msgLength),
+				Data: generateInt64Array(msgLength),
 			}
 		case schemapb.DataType_Float:
 			insertData.Data[f.FieldID] = &storage.FloatFieldData{
-				NumRows: []int64{int64(msgLength)},
-				Data:    generateFloat32Array(msgLength),
+				Data: generateFloat32Array(msgLength),
 			}
 		case schemapb.DataType_Double:
 			insertData.Data[f.FieldID] = &storage.DoubleFieldData{
-				NumRows: []int64{int64(msgLength)},
-				Data:    generateFloat64Array(msgLength),
+				Data: generateFloat64Array(msgLength),
 			}
 		case schemapb.DataType_String, schemapb.DataType_VarChar:
 			insertData.Data[f.FieldID] = &storage.StringFieldData{
-				NumRows: []int64{int64(msgLength)},
-				Data:    generateStringArray(msgLength),
+				Data: generateStringArray(msgLength),
 			}
 		case schemapb.DataType_FloatVector:
 			dim := simpleFloatVecField.dim // if no dim specified, use simpleFloatVecField's dim
 			insertData.Data[f.FieldID] = &storage.FloatVectorFieldData{
-				NumRows: []int64{int64(msgLength)},
-				Data:    generateFloatVectors(msgLength, dim),
-				Dim:     dim,
+				Data: generateFloatVectors(msgLength, dim),
+				Dim:  dim,
 			}
 		case schemapb.DataType_BinaryVector:
 			dim := simpleBinVecField.dim
 			insertData.Data[f.FieldID] = &storage.BinaryVectorFieldData{
-				NumRows: []int64{int64(msgLength)},
-				Data:    generateBinaryVectors(msgLength, dim),
-				Dim:     dim,
+				Data: generateBinaryVectors(msgLength, dim),
+				Dim:  dim,
 			}
 		default:
 			err := errors.New("data type not supported")

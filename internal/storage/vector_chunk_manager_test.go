@@ -88,26 +88,21 @@ func initBinlogFile(schema *etcdpb.CollectionMeta) []*Blob {
 	insertData := &InsertData{
 		Data: map[int64]FieldData{
 			0: &Int64FieldData{
-				NumRows: []int64{2},
-				Data:    []int64{3, 4},
+				Data: []int64{3, 4},
 			},
 			1: &Int64FieldData{
-				NumRows: []int64{2},
-				Data:    []int64{3, 4},
+				Data: []int64{3, 4},
 			},
 			101: &Int8FieldData{
-				NumRows: []int64{2},
-				Data:    []int8{3, 4},
+				Data: []int8{3, 4},
 			},
 			108: &BinaryVectorFieldData{
-				NumRows: []int64{2},
-				Data:    []byte{0, 255},
-				Dim:     8,
+				Data: []byte{0, 255},
+				Dim:  8,
 			},
 			109: &FloatVectorFieldData{
-				NumRows: []int64{2},
-				Data:    []float32{0, 1, 2, 3, 4, 5, 6, 7, 0, 111, 222, 333, 444, 555, 777, 666},
-				Dim:     8,
+				Data: []float32{0, 1, 2, 3, 4, 5, 6, 7, 0, 111, 222, 333, 444, 555, 777, 666},
+				Dim:  8,
 			},
 		},
 	}
