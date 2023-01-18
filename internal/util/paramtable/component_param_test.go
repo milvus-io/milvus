@@ -57,7 +57,7 @@ func TestComponentParam(t *testing.T) {
 		// test the case coommo
 		Params.Base.Save("common.entityExpiration", "50")
 		Params.initEntityExpiration()
-		assert.Equal(t, int64(Params.EntityExpirationTTL.Seconds()), int64(DefaultRetentionDuration))
+		assert.Equal(t, int64(Params.EntityExpirationTTL.Seconds()), int64(50))
 
 		assert.NotEqual(t, Params.SimdType, "")
 		t.Logf("knowhere simd type = %s", Params.SimdType)
