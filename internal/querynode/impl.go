@@ -412,20 +412,17 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 		return status, nil
 	}
 
-	dct := &releaseCollectionTask{
+	unsubTask := &unsubDmChannelTask{
 		baseTask: baseTask{
 			ctx:  ctx,
 			done: make(chan error),
 		},
-		req: &querypb.ReleaseCollectionRequest{
-			Base:         req.GetBase(),
-			CollectionID: req.GetCollectionID(),
-			NodeID:       req.GetNodeID(),
-		},
-		node: node,
+		node:         node,
+		collectionID: req.GetCollectionID(),
+		channel:      req.GetChannelName(),
 	}
 
-	err := node.scheduler.queue.Enqueue(dct)
+	err := node.scheduler.queue.Enqueue(unsubTask)
 	if err != nil {
 		status := &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -434,9 +431,9 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 		log.Warn("failed to enqueue subscribe channel task", zap.Error(err))
 		return status, nil
 	}
-	log.Info("unsubDmChannel(ReleaseCollection) enqueue done", zap.Int64("collectionID", req.GetCollectionID()))
+	log.Info("unsubDmChannelTask enqueue done", zap.Int64("collectionID", req.GetCollectionID()))
 
-	err = dct.WaitToFinish()
+	err = unsubTask.WaitToFinish()
 	if err != nil {
 		log.Warn("failed to do subscribe channel task successfully", zap.Error(err))
 		return &commonpb.Status{
@@ -445,7 +442,7 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 		}, nil
 	}
 
-	log.Info("unsubDmChannel(ReleaseCollection) WaitToFinish done", zap.Int64("collectionID", req.GetCollectionID()))
+	log.Info("unsubDmChannelTask WaitToFinish done", zap.Int64("collectionID", req.GetCollectionID()))
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}, nil
