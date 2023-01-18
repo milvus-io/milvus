@@ -490,6 +490,7 @@ class TestNewIndexBase(TestcaseBase):
             assert len(collection_w.indexes) == 1
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.xfail(reason="Each RPC is limited to 64 MB")
     def test_annoy_index(self):
         # The strange thing is that the indexnode crash is only reproduced when nb is 50000 and dim is 512
         nb = 50000
