@@ -210,7 +210,7 @@ func (ob *TargetObserver) isNextTargetExpired(collectionID int64) bool {
 func (ob *TargetObserver) updateNextTarget(collectionID int64) error {
 	log := log.With(zap.Int64("collectionID", collectionID))
 
-	log.Warn("observer trigger update next target")
+	log.Info("observer trigger update next target")
 	err := ob.targetMgr.UpdateCollectionNextTarget(collectionID)
 	if err != nil {
 		log.Error("failed to update next target for collection",

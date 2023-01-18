@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
@@ -212,6 +213,11 @@ func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg, ErrNotHealthy), nil
 	}
 
+	// If refresh mode is ON.
+	if req.GetRefresh() {
+		return s.refreshCollection(ctx, req.GetCollectionID())
+	}
+
 	loadJob := job.NewLoadCollectionJob(ctx,
 		req,
 		s.dist,
@@ -289,6 +295,11 @@ func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitions
 		log.Warn(msg, zap.Error(ErrNotHealthy))
 		metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
 		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg, ErrNotHealthy), nil
+	}
+
+	// If refresh mode is ON.
+	if req.GetRefresh() {
+		return s.refreshPartitions(ctx, req.GetCollectionID(), req.GetPartitionIDs())
 	}
 
 	loadJob := job.NewLoadPartitionJob(ctx,
@@ -464,6 +475,113 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfo
 		Status: successStatus,
 		Infos:  infos,
 	}, nil
+}
+
+// refreshCollection must be called after loading a collection. It looks for new segments that are not loaded yet and
+// tries to load them up. It returns when all segments of the given collection are loaded, or when error happens.
+// Note that a collection's loading progress always stays at 100% after a successful load and will not get updated
+// during refreshCollection.
+func (s *Server) refreshCollection(ctx context.Context, collID int64) (*commonpb.Status, error) {
+	ctx, cancel := context.WithTimeout(ctx, Params.QueryCoordCfg.LoadTimeoutSeconds.GetAsDuration(time.Second))
+	defer cancel()
+
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", collID),
+	)
+	if s.status.Load() != commonpb.StateCode_Healthy {
+		msg := "failed to refresh collection"
+		log.Warn(msg, zap.Error(ErrNotHealthy))
+		metrics.QueryCoordReleaseCount.WithLabelValues(metrics.FailLabel).Inc()
+		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg, ErrNotHealthy), nil
+	}
+
+	// Check that collection is fully loaded.
+	if s.meta.CollectionManager.GetLoadPercentage(collID) != 100 {
+		errMsg := "a collection must be fully loaded before refreshing"
+		log.Warn(errMsg)
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "a collection must be fully loaded before refreshing",
+		}, nil
+	}
+
+	// Pull the latest target.
+	readyCh, err := s.targetObserver.UpdateNextTarget(collID)
+	if err != nil {
+		log.Warn("failed to update next target", zap.Error(err))
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}, nil
+	}
+
+	select {
+	case <-ctx.Done():
+		log.Warn("refresh collection failed as context canceled")
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "context canceled",
+		}, nil
+	case <-readyCh:
+		log.Info("refresh collection succeeded")
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		}, nil
+	}
+}
+
+// refreshPartitions must be called after loading a collection. It looks for new segments that are not loaded yet and
+// tries to load them up. It returns when all segments of the given collection are loaded, or when error happens.
+// Note that a collection's loading progress always stays at 100% after a successful load and will not get updated
+// during refreshPartitions.
+func (s *Server) refreshPartitions(ctx context.Context, collID int64, partIDs []int64) (*commonpb.Status, error) {
+	ctx, cancel := context.WithTimeout(ctx, Params.QueryCoordCfg.LoadTimeoutSeconds.GetAsDuration(time.Second))
+	defer cancel()
+
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", collID),
+		zap.Int64s("partitionIDs", partIDs),
+	)
+	if s.status.Load() != commonpb.StateCode_Healthy {
+		msg := "failed to refresh partitions"
+		log.Warn(msg, zap.Error(ErrNotHealthy))
+		metrics.QueryCoordReleaseCount.WithLabelValues(metrics.FailLabel).Inc()
+		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg, ErrNotHealthy), nil
+	}
+
+	// Check that all partitions are fully loaded.
+	if s.meta.CollectionManager.GetLoadPercentage(collID) != 100 {
+		errMsg := "partitions must be fully loaded before refreshing"
+		log.Warn(errMsg)
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    errMsg,
+		}, nil
+	}
+
+	// Pull the latest target.
+	readyCh, err := s.targetObserver.UpdateNextTarget(collID)
+	if err != nil {
+		log.Warn("failed to update next target", zap.Error(err))
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}, nil
+	}
+
+	select {
+	case <-ctx.Done():
+		log.Warn("refresh partitions failed as context canceled")
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    "context canceled",
+		}, nil
+	case <-readyCh:
+		log.Info("refresh partitions succeeded")
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		}, nil
+	}
 }
 
 func (s *Server) isStoppingNode(nodeID int64) error {
