@@ -190,9 +190,13 @@ func Test_scheduler_updateDdlMinTsLoop(t *testing.T) {
 		paramtable.Get().Save(Params.ProxyCfg.TimeTickInterval.Key, "1")
 		s.Start()
 
-		time.Sleep(time.Millisecond * 4)
-
-		assert.Greater(t, s.GetMinDdlTs(), Timestamp(100))
+		for i := 0; i < 100; i++ {
+			if s.GetMinDdlTs() > Timestamp(100) {
+				break
+			}
+			assert.True(t, i < 100)
+			time.Sleep(time.Millisecond)
+		}
 
 		// add task to queue.
 		n := 10
