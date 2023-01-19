@@ -21,10 +21,9 @@ import (
 	"fmt"
 	"math/rand"
 
-	"github.com/samber/lo"
-
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	"github.com/samber/lo"
 )
 
 func GetReplicaNodesInfo(replicaMgr *meta.ReplicaManager, nodeMgr *session.NodeManager, replicaID int64) []*session.NodeInfo {

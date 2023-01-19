@@ -74,8 +74,9 @@ func CreateTestCollection(collection int64, replica int32) *meta.Collection {
 func CreateTestPartition(collection int64, partitionID int64) *meta.Partition {
 	return &meta.Partition{
 		PartitionLoadInfo: &querypb.PartitionLoadInfo{
-			CollectionID: collection,
-			PartitionID:  partitionID,
+			CollectionID:  collection,
+			PartitionID:   partitionID,
+			ReplicaNumber: 1,
 		},
 	}
 }

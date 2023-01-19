@@ -100,6 +100,7 @@ message LoadCollectionRequest {
   int32 replica_number = 5;
   // fieldID -> indexID
   map<int64, int64> field_indexID = 6;
+  bool refresh = 7;
 }
 
 message ReleaseCollectionRequest {
@@ -126,6 +127,7 @@ message LoadPartitionsRequest {
   int32 replica_number = 6;
   // fieldID -> indexID
   map<int64, int64> field_indexID = 7;
+  bool refresh = 8;
 }
 
 message ReleasePartitionsRequest {
