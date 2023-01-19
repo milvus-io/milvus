@@ -39,14 +39,14 @@ def trace(fmt=DEFAULT_FMT, prefix='chaos-test', flag=True):
     def decorate(func):
         @functools.wraps(func)
         def inner_wrapper(self, *args, **kwargs):
-            start_time = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
+            start_time = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%fZ')
             t0 = time.perf_counter()
             res, result = func(self, *args, **kwargs)
             elapsed = time.perf_counter() - t0
-            end_time = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
+            end_time = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+            operation_name = func.__name__
             if flag:
                 collection_name = self.c_wrap.name
-                operation_name = func.__name__
                 log_str = f"[{prefix}]" + fmt.format(**locals())
                 # TODO: add report function in this place, like uploading to influxdb
                 # it is better a async way to do this, in case of blocking the request processing
@@ -56,8 +56,12 @@ def trace(fmt=DEFAULT_FMT, prefix='chaos-test', flag=True):
                 self.average_time = (
                     elapsed + self.average_time * self._succ) / (self._succ + 1)
                 self._succ += 1
+                if len(self.fail_records) > 0 and self.fail_records[-1][0] == "failure" and \
+                        self._succ + self._fail == self.fail_records[-1][1] + 1:
+                    self.fail_records.append(("success", self._succ + self._fail, start_time))
             else:
                 self._fail += 1
+                self.fail_records.append(("failure", self._succ + self._fail, start_time))
             return res, result
         return inner_wrapper
     return decorate
@@ -91,6 +95,7 @@ class Checker:
     def __init__(self, collection_name=None, shards_num=2, dim=ct.default_dim):
         self._succ = 0
         self._fail = 0
+        self.fail_records = []
         self._keep_running = True
         self.rsp_times = []
         self.average_time = 0
@@ -126,6 +131,8 @@ class Checker:
         checkers_result = f"{checker_name}, succ_rate: {succ_rate:.2f}, total: {total:03d}, average_time: {average_time:.4f}, max_time: {max_time:.4f}, min_time: {min_time:.4f}"
         log.info(checkers_result)
         log.info(f"{checker_name} rsp times: {self.rsp_times}")
+        if len(self.fail_records) > 0:
+            log.info(f"{checker_name} failed at {self.fail_records}")
         return checkers_result
 
     def terminate(self):

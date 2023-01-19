@@ -31,7 +31,7 @@ pytest-random-order
 python-benedict==0.24.3
 timeout-decorator==0.5.0
 
-# for bulk load test
+# for bulk insert test
 minio==7.1.5
 
 # for benchmark
@@ -39,3 +39,6 @@ h5py==3.7.0
 
 # for log
 loguru==0.6.0
+
+# util
+psutil==5.8.0
