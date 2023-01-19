@@ -604,14 +604,14 @@ func (p *MinioConfig) Init(base *BaseTable) {
 	p.AccessKeyID = ParamItem{
 		Key:          "minio.accessKeyID",
 		Version:      "2.0.0",
-		PanicIfEmpty: true,
+		PanicIfEmpty: false, // tmp fix, need to be conditional
 	}
 	p.AccessKeyID.Init(base.mgr)
 
 	p.SecretAccessKey = ParamItem{
 		Key:          "minio.secretAccessKey",
 		Version:      "2.0.0",
-		PanicIfEmpty: true,
+		PanicIfEmpty: false, // tmp fix, need to be conditional
 	}
 	p.SecretAccessKey.Init(base.mgr)
 
