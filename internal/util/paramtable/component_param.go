@@ -88,16 +88,17 @@ type ComponentParam struct {
 	IntegrationTestCfg integrationTestConfig
 }
 
-// InitOnce initialize once
-func (p *ComponentParam) InitOnce() {
+// Init initialize once
+func (p *ComponentParam) Init() {
 	p.once.Do(func() {
-		p.Init()
+		p.init()
 	})
 }
 
-// Init initialize the global param table
-func (p *ComponentParam) Init() {
-	p.ServiceParam.Init()
+// init initialize the global param table
+
+func (p *ComponentParam) init() {
+	p.ServiceParam.init()
 
 	p.CommonCfg.init(&p.BaseTable)
 	p.QuotaConfig.init(&p.BaseTable)

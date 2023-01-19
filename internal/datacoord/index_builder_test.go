@@ -601,7 +601,7 @@ func TestIndexBuilder(t *testing.T) {
 		nodeID  = UniqueID(700)
 	)
 
-	Params.InitOnce()
+	Params.Init()
 	ctx := context.Background()
 	catalog := catalogmocks.NewDataCoordCatalog(t)
 	catalog.On("CreateSegmentIndex",

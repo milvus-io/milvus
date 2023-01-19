@@ -20,7 +20,7 @@ import (
 )
 
 func getTestEtcdCli() *clientv3.Client {
-	Params.InitOnce()
+	Params.Init()
 	cli, err := etcd.GetEtcdClient(
 		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
 		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),

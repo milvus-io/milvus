@@ -139,11 +139,11 @@ func buildVectorChunkManager(localPath string, localCacheEnable bool) (*VectorCh
 	return vcm, cancel, nil
 }
 
-var Params paramtable.BaseTable
+var Params = paramtable.Get()
 var localPath = "/tmp/milvus_test/chunkmanager/"
 
 func TestMain(m *testing.M) {
-	Params.Init(0)
+	Params.Init()
 	exitCode := m.Run()
 	err := os.RemoveAll(localPath)
 	if err != nil {

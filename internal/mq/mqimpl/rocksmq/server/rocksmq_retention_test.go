@@ -411,8 +411,8 @@ func TestRetentionInfo_InitRetentionInfo(t *testing.T) {
 
 	defer os.RemoveAll(metaPath)
 
-	var params paramtable.BaseTable
-	params.Init(0)
+	params := paramtable.Get()
+	params.Init()
 	rmq, err := NewRocksMQ(rocksdbPath, idAllocator)
 	assert.Nil(t, err)
 	assert.NotNil(t, rmq)

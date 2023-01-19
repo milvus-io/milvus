@@ -9,7 +9,7 @@ type hookConfig struct {
 
 func (h *hookConfig) init() {
 	base := &BaseTable{YamlFile: hookYamlFile}
-	base.Init(0)
+	base.init(0)
 
 	h.SoPath = ParamItem{
 		Key:          "soPath",

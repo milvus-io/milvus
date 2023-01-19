@@ -714,7 +714,7 @@ func TestRootCoord_ShowConfigurations(t *testing.T) {
 	})
 
 	t.Run("normal case", func(t *testing.T) {
-		Params.InitOnce()
+		Params.Init()
 
 		pattern := "rootcoord.Port"
 		req := &internalpb.ShowConfigurationsRequest{

@@ -2,7 +2,6 @@ package indexcgowrapper
 
 import (
 	"strconv"
-	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -40,8 +39,7 @@ const (
 	ef             = 200
 )
 
-var Params paramtable.ServiceParam
-var InitOnce sync.Once
+var Params paramtable.ComponentParam
 
 type vecTestCase struct {
 	indexType  string

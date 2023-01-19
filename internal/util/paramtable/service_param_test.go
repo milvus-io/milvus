@@ -22,7 +22,7 @@ import (
 
 func TestServiceParam(t *testing.T) {
 	var SParams ServiceParam
-	SParams.Init()
+	SParams.init()
 
 	t.Run("test etcdConfig", func(t *testing.T) {
 		Params := &SParams.EtcdCfg
@@ -54,11 +54,11 @@ func TestServiceParam(t *testing.T) {
 		// test UseEmbedEtcd
 		t.Setenv("etcd.use.embed", "true")
 		t.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.ClusterDeployMode)
-		assert.Panics(t, func() { SParams.Init() })
+		assert.Panics(t, func() { SParams.init() })
 
 		t.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode)
 		t.Setenv("etcd.use.embed", "false")
-		SParams.Init()
+		SParams.init()
 	})
 
 	t.Run("test pulsarConfig", func(t *testing.T) {

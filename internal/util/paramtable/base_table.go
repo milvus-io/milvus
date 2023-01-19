@@ -76,9 +76,9 @@ func NewBaseTableFromYamlOnly(yaml string) *BaseTable {
 	return gp
 }
 
-// Init initializes the param table.
+// init initializes the param table.
 // if refreshInterval greater than 0 will auto refresh config from source
-func (gp *BaseTable) Init(refreshInterval int) {
+func (gp *BaseTable) init(refreshInterval int) {
 	formatter := func(key string) string {
 		ret := strings.ToLower(key)
 		ret = strings.TrimPrefix(ret, "milvus.")
