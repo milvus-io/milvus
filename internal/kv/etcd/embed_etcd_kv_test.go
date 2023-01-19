@@ -35,7 +35,7 @@ import (
 
 func TestEmbedEtcd(te *testing.T) {
 	te.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode)
-	param := new(paramtable.ServiceParam)
+	param := new(paramtable.ComponentParam)
 	te.Setenv("etcd.use.embed", "true")
 	te.Setenv("etcd.config.path", "../../../configs/advanced/etcd.yaml")
 

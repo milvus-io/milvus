@@ -53,8 +53,8 @@ type ServiceParam struct {
 	MinioCfg        MinioConfig
 }
 
-func (p *ServiceParam) Init() {
-	p.BaseTable.Init(10)
+func (p *ServiceParam) init() {
+	p.BaseTable.init(10)
 
 	p.LocalStorageCfg.Init(&p.BaseTable)
 	p.MetaStoreCfg.Init(&p.BaseTable)

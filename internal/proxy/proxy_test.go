@@ -474,10 +474,10 @@ func TestProxy(t *testing.T) {
 	testServer := newProxyTestServer(proxy)
 	wg.Add(1)
 
-	base := paramtable.BaseTable{}
-	base.Init(0)
+	base := &paramtable.ComponentParam{}
+	base.Init()
 	var p paramtable.GrpcServerConfig
-	p.Init(typeutil.ProxyRole, &base)
+	p.Init(typeutil.ProxyRole, &base.BaseTable)
 	testServer.Proxy.SetAddress(p.GetAddress())
 	assert.Equal(t, p.GetAddress(), testServer.Proxy.GetAddress())
 

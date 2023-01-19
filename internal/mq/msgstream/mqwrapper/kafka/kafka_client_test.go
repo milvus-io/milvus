@@ -22,10 +22,10 @@ import (
 	"go.uber.org/zap"
 )
 
-var Params paramtable.BaseTable
+var Params = paramtable.Get()
 
 func TestMain(m *testing.M) {
-	Params.Init(0)
+	Params.Init()
 	mockCluster, err := kafka.NewMockCluster(1)
 	defer mockCluster.Close()
 	if err != nil {

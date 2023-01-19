@@ -32,11 +32,11 @@ func TestProxyRpcLimit(t *testing.T) {
 	localMsg := true
 	factory := dependency.NewDefaultFactory(localMsg)
 
-	base := paramtable.BaseTable{}
-	base.Init(0)
+	base := &paramtable.ComponentParam{}
+	base.Init()
 	var p paramtable.GrpcServerConfig
 	assert.NoError(t, err)
-	p.Init(typeutil.ProxyRole, &base)
+	p.Init(typeutil.ProxyRole, &base.BaseTable)
 	base.Save("proxy.grpc.serverMaxRecvSize", "1")
 
 	assert.Equal(t, p.ServerMaxRecvSize.GetAsInt(), 1)

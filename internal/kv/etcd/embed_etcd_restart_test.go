@@ -32,7 +32,7 @@ func TestEtcdRestartLoad(te *testing.T) {
 	etcdDataDir := "/tmp/_etcd_data"
 	te.Setenv(metricsinfo.DeployModeEnvKey, metricsinfo.StandaloneDeployMode)
 	te.Setenv("ETCD_USE_EMBED", "true")
-	param := new(paramtable.ServiceParam)
+	param := new(paramtable.ComponentParam)
 	param.Init()
 	param.BaseTable.Save("etcd.config.path", "../../../configs/advanced/etcd.yaml")
 	param.BaseTable.Save("etcd.data.dir", etcdDataDir)

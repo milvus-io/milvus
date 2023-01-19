@@ -30,7 +30,7 @@ import (
 )
 
 func Test_NewClient(t *testing.T) {
-	proxy.Params.InitOnce()
+	proxy.Params.Init()
 	ctx := context.Background()
 	client, err := NewClient(ctx, "")
 	assert.Nil(t, client)

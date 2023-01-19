@@ -44,10 +44,10 @@ const (
 	DefaultPulsarNamespace = "default"
 )
 
-var Params paramtable.BaseTable
+var Params = paramtable.Get()
 
 func TestMain(m *testing.M) {
-	Params.Init(0)
+	Params.Init()
 	exitCode := m.Run()
 	os.Exit(exitCode)
 }

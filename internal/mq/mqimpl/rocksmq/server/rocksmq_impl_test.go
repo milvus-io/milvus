@@ -168,8 +168,7 @@ func TestRocksmq_RegisterConsumer(t *testing.T) {
 	defer os.RemoveAll(rocksdbPath + kvSuffix)
 	defer os.RemoveAll(rocksdbPath)
 
-	var params paramtable.BaseTable
-	params.Init(0)
+	paramtable.Init()
 	rmq, err := NewRocksMQ(rocksdbPath, idAllocator)
 	assert.NoError(t, err)
 	defer rmq.Close()
@@ -233,8 +232,7 @@ func TestRocksmq_Basic(t *testing.T) {
 	rocksdbPath := rmqPath + suffix
 	defer os.RemoveAll(rocksdbPath + kvSuffix)
 	defer os.RemoveAll(rocksdbPath)
-	var params paramtable.BaseTable
-	params.Init(0)
+	paramtable.Init()
 	rmq, err := NewRocksMQ(rocksdbPath, idAllocator)
 	assert.Nil(t, err)
 	defer rmq.Close()
@@ -370,8 +368,7 @@ func TestRocksmq_Dummy(t *testing.T) {
 	rocksdbPath := rmqPath + suffix
 	defer os.RemoveAll(rocksdbPath + kvSuffix)
 	defer os.RemoveAll(rocksdbPath)
-	var params paramtable.BaseTable
-	params.Init(0)
+	paramtable.Init()
 	rmq, err := NewRocksMQ(rocksdbPath, idAllocator)
 	assert.Nil(t, err)
 	defer rmq.Close()
@@ -441,8 +438,7 @@ func TestRocksmq_Seek(t *testing.T) {
 	defer os.RemoveAll(rocksdbPath + kvSuffix)
 	defer os.RemoveAll(rocksdbPath)
 
-	var params paramtable.BaseTable
-	params.Init(0)
+	paramtable.Init()
 	rmq, err := NewRocksMQ(rocksdbPath, idAllocator)
 	assert.Nil(t, err)
 	defer rmq.Close()
@@ -509,8 +505,8 @@ func TestRocksmq_Loop(t *testing.T) {
 	kvName := name + "_meta_kv"
 	_ = os.RemoveAll(kvName)
 	defer os.RemoveAll(kvName)
-	var params paramtable.BaseTable
-	params.Init(0)
+
+	paramtable.Init()
 	rmq, err := NewRocksMQ(name, idAllocator)
 	assert.Nil(t, err)
 	defer rmq.Close()
@@ -581,8 +577,8 @@ func TestRocksmq_Goroutines(t *testing.T) {
 	kvName := name + "_meta_kv"
 	_ = os.RemoveAll(kvName)
 	defer os.RemoveAll(kvName)
-	var params paramtable.BaseTable
-	params.Init(0)
+
+	paramtable.Init()
 	rmq, err := NewRocksMQ(name, idAllocator)
 	assert.Nil(t, err)
 	defer rmq.Close()
@@ -660,8 +656,8 @@ func TestRocksmq_Throughout(t *testing.T) {
 	kvName := name + "_meta_kv"
 	_ = os.RemoveAll(kvName)
 	defer os.RemoveAll(kvName)
-	var params paramtable.BaseTable
-	params.Init(0)
+
+	paramtable.Init()
 	rmq, err := NewRocksMQ(name, idAllocator)
 	assert.Nil(t, err)
 	defer rmq.Close()
@@ -725,8 +721,8 @@ func TestRocksmq_MultiChan(t *testing.T) {
 	kvName := name + "_meta_kv"
 	_ = os.RemoveAll(kvName)
 	defer os.RemoveAll(kvName)
-	var params paramtable.BaseTable
-	params.Init(0)
+
+	paramtable.Init()
 	rmq, err := NewRocksMQ(name, idAllocator)
 	assert.Nil(t, err)
 	defer rmq.Close()
@@ -779,8 +775,8 @@ func TestRocksmq_CopyData(t *testing.T) {
 	kvName := name + "_meta_kv"
 	_ = os.RemoveAll(kvName)
 	defer os.RemoveAll(kvName)
-	var params paramtable.BaseTable
-	params.Init(0)
+
+	paramtable.Init()
 	rmq, err := NewRocksMQ(name, idAllocator)
 	assert.Nil(t, err)
 	defer rmq.Close()
@@ -847,8 +843,8 @@ func TestRocksmq_SeekToLatest(t *testing.T) {
 	kvName := name + "_meta_kv"
 	_ = os.RemoveAll(kvName)
 	defer os.RemoveAll(kvName)
-	var params paramtable.BaseTable
-	params.Init(0)
+
+	paramtable.Init()
 	rmq, err := NewRocksMQ(name, idAllocator)
 	assert.Nil(t, err)
 	defer rmq.Close()

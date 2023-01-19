@@ -26,7 +26,7 @@ const (
 var params ComponentParam
 
 func Init() {
-	params.InitOnce()
+	params.Init()
 }
 
 func Get() *ComponentParam {

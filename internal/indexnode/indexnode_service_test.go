@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/metautil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func genStorageConfig() *indexpb.StorageConfig {
@@ -48,7 +49,8 @@ func genStorageConfig() *indexpb.StorageConfig {
 
 func TestIndexNodeSimple(t *testing.T) {
 	in, err := NewMockIndexNodeComponent(context.TODO())
-	assert.Nil(t, err)
+	require.Nil(t, err)
+	defer in.Stop()
 	ctx := context.TODO()
 	state, err := in.GetComponentStates(ctx)
 	assert.Nil(t, err)
@@ -226,7 +228,8 @@ func TestIndexNodeComplex(t *testing.T) {
 		}
 	)
 	in, err := NewMockIndexNodeComponent(context.TODO())
-	assert.Nil(t, err)
+	require.Nil(t, err)
+	defer in.Stop()
 	ctx := context.TODO()
 	state, err := in.GetComponentStates(ctx)
 	assert.Nil(t, err)
@@ -386,6 +389,7 @@ func TestGetMetrics(t *testing.T) {
 	)
 	in, err := NewMockIndexNodeComponent(ctx)
 	assert.Nil(t, err)
+	defer in.Stop()
 	resp, err := in.GetMetrics(ctx, metricReq)
 	assert.Nil(t, err)
 	assert.Equal(t, resp.Status.ErrorCode, commonpb.ErrorCode_Success)
@@ -399,6 +403,7 @@ func TestGetMetricsError(t *testing.T) {
 
 	in, err := NewMockIndexNodeComponent(ctx)
 	assert.Nil(t, err)
+	defer in.Stop()
 	errReq := &milvuspb.GetMetricsRequest{
 		Request: `{"metric_typ": "system_info"}`,
 	}

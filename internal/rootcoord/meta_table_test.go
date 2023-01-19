@@ -447,7 +447,7 @@ func TestMetaTable_getCollectionByIDInternal(t *testing.T) {
 	})
 
 	t.Run("normal case, filter unavailable partitions", func(t *testing.T) {
-		Params.InitOnce()
+		Params.Init()
 		meta := &MetaTable{
 			collID2Meta: map[typeutil.UniqueID]*model.Collection{
 				100: {
@@ -469,7 +469,7 @@ func TestMetaTable_getCollectionByIDInternal(t *testing.T) {
 	})
 
 	t.Run("get latest version", func(t *testing.T) {
-		Params.InitOnce()
+		Params.Init()
 		meta := &MetaTable{
 			collID2Meta: map[typeutil.UniqueID]*model.Collection{
 				100: {

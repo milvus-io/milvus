@@ -3735,6 +3735,7 @@ func Test_newChunkManagerFactory(t *testing.T) {
 	paramtable.Get().Save(Params.DataCoordCfg.EnableGarbageCollection.Key, "true")
 
 	t.Run("err_minio_bad_address", func(t *testing.T) {
+		paramtable.Get().Save(Params.CommonCfg.StorageType.Key, "minio")
 		paramtable.Get().Save(Params.MinioCfg.Address.Key, "host:9000:bad")
 		defer paramtable.Get().Reset(Params.MinioCfg.Address.Key)
 		storageCli, err := server.newChunkManagerFactory()

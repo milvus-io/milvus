@@ -287,9 +287,7 @@ func genIndexCase() []indexTestCase {
 }
 
 func genStorageConfig() *indexpb.StorageConfig {
-	InitOnce.Do(func() {
-		Params.Init()
-	})
+	Params.Init()
 
 	return &indexpb.StorageConfig{
 		Address:         Params.MinioCfg.Address.GetValue(),
