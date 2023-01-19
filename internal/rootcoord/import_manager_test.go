@@ -542,7 +542,10 @@ func TestImportManager_ImportJob(t *testing.T) {
 		globalCount++
 		return globalCount, 0, nil
 	}
+
 	paramtable.Get().Save(Params.RootCoordCfg.ImportTaskSubPath.Key, "test_import_task")
+	paramtable.Get().Save(Params.RootCoordCfg.ImportMaxPendingTaskCount.Key, "16")
+	defer paramtable.Get().Remove(Params.RootCoordCfg.ImportMaxPendingTaskCount.Key)
 	colID := int64(100)
 	mockKv := memkv.NewMemoryKV()
 	callMarkSegmentsDropped := func(ctx context.Context, segIDs []typeutil.UniqueID) (*commonpb.Status, error) {
@@ -654,9 +657,9 @@ func TestImportManager_ImportJob(t *testing.T) {
 
 	// the pending list already has one task
 	// once task count exceeds MaxPendingCount, return error
-	for i := 0; i <= MaxPendingCount; i++ {
+	for i := 0; i <= Params.RootCoordCfg.ImportMaxPendingTaskCount.GetAsInt(); i++ {
 		resp = mgr.importJob(context.TODO(), rowReq, colID, 0)
-		if i < MaxPendingCount-1 {
+		if i < Params.RootCoordCfg.ImportMaxPendingTaskCount.GetAsInt()-1 {
 			assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 		} else {
 			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)

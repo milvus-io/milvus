@@ -579,6 +579,7 @@ type rootCoordConfig struct {
 	MinSegmentSizeToEnableIndex ParamItem `refreshable:"true"`
 	ImportTaskExpiration        ParamItem `refreshable:"true"`
 	ImportTaskRetention         ParamItem `refreshable:"true"`
+	ImportMaxPendingTaskCount   ParamItem `refreshable:"true"`
 	ImportTaskSubPath           ParamItem `refreshable:"true"`
 	EnableActiveStandby         ParamItem `refreshable:"false"`
 }
@@ -625,6 +626,13 @@ func (p *rootCoordConfig) init(base *BaseTable) {
 		DefaultValue: "importtask",
 	}
 	p.ImportTaskSubPath.Init(base.mgr)
+
+	p.ImportMaxPendingTaskCount = ParamItem{
+		Key:          "rootCoord.importMaxPendingTaskCount",
+		Version:      "2.2.2",
+		DefaultValue: strconv.Itoa(65535),
+	}
+	p.ImportMaxPendingTaskCount.Init(base.mgr)
 
 	p.EnableActiveStandby = ParamItem{
 		Key:          "rootCoord.enableActiveStandby",

@@ -40,8 +40,7 @@ import (
 )
 
 const (
-	MaxPendingCount = 65536 // TODO: Make this configurable.
-	delimiter       = "/"
+	delimiter = "/"
 )
 
 // checkPendingTasksInterval is the default interval to check and send out pending tasks,
@@ -94,7 +93,7 @@ func newImportManager(ctx context.Context, client kv.TxnKV,
 	mgr := &importManager{
 		ctx:                       ctx,
 		taskStore:                 client,
-		pendingTasks:              make([]*datapb.ImportTaskInfo, 0, MaxPendingCount), // currently task queue max size is 32
+		pendingTasks:              make([]*datapb.ImportTaskInfo, 0, Params.RootCoordCfg.ImportMaxPendingTaskCount.GetAsInt()), // currently task queue max size is 32
 		workingTasks:              make(map[int64]*datapb.ImportTaskInfo),
 		busyNodes:                 make(map[int64]int64),
 		pendingLock:               sync.RWMutex{},
