@@ -150,7 +150,7 @@ build-cpp-with-unittest: download-milvus-proto
 
 build-cpp-with-coverage: download-milvus-proto
 	@echo "Building Milvus cpp library with coverage and unittest ..."
-	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -u -a -c -f "$(CUSTOM_THIRDPARTY_PATH)" -n ${disk_index})
+	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -u -a ${USE_ASAN} -c -f "$(CUSTOM_THIRDPARTY_PATH)" -n ${disk_index})
 
 
 # Run the tests.

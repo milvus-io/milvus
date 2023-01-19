@@ -59,7 +59,7 @@ EMBEDDED_MILVUS="OFF"
 BUILD_DISK_ANN="OFF"
 USE_ASAN="OFF"
 
-while getopts "p:d:t:s:f:n:ulrcghzmeba" arg; do
+while getopts "p:d:t:s:f:n:a:ulrcghzmeb" arg; do
   case $arg in
   f)
     CUSTOM_THIRDPARTY_PATH=$OPTARG
@@ -107,8 +107,12 @@ while getopts "p:d:t:s:f:n:ulrcghzmeba" arg; do
     BUILD_DISK_ANN=$OPTARG
     ;;
   a)
-    USE_ASAN="ON"
-    BUILD_TYPE=Debug
+    ENV_VAL=$OPTARG
+    if [[ ${ENV_VAL} == 'true' ]]; then
+        echo "Set USE_ASAN to ON"
+        USE_ASAN="ON"
+        BUILD_TYPE=Debug
+    fi
     ;;
   h) # help
     echo "
@@ -127,7 +131,7 @@ parameter:
 -e: build without prometheus(default: OFF)
 -s: build with CUDA arch(default:DEFAULT), for example '-gencode=compute_61,code=sm_61;-gencode=compute_75,code=sm_75'
 -b: build embedded milvus(default: OFF)
--a: build milvus with AddressSanitizer
+-a: build milvus with AddressSanitizer(default: false)
 -h: help
 
 usage:

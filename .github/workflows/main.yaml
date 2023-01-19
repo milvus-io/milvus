@@ -46,6 +46,26 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+      - name: 'Check Changed files'
+        id: changed-files-cpp
+        uses: tj-actions/changed-files@v35
+        with:
+          since_last_remote_commit: 'true'
+          files: |
+            **/*.cpp
+            **/*.cc
+            **/*.c
+            **/*.h
+            **/*.hpp
+            **/*.CMakeLists.txt
+            **/conanfiles.*          
+      - name: 'Setup Use USE_ASAN'
+        if: steps.changed-files-cpp.outputs.any_changed == 'true'
+        run: |
+            echo "useasan=true" >> $GITHUB_ENV
+            echo "Setup USE_ASAN to true since cpp file(s) changed"
       - name: 'Generate CCache Hash'
         env:
           CORE_HASH: ${{ hashFiles( 'internal/core/**/*.cpp', 'internal/core/**/*.cc', 'internal/core/**/*.c', 'internal/core/**/*.h', 'internal/core/**/*.hpp', 'internal/core/**/CMakeLists.txt') }}
@@ -76,7 +96,7 @@ jobs:
           docker-compose up -d pulsar etcd minio
       - name: Build and UnitTest
         run: |
-          ./build/builder.sh /bin/bash -c "make ci-ut"
+          ./build/builder.sh /bin/bash -c "make USE_ASAN={{env.useasan}} ci-ut"
       - name: Get the status & restart count for containers when ut failed
         if: ${{ failure() }}
         run: |
