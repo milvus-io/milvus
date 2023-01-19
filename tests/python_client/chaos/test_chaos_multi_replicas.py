@@ -214,7 +214,7 @@ class TestChaos(TestChaosBase):
         sleep(2)
         # wait all pods ready
         log.info(f"wait for pods in namespace {constants.CHAOS_NAMESPACE} with label app.kubernetes.io/instance={release_name}")
-        ready_1 = wait_pods_ready(constants.CHAOS_NAMESPACE,f"app.kubernetes.io/instance={release_name}")
+        ready_1 = wait_pods_ready(constants.CHAOS_NAMESPACE, f"app.kubernetes.io/instance={release_name}")
         log.info(f"wait for pods in namespace {constants.CHAOS_NAMESPACE} with label release={release_name}")
         ready_2 = wait_pods_ready(constants.CHAOS_NAMESPACE, f"release={release_name}")
         if ready_1 and ready_2:

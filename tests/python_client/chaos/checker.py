@@ -75,7 +75,7 @@ def exception_handler():
                 e_str = str(e)
                 log_e = e_str[0:log_row_length] + \
                     '......' if len(e_str) > log_row_length else e_str
-                log.error(log_e)
+                log.error(f"class: {self.__class__.__name__}, func name: {func.__name__}, error: {log_e}")
                 return Error(e), False
         return inner_wrapper
     return wrapper

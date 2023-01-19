@@ -3,28 +3,28 @@ cluster:
 image:
   all:
     repository: milvusdb/milvus
-    tag: master-latest
+    tag: 2.2.0-latest
     pullPolicy: IfNotPresent
 
 rootCoordinator:
   replicas: 2
   activeStandby:
-    enabled: true  # Enable active-standby when you set multiple replicas for root coordinator  
+    enabled: true  # Enable active-standby when you set multiple replicas for root coordinator
 
 queryCoordinator:
   replicas: 2
   activeStandby:
-    enabled: true  # Enable active-standby when you set multiple replicas for root coordinator  
+    enabled: true  # Enable active-standby when you set multiple replicas for root coordinator
 
 dataCoordinator:
   replicas: 2
   activeStandby:
-    enabled: true  # Enable active-standby when you set multiple replicas for root coordinator  
+    enabled: true  # Enable active-standby when you set multiple replicas for root coordinator
 
 indexCoordinator:
   replicas: 2
   activeStandby:
-    enabled: true  # Enable active-standby when you set multiple replicas for root coordinator  
+    enabled: true  # Enable active-standby when you set multiple replicas for root coordinator
 
 
 etcd:

@@ -42,3 +42,6 @@ h5py==3.1.0
 
 # for log
 loguru==0.5.3
+
+# for standby test
+etcd3==0.12.0
