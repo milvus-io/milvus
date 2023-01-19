@@ -864,6 +864,10 @@ func (s *Server) CheckHealth(ctx context.Context, request *milvuspb.CheckHealthR
 	return s.proxy.CheckHealth(ctx, request)
 }
 
+func (s *Server) RenameCollection(ctx context.Context, req *milvuspb.RenameCollectionRequest) (*commonpb.Status, error) {
+	return s.proxy.RenameCollection(ctx, req)
+}
+
 func (s *Server) CreateResourceGroup(ctx context.Context, req *milvuspb.CreateResourceGroupRequest) (*commonpb.Status, error) {
 	return nil, nil
 }

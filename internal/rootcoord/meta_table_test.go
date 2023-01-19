@@ -22,17 +22,16 @@ import (
 	"math/rand"
 	"testing"
 
-	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
+	"github.com/milvus-io/milvus/internal/common"
+	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-
-	"github.com/milvus-io/milvus/internal/common"
-	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util"
@@ -911,6 +910,139 @@ func TestMetaTable_AddPartition(t *testing.T) {
 		}
 		err := meta.AddPartition(context.TODO(), &model.Partition{CollectionID: 100, State: pb.PartitionState_PartitionCreated})
 		assert.NoError(t, err)
+	})
+}
+
+func TestMetaTable_RenameCollection(t *testing.T) {
+	t.Run("unsupported use a alias to rename collection", func(t *testing.T) {
+		meta := &MetaTable{
+			collAlias2ID: map[string]typeutil.UniqueID{
+				"alias": 1,
+			},
+		}
+		err := meta.RenameCollection(context.TODO(), "alias", "new", typeutil.MaxTimestamp)
+		assert.Error(t, err)
+	})
+
+	t.Run("collection name not exist", func(t *testing.T) {
+		meta := &MetaTable{}
+		err := meta.RenameCollection(context.TODO(), "non-exists", "new", typeutil.MaxTimestamp)
+		assert.Error(t, err)
+	})
+
+	t.Run("collection id not exist", func(t *testing.T) {
+		meta := &MetaTable{
+			collName2ID: map[string]typeutil.UniqueID{
+				"old": 1,
+			},
+		}
+		err := meta.RenameCollection(context.TODO(), "old", "new", typeutil.MaxTimestamp)
+		assert.Error(t, err)
+	})
+
+	t.Run("new collection name already exist-1", func(t *testing.T) {
+		meta := &MetaTable{
+			collName2ID: map[string]typeutil.UniqueID{
+				"old": 1,
+				"new": 2,
+			},
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				2: {
+					CollectionID: 1,
+					Name:         "old",
+					State:        pb.CollectionState_CollectionCreated,
+				},
+			},
+		}
+		err := meta.RenameCollection(context.TODO(), "old", "new", 1000)
+		assert.Error(t, err)
+	})
+
+	t.Run("new collection name already exist-2", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("GetCollectionByID",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(nil, errors.New("error mock GetCollectionByID"))
+		meta := &MetaTable{
+			catalog: catalog,
+			collName2ID: map[string]typeutil.UniqueID{
+				"old": 1,
+				"new": 2,
+			},
+		}
+		err := meta.RenameCollection(context.TODO(), "old", "new", 1000)
+		assert.Error(t, err)
+	})
+
+	t.Run("alter collection fail", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("AlterCollection",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(errors.New("fail"))
+		catalog.On("GetCollectionByName",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(nil, common.NewCollectionNotExistError("error"))
+
+		meta := &MetaTable{
+			catalog: catalog,
+			collName2ID: map[string]typeutil.UniqueID{
+				"old": 1,
+			},
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				1: {
+					CollectionID: 1,
+					Name:         "old",
+				},
+			},
+		}
+		err := meta.RenameCollection(context.TODO(), "old", "new", 1000)
+		assert.Error(t, err)
+	})
+
+	t.Run("alter collection ok", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("AlterCollection",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(nil)
+		catalog.On("GetCollectionByName",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(nil, common.NewCollectionNotExistError("error"))
+		meta := &MetaTable{
+			catalog: catalog,
+			collName2ID: map[string]typeutil.UniqueID{
+				"old": 1,
+			},
+			collID2Meta: map[typeutil.UniqueID]*model.Collection{
+				1: {
+					CollectionID: 1,
+					Name:         "old",
+				},
+			},
+		}
+		err := meta.RenameCollection(context.TODO(), "old", "new", 1000)
+		assert.NoError(t, err)
+
+		id, ok := meta.collName2ID["new"]
+		assert.True(t, ok)
+		assert.Equal(t, int64(1), id)
+
+		coll, ok := meta.collID2Meta[1]
+		assert.True(t, ok)
+		assert.Equal(t, "new", coll.Name)
 	})
 }
 

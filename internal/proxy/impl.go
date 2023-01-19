@@ -24,10 +24,11 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/golang/protobuf/proto"
 	"go.opentelemetry.io/otel"
+	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
@@ -49,7 +50,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"go.uber.org/zap"
 )
 
 const moduleName = "Proxy"
@@ -4405,6 +4405,47 @@ func (node *Proxy) CheckHealth(ctx context.Context, request *milvuspb.CheckHealt
 		Reasons:     reasons,
 		IsHealthy:   true,
 	}, nil
+}
+
+func (node *Proxy) RenameCollection(ctx context.Context, req *milvuspb.RenameCollectionRequest) (*commonpb.Status, error) {
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-RefreshPolicyInfoCache")
+	defer sp.End()
+
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("oldName", req.GetOldName()),
+		zap.String("newName", req.GetNewName()))
+
+	log.Info("received rename collection request")
+	var err error
+
+	if !node.checkHealthy() {
+		return unhealthyStatus(), nil
+	}
+
+	if err := validateCollectionName(req.GetNewName()); err != nil {
+		log.Warn("validate new collection name fail", zap.Error(err))
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_IllegalCollectionName,
+			Reason:    err.Error(),
+		}, err
+	}
+
+	req.Base = commonpbutil.NewMsgBase(
+		commonpbutil.WithMsgType(commonpb.MsgType_RenameCollection),
+		commonpbutil.WithMsgID(0),
+		commonpbutil.WithSourceID(paramtable.GetNodeID()),
+	)
+	resp, err := node.rootCoord.RenameCollection(ctx, req)
+	if err != nil {
+		log.Warn("failed to rename collection", zap.Error(err))
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}, err
+	}
+
+	return resp, nil
 }
 
 func (node *Proxy) CreateResourceGroup(ctx context.Context, request *milvuspb.CreateResourceGroupRequest) (*commonpb.Status, error) {

@@ -54,6 +54,7 @@ type mockMetaTable struct {
 	GetPartitionByNameFunc           func(collID UniqueID, partitionName string, ts Timestamp) (UniqueID, error)
 	GetCollectionVirtualChannelsFunc func(colID int64) []string
 	AlterCollectionFunc              func(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts Timestamp) error
+	RenameCollectionFunc             func(ctx context.Context, oldName string, newName string, ts Timestamp) error
 }
 
 func (m mockMetaTable) ListCollections(ctx context.Context, ts Timestamp) ([]*model.Collection, error) {
@@ -114,6 +115,10 @@ func (m mockMetaTable) ListAliasesByID(collID UniqueID) []string {
 
 func (m mockMetaTable) AlterCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts Timestamp) error {
 	return m.AlterCollectionFunc(ctx, oldColl, newColl, ts)
+}
+
+func (m *mockMetaTable) RenameCollection(ctx context.Context, oldName string, newName string, ts Timestamp) error {
+	return m.RenameCollectionFunc(ctx, oldName, newName, ts)
 }
 
 func (m mockMetaTable) GetCollectionIDByName(name string) (UniqueID, error) {

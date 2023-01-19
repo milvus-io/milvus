@@ -31,7 +31,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
-	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/etcd"
@@ -39,17 +38,12 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 )
 
-type proxyMock struct {
-	types.Proxy
-	invalidateCollectionMetaCache func(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error)
-}
-
-func (p *proxyMock) InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
-	return p.invalidateCollectionMetaCache(ctx, request)
-}
-
 type mockCore struct {
 	types.RootCoordComponent
+}
+
+func (m *mockCore) RenameCollection(ctx context.Context, request *milvuspb.RenameCollectionRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
 }
 
 func (m *mockCore) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
@@ -194,9 +188,13 @@ func TestRun(t *testing.T) {
 		assert.Equal(t, true, ret.IsHealthy)
 	})
 
+	t.Run("RenameCollection", func(t *testing.T) {
+		_, err := svr.RenameCollection(ctx, nil)
+		assert.Nil(t, err)
+	})
+
 	err = svr.Stop()
 	assert.Nil(t, err)
-
 }
 
 func TestServerRun_DataCoordClientInitErr(t *testing.T) {
