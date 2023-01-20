@@ -27,7 +27,7 @@ class SubSearchResult {
           topk_(topk),
           round_decimal_(round_decimal),
           metric_type_(metric_type),
-          seg_offsets_(num_queries * topk, -1),
+          seg_offsets_(num_queries * topk, INVALID_SEG_OFFSET),
           distances_(num_queries * topk, init_value(metric_type)) {
     }
 

@@ -40,17 +40,29 @@ SubSearchResult::merge_impl(const SubSearchResult& right) {
         auto rit = 0;  // right iter
 
         for (auto buf_iter = 0; buf_iter < topk_; ++buf_iter) {
+            auto left_id = left_ids[lit];
             auto left_v = left_distances[lit];
+            auto right_id = right_ids[rit];
             auto right_v = right_distances[rit];
             // optimize out at compiling
-            if (is_desc ? (left_v >= right_v) : (left_v <= right_v)) {
+            if (left_id == INVALID_SEG_OFFSET) {
+                buf_distances[buf_iter] = right_distances[rit];
+                buf_ids[buf_iter] = right_ids[rit];
+                ++rit;
+            } else if (right_id == INVALID_SEG_OFFSET) {
                 buf_distances[buf_iter] = left_distances[lit];
                 buf_ids[buf_iter] = left_ids[lit];
                 ++lit;
             } else {
-                buf_distances[buf_iter] = right_distances[rit];
-                buf_ids[buf_iter] = right_ids[rit];
-                ++rit;
+                if (is_desc ? (left_v >= right_v) : (left_v <= right_v)) {
+                    buf_distances[buf_iter] = left_distances[lit];
+                    buf_ids[buf_iter] = left_ids[lit];
+                    ++lit;
+                } else {
+                    buf_distances[buf_iter] = right_distances[rit];
+                    buf_ids[buf_iter] = right_ids[rit];
+                    ++rit;
+                }
             }
         }
         std::copy_n(buf_distances.data(), topk_, left_distances);
