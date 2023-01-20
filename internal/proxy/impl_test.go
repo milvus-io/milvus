@@ -160,7 +160,7 @@ func TestProxyRenameCollection(t *testing.T) {
 		node.stateCode.Store(commonpb.StateCode_Healthy)
 		ctx := context.Background()
 		resp, err := node.RenameCollection(ctx, &milvuspb.RenameCollectionRequest{NewName: "$#^%#&#$*!)#@!"})
-		assert.Error(t, err)
+		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_IllegalCollectionName, resp.GetErrorCode())
 	})
 

@@ -330,9 +330,10 @@ func (mt *MetaTable) getCollectionByIDInternal(ctx context.Context, collectionID
 func (mt *MetaTable) GetCollectionByName(ctx context.Context, collectionName string, ts Timestamp) (*model.Collection, error) {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
+	return mt.getCollectionByNameInternal(ctx, collectionName, ts)
+}
 
-	var collectionID UniqueID
-
+func (mt *MetaTable) getCollectionByNameInternal(ctx context.Context, collectionName string, ts Timestamp) (*model.Collection, error) {
 	collectionID, ok := mt.collAlias2ID[collectionName]
 	if ok {
 		return mt.getCollectionByIDInternal(ctx, collectionID, ts, false)
@@ -447,10 +448,10 @@ func (mt *MetaTable) AlterCollection(ctx context.Context, oldColl *model.Collect
 }
 
 func (mt *MetaTable) RenameCollection(ctx context.Context, oldName string, newName string, ts Timestamp) error {
-	mt.ddLock.RLock()
-	defer mt.ddLock.RUnlock()
-	ctx = contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
 
+	ctx = contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
 	log := log.Ctx(ctx).With(zap.String("oldName", oldName), zap.String("newName", newName))
 
 	//old collection should not be an alias
@@ -461,7 +462,7 @@ func (mt *MetaTable) RenameCollection(ctx context.Context, oldName string, newNa
 	}
 
 	// check new collection already exists
-	newColl, err := mt.GetCollectionByName(ctx, newName, ts)
+	newColl, err := mt.getCollectionByNameInternal(ctx, newName, ts)
 	if newColl != nil {
 		return fmt.Errorf("duplicated new collection name :%s with other collection name or alias", newName)
 	}
@@ -471,7 +472,7 @@ func (mt *MetaTable) RenameCollection(ctx context.Context, oldName string, newNa
 	}
 
 	// get old collection meta
-	oldColl, err := mt.GetCollectionByName(ctx, oldName, ts)
+	oldColl, err := mt.getCollectionByNameInternal(ctx, oldName, ts)
 	if err != nil {
 		return err
 	}

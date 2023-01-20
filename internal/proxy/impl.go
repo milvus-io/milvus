@@ -4428,7 +4428,7 @@ func (node *Proxy) RenameCollection(ctx context.Context, req *milvuspb.RenameCol
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_IllegalCollectionName,
 			Reason:    err.Error(),
-		}, err
+		}, nil
 	}
 
 	req.Base = commonpbutil.NewMsgBase(
