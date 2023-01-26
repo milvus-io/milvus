@@ -36,7 +36,7 @@ import (
 
 const (
 	// RequestTimeout is default timeout for etcd request.
-	RequestTimeout = 10 * time.Second
+	RequestTimeout = 30 * time.Second
 )
 
 // EtcdKV implements TxnKV interface, it supports to process multiple kvs in a transaction.
@@ -432,7 +432,7 @@ func (kv *EtcdKV) MultiSave(kvs map[string]string) error {
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
 
-	CheckTnxStringValueSizeAndWarn(kvs)
+	CheckTxnStringValueSizeAndWarn(kvs)
 	_, err := kv.client.Txn(ctx).If().Then(ops...).Commit()
 	CheckElapseAndWarn(start, "Slow etcd operation multi save", zap.Strings("keys", keys))
 	return err
@@ -451,7 +451,7 @@ func (kv *EtcdKV) MultiSaveBytes(kvs map[string][]byte) error {
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
 
-	CheckTnxBytesValueSizeAndWarn(kvs)
+	CheckTxnBytesValueSizeAndWarn(kvs)
 	_, err := kv.client.Txn(ctx).If().Then(ops...).Commit()
 	CheckElapseAndWarn(start, "Slow etcd operation multi save", zap.Strings("keys", keys))
 	return err
@@ -542,6 +542,7 @@ func (kv *EtcdKV) MultiSaveBytesAndRemove(saves map[string][]byte, removals []st
 }
 
 // Watch starts watching a key, returns a watch channel.
+// Watch related can not set timeout
 func (kv *EtcdKV) Watch(key string) clientv3.WatchChan {
 	start := time.Now()
 	key = path.Join(kv.rootPath, key)
@@ -631,7 +632,10 @@ func (kv *EtcdKV) MultiSaveBytesAndRemoveWithPrefix(saves map[string][]byte, rem
 // Grant creates a new lease implemented in etcd grant interface.
 func (kv *EtcdKV) Grant(ttl int64) (id clientv3.LeaseID, err error) {
 	start := time.Now()
-	resp, err := kv.client.Grant(context.Background(), ttl)
+	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
+	defer cancel()
+
+	resp, err := kv.client.Grant(ctx, ttl)
 	CheckElapseAndWarn(start, "Slow etcd operation grant")
 	return resp.ID, err
 }
@@ -745,7 +749,7 @@ func CheckValueSizeAndWarn(key string, value interface{}) bool {
 	return false
 }
 
-func CheckTnxBytesValueSizeAndWarn(kvs map[string][]byte) bool {
+func CheckTxnBytesValueSizeAndWarn(kvs map[string][]byte) bool {
 	var hasWarn bool
 	for key, value := range kvs {
 		if CheckValueSizeAndWarn(key, value) {
@@ -755,11 +759,11 @@ func CheckTnxBytesValueSizeAndWarn(kvs map[string][]byte) bool {
 	return hasWarn
 }
 
-func CheckTnxStringValueSizeAndWarn(kvs map[string]string) bool {
+func CheckTxnStringValueSizeAndWarn(kvs map[string]string) bool {
 	newKvs := make(map[string][]byte, len(kvs))
 	for key, value := range kvs {
 		newKvs[key] = []byte(value)
 	}
 
-	return CheckTnxBytesValueSizeAndWarn(newKvs)
+	return CheckTxnBytesValueSizeAndWarn(newKvs)
 }

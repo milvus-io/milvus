@@ -34,6 +34,10 @@ const (
 	ModeInterval
 )
 
+const (
+	ReadConfigTimeout = 10 * time.Second
+)
+
 type EtcdSource struct {
 	sync.RWMutex
 	etcdCli          *clientv3.Client
@@ -120,7 +124,9 @@ func (es *EtcdSource) Close() {
 
 func (es *EtcdSource) refreshConfigurations() error {
 	prefix := es.keyPrefix + "/config"
-	response, err := es.etcdCli.Get(es.ctx, prefix, clientv3.WithPrefix())
+	ctx, cancel := context.WithTimeout(es.ctx, ReadConfigTimeout)
+	defer cancel()
+	response, err := es.etcdCli.Get(ctx, prefix, clientv3.WithPrefix())
 	if err != nil {
 		return err
 	}

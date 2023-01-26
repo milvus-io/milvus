@@ -1020,21 +1020,21 @@ func TestCheckValueSizeAndWarn(t *testing.T) {
 func TestCheckTnxBytesValueSizeAndWarn(t *testing.T) {
 	kvs := make(map[string][]byte, 0)
 	kvs["k"] = []byte("v")
-	ret := etcdkv.CheckTnxBytesValueSizeAndWarn(kvs)
+	ret := etcdkv.CheckTxnBytesValueSizeAndWarn(kvs)
 	assert.False(t, ret)
 
 	kvs["k"] = make([]byte, 1024000)
-	ret = etcdkv.CheckTnxBytesValueSizeAndWarn(kvs)
+	ret = etcdkv.CheckTxnBytesValueSizeAndWarn(kvs)
 	assert.True(t, ret)
 }
 
 func TestCheckTnxStringValueSizeAndWarn(t *testing.T) {
 	kvs := make(map[string]string, 0)
 	kvs["k"] = "v"
-	ret := etcdkv.CheckTnxStringValueSizeAndWarn(kvs)
+	ret := etcdkv.CheckTxnStringValueSizeAndWarn(kvs)
 	assert.False(t, ret)
 
 	kvs["k1"] = funcutil.RandomString(1024000)
-	ret = etcdkv.CheckTnxStringValueSizeAndWarn(kvs)
+	ret = etcdkv.CheckTxnStringValueSizeAndWarn(kvs)
 	assert.True(t, ret)
 }
