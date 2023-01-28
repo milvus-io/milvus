@@ -28,6 +28,7 @@
 
 namespace milvus::segcore {
 
+// see also internal/querynode/load_index_info.go
 struct LoadIndexInfo {
     int64_t collection_id;
     int64_t partition_id;
