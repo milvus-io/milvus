@@ -96,7 +96,7 @@ jobs:
           docker-compose up -d pulsar etcd minio
       - name: Build and UnitTest
         run: |
-          ./build/builder.sh /bin/bash -c "make USE_ASAN={{env.useasan}} ci-ut"
+          ./build/builder.sh /bin/bash -c "make USE_ASAN=${{env.useasan}} ci-ut"
       - name: Get the status & restart count for containers when ut failed
         if: ${{ failure() }}
         run: |
