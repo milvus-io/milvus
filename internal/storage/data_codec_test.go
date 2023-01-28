@@ -21,11 +21,12 @@ import (
 	"fmt"
 	"testing"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/stretchr/testify/assert"
-	"go.uber.org/zap"
 )
 
 const (
@@ -148,54 +149,42 @@ func TestInsertCodec(t *testing.T) {
 	insertData1 := &InsertData{
 		Data: map[int64]FieldData{
 			RowIDField: &Int64FieldData{
-				NumRows: []int64{2},
-				Data:    []int64{3, 4},
+				Data: []int64{3, 4},
 			},
 			TimestampField: &Int64FieldData{
-				NumRows: []int64{2},
-				Data:    []int64{3, 4},
+				Data: []int64{3, 4},
 			},
 			BoolField: &BoolFieldData{
-				NumRows: []int64{2},
-				Data:    []bool{true, false},
+				Data: []bool{true, false},
 			},
 			Int8Field: &Int8FieldData{
-				NumRows: []int64{2},
-				Data:    []int8{3, 4},
+				Data: []int8{3, 4},
 			},
 			Int16Field: &Int16FieldData{
-				NumRows: []int64{2},
-				Data:    []int16{3, 4},
+				Data: []int16{3, 4},
 			},
 			Int32Field: &Int32FieldData{
-				NumRows: []int64{2},
-				Data:    []int32{3, 4},
+				Data: []int32{3, 4},
 			},
 			Int64Field: &Int64FieldData{
-				NumRows: []int64{2},
-				Data:    []int64{3, 4},
+				Data: []int64{3, 4},
 			},
 			FloatField: &FloatFieldData{
-				NumRows: []int64{2},
-				Data:    []float32{3, 4},
+				Data: []float32{3, 4},
 			},
 			DoubleField: &DoubleFieldData{
-				NumRows: []int64{2},
-				Data:    []float64{3, 4},
+				Data: []float64{3, 4},
 			},
 			StringField: &StringFieldData{
-				NumRows: []int64{2},
-				Data:    []string{"3", "4"},
+				Data: []string{"3", "4"},
 			},
 			BinaryVectorField: &BinaryVectorFieldData{
-				NumRows: []int64{2},
-				Data:    []byte{0, 255},
-				Dim:     8,
+				Data: []byte{0, 255},
+				Dim:  8,
 			},
 			FloatVectorField: &FloatVectorFieldData{
-				NumRows: []int64{2},
-				Data:    []float32{4, 5, 6, 7, 4, 5, 6, 7},
-				Dim:     4,
+				Data: []float32{4, 5, 6, 7, 4, 5, 6, 7},
+				Dim:  4,
 			},
 		},
 	}
@@ -203,72 +192,60 @@ func TestInsertCodec(t *testing.T) {
 	insertData2 := &InsertData{
 		Data: map[int64]FieldData{
 			RowIDField: &Int64FieldData{
-				NumRows: []int64{2},
-				Data:    []int64{1, 2},
+				Data: []int64{1, 2},
 			},
 			TimestampField: &Int64FieldData{
-				NumRows: []int64{2},
-				Data:    []int64{1, 2},
+				Data: []int64{1, 2},
 			},
 			BoolField: &BoolFieldData{
-				NumRows: []int64{2},
-				Data:    []bool{true, false},
+				Data: []bool{true, false},
 			},
 			Int8Field: &Int8FieldData{
-				NumRows: []int64{2},
-				Data:    []int8{1, 2},
+				Data: []int8{1, 2},
 			},
 			Int16Field: &Int16FieldData{
-				NumRows: []int64{2},
-				Data:    []int16{1, 2},
+				Data: []int16{1, 2},
 			},
 			Int32Field: &Int32FieldData{
-				NumRows: []int64{2},
-				Data:    []int32{1, 2},
+				Data: []int32{1, 2},
 			},
 			Int64Field: &Int64FieldData{
-				NumRows: []int64{2},
-				Data:    []int64{1, 2},
+				Data: []int64{1, 2},
 			},
 			FloatField: &FloatFieldData{
-				NumRows: []int64{2},
-				Data:    []float32{1, 2},
+				Data: []float32{1, 2},
 			},
 			DoubleField: &DoubleFieldData{
-				NumRows: []int64{2},
-				Data:    []float64{1, 2},
+				Data: []float64{1, 2},
 			},
 			StringField: &StringFieldData{
-				NumRows: []int64{2},
-				Data:    []string{"1", "2"},
+				Data: []string{"1", "2"},
 			},
 			BinaryVectorField: &BinaryVectorFieldData{
-				NumRows: []int64{2},
-				Data:    []byte{0, 255},
-				Dim:     8,
+				Data: []byte{0, 255},
+				Dim:  8,
 			},
 			FloatVectorField: &FloatVectorFieldData{
-				NumRows: []int64{2},
-				Data:    []float32{0, 1, 2, 3, 0, 1, 2, 3},
-				Dim:     4,
+				Data: []float32{0, 1, 2, 3, 0, 1, 2, 3},
+				Dim:  4,
 			},
 		},
 	}
 
 	insertDataEmpty := &InsertData{
 		Data: map[int64]FieldData{
-			RowIDField:        &Int64FieldData{[]int64{}, []int64{}},
-			TimestampField:    &Int64FieldData{[]int64{}, []int64{}},
-			BoolField:         &BoolFieldData{[]int64{}, []bool{}},
-			Int8Field:         &Int8FieldData{[]int64{}, []int8{}},
-			Int16Field:        &Int16FieldData{[]int64{}, []int16{}},
-			Int32Field:        &Int32FieldData{[]int64{}, []int32{}},
-			Int64Field:        &Int64FieldData{[]int64{}, []int64{}},
-			FloatField:        &FloatFieldData{[]int64{}, []float32{}},
-			DoubleField:       &DoubleFieldData{[]int64{}, []float64{}},
-			StringField:       &StringFieldData{[]int64{}, []string{}},
-			BinaryVectorField: &BinaryVectorFieldData{[]int64{}, []byte{}, 8},
-			FloatVectorField:  &FloatVectorFieldData{[]int64{}, []float32{}, 4},
+			RowIDField:        &Int64FieldData{[]int64{}},
+			TimestampField:    &Int64FieldData{[]int64{}},
+			BoolField:         &BoolFieldData{[]bool{}},
+			Int8Field:         &Int8FieldData{[]int8{}},
+			Int16Field:        &Int16FieldData{[]int16{}},
+			Int32Field:        &Int32FieldData{[]int32{}},
+			Int64Field:        &Int64FieldData{[]int64{}},
+			FloatField:        &FloatFieldData{[]float32{}},
+			DoubleField:       &DoubleFieldData{[]float64{}},
+			StringField:       &StringFieldData{[]string{}},
+			BinaryVectorField: &BinaryVectorFieldData{[]byte{}, 8},
+			FloatVectorField:  &FloatVectorFieldData{[]float32{}, 4},
 		},
 	}
 	b, s, err := insertCodec.Serialize(PartitionID, SegmentID, insertDataEmpty)
@@ -294,18 +271,6 @@ func TestInsertCodec(t *testing.T) {
 	assert.Equal(t, UniqueID(CollectionID), collID)
 	assert.Equal(t, UniqueID(PartitionID), partID)
 	assert.Equal(t, UniqueID(SegmentID), segID)
-	assert.Equal(t, []int64{2, 2}, resultData.Data[RowIDField].(*Int64FieldData).NumRows)
-	assert.Equal(t, []int64{2, 2}, resultData.Data[TimestampField].(*Int64FieldData).NumRows)
-	assert.Equal(t, []int64{2, 2}, resultData.Data[BoolField].(*BoolFieldData).NumRows)
-	assert.Equal(t, []int64{2, 2}, resultData.Data[Int8Field].(*Int8FieldData).NumRows)
-	assert.Equal(t, []int64{2, 2}, resultData.Data[Int16Field].(*Int16FieldData).NumRows)
-	assert.Equal(t, []int64{2, 2}, resultData.Data[Int32Field].(*Int32FieldData).NumRows)
-	assert.Equal(t, []int64{2, 2}, resultData.Data[Int64Field].(*Int64FieldData).NumRows)
-	assert.Equal(t, []int64{2, 2}, resultData.Data[FloatField].(*FloatFieldData).NumRows)
-	assert.Equal(t, []int64{2, 2}, resultData.Data[DoubleField].(*DoubleFieldData).NumRows)
-	assert.Equal(t, []int64{2, 2}, resultData.Data[StringField].(*StringFieldData).NumRows)
-	assert.Equal(t, []int64{2, 2}, resultData.Data[BinaryVectorField].(*BinaryVectorFieldData).NumRows)
-	assert.Equal(t, []int64{2, 2}, resultData.Data[FloatVectorField].(*FloatVectorFieldData).NumRows)
 	assert.Equal(t, []int64{1, 2, 3, 4}, resultData.Data[RowIDField].(*Int64FieldData).Data)
 	assert.Equal(t, []int64{1, 2, 3, 4}, resultData.Data[TimestampField].(*Int64FieldData).Data)
 	assert.Equal(t, []bool{true, false, true, false}, resultData.Data[BoolField].(*BoolFieldData).Data)
@@ -459,59 +424,146 @@ func TestTsError(t *testing.T) {
 	assert.NotNil(t, err)
 }
 
-//func TestSchemaError(t *testing.T) {
-//	schema := &etcdpb.CollectionMeta{
-//		ID:            CollectionID,
-//		CreateTime:    1,
-//		SegmentIDs:    []int64{SegmentID},
-//		PartitionTags: []string{"partition_0", "partition_1"},
-//		Schema: &schemapb.CollectionSchema{
-//			Name:        "schema",
-//			Description: "schema",
-//			AutoID:      true,
-//			Fields: []*schemapb.FieldSchema{
-//				{
-//					FieldID:      RowIDField,
-//					Name:         "row_id",
-//					IsPrimaryKey: false,
-//					Description:  "row_id",
-//					DataType:     schemapb.DataType_Int64,
-//				},
-//				{
-//					FieldID:      TimestampField,
-//					Name:         "Timestamp",
-//					IsPrimaryKey: false,
-//					Description:  "Timestamp",
-//					DataType:     schemapb.DataType_Int64,
-//				},
-//				{
-//					FieldID:      BoolField,
-//					Name:         "field_bool",
-//					IsPrimaryKey: false,
-//					Description:  "bool",
-//					DataType:     999,
-//				},
-//			},
-//		},
-//	}
-//	insertData := &InsertData{
-//		Data: map[int64]FieldData{
-//			RowIDField: &Int64FieldData{
-//				NumRows: []int64{2},
-//				Data:    []int64{3, 4},
-//			},
-//			TimestampField: &Int64FieldData{
-//				NumRows: []int64{2},
-//				Data:    []int64{3, 4},
-//			},
-//			BoolField: &BoolFieldData{
-//				NumRows: []int64{2},
-//				Data:    []bool{true, false},
-//			},
-//		},
-//	}
-//	insertCodec := NewInsertCodec(schema)
-//	blobs, _, err := insertCodec.Serialize(PartitionID, SegmentID, insertData)
-//	assert.Nil(t, blobs)
-//	assert.NotNil(t, err)
-//}
+func TestMemorySize(t *testing.T) {
+	insertData1 := &InsertData{
+		Data: map[int64]FieldData{
+			RowIDField: &Int64FieldData{
+				Data: []int64{3},
+			},
+			TimestampField: &Int64FieldData{
+				Data: []int64{3},
+			},
+			BoolField: &BoolFieldData{
+				Data: []bool{true},
+			},
+			Int8Field: &Int8FieldData{
+				Data: []int8{3},
+			},
+			Int16Field: &Int16FieldData{
+				Data: []int16{3},
+			},
+			Int32Field: &Int32FieldData{
+				Data: []int32{3},
+			},
+			Int64Field: &Int64FieldData{
+				Data: []int64{3},
+			},
+			FloatField: &FloatFieldData{
+				Data: []float32{3},
+			},
+			DoubleField: &DoubleFieldData{
+				Data: []float64{3},
+			},
+			StringField: &StringFieldData{
+				Data: []string{"3"},
+			},
+			BinaryVectorField: &BinaryVectorFieldData{
+				Data: []byte{0},
+				Dim:  8,
+			},
+			FloatVectorField: &FloatVectorFieldData{
+				Data: []float32{4, 5, 6, 7},
+				Dim:  4,
+			},
+		},
+	}
+	assert.Equal(t, insertData1.Data[RowIDField].GetMemorySize(), 8)
+	assert.Equal(t, insertData1.Data[TimestampField].GetMemorySize(), 8)
+	assert.Equal(t, insertData1.Data[BoolField].GetMemorySize(), 1)
+	assert.Equal(t, insertData1.Data[Int8Field].GetMemorySize(), 1)
+	assert.Equal(t, insertData1.Data[Int16Field].GetMemorySize(), 2)
+	assert.Equal(t, insertData1.Data[Int32Field].GetMemorySize(), 4)
+	assert.Equal(t, insertData1.Data[Int64Field].GetMemorySize(), 8)
+	assert.Equal(t, insertData1.Data[FloatField].GetMemorySize(), 4)
+	assert.Equal(t, insertData1.Data[DoubleField].GetMemorySize(), 8)
+	assert.Equal(t, insertData1.Data[StringField].GetMemorySize(), 17)
+	assert.Equal(t, insertData1.Data[BinaryVectorField].GetMemorySize(), 5)
+	assert.Equal(t, insertData1.Data[FloatField].GetMemorySize(), 4)
+
+	insertData2 := &InsertData{
+		Data: map[int64]FieldData{
+			RowIDField: &Int64FieldData{
+				Data: []int64{1, 2},
+			},
+			TimestampField: &Int64FieldData{
+				Data: []int64{1, 2},
+			},
+			BoolField: &BoolFieldData{
+				Data: []bool{true, false},
+			},
+			Int8Field: &Int8FieldData{
+				Data: []int8{1, 2},
+			},
+			Int16Field: &Int16FieldData{
+				Data: []int16{1, 2},
+			},
+			Int32Field: &Int32FieldData{
+				Data: []int32{1, 2},
+			},
+			Int64Field: &Int64FieldData{
+				Data: []int64{1, 2},
+			},
+			FloatField: &FloatFieldData{
+				Data: []float32{1, 2},
+			},
+			DoubleField: &DoubleFieldData{
+				Data: []float64{1, 2},
+			},
+			StringField: &StringFieldData{
+				Data: []string{"1", "23"},
+			},
+			BinaryVectorField: &BinaryVectorFieldData{
+				Data: []byte{0, 255},
+				Dim:  8,
+			},
+			FloatVectorField: &FloatVectorFieldData{
+				Data: []float32{0, 1, 2, 3, 0, 1, 2, 3},
+				Dim:  4,
+			},
+		},
+	}
+
+	assert.Equal(t, insertData2.Data[RowIDField].GetMemorySize(), 16)
+	assert.Equal(t, insertData2.Data[TimestampField].GetMemorySize(), 16)
+	assert.Equal(t, insertData2.Data[BoolField].GetMemorySize(), 2)
+	assert.Equal(t, insertData2.Data[Int8Field].GetMemorySize(), 2)
+	assert.Equal(t, insertData2.Data[Int16Field].GetMemorySize(), 4)
+	assert.Equal(t, insertData2.Data[Int32Field].GetMemorySize(), 8)
+	assert.Equal(t, insertData2.Data[Int64Field].GetMemorySize(), 16)
+	assert.Equal(t, insertData2.Data[FloatField].GetMemorySize(), 8)
+	assert.Equal(t, insertData2.Data[DoubleField].GetMemorySize(), 16)
+	assert.Equal(t, insertData2.Data[StringField].GetMemorySize(), 35)
+	assert.Equal(t, insertData2.Data[BinaryVectorField].GetMemorySize(), 6)
+	assert.Equal(t, insertData2.Data[FloatField].GetMemorySize(), 8)
+
+	insertDataEmpty := &InsertData{
+		Data: map[int64]FieldData{
+			RowIDField:        &Int64FieldData{[]int64{}},
+			TimestampField:    &Int64FieldData{[]int64{}},
+			BoolField:         &BoolFieldData{[]bool{}},
+			Int8Field:         &Int8FieldData{[]int8{}},
+			Int16Field:        &Int16FieldData{[]int16{}},
+			Int32Field:        &Int32FieldData{[]int32{}},
+			Int64Field:        &Int64FieldData{[]int64{}},
+			FloatField:        &FloatFieldData{[]float32{}},
+			DoubleField:       &DoubleFieldData{[]float64{}},
+			StringField:       &StringFieldData{[]string{}},
+			BinaryVectorField: &BinaryVectorFieldData{[]byte{}, 8},
+			FloatVectorField:  &FloatVectorFieldData{[]float32{}, 4},
+		},
+	}
+
+	assert.Equal(t, insertDataEmpty.Data[RowIDField].GetMemorySize(), 0)
+	assert.Equal(t, insertDataEmpty.Data[TimestampField].GetMemorySize(), 0)
+	assert.Equal(t, insertDataEmpty.Data[BoolField].GetMemorySize(), 0)
+	assert.Equal(t, insertDataEmpty.Data[Int8Field].GetMemorySize(), 0)
+	assert.Equal(t, insertDataEmpty.Data[Int16Field].GetMemorySize(), 0)
+	assert.Equal(t, insertDataEmpty.Data[Int32Field].GetMemorySize(), 0)
+	assert.Equal(t, insertDataEmpty.Data[Int64Field].GetMemorySize(), 0)
+	assert.Equal(t, insertDataEmpty.Data[FloatField].GetMemorySize(), 0)
+	assert.Equal(t, insertDataEmpty.Data[DoubleField].GetMemorySize(), 0)
+	assert.Equal(t, insertDataEmpty.Data[StringField].GetMemorySize(), 0)
+	assert.Equal(t, insertDataEmpty.Data[BinaryVectorField].GetMemorySize(), 4)
+	assert.Equal(t, insertDataEmpty.Data[FloatVectorField].GetMemorySize(), 4)
+
+}

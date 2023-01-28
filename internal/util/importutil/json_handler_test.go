@@ -141,7 +141,6 @@ func Test_JSONRowConsumerFlush(t *testing.T) {
 		for j := 0; j < rowCountEachShard; j++ {
 			pkFieldData.Data = append(pkFieldData.Data, int64(j))
 		}
-		pkFieldData.NumRows = []int64{int64(rowCountEachShard)}
 	}
 
 	err = consumer.flush(true)
@@ -162,7 +161,6 @@ func Test_JSONRowConsumerFlush(t *testing.T) {
 		for j := 0; j < rowCountEachShard; j++ {
 			pkFieldData.Data = append(pkFieldData.Data, int64(j))
 		}
-		pkFieldData.NumRows = []int64{int64(rowCountEachShard)}
 	}
 	err = consumer.flush(true)
 	assert.Nil(t, err)
@@ -208,7 +206,6 @@ func Test_JSONRowConsumerHandle(t *testing.T) {
 		for i := 0; i < 10; i++ {
 			pkFieldData.Data = append(pkFieldData.Data, int64(i))
 		}
-		pkFieldData.NumRows = []int64{int64(10)}
 
 		// nil input will trigger flush
 		err = consumer.Handle(nil)
@@ -222,7 +219,6 @@ func Test_JSONRowConsumerHandle(t *testing.T) {
 		for j := 0; j < rowCount; j++ {
 			pkFieldData.Data = append(pkFieldData.Data, int64(j))
 		}
-		pkFieldData.NumRows = []int64{int64(rowCount)}
 
 		input := make([]map[storage.FieldID]interface{}, rowCount)
 		for j := 0; j < rowCount; j++ {

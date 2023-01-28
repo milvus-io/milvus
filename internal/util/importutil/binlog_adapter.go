@@ -557,7 +557,6 @@ func (p *BinlogAdapter) getShardingListByPrimaryInt64(primaryKeys []int64,
 
 			// append the entity to primary key's FieldData
 			field.(*storage.Int64FieldData).Data = append(field.(*storage.Int64FieldData).Data, key)
-			field.(*storage.Int64FieldData).NumRows[0]++
 
 			shardList = append(shardList, int32(shardID))
 		}
@@ -609,7 +608,6 @@ func (p *BinlogAdapter) getShardingListByPrimaryVarchar(primaryKeys []string,
 
 			// append the entity to primary key's FieldData
 			field.(*storage.StringFieldData).Data = append(field.(*storage.StringFieldData).Data, key)
-			field.(*storage.StringFieldData).NumRows[0]++
 
 			shardList = append(shardList, int32(shardID))
 		}
@@ -773,7 +771,6 @@ func (p *BinlogAdapter) dispatchBoolToShards(data []bool, memoryData []map[stora
 		fields := memoryData[shardID] // initSegmentData() can ensure the existence, no need to check bound here
 		field := fields[fieldID]      // initSegmentData() can ensure the existence, no need to check existence here
 		field.(*storage.BoolFieldData).Data = append(field.(*storage.BoolFieldData).Data, val)
-		field.(*storage.BoolFieldData).NumRows[0]++
 	}
 
 	return nil
@@ -797,7 +794,6 @@ func (p *BinlogAdapter) dispatchInt8ToShards(data []int8, memoryData []map[stora
 		fields := memoryData[shardID] // initSegmentData() can ensure the existence, no need to check bound here
 		field := fields[fieldID]      // initSegmentData() can ensure the existence, no need to check existence here
 		field.(*storage.Int8FieldData).Data = append(field.(*storage.Int8FieldData).Data, val)
-		field.(*storage.Int8FieldData).NumRows[0]++
 	}
 
 	return nil
@@ -821,7 +817,6 @@ func (p *BinlogAdapter) dispatchInt16ToShards(data []int16, memoryData []map[sto
 		fields := memoryData[shardID] // initSegmentData() can ensure the existence, no need to check bound here
 		field := fields[fieldID]      // initSegmentData() can ensure the existence, no need to check existence here
 		field.(*storage.Int16FieldData).Data = append(field.(*storage.Int16FieldData).Data, val)
-		field.(*storage.Int16FieldData).NumRows[0]++
 	}
 
 	return nil
@@ -845,7 +840,6 @@ func (p *BinlogAdapter) dispatchInt32ToShards(data []int32, memoryData []map[sto
 		fields := memoryData[shardID] // initSegmentData() can ensure the existence, no need to check bound here
 		field := fields[fieldID]      // initSegmentData() can ensure the existence, no need to check existence here
 		field.(*storage.Int32FieldData).Data = append(field.(*storage.Int32FieldData).Data, val)
-		field.(*storage.Int32FieldData).NumRows[0]++
 	}
 
 	return nil
@@ -869,7 +863,6 @@ func (p *BinlogAdapter) dispatchInt64ToShards(data []int64, memoryData []map[sto
 		fields := memoryData[shardID] // initSegmentData() can ensure the existence, no need to check bound here
 		field := fields[fieldID]      // initSegmentData() can ensure the existence, no need to check existence here
 		field.(*storage.Int64FieldData).Data = append(field.(*storage.Int64FieldData).Data, val)
-		field.(*storage.Int64FieldData).NumRows[0]++
 	}
 
 	return nil
@@ -893,7 +886,6 @@ func (p *BinlogAdapter) dispatchFloatToShards(data []float32, memoryData []map[s
 		fields := memoryData[shardID] // initSegmentData() can ensure the existence, no need to check bound here
 		field := fields[fieldID]      // initSegmentData() can ensure the existence, no need to check existence here
 		field.(*storage.FloatFieldData).Data = append(field.(*storage.FloatFieldData).Data, val)
-		field.(*storage.FloatFieldData).NumRows[0]++
 	}
 
 	return nil
@@ -917,7 +909,6 @@ func (p *BinlogAdapter) dispatchDoubleToShards(data []float64, memoryData []map[
 		fields := memoryData[shardID] // initSegmentData() can ensure the existence, no need to check bound here
 		field := fields[fieldID]      // initSegmentData() can ensure the existence, no need to check existence here
 		field.(*storage.DoubleFieldData).Data = append(field.(*storage.DoubleFieldData).Data, val)
-		field.(*storage.DoubleFieldData).NumRows[0]++
 	}
 
 	return nil
@@ -941,7 +932,6 @@ func (p *BinlogAdapter) dispatchVarcharToShards(data []string, memoryData []map[
 		fields := memoryData[shardID] // initSegmentData() can ensure the existence, no need to check bound here
 		field := fields[fieldID]      // initSegmentData() can ensure the existence, no need to check existence here
 		field.(*storage.StringFieldData).Data = append(field.(*storage.StringFieldData).Data, val)
-		field.(*storage.StringFieldData).NumRows[0]++
 	}
 
 	return nil
@@ -983,7 +973,6 @@ func (p *BinlogAdapter) dispatchBinaryVecToShards(data []byte, dim int, memoryDa
 
 			binVecField.Data = append(binVecField.Data, val)
 		}
-		binVecField.NumRows[0]++
 	}
 
 	return nil
@@ -1023,7 +1012,6 @@ func (p *BinlogAdapter) dispatchFloatVecToShards(data []float32, dim int, memory
 			val := data[dim*i+j]
 			floatVecField.Data = append(floatVecField.Data, val)
 		}
-		floatVecField.NumRows[0]++
 	}
 
 	return nil

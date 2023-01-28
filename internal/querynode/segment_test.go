@@ -590,14 +590,6 @@ func TestSegment_BasicMetrics(t *testing.T) {
 		defaultSegmentStartPosition)
 	assert.Nil(t, err)
 
-	t.Run("test id binlog row size", func(t *testing.T) {
-		size := int64(1024)
-		segment.setIDBinlogRowSizes([]int64{size})
-		sizes := segment.getIDBinlogRowSizes()
-		assert.Len(t, sizes, 1)
-		assert.Equal(t, size, sizes[0])
-	})
-
 	t.Run("test type", func(t *testing.T) {
 		sType := segmentTypeGrowing
 		segment.setType(sType)
@@ -685,17 +677,17 @@ func Test_getFieldDataPath(t *testing.T) {
 			FieldID: 0,
 			Binlogs: []*datapb.Binlog{
 				{
-					LogPath: funcutil.GenRandomStr(),
+					EntriesNum: 10,
+					LogPath:    funcutil.GenRandomStr(),
 				},
 				{
-					LogPath: funcutil.GenRandomStr(),
+					EntriesNum: 15,
+					LogPath:    funcutil.GenRandomStr(),
 				},
 			},
 		},
 	}
-	s := &Segment{
-		idBinlogRowSizes: []int64{10, 15},
-	}
+	s := &Segment{}
 
 	path, offsetInBinlog := s.getFieldDataPath(indexedFieldInfo, 4)
 	assert.Equal(t, indexedFieldInfo.fieldBinlog.Binlogs[0].LogPath, path)

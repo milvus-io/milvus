@@ -315,9 +315,8 @@ func RowBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *schemap
 
 			vecs := readFloatVectors(blobReaders, dim)
 			idata.Data[field.FieldID] = &FloatVectorFieldData{
-				NumRows: []int64{int64(msg.NRows())},
-				Data:    vecs,
-				Dim:     dim,
+				Data: vecs,
+				Dim:  dim,
 			}
 
 		case schemapb.DataType_BinaryVector:
@@ -330,39 +329,33 @@ func RowBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *schemap
 
 			vecs := readBinaryVectors(blobReaders, dim)
 			idata.Data[field.FieldID] = &BinaryVectorFieldData{
-				NumRows: []int64{int64(msg.NRows())},
-				Data:    vecs,
-				Dim:     dim,
+				Data: vecs,
+				Dim:  dim,
 			}
 
 		case schemapb.DataType_Bool:
 			idata.Data[field.FieldID] = &BoolFieldData{
-				NumRows: []int64{int64(msg.NRows())},
-				Data:    readBoolArray(blobReaders),
+				Data: readBoolArray(blobReaders),
 			}
 
 		case schemapb.DataType_Int8:
 			idata.Data[field.FieldID] = &Int8FieldData{
-				NumRows: []int64{int64(msg.NRows())},
-				Data:    readInt8Array(blobReaders),
+				Data: readInt8Array(blobReaders),
 			}
 
 		case schemapb.DataType_Int16:
 			idata.Data[field.FieldID] = &Int16FieldData{
-				NumRows: []int64{int64(msg.NRows())},
-				Data:    readInt16Array(blobReaders),
+				Data: readInt16Array(blobReaders),
 			}
 
 		case schemapb.DataType_Int32:
 			idata.Data[field.FieldID] = &Int32FieldData{
-				NumRows: []int64{int64(msg.NRows())},
-				Data:    readInt32Array(blobReaders),
+				Data: readInt32Array(blobReaders),
 			}
 
 		case schemapb.DataType_Int64:
 			idata.Data[field.FieldID] = &Int64FieldData{
-				NumRows: []int64{int64(msg.NRows())},
-				Data:    nil,
+				Data: nil,
 			}
 
 			fieldData := idata.Data[field.FieldID].(*Int64FieldData)
@@ -379,14 +372,12 @@ func RowBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *schemap
 
 		case schemapb.DataType_Float:
 			idata.Data[field.FieldID] = &FloatFieldData{
-				NumRows: []int64{int64(msg.NRows())},
-				Data:    readFloatArray(blobReaders),
+				Data: readFloatArray(blobReaders),
 			}
 
 		case schemapb.DataType_Double:
 			idata.Data[field.FieldID] = &DoubleFieldData{
-				NumRows: []int64{int64(msg.NRows())},
-				Data:    readDoubleArray(blobReaders),
+				Data: readDoubleArray(blobReaders),
 			}
 		}
 	}
@@ -418,9 +409,8 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			srcData := srcFields[field.FieldID].GetVectors().GetFloatVector().GetData()
 
 			fieldData := &FloatVectorFieldData{
-				NumRows: []int64{int64(msg.NRows())},
-				Data:    make([]float32, 0, len(srcData)),
-				Dim:     dim,
+				Data: make([]float32, 0, len(srcData)),
+				Dim:  dim,
 			}
 			fieldData.Data = append(fieldData.Data, srcData...)
 
@@ -436,9 +426,8 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			srcData := srcFields[field.FieldID].GetVectors().GetBinaryVector()
 
 			fieldData := &BinaryVectorFieldData{
-				NumRows: []int64{int64(msg.NRows())},
-				Data:    make([]byte, 0, len(srcData)),
-				Dim:     dim,
+				Data: make([]byte, 0, len(srcData)),
+				Dim:  dim,
 			}
 			fieldData.Data = append(fieldData.Data, srcData...)
 
@@ -448,8 +437,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			srcData := srcFields[field.FieldID].GetScalars().GetBoolData().GetData()
 
 			fieldData := &BoolFieldData{
-				NumRows: []int64{int64(msg.NRows())},
-				Data:    make([]bool, 0, len(srcData)),
+				Data: make([]bool, 0, len(srcData)),
 			}
 			fieldData.Data = append(fieldData.Data, srcData...)
 
@@ -459,8 +447,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			srcData := srcFields[field.FieldID].GetScalars().GetIntData().GetData()
 
 			fieldData := &Int8FieldData{
-				NumRows: []int64{int64(msg.NRows())},
-				Data:    make([]int8, 0, len(srcData)),
+				Data: make([]int8, 0, len(srcData)),
 			}
 			int8SrcData := make([]int8, len(srcData))
 			for i := 0; i < len(srcData); i++ {
@@ -474,8 +461,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			srcData := srcFields[field.FieldID].GetScalars().GetIntData().GetData()
 
 			fieldData := &Int16FieldData{
-				NumRows: []int64{int64(msg.NRows())},
-				Data:    make([]int16, 0, len(srcData)),
+				Data: make([]int16, 0, len(srcData)),
 			}
 			int16SrcData := make([]int16, len(srcData))
 			for i := 0; i < len(srcData); i++ {
@@ -489,8 +475,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			srcData := srcFields[field.FieldID].GetScalars().GetIntData().GetData()
 
 			fieldData := &Int32FieldData{
-				NumRows: []int64{int64(msg.NRows())},
-				Data:    make([]int32, 0, len(srcData)),
+				Data: make([]int32, 0, len(srcData)),
 			}
 			fieldData.Data = append(fieldData.Data, srcData...)
 
@@ -498,8 +483,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 
 		case schemapb.DataType_Int64:
 			fieldData := &Int64FieldData{
-				NumRows: []int64{int64(msg.NRows())},
-				Data:    make([]int64, 0),
+				Data: make([]int64, 0),
 			}
 
 			switch field.FieldID {
@@ -523,8 +507,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			srcData := srcFields[field.FieldID].GetScalars().GetFloatData().GetData()
 
 			fieldData := &FloatFieldData{
-				NumRows: []int64{int64(msg.NRows())},
-				Data:    make([]float32, 0, len(srcData)),
+				Data: make([]float32, 0, len(srcData)),
 			}
 			fieldData.Data = append(fieldData.Data, srcData...)
 
@@ -534,8 +517,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			srcData := srcFields[field.FieldID].GetScalars().GetDoubleData().GetData()
 
 			fieldData := &DoubleFieldData{
-				NumRows: []int64{int64(msg.NRows())},
-				Data:    make([]float64, 0, len(srcData)),
+				Data: make([]float64, 0, len(srcData)),
 			}
 			fieldData.Data = append(fieldData.Data, srcData...)
 
@@ -544,8 +526,7 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			srcData := srcFields[field.FieldID].GetScalars().GetStringData().GetData()
 
 			fieldData := &StringFieldData{
-				NumRows: []int64{int64(msg.NumRows)},
-				Data:    make([]string, 0, len(srcData)),
+				Data: make([]string, 0, len(srcData)),
 			}
 
 			fieldData.Data = append(fieldData.Data, srcData...)
@@ -566,133 +547,113 @@ func InsertMsgToInsertData(msg *msgstream.InsertMsg, schema *schemapb.Collection
 func mergeBoolField(data *InsertData, fid FieldID, field *BoolFieldData) {
 	if _, ok := data.Data[fid]; !ok {
 		fieldData := &BoolFieldData{
-			NumRows: []int64{0},
-			Data:    nil,
+			Data: nil,
 		}
 		data.Data[fid] = fieldData
 	}
 	fieldData := data.Data[fid].(*BoolFieldData)
 	fieldData.Data = append(fieldData.Data, field.Data...)
-	fieldData.NumRows[0] += int64(field.RowNum())
 }
 
 func mergeInt8Field(data *InsertData, fid FieldID, field *Int8FieldData) {
 	if _, ok := data.Data[fid]; !ok {
 		fieldData := &Int8FieldData{
-			NumRows: []int64{0},
-			Data:    nil,
+			Data: nil,
 		}
 		data.Data[fid] = fieldData
 	}
 	fieldData := data.Data[fid].(*Int8FieldData)
 	fieldData.Data = append(fieldData.Data, field.Data...)
-	fieldData.NumRows[0] += int64(field.RowNum())
 }
 
 func mergeInt16Field(data *InsertData, fid FieldID, field *Int16FieldData) {
 	if _, ok := data.Data[fid]; !ok {
 		fieldData := &Int16FieldData{
-			NumRows: []int64{0},
-			Data:    nil,
+			Data: nil,
 		}
 		data.Data[fid] = fieldData
 	}
 	fieldData := data.Data[fid].(*Int16FieldData)
 	fieldData.Data = append(fieldData.Data, field.Data...)
-	fieldData.NumRows[0] += int64(field.RowNum())
 }
 
 func mergeInt32Field(data *InsertData, fid FieldID, field *Int32FieldData) {
 	if _, ok := data.Data[fid]; !ok {
 		fieldData := &Int32FieldData{
-			NumRows: []int64{0},
-			Data:    nil,
+			Data: nil,
 		}
 		data.Data[fid] = fieldData
 	}
 	fieldData := data.Data[fid].(*Int32FieldData)
 	fieldData.Data = append(fieldData.Data, field.Data...)
-	fieldData.NumRows[0] += int64(field.RowNum())
 }
 
 func mergeInt64Field(data *InsertData, fid FieldID, field *Int64FieldData) {
 	if _, ok := data.Data[fid]; !ok {
 		fieldData := &Int64FieldData{
-			NumRows: []int64{0},
-			Data:    nil,
+			Data: nil,
 		}
 		data.Data[fid] = fieldData
 	}
 	fieldData := data.Data[fid].(*Int64FieldData)
 	fieldData.Data = append(fieldData.Data, field.Data...)
-	fieldData.NumRows[0] += int64(field.RowNum())
 }
 
 func mergeFloatField(data *InsertData, fid FieldID, field *FloatFieldData) {
 	if _, ok := data.Data[fid]; !ok {
 		fieldData := &FloatFieldData{
-			NumRows: []int64{0},
-			Data:    nil,
+			Data: nil,
 		}
 		data.Data[fid] = fieldData
 	}
 	fieldData := data.Data[fid].(*FloatFieldData)
 	fieldData.Data = append(fieldData.Data, field.Data...)
-	fieldData.NumRows[0] += int64(field.RowNum())
 }
 
 func mergeDoubleField(data *InsertData, fid FieldID, field *DoubleFieldData) {
 	if _, ok := data.Data[fid]; !ok {
 		fieldData := &DoubleFieldData{
-			NumRows: []int64{0},
-			Data:    nil,
+			Data: nil,
 		}
 		data.Data[fid] = fieldData
 	}
 	fieldData := data.Data[fid].(*DoubleFieldData)
 	fieldData.Data = append(fieldData.Data, field.Data...)
-	fieldData.NumRows[0] += int64(field.RowNum())
 }
 
 func mergeStringField(data *InsertData, fid FieldID, field *StringFieldData) {
 	if _, ok := data.Data[fid]; !ok {
 		fieldData := &StringFieldData{
-			NumRows: []int64{0},
-			Data:    nil,
+			Data: nil,
 		}
 		data.Data[fid] = fieldData
 	}
 	fieldData := data.Data[fid].(*StringFieldData)
 	fieldData.Data = append(fieldData.Data, field.Data...)
-	fieldData.NumRows[0] += int64(field.RowNum())
 }
 
 func mergeBinaryVectorField(data *InsertData, fid FieldID, field *BinaryVectorFieldData) {
 	if _, ok := data.Data[fid]; !ok {
 		fieldData := &BinaryVectorFieldData{
-			NumRows: []int64{0},
-			Data:    nil,
-			Dim:     field.Dim,
+			Data: nil,
+			Dim:  field.Dim,
 		}
 		data.Data[fid] = fieldData
 	}
 	fieldData := data.Data[fid].(*BinaryVectorFieldData)
 	fieldData.Data = append(fieldData.Data, field.Data...)
-	fieldData.NumRows[0] += int64(field.RowNum())
 }
 
 func mergeFloatVectorField(data *InsertData, fid FieldID, field *FloatVectorFieldData) {
 	if _, ok := data.Data[fid]; !ok {
 		fieldData := &FloatVectorFieldData{
-			NumRows: []int64{0},
-			Data:    nil,
-			Dim:     field.Dim,
+			Data: nil,
+			Dim:  field.Dim,
 		}
 		data.Data[fid] = fieldData
 	}
 	fieldData := data.Data[fid].(*FloatVectorFieldData)
 	fieldData.Data = append(fieldData.Data, field.Data...)
-	fieldData.NumRows[0] += int64(field.RowNum())
 }
 
 // MergeFieldData merge field into data.

@@ -693,12 +693,10 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 // TODO copy maybe expensive, but this seems to be the only convinent way.
 func interface2FieldData(schemaDataType schemapb.DataType, content []interface{}, numRows int64) (storage.FieldData, error) {
 	var rst storage.FieldData
-	numOfRows := []int64{numRows}
 	switch schemaDataType {
 	case schemapb.DataType_Bool:
 		var data = &storage.BoolFieldData{
-			NumRows: numOfRows,
-			Data:    make([]bool, 0, len(content)),
+			Data: make([]bool, 0, len(content)),
 		}
 
 		for _, c := range content {
@@ -712,8 +710,7 @@ func interface2FieldData(schemaDataType schemapb.DataType, content []interface{}
 
 	case schemapb.DataType_Int8:
 		var data = &storage.Int8FieldData{
-			NumRows: numOfRows,
-			Data:    make([]int8, 0, len(content)),
+			Data: make([]int8, 0, len(content)),
 		}
 
 		for _, c := range content {
@@ -727,8 +724,7 @@ func interface2FieldData(schemaDataType schemapb.DataType, content []interface{}
 
 	case schemapb.DataType_Int16:
 		var data = &storage.Int16FieldData{
-			NumRows: numOfRows,
-			Data:    make([]int16, 0, len(content)),
+			Data: make([]int16, 0, len(content)),
 		}
 
 		for _, c := range content {
@@ -742,8 +738,7 @@ func interface2FieldData(schemaDataType schemapb.DataType, content []interface{}
 
 	case schemapb.DataType_Int32:
 		var data = &storage.Int32FieldData{
-			NumRows: numOfRows,
-			Data:    make([]int32, 0, len(content)),
+			Data: make([]int32, 0, len(content)),
 		}
 
 		for _, c := range content {
@@ -757,8 +752,7 @@ func interface2FieldData(schemaDataType schemapb.DataType, content []interface{}
 
 	case schemapb.DataType_Int64:
 		var data = &storage.Int64FieldData{
-			NumRows: numOfRows,
-			Data:    make([]int64, 0, len(content)),
+			Data: make([]int64, 0, len(content)),
 		}
 
 		for _, c := range content {
@@ -772,8 +766,7 @@ func interface2FieldData(schemaDataType schemapb.DataType, content []interface{}
 
 	case schemapb.DataType_Float:
 		var data = &storage.FloatFieldData{
-			NumRows: numOfRows,
-			Data:    make([]float32, 0, len(content)),
+			Data: make([]float32, 0, len(content)),
 		}
 
 		for _, c := range content {
@@ -787,8 +780,7 @@ func interface2FieldData(schemaDataType schemapb.DataType, content []interface{}
 
 	case schemapb.DataType_Double:
 		var data = &storage.DoubleFieldData{
-			NumRows: numOfRows,
-			Data:    make([]float64, 0, len(content)),
+			Data: make([]float64, 0, len(content)),
 		}
 
 		for _, c := range content {
@@ -802,8 +794,7 @@ func interface2FieldData(schemaDataType schemapb.DataType, content []interface{}
 
 	case schemapb.DataType_String, schemapb.DataType_VarChar:
 		var data = &storage.StringFieldData{
-			NumRows: numOfRows,
-			Data:    make([]string, 0, len(content)),
+			Data: make([]string, 0, len(content)),
 		}
 
 		for _, c := range content {
@@ -817,8 +808,7 @@ func interface2FieldData(schemaDataType schemapb.DataType, content []interface{}
 
 	case schemapb.DataType_FloatVector:
 		var data = &storage.FloatVectorFieldData{
-			NumRows: numOfRows,
-			Data:    []float32{},
+			Data: []float32{},
 		}
 
 		for _, c := range content {
@@ -834,8 +824,7 @@ func interface2FieldData(schemaDataType schemapb.DataType, content []interface{}
 
 	case schemapb.DataType_BinaryVector:
 		var data = &storage.BinaryVectorFieldData{
-			NumRows: numOfRows,
-			Data:    []byte{},
+			Data: []byte{},
 		}
 
 		for _, c := range content {

@@ -504,7 +504,7 @@ func Test_TryFlushBlocks(t *testing.T) {
 	}
 
 	blockSize := int64(1024)
-	maxTotalSize := int64(2048)
+	maxTotalSize := int64(4096)
 	shardNum := int32(3)
 
 	// prepare flush data, 3 shards, each shard 10 rows
