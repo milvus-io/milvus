@@ -459,6 +459,8 @@ The implemented SDK and its API documentation are listed below:
 - [Go SDK](https://github.com/milvus-io/milvus-sdk-go)
 - [Cpp SDK](https://github.com/milvus-io/milvus-sdk-cpp)(under development)
 - [Node SDK](https://github.com/milvus-io/milvus-sdk-node)
+- [Rust SDK](https://github.com/milvus-io/milvus-sdk-rust)(under development)
+- [CSharp SDK](https://github.com/milvus-io/milvus-sdk-csharp)(under development)
 
 ### Attu
 
