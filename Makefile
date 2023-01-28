@@ -21,6 +21,10 @@ OS := $(shell uname -s)
 ARCH := $(shell arch)
 mode = Release
 disk_index = OFF
+useasan = false 
+ifeq (${USE_ASAN}, true)
+useasan = true 
+endif
 
 
 export GIT_BRANCH=master
@@ -37,9 +41,9 @@ get-build-deps:
 
 # attention: upgrade golangci-lint should also change Dockerfiles in build/docker/builder/cpu/<os>
 getdeps:
-	@mkdir -p ${GOPATH}/bin
-	@which golangci-lint 1>/dev/null || (echo "Installing golangci-lint" && curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GOPATH)/bin v1.46.2)
-	@$(PWD)/bin/mockery --version 2>&1 1>/dev/null || (echo "Installing mockery v2.16.0 to ./bin/" && GOBIN=$(PWD)/bin/ go install github.com/vektra/mockery/v2@v2.16.0)
+	@mkdir -p $(INSTALL_PATH)
+	@$(INSTALL_PATH)/golangci-lint --version 2>&1 1>/dev/null || (echo "Installing golangci-lint into ./bin/" && curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(INSTALL_PATH) v1.46.2)
+	@$(INSTALL_PATH)/mockery --version 2>&1 1>/dev/null || (echo "Installing mockery v2.16.0 to ./bin/" && GOBIN=$(INSTALL_PATH)/ go install github.com/vektra/mockery/v2@v2.16.0)
 
 tools/bin/revive: tools/check/go.mod
 	cd tools/check; \
@@ -78,12 +82,11 @@ lint: tools/bin/revive
 	@tools/bin/revive -formatter friendly -config tools/check/revive.toml ./...
 
 #TODO: Check code specifications by golangci-lint
-static-check:
+static-check: getdeps
 	@echo "Running $@ check"
-	@GO111MODULE=on ${GOPATH}/bin/golangci-lint cache clean
-	@source $(PWD)/scripts/setenv.sh && GO111MODULE=on ${GOPATH}/bin/golangci-lint run --timeout=30m --config ./.golangci.yml ./internal/...
-	@source $(PWD)/scripts/setenv.sh && GO111MODULE=on ${GOPATH}/bin/golangci-lint run --timeout=30m --config ./.golangci.yml ./cmd/...
-#	@GO111MODULE=on ${GOPATH}/bin/golangci-lint run --timeout=30m --config ./.golangci.yml ./tests/go_client/...
+	@GO111MODULE=on $(INSTALL_PATH)/golangci-lint cache clean
+	@source $(PWD)/scripts/setenv.sh && GO111MODULE=on $(INSTALL_PATH)/golangci-lint run --timeout=30m --config ./.golangci.yml ./internal/...
+	@source $(PWD)/scripts/setenv.sh && GO111MODULE=on $(INSTALL_PATH)/golangci-lint run --timeout=30m --config ./.golangci.yml ./cmd/...
 
 verifiers: build-cpp getdeps cppcheck fmt static-check
 
@@ -150,7 +153,7 @@ build-cpp-with-unittest: download-milvus-proto
 
 build-cpp-with-coverage: download-milvus-proto
 	@echo "Building Milvus cpp library with coverage and unittest ..."
-	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -u -a ${USE_ASAN} -c -f "$(CUSTOM_THIRDPARTY_PATH)" -n ${disk_index})
+	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -u -a ${useasan} -c -f "$(CUSTOM_THIRDPARTY_PATH)" -n ${disk_index})
 
 
 # Run the tests.
