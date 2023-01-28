@@ -183,17 +183,14 @@ func (c *mockChunkmgr) mockFieldData(numrows, dim int, collectionID, partitionID
 	}
 	vecs := randomFloats(numrows, dim)
 	idField := storage.Int64FieldData{
-		NumRows: []int64{},
-		Data:    idList,
+		Data: idList,
 	}
 	tsField := storage.Int64FieldData{
-		NumRows: []int64{},
-		Data:    tsList,
+		Data: tsList,
 	}
 	vecField := storage.FloatVectorFieldData{
-		NumRows: []int64{},
-		Data:    vecs,
-		Dim:     dim,
+		Data: vecs,
+		Dim:  dim,
 	}
 	insertData := &storage.InsertData{
 		Data: map[int64]storage.FieldData{

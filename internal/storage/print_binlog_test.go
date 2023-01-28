@@ -185,54 +185,42 @@ func TestPrintBinlogFiles(t *testing.T) {
 	insertDataFirst := &InsertData{
 		Data: map[int64]FieldData{
 			0: &Int64FieldData{
-				NumRows: []int64{2},
-				Data:    []int64{3, 4},
+				Data: []int64{3, 4},
 			},
 			1: &Int64FieldData{
-				NumRows: []int64{2},
-				Data:    []int64{3, 4},
+				Data: []int64{3, 4},
 			},
 			100: &BoolFieldData{
-				NumRows: []int64{2},
-				Data:    []bool{true, false},
+				Data: []bool{true, false},
 			},
 			101: &Int8FieldData{
-				NumRows: []int64{2},
-				Data:    []int8{3, 4},
+				Data: []int8{3, 4},
 			},
 			102: &Int16FieldData{
-				NumRows: []int64{2},
-				Data:    []int16{3, 4},
+				Data: []int16{3, 4},
 			},
 			103: &Int32FieldData{
-				NumRows: []int64{2},
-				Data:    []int32{3, 4},
+				Data: []int32{3, 4},
 			},
 			104: &Int64FieldData{
-				NumRows: []int64{2},
-				Data:    []int64{3, 4},
+				Data: []int64{3, 4},
 			},
 			105: &FloatFieldData{
-				NumRows: []int64{2},
-				Data:    []float32{3, 4},
+				Data: []float32{3, 4},
 			},
 			106: &DoubleFieldData{
-				NumRows: []int64{2},
-				Data:    []float64{3, 4},
+				Data: []float64{3, 4},
 			},
 			107: &StringFieldData{
-				NumRows: []int64{2},
-				Data:    []string{"3", "4"},
+				Data: []string{"3", "4"},
 			},
 			108: &BinaryVectorFieldData{
-				NumRows: []int64{2},
-				Data:    []byte{0, 255},
-				Dim:     8,
+				Data: []byte{0, 255},
+				Dim:  8,
 			},
 			109: &FloatVectorFieldData{
-				NumRows: []int64{2},
-				Data:    []float32{0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},
-				Dim:     8,
+				Data: []float32{0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},
+				Dim:  8,
 			},
 		},
 	}
@@ -240,54 +228,42 @@ func TestPrintBinlogFiles(t *testing.T) {
 	insertDataSecond := &InsertData{
 		Data: map[int64]FieldData{
 			0: &Int64FieldData{
-				NumRows: []int64{2},
-				Data:    []int64{1, 2},
+				Data: []int64{1, 2},
 			},
 			1: &Int64FieldData{
-				NumRows: []int64{2},
-				Data:    []int64{1, 2},
+				Data: []int64{1, 2},
 			},
 			100: &BoolFieldData{
-				NumRows: []int64{2},
-				Data:    []bool{true, false},
+				Data: []bool{true, false},
 			},
 			101: &Int8FieldData{
-				NumRows: []int64{2},
-				Data:    []int8{1, 2},
+				Data: []int8{1, 2},
 			},
 			102: &Int16FieldData{
-				NumRows: []int64{2},
-				Data:    []int16{1, 2},
+				Data: []int16{1, 2},
 			},
 			103: &Int32FieldData{
-				NumRows: []int64{2},
-				Data:    []int32{1, 2},
+				Data: []int32{1, 2},
 			},
 			104: &Int64FieldData{
-				NumRows: []int64{2},
-				Data:    []int64{1, 2},
+				Data: []int64{1, 2},
 			},
 			105: &FloatFieldData{
-				NumRows: []int64{2},
-				Data:    []float32{1, 2},
+				Data: []float32{1, 2},
 			},
 			106: &DoubleFieldData{
-				NumRows: []int64{2},
-				Data:    []float64{1, 2},
+				Data: []float64{1, 2},
 			},
 			107: &StringFieldData{
-				NumRows: []int64{2},
-				Data:    []string{"1", "2"},
+				Data: []string{"1", "2"},
 			},
 			108: &BinaryVectorFieldData{
-				NumRows: []int64{2},
-				Data:    []byte{0, 255},
-				Dim:     8,
+				Data: []byte{0, 255},
+				Dim:  8,
 			},
 			109: &FloatVectorFieldData{
-				NumRows: []int64{2},
-				Data:    []float32{0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},
-				Dim:     8,
+				Data: []float32{0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7},
+				Dim:  8,
 			},
 		},
 	}

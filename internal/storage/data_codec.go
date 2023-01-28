@@ -110,46 +110,36 @@ type FieldData interface {
 }
 
 type BoolFieldData struct {
-	NumRows []int64
-	Data    []bool
+	Data []bool
 }
 type Int8FieldData struct {
-	NumRows []int64
-	Data    []int8
+	Data []int8
 }
 type Int16FieldData struct {
-	NumRows []int64
-	Data    []int16
+	Data []int16
 }
 type Int32FieldData struct {
-	NumRows []int64
-	Data    []int32
+	Data []int32
 }
 type Int64FieldData struct {
-	NumRows []int64
-	Data    []int64
+	Data []int64
 }
 type FloatFieldData struct {
-	NumRows []int64
-	Data    []float32
+	Data []float32
 }
 type DoubleFieldData struct {
-	NumRows []int64
-	Data    []float64
+	Data []float64
 }
 type StringFieldData struct {
-	NumRows []int64
-	Data    []string
+	Data []string
 }
 type BinaryVectorFieldData struct {
-	NumRows []int64
-	Data    []byte
-	Dim     int
+	Data []byte
+	Dim  int
 }
 type FloatVectorFieldData struct {
-	NumRows []int64
-	Data    []float32
-	Dim     int
+	Data []float32
+	Dim  int
 }
 
 // RowNum implements FieldData.RowNum
@@ -187,47 +177,51 @@ func (data *FloatVectorFieldData) GetRow(i int) interface{} {
 
 // GetMemorySize implements FieldData.GetMemorySize
 func (data *BoolFieldData) GetMemorySize() int {
-	return binary.Size(data.NumRows) + binary.Size(data.Data)
+	return binary.Size(data.Data)
 }
 
 // GetMemorySize implements FieldData.GetMemorySize
 func (data *Int8FieldData) GetMemorySize() int {
-	return binary.Size(data.NumRows) + binary.Size(data.Data)
+	return binary.Size(data.Data)
 }
 
 // GetMemorySize implements FieldData.GetMemorySize
 func (data *Int16FieldData) GetMemorySize() int {
-	return binary.Size(data.NumRows) + binary.Size(data.Data)
+	return binary.Size(data.Data)
 }
 
 // GetMemorySize implements FieldData.GetMemorySize
 func (data *Int32FieldData) GetMemorySize() int {
-	return binary.Size(data.NumRows) + binary.Size(data.Data)
+	return binary.Size(data.Data)
 }
 
 // GetMemorySize implements FieldData.GetMemorySize
 func (data *Int64FieldData) GetMemorySize() int {
-	return binary.Size(data.NumRows) + binary.Size(data.Data)
+	return binary.Size(data.Data)
 }
 
 func (data *FloatFieldData) GetMemorySize() int {
-	return binary.Size(data.NumRows) + binary.Size(data.Data)
+	return binary.Size(data.Data)
 }
 
 func (data *DoubleFieldData) GetMemorySize() int {
-	return binary.Size(data.NumRows) + binary.Size(data.Data)
+	return binary.Size(data.Data)
 }
 
 func (data *StringFieldData) GetMemorySize() int {
-	return binary.Size(data.NumRows) + binary.Size(data.Data)
+	var size int
+	for _, val := range data.Data {
+		size += len(val) + 16
+	}
+	return size
 }
 
 func (data *BinaryVectorFieldData) GetMemorySize() int {
-	return binary.Size(data.NumRows) + binary.Size(data.Data) + binary.Size(data.Dim)
+	return binary.Size(data.Data) + 4
 }
 
 func (data *FloatVectorFieldData) GetMemorySize() int {
-	return binary.Size(data.NumRows) + binary.Size(data.Data) + binary.Size(data.Dim)
+	return binary.Size(data.Data) + 4
 }
 
 // system filed id:
@@ -511,15 +505,13 @@ func (insertCodec *InsertCodec) DeserializeInto(fieldBinlogs []*Blob, rowNum int
 
 				if insertData.Data[fieldID] == nil {
 					insertData.Data[fieldID] = &BoolFieldData{
-						NumRows: make([]int64, 0),
-						Data:    make([]bool, 0, rowNum),
+						Data: make([]bool, 0, rowNum),
 					}
 				}
 				boolFieldData := insertData.Data[fieldID].(*BoolFieldData)
 
 				boolFieldData.Data = append(boolFieldData.Data, singleData...)
 				totalLength += len(singleData)
-				boolFieldData.NumRows = append(boolFieldData.NumRows, int64(len(singleData)))
 				insertData.Data[fieldID] = boolFieldData
 
 			case schemapb.DataType_Int8:
@@ -532,15 +524,13 @@ func (insertCodec *InsertCodec) DeserializeInto(fieldBinlogs []*Blob, rowNum int
 
 				if insertData.Data[fieldID] == nil {
 					insertData.Data[fieldID] = &Int8FieldData{
-						NumRows: make([]int64, 0),
-						Data:    make([]int8, 0, rowNum),
+						Data: make([]int8, 0, rowNum),
 					}
 				}
 				int8FieldData := insertData.Data[fieldID].(*Int8FieldData)
 
 				int8FieldData.Data = append(int8FieldData.Data, singleData...)
 				totalLength += len(singleData)
-				int8FieldData.NumRows = append(int8FieldData.NumRows, int64(len(singleData)))
 				insertData.Data[fieldID] = int8FieldData
 
 			case schemapb.DataType_Int16:
@@ -553,15 +543,13 @@ func (insertCodec *InsertCodec) DeserializeInto(fieldBinlogs []*Blob, rowNum int
 
 				if insertData.Data[fieldID] == nil {
 					insertData.Data[fieldID] = &Int16FieldData{
-						NumRows: make([]int64, 0),
-						Data:    make([]int16, 0, rowNum),
+						Data: make([]int16, 0, rowNum),
 					}
 				}
 				int16FieldData := insertData.Data[fieldID].(*Int16FieldData)
 
 				int16FieldData.Data = append(int16FieldData.Data, singleData...)
 				totalLength += len(singleData)
-				int16FieldData.NumRows = append(int16FieldData.NumRows, int64(len(singleData)))
 				insertData.Data[fieldID] = int16FieldData
 
 			case schemapb.DataType_Int32:
@@ -574,15 +562,13 @@ func (insertCodec *InsertCodec) DeserializeInto(fieldBinlogs []*Blob, rowNum int
 
 				if insertData.Data[fieldID] == nil {
 					insertData.Data[fieldID] = &Int32FieldData{
-						NumRows: make([]int64, 0),
-						Data:    make([]int32, 0, rowNum),
+						Data: make([]int32, 0, rowNum),
 					}
 				}
 				int32FieldData := insertData.Data[fieldID].(*Int32FieldData)
 
 				int32FieldData.Data = append(int32FieldData.Data, singleData...)
 				totalLength += len(singleData)
-				int32FieldData.NumRows = append(int32FieldData.NumRows, int64(len(singleData)))
 				insertData.Data[fieldID] = int32FieldData
 
 			case schemapb.DataType_Int64:
@@ -595,15 +581,13 @@ func (insertCodec *InsertCodec) DeserializeInto(fieldBinlogs []*Blob, rowNum int
 
 				if insertData.Data[fieldID] == nil {
 					insertData.Data[fieldID] = &Int64FieldData{
-						NumRows: make([]int64, 0),
-						Data:    make([]int64, 0, rowNum),
+						Data: make([]int64, 0, rowNum),
 					}
 				}
 				int64FieldData := insertData.Data[fieldID].(*Int64FieldData)
 
 				int64FieldData.Data = append(int64FieldData.Data, singleData...)
 				totalLength += len(singleData)
-				int64FieldData.NumRows = append(int64FieldData.NumRows, int64(len(singleData)))
 				insertData.Data[fieldID] = int64FieldData
 
 			case schemapb.DataType_Float:
@@ -616,15 +600,13 @@ func (insertCodec *InsertCodec) DeserializeInto(fieldBinlogs []*Blob, rowNum int
 
 				if insertData.Data[fieldID] == nil {
 					insertData.Data[fieldID] = &FloatFieldData{
-						NumRows: make([]int64, 0),
-						Data:    make([]float32, 0, rowNum),
+						Data: make([]float32, 0, rowNum),
 					}
 				}
 				floatFieldData := insertData.Data[fieldID].(*FloatFieldData)
 
 				floatFieldData.Data = append(floatFieldData.Data, singleData...)
 				totalLength += len(singleData)
-				floatFieldData.NumRows = append(floatFieldData.NumRows, int64(len(singleData)))
 				insertData.Data[fieldID] = floatFieldData
 
 			case schemapb.DataType_Double:
@@ -637,15 +619,13 @@ func (insertCodec *InsertCodec) DeserializeInto(fieldBinlogs []*Blob, rowNum int
 
 				if insertData.Data[fieldID] == nil {
 					insertData.Data[fieldID] = &DoubleFieldData{
-						NumRows: make([]int64, 0),
-						Data:    make([]float64, 0, rowNum),
+						Data: make([]float64, 0, rowNum),
 					}
 				}
 				doubleFieldData := insertData.Data[fieldID].(*DoubleFieldData)
 
 				doubleFieldData.Data = append(doubleFieldData.Data, singleData...)
 				totalLength += len(singleData)
-				doubleFieldData.NumRows = append(doubleFieldData.NumRows, int64(len(singleData)))
 				insertData.Data[fieldID] = doubleFieldData
 
 			case schemapb.DataType_String, schemapb.DataType_VarChar:
@@ -658,15 +638,13 @@ func (insertCodec *InsertCodec) DeserializeInto(fieldBinlogs []*Blob, rowNum int
 
 				if insertData.Data[fieldID] == nil {
 					insertData.Data[fieldID] = &StringFieldData{
-						NumRows: make([]int64, 0),
-						Data:    make([]string, 0, rowNum),
+						Data: make([]string, 0, rowNum),
 					}
 				}
 				stringFieldData := insertData.Data[fieldID].(*StringFieldData)
 
 				stringFieldData.Data = append(stringFieldData.Data, stringPayload...)
 				totalLength += len(stringPayload)
-				stringFieldData.NumRows = append(stringFieldData.NumRows, int64(len(stringPayload)))
 				insertData.Data[fieldID] = stringFieldData
 
 			case schemapb.DataType_BinaryVector:
@@ -680,8 +658,7 @@ func (insertCodec *InsertCodec) DeserializeInto(fieldBinlogs []*Blob, rowNum int
 
 				if insertData.Data[fieldID] == nil {
 					insertData.Data[fieldID] = &BinaryVectorFieldData{
-						NumRows: make([]int64, 0),
-						Data:    make([]byte, 0, rowNum*dim),
+						Data: make([]byte, 0, rowNum*dim),
 					}
 				}
 				binaryVectorFieldData := insertData.Data[fieldID].(*BinaryVectorFieldData)
@@ -694,7 +671,6 @@ func (insertCodec *InsertCodec) DeserializeInto(fieldBinlogs []*Blob, rowNum int
 					return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, err
 				}
 				totalLength += length
-				binaryVectorFieldData.NumRows = append(binaryVectorFieldData.NumRows, int64(length))
 				binaryVectorFieldData.Dim = dim
 				insertData.Data[fieldID] = binaryVectorFieldData
 
@@ -709,8 +685,7 @@ func (insertCodec *InsertCodec) DeserializeInto(fieldBinlogs []*Blob, rowNum int
 
 				if insertData.Data[fieldID] == nil {
 					insertData.Data[fieldID] = &FloatVectorFieldData{
-						NumRows: make([]int64, 0),
-						Data:    make([]float32, 0, rowNum*dim),
+						Data: make([]float32, 0, rowNum*dim),
 					}
 				}
 				floatVectorFieldData := insertData.Data[fieldID].(*FloatVectorFieldData)
@@ -723,7 +698,6 @@ func (insertCodec *InsertCodec) DeserializeInto(fieldBinlogs []*Blob, rowNum int
 					return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, err
 				}
 				totalLength += length
-				floatVectorFieldData.NumRows = append(floatVectorFieldData.NumRows, int64(length))
 				floatVectorFieldData.Dim = dim
 				insertData.Data[fieldID] = floatVectorFieldData
 

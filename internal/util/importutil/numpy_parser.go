@@ -444,8 +444,7 @@ func (p *NumpyParser) readData(columnReader *NumpyColumnReader, rowCount int) (s
 		}
 
 		return &storage.BoolFieldData{
-			NumRows: []int64{int64(len(data))},
-			Data:    data,
+			Data: data,
 		}, nil
 	case schemapb.DataType_Int8:
 		data, err := columnReader.reader.ReadInt8(rowCount)
@@ -455,8 +454,7 @@ func (p *NumpyParser) readData(columnReader *NumpyColumnReader, rowCount int) (s
 		}
 
 		return &storage.Int8FieldData{
-			NumRows: []int64{int64(len(data))},
-			Data:    data,
+			Data: data,
 		}, nil
 	case schemapb.DataType_Int16:
 		data, err := columnReader.reader.ReadInt16(rowCount)
@@ -466,8 +464,7 @@ func (p *NumpyParser) readData(columnReader *NumpyColumnReader, rowCount int) (s
 		}
 
 		return &storage.Int16FieldData{
-			NumRows: []int64{int64(len(data))},
-			Data:    data,
+			Data: data,
 		}, nil
 	case schemapb.DataType_Int32:
 		data, err := columnReader.reader.ReadInt32(rowCount)
@@ -477,8 +474,7 @@ func (p *NumpyParser) readData(columnReader *NumpyColumnReader, rowCount int) (s
 		}
 
 		return &storage.Int32FieldData{
-			NumRows: []int64{int64(len(data))},
-			Data:    data,
+			Data: data,
 		}, nil
 	case schemapb.DataType_Int64:
 		data, err := columnReader.reader.ReadInt64(rowCount)
@@ -488,8 +484,7 @@ func (p *NumpyParser) readData(columnReader *NumpyColumnReader, rowCount int) (s
 		}
 
 		return &storage.Int64FieldData{
-			NumRows: []int64{int64(len(data))},
-			Data:    data,
+			Data: data,
 		}, nil
 	case schemapb.DataType_Float:
 		data, err := columnReader.reader.ReadFloat32(rowCount)
@@ -499,8 +494,7 @@ func (p *NumpyParser) readData(columnReader *NumpyColumnReader, rowCount int) (s
 		}
 
 		return &storage.FloatFieldData{
-			NumRows: []int64{int64(len(data))},
-			Data:    data,
+			Data: data,
 		}, nil
 	case schemapb.DataType_Double:
 		data, err := columnReader.reader.ReadFloat64(rowCount)
@@ -510,8 +504,7 @@ func (p *NumpyParser) readData(columnReader *NumpyColumnReader, rowCount int) (s
 		}
 
 		return &storage.DoubleFieldData{
-			NumRows: []int64{int64(len(data))},
-			Data:    data,
+			Data: data,
 		}, nil
 	case schemapb.DataType_VarChar:
 		data, err := columnReader.reader.ReadString(rowCount)
@@ -521,8 +514,7 @@ func (p *NumpyParser) readData(columnReader *NumpyColumnReader, rowCount int) (s
 		}
 
 		return &storage.StringFieldData{
-			NumRows: []int64{int64(len(data))},
-			Data:    data,
+			Data: data,
 		}, nil
 	case schemapb.DataType_BinaryVector:
 		data, err := columnReader.reader.ReadUint8(rowCount * (columnReader.dimension / 8))
@@ -532,9 +524,8 @@ func (p *NumpyParser) readData(columnReader *NumpyColumnReader, rowCount int) (s
 		}
 
 		return &storage.BinaryVectorFieldData{
-			NumRows: []int64{int64(len(data) * 8 / columnReader.dimension)},
-			Data:    data,
-			Dim:     columnReader.dimension,
+			Data: data,
+			Dim:  columnReader.dimension,
 		}, nil
 	case schemapb.DataType_FloatVector:
 		// float32/float64 numpy file can be used for float vector file, 2 reasons:
@@ -564,9 +555,8 @@ func (p *NumpyParser) readData(columnReader *NumpyColumnReader, rowCount int) (s
 		}
 
 		return &storage.FloatVectorFieldData{
-			NumRows: []int64{int64(len(data) / columnReader.dimension)},
-			Data:    data,
-			Dim:     columnReader.dimension,
+			Data: data,
+			Dim:  columnReader.dimension,
 		}, nil
 	default:
 		log.Error("Numpy parser: unsupported data type of field", zap.Any("dataType", columnReader.dataType),
@@ -583,63 +573,54 @@ func (p *NumpyParser) appendFunc(schema *schemapb.FieldSchema) func(src storage.
 		return func(src storage.FieldData, n int, target storage.FieldData) error {
 			arr := target.(*storage.BoolFieldData)
 			arr.Data = append(arr.Data, src.GetRow(n).(bool))
-			arr.NumRows[0]++
 			return nil
 		}
 	case schemapb.DataType_Float:
 		return func(src storage.FieldData, n int, target storage.FieldData) error {
 			arr := target.(*storage.FloatFieldData)
 			arr.Data = append(arr.Data, src.GetRow(n).(float32))
-			arr.NumRows[0]++
 			return nil
 		}
 	case schemapb.DataType_Double:
 		return func(src storage.FieldData, n int, target storage.FieldData) error {
 			arr := target.(*storage.DoubleFieldData)
 			arr.Data = append(arr.Data, src.GetRow(n).(float64))
-			arr.NumRows[0]++
 			return nil
 		}
 	case schemapb.DataType_Int8:
 		return func(src storage.FieldData, n int, target storage.FieldData) error {
 			arr := target.(*storage.Int8FieldData)
 			arr.Data = append(arr.Data, src.GetRow(n).(int8))
-			arr.NumRows[0]++
 			return nil
 		}
 	case schemapb.DataType_Int16:
 		return func(src storage.FieldData, n int, target storage.FieldData) error {
 			arr := target.(*storage.Int16FieldData)
 			arr.Data = append(arr.Data, src.GetRow(n).(int16))
-			arr.NumRows[0]++
 			return nil
 		}
 	case schemapb.DataType_Int32:
 		return func(src storage.FieldData, n int, target storage.FieldData) error {
 			arr := target.(*storage.Int32FieldData)
 			arr.Data = append(arr.Data, src.GetRow(n).(int32))
-			arr.NumRows[0]++
 			return nil
 		}
 	case schemapb.DataType_Int64:
 		return func(src storage.FieldData, n int, target storage.FieldData) error {
 			arr := target.(*storage.Int64FieldData)
 			arr.Data = append(arr.Data, src.GetRow(n).(int64))
-			arr.NumRows[0]++
 			return nil
 		}
 	case schemapb.DataType_BinaryVector:
 		return func(src storage.FieldData, n int, target storage.FieldData) error {
 			arr := target.(*storage.BinaryVectorFieldData)
 			arr.Data = append(arr.Data, src.GetRow(n).([]byte)...)
-			arr.NumRows[0]++
 			return nil
 		}
 	case schemapb.DataType_FloatVector:
 		return func(src storage.FieldData, n int, target storage.FieldData) error {
 			arr := target.(*storage.FloatVectorFieldData)
 			arr.Data = append(arr.Data, src.GetRow(n).([]float32)...)
-			arr.NumRows[0]++
 			return nil
 		}
 	case schemapb.DataType_String, schemapb.DataType_VarChar:
@@ -736,8 +717,7 @@ func (p *NumpyParser) splitFieldsData(fieldsData map[storage.FieldID]storage.Fie
 	rowIDField, ok := fieldsData[common.RowIDField]
 	if !ok {
 		rowIDField = &storage.Int64FieldData{
-			Data:    make([]int64, 0),
-			NumRows: []int64{0},
+			Data: make([]int64, 0),
 		}
 		fieldsData[common.RowIDField] = rowIDField
 	}
@@ -755,8 +735,7 @@ func (p *NumpyParser) splitFieldsData(fieldsData map[storage.FieldID]storage.Fie
 		}
 
 		primaryDataArr := &storage.Int64FieldData{
-			NumRows: []int64{int64(rowCount)},
-			Data:    make([]int64, 0, rowCount),
+			Data: make([]int64, 0, rowCount),
 		}
 		for i := rowIDBegin; i < rowIDEnd; i++ {
 			primaryDataArr.Data = append(primaryDataArr.Data, i)
