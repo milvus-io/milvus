@@ -92,7 +92,7 @@ func (dh *distHandler) start(ctx context.Context) {
 }
 
 func (dh *distHandler) logFailureInfo(resp *querypb.GetDataDistributionResponse, err error) {
-	log.With(zap.Int64("nodeID", dh.nodeID))
+	log := log.With(zap.Int64("nodeID", dh.nodeID))
 	if err != nil {
 		log.Warn("failed to get data distribution",
 			zap.Error(err))
