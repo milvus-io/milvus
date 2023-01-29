@@ -122,8 +122,9 @@ func (p *EtcdConfig) Init(base *BaseTable) {
 	}
 
 	p.ConfigPath = ParamItem{
-		Key:     "etcd.config.path",
-		Version: "2.1.0",
+		Key:          "etcd.config.path",
+		DefaultValue: "",
+		Version:      "2.1.0",
 	}
 	p.ConfigPath.Init(base.mgr)
 
@@ -133,13 +134,6 @@ func (p *EtcdConfig) Init(base *BaseTable) {
 		Version:      "2.1.0",
 	}
 	p.DataDir.Init(base.mgr)
-
-	p.Endpoints = ParamItem{
-		Key:          "etcd.endpoints",
-		Version:      "2.0.0",
-		PanicIfEmpty: true,
-	}
-	p.Endpoints.Init(base.mgr)
 
 	p.RootPath = ParamItem{
 		Key:          "etcd.rootPath",
