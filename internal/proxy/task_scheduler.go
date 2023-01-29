@@ -227,12 +227,13 @@ type dmTaskQueue struct {
 func (queue *dmTaskQueue) Enqueue(t task) error {
 	queue.statsLock.Lock()
 	defer queue.statsLock.Unlock()
-	err := queue.baseTaskQueue.Enqueue(t)
+	err := queue.addPChanStats(t)
 	if err != nil {
 		return err
 	}
-	err = queue.addPChanStats(t)
+	err = queue.baseTaskQueue.Enqueue(t)
 	if err != nil {
+		queue.popPChanStats(t)
 		return err
 	}
 
