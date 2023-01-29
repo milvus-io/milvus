@@ -552,7 +552,8 @@ func (s *Segment) fillIndexedFieldsData(ctx context.Context, collectionID Unique
 	for _, fieldData := range result.FieldsData {
 		// If the vector field doesn't have indexed. Vector data is in memory for
 		// brute force search. No need to download data from remote.
-		if !s.hasLoadIndexForIndexedField(fieldData.FieldId) {
+		if fieldData.GetType() != schemapb.DataType_FloatVector && fieldData.GetType() != schemapb.DataType_BinaryVector ||
+			!s.hasLoadIndexForIndexedField(fieldData.FieldId) {
 			continue
 		}
 
