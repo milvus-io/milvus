@@ -35,7 +35,6 @@ import (
 	"runtime"
 	"runtime/debug"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 	"unsafe"
@@ -50,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/gc"
 	"github.com/milvus-io/milvus/internal/util/hardware"
 	"github.com/milvus-io/milvus/internal/util/initcore"
+	"github.com/milvus-io/milvus/internal/util/lifetime"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -83,10 +83,9 @@ type QueryNode struct {
 	queryNodeLoopCtx    context.Context
 	queryNodeLoopCancel context.CancelFunc
 
-	wg sync.WaitGroup
+	lifetime lifetime.Lifetime[commonpb.StateCode]
 
-	stateCode atomic.Value
-	stopOnce  sync.Once
+	stopOnce sync.Once
 
 	//call once
 	initOnce sync.Once
@@ -143,11 +142,11 @@ func NewQueryNode(ctx context.Context, factory dependency.Factory) *QueryNode {
 		queryNodeLoopCancel: cancel,
 		factory:             factory,
 		IsStandAlone:        os.Getenv(metricsinfo.DeployModeEnvKey) == metricsinfo.StandaloneDeployMode,
+		lifetime:            lifetime.NewLifetime(commonpb.StateCode_Abnormal),
 	}
 
 	queryNode.tSafeReplica = newTSafeReplica()
 	queryNode.scheduler = newTaskScheduler(ctx1, queryNode.tSafeReplica)
-	queryNode.UpdateStateCode(commonpb.StateCode_Abnormal)
 
 	return queryNode
 }
@@ -355,7 +354,7 @@ func (node *QueryNode) Stop() error {
 		}
 
 		node.UpdateStateCode(commonpb.StateCode_Abnormal)
-		node.wg.Wait()
+		node.lifetime.Wait()
 		node.queryNodeLoopCancel()
 
 		// close services
@@ -383,7 +382,7 @@ func (node *QueryNode) Stop() error {
 
 // UpdateStateCode updata the state of query node, which can be initializing, healthy, and abnormal
 func (node *QueryNode) UpdateStateCode(code commonpb.StateCode) {
-	node.stateCode.Store(code)
+	node.lifetime.SetState(code)
 }
 
 // SetEtcdClient assigns parameter client to its member etcdCli
