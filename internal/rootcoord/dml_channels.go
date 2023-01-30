@@ -172,7 +172,9 @@ func newDmlChannels(ctx context.Context, factory msgstream.Factory, chanNamePref
 	}
 
 	heap.Init(&d.channelsHeap)
-	log.Debug("init dml channels", zap.Int64("num", chanNum))
+
+	log.Info("init dml channels", zap.String("prefix", chanNamePrefix), zap.Int64("num", chanNum))
+
 	metrics.RootCoordNumOfDMLChannel.Add(float64(chanNum))
 	metrics.RootCoordNumOfMsgStream.Add(float64(chanNum))
 
