@@ -30,6 +30,10 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/zap/zapcore"
+
+	"github.com/milvus-io/milvus/internal/mysqld"
+
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
 	"github.com/milvus-io/milvus/internal/tracer"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
@@ -86,6 +90,8 @@ type Server struct {
 	rootCoordClient  types.RootCoord
 	dataCoordClient  types.DataCoord
 	queryCoordClient types.QueryCoord
+
+	mysqlServer *mysqld.Server
 }
 
 // NewServer create a Proxy server.
@@ -279,6 +285,37 @@ func (s *Server) startInternalGrpc(grpcPort int, errChan chan error) {
 	}
 }
 
+func getLogLevel() zapcore.Level {
+	level := zapcore.InfoLevel
+	cfg := paramtable.Get().Log
+	_ = level.UnmarshalText([]byte(cfg.Level))
+	return level
+}
+
+func getMysqlTCPPort() int {
+	cfg := paramtable.Get().MysqldConfig
+	return cfg.TCPPort.GetAsInt()
+}
+
+func (s *Server) startMySQLServer() error {
+	port := getMysqlTCPPort()
+	level := getLogLevel()
+	mysqlServer, err := mysqld.NewServer(s.proxy, port, level)
+	if err != nil {
+		return err
+	}
+
+	s.mysqlServer = mysqlServer
+
+	if err := s.mysqlServer.Start(); err != nil {
+		return err
+	}
+
+	log.Info("start mysql server", zap.Int("tcpPort", port), zap.String("level", level.String()))
+
+	return nil
+}
+
 // Start start the Proxy Server
 func (s *Server) Run() error {
 	log.Debug("init Proxy server")
@@ -467,6 +504,11 @@ func (s *Server) start() error {
 		return err
 	}
 
+	if err := s.startMySQLServer(); err != nil {
+		log.Warn("failed to start mysql server", zap.Error(err))
+		return err
+	}
+
 	return nil
 }
 
@@ -501,6 +543,10 @@ func (s *Server) Stop() error {
 	err = s.proxy.Stop()
 	if err != nil {
 		return err
+	}
+
+	if s.mysqlServer != nil {
+		return s.mysqlServer.Close()
 	}
 
 	return nil

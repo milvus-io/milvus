@@ -7,6 +7,14 @@ run:
     - docs
     - scripts
     - internal/core
+    - internal/mysqld/parser/antlrparser/parser
+    - internal/planparserv2/generated
+  skip-files:
+    # The worst lint rule of golang.
+    - internal/mysqld/parser/antlrparser/ast_builder.go
+    - internal/mysqld/parser/antlrparser/node_ret.go
+    - internal/mysqld/planner/sql_statement.go
+    - internal/mysqld/planner/sql_statements.go
 
 linters:
   disable-all: true

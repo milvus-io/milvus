@@ -550,3 +550,7 @@ trace:
   # when exporter is jaeger should set the jaeger's URL
   jaeger:
     url: ''
+
+mysqld:
+  tcpPort: 3306
+  # TODO: support socket.
