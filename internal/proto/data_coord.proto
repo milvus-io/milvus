@@ -109,6 +109,7 @@ message FlushRequest {
   int64 dbID = 2;
   repeated int64 segmentIDs = 3;
   int64 collectionID = 4;
+  bool  isImport = 5;
 }
 
 message FlushResponse {

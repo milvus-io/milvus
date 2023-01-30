@@ -394,7 +394,6 @@ func (c *Core) initImportManager() error {
 		impTaskKv,
 		f.NewIDAllocator(),
 		f.NewImportFunc(),
-		f.NewMarkSegmentsDroppedFunc(),
 		f.NewGetSegmentStatesFunc(),
 		f.NewGetCollectionNameFunc(),
 		f.NewUnsetIsImportingStateFunc(),

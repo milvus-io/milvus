@@ -77,7 +77,6 @@ type importManager struct {
 	idAllocator               func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error)
 	callImportService         func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error)
 	getCollectionName         func(collID, partitionID typeutil.UniqueID) (string, string, error)
-	callMarkSegmentsDropped   func(ctx context.Context, segIDs []typeutil.UniqueID) (*commonpb.Status, error)
 	callGetSegmentStates      func(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error)
 	callUnsetIsImportingState func(context.Context, *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error)
 }
@@ -86,7 +85,6 @@ type importManager struct {
 func newImportManager(ctx context.Context, client kv.TxnKV,
 	idAlloc func(count uint32) (typeutil.UniqueID, typeutil.UniqueID, error),
 	importService func(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error),
-	markSegmentsDropped func(ctx context.Context, segIDs []typeutil.UniqueID) (*commonpb.Status, error),
 	getSegmentStates func(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error),
 	getCollectionName func(collID, partitionID typeutil.UniqueID) (string, string, error),
 	unsetIsImportingState func(context.Context, *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error)) *importManager {
@@ -102,7 +100,6 @@ func newImportManager(ctx context.Context, client kv.TxnKV,
 		lastReqID:                 0,
 		idAllocator:               idAlloc,
 		callImportService:         importService,
-		callMarkSegmentsDropped:   markSegmentsDropped,
 		callGetSegmentStates:      getSegmentStates,
 		getCollectionName:         getCollectionName,
 		callUnsetIsImportingState: unsetIsImportingState,
@@ -228,7 +225,7 @@ func (m *importManager) sendOutTasks(ctx context.Context) error {
 			break
 		}
 		if err != nil {
-			log.Error("import task get error", zap.Error(err))
+			log.Warn("import task get error", zap.Error(err))
 			break
 		}
 
@@ -1014,23 +1011,9 @@ func (m *importManager) removeBadImportSegments(ctx context.Context) {
 		log.Info("trying to mark segments as dropped",
 			zap.Int64("task ID", t.GetId()),
 			zap.Int64s("segment IDs", t.GetState().GetSegments()))
-		status, err := m.callMarkSegmentsDropped(ctx, t.GetState().GetSegments())
-		errMsg := "failed to mark all segments dropped, some segments might already have been dropped"
-		if err != nil {
-			log.Error(errMsg,
-				zap.Int64("task ID", t.GetId()),
-				zap.Int64s("segments", t.GetState().GetSegments()),
-				zap.Error(err))
-		}
-		if status.GetErrorCode() != commonpb.ErrorCode_Success {
-			log.Error(errMsg,
-				zap.Int64("task ID", t.GetId()),
-				zap.Int64s("segments", t.GetState().GetSegments()),
-				zap.Error(errors.New(status.GetReason())))
-		}
+
 		if err = m.setImportTaskState(t.GetId(), commonpb.ImportState_ImportFailedAndCleaned); err != nil {
-			log.Error(errMsg,
-				zap.Int64("task ID", t.GetId()))
+			log.Warn("failed to set ", zap.Int64("task ID", t.GetId()), zap.Error(err))
 		}
 	}
 }
