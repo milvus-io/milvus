@@ -79,11 +79,18 @@ jobs:
           ./build/builder.sh /bin/bash -c "make ci-ut"
       - name: Get the status & restart count for containers when ut failed
         if: ${{ failure() }}
-        run: |  
+        run: |
           echo "----show current status for each container---"
-          docker ps --format "table {{.Names}}\t\t{{.Image}}\t\t{{.Status}}"
-          for container in $(docker ps --format "table {{.Names}}" | grep -v "NAMES"); do
+          docker ps -a --format "table {{.Names}}\t\t{{.Image}}\t\t{{.Status}}"
+          for container in $(docker ps -a --format "table {{.Names}}" | grep -v "NAMES"); do
               echo "restart count for ${container} is $(docker inspect ${container} --format '{{json .RestartCount}}')"
+          done
+          for container in $(docker ps -a --format "table {{.Names}}" | grep -v "NAMES"); do
+              if [ "$(docker inspect ${container} --format '{{json .State.Status}}')" != "running" ]
+              then
+                echo "--------- logs for ${container}, status: $(docker inspect ${container} --format '{{json .State.Status}}') ------------"
+                docker logs ${container} --tail=200
+              fi
           done
       - name: Upload coverage to Codecov
         if: "github.repository == 'milvus-io/milvus'"
