@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
+	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
@@ -178,7 +179,7 @@ func (suite *CollectionObserverSuite) SetupTest() {
 
 	// Dependencies
 	suite.dist = meta.NewDistributionManager()
-	suite.meta = meta.NewMeta(suite.idAllocator, suite.store)
+	suite.meta = meta.NewMeta(suite.idAllocator, suite.store, session.NewNodeManager())
 	suite.broker = meta.NewMockBroker(suite.T())
 	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta)
 	suite.targetObserver = NewTargetObserver(suite.meta,
@@ -323,7 +324,7 @@ func (suite *CollectionObserverSuite) loadAll() {
 
 func (suite *CollectionObserverSuite) load(collection int64) {
 	// Mock meta data
-	replicas, err := suite.meta.ReplicaManager.Spawn(collection, suite.replicaNumber[collection])
+	replicas, err := suite.meta.ReplicaManager.Spawn(collection, suite.replicaNumber[collection], meta.DefaultResourceGroupName)
 	suite.NoError(err)
 	for _, replica := range replicas {
 		replica.AddNode(suite.nodes...)

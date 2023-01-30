@@ -354,7 +354,7 @@ enum MsgType : int {
   ListPolicy = 1609,
   CreateResourceGroup = 1700,
   DropResourceGroup = 1701,
-  ListResourceGroup = 1702,
+  ListResourceGroups = 1702,
   DescribeResourceGroup = 1703,
   TransferNode = 1704,
   TransferReplica = 1705,

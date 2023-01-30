@@ -293,7 +293,7 @@ func (m *MockRootCoord) RenameCollection(ctx context.Context, req *milvuspb.Rena
 	return nil, nil
 }
 
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type MockQueryCoord struct {
 	MockBase
 	initErr  error
@@ -406,6 +406,30 @@ func (m *MockQueryCoord) CheckHealth(ctx context.Context, req *milvuspb.CheckHea
 	return &milvuspb.CheckHealthResponse{
 		IsHealthy: true,
 	}, nil
+}
+
+func (m *MockQueryCoord) CreateResourceGroup(ctx context.Context, req *milvuspb.CreateResourceGroupRequest) (*commonpb.Status, error) {
+	return nil, nil
+}
+
+func (m *MockQueryCoord) DropResourceGroup(ctx context.Context, req *milvuspb.DropResourceGroupRequest) (*commonpb.Status, error) {
+	return nil, nil
+}
+
+func (m *MockQueryCoord) DescribeResourceGroup(ctx context.Context, req *querypb.DescribeResourceGroupRequest) (*querypb.DescribeResourceGroupResponse, error) {
+	return nil, nil
+}
+
+func (m *MockQueryCoord) TransferNode(ctx context.Context, req *milvuspb.TransferNodeRequest) (*commonpb.Status, error) {
+	return nil, nil
+}
+
+func (m *MockQueryCoord) TransferReplica(ctx context.Context, req *querypb.TransferReplicaRequest) (*commonpb.Status, error) {
+	return nil, nil
+}
+
+func (m *MockQueryCoord) ListResourceGroups(ctx context.Context, req *milvuspb.ListResourceGroupsRequest) (*milvuspb.ListResourceGroupsResponse, error) {
+	return nil, nil
 }
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -935,7 +959,7 @@ func (m *MockProxy) TransferReplica(ctx context.Context, req *milvuspb.TransferR
 	return nil, nil
 }
 
-func (m *MockProxy) ListResourceGroup(ctx context.Context, req *milvuspb.ListResourceGroupRequest) (*milvuspb.ListResourceGroupResponse, error) {
+func (m *MockProxy) ListResourceGroups(ctx context.Context, req *milvuspb.ListResourceGroupsRequest) (*milvuspb.ListResourceGroupsResponse, error) {
 	return nil, nil
 }
 
@@ -1377,6 +1401,36 @@ func Test_NewServer(t *testing.T) {
 
 	t.Run("RenameCollection", func(t *testing.T) {
 		_, err := server.RenameCollection(ctx, nil)
+		assert.Nil(t, err)
+	})
+
+	t.Run("CreateResourceGroup", func(t *testing.T) {
+		_, err := server.CreateResourceGroup(ctx, nil)
+		assert.Nil(t, err)
+	})
+
+	t.Run("DropResourceGroup", func(t *testing.T) {
+		_, err := server.DropResourceGroup(ctx, nil)
+		assert.Nil(t, err)
+	})
+
+	t.Run("TransferNode", func(t *testing.T) {
+		_, err := server.TransferNode(ctx, nil)
+		assert.Nil(t, err)
+	})
+
+	t.Run("TransferReplica", func(t *testing.T) {
+		_, err := server.TransferReplica(ctx, nil)
+		assert.Nil(t, err)
+	})
+
+	t.Run("ListResourceGroups", func(t *testing.T) {
+		_, err := server.ListResourceGroups(ctx, nil)
+		assert.Nil(t, err)
+	})
+
+	t.Run("DescribeResourceGroup", func(t *testing.T) {
+		_, err := server.DescribeResourceGroup(ctx, nil)
 		assert.Nil(t, err)
 	})
 

@@ -364,3 +364,27 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 func (s *Server) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
 	return s.queryCoord.CheckHealth(ctx, req)
 }
+
+func (s *Server) CreateResourceGroup(ctx context.Context, req *milvuspb.CreateResourceGroupRequest) (*commonpb.Status, error) {
+	return s.queryCoord.CreateResourceGroup(ctx, req)
+}
+
+func (s *Server) DropResourceGroup(ctx context.Context, req *milvuspb.DropResourceGroupRequest) (*commonpb.Status, error) {
+	return s.queryCoord.DropResourceGroup(ctx, req)
+}
+
+func (s *Server) TransferNode(ctx context.Context, req *milvuspb.TransferNodeRequest) (*commonpb.Status, error) {
+	return s.queryCoord.TransferNode(ctx, req)
+}
+
+func (s *Server) TransferReplica(ctx context.Context, req *querypb.TransferReplicaRequest) (*commonpb.Status, error) {
+	return s.queryCoord.TransferReplica(ctx, req)
+}
+
+func (s *Server) ListResourceGroups(ctx context.Context, req *milvuspb.ListResourceGroupsRequest) (*milvuspb.ListResourceGroupsResponse, error) {
+	return s.queryCoord.ListResourceGroups(ctx, req)
+}
+
+func (s *Server) DescribeResourceGroup(ctx context.Context, req *querypb.DescribeResourceGroupRequest) (*querypb.DescribeResourceGroupResponse, error) {
+	return s.queryCoord.DescribeResourceGroup(ctx, req)
+}

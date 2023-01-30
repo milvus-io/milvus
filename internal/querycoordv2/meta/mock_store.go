@@ -155,6 +155,51 @@ func (_c *MockStore_GetReplicas_Call) Return(_a0 []*querypb.Replica, _a1 error) 
 	return _c
 }
 
+// GetResourceGroups provides a mock function with given fields:
+func (_m *MockStore) GetResourceGroups() ([]*querypb.ResourceGroup, error) {
+	ret := _m.Called()
+
+	var r0 []*querypb.ResourceGroup
+	if rf, ok := ret.Get(0).(func() []*querypb.ResourceGroup); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*querypb.ResourceGroup)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func() error); ok {
+		r1 = rf()
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockStore_GetResourceGroups_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetResourceGroups'
+type MockStore_GetResourceGroups_Call struct {
+	*mock.Call
+}
+
+// GetResourceGroups is a helper method to define mock.On call
+func (_e *MockStore_Expecter) GetResourceGroups() *MockStore_GetResourceGroups_Call {
+	return &MockStore_GetResourceGroups_Call{Call: _e.mock.On("GetResourceGroups")}
+}
+
+func (_c *MockStore_GetResourceGroups_Call) Run(run func()) *MockStore_GetResourceGroups_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockStore_GetResourceGroups_Call) Return(_a0 []*querypb.ResourceGroup, _a1 error) *MockStore_GetResourceGroups_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
 // ReleaseCollection provides a mock function with given fields: id
 func (_m *MockStore) ReleaseCollection(id int64) error {
 	ret := _m.Called(id)
@@ -319,6 +364,43 @@ func (_c *MockStore_ReleaseReplicas_Call) Return(_a0 error) *MockStore_ReleaseRe
 	return _c
 }
 
+// RemoveResourceGroup provides a mock function with given fields: rgName
+func (_m *MockStore) RemoveResourceGroup(rgName string) error {
+	ret := _m.Called(rgName)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string) error); ok {
+		r0 = rf(rgName)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStore_RemoveResourceGroup_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveResourceGroup'
+type MockStore_RemoveResourceGroup_Call struct {
+	*mock.Call
+}
+
+// RemoveResourceGroup is a helper method to define mock.On call
+//  - rgName string
+func (_e *MockStore_Expecter) RemoveResourceGroup(rgName interface{}) *MockStore_RemoveResourceGroup_Call {
+	return &MockStore_RemoveResourceGroup_Call{Call: _e.mock.On("RemoveResourceGroup", rgName)}
+}
+
+func (_c *MockStore_RemoveResourceGroup_Call) Run(run func(rgName string)) *MockStore_RemoveResourceGroup_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *MockStore_RemoveResourceGroup_Call) Return(_a0 error) *MockStore_RemoveResourceGroup_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
 // SaveCollection provides a mock function with given fields: info
 func (_m *MockStore) SaveCollection(info *querypb.CollectionLoadInfo) error {
 	ret := _m.Called(info)
@@ -439,6 +521,56 @@ func (_c *MockStore_SaveReplica_Call) Run(run func(replica *querypb.Replica)) *M
 }
 
 func (_c *MockStore_SaveReplica_Call) Return(_a0 error) *MockStore_SaveReplica_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+// SaveResourceGroup provides a mock function with given fields: rgs
+func (_m *MockStore) SaveResourceGroup(rgs ...*querypb.ResourceGroup) error {
+	_va := make([]interface{}, len(rgs))
+	for _i := range rgs {
+		_va[_i] = rgs[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(...*querypb.ResourceGroup) error); ok {
+		r0 = rf(rgs...)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockStore_SaveResourceGroup_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveResourceGroup'
+type MockStore_SaveResourceGroup_Call struct {
+	*mock.Call
+}
+
+// SaveResourceGroup is a helper method to define mock.On call
+//  - rgs ...*querypb.ResourceGroup
+func (_e *MockStore_Expecter) SaveResourceGroup(rgs ...interface{}) *MockStore_SaveResourceGroup_Call {
+	return &MockStore_SaveResourceGroup_Call{Call: _e.mock.On("SaveResourceGroup",
+		append([]interface{}{}, rgs...)...)}
+}
+
+func (_c *MockStore_SaveResourceGroup_Call) Run(run func(rgs ...*querypb.ResourceGroup)) *MockStore_SaveResourceGroup_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]*querypb.ResourceGroup, len(args)-0)
+		for i, a := range args[0:] {
+			if a != nil {
+				variadicArgs[i] = a.(*querypb.ResourceGroup)
+			}
+		}
+		run(variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockStore_SaveResourceGroup_Call) Return(_a0 error) *MockStore_SaveResourceGroup_Call {
 	_c.Call.Return(_a0)
 	return _c
 }

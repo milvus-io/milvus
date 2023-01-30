@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 )
 
@@ -144,7 +145,7 @@ func (c *SegmentChecker) getStreamingSegmentDiff(targetMgr *meta.TargetManager,
 
 func (c *SegmentChecker) getStreamingSegmentsDist(distMgr *meta.DistributionManager, replica *meta.Replica) map[int64]*meta.Segment {
 	segments := make(map[int64]*meta.Segment, 0)
-	for _, node := range replica.Nodes.Collect() {
+	for _, node := range replica.GetNodes() {
 		segmentsOnNodes := distMgr.LeaderViewManager.GetGrowingSegmentDistByCollectionAndNode(replica.CollectionID, node)
 		for k, v := range segmentsOnNodes {
 			segments[k] = v
@@ -196,7 +197,7 @@ func (c *SegmentChecker) getHistoricalSegmentDiff(targetMgr *meta.TargetManager,
 
 func (c *SegmentChecker) getHistoricalSegmentsDist(distMgr *meta.DistributionManager, replica *meta.Replica) []*meta.Segment {
 	ret := make([]*meta.Segment, 0)
-	for _, node := range replica.Nodes.Collect() {
+	for _, node := range replica.GetNodes() {
 		ret = append(ret, distMgr.SegmentDistManager.GetByCollectionAndNode(replica.CollectionID, node)...)
 	}
 	return ret
@@ -266,7 +267,11 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 		}
 		packedSegments = append(packedSegments, &meta.Segment{SegmentInfo: s})
 	}
-	plans := c.balancer.AssignSegment(packedSegments, replica.Replica.GetNodes())
+	outboundNodes := c.meta.ResourceManager.CheckOutboundNodes(replica)
+	availableNodes := lo.Filter(replica.Replica.GetNodes(), func(node int64, _ int) bool {
+		return !outboundNodes.Contain(node)
+	})
+	plans := c.balancer.AssignSegment(packedSegments, availableNodes)
 	for i := range plans {
 		plans[i].ReplicaID = replica.GetID()
 	}

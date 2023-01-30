@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
+	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
@@ -74,7 +75,7 @@ func (suite *TargetObserverSuite) SetupTest() {
 	// meta
 	store := meta.NewMetaStore(suite.kv)
 	idAllocator := RandomIncrementIDAllocator()
-	suite.meta = meta.NewMeta(idAllocator, store)
+	suite.meta = meta.NewMeta(idAllocator, store, session.NewNodeManager())
 
 	suite.broker = meta.NewMockBroker(suite.T())
 	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta)
@@ -86,7 +87,7 @@ func (suite *TargetObserverSuite) SetupTest() {
 
 	err = suite.meta.CollectionManager.PutCollection(utils.CreateTestCollection(suite.collectionID, 1))
 	suite.NoError(err)
-	replicas, err := suite.meta.ReplicaManager.Spawn(suite.collectionID, 1)
+	replicas, err := suite.meta.ReplicaManager.Spawn(suite.collectionID, 1, meta.DefaultResourceGroupName)
 	suite.NoError(err)
 	replicas[0].AddNode(2)
 	err = suite.meta.ReplicaManager.Put(replicas...)
@@ -212,6 +213,6 @@ func (suite *TargetObserverSuite) TearDownSuite() {
 	suite.observer.Stop()
 }
 
-func TestTargetManager(t *testing.T) {
+func TestTargetObserver(t *testing.T) {
 	suite.Run(t, new(TargetObserverSuite))
 }

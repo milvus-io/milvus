@@ -888,8 +888,11 @@ type queryCoordConfig struct {
 	CheckHandoffInterval ParamItem `refreshable:"true"`
 	EnableActiveStandby  ParamItem `refreshable:"false"`
 
-	NextTargetSurviveTime    ParamItem `refreshable:"true"`
-	UpdateNextTargetInterval ParamItem `refreshable:"false"`
+	NextTargetSurviveTime      ParamItem `refreshable:"true"`
+	UpdateNextTargetInterval   ParamItem `refreshable:"false"`
+	CheckNodeInReplicaInterval ParamItem `refreshable:"false"`
+	CheckResourceGroupInterval ParamItem `refreshable:"false"`
+	EnableRGAutoRecover        ParamItem `refreshable:"true"`
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -1040,6 +1043,30 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		PanicIfEmpty: true,
 	}
 	p.UpdateNextTargetInterval.Init(base.mgr)
+
+	p.CheckNodeInReplicaInterval = ParamItem{
+		Key:          "queryCoord.checkNodeInReplicaInterval",
+		Version:      "2.2.3",
+		DefaultValue: "60",
+		PanicIfEmpty: true,
+	}
+	p.CheckNodeInReplicaInterval.Init(base.mgr)
+
+	p.CheckResourceGroupInterval = ParamItem{
+		Key:          "queryCoord.checkResourceGroupInterval",
+		Version:      "2.2.3",
+		DefaultValue: "30",
+		PanicIfEmpty: true,
+	}
+	p.CheckResourceGroupInterval.Init(base.mgr)
+
+	p.EnableRGAutoRecover = ParamItem{
+		Key:          "queryCoord.enableRGAutoRecover",
+		Version:      "2.2.3",
+		DefaultValue: "true",
+		PanicIfEmpty: true,
+	}
+	p.EnableRGAutoRecover.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

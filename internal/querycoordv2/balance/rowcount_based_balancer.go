@@ -104,13 +104,15 @@ func (b *RowCountBasedBalancer) Balance() ([]SegmentAssignPlan, []ChannelAssignP
 }
 
 func (b *RowCountBasedBalancer) balanceReplica(replica *meta.Replica) ([]SegmentAssignPlan, []ChannelAssignPlan) {
-	nodes := replica.Nodes.Collect()
+	nodes := replica.GetNodes()
 	if len(nodes) == 0 {
 		return nil, nil
 	}
 	nodesRowCnt := make(map[int64]int)
 	nodesSegments := make(map[int64][]*meta.Segment)
 	stoppingNodesSegments := make(map[int64][]*meta.Segment)
+
+	outboundNodes := b.meta.ResourceManager.CheckOutboundNodes(replica)
 
 	totalCnt := 0
 	for _, nid := range nodes {
@@ -124,6 +126,14 @@ func (b *RowCountBasedBalancer) balanceReplica(replica *meta.Replica) ([]Segment
 			log.Info("not existed node", zap.Int64("nid", nid), zap.Any("segments", segments), zap.Error(err))
 			continue
 		} else if isStopping {
+			stoppingNodesSegments[nid] = segments
+		} else if outboundNodes.Contain(nid) {
+			// if node is stop or transfer to other rg
+			log.RatedInfo(10, "meet outbound node, try to move out all segment/channel",
+				zap.Int64("collectionID", replica.GetCollectionID()),
+				zap.Int64("replicaID", replica.GetCollectionID()),
+				zap.Int64("node", nid),
+			)
 			stoppingNodesSegments[nid] = segments
 		} else {
 			nodesSegments[nid] = segments
@@ -224,7 +234,7 @@ outer:
 		node.setPriority(node.getPriority() + int(s.GetNumOfRows()))
 		queue.push(node)
 	}
-	return plans, b.getChannelPlan(replica, stoppingNodesSegments)
+	return plans, b.getChannelPlan(replica, lo.Keys(nodesSegments), lo.Keys(stoppingNodesSegments))
 }
 
 func (b *RowCountBasedBalancer) handleStoppingNodes(replica *meta.Replica, nodeSegments map[int64][]*meta.Segment) ([]SegmentAssignPlan, []ChannelAssignPlan) {
@@ -271,17 +281,11 @@ func (b *RowCountBasedBalancer) collectionStoppingSegments(stoppingNodesSegments
 	return segments, removeRowCnt
 }
 
-func (b *RowCountBasedBalancer) getChannelPlan(replica *meta.Replica, stoppingNodesSegments map[int64][]*meta.Segment) []ChannelAssignPlan {
-	// maybe it will have some strategies to balance the channel in the future
-	// but now, only balance the channel for the stopping nodes.
-	return b.getChannelPlanForStoppingNodes(replica, stoppingNodesSegments)
-}
-
-func (b *RowCountBasedBalancer) getChannelPlanForStoppingNodes(replica *meta.Replica, stoppingNodesSegments map[int64][]*meta.Segment) []ChannelAssignPlan {
+func (b *RowCountBasedBalancer) getChannelPlan(replica *meta.Replica, onlineNodes []int64, offlineNodes []int64) []ChannelAssignPlan {
 	channelPlans := make([]ChannelAssignPlan, 0)
-	for nodeID := range stoppingNodesSegments {
+	for _, nodeID := range offlineNodes {
 		dmChannels := b.dist.ChannelDistManager.GetByCollectionAndNode(replica.GetCollectionID(), nodeID)
-		plans := b.AssignChannel(dmChannels, replica.Replica.GetNodes())
+		plans := b.AssignChannel(dmChannels, onlineNodes)
 		for i := range plans {
 			plans[i].From = nodeID
 			plans[i].ReplicaID = replica.ID

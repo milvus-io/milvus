@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/samber/lo"
 )
 
 const (
@@ -51,27 +52,33 @@ const (
 	OffsetKey       = "offset"
 	LimitKey        = "limit"
 
-	InsertTaskName             = "InsertTask"
-	CreateCollectionTaskName   = "CreateCollectionTask"
-	DropCollectionTaskName     = "DropCollectionTask"
-	HasCollectionTaskName      = "HasCollectionTask"
-	DescribeCollectionTaskName = "DescribeCollectionTask"
-	ShowCollectionTaskName     = "ShowCollectionTask"
-	CreatePartitionTaskName    = "CreatePartitionTask"
-	DropPartitionTaskName      = "DropPartitionTask"
-	HasPartitionTaskName       = "HasPartitionTask"
-	ShowPartitionTaskName      = "ShowPartitionTask"
-	FlushTaskName              = "FlushTask"
-	LoadCollectionTaskName     = "LoadCollectionTask"
-	ReleaseCollectionTaskName  = "ReleaseCollectionTask"
-	LoadPartitionTaskName      = "LoadPartitionsTask"
-	ReleasePartitionTaskName   = "ReleasePartitionsTask"
-	DeleteTaskName             = "DeleteTask"
-	CreateAliasTaskName        = "CreateAliasTask"
-	DropAliasTaskName          = "DropAliasTask"
-	AlterAliasTaskName         = "AlterAliasTask"
-	AlterCollectionTaskName    = "AlterCollectionTask"
-	UpsertTaskName             = "UpsertTask"
+	InsertTaskName                = "InsertTask"
+	CreateCollectionTaskName      = "CreateCollectionTask"
+	DropCollectionTaskName        = "DropCollectionTask"
+	HasCollectionTaskName         = "HasCollectionTask"
+	DescribeCollectionTaskName    = "DescribeCollectionTask"
+	ShowCollectionTaskName        = "ShowCollectionTask"
+	CreatePartitionTaskName       = "CreatePartitionTask"
+	DropPartitionTaskName         = "DropPartitionTask"
+	HasPartitionTaskName          = "HasPartitionTask"
+	ShowPartitionTaskName         = "ShowPartitionTask"
+	FlushTaskName                 = "FlushTask"
+	LoadCollectionTaskName        = "LoadCollectionTask"
+	ReleaseCollectionTaskName     = "ReleaseCollectionTask"
+	LoadPartitionTaskName         = "LoadPartitionsTask"
+	ReleasePartitionTaskName      = "ReleasePartitionsTask"
+	DeleteTaskName                = "DeleteTask"
+	CreateAliasTaskName           = "CreateAliasTask"
+	DropAliasTaskName             = "DropAliasTask"
+	AlterAliasTaskName            = "AlterAliasTask"
+	AlterCollectionTaskName       = "AlterCollectionTask"
+	UpsertTaskName                = "UpsertTask"
+	CreateResourceGroupTaskName   = "CreateResourceGroupTask"
+	DropResourceGroupTaskName     = "DropResourceGroupTask"
+	TransferNodeTaskName          = "TransferNodeTask"
+	TransferReplicaTaskName       = "TransferReplicaTask"
+	ListResourceGroupsTaskName    = "ListResourceGroupsTask"
+	DescribeResourceGroupTaskName = "DescribeResourceGroupTask"
 
 	// minFloat32 minimum float.
 	minFloat32 = -1 * float32(math.MaxFloat32)
@@ -1914,5 +1921,414 @@ func (a *AlterAliasTask) Execute(ctx context.Context) error {
 }
 
 func (a *AlterAliasTask) PostExecute(ctx context.Context) error {
+	return nil
+}
+
+type CreateResourceGroupTask struct {
+	Condition
+	*milvuspb.CreateResourceGroupRequest
+	ctx        context.Context
+	queryCoord types.QueryCoord
+	result     *commonpb.Status
+}
+
+func (t *CreateResourceGroupTask) TraceCtx() context.Context {
+	return t.ctx
+}
+
+func (t *CreateResourceGroupTask) ID() UniqueID {
+	return t.Base.MsgID
+}
+
+func (t *CreateResourceGroupTask) SetID(uid UniqueID) {
+	t.Base.MsgID = uid
+}
+
+func (t *CreateResourceGroupTask) Name() string {
+	return CreateResourceGroupTaskName
+}
+
+func (t *CreateResourceGroupTask) Type() commonpb.MsgType {
+	return t.Base.MsgType
+}
+
+func (t *CreateResourceGroupTask) BeginTs() Timestamp {
+	return t.Base.Timestamp
+}
+
+func (t *CreateResourceGroupTask) EndTs() Timestamp {
+	return t.Base.Timestamp
+}
+
+func (t *CreateResourceGroupTask) SetTs(ts Timestamp) {
+	t.Base.Timestamp = ts
+}
+
+func (t *CreateResourceGroupTask) OnEnqueue() error {
+	t.Base = commonpbutil.NewMsgBase()
+	return nil
+}
+
+func (t *CreateResourceGroupTask) PreExecute(ctx context.Context) error {
+	t.Base.MsgType = commonpb.MsgType_CreateResourceGroup
+	t.Base.SourceID = paramtable.GetNodeID()
+
+	return nil
+}
+
+func (t *CreateResourceGroupTask) Execute(ctx context.Context) error {
+	var err error
+	t.result, err = t.queryCoord.CreateResourceGroup(ctx, t.CreateResourceGroupRequest)
+	return err
+}
+
+func (t *CreateResourceGroupTask) PostExecute(ctx context.Context) error {
+	return nil
+}
+
+type DropResourceGroupTask struct {
+	Condition
+	*milvuspb.DropResourceGroupRequest
+	ctx        context.Context
+	queryCoord types.QueryCoord
+	result     *commonpb.Status
+}
+
+func (t *DropResourceGroupTask) TraceCtx() context.Context {
+	return t.ctx
+}
+
+func (t *DropResourceGroupTask) ID() UniqueID {
+	return t.Base.MsgID
+}
+
+func (t *DropResourceGroupTask) SetID(uid UniqueID) {
+	t.Base.MsgID = uid
+}
+
+func (t *DropResourceGroupTask) Name() string {
+	return DropResourceGroupTaskName
+}
+
+func (t *DropResourceGroupTask) Type() commonpb.MsgType {
+	return t.Base.MsgType
+}
+
+func (t *DropResourceGroupTask) BeginTs() Timestamp {
+	return t.Base.Timestamp
+}
+
+func (t *DropResourceGroupTask) EndTs() Timestamp {
+	return t.Base.Timestamp
+}
+
+func (t *DropResourceGroupTask) SetTs(ts Timestamp) {
+	t.Base.Timestamp = ts
+}
+
+func (t *DropResourceGroupTask) OnEnqueue() error {
+	t.Base = commonpbutil.NewMsgBase()
+	return nil
+}
+
+func (t *DropResourceGroupTask) PreExecute(ctx context.Context) error {
+	t.Base.MsgType = commonpb.MsgType_DropResourceGroup
+	t.Base.SourceID = paramtable.GetNodeID()
+
+	return nil
+}
+
+func (t *DropResourceGroupTask) Execute(ctx context.Context) error {
+	var err error
+	t.result, err = t.queryCoord.DropResourceGroup(ctx, t.DropResourceGroupRequest)
+	return err
+}
+
+func (t *DropResourceGroupTask) PostExecute(ctx context.Context) error {
+	return nil
+}
+
+type DescribeResourceGroupTask struct {
+	Condition
+	*milvuspb.DescribeResourceGroupRequest
+	ctx        context.Context
+	queryCoord types.QueryCoord
+	result     *milvuspb.DescribeResourceGroupResponse
+}
+
+func (t *DescribeResourceGroupTask) TraceCtx() context.Context {
+	return t.ctx
+}
+
+func (t *DescribeResourceGroupTask) ID() UniqueID {
+	return t.Base.MsgID
+}
+
+func (t *DescribeResourceGroupTask) SetID(uid UniqueID) {
+	t.Base.MsgID = uid
+}
+
+func (t *DescribeResourceGroupTask) Name() string {
+	return DescribeResourceGroupTaskName
+}
+
+func (t *DescribeResourceGroupTask) Type() commonpb.MsgType {
+	return t.Base.MsgType
+}
+
+func (t *DescribeResourceGroupTask) BeginTs() Timestamp {
+	return t.Base.Timestamp
+}
+
+func (t *DescribeResourceGroupTask) EndTs() Timestamp {
+	return t.Base.Timestamp
+}
+
+func (t *DescribeResourceGroupTask) SetTs(ts Timestamp) {
+	t.Base.Timestamp = ts
+}
+
+func (t *DescribeResourceGroupTask) OnEnqueue() error {
+	t.Base = commonpbutil.NewMsgBase()
+	return nil
+}
+
+func (t *DescribeResourceGroupTask) PreExecute(ctx context.Context) error {
+	t.Base.MsgType = commonpb.MsgType_DescribeResourceGroup
+	t.Base.SourceID = paramtable.GetNodeID()
+
+	return nil
+}
+
+func (t *DescribeResourceGroupTask) Execute(ctx context.Context) error {
+	var err error
+	resp, err := t.queryCoord.DescribeResourceGroup(ctx, &querypb.DescribeResourceGroupRequest{
+		ResourceGroup: t.ResourceGroup,
+	})
+	rgInfo := resp.GetResourceGroup()
+
+	getCollectionNameFunc := func(value int32, key int64) string {
+		name, err := globalMetaCache.GetCollectionName(ctx, key)
+		if err != nil {
+			// unreachable logic path
+			return "unavailable_collection"
+		}
+		return name
+	}
+
+	loadReplicas := lo.MapKeys(rgInfo.NumLoadedReplica, getCollectionNameFunc)
+	outgoingNodes := lo.MapKeys(rgInfo.NumOutgoingNode, getCollectionNameFunc)
+	incomingNodes := lo.MapKeys(rgInfo.NumIncomingNode, getCollectionNameFunc)
+
+	t.result = &milvuspb.DescribeResourceGroupResponse{
+		Status: resp.Status,
+		ResourceGroup: &milvuspb.ResourceGroup{
+			Name:             rgInfo.GetName(),
+			Capacity:         rgInfo.GetCapacity(),
+			NumAvailableNode: rgInfo.NumAvailableNode,
+			NumLoadedReplica: loadReplicas,
+			NumOutgoingNode:  outgoingNodes,
+			NumIncomingNode:  incomingNodes,
+		},
+	}
+	return err
+}
+
+func (t *DescribeResourceGroupTask) PostExecute(ctx context.Context) error {
+	return nil
+}
+
+type TransferNodeTask struct {
+	Condition
+	*milvuspb.TransferNodeRequest
+	ctx        context.Context
+	queryCoord types.QueryCoord
+	result     *commonpb.Status
+}
+
+func (t *TransferNodeTask) TraceCtx() context.Context {
+	return t.ctx
+}
+
+func (t *TransferNodeTask) ID() UniqueID {
+	return t.Base.MsgID
+}
+
+func (t *TransferNodeTask) SetID(uid UniqueID) {
+	t.Base.MsgID = uid
+}
+
+func (t *TransferNodeTask) Name() string {
+	return TransferNodeTaskName
+}
+
+func (t *TransferNodeTask) Type() commonpb.MsgType {
+	return t.Base.MsgType
+}
+
+func (t *TransferNodeTask) BeginTs() Timestamp {
+	return t.Base.Timestamp
+}
+
+func (t *TransferNodeTask) EndTs() Timestamp {
+	return t.Base.Timestamp
+}
+
+func (t *TransferNodeTask) SetTs(ts Timestamp) {
+	t.Base.Timestamp = ts
+}
+
+func (t *TransferNodeTask) OnEnqueue() error {
+	t.Base = commonpbutil.NewMsgBase()
+	return nil
+}
+
+func (t *TransferNodeTask) PreExecute(ctx context.Context) error {
+	t.Base.MsgType = commonpb.MsgType_TransferNode
+	t.Base.SourceID = paramtable.GetNodeID()
+
+	return nil
+}
+
+func (t *TransferNodeTask) Execute(ctx context.Context) error {
+	var err error
+	t.result, err = t.queryCoord.TransferNode(ctx, t.TransferNodeRequest)
+	return err
+}
+
+func (t *TransferNodeTask) PostExecute(ctx context.Context) error {
+	return nil
+}
+
+type TransferReplicaTask struct {
+	Condition
+	*milvuspb.TransferReplicaRequest
+	ctx        context.Context
+	queryCoord types.QueryCoord
+	result     *commonpb.Status
+}
+
+func (t *TransferReplicaTask) TraceCtx() context.Context {
+	return t.ctx
+}
+
+func (t *TransferReplicaTask) ID() UniqueID {
+	return t.Base.MsgID
+}
+
+func (t *TransferReplicaTask) SetID(uid UniqueID) {
+	t.Base.MsgID = uid
+}
+
+func (t *TransferReplicaTask) Name() string {
+	return TransferReplicaTaskName
+}
+
+func (t *TransferReplicaTask) Type() commonpb.MsgType {
+	return t.Base.MsgType
+}
+
+func (t *TransferReplicaTask) BeginTs() Timestamp {
+	return t.Base.Timestamp
+}
+
+func (t *TransferReplicaTask) EndTs() Timestamp {
+	return t.Base.Timestamp
+}
+
+func (t *TransferReplicaTask) SetTs(ts Timestamp) {
+	t.Base.Timestamp = ts
+}
+
+func (t *TransferReplicaTask) OnEnqueue() error {
+	t.Base = commonpbutil.NewMsgBase()
+	return nil
+}
+
+func (t *TransferReplicaTask) PreExecute(ctx context.Context) error {
+	t.Base.MsgType = commonpb.MsgType_TransferReplica
+	t.Base.SourceID = paramtable.GetNodeID()
+
+	return nil
+}
+
+func (t *TransferReplicaTask) Execute(ctx context.Context) error {
+	var err error
+	collID, err := globalMetaCache.GetCollectionID(ctx, t.CollectionName)
+	if err != nil {
+		return err
+	}
+	t.result, err = t.queryCoord.TransferReplica(ctx, &querypb.TransferReplicaRequest{
+		SourceResourceGroup: t.SourceResourceGroup,
+		TargetResourceGroup: t.TargetResourceGroup,
+		CollectionID:        collID,
+		NumReplica:          t.NumReplica,
+	})
+	return err
+}
+
+func (t *TransferReplicaTask) PostExecute(ctx context.Context) error {
+	return nil
+}
+
+type ListResourceGroupsTask struct {
+	Condition
+	*milvuspb.ListResourceGroupsRequest
+	ctx        context.Context
+	queryCoord types.QueryCoord
+	result     *milvuspb.ListResourceGroupsResponse
+}
+
+func (t *ListResourceGroupsTask) TraceCtx() context.Context {
+	return t.ctx
+}
+
+func (t *ListResourceGroupsTask) ID() UniqueID {
+	return t.Base.MsgID
+}
+
+func (t *ListResourceGroupsTask) SetID(uid UniqueID) {
+	t.Base.MsgID = uid
+}
+
+func (t *ListResourceGroupsTask) Name() string {
+	return ListResourceGroupsTaskName
+}
+
+func (t *ListResourceGroupsTask) Type() commonpb.MsgType {
+	return t.Base.MsgType
+}
+
+func (t *ListResourceGroupsTask) BeginTs() Timestamp {
+	return t.Base.Timestamp
+}
+
+func (t *ListResourceGroupsTask) EndTs() Timestamp {
+	return t.Base.Timestamp
+}
+
+func (t *ListResourceGroupsTask) SetTs(ts Timestamp) {
+	t.Base.Timestamp = ts
+}
+
+func (t *ListResourceGroupsTask) OnEnqueue() error {
+	t.Base = commonpbutil.NewMsgBase()
+	return nil
+}
+
+func (t *ListResourceGroupsTask) PreExecute(ctx context.Context) error {
+	t.Base.MsgType = commonpb.MsgType_ListResourceGroups
+	t.Base.SourceID = paramtable.GetNodeID()
+
+	return nil
+}
+
+func (t *ListResourceGroupsTask) Execute(ctx context.Context) error {
+	var err error
+	t.result, err = t.queryCoord.ListResourceGroups(ctx, t.ListResourceGroupsRequest)
+	return err
+}
+
+func (t *ListResourceGroupsTask) PostExecute(ctx context.Context) error {
 	return nil
 }
