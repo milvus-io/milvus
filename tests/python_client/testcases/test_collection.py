@@ -2260,7 +2260,7 @@ class TestLoadCollection(TestcaseBase):
         collection_w.load(replica_number=get_non_number_replicas, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("replicas", [-1, 0, None])
+    @pytest.mark.parametrize("replicas", [-1, 0])
     def test_load_replica_invalid_number(self, replicas):
         """
         target: test load partition with invalid replica number
@@ -2279,6 +2279,26 @@ class TestLoadCollection(TestcaseBase):
         groups = replicas.groups
         assert len(groups) == 1
         assert len(groups[0].shards) == 2
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("replicas", [None])
+    def test_load_replica_number_none(self, replicas):
+        """
+        target: test load partition with replica number none
+        method: load with replica number=None
+        expected: raise exceptions
+        """
+        # create, insert
+        collection_w = self.init_collection_wrap(cf.gen_unique_str(prefix))
+        df = cf.gen_default_dataframe_data()
+        insert_res, _ = collection_w.insert(df)
+        assert collection_w.num_entities == ct.default_nb
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
+
+        collection_w.load(replica_number=replicas,
+                          check_task=CheckTasks.err_res,
+                          check_items={"err_code": 1,
+                                       "err_msg": "`replica_number` value None is illegal"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_replica_greater_than_querynodes(self):
