@@ -144,11 +144,7 @@ func (s *Server) Register() error {
 	return nil
 }
 
-func (s *Server) Init() error {
-	log.Info("QueryCoord start init",
-		zap.String("meta-root-path", Params.EtcdCfg.MetaRootPath.GetValue()),
-		zap.String("address", s.address))
-
+func (s *Server) initSession() error {
 	// Init QueryCoord session
 	s.session = sessionutil.NewSession(s.ctx, Params.EtcdCfg.MetaRootPath.GetValue(), s.etcdCli)
 	if s.session == nil {
@@ -157,7 +153,39 @@ func (s *Server) Init() error {
 	s.session.Init(typeutil.QueryCoordRole, s.address, true, true)
 	s.enableActiveStandBy = Params.QueryCoordCfg.EnableActiveStandby.GetAsBool()
 	s.session.SetEnableActiveStandBy(s.enableActiveStandBy)
+	return nil
+}
 
+func (s *Server) Init() error {
+	log.Info("QueryCoord start init",
+		zap.String("meta-root-path", Params.EtcdCfg.MetaRootPath.GetValue()),
+		zap.String("address", s.address))
+
+	if err := s.initSession(); err != nil {
+		return err
+	}
+
+	if s.enableActiveStandBy {
+		s.activateFunc = func() {
+			log.Info("QueryCoord switch from standby to active, activating")
+			if err := s.initQueryCoord(); err != nil {
+				log.Warn("QueryCoord init failed", zap.Error(err))
+			}
+			if err := s.startQueryCoord(); err != nil {
+				log.Warn("QueryCoord init failed", zap.Error(err))
+			}
+			s.UpdateStateCode(commonpb.StateCode_Healthy)
+			log.Info("QueryCoord startup success")
+		}
+		s.UpdateStateCode(commonpb.StateCode_StandBy)
+		log.Info("QueryCoord enter standby mode successfully")
+		return nil
+	}
+
+	return s.initQueryCoord()
+}
+
+func (s *Server) initQueryCoord() error {
 	// Init KV
 	etcdKV := etcdkv.NewEtcdKV(s.etcdCli, Params.EtcdCfg.MetaRootPath.GetValue())
 	s.kv = etcdKV
@@ -318,6 +346,17 @@ func (s *Server) afterStart() {
 }
 
 func (s *Server) Start() error {
+	if !s.enableActiveStandBy {
+		if err := s.startQueryCoord(); err != nil {
+			return err
+		}
+		s.UpdateStateCode(commonpb.StateCode_Healthy)
+		log.Info("QueryCoord started")
+	}
+	return nil
+}
+
+func (s *Server) startQueryCoord() error {
 	log.Info("start watcher...")
 	sessions, revision, err := s.session.GetSessions(typeutil.QueryNodeRole)
 	if err != nil {
@@ -339,22 +378,8 @@ func (s *Server) Start() error {
 	if err != nil {
 		return err
 	}
-
-	if s.enableActiveStandBy {
-		s.activateFunc = func() {
-			log.Info("querycoord switch from standby to active, activating")
-			s.startServerLoop()
-			s.UpdateStateCode(commonpb.StateCode_Healthy)
-		}
-		s.UpdateStateCode(commonpb.StateCode_StandBy)
-	} else {
-		s.startServerLoop()
-		s.UpdateStateCode(commonpb.StateCode_Healthy)
-	}
-	log.Info("QueryCoord started")
-
+	s.startServerLoop()
 	s.afterStart()
-
 	return nil
 }
 

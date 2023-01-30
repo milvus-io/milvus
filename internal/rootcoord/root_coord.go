@@ -405,10 +405,6 @@ func (c *Core) initImportManager() error {
 }
 
 func (c *Core) initInternal() error {
-	if err := c.initSession(); err != nil {
-		return err
-	}
-
 	c.initKVCreator()
 
 	if err := c.initMetaTable(); err != nil {
@@ -426,7 +422,6 @@ func (c *Core) initInternal() error {
 	c.scheduler = newScheduler(c.ctx, c.idAllocator, c.tsoAllocator)
 
 	c.factory.Init(Params)
-
 	chanMap := c.meta.ListCollectionPhysicalChannels()
 	c.chanTimeTick = newTimeTickSync(c.ctx, c.session.ServerID, c.factory, chanMap)
 	c.proxyClientManager = newProxyClientManager(c.proxyCreator)
@@ -468,9 +463,36 @@ func (c *Core) initInternal() error {
 // Init initialize routine
 func (c *Core) Init() error {
 	var initError error
-	c.initOnce.Do(func() {
-		initError = c.initInternal()
-	})
+	c.factory.Init(Params)
+	if err := c.initSession(); err != nil {
+		return err
+	}
+
+	if c.enableActiveStandBy {
+		c.activateFunc = func() {
+			log.Info("RootCoord switch from standby to active, activating")
+			c.initOnce.Do(func() {
+				if err := c.initInternal(); err != nil {
+					log.Warn("RootCoord init failed", zap.Error(err))
+				}
+			})
+			c.startOnce.Do(func() {
+				if err := c.startInternal(); err != nil {
+					log.Warn("RootCoord start failed", zap.Error(err))
+				}
+			})
+
+			c.UpdateStateCode(commonpb.StateCode_Healthy)
+			log.Info("RootCoord startup success")
+		}
+		c.UpdateStateCode(commonpb.StateCode_StandBy)
+		log.Info("RootCoord enter standby mode successfully")
+	} else {
+		c.initOnce.Do(func() {
+			initError = c.initInternal()
+		})
+	}
+
 	return initError
 }
 
@@ -603,20 +625,10 @@ func (c *Core) startInternal() error {
 	c.scheduler.Start()
 	c.stepExecutor.Start()
 
-	if c.enableActiveStandBy {
-		c.activateFunc = func() {
-			// todo to complete
-			log.Info("rootcoord switch from standby to active, activating")
-			c.startServerLoop()
-			c.UpdateStateCode(commonpb.StateCode_Healthy)
-		}
-		c.UpdateStateCode(commonpb.StateCode_StandBy)
-		logutil.Logger(c.ctx).Info("rootcoord enter standby mode successfully")
-	} else {
-		c.startServerLoop()
-		c.UpdateStateCode(commonpb.StateCode_Healthy)
-		logutil.Logger(c.ctx).Info("rootcoord startup successfully")
-	}
+	c.startServerLoop()
+	c.UpdateStateCode(commonpb.StateCode_Healthy)
+	logutil.Logger(c.ctx).Info("rootcoord startup successfully")
+
 	return nil
 }
 
@@ -633,9 +645,12 @@ func (c *Core) startServerLoop() {
 // Start starts RootCoord.
 func (c *Core) Start() error {
 	var err error
-	c.startOnce.Do(func() {
-		err = c.startInternal()
-	})
+	if !c.enableActiveStandBy {
+		c.startOnce.Do(func() {
+			err = c.startInternal()
+		})
+	}
+
 	return err
 }
 
