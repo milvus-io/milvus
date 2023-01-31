@@ -143,6 +143,7 @@ func (mcm *MinioChunkManager) normalizeRootPath(rootPath string) string {
 
 // SetVar set the variable value of mcm
 func (mcm *MinioChunkManager) SetVar(bucketName string, rootPath string) {
+	log.Info("minio chunkmanager ", zap.String("bucketName", bucketName), zap.String("rootpath", rootPath))
 	mcm.bucketName = bucketName
 	mcm.rootPath = rootPath
 }
@@ -168,7 +169,7 @@ func (mcm *MinioChunkManager) Path(ctx context.Context, filePath string) (string
 func (mcm *MinioChunkManager) Reader(ctx context.Context, filePath string) (FileReader, error) {
 	reader, err := mcm.Client.GetObject(ctx, mcm.bucketName, filePath, minio.GetObjectOptions{})
 	if err != nil {
-		log.Warn("failed to get object", zap.String("path", filePath), zap.Error(err))
+		log.Warn("failed to get object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
 		return nil, err
 	}
 	return reader, nil
@@ -177,7 +178,7 @@ func (mcm *MinioChunkManager) Reader(ctx context.Context, filePath string) (File
 func (mcm *MinioChunkManager) Size(ctx context.Context, filePath string) (int64, error) {
 	objectInfo, err := mcm.Client.StatObject(ctx, mcm.bucketName, filePath, minio.StatObjectOptions{})
 	if err != nil {
-		log.Warn("failed to stat object", zap.String("path", filePath), zap.Error(err))
+		log.Warn("failed to stat object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
 		return 0, err
 	}
 
@@ -189,7 +190,7 @@ func (mcm *MinioChunkManager) Write(ctx context.Context, filePath string, conten
 	_, err := mcm.Client.PutObject(ctx, mcm.bucketName, filePath, bytes.NewReader(content), int64(len(content)), minio.PutObjectOptions{})
 
 	if err != nil {
-		log.Warn("failed to put object", zap.String("path", filePath), zap.Error(err))
+		log.Warn("failed to put object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
 		return err
 	}
 
@@ -220,7 +221,7 @@ func (mcm *MinioChunkManager) Exist(ctx context.Context, filePath string) (bool,
 		if errResponse.Code == "NoSuchKey" {
 			return false, nil
 		}
-		log.Warn("failed to stat object", zap.String("path", filePath), zap.Error(err))
+		log.Warn("failed to stat object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
 		return false, err
 	}
 	return true, nil
@@ -230,14 +231,14 @@ func (mcm *MinioChunkManager) Exist(ctx context.Context, filePath string) (bool,
 func (mcm *MinioChunkManager) Read(ctx context.Context, filePath string) ([]byte, error) {
 	object, err := mcm.Client.GetObject(ctx, mcm.bucketName, filePath, minio.GetObjectOptions{})
 	if err != nil {
-		log.Warn("failed to get object", zap.String("path", filePath), zap.Error(err))
+		log.Warn("failed to get object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
 		return nil, err
 	}
 	defer object.Close()
 
 	objectInfo, err := object.Stat()
 	if err != nil {
-		log.Warn("failed to stat object", zap.String("path", filePath), zap.Error(err))
+		log.Warn("failed to stat object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
 		errResponse := minio.ToErrorResponse(err)
 		if errResponse.Code == "NoSuchKey" {
 			return nil, WrapErrNoSuchKey(filePath)
@@ -251,7 +252,7 @@ func (mcm *MinioChunkManager) Read(ctx context.Context, filePath string) ([]byte
 		if errResponse.Code == "NoSuchKey" {
 			return nil, WrapErrNoSuchKey(filePath)
 		}
-		log.Warn("failed to read object", zap.String("path", filePath), zap.Error(err))
+		log.Warn("failed to read object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
 		return nil, err
 	}
 	return data, nil
@@ -300,13 +301,13 @@ func (mcm *MinioChunkManager) ReadAt(ctx context.Context, filePath string, off i
 	opts := minio.GetObjectOptions{}
 	err := opts.SetRange(off, off+length-1)
 	if err != nil {
-		log.Warn("failed to set range", zap.String("path", filePath), zap.Error(err))
+		log.Warn("failed to set range", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
 		return nil, err
 	}
 
 	object, err := mcm.Client.GetObject(ctx, mcm.bucketName, filePath, opts)
 	if err != nil {
-		log.Warn("failed to get object", zap.String("path", filePath), zap.Error(err))
+		log.Warn("failed to get object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
 		return nil, err
 	}
 	defer object.Close()
@@ -317,7 +318,7 @@ func (mcm *MinioChunkManager) ReadAt(ctx context.Context, filePath string, off i
 		if errResponse.Code == "NoSuchKey" {
 			return nil, WrapErrNoSuchKey(filePath)
 		}
-		log.Warn("failed to read object", zap.String("path", filePath), zap.Error(err))
+		log.Warn("failed to read object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
 		return nil, err
 	}
 	return data, nil
@@ -327,7 +328,7 @@ func (mcm *MinioChunkManager) ReadAt(ctx context.Context, filePath string, off i
 func (mcm *MinioChunkManager) Remove(ctx context.Context, filePath string) error {
 	err := mcm.Client.RemoveObject(ctx, mcm.bucketName, filePath, minio.RemoveObjectOptions{})
 	if err != nil {
-		log.Warn("failed to remove object", zap.String("path", filePath), zap.Error(err))
+		log.Warn("failed to remove object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
 		return err
 	}
 	return nil
@@ -353,7 +354,7 @@ func (mcm *MinioChunkManager) RemoveWithPrefix(ctx context.Context, prefix strin
 	objects := mcm.Client.ListObjects(ctx, mcm.bucketName, minio.ListObjectsOptions{Prefix: prefix, Recursive: true})
 	for rErr := range mcm.Client.RemoveObjects(ctx, mcm.bucketName, objects, minio.RemoveObjectsOptions{GovernanceBypass: false}) {
 		if rErr.Err != nil {
-			log.Warn("failed to remove objects", zap.String("prefix", prefix), zap.Error(rErr.Err))
+			log.Warn("failed to remove objects", zap.String("bucket", mcm.bucketName), zap.String("prefix", prefix), zap.Error(rErr.Err))
 			return rErr.Err
 		}
 	}
@@ -388,7 +389,7 @@ func (mcm *MinioChunkManager) ListWithPrefix(ctx context.Context, prefix string,
 
 		for object := range objects {
 			if object.Err != nil {
-				log.Warn("failed to list with prefix", zap.String("prefix", prefix), zap.Error(object.Err))
+				log.Warn("failed to list with prefix", zap.String("bucket", mcm.bucketName), zap.String("prefix", prefix), zap.Error(object.Err))
 				return nil, nil, object.Err
 			}
 
