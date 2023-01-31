@@ -40,8 +40,26 @@ import (
 	"google.golang.org/grpc"
 )
 
-func TestConnectionManager(t *testing.T) {
+func TestMain(t *testing.M) {
+	// init embed etcd
+	embedetcdServer, tempDir, err := etcd.StartTestEmbedEtcdServer()
+	if err != nil {
+		log.Fatal("failed to start embed etcd server for unittest", zap.Error(err))
+	}
+
+	defer os.RemoveAll(tempDir)
+	defer embedetcdServer.Server.Stop()
+
+	addrs := etcd.GetEmbedEtcdEndpoints(embedetcdServer)
+	// setup env for etcd endpoint
+	os.Setenv("etcd.endpoints", strings.Join(addrs, ","))
+
 	paramtable.Init()
+
+	os.Exit(t.Run())
+}
+
+func TestConnectionManager(t *testing.T) {
 	ctx := context.Background()
 
 	session := initSession(ctx)
