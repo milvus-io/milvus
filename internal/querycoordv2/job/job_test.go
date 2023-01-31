@@ -131,19 +131,29 @@ func (suite *JobSuite) SetupTest() {
 
 	suite.store = meta.NewMetaStore(suite.kv)
 	suite.dist = meta.NewDistributionManager()
-	suite.meta = meta.NewMeta(RandomIncrementIDAllocator(), suite.store)
+	suite.nodeMgr = session.NewNodeManager()
+	suite.meta = meta.NewMeta(RandomIncrementIDAllocator(), suite.store, suite.nodeMgr)
 	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta)
 	suite.targetObserver = observers.NewTargetObserver(suite.meta,
 		suite.targetMgr,
 		suite.dist,
 		suite.broker,
 	)
-	suite.nodeMgr = session.NewNodeManager()
-	suite.nodeMgr.Add(&session.NodeInfo{})
 	suite.scheduler = NewScheduler()
 
 	suite.scheduler.Start(context.Background())
 	meta.GlobalFailedLoadCache = meta.NewFailedLoadCache()
+
+	suite.nodeMgr.Add(session.NewNodeInfo(1000, "localhost"))
+	suite.nodeMgr.Add(session.NewNodeInfo(2000, "localhost"))
+	suite.nodeMgr.Add(session.NewNodeInfo(3000, "localhost"))
+
+	err = suite.meta.AssignNode(meta.DefaultResourceGroupName, 1000)
+	suite.NoError(err)
+	err = suite.meta.AssignNode(meta.DefaultResourceGroupName, 2000)
+	suite.NoError(err)
+	err = suite.meta.AssignNode(meta.DefaultResourceGroupName, 3000)
+	suite.NoError(err)
 }
 
 func (suite *JobSuite) TearDownTest() {
@@ -265,6 +275,48 @@ func (suite *JobSuite) TestLoadCollection() {
 		err := job.Wait()
 		suite.ErrorIs(err, ErrLoadParameterMismatched)
 	}
+
+	suite.meta.ResourceManager.AddResourceGroup("rg1")
+	suite.meta.ResourceManager.AddResourceGroup("rg2")
+	suite.meta.ResourceManager.AddResourceGroup("rg3")
+
+	// Load with 3 replica on 1 rg
+	req := &querypb.LoadCollectionRequest{
+		CollectionID:   1001,
+		ReplicaNumber:  3,
+		ResourceGroups: []string{"rg1"},
+	}
+	job := NewLoadCollectionJob(
+		ctx,
+		req,
+		suite.dist,
+		suite.meta,
+		suite.targetMgr,
+		suite.broker,
+		suite.nodeMgr,
+	)
+	suite.scheduler.Add(job)
+	err := job.Wait()
+	suite.ErrorContains(err, meta.ErrNodeNotEnough.Error())
+
+	// Load with 3 replica on 3 rg
+	req = &querypb.LoadCollectionRequest{
+		CollectionID:   1002,
+		ReplicaNumber:  3,
+		ResourceGroups: []string{"rg1", "rg2", "rg3"},
+	}
+	job = NewLoadCollectionJob(
+		ctx,
+		req,
+		suite.dist,
+		suite.meta,
+		suite.targetMgr,
+		suite.broker,
+		suite.nodeMgr,
+	)
+	suite.scheduler.Add(job)
+	err = job.Wait()
+	suite.ErrorContains(err, meta.ErrNodeNotEnough.Error())
 }
 
 func (suite *JobSuite) TestLoadCollectionWithReplicas() {
@@ -278,7 +330,7 @@ func (suite *JobSuite) TestLoadCollectionWithReplicas() {
 		// Load with 3 replica
 		req := &querypb.LoadCollectionRequest{
 			CollectionID:  collection,
-			ReplicaNumber: 3,
+			ReplicaNumber: 5,
 		}
 		job := NewLoadCollectionJob(
 			ctx,
@@ -482,6 +534,50 @@ func (suite *JobSuite) TestLoadPartition() {
 		err := job.Wait()
 		suite.ErrorIs(err, ErrLoadParameterMismatched)
 	}
+
+	suite.meta.ResourceManager.AddResourceGroup("rg1")
+	suite.meta.ResourceManager.AddResourceGroup("rg2")
+	suite.meta.ResourceManager.AddResourceGroup("rg3")
+
+	// test load 3 replica in 1 rg, should pass rg check
+	req := &querypb.LoadPartitionsRequest{
+		CollectionID:   100,
+		PartitionIDs:   []int64{1001},
+		ReplicaNumber:  3,
+		ResourceGroups: []string{"rg1"},
+	}
+	job := NewLoadPartitionJob(
+		ctx,
+		req,
+		suite.dist,
+		suite.meta,
+		suite.targetMgr,
+		suite.broker,
+		suite.nodeMgr,
+	)
+	suite.scheduler.Add(job)
+	err := job.Wait()
+	suite.Contains(err.Error(), meta.ErrNodeNotEnough.Error())
+
+	// test load 3 replica in 3 rg, should pass rg check
+	req = &querypb.LoadPartitionsRequest{
+		CollectionID:   102,
+		PartitionIDs:   []int64{1001},
+		ReplicaNumber:  3,
+		ResourceGroups: []string{"rg1", "rg2", "rg3"},
+	}
+	job = NewLoadPartitionJob(
+		ctx,
+		req,
+		suite.dist,
+		suite.meta,
+		suite.targetMgr,
+		suite.broker,
+		suite.nodeMgr,
+	)
+	suite.scheduler.Add(job)
+	err = job.Wait()
+	suite.Contains(err.Error(), meta.ErrNodeNotEnough.Error())
 }
 
 func (suite *JobSuite) TestLoadPartitionWithReplicas() {
@@ -496,7 +592,7 @@ func (suite *JobSuite) TestLoadPartitionWithReplicas() {
 		req := &querypb.LoadPartitionsRequest{
 			CollectionID:  collection,
 			PartitionIDs:  suite.partitions[collection],
-			ReplicaNumber: 3,
+			ReplicaNumber: 5,
 		}
 		job := NewLoadPartitionJob(
 			ctx,
@@ -707,7 +803,16 @@ func (suite *JobSuite) TestReleasePartition() {
 func (suite *JobSuite) TestLoadCollectionStoreFailed() {
 	// Store collection failed
 	store := meta.NewMockStore(suite.T())
-	suite.meta = meta.NewMeta(RandomIncrementIDAllocator(), store)
+	suite.meta = meta.NewMeta(RandomIncrementIDAllocator(), store, suite.nodeMgr)
+
+	store.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything).Return(nil)
+	err := suite.meta.AssignNode(meta.DefaultResourceGroupName, 1000)
+	suite.NoError(err)
+	err = suite.meta.AssignNode(meta.DefaultResourceGroupName, 2000)
+	suite.NoError(err)
+	err = suite.meta.AssignNode(meta.DefaultResourceGroupName, 3000)
+	suite.NoError(err)
+
 	for _, collection := range suite.collections {
 		if suite.loadTypes[collection] != querypb.LoadType_LoadCollection {
 			continue
@@ -743,8 +848,17 @@ func (suite *JobSuite) TestLoadCollectionStoreFailed() {
 func (suite *JobSuite) TestLoadPartitionStoreFailed() {
 	// Store partition failed
 	store := meta.NewMockStore(suite.T())
-	suite.meta = meta.NewMeta(RandomIncrementIDAllocator(), store)
-	err := errors.New("failed to store collection")
+	suite.meta = meta.NewMeta(RandomIncrementIDAllocator(), store, suite.nodeMgr)
+
+	store.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything).Return(nil)
+	err := suite.meta.AssignNode(meta.DefaultResourceGroupName, 1000)
+	suite.NoError(err)
+	err = suite.meta.AssignNode(meta.DefaultResourceGroupName, 2000)
+	suite.NoError(err)
+	err = suite.meta.AssignNode(meta.DefaultResourceGroupName, 3000)
+	suite.NoError(err)
+
+	err = errors.New("failed to store collection")
 	for _, collection := range suite.collections {
 		if suite.loadTypes[collection] != querypb.LoadType_LoadPartition {
 			continue
@@ -775,7 +889,7 @@ func (suite *JobSuite) TestLoadPartitionStoreFailed() {
 
 func (suite *JobSuite) TestLoadCreateReplicaFailed() {
 	// Store replica failed
-	suite.meta = meta.NewMeta(ErrorIDAllocator(), suite.store)
+	suite.meta = meta.NewMeta(ErrorIDAllocator(), suite.store, session.NewNodeManager())
 	for _, collection := range suite.collections {
 		req := &querypb.LoadCollectionRequest{
 			CollectionID: collection,

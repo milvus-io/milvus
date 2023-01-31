@@ -753,8 +753,11 @@ type queryCoordConfig struct {
 	CheckHandoffInterval                time.Duration
 	EnableActiveStandby                 bool
 
-	NextTargetSurviveTime    time.Duration
-	UpdateNextTargetInterval time.Duration
+	NextTargetSurviveTime      time.Duration
+	UpdateNextTargetInterval   time.Duration
+	CheckNodeInReplicaInterval time.Duration
+	CheckResourceGroupInterval time.Duration
+	EnableRGAutoRecover        bool
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -784,6 +787,9 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 	p.initEnableActiveStandby()
 	p.initNextTargetSurviveTime()
 	p.initUpdateNextTargetInterval()
+	p.initCheckNodeInReplicaInterval()
+	p.initCheckResourceGroupInterval()
+	p.initEnableRGAutoRecover()
 }
 
 func (p *queryCoordConfig) initTaskRetryNum() {
@@ -935,6 +941,28 @@ func (p *queryCoordConfig) initUpdateNextTargetInterval() {
 		panic(err)
 	}
 	p.UpdateNextTargetInterval = time.Duration(updateNextTargetInterval) * time.Second
+}
+
+func (p *queryCoordConfig) initCheckNodeInReplicaInterval() {
+	interval := p.Base.LoadWithDefault("queryCoord.checkNodeInReplicaInterval", "60")
+	checkNodeInReplicaInterval, err := strconv.ParseInt(interval, 10, 64)
+	if err != nil {
+		panic(err)
+	}
+	p.CheckNodeInReplicaInterval = time.Duration(checkNodeInReplicaInterval) * time.Second
+}
+
+func (p *queryCoordConfig) initCheckResourceGroupInterval() {
+	interval := p.Base.LoadWithDefault("queryCoord.checkResourceGroupInterval", "60")
+	checkResourceGroupInterval, err := strconv.ParseInt(interval, 10, 64)
+	if err != nil {
+		panic(err)
+	}
+	p.CheckResourceGroupInterval = time.Duration(checkResourceGroupInterval) * time.Second
+}
+
+func (p *queryCoordConfig) initEnableRGAutoRecover() {
+	p.EnableRGAutoRecover = p.Base.ParseBool("queryCoord.enableRGAutoRecover", true)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

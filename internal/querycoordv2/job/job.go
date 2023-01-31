@@ -192,10 +192,11 @@ func (job *LoadCollectionJob) Execute() error {
 	}
 
 	// Create replicas
-	replicas, err := utils.SpawnReplicas(job.meta.ReplicaManager,
-		job.nodeMgr,
+	replicas, err := utils.SpawnReplicasWithRG(job.meta,
 		req.GetCollectionID(),
-		req.GetReplicaNumber())
+		req.GetResourceGroups(),
+		req.GetReplicaNumber(),
+	)
 	if err != nil {
 		msg := "failed to spawn replica for collection"
 		log.Error(msg, zap.Error(err))
@@ -204,7 +205,8 @@ func (job *LoadCollectionJob) Execute() error {
 	for _, replica := range replicas {
 		log.Info("replica created",
 			zap.Int64("replicaID", replica.GetID()),
-			zap.Int64s("nodes", replica.GetNodes()))
+			zap.Int64s("nodes", replica.GetNodes()),
+			zap.String("resourceGroup", replica.GetResourceGroup()))
 	}
 
 	// Fetch channels and segments from DataCoord
@@ -405,10 +407,11 @@ func (job *LoadPartitionJob) Execute() error {
 	}
 
 	// Create replicas
-	replicas, err := utils.SpawnReplicas(job.meta.ReplicaManager,
-		job.nodeMgr,
+	replicas, err := utils.SpawnReplicasWithRG(job.meta,
 		req.GetCollectionID(),
-		req.GetReplicaNumber())
+		req.GetResourceGroups(),
+		req.GetReplicaNumber(),
+	)
 	if err != nil {
 		msg := "failed to spawn replica for collection"
 		log.Error(msg, zap.Error(err))
@@ -417,7 +420,8 @@ func (job *LoadPartitionJob) Execute() error {
 	for _, replica := range replicas {
 		log.Info("replica created",
 			zap.Int64("replicaID", replica.GetID()),
-			zap.Int64s("nodes", replica.GetNodes()))
+			zap.Int64s("nodes", replica.GetNodes()),
+			zap.String("resourceGroup", replica.GetResourceGroup()))
 	}
 
 	err = job.targetMgr.UpdateCollectionNextTargetWithPartitions(req.GetCollectionID(), req.GetPartitionIDs()...)

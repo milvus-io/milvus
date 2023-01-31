@@ -76,14 +76,14 @@ func (suite *ReplicaManagerSuite) TestSpawn() {
 	mgr := suite.mgr
 
 	for i, collection := range suite.collections {
-		replicas, err := mgr.Spawn(collection, suite.replicaNumbers[i])
+		replicas, err := mgr.Spawn(collection, suite.replicaNumbers[i], DefaultResourceGroupName)
 		suite.NoError(err)
 		suite.Len(replicas, int(suite.replicaNumbers[i]))
 	}
 
 	mgr.idAllocator = ErrorIDAllocator()
 	for i, collection := range suite.collections {
-		_, err := mgr.Spawn(collection, suite.replicaNumbers[i])
+		_, err := mgr.Spawn(collection, suite.replicaNumbers[i], DefaultResourceGroupName)
 		suite.Error(err)
 	}
 }
@@ -98,8 +98,8 @@ func (suite *ReplicaManagerSuite) TestGet() {
 		for _, replica := range replicas {
 			suite.Equal(collection, replica.GetCollectionID())
 			suite.Equal(replica, mgr.Get(replica.GetID()))
-			suite.Equal(replica.Replica.Nodes, replica.Nodes.Collect())
-			replicaNodes[replica.GetID()] = replica.Replica.Nodes
+			suite.Equal(replica.Replica.GetNodes(), replica.GetNodes())
+			replicaNodes[replica.GetID()] = replica.Replica.GetNodes()
 			nodes = append(nodes, replica.Replica.Nodes...)
 		}
 		suite.Len(nodes, int(suite.replicaNumbers[i]))
@@ -137,9 +137,9 @@ func (suite *ReplicaManagerSuite) TestRecover() {
 	suite.NotNil(replica)
 	suite.EqualValues(1000, replica.CollectionID)
 	suite.EqualValues([]int64{1, 2, 3}, replica.Replica.Nodes)
-	suite.Len(replica.Nodes, len(replica.Replica.GetNodes()))
+	suite.Len(replica.GetNodes(), len(replica.Replica.GetNodes()))
 	for _, node := range replica.Replica.GetNodes() {
-		suite.True(replica.Nodes.Contain(node))
+		suite.True(replica.Contains(node))
 	}
 }
 
@@ -175,7 +175,7 @@ func (suite *ReplicaManagerSuite) TestNodeManipulate() {
 		suite.NoError(err)
 
 		replica = mgr.GetByCollectionAndNode(collection, newNode)
-		suite.Contains(replica.Nodes, newNode)
+		suite.Contains(replica.GetNodes(), newNode)
 		suite.Contains(replica.Replica.GetNodes(), newNode)
 
 		err = mgr.RemoveNode(replica.GetID(), firstNode)
@@ -192,7 +192,7 @@ func (suite *ReplicaManagerSuite) TestNodeManipulate() {
 		suite.Nil(replica)
 
 		replica = mgr.GetByCollectionAndNode(collection, newNode)
-		suite.Contains(replica.Nodes, newNode)
+		suite.Contains(replica.GetNodes(), newNode)
 		suite.Contains(replica.Replica.GetNodes(), newNode)
 	}
 }
@@ -201,7 +201,7 @@ func (suite *ReplicaManagerSuite) spawnAndPutAll() {
 	mgr := suite.mgr
 
 	for i, collection := range suite.collections {
-		replicas, err := mgr.Spawn(collection, suite.replicaNumbers[i])
+		replicas, err := mgr.Spawn(collection, suite.replicaNumbers[i], DefaultResourceGroupName)
 		suite.NoError(err)
 		suite.Len(replicas, int(suite.replicaNumbers[i]))
 		for j, replica := range replicas {
@@ -210,6 +210,27 @@ func (suite *ReplicaManagerSuite) spawnAndPutAll() {
 		err = mgr.Put(replicas...)
 		suite.NoError(err)
 	}
+}
+
+func (suite *ReplicaManagerSuite) TestResourceGroup() {
+	mgr := NewReplicaManager(suite.idAllocator, suite.store)
+	replica1, err := mgr.spawn(int64(1000), DefaultResourceGroupName)
+	replica1.AddNode(1)
+	suite.NoError(err)
+	mgr.Put(replica1)
+
+	replica2, err := mgr.spawn(int64(2000), DefaultResourceGroupName)
+	replica2.AddNode(1)
+	suite.NoError(err)
+	mgr.Put(replica2)
+
+	replicas := mgr.GetByResourceGroup(DefaultResourceGroupName)
+	suite.Len(replicas, 2)
+	replicas = mgr.GetByCollectionAndRG(int64(1000), DefaultResourceGroupName)
+	suite.Len(replicas, 1)
+	rgNames := mgr.GetResourceGroupByCollection(int64(1000))
+	suite.Len(rgNames, 1)
+	suite.True(rgNames.Contain(DefaultResourceGroupName))
 }
 
 func (suite *ReplicaManagerSuite) clearMemory() {

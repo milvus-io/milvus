@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
+	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/etcd"
@@ -41,6 +42,7 @@ type SegmentCheckerTestSuite struct {
 	checker *SegmentChecker
 	meta    *meta.Meta
 	broker  *meta.MockBroker
+	nodeMgr *session.NodeManager
 }
 
 func (suite *SegmentCheckerTestSuite) SetupSuite() {
@@ -64,7 +66,8 @@ func (suite *SegmentCheckerTestSuite) SetupTest() {
 	// meta
 	store := meta.NewMetaStore(suite.kv)
 	idAllocator := RandomIncrementIDAllocator()
-	suite.meta = meta.NewMeta(idAllocator, store)
+	suite.nodeMgr = session.NewNodeManager()
+	suite.meta = meta.NewMeta(idAllocator, store, suite.nodeMgr)
 	distManager := meta.NewDistributionManager()
 	suite.broker = meta.NewMockBroker(suite.T())
 	targetManager := meta.NewTargetManager(suite.broker, suite.meta)
@@ -100,6 +103,10 @@ func (suite *SegmentCheckerTestSuite) TestLoadSegments() {
 	// set meta
 	checker.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
 	checker.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
+	suite.nodeMgr.Add(session.NewNodeInfo(1, "localhost"))
+	suite.nodeMgr.Add(session.NewNodeInfo(2, "localhost"))
+	checker.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 1)
+	checker.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 2)
 
 	// set target
 	segments := []*datapb.SegmentBinlogs{

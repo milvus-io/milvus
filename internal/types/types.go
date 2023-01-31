@@ -1308,6 +1308,13 @@ type ProxyComponent interface {
 	SelectGrant(ctx context.Context, req *milvuspb.SelectGrantRequest) (*milvuspb.SelectGrantResponse, error)
 
 	CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error)
+
+	CreateResourceGroup(ctx context.Context, req *milvuspb.CreateResourceGroupRequest) (*commonpb.Status, error)
+	DropResourceGroup(ctx context.Context, req *milvuspb.DropResourceGroupRequest) (*commonpb.Status, error)
+	TransferNode(ctx context.Context, req *milvuspb.TransferNodeRequest) (*commonpb.Status, error)
+	TransferReplica(ctx context.Context, req *milvuspb.TransferReplicaRequest) (*commonpb.Status, error)
+	ListResourceGroups(ctx context.Context, req *milvuspb.ListResourceGroupsRequest) (*milvuspb.ListResourceGroupsResponse, error)
+	DescribeResourceGroup(ctx context.Context, req *milvuspb.DescribeResourceGroupRequest) (*milvuspb.DescribeResourceGroupResponse, error)
 }
 
 // QueryNode is the interface `querynode` package implements
@@ -1377,6 +1384,13 @@ type QueryCoord interface {
 	GetShardLeaders(ctx context.Context, req *querypb.GetShardLeadersRequest) (*querypb.GetShardLeadersResponse, error)
 
 	CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error)
+
+	CreateResourceGroup(ctx context.Context, req *milvuspb.CreateResourceGroupRequest) (*commonpb.Status, error)
+	DropResourceGroup(ctx context.Context, req *milvuspb.DropResourceGroupRequest) (*commonpb.Status, error)
+	TransferNode(ctx context.Context, req *milvuspb.TransferNodeRequest) (*commonpb.Status, error)
+	TransferReplica(ctx context.Context, req *querypb.TransferReplicaRequest) (*commonpb.Status, error)
+	ListResourceGroups(ctx context.Context, req *milvuspb.ListResourceGroupsRequest) (*milvuspb.ListResourceGroupsResponse, error)
+	DescribeResourceGroup(ctx context.Context, req *querypb.DescribeResourceGroupRequest) (*querypb.DescribeResourceGroupResponse, error)
 }
 
 // QueryCoordComponent is used by grpc server of QueryCoord

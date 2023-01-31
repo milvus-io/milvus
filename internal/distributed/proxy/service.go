@@ -696,12 +696,12 @@ func (s *Server) GetDdChannel(ctx context.Context, request *internalpb.GetDdChan
 	return s.proxy.GetDdChannel(ctx, request)
 }
 
-//GetPersistentSegmentInfo notifies Proxy to get persistent segment info.
+// GetPersistentSegmentInfo notifies Proxy to get persistent segment info.
 func (s *Server) GetPersistentSegmentInfo(ctx context.Context, request *milvuspb.GetPersistentSegmentInfoRequest) (*milvuspb.GetPersistentSegmentInfoResponse, error) {
 	return s.proxy.GetPersistentSegmentInfo(ctx, request)
 }
 
-//GetQuerySegmentInfo notifies Proxy to get query segment info.
+// GetQuerySegmentInfo notifies Proxy to get query segment info.
 func (s *Server) GetQuerySegmentInfo(ctx context.Context, request *milvuspb.GetQuerySegmentInfoRequest) (*milvuspb.GetQuerySegmentInfoResponse, error) {
 	return s.proxy.GetQuerySegmentInfo(ctx, request)
 
@@ -891,4 +891,28 @@ func (s *Server) GetVersion(ctx context.Context, request *milvuspb.GetVersionReq
 
 func (s *Server) CheckHealth(ctx context.Context, request *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
 	return s.proxy.CheckHealth(ctx, request)
+}
+
+func (s *Server) CreateResourceGroup(ctx context.Context, req *milvuspb.CreateResourceGroupRequest) (*commonpb.Status, error) {
+	return s.proxy.CreateResourceGroup(ctx, req)
+}
+
+func (s *Server) DropResourceGroup(ctx context.Context, req *milvuspb.DropResourceGroupRequest) (*commonpb.Status, error) {
+	return s.proxy.DropResourceGroup(ctx, req)
+}
+
+func (s *Server) DescribeResourceGroup(ctx context.Context, req *milvuspb.DescribeResourceGroupRequest) (*milvuspb.DescribeResourceGroupResponse, error) {
+	return s.proxy.DescribeResourceGroup(ctx, req)
+}
+
+func (s *Server) TransferNode(ctx context.Context, req *milvuspb.TransferNodeRequest) (*commonpb.Status, error) {
+	return s.proxy.TransferNode(ctx, req)
+}
+
+func (s *Server) TransferReplica(ctx context.Context, req *milvuspb.TransferReplicaRequest) (*commonpb.Status, error) {
+	return s.proxy.TransferReplica(ctx, req)
+}
+
+func (s *Server) ListResourceGroups(ctx context.Context, req *milvuspb.ListResourceGroupsRequest) (*milvuspb.ListResourceGroupsResponse, error) {
+	return s.proxy.ListResourceGroups(ctx, req)
 }

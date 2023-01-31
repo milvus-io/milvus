@@ -8,6 +8,7 @@ import (
 )
 
 type getCollectionIDFunc func(ctx context.Context, collectionName string) (typeutil.UniqueID, error)
+type getCollectionNameFunc func(ctx context.Context, collectionID int64) (string, error)
 type getCollectionSchemaFunc func(ctx context.Context, collectionName string) (*schemapb.CollectionSchema, error)
 type getCollectionInfoFunc func(ctx context.Context, collectionName string) (*collectionInfo, error)
 type getUserRoleFunc func(username string) []string
@@ -16,6 +17,7 @@ type getPartitionIDFunc func(ctx context.Context, collectionName string, partiti
 type mockCache struct {
 	Cache
 	getIDFunc          getCollectionIDFunc
+	getNameFunc        getCollectionNameFunc
 	getSchemaFunc      getCollectionSchemaFunc
 	getInfoFunc        getCollectionInfoFunc
 	getUserRoleFunc    getUserRoleFunc
@@ -27,6 +29,13 @@ func (m *mockCache) GetCollectionID(ctx context.Context, collectionName string) 
 		return m.getIDFunc(ctx, collectionName)
 	}
 	return 0, nil
+}
+
+func (m *mockCache) GetCollectionName(ctx context.Context, collectionID int64) (string, error) {
+	if m.getIDFunc != nil {
+		return m.getNameFunc(ctx, collectionID)
+	}
+	return "", nil
 }
 
 func (m *mockCache) GetCollectionSchema(ctx context.Context, collectionName string) (*schemapb.CollectionSchema, error) {

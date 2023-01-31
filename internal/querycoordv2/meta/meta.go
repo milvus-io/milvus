@@ -16,17 +16,22 @@
 
 package meta
 
+import "github.com/milvus-io/milvus/internal/querycoordv2/session"
+
 type Meta struct {
 	*CollectionManager
 	*ReplicaManager
+	*ResourceManager
 }
 
 func NewMeta(
 	idAllocator func() (int64, error),
 	store Store,
+	nodeMgr *session.NodeManager,
 ) *Meta {
 	return &Meta{
 		NewCollectionManager(store),
 		NewReplicaManager(idAllocator, store),
+		NewResourceManager(store, nodeMgr),
 	}
 }

@@ -250,6 +250,12 @@ func TestComponentParam(t *testing.T) {
 		Params := CParams.QueryCoordCfg
 		assert.Equal(t, Params.EnableActiveStandby, false)
 		t.Logf("queryCoord EnableActiveStandby = %t", Params.EnableActiveStandby)
+
+		assert.Equal(t, float64(300), Params.NextTargetSurviveTime.Seconds())
+		assert.Equal(t, float64(30), Params.UpdateNextTargetInterval.Seconds())
+		assert.Equal(t, float64(60), Params.CheckNodeInReplicaInterval.Seconds())
+		assert.Equal(t, float64(60), Params.CheckResourceGroupInterval.Seconds())
+		assert.Equal(t, true, Params.EnableRGAutoRecover)
 	})
 
 	t.Run("test queryNodeConfig", func(t *testing.T) {

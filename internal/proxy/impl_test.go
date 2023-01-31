@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/stretchr/testify/assert"
 )
@@ -144,5 +145,78 @@ func TestProxy_CheckHealth(t *testing.T) {
 		assert.Equal(t, true, resp.IsHealthy)
 		assert.Equal(t, 2, len(resp.GetQuotaStates()))
 		assert.Equal(t, 2, len(resp.GetReasons()))
+	})
+}
+
+func TestProxy_ResourceGroup(t *testing.T) {
+	factory := dependency.NewDefaultFactory(true)
+	ctx := context.Background()
+
+	node, err := NewProxy(ctx, factory)
+	assert.NoError(t, err)
+	node.multiRateLimiter = NewMultiRateLimiter()
+	node.stateCode.Store(commonpb.StateCode_Healthy)
+
+	qc := NewQueryCoordMock()
+	node.SetQueryCoordClient(qc)
+
+	tsoAllocatorIns := newMockTsoAllocator()
+	node.sched, err = newTaskScheduler(node.ctx, tsoAllocatorIns, node.factory)
+	node.sched.ddQueue.setMaxTaskNum(1024)
+	assert.NoError(t, err)
+	node.sched.Start()
+	defer node.sched.Close()
+
+	rc := &MockRootCoordClientInterface{}
+	mgr := newShardClientMgr()
+	InitMetaCache(ctx, rc, qc, mgr)
+
+	t.Run("create resource group", func(t *testing.T) {
+		resp, err := node.CreateResourceGroup(ctx, &milvuspb.CreateResourceGroupRequest{
+			ResourceGroup: "rg",
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, resp.ErrorCode, commonpb.ErrorCode_Success)
+	})
+
+	t.Run("drop resource group", func(t *testing.T) {
+		resp, err := node.DropResourceGroup(ctx, &milvuspb.DropResourceGroupRequest{
+			ResourceGroup: "rg",
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, resp.ErrorCode, commonpb.ErrorCode_Success)
+	})
+
+	t.Run("transfer node", func(t *testing.T) {
+		resp, err := node.TransferNode(ctx, &milvuspb.TransferNodeRequest{
+			SourceResourceGroup: "rg1",
+			TargetResourceGroup: "rg2",
+			NumNode:             1,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, resp.ErrorCode, commonpb.ErrorCode_Success)
+	})
+
+	t.Run("transfer replica", func(t *testing.T) {
+		resp, err := node.TransferReplica(ctx, &milvuspb.TransferReplicaRequest{
+			SourceResourceGroup: "rg1",
+			TargetResourceGroup: "rg2",
+			NumReplica:          1,
+			CollectionName:      "collection1",
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, resp.ErrorCode, commonpb.ErrorCode_Success)
+	})
+
+	t.Run("list resource group", func(t *testing.T) {
+		resp, err := node.ListResourceGroups(ctx, &milvuspb.ListResourceGroupsRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, resp.Status.ErrorCode, commonpb.ErrorCode_Success)
+	})
+
+	t.Run("describe resource group", func(t *testing.T) {
+		resp, err := node.DescribeResourceGroup(ctx, &milvuspb.DescribeResourceGroupRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, resp.Status.ErrorCode, commonpb.ErrorCode_Success)
 	})
 }

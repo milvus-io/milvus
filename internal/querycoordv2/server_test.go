@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/mocks"
 	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
+	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
@@ -95,7 +96,7 @@ func (suite *ServerSuite) SetupSuite() {
 		1000: 1,
 		1001: 3,
 	}
-	suite.nodes = make([]*mocks.MockQueryNode, 3)
+	suite.nodes = make([]*mocks.MockQueryNode, 6)
 }
 
 func (suite *ServerSuite) SetupTest() {
@@ -113,6 +114,8 @@ func (suite *ServerSuite) SetupTest() {
 		suite.Require().NoError(err)
 		ok := suite.waitNodeUp(suite.nodes[i], 5*time.Second)
 		suite.Require().True(ok)
+		suite.server.nodeMgr.Add(session.NewNodeInfo(suite.nodes[i].ID, "localhost"))
+		suite.server.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, suite.nodes[i].ID)
 	}
 
 	suite.loadAll()
@@ -167,7 +170,6 @@ func (suite *ServerSuite) TestNodeUp() {
 		}
 		return true
 	}, 5*time.Second, time.Second)
-
 }
 
 func (suite *ServerSuite) TestNodeUpdate() {
