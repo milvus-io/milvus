@@ -42,8 +42,26 @@ import (
 
 var Params paramtable.BaseTable
 
+func TestMain(t *testing.M) {
+	// init embed etcd
+	embedetcdServer, tempDir, err := etcd.StartTestEmbedEtcdServer()
+	if err != nil {
+		log.Fatal("failed to start embed etcd server for unittest", zap.Error(err))
+	}
+
+	defer os.RemoveAll(tempDir)
+	defer embedetcdServer.Server.Stop()
+
+	addrs := etcd.GetEmbedEtcdEndpoints(embedetcdServer)
+	// setup env for etcd endpoint
+	os.Setenv("etcd.endpoints", strings.Join(addrs, ","))
+
+	os.Exit(t.Run())
+}
+
 func TestConnectionManager(t *testing.T) {
 	Params.Init()
+
 	ctx := context.Background()
 
 	session := initSession(ctx)
