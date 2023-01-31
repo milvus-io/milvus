@@ -352,8 +352,11 @@ func (m *meta) SetState(segmentID UniqueID, targetState commonpb.SegmentState) e
 		log.Warn("meta update: setting segment state - segment not found",
 			zap.Int64("segment ID", segmentID),
 			zap.Any("target state", targetState))
-		// TODO: Should probably return error instead.
-		return nil
+		// idempotent drop
+		if targetState == commonpb.SegmentState_Dropped {
+			return nil
+		}
+		return fmt.Errorf("segment is not exist with ID = %d", segmentID)
 	}
 	// Persist segment updates first.
 	clonedSegment := curSegInfo.Clone()

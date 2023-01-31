@@ -38,7 +38,6 @@ type Broker interface {
 	Flush(ctx context.Context, cID int64, segIDs []int64) error
 	Import(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error)
 	UnsetIsImportingState(context.Context, *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error)
-	MarkSegmentsDropped(context.Context, *datapb.MarkSegmentsDroppedRequest) (*commonpb.Status, error)
 	GetSegmentStates(context.Context, *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error)
 	GcConfirm(ctx context.Context, collectionID, partitionID UniqueID) bool
 
@@ -135,6 +134,7 @@ func (b *ServerBroker) Flush(ctx context.Context, cID int64, segIDs []int64) err
 		DbID:         0,
 		SegmentIDs:   segIDs,
 		CollectionID: cID,
+		IsImport:     true,
 	})
 	if err != nil {
 		return errors.New("failed to call flush to data coordinator: " + err.Error())
@@ -152,10 +152,6 @@ func (b *ServerBroker) Import(ctx context.Context, req *datapb.ImportTaskRequest
 
 func (b *ServerBroker) UnsetIsImportingState(ctx context.Context, req *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error) {
 	return b.s.dataCoord.UnsetIsImportingState(ctx, req)
-}
-
-func (b *ServerBroker) MarkSegmentsDropped(ctx context.Context, req *datapb.MarkSegmentsDroppedRequest) (*commonpb.Status, error) {
-	return b.s.dataCoord.MarkSegmentsDropped(ctx, req)
 }
 
 func (b *ServerBroker) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error) {

@@ -78,7 +78,7 @@ type Manager interface {
 	DropSegment(ctx context.Context, segmentID UniqueID)
 	// SealAllSegments seals all segments of collection with collectionID and return sealed segments.
 	// If segIDs is not empty, also seals segments in segIDs.
-	SealAllSegments(ctx context.Context, collectionID UniqueID, segIDs []UniqueID) ([]UniqueID, error)
+	SealAllSegments(ctx context.Context, collectionID UniqueID, segIDs []UniqueID, isImporting bool) ([]UniqueID, error)
 	// GetFlushableSegments returns flushable segment ids
 	GetFlushableSegments(ctx context.Context, channel string, ts Timestamp) ([]UniqueID, error)
 	// ExpireAllocations notifies segment status to expire old allocations
@@ -261,7 +261,7 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 		requestRows, int64(maxCountPerSegment))
 
 	// create new segments and add allocations
-	expireTs, err := s.genExpireTs(ctx)
+	expireTs, err := s.genExpireTs(ctx, false)
 	if err != nil {
 		return nil, err
 	}
@@ -296,7 +296,7 @@ func (s *SegmentManager) allocSegmentForImport(ctx context.Context, collectionID
 
 	// create new segments and add allocations to meta
 	// to avoid mixing up with growing segments, the segment state is "Importing"
-	expireTs, err := s.genExpireTs(ctx)
+	expireTs, err := s.genExpireTs(ctx, true)
 	if err != nil {
 		return nil, err
 	}
@@ -329,13 +329,17 @@ func isGrowing(segment *SegmentInfo) bool {
 	return segment.GetState() == commonpb.SegmentState_Growing
 }
 
-func (s *SegmentManager) genExpireTs(ctx context.Context) (Timestamp, error) {
+func (s *SegmentManager) genExpireTs(ctx context.Context, isImported bool) (Timestamp, error) {
 	ts, err := s.allocator.allocTimestamp(ctx)
 	if err != nil {
 		return 0, err
 	}
 	physicalTs, logicalTs := tsoutil.ParseTS(ts)
 	expirePhysicalTs := physicalTs.Add(time.Duration(Params.DataCoordCfg.SegAssignmentExpiration.GetAsFloat()) * time.Millisecond)
+	// for imported segment, clean up ImportTaskExpiration
+	if isImported {
+		expirePhysicalTs = physicalTs.Add(time.Duration(Params.RootCoordCfg.ImportTaskExpiration.GetAsFloat()) * time.Second)
+	}
 	expireTs := tsoutil.ComposeTS(expirePhysicalTs.UnixNano()/int64(time.Millisecond), int64(logicalTs))
 	return expireTs, nil
 }
@@ -416,7 +420,7 @@ func (s *SegmentManager) DropSegment(ctx context.Context, segmentID UniqueID) {
 }
 
 // SealAllSegments seals all segments of collection with collectionID and return sealed segments
-func (s *SegmentManager) SealAllSegments(ctx context.Context, collectionID UniqueID, segIDs []UniqueID) ([]UniqueID, error) {
+func (s *SegmentManager) SealAllSegments(ctx context.Context, collectionID UniqueID, segIDs []UniqueID, isImport bool) ([]UniqueID, error) {
 	_, sp := otel.Tracer(typeutil.DataCoordRole).Start(ctx, "Seal-Segments")
 	defer sp.End()
 	s.mu.Lock()
@@ -435,12 +439,13 @@ func (s *SegmentManager) SealAllSegments(ctx context.Context, collectionID Uniqu
 		if info.CollectionID != collectionID {
 			continue
 		}
+		// idempotent sealed
 		if info.State == commonpb.SegmentState_Sealed {
 			ret = append(ret, id)
 			continue
 		}
-		if info.State == commonpb.SegmentState_Flushing ||
-			info.State == commonpb.SegmentState_Flushed {
+		// segment can be sealed only if it is growing or if it's importing
+		if (!isImport && info.State != commonpb.SegmentState_Growing) || (isImport && info.State != commonpb.SegmentState_Importing) {
 			continue
 		}
 		if err := s.meta.SetState(id, commonpb.SegmentState_Sealed); err != nil {
@@ -462,7 +467,7 @@ func (s *SegmentManager) GetFlushableSegments(ctx context.Context, channel strin
 		return nil, err
 	}
 
-	s.dropEmptySealedSegment(t, channel)
+	s.cleanupSealedSegment(t, channel)
 
 	ret := make([]UniqueID, 0, len(s.segments))
 	for _, id := range s.segments {
@@ -501,7 +506,7 @@ func (s *SegmentManager) ExpireAllocations(channel string, ts Timestamp) error {
 	return nil
 }
 
-func (s *SegmentManager) dropEmptySealedSegment(ts Timestamp, channel string) {
+func (s *SegmentManager) cleanupSealedSegment(ts Timestamp, channel string) {
 	valids := make([]int64, 0, len(s.segments))
 	for _, id := range s.segments {
 		segment := s.meta.GetSegment(id)
@@ -511,10 +516,18 @@ func (s *SegmentManager) dropEmptySealedSegment(ts Timestamp, channel string) {
 		}
 
 		if isEmptySealedSegment(segment, ts) {
-			log.Info("remove empty sealed segment", zap.Any("segment", id))
+			log.Info("remove empty sealed segment", zap.Int64("collection", segment.CollectionID), zap.Any("segment", id))
 			s.meta.SetState(id, commonpb.SegmentState_Dropped)
 			continue
 		}
+
+		// clean up importing segment since the task failed.
+		if segment.GetState() == commonpb.SegmentState_Importing && segment.GetLastExpireTime() < ts {
+			log.Info("cleanup staled importing segment", zap.Int64("collection", segment.CollectionID), zap.Int64("segment", id))
+			s.meta.SetState(id, commonpb.SegmentState_Dropped)
+			continue
+		}
+
 		valids = append(valids, id)
 	}
 	s.segments = valids
@@ -533,9 +546,7 @@ func (s *SegmentManager) tryToSealSegment(ts Timestamp, channel string) error {
 			continue
 		}
 		channelInfo[info.InsertChannel] = append(channelInfo[info.InsertChannel], info)
-		if info.State == commonpb.SegmentState_Sealed ||
-			info.State == commonpb.SegmentState_Flushing ||
-			info.State == commonpb.SegmentState_Flushed {
+		if info.State != commonpb.SegmentState_Growing {
 			continue
 		}
 		// change shouldSeal to segment seal policy logic
@@ -552,9 +563,7 @@ func (s *SegmentManager) tryToSealSegment(ts Timestamp, channel string) error {
 		for _, policy := range s.channelSealPolicies {
 			vs := policy(channel, segmentInfos, ts)
 			for _, info := range vs {
-				if info.State == commonpb.SegmentState_Sealed ||
-					info.State == commonpb.SegmentState_Flushing ||
-					info.State == commonpb.SegmentState_Flushed {
+				if info.State != commonpb.SegmentState_Growing {
 					continue
 				}
 				if err := s.meta.SetState(info.GetID(), commonpb.SegmentState_Sealed); err != nil {

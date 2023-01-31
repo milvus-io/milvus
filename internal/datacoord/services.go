@@ -73,7 +73,10 @@ func (s *Server) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResp
 // this api only guarantees all the segments requested is sealed
 // these segments will be flushed only after the Flush policy is fulfilled
 func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.FlushResponse, error) {
-	log.Info("receive flush request", zap.Int64("dbID", req.GetDbID()), zap.Int64("collectionID", req.GetCollectionID()))
+	log.Info("receive flush request",
+		zap.Int64("dbID", req.GetDbID()),
+		zap.Int64("collectionID", req.GetCollectionID()),
+		zap.Bool("isImporting", req.GetIsImport()))
 	ctx, sp := otel.Tracer(typeutil.DataCoordRole).Start(ctx, "DataCoord-Flush")
 	defer sp.End()
 	resp := &datapb.FlushResponse{
@@ -97,7 +100,7 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 	}
 	timeOfSeal, _ := tsoutil.ParseTS(ts)
 
-	sealedSegmentIDs, err := s.segmentManager.SealAllSegments(ctx, req.GetCollectionID(), req.GetSegmentIDs())
+	sealedSegmentIDs, err := s.segmentManager.SealAllSegments(ctx, req.GetCollectionID(), req.GetSegmentIDs(), req.GetIsImport())
 	if err != nil {
 		resp.Status.Reason = fmt.Sprintf("failed to flush %d, %s", req.CollectionID, err)
 		return resp, nil
@@ -1165,6 +1168,7 @@ func (s *Server) Import(ctx context.Context, itr *datapb.ImportTaskRequest) (*da
 	nodes := s.sessionManager.getLiveNodeIDs()
 	if len(nodes) == 0 {
 		log.Error("import failed as all DataNodes are offline")
+		resp.Status.Reason = "no data node available"
 		return resp, nil
 	}
 	log.Info("available DataNodes are", zap.Int64s("node ID", nodes))
@@ -1277,6 +1281,7 @@ func (s *Server) SaveImportSegment(ctx context.Context, req *datapb.SaveImportSe
 			zap.Error(err))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
 		}, nil
 	}
 	resp, err := cli.AddImportSegment(ctx,
@@ -1296,6 +1301,7 @@ func (s *Server) SaveImportSegment(ctx context.Context, req *datapb.SaveImportSe
 		log.Error("failed to add segment", zap.Int64("DataNode ID", nodeID), zap.Error(err))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
 		}, nil
 	}
 	log.Info("succeed to add segment", zap.Int64("DataNode ID", nodeID), zap.Any("add segment req", req))
@@ -1308,6 +1314,7 @@ func (s *Server) SaveImportSegment(ctx context.Context, req *datapb.SaveImportSe
 		log.Error("failed to SaveBinlogPaths", zap.Error(err))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
 		}, nil
 	}
 	return &commonpb.Status{
@@ -1320,17 +1327,18 @@ func (s *Server) SaveImportSegment(ctx context.Context, req *datapb.SaveImportSe
 func (s *Server) UnsetIsImportingState(ctx context.Context, req *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error) {
 	log.Info("unsetting isImport state of segments",
 		zap.Int64s("segments", req.GetSegmentIds()))
-	failure := false
+	var reportErr error
 	for _, segID := range req.GetSegmentIds() {
 		if err := s.meta.UnsetIsImporting(segID); err != nil {
 			// Fail-open.
 			log.Error("failed to unset segment is importing state", zap.Int64("segment ID", segID))
-			failure = true
+			reportErr = err
 		}
 	}
-	if failure {
+	if reportErr != nil {
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    reportErr.Error(),
 		}, nil
 	}
 	return &commonpb.Status{
@@ -1340,9 +1348,9 @@ func (s *Server) UnsetIsImportingState(ctx context.Context, req *datapb.UnsetIsI
 
 // MarkSegmentsDropped marks the given segments as `Dropped`.
 // An error status will be returned and error will be logged, if we failed to mark *all* segments.
+// Deprecated, do not use it
 func (s *Server) MarkSegmentsDropped(ctx context.Context, req *datapb.MarkSegmentsDroppedRequest) (*commonpb.Status, error) {
-	log.Info("marking segments dropped",
-		zap.Int64s("segments", req.GetSegmentIds()))
+	log.Info("marking segments dropped", zap.Int64s("segments", req.GetSegmentIds()))
 	failure := false
 	for _, segID := range req.GetSegmentIds() {
 		if err := s.meta.SetState(segID, commonpb.SegmentState_Dropped); err != nil {

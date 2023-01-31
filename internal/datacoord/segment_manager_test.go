@@ -247,7 +247,7 @@ func TestSaveSegmentsToMeta(t *testing.T) {
 	allocations, err := segmentManager.AllocSegment(context.Background(), collID, 0, "c1", 1000)
 	assert.Nil(t, err)
 	assert.EqualValues(t, 1, len(allocations))
-	_, err = segmentManager.SealAllSegments(context.Background(), collID, nil)
+	_, err = segmentManager.SealAllSegments(context.Background(), collID, nil, false)
 	assert.Nil(t, err)
 	segment := meta.GetSegment(allocations[0].SegmentID)
 	assert.NotNil(t, segment)
@@ -269,7 +269,7 @@ func TestSaveSegmentsToMetaWithSpecificSegments(t *testing.T) {
 	allocations, err := segmentManager.AllocSegment(context.Background(), collID, 0, "c1", 1000)
 	assert.Nil(t, err)
 	assert.EqualValues(t, 1, len(allocations))
-	_, err = segmentManager.SealAllSegments(context.Background(), collID, []int64{allocations[0].SegmentID})
+	_, err = segmentManager.SealAllSegments(context.Background(), collID, []int64{allocations[0].SegmentID}, false)
 	assert.Nil(t, err)
 	segment := meta.GetSegment(allocations[0].SegmentID)
 	assert.NotNil(t, segment)
@@ -364,6 +364,37 @@ func TestExpireAllocation(t *testing.T) {
 	assert.EqualValues(t, 0, len(segment.allocations))
 }
 
+func TestCleanExpiredBulkloadSegment(t *testing.T) {
+	t.Run("expiredBulkloadSegment", func(t *testing.T) {
+		Params.Init()
+		mockAllocator := newMockAllocator()
+		meta, err := newMemoryMeta()
+		assert.Nil(t, err)
+
+		schema := newTestSchema()
+		collID, err := mockAllocator.allocID(context.Background())
+		assert.Nil(t, err)
+		meta.AddCollection(&collectionInfo{ID: collID, Schema: schema})
+		ms := newMockRootCoordService()
+		segmentManager := newSegmentManager(meta, mockAllocator, ms)
+		allocation, err := segmentManager.allocSegmentForImport(context.TODO(), collID, 0, "c1", 2, 1)
+		assert.Nil(t, err)
+
+		ids, err := segmentManager.GetFlushableSegments(context.TODO(), "c1", allocation.ExpireTime)
+		assert.Nil(t, err)
+		assert.EqualValues(t, len(ids), 0)
+
+		assert.EqualValues(t, len(segmentManager.segments), 1)
+
+		ids, err = segmentManager.GetFlushableSegments(context.TODO(), "c1", allocation.ExpireTime+1)
+		assert.Nil(t, err)
+		assert.Empty(t, ids)
+		assert.EqualValues(t, len(ids), 0)
+
+		assert.EqualValues(t, len(segmentManager.segments), 0)
+	})
+}
+
 func TestGetFlushableSegments(t *testing.T) {
 	t.Run("get flushable segments between small interval", func(t *testing.T) {
 		Params.Init()
@@ -380,7 +411,7 @@ func TestGetFlushableSegments(t *testing.T) {
 		assert.Nil(t, err)
 		assert.EqualValues(t, 1, len(allocations))
 
-		ids, err := segmentManager.SealAllSegments(context.TODO(), collID, nil)
+		ids, err := segmentManager.SealAllSegments(context.TODO(), collID, nil, false)
 		assert.Nil(t, err)
 		assert.EqualValues(t, 1, len(ids))
 		assert.EqualValues(t, allocations[0].SegmentID, ids[0])

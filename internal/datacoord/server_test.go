@@ -252,6 +252,50 @@ func TestFlush(t *testing.T) {
 		assert.EqualValues(t, segID, ids[0])
 	})
 
+	t.Run("bulkload segment", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+		schema := newTestSchema()
+		svr.meta.AddCollection(&collectionInfo{ID: 0, Schema: schema, Partitions: []int64{}})
+
+		allocations, err := svr.segmentManager.allocSegmentForImport(context.TODO(), 0, 1, "channel-1", 1, 100)
+		assert.Nil(t, err)
+		expireTs := allocations.ExpireTime
+		segID := allocations.SegmentID
+
+		resp, err := svr.Flush(context.TODO(), req)
+		assert.Nil(t, err)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.EqualValues(t, 0, len(resp.SegmentIDs))
+		// should not flush anything since this is a normal flush
+		svr.meta.SetCurrentRows(segID, 1)
+		ids, err := svr.segmentManager.GetFlushableSegments(context.TODO(), "channel-1", expireTs)
+		assert.Nil(t, err)
+		assert.EqualValues(t, 0, len(ids))
+
+		req := &datapb.FlushRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_Flush,
+				MsgID:     0,
+				Timestamp: 0,
+				SourceID:  0,
+			},
+			DbID:         0,
+			CollectionID: 0,
+			IsImport:     true,
+		}
+
+		resp, err = svr.Flush(context.TODO(), req)
+		assert.Nil(t, err)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.EqualValues(t, 1, len(resp.SegmentIDs))
+
+		ids, err = svr.segmentManager.GetFlushableSegments(context.TODO(), "channel-1", expireTs)
+		assert.Nil(t, err)
+		assert.EqualValues(t, 1, len(ids))
+		assert.EqualValues(t, segID, ids[0])
+	})
+
 	t.Run("closed server", func(t *testing.T) {
 		svr := newTestServer(t, nil)
 		closeTestServer(t, svr)
@@ -1164,7 +1208,7 @@ func (s *spySegmentManager) DropSegment(ctx context.Context, segmentID UniqueID)
 }
 
 // SealAllSegments seals all segments of collection with collectionID and return sealed segments
-func (s *spySegmentManager) SealAllSegments(ctx context.Context, collectionID UniqueID, segIDs []UniqueID) ([]UniqueID, error) {
+func (s *spySegmentManager) SealAllSegments(ctx context.Context, collectionID UniqueID, segIDs []UniqueID, isImport bool) ([]UniqueID, error) {
 	panic("not implemented") // TODO: Implement
 }
 
@@ -3388,29 +3432,6 @@ func TestDataCoord_UnsetIsImportingState(t *testing.T) {
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
-	})
-}
-
-func TestDataCoord_MarkSegmentsDropped(t *testing.T) {
-	t.Run("normal case", func(t *testing.T) {
-		svr := newTestServer(t, nil)
-		defer closeTestServer(t, svr)
-		seg := buildSegment(100, 100, 100, "ch1", false)
-		svr.meta.AddSegment(seg)
-
-		status, err := svr.MarkSegmentsDropped(context.Background(), &datapb.MarkSegmentsDroppedRequest{
-			SegmentIds: []int64{100},
-		})
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
-
-		// Trying to mark dropped of a segment that does not exist.
-		status, err = svr.MarkSegmentsDropped(context.Background(), &datapb.MarkSegmentsDroppedRequest{
-			SegmentIds: []int64{999},
-		})
-		assert.NoError(t, err)
-		// Returning success as SetState will succeed if segment does not exist. This should probably get fixed.
-		assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
 	})
 }
 

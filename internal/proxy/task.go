@@ -1217,6 +1217,7 @@ func (ft *flushTask) Execute(ctx context.Context) error {
 			),
 			DbID:         0,
 			CollectionID: collID,
+			IsImport:     false,
 		}
 		resp, err := ft.dataCoord.Flush(ctx, flushReq)
 		if err != nil {
