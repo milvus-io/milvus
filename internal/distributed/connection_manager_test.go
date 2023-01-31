@@ -18,6 +18,7 @@ package distributed
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"os"
 	"os/signal"
@@ -61,6 +62,9 @@ func TestMain(t *testing.M) {
 
 func TestConnectionManager(t *testing.T) {
 	ctx := context.Background()
+
+	testPath := fmt.Sprintf("TestConnectionManager-%d", time.Now().Unix())
+	paramtable.Get().Save(paramtable.Get().EtcdCfg.RootPath.Key, testPath)
 
 	session := initSession(ctx)
 	cm := NewConnectionManager(session)
