@@ -17,7 +17,6 @@
 package commonpbutil
 
 import (
-	"sync/atomic"
 	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -102,18 +101,10 @@ func UpdateMsgBase(msgBase *commonpb.MsgBase, options ...MsgBaseOptions) *common
 	return msgBaseRt
 }
 
-func IsHealthy(stateCode atomic.Value) bool {
-	code, ok := stateCode.Load().(commonpb.StateCode)
-	if !ok {
-		return false
-	}
-	return code == commonpb.StateCode_Healthy
+func IsHealthy(stateCode commonpb.StateCode) bool {
+	return stateCode == commonpb.StateCode_Healthy
 }
 
-func IsHealthyOrStopping(stateCode atomic.Value) bool {
-	code, ok := stateCode.Load().(commonpb.StateCode)
-	if !ok {
-		return false
-	}
-	return code == commonpb.StateCode_Healthy || code == commonpb.StateCode_Stopping
+func IsHealthyOrStopping(stateCode commonpb.StateCode) bool {
+	return stateCode == commonpb.StateCode_Healthy || stateCode == commonpb.StateCode_Stopping
 }

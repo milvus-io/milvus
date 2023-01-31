@@ -32,7 +32,6 @@ import (
 	"os"
 	"path"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 	"unsafe"
@@ -47,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/hardware"
 	"github.com/milvus-io/milvus/internal/util/initcore"
+	"github.com/milvus-io/milvus/internal/util/lifetime"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -74,7 +74,7 @@ type taskKey struct {
 
 // IndexNode is a component that executes the task of building indexes.
 type IndexNode struct {
-	stateCode atomic.Value
+	lifetime lifetime.Lifetime[commonpb.StateCode]
 
 	loopCtx    context.Context
 	loopCancel func()
@@ -107,8 +107,8 @@ func NewIndexNode(ctx context.Context, factory dependency.Factory) *IndexNode {
 		factory:        factory,
 		storageFactory: &chunkMgr{},
 		tasks:          map[taskKey]*taskInfo{},
+		lifetime:       lifetime.NewLifetime(commonpb.StateCode_Abnormal),
 	}
-	b.UpdateStateCode(commonpb.StateCode_Abnormal)
 	sc := NewTaskScheduler(b.loopCtx)
 
 	b.sched = sc
@@ -172,7 +172,7 @@ func (i *IndexNode) Init() error {
 	var initErr error
 	i.initOnce.Do(func() {
 		i.UpdateStateCode(commonpb.StateCode_Initializing)
-		log.Info("IndexNode init", zap.Any("State", i.stateCode.Load().(commonpb.StateCode)))
+		log.Info("IndexNode init", zap.String("state", i.lifetime.GetState().String()))
 		err := i.initSession()
 		if err != nil {
 			log.Error(err.Error())
@@ -204,7 +204,7 @@ func (i *IndexNode) Start() error {
 		startErr = i.sched.Start()
 
 		i.UpdateStateCode(commonpb.StateCode_Healthy)
-		log.Info("IndexNode", zap.Any("State", i.stateCode.Load()))
+		log.Info("IndexNode", zap.Any("State", i.lifetime.GetState().String()))
 	})
 
 	log.Info("IndexNode start finished", zap.Error(startErr))
@@ -222,6 +222,7 @@ func (i *IndexNode) Stop() error {
 		} else {
 			i.waitTaskFinish()
 		}
+		i.lifetime.Wait()
 
 		// https://github.com/milvus-io/milvus/issues/12282
 		i.UpdateStateCode(commonpb.StateCode_Abnormal)
@@ -246,7 +247,7 @@ func (i *IndexNode) Stop() error {
 
 // UpdateStateCode updates the component state of IndexNode.
 func (i *IndexNode) UpdateStateCode(code commonpb.StateCode) {
-	i.stateCode.Store(code)
+	i.lifetime.SetState(code)
 }
 
 // SetEtcdClient assigns parameter client to its member etcdCli
@@ -265,7 +266,7 @@ func (i *IndexNode) GetComponentStates(ctx context.Context) (*milvuspb.Component
 		// NodeID:    Params.NodeID, // will race with i.Register()
 		NodeID:    nodeID,
 		Role:      typeutil.IndexNodeRole,
-		StateCode: i.stateCode.Load().(commonpb.StateCode),
+		StateCode: i.lifetime.GetState(),
 	}
 
 	ret := &milvuspb.ComponentStates{
@@ -277,8 +278,8 @@ func (i *IndexNode) GetComponentStates(ctx context.Context) (*milvuspb.Component
 	}
 
 	log.RatedInfo(10, "IndexNode Component states",
-		zap.Any("State", ret.State),
-		zap.Any("Status", ret.Status),
+		zap.String("State", ret.State.String()),
+		zap.String("Status", ret.GetStatus().GetErrorCode().String()),
 		zap.Any("SubcomponentStates", ret.SubcomponentStates))
 	return ret, nil
 }
@@ -310,7 +311,7 @@ func (i *IndexNode) GetNodeID() int64 {
 
 // ShowConfigurations returns the configurations of indexNode matching req.Pattern
 func (i *IndexNode) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
-	if !commonpbutil.IsHealthyOrStopping(i.stateCode) {
+	if !i.lifetime.Add(commonpbutil.IsHealthyOrStopping) {
 		log.Warn("IndexNode.ShowConfigurations failed",
 			zap.Int64("nodeId", paramtable.GetNodeID()),
 			zap.String("req", req.Pattern),

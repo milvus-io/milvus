@@ -509,15 +509,6 @@ func TestImpl_GetSegmentInfo(t *testing.T) {
 	})
 }
 
-func TestImpl_isHealthy(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	node, err := genSimpleQueryNode(ctx)
-	assert.NoError(t, err)
-
-	assert.True(t, node.isHealthy(node.lifetime.GetState()))
-}
-
 func TestImpl_ShowConfigurations(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
