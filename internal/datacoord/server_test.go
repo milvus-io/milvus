@@ -25,6 +25,7 @@ import (
 	"os/signal"
 	"path"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -61,6 +62,18 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	// init embed etcd
+	embedetcdServer, tempDir, err := etcd.StartTestEmbedEtcdServer()
+	if err != nil {
+		log.Fatal(err.Error())
+	}
+	defer os.RemoveAll(tempDir)
+	defer embedetcdServer.Close()
+
+	addrs := etcd.GetEmbedEtcdEndpoints(embedetcdServer)
+	// setup env for etcd endpoint
+	os.Setenv("etcd.endpoints", strings.Join(addrs, ","))
+
 	paramtable.Init()
 	rand.Seed(time.Now().UnixNano())
 	os.Exit(m.Run())
