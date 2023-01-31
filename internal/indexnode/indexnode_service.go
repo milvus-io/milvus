@@ -41,14 +41,15 @@ import (
 )
 
 func (i *IndexNode) CreateJob(ctx context.Context, req *indexpb.CreateJobRequest) (*commonpb.Status, error) {
-	if !commonpbutil.IsHealthy(i.stateCode) {
-		stateCode := i.stateCode.Load().(commonpb.StateCode)
-		log.Ctx(ctx).Warn("index node not ready", zap.Int32("state", int32(stateCode)), zap.String("ClusterID", req.ClusterID), zap.Int64("IndexBuildID", req.BuildID))
+	if !i.lifetime.Add(commonpbutil.IsHealthy) {
+		stateCode := i.lifetime.GetState()
+		log.Ctx(ctx).Warn("index node not ready", zap.String("state", stateCode.String()), zap.String("ClusterID", req.ClusterID), zap.Int64("IndexBuildID", req.BuildID))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    "state code is not healthy",
 		}, nil
 	}
+	defer i.lifetime.Done()
 	log.Ctx(ctx).Info("IndexNode building index ...",
 		zap.String("ClusterID", req.ClusterID),
 		zap.Int64("IndexBuildID", req.BuildID),
@@ -116,9 +117,9 @@ func (i *IndexNode) CreateJob(ctx context.Context, req *indexpb.CreateJobRequest
 }
 
 func (i *IndexNode) QueryJobs(ctx context.Context, req *indexpb.QueryJobsRequest) (*indexpb.QueryJobsResponse, error) {
-	if !commonpbutil.IsHealthyOrStopping(i.stateCode) {
-		stateCode := i.stateCode.Load().(commonpb.StateCode)
-		log.Ctx(ctx).Warn("index node not ready", zap.Int32("state", int32(stateCode)), zap.String("ClusterID", req.ClusterID))
+	if !i.lifetime.Add(commonpbutil.IsHealthyOrStopping) {
+		stateCode := i.lifetime.GetState()
+		log.Ctx(ctx).Warn("index node not ready", zap.String("state", stateCode.String()), zap.String("ClusterID", req.ClusterID))
 		return &indexpb.QueryJobsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -126,6 +127,7 @@ func (i *IndexNode) QueryJobs(ctx context.Context, req *indexpb.QueryJobsRequest
 			},
 		}, nil
 	}
+	defer i.lifetime.Done()
 	infos := make(map[UniqueID]*taskInfo)
 	i.foreachTaskInfo(func(ClusterID string, buildID UniqueID, info *taskInfo) {
 		if ClusterID == req.ClusterID {
@@ -167,14 +169,15 @@ func (i *IndexNode) QueryJobs(ctx context.Context, req *indexpb.QueryJobsRequest
 
 func (i *IndexNode) DropJobs(ctx context.Context, req *indexpb.DropJobsRequest) (*commonpb.Status, error) {
 	log.Ctx(ctx).Info("drop index build jobs", zap.String("ClusterID", req.ClusterID), zap.Int64s("IndexBuildIDs", req.BuildIDs))
-	if !commonpbutil.IsHealthyOrStopping(i.stateCode) {
-		stateCode := i.stateCode.Load().(commonpb.StateCode)
-		log.Ctx(ctx).Warn("index node not ready", zap.Int32("state", int32(stateCode)), zap.String("ClusterID", req.ClusterID))
+	if !i.lifetime.Add(commonpbutil.IsHealthyOrStopping) {
+		stateCode := i.lifetime.GetState()
+		log.Ctx(ctx).Warn("index node not ready", zap.String("state", stateCode.String()), zap.String("ClusterID", req.ClusterID))
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    "state code is not healthy",
 		}, nil
 	}
+	defer i.lifetime.Done()
 	keys := make([]taskKey, 0, len(req.BuildIDs))
 	for _, buildID := range req.BuildIDs {
 		keys = append(keys, taskKey{ClusterID: req.ClusterID, BuildID: buildID})
@@ -194,9 +197,9 @@ func (i *IndexNode) DropJobs(ctx context.Context, req *indexpb.DropJobsRequest) 
 }
 
 func (i *IndexNode) GetJobStats(ctx context.Context, req *indexpb.GetJobStatsRequest) (*indexpb.GetJobStatsResponse, error) {
-	if !commonpbutil.IsHealthyOrStopping(i.stateCode) {
-		stateCode := i.stateCode.Load().(commonpb.StateCode)
-		log.Ctx(ctx).Warn("index node not ready", zap.Int32("state", int32(stateCode)))
+	if !i.lifetime.Add(commonpbutil.IsHealthyOrStopping) {
+		stateCode := i.lifetime.GetState()
+		log.Ctx(ctx).Warn("index node not ready", zap.String("state", stateCode.String()))
 		return &indexpb.GetJobStatsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -204,6 +207,7 @@ func (i *IndexNode) GetJobStats(ctx context.Context, req *indexpb.GetJobStatsReq
 			},
 		}, nil
 	}
+	defer i.lifetime.Done()
 	unissued, active := i.sched.IndexBuildQueue.GetTaskNum()
 	jobInfos := make([]*indexpb.JobInfo, 0)
 	i.foreachTaskInfo(func(ClusterID string, buildID UniqueID, info *taskInfo) {
@@ -233,7 +237,7 @@ func (i *IndexNode) GetJobStats(ctx context.Context, req *indexpb.GetJobStatsReq
 // GetMetrics gets the metrics info of IndexNode.
 // TODO(dragondriver): cache the Metrics and set a retention to the cache
 func (i *IndexNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	if !commonpbutil.IsHealthyOrStopping(i.stateCode) {
+	if !i.lifetime.Add(commonpbutil.IsHealthyOrStopping) {
 		log.Ctx(ctx).Warn("IndexNode.GetMetrics failed",
 			zap.Int64("nodeID", paramtable.GetNodeID()),
 			zap.String("req", req.Request),
@@ -247,6 +251,7 @@ func (i *IndexNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequ
 			Response: "",
 		}, nil
 	}
+	defer i.lifetime.Done()
 
 	metricType, err := metricsinfo.ParseMetricType(req.Request)
 	if err != nil {

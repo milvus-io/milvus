@@ -19,7 +19,6 @@
 package commonpbutil
 
 import (
-	"sync/atomic"
 	"testing"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -27,53 +26,41 @@ import (
 )
 
 func TestIsHealthy(t *testing.T) {
-	{
-		v := atomic.Value{}
-		v.Store(1)
-		assert.False(t, IsHealthy(v))
+	type testCase struct {
+		code   commonpb.StateCode
+		expect bool
 	}
 
-	{
-		v := atomic.Value{}
-		v.Store(commonpb.StateCode_Abnormal)
-		assert.False(t, IsHealthy(v))
+	cases := []testCase{
+		{commonpb.StateCode_Healthy, true},
+		{commonpb.StateCode_Initializing, false},
+		{commonpb.StateCode_Abnormal, false},
+		{commonpb.StateCode_StandBy, false},
+		{commonpb.StateCode_Stopping, false},
 	}
-
-	{
-		v := atomic.Value{}
-		v.Store(commonpb.StateCode_Stopping)
-		assert.False(t, IsHealthy(v))
-	}
-
-	{
-		v := atomic.Value{}
-		v.Store(commonpb.StateCode_Healthy)
-		assert.True(t, IsHealthy(v))
+	for _, tc := range cases {
+		t.Run(tc.code.String(), func(t *testing.T) {
+			assert.Equal(t, tc.expect, IsHealthy(tc.code))
+		})
 	}
 }
 
 func TestIsHealthyOrStopping(t *testing.T) {
-	{
-		v := atomic.Value{}
-		v.Store(1)
-		assert.False(t, IsHealthyOrStopping(v))
+	type testCase struct {
+		code   commonpb.StateCode
+		expect bool
 	}
 
-	{
-		v := atomic.Value{}
-		v.Store(commonpb.StateCode_Abnormal)
-		assert.False(t, IsHealthyOrStopping(v))
+	cases := []testCase{
+		{commonpb.StateCode_Healthy, true},
+		{commonpb.StateCode_Initializing, false},
+		{commonpb.StateCode_Abnormal, false},
+		{commonpb.StateCode_StandBy, false},
+		{commonpb.StateCode_Stopping, true},
 	}
-
-	{
-		v := atomic.Value{}
-		v.Store(commonpb.StateCode_Stopping)
-		assert.True(t, IsHealthyOrStopping(v))
-	}
-
-	{
-		v := atomic.Value{}
-		v.Store(commonpb.StateCode_Healthy)
-		assert.True(t, IsHealthyOrStopping(v))
+	for _, tc := range cases {
+		t.Run(tc.code.String(), func(t *testing.T) {
+			assert.Equal(t, tc.expect, IsHealthyOrStopping(tc.code))
+		})
 	}
 }

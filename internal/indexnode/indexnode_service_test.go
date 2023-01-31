@@ -349,7 +349,7 @@ Loop:
 	assert.Nil(t, in.Stop())
 	node := in.(*mockIndexNodeComponent).IndexNode
 	assert.Equal(t, 0, len(node.tasks))
-	assert.Equal(t, commonpb.StateCode_Abnormal, node.stateCode.Load().(commonpb.StateCode))
+	assert.Equal(t, commonpb.StateCode_Abnormal, node.lifetime.GetState())
 }
 
 func TestAbnormalIndexNode(t *testing.T) {
