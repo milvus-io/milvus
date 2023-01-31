@@ -241,6 +241,24 @@ queryNode:
     maxNQ: 1000
     topKMergeRatio: 10.0
 
+indexCoord:
+  # deprecated
+  address: localhost
+  port: 31000
+  enableActiveStandby: false  # Enable active-standby
+
+  minSegmentNumRowsToEnableIndex: 1024 # It's a threshold. When the segment num rows is less than this value, the segment will not be indexed
+
+  bindIndexNodeMode:
+    enable: false
+    address: "localhost:22930"
+    withCred: false
+    nodeID: 0
+
+  # deprecated
+  gc:
+    interval: 600 # gc interval in seconds
+
 indexNode:
   port: 21121
   enableDisk: true # enable index node build disk vector index
@@ -282,7 +300,6 @@ dataCoord:
     # over (compactableProportion * segment max # of rows) rows.
     # MUST BE GREATER THAN OR EQUAL TO <smallProportion>!!!
     expansionRate: 1.25 # During compaction, the size of segment # of rows is able to exceed segment max # of rows by (expansionRate-1) * 100%.
-    minSegmentNumRowsToEnableIndex: 1024 # It's a threshold. When the segment num rows is less than this value, the segment will not be indexed
 
   compaction:
     enableAutoCompaction: true
@@ -291,13 +308,6 @@ dataCoord:
     interval: 3600 # gc interval in seconds
     missingTolerance: 86400 # file meta missing tolerance duration in seconds, 60*24
     dropTolerance: 86400 # file belongs to dropped entity tolerance duration in seconds, 60*24
-
-  bindIndexNodeMode:
-    enable: false
-    address: "localhost:22930"
-    withCred: false
-    nodeID: 0
-
 
 
 dataNode:
