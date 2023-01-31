@@ -1602,35 +1602,35 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	p.EnableActiveStandby.Init(base.mgr)
 
 	p.MinSegmentNumRowsToEnableIndex = ParamItem{
-		Key:          "dataCoord.segment.minSegmentNumRowsToEnableIndex",
+		Key:          "indexCoord.segment.minSegmentNumRowsToEnableIndex",
 		Version:      "2.0.0",
 		DefaultValue: "1024",
 	}
 	p.MinSegmentNumRowsToEnableIndex.Init(base.mgr)
 
 	p.BindIndexNodeMode = ParamItem{
-		Key:          "dataCoord.bindIndexNodeMode.enable",
+		Key:          "indexCoord.bindIndexNodeMode.enable",
 		Version:      "2.0.0",
 		DefaultValue: "false",
 	}
 	p.BindIndexNodeMode.Init(base.mgr)
 
 	p.IndexNodeAddress = ParamItem{
-		Key:          "dataCoord.bindIndexNodeMode.address",
+		Key:          "indexCoord.bindIndexNodeMode.address",
 		Version:      "2.0.0",
 		DefaultValue: "localhost:22930",
 	}
 	p.IndexNodeAddress.Init(base.mgr)
 
 	p.WithCredential = ParamItem{
-		Key:          "dataCoord.bindIndexNodeMode.withCred",
+		Key:          "indexCoord.bindIndexNodeMode.withCred",
 		Version:      "2.0.0",
 		DefaultValue: "false",
 	}
 	p.WithCredential.Init(base.mgr)
 
 	p.IndexNodeID = ParamItem{
-		Key:          "dataCoord.bindIndexNodeMode.nodeID",
+		Key:          "indexCoord.bindIndexNodeMode.nodeID",
 		Version:      "2.0.0",
 		DefaultValue: "0",
 	}
