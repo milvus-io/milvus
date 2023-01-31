@@ -3798,7 +3798,6 @@ class TestsearchPagination(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("limit", [10, 20])
-    @pytest.mark.skip("issue #21444")
     def test_search_with_pagination(self, offset, auto_id, limit, _async):
         """
         target: test search with pagination
@@ -3833,7 +3832,6 @@ class TestsearchPagination(TestcaseBase):
         assert set(search_res[0].ids) == set(res[0].ids[offset:])
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip("issue #21444")
     def test_search_string_with_pagination(self, offset, auto_id, _async):
         """
         target: test search string with pagination
@@ -3997,7 +3995,6 @@ class TestsearchPagination(TestcaseBase):
         assert set(search_res[0].ids) == set(res[0].ids[offset:])
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip("issue #21444")
     def test_search_pagination_with_index_partition(self, offset, auto_id, _async):
         """
         target: test search pagination with index and partition
@@ -4161,7 +4158,6 @@ class TestsearchPagination(TestcaseBase):
     @pytest.mark.parametrize("index, params",
                              zip(ct.all_index_types[:7],
                                  ct.default_index_params[:7]))
-    @pytest.mark.skip("issue #21444")
     def test_search_pagination_after_different_index(self, index, params, auto_id, offset, _async):
         """
         target: test search pagination after different index
