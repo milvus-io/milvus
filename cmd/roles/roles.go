@@ -24,7 +24,6 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/milvus-io/milvus/internal/management"
 	rocksmqimpl "github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
 
 	"go.uber.org/zap"
@@ -35,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/indexcoord"
 	"github.com/milvus-io/milvus/internal/indexnode"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/management"
 	"github.com/milvus-io/milvus/internal/management/healthz"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proxy"
@@ -232,6 +232,8 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 		}
 	}
 
+	management.ServeHTTP()
+
 	if os.Getenv(metricsinfo.DeployModeEnvKey) == metricsinfo.StandaloneDeployMode {
 		closer := trace.InitTracing("standalone")
 		if closer != nil {
@@ -305,7 +307,7 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 	}
 
 	metrics.Register(Registry)
-	management.ServeHTTP()
+
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc,
 		syscall.SIGHUP,
