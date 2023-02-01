@@ -58,6 +58,16 @@ func (m *ConcurrentMap[K, V]) InsertIfNotPresent(key K, value V) {
 	}
 }
 
+// Insert inserts the key-value pair to the concurrent map
+func (m *ConcurrentMap[K, V]) Insert(key K, value V) {
+	_, loaded := m.inner.LoadOrStore(key, value)
+	if !loaded {
+		m.len.Inc()
+	} else {
+		m.inner.Store(key, value)
+	}
+}
+
 func (m *ConcurrentMap[K, V]) Get(key K) (V, bool) {
 	var zeroValue V
 	value, ok := m.inner.Load(key)

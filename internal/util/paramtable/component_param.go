@@ -143,6 +143,10 @@ func (p *ComponentParam) GetAll() map[string]string {
 	return p.mgr.GetConfigs()
 }
 
+func (p *ComponentParam) Watch(key string, watcher config.EventHandler) {
+	p.mgr.Dispatcher.Register(key, watcher)
+}
+
 // /////////////////////////////////////////////////////////////////////////////
 // --- common ---
 type commonConfig struct {

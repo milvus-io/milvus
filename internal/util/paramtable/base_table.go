@@ -97,7 +97,7 @@ func (gp *BaseTable) init(refreshInterval int) {
 	}
 	gp.initConfigsFromLocal(refreshInterval)
 	gp.initConfigsFromRemote(refreshInterval)
-	gp.InitLogCfg()
+	gp.initLog()
 }
 
 func (gp *BaseTable) initConfigsFromLocal(refreshInterval int) {
@@ -203,8 +203,8 @@ func (gp *BaseTable) Reset(key string) error {
 	return nil
 }
 
-// InitLogCfg init log of the base table
-func (gp *BaseTable) InitLogCfg() {
+// initLog init log of the base table
+func (gp *BaseTable) initLog() {
 	gp.Log = log.Config{}
 	format := gp.GetWithDefault("log.format", DefaultLogFormat)
 	gp.Log.Format = format
