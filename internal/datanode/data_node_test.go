@@ -911,11 +911,11 @@ func TestWatchChannel(t *testing.T) {
 
 		err = kv.RemoveWithPrefix(fmt.Sprintf("%s/%d", Params.DataNodeCfg.ChannelWatchSubPath, Params.DataNodeCfg.GetNodeID()))
 		assert.Nil(t, err)
-		//TODO there is not way to sync Release done, use sleep for now
-		time.Sleep(100 * time.Millisecond)
 
-		exist = node.flowgraphManager.exist(ch)
-		assert.False(t, exist)
+		assert.Eventually(t, func() bool {
+			exist = node.flowgraphManager.exist(ch)
+			return !exist
+		}, 3*time.Second, 100*time.Millisecond)
 	})
 
 	t.Run("Test release channel", func(t *testing.T) {
