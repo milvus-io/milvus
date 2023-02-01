@@ -88,7 +88,7 @@ func (p *proxyClientManager) AddProxyClient(session *sessionutil.Session) {
 		return
 	}
 
-	go p.connect(session)
+	p.connect(session)
 }
 
 // GetProxyCount returns number of proxy clients.
