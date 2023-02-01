@@ -621,7 +621,7 @@ def tanimoto(x, y):
     y = np.asarray(y, np.bool_)
     res = np.double(np.bitwise_and(x, y).sum()) / np.double(np.bitwise_or(x, y).sum())
     if res == 0:
-        value = 0
+        value = float("inf")
     else:
         value = -np.log2(res)
     return value

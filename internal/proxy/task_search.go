@@ -655,7 +655,7 @@ func selectHighestScoreIndex(subSearchResultData []*schemapb.SearchResultData, s
 		sScore := subSearchResultData[i].Scores[sIdx]
 
 		// Choose the larger score idx or the smaller pk idx with the same score
-		if sScore > maxScore {
+		if subSearchIdx == -1 || sScore > maxScore {
 			subSearchIdx = i
 			resultDataIdx = sIdx
 			maxScore = sScore

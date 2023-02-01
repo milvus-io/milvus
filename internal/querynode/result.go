@@ -193,7 +193,7 @@ func selectSearchResultData(dataArray []*schemapb.SearchResultData, resultOffset
 		idx := resultOffsets[i][qi] + offset
 		distance := dataArray[i].Scores[idx]
 
-		if distance > maxDistance {
+		if sel == -1 || distance > maxDistance {
 			sel = i
 			maxDistance = distance
 			resultDataIdx = idx
