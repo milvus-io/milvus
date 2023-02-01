@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -40,9 +41,14 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 var dataSyncServiceTestDir = "/tmp/milvus_test/data_sync_service"
+
+func init() {
+	Params.Init()
+}
 
 func getVchanInfo(info *testInfo) *datapb.VchannelInfo {
 	var ufs []*datapb.SegmentInfo
@@ -160,12 +166,14 @@ func TestDataSyncService_newDataSyncService(te *testing.T) {
 			if test.channelNil {
 				channel = nil
 			}
+			dispClient := msgdispatcher.NewClient(test.inMsgFactory, typeutil.DataNodeRole, paramtable.GetNodeID())
 
 			ds, err := newDataSyncService(ctx,
 				make(chan flushMsg),
 				make(chan resendTTMsg),
 				channel,
 				NewAllocatorFactory(),
+				dispClient,
 				test.inMsgFactory,
 				getVchanInfo(test),
 				make(chan string),
@@ -217,6 +225,7 @@ func TestDataSyncService_Start(t *testing.T) {
 
 	allocFactory := NewAllocatorFactory(1)
 	factory := dependency.NewDefaultFactory(true)
+	dispClient := msgdispatcher.NewClient(factory, typeutil.DataNodeRole, paramtable.GetNodeID())
 	defer os.RemoveAll("/tmp/milvus")
 	paramtable.Get().Save(Params.DataNodeCfg.FlushInsertBufferSize.Key, "1")
 
@@ -270,7 +279,7 @@ func TestDataSyncService_Start(t *testing.T) {
 		},
 	}
 
-	sync, err := newDataSyncService(ctx, flushChan, resendTTChan, channel, allocFactory, factory, vchan, signalCh, dataCoord, newCache(), cm, newCompactionExecutor(), 0)
+	sync, err := newDataSyncService(ctx, flushChan, resendTTChan, channel, allocFactory, dispClient, factory, vchan, signalCh, dataCoord, newCache(), cm, newCompactionExecutor(), 0)
 	assert.Nil(t, err)
 
 	sync.flushListener = make(chan *segmentFlushPack)
@@ -399,6 +408,7 @@ func TestDataSyncService_Close(t *testing.T) {
 
 		allocFactory  = NewAllocatorFactory(1)
 		factory       = dependency.NewDefaultFactory(true)
+		dispClient    = msgdispatcher.NewClient(factory, typeutil.DataNodeRole, paramtable.GetNodeID())
 		mockDataCoord = &DataCoordFactory{}
 	)
 	mockDataCoord.UserSegmentInfo = map[int64]*datapb.SegmentInfo{
@@ -421,7 +431,7 @@ func TestDataSyncService_Close(t *testing.T) {
 	paramtable.Get().Reset(Params.DataNodeCfg.FlushInsertBufferSize.Key)
 
 	channel := newChannel(insertChannelName, collMeta.ID, collMeta.GetSchema(), mockRootCoord, cm)
-	sync, err := newDataSyncService(ctx, flushChan, resendTTChan, channel, allocFactory, factory, vchan, signalCh, mockDataCoord, newCache(), cm, newCompactionExecutor(), 0)
+	sync, err := newDataSyncService(ctx, flushChan, resendTTChan, channel, allocFactory, dispClient, factory, vchan, signalCh, mockDataCoord, newCache(), cm, newCompactionExecutor(), 0)
 	assert.Nil(t, err)
 
 	sync.flushListener = make(chan *segmentFlushPack, 10)

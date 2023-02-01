@@ -278,6 +278,7 @@ func TestFlowGraph_DDNode_Operate(t *testing.T) {
 					},
 					DeleteRequest: internalpb.DeleteRequest{
 						Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_Delete},
+						ShardName:    "by-dev-rootcoord-dml-mock-0",
 						CollectionID: test.inMsgCollID,
 					},
 				}

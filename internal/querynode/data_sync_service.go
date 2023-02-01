@@ -25,6 +25,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
+	"github.com/milvus-io/milvus/internal/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
@@ -40,6 +41,7 @@ type dataSyncService struct {
 
 	metaReplica  ReplicaInterface
 	tSafeReplica TSafeReplicaInterface
+	dispClient   msgdispatcher.Client
 	msFactory    msgstream.Factory
 }
 
@@ -51,7 +53,7 @@ func (dsService *dataSyncService) getFlowGraphNum() int {
 }
 
 // addFlowGraphsForDMLChannels add flowGraphs to dmlChannel2FlowGraph
-func (dsService *dataSyncService) addFlowGraphsForDMLChannels(collectionID UniqueID, dmlChannels []string) (map[string]*queryNodeFlowGraph, error) {
+func (dsService *dataSyncService) addFlowGraphsForDMLChannels(collectionID UniqueID, dmlChannels map[string]*msgstream.MsgPosition) (map[string]*queryNodeFlowGraph, error) {
 	dsService.mu.Lock()
 	defer dsService.mu.Unlock()
 
@@ -61,7 +63,7 @@ func (dsService *dataSyncService) addFlowGraphsForDMLChannels(collectionID Uniqu
 	}
 
 	results := make(map[string]*queryNodeFlowGraph)
-	for _, channel := range dmlChannels {
+	for channel, position := range dmlChannels {
 		if _, ok := dsService.dmlChannel2FlowGraph[channel]; ok {
 			log.Warn("dml flow graph has been existed",
 				zap.Any("collectionID", collectionID),
@@ -74,7 +76,8 @@ func (dsService *dataSyncService) addFlowGraphsForDMLChannels(collectionID Uniqu
 			dsService.metaReplica,
 			dsService.tSafeReplica,
 			channel,
-			dsService.msFactory)
+			position,
+			dsService.dispClient)
 		if err != nil {
 			for _, fg := range results {
 				fg.flowGraph.Close()
@@ -128,7 +131,7 @@ func (dsService *dataSyncService) addFlowGraphsForDeltaChannels(collectionID Uni
 			dsService.metaReplica,
 			dsService.tSafeReplica,
 			channel,
-			dsService.msFactory)
+			dsService.dispClient)
 		if err != nil {
 			for channel, fg := range results {
 				fg.flowGraph.Close()
@@ -291,6 +294,7 @@ func (dsService *dataSyncService) removeEmptyFlowGraphByChannel(collectionID int
 func newDataSyncService(ctx context.Context,
 	metaReplica ReplicaInterface,
 	tSafeReplica TSafeReplicaInterface,
+	dispClient msgdispatcher.Client,
 	factory msgstream.Factory) *dataSyncService {
 
 	return &dataSyncService{
@@ -299,6 +303,7 @@ func newDataSyncService(ctx context.Context,
 		deltaChannel2FlowGraph: make(map[Channel]*queryNodeFlowGraph),
 		metaReplica:            metaReplica,
 		tSafeReplica:           tSafeReplica,
+		dispClient:             dispClient,
 		msFactory:              factory,
 	}
 }
@@ -308,6 +313,7 @@ func (dsService *dataSyncService) close() {
 	// close DML flow graphs
 	for channel, nodeFG := range dsService.dmlChannel2FlowGraph {
 		if nodeFG != nil {
+			dsService.dispClient.Deregister(channel)
 			nodeFG.flowGraph.Close()
 		}
 		delete(dsService.dmlChannel2FlowGraph, channel)
@@ -315,6 +321,7 @@ func (dsService *dataSyncService) close() {
 	// close delta flow graphs
 	for channel, nodeFG := range dsService.deltaChannel2FlowGraph {
 		if nodeFG != nil {
+			dsService.dispClient.Deregister(channel)
 			nodeFG.flowGraph.Close()
 		}
 		delete(dsService.deltaChannel2FlowGraph, channel)

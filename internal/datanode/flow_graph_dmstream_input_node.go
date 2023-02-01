@@ -17,7 +17,6 @@
 package datanode
 
 import (
-	"context"
 	"fmt"
 	"time"
 
@@ -25,10 +24,11 @@ import (
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
+	"github.com/milvus-io/milvus/internal/mq/msgdispatcher"
+	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
-	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -37,50 +37,32 @@ import (
 // DmInputNode receives messages from message streams, packs messages between two timeticks, and passes all
 //  messages between two timeticks to the following flowgraph node. In DataNode, the following flow graph node is
 //  flowgraph ddNode.
-func newDmInputNode(ctx context.Context, seekPos *internalpb.MsgPosition, dmNodeConfig *nodeConfig) (*flowgraph.InputNode, error) {
-	// subName should be unique, since pchannelName is shared among several collections
-	// use vchannel in case of reuse pchannel for same collection
-	consumeSubName := fmt.Sprintf("%s-%d-%s", Params.CommonCfg.DataNodeSubName.GetValue(), paramtable.GetNodeID(), dmNodeConfig.vChannelName)
-	insertStream, err := dmNodeConfig.msFactory.NewTtMsgStream(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	// MsgStream needs a physical channel name, but the channel name in seek position from DataCoord
-	//  is virtual channel name, so we need to convert vchannel name into pchannel neme here.
-	pchannelName := funcutil.ToPhysicalChannel(dmNodeConfig.vChannelName)
-	if seekPos != nil {
-		insertStream.AsConsumer([]string{pchannelName}, consumeSubName, mqwrapper.SubscriptionPositionUnknown)
-		seekPos.ChannelName = pchannelName
-		cpTs, _ := tsoutil.ParseTS(seekPos.Timestamp)
-		start := time.Now()
-		log.Info("datanode begin to seek",
-			zap.ByteString("seek msgID", seekPos.GetMsgID()),
-			zap.String("pchannel", seekPos.GetChannelName()),
-			zap.String("vchannel", dmNodeConfig.vChannelName),
-			zap.Time("position", cpTs),
-			zap.Duration("tsLag", time.Since(cpTs)),
-			zap.Int64("collection ID", dmNodeConfig.collectionID))
-		err = insertStream.Seek([]*internalpb.MsgPosition{seekPos})
+func newDmInputNode(dispatcherClient msgdispatcher.Client, seekPos *internalpb.MsgPosition, dmNodeConfig *nodeConfig) (*flowgraph.InputNode, error) {
+	log := log.With(zap.Int64("nodeID", paramtable.GetNodeID()),
+		zap.Int64("collection ID", dmNodeConfig.collectionID),
+		zap.String("vchannel", dmNodeConfig.vChannelName))
+	var err error
+	var input <-chan *msgstream.MsgPack
+	if seekPos != nil && len(seekPos.MsgID) != 0 {
+		input, err = dispatcherClient.Register(dmNodeConfig.vChannelName, seekPos, mqwrapper.SubscriptionPositionUnknown)
 		if err != nil {
 			return nil, err
 		}
-		log.Info("datanode seek successfully",
-			zap.ByteString("seek msgID", seekPos.GetMsgID()),
-			zap.String("pchannel", seekPos.GetChannelName()),
-			zap.String("vchannel", dmNodeConfig.vChannelName),
-			zap.Time("position", cpTs),
-			zap.Duration("tsLag", time.Since(cpTs)),
-			zap.Int64("collection ID", dmNodeConfig.collectionID),
-			zap.Duration("elapse", time.Since(start)))
+		log.Info("datanode seek successfully when register to msgDispatcher",
+			zap.ByteString("msgID", seekPos.GetMsgID()),
+			zap.Time("tsTime", tsoutil.PhysicalTime(seekPos.GetTimestamp())),
+			zap.Duration("tsLag", time.Since(tsoutil.PhysicalTime(seekPos.GetTimestamp()))))
 	} else {
-		insertStream.AsConsumer([]string{pchannelName}, consumeSubName, mqwrapper.SubscriptionPositionEarliest)
+		input, err = dispatcherClient.Register(dmNodeConfig.vChannelName, nil, mqwrapper.SubscriptionPositionEarliest)
+		if err != nil {
+			return nil, err
+		}
+		log.Info("datanode consume successfully when register to msgDispatcher")
 	}
 	metrics.DataNodeNumConsumers.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Inc()
-	log.Info("datanode AsConsumer", zap.String("physical channel", pchannelName), zap.String("subName", consumeSubName), zap.Int64("collection ID", dmNodeConfig.collectionID))
 
 	name := fmt.Sprintf("dmInputNode-data-%d-%s", dmNodeConfig.collectionID, dmNodeConfig.vChannelName)
-	node := flowgraph.NewInputNode(insertStream, name, dmNodeConfig.maxQueueLength, dmNodeConfig.maxParallelism,
+	node := flowgraph.NewInputNode(input, name, dmNodeConfig.maxQueueLength, dmNodeConfig.maxParallelism,
 		typeutil.DataNodeRole, paramtable.GetNodeID(), dmNodeConfig.collectionID, metrics.AllLabel)
 	return node, nil
 }

@@ -21,14 +21,20 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/util/dependency"
-	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/milvus-io/milvus/internal/mq/msgdispatcher"
+	"github.com/milvus-io/milvus/internal/mq/msgstream"
+	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 func init() {
 	rateCol, _ = newRateCollector()
+	Params.Init()
 }
 
 func TestDataSyncService_DMLFlowGraphs(t *testing.T) {
@@ -40,17 +46,18 @@ func TestDataSyncService_DMLFlowGraphs(t *testing.T) {
 
 	fac := genFactory()
 	assert.NoError(t, err)
+	dispClient := msgdispatcher.NewClient(fac, typeutil.QueryNodeRole, paramtable.GetNodeID())
 
 	tSafe := newTSafeReplica()
-	dataSyncService := newDataSyncService(ctx, replica, tSafe, fac)
+	dataSyncService := newDataSyncService(ctx, replica, tSafe, dispClient, fac)
 	assert.NotNil(t, dataSyncService)
 
 	t.Run("test DMLFlowGraphs", func(t *testing.T) {
-		_, err = dataSyncService.addFlowGraphsForDMLChannels(defaultCollectionID, []Channel{defaultDMLChannel})
+		_, err = dataSyncService.addFlowGraphsForDMLChannels(defaultCollectionID, map[Channel]*msgstream.MsgPosition{defaultDMLChannel: nil})
 		assert.NoError(t, err)
 		assert.Len(t, dataSyncService.dmlChannel2FlowGraph, 1)
 
-		_, err = dataSyncService.addFlowGraphsForDMLChannels(defaultCollectionID, []Channel{defaultDMLChannel})
+		_, err = dataSyncService.addFlowGraphsForDMLChannels(defaultCollectionID, map[Channel]*msgstream.MsgPosition{defaultDMLChannel: nil})
 		assert.NoError(t, err)
 		assert.Len(t, dataSyncService.dmlChannel2FlowGraph, 1)
 
@@ -68,7 +75,7 @@ func TestDataSyncService_DMLFlowGraphs(t *testing.T) {
 		assert.Nil(t, fg)
 		assert.Error(t, err)
 
-		_, err = dataSyncService.addFlowGraphsForDMLChannels(defaultCollectionID, []Channel{defaultDMLChannel})
+		_, err = dataSyncService.addFlowGraphsForDMLChannels(defaultCollectionID, map[Channel]*msgstream.MsgPosition{defaultDMLChannel: nil})
 		assert.NoError(t, err)
 		assert.Len(t, dataSyncService.dmlChannel2FlowGraph, 1)
 
@@ -88,7 +95,7 @@ func TestDataSyncService_DMLFlowGraphs(t *testing.T) {
 	t.Run("test addFlowGraphsForDMLChannels checkReplica Failed", func(t *testing.T) {
 		err = dataSyncService.metaReplica.removeCollection(defaultCollectionID)
 		assert.NoError(t, err)
-		_, err = dataSyncService.addFlowGraphsForDMLChannels(defaultCollectionID, []Channel{defaultDMLChannel})
+		_, err = dataSyncService.addFlowGraphsForDMLChannels(defaultCollectionID, map[Channel]*msgstream.MsgPosition{defaultDMLChannel: nil})
 		assert.Error(t, err)
 		dataSyncService.metaReplica.addCollection(defaultCollectionID, genTestCollectionSchema())
 	})
@@ -103,9 +110,10 @@ func TestDataSyncService_DeltaFlowGraphs(t *testing.T) {
 
 	fac := genFactory()
 	assert.NoError(t, err)
+	dispClient := msgdispatcher.NewClient(fac, typeutil.QueryNodeRole, paramtable.GetNodeID())
 
 	tSafe := newTSafeReplica()
-	dataSyncService := newDataSyncService(ctx, replica, tSafe, fac)
+	dataSyncService := newDataSyncService(ctx, replica, tSafe, dispClient, fac)
 	assert.NotNil(t, dataSyncService)
 
 	t.Run("test DeltaFlowGraphs", func(t *testing.T) {
@@ -160,12 +168,14 @@ func TestDataSyncService_DeltaFlowGraphs(t *testing.T) {
 
 type DataSyncServiceSuite struct {
 	suite.Suite
-	factory   dependency.Factory
-	dsService *dataSyncService
+	dispClient msgdispatcher.Client
+	factory    dependency.Factory
+	dsService  *dataSyncService
 }
 
 func (s *DataSyncServiceSuite) SetupSuite() {
 	s.factory = genFactory()
+	s.dispClient = msgdispatcher.NewClient(s.factory, typeutil.QueryNodeRole, paramtable.GetNodeID())
 }
 
 func (s *DataSyncServiceSuite) SetupTest() {
@@ -176,7 +186,7 @@ func (s *DataSyncServiceSuite) SetupTest() {
 	s.Require().NoError(err)
 
 	tSafe := newTSafeReplica()
-	s.dsService = newDataSyncService(ctx, replica, tSafe, s.factory)
+	s.dsService = newDataSyncService(ctx, replica, tSafe, s.dispClient, s.factory)
 	s.Require().NoError(err)
 }
 

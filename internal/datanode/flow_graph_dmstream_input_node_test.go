@@ -21,12 +21,14 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/util/paramtable"
+	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus/internal/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/stretchr/testify/assert"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 type mockMsgStreamFactory struct {
@@ -93,7 +95,10 @@ func (mtm *mockTtMsgStream) GetLatestMsgID(channel string) (msgstream.MessageID,
 }
 
 func TestNewDmInputNode(t *testing.T) {
-	ctx := context.Background()
-	_, err := newDmInputNode(ctx, new(internalpb.MsgPosition), &nodeConfig{msFactory: &mockMsgStreamFactory{}})
+	client := msgdispatcher.NewClient(&mockMsgStreamFactory{}, typeutil.DataNodeRole, paramtable.GetNodeID())
+	_, err := newDmInputNode(client, new(internalpb.MsgPosition), &nodeConfig{
+		msFactory:    &mockMsgStreamFactory{},
+		vChannelName: "mock_vchannel_0",
+	})
 	assert.Nil(t, err)
 }

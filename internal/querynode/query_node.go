@@ -30,6 +30,7 @@ import "C"
 import (
 	"context"
 	"fmt"
+	"github.com/milvus-io/milvus/internal/mq/msgdispatcher"
 	"os"
 	"path"
 	"runtime"
@@ -106,8 +107,9 @@ type QueryNode struct {
 	etcdCli *clientv3.Client
 	address string
 
-	factory   dependency.Factory
-	scheduler *taskScheduler
+	dispClient msgdispatcher.Client
+	factory    dependency.Factory
+	scheduler  *taskScheduler
 
 	sessionMu sync.Mutex
 	session   *sessionutil.Session
@@ -256,6 +258,9 @@ func (node *QueryNode) Init() error {
 		}
 		log.Info("QueryNode init rateCollector done", zap.Int64("nodeID", paramtable.GetNodeID()))
 
+		node.dispClient = msgdispatcher.NewClient(node.factory, typeutil.QueryNodeRole, paramtable.GetNodeID())
+		log.Info("QueryNode init dispatcher client done", zap.Int64("nodeID", paramtable.GetNodeID()))
+
 		node.vectorStorage, err = node.factory.NewPersistentStorageChunkManager(node.queryNodeLoopCtx)
 		if err != nil {
 			log.Error("QueryNode init vector storage failed", zap.Error(err))
@@ -283,7 +288,7 @@ func (node *QueryNode) Init() error {
 			node.vectorStorage,
 			node.factory)
 
-		node.dataSyncService = newDataSyncService(node.queryNodeLoopCtx, node.metaReplica, node.tSafeReplica, node.factory)
+		node.dataSyncService = newDataSyncService(node.queryNodeLoopCtx, node.metaReplica, node.tSafeReplica, node.dispClient, node.factory)
 
 		node.InitSegcore()
 

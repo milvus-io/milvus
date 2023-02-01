@@ -53,6 +53,7 @@ type TsMsg interface {
 	Unmarshal(MarshalType) (TsMsg, error)
 	Position() *MsgPosition
 	SetPosition(*MsgPosition)
+	VChannel() string
 }
 
 // BaseMsg is a basic structure that contains begin timestamp, end timestamp and the position of msgstream
@@ -62,6 +63,7 @@ type BaseMsg struct {
 	EndTimestamp   Timestamp
 	HashValues     []uint32
 	MsgPosition    *MsgPosition
+	Vchannel       string
 }
 
 // TraceCtx returns the context of opentracing
@@ -97,6 +99,10 @@ func (bm *BaseMsg) Position() *MsgPosition {
 // SetPosition is used to set position of this message in msgstream
 func (bm *BaseMsg) SetPosition(position *MsgPosition) {
 	bm.MsgPosition = position
+}
+
+func (bm *BaseMsg) VChannel() string {
+	return bm.Vchannel
 }
 
 func convertToByteArray(input interface{}) ([]byte, error) {
@@ -170,6 +176,7 @@ func (it *InsertMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 			insertMsg.BeginTimestamp = timestamp
 		}
 	}
+	insertMsg.Vchannel = insertMsg.ShardName
 
 	return insertMsg, nil
 }
@@ -278,6 +285,7 @@ func (it *InsertMsg) IndexMsg(index int) *InsertMsg {
 			Ctx:            it.TraceCtx(),
 			BeginTimestamp: it.BeginTimestamp,
 			EndTimestamp:   it.EndTimestamp,
+			Vchannel:       it.Vchannel,
 			HashValues:     it.HashValues,
 			MsgPosition:    it.MsgPosition,
 		},
@@ -361,7 +369,7 @@ func (dt *DeleteMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 			deleteMsg.BeginTimestamp = timestamp
 		}
 	}
-
+	deleteMsg.Vchannel = deleteRequest.ShardName
 	return deleteMsg, nil
 }
 

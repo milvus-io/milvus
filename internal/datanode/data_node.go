@@ -39,13 +39,13 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
-
 	allocator2 "github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/mq/msgdispatcher"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
@@ -127,7 +127,8 @@ type DataNode struct {
 
 	closer io.Closer
 
-	factory dependency.Factory
+	dispClient msgdispatcher.Client
+	factory    dependency.Factory
 }
 
 // NewDataNode will return a DataNode with abnormal state.
@@ -248,6 +249,9 @@ func (node *DataNode) Init() error {
 			return
 		}
 		log.Info("DataNode server init rateCollector done", zap.Int64("node ID", paramtable.GetNodeID()))
+
+		node.dispClient = msgdispatcher.NewClient(node.factory, typeutil.DataNodeRole, paramtable.GetNodeID())
+		log.Info("DataNode server init dispatcher client done", zap.Int64("node ID", paramtable.GetNodeID()))
 
 		idAllocator, err := allocator2.NewIDAllocator(node.ctx, node.rootCoord, paramtable.GetNodeID())
 		if err != nil {

@@ -27,13 +27,14 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.etcd.io/etcd/server/v3/embed"
 
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/util/dependency"
-	"github.com/milvus-io/milvus/internal/util/paramtable"
-
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 var embedetcdServer *embed.Etcd
@@ -98,10 +99,9 @@ func newQueryNodeMock() *QueryNode {
 	factory := newMessageStreamFactory()
 	svr := NewQueryNode(ctx, factory)
 	tsReplica := newTSafeReplica()
-
-	replica := newCollectionReplica()
-	svr.metaReplica = replica
-	svr.dataSyncService = newDataSyncService(ctx, svr.metaReplica, tsReplica, factory)
+	svr.dispClient = msgdispatcher.NewClient(factory, typeutil.QueryNodeRole, paramtable.GetNodeID())
+	svr.metaReplica = newCollectionReplica()
+	svr.dataSyncService = newDataSyncService(ctx, svr.metaReplica, tsReplica, svr.dispClient, factory)
 	svr.vectorStorage, err = factory.NewPersistentStorageChunkManager(ctx)
 	if err != nil {
 		panic(err)

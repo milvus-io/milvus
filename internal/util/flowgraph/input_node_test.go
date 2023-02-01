@@ -40,7 +40,7 @@ func TestInputNode(t *testing.T) {
 	produceStream.Produce(&msgPack)
 
 	nodeName := "input_node"
-	inputNode := NewInputNode(msgStream, nodeName, 100, 100, "", 0, 0, "")
+	inputNode := NewInputNode(msgStream.Chan(), nodeName, 100, 100, "", 0, 0, "")
 	defer inputNode.Close()
 
 	isInputNode := inputNode.IsInputNode()
@@ -48,9 +48,6 @@ func TestInputNode(t *testing.T) {
 
 	name := inputNode.Name()
 	assert.Equal(t, name, nodeName)
-
-	stream := inputNode.InStream()
-	assert.NotNil(t, stream)
 
 	output := inputNode.Operate(nil)
 	assert.NotNil(t, output)
