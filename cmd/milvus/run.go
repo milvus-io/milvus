@@ -110,7 +110,7 @@ func (c *run) formatFlags(args []string, flags *flag.FlagSet) {
 
 	flags.BoolVar(&c.enableRootCoord, typeutil.RootCoordRole, false, "enable root coordinator")
 	flags.BoolVar(&c.enableQueryCoord, typeutil.QueryCoordRole, false, "enable query coordinator")
-	//flags.BoolVar(&c.enableIndexCoord, typeutil.IndexCoordRole, false, "enable index coordinator")
+	flags.BoolVar(&c.enableIndexCoord, typeutil.IndexCoordRole, false, "enable index coordinator")
 	flags.BoolVar(&c.enableDataCoord, typeutil.DataCoordRole, false, "enable data coordinator")
 
 	flags.BoolVar(&c.enableQueryNode, typeutil.QueryNodeRole, false, "enable query node")
