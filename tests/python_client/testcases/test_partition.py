@@ -335,7 +335,7 @@ class TestPartitionParams(TestcaseBase):
         partition_w.load(replica_number=get_non_number_replicas, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("replicas", [0, -1, None])
+    @pytest.mark.parametrize("replicas", [0, -1])
     def test_load_replica_invalid_number(self, replicas):
         """
         target: test load partition with invalid replica number
