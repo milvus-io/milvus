@@ -170,7 +170,7 @@ LocalChunkManager::CreateDir(const std::string& dir) {
     boost::filesystem::path dirPath(dir);
     auto create_success = boost::filesystem::create_directories(dirPath);
     if (!create_success) {
-        CreateFileException("create dir failed" + dir);
+        throw CreateFileException("create dir failed" + dir);
     }
 }
 
