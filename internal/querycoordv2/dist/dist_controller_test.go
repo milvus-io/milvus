@@ -65,7 +65,7 @@ func (suite *DistControllerTestSuite) SetupTest() {
 	// meta
 	store := meta.NewMetaStore(suite.kv)
 	idAllocator := RandomIncrementIDAllocator()
-	suite.meta = meta.NewMeta(idAllocator, store)
+	suite.meta = meta.NewMeta(idAllocator, store, session.NewNodeManager())
 
 	suite.mockCluster = session.NewMockCluster(suite.T())
 	nodeManager := session.NewNodeManager()

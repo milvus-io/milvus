@@ -32,7 +32,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type MockQueryCoord struct {
 	states           *milvuspb.ComponentStates
 	status           *commonpb.Status
@@ -158,7 +158,35 @@ func (m *MockQueryCoord) CheckHealth(ctx context.Context, req *milvuspb.CheckHea
 	}, m.err
 }
 
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+func (m *MockQueryCoord) CreateResourceGroup(ctx context.Context, req *milvuspb.CreateResourceGroupRequest) (*commonpb.Status, error) {
+	return m.status, nil
+}
+
+func (m *MockQueryCoord) DropResourceGroup(ctx context.Context, req *milvuspb.DropResourceGroupRequest) (*commonpb.Status, error) {
+	return m.status, nil
+}
+
+func (m *MockQueryCoord) TransferNode(ctx context.Context, req *milvuspb.TransferNodeRequest) (*commonpb.Status, error) {
+	return m.status, nil
+}
+
+func (m *MockQueryCoord) TransferReplica(ctx context.Context, req *querypb.TransferReplicaRequest) (*commonpb.Status, error) {
+	return m.status, nil
+}
+
+func (m *MockQueryCoord) ListResourceGroups(ctx context.Context, req *milvuspb.ListResourceGroupsRequest) (*milvuspb.ListResourceGroupsResponse, error) {
+	return &milvuspb.ListResourceGroupsResponse{
+		Status: m.status,
+	}, nil
+}
+
+func (m *MockQueryCoord) DescribeResourceGroup(ctx context.Context, req *querypb.DescribeResourceGroupRequest) (*querypb.DescribeResourceGroupResponse, error) {
+	return &querypb.DescribeResourceGroupResponse{
+		Status: m.status,
+	}, nil
+}
+
+// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type MockRootCoord struct {
 	types.RootCoord
 	initErr  error
@@ -191,7 +219,7 @@ func (m *MockRootCoord) GetComponentStates(ctx context.Context) (*milvuspb.Compo
 	}, nil
 }
 
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type MockDataCoord struct {
 	types.DataCoord
 	initErr  error
@@ -224,7 +252,7 @@ func (m *MockDataCoord) GetComponentStates(ctx context.Context) (*milvuspb.Compo
 	}, nil
 }
 
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type MockIndexCoord struct {
 	types.IndexCoord
 	initErr  error
@@ -257,7 +285,7 @@ func (m *MockIndexCoord) GetComponentStates(ctx context.Context) (*milvuspb.Comp
 	}, nil
 }
 
-///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 func Test_NewServer(t *testing.T) {
 	ctx := context.Background()
 	server, err := NewServer(ctx, nil)
@@ -397,6 +425,43 @@ func Test_NewServer(t *testing.T) {
 		ret, err := server.CheckHealth(ctx, nil)
 		assert.Nil(t, err)
 		assert.Equal(t, true, ret.IsHealthy)
+	})
+
+	t.Run("CreateResourceGroup", func(t *testing.T) {
+		resp, err := server.CreateResourceGroup(ctx, nil)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	t.Run("DropResourceGroup", func(t *testing.T) {
+		resp, err := server.DropResourceGroup(ctx, nil)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	t.Run("TransferNode", func(t *testing.T) {
+		resp, err := server.TransferNode(ctx, nil)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	t.Run("TransferReplica", func(t *testing.T) {
+		resp, err := server.TransferReplica(ctx, nil)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+	})
+
+	t.Run("ListResourceGroups", func(t *testing.T) {
+		req := &milvuspb.ListResourceGroupsRequest{}
+		resp, err := server.ListResourceGroups(ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	t.Run("DescribeResourceGroup", func(t *testing.T) {
+		resp, err := server.DescribeResourceGroup(ctx, nil)
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
 	err = server.Stop()

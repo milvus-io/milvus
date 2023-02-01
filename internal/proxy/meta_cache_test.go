@@ -127,7 +127,7 @@ func (m *MockRootCoordClientInterface) DescribeCollection(ctx context.Context, i
 		return nil, errors.New("mocked error")
 	}
 	m.IncAccessCount()
-	if in.CollectionName == "collection1" {
+	if in.CollectionName == "collection1" || in.CollectionID == 1 {
 		return &milvuspb.DescribeCollectionResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_Success,
@@ -135,10 +135,11 @@ func (m *MockRootCoordClientInterface) DescribeCollection(ctx context.Context, i
 			CollectionID: typeutil.UniqueID(1),
 			Schema: &schemapb.CollectionSchema{
 				AutoID: true,
+				Name:   "collection1",
 			},
 		}, nil
 	}
-	if in.CollectionName == "collection2" {
+	if in.CollectionName == "collection2" || in.CollectionID == 2 {
 		return &milvuspb.DescribeCollectionResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_Success,
@@ -146,6 +147,7 @@ func (m *MockRootCoordClientInterface) DescribeCollection(ctx context.Context, i
 			CollectionID: typeutil.UniqueID(2),
 			Schema: &schemapb.CollectionSchema{
 				AutoID: true,
+				Name:   "collection2",
 			},
 		}, nil
 	}
@@ -230,7 +232,7 @@ func (m *MockQueryCoordClientInterface) ShowCollections(ctx context.Context, req
 	return rsp, nil
 }
 
-//Simulate the cache path and the
+// Simulate the cache path and the
 func TestMetaCache_GetCollection(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockRootCoordClientInterface{}
@@ -251,6 +253,7 @@ func TestMetaCache_GetCollection(t *testing.T) {
 	assert.Equal(t, schema, &schemapb.CollectionSchema{
 		AutoID: true,
 		Fields: []*schemapb.FieldSchema{},
+		Name:   "collection1",
 	})
 	id, err = globalMetaCache.GetCollectionID(ctx, "collection2")
 	assert.Equal(t, rootCoord.GetAccessCount(), 2)
@@ -262,6 +265,7 @@ func TestMetaCache_GetCollection(t *testing.T) {
 	assert.Equal(t, schema, &schemapb.CollectionSchema{
 		AutoID: true,
 		Fields: []*schemapb.FieldSchema{},
+		Name:   "collection2",
 	})
 
 	// test to get from cache, this should trigger root request
@@ -275,8 +279,59 @@ func TestMetaCache_GetCollection(t *testing.T) {
 	assert.Equal(t, schema, &schemapb.CollectionSchema{
 		AutoID: true,
 		Fields: []*schemapb.FieldSchema{},
+		Name:   "collection1",
 	})
 
+}
+
+func TestMetaCache_GetCollectionName(t *testing.T) {
+	ctx := context.Background()
+	rootCoord := &MockRootCoordClientInterface{}
+	queryCoord := &MockQueryCoordClientInterface{}
+	mgr := newShardClientMgr()
+	err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
+	assert.Nil(t, err)
+
+	collection, err := globalMetaCache.GetCollectionName(ctx, 1)
+	assert.Nil(t, err)
+	assert.Equal(t, collection, "collection1")
+	assert.Equal(t, rootCoord.GetAccessCount(), 1)
+
+	// should'nt be accessed to remote root coord.
+	schema, err := globalMetaCache.GetCollectionSchema(ctx, "collection1")
+	assert.Equal(t, rootCoord.GetAccessCount(), 1)
+	assert.Nil(t, err)
+	assert.Equal(t, schema, &schemapb.CollectionSchema{
+		AutoID: true,
+		Fields: []*schemapb.FieldSchema{},
+		Name:   "collection1",
+	})
+	collection, err = globalMetaCache.GetCollectionName(ctx, 1)
+	assert.Equal(t, rootCoord.GetAccessCount(), 1)
+	assert.Nil(t, err)
+	assert.Equal(t, collection, "collection1")
+	schema, err = globalMetaCache.GetCollectionSchema(ctx, "collection2")
+	assert.Equal(t, rootCoord.GetAccessCount(), 2)
+	assert.Nil(t, err)
+	assert.Equal(t, schema, &schemapb.CollectionSchema{
+		AutoID: true,
+		Fields: []*schemapb.FieldSchema{},
+		Name:   "collection2",
+	})
+
+	// test to get from cache, this should trigger root request
+	collection, err = globalMetaCache.GetCollectionName(ctx, 1)
+	assert.Equal(t, rootCoord.GetAccessCount(), 2)
+	assert.Nil(t, err)
+	assert.Equal(t, collection, "collection1")
+	schema, err = globalMetaCache.GetCollectionSchema(ctx, "collection1")
+	assert.Equal(t, rootCoord.GetAccessCount(), 2)
+	assert.Nil(t, err)
+	assert.Equal(t, schema, &schemapb.CollectionSchema{
+		AutoID: true,
+		Fields: []*schemapb.FieldSchema{},
+		Name:   "collection1",
+	})
 }
 
 func TestMetaCache_GetCollectionFailure(t *testing.T) {
@@ -299,6 +354,7 @@ func TestMetaCache_GetCollectionFailure(t *testing.T) {
 	assert.Equal(t, schema, &schemapb.CollectionSchema{
 		AutoID: true,
 		Fields: []*schemapb.FieldSchema{},
+		Name:   "collection1",
 	})
 
 	rootCoord.Error = true
@@ -307,6 +363,7 @@ func TestMetaCache_GetCollectionFailure(t *testing.T) {
 	assert.Equal(t, schema, &schemapb.CollectionSchema{
 		AutoID: true,
 		Fields: []*schemapb.FieldSchema{},
+		Name:   "collection1",
 	})
 }
 
@@ -367,6 +424,7 @@ func TestMetaCache_ConcurrentTest1(t *testing.T) {
 			assert.Equal(t, schema, &schemapb.CollectionSchema{
 				AutoID: true,
 				Fields: []*schemapb.FieldSchema{},
+				Name:   "collection1",
 			})
 			time.Sleep(10 * time.Millisecond)
 		}
