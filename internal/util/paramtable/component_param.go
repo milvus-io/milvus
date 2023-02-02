@@ -1463,8 +1463,8 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 
 	p.SegmentMaxBinlogFileNumber = ParamItem{
 		Key:          "dataCoord.segment.maxBinlogFileNumber",
-		Version:      "2.0.0",
-		DefaultValue: "256",
+		Version:      "2.2.0",
+		DefaultValue: "16",
 	}
 	p.SegmentMaxBinlogFileNumber.Init(base.mgr)
 
