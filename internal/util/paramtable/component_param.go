@@ -1399,10 +1399,11 @@ type dataCoordConfig struct {
 	GCDropTolerance         ParamItem `refreshable:"false"`
 	EnableActiveStandby     ParamItem `refreshable:"false"`
 
-	BindIndexNodeMode ParamItem `refreshable:"false"`
-	IndexNodeAddress  ParamItem `refreshable:"false"`
-	WithCredential    ParamItem `refreshable:"false"`
-	IndexNodeID       ParamItem `refreshable:"false"`
+	BindIndexNodeMode          ParamItem `refreshable:"false"`
+	IndexNodeAddress           ParamItem `refreshable:"false"`
+	WithCredential             ParamItem `refreshable:"false"`
+	IndexNodeID                ParamItem `refreshable:"false"`
+	IndexTaskSchedulerInterval ParamItem `refreshable:"false"`
 
 	MinSegmentNumRowsToEnableIndex ParamItem `refreshable:"true"`
 }
@@ -1639,6 +1640,12 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 		DefaultValue: "0",
 	}
 	p.IndexNodeID.Init(base.mgr)
+	p.IndexTaskSchedulerInterval = ParamItem{
+		Key:          "indexCoord.scheduler.interval",
+		Version:      "2.0.0",
+		DefaultValue: "1000",
+	}
+	p.IndexTaskSchedulerInterval.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
