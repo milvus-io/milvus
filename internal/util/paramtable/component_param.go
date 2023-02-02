@@ -1278,6 +1278,7 @@ type dataCoordConfig struct {
 	SegmentMaxLifetime             time.Duration
 	SegmentMaxIdleTime             time.Duration
 	SegmentMinSizeFromIdleToSealed float64
+	SegmentMaxBinlogFileNumber     int
 
 	CreatedTime time.Time
 	UpdatedTime time.Time
@@ -1319,6 +1320,7 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	p.initSegmentMaxLifetime()
 	p.initSegmentMaxIdleTime()
 	p.initSegmentMinSizeFromIdleToSealed()
+	p.initSegmentMaxBinlogFileNumber()
 
 	p.initEnableCompaction()
 	p.initEnableAutoCompaction()
@@ -1373,6 +1375,11 @@ func (p *dataCoordConfig) initSegmentMaxIdleTime() {
 func (p *dataCoordConfig) initSegmentMinSizeFromIdleToSealed() {
 	p.SegmentMinSizeFromIdleToSealed = p.Base.ParseFloatWithDefault("dataCoord.segment.minSizeFromIdleToSealed", 16.0)
 	log.Info("init segment min size from idle to sealed", zap.Float64("value", p.SegmentMinSizeFromIdleToSealed))
+}
+
+func (p *dataCoordConfig) initSegmentMaxBinlogFileNumber() {
+	p.SegmentMaxBinlogFileNumber = p.Base.ParseIntWithDefault("dataCoord.segment.maxBinlogFileNumber", 16)
+	log.Info("init segment max binlog file to sealed", zap.Int("value", p.SegmentMaxBinlogFileNumber))
 }
 
 func (p *dataCoordConfig) initChannelWatchPrefix() {
