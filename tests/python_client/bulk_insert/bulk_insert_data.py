@@ -5,7 +5,7 @@ import pathlib
 import numpy as np
 import random
 from sklearn import preprocessing
-from common.common_func import gen_unique_str
+from common.common_func import gen_unique_unicode_str
 from minio_comm import copy_files_to_minio
 from utils.util_log import test_log as log
 
@@ -65,7 +65,7 @@ def gen_float_vectors(nb, dim):
 
 
 def gen_str_invalid_vectors(nb, dim):
-    vectors = [[str(gen_unique_str()) for _ in range(dim)] for _ in range(nb)]
+    vectors = [[str(gen_unique_unicode_str()) for _ in range(dim)] for _ in range(nb)]
     return vectors
 
 
@@ -101,7 +101,7 @@ def gen_row_based_json_file(row_file, str_pk, data_fields, float_vect,
                 data_field = data_fields[j]
                 if data_field == DataField.pk_field:
                     if str_pk:
-                        f.write('"uid":"' + str(gen_unique_str()) + '"')
+                        f.write('"uid":"' + str(gen_unique_unicode_str()) + '"')
                     else:
                         if err_type == DataErrorType.float_on_int_pk:
                             f.write('"uid":' + str(i + start_uid + random.random()) + '')
@@ -117,11 +117,11 @@ def gen_row_based_json_file(row_file, str_pk, data_fields, float_vect,
                     if err_type == DataErrorType.int_on_float_scalar:
                         f.write('"float_scalar":' + str(random.randint(-999999, 9999999)) + '')
                     elif err_type == DataErrorType.str_on_float_scalar:
-                        f.write('"float_scalar":"' + str(gen_unique_str()) + '"')
+                        f.write('"float_scalar":"' + str(gen_unique_unicode_str()) + '"')
                     else:
                         f.write('"float_scalar":' + str(random.random()) + '')
                 if data_field == DataField.string_field:
-                    f.write('"string_scalar":"' + str(gen_unique_str()) + '"')
+                    f.write('"string_scalar":"' + str(gen_unique_unicode_str()) + '"')
                 if data_field == DataField.bool_field:
                     if err_type == DataErrorType.typo_on_bool:
                         f.write('"bool_scalar":' + str(random.choice(["True", "False", "TRUE", "FALSE", "0", "1"])) + '')
@@ -161,7 +161,7 @@ def gen_column_base_json_file(col_file, str_pk, data_fields, float_vect,
                 data_field = data_fields[j]
                 if data_field == DataField.pk_field:
                     if str_pk:
-                        f.write('"uid":["' + ',"'.join(str(gen_unique_str()) + '"' for i in range(rows)) + ']')
+                        f.write('"uid":["' + ',"'.join(str(gen_unique_unicode_str()) + '"' for i in range(rows)) + ']')
                         f.write("\n")
                     else:
                         if err_type == DataErrorType.float_on_int_pk:
@@ -184,14 +184,14 @@ def gen_column_base_json_file(col_file, str_pk, data_fields, float_vect,
                             str(random.randint(-999999, 9999999)) for i in range(rows)) + "]")
                     elif err_type == DataErrorType.str_on_float_scalar:
                         f.write('"float_scalar":["' + ',"'.join(str(
-                            gen_unique_str()) + '"' for i in range(rows)) + ']')
+                            gen_unique_unicode_str()) + '"' for i in range(rows)) + ']')
                     else:
                         f.write('"float_scalar":[' + ",".join(
                             str(random.random()) for i in range(rows)) + "]")
                     f.write("\n")
                 if data_field == DataField.string_field:
                     f.write('"string_scalar":["' + ',"'.join(str(
-                        gen_unique_str()) + '"' for i in range(rows)) + ']')
+                        gen_unique_unicode_str()) + '"' for i in range(rows)) + ']')
                     f.write("\n")
                 if data_field == DataField.bool_field:
                     if err_type == DataErrorType.typo_on_bool:
@@ -270,7 +270,22 @@ def gen_string_in_numpy_file(dir, data_field, rows, start=0, force=False):
         # non vector columns
         data = []
         if rows > 0:
-            data = [gen_unique_str(str(i)) for i in range(start, rows+start)]
+            data = [gen_unique_unicode_str(str(i)) for i in range(start, rows+start)]
+        arr = np.array(data)
+        # print(f"file_name: {file_name} data type: {arr.dtype}")
+        log.info(f"file_name: {file_name} data type: {arr.dtype} data shape: {arr.shape}")
+        np.save(file, arr)
+    return file_name
+
+
+def gen_bool_in_numpy_file(dir, data_field, rows, start=0, force=False):
+    file_name = f"{data_field}.npy"
+    file = f"{dir}/{file_name}"
+    if not os.path.exists(file) or force:
+        # non vector columns
+        data = []
+        if rows > 0:
+            data = [random.choice([True, False]) for i in range(start, rows+start)]
         arr = np.array(data)
         # print(f"file_name: {file_name} data type: {arr.dtype}")
         log.info(f"file_name: {file_name} data type: {arr.dtype} data shape: {arr.shape}")
@@ -380,6 +395,8 @@ def gen_npy_files(float_vector, rows, dim, data_fields, file_nums=1, err_type=""
                                                       rows=rows, dim=dim, force=force)
             elif data_field == DataField.string_field:  # string field for numpy not supported yet at 2022-10-17
                 file_name = gen_string_in_numpy_file(dir=data_source, data_field=data_field, rows=rows, force=force)
+            elif data_field == DataField.bool_field:
+                file_name = gen_bool_in_numpy_file(dir=data_source, data_field=data_field, rows=rows, force=force)
             else:
                 file_name = gen_int_or_float_in_numpy_file(dir=data_source, data_field=data_field,
                                                            rows=rows, force=force)

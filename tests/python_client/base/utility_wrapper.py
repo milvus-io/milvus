@@ -92,7 +92,7 @@ class ApiUtilityWrapper:
                  unknown, "unknown")
 
     def wait_for_bulk_insert_tasks_completed(self, task_ids, target_state=BulkInsertState.ImportCompleted,
-                                           timeout=None, using="default", **kwargs):
+                                             timeout=None, using="default", **kwargs):
         start = time.time()
         tasks_state_distribution = {
             "success": set(),
@@ -181,6 +181,24 @@ class ApiUtilityWrapper:
         for task in all_tasks:
             if task.task_id in pending_task_ids:
                 log.info(f"task {task.task_id} state transfer from pending to {task.state_name}")
+
+    def wait_index_build_completed(self, collection_name, timeout=None):
+        start = time.time()
+        if timeout is not None:
+            task_timeout = timeout
+        else:
+            task_timeout = TIMEOUT
+        end = time.time()
+        while end-start <= task_timeout:
+            time.sleep(0.5)
+            index_states, _ = self.index_building_progress(collection_name)
+            log.debug(f"index states: {index_states}")
+            if index_states["total_rows"] == index_states["indexed_rows"]:
+                log.info(f"index build completed")
+                return True
+            end = time.time()
+        log.info(f"index build timeout")
+        return False
 
     def get_query_segment_info(self, collection_name, timeout=None, using="default", check_task=None, check_items=None):
         timeout = TIMEOUT if timeout is None else timeout
