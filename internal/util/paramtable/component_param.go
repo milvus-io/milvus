@@ -1621,7 +1621,8 @@ type indexCoordConfig struct {
 
 	MinSegmentNumRowsToEnableIndex int64
 
-	GCInterval time.Duration
+	SchedulerInterval time.Duration
+	GCInterval        time.Duration
 
 	CreatedTime time.Time
 	UpdatedTime time.Time
@@ -1633,6 +1634,7 @@ func (p *indexCoordConfig) init(base *BaseTable) {
 	p.Base = base
 
 	p.initGCInterval()
+	p.initSchedulerInterval()
 	p.initMinSegmentNumRowsToEnableIndex()
 	p.initBindIndexNodeMode()
 	p.initIndexNodeAddress()
@@ -1648,6 +1650,10 @@ func (p *indexCoordConfig) initMinSegmentNumRowsToEnableIndex() {
 
 func (p *indexCoordConfig) initGCInterval() {
 	p.GCInterval = time.Duration(p.Base.ParseInt64WithDefault("indexCoord.gc.interval", 60*10)) * time.Second
+}
+
+func (p *indexCoordConfig) initSchedulerInterval() {
+	p.SchedulerInterval = time.Duration(p.Base.ParseInt64WithDefault("indexCoord.scheduler.interval", 1000)) * time.Millisecond
 }
 
 func (p *indexCoordConfig) initBindIndexNodeMode() {
