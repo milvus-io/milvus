@@ -116,13 +116,25 @@ func getSegmentCapacityPolicy(sizeFactor float64) segmentSealPolicy {
 	}
 }
 
-// getLastExpiresLifetimePolicy get segmentSealPolicy with lifetime limit compares ts - segment.lastExpireTime
+// sealByMaxBinlogSizePolicy get segmentSealPolicy with lifetime limit compares ts - segment.lastExpireTime
 func sealByLifetimePolicy(lifetime time.Duration) segmentSealPolicy {
 	return func(segment *SegmentInfo, ts Timestamp) bool {
 		pts, _ := tsoutil.ParseTS(ts)
 		epts, _ := tsoutil.ParseTS(segment.GetLastExpireTime())
 		d := pts.Sub(epts)
 		return d >= lifetime
+	}
+}
+
+// sealByMaxBinlogSizePolicy seal segment if binlog file number of segment exceed configured max number
+func sealByMaxBinlogFileNumberPolicy(maxBinlogFileNumber int) segmentSealPolicy {
+	return func(segment *SegmentInfo, ts Timestamp) bool {
+		logFileCounter := 0
+		for _, fieldBinlog := range segment.Binlogs {
+			logFileCounter += len(fieldBinlog.GetBinlogs())
+		}
+
+		return logFileCounter >= maxBinlogFileNumber
 	}
 }
 

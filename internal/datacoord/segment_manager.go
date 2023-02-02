@@ -184,6 +184,7 @@ func defaultAllocatePolicy() AllocatePolicy {
 
 func defaultSegmentSealPolicy() []segmentSealPolicy {
 	return []segmentSealPolicy{
+		sealByMaxBinlogFileNumberPolicy(Params.DataCoordCfg.SegmentMaxBinlogFileNumber),
 		sealByLifetimePolicy(Params.DataCoordCfg.SegmentMaxLifetime),
 		getSegmentCapacityPolicy(Params.DataCoordCfg.SegmentSealProportion),
 		sealLongTimeIdlePolicy(Params.DataCoordCfg.SegmentMaxIdleTime, Params.DataCoordCfg.SegmentMinSizeFromIdleToSealed, Params.DataCoordCfg.SegmentMaxSize),
