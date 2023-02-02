@@ -65,7 +65,8 @@ func AvgAssignRegisterPolicy(store ROChannelStore, nodeID int64) ChannelOpSet {
 	for _, info := range avaNodes {
 		channelNum += len(info.Channels)
 	}
-	chPerNode := channelNum / (len(store.GetNodes()) + 1)
+	// store already add the new node
+	chPerNode := channelNum / len(store.GetNodes())
 	if chPerNode == 0 {
 		return nil
 	}
