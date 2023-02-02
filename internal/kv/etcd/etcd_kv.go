@@ -434,6 +434,9 @@ func (kv *EtcdKV) MultiSave(kvs map[string]string) error {
 
 	CheckTnxStringValueSizeAndWarn(kvs)
 	_, err := kv.client.Txn(ctx).If().Then(ops...).Commit()
+	if err != nil {
+		log.Warn("Etcd MultiSave error", zap.Any("kvs", kvs), zap.Int("len", len(kvs)), zap.Error(err))
+	}
 	CheckElapseAndWarn(start, "Slow etcd operation multi save", zap.Strings("keys", keys))
 	return err
 }
@@ -453,6 +456,9 @@ func (kv *EtcdKV) MultiSaveBytes(kvs map[string][]byte) error {
 
 	CheckTnxBytesValueSizeAndWarn(kvs)
 	_, err := kv.client.Txn(ctx).If().Then(ops...).Commit()
+	if err != nil {
+		log.Warn("Etcd MultiSaveBytes err", zap.Any("kvs", kvs), zap.Int("len", len(kvs)), zap.Error(err))
+	}
 	CheckElapseAndWarn(start, "Slow etcd operation multi save", zap.Strings("keys", keys))
 	return err
 }
@@ -493,6 +499,9 @@ func (kv *EtcdKV) MultiRemove(keys []string) error {
 	defer cancel()
 
 	_, err := kv.client.Txn(ctx).If().Then(ops...).Commit()
+	if err != nil {
+		log.Warn("Etcd MultiRemove error", zap.Strings("keys", keys), zap.Int("len", len(keys)), zap.Error(err))
+	}
 	CheckElapseAndWarn(start, "Slow etcd operation multi remove", zap.Strings("keys", keys))
 	return err
 }
@@ -515,6 +524,14 @@ func (kv *EtcdKV) MultiSaveAndRemove(saves map[string]string, removals []string)
 	defer cancel()
 
 	_, err := kv.client.Txn(ctx).If().Then(ops...).Commit()
+	if err != nil {
+		log.Warn("Etcd MultiSaveAndRemove error",
+			zap.Any("saves", saves),
+			zap.Strings("removes", removals),
+			zap.Int("saveLength", len(saves)),
+			zap.Int("removeLength", len(removals)),
+			zap.Error(err))
+	}
 	CheckElapseAndWarn(start, "Slow etcd operation multi save and remove", zap.Strings("keys", keys))
 	return err
 }
@@ -537,6 +554,14 @@ func (kv *EtcdKV) MultiSaveBytesAndRemove(saves map[string][]byte, removals []st
 	defer cancel()
 
 	_, err := kv.client.Txn(ctx).If().Then(ops...).Commit()
+	if err != nil {
+		log.Warn("Etcd MultiSaveBytesAndRemove error",
+			zap.Any("saves", saves),
+			zap.Strings("removes", removals),
+			zap.Int("saveLength", len(saves)),
+			zap.Int("removeLength", len(removals)),
+			zap.Error(err))
+	}
 	CheckElapseAndWarn(start, "Slow etcd operation multi save and remove", zap.Strings("keys", keys))
 	return err
 }
@@ -580,6 +605,9 @@ func (kv *EtcdKV) MultiRemoveWithPrefix(keys []string) error {
 	defer cancel()
 
 	_, err := kv.client.Txn(ctx).If().Then(ops...).Commit()
+	if err != nil {
+		log.Warn("Etcd MultiRemoveWithPrefix error", zap.Strings("keys", keys), zap.Int("len", len(keys)), zap.Error(err))
+	}
 	CheckElapseAndWarn(start, "Slow etcd operation multi remove with prefix", zap.Strings("keys", keys))
 	return err
 }
@@ -602,6 +630,14 @@ func (kv *EtcdKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals
 	defer cancel()
 
 	_, err := kv.client.Txn(ctx).If().Then(ops...).Commit()
+	if err != nil {
+		log.Warn("Etcd MultiSaveAndRemoveWithPrefix error",
+			zap.Any("saves", saves),
+			zap.Strings("removes", removals),
+			zap.Int("saveLength", len(saves)),
+			zap.Int("removeLength", len(removals)),
+			zap.Error(err))
+	}
 	CheckElapseAndWarn(start, "Slow etcd operation multi save and move with prefix", zap.Strings("keys", keys))
 	return err
 }
@@ -624,6 +660,14 @@ func (kv *EtcdKV) MultiSaveBytesAndRemoveWithPrefix(saves map[string][]byte, rem
 	defer cancel()
 
 	_, err := kv.client.Txn(ctx).If().Then(ops...).Commit()
+	if err != nil {
+		log.Warn("Etcd MultiSaveBytesAndRemoveWithPrefix error",
+			zap.Any("saves", saves),
+			zap.Strings("removes", removals),
+			zap.Int("saveLength", len(saves)),
+			zap.Int("removeLength", len(removals)),
+			zap.Error(err))
+	}
 	CheckElapseAndWarn(start, "Slow etcd operation multi save and move with prefix", zap.Strings("keys", keys))
 	return err
 }
