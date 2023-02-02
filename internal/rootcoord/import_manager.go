@@ -731,7 +731,6 @@ func (m *importManager) getTaskState(tID int64) *milvuspb.GetImportStateResponse
 		},
 		Infos: make([]*commonpb.KeyValuePair, 0),
 	}
-	log.Debug("getting import task state", zap.Int64("task ID", tID))
 	// (1) Search in pending tasks list.
 	found := false
 	m.pendingLock.Lock()
@@ -771,6 +770,7 @@ func (m *importManager) getTaskState(tID int64) *milvuspb.GetImportStateResponse
 			zap.Error(err))
 	}
 	if found {
+		log.Info("getting import task state", zap.Int64("task ID", tID), zap.Any("state", resp.State), zap.Int64s("segment", resp.SegmentIds))
 		return resp
 	}
 	log.Debug("get import task state failed", zap.Int64("taskID", tID))
