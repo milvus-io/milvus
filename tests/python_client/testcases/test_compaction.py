@@ -297,6 +297,52 @@ class TestCompactionParams(TestcaseBase):
         collection_w.load()
         collection_w.query(expr, check_items=CheckTasks.check_query_empty)
 
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_compact_after_delete(self):
+        """
+        target: test delete and then compact
+        method: 1. create a collection and insert data
+                2. delete all data and compact
+                3. load query and release
+        expected: can't find the deleted data
+        """
+        nb = 50000
+        collection_w = self.init_collection_wrap(name=cf.gen_unique_str(prefix))
+        df = cf.gen_default_dataframe_data(nb=nb)
+        res, _ = collection_w.insert(df)
+        assert collection_w.num_entities == nb
+
+        expr = f'{ct.default_int64_field_name} in {res.primary_keys}'
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
+        collection_w.delete(expr)
+        assert collection_w.num_entities == nb
+        collection_w.compact()
+        collection_w.wait_for_compaction_completed()
+        # collection_w.get_compaction_plans(check_task=CheckTasks.check_delete_compact)
+
+        collection_w.load()
+        res = collection_w.query(expr)[0]
+        assert len(res) == 0
+        collection_w.release()
+
+        sleep(30)
+        collection_w.load()
+        res = collection_w.query(expr)[0]
+        assert len(res) == 0
+        collection_w.release()
+
+        sleep(40)
+        collection_w.load()
+        res = collection_w.query(expr)[0]
+        assert len(res) == 0
+        collection_w.release()
+
+        sleep(60)
+        collection_w.load()
+        res = collection_w.query(expr)[0]
+        assert len(res) == 0
+        collection_w.release()
+
     @pytest.mark.skip(reason="TODO")
     @pytest.mark.tags(CaseLabel.L2)
     def test_compact_delete_max_delete_size(self):
