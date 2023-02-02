@@ -228,6 +228,8 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 		paramtable.Init()
 	}
 
+	management.ServeHTTP()
+
 	var rc *components.RootCoord
 	var wg sync.WaitGroup
 	if mr.EnableRootCoord {
@@ -298,7 +300,6 @@ func (mr *MilvusRoles) Run(local bool, alias string) {
 	mr.setupLogger()
 	tracer.Init()
 	metrics.Register(Registry)
-	management.ServeHTTP()
 
 	paramtable.SetCreateTime(time.Now())
 	paramtable.SetUpdateTime(time.Now())
