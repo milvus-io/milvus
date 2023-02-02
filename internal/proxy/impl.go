@@ -383,7 +383,8 @@ func (node *Proxy) LoadCollection(ctx context.Context, request *milvuspb.LoadCol
 	log := log.Ctx(ctx).With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
-		zap.String("collection", request.CollectionName))
+		zap.String("collection", request.CollectionName),
+		zap.Bool("refreshMode", request.Refresh))
 
 	log.Debug("LoadCollection received")
 
@@ -1129,7 +1130,8 @@ func (node *Proxy) LoadPartitions(ctx context.Context, request *milvuspb.LoadPar
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
-		zap.Any("partitions", request.PartitionNames))
+		zap.Strings("partitions", request.PartitionNames),
+		zap.Bool("refreshMode", request.Refresh))
 
 	log.Debug(rpcReceived(method))
 

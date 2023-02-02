@@ -213,6 +213,7 @@ func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 		zap.Any("schema", req.Schema),
 		zap.Int32("replicaNumber", req.ReplicaNumber),
 		zap.Int64s("fieldIndexes", lo.Values(req.GetFieldIndexID())),
+		zap.Bool("refreshMode", req.GetRefresh()),
 	)
 	metrics.QueryCoordLoadCount.WithLabelValues(metrics.TotalLabel).Inc()
 
@@ -301,6 +302,7 @@ func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitions
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.Int32("replicaNumber", req.GetReplicaNumber()),
 		zap.Strings("resourceGroups", req.GetResourceGroups()),
+		zap.Bool("refreshMode", req.GetRefresh()),
 	)
 
 	log.Info("received load partitions request",
