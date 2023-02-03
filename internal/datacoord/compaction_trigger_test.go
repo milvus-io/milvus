@@ -179,6 +179,12 @@ func Test_compactionTrigger_force(t *testing.T) {
 									{
 										FieldID:  vecFieldID,
 										DataType: schemapb.DataType_FloatVector,
+										TypeParams: []*commonpb.KeyValuePair{
+											{
+												Key:   "dim",
+												Value: "128",
+											},
+										},
 									},
 								},
 							},
@@ -275,6 +281,12 @@ func Test_compactionTrigger_force(t *testing.T) {
 									{
 										FieldID:  vecFieldID,
 										DataType: schemapb.DataType_FloatVector,
+										TypeParams: []*commonpb.KeyValuePair{
+											{
+												Key:   "dim",
+												Value: "128",
+											},
+										},
 									},
 								},
 							},
@@ -344,14 +356,17 @@ func Test_compactionTrigger_force(t *testing.T) {
 			indexCoord := newMockIndexCoord()
 
 			tr := &compactionTrigger{
-				meta:              tt.fields.meta,
-				handler:           newMockHandlerWithMeta(tt.fields.meta),
-				allocator:         tt.fields.allocator,
-				signals:           tt.fields.signals,
-				compactionHandler: tt.fields.compactionHandler,
-				globalTrigger:     tt.fields.globalTrigger,
-				segRefer:          tt.fields.segRefer,
-				indexCoord:        indexCoord,
+				meta:                         tt.fields.meta,
+				handler:                      newMockHandlerWithMeta(tt.fields.meta),
+				allocator:                    tt.fields.allocator,
+				signals:                      tt.fields.signals,
+				compactionHandler:            tt.fields.compactionHandler,
+				globalTrigger:                tt.fields.globalTrigger,
+				segRefer:                     tt.fields.segRefer,
+				indexCoord:                   indexCoord,
+				estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
+				estimateNonDiskSegmentPolicy: calBySchemaPolicy,
+				testingOnly:                  true,
 			}
 			_, err := tr.forceTriggerCompaction(tt.collectionID)
 			assert.Equal(t, tt.wantErr, err != nil)
@@ -370,15 +385,17 @@ func Test_compactionTrigger_force(t *testing.T) {
 				segment.CollectionID = 1000
 			}
 			tr := &compactionTrigger{
-				meta:                      tt.fields.meta,
-				handler:                   newMockHandlerWithMeta(tt.fields.meta),
-				allocator:                 tt.fields.allocator,
-				signals:                   tt.fields.signals,
-				compactionHandler:         tt.fields.compactionHandler,
-				globalTrigger:             tt.fields.globalTrigger,
-				segRefer:                  tt.fields.segRefer,
-				indexCoord:                indexCood,
-				estimateDiskSegmentPolicy: calBySchemaPolicyWithDiskIndex,
+				meta:                         tt.fields.meta,
+				handler:                      newMockHandlerWithMeta(tt.fields.meta),
+				allocator:                    tt.fields.allocator,
+				signals:                      tt.fields.signals,
+				compactionHandler:            tt.fields.compactionHandler,
+				globalTrigger:                tt.fields.globalTrigger,
+				segRefer:                     tt.fields.segRefer,
+				indexCoord:                   indexCood,
+				estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
+				estimateNonDiskSegmentPolicy: calBySchemaPolicy,
+				testingOnly:                  true,
 			}
 			tt.collectionID = 1000
 			_, err := tr.forceTriggerCompaction(tt.collectionID)
@@ -398,15 +415,17 @@ func Test_compactionTrigger_force(t *testing.T) {
 				segment.CollectionID = 2000
 			}
 			tr := &compactionTrigger{
-				meta:                      tt.fields.meta,
-				handler:                   newMockHandlerWithMeta(tt.fields.meta),
-				allocator:                 tt.fields.allocator,
-				signals:                   tt.fields.signals,
-				compactionHandler:         tt.fields.compactionHandler,
-				globalTrigger:             tt.fields.globalTrigger,
-				segRefer:                  tt.fields.segRefer,
-				indexCoord:                indexCood,
-				estimateDiskSegmentPolicy: calBySchemaPolicyWithDiskIndex,
+				meta:                         tt.fields.meta,
+				handler:                      newMockHandlerWithMeta(tt.fields.meta),
+				allocator:                    tt.fields.allocator,
+				signals:                      tt.fields.signals,
+				compactionHandler:            tt.fields.compactionHandler,
+				globalTrigger:                tt.fields.globalTrigger,
+				segRefer:                     tt.fields.segRefer,
+				indexCoord:                   indexCood,
+				estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
+				estimateNonDiskSegmentPolicy: calBySchemaPolicy,
+				testingOnly:                  true,
 			}
 			tt.collectionID = 2000
 			_, err := tr.forceTriggerCompaction(tt.collectionID)
@@ -431,15 +450,17 @@ func Test_compactionTrigger_force(t *testing.T) {
 				segment.CollectionID = 3000
 			}
 			tr := &compactionTrigger{
-				meta:                      tt.fields.meta,
-				handler:                   newMockHandlerWithMeta(tt.fields.meta),
-				allocator:                 tt.fields.allocator,
-				signals:                   tt.fields.signals,
-				compactionHandler:         tt.fields.compactionHandler,
-				globalTrigger:             tt.fields.globalTrigger,
-				segRefer:                  tt.fields.segRefer,
-				indexCoord:                indexCood,
-				estimateDiskSegmentPolicy: calBySchemaPolicyWithDiskIndex,
+				meta:                         tt.fields.meta,
+				handler:                      newMockHandlerWithMeta(tt.fields.meta),
+				allocator:                    tt.fields.allocator,
+				signals:                      tt.fields.signals,
+				compactionHandler:            tt.fields.compactionHandler,
+				globalTrigger:                tt.fields.globalTrigger,
+				segRefer:                     tt.fields.segRefer,
+				indexCoord:                   indexCood,
+				estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
+				estimateNonDiskSegmentPolicy: calBySchemaPolicy,
+				testingOnly:                  true,
 			}
 			tt.collectionID = 3000
 			_, err := tr.forceTriggerCompaction(tt.collectionID)
@@ -464,15 +485,17 @@ func Test_compactionTrigger_force(t *testing.T) {
 				segment.CollectionID = 4000
 			}
 			tr := &compactionTrigger{
-				meta:                      tt.fields.meta,
-				handler:                   newMockHandlerWithMeta(tt.fields.meta),
-				allocator:                 tt.fields.allocator,
-				signals:                   tt.fields.signals,
-				compactionHandler:         tt.fields.compactionHandler,
-				globalTrigger:             tt.fields.globalTrigger,
-				segRefer:                  tt.fields.segRefer,
-				indexCoord:                indexCood,
-				estimateDiskSegmentPolicy: calBySchemaPolicyWithDiskIndex,
+				meta:                         tt.fields.meta,
+				handler:                      newMockHandlerWithMeta(tt.fields.meta),
+				allocator:                    tt.fields.allocator,
+				signals:                      tt.fields.signals,
+				compactionHandler:            tt.fields.compactionHandler,
+				globalTrigger:                tt.fields.globalTrigger,
+				segRefer:                     tt.fields.segRefer,
+				indexCoord:                   indexCood,
+				estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
+				estimateNonDiskSegmentPolicy: calBySchemaPolicy,
+				testingOnly:                  true,
 			}
 			tt.collectionID = 4000
 			_, err := tr.forceTriggerCompaction(tt.collectionID)
@@ -505,6 +528,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 				globalTrigger:     tt.fields.globalTrigger,
 				segRefer:          tt.fields.segRefer,
 				indexCoord:        indexCood,
+				testingOnly:       true,
 			}
 			tt.collectionID = 10000
 			_, err := tr.forceTriggerCompaction(tt.collectionID)
@@ -524,15 +548,17 @@ func Test_compactionTrigger_force(t *testing.T) {
 		t.Run(tt.name+" with allocate ts error", func(t *testing.T) {
 			indexCood := newMockIndexCoord()
 			tr := &compactionTrigger{
-				meta:                      tt.fields.meta,
-				handler:                   newMockHandlerWithMeta(tt.fields.meta),
-				allocator:                 &FailsAllocator{allocIDSucceed: true},
-				signals:                   tt.fields.signals,
-				compactionHandler:         tt.fields.compactionHandler,
-				globalTrigger:             tt.fields.globalTrigger,
-				segRefer:                  tt.fields.segRefer,
-				indexCoord:                indexCood,
-				estimateDiskSegmentPolicy: calBySchemaPolicyWithDiskIndex,
+				meta:                         tt.fields.meta,
+				handler:                      newMockHandlerWithMeta(tt.fields.meta),
+				allocator:                    &FailsAllocator{allocIDSucceed: true},
+				signals:                      tt.fields.signals,
+				compactionHandler:            tt.fields.compactionHandler,
+				globalTrigger:                tt.fields.globalTrigger,
+				segRefer:                     tt.fields.segRefer,
+				indexCoord:                   indexCood,
+				estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
+				estimateNonDiskSegmentPolicy: calBySchemaPolicy,
+				testingOnly:                  true,
 			}
 
 			{
@@ -584,15 +610,17 @@ func Test_compactionTrigger_force(t *testing.T) {
 				segment.CollectionID = 1111
 			}
 			tr := &compactionTrigger{
-				meta:                      tt.fields.meta,
-				handler:                   newMockHandlerWithMeta(tt.fields.meta),
-				allocator:                 tt.fields.allocator,
-				signals:                   tt.fields.signals,
-				compactionHandler:         tt.fields.compactionHandler,
-				globalTrigger:             tt.fields.globalTrigger,
-				segRefer:                  tt.fields.segRefer,
-				indexCoord:                indexCood,
-				estimateDiskSegmentPolicy: calBySchemaPolicyWithDiskIndex,
+				meta:                         tt.fields.meta,
+				handler:                      newMockHandlerWithMeta(tt.fields.meta),
+				allocator:                    tt.fields.allocator,
+				signals:                      tt.fields.signals,
+				compactionHandler:            tt.fields.compactionHandler,
+				globalTrigger:                tt.fields.globalTrigger,
+				segRefer:                     tt.fields.segRefer,
+				indexCoord:                   indexCood,
+				estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
+				estimateNonDiskSegmentPolicy: calBySchemaPolicy,
+				testingOnly:                  true,
 			}
 
 			{
@@ -708,6 +736,12 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 									{
 										FieldID:  vecFieldID,
 										DataType: schemapb.DataType_FloatVector,
+										TypeParams: []*commonpb.KeyValuePair{
+											{
+												Key:   "dim",
+												Value: "128",
+											},
+										},
 									},
 								},
 							},
@@ -779,14 +813,17 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 			indexCoord := newMockIndexCoord()
 
 			tr := &compactionTrigger{
-				meta:              tt.fields.meta,
-				handler:           newMockHandlerWithMeta(tt.fields.meta),
-				allocator:         tt.fields.allocator,
-				signals:           tt.fields.signals,
-				compactionHandler: tt.fields.compactionHandler,
-				globalTrigger:     tt.fields.globalTrigger,
-				segRefer:          &SegmentReferenceManager{segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{}},
-				indexCoord:        indexCoord,
+				meta:                         tt.fields.meta,
+				handler:                      newMockHandlerWithMeta(tt.fields.meta),
+				allocator:                    tt.fields.allocator,
+				signals:                      tt.fields.signals,
+				compactionHandler:            tt.fields.compactionHandler,
+				globalTrigger:                tt.fields.globalTrigger,
+				segRefer:                     &SegmentReferenceManager{segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{}},
+				indexCoord:                   indexCoord,
+				estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
+				estimateNonDiskSegmentPolicy: calBySchemaPolicy,
+				testingOnly:                  true,
 			}
 			_, err := tr.forceTriggerCompaction(tt.args.collectionID)
 			assert.Equal(t, tt.wantErr, err != nil)
@@ -979,14 +1016,17 @@ func Test_compactionTrigger_noplan(t *testing.T) {
 			indexCoord := newMockIndexCoord()
 
 			tr := &compactionTrigger{
-				meta:              tt.fields.meta,
-				handler:           newMockHandlerWithMeta(tt.fields.meta),
-				allocator:         tt.fields.allocator,
-				signals:           tt.fields.signals,
-				compactionHandler: tt.fields.compactionHandler,
-				globalTrigger:     tt.fields.globalTrigger,
-				segRefer:          &SegmentReferenceManager{segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{}},
-				indexCoord:        indexCoord,
+				meta:                         tt.fields.meta,
+				handler:                      newMockHandlerWithMeta(tt.fields.meta),
+				allocator:                    tt.fields.allocator,
+				signals:                      tt.fields.signals,
+				compactionHandler:            tt.fields.compactionHandler,
+				globalTrigger:                tt.fields.globalTrigger,
+				segRefer:                     &SegmentReferenceManager{segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{}},
+				indexCoord:                   indexCoord,
+				estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
+				estimateNonDiskSegmentPolicy: calBySchemaPolicy,
+				testingOnly:                  true,
 			}
 			tr.start()
 			defer tr.stop()
@@ -1175,14 +1215,17 @@ func Test_compactionTrigger_smallfiles(t *testing.T) {
 			indexCoord := newMockIndexCoord()
 
 			tr := &compactionTrigger{
-				meta:              tt.fields.meta,
-				handler:           newMockHandlerWithMeta(tt.fields.meta),
-				allocator:         tt.fields.allocator,
-				signals:           tt.fields.signals,
-				compactionHandler: tt.fields.compactionHandler,
-				globalTrigger:     tt.fields.globalTrigger,
-				segRefer:          &SegmentReferenceManager{segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{}},
-				indexCoord:        indexCoord,
+				meta:                         tt.fields.meta,
+				handler:                      newMockHandlerWithMeta(tt.fields.meta),
+				allocator:                    tt.fields.allocator,
+				signals:                      tt.fields.signals,
+				compactionHandler:            tt.fields.compactionHandler,
+				globalTrigger:                tt.fields.globalTrigger,
+				segRefer:                     &SegmentReferenceManager{segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{}},
+				indexCoord:                   indexCoord,
+				estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
+				estimateNonDiskSegmentPolicy: calBySchemaPolicy,
+				testingOnly:                  true,
 			}
 			tr.start()
 			defer tr.stop()
@@ -1274,6 +1317,12 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 									{
 										FieldID:  vecFieldID,
 										DataType: schemapb.DataType_FloatVector,
+										TypeParams: []*commonpb.KeyValuePair{
+											{
+												Key:   "dim",
+												Value: "128",
+											},
+										},
 									},
 								},
 							},
@@ -1306,6 +1355,7 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 				globalTrigger:     tt.fields.globalTrigger,
 				segRefer:          &SegmentReferenceManager{segmentsLock: map[UniqueID]map[UniqueID]*datapb.SegmentReferenceLock{}},
 				indexCoord:        indexCoord,
+				testingOnly:       true,
 			}
 			tr.start()
 			defer tr.stop()
