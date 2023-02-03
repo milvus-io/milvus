@@ -48,9 +48,8 @@ var _globalL, _globalP, _globalS, _globalR atomic.Value
 
 var (
 	_globalLevelLogger sync.Map
+	_namedRateLimiters sync.Map
 )
-
-var rateLimiter *utils.ReconfigurableRateLimiter
 
 func init() {
 	l, p := newStdLogger()
