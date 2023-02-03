@@ -35,6 +35,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -253,4 +255,34 @@ func TestLeveledLogger(t *testing.T) {
 	assert.Equal(t, ctxL(), L())
 	SetLevel(orgLevel)
 
+}
+
+func TestStdAndFileLogger(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	fileConf := FileLogConfig{
+		RootPath: tmpDir,
+		Filename: "TestStdAndFileLogger",
+	}
+	fmt.Println(tmpDir)
+	conf := &Config{Level: "debug", Stdout: true, File: fileConf}
+
+	logger, _, err := InitLogger(conf)
+
+	assert.NoError(t, err)
+	logger.Info("1234567")
+
+	fileInfo, err := os.Stat(fileConf.RootPath + string(filepath.Separator) + fileConf.Filename)
+	assert.NoError(t, err)
+	assert.NotEmpty(t, fileInfo)
+	assert.True(t, fileInfo.Size() > 0)
+}
+
+func TestStdLogger(t *testing.T) {
+	conf := &Config{Level: "debug", Stdout: true}
+
+	logger, _, err := InitLogger(conf)
+
+	assert.NoError(t, err)
+	logger.Info("1234567")
 }

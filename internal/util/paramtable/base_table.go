@@ -49,7 +49,7 @@ const (
 	DefaultRootPath        = ""
 )
 
-//Const of Global Config List
+// Const of Global Config List
 func globalConfigPrefixs() []string {
 	return []string{"metastore.", "localStorage.", "etcd.", "mysql.", "minio.", "pulsar.", "kafka.", "rocksmq.", "log.", "grpc.", "common.", "quotaAndLimits."}
 }
@@ -226,6 +226,12 @@ func (gp *BaseTable) initLog() {
 	gp.Log.File.MaxBackups, _ = strconv.Atoi(gp.GetWithDefault("log.file.maxBackups", "10"))
 	gp.Log.File.MaxDays, _ = strconv.Atoi(gp.GetWithDefault("log.file.maxAge", "20"))
 	gp.Log.File.RootPath = gp.GetWithDefault("log.file.rootPath", DefaultRootPath)
+	stdout, err := strconv.ParseBool(gp.GetWithDefault("log.stdout", "true"))
+	if err != nil {
+		gp.Log.Stdout = true
+	} else {
+		gp.Log.Stdout = stdout
+	}
 
 	grpclog, err := gp.Load("grpc.log.level")
 	if err != nil {
