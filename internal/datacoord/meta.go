@@ -604,11 +604,11 @@ func (m *meta) UpdateDropChannelSegmentInfo(channel string, segments []*SegmentI
 		log.Error("meta update: update drop channel segment info failed",
 			zap.String("channel", channel),
 			zap.Error(err))
-		// Apply segment metric mutation on successful meta update.
-		metricMutation.commit()
 	} else {
 		log.Info("meta update: update drop channel segment info - complete",
 			zap.String("channel", channel))
+		// Apply segment metric mutation on successful meta update.
+		metricMutation.commit()
 	}
 	return err
 }
