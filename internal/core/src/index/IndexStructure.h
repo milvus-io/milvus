@@ -44,6 +44,6 @@ struct IndexStructure {
         return a_ == b.a_;
     }
     T a_;
-    size_t idx_;
+    int32_t idx_;
 };
 }  // namespace milvus::index
