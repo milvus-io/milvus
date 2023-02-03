@@ -16,10 +16,10 @@
 
 TEST(SearchResultPair, Greater) {
     auto pair1 = SearchResultPair(0, 1.0, nullptr, 0, 0, 1);
-    auto pair2 = SearchResultPair(1, 2.0, nullptr, 1, 0, 10);
+    auto pair2 = SearchResultPair(1, 2.0, nullptr, 1, 0, 1);
     ASSERT_EQ(pair1 > pair2, false);
 
-    pair1.advance();
+    pair2.advance();
     ASSERT_EQ(pair1 > pair2, true);
-    ASSERT_EQ(pair1.primary_key_, INVALID_PK);
+    ASSERT_EQ(pair2.primary_key_, INVALID_PK);
 }
