@@ -6,7 +6,7 @@ class MilvusConan(ConanFile):
     settings = "os", "compiler", "build_type", "arch"
     requires = (
         "rocksdb/6.29.5",
-        "boost/1.80.0",
+        "boost/1.81.0",
         "onetbb/2021.7.0",
         "zstd/1.5.2",
         "arrow/8.0.1",
@@ -33,24 +33,25 @@ class MilvusConan(ConanFile):
         "aws-sdk-cpp:text-to-speech": False,
         "aws-sdk-cpp:transfer": False,
         "gtest:build_gmock": False,
-        "boost:without_fiber": True,
-        "boost:without_json": True,
-        "boost:without_wave": True,
-        "boost:without_math": True,
-        "boost:without_graph": True,
-        "boost:without_graph_parallel": True,
-        "boost:without_nowide": True,
     }
     should_build = False
 
     def configure(self):
         # Macos M1 cannot use jemalloc
-        if self.settings.os == "Macos" and self.settings.arch not in ("x86_64", "x86"):
-            self.options["arrow"].with_jemalloc = False
+        if self.settings.os == "Macos":
+            if self.settings.arch not in ("x86_64", "x86"):
+                self.options["arrow"].with_jemalloc = False
+            self.options["boost"].without_fiber = True
+            self.options["boost"].without_json = True
+            self.options["boost"].without_wave = True
+            self.options["boost"].without_math = True
+            self.options["boost"].without_graph = True
+            self.options["boost"].without_graph_parallel = True
+            self.options["boost"].without_nowide = True
+            self.options["boost"].without_locale = True
+            self.options["boost"].without_url = True
 
     def imports(self):
-        self.copy("librocksdb.a", "../lib", "lib")
-        self.copy("libarrow.a", "../lib", "lib")
         self.copy("*.dylib", "../lib", "lib")
         self.copy("*.dll", "../lib", "lib")
         self.copy("*.so*", "../lib", "lib")
