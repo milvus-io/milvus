@@ -411,6 +411,13 @@ func (gp *BaseTable) InitLogCfg() {
 	gp.Log.File.MaxSize = gp.ParseIntWithDefault("log.file.maxSize", DefaultMaxSize)
 	gp.Log.File.MaxBackups = gp.ParseIntWithDefault("log.file.maxBackups", DefaultMaxBackups)
 	gp.Log.File.MaxDays = gp.ParseIntWithDefault("log.file.maxAge", DefaultMaxAge)
+	gp.Log.File.RootPath = gp.LoadWithDefault("log.file.rootPath", DefaultRootPath)
+	stdout, err := strconv.ParseBool(gp.LoadWithDefault("log.stdout", "true"))
+	if err != nil {
+		gp.Log.Stdout = true
+	} else {
+		gp.Log.Stdout = stdout
+	}
 }
 
 // SetLogConfig set log config of the base table

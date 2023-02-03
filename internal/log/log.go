@@ -68,23 +68,25 @@ func init() {
 
 // InitLogger initializes a zap logger.
 func InitLogger(cfg *Config, opts ...zap.Option) (*zap.Logger, *ZapProperties, error) {
-	var output zapcore.WriteSyncer
+	var outputs []zapcore.WriteSyncer
 	if len(cfg.File.Filename) > 0 {
 		lg, err := initFileLog(&cfg.File)
 		if err != nil {
 			return nil, nil, err
 		}
-		output = zapcore.AddSync(lg)
-	} else {
+		outputs = append(outputs, zapcore.AddSync(lg))
+	}
+	if cfg.Stdout {
 		stdOut, _, err := zap.Open([]string{"stdout"}...)
 		if err != nil {
 			return nil, nil, err
 		}
-		output = stdOut
+		outputs = append(outputs, stdOut)
 	}
 	debugCfg := *cfg
 	debugCfg.Level = "debug"
-	debugL, r, err := InitLoggerWithWriteSyncer(&debugCfg, output, opts...)
+	outputsWriter := zap.CombineWriteSyncers(outputs...)
+	debugL, r, err := InitLoggerWithWriteSyncer(&debugCfg, outputsWriter, opts...)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -149,7 +151,7 @@ func initFileLog(cfg *FileLogConfig) (*lumberjack.Logger, error) {
 }
 
 func newStdLogger() (*zap.Logger, *ZapProperties) {
-	conf := &Config{Level: "debug", File: FileLogConfig{}}
+	conf := &Config{Level: "debug", Stdout: true}
 	lg, r, _ := InitLogger(conf)
 	return lg, r
 }
