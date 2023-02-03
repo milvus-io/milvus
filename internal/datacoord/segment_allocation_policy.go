@@ -130,7 +130,7 @@ func sealByLifetimePolicy(lifetime time.Duration) segmentSealPolicy {
 func sealByMaxBinlogFileNumberPolicy(maxBinlogFileNumber int) segmentSealPolicy {
 	return func(segment *SegmentInfo, ts Timestamp) bool {
 		logFileCounter := 0
-		for _, fieldBinlog := range segment.Binlogs {
+		for _, fieldBinlog := range segment.GetStatslogs() {
 			logFileCounter += len(fieldBinlog.GetBinlogs())
 		}
 
