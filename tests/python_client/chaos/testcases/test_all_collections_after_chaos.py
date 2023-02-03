@@ -32,8 +32,9 @@ class TestAllCollection(TestcaseBase):
         tt = time.time() - t0
         assert collection_w.name == name
         # compact collection before getting num_entities
+        collection_w.flush(timeout=180)
         collection_w.compact()
-        collection_w.wait_for_compaction_completed()
+        collection_w.wait_for_compaction_completed(timeout=720)
 
         entities = collection_w.num_entities
         log.info(f"assert create collection: {tt}, init_entities: {entities}")
