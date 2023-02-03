@@ -234,12 +234,13 @@ func (gc *garbageCollector) clearEtcd() {
 	}
 
 	for _, segment := range drops {
+		log := log.With(zap.Int64("segmentID", segment.ID))
 		if !gc.isExpire(segment.GetDroppedAt()) {
 			continue
 		}
 		// segment gc shall only happen when channel cp is after segment dml cp.
 		if segment.GetDmlPosition().GetTimestamp() > channelCPs[segment.GetInsertChannel()] {
-			log.RatedInfo(60, "dropped segment dml position after channel cp, skip meta gc",
+			log.WithRateGroup("GC_FAIL_CP_BEFORE", 1, 60).RatedInfo(60, "dropped segment dml position after channel cp, skip meta gc",
 				zap.Uint64("dmlPosTs", segment.GetDmlPosition().GetTimestamp()),
 				zap.Uint64("channelCpTs", channelCPs[segment.GetInsertChannel()]),
 			)
