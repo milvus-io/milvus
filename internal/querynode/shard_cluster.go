@@ -202,10 +202,12 @@ func (sc *ShardCluster) Close() {
 	})
 }
 
-func (sc *ShardCluster) getLogger() *zap.Logger {
-	return log.With(zap.Int64("collectionID", sc.collectionID),
+func (sc *ShardCluster) getLogger() *log.MLogger {
+	return log.With(
+		zap.Int64("collectionID", sc.collectionID),
 		zap.String("channel", sc.vchannelName),
-		zap.Int64("replicaID", sc.replicaID))
+		zap.Int64("replicaID", sc.replicaID),
+	)
 }
 
 // serviceable returns whether shard cluster could provide query service.
