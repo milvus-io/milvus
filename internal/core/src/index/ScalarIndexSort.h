@@ -81,7 +81,7 @@ class ScalarIndexSort : public ScalarIndex<T> {
  private:
     bool is_built_;
     Config config_;
-    std::vector<size_t> idx_to_offsets_;  // used to retrieve.
+    std::vector<int32_t> idx_to_offsets_;  // used to retrieve.
     std::vector<IndexStructure<T>> data_;
 };
 
