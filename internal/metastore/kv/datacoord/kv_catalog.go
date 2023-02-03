@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/metautil"
+	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -229,6 +230,25 @@ func (kc *Catalog) AddSegment(ctx context.Context, segment *datapb.SegmentInfo) 
 	return kc.MetaKv.MultiSave(kvs)
 }
 
+// LoadFromSegmentPath loads segment info from persistent storage by given segment path.
+// # TESTING ONLY #
+func (kc *Catalog) LoadFromSegmentPath(colID, partID, segID typeutil.UniqueID) (*datapb.SegmentInfo, error) {
+	v, err := kc.MetaKv.Load(buildSegmentPath(colID, partID, segID))
+	if err != nil {
+		log.Error("(testing only) failed to load segment info by segment path")
+		return nil, err
+	}
+
+	segInfo := &datapb.SegmentInfo{}
+	err = proto.Unmarshal([]byte(v), segInfo)
+	if err != nil {
+		log.Error("(testing only) failed to unmarshall segment info")
+		return nil, err
+	}
+
+	return segInfo, nil
+}
+
 func (kc *Catalog) AlterSegments(ctx context.Context, newSegments []*datapb.SegmentInfo) error {
 	if len(newSegments) == 0 {
 		return nil
@@ -318,7 +338,8 @@ func (kc *Catalog) AlterSegmentsAndAddNewSegment(ctx context.Context, segments [
 
 	for _, s := range segments {
 		noBinlogsSegment, binlogs, deltalogs, statslogs := CloneSegmentWithExcludeBinlogs(s)
-
+		// `s` is not mutated above. Also, `noBinlogsSegment` is a cloned version of `s`.
+		segmentutil.ReCalcRowCount(s, noBinlogsSegment)
 		// for compacted segments
 		if noBinlogsSegment.State == commonpb.SegmentState_Dropped {
 			hasBinlogkeys, err := kc.hasBinlogPrefix(s)
@@ -408,6 +429,8 @@ func (kc *Catalog) SaveDroppedSegmentsInBatch(ctx context.Context, segments []*d
 	for _, s := range segments {
 		key := buildSegmentPath(s.GetCollectionID(), s.GetPartitionID(), s.GetID())
 		noBinlogsSegment, _, _, _ := CloneSegmentWithExcludeBinlogs(s)
+		// `s` is not mutated above. Also, `noBinlogsSegment` is a cloned version of `s`.
+		segmentutil.ReCalcRowCount(s, noBinlogsSegment)
 		segBytes, err := proto.Marshal(noBinlogsSegment)
 		if err != nil {
 			return fmt.Errorf("failed to marshal segment: %d, err: %w", s.GetID(), err)
@@ -666,6 +689,8 @@ func buildBinlogKvsWithLogID(collectionID, partitionID, segmentID typeutil.Uniqu
 
 func buildSegmentAndBinlogsKvs(segment *datapb.SegmentInfo) (map[string]string, error) {
 	noBinlogsSegment, binlogs, deltalogs, statslogs := CloneSegmentWithExcludeBinlogs(segment)
+	// `segment` is not mutated above. Also, `noBinlogsSegment` is a cloned version of `segment`.
+	segmentutil.ReCalcRowCount(segment, noBinlogsSegment)
 
 	// save binlogs separately
 	kvs, err := buildBinlogKvsWithLogID(noBinlogsSegment.CollectionID, noBinlogsSegment.PartitionID, noBinlogsSegment.ID, binlogs, deltalogs, statslogs)
