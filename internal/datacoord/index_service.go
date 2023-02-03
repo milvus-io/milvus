@@ -45,6 +45,10 @@ func (s *Server) createIndexForSegment(segment *SegmentInfo, indexID UniqueID) e
 	if err != nil {
 		return err
 	}
+	timestamp, err := s.allocator.allocTimestamp(s.ctx)
+	if err != nil {
+		return err
+	}
 	segIndex := &model.SegmentIndex{
 		SegmentID:    segment.ID,
 		CollectionID: segment.CollectionID,
@@ -52,7 +56,7 @@ func (s *Server) createIndexForSegment(segment *SegmentInfo, indexID UniqueID) e
 		NumRows:      segment.NumOfRows,
 		IndexID:      indexID,
 		BuildID:      buildID,
-		CreateTime:   segment.LastExpireTime,
+		CreateTime:   timestamp,
 		WriteHandoff: false,
 	}
 	if err = s.meta.AddSegmentIndex(segIndex); err != nil {
@@ -335,7 +339,7 @@ func (s *Server) completeIndexInfo(indexInfo *indexpb.IndexInfo, index *model.In
 			}
 			continue
 		}
-		if segIdx.CreateTime > index.CreateTime {
+		if uint64(seg.GetID()) > index.CreateTime {
 			continue
 		}
 		switch segIdx.IndexState {

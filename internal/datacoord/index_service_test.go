@@ -1147,3 +1147,57 @@ func TestServer_GetIndexInfos(t *testing.T) {
 		assert.Equal(t, 1, len(resp.GetSegmentInfo()))
 	})
 }
+
+func TestCreateIndexForSegment(t *testing.T) {
+	var (
+		collID   = UniqueID(1)
+		partID   = UniqueID(2)
+		indexID  = UniqueID(100)
+		segID    = UniqueID(1000)
+		createTS = uint64(1000)
+		ctx      = context.Background()
+	)
+
+	dpSegmentInfo := &datapb.SegmentInfo{
+		ID:             segID,
+		CollectionID:   collID,
+		PartitionID:    partID,
+		NumOfRows:      10000,
+		State:          commonpb.SegmentState_Flushed,
+		MaxRowNum:      65536,
+		LastExpireTime: createTS,
+	}
+
+	allocator := newMockAllocator()
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	catalog.On("CreateSegmentIndex",
+		mock.Anything,
+		mock.Anything,
+	).Return(nil)
+	meta := &meta{
+		catalog: catalog,
+		segments: &SegmentsInfo{
+			map[UniqueID]*SegmentInfo{
+				segID: {
+					SegmentInfo: dpSegmentInfo,
+				},
+			},
+		},
+		buildID2SegmentIndex: make(map[UniqueID]*model.SegmentIndex),
+	}
+	s := &Server{
+		ctx:             ctx,
+		meta:            meta,
+		allocator:       allocator,
+		notifyIndexChan: make(chan UniqueID, 1),
+		indexBuilder:    newIndexBuilder(ctx, meta, nil, nil),
+	}
+	segmentInfo := NewSegmentInfo(dpSegmentInfo)
+	allocator.mockAllocTimestampErr = true
+	err := s.createIndexForSegment(segmentInfo, indexID)
+	assert.Error(t, err)
+
+	allocator.mockAllocTimestampErr = false
+	err = s.createIndexForSegment(segmentInfo, indexID)
+	assert.NoError(t, err)
+}
