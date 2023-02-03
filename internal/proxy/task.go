@@ -1364,6 +1364,7 @@ func (lct *loadCollectionTask) Execute(ctx context.Context) (err error) {
 		Schema:        collSchema,
 		ReplicaNumber: lct.ReplicaNumber,
 		FieldIndexID:  fieldIndexIDs,
+		Refresh:       lct.Refresh,
 	}
 	log.Info("send LoadCollectionRequest to query coordinator", zap.String("role", typeutil.ProxyRole),
 		zap.Int64("msgID", request.Base.MsgID), zap.Int64("collectionID", request.CollectionID),
@@ -1586,6 +1587,7 @@ func (lpt *loadPartitionsTask) Execute(ctx context.Context) error {
 		Schema:        collSchema,
 		ReplicaNumber: lpt.ReplicaNumber,
 		FieldIndexID:  fieldIndexIDs,
+		Refresh:       lpt.Refresh,
 	}
 	lpt.result, err = lpt.queryCoord.LoadPartitions(ctx, request)
 	return err
