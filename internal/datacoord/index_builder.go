@@ -97,7 +97,7 @@ func newIndexBuilder(ctx context.Context, metaTable *meta, nodeManager *IndexNod
 		meta:             metaTable,
 		tasks:            make(map[int64]indexTaskState),
 		notifyChan:       make(chan struct{}, 1),
-		scheduleDuration: time.Second,
+		scheduleDuration: Params.DataCoordCfg.IndexTaskSchedulerInterval.GetAsDuration(time.Millisecond),
 		policy:           defaultBuildIndexPolicy,
 		nodeManager:      nodeManager,
 		chunkManager:     chunkManager,
