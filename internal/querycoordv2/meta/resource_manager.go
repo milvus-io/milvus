@@ -140,7 +140,7 @@ type ResourceManager struct {
 
 func NewResourceManager(store Store, nodeMgr *session.NodeManager) *ResourceManager {
 	groupMap := make(map[string]*ResourceGroup)
-	groupMap[DefaultResourceGroupName] = NewResourceGroup(1000000)
+	groupMap[DefaultResourceGroupName] = NewResourceGroup(0)
 	return &ResourceManager{
 		groups:  groupMap,
 		store:   store,
@@ -459,8 +459,8 @@ func (rm *ResourceManager) HandleNodeUp(node int64) (string, error) {
 		return rgName, nil
 	}
 
-	// add new node to default rg
-	rm.groups[DefaultResourceGroupName].handleNodeUp(node)
+	// assign new node to default rg
+	rm.groups[DefaultResourceGroupName].assignNode(node)
 	log.Info("HandleNodeUp: assign node to default resource group",
 		zap.String("rgName", DefaultResourceGroupName),
 		zap.Int64("node", node),
