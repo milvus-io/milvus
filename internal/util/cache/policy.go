@@ -132,6 +132,14 @@ const (
 type entryEvent struct {
 	entry *entry
 	event event
+	done  chan struct{}
+}
+
+// Done closes event signal channel.
+func (e *entryEvent) Done() {
+	if e.done != nil {
+		close(e.done)
+	}
 }
 
 // cache is a data structure for cache entries.

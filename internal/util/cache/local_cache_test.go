@@ -291,7 +291,7 @@ func TestExpireAfterWrite(t *testing.T) {
 	assert.Equal(t, 2, loadCount)
 }
 
-func TestRefreshAterWrite(t *testing.T) {
+func TestRefreshAfterWrite(t *testing.T) {
 	var mutex sync.Mutex
 	loaded := make(map[int]int)
 	loader := func(k int) (int, error) {
