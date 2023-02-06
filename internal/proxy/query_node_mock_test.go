@@ -131,3 +131,7 @@ func (m *QueryNodeMock) GetDataDistribution(context.Context, *querypb.GetDataDis
 func (m *QueryNodeMock) SyncDistribution(context.Context, *querypb.SyncDistributionRequest) (*commonpb.Status, error) {
 	return nil, nil
 }
+
+func (m *QueryNodeMock) Delete(context.Context, *querypb.DeleteRequest) (*commonpb.Status, error) {
+	return nil, nil
+}

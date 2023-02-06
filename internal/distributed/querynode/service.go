@@ -36,7 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	qn "github.com/milvus-io/milvus/internal/querynode"
+	qn "github.com/milvus-io/milvus/internal/querynodev2"
 	"github.com/milvus-io/milvus/internal/tracer"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -325,4 +325,9 @@ func (s *Server) GetDataDistribution(ctx context.Context, req *querypb.GetDataDi
 
 func (s *Server) SyncDistribution(ctx context.Context, req *querypb.SyncDistributionRequest) (*commonpb.Status, error) {
 	return s.querynode.SyncDistribution(ctx, req)
+}
+
+// Delete is used to forward delete message between delegator and workers.
+func (s *Server) Delete(ctx context.Context, req *querypb.DeleteRequest) (*commonpb.Status, error) {
+	return s.querynode.Delete(ctx, req)
 }

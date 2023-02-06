@@ -156,6 +156,10 @@ func (m *MockQueryNode) SyncDistribution(context.Context, *querypb.SyncDistribut
 	return m.status, m.err
 }
 
+func (m *MockQueryNode) Delete(context.Context, *querypb.DeleteRequest) (*commonpb.Status, error) {
+	return m.status, m.err
+}
+
 type MockRootCoord struct {
 	types.RootCoord
 	initErr  error

@@ -79,12 +79,14 @@ type SegmentAction struct {
 	segmentID UniqueID
 	scope     querypb.DataScope
 
+	// loadDeltaOnly      bool
 	isReleaseCommitted atomic.Bool
 }
 
 func NewSegmentAction(nodeID UniqueID, typ ActionType, shard string, segmentID UniqueID) *SegmentAction {
 	return NewSegmentActionWithScope(nodeID, typ, shard, segmentID, querypb.DataScope_All)
 }
+
 func NewSegmentActionWithScope(nodeID UniqueID, typ ActionType, shard string, segmentID UniqueID, scope querypb.DataScope) *SegmentAction {
 	base := NewBaseAction(nodeID, typ, shard)
 	return &SegmentAction{

@@ -104,3 +104,7 @@ func (m *GrpcQueryNodeClient) SyncDistribution(ctx context.Context, in *querypb.
 func (m *GrpcQueryNodeClient) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmChannelRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }
+
+func (m *GrpcQueryNodeClient) Delete(ctx context.Context, in *querypb.DeleteRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}

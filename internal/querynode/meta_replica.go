@@ -619,24 +619,24 @@ func (replica *metaReplica) addSegmentPrivate(segment *Segment) error {
 		zap.Int64("segment ID", segID),
 		zap.String("segment type", segType.String()),
 		zap.Int64("row count", rowCount),
-		zap.Uint64("segment indexed fields", segment.indexedFieldInfos.Len()),
 	)
-	metrics.QueryNodeNumSegments.WithLabelValues(
-		fmt.Sprint(paramtable.GetNodeID()),
-		fmt.Sprint(segment.collectionID),
-		fmt.Sprint(segment.partitionID),
-		segType.String(),
-		fmt.Sprint(segment.indexedFieldInfos.Len()),
-	).Inc()
-	if rowCount > 0 {
-		metrics.QueryNodeNumEntities.WithLabelValues(
+	/*
+		metrics.QueryNodeNumSegments.WithLabelValues(
 			fmt.Sprint(paramtable.GetNodeID()),
 			fmt.Sprint(segment.collectionID),
 			fmt.Sprint(segment.partitionID),
 			segType.String(),
 			fmt.Sprint(segment.indexedFieldInfos.Len()),
-		).Add(float64(rowCount))
-	}
+		).Inc()
+		if rowCount > 0 {
+			metrics.QueryNodeNumEntities.WithLabelValues(
+				fmt.Sprint(paramtable.GetNodeID()),
+				fmt.Sprint(segment.collectionID),
+				fmt.Sprint(segment.partitionID),
+				segType.String(),
+				fmt.Sprint(segment.indexedFieldInfos.Len()),
+			).Add(float64(rowCount))
+		}*/
 	return nil
 }
 
@@ -727,25 +727,25 @@ func (replica *metaReplica) removeSegmentPrivate(segmentID UniqueID, segType seg
 			zap.Int64("segment ID", segmentID),
 			zap.String("segment type", segType.String()),
 			zap.Int64("row count", rowCount),
-			zap.Uint64("segment indexed fields", segment.indexedFieldInfos.Len()),
 		)
-		metrics.QueryNodeNumSegments.WithLabelValues(
-			fmt.Sprint(paramtable.GetNodeID()),
-			fmt.Sprint(segment.collectionID),
-			fmt.Sprint(segment.partitionID),
-			segType.String(),
-			// Note: this field is mutable after segment is loaded.
-			fmt.Sprint(segment.indexedFieldInfos.Len()),
-		).Dec()
-		if rowCount > 0 {
-			metrics.QueryNodeNumEntities.WithLabelValues(
+		/*
+			metrics.QueryNodeNumSegments.WithLabelValues(
 				fmt.Sprint(paramtable.GetNodeID()),
 				fmt.Sprint(segment.collectionID),
 				fmt.Sprint(segment.partitionID),
 				segType.String(),
+				// Note: this field is mutable after segment is loaded.
 				fmt.Sprint(segment.indexedFieldInfos.Len()),
-			).Sub(float64(rowCount))
-		}
+			).Dec()
+			if rowCount > 0 {
+				metrics.QueryNodeNumEntities.WithLabelValues(
+					fmt.Sprint(paramtable.GetNodeID()),
+					fmt.Sprint(segment.collectionID),
+					fmt.Sprint(segment.partitionID),
+					segType.String(),
+					fmt.Sprint(segment.indexedFieldInfos.Len()),
+				).Sub(float64(rowCount))
+			}*/
 	}
 	replica.sendNoSegmentSignal()
 }

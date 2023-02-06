@@ -294,6 +294,30 @@ func GenPrimaryKeyByRawData(data interface{}, pkType schemapb.DataType) (Primary
 	return result, nil
 }
 
+func GenInt64PrimaryKeys(data ...int64) ([]PrimaryKey, error) {
+	pks := make([]PrimaryKey, len(data))
+	var err error
+	for i := range data {
+		pks[i], err = GenPrimaryKeyByRawData(data[i], schemapb.DataType_Int64)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return pks, nil
+}
+
+func GenVarcharPrimaryKeys(data ...string) ([]PrimaryKey, error) {
+	pks := make([]PrimaryKey, len(data))
+	var err error
+	for i := range data {
+		pks[i], err = GenPrimaryKeyByRawData(data[i], schemapb.DataType_VarChar)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return pks, nil
+}
+
 func ParseFieldData2PrimaryKeys(data *schemapb.FieldData) ([]PrimaryKey, error) {
 	ret := make([]PrimaryKey, 0)
 	if data == nil {

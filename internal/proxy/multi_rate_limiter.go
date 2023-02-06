@@ -191,7 +191,7 @@ func (rl *rateLimiter) registerLimiters() {
 		}
 		limit := ratelimitutil.Limit(r.GetAsFloat())
 		burst := r.GetAsFloat() // use rate as burst, because Limiter is with punishment mechanism, burst is insignificant.
-		rl.limiters.InsertIfNotPresent(internalpb.RateType(rt), ratelimitutil.NewLimiter(limit, burst))
+		rl.limiters.GetOrInsert(internalpb.RateType(rt), ratelimitutil.NewLimiter(limit, burst))
 		onEvent := func(rateType internalpb.RateType) func(*config.Event) {
 			return func(event *config.Event) {
 				f, err := strconv.ParseFloat(event.Value, 64)

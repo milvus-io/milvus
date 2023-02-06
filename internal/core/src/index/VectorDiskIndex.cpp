@@ -15,13 +15,13 @@
 // limitations under the License.
 
 #include "index/VectorDiskIndex.h"
+
+#include "common/Utils.h"
+#include "config/ConfigKnowhere.h"
 #include "index/Meta.h"
 #include "index/Utils.h"
-
 #include "storage/LocalChunkManager.h"
-#include "config/ConfigKnowhere.h"
 #include "storage/Util.h"
-#include "common/Utils.h"
 
 namespace milvus::index {
 
@@ -48,13 +48,16 @@ VectorDiskAnnIndex<T>::VectorDiskAnnIndex(const IndexType& index_type,
 template <typename T>
 void
 VectorDiskAnnIndex<T>::Load(const BinarySet& binary_set /* not used */, const Config& config) {
+    LOG(INFO) << "(yah01)Load: parse config...";
     auto prepare_config = parse_prepare_config(config);
     knowhere::Config cfg;
     knowhere::DiskANNPrepareConfig::Set(cfg, prepare_config);
 
     auto index_files = GetValueFromConfig<std::vector<std::string>>(config, "index_files");
     AssertInfo(index_files.has_value(), "index file paths is empty when load disk ann index data");
+    LOG(INFO) << "(yah01)Load: pull index files...";
     file_manager_->CacheIndexToDisk(index_files.value());
+    LOG(INFO) << "(yah01)Load: prepare index...";
     auto ok = index_->Prepare(cfg);
     AssertInfo(ok, "load disk index failed");
     SetDim(index_->Dim());

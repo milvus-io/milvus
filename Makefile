@@ -22,9 +22,9 @@ ARCH := $(shell arch)
 mode = Release
 disk_index = OFF
 useasan = false 
-ifeq (${USE_ASAN}, true)
-useasan = true 
-endif
+# ifeq (${USE_ASAN}, true)
+# useasan = true 
+# endif
 
 
 export GIT_BRANCH=master
@@ -320,5 +320,9 @@ generate-mockery: getdeps
 	# internal/rootcoord
 	$(PWD)/bin/mockery --name=IMetaTable --dir=$(PWD)/internal/rootcoord --output=$(PWD)/internal/rootcoord/mocks --filename=meta_table.go --with-expecter --outpkg=mockrootcoord
 	$(PWD)/bin/mockery --name=GarbageCollector --dir=$(PWD)/internal/rootcoord --output=$(PWD)/internal/rootcoord/mocks --filename=garbage_collector.go --with-expecter --outpkg=mockrootcoord
+	# internal/querynodev2
+	$(PWD)/bin/mockery --name=Manager --dir=$(PWD)/internal/querynodev2/cluster --output=$(PWD)/internal/querynodev2/cluster --filename=mock_manager.go --with-expecter --outpkg=cluster --structname=MockManager --inpackage
+	$(PWD)/bin/mockery --name=Loader --dir=$(PWD)/internal/querynodev2/segments --output=$(PWD)/internal/querynodev2/segments --filename=mock_loader.go --with-expecter --outpkg=segments --structname=MockLoader --inpackage
+	$(PWD)/bin/mockery --name=Worker --dir=$(PWD)/internal/querynodev2/cluster --output=$(PWD)/internal/querynodev2/cluster --filename=mock_worker.go --with-expecter --outpkg=worker --structname=MockWorker --inpackage
 
 ci-ut: build-cpp-with-coverage generated-proto-go-without-cpp codecov-cpp codecov-go

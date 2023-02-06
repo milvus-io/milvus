@@ -234,9 +234,23 @@ SegmentSealedImpl::LoadDeletedRecord(const LoadDeletedRecordInfo& info) {
     auto timestamps = reinterpret_cast<const Timestamp*>(info.timestamps);
 
     // step 2: fill pks and timestamps
+    ssize_t n = deleted_record_.ack_responder_.GetAck();
+    ssize_t divide_point = 0;
+    // Truncate the overlapping prefix
+    if (n > 0) {
+        auto last = deleted_record_.timestamps_[n - 1];
+        divide_point = std::lower_bound(timestamps, timestamps + size, last + 1) - timestamps;
+    }
+
+    // All these delete records have been loaded
+    if (divide_point == size) {
+        return;
+    }
+
+    size -= divide_point;
     auto reserved_begin = deleted_record_.reserved.fetch_add(size);
-    deleted_record_.pks_.set_data_raw(reserved_begin, pks.data(), size);
-    deleted_record_.timestamps_.set_data_raw(reserved_begin, timestamps, size);
+    deleted_record_.pks_.set_data_raw(reserved_begin, pks.data() + divide_point, size);
+    deleted_record_.timestamps_.set_data_raw(reserved_begin, timestamps + divide_point, size);
     deleted_record_.ack_responder_.AddSegment(reserved_begin, reserved_begin + size);
 }
 

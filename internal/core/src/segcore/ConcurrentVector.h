@@ -11,17 +11,17 @@
 
 #pragma once
 
+#include <tbb/concurrent_vector.h>
+
 #include <atomic>
 #include <cassert>
 #include <deque>
 #include <mutex>
+#include <shared_mutex>
 #include <string>
 #include <unordered_map>
-#include <shared_mutex>
 #include <utility>
 #include <vector>
-
-#include <tbb/concurrent_vector.h>
 
 #include "common/FieldMeta.h"
 #include "common/Span.h"

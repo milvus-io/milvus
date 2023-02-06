@@ -28,7 +28,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/util/cache"
 )
 
@@ -53,8 +52,8 @@ type VectorChunkManager struct {
 var _ ChunkManager = (*VectorChunkManager)(nil)
 
 // NewVectorChunkManager create a new vector manager object.
-func NewVectorChunkManager(ctx context.Context, cacheStorage ChunkManager, vectorStorage ChunkManager, schema *etcdpb.CollectionMeta, cacheLimit int64, cacheEnable bool) (*VectorChunkManager, error) {
-	insertCodec := NewInsertCodec(schema)
+func NewVectorChunkManager(ctx context.Context, cacheStorage ChunkManager, vectorStorage ChunkManager, cacheLimit int64, cacheEnable bool) (*VectorChunkManager, error) {
+	insertCodec := NewInsertCodec()
 	vcm := &VectorChunkManager{
 		cacheStorage:  cacheStorage,
 		vectorStorage: vectorStorage,
