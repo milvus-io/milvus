@@ -302,6 +302,20 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	log.Ctx(ctx).Debug("translate output fields",
 		zap.Strings("output fields", t.request.GetOutputFields()))
 
+	//fetch search_growing from search param
+	var ignoreGrowing bool
+	for i, kv := range t.request.GetSearchParams() {
+		if kv.GetKey() == IgnoreGrowingKey {
+			ignoreGrowing, err = strconv.ParseBool(kv.GetValue())
+			if err != nil {
+				return errors.New("parse search growing failed")
+			}
+			t.request.SearchParams = append(t.request.GetSearchParams()[:i], t.request.GetSearchParams()[i+1:]...)
+			break
+		}
+	}
+	t.SearchRequest.IgnoreGrowing = ignoreGrowing
+
 	if t.request.GetDslType() == commonpb.DslType_BoolExprV1 {
 		annsField, err := funcutil.GetAttrByKeyFromRepeatedKV(AnnsFieldKey, t.request.GetSearchParams())
 		if err != nil {

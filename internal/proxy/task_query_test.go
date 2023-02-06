@@ -154,6 +154,12 @@ func TestQueryTask_all(t *testing.T) {
 			},
 			CollectionName: collectionName,
 			Expr:           expr,
+			QueryParams: []*commonpb.KeyValuePair{
+				{
+					Key:   IgnoreGrowingKey,
+					Value: "false",
+				},
+			},
 		},
 		qc:       qc,
 		shardMgr: mgr,

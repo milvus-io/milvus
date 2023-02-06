@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
@@ -126,7 +127,9 @@ type ShardSegmentDetector interface {
 type ShardNodeBuilder func(nodeID int64, addr string) shardQueryNode
 
 // withStreaming function type to let search detects corresponding search streaming is done.
-type withStreaming func(ctx context.Context) error
+type searchWithStreaming func(ctx context.Context) (error, *internalpb.SearchResults)
+type queryWithStreaming func(ctx context.Context) (error, *internalpb.RetrieveResults)
+type getStatisticsWithStreaming func(ctx context.Context) (error, *internalpb.GetStatisticsResponse)
 
 // ShardCluster maintains the ShardCluster information and perform shard level operations
 type ShardCluster struct {
@@ -824,7 +827,7 @@ func (sc *ShardCluster) segmentsOnline(segments []shardSegmentInfo) bool {
 }
 
 // GetStatistics returns the statistics on the shard cluster.
-func (sc *ShardCluster) GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest, withStreaming withStreaming) ([]*internalpb.GetStatisticsResponse, error) {
+func (sc *ShardCluster) GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest, withStreaming getStatisticsWithStreaming) ([]*internalpb.GetStatisticsResponse, error) {
 	if !sc.serviceable() {
 		return nil, fmt.Errorf("ShardCluster for %s replicaID %d is not available", sc.vchannelName, sc.replicaID)
 	}
@@ -854,7 +857,11 @@ func (sc *ShardCluster) GetStatistics(ctx context.Context, req *querypb.GetStati
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		streamErr := withStreaming(reqCtx)
+		if withStreaming == nil {
+			return
+		}
+
+		streamErr, streamResult := withStreaming(reqCtx)
 		resultMut.Lock()
 		defer resultMut.Unlock()
 		if streamErr != nil {
@@ -863,6 +870,9 @@ func (sc *ShardCluster) GetStatistics(ctx context.Context, req *querypb.GetStati
 			if !errors.Is(streamErr, context.Canceled) {
 				err = fmt.Errorf("stream operation failed: %w", streamErr)
 			}
+		}
+		if streamResult != nil {
+			results = append(results, streamResult)
 		}
 	}()
 
@@ -907,7 +917,7 @@ func (sc *ShardCluster) GetStatistics(ctx context.Context, req *querypb.GetStati
 }
 
 // Search preforms search operation on shard cluster.
-func (sc *ShardCluster) Search(ctx context.Context, req *querypb.SearchRequest, withStreaming withStreaming) ([]*internalpb.SearchResults, error) {
+func (sc *ShardCluster) Search(ctx context.Context, req *querypb.SearchRequest, withStreaming searchWithStreaming) ([]*internalpb.SearchResults, error) {
 	log := log.Ctx(ctx)
 	if !sc.serviceable() {
 		err := WrapErrShardNotAvailable(sc.replicaID, sc.vchannelName)
@@ -946,8 +956,11 @@ func (sc *ShardCluster) Search(ctx context.Context, req *querypb.SearchRequest, 
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		if withStreaming == nil {
+			return
+		}
 
-		streamErr := withStreaming(reqCtx)
+		streamErr, streamResult := withStreaming(reqCtx)
 		resultMut.Lock()
 		defer resultMut.Unlock()
 		if streamErr != nil {
@@ -955,6 +968,9 @@ func (sc *ShardCluster) Search(ctx context.Context, req *querypb.SearchRequest, 
 				err = fmt.Errorf("stream operation failed: %w", streamErr)
 			}
 			cancel()
+		}
+		if streamResult != nil {
+			results = append(results, streamResult)
 		}
 	}()
 
@@ -1009,7 +1025,7 @@ func (sc *ShardCluster) Search(ctx context.Context, req *querypb.SearchRequest, 
 }
 
 // Query performs query operation on shard cluster.
-func (sc *ShardCluster) Query(ctx context.Context, req *querypb.QueryRequest, withStreaming withStreaming) ([]*internalpb.RetrieveResults, error) {
+func (sc *ShardCluster) Query(ctx context.Context, req *querypb.QueryRequest, withStreaming queryWithStreaming) ([]*internalpb.RetrieveResults, error) {
 	if !sc.serviceable() {
 		return nil, WrapErrShardNotAvailable(sc.replicaID, sc.vchannelName)
 	}
@@ -1030,19 +1046,28 @@ func (sc *ShardCluster) Query(ctx context.Context, req *querypb.QueryRequest, wi
 
 	var err error
 	var resultMut sync.Mutex
+
 	results := make([]*internalpb.RetrieveResults, 0, len(segAllocs)+1) // count(nodes) + 1(growing)
 
 	// detect corresponding streaming query is done
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		if withStreaming == nil {
+			return
+		}
 
-		streamErr := withStreaming(reqCtx)
+		streamErr, streamResult := withStreaming(reqCtx)
+		resultMut.Lock()
+		defer resultMut.Unlock()
 		if streamErr != nil {
 			if err == nil {
 				err = fmt.Errorf("stream operation failed: %w", streamErr)
 			}
 			cancel()
+		}
+		if streamResult != nil {
+			results = append(results, streamResult)
 		}
 	}()
 
@@ -1097,4 +1122,50 @@ func (sc *ShardCluster) GetSegmentInfos() []shardSegmentInfo {
 
 func (sc *ShardCluster) getVersion() int64 {
 	return sc.version
+}
+
+func getSearchWithStreamingFunc(searchCtx context.Context, req *querypb.SearchRequest, node *QueryNode, qs *queryShard, nodeID int64) searchWithStreaming {
+	return func(ctx context.Context) (error, *internalpb.SearchResults) {
+		streamingTask, err := newSearchTask(searchCtx, req)
+		if err != nil {
+			return err, nil
+		}
+		streamingTask.QS = qs
+		streamingTask.DataScope = querypb.DataScope_Streaming
+		err = node.scheduler.AddReadTask(searchCtx, streamingTask)
+		if err != nil {
+			return err, nil
+		}
+		err = streamingTask.WaitToFinish()
+		if err != nil {
+			return err, nil
+		}
+		metrics.QueryNodeSQLatencyInQueue.WithLabelValues(fmt.Sprint(nodeID),
+			metrics.SearchLabel).Observe(float64(streamingTask.queueDur.Milliseconds()))
+		metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(nodeID),
+			metrics.SearchLabel).Observe(float64(streamingTask.reduceDur.Milliseconds()))
+		return nil, streamingTask.Ret
+	}
+}
+
+func getQueryWithStreamingFunc(queryCtx context.Context, req *querypb.QueryRequest, node *QueryNode, qs *queryShard, nodeID int64) queryWithStreaming {
+	return func(ctx context.Context) (error, *internalpb.RetrieveResults) {
+		streamingTask := newQueryTask(queryCtx, req)
+		streamingTask.DataScope = querypb.DataScope_Streaming
+		streamingTask.QS = qs
+		err := node.scheduler.AddReadTask(queryCtx, streamingTask)
+
+		if err != nil {
+			return err, nil
+		}
+		err = streamingTask.WaitToFinish()
+		if err != nil {
+			return err, nil
+		}
+		metrics.QueryNodeSQLatencyInQueue.WithLabelValues(fmt.Sprint(nodeID),
+			metrics.QueryLabel).Observe(float64(streamingTask.queueDur.Milliseconds()))
+		metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(nodeID),
+			metrics.QueryLabel).Observe(float64(streamingTask.reduceDur.Milliseconds()))
+		return nil, streamingTask.Ret
+	}
 }

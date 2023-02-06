@@ -171,6 +171,7 @@ message SearchRequest {
   int64  nq = 14;
   int64  topk = 15;
   string metricType = 16;
+  bool ignoreGrowing = 17; // Optional
 }
 
 message SearchResults {
@@ -201,6 +202,7 @@ message RetrieveRequest {
   uint64 guarantee_timestamp = 9;
   uint64 timeout_timestamp = 10;
   int64 limit = 11; // Optional
+  bool ignoreGrowing = 12;
 }
 
 message RetrieveResults {
