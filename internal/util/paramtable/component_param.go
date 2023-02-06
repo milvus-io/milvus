@@ -1344,7 +1344,7 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 }
 
 func (p *dataCoordConfig) initMaxWatchDuration() {
-	p.MaxWatchDuration = time.Duration(p.Base.ParseInt64WithDefault("dataCoord.channel.maxWatchDuration", 60)) * time.Second
+	p.MaxWatchDuration = time.Duration(p.Base.ParseInt64WithDefault("dataCoord.channel.maxWatchDuration", 600)) * time.Second
 }
 
 func (p *dataCoordConfig) initSegmentMaxSize() {
@@ -1424,7 +1424,7 @@ func (p *dataCoordConfig) initSegmentProportion() {
 
 // compaction execution timeout
 func (p *dataCoordConfig) initCompactionTimeoutInSeconds() {
-	p.CompactionTimeoutInSeconds = p.Base.ParseInt32WithDefault("dataCoord.compaction.timeout", 60*3)
+	p.CompactionTimeoutInSeconds = p.Base.ParseInt32WithDefault("dataCoord.compaction.timeout", 60*5)
 }
 
 func (p *dataCoordConfig) initCompactionCheckIntervalInSeconds() {
@@ -1470,7 +1470,7 @@ func (p *dataCoordConfig) initGCMissingTolerance() {
 }
 
 func (p *dataCoordConfig) initGCDropTolerance() {
-	p.GCDropTolerance = time.Duration(p.Base.ParseInt64WithDefault("dataCoord.gc.dropTolerance", 24*60*60)) * time.Second
+	p.GCDropTolerance = time.Duration(p.Base.ParseInt64WithDefault("dataCoord.gc.dropTolerance", 3600)) * time.Second
 }
 
 func (p *dataCoordConfig) SetEnableAutoCompaction(enable bool) {
