@@ -9,15 +9,17 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <cstdint>
-#include <vector>
-#include <algorithm>
+#include "Reduce.h"
+
 #include <log/Log.h>
 
-#include "Reduce.h"
-#include "pkVisitor.h"
+#include <algorithm>
+#include <cstdint>
+#include <vector>
+
 #include "SegmentInterface.h"
 #include "Utils.h"
+#include "pkVisitor.h"
 
 namespace milvus::segcore {
 
@@ -160,6 +162,7 @@ ReduceHelper::ReduceSearchResultForOneNQ(int64_t qi, int64_t topk, int64_t& offs
         heap_.pop();
     }
     pk_set_.clear();
+    pairs_.clear();
 
     pairs_.reserve(num_segments_);
     for (int i = 0; i < num_segments_; i++) {
@@ -183,7 +186,7 @@ ReduceHelper::ReduceSearchResultForOneNQ(int64_t qi, int64_t topk, int64_t& offs
 
     int64_t dup_cnt = 0;
     auto start = offset;
-    while (offset - start < topk) {
+    while (offset - start < topk && !heap_.empty()) {
         auto pilot = heap_.top();
         heap_.pop();
 
@@ -203,7 +206,9 @@ ReduceHelper::ReduceSearchResultForOneNQ(int64_t qi, int64_t topk, int64_t& offs
             dup_cnt++;
         }
         pilot->advance();
-        heap_.push(pilot);
+        if (pilot->primary_key_ != INVALID_PK) {
+            heap_.push(pilot);
+        }
     }
     return dup_cnt;
 }

@@ -50,7 +50,7 @@ struct SearchResultPair {
             distance_ = search_result_->distances_.at(offset_);
         } else {
             primary_key_ = INVALID_PK;
-            distance_ = std::numeric_limits<float>::max();
+            distance_ = std::numeric_limits<float>::min();
         }
     }
 };
@@ -58,6 +58,6 @@ struct SearchResultPair {
 struct SearchResultPairComparator {
     bool
     operator()(const SearchResultPair* lhs, const SearchResultPair* rhs) const {
-        return *lhs > *rhs;
+        return *rhs > *lhs;
     }
 };
