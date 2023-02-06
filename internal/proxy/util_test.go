@@ -68,6 +68,31 @@ func TestValidateCollectionName(t *testing.T) {
 	}
 }
 
+func TestValidateResourceGroupName(t *testing.T) {
+	assert.Nil(t, ValidateResourceGroupName("abc"))
+	assert.Nil(t, ValidateResourceGroupName("_123abc"))
+	assert.Nil(t, ValidateResourceGroupName("abc123_"))
+
+	longName := make([]byte, 256)
+	for i := 0; i < len(longName); i++ {
+		longName[i] = 'a'
+	}
+	invalidNames := []string{
+		"123abc",
+		"$abc",
+		"abc$",
+		"_12 ac",
+		" ",
+		"",
+		string(longName),
+		"中文",
+	}
+
+	for _, name := range invalidNames {
+		assert.NotNil(t, ValidateResourceGroupName(name))
+	}
+}
+
 func TestValidatePartitionTag(t *testing.T) {
 	assert.Nil(t, validatePartitionTag("abc", true))
 	assert.Nil(t, validatePartitionTag("123abc", true))

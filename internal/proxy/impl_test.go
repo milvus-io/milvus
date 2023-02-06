@@ -266,8 +266,68 @@ func TestProxy_ResourceGroup(t *testing.T) {
 	})
 
 	t.Run("describe resource group", func(t *testing.T) {
-		resp, err := node.DescribeResourceGroup(ctx, &milvuspb.DescribeResourceGroupRequest{})
+		resp, err := node.DescribeResourceGroup(ctx, &milvuspb.DescribeResourceGroupRequest{ResourceGroup: "rg"})
 		assert.NoError(t, err)
 		assert.Equal(t, resp.Status.ErrorCode, commonpb.ErrorCode_Success)
+	})
+}
+
+func TestProxy_InvalidResourceGroupName(t *testing.T) {
+	factory := dependency.NewDefaultFactory(true)
+	ctx := context.Background()
+
+	node, err := NewProxy(ctx, factory)
+	assert.NoError(t, err)
+	node.multiRateLimiter = NewMultiRateLimiter()
+	node.stateCode.Store(commonpb.StateCode_Healthy)
+
+	qc := NewQueryCoordMock()
+	node.SetQueryCoordClient(qc)
+
+	tsoAllocatorIns := newMockTsoAllocator()
+	node.sched, err = newTaskScheduler(node.ctx, tsoAllocatorIns, node.factory)
+	assert.NoError(t, err)
+	node.sched.Start()
+	defer node.sched.Close()
+
+	rc := &MockRootCoordClientInterface{}
+	mgr := newShardClientMgr()
+	InitMetaCache(ctx, rc, qc, mgr)
+
+	t.Run("create resource group", func(t *testing.T) {
+		resp, err := node.CreateResourceGroup(ctx, &milvuspb.CreateResourceGroupRequest{
+			ResourceGroup: "...",
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, resp.ErrorCode, commonpb.ErrorCode_UnexpectedError)
+	})
+
+	t.Run("drop resource group", func(t *testing.T) {
+		resp, err := node.DropResourceGroup(ctx, &milvuspb.DropResourceGroupRequest{
+			ResourceGroup: "...",
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, resp.ErrorCode, commonpb.ErrorCode_UnexpectedError)
+	})
+
+	t.Run("transfer node", func(t *testing.T) {
+		resp, err := node.TransferNode(ctx, &milvuspb.TransferNodeRequest{
+			SourceResourceGroup: "...",
+			TargetResourceGroup: "!!!",
+			NumNode:             1,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, resp.ErrorCode, commonpb.ErrorCode_UnexpectedError)
+	})
+
+	t.Run("transfer replica", func(t *testing.T) {
+		resp, err := node.TransferReplica(ctx, &milvuspb.TransferReplicaRequest{
+			SourceResourceGroup: "...",
+			TargetResourceGroup: "!!!",
+			NumReplica:          1,
+			CollectionName:      "collection1",
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, resp.ErrorCode, commonpb.ErrorCode_UnexpectedError)
 	})
 }
