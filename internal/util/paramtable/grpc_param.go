@@ -74,6 +74,7 @@ func (p *grpcConfig) init(domain string, base *BaseTable) {
 		Key:          p.Domain + ".port",
 		Version:      "2.0.0",
 		DefaultValue: strconv.FormatInt(ProxyExternalPort, 10),
+		Export:       true,
 	}
 	p.Port.Init(base.mgr)
 
@@ -88,24 +89,28 @@ func (p *grpcConfig) init(domain string, base *BaseTable) {
 		Key:          "common.security.tlsMode",
 		Version:      "2.0.0",
 		DefaultValue: "0",
+		Export:       true,
 	}
 	p.TLSMode.Init(base.mgr)
 
 	p.ServerPemPath = ParamItem{
 		Key:     "tls.serverPemPath",
 		Version: "2.0.0",
+		Export:  true,
 	}
 	p.ServerPemPath.Init(base.mgr)
 
 	p.ServerKeyPath = ParamItem{
 		Key:     "tls.serverKeyPath",
 		Version: "2.0.0",
+		Export:  true,
 	}
 	p.ServerKeyPath.Init(base.mgr)
 
 	p.CaPemPath = ParamItem{
 		Key:     "tls.caPemPath",
 		Version: "2.0.0",
+		Export:  true,
 	}
 	p.CaPemPath.Init(base.mgr)
 }
@@ -148,6 +153,7 @@ func (p *GrpcServerConfig) Init(domain string, base *BaseTable) {
 			}
 			return v
 		},
+		Export: true,
 	}
 	p.ServerMaxSendSize.Init(base.mgr)
 
@@ -169,6 +175,7 @@ func (p *GrpcServerConfig) Init(domain string, base *BaseTable) {
 			}
 			return v
 		},
+		Export: true,
 	}
 	p.ServerMaxRecvSize.Init(base.mgr)
 }
@@ -213,6 +220,7 @@ func (p *GrpcClientConfig) Init(domain string, base *BaseTable) {
 			}
 			return v
 		},
+		Export: true,
 	}
 	p.ClientMaxSendSize.Init(base.mgr)
 
@@ -234,6 +242,7 @@ func (p *GrpcClientConfig) Init(domain string, base *BaseTable) {
 			}
 			return v
 		},
+		Export: true,
 	}
 	p.ClientMaxRecvSize.Init(base.mgr)
 
@@ -254,6 +263,7 @@ func (p *GrpcClientConfig) Init(domain string, base *BaseTable) {
 			}
 			return v
 		},
+		Export: true,
 	}
 	p.DialTimeout.Init(base.mgr)
 
@@ -274,6 +284,7 @@ func (p *GrpcClientConfig) Init(domain string, base *BaseTable) {
 			}
 			return v
 		},
+		Export: true,
 	}
 	p.KeepAliveTimeout.Init(base.mgr)
 
@@ -294,6 +305,7 @@ func (p *GrpcClientConfig) Init(domain string, base *BaseTable) {
 			}
 			return v
 		},
+		Export: true,
 	}
 	p.KeepAliveTime.Init(base.mgr)
 
@@ -320,6 +332,7 @@ func (p *GrpcClientConfig) Init(domain string, base *BaseTable) {
 			}
 			return v
 		},
+		Export: true,
 	}
 	p.MaxAttempts.Init(base.mgr)
 
@@ -340,6 +353,7 @@ func (p *GrpcClientConfig) Init(domain string, base *BaseTable) {
 			}
 			return v
 		},
+		Export: true,
 	}
 	p.InitialBackoff.Init(base.mgr)
 
@@ -360,6 +374,7 @@ func (p *GrpcClientConfig) Init(domain string, base *BaseTable) {
 			}
 			return v
 		},
+		Export: true,
 	}
 	p.MaxBackoff.Init(base.mgr)
 
@@ -380,6 +395,7 @@ func (p *GrpcClientConfig) Init(domain string, base *BaseTable) {
 			}
 			return v
 		},
+		Export: true,
 	}
 	p.BackoffMultiplier.Init(base.mgr)
 
@@ -400,6 +416,7 @@ func (p *GrpcClientConfig) Init(domain string, base *BaseTable) {
 			}
 			return v
 		},
+		Export: true,
 	}
 	p.CompressionEnabled.Init(base.mgr)
 }

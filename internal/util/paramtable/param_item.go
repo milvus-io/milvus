@@ -27,6 +27,7 @@ type ParamItem struct {
 	DefaultValue string
 	FallbackKeys []string
 	PanicIfEmpty bool
+	Export       bool
 
 	Formatter func(originValue string) string
 	Forbidden bool
@@ -121,6 +122,7 @@ type ParamGroup struct {
 	KeyPrefix string // which should be named as "A.B."
 	Version   string
 	Doc       string
+	Export    bool
 
 	GetFunc func() map[string]string
 

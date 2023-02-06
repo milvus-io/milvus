@@ -166,7 +166,19 @@ func (mr *MilvusRoles) runIndexNode(ctx context.Context, localMsg bool, wg *sync
 }
 
 func (mr *MilvusRoles) setupLogger() {
-	logConfig := paramtable.Get().Log
+	params := paramtable.Get()
+	logConfig := log.Config{
+		Level:     params.LogCfg.Level.GetValue(),
+		GrpcLevel: params.LogCfg.GrpcLogLevel.GetValue(),
+		Format:    params.LogCfg.Format.GetValue(),
+		Stdout:    params.LogCfg.Stdout.GetAsBool(),
+		File: log.FileLogConfig{
+			RootPath:   params.LogCfg.RootPath.GetValue(),
+			MaxSize:    params.LogCfg.MaxSize.GetAsInt(),
+			MaxDays:    params.LogCfg.MaxAge.GetAsInt(),
+			MaxBackups: params.LogCfg.MaxBackups.GetAsInt(),
+		},
+	}
 	id := paramtable.GetNodeID()
 	roleName := paramtable.GetRole()
 	rootPath := logConfig.File.RootPath
