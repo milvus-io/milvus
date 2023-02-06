@@ -24,7 +24,6 @@ endif ()
 message(STATUS "Building knowhere-${KNOWHERE_SOURCE_VER} from source")
 message(STATUS ${CMAKE_BUILD_TYPE})
 
-set (CMAKE_MODULE_PATH ${CMAKE_BINARY_DIR}/conan/)
 
 if ( BUILD_DISK_ANN STREQUAL "ON" )
     set(KNOWHERE_WITH_DISKANN ON CACHE BOOL "" FORCE )
@@ -33,6 +32,7 @@ else ()
 endif ()
 
 # BUILD_UNIT_TEST OFF will only affect knowhere
+set (CMAKE_PREFIX_PATH ${CONAN_BOOST_ROOT})
 set( BUILD_UNIT_TEST  OFF )
 FetchContent_Declare(
         knowhere
