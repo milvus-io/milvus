@@ -51,8 +51,16 @@ func (t *createCollectionTask) validate() error {
 		return err
 	}
 
-	if t.Req.GetShardsNum() >= maxShardNum {
-		return fmt.Errorf("shard num (%d) exceeds limit (%d)", t.Req.GetShardsNum(), maxShardNum)
+	shardsNum := t.Req.GetShardsNum()
+
+	cfgMaxShardNum := Params.RootCoordCfg.DmlChannelNum.GetAsInt32()
+	if shardsNum > cfgMaxShardNum {
+		return fmt.Errorf("shard num (%d) exceeds max configuration (%d)", shardsNum, cfgMaxShardNum)
+	}
+
+	cfgShardLimit := Params.ProxyCfg.MaxShardNum.GetAsInt32()
+	if shardsNum > cfgShardLimit {
+		return fmt.Errorf("shard num (%d) exceeds system limit (%d)", shardsNum, cfgShardLimit)
 	}
 
 	return nil
