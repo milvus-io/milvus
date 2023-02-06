@@ -266,7 +266,9 @@ func TestProxy_ResourceGroup(t *testing.T) {
 	})
 
 	t.Run("describe resource group", func(t *testing.T) {
-		resp, err := node.DescribeResourceGroup(ctx, &milvuspb.DescribeResourceGroupRequest{ResourceGroup: "rg"})
+		resp, err := node.DescribeResourceGroup(ctx, &milvuspb.DescribeResourceGroupRequest{
+			ResourceGroup: "rg",
+		})
 		assert.NoError(t, err)
 		assert.Equal(t, resp.Status.ErrorCode, commonpb.ErrorCode_Success)
 	})

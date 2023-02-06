@@ -2108,7 +2108,10 @@ func (t *DescribeResourceGroupTask) Execute(ctx context.Context) error {
 	resp, err := t.queryCoord.DescribeResourceGroup(ctx, &querypb.DescribeResourceGroupRequest{
 		ResourceGroup: t.ResourceGroup,
 	})
-	rgInfo := resp.GetResourceGroup()
+
+	if err != nil {
+		return err
+	}
 
 	getCollectionNameFunc := func(value int32, key int64) string {
 		name, err := globalMetaCache.GetCollectionName(ctx, key)
@@ -2119,22 +2122,31 @@ func (t *DescribeResourceGroupTask) Execute(ctx context.Context) error {
 		return name
 	}
 
-	loadReplicas := lo.MapKeys(rgInfo.NumLoadedReplica, getCollectionNameFunc)
-	outgoingNodes := lo.MapKeys(rgInfo.NumOutgoingNode, getCollectionNameFunc)
-	incomingNodes := lo.MapKeys(rgInfo.NumIncomingNode, getCollectionNameFunc)
+	if resp.Status.ErrorCode == commonpb.ErrorCode_Success {
+		rgInfo := resp.GetResourceGroup()
 
-	t.result = &milvuspb.DescribeResourceGroupResponse{
-		Status: resp.Status,
-		ResourceGroup: &milvuspb.ResourceGroup{
-			Name:             rgInfo.GetName(),
-			Capacity:         rgInfo.GetCapacity(),
-			NumAvailableNode: rgInfo.NumAvailableNode,
-			NumLoadedReplica: loadReplicas,
-			NumOutgoingNode:  outgoingNodes,
-			NumIncomingNode:  incomingNodes,
-		},
+		loadReplicas := lo.MapKeys(rgInfo.NumLoadedReplica, getCollectionNameFunc)
+		outgoingNodes := lo.MapKeys(rgInfo.NumOutgoingNode, getCollectionNameFunc)
+		incomingNodes := lo.MapKeys(rgInfo.NumIncomingNode, getCollectionNameFunc)
+
+		t.result = &milvuspb.DescribeResourceGroupResponse{
+			Status: resp.Status,
+			ResourceGroup: &milvuspb.ResourceGroup{
+				Name:             rgInfo.GetName(),
+				Capacity:         rgInfo.GetCapacity(),
+				NumAvailableNode: rgInfo.NumAvailableNode,
+				NumLoadedReplica: loadReplicas,
+				NumOutgoingNode:  outgoingNodes,
+				NumIncomingNode:  incomingNodes,
+			},
+		}
+	} else {
+		t.result = &milvuspb.DescribeResourceGroupResponse{
+			Status: resp.Status,
+		}
 	}
-	return err
+
+	return nil
 }
 
 func (t *DescribeResourceGroupTask) PostExecute(ctx context.Context) error {
