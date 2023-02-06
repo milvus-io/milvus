@@ -121,7 +121,8 @@ func StartMiniCluster(ctx context.Context, opts ...Option) (cluster *MiniCluster
 	cluster = &MiniCluster{
 		ctx: ctx,
 	}
-	Params.InitOnce()
+	//Params.InitOnce()
+	Params.Init()
 	cluster.params = DefaultParams()
 	cluster.clusterConfig = DefaultClusterConfig()
 	for _, opt := range opts {
@@ -555,7 +556,7 @@ func (cluster *MiniCluster) CreateDefaultDataCoord() (types.DataCoordComponent, 
 }
 
 func (cluster *MiniCluster) CreateDefaultQueryCoord() (types.QueryCoordComponent, error) {
-	queryCoord, err := querycoord.NewQueryCoord(cluster.ctx, cluster.factory)
+	queryCoord, err := querycoord.NewQueryCoord(cluster.ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -1147,9 +1148,8 @@ func (cluster *MiniCluster) UpdateClusterSize(clusterConfig ClusterConfig) error
 func (cluster *MiniCluster) GetProxy(ctx context.Context, addr string) (types.Proxy, error) {
 	if cluster.proxy.GetAddress() == addr {
 		return cluster.proxy, nil
-	} else {
-		return nil, nil
 	}
+	return nil, nil
 }
 
 func (cluster *MiniCluster) GetQueryNode(ctx context.Context, addr string) (types.QueryNode, error) {

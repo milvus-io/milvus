@@ -29,6 +29,7 @@ import (
 func TestAddRemoveDataNode(t *testing.T) {
 	ctx := context.Background()
 	c, err := StartMiniCluster(ctx)
+	assert.NoError(t, err)
 	err = c.Start()
 	assert.NoError(t, err)
 	defer c.Stop()
@@ -67,6 +68,7 @@ func TestAddRemoveDataNode(t *testing.T) {
 func TestAddRemoveQueryNode(t *testing.T) {
 	ctx := context.Background()
 	c, err := StartMiniCluster(ctx)
+	assert.NoError(t, err)
 	err = c.Start()
 	assert.NoError(t, err)
 	defer c.Stop()
@@ -105,6 +107,7 @@ func TestAddRemoveQueryNode(t *testing.T) {
 func TestAddRemoveIndexNode(t *testing.T) {
 	ctx := context.Background()
 	c, err := StartMiniCluster(ctx)
+	assert.NoError(t, err)
 	err = c.Start()
 	assert.NoError(t, err)
 	defer c.Stop()
@@ -143,6 +146,7 @@ func TestAddRemoveIndexNode(t *testing.T) {
 func TestUpdateClusterSize(t *testing.T) {
 	ctx := context.Background()
 	c, err := StartMiniCluster(ctx)
+	assert.NoError(t, err)
 	err = c.Start()
 	assert.NoError(t, err)
 	defer c.Stop()

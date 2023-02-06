@@ -38,6 +38,7 @@ import (
 func TestShowSessions(t *testing.T) {
 	ctx := context.Background()
 	c, err := StartMiniCluster(ctx)
+	assert.NoError(t, err)
 	err = c.Start()
 	assert.NoError(t, err)
 	defer c.Stop()
@@ -55,6 +56,7 @@ func TestShowSessions(t *testing.T) {
 func TestShowSegments(t *testing.T) {
 	ctx := context.Background()
 	c, err := StartMiniCluster(ctx)
+	assert.NoError(t, err)
 	err = c.Start()
 	assert.NoError(t, err)
 	defer c.Stop()
@@ -132,6 +134,7 @@ func TestShowSegments(t *testing.T) {
 		HashKeys:       hashKeys,
 		NumRows:        uint32(rowNum),
 	})
+	assert.NoError(t, err)
 	assert.Equal(t, insertResult.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 
 	segments, err := c.metaWatcher.ShowSegments()
@@ -226,6 +229,7 @@ func TestShowReplicas(t *testing.T) {
 		HashKeys:       hashKeys,
 		NumRows:        uint32(rowNum),
 	})
+	assert.NoError(t, err)
 	assert.Equal(t, insertResult.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 
 	// flush
@@ -251,7 +255,7 @@ func TestShowReplicas(t *testing.T) {
 				SegmentIDs: ids,
 			})
 			if err != nil {
-				panic(errors.New("GetFlushState failed"))
+				//panic(errors.New("GetFlushState failed"))
 				return false
 			}
 			return resp.GetFlushed()
@@ -291,6 +295,7 @@ func TestShowReplicas(t *testing.T) {
 			},
 		},
 	})
+	assert.NoError(t, err)
 	if createIndexStatus.GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn("createIndexStatus fail reason", zap.String("reason", createIndexStatus.GetReason()))
 	}
@@ -301,16 +306,12 @@ func TestShowReplicas(t *testing.T) {
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})
+	assert.NoError(t, err)
 	if loadStatus.GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn("loadStatus fail reason", zap.String("reason", loadStatus.GetReason()))
 	}
 	assert.Equal(t, commonpb.ErrorCode_Success, loadStatus.GetErrorCode())
 	for {
-		select {
-		case <-ctx.Done():
-			errors.New("context deadline exceeded")
-		default:
-		}
 		loadProgress, err := c.proxy.GetLoadingProgress(ctx, &milvuspb.GetLoadingProgressRequest{
 			CollectionName: collectionName,
 		})
