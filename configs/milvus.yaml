@@ -159,7 +159,8 @@ proxy:
   maxNameLength: 255  # Maximum length of name for a collection or alias
   maxFieldNum: 256     # Maximum number of fields in a collection
   maxDimension: 32768 # Maximum dimension of a vector
-  maxShardNum: 256 # Maximum number of shards in a collection
+  # It's strongly DISCOURAGED to set `maxShardNum` > 64.
+  maxShardNum: 64 # Maximum number of shards in a collection
   maxTaskNum: 1024 # max task number of proxy task queue
   # please adjust in embedded Milvus: false
   ginLogging: true # Whether to produce gin logs.
