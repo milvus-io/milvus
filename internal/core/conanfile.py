@@ -22,7 +22,7 @@ class MilvusConan(ConanFile):
         "libcurl/7.86.0",
     )
 
-    generators = "cmake"
+    generators = ("cmake", "cmake_find_package")
     default_options = {
         "rocksdb:shared": True,
         "arrow:parquet": True,
