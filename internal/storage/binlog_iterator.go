@@ -62,7 +62,7 @@ type InsertBinlogIterator struct {
 // NewInsertBinlogIterator creates a new iterator
 func NewInsertBinlogIterator(blobs []*Blob, PKfieldID UniqueID, pkType schemapb.DataType) (*InsertBinlogIterator, error) {
 	// TODO: load part of file to read records other than loading all content
-	reader := NewInsertCodec(nil)
+	reader := NewInsertCodecWithSchema(nil)
 
 	_, _, serData, err := reader.Deserialize(blobs)
 

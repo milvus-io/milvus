@@ -47,15 +47,12 @@ func NewConcurrentMap[K comparable, V any]() *ConcurrentMap[K, V] {
 	return &ConcurrentMap[K, V]{}
 }
 
-func (m *ConcurrentMap[K, V]) Len() uint64 {
-	return m.len.Load()
-}
-
-// InsertIfNotPresent inserts the key-value pair to the concurrent map if the key does not exist. It is otherwise a no-op.
-func (m *ConcurrentMap[K, V]) InsertIfNotPresent(key K, value V) {
-	if _, loaded := m.inner.LoadOrStore(key, value); !loaded {
-		m.len.Inc()
-	}
+func (m *ConcurrentMap[K, V]) Range(f func(key K, value V) bool) {
+	m.inner.Range(func(key, value any) bool {
+		trueKey := key.(K)
+		trueValue := value.(V)
+		return f(trueKey, trueValue)
+	})
 }
 
 // Insert inserts the key-value pair to the concurrent map

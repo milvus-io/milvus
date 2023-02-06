@@ -914,7 +914,7 @@ func createBinLogs(rowNum int, schema *schemapb.CollectionSchema, ts Timestamp,
 		ID:     colID,
 		Schema: schema,
 	}
-	binLogs, statsBinLogs, err := storage.NewInsertCodec(meta).Serialize(partID, segmentID, data.buffer)
+	binLogs, statsBinLogs, err := storage.NewInsertCodecWithSchema(meta).Serialize(partID, segmentID, data.buffer)
 	if err != nil {
 		return nil, nil, err
 	}

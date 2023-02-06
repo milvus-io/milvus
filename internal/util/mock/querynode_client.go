@@ -120,3 +120,7 @@ func (q QueryNodeClient) GetDataDistribution(ctx context.Context, req *querypb.G
 func (q QueryNodeClient) SyncDistribution(ctx context.Context, req *querypb.SyncDistributionRequest) (*commonpb.Status, error) {
 	return q.grpcClient.SyncDistribution(ctx, req)
 }
+
+func (q QueryNodeClient) Delete(ctx context.Context, req *querypb.DeleteRequest) (*commonpb.Status, error) {
+	return q.grpcClient.Delete(ctx, req)
+}

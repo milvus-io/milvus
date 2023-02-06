@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 )
@@ -52,8 +53,10 @@ func GetReplicaNodesInfo(replicaMgr *meta.ReplicaManager, nodeMgr *session.NodeM
 func GetPartitions(collectionMgr *meta.CollectionManager, broker meta.Broker, collectionID int64) ([]int64, error) {
 	collection := collectionMgr.GetCollection(collectionID)
 	if collection != nil {
-		partitions, err := broker.GetPartitions(context.Background(), collectionID)
-		return partitions, err
+		allPartitions, err := broker.GetPartitions(context.Background(), collectionID)
+		partitions := typeutil.NewUniqueSet(allPartitions...)
+		partitions.Remove(collection.GetReleasedPartitions()...)
+		return partitions.Collect(), err
 	}
 
 	partitions := collectionMgr.GetPartitionsByCollection(collectionID)

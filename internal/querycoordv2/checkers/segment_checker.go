@@ -88,6 +88,10 @@ func (c *SegmentChecker) checkReplica(ctx context.Context, replica *meta.Replica
 	tasks = c.createSegmentReduceTasks(ctx, redundancies, replica.GetID(), querypb.DataScope_All)
 	ret = append(ret, tasks...)
 
+	// outdated := c.getOutdatedSegment(c.targetMgr, c.dist, c.meta, replica.GetCollectionID(), replica.GetID())
+	// tasks = c.createSegmentUpdateDeltaTasks(ctx, outdated, replica.GetID())
+	// ret = append(ret, tasks...)
+
 	// compare inner dists to find repeated loaded segments
 	redundancies = c.findRepeatedHistoricalSegments(c.dist, c.meta, replica.GetID())
 	redundancies = c.filterExistedOnLeader(replica, redundancies)
@@ -156,7 +160,8 @@ func (c *SegmentChecker) getStreamingSegmentsDist(distMgr *meta.DistributionMana
 }
 
 // GetHistoricalSegmentDiff get historical segment diff between target and dist
-func (c *SegmentChecker) getHistoricalSegmentDiff(targetMgr *meta.TargetManager,
+func (c *SegmentChecker) getHistoricalSegmentDiff(
+	targetMgr *meta.TargetManager,
 	distMgr *meta.DistributionManager,
 	metaInfo *meta.Meta,
 	collectionID int64,
@@ -175,7 +180,7 @@ func (c *SegmentChecker) getHistoricalSegmentDiff(targetMgr *meta.TargetManager,
 	nextTargetMap := targetMgr.GetHistoricalSegmentsByCollection(collectionID, meta.NextTarget)
 	currentTargetMap := targetMgr.GetHistoricalSegmentsByCollection(collectionID, meta.CurrentTarget)
 
-	//get segment which exist on next target, but not on dist
+	// Segment which exist on next target, but not on dist
 	for segmentID, segment := range nextTargetMap {
 		if !distMap.Contain(segmentID) {
 			toLoad = append(toLoad, segment)

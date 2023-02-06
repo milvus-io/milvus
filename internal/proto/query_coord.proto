@@ -69,6 +69,7 @@ service QueryNode {
 
   rpc GetDataDistribution(GetDataDistributionRequest) returns (GetDataDistributionResponse) {}
   rpc SyncDistribution(SyncDistributionRequest) returns (common.Status) {}
+  rpc Delete(DeleteRequest) returns (common.Status) {}
 }
 
 //--------------------QueryCoord grpc request and response proto------------------
@@ -234,6 +235,7 @@ message SegmentLoadInfo {
   int64 segment_size = 12;
   string insert_channel = 13;
   internal.MsgPosition start_position = 14;
+  internal.MsgPosition end_position = 15;
 }
 
 message FieldIndexInfo {
@@ -250,6 +252,11 @@ message FieldIndexInfo {
   int64 num_rows = 10;
 }
 
+enum LoadScope {
+  Full = 0;
+  Delta = 1;
+}
+
 message LoadSegmentsRequest {
   common.MsgBase base = 1;
   int64 dst_nodeID = 2;
@@ -262,6 +269,7 @@ message LoadSegmentsRequest {
   repeated internal.MsgPosition delta_positions = 9;
   int64 version = 10;
   bool need_transfer = 11;
+  LoadScope load_scope = 12;
 }
 
 message ReleaseSegmentsRequest {
@@ -304,6 +312,18 @@ message ReplicaSegmentsInfo {
   int64 partition_id = 2;
   repeated int64 segment_ids = 3;
   repeated int64 versions = 4;
+}
+
+message GetLoadInfoRequest {
+  common.MsgBase base = 1;
+  int64 collection_id = 2;
+}
+
+message GetLoadInfoResponse {
+  common.Status status = 1;
+  schema.CollectionSchema schema = 2;
+  LoadType load_type = 3;
+  repeated int64 partitions = 4;
 }
 
 //----------------request auto triggered by QueryCoord-----------------
@@ -435,6 +455,7 @@ message SealedSegmentsChangeInfo {
 
 message GetDataDistributionRequest {
   common.MsgBase base = 1;
+  map<string, internal.MsgPosition> checkpoints = 2;
 }
 
 message GetDataDistributionResponse {
@@ -465,6 +486,7 @@ message SegmentVersionInfo {
   int64 partition = 3;
   string channel = 4;
   int64 version = 5;
+  uint64 last_delta_timestamp = 6;
 }
 
 message ChannelVersionInfo {
@@ -505,6 +527,7 @@ message Replica {
 enum SyncType {
   Remove = 0;
   Set = 1;
+  Amend = 2;
 }
 
 message SyncAction {
@@ -513,6 +536,7 @@ message SyncAction {
   int64 segmentID = 3;
   int64 nodeID = 4;
   int64 version = 5;
+  SegmentLoadInfo info = 6;
 }
 
 message SyncDistributionRequest {
@@ -557,4 +581,13 @@ message ResourceGroupInfo {
   map<int64, int32> num_outgoing_node = 5;
    // collection id -> be accessed node num by other rg
   map<int64, int32> num_incoming_node = 6;
+}
+message DeleteRequest {
+  common.MsgBase base = 1;
+  int64 collection_id = 2;
+  int64 partition_id = 3;
+  string vchannel_name = 4;
+  int64 segment_id = 5;
+  schema.IDs primary_keys = 6;
+  repeated uint64 timestamps = 7; 
 }

@@ -34,7 +34,7 @@ func generateTestData(t *testing.T, num int) []*Blob {
 		{FieldID: 102, Name: "floatVector", DataType: schemapb.DataType_FloatVector},
 		{FieldID: 103, Name: "binaryVector", DataType: schemapb.DataType_BinaryVector},
 	}}
-	insertCodec := NewInsertCodec(&etcdpb.CollectionMeta{ID: 1, Schema: schema})
+	insertCodec := NewInsertCodecWithSchema(&etcdpb.CollectionMeta{ID: 1, Schema: schema})
 
 	var (
 		field0   []int64

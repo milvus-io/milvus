@@ -31,7 +31,10 @@ import (
 	"go.uber.org/zap"
 )
 
-const interval = 1 * time.Second
+const (
+	interval   = 1 * time.Second
+	RPCTimeout = 3 * time.Second
+)
 
 // LeaderObserver is to sync the distribution with leader
 type LeaderObserver struct {
@@ -40,6 +43,7 @@ type LeaderObserver struct {
 	dist    *meta.DistributionManager
 	meta    *meta.Meta
 	target  *meta.TargetManager
+	broker  meta.Broker
 	cluster session.Cluster
 
 	stopOnce sync.Once
@@ -105,11 +109,39 @@ func (o *LeaderObserver) findNeedLoadedSegments(leaderView *meta.LeaderView, dis
 	dists = utils.FindMaxVersionSegments(dists)
 	for _, s := range dists {
 		version, ok := leaderView.Segments[s.GetID()]
-		existInCurrentTarget := o.target.GetHistoricalSegment(s.CollectionID, s.GetID(), meta.CurrentTarget) != nil
+		currentTarget := o.target.GetHistoricalSegment(s.CollectionID, s.GetID(), meta.CurrentTarget)
+		existInCurrentTarget := currentTarget != nil
 		existInNextTarget := o.target.GetHistoricalSegment(s.CollectionID, s.GetID(), meta.NextTarget) != nil
-		if ok && version.GetVersion() >= s.Version || (!existInCurrentTarget && !existInNextTarget) {
+
+		if ok && version.GetVersion() >= s.Version ||
+			!existInCurrentTarget && !existInNextTarget {
 			continue
 		}
+
+		// Delta logs are outdated
+		if existInCurrentTarget && s.LastDeltaTimestamp < currentTarget.GetDmlPosition().GetTimestamp() {
+			ctx, cancel := context.WithTimeout(context.Background(), RPCTimeout)
+			resp, err := o.broker.GetSegmentInfo(ctx, s.GetID())
+			if err != nil || len(resp.GetInfos()) == 0 {
+				log.Warn("failed to get segment info from DataCoord", zap.Error(err))
+				cancel()
+				continue
+			}
+			cancel()
+
+			segment := resp.GetInfos()[0]
+			loadInfo := utils.PackSegmentLoadInfo(segment, nil)
+
+			ret = append(ret, &querypb.SyncAction{
+				Type:        querypb.SyncType_Amend,
+				PartitionID: s.GetPartitionID(),
+				SegmentID:   s.GetID(),
+				NodeID:      s.Node,
+				Version:     s.Version,
+				Info:        loadInfo,
+			})
+		}
+
 		ret = append(ret, &querypb.SyncAction{
 			Type:        querypb.SyncType_Set,
 			PartitionID: s.GetPartitionID(),
@@ -180,6 +212,7 @@ func NewLeaderObserver(
 	dist *meta.DistributionManager,
 	meta *meta.Meta,
 	targetMgr *meta.TargetManager,
+	broker meta.Broker,
 	cluster session.Cluster,
 ) *LeaderObserver {
 	return &LeaderObserver{
@@ -187,6 +220,7 @@ func NewLeaderObserver(
 		dist:    dist,
 		meta:    meta,
 		target:  targetMgr,
+		broker:  broker,
 		cluster: cluster,
 	}
 }

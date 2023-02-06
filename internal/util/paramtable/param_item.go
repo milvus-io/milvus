@@ -84,6 +84,10 @@ func (pi *ParamItem) GetAsInt32() int32 {
 	return int32(getAsInt64(pi.GetValue()))
 }
 
+func (pi *ParamItem) GetAsUint32() uint32 {
+	return uint32(getAsInt64(pi.GetValue()))
+}
+
 func (pi *ParamItem) GetAsInt64() int64 {
 	return getAsInt64(pi.GetValue())
 }

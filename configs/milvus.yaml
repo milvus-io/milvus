@@ -192,7 +192,7 @@ queryCoord:
   heartbeatAvailableInterval: 10000 # 10s, Only QueryNodes which fetched heartbeats within the duration are available
   loadTimeoutSeconds: 600
   checkHandoffInterval: 5000
-  taskMergeCap: 16
+  taskMergeCap: 1
   taskExecutionCap: 256
   enableActiveStandby: false  # Enable active-standby
 

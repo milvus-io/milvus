@@ -73,7 +73,7 @@ func (suite *LeaderObserverTestSuite) SetupTest() {
 	suite.mockCluster = session.NewMockCluster(suite.T())
 	distManager := meta.NewDistributionManager()
 	targetManager := meta.NewTargetManager(suite.broker, suite.meta)
-	suite.observer = NewLeaderObserver(distManager, suite.meta, targetManager, suite.mockCluster)
+	suite.observer = NewLeaderObserver(distManager, suite.meta, targetManager, suite.broker, suite.mockCluster)
 }
 
 func (suite *LeaderObserverTestSuite) TearDownTest() {

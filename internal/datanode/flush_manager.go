@@ -363,7 +363,7 @@ func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segmentID Uni
 	}
 
 	// encode data and convert output data
-	inCodec := storage.NewInsertCodec(meta)
+	inCodec := storage.NewInsertCodecWithSchema(meta)
 
 	binLogs, statsBinlogs, err := inCodec.Serialize(partID, segmentID, data.buffer)
 	if err != nil {

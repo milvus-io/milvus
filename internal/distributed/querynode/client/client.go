@@ -396,3 +396,23 @@ func (c *Client) SyncDistribution(ctx context.Context, req *querypb.SyncDistribu
 	}
 	return ret.(*commonpb.Status), err
 }
+
+// Delete is used to forward delete message between delegator and workers.
+func (c *Client) Delete(ctx context.Context, req *querypb.DeleteRequest) (*commonpb.Status, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID()),
+	)
+	ret, err := c.grpcClient.Call(ctx, func(client querypb.QueryNodeClient) (any, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.Delete(ctx, req)
+	})
+
+	if err != nil || ret == nil {
+		return nil, err
+	}
+	return ret.(*commonpb.Status), err
+}

@@ -29,6 +29,53 @@ func (_m *MockQueryNodeServer) EXPECT() *MockQueryNodeServer_Expecter {
 	return &MockQueryNodeServer_Expecter{mock: &_m.Mock}
 }
 
+// Delete provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryNodeServer) Delete(_a0 context.Context, _a1 *querypb.DeleteRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *commonpb.Status
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.DeleteRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	var r1 error
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.DeleteRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockQueryNodeServer_Delete_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Delete'
+type MockQueryNodeServer_Delete_Call struct {
+	*mock.Call
+}
+
+// Delete is a helper method to define mock.On call
+//  - _a0 context.Context
+//  - _a1 *querypb.DeleteRequest
+func (_e *MockQueryNodeServer_Expecter) Delete(_a0 interface{}, _a1 interface{}) *MockQueryNodeServer_Delete_Call {
+	return &MockQueryNodeServer_Delete_Call{Call: _e.mock.On("Delete", _a0, _a1)}
+}
+
+func (_c *MockQueryNodeServer_Delete_Call) Run(run func(_a0 context.Context, _a1 *querypb.DeleteRequest)) *MockQueryNodeServer_Delete_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*querypb.DeleteRequest))
+	})
+	return _c
+}
+
+func (_c *MockQueryNodeServer_Delete_Call) Return(_a0 *commonpb.Status, _a1 error) *MockQueryNodeServer_Delete_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
 // GetComponentStates provides a mock function with given fields: _a0, _a1
 func (_m *MockQueryNodeServer) GetComponentStates(_a0 context.Context, _a1 *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
 	ret := _m.Called(_a0, _a1)

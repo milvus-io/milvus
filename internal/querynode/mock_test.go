@@ -592,10 +592,7 @@ func genVectorChunkManager(ctx context.Context, col *Collection) (*storage.Vecto
 		return nil, err
 	}
 
-	vcm, err := storage.NewVectorChunkManager(ctx, lcm, rcm, &etcdpb.CollectionMeta{
-		ID:     col.id,
-		Schema: col.schema,
-	}, Params.QueryNodeCfg.CacheMemoryLimit.GetAsInt64(), false)
+	vcm, err := storage.NewVectorChunkManager(ctx, lcm, rcm, Params.QueryNodeCfg.CacheMemoryLimit.GetAsInt64(), false)
 	if err != nil {
 		return nil, err
 	}
@@ -905,7 +902,7 @@ func genStorageBlob(collectionID UniqueID,
 	}
 	tmpSchema.Fields = append(tmpSchema.Fields, schema.Fields...)
 	collMeta := genCollectionMeta(collectionID, tmpSchema)
-	inCodec := storage.NewInsertCodec(collMeta)
+	inCodec := storage.NewInsertCodecWithSchema(collMeta)
 	insertData, err := genInsertData(msgLength, schema)
 	if err != nil {
 		return nil, nil, err

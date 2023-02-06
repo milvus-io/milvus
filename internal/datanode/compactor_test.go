@@ -545,7 +545,7 @@ func getInt64DeltaBlobs(segID UniqueID, pks []UniqueID, tss []Timestamp) ([]*Blo
 }
 
 func getInsertBlobs(segID UniqueID, iData *InsertData, meta *etcdpb.CollectionMeta) ([]*Blob, error) {
-	iCodec := storage.NewInsertCodec(meta)
+	iCodec := storage.NewInsertCodecWithSchema(meta)
 
 	iblobs, _, err := iCodec.Serialize(10, segID, iData)
 	return iblobs, err
