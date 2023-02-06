@@ -153,16 +153,14 @@ func (suite *ResourceManagerSuite) TestHandleNodeUp() {
 	suite.NoError(err)
 	defaultRG, err := suite.manager.GetResourceGroup(DefaultResourceGroupName)
 	suite.NoError(err)
-	oldNodesNum := len(defaultRG.GetNodes())
+	suite.Equal(0, defaultRG.GetCapacity())
 	suite.manager.HandleNodeUp(101)
 	rg, err = suite.manager.GetResourceGroup("rg1")
 	suite.NoError(err)
 	suite.Equal(rg.GetCapacity(), 3)
 	suite.Equal(len(rg.GetNodes()), 2)
 	suite.False(suite.manager.ContainsNode("rg1", 101))
-	nodes, err := suite.manager.GetNodes(DefaultResourceGroupName)
-	suite.NoError(err)
-	suite.Equal(len(nodes), oldNodesNum+1)
+	suite.Equal(1, defaultRG.GetCapacity())
 }
 
 func (suite *ResourceManagerSuite) TestRecover() {
