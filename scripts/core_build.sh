@@ -198,9 +198,10 @@ case "${unameOut}" in
     export CLANG_TOOLS_PATH="${llvm_prefix}/bin"
     export CC="${llvm_prefix}/bin/clang"
     export CXX="${llvm_prefix}/bin/clang++"
-    conan install ${CPP_SRC_DIR} --install-folder conan --build=missing -s compiler=clang -s compiler.libcxx=libc++ || { echo 'conan install failed'; exit 1; }
+    conan install ${CPP_SRC_DIR} --install-folder conan --build=missing -s compiler=clang -s compiler.version=15 -s compiler.libcxx=libc++ || { echo 'conan install failed'; exit 1; }
     ;;
   Linux*)
+    export CPU_TARGET=avx
     if [[ `gcc -v 2>&1 | sed -n 's/.*\(--with-default-libstdcxx-abi\)=\(\w*\).*/\2/p'` == "gcc4" ]]; then
       conan install ${CPP_SRC_DIR} --install-folder conan --build=missing || { echo 'conan install failed'; exit 1; }
     else 
@@ -211,9 +212,6 @@ case "${unameOut}" in
     echo "Cannot build on windows"
     ;;
 esac
-rm conan/Findbison.cmake
-rm conan/Findflex.cmake
-rm conan/FindProtobuf.cmake
 
 arch=$(uname -m)
 CMAKE_CMD="cmake \

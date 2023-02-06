@@ -42,9 +42,10 @@ main(int argc, char** argv) {
     // filesystem. We also need to register the dwrf reader factory:
     filesystems::registerLocalFileSystem();
     dwrf::registerDwrfReaderFactory();
+    auto pool = facebook::velox::memory::getDefaultMemoryPool();
 
     std::string filePath{argv[1]};
-    ReaderOptions readerOpts;
+    ReaderOptions readerOpts{pool.get()};
     // To make DwrfReader reads ORC file, setFileFormat to FileFormat::ORC
     readerOpts.setFileFormat(FileFormat::ORC);
     auto reader = DwrfReader::create(

@@ -35,6 +35,7 @@ class MilvusConan(ConanFile):
         "flex/2.6.4",
         "xsimd/9.0.1",
         "folly/2022.10.31.00@milvus/dev",
+        "velox/2023.02.07.01@milvus/dev",
     )
     generators = ("cmake", "cmake_find_package")
     default_options = {
@@ -47,8 +48,8 @@ class MilvusConan(ConanFile):
         "aws-sdk-cpp:text-to-speech": False,
         "aws-sdk-cpp:transfer": False,
         "gtest:build_gmock": False,
+        "folly:use_sse4_2": True,
     }
-    should_build = False
 
     def configure(self):
         # Macos M1 cannot use jemalloc
