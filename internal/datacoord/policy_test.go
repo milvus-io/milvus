@@ -443,7 +443,9 @@ func TestAvgAssignRegisterPolicy(t *testing.T) {
 			args{
 				&ChannelStore{
 					memkv.NewMemoryKV(),
-					map[int64]*NodeChannelInfo{},
+					map[int64]*NodeChannelInfo{
+						1: {NodeID: 1, Channels: make([]*channel, 0)},
+					},
 				},
 				1,
 			},
@@ -456,6 +458,7 @@ func TestAvgAssignRegisterPolicy(t *testing.T) {
 					memkv.NewMemoryKV(),
 					map[int64]*NodeChannelInfo{
 						bufferID: {bufferID, []*channel{{Name: "ch1", CollectionID: 1}}},
+						1:        {NodeID: 1, Channels: []*channel{}},
 					},
 				},
 				1,
@@ -480,6 +483,7 @@ func TestAvgAssignRegisterPolicy(t *testing.T) {
 					memkv.NewMemoryKV(),
 					map[int64]*NodeChannelInfo{
 						1: {1, []*channel{{Name: "ch1", CollectionID: 1}, {Name: "ch2", CollectionID: 1}}},
+						3: {3, []*channel{}},
 					},
 				},
 				3,
@@ -500,6 +504,7 @@ func TestAvgAssignRegisterPolicy(t *testing.T) {
 					map[int64]*NodeChannelInfo{
 						1: {1, []*channel{{Name: "ch1", CollectionID: 1}}},
 						2: {2, []*channel{{Name: "ch3", CollectionID: 1}}},
+						3: {3, []*channel{}},
 					},
 				},
 				3,
@@ -514,6 +519,7 @@ func TestAvgAssignRegisterPolicy(t *testing.T) {
 					map[int64]*NodeChannelInfo{
 						1: {1, []*channel{{Name: "ch1", CollectionID: 1}, {Name: "ch2", CollectionID: 1}, {Name: "ch3", CollectionID: 1}}},
 						2: {2, []*channel{}},
+						3: {3, []*channel{}},
 					},
 				},
 				3,
