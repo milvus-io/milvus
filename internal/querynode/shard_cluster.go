@@ -980,15 +980,7 @@ func (sc *ShardCluster) Search(ctx context.Context, req *querypb.SearchRequest, 
 		go func() {
 			defer wg.Done()
 
-			queryNode := GetQueryNode()
-			var partialResult *internalpb.SearchResults
-			var nodeErr error
-
-			if queryNode != nil && queryNode.IsStandAlone {
-				partialResult, nodeErr = queryNode.Search(reqCtx, nodeReq)
-			} else {
-				partialResult, nodeErr = node.client.Search(reqCtx, nodeReq)
-			}
+			partialResult, nodeErr := node.client.Search(reqCtx, nodeReq)
 
 			resultMut.Lock()
 			defer resultMut.Unlock()
