@@ -1050,6 +1050,42 @@ class TestCollectionSearch(TestcaseBase):
             assert sorted(list(set(ids))) == sorted(ids)
 
     @pytest.mark.tags(CaseLabel.L1)
+    def test_accurate_search_with_multi_segments(self, dim):
+        """
+        target: search collection with multi segments accurately
+        method: insert and flush twice
+        expect: result pk should be [19,9,18]
+        """
+        # 1. create a collection
+        nb = 10
+        fields = [cf.gen_int64_field("int64"), cf.gen_float_vec_field(dim=dim)]
+        schema = cf.gen_collection_schema(fields=fields, primary_field="int64")
+        collection_w = self.init_collection_wrap(schema=schema)
+
+        # 2. insert data and flush twice
+        for r in range(2):
+            pks = pd.Series(data=[r*nb+i for i in range(0, nb)])
+            vectors = [[i*2+r for _ in range(dim)] for i in range(0, nb)]
+            dataframe = pd.DataFrame({"int64": pks,
+                                    ct.default_float_vec_field_name: vectors})
+            collection_w.insert(dataframe)
+            collection_w.flush()
+            
+        # 3. search
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
+        collection_w.load()
+        vectors = [[20 for _ in range(dim)]]
+        collection_w.search(vectors, default_search_field,
+                            default_search_params, 3,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={
+                                    "nq": 1,
+                                    "limit": 3,
+                                    "ids": [19,9,18]
+                                })
+
+
+    @pytest.mark.tags(CaseLabel.L1)
     def test_search_with_empty_vectors(self, dim, auto_id, _async):
         """
         target: test search with empty query vector
