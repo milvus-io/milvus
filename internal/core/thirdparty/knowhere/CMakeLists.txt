@@ -75,6 +75,7 @@ macro(build_knowhere)
     add_dependencies(knowhere knowhere_ep)
 endmacro()
 
+
 set(KNOWHERE_SOURCE "AUTO")
 if (KNOWHERE_SOURCE STREQUAL "AUTO")
     find_package(knowhere)
