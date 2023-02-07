@@ -40,11 +40,39 @@ func Test_createCollectionTask_validate(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("shard num exceeds limit", func(t *testing.T) {
+	t.Run("shard num exceeds configuration", func(t *testing.T) {
+		cfgMaxShardNum := Params.RootCoordCfg.DmlChannelNum
+		restoreCfg := func() { Params.RootCoordCfg.DmlChannelNum = cfgMaxShardNum }
+		defer restoreCfg()
+
+		Params.RootCoordCfg.DmlChannelNum = 1
+
 		task := createCollectionTask{
 			Req: &milvuspb.CreateCollectionRequest{
 				Base:      &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
-				ShardsNum: maxShardNum + 1,
+				ShardsNum: 2,
+			},
+		}
+		err := task.validate()
+		assert.Error(t, err)
+	})
+
+	t.Run("shard num exceeds limit", func(t *testing.T) {
+		cfgMaxShardNum := Params.RootCoordCfg.DmlChannelNum
+		cfgShardLimit := Params.ProxyCfg.MaxShardNum
+		restoreCfg := func() {
+			Params.RootCoordCfg.DmlChannelNum = cfgMaxShardNum
+			Params.ProxyCfg.MaxShardNum = cfgShardLimit
+		}
+		defer restoreCfg()
+
+		Params.RootCoordCfg.DmlChannelNum = 100
+		Params.ProxyCfg.MaxShardNum = 4
+
+		task := createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:      &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				ShardsNum: 8,
 			},
 		}
 		err := task.validate()
