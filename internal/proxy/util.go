@@ -97,21 +97,44 @@ func validateCollectionNameOrAlias(entity, entityType string) error {
 
 	invalidMsg := fmt.Sprintf("Invalid collection %s: %s. ", entityType, entity)
 	if len(entity) > Params.ProxyCfg.MaxNameLength.GetAsInt() {
-		msg := invalidMsg + fmt.Sprintf("The length of a collection %s must be less than ", entityType) + Params.ProxyCfg.MaxNameLength.GetValue() + " characters."
-		return errors.New(msg)
+		return fmt.Errorf("%s the length of a collection %s must be less than %s characters", invalidMsg, entityType,
+			Params.ProxyCfg.MaxNameLength.GetValue())
 	}
 
 	firstChar := entity[0]
 	if firstChar != '_' && !isAlpha(firstChar) {
-		msg := invalidMsg + fmt.Sprintf("The first character of a collection %s must be an underscore or letter.", entityType)
-		return errors.New(msg)
+		return fmt.Errorf("%s the first character of a collection %s must be an underscore or letter", invalidMsg, entityType)
 	}
 
 	for i := 1; i < len(entity); i++ {
 		c := entity[i]
 		if c != '_' && !isAlpha(c) && !isNumber(c) {
-			msg := invalidMsg + fmt.Sprintf("Collection %s can only contain numbers, letters and underscores.", entityType)
-			return errors.New(msg)
+			return fmt.Errorf("%s collection %s can only contain numbers, letters and underscores", invalidMsg, entityType)
+		}
+	}
+	return nil
+}
+
+func ValidateResourceGroupName(entity string) error {
+	if entity == "" {
+		return fmt.Errorf("resource group name %s should not be empty", entity)
+	}
+
+	invalidMsg := fmt.Sprintf("Invalid resource group name %s.", entity)
+	if len(entity) > Params.ProxyCfg.MaxNameLength.GetAsInt() {
+		return fmt.Errorf("%s the length of a resource group name must be less than %s characters",
+			invalidMsg, Params.ProxyCfg.MaxNameLength.GetValue())
+	}
+
+	firstChar := entity[0]
+	if firstChar != '_' && !isAlpha(firstChar) {
+		return fmt.Errorf("%s the first character of a resource group name must be an underscore or letter", invalidMsg)
+	}
+
+	for i := 1; i < len(entity); i++ {
+		c := entity[i]
+		if c != '_' && !isAlpha(c) && !isNumber(c) {
+			return fmt.Errorf("%s resource group name can only contain numbers, letters and underscores", invalidMsg)
 		}
 	}
 	return nil
