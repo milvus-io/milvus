@@ -29,12 +29,16 @@ type ParamItem struct {
 	PanicIfEmpty bool
 
 	Formatter func(originValue string) string
+	Forbidden bool
 
 	manager *config.Manager
 }
 
 func (pi *ParamItem) Init(manager *config.Manager) {
 	pi.manager = manager
+	if pi.Forbidden {
+		pi.manager.ForbidUpdate(pi.Key)
+	}
 }
 
 // Get original value with error

@@ -30,7 +30,7 @@ func (ed *EventDispatcher) Get(key string) []EventHandler {
 }
 
 func (ed *EventDispatcher) Dispatch(event *Event) {
-	hs, ok := ed.registry[event.Key]
+	hs, ok := ed.registry[formatKey(event.Key)]
 	if !ok {
 		return
 	}
@@ -51,6 +51,7 @@ func (ed *EventDispatcher) Register(key string, handler EventHandler) {
 }
 
 func (ed *EventDispatcher) Unregister(key string, handler EventHandler) {
+	key = formatKey(key)
 	v, ok := ed.registry[key]
 	if !ok {
 		return

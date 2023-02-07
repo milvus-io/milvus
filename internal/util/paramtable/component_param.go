@@ -177,8 +177,8 @@ type commonConfig struct {
 	DataCoordWatchSubPath ParamItem `refreshable:"false"`
 	DataNodeSubName       ParamItem `refreshable:"false"`
 
-	DefaultPartitionName ParamItem `refreshable:"true"`
-	DefaultIndexName     ParamItem `refreshable:"true"`
+	DefaultPartitionName ParamItem `refreshable:"false"`
+	DefaultIndexName     ParamItem `refreshable:"false"`
 	RetentionDuration    ParamItem `refreshable:"true"`
 	EntityExpirationTTL  ParamItem `refreshable:"true"`
 
@@ -218,6 +218,7 @@ func (p *commonConfig) init(base *BaseTable) {
 		Version:      "2.1.0",
 		FallbackKeys: []string{"common.chanNamePrefix.cluster"},
 		PanicIfEmpty: true,
+		Forbidden:    true,
 	}
 	p.ClusterPrefix.Init(base.mgr)
 
@@ -377,6 +378,7 @@ func (p *commonConfig) init(base *BaseTable) {
 		Key:          "common.defaultPartitionName",
 		Version:      "2.0.0",
 		DefaultValue: "_default",
+		Forbidden:    true,
 	}
 	p.DefaultPartitionName.Init(base.mgr)
 
@@ -384,6 +386,7 @@ func (p *commonConfig) init(base *BaseTable) {
 		Key:          "common.defaultIndexName",
 		Version:      "2.0.0",
 		DefaultValue: "_default_idx",
+		Forbidden:    true,
 	}
 	p.DefaultIndexName.Init(base.mgr)
 

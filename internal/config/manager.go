@@ -22,6 +22,7 @@ import (
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
 )
 
@@ -79,18 +80,20 @@ func filterate(key string, filters ...Filter) (string, bool) {
 
 type Manager struct {
 	sync.RWMutex
-	Dispatcher   *EventDispatcher
-	sources      map[string]Source
-	keySourceMap map[string]string // store the key to config source, example: key is A.B.C and source is file which means the A.B.C's value is from file
-	overlays     map[string]string // store the highest priority configs which modified at runtime
+	Dispatcher    *EventDispatcher
+	sources       map[string]Source
+	keySourceMap  map[string]string // store the key to config source, example: key is A.B.C and source is file which means the A.B.C's value is from file
+	overlays      map[string]string // store the highest priority configs which modified at runtime
+	forbiddenKeys typeutil.Set[string]
 }
 
 func NewManager() *Manager {
 	return &Manager{
-		Dispatcher:   NewEventDispatcher(),
-		sources:      make(map[string]Source),
-		keySourceMap: make(map[string]string),
-		overlays:     make(map[string]string),
+		Dispatcher:    NewEventDispatcher(),
+		sources:       make(map[string]Source),
+		keySourceMap:  make(map[string]string),
+		overlays:      make(map[string]string),
+		forbiddenKeys: typeutil.NewSet[string](),
 	}
 }
 
@@ -173,22 +176,33 @@ func (m *Manager) AddSource(source Source) error {
 	return nil
 }
 
+// Update config at runtime, which can be called by others
+// The most used scenario is UT
 func (m *Manager) SetConfig(key, value string) {
 	m.Lock()
 	defer m.Unlock()
 	m.overlays[formatKey(key)] = value
 }
 
+// Delete config at runtime, which has the highest priority to override all other sources
 func (m *Manager) DeleteConfig(key string) {
 	m.Lock()
 	defer m.Unlock()
 	m.overlays[formatKey(key)] = TombValue
 }
 
+// Remove the config which set at runtime, use config from sources
 func (m *Manager) ResetConfig(key string) {
 	m.Lock()
 	defer m.Unlock()
 	delete(m.overlays, formatKey(key))
+}
+
+// Ignore any of update events, which means the config cannot auto refresh anymore
+func (m *Manager) ForbidUpdate(key string) {
+	m.Lock()
+	defer m.Unlock()
+	m.forbiddenKeys.Insert(formatKey(key))
 }
 
 // Do not use it directly, only used when add source and unittests.
@@ -289,6 +303,10 @@ func (m *Manager) updateEvent(e *Event) error {
 func (m *Manager) OnEvent(event *Event) {
 	m.Lock()
 	defer m.Unlock()
+	if m.forbiddenKeys.Contain(formatKey(event.Key)) {
+		log.Info("ignore event for forbidden key", zap.String("key", event.Key))
+		return
+	}
 	err := m.updateEvent(event)
 	if err != nil {
 		log.Warn("failed in updating event with error", zap.Error(err), zap.Any("event", event))
