@@ -40,14 +40,14 @@ FetchContent_Declare(
         # URL             ${KNOWHERE_SOURCE_URL}
         # URL_MD5         ${KNOWHERE_SOURCE_MD5}
         GIT_REPOSITORY  "https://github.com/cqy123456/knowhere.git"
-        GIT_TAG         test
+        GIT_TAG         ${KNOWHERE_VERSION}
         SOURCE_DIR      ${CMAKE_CURRENT_BINARY_DIR}/knowhere-src
         BINARY_DIR      ${CMAKE_CURRENT_BINARY_DIR}/knowhere-build
         DOWNLOAD_DIR    ${THIRDPARTY_DOWNLOAD_PATH} )
 
 FetchContent_GetProperties( knowhere )
 if ( NOT knowhere_POPULATED )
-    FetchContent_Populate( knowhere )
+    FetchContent_Populate( klonowhere )
 
     # Adding the following target:
     # knowhere
