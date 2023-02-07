@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -41,9 +42,10 @@ import (
 func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
 	ch := make(chan interface{}, 1)
 	type fields struct {
-		plans     map[int64]*compactionTask
-		sessions  *SessionManager
-		chManager *ChannelManager
+		plans            map[int64]*compactionTask
+		sessions         *SessionManager
+		chManager        *ChannelManager
+		allocatorFactory func() allocator
 	}
 	type args struct {
 		signal *compactionSignal
@@ -77,6 +79,7 @@ func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
 						},
 					},
 				},
+				allocatorFactory: func() allocator { return newMockAllocator() },
 			},
 			args{
 				signal: &compactionSignal{id: 100},
@@ -106,6 +109,49 @@ func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
 						},
 					},
 				},
+				allocatorFactory: func() allocator { return newMockAllocator() },
+			},
+			args{
+				signal: &compactionSignal{id: 100},
+				plan:   &datapb.CompactionPlan{PlanID: 1, Channel: "ch1", Type: datapb.CompactionType_MergeCompaction},
+			},
+			true,
+			nil,
+		},
+		{
+			"test_allocate_ts_failed",
+			fields{
+				plans: map[int64]*compactionTask{},
+				sessions: &SessionManager{
+					sessions: struct {
+						sync.RWMutex
+						data map[int64]*Session
+					}{
+						data: map[int64]*Session{
+							1: {client: &mockDataNodeClient{ch: ch, compactionResp: &commonpb.Status{ErrorCode: commonpb.ErrorCode_CacheFailed}}},
+						},
+					},
+				},
+				chManager: &ChannelManager{
+					store: &ChannelStore{
+						channelsInfo: map[int64]*NodeChannelInfo{
+							1: {NodeID: 1, Channels: []*channel{{Name: "ch1"}}},
+						},
+					},
+				},
+				allocatorFactory: func() allocator {
+					a := &NMockAllocator{}
+					start := time.Now()
+					a.EXPECT().allocTimestamp(mock.Anything).Call.Return(func(_ context.Context) Timestamp {
+						return tsoutil.ComposeTSByTime(time.Now(), 0)
+					}, func(_ context.Context) error {
+						if time.Since(start) > time.Second*2 {
+							return nil
+						}
+						return errors.New("mocked")
+					})
+					return a
+				},
 			},
 			args{
 				signal: &compactionSignal{id: 100},
@@ -122,14 +168,13 @@ func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
 				sessions:   tt.fields.sessions,
 				chManager:  tt.fields.chManager,
 				parallelCh: make(map[int64]chan struct{}),
-				allocator:  newMockAllocator(),
+				allocator:  tt.fields.allocatorFactory(),
 			}
 			Params.Save(Params.DataCoordCfg.CompactionCheckIntervalInSeconds.Key, "1")
 			c.start()
 			err := c.execCompactionPlan(tt.args.signal, tt.args.plan)
 			assert.Equal(t, tt.err, err)
 			if err == nil {
-				<-ch
 				task := c.getCompaction(tt.args.plan.PlanID)
 				if !tt.wantErr {
 					assert.Equal(t, tt.args.plan, task.plan)

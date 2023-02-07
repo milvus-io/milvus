@@ -35,6 +35,7 @@ import (
 const (
 	maxParallelCompactionTaskNum = 100
 	rpcCompactionTimeout         = 10 * time.Second
+	tsTimeout                    = uint64(1)
 )
 
 type compactionPlanContext interface {
@@ -183,6 +184,12 @@ func (c *compactionPlanHandler) execCompactionPlan(signal *compactionSignal, pla
 		ts, err := c.allocator.allocTimestamp(context.TODO())
 		if err != nil {
 			log.Warn("Alloc start time for CompactionPlan failed", zap.Int64("planID", plan.GetPlanID()))
+			// update plan ts to TIMEOUT ts
+			c.mu.Lock()
+			c.plans[plan.PlanID] = c.plans[plan.PlanID].shadowClone(func(task *compactionTask) {
+				task.plan.StartTime = tsTimeout
+			})
+			c.mu.Unlock()
 			return
 		}
 
