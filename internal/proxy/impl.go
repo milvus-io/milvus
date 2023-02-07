@@ -4737,9 +4737,16 @@ func (node *Proxy) CreateResourceGroup(ctx context.Context, request *milvuspb.Cr
 		return unhealthyStatus(), nil
 	}
 
+	method := "CreateResourceGroup"
+	if err := ValidateResourceGroupName(request.GetResourceGroup()); err != nil {
+		log.Warn("CreateResourceGroup failed",
+			zap.Error(err),
+		)
+		return getErrResponse(err, method), nil
+	}
+
 	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-CreateResourceGroup")
 	defer sp.Finish()
-	method := "CreateResourceGroup"
 	tr := timerecord.NewTimeRecorder(method)
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(Params.QueryCoordCfg.GetNodeID(), 10), method,
 		metrics.TotalLabel).Inc()
@@ -4759,13 +4766,7 @@ func (node *Proxy) CreateResourceGroup(ctx context.Context, request *milvuspb.Cr
 	if err := node.sched.ddQueue.Enqueue(t); err != nil {
 		log.Warn("CreateResourceGroup failed to enqueue",
 			zap.Error(err))
-
-		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(Params.QueryCoordCfg.GetNodeID(), 10), method,
-			metrics.AbandonLabel).Inc()
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return getErrResponse(err, method), nil
 	}
 
 	log.Debug("CreateResourceGroup enqueued",
@@ -4777,12 +4778,7 @@ func (node *Proxy) CreateResourceGroup(ctx context.Context, request *milvuspb.Cr
 			zap.Error(err),
 			zap.Uint64("BeginTS", t.BeginTs()),
 			zap.Uint64("EndTS", t.EndTs()))
-		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(Params.QueryCoordCfg.GetNodeID(), 10), method,
-			metrics.FailLabel).Inc()
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return getErrResponse(err, method), nil
 	}
 
 	log.Debug("CreateResourceGroup done",
@@ -4795,14 +4791,30 @@ func (node *Proxy) CreateResourceGroup(ctx context.Context, request *milvuspb.Cr
 	return t.result, nil
 }
 
+func getErrResponse(err error, method string) *commonpb.Status {
+	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(Params.QueryCoordCfg.GetNodeID(), 10), method, metrics.FailLabel).Inc()
+
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		Reason:    err.Error(),
+	}
+}
+
 func (node *Proxy) DropResourceGroup(ctx context.Context, request *milvuspb.DropResourceGroupRequest) (*commonpb.Status, error) {
 	if !node.checkHealthy() {
 		return unhealthyStatus(), nil
 	}
 
+	method := "DropResourceGroup"
+	if err := ValidateResourceGroupName(request.GetResourceGroup()); err != nil {
+		log.Warn("DropResourceGroup failed",
+			zap.Error(err),
+		)
+		return getErrResponse(err, method), nil
+	}
+
 	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-DropResourceGroup")
 	defer sp.Finish()
-	method := "DropResourceGroup"
 	tr := timerecord.NewTimeRecorder(method)
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(Params.QueryCoordCfg.GetNodeID(), 10), method,
 		metrics.TotalLabel).Inc()
@@ -4823,12 +4835,7 @@ func (node *Proxy) DropResourceGroup(ctx context.Context, request *milvuspb.Drop
 		log.Warn("DropResourceGroup failed to enqueue",
 			zap.Error(err))
 
-		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(Params.QueryCoordCfg.GetNodeID(), 10), method,
-			metrics.AbandonLabel).Inc()
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return getErrResponse(err, method), nil
 	}
 
 	log.Debug("DropResourceGroup enqueued",
@@ -4840,12 +4847,7 @@ func (node *Proxy) DropResourceGroup(ctx context.Context, request *milvuspb.Drop
 			zap.Error(err),
 			zap.Uint64("BeginTS", t.BeginTs()),
 			zap.Uint64("EndTS", t.EndTs()))
-		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(Params.QueryCoordCfg.GetNodeID(), 10), method,
-			metrics.FailLabel).Inc()
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return getErrResponse(err, method), nil
 	}
 
 	log.Debug("DropResourceGroup done",
@@ -4863,9 +4865,23 @@ func (node *Proxy) TransferNode(ctx context.Context, request *milvuspb.TransferN
 		return unhealthyStatus(), nil
 	}
 
+	method := "TransferNode"
+	if err := ValidateResourceGroupName(request.GetSourceResourceGroup()); err != nil {
+		log.Warn("TransferNode failed",
+			zap.Error(err),
+		)
+		return getErrResponse(err, method), nil
+	}
+
+	if err := ValidateResourceGroupName(request.GetTargetResourceGroup()); err != nil {
+		log.Warn("TransferNode failed",
+			zap.Error(err),
+		)
+		return getErrResponse(err, method), nil
+	}
+
 	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-TransferNode")
 	defer sp.Finish()
-	method := "TransferNode"
 	tr := timerecord.NewTimeRecorder(method)
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(Params.QueryCoordCfg.GetNodeID(), 10), method,
 		metrics.TotalLabel).Inc()
@@ -4886,12 +4902,7 @@ func (node *Proxy) TransferNode(ctx context.Context, request *milvuspb.TransferN
 		log.Warn("TransferNode failed to enqueue",
 			zap.Error(err))
 
-		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(Params.QueryCoordCfg.GetNodeID(), 10), method,
-			metrics.AbandonLabel).Inc()
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return getErrResponse(err, method), nil
 	}
 
 	log.Debug("TransferNode enqueued",
@@ -4903,12 +4914,7 @@ func (node *Proxy) TransferNode(ctx context.Context, request *milvuspb.TransferN
 			zap.Error(err),
 			zap.Uint64("BeginTS", t.BeginTs()),
 			zap.Uint64("EndTS", t.EndTs()))
-		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(Params.QueryCoordCfg.GetNodeID(), 10), method,
-			metrics.FailLabel).Inc()
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return getErrResponse(err, method), nil
 	}
 
 	log.Debug("TransferNode done",
@@ -4926,9 +4932,23 @@ func (node *Proxy) TransferReplica(ctx context.Context, request *milvuspb.Transf
 		return unhealthyStatus(), nil
 	}
 
+	method := "TransferReplica"
+	if err := ValidateResourceGroupName(request.GetSourceResourceGroup()); err != nil {
+		log.Warn("TransferReplica failed",
+			zap.Error(err),
+		)
+		return getErrResponse(err, method), nil
+	}
+
+	if err := ValidateResourceGroupName(request.GetTargetResourceGroup()); err != nil {
+		log.Warn("TransferReplica failed",
+			zap.Error(err),
+		)
+		return getErrResponse(err, method), nil
+	}
+
 	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-TransferReplica")
 	defer sp.Finish()
-	method := "TransferReplica"
 	tr := timerecord.NewTimeRecorder(method)
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(Params.QueryCoordCfg.GetNodeID(), 10), method,
 		metrics.TotalLabel).Inc()
@@ -4949,12 +4969,7 @@ func (node *Proxy) TransferReplica(ctx context.Context, request *milvuspb.Transf
 		log.Warn("TransferReplica failed to enqueue",
 			zap.Error(err))
 
-		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(Params.QueryCoordCfg.GetNodeID(), 10), method,
-			metrics.AbandonLabel).Inc()
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return getErrResponse(err, method), nil
 	}
 
 	log.Debug("TransferReplica enqueued",
@@ -4966,12 +4981,7 @@ func (node *Proxy) TransferReplica(ctx context.Context, request *milvuspb.Transf
 			zap.Error(err),
 			zap.Uint64("BeginTS", t.BeginTs()),
 			zap.Uint64("EndTS", t.EndTs()))
-		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(Params.QueryCoordCfg.GetNodeID(), 10), method,
-			metrics.FailLabel).Inc()
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}, nil
+		return getErrResponse(err, method), nil
 	}
 
 	log.Debug("TransferReplica done",
@@ -5060,9 +5070,20 @@ func (node *Proxy) DescribeResourceGroup(ctx context.Context, request *milvuspb.
 		}, nil
 	}
 
+	method := "DescribeResourceGroup"
+	GetErrResponse := func(err error) *milvuspb.DescribeResourceGroupResponse {
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(Params.QueryCoordCfg.GetNodeID(), 10), method, metrics.FailLabel).Inc()
+
+		return &milvuspb.DescribeResourceGroupResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+		}
+	}
+
 	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-DescribeResourceGroup")
 	defer sp.Finish()
-	method := "DescribeResourceGroup"
 	tr := timerecord.NewTimeRecorder(method)
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(Params.QueryCoordCfg.GetNodeID(), 10), method,
 		metrics.TotalLabel).Inc()
@@ -5083,14 +5104,7 @@ func (node *Proxy) DescribeResourceGroup(ctx context.Context, request *milvuspb.
 		log.Warn("DescribeResourceGroup failed to enqueue",
 			zap.Error(err))
 
-		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(Params.QueryCoordCfg.GetNodeID(), 10), method,
-			metrics.AbandonLabel).Inc()
-		return &milvuspb.DescribeResourceGroupResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
-		}, nil
+		return GetErrResponse(err), nil
 	}
 
 	log.Debug("DescribeResourceGroup enqueued",
@@ -5102,14 +5116,7 @@ func (node *Proxy) DescribeResourceGroup(ctx context.Context, request *milvuspb.
 			zap.Error(err),
 			zap.Uint64("BeginTS", t.BeginTs()),
 			zap.Uint64("EndTS", t.EndTs()))
-		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(Params.QueryCoordCfg.GetNodeID(), 10), method,
-			metrics.FailLabel).Inc()
-		return &milvuspb.DescribeResourceGroupResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
-		}, nil
+		return GetErrResponse(err), nil
 	}
 
 	log.Debug("DescribeResourceGroup done",
