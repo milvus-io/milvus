@@ -463,19 +463,29 @@ func (coord *QueryCoordMock) ListResourceGroups(ctx context.Context, req *milvus
 }
 
 func (coord *QueryCoordMock) DescribeResourceGroup(ctx context.Context, req *querypb.DescribeResourceGroupRequest) (*querypb.DescribeResourceGroupResponse, error) {
+	if req.GetResourceGroup() == "rg" {
+		return &querypb.DescribeResourceGroupResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+				Reason:    "",
+			},
+			ResourceGroup: &querypb.ResourceGroupInfo{
+				Name:             "rg",
+				Capacity:         2,
+				NumAvailableNode: 1,
+				NumOutgoingNode:  map[int64]int32{1: 1},
+				NumIncomingNode:  map[int64]int32{2: 2},
+			},
+		}, nil
+	}
+
 	return &querypb.DescribeResourceGroupResponse{
 		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
 			Reason:    "",
 		},
-		ResourceGroup: &querypb.ResourceGroupInfo{
-			Name:             "rg",
-			Capacity:         2,
-			NumAvailableNode: 1,
-			NumOutgoingNode:  map[int64]int32{1: 1},
-			NumIncomingNode:  map[int64]int32{2: 2},
-		},
 	}, nil
+
 }
 
 func NewQueryCoordMock(opts ...QueryCoordMockOption) *QueryCoordMock {
