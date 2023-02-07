@@ -47,6 +47,22 @@ type Validator struct {
 	fieldName   string                                               // field name
 }
 
+func getPrimaryKey(obj interface{}, fieldName string, isString bool) (string, error) {
+	// varchar type primary field, the value must be a string
+	if isString {
+		if value, ok := obj.(string); ok {
+			return value, nil
+		}
+		return "", fmt.Errorf("illegal value '%v' for varchar type primary key field '%s'", obj, fieldName)
+	}
+
+	// int64 type primary field, the value must be json.Number
+	if num, ok := obj.(json.Number); ok {
+		return string(num), nil
+	}
+	return "", fmt.Errorf("illegal value '%v' for int64 type primary key field '%s'", obj, fieldName)
+}
+
 // JSONRowConsumer is row-based json format consumer class
 type JSONRowConsumer struct {
 	collectionSchema *schemapb.CollectionSchema              // collection schema
@@ -225,6 +241,7 @@ func (v *JSONRowConsumer) Handle(rows []map[storage.FieldID]interface{}) error {
 	// consume rows
 	for i := 0; i < len(rows); i++ {
 		row := rows[i]
+		rowNumber := v.rowCounter + int64(i)
 
 		// hash to a shard number
 		var shard uint32
@@ -235,7 +252,13 @@ func (v *JSONRowConsumer) Handle(rows []map[storage.FieldID]interface{}) error {
 			}
 
 			value := row[v.primaryKey]
-			pk := string(value.(string))
+			pk, err := getPrimaryKey(value, primaryValidator.fieldName, primaryValidator.isString)
+			if err != nil {
+				log.Error("JSON row consumer: failed to parse primary key at the row",
+					zap.Int64("rowNumber", rowNumber), zap.Error(err))
+				return fmt.Errorf("failed to parse primary key at the row %d, error: %w", rowNumber, err)
+			}
+
 			hash := typeutil.HashString2Uint32(pk)
 			shard = hash % uint32(v.shardNum)
 			pkArray := v.segmentsData[shard][v.primaryKey].(*storage.StringFieldData)
@@ -247,22 +270,28 @@ func (v *JSONRowConsumer) Handle(rows []map[storage.FieldID]interface{}) error {
 				pk = rowIDBegin + int64(i)
 			} else {
 				value := row[v.primaryKey]
+				strValue, err := getPrimaryKey(value, primaryValidator.fieldName, primaryValidator.isString)
+				if err != nil {
+					log.Error("JSON row consumer: failed to parse primary key at the row",
+						zap.Int64("rowNumber", rowNumber), zap.Error(err))
+					return fmt.Errorf("failed to parse primary key at the row %d, error: %w", rowNumber, err)
+				}
+
 				// parse the pk from a string
-				strValue := string(value.(json.Number))
 				pk, err = strconv.ParseInt(strValue, 10, 64)
 				if err != nil {
 					log.Error("JSON row consumer: failed to parse primary key at the row",
-						zap.String("value", strValue), zap.Int64("rowNumber", v.rowCounter+int64(i)), zap.Error(err))
+						zap.String("value", strValue), zap.Int64("rowNumber", rowNumber), zap.Error(err))
 					return fmt.Errorf("failed to parse primary key '%s' at the row %d, error: %w",
-						strValue, v.rowCounter+int64(i), err)
+						strValue, rowNumber, err)
 				}
 			}
 
 			hash, err := typeutil.Hash32Int64(pk)
 			if err != nil {
 				log.Error("JSON row consumer: failed to hash primary key at the row",
-					zap.Int64("key", pk), zap.Int64("rowNumber", v.rowCounter+int64(i)), zap.Error(err))
-				return fmt.Errorf("failed to hash primary key %d at the row %d, error: %w", pk, v.rowCounter+int64(i), err)
+					zap.Int64("key", pk), zap.Int64("rowNumber", rowNumber), zap.Error(err))
+				return fmt.Errorf("failed to hash primary key %d at the row %d, error: %w", pk, rowNumber, err)
 			}
 
 			shard = hash % uint32(v.shardNum)
@@ -282,9 +311,9 @@ func (v *JSONRowConsumer) Handle(rows []map[storage.FieldID]interface{}) error {
 			value := row[name]
 			if err := validator.convertFunc(value, v.segmentsData[shard][name]); err != nil {
 				log.Error("JSON row consumer: failed to convert value for field at the row",
-					zap.String("fieldName", validator.fieldName), zap.Int64("rowNumber", v.rowCounter+int64(i)), zap.Error(err))
+					zap.String("fieldName", validator.fieldName), zap.Int64("rowNumber", rowNumber), zap.Error(err))
 				return fmt.Errorf("failed to convert value for field '%s' at the row %d,  error: %w",
-					validator.fieldName, v.rowCounter+int64(i), err)
+					validator.fieldName, rowNumber, err)
 			}
 		}
 	}
