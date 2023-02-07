@@ -348,12 +348,16 @@ func (s *searchTask) CanMergeWith(t readTask) bool {
 		return false
 	}
 
-	pre := s.NQ * s.TopK * 1.0
-	newTopK := s.TopK
-	if newTopK < s2.TopK {
-		newTopK = s2.TopK
+	pre := s.NQ * s.TopK
+	if s2.NQ*s2.TopK < pre {
+		pre = s2.NQ * s2.TopK
 	}
-	after := (s.NQ + s2.NQ) * newTopK
+
+	maxTopk := s.TopK
+	if maxTopk < s2.TopK {
+		maxTopk = s2.TopK
+	}
+	after := (s.NQ + s2.NQ) * maxTopk
 
 	if pre == 0 {
 		return false
