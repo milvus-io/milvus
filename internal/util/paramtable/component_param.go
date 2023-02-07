@@ -749,7 +749,7 @@ func (p *proxyConfig) init(base *BaseTable) {
 
 	p.MaxShardNum = ParamItem{
 		Key:          "proxy.maxShardNum",
-		DefaultValue: "256",
+		DefaultValue: "64",
 		Version:      "2.0.0",
 		PanicIfEmpty: true,
 	}
