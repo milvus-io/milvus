@@ -1413,7 +1413,7 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	p.MaxWatchDuration = ParamItem{
 		Key:          "dataCoord.channel.maxWatchDuration",
 		Version:      "2.2.1",
-		DefaultValue: "60",
+		DefaultValue: "600",
 	}
 	p.MaxWatchDuration.Init(base.mgr)
 
@@ -1525,7 +1525,7 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	p.CompactionTimeoutInSeconds = ParamItem{
 		Key:          "dataCoord.compaction.timeout",
 		Version:      "2.0.0",
-		DefaultValue: "180",
+		DefaultValue: "300",
 	}
 	p.CompactionTimeoutInSeconds.Init(base.mgr)
 
@@ -1560,7 +1560,7 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	p.SingleCompactionDeltalogMaxNum = ParamItem{
 		Key:          "dataCoord.compaction.single.deltalog.maxnum",
 		Version:      "2.0.0",
-		DefaultValue: "1000",
+		DefaultValue: "200",
 	}
 	p.SingleCompactionDeltalogMaxNum.Init(base.mgr)
 
@@ -1595,7 +1595,7 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	p.GCDropTolerance = ParamItem{
 		Key:          "dataCoord.gc.dropTolerance",
 		Version:      "2.0.0",
-		DefaultValue: "86400",
+		DefaultValue: "3600",
 	}
 	p.GCDropTolerance.Init(base.mgr)
 
