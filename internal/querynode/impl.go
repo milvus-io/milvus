@@ -755,12 +755,10 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
-				failRet.Status.Reason = err.Error()
 				failRet.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 				return err
 			}
 			if ret.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-				failRet.Status.Reason = ret.Status.Reason
 				failRet.Status.ErrorCode = ret.Status.ErrorCode
 				return fmt.Errorf("%s", ret.Status.Reason)
 			}
@@ -769,6 +767,8 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 		})
 	}
 	if err := runningGp.Wait(); err != nil {
+		// make fail reason comes from first err
+		failRet.Status.Reason = err.Error()
 		return failRet, nil
 	}
 
@@ -1137,12 +1137,10 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
-				failRet.Status.Reason = err.Error()
 				failRet.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 				return err
 			}
 			if ret.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-				failRet.Status.Reason = ret.Status.Reason
 				failRet.Status.ErrorCode = ret.Status.ErrorCode
 				return fmt.Errorf("%s", ret.Status.Reason)
 			}
@@ -1151,6 +1149,7 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 		})
 	}
 	if err := runningGp.Wait(); err != nil {
+		failRet.Status.Reason = err.Error()
 		return failRet, nil
 	}
 	ret, err := mergeInternalRetrieveResultsAndFillIfEmpty(ctx, toMergeResults, req.GetReq().GetLimit(), req.GetReq().GetOutputFieldsId(), coll.Schema())
