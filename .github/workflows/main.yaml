@@ -33,7 +33,7 @@ on:
       - '!build/ci/jenkins/**'
 
 jobs:
-  ubuntu:
+  UT:
     name: Build and test AMD64 Ubuntu ${{ matrix.ubuntu }}
     runs-on: ubuntu-${{ matrix.ubuntu }}
     timeout-minutes: 120
@@ -46,7 +46,27 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v2
-      - name: "Generate CCache Hash"
+        with:
+          fetch-depth: 0
+      - name: 'Check Changed files'
+        id: changed-files-cpp
+        uses: tj-actions/changed-files@v35
+        with:
+          since_last_remote_commit: 'true'
+          files: |
+            **/*.cpp
+            **/*.cc
+            **/*.c
+            **/*.h
+            **/*.hpp
+            **/*.CMakeLists.txt
+            **/conanfiles.*          
+      - name: 'Setup Use USE_ASAN'
+        if: steps.changed-files-cpp.outputs.any_changed == 'true'
+        run: |
+            echo "useasan=true" >> $GITHUB_ENV
+            echo "Setup USE_ASAN to true since cpp file(s) changed"
+      - name: 'Generate CCache Hash'
         env:
           CORE_HASH: ${{ hashFiles( 'internal/core/**/*.cpp', 'internal/core/**/*.cc', 'internal/core/**/*.c', 'internal/core/**/*.h', 'internal/core/**/*.hpp', 'internal/core/**/CMakeLists.txt') }}
         run: |
@@ -58,40 +78,57 @@ jobs:
           path: .docker/amd64-ubuntu${{ matrix.ubuntu }}-ccache
           key: ubuntu${{ matrix.ubuntu }}-ccache-${{ env.corehash }}
           restore-keys: ubuntu${{ matrix.ubuntu }}-ccache-
-      - name: Cache Third Party
-        uses: actions/cache@v3
-        with:
-          path: .docker/thirdparty
-          key: ubuntu${{ matrix.ubuntu }}-thirdparty-${{ hashFiles('internal/core/thirdparty/**') }}
-          restore-keys: ubuntu${{ matrix.ubuntu }}-thirdparty-
       - name: Cache Go Mod Volumes
         uses: actions/cache@v3
         with:
           path: .docker/amd64-ubuntu${{ matrix.ubuntu }}-go-mod
           key: ubuntu${{ matrix.ubuntu }}-go-mod-${{ hashFiles('**/go.sum') }}
           restore-keys: ubuntu${{ matrix.ubuntu }}-go-mod-
+      - name: Cache Conan Packages
+        uses: actions/cache@v3
+        with:
+          path: .docker/amd64-ubuntu${{ matrix.ubuntu }}-conan
+          key: ubuntu${{ matrix.ubuntu }}-conan-${{ hashFiles('internal/core/conanfile.*') }}
+          restore-keys: ubuntu${{ matrix.ubuntu }}-conan-
       - name: Start Service
         shell: bash
         run: |
           docker-compose up -d pulsar etcd minio
       - name: Build and UnitTest
         run: |
-          ./build/builder.sh /bin/bash -c "make ci-ut"
+          ./build/builder.sh /bin/bash -c "make USE_ASAN=${{env.useasan}} ci-ut"
       - name: Get the status & restart count for containers when ut failed
         if: ${{ failure() }}
         run: |
           echo "----show current status for each container---"
-          docker ps -a --format "table {{.Names}}\t\t{{.Image}}\t\t{{.Status}}"
-          for container in $(docker ps -a --format "table {{.Names}}" | grep -v "NAMES"); do
+          docker ps --format "table {{.Names}}\t\t{{.Image}}\t\t{{.Status}}"
+          for container in $(docker ps --format "table {{.Names}}" | grep -v "NAMES"); do
               echo "restart count for ${container} is $(docker inspect ${container} --format '{{json .RestartCount}}')"
           done
-          for container in $(docker ps -a --format "table {{.Names}}" | grep -v "NAMES"); do
-              if [ "$(docker inspect ${container} --format '{{json .State.Status}}')" != "running" ]
-              then
-                echo "--------- logs for ${container}, status: $(docker inspect ${container} --format '{{json .State.Status}}') ------------"
-                docker logs ${container} --tail=200
-              fi
-          done
+      - name: Archive code coverage results
+        uses: actions/upload-artifact@v3
+        with:
+          name: code-coverage-result
+          path: |
+            ./go_coverage.txt
+            ./lcov_output.info
+            *.info
+            *.out
+            .git
+  codecov:
+    name: Upload Code Coverage
+    needs: UT
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Download code coverage results
+        uses: actions/download-artifact@v3.0.1
+        with:
+          name: code-coverage-result
+      - name: Display structure of code coverage results
+        run: |
+          ls -lah
+
       - name: Upload coverage to Codecov
         if: "github.repository == 'milvus-io/milvus'"
         uses: codecov/codecov-action@v3.1.1
@@ -99,7 +136,7 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./go_coverage.txt,./lcov_output.info
-          name: ubuntu-${{ matrix.ubuntu }}-unittests
+          name: ubuntu-20.04-unittests
           fail_ci_if_error: true
       - name: Retry Upload coverage to Codecov
         if: "${{ failure() }} && github.repository == 'milvus-io/milvus'"
