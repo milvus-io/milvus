@@ -20,7 +20,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends wget curl ca-ce
     apt-get remove --purge -y && \
     rm -rf /var/lib/apt/lists/*
 
-RUN pip3 install conan
+RUN pip3 install conan==1.58.0
 
 # Install Go
 ENV GOPATH /go
