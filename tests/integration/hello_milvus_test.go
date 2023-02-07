@@ -125,6 +125,7 @@ func TestHelloMilvus(t *testing.T) {
 		HashKeys:       hashKeys,
 		NumRows:        uint32(rowNum),
 	})
+	assert.NoError(t, err)
 	assert.Equal(t, insertResult.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 
 	// flush
@@ -150,7 +151,7 @@ func TestHelloMilvus(t *testing.T) {
 				SegmentIDs: ids,
 			})
 			if err != nil {
-				panic(errors.New("GetFlushState failed"))
+				//panic(errors.New("GetFlushState failed"))
 				return false
 			}
 			return resp.GetFlushed()
@@ -193,6 +194,7 @@ func TestHelloMilvus(t *testing.T) {
 	if createIndexStatus.GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn("createIndexStatus fail reason", zap.String("reason", createIndexStatus.GetReason()))
 	}
+	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_Success, createIndexStatus.GetErrorCode())
 
 	// load
@@ -200,16 +202,12 @@ func TestHelloMilvus(t *testing.T) {
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})
+	assert.NoError(t, err)
 	if loadStatus.GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn("loadStatus fail reason", zap.String("reason", loadStatus.GetReason()))
 	}
 	assert.Equal(t, commonpb.ErrorCode_Success, loadStatus.GetErrorCode())
 	for {
-		select {
-		case <-ctx.Done():
-			errors.New("context deadline exceeded")
-		default:
-		}
 		loadProgress, err := c.proxy.GetLoadingProgress(ctx, &milvuspb.GetLoadingProgressRequest{
 			CollectionName: collectionName,
 		})

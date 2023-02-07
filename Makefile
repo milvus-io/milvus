@@ -74,6 +74,7 @@ else
 	@echo "Running $@ check"
 	@GO111MODULE=on env bash $(PWD)/scripts/gofmt.sh cmd/
 	@GO111MODULE=on env bash $(PWD)/scripts/gofmt.sh internal/
+	@GO111MODULE=on env bash $(PWD)/scripts/gofmt.sh tests/integration/
 	@GO111MODULE=on env bash $(PWD)/scripts/gofmt.sh tests/go/
 endif
 
@@ -87,6 +88,7 @@ static-check: getdeps
 	@GO111MODULE=on $(INSTALL_PATH)/golangci-lint cache clean
 	@source $(PWD)/scripts/setenv.sh && GO111MODULE=on $(INSTALL_PATH)/golangci-lint run --timeout=30m --config ./.golangci.yml ./internal/...
 	@source $(PWD)/scripts/setenv.sh && GO111MODULE=on $(INSTALL_PATH)/golangci-lint run --timeout=30m --config ./.golangci.yml ./cmd/...
+	@source $(PWD)/scripts/setenv.sh && GO111MODULE=on $(INSTALL_PATH)/golangci-lint run --timeout=30m --config ./.golangci.yml ./tests/integration/...
 
 verifiers: build-cpp getdeps cppcheck fmt static-check
 
@@ -104,6 +106,14 @@ meta-migration:
     		mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && \
     		GO111MODULE=on $(GO) build -ldflags="-r $${RPATH} -X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)'" \
     		${APPLE_SILICON_FLAG} -o $(INSTALL_PATH)/meta-migration $(MIGRATION_PATH)/main.go 1>/dev/null
+
+INTERATION_PATH = $(PWD)/tests/integration
+integration-test:
+	@echo "Building integration tests ..."
+	@source $(PWD)/scripts/setenv.sh && \
+    		mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && \
+    		GO111MODULE=on $(GO) build -ldflags="-r $${RPATH} -X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)'" \
+    		${APPLE_SILICON_FLAG} -o $(INSTALL_PATH)/integration-test $(INTERATION_PATH)/ 1>/dev/null
 
 BUILD_TAGS = $(shell git describe --tags --always --dirty="-dev")
 BUILD_TIME = $(shell date -u)
