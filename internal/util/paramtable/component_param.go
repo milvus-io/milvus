@@ -654,7 +654,7 @@ func (p *proxyConfig) initMaxPasswordLength() {
 }
 
 func (p *proxyConfig) initMaxShardNum() {
-	str := p.Base.LoadWithDefault("proxy.maxShardNum", "256")
+	str := p.Base.LoadWithDefault("proxy.maxShardNum", "64")
 	maxShardNum, err := strconv.ParseInt(str, 10, 64)
 	if err != nil {
 		panic(err)
