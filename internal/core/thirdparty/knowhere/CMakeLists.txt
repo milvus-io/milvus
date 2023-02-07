@@ -47,12 +47,12 @@ FetchContent_Declare(
 
 FetchContent_GetProperties( knowhere )
 if ( NOT knowhere_POPULATED )
-    FetchContent_Populate( klonowhere )
+    FetchContent_Populate( knowhere )
 
     # Adding the following target:
     # knowhere
     add_subdirectory( ${knowhere_SOURCE_DIR}
-                      ${knowhere_BINARY_DIR} )
+                        ${knowhere_BINARY_DIR} )
 endif()
 
 # get prometheus COMPILE_OPTIONS
