@@ -190,7 +190,6 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 			nodeID:      nodeID,
 		}
 		chManager.stateTimer.notifyTimeoutWatcher(e)
-		chManager.stateTimer.stopIfExist(e)
 
 		waitAndCheckState(t, metakv, datapb.ChannelWatchState_ToRelease, nodeID, cName, collectionID)
 		assert.Eventually(t, func() bool {
