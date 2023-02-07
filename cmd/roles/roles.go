@@ -47,14 +47,12 @@ import (
 )
 
 // all milvus related metrics is in a separate registry
-var Registry *prometheus.Registry
+var Registry *metrics.MilvusRegistry
 
 func init() {
-	Registry = prometheus.NewRegistry()
-	Registry.MustRegister(prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))
-	Registry.MustRegister(prometheus.NewGoCollector())
-	metrics.RegisterEtcdMetrics(Registry)
-	metrics.RegisterMq(Registry)
+	Registry = metrics.NewMilvusRegistry()
+	metrics.RegisterEtcdMetrics(Registry.GoRegistry)
+	metrics.RegisterMq(Registry.GoRegistry)
 }
 
 func stopRocksmq() {
@@ -95,7 +93,7 @@ func runComponent[T component](ctx context.Context,
 	wg.Wait()
 
 	healthz.Register(role)
-	metricRegister(Registry)
+	metricRegister(Registry.GoRegistry)
 	return role
 }
 
@@ -193,7 +191,7 @@ func (mr *MilvusRoles) setupLogger() {
 }
 
 // Register serves prometheus http service
-func setupPrometheusHTTPServer(r *prometheus.Registry) {
+func setupPrometheusHTTPServer(r *metrics.MilvusRegistry) {
 	http.Register(&http.Handler{
 		Path:    "/metrics",
 		Handler: promhttp.HandlerFor(r, promhttp.HandlerOpts{}),

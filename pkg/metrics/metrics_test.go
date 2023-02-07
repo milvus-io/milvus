@@ -18,20 +18,18 @@ package metrics
 
 import (
 	"testing"
-
-	"github.com/prometheus/client_golang/prometheus"
 )
 
 func TestRegisterMetrics(t *testing.T) {
-	r := prometheus.NewRegistry()
+	r := NewMilvusRegistry()
 	// Make sure it doesn't panic.
-	RegisterRootCoord(r)
-	RegisterDataNode(r)
-	RegisterDataCoord(r)
-	RegisterIndexNode(r)
-	RegisterProxy(r)
-	RegisterQueryNode(r)
-	RegisterQueryCoord(r)
-	RegisterEtcdMetrics(r)
-	RegisterMq(r)
+	RegisterRootCoord(r.GoRegistry)
+	RegisterDataNode(r.GoRegistry)
+	RegisterDataCoord(r.GoRegistry)
+	RegisterIndexNode(r.GoRegistry)
+	RegisterProxy(r.GoRegistry)
+	RegisterQueryNode(r.GoRegistry)
+	RegisterQueryCoord(r.GoRegistry)
+	RegisterEtcdMetrics(r.GoRegistry)
+	RegisterMq(r.GoRegistry)
 }
