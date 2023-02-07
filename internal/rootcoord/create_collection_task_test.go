@@ -40,11 +40,26 @@ func Test_createCollectionTask_validate(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("shard num exceeds limit", func(t *testing.T) {
+	t.Run("shard num exceeds max configuration", func(t *testing.T) {
+		// TODO: better to have a `Set` method for ParamItem.
+		cfgMaxShardNum := Params.RootCoordCfg.DmlChannelNum.GetAsInt32()
 		task := createCollectionTask{
 			Req: &milvuspb.CreateCollectionRequest{
 				Base:      &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
-				ShardsNum: maxShardNum + 1,
+				ShardsNum: cfgMaxShardNum + 1,
+			},
+		}
+		err := task.validate()
+		assert.Error(t, err)
+	})
+
+	t.Run("shard num exceeds limit", func(t *testing.T) {
+		// TODO: better to have a `Set` method for ParamItem.
+		cfgShardLimit := Params.ProxyCfg.MaxShardNum.GetAsInt32()
+		task := createCollectionTask{
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:      &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				ShardsNum: cfgShardLimit + 1,
 			},
 		}
 		err := task.validate()
