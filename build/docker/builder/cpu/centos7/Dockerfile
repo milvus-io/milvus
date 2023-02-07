@@ -14,15 +14,15 @@ FROM milvusdb/openblas:centos7-20210706
 RUN yum install -y epel-release centos-release-scl-rh && yum install -y wget curl which && \
     wget -qO- "https://cmake.org/files/v3.24/cmake-3.24.0-linux-x86_64.tar.gz" | tar --strip-components=1 -xz -C /usr/local && \
     yum install -y git make automake python3-devel \
-    devtoolset-7-gcc devtoolset-7-gcc-c++ devtoolset-7-gcc-gfortran \
-    llvm-toolset-7.0-clang llvm-toolset-7.0-clang-tools-extra \
+    devtoolset-8-gcc devtoolset-8-gcc-c++ devtoolset-8-gcc-gfortran \
+    llvm-toolset-8.0-clang llvm-toolset-8.0-clang-tools-extra \
     libaio libuuid-devel unzip \
     ccache lcov libtool m4 autoconf automake && \
     rm -rf /var/cache/yum/* && \
-    echo "source scl_source enable devtoolset-7" >> /etc/profile.d/devtoolset-7.sh && \
-    echo "source scl_source enable llvm-toolset-7.0" >> /etc/profile.d/llvm-toolset-7.sh
+    echo "source scl_source enable devtoolset-8" >> /etc/profile.d/devtoolset-8.sh && \
+    echo "source scl_source enable llvm-toolset-8.0" >> /etc/profile.d/llvm-toolset-8.sh
 
-RUN pip3 install conan
+RUN pip3 install conan==1.58.0
 
 RUN mkdir /tmp/stdlib && cd /tmp/stdlib && \
     wget https://repo.anaconda.com/archive/Anaconda3-2019.07-Linux-x86_64.sh && \
@@ -35,7 +35,7 @@ RUN mkdir /tmp/stdlib && cd /tmp/stdlib && \
     ln -s /usr/lib64/libatomic.so.1.2.0 /usr/lib64/libatomic.so.1 && \
     rm -rf /tmp/stdlib
 
-ENV CLANG_TOOLS_PATH="/opt/rh/llvm-toolset-7.0/root/usr/bin"
+ENV CLANG_TOOLS_PATH="/opt/rh/llvm-toolset-8.0/root/usr/bin"
 ENV LD_LIBRARY_PATH /usr/local/lib:$LD_LIBRARY_PATH
 
 # Install Go
