@@ -207,7 +207,7 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair) (*planpb.QueryIn
 	if roundDecimal != -1 && (roundDecimal > 6 || roundDecimal < 0) {
 		return nil, 0, fmt.Errorf("%s [%s] is invalid, should be -1 or an integer in range [0, 6]", RoundDecimalKey, roundDecimalStr)
 	}
-	searchParamStr, err := parseSearchParams(searchParamsPair)
+	searchParamStr, err := funcutil.GetAttrByKeyFromRepeatedKV(SearchParamsKey, searchParamsPair)
 	if err != nil {
 		return nil, 0, err
 	}

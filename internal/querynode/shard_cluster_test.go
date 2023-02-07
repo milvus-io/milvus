@@ -1103,7 +1103,7 @@ func TestShardCluster_Search(t *testing.T) {
 
 		_, err := sc.Search(ctx, &querypb.SearchRequest{
 			DmlChannels: []string{vchannelName},
-		}, streamingDoNothing)
+		}, streamingDoNothing, 1)
 		assert.Error(t, err)
 	})
 
@@ -1115,7 +1115,7 @@ func TestShardCluster_Search(t *testing.T) {
 
 		_, err := sc.Search(ctx, &querypb.SearchRequest{
 			DmlChannels: []string{vchannelName + "_suffix"},
-		}, streamingDoNothing)
+		}, streamingDoNothing, 1)
 		assert.Error(t, err)
 	})
 
@@ -1168,7 +1168,7 @@ func TestShardCluster_Search(t *testing.T) {
 				Base: &commonpb.MsgBase{},
 			},
 			DmlChannels: []string{vchannelName},
-		}, streamingDoNothing)
+		}, streamingDoNothing, 1)
 		assert.NoError(t, err)
 		assert.Equal(t, len(nodeEvents), len(result))
 	})
@@ -1222,7 +1222,7 @@ func TestShardCluster_Search(t *testing.T) {
 				Base: &commonpb.MsgBase{},
 			},
 			DmlChannels: []string{vchannelName},
-		}, func(ctx context.Context) error { return errors.New("mocked") })
+		}, func(ctx context.Context) error { return errors.New("mocked") }, 1)
 		assert.Error(t, err)
 	})
 
@@ -1283,7 +1283,7 @@ func TestShardCluster_Search(t *testing.T) {
 				Base: &commonpb.MsgBase{},
 			},
 			DmlChannels: []string{vchannelName},
-		}, streamingDoNothing)
+		}, streamingDoNothing, 1)
 		assert.Error(t, err)
 	})
 
@@ -1338,7 +1338,7 @@ func TestShardCluster_Search(t *testing.T) {
 				Base: &commonpb.MsgBase{},
 			},
 			DmlChannels: []string{vchannelName},
-		}, streamingDoNothing)
+		}, streamingDoNothing, 1)
 		assert.Error(t, err)
 	})
 }

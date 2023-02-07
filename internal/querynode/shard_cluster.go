@@ -18,9 +18,11 @@ package querynode
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"runtime"
+	"strconv"
 	"sync"
 
 	"go.uber.org/atomic"
@@ -31,12 +33,19 @@ import (
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/autoindex"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 type shardClusterState int32
+
+const (
+	SearchParamsKey = "params"
+	SearchLevelKey  = "level"
+)
 
 const (
 	available   shardClusterState = 1
@@ -906,8 +915,58 @@ func (sc *ShardCluster) GetStatistics(ctx context.Context, req *querypb.GetStati
 	return results, nil
 }
 
+func parseSearchParams(searchParamStr string, topk int64) (string, error) {
+	// searchParamStr, err := funcutil.GetAttrByKeyFromRepeatedKV(SearchParamsKey, searchParamsPair)
+	if Params.AutoIndexConfig.Enable.GetAsBool() {
+		searchParamMap := make(map[string]interface{})
+		var level int
+
+		err := json.Unmarshal([]byte(searchParamStr), &searchParamMap)
+		if err == nil { // if unmarshal success, we try to parse level
+			if searchParamMap == nil { // is searchParamStr equal "null", searchParamMap will become nil!
+				searchParamMap = make(map[string]interface{})
+			}
+			levelValue, ok := searchParamMap[SearchLevelKey]
+			if !ok { // if level is not specified, set to default 1
+				level = 1
+			} else {
+				switch lValue := levelValue.(type) {
+				case float64: // for numeric values, json unmarshal will interpret it as float64
+					level = int(lValue)
+				case string:
+					level, err = strconv.Atoi(lValue)
+				default:
+					err = fmt.Errorf("wrong level in search params")
+				}
+			}
+		}
+		if err != nil {
+			return "", fmt.Errorf("search params in wrong format:%w", err)
+		}
+
+		paramsStr := Params.AutoIndexConfig.SearchParamsYamlStr.GetValue()
+		calculator := autoindex.GetSearchCalculator(paramsStr, level)
+		if calculator == nil {
+			return "", fmt.Errorf("search params calculator not found for level:%d", level)
+		}
+		newSearchParamMap, err2 := calculator.CalculateNew(topk)
+		if err2 != nil {
+			return "", errors.New("search params calculate failed")
+		}
+		for k, v := range newSearchParamMap {
+			searchParamMap[k] = v
+		}
+		searchParamValue, err2 := json.Marshal(searchParamMap)
+		if err2 != nil {
+			return "", err2
+		}
+		searchParamStr = string(searchParamValue)
+	}
+	return searchParamStr, nil
+}
+
 // Search preforms search operation on shard cluster.
-func (sc *ShardCluster) Search(ctx context.Context, req *querypb.SearchRequest, withStreaming withStreaming) ([]*internalpb.SearchResults, error) {
+func (sc *ShardCluster) Search(ctx context.Context, req *querypb.SearchRequest, withStreaming withStreaming, channelNum int) ([]*internalpb.SearchResults, error) {
 	log := log.Ctx(ctx)
 	if !sc.serviceable() {
 		err := WrapErrShardNotAvailable(sc.replicaID, sc.vchannelName)
@@ -962,6 +1021,13 @@ func (sc *ShardCluster) Search(ctx context.Context, req *querypb.SearchRequest, 
 	for nodeID, segments := range segAllocs {
 		internalReq := typeutil.Clone(req.GetReq())
 		internalReq.GetBase().TargetID = nodeID
+		plan := &planpb.PlanNode{}
+		proto.Unmarshal(internalReq.GetSerializedExprPlan(), plan)
+		searchParamStr := plan.GetVectorAnns().GetQueryInfo().SearchParams
+		topk := (plan.GetVectorAnns().GetQueryInfo().GetTopk()) / int64(channelNum)
+		searchParamStr, err = parseSearchParams(searchParamStr, topk)
+		plan.GetVectorAnns().GetQueryInfo().SearchParams = searchParamStr
+		internalReq.SerializedExprPlan, err = proto.Marshal(plan)
 		nodeReq := &querypb.SearchRequest{
 			Req:             internalReq,
 			DmlChannels:     req.DmlChannels,

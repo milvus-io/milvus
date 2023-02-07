@@ -28,6 +28,7 @@ var _ Calculator = (*methodNormal)(nil)
 
 type Calculator interface {
 	Calculate(params []*commonpb.KeyValuePair) (map[string]interface{}, error)
+	CalculateNew(topk int64) (map[string]interface{}, error)
 }
 
 type methodPieceWise struct {
@@ -54,6 +55,27 @@ func (m *methodPieceWise) Calculate(params []*commonpb.KeyValuePair) (map[string
 	}
 	f := m.functions[idx]
 	retMap, err := f.calculate(params)
+	if err != nil {
+		return nil, err
+	}
+	return retMap, nil
+}
+
+func (m *methodPieceWise) CalculateNew(topk int64) (map[string]interface{}, error) {
+	bpValue := topk
+	idx := 0
+	for _, p := range m.bp {
+		if bpValue < int64(p) {
+			break
+		}
+		idx++
+	}
+	if idx >= len(m.functions) {
+		// can not happen
+		return nil, fmt.Errorf("calculate failed, methodPeiceWise functions size not match")
+	}
+	f := m.functions[idx]
+	retMap, err := f.calculateNew(topk)
 	if err != nil {
 		return nil, err
 	}
@@ -127,6 +149,14 @@ type methodNormal struct {
 
 func (m *methodNormal) Calculate(params []*commonpb.KeyValuePair) (map[string]interface{}, error) {
 	retMap, err := m.function.calculate(params)
+	if err != nil {
+		return nil, err
+	}
+	return retMap, nil
+}
+
+func (m *methodNormal) CalculateNew(topk int64) (map[string]interface{}, error) {
+	retMap, err := m.function.calculateNew(topk)
 	if err != nil {
 		return nil, err
 	}

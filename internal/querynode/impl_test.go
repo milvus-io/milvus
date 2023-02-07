@@ -787,7 +787,7 @@ func TestImpl_searchWithDmlChannel(t *testing.T) {
 		Req:             req,
 		FromShardLeader: false,
 		DmlChannels:     []string{defaultDMLChannel},
-	}, defaultDMLChannel)
+	}, defaultDMLChannel, 1)
 	assert.NoError(t, err)
 
 	// search for wrong dml channel
@@ -795,7 +795,7 @@ func TestImpl_searchWithDmlChannel(t *testing.T) {
 		Req:             req,
 		FromShardLeader: false,
 		DmlChannels:     []string{defaultDMLChannel + "_suffix"},
-	}, defaultDMLChannel)
+	}, defaultDMLChannel, 1)
 	assert.NoError(t, err)
 }
 

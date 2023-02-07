@@ -33,6 +33,7 @@ const (
 var _ calculateFunc = (*function)(nil)
 
 type calculateFunc interface {
+	calculateNew(params int64) (map[string]interface{}, error)
 	calculate(params []*commonpb.KeyValuePair) (map[string]interface{}, error)
 	GetInputKey() string
 	GetOutputKey() string
@@ -67,6 +68,17 @@ func (f *function) calculate(params []*commonpb.KeyValuePair) (map[string]interf
 	if err != nil {
 		return nil, err
 	}
+	inputVar := formula.Var(f.input, inputValue)
+	outputValue, err := f.f.Eval(inputVar)
+	if err != nil {
+		return nil, fmt.Errorf("calculate failed:%w", err)
+	}
+	ret := make(map[string]interface{})
+	ret[f.outputKey] = int64(outputValue)
+	return ret, nil
+}
+
+func (f *function) calculateNew(inputValue int64) (map[string]interface{}, error) {
 	inputVar := formula.Var(f.input, inputValue)
 	outputValue, err := f.f.Eval(inputVar)
 	if err != nil {

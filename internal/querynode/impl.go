@@ -741,6 +741,8 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 	toReduceResults := make([]*internalpb.SearchResults, 0)
 	runningGp, runningCtx := errgroup.WithContext(ctx)
 	mu := &sync.Mutex{}
+	channelNum := len(req.GetDmlChannels())
+
 	for _, ch := range req.GetDmlChannels() {
 		ch := ch
 		req := &querypb.SearchRequest{
@@ -751,7 +753,7 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 			Scope:           req.Scope,
 		}
 		runningGp.Go(func() error {
-			ret, err := node.searchWithDmlChannel(runningCtx, req, ch)
+			ret, err := node.searchWithDmlChannel(runningCtx, req, ch, channelNum)
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
@@ -788,7 +790,7 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 	return ret, nil
 }
 
-func (node *QueryNode) searchWithDmlChannel(ctx context.Context, req *querypb.SearchRequest, dmlChannel string) (*internalpb.SearchResults, error) {
+func (node *QueryNode) searchWithDmlChannel(ctx context.Context, req *querypb.SearchRequest, dmlChannel string, channelNum int) (*internalpb.SearchResults, error) {
 	nodeID := node.GetSession().ServerID
 	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(nodeID), metrics.SearchLabel, metrics.TotalLabel).Inc()
 	failRet := &internalpb.SearchResults{
@@ -908,7 +910,7 @@ func (node *QueryNode) searchWithDmlChannel(ctx context.Context, req *querypb.Se
 	}
 
 	// shard leader dispatches request to its shard cluster
-	results, errCluster = cluster.Search(searchCtx, req, withStreaming)
+	results, errCluster = cluster.Search(searchCtx, req, withStreaming, channelNum)
 	if errCluster != nil {
 		log.Ctx(ctx).Warn("search shard cluster failed", zap.String("vChannel", dmlChannel), zap.Error(errCluster))
 		failRet.Status.Reason = errCluster.Error()
