@@ -192,6 +192,7 @@ func (c *ChannelManager) checkOldNodes(nodes []UniqueID) error {
 	for nodeID, watchInfos := range nodeWatchInfos {
 		for _, info := range watchInfos {
 			channelName := info.GetVchan().GetChannelName()
+			checkInterval := Params.DataCoordCfg.WatchTimeoutInterval.GetAsDuration(time.Second)
 
 			log.Info("processing watch info",
 				zap.String("watch state", info.GetState().String()),
@@ -199,7 +200,7 @@ func (c *ChannelManager) checkOldNodes(nodes []UniqueID) error {
 
 			switch info.GetState() {
 			case datapb.ChannelWatchState_ToWatch, datapb.ChannelWatchState_Uncomplete:
-				c.stateTimer.startOne(datapb.ChannelWatchState_ToWatch, channelName, nodeID, info.GetTimeoutTs())
+				c.stateTimer.startOne(datapb.ChannelWatchState_ToWatch, channelName, nodeID, checkInterval)
 
 			case datapb.ChannelWatchState_WatchFailure:
 				if err := c.Release(nodeID, channelName); err != nil {
@@ -207,7 +208,7 @@ func (c *ChannelManager) checkOldNodes(nodes []UniqueID) error {
 				}
 
 			case datapb.ChannelWatchState_ToRelease:
-				c.stateTimer.startOne(datapb.ChannelWatchState_ToRelease, channelName, nodeID, info.GetTimeoutTs())
+				c.stateTimer.startOne(datapb.ChannelWatchState_ToRelease, channelName, nodeID, checkInterval)
 
 			case datapb.ChannelWatchState_ReleaseSuccess:
 				if err := c.Reassign(nodeID, channelName); err != nil {
@@ -446,11 +447,10 @@ func (c *ChannelManager) fillChannelWatchInfo(op *ChannelOp) {
 	for _, ch := range op.Channels {
 		vcInfo := c.h.GetDataVChanPositions(ch, allPartitionID)
 		info := &datapb.ChannelWatchInfo{
-			Vchan:     vcInfo,
-			StartTs:   time.Now().Unix(),
-			State:     datapb.ChannelWatchState_Uncomplete,
-			TimeoutTs: time.Now().Add(Params.DataCoordCfg.MaxWatchDuration.GetAsDuration(time.Second)).UnixNano(),
-			Schema:    ch.Schema,
+			Vchan:   vcInfo,
+			StartTs: time.Now().Unix(),
+			State:   datapb.ChannelWatchState_Uncomplete,
+			Schema:  ch.Schema,
 		}
 		op.ChannelWatchInfos = append(op.ChannelWatchInfos, info)
 	}
@@ -460,20 +460,19 @@ func (c *ChannelManager) fillChannelWatchInfo(op *ChannelOp) {
 func (c *ChannelManager) fillChannelWatchInfoWithState(op *ChannelOp, state datapb.ChannelWatchState) []string {
 	var channelsWithTimer = []string{}
 	startTs := time.Now().Unix()
-	timeoutTs := time.Now().Add(Params.DataCoordCfg.MaxWatchDuration.GetAsDuration(time.Second)).UnixNano()
+	checkInterval := Params.DataCoordCfg.WatchTimeoutInterval.GetAsDuration(time.Second)
 	for _, ch := range op.Channels {
 		vcInfo := c.h.GetDataVChanPositions(ch, allPartitionID)
 		info := &datapb.ChannelWatchInfo{
-			Vchan:     vcInfo,
-			StartTs:   startTs,
-			State:     state,
-			TimeoutTs: timeoutTs,
-			Schema:    ch.Schema,
+			Vchan:   vcInfo,
+			StartTs: startTs,
+			State:   state,
+			Schema:  ch.Schema,
 		}
 
 		// Only set timer for watchInfo not from bufferID
 		if op.NodeID != bufferID {
-			c.stateTimer.startOne(state, ch.Name, op.NodeID, timeoutTs)
+			c.stateTimer.startOne(state, ch.Name, op.NodeID, checkInterval)
 			channelsWithTimer = append(channelsWithTimer, ch.Name)
 		}
 
@@ -696,11 +695,13 @@ func (c *ChannelManager) watchChannelStatesLoop(ctx context.Context) {
 					continue
 				}
 
-				// ignore these states
+				// runnging states
 				state := watchInfo.GetState()
 				if state == datapb.ChannelWatchState_ToWatch ||
 					state == datapb.ChannelWatchState_ToRelease ||
 					state == datapb.ChannelWatchState_Uncomplete {
+					c.stateTimer.resetIfExist(watchInfo.GetVchan().ChannelName, Params.DataCoordCfg.WatchTimeoutInterval.GetAsDuration(time.Second))
+					log.Info("tickle update, timer delay", zap.String("channel", watchInfo.GetVchan().ChannelName), zap.Int32("progress", watchInfo.Progress))
 					continue
 				}
 

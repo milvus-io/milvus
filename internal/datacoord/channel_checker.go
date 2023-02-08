@@ -33,10 +33,12 @@ import (
 )
 
 type channelStateTimer struct {
-	watchkv        kv.MetaKv
-	runningTimers  sync.Map // channel name to timer stop channels
-	etcdWatcher    clientv3.WatchChan
-	timeoutWatcher chan *ackEvent
+	watchkv kv.MetaKv
+
+	runningTimers     sync.Map
+	runningTimerStops sync.Map // channel name to timer stop channels
+	etcdWatcher       clientv3.WatchChan
+	timeoutWatcher    chan *ackEvent
 }
 
 func newChannelStateTimer(kv kv.MetaKv) *channelStateTimer {
@@ -49,7 +51,6 @@ func newChannelStateTimer(kv kv.MetaKv) *channelStateTimer {
 func (c *channelStateTimer) getWatchers(prefix string) (clientv3.WatchChan, chan *ackEvent) {
 	if c.etcdWatcher == nil {
 		c.etcdWatcher = c.watchkv.WatchWithPrefix(prefix)
-
 	}
 	return c.etcdWatcher, c.timeoutWatcher
 }
@@ -80,8 +81,8 @@ func (c *channelStateTimer) loadAllChannels(nodeID UniqueID) ([]*datapb.ChannelW
 }
 
 // startOne can write ToWatch or ToRelease states.
-func (c *channelStateTimer) startOne(watchState datapb.ChannelWatchState, channelName string, nodeID UniqueID, timeoutTs int64) {
-	if timeoutTs == 0 {
+func (c *channelStateTimer) startOne(watchState datapb.ChannelWatchState, channelName string, nodeID UniqueID, timeout time.Duration) {
+	if timeout == 0 {
 		log.Info("zero timeoutTs, skip starting timer",
 			zap.String("watch state", watchState.String()),
 			zap.Int64("nodeID", nodeID),
@@ -89,23 +90,29 @@ func (c *channelStateTimer) startOne(watchState datapb.ChannelWatchState, channe
 		)
 		return
 	}
+
 	stop := make(chan struct{})
+	ticker := time.NewTimer(timeout)
 	c.removeTimers([]string{channelName})
-	c.runningTimers.Store(channelName, stop)
-	timeoutT := time.Unix(0, timeoutTs)
+	c.runningTimerStops.Store(channelName, stop)
+	c.runningTimers.Store(channelName, ticker)
+
 	go func() {
 		log.Info("timer started",
 			zap.String("watch state", watchState.String()),
 			zap.Int64("nodeID", nodeID),
 			zap.String("channel name", channelName),
-			zap.Time("timeout time", timeoutT))
+			zap.Duration("check interval", timeout))
+		defer ticker.Stop()
+
 		select {
-		case <-time.NewTimer(time.Until(timeoutT)).C:
+		case <-ticker.C:
+			// check tickle at path as :tickle/[prefix]/{channel_name}
 			log.Info("timeout and stop timer: wait for channel ACK timeout",
 				zap.String("watch state", watchState.String()),
 				zap.Int64("nodeID", nodeID),
 				zap.String("channel name", channelName),
-				zap.Time("timeout time", timeoutT))
+				zap.Duration("timeout interval", timeout))
 			ackType := getAckType(watchState)
 			c.notifyTimeoutWatcher(&ackEvent{ackType, channelName, nodeID})
 		case <-stop:
@@ -113,7 +120,7 @@ func (c *channelStateTimer) startOne(watchState datapb.ChannelWatchState, channe
 				zap.String("watch state", watchState.String()),
 				zap.Int64("nodeID", nodeID),
 				zap.String("channel name", channelName),
-				zap.Time("timeout time", timeoutT))
+				zap.Duration("timeout interval", timeout))
 		}
 	}()
 }
@@ -124,16 +131,25 @@ func (c *channelStateTimer) notifyTimeoutWatcher(e *ackEvent) {
 
 func (c *channelStateTimer) removeTimers(channels []string) {
 	for _, channel := range channels {
-		if stop, ok := c.runningTimers.LoadAndDelete(channel); ok {
+		if stop, ok := c.runningTimerStops.LoadAndDelete(channel); ok {
 			close(stop.(chan struct{}))
+			c.runningTimers.Delete(channel)
 		}
 	}
 }
 
 func (c *channelStateTimer) stopIfExist(e *ackEvent) {
-	stop, ok := c.runningTimers.LoadAndDelete(e.channelName)
+	stop, ok := c.runningTimerStops.LoadAndDelete(e.channelName)
 	if ok && e.ackType != watchTimeoutAck && e.ackType != releaseTimeoutAck {
 		close(stop.(chan struct{}))
+		c.runningTimers.Delete(e.channelName)
+	}
+}
+
+func (c *channelStateTimer) resetIfExist(channel string, interval time.Duration) {
+	if value, ok := c.runningTimers.Load(channel); ok {
+		timer := value.(*time.Timer)
+		timer.Reset(interval)
 	}
 }
 

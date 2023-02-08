@@ -181,6 +181,7 @@ func TestDataSyncService_newDataSyncService(te *testing.T) {
 				newCache(),
 				cm,
 				newCompactionExecutor(),
+				genTestTickler(),
 				0,
 			)
 
@@ -279,7 +280,7 @@ func TestDataSyncService_Start(t *testing.T) {
 		},
 	}
 
-	sync, err := newDataSyncService(ctx, flushChan, resendTTChan, channel, allocFactory, dispClient, factory, vchan, signalCh, dataCoord, newCache(), cm, newCompactionExecutor(), 0)
+	sync, err := newDataSyncService(ctx, flushChan, resendTTChan, channel, allocFactory, dispClient, factory, vchan, signalCh, dataCoord, newCache(), cm, newCompactionExecutor(), genTestTickler(), 0)
 	assert.Nil(t, err)
 
 	sync.flushListener = make(chan *segmentFlushPack)
@@ -431,7 +432,7 @@ func TestDataSyncService_Close(t *testing.T) {
 	paramtable.Get().Reset(Params.DataNodeCfg.FlushInsertBufferSize.Key)
 
 	channel := newChannel(insertChannelName, collMeta.ID, collMeta.GetSchema(), mockRootCoord, cm)
-	sync, err := newDataSyncService(ctx, flushChan, resendTTChan, channel, allocFactory, dispClient, factory, vchan, signalCh, mockDataCoord, newCache(), cm, newCompactionExecutor(), 0)
+	sync, err := newDataSyncService(ctx, flushChan, resendTTChan, channel, allocFactory, dispClient, factory, vchan, signalCh, mockDataCoord, newCache(), cm, newCompactionExecutor(), genTestTickler(), 0)
 	assert.Nil(t, err)
 
 	sync.flushListener = make(chan *segmentFlushPack, 10)

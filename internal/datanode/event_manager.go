@@ -20,9 +20,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/golang/protobuf/proto"
+	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 )
 
@@ -67,7 +69,7 @@ func (e *channelEventManager) Run() {
 			case event := <-e.eventChan:
 				switch event.eventType {
 				case putEventType:
-					e.retryHandlePutEvent(event)
+					e.handlePutEvent(event.info, event.version)
 				case deleteEventType:
 					e.handleDeleteEvent(event.vChanName)
 				}
@@ -76,65 +78,6 @@ func (e *channelEventManager) Run() {
 			}
 		}
 	}()
-}
-
-func (e *channelEventManager) retryHandlePutEvent(event event) {
-	countdown := time.Until(time.Unix(0, event.info.TimeoutTs))
-	if countdown < 0 {
-		log.Warn("event already timed out", zap.String("vChanName", event.vChanName))
-		return
-	}
-	// Trigger retry for-loop when fail to handle put event for the first time
-	if err := e.handlePutEvent(event.info, event.version); err != nil {
-		timer := time.NewTimer(countdown)
-		defer timer.Stop()
-		ticker := time.NewTicker(e.retryInterval)
-		defer ticker.Stop()
-		for {
-			log.Warn("handle put event fail, starting retry",
-				zap.String("vChanName", event.vChanName),
-				zap.String("retry interval", e.retryInterval.String()),
-				zap.Error(err))
-
-			// reset the ticker
-			ticker.Reset(e.retryInterval)
-
-			select {
-			case <-ticker.C:
-				// ticker notify, do another retry
-			case <-timer.C:
-				// timeout
-				log.Warn("event process timed out", zap.String("vChanName", event.vChanName))
-				return
-			case evt, ok := <-e.eventChan:
-				if !ok {
-					log.Warn("event channel closed", zap.String("vChanName", event.vChanName))
-					return
-				}
-				// When got another put event, overwrite current event
-				if evt.eventType == putEventType {
-					// handles only Uncomplete, ToWatch and ToRelease
-					if isEndWatchState(evt.info.State) {
-						return
-					}
-					event = evt
-				}
-				// When getting a delete event at next retry, exit retry loop
-				// When getting a put event, just continue the retry
-				if evt.eventType == deleteEventType {
-					log.Warn("delete event triggerred, terminating retry.",
-						zap.String("vChanName", event.vChanName))
-					e.handleDeleteEvent(evt.vChanName)
-					return
-				}
-			}
-			err = e.handlePutEvent(event.info, event.version)
-			if err == nil {
-				log.Info("handle put event successfully", zap.String("vChanName", event.vChanName))
-				return
-			}
-		}
-	}
 }
 
 func (e *channelEventManager) handleEvent(event event) {
@@ -151,4 +94,89 @@ func isEndWatchState(state datapb.ChannelWatchState) bool {
 	return state != datapb.ChannelWatchState_ToWatch && // start watch
 		state != datapb.ChannelWatchState_ToRelease && // start release
 		state != datapb.ChannelWatchState_Uncomplete // legacy state, equal to ToWatch
+}
+
+type tickler struct {
+	progress *atomic.Int32
+	version  int64
+
+	kv        kv.MetaKv
+	path      string
+	watchInfo *datapb.ChannelWatchInfo
+
+	interval time.Duration
+	closeCh  chan struct{}
+	closeWg  sync.WaitGroup
+}
+
+func (t *tickler) inc() {
+	t.progress.Inc()
+}
+
+func (t *tickler) watch() {
+	if t.interval == 0 {
+		log.Info("zero interval, close ticler watch",
+			zap.String("channel name", t.watchInfo.GetVchan().GetChannelName()),
+		)
+		return
+	}
+
+	t.closeWg.Add(1)
+	ticker := time.NewTicker(t.interval)
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				nowProgress := t.progress.Load()
+				if t.watchInfo.Progress == nowProgress {
+					continue
+				}
+
+				t.watchInfo.Progress = nowProgress
+				v, err := proto.Marshal(t.watchInfo)
+				if err != nil {
+					log.Error("fail to marshal watchInfo with progress at tickler",
+						zap.String("vChanName", t.watchInfo.Vchan.ChannelName),
+						zap.Int32("progree", nowProgress),
+						zap.Error(err))
+					return
+				}
+				success, err := t.kv.CompareVersionAndSwap(t.path, t.version, string(v))
+				if err != nil {
+					log.Error("tickler update failed", zap.Error(err))
+					continue
+				}
+
+				if !success {
+					log.Error("tickler update failed: failed to compare version and swap",
+						zap.String("key", t.path), zap.Int32("progress", nowProgress), zap.Int64("version", t.version),
+						zap.String("vChanName", t.watchInfo.GetVchan().ChannelName))
+					return
+				}
+				log.Debug("tickler update success", zap.Int32("progress", nowProgress), zap.Int64("version", t.version),
+					zap.String("vChanName", t.watchInfo.GetVchan().ChannelName))
+				t.version++
+			case <-t.closeCh:
+				t.closeWg.Done()
+				return
+			}
+		}
+	}()
+}
+
+func (t *tickler) stop() {
+	close(t.closeCh)
+	t.closeWg.Wait()
+}
+
+func newTickler(version int64, path string, watchInfo *datapb.ChannelWatchInfo, kv kv.MetaKv, interval time.Duration) *tickler {
+	return &tickler{
+		progress:  atomic.NewInt32(0),
+		path:      path,
+		kv:        kv,
+		watchInfo: watchInfo,
+		version:   version,
+		interval:  interval,
+		closeCh:   make(chan struct{}),
+	}
 }

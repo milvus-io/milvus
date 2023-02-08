@@ -176,6 +176,7 @@ type commonConfig struct {
 	DataCoordSegmentInfo  ParamItem `refreshable:"true"`
 	DataCoordSubName      ParamItem `refreshable:"false"`
 	DataCoordWatchSubPath ParamItem `refreshable:"false"`
+	DataCoordTicklePath   ParamItem `refreshable:"false"`
 	DataNodeSubName       ParamItem `refreshable:"false"`
 
 	DefaultPartitionName ParamItem `refreshable:"false"`
@@ -365,6 +366,14 @@ func (p *commonConfig) init(base *BaseTable) {
 		PanicIfEmpty: true,
 	}
 	p.DataCoordWatchSubPath.Init(base.mgr)
+
+	p.DataCoordTicklePath = ParamItem{
+		Key:          "msgChannel.subNamePrefix.dataCoordWatchSubPath",
+		Version:      "2.2.3",
+		DefaultValue: "tickle",
+		PanicIfEmpty: true,
+	}
+	p.DataCoordTicklePath.Init(base.mgr)
 
 	p.DataNodeSubName = ParamItem{
 		Key:          "msgChannel.subNamePrefix.dataNodeSubNamePrefix",
@@ -1367,7 +1376,7 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 type dataCoordConfig struct {
 
 	// --- CHANNEL ---
-	MaxWatchDuration ParamItem `refreshable:"false"`
+	WatchTimeoutInterval ParamItem `refreshable:"false"`
 
 	// --- SEGMENTS ---
 	SegmentMaxSize                 ParamItem `refreshable:"false"`
@@ -1414,12 +1423,12 @@ type dataCoordConfig struct {
 
 func (p *dataCoordConfig) init(base *BaseTable) {
 
-	p.MaxWatchDuration = ParamItem{
-		Key:          "dataCoord.channel.maxWatchDuration",
-		Version:      "2.2.1",
-		DefaultValue: "600",
+	p.WatchTimeoutInterval = ParamItem{
+		Key:          "dataCoord.channel.watchTimeoutInterval",
+		Version:      "2.2.3",
+		DefaultValue: "30",
 	}
-	p.MaxWatchDuration.Init(base.mgr)
+	p.WatchTimeoutInterval.Init(base.mgr)
 
 	p.SegmentMaxSize = ParamItem{
 		Key:          "dataCoord.segment.maxSize",
@@ -1664,6 +1673,9 @@ type dataNodeConfig struct {
 	BinLogMaxSize          ParamItem `refreshable:"true"`
 	SyncPeriod             ParamItem `refreshable:"true"`
 
+	// watchEvent
+	WatchEventTicklerInterval ParamItem `refreshable:"false"`
+
 	// io concurrency to fetch stats logs
 	IOConcurrency ParamItem `refreshable:"false"`
 }
@@ -1712,6 +1724,13 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		DefaultValue: "600",
 	}
 	p.SyncPeriod.Init(base.mgr)
+
+	p.WatchEventTicklerInterval = ParamItem{
+		Key:          "datanode.segment.watchEventTicklerInterval",
+		Version:      "2.2.3",
+		DefaultValue: "15",
+	}
+	p.WatchEventTicklerInterval.Init(base.mgr)
 
 	p.IOConcurrency = ParamItem{
 		Key:          "dataNode.dataSync.ioConcurrency",

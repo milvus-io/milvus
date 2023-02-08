@@ -25,6 +25,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/mq/msgdispatcher"
@@ -63,6 +64,7 @@ type dataSyncService struct {
 	chunkManager     storage.ChunkManager
 	compactor        *compactionExecutor // reference to compaction executor
 
+	kv            kv.MetaKv
 	serverID      int64
 	stopOnce      sync.Once
 	flushListener chan *segmentFlushPack // chan to listen flush event
@@ -81,6 +83,7 @@ func newDataSyncService(ctx context.Context,
 	flushingSegCache *Cache,
 	chunkManager storage.ChunkManager,
 	compactor *compactionExecutor,
+	tickler *tickler,
 	serverID int64,
 ) (*dataSyncService, error) {
 
@@ -117,7 +120,7 @@ func newDataSyncService(ctx context.Context,
 		serverID:         serverID,
 	}
 
-	if err := service.initNodes(vchan); err != nil {
+	if err := service.initNodes(vchan, tickler); err != nil {
 		return nil, err
 	}
 	return service, nil
@@ -179,7 +182,7 @@ func (dsService *dataSyncService) clearGlobalFlushingCache() {
 }
 
 // initNodes inits a TimetickedFlowGraph
-func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) error {
+func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo, tickler *tickler) error {
 	dsService.fg = flowgraph.NewTimeTickedFlowGraph(dsService.ctx)
 	// initialize flush manager for DataSync Service
 	dsService.flushManager = NewRendezvousFlushManager(dsService.idAllocator, dsService.chunkManager, dsService.channel,
@@ -235,6 +238,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 				recoverTs:    vchanInfo.GetSeekPosition().GetTimestamp()}); err != nil {
 				return nil, err
 			}
+			tickler.inc()
 			return nil, nil
 		})
 		futures = append(futures, future)
@@ -270,10 +274,15 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 			}); err != nil {
 				return nil, err
 			}
+			tickler.inc()
 			return nil, nil
 		})
 		futures = append(futures, future)
 	}
+
+	//tickler will update addSegment progress to watchInfo
+	tickler.watch()
+	defer tickler.stop()
 
 	err = concurrency.AwaitAll(futures...)
 	if err != nil {
