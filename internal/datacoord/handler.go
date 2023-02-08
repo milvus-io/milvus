@@ -228,10 +228,10 @@ func (h *ServerHandler) getCollectionStartPos(channel *channel) *internalpb.MsgP
 }
 
 // GetChannelSeekPosition gets channel seek position from:
-//	1. Channel checkpoint meta;
-//	2. Segments earliest dml position;
-//	3. Collection start position;
-//  And would return if any position is valid.
+//  1. Channel checkpoint meta;
+//  2. Segments earliest dml position;
+//  3. Collection start position;
+//     And would return if any position is valid.
 func (h *ServerHandler) GetChannelSeekPosition(channel *channel, partitionID UniqueID) *internalpb.MsgPosition {
 	var seekPosition *internalpb.MsgPosition
 	seekPosition = h.s.meta.GetChannelCheckpoint(channel.Name)
@@ -331,7 +331,7 @@ func (h *ServerHandler) CheckShouldDropChannel(channel string) bool {
 			}
 		}
 		return false*/
-	return h.s.meta.catalog.IsChannelDropped(h.s.ctx, channel)
+	return h.s.meta.catalog.ShouldDropChannel(h.s.ctx, channel)
 }
 
 // FinishDropChannel cleans up the remove flag for channels
@@ -342,10 +342,7 @@ func (h *ServerHandler) FinishDropChannel(channel string) error {
 		log.Warn("DropChannel failed", zap.String("vChannel", channel), zap.Error(err))
 		return err
 	}
-	err = h.s.meta.DropChannelCheckpoint(channel)
-	if err != nil {
-		log.Warn("DropChannelCheckpoint failed", zap.String("vChannel", channel), zap.Error(err))
-		return err
-	}
+	log.Info("DropChannel succeeded", zap.String("vChannel", channel))
+	// Channel checkpoints are cleaned up during garbage collection.
 	return nil
 }

@@ -460,6 +460,17 @@ func (kc *Catalog) DropSegment(ctx context.Context, segment *datapb.SegmentInfo)
 	return kc.MetaKv.MultiRemove(keys)
 }
 
+func (kc *Catalog) MarkChannelAdded(ctx context.Context, channel string) error {
+	key := buildChannelRemovePath(channel)
+	err := kc.MetaKv.Save(key, NonRemoveFlagTomestone)
+	if err != nil {
+		log.Error("failed to mark channel added", zap.String("channel", channel), zap.Error(err))
+		return err
+	}
+	log.Info("NON remove flag tombstone added", zap.String("channel", channel))
+	return nil
+}
+
 func (kc *Catalog) MarkChannelDeleted(ctx context.Context, channel string) error {
 	key := buildChannelRemovePath(channel)
 	err := kc.MetaKv.Save(key, RemoveFlagTomestone)
@@ -467,11 +478,11 @@ func (kc *Catalog) MarkChannelDeleted(ctx context.Context, channel string) error
 		log.Error("Failed to mark channel dropped", zap.String("channel", channel), zap.Error(err))
 		return err
 	}
-
+	log.Info("remove flag tombstone added", zap.String("channel", channel))
 	return nil
 }
 
-func (kc *Catalog) IsChannelDropped(ctx context.Context, channel string) bool {
+func (kc *Catalog) ShouldDropChannel(ctx context.Context, channel string) bool {
 	key := buildChannelRemovePath(channel)
 	v, err := kc.MetaKv.Load(key)
 	if err != nil || v != RemoveFlagTomestone {
@@ -480,9 +491,19 @@ func (kc *Catalog) IsChannelDropped(ctx context.Context, channel string) bool {
 	return true
 }
 
+func (kc *Catalog) ChannelExists(ctx context.Context, channel string) bool {
+	key := buildChannelRemovePath(channel)
+	v, err := kc.MetaKv.Load(key)
+	if err == nil && v == NonRemoveFlagTomestone {
+		return true
+	}
+	return false
+}
+
 // DropChannel removes channel remove flag after whole procedure is finished
 func (kc *Catalog) DropChannel(ctx context.Context, channel string) error {
 	key := buildChannelRemovePath(channel)
+	log.Info("removing channel remove path", zap.String("channel", channel))
 	return kc.MetaKv.Remove(key)
 }
 
