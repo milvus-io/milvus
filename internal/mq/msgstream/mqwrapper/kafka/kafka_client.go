@@ -1,3 +1,19 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package kafka
 
 import (
@@ -5,12 +21,14 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/milvus-io/milvus/internal/util/paramtable"
+	"go.uber.org/zap"
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
-	"go.uber.org/zap"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
+	"github.com/milvus-io/milvus/internal/util/timerecord"
 )
 
 var Producer *kafka.Producer
@@ -143,10 +161,18 @@ func (kc *kafkaClient) newConsumerConfig(group string, offset mqwrapper.Subscrip
 }
 
 func (kc *kafkaClient) CreateProducer(options mqwrapper.ProducerOptions) (mqwrapper.Producer, error) {
+	start := timerecord.NewTimeRecorder("create producer")
+	metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateProducerLabel, metrics.TotalLabel).Inc()
+
 	pp, err := kc.getKafkaProducer()
 	if err != nil {
+		metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateProducerLabel, metrics.FailLabel).Inc()
 		return nil, err
 	}
+
+	elapsed := start.Elapse("create producer done")
+	metrics.MsgStreamRequestLatency.WithLabelValues(metrics.CreateProducerLabel).Observe(float64(elapsed.Milliseconds()))
+	metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateProducerLabel, metrics.SuccessLabel).Inc()
 
 	deliveryChan := make(chan kafka.Event, 128)
 	producer := &kafkaProducer{p: pp, deliveryChan: deliveryChan, topic: options.Topic}
@@ -154,11 +180,19 @@ func (kc *kafkaClient) CreateProducer(options mqwrapper.ProducerOptions) (mqwrap
 }
 
 func (kc *kafkaClient) Subscribe(options mqwrapper.ConsumerOptions) (mqwrapper.Consumer, error) {
+	start := timerecord.NewTimeRecorder("create consumer")
+	metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateConsumerLabel, metrics.TotalLabel).Inc()
+
 	config := kc.newConsumerConfig(options.SubscriptionName, options.SubscriptionInitialPosition)
 	consumer, err := newKafkaConsumer(config, options.Topic, options.SubscriptionName, options.SubscriptionInitialPosition)
 	if err != nil {
+		metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateConsumerLabel, metrics.FailLabel).Inc()
 		return nil, err
 	}
+
+	elapsed := start.Elapse("create consumer done")
+	metrics.MsgStreamRequestLatency.WithLabelValues(metrics.CreateConsumerLabel).Observe(float64(elapsed.Milliseconds()))
+	metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateConsumerLabel, metrics.SuccessLabel).Inc()
 	return consumer, nil
 }
 

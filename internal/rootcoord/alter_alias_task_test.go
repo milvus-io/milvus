@@ -13,13 +13,17 @@ import (
 
 func Test_alterAliasTask_Prepare(t *testing.T) {
 	t.Run("invalid msg type", func(t *testing.T) {
-		task := &alterAliasTask{Req: &milvuspb.AlterAliasRequest{Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection}}}
+		task := &alterAliasTask{
+			baseTask: newBaseTask(context.TODO(), nil),
+			Req:      &milvuspb.AlterAliasRequest{Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection}}}
 		err := task.Prepare(context.Background())
 		assert.Error(t, err)
 	})
 
 	t.Run("normal case", func(t *testing.T) {
-		task := &alterAliasTask{Req: &milvuspb.AlterAliasRequest{Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterAlias}}}
+		task := &alterAliasTask{
+			baseTask: newBaseTask(context.TODO(), nil),
+			Req:      &milvuspb.AlterAliasRequest{Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterAlias}}}
 		err := task.Prepare(context.Background())
 		assert.NoError(t, err)
 	})
@@ -29,7 +33,7 @@ func Test_alterAliasTask_Execute(t *testing.T) {
 	t.Run("failed to expire cache", func(t *testing.T) {
 		core := newTestCore(withInvalidProxyManager())
 		task := &alterAliasTask{
-			baseTask: baseTask{core: core},
+			baseTask: newBaseTask(context.TODO(), core),
 			Req: &milvuspb.AlterAliasRequest{
 				Base:  &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterAlias},
 				Alias: "test",
@@ -42,7 +46,7 @@ func Test_alterAliasTask_Execute(t *testing.T) {
 	t.Run("failed to alter alias", func(t *testing.T) {
 		core := newTestCore(withValidProxyManager(), withInvalidMeta())
 		task := &alterAliasTask{
-			baseTask: baseTask{core: core},
+			baseTask: newBaseTask(context.TODO(), core),
 			Req: &milvuspb.AlterAliasRequest{
 				Base:  &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterAlias},
 				Alias: "test",

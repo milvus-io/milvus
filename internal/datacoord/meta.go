@@ -103,6 +103,24 @@ func (m *meta) reloadFromKV() error {
 		metrics.DataCoordNumSegments.WithLabelValues(segment.State.String()).Inc()
 		if segment.State == commonpb.SegmentState_Flushed {
 			numStoredRows += segment.NumOfRows
+
+			insertFileNum := 0
+			for _, fieldBinlog := range segment.GetBinlogs() {
+				insertFileNum += len(fieldBinlog.GetBinlogs())
+			}
+			metrics.FlushedSegmentFileNum.WithLabelValues(metrics.InsertFileLabel).Observe(float64(insertFileNum))
+
+			statFileNum := 0
+			for _, fieldBinlog := range segment.GetStatslogs() {
+				statFileNum += len(fieldBinlog.GetBinlogs())
+			}
+			metrics.FlushedSegmentFileNum.WithLabelValues(metrics.StatFileLabel).Observe(float64(statFileNum))
+
+			deleteFileNum := 0
+			for _, filedBinlog := range segment.GetDeltalogs() {
+				deleteFileNum += len(filedBinlog.GetBinlogs())
+			}
+			metrics.FlushedSegmentFileNum.WithLabelValues(metrics.DeleteFileLabel).Observe(float64(deleteFileNum))
 		}
 	}
 	metrics.DataCoordNumStoredRows.WithLabelValues().Set(float64(numStoredRows))

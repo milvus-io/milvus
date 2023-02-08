@@ -3,15 +3,15 @@ package rootcoord
 import (
 	"context"
 
-	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metastore/model"
-	"go.uber.org/zap"
-
-	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
+	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 type createPartitionTask struct {
@@ -21,6 +21,7 @@ type createPartitionTask struct {
 }
 
 func (t *createPartitionTask) Prepare(ctx context.Context) error {
+	t.SetStep(typeutil.TaskStepPreExecute)
 	if err := CheckMsgType(t.Req.GetBase().GetMsgType(), commonpb.MsgType_CreatePartition); err != nil {
 		return err
 	}
@@ -33,6 +34,7 @@ func (t *createPartitionTask) Prepare(ctx context.Context) error {
 }
 
 func (t *createPartitionTask) Execute(ctx context.Context) error {
+	t.SetStep(typeutil.TaskStepExecute)
 	for _, partition := range t.collMeta.Partitions {
 		if partition.PartitionName == t.Req.GetPartitionName() {
 			log.Warn("add duplicate partition", zap.String("collection", t.Req.GetCollectionName()), zap.String("partition", t.Req.GetPartitionName()), zap.Uint64("ts", t.GetTs()))

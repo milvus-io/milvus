@@ -19,13 +19,14 @@ package rmq
 import (
 	"strconv"
 
-	"github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
-
-	"github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/client"
-	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
+	"github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/client"
+	"github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
+	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/internal/util/timerecord"
 )
 
 // rmqClient contains a rocksmq client
@@ -50,17 +51,28 @@ func NewClient(opts client.Options) (*rmqClient, error) {
 
 // CreateProducer creates a producer for rocksmq client
 func (rc *rmqClient) CreateProducer(options mqwrapper.ProducerOptions) (mqwrapper.Producer, error) {
+	start := timerecord.NewTimeRecorder("create producer")
+	metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateProducerLabel, metrics.TotalLabel).Inc()
+
 	rmqOpts := client.ProducerOptions{Topic: options.Topic}
 	pp, err := rc.client.CreateProducer(rmqOpts)
 	if err != nil {
+		metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateProducerLabel, metrics.FailLabel).Inc()
 		return nil, err
 	}
 	rp := rmqProducer{p: pp}
+
+	elapsed := start.Elapse("create producer done")
+	metrics.MsgStreamRequestLatency.WithLabelValues(metrics.CreateProducerLabel).Observe(float64(elapsed.Milliseconds()))
+	metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateProducerLabel, metrics.SuccessLabel).Inc()
 	return &rp, nil
 }
 
 // Subscribe subscribes a consumer in rmq client
 func (rc *rmqClient) Subscribe(options mqwrapper.ConsumerOptions) (mqwrapper.Consumer, error) {
+	start := timerecord.NewTimeRecorder("create consumer")
+	metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateConsumerLabel, metrics.TotalLabel).Inc()
+
 	receiveChannel := make(chan client.Message, options.BufSize)
 
 	cli, err := rc.client.Subscribe(client.ConsumerOptions{
@@ -70,11 +82,15 @@ func (rc *rmqClient) Subscribe(options mqwrapper.ConsumerOptions) (mqwrapper.Con
 		SubscriptionInitialPosition: options.SubscriptionInitialPosition,
 	})
 	if err != nil {
+		metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateConsumerLabel, metrics.FailLabel).Inc()
 		return nil, err
 	}
 
 	rConsumer := &Consumer{c: cli, closeCh: make(chan struct{})}
 
+	elapsed := start.Elapse("create consumer done")
+	metrics.MsgStreamRequestLatency.WithLabelValues(metrics.CreateConsumerLabel).Observe(float64(elapsed.Milliseconds()))
+	metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateConsumerLabel, metrics.SuccessLabel).Inc()
 	return rConsumer, nil
 }
 

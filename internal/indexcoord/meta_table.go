@@ -112,6 +112,7 @@ func (mt *metaTable) reloadFromKV() error {
 	}
 	for _, segIdx := range segmentIndxes {
 		mt.updateSegmentIndex(segIdx)
+		metrics.FlushedSegmentFileNum.WithLabelValues(metrics.IndexFileLabel).Observe(float64(len(segIdx.IndexFileKeys)))
 	}
 
 	log.Info("IndexCoord metaTable reloadFromKV success")
@@ -1038,6 +1039,7 @@ func (mt *metaTable) FinishTask(taskInfo *indexpb.IndexTaskInfo) error {
 	}
 
 	mt.updateIndexTasksMetrics()
+	metrics.FlushedSegmentFileNum.WithLabelValues(metrics.IndexFileLabel).Observe(float64(len(taskInfo.IndexFileKeys)))
 	log.Info("finish index task success", zap.Int64("buildID", taskInfo.BuildID),
 		zap.String("state", taskInfo.GetState().String()), zap.String("fail reason", taskInfo.GetFailReason()))
 	return nil

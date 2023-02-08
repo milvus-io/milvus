@@ -24,12 +24,15 @@ import (
 	"time"
 
 	"github.com/apache/pulsar-client-go/pulsar"
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
-	"github.com/milvus-io/milvus/internal/util/retry"
 	pulsarctl "github.com/streamnative/pulsarctl/pkg/pulsar"
 	"github.com/streamnative/pulsarctl/pkg/pulsar/common"
 	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
+	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/internal/util/retry"
+	"github.com/milvus-io/milvus/internal/util/timerecord"
 )
 
 type pulsarClient struct {
@@ -62,8 +65,12 @@ func NewClient(tenant string, namespace string, opts pulsar.ClientOptions) (*pul
 
 // CreateProducer create a pulsar producer from options
 func (pc *pulsarClient) CreateProducer(options mqwrapper.ProducerOptions) (mqwrapper.Producer, error) {
+	start := timerecord.NewTimeRecorder("create producer")
+	metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateProducerLabel, metrics.TotalLabel).Inc()
+
 	fullTopicName, err := GetFullTopicName(pc.tenant, pc.namespace, options.Topic)
 	if err != nil {
+		metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateProducerLabel, metrics.FailLabel).Inc()
 		return nil, err
 	}
 	opts := pulsar.ProducerOptions{Topic: fullTopicName}
@@ -78,20 +85,30 @@ func (pc *pulsarClient) CreateProducer(options mqwrapper.ProducerOptions) (mqwra
 
 	pp, err := pc.client.CreateProducer(opts)
 	if err != nil {
+		metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateProducerLabel, metrics.FailLabel).Inc()
 		return nil, err
 	}
 	if pp == nil {
+		metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateProducerLabel, metrics.FailLabel).Inc()
 		return nil, errors.New("pulsar is not ready, producer is nil")
 	}
+
+	elapsed := start.Elapse("create producer done")
+	metrics.MsgStreamRequestLatency.WithLabelValues(metrics.CreateProducerLabel).Observe(float64(elapsed.Milliseconds()))
+	metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateProducerLabel, metrics.SuccessLabel).Inc()
 	producer := &pulsarProducer{p: pp}
 	return producer, nil
 }
 
 // Subscribe creates a pulsar consumer instance and subscribe a topic
 func (pc *pulsarClient) Subscribe(options mqwrapper.ConsumerOptions) (mqwrapper.Consumer, error) {
+	start := timerecord.NewTimeRecorder("create consumer")
+	metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateConsumerLabel, metrics.TotalLabel).Inc()
+
 	receiveChannel := make(chan pulsar.ConsumerMessage, options.BufSize)
 	fullTopicName, err := GetFullTopicName(pc.tenant, pc.namespace, options.Topic)
 	if err != nil {
+		metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateConsumerLabel, metrics.FailLabel).Inc()
 		return nil, err
 	}
 	consumer, err := pc.client.Subscribe(pulsar.ConsumerOptions{
@@ -102,6 +119,7 @@ func (pc *pulsarClient) Subscribe(options mqwrapper.ConsumerOptions) (mqwrapper.
 		MessageChannel:              receiveChannel,
 	})
 	if err != nil {
+		metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateConsumerLabel, metrics.FailLabel).Inc()
 		if strings.Contains(err.Error(), "ConsumerBusy") {
 			return nil, retry.Unrecoverable(err)
 		}
@@ -114,6 +132,9 @@ func (pc *pulsarClient) Subscribe(options mqwrapper.ConsumerOptions) (mqwrapper.
 		pConsumer.AtLatest = true
 	}
 
+	elapsed := start.Elapse("create consumer done")
+	metrics.MsgStreamRequestLatency.WithLabelValues(metrics.CreateConsumerLabel).Observe(float64(elapsed.Milliseconds()))
+	metrics.MsgStreamOpCounter.WithLabelValues(metrics.CreateConsumerLabel, metrics.SuccessLabel).Inc()
 	return pConsumer, nil
 }
 

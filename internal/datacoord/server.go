@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -222,11 +223,14 @@ func (s *Server) Register() error {
 	if s.enableActiveStandBy {
 		s.session.ProcessActiveStandBy(s.activateFunc)
 	}
+	metrics.NumNodes.WithLabelValues(strconv.FormatInt(s.session.ServerID, 10), typeutil.DataCoordRole).Inc()
+	log.Info("DataCoord Register Finished")
 	go s.session.LivenessCheck(s.serverLoopCtx, func() {
 		logutil.Logger(s.ctx).Error("disconnected from etcd and exited", zap.Int64("serverID", s.session.ServerID))
 		if err := s.Stop(); err != nil {
 			logutil.Logger(s.ctx).Fatal("failed to stop server", zap.Error(err))
 		}
+		metrics.NumNodes.WithLabelValues(strconv.FormatInt(s.session.ServerID, 10), typeutil.DataCoordRole).Dec()
 		// manually send signal to starter goroutine
 		if s.session.TriggerKill {
 			if p, err := os.FindProcess(os.Getpid()); err == nil {
@@ -798,6 +802,25 @@ func (s *Server) postFlush(ctx context.Context, segmentID UniqueID) error {
 		log.Error("flush segment complete failed", zap.Error(err))
 		return err
 	}
+
+	insertFileNum := 0
+	for _, fieldBinlog := range segment.GetBinlogs() {
+		insertFileNum += len(fieldBinlog.GetBinlogs())
+	}
+	metrics.FlushedSegmentFileNum.WithLabelValues(metrics.InsertFileLabel).Observe(float64(insertFileNum))
+
+	statFileNum := 0
+	for _, fieldBinlog := range segment.GetStatslogs() {
+		statFileNum += len(fieldBinlog.GetBinlogs())
+	}
+	metrics.FlushedSegmentFileNum.WithLabelValues(metrics.StatFileLabel).Observe(float64(statFileNum))
+
+	deleteFileNum := 0
+	for _, filedBinlog := range segment.GetDeltalogs() {
+		deleteFileNum += len(filedBinlog.GetBinlogs())
+	}
+	metrics.FlushedSegmentFileNum.WithLabelValues(metrics.DeleteFileLabel).Observe(float64(deleteFileNum))
+
 	log.Info("flush segment complete", zap.Int64("id", segmentID))
 	return nil
 }

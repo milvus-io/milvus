@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 var _ readTask = (*searchTask)(nil)
@@ -59,10 +60,10 @@ type searchTask struct {
 }
 
 func (s *searchTask) PreExecute(ctx context.Context) error {
-	s.SetStep(TaskStepPreExecute)
+	s.SetStep(typeutil.TaskStepPreExecute)
 	rateCol.rtCounter.increaseQueueTime(s)
 	for _, t := range s.otherTasks {
-		t.SetStep(TaskStepPreExecute)
+		t.SetStep(typeutil.TaskStepPreExecute)
 		rateCol.rtCounter.increaseQueueTime(t)
 	}
 	s.combinePlaceHolderGroups()

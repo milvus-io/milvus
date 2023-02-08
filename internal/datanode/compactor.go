@@ -422,6 +422,8 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 		return nil, errContext
 	}
 
+	durInQueue := t.tr.Record("compact task start to process")
+
 	ctxTimeout, cancelAll := context.WithTimeout(t.ctx, time.Duration(t.plan.GetTimeoutInSeconds())*time.Second)
 	defer cancelAll()
 
@@ -682,6 +684,7 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 
 	log.Info("overall elapse in ms", zap.Int64("planID", t.plan.GetPlanID()), zap.Float64("elapse", nano2Milli(time.Since(compactStart))))
 	metrics.DataNodeCompactionLatency.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID())).Observe(float64(t.tr.ElapseSpan().Milliseconds()))
+	metrics.DataNodeCompactionLatencyInQueue.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID())).Observe(float64(durInQueue.Milliseconds()))
 
 	return pack, nil
 }

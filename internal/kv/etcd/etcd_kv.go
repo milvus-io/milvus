@@ -23,15 +23,13 @@ import (
 	"path"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/metrics"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/common"
-
-	clientv3 "go.etcd.io/etcd/client/v3"
-
 	"github.com/milvus-io/milvus/internal/log"
-
-	"go.uber.org/zap"
+	"github.com/milvus-io/milvus/internal/metrics"
+	"github.com/milvus-io/milvus/internal/util/timerecord"
 )
 
 const (
@@ -67,8 +65,6 @@ func (kv *EtcdKV) GetPath(key string) string {
 func (kv *EtcdKV) WalkWithPrefix(prefix string, paginationSize int, fn func([]byte, []byte) error) error {
 	start := time.Now()
 	prefix = path.Join(kv.rootPath, prefix)
-	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
-	defer cancel()
 
 	batch := int64(paginationSize)
 	opts := []clientv3.OpOption{
@@ -79,7 +75,7 @@ func (kv *EtcdKV) WalkWithPrefix(prefix string, paginationSize int, fn func([]by
 
 	key := prefix
 	for {
-		resp, err := kv.client.Get(ctx, key, opts...)
+		resp, err := kv.getEtcdMeta(context.TODO(), key, opts...)
 		if err != nil {
 			return err
 		}
@@ -105,9 +101,7 @@ func (kv *EtcdKV) WalkWithPrefix(prefix string, paginationSize int, fn func([]by
 func (kv *EtcdKV) LoadWithPrefix(key string) ([]string, []string, error) {
 	start := time.Now()
 	key = path.Join(kv.rootPath, key)
-	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
-	defer cancel()
-	resp, err := kv.client.Get(ctx, key, clientv3.WithPrefix(),
+	resp, err := kv.getEtcdMeta(context.TODO(), key, clientv3.WithPrefix(),
 		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
 	if err != nil {
 		return nil, nil, err
@@ -126,9 +120,7 @@ func (kv *EtcdKV) LoadWithPrefix(key string) ([]string, []string, error) {
 func (kv *EtcdKV) LoadBytesWithPrefix(key string) ([]string, [][]byte, error) {
 	start := time.Now()
 	key = path.Join(kv.rootPath, key)
-	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
-	defer cancel()
-	resp, err := kv.client.Get(ctx, key, clientv3.WithPrefix(),
+	resp, err := kv.getEtcdMeta(context.TODO(), key, clientv3.WithPrefix(),
 		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
 	if err != nil {
 		return nil, nil, err
@@ -147,9 +139,7 @@ func (kv *EtcdKV) LoadBytesWithPrefix(key string) ([]string, [][]byte, error) {
 func (kv *EtcdKV) LoadWithPrefix2(key string) ([]string, []string, []int64, error) {
 	start := time.Now()
 	key = path.Join(kv.rootPath, key)
-	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
-	defer cancel()
-	resp, err := kv.client.Get(ctx, key, clientv3.WithPrefix(),
+	resp, err := kv.getEtcdMeta(context.TODO(), key, clientv3.WithPrefix(),
 		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
 	if err != nil {
 		return nil, nil, nil, err
@@ -169,9 +159,7 @@ func (kv *EtcdKV) LoadWithPrefix2(key string) ([]string, []string, []int64, erro
 func (kv *EtcdKV) LoadWithRevisionAndVersions(key string) ([]string, []string, []int64, int64, error) {
 	start := time.Now()
 	key = path.Join(kv.rootPath, key)
-	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
-	defer cancel()
-	resp, err := kv.client.Get(ctx, key, clientv3.WithPrefix(),
+	resp, err := kv.getEtcdMeta(context.TODO(), key, clientv3.WithPrefix(),
 		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
 	if err != nil {
 		return nil, nil, nil, 0, err
@@ -192,9 +180,7 @@ func (kv *EtcdKV) LoadWithRevisionAndVersions(key string) ([]string, []string, [
 func (kv *EtcdKV) LoadBytesWithPrefix2(key string) ([]string, [][]byte, []int64, error) {
 	start := time.Now()
 	key = path.Join(kv.rootPath, key)
-	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
-	defer cancel()
-	resp, err := kv.client.Get(ctx, key, clientv3.WithPrefix(),
+	resp, err := kv.getEtcdMeta(context.TODO(), key, clientv3.WithPrefix(),
 		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
 	if err != nil {
 		return nil, nil, nil, err
@@ -215,9 +201,7 @@ func (kv *EtcdKV) LoadBytesWithPrefix2(key string) ([]string, [][]byte, []int64,
 func (kv *EtcdKV) Load(key string) (string, error) {
 	start := time.Now()
 	key = path.Join(kv.rootPath, key)
-	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
-	defer cancel()
-	resp, err := kv.client.Get(ctx, key)
+	resp, err := kv.getEtcdMeta(context.TODO(), key)
 	if err != nil {
 		return "", err
 	}
@@ -232,9 +216,7 @@ func (kv *EtcdKV) Load(key string) (string, error) {
 func (kv *EtcdKV) LoadBytes(key string) ([]byte, error) {
 	start := time.Now()
 	key = path.Join(kv.rootPath, key)
-	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
-	defer cancel()
-	resp, err := kv.client.Get(ctx, key)
+	resp, err := kv.getEtcdMeta(context.TODO(), key)
 	if err != nil {
 		return []byte{}, err
 	}
@@ -255,7 +237,7 @@ func (kv *EtcdKV) MultiLoad(keys []string) ([]string, error) {
 
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
-	resp, err := kv.client.Txn(ctx).If().Then(ops...).Commit()
+	resp, err := kv.executeTxn(kv.getTxnWithCmp(ctx), ops...)
 	if err != nil {
 		return []string{}, err
 	}
@@ -290,7 +272,7 @@ func (kv *EtcdKV) MultiLoadBytes(keys []string) ([][]byte, error) {
 
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
-	resp, err := kv.client.Txn(ctx).If().Then(ops...).Commit()
+	resp, err := kv.executeTxn(kv.getTxnWithCmp(ctx), ops...)
 	if err != nil {
 		return [][]byte{}, err
 	}
@@ -319,9 +301,7 @@ func (kv *EtcdKV) MultiLoadBytes(keys []string) ([][]byte, error) {
 func (kv *EtcdKV) LoadWithRevision(key string) ([]string, []string, int64, error) {
 	start := time.Now()
 	key = path.Join(kv.rootPath, key)
-	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
-	defer cancel()
-	resp, err := kv.client.Get(ctx, key, clientv3.WithPrefix(),
+	resp, err := kv.getEtcdMeta(context.TODO(), key, clientv3.WithPrefix(),
 		clientv3.WithSort(clientv3.SortByCreateRevision, clientv3.SortAscend))
 	if err != nil {
 		return nil, nil, 0, err
@@ -340,9 +320,7 @@ func (kv *EtcdKV) LoadWithRevision(key string) ([]string, []string, int64, error
 func (kv *EtcdKV) LoadBytesWithRevision(key string) ([]string, [][]byte, int64, error) {
 	start := time.Now()
 	key = path.Join(kv.rootPath, key)
-	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
-	defer cancel()
-	resp, err := kv.client.Get(ctx, key, clientv3.WithPrefix(),
+	resp, err := kv.getEtcdMeta(context.TODO(), key, clientv3.WithPrefix(),
 		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
 	if err != nil {
 		return nil, nil, 0, err
@@ -361,10 +339,8 @@ func (kv *EtcdKV) LoadBytesWithRevision(key string) ([]string, [][]byte, int64, 
 func (kv *EtcdKV) Save(key, value string) error {
 	start := time.Now()
 	key = path.Join(kv.rootPath, key)
-	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
-	defer cancel()
 	CheckValueSizeAndWarn(key, value)
-	_, err := kv.client.Put(ctx, key, value)
+	_, err := kv.putEtcdMeta(context.TODO(), key, value)
 	CheckElapseAndWarn(start, "Slow etcd operation save", zap.String("key", key))
 	return err
 }
@@ -373,10 +349,8 @@ func (kv *EtcdKV) Save(key, value string) error {
 func (kv *EtcdKV) SaveBytes(key string, value []byte) error {
 	start := time.Now()
 	key = path.Join(kv.rootPath, key)
-	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
-	defer cancel()
 	CheckValueSizeAndWarn(key, value)
-	_, err := kv.client.Put(ctx, key, string(value))
+	_, err := kv.putEtcdMeta(context.TODO(), key, string(value))
 	CheckElapseAndWarn(start, "Slow etcd operation save", zap.String("key", key))
 	return err
 }
@@ -386,10 +360,8 @@ func (kv *EtcdKV) SaveWithLease(key, value string, id clientv3.LeaseID) error {
 	log.Debug("Etcd saving with lease", zap.String("etcd_key", key))
 	start := time.Now()
 	key = path.Join(kv.rootPath, key)
-	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
-	defer cancel()
 	CheckValueSizeAndWarn(key, value)
-	_, err := kv.client.Put(ctx, key, value, clientv3.WithLease(id))
+	_, err := kv.putEtcdMeta(context.TODO(), key, value, clientv3.WithLease(id))
 	CheckElapseAndWarn(start, "Slow etcd operation save with lease", zap.String("key", key))
 	return err
 }
@@ -399,10 +371,8 @@ func (kv *EtcdKV) SaveWithIgnoreLease(key, value string) error {
 	log.Debug("Etcd saving with ignore lease", zap.String("etcd_key", key))
 	start := time.Now()
 	key = path.Join(kv.rootPath, key)
-	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
-	defer cancel()
 	CheckValueSizeAndWarn(key, value)
-	_, err := kv.client.Put(ctx, key, value, clientv3.WithIgnoreLease())
+	_, err := kv.putEtcdMeta(context.TODO(), key, value, clientv3.WithIgnoreLease())
 	CheckElapseAndWarn(start, "Slow etcd operation save with lease", zap.String("key", key))
 	return err
 }
@@ -411,10 +381,8 @@ func (kv *EtcdKV) SaveWithIgnoreLease(key, value string) error {
 func (kv *EtcdKV) SaveBytesWithLease(key string, value []byte, id clientv3.LeaseID) error {
 	start := time.Now()
 	key = path.Join(kv.rootPath, key)
-	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
-	defer cancel()
 	CheckValueSizeAndWarn(key, value)
-	_, err := kv.client.Put(ctx, key, string(value), clientv3.WithLease(id))
+	_, err := kv.putEtcdMeta(context.TODO(), key, string(value), clientv3.WithLease(id))
 	CheckElapseAndWarn(start, "Slow etcd operation save with lease", zap.String("key", key))
 	return err
 }
@@ -433,7 +401,7 @@ func (kv *EtcdKV) MultiSave(kvs map[string]string) error {
 	defer cancel()
 
 	CheckTxnStringValueSizeAndWarn(kvs)
-	_, err := kv.client.Txn(ctx).If().Then(ops...).Commit()
+	_, err := kv.executeTxn(kv.getTxnWithCmp(ctx), ops...)
 	if err != nil {
 		log.Warn("Etcd MultiSave error", zap.Any("kvs", kvs), zap.Int("len", len(kvs)), zap.Error(err))
 	}
@@ -455,7 +423,7 @@ func (kv *EtcdKV) MultiSaveBytes(kvs map[string][]byte) error {
 	defer cancel()
 
 	CheckTxnBytesValueSizeAndWarn(kvs)
-	_, err := kv.client.Txn(ctx).If().Then(ops...).Commit()
+	_, err := kv.executeTxn(kv.getTxnWithCmp(ctx), ops...)
 	if err != nil {
 		log.Warn("Etcd MultiSaveBytes err", zap.Any("kvs", kvs), zap.Int("len", len(kvs)), zap.Error(err))
 	}
@@ -467,10 +435,7 @@ func (kv *EtcdKV) MultiSaveBytes(kvs map[string][]byte) error {
 func (kv *EtcdKV) RemoveWithPrefix(prefix string) error {
 	start := time.Now()
 	key := path.Join(kv.rootPath, prefix)
-	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
-	defer cancel()
-
-	_, err := kv.client.Delete(ctx, key, clientv3.WithPrefix())
+	_, err := kv.removeEtcdMeta(context.TODO(), key, clientv3.WithPrefix())
 	CheckElapseAndWarn(start, "Slow etcd operation remove with prefix", zap.String("prefix", prefix))
 	return err
 }
@@ -479,10 +444,7 @@ func (kv *EtcdKV) RemoveWithPrefix(prefix string) error {
 func (kv *EtcdKV) Remove(key string) error {
 	start := time.Now()
 	key = path.Join(kv.rootPath, key)
-	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
-	defer cancel()
-
-	_, err := kv.client.Delete(ctx, key)
+	_, err := kv.removeEtcdMeta(context.TODO(), key)
 	CheckElapseAndWarn(start, "Slow etcd operation remove", zap.String("key", key))
 	return err
 }
@@ -498,7 +460,7 @@ func (kv *EtcdKV) MultiRemove(keys []string) error {
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
 
-	_, err := kv.client.Txn(ctx).If().Then(ops...).Commit()
+	_, err := kv.executeTxn(kv.getTxnWithCmp(ctx), ops...)
 	if err != nil {
 		log.Warn("Etcd MultiRemove error", zap.Strings("keys", keys), zap.Int("len", len(keys)), zap.Error(err))
 	}
@@ -523,7 +485,7 @@ func (kv *EtcdKV) MultiSaveAndRemove(saves map[string]string, removals []string)
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
 
-	_, err := kv.client.Txn(ctx).If().Then(ops...).Commit()
+	_, err := kv.executeTxn(kv.getTxnWithCmp(ctx), ops...)
 	if err != nil {
 		log.Warn("Etcd MultiSaveAndRemove error",
 			zap.Any("saves", saves),
@@ -553,7 +515,7 @@ func (kv *EtcdKV) MultiSaveBytesAndRemove(saves map[string][]byte, removals []st
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
 
-	_, err := kv.client.Txn(ctx).If().Then(ops...).Commit()
+	_, err := kv.executeTxn(kv.getTxnWithCmp(ctx), ops...)
 	if err != nil {
 		log.Warn("Etcd MultiSaveBytesAndRemove error",
 			zap.Any("saves", saves),
@@ -605,7 +567,7 @@ func (kv *EtcdKV) MultiRemoveWithPrefix(keys []string) error {
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
 
-	_, err := kv.client.Txn(ctx).If().Then(ops...).Commit()
+	_, err := kv.executeTxn(kv.getTxnWithCmp(ctx), ops...)
 	if err != nil {
 		log.Warn("Etcd MultiRemoveWithPrefix error", zap.Strings("keys", keys), zap.Int("len", len(keys)), zap.Error(err))
 	}
@@ -630,7 +592,7 @@ func (kv *EtcdKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
 
-	_, err := kv.client.Txn(ctx).If().Then(ops...).Commit()
+	_, err := kv.executeTxn(kv.getTxnWithCmp(ctx), ops...)
 	if err != nil {
 		log.Warn("Etcd MultiSaveAndRemoveWithPrefix error",
 			zap.Any("saves", saves),
@@ -660,7 +622,7 @@ func (kv *EtcdKV) MultiSaveBytesAndRemoveWithPrefix(saves map[string][]byte, rem
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
 
-	_, err := kv.client.Txn(ctx).If().Then(ops...).Commit()
+	_, err := kv.executeTxn(kv.getTxnWithCmp(ctx), ops...)
 	if err != nil {
 		log.Warn("Etcd MultiSaveBytesAndRemoveWithPrefix error",
 			zap.Any("saves", saves),
@@ -702,12 +664,9 @@ func (kv *EtcdKV) CompareValueAndSwap(key, value, target string, opts ...clientv
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
-	resp, err := kv.client.Txn(ctx).If(
-		clientv3.Compare(
-			clientv3.Value(path.Join(kv.rootPath, key)),
-			"=",
-			value)).
-		Then(clientv3.OpPut(path.Join(kv.rootPath, key), target, opts...)).Commit()
+	resp, err := kv.executeTxn(kv.getTxnWithCmp(ctx,
+		clientv3.Compare(clientv3.Value(path.Join(kv.rootPath, key)), "=", value)),
+		clientv3.OpPut(path.Join(kv.rootPath, key), target, opts...))
 	if err != nil {
 		return false, err
 	}
@@ -721,12 +680,9 @@ func (kv *EtcdKV) CompareValueAndSwapBytes(key string, value, target []byte, opt
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
-	resp, err := kv.client.Txn(ctx).If(
-		clientv3.Compare(
-			clientv3.Value(path.Join(kv.rootPath, key)),
-			"=",
-			string(value))).
-		Then(clientv3.OpPut(path.Join(kv.rootPath, key), string(target), opts...)).Commit()
+	resp, err := kv.executeTxn(kv.getTxnWithCmp(ctx,
+		clientv3.Compare(clientv3.Value(path.Join(kv.rootPath, key)), "=", string(value))),
+		clientv3.OpPut(path.Join(kv.rootPath, key), string(target), opts...))
 	if err != nil {
 		return false, err
 	}
@@ -740,12 +696,9 @@ func (kv *EtcdKV) CompareVersionAndSwap(key string, source int64, target string,
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
-	resp, err := kv.client.Txn(ctx).If(
-		clientv3.Compare(
-			clientv3.Version(path.Join(kv.rootPath, key)),
-			"=",
-			source)).
-		Then(clientv3.OpPut(path.Join(kv.rootPath, key), target, opts...)).Commit()
+	resp, err := kv.executeTxn(kv.getTxnWithCmp(ctx,
+		clientv3.Compare(clientv3.Version(path.Join(kv.rootPath, key)), "=", source)),
+		clientv3.OpPut(path.Join(kv.rootPath, key), target, opts...))
 	if err != nil {
 		return false, err
 	}
@@ -759,12 +712,9 @@ func (kv *EtcdKV) CompareVersionAndSwapBytes(key string, source int64, target []
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.TODO(), RequestTimeout)
 	defer cancel()
-	resp, err := kv.client.Txn(ctx).If(
-		clientv3.Compare(
-			clientv3.Version(path.Join(kv.rootPath, key)),
-			"=",
-			source)).
-		Then(clientv3.OpPut(path.Join(kv.rootPath, key), string(target), opts...)).Commit()
+	resp, err := kv.executeTxn(kv.getTxnWithCmp(ctx,
+		clientv3.Compare(clientv3.Version(path.Join(kv.rootPath, key)), "=", source)),
+		clientv3.OpPut(path.Join(kv.rootPath, key), string(target), opts...))
 	if err != nil {
 		return false, err
 	}
@@ -775,7 +725,6 @@ func (kv *EtcdKV) CompareVersionAndSwapBytes(key string, source int64, target []
 // CheckElapseAndWarn checks the elapsed time and warns if it is too long.
 func CheckElapseAndWarn(start time.Time, message string, fields ...zap.Field) bool {
 	elapsed := time.Since(start)
-	metrics.EtcdRequestLatency.Observe(float64(elapsed))
 	if elapsed.Milliseconds() > 2000 {
 		log.Warn(message, append([]zap.Field{zap.String("time spent", elapsed.String())}, fields...)...)
 		return true
@@ -785,7 +734,6 @@ func CheckElapseAndWarn(start time.Time, message string, fields ...zap.Field) bo
 
 func CheckValueSizeAndWarn(key string, value interface{}) bool {
 	size := binary.Size(value)
-	metrics.EtcdPutKvSize.Observe(float64(size))
 	if size > 102400 {
 		log.Warn("value size large than 100kb", zap.String("key", key), zap.Int("value_size(kb)", size/1024))
 		return true
@@ -810,4 +758,107 @@ func CheckTxnStringValueSizeAndWarn(kvs map[string]string) bool {
 	}
 
 	return CheckTxnBytesValueSizeAndWarn(newKvs)
+}
+
+func (kv *EtcdKV) getEtcdMeta(ctx context.Context, key string, opts ...clientv3.OpOption) (*clientv3.GetResponse, error) {
+	ctx1, cancel := context.WithTimeout(ctx, RequestTimeout)
+	defer cancel()
+
+	start := timerecord.NewTimeRecorder("getEtcdMeta")
+	resp, err := kv.client.Get(ctx1, key, opts...)
+	elapsed := start.Elapse("getEtcdMeta done")
+	metrics.MetaOpCounter.WithLabelValues(metrics.MetaGetLabel, metrics.TotalLabel).Inc()
+
+	// cal meta kv size
+	if err == nil && resp != nil {
+		totalSize := 0
+		for _, v := range resp.Kvs {
+			totalSize += binary.Size(v)
+		}
+		metrics.MetaKvSize.WithLabelValues(metrics.MetaGetLabel).Observe(float64(totalSize))
+		metrics.MetaRequestLatency.WithLabelValues(metrics.MetaGetLabel).Observe(float64(elapsed.Milliseconds()))
+		metrics.MetaOpCounter.WithLabelValues(metrics.MetaGetLabel, metrics.SuccessLabel).Inc()
+	} else {
+		metrics.MetaOpCounter.WithLabelValues(metrics.MetaGetLabel, metrics.FailLabel).Inc()
+	}
+
+	return resp, err
+}
+
+func (kv *EtcdKV) putEtcdMeta(ctx context.Context, key, val string, opts ...clientv3.OpOption) (*clientv3.PutResponse, error) {
+	ctx1, cancel := context.WithTimeout(ctx, RequestTimeout)
+	defer cancel()
+
+	start := timerecord.NewTimeRecorder("putEtcdMeta")
+	resp, err := kv.client.Put(ctx1, key, val, opts...)
+	elapsed := start.Elapse("putEtcdMeta done")
+	metrics.MetaOpCounter.WithLabelValues(metrics.MetaPutLabel, metrics.TotalLabel).Inc()
+	if err == nil {
+		metrics.MetaKvSize.WithLabelValues(metrics.MetaPutLabel).Observe(float64(len(val)))
+		metrics.MetaRequestLatency.WithLabelValues(metrics.MetaPutLabel).Observe(float64(elapsed.Milliseconds()))
+		metrics.MetaOpCounter.WithLabelValues(metrics.MetaPutLabel, metrics.SuccessLabel).Inc()
+	} else {
+		metrics.MetaOpCounter.WithLabelValues(metrics.MetaPutLabel, metrics.FailLabel).Inc()
+	}
+
+	return resp, err
+}
+
+func (kv *EtcdKV) removeEtcdMeta(ctx context.Context, key string, opts ...clientv3.OpOption) (*clientv3.DeleteResponse, error) {
+	ctx1, cancel := context.WithTimeout(ctx, RequestTimeout)
+	defer cancel()
+
+	start := timerecord.NewTimeRecorder("removeEtcdMeta")
+	resp, err := kv.client.Delete(ctx1, key, opts...)
+	elapsed := start.Elapse("removeEtcdMeta done")
+	metrics.MetaOpCounter.WithLabelValues(metrics.MetaRemoveLabel, metrics.TotalLabel).Inc()
+
+	if err == nil {
+		metrics.MetaRequestLatency.WithLabelValues(metrics.MetaRemoveLabel).Observe(float64(elapsed.Milliseconds()))
+		metrics.MetaOpCounter.WithLabelValues(metrics.MetaRemoveLabel, metrics.SuccessLabel).Inc()
+	} else {
+		metrics.MetaOpCounter.WithLabelValues(metrics.MetaRemoveLabel, metrics.FailLabel).Inc()
+	}
+
+	return resp, err
+}
+
+func (kv *EtcdKV) getTxnWithCmp(ctx context.Context, cmp ...clientv3.Cmp) clientv3.Txn {
+	return kv.client.Txn(ctx).If(cmp...)
+}
+
+func (kv *EtcdKV) executeTxn(txn clientv3.Txn, ops ...clientv3.Op) (*clientv3.TxnResponse, error) {
+	start := timerecord.NewTimeRecorder("executeTxn")
+
+	resp, err := txn.Then(ops...).Commit()
+	elapsed := start.Elapse("executeTxn done")
+	metrics.MetaOpCounter.WithLabelValues(metrics.MetaTxnLabel, metrics.TotalLabel).Inc()
+
+	if err == nil && resp.Succeeded {
+		// cal put meta kv size
+		totalPutSize := 0
+		for _, op := range ops {
+			if op.IsPut() {
+				totalPutSize += binary.Size(op.ValueBytes())
+			}
+		}
+		metrics.MetaKvSize.WithLabelValues(metrics.MetaPutLabel).Observe(float64(totalPutSize))
+
+		// cal get meta kv size
+		totalGetSize := 0
+		for _, rp := range resp.Responses {
+			if rp.GetResponseRange() != nil {
+				for _, v := range rp.GetResponseRange().Kvs {
+					totalGetSize += binary.Size(v)
+				}
+			}
+		}
+		metrics.MetaKvSize.WithLabelValues(metrics.MetaGetLabel).Observe(float64(totalGetSize))
+		metrics.MetaRequestLatency.WithLabelValues(metrics.MetaTxnLabel).Observe(float64(elapsed.Milliseconds()))
+		metrics.MetaOpCounter.WithLabelValues(metrics.MetaTxnLabel, metrics.SuccessLabel).Inc()
+	} else {
+		metrics.MetaOpCounter.WithLabelValues(metrics.MetaTxnLabel, metrics.FailLabel).Inc()
+	}
+
+	return resp, err
 }

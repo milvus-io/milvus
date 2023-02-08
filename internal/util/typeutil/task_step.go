@@ -14,18 +14,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package querynode
+package typeutil
 
-import (
-	"testing"
+type TaskStep int32
 
-	"github.com/stretchr/testify/assert"
+const (
+	TaskStepUnissued    TaskStep = 0
+	TaskStepEnqueue     TaskStep = 1
+	TaskStepPreExecute  TaskStep = 2
+	TaskStepExecute     TaskStep = 3
+	TaskStepPostExecute TaskStep = 4
 )
 
-func TestTaskStep_String(t *testing.T) {
-	assert.Equal(t, TaskStepUnissued.String(), "Unissued")
-	assert.Equal(t, TaskStepEnqueue.String(), "Enqueue")
-	assert.Equal(t, TaskStepPreExecute.String(), "PreExecute")
-	assert.Equal(t, TaskStepExecute.String(), "Execute")
-	assert.Equal(t, TaskStepPostExecute.String(), "PostExecute")
+var TaskStepNames = map[TaskStep]string{
+	0: "Unissued",
+	1: "Enqueue",
+	2: "PreExecute",
+	3: "Execute",
+	4: "PostExecute",
+}
+
+func (x TaskStep) String() string {
+	ret, ok := TaskStepNames[x]
+	if !ok {
+		return "None"
+	}
+	return ret
 }

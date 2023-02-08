@@ -5,14 +5,12 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/metastore/model"
-
-	"github.com/milvus-io/milvus/internal/common"
-
-	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
+	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 )
 
 func Test_alterCollectionTask_Prepare(t *testing.T) {
@@ -51,7 +49,7 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 	t.Run("failed to create alias", func(t *testing.T) {
 		core := newTestCore(withInvalidMeta())
 		task := &alterCollectionTask{
-			baseTask: baseTask{core: core},
+			baseTask: newBaseTask(context.TODO(), core),
 			Req: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterCollection},
 				CollectionName: "cn",
@@ -73,7 +71,7 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 
 		core := newTestCore(withMeta(meta))
 		task := &alterCollectionTask{
-			baseTask: baseTask{core: core},
+			baseTask: newBaseTask(context.TODO(), core),
 			Req: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterCollection},
 				CollectionName: "cn",
@@ -101,7 +99,7 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 
 		core := newTestCore(withValidProxyManager(), withMeta(meta), withBroker(broker))
 		task := &alterCollectionTask{
-			baseTask: baseTask{core: core},
+			baseTask: newBaseTask(context.TODO(), core),
 			Req: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterCollection},
 				CollectionName: "cn",
@@ -129,7 +127,7 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 
 		core := newTestCore(withValidProxyManager(), withMeta(meta), withBroker(broker))
 		task := &alterCollectionTask{
-			baseTask: baseTask{core: core},
+			baseTask: newBaseTask(context.TODO(), core),
 			Req: &milvuspb.AlterCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterCollection},
 				CollectionName: "cn",

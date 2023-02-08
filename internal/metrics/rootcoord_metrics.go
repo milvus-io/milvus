@@ -44,6 +44,14 @@ var (
 			Help:      "latency of each DDL operations",
 		}, []string{functionLabelName})
 
+	RootCoordDDLReqLatencyInQueue = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.RootCoordRole,
+			Name:      "ddl_req_latency_in_queue",
+			Help:      "latency of each DDL operations in queue",
+		}, []string{functionLabelName})
+
 	// RootCoordSyncTimeTickLatency records the latency of sync time tick.
 	RootCoordSyncTimeTickLatency = prometheus.NewHistogram(
 		prometheus.HistogramOpts{

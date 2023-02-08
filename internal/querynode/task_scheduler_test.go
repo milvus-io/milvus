@@ -21,6 +21,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -68,7 +69,7 @@ type mockReadTask struct {
 	canMerge     bool
 	timeout      bool
 	timeoutError error
-	step         TaskStep
+	step         typeutil.TaskStep
 	readyError   error
 }
 
@@ -100,7 +101,7 @@ func (m *mockReadTask) SetMaxCPUUsage(cpu int32) {
 	m.maxCPU = cpu
 }
 
-func (m *mockReadTask) SetStep(step TaskStep) {
+func (m *mockReadTask) SetStep(step typeutil.TaskStep) {
 	m.step = step
 }
 

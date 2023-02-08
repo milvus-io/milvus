@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
 )
 
@@ -44,7 +45,7 @@ type readTask interface {
 	TimeoutError() error
 
 	SetMaxCPUUsage(int32)
-	SetStep(step TaskStep)
+	SetStep(step typeutil.TaskStep)
 }
 
 var _ readTask = (*baseReadTask)(nil)
@@ -62,7 +63,7 @@ type baseReadTask struct {
 	TravelTimestamp    uint64
 	GuaranteeTimestamp uint64
 	TimeoutTimestamp   uint64
-	step               TaskStep
+	step               typeutil.TaskStep
 	queueDur           time.Duration
 	reduceDur          time.Duration
 	waitTsDur          time.Duration
@@ -70,19 +71,19 @@ type baseReadTask struct {
 	tr                 *timerecord.TimeRecorder
 }
 
-func (b *baseReadTask) SetStep(step TaskStep) {
+func (b *baseReadTask) SetStep(step typeutil.TaskStep) {
 	b.step = step
 	switch step {
-	case TaskStepEnqueue:
+	case typeutil.TaskStepEnqueue:
 		b.queueDur = 0
 		b.tr.Record("enqueue done")
-	case TaskStepPreExecute:
+	case typeutil.TaskStepPreExecute:
 		b.queueDur = b.tr.Record("start to process")
 	}
 }
 
 func (b *baseReadTask) OnEnqueue() error {
-	b.SetStep(TaskStepEnqueue)
+	b.SetStep(typeutil.TaskStepEnqueue)
 	return nil
 }
 
@@ -91,25 +92,25 @@ func (b *baseReadTask) SetMaxCPUUsage(cpu int32) {
 }
 
 func (b *baseReadTask) PreExecute(ctx context.Context) error {
-	b.SetStep(TaskStepPreExecute)
+	b.SetStep(typeutil.TaskStepPreExecute)
 	return nil
 }
 
 func (b *baseReadTask) Execute(ctx context.Context) error {
-	b.SetStep(TaskStepExecute)
+	b.SetStep(typeutil.TaskStepExecute)
 	return nil
 }
 
 func (b *baseReadTask) PostExecute(ctx context.Context) error {
-	b.SetStep(TaskStepPostExecute)
+	b.SetStep(typeutil.TaskStepPostExecute)
 	return nil
 }
 
 func (b *baseReadTask) Notify(err error) {
 	switch b.step {
-	case TaskStepEnqueue:
+	case typeutil.TaskStepEnqueue:
 		b.queueDur = b.tr.Record("enqueueEnd")
-	case TaskStepPostExecute:
+	case typeutil.TaskStepPostExecute:
 		b.tr.Record("execute task done")
 	}
 	b.baseTask.Notify(err)

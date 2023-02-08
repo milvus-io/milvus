@@ -17,7 +17,8 @@ import (
 func Test_createPartitionTask_Prepare(t *testing.T) {
 	t.Run("invalid msg type", func(t *testing.T) {
 		task := &createPartitionTask{
-			Req: &milvuspb.CreatePartitionRequest{Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection}},
+			baseTask: newBaseTask(context.TODO(), nil),
+			Req:      &milvuspb.CreatePartitionRequest{Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection}},
 		}
 		err := task.Prepare(context.Background())
 		assert.Error(t, err)
@@ -26,7 +27,7 @@ func Test_createPartitionTask_Prepare(t *testing.T) {
 	t.Run("failed to get collection meta", func(t *testing.T) {
 		core := newTestCore(withInvalidMeta())
 		task := &createPartitionTask{
-			baseTask: baseTask{core: core},
+			baseTask: newBaseTask(context.TODO(), core),
 			Req:      &milvuspb.CreatePartitionRequest{Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_CreatePartition}},
 		}
 		err := task.Prepare(context.Background())
@@ -42,7 +43,7 @@ func Test_createPartitionTask_Prepare(t *testing.T) {
 		}
 		core := newTestCore(withMeta(meta))
 		task := &createPartitionTask{
-			baseTask: baseTask{core: core},
+			baseTask: newBaseTask(context.TODO(), core),
 			Req:      &milvuspb.CreatePartitionRequest{Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_CreatePartition}},
 		}
 		err := task.Prepare(context.Background())
@@ -70,7 +71,7 @@ func Test_createPartitionTask_Execute(t *testing.T) {
 		coll := &model.Collection{Name: collectionName, Partitions: []*model.Partition{}}
 		core := newTestCore(withInvalidIDAllocator())
 		task := &createPartitionTask{
-			baseTask: baseTask{core: core},
+			baseTask: newBaseTask(context.TODO(), core),
 			collMeta: coll,
 			Req:      &milvuspb.CreatePartitionRequest{CollectionName: collectionName, PartitionName: partitionName},
 		}
@@ -84,7 +85,7 @@ func Test_createPartitionTask_Execute(t *testing.T) {
 		coll := &model.Collection{Name: collectionName, Partitions: []*model.Partition{}}
 		core := newTestCore(withValidIDAllocator(), withInvalidProxyManager())
 		task := &createPartitionTask{
-			baseTask: baseTask{core: core},
+			baseTask: newBaseTask(context.TODO(), core),
 			collMeta: coll,
 			Req:      &milvuspb.CreatePartitionRequest{CollectionName: collectionName, PartitionName: partitionName},
 		}
@@ -98,7 +99,7 @@ func Test_createPartitionTask_Execute(t *testing.T) {
 		coll := &model.Collection{Name: collectionName, Partitions: []*model.Partition{}}
 		core := newTestCore(withValidIDAllocator(), withValidProxyManager(), withInvalidMeta())
 		task := &createPartitionTask{
-			baseTask: baseTask{core: core},
+			baseTask: newBaseTask(context.TODO(), core),
 			collMeta: coll,
 			Req:      &milvuspb.CreatePartitionRequest{CollectionName: collectionName, PartitionName: partitionName},
 		}
@@ -116,7 +117,7 @@ func Test_createPartitionTask_Execute(t *testing.T) {
 		}
 		core := newTestCore(withValidIDAllocator(), withValidProxyManager(), withMeta(meta))
 		task := &createPartitionTask{
-			baseTask: baseTask{core: core},
+			baseTask: newBaseTask(context.TODO(), core),
 			collMeta: coll,
 			Req:      &milvuspb.CreatePartitionRequest{CollectionName: collectionName, PartitionName: partitionName},
 		}

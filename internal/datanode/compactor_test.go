@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -569,6 +570,7 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 		emptyTask := &compactionTask{
 			ctx:    ctx,
 			cancel: cancel,
+			tr:     timerecord.NewTimeRecorder("test"),
 		}
 
 		plan := &datapb.CompactionPlan{

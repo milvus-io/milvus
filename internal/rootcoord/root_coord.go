@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -299,12 +300,14 @@ func (c *Core) Register() error {
 	if c.enableActiveStandBy {
 		c.session.ProcessActiveStandBy(c.activateFunc)
 	}
+	metrics.NumNodes.WithLabelValues(strconv.FormatInt(c.session.ServerID, 10), typeutil.RootCoordRole).Inc()
 	log.Info("RootCoord Register Finished")
 	go c.session.LivenessCheck(c.ctx, func() {
 		log.Error("Root Coord disconnected from etcd, process will exit", zap.Int64("Server Id", c.session.ServerID))
 		if err := c.Stop(); err != nil {
 			log.Fatal("failed to stop server", zap.Error(err))
 		}
+		metrics.NumNodes.WithLabelValues(strconv.FormatInt(c.session.ServerID, 10), typeutil.RootCoordRole).Dec()
 		// manually send signal to starter goroutine
 		if c.session.TriggerKill {
 			if p, err := os.FindProcess(os.Getpid()); err == nil {
@@ -770,19 +773,16 @@ func (c *Core) CreateCollection(ctx context.Context, in *milvuspb.CreateCollecti
 		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]), nil
 	}
 
-	metrics.RootCoordDDLReqCounter.WithLabelValues("CreateCollection", metrics.TotalLabel).Inc()
+	method := "CreateCollection"
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder("CreateCollection")
 
 	log.Ctx(ctx).Info("received request to create collection", zap.String("role", typeutil.RootCoordRole),
 		zap.String("name", in.GetCollectionName()), zap.Int64("msgID", in.GetBase().GetMsgID()))
 
 	t := &createCollectionTask{
-		baseTask: baseTask{
-			ctx:  ctx,
-			core: c,
-			done: make(chan error, 1),
-		},
-		Req: in,
+		baseTask: newBaseTask(ctx, c),
+		Req:      in,
 	}
 
 	if err := c.scheduler.AddTask(t); err != nil {
@@ -790,7 +790,7 @@ func (c *Core) CreateCollection(ctx context.Context, in *milvuspb.CreateCollecti
 			zap.Error(err),
 			zap.String("name", in.GetCollectionName()), zap.Int64("msgID", in.GetBase().GetMsgID()))
 
-		metrics.RootCoordDDLReqCounter.WithLabelValues("CreateCollection", metrics.FailLabel).Inc()
+		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
 		return failStatus(commonpb.ErrorCode_UnexpectedError, err.Error()), nil
 	}
 
@@ -800,13 +800,14 @@ func (c *Core) CreateCollection(ctx context.Context, in *milvuspb.CreateCollecti
 			zap.String("name", in.GetCollectionName()),
 			zap.Int64("msgID", in.GetBase().GetMsgID()), zap.Uint64("ts", t.GetTs()))
 
-		metrics.RootCoordDDLReqCounter.WithLabelValues("CreateCollection", metrics.FailLabel).Inc()
+		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
 		return failStatus(commonpb.ErrorCode_UnexpectedError, err.Error()), nil
 	}
 
-	metrics.RootCoordDDLReqCounter.WithLabelValues("CreateCollection", metrics.SuccessLabel).Inc()
-	metrics.RootCoordDDLReqLatency.WithLabelValues("CreateCollection").Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	metrics.RootCoordNumOfCollections.Inc()
+	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues(method).Observe(float64(t.queueDur.Milliseconds()))
 
 	log.Ctx(ctx).Info("done to create collection", zap.String("role", typeutil.RootCoordRole),
 		zap.String("name", in.GetCollectionName()),
@@ -820,19 +821,16 @@ func (c *Core) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRe
 		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]), nil
 	}
 
-	metrics.RootCoordDDLReqCounter.WithLabelValues("DropCollection", metrics.TotalLabel).Inc()
+	method := "DropCollection"
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder("DropCollection")
 
 	log.Ctx(ctx).Info("received request to drop collection", zap.String("role", typeutil.RootCoordRole),
 		zap.String("name", in.GetCollectionName()), zap.Int64("msgID", in.GetBase().GetMsgID()))
 
 	t := &dropCollectionTask{
-		baseTask: baseTask{
-			ctx:  ctx,
-			core: c,
-			done: make(chan error, 1),
-		},
-		Req: in,
+		baseTask: newBaseTask(ctx, c),
+		Req:      in,
 	}
 
 	if err := c.scheduler.AddTask(t); err != nil {
@@ -840,7 +838,7 @@ func (c *Core) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRe
 			zap.Error(err),
 			zap.String("name", in.GetCollectionName()), zap.Int64("msgID", in.GetBase().GetMsgID()))
 
-		metrics.RootCoordDDLReqCounter.WithLabelValues("DropCollection", metrics.FailLabel).Inc()
+		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
 		return failStatus(commonpb.ErrorCode_UnexpectedError, err.Error()), nil
 	}
 
@@ -850,13 +848,14 @@ func (c *Core) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRe
 			zap.String("name", in.GetCollectionName()),
 			zap.Int64("msgID", in.GetBase().GetMsgID()), zap.Uint64("ts", t.GetTs()))
 
-		metrics.RootCoordDDLReqCounter.WithLabelValues("DropCollection", metrics.FailLabel).Inc()
+		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
 		return failStatus(commonpb.ErrorCode_UnexpectedError, err.Error()), nil
 	}
 
-	metrics.RootCoordDDLReqCounter.WithLabelValues("DropCollection", metrics.SuccessLabel).Inc()
-	metrics.RootCoordDDLReqLatency.WithLabelValues("DropCollection").Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	metrics.RootCoordNumOfCollections.Dec()
+	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues(method).Observe(float64(t.queueDur.Milliseconds()))
 
 	log.Ctx(ctx).Info("done to drop collection", zap.String("role", typeutil.RootCoordRole),
 		zap.String("name", in.GetCollectionName()), zap.Int64("msgID", in.GetBase().GetMsgID()),
@@ -873,7 +872,8 @@ func (c *Core) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequ
 		}, nil
 	}
 
-	metrics.RootCoordDDLReqCounter.WithLabelValues("HasCollection", metrics.TotalLabel).Inc()
+	method := "HasCollection"
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder("HasCollection")
 
 	ts := getTravelTs(in)
@@ -889,7 +889,7 @@ func (c *Core) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequ
 
 	if err := c.scheduler.AddTask(t); err != nil {
 		log.Warn("failed to enqueue request to has collection", zap.Error(err))
-		metrics.RootCoordDDLReqCounter.WithLabelValues("HasCollection", metrics.FailLabel).Inc()
+		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
 		return &milvuspb.BoolResponse{
 			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "HasCollection failed: "+err.Error()),
 			Value:  false,
@@ -898,15 +898,16 @@ func (c *Core) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequ
 
 	if err := t.WaitToFinish(); err != nil {
 		log.Warn("failed to has collection", zap.Error(err))
-		metrics.RootCoordDDLReqCounter.WithLabelValues("HasCollection", metrics.FailLabel).Inc()
+		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
 		return &milvuspb.BoolResponse{
 			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "HasCollection failed: "+err.Error()),
 			Value:  false,
 		}, nil
 	}
 
-	metrics.RootCoordDDLReqCounter.WithLabelValues("HasCollection", metrics.SuccessLabel).Inc()
-	metrics.RootCoordDDLReqLatency.WithLabelValues("HasCollection").Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues(method).Observe(float64(t.queueDur.Milliseconds()))
 
 	log.Info("done to has collection", zap.Bool("exist", t.Rsp.GetValue()))
 
@@ -956,7 +957,8 @@ func (c *Core) describeCollectionImpl(ctx context.Context, in *milvuspb.Describe
 		}, nil
 	}
 
-	metrics.RootCoordDDLReqCounter.WithLabelValues("DescribeCollection", metrics.TotalLabel).Inc()
+	method := "DescribeCollection"
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder("DescribeCollection")
 
 	ts := getTravelTs(in)
@@ -997,8 +999,9 @@ func (c *Core) describeCollectionImpl(ctx context.Context, in *milvuspb.Describe
 		}, nil
 	}
 
-	metrics.RootCoordDDLReqCounter.WithLabelValues("DescribeCollection", metrics.SuccessLabel).Inc()
-	metrics.RootCoordDDLReqLatency.WithLabelValues("DescribeCollection").Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues(method).Observe(float64(t.queueDur.Milliseconds()))
 
 	log.Info("done to describe collection", zap.Int64("collection_id", t.Rsp.GetCollectionID()))
 
@@ -1027,8 +1030,8 @@ func (c *Core) ShowCollections(ctx context.Context, in *milvuspb.ShowCollections
 			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]),
 		}, nil
 	}
-
-	metrics.RootCoordDDLReqCounter.WithLabelValues("ShowCollections", metrics.TotalLabel).Inc()
+	method := "ShowCollections"
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder("ShowCollections")
 
 	ts := getTravelTs(in)
@@ -1044,7 +1047,7 @@ func (c *Core) ShowCollections(ctx context.Context, in *milvuspb.ShowCollections
 
 	if err := c.scheduler.AddTask(t); err != nil {
 		log.Warn("failed to enqueue request to show collections", zap.Error(err))
-		metrics.RootCoordDDLReqCounter.WithLabelValues("ShowCollections", metrics.FailLabel).Inc()
+		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
 		return &milvuspb.ShowCollectionsResponse{
 			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "ShowCollections failed: "+err.Error()),
 		}, nil
@@ -1052,14 +1055,15 @@ func (c *Core) ShowCollections(ctx context.Context, in *milvuspb.ShowCollections
 
 	if err := t.WaitToFinish(); err != nil {
 		log.Warn("failed to show collections", zap.Error(err))
-		metrics.RootCoordDDLReqCounter.WithLabelValues("ShowCollections", metrics.FailLabel).Inc()
+		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
 		return &milvuspb.ShowCollectionsResponse{
 			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "ShowCollections failed: "+err.Error()),
 		}, nil
 	}
 
-	metrics.RootCoordDDLReqCounter.WithLabelValues("ShowCollections", metrics.SuccessLabel).Inc()
-	metrics.RootCoordDDLReqLatency.WithLabelValues("ShowCollections").Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues(method).Observe(float64(t.queueDur.Milliseconds()))
 
 	log.Info("done to show collections", zap.Int("num of collections", len(t.Rsp.GetCollectionNames()))) // maybe very large, print number instead.
 
@@ -1071,19 +1075,16 @@ func (c *Core) AlterCollection(ctx context.Context, in *milvuspb.AlterCollection
 		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]), nil
 	}
 
-	metrics.RootCoordDDLReqCounter.WithLabelValues("AlterCollection", metrics.TotalLabel).Inc()
+	method := "AlterCollection"
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder("AlterCollection")
 
 	log.Info("received request to alter collection", zap.String("role", typeutil.RootCoordRole),
 		zap.String("name", in.GetCollectionName()), zap.Int64("msgID", in.GetBase().GetMsgID()))
 
 	t := &alterCollectionTask{
-		baseTask: baseTask{
-			ctx:  ctx,
-			core: c,
-			done: make(chan error, 1),
-		},
-		Req: in,
+		baseTask: newBaseTask(ctx, c),
+		Req:      in,
 	}
 
 	if err := c.scheduler.AddTask(t); err != nil {
@@ -1092,7 +1093,7 @@ func (c *Core) AlterCollection(ctx context.Context, in *milvuspb.AlterCollection
 			zap.Error(err),
 			zap.String("name", in.GetCollectionName()), zap.Int64("msgID", in.GetBase().GetMsgID()))
 
-		metrics.RootCoordDDLReqCounter.WithLabelValues("AlterCollection", metrics.FailLabel).Inc()
+		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
 		return failStatus(commonpb.ErrorCode_UnexpectedError, err.Error()), nil
 	}
 
@@ -1103,13 +1104,14 @@ func (c *Core) AlterCollection(ctx context.Context, in *milvuspb.AlterCollection
 			zap.String("name", in.GetCollectionName()),
 			zap.Int64("msgID", in.GetBase().GetMsgID()), zap.Uint64("ts", t.GetTs()))
 
-		metrics.RootCoordDDLReqCounter.WithLabelValues("AlterCollection", metrics.FailLabel).Inc()
+		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
 		return failStatus(commonpb.ErrorCode_UnexpectedError, err.Error()), nil
 	}
 
-	metrics.RootCoordDDLReqCounter.WithLabelValues("AlterCollection", metrics.SuccessLabel).Inc()
-	metrics.RootCoordDDLReqLatency.WithLabelValues("AlterCollection").Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	metrics.RootCoordNumOfCollections.Dec()
+	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues(method).Observe(float64(t.queueDur.Milliseconds()))
 
 	log.Info("done to alter collection", zap.String("role", typeutil.RootCoordRole),
 		zap.String("name", in.GetCollectionName()), zap.Int64("msgID", in.GetBase().GetMsgID()),
@@ -1123,7 +1125,8 @@ func (c *Core) CreatePartition(ctx context.Context, in *milvuspb.CreatePartition
 		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]), nil
 	}
 
-	metrics.RootCoordDDLReqCounter.WithLabelValues("CreatePartition", metrics.TotalLabel).Inc()
+	method := "CreatePartition"
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder("CreatePartition")
 
 	log.Ctx(ctx).Info("received request to create partition", zap.String("role", typeutil.RootCoordRole),
@@ -1131,12 +1134,8 @@ func (c *Core) CreatePartition(ctx context.Context, in *milvuspb.CreatePartition
 		zap.Int64("msgID", in.GetBase().GetMsgID()))
 
 	t := &createPartitionTask{
-		baseTask: baseTask{
-			ctx:  ctx,
-			core: c,
-			done: make(chan error, 1),
-		},
-		Req: in,
+		baseTask: newBaseTask(ctx, c),
+		Req:      in,
 	}
 
 	if err := c.scheduler.AddTask(t); err != nil {
@@ -1145,7 +1144,7 @@ func (c *Core) CreatePartition(ctx context.Context, in *milvuspb.CreatePartition
 			zap.String("collection", in.GetCollectionName()), zap.String("partition", in.GetPartitionName()),
 			zap.Int64("msgID", in.GetBase().GetMsgID()))
 
-		metrics.RootCoordDDLReqCounter.WithLabelValues("CreatePartition", metrics.FailLabel).Inc()
+		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
 		return failStatus(commonpb.ErrorCode_UnexpectedError, err.Error()), nil
 	}
 
@@ -1155,12 +1154,13 @@ func (c *Core) CreatePartition(ctx context.Context, in *milvuspb.CreatePartition
 			zap.String("collection", in.GetCollectionName()), zap.String("partition", in.GetPartitionName()),
 			zap.Int64("msgID", in.GetBase().GetMsgID()), zap.Uint64("ts", t.GetTs()))
 
-		metrics.RootCoordDDLReqCounter.WithLabelValues("CreatePartition", metrics.FailLabel).Inc()
+		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
 		return failStatus(commonpb.ErrorCode_UnexpectedError, err.Error()), nil
 	}
 
-	metrics.RootCoordDDLReqCounter.WithLabelValues("CreatePartition", metrics.SuccessLabel).Inc()
-	metrics.RootCoordDDLReqLatency.WithLabelValues("CreatePartition").Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues(method).Observe(float64(t.queueDur.Milliseconds()))
 
 	log.Ctx(ctx).Info("done to create partition", zap.String("role", typeutil.RootCoordRole),
 		zap.String("collection", in.GetCollectionName()), zap.String("partition", in.GetPartitionName()),
@@ -1174,7 +1174,8 @@ func (c *Core) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequ
 		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]), nil
 	}
 
-	metrics.RootCoordDDLReqCounter.WithLabelValues("DropPartition", metrics.TotalLabel).Inc()
+	method := "DropPartition"
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder("DropPartition")
 
 	log.Ctx(ctx).Info("received request to drop partition", zap.String("role", typeutil.RootCoordRole),
@@ -1182,12 +1183,8 @@ func (c *Core) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequ
 		zap.Int64("msgID", in.GetBase().GetMsgID()))
 
 	t := &dropPartitionTask{
-		baseTask: baseTask{
-			ctx:  ctx,
-			core: c,
-			done: make(chan error, 1),
-		},
-		Req: in,
+		baseTask: newBaseTask(ctx, c),
+		Req:      in,
 	}
 
 	if err := c.scheduler.AddTask(t); err != nil {
@@ -1196,7 +1193,7 @@ func (c *Core) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequ
 			zap.String("collection", in.GetCollectionName()), zap.String("partition", in.GetPartitionName()),
 			zap.Int64("msgID", in.GetBase().GetMsgID()))
 
-		metrics.RootCoordDDLReqCounter.WithLabelValues("DropPartition", metrics.FailLabel).Inc()
+		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
 		return failStatus(commonpb.ErrorCode_UnexpectedError, err.Error()), nil
 	}
 	if err := t.WaitToFinish(); err != nil {
@@ -1205,12 +1202,13 @@ func (c *Core) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequ
 			zap.String("collection", in.GetCollectionName()), zap.String("partition", in.GetPartitionName()),
 			zap.Int64("msgID", in.GetBase().GetMsgID()), zap.Uint64("ts", t.GetTs()))
 
-		metrics.RootCoordDDLReqCounter.WithLabelValues("DropPartition", metrics.FailLabel).Inc()
+		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
 		return failStatus(commonpb.ErrorCode_UnexpectedError, err.Error()), nil
 	}
 
-	metrics.RootCoordDDLReqCounter.WithLabelValues("DropPartition", metrics.SuccessLabel).Inc()
-	metrics.RootCoordDDLReqLatency.WithLabelValues("DropPartition").Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues(method).Observe(float64(t.queueDur.Milliseconds()))
 
 	log.Ctx(ctx).Info("done to drop partition", zap.String("role", typeutil.RootCoordRole),
 		zap.String("collection", in.GetCollectionName()), zap.String("partition", in.GetPartitionName()),
@@ -1227,7 +1225,8 @@ func (c *Core) HasPartition(ctx context.Context, in *milvuspb.HasPartitionReques
 		}, nil
 	}
 
-	metrics.RootCoordDDLReqCounter.WithLabelValues("HasPartition", metrics.TotalLabel).Inc()
+	method := "HasPartition"
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder("HasPartition")
 
 	// TODO(longjiquan): why HasPartitionRequest doesn't contain Timestamp but other requests do.
@@ -1244,7 +1243,7 @@ func (c *Core) HasPartition(ctx context.Context, in *milvuspb.HasPartitionReques
 
 	if err := c.scheduler.AddTask(t); err != nil {
 		log.Warn("failed to enqueue request to has partition", zap.Error(err))
-		metrics.RootCoordDDLReqCounter.WithLabelValues("HasPartition", metrics.FailLabel).Inc()
+		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
 		return &milvuspb.BoolResponse{
 			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "HasPartition failed: "+err.Error()),
 			Value:  false,
@@ -1253,15 +1252,16 @@ func (c *Core) HasPartition(ctx context.Context, in *milvuspb.HasPartitionReques
 
 	if err := t.WaitToFinish(); err != nil {
 		log.Warn("failed to has partition", zap.Error(err))
-		metrics.RootCoordDDLReqCounter.WithLabelValues("HasPartition", metrics.FailLabel).Inc()
+		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
 		return &milvuspb.BoolResponse{
 			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "HasPartition failed: "+err.Error()),
 			Value:  false,
 		}, nil
 	}
 
-	metrics.RootCoordDDLReqCounter.WithLabelValues("HasPartition", metrics.SuccessLabel).Inc()
-	metrics.RootCoordDDLReqLatency.WithLabelValues("HasPartition").Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues(method).Observe(float64(t.queueDur.Milliseconds()))
 
 	log.Info("done to has partition", zap.Bool("exist", t.Rsp.GetValue()))
 
@@ -1275,7 +1275,8 @@ func (c *Core) showPartitionsImpl(ctx context.Context, in *milvuspb.ShowPartitio
 		}, nil
 	}
 
-	metrics.RootCoordDDLReqCounter.WithLabelValues("ShowPartitions", metrics.TotalLabel).Inc()
+	method := "ShowPartitions"
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder("ShowPartitions")
 
 	log := log.Ctx(ctx).With(
@@ -1294,7 +1295,7 @@ func (c *Core) showPartitionsImpl(ctx context.Context, in *milvuspb.ShowPartitio
 
 	if err := c.scheduler.AddTask(t); err != nil {
 		log.Warn("failed to enqueue request to show partitions", zap.Error(err))
-		metrics.RootCoordDDLReqCounter.WithLabelValues("ShowPartitions", metrics.FailLabel).Inc()
+		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
 		return &milvuspb.ShowPartitionsResponse{
 			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "ShowPartitions failed: "+err.Error()),
 			// Status: common.StatusFromError(err),
@@ -1303,15 +1304,16 @@ func (c *Core) showPartitionsImpl(ctx context.Context, in *milvuspb.ShowPartitio
 
 	if err := t.WaitToFinish(); err != nil {
 		log.Warn("failed to show partitions", zap.Error(err))
-		metrics.RootCoordDDLReqCounter.WithLabelValues("ShowPartitions", metrics.FailLabel).Inc()
+		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
 		return &milvuspb.ShowPartitionsResponse{
 			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "ShowPartitions failed: "+err.Error()),
 			// Status: common.StatusFromError(err),
 		}, nil
 	}
 
-	metrics.RootCoordDDLReqCounter.WithLabelValues("ShowPartitions", metrics.SuccessLabel).Inc()
-	metrics.RootCoordDDLReqLatency.WithLabelValues("ShowPartitions").Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues(method).Observe(float64(t.queueDur.Milliseconds()))
 
 	log.Info("done to show partitions", zap.Strings("partitions", t.Rsp.GetPartitionNames()))
 
@@ -1491,7 +1493,8 @@ func (c *Core) CreateAlias(ctx context.Context, in *milvuspb.CreateAliasRequest)
 		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]), nil
 	}
 
-	metrics.RootCoordDDLReqCounter.WithLabelValues("CreateAlias", metrics.TotalLabel).Inc()
+	method := "CreateAlias"
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder("CreateAlias")
 
 	log.Info("received request to create alias", zap.String("role", typeutil.RootCoordRole),
@@ -1499,12 +1502,8 @@ func (c *Core) CreateAlias(ctx context.Context, in *milvuspb.CreateAliasRequest)
 		zap.Int64("msgID", in.GetBase().GetMsgID()))
 
 	t := &createAliasTask{
-		baseTask: baseTask{
-			ctx:  ctx,
-			core: c,
-			done: make(chan error, 1),
-		},
-		Req: in,
+		baseTask: newBaseTask(ctx, c),
+		Req:      in,
 	}
 
 	if err := c.scheduler.AddTask(t); err != nil {
@@ -1514,7 +1513,7 @@ func (c *Core) CreateAlias(ctx context.Context, in *milvuspb.CreateAliasRequest)
 			zap.String("alias", in.GetAlias()), zap.String("collection", in.GetCollectionName()),
 			zap.Int64("msgID", in.GetBase().GetMsgID()))
 
-		metrics.RootCoordDDLReqCounter.WithLabelValues("CreateAlias", metrics.FailLabel).Inc()
+		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
 		return failStatus(commonpb.ErrorCode_UnexpectedError, err.Error()), nil
 	}
 
@@ -1525,12 +1524,13 @@ func (c *Core) CreateAlias(ctx context.Context, in *milvuspb.CreateAliasRequest)
 			zap.String("alias", in.GetAlias()), zap.String("collection", in.GetCollectionName()),
 			zap.Int64("msgID", in.GetBase().GetMsgID()), zap.Uint64("ts", t.GetTs()))
 
-		metrics.RootCoordDDLReqCounter.WithLabelValues("CreateAlias", metrics.FailLabel).Inc()
+		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
 		return failStatus(commonpb.ErrorCode_UnexpectedError, err.Error()), nil
 	}
 
-	metrics.RootCoordDDLReqCounter.WithLabelValues("CreateAlias", metrics.SuccessLabel).Inc()
-	metrics.RootCoordDDLReqLatency.WithLabelValues("CreateAlias").Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues(method).Observe(float64(t.queueDur.Milliseconds()))
 
 	log.Info("done to create alias", zap.String("role", typeutil.RootCoordRole),
 		zap.String("alias", in.GetAlias()), zap.String("collection", in.GetCollectionName()),
@@ -1544,19 +1544,16 @@ func (c *Core) DropAlias(ctx context.Context, in *milvuspb.DropAliasRequest) (*c
 		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]), nil
 	}
 
-	metrics.RootCoordDDLReqCounter.WithLabelValues("DropAlias", metrics.TotalLabel).Inc()
+	method := "DropAlias"
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder("DropAlias")
 
 	log.Info("received request to drop alias", zap.String("role", typeutil.RootCoordRole),
 		zap.String("alias", in.GetAlias()), zap.Int64("msgID", in.GetBase().GetMsgID()))
 
 	t := &dropAliasTask{
-		baseTask: baseTask{
-			ctx:  ctx,
-			core: c,
-			done: make(chan error, 1),
-		},
-		Req: in,
+		baseTask: newBaseTask(ctx, c),
+		Req:      in,
 	}
 
 	if err := c.scheduler.AddTask(t); err != nil {
@@ -1565,7 +1562,7 @@ func (c *Core) DropAlias(ctx context.Context, in *milvuspb.DropAliasRequest) (*c
 			zap.Error(err),
 			zap.String("alias", in.GetAlias()), zap.Int64("msgID", in.GetBase().GetMsgID()))
 
-		metrics.RootCoordDDLReqCounter.WithLabelValues("DropAlias", metrics.FailLabel).Inc()
+		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
 		return failStatus(commonpb.ErrorCode_UnexpectedError, err.Error()), nil
 	}
 
@@ -1576,12 +1573,13 @@ func (c *Core) DropAlias(ctx context.Context, in *milvuspb.DropAliasRequest) (*c
 			zap.String("alias", in.GetAlias()),
 			zap.Int64("msgID", in.GetBase().GetMsgID()), zap.Uint64("ts", t.GetTs()))
 
-		metrics.RootCoordDDLReqCounter.WithLabelValues("DropAlias", metrics.FailLabel).Inc()
+		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
 		return failStatus(commonpb.ErrorCode_UnexpectedError, err.Error()), nil
 	}
 
-	metrics.RootCoordDDLReqCounter.WithLabelValues("DropAlias", metrics.SuccessLabel).Inc()
-	metrics.RootCoordDDLReqLatency.WithLabelValues("DropAlias").Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues(method).Observe(float64(t.queueDur.Milliseconds()))
 
 	log.Info("done to drop alias", zap.String("role", typeutil.RootCoordRole),
 		zap.String("alias", in.GetAlias()),
@@ -1595,7 +1593,8 @@ func (c *Core) AlterAlias(ctx context.Context, in *milvuspb.AlterAliasRequest) (
 		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]), nil
 	}
 
-	metrics.RootCoordDDLReqCounter.WithLabelValues("DropAlias", metrics.TotalLabel).Inc()
+	method := "AlterAlias"
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder("AlterAlias")
 
 	log.Info("received request to alter alias", zap.String("role", typeutil.RootCoordRole),
@@ -1603,12 +1602,8 @@ func (c *Core) AlterAlias(ctx context.Context, in *milvuspb.AlterAliasRequest) (
 		zap.Int64("msgID", in.GetBase().GetMsgID()))
 
 	t := &alterAliasTask{
-		baseTask: baseTask{
-			ctx:  ctx,
-			core: c,
-			done: make(chan error, 1),
-		},
-		Req: in,
+		baseTask: newBaseTask(ctx, c),
+		Req:      in,
 	}
 
 	if err := c.scheduler.AddTask(t); err != nil {
@@ -1618,7 +1613,7 @@ func (c *Core) AlterAlias(ctx context.Context, in *milvuspb.AlterAliasRequest) (
 			zap.String("alias", in.GetAlias()), zap.String("collection", in.GetCollectionName()),
 			zap.Int64("msgID", in.GetBase().GetMsgID()))
 
-		metrics.RootCoordDDLReqCounter.WithLabelValues("AlterAlias", metrics.FailLabel).Inc()
+		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
 		return failStatus(commonpb.ErrorCode_UnexpectedError, err.Error()), nil
 	}
 
@@ -1629,12 +1624,13 @@ func (c *Core) AlterAlias(ctx context.Context, in *milvuspb.AlterAliasRequest) (
 			zap.String("alias", in.GetAlias()), zap.String("collection", in.GetCollectionName()),
 			zap.Int64("msgID", in.GetBase().GetMsgID()), zap.Uint64("ts", t.GetTs()))
 
-		metrics.RootCoordDDLReqCounter.WithLabelValues("AlterAlias", metrics.FailLabel).Inc()
+		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
 		return failStatus(commonpb.ErrorCode_UnexpectedError, err.Error()), nil
 	}
 
-	metrics.RootCoordDDLReqCounter.WithLabelValues("AlterAlias", metrics.SuccessLabel).Inc()
-	metrics.RootCoordDDLReqLatency.WithLabelValues("AlterAlias").Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues(method).Observe(float64(t.queueDur.Milliseconds()))
 
 	log.Info("done to alter alias", zap.String("role", typeutil.RootCoordRole),
 		zap.String("alias", in.GetAlias()), zap.String("collection", in.GetCollectionName()),

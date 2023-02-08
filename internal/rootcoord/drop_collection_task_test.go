@@ -21,6 +21,7 @@ import (
 func Test_dropCollectionTask_Prepare(t *testing.T) {
 	t.Run("invalid msg type", func(t *testing.T) {
 		task := &dropCollectionTask{
+			baseTask: newBaseTask(context.TODO(), nil),
 			Req: &milvuspb.DropCollectionRequest{
 				Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_DescribeCollection},
 			},
@@ -37,7 +38,7 @@ func Test_dropCollectionTask_Prepare(t *testing.T) {
 		}
 		core := newTestCore(withMeta(meta))
 		task := &dropCollectionTask{
-			baseTask: baseTask{core: core},
+			baseTask: newBaseTask(context.TODO(), core),
 			Req: &milvuspb.DropCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection},
 				CollectionName: collectionName,
@@ -55,7 +56,7 @@ func Test_dropCollectionTask_Prepare(t *testing.T) {
 		}
 		core := newTestCore(withMeta(meta))
 		task := &dropCollectionTask{
-			baseTask: baseTask{core: core},
+			baseTask: newBaseTask(context.TODO(), core),
 			Req: &milvuspb.DropCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection},
 				CollectionName: collectionName,
@@ -82,7 +83,7 @@ func Test_dropCollectionTask_Execute(t *testing.T) {
 		})
 		core := newTestCore(withMeta(meta))
 		task := &dropCollectionTask{
-			baseTask: baseTask{core: core},
+			baseTask: newBaseTask(context.TODO(), core),
 			Req: &milvuspb.DropCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection},
 				CollectionName: collectionName,
@@ -111,7 +112,7 @@ func Test_dropCollectionTask_Execute(t *testing.T) {
 
 		core := newTestCore(withInvalidProxyManager(), withMeta(meta))
 		task := &dropCollectionTask{
-			baseTask: baseTask{core: core},
+			baseTask: newBaseTask(context.TODO(), core),
 			Req: &milvuspb.DropCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection},
 				CollectionName: collectionName,
@@ -136,7 +137,7 @@ func Test_dropCollectionTask_Execute(t *testing.T) {
 		}
 		core := newTestCore(withValidProxyManager(), withMeta(meta))
 		task := &dropCollectionTask{
-			baseTask: baseTask{core: core},
+			baseTask: newBaseTask(context.TODO(), core),
 			Req: &milvuspb.DropCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection},
 				CollectionName: collectionName,
@@ -215,7 +216,7 @@ func Test_dropCollectionTask_Execute(t *testing.T) {
 			withTtSynchronizer(ticker))
 
 		task := &dropCollectionTask{
-			baseTask: baseTask{core: core},
+			baseTask: newBaseTask(context.TODO(), core),
 			Req: &milvuspb.DropCollectionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection},
 				CollectionName: collectionName,

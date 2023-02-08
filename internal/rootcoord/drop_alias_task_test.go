@@ -15,7 +15,8 @@ import (
 func Test_dropAliasTask_Prepare(t *testing.T) {
 	t.Run("invalid msg type", func(t *testing.T) {
 		task := &dropAliasTask{
-			Req: &milvuspb.DropAliasRequest{Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection}},
+			baseTask: newBaseTask(context.TODO(), nil),
+			Req:      &milvuspb.DropAliasRequest{Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection}},
 		}
 		err := task.Prepare(context.Background())
 		assert.Error(t, err)
@@ -23,7 +24,8 @@ func Test_dropAliasTask_Prepare(t *testing.T) {
 
 	t.Run("normal case", func(t *testing.T) {
 		task := &dropAliasTask{
-			Req: &milvuspb.DropAliasRequest{Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_DropAlias}},
+			baseTask: newBaseTask(context.TODO(), nil),
+			Req:      &milvuspb.DropAliasRequest{Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_DropAlias}},
 		}
 		err := task.Prepare(context.Background())
 		assert.NoError(t, err)
@@ -35,7 +37,7 @@ func Test_dropAliasTask_Execute(t *testing.T) {
 		core := newTestCore(withInvalidProxyManager())
 		alias := funcutil.GenRandomStr()
 		task := &dropAliasTask{
-			baseTask: baseTask{core: core},
+			baseTask: newBaseTask(context.TODO(), core),
 			Req: &milvuspb.DropAliasRequest{
 
 				Base:  &commonpb.MsgBase{MsgType: commonpb.MsgType_DropAlias},
@@ -50,7 +52,7 @@ func Test_dropAliasTask_Execute(t *testing.T) {
 		core := newTestCore(withValidProxyManager(), withInvalidMeta())
 		alias := funcutil.GenRandomStr()
 		task := &dropAliasTask{
-			baseTask: baseTask{core: core},
+			baseTask: newBaseTask(context.TODO(), core),
 			Req: &milvuspb.DropAliasRequest{
 
 				Base:  &commonpb.MsgBase{MsgType: commonpb.MsgType_DropAlias},
@@ -69,7 +71,7 @@ func Test_dropAliasTask_Execute(t *testing.T) {
 		core := newTestCore(withValidProxyManager(), withMeta(meta))
 		alias := funcutil.GenRandomStr()
 		task := &dropAliasTask{
-			baseTask: baseTask{core: core},
+			baseTask: newBaseTask(context.TODO(), core),
 			Req: &milvuspb.DropAliasRequest{
 
 				Base:  &commonpb.MsgBase{MsgType: commonpb.MsgType_DropAlias},

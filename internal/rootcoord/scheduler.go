@@ -119,6 +119,7 @@ func (s *scheduler) setTs(task task) error {
 }
 
 func (s *scheduler) enqueue(task task) {
+	task.OnEnqueue()
 	s.taskChan <- task
 }
 

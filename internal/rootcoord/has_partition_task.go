@@ -16,6 +16,7 @@ type hasPartitionTask struct {
 }
 
 func (t *hasPartitionTask) Prepare(ctx context.Context) error {
+	t.SetStep(typeutil.TaskStepPreExecute)
 	if err := CheckMsgType(t.Req.Base.MsgType, commonpb.MsgType_HasPartition); err != nil {
 		return err
 	}
@@ -24,6 +25,7 @@ func (t *hasPartitionTask) Prepare(ctx context.Context) error {
 
 // Execute task execution
 func (t *hasPartitionTask) Execute(ctx context.Context) error {
+	t.SetStep(typeutil.TaskStepExecute)
 	t.Rsp.Status = succStatus()
 	t.Rsp.Value = false
 	// TODO: why HasPartitionRequest doesn't contain Timestamp but other requests do.

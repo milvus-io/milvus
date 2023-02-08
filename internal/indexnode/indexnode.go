@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
@@ -53,6 +54,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
@@ -125,6 +127,8 @@ func NewIndexNode(ctx context.Context, factory dependency.Factory) (*IndexNode, 
 // Register register index node at etcd.
 func (i *IndexNode) Register() error {
 	i.session.Register()
+	metrics.NumNodes.WithLabelValues(strconv.FormatInt(i.session.ServerID, 10), typeutil.IndexNodeRole).Inc()
+	log.Info("IndexNode Register Finished")
 
 	//start liveness check
 	go i.session.LivenessCheck(i.loopCtx, func() {
@@ -132,6 +136,7 @@ func (i *IndexNode) Register() error {
 		if err := i.Stop(); err != nil {
 			log.Fatal("failed to stop server", zap.Error(err))
 		}
+		metrics.NumNodes.WithLabelValues(strconv.FormatInt(i.session.ServerID, 10), typeutil.IndexNodeRole).Dec()
 		// manually send signal to starter goroutine
 		if i.session.TriggerKill {
 			if p, err := os.FindProcess(os.Getpid()); err == nil {

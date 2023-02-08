@@ -22,6 +22,13 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
+const (
+	LoadSegmentLabel     = "load_segment"
+	WatchDmlChannelLabel = "watch_dml_channel"
+
+	QueryCoordTaskType = "querycoord_task_type"
+)
+
 var (
 	QueryCoordNumCollections = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -83,7 +90,7 @@ var (
 			Subsystem: typeutil.QueryCoordRole,
 			Name:      "task_num",
 			Help:      "the number of tasks in QueryCoord's scheduler",
-		}, []string{})
+		}, []string{QueryCoordTaskType})
 
 	QueryCoordNumQueryNodes = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{

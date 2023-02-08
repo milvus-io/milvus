@@ -14,9 +14,10 @@ package rmq
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/client"
-
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/internal/util/timerecord"
 )
 
 var _ mqwrapper.Producer = (*rmqProducer)(nil)
@@ -33,9 +34,20 @@ func (rp *rmqProducer) Topic() string {
 
 // Send send the producer messages to rocksmq
 func (rp *rmqProducer) Send(ctx context.Context, message *mqwrapper.ProducerMessage) (mqwrapper.MessageID, error) {
+	start := timerecord.NewTimeRecorder("send msg to stream")
+	metrics.MsgStreamOpCounter.WithLabelValues(metrics.SendMsgLabel, metrics.TotalLabel).Inc()
+
 	pm := &client.ProducerMessage{Payload: message.Payload}
 	id, err := rp.p.Send(pm)
-	return &rmqID{messageID: id}, err
+	if err != nil {
+		metrics.MsgStreamOpCounter.WithLabelValues(metrics.SendMsgLabel, metrics.FailLabel).Inc()
+		return &rmqID{messageID: id}, err
+	}
+
+	elapsed := start.Elapse("send msg to stream done")
+	metrics.MsgStreamRequestLatency.WithLabelValues(metrics.SendMsgLabel).Observe(float64(elapsed.Milliseconds()))
+	metrics.MsgStreamOpCounter.WithLabelValues(metrics.SendMsgLabel, metrics.SuccessLabel).Inc()
+	return &rmqID{messageID: id}, nil
 }
 
 // Close does nothing currently
