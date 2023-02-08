@@ -13,7 +13,6 @@
 
 set( KNOWHERE_VERSION v1.3.6-test )
 
-
 macro(build_knowhere)
     message(STATUS "Building knowhere-${KNOWHERE_VERSION} from source")
     set (KNOWHERE_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX})
