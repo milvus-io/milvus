@@ -2720,3 +2720,35 @@ func TestDescribeResourceGroupTask(t *testing.T) {
 	assert.NotNil(t, outgoingNodeNum["collection1"])
 	assert.NotNil(t, incomingNodeNum["collection2"])
 }
+
+func TestDescribeResourceGroupTaskFailed(t *testing.T) {
+	rc := &MockRootCoordClientInterface{}
+	qc := NewQueryCoordMock()
+	qc.Start()
+	defer qc.Stop()
+	ctx := context.Background()
+	mgr := newShardClientMgr()
+	InitMetaCache(ctx, rc, qc, mgr)
+	// make it avoid remote call on rc
+	globalMetaCache.GetCollectionSchema(context.Background(), "collection1")
+	globalMetaCache.GetCollectionSchema(context.Background(), "collection2")
+
+	req := &milvuspb.DescribeResourceGroupRequest{
+		Base: &commonpb.MsgBase{
+			MsgID:     1,
+			Timestamp: 2,
+			TargetID:  3,
+		},
+		ResourceGroup: "rgggg",
+	}
+
+	task := &DescribeResourceGroupTask{
+		DescribeResourceGroupRequest: req,
+		ctx:                          ctx,
+		queryCoord:                   qc,
+	}
+	task.PreExecute(ctx)
+	err := task.Execute(ctx)
+	assert.Nil(t, err)
+	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, task.result.Status.ErrorCode)
+}
