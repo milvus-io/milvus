@@ -1,5 +1,10 @@
 package paramtable
 
+import (
+	"github.com/milvus-io/milvus/internal/log"
+	"go.uber.org/zap"
+)
+
 const hookYamlFile = "hook.yaml"
 
 type HookConfig struct {
@@ -11,6 +16,7 @@ type HookConfig struct {
 func (h *HookConfig) init() {
 	h.Base = &BaseTable{YamlFile: hookYamlFile}
 	h.Base.Init()
+	log.Info("hook config", zap.Any("hook", h.Base.Configs()))
 
 	h.initSoPath()
 	h.initSoConfig()
