@@ -483,6 +483,7 @@ func (ibNode *insertBufferNode) Sync(fgMsg *flowGraphMsg, seg2Upload []UniqueID,
 		segmentsToSync = append(segmentsToSync, task.segmentID)
 		ibNode.channel.rollInsertBuffer(task.segmentID)
 		ibNode.channel.RollPKstats(task.segmentID, pkStats)
+		ibNode.channel.setSegmentLastSyncTs(task.segmentID, endPosition.GetTimestamp())
 		metrics.DataNodeFlushBufferCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SuccessLabel).Inc()
 		metrics.DataNodeFlushBufferCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.TotalLabel).Inc()
 		if task.auto {

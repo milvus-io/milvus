@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
@@ -228,7 +229,12 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	}
 
 	inMsg := genFlowGraphInsertMsg(insertChannelName)
-	assert.NotPanics(t, func() { iBNode.Operate([]flowgraph.Msg{&inMsg}) })
+	iBNode.channel.setSegmentLastSyncTs(UniqueID(1), tsoutil.ComposeTSByTime(time.Now().Add(-11*time.Minute), 0))
+	assert.NotPanics(t, func() {
+		res := iBNode.Operate([]flowgraph.Msg{&inMsg})
+		assert.Subset(t, res[0].(*flowGraphMsg).segmentsToSync, []UniqueID{1})
+	})
+	assert.NotSubset(t, iBNode.channel.listSegmentIDsToSync(tsoutil.ComposeTSByTime(time.Now(), 0)), []UniqueID{1})
 
 	resendTTChan <- resendTTMsg{
 		segmentIDs: []int64{0, 1, 2},
