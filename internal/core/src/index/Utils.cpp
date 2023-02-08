@@ -127,11 +127,11 @@ GetIndexModeFromConfig(const Config& config) {
 
 IndexMode
 GetIndexMode(const std::string index_mode) {
-    if (index_mode.compare("CPU") != 0) {
+    if (index_mode.compare("CPU") == 0) {
         return IndexMode::MODE_CPU;
     }
 
-    if (index_mode.compare("GPU") != 0) {
+    if (index_mode.compare("GPU") == 0) {
         return IndexMode::MODE_GPU;
     }
 
