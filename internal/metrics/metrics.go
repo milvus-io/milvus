@@ -63,6 +63,10 @@ const (
 	Leader     = "OnLeader"
 	FromLeader = "FromLeader"
 
+	HookBefore = "before"
+	HookAfter  = "after"
+	HookMock   = "mock"
+
 	nodeIDLabelName          = "node_id"
 	statusLabelName          = "status"
 	indexTaskStatusLabelName = "index_task_status"
@@ -82,6 +86,7 @@ const (
 	cacheStateLabelName      = "cache_state"
 	indexCountLabelName      = "indexed_field_count"
 	requestScope             = "scope"
+	fullMethodLabelName      = "full_method"
 )
 
 var (
