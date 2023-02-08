@@ -58,6 +58,9 @@ const (
 	Leader     = "OnLeader"
 	FromLeader = "FromLeader"
 
+	HookErrorBefore = "before"
+	HookErrorAfter  = "after"
+
 	nodeIDLabelName          = "node_id"
 	statusLabelName          = "status"
 	indexTaskStatusLabelName = "index_task_status"
@@ -75,6 +78,7 @@ const (
 	cacheStateLabelName      = "cache_state"
 	indexCountLabelName      = "indexed_field_count"
 	requestScope             = "scope"
+	hookErrorFuncLabelName   = "error_func"
 )
 
 var (
