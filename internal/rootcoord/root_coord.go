@@ -132,7 +132,7 @@ type Core struct {
 	importManager *importManager
 
 	enableActiveStandBy bool
-	activateFunc        func()
+	activateFunc        func() error
 }
 
 // --------------------- function --------------------------
@@ -274,7 +274,9 @@ func (c *Core) SetQueryCoord(s types.QueryCoord) error {
 func (c *Core) Register() error {
 	c.session.Register()
 	if c.enableActiveStandBy {
-		c.session.ProcessActiveStandBy(c.activateFunc)
+		if err := c.session.ProcessActiveStandBy(c.activateFunc); err != nil {
+			return err
+		}
 	}
 	log.Info("RootCoord Register Finished")
 	go c.session.LivenessCheck(c.ctx, func() {
@@ -468,21 +470,27 @@ func (c *Core) Init() error {
 	}
 
 	if c.enableActiveStandBy {
-		c.activateFunc = func() {
+		c.activateFunc = func() error {
 			log.Info("RootCoord switch from standby to active, activating")
+
+			var err error
 			c.initOnce.Do(func() {
-				if err := c.initInternal(); err != nil {
-					log.Warn("RootCoord init failed", zap.Error(err))
+				if err = c.initInternal(); err != nil {
+					log.Error("RootCoord init failed", zap.Error(err))
 				}
 			})
+			if err != nil {
+				return err
+			}
 			c.startOnce.Do(func() {
-				if err := c.startInternal(); err != nil {
-					log.Warn("RootCoord start failed", zap.Error(err))
+				if err = c.startInternal(); err != nil {
+					log.Error("RootCoord start failed", zap.Error(err))
 				}
 			})
 
 			c.UpdateStateCode(commonpb.StateCode_Healthy)
 			log.Info("RootCoord startup success")
+			return err
 		}
 		c.UpdateStateCode(commonpb.StateCode_StandBy)
 		log.Info("RootCoord enter standby mode successfully")

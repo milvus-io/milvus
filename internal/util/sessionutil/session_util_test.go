@@ -645,9 +645,10 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 	s1.Register()
 	wg.Add(1)
 	s1.liveCh = ch
-	s1.ProcessActiveStandBy(func() {
+	s1.ProcessActiveStandBy(func() error {
 		log.Debug("Session 1 become active")
 		wg.Done()
+		return nil
 	})
 	go s1.LivenessCheck(ctx1, func() {
 		flag = true
@@ -663,9 +664,10 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 	s2.SetEnableActiveStandBy(true)
 	s2.Register()
 	wg.Add(1)
-	go s2.ProcessActiveStandBy(func() {
+	go s2.ProcessActiveStandBy(func() error {
 		log.Debug("Session 2 become active")
 		wg.Done()
+		return nil
 	})
 	assert.True(t, s2.isStandby.Load().(bool))
 
