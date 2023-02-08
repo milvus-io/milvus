@@ -1198,7 +1198,10 @@ func (m *meta) UpdateChannelCheckpoint(vChannel string, pos *internalpb.MsgPosit
 		}
 		m.channelCPs[vChannel] = pos
 		ts, _ := tsoutil.ParseTS(pos.Timestamp)
-		log.Debug("UpdateChannelCheckpoint done", zap.String("vChannel", vChannel), zap.Time("time", ts))
+		log.Debug("UpdateChannelCheckpoint done",
+			zap.String("vChannel", vChannel),
+			zap.Uint64("ts", pos.Timestamp),
+			zap.Time("time", ts))
 	}
 	return nil
 }
