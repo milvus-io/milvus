@@ -896,7 +896,7 @@ func genFlowGraphInsertMsg(chanName string) flowGraphMsg {
 		{
 			ChannelName: chanName,
 			MsgID:       make([]byte, 0),
-			Timestamp:   0,
+			Timestamp:   tsoutil.ComposeTSByTime(time.Now(), 0),
 		},
 	}
 
