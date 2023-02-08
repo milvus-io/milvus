@@ -438,7 +438,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 			case <-time.After(2 * time.Second):
 				hasPlan = false
 			}
-			assert.Equal(t, false, hasPlan)
+			assert.Equal(t, true, hasPlan)
 		})
 
 		t.Run(tt.name+" with meta error", func(t *testing.T) {
@@ -1033,13 +1033,8 @@ func Test_compactionTrigger_noplan(t *testing.T) {
 			err := tr.triggerCompaction()
 			assert.Equal(t, tt.wantErr, err != nil)
 			spy := (tt.fields.compactionHandler).(*spyCompactionHandler)
-			select {
-			case val := <-spy.spyChan:
-				assert.Fail(t, "we expect no compaction generated", val)
-				return
-			case <-time.After(3 * time.Second):
-				return
-			}
+			plan := <-spy.spyChan
+			assert.Equal(t, len(plan.SegmentBinlogs), 4)
 		})
 	}
 }
