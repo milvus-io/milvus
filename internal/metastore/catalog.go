@@ -111,8 +111,10 @@ type DataCoordCatalog interface {
 	DropSegment(ctx context.Context, segment *datapb.SegmentInfo) error
 	RevertAlterSegmentsAndAddNewSegment(ctx context.Context, segments []*datapb.SegmentInfo, removalSegment *datapb.SegmentInfo) error
 
+	MarkChannelAdded(ctx context.Context, channel string) error
 	MarkChannelDeleted(ctx context.Context, channel string) error
-	IsChannelDropped(ctx context.Context, channel string) bool
+	ShouldDropChannel(ctx context.Context, channel string) bool
+	ChannelExists(ctx context.Context, channel string) bool
 	DropChannel(ctx context.Context, channel string) error
 
 	ListChannelCheckpoint(ctx context.Context) (map[string]*msgpb.MsgPosition, error)

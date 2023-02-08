@@ -903,6 +903,14 @@ func TestGarbageCollector_recycleUnusedIndexFiles(t *testing.T) {
 
 func TestGarbageCollector_clearETCD(t *testing.T) {
 	catalog := catalogmocks.NewDataCoordCatalog(t)
+	catalog.On("ChannelExists",
+		mock.Anything,
+		mock.Anything,
+	).Return(false)
+	catalog.On("DropChannelCheckpoint",
+		mock.Anything,
+		mock.Anything,
+	).Return(nil)
 	catalog.On("CreateSegmentIndex",
 		mock.Anything,
 		mock.Anything,
@@ -1151,7 +1159,7 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 	segE := gc.meta.GetSegment(segID + 4)
 	assert.NotNil(t, segE)
 	segF := gc.meta.GetSegment(segID + 5)
-	assert.NotNil(t, segF)
+	assert.Nil(t, segF)
 
 	err := gc.meta.AddSegmentIndex(&model.SegmentIndex{
 		SegmentID:    segID + 4,
@@ -1184,7 +1192,7 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 	segE = gc.meta.GetSegment(segID + 4)
 	assert.NotNil(t, segE)
 	segF = gc.meta.GetSegment(segID + 5)
-	assert.NotNil(t, segF)
+	assert.Nil(t, segF)
 
 	gc.clearEtcd()
 	segA = gc.meta.GetSegment(segID)
@@ -1192,6 +1200,6 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 	segB = gc.meta.GetSegment(segID + 1)
 	assert.Nil(t, segB)
 	segF = gc.meta.GetSegment(segID + 5)
-	assert.NotNil(t, segF)
+	assert.Nil(t, segF)
 
 }

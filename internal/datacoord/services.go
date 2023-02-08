@@ -1124,6 +1124,12 @@ func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 			resp.Status.Reason = err.Error()
 			return resp, nil
 		}
+		if err := s.meta.catalog.MarkChannelAdded(ctx, ch.Name); err != nil {
+			// TODO: add background task to periodically cleanup the orphaned channel add marks.
+			log.Error("failed to mark channel added", zap.String("channelName", channelName), zap.Error(err))
+			resp.Status.Reason = err.Error()
+			return resp, nil
+		}
 	}
 	resp.Status.ErrorCode = commonpb.ErrorCode_Success
 

@@ -279,24 +279,41 @@ func (gc *garbageCollector) clearEtcd() {
 		if !gc.isExpire(segment.GetDroppedAt()) {
 			continue
 		}
-		// segment gc shall only happen when channel cp is after segment dml cp.
-		if segment.GetDmlPosition().GetTimestamp() > channelCPs[segment.GetInsertChannel()] {
-			log.WithRateGroup("GC_FAIL_CP_BEFORE", 1, 60).RatedInfo(60, "dropped segment dml position after channel cp, skip meta gc",
-				zap.Uint64("dmlPosTs", segment.GetDmlPosition().GetTimestamp()),
-				zap.Uint64("channelCpTs", channelCPs[segment.GetInsertChannel()]),
-			)
+		segInsertChannel := segment.GetInsertChannel()
+		// Ignore segments from potentially dropped collection. Check if collection is to be dropped by checking if channel is dropped.
+		// We do this because collection meta drop relies on all segment being GCed.
+		if gc.meta.catalog.ChannelExists(context.Background(), segInsertChannel) &&
+			segment.GetDmlPosition().GetTimestamp() > channelCPs[segInsertChannel] {
+			// segment gc shall only happen when channel cp is after segment dml cp.
+			log.WithRateGroup("GC_FAIL_CP_BEFORE", 1, 60).
+				RatedInfo(60, "dropped segment dml position after channel cp, skip meta gc",
+					zap.Uint64("dmlPosTs", segment.GetDmlPosition().GetTimestamp()),
+					zap.Uint64("channelCpTs", channelCPs[segInsertChannel]),
+				)
 			continue
 		}
 		// For compact A, B -> C, don't GC A or B if C is not indexed,
 		// guarantee replacing A, B with C won't downgrade performance
 		if to, ok := compactTo[segment.GetID()]; ok && !indexedSet.Contain(to.GetID()) {
+			log.WithRateGroup("GC_FAIL_COMPACT_TO_NOT_INDEXED", 1, 60).
+				RatedWarn(60, "skipping GC when compact target segment is not indexed",
+					zap.Int64("segmentID", to.GetID()))
 			continue
 		}
 		logs := getLogs(segment)
-		log.Info("GC segment",
-			zap.Int64("segmentID", segment.GetID()))
+		log.Info("GC segment", zap.Int64("segmentID", segment.GetID()))
 		if gc.removeLogs(logs) {
 			_ = gc.meta.DropSegment(segment.GetID())
+		}
+		if segList := gc.meta.GetSegmentsByChannel(segInsertChannel); len(segList) == 0 &&
+			!gc.meta.catalog.ChannelExists(context.Background(), segInsertChannel) {
+			log.Info("empty channel found during gc, manually cleanup channel checkpoints",
+				zap.String("vChannel", segInsertChannel))
+
+			if err := gc.meta.DropChannelCheckpoint(segInsertChannel); err != nil {
+				// Fail-open as there's nothing to do.
+				log.Warn("failed to drop channel check point during segment garbage collection", zap.Error(err))
+			}
 		}
 	}
 }
