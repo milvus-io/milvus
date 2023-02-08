@@ -47,6 +47,7 @@ set(MILVUS_TEST_FILES
         test_utils.cpp
         test_data_codec.cpp
         test_range_search_sort.cpp
+        test_tracer.cpp
         )
 
 if ( BUILD_DISK_ANN STREQUAL "ON" )

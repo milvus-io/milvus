@@ -199,7 +199,7 @@ case "${unameOut}" in
     export CXX="${llvm_prefix}/bin/clang++"
     export CFLAGS=-Wno-deprecated-declarations
     export CXXFLAGS=-Wno-deprecated-declarations
-    conan install ${CPP_SRC_DIR} --install-folder conan --build=missing -s compiler=clang -s compiler.version=15 -s compiler.libcxx=libc++ || { echo 'conan install failed'; exit 1; }
+    conan install ${CPP_SRC_DIR} --install-folder conan --build=missing -s compiler=clang -s compiler.version=15 -s compiler.libcxx=libc++ -s compiler.cppstd=17 || { echo 'conan install failed'; exit 1; }
     ;;
   Linux*)
     echo "Running on ${OS_NAME}"

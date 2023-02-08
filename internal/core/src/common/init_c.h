@@ -22,6 +22,7 @@ extern "C" {
 
 #include <stdbool.h>
 #include <stdint.h>
+#include "type_c.h"
 
 void
 InitIndexSliceSize(const int64_t);
@@ -34,6 +35,9 @@ InitCpuNum(const int);
 
 void
 InitLocalRootPath(const char*);
+
+void
+InitTrace(CTraceConfig* config);
 
 #ifdef __cplusplus
 };

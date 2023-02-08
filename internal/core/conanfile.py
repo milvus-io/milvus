@@ -17,7 +17,7 @@ class MilvusConan(ConanFile):
         "aws-sdk-cpp/1.9.234",
         "benchmark/1.7.0",
         "gtest/1.8.1",
-        "protobuf/3.21.9",
+        "protobuf/3.21.4",
         "rapidxml/1.13",
         "yaml-cpp/0.7.0",
         "marisa/0.2.6",
@@ -35,8 +35,9 @@ class MilvusConan(ConanFile):
         "flex/2.6.4",
         "xsimd/9.0.1",
         "xz_utils/5.4.0",
-        "folly/2022.10.31.01@milvus/dev",
-        "velox/2023.02.07.01@milvus/dev",
+        "folly/2023.02.24@milvus/dev",
+        "velox/2023.02.24@milvus/dev",
+        "opentelemetry-cpp/1.8.1.1@milvus/dev",
     )
     generators = ("cmake", "cmake_find_package")
     default_options = {
@@ -49,12 +50,12 @@ class MilvusConan(ConanFile):
         "aws-sdk-cpp:text-to-speech": False,
         "aws-sdk-cpp:transfer": False,
         "gtest:build_gmock": False,
-        "folly:use_sse4_2": True,
+        "boost:without_locale": False,
     }
 
     def configure(self):
-        # Macos M1 cannot use jemalloc
         if self.settings.os == "Macos":
+            # Macos M1 cannot use jemalloc
             if self.settings.arch not in ("x86_64", "x86"):
                 del self.options["folly"].use_sse4_2
 
@@ -66,7 +67,6 @@ class MilvusConan(ConanFile):
             self.options["boost"].without_graph = True
             self.options["boost"].without_graph_parallel = True
             self.options["boost"].without_nowide = True
-            self.options["boost"].without_locale = True
             self.options["boost"].without_url = True
 
     def imports(self):
@@ -74,3 +74,4 @@ class MilvusConan(ConanFile):
         self.copy("*.dll", "../lib", "lib")
         self.copy("*.so*", "../lib", "lib")
         self.copy("*", "../bin", "bin")
+        self.copy("*.proto", "../include", "include")

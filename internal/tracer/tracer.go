@@ -17,6 +17,8 @@
 package tracer
 
 import (
+	"context"
+
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -24,6 +26,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/jaeger"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	stdout "go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -41,6 +44,8 @@ func Init() {
 	case "jaeger":
 		exp, err = jaeger.New(jaeger.WithCollectorEndpoint(
 			jaeger.WithEndpoint(params.TraceCfg.JaegerURL.GetValue())))
+	case "otlp":
+		exp, err = otlptracegrpc.New(context.Background(), otlptracegrpc.WithEndpoint(params.TraceCfg.OtlpEndpoint.GetValue()))
 	case "stdout":
 		exp, err = stdout.New()
 	default:

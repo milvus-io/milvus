@@ -14,6 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <memory>
 #include <mutex>
 
 #include "common/init_c.h"
@@ -22,8 +23,11 @@
 #include "config/ConfigChunkManager.h"
 #include "common/Slice.h"
 #include "common/Common.h"
+#include "common/Tracer.h"
+#include "log/Log.h"
 
 std::once_flag flag1, flag2, flag3, flag4;
+std::once_flag traceFlag;
 
 void
 InitLocalRootPath(const char* root_path) {
@@ -54,4 +58,19 @@ void
 InitCpuNum(const int value) {
     std::call_once(
         flag4, [](int value) { milvus::SetCpuNum(value); }, value);
+}
+
+void
+InitTrace(CTraceConfig* config) {
+    auto traceConfig = milvus::tracer::TraceConfig{config->exporter,
+                                                   config->sampleFraction,
+                                                   config->jaegerURL,
+                                                   config->otlpEndpoint,
+                                                   config->nodeID};
+    std::call_once(
+        traceFlag,
+        [](milvus::tracer::TraceConfig* c) {
+            milvus::tracer::initTelementry(c);
+        },
+        &traceConfig);
 }

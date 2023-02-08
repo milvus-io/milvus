@@ -243,6 +243,8 @@ func (node *QueryNode) InitSegcore() {
 	if len(mmapDirPath) > 0 {
 		log.Info("mmap enabled", zap.String("dir", mmapDirPath))
 	}
+
+	initcore.InitTraceConfig(Params)
 }
 
 // Init function init historical and streaming module to manage segments

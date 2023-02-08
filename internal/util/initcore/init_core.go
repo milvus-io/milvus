@@ -39,3 +39,14 @@ func InitLocalStorageConfig(params *paramtable.ComponentParam) {
 	C.InitLocalRootPath(CLocalRootPath)
 	C.free(unsafe.Pointer(CLocalRootPath))
 }
+
+func InitTraceConfig(params *paramtable.ComponentParam) {
+	config := C.CTraceConfig{
+		exporter:       C.CString(params.TraceCfg.Exporter.GetValue()),
+		sampleFraction: C.int(params.TraceCfg.SampleFraction.GetAsInt()),
+		jaegerURL:      C.CString(params.TraceCfg.JaegerURL.GetValue()),
+		otlpEndpoint:   C.CString(params.TraceCfg.OtlpEndpoint.GetValue()),
+		nodeID:         C.int(paramtable.GetNodeID()),
+	}
+	C.InitTrace(&config)
+}

@@ -29,7 +29,7 @@ if [[ $(uname -s) == "Darwin" ]]; then
   export PATH="/usr/local/opt/grep/libexec/gnubin:$PATH"
 fi
 
-check_result=$(git status | grep -E "*pb.go|*pb.cc|*pb.h")
+check_result=$(git status | grep -E ".*pb.go|.*pb.cc|.*pb.h")
 echo "check_result: $check_result"
 if test -z "$check_result"; then
   exit 0
