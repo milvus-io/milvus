@@ -17,6 +17,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	config "github.com/milvus-io/milvus/internal/config"
@@ -57,7 +58,8 @@ var defaultYaml = DefaultMilvusYaml
 
 // BaseTable the basics of paramtable
 type BaseTable struct {
-	mgr *config.Manager
+	once sync.Once
+	mgr  *config.Manager
 
 	configDir string
 	YamlFile  string
@@ -74,6 +76,16 @@ func NewBaseTableFromYamlOnly(yaml string) *BaseTable {
 	}))
 	gp := &BaseTable{mgr: mgr, YamlFile: yaml}
 	return gp
+}
+
+// GlobalInitWithYaml initializes the param table with the given yaml.
+// We will update the global DefaultYaml variable directly, once and for all.
+// GlobalInitWithYaml shall be called at the very beginning before initiating the base table.
+// GlobalInitWithYaml should be called only in standalone and embedded Milvus.
+func (gp *BaseTable) GlobalInitWithYaml(yaml string) {
+	gp.once.Do(func() {
+		defaultYaml = yaml
+	})
 }
 
 // init initializes the param table.
