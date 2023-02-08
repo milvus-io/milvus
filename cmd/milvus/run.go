@@ -93,18 +93,10 @@ func (c *run) execute(args []string, flags *flag.FlagSet) {
 		os.Exit(-1)
 	}
 
-	// Setup logger in advance for standalone and embedded Milvus.
-	// Any log from this point on is under control.
-	if c.serverType == typeutil.StandaloneRole || c.serverType == typeutil.EmbeddedRole {
+	// setup config for embedded milvus
+	if c.serverType == typeutil.EmbeddedRole {
 		var params paramtable.BaseTable
-		if c.serverType == typeutil.EmbeddedRole {
-			params.GlobalInitWithYaml("embedded-milvus.yaml")
-		} else {
-			params.Init()
-		}
-		params.SetLogConfig()
-		params.RoleName = c.serverType
-		params.SetLogger(0)
+		params.GlobalInitWithYaml("embedded-milvus.yaml")
 	}
 
 	runtimeDir := createRuntimeDir(c.serverType)
