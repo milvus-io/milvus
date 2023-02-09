@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -129,11 +130,14 @@ func (s *Server) Register() error {
 	if s.enableActiveStandBy {
 		s.session.ProcessActiveStandBy(s.activateFunc)
 	}
+	metrics.NumNodes.WithLabelValues(strconv.FormatInt(s.session.ServerID, 10), typeutil.QueryCoordRole).Inc()
+	log.Info("QueryCoord Register Finished")
 	go s.session.LivenessCheck(s.ctx, func() {
 		log.Error("QueryCoord disconnected from etcd, process will exit", zap.Int64("serverID", s.session.ServerID))
 		if err := s.Stop(); err != nil {
 			log.Fatal("failed to stop server", zap.Error(err))
 		}
+		metrics.NumNodes.WithLabelValues(strconv.FormatInt(s.session.ServerID, 10), typeutil.QueryCoordRole).Dec()
 		// manually send signal to starter goroutine
 		if s.session.TriggerKill {
 			if p, err := os.FindProcess(os.Getpid()); err == nil {

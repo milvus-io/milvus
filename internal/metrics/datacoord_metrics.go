@@ -95,6 +95,25 @@ var (
 			Help:      "binlog size of segments",
 		}, []string{segmentStateLabelName})
 
+	DataCoordDmlChannelNum = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "watched_dml_chanel_num",
+			Help:      "the num of dml channel watched by datanode",
+		}, []string{
+			nodeIDLabelName,
+		})
+
+	DataCoordCompactedSegmentSize = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "compacted_segment_size",
+			Help:      "the segment size of compacted segment",
+			Buckets:   buckets,
+		}, []string{})
+
 	/* hard to implement, commented now
 	DataCoordSegmentSizeRatio = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{

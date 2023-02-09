@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 var _ readTask = (*queryTask)(nil)
@@ -47,7 +48,7 @@ func (q *queryTask) PreExecute(ctx context.Context) error {
 	if !funcutil.CheckCtxValid(q.Ctx()) {
 		return errors.New("search context timeout1$")
 	}
-	q.SetStep(TaskStepPreExecute)
+	q.SetStep(typeutil.TaskStepPreExecute)
 	rateCol.rtCounter.increaseQueueTime(q)
 	return nil
 }

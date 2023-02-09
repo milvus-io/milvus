@@ -14,6 +14,7 @@ import (
 func Test_showPartitionTask_Prepare(t *testing.T) {
 	t.Run("invalid msg type", func(t *testing.T) {
 		task := &showPartitionTask{
+			baseTask: newBaseTask(context.TODO(), nil),
 			Req: &milvuspb.ShowPartitionsRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_Undefined,
@@ -26,6 +27,7 @@ func Test_showPartitionTask_Prepare(t *testing.T) {
 
 	t.Run("normal case", func(t *testing.T) {
 		task := &showPartitionTask{
+			baseTask: newBaseTask(context.TODO(), nil),
 			Req: &milvuspb.ShowPartitionsRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_ShowPartitions,
@@ -41,10 +43,7 @@ func Test_showPartitionTask_Execute(t *testing.T) {
 	t.Run("failed to list collections by name", func(t *testing.T) {
 		core := newTestCore(withInvalidMeta())
 		task := &showPartitionTask{
-			baseTask: baseTask{
-				core: core,
-				done: make(chan error, 1),
-			},
+			baseTask: newBaseTask(context.TODO(), core),
 			Req: &milvuspb.ShowPartitionsRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_ShowPartitions,
@@ -61,10 +60,7 @@ func Test_showPartitionTask_Execute(t *testing.T) {
 	t.Run("failed to list collections by id", func(t *testing.T) {
 		core := newTestCore(withInvalidMeta())
 		task := &showPartitionTask{
-			baseTask: baseTask{
-				core: core,
-				done: make(chan error, 1),
-			},
+			baseTask: newBaseTask(context.TODO(), core),
 			Req: &milvuspb.ShowPartitionsRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_ShowPartitions,
@@ -98,10 +94,7 @@ func Test_showPartitionTask_Execute(t *testing.T) {
 		}
 		core := newTestCore(withMeta(meta))
 		task := &showPartitionTask{
-			baseTask: baseTask{
-				core: core,
-				done: make(chan error, 1),
-			},
+			baseTask: newBaseTask(context.TODO(), core),
 			Req: &milvuspb.ShowPartitionsRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_ShowPartitions,

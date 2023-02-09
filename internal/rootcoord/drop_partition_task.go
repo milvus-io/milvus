@@ -4,17 +4,16 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/milvus-io/milvus/internal/log"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/internal/metastore/model"
-
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
-	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 
 	"github.com/milvus-io/milvus/internal/common"
-
-	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metastore/model"
+	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 type dropPartitionTask struct {
@@ -24,6 +23,7 @@ type dropPartitionTask struct {
 }
 
 func (t *dropPartitionTask) Prepare(ctx context.Context) error {
+	t.SetStep(typeutil.TaskStepPreExecute)
 	if err := CheckMsgType(t.Req.GetBase().GetMsgType(), commonpb.MsgType_DropPartition); err != nil {
 		return err
 	}
@@ -40,6 +40,7 @@ func (t *dropPartitionTask) Prepare(ctx context.Context) error {
 }
 
 func (t *dropPartitionTask) Execute(ctx context.Context) error {
+	t.SetStep(typeutil.TaskStepExecute)
 	partID := common.InvalidPartitionID
 	for _, partition := range t.collMeta.Partitions {
 		if partition.PartitionName == t.Req.GetPartitionName() {

@@ -13,6 +13,7 @@ import (
 func Test_hasPartitionTask_Prepare(t *testing.T) {
 	t.Run("invalid msg type", func(t *testing.T) {
 		task := &hasPartitionTask{
+			baseTask: newBaseTask(context.TODO(), nil),
 			Req: &milvuspb.HasPartitionRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_Undefined,
@@ -25,6 +26,7 @@ func Test_hasPartitionTask_Prepare(t *testing.T) {
 
 	t.Run("normal case", func(t *testing.T) {
 		task := &hasPartitionTask{
+			baseTask: newBaseTask(context.TODO(), nil),
 			Req: &milvuspb.HasPartitionRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_HasPartition,
@@ -40,10 +42,7 @@ func Test_hasPartitionTask_Execute(t *testing.T) {
 	t.Run("fail to get collection", func(t *testing.T) {
 		core := newTestCore(withInvalidMeta())
 		task := &hasPartitionTask{
-			baseTask: baseTask{
-				core: core,
-				done: make(chan error, 1),
-			},
+			baseTask: newBaseTask(context.TODO(), core),
 			Req: &milvuspb.HasPartitionRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_HasPartition,
@@ -71,10 +70,7 @@ func Test_hasPartitionTask_Execute(t *testing.T) {
 		}
 		core := newTestCore(withMeta(meta))
 		task := &hasPartitionTask{
-			baseTask: baseTask{
-				core: core,
-				done: make(chan error, 1),
-			},
+			baseTask: newBaseTask(context.TODO(), core),
 			Req: &milvuspb.HasPartitionRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_HasCollection,
@@ -106,10 +102,7 @@ func Test_hasPartitionTask_Execute(t *testing.T) {
 		}
 		core := newTestCore(withMeta(meta))
 		task := &hasPartitionTask{
-			baseTask: baseTask{
-				core: core,
-				done: make(chan error, 1),
-			},
+			baseTask: newBaseTask(context.TODO(), core),
 			Req: &milvuspb.HasPartitionRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_HasCollection,

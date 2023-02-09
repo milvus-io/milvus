@@ -21,12 +21,14 @@ import (
 	"context"
 	"errors"
 	"runtime/debug"
+	"strconv"
 	"sync"
 
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 )
 
 // TaskQueue is a queue used to store tasks.
@@ -228,6 +230,10 @@ func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
 		}
 	}
 	t.SetState(commonpb.IndexState_Finished, "")
+	if indexBuildTask, ok := t.(*indexBuildTask); ok {
+		metrics.IndexNodeBuildIndexLatency.WithLabelValues(strconv.FormatInt(Params.IndexNodeCfg.GetNodeID(), 10)).Observe(float64(indexBuildTask.tr.ElapseSpan().Milliseconds()))
+		metrics.IndexNodeIndexTaskLatencyInQueue.WithLabelValues(strconv.FormatInt(Params.IndexNodeCfg.GetNodeID(), 10)).Observe(float64(indexBuildTask.queueDur.Milliseconds()))
+	}
 }
 
 func (sched *TaskScheduler) indexBuildLoop() {

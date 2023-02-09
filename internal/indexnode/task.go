@@ -98,6 +98,7 @@ type indexBuildTask struct {
 	newIndexParams map[string]string
 	serializedSize uint64
 	tr             *timerecord.TimeRecorder
+	queueDur       time.Duration
 	statistic      indexpb.JobInfo
 	node           *IndexNode
 }
@@ -138,6 +139,8 @@ func (it *indexBuildTask) GetState() commonpb.IndexState {
 
 // OnEnqueue enqueues indexing tasks.
 func (it *indexBuildTask) OnEnqueue(ctx context.Context) error {
+	it.queueDur = 0
+	it.tr.Record("enqueue done")
 	it.statistic.StartTime = time.Now().UnixMicro()
 	it.statistic.PodID = it.node.GetNodeID()
 	log.Ctx(ctx).Debug("IndexNode IndexBuilderTask Enqueue")
@@ -145,6 +148,9 @@ func (it *indexBuildTask) OnEnqueue(ctx context.Context) error {
 }
 
 func (it *indexBuildTask) Prepare(ctx context.Context) error {
+	// cal time duration in task queue
+	it.queueDur = it.tr.Record("start to process")
+
 	logutil.Logger(ctx).Info("Begin to prepare indexBuildTask", zap.Int64("buildID", it.BuildID), zap.Int64("Collection", it.collectionID), zap.Int64("SegmentIf", it.segmentID))
 	typeParams := make(map[string]string)
 	indexParams := make(map[string]string)

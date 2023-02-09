@@ -173,6 +173,7 @@ func (t *createCollectionTask) assignChannels() error {
 }
 
 func (t *createCollectionTask) Prepare(ctx context.Context) error {
+	t.SetStep(typeutil.TaskStepPreExecute)
 	if err := t.validate(); err != nil {
 		return err
 	}
@@ -235,6 +236,7 @@ func (t *createCollectionTask) addChannelsAndGetStartPositions(ctx context.Conte
 }
 
 func (t *createCollectionTask) Execute(ctx context.Context) error {
+	t.SetStep(typeutil.TaskStepExecute)
 	collID := t.collID
 	partID := t.partID
 	ts := t.GetTs()

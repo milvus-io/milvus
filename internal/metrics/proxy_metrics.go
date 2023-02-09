@@ -131,7 +131,7 @@ var (
 			Buckets:   buckets, // unit: ms
 		}, []string{nodeIDLabelName, msgTypeLabelName})
 
-	// ProxyCacheHitCounter record the number of Proxy cache hits or miss.
+	// ProxyCacheStatsCounter record the number of Proxy cache hits or miss.
 	ProxyCacheStatsCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,

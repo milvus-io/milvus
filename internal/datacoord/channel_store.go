@@ -25,7 +25,9 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/kv"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+
 	"go.uber.org/zap/zapcore"
 )
 
@@ -156,6 +158,7 @@ func (c *ChannelStore) Reload() error {
 			Schema:       cw.GetSchema(),
 		}
 		c.channelsInfo[nodeID].Channels = append(c.channelsInfo[nodeID].Channels, channel)
+		metrics.DataCoordDmlChannelNum.WithLabelValues(strconv.FormatInt(nodeID, 10)).Set(float64(len(c.channelsInfo[nodeID].Channels)))
 	}
 	return nil
 }
@@ -264,6 +267,7 @@ func (c *ChannelStore) update(opSet ChannelOpSet) error {
 		default:
 			return errUnknownOpType
 		}
+		metrics.DataCoordDmlChannelNum.WithLabelValues(strconv.FormatInt(op.NodeID, 10)).Set(float64(len(c.channelsInfo[op.NodeID].Channels)))
 	}
 	return nil
 }

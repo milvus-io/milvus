@@ -71,12 +71,6 @@ const (
 	// RPCConnectionTimeout is used to set the timeout for rpc request
 	RPCConnectionTimeout = 30 * time.Second
 
-	// MetricRequestsTotal is used to count the num of total requests
-	MetricRequestsTotal = "total"
-
-	// MetricRequestsSuccess is used to count the num of successful requests
-	MetricRequestsSuccess = "success"
-
 	// ConnectEtcdMaxRetryTime is used to limit the max retry time for connection etcd
 	ConnectEtcdMaxRetryTime = 100
 
@@ -188,13 +182,15 @@ func (node *DataNode) SetDataCoord(ds types.DataCoord) error {
 // Register register datanode to etcd
 func (node *DataNode) Register() error {
 	node.session.Register()
-
+	metrics.NumNodes.WithLabelValues(strconv.FormatInt(node.session.ServerID, 10), typeutil.DataNodeRole).Inc()
+	log.Info("DataNode Register Finished")
 	// Start liveness check
 	go node.session.LivenessCheck(node.ctx, func() {
 		log.Error("Data Node disconnected from etcd, process will exit", zap.Int64("Server Id", node.session.ServerID))
 		if err := node.Stop(); err != nil {
 			log.Fatal("failed to stop server", zap.Error(err))
 		}
+		metrics.NumNodes.WithLabelValues(strconv.FormatInt(node.session.ServerID, 10), typeutil.DataNodeRole).Dec()
 		// manually send signal to starter goroutine
 		if node.session.TriggerKill {
 			if p, err := os.FindProcess(os.Getpid()); err == nil {
@@ -584,7 +580,7 @@ func (node *DataNode) ReadyToFlush() error {
 func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmentsRequest) (*commonpb.Status, error) {
 	metrics.DataNodeFlushReqCounter.WithLabelValues(
 		fmt.Sprint(Params.DataNodeCfg.GetNodeID()),
-		MetricRequestsTotal).Inc()
+		metrics.TotalLabel).Inc()
 
 	errStatus := &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_UnexpectedError,
@@ -670,7 +666,7 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 
 	metrics.DataNodeFlushReqCounter.WithLabelValues(
 		fmt.Sprint(Params.DataNodeCfg.GetNodeID()),
-		MetricRequestsSuccess).Inc()
+		metrics.SuccessLabel).Inc()
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}, nil

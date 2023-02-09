@@ -30,16 +30,11 @@ import (
 
 	"github.com/golang/protobuf/proto"
 
-	"github.com/milvus-io/milvus/internal/util/metautil"
-
-	"github.com/milvus-io/milvus/internal/util/errorutil"
-
-	"golang.org/x/sync/errgroup"
-
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
@@ -56,6 +51,8 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/errorutil"
+	"github.com/milvus-io/milvus/internal/util/metautil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
@@ -142,11 +139,14 @@ func (i *IndexCoord) Register() error {
 	if i.enableActiveStandBy {
 		i.session.ProcessActiveStandBy(i.activateFunc)
 	}
+	metrics.NumNodes.WithLabelValues(strconv.FormatInt(i.session.ServerID, 10), typeutil.IndexCoordRole).Inc()
+	log.Info("IndexCoord Register Finished")
 	go i.session.LivenessCheck(i.loopCtx, func() {
 		log.Error("Index Coord disconnected from etcd, process will exit", zap.Int64("Server Id", i.session.ServerID))
 		if err := i.Stop(); err != nil {
 			log.Fatal("failed to stop server", zap.Error(err))
 		}
+		metrics.NumNodes.WithLabelValues(strconv.FormatInt(i.session.ServerID, 10), typeutil.IndexCoordRole).Dec()
 		// manually send signal to starter goroutine
 		if i.session.TriggerKill {
 			if p, err := os.FindProcess(os.Getpid()); err == nil {

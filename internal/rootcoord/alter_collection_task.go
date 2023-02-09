@@ -5,10 +5,11 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/milvus-io/milvus/internal/log"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 type alterCollectionTask struct {
@@ -17,6 +18,7 @@ type alterCollectionTask struct {
 }
 
 func (a *alterCollectionTask) Prepare(ctx context.Context) error {
+	a.SetStep(typeutil.TaskStepExecute)
 	if a.Req.GetCollectionName() == "" {
 		return fmt.Errorf("alter collection failed, collection name does not exists")
 	}
@@ -25,6 +27,7 @@ func (a *alterCollectionTask) Prepare(ctx context.Context) error {
 }
 
 func (a *alterCollectionTask) Execute(ctx context.Context) error {
+	a.SetStep(typeutil.TaskStepExecute)
 	// Now we only support alter properties of collection
 	if a.Req.GetProperties() == nil {
 		return errors.New("only support alter collection properties, but collection properties is empty")

@@ -17,6 +17,7 @@
 package datanode
 
 import (
+	"strconv"
 	"sync"
 	"sync/atomic"
 
@@ -24,6 +25,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -114,11 +116,35 @@ func (s *Segment) isPKExist(pk primaryKey) bool {
 	return false
 }
 
+// setInsertBuffer set curInsertBuf.
+func (s *Segment) setInsertBuffer(buf *BufferData) {
+	s.curInsertBuf = buf
+
+	if buf != nil && buf.buffer != nil {
+		dataSize := 0
+		for _, data := range buf.buffer.Data {
+			dataSize += data.GetMemorySize()
+		}
+		metrics.DataNodeFlowGraphBufferDataSize.WithLabelValues(strconv.FormatInt(Params.QueryNodeCfg.GetNodeID(), 10),
+			strconv.FormatInt(s.collectionID, 10)).Add(float64(dataSize))
+	}
+}
+
 // rollInsertBuffer moves curInsertBuf to historyInsertBuf, and then sets curInsertBuf to nil.
 func (s *Segment) rollInsertBuffer() {
 	if s.curInsertBuf == nil {
 		return
 	}
+
+	if s.curInsertBuf.buffer != nil {
+		dataSize := 0
+		for _, data := range s.curInsertBuf.buffer.Data {
+			dataSize += data.GetMemorySize()
+		}
+		metrics.DataNodeFlowGraphBufferDataSize.WithLabelValues(strconv.FormatInt(Params.QueryNodeCfg.GetNodeID(), 10),
+			strconv.FormatInt(s.collectionID, 10)).Sub(float64(dataSize))
+	}
+
 	s.curInsertBuf.buffer = nil // free buffer memory, only keep meta infos in historyInsertBuf
 	s.historyInsertBuf = append(s.historyInsertBuf, s.curInsertBuf)
 	s.curInsertBuf = nil

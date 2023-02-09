@@ -26,11 +26,13 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	queryPb "github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/timerecord"
 )
 
 type watchDmChannelsTask struct {
@@ -43,6 +45,7 @@ type watchDmChannelsTask struct {
 func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 	collectionID := w.req.CollectionID
 	partitionIDs := w.req.GetPartitionIDs()
+	tr := timerecord.NewTimeRecorder("watchDmChannels")
 
 	lType := w.req.GetLoadMeta().GetLoadType()
 	if lType == queryPb.LoadType_UnKnownType {
@@ -145,6 +148,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 		fg.flowGraph.Start()
 	}
 
+	metrics.QueryNodeWatchDmlChannelLatency.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	log.Info("WatchDmChannels done")
 	return nil
 }

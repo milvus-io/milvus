@@ -17,6 +17,7 @@ type showCollectionTask struct {
 }
 
 func (t *showCollectionTask) Prepare(ctx context.Context) error {
+	t.SetStep(typeutil.TaskStepPreExecute)
 	if err := CheckMsgType(t.Req.Base.MsgType, commonpb.MsgType_ShowCollections); err != nil {
 		return err
 	}
@@ -25,6 +26,7 @@ func (t *showCollectionTask) Prepare(ctx context.Context) error {
 
 // Execute task execution
 func (t *showCollectionTask) Execute(ctx context.Context) error {
+	t.SetStep(typeutil.TaskStepExecute)
 	t.Rsp.Status = succStatus()
 	ts := t.Req.GetTimeStamp()
 	if ts == 0 {

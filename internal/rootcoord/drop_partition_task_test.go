@@ -18,6 +18,7 @@ import (
 func Test_dropPartitionTask_Prepare(t *testing.T) {
 	t.Run("invalid msg type", func(t *testing.T) {
 		task := &dropPartitionTask{
+			baseTask: newBaseTask(context.TODO(), nil),
 			Req: &milvuspb.DropPartitionRequest{
 				Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection},
 			},
@@ -28,6 +29,7 @@ func Test_dropPartitionTask_Prepare(t *testing.T) {
 
 	t.Run("drop default partition", func(t *testing.T) {
 		task := &dropPartitionTask{
+			baseTask: newBaseTask(context.TODO(), nil),
 			Req: &milvuspb.DropPartitionRequest{
 				Base:          &commonpb.MsgBase{MsgType: commonpb.MsgType_DropPartition},
 				PartitionName: Params.CommonCfg.DefaultPartitionName,
@@ -40,7 +42,7 @@ func Test_dropPartitionTask_Prepare(t *testing.T) {
 	t.Run("failed to get collection meta", func(t *testing.T) {
 		core := newTestCore(withInvalidMeta())
 		task := &dropPartitionTask{
-			baseTask: baseTask{core: core},
+			baseTask: newBaseTask(context.TODO(), core),
 			Req: &milvuspb.DropPartitionRequest{
 				Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_DropPartition},
 			},
@@ -60,7 +62,7 @@ func Test_dropPartitionTask_Prepare(t *testing.T) {
 		}
 		core := newTestCore(withMeta(meta))
 		task := &dropPartitionTask{
-			baseTask: baseTask{core: core},
+			baseTask: newBaseTask(context.TODO(), core),
 			Req: &milvuspb.DropPartitionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_DropPartition},
 				CollectionName: collectionName,
@@ -95,7 +97,7 @@ func Test_dropPartitionTask_Execute(t *testing.T) {
 		coll := &model.Collection{Name: collectionName, Partitions: []*model.Partition{{PartitionName: partitionName}}}
 		core := newTestCore(withInvalidProxyManager())
 		task := &dropPartitionTask{
-			baseTask: baseTask{core: core},
+			baseTask: newBaseTask(context.TODO(), core),
 			Req: &milvuspb.DropPartitionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_DropPartition},
 				CollectionName: collectionName,
@@ -113,7 +115,7 @@ func Test_dropPartitionTask_Execute(t *testing.T) {
 		coll := &model.Collection{Name: collectionName, Partitions: []*model.Partition{{PartitionName: partitionName}}}
 		core := newTestCore(withValidProxyManager(), withInvalidMeta())
 		task := &dropPartitionTask{
-			baseTask: baseTask{core: core},
+			baseTask: newBaseTask(context.TODO(), core),
 			Req: &milvuspb.DropPartitionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_DropPartition},
 				CollectionName: collectionName,
@@ -169,7 +171,7 @@ func Test_dropPartitionTask_Execute(t *testing.T) {
 			withBroker(broker))
 
 		task := &dropPartitionTask{
-			baseTask: baseTask{core: core},
+			baseTask: newBaseTask(context.TODO(), core),
 			Req: &milvuspb.DropPartitionRequest{
 				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_DropPartition},
 				CollectionName: collectionName,

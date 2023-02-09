@@ -53,6 +53,7 @@ type TsMsg interface {
 	Unmarshal(MarshalType) (TsMsg, error)
 	Position() *MsgPosition
 	SetPosition(*MsgPosition)
+	Size() int
 }
 
 // BaseMsg is a basic structure that contains begin timestamp, end timestamp and the position of msgstream
@@ -285,6 +286,10 @@ func (it *InsertMsg) IndexMsg(index int) *InsertMsg {
 	}
 }
 
+func (it *InsertMsg) Size() int {
+	return proto.Size(&it.InsertRequest)
+}
+
 /////////////////////////////////////////Delete//////////////////////////////////////////
 
 // DeleteMsg is a message pack that contains delete request
@@ -380,6 +385,10 @@ func (dt *DeleteMsg) CheckAligned() error {
 	return nil
 }
 
+func (dt *DeleteMsg) Size() int {
+	return proto.Size(&dt.DeleteRequest)
+}
+
 /////////////////////////////////////////TimeTick//////////////////////////////////////////
 
 // TimeTickMsg is a message pack that contains time tick only
@@ -433,6 +442,10 @@ func (tst *TimeTickMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 	timeTick.EndTimestamp = timeTick.Base.Timestamp
 
 	return timeTick, nil
+}
+
+func (tst *TimeTickMsg) Size() int {
+	return proto.Size(&tst.TimeTickMsg)
 }
 
 /////////////////////////////////////////CreateCollection//////////////////////////////////////////
@@ -490,6 +503,10 @@ func (cc *CreateCollectionMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 	return createCollectionMsg, nil
 }
 
+func (cc *CreateCollectionMsg) Size() int {
+	return proto.Size(&cc.CreateCollectionRequest)
+}
+
 /////////////////////////////////////////DropCollection//////////////////////////////////////////
 
 // DropCollectionMsg is a message pack that contains drop collection request
@@ -543,6 +560,10 @@ func (dc *DropCollectionMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 	dropCollectionMsg.EndTimestamp = dropCollectionMsg.Base.Timestamp
 
 	return dropCollectionMsg, nil
+}
+
+func (dc *DropCollectionMsg) Size() int {
+	return proto.Size(&dc.DropCollectionRequest)
 }
 
 /////////////////////////////////////////CreatePartition//////////////////////////////////////////
@@ -600,6 +621,10 @@ func (cp *CreatePartitionMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 	return createPartitionMsg, nil
 }
 
+func (cp *CreatePartitionMsg) Size() int {
+	return proto.Size(&cp.CreatePartitionRequest)
+}
+
 /////////////////////////////////////////DropPartition//////////////////////////////////////////
 
 // DropPartitionMsg is a message pack that contains drop partition request
@@ -655,6 +680,10 @@ func (dp *DropPartitionMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 	return dropPartitionMsg, nil
 }
 
+func (dp *DropPartitionMsg) Size() int {
+	return proto.Size(&dp.DropPartitionRequest)
+}
+
 /////////////////////////////////////////DataNodeTtMsg//////////////////////////////////////////
 
 // DataNodeTtMsg is a message pack that contains datanode time tick
@@ -705,4 +734,8 @@ func (m *DataNodeTtMsg) Unmarshal(input MarshalType) (TsMsg, error) {
 	return &DataNodeTtMsg{
 		DataNodeTtMsg: msg,
 	}, nil
+}
+
+func (m *DataNodeTtMsg) Size() int {
+	return proto.Size(&m.DataNodeTtMsg)
 }

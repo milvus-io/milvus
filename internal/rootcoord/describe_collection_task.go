@@ -5,6 +5,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 // describeCollectionTask describe collection request task
@@ -16,6 +17,7 @@ type describeCollectionTask struct {
 }
 
 func (t *describeCollectionTask) Prepare(ctx context.Context) error {
+	t.SetStep(typeutil.TaskStepPreExecute)
 	if err := CheckMsgType(t.Req.Base.MsgType, commonpb.MsgType_DescribeCollection); err != nil {
 		return err
 	}
@@ -24,6 +26,7 @@ func (t *describeCollectionTask) Prepare(ctx context.Context) error {
 
 // Execute task execution
 func (t *describeCollectionTask) Execute(ctx context.Context) (err error) {
+	t.SetStep(typeutil.TaskStepExecute)
 	coll, err := t.core.describeCollection(ctx, t.Req, t.allowUnavailable)
 	if err != nil {
 		return err

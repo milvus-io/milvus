@@ -11,6 +11,8 @@ import (
 	"go.uber.org/atomic"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 type mockFailTask struct {
@@ -21,10 +23,7 @@ type mockFailTask struct {
 
 func newMockFailTask() *mockFailTask {
 	task := &mockFailTask{
-		baseTask: baseTask{
-			ctx:  context.Background(),
-			done: make(chan error, 1),
-		},
+		baseTask: newBaseTask(context.TODO(), nil),
 	}
 	task.SetCtx(context.Background())
 	return task
@@ -43,10 +42,12 @@ func newMockExecuteFailTask() *mockFailTask {
 }
 
 func (m mockFailTask) Prepare(context.Context) error {
+	m.SetStep(typeutil.TaskStepPreExecute)
 	return m.prepareErr
 }
 
 func (m mockFailTask) Execute(context.Context) error {
+	m.SetStep(typeutil.TaskStepExecute)
 	return m.executeErr
 }
 
@@ -56,10 +57,7 @@ type mockNormalTask struct {
 
 func newMockNormalTask() *mockNormalTask {
 	task := &mockNormalTask{
-		baseTask: baseTask{
-			ctx:  context.Background(),
-			done: make(chan error, 1),
-		},
+		baseTask: newBaseTask(context.TODO(), nil),
 	}
 	task.SetCtx(context.Background())
 	return task

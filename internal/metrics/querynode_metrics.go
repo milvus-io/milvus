@@ -162,6 +162,19 @@ var (
 			segmentStateLabelName,
 		})
 
+	QueryNodeSegmentSearchLatencyPerVector = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "segment_latency_per_vector",
+			Help:      "one vector's search latency per segment",
+			Buckets:   buckets,
+		}, []string{
+			nodeIDLabelName,
+			queryTypeLabelName,
+			segmentStateLabelName,
+		})
+
 	QueryNodeSQSegmentLatencyInCore = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
@@ -192,6 +205,17 @@ var (
 			Subsystem: typeutil.QueryNodeRole,
 			Name:      "load_segment_latency",
 			Help:      "latency of load per segment",
+			Buckets:   buckets,
+		}, []string{
+			nodeIDLabelName,
+		})
+
+	QueryNodeWatchDmlChannelLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "watch_dml_channel_latency",
+			Help:      "latency of watch dml channel",
 			Buckets:   buckets,
 		}, []string{
 			nodeIDLabelName,

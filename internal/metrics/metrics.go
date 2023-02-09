@@ -42,6 +42,11 @@ const (
 	TimetickLabel  = "timetick"
 	AllLabel       = "all"
 
+	InsertFileLabel = "insert_file"
+	DeleteFileLabel = "delete_file"
+	StatFileLabel   = "stat_file"
+	IndexFileLabel  = "index_file"
+
 	UnissuedIndexTaskLabel   = "unissued"
 	InProgressIndexTaskLabel = "in-progress"
 	FinishedIndexTaskLabel   = "finished"
@@ -69,6 +74,7 @@ const (
 	queryTypeLabelName       = "query_type"
 	collectionName           = "collection_name"
 	segmentStateLabelName    = "segment_state"
+	segmentFileTypeLabelName = "segment_file_type"
 	usernameLabelName        = "username"
 	roleNameLabelName        = "role_name"
 	cacheNameLabelName       = "cache_name"
@@ -81,6 +87,21 @@ var (
 	// buckets involves durations in milliseconds,
 	// [1 2 4 8 16 32 64 128 256 512 1024 2048 4096 8192 16384 32768 65536 1.31072e+05]
 	buckets = prometheus.ExponentialBuckets(1, 2, 18)
+
+	NumNodes = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Name:      "num_node",
+			Help:      "number of nodes and coordinates",
+		}, []string{nodeIDLabelName, roleNameLabelName})
+
+	FlushedSegmentFileNum = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Name:      "flushed_segment_file_num",
+			Help:      "the num of files for flushed segment",
+			Buckets:   buckets,
+		}, []string{segmentFileTypeLabelName})
 )
 
 // Register serves prometheus http service
@@ -93,4 +114,5 @@ func Register(r *prometheus.Registry) {
 		Path:    "/metrics_default",
 		Handler: promhttp.Handler(),
 	})
+	r.MustRegister(NumNodes)
 }

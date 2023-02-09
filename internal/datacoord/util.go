@@ -27,10 +27,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+
 	"go.uber.org/zap"
 )
 
@@ -205,4 +207,30 @@ func getCollectionTTL(properties map[string]string) (time.Duration, error) {
 	}
 
 	return Params.CommonCfg.EntityExpirationTTL, nil
+}
+
+func getCompactedSegmentSize(s *datapb.CompactionResult) int64 {
+	var segmentSize int64
+
+	if s != nil {
+		for _, binlogs := range s.GetInsertLogs() {
+			for _, l := range binlogs.GetBinlogs() {
+				segmentSize += l.GetLogSize()
+			}
+		}
+
+		for _, deltaLogs := range s.GetDeltalogs() {
+			for _, l := range deltaLogs.GetBinlogs() {
+				segmentSize += l.GetLogSize()
+			}
+		}
+
+		for _, statsLogs := range s.GetDeltalogs() {
+			for _, l := range statsLogs.GetBinlogs() {
+				segmentSize += l.GetLogSize()
+			}
+		}
+	}
+
+	return segmentSize
 }

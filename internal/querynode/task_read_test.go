@@ -9,6 +9,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 )
@@ -57,14 +58,14 @@ func (s *baseReadTaskSuite) TestPreExecute() {
 	ctx := context.Background()
 	err := s.task.PreExecute(ctx)
 	s.Assert().NoError(err)
-	s.Assert().Equal(TaskStepPreExecute, s.task.step)
+	s.Assert().Equal(typeutil.TaskStepPreExecute, s.task.step)
 }
 
 func (s *baseReadTaskSuite) TestExecute() {
 	ctx := context.Background()
 	err := s.task.Execute(ctx)
 	s.Assert().NoError(err)
-	s.Assert().Equal(TaskStepExecute, s.task.step)
+	s.Assert().Equal(typeutil.TaskStepExecute, s.task.step)
 }
 
 func (s *baseReadTaskSuite) TestTimeout() {
