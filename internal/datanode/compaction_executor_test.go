@@ -27,9 +27,12 @@ import (
 
 func TestCompactionExecutor(t *testing.T) {
 	t.Run("Test execute", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
 		ex := newCompactionExecutor()
-		go ex.start(context.TODO())
+		go ex.start(ctx)
 		ex.execute(newMockCompactor(true))
+
+		cancel()
 	})
 
 	t.Run("Test stopTask", func(t *testing.T) {
