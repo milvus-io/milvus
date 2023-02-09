@@ -399,6 +399,7 @@ func (kc *Catalog) AlterSegmentsAndAddNewSegment(ctx context.Context, segments [
 				return err
 			}
 			maps.Copy(kvs, segmentKvs)
+			kc.collectMetrics(newSegment)
 		} else {
 			// should be a faked segment, we create flush path directly here
 			flushSegKey := buildFlushedSegmentPath(newSegment.GetCollectionID(), newSegment.GetPartitionID(), newSegment.GetID())
@@ -412,7 +413,6 @@ func (kc *Catalog) AlterSegmentsAndAddNewSegment(ctx context.Context, segments [
 		}
 	}
 
-	kc.collectMetrics(newSegment)
 	return kc.MetaKv.MultiSave(kvs)
 }
 
