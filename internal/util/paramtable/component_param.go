@@ -1062,7 +1062,7 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 	p.CheckResourceGroupInterval = ParamItem{
 		Key:          "queryCoord.checkResourceGroupInterval",
 		Version:      "2.2.3",
-		DefaultValue: "30",
+		DefaultValue: "10",
 		PanicIfEmpty: true,
 	}
 	p.CheckResourceGroupInterval.Init(base.mgr)
