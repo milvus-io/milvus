@@ -107,7 +107,7 @@ type IndexCoord struct {
 	rootCoordClient types.RootCoord
 
 	enableActiveStandBy bool
-	activateFunc        func()
+	activateFunc        func() error
 
 	// Add callback functions at different stages
 	startCallbacks []func()
@@ -184,15 +184,16 @@ func (i *IndexCoord) Init() error {
 	}
 
 	if i.enableActiveStandBy {
-		i.activateFunc = func() {
+		i.activateFunc = func() error {
 			log.Info("IndexCoord switch from standby to active, activating")
 			if err := i.initIndexCoord(); err != nil {
-				log.Warn("IndexCoord init failed", zap.Error(err))
-				// TODO: panic if error occurred?
+				log.Error("IndexCoord init failed", zap.Error(err))
+				return err
 			}
 			i.startIndexCoord()
 			i.stateCode.Store(commonpb.StateCode_Healthy)
 			log.Info("IndexCoord startup success")
+			return nil
 		}
 		i.stateCode.Store(commonpb.StateCode_StandBy)
 		log.Info("IndexCoord enter standby mode successfully")
