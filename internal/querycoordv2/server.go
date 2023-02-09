@@ -110,7 +110,7 @@ type Server struct {
 
 	// Active-standby
 	enableActiveStandBy bool
-	activateFunc        func()
+	activateFunc        func() error
 }
 
 func NewQueryCoord(ctx context.Context) (*Server, error) {
@@ -127,7 +127,10 @@ func NewQueryCoord(ctx context.Context) (*Server, error) {
 func (s *Server) Register() error {
 	s.session.Register()
 	if s.enableActiveStandBy {
-		s.session.ProcessActiveStandBy(s.activateFunc)
+		if err := s.session.ProcessActiveStandBy(s.activateFunc); err != nil {
+			log.Error("failed to activate standby server", zap.Error(err))
+			return err
+		}
 	}
 	go s.session.LivenessCheck(s.ctx, func() {
 		log.Error("QueryCoord disconnected from etcd, process will exit", zap.Int64("serverID", s.session.ServerID))
@@ -166,16 +169,19 @@ func (s *Server) Init() error {
 	}
 
 	if s.enableActiveStandBy {
-		s.activateFunc = func() {
+		s.activateFunc = func() error {
 			log.Info("QueryCoord switch from standby to active, activating")
 			if err := s.initQueryCoord(); err != nil {
-				log.Warn("QueryCoord init failed", zap.Error(err))
+				log.Error("QueryCoord init failed", zap.Error(err))
+				return err
 			}
 			if err := s.startQueryCoord(); err != nil {
-				log.Warn("QueryCoord init failed", zap.Error(err))
+				log.Error("QueryCoord init failed", zap.Error(err))
+				return err
 			}
 			s.UpdateStateCode(commonpb.StateCode_Healthy)
 			log.Info("QueryCoord startup success")
+			return nil
 		}
 		s.UpdateStateCode(commonpb.StateCode_StandBy)
 		log.Info("QueryCoord enter standby mode successfully")

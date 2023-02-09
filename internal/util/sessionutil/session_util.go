@@ -775,7 +775,7 @@ func (s *Session) updateStandby(b bool) {
 //    Start watching the active key. Whenever active key disappears, STANDBY node will go backup to 2.
 //
 // activateFunc is the function to re-active the service.
-func (s *Session) ProcessActiveStandBy(activateFunc func()) error {
+func (s *Session) ProcessActiveStandBy(activateFunc func() error) error {
 	s.activeKey = path.Join(s.metaRoot, DefaultServiceRoot, s.ServerName)
 
 	// try to register to the active_key.
@@ -857,7 +857,7 @@ func (s *Session) ProcessActiveStandBy(activateFunc func()) error {
 	s.updateStandby(false)
 	log.Info(fmt.Sprintf("serverName: %v quit STANDBY mode, this node will become ACTIVE", s.ServerName))
 	if activateFunc != nil {
-		activateFunc()
+		return activateFunc()
 	}
 	return nil
 }
