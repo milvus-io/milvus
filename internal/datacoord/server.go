@@ -124,7 +124,7 @@ type Server struct {
 	qcEventCh <-chan *sessionutil.SessionEvent
 
 	enableActiveStandBy bool
-	activateFunc        func()
+	activateFunc        func() error
 
 	dataNodeCreator        dataNodeCreatorFunc
 	rootCoordClientCreator rootCoordCreatorFunc
@@ -220,7 +220,10 @@ func (s *Server) QuitSignal() <-chan struct{} {
 func (s *Server) Register() error {
 	s.session.Register()
 	if s.enableActiveStandBy {
-		s.session.ProcessActiveStandBy(s.activateFunc)
+		err := s.session.ProcessActiveStandBy(s.activateFunc)
+		if err != nil {
+			return err
+		}
 	}
 	go s.session.LivenessCheck(s.serverLoopCtx, func() {
 		logutil.Logger(s.ctx).Error("disconnected from etcd and exited", zap.Int64("serverID", s.session.ServerID))
@@ -258,15 +261,16 @@ func (s *Server) Init() error {
 		return err
 	}
 	if s.enableActiveStandBy {
-		s.activateFunc = func() {
+		s.activateFunc = func() error {
 			log.Info("DataCoord switch from standby to active, activating")
 			if err := s.initDataCoord(); err != nil {
-				log.Warn("DataCoord init failed", zap.Error(err))
-				// TODO: panic if error occurred?
+				log.Error("DataCoord init failed", zap.Error(err))
+				return err
 			}
 			s.startDataCoord()
 			s.stateCode.Store(commonpb.StateCode_Healthy)
 			log.Info("DataCoord startup success")
+			return nil
 		}
 		s.stateCode.Store(commonpb.StateCode_StandBy)
 		log.Info("DataCoord enter standby mode successfully")
