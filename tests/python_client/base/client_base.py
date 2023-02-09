@@ -14,6 +14,8 @@ from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
 
+from pymilvus import ResourceGroupInfo
+
 
 class Base:
     """ Initialize class object """
@@ -25,6 +27,7 @@ class Base:
     collection_schema_wrap = None
     field_schema_wrap = None
     collection_object_list = []
+    resource_group_list = []
 
     def setup_class(self):
         log.info("[setup_class] Start setup class...")
@@ -63,6 +66,16 @@ class Base:
             for collection_object in self.collection_object_list:
                 if collection_object.collection is not None and collection_object.name in collection_list:
                     collection_object.drop(check_task=ct.CheckTasks.check_nothing)
+
+            """ Clean up the rgs before disconnect """
+            for rg_name in self.resource_group_list:
+                rg = self.utility_wrap.describe_resource_group(name=rg_name, check_task=ct.CheckTasks.check_nothing)[0]
+                if isinstance(rg, ResourceGroupInfo):
+                    if rg.num_available_node > 0:
+                        self.utility_wrap.transfer_node(source=rg_name,
+                                                        target=ct.default_resource_group_name,
+                                                        num_node=rg.num_available_node)
+                    self.utility_wrap.drop_resource_group(rg_name, check_task=ct.CheckTasks.check_nothing)
 
         except Exception as e:
             log.debug(str(e))
@@ -262,3 +275,14 @@ class TestcaseBase(Base):
             collection_w.insert(df)
             assert collection_w.num_entities == nb_of_segment * (i + 1)
         return collection_w
+
+    def init_resource_group(self, name, using="default", timeout=None, check_task=None, check_items=None, **kwargs):
+        if not self.connection_wrap.has_connection(alias=DefaultConfig.DEFAULT_USING)[0]:
+            self._connect()
+        utility_w = ApiUtilityWrapper()
+        res, check_result = utility_w.create_resource_group(name=name, using=using, timeout=timeout,
+                                                            check_task=check_task,
+                                                            check_items=check_items, **kwargs)
+        if res is None and check_result:
+            self.resource_group_list.append(name)
+        return res, check_result

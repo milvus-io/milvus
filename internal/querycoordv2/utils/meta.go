@@ -33,7 +33,7 @@ var (
 	ErrGetNodesFromRG       = errors.New("failed to get node from rg")
 	ErrNoReplicaFound       = errors.New("no replica found during assign nodes")
 	ErrReplicasInconsistent = errors.New("all replicas should belong to same collection during assign nodes")
-	ErrUseWrongNumRG        = errors.New("resource num can only be 0, 1 or same as replica number")
+	ErrUseWrongNumRG        = errors.New("resource group num can only be 0, 1 or same as replica number")
 )
 
 func GetReplicaNodesInfo(replicaMgr *meta.ReplicaManager, nodeMgr *session.NodeManager, replicaID int64) []*session.NodeInfo {

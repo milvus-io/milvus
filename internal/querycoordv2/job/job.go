@@ -167,12 +167,6 @@ func (job *LoadCollectionJob) PreExecute() error {
 		return ErrCollectionLoaded
 	}
 
-	if len(job.nodeMgr.GetAll()) < int(job.req.GetReplicaNumber()) {
-		msg := "no enough nodes to create replicas"
-		log.Warn(msg)
-		return utils.WrapError(msg, ErrNoEnoughNode)
-	}
-
 	return nil
 }
 
@@ -379,12 +373,6 @@ func (job *LoadPartitionJob) PreExecute() error {
 			}
 		}
 		return ErrCollectionLoaded
-	}
-
-	if len(job.nodeMgr.GetAll()) < int(job.req.GetReplicaNumber()) {
-		msg := "no enough nodes to create replicas"
-		log.Warn(msg)
-		return utils.WrapError(msg, ErrNoEnoughNode)
 	}
 
 	return nil

@@ -254,7 +254,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, float64(300), Params.NextTargetSurviveTime.Seconds())
 		assert.Equal(t, float64(30), Params.UpdateNextTargetInterval.Seconds())
 		assert.Equal(t, float64(60), Params.CheckNodeInReplicaInterval.Seconds())
-		assert.Equal(t, float64(60), Params.CheckResourceGroupInterval.Seconds())
+		assert.Equal(t, float64(10), Params.CheckResourceGroupInterval.Seconds())
 		assert.Equal(t, true, Params.EnableRGAutoRecover)
 	})
 

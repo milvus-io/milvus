@@ -953,7 +953,7 @@ func (p *queryCoordConfig) initCheckNodeInReplicaInterval() {
 }
 
 func (p *queryCoordConfig) initCheckResourceGroupInterval() {
-	interval := p.Base.LoadWithDefault("queryCoord.checkResourceGroupInterval", "60")
+	interval := p.Base.LoadWithDefault("queryCoord.checkResourceGroupInterval", "10")
 	checkResourceGroupInterval, err := strconv.ParseInt(interval, 10, 64)
 	if err != nil {
 		panic(err)
