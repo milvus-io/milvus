@@ -99,7 +99,6 @@ func NewBaseTableFromYamlOnly(yaml string) *BaseTable {
 func (gp *BaseTable) GlobalInitWithYaml(yaml string) {
 	gp.once.Do(func() {
 		defaultYaml = yaml
-		gp.Init()
 	})
 }
 
