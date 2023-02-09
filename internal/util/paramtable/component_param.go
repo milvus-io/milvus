@@ -1378,7 +1378,7 @@ func (p *dataCoordConfig) initSegmentMinSizeFromIdleToSealed() {
 }
 
 func (p *dataCoordConfig) initSegmentMaxBinlogFileNumber() {
-	p.SegmentMaxBinlogFileNumber = p.Base.ParseIntWithDefault("dataCoord.segment.maxBinlogFileNumber", 16)
+	p.SegmentMaxBinlogFileNumber = p.Base.ParseIntWithDefault("dataCoord.segment.maxBinlogFileNumber", 32)
 	log.Info("init segment max binlog file to sealed", zap.Int("value", p.SegmentMaxBinlogFileNumber))
 }
 

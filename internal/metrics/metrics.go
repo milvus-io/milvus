@@ -74,6 +74,7 @@ const (
 	queryTypeLabelName       = "query_type"
 	collectionName           = "collection_name"
 	segmentStateLabelName    = "segment_state"
+	segmentIDLabelName       = "segment_id"
 	segmentFileTypeLabelName = "segment_file_type"
 	usernameLabelName        = "username"
 	roleNameLabelName        = "role_name"
