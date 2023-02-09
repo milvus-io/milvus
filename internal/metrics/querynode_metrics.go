@@ -400,6 +400,8 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeExecuteCounter)
 	registry.MustRegister(QueryNodeConsumerMsgCount)
 	registry.MustRegister(QueryNodeConsumeTimeTickLag)
+	registry.MustRegister(QueryNodeSegmentSearchLatencyPerVector)
+	registry.MustRegister(QueryNodeWatchDmlChannelLatency)
 }
 
 func CleanupQueryNodeCollectionMetrics(nodeID int64, collectionID int64) {

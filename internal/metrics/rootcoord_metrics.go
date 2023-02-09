@@ -196,4 +196,5 @@ func RegisterRootCoord(registry *prometheus.Registry) {
 	registry.MustRegister(RootCoordNumOfRoles)
 	registry.MustRegister(RootCoordTtDelay)
 	registry.MustRegister(RootCoordQuotaStates)
+	registry.MustRegister(RootCoordDDLReqLatencyInQueue)
 }

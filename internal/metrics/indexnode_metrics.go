@@ -102,4 +102,6 @@ func RegisterIndexNode(registry *prometheus.Registry) {
 	registry.MustRegister(IndexNodeKnowhereBuildIndexLatency)
 	registry.MustRegister(IndexNodeEncodeIndexFileLatency)
 	registry.MustRegister(IndexNodeSaveIndexFileLatency)
+	registry.MustRegister(IndexNodeIndexTaskLatencyInQueue)
+	registry.MustRegister(IndexNodeBuildIndexLatency)
 }
