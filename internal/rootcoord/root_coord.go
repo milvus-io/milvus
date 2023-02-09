@@ -696,6 +696,9 @@ func (c *Core) Stop() error {
 	c.stopExecutor()
 	c.stopScheduler()
 	c.cancelIfNotNil()
+	if c.quotaCenter != nil {
+		c.quotaCenter.stop()
+	}
 	c.wg.Wait()
 	c.revokeSession()
 	return nil

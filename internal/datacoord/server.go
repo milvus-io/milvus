@@ -937,6 +937,7 @@ func (s *Server) Stop() error {
 		s.stopCompactionTrigger()
 		s.stopCompactionHandler()
 	}
+	s.indexBuilder.Stop()
 	return nil
 }
 
