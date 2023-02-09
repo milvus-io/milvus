@@ -20,9 +20,10 @@ import (
 	// nolint:gosec
 	_ "net/http/pprof"
 
-	"github.com/milvus-io/milvus/internal/management"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+
+	"github.com/milvus-io/milvus/internal/management"
 )
 
 const (
@@ -70,6 +71,7 @@ const (
 	queryTypeLabelName       = "query_type"
 	collectionName           = "collection_name"
 	segmentStateLabelName    = "segment_state"
+	segmentIDLabelName       = "segment_id"
 	usernameLabelName        = "username"
 	roleNameLabelName        = "role_name"
 	cacheNameLabelName       = "cache_name"

@@ -297,7 +297,7 @@ dataCoord:
     minSizeFromIdleToSealed: 16 # The min size in MB of segment which can be idle from sealed.
     # The max number of statslog file for one segment, the segment will be sealed if
     # the number of statslog file reaches to max value.
-    maxBinlogFileNumber: 16
+    maxBinlogFileNumber: 32
     smallProportion: 0.5 # The segment is considered as "small segment" when its # of rows is smaller than
     # (smallProportion * segment max # of rows).
     compactableProportion: 0.5 # A compaction will happen on small segments if the segment after compaction will have

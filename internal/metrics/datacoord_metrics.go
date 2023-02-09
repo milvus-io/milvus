@@ -17,8 +17,11 @@
 package metrics
 
 import (
-	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"fmt"
+
 	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 const (
@@ -94,6 +97,17 @@ var (
 			Name:      "stored_binlog_size",
 			Help:      "binlog size of segments",
 		}, []string{segmentStateLabelName})
+
+	DataCoordSegmentBinLogFileCount = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "segment_binlog_file_count",
+			Help:      "number of binlog files for each segment",
+		}, []string{
+			collectionIDLabelName,
+			segmentIDLabelName,
+		})
 
 	/* hard to implement, commented now
 	DataCoordSegmentSizeRatio = prometheus.NewHistogramVec(
@@ -177,7 +191,17 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(DataCoordNumStoredRowsCounter)
 	registry.MustRegister(DataCoordConsumeDataNodeTimeTickLag)
 	registry.MustRegister(DataCoordStoredBinlogSize)
+	registry.MustRegister(DataCoordSegmentBinLogFileCount)
 	registry.MustRegister(IndexRequestCounter)
 	registry.MustRegister(IndexTaskNum)
 	registry.MustRegister(IndexNodeNum)
+}
+
+func CleanupDataCoordSegmentMetrics(collectionID int64, segmentID int64) {
+	DataCoordSegmentBinLogFileCount.
+		Delete(
+			prometheus.Labels{
+				collectionIDLabelName: fmt.Sprint(collectionID),
+				segmentIDLabelName:    fmt.Sprint(segmentID),
+			})
 }
