@@ -1336,7 +1336,7 @@ func TestCore_startTimeTickLoop(t *testing.T) {
 
 // make sure the main functions work well when EnableActiveStandby=true
 func TestRootcoord_EnableActiveStandby(t *testing.T) {
-	Params.Init()
+	Params.InitOnce()
 	Params.RootCoordCfg.EnableActiveStandby = true
 	randVal := rand.Int()
 	Params.CommonCfg.RootCoordTimeTick = fmt.Sprintf("rootcoord-time-tick-%d", randVal)
@@ -1363,12 +1363,65 @@ func TestRootcoord_EnableActiveStandby(t *testing.T) {
 	core.etcdCli = etcdCli
 	assert.NoError(t, err)
 	err = core.Init()
+	assert.Equal(t, commonpb.StateCode_StandBy, core.stateCode.Load().(commonpb.StateCode))
 	assert.NoError(t, err)
 	err = core.Start()
 	assert.NoError(t, err)
 	core.session.TriggerKill = false
 	err = core.Register()
 	assert.NoError(t, err)
+	assert.Equal(t, commonpb.StateCode_Healthy, core.stateCode.Load().(commonpb.StateCode))
+	resp, err := core.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_DescribeCollection,
+			MsgID:     0,
+			Timestamp: 0,
+			SourceID:  Params.ProxyCfg.GetNodeID(),
+		},
+		CollectionName: "unexist"})
+	assert.NoError(t, err)
+	assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	err = core.Stop()
+	assert.NoError(t, err)
+}
+
+// make sure the main functions work well when EnableActiveStandby=false
+func TestRootcoord_DisableActiveStandby(t *testing.T) {
+	Params.InitOnce()
+	Params.RootCoordCfg.EnableActiveStandby = false
+	randVal := rand.Int()
+	Params.CommonCfg.RootCoordTimeTick = fmt.Sprintf("rootcoord-time-tick-%d", randVal)
+	Params.CommonCfg.RootCoordStatistics = fmt.Sprintf("rootcoord-statistics-%d", randVal)
+	Params.EtcdCfg.MetaRootPath = fmt.Sprintf("/%d/%s", randVal, Params.EtcdCfg.MetaRootPath)
+	Params.EtcdCfg.KvRootPath = fmt.Sprintf("/%d/%s", randVal, Params.EtcdCfg.KvRootPath)
+	Params.CommonCfg.RootCoordSubName = fmt.Sprintf("subname-%d", randVal)
+	Params.CommonCfg.RootCoordDml = fmt.Sprintf("rootcoord-dml-test-%d", randVal)
+	Params.CommonCfg.RootCoordDelta = fmt.Sprintf("rootcoord-delta-test-%d", randVal)
+
+	ctx := context.Background()
+	coreFactory := dependency.NewDefaultFactory(true)
+	etcdCli, err := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd,
+		Params.EtcdCfg.EtcdUseSSL,
+		Params.EtcdCfg.Endpoints,
+		Params.EtcdCfg.EtcdTLSCert,
+		Params.EtcdCfg.EtcdTLSKey,
+		Params.EtcdCfg.EtcdTLSCACert,
+		Params.EtcdCfg.EtcdTLSMinVersion)
+	assert.NoError(t, err)
+	defer etcdCli.Close()
+	core, err := NewCore(ctx, coreFactory)
+	core.etcdCli = etcdCli
+	assert.NoError(t, err)
+	err = core.Init()
+	assert.Equal(t, commonpb.StateCode_Initializing, core.stateCode.Load().(commonpb.StateCode))
+	assert.NoError(t, err)
+	err = core.Start()
+	assert.NoError(t, err)
+	core.session.TriggerKill = false
+	err = core.Register()
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.StateCode_Healthy, core.stateCode.Load().(commonpb.StateCode))
 	resp, err := core.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_DescribeCollection,

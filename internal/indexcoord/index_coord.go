@@ -171,9 +171,6 @@ func (i *IndexCoord) initSession() error {
 
 // Init initializes the IndexCoord component.
 func (i *IndexCoord) Init() error {
-	i.UpdateStateCode(commonpb.StateCode_Initializing)
-	log.Info("IndexCoord init", zap.Any("stateCode", i.stateCode.Load().(commonpb.StateCode)))
-
 	var initErr error
 	Params.InitOnce()
 	i.factory.Init(&Params)
@@ -191,7 +188,6 @@ func (i *IndexCoord) Init() error {
 				return err
 			}
 			i.startIndexCoord()
-			i.stateCode.Store(commonpb.StateCode_Healthy)
 			log.Info("IndexCoord startup success")
 			return nil
 		}
@@ -207,6 +203,8 @@ func (i *IndexCoord) Init() error {
 }
 
 func (i *IndexCoord) initIndexCoord() error {
+	i.UpdateStateCode(commonpb.StateCode_Initializing)
+	log.Info("IndexCoord init", zap.Any("stateCode", i.stateCode.Load().(commonpb.StateCode)))
 	var err error
 	connectEtcdFn := func() error {
 		i.etcdKV = etcdkv.NewEtcdKV(i.etcdCli, Params.EtcdCfg.MetaRootPath)
@@ -290,7 +288,6 @@ func (i *IndexCoord) initIndexCoord() error {
 func (i *IndexCoord) Start() error {
 	if !i.enableActiveStandBy {
 		i.startIndexCoord()
-		i.UpdateStateCode(commonpb.StateCode_Healthy)
 		log.Info("IndexCoord start successfully", zap.Any("state", i.stateCode.Load()))
 	}
 
@@ -314,12 +311,12 @@ func (i *IndexCoord) startIndexCoord() {
 		i.handoff.Start()
 		i.flushedSegmentWatcher.Start()
 
-		i.UpdateStateCode(commonpb.StateCode_Healthy)
 	})
 	// Start callbacks
 	for _, cb := range i.startCallbacks {
 		cb()
 	}
+	i.UpdateStateCode(commonpb.StateCode_Healthy)
 }
 
 // Stop stops the IndexCoord component.

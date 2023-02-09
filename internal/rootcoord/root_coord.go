@@ -318,7 +318,6 @@ func (c *Core) Register() error {
 		}
 	})
 
-	c.UpdateStateCode(commonpb.StateCode_Healthy)
 	return nil
 }
 
@@ -429,6 +428,7 @@ func (c *Core) initImportManager() error {
 }
 
 func (c *Core) initInternal() error {
+	c.UpdateStateCode(commonpb.StateCode_Initializing)
 	c.initKVCreator()
 
 	if err := c.initMetaTable(); err != nil {
@@ -512,8 +512,6 @@ func (c *Core) Init() error {
 			if err != nil {
 				return err
 			}
-
-			c.UpdateStateCode(commonpb.StateCode_Healthy)
 			log.Info("RootCoord startup success")
 			return nil
 		}

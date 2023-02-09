@@ -3589,10 +3589,16 @@ func newTestServer(t *testing.T, receiveCh chan any, opts ...Option) *Server {
 
 	err = svr.Init()
 	assert.Nil(t, err)
-	err = svr.Start()
-	assert.Nil(t, err)
+	if Params.IndexCoordCfg.EnableActiveStandby {
+		assert.Equal(t, commonpb.StateCode_StandBy, svr.stateCode.Load().(commonpb.StateCode))
+	} else {
+		assert.Equal(t, commonpb.StateCode_Initializing, svr.stateCode.Load().(commonpb.StateCode))
+	}
 	err = svr.Register()
 	assert.Nil(t, err)
+	err = svr.Start()
+	assert.Nil(t, err)
+	assert.Equal(t, commonpb.StateCode_Healthy, svr.stateCode.Load().(commonpb.StateCode))
 
 	// Stop channal watch state watcher in tests
 	if svr.channelManager != nil && svr.channelManager.stopChecker != nil {
