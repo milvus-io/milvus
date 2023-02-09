@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/config"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -363,4 +364,15 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, Params.GracefulStopTimeout.GetAsInt64(), int64(50))
 	})
 
+}
+
+func TestForbiddenItem(t *testing.T) {
+	Init()
+	params := Get()
+
+	params.mgr.OnEvent(&config.Event{
+		Key:   params.CommonCfg.ClusterPrefix.Key,
+		Value: "new-cluster",
+	})
+	assert.Equal(t, "by-dev", params.CommonCfg.ClusterPrefix.GetValue())
 }
