@@ -12,8 +12,6 @@
 #include <gtest/gtest.h>
 #include <boost/format.hpp>
 
-#include <knowhere/index/IndexType.h>
-#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "segcore/SegmentSealedImpl.h"
 #include "test_utils/DataGen.h"
 #include "index/IndexFactory.h"
@@ -85,19 +83,19 @@ TEST(Sealed, without_predicate) {
 
     auto indexing = milvus::index::IndexFactory::GetInstance().CreateIndex(create_index_info, nullptr);
 
-    auto build_conf = knowhere::Config{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
+    auto build_conf = knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
                                        {knowhere::meta::DIM, std::to_string(dim)},
                                        {knowhere::indexparam::NLIST, "100"}};
 
-    auto search_conf = knowhere::Config{{knowhere::indexparam::NPROBE, 10}};
+    auto search_conf = knowhere::Json{{knowhere::indexparam::NPROBE, 10}};
 
-    auto database = knowhere::GenDataset(N, dim, vec_col.data() + 1000 * dim);
+    auto database = knowhere::GenDataSet(N, dim, vec_col.data() + 1000 * dim);
     indexing->BuildWithDataset(database, build_conf);
 
     auto vec_index = dynamic_cast<milvus::index::VectorIndex*>(indexing.get());
     EXPECT_EQ(vec_index->Count(), N);
     EXPECT_EQ(vec_index->GetDim(), dim);
-    auto query_dataset = knowhere::GenDataset(num_queries, dim, query_ptr);
+    auto query_dataset = knowhere::GenDataSet(num_queries, dim, query_ptr);
 
     milvus::SearchInfo searchInfo;
     searchInfo.topk_ = topK;
@@ -191,21 +189,21 @@ TEST(Sealed, with_predicate) {
     create_index_info.index_type = knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
     auto indexing = milvus::index::IndexFactory::GetInstance().CreateIndex(create_index_info, nullptr);
 
-    auto build_conf = knowhere::Config{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
+    auto build_conf = knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
                                        {knowhere::meta::DIM, std::to_string(dim)},
                                        {knowhere::indexparam::NLIST, "100"}};
 
-    auto database = knowhere::GenDataset(N, dim, vec_col.data());
+    auto database = knowhere::GenDataSet(N, dim, vec_col.data());
     indexing->BuildWithDataset(database, build_conf);
 
     auto vec_index = dynamic_cast<index::VectorIndex*>(indexing.get());
     EXPECT_EQ(vec_index->Count(), N);
     EXPECT_EQ(vec_index->GetDim(), dim);
 
-    auto query_dataset = knowhere::GenDataset(num_queries, dim, query_ptr);
+    auto query_dataset = knowhere::GenDataSet(num_queries, dim, query_ptr);
 
     auto search_conf =
-        knowhere::Config{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2}, {knowhere::indexparam::NPROBE, 10}};
+        knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2}, {knowhere::indexparam::NPROBE, 10}};
     milvus::SearchInfo searchInfo;
     searchInfo.topk_ = topK;
     searchInfo.metric_type_ = knowhere::metric::L2;
@@ -289,11 +287,11 @@ TEST(Sealed, with_predicate_filter_all) {
     create_index_info.index_type = knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
     auto ivf_indexing = milvus::index::IndexFactory::GetInstance().CreateIndex(create_index_info, nullptr);
 
-    auto ivf_build_conf = knowhere::Config{{knowhere::meta::DIM, std::to_string(dim)},
+    auto ivf_build_conf = knowhere::Json{{knowhere::meta::DIM, std::to_string(dim)},
                                            {knowhere::indexparam::NLIST, "100"},
                                            {knowhere::meta::METRIC_TYPE, knowhere::metric::L2}};
 
-    auto database = knowhere::GenDataset(N, dim, vec_col.data());
+    auto database = knowhere::GenDataSet(N, dim, vec_col.data());
     ivf_indexing->BuildWithDataset(database, ivf_build_conf);
 
     auto ivf_vec_index = dynamic_cast<index::VectorIndex*>(ivf_indexing.get());
@@ -313,7 +311,7 @@ TEST(Sealed, with_predicate_filter_all) {
     auto sr = ivf_sealed_segment->Search(plan.get(), ph_group.get(), time);
     EXPECT_EQ(sr->get_total_result_count(), 0);
 
-    auto hnsw_conf = knowhere::Config{{knowhere::meta::DIM, std::to_string(dim)},
+    auto hnsw_conf = knowhere::Json{{knowhere::meta::DIM, std::to_string(dim)},
                                       {knowhere::indexparam::HNSW_M, "16"},
                                       {knowhere::indexparam::EFCONSTRUCTION, "200"},
                                       {knowhere::indexparam::EF, "200"},

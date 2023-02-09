@@ -23,7 +23,7 @@
 #include "index/Meta.h"
 #include <google/protobuf/text_format.h>
 #include "exceptions/EasyAssert.h"
-
+#include "knowhere/comp/index_param.h"
 namespace milvus::index {
 
 size_t

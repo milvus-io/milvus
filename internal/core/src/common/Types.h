@@ -30,10 +30,10 @@
 #include <NamedType/named_type.hpp>
 #include <variant>
 
-#include "knowhere/index/vector_index/helpers/IndexParameter.h"
-#include <knowhere/index/IndexType.h>
-#include "knowhere/common/BinarySet.h"
-#include "knowhere/common/Dataset.h"
+#include "nlohmann/json.hpp"
+#include "knowhere/comp/index_param.h"
+#include "knowhere/binaryset.h"
+#include "knowhere/dataset.h"
 #include "pb/schema.pb.h"
 #include "pb/segcore.pb.h"
 #include "pb/plan.pb.h"
@@ -118,7 +118,8 @@ using TargetBitmapPtr = std::unique_ptr<TargetBitmap>;
 
 using BinaryPtr = knowhere::BinaryPtr;
 using BinarySet = knowhere::BinarySet;
-using DatasetPtr = knowhere::DatasetPtr;
+using Dataset = knowhere::DataSet;
+using DatasetPtr = knowhere::DataSetPtr;
 using MetricType = knowhere::MetricType;
 // TODO :: type define milvus index type(vector index type and scalar index type)
 using IndexType = knowhere::IndexType;

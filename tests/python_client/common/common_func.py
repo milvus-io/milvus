@@ -492,7 +492,7 @@ def gen_invalid_search_param(index_type, metric_type="L2"):
             hnsw_search_param = {"metric_type": metric_type, "params": {"ef": ef}}
             search_params.append(hnsw_search_param)
     elif index_type == "ANNOY":
-        for search_k in ["-1"]:
+        for search_k in ["-2"]:
             annoy_search_param = {"metric_type": metric_type, "params": {"search_k": search_k}}
             search_params.append(annoy_search_param)
     elif index_type == "DISKANN":

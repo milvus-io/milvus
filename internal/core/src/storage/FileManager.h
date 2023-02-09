@@ -20,7 +20,7 @@
 #include <optional>
 #include <memory>
 
-#include "knowhere/common/FileManager.h"
+#include "knowhere/file_manager.h"
 
 namespace milvus::storage {
 

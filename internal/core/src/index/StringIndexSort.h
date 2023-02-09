@@ -21,7 +21,6 @@
 #include "common/Utils.h"
 #include "index/ScalarIndexSort.h"
 #include "index/StringIndex.h"
-#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 
 namespace milvus::index {
 // TODO: should inherit from StringIndex?

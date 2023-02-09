@@ -39,7 +39,7 @@ struct Payload {
 class PayloadOutputStream : public arrow::io::OutputStream {
  public:
     PayloadOutputStream();
-    ~PayloadOutputStream();
+    ~PayloadOutputStream() noexcept;
 
     arrow::Status
     Close() override;
@@ -64,7 +64,7 @@ class PayloadOutputStream : public arrow::io::OutputStream {
 class PayloadInputStream : public arrow::io::RandomAccessFile {
  public:
     PayloadInputStream(const uint8_t* data, int64_t size);
-    ~PayloadInputStream();
+    ~PayloadInputStream() noexcept;
 
     arrow::Status
     Close() override;

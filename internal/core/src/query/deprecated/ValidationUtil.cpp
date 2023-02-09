@@ -11,8 +11,6 @@
 
 #include "ValidationUtil.h"
 #include "config/ServerConfig.h"
-#include "knowhere/index/vector_index/ConfAdapter.h"
-#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 #include "utils/Log.h"
 #include "utils/StringHelpFunctions.h"
 

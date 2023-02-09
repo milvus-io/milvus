@@ -20,11 +20,9 @@
 #include "exceptions/EasyAssert.h"
 #include "config/ConfigKnowhere.h"
 
-#include "knowhere/index/VecIndexFactory.h"
-#include "knowhere/common/Timer.h"
+#include "knowhere/factory.h"
+#include "knowhere/comp/Timer.h"
 #include "common/BitsetView.h"
-#include "knowhere/index/vector_index/ConfAdapterMgr.h"
-#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "common/Slice.h"
 
 namespace milvus::index {
@@ -33,16 +31,15 @@ VectorMemIndex::VectorMemIndex(const IndexType& index_type, const MetricType& me
     : VectorIndex(index_type, index_mode, metric_type) {
     AssertInfo(!is_unsupported(index_type, metric_type), index_type + " doesn't support metric: " + metric_type);
 
-    index_ = knowhere::VecIndexFactory::GetInstance().CreateVecIndex(GetIndexType(), index_mode);
-    AssertInfo(index_ != nullptr, "[VecIndexCreator]Index is null after create index");
+    index_ = knowhere::IndexFactory::Instance().Create(GetIndexType());
 }
 
 BinarySet
 VectorMemIndex::Serialize(const Config& config) {
-    knowhere::Config serialize_config = config;
-    parse_config(serialize_config);
-
-    auto ret = index_->Serialize(serialize_config);
+    knowhere::BinarySet ret;
+    auto stat = index_.Serialize(ret);
+    if (stat != knowhere::Status::success)
+        PanicCodeInfo(ErrorCodeEnum::UnexpectedError, "failed to serialize index");
     milvus::Disassemble(ret);
 
     return ret;
@@ -51,30 +48,25 @@ VectorMemIndex::Serialize(const Config& config) {
 void
 VectorMemIndex::Load(const BinarySet& binary_set, const Config& config) {
     milvus::Assemble(const_cast<BinarySet&>(binary_set));
-    index_->Load(binary_set);
-    SetDim(index_->Dim());
+    auto stat = index_.Deserialize(binary_set);
+    if (stat != knowhere::Status::success)
+        PanicCodeInfo(ErrorCodeEnum::UnexpectedError, "failed to Deserialize index");
+    SetDim(index_.Dim());
 }
 
 void
 VectorMemIndex::BuildWithDataset(const DatasetPtr& dataset, const Config& config) {
-    knowhere::Config index_config;
+    knowhere::Json index_config;
     index_config.update(config);
-    parse_config(index_config);
 
-    SetDim(knowhere::GetDatasetDim(dataset));
-    knowhere::SetMetaRows(index_config, knowhere::GetDatasetRows(dataset));
-    if (GetIndexType() == knowhere::IndexEnum::INDEX_FAISS_IVFPQ) {
-        if (!config.contains(knowhere::indexparam::NBITS)) {
-            knowhere::SetIndexParamNbits(index_config, 8);
-        }
-    }
-    auto conf_adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(GetIndexType());
-    AssertInfo(conf_adapter->CheckTrain(index_config, GetIndexMode()), "something wrong in index parameters!");
+    SetDim(dataset->GetDim());
 
     knowhere::TimeRecorder rc("BuildWithoutIds", 1);
-    index_->BuildAll(dataset, index_config);
+    auto stat = index_.Build(*dataset, index_config);
+    if (stat != knowhere::Status::success)
+        PanicCodeInfo(ErrorCodeEnum::BuildIndexError, "failed to build index");
     rc.ElapseFromBegin("Done");
-    SetDim(index_->Dim());
+    SetDim(index_.Dim());
 }
 
 std::unique_ptr<SearchResult>
@@ -82,26 +74,21 @@ VectorMemIndex::Query(const DatasetPtr dataset, const SearchInfo& search_info, c
     //    AssertInfo(GetMetricType() == search_info.metric_type_,
     //               "Metric type of field index isn't the same with search info");
 
-    auto num_queries = knowhere::GetDatasetRows(dataset);
-    Config search_conf = search_info.search_params_;
+    auto num_queries = dataset->GetRows();
+    knowhere::Json search_conf = search_info.search_params_;
     auto topk = search_info.topk_;
     // TODO :: check dim of search data
     auto final = [&] {
-        knowhere::SetMetaTopk(search_conf, topk);
-        knowhere::SetMetaMetricType(search_conf, GetMetricType());
+        search_conf[knowhere::meta::TOPK] = topk;
+        search_conf[knowhere::meta::METRIC_TYPE] = GetMetricType();
         auto index_type = GetIndexType();
-        auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(index_type);
-        try {
-            adapter->CheckSearch(search_conf, index_type, GetIndexMode());
-        } catch (std::exception& e) {
-            AssertInfo(false, e.what());
-        }
-        return index_->Query(dataset, search_conf, bitset);
+        return index_.Search(*dataset, search_conf, bitset);
     }();
-
-    auto ids = knowhere::GetDatasetIDs(final);
-    float* distances = (float*)knowhere::GetDatasetDistance(final);
-
+    if (!final.has_value())
+        PanicCodeInfo(ErrorCodeEnum::UnexpectedError, "failed to search");
+    auto ids = final.value()->GetIds();
+    float* distances = const_cast<float*>(final.value()->GetDistance());
+    final.value()->SetIsOwner(true);
     auto round_decimal = search_info.round_decimal_;
     auto total_num = num_queries * topk;
 
@@ -121,33 +108,6 @@ VectorMemIndex::Query(const DatasetPtr dataset, const SearchInfo& search_info, c
     std::copy_n(distances, total_num, result->distances_.data());
 
     return result;
-}
-
-void
-VectorMemIndex::parse_config(Config& config) {
-    auto stoi_closure = [](const std::string& s) -> int { return std::stoi(s); };
-
-    /***************************** meta *******************************/
-    CheckParameter<int>(config, knowhere::meta::DIM, stoi_closure, std::nullopt);
-    CheckParameter<int>(config, knowhere::meta::TOPK, stoi_closure, std::nullopt);
-
-    /***************************** IVF Params *******************************/
-    CheckParameter<int>(config, knowhere::indexparam::NPROBE, stoi_closure, std::nullopt);
-    CheckParameter<int>(config, knowhere::indexparam::NLIST, stoi_closure, std::nullopt);
-    CheckParameter<int>(config, knowhere::indexparam::M, stoi_closure, std::nullopt);
-    CheckParameter<int>(config, knowhere::indexparam::NBITS, stoi_closure, std::nullopt);
-
-    /************************** PQ Params *****************************/
-    CheckParameter<int>(config, knowhere::indexparam::PQ_M, stoi_closure, std::nullopt);
-
-    /************************** HNSW Params *****************************/
-    CheckParameter<int>(config, knowhere::indexparam::EFCONSTRUCTION, stoi_closure, std::nullopt);
-    CheckParameter<int>(config, knowhere::indexparam::HNSW_M, stoi_closure, std::nullopt);
-    CheckParameter<int>(config, knowhere::indexparam::EF, stoi_closure, std::nullopt);
-
-    /************************** Annoy Params *****************************/
-    CheckParameter<int>(config, knowhere::indexparam::N_TREES, stoi_closure, std::nullopt);
-    CheckParameter<int>(config, knowhere::indexparam::SEARCH_K, stoi_closure, std::nullopt);
 }
 
 }  // namespace milvus::index

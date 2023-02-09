@@ -21,7 +21,6 @@
 #include <utility>
 #include <vector>
 #include <string>
-#include "knowhere/common/Exception.h"
 #include "index/IndexStructure.h"
 #include "index/ScalarIndex.h"
 

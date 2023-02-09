@@ -40,7 +40,7 @@ EasyAssertInfo(bool value,
 class SegcoreError : public std::runtime_error {
  public:
     SegcoreError(ErrorCodeEnum error_code, const std::string& error_msg)
-        : error_code_(error_code), std::runtime_error(error_msg) {
+        : std::runtime_error(error_msg), error_code_(error_code) {
     }
 
     ErrorCodeEnum

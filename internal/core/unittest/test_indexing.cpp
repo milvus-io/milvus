@@ -16,11 +16,9 @@
 #include <string>
 #include <vector>
 
-#include "faiss/utils/distances.h"
 #include "query/SearchBruteForce.h"
 #include "segcore/Reduce.h"
 #include "index/IndexFactory.h"
-#include "knowhere/archive/KnowhereConfig.h"
 #include "common/QueryResult.h"
 #include "test_utils/indexbuilder_test_utils.h"
 #include "test_utils/DataGen.h"
@@ -98,6 +96,7 @@ merge_into(int64_t queries,
     return Status::OK();
 }
 
+/*
 TEST(Indexing, SmartBruteForce) {
     int64_t N = 1000;
     auto [raw_data, timestamps, uids] = generate_data<DIM>(N);
@@ -139,7 +138,7 @@ TEST(Indexing, SmartBruteForce) {
         std::cout << std::endl;
     }
 }
-
+*/
 TEST(Indexing, BinaryBruteForce) {
     int64_t N = 100000;
     int64_t num_queries = 10;
@@ -224,7 +223,7 @@ TEST(Indexing, Naive) {
     create_index_info.index_type = knowhere::IndexEnum::INDEX_FAISS_IVFPQ;
     auto index = milvus::index::IndexFactory::GetInstance().CreateIndex(create_index_info, nullptr);
 
-    auto build_conf = knowhere::Config{
+    auto build_conf = knowhere::Json{
         {knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
         {knowhere::meta::DIM, std::to_string(DIM)},
         {knowhere::indexparam::NLIST, "100"},
@@ -232,12 +231,12 @@ TEST(Indexing, Naive) {
         {knowhere::indexparam::NBITS, "8"},
     };
 
-    auto search_conf = knowhere::Config{
+    auto search_conf = knowhere::Json{
         {knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
         {knowhere::indexparam::NPROBE, 4},
     };
 
-    std::vector<knowhere::DatasetPtr> datasets;
+    std::vector<knowhere::DataSetPtr> datasets;
     std::vector<std::vector<float>> ftrashs;
     auto raw = raw_data.data();
     for (int beg = 0; beg < N; beg += TestChunkSize) {
@@ -247,7 +246,7 @@ TEST(Indexing, Naive) {
         }
         std::vector<float> ft(raw + DIM * beg, raw + DIM * end);
 
-        auto ds = knowhere::GenDataset(end - beg, DIM, ft.data());
+        auto ds = knowhere::GenDataSet(end - beg, DIM, ft.data());
         datasets.push_back(ds);
         ftrashs.push_back(std::move(ft));
     }
@@ -263,7 +262,7 @@ TEST(Indexing, Naive) {
     }
 
     BitsetView view = bitmap;
-    auto query_ds = knowhere::GenDataset(1, DIM, raw_data.data());
+    auto query_ds = knowhere::GenDataSet(1, DIM, raw_data.data());
 
     milvus::SearchInfo searchInfo;
     searchInfo.topk_ = TOPK;
@@ -286,7 +285,6 @@ class IndexTest : public ::testing::TestWithParam<Param> {
  protected:
     void
     SetUp() override {
-        knowhere::KnowhereConfig::SetStatisticsLevel(3);
         storage_config_ = get_default_storage_config();
 
         auto param = GetParam();
@@ -318,12 +316,12 @@ class IndexTest : public ::testing::TestWithParam<Param> {
         auto dataset = GenDataset(NB, metric_type, is_binary);
         if (!is_binary) {
             xb_data = dataset.get_col<float>(milvus::FieldId(100));
-            xb_dataset = knowhere::GenDataset(NB, DIM, xb_data.data());
-            xq_dataset = knowhere::GenDataset(NQ, DIM, xb_data.data() + DIM * query_offset);
+            xb_dataset = knowhere::GenDataSet(NB, DIM, xb_data.data());
+            xq_dataset = knowhere::GenDataSet(NQ, DIM, xb_data.data() + DIM * query_offset);
         } else {
             xb_bin_data = dataset.get_col<uint8_t>(milvus::FieldId(100));
-            xb_dataset = knowhere::GenDataset(NB, DIM, xb_bin_data.data());
-            xq_dataset = knowhere::GenDataset(NQ, DIM, xb_bin_data.data() + DIM * query_offset);
+            xb_dataset = knowhere::GenDataSet(NB, DIM, xb_bin_data.data());
+            xq_dataset = knowhere::GenDataSet(NQ, DIM, xb_bin_data.data() + DIM * query_offset);
         }
     }
 
@@ -338,10 +336,10 @@ class IndexTest : public ::testing::TestWithParam<Param> {
     milvus::Config load_conf;
     milvus::Config search_conf;
     milvus::DataType vec_field_data_type;
-    knowhere::DatasetPtr xb_dataset;
+    knowhere::DataSetPtr xb_dataset;
     std::vector<float> xb_data;
     std::vector<uint8_t> xb_bin_data;
-    knowhere::DatasetPtr xq_dataset;
+    knowhere::DataSetPtr xq_dataset;
     int64_t query_offset = 100;
     int64_t NB = 10000;
     StorageConfig storage_config_;

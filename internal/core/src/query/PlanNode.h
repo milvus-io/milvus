@@ -19,7 +19,6 @@
 
 #include "common/QueryInfo.h"
 #include "query/Expr.h"
-#include "knowhere/common/Config.h"
 
 namespace milvus::query {
 

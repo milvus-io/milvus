@@ -10,7 +10,6 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
-#include <knowhere/index/vector_index/helpers/IndexParameter.h>
 #include <pb/schema.pb.h>
 #include <index/BoolIndex.h>
 #include "test_utils/indexbuilder_test_utils.h"

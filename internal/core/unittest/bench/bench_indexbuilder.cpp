@@ -13,8 +13,7 @@
 #include <tuple>
 #include <map>
 #include <google/protobuf/text_format.h>
-#include <knowhere/index/vector_index/helpers/IndexParameter.h>
-#include <knowhere/index/vector_index/adapter/VectorAdapter.h>
+#include <knowhere/comp/index_param.h>
 
 #include "pb/index_cgo_msg.pb.h"
 #include "indexbuilder/VecIndexCreator.h"
@@ -60,7 +59,7 @@ IndexBuilder_build(benchmark::State& state) {
     auto is_binary = state.range(2);
     auto dataset = GenDataset(NB, metric_type, is_binary);
     auto xb_data = dataset.get_col<float>(milvus::FieldId(START_USER_FIELDID));
-    auto xb_dataset = knowhere::GenDataset(NB, DIM, xb_data.data());
+    auto xb_dataset = knowhere::GenDataSet(NB, DIM, xb_data.data());
 
     for (auto _ : state) {
         auto index = std::make_unique<milvus::indexbuilder::VecIndexCreator>(
@@ -90,7 +89,7 @@ IndexBuilder_build_and_codec(benchmark::State& state) {
     auto is_binary = state.range(2);
     auto dataset = GenDataset(NB, metric_type, is_binary);
     auto xb_data = dataset.get_col<float>(milvus::FieldId(100));
-    auto xb_dataset = knowhere::GenDataset(NB, DIM, xb_data.data());
+    auto xb_dataset = knowhere::GenDataSet(NB, DIM, xb_data.data());
 
     for (auto _ : state) {
         auto index = std::make_unique<milvus::indexbuilder::VecIndexCreator>(

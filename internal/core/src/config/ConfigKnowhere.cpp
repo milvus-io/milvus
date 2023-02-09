@@ -20,8 +20,8 @@
 #include "exceptions/EasyAssert.h"
 #include "easyloggingpp/easylogging++.h"
 #include "log/Log.h"
-#include "knowhere/archive/KnowhereConfig.h"
-#include "knowhere/common/ThreadPool.h"
+#include "knowhere/comp/thread_pool.h"
+#include "knowhere/comp/knowhere_config.h"
 
 namespace milvus::config {
 

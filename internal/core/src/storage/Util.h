@@ -22,7 +22,7 @@
 
 #include "storage/PayloadStream.h"
 #include "storage/FileManager.h"
-#include "knowhere/index/IndexType.h"
+#include "knowhere/comp/index_param.h"
 
 namespace milvus::storage {
 

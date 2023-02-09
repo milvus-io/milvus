@@ -23,7 +23,6 @@ set(MILVUS_TEST_FILES
         test_bool_index.cpp
         test_common.cpp
         test_concurrent_vector.cpp
-        test_conf_adapter_mgr.cpp
         test_c_api.cpp
         test_expr.cpp
         test_growing.cpp

@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "knowhere/common/BinarySet.h"
+#include "knowhere/binaryset.h"
 #include "common/binary_set_c.h"
 
 CStatus

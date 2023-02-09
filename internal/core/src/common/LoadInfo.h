@@ -21,7 +21,6 @@
 #include "Types.h"
 
 #include "common/CDataType.h"
-#include "knowhere/index/Index.h"
 
 // NOTE: field_id can be system field
 // NOTE: Refer to common/SystemProperty.cpp for details
