@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/hardware"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -90,6 +91,12 @@ func (c *run) execute(args []string, flags *flag.FlagSet) {
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown server type = %s\n%s", c.serverType, c.getHelp())
 		os.Exit(-1)
+	}
+
+	// setup config for embedded milvus
+	if c.serverType == typeutil.EmbeddedRole {
+		var params paramtable.BaseTable
+		params.GlobalInitWithYaml("embedded-milvus.yaml")
 	}
 
 	runtimeDir := createRuntimeDir(c.serverType)
