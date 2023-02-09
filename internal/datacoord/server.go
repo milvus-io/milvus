@@ -282,7 +282,6 @@ func (s *Server) initSession() error {
 // Init change server state to Initializing
 func (s *Server) Init() error {
 	var err error
-	s.stateCode.Store(commonpb.StateCode_Initializing)
 	s.factory.Init(Params)
 	if err = s.initSession(); err != nil {
 		return err
@@ -295,7 +294,6 @@ func (s *Server) Init() error {
 				return err
 			}
 			s.startDataCoord()
-			s.stateCode.Store(commonpb.StateCode_Healthy)
 			log.Info("DataCoord startup success")
 			return nil
 		}
@@ -308,6 +306,7 @@ func (s *Server) Init() error {
 }
 
 func (s *Server) initDataCoord() error {
+	s.stateCode.Store(commonpb.StateCode_Initializing)
 	var err error
 	if err = s.initRootCoordClient(); err != nil {
 		return err
@@ -363,7 +362,6 @@ func (s *Server) initDataCoord() error {
 func (s *Server) Start() error {
 	if !s.enableActiveStandBy {
 		s.startDataCoord()
-		s.stateCode.Store(commonpb.StateCode_Healthy)
 		log.Info("DataCoord startup successfully")
 	}
 
@@ -382,6 +380,7 @@ func (s *Server) startDataCoord() {
 	// data while offline.
 	log.Info("DataCoord (re)starts successfully and re-collecting segment stats from DataNodes")
 	s.reCollectSegmentStats(s.ctx)
+	s.stateCode.Store(commonpb.StateCode_Healthy)
 }
 
 func (s *Server) initCluster() error {
