@@ -37,6 +37,7 @@ default_float_vec_field_name = "float_vector"
 another_float_vec_field_name = "float_vector1"
 default_binary_vec_field_name = "binary_vector"
 default_partition_name = "_default"
+default_resource_group_name = '__default_resource_group'
 default_tag = "1970_01_01"
 row_count = "row_count"
 default_length = 65535
@@ -200,6 +201,7 @@ class CheckTasks:
     check_role_property = "check_role_property"
     check_permission_deny = "check_permission_deny"
     check_value_equal = "check_value_equal"
+    check_rg_property = "check_resource_group_property"
 
 
 class BulkLoadStates:
