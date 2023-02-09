@@ -33,16 +33,16 @@ function install_linux_deps() {
       sudo yum install -y epel-release centos-release-scl-rh && \
       sudo yum install -y git make automake ccache openssl-devel zlib-devel libzstd-devel \
           libcurl-devel python3-devel \
-          devtoolset-7-gcc devtoolset-7-gcc-c++ devtoolset-7-gcc-gfortran \
-          llvm-toolset-7.0-clang llvm-toolset-7.0-clang-tools-extra
+          devtoolset-8-gcc devtoolset-8-gcc-c++ devtoolset-8-gcc-gfortran \
+          llvm-toolset-8.0-clang llvm-toolset-8.0-clang-tools-extra
 
-      echo "source scl_source enable devtoolset-7" | sudo tee -a /etc/profile.d/devtoolset-7.sh
-      echo "source scl_source enable llvm-toolset-7.0" | sudo tee -a /etc/profile.d/llvm-toolset-7.sh
-      echo "export CLANG_TOOLS_PATH=/opt/rh/llvm-toolset-7.0/root/usr/bin" | sudo tee -a /etc/profile.d/llvm-toolset-7.sh
-      source "/etc/profile.d/llvm-toolset-7.sh"
+      echo "source scl_source enable devtoolset-8" | sudo tee -a /etc/profile.d/devtoolset-8.sh
+      echo "source scl_source enable llvm-toolset-8.0" | sudo tee -a /etc/profile.d/llvm-toolset-8.sh
+      echo "export CLANG_TOOLS_PATH=/opt/rh/llvm-toolset-8.0/root/usr/bin" | sudo tee -a /etc/profile.d/llvm-toolset-8.sh
+      source "/etc/profile.d/llvm-toolset-8.sh"
 
       # install OpenBLAS, this could take a while.
-      source "/etc/profile.d/devtoolset-7.sh" && \
+      source "/etc/profile.d/devtoolset-8.sh" && \
           wget https://github.com/xianyi/OpenBLAS/archive/v0.3.9.tar.gz && \
           tar zxvf v0.3.9.tar.gz && cd OpenBLAS-0.3.9 && \
           make TARGET=CORE2 DYNAMIC_ARCH=1 DYNAMIC_OLDER=1 USE_THREAD=0 USE_OPENMP=0 FC=gfortran CC=gcc COMMON_OPT="-O3 -g -fPIC" FCOMMON_OPT="-O3 -g -fPIC -frecursive" NMAX="NUM_THREADS=128" LIBPREFIX="libopenblas" INTERFACE64=0 NO_STATIC=1 && \

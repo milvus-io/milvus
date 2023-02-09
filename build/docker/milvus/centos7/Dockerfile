@@ -9,7 +9,7 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
-FROM milvusdb/openblas:centos7-20210706 AS openblas
+FROM milvusdb/openblas:centos7-20230209 AS openblas
 
 FROM centos:centos7
 

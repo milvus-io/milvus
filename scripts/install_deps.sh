@@ -26,20 +26,20 @@ function install_linux_deps() {
 
     sudo pip3 install conan
   elif [[ -x "$(command -v yum)" ]]; then
-    # for CentOS devtoolset-7
+    # for CentOS devtoolset-8
     sudo yum install -y epel-release centos-release-scl-rh 
     sudo yum install -y wget curl which \
       git make automake python3-devel \
-      devtoolset-7-gcc devtoolset-7-gcc-c++ devtoolset-7-gcc-gfortran \
-      llvm-toolset-7.0-clang llvm-toolset-7.0-clang-tools-extra \
+      devtoolset-8-gcc devtoolset-8-gcc-c++ devtoolset-8-gcc-gfortran \
+      llvm-toolset-8.0-clang llvm-toolset-8.0-clang-tools-extra \
       libaio libuuid-devel unzip \
       ccache lcov libtool m4 autoconf automake
 
     sudo pip3 install conan
-    echo "source scl_source enable devtoolset-7" | sudo tee -a /etc/profile.d/devtoolset-7.sh
-    echo "source scl_source enable llvm-toolset-7.0" | sudo tee -a /etc/profile.d/llvm-toolset-7.sh
-    echo "export CLANG_TOOLS_PATH=/opt/rh/llvm-toolset-7.0/root/usr/bin" | sudo tee -a /etc/profile.d/llvm-toolset-7.sh
-    source "/etc/profile.d/llvm-toolset-7.sh"
+    echo "source scl_source enable devtoolset-8" | sudo tee -a /etc/profile.d/devtoolset-8.sh
+    echo "source scl_source enable llvm-toolset-8.0" | sudo tee -a /etc/profile.d/llvm-toolset-8.sh
+    echo "export CLANG_TOOLS_PATH=/opt/rh/llvm-toolset-8.0/root/usr/bin" | sudo tee -a /etc/profile.d/llvm-toolset-8.sh
+    source "/etc/profile.d/llvm-toolset-8.sh"
   else
     echo "Error Install Dependencies ..."
     exit 1
