@@ -703,7 +703,7 @@ func (s *Segment) segmentInsert(offset int64, entityIDs []UniqueID, timestamps [
 		fmt.Sprint(Params.QueryNodeCfg.GetNodeID()),
 		fmt.Sprint(s.collectionID),
 		fmt.Sprint(s.partitionID),
-		s.segmentType.String(),
+		s.getType().String(),
 		fmt.Sprint(0),
 	).Add(float64(numOfRow))
 	s.setRecentlyModified(true)

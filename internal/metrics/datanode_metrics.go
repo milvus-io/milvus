@@ -239,6 +239,8 @@ func RegisterDataNode(registry *prometheus.Registry) {
 	registry.MustRegister(DataNodeProduceTimeTickLag)
 	registry.MustRegister(DataNodeConsumeBytesCount)
 	registry.MustRegister(DataNodeForwardDeleteMsgTimeTaken)
+	registry.MustRegister(DataNodeCompactionLatencyInQueue)
+	registry.MustRegister(DataNodeFlowGraphBufferDataSize)
 }
 
 func CleanupDataNodeCollectionMetrics(nodeID int64, collectionID int64, channel string) {
