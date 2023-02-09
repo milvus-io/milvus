@@ -92,12 +92,13 @@ func (rg *ResourceGroup) unassignNode(id int64) error {
 }
 
 func (rg *ResourceGroup) handleNodeUp(id int64) error {
-	if rg.LackOfNodes() == 0 {
-		return ErrRGIsFull
-	}
-
 	if rg.containsNode(id) {
 		return ErrNodeAlreadyAssign
+	}
+
+	if len(rg.nodes) >= rg.capacity {
+		// handleNodeUp can grow the capacity
+		rg.capacity++
 	}
 
 	rg.nodes.Insert(id)
@@ -460,8 +461,8 @@ func (rm *ResourceManager) HandleNodeUp(node int64) (string, error) {
 	}
 
 	// assign new node to default rg
-	rm.groups[DefaultResourceGroupName].assignNode(node)
-	log.Info("HandleNodeUp: assign node to default resource group",
+	rm.groups[DefaultResourceGroupName].handleNodeUp(node)
+	log.Info("HandleNodeUp: add node to default resource group",
 		zap.String("rgName", DefaultResourceGroupName),
 		zap.Int64("node", node),
 	)

@@ -283,6 +283,42 @@ func (suite *ResourceManagerSuite) TestAutoRecover() {
 	suite.Equal(lackNodes, 0)
 }
 
+func (suite *ResourceManagerSuite) TestDefaultResourceGroup() {
+	for i := 0; i < 10; i++ {
+		suite.manager.nodeMgr.Add(session.NewNodeInfo(int64(i), "localhost"))
+	}
+	defaultRG, err := suite.manager.GetResourceGroup(DefaultResourceGroupName)
+	suite.NoError(err)
+	suite.Equal(defaultRG.GetCapacity(), 0)
+	suite.Len(defaultRG.GetNodes(), 0)
+
+	suite.manager.HandleNodeUp(1)
+	suite.manager.HandleNodeUp(2)
+	suite.manager.HandleNodeUp(3)
+	suite.Equal(defaultRG.GetCapacity(), 3)
+	suite.Len(defaultRG.GetNodes(), 3)
+
+	// shutdown node 1 and 2
+	suite.manager.nodeMgr.Remove(1)
+	suite.manager.nodeMgr.Remove(2)
+
+	defaultRG, err = suite.manager.GetResourceGroup(DefaultResourceGroupName)
+	suite.NoError(err)
+	suite.Equal(defaultRG.GetCapacity(), 3)
+	suite.Len(defaultRG.GetNodes(), 1)
+
+	suite.manager.HandleNodeUp(4)
+	suite.manager.HandleNodeUp(5)
+	suite.Equal(defaultRG.GetCapacity(), 3)
+	suite.Len(defaultRG.GetNodes(), 3)
+
+	suite.manager.HandleNodeUp(7)
+	suite.manager.HandleNodeUp(8)
+	suite.manager.HandleNodeUp(9)
+	suite.Equal(defaultRG.GetCapacity(), 6)
+	suite.Len(defaultRG.GetNodes(), 6)
+}
+
 func (suite *ResourceManagerSuite) TearDownSuite() {
 	suite.kv.Close()
 }
