@@ -230,9 +230,6 @@ func (s *Server) init() error {
 	if err := s.SetIndexCoord(s.indexCoord); err != nil {
 		panic(err)
 	}
-
-	s.queryCoord.UpdateStateCode(commonpb.StateCode_Initializing)
-	log.Info("QueryCoord", zap.Any("State", commonpb.StateCode_Initializing))
 	if err := s.queryCoord.Init(); err != nil {
 		return err
 	}

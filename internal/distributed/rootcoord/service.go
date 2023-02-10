@@ -184,9 +184,6 @@ func (s *Server) init() error {
 	}
 	log.Info("grpc init done ...")
 
-	s.rootCoord.UpdateStateCode(commonpb.StateCode_Initializing)
-	log.Info("RootCoord", zap.Any("State", commonpb.StateCode_Initializing))
-
 	if s.newDataCoordClient != nil {
 		log.Info("RootCoord start to create DataCoord client")
 		dataCoord := s.newDataCoordClient(rootcoord.Params.EtcdCfg.MetaRootPath, s.etcdCli)

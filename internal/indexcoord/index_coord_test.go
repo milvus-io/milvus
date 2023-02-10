@@ -185,14 +185,18 @@ func testIndexCoord(t *testing.T) {
 
 	err = ic.Init()
 	assert.NoError(t, err)
+	if Params.IndexCoordCfg.EnableActiveStandby {
+		assert.Equal(t, commonpb.StateCode_StandBy, ic.stateCode.Load().(commonpb.StateCode))
+	} else {
+		assert.Equal(t, commonpb.StateCode_Initializing, ic.stateCode.Load().(commonpb.StateCode))
+	}
 
 	err = ic.Register()
 	assert.NoError(t, err)
 
 	err = ic.Start()
 	assert.NoError(t, err)
-
-	ic.UpdateStateCode(commonpb.StateCode_Healthy)
+	assert.Equal(t, commonpb.StateCode_Healthy, ic.stateCode.Load().(commonpb.StateCode))
 
 	mockKv := NewMockEtcdKVWithReal(ic.etcdKV)
 	ic.metaTable.catalog = &indexcoord.Catalog{
