@@ -365,6 +365,8 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) {
 			break
 		}
 
+		group.segments = FilterInIndexedSegments(t.handler, t.indexCoord, group.segments...)
+
 		isDiskIndex, err := t.updateSegmentMaxSize(group.segments)
 		if err != nil {
 			log.Warn("failed to update segment max size", zap.Error(err))
