@@ -542,12 +542,18 @@ enum ObjectPrivilege : int {
   PrivilegeManageOwnership = 23,
   PrivilegeSelectUser = 24,
   PrivilegeUpsert = 25,
+  PrivilegeCreateResourceGroup = 26,
+  PrivilegeDropResourceGroup = 27,
+  PrivilegeDescribeResourceGroup = 28,
+  PrivilegeListResourceGroups = 29,
+  PrivilegeTransferNode = 30,
+  PrivilegeTransferReplica = 31,
   ObjectPrivilege_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::min(),
   ObjectPrivilege_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::max()
 };
 bool ObjectPrivilege_IsValid(int value);
 constexpr ObjectPrivilege ObjectPrivilege_MIN = PrivilegeAll;
-constexpr ObjectPrivilege ObjectPrivilege_MAX = PrivilegeUpsert;
+constexpr ObjectPrivilege ObjectPrivilege_MAX = PrivilegeTransferReplica;
 constexpr int ObjectPrivilege_ARRAYSIZE = ObjectPrivilege_MAX + 1;
 
 const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* ObjectPrivilege_descriptor();

@@ -428,7 +428,7 @@ const char descriptor_table_protodef_common_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "ImportStarted\020\002\022\023\n\017ImportPersisted\020\005\022\021\n\r"
   "ImportFlushed\020\010\022\023\n\017ImportCompleted\020\006\022\032\n\026"
   "ImportFailedAndCleaned\020\007*2\n\nObjectType\022\016"
-  "\n\nCollection\020\000\022\n\n\006Global\020\001\022\010\n\004User\020\002*\233\005\n"
+  "\n\nCollection\020\000\022\n\n\006Global\020\001\022\010\n\004User\020\002*\333\006\n"
   "\017ObjectPrivilege\022\020\n\014PrivilegeAll\020\000\022\035\n\031Pr"
   "ivilegeCreateCollection\020\001\022\033\n\027PrivilegeDr"
   "opCollection\020\002\022\037\n\033PrivilegeDescribeColle"
@@ -445,24 +445,29 @@ const char descriptor_table_protodef_common_2eproto[] PROTOBUF_SECTION_VARIABLE(
   "UpdateUser\020\024\022\032\n\026PrivilegeDropOwnership\020\025"
   "\022\034\n\030PrivilegeSelectOwnership\020\026\022\034\n\030Privil"
   "egeManageOwnership\020\027\022\027\n\023PrivilegeSelectU"
-  "ser\020\030\022\023\n\017PrivilegeUpsert\020\031*S\n\tStateCode\022"
-  "\020\n\014Initializing\020\000\022\013\n\007Healthy\020\001\022\014\n\010Abnorm"
-  "al\020\002\022\013\n\007StandBy\020\003\022\014\n\010Stopping\020\004*c\n\tLoadS"
-  "tate\022\025\n\021LoadStateNotExist\020\000\022\024\n\020LoadState"
-  "NotLoad\020\001\022\024\n\020LoadStateLoading\020\002\022\023\n\017LoadS"
-  "tateLoaded\020\003:^\n\021privilege_ext_obj\022\037.goog"
-  "le.protobuf.MessageOptions\030\351\007 \001(\0132!.milv"
-  "us.proto.common.PrivilegeExtBf\n\016io.milvu"
-  "s.grpcB\013CommonProtoP\001Z1github.com/milvus"
-  "-io/milvus-proto/go-api/commonpb\240\001\001\252\002\016IO"
-  ".Milvus.Grpcb\006proto3"
+  "ser\020\030\022\023\n\017PrivilegeUpsert\020\031\022 \n\034PrivilegeC"
+  "reateResourceGroup\020\032\022\036\n\032PrivilegeDropRes"
+  "ourceGroup\020\033\022\"\n\036PrivilegeDescribeResourc"
+  "eGroup\020\034\022\037\n\033PrivilegeListResourceGroups\020"
+  "\035\022\031\n\025PrivilegeTransferNode\020\036\022\034\n\030Privileg"
+  "eTransferReplica\020\037*S\n\tStateCode\022\020\n\014Initi"
+  "alizing\020\000\022\013\n\007Healthy\020\001\022\014\n\010Abnormal\020\002\022\013\n\007"
+  "StandBy\020\003\022\014\n\010Stopping\020\004*c\n\tLoadState\022\025\n\021"
+  "LoadStateNotExist\020\000\022\024\n\020LoadStateNotLoad\020"
+  "\001\022\024\n\020LoadStateLoading\020\002\022\023\n\017LoadStateLoad"
+  "ed\020\003:^\n\021privilege_ext_obj\022\037.google.proto"
+  "buf.MessageOptions\030\351\007 \001(\0132!.milvus.proto"
+  ".common.PrivilegeExtBf\n\016io.milvus.grpcB\013"
+  "CommonProtoP\001Z1github.com/milvus-io/milv"
+  "us-proto/go-api/commonpb\240\001\001\252\002\016IO.Milvus."
+  "Grpcb\006proto3"
   ;
 static const ::_pbi::DescriptorTable* const descriptor_table_common_2eproto_deps[1] = {
   &::descriptor_table_google_2fprotobuf_2fdescriptor_2eproto,
 };
 static ::_pbi::once_flag descriptor_table_common_2eproto_once;
 const ::_pbi::DescriptorTable descriptor_table_common_2eproto = {
-    false, false, 5860, descriptor_table_protodef_common_2eproto,
+    false, false, 6052, descriptor_table_protodef_common_2eproto,
     "common.proto",
     &descriptor_table_common_2eproto_once, descriptor_table_common_2eproto_deps, 1, 11,
     schemas, file_default_instances, TableStruct_common_2eproto::offsets,
@@ -813,6 +818,12 @@ bool ObjectPrivilege_IsValid(int value) {
     case 23:
     case 24:
     case 25:
+    case 26:
+    case 27:
+    case 28:
+    case 29:
+    case 30:
+    case 31:
       return true;
     default:
       return false;

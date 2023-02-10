@@ -133,3 +133,64 @@ func TestPrivilegeInterceptor(t *testing.T) {
 	})
 
 }
+
+func TestResourceGroupPrivilege(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("Resource Group Privilege", func(t *testing.T) {
+		paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+
+		_, err := PrivilegeInterceptor(ctx, &milvuspb.ListResourceGroupsRequest{})
+		assert.NotNil(t, err)
+
+		ctx = GetContext(context.Background(), "fooo:123456")
+		client := &MockRootCoordClientInterface{}
+		queryCoord := &MockQueryCoordClientInterface{}
+		mgr := newShardClientMgr()
+
+		client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
+			return &internalpb.ListPolicyResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+				},
+				PolicyInfos: []string{
+					funcutil.PolicyForPrivilege("role1", commonpb.ObjectType_Global.String(), "*", commonpb.ObjectPrivilege_PrivilegeCreateResourceGroup.String()),
+					funcutil.PolicyForPrivilege("role1", commonpb.ObjectType_Global.String(), "*", commonpb.ObjectPrivilege_PrivilegeDropResourceGroup.String()),
+					funcutil.PolicyForPrivilege("role1", commonpb.ObjectType_Global.String(), "*", commonpb.ObjectPrivilege_PrivilegeDescribeResourceGroup.String()),
+					funcutil.PolicyForPrivilege("role1", commonpb.ObjectType_Global.String(), "*", commonpb.ObjectPrivilege_PrivilegeListResourceGroups.String()),
+					funcutil.PolicyForPrivilege("role1", commonpb.ObjectType_Global.String(), "*", commonpb.ObjectPrivilege_PrivilegeTransferNode.String()),
+					funcutil.PolicyForPrivilege("role1", commonpb.ObjectType_Global.String(), "*", commonpb.ObjectPrivilege_PrivilegeTransferReplica.String()),
+				},
+				UserRoles: []string{
+					funcutil.EncodeUserRoleCache("fooo", "role1"),
+				},
+			}, nil
+		}
+		InitMetaCache(ctx, client, queryCoord, mgr)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.CreateResourceGroupRequest{
+			ResourceGroup: "rg",
+		})
+		assert.Nil(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.DropResourceGroupRequest{
+			ResourceGroup: "rg",
+		})
+		assert.Nil(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.DescribeResourceGroupRequest{
+			ResourceGroup: "rg",
+		})
+		assert.Nil(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.ListResourceGroupsRequest{})
+		assert.Nil(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.TransferNodeRequest{})
+		assert.Nil(t, err)
+
+		_, err = PrivilegeInterceptor(GetContext(context.Background(), "fooo:123456"), &milvuspb.TransferReplicaRequest{})
+		assert.Nil(t, err)
+	})
+
+}
