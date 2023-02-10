@@ -11,17 +11,17 @@
 
 #pragma once
 
+#include <tbb/concurrent_vector.h>
+
 #include <atomic>
 #include <cassert>
 #include <deque>
 #include <mutex>
+#include <shared_mutex>
 #include <string>
 #include <unordered_map>
-#include <shared_mutex>
 #include <utility>
 #include <vector>
-
-#include <tbb/concurrent_vector.h>
 
 #include "common/FieldMeta.h"
 #include "common/Span.h"
@@ -148,6 +148,12 @@ class ConcurrentVectorImpl : public VectorBase {
         chunks_.emplace_to_at_least(chunk_count, Dim * size_per_chunk_);
     }
 
+    void
+    grow_on_demand(int64_t element_count) {
+        auto chunk_count = upper_div(element_count, size_per_chunk_);
+        chunks_.emplace_to_at_least(chunk_count, Dim * element_count);
+    }
+
     Span<TraitType>
     get_span(int64_t chunk_id) const {
         auto& chunk = get_chunk(chunk_id);
@@ -224,6 +230,11 @@ class ConcurrentVectorImpl : public VectorBase {
         return chunks_[chunk_index];
     }
 
+    Chunk&
+    get_chunk(ssize_t index) {
+        return chunks_[index];
+    }
+
     const void*
     get_chunk_data(ssize_t chunk_index) const override {
         return chunks_[chunk_index].data();
@@ -274,7 +285,7 @@ class ConcurrentVectorImpl : public VectorBase {
             return;
         }
         auto chunk_max_size = chunks_.size();
-        Assert(chunk_id < chunk_max_size);
+        AssertInfo(chunk_id < chunk_max_size, "chunk_id=" + std::to_string(chunk_id));
         Chunk& chunk = chunks_[chunk_id];
         auto ptr = chunk.data();
         std::copy_n(source + source_offset * Dim, element_count * Dim, ptr + chunk_offset * Dim);
