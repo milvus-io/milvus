@@ -327,7 +327,7 @@ def gen_default_list_data(nb=ct.default_nb, dim=ct.default_dim, start=0):
     int_values = [i for i in range(start, start + nb)]
     float_values = [np.float32(i) for i in range(start, start + nb)]
     string_values = [str(i) for i in range(start, start + nb)]
-    float_vec_values = gen_vectors(start + nb, dim)
+    float_vec_values = gen_vectors(nb, dim)
     data = [int_values, float_values, string_values, float_vec_values]
     return data
 
