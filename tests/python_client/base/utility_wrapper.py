@@ -450,3 +450,40 @@ class ApiUtilityWrapper:
         res, check = api_request([self.role.list_grants], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
         return res, check_result
+
+    def create_resource_group(self, name, using="default", timeout=None, check_task=None, check_items=None, **kwargs):
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.ut.create_resource_group, name, using, timeout], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
+    def drop_resource_group(self, name, using="default", timeout=None, check_task=None, check_items=None, **kwargs):
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.ut.drop_resource_group, name, using, timeout], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
+    def list_resource_groups(self, using="default", timeout=None, check_task=None, check_items=None, **kwargs):
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.ut.list_resource_groups, using, timeout], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
+    def describe_resource_group(self, name, using="default", timeout=None, check_task=None, check_items=None, **kwargs):
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.ut.describe_resource_group, name, using, timeout], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
+    def transfer_node(self, source, target, num_node, using="default", timeout=None, check_task=None, check_items=None, **kwargs):
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.ut.transfer_node, source, target, num_node, using, timeout], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+
+    def transfer_replica(self, source, target, collection_name, num_replica, using="default", timeout=None, check_task=None, check_items=None, **kwargs):
+        func_name = sys._getframe().f_code.co_name
+        res, check = api_request([self.ut.transfer_replica, source, target, collection_name,num_replica, using, timeout], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task, check_items, check, **kwargs).run()
+        return res, check_result
+

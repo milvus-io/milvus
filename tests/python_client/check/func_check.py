@@ -6,7 +6,7 @@ from common import common_type as ct
 from common import common_func as cf
 from common.common_type import CheckTasks, Connect_Object_Name
 # from common.code_mapping import ErrorCode, ErrorMessage
-from pymilvus import Collection, Partition
+from pymilvus import Collection, Partition, ResourceGroupInfo
 from utils.api_request import Error
 import check.param_check as pc
 
@@ -83,6 +83,9 @@ class ResponseChecker:
         elif self.check_task == CheckTasks.check_permission_deny:
             # Collection interface response check
             result = self.check_permission_deny(self.response, self.succ)
+        elif self.check_task == CheckTasks.check_rg_property:
+            # describe resource group interface response check
+            result = self.check_rg_property(self.response, self.func_name, self.check_items)
 
         # Add check_items here if something new need verify
 
@@ -194,6 +197,29 @@ class ResponseChecker:
             assert partition.is_empty == check_items["is_empty"]
         if check_items.get("num_entities", None):
             assert partition.num_entities == check_items["num_entities"]
+        return True
+
+    @staticmethod
+    def check_rg_property(rg, func_name, check_items):
+        exp_func_name = "describe_resource_group"
+        if func_name != exp_func_name:
+            log.warning("The function name is {} rather than {}".format(func_name, exp_func_name))
+        if not isinstance(rg, ResourceGroupInfo):
+            raise Exception("The result to check isn't ResourceGroupInfo type object")
+        if len(check_items) == 0:
+            raise Exception("No expect values found in the check task")
+        if check_items.get("name", None):
+            assert rg.name == check_items["name"]
+        if check_items.get("capacity", None):
+            assert rg.capacity == check_items["capacity"]
+        if check_items.get("num_available_node", None):
+            assert rg.num_available_node == check_items["num_available_node"]
+        if check_items.get("num_loaded_replica", None):
+            assert rg.num_loaded_replica == check_items["num_loaded_replica"]
+        if check_items.get("num_outgoing_node", None):
+            assert rg.num_outgoing_node == check_items["num_outgoing_node"]
+        if check_items.get("num_incoming_node", None):
+            assert rg.num_incoming_node == check_items["num_incoming_node"]
         return True
 
     @staticmethod

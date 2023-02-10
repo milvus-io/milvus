@@ -323,11 +323,11 @@ def gen_default_binary_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, star
     return df, binary_raw_values
 
 
-def gen_default_list_data(nb=ct.default_nb, dim=ct.default_dim):
-    int_values = [i for i in range(nb)]
-    float_values = [np.float32(i) for i in range(nb)]
-    string_values = [str(i) for i in range(nb)]
-    float_vec_values = gen_vectors(nb, dim)
+def gen_default_list_data(nb=ct.default_nb, dim=ct.default_dim, start=0):
+    int_values = [i for i in range(start, start + nb)]
+    float_values = [np.float32(i) for i in range(start, start + nb)]
+    string_values = [str(i) for i in range(start, start + nb)]
+    float_vec_values = gen_vectors(start + nb, dim)
     data = [int_values, float_values, string_values, float_vec_values]
     return data
 
