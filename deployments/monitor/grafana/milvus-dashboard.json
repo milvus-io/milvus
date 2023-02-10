@@ -4710,7 +4710,7 @@
       "renderer": "flot",
       "seriesOverrides": [],
       "spaceLength": 10,
-      "stack": false,
+      "stack": true,
       "steppedLine": false,
       "targets": [
         {
@@ -4719,10 +4719,10 @@
             "uid": "$datasource"
           },
           "exemplar": true,
-          "expr": "sum(milvus_querynode_segment_num{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (pod, node_id)",
+          "expr": "sum(milvus_querynode_segment_num{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}) by (pod, node_id, segment_state)",
           "interval": "",
           "intervalFactor": 2,
-          "legendFormat": "{{pod}}-{{node_id}}",
+          "legendFormat": "{{pod}}-{{node_id}}-{{segment_state}}",
           "queryType": "randomWalk",
           "refId": "A"
         }
@@ -5820,7 +5820,7 @@
           "exemplar": false,
           "expr": "histogram_quantile(0.99, sum by (le, pod, node_id, query_type, segment_state) (rate(milvus_querynode_sq_segment_latency_bucket{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])))",
           "interval": "",
-          "legendFormat": "p99-{{pod}}-{{node_id}}-{{query_type}}",
+          "legendFormat": "p99-{{pod}}-{{node_id}}-{{query_type}}-{{segment_state}}",
           "queryType": "randomWalk",
           "refId": "A"
         },
@@ -5833,7 +5833,7 @@
           "expr": "sum(increase(milvus_querynode_sq_segment_latency_sum{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])) by(pod, node_id, query_type, segment_state) / sum(increase(milvus_querynode_sq_segment_latency_count{app_kubernetes_io_instance=~\"$instance\", app_kubernetes_io_name=\"$app_name\", namespace=\"$namespace\"}[2m])) by(pod, node_id, query_type, segment_state)",
           "hide": false,
           "interval": "",
-          "legendFormat": "avg-{{pod}}-{{node_id}}-{{query_type}}",
+          "legendFormat": "avg-{{pod}}-{{node_id}}-{{query_type}}_{{segment_state}}",
           "refId": "B"
         }
       ],
