@@ -14,6 +14,8 @@ from utils.util_log import test_log as log
 from common import common_func as cf
 from common import common_type as ct
 
+from pymilvus import ResourceGroupInfo
+
 
 class Base:
     """ Initialize class object """
@@ -67,8 +69,8 @@ class Base:
 
             """ Clean up the rgs before disconnect """
             for rg_name in self.resource_group_list:
-                rg = self.utility_wrap.describe_resource_group(name=rg_name)[0]
-                if rg is not None:
+                rg = self.utility_wrap.describe_resource_group(name=rg_name, check_task=ct.CheckTasks.check_nothing)[0]
+                if isinstance(rg, ResourceGroupInfo):
                     if rg.num_available_node > 0:
                         self.utility_wrap.transfer_node(source=rg_name,
                                                         target=ct.default_resource_group_name,
