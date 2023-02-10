@@ -17,8 +17,6 @@
 package meta
 
 import (
-	"time"
-
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -28,14 +26,12 @@ import (
 type CollectionTarget struct {
 	segments   map[int64]*datapb.SegmentInfo
 	dmChannels map[string]*DmChannel
-	createTime time.Time
 }
 
 func NewCollectionTarget(segments map[int64]*datapb.SegmentInfo, dmChannels map[string]*DmChannel) *CollectionTarget {
 	return &CollectionTarget{
 		segments:   segments,
 		dmChannels: dmChannels,
-		createTime: time.Now(),
 	}
 }
 
@@ -53,10 +49,6 @@ func (p *CollectionTarget) GetAllSegmentIDs() []int64 {
 
 func (p *CollectionTarget) GetAllDmChannelNames() []string {
 	return lo.Keys(p.dmChannels)
-}
-
-func (p *CollectionTarget) GetCreateTime() time.Time {
-	return p.createTime
 }
 
 func (p *CollectionTarget) IsEmpty() bool {
