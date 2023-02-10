@@ -22,12 +22,11 @@
 #include "index/ScalarIndexSort.h"
 #include "index/StringIndexSort.h"
 #include "index/VectorMemNMIndex.h"
-#include "knowhere/index/VecIndex.h"
-#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "query/SearchOnIndex.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegmentSealedImpl.h"
 #include "segcore/Utils.h"
+#include "knowhere/comp/index_param.h"
 
 #include "PbHelper.h"
 
@@ -466,14 +465,14 @@ SealedCreator(SchemaPtr schema, const GeneratedData& dataset) {
     return segment;
 }
 
-inline index::VectorIndexPtr
+inline std::unique_ptr<milvus::index::VectorIndex>
 GenVecIndexing(int64_t N, int64_t dim, const float* vec) {
     // {knowhere::IndexParams::nprobe, 10},
-    auto conf = knowhere::Config{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
-                                 {knowhere::meta::DIM, std::to_string(dim)},
-                                 {knowhere::indexparam::NLIST, "1024"},
-                                 {knowhere::meta::DEVICE_ID, 0}};
-    auto database = knowhere::GenDataset(N, dim, vec);
+    auto conf = knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
+                               {knowhere::meta::DIM, std::to_string(dim)},
+                               {knowhere::indexparam::NLIST, "1024"},
+                               {knowhere::meta::DEVICE_ID, 0}};
+    auto database = knowhere::GenDataSet(N, dim, vec);
     auto indexing = std::make_unique<index::VectorMemNMIndex>(knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
                                                               knowhere::metric::L2, IndexMode::MODE_CPU);
     indexing->BuildWithDataset(database, conf);

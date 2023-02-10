@@ -21,7 +21,7 @@
 #include <string>
 #include <boost/dynamic_bitset.hpp>
 
-#include "knowhere/index/VecIndex.h"
+#include "knowhere/factory.h"
 #include "index/Index.h"
 #include "common/Types.h"
 #include "common/BitsetView.h"
@@ -81,5 +81,4 @@ class VectorIndex : public IndexBase {
     int64_t dim_;
 };
 
-using VectorIndexPtr = std::unique_ptr<VectorIndex>;
 }  // namespace milvus::index

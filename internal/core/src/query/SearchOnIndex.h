@@ -12,7 +12,6 @@
 #pragma once
 
 #include "common/BitsetView.h"
-#include "knowhere/index/VecIndex.h"
 #include "query/SubSearchResult.h"
 #include "query/helper.h"
 #include "common/QueryInfo.h"

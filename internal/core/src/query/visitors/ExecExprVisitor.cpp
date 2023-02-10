@@ -273,7 +273,7 @@ ExecExprVisitor::ExecUnaryRangeVisitorDispatcher(UnaryRangeExpr& expr_raw) -> Bi
         }
         case OpType::PrefixMatch: {
             auto index_func = [val](Index* index) {
-                auto dataset = std::make_unique<knowhere::Dataset>();
+                auto dataset = std::make_unique<Dataset>();
                 dataset->Set(milvus::index::OPERATOR_TYPE, OpType::PrefixMatch);
                 dataset->Set(milvus::index::PREFIX_VALUE, val);
                 return index->Query(std::move(dataset));

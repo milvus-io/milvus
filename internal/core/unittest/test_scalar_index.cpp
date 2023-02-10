@@ -10,8 +10,6 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
-#include <knowhere/index/vector_index/helpers/IndexParameter.h>
-#include <knowhere/index/vector_index/ConfAdapterMgr.h>
 
 #include "index/IndexFactory.h"
 #include "common/CDataType.h"

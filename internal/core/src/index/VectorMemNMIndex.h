@@ -47,7 +47,7 @@ class VectorMemNMIndex : public VectorMemIndex {
 
  private:
     void
-    store_raw_data(const knowhere::DatasetPtr& dataset);
+    store_raw_data(const DatasetPtr& dataset);
 
     void
     LoadRawData();

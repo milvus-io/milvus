@@ -10,10 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
-#include <knowhere/index/vector_index/helpers/IndexParameter.h>
-#include <knowhere/index/vector_index/adapter/VectorAdapter.h>
-#include <knowhere/index/vector_index/ConfAdapterMgr.h>
-#include <knowhere/archive/KnowhereConfig.h>
+#include <knowhere/comp/index_param.h>
 
 #include "indexbuilder/index_c.h"
 #include "test_utils/DataGen.h"
@@ -38,7 +35,7 @@ template <typename T, typename = std::enable_if_t<std::is_arithmetic_v<T> | std:
 inline void
 build_index(const ScalarIndexCreatorPtr& creator, const std::vector<T>& arr) {
     const int64_t dim = 8;  // not important here
-    auto dataset = knowhere::GenDataset(arr.size(), dim, arr.data());
+    auto dataset = knowhere::GenDataSet(arr.size(), dim, arr.data());
     creator->Build(dataset);
 }
 
@@ -53,7 +50,7 @@ build_index(const ScalarIndexCreatorPtr& creator, const std::vector<bool>& arr) 
 
     creator->Build(ds);
 
-    delete[](char*) knowhere::GetDatasetTensor(ds);
+    delete[](char*) (ds->GetTensor());
 }
 
 template <>
@@ -65,7 +62,7 @@ build_index(const ScalarIndexCreatorPtr& creator, const std::vector<std::string>
 
     creator->Build(ds);
 
-    delete[](char*) knowhere::GetDatasetTensor(ds);
+    delete[](char*) (ds->GetTensor());
 }
 
 }  // namespace

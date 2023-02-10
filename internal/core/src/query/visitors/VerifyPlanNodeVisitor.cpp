@@ -9,8 +9,6 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include "knowhere/index/vector_index/ConfAdapterMgr.h"
-#include "knowhere/index/vector_index/ConfAdapter.h"
 #include "query/generated/VerifyPlanNodeVisitor.h"
 
 namespace milvus::query {
@@ -65,43 +63,15 @@ InferBinaryIndexType(const Json& search_params) {
 }
 
 void
-VerifyPlanNodeVisitor::visit(FloatVectorANNS& node) {
-    auto& search_params = node.search_info_.search_params_;
-    auto inferred_type = InferIndexType(search_params);
-    auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(inferred_type);
-    auto index_mode = knowhere::IndexMode::MODE_CPU;
-
-    // mock the api, topk will be passed from placeholder
-    auto params_copy = search_params;
-    knowhere::SetMetaTopk(params_copy, 10);
-
-    // NOTE: the second parameter is not checked in knowhere, may be redundant
-    auto passed = adapter->CheckSearch(params_copy, inferred_type, index_mode);
-    if (!passed) {
-        PanicCodeInfo(ErrorCodeEnum::IllegalArgument, "invalid search params");
-    }
+VerifyPlanNodeVisitor::visit(FloatVectorANNS&) {
 }
 
 void
-VerifyPlanNodeVisitor::visit(BinaryVectorANNS& node) {
-    auto& search_params = node.search_info_.search_params_;
-    auto inferred_type = InferBinaryIndexType(search_params);
-    auto adapter = knowhere::AdapterMgr::GetInstance().GetAdapter(inferred_type);
-    auto index_mode = knowhere::IndexMode::MODE_CPU;
-
-    // mock the api, topk will be passed from placeholder
-    auto params_copy = search_params;
-    knowhere::SetMetaTopk(params_copy, 10);
-
-    // NOTE: the second parameter is not checked in knowhere, may be redundant
-    auto passed = adapter->CheckSearch(params_copy, inferred_type, index_mode);
-    if (!passed) {
-        PanicCodeInfo(ErrorCodeEnum::IllegalArgument, "invalid search params");
-    }
+VerifyPlanNodeVisitor::visit(BinaryVectorANNS&) {
 }
 
 void
-VerifyPlanNodeVisitor::visit(RetrievePlanNode& node) {
+VerifyPlanNodeVisitor::visit(RetrievePlanNode&) {
 }
 
 }  // namespace milvus::query

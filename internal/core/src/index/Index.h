@@ -18,7 +18,7 @@
 
 #include <memory>
 #include <boost/dynamic_bitset.hpp>
-
+#include "knowhere/dataset.h"
 #include "common/Types.h"
 
 namespace milvus::index {

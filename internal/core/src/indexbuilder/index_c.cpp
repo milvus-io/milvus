@@ -16,7 +16,6 @@
 #endif
 
 #include "exceptions/EasyAssert.h"
-#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "indexbuilder/VecIndexCreator.h"
 #include "indexbuilder/index_c.h"
 #include "indexbuilder/IndexFactory.h"
@@ -87,7 +86,7 @@ BuildFloatVecIndex(CIndex index, int64_t float_value_num, const float* vectors) 
         auto cIndex = dynamic_cast<milvus::indexbuilder::VecIndexCreator*>(real_index);
         auto dim = cIndex->dim();
         auto row_nums = float_value_num / dim;
-        auto ds = knowhere::GenDataset(row_nums, dim, vectors);
+        auto ds = knowhere::GenDataSet(row_nums, dim, vectors);
         cIndex->Build(ds);
         status.error_code = Success;
         status.error_msg = "";
@@ -107,7 +106,7 @@ BuildBinaryVecIndex(CIndex index, int64_t data_size, const uint8_t* vectors) {
         auto cIndex = dynamic_cast<milvus::indexbuilder::VecIndexCreator*>(real_index);
         auto dim = cIndex->dim();
         auto row_nums = (data_size * 8) / dim;
-        auto ds = knowhere::GenDataset(row_nums, dim, vectors);
+        auto ds = knowhere::GenDataSet(row_nums, dim, vectors);
         cIndex->Build(ds);
         status.error_code = Success;
         status.error_msg = "";
@@ -131,7 +130,7 @@ BuildScalarIndex(CIndex c_index, int64_t size, const void* field_data) {
 
         auto real_index = reinterpret_cast<milvus::indexbuilder::IndexCreatorBase*>(c_index);
         const int64_t dim = 8;  // not important here
-        auto dataset = knowhere::GenDataset(size, dim, field_data);
+        auto dataset = knowhere::GenDataSet(size, dim, field_data);
         real_index->Build(dataset);
 
         status.error_code = Success;

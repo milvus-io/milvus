@@ -47,8 +47,8 @@ ScalarIndexCreator::ScalarIndexCreator(DataType dtype, const char* type_params, 
 
 void
 ScalarIndexCreator::Build(const milvus::DatasetPtr& dataset) {
-    auto size = knowhere::GetDatasetRows(dataset);
-    auto data = knowhere::GetDatasetTensor(dataset);
+    auto size = dataset->GetRows();
+    auto data = dataset->GetTensor();
     index_->BuildWithRawData(size, data);
 }
 

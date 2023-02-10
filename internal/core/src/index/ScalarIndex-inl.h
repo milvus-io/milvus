@@ -19,7 +19,7 @@
 #include <vector>
 
 #include "index/Meta.h"
-#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
+#include "knowhere/dataset.h"
 
 namespace milvus::index {
 template <typename T>
@@ -44,14 +44,14 @@ ScalarIndex<T>::Query(const DatasetPtr& dataset) {
         }
 
         case OpType::In: {
-            auto n = knowhere::GetDatasetRows(dataset);
-            auto values = knowhere::GetDatasetTensor(dataset);
+            auto n = dataset->GetRows();
+            auto values = dataset->GetTensor();
             return In(n, reinterpret_cast<const T*>(values));
         }
 
         case OpType::NotIn: {
-            auto n = knowhere::GetDatasetRows(dataset);
-            auto values = knowhere::GetDatasetTensor(dataset);
+            auto n = dataset->GetRows();
+            auto values = dataset->GetTensor();
             return NotIn(n, reinterpret_cast<const T*>(values));
         }
 

@@ -18,7 +18,6 @@
 #include "indexbuilder/VecIndexCreator.h"
 #include "common/QueryResult.h"
 #include "test_utils/indexbuilder_test_utils.h"
-#include "knowhere/archive/KnowhereConfig.h"
 
 using namespace milvus;
 using namespace milvus::segcore;
@@ -30,7 +29,6 @@ class IndexWrapperTest : public ::testing::TestWithParam<Param> {
  protected:
     void
     SetUp() override {
-        knowhere::KnowhereConfig::SetStatisticsLevel(3);
         storage_config_ = get_default_storage_config();
 
         auto param = GetParam();
@@ -66,12 +64,12 @@ class IndexWrapperTest : public ::testing::TestWithParam<Param> {
         auto dataset = GenDataset(NB, metric_type, is_binary);
         if (!is_binary) {
             xb_data = dataset.get_col<float>(milvus::FieldId(100));
-            xb_dataset = knowhere::GenDataset(NB, DIM, xb_data.data());
-            xq_dataset = knowhere::GenDataset(NQ, DIM, xb_data.data() + DIM * query_offset);
+            xb_dataset = knowhere::GenDataSet(NB, DIM, xb_data.data());
+            xq_dataset = knowhere::GenDataSet(NQ, DIM, xb_data.data() + DIM * query_offset);
         } else {
             xb_bin_data = dataset.get_col<uint8_t>(milvus::FieldId(100));
-            xb_dataset = knowhere::GenDataset(NB, DIM, xb_bin_data.data());
-            xq_dataset = knowhere::GenDataset(NQ, DIM, xb_bin_data.data() + DIM * query_offset);
+            xb_dataset = knowhere::GenDataSet(NB, DIM, xb_bin_data.data());
+            xq_dataset = knowhere::GenDataSet(NQ, DIM, xb_bin_data.data() + DIM * query_offset);
         }
     }
 
@@ -87,10 +85,10 @@ class IndexWrapperTest : public ::testing::TestWithParam<Param> {
     milvus::Config search_conf;
     bool is_binary;
     CDataType vec_field_data_type;
-    knowhere::DatasetPtr xb_dataset;
+    knowhere::DataSetPtr xb_dataset;
     std::vector<float> xb_data;
     std::vector<uint8_t> xb_bin_data;
-    knowhere::DatasetPtr xq_dataset;
+    knowhere::DataSetPtr xq_dataset;
     int64_t query_offset = 100;
     int64_t NB = 10000;
     StorageConfig storage_config_;
@@ -114,15 +112,15 @@ TEST_P(IndexWrapperTest, BuildAndQuery) {
         vec_field_data_type, type_params_str.c_str(), index_params_str.c_str(), storage_config_);
 
     auto dataset = GenDataset(NB, metric_type, is_binary);
-    knowhere::DatasetPtr xb_dataset;
+    knowhere::DataSetPtr xb_dataset;
     std::vector<uint8_t> bin_vecs;
     std::vector<float> f_vecs;
     if (is_binary) {
         bin_vecs = dataset.get_col<uint8_t>(milvus::FieldId(100));
-        xb_dataset = knowhere::GenDataset(NB, DIM, bin_vecs.data());
+        xb_dataset = knowhere::GenDataSet(NB, DIM, bin_vecs.data());
     } else {
         f_vecs = dataset.get_col<float>(milvus::FieldId(100));
-        xb_dataset = knowhere::GenDataset(NB, DIM, f_vecs.data());
+        xb_dataset = knowhere::GenDataSet(NB, DIM, f_vecs.data());
     }
 
     ASSERT_NO_THROW(index->Build(xb_dataset));

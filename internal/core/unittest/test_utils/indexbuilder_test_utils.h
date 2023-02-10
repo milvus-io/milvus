@@ -26,9 +26,6 @@
 #include "indexbuilder/ScalarIndexCreator.h"
 #include "indexbuilder/VecIndexCreator.h"
 #include "indexbuilder/index_c.h"
-#include "knowhere/index/VecIndexFactory.h"
-#include "knowhere/index/vector_index/helpers/IndexParameter.h"
-#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 #include "pb/index_cgo_msg.pb.h"
 #include "storage/Types.h"
 
@@ -195,54 +192,54 @@ get_default_cstorage_config() {
 auto
 generate_build_conf(const milvus::IndexType& index_type, const milvus::MetricType& metric_type) {
     if (index_type == knowhere::IndexEnum::INDEX_FAISS_IDMAP) {
-        return knowhere::Config{
+        return knowhere::Json{
             {knowhere::meta::METRIC_TYPE, metric_type},
             {knowhere::meta::DIM, std::to_string(DIM)},
         };
     } else if (index_type == knowhere::IndexEnum::INDEX_FAISS_IVFPQ) {
-        return knowhere::Config{
+        return knowhere::Json{
             {knowhere::meta::METRIC_TYPE, metric_type}, {knowhere::meta::DIM, std::to_string(DIM)},
             {knowhere::indexparam::NLIST, "16"},        {knowhere::indexparam::M, "4"},
             {knowhere::indexparam::NBITS, "8"},
         };
     } else if (index_type == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT) {
-        return knowhere::Config{
+        return knowhere::Json{
             {knowhere::meta::METRIC_TYPE, metric_type},
             {knowhere::meta::DIM, std::to_string(DIM)},
             {knowhere::indexparam::NLIST, "16"},
         };
     } else if (index_type == knowhere::IndexEnum::INDEX_FAISS_IVFSQ8) {
-        return knowhere::Config{
+        return knowhere::Json{
             {knowhere::meta::METRIC_TYPE, metric_type},
             {knowhere::meta::DIM, std::to_string(DIM)},
             {knowhere::indexparam::NLIST, "16"},
         };
     } else if (index_type == knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT) {
-        return knowhere::Config{
+        return knowhere::Json{
             {knowhere::meta::METRIC_TYPE, metric_type},
             {knowhere::meta::DIM, std::to_string(DIM)},
             {knowhere::indexparam::NLIST, "16"},
         };
     } else if (index_type == knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP) {
-        return knowhere::Config{
+        return knowhere::Json{
             {knowhere::meta::METRIC_TYPE, metric_type},
             {knowhere::meta::DIM, std::to_string(DIM)},
         };
     } else if (index_type == knowhere::IndexEnum::INDEX_HNSW) {
-        return knowhere::Config{
+        return knowhere::Json{
             {knowhere::meta::METRIC_TYPE, metric_type},
             {knowhere::meta::DIM, std::to_string(DIM)},
             {knowhere::indexparam::HNSW_M, "16"},
             {knowhere::indexparam::EFCONSTRUCTION, "200"},
         };
     } else if (index_type == knowhere::IndexEnum::INDEX_ANNOY) {
-        return knowhere::Config{
+        return knowhere::Json{
             {knowhere::meta::METRIC_TYPE, metric_type},
             {knowhere::meta::DIM, std::to_string(DIM)},
             {knowhere::indexparam::N_TREES, "4"},
         };
     } else if (index_type == knowhere::IndexEnum::INDEX_DISKANN) {
-        return knowhere::Config{
+        return knowhere::Json{
             {knowhere::meta::METRIC_TYPE, metric_type},
             {knowhere::meta::DIM, std::to_string(DIM)},
             {milvus::index::DISK_ANN_MAX_DEGREE, std::to_string(48)},
@@ -251,19 +248,19 @@ generate_build_conf(const milvus::IndexType& index_type, const milvus::MetricTyp
             {milvus::index::DISK_ANN_BUILD_DRAM_BUDGET, std::to_string(32)},
         };
     }
-    return knowhere::Config();
+    return knowhere::Json();
 }
 
 auto
 generate_load_conf(const milvus::IndexType& index_type, const milvus::MetricType& metric_type, int64_t nb) {
     if (index_type == knowhere::IndexEnum::INDEX_DISKANN) {
-        return knowhere::Config{
+        return knowhere::Json{
             {knowhere::meta::METRIC_TYPE, metric_type},
             {knowhere::meta::DIM, std::to_string(DIM)},
             {milvus::index::DISK_ANN_SEARCH_CACHE_BUDGET, std::to_string(0.0002)},
         };
     }
-    return knowhere::Config();
+    return knowhere::Json();
 }
 
 std::vector<milvus::IndexType>
@@ -401,13 +398,13 @@ CountDistance(
 
 void
 CheckDistances(const QueryResultPtr& result,
-               const knowhere::DatasetPtr& base_dataset,
-               const knowhere::DatasetPtr& query_dataset,
+               const knowhere::DataSetPtr& base_dataset,
+               const knowhere::DataSetPtr& query_dataset,
                const knowhere::MetricType& metric,
                const float threshold = 1.0e-5) {
-    auto base_vecs = (float*)knowhere::GetDatasetTensor(base_dataset);
-    auto query_vecs = (float*)knowhere::GetDatasetTensor(query_dataset);
-    auto dim = knowhere::GetDatasetDim(base_dataset);
+    auto base_vecs = (float*)(base_dataset->GetTensor());
+    auto query_vecs = (float*)(query_dataset->GetTensor());
+    auto dim = base_dataset->GetDim();
     auto nq = result->total_nq_;
     auto k = result->unity_topK_;
     for (auto i = 0; i < nq; i++) {
@@ -535,7 +532,7 @@ auto
 GenDsFromPB(const google::protobuf::Message& msg) {
     auto data = new char[msg.ByteSizeLong()];
     msg.SerializeToArray(data, msg.ByteSizeLong());
-    return knowhere::GenDataset(msg.ByteSizeLong(), 8, data);
+    return knowhere::GenDataSet(msg.ByteSizeLong(), 8, data);
 }
 
 template <typename T>

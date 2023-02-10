@@ -13,7 +13,6 @@
 #include <random>
 
 #include "common/Utils.h"
-#include "knowhere/index/vector_index/helpers/IndexParameter.h"
 
 #include "query/SearchBruteForce.h"
 #include "test_utils/Distance.h"

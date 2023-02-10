@@ -10,7 +10,6 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "SearchOnIndex.h"
-#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
 
 namespace milvus::query {
 SubSearchResult
@@ -23,7 +22,7 @@ SearchOnIndex(const dataset::SearchDataset& search_dataset,
     auto dim = search_dataset.dim;
     auto metric_type = search_dataset.metric_type;
     auto round_decimal = search_dataset.round_decimal;
-    auto dataset = knowhere::GenDataset(num_queries, dim, search_dataset.query_data);
+    auto dataset = knowhere::GenDataSet(num_queries, dim, search_dataset.query_data);
 
     // NOTE: VecIndex Query API forget to add const qualifier
     // NOTE: use const_cast as a workaround

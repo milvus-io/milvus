@@ -10,9 +10,6 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <gtest/gtest.h>
-#include <knowhere/index/vector_index/helpers/IndexParameter.h>
-#include <knowhere/index/vector_index/adapter/VectorAdapter.h>
-#include <knowhere/archive/KnowhereConfig.h>
 
 #include "index/Index.h"
 #include "index/ScalarIndex.h"
@@ -137,21 +134,21 @@ TEST_F(StringIndexMarisaTest, Query) {
     index->Build(nb, strs.data());
 
     {
-        auto ds = knowhere::GenDataset(strs.size(), 8, strs.data());
+        auto ds = knowhere::GenDataSet(strs.size(), 8, strs.data());
         ds->Set<milvus::OpType>(milvus::index::OPERATOR_TYPE, milvus::OpType::In);
         auto bitset = index->Query(ds);
         ASSERT_TRUE(bitset->any());
     }
 
     {
-        auto ds = knowhere::GenDataset(strs.size(), 8, strs.data());
+        auto ds = knowhere::GenDataSet(strs.size(), 8, strs.data());
         ds->Set<milvus::OpType>(milvus::index::OPERATOR_TYPE, milvus::OpType::NotIn);
         auto bitset = index->Query(ds);
         ASSERT_TRUE(bitset->none());
     }
 
     {
-        auto ds = std::make_shared<knowhere::Dataset>();
+        auto ds = std::make_shared<knowhere::DataSet>();
         ds->Set<milvus::OpType>(milvus::index::OPERATOR_TYPE, milvus::OpType::GreaterEqual);
         ds->Set<std::string>(milvus::index::RANGE_VALUE, "0");
         auto bitset = index->Query(ds);
@@ -160,7 +157,7 @@ TEST_F(StringIndexMarisaTest, Query) {
     }
 
     {
-        auto ds = std::make_shared<knowhere::Dataset>();
+        auto ds = std::make_shared<knowhere::DataSet>();
         ds->Set<milvus::OpType>(milvus::index::OPERATOR_TYPE, milvus::OpType::Range);
         ds->Set<std::string>(milvus::index::LOWER_BOUND_VALUE, "0");
         ds->Set<std::string>(milvus::index::UPPER_BOUND_VALUE, "range");
@@ -172,7 +169,7 @@ TEST_F(StringIndexMarisaTest, Query) {
 
     {
         for (size_t i = 0; i < strs.size(); i++) {
-            auto ds = std::make_shared<knowhere::Dataset>();
+            auto ds = std::make_shared<knowhere::DataSet>();
             ds->Set<milvus::OpType>(milvus::index::OPERATOR_TYPE, milvus::OpType::PrefixMatch);
             ds->Set<std::string>(milvus::index::PREFIX_VALUE, std::move(strs[i]));
             auto bitset = index->Query(ds);

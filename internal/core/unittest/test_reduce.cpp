@@ -14,7 +14,7 @@
 #include <random>
 #include <vector>
 
-#include "knowhere/index/vector_index/helpers/IndexParameter.h"
+#include "knowhere/comp/index_param.h"
 #include "query/SubSearchResult.h"
 
 using namespace milvus;

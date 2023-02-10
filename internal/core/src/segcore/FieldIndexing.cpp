@@ -35,13 +35,13 @@ VectorFieldIndexing::BuildIndexRange(int64_t ack_beg, int64_t ack_end, const Vec
         const auto& chunk = source->get_chunk(chunk_id);
         auto indexing = std::make_unique<index::VectorMemNMIndex>(knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
                                                                   knowhere::metric::L2, IndexMode::MODE_CPU);
-        auto dataset = knowhere::GenDataset(source->get_size_per_chunk(), dim, chunk.data());
+        auto dataset = knowhere::GenDataSet(source->get_size_per_chunk(), dim, chunk.data());
         indexing->BuildWithDataset(dataset, conf);
         data_[chunk_id] = std::move(indexing);
     }
 }
 
-knowhere::Config
+knowhere::Json
 VectorFieldIndexing::get_build_params() const {
     // TODO
     auto type_opt = field_meta_.get_metric_type();
@@ -57,7 +57,7 @@ VectorFieldIndexing::get_build_params() const {
     return base_params;
 }
 
-knowhere::Config
+knowhere::Json
 VectorFieldIndexing::get_search_params(int top_K) const {
     // TODO
     auto type_opt = field_meta_.get_metric_type();
@@ -67,8 +67,8 @@ VectorFieldIndexing::get_search_params(int top_K) const {
 
     auto base_params = config.search_params;
     AssertInfo(base_params.count("nprobe"), "Can't get nprobe from base params");
-    knowhere::SetMetaTopk(base_params, top_K);
-    knowhere::SetMetaMetricType(base_params, metric_type);
+    base_params[knowhere::meta::TOPK] = top_K;
+    base_params[knowhere::meta::METRIC_TYPE] = metric_type;
 
     return base_params;
 }

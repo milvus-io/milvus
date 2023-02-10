@@ -17,39 +17,37 @@
 #include "common/Consts.h"
 #include "config/ConfigChunkManager.h"
 #include "exceptions/EasyAssert.h"
-#include "knowhere/index/vector_index/adapter/VectorAdapter.h"
-#include "knowhere/index/vector_index/helpers/IndexParameter.h"
+#include "knowhere/dataset.h"
 
 namespace milvus {
-
 inline DatasetPtr
 GenDataset(const int64_t nb, const int64_t dim, const void* xb) {
-    return knowhere::GenDataset(nb, dim, xb);
+    return knowhere::GenDataSet(nb, dim, xb);
 }
 
 inline const float*
 GetDatasetDistance(const DatasetPtr& dataset) {
-    return knowhere::GetDatasetDistance(dataset);
+    return dataset->GetDistance();
 }
 
 inline const int64_t*
 GetDatasetIDs(const DatasetPtr& dataset) {
-    return knowhere::GetDatasetIDs(dataset);
+    return dataset->GetIds();
 }
 
 inline int64_t
 GetDatasetRows(const DatasetPtr& dataset) {
-    return knowhere::GetDatasetRows(dataset);
+    return dataset->GetRows();
 }
 
 inline const void*
 GetDatasetTensor(const DatasetPtr& dataset) {
-    return knowhere::GetDatasetTensor(dataset);
+    return dataset->GetTensor();
 }
 
 inline int64_t
 GetDatasetDim(const DatasetPtr& dataset) {
-    return knowhere::GetDatasetDim(dataset);
+    return dataset->GetDim();
 }
 
 inline bool

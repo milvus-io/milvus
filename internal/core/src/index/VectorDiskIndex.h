@@ -20,8 +20,6 @@
 
 #include "index/VectorIndex.h"
 #include "storage/DiskFileManagerImpl.h"
-#include "knowhere/index/vector_index/IndexDiskANN.h"
-#include "knowhere/index/vector_index/IndexDiskANNConfig.h"
 
 namespace milvus::index {
 
@@ -47,7 +45,7 @@ class VectorDiskAnnIndex : public VectorIndex {
 
     int64_t
     Count() override {
-        return index_->Count();
+        return index_.Count();
     }
 
     void
@@ -63,17 +61,11 @@ class VectorDiskAnnIndex : public VectorIndex {
     CleanLocalData() override;
 
  private:
-    knowhere::DiskANNBuildConfig
-    parse_build_config(const Config& config);
-
-    knowhere::DiskANNPrepareConfig
-    parse_prepare_config(const Config& config);
-
-    void
-    parse_config(Config& config);
+    knowhere::Json
+    update_load_json(const Config& config);
 
  private:
-    std::unique_ptr<knowhere::IndexDiskANN<T>> index_;
+    knowhere::Index<knowhere::IndexNode> index_;
     std::shared_ptr<storage::DiskFileManagerImpl> file_manager_;
     uint32_t search_beamwidth_ = 8;
 };

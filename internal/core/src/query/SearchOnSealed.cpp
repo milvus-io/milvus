@@ -40,11 +40,11 @@ SearchOnSealedIndex(const Schema& schema,
                "Metric type of field index isn't the same with search info");
 
     auto final = [&] {
-        auto ds = knowhere::GenDataset(num_queries, dim, query_data);
+        auto ds = knowhere::GenDataSet(num_queries, dim, query_data);
 
         auto conf = search_info.search_params_;
-        knowhere::SetMetaTopk(conf, search_info.topk_);
-        knowhere::SetMetaMetricType(conf, field_indexing->metric_type_);
+        conf[knowhere::meta::TOPK] = search_info.topk_;
+        conf[knowhere::meta::METRIC_TYPE] = field_indexing->metric_type_;
         auto vec_index = dynamic_cast<index::VectorIndex*>(field_indexing->indexing_.get());
         auto index_type = vec_index->GetIndexType();
         return vec_index->Query(ds, search_info, bitset);

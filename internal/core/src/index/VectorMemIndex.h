@@ -21,7 +21,7 @@
 #include <string>
 #include <vector>
 #include <boost/dynamic_bitset.hpp>
-
+#include "knowhere/factory.h"
 #include "index/VectorIndex.h"
 
 namespace milvus::index {
@@ -41,19 +41,15 @@ class VectorMemIndex : public VectorIndex {
 
     int64_t
     Count() override {
-        return index_->Count();
+        return index_.Count();
     }
 
     std::unique_ptr<SearchResult>
     Query(const DatasetPtr dataset, const SearchInfo& search_info, const BitsetView& bitset) override;
 
  protected:
-    void
-    parse_config(Config& config);
-
- protected:
     Config config_;
-    knowhere::VecIndexPtr index_ = nullptr;
+    knowhere::Index<knowhere::IndexNode> index_;
 };
 
 using VectorMemIndexPtr = std::unique_ptr<VectorMemIndex>;

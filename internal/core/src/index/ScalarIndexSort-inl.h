@@ -20,7 +20,7 @@
 #include <pb/schema.pb.h>
 #include <vector>
 #include <string>
-#include "knowhere/common/Log.h"
+#include "knowhere/log.h"
 #include "Meta.h"
 #include "common/Utils.h"
 #include "common/Slice.h"

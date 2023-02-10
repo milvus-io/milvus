@@ -95,10 +95,10 @@ class VectorFieldIndexing : public FieldIndexing {
         return data_.at(chunk_id).get();
     }
 
-    knowhere::Config
+    knowhere::Json
     get_build_params() const;
 
-    knowhere::Config
+    knowhere::Json
     get_search_params(int top_k) const;
 
  private:
