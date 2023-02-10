@@ -48,6 +48,8 @@ type Config struct {
 	Format string `toml:"format" json:"format"`
 	// Disable automatic timestamps in output.
 	DisableTimestamp bool `toml:"disable-timestamp" json:"disable-timestamp"`
+	// Stdout enable or not.
+	Stdout bool `toml:"stdout" json:"stdout"`
 	// File log config.
 	File FileLogConfig `toml:"file" json:"file"`
 	// Development puts the logger in development mode, which changes the
