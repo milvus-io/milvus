@@ -188,8 +188,6 @@ func (s *Server) init() error {
 	}
 	log.Debug("QueryCoord report DataCoord ready")
 
-	s.queryCoord.UpdateStateCode(commonpb.StateCode_Initializing)
-	log.Debug("QueryCoord", zap.Any("State", commonpb.StateCode_Initializing))
 	if err := s.queryCoord.Init(); err != nil {
 		return err
 	}

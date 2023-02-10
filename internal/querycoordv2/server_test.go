@@ -228,11 +228,13 @@ func (suite *ServerSuite) TestDisableActiveStandby() {
 
 	suite.server, err = newQueryCoord()
 	suite.NoError(err)
+	suite.Equal(commonpb.StateCode_Initializing, suite.server.status.Load().(commonpb.StateCode))
 	suite.hackServer()
 	err = suite.server.Start()
 	suite.NoError(err)
 	err = suite.server.Register()
 	suite.NoError(err)
+	suite.Equal(commonpb.StateCode_Healthy, suite.server.status.Load().(commonpb.StateCode))
 
 	states, err := suite.server.GetComponentStates(context.Background())
 	suite.NoError(err)

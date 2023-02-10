@@ -179,7 +179,6 @@ func (s *Server) Init() error {
 				log.Error("QueryCoord init failed", zap.Error(err))
 				return err
 			}
-			s.UpdateStateCode(commonpb.StateCode_Healthy)
 			log.Info("QueryCoord startup success")
 			return nil
 		}
@@ -192,6 +191,8 @@ func (s *Server) Init() error {
 }
 
 func (s *Server) initQueryCoord() error {
+	s.UpdateStateCode(commonpb.StateCode_Initializing)
+	log.Info("QueryCoord", zap.Any("State", commonpb.StateCode_Initializing))
 	// Init KV
 	etcdKV := etcdkv.NewEtcdKV(s.etcdCli, Params.EtcdCfg.MetaRootPath.GetValue())
 	s.kv = etcdKV
@@ -356,7 +357,6 @@ func (s *Server) Start() error {
 		if err := s.startQueryCoord(); err != nil {
 			return err
 		}
-		s.UpdateStateCode(commonpb.StateCode_Healthy)
 		log.Info("QueryCoord started")
 	}
 	return nil
@@ -386,6 +386,7 @@ func (s *Server) startQueryCoord() error {
 	}
 	s.startServerLoop()
 	s.afterStart()
+	s.UpdateStateCode(commonpb.StateCode_Healthy)
 	return nil
 }
 
