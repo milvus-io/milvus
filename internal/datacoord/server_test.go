@@ -2697,6 +2697,87 @@ func TestGetRecoveryInfo(t *testing.T) {
 		assert.NotEqual(t, 0, resp.GetChannels()[0].GetSeekPosition().GetTimestamp())
 	})
 
+	t.Run("with continuous compaction", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+
+		svr.rootCoordClientCreator = func(ctx context.Context, metaRootPath string, etcdCli *clientv3.Client) (types.RootCoord, error) {
+			return newMockRootCoordService(), nil
+		}
+
+		svr.meta.AddCollection(&collectionInfo{
+			ID:     0,
+			Schema: newTestSchema(),
+		})
+
+		err := svr.meta.UpdateChannelCheckpoint("vchan1", &internalpb.MsgPosition{
+			ChannelName: "vchan1",
+			Timestamp:   0,
+		})
+		assert.NoError(t, err)
+
+		seg1 := createSegment(9, 0, 0, 100, 30, "vchan1", commonpb.SegmentState_Dropped)
+		seg2 := createSegment(10, 0, 0, 100, 40, "vchan1", commonpb.SegmentState_Dropped)
+		seg3 := createSegment(11, 0, 0, 100, 40, "vchan1", commonpb.SegmentState_Dropped)
+		seg3.CompactionFrom = []int64{9, 10}
+		seg4 := createSegment(12, 0, 0, 100, 40, "vchan1", commonpb.SegmentState_Dropped)
+		seg5 := createSegment(13, 0, 0, 100, 40, "vchan1", commonpb.SegmentState_Flushed)
+		seg5.CompactionFrom = []int64{11, 12}
+		err = svr.meta.AddSegment(NewSegmentInfo(seg1))
+		assert.Nil(t, err)
+		err = svr.meta.AddSegment(NewSegmentInfo(seg2))
+		assert.Nil(t, err)
+		err = svr.meta.AddSegment(NewSegmentInfo(seg3))
+		assert.Nil(t, err)
+		err = svr.meta.AddSegment(NewSegmentInfo(seg4))
+		assert.Nil(t, err)
+		err = svr.meta.AddSegment(NewSegmentInfo(seg5))
+		assert.Nil(t, err)
+		err = svr.meta.CreateIndex(&model.Index{
+			TenantID:        "",
+			CollectionID:    0,
+			FieldID:         2,
+			IndexID:         0,
+			IndexName:       "_default_idx_2",
+			IsDeleted:       false,
+			CreateTime:      0,
+			TypeParams:      nil,
+			IndexParams:     nil,
+			IsAutoIndex:     false,
+			UserIndexParams: nil,
+		})
+		assert.Nil(t, err)
+		svr.meta.segments.SetSegmentIndex(seg4.ID, &model.SegmentIndex{
+			SegmentID:     seg4.ID,
+			CollectionID:  0,
+			PartitionID:   0,
+			NumRows:       100,
+			IndexID:       0,
+			BuildID:       0,
+			NodeID:        0,
+			IndexVersion:  1,
+			IndexState:    commonpb.IndexState_Finished,
+			FailReason:    "",
+			IsDeleted:     false,
+			CreateTime:    0,
+			IndexFileKeys: nil,
+			IndexSize:     0,
+		})
+
+		req := &datapb.GetRecoveryInfoRequest{
+			CollectionID: 0,
+			PartitionID:  0,
+		}
+		resp, err := svr.GetRecoveryInfo(context.TODO(), req)
+		assert.Nil(t, err)
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.NotNil(t, resp.GetChannels()[0].SeekPosition)
+		assert.NotEqual(t, 0, resp.GetChannels()[0].GetSeekPosition().GetTimestamp())
+		assert.Len(t, resp.GetChannels()[0].GetDroppedSegmentIds(), 0)
+		assert.ElementsMatch(t, []UniqueID{9, 10}, resp.GetChannels()[0].GetUnflushedSegmentIds())
+		assert.ElementsMatch(t, []UniqueID{12}, resp.GetChannels()[0].GetFlushedSegmentIds())
+	})
+
 	t.Run("with closed server", func(t *testing.T) {
 		svr := newTestServer(t, nil)
 		closeTestServer(t, svr)
