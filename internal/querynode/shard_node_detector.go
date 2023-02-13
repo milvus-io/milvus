@@ -52,6 +52,7 @@ func NewEtcdShardNodeDetector(client *clientv3.Client, rootPath string, resolver
 		idAddr: resolver,
 
 		closeCh: make(chan struct{}),
+		evtCh:   make(chan nodeEvent, 32),
 	}
 }
 
@@ -106,8 +107,6 @@ func (nd *etcdShardNodeDetector) watchNodes(collectionID int64, replicaID int64,
 			})
 		}
 	}
-
-	nd.evtCh = make(chan nodeEvent, 32)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	go nd.cancelClose(cancel)

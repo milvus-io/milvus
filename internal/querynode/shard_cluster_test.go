@@ -152,10 +152,11 @@ func TestShardCluster_Create(t *testing.T) {
 				initNodes: nodeEvent,
 			}, &mockSegmentDetector{}, buildMockQueryNode)
 		defer sc.Close()
+		sc.SetupFirstVersion()
 
 		for _, e := range nodeEvent {
 			node, has := sc.getNode(e.nodeID)
-			assert.True(t, has)
+			require.True(t, has)
 			assert.Equal(t, e.nodeAddr, node.nodeAddr)
 		}
 		sc.mut.Lock()
@@ -201,22 +202,25 @@ func TestShardCluster_Create(t *testing.T) {
 				initSegments: segmentEvents,
 			}, buildMockQueryNode)
 		defer sc.Close()
+		sc.SetupFirstVersion()
 
 		for _, e := range segmentEvents {
+			sc.distribution.mut.Lock()
+			segment, has := sc.distribution.sealedSegments[e.segmentID] //sc.segments[e.segmentID]
+			sc.distribution.mut.Unlock()
 			sc.mut.RLock()
-			segment, has := sc.segments[e.segmentID]
 			_, inCluster := sc.pickNode(e)
 			sc.mut.RUnlock()
+			assert.True(t, has)
+			assert.Equal(t, e.segmentID, segment.SegmentID)
+			assert.Equal(t, e.state, segment.State)
 			if inCluster {
-				assert.True(t, has)
-				assert.Equal(t, e.segmentID, segment.segmentID)
-				assert.Contains(t, e.nodeIDs, segment.nodeID)
-				assert.Equal(t, e.state, segment.state)
+				assert.Contains(t, e.nodeIDs, segment.NodeID)
 			} else {
-				assert.False(t, has)
+				assert.Equal(t, common.InvalidNodeID, segment.NodeID)
 			}
 		}
-		assert.EqualValues(t, unavailable, sc.state.Load())
+		assert.False(t, sc.serviceable())
 	})
 }
 
@@ -244,6 +248,7 @@ func TestShardCluster_nodeEvent(t *testing.T) {
 				evtCh:     evtCh,
 			}, &mockSegmentDetector{}, buildMockQueryNode)
 		defer sc.Close()
+		sc.SetupFirstVersion()
 
 		evtCh <- nodeEvent{
 			nodeID:    3,
@@ -281,7 +286,7 @@ func TestShardCluster_nodeEvent(t *testing.T) {
 			_, has := sc.getNode(3)
 			return !has
 		}, time.Second, time.Millisecond)
-		assert.Equal(t, int32(available), sc.state.Load())
+		assert.True(t, sc.serviceable())
 
 		evtCh <- nodeEvent{
 			nodeID:    4,
@@ -330,6 +335,7 @@ func TestShardCluster_nodeEvent(t *testing.T) {
 				initSegments: segmentEvents,
 			}, buildMockQueryNode)
 		defer sc.Close()
+		sc.SetupFirstVersion()
 
 		evtCh <- nodeEvent{
 			nodeID:    3,
@@ -362,7 +368,7 @@ func TestShardCluster_nodeEvent(t *testing.T) {
 			_, has := sc.getNode(2)
 			return !has
 		}, time.Second, time.Millisecond)
-		assert.Equal(t, int32(unavailable), sc.state.Load())
+		assert.False(t, sc.serviceable())
 
 		segment, has := sc.getSegment(2)
 		assert.True(t, has)
@@ -421,6 +427,7 @@ func TestShardCluster_segmentEvent(t *testing.T) {
 				evtCh:        evtCh,
 			}, buildMockQueryNode)
 		defer sc.Close()
+		sc.SetupFirstVersion()
 
 		evtCh <- segmentEvent{
 			segmentID: 1,
@@ -456,7 +463,6 @@ func TestShardCluster_segmentEvent(t *testing.T) {
 			return has && seg.nodeID == 1 && seg.state == segmentStateLoading
 		}, time.Second, time.Millisecond)
 
-		// node id not match
 		evtCh <- segmentEvent{
 			segmentID: 1,
 			nodeIDs:   []int64{2},
@@ -466,7 +472,7 @@ func TestShardCluster_segmentEvent(t *testing.T) {
 		// will not change
 		assert.Eventually(t, func() bool {
 			seg, has := sc.getSegment(1)
-			return has && seg.nodeID == 1 && seg.state == segmentStateLoading
+			return has && seg.nodeID == 2 && seg.state == segmentStateLoaded
 		}, time.Second, time.Millisecond)
 		close(evtCh)
 	})
@@ -511,6 +517,7 @@ func TestShardCluster_segmentEvent(t *testing.T) {
 				evtCh:        evtCh,
 			}, buildMockQueryNode)
 		defer sc.Close()
+		sc.SetupFirstVersion()
 
 		sc.SyncSegments(segmentEventsToSyncInfo(segmentEvents), segmentStateLoaded)
 
@@ -603,6 +610,7 @@ func TestShardCluster_segmentEvent(t *testing.T) {
 				evtCh:        evtCh,
 			}, buildMockQueryNode)
 		defer sc.Close()
+		sc.SetupFirstVersion()
 
 		sc.SyncSegments(segmentEventsToSyncInfo(segmentEvents), segmentStateLoaded)
 
@@ -678,6 +686,7 @@ func TestShardCluster_segmentEvent(t *testing.T) {
 				evtCh:        evtCh,
 			}, buildMockQueryNode)
 		defer sc.Close()
+		sc.SetupFirstVersion()
 
 		sc.SyncSegments(segmentEventsToSyncInfo(nil), segmentStateLoaded)
 
@@ -759,6 +768,7 @@ func TestShardCluster_segmentEvent(t *testing.T) {
 				evtCh:        evtCh,
 			}, buildMockQueryNode)
 		defer sc.Close()
+		sc.SetupFirstVersion()
 
 		evtCh <- segmentEvent{
 			segmentID: 3,
@@ -832,6 +842,7 @@ func TestShardCluster_segmentEvent(t *testing.T) {
 				evtCh:        evtCh,
 			}, buildMockQueryNode)
 		defer sc.Close()
+		sc.SetupFirstVersion()
 
 		sc.SyncSegments(segmentEventsToSyncInfo(nil), segmentStateLoaded)
 		// non-exist segment
@@ -1112,6 +1123,7 @@ func TestShardCluster_Search(t *testing.T) {
 			&mockNodeDetector{}, &mockSegmentDetector{}, buildMockQueryNode)
 
 		defer sc.Close()
+		sc.SetupFirstVersion()
 
 		_, err := sc.Search(ctx, &querypb.SearchRequest{
 			DmlChannels: []string{vchannelName + "_suffix"},
@@ -1161,7 +1173,7 @@ func TestShardCluster_Search(t *testing.T) {
 		sc.SetupFirstVersion()
 		setupSegmentForShardCluster(sc, segmentEvents)
 
-		require.EqualValues(t, available, sc.state.Load())
+		require.True(t, sc.serviceable())
 
 		result, err := sc.Search(ctx, &querypb.SearchRequest{
 			Req: &internalpb.SearchRequest{
@@ -1321,13 +1333,11 @@ func TestShardCluster_Search(t *testing.T) {
 		sc.SetupFirstVersion()
 		setupSegmentForShardCluster(sc, segmentEvents)
 		//mock meta error
-		sc.mutVersion.Lock()
-		sc.currentVersion.segments[3] = shardSegmentInfo{
-			segmentID: 3,
-			nodeID:    3, // node does not exist
-			state:     segmentStateLoaded,
-		}
-		sc.mutVersion.Unlock()
+		sc.distribution.UpdateDistribution(SegmentEntry{
+			SegmentID: 3,
+			NodeID:    3,
+			State:     segmentStateLoaded,
+		})
 
 		defer sc.Close()
 
@@ -1391,7 +1401,6 @@ func TestShardCluster_Query(t *testing.T) {
 
 		defer sc.Close()
 		// setup first version
-		sc.SetupFirstVersion()
 		setupSegmentForShardCluster(sc, segmentEvents)
 
 		require.EqualValues(t, unavailable, sc.state.Load())
@@ -1622,13 +1631,11 @@ func TestShardCluster_Query(t *testing.T) {
 		sc.SetupFirstVersion()
 		setupSegmentForShardCluster(sc, segmentEvents)
 		//mock meta error
-		sc.mutVersion.Lock()
-		sc.currentVersion.segments[3] = shardSegmentInfo{
-			segmentID: 3,
-			nodeID:    3, // node does not exist
-			state:     segmentStateLoaded,
-		}
-		sc.mutVersion.Unlock()
+		sc.distribution.UpdateDistribution(SegmentEntry{
+			SegmentID: 3,
+			NodeID:    3,
+			State:     segmentStateLoaded,
+		})
 
 		defer sc.Close()
 
@@ -1904,15 +1911,12 @@ func TestShardCluster_GetStatistics(t *testing.T) {
 			}, buildMockQueryNode)
 		// setup first version
 		sc.SetupFirstVersion()
-		setupSegmentForShardCluster(sc, segmentEvents)
-		//mock meta error
-		sc.mutVersion.Lock()
-		sc.currentVersion.segments[3] = shardSegmentInfo{
-			segmentID: 3,
-			nodeID:    3, // node does not exist
-			state:     segmentStateLoaded,
-		}
-		sc.mutVersion.Unlock()
+		setupSegmentForShardCluster(sc, segmentEvents) //mock meta error
+		sc.distribution.UpdateDistribution(SegmentEntry{
+			SegmentID: 3,
+			NodeID:    3,
+			State:     segmentStateLoaded,
+		})
 		defer sc.Close()
 
 		require.EqualValues(t, available, sc.state.Load())
@@ -1975,71 +1979,15 @@ func TestShardCluster_Version(t *testing.T) {
 		_, version := sc.segmentAllocations(nil)
 
 		sc.mut.RLock()
-		assert.Equal(t, version, sc.currentVersion.versionID)
-		assert.Equal(t, int64(1), sc.currentVersion.inUse.Load())
+		assert.Equal(t, version, sc.distribution.current.version)
+		assert.Equal(t, int64(1), sc.distribution.current.inUse.Load())
 		sc.mut.RUnlock()
 
 		sc.finishUsage(version)
 		sc.mut.RLock()
 
-		assert.Equal(t, int64(0), sc.currentVersion.inUse.Load())
+		assert.Equal(t, int64(0), sc.distribution.current.inUse.Load())
 		sc.mut.RUnlock()
-	})
-
-	t.Run("wait segments online", func(t *testing.T) {
-		nodeEvents := []nodeEvent{
-			{
-				nodeID:   1,
-				nodeAddr: "addr_1",
-			},
-			{
-				nodeID:   2,
-				nodeAddr: "addr_2",
-			},
-		}
-
-		segmentEvents := []segmentEvent{
-			{
-				segmentID: 1,
-				nodeIDs:   []int64{1},
-				state:     segmentStateLoaded,
-			},
-			{
-				segmentID: 2,
-				nodeIDs:   []int64{2},
-				state:     segmentStateLoaded,
-			},
-		}
-		evtCh := make(chan segmentEvent, 10)
-		sc := NewShardCluster(collectionID, replicaID, vchannelName, version,
-			&mockNodeDetector{
-				initNodes: nodeEvents,
-			}, &mockSegmentDetector{
-				initSegments: segmentEvents,
-				evtCh:        evtCh,
-			}, buildMockQueryNode)
-		defer sc.Close()
-
-		sc.SetupFirstVersion()
-
-		assert.True(t, sc.segmentsOnline([]shardSegmentInfo{{nodeID: 1, segmentID: 1}, {nodeID: 2, segmentID: 2}}))
-		assert.False(t, sc.segmentsOnline([]shardSegmentInfo{{nodeID: 1, segmentID: 1}, {nodeID: 2, segmentID: 2}, {nodeID: 1, segmentID: 3}}))
-
-		sig := make(chan struct{})
-		go func() {
-			sc.waitSegmentsOnline([]shardSegmentInfo{{nodeID: 1, segmentID: 1}, {nodeID: 2, segmentID: 2}, {nodeID: 1, segmentID: 3}})
-			close(sig)
-		}()
-
-		evtCh <- segmentEvent{
-			eventType: segmentAdd,
-			segmentID: 3,
-			nodeIDs:   []int64{1, 4},
-			state:     segmentStateLoaded,
-		}
-
-		<-sig
-		assert.True(t, sc.segmentsOnline([]shardSegmentInfo{{nodeID: 1, segmentID: 1}, {nodeID: 2, segmentID: 2}, {nodeID: 1, segmentID: 3}}))
 	})
 }
 
