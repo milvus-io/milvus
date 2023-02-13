@@ -23,8 +23,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
-
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
@@ -34,7 +32,9 @@ import (
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util"
@@ -258,6 +258,7 @@ func (kc *Catalog) AlterSegments(ctx context.Context, newSegments []*datapb.Segm
 	}
 	kvsBySeg := make(map[int64]map[string]string)
 	for _, segment := range newSegments {
+		kc.collectMetrics(segment)
 		segmentKvs, err := buildSegmentAndBinlogsKvs(segment)
 		if err != nil {
 			return err
@@ -305,7 +306,27 @@ func (kc *Catalog) AlterSegment(ctx context.Context, newSegment *datapb.SegmentI
 	}
 	maps.Copy(kvs, segmentKvs)
 
+	kc.collectMetrics(newSegment)
 	return kc.MetaKv.MultiSave(kvs)
+}
+
+func (kc *Catalog) collectMetrics(s *datapb.SegmentInfo) {
+	statsFieldFn := func(fieldBinlogs []*datapb.FieldBinlog) int {
+		cnt := 0
+		for _, fbs := range fieldBinlogs {
+			cnt += len(fbs.Binlogs)
+		}
+		return cnt
+	}
+
+	cnt := 0
+	cnt += statsFieldFn(s.GetBinlogs())
+	cnt += statsFieldFn(s.GetStatslogs())
+	cnt += statsFieldFn(s.GetDeltalogs())
+
+	metrics.DataCoordSegmentBinLogFileCount.
+		WithLabelValues(fmt.Sprint(s.CollectionID), fmt.Sprint(s.GetID())).
+		Set(float64(cnt))
 }
 
 func (kc *Catalog) hasBinlogPrefix(segment *datapb.SegmentInfo) (bool, error) {
@@ -371,6 +392,7 @@ func (kc *Catalog) AlterSegmentsAndAddNewSegment(ctx context.Context, segments [
 				return err
 			}
 			maps.Copy(kvs, segmentKvs)
+			kc.collectMetrics(newSegment)
 		}
 	}
 	return kc.MetaKv.MultiSave(kvs)
@@ -441,7 +463,12 @@ func (kc *Catalog) DropSegment(ctx context.Context, segment *datapb.SegmentInfo)
 	keys := []string{segKey}
 	binlogKeys := buildBinlogKeys(segment)
 	keys = append(keys, binlogKeys...)
-	return kc.MetaKv.MultiRemove(keys)
+	if err := kc.MetaKv.MultiRemove(keys); err != nil {
+		return err
+	}
+
+	metrics.CleanupDataCoordSegmentMetrics(segment.CollectionID, segment.ID)
+	return nil
 }
 
 func (kc *Catalog) MarkChannelDeleted(ctx context.Context, channel string) error {

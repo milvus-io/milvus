@@ -20,9 +20,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/shirou/gopsutil/v3/disk"
+
 	config "github.com/milvus-io/milvus/internal/config"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/shirou/gopsutil/v3/disk"
 )
 
 const (
@@ -1472,7 +1473,7 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	p.SegmentMaxBinlogFileNumber = ParamItem{
 		Key:          "dataCoord.segment.maxBinlogFileNumber",
 		Version:      "2.2.0",
-		DefaultValue: "16",
+		DefaultValue: "32",
 	}
 	p.SegmentMaxBinlogFileNumber.Init(base.mgr)
 
