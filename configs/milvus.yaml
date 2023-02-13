@@ -404,6 +404,15 @@ common:
     ttl: 20 # ttl value when session granting a lease to register service
     retryTimes: 30 # retry times when session sending etcd requests
 
+  # preCreatedTopic decides whether using existed topic
+  preCreatedTopic:
+    enabled: false
+    # support pre-created topics
+    # the name of pre-created topics
+    names: ["topic1", "topic2"]
+    # need to set a separated topic to stand for currently consumed timestamp for each channel
+    timeticker: "timetick-channel"
+
 # QuotaConfig, configurations of Milvus quota and limits.
 # By default, we enable:
 #   1. TT protection;

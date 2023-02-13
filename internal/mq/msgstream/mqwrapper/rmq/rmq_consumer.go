@@ -101,3 +101,7 @@ func (rc *Consumer) GetLatestMsgID() (mqwrapper.MessageID, error) {
 	msgID, err := rc.c.GetLatestMsgID()
 	return &rmqID{messageID: msgID}, err
 }
+
+func (rc *Consumer) CheckTopicValid(topic string) error {
+	return rc.c.CheckTopicValid(topic)
+}

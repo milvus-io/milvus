@@ -66,6 +66,7 @@ type MsgStream interface {
 	Seek(offset []*MsgPosition) error
 
 	GetLatestMsgID(channel string) (MessageID, error)
+	CheckTopicValid(channel string) error
 }
 
 type Factory interface {

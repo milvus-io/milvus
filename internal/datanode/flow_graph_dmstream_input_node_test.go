@@ -100,6 +100,10 @@ func (mtm *mockTtMsgStream) GetLatestMsgID(channel string) (msgstream.MessageID,
 	return nil, nil
 }
 
+func (mtm *mockTtMsgStream) CheckTopicValid(channel string) error {
+	return nil
+}
+
 func TestNewDmInputNode(t *testing.T) {
 	client := msgdispatcher.NewClient(&mockMsgStreamFactory{}, typeutil.DataNodeRole, paramtable.GetNodeID())
 	_, err := newDmInputNode(client, new(msgpb.MsgPosition), &nodeConfig{

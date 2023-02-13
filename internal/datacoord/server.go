@@ -570,11 +570,16 @@ func (s *Server) startDataNodeTtLoop(ctx context.Context) {
 		log.Error("DataCoord failed to create timetick channel", zap.Error(err))
 		panic(err)
 	}
+
+	timeTickChannel := Params.CommonCfg.DataCoordTimeTick.GetValue()
+	if Params.CommonCfg.PreCreatedTopicEnabled.GetAsBool() {
+		timeTickChannel = Params.CommonCfg.TimeTicker.GetValue()
+	}
 	subName := fmt.Sprintf("%s-%d-datanodeTl", Params.CommonCfg.DataCoordSubName.GetValue(), paramtable.GetNodeID())
-	ttMsgStream.AsConsumer([]string{Params.CommonCfg.DataCoordTimeTick.GetValue()},
-		subName, mqwrapper.SubscriptionPositionLatest)
+
+	ttMsgStream.AsConsumer([]string{timeTickChannel}, subName, mqwrapper.SubscriptionPositionLatest)
 	log.Info("DataCoord creates the timetick channel consumer",
-		zap.String("timeTickChannel", Params.CommonCfg.DataCoordTimeTick.GetValue()),
+		zap.String("timeTickChannel", timeTickChannel),
 		zap.String("subscription", subName))
 
 	go s.handleDataNodeTimetickMsgstream(ctx, ttMsgStream)

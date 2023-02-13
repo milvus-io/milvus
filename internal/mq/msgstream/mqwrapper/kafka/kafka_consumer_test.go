@@ -254,3 +254,17 @@ func createConfig(groupID string) *kafka.ConfigMap {
 		"api.version.request": "true",
 	}
 }
+
+func TestKafkaConsumer_CheckPreTopicValid(t *testing.T) {
+	rand.Seed(time.Now().UnixNano())
+	groupID := fmt.Sprintf("test-groupid-%d", rand.Int())
+	topic := fmt.Sprintf("test-topicName-%d", rand.Int())
+
+	config := createConfig(groupID)
+	consumer, err := newKafkaConsumer(config, topic, groupID, mqwrapper.SubscriptionPositionEarliest)
+	assert.NoError(t, err)
+	defer consumer.Close()
+
+	err = consumer.CheckTopicValid(topic)
+	assert.NoError(t, err)
+}

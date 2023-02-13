@@ -5,10 +5,10 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/internal/util/merr"
 	"go.uber.org/zap"
 )
 
@@ -218,6 +218,30 @@ func (kc *Consumer) GetLatestMsgID() (mqwrapper.MessageID, error) {
 
 	log.Info("get latest msg ID ", zap.Any("topic", kc.topic), zap.Int64("oldest offset", low), zap.Int64("latest offset", high))
 	return &kafkaID{messageID: high}, nil
+}
+
+func (kc *Consumer) CheckTopicValid(topic string) error {
+	latestMsgID, err := kc.GetLatestMsgID()
+	log.With(zap.String("topic", kc.topic))
+	// check topic is existed
+	if err != nil {
+		switch v := err.(type) {
+		case kafka.Error:
+			if v.Code() == kafka.ErrUnknownTopic || v.Code() == kafka.ErrUnknownPartition || v.Code() == kafka.ErrUnknownTopicOrPart {
+				return merr.WrapErrTopicNotFound(topic, "topic get latest msg ID failed, topic or partition does not exists")
+			}
+		default:
+			return err
+		}
+	}
+
+	// check topic is empty
+	if !latestMsgID.AtEarliestPosition() {
+		return merr.WrapErrTopicNotEmpty(topic, "topic is not empty")
+	}
+	log.Info("created topic is empty")
+
+	return nil
 }
 
 func (kc *Consumer) Close() {

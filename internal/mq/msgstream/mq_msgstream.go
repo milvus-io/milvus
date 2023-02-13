@@ -100,6 +100,7 @@ func (ms *mqMsgStream) AsProducer(channels []string) {
 			log.Error("MsgStream asProducer's channel is an empty string")
 			break
 		}
+
 		fn := func() error {
 			pp, err := ms.client.CreateProducer(mqwrapper.ProducerOptions{Topic: channel, EnableCompression: true})
 			if err != nil {
@@ -130,6 +131,14 @@ func (ms *mqMsgStream) GetLatestMsgID(channel string) (MessageID, error) {
 		return nil, errors.New(errMsg)
 	}
 	return lastMsg, nil
+}
+
+func (ms *mqMsgStream) CheckTopicValid(channel string) error {
+	err := ms.consumers[channel].CheckTopicValid(channel)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 // AsConsumerWithPosition Create consumer to receive message from channels, with initial position

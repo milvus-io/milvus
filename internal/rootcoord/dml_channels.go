@@ -23,11 +23,13 @@ import (
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/metrics"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
+	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 )
 
 type dmlMsgStream struct {
@@ -142,7 +144,25 @@ type dmlChannels struct {
 	channelsHeap channelsHeap
 }
 
-func newDmlChannels(ctx context.Context, factory msgstream.Factory, chanNamePrefix string, chanNum int64) *dmlChannels {
+func newDmlChannels(ctx context.Context, factory msgstream.Factory, chanNamePrefixDefault string, chanNumDefault int64) *dmlChannels {
+	params := paramtable.Get().CommonCfg
+	var (
+		chanNamePrefix string
+		chanNum        int64
+		names          []string
+	)
+
+	// if topic created, use the existed topic
+	if params.PreCreatedTopicEnabled.GetAsBool() {
+		chanNamePrefix = ""
+		chanNum = int64(len(params.TopicNames.GetAsStrings()))
+		names = params.TopicNames.GetAsStrings()
+	} else {
+		chanNamePrefix = chanNamePrefixDefault
+		chanNum = chanNumDefault
+		names = genChannelNames(chanNamePrefix, chanNum)
+	}
+
 	d := &dmlChannels{
 		ctx:          ctx,
 		factory:      factory,
@@ -151,21 +171,35 @@ func newDmlChannels(ctx context.Context, factory msgstream.Factory, chanNamePref
 		channelsHeap: make([]*dmlMsgStream, 0, chanNum),
 	}
 
-	for i := int64(0); i < chanNum; i++ {
-		name := genChannelName(d.namePrefix, i)
+	for i, name := range names {
 		ms, err := factory.NewMsgStream(ctx)
 		if err != nil {
-			log.Error("Failed to add msgstream", zap.String("name", name), zap.Error(err))
+			log.Error("Failed to add msgstream",
+				zap.String("name", name),
+				zap.Error(err))
 			panic("Failed to add msgstream")
 		}
-		ms.AsProducer([]string{name})
 
+		if params.PreCreatedTopicEnabled.GetAsBool() {
+			subName := fmt.Sprintf("pre-created-topic-check-%s", name)
+			ms.AsConsumer([]string{name}, subName, mqwrapper.SubscriptionPositionUnknown)
+			// check topic exist and check the existed topic whether empty or not
+			// kafka and rmq will err if the topic does not yet exist, pulsar will not
+			// if one of the topics is not empty, panic
+			err := ms.CheckTopicValid(name)
+			if err != nil {
+				log.Error("created topic is invaild", zap.String("name", name), zap.Error(err))
+				panic("created topic is invaild")
+			}
+		}
+
+		ms.AsProducer([]string{name})
 		dms := &dmlMsgStream{
 			ms:     ms,
 			refcnt: 0,
 			used:   0,
-			idx:    i,
-			pos:    int(i),
+			idx:    int64(i),
+			pos:    i,
 		}
 		d.pool.Store(name, dms)
 		d.channelsHeap = append(d.channelsHeap, dms)
@@ -194,7 +228,7 @@ func (d *dmlChannels) getChannelNames(count int) []string {
 		item := heap.Pop(&d.channelsHeap).(*dmlMsgStream)
 		item.BookUsage()
 		items = append(items, item)
-		result = append(result, genChannelName(d.namePrefix, item.idx))
+		result = append(result, getChannelName(d.namePrefix, item.idx))
 	}
 
 	for _, item := range items {
@@ -211,7 +245,7 @@ func (d *dmlChannels) listChannels() []string {
 		func(k, v interface{}) bool {
 			dms := v.(*dmlMsgStream)
 			if dms.RefCnt() > 0 {
-				chanNames = append(chanNames, genChannelName(d.namePrefix, dms.idx))
+				chanNames = append(chanNames, getChannelName(d.namePrefix, dms.idx))
 			}
 			return true
 		})
@@ -306,6 +340,19 @@ func (d *dmlChannels) removeChannels(names ...string) {
 	}
 }
 
-func genChannelName(prefix string, idx int64) string {
+func getChannelName(prefix string, idx int64) string {
+	params := paramtable.Get().CommonCfg
+	if params.PreCreatedTopicEnabled.GetAsBool() {
+		return params.TopicNames.GetAsStrings()[idx]
+	}
 	return fmt.Sprintf("%s_%d", prefix, idx)
+}
+
+func genChannelNames(prefix string, num int64) []string {
+	var results []string
+	for idx := int64(0); idx < num; idx++ {
+		result := fmt.Sprintf("%s_%d", prefix, idx)
+		results = append(results, result)
+	}
+	return results
 }

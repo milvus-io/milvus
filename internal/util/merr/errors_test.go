@@ -108,6 +108,11 @@ func (s *ErrSuite) TestWrap() {
 
 	// Metrics related
 	s.ErrorIs(WrapErrMetricNotFound("unknown", "failed to get metric"), ErrMetricNotFound)
+
+	// Topic related
+	s.ErrorIs(WrapErrTopicNotFound("unknown", "failed to get topic"), ErrTopicNotFound)
+	s.ErrorIs(WrapErrTopicNotEmpty("unknown", "topic is not empty"), ErrTopicNotEmpty)
+
 }
 
 func (s *ErrSuite) TestCombine() {

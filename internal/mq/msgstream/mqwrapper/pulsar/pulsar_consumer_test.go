@@ -218,3 +218,26 @@ func TestPulsarClientUnsubscribeTwice(t *testing.T) {
 	assert.True(t, strings.Contains(err.Error(), "Consumer not found"))
 	t.Log(err)
 }
+
+func TestCheckPreTopicValid(t *testing.T) {
+	pulsarAddress := getPulsarAddress()
+	pc, err := NewClient(DefaultPulsarTenant, DefaultPulsarNamespace, pulsar.ClientOptions{URL: pulsarAddress})
+	assert.Nil(t, err)
+
+	receiveChannel := make(chan pulsar.ConsumerMessage, 100)
+	consumer, err := pc.client.Subscribe(pulsar.ConsumerOptions{
+		Topic:                       "Topic-1",
+		SubscriptionName:            "SubName-1",
+		SubscriptionInitialPosition: pulsar.SubscriptionInitialPosition(mqwrapper.SubscriptionPositionEarliest),
+		MessageChannel:              receiveChannel,
+	})
+	assert.Nil(t, err)
+	assert.NotNil(t, consumer)
+
+	str := consumer.Subscription()
+	assert.NotNil(t, str)
+
+	pulsarConsumer := &Consumer{c: consumer, closeCh: make(chan struct{})}
+	err = pulsarConsumer.CheckTopicValid("Topic-1")
+	assert.NoError(t, err)
+}
