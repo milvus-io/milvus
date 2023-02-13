@@ -308,3 +308,37 @@ func Test_BinlogParserParse(t *testing.T) {
 	err = parser.Parse(paths)
 	assert.NotNil(t, err)
 }
+
+func Test_BinlogParserSkipFlagFile(t *testing.T) {
+	ctx := context.Background()
+
+	flushFunc := func(fields map[storage.FieldID]storage.FieldData, shardID int) error {
+		return nil
+	}
+
+	chunkManager := &MockChunkManager{
+		listErr:    errors.New("error"),
+		listResult: make(map[string][]string),
+	}
+
+	parser, err := NewBinlogParser(ctx, sampleSchema(), 2, 1024, chunkManager, flushFunc, nil, 0, math.MaxUint64)
+	assert.NotNil(t, parser)
+	assert.Nil(t, err)
+
+	insertPath := "insertPath"
+	deltaPath := "deltaPath"
+
+	// chunkManager return error
+	holders, err := parser.constructSegmentHolders(insertPath, deltaPath)
+	assert.NotNil(t, err)
+	assert.Nil(t, holders)
+
+	// parse field id error(insert log)
+	chunkManager.listErr = nil
+	chunkManager.listResult[insertPath] = []string{
+		"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/0/435978159903735811",
+		"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008/.DS_Store",
+	}
+	_, err = parser.constructSegmentHolders(insertPath, deltaPath)
+	assert.NoError(t, err)
+}

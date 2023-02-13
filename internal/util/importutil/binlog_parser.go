@@ -23,6 +23,7 @@ import (
 	"path"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/log"
@@ -127,6 +128,12 @@ func (p *BinlogParser) constructSegmentHolders(insertlogRoot string, deltalogRoo
 	log.Info("Binlog parser: list insert logs", zap.Int("logsCount", len(insertlogs)))
 	for _, insertlog := range insertlogs {
 		log.Info("Binlog parser: mapping insert log to segment", zap.String("insertlog", insertlog))
+		filePath := path.Base(insertlog)
+		// skip file with prefix '.', such as .success .DS_Store
+		if strings.HasPrefix(filePath, ".") {
+			log.Debug("file path might not be a real bin log", zap.String("filePath", filePath))
+			continue
+		}
 		fieldPath := path.Dir(insertlog)
 		fieldStrID := path.Base(fieldPath)
 		fieldID, err := strconv.ParseInt(fieldStrID, 10, 64)
