@@ -57,6 +57,7 @@ type compactionTaskState int8
 
 const (
 	executing compactionTaskState = iota + 1
+	pipelining
 	completed
 	failed
 	timeout
@@ -153,6 +154,12 @@ func (c *compactionPlanHandler) stop() {
 	c.wg.Wait()
 }
 
+func (c *compactionPlanHandler) updateTask(planID int64, opts ...compactionTaskOpt) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.plans[planID] = c.plans[planID].shadowClone(opts...)
+}
+
 // execCompactionPlan start to execute plan and return immediately
 func (c *compactionPlanHandler) execCompactionPlan(signal *compactionSignal, plan *datapb.CompactionPlan) error {
 	c.mu.Lock()
@@ -171,7 +178,7 @@ func (c *compactionPlanHandler) execCompactionPlan(signal *compactionSignal, pla
 	task := &compactionTask{
 		triggerInfo: signal,
 		plan:        plan,
-		state:       executing,
+		state:       pipelining,
 		dataNodeID:  nodeID,
 	}
 	c.plans[plan.PlanID] = task
@@ -185,21 +192,12 @@ func (c *compactionPlanHandler) execCompactionPlan(signal *compactionSignal, pla
 		if err != nil {
 			log.Warn("Alloc start time for CompactionPlan failed", zap.Int64("planID", plan.GetPlanID()))
 			// update plan ts to TIMEOUT ts
-			c.mu.Lock()
-			c.plans[plan.PlanID] = c.plans[plan.PlanID].shadowClone(func(task *compactionTask) {
-				task.plan.StartTime = tsTimeout
-			})
-			c.mu.Unlock()
+			c.updateTask(plan.PlanID, setState(executing), setStartTime(tsTimeout))
 			return
 		}
-
-		c.mu.Lock()
-		c.plans[plan.PlanID] = c.plans[plan.PlanID].shadowClone(func(task *compactionTask) {
-			task.plan.StartTime = ts
-		})
-		c.mu.Unlock()
-
+		c.updateTask(plan.PlanID, setStartTime(ts))
 		err = c.sessions.Compaction(nodeID, plan)
+		c.updateTask(plan.PlanID, setState(executing))
 		if err != nil {
 			log.Warn("try to Compaction but DataNode rejected",
 				zap.Int64("targetNodeID", nodeID),
@@ -209,7 +207,6 @@ func (c *compactionPlanHandler) execCompactionPlan(signal *compactionSignal, pla
 			// release queue will be done in `updateCompaction`
 			return
 		}
-
 		log.Info("start compaction", zap.Int64("nodeID", nodeID), zap.Int64("planID", plan.GetPlanID()))
 	}()
 	return nil
@@ -311,12 +308,6 @@ func (c *compactionPlanHandler) updateCompaction(ts Timestamp) error {
 		stateResult, ok := planStates[task.plan.PlanID]
 		state := stateResult.GetState()
 		planID := task.plan.PlanID
-		startTime := task.plan.GetStartTime()
-
-		// start time is 0 means this task have not started, skip checker
-		if startTime == 0 {
-			continue
-		}
 		// check wether the state of CompactionPlan is working
 		if ok {
 			if state == commonpb.CompactionState_Completed {
@@ -419,6 +410,12 @@ type compactionTaskOpt func(task *compactionTask)
 func setState(state compactionTaskState) compactionTaskOpt {
 	return func(task *compactionTask) {
 		task.state = state
+	}
+}
+
+func setStartTime(startTime uint64) compactionTaskOpt {
+	return func(task *compactionTask) {
+		task.plan.StartTime = startTime
 	}
 }
 
