@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"sync"
 
-	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/common"
@@ -30,11 +30,11 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/metrics"
+	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/contextutil"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"go.uber.org/zap"
 )
 
 //go:generate mockery --name=IMetaTable --outpkg=mockrootcoord
@@ -55,6 +55,7 @@ type IMetaTable interface {
 	DropAlias(ctx context.Context, alias string, ts Timestamp) error
 	AlterAlias(ctx context.Context, alias string, collectionName string, ts Timestamp) error
 	AlterCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts Timestamp) error
+	RenameCollection(ctx context.Context, oldName string, newName string, ts Timestamp) error
 
 	// TODO: it'll be a big cost if we handle the time travel logic, since we should always list all aliases in catalog.
 	IsAlias(name string) bool
@@ -326,9 +327,10 @@ func (mt *MetaTable) getCollectionByIDInternal(ctx context.Context, collectionID
 func (mt *MetaTable) GetCollectionByName(ctx context.Context, collectionName string, ts Timestamp) (*model.Collection, error) {
 	mt.ddLock.RLock()
 	defer mt.ddLock.RUnlock()
+	return mt.getCollectionByNameInternal(ctx, collectionName, ts)
+}
 
-	var collectionID UniqueID
-
+func (mt *MetaTable) getCollectionByNameInternal(ctx context.Context, collectionName string, ts Timestamp) (*model.Collection, error) {
 	collectionID, ok := mt.collAlias2ID[collectionName]
 	if ok {
 		return mt.getCollectionByIDInternal(ctx, collectionID, ts, false)
@@ -438,6 +440,50 @@ func (mt *MetaTable) AlterCollection(ctx context.Context, oldColl *model.Collect
 	}
 	mt.collID2Meta[oldColl.CollectionID] = newColl
 	log.Info("alter collection finished", zap.Int64("collectionID", oldColl.CollectionID), zap.Uint64("ts", ts))
+	return nil
+}
+
+func (mt *MetaTable) RenameCollection(ctx context.Context, oldName string, newName string, ts Timestamp) error {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+	ctx = contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName)
+
+	log := log.Ctx(ctx).With(zap.String("oldName", oldName), zap.String("newName", newName))
+
+	//old collection should not be an alias
+	_, ok := mt.collAlias2ID[oldName]
+	if ok {
+		log.Warn("unsupported use a alias to rename collection")
+		return fmt.Errorf("unsupported use an alias to rename collection, alias:%s", oldName)
+	}
+
+	// check new collection already exists
+	newColl, err := mt.getCollectionByNameInternal(ctx, newName, ts)
+	if newColl != nil {
+		return fmt.Errorf("duplicated new collection name :%s with other collection name or alias", newName)
+	}
+	if err != nil && !common.IsCollectionNotExistErrorV2(err) {
+		log.Warn("check new collection name fail")
+		return err
+	}
+
+	// get old collection meta
+	oldColl, err := mt.getCollectionByNameInternal(ctx, oldName, ts)
+	if err != nil {
+		return err
+	}
+
+	newColl = oldColl.Clone()
+	newColl.Name = newName
+	if err := mt.catalog.AlterCollection(ctx, oldColl, newColl, metastore.MODIFY, ts); err != nil {
+		return err
+	}
+
+	mt.collName2ID[newName] = oldColl.CollectionID
+	delete(mt.collName2ID, oldName)
+	mt.collID2Meta[oldColl.CollectionID] = newColl
+
+	log.Info("rename collection finished")
 	return nil
 }
 

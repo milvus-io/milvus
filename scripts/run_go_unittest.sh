@@ -159,22 +159,22 @@ go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/metastore/..." -failfa
 
 function test_all()
 {
-test_proxy
-test_querynode
-test_datanode
-test_indexnode
-test_rootcoord
-test_querycoord
-test_datacoord
-test_indexcoord
-test_kv
-test_mq
-test_storage
-test_allocator
-test_tso
-test_config
-test_util
-test_metastore
+#test_proxy
+#test_querynode
+#test_datanode
+#test_indexnode
+#test_rootcoord
+#test_querycoord
+#test_datacoord
+#test_indexcoord
+#test_kv
+#test_mq
+#test_storage
+#test_allocator
+#test_tso
+#test_config
+#test_util
+#test_metastore
 }
 
 

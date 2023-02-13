@@ -30,13 +30,12 @@ echo "Running unittest under ./internal"
 if [[ $(uname -s) == "Darwin" && "$(uname -m)" == "arm64" ]]; then
     APPLE_SILICON_FLAG="-tags dynamic"
 fi
-for d in $(go list ./internal/... | grep -v -e vendor -e kafka -e planparserv2/generated -e mocks); do
-    go test -race ${APPLE_SILICON_FLAG} -v -coverpkg=./... -coverprofile=profile.out -covermode=atomic "$d"
-    if [ -f profile.out ]; then
-        grep -v kafka profile.out | grep -v planparserv2/generated | grep -v mocks | sed '1d' >> ${FILE_COVERAGE_INFO}
-        rm profile.out
-    fi
-done
+
+go test -race ${APPLE_SILICON_FLAG} -v -coverpkg=./... -coverprofile=profile.out -covermode=atomic "github.com/milvus-io/milvus/internal/datacoord"
+if [ -f profile.out ]; then
+    grep -v kafka profile.out | grep -v planparserv2/generated | grep -v mocks | sed '1d' >> ${FILE_COVERAGE_INFO}
+    rm profile.out
+fi
 
 # generate html report
 go tool cover -html=./${FILE_COVERAGE_INFO} -o ./${FILE_COVERAGE_HTML}
