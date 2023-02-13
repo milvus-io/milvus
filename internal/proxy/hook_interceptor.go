@@ -89,8 +89,8 @@ func UnaryServerHookInterceptor() grpc.UnaryServerInterceptor {
 		}
 
 		if newCtx, err = hoo.Before(ctx, req, fullMethod); err != nil {
-			log.Warn("hook before error", zap.String("user", getCurrentUser(ctx)), zap.String("full method", fullMethod),
-				zap.Any("request", req), zap.Error(err))
+			log.Warn("hook before error", zap.String("user", getCurrentUser(ctx)),
+				zap.String("full method", fullMethod), zap.Error(err))
 			metrics.ProxyHookFunc.WithLabelValues(metrics.HookBefore, fullMethod).Inc()
 			return nil, err
 		}
