@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
+	"github.com/milvus-io/milvus/internal/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -49,6 +50,7 @@ type dataSyncService struct {
 	resendTTCh   chan resendTTMsg   // chan to ask for resending DataNode time tick message.
 	channel      Channel            // channel stores meta of channel
 	idAllocator  allocatorInterface // id/timestamp allocator
+	dispClient   msgdispatcher.Client
 	msFactory    msgstream.Factory
 	collectionID UniqueID // collection id of vchan for which this data sync service serves
 	vchannelName string
@@ -71,6 +73,7 @@ func newDataSyncService(ctx context.Context,
 	resendTTCh chan resendTTMsg,
 	channel Channel,
 	alloc allocatorInterface,
+	dispClient msgdispatcher.Client,
 	factory msgstream.Factory,
 	vchan *datapb.VchannelInfo,
 	clearSignal chan<- string,
@@ -101,6 +104,7 @@ func newDataSyncService(ctx context.Context,
 		resendTTCh:       resendTTCh,
 		channel:          channel,
 		idAllocator:      alloc,
+		dispClient:       dispClient,
 		msFactory:        factory,
 		collectionID:     vchan.GetCollectionID(),
 		vchannelName:     vchan.GetChannelName(),
@@ -156,6 +160,7 @@ func (dsService *dataSyncService) close() {
 		if dsService.fg != nil {
 			log.Info("dataSyncService closing flowgraph", zap.Int64("collectionID", dsService.collectionID),
 				zap.String("vChanName", dsService.vchannelName))
+			dsService.dispClient.Deregister(dsService.vchannelName)
 			dsService.fg.Close()
 			metrics.DataNodeNumConsumers.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Dec()
 			metrics.DataNodeNumProducers.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Sub(2) // timeTickChannel + deltaChannel
@@ -287,7 +292,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo) erro
 	}
 
 	var dmStreamNode Node
-	dmStreamNode, err = newDmInputNode(dsService.ctx, vchanInfo.GetSeekPosition(), c)
+	dmStreamNode, err = newDmInputNode(dsService.dispClient, vchanInfo.GetSeekPosition(), c)
 	if err != nil {
 		return err
 	}

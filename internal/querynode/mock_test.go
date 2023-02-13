@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/common"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
@@ -1702,6 +1703,7 @@ func genSimpleQueryNodeWithMQFactory(ctx context.Context, fac dependency.Factory
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath.GetValue())
 	node.etcdKV = etcdKV
 
+	node.dispClient = msgdispatcher.NewClient(fac, typeutil.QueryNodeRole, paramtable.GetNodeID())
 	node.tSafeReplica = newTSafeReplica()
 
 	replica, err := genSimpleReplicaWithSealSegment(ctx)
@@ -1711,7 +1713,7 @@ func genSimpleQueryNodeWithMQFactory(ctx context.Context, fac dependency.Factory
 	node.tSafeReplica.addTSafe(defaultDMLChannel)
 
 	node.tSafeReplica.addTSafe(defaultDeltaChannel)
-	node.dataSyncService = newDataSyncService(node.queryNodeLoopCtx, replica, node.tSafeReplica, node.factory)
+	node.dataSyncService = newDataSyncService(node.queryNodeLoopCtx, replica, node.tSafeReplica, node.dispClient, node.factory)
 
 	node.metaReplica = replica
 

@@ -122,7 +122,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 		}
 	}()
 
-	channel2FlowGraph, err := w.initFlowGraph(ctx, collectionID, vChannels, VPChannels)
+	channel2FlowGraph, err := w.initFlowGraph(collectionID, vChannels)
 	if err != nil {
 		return err
 	}
@@ -243,21 +243,16 @@ func (w *watchDmChannelsTask) LoadGrowingSegments(ctx context.Context, collectio
 	return unFlushedSegmentIDs, nil
 }
 
-func (w *watchDmChannelsTask) initFlowGraph(ctx context.Context, collectionID UniqueID, vChannels []Channel, VPChannels map[string]string) (map[string]*queryNodeFlowGraph, error) {
+func (w *watchDmChannelsTask) initFlowGraph(collectionID UniqueID, vChannels []Channel) (map[string]*queryNodeFlowGraph, error) {
 	// So far, we don't support to enable each node with two different channel
 	consumeSubName := funcutil.GenChannelSubName(Params.CommonCfg.QueryNodeSubName.GetValue(), collectionID, paramtable.GetNodeID())
 
-	// group channels by to seeking or consuming
+	// group channels by to seeking
 	channel2SeekPosition := make(map[string]*internalpb.MsgPosition)
-
-	// for channel with no position
-	channel2AsConsumerPosition := make(map[string]*internalpb.MsgPosition)
 	for _, info := range w.req.Infos {
-		if info.SeekPosition == nil || len(info.SeekPosition.MsgID) == 0 {
-			channel2AsConsumerPosition[info.ChannelName] = info.SeekPosition
-			continue
+		if info.SeekPosition != nil && len(info.SeekPosition.MsgID) != 0 {
+			info.SeekPosition.MsgGroup = consumeSubName
 		}
-		info.SeekPosition.MsgGroup = consumeSubName
 		channel2SeekPosition[info.ChannelName] = info.SeekPosition
 	}
 	log.Info("watchDMChannel, group channels done", zap.Int64("collectionID", collectionID))
@@ -333,49 +328,11 @@ func (w *watchDmChannelsTask) initFlowGraph(ctx context.Context, collectionID Un
 	)
 
 	// add flow graph
-	channel2FlowGraph, err := w.node.dataSyncService.addFlowGraphsForDMLChannels(collectionID, vChannels)
+	channel2FlowGraph, err := w.node.dataSyncService.addFlowGraphsForDMLChannels(collectionID, channel2SeekPosition)
 	if err != nil {
 		log.Warn("watchDMChannel, add flowGraph for dmChannels failed", zap.Int64("collectionID", collectionID), zap.Strings("vChannels", vChannels), zap.Error(err))
 		return nil, err
 	}
-	log.Info("Query node add DML flow graphs", zap.Int64("collectionID", collectionID), zap.Any("channels", vChannels))
-
-	// channels as consumer
-	for channel, fg := range channel2FlowGraph {
-		if _, ok := channel2AsConsumerPosition[channel]; ok {
-			// use pChannel to consume
-			err = fg.consumeFlowGraph(VPChannels[channel], consumeSubName)
-			if err != nil {
-				log.Error("msgStream as consumer failed for dmChannels", zap.Int64("collectionID", collectionID), zap.String("vChannel", channel))
-				break
-			}
-		}
-
-		if pos, ok := channel2SeekPosition[channel]; ok {
-			pos.MsgGroup = consumeSubName
-			// use pChannel to seek
-			pos.ChannelName = VPChannels[channel]
-			err = fg.consumeFlowGraphFromPosition(pos)
-			if err != nil {
-				log.Error("msgStream seek failed for dmChannels", zap.Int64("collectionID", collectionID), zap.String("vChannel", channel))
-				break
-			}
-		}
-	}
-
-	if err != nil {
-		log.Warn("watchDMChannel, add flowGraph for dmChannels failed", zap.Int64("collectionID", collectionID), zap.Strings("vChannels", vChannels), zap.Error(err))
-		for _, fg := range channel2FlowGraph {
-			fg.flowGraph.Close()
-		}
-		gcChannels := make([]Channel, 0)
-		for channel := range channel2FlowGraph {
-			gcChannels = append(gcChannels, channel)
-		}
-		w.node.dataSyncService.removeFlowGraphsByDMLChannels(gcChannels)
-		return nil, err
-	}
-
 	log.Info("watchDMChannel, add flowGraph for dmChannels success", zap.Int64("collectionID", collectionID), zap.Strings("vChannels", vChannels))
 	return channel2FlowGraph, nil
 }

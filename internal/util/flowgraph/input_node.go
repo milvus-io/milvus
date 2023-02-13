@@ -36,7 +36,7 @@ import (
 // InputNode is the entry point of flowgragh
 type InputNode struct {
 	BaseNode
-	inStream     msgstream.MsgStream
+	input        <-chan *msgstream.MsgPack
 	lastMsg      *msgstream.MsgPack
 	name         string
 	role         string
@@ -51,17 +51,6 @@ func (inNode *InputNode) IsInputNode() bool {
 	return true
 }
 
-// Start is used to start input msgstream
-func (inNode *InputNode) Start() {
-}
-
-// Close implements node
-func (inNode *InputNode) Close() {
-	inNode.closeOnce.Do(func() {
-		inNode.inStream.Close()
-	})
-}
-
 func (inNode *InputNode) IsValidInMsg(in []Msg) bool {
 	return true
 }
@@ -71,16 +60,11 @@ func (inNode *InputNode) Name() string {
 	return inNode.name
 }
 
-// InStream returns the internal MsgStream
-func (inNode *InputNode) InStream() msgstream.MsgStream {
-	return inNode.inStream
-}
-
 // Operate consume a message pack from msgstream and return
 func (inNode *InputNode) Operate(in []Msg) []Msg {
-	msgPack, ok := <-inNode.inStream.Chan()
+	msgPack, ok := <-inNode.input
 	if !ok {
-		log.Warn("MsgStream closed", zap.Any("input node", inNode.Name()))
+		log.Warn("input closed", zap.Any("input node", inNode.Name()))
 		if inNode.lastMsg != nil {
 			log.Info("trigger force sync", zap.Int64("collection", inNode.collectionID), zap.Any("position", inNode.lastMsg))
 			return []Msg{&MsgStreamMsg{
@@ -151,15 +135,15 @@ func (inNode *InputNode) Operate(in []Msg) []Msg {
 	return []Msg{msgStreamMsg}
 }
 
-// NewInputNode composes an InputNode with provided MsgStream, name and parameters
-func NewInputNode(inStream msgstream.MsgStream, nodeName string, maxQueueLength int32, maxParallelism int32, role string, nodeID int64, collectionID int64, dataType string) *InputNode {
+// NewInputNode composes an InputNode with provided input channel, name and parameters
+func NewInputNode(input <-chan *msgstream.MsgPack, nodeName string, maxQueueLength int32, maxParallelism int32, role string, nodeID int64, collectionID int64, dataType string) *InputNode {
 	baseNode := BaseNode{}
 	baseNode.SetMaxQueueLength(maxQueueLength)
 	baseNode.SetMaxParallelism(maxParallelism)
 
 	return &InputNode{
 		BaseNode:     baseNode,
-		inStream:     inStream,
+		input:        input,
 		name:         nodeName,
 		role:         role,
 		nodeID:       nodeID,
