@@ -93,3 +93,4 @@ internal/kv/rocksdb/cwrapper/
 
 # local file data
 **/data/*
+files
