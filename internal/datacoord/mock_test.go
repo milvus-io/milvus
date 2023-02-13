@@ -354,6 +354,10 @@ type mockRootCoordService struct {
 	cnt   int64
 }
 
+func (m *mockRootCoordService) RenameCollection(ctx context.Context, req *milvuspb.RenameCollectionRequest) (*commonpb.Status, error) {
+	panic("implement me")
+}
+
 func (m *mockRootCoordService) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
 	panic("implement me")
 }
