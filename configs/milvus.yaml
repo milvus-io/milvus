@@ -14,15 +14,31 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Related configuration of etcd, used to store Milvus metadata & service discovery.
+# Etcd is the metadata engine supporting Milvus' metadata & service discovery.
+# Under this section, you can configure etcd endpoints, relevant key prefixes, etc.
 etcd:
+  # Endpoints used to access etcd service. You can change this parameter as the endpoints of your own etcd cluster.
+  # Or Use environment variable: `ETCD_ENDPOINTS`
+  # etcd preferentially acquires valid address from environment variable `ETCD_ENDPOINTS` when Milvus is started.
   endpoints:
     - localhost:2379
-  rootPath: by-dev # The root path where data is stored in etcd
-  metaSubPath: meta # metaRootPath = rootPath + '/' + metaSubPath
-  kvSubPath: kv # kvRootPath = rootPath + '/' + kvSubPath
+  # Root prefix of the key to where Milvus stores data in etcd.
+  # Set an easy-to-identify root key prefix for Milvus if etcd service already exists.
+  # Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
+  # It is recommended to change this parameter before starting Milvus for the first time.
+  rootPath: by-dev
+  # Sub-prefix of the key to where Milvus stores metadata-related information in etcd.
+  # metaRootPath = rootPath + '/' + metaSubPath
+  # Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
+  # It is recommended to change this parameter before starting Milvus for the first time.
+  metaSubPath: meta
+  # Sub-prefix of the key to where Milvus stores timestamps in etcd.
+  # kvRootPath = rootPath + '/' + kvSubPath
+  # Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
+  # It is recommended not to change this parameter if there is no specific reason.
+  kvSubPath: kv
   log:
-    # path is one of:
+    # path of etcd log file, can be one of:
     #  - "default" as os.Stderr,
     #  - "stderr" as os.Stderr,
     #  - "stdout" as os.Stdout,
@@ -31,14 +47,16 @@ etcd:
     path: stdout
     level: info # Only supports debug, info, warn, error, panic, or fatal. Default 'info'.
   use:
+    # Whether to enable embedded Etcd (an in-process EtcdServer).
     # please adjust in embedded Milvus: true
-    embed: false # Whether to enable embedded Etcd (an in-process EtcdServer).
+    embed: false 
   data:
     # Embedded Etcd only.
     # please adjust in embedded Milvus: /tmp/milvus/etcdData/
     dir: default.etcd
   ssl:
-    enabled: false # Whether to support ETCD secure connection mode
+    # Whether to enable ETCD secure connection mode
+    enabled: false
     tlsCert: /path/to/etcd-client.pem # path to your cert file
     tlsKey: /path/to/etcd-client-key.pem # path to your key file
     tlsCACert: /path/to/ca.pem # path to your CACert file
@@ -47,37 +65,55 @@ etcd:
     # We recommend using version 1.2 and above
     tlsMinVersion: 1.3
 
-# Default value: etcd
-# Valid values: [etcd, mysql]
+# Metastore of Milvus
 metastore:
-  type: etcd
+  type: etcd # Valid values: [etcd, mysql]
 
-# Related configuration of mysql, used to store Milvus metadata.
+# Related configuration of mysql, used to store Milvus metadata. 
+# Caution it is still in development.
 mysql:
-  username: root
-  password: 123456
-  address: localhost
-  port: 3306
-  dbName: milvus_meta
-  driverName: mysql
-  maxOpenConns: 20
-  maxIdleConns: 5
+  username: root # username of mysql
+  password: 123456 # password of mysql
+  address: localhost # Address of mysql
+  port: 3306 # Port of mysql
+  dbName: milvus_meta # Database name of mysql
+  driverName: mysql # Driver name of mysql
+  maxOpenConns: 20 # Max number of open connections to mysql
+  maxIdleConns: 5 # Max number of idle connections to mysql
 
-# please adjust in embedded Milvus: /tmp/milvus/data/
+# localStorage is used when [common.storageType](configure_common.md) set to local
 localStorage:
+  # path to store data chunk
+  # please adjust in embedded Milvus: /tmp/milvus/data/
   path: /var/lib/milvus/data/
 
-# Related configuration of MinIO/S3/GCS or any other service supports S3 API, which is responsible for data persistence for Milvus.
+# Related configuration of MinIO/S3.
+# Milvus supports MinIO and Amazon S3 or any other service supports S3 API (like GCS, Azure Blob and etc.), as the storage engine for data persistence of insert log files and index files for Milvus.
+# Whereas MinIO is the de facto standard for S3 compatibility, you can configure S3 parameters directly under MinIO section.
 # We refer to the storage service as MinIO/S3 in the following description for simplicity.
+# You can also configure some of the fields through environment variables, which is prioritized over the configuration file.
 minio:
-  address: localhost # Address of MinIO/S3
-  port: 9000   # Port of MinIO/S3
-  accessKeyID: minioadmin # accessKeyID of MinIO/S3
-  secretAccessKey: minioadmin # MinIO/S3 encryption string
-  useSSL: false # Access to MinIO/S3 with SSL
-  bucketName: "a-bucket" # Bucket name in MinIO/S3
+  # The IP address of MinIO/S3 compatible storage service
+  # For s3 set to s3.amazonaws.com or s3.<region>.amazonaws.com(when useIAM)
+  # For gcs set to storage.googleapis.com
+  # `minio.address` and `minio.port` together generate the valid access to MinIO or S3 service.
+  # Environment variable: `MINIO_ADDRESS` overwrites `<minio.address>:<minio.port>`
+  address: localhost # Default value applies when MinIO is running on the same network with Milvus.
+  # Port of MinIO/S3
+  # Environment variable: `MINIO_ADDRESS` overwrites `<minio.address>:<minio.port>`
+  port: 9000 # MinIO port defaults to 9000, For S3 or other cloud storage service, set to 443
+  # Access key ID that MinIO or S3 issues to user for authorized access.
+  # Environment variable: `MINIO_ACCESS_KEY`
+  # `minio.accessKeyID` and `minio.secretAccessKey` together are used for identity authentication to access the MinIO or S3 service.
+  # default value is used for minio deployment of default configuration.
+  accessKeyID: minioadmin
+  # Secret key used to encrypt the signature string and verify the signature string on server. It must be kept strictly confidential and accessible only to the MinIO or S3 server and users.
+  # Environment variable: `MINIO_SECRET_KEY`
+  secretAccessKey: minioadmin
+  useSSL: false # Whether to access the MinIO or S3 service through SSL. For S3 or other cloud storage service, set to 443
+  bucketName: "a-bucket" # Bucket name in MinIO/S3. Bucket with this name will be created if it does not exist. If the bucket already exists and is accessible, it will be used directly. Otherwise, there will be an error.
   rootPath: files # The root path where the message is stored in MinIO/S3
-   # Whether to use IAM role to access S3/GCS instead of access/secret keys
+  # Whether to use IAM role to access S3/GCS instead of access/secret keys.
   # For more infomation, refer to
   # aws: https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_use.html
   # gcp: https://cloud.google.com/storage/docs/access-control/iam
@@ -91,46 +127,54 @@ minio:
   # Leave it empty if you want to use AWS default endpoint
   iamEndpoint: ""
 
+# Related configuration of pulsar, used to manage Milvus logs of recent mutation operations, output streaming log, and provide log publish-subscribe services.
 # Milvus supports three MQ: rocksmq(based on RockDB), Pulsar and Kafka, which should be reserved in config what you use.
 # There is a note about enabling priority if we config multiple mq in this file
 # 1. standalone(local) mode: rockskmq(default) > Pulsar > Kafka
 # 2. cluster mode:  Pulsar(default) > Kafka (rocksmq is unsupported)
-
-# Related configuration of pulsar, used to manage Milvus logs of recent mutation operations, output streaming log, and provide log publish-subscribe services.
 pulsar:
   address: localhost # Address of pulsar
   port: 6650 # Port of pulsar
   webport: 80 # Web port of pulsar, if you connect direcly without proxy, should use 8080
   maxMessageSize: 5242880 # 5 * 1024 * 1024 Bytes, Maximum size of each message in pulsar.
-  tenant: public
-  namespace: default
+  tenant: public # Tenant of pulsar
+  namespace: default # Namespace of pulsar
 
-# If you want to enable kafka, needs to comment the pulsar configs
+# Related configuration of kafka, used to manage Milvus logs of recent mutation operations, output streaming log, and provide log publish-subscribe services.
+# Milvus supports three MQ: rocksmq(based on RockDB), Pulsar and Kafka, which should be reserved in config what you use.
+# There is a note about enabling priority if we config multiple mq in this file
+# 1. standalone(local) mode: rockskmq(default) > Pulsar > Kafka
+# 2. cluster mode:  Pulsar(default) > Kafka (rocksmq is unsupported)
 kafka:
   producer:
-    client.id: dc
+    client.id: dc # Client ID of kafka producer
   consumer:
-    client.id: dc1
-#  brokerList: localhost1:9092,localhost2:9092,localhost3:9092
-#  saslUsername: username
-#  saslPassword: password
-#  saslMechanisms: PLAIN
-#  securityProtocol: SASL_SSL
+    client.id: dc1 # Client ID of kafka consumer
+  brokerList: localhost1:9092,localhost2:9092,localhost3:9092 # Broker list of kafka
+  saslUsername: "" # Username of kafka
+  saslPassword: "" # Password of kafka
+  saslMechanisms: PLAIN # SASL Mechanisms of kafka
+  securityProtocol: SASL_SSL # Security Protocol of kafka
 
+# Related configuration of rocksmq, used to manage Milvus logs of recent mutation operations, output streaming log, and provide log publish-subscribe services.
+# Milvus supports three MQ: rocksmq(based on RockDB), Pulsar and Kafka, which should be reserved in config what you use.
+# There is a note about enabling priority if we config multiple mq in this file
+# 1. standalone(local) mode: rockskmq(default) > Pulsar > Kafka
+# 2. cluster mode:  Pulsar(default) > Kafka (rocksmq is unsupported)
 rocksmq:
   # please adjust in embedded Milvus: /tmp/milvus/rdb_data
   path: /var/lib/milvus/rdb_data # The path where the message is stored in rocksmq
-  rocksmqPageSize: 2147483648 # 2 GB, 2 * 1024 * 1024 * 1024 bytes, The size of each page of messages in rocksmq
-  retentionTimeInMinutes: 7200 # 5 days, 5 * 24 * 60 minutes, The retention time of the message in rocksmq.
-  retentionSizeInMB: 8192 # 8 GB, 8 * 1024 MB, The retention size of the message in rocksmq.
-  compactionInterval: 86400 # 1 day, trigger rocksdb compaction every day to remove deleted data
-  lrucacheratio: 0.06 # rocksdb cache memory ratio
+  rocksmqPageSize: 2147483648 # Defaults to 2 GB, 2 * 1024 * 1024 * 1024 bytes. The size of each page of messages in rocksmq
+  retentionTimeInMinutes: 7200 # Defaults to 5 days, 5 * 24 * 60 minutes. The retention time of the message in rocksmq.
+  retentionSizeInMB: 8192 # Defaults to 8 GB, 8 * 1024 MB. The retention size of the message in rocksmq.
+  compactionInterval: 86400 # Defaults to 1 day. Trigger rocksdb compaction every interval to remove deleted data
+  lrucacheratio: 0.06 # Defaults to 6%. Rocksdb cache memory ratio
 
 # Related configuration of rootCoord, used to handle data definition language (DDL) and data control language (DCL) requests
 rootCoord:
-  address: localhost
-  port: 53100
-  enableActiveStandby: false  # Enable active-standby
+  address: localhost # IP address of rootCoord server
+  port: 53100 # Port for rootCoord server to listen on
+  enableActiveStandby: false # Whether to enable active-standby (HA) mode for rootCoord. When enabled you can perform rolling update of rootCoord without downtime. Sugguested to enable this option.
 
   dmlChannelNum: 256 # The number of dml channels created at system startup
   maxPartitionNum: 4096 # Maximum number of partitions in a collection
@@ -146,7 +190,7 @@ rootCoord:
 
 # Related configuration of proxy, used to validate client requests and reduce the returned results.
 proxy:
-  port: 19530
+  port: 19530 # Port for proxy server to listen on
   internalPort: 19529
   http:
     enabled: true # Whether to enable the http server
