@@ -115,12 +115,34 @@ func (suite *ResourceManagerSuite) TestManipulateNode() {
 	suite.ErrorIs(err, ErrNodeAlreadyAssign)
 
 	// transfer node between rgs
-	err = suite.manager.TransferNode("rg1", "rg2")
+	err = suite.manager.TransferNode("rg1", "rg2", 1)
 	suite.NoError(err)
 
 	// transfer meet non exist rg
-	err = suite.manager.TransferNode("rgggg", "rg2")
+	err = suite.manager.TransferNode("rgggg", "rg2", 1)
 	suite.ErrorIs(err, ErrRGNotExist)
+
+	err = suite.manager.TransferNode("rg1", "rg2", 5)
+	suite.ErrorIs(err, ErrNodeNotEnough)
+
+	suite.manager.nodeMgr.Add(session.NewNodeInfo(11, "localhost"))
+	suite.manager.nodeMgr.Add(session.NewNodeInfo(12, "localhost"))
+	suite.manager.nodeMgr.Add(session.NewNodeInfo(13, "localhost"))
+	suite.manager.nodeMgr.Add(session.NewNodeInfo(14, "localhost"))
+	suite.manager.AssignNode("rg1", 11)
+	suite.manager.AssignNode("rg1", 12)
+	suite.manager.AssignNode("rg1", 13)
+	suite.manager.AssignNode("rg1", 14)
+
+	rg1, err := suite.manager.GetResourceGroup("rg1")
+	suite.NoError(err)
+	rg2, err := suite.manager.GetResourceGroup("rg2")
+	suite.NoError(err)
+	suite.Equal(rg1.GetCapacity(), 4)
+	suite.Equal(rg2.GetCapacity(), 1)
+	suite.manager.TransferNode("rg1", "rg2", 3)
+	suite.Equal(rg1.GetCapacity(), 1)
+	suite.Equal(rg2.GetCapacity(), 4)
 }
 
 func (suite *ResourceManagerSuite) TestHandleNodeUp() {

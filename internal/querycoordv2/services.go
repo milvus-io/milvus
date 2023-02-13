@@ -1009,6 +1009,7 @@ func (s *Server) TransferNode(ctx context.Context, req *milvuspb.TransferNodeReq
 	log := log.Ctx(ctx).With(
 		zap.String("source", req.GetSourceResourceGroup()),
 		zap.String("target", req.GetTargetResourceGroup()),
+		zap.Int32("numNode", req.GetNumNode()),
 	)
 
 	log.Info("transfer node between resource group request received")
@@ -1027,7 +1028,7 @@ func (s *Server) TransferNode(ctx context.Context, req *milvuspb.TransferNodeReq
 			fmt.Sprintf("the target resource group[%s] doesn't exist", req.GetTargetResourceGroup()), meta.ErrRGNotExist), nil
 	}
 
-	err := s.meta.ResourceManager.TransferNode(req.GetSourceResourceGroup(), req.GetTargetResourceGroup())
+	err := s.meta.ResourceManager.TransferNode(req.GetSourceResourceGroup(), req.GetTargetResourceGroup(), int(req.GetNumNode()))
 	if err != nil {
 		log.Warn(ErrTransferNodeFailed.Error(), zap.Error(err))
 		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, ErrTransferNodeFailed.Error(), err), nil
