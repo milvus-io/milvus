@@ -11,22 +11,14 @@
 
 #pragma once
 
-#include "common/BitsetView.h"
-#include "common/FieldMeta.h"
-#include "common/QueryInfo.h"
-#include "query/SubSearchResult.h"
-#include "query/helper.h"
+#include <string>
+#include <common/Types.h>
 
-namespace milvus::query {
+namespace milvus {
+
+DatasetPtr
+SortRangeSearchResult(DatasetPtr data_set, int64_t topk, int64_t nq, std::string metric_type);
 
 void
-CheckBruteForceSearchParam(const FieldMeta& field, const SearchInfo& search_info);
-
-SubSearchResult
-BruteForceSearch(const dataset::SearchDataset& dataset,
-                 const void* chunk_data_raw,
-                 int64_t chunk_rows,
-                 const knowhere::Json& conf,
-                 const BitsetView& bitset);
-
-}  // namespace milvus::query
+CheckRangeSearchParam(float radius, float range_filter, std::string metric_type);
+}  // namespace milvus

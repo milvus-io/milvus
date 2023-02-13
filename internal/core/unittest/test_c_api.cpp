@@ -3522,3 +3522,245 @@ TEST(CApiTest, RetriveScalarFieldFromSealedSegmentWithIndex) {
 
     DeleteSegment(segment);
 }
+
+TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_WHEN_IP) {
+    auto c_collection = NewCollection(get_default_schema_config());
+    auto segment = NewSegment(c_collection, Growing, -1);
+    auto col = (milvus::segcore::Collection*)c_collection;
+
+    int N = 10000;
+    auto dataset = DataGen(col->get_schema(), N);
+    int64_t ts_offset = 1000;
+
+    int64_t offset;
+    PreInsert(segment, N, &offset);
+
+    auto insert_data = serialize(dataset.raw_);
+    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
+                          insert_data.size());
+    ASSERT_EQ(ins_res.error_code, Success);
+
+    const char* dsl_string = R"(
+    {
+        "bool": {
+            "vector": {
+                "fakevec": {
+                    "metric_type": "IP",
+                    "params": {
+                        "nprobe": 10,
+                        "radius": 10
+                    },
+                    "query": "$0",
+                    "topk": 10,
+                    "round_decimal": 3
+                }
+            }
+        }
+    })";
+
+    int num_queries = 10;
+    auto blob = generate_query_data(num_queries);
+
+    void* plan = nullptr;
+    auto status = CreateSearchPlan(c_collection, dsl_string, &plan);
+    ASSERT_EQ(status.error_code, Success);
+
+    void* placeholderGroup = nullptr;
+    status = ParsePlaceholderGroup(plan, blob.data(), blob.length(), &placeholderGroup);
+    ASSERT_EQ(status.error_code, Success);
+
+    std::vector<CPlaceholderGroup> placeholderGroups;
+    placeholderGroups.push_back(placeholderGroup);
+
+    CSearchResult search_result;
+    auto res = Search(segment, plan, placeholderGroup, ts_offset, &search_result);
+    ASSERT_EQ(res.error_code, Success);
+
+    DeleteSearchPlan(plan);
+    DeletePlaceholderGroup(placeholderGroup);
+    DeleteSearchResult(search_result);
+    DeleteCollection(c_collection);
+    DeleteSegment(segment);
+}
+
+TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_IP) {
+    auto c_collection = NewCollection(get_default_schema_config());
+    auto segment = NewSegment(c_collection, Growing, -1);
+    auto col = (milvus::segcore::Collection*)c_collection;
+
+    int N = 10000;
+    auto dataset = DataGen(col->get_schema(), N);
+    int64_t ts_offset = 1000;
+
+    int64_t offset;
+    PreInsert(segment, N, &offset);
+
+    auto insert_data = serialize(dataset.raw_);
+    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
+                          insert_data.size());
+    ASSERT_EQ(ins_res.error_code, Success);
+
+    const char* dsl_string = R"(
+    {
+        "bool": {
+            "vector": {
+                "fakevec": {
+                    "metric_type": "IP",
+                    "params": {
+                        "nprobe": 10,
+                        "radius": 10,
+                        "range_filter": 20
+                    },
+                    "query": "$0",
+                    "topk": 10,
+                    "round_decimal": 3
+                }
+            }
+        }
+    })";
+
+    int num_queries = 10;
+    auto blob = generate_query_data(num_queries);
+
+    void* plan = nullptr;
+    auto status = CreateSearchPlan(c_collection, dsl_string, &plan);
+    ASSERT_EQ(status.error_code, Success);
+
+    void* placeholderGroup = nullptr;
+    status = ParsePlaceholderGroup(plan, blob.data(), blob.length(), &placeholderGroup);
+    ASSERT_EQ(status.error_code, Success);
+
+    std::vector<CPlaceholderGroup> placeholderGroups;
+    placeholderGroups.push_back(placeholderGroup);
+
+    CSearchResult search_result;
+    auto res = Search(segment, plan, placeholderGroup, ts_offset, &search_result);
+    ASSERT_EQ(res.error_code, Success);
+
+    DeleteSearchPlan(plan);
+    DeletePlaceholderGroup(placeholderGroup);
+    DeleteSearchResult(search_result);
+    DeleteCollection(c_collection);
+    DeleteSegment(segment);
+}
+
+TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_WHEN_L2) {
+    auto c_collection = NewCollection(get_default_schema_config());
+    auto segment = NewSegment(c_collection, Growing, -1);
+    auto col = (milvus::segcore::Collection*)c_collection;
+
+    int N = 10000;
+    auto dataset = DataGen(col->get_schema(), N);
+    int64_t ts_offset = 1000;
+
+    int64_t offset;
+    PreInsert(segment, N, &offset);
+
+    auto insert_data = serialize(dataset.raw_);
+    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
+                          insert_data.size());
+    ASSERT_EQ(ins_res.error_code, Success);
+
+    const char* dsl_string = R"(
+    {
+        "bool": {
+            "vector": {
+                "fakevec": {
+                    "metric_type": "L2",
+                    "params": {
+                        "nprobe": 10,
+                        "radius": 10
+                    },
+                    "query": "$0",
+                    "topk": 10,
+                    "round_decimal": 3
+                }
+            }
+        }
+    })";
+
+    int num_queries = 10;
+    auto blob = generate_query_data(num_queries);
+
+    void* plan = nullptr;
+    auto status = CreateSearchPlan(c_collection, dsl_string, &plan);
+    ASSERT_EQ(status.error_code, Success);
+
+    void* placeholderGroup = nullptr;
+    status = ParsePlaceholderGroup(plan, blob.data(), blob.length(), &placeholderGroup);
+    ASSERT_EQ(status.error_code, Success);
+
+    std::vector<CPlaceholderGroup> placeholderGroups;
+    placeholderGroups.push_back(placeholderGroup);
+
+    CSearchResult search_result;
+    auto res = Search(segment, plan, placeholderGroup, ts_offset, &search_result);
+    ASSERT_EQ(res.error_code, Success);
+
+    DeleteSearchPlan(plan);
+    DeletePlaceholderGroup(placeholderGroup);
+    DeleteSearchResult(search_result);
+    DeleteCollection(c_collection);
+    DeleteSegment(segment);
+}
+
+TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_L2) {
+    auto c_collection = NewCollection(get_default_schema_config());
+    auto segment = NewSegment(c_collection, Growing, -1);
+    auto col = (milvus::segcore::Collection*)c_collection;
+
+    int N = 10000;
+    auto dataset = DataGen(col->get_schema(), N);
+    int64_t ts_offset = 1000;
+
+    int64_t offset;
+    PreInsert(segment, N, &offset);
+
+    auto insert_data = serialize(dataset.raw_);
+    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
+                          insert_data.size());
+    ASSERT_EQ(ins_res.error_code, Success);
+
+    const char* dsl_string = R"(
+    {
+        "bool": {
+            "vector": {
+                "fakevec": {
+                    "metric_type": "L2",
+                    "params": {
+                        "nprobe": 10,
+                        "radius": 20,
+                        "range_filter": 10
+                    },
+                    "query": "$0",
+                    "topk": 10,
+                    "round_decimal": 3
+                }
+            }
+        }
+    })";
+
+    int num_queries = 10;
+    auto blob = generate_query_data(num_queries);
+
+    void* plan = nullptr;
+    auto status = CreateSearchPlan(c_collection, dsl_string, &plan);
+    ASSERT_EQ(status.error_code, Success);
+
+    void* placeholderGroup = nullptr;
+    status = ParsePlaceholderGroup(plan, blob.data(), blob.length(), &placeholderGroup);
+    ASSERT_EQ(status.error_code, Success);
+
+    std::vector<CPlaceholderGroup> placeholderGroups;
+    placeholderGroups.push_back(placeholderGroup);
+
+    CSearchResult search_result;
+    auto res = Search(segment, plan, placeholderGroup, ts_offset, &search_result);
+    ASSERT_EQ(res.error_code, Success);
+
+    DeleteSearchPlan(plan);
+    DeletePlaceholderGroup(placeholderGroup);
+    DeleteSearchResult(search_result);
+    DeleteCollection(c_collection);
+    DeleteSegment(segment);
+}

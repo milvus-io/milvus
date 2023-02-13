@@ -21,7 +21,9 @@
 #include "storage/LocalChunkManager.h"
 #include "config/ConfigKnowhere.h"
 #include "storage/Util.h"
+#include "common/Consts.h"
 #include "common/Utils.h"
+#include "common/RangeSearchHelper.h"
 
 namespace milvus::index {
 
@@ -145,14 +147,29 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset, const SearchInfo& search_
     // set json reset field, will be removed later
     search_config[DISK_ANN_PQ_CODE_BUDGET] = 0.0;
 
-    auto final = index_.Search(*dataset, search_config, bitset);
-    if (!final.has_value()) {
-        PanicCodeInfo(ErrorCodeEnum::UnexpectedError, "failed to search");
-    }
+    auto final = [&] {
+        auto radius = GetValueFromConfig<float>(search_info.search_params_, RADIUS);
+        if (radius.has_value()) {
+            search_config[RADIUS] = radius.value();
+            auto range_filter = GetValueFromConfig<float>(search_info.search_params_, RANGE_FILTER);
+            if (range_filter.has_value()) {
+                search_config[RANGE_FILTER] = range_filter.value();
+                CheckRangeSearchParam(search_config[RADIUS], search_config[RANGE_FILTER], GetMetricType());
+            }
+            auto res = index_.RangeSearch(*dataset, search_config, bitset);
+            return SortRangeSearchResult(res.value(), topk, num_queries, GetMetricType());
+        } else {
+            auto res = index_.Search(*dataset, search_config, bitset);
+            if (!res.has_value()) {
+                PanicCodeInfo(ErrorCodeEnum::UnexpectedError, "failed to search");
+            }
+            return res.value();
+        }
+    }();
 
-    auto ids = final.value()->GetIds();
-    float* distances = const_cast<float*>(final.value()->GetDistance());
-    final.value()->SetIsOwner(true);
+    auto ids = final->GetIds();
+    float* distances = const_cast<float*>(final->GetDistance());
+    final->SetIsOwner(true);
 
     auto round_decimal = search_info.round_decimal_;
     auto total_num = num_queries * topk;
