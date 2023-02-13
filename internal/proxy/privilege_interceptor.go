@@ -73,7 +73,7 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 	}
 	username, err := GetCurUserFromContext(ctx)
 	if err != nil {
-		log.Error("GetCurUserFromContext fail", zap.Error(err))
+		log.Warn("GetCurUserFromContext fail", zap.Error(err))
 		return ctx, err
 	}
 	if username == util.UserRoot {
@@ -81,7 +81,7 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 	}
 	roleNames, err := GetRole(username)
 	if err != nil {
-		log.Error("GetRole fail", zap.String("username", username), zap.Error(err))
+		log.Warn("GetRole fail", zap.String("username", username), zap.Error(err))
 		return ctx, err
 	}
 	roleNames = append(roleNames, util.RolePublic)
@@ -96,7 +96,7 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 	objectPrivilege := privilegeExt.ObjectPrivilege.String()
 	policyInfo := strings.Join(globalMetaCache.GetPrivilegeInfo(ctx), ",")
 
-	log.Debug("current request info", zap.String("username", username), zap.Strings("role_names", roleNames),
+	logWithCurrentRequestInfo := log.With(zap.String("username", username), zap.Strings("role_names", roleNames),
 		zap.String("object_type", objectType), zap.String("object_privilege", objectPrivilege),
 		zap.Int32("object_index", objectNameIndex), zap.String("object_name", objectName),
 		zap.Int32("object_indexs", objectNameIndexs), zap.Strings("object_names", objectNames),
@@ -109,7 +109,7 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 	casbinModel := templateModel.Copy()
 	e, err := casbin.NewEnforcer(casbinModel, a)
 	if err != nil {
-		log.Error("NewEnforcer fail", zap.String("policy", policy), zap.Error(err))
+		logWithCurrentRequestInfo.Warn("NewEnforcer fail", zap.String("policy", policy), zap.Error(err))
 		return ctx, err
 	}
 	for _, roleName := range roleNames {
@@ -126,6 +126,7 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 			// handle the api which refers one resource
 			permitObject, err := permitFunc(objectName)
 			if err != nil {
+				logWithCurrentRequestInfo.Warn("fail to execute permit func", zap.String("name", objectName), zap.Error(err))
 				return ctx, err
 			}
 			if permitObject {
@@ -139,6 +140,7 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 			for _, name := range objectNames {
 				p, err := permitFunc(name)
 				if err != nil {
+					logWithCurrentRequestInfo.Warn("fail to execute permit func", zap.String("name", name), zap.Error(err))
 					return ctx, err
 				}
 				if !p {
@@ -152,7 +154,7 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 		}
 	}
 
-	log.Debug("permission deny", zap.String("policy", policy), zap.Strings("roles", roleNames))
+	logWithCurrentRequestInfo.Info("permission deny", zap.String("policy", policy), zap.Strings("roles", roleNames))
 	return ctx, status.Error(codes.PermissionDenied, fmt.Sprintf("%s: permission deny", objectPrivilege))
 }
 

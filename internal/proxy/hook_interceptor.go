@@ -6,9 +6,9 @@ import (
 	"plugin"
 
 	"github.com/milvus-io/milvus-proto/go-api/hook"
-
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"go.uber.org/zap"
-
 	"google.golang.org/grpc"
 )
 
@@ -82,16 +82,33 @@ func UnaryServerHookInterceptor() grpc.UnaryServerInterceptor {
 		)
 
 		if isMock, mockResp, err = hoo.Mock(ctx, req, fullMethod); isMock {
+			log.Info("hook mock", zap.String("user", getCurrentUser(ctx)),
+				zap.String("full method", fullMethod), zap.Error(err))
+			metrics.ProxyHookFunc.WithLabelValues(metrics.HookMock, fullMethod).Inc()
 			return mockResp, err
 		}
 
 		if newCtx, err = hoo.Before(ctx, req, fullMethod); err != nil {
+			log.Warn("hook before error", zap.String("user", getCurrentUser(ctx)), zap.String("full method", fullMethod),
+				zap.Any("request", req), zap.Error(err))
+			metrics.ProxyHookFunc.WithLabelValues(metrics.HookBefore, fullMethod).Inc()
 			return nil, err
 		}
 		realResp, realErr = handler(newCtx, req)
 		if err = hoo.After(newCtx, realResp, realErr, fullMethod); err != nil {
+			log.Warn("hook after error", zap.String("user", getCurrentUser(ctx)), zap.String("full method", fullMethod),
+				zap.Any("request", req), zap.Error(err))
+			metrics.ProxyHookFunc.WithLabelValues(metrics.HookAfter, fullMethod).Inc()
 			return nil, err
 		}
 		return realResp, realErr
 	}
+}
+
+func getCurrentUser(ctx context.Context) string {
+	username, err := GetCurUserFromContext(ctx)
+	if err != nil {
+		log.Warn("fail to get current user", zap.Error(err))
+	}
+	return username
 }
