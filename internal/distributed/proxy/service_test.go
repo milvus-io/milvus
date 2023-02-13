@@ -28,29 +28,29 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/health/grpc_health_v1"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	milvusmock "github.com/milvus-io/milvus/internal/util/mock"
 	"github.com/milvus-io/milvus/internal/util/uniquegenerator"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"google.golang.org/grpc/health/grpc_health_v1"
 )
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -344,6 +344,10 @@ func (m *MockIndexCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetric
 }
 
 func (m *MockIndexCoord) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
+	return nil, nil
+}
+
+func (m *MockRootCoord) RenameCollection(ctx context.Context, req *milvuspb.RenameCollectionRequest) (*commonpb.Status, error) {
 	return nil, nil
 }
 
@@ -986,6 +990,10 @@ func (m *MockProxy) ListResourceGroups(ctx context.Context, req *milvuspb.ListRe
 	return nil, nil
 }
 
+func (m *MockProxy) RenameCollection(ctx context.Context, req *milvuspb.RenameCollectionRequest) (*commonpb.Status, error) {
+	return nil, nil
+}
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 type WaitOption struct {
@@ -1438,6 +1446,11 @@ func Test_NewServer(t *testing.T) {
 
 	t.Run("DescribeResourceGroup", func(t *testing.T) {
 		_, err := server.DescribeResourceGroup(ctx, nil)
+		assert.Nil(t, err)
+	})
+
+	t.Run("RenameCollection", func(t *testing.T) {
+		_, err := server.RenameCollection(ctx, nil)
 		assert.Nil(t, err)
 	})
 
