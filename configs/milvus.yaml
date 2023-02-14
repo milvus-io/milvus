@@ -333,9 +333,10 @@ dataNode:
 # Configures the system log output.
 log:
   level: debug # Only supports debug, info, warn, error, panic, or fatal. Default 'info'.
+  stdout: "true" # default true, print log to stdout
   file:
     # please adjust in embedded Milvus: /tmp/milvus/logs
-    rootPath: "" # default to stdout, stderr
+    rootPath: "" # root dir path to put logs, default "" means no log file will print
     maxSize: 300 # MB
     maxAge: 10 # Maximum time for log retention in day.
     maxBackups: 20
