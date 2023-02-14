@@ -796,7 +796,7 @@ func Test_parseBinlogKey(t *testing.T) {
 
 func verifyBinlogs(t *testing.T, binlogBytes []byte) {
 	binlogs := &datapb.FieldBinlog{}
-	err := proto.Unmarshal([]byte(binlogBytes), binlogs)
+	err := proto.Unmarshal(binlogBytes, binlogs)
 	assert.NoError(t, err)
 	assert.Equal(t, 1, len(binlogs.Binlogs))
 	assert.Equal(t, int64(99), binlogs.Binlogs[0].GetLogID())

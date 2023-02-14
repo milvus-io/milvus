@@ -19,6 +19,8 @@ linters:
     - gosimple
     - gosec
     - revive
+    - durationcheck
+    - unconvert
       #    - gocritic
 
 linters-settings:

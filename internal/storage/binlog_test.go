@@ -1293,7 +1293,7 @@ func TestNewBinlogReaderError(t *testing.T) {
 	assert.NotNil(t, err)
 
 	buffer := new(bytes.Buffer)
-	err = binary.Write(buffer, common.Endian, int32(MagicNumber))
+	err = binary.Write(buffer, common.Endian, MagicNumber)
 	assert.Nil(t, err)
 	data = buffer.Bytes()
 

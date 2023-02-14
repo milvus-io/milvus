@@ -503,12 +503,12 @@ func getTypeName(dt schemapb.DataType) string {
 
 func pkToShard(pk interface{}, shardNum uint32) (uint32, error) {
 	var shard uint32
-	strPK, ok := interface{}(pk).(string)
+	strPK, ok := pk.(string)
 	if ok {
 		hash := typeutil.HashString2Uint32(strPK)
 		shard = hash % shardNum
 	} else {
-		intPK, ok := interface{}(pk).(int64)
+		intPK, ok := pk.(int64)
 		if !ok {
 			log.Error("Numpy parser: primary key field must be int64 or varchar")
 			return 0, fmt.Errorf("primary key field must be int64 or varchar")

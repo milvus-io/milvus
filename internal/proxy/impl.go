@@ -2270,7 +2270,7 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 
 		req: &milvuspb.UpsertRequest{
 			Base: commonpbutil.NewMsgBase(
-				commonpbutil.WithMsgType(commonpb.MsgType(commonpb.MsgType_Upsert)),
+				commonpbutil.WithMsgType(commonpb.MsgType_Upsert),
 				commonpbutil.WithSourceID(paramtable.GetNodeID()),
 			),
 			CollectionName: request.CollectionName,

@@ -90,7 +90,7 @@ func reduceSearchResultsAndFillData(plan *SearchPlan, searchResults []*SearchRes
 		}
 		cSearchResults = append(cSearchResults, res.cSearchResult)
 	}
-	cSearchResultPtr := (*C.CSearchResult)(&cSearchResults[0])
+	cSearchResultPtr := &cSearchResults[0]
 	cNumSegments := C.int64_t(numSegments)
 	var cSliceNQSPtr = (*C.int64_t)(&sliceNQs[0])
 	var cSliceTopKSPtr = (*C.int64_t)(&sliceTopKs[0])
