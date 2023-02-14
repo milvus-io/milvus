@@ -473,6 +473,7 @@ func (suite *ServiceSuite) TestTransferNode() {
 	resp, err := server.TransferNode(ctx, &milvuspb.TransferNodeRequest{
 		SourceResourceGroup: meta.DefaultResourceGroupName,
 		TargetResourceGroup: "rg1",
+		NumNode:             1,
 	})
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, resp.ErrorCode)
@@ -497,6 +498,40 @@ func (suite *ServiceSuite) TestTransferNode() {
 	suite.NoError(err)
 	suite.Contains(resp.Reason, meta.ErrRGNotExist.Error())
 	suite.Equal(commonpb.ErrorCode_IllegalArgument, resp.ErrorCode)
+
+	err = server.meta.ResourceManager.AddResourceGroup("rg3")
+	suite.NoError(err)
+	err = server.meta.ResourceManager.AddResourceGroup("rg4")
+	suite.NoError(err)
+	suite.nodeMgr.Add(session.NewNodeInfo(11, "localhost"))
+	suite.nodeMgr.Add(session.NewNodeInfo(12, "localhost"))
+	suite.nodeMgr.Add(session.NewNodeInfo(13, "localhost"))
+	suite.nodeMgr.Add(session.NewNodeInfo(14, "localhost"))
+	suite.meta.ResourceManager.AssignNode("rg3", 11)
+	suite.meta.ResourceManager.AssignNode("rg3", 12)
+	suite.meta.ResourceManager.AssignNode("rg3", 13)
+	suite.meta.ResourceManager.AssignNode("rg3", 14)
+
+	resp, err = server.TransferNode(ctx, &milvuspb.TransferNodeRequest{
+		SourceResourceGroup: "rg3",
+		TargetResourceGroup: "rg4",
+		NumNode:             3,
+	})
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_Success, resp.ErrorCode)
+	nodes, err = server.meta.ResourceManager.GetNodes("rg3")
+	suite.NoError(err)
+	suite.Len(nodes, 1)
+	nodes, err = server.meta.ResourceManager.GetNodes("rg4")
+	suite.NoError(err)
+	suite.Len(nodes, 3)
+	resp, err = server.TransferNode(ctx, &milvuspb.TransferNodeRequest{
+		SourceResourceGroup: "rg3",
+		TargetResourceGroup: "rg4",
+		NumNode:             3,
+	})
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.ErrorCode)
 
 	// server unhealthy
 	server.status.Store(commonpb.StateCode_Abnormal)

@@ -489,7 +489,7 @@ func (rm *ResourceManager) HandleNodeDown(node int64) (string, error) {
 	return "", ErrNodeNotAssignToRG
 }
 
-func (rm *ResourceManager) TransferNode(from, to string) error {
+func (rm *ResourceManager) TransferNode(from string, to string, numNode int) error {
 	rm.rwmutex.Lock()
 	defer rm.rwmutex.Unlock()
 
@@ -497,57 +497,66 @@ func (rm *ResourceManager) TransferNode(from, to string) error {
 		return ErrRGNotExist
 	}
 
-	if len(rm.groups[from].nodes) == 0 {
-		return ErrRGIsEmpty
-	}
-
 	rm.checkRGNodeStatus(from)
 	rm.checkRGNodeStatus(to)
+	if len(rm.groups[from].nodes) < numNode {
+		return ErrNodeNotEnough
+	}
 
 	//todo: a better way to choose a node with least balance cost
-	node := rm.groups[from].GetNodes()[0]
-	if err := rm.transferNodeInStore(from, to, node); err != nil {
+	movedNodes, err := rm.transferNodeInStore(from, to, numNode)
+	if err != nil {
 		return err
 	}
 
-	err := rm.groups[from].unassignNode(node)
-	if err != nil {
-		// interrupt transfer, unreachable logic path
-		return err
-	}
+	for _, node := range movedNodes {
+		err := rm.groups[from].unassignNode(node)
+		if err != nil {
+			// interrupt transfer, unreachable logic path
+			return err
+		}
 
-	err = rm.groups[to].assignNode(node)
-	if err != nil {
-		// interrupt transfer, unreachable logic path
-		return err
+		err = rm.groups[to].assignNode(node)
+		if err != nil {
+			// interrupt transfer, unreachable logic path
+			return err
+		}
 	}
 
 	return nil
 }
 
-func (rm *ResourceManager) transferNodeInStore(from string, to string, node int64) error {
+func (rm *ResourceManager) transferNodeInStore(from string, to string, numNode int) ([]int64, error) {
+	availableNodes := rm.groups[from].GetNodes()
+	if len(availableNodes) < numNode {
+		return nil, ErrNodeNotEnough
+	}
+
+	movedNodes := make([]int64, 0, numNode)
 	fromNodeList := make([]int64, 0)
-	for nid := range rm.groups[from].nodes {
-		if nid != node {
-			fromNodeList = append(fromNodeList, nid)
+	toNodeList := rm.groups[to].GetNodes()
+	for i := 0; i < len(availableNodes); i++ {
+		if i < numNode {
+			movedNodes = append(movedNodes, availableNodes[i])
+			toNodeList = append(toNodeList, availableNodes[i])
+		} else {
+			fromNodeList = append(fromNodeList, availableNodes[i])
 		}
 	}
-	toNodeList := rm.groups[to].GetNodes()
-	toNodeList = append(toNodeList, node)
 
 	fromRG := &querypb.ResourceGroup{
 		Name:     from,
-		Capacity: int32(rm.groups[from].GetCapacity()) - 1,
+		Capacity: int32(rm.groups[from].GetCapacity() - numNode),
 		Nodes:    fromNodeList,
 	}
 
 	toRG := &querypb.ResourceGroup{
 		Name:     to,
-		Capacity: int32(rm.groups[to].GetCapacity()) + 1,
+		Capacity: int32(rm.groups[to].GetCapacity() + numNode),
 		Nodes:    toNodeList,
 	}
 
-	return rm.store.SaveResourceGroup(fromRG, toRG)
+	return movedNodes, rm.store.SaveResourceGroup(fromRG, toRG)
 }
 
 // auto recover rg, return recover used node num
