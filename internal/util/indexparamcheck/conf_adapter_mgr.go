@@ -57,6 +57,8 @@ func (mgr *ConfAdapterMgrImpl) registerConfAdapter() {
 	mgr.adapters[IndexHNSW] = newHNSWConfAdapter()
 	mgr.adapters[IndexANNOY] = newANNOYConfAdapter()
 	mgr.adapters[IndexDISKANN] = newDISKANNConfAdapter()
+	mgr.adapters[DefaultIndexType] = newScalarConfAdapter()
+	mgr.adapters[DefaultStringIndexType] = newScalarConfAdapter()
 }
 
 func newConfAdapterMgrImpl() *ConfAdapterMgrImpl {

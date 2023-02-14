@@ -80,7 +80,7 @@ func Test_CheckStrByValues(t *testing.T) {
 	}
 
 	for _, test := range cases {
-		if got := CheckStrByValues(test.params, test.key, test.container); got != test.want {
+		if got := CheckStrByValues(test.params, test.key, test.container); (got == nil) != test.want {
 			t.Errorf("CheckStrByValues(%v, %v, %v) = %v", test.params, test.key, test.container, test.want)
 		}
 	}

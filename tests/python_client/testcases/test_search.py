@@ -39,6 +39,7 @@ default_float_field_name = ct.default_float_field_name
 default_bool_field_name = ct.default_bool_field_name
 default_string_field_name = ct.default_string_field_name
 default_index_params = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
+default_scalar_index_params = {}
 vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
 range_search_supported_index = ct.all_index_types[:5]
 range_search_supported_index.append(ct.all_index_types[6])
@@ -3262,7 +3263,7 @@ class TestCollectionSearch(TestcaseBase):
         collection_w = self.init_collection_wrap(name=collection_name, schema=schema,
                                                  check_task=CheckTasks.check_collection_property,
                                                  check_items={"name": collection_name, "schema": schema})
-        collection_w.create_index(field_name1, default_index_params, index_name=index_name)
+        collection_w.create_index(field_name1, default_scalar_index_params, index_name=index_name)
         int_values = pd.Series(data=[i for i in range(0, nb)])
         float_vec_values = cf.gen_vectors(nb, dim)
         dataframe = pd.DataFrame({ct.default_int64_field_name: int_values,

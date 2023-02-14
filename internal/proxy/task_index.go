@@ -109,13 +109,6 @@ func (cit *createIndexTask) OnEnqueue() error {
 func (cit *createIndexTask) parseIndexParams() error {
 	isVecIndex := typeutil.IsVectorType(cit.fieldSchema.DataType)
 	indexParamsMap := make(map[string]string)
-	if !isVecIndex {
-		if cit.fieldSchema.DataType == schemapb.DataType_VarChar {
-			indexParamsMap[common.IndexTypeKey] = DefaultStringIndexType
-		} else {
-			indexParamsMap[common.IndexTypeKey] = DefaultIndexType
-		}
-	}
 
 	for _, kv := range cit.req.GetExtraParams() {
 		if kv.Key == common.IndexParamsKey {
@@ -128,6 +121,20 @@ func (cit *createIndexTask) parseIndexParams() error {
 			}
 		} else {
 			indexParamsMap[kv.Key] = kv.Value
+		}
+	}
+
+	if !isVecIndex {
+		if cit.fieldSchema.DataType == schemapb.DataType_VarChar {
+			if indexType, ok := indexParamsMap[common.IndexTypeKey]; ok && indexType != DefaultStringIndexType {
+				return fmt.Errorf("can't build %s index on field: %s", indexType, cit.fieldSchema.GetDataType().String())
+			}
+			indexParamsMap[common.IndexTypeKey] = DefaultStringIndexType
+		} else {
+			if indexType, ok := indexParamsMap[common.IndexTypeKey]; ok && indexType != DefaultIndexType {
+				return fmt.Errorf("can't build %s index on field: %s", indexType, cit.fieldSchema.GetDataType().String())
+			}
+			indexParamsMap[common.IndexTypeKey] = DefaultIndexType
 		}
 	}
 
@@ -161,11 +168,11 @@ func (cit *createIndexTask) parseIndexParams() error {
 				return err
 			}
 		}
+	}
 
-		err := checkTrain(cit.fieldSchema, indexParamsMap)
-		if err != nil {
-			return err
-		}
+	err := checkTrain(cit.fieldSchema, indexParamsMap)
+	if err != nil {
+		return err
 	}
 	typeParams := cit.fieldSchema.GetTypeParams()
 	typeParamsMap := make(map[string]string)
@@ -238,36 +245,31 @@ func fillDimension(field *schemapb.FieldSchema, indexParams map[string]string) e
 }
 
 func checkTrain(field *schemapb.FieldSchema, indexParams map[string]string) error {
-	indexType := indexParams[common.IndexTypeKey]
-	// skip params check of non-vector field.
-	vecDataTypes := []schemapb.DataType{
-		schemapb.DataType_FloatVector,
-		schemapb.DataType_BinaryVector,
-	}
-	if !funcutil.SliceContain(vecDataTypes, field.GetDataType()) {
-		return indexparamcheck.CheckIndexValid(field.GetDataType(), indexType, indexParams)
-	}
-
-	adapter, err := indexparamcheck.GetConfAdapterMgrInstance().GetAdapter(indexType)
-	if err != nil {
-		log.Warn("Failed to get conf adapter", zap.String(common.IndexTypeKey, indexType))
-		return fmt.Errorf("invalid index type: %s", indexType)
-	}
-
 	if err := fillDimension(field, indexParams); err != nil {
 		return err
 	}
 
+	indexType := indexParams[common.IndexTypeKey]
+	adapter, err := indexparamcheck.GetConfAdapterMgrInstance().GetAdapter(indexType)
+	if err != nil {
+		log.Info("failed to get conf adapter", zap.String(common.IndexTypeKey, indexType))
+		return fmt.Errorf("invalid index type: %s", indexType)
+	}
+
 	ok := adapter.CheckValidDataType(field.GetDataType())
 	if !ok {
-		log.Warn("Field data type don't support the index build type", zap.String("fieldDataType", field.GetDataType().String()), zap.String("indexType", indexType))
+		log.Info("field data type don't support the index build type", zap.String("fieldDataType", field.GetDataType().String()), zap.String("indexType", indexType))
 		return fmt.Errorf("field data type %s don't support the index build type %s", field.GetDataType().String(), indexType)
 	}
 
-	ok = adapter.CheckTrain(indexParams)
-	if !ok {
-		log.Warn("Create index with invalid params", zap.Any("index_params", indexParams))
-		return fmt.Errorf("invalid index params: %v", indexParams)
+	if err = adapter.CheckTrain(indexParams); err != nil {
+		log.Info("create index with invalid params", zap.Error(err))
+		return err
+	}
+
+	if err = adapter.CheckUnnecessaryParams(indexParams); err != nil {
+		log.Info("create index with invalid params", zap.Error(err))
+		return err
 	}
 
 	return nil

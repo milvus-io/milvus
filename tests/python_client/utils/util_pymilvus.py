@@ -45,13 +45,13 @@ all_index_types = [
 ]
 
 default_index_params = [
-    {"nlist": 128},
+    {},
     {"nlist": 128},
     {"nlist": 128},
     {"nlist": 128, "m": 16, "nbits": 8},
     {"M": 48, "efConstruction": 500},
     {"n_trees": 50},
-    {"nlist": 128},
+    {},
     {"nlist": 128}
 ]
 
