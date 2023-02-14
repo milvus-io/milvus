@@ -22,7 +22,6 @@ import (
 	"os"
 	"sync"
 	"syscall"
-	"time"
 
 	"github.com/cockroachdb/errors"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -134,8 +133,9 @@ func (s *Server) Register() error {
 			return err
 		}
 	}
-	go s.session.LivenessCheck(s.ctx, func() {
-		log.Error("QueryCoord disconnected from etcd, process will exit", zap.Int64("serverID", paramtable.GetNodeID()))
+
+	s.session.LivenessCheck(s.ctx, func() {
+		log.Error("QueryCoord disconnected from etcd, process will exit", zap.Int64("serverID", s.session.ServerID))
 		if err := s.Stop(); err != nil {
 			log.Fatal("failed to stop server", zap.Error(err))
 		}
@@ -425,7 +425,7 @@ func (s *Server) startServerLoop() {
 func (s *Server) Stop() error {
 	s.cancel()
 	if s.session != nil {
-		s.session.Revoke(time.Second)
+		s.session.Stop()
 	}
 
 	if s.session != nil {

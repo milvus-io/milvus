@@ -193,7 +193,7 @@ func (node *DataNode) Register() error {
 	node.session.Register()
 
 	// Start liveness check
-	go node.session.LivenessCheck(node.ctx, func() {
+	node.session.LivenessCheck(node.ctx, func() {
 		log.Error("Data Node disconnected from etcd, process will exit", zap.Int64("Server Id", node.GetSession().ServerID))
 		if err := node.Stop(); err != nil {
 			log.Fatal("failed to stop server", zap.Error(err))
@@ -580,7 +580,9 @@ func (node *DataNode) Stop() error {
 		}
 	}
 
-	node.session.Revoke(time.Second)
+	if node.session != nil {
+		node.session.Stop()
+	}
 
 	return nil
 }

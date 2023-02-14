@@ -278,7 +278,7 @@ func (c *Core) Register() error {
 		}
 	}
 	log.Info("RootCoord Register Finished")
-	go c.session.LivenessCheck(c.ctx, func() {
+	c.session.LivenessCheck(c.ctx, func() {
 		log.Error("Root Coord disconnected from etcd, process will exit", zap.Int64("Server Id", c.session.ServerID))
 		if err := c.Stop(); err != nil {
 			log.Fatal("failed to stop server", zap.Error(err))
@@ -674,7 +674,7 @@ func (c *Core) cancelIfNotNil() {
 func (c *Core) revokeSession() {
 	if c.session != nil {
 		// wait at most one second to revoke
-		c.session.Revoke(time.Second)
+		c.session.Stop()
 		log.Info("revoke rootcoord session")
 	}
 }

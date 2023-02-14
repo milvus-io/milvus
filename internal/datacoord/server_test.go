@@ -3947,7 +3947,6 @@ func newTestServer(t *testing.T, receiveCh chan any, opts ...Option) *Server {
 	var err error
 	paramtable.Get().Save(Params.CommonCfg.DataCoordTimeTick.Key, Params.CommonCfg.DataCoordTimeTick.GetValue()+strconv.Itoa(rand.Int()))
 	factory := dependency.NewDefaultFactory(true)
-
 	etcdCli, err := etcd.GetEtcdClient(
 		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
 		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
@@ -4077,10 +4076,6 @@ func newTestServer2(t *testing.T, receiveCh chan any, opts ...Option) *Server {
 	assert.Nil(t, err)
 	err = svr.Start()
 	assert.Nil(t, err)
-
-	_, err = etcdCli.Delete(context.Background(), sessKey, clientv3.WithPrefix())
-	assert.Nil(t, err)
-
 	err = svr.Register()
 	assert.Nil(t, err)
 
@@ -4196,6 +4191,7 @@ func Test_CheckHealth(t *testing.T) {
 func Test_newChunkManagerFactory(t *testing.T) {
 	server := newTestServer2(t, nil)
 	paramtable.Get().Save(Params.DataCoordCfg.EnableGarbageCollection.Key, "true")
+	defer closeTestServer(t, server)
 
 	t.Run("err_minio_bad_address", func(t *testing.T) {
 		paramtable.Get().Save(Params.CommonCfg.StorageType.Key, "minio")
@@ -4221,6 +4217,7 @@ func Test_initGarbageCollection(t *testing.T) {
 	defer paramtable.Get().Reset(Params.DataCoordCfg.EnableGarbageCollection.Key)
 
 	server := newTestServer2(t, nil)
+	defer closeTestServer(t, server)
 
 	t.Run("ok", func(t *testing.T) {
 		storageCli, err := server.newChunkManagerFactory()

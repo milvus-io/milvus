@@ -156,7 +156,7 @@ func (node *QueryNode) initSession() error {
 func (node *QueryNode) Register() error {
 	node.session.Register()
 	// start liveness check
-	go node.session.LivenessCheck(node.ctx, func() {
+	node.session.LivenessCheck(node.ctx, func() {
 		log.Error("Query Node disconnected from etcd, process will exit", zap.Int64("Server Id", paramtable.GetNodeID()))
 		if err := node.Stop(); err != nil {
 			log.Fatal("failed to stop server", zap.Error(err))
