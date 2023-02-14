@@ -21,6 +21,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/milvus-io/milvus/internal/common"
+
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -284,6 +286,214 @@ func TestCreateIndexTask_PreExecute(t *testing.T) {
 		qc := NewQueryCoordMock(withValidShardLeaders(), SetQueryCoordShowCollectionsFunc(showCollectionMock))
 		qc.updateState(commonpb.StateCode_Healthy)
 		cit.queryCoord = qc
+		err := cit.PreExecute(ctx)
+		assert.Error(t, err)
+	})
+
+	t.Run("check HNSW params error", func(t *testing.T) {
+		cit.req = &milvuspb.CreateIndexRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_CreateIndex,
+			},
+			CollectionName: collectionName,
+			FieldName:      fieldName,
+			ExtraParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.IndexTypeKey,
+					Value: "HNSW",
+				},
+				{
+					Key:   "params",
+					Value: "{\"M\": 48, \"efConstruction\": 500}",
+				},
+				{
+					Key:   "A",
+					Value: "100",
+				},
+			},
+		}
+		err := cit.PreExecute(ctx)
+		assert.Error(t, err)
+	})
+
+	t.Run("check FLAT params error", func(t *testing.T) {
+		cit.req = &milvuspb.CreateIndexRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_CreateIndex,
+			},
+			CollectionName: collectionName,
+			FieldName:      fieldName,
+			ExtraParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.IndexTypeKey,
+					Value: "FLAT",
+				},
+				{
+					Key:   "params",
+					Value: "{}",
+				},
+				{
+					Key:   "A",
+					Value: "100",
+				},
+			},
+		}
+		err := cit.PreExecute(ctx)
+		assert.Error(t, err)
+	})
+
+	t.Run("check IVF_PQ params error", func(t *testing.T) {
+		cit.req = &milvuspb.CreateIndexRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_CreateIndex,
+			},
+			CollectionName: collectionName,
+			FieldName:      fieldName,
+			ExtraParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.IndexTypeKey,
+					Value: "IVF_PQ",
+				},
+				{
+					Key:   "params",
+					Value: "{\"nlist\": 128, \"m\": 16, \"nbits\": 8}",
+				},
+				{
+					Key:   "A",
+					Value: "100",
+				},
+			},
+		}
+		err := cit.PreExecute(ctx)
+		assert.Error(t, err)
+	})
+
+	t.Run("check IVF_SQ8 params error", func(t *testing.T) {
+		cit.req = &milvuspb.CreateIndexRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_CreateIndex,
+			},
+			CollectionName: collectionName,
+			FieldName:      fieldName,
+			ExtraParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.IndexTypeKey,
+					Value: "IVF_SQ8",
+				},
+				{
+					Key:   "params",
+					Value: "{\"nlist\": 64}",
+				},
+				{
+					Key:   "A",
+					Value: "100",
+				},
+			},
+		}
+		err := cit.PreExecute(ctx)
+		assert.Error(t, err)
+	})
+
+	t.Run("check ANNOY params error", func(t *testing.T) {
+		cit.req = &milvuspb.CreateIndexRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_CreateIndex,
+			},
+			CollectionName: collectionName,
+			FieldName:      fieldName,
+			ExtraParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.IndexTypeKey,
+					Value: "ANNOY",
+				},
+				{
+					Key:   "params",
+					Value: "{\"n_trees\": 50}",
+				},
+				{
+					Key:   "A",
+					Value: "100",
+				},
+			},
+		}
+		err := cit.PreExecute(ctx)
+		assert.Error(t, err)
+	})
+
+	t.Run("check DISKANN params error", func(t *testing.T) {
+		cit.req = &milvuspb.CreateIndexRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_CreateIndex,
+			},
+			CollectionName: collectionName,
+			FieldName:      fieldName,
+			ExtraParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.IndexTypeKey,
+					Value: "DISKANN",
+				},
+				{
+					Key:   "params",
+					Value: "{}",
+				},
+				{
+					Key:   "A",
+					Value: "100",
+				},
+			},
+		}
+		err := cit.PreExecute(ctx)
+		assert.Error(t, err)
+	})
+
+	t.Run("check BIN_FLAT params error", func(t *testing.T) {
+		cit.req = &milvuspb.CreateIndexRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_CreateIndex,
+			},
+			CollectionName: collectionName,
+			FieldName:      fieldName,
+			ExtraParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.IndexTypeKey,
+					Value: "BIN_FLAT",
+				},
+				{
+					Key:   "params",
+					Value: "{}",
+				},
+				{
+					Key:   "A",
+					Value: "100",
+				},
+			},
+		}
+		err := cit.PreExecute(ctx)
+		assert.Error(t, err)
+	})
+
+	t.Run("check BIN_IVF_FLAT params error", func(t *testing.T) {
+		cit.req = &milvuspb.CreateIndexRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_CreateIndex,
+			},
+			CollectionName: collectionName,
+			FieldName:      fieldName,
+			ExtraParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.IndexTypeKey,
+					Value: "BIN_IVF_FLAT",
+				},
+				{
+					Key:   "params",
+					Value: "{\"nlist\": 128}",
+				},
+				{
+					Key:   "A",
+					Value: "100",
+				},
+			},
+		}
 		err := cit.PreExecute(ctx)
 		assert.Error(t, err)
 	})

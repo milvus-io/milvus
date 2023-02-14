@@ -17,119 +17,18 @@
 package indexparamcheck
 
 import (
+	"fmt"
 	"strconv"
 
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
 
-const (
-	// L2 represents Euclidean distance
-	L2 = "L2"
-
-	// IP represents inner product distance
-	IP = "IP"
-
-	// HAMMING represents hamming distance
-	HAMMING = "HAMMING"
-
-	// JACCARD represents jaccard distance
-	JACCARD = "JACCARD"
-
-	// TANIMOTO represents tanimoto distance
-	TANIMOTO = "TANIMOTO"
-
-	// SUBSTRUCTURE represents substructure distance
-	SUBSTRUCTURE = "SUBSTRUCTURE"
-
-	// SUPERSTRUCTURE represents superstructure distance
-	SUPERSTRUCTURE = "SUPERSTRUCTURE"
-
-	MinNBits     = 1
-	MaxNBits     = 16
-	DefaultNBits = 8
-
-	// MinNList is the lower limit of nlist that used in Index IVFxxx
-	MinNList = 1
-	// MaxNList is the upper limit of nlist that used in Index IVFxxx
-	MaxNList = 65536
-
-	// DefaultMinDim is the smallest dimension supported in Milvus
-	DefaultMinDim = 1
-	// DefaultMaxDim is the largest dimension supported in Milvus
-	DefaultMaxDim = 32768
-
-	// If Dim = 32 and raw vector data = 2G, query node need 24G disk space When loading the vectors' disk index
-	// If Dim = 2, and raw vector data = 2G, query node need 240G disk space When loading the vectors' disk index
-	// So DiskAnnMinDim should be greater than or equal to 32 to avoid running out of disk space
-	DiskAnnMinDim = 32
-
-	NgtMinEdgeSize = 1
-	NgtMaxEdgeSize = 200
-
-	HNSWMinEfConstruction = 8
-	HNSWMaxEfConstruction = 512
-	HNSWMinM              = 4
-	HNSWMaxM              = 64
-
-	MinKNNG              = 5
-	MaxKNNG              = 300
-	MinSearchLength      = 10
-	MaxSearchLength      = 300
-	MinOutDegree         = 5
-	MaxOutDegree         = 300
-	MinCandidatePoolSize = 50
-	MaxCandidatePoolSize = 1000
-
-	MinNTrees = 1
-	// too large of n_trees takes much time, if there is real requirement, change this threshold.
-	MaxNTrees = 1024
-
-	// DIM is a constant used to represent dimension
-	DIM = "dim"
-	// Metric is a constant used to metric type
-	Metric = "metric_type"
-	// NLIST is a constant used to nlist in Index IVFxxx
-	NLIST = "nlist"
-	NBITS = "nbits"
-	IVFM  = "m"
-
-	KNNG         = "knng"
-	SearchLength = "search_length"
-	OutDegree    = "out_degree"
-	CANDIDATE    = "candidate_pool_size"
-
-	EFConstruction = "efConstruction"
-	HNSWM          = "M"
-
-	PQM    = "PQM"
-	NTREES = "n_trees"
-
-	EdgeSize                  = "edge_size"
-	ForcedlyPrunedEdgeSize    = "forcedly_pruned_edge_size"
-	SelectivelyPrunedEdgeSize = "selectively_pruned_edge_size"
-
-	OutgoingEdgeSize = "outgoing_edge_size"
-	IncomingEdgeSize = "incoming_edge_size"
-
-	IndexMode = "index_mode"
-	CPUMode   = "CPU"
-	GPUMode   = "GPU"
-)
-
-// METRICS is a set of all metrics types supported for float vector.
-var METRICS = []string{L2, IP} // const
-
-// BinIDMapMetrics is a set of all metric types supported for binary vector.
-var BinIDMapMetrics = []string{HAMMING, JACCARD, TANIMOTO, SUBSTRUCTURE, SUPERSTRUCTURE}   // const
-var BinIvfMetrics = []string{HAMMING, JACCARD, TANIMOTO}                                   // const
-var supportDimPerSubQuantizer = []int{32, 28, 24, 20, 16, 12, 10, 8, 6, 4, 3, 2, 1}        // const
-var supportSubQuantizer = []int{96, 64, 56, 48, 40, 32, 28, 24, 20, 16, 12, 8, 4, 3, 2, 1} // const
-
 type ConfAdapter interface {
 	// CheckTrain returns true if the index can be built with the specific index parameters.
-	CheckTrain(map[string]string) bool
+	CheckTrain(map[string]string) error
 	CheckValidDataType(dType schemapb.DataType) bool
+	CheckUnnecessaryParams(map[string]string) error
 }
 
 // BaseConfAdapter checks if a `FLAT` index can be built.
@@ -137,9 +36,9 @@ type BaseConfAdapter struct {
 }
 
 // CheckTrain check whether the params contains supported metrics types
-func (adapter *BaseConfAdapter) CheckTrain(params map[string]string) bool {
+func (adapter *BaseConfAdapter) CheckTrain(params map[string]string) error {
 	if !CheckIntByRange(params, DIM, DefaultMinDim, DefaultMaxDim) {
-		return false
+		return fmt.Errorf("invild param with: %s", DIM)
 	}
 
 	return CheckStrByValues(params, Metric, METRICS)
@@ -148,6 +47,10 @@ func (adapter *BaseConfAdapter) CheckTrain(params map[string]string) bool {
 // CheckValidDataType check whether the field data type is supported for the index type
 func (adapter *BaseConfAdapter) CheckValidDataType(dType schemapb.DataType) bool {
 	return true
+}
+
+func (adapter *BaseConfAdapter) CheckUnnecessaryParams(params map[string]string) error {
+	return checkUnnecessaryParams(FLATParams, params)
 }
 
 func newBaseConfAdapter() *BaseConfAdapter {
@@ -160,14 +63,18 @@ type IVFConfAdapter struct {
 }
 
 // CheckTrain returns true if the index can be built with the specific index parameters.
-func (adapter *IVFConfAdapter) CheckTrain(params map[string]string) bool {
+func (adapter *IVFConfAdapter) CheckTrain(params map[string]string) error {
 	if !CheckIntByRange(params, NLIST, MinNList, MaxNList) {
-		return false
+		return fmt.Errorf("invild param with: %s", NLIST)
 	}
 
 	// skip check number of rows
 
 	return adapter.BaseConfAdapter.CheckTrain(params)
+}
+
+func (adapter *IVFConfAdapter) CheckUnnecessaryParams(params map[string]string) error {
+	return checkUnnecessaryParams(IVFFLATParams, params)
 }
 
 func newIVFConfAdapter() *IVFConfAdapter {
@@ -180,23 +87,23 @@ type IVFPQConfAdapter struct {
 }
 
 // CheckTrain checks if ivf-pq index can be built with the specific index parameters.
-func (adapter *IVFPQConfAdapter) CheckTrain(params map[string]string) bool {
-	if !adapter.IVFConfAdapter.CheckTrain(params) {
-		return false
+func (adapter *IVFPQConfAdapter) CheckTrain(params map[string]string) error {
+	if err := adapter.IVFConfAdapter.CheckTrain(params); err != nil {
+		return err
 	}
 
 	return adapter.checkPQParams(params)
 }
 
-func (adapter *IVFPQConfAdapter) checkPQParams(params map[string]string) bool {
+func (adapter *IVFPQConfAdapter) checkPQParams(params map[string]string) error {
 	dimStr, dimensionExist := params[DIM]
 	if !dimensionExist {
-		return false
+		return fmt.Errorf("lack necessary parameter: %s", DIM)
 	}
 
 	dimension, err := strconv.Atoi(dimStr)
 	if err != nil { // invalid dimension
-		return false
+		return fmt.Errorf("invalid param with: %s", DIM)
 	}
 
 	// nbits can be set to default: 8
@@ -207,17 +114,17 @@ func (adapter *IVFPQConfAdapter) checkPQParams(params map[string]string) bool {
 	} else {
 		nbits, err = strconv.Atoi(nbitsStr)
 		if err != nil { // invalid nbits
-			return false
+			return fmt.Errorf("invalid param with: %s", NBITS)
 		}
 	}
 
 	mStr, ok := params[IVFM]
 	if !ok {
-		return false
+		return fmt.Errorf("lack necessary parameter: %s", IVFM)
 	}
 	m, err := strconv.Atoi(mStr)
 	if err != nil || m == 0 { // invalid m
-		return false
+		return fmt.Errorf("invalid param with: %s", IVFM)
 	}
 
 	mode, ok := params[IndexMode]
@@ -226,10 +133,14 @@ func (adapter *IVFPQConfAdapter) checkPQParams(params map[string]string) bool {
 	}
 
 	if mode == GPUMode && !adapter.checkGPUPQParams(dimension, m, nbits) {
-		return false
+		return fmt.Errorf("invalid param in %s mode", mode)
 	}
 
-	return adapter.checkCPUPQParams(dimension, m)
+	if !adapter.checkCPUPQParams(dimension, m) {
+		return fmt.Errorf("invalid param in %s mode", mode)
+	}
+
+	return nil
 }
 
 func (adapter *IVFPQConfAdapter) checkGPUPQParams(dimension, m, nbits int) bool {
@@ -245,6 +156,10 @@ func (adapter *IVFPQConfAdapter) checkGPUPQParams(dimension, m, nbits int) bool 
 
 func (adapter *IVFPQConfAdapter) checkCPUPQParams(dimension, m int) bool {
 	return (dimension % m) == 0
+}
+
+func (adapter *IVFPQConfAdapter) CheckUnnecessaryParams(params map[string]string) error {
+	return checkUnnecessaryParams(IVFPQParams, params)
 }
 
 func newIVFPQConfAdapter() *IVFPQConfAdapter {
@@ -267,11 +182,15 @@ func (adapter *IVFSQConfAdapter) checkNBits(params map[string]string) bool {
 }
 
 // CheckTrain returns true if the index can be built with the specific index parameters.
-func (adapter *IVFSQConfAdapter) CheckTrain(params map[string]string) bool {
+func (adapter *IVFSQConfAdapter) CheckTrain(params map[string]string) error {
 	if !adapter.checkNBits(params) {
-		return false
+		return fmt.Errorf("invild param with: %s", NBITS)
 	}
 	return adapter.IVFConfAdapter.CheckTrain(params)
+}
+
+func (adapter *IVFSQConfAdapter) CheckUnnecessaryParams(params map[string]string) error {
+	return checkUnnecessaryParams(IVFSQ8Params, params)
 }
 
 func newIVFSQConfAdapter() *IVFSQConfAdapter {
@@ -283,12 +202,16 @@ type BinIDMAPConfAdapter struct {
 }
 
 // CheckTrain checks if a binary flat index can be built with the specific parameters.
-func (adapter *BinIDMAPConfAdapter) CheckTrain(params map[string]string) bool {
+func (adapter *BinIDMAPConfAdapter) CheckTrain(params map[string]string) error {
 	if !CheckIntByRange(params, DIM, DefaultMinDim, DefaultMaxDim) {
-		return false
+		return fmt.Errorf("invild param with: %s", DIM)
 	}
 
 	return CheckStrByValues(params, Metric, BinIDMapMetrics)
+}
+
+func (adapter *BinIDMAPConfAdapter) CheckUnnecessaryParams(params map[string]string) error {
+	return checkUnnecessaryParams(BINFLATParams, params)
 }
 
 func newBinIDMAPConfAdapter() *BinIDMAPConfAdapter {
@@ -301,22 +224,22 @@ type BinIVFConfAdapter struct {
 }
 
 // CheckTrain checks if a binary ivf index can be built with specific parameters.
-func (adapter *BinIVFConfAdapter) CheckTrain(params map[string]string) bool {
+func (adapter *BinIVFConfAdapter) CheckTrain(params map[string]string) error {
 	if !CheckIntByRange(params, DIM, DefaultMinDim, DefaultMaxDim) {
-		return false
+		return fmt.Errorf("invild param with: %s", DIM)
 	}
 
 	if !CheckIntByRange(params, NLIST, MinNList, MaxNList) {
-		return false
-	}
-
-	if !CheckStrByValues(params, Metric, BinIvfMetrics) {
-		return false
+		return fmt.Errorf("invild param with: %s", DIM)
 	}
 
 	// skip checking the number of rows
 
-	return true
+	return CheckStrByValues(params, Metric, BinIvfMetrics)
+}
+
+func (adapter *BinIVFConfAdapter) CheckUnnecessaryParams(params map[string]string) error {
+	return checkUnnecessaryParams(BINIVFFLATParams, params)
 }
 
 func newBinIVFConfAdapter() *BinIVFConfAdapter {
@@ -328,30 +251,34 @@ type NSGConfAdapter struct {
 }
 
 // CheckTrain checks if a nsg index can be built with specific parameters.
-func (adapter *NSGConfAdapter) CheckTrain(params map[string]string) bool {
-	if !CheckStrByValues(params, Metric, METRICS) {
-		return false
+func (adapter *NSGConfAdapter) CheckTrain(params map[string]string) error {
+	if err := CheckStrByValues(params, Metric, METRICS); err != nil {
+		return err
 	}
 
 	if !CheckIntByRange(params, KNNG, MinKNNG, MaxKNNG) {
-		return false
+		return fmt.Errorf("invild param with: %s", KNNG)
 	}
 
 	if !CheckIntByRange(params, SearchLength, MinSearchLength, MaxSearchLength) {
-		return false
+		return fmt.Errorf("invild param with: %s", SearchLength)
 	}
 
 	if !CheckIntByRange(params, OutDegree, MinOutDegree, MaxOutDegree) {
-		return false
+		return fmt.Errorf("invild param with: %s", OutDegree)
 	}
 
 	if !CheckIntByRange(params, CANDIDATE, MinCandidatePoolSize, MaxCandidatePoolSize) {
-		return false
+		return fmt.Errorf("invild param with: %s", CANDIDATE)
 	}
 
 	// skip checking the number of rows
 
-	return true
+	return nil
+}
+
+func (adapter *NSGConfAdapter) CheckUnnecessaryParams(params map[string]string) error {
+	return checkUnnecessaryParams(NSGParams, params)
 }
 
 func newNSGConfAdapter() *NSGConfAdapter {
@@ -364,16 +291,20 @@ type HNSWConfAdapter struct {
 }
 
 // CheckTrain checks if a hnsw index can be built with specific parameters.
-func (adapter *HNSWConfAdapter) CheckTrain(params map[string]string) bool {
+func (adapter *HNSWConfAdapter) CheckTrain(params map[string]string) error {
 	if !CheckIntByRange(params, EFConstruction, HNSWMinEfConstruction, HNSWMaxEfConstruction) {
-		return false
+		return fmt.Errorf("invild param with: %s", EFConstruction)
 	}
 
 	if !CheckIntByRange(params, HNSWM, HNSWMinM, HNSWMaxM) {
-		return false
+		return fmt.Errorf("invild param with: %s", HNSWM)
 	}
 
 	return adapter.BaseConfAdapter.CheckTrain(params)
+}
+
+func (adapter *HNSWConfAdapter) CheckUnnecessaryParams(params map[string]string) error {
+	return checkUnnecessaryParams(HNSWParams, params)
 }
 
 func newHNSWConfAdapter() *HNSWConfAdapter {
@@ -386,12 +317,16 @@ type ANNOYConfAdapter struct {
 }
 
 // CheckTrain checks if an annoy index can be built with specific parameters.
-func (adapter *ANNOYConfAdapter) CheckTrain(params map[string]string) bool {
+func (adapter *ANNOYConfAdapter) CheckTrain(params map[string]string) error {
 	if !CheckIntByRange(params, NTREES, MinNTrees, MaxNTrees) {
-		return false
+		return fmt.Errorf("invild param with: %s", NTREES)
 	}
 
 	return adapter.BaseConfAdapter.CheckTrain(params)
+}
+
+func (adapter *ANNOYConfAdapter) CheckUnnecessaryParams(params map[string]string) error {
+	return checkUnnecessaryParams(ANNOYParams, params)
 }
 
 func newANNOYConfAdapter() *ANNOYConfAdapter {
@@ -400,20 +335,16 @@ func newANNOYConfAdapter() *ANNOYConfAdapter {
 
 // RHNSWFlatConfAdapter checks if a rhnsw flat index can be built.
 type RHNSWFlatConfAdapter struct {
-	BaseConfAdapter
+	HNSWConfAdapter
 }
 
 // CheckTrain checks if a rhnsw flat index can be built with specific parameters.
-func (adapter *RHNSWFlatConfAdapter) CheckTrain(params map[string]string) bool {
-	if !CheckIntByRange(params, EFConstruction, HNSWMinEfConstruction, HNSWMaxEfConstruction) {
-		return false
-	}
+func (adapter *RHNSWFlatConfAdapter) CheckTrain(params map[string]string) error {
+	return adapter.HNSWConfAdapter.CheckTrain(params)
+}
 
-	if !CheckIntByRange(params, HNSWM, HNSWMinM, HNSWMaxM) {
-		return false
-	}
-
-	return adapter.BaseConfAdapter.CheckTrain(params)
+func (adapter *RHNSWFlatConfAdapter) CheckUnnecessaryParams(params map[string]string) error {
+	return checkUnnecessaryParams(HNSWParams, params)
 }
 
 func newRHNSWFlatConfAdapter() *RHNSWFlatConfAdapter {
@@ -422,35 +353,35 @@ func newRHNSWFlatConfAdapter() *RHNSWFlatConfAdapter {
 
 // RHNSWPQConfAdapter checks if a rhnsw pq index can be built.
 type RHNSWPQConfAdapter struct {
-	BaseConfAdapter
 	IVFPQConfAdapter
+	HNSWConfAdapter
 }
 
 // CheckTrain checks if a rhnsw pq index can be built with specific parameters.
-func (adapter *RHNSWPQConfAdapter) CheckTrain(params map[string]string) bool {
-	if !adapter.BaseConfAdapter.CheckTrain(params) {
-		return false
-	}
-
-	if !CheckIntByRange(params, EFConstruction, HNSWMinEfConstruction, HNSWMaxEfConstruction) {
-		return false
-	}
-
-	if !CheckIntByRange(params, HNSWM, HNSWMinM, HNSWMaxM) {
-		return false
+func (adapter *RHNSWPQConfAdapter) CheckTrain(params map[string]string) error {
+	if err := adapter.HNSWConfAdapter.CheckTrain(params); err != nil {
+		return err
 	}
 
 	dimension, _ := strconv.Atoi(params[DIM])
 	pqmStr, ok := params[PQM]
 	if !ok {
-		return false
+		return fmt.Errorf("lack necessary param: %s", PQM)
 	}
 	pqm, err := strconv.Atoi(pqmStr)
 	if err != nil || pqm == 0 {
-		return false
+		return fmt.Errorf("invild param with: %s", PQM)
 	}
 
-	return adapter.IVFPQConfAdapter.checkCPUPQParams(dimension, pqm)
+	if !adapter.IVFPQConfAdapter.checkCPUPQParams(dimension, pqm) {
+		return fmt.Errorf("invild param with: %s", PQM)
+	}
+
+	return nil
+}
+
+func (adapter *RHNSWPQConfAdapter) CheckUnnecessaryParams(params map[string]string) error {
+	return checkUnnecessaryParams(RHNSWPQParams, params)
 }
 
 func newRHNSWPQConfAdapter() *RHNSWPQConfAdapter {
@@ -460,19 +391,16 @@ func newRHNSWPQConfAdapter() *RHNSWPQConfAdapter {
 // RHNSWSQConfAdapter checks if a rhnsw sq index can be built.
 type RHNSWSQConfAdapter struct {
 	BaseConfAdapter
+	HNSWConfAdapter
 }
 
 // CheckTrain checks if a rhnsw sq index can be built with specific parameters.
-func (adapter *RHNSWSQConfAdapter) CheckTrain(params map[string]string) bool {
-	if !CheckIntByRange(params, EFConstruction, HNSWMinEfConstruction, HNSWMaxEfConstruction) {
-		return false
-	}
+func (adapter *RHNSWSQConfAdapter) CheckTrain(params map[string]string) error {
+	return adapter.HNSWConfAdapter.CheckTrain(params)
+}
 
-	if !CheckIntByRange(params, HNSWM, HNSWMinM, HNSWMaxM) {
-		return false
-	}
-
-	return adapter.BaseConfAdapter.CheckTrain(params)
+func (adapter *RHNSWSQConfAdapter) CheckUnnecessaryParams(params map[string]string) error {
+	return checkUnnecessaryParams(HNSWParams, params)
 }
 
 func newRHNSWSQConfAdapter() *RHNSWSQConfAdapter {
@@ -484,26 +412,30 @@ type NGTPANNGConfAdapter struct {
 	BaseConfAdapter
 }
 
-func (adapter *NGTPANNGConfAdapter) CheckTrain(params map[string]string) bool {
+func (adapter *NGTPANNGConfAdapter) CheckTrain(params map[string]string) error {
 	if !CheckIntByRange(params, EdgeSize, NgtMinEdgeSize, NgtMaxEdgeSize) {
-		return false
+		return fmt.Errorf("invild param with: %s", EdgeSize)
 	}
 
 	if !CheckIntByRange(params, ForcedlyPrunedEdgeSize, NgtMinEdgeSize, NgtMaxEdgeSize) {
-		return false
+		return fmt.Errorf("invild param with: %s", ForcedlyPrunedEdgeSize)
 	}
 
 	if !CheckIntByRange(params, SelectivelyPrunedEdgeSize, NgtMinEdgeSize, NgtMaxEdgeSize) {
-		return false
+		return fmt.Errorf("invild param with: %s", SelectivelyPrunedEdgeSize)
 	}
 
 	selectivelyPrunedEdgeSize, _ := strconv.Atoi(params[SelectivelyPrunedEdgeSize])
 	forcedlyPrunedEdgeSize, _ := strconv.Atoi(params[ForcedlyPrunedEdgeSize])
 	if selectivelyPrunedEdgeSize >= forcedlyPrunedEdgeSize {
-		return false
+		return fmt.Errorf("invild param with: %s and %s", ForcedlyPrunedEdgeSize, ForcedlyPrunedEdgeSize)
 	}
 
 	return adapter.BaseConfAdapter.CheckTrain(params)
+}
+
+func (adapter *NGTPANNGConfAdapter) CheckUnnecessaryParams(params map[string]string) error {
+	return checkUnnecessaryParams(NGTPANNGParams, params)
 }
 
 func newNGTPANNGConfAdapter() *NGTPANNGConfAdapter {
@@ -515,20 +447,24 @@ type NGTONNGConfAdapter struct {
 	BaseConfAdapter
 }
 
-func (adapter *NGTONNGConfAdapter) CheckTrain(params map[string]string) bool {
+func (adapter *NGTONNGConfAdapter) CheckTrain(params map[string]string) error {
 	if !CheckIntByRange(params, EdgeSize, NgtMinEdgeSize, NgtMaxEdgeSize) {
-		return false
+		return fmt.Errorf("invild param with: %s", EdgeSize)
 	}
 
 	if !CheckIntByRange(params, OutgoingEdgeSize, NgtMinEdgeSize, NgtMaxEdgeSize) {
-		return false
+		return fmt.Errorf("invild param with: %s", OutgoingEdgeSize)
 	}
 
 	if !CheckIntByRange(params, IncomingEdgeSize, NgtMinEdgeSize, NgtMaxEdgeSize) {
-		return false
+		return fmt.Errorf("invild param with: %s", IncomingEdgeSize)
 	}
 
 	return adapter.BaseConfAdapter.CheckTrain(params)
+}
+
+func (adapter *NGTONNGConfAdapter) CheckUnnecessaryParams(params map[string]string) error {
+	return checkUnnecessaryParams(NGTONNGParams, params)
 }
 
 func newNGTONNGConfAdapter() *NGTONNGConfAdapter {
@@ -539,11 +475,15 @@ type DISKANNConfAdapter struct {
 	BaseConfAdapter
 }
 
-func (adapter *DISKANNConfAdapter) CheckTrain(params map[string]string) bool {
+func (adapter *DISKANNConfAdapter) CheckTrain(params map[string]string) error {
 	if !CheckIntByRange(params, DIM, DiskAnnMinDim, DefaultMaxDim) {
-		return false
+		return fmt.Errorf("invild param with: %s", DIM)
 	}
-	return adapter.BaseConfAdapter.CheckTrain(params)
+	return nil
+}
+
+func (adapter *DISKANNConfAdapter) CheckUnnecessaryParams(params map[string]string) error {
+	return checkUnnecessaryParams(DISKANNParams, params)
 }
 
 // CheckValidDataType check whether the field data type is supported for the index type
@@ -556,4 +496,20 @@ func (adapter *DISKANNConfAdapter) CheckValidDataType(dType schemapb.DataType) b
 
 func newDISKANNConfAdapter() *DISKANNConfAdapter {
 	return &DISKANNConfAdapter{}
+}
+
+type ScalarConfAdapter struct {
+	BaseConfAdapter
+}
+
+func (adapter *ScalarConfAdapter) CheckTrain(params map[string]string) error {
+	return nil
+}
+
+func (adapter *ScalarConfAdapter) CheckUnnecessaryParams(params map[string]string) error {
+	return checkUnnecessaryParams(ScalarIndexParams, params)
+}
+
+func newScalarConfAdapter() *ScalarConfAdapter {
+	return &ScalarConfAdapter{}
 }

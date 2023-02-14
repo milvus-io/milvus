@@ -17,6 +17,7 @@
 package indexparamcheck
 
 import (
+	"fmt"
 	"strconv"
 
 	"github.com/milvus-io/milvus/internal/util/funcutil"
@@ -47,11 +48,16 @@ func CheckIntByRange(params map[string]string, key string, min, max int) bool {
 //   1. the key does not exist, or
 //   2. the data does not appear in the container
 // Return true otherwise
-func CheckStrByValues(params map[string]string, key string, container []string) bool {
+func CheckStrByValues(params map[string]string, key string, container []string) error {
 	value, ok := params[key]
 	if !ok {
-		return false
+		return fmt.Errorf("lack necessary parameter: %s", key)
 	}
 
-	return funcutil.SliceContain(container, value)
+	if !funcutil.SliceContain(container, value) {
+		return fmt.Errorf("invalid param with: %s", key)
+
+	}
+
+	return nil
 }

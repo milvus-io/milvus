@@ -2081,7 +2081,7 @@ func Test_checkTrain(t *testing.T) {
 			DataType: schemapb.DataType_Int64,
 		}
 		m := map[string]string{
-			"index_type": "scalar",
+			"index_type": DefaultIndexType,
 		}
 		assert.NoError(t, checkTrain(f, m))
 	})

@@ -64,7 +64,7 @@ func TestBaseConfAdapter_CheckTrain(t *testing.T) {
 
 	adapter := newBaseConfAdapter()
 	for _, test := range cases {
-		if got := adapter.CheckTrain(test.params); got != test.want {
+		if got := adapter.CheckTrain(test.params); (got == nil) != test.want {
 			t.Errorf("BaseConfAdapter.CheckTrain(%v) = %v", test.params, test.want)
 		}
 	}
@@ -89,7 +89,7 @@ func TestIVFConfAdapter_CheckTrain(t *testing.T) {
 
 	adapter := newIVFConfAdapter()
 	for _, test := range cases {
-		if got := adapter.CheckTrain(test.params); got != test.want {
+		if got := adapter.CheckTrain(test.params); (got == nil) != test.want {
 			t.Errorf("IVFConfAdapter.CheckTrain(%v) = %v", test.params, test.want)
 		}
 	}
@@ -160,7 +160,7 @@ func TestIVFPQConfAdapter_CheckTrain(t *testing.T) {
 
 	adapter := newIVFPQConfAdapter()
 	for i, test := range cases {
-		if got := adapter.CheckTrain(test.params); got != test.want {
+		if got := adapter.CheckTrain(test.params); (got == nil) != test.want {
 			fmt.Printf("i: %d, params: %v\n", i, test.params)
 			t.Errorf("IVFPQConfAdapter.CheckTrain(%v) = %v", test.params, test.want)
 		}
@@ -197,7 +197,7 @@ func TestIVFSQConfAdapter_CheckTrain(t *testing.T) {
 
 	adapter := newIVFSQConfAdapter()
 	for _, test := range cases {
-		if got := adapter.CheckTrain(test.params); got != test.want {
+		if got := adapter.CheckTrain(test.params); (got == nil) != test.want {
 			t.Errorf("IVFSQConfAdapter.CheckTrain(%v) = %v", test.params, test.want)
 		}
 	}
@@ -222,7 +222,7 @@ func TestBinIDMAPConfAdapter_CheckTrain(t *testing.T) {
 
 	adapter := newBinIDMAPConfAdapter()
 	for _, test := range cases {
-		if got := adapter.CheckTrain(test.params); got != test.want {
+		if got := adapter.CheckTrain(test.params); (got == nil) != test.want {
 			t.Errorf("BinIDMAPConfAdapter.CheckTrain(%v) = %v", test.params, test.want)
 		}
 	}
@@ -260,7 +260,7 @@ func TestBinIVFConfAdapter_CheckTrain(t *testing.T) {
 
 	adapter := newBinIVFConfAdapter()
 	for _, test := range cases {
-		if got := adapter.CheckTrain(test.params); got != test.want {
+		if got := adapter.CheckTrain(test.params); (got == nil) != test.want {
 			t.Errorf("BinIVFConfAdapter.CheckTrain(%v) = %v", test.params, test.want)
 		}
 	}
@@ -323,7 +323,7 @@ func TestNSGConfAdapter_CheckTrain(t *testing.T) {
 
 	adapter := newNSGConfAdapter()
 	for _, test := range cases {
-		if got := adapter.CheckTrain(test.params); got != test.want {
+		if got := adapter.CheckTrain(test.params); (got == nil) != test.want {
 			t.Errorf("NSGConfAdapter.CheckTrain(%v) = %v", test.params, test.want)
 		}
 	}
@@ -363,7 +363,7 @@ func TestHNSWConfAdapter_CheckTrain(t *testing.T) {
 
 	adapter := newHNSWConfAdapter()
 	for _, test := range cases {
-		if got := adapter.CheckTrain(test.params); got != test.want {
+		if got := adapter.CheckTrain(test.params); (got == nil) != test.want {
 			t.Errorf("HNSWConfAdapter.CheckTrain(%v) = %v", test.params, test.want)
 		}
 	}
@@ -394,7 +394,7 @@ func TestANNOYConfAdapter_CheckTrain(t *testing.T) {
 
 	adapter := newANNOYConfAdapter()
 	for _, test := range cases {
-		if got := adapter.CheckTrain(test.params); got != test.want {
+		if got := adapter.CheckTrain(test.params); (got == nil) != test.want {
 			t.Errorf("ANNOYConfAdapter.CheckTrain(%v) = %v", test.params, test.want)
 		}
 	}
@@ -433,7 +433,7 @@ func TestRHNSWFlatConfAdapter_CheckTrain(t *testing.T) {
 
 	adapter := newRHNSWFlatConfAdapter()
 	for _, test := range cases {
-		if got := adapter.CheckTrain(test.params); got != test.want {
+		if got := adapter.CheckTrain(test.params); (got == nil) != test.want {
 			t.Errorf("RHNSWFlatConfAdapter.CheckTrain(%v) = %v", test.params, test.want)
 		}
 	}
@@ -493,7 +493,7 @@ func TestRHNSWPQConfAdapter_CheckTrain(t *testing.T) {
 
 	adapter := newRHNSWPQConfAdapter()
 	for _, test := range cases {
-		if got := adapter.CheckTrain(test.params); got != test.want {
+		if got := adapter.CheckTrain(test.params); (got == nil) != test.want {
 			t.Errorf("RHNSWPQConfAdapter.CheckTrain(%v) = %v", test.params, test.want)
 		}
 	}
@@ -532,7 +532,7 @@ func TestRHNSWSQConfAdapter_CheckTrain(t *testing.T) {
 
 	adapter := newRHNSWSQConfAdapter()
 	for _, test := range cases {
-		if got := adapter.CheckTrain(test.params); got != test.want {
+		if got := adapter.CheckTrain(test.params); (got == nil) != test.want {
 			t.Errorf("RHNSWSQConfAdapter.CheckTrain(%v) = %v", test.params, test.want)
 		}
 	}
@@ -585,7 +585,7 @@ func TestNGTPANNGConfAdapter_CheckTrain(t *testing.T) {
 
 	adapter := newNGTPANNGConfAdapter()
 	for _, test := range cases {
-		if got := adapter.CheckTrain(test.params); got != test.want {
+		if got := adapter.CheckTrain(test.params); (got == nil) != test.want {
 			t.Errorf("NGTPANNGConfAdapter.CheckTrain(%v) = %v", test.params, test.want)
 		}
 	}
@@ -633,7 +633,7 @@ func TestNGTONNGConfAdapter_CheckTrain(t *testing.T) {
 
 	adapter := newNGTONNGConfAdapter()
 	for _, test := range cases {
-		if got := adapter.CheckTrain(test.params); got != test.want {
+		if got := adapter.CheckTrain(test.params); (got == nil) != test.want {
 			t.Errorf("NGTONNGConfAdapter.CheckTrain(%v) = %v", test.params, test.want)
 		}
 	}
