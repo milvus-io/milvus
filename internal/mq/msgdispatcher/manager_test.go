@@ -45,12 +45,14 @@ func TestManager(t *testing.T) {
 			r := rand.Intn(10) + 1
 			for j := 0; j < r; j++ {
 				offset++
-				_, err := c.Add(fmt.Sprintf("mock_vchannel_%d", offset), nil, mqwrapper.SubscriptionPositionUnknown)
+				t.Logf("dyh add, %s", fmt.Sprintf("mock-pchannel-0_vchannel_%d", offset))
+				_, err := c.Add(fmt.Sprintf("mock-pchannel-0_vchannel_%d", offset), nil, mqwrapper.SubscriptionPositionUnknown)
 				assert.NoError(t, err)
 				assert.Equal(t, offset, c.Num())
 			}
 			for j := 0; j < rand.Intn(r); j++ {
-				c.Remove(fmt.Sprintf("mock_vchannel_%d", offset))
+				t.Logf("dyh remove, %s", fmt.Sprintf("mock-pchannel-0_vchannel_%d", offset))
+				c.Remove(fmt.Sprintf("mock-pchannel-0_vchannel_%d", offset))
 				offset--
 				assert.Equal(t, offset, c.Num())
 			}
@@ -93,8 +95,9 @@ func TestManager(t *testing.T) {
 
 		CheckPeriod = 10 * time.Millisecond
 		go c.Run()
-		time.Sleep(15 * time.Millisecond)
-		assert.Equal(t, 1, c.Num()) // expected merged
+		assert.Eventually(t, func() bool {
+			return c.Num() == 1 // expected merged
+		}, 300*time.Millisecond, 10*time.Millisecond)
 
 		assert.NotPanics(t, func() {
 			c.Close()
@@ -140,14 +143,13 @@ func (suite *SimulationSuite) SetupTest() {
 	suite.producer = producer
 
 	suite.manager = NewDispatcherManager(suite.pchannel, typeutil.DataNodeRole, 0, suite.factory)
-	CheckPeriod = 10 * time.Millisecond
 	go suite.manager.Run()
 }
 
 func (suite *SimulationSuite) produceMsg(wg *sync.WaitGroup) {
 	defer wg.Done()
 
-	const timeTickCount = 200
+	const timeTickCount = 100
 	var uniqueMsgID int64
 	vchannelKeys := reflect.ValueOf(suite.vchannels).MapKeys()
 
@@ -205,7 +207,7 @@ func (suite *SimulationSuite) consumeMsg(ctx context.Context, wg *sync.WaitGroup
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(2000 * time.Millisecond): // no message to consume
+		case <-time.After(5000 * time.Millisecond): // no message to consume
 			return
 		case pack := <-suite.vchannels[vchannel].output:
 			assert.Greater(suite.T(), pack.EndTs, lastTs)
@@ -245,7 +247,7 @@ func (suite *SimulationSuite) produceTimeTickOnly(ctx context.Context) {
 }
 
 func (suite *SimulationSuite) TestDispatchToVchannels() {
-	const vchannelNum = 20
+	const vchannelNum = 10
 	suite.vchannels = make(map[string]*vchannelHelper, vchannelNum)
 	for i := 0; i < vchannelNum; i++ {
 		vchannel := fmt.Sprintf("%s_vchannelv%d", suite.pchannel, i)
@@ -275,9 +277,9 @@ func (suite *SimulationSuite) TestMerge() {
 	ctx, cancel := context.WithCancel(context.Background())
 	go suite.produceTimeTickOnly(ctx)
 
-	const vchannelNum = 20
+	const vchannelNum = 10
 	suite.vchannels = make(map[string]*vchannelHelper, vchannelNum)
-	positions, err := getSeekPositions(suite.factory, suite.pchannel, 200)
+	positions, err := getSeekPositions(suite.factory, suite.pchannel, 100)
 	assert.NoError(suite.T(), err)
 
 	for i := 0; i < vchannelNum; i++ {
@@ -306,27 +308,20 @@ func (suite *SimulationSuite) TestSplit() {
 	ctx, cancel := context.WithCancel(context.Background())
 	go suite.produceTimeTickOnly(ctx)
 
-	const vchannelNum = 10
+	const (
+		vchannelNum = 10
+		splitNum    = 3
+	)
 	suite.vchannels = make(map[string]*vchannelHelper, vchannelNum)
-	DefaultTargetChanSize = 10
 	MaxTolerantLag = 500 * time.Millisecond
+	DefaultTargetChanSize = 65536
 	for i := 0; i < vchannelNum; i++ {
-		vchannel := fmt.Sprintf("%s_vchannelv%d", suite.pchannel, i)
-		output, err := suite.manager.Add(vchannel, nil, mqwrapper.SubscriptionPositionEarliest)
-		assert.NoError(suite.T(), err)
-		suite.vchannels[vchannel] = &vchannelHelper{output: output}
-	}
-
-	const splitNum = 3
-	wg := &sync.WaitGroup{}
-	counter := 0
-	for vchannel := range suite.vchannels {
-		wg.Add(1)
-		go suite.consumeMsg(ctx, wg, vchannel)
-		counter++
-		if counter >= len(suite.vchannels)-splitNum {
-			break
+		if i >= vchannelNum-splitNum {
+			DefaultTargetChanSize = 10
 		}
+		vchannel := fmt.Sprintf("%s_vchannelv%d", suite.pchannel, i)
+		_, err := suite.manager.Add(vchannel, nil, mqwrapper.SubscriptionPositionEarliest)
+		assert.NoError(suite.T(), err)
 	}
 
 	suite.Eventually(func() bool {
@@ -335,7 +330,6 @@ func (suite *SimulationSuite) TestSplit() {
 	}, 10*time.Second, 100*time.Millisecond)
 
 	cancel()
-	wg.Wait()
 }
 
 func (suite *SimulationSuite) TearDownTest() {

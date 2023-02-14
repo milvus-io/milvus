@@ -148,7 +148,6 @@ func assignSegmentID(ctx context.Context, insertMsg *msgstream.InsertMsg, result
 			msg.HashValues = append(msg.HashValues, insertMsg.HashValues[offset])
 			msg.Timestamps = append(msg.Timestamps, insertMsg.Timestamps[offset])
 			msg.RowIDs = append(msg.RowIDs, insertMsg.RowIDs[offset])
-			msg.BaseMsg.Vchannel = channelName
 			msg.NumRows++
 			requestSize += curRowMessageSize
 		}

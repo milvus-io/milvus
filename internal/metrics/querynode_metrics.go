@@ -343,6 +343,17 @@ var (
 			Name:      "execute_bytes_counter",
 			Help:      "",
 		}, []string{nodeIDLabelName, msgTypeLabelName})
+
+	QueryNodeMsgDispatcherTtLag = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "msg_dispatcher_tt_lag_ms",
+			Help:      "time.Now() sub dispatcher's current consume time",
+		}, []string{
+			nodeIDLabelName,
+			channelNameLabelName,
+		})
 )
 
 // RegisterQueryNode registers QueryNode metrics
@@ -376,6 +387,7 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeExecuteCounter)
 	registry.MustRegister(QueryNodeConsumerMsgCount)
 	registry.MustRegister(QueryNodeConsumeTimeTickLag)
+	registry.MustRegister(QueryNodeMsgDispatcherTtLag)
 }
 
 func CleanupQueryNodeCollectionMetrics(nodeID int64, collectionID int64) {
