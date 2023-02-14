@@ -184,7 +184,17 @@ func TestUpdateSessions(t *testing.T) {
 }
 
 func TestSessionLivenessCheck(t *testing.T) {
-	s := &Session{}
+	Params.Init()
+	endpoints := Params.LoadWithDefault("etcd.endpoints", paramtable.DefaultEtcdEndpoints)
+	metaRoot := fmt.Sprintf("%d/%s", rand.Int(), DefaultServiceRoot)
+
+	etcdEndpoints := strings.Split(endpoints, ",")
+	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
+	require.NoError(t, err)
+	s := &Session{
+		etcdCli:  etcdCli,
+		metaRoot: metaRoot,
+	}
 	ctx := context.Background()
 	ch := make(chan bool)
 	s.liveCh = ch

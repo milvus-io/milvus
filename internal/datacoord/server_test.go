@@ -3561,7 +3561,6 @@ func newTestServer(t *testing.T, receiveCh chan any, opts ...Option) *Server {
 	Params.Init()
 	Params.CommonCfg.DataCoordTimeTick = Params.CommonCfg.DataCoordTimeTick + strconv.Itoa(rand.Int())
 	factory := dependency.NewDefaultFactory(true)
-
 	etcdCli, err := etcd.GetEtcdClient(
 		Params.EtcdCfg.UseEmbedEtcd,
 		Params.EtcdCfg.EtcdUseSSL,
@@ -3682,14 +3681,6 @@ func newTestServer2(t *testing.T, receiveCh chan any, opts ...Option) *Server {
 	_, err = etcdCli.Delete(context.Background(), sessKey, clientv3.WithPrefix())
 	assert.Nil(t, err)
 
-	icSession := sessionutil.NewSession(context.Background(), Params.EtcdCfg.MetaRootPath, etcdCli)
-	icSession.Init(typeutil.IndexCoordRole, "localhost:31000", true, true)
-	icSession.Register()
-
-	qcSession := sessionutil.NewSession(context.Background(), Params.EtcdCfg.MetaRootPath, etcdCli)
-	qcSession.Init(typeutil.QueryCoordRole, "localhost:19532", true, true)
-	qcSession.Register()
-
 	svr := CreateServer(context.TODO(), factory, opts...)
 	svr.SetEtcdClient(etcdCli)
 	svr.dataNodeCreator = func(ctx context.Context, addr string) (types.DataNode, error) {
@@ -3703,10 +3694,6 @@ func newTestServer2(t *testing.T, receiveCh chan any, opts ...Option) *Server {
 	assert.Nil(t, err)
 	err = svr.Start()
 	assert.Nil(t, err)
-
-	_, err = etcdCli.Delete(context.Background(), sessKey, clientv3.WithPrefix())
-	assert.Nil(t, err)
-
 	err = svr.Register()
 	assert.Nil(t, err)
 
@@ -3821,6 +3808,7 @@ func Test_initServiceDiscovery(t *testing.T) {
 
 func Test_newChunkManagerFactory(t *testing.T) {
 	server := newTestServer2(t, nil)
+	defer closeTestServer(t, server)
 	Params.DataCoordCfg.EnableGarbageCollection = true
 
 	t.Run("err_minio_bad_address", func(t *testing.T) {
@@ -3847,6 +3835,7 @@ func Test_newChunkManagerFactory(t *testing.T) {
 
 func Test_initGarbageCollection(t *testing.T) {
 	server := newTestServer2(t, nil)
+	defer closeTestServer(t, server)
 	Params.DataCoordCfg.EnableGarbageCollection = true
 
 	t.Run("ok", func(t *testing.T) {
