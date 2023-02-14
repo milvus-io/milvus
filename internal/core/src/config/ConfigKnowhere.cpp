@@ -34,6 +34,7 @@ KnowhereInitImpl(const char* conf_file) {
         knowhere::KnowhereConfig::SetEarlyStopThreshold(0);
         knowhere::KnowhereConfig::SetLogHandler();
         knowhere::KnowhereConfig::SetStatisticsLevel(0);
+        knowhere::KnowhereConfig::ShowVersion();
 
 #ifdef EMBEDDED_MILVUS
         // always disable all logs for embedded milvus.
@@ -46,6 +47,7 @@ KnowhereInitImpl(const char* conf_file) {
             el::Loggers::reconfigureAllLoggers(el_conf);
             LOG_SERVER_DEBUG_ << "Config easylogging with yaml file: " << conf_file;
         }
+        LOG_SERVER_DEBUG_ << "Knowhere init successfully";
 #endif
     };
 
