@@ -39,8 +39,7 @@ class MilvusConan(ConanFile):
     def configure(self):
         # Macos M1 cannot use jemalloc
         if self.settings.os == "Macos":
-            if self.settings.arch not in ("x86_64", "x86"):
-                self.options["arrow"].with_jemalloc = False
+            self.options["arrow"].with_jemalloc = False
             self.options["boost"].without_fiber = True
             self.options["boost"].without_json = True
             self.options["boost"].without_wave = True
