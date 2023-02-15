@@ -6,6 +6,7 @@ import (
 
 	"google.golang.org/grpc/metadata"
 
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util"
 
 	"github.com/milvus-io/milvus/internal/util/crypto"
@@ -24,7 +25,7 @@ func TestValidAuth(t *testing.T) {
 	assert.False(t, res)
 	// normal metadata
 	rootCoord := &MockRootCoordClientInterface{}
-	queryCoord := &MockQueryCoordClientInterface{}
+	queryCoord := &types.MockQueryCoord{}
 	mgr := newShardClientMgr()
 	err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
 	assert.Nil(t, err)
@@ -54,7 +55,7 @@ func TestAuthenticationInterceptor(t *testing.T) {
 	assert.NotNil(t, err)
 	// mock metacache
 	rootCoord := &MockRootCoordClientInterface{}
-	queryCoord := &MockQueryCoordClientInterface{}
+	queryCoord := &types.MockQueryCoord{}
 	mgr := newShardClientMgr()
 	err = InitMetaCache(ctx, rootCoord, queryCoord, mgr)
 	assert.Nil(t, err)

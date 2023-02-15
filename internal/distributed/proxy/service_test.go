@@ -44,7 +44,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/types"
@@ -290,145 +289,6 @@ func (m *MockRootCoord) CheckHealth(ctx context.Context, req *milvuspb.CheckHeal
 }
 
 func (m *MockRootCoord) RenameCollection(ctx context.Context, req *milvuspb.RenameCollectionRequest) (*commonpb.Status, error) {
-	return nil, nil
-}
-
-// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-type MockQueryCoord struct {
-	MockBase
-	initErr  error
-	startErr error
-	stopErr  error
-	regErr   error
-}
-
-func (m *MockQueryCoord) Init() error {
-	return m.initErr
-}
-
-func (m *MockQueryCoord) Start() error {
-	return m.startErr
-}
-
-func (m *MockQueryCoord) Stop() error {
-	return m.stopErr
-}
-
-func (m *MockQueryCoord) Register() error {
-	return m.regErr
-}
-
-func (m *MockQueryCoord) UpdateStateCode(code commonpb.StateCode) {
-}
-
-func (m *MockQueryCoord) SetRootCoord(types.RootCoord) error {
-	return nil
-}
-
-func (m *MockQueryCoord) SetDataCoord(types.DataCoord) error {
-	return nil
-}
-
-func (m *MockQueryCoord) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
-	return &milvuspb.ComponentStates{
-		State: &milvuspb.ComponentInfo{
-			NodeID:    int64(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
-			Role:      "MockQueryCoord",
-			StateCode: commonpb.StateCode_Healthy,
-			ExtraInfo: nil,
-		},
-		SubcomponentStates: nil,
-		Status:             &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
-	}, nil
-}
-
-func (m *MockQueryCoord) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	return nil, nil
-}
-
-func (m *MockQueryCoord) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	return nil, nil
-}
-
-func (m *MockQueryCoord) ShowCollections(ctx context.Context, req *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
-	return nil, nil
-}
-
-func (m *MockQueryCoord) LoadCollection(ctx context.Context, req *querypb.LoadCollectionRequest) (*commonpb.Status, error) {
-	return nil, nil
-}
-
-func (m *MockQueryCoord) ReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
-	return nil, nil
-}
-
-func (m *MockQueryCoord) ShowPartitions(ctx context.Context, req *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
-	return nil, nil
-}
-
-func (m *MockQueryCoord) GetPartitionStates(ctx context.Context, req *querypb.GetPartitionStatesRequest) (*querypb.GetPartitionStatesResponse, error) {
-	return nil, nil
-}
-
-func (m *MockQueryCoord) LoadPartitions(ctx context.Context, req *querypb.LoadPartitionsRequest) (*commonpb.Status, error) {
-	return nil, nil
-}
-
-func (m *MockQueryCoord) ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error) {
-	return nil, nil
-}
-
-func (m *MockQueryCoord) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
-	return nil, nil
-}
-
-func (m *MockQueryCoord) LoadBalance(ctx context.Context, req *querypb.LoadBalanceRequest) (*commonpb.Status, error) {
-	return nil, nil
-}
-
-func (m *MockQueryCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	return nil, nil
-}
-
-func (m *MockQueryCoord) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasRequest) (*milvuspb.GetReplicasResponse, error) {
-	return nil, nil
-}
-
-func (m *MockQueryCoord) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeadersRequest) (*querypb.GetShardLeadersResponse, error) {
-	return nil, nil
-}
-
-func (m *MockQueryCoord) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
-	return nil, nil
-}
-
-func (m *MockQueryCoord) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
-	return &milvuspb.CheckHealthResponse{
-		IsHealthy: true,
-	}, nil
-}
-
-func (m *MockQueryCoord) CreateResourceGroup(ctx context.Context, req *milvuspb.CreateResourceGroupRequest) (*commonpb.Status, error) {
-	return nil, nil
-}
-
-func (m *MockQueryCoord) DropResourceGroup(ctx context.Context, req *milvuspb.DropResourceGroupRequest) (*commonpb.Status, error) {
-	return nil, nil
-}
-
-func (m *MockQueryCoord) DescribeResourceGroup(ctx context.Context, req *querypb.DescribeResourceGroupRequest) (*querypb.DescribeResourceGroupResponse, error) {
-	return nil, nil
-}
-
-func (m *MockQueryCoord) TransferNode(ctx context.Context, req *milvuspb.TransferNodeRequest) (*commonpb.Status, error) {
-	return nil, nil
-}
-
-func (m *MockQueryCoord) TransferReplica(ctx context.Context, req *querypb.TransferReplicaRequest) (*commonpb.Status, error) {
-	return nil, nil
-}
-
-func (m *MockQueryCoord) ListResourceGroups(ctx context.Context, req *milvuspb.ListResourceGroupsRequest) (*milvuspb.ListResourceGroupsResponse, error) {
 	return nil, nil
 }
 
@@ -1090,15 +950,9 @@ func runAndWaitForServerReady(server *Server) error {
 func Test_NewServer(t *testing.T) {
 	paramtable.Init()
 	ctx := context.Background()
-	server, err := NewServer(ctx, nil)
-	assert.NotNil(t, server)
-	assert.Nil(t, err)
 
-	server.proxy = &MockProxy{}
-	server.rootCoordClient = &MockRootCoord{}
-	server.queryCoordClient = &MockQueryCoord{}
-	server.dataCoordClient = &MockDataCoord{}
-
+	server := getServer(t)
+	var err error
 	t.Run("Run", func(t *testing.T) {
 		err = runAndWaitForServerReady(server)
 		assert.Nil(t, err)
@@ -1448,15 +1302,8 @@ func Test_NewServer(t *testing.T) {
 
 func TestServer_Check(t *testing.T) {
 	ctx := context.Background()
-	server, err := NewServer(ctx, nil)
-	assert.NotNil(t, server)
-	assert.Nil(t, err)
-
-	mockProxy := &MockProxy{}
-	server.proxy = mockProxy
-	server.rootCoordClient = &MockRootCoord{}
-	server.queryCoordClient = &MockQueryCoord{}
-	server.dataCoordClient = &MockDataCoord{}
+	server := getServer(t)
+	mockProxy := server.proxy.(*MockProxy)
 
 	req := &grpc_health_v1.HealthCheckRequest{Service: ""}
 	ret, err := server.Check(ctx, req)
@@ -1503,21 +1350,14 @@ func TestServer_Check(t *testing.T) {
 
 func TestServer_Watch(t *testing.T) {
 	ctx := context.Background()
-	server, err := NewServer(ctx, nil)
-	assert.NotNil(t, server)
-	assert.Nil(t, err)
-
-	mockProxy := &MockProxy{}
-	server.proxy = mockProxy
-	server.rootCoordClient = &MockRootCoord{}
-	server.queryCoordClient = &MockQueryCoord{}
-	server.dataCoordClient = &MockDataCoord{}
+	server := getServer(t)
+	mockProxy := server.proxy.(*MockProxy)
 
 	watchServer := milvusmock.NewGrpcHealthWatchServer()
 	resultChan := watchServer.Chan()
 	req := &grpc_health_v1.HealthCheckRequest{Service: ""}
 	//var ret *grpc_health_v1.HealthCheckResponse
-	err = server.Watch(req, watchServer)
+	err := server.Watch(req, watchServer)
 	ret := <-resultChan
 
 	assert.Nil(t, err)
@@ -1567,19 +1407,10 @@ func TestServer_Watch(t *testing.T) {
 }
 
 func Test_NewServer_HTTPServer_Enabled(t *testing.T) {
-	ctx := context.Background()
-	server, err := NewServer(ctx, nil)
-	assert.NotNil(t, server)
-	assert.Nil(t, err)
-
-	server.proxy = &MockProxy{}
-	server.rootCoordClient = &MockRootCoord{}
-	server.queryCoordClient = &MockQueryCoord{}
-	server.dataCoordClient = &MockDataCoord{}
+	server := getServer(t)
 
 	paramtable.Get().Save(proxy.Params.HTTPCfg.Enabled.Key, "true")
-
-	err = runAndWaitForServerReady(server)
+	err := runAndWaitForServerReady(server)
 	assert.Nil(t, err)
 	err = server.Stop()
 	assert.Nil(t, err)
@@ -1602,8 +1433,21 @@ func getServer(t *testing.T) *Server {
 
 	server.proxy = &MockProxy{}
 	server.rootCoordClient = &MockRootCoord{}
-	server.queryCoordClient = &MockQueryCoord{}
 	server.dataCoordClient = &MockDataCoord{}
+
+	mockQC := &types.MockQueryCoord{}
+	server.queryCoordClient = mockQC
+	mockQC.EXPECT().Init().Return(nil)
+	mockQC.EXPECT().GetComponentStates(mock.Anything).Return(&milvuspb.ComponentStates{
+		State: &milvuspb.ComponentInfo{
+			NodeID:    int64(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
+			Role:      "MockQueryCoord",
+			StateCode: commonpb.StateCode_Healthy,
+			ExtraInfo: nil,
+		},
+		SubcomponentStates: nil,
+		Status:             &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+	}, nil)
 	return server
 }
 

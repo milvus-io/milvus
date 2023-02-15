@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -55,21 +56,6 @@ func (m *MockRootCoordClientInterface) IncAccessCount() {
 }
 
 func (m *MockRootCoordClientInterface) GetAccessCount() int {
-	ret := atomic.LoadInt32(&m.AccessCount)
-	return int(ret)
-}
-
-type MockQueryCoordClientInterface struct {
-	types.QueryCoord
-	Error       bool
-	AccessCount int32
-}
-
-func (m *MockQueryCoordClientInterface) IncAccessCount() {
-	atomic.AddInt32(&m.AccessCount, 1)
-}
-
-func (m *MockQueryCoordClientInterface) GetAccessCount() int {
 	ret := atomic.LoadInt32(&m.AccessCount)
 	return int(ret)
 }
@@ -217,26 +203,11 @@ func (m *MockRootCoordClientInterface) ListPolicy(ctx context.Context, in *inter
 	}, nil
 }
 
-func (m *MockQueryCoordClientInterface) ShowCollections(ctx context.Context, req *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
-	if m.Error {
-		return nil, errors.New("mocked error")
-	}
-	m.IncAccessCount()
-	rsp := &querypb.ShowCollectionsResponse{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		},
-		CollectionIDs:       []UniqueID{1, 2},
-		InMemoryPercentages: []int64{100, 50},
-	}
-	return rsp, nil
-}
-
 // Simulate the cache path and the
 func TestMetaCache_GetCollection(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockRootCoordClientInterface{}
-	queryCoord := &MockQueryCoordClientInterface{}
+	queryCoord := &types.MockQueryCoord{}
 	mgr := newShardClientMgr()
 	err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
 	assert.Nil(t, err)
@@ -287,7 +258,7 @@ func TestMetaCache_GetCollection(t *testing.T) {
 func TestMetaCache_GetCollectionName(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockRootCoordClientInterface{}
-	queryCoord := &MockQueryCoordClientInterface{}
+	queryCoord := &types.MockQueryCoord{}
 	mgr := newShardClientMgr()
 	err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
 	assert.Nil(t, err)
@@ -337,7 +308,7 @@ func TestMetaCache_GetCollectionName(t *testing.T) {
 func TestMetaCache_GetCollectionFailure(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockRootCoordClientInterface{}
-	queryCoord := &MockQueryCoordClientInterface{}
+	queryCoord := &types.MockQueryCoord{}
 	mgr := newShardClientMgr()
 	err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
 	assert.Nil(t, err)
@@ -370,7 +341,7 @@ func TestMetaCache_GetCollectionFailure(t *testing.T) {
 func TestMetaCache_GetNonExistCollection(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockRootCoordClientInterface{}
-	queryCoord := &MockQueryCoordClientInterface{}
+	queryCoord := &types.MockQueryCoord{}
 	mgr := newShardClientMgr()
 	err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
 	assert.Nil(t, err)
@@ -386,7 +357,7 @@ func TestMetaCache_GetNonExistCollection(t *testing.T) {
 func TestMetaCache_GetPartitionID(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockRootCoordClientInterface{}
-	queryCoord := &MockQueryCoordClientInterface{}
+	queryCoord := &types.MockQueryCoord{}
 	mgr := newShardClientMgr()
 	err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
 	assert.Nil(t, err)
@@ -408,7 +379,7 @@ func TestMetaCache_GetPartitionID(t *testing.T) {
 func TestMetaCache_ConcurrentTest1(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockRootCoordClientInterface{}
-	queryCoord := &MockQueryCoordClientInterface{}
+	queryCoord := &types.MockQueryCoord{}
 	mgr := newShardClientMgr()
 	err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
 	assert.Nil(t, err)
@@ -462,7 +433,7 @@ func TestMetaCache_ConcurrentTest1(t *testing.T) {
 func TestMetaCache_GetPartitionError(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockRootCoordClientInterface{}
-	queryCoord := &MockQueryCoordClientInterface{}
+	queryCoord := &types.MockQueryCoord{}
 	mgr := newShardClientMgr()
 	err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
 	assert.Nil(t, err)
@@ -498,7 +469,8 @@ func TestMetaCache_GetShards(t *testing.T) {
 	)
 
 	rootCoord := &MockRootCoordClientInterface{}
-	qc := NewQueryCoordMock()
+	qc := getQueryCoord()
+	qc.EXPECT().Init().Return(nil)
 	shardMgr := newShardClientMgr()
 	err := InitMetaCache(ctx, rootCoord, qc, shardMgr)
 	require.Nil(t, err)
@@ -514,14 +486,36 @@ func TestMetaCache_GetShards(t *testing.T) {
 	})
 
 	t.Run("without shardLeaders in collection info invalid shardLeaders", func(t *testing.T) {
-		qc.validShardLeaders = false
+		qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    "not implemented",
+			},
+		}, nil).Times(1)
+		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		}, nil)
 		shards, err := globalMetaCache.GetShards(ctx, false, collectionName)
 		assert.Error(t, err)
 		assert.Empty(t, shards)
 	})
 
 	t.Run("without shardLeaders in collection info", func(t *testing.T) {
-		qc.validShardLeaders = true
+		qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+			Shards: []*querypb.ShardLeadersList{
+				{
+					ChannelName: "channel-1",
+					NodeIds:     []int64{1, 2, 3},
+					NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
+				},
+			},
+		}, nil)
+		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		}, nil)
 		shards, err := globalMetaCache.GetShards(ctx, true, collectionName)
 		assert.NoError(t, err)
 		assert.NotEmpty(t, shards)
@@ -529,7 +523,12 @@ func TestMetaCache_GetShards(t *testing.T) {
 		assert.Equal(t, 3, len(shards["channel-1"]))
 
 		// get from cache
-		qc.validShardLeaders = false
+		qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    "not implemented",
+			},
+		}, nil)
 		shards, err = globalMetaCache.GetShards(ctx, true, collectionName)
 
 		assert.NoError(t, err)
@@ -546,7 +545,8 @@ func TestMetaCache_ClearShards(t *testing.T) {
 	)
 
 	rootCoord := &MockRootCoordClientInterface{}
-	qc := NewQueryCoordMock()
+	qc := getQueryCoord()
+	qc.EXPECT().Init().Return(nil)
 	mgr := newShardClientMgr()
 	err := InitMetaCache(ctx, rootCoord, qc, mgr)
 	require.Nil(t, err)
@@ -565,7 +565,21 @@ func TestMetaCache_ClearShards(t *testing.T) {
 
 	t.Run("Clear valid collection valid cache", func(t *testing.T) {
 
-		qc.validShardLeaders = true
+		qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+			Shards: []*querypb.ShardLeadersList{
+				{
+					ChannelName: "channel-1",
+					NodeIds:     []int64{1, 2, 3},
+					NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
+				},
+			},
+		}, nil).Times(1)
+		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		}, nil)
 		shards, err := globalMetaCache.GetShards(ctx, true, collectionName)
 		require.NoError(t, err)
 		require.NotEmpty(t, shards)
@@ -574,7 +588,12 @@ func TestMetaCache_ClearShards(t *testing.T) {
 
 		globalMetaCache.ClearShards(collectionName)
 
-		qc.validShardLeaders = false
+		qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    "not implemented",
+			},
+		}, nil)
 		shards, err = globalMetaCache.GetShards(ctx, true, collectionName)
 		assert.Error(t, err)
 		assert.Empty(t, shards)
@@ -583,7 +602,7 @@ func TestMetaCache_ClearShards(t *testing.T) {
 
 func TestMetaCache_PolicyInfo(t *testing.T) {
 	client := &MockRootCoordClientInterface{}
-	qc := &MockQueryCoordClientInterface{}
+	qc := &types.MockQueryCoord{}
 	mgr := newShardClientMgr()
 
 	t.Run("InitMetaCache", func(t *testing.T) {
@@ -666,11 +685,21 @@ func TestMetaCache_PolicyInfo(t *testing.T) {
 func TestMetaCache_LoadCache(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockRootCoordClientInterface{}
-	queryCoord := &MockQueryCoordClientInterface{}
+	queryCoord := &types.MockQueryCoord{}
 	mgr := newShardClientMgr()
 	err := InitMetaCache(ctx, rootCoord, queryCoord, mgr)
 	assert.Nil(t, err)
 
+	qcCounter := 0
+	queryCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		CollectionIDs:       []UniqueID{1, 2},
+		InMemoryPercentages: []int64{100, 50},
+	}, nil).Run(func(ctx context.Context, req *querypb.ShowCollectionsRequest) {
+		qcCounter++
+	})
 	t.Run("test IsCollectionLoaded", func(t *testing.T) {
 		info, err := globalMetaCache.GetCollectionInfo(ctx, "collection1")
 		assert.NoError(t, err)
@@ -678,14 +707,14 @@ func TestMetaCache_LoadCache(t *testing.T) {
 		// no collectionInfo of collection1, should access RootCoord
 		assert.Equal(t, rootCoord.GetAccessCount(), 1)
 		// not loaded, should access QueryCoord
-		assert.Equal(t, queryCoord.GetAccessCount(), 1)
+		assert.Equal(t, qcCounter, 1)
 
 		info, err = globalMetaCache.GetCollectionInfo(ctx, "collection1")
 		assert.NoError(t, err)
 		assert.True(t, info.isLoaded)
 		// shouldn't access QueryCoord or RootCoord again
 		assert.Equal(t, rootCoord.GetAccessCount(), 1)
-		assert.Equal(t, queryCoord.GetAccessCount(), 1)
+		assert.Equal(t, qcCounter, 1)
 
 		// test collection2 not fully loaded
 		info, err = globalMetaCache.GetCollectionInfo(ctx, "collection2")
@@ -694,7 +723,7 @@ func TestMetaCache_LoadCache(t *testing.T) {
 		// no collectionInfo of collection2, should access RootCoord
 		assert.Equal(t, rootCoord.GetAccessCount(), 2)
 		// not loaded, should access QueryCoord
-		assert.Equal(t, queryCoord.GetAccessCount(), 2)
+		assert.Equal(t, qcCounter, 2)
 	})
 
 	t.Run("test RemoveCollectionLoadCache", func(t *testing.T) {
@@ -703,17 +732,25 @@ func TestMetaCache_LoadCache(t *testing.T) {
 		assert.NoError(t, err)
 		assert.True(t, info.isLoaded)
 		// should access QueryCoord
-		assert.Equal(t, queryCoord.GetAccessCount(), 3)
+		assert.Equal(t, qcCounter, 3)
 	})
 }
 
 func TestMetaCache_RemoveCollection(t *testing.T) {
 	ctx := context.Background()
 	rootCoord := &MockRootCoordClientInterface{}
-	queryCoord := &MockQueryCoordClientInterface{}
+	queryCoord := &types.MockQueryCoord{}
 	shardMgr := newShardClientMgr()
 	err := InitMetaCache(ctx, rootCoord, queryCoord, shardMgr)
 	assert.Nil(t, err)
+
+	queryCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		CollectionIDs:       []UniqueID{1, 2},
+		InMemoryPercentages: []int64{100, 50},
+	}, nil)
 
 	info, err := globalMetaCache.GetCollectionInfo(ctx, "collection1")
 	assert.NoError(t, err)

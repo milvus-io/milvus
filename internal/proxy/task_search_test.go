@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/common"
@@ -117,11 +118,12 @@ func TestSearchTask_PreExecute(t *testing.T) {
 
 	var (
 		rc  = NewRootCoordMock()
-		qc  = NewQueryCoordMock()
+		qc  = getQueryCoord()
 		ctx = context.TODO()
 
 		collectionName = t.Name() + funcutil.GenRandomStr()
 	)
+	successStatus := commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
 
 	err = rc.Start()
 	defer rc.Stop()
@@ -234,21 +236,15 @@ func TestSearchTask_PreExecute(t *testing.T) {
 		task.collectionName = collName
 
 		t.Run("show collection status unexpected error", func(t *testing.T) {
-			qc.SetShowCollectionsFunc(func(ctx context.Context, request *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
-				return &querypb.ShowCollectionsResponse{
-					Status: &commonpb.Status{
-						ErrorCode: commonpb.ErrorCode_UnexpectedError,
-						Reason:    "mock",
-					},
-				}, nil
-			})
+			qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_UnexpectedError,
+					Reason:    "mock",
+				},
+			}, nil).Times(1)
 
 			assert.Error(t, task.PreExecute(ctx))
-			qc.ResetShowCollectionsFunc()
 		})
-
-		qc.ResetShowCollectionsFunc()
-		qc.ResetShowPartitionsFunc()
 	})
 
 	t.Run("search with timeout", func(t *testing.T) {
@@ -256,6 +252,13 @@ func TestSearchTask_PreExecute(t *testing.T) {
 		createColl(t, collName, rc)
 		collID, err := globalMetaCache.GetCollectionID(context.TODO(), collName)
 		require.NoError(t, err)
+
+		qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(&successStatus, nil)
+		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+			Status:              &successStatus,
+			CollectionIDs:       []int64{collID},
+			InMemoryPercentages: []int64{100},
+		}, nil)
 		status, err := qc.LoadCollection(ctx, &querypb.LoadCollectionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType: commonpb.MsgType_LoadCollection,
@@ -288,13 +291,20 @@ func TestSearchTask_PreExecute(t *testing.T) {
 	})
 }
 
+func getQueryCoord() *types.MockQueryCoord {
+	qc := &types.MockQueryCoord{}
+	qc.EXPECT().Start().Return(nil)
+	qc.EXPECT().Stop().Return(nil)
+	return qc
+}
+
 func TestSearchTaskV2_Execute(t *testing.T) {
 
 	var (
 		err error
 
 		rc  = NewRootCoordMock()
-		qc  = NewQueryCoordMock()
+		qc  = getQueryCoord()
 		ctx = context.TODO()
 
 		collectionName = t.Name() + funcutil.GenRandomStr()
@@ -1589,10 +1599,8 @@ func Test_checkIfLoaded(t *testing.T) {
 			return &collectionInfo{isLoaded: false}, nil
 		})
 		globalMetaCache = cache
-		qc := NewQueryCoordMock()
-		qc.SetShowPartitionsFunc(func(ctx context.Context, request *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
-			return nil, errors.New("mock")
-		})
+		qc := getQueryCoord()
+		qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(nil, errors.New("mock")).Times(1)
 		_, err := checkIfLoaded(context.Background(), qc, "test", []UniqueID{1, 2})
 		assert.Error(t, err)
 	})
@@ -1603,10 +1611,8 @@ func Test_checkIfLoaded(t *testing.T) {
 			return &collectionInfo{isLoaded: false}, nil
 		})
 		globalMetaCache = cache
-		qc := NewQueryCoordMock()
-		qc.SetShowPartitionsFunc(func(ctx context.Context, request *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
-			return &querypb.ShowPartitionsResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_CollectionNotExists}}, nil
-		})
+		qc := getQueryCoord()
+		qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_CollectionNotExists}}, nil).Times(1)
 		_, err := checkIfLoaded(context.Background(), qc, "test", []UniqueID{1, 2})
 		assert.Error(t, err)
 	})
@@ -1617,10 +1623,9 @@ func Test_checkIfLoaded(t *testing.T) {
 			return &collectionInfo{isLoaded: false}, nil
 		})
 		globalMetaCache = cache
-		qc := NewQueryCoordMock()
-		qc.SetShowPartitionsFunc(func(ctx context.Context, request *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
-			return &querypb.ShowPartitionsResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, InMemoryPercentages: []int64{100, 100}}, nil
-		})
+		qc := getQueryCoord()
+		qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(
+			&querypb.ShowPartitionsResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, InMemoryPercentages: []int64{100, 100}}, nil).Times(1)
 		loaded, err := checkIfLoaded(context.Background(), qc, "test", []UniqueID{1, 2})
 		assert.NoError(t, err)
 		assert.True(t, loaded)
@@ -1632,10 +1637,9 @@ func Test_checkIfLoaded(t *testing.T) {
 			return &collectionInfo{isLoaded: false}, nil
 		})
 		globalMetaCache = cache
-		qc := NewQueryCoordMock()
-		qc.SetShowPartitionsFunc(func(ctx context.Context, request *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
-			return &querypb.ShowPartitionsResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, InMemoryPercentages: []int64{100, 50}}, nil
-		})
+		qc := getQueryCoord()
+		qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(
+			&querypb.ShowPartitionsResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, InMemoryPercentages: []int64{100, 50}}, nil).Times(1)
 		loaded, err := checkIfLoaded(context.Background(), qc, "test", []UniqueID{1, 2})
 		assert.NoError(t, err)
 		assert.False(t, loaded)
@@ -1647,10 +1651,8 @@ func Test_checkIfLoaded(t *testing.T) {
 			return &collectionInfo{isLoaded: false}, nil
 		})
 		globalMetaCache = cache
-		qc := NewQueryCoordMock()
-		qc.SetShowPartitionsFunc(func(ctx context.Context, request *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
-			return nil, errors.New("mock")
-		})
+		qc := getQueryCoord()
+		qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(nil, errors.New("mock")).Times(1)
 		_, err := checkIfLoaded(context.Background(), qc, "test", []UniqueID{1, 2})
 		assert.Error(t, err)
 	})
@@ -1661,10 +1663,8 @@ func Test_checkIfLoaded(t *testing.T) {
 			return &collectionInfo{isLoaded: false}, nil
 		})
 		globalMetaCache = cache
-		qc := NewQueryCoordMock()
-		qc.SetShowPartitionsFunc(func(ctx context.Context, request *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
-			return &querypb.ShowPartitionsResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_CollectionNotExists}}, nil
-		})
+		qc := getQueryCoord()
+		qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_CollectionNotExists}}, nil).Times(1)
 		_, err := checkIfLoaded(context.Background(), qc, "test", []UniqueID{1, 2})
 		assert.Error(t, err)
 	})
@@ -1675,10 +1675,9 @@ func Test_checkIfLoaded(t *testing.T) {
 			return &collectionInfo{isLoaded: false}, nil
 		})
 		globalMetaCache = cache
-		qc := NewQueryCoordMock()
-		qc.SetShowPartitionsFunc(func(ctx context.Context, request *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
-			return &querypb.ShowPartitionsResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, PartitionIDs: []UniqueID{1, 2}}, nil
-		})
+		qc := getQueryCoord()
+		qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(
+			&querypb.ShowPartitionsResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, PartitionIDs: []UniqueID{1, 2}}, nil).Times(1)
 		loaded, err := checkIfLoaded(context.Background(), qc, "test", []UniqueID{})
 		assert.NoError(t, err)
 		assert.False(t, loaded)
@@ -1690,10 +1689,9 @@ func Test_checkIfLoaded(t *testing.T) {
 			return &collectionInfo{isLoaded: false}, nil
 		})
 		globalMetaCache = cache
-		qc := NewQueryCoordMock()
-		qc.SetShowPartitionsFunc(func(ctx context.Context, request *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
-			return &querypb.ShowPartitionsResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, PartitionIDs: []UniqueID{}}, nil
-		})
+		qc := getQueryCoord()
+		qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(
+			&querypb.ShowPartitionsResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, PartitionIDs: []UniqueID{}}, nil).Times(1)
 		loaded, err := checkIfLoaded(context.Background(), qc, "test", []UniqueID{})
 		assert.NoError(t, err)
 		assert.False(t, loaded)
@@ -1707,7 +1705,7 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 		ctx = context.TODO()
 
 		rc = NewRootCoordMock()
-		qc = NewQueryCoordMock(withValidShardLeaders())
+		qc = getQueryCoord()
 		qn = &QueryNodeMock{}
 
 		shardsNum      = int32(2)
@@ -1766,6 +1764,23 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
 	assert.NoError(t, err)
 
+	successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
+	qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(successStatus, nil)
+	qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
+		Status: successStatus,
+		Shards: []*querypb.ShardLeadersList{
+			{
+				ChannelName: "channel-1",
+				NodeIds:     []int64{1, 2, 3},
+				NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
+			},
+		},
+	}, nil)
+	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+		Status:              successStatus,
+		CollectionIDs:       []int64{collectionID},
+		InMemoryPercentages: []int64{100},
+	}, nil)
 	status, err := qc.LoadCollection(ctx, &querypb.LoadCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:  commonpb.MsgType_LoadCollection,

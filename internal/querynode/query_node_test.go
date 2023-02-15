@@ -30,7 +30,6 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgdispatcher"
-	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
@@ -38,11 +37,6 @@ import (
 )
 
 var embedetcdServer *embed.Etcd
-
-// mock of query coordinator client
-type queryCoordMock struct {
-	types.QueryCoord
-}
 
 func setup() {
 	os.Setenv("QUERY_NODE_ID", "1")

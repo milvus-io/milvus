@@ -9,6 +9,7 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
@@ -34,7 +35,7 @@ func TestQueryTask_all(t *testing.T) {
 		ctx = context.TODO()
 
 		rc = NewRootCoordMock()
-		qc = NewQueryCoordMock(withValidShardLeaders())
+		qc = types.NewMockQueryCoord(t)
 		qn = &QueryNodeMock{}
 
 		shardsNum      = int32(2)
@@ -47,6 +48,21 @@ func TestQueryTask_all(t *testing.T) {
 			return fmt.Errorf("fake error")
 		}
 	)
+
+	successStatus := commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
+	qc.EXPECT().Start().Return(nil)
+	qc.EXPECT().Stop().Return(nil)
+	qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(&successStatus, nil)
+	qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
+		Status: &successStatus,
+		Shards: []*querypb.ShardLeadersList{
+			{
+				ChannelName: "channel-1",
+				NodeIds:     []int64{1, 2, 3},
+				NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
+			},
+		},
+	}, nil)
 
 	mockCreator := func(ctx context.Context, address string) (types.QueryNode, error) {
 		return qn, nil
@@ -96,6 +112,12 @@ func TestQueryTask_all(t *testing.T) {
 
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
 	assert.NoError(t, err)
+
+	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+		Status:              &successStatus,
+		CollectionIDs:       []int64{collectionID},
+		InMemoryPercentages: []int64{100},
+	}, nil)
 
 	status, err := qc.LoadCollection(ctx, &querypb.LoadCollectionRequest{
 		Base: &commonpb.MsgBase{

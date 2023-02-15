@@ -72,6 +72,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
@@ -4192,9 +4193,26 @@ func TestProxy_GetLoadState(t *testing.T) {
 	}()
 
 	{
-		q := NewQueryCoordMock()
-		q.state.Store(commonpb.StateCode_Abnormal)
-		proxy := &Proxy{queryCoord: q}
+		qc := getQueryCoord()
+		qc.EXPECT().GetComponentStates(mock.Anything).Return(&milvuspb.ComponentStates{
+			State: &milvuspb.ComponentInfo{
+				NodeID:    0,
+				Role:      typeutil.QueryCoordRole,
+				StateCode: commonpb.StateCode_Abnormal,
+				ExtraInfo: nil,
+			},
+			SubcomponentStates: nil,
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+				Reason:    "",
+			},
+		}, nil)
+		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+			Status:              &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			CollectionIDs:       nil,
+			InMemoryPercentages: []int64{},
+		}, nil)
+		proxy := &Proxy{queryCoord: qc}
 		proxy.stateCode.Store(commonpb.StateCode_Healthy)
 		stateResp, err := proxy.GetLoadState(context.Background(), &milvuspb.GetLoadStateRequest{CollectionName: "foo"})
 		assert.NoError(t, err)
@@ -4206,13 +4224,23 @@ func TestProxy_GetLoadState(t *testing.T) {
 	}
 
 	{
-		q := NewQueryCoordMock(SetQueryCoordShowCollectionsFunc(func(ctx context.Context, request *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
-			return nil, errors.New("test")
-		}), SetQueryCoordShowPartitionsFunc(func(ctx context.Context, request *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
-			return nil, errors.New("test")
-		}))
-		q.state.Store(commonpb.StateCode_Healthy)
-		proxy := &Proxy{queryCoord: q}
+		qc := getQueryCoord()
+		qc.EXPECT().GetComponentStates(mock.Anything).Return(&milvuspb.ComponentStates{
+			State: &milvuspb.ComponentInfo{
+				NodeID:    0,
+				Role:      typeutil.QueryCoordRole,
+				StateCode: commonpb.StateCode_Healthy,
+				ExtraInfo: nil,
+			},
+			SubcomponentStates: nil,
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+				Reason:    "",
+			},
+		}, nil)
+		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(nil, errors.New("test"))
+		qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(nil, errors.New("test"))
+		proxy := &Proxy{queryCoord: qc}
 		proxy.stateCode.Store(commonpb.StateCode_Healthy)
 
 		stateResp, err := proxy.GetLoadState(context.Background(), &milvuspb.GetLoadStateRequest{CollectionName: "foo"})
@@ -4237,15 +4265,27 @@ func TestProxy_GetLoadState(t *testing.T) {
 	}
 
 	{
-		q := NewQueryCoordMock(SetQueryCoordShowCollectionsFunc(func(ctx context.Context, request *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
-			return &querypb.ShowCollectionsResponse{
-				Status:              &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
-				CollectionIDs:       request.CollectionIDs,
-				InMemoryPercentages: []int64{},
-			}, nil
-		}))
-		q.state.Store(commonpb.StateCode_Healthy)
-		proxy := &Proxy{queryCoord: q}
+		qc := getQueryCoord()
+		qc.EXPECT().GetComponentStates(mock.Anything).Return(&milvuspb.ComponentStates{
+			State: &milvuspb.ComponentInfo{
+				NodeID:    0,
+				Role:      typeutil.QueryCoordRole,
+				StateCode: commonpb.StateCode_Healthy,
+				ExtraInfo: nil,
+			},
+			SubcomponentStates: nil,
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+				Reason:    "",
+			},
+		}, nil)
+		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+			Status:              &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			CollectionIDs:       nil,
+			InMemoryPercentages: []int64{},
+		}, nil)
+		qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(nil, errors.New("test"))
+		proxy := &Proxy{queryCoord: qc}
 		proxy.stateCode.Store(commonpb.StateCode_Healthy)
 
 		stateResp, err := proxy.GetLoadState(context.Background(), &milvuspb.GetLoadStateRequest{CollectionName: "foo"})
@@ -4259,15 +4299,26 @@ func TestProxy_GetLoadState(t *testing.T) {
 	}
 
 	{
-		q := NewQueryCoordMock(SetQueryCoordShowCollectionsFunc(func(ctx context.Context, request *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
-			return &querypb.ShowCollectionsResponse{
-				Status:              &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
-				CollectionIDs:       request.CollectionIDs,
-				InMemoryPercentages: []int64{100},
-			}, nil
-		}))
-		q.state.Store(commonpb.StateCode_Healthy)
-		proxy := &Proxy{queryCoord: q}
+		qc := getQueryCoord()
+		qc.EXPECT().GetComponentStates(mock.Anything).Return(&milvuspb.ComponentStates{
+			State: &milvuspb.ComponentInfo{
+				NodeID:    0,
+				Role:      typeutil.QueryCoordRole,
+				StateCode: commonpb.StateCode_Healthy,
+				ExtraInfo: nil,
+			},
+			SubcomponentStates: nil,
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+				Reason:    "",
+			},
+		}, nil)
+		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+			Status:              &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			CollectionIDs:       nil,
+			InMemoryPercentages: []int64{100},
+		}, nil)
+		proxy := &Proxy{queryCoord: qc}
 		proxy.stateCode.Store(commonpb.StateCode_Healthy)
 
 		stateResp, err := proxy.GetLoadState(context.Background(), &milvuspb.GetLoadStateRequest{CollectionName: "foo", Base: &commonpb.MsgBase{}})
@@ -4286,15 +4337,26 @@ func TestProxy_GetLoadState(t *testing.T) {
 	}
 
 	{
-		q := NewQueryCoordMock(SetQueryCoordShowCollectionsFunc(func(ctx context.Context, request *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
-			return &querypb.ShowCollectionsResponse{
-				Status:              &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
-				CollectionIDs:       request.CollectionIDs,
-				InMemoryPercentages: []int64{50},
-			}, nil
-		}))
-		q.state.Store(commonpb.StateCode_Healthy)
-		proxy := &Proxy{queryCoord: q}
+		qc := getQueryCoord()
+		qc.EXPECT().GetComponentStates(mock.Anything).Return(&milvuspb.ComponentStates{
+			State: &milvuspb.ComponentInfo{
+				NodeID:    0,
+				Role:      typeutil.QueryCoordRole,
+				StateCode: commonpb.StateCode_Healthy,
+				ExtraInfo: nil,
+			},
+			SubcomponentStates: nil,
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+				Reason:    "",
+			},
+		}, nil)
+		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+			Status:              &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+			CollectionIDs:       nil,
+			InMemoryPercentages: []int64{50},
+		}, nil)
+		proxy := &Proxy{queryCoord: qc}
 		proxy.stateCode.Store(commonpb.StateCode_Healthy)
 
 		stateResp, err := proxy.GetLoadState(context.Background(), &milvuspb.GetLoadStateRequest{CollectionName: "foo"})
@@ -4309,17 +4371,27 @@ func TestProxy_GetLoadState(t *testing.T) {
 	}
 
 	t.Run("test insufficient memory", func(t *testing.T) {
-		q := NewQueryCoordMock(SetQueryCoordShowCollectionsFunc(func(ctx context.Context, request *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
-			return &querypb.ShowCollectionsResponse{
-				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_InsufficientMemoryToLoad},
-			}, nil
-		}), SetQueryCoordShowPartitionsFunc(func(ctx context.Context, request *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
-			return &querypb.ShowPartitionsResponse{
-				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_InsufficientMemoryToLoad},
-			}, nil
-		}))
-		q.state.Store(commonpb.StateCode_Healthy)
-		proxy := &Proxy{queryCoord: q}
+		qc := getQueryCoord()
+		qc.EXPECT().GetComponentStates(mock.Anything).Return(&milvuspb.ComponentStates{
+			State: &milvuspb.ComponentInfo{
+				NodeID:    0,
+				Role:      typeutil.QueryCoordRole,
+				StateCode: commonpb.StateCode_Healthy,
+				ExtraInfo: nil,
+			},
+			SubcomponentStates: nil,
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+				Reason:    "",
+			},
+		}, nil)
+		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_InsufficientMemoryToLoad},
+		}, nil)
+		qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
+			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_InsufficientMemoryToLoad},
+		}, nil)
+		proxy := &Proxy{queryCoord: qc}
 		proxy.stateCode.Store(commonpb.StateCode_Healthy)
 
 		stateResp, err := proxy.GetLoadState(context.Background(), &milvuspb.GetLoadStateRequest{CollectionName: "foo"})

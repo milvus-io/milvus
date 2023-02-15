@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"google.golang.org/grpc/metadata"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -34,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/crypto"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
@@ -838,17 +840,23 @@ func Test_isCollectionIsLoaded(t *testing.T) {
 	ctx := context.Background()
 	t.Run("normal", func(t *testing.T) {
 		collID := int64(1)
-		showCollectionMock := func(ctx context.Context, request *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
-			return &querypb.ShowCollectionsResponse{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-					Reason:    "",
+		qc := &types.MockQueryCoord{}
+		successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
+		qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(successStatus, nil)
+		qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
+			Status: successStatus,
+			Shards: []*querypb.ShardLeadersList{
+				{
+					ChannelName: "channel-1",
+					NodeIds:     []int64{1, 2, 3},
+					NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
 				},
-				CollectionIDs: []int64{collID, 10, 100},
-			}, nil
-		}
-		qc := NewQueryCoordMock(withValidShardLeaders(), SetQueryCoordShowCollectionsFunc(showCollectionMock))
-		qc.updateState(commonpb.StateCode_Healthy)
+			},
+		}, nil)
+		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+			Status:        successStatus,
+			CollectionIDs: []int64{collID, 10, 100},
+		}, nil)
 		loaded, err := isCollectionLoaded(ctx, qc, collID)
 		assert.NoError(t, err)
 		assert.True(t, loaded)
@@ -856,17 +864,23 @@ func Test_isCollectionIsLoaded(t *testing.T) {
 
 	t.Run("error", func(t *testing.T) {
 		collID := int64(1)
-		showCollectionMock := func(ctx context.Context, request *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
-			return &querypb.ShowCollectionsResponse{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-					Reason:    "",
+		qc := &types.MockQueryCoord{}
+		successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
+		qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(successStatus, nil)
+		qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
+			Status: successStatus,
+			Shards: []*querypb.ShardLeadersList{
+				{
+					ChannelName: "channel-1",
+					NodeIds:     []int64{1, 2, 3},
+					NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
 				},
-				CollectionIDs: []int64{collID},
-			}, errors.New("error")
-		}
-		qc := NewQueryCoordMock(withValidShardLeaders(), SetQueryCoordShowCollectionsFunc(showCollectionMock))
-		qc.updateState(commonpb.StateCode_Healthy)
+			},
+		}, nil)
+		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+			Status:        successStatus,
+			CollectionIDs: []int64{collID},
+		}, errors.New("error"))
 		loaded, err := isCollectionLoaded(ctx, qc, collID)
 		assert.Error(t, err)
 		assert.False(t, loaded)
@@ -874,17 +888,26 @@ func Test_isCollectionIsLoaded(t *testing.T) {
 
 	t.Run("fail", func(t *testing.T) {
 		collID := int64(1)
-		showCollectionMock := func(ctx context.Context, request *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
-			return &querypb.ShowCollectionsResponse{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_UnexpectedError,
-					Reason:    "fail reason",
+		qc := &types.MockQueryCoord{}
+		successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
+		qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(successStatus, nil)
+		qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
+			Status: successStatus,
+			Shards: []*querypb.ShardLeadersList{
+				{
+					ChannelName: "channel-1",
+					NodeIds:     []int64{1, 2, 3},
+					NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
 				},
-				CollectionIDs: []int64{collID},
-			}, nil
-		}
-		qc := NewQueryCoordMock(withValidShardLeaders(), SetQueryCoordShowCollectionsFunc(showCollectionMock))
-		qc.updateState(commonpb.StateCode_Healthy)
+			},
+		}, nil)
+		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    "fail reason",
+			},
+			CollectionIDs: []int64{collID},
+		}, nil)
 		loaded, err := isCollectionLoaded(ctx, qc, collID)
 		assert.Error(t, err)
 		assert.False(t, loaded)
@@ -896,17 +919,26 @@ func Test_isPartitionIsLoaded(t *testing.T) {
 	t.Run("normal", func(t *testing.T) {
 		collID := int64(1)
 		partID := int64(2)
-		showPartitionsMock := func(ctx context.Context, request *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
-			return &querypb.ShowPartitionsResponse{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-					Reason:    "",
+		qc := &types.MockQueryCoord{}
+		successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
+		qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(successStatus, nil)
+		qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
+			Status: successStatus,
+			Shards: []*querypb.ShardLeadersList{
+				{
+					ChannelName: "channel-1",
+					NodeIds:     []int64{1, 2, 3},
+					NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
 				},
-				PartitionIDs: []int64{partID},
-			}, nil
-		}
-		qc := NewQueryCoordMock(withValidShardLeaders(), SetQueryCoordShowPartitionsFunc(showPartitionsMock))
-		qc.updateState(commonpb.StateCode_Healthy)
+			},
+		}, nil)
+		qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+				Reason:    "",
+			},
+			PartitionIDs: []int64{partID},
+		}, nil)
 		loaded, err := isPartitionLoaded(ctx, qc, collID, []int64{partID})
 		assert.NoError(t, err)
 		assert.True(t, loaded)
@@ -915,17 +947,26 @@ func Test_isPartitionIsLoaded(t *testing.T) {
 	t.Run("error", func(t *testing.T) {
 		collID := int64(1)
 		partID := int64(2)
-		showPartitionsMock := func(ctx context.Context, request *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
-			return &querypb.ShowPartitionsResponse{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-					Reason:    "",
+		qc := &types.MockQueryCoord{}
+		successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
+		qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(successStatus, nil)
+		qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
+			Status: successStatus,
+			Shards: []*querypb.ShardLeadersList{
+				{
+					ChannelName: "channel-1",
+					NodeIds:     []int64{1, 2, 3},
+					NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
 				},
-				PartitionIDs: []int64{partID},
-			}, errors.New("error")
-		}
-		qc := NewQueryCoordMock(withValidShardLeaders(), SetQueryCoordShowPartitionsFunc(showPartitionsMock))
-		qc.updateState(commonpb.StateCode_Healthy)
+			},
+		}, nil)
+		qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+				Reason:    "",
+			},
+			PartitionIDs: []int64{partID},
+		}, errors.New("error"))
 		loaded, err := isPartitionLoaded(ctx, qc, collID, []int64{partID})
 		assert.Error(t, err)
 		assert.False(t, loaded)
@@ -934,17 +975,26 @@ func Test_isPartitionIsLoaded(t *testing.T) {
 	t.Run("fail", func(t *testing.T) {
 		collID := int64(1)
 		partID := int64(2)
-		showPartitionsMock := func(ctx context.Context, request *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
-			return &querypb.ShowPartitionsResponse{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_UnexpectedError,
-					Reason:    "fail reason",
+		qc := &types.MockQueryCoord{}
+		successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
+		qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(successStatus, nil)
+		qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
+			Status: successStatus,
+			Shards: []*querypb.ShardLeadersList{
+				{
+					ChannelName: "channel-1",
+					NodeIds:     []int64{1, 2, 3},
+					NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
 				},
-				PartitionIDs: []int64{partID},
-			}, nil
-		}
-		qc := NewQueryCoordMock(withValidShardLeaders(), SetQueryCoordShowPartitionsFunc(showPartitionsMock))
-		qc.updateState(commonpb.StateCode_Healthy)
+			},
+		}, nil)
+		qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    "fail reason",
+			},
+			PartitionIDs: []int64{partID},
+		}, nil)
 		loaded, err := isPartitionLoaded(ctx, qc, collID, []int64{partID})
 		assert.Error(t, err)
 		assert.False(t, loaded)

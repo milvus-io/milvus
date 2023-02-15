@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
@@ -420,68 +421,74 @@ func withQueryCoord(qc types.QueryCoord) Opt {
 }
 
 func withUnhealthyQueryCoord() Opt {
-	qc := newMockQueryCoord()
-	qc.GetComponentStatesFunc = func(ctx context.Context) (*milvuspb.ComponentStates, error) {
-		return &milvuspb.ComponentStates{
+	qc := &types.MockQueryCoord{}
+	qc.EXPECT().GetComponentStates(mock.Anything).Return(
+		&milvuspb.ComponentStates{
 			State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Abnormal},
 			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "error mock GetComponentStates"),
-		}, retry.Unrecoverable(errors.New("error mock GetComponentStates"))
-	}
+		}, retry.Unrecoverable(errors.New("error mock GetComponentStates")),
+	)
 	return withQueryCoord(qc)
 }
 
 func withInvalidQueryCoord() Opt {
-	qc := newMockQueryCoord()
-	qc.GetComponentStatesFunc = func(ctx context.Context) (*milvuspb.ComponentStates, error) {
-		return &milvuspb.ComponentStates{
+	qc := &types.MockQueryCoord{}
+	qc.EXPECT().GetComponentStates(mock.Anything).Return(
+		&milvuspb.ComponentStates{
 			State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Healthy},
 			Status: succStatus(),
-		}, nil
-	}
-	qc.ReleaseCollectionFunc = func(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
-		return nil, errors.New("error mock ReleaseCollection")
-	}
-	qc.GetSegmentInfoFunc = func(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
-		return nil, errors.New("error mock GetSegmentInfo")
-	}
+		}, nil,
+	)
+	qc.EXPECT().ReleaseCollection(mock.Anything, mock.Anything).Return(
+		nil, errors.New("error mock ReleaseCollection"),
+	)
+
+	qc.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).Return(
+		nil, errors.New("error mock GetSegmentInfo"),
+	)
+
 	return withQueryCoord(qc)
 }
 
 func withFailedQueryCoord() Opt {
-	qc := newMockQueryCoord()
-	qc.GetComponentStatesFunc = func(ctx context.Context) (*milvuspb.ComponentStates, error) {
-		return &milvuspb.ComponentStates{
+	qc := &types.MockQueryCoord{}
+	qc.EXPECT().GetComponentStates(mock.Anything).Return(
+		&milvuspb.ComponentStates{
 			State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Healthy},
 			Status: succStatus(),
-		}, nil
-	}
-	qc.ReleaseCollectionFunc = func(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
-		return failStatus(commonpb.ErrorCode_UnexpectedError, "mock release collection error"), nil
-	}
-	qc.GetSegmentInfoFunc = func(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
-		return &querypb.GetSegmentInfoResponse{
+		}, nil,
+	)
+	qc.EXPECT().ReleaseCollection(mock.Anything, mock.Anything).Return(
+		failStatus(commonpb.ErrorCode_UnexpectedError, "mock release collection error"), nil,
+	)
+
+	qc.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).Return(
+		&querypb.GetSegmentInfoResponse{
 			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "mock get segment info error"),
-		}, nil
-	}
+		}, nil,
+	)
+
 	return withQueryCoord(qc)
 }
 
 func withValidQueryCoord() Opt {
-	qc := newMockQueryCoord()
-	qc.GetComponentStatesFunc = func(ctx context.Context) (*milvuspb.ComponentStates, error) {
-		return &milvuspb.ComponentStates{
+	qc := &types.MockQueryCoord{}
+	qc.EXPECT().GetComponentStates(mock.Anything).Return(
+		&milvuspb.ComponentStates{
 			State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Healthy},
 			Status: succStatus(),
-		}, nil
-	}
-	qc.ReleaseCollectionFunc = func(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
-		return succStatus(), nil
-	}
-	qc.GetSegmentInfoFunc = func(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
-		return &querypb.GetSegmentInfoResponse{
+		}, nil,
+	)
+	qc.EXPECT().ReleaseCollection(mock.Anything, mock.Anything).Return(
+		succStatus(), nil,
+	)
+
+	qc.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).Return(
+		&querypb.GetSegmentInfoResponse{
 			Status: succStatus(),
-		}, nil
-	}
+		}, nil,
+	)
+
 	return withQueryCoord(qc)
 }
 
