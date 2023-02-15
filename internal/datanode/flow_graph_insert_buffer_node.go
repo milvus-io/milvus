@@ -117,6 +117,23 @@ func (ibNode *insertBufferNode) IsValidInMsg(in []Msg) bool {
 
 func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 	fgMsg := in[0].(*flowGraphMsg)
+
+	// replace pchannel with vchannel
+	startPositions := make([]*internalpb.MsgPosition, 0, len(fgMsg.startPositions))
+	for idx := range fgMsg.startPositions {
+		pos := proto.Clone(fgMsg.startPositions[idx]).(*internalpb.MsgPosition)
+		pos.ChannelName = ibNode.channelName
+		startPositions = append(startPositions, pos)
+	}
+	fgMsg.startPositions = startPositions
+	endPositions := make([]*internalpb.MsgPosition, 0, len(fgMsg.endPositions))
+	for idx := range fgMsg.endPositions {
+		pos := proto.Clone(fgMsg.endPositions[idx]).(*internalpb.MsgPosition)
+		pos.ChannelName = ibNode.channelName
+		endPositions = append(endPositions, pos)
+	}
+	fgMsg.endPositions = endPositions
+
 	if fgMsg.IsCloseMsg() {
 		if len(fgMsg.endPositions) != 0 {
 			// try to sync all segments
@@ -151,22 +168,6 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 			sp.End()
 		}
 	}()
-
-	// replace pchannel with vchannel
-	startPositions := make([]*internalpb.MsgPosition, 0, len(fgMsg.startPositions))
-	for idx := range fgMsg.startPositions {
-		pos := proto.Clone(fgMsg.startPositions[idx]).(*internalpb.MsgPosition)
-		pos.ChannelName = ibNode.channelName
-		startPositions = append(startPositions, pos)
-	}
-	fgMsg.startPositions = startPositions
-	endPositions := make([]*internalpb.MsgPosition, 0, len(fgMsg.endPositions))
-	for idx := range fgMsg.endPositions {
-		pos := proto.Clone(fgMsg.endPositions[idx]).(*internalpb.MsgPosition)
-		pos.ChannelName = ibNode.channelName
-		endPositions = append(endPositions, pos)
-	}
-	fgMsg.endPositions = endPositions
 
 	if startPositions[0].Timestamp < ibNode.lastTimestamp {
 		// message stream should guarantee that this should not happen
