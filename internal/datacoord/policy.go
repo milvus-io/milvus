@@ -455,14 +455,14 @@ func BgCheckWithMaxWatchDuration(kv kv.TxnKV) ChannelBGChecker {
 					return nil, err
 				}
 				reviseVChannelInfo(watchInfo.GetVchan())
-				// if a channel is not watched after maxWatchDuration,
+				// if a channel is not watched or update watch progress after WatchTimeoutInterval,
 				// then we reallocate it to another node
 				if watchInfo.State == datapb.ChannelWatchState_Complete || watchInfo.State == datapb.ChannelWatchState_WatchSuccess {
 					continue
 				}
 				startTime := time.Unix(watchInfo.StartTs, 0)
 				d := ts.Sub(startTime)
-				if d >= Params.DataCoordCfg.MaxWatchDuration.GetAsDuration(time.Second) {
+				if d >= Params.DataCoordCfg.WatchTimeoutInterval.GetAsDuration(time.Second) {
 					cinfo.Channels = append(cinfo.Channels, c)
 				}
 			}

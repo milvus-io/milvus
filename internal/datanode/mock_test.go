@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgdispatcher"
@@ -134,6 +135,22 @@ func makeNewChannelNames(names []string, suffix string) []string {
 		ret = append(ret, name+suffix)
 	}
 	return ret
+}
+
+func newTestEtcdKV() (kv.MetaKv, error) {
+	etcdCli, err := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
+		Params.EtcdCfg.Endpoints.GetAsStrings(),
+		Params.EtcdCfg.EtcdTLSCert.GetValue(),
+		Params.EtcdCfg.EtcdTLSKey.GetValue(),
+		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
+		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
+	if err != nil {
+		return nil, err
+	}
+
+	return etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath.GetValue()), nil
 }
 
 func clearEtcd(rootPath string) error {
@@ -1292,4 +1309,8 @@ func genTimestamp() typeutil.Timestamp {
 	// Generate birthday of Golang
 	gb := time.Date(2009, time.Month(11), 10, 23, 0, 0, 0, time.UTC)
 	return tsoutil.ComposeTSByTime(gb, 0)
+}
+
+func genTestTickler() *tickler {
+	return newTickler(0, "", nil, nil, 0)
 }

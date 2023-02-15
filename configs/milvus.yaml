@@ -280,7 +280,7 @@ dataCoord:
   enableActiveStandby: false  # Enable active-standby
 
   channel:
-    maxWatchDuration: 600 # Timeout on watching channels (in seconds). Default 600 seconds.
+    watchTimeoutInterval: 30 # Timeout on watching channels (in seconds). Datanode tickler update watch progress will reset timeout timer.
 
   segment:
     maxSize: 512 # Maximum size of a segment in MB

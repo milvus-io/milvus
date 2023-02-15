@@ -413,10 +413,12 @@ message ChannelWatchInfo {
     int64 startTs = 2;
     ChannelWatchState state = 3;
     // the timeout ts, datanode shall do nothing after it
-    // if the timeout is not set(= 0), original infinite retry logic shall be applied
+    // NOT USED.
     int64 timeoutTs = 4;
     // the schema of the collection to watch, to avoid get schema rpc issues.
     schema.CollectionSchema schema = 5;
+    // watch progress
+    int32 progress = 6;
 }
 
 enum CompactionType {

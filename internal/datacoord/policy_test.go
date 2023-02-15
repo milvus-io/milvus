@@ -402,7 +402,7 @@ func TestBgCheckWithMaxWatchDuration(t *testing.T) {
 				getKv([]*watch{{1, "chan1", &datapb.ChannelWatchInfo{StartTs: ts.Unix(), State: datapb.ChannelWatchState_Uncomplete}},
 					{1, "chan2", &datapb.ChannelWatchInfo{StartTs: ts.Unix(), State: datapb.ChannelWatchState_Complete}}}),
 				[]*NodeChannelInfo{{1, []*channel{{Name: "chan1", CollectionID: 1}, {Name: "chan2", CollectionID: 1}}}},
-				ts.Add(Params.DataCoordCfg.MaxWatchDuration.GetAsDuration(time.Second)),
+				ts.Add(Params.DataCoordCfg.WatchTimeoutInterval.GetAsDuration(time.Second)),
 			},
 			[]*NodeChannelInfo{{1, []*channel{{Name: "chan1", CollectionID: 1}}}},
 			nil,
@@ -412,7 +412,7 @@ func TestBgCheckWithMaxWatchDuration(t *testing.T) {
 			args{
 				getKv([]*watch{{1, "chan1", &datapb.ChannelWatchInfo{StartTs: ts.Unix(), State: datapb.ChannelWatchState_Uncomplete}}}),
 				[]*NodeChannelInfo{{1, []*channel{{Name: "chan1", CollectionID: 1}}}},
-				ts.Add(Params.DataCoordCfg.MaxWatchDuration.GetAsDuration(time.Second)).Add(-time.Second),
+				ts.Add(Params.DataCoordCfg.WatchTimeoutInterval.GetAsDuration(time.Second)).Add(-time.Second),
 			},
 			[]*NodeChannelInfo{},
 			nil,

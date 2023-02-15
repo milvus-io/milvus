@@ -18,12 +18,14 @@ package datanode
 
 import (
 	"errors"
+	"fmt"
+	"path"
 	"testing"
 	"time"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/stretchr/testify/assert"
-	"go.uber.org/atomic"
 )
 
 func TestChannelEventManager(t *testing.T) {
@@ -41,95 +43,10 @@ func TestChannelEventManager(t *testing.T) {
 			eventType: putEventType,
 			vChanName: "",
 			version:   0,
-			info: &datapb.ChannelWatchInfo{
-				TimeoutTs: time.Now().Add(time.Minute).UnixNano(),
-			},
+			info:      &datapb.ChannelWatchInfo{},
 		})
 		<-ch
 		assert.True(t, ran)
-	})
-
-	t.Run("event already timeout", func(t *testing.T) {
-		ch := make(chan struct{}, 1)
-		ran := false
-		em := newChannelEventManager(func(info *datapb.ChannelWatchInfo, version int64) error {
-			ran = true
-			ch <- struct{}{}
-			return nil
-		}, func(name string) {}, time.Millisecond*10)
-
-		em.Run()
-		em.handleEvent(event{
-			eventType: putEventType,
-			vChanName: "",
-			version:   0,
-			info: &datapb.ChannelWatchInfo{
-				TimeoutTs: time.Now().Add(-time.Minute).UnixNano(),
-			},
-		})
-		select {
-		case <-ch:
-			t.FailNow()
-		case <-time.NewTimer(time.Millisecond * 100).C:
-		}
-		assert.False(t, ran)
-	})
-
-	t.Run("retry success", func(t *testing.T) {
-		ch := make(chan struct{}, 1)
-		ran := false
-		counter := atomic.Int32{}
-		counter.Store(0)
-		em := newChannelEventManager(func(info *datapb.ChannelWatchInfo, version int64) error {
-			current := counter.Add(1)
-			if current == 2 {
-				ran = true
-				ch <- struct{}{}
-				return nil
-			}
-
-			return errors.New("mocked error")
-		}, func(name string) {}, time.Millisecond*10)
-
-		em.Run()
-		em.handleEvent(event{
-			eventType: putEventType,
-			vChanName: "",
-			version:   0,
-			info: &datapb.ChannelWatchInfo{
-				TimeoutTs: time.Now().Add(time.Minute).UnixNano(),
-			},
-		})
-		<-ch
-		assert.True(t, ran)
-	})
-
-	t.Run("retry until timeout", func(t *testing.T) {
-		em := newChannelEventManager(func(info *datapb.ChannelWatchInfo, version int64) error {
-			return errors.New("mocked error")
-		}, func(name string) {}, time.Millisecond*100)
-
-		ch := make(chan struct{}, 1)
-
-		go func() {
-			ddl := time.Now().Add(time.Millisecond * 50)
-			evt := event{
-				eventType: putEventType,
-				vChanName: "",
-				version:   0,
-				info: &datapb.ChannelWatchInfo{
-					TimeoutTs: ddl.UnixNano(),
-				},
-			}
-			em.retryHandlePutEvent(evt)
-			ch <- struct{}{}
-		}()
-
-		select {
-		case <-ch:
-		case <-time.NewTimer(time.Second).C:
-			t.FailNow()
-		}
 	})
 
 	t.Run("close behavior", func(t *testing.T) {
@@ -139,25 +56,22 @@ func TestChannelEventManager(t *testing.T) {
 		}, func(name string) {}, time.Millisecond*10)
 
 		go func() {
-			ddl := time.Now().Add(time.Minute)
 			evt := event{
 				eventType: putEventType,
 				vChanName: "",
 				version:   0,
-				info: &datapb.ChannelWatchInfo{
-					TimeoutTs: ddl.UnixNano(),
-				},
+				info:      &datapb.ChannelWatchInfo{},
 			}
-			em.retryHandlePutEvent(evt)
+			em.handleEvent(evt)
 			ch <- struct{}{}
 		}()
 
-		close(em.eventChan)
 		select {
 		case <-ch:
 		case <-time.NewTimer(time.Second).C:
 			t.FailNow()
 		}
+		close(em.eventChan)
 
 		assert.NotPanics(t, func() {
 			em.Close()
@@ -183,17 +97,13 @@ func TestChannelEventManager(t *testing.T) {
 			eventType: putEventType,
 			vChanName: "",
 			version:   0,
-			info: &datapb.ChannelWatchInfo{
-				TimeoutTs: time.Now().Add(time.Minute).UnixNano(),
-			},
+			info:      &datapb.ChannelWatchInfo{},
 		})
 		em.handleEvent(event{
 			eventType: deleteEventType,
 			vChanName: "",
 			version:   0,
-			info: &datapb.ChannelWatchInfo{
-				TimeoutTs: time.Now().Add(time.Minute).UnixNano(),
-			},
+			info:      &datapb.ChannelWatchInfo{},
 		})
 		<-ch
 		assert.True(t, ran)
@@ -219,8 +129,7 @@ func TestChannelEventManager(t *testing.T) {
 			vChanName: "",
 			version:   0,
 			info: &datapb.ChannelWatchInfo{
-				State:     datapb.ChannelWatchState_ToWatch,
-				TimeoutTs: time.Now().Add(time.Minute).UnixNano(),
+				State: datapb.ChannelWatchState_ToWatch,
 			},
 		})
 		em.handleEvent(event{
@@ -228,62 +137,72 @@ func TestChannelEventManager(t *testing.T) {
 			vChanName: "",
 			version:   1,
 			info: &datapb.ChannelWatchInfo{
-				State:     datapb.ChannelWatchState_ToWatch,
-				TimeoutTs: time.Now().Add(time.Minute).UnixNano(),
+				State: datapb.ChannelWatchState_ToWatch,
 			},
 		})
 		<-ch
 		assert.True(t, ran)
 	})
+}
 
-	t.Run("canceled by EndStates", func(t *testing.T) {
-		endStates := []datapb.ChannelWatchState{
-			datapb.ChannelWatchState_Complete,
-			datapb.ChannelWatchState_WatchSuccess,
-			datapb.ChannelWatchState_WatchFailure,
-			datapb.ChannelWatchState_ReleaseSuccess,
-			datapb.ChannelWatchState_ReleaseFailure,
-		}
+func parseWatchInfo(key string, data []byte) (*datapb.ChannelWatchInfo, error) {
+	watchInfo := datapb.ChannelWatchInfo{}
+	if err := proto.Unmarshal(data, &watchInfo); err != nil {
+		return nil, fmt.Errorf("invalid event data: fail to parse ChannelWatchInfo, key: %s, err: %v", key, err)
 
-		for _, es := range endStates {
-			em := newChannelEventManager(
-				func(info *datapb.ChannelWatchInfo, version int64) error {
-					return errors.New("mocked error")
-				},
-				func(name string) {},
-				time.Millisecond*100,
-			)
+	}
 
-			ch := make(chan struct{}, 1)
-			ddl := time.Now().Add(time.Minute)
+	if watchInfo.Vchan == nil {
+		return nil, fmt.Errorf("invalid event: ChannelWatchInfo with nil VChannelInfo, key: %s", key)
+	}
+	reviseVChannelInfo(watchInfo.GetVchan())
 
-			go func() {
-				evt := event{
-					eventType: putEventType,
-					vChanName: "",
-					version:   0,
-					info: &datapb.ChannelWatchInfo{
-						TimeoutTs: ddl.UnixNano(),
-					},
+	return &watchInfo, nil
+}
+
+func TestEventTickler(t *testing.T) {
+	channelName := "test-channel"
+	etcdPrefix := "test_path"
+
+	kv, err := newTestEtcdKV()
+	assert.NoError(t, err)
+	kv.RemoveWithPrefix(etcdPrefix)
+	defer kv.RemoveWithPrefix(etcdPrefix)
+
+	tickler := newTickler(0, path.Join(etcdPrefix, channelName), &datapb.ChannelWatchInfo{
+		Vchan: &datapb.VchannelInfo{
+			ChannelName: channelName,
+		},
+	}, kv, 100*time.Millisecond)
+	defer tickler.stop()
+	endCh := make(chan struct{}, 1)
+	go func() {
+		watchCh := kv.WatchWithPrefix(etcdPrefix)
+		for {
+			event, ok := <-watchCh
+			assert.True(t, ok)
+			for _, evt := range event.Events {
+				key := string(evt.Kv.Key)
+				watchInfo, err := parseWatchInfo(key, evt.Kv.Value)
+				assert.NoError(t, err)
+				if watchInfo.GetVchan().GetChannelName() == channelName {
+					assert.Equal(t, int32(1), watchInfo.Progress)
+					endCh <- struct{}{}
+					return
 				}
-				em.retryHandlePutEvent(evt)
-				ch <- struct{}{}
-			}()
-
-			em.eventChan <- event{
-				eventType: putEventType,
-				vChanName: "",
-				version:   0,
-				info: &datapb.ChannelWatchInfo{
-					State:     es,
-					TimeoutTs: ddl.UnixNano(),
-				},
-			}
-			select {
-			case <-ch:
-			case <-time.NewTimer(time.Minute).C:
-				t.FailNow()
 			}
 		}
-	})
+
+	}()
+
+	tickler.inc()
+	tickler.watch()
+	assert.Eventually(t, func() bool {
+		select {
+		case <-endCh:
+			return true
+		default:
+			return false
+		}
+	}, 4*time.Second, 100*time.Millisecond)
 }

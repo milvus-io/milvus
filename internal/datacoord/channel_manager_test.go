@@ -127,7 +127,7 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 		waitAndCheckState(t, metakv, datapb.ChannelWatchState_WatchSuccess, nodeID, cName, collectionID)
 
 		assert.Eventually(t, func() bool {
-			_, loaded := chManager.stateTimer.runningTimers.Load(cName)
+			_, loaded := chManager.stateTimer.runningTimerStops.Load(cName)
 			return !loaded
 		}, waitFor, tick)
 
@@ -157,7 +157,7 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 		waitAndCheckState(t, metakv, datapb.ChannelWatchState_ToRelease, nodeID, cName, collectionID)
 
 		assert.Eventually(t, func() bool {
-			_, loaded := chManager.stateTimer.runningTimers.Load(cName)
+			_, loaded := chManager.stateTimer.runningTimerStops.Load(cName)
 			return loaded
 		}, waitFor, tick)
 
@@ -193,7 +193,7 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 
 		waitAndCheckState(t, metakv, datapb.ChannelWatchState_ToRelease, nodeID, cName, collectionID)
 		assert.Eventually(t, func() bool {
-			_, loaded := chManager.stateTimer.runningTimers.Load(cName)
+			_, loaded := chManager.stateTimer.runningTimerStops.Load(cName)
 			return loaded
 		}, waitFor, tick)
 
@@ -242,7 +242,7 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 		assert.Error(t, err)
 		assert.Empty(t, w)
 
-		_, loaded := chManager.stateTimer.runningTimers.Load(cName)
+		_, loaded := chManager.stateTimer.runningTimerStops.Load(cName)
 		assert.True(t, loaded)
 		chManager.stateTimer.removeTimers([]string{cName})
 	})
@@ -279,7 +279,7 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 		waitAndCheckState(t, metakv, datapb.ChannelWatchState_ToWatch, nodeID, cName, collectionID)
 
 		assert.Eventually(t, func() bool {
-			_, loaded := chManager.stateTimer.runningTimers.Load(cName)
+			_, loaded := chManager.stateTimer.runningTimerStops.Load(cName)
 			return loaded
 		}, waitFor, tick)
 		cancel()
@@ -331,7 +331,7 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 		assert.Error(t, err)
 		assert.Empty(t, w)
 
-		_, loaded := chManager.stateTimer.runningTimers.Load(cName)
+		_, loaded := chManager.stateTimer.runningTimerStops.Load(cName)
 		assert.True(t, loaded)
 		chManager.stateTimer.removeTimers([]string{cName})
 	})
@@ -370,7 +370,7 @@ func TestChannelManager_StateTransfer(t *testing.T) {
 
 		waitAndCheckState(t, metakv, datapb.ChannelWatchState_ToWatch, nodeID, cName, collectionID)
 		assert.Eventually(t, func() bool {
-			_, loaded := chManager.stateTimer.runningTimers.Load(cName)
+			_, loaded := chManager.stateTimer.runningTimerStops.Load(cName)
 			return loaded
 		}, waitFor, tick)
 
@@ -585,7 +585,7 @@ func TestChannelManager(t *testing.T) {
 				bufferID: {bufferID, []*channel{}},
 			},
 		}
-		chManager.stateTimer.startOne(datapb.ChannelWatchState_ToRelease, "channel-1", 1, time.Now().Add(Params.DataCoordCfg.MaxWatchDuration.GetAsDuration(time.Second)).UnixNano())
+		chManager.stateTimer.startOne(datapb.ChannelWatchState_ToRelease, "channel-1", 1, Params.DataCoordCfg.WatchTimeoutInterval.GetAsDuration(time.Second))
 
 		err = chManager.DeleteNode(1)
 		assert.NoError(t, err)
@@ -755,8 +755,7 @@ func TestChannelManager_Reload(t *testing.T) {
 				CollectionID: collectionID,
 				ChannelName:  channelName,
 			},
-			State:     state,
-			TimeoutTs: time.Now().Add(20 * time.Second).UnixNano(),
+			State: state,
 		}
 	}
 
@@ -773,7 +772,7 @@ func TestChannelManager_Reload(t *testing.T) {
 			require.NoError(t, err)
 
 			chManager.checkOldNodes([]UniqueID{nodeID})
-			_, ok := chManager.stateTimer.runningTimers.Load(channelName)
+			_, ok := chManager.stateTimer.runningTimerStops.Load(channelName)
 			assert.True(t, ok)
 			chManager.stateTimer.removeTimers([]string{channelName})
 		})
@@ -789,7 +788,7 @@ func TestChannelManager_Reload(t *testing.T) {
 			err = chManager.checkOldNodes([]UniqueID{nodeID})
 			assert.NoError(t, err)
 
-			_, ok := chManager.stateTimer.runningTimers.Load(channelName)
+			_, ok := chManager.stateTimer.runningTimerStops.Load(channelName)
 			assert.True(t, ok)
 			chManager.stateTimer.removeTimers([]string{channelName})
 		})

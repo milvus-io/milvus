@@ -363,6 +363,11 @@ func (node *DataNode) handleWatchInfo(e *event, key string, data []byte) {
 			return
 		}
 
+		if watchInfo.Progress != 0 {
+			log.Info("DataNode received a PUT event with tickler update progress", zap.String("channel", watchInfo.Vchan.ChannelName), zap.Int64("version", e.version))
+			return
+		}
+
 		e.info = watchInfo
 		e.vChanName = watchInfo.GetVchan().GetChannelName()
 		log.Info("DataNode is handling watchInfo PUT event", zap.String("key", key), zap.Any("watch state", watchInfo.GetState().String()))
@@ -410,9 +415,13 @@ func parseDeleteEventKey(key string) string {
 
 func (node *DataNode) handlePutEvent(watchInfo *datapb.ChannelWatchInfo, version int64) (err error) {
 	vChanName := watchInfo.GetVchan().GetChannelName()
+	key := path.Join(Params.CommonCfg.DataCoordWatchSubPath.GetValue(), fmt.Sprintf("%d", node.GetSession().ServerID), vChanName)
+	tickler := newTickler(version, key, watchInfo, node.watchKv, Params.DataNodeCfg.WatchEventTicklerInterval.GetAsDuration(time.Second))
+
 	switch watchInfo.State {
 	case datapb.ChannelWatchState_Uncomplete, datapb.ChannelWatchState_ToWatch:
-		if err := node.flowgraphManager.addAndStart(node, watchInfo.GetVchan(), watchInfo.GetSchema()); err != nil {
+		if err := node.flowgraphManager.addAndStart(node, watchInfo.GetVchan(), watchInfo.GetSchema(), tickler); err != nil {
+			watchInfo.State = datapb.ChannelWatchState_WatchFailure
 			return fmt.Errorf("fail to add and start flowgraph for vChanName: %s, err: %v", vChanName, err)
 		}
 		log.Info("handle put event: new data sync service success", zap.String("vChanName", vChanName))
@@ -429,10 +438,8 @@ func (node *DataNode) handlePutEvent(watchInfo *datapb.ChannelWatchInfo, version
 		return fmt.Errorf("fail to marshal watchInfo with state, vChanName: %s, state: %s ,err: %w", vChanName, watchInfo.State.String(), err)
 	}
 
-	key := path.Join(Params.CommonCfg.DataCoordWatchSubPath.GetValue(), fmt.Sprintf("%d", node.GetSession().ServerID), vChanName)
-
-	success, err := node.watchKv.CompareVersionAndSwap(key, version, string(v))
-	// etcd error, retrying
+	success, err := node.watchKv.CompareVersionAndSwap(key, tickler.version, string(v))
+	// etcd error
 	if err != nil {
 		// flow graph will leak if not release, causing new datanode failed to subscribe
 		node.tryToReleaseFlowgraph(vChanName)
