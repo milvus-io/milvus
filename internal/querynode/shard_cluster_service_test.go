@@ -67,7 +67,7 @@ func TestShardClusterService_SyncReplicaSegments(t *testing.T) {
 			})
 
 			assert.NoError(t, err)
-			assert.Nil(t, sc.currentVersion)
+			assert.Nil(t, sc.distribution)
 		})
 	})
 

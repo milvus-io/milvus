@@ -1348,9 +1348,9 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 		segmentInfos := sc.GetSegmentInfos()
 		mapping := make(map[int64]*querypb.SegmentDist)
 		for _, info := range segmentInfos {
-			mapping[info.segmentID] = &querypb.SegmentDist{
-				NodeID:  info.nodeID,
-				Version: info.version,
+			mapping[info.SegmentID] = &querypb.SegmentDist{
+				NodeID:  info.NodeID,
+				Version: info.Version,
 			}
 		}
 		view := &querypb.LeaderView{
