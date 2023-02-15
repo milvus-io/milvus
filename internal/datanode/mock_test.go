@@ -27,6 +27,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/util/metautil"
 
 	"go.uber.org/zap"
@@ -131,6 +132,22 @@ func makeNewChannelNames(names []string, suffix string) []string {
 		ret = append(ret, name+suffix)
 	}
 	return ret
+}
+
+func newTestEtcdKV() (kv.MetaKv, error) {
+	etcdCli, err := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd,
+		Params.EtcdCfg.EtcdUseSSL,
+		Params.EtcdCfg.Endpoints,
+		Params.EtcdCfg.EtcdTLSCert,
+		Params.EtcdCfg.EtcdTLSKey,
+		Params.EtcdCfg.EtcdTLSCACert,
+		Params.EtcdCfg.EtcdTLSMinVersion)
+	if err != nil {
+		return nil, err
+	}
+
+	return etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath), nil
 }
 
 func clearEtcd(rootPath string) error {
@@ -1289,4 +1306,8 @@ func genTimestamp() typeutil.Timestamp {
 	// Generate birthday of Golang
 	gb := time.Date(2009, time.Month(11), 10, 23, 0, 0, 0, time.UTC)
 	return tsoutil.ComposeTSByTime(gb, 0)
+}
+
+func genTestTickler() *tickler {
+	return newTickler(0, "", nil, nil, 0)
 }

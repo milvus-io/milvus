@@ -218,7 +218,7 @@ func TestDataNode(t *testing.T) {
 			FlushedSegmentIds:   []int64{},
 		}
 
-		err := node1.flowgraphManager.addAndStart(node1, vchan, nil)
+		err := node1.flowgraphManager.addAndStart(node1, vchan, nil, genTestTickler())
 		require.Nil(t, err)
 
 		fgservice, ok := node1.flowgraphManager.getFlowgraphService(dmChannelName)
@@ -463,14 +463,14 @@ func TestDataNode(t *testing.T) {
 			ChannelName:         chName1,
 			UnflushedSegmentIds: []int64{},
 			FlushedSegmentIds:   []int64{},
-		}, nil)
+		}, nil, genTestTickler())
 		require.Nil(t, err)
 		err = node.flowgraphManager.addAndStart(node, &datapb.VchannelInfo{
 			CollectionID:        100,
 			ChannelName:         chName2,
 			UnflushedSegmentIds: []int64{},
 			FlushedSegmentIds:   []int64{},
-		}, nil)
+		}, nil, genTestTickler())
 		require.Nil(t, err)
 
 		_, ok := node.flowgraphManager.getFlowgraphService(chName1)
@@ -529,14 +529,14 @@ func TestDataNode(t *testing.T) {
 			ChannelName:         chName1,
 			UnflushedSegmentIds: []int64{},
 			FlushedSegmentIds:   []int64{},
-		}, nil)
+		}, nil, genTestTickler())
 		require.Nil(t, err)
 		err = node.flowgraphManager.addAndStart(node, &datapb.VchannelInfo{
 			CollectionID:        999, // wrong collection ID.
 			ChannelName:         chName2,
 			UnflushedSegmentIds: []int64{},
 			FlushedSegmentIds:   []int64{},
-		}, nil)
+		}, nil, genTestTickler())
 		require.Nil(t, err)
 
 		_, ok := node.flowgraphManager.getFlowgraphService(chName1)
@@ -647,7 +647,7 @@ func TestDataNode(t *testing.T) {
 
 		for i, test := range testDataSyncs {
 			if i <= 2 {
-				err = node.flowgraphManager.addAndStart(node, &datapb.VchannelInfo{CollectionID: 1, ChannelName: test.dmChannelName}, nil)
+				err = node.flowgraphManager.addAndStart(node, &datapb.VchannelInfo{CollectionID: 1, ChannelName: test.dmChannelName}, nil, genTestTickler())
 				assert.Nil(t, err)
 				vchanNameCh <- test.dmChannelName
 			}
@@ -682,7 +682,7 @@ func TestDataNode(t *testing.T) {
 			ChannelName:         chanName,
 			UnflushedSegmentIds: []int64{},
 			FlushedSegmentIds:   []int64{},
-		}, nil)
+		}, nil, genTestTickler())
 		require.NoError(t, err)
 		fg, ok := node.flowgraphManager.getFlowgraphService(chanName)
 		assert.True(t, ok)
@@ -794,14 +794,14 @@ func TestDataNode_AddSegment(t *testing.T) {
 			ChannelName:         chName1,
 			UnflushedSegmentIds: []int64{},
 			FlushedSegmentIds:   []int64{},
-		}, nil)
+		}, nil, genTestTickler())
 		require.Nil(t, err)
 		err = node.flowgraphManager.addAndStart(node, &datapb.VchannelInfo{
 			CollectionID:        100,
 			ChannelName:         chName2,
 			UnflushedSegmentIds: []int64{},
 			FlushedSegmentIds:   []int64{},
-		}, nil)
+		}, nil, genTestTickler())
 		require.Nil(t, err)
 
 		_, ok := node.flowgraphManager.getFlowgraphService(chName1)
@@ -895,9 +895,8 @@ func TestWatchChannel(t *testing.T) {
 			UnflushedSegmentIds: []int64{},
 		}
 		info := &datapb.ChannelWatchInfo{
-			State:     datapb.ChannelWatchState_ToWatch,
-			Vchan:     vchan,
-			TimeoutTs: time.Now().Add(time.Minute).UnixNano(),
+			State: datapb.ChannelWatchState_ToWatch,
+			Vchan: vchan,
 		}
 		val, err := proto.Marshal(info)
 		assert.Nil(t, err)
@@ -954,9 +953,8 @@ func TestWatchChannel(t *testing.T) {
 			UnflushedSegmentIds: []int64{},
 		}
 		info := &datapb.ChannelWatchInfo{
-			State:     datapb.ChannelWatchState_ToRelease,
-			Vchan:     vchan,
-			TimeoutTs: time.Now().Add(time.Minute).UnixNano(),
+			State: datapb.ChannelWatchState_ToRelease,
+			Vchan: vchan,
 		}
 		val, err := proto.Marshal(info)
 		assert.Nil(t, err)
@@ -1018,9 +1016,8 @@ func TestWatchChannel(t *testing.T) {
 		m.Run()
 
 		info = datapb.ChannelWatchInfo{
-			Vchan:     &datapb.VchannelInfo{ChannelName: ch},
-			State:     datapb.ChannelWatchState_Uncomplete,
-			TimeoutTs: time.Now().Add(time.Minute).UnixNano(),
+			Vchan: &datapb.VchannelInfo{ChannelName: ch},
+			State: datapb.ChannelWatchState_Uncomplete,
 		}
 		bs, err = proto.Marshal(&info)
 		assert.NoError(t, err)
@@ -1059,9 +1056,8 @@ func TestWatchChannel(t *testing.T) {
 		}
 
 		info := datapb.ChannelWatchInfo{
-			Vchan:     &datapb.VchannelInfo{ChannelName: ch},
-			State:     datapb.ChannelWatchState_Uncomplete,
-			TimeoutTs: time.Now().Add(time.Minute).UnixNano(),
+			Vchan: &datapb.VchannelInfo{ChannelName: ch},
+			State: datapb.ChannelWatchState_Uncomplete,
 		}
 		bs, err := proto.Marshal(&info)
 		assert.NoError(t, err)
@@ -1082,8 +1078,7 @@ func TestWatchChannel(t *testing.T) {
 				DroppedSegments:     []*datapb.SegmentInfo{{ID: 3}},
 				UnflushedSegmentIds: []int64{1},
 			},
-			State:     datapb.ChannelWatchState_Uncomplete,
-			TimeoutTs: time.Now().Add(time.Minute).UnixNano(),
+			State: datapb.ChannelWatchState_Uncomplete,
 		}
 		bs, err := proto.Marshal(&info)
 		assert.NoError(t, err)
@@ -1145,7 +1140,7 @@ func TestDataNode_ResendSegmentStats(t *testing.T) {
 		FlushedSegmentIds:   []int64{},
 	}
 
-	err = node.flowgraphManager.addAndStart(node, vChan, nil)
+	err = node.flowgraphManager.addAndStart(node, vChan, nil, genTestTickler())
 	require.Nil(t, err)
 
 	fgService, ok := node.flowgraphManager.getFlowgraphService(dmChannelName)
