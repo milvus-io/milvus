@@ -9,6 +9,7 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License
 
+find_package(velox)
 set(MILVUS_QUERY_SRCS
         deprecated/BinaryQuery.cpp
         generated/PlanNode.cpp
@@ -31,4 +32,6 @@ set(MILVUS_QUERY_SRCS
         PlanProto.cpp
         )
 add_library(milvus_query ${MILVUS_QUERY_SRCS})
-target_link_libraries(milvus_query milvus_index)
+
+target_include_directories(milvus_query PUBLIC ${Velox_INCLUDE_DIR}/velox/external/xxhash)
+target_link_libraries(milvus_query milvus_index ${CONAN_LIBS})

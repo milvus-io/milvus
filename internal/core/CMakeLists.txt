@@ -15,6 +15,7 @@
 # limitations under the License.
 
 cmake_minimum_required( VERSION 3.18 )
+set(CMAKE_VERBOSE_MAKEFILE ON)
 
 if ( APPLE )
     set( CMAKE_CROSSCOMPILING TRUE )
@@ -41,6 +42,8 @@ elseif ( MSYS )
 else ()
     message(FATAL_ERROR "Unsupported platform!" )
 endif ()
+
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mavx2")
 
 if (CMAKE_COMPILER_IS_GNUCC)
     if (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 11.99)
@@ -115,6 +118,7 @@ if (LINUX OR MSYS)
                   "-DELPP_THREAD_SAFE"
                   "-fopenmp"
                   "-Werror"
+                  "-Wp,-w"
                   )
 endif ()
 
@@ -246,6 +250,10 @@ endif ()
 
 if ( BUILD_DISK_ANN STREQUAL "ON" )
     ADD_DEFINITIONS(-DBUILD_DISK_ANN=${BUILD_DISK_ANN})
+endif ()
+
+if ( USE_VELOX STREQUAL "ON" )
+    ADD_DEFINITIONS(-DUSE_VELOX=${USE_VELOX})
 endif ()
 
 # Warning: add_subdirectory(src) must be after append_flags("-ftest-coverage"),

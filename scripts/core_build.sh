@@ -57,6 +57,7 @@ CUDA_ARCH="DEFAULT"
 CUSTOM_THIRDPARTY_PATH=""
 EMBEDDED_MILVUS="OFF"
 BUILD_DISK_ANN="OFF"
+USE_VELOX="OFF"
 USE_ASAN="OFF"
 
 while getopts "p:d:t:s:f:n:a:ulrcghzmeb" arg; do
@@ -105,6 +106,9 @@ while getopts "p:d:t:s:f:n:a:ulrcghzmeb" arg; do
     ;;
   n)
     BUILD_DISK_ANN=$OPTARG
+    ;;
+  v)
+    USE_VELOX=$OPTARG
     ;;
   a)
     ENV_VAL=$OPTARG
@@ -234,6 +238,7 @@ ${CMAKE_EXTRA_ARGS} \
 -DCUSTOM_THIRDPARTY_DOWNLOAD_PATH=${CUSTOM_THIRDPARTY_PATH} \
 -DEMBEDDED_MILVUS=${EMBEDDED_MILVUS} \
 -DBUILD_DISK_ANN=${BUILD_DISK_ANN} \
+-DUSE_VELOX=${USE_VELOX} \
 -DUSE_ASAN=${USE_ASAN} \
 ${CPP_SRC_DIR}"
 

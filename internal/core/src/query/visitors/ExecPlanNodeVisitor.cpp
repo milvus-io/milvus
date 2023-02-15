@@ -13,11 +13,23 @@
 
 #include <utility>
 
+#include <velox/exec/tests/utils/Cursor.h>
+#include <velox/exec/tests/utils/PlanBuilder.h>
+#include <velox/exec/tests/utils/QueryAssertions.h>
+#include <velox/exec/tests/utils/AssertQueryBuilder.h>
+#include <velox/substrait/SubstraitToVeloxPlan.h>
+#include <velox/substrait/tests/JsonToProtoConverter.h>
+#include <velox/external/xxhash/xxhash.h>
+
+#include "common/Consts.h"
+#include "query/Expr.h"
 #include "query/PlanImpl.h"
 #include "query/SubSearchResult.h"
 #include "query/generated/ExecExprVisitor.h"
 #include "segcore/SegmentGrowing.h"
 #include "utils/Json.h"
+
+#include "segcore/engine/SegmentConnector.h"
 
 namespace milvus::query {
 
@@ -97,6 +109,51 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
     }
 
     std::unique_ptr<BitsetType> bitset_holder;
+#ifdef USE_VELOX
+    bool fields_has_index = false;
+    auto expr_fields = (*node.predicate_)->GetFieldIds();
+    for (auto& field_id : expr_fields) {
+        if (segment->num_chunk_index(field_id) > 0) {
+            fields_has_index = true;
+            std::cout << "field id has index" << field_id.get() << std::endl;
+        }
+    }
+
+    if (node.predicate_.has_value()) {
+        if (!fields_has_index) {
+            facebook::velox::core::PlanNodeId plan_node_id;
+            auto plan = milvus::engine::PlanBuilder()
+                            .tableScan(segment)
+                            .capturePlanNodeId(plan_node_id)
+                            .filter(node.expr_str_)
+                            .planNode();
+            // facebook::velox::exec::test::CursorParameters expr_params;
+            // expr_params.planNode = plan;
+            // auto result = facebook::velox::exec::test::readCursor(expr_params, [](facebook::velox::exec::Task*) {});
+            auto split =
+                std::make_shared<milvus::engine::SegmentConnectorSplit>(
+                    SEGMENT_CONNECTOR_ID, segment);
+            auto result =
+                facebook::velox::exec::test::AssertQueryBuilder(plan)
+                    .split(plan_node_id, split)
+                    .copyResults(milvus::engine::GetDefaultMemoryPool().get());
+            // bitset_holder = ExecExprVisitor(*segment, active_count, timestamp_).call_child(*(node.predicate_));
+            auto bool_vec = result->childAt(0)->template asFlatVector<bool>();
+            bitset_holder = std::make_unique<BitsetType>();
+            for (int i = 0; i < result->size(); ++i) {
+                bitset_holder->push_back(bool_vec->valueAtFast(i));
+            }
+            bitset_holder->flip();
+        } else {
+            bitset_holder = std::make_unique<BitsetType>(
+                ExecExprVisitor(*segment, active_count, timestamp_)
+                    .call_child(*node.predicate_.value()));
+            bitset_holder->flip();
+        }
+    } else {
+        bitset_holder = std::make_unique<BitsetType>(active_count, false);
+    }
+#else
     if (node.predicate_.has_value()) {
         bitset_holder = std::make_unique<BitsetType>(
             ExecExprVisitor(*segment, active_count, timestamp_)
@@ -105,6 +162,8 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
     } else {
         bitset_holder = std::make_unique<BitsetType>(active_count, false);
     }
+#endif
+
     segment->mask_with_timestamps(*bitset_holder, timestamp_);
 
     segment->mask_with_delete(*bitset_holder, active_count, timestamp_);
@@ -163,11 +222,66 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
         bitset_holder.resize(active_count);
     }
 
+#ifdef USE_VELOX
+    bool fields_has_index = false;
+    if (node.predicate_ != nullptr) {
+        auto expr_fields = node.predicate_->GetFieldIds();
+        for (auto& field_id : expr_fields) {
+            if (segment->num_chunk_index(field_id) > 0) {
+                fields_has_index = true;
+                std::cout << "field id has index" << field_id.get()
+                          << std::endl;
+            }
+        }
+    }
+    if (node.predicate_ != nullptr) {
+        if (!fields_has_index) {
+            //::substrait::Plan substraitPlan;
+            //milvus::engine::ReadProtoFromJsonFile("/home/zhanglu/github/veloxengine/substrait/plan.json",
+            //substraitPlan);
+
+            //// Convert to Velox PlanNode.
+            //facebook::velox::substrait::SubstraitVeloxPlanConverter
+            //planConverter(milvus::engine::GetDefaultMemoryPool().get());
+            //auto planNode = planConverter.toVeloxPlan(substraitPlan);
+            //std::cout << planNode->toString(true, true) << std::endl;
+
+            facebook::velox::core::PlanNodeId plan_node_id;
+            auto plan = milvus::engine::PlanBuilder()
+                            .tableScan(segment)
+                            .capturePlanNodeId(plan_node_id)
+                            .filter(node.expr_str_)
+                            .planNode();
+            // facebook::velox::exec::test::CursorParameters expr_params;
+            // expr_params.planNode = plan;
+            // auto result = facebook::velox::exec::test::readCursor(expr_params, [](facebook::velox::exec::Task*) {});
+            auto split =
+                std::make_shared<milvus::engine::SegmentConnectorSplit>(
+                    SEGMENT_CONNECTOR_ID, segment);
+            auto result =
+                facebook::velox::exec::test::AssertQueryBuilder(plan)
+                    .split(plan_node_id, split)
+                    .copyResults(milvus::engine::GetDefaultMemoryPool().get());
+            auto bool_vec = result->childAt(0)->template asFlatVector<bool>();
+            for (int i = 0; i < result->size(); ++i) {
+                bitset_holder.push_back(bool_vec->valueAtFast(i));
+            }
+            // std::string s;
+            // boost::to_string(bitset_holder, s);
+            // bitset_holder.resize(result->size());
+            bitset_holder.flip();
+        } else {
+            bitset_holder = ExecExprVisitor(*segment, active_count, timestamp_)
+                                .call_child(*(node.predicate_));
+        }
+    }
+#else
     if (node.predicate_.has_value() && node.predicate_.value() != nullptr) {
         bitset_holder = ExecExprVisitor(*segment, active_count, timestamp_)
                             .call_child(*(node.predicate_.value()));
         bitset_holder.flip();
     }
+#endif
 
     segment->mask_with_timestamps(bitset_holder, timestamp_);
 

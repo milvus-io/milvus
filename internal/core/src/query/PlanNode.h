@@ -36,6 +36,7 @@ using PlanNodePtr = std::unique_ptr<PlanNode>;
 
 struct VectorPlanNode : PlanNode {
     std::optional<ExprPtr> predicate_;
+    std::string expr_str_;
     SearchInfo search_info_;
     std::string placeholder_tag_;
 };
@@ -59,6 +60,7 @@ struct RetrievePlanNode : PlanNode {
 
     std::optional<ExprPtr> predicate_;
     bool is_count;
+    std::string expr_str_;
 };
 
 }  // namespace milvus::query

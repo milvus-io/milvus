@@ -28,6 +28,7 @@ services:
       ETCD_ENDPOINTS: ${ETCD_ENDPOINTS}
       MINIO_ADDRESS: ${MINIO_ADDRESS}
       CONAN_USER_HOME: /home/milvus
+      CPU_TARGET: ${CPU_TARGET}
     volumes: &builder-volumes
       - .:/go/src/github.com/milvus-io/milvus:delegated
       - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${IMAGE_ARCH}-${OS_NAME}-ccache:/ccache:delegated

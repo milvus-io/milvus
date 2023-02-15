@@ -20,10 +20,10 @@
 #include <index/ScalarIndex.h>
 
 #include "AckResponder.h"
-#include "InsertRecord.h"
 #include "common/Schema.h"
 #include "segcore/SegcoreConfig.h"
 #include "index/VectorIndex.h"
+#include "InsertRecord.h"
 
 namespace milvus::segcore {
 

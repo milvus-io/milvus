@@ -73,6 +73,11 @@ class SegmentSealedImpl : public SegmentSealed {
     }
 
  public:
+    const InsertRecord<true>&
+    get_insert_record() const {
+        return insert_record_;
+    }
+
     int64_t
     GetMemoryUsageInBytes() const override;
 

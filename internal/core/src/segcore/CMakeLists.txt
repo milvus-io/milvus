@@ -9,13 +9,15 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License
 
-option( EMBEDDED_MILVUS "Enable embedded Milvus" OFF )
+option(EMBEDDED_MILVUS "Enable embedded Milvus" OFF)
 
-if ( EMBEDDED_MILVUS )
-    add_compile_definitions( EMBEDDED_MILVUS )
+if(EMBEDDED_MILVUS)
+        add_compile_definitions(EMBEDDED_MILVUS)
 endif()
 
 milvus_add_pkg_config("milvus_segcore")
+
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mavx2")
 
 set(SEGCORE_FILES
         Collection.cpp
@@ -35,14 +37,20 @@ set(SEGCORE_FILES
         ScalarIndex.cpp
         TimestampIndex.cpp
         Utils.cpp
-        ConcurrentVector.cpp)
+        ConcurrentVector.cpp
+        engine/Init.cpp
+        engine/Memory.cpp
+        engine/Vector.cpp
+        engine/SubstraitToVeloxPlan.cpp
+        engine/SegmentConnector.cpp)
+
 add_library(milvus_segcore SHARED ${SEGCORE_FILES})
 
 find_library(TBB NAMES tbb)
 set(PLATFORM_LIBS dl)
 
-if (MSYS)
-  set(PLATFORM_LIBS )
+if(MSYS)
+        set(PLATFORM_LIBS)
 endif()
 
 target_link_libraries(milvus_segcore
@@ -50,7 +58,9 @@ target_link_libraries(milvus_segcore
         ${PLATFORM_LIBS}
         ${TBB}
         ${OpenMP_CXX_FLAGS}
-        )
+        ${CONAN_LIBS}
+        velox_bundled
+)
 
 install(TARGETS milvus_segcore DESTINATION "${CMAKE_INSTALL_LIBDIR}")
 

@@ -61,6 +61,8 @@ func ParseExpr(schema *typeutil.SchemaHelper, exprStr string) (*planpb.Expr, err
 		return nil, fmt.Errorf("predicate is not a boolean expression: %s, data type: %s", exprStr, predicate.dataType)
 	}
 
+	predicate.expr.ExprStr = exprStr
+
 	return predicate.expr, nil
 }
 

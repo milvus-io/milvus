@@ -19,6 +19,7 @@
 #include "common/VectorTrait.h"
 #include "generated/ExtractInfoExprVisitor.h"
 #include "generated/ExtractInfoPlanNodeVisitor.h"
+#include "log/Log.h"
 
 namespace milvus::query {
 namespace planpb = milvus::proto::plan;
@@ -178,6 +179,9 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
     }();
     plan_node->placeholder_tag_ = anns_proto.placeholder_tag();
     plan_node->predicate_ = std::move(expr_opt);
+    if (anns_proto.has_predicates()) {
+        plan_node->expr_str_ = anns_proto.predicates().expr_str();
+    }
     plan_node->search_info_ = std::move(search_info);
     return plan_node;
 }
@@ -186,6 +190,7 @@ std::unique_ptr<RetrievePlanNode>
 ProtoParser::RetrievePlanNodeFromProto(
     const planpb::PlanNode& plan_node_proto) {
     Assert(plan_node_proto.has_predicates() || plan_node_proto.has_query());
+    LOG_SEGCORE_DEBUG_ << "plan proto" << plan_node_proto.DebugString();
 
     auto plan_node = [&]() -> std::unique_ptr<RetrievePlanNode> {
         auto node = std::make_unique<RetrievePlanNode>();
@@ -196,6 +201,7 @@ ProtoParser::RetrievePlanNodeFromProto(
                 return ParseExpr(predicate_proto);
             }();
             node->predicate_ = std::move(expr_opt);
+            node->expr_str_ = predicate_proto.expr_str();
         } else {
             auto& query = plan_node_proto.query();
             if (query.has_predicates()) {
@@ -204,12 +210,12 @@ ProtoParser::RetrievePlanNodeFromProto(
                     return ParseExpr(predicate_proto);
                 }();
                 node->predicate_ = std::move(expr_opt);
+                node->expr_str_ = predicate_proto.expr_str();
             }
             node->is_count = query.is_count();
         }
         return node;
     }();
-
     return plan_node;
 }
 

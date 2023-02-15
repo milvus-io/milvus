@@ -138,6 +138,7 @@ message Expr {
     ValueExpr value_expr = 9;
     ColumnExpr column_expr = 10;
   };
+  string expr_str = 11;
 }
 
 message VectorANNS {

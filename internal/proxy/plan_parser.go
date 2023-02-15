@@ -272,6 +272,8 @@ func parseExpr(schema *typeutil.SchemaHelper, exprStr string) (*planpb.Expr, err
 		return nil, err
 	}
 
+	expr.ExprStr = exprStr
+
 	return expr, nil
 }
 

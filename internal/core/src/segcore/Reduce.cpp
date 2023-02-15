@@ -11,8 +11,6 @@
 
 #include "Reduce.h"
 
-#include <log/Log.h>
-
 #include <algorithm>
 #include <cstdint>
 #include <vector>
@@ -20,6 +18,7 @@
 #include "SegmentInterface.h"
 #include "Utils.h"
 #include "pkVisitor.h"
+#include "log/Log.h"
 
 namespace milvus::segcore {
 

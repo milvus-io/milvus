@@ -23,6 +23,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <set>
 
 #include "common/Schema.h"
 #include "pb/plan.pb.h"
@@ -39,6 +40,8 @@ struct Expr {
     virtual ~Expr() = default;
     virtual void
     accept(ExprVisitor&) = 0;
+    virtual std::set<FieldId>
+    GetFieldIds() = 0;
 };
 
 using ExprPtr = std::unique_ptr<Expr>;
@@ -52,6 +55,17 @@ struct BinaryExprBase : Expr {
     BinaryExprBase(ExprPtr& left, ExprPtr& right)
         : left_(std::move(left)), right_(std::move(right)) {
     }
+
+ public:
+    std::set<FieldId>
+    GetFieldIds() override {
+        std::set<FieldId> ids;
+        auto left_ids = left_->GetFieldIds();
+        ids.insert(left_ids.begin(), left_ids.end());
+        auto right_ids = right_->GetFieldIds();
+        ids.insert(right_ids.begin(), right_ids.end());
+        return ids;
+    }
 };
 
 struct UnaryExprBase : Expr {
@@ -60,6 +74,12 @@ struct UnaryExprBase : Expr {
     UnaryExprBase() = delete;
 
     explicit UnaryExprBase(ExprPtr& child) : child_(std::move(child)) {
+    }
+
+ public:
+    std::set<FieldId>
+    GetFieldIds() override {
+        return child_->GetFieldIds();
     }
 };
 
@@ -111,6 +131,11 @@ struct TermExpr : Expr {
  public:
     void
     accept(ExprVisitor&) override;
+
+    std::set<FieldId>
+    GetFieldIds() override {
+        return {field_id_};
+    }
 };
 
 static const std::map<std::string, ArithOpType> arith_op_mapping_ = {
@@ -154,6 +179,11 @@ struct BinaryArithOpEvalRangeExpr : Expr {
  public:
     void
     accept(ExprVisitor&) override;
+
+    std::set<FieldId>
+    GetFieldIds() override {
+        return {field_id_};
+    }
 };
 
 static const std::map<std::string, OpType> mapping_ = {
@@ -186,6 +216,11 @@ struct UnaryRangeExpr : Expr {
  public:
     void
     accept(ExprVisitor&) override;
+
+    std::set<FieldId>
+    GetFieldIds() override {
+        return {field_id_};
+    }
 };
 
 struct BinaryRangeExpr : Expr {
@@ -211,6 +246,11 @@ struct BinaryRangeExpr : Expr {
  public:
     void
     accept(ExprVisitor&) override;
+
+    std::set<FieldId>
+    GetFieldIds() override {
+        return {field_id_};
+    }
 };
 
 struct CompareExpr : Expr {
@@ -223,6 +263,11 @@ struct CompareExpr : Expr {
  public:
     void
     accept(ExprVisitor&) override;
+
+    std::set<FieldId>
+    GetFieldIds() override {
+        return {left_field_id_, right_field_id_};
+    }
 };
 
 }  // namespace milvus::query
