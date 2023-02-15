@@ -22,10 +22,10 @@
 #include <utility>
 
 #include "AckResponder.h"
-#include "ConcurrentVector.h"
-#include "DeletedRecord.h"
 #include "FieldIndexing.h"
+#include "ConcurrentVector.h"
 #include "InsertRecord.h"
+#include "DeletedRecord.h"
 #include "SealedIndexingRecord.h"
 #include "SegmentGrowing.h"
 

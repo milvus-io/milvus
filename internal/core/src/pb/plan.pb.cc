@@ -234,7 +234,8 @@ struct BinaryArithOpEvalRangeExprDefaultTypeInternal {
 PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 BinaryArithOpEvalRangeExprDefaultTypeInternal _BinaryArithOpEvalRangeExpr_default_instance_;
 PROTOBUF_CONSTEXPR Expr::Expr(
     ::_pbi::ConstantInitialized): _impl_{
-    /*decltype(_impl_.expr_)*/{}
+    /*decltype(_impl_.expr_str_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.expr_)*/{}
   , /*decltype(_impl_._cached_size_)*/{}
   , /*decltype(_impl_._oneof_case_)*/{}} {}
 struct ExprDefaultTypeInternal {
@@ -431,6 +432,7 @@ const uint32_t TableStruct_plan_2eproto::offsets[] PROTOBUF_SECTION_VARIABLE(pro
   ::_pbi::kInvalidFieldOffsetTag,
   ::_pbi::kInvalidFieldOffsetTag,
   ::_pbi::kInvalidFieldOffsetTag,
+  PROTOBUF_FIELD_OFFSET(::milvus::proto::plan::Expr, _impl_.expr_str_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::plan::Expr, _impl_.expr_),
   ~0u,  // no _has_bits_
   PROTOBUF_FIELD_OFFSET(::milvus::proto::plan::VectorANNS, _internal_metadata_),
@@ -470,8 +472,8 @@ static const ::_pbi::MigrationSchema schemas[] PROTOBUF_SECTION_VARIABLE(protode
   { 108, -1, -1, sizeof(::milvus::proto::plan::BinaryArithExpr)},
   { 117, -1, -1, sizeof(::milvus::proto::plan::BinaryArithOpEvalRangeExpr)},
   { 128, -1, -1, sizeof(::milvus::proto::plan::Expr)},
-  { 145, -1, -1, sizeof(::milvus::proto::plan::VectorANNS)},
-  { 156, -1, -1, sizeof(::milvus::proto::plan::PlanNode)},
+  { 146, -1, -1, sizeof(::milvus::proto::plan::VectorANNS)},
+  { 157, -1, -1, sizeof(::milvus::proto::plan::PlanNode)},
 };
 
 static const ::_pb::Message* const file_default_instances[] = {
@@ -547,7 +549,7 @@ const char descriptor_table_protodef_plan_2eproto[] PROTOBUF_SECTION_VARIABLE(pr
   "ht_operand\030\003 \001(\0132\037.milvus.proto.plan.Gen"
   "ericValue\022%\n\002op\030\004 \001(\0162\031.milvus.proto.pla"
   "n.OpType\022.\n\005value\030\005 \001(\0132\037.milvus.proto.p"
-  "lan.GenericValue\"\347\004\n\004Expr\0220\n\tterm_expr\030\001"
+  "lan.GenericValue\"\371\004\n\004Expr\0220\n\tterm_expr\030\001"
   " \001(\0132\033.milvus.proto.plan.TermExprH\000\0222\n\nu"
   "nary_expr\030\002 \001(\0132\034.milvus.proto.plan.Unar"
   "yExprH\000\0224\n\013binary_expr\030\003 \001(\0132\035.milvus.pr"
@@ -562,30 +564,31 @@ const char descriptor_table_protodef_plan_2eproto[] PROTOBUF_SECTION_VARIABLE(pr
   "(\0132\".milvus.proto.plan.BinaryArithExprH\000"
   "\0222\n\nvalue_expr\030\t \001(\0132\034.milvus.proto.plan"
   ".ValueExprH\000\0224\n\013column_expr\030\n \001(\0132\035.milv"
-  "us.proto.plan.ColumnExprH\000B\006\n\004expr\"\251\001\n\nV"
-  "ectorANNS\022\021\n\tis_binary\030\001 \001(\010\022\020\n\010field_id"
-  "\030\002 \001(\003\022+\n\npredicates\030\003 \001(\0132\027.milvus.prot"
-  "o.plan.Expr\0220\n\nquery_info\030\004 \001(\0132\034.milvus"
-  ".proto.plan.QueryInfo\022\027\n\017placeholder_tag"
-  "\030\005 \001(\t\"\221\001\n\010PlanNode\0224\n\013vector_anns\030\001 \001(\013"
-  "2\035.milvus.proto.plan.VectorANNSH\000\022-\n\npre"
-  "dicates\030\002 \001(\0132\027.milvus.proto.plan.ExprH\000"
-  "\022\030\n\020output_field_ids\030\003 \003(\003B\006\n\004node*\272\001\n\006O"
-  "pType\022\013\n\007Invalid\020\000\022\017\n\013GreaterThan\020\001\022\020\n\014G"
-  "reaterEqual\020\002\022\014\n\010LessThan\020\003\022\r\n\tLessEqual"
-  "\020\004\022\t\n\005Equal\020\005\022\014\n\010NotEqual\020\006\022\017\n\013PrefixMat"
-  "ch\020\007\022\020\n\014PostfixMatch\020\010\022\t\n\005Match\020\t\022\t\n\005Ran"
-  "ge\020\n\022\006\n\002In\020\013\022\t\n\005NotIn\020\014*G\n\013ArithOpType\022\013"
-  "\n\007Unknown\020\000\022\007\n\003Add\020\001\022\007\n\003Sub\020\002\022\007\n\003Mul\020\003\022\007"
-  "\n\003Div\020\004\022\007\n\003Mod\020\005B3Z1github.com/milvus-io"
-  "/milvus/internal/proto/planpbb\006proto3"
+  "us.proto.plan.ColumnExprH\000\022\020\n\010expr_str\030\013"
+  " \001(\tB\006\n\004expr\"\251\001\n\nVectorANNS\022\021\n\tis_binary"
+  "\030\001 \001(\010\022\020\n\010field_id\030\002 \001(\003\022+\n\npredicates\030\003"
+  " \001(\0132\027.milvus.proto.plan.Expr\0220\n\nquery_i"
+  "nfo\030\004 \001(\0132\034.milvus.proto.plan.QueryInfo\022"
+  "\027\n\017placeholder_tag\030\005 \001(\t\"\221\001\n\010PlanNode\0224\n"
+  "\013vector_anns\030\001 \001(\0132\035.milvus.proto.plan.V"
+  "ectorANNSH\000\022-\n\npredicates\030\002 \001(\0132\027.milvus"
+  ".proto.plan.ExprH\000\022\030\n\020output_field_ids\030\003"
+  " \003(\003B\006\n\004node*\272\001\n\006OpType\022\013\n\007Invalid\020\000\022\017\n\013"
+  "GreaterThan\020\001\022\020\n\014GreaterEqual\020\002\022\014\n\010LessT"
+  "han\020\003\022\r\n\tLessEqual\020\004\022\t\n\005Equal\020\005\022\014\n\010NotEq"
+  "ual\020\006\022\017\n\013PrefixMatch\020\007\022\020\n\014PostfixMatch\020\010"
+  "\022\t\n\005Match\020\t\022\t\n\005Range\020\n\022\006\n\002In\020\013\022\t\n\005NotIn\020"
+  "\014*G\n\013ArithOpType\022\013\n\007Unknown\020\000\022\007\n\003Add\020\001\022\007"
+  "\n\003Sub\020\002\022\007\n\003Mul\020\003\022\007\n\003Div\020\004\022\007\n\003Mod\020\005B3Z1gi"
+  "thub.com/milvus-io/milvus/internal/proto"
+  "/planpbb\006proto3"
   ;
 static const ::_pbi::DescriptorTable* const descriptor_table_plan_2eproto_deps[1] = {
   &::descriptor_table_schema_2eproto,
 };
 static ::_pbi::once_flag descriptor_table_plan_2eproto_once;
 const ::_pbi::DescriptorTable descriptor_table_plan_2eproto = {
-    false, false, 3357, descriptor_table_protodef_plan_2eproto,
+    false, false, 3375, descriptor_table_protodef_plan_2eproto,
     "plan.proto",
     &descriptor_table_plan_2eproto_once, descriptor_table_plan_2eproto_deps, 1, 17,
     schemas, file_default_instances, TableStruct_plan_2eproto::offsets,
@@ -4655,11 +4658,20 @@ Expr::Expr(const Expr& from)
   : ::PROTOBUF_NAMESPACE_ID::Message() {
   Expr* const _this = this; (void)_this;
   new (&_impl_) Impl_{
-      decltype(_impl_.expr_){}
+      decltype(_impl_.expr_str_){}
+    , decltype(_impl_.expr_){}
     , /*decltype(_impl_._cached_size_)*/{}
     , /*decltype(_impl_._oneof_case_)*/{}};
 
   _internal_metadata_.MergeFrom<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(from._internal_metadata_);
+  _impl_.expr_str_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.expr_str_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (!from._internal_expr_str().empty()) {
+    _this->_impl_.expr_str_.Set(from._internal_expr_str(), 
+      _this->GetArenaForAllocation());
+  }
   clear_has_expr();
   switch (from.expr_case()) {
     case kTermExpr: {
@@ -4724,10 +4736,15 @@ inline void Expr::SharedCtor(
   (void)arena;
   (void)is_message_owned;
   new (&_impl_) Impl_{
-      decltype(_impl_.expr_){}
+      decltype(_impl_.expr_str_){}
+    , decltype(_impl_.expr_){}
     , /*decltype(_impl_._cached_size_)*/{}
     , /*decltype(_impl_._oneof_case_)*/{}
   };
+  _impl_.expr_str_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.expr_str_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
   clear_has_expr();
 }
 
@@ -4742,6 +4759,7 @@ Expr::~Expr() {
 
 inline void Expr::SharedDtor() {
   GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+  _impl_.expr_str_.Destroy();
   if (has_expr()) {
     clear_expr();
   }
@@ -4828,6 +4846,7 @@ void Expr::Clear() {
   // Prevent compiler warnings about cached_has_bits being unused
   (void) cached_has_bits;
 
+  _impl_.expr_str_.ClearToEmpty();
   clear_expr();
   _internal_metadata_.Clear<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>();
 }
@@ -4915,6 +4934,16 @@ const char* Expr::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 82)) {
           ptr = ctx->ParseMessage(_internal_mutable_column_expr(), ptr);
           CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // string expr_str = 11;
+      case 11:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 90)) {
+          auto str = _internal_mutable_expr_str();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+          CHK_(::_pbi::VerifyUTF8(str, "milvus.proto.plan.Expr.expr_str"));
         } else
           goto handle_unusual;
         continue;
@@ -5017,6 +5046,16 @@ uint8_t* Expr::_InternalSerialize(
         _Internal::column_expr(this).GetCachedSize(), target, stream);
   }
 
+  // string expr_str = 11;
+  if (!this->_internal_expr_str().empty()) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->_internal_expr_str().data(), static_cast<int>(this->_internal_expr_str().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "milvus.proto.plan.Expr.expr_str");
+    target = stream->WriteStringMaybeAliased(
+        11, this->_internal_expr_str(), target);
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = ::_pbi::WireFormat::InternalSerializeUnknownFieldsToArray(
         _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance), target, stream);
@@ -5032,6 +5071,13 @@ size_t Expr::ByteSizeLong() const {
   uint32_t cached_has_bits = 0;
   // Prevent compiler warnings about cached_has_bits being unused
   (void) cached_has_bits;
+
+  // string expr_str = 11;
+  if (!this->_internal_expr_str().empty()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+        this->_internal_expr_str());
+  }
 
   switch (expr_case()) {
     // .milvus.proto.plan.TermExpr term_expr = 1;
@@ -5126,6 +5172,9 @@ void Expr::MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROTOBUF_
   uint32_t cached_has_bits = 0;
   (void) cached_has_bits;
 
+  if (!from._internal_expr_str().empty()) {
+    _this->_internal_set_expr_str(from._internal_expr_str());
+  }
   switch (from.expr_case()) {
     case kTermExpr: {
       _this->_internal_mutable_term_expr()->::milvus::proto::plan::TermExpr::MergeFrom(
@@ -5197,7 +5246,13 @@ bool Expr::IsInitialized() const {
 
 void Expr::InternalSwap(Expr* other) {
   using std::swap;
+  auto* lhs_arena = GetArenaForAllocation();
+  auto* rhs_arena = other->GetArenaForAllocation();
   _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.expr_str_, lhs_arena,
+      &other->_impl_.expr_str_, rhs_arena
+  );
   swap(_impl_.expr_, other->_impl_.expr_);
   swap(_impl_._oneof_case_[0], other->_impl_._oneof_case_[0]);
 }

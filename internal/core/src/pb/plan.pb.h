@@ -3075,6 +3075,7 @@ class Expr final :
   // accessors -------------------------------------------------------
 
   enum : int {
+    kExprStrFieldNumber = 11,
     kTermExprFieldNumber = 1,
     kUnaryExprFieldNumber = 2,
     kBinaryExprFieldNumber = 3,
@@ -3086,6 +3087,20 @@ class Expr final :
     kValueExprFieldNumber = 9,
     kColumnExprFieldNumber = 10,
   };
+  // string expr_str = 11;
+  void clear_expr_str();
+  const std::string& expr_str() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_expr_str(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_expr_str();
+  PROTOBUF_NODISCARD std::string* release_expr_str();
+  void set_allocated_expr_str(std::string* expr_str);
+  private:
+  const std::string& _internal_expr_str() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_expr_str(const std::string& value);
+  std::string* _internal_mutable_expr_str();
+  public:
+
   // .milvus.proto.plan.TermExpr term_expr = 1;
   bool has_term_expr() const;
   private:
@@ -3289,6 +3304,7 @@ class Expr final :
   typedef void InternalArenaConstructable_;
   typedef void DestructorSkippable_;
   struct Impl_ {
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr expr_str_;
     union ExprUnion {
       constexpr ExprUnion() : _constinit_{} {}
         ::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized _constinit_;
@@ -7011,6 +7027,56 @@ inline ::milvus::proto::plan::ColumnExpr* Expr::mutable_column_expr() {
   ::milvus::proto::plan::ColumnExpr* _msg = _internal_mutable_column_expr();
   // @@protoc_insertion_point(field_mutable:milvus.proto.plan.Expr.column_expr)
   return _msg;
+}
+
+// string expr_str = 11;
+inline void Expr::clear_expr_str() {
+  _impl_.expr_str_.ClearToEmpty();
+}
+inline const std::string& Expr::expr_str() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.plan.Expr.expr_str)
+  return _internal_expr_str();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void Expr::set_expr_str(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.expr_str_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:milvus.proto.plan.Expr.expr_str)
+}
+inline std::string* Expr::mutable_expr_str() {
+  std::string* _s = _internal_mutable_expr_str();
+  // @@protoc_insertion_point(field_mutable:milvus.proto.plan.Expr.expr_str)
+  return _s;
+}
+inline const std::string& Expr::_internal_expr_str() const {
+  return _impl_.expr_str_.Get();
+}
+inline void Expr::_internal_set_expr_str(const std::string& value) {
+  
+  _impl_.expr_str_.Set(value, GetArenaForAllocation());
+}
+inline std::string* Expr::_internal_mutable_expr_str() {
+  
+  return _impl_.expr_str_.Mutable(GetArenaForAllocation());
+}
+inline std::string* Expr::release_expr_str() {
+  // @@protoc_insertion_point(field_release:milvus.proto.plan.Expr.expr_str)
+  return _impl_.expr_str_.Release();
+}
+inline void Expr::set_allocated_expr_str(std::string* expr_str) {
+  if (expr_str != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.expr_str_.SetAllocated(expr_str, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.expr_str_.IsDefault()) {
+    _impl_.expr_str_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.plan.Expr.expr_str)
 }
 
 inline bool Expr::has_expr() const {

@@ -35,6 +35,15 @@ VectorFieldIndexing::BuildIndexRange(int64_t ack_beg,
     auto conf = get_build_params();
     data_.grow_to_at_least(ack_end);
     for (int chunk_id = ack_beg; chunk_id < ack_end; chunk_id++) {
+#ifdef USE_VELOX
+        const auto* chunk_data = source->get_chunk_data(chunk_id);
+        auto indexing = std::make_unique<index::VectorMemNMIndex>(
+            knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+            knowhere::metric::L2,
+            IndexMode::MODE_CPU);
+        auto dataset =
+            knowhere::GenDataSet(source->get_size_per_chunk(), dim, chunk_data);
+#else
         const auto& chunk = source->get_chunk(chunk_id);
         auto indexing = std::make_unique<index::VectorMemNMIndex>(
             knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
@@ -42,6 +51,7 @@ VectorFieldIndexing::BuildIndexRange(int64_t ack_beg,
             IndexMode::MODE_CPU);
         auto dataset = knowhere::GenDataSet(
             source->get_size_per_chunk(), dim, chunk.data());
+#endif
         indexing->BuildWithDataset(dataset, conf);
         data_[chunk_id] = std::move(indexing);
     }
@@ -93,6 +103,20 @@ ScalarFieldIndexing<T>::BuildIndexRange(int64_t ack_beg,
     AssertInfo(ack_end <= num_chunk, "Ack_end is bigger than num_chunk");
     data_.grow_to_at_least(ack_end);
     for (int chunk_id = ack_beg; chunk_id < ack_end; chunk_id++) {
+#ifdef USE_VELOX
+        const auto* chunk_data = source->get_chunk_data(chunk_id);
+        // build index for chunk
+        // TODO
+        if constexpr (std::is_same_v<T, std::string>) {
+            auto indexing = index::CreateStringIndexSort();
+            indexing->Build(vec_base->get_size_per_chunk(), (T*)chunk_data);
+            data_[chunk_id] = std::move(indexing);
+        } else {
+            auto indexing = index::CreateScalarIndexSort<T>();
+            indexing->Build(vec_base->get_size_per_chunk(), (T*)chunk_data);
+            data_[chunk_id] = std::move(indexing);
+        }
+#else
         const auto& chunk = source->get_chunk(chunk_id);
         // build index for chunk
         // TODO
@@ -105,6 +129,7 @@ ScalarFieldIndexing<T>::BuildIndexRange(int64_t ack_beg,
             indexing->Build(vec_base->get_size_per_chunk(), chunk.data());
             data_[chunk_id] = std::move(indexing);
         }
+#endif
     }
 }
 

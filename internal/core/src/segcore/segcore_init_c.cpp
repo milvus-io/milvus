@@ -9,6 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include "segcore/engine/Init.h"
 #include "config/ConfigKnowhere.h"
 #include "log/Log.h"
 #include "segcore/SegcoreConfig.h"
@@ -18,6 +19,7 @@ namespace milvus::segcore {
 extern "C" void
 SegcoreInit(const char* conf_file) {
     milvus::config::KnowhereInitImpl(conf_file);
+    milvus::engine::InitEngine();
 }
 
 // TODO merge small index config into one config map, including enable/disable small_index

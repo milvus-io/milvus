@@ -36,7 +36,7 @@ class MilvusConan(ConanFile):
         "xsimd/9.0.1",
         "xz_utils/5.4.0",
         "folly/2022.10.31.01@milvus/dev",
-        "velox/2023.02.07.01@milvus/dev",
+        "velox/2023.02.24-1-g6ba27bbc@milvus/dev",
     )
     generators = ("cmake", "cmake_find_package")
     default_options = {
