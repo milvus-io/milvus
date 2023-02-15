@@ -9,33 +9,33 @@
 # is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
-FROM milvusdb/openblas:centos7-20230209
+FROM milvusdb/openblas:centos7-20230215
 
 RUN yum install -y epel-release centos-release-scl-rh && yum install -y wget curl which && \
     wget -qO- "https://cmake.org/files/v3.24/cmake-3.24.0-linux-x86_64.tar.gz" | tar --strip-components=1 -xz -C /usr/local && \
     yum install -y git make automake python3-devel \
-    devtoolset-8-gcc devtoolset-8-gcc-c++ devtoolset-8-gcc-gfortran \
-    llvm-toolset-8.0-clang llvm-toolset-8.0-clang-tools-extra \
+    devtoolset-11-gcc devtoolset-11-gcc-c++ devtoolset-11-gcc-gfortran \
+    llvm-toolset-11.0-clang llvm-toolset-11.0-clang-tools-extra \
     libaio libuuid-devel unzip \
     ccache lcov libtool m4 autoconf automake && \
     rm -rf /var/cache/yum/* && \
-    echo "source scl_source enable devtoolset-8" >> /etc/profile.d/devtoolset-8.sh && \
-    echo "source scl_source enable llvm-toolset-8.0" >> /etc/profile.d/llvm-toolset-8.sh
+    echo "source scl_source enable devtoolset-11" >> /etc/profile.d/devtoolset-11.sh && \
+    echo "source scl_source enable llvm-toolset-11.0" >> /etc/profile.d/llvm-toolset-11.sh
 
 RUN pip3 install conan==1.58.0
 
 RUN mkdir /tmp/stdlib && cd /tmp/stdlib && \
-    wget https://repo.anaconda.com/archive/Anaconda3-2019.07-Linux-x86_64.sh && \
-    sh Anaconda3-2019.07-Linux-x86_64.sh -b -p conda && \
-    cp conda/lib/libstdc++.so.6.0.26 /usr/lib64 && \
+    wget https://repo.anaconda.com/archive/Anaconda3-2022.10-Linux-x86_64.sh && \
+    sh Anaconda3-2022.10-Linux-x86_64.sh -b -p conda && \
+    cp conda/lib/libstdc++.so.6.0.29 /usr/lib64 && \
     rm /usr/lib64/libstdc++.so.6 && \
-    ln -s /usr/lib64/libstdc++.so.6.0.26 /usr/lib64/libstdc++.so.6 && \
+    ln -s /usr/lib64/libstdc++.so.6.0.29 /usr/lib64/libstdc++.so.6 && \
     cp conda/lib/libatomic.so.1.2.0 /usr/lib64 && \
     ln -s /usr/lib64/libatomic.so.1.2.0 /usr/lib64/libatomic.so && \
     ln -s /usr/lib64/libatomic.so.1.2.0 /usr/lib64/libatomic.so.1 && \
     rm -rf /tmp/stdlib
 
-ENV CLANG_TOOLS_PATH="/opt/rh/llvm-toolset-8.0/root/usr/bin"
+ENV CLANG_TOOLS_PATH="/opt/rh/llvm-toolset-11.0/root/usr/bin"
 ENV LD_LIBRARY_PATH /usr/local/lib:$LD_LIBRARY_PATH
 
 # Install Go
