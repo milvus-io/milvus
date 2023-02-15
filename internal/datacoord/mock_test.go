@@ -298,7 +298,7 @@ func (c *mockDataNodeClient) ShowConfigurations(ctx context.Context, req *intern
 
 func (c *mockDataNodeClient) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	// TODO(dragondriver): change the id, though it's not important in ut
-	nodeID := UniqueID(c.id)
+	nodeID := c.id
 
 	nodeInfos := metricsinfo.DataNodeInfos{
 		BaseComponentInfos: metricsinfo.BaseComponentInfos{

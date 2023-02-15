@@ -70,8 +70,8 @@ func HandleCProto(cRes *C.CProto, msg proto.Message) error {
 
 // CopyCProtoBlob returns the copy of C memory
 func CopyCProtoBlob(cProto *C.CProto) []byte {
-	blob := C.GoBytes(unsafe.Pointer(cProto.proto_blob), C.int32_t(cProto.proto_size))
-	C.free(unsafe.Pointer(cProto.proto_blob))
+	blob := C.GoBytes(cProto.proto_blob, C.int32_t(cProto.proto_size))
+	C.free(cProto.proto_blob)
 	return blob
 }
 

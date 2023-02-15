@@ -634,7 +634,7 @@ func (w *sessionWatcher) handleWatchResponse(wresp clientv3.WatchResponse) {
 		case mvccpb.PUT:
 			log.Debug("watch services",
 				zap.Any("add kv", ev.Kv))
-			err := json.Unmarshal([]byte(ev.Kv.Value), session)
+			err := json.Unmarshal(ev.Kv.Value, session)
 			if err != nil {
 				log.Error("watch services", zap.Error(err))
 				continue
@@ -650,7 +650,7 @@ func (w *sessionWatcher) handleWatchResponse(wresp clientv3.WatchResponse) {
 		case mvccpb.DELETE:
 			log.Debug("watch services",
 				zap.Any("delete kv", ev.PrevKv))
-			err := json.Unmarshal([]byte(ev.PrevKv.Value), session)
+			err := json.Unmarshal(ev.PrevKv.Value, session)
 			if err != nil {
 				log.Error("watch services", zap.Error(err))
 				continue

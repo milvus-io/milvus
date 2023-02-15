@@ -634,8 +634,8 @@ func parseGuaranteeTs(ts, tMax typeutil.Timestamp) typeutil.Timestamp {
 	case strongTS:
 		ts = tMax
 	case boundedTS:
-		ratio := time.Duration(-Params.CommonCfg.GracefulTime.GetAsInt64())
-		ts = tsoutil.AddPhysicalDurationOnTs(tMax, ratio*time.Millisecond)
+		ratio := Params.CommonCfg.GracefulTime.GetAsDuration(time.Millisecond)
+		ts = tsoutil.AddPhysicalDurationOnTs(tMax, -ratio)
 	}
 	return ts
 }

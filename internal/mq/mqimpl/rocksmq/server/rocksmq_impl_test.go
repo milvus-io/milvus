@@ -403,9 +403,9 @@ func TestRocksmq_Dummy(t *testing.T) {
 	assert.Error(t, err)
 
 	channelName2 := strings.Repeat(channelName1, 100)
-	err = rmq.CreateTopic(string(channelName2))
+	err = rmq.CreateTopic(channelName2)
 	assert.NoError(t, err)
-	_, err = rmq.Produce(string(channelName2), nil)
+	_, err = rmq.Produce(channelName2, nil)
 	assert.Error(t, err)
 
 	channelName3 := "channel/dummy"
@@ -950,7 +950,7 @@ func TestRocksmq_GetLatestMsg(t *testing.T) {
 	assert.Nil(t, err)
 
 	msgID, err := rmq.GetLatestMsg(channelName)
-	assert.Equal(t, msgID, int64(DefaultMessageID))
+	assert.Equal(t, msgID, DefaultMessageID)
 	assert.Nil(t, err)
 
 	loopNum := 10
@@ -990,7 +990,7 @@ func TestRocksmq_GetLatestMsg(t *testing.T) {
 	rmq.DestroyTopic(channelName)
 	rmq.Close()
 	msgID, err = rmq.GetLatestMsg(channelName)
-	assert.Equal(t, msgID, int64(DefaultMessageID))
+	assert.Equal(t, msgID, DefaultMessageID)
 	assert.NotNil(t, err)
 }
 
