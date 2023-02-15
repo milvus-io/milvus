@@ -4,12 +4,12 @@
 
 # Install devltoolset
 yum install -y epel-release centos-release-scl-rh && yum install -y wget make automake \
-    devtoolset-8-gcc devtoolset-8-gcc-c++ devtoolset-8-gcc-gfortran && \
+    devtoolset-11-gcc devtoolset-11-gcc-c++ devtoolset-11-gcc-gfortran && \
     rm -rf /var/cache/yum/* && \
-    echo "source scl_source enable devtoolset-8" >> /etc/profile.d/devtoolset-8.sh
+    echo "source scl_source enable devtoolset-11" >> /etc/profile.d/devtoolset-11.sh
 
 # Install openblas
-source /etc/profile.d/devtoolset-8.sh && \
+source /etc/profile.d/devtoolset-11.sh && \
     wget https://github.com/xianyi/OpenBLAS/archive/v0.3.9.tar.gz && \
     tar zxvf v0.3.9.tar.gz && cd OpenBLAS-0.3.9 && \
     make TARGET=CORE2 DYNAMIC_ARCH=1 DYNAMIC_OLDER=1 USE_THREAD=0 USE_OPENMP=0 FC=gfortran CC=gcc COMMON_OPT="-O3 -g -fPIC" FCOMMON_OPT="-O3 -g -fPIC -frecursive" NMAX="NUM_THREADS=128" LIBPREFIX="libopenblas" INTERFACE64=0 NO_STATIC=1 && \
@@ -19,14 +19,14 @@ source /etc/profile.d/devtoolset-8.sh && \
 export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/usr/lib"
 
 # Install tbb
-source /etc/profile.d/devtoolset-8.sh && \
+source /etc/profile.d/devtoolset-11.sh && \
     git clone https://github.com/wjakob/tbb.git && \
     cd tbb/build && \
     cmake .. && make -j && make install && \
     cd ../../ && rm -rf tbb/
 
 # Install boost
-source /etc/profile.d/devtoolset-8.sh && \
+source /etc/profile.d/devtoolset-11.sh && \
     wget -q https://boostorg.jfrog.io/artifactory/main/release/1.65.1/source/boost_1_65_1.tar.gz && \
     tar zxf boost_1_65_1.tar.gz && cd boost_1_65_1 && \
     ./bootstrap.sh --prefix=/usr/local --with-toolset=gcc --without-libraries=python && \
