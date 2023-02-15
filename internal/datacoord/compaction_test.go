@@ -40,7 +40,6 @@ import (
 )
 
 func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
-	ch := make(chan interface{}, 1)
 	type fields struct {
 		plans            map[int64]*compactionTask
 		sessions         *SessionManager
@@ -68,7 +67,7 @@ func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
 						data map[int64]*Session
 					}{
 						data: map[int64]*Session{
-							1: {client: &mockDataNodeClient{ch: ch}},
+							1: {client: &mockDataNodeClient{ch: make(chan interface{}, 1)}},
 						},
 					},
 				},
@@ -98,7 +97,7 @@ func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
 						data map[int64]*Session
 					}{
 						data: map[int64]*Session{
-							1: {client: &mockDataNodeClient{ch: ch, compactionResp: &commonpb.Status{ErrorCode: commonpb.ErrorCode_CacheFailed}}},
+							1: {client: &mockDataNodeClient{ch: make(chan interface{}, 1), compactionResp: &commonpb.Status{ErrorCode: commonpb.ErrorCode_CacheFailed}}},
 						},
 					},
 				},
@@ -128,7 +127,7 @@ func Test_compactionPlanHandler_execCompactionPlan(t *testing.T) {
 						data map[int64]*Session
 					}{
 						data: map[int64]*Session{
-							1: {client: &mockDataNodeClient{ch: ch, compactionResp: &commonpb.Status{ErrorCode: commonpb.ErrorCode_CacheFailed}}},
+							1: {client: &mockDataNodeClient{ch: make(chan interface{}, 1), compactionResp: &commonpb.Status{ErrorCode: commonpb.ErrorCode_CacheFailed}}},
 						},
 					},
 				},

@@ -1065,6 +1065,8 @@ func getCompactionMergeInfo(task *compactionTask) *milvuspb.CompactionMergeInfo 
 func getCompactionState(tasks []*compactionTask) (state commonpb.CompactionState, executingCnt, completedCnt, failedCnt, timeoutCnt int) {
 	for _, t := range tasks {
 		switch t.state {
+		case pipelining:
+			executingCnt++
 		case executing:
 			executingCnt++
 		case completed:
