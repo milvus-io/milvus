@@ -60,7 +60,7 @@ jobs:
             **/*.h
             **/*.hpp
             **/*.CMakeLists.txt
-            **/conanfiles.*          
+            **/conanfile.*          
       - name: 'Setup Use USE_ASAN'
         if: steps.changed-files-cpp.outputs.any_changed == 'true'
         run: |
@@ -68,7 +68,7 @@ jobs:
             echo "Setup USE_ASAN to true since cpp file(s) changed"
       - name: 'Generate CCache Hash'
         env:
-          CORE_HASH: ${{ hashFiles( 'internal/core/**/*.cpp', 'internal/core/**/*.cc', 'internal/core/**/*.c', 'internal/core/**/*.h', 'internal/core/**/*.hpp', 'internal/core/**/CMakeLists.txt') }}
+          CORE_HASH: ${{ hashFiles( 'internal/core/**/*.cpp', 'internal/core/**/*.cc', 'internal/core/**/*.c', 'internal/core/**/*.h', 'internal/core/**/*.hpp', 'internal/core/**/CMakeLists.txt', 'internal/core/conanfile.py') }}
         run: |
           echo "corehash=${CORE_HASH}" >> $GITHUB_ENV
           echo "Set CCache hash to ${CORE_HASH}"
