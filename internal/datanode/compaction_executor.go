@@ -46,10 +46,10 @@ func newCompactionExecutor() *compactionExecutor {
 
 func (c *compactionExecutor) execute(task compactor) {
 	c.taskCh <- task
+	c.toExecutingState(task)
 }
 
 func (c *compactionExecutor) toExecutingState(task compactor) {
-	task.start()
 	c.executing.Store(task.getPlanID(), task)
 }
 
@@ -60,7 +60,7 @@ func (c *compactionExecutor) toCompleteState(task compactor) {
 
 // These two func are bounded for waitGroup
 func (c *compactionExecutor) executeWithState(task compactor) {
-	c.toExecutingState(task)
+	task.start()
 	go c.executeTask(task)
 }
 
