@@ -111,7 +111,6 @@ func (suite *ResourceManagerSuite) TestManipulateNode() {
 	err = suite.manager.AssignNode("rg1", 1)
 	suite.NoError(err)
 	err = suite.manager.AssignNode("rg2", 1)
-	println(err.Error())
 	suite.ErrorIs(err, ErrNodeAlreadyAssign)
 
 	// transfer node between rgs
@@ -175,14 +174,14 @@ func (suite *ResourceManagerSuite) TestHandleNodeUp() {
 	suite.NoError(err)
 	defaultRG, err := suite.manager.GetResourceGroup(DefaultResourceGroupName)
 	suite.NoError(err)
-	suite.Equal(0, defaultRG.GetCapacity())
+	suite.Equal(DefaultResourceGroupCapacity, defaultRG.GetCapacity())
 	suite.manager.HandleNodeUp(101)
 	rg, err = suite.manager.GetResourceGroup("rg1")
 	suite.NoError(err)
 	suite.Equal(rg.GetCapacity(), 3)
 	suite.Equal(len(rg.GetNodes()), 2)
 	suite.False(suite.manager.ContainsNode("rg1", 101))
-	suite.Equal(1, defaultRG.GetCapacity())
+	suite.Equal(DefaultResourceGroupCapacity, defaultRG.GetCapacity())
 }
 
 func (suite *ResourceManagerSuite) TestRecover() {
@@ -311,13 +310,13 @@ func (suite *ResourceManagerSuite) TestDefaultResourceGroup() {
 	}
 	defaultRG, err := suite.manager.GetResourceGroup(DefaultResourceGroupName)
 	suite.NoError(err)
-	suite.Equal(defaultRG.GetCapacity(), 0)
+	suite.Equal(defaultRG.GetCapacity(), DefaultResourceGroupCapacity)
 	suite.Len(defaultRG.GetNodes(), 0)
 
 	suite.manager.HandleNodeUp(1)
 	suite.manager.HandleNodeUp(2)
 	suite.manager.HandleNodeUp(3)
-	suite.Equal(defaultRG.GetCapacity(), 3)
+	suite.Equal(defaultRG.GetCapacity(), DefaultResourceGroupCapacity)
 	suite.Len(defaultRG.GetNodes(), 3)
 
 	// shutdown node 1 and 2
@@ -326,18 +325,18 @@ func (suite *ResourceManagerSuite) TestDefaultResourceGroup() {
 
 	defaultRG, err = suite.manager.GetResourceGroup(DefaultResourceGroupName)
 	suite.NoError(err)
-	suite.Equal(defaultRG.GetCapacity(), 3)
+	suite.Equal(defaultRG.GetCapacity(), DefaultResourceGroupCapacity)
 	suite.Len(defaultRG.GetNodes(), 1)
 
 	suite.manager.HandleNodeUp(4)
 	suite.manager.HandleNodeUp(5)
-	suite.Equal(defaultRG.GetCapacity(), 3)
+	suite.Equal(defaultRG.GetCapacity(), DefaultResourceGroupCapacity)
 	suite.Len(defaultRG.GetNodes(), 3)
 
 	suite.manager.HandleNodeUp(7)
 	suite.manager.HandleNodeUp(8)
 	suite.manager.HandleNodeUp(9)
-	suite.Equal(defaultRG.GetCapacity(), 6)
+	suite.Equal(defaultRG.GetCapacity(), DefaultResourceGroupCapacity)
 	suite.Len(defaultRG.GetNodes(), 6)
 }
 

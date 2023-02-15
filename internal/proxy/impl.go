@@ -4514,7 +4514,7 @@ func getErrResponse(err error, method string) *commonpb.Status {
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel).Inc()
 
 	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		ErrorCode: commonpb.ErrorCode_IllegalArgument,
 		Reason:    err.Error(),
 	}
 }
@@ -4525,13 +4525,6 @@ func (node *Proxy) DropResourceGroup(ctx context.Context, request *milvuspb.Drop
 	}
 
 	method := "DropResourceGroup"
-	if err := ValidateResourceGroupName(request.GetResourceGroup()); err != nil {
-		log.Warn("DropResourceGroup failed",
-			zap.Error(err),
-		)
-		return getErrResponse(err, method), nil
-	}
-
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-DropResourceGroup")
 	defer sp.End()
 	tr := timerecord.NewTimeRecorder(method)

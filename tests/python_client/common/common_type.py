@@ -38,6 +38,7 @@ another_float_vec_field_name = "float_vector1"
 default_binary_vec_field_name = "binary_vector"
 default_partition_name = "_default"
 default_resource_group_name = '__default_resource_group'
+default_resource_group_capacity = 1000000
 default_tag = "1970_01_01"
 row_count = "row_count"
 default_length = 65535
