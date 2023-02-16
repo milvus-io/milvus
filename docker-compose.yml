@@ -45,7 +45,7 @@ services:
         make check-proto-product && make verifiers && make unittest"
 
   etcd:
-    image: docker.io/bitnami/etcd:3.5.0-debian-10-r24
+    image: quay.io/coreos/etcd:v3.5.5
     environment:
       - ALLOW_NONE_AUTHENTICATION=yes
       - ETCD_AUTO_COMPACTION_MODE=revision
