@@ -64,6 +64,23 @@ func Test_createPartitionTask_Execute(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("create too many partitions", func(t *testing.T) {
+		cfgMaxPartitionNum := Params.RootCoordCfg.MaxPartitionNum.GetAsInt()
+		partitions := make([]*model.Partition, 0, cfgMaxPartitionNum)
+		for i := 0; i < cfgMaxPartitionNum; i++ {
+			partitions = append(partitions, &model.Partition{})
+		}
+		collectionName := funcutil.GenRandomStr()
+		partitionName := funcutil.GenRandomStr()
+		coll := &model.Collection{Name: collectionName, Partitions: partitions}
+		task := &createPartitionTask{
+			collMeta: coll,
+			Req:      &milvuspb.CreatePartitionRequest{CollectionName: collectionName, PartitionName: partitionName},
+		}
+		err := task.Execute(context.Background())
+		assert.Error(t, err)
+	})
+
 	t.Run("failed to allocate partition id", func(t *testing.T) {
 		collectionName := funcutil.GenRandomStr()
 		partitionName := funcutil.GenRandomStr()

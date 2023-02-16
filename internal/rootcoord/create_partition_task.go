@@ -2,6 +2,7 @@ package rootcoord
 
 import (
 	"context"
+	"fmt"
 
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 
@@ -38,6 +39,12 @@ func (t *createPartitionTask) Execute(ctx context.Context) error {
 			log.Warn("add duplicate partition", zap.String("collection", t.Req.GetCollectionName()), zap.String("partition", t.Req.GetPartitionName()), zap.Uint64("ts", t.GetTs()))
 			return nil
 		}
+	}
+
+	cfgMaxPartitionNum := Params.RootCoordCfg.MaxPartitionNum.GetAsInt()
+	if len(t.collMeta.Partitions) >= cfgMaxPartitionNum {
+		return fmt.Errorf("partition number (%d) exceeds max configuration (%d), collection: %s",
+			len(t.collMeta.Partitions), cfgMaxPartitionNum, t.collMeta.Name)
 	}
 
 	partID, err := t.core.idAllocator.AllocOne()
