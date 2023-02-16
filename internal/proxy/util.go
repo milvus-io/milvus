@@ -117,7 +117,7 @@ func validateCollectionNameOrAlias(entity, entityType string) error {
 
 func ValidateResourceGroupName(entity string) error {
 	if entity == "" {
-		return fmt.Errorf("resource group name %s should not be empty", entity)
+		return errors.New("resource group name couldn't be empty")
 	}
 
 	invalidMsg := fmt.Sprintf("Invalid resource group name %s.", entity)

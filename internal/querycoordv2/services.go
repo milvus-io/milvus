@@ -1060,12 +1060,19 @@ func (s *Server) TransferReplica(ctx context.Context, req *querypb.TransferRepli
 			fmt.Sprintf("the target resource group[%s] doesn't exist", req.GetTargetResourceGroup()), meta.ErrRGNotExist), nil
 	}
 
+	replicas := s.meta.ReplicaManager.GetByCollectionAndRG(req.GetCollectionID(), req.GetTargetResourceGroup())
+	if len(replicas) > 0 {
+		return utils.WrapStatus(commonpb.ErrorCode_IllegalArgument,
+			fmt.Sprintf("found [%d] replicas of same collection in target resource group[%s], dynamically increase replica num is unsupported",
+				len(replicas), req.GetSourceResourceGroup())), nil
+	}
+
 	// for now, we don't support to transfer replica of same collection to same resource group
-	replicas := s.meta.ReplicaManager.GetByCollectionAndRG(req.GetCollectionID(), req.GetSourceResourceGroup())
+	replicas = s.meta.ReplicaManager.GetByCollectionAndRG(req.GetCollectionID(), req.GetSourceResourceGroup())
 	if len(replicas) < int(req.GetNumReplica()) {
 		return utils.WrapStatus(commonpb.ErrorCode_IllegalArgument,
-			fmt.Sprintf("found [%d] replicas of collection[%d] in source resource group[%s]",
-				len(replicas), req.GetCollectionID(), req.GetSourceResourceGroup())), nil
+			fmt.Sprintf("only found [%d] replicas in source resource group[%s]",
+				len(replicas), req.GetSourceResourceGroup())), nil
 	}
 
 	err := s.transferReplica(req.GetTargetResourceGroup(), replicas[:req.GetNumReplica()])

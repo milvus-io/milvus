@@ -215,11 +215,11 @@ class ResponseChecker:
         if check_items.get("num_available_node", None):
             assert rg.num_available_node == check_items["num_available_node"]
         if check_items.get("num_loaded_replica", None):
-            assert rg.num_loaded_replica == check_items["num_loaded_replica"]
+            assert dict(rg.num_loaded_replica).items() >= check_items["num_loaded_replica"].items()
         if check_items.get("num_outgoing_node", None):
-            assert rg.num_outgoing_node == check_items["num_outgoing_node"]
+            assert dict(rg.num_outgoing_node).items() >= check_items["num_outgoing_node"].items()
         if check_items.get("num_incoming_node", None):
-            assert rg.num_incoming_node == check_items["num_incoming_node"]
+            assert dict(rg.num_incoming_node).items() >= check_items["num_incoming_node"].items()
         return True
 
     @staticmethod

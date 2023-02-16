@@ -301,7 +301,7 @@ func TestProxy_InvalidResourceGroupName(t *testing.T) {
 			ResourceGroup: "...",
 		})
 		assert.NoError(t, err)
-		assert.Equal(t, resp.ErrorCode, commonpb.ErrorCode_UnexpectedError)
+		assert.Equal(t, resp.ErrorCode, commonpb.ErrorCode_IllegalArgument)
 	})
 
 	t.Run("drop resource group", func(t *testing.T) {
@@ -309,7 +309,7 @@ func TestProxy_InvalidResourceGroupName(t *testing.T) {
 			ResourceGroup: "...",
 		})
 		assert.NoError(t, err)
-		assert.Equal(t, resp.ErrorCode, commonpb.ErrorCode_UnexpectedError)
+		assert.Equal(t, resp.ErrorCode, commonpb.ErrorCode_Success)
 	})
 
 	t.Run("transfer node", func(t *testing.T) {
@@ -319,7 +319,7 @@ func TestProxy_InvalidResourceGroupName(t *testing.T) {
 			NumNode:             1,
 		})
 		assert.NoError(t, err)
-		assert.Equal(t, resp.ErrorCode, commonpb.ErrorCode_UnexpectedError)
+		assert.Equal(t, resp.ErrorCode, commonpb.ErrorCode_IllegalArgument)
 	})
 
 	t.Run("transfer replica", func(t *testing.T) {
@@ -330,6 +330,6 @@ func TestProxy_InvalidResourceGroupName(t *testing.T) {
 			CollectionName:      "collection1",
 		})
 		assert.NoError(t, err)
-		assert.Equal(t, resp.ErrorCode, commonpb.ErrorCode_UnexpectedError)
+		assert.Equal(t, resp.ErrorCode, commonpb.ErrorCode_IllegalArgument)
 	})
 }

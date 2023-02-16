@@ -561,7 +561,7 @@ func (suite *ServiceSuite) TestTransferReplica() {
 		NumReplica:          2,
 	})
 	suite.NoError(err)
-	suite.Contains(resp.Reason, "found [0] replicas of collection[1] in source resource group")
+	suite.Contains(resp.Reason, "only found [0] replicas in source resource group")
 
 	resp, err = suite.server.TransferReplica(ctx, &querypb.TransferReplicaRequest{
 		SourceResourceGroup: "rgg",
@@ -591,6 +591,11 @@ func (suite *ServiceSuite) TestTransferReplica() {
 		ID:            222,
 		ResourceGroup: meta.DefaultResourceGroupName,
 	}, typeutil.NewUniqueSet(2)))
+	suite.server.meta.Put(meta.NewReplica(&querypb.Replica{
+		CollectionID:  1,
+		ID:            333,
+		ResourceGroup: meta.DefaultResourceGroupName,
+	}, typeutil.NewUniqueSet(3)))
 
 	suite.server.nodeMgr.Add(session.NewNodeInfo(1001, "localhost"))
 	suite.server.nodeMgr.Add(session.NewNodeInfo(1002, "localhost"))
@@ -611,6 +616,14 @@ func (suite *ServiceSuite) TestTransferReplica() {
 	suite.NoError(err)
 	suite.Equal(resp.ErrorCode, commonpb.ErrorCode_Success)
 	suite.Len(suite.server.meta.GetByResourceGroup("rg3"), 2)
+	resp, err = suite.server.TransferReplica(ctx, &querypb.TransferReplicaRequest{
+		SourceResourceGroup: meta.DefaultResourceGroupName,
+		TargetResourceGroup: "rg3",
+		CollectionID:        1,
+		NumReplica:          2,
+	})
+	suite.NoError(err)
+	suite.Contains(resp.Reason, "dynamically increase replica num is unsupported")
 
 	// server unhealthy
 	server.status.Store(commonpb.StateCode_Abnormal)
