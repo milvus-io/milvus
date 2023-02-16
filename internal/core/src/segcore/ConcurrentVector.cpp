@@ -109,10 +109,16 @@ VectorBase::fill_chunk_data(ssize_t element_count, const DataArray* data, const 
             return fill_chunk_data(data->scalars().double_data().data().data(), element_count);
         }
         case DataType::VARCHAR: {
-            auto begin = data->scalars().string_data().data().begin();
-            auto end = data->scalars().string_data().data().end();
-            std::vector<std::string> data_raw(begin, end);
-            return fill_chunk_data(data_raw.data(), element_count);
+            auto vec = static_cast<ConcurrentVector<std::string>*>(this);
+            auto count = data->scalars().string_data().data().size();
+            vec->grow_on_demand(count);
+            auto& chunk = vec->get_chunk(0);
+
+            size_t index = 0;
+            for (auto& str : data->scalars().string_data().data()) {
+                chunk[index++] = str;
+            }
+            return;
         }
         default: {
             PanicInfo("unsupported");

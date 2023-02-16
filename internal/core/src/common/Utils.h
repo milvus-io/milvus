@@ -12,6 +12,7 @@
 #pragma once
 
 #include <google/protobuf/text_format.h>
+
 #include <string>
 
 #include "common/Consts.h"
@@ -85,14 +86,14 @@ PostfixMatch(const std::string& str, const std::string& postfix) {
 inline int64_t
 upper_align(int64_t value, int64_t align) {
     Assert(align > 0);
-    auto groups = (value + align - 1) / align;
+    auto groups = value / align + (value % align != 0);
     return groups * align;
 }
 
 inline int64_t
 upper_div(int64_t value, int64_t align) {
     Assert(align > 0);
-    auto groups = (value + align - 1) / align;
+    auto groups = value / align + (value % align != 0);
     return groups;
 }
 
