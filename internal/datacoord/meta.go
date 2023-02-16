@@ -126,6 +126,8 @@ func (m *meta) reloadFromKV() error {
 		return err
 	}
 	for vChannel, pos := range channelCPs {
+		// for 2.2.2 issue https://github.com/milvus-io/milvus/issues/22181
+		pos.ChannelName = vChannel
 		m.channelCPs[vChannel] = pos
 	}
 
