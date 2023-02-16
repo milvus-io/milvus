@@ -17,10 +17,13 @@
 package querynode
 
 import (
+	"context"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/atomic"
+	"go.uber.org/zap"
 )
 
 const (
@@ -31,6 +34,7 @@ const (
 // distribution is the struct to store segment distribution.
 // it contains both growing and sealed segments.
 type distribution struct {
+	replicaID int64
 	// segments information
 	// map[SegmentID]=>segmentEntry
 	sealedSegments map[UniqueID]SegmentEntry
@@ -68,8 +72,9 @@ func (s *SegmentEntry) Update(new SegmentEntry) {
 }
 
 // NewDistribution creates a new distribution instance with all field initialized.
-func NewDistribution() *distribution {
+func NewDistribution(replicaID int64) *distribution {
 	dist := &distribution{
+		replicaID:      replicaID,
 		sealedSegments: make(map[UniqueID]SegmentEntry),
 		snapshots:      typeutil.NewConcurrentMap[int64, *snapshot](),
 		offlines:       atomic.NewInt32(0),
@@ -77,6 +82,10 @@ func NewDistribution() *distribution {
 
 	dist.genSnapshot()
 	return dist
+}
+
+func (d *distribution) getLogger() *log.MLogger {
+	return log.Ctx(context.Background()).With(zap.Int64("replicaID", d.replicaID))
 }
 
 // Serviceable returns whether all segment recorded is in loaded state.
@@ -145,21 +154,24 @@ func (d *distribution) NodeDown(nodeID int64) {
 	var delta int32
 
 	for _, entry := range d.sealedSegments {
-		if entry.NodeID == nodeID {
+		if entry.NodeID == nodeID && entry.State != segmentStateOffline {
 			entry.State = segmentStateOffline
 			d.sealedSegments[entry.SegmentID] = entry
 			delta++
 		}
 	}
 
-	d.offlines.Add(delta)
+	if delta != 0 {
+		d.offlines.Add(delta)
+		d.getLogger().Info("distribution updated since nodeDown", zap.Int32("delta", delta), zap.Int32("offlines", d.offlines.Load()), zap.Int64("nodeID", nodeID))
+	}
 }
 
 // updateSegment update segment entry value and offline segment number based on old/new state.
 func (d *distribution) updateSegment(old, new SegmentEntry) {
 	delta := int32(0)
 	switch {
-	case new.State != segmentStateLoaded && new.State == segmentStateLoaded:
+	case old.State != segmentStateLoaded && new.State == segmentStateLoaded:
 		delta = -1
 	case old.State == segmentStateLoaded && new.State != segmentStateLoaded:
 		delta = 1
@@ -167,7 +179,15 @@ func (d *distribution) updateSegment(old, new SegmentEntry) {
 
 	old.Update(new)
 	d.sealedSegments[old.SegmentID] = old
-	d.offlines.Add(delta)
+	if delta != 0 {
+		d.offlines.Add(delta)
+		d.getLogger().Info("distribution updated since segment update",
+			zap.Int32("delta", delta),
+			zap.Int32("offlines", d.offlines.Load()),
+			zap.Int64("segmentID", new.SegmentID),
+			zap.Int32("state", int32(new.State)),
+		)
+	}
 }
 
 // RemoveDistributions remove segments distributions and returns the clear signal channel.
