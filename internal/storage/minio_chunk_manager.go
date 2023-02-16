@@ -236,6 +236,18 @@ func (mcm *MinioChunkManager) Read(ctx context.Context, filePath string) ([]byte
 	}
 	defer object.Close()
 
+	// Prefetch object data
+	var empty []byte
+	_, err = object.Read(empty)
+	if err != nil {
+		errResponse := minio.ToErrorResponse(err)
+		if errResponse.Code == "NoSuchKey" {
+			return nil, WrapErrNoSuchKey(filePath)
+		}
+		log.Warn("failed to read object", zap.String("path", filePath), zap.Error(err))
+		return nil, err
+	}
+
 	objectInfo, err := object.Stat()
 	if err != nil {
 		log.Warn("failed to stat object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))

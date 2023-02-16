@@ -4411,7 +4411,7 @@ func (node *Proxy) CheckHealth(ctx context.Context, request *milvuspb.CheckHealt
 }
 
 func (node *Proxy) RenameCollection(ctx context.Context, req *milvuspb.RenameCollectionRequest) (*commonpb.Status, error) {
-	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-RefreshPolicyInfoCache")
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-RenameCollection")
 	defer sp.End()
 
 	log := log.Ctx(ctx).With(
