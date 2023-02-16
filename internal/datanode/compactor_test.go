@@ -594,6 +594,18 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 		emptyTask.stop()
 	})
 
+	t.Run("Test compact stop", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.TODO())
+		emptyTask := &compactionTask{
+			ctx:    ctx,
+			cancel: cancel,
+		}
+
+		go emptyTask.start()
+
+		emptyTask.stop()
+	})
+
 	t.Run("Test typeII compact valid", func(t *testing.T) {
 		alloc := NewAllocatorFactory(1)
 		type testCase struct {

@@ -133,16 +133,21 @@ type mockCompactor struct {
 	isvalid       bool
 	alwaysWorking bool
 
-	wg sync.WaitGroup
+	wg      sync.WaitGroup
+	RWMutex sync.RWMutex
 }
 
 var _ compactor = (*mockCompactor)(nil)
 
 func (mc *mockCompactor) start() {
+	mc.RWMutex.Lock()
+	defer mc.RWMutex.Unlock()
 	mc.wg.Add(1)
 }
 
 func (mc *mockCompactor) complete() {
+	mc.RWMutex.Lock()
+	defer mc.RWMutex.Unlock()
 	mc.wg.Done()
 }
 
@@ -162,6 +167,8 @@ func (mc *mockCompactor) getPlanID() UniqueID {
 }
 
 func (mc *mockCompactor) stop() {
+	mc.RWMutex.Lock()
+	defer mc.RWMutex.Unlock()
 	if mc.cancel != nil {
 		mc.cancel()
 		mc.wg.Wait()

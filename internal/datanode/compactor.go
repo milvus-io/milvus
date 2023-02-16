@@ -81,6 +81,7 @@ type compactionTask struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
+	RWMutex      sync.RWMutex
 	wg           sync.WaitGroup
 	tr           *timerecord.TimeRecorder
 	chunkManager storage.ChunkManager
@@ -116,14 +117,20 @@ func newCompactionTask(
 }
 
 func (t *compactionTask) start() {
+	t.RWMutex.Lock()
+	defer t.RWMutex.Unlock()
 	t.wg.Add(1)
 }
 
 func (t *compactionTask) complete() {
+	t.RWMutex.Lock()
+	defer t.RWMutex.Unlock()
 	t.wg.Done()
 }
 
 func (t *compactionTask) stop() {
+	t.RWMutex.Lock()
+	defer t.RWMutex.Unlock()
 	t.cancel()
 	t.wg.Wait()
 }
