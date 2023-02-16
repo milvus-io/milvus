@@ -267,6 +267,7 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 	partitionName := dt.PartitionName
 	proxyID := dt.Base.SourceID
 	for index, key := range dt.HashValues {
+		vchannel := channelNames[key]
 		ts := dt.Timestamps[index]
 		_, ok := result[key]
 		if !ok {
@@ -296,6 +297,7 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 		curMsg.Timestamps = append(curMsg.Timestamps, dt.Timestamps[index])
 		typeutil.AppendIDs(curMsg.PrimaryKeys, dt.PrimaryKeys, index)
 		curMsg.NumRows++
+		curMsg.ShardName = vchannel
 	}
 
 	// send delete request to log broker
