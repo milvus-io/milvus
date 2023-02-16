@@ -324,6 +324,10 @@ dataNode:
     # The period to sync segments if buffer is not empty.
     syncPeriod: 600 # Seconds, 10min
 
+  memory:
+    forceSyncEnable: true # `true` to force sync if memory usage is too high
+    forceSyncThreshold: 0.6 # forceSync only take effects when memory usage ratio > forceSyncThreshold  
+    forceSyncSegmentRatio: 0.3 # ratio of segments to sync, top largest forceSyncSegmentRatio segments will be synced
 
 # Configures the system log output.
 log:

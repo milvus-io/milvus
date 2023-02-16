@@ -1070,7 +1070,7 @@ func TestInsertBufferNode_updateSegmentStates(te *testing.T) {
 			},
 		}
 
-		seg, err := ibNode.updateSegmentStates(im, &internalpb.MsgPosition{}, &internalpb.MsgPosition{})
+		seg, err := ibNode.addSegmentAndUpdateRowNum(im, &internalpb.MsgPosition{}, &internalpb.MsgPosition{})
 
 		assert.Error(te, err)
 		assert.Empty(te, seg)
