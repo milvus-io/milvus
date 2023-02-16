@@ -185,7 +185,7 @@ func (node *DataNode) Register() error {
 	metrics.NumNodes.WithLabelValues(strconv.FormatInt(node.session.ServerID, 10), typeutil.DataNodeRole).Inc()
 	log.Info("DataNode Register Finished")
 	// Start liveness check
-	go node.session.LivenessCheck(node.ctx, func() {
+	node.session.LivenessCheck(node.ctx, func() {
 		log.Error("Data Node disconnected from etcd, process will exit", zap.Int64("Server Id", node.session.ServerID))
 		if err := node.Stop(); err != nil {
 			log.Fatal("failed to stop server", zap.Error(err))

@@ -669,68 +669,71 @@ func (s *Session) LivenessCheck(ctx context.Context, callback func()) {
 		panic(err)
 	}
 	s.watchSessionKeyCh = s.etcdCli.Watch(context.Background(), s.getSessionKey(), clientv3.WithRev(getResp.Header.Revision))
-	for {
-		select {
-		case _, ok := <-s.liveCh:
-			// ok, still alive
-			if ok {
-				continue
-			}
-			// not ok, connection lost
-			log.Warn("connection lost detected, shuting down")
-			if callback != nil {
-				go callback()
-			}
-			return
-		case <-ctx.Done():
-			log.Info("liveness exits due to context done")
-			// cancel the etcd keepAlive context
-			if s.keepAliveCancel != nil {
-				s.keepAliveCancel()
-			}
-			return
-		case resp, ok := <-s.watchSessionKeyCh:
-			if !ok {
-				log.Warn("watch session key channel closed")
+	go func() {
+		for {
+			select {
+			case _, ok := <-s.liveCh:
+				// ok, still alive
+				if ok {
+					continue
+				}
+				// not ok, connection lost
+				log.Warn("connection lost detected, shuting down")
+				if callback != nil {
+					go callback()
+				}
+				return
+			case <-ctx.Done():
+				log.Info("liveness exits due to context done")
+				// cancel the etcd keepAlive context
 				if s.keepAliveCancel != nil {
 					s.keepAliveCancel()
 				}
 				return
-			}
-			if resp.Err() != nil {
-				// if not ErrCompacted, just close the channel
-				if resp.Err() != v3rpc.ErrCompacted {
-					//close event channel
-					log.Warn("Watch service found error", zap.Error(resp.Err()))
+			case resp, ok := <-s.watchSessionKeyCh:
+				if !ok {
+					log.Warn("watch session key channel closed")
 					if s.keepAliveCancel != nil {
 						s.keepAliveCancel()
 					}
 					return
 				}
-				log.Warn("Watch service found compacted error", zap.Error(resp.Err()))
-				getResp, err := s.etcdCli.Get(s.ctx, s.getSessionKey())
-				if err != nil || len(getResp.Kvs) == 0 {
-					if s.keepAliveCancel != nil {
-						s.keepAliveCancel()
+				if resp.Err() != nil {
+					// if not ErrCompacted, just close the channel
+					if resp.Err() != v3rpc.ErrCompacted {
+						//close event channel
+						log.Warn("Watch service found error", zap.Error(resp.Err()))
+						if s.keepAliveCancel != nil {
+							s.keepAliveCancel()
+						}
+						return
 					}
-					return
+					log.Warn("Watch service found compacted error", zap.Error(resp.Err()))
+					getResp, err := s.etcdCli.Get(s.ctx, s.getSessionKey())
+					if err != nil || len(getResp.Kvs) == 0 {
+						if s.keepAliveCancel != nil {
+							s.keepAliveCancel()
+						}
+						return
+					}
+					s.watchSessionKeyCh = s.etcdCli.Watch(s.ctx, s.getSessionKey(), clientv3.WithRev(getResp.Header.Revision))
+					continue
 				}
-				s.watchSessionKeyCh = s.etcdCli.Watch(s.ctx, s.getSessionKey(), clientv3.WithRev(getResp.Header.Revision))
-				continue
-			}
-			for _, event := range resp.Events {
-				switch event.Type {
-				case mvccpb.PUT:
-					log.Info("register session success", zap.String("role", s.ServerName), zap.String("key", string(event.Kv.Key)))
-				case mvccpb.DELETE:
-					log.Info("session key is deleted, exit...", zap.String("role", s.ServerName), zap.String("key", string(event.Kv.Key)))
-					if s.keepAliveCancel != nil {
-						s.keepAliveCancel()
+				for _, event := range resp.Events {
+					switch event.Type {
+					case mvccpb.PUT:
+						log.Info("register session success", zap.String("role", s.ServerName), zap.String("key", string(event.Kv.Key)))
+					case mvccpb.DELETE:
+						log.Info("session key is deleted, exit...", zap.String("role", s.ServerName), zap.String("key", string(event.Kv.Key)))
+						if s.keepAliveCancel != nil {
+							s.keepAliveCancel()
+						}
 					}
 				}
 			}
 		}
-	}
+	}()
+
 }
 
 // Revoke revokes the internal leaseID for the session key

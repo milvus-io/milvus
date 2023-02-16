@@ -135,7 +135,7 @@ func (s *Server) Register() error {
 	}
 	metrics.NumNodes.WithLabelValues(strconv.FormatInt(s.session.ServerID, 10), typeutil.QueryCoordRole).Inc()
 	log.Info("QueryCoord Register Finished")
-	go s.session.LivenessCheck(s.ctx, func() {
+	s.session.LivenessCheck(s.ctx, func() {
 		log.Error("QueryCoord disconnected from etcd, process will exit", zap.Int64("serverID", s.session.ServerID))
 		if err := s.Stop(); err != nil {
 			log.Fatal("failed to stop server", zap.Error(err))
