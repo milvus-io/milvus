@@ -906,12 +906,14 @@ func (s *Server) Stop() error {
 	s.cluster.Close()
 	s.garbageCollector.close()
 	s.stopServerLoop()
-	s.session.Revoke(time.Second)
 
 	if Params.DataCoordCfg.EnableCompaction.GetAsBool() {
 		s.stopCompactionTrigger()
 		s.stopCompactionHandler()
 	}
+
+	// Revoke operation should be set to end
+	s.session.Revoke(time.Second)
 	return nil
 }
 
