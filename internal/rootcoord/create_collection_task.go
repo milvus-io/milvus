@@ -54,7 +54,7 @@ func (t *createCollectionTask) validate() error {
 	shardsNum := int64(t.Req.GetShardsNum())
 
 	cfgMaxShardNum := Params.RootCoordCfg.DmlChannelNum
-	if shardsNum >= cfgMaxShardNum {
+	if shardsNum > cfgMaxShardNum {
 		return fmt.Errorf("shard num (%d) exceeds max configuration (%d)", shardsNum, cfgMaxShardNum)
 	}
 
