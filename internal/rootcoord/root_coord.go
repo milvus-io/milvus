@@ -304,7 +304,7 @@ func (c *Core) Register() error {
 	}
 	metrics.NumNodes.WithLabelValues(strconv.FormatInt(c.session.ServerID, 10), typeutil.RootCoordRole).Inc()
 	log.Info("RootCoord Register Finished")
-	go c.session.LivenessCheck(c.ctx, func() {
+	c.session.LivenessCheck(c.ctx, func() {
 		log.Error("Root Coord disconnected from etcd, process will exit", zap.Int64("Server Id", c.session.ServerID))
 		if err := c.Stop(); err != nil {
 			log.Fatal("failed to stop server", zap.Error(err))

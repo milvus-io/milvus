@@ -202,7 +202,7 @@ func TestSessionLivenessCheck(t *testing.T) {
 
 	flag := false
 
-	go s.LivenessCheck(ctx, func() {
+	s.LivenessCheck(ctx, func() {
 		flag = true
 		signal <- struct{}{}
 	})
@@ -222,7 +222,7 @@ func TestSessionLivenessCheck(t *testing.T) {
 	s.liveCh = ch
 	flag = false
 
-	go s.LivenessCheck(ctx, func() {
+	s.LivenessCheck(ctx, func() {
 		flag = true
 		signal <- struct{}{}
 	})
@@ -658,7 +658,7 @@ func TestSessionProcessActiveStandBy(t *testing.T) {
 		wg.Done()
 		return nil
 	})
-	go s1.LivenessCheck(ctx1, func() {
+	s1.LivenessCheck(ctx1, func() {
 		flag = true
 		signal <- struct{}{}
 		s1.keepAliveCancel()

@@ -3642,9 +3642,10 @@ func newTestServerWithMeta(t *testing.T, receiveCh chan any, meta *meta, opts ..
 	assert.Nil(t, err)
 	svr.meta = meta
 
-	err = svr.Start()
-	assert.Nil(t, err)
 	err = svr.Register()
+	assert.Nil(t, err)
+
+	err = svr.Start()
 	assert.Nil(t, err)
 
 	// Stop channal watch state watcher in tests
@@ -3692,9 +3693,11 @@ func newTestServer2(t *testing.T, receiveCh chan any, opts ...Option) *Server {
 
 	err = svr.Init()
 	assert.Nil(t, err)
-	err = svr.Start()
-	assert.Nil(t, err)
+
 	err = svr.Register()
+	assert.Nil(t, err)
+
+	err = svr.Start()
 	assert.Nil(t, err)
 
 	// Stop channal watch state watcher in tests
@@ -3883,9 +3886,11 @@ func testDataCoordBase(t *testing.T, opts ...Option) *Server {
 
 	err = svr.Init()
 	assert.Nil(t, err)
-	err = svr.Start()
-	assert.Nil(t, err)
+
 	err = svr.Register()
+	assert.Nil(t, err)
+
+	err = svr.Start()
 	assert.Nil(t, err)
 
 	resp, err := svr.GetComponentStates(context.Background())

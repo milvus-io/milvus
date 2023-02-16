@@ -1365,11 +1365,12 @@ func TestRootcoord_EnableActiveStandby(t *testing.T) {
 	err = core.Init()
 	assert.Equal(t, commonpb.StateCode_StandBy, core.stateCode.Load().(commonpb.StateCode))
 	assert.NoError(t, err)
-	err = core.Start()
-	assert.NoError(t, err)
 	core.session.TriggerKill = false
 	err = core.Register()
 	assert.NoError(t, err)
+	err = core.Start()
+	assert.NoError(t, err)
+
 	assert.Equal(t, commonpb.StateCode_Healthy, core.stateCode.Load().(commonpb.StateCode))
 	resp, err := core.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
 		Base: &commonpb.MsgBase{
@@ -1416,10 +1417,10 @@ func TestRootcoord_DisableActiveStandby(t *testing.T) {
 	err = core.Init()
 	assert.Equal(t, commonpb.StateCode_Initializing, core.stateCode.Load().(commonpb.StateCode))
 	assert.NoError(t, err)
-	err = core.Start()
-	assert.NoError(t, err)
 	core.session.TriggerKill = false
 	err = core.Register()
+	assert.NoError(t, err)
+	err = core.Start()
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.StateCode_Healthy, core.stateCode.Load().(commonpb.StateCode))
 	resp, err := core.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{

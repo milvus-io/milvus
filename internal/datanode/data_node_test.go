@@ -853,8 +853,6 @@ func TestWatchChannel(t *testing.T) {
 	err = node.Start()
 	assert.Nil(t, err)
 	defer node.Stop()
-	err = node.Register()
-	assert.Nil(t, err)
 
 	defer cancel()
 

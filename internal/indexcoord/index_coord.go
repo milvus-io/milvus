@@ -141,7 +141,7 @@ func (i *IndexCoord) Register() error {
 	}
 	metrics.NumNodes.WithLabelValues(strconv.FormatInt(i.session.ServerID, 10), typeutil.IndexCoordRole).Inc()
 	log.Info("IndexCoord Register Finished")
-	go i.session.LivenessCheck(i.loopCtx, func() {
+	i.session.LivenessCheck(i.loopCtx, func() {
 		log.Error("Index Coord disconnected from etcd, process will exit", zap.Int64("Server Id", i.session.ServerID))
 		if err := i.Stop(); err != nil {
 			log.Fatal("failed to stop server", zap.Error(err))
