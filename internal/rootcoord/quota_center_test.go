@@ -24,40 +24,22 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
-type queryCoordMockForQuota struct {
-	mockQueryCoord
-	retErr        bool
-	retFailStatus bool
-}
-
 type dataCoordMockForQuota struct {
 	mockDataCoord
 	retErr        bool
 	retFailStatus bool
-}
-
-func (q *queryCoordMockForQuota) GetMetrics(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	if q.retErr {
-		return nil, fmt.Errorf("mock err")
-	}
-	if q.retFailStatus {
-		return &milvuspb.GetMetricsResponse{
-			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "mock failure status"),
-		}, nil
-	}
-	return &milvuspb.GetMetricsResponse{
-		Status: succStatus(),
-	}, nil
 }
 
 func (d *dataCoordMockForQuota) GetMetrics(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
@@ -85,36 +67,44 @@ func TestQuotaCenter(t *testing.T) {
 	pcm := newProxyClientManager(core.proxyCreator)
 
 	t.Run("test QuotaCenter", func(t *testing.T) {
-		quotaCenter := NewQuotaCenter(pcm, &queryCoordMockForQuota{}, &dataCoordMockForQuota{}, core.tsoAllocator)
+		qc := types.NewMockQueryCoord(t)
+		quotaCenter := NewQuotaCenter(pcm, qc, &dataCoordMockForQuota{}, core.tsoAllocator)
 		go quotaCenter.run()
 		time.Sleep(10 * time.Millisecond)
 		quotaCenter.stop()
 	})
 
 	t.Run("test syncMetrics", func(t *testing.T) {
-		quotaCenter := NewQuotaCenter(pcm, &queryCoordMockForQuota{}, &dataCoordMockForQuota{}, core.tsoAllocator)
+		qc := types.NewMockQueryCoord(t)
+		qc.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{Status: succStatus()}, nil)
+		quotaCenter := NewQuotaCenter(pcm, qc, &dataCoordMockForQuota{}, core.tsoAllocator)
 		err = quotaCenter.syncMetrics()
 		assert.Error(t, err) // for empty response
 
-		quotaCenter = NewQuotaCenter(pcm, &queryCoordMockForQuota{retErr: true}, &dataCoordMockForQuota{}, core.tsoAllocator)
+		quotaCenter = NewQuotaCenter(pcm, qc, &dataCoordMockForQuota{}, core.tsoAllocator)
 		err = quotaCenter.syncMetrics()
 		assert.Error(t, err)
 
-		quotaCenter = NewQuotaCenter(pcm, &queryCoordMockForQuota{}, &dataCoordMockForQuota{retErr: true}, core.tsoAllocator)
+		quotaCenter = NewQuotaCenter(pcm, qc, &dataCoordMockForQuota{retFailStatus: true}, core.tsoAllocator)
 		err = quotaCenter.syncMetrics()
 		assert.Error(t, err)
 
-		quotaCenter = NewQuotaCenter(pcm, &queryCoordMockForQuota{retFailStatus: true}, &dataCoordMockForQuota{}, core.tsoAllocator)
+		qc.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock err"))
+		quotaCenter = NewQuotaCenter(pcm, qc, &dataCoordMockForQuota{retErr: true}, core.tsoAllocator)
 		err = quotaCenter.syncMetrics()
 		assert.Error(t, err)
 
-		quotaCenter = NewQuotaCenter(pcm, &queryCoordMockForQuota{}, &dataCoordMockForQuota{retFailStatus: true}, core.tsoAllocator)
+		qc.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
+			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "mock failure status"),
+		}, nil)
+		quotaCenter = NewQuotaCenter(pcm, qc, &dataCoordMockForQuota{}, core.tsoAllocator)
 		err = quotaCenter.syncMetrics()
 		assert.Error(t, err)
 	})
 
 	t.Run("test forceDeny", func(t *testing.T) {
-		quotaCenter := NewQuotaCenter(pcm, &queryCoordMockForQuota{}, &dataCoordMockForQuota{}, core.tsoAllocator)
+		qc := types.NewMockQueryCoord(t)
+		quotaCenter := NewQuotaCenter(pcm, qc, &dataCoordMockForQuota{}, core.tsoAllocator)
 		quotaCenter.forceDenyReading(commonpb.ErrorCode_ForceDeny)
 		assert.Equal(t, Limit(0), quotaCenter.currentRates[internalpb.RateType_DQLQuery])
 		assert.Equal(t, Limit(0), quotaCenter.currentRates[internalpb.RateType_DQLQuery])
@@ -124,7 +114,8 @@ func TestQuotaCenter(t *testing.T) {
 	})
 
 	t.Run("test calculateRates", func(t *testing.T) {
-		quotaCenter := NewQuotaCenter(pcm, &queryCoordMockForQuota{}, &dataCoordMockForQuota{}, core.tsoAllocator)
+		qc := types.NewMockQueryCoord(t)
+		quotaCenter := NewQuotaCenter(pcm, qc, &dataCoordMockForQuota{}, core.tsoAllocator)
 		err = quotaCenter.calculateRates()
 		assert.NoError(t, err)
 		alloc := newMockTsoAllocator()
@@ -137,8 +128,9 @@ func TestQuotaCenter(t *testing.T) {
 	})
 
 	t.Run("test getTimeTickDelayFactor", func(t *testing.T) {
+		qc := types.NewMockQueryCoord(t)
 		// test MaxTimestamp
-		quotaCenter := NewQuotaCenter(pcm, &queryCoordMockForQuota{}, &dataCoordMockForQuota{}, core.tsoAllocator)
+		quotaCenter := NewQuotaCenter(pcm, qc, &dataCoordMockForQuota{}, core.tsoAllocator)
 		factor := quotaCenter.getTimeTickDelayFactor(0)
 		assert.Equal(t, float64(1), factor)
 
@@ -187,7 +179,8 @@ func TestQuotaCenter(t *testing.T) {
 	})
 
 	t.Run("test getTimeTickDelayFactor factors", func(t *testing.T) {
-		quotaCenter := NewQuotaCenter(pcm, &queryCoordMockForQuota{}, &dataCoordMockForQuota{}, core.tsoAllocator)
+		qc := types.NewMockQueryCoord(t)
+		quotaCenter := NewQuotaCenter(pcm, qc, &dataCoordMockForQuota{}, core.tsoAllocator)
 		type ttCase struct {
 			maxTtDelay     time.Duration
 			curTt          time.Time
@@ -233,7 +226,8 @@ func TestQuotaCenter(t *testing.T) {
 	})
 
 	t.Run("test getNQInQueryFactor", func(t *testing.T) {
-		quotaCenter := NewQuotaCenter(pcm, &queryCoordMockForQuota{}, &dataCoordMockForQuota{}, core.tsoAllocator)
+		qc := types.NewMockQueryCoord(t)
+		quotaCenter := NewQuotaCenter(pcm, qc, &dataCoordMockForQuota{}, core.tsoAllocator)
 		factor := quotaCenter.getNQInQueryFactor()
 		assert.Equal(t, float64(1), factor)
 
@@ -259,7 +253,8 @@ func TestQuotaCenter(t *testing.T) {
 	})
 
 	t.Run("test getQueryLatencyFactor", func(t *testing.T) {
-		quotaCenter := NewQuotaCenter(pcm, &queryCoordMockForQuota{}, &dataCoordMockForQuota{}, core.tsoAllocator)
+		qc := types.NewMockQueryCoord(t)
+		quotaCenter := NewQuotaCenter(pcm, qc, &dataCoordMockForQuota{}, core.tsoAllocator)
 		factor := quotaCenter.getQueryLatencyFactor()
 		assert.Equal(t, float64(1), factor)
 
@@ -284,7 +279,8 @@ func TestQuotaCenter(t *testing.T) {
 	})
 
 	t.Run("test checkReadResult", func(t *testing.T) {
-		quotaCenter := NewQuotaCenter(pcm, &queryCoordMockForQuota{}, &dataCoordMockForQuota{}, core.tsoAllocator)
+		qc := types.NewMockQueryCoord(t)
+		quotaCenter := NewQuotaCenter(pcm, qc, &dataCoordMockForQuota{}, core.tsoAllocator)
 		factor := quotaCenter.getReadResultFactor()
 		assert.Equal(t, float64(1), factor)
 
@@ -309,7 +305,8 @@ func TestQuotaCenter(t *testing.T) {
 	})
 
 	t.Run("test calculateReadRates", func(t *testing.T) {
-		quotaCenter := NewQuotaCenter(pcm, &queryCoordMockForQuota{}, &dataCoordMockForQuota{}, core.tsoAllocator)
+		qc := types.NewMockQueryCoord(t)
+		quotaCenter := NewQuotaCenter(pcm, qc, &dataCoordMockForQuota{}, core.tsoAllocator)
 		quotaCenter.proxyMetrics = map[UniqueID]*metricsinfo.ProxyQuotaMetrics{
 			1: {Rms: []metricsinfo.RateMetric{
 				{Label: internalpb.RateType_DQLSearch.String(), Rate: 100},
@@ -351,7 +348,8 @@ func TestQuotaCenter(t *testing.T) {
 	})
 
 	t.Run("test calculateWriteRates", func(t *testing.T) {
-		quotaCenter := NewQuotaCenter(pcm, &queryCoordMockForQuota{}, &dataCoordMockForQuota{}, core.tsoAllocator)
+		qc := types.NewMockQueryCoord(t)
+		quotaCenter := NewQuotaCenter(pcm, qc, &dataCoordMockForQuota{}, core.tsoAllocator)
 		err = quotaCenter.calculateWriteRates()
 		assert.NoError(t, err)
 
@@ -376,7 +374,8 @@ func TestQuotaCenter(t *testing.T) {
 	})
 
 	t.Run("test getMemoryFactor basic", func(t *testing.T) {
-		quotaCenter := NewQuotaCenter(pcm, &queryCoordMockForQuota{}, &dataCoordMockForQuota{}, core.tsoAllocator)
+		qc := types.NewMockQueryCoord(t)
+		quotaCenter := NewQuotaCenter(pcm, qc, &dataCoordMockForQuota{}, core.tsoAllocator)
 		factor := quotaCenter.getMemoryFactor()
 		assert.Equal(t, float64(1), factor)
 		quotaCenter.dataNodeMetrics = map[UniqueID]*metricsinfo.DataNodeQuotaMetrics{1: {Hms: metricsinfo.HardwareMetrics{MemoryUsage: 100, Memory: 100}}}
@@ -388,7 +387,8 @@ func TestQuotaCenter(t *testing.T) {
 	})
 
 	t.Run("test getMemoryFactor factors", func(t *testing.T) {
-		quotaCenter := NewQuotaCenter(pcm, &queryCoordMockForQuota{}, &dataCoordMockForQuota{}, core.tsoAllocator)
+		qc := types.NewMockQueryCoord(t)
+		quotaCenter := NewQuotaCenter(pcm, qc, &dataCoordMockForQuota{}, core.tsoAllocator)
 		type memCase struct {
 			lowWater       float64
 			highWater      float64
@@ -428,7 +428,8 @@ func TestQuotaCenter(t *testing.T) {
 	})
 
 	t.Run("test ifDiskQuotaExceeded", func(t *testing.T) {
-		quotaCenter := NewQuotaCenter(pcm, &queryCoordMockForQuota{}, &dataCoordMockForQuota{}, core.tsoAllocator)
+		qc := types.NewMockQueryCoord(t)
+		quotaCenter := NewQuotaCenter(pcm, qc, &dataCoordMockForQuota{}, core.tsoAllocator)
 
 		paramtable.Get().Save(Params.QuotaConfig.DiskProtectionEnabled.Key, "false")
 		ok := quotaCenter.ifDiskQuotaExceeded()
@@ -449,7 +450,8 @@ func TestQuotaCenter(t *testing.T) {
 	})
 
 	t.Run("test setRates", func(t *testing.T) {
-		quotaCenter := NewQuotaCenter(pcm, &queryCoordMockForQuota{}, &dataCoordMockForQuota{}, core.tsoAllocator)
+		qc := types.NewMockQueryCoord(t)
+		quotaCenter := NewQuotaCenter(pcm, qc, &dataCoordMockForQuota{}, core.tsoAllocator)
 		quotaCenter.currentRates[internalpb.RateType_DMLInsert] = 100
 		quotaCenter.quotaStates[milvuspb.QuotaState_DenyToWrite] = commonpb.ErrorCode_MemoryQuotaExhausted
 		quotaCenter.quotaStates[milvuspb.QuotaState_DenyToRead] = commonpb.ErrorCode_ForceDeny
@@ -458,14 +460,16 @@ func TestQuotaCenter(t *testing.T) {
 	})
 
 	t.Run("test recordMetrics", func(t *testing.T) {
-		quotaCenter := NewQuotaCenter(pcm, &queryCoordMockForQuota{}, &dataCoordMockForQuota{}, core.tsoAllocator)
+		qc := types.NewMockQueryCoord(t)
+		quotaCenter := NewQuotaCenter(pcm, qc, &dataCoordMockForQuota{}, core.tsoAllocator)
 		quotaCenter.quotaStates[milvuspb.QuotaState_DenyToWrite] = commonpb.ErrorCode_MemoryQuotaExhausted
 		quotaCenter.quotaStates[milvuspb.QuotaState_DenyToRead] = commonpb.ErrorCode_ForceDeny
 		quotaCenter.recordMetrics()
 	})
 
 	t.Run("test guaranteeMinRate", func(t *testing.T) {
-		quotaCenter := NewQuotaCenter(pcm, &queryCoordMockForQuota{}, &dataCoordMockForQuota{}, core.tsoAllocator)
+		qc := types.NewMockQueryCoord(t)
+		quotaCenter := NewQuotaCenter(pcm, qc, &dataCoordMockForQuota{}, core.tsoAllocator)
 		minRate := Limit(100)
 		quotaCenter.currentRates[internalpb.RateType_DQLSearch] = Limit(50)
 		quotaCenter.guaranteeMinRate(float64(minRate), internalpb.RateType_DQLSearch)

@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 )
@@ -43,7 +44,7 @@ func TestProxy_metrics(t *testing.T) {
 	rc.Start()
 	defer rc.Stop()
 
-	qc := NewQueryCoordMock()
+	qc := getQueryCoord()
 	qc.Start()
 	defer qc.Stop()
 
@@ -99,7 +100,7 @@ func TestProxy_metrics(t *testing.T) {
 		}, nil
 	}
 
-	qc.getMetricsFunc = func(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	getMetricsFunc := func(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 		id := typeutil.UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
 
 		clusterTopology := metricsinfo.QueryClusterTopology{
@@ -150,6 +151,7 @@ func TestProxy_metrics(t *testing.T) {
 			ComponentName: metricsinfo.ConstructComponentName(typeutil.QueryCoordRole, id),
 		}, nil
 	}
+	qc.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(getMetricsFunc(nil, nil))
 
 	dc.getMetricsFunc = func(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 		id := typeutil.UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
@@ -217,6 +219,5 @@ func TestProxy_metrics(t *testing.T) {
 	assert.NotNil(t, resp)
 
 	rc.getMetricsFunc = nil
-	qc.getMetricsFunc = nil
 	dc.getMetricsFunc = nil
 }

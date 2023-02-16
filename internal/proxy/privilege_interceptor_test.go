@@ -8,6 +8,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/stretchr/testify/assert"
@@ -44,7 +45,7 @@ func TestPrivilegeInterceptor(t *testing.T) {
 
 		ctx = GetContext(context.Background(), "alice:123456")
 		client := &MockRootCoordClientInterface{}
-		queryCoord := &MockQueryCoordClientInterface{}
+		queryCoord := &types.MockQueryCoord{}
 		mgr := newShardClientMgr()
 
 		client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
@@ -145,7 +146,7 @@ func TestResourceGroupPrivilege(t *testing.T) {
 
 		ctx = GetContext(context.Background(), "fooo:123456")
 		client := &MockRootCoordClientInterface{}
-		queryCoord := &MockQueryCoordClientInterface{}
+		queryCoord := &types.MockQueryCoord{}
 		mgr := newShardClientMgr()
 
 		client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {

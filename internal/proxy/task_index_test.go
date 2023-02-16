@@ -23,8 +23,10 @@ import (
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/types"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
@@ -50,7 +52,13 @@ func TestGetIndexStateTask_Execute(t *testing.T) {
 	ctx := context.Background()
 
 	rootCoord := newMockRootCoord()
-	queryCoord := NewQueryCoordMock()
+	queryCoord := getMockQueryCoord()
+	queryCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		CollectionIDs: []int64{},
+	}, nil)
 	datacoord := NewDataCoordMock()
 
 	gist := &getIndexStateTask{
@@ -108,18 +116,15 @@ func TestDropIndexTask_PreExecute(t *testing.T) {
 	indexName := "_default_idx_101"
 
 	Params.Init()
-	showCollectionMock := func(ctx context.Context, request *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
-		return &querypb.ShowCollectionsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
-			CollectionIDs: nil,
-		}, nil
-	}
-	qc := NewQueryCoordMock(withValidShardLeaders(), SetQueryCoordShowCollectionsFunc(showCollectionMock))
+	qc := getMockQueryCoord()
+	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		CollectionIDs: []int64{},
+	}, nil)
 	dc := NewDataCoordMock()
 	ctx := context.Background()
-	qc.updateState(commonpb.StateCode_Healthy)
 
 	mockCache := newMockCache()
 	mockCache.setGetIDFunc(func(ctx context.Context, collectionName string) (typeutil.UniqueID, error) {
@@ -168,16 +173,13 @@ func TestDropIndexTask_PreExecute(t *testing.T) {
 	globalMetaCache = mockCache
 
 	t.Run("coll has been loaded", func(t *testing.T) {
-		showCollectionMock := func(ctx context.Context, request *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
-			return &querypb.ShowCollectionsResponse{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-				},
-				CollectionIDs: []int64{collectionID},
-			}, nil
-		}
-		qc := NewQueryCoordMock(withValidShardLeaders(), SetQueryCoordShowCollectionsFunc(showCollectionMock))
-		qc.updateState(commonpb.StateCode_Healthy)
+		qc := getMockQueryCoord()
+		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+			CollectionIDs: []int64{collectionID},
+		}, nil)
 		dit.queryCoord = qc
 
 		err := dit.PreExecute(ctx)
@@ -185,11 +187,8 @@ func TestDropIndexTask_PreExecute(t *testing.T) {
 	})
 
 	t.Run("show collection error", func(t *testing.T) {
-		showCollectionMock := func(ctx context.Context, request *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
-			return nil, errors.New("error")
-		}
-		qc := NewQueryCoordMock(withValidShardLeaders(), SetQueryCoordShowCollectionsFunc(showCollectionMock))
-		qc.updateState(commonpb.StateCode_Healthy)
+		qc := getMockQueryCoord()
+		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(nil, errors.New("error"))
 		dit.queryCoord = qc
 
 		err := dit.PreExecute(ctx)
@@ -197,21 +196,35 @@ func TestDropIndexTask_PreExecute(t *testing.T) {
 	})
 
 	t.Run("show collection fail", func(t *testing.T) {
-		showCollectionMock := func(ctx context.Context, request *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
-			return &querypb.ShowCollectionsResponse{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_UnexpectedError,
-					Reason:    "fail reason",
-				},
-			}, nil
-		}
-		qc := NewQueryCoordMock(withValidShardLeaders(), SetQueryCoordShowCollectionsFunc(showCollectionMock))
-		qc.updateState(commonpb.StateCode_Healthy)
+		qc := getMockQueryCoord()
+		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    "fail reason",
+			},
+		}, nil)
 		dit.queryCoord = qc
 
 		err := dit.PreExecute(ctx)
 		assert.Error(t, err)
 	})
+}
+
+func getMockQueryCoord() *types.MockQueryCoord {
+	qc := &types.MockQueryCoord{}
+	successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
+	qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(successStatus, nil)
+	qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
+		Status: successStatus,
+		Shards: []*querypb.ShardLeadersList{
+			{
+				ChannelName: "channel-1",
+				NodeIds:     []int64{1, 2, 3},
+				NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
+			},
+		},
+	}, nil)
+	return qc
 }
 
 func TestCreateIndexTask_PreExecute(t *testing.T) {
@@ -247,16 +260,13 @@ func TestCreateIndexTask_PreExecute(t *testing.T) {
 	}
 
 	t.Run("normal", func(t *testing.T) {
-		showCollectionMock := func(ctx context.Context, request *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
-			return &querypb.ShowCollectionsResponse{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_Success,
-				},
-				CollectionIDs: []int64{},
-			}, nil
-		}
-		qc := NewQueryCoordMock(withValidShardLeaders(), SetQueryCoordShowCollectionsFunc(showCollectionMock))
-		qc.updateState(commonpb.StateCode_Healthy)
+		qc := getMockQueryCoord()
+		qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+			CollectionIDs: []int64{},
+		}, nil)
 		cit.queryCoord = qc
 
 		err := cit.PreExecute(ctx)

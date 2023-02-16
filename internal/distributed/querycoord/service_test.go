@@ -22,7 +22,6 @@ import (
 	"os"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 
@@ -31,164 +30,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/stretchr/testify/assert"
-	clientv3 "go.etcd.io/etcd/client/v3"
+	"github.com/stretchr/testify/mock"
 )
-
-// /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-type MockQueryCoord struct {
-	states           *milvuspb.ComponentStates
-	status           *commonpb.Status
-	err              error
-	initErr          error
-	startErr         error
-	stopErr          error
-	regErr           error
-	strResp          *milvuspb.StringResponse
-	showcolResp      *querypb.ShowCollectionsResponse
-	showpartResp     *querypb.ShowPartitionsResponse
-	partResp         *querypb.GetPartitionStatesResponse
-	infoResp         *querypb.GetSegmentInfoResponse
-	configResp       *internalpb.ShowConfigurationsResponse
-	metricResp       *milvuspb.GetMetricsResponse
-	replicasResp     *milvuspb.GetReplicasResponse
-	shardLeadersResp *querypb.GetShardLeadersResponse
-}
-
-func (m *MockQueryCoord) Init() error {
-	return m.initErr
-}
-
-func (m *MockQueryCoord) Start() error {
-	return m.startErr
-}
-
-func (m *MockQueryCoord) Stop() error {
-	return m.stopErr
-}
-
-func (m *MockQueryCoord) Register() error {
-	log.Debug("MockQueryCoord::Register")
-	return m.regErr
-}
-
-func (m *MockQueryCoord) UpdateStateCode(code commonpb.StateCode) {
-}
-
-func (m *MockQueryCoord) SetAddress(address string) {
-}
-
-func (m *MockQueryCoord) SetEtcdClient(client *clientv3.Client) {
-}
-
-func (m *MockQueryCoord) SetRootCoord(types.RootCoord) error {
-	return nil
-}
-
-func (m *MockQueryCoord) SetDataCoord(types.DataCoord) error {
-	return nil
-}
-
-func (m *MockQueryCoord) SetQueryNodeCreator(func(ctx context.Context, addr string) (types.QueryNode, error)) {
-}
-
-func (m *MockQueryCoord) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
-	log.Debug("MockQueryCoord::WaitForComponentStates")
-	return m.states, m.err
-}
-
-func (m *MockQueryCoord) GetTimeTickChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	return m.strResp, m.err
-}
-
-func (m *MockQueryCoord) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringResponse, error) {
-	return m.strResp, m.err
-}
-
-func (m *MockQueryCoord) ShowCollections(ctx context.Context, req *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
-	return m.showcolResp, m.err
-}
-
-func (m *MockQueryCoord) LoadCollection(ctx context.Context, req *querypb.LoadCollectionRequest) (*commonpb.Status, error) {
-	return m.status, m.err
-}
-
-func (m *MockQueryCoord) ReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
-	return m.status, m.err
-}
-
-func (m *MockQueryCoord) ShowPartitions(ctx context.Context, req *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
-	return m.showpartResp, m.err
-}
-
-func (m *MockQueryCoord) GetPartitionStates(ctx context.Context, req *querypb.GetPartitionStatesRequest) (*querypb.GetPartitionStatesResponse, error) {
-	return m.partResp, m.err
-}
-
-func (m *MockQueryCoord) LoadPartitions(ctx context.Context, req *querypb.LoadPartitionsRequest) (*commonpb.Status, error) {
-	return m.status, m.err
-}
-
-func (m *MockQueryCoord) ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error) {
-	return m.status, m.err
-}
-
-func (m *MockQueryCoord) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
-	return m.infoResp, m.err
-}
-
-func (m *MockQueryCoord) LoadBalance(ctx context.Context, req *querypb.LoadBalanceRequest) (*commonpb.Status, error) {
-	return m.status, m.err
-}
-
-func (m *MockQueryCoord) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
-	return m.configResp, m.err
-}
-
-func (m *MockQueryCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	return m.metricResp, m.err
-}
-
-func (m *MockQueryCoord) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasRequest) (*milvuspb.GetReplicasResponse, error) {
-	return m.replicasResp, m.err
-}
-
-func (m *MockQueryCoord) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeadersRequest) (*querypb.GetShardLeadersResponse, error) {
-	return m.shardLeadersResp, m.err
-}
-
-func (m *MockQueryCoord) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
-	return &milvuspb.CheckHealthResponse{
-		IsHealthy: true,
-	}, m.err
-}
-
-func (m *MockQueryCoord) CreateResourceGroup(ctx context.Context, req *milvuspb.CreateResourceGroupRequest) (*commonpb.Status, error) {
-	return m.status, nil
-}
-
-func (m *MockQueryCoord) DropResourceGroup(ctx context.Context, req *milvuspb.DropResourceGroupRequest) (*commonpb.Status, error) {
-	return m.status, nil
-}
-
-func (m *MockQueryCoord) TransferNode(ctx context.Context, req *milvuspb.TransferNodeRequest) (*commonpb.Status, error) {
-	return m.status, nil
-}
-
-func (m *MockQueryCoord) TransferReplica(ctx context.Context, req *querypb.TransferReplicaRequest) (*commonpb.Status, error) {
-	return m.status, nil
-}
-
-func (m *MockQueryCoord) ListResourceGroups(ctx context.Context, req *milvuspb.ListResourceGroupsRequest) (*milvuspb.ListResourceGroupsResponse, error) {
-	return &milvuspb.ListResourceGroupsResponse{
-		Status: m.status,
-	}, nil
-}
-
-func (m *MockQueryCoord) DescribeResourceGroup(ctx context.Context, req *querypb.DescribeResourceGroupRequest) (*querypb.DescribeResourceGroupResponse, error) {
-	return &querypb.DescribeResourceGroupResponse{
-		Status: m.status,
-	}, nil
-}
 
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type MockRootCoord struct {
@@ -269,28 +112,17 @@ func Test_NewServer(t *testing.T) {
 	assert.Nil(t, err)
 	assert.NotNil(t, server)
 
-	mqc := &MockQueryCoord{
-		states: &milvuspb.ComponentStates{
-			State:  &milvuspb.ComponentInfo{StateCode: commonpb.StateCode_Healthy},
-			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
-		},
-		status:       &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
-		err:          nil,
-		strResp:      &milvuspb.StringResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}},
-		showcolResp:  &querypb.ShowCollectionsResponse{},
-		showpartResp: &querypb.ShowPartitionsResponse{},
-		partResp:     &querypb.GetPartitionStatesResponse{},
-		infoResp:     &querypb.GetSegmentInfoResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}},
-		configResp:   &internalpb.ShowConfigurationsResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}},
-		metricResp:   &milvuspb.GetMetricsResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}},
-	}
-
 	mdc := &MockDataCoord{
 		stateErr: commonpb.ErrorCode_Success,
 	}
 
 	mrc := &MockRootCoord{
 		stateErr: commonpb.ErrorCode_Success,
+	}
+
+	mqc := getQueryCoord()
+	successStatus := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
 	}
 
 	t.Run("Run", func(t *testing.T) {
@@ -303,6 +135,15 @@ func Test_NewServer(t *testing.T) {
 	})
 
 	t.Run("GetComponentStates", func(t *testing.T) {
+		mqc.EXPECT().GetComponentStates(mock.Anything).Return(&milvuspb.ComponentStates{
+			State: &milvuspb.ComponentInfo{
+				NodeID:    0,
+				Role:      "MockQueryCoord",
+				StateCode: commonpb.StateCode_Healthy,
+			},
+			Status: successStatus,
+		}, nil)
+
 		req := &milvuspb.GetComponentStatesRequest{}
 		states, err := server.GetComponentStates(ctx, req)
 		assert.Nil(t, err)
@@ -311,6 +152,11 @@ func Test_NewServer(t *testing.T) {
 
 	t.Run("GetStatisticsChannel", func(t *testing.T) {
 		req := &internalpb.GetStatisticsChannelRequest{}
+		mqc.EXPECT().GetStatisticsChannel(mock.Anything).Return(
+			&milvuspb.StringResponse{
+				Status: successStatus,
+			}, nil,
+		)
 		resp, err := server.GetStatisticsChannel(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
@@ -318,53 +164,71 @@ func Test_NewServer(t *testing.T) {
 
 	t.Run("GetTimeTickChannel", func(t *testing.T) {
 		req := &internalpb.GetTimeTickChannelRequest{}
+		mqc.EXPECT().GetTimeTickChannel(mock.Anything).Return(
+			&milvuspb.StringResponse{
+				Status: successStatus,
+			}, nil,
+		)
 		resp, err := server.GetTimeTickChannel(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
 	t.Run("ShowCollections", func(t *testing.T) {
+		mqc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(
+			&querypb.ShowCollectionsResponse{
+				Status: successStatus,
+			}, nil,
+		)
 		resp, err := server.ShowCollections(ctx, nil)
 		assert.Nil(t, err)
 		assert.NotNil(t, resp)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
 	t.Run("LoadCollection", func(t *testing.T) {
+		mqc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(successStatus, nil)
 		resp, err := server.LoadCollection(ctx, nil)
 		assert.Nil(t, err)
 		assert.NotNil(t, resp)
 	})
 
 	t.Run("ReleaseCollection", func(t *testing.T) {
+		mqc.EXPECT().ReleaseCollection(mock.Anything, mock.Anything).Return(successStatus, nil)
 		resp, err := server.ReleaseCollection(ctx, nil)
 		assert.Nil(t, err)
 		assert.NotNil(t, resp)
 	})
 
 	t.Run("ShowPartitions", func(t *testing.T) {
+		mqc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{Status: successStatus}, nil)
 		resp, err := server.ShowPartitions(ctx, nil)
 		assert.Nil(t, err)
 		assert.NotNil(t, resp)
 	})
 	t.Run("GetPartitionStates", func(t *testing.T) {
+		mqc.EXPECT().GetPartitionStates(mock.Anything, mock.Anything).Return(&querypb.GetPartitionStatesResponse{Status: successStatus}, nil)
 		resp, err := server.GetPartitionStates(ctx, nil)
 		assert.Nil(t, err)
 		assert.NotNil(t, resp)
 	})
 
 	t.Run("LoadPartitions", func(t *testing.T) {
+		mqc.EXPECT().LoadPartitions(mock.Anything, mock.Anything).Return(successStatus, nil)
 		resp, err := server.LoadPartitions(ctx, nil)
 		assert.Nil(t, err)
 		assert.NotNil(t, resp)
 	})
 
 	t.Run("ReleasePartitions", func(t *testing.T) {
+		mqc.EXPECT().ReleasePartitions(mock.Anything, mock.Anything).Return(successStatus, nil)
 		resp, err := server.ReleasePartitions(ctx, nil)
 		assert.Nil(t, err)
 		assert.NotNil(t, resp)
 	})
 
 	t.Run("GetTimeTickChannel", func(t *testing.T) {
+		mqc.EXPECT().GetTimeTickChannel(mock.Anything).Return(&milvuspb.StringResponse{Status: successStatus}, nil)
 		resp, err := server.GetTimeTickChannel(ctx, nil)
 		assert.Nil(t, err)
 		assert.NotNil(t, resp)
@@ -372,6 +236,7 @@ func Test_NewServer(t *testing.T) {
 
 	t.Run("GetSegmentInfo", func(t *testing.T) {
 		req := &querypb.GetSegmentInfoRequest{}
+		mqc.EXPECT().GetSegmentInfo(mock.Anything, req).Return(&querypb.GetSegmentInfoResponse{Status: successStatus}, nil)
 		resp, err := server.GetSegmentInfo(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
@@ -379,6 +244,7 @@ func Test_NewServer(t *testing.T) {
 
 	t.Run("LoadBalance", func(t *testing.T) {
 		req := &querypb.LoadBalanceRequest{}
+		mqc.EXPECT().LoadBalance(mock.Anything, req).Return(successStatus, nil)
 		resp, err := server.LoadBalance(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
@@ -388,36 +254,43 @@ func Test_NewServer(t *testing.T) {
 		req := &milvuspb.GetMetricsRequest{
 			Request: "",
 		}
+		mqc.EXPECT().GetMetrics(mock.Anything, req).Return(&milvuspb.GetMetricsResponse{Status: successStatus}, nil)
 		resp, err := server.GetMetrics(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
 	t.Run("CheckHealth", func(t *testing.T) {
+		mqc.EXPECT().CheckHealth(mock.Anything, mock.Anything).Return(
+			&milvuspb.CheckHealthResponse{Status: successStatus, IsHealthy: true}, nil)
 		ret, err := server.CheckHealth(ctx, nil)
 		assert.Nil(t, err)
 		assert.Equal(t, true, ret.IsHealthy)
 	})
 
 	t.Run("CreateResourceGroup", func(t *testing.T) {
+		mqc.EXPECT().CreateResourceGroup(mock.Anything, mock.Anything).Return(successStatus, nil)
 		resp, err := server.CreateResourceGroup(ctx, nil)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
 	t.Run("DropResourceGroup", func(t *testing.T) {
+		mqc.EXPECT().DropResourceGroup(mock.Anything, mock.Anything).Return(successStatus, nil)
 		resp, err := server.DropResourceGroup(ctx, nil)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
 	t.Run("TransferNode", func(t *testing.T) {
+		mqc.EXPECT().TransferNode(mock.Anything, mock.Anything).Return(successStatus, nil)
 		resp, err := server.TransferNode(ctx, nil)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 	})
 
 	t.Run("TransferReplica", func(t *testing.T) {
+		mqc.EXPECT().TransferReplica(mock.Anything, mock.Anything).Return(successStatus, nil)
 		resp, err := server.TransferReplica(ctx, nil)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
@@ -425,12 +298,14 @@ func Test_NewServer(t *testing.T) {
 
 	t.Run("ListResourceGroups", func(t *testing.T) {
 		req := &milvuspb.ListResourceGroupsRequest{}
+		mqc.EXPECT().ListResourceGroups(mock.Anything, req).Return(&milvuspb.ListResourceGroupsResponse{Status: successStatus}, nil)
 		resp, err := server.ListResourceGroups(ctx, req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
 	t.Run("DescribeResourceGroup", func(t *testing.T) {
+		mqc.EXPECT().DescribeResourceGroup(mock.Anything, mock.Anything).Return(&querypb.DescribeResourceGroupResponse{Status: successStatus}, nil)
 		resp, err := server.DescribeResourceGroup(ctx, nil)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
@@ -448,9 +323,9 @@ func TestServer_Run1(t *testing.T) {
 	assert.Nil(t, err)
 	assert.NotNil(t, server)
 
-	server.queryCoord = &MockQueryCoord{
-		regErr: errors.New("error"),
-	}
+	mqc := getQueryCoord()
+	mqc.EXPECT().Start().Return(errors.New("error"))
+	server.queryCoord = mqc
 	err = server.Run()
 	assert.Error(t, err)
 
@@ -464,7 +339,7 @@ func TestServer_Run2(t *testing.T) {
 	assert.Nil(t, err)
 	assert.NotNil(t, server)
 
-	server.queryCoord = &MockQueryCoord{}
+	server.queryCoord = getQueryCoord()
 	server.rootCoord = &MockRootCoord{
 		initErr: errors.New("error"),
 	}
@@ -473,13 +348,27 @@ func TestServer_Run2(t *testing.T) {
 	assert.Nil(t, err)
 }
 
+func getQueryCoord() *types.MockQueryCoord {
+	mqc := &types.MockQueryCoord{}
+	mqc.EXPECT().Init().Return(nil)
+	mqc.EXPECT().SetEtcdClient(mock.Anything)
+	mqc.EXPECT().SetAddress(mock.Anything)
+	mqc.EXPECT().SetRootCoord(mock.Anything).Return(nil)
+	mqc.EXPECT().SetDataCoord(mock.Anything).Return(nil)
+	mqc.EXPECT().UpdateStateCode(mock.Anything)
+	mqc.EXPECT().Register().Return(nil)
+	mqc.EXPECT().Start().Return(nil)
+	mqc.EXPECT().Stop().Return(nil)
+
+	return mqc
+}
+
 func TestServer_Run3(t *testing.T) {
 	ctx := context.Background()
 	server, err := NewServer(ctx, nil)
 	assert.Nil(t, err)
 	assert.NotNil(t, server)
-
-	server.queryCoord = &MockQueryCoord{}
+	server.queryCoord = getQueryCoord()
 	server.rootCoord = &MockRootCoord{
 		startErr: errors.New("error"),
 	}
@@ -495,7 +384,7 @@ func TestServer_Run4(t *testing.T) {
 	assert.Nil(t, err)
 	assert.NotNil(t, server)
 
-	server.queryCoord = &MockQueryCoord{}
+	server.queryCoord = getQueryCoord()
 	server.rootCoord = &MockRootCoord{}
 	server.dataCoord = &MockDataCoord{
 		initErr: errors.New("error"),
@@ -511,7 +400,7 @@ func TestServer_Run5(t *testing.T) {
 	assert.Nil(t, err)
 	assert.NotNil(t, server)
 
-	server.queryCoord = &MockQueryCoord{}
+	server.queryCoord = getQueryCoord()
 	server.rootCoord = &MockRootCoord{}
 	server.dataCoord = &MockDataCoord{
 		startErr: errors.New("error"),

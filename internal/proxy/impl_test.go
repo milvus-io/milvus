@@ -29,6 +29,8 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -72,9 +74,11 @@ func TestProxy_CheckHealth(t *testing.T) {
 	})
 
 	t.Run("proxy health check is ok", func(t *testing.T) {
+		qc := &types.MockQueryCoord{}
+		qc.EXPECT().CheckHealth(mock.Anything, mock.Anything).Return(&milvuspb.CheckHealthResponse{IsHealthy: true}, nil)
 		node := &Proxy{
 			rootCoord:  NewRootCoordMock(),
-			queryCoord: NewQueryCoordMock(),
+			queryCoord: qc,
 			dataCoord:  NewDataCoordMock(),
 			session:    &sessionutil.Session{ServerID: 1},
 		}
@@ -96,22 +100,18 @@ func TestProxy_CheckHealth(t *testing.T) {
 			}, nil
 		}
 
-		checkHealthFunc2 := func(ctx context.Context,
-			req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
-			return nil, errors.New("test")
-		}
-
 		dataCoordMock := NewDataCoordMock()
 		dataCoordMock.checkHealthFunc = checkHealthFunc1
+
+		qc := &types.MockQueryCoord{}
+		qc.EXPECT().CheckHealth(mock.Anything, mock.Anything).Return(nil, errors.New("test"))
 		node := &Proxy{
 			session: &sessionutil.Session{ServerID: 1},
 			rootCoord: NewRootCoordMock(func(mock *RootCoordMock) {
 				mock.checkHealthFunc = checkHealthFunc1
 			}),
-			queryCoord: NewQueryCoordMock(func(mock *QueryCoordMock) {
-				mock.checkHealthFunc = checkHealthFunc2
-			}),
-			dataCoord: dataCoordMock}
+			queryCoord: qc,
+			dataCoord:  dataCoordMock}
 		node.multiRateLimiter = NewMultiRateLimiter()
 		node.stateCode.Store(commonpb.StateCode_Healthy)
 		ctx := context.Background()
@@ -122,10 +122,12 @@ func TestProxy_CheckHealth(t *testing.T) {
 	})
 
 	t.Run("check quota state", func(t *testing.T) {
+		qc := &types.MockQueryCoord{}
+		qc.EXPECT().CheckHealth(mock.Anything, mock.Anything).Return(&milvuspb.CheckHealthResponse{IsHealthy: true}, nil)
 		node := &Proxy{
 			rootCoord:  NewRootCoordMock(),
 			dataCoord:  NewDataCoordMock(),
-			queryCoord: NewQueryCoordMock(),
+			queryCoord: qc,
 		}
 		node.multiRateLimiter = NewMultiRateLimiter()
 		node.stateCode.Store(commonpb.StateCode_Healthy)
@@ -209,7 +211,7 @@ func TestProxy_ResourceGroup(t *testing.T) {
 	node.multiRateLimiter = NewMultiRateLimiter()
 	node.stateCode.Store(commonpb.StateCode_Healthy)
 
-	qc := NewQueryCoordMock()
+	qc := types.NewMockQueryCoord(t)
 	node.SetQueryCoordClient(qc)
 
 	tsoAllocatorIns := newMockTsoAllocator()
@@ -222,7 +224,10 @@ func TestProxy_ResourceGroup(t *testing.T) {
 	mgr := newShardClientMgr()
 	InitMetaCache(ctx, rc, qc, mgr)
 
+	successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
+
 	t.Run("create resource group", func(t *testing.T) {
+		qc.EXPECT().CreateResourceGroup(mock.Anything, mock.Anything).Return(successStatus, nil)
 		resp, err := node.CreateResourceGroup(ctx, &milvuspb.CreateResourceGroupRequest{
 			ResourceGroup: "rg",
 		})
@@ -231,6 +236,7 @@ func TestProxy_ResourceGroup(t *testing.T) {
 	})
 
 	t.Run("drop resource group", func(t *testing.T) {
+		qc.EXPECT().DropResourceGroup(mock.Anything, mock.Anything).Return(successStatus, nil)
 		resp, err := node.DropResourceGroup(ctx, &milvuspb.DropResourceGroupRequest{
 			ResourceGroup: "rg",
 		})
@@ -239,6 +245,7 @@ func TestProxy_ResourceGroup(t *testing.T) {
 	})
 
 	t.Run("transfer node", func(t *testing.T) {
+		qc.EXPECT().TransferNode(mock.Anything, mock.Anything).Return(successStatus, nil)
 		resp, err := node.TransferNode(ctx, &milvuspb.TransferNodeRequest{
 			SourceResourceGroup: "rg1",
 			TargetResourceGroup: "rg2",
@@ -249,6 +256,7 @@ func TestProxy_ResourceGroup(t *testing.T) {
 	})
 
 	t.Run("transfer replica", func(t *testing.T) {
+		qc.EXPECT().TransferReplica(mock.Anything, mock.Anything).Return(successStatus, nil)
 		resp, err := node.TransferReplica(ctx, &milvuspb.TransferReplicaRequest{
 			SourceResourceGroup: "rg1",
 			TargetResourceGroup: "rg2",
@@ -260,12 +268,24 @@ func TestProxy_ResourceGroup(t *testing.T) {
 	})
 
 	t.Run("list resource group", func(t *testing.T) {
+		qc.EXPECT().ListResourceGroups(mock.Anything, mock.Anything).Return(&milvuspb.ListResourceGroupsResponse{Status: successStatus}, nil)
 		resp, err := node.ListResourceGroups(ctx, &milvuspb.ListResourceGroupsRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, resp.Status.ErrorCode, commonpb.ErrorCode_Success)
 	})
 
 	t.Run("describe resource group", func(t *testing.T) {
+		qc.EXPECT().DescribeResourceGroup(mock.Anything, mock.Anything).Return(&querypb.DescribeResourceGroupResponse{
+			Status: successStatus,
+			ResourceGroup: &querypb.ResourceGroupInfo{
+				Name:             "rg",
+				Capacity:         1,
+				NumAvailableNode: 1,
+				NumLoadedReplica: nil,
+				NumOutgoingNode:  nil,
+				NumIncomingNode:  nil,
+			},
+		}, nil)
 		resp, err := node.DescribeResourceGroup(ctx, &milvuspb.DescribeResourceGroupRequest{
 			ResourceGroup: "rg",
 		})
@@ -283,7 +303,7 @@ func TestProxy_InvalidResourceGroupName(t *testing.T) {
 	node.multiRateLimiter = NewMultiRateLimiter()
 	node.stateCode.Store(commonpb.StateCode_Healthy)
 
-	qc := NewQueryCoordMock()
+	qc := types.NewMockQueryCoord(t)
 	node.SetQueryCoordClient(qc)
 
 	tsoAllocatorIns := newMockTsoAllocator()

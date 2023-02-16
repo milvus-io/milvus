@@ -753,7 +753,7 @@ func TestHasCollectionTask(t *testing.T) {
 	rc := NewRootCoordMock()
 	rc.Start()
 	defer rc.Stop()
-	qc := NewQueryCoordMock()
+	qc := getQueryCoord()
 	qc.Start()
 	defer qc.Stop()
 	ctx := context.Background()
@@ -838,7 +838,7 @@ func TestDescribeCollectionTask(t *testing.T) {
 	rc := NewRootCoordMock()
 	rc.Start()
 	defer rc.Stop()
-	qc := NewQueryCoordMock()
+	qc := getQueryCoord()
 	qc.Start()
 	defer qc.Stop()
 	ctx := context.Background()
@@ -900,7 +900,7 @@ func TestDescribeCollectionTask_ShardsNum1(t *testing.T) {
 	rc := NewRootCoordMock()
 	rc.Start()
 	defer rc.Stop()
-	qc := NewQueryCoordMock()
+	qc := getQueryCoord()
 	qc.Start()
 	defer qc.Stop()
 	ctx := context.Background()
@@ -964,7 +964,7 @@ func TestDescribeCollectionTask_ShardsNum2(t *testing.T) {
 	rc := NewRootCoordMock()
 	rc.Start()
 	defer rc.Stop()
-	qc := NewQueryCoordMock()
+	qc := getQueryCoord()
 	qc.Start()
 	defer qc.Stop()
 	ctx := context.Background()
@@ -1081,18 +1081,17 @@ func TestDropPartitionTask(t *testing.T) {
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
 	partitionName := prefix + funcutil.GenRandomStr()
-
-	showPartitionsMock := func(ctx context.Context, request *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
-		return &querypb.ShowPartitionsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-				Reason:    "",
-			},
-			PartitionIDs: []int64{},
-		}, nil
-	}
-	qc := NewQueryCoordMock(withValidShardLeaders(), SetQueryCoordShowPartitionsFunc(showPartitionsMock))
-	qc.updateState(commonpb.StateCode_Healthy)
+	qc := getQueryCoord()
+	qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
+		},
+		PartitionIDs: []int64{},
+	}, nil)
+	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+	}, nil)
 	mockCache := newMockCache()
 	mockCache.setGetPartitionIDFunc(func(ctx context.Context, collectionName string, partitionName string) (typeutil.UniqueID, error) {
 		return 1, nil
@@ -1286,7 +1285,7 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 	rc := NewRootCoordMock()
 	rc.Start()
 	defer rc.Stop()
-	qc := NewQueryCoordMock()
+	qc := getQueryCoord()
 	qc.Start()
 	defer qc.Stop()
 
@@ -1537,7 +1536,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 	rc := NewRootCoordMock()
 	rc.Start()
 	defer rc.Stop()
-	qc := NewQueryCoordMock()
+	qc := getQueryCoord()
 	qc.Start()
 	defer qc.Stop()
 
@@ -2202,16 +2201,17 @@ func Test_createIndexTask_PreExecute(t *testing.T) {
 			FieldName:      fieldName,
 		},
 	}
-	showCollectionMock := func(ctx context.Context, request *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
-		return &querypb.ShowCollectionsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_Success,
-			},
-			CollectionIDs: []int64{},
-		}, nil
-	}
-	qc := NewQueryCoordMock(withValidShardLeaders(), SetQueryCoordShowCollectionsFunc(showCollectionMock))
-	qc.updateState(commonpb.StateCode_Healthy)
+	qc := getQueryCoord()
+	qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
+		},
+		PartitionIDs: []int64{},
+	}, nil)
+	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+	}, nil)
 	cit.queryCoord = qc
 
 	t.Run("normal", func(t *testing.T) {
@@ -2348,8 +2348,19 @@ func Test_dropCollectionTask_PostExecute(t *testing.T) {
 
 func Test_loadCollectionTask_Execute(t *testing.T) {
 	rc := newMockRootCoord()
-	qc := NewQueryCoordMock(withValidShardLeaders())
 	dc := NewDataCoordMock()
+
+	qc := getQueryCoord()
+	qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
+		},
+		PartitionIDs: []int64{},
+	}, nil)
+	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+	}, nil)
 
 	dbName := funcutil.GenRandomStr()
 	collectionName := funcutil.GenRandomStr()
@@ -2445,8 +2456,19 @@ func Test_loadCollectionTask_Execute(t *testing.T) {
 
 func Test_loadPartitionTask_Execute(t *testing.T) {
 	rc := newMockRootCoord()
-	qc := NewQueryCoordMock(withValidShardLeaders())
 	dc := NewDataCoordMock()
+
+	qc := getQueryCoord()
+	qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
+		},
+		PartitionIDs: []int64{},
+	}, nil)
+	qc.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+	}, nil)
 
 	dbName := funcutil.GenRandomStr()
 	collectionName := funcutil.GenRandomStr()
@@ -2544,7 +2566,8 @@ func TestCreateResourceGroupTask(t *testing.T) {
 	rc := NewRootCoordMock()
 	rc.Start()
 	defer rc.Stop()
-	qc := NewQueryCoordMock()
+	qc := getQueryCoord()
+	qc.EXPECT().CreateResourceGroup(mock.Anything, mock.Anything).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil)
 	qc.Start()
 	defer qc.Stop()
 	ctx := context.Background()
@@ -2583,7 +2606,8 @@ func TestDropResourceGroupTask(t *testing.T) {
 	rc := NewRootCoordMock()
 	rc.Start()
 	defer rc.Stop()
-	qc := NewQueryCoordMock()
+	qc := getQueryCoord()
+	qc.EXPECT().DropResourceGroup(mock.Anything, mock.Anything).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil)
 	qc.Start()
 	defer qc.Stop()
 	ctx := context.Background()
@@ -2622,7 +2646,8 @@ func TestTransferNodeTask(t *testing.T) {
 	rc := NewRootCoordMock()
 	rc.Start()
 	defer rc.Stop()
-	qc := NewQueryCoordMock()
+	qc := getQueryCoord()
+	qc.EXPECT().TransferNode(mock.Anything, mock.Anything).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil)
 	qc.Start()
 	defer qc.Stop()
 	ctx := context.Background()
@@ -2661,7 +2686,8 @@ func TestTransferNodeTask(t *testing.T) {
 
 func TestTransferReplicaTask(t *testing.T) {
 	rc := &MockRootCoordClientInterface{}
-	qc := NewQueryCoordMock()
+	qc := getQueryCoord()
+	qc.EXPECT().TransferReplica(mock.Anything, mock.Anything).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil)
 	qc.Start()
 	defer qc.Stop()
 	ctx := context.Background()
@@ -2703,7 +2729,11 @@ func TestTransferReplicaTask(t *testing.T) {
 
 func TestListResourceGroupsTask(t *testing.T) {
 	rc := &MockRootCoordClientInterface{}
-	qc := NewQueryCoordMock()
+	qc := getQueryCoord()
+	qc.EXPECT().ListResourceGroups(mock.Anything, mock.Anything).Return(&milvuspb.ListResourceGroupsResponse{
+		Status:         &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		ResourceGroups: []string{meta.DefaultResourceGroupName, "rg"},
+	}, nil)
 	qc.Start()
 	defer qc.Stop()
 	ctx := context.Background()
@@ -2742,7 +2772,17 @@ func TestListResourceGroupsTask(t *testing.T) {
 
 func TestDescribeResourceGroupTask(t *testing.T) {
 	rc := &MockRootCoordClientInterface{}
-	qc := NewQueryCoordMock()
+	qc := getQueryCoord()
+	qc.EXPECT().DescribeResourceGroup(mock.Anything, mock.Anything).Return(&querypb.DescribeResourceGroupResponse{
+		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		ResourceGroup: &querypb.ResourceGroupInfo{
+			Name:             "rg",
+			Capacity:         2,
+			NumAvailableNode: 1,
+			NumOutgoingNode:  map[int64]int32{1: 1},
+			NumIncomingNode:  map[int64]int32{2: 2},
+		},
+	}, nil)
 	qc.Start()
 	defer qc.Stop()
 	ctx := context.Background()
@@ -2787,7 +2827,10 @@ func TestDescribeResourceGroupTask(t *testing.T) {
 
 func TestDescribeResourceGroupTaskFailed(t *testing.T) {
 	rc := &MockRootCoordClientInterface{}
-	qc := NewQueryCoordMock()
+	qc := getQueryCoord()
+	qc.EXPECT().DescribeResourceGroup(mock.Anything, mock.Anything).Return(&querypb.DescribeResourceGroupResponse{
+		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError},
+	}, nil)
 	qc.Start()
 	defer qc.Stop()
 	ctx := context.Background()
