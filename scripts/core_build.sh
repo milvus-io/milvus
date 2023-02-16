@@ -188,6 +188,8 @@ if [[ ${MAKE_CLEAN} == "ON" ]]; then
   exit 0
 fi
 
+export CONAN_REVISIONS_ENABLED=1
+conan remote add default-conan-local https://milvus01.jfrog.io/artifactory/api/conan/default-conan-local
 unameOut="$(uname -s)"
 case "${unameOut}" in
   Darwin*)
@@ -195,15 +197,18 @@ case "${unameOut}" in
     export CLANG_TOOLS_PATH="${llvm_prefix}/bin"
     export CC="${llvm_prefix}/bin/clang"
     export CXX="${llvm_prefix}/bin/clang++"
-    export LDFLAGS="-L${llvm_prefix}/lib -L/usr/local/opt/libomp/lib"
-    export CXXFLAGS="-I${llvm_prefix}/include -I/usr/local/include -I/usr/local/opt/libomp/include"
-    conan install ${CPP_SRC_DIR} --install-folder conan --build=missing -s compiler=clang -s compiler.libcxx=libc++ || { echo 'conan install failed'; exit 1; }
+    export CFLAGS=-Wno-deprecated-declarations
+    export CXXFLAGS=-Wno-deprecated-declarations
+    conan install ${CPP_SRC_DIR} --install-folder conan --build=missing -s compiler=clang -s compiler.version=15 -s compiler.libcxx=libc++ || { echo 'conan install failed'; exit 1; }
     ;;
   Linux*)
+    echo "Running on ${OS_NAME}"
+    export CPU_TARGET=avx
+    GCC_VERSION=`gcc -dumpversion`
     if [[ `gcc -v 2>&1 | sed -n 's/.*\(--with-default-libstdcxx-abi\)=\(\w*\).*/\2/p'` == "gcc4" ]]; then
-      conan install ${CPP_SRC_DIR} --install-folder conan --build=missing || { echo 'conan install failed'; exit 1; }
+      conan install ${CPP_SRC_DIR} --install-folder conan --build=missing -s compiler.version=${GCC_VERSION} || { echo 'conan install failed'; exit 1; }
     else 
-      conan install ${CPP_SRC_DIR} --install-folder conan --build=missing -s compiler.libcxx=libstdc++11 || { echo 'conan install failed'; exit 1; }
+      conan install ${CPP_SRC_DIR} --install-folder conan --build=missing -s compiler.version=${GCC_VERSION} -s compiler.libcxx=libstdc++11 || { echo 'conan install failed'; exit 1; }
     fi 
     ;;
   *)   
@@ -211,6 +216,7 @@ case "${unameOut}" in
     ;;
 esac
 
+arch=$(uname -m)
 CMAKE_CMD="cmake \
 ${CMAKE_EXTRA_ARGS} \
 -DBUILD_UNIT_TEST=${BUILD_UNITTEST} \
@@ -218,6 +224,7 @@ ${CMAKE_EXTRA_ARGS} \
 -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
 -DOpenBLAS_SOURCE=AUTO \
 -DCMAKE_CUDA_COMPILER=${CUDA_COMPILER} \
+-DCMAKE_LIBRARY_ARCHITECTURE=${arch} \
 -DBUILD_COVERAGE=${BUILD_COVERAGE} \
 -DMILVUS_DB_PATH=${DB_PATH} \
 -DENABLE_CPU_PROFILING=${PROFILING} \

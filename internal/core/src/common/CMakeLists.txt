@@ -28,8 +28,6 @@ target_link_libraries(milvus_common
         milvus_log
         yaml-cpp
         boost_bitset_ext
-        # arrow
-        # parquet
         ${CONAN_LIBS}
         )
 

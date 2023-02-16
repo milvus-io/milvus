@@ -9,6 +9,9 @@ class MilvusConan(ConanFile):
         "boost/1.81.0",
         "onetbb/2021.7.0",
         "zstd/1.5.2",
+        "lz4/1.9.4",
+        "snappy/1.1.9",
+        "lzo/2.10",
         "arrow/8.0.1",
         "openssl/1.1.1q",
         "aws-sdk-cpp/1.9.234",
@@ -20,8 +23,20 @@ class MilvusConan(ConanFile):
         "marisa/0.2.6",
         "zlib/1.2.13",
         "libcurl/7.86.0",
+        "glog/0.6.0",
+        "fmt/8.0.1",
+        "gflags/2.2.2",
+        "double-conversion/3.2.1",
+        "libevent/2.1.12",
+        "libdwarf/20191104",
+        "libiberty/9.1.0",
+        "libsodium/cci.20220430",
+        "bison/3.5.3",
+        "flex/2.6.4",
+        "xsimd/9.0.1",
+        "folly/2022.10.31.01@milvus/dev",
+        "velox/2023.02.07.01@milvus/dev",
     )
-
     generators = ("cmake", "cmake_find_package")
     default_options = {
         "rocksdb:shared": True,
@@ -33,14 +48,16 @@ class MilvusConan(ConanFile):
         "aws-sdk-cpp:text-to-speech": False,
         "aws-sdk-cpp:transfer": False,
         "gtest:build_gmock": False,
+        "folly:use_sse4_2": True,
     }
-    should_build = False
 
     def configure(self):
         # Macos M1 cannot use jemalloc
         if self.settings.os == "Macos":
             if self.settings.arch not in ("x86_64", "x86"):
-                self.options["arrow"].with_jemalloc = False
+                del self.options["folly"].use_sse4_2
+
+            self.options["arrow"].with_jemalloc = False
             self.options["boost"].without_fiber = True
             self.options["boost"].without_json = True
             self.options["boost"].without_wave = True
