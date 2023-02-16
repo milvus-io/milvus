@@ -597,12 +597,10 @@ func (suite *SessionWithVersionSuite) TestWatchServicesWithVersionRange() {
 			}
 		}()
 
-		t := time.NewTimer(time.Second)
-		defer t.Stop()
 		select {
 		case evt := <-ch:
 			suite.Equal(suite.sessions[1].ServerID, evt.Session.ServerID)
-		case <-t.C:
+		case <-time.After(time.Second):
 			suite.Fail("no event received, failing")
 		}
 	})

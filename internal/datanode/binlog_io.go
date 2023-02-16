@@ -75,7 +75,6 @@ func (b *binlogIO) download(ctx context.Context, paths []string) ([]*Blob, error
 	g.Go(func() error {
 		for err != nil {
 			select {
-
 			case <-gCtx.Done():
 				log.Warn("ctx done when downloading kvs from blob storage")
 				return errDownloadFromBlobStorage
@@ -83,7 +82,7 @@ func (b *binlogIO) download(ctx context.Context, paths []string) ([]*Blob, error
 			default:
 				if err != errStart {
 					log.Warn("downloading failed, retry in 50ms", zap.Strings("paths", paths))
-					<-time.After(50 * time.Millisecond)
+					time.Sleep(50 * time.Millisecond)
 				}
 				vs, err = b.MultiRead(ctx, paths)
 			}
@@ -122,7 +121,7 @@ func (b *binlogIO) uploadSegmentFiles(
 				log.Warn("save binlog failed, retry in 50ms",
 					zap.Int64("collectionID", CollectionID),
 					zap.Int64("segmentID", segID))
-				<-time.After(50 * time.Millisecond)
+				time.Sleep(50 * time.Millisecond)
 			}
 			err = b.MultiWrite(ctx, kvs)
 		}

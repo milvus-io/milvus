@@ -185,12 +185,14 @@ func TestClient_SeekLatest(t *testing.T) {
 
 	msgChan = consumer2.Chan()
 	loop := true
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
 	for loop {
 		select {
 		case msg := <-msgChan:
 			assert.Equal(t, len(msg.Payload), 8)
 			loop = false
-		case <-time.After(2 * time.Second):
+		case <-ticker.C:
 			msg := &ProducerMessage{
 				Payload: make([]byte, 8),
 			}

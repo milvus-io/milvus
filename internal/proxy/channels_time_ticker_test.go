@@ -107,8 +107,8 @@ func TestChannelsTimeTickerImpl_getLastTick(t *testing.T) {
 	tso := newMockTsoAllocator()
 	ctx := context.Background()
 
-	ticker := newChannelsTimeTicker(ctx, interval, pchans, newGetStatisticsFunc(pchans), tso)
-	err := ticker.start()
+	channelTicker := newChannelsTimeTicker(ctx, interval, pchans, newGetStatisticsFunc(pchans), tso)
+	err := channelTicker.start()
 	assert.Equal(t, nil, err)
 
 	var wg sync.WaitGroup
@@ -116,14 +116,15 @@ func TestChannelsTimeTickerImpl_getLastTick(t *testing.T) {
 	b := make(chan struct{}, 1)
 	go func() {
 		defer wg.Done()
-		timer := time.NewTicker(interval * 40)
+		ticker := time.NewTicker(interval * 40)
+		defer ticker.Stop()
 		for {
 			select {
 			case <-b:
 				return
-			case <-timer.C:
+			case <-ticker.C:
 				for _, pchan := range pchans {
-					ts, err := ticker.getLastTick(pchan)
+					ts, err := channelTicker.getLastTick(pchan)
 					assert.Equal(t, nil, err)
 					log.Debug("TestChannelsTimeTickerImpl_getLastTick",
 						zap.Any("pchan", pchan),
@@ -137,7 +138,7 @@ func TestChannelsTimeTickerImpl_getLastTick(t *testing.T) {
 	wg.Wait()
 
 	defer func() {
-		err := ticker.close()
+		err := channelTicker.close()
 		assert.Equal(t, nil, err)
 	}()
 
@@ -154,8 +155,8 @@ func TestChannelsTimeTickerImpl_getMinTsStatistics(t *testing.T) {
 	tso := newMockTsoAllocator()
 	ctx := context.Background()
 
-	ticker := newChannelsTimeTicker(ctx, interval, pchans, newGetStatisticsFunc(pchans), tso)
-	err := ticker.start()
+	channelTicker := newChannelsTimeTicker(ctx, interval, pchans, newGetStatisticsFunc(pchans), tso)
+	err := channelTicker.start()
 	assert.Equal(t, nil, err)
 
 	var wg sync.WaitGroup
@@ -163,13 +164,14 @@ func TestChannelsTimeTickerImpl_getMinTsStatistics(t *testing.T) {
 	b := make(chan struct{}, 1)
 	go func() {
 		defer wg.Done()
-		timer := time.NewTicker(interval * 40)
+		ticker := time.NewTicker(interval * 40)
+		defer ticker.Stop()
 		for {
 			select {
 			case <-b:
 				return
-			case <-timer.C:
-				stats, _, err := ticker.getMinTsStatistics()
+			case <-ticker.C:
+				stats, _, err := channelTicker.getMinTsStatistics()
 				assert.Equal(t, nil, err)
 				for pchan, ts := range stats {
 					log.Debug("TestChannelsTimeTickerImpl_getLastTick",
@@ -184,7 +186,7 @@ func TestChannelsTimeTickerImpl_getMinTsStatistics(t *testing.T) {
 	wg.Wait()
 
 	defer func() {
-		err := ticker.close()
+		err := channelTicker.close()
 		assert.Equal(t, nil, err)
 	}()
 
@@ -201,8 +203,8 @@ func TestChannelsTimeTickerImpl_getMinTick(t *testing.T) {
 	tso := newMockTsoAllocator()
 	ctx := context.Background()
 
-	ticker := newChannelsTimeTicker(ctx, interval, pchans, newGetStatisticsFunc(pchans), tso)
-	err := ticker.start()
+	channelTicker := newChannelsTimeTicker(ctx, interval, pchans, newGetStatisticsFunc(pchans), tso)
+	err := channelTicker.start()
 	assert.Equal(t, nil, err)
 
 	var wg sync.WaitGroup
@@ -211,13 +213,14 @@ func TestChannelsTimeTickerImpl_getMinTick(t *testing.T) {
 	ts := typeutil.ZeroTimestamp
 	go func() {
 		defer wg.Done()
-		timer := time.NewTicker(interval * 40)
+		ticker := time.NewTicker(interval * 40)
+		defer ticker.Stop()
 		for {
 			select {
 			case <-b:
 				return
-			case <-timer.C:
-				minTs := ticker.getMinTick()
+			case <-ticker.C:
+				minTs := channelTicker.getMinTick()
 				assert.GreaterOrEqual(t, minTs, ts)
 			}
 		}
@@ -227,7 +230,7 @@ func TestChannelsTimeTickerImpl_getMinTick(t *testing.T) {
 	wg.Wait()
 
 	defer func() {
-		err := ticker.close()
+		err := channelTicker.close()
 		assert.Equal(t, nil, err)
 	}()
 

@@ -122,16 +122,16 @@ func newCompactionPlanHandler(sessions *SessionManager, cm *ChannelManager, meta
 
 func (c *compactionPlanHandler) start() {
 	interval := Params.DataCoordCfg.CompactionCheckIntervalInSeconds.GetAsDuration(time.Second)
-	ticker := time.NewTicker(interval)
 	c.quit = make(chan struct{})
 	c.wg.Add(1)
 
 	go func() {
 		defer c.wg.Done()
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
 		for {
 			select {
 			case <-c.quit:
-				ticker.Stop()
 				log.Info("compaction handler quit")
 				return
 			case <-ticker.C:

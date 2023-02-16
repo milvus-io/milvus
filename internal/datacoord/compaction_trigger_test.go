@@ -1474,12 +1474,14 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 
 			// should be split into two plans
 			var plans []*datapb.CompactionPlan
+			ticker := time.NewTicker(3 * time.Second)
+			defer ticker.Stop()
 		WAIT:
 			for {
 				select {
 				case val := <-spy.spyChan:
 					plans = append(plans, val)
-				case <-time.After(3 * time.Second):
+				case <-ticker.C:
 					break WAIT
 				}
 			}

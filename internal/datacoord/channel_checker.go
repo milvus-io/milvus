@@ -92,10 +92,10 @@ func (c *channelStateTimer) startOne(watchState datapb.ChannelWatchState, channe
 	}
 
 	stop := make(chan struct{})
-	ticker := time.NewTimer(timeout)
+	timer := time.NewTimer(timeout)
 	c.removeTimers([]string{channelName})
 	c.runningTimerStops.Store(channelName, stop)
-	c.runningTimers.Store(channelName, ticker)
+	c.runningTimers.Store(channelName, timer)
 
 	go func() {
 		log.Info("timer started",
@@ -103,10 +103,10 @@ func (c *channelStateTimer) startOne(watchState datapb.ChannelWatchState, channe
 			zap.Int64("nodeID", nodeID),
 			zap.String("channel name", channelName),
 			zap.Duration("check interval", timeout))
-		defer ticker.Stop()
+		defer timer.Stop()
 
 		select {
-		case <-ticker.C:
+		case <-timer.C:
 			// check tickle at path as :tickle/[prefix]/{channel_name}
 			log.Info("timeout and stop timer: wait for channel ACK timeout",
 				zap.String("watch state", watchState.String()),

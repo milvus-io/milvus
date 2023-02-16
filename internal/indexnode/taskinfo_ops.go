@@ -1,6 +1,7 @@
 package indexnode
 
 import (
+	"context"
 	"time"
 
 	"github.com/golang/protobuf/proto"
@@ -110,15 +111,18 @@ func (i *IndexNode) waitTaskFinish() {
 	}
 
 	gracefulTimeout := Params.IndexNodeCfg.GracefulStopTimeout
-	timer := time.NewTimer(gracefulTimeout.GetAsDuration(time.Second))
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
 
+	timeoutCtx, cancel := context.WithTimeout(i.loopCtx, gracefulTimeout.GetAsDuration(time.Second))
+	defer cancel()
 	for {
 		select {
-		case <-time.Tick(time.Second):
+		case <-ticker.C:
 			if !i.hasInProgressTask() {
 				return
 			}
-		case <-timer.C:
+		case <-timeoutCtx.Done():
 			log.Warn("timeout, the index node has some progress task")
 			for _, info := range i.tasks {
 				if info.state == commonpb.IndexState_InProgress {

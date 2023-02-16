@@ -215,6 +215,7 @@ func (c *Core) sendMinDdlTsAsTt() {
 func (c *Core) startTimeTickLoop() {
 	defer c.wg.Done()
 	ticker := time.NewTicker(Params.ProxyCfg.TimeTickInterval.GetAsDuration(time.Millisecond))
+	defer ticker.Stop()
 	for {
 		select {
 		case <-c.ctx.Done():

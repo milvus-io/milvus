@@ -94,10 +94,11 @@ func (gc *garbageCollector) start() {
 // work contains actual looping check logic
 func (gc *garbageCollector) work() {
 	defer gc.wg.Done()
-	ticker := time.Tick(gc.option.checkInterval)
+	ticker := time.NewTicker(gc.option.checkInterval)
+	defer ticker.Stop()
 	for {
 		select {
-		case <-ticker:
+		case <-ticker.C:
 			gc.clearEtcd()
 			gc.recycleUnusedIndexes()
 			gc.recycleUnusedSegIndexes()

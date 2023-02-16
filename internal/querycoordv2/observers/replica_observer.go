@@ -63,6 +63,7 @@ func (ob *ReplicaObserver) schedule(ctx context.Context) {
 	log.Info("Start check replica loop")
 
 	ticker := time.NewTicker(params.Params.QueryCoordCfg.CheckNodeInReplicaInterval.GetAsDuration(time.Second))
+	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():

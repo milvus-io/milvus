@@ -100,6 +100,7 @@ func (c *QueryCluster) Stop() {
 func (c *QueryCluster) updateLoop() {
 	defer c.wg.Done()
 	ticker := time.NewTicker(updateTickerDuration)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-c.ch:

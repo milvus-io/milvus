@@ -203,11 +203,11 @@ func (suite *SimulationSuite) produceMsg(wg *sync.WaitGroup) {
 func (suite *SimulationSuite) consumeMsg(ctx context.Context, wg *sync.WaitGroup, vchannel string) {
 	defer wg.Done()
 	var lastTs typeutil.Timestamp
+	timeoutCtx, cancel := context.WithTimeout(ctx, 5000*time.Millisecond)
+	defer cancel()
 	for {
 		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(5000 * time.Millisecond): // no message to consume
+		case <-timeoutCtx.Done():
 			return
 		case pack := <-suite.vchannels[vchannel].output:
 			assert.Greater(suite.T(), pack.EndTs, lastTs)
@@ -231,11 +231,13 @@ func (suite *SimulationSuite) consumeMsg(ctx context.Context, wg *sync.WaitGroup
 
 func (suite *SimulationSuite) produceTimeTickOnly(ctx context.Context) {
 	var tt = 1
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(10 * time.Millisecond):
+		case <-ticker.C:
 			ts := uint64(tt * 1000)
 			err := suite.producer.Produce(&msgstream.MsgPack{
 				Msgs: []msgstream.TsMsg{genTimeTickMsg(ts)},
