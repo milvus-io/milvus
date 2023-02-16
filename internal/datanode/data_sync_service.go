@@ -25,7 +25,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
-	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/mq/msgdispatcher"
@@ -64,7 +63,6 @@ type dataSyncService struct {
 	chunkManager     storage.ChunkManager
 	compactor        *compactionExecutor // reference to compaction executor
 
-	kv            kv.MetaKv
 	serverID      int64
 	stopOnce      sync.Once
 	flushListener chan *segmentFlushPack // chan to listen flush event
