@@ -197,6 +197,17 @@ var (
 			Help:      "forward delete message time taken",
 			Buckets:   buckets, // unit: ms
 		}, []string{nodeIDLabelName})
+
+	DataNodeMsgDispatcherTtLag = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataNodeRole,
+			Name:      "msg_dispatcher_tt_lag_ms",
+			Help:      "time.Now() sub dispatcher's current consume time",
+		}, []string{
+			nodeIDLabelName,
+			channelNameLabelName,
+		})
 )
 
 // RegisterDataNode registers DataNode metrics
@@ -217,6 +228,7 @@ func RegisterDataNode(registry *prometheus.Registry) {
 	registry.MustRegister(DataNodeProduceTimeTickLag)
 	registry.MustRegister(DataNodeConsumeBytesCount)
 	registry.MustRegister(DataNodeForwardDeleteMsgTimeTaken)
+	registry.MustRegister(DataNodeMsgDispatcherTtLag)
 }
 
 func CleanupDataNodeCollectionMetrics(nodeID int64, collectionID int64, channel string) {

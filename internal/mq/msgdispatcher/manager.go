@@ -25,9 +25,13 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/internal/util/retry"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 var (
@@ -125,6 +129,7 @@ func (c *dispatcherManager) Remove(vchannel string) {
 		c.soloDispatchers[vchannel].Handle(terminate)
 		c.soloDispatchers[vchannel].CloseTarget(vchannel)
 		delete(c.soloDispatchers, vchannel)
+		c.deleteMetric(vchannel)
 		log.Info("remove soloDispatcher done")
 	}
 	c.lagTargets.Delete(vchannel)
@@ -150,14 +155,18 @@ func (c *dispatcherManager) Run() {
 	log := log.With(zap.String("role", c.role),
 		zap.Int64("nodeID", c.nodeID), zap.String("pchannel", c.pchannel))
 	log.Info("dispatcherManager is running...")
-	ticker := time.NewTicker(CheckPeriod)
-	defer ticker.Stop()
+	ticker1 := time.NewTicker(10 * time.Second)
+	ticker2 := time.NewTicker(CheckPeriod)
+	defer ticker1.Stop()
+	defer ticker2.Stop()
 	for {
 		select {
 		case <-c.closeChan:
 			log.Info("dispatcherManager exited")
 			return
-		case <-ticker.C:
+		case <-ticker1.C:
+			c.uploadMetric()
+		case <-ticker2.C:
 			c.tryMerge()
 		case <-c.lagNotifyChan:
 			c.mu.Lock()
@@ -206,6 +215,7 @@ func (c *dispatcherManager) tryMerge() {
 		}
 		c.soloDispatchers[vchannel].Handle(terminate)
 		delete(c.soloDispatchers, vchannel)
+		c.deleteMetric(vchannel)
 	}
 	c.mainDispatcher.Handle(resume)
 	log.Info("merge done", zap.Any("vchannel", candidates))
@@ -220,6 +230,7 @@ func (c *dispatcherManager) split(t *target) {
 	if _, ok := c.soloDispatchers[t.vchannel]; ok {
 		c.soloDispatchers[t.vchannel].Handle(terminate)
 		delete(c.soloDispatchers, t.vchannel)
+		c.deleteMetric(t.vchannel)
 	}
 
 	var newSolo *Dispatcher
@@ -237,4 +248,43 @@ func (c *dispatcherManager) split(t *target) {
 	c.soloDispatchers[t.vchannel] = newSolo
 	newSolo.Handle(start)
 	log.Info("split done")
+}
+
+// deleteMetric remove specific prometheus metric,
+// Lock/RLock is required before calling this method.
+func (c *dispatcherManager) deleteMetric(channel string) {
+	nodeIDStr := fmt.Sprintf("%d", c.nodeID)
+	if c.role == typeutil.DataNodeRole {
+		metrics.DataNodeMsgDispatcherTtLag.DeleteLabelValues(nodeIDStr, channel)
+		return
+	}
+	if c.role == typeutil.QueryNodeRole {
+		metrics.QueryNodeMsgDispatcherTtLag.DeleteLabelValues(nodeIDStr, channel)
+	}
+}
+
+func (c *dispatcherManager) uploadMetric() {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	nodeIDStr := fmt.Sprintf("%d", c.nodeID)
+	fn := func(gauge *prometheus.GaugeVec) {
+		if c.mainDispatcher == nil {
+			return
+		}
+		// for main dispatcher, use pchannel as channel label
+		gauge.WithLabelValues(nodeIDStr, c.pchannel).Set(
+			float64(time.Since(tsoutil.PhysicalTime(c.mainDispatcher.CurTs())).Milliseconds()))
+		// for solo dispatchers, use vchannel as channel label
+		for vchannel, dispatcher := range c.soloDispatchers {
+			gauge.WithLabelValues(nodeIDStr, vchannel).Set(
+				float64(time.Since(tsoutil.PhysicalTime(dispatcher.CurTs())).Milliseconds()))
+		}
+	}
+	if c.role == typeutil.DataNodeRole {
+		fn(metrics.DataNodeMsgDispatcherTtLag)
+		return
+	}
+	if c.role == typeutil.QueryNodeRole {
+		fn(metrics.QueryNodeMsgDispatcherTtLag)
+	}
 }

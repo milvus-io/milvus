@@ -25,6 +25,7 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
@@ -54,6 +55,9 @@ func (s signal) String() string {
 }
 
 type Dispatcher struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+
 	done chan struct{}
 	wg   sync.WaitGroup
 	once sync.Once
@@ -158,16 +162,20 @@ func (d *Dispatcher) Handle(signal signal) {
 	log.Info("get signal")
 	switch signal {
 	case start:
+		d.ctx, d.cancel = context.WithCancel(context.Background())
 		d.wg.Add(1)
 		go d.work()
 	case pause:
 		d.done <- struct{}{}
+		d.cancel()
 		d.wg.Wait()
 	case resume:
+		d.ctx, d.cancel = context.WithCancel(context.Background())
 		d.wg.Add(1)
 		go d.work()
 	case terminate:
 		d.done <- struct{}{}
+		d.cancel()
 		d.wg.Wait()
 		d.once.Do(func() {
 			d.stream.Close()
@@ -192,39 +200,24 @@ func (d *Dispatcher) work() {
 			}
 			d.curTs.Store(pack.EndPositions[0].GetTimestamp())
 
-			// init packs for all targets, even though there's no msg in pack,
-			// but we still need to dispatch time ticks to the targets.
-			targetPacks := make(map[string]*MsgPack)
-			for vchannel := range d.targets {
-				targetPacks[vchannel] = &MsgPack{
-					BeginTs:        pack.BeginTs,
-					EndTs:          pack.EndTs,
-					Msgs:           make([]msgstream.TsMsg, 0),
-					StartPositions: pack.StartPositions,
-					EndPositions:   pack.EndPositions,
-				}
-			}
-
-			// group messages by vchannel
-			for _, msg := range pack.Msgs {
-				if msg.VChannel() == "" {
-					// for non-dml msg, such as CreateCollection, DropCollection, ...
-					// we need to dispatch it to all the vchannels.
-					for k := range targetPacks {
-						targetPacks[k].Msgs = append(targetPacks[k].Msgs, msg)
-					}
-					continue
-				}
-				if _, ok := targetPacks[msg.VChannel()]; !ok {
-					continue
-				}
-				targetPacks[msg.VChannel()].Msgs = append(targetPacks[msg.VChannel()].Msgs, msg)
-			}
-
-			// dispatch messages, split target if block
+			targetPacks := d.groupingMsgs(pack)
 			for vchannel, p := range targetPacks {
-				t := d.targets[vchannel]
-				if err := t.send(p); err != nil {
+				var err error
+				var t = d.targets[vchannel]
+				if d.isMain {
+					// for main dispatcher, split target if err occurs
+					err = t.send(p)
+				} else {
+					// for solo dispatcher, only 1 target exists, we should
+					// keep retrying if err occurs, unless it paused or terminated.
+					for {
+						err = t.send(p)
+						if err == nil || !funcutil.CheckCtxValid(d.ctx) {
+							break
+						}
+					}
+				}
+				if err != nil {
 					t.pos = pack.StartPositions[0]
 					d.lagTargets.LoadOrStore(t.vchannel, t)
 					d.nonBlockingNotify()
@@ -234,6 +227,43 @@ func (d *Dispatcher) work() {
 			}
 		}
 	}
+}
+
+func (d *Dispatcher) groupingMsgs(pack *MsgPack) map[string]*MsgPack {
+	// init packs for all targets, even though there's no msg in pack,
+	// but we still need to dispatch time ticks to the targets.
+	targetPacks := make(map[string]*MsgPack)
+	for vchannel := range d.targets {
+		targetPacks[vchannel] = &MsgPack{
+			BeginTs:        pack.BeginTs,
+			EndTs:          pack.EndTs,
+			Msgs:           make([]msgstream.TsMsg, 0),
+			StartPositions: pack.StartPositions,
+			EndPositions:   pack.EndPositions,
+		}
+	}
+	// group messages by vchannel
+	for _, msg := range pack.Msgs {
+		var vchannel string
+		switch msg.Type() {
+		case commonpb.MsgType_Insert:
+			vchannel = msg.(*msgstream.InsertMsg).GetShardName()
+		case commonpb.MsgType_Delete:
+			vchannel = msg.(*msgstream.DeleteMsg).GetShardName()
+		}
+		if vchannel == "" {
+			// for non-dml msg, such as CreateCollection, DropCollection, ...
+			// we need to dispatch it to all the vchannels.
+			for k := range targetPacks {
+				targetPacks[k].Msgs = append(targetPacks[k].Msgs, msg)
+			}
+			continue
+		}
+		if _, ok := targetPacks[vchannel]; ok {
+			targetPacks[vchannel].Msgs = append(targetPacks[vchannel].Msgs, msg)
+		}
+	}
+	return targetPacks
 }
 
 func (d *Dispatcher) nonBlockingNotify() {

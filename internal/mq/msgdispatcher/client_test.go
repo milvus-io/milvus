@@ -23,6 +23,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -39,20 +40,25 @@ func TestClient(t *testing.T) {
 }
 
 func TestClient_Concurrency(t *testing.T) {
-	client := NewClient(newMockFactory(), typeutil.ProxyRole, 1)
-	assert.NotNil(t, client)
+	client1 := NewClient(newMockFactory(), typeutil.ProxyRole, 1)
+	assert.NotNil(t, client1)
 	wg := &sync.WaitGroup{}
-	for i := 0; i < 100; i++ {
+	const total = 100
+	deregisterCount := atomic.NewInt32(0)
+	for i := 0; i < total; i++ {
 		vchannel := fmt.Sprintf("mock-vchannel-%d-%d", i, rand.Int())
 		wg.Add(1)
 		go func() {
-			for j := 0; j < 10; j++ {
-				_, err := client.Register(vchannel, nil, mqwrapper.SubscriptionPositionUnknown)
-				assert.NoError(t, err)
-				client.Deregister(vchannel)
+			_, err := client1.Register(vchannel, nil, mqwrapper.SubscriptionPositionUnknown)
+			assert.NoError(t, err)
+			for j := 0; j < rand.Intn(2); j++ {
+				client1.Deregister(vchannel)
+				deregisterCount.Inc()
 			}
 			wg.Done()
 		}()
 	}
 	wg.Wait()
+	expected := int(total - deregisterCount.Load())
+	assert.Equal(t, expected, len(client1.(*client).managers))
 }
