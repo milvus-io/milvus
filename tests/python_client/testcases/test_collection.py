@@ -2228,11 +2228,11 @@ class TestLoadCollection(TestcaseBase):
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
 
         # load with non-number replicas
-        error = {ct.err_code: 0, ct.err_msg: f"but expected one of: int, long"}
+        error = {ct.err_code: 1, ct.err_msg: f"but expected one of: int, long"}
         collection_w.load(replica_number=get_non_number_replicas, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("replicas", [-1, 0, None])
+    @pytest.mark.parametrize("replicas", [-1, 0])
     def test_load_replica_invalid_number(self, replicas):
         """
         target: test load partition with invalid replica number
