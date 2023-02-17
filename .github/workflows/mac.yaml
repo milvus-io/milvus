@@ -85,7 +85,7 @@ jobs:
           if [[ ! -d "/var/tmp/ccache" ]];then
             mkdir -p /var/tmp/ccache
           fi
-          brew install libomp ninja openblas ccache conan
+          brew install libomp ninja openblas ccache conan pkg-config
           if [[ ! -d "/usr/local/opt/llvm" ]]; then
             ln -s /usr/local/opt/llvm@14 /usr/local/opt/llvm
           fi
