@@ -19,16 +19,40 @@ package grpcquerycoordclient
 import (
 	"context"
 	"errors"
+	"math/rand"
+	"os"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/mock"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/stretchr/testify/assert"
 )
+
+func TestMain(m *testing.M) {
+	// init embed etcd
+	embedetcdServer, tempDir, err := etcd.StartTestEmbedEtcdServer()
+	if err != nil {
+		log.Fatal(err.Error())
+	}
+	defer os.RemoveAll(tempDir)
+	defer embedetcdServer.Close()
+
+	addrs := etcd.GetEmbedEtcdEndpoints(embedetcdServer)
+
+	paramtable.Init()
+	paramtable.Get().Save(Params.EtcdCfg.Endpoints.Key, strings.Join(addrs, ","))
+
+	rand.Seed(time.Now().UnixNano())
+	os.Exit(m.Run())
+}
 
 func Test_NewClient(t *testing.T) {
 	proxy.Params.Init()

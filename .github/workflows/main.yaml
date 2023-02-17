@@ -72,7 +72,8 @@ jobs:
           echo "corehash=${CORE_HASH}" >> $GITHUB_ENV
           echo "Set CCache hash to ${CORE_HASH}"
       - name: Cache CCache Volumes
-        uses: actions/cache@v3
+        # uses: actions/cache@v3
+        uses: pat-s/always-upload-cache@v3
         with:
           path: .docker/amd64-ubuntu${{ matrix.ubuntu }}-ccache
           key: ubuntu${{ matrix.ubuntu }}-ccache-${{ env.corehash }}
@@ -84,7 +85,8 @@ jobs:
           key: ubuntu${{ matrix.ubuntu }}-go-mod-${{ hashFiles('**/go.sum') }}
           restore-keys: ubuntu${{ matrix.ubuntu }}-go-mod-
       - name: Cache Conan Packages
-        uses: actions/cache@v3
+        # uses: actions/cache@v3
+        uses: pat-s/always-upload-cache@v3
         with:
           path: .docker/amd64-ubuntu${{ matrix.ubuntu }}-conan
           key: ubuntu${{ matrix.ubuntu }}-conan-${{ hashFiles('internal/core/conanfile.*') }}

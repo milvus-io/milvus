@@ -305,6 +305,7 @@ func TestProxy_InvalidResourceGroupName(t *testing.T) {
 
 	qc := types.NewMockQueryCoord(t)
 	node.SetQueryCoordClient(qc)
+	qc.EXPECT().DropResourceGroup(mock.Anything, mock.Anything).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil)
 
 	tsoAllocatorIns := newMockTsoAllocator()
 	node.sched, err = newTaskScheduler(node.ctx, tsoAllocatorIns, node.factory)

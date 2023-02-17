@@ -71,10 +71,10 @@ func TestMain(m *testing.M) {
 	defer embedetcdServer.Close()
 
 	addrs := etcd.GetEmbedEtcdEndpoints(embedetcdServer)
-	// setup env for etcd endpoint
-	os.Setenv("etcd.endpoints", strings.Join(addrs, ","))
 
 	paramtable.Init()
+	paramtable.Get().Save(Params.EtcdCfg.Endpoints.Key, strings.Join(addrs, ","))
+
 	rand.Seed(time.Now().UnixNano())
 	os.Exit(m.Run())
 }
