@@ -68,14 +68,16 @@ class Base:
                     collection_object.drop(check_task=ct.CheckTasks.check_nothing)
 
             """ Clean up the rgs before disconnect """
+            rgs_list = self.utility_wrap.list_resource_groups()[0]
             for rg_name in self.resource_group_list:
-                rg = self.utility_wrap.describe_resource_group(name=rg_name, check_task=ct.CheckTasks.check_nothing)[0]
-                if isinstance(rg, ResourceGroupInfo):
-                    if rg.num_available_node > 0:
-                        self.utility_wrap.transfer_node(source=rg_name,
-                                                        target=ct.default_resource_group_name,
-                                                        num_node=rg.num_available_node)
-                    self.utility_wrap.drop_resource_group(rg_name, check_task=ct.CheckTasks.check_nothing)
+                if rg_name is not None and rg_name in rgs_list:
+                    rg = self.utility_wrap.describe_resource_group(name=rg_name, check_task=ct.CheckTasks.check_nothing)[0]
+                    if isinstance(rg, ResourceGroupInfo):
+                        if rg.num_available_node > 0:
+                            self.utility_wrap.transfer_node(source=rg_name,
+                                                            target=ct.default_resource_group_name,
+                                                            num_node=rg.num_available_node)
+                        self.utility_wrap.drop_resource_group(rg_name, check_task=ct.CheckTasks.check_nothing)
 
         except Exception as e:
             log.debug(str(e))
