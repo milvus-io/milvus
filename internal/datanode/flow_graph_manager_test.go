@@ -63,7 +63,7 @@ func TestFlowGraphManager(t *testing.T) {
 		}
 		require.False(t, fm.exist(vchanName))
 
-		err := fm.addAndStart(node, vchan, nil)
+		err := fm.addAndStart(node, vchan, nil, genTestTickler())
 		assert.NoError(t, err)
 		assert.True(t, fm.exist(vchanName))
 
@@ -78,7 +78,7 @@ func TestFlowGraphManager(t *testing.T) {
 		}
 		require.False(t, fm.exist(vchanName))
 
-		err := fm.addAndStart(node, vchan, nil)
+		err := fm.addAndStart(node, vchan, nil, genTestTickler())
 		assert.NoError(t, err)
 		assert.True(t, fm.exist(vchanName))
 
@@ -96,7 +96,7 @@ func TestFlowGraphManager(t *testing.T) {
 		}
 		require.False(t, fm.exist(vchanName))
 
-		err := fm.addAndStart(node, vchan, nil)
+		err := fm.addAndStart(node, vchan, nil, genTestTickler())
 		assert.NoError(t, err)
 		assert.True(t, fm.exist(vchanName))
 		fg, ok := fm.getFlowgraphService(vchanName)
@@ -144,7 +144,7 @@ func TestFlowGraphManager(t *testing.T) {
 		}
 		require.False(t, fm.exist(vchanName))
 
-		err := fm.addAndStart(node, vchan, nil)
+		err := fm.addAndStart(node, vchan, nil, genTestTickler())
 		assert.NoError(t, err)
 		assert.True(t, fm.exist(vchanName))
 

@@ -1268,7 +1268,7 @@ type dataCoordConfig struct {
 	ChannelWatchSubPath string
 
 	// --- CHANNEL ---
-	MaxWatchDuration time.Duration
+	WatchTimeoutInterval time.Duration
 
 	// --- SEGMENTS ---
 	SegmentMaxSize                 float64
@@ -1311,7 +1311,7 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	p.Base = base
 	p.initChannelWatchPrefix()
 
-	p.initMaxWatchDuration()
+	p.initWatchTimeoutInterval()
 
 	p.initSegmentMaxSize()
 	p.initDiskSegmentMaxSize()
@@ -1343,8 +1343,8 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	p.initEnableActiveStandby()
 }
 
-func (p *dataCoordConfig) initMaxWatchDuration() {
-	p.MaxWatchDuration = time.Duration(p.Base.ParseInt64WithDefault("dataCoord.channel.maxWatchDuration", 600)) * time.Second
+func (p *dataCoordConfig) initWatchTimeoutInterval() {
+	p.WatchTimeoutInterval = time.Duration(p.Base.ParseInt64WithDefault("dataCoord.channel.watchTimeoutInterval", 30)) * time.Second
 }
 
 func (p *dataCoordConfig) initSegmentMaxSize() {
@@ -1528,6 +1528,9 @@ type dataNodeConfig struct {
 	// etcd
 	ChannelWatchSubPath string
 
+	// watchEvent
+	WatchEventTicklerInterval time.Duration
+
 	// io concurrency to fetch stats logs
 	IOConcurrency int
 
@@ -1552,6 +1555,10 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 // InitAlias init this DataNode alias
 func (p *dataNodeConfig) InitAlias(alias string) {
 	p.Alias = alias
+}
+
+func (p *dataNodeConfig) initWatchEventTicklerInterval() {
+	p.WatchEventTicklerInterval = time.Duration(p.Base.ParseInt64WithDefault("dataCoord.channel.watchEventTicklerInterval", 15)) * time.Second
 }
 
 func (p *dataNodeConfig) initFlowGraphMaxQueueLength() {
