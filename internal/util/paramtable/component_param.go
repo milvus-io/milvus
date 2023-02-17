@@ -1414,7 +1414,7 @@ func (p *dataCoordConfig) initEnableCompaction() {
 }
 
 func (p *dataCoordConfig) initEnableAutoCompaction() {
-	p.EnableAutoCompaction.Store(p.Base.ParseBool("dataCoord.compaction.enableAutoCompaction", false))
+	p.EnableAutoCompaction.Store(p.Base.ParseBool("dataCoord.compaction.enableAutoCompaction", true))
 }
 
 func (p *dataCoordConfig) initCompactionMinSegment() {
