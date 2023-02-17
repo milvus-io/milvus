@@ -24,10 +24,6 @@ import (
 	"sync"
 	"syscall"
 
-	rocksmqimpl "github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
-
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/cmd/components"
 	"github.com/milvus-io/milvus/internal/datacoord"
 	"github.com/milvus-io/milvus/internal/datanode"
@@ -37,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/management"
 	"github.com/milvus-io/milvus/internal/management/healthz"
 	"github.com/milvus-io/milvus/internal/metrics"
+	rocksmqimpl "github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
 	"github.com/milvus-io/milvus/internal/proxy"
 	querycoord "github.com/milvus-io/milvus/internal/querycoordv2"
 	"github.com/milvus-io/milvus/internal/querynode"
@@ -48,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/trace"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/prometheus/client_golang/prometheus"
+	"go.uber.org/zap"
 )
 
 var Params paramtable.ComponentParam

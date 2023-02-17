@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	queryPb "github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/concurrency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
@@ -153,7 +154,7 @@ func TestImpl_WatchDmChannels(t *testing.T) {
 		defer node.UpdateStateCode(commonpb.StateCode_Healthy)
 		status, err := node.WatchDmChannels(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, status.ErrorCode)
 	})
 
 	t.Run("server stopping", func(t *testing.T) {
@@ -167,7 +168,7 @@ func TestImpl_WatchDmChannels(t *testing.T) {
 		defer node.UpdateStateCode(commonpb.StateCode_Healthy)
 		status, err := node.WatchDmChannels(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, status.ErrorCode)
 	})
 
 	t.Run("mock release after loaded", func(t *testing.T) {
@@ -283,7 +284,7 @@ func TestImpl_UnsubDmChannel(t *testing.T) {
 		node.UpdateStateCode(commonpb.StateCode_Abnormal)
 		status, err := node.UnsubDmChannel(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, status.ErrorCode)
 	})
 }
 
@@ -329,7 +330,7 @@ func TestImpl_LoadSegments(t *testing.T) {
 		defer node.UpdateStateCode(commonpb.StateCode_Healthy)
 		status, err := node.LoadSegments(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, status.ErrorCode)
 	})
 
 	t.Run("server stopping", func(t *testing.T) {
@@ -337,7 +338,7 @@ func TestImpl_LoadSegments(t *testing.T) {
 		defer node.UpdateStateCode(commonpb.StateCode_Healthy)
 		status, err := node.LoadSegments(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, status.ErrorCode)
 	})
 }
 
@@ -363,7 +364,7 @@ func TestImpl_ReleaseCollection(t *testing.T) {
 	node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	status, err = node.ReleaseCollection(ctx, req)
 	assert.NoError(t, err)
-	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
+	assert.Equal(t, commonpb.ErrorCode_NotReadyServe, status.ErrorCode)
 }
 
 func TestImpl_ReleasePartitions(t *testing.T) {
@@ -389,7 +390,7 @@ func TestImpl_ReleasePartitions(t *testing.T) {
 	node.UpdateStateCode(commonpb.StateCode_Abnormal)
 	status, err = node.ReleasePartitions(ctx, req)
 	assert.NoError(t, err)
-	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
+	assert.Equal(t, commonpb.ErrorCode_NotReadyServe, status.ErrorCode)
 }
 
 func TestImpl_GetSegmentInfo(t *testing.T) {
@@ -422,7 +423,7 @@ func TestImpl_GetSegmentInfo(t *testing.T) {
 		node.UpdateStateCode(commonpb.StateCode_Abnormal)
 		rsp, err = node.GetSegmentInfo(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, rsp.Status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, rsp.Status.ErrorCode)
 	})
 
 	t.Run("test no collection in metaReplica", func(t *testing.T) {
@@ -509,7 +510,7 @@ func TestImpl_GetSegmentInfo(t *testing.T) {
 		node.UpdateStateCode(commonpb.StateCode_Abnormal)
 		rsp, err = node.GetSegmentInfo(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, rsp.Status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, rsp.Status.ErrorCode)
 	})
 }
 
@@ -519,7 +520,7 @@ func TestImpl_isHealthy(t *testing.T) {
 	node, err := genSimpleQueryNode(ctx)
 	assert.NoError(t, err)
 
-	isHealthy := node.isHealthy()
+	isHealthy := commonpbutil.IsHealthy(node.stateCode)
 	assert.True(t, isHealthy)
 }
 
@@ -567,7 +568,7 @@ func TestImpl_ShowConfigurations(t *testing.T) {
 
 		reqs, err := node.ShowConfigurations(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, reqs.Status.ErrorCode, commonpb.ErrorCode_UnexpectedError)
+		assert.Equal(t, reqs.Status.ErrorCode, commonpb.ErrorCode_NotReadyServe)
 	})
 }
 
@@ -676,7 +677,7 @@ func TestImpl_ReleaseSegments(t *testing.T) {
 		node.UpdateStateCode(commonpb.StateCode_Abnormal)
 		resp, err := node.ReleaseSegments(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetErrorCode())
 	})
 
 	t.Run("test target not matched", func(t *testing.T) {
@@ -938,7 +939,7 @@ func TestImpl_SyncReplicaSegments(t *testing.T) {
 
 		resp, err := node.SyncReplicaSegments(ctx, &querypb.SyncReplicaSegmentsRequest{})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetErrorCode())
 	})
 
 	t.Run("Sync non-exist channel", func(t *testing.T) {
@@ -1013,7 +1014,7 @@ func TestSyncDistribution(t *testing.T) {
 
 		resp, err := node.SyncDistribution(ctx, &querypb.SyncDistributionRequest{})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetErrorCode())
 	})
 
 	t.Run("Target not match", func(t *testing.T) {
@@ -1137,7 +1138,7 @@ func TestGetDataDistribution(t *testing.T) {
 
 		resp, err := node.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetStatus().GetErrorCode())
 	})
 
 	t.Run("Target not match", func(t *testing.T) {

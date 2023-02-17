@@ -181,22 +181,38 @@ func TestQueryTask_all(t *testing.T) {
 	assert.Error(t, task.Execute(ctx))
 
 	qn.queryError = nil
-	qn.withQueryResult = &internalpb.RetrieveResults{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_NotShardLeader,
-		},
+	qn.getQueryResult = func() *internalpb.RetrieveResults {
+		return &internalpb.RetrieveResults{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_NotShardLeader,
+			},
+		}
 	}
 	err = task.Execute(ctx)
 	assert.True(t, strings.Contains(err.Error(), errInvalidShardLeaders.Error()))
 
-	qn.withQueryResult = &internalpb.RetrieveResults{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		},
+	qn.getQueryResult = func() *internalpb.RetrieveResults {
+		return &internalpb.RetrieveResults{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			},
+		}
 	}
 	assert.Error(t, task.Execute(ctx))
 
-	qn.withQueryResult = result1
+	result0 := &internalpb.RetrieveResults{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_NotShardLeader,
+		},
+	}
+	i := 0
+	qn.getQueryResult = func() *internalpb.RetrieveResults {
+		i++
+		if i < 3 {
+			return result0
+		}
+		return result1
+	}
 
 	assert.NoError(t, task.Execute(ctx))
 

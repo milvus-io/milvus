@@ -38,8 +38,8 @@ type QueryNodeMock struct {
 	state atomic.Value // internal.StateCode
 
 	withStatisticsResponse *internalpb.GetStatisticsResponse
-	withSearchResult       *internalpb.SearchResults
-	withQueryResult        *internalpb.RetrieveResults
+	getSearchResult        func() *internalpb.SearchResults
+	getQueryResult         func() *internalpb.RetrieveResults
 	queryError             error
 	searchError            error
 	statisticsError        error
@@ -56,14 +56,20 @@ func (m *QueryNodeMock) Search(ctx context.Context, req *querypb.SearchRequest) 
 	if m.searchError != nil {
 		return nil, m.searchError
 	}
-	return m.withSearchResult, nil
+	if m.getSearchResult != nil {
+		return m.getSearchResult(), nil
+	}
+	return nil, nil
 }
 
 func (m *QueryNodeMock) Query(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
 	if m.queryError != nil {
 		return nil, m.queryError
 	}
-	return m.withQueryResult, nil
+	if m.getQueryResult != nil {
+		return m.getQueryResult(), nil
+	}
+	return nil, nil
 }
 
 func (m *QueryNodeMock) SyncReplicaSegments(ctx context.Context, req *querypb.SyncReplicaSegmentsRequest) (*commonpb.Status, error) {

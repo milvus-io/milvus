@@ -79,7 +79,7 @@ import (
 )
 
 const (
-	attempts      = 1000000
+	attempts      = 10
 	sleepDuration = time.Millisecond * 200
 )
 

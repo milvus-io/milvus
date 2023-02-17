@@ -7,6 +7,9 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus/internal/common"
+
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/types"
 
@@ -60,7 +63,7 @@ func groupShardleadersWithSameQueryNode(
 			if err, ok := errSet[dml]; ok {
 				return nil, nil, err
 			}
-			return nil, nil, fmt.Errorf("no available shard leader")
+			return nil, nil, common.NewCodeError(commonpb.ErrorCode_NotShardLeader, fmt.Errorf("no available shard leader"))
 		}
 	}
 	qnSet := make(map[int64]types.QueryNode)

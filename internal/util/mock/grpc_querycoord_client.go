@@ -39,23 +39,23 @@ func (m *GrpcQueryCoordClient) CheckHealth(ctx context.Context, in *milvuspb.Che
 }
 
 func (m *GrpcQueryCoordClient) GetComponentStates(ctx context.Context, in *milvuspb.GetComponentStatesRequest, opts ...grpc.CallOption) (*milvuspb.ComponentStates, error) {
-	return &milvuspb.ComponentStates{}, m.Err
+	return &milvuspb.ComponentStates{Status: SuccessStatus()}, m.Err
 }
 
 func (m *GrpcQueryCoordClient) GetTimeTickChannel(ctx context.Context, in *internalpb.GetTimeTickChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error) {
-	return &milvuspb.StringResponse{}, m.Err
+	return &milvuspb.StringResponse{Status: SuccessStatus()}, m.Err
 }
 
 func (m *GrpcQueryCoordClient) GetStatisticsChannel(ctx context.Context, in *internalpb.GetStatisticsChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error) {
-	return &milvuspb.StringResponse{}, m.Err
+	return &milvuspb.StringResponse{Status: SuccessStatus()}, m.Err
 }
 
 func (m *GrpcQueryCoordClient) ShowCollections(ctx context.Context, in *querypb.ShowCollectionsRequest, opts ...grpc.CallOption) (*querypb.ShowCollectionsResponse, error) {
-	return &querypb.ShowCollectionsResponse{}, m.Err
+	return &querypb.ShowCollectionsResponse{Status: SuccessStatus()}, m.Err
 }
 
 func (m *GrpcQueryCoordClient) ShowPartitions(ctx context.Context, in *querypb.ShowPartitionsRequest, opts ...grpc.CallOption) (*querypb.ShowPartitionsResponse, error) {
-	return &querypb.ShowPartitionsResponse{}, m.Err
+	return &querypb.ShowPartitionsResponse{Status: SuccessStatus()}, m.Err
 }
 
 func (m *GrpcQueryCoordClient) LoadPartitions(ctx context.Context, in *querypb.LoadPartitionsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
@@ -75,11 +75,11 @@ func (m *GrpcQueryCoordClient) ReleaseCollection(ctx context.Context, in *queryp
 }
 
 func (m *GrpcQueryCoordClient) GetPartitionStates(ctx context.Context, in *querypb.GetPartitionStatesRequest, opts ...grpc.CallOption) (*querypb.GetPartitionStatesResponse, error) {
-	return &querypb.GetPartitionStatesResponse{}, m.Err
+	return &querypb.GetPartitionStatesResponse{Status: SuccessStatus()}, m.Err
 }
 
 func (m *GrpcQueryCoordClient) GetSegmentInfo(ctx context.Context, in *querypb.GetSegmentInfoRequest, opts ...grpc.CallOption) (*querypb.GetSegmentInfoResponse, error) {
-	return &querypb.GetSegmentInfoResponse{}, m.Err
+	return &querypb.GetSegmentInfoResponse{Status: SuccessStatus()}, m.Err
 }
 
 func (m *GrpcQueryCoordClient) LoadBalance(ctx context.Context, in *querypb.LoadBalanceRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
@@ -87,19 +87,19 @@ func (m *GrpcQueryCoordClient) LoadBalance(ctx context.Context, in *querypb.Load
 }
 
 func (m *GrpcQueryCoordClient) ShowConfigurations(ctx context.Context, in *internalpb.ShowConfigurationsRequest, opts ...grpc.CallOption) (*internalpb.ShowConfigurationsResponse, error) {
-	return &internalpb.ShowConfigurationsResponse{}, m.Err
+	return &internalpb.ShowConfigurationsResponse{Status: SuccessStatus()}, m.Err
 }
 
 func (m *GrpcQueryCoordClient) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest, opts ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error) {
-	return &milvuspb.GetMetricsResponse{}, m.Err
+	return &milvuspb.GetMetricsResponse{Status: SuccessStatus()}, m.Err
 }
 
 func (m *GrpcQueryCoordClient) GetReplicas(ctx context.Context, in *milvuspb.GetReplicasRequest, opts ...grpc.CallOption) (*milvuspb.GetReplicasResponse, error) {
-	return &milvuspb.GetReplicasResponse{}, m.Err
+	return &milvuspb.GetReplicasResponse{Status: SuccessStatus()}, m.Err
 }
 
 func (m *GrpcQueryCoordClient) GetShardLeaders(ctx context.Context, in *querypb.GetShardLeadersRequest, opts ...grpc.CallOption) (*querypb.GetShardLeadersResponse, error) {
-	return &querypb.GetShardLeadersResponse{}, m.Err
+	return &querypb.GetShardLeadersResponse{Status: SuccessStatus()}, m.Err
 }
 
 func (m *GrpcQueryCoordClient) CreateResourceGroup(ctx context.Context, req *milvuspb.CreateResourceGroupRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
@@ -119,9 +119,9 @@ func (m *GrpcQueryCoordClient) TransferReplica(ctx context.Context, req *querypb
 }
 
 func (m *GrpcQueryCoordClient) ListResourceGroups(ctx context.Context, req *milvuspb.ListResourceGroupsRequest, opts ...grpc.CallOption) (*milvuspb.ListResourceGroupsResponse, error) {
-	return &milvuspb.ListResourceGroupsResponse{}, m.Err
+	return &milvuspb.ListResourceGroupsResponse{Status: SuccessStatus()}, m.Err
 }
 
 func (m *GrpcQueryCoordClient) DescribeResourceGroup(ctx context.Context, req *querypb.DescribeResourceGroupRequest, opts ...grpc.CallOption) (*querypb.DescribeResourceGroupResponse, error) {
-	return &querypb.DescribeResourceGroupResponse{}, m.Err
+	return &querypb.DescribeResourceGroupResponse{Status: SuccessStatus()}, m.Err
 }

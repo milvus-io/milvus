@@ -338,13 +338,10 @@ func (i *IndexNode) ShowConfigurations(ctx context.Context, req *internalpb.Show
 			zap.String("req", req.Pattern),
 			zap.Error(errIndexNodeIsUnhealthy(Params.IndexNodeCfg.GetNodeID())))
 
-		return &internalpb.ShowConfigurationsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    msgIndexNodeIsUnhealthy(Params.IndexNodeCfg.GetNodeID()),
-			},
-			Configuations: nil,
-		}, nil
+		stateCode := i.stateCode.Load().(commonpb.StateCode)
+		ret := &internalpb.ShowConfigurationsResponse{Status: &commonpb.Status{}}
+		setNotServingStatus(ret.GetStatus(), stateCode)
+		return ret, nil
 	}
 
 	return getComponentConfigurations(ctx, req), nil

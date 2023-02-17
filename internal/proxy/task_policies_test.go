@@ -115,7 +115,7 @@ func TestGroupShardLeadersWithSameQueryNode(t *testing.T) {
 	nexts["c0"] = 2
 	nexts["c1"] = 3
 	_, _, err = groupShardleadersWithSameQueryNode(ctx, shard2leaders, nexts, errSet, mgr)
-	assert.Equal(t, err, fmt.Errorf("no available shard leader"))
+	assert.Contains(t, err.Error(), "no available shard leader")
 }
 
 func TestMergeRoundRobinPolicy(t *testing.T) {
