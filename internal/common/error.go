@@ -27,6 +27,7 @@ import (
 var (
 	// ErrNodeIDNotMatch stands for the error that grpc target id and node session id not match.
 	ErrNodeIDNotMatch = errors.New("target node id not match")
+	CodeErr           = NewCodeError(commonpb.ErrorCode_NotReadyServe, errors.New("empty"))
 )
 
 // WrapNodeIDNotMatchError wraps `ErrNodeIDNotMatch` with targetID and sessionID.
@@ -138,4 +139,36 @@ func StatusFromError(e error) *commonpb.Status {
 		return &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError, Reason: e.Error()}
 	}
 	return &commonpb.Status{ErrorCode: statusError.GetErrorCode(), Reason: statusError.GetReason()}
+}
+
+type codeError struct {
+	code commonpb.ErrorCode
+	err  error
+}
+
+func NewCodeError(c commonpb.ErrorCode, e error) error {
+	return &codeError{c, e}
+}
+
+func (t *codeError) Error() string {
+	return fmt.Sprintf("code: %s, error: %v", t.code.String(), t.err)
+}
+
+func (t *codeError) Is(err error) bool {
+	_, ok := err.(*codeError)
+	return ok
+}
+
+func IsRetryErrorCode(code commonpb.ErrorCode) bool {
+	return code == commonpb.ErrorCode_NotReadyServe ||
+		code == commonpb.ErrorCode_NotShardLeader ||
+		code == commonpb.ErrorCode_NodeIDNotMatch
+}
+
+func IsTriableError(err error) bool {
+	if is := errors.Is(err, CodeErr); is {
+		codeErr := err.(*codeError)
+		return IsRetryErrorCode(codeErr.code)
+	}
+	return false
 }

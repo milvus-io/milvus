@@ -122,6 +122,10 @@ func TestComponentParam(t *testing.T) {
 
 		params.Save("common.security.superUsers", "")
 		assert.Equal(t, []string{""}, Params.SuperUsers.GetAsStrings())
+
+		assert.Equal(t, Params.GrpcRetryTimes.GetAsInt(), 5)
+		params.Save("grpc.server.retryTimes", "6")
+		assert.Equal(t, Params.GrpcRetryTimes.GetAsInt(), 6)
 	})
 
 	t.Run("test rootCoordConfig", func(t *testing.T) {

@@ -80,3 +80,9 @@ func TestStatusFromError(t *testing.T) {
 	status = StatusFromError(NewCollectionNotExistError("collection not exist"))
 	assert.Equal(t, commonpb.ErrorCode_CollectionNotExists, status.GetErrorCode())
 }
+
+func TestCodeError(t *testing.T) {
+	assert.False(t, IsTriableError(nil))
+	assert.True(t, IsTriableError(NewCodeError(commonpb.ErrorCode_NotReadyServe, nil)))
+	assert.False(t, IsTriableError(NewCodeError(commonpb.ErrorCode_UnexpectedError, nil)))
+}

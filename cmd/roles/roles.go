@@ -26,16 +26,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/tracer"
-
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/cmd/components"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/management"
 	"github.com/milvus-io/milvus/internal/management/healthz"
 	"github.com/milvus-io/milvus/internal/metrics"
 	rocksmqimpl "github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
+	"github.com/milvus-io/milvus/internal/tracer"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/logutil"
@@ -44,6 +41,7 @@ import (
 	_ "github.com/milvus-io/milvus/internal/util/symbolizer" // support symbolizer and crash dump
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/prometheus/client_golang/prometheus"
+	"go.uber.org/zap"
 )
 
 // all milvus related metrics is in a separate registry

@@ -175,8 +175,7 @@ func TestAssignSegmentID(t *testing.T) {
 			SegmentIDRequests: []*datapb.SegmentIDRequest{req},
 		})
 		assert.Nil(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-		assert.Equal(t, serverNotServingErrMsg, resp.GetStatus().GetReason())
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetStatus().GetErrorCode())
 	})
 
 	t.Run("assign segment with invalid collection", func(t *testing.T) {
@@ -315,8 +314,7 @@ func TestFlush(t *testing.T) {
 		closeTestServer(t, svr)
 		resp, err := svr.Flush(context.Background(), req)
 		assert.Nil(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-		assert.Equal(t, serverNotServingErrMsg, resp.GetStatus().GetReason())
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetStatus().GetErrorCode())
 	})
 }
 
@@ -425,8 +423,7 @@ func TestGetSegmentStates(t *testing.T) {
 			SegmentIDs: []int64{0},
 		})
 		assert.Nil(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-		assert.Equal(t, serverNotServingErrMsg, resp.GetStatus().GetReason())
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetStatus().GetErrorCode())
 	})
 }
 
@@ -502,8 +499,7 @@ func TestGetInsertBinlogPaths(t *testing.T) {
 			SegmentID: 0,
 		})
 		assert.Nil(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-		assert.Equal(t, serverNotServingErrMsg, resp.GetStatus().GetReason())
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetStatus().GetErrorCode())
 	})
 }
 
@@ -527,8 +523,7 @@ func TestGetCollectionStatistics(t *testing.T) {
 			CollectionID: 0,
 		})
 		assert.Nil(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-		assert.Equal(t, serverNotServingErrMsg, resp.GetStatus().GetReason())
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetStatus().GetErrorCode())
 	})
 }
 
@@ -550,8 +545,7 @@ func TestGetPartitionStatistics(t *testing.T) {
 		closeTestServer(t, svr)
 		resp, err := svr.GetPartitionStatistics(context.Background(), &datapb.GetPartitionStatisticsRequest{})
 		assert.Nil(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-		assert.Equal(t, serverNotServingErrMsg, resp.GetStatus().GetReason())
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetStatus().GetErrorCode())
 	})
 }
 
@@ -622,8 +616,7 @@ func TestGetSegmentInfo(t *testing.T) {
 			SegmentIDs: []int64{},
 		})
 		assert.Nil(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-		assert.Equal(t, serverNotServingErrMsg, resp.GetStatus().GetReason())
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetStatus().GetErrorCode())
 	})
 	t.Run("with dropped segment", func(t *testing.T) {
 		svr := newTestServer(t, nil)
@@ -816,8 +809,7 @@ func TestGetFlushedSegments(t *testing.T) {
 			closeTestServer(t, svr)
 			resp, err := svr.GetFlushedSegments(context.Background(), &datapb.GetFlushedSegmentsRequest{})
 			assert.Nil(t, err)
-			assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-			assert.Equal(t, serverNotServingErrMsg, resp.GetStatus().GetReason())
+			assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetStatus().GetErrorCode())
 		})
 	})
 }
@@ -921,8 +913,7 @@ func TestGetSegmentsByStates(t *testing.T) {
 			closeTestServer(t, svr)
 			resp, err := svr.GetSegmentsByStates(context.Background(), &datapb.GetSegmentsByStatesRequest{})
 			assert.Nil(t, err)
-			assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-			assert.Equal(t, serverNotServingErrMsg, resp.GetStatus().GetReason())
+			assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetStatus().GetErrorCode())
 		})
 	})
 }
@@ -1127,7 +1118,7 @@ func TestServer_ShowConfigurations(t *testing.T) {
 	svr.stateCode.Store(commonpb.StateCode_Initializing)
 	resp, err := svr.ShowConfigurations(svr.ctx, req)
 	assert.Nil(t, err)
-	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+	assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetStatus().GetErrorCode())
 
 	// normal case
 	svr.stateCode.Store(stateSave)
@@ -1559,8 +1550,7 @@ func TestSaveBinlogPaths(t *testing.T) {
 		closeTestServer(t, svr)
 		resp, err := svr.SaveBinlogPaths(context.Background(), &datapb.SaveBinlogPathsRequest{})
 		assert.Nil(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
-		assert.Equal(t, serverNotServingErrMsg, resp.GetReason())
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetErrorCode())
 	})
 	/*
 		t.Run("test save dropped segment and remove channel", func(t *testing.T) {
@@ -1758,8 +1748,7 @@ func TestDropVirtualChannel(t *testing.T) {
 		closeTestServer(t, svr)
 		resp, err := svr.DropVirtualChannel(context.Background(), &datapb.DropVirtualChannelRequest{})
 		assert.Nil(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-		assert.Equal(t, serverNotServingErrMsg, resp.GetStatus().GetReason())
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetStatus().GetErrorCode())
 	})
 }
 
@@ -2988,8 +2977,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		closeTestServer(t, svr)
 		resp, err := svr.GetRecoveryInfo(context.TODO(), &datapb.GetRecoveryInfoRequest{})
 		assert.Nil(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-		assert.Equal(t, serverNotServingErrMsg, resp.GetStatus().GetReason())
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetStatus().GetErrorCode())
 	})
 }
 
@@ -3054,8 +3042,7 @@ func TestGetCompactionState(t *testing.T) {
 
 		resp, err := svr.GetCompactionState(context.Background(), &milvuspb.GetCompactionStateRequest{})
 		assert.Nil(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-		assert.Equal(t, msgDataCoordIsUnhealthy(paramtable.GetNodeID()), resp.GetStatus().GetReason())
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetStatus().GetErrorCode())
 	})
 }
 
@@ -3116,8 +3103,7 @@ func TestManualCompaction(t *testing.T) {
 			Timetravel:   1,
 		})
 		assert.Nil(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
-		assert.Equal(t, msgDataCoordIsUnhealthy(paramtable.GetNodeID()), resp.Status.Reason)
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.Status.ErrorCode)
 	})
 }
 
@@ -3167,8 +3153,7 @@ func TestGetCompactionStateWithPlans(t *testing.T) {
 			CompactionID: 1,
 		})
 		assert.Nil(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
-		assert.Equal(t, msgDataCoordIsUnhealthy(paramtable.GetNodeID()), resp.Status.Reason)
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.Status.ErrorCode)
 	})
 }
 
@@ -3526,8 +3511,7 @@ func TestDataCoordServer_SetSegmentState(t *testing.T) {
 			NewState:  commonpb.SegmentState_Flushed,
 		})
 		assert.Nil(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-		assert.Equal(t, serverNotServingErrMsg, resp.GetStatus().GetReason())
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetStatus().GetErrorCode())
 	})
 }
 
@@ -3602,8 +3586,7 @@ func TestDataCoord_Import(t *testing.T) {
 			},
 		})
 		assert.Nil(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.GetErrorCode())
-		assert.Equal(t, msgDataCoordIsUnhealthy(paramtable.GetNodeID()), resp.Status.GetReason())
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.Status.GetErrorCode())
 	})
 
 	t.Run("test update segment stat", func(t *testing.T) {
@@ -3631,7 +3614,7 @@ func TestDataCoord_Import(t *testing.T) {
 			}},
 		})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, status.GetErrorCode())
 	})
 }
 
@@ -3684,7 +3667,6 @@ func TestDataCoord_SegmentStatistics(t *testing.T) {
 			}},
 		})
 		assert.NoError(t, err)
-
 		assert.Equal(t, svr.meta.GetHealthySegment(100).currRows, int64(0))
 		assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
 		closeTestServer(t, svr)
@@ -3763,7 +3745,7 @@ func TestDataCoord_SaveImportSegment(t *testing.T) {
 
 		status, err := svr.SaveImportSegment(context.TODO(), &datapb.SaveImportSegmentRequest{})
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_DataCoordNA, status.GetErrorCode())
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, status.GetErrorCode())
 	})
 }
 

@@ -22,11 +22,6 @@ import (
 	"strconv"
 
 	"github.com/golang/protobuf/proto"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/trace"
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/common"
@@ -38,16 +33,19 @@ import (
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+	"go.uber.org/zap"
 )
 
 func (i *IndexNode) CreateJob(ctx context.Context, req *indexpb.CreateJobRequest) (*commonpb.Status, error) {
 	if !i.lifetime.Add(commonpbutil.IsHealthy) {
 		stateCode := i.lifetime.GetState()
-		log.Ctx(ctx).Warn("index node not ready", zap.String("state", stateCode.String()), zap.String("ClusterID", req.ClusterID), zap.Int64("IndexBuildID", req.BuildID))
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    "state code is not healthy",
-		}, nil
+		log.Ctx(ctx).Warn("index node not ready", zap.Int32("state", int32(stateCode)), zap.String("ClusterID", req.ClusterID), zap.Int64("IndexBuildID", req.BuildID))
+		ret := &commonpb.Status{}
+		setNotServingStatus(ret, stateCode)
+		return ret, nil
 	}
 	defer i.lifetime.Done()
 	log.Ctx(ctx).Info("IndexNode building index ...",
@@ -120,12 +118,9 @@ func (i *IndexNode) QueryJobs(ctx context.Context, req *indexpb.QueryJobsRequest
 	if !i.lifetime.Add(commonpbutil.IsHealthyOrStopping) {
 		stateCode := i.lifetime.GetState()
 		log.Ctx(ctx).Warn("index node not ready", zap.String("state", stateCode.String()), zap.String("ClusterID", req.ClusterID))
-		return &indexpb.QueryJobsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    "state code is not healthy",
-			},
-		}, nil
+		ret := &indexpb.QueryJobsResponse{Status: &commonpb.Status{}}
+		setNotServingStatus(ret.GetStatus(), stateCode)
+		return ret, nil
 	}
 	defer i.lifetime.Done()
 	infos := make(map[UniqueID]*taskInfo)
@@ -172,10 +167,9 @@ func (i *IndexNode) DropJobs(ctx context.Context, req *indexpb.DropJobsRequest) 
 	if !i.lifetime.Add(commonpbutil.IsHealthyOrStopping) {
 		stateCode := i.lifetime.GetState()
 		log.Ctx(ctx).Warn("index node not ready", zap.String("state", stateCode.String()), zap.String("ClusterID", req.ClusterID))
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    "state code is not healthy",
-		}, nil
+		ret := &commonpb.Status{}
+		setNotServingStatus(ret, stateCode)
+		return ret, nil
 	}
 	defer i.lifetime.Done()
 	keys := make([]taskKey, 0, len(req.BuildIDs))
@@ -200,12 +194,9 @@ func (i *IndexNode) GetJobStats(ctx context.Context, req *indexpb.GetJobStatsReq
 	if !i.lifetime.Add(commonpbutil.IsHealthyOrStopping) {
 		stateCode := i.lifetime.GetState()
 		log.Ctx(ctx).Warn("index node not ready", zap.String("state", stateCode.String()))
-		return &indexpb.GetJobStatsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    "state code is not healthy",
-			},
-		}, nil
+		ret := &indexpb.GetJobStatsResponse{Status: &commonpb.Status{}}
+		setNotServingStatus(ret.GetStatus(), stateCode)
+		return ret, nil
 	}
 	defer i.lifetime.Done()
 	unissued, active := i.sched.IndexBuildQueue.GetTaskNum()
@@ -243,13 +234,13 @@ func (i *IndexNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequ
 			zap.String("req", req.Request),
 			zap.Error(errIndexNodeIsUnhealthy(paramtable.GetNodeID())))
 
-		return &milvuspb.GetMetricsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    msgIndexNodeIsUnhealthy(paramtable.GetNodeID()),
-			},
+		stateCode := i.lifetime.GetState()
+		ret := &milvuspb.GetMetricsResponse{
+			Status:   &commonpb.Status{},
 			Response: "",
-		}, nil
+		}
+		setNotServingStatus(ret.GetStatus(), stateCode)
+		return ret, nil
 	}
 	defer i.lifetime.Done()
 

@@ -45,6 +45,8 @@ const (
 	DefaultSearchCacheBudgetGBRatio = 0.10
 	DefaultLoadNumThreadRatio       = 8.0
 	DefaultBeamWidthRatio           = 4.0
+
+	DefaultGrpcRetryTimes = 5
 )
 
 // ComponentParam is used to quickly and easily access all components' configurations.
@@ -207,6 +209,8 @@ type commonConfig struct {
 
 	SessionTTL        ParamItem `refreshable:"false"`
 	SessionRetryTimes ParamItem `refreshable:"false"`
+
+	GrpcRetryTimes ParamItem `refreshable:"false"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -608,6 +612,15 @@ like the old password verification when updating the credential`,
 		Export:       true,
 	}
 	p.SessionRetryTimes.Init(base.mgr)
+
+	p.GrpcRetryTimes = ParamItem{
+		Key:          "grpc.server.retryTimes",
+		Version:      "2.2.0",
+		DefaultValue: "5",
+		Doc:          "retry times when receiving a grpc return value with a failure and retryable state code",
+		Export:       true,
+	}
+	p.GrpcRetryTimes.Init(base.mgr)
 
 }
 

@@ -19,7 +19,12 @@ package datacoord
 import (
 	"fmt"
 
+	"github.com/milvus-io/milvus/internal/util/paramtable"
+
 	"github.com/cockroachdb/errors"
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus/internal/util/errorutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 // errNilKvClient stands for a nil kv client is detected when initialized
@@ -47,4 +52,10 @@ func msgSegmentNotFound(segID UniqueID) string {
 
 func msgAmbiguousIndexName() string {
 	return "there are multiple indexes, please specify the index_name"
+}
+
+func setNotServingStatus(status *commonpb.Status, stateCode commonpb.StateCode) {
+	reason := fmt.Sprintf("sate code: %s", stateCode.String())
+	status.Reason = errorutil.NotServingReason(typeutil.DataCoordRole, paramtable.GetNodeID(), reason)
+	status.ErrorCode = commonpb.ErrorCode_NotReadyServe
 }

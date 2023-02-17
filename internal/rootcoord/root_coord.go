@@ -29,7 +29,8 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/samber/lo"
-
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -67,8 +68,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 )
 
 // UniqueID is an alias of typeutil.UniqueID.
@@ -758,7 +757,9 @@ func (c *Core) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringRespon
 // CreateCollection create collection
 func (c *Core) CreateCollection(ctx context.Context, in *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
 	if code, ok := c.checkHealthy(); !ok {
-		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]), nil
+		ret := &commonpb.Status{}
+		setNotServingStatus(ret, code)
+		return ret, nil
 	}
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("CreateCollection", metrics.TotalLabel).Inc()
@@ -812,7 +813,9 @@ func (c *Core) CreateCollection(ctx context.Context, in *milvuspb.CreateCollecti
 // DropCollection drop collection
 func (c *Core) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
 	if code, ok := c.checkHealthy(); !ok {
-		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]), nil
+		ret := &commonpb.Status{}
+		setNotServingStatus(ret, code)
+		return ret, nil
 	}
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("DropCollection", metrics.TotalLabel).Inc()
@@ -862,10 +865,9 @@ func (c *Core) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRe
 // HasCollection check collection existence
 func (c *Core) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
 	if code, ok := c.checkHealthy(); !ok {
-		return &milvuspb.BoolResponse{
-			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]),
-			Value:  false,
-		}, nil
+		ret := &milvuspb.BoolResponse{Status: &commonpb.Status{}}
+		setNotServingStatus(ret.GetStatus(), code)
+		return ret, nil
 	}
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("HasCollection", metrics.TotalLabel).Inc()
@@ -947,9 +949,9 @@ func convertModelToDesc(collInfo *model.Collection, aliases []string) *milvuspb.
 
 func (c *Core) describeCollectionImpl(ctx context.Context, in *milvuspb.DescribeCollectionRequest, allowUnavailable bool) (*milvuspb.DescribeCollectionResponse, error) {
 	if code, ok := c.checkHealthy(); !ok {
-		return &milvuspb.DescribeCollectionResponse{
-			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode"+commonpb.StateCode_name[int32(code)]),
-		}, nil
+		ret := &milvuspb.DescribeCollectionResponse{Status: &commonpb.Status{}}
+		setNotServingStatus(ret.GetStatus(), code)
+		return ret, nil
 	}
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("DescribeCollection", metrics.TotalLabel).Inc()
@@ -1018,9 +1020,9 @@ func (c *Core) DescribeCollectionInternal(ctx context.Context, in *milvuspb.Desc
 // ShowCollections list all collection names
 func (c *Core) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
 	if code, ok := c.checkHealthy(); !ok {
-		return &milvuspb.ShowCollectionsResponse{
-			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]),
-		}, nil
+		ret := &milvuspb.ShowCollectionsResponse{Status: &commonpb.Status{}}
+		setNotServingStatus(ret.GetStatus(), code)
+		return ret, nil
 	}
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("ShowCollections", metrics.TotalLabel).Inc()
@@ -1064,7 +1066,9 @@ func (c *Core) ShowCollections(ctx context.Context, in *milvuspb.ShowCollections
 
 func (c *Core) AlterCollection(ctx context.Context, in *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
 	if code, ok := c.checkHealthy(); !ok {
-		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]), nil
+		ret := &commonpb.Status{}
+		setNotServingStatus(ret, code)
+		return ret, nil
 	}
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("AlterCollection", metrics.TotalLabel).Inc()
@@ -1118,7 +1122,9 @@ func (c *Core) AlterCollection(ctx context.Context, in *milvuspb.AlterCollection
 // CreatePartition create partition
 func (c *Core) CreatePartition(ctx context.Context, in *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
 	if code, ok := c.checkHealthy(); !ok {
-		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]), nil
+		ret := &commonpb.Status{}
+		setNotServingStatus(ret, code)
+		return ret, nil
 	}
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("CreatePartition", metrics.TotalLabel).Inc()
@@ -1175,7 +1181,9 @@ func (c *Core) CreatePartition(ctx context.Context, in *milvuspb.CreatePartition
 // DropPartition drop partition
 func (c *Core) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
 	if code, ok := c.checkHealthy(); !ok {
-		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]), nil
+		ret := &commonpb.Status{}
+		setNotServingStatus(ret, code)
+		return ret, nil
 	}
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("DropPartition", metrics.TotalLabel).Inc()
@@ -1231,10 +1239,9 @@ func (c *Core) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequ
 // HasPartition check partition existence
 func (c *Core) HasPartition(ctx context.Context, in *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error) {
 	if code, ok := c.checkHealthy(); !ok {
-		return &milvuspb.BoolResponse{
-			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]),
-			Value:  false,
-		}, nil
+		ret := &milvuspb.BoolResponse{Status: &commonpb.Status{}}
+		setNotServingStatus(ret.GetStatus(), code)
+		return ret, nil
 	}
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("HasPartition", metrics.TotalLabel).Inc()
@@ -1282,9 +1289,9 @@ func (c *Core) HasPartition(ctx context.Context, in *milvuspb.HasPartitionReques
 
 func (c *Core) showPartitionsImpl(ctx context.Context, in *milvuspb.ShowPartitionsRequest, allowUnavailable bool) (*milvuspb.ShowPartitionsResponse, error) {
 	if code, ok := c.checkHealthy(); !ok {
-		return &milvuspb.ShowPartitionsResponse{
-			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]),
-		}, nil
+		ret := &milvuspb.ShowPartitionsResponse{Status: &commonpb.Status{}}
+		setNotServingStatus(ret.GetStatus(), code)
+		return ret, nil
 	}
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("ShowPartitions", metrics.TotalLabel).Inc()
@@ -1347,9 +1354,9 @@ func (c *Core) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsReques
 // AllocTimestamp alloc timestamp
 func (c *Core) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error) {
 	if code, ok := c.checkHealthy(); !ok {
-		return &rootcoordpb.AllocTimestampResponse{
-			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]),
-		}, nil
+		ret := &rootcoordpb.AllocTimestampResponse{Status: &commonpb.Status{}}
+		setNotServingStatus(ret.GetStatus(), code)
+		return ret, nil
 	}
 
 	ts, err := c.tsoAllocator.GenerateTSO(in.GetCount())
@@ -1375,9 +1382,9 @@ func (c *Core) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTimestam
 // AllocID alloc ids
 func (c *Core) AllocID(ctx context.Context, in *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error) {
 	if code, ok := c.checkHealthy(); !ok {
-		return &rootcoordpb.AllocIDResponse{
-			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]),
-		}, nil
+		ret := &rootcoordpb.AllocIDResponse{Status: &commonpb.Status{}}
+		setNotServingStatus(ret.GetStatus(), code)
+		return ret, nil
 	}
 	start, _, err := c.idAllocator.Alloc(in.Count)
 	if err != nil {
@@ -1403,8 +1410,9 @@ func (c *Core) AllocID(ctx context.Context, in *rootcoordpb.AllocIDRequest) (*ro
 func (c *Core) UpdateChannelTimeTick(ctx context.Context, in *internalpb.ChannelTimeTickMsg) (*commonpb.Status, error) {
 	log := log.Ctx(ctx)
 	if code, ok := c.checkHealthy(); !ok {
-		log.Warn("failed to updateTimeTick because rootcoord is not healthy", zap.Any("state", code))
-		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]), nil
+		ret := &commonpb.Status{}
+		setNotServingStatus(ret, code)
+		return ret, nil
 	}
 	if in.Base.MsgType != commonpb.MsgType_TimeTick {
 		log.Warn("failed to updateTimeTick because base messasge is not timetick, state", zap.Any("base message type", in.Base.MsgType))
@@ -1424,7 +1432,9 @@ func (c *Core) UpdateChannelTimeTick(ctx context.Context, in *internalpb.Channel
 // InvalidateCollectionMetaCache notifies RootCoord to release the collection cache in Proxies.
 func (c *Core) InvalidateCollectionMetaCache(ctx context.Context, in *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
 	if code, ok := c.checkHealthy(); !ok {
-		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]), nil
+		ret := &commonpb.Status{}
+		setNotServingStatus(ret, code)
+		return ret, nil
 	}
 	err := c.proxyClientManager.InvalidateCollectionMetaCache(ctx, in)
 	if err != nil {
@@ -1436,10 +1446,9 @@ func (c *Core) InvalidateCollectionMetaCache(ctx context.Context, in *proxypb.In
 // ShowConfigurations returns the configurations of RootCoord matching req.Pattern
 func (c *Core) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
 	if code, ok := c.checkHealthy(); !ok {
-		return &internalpb.ShowConfigurationsResponse{
-			Status:        failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]),
-			Configuations: nil,
-		}, nil
+		ret := &internalpb.ShowConfigurationsResponse{Status: &commonpb.Status{}}
+		setNotServingStatus(ret.GetStatus(), code)
+		return ret, nil
 	}
 
 	configList := make([]*commonpb.KeyValuePair, 0)
@@ -1463,10 +1472,12 @@ func (c *Core) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfi
 // GetMetrics get metrics
 func (c *Core) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	if code, ok := c.checkHealthy(); !ok {
-		return &milvuspb.GetMetricsResponse{
-			Status:   failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]),
+		ret := &milvuspb.GetMetricsResponse{
+			Status:   &commonpb.Status{},
 			Response: "",
-		}, nil
+		}
+		setNotServingStatus(ret.GetStatus(), code)
+		return ret, nil
 	}
 
 	metricType, err := metricsinfo.ParseMetricType(in.Request)
@@ -1512,7 +1523,9 @@ func (c *Core) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) (
 // CreateAlias create collection alias
 func (c *Core) CreateAlias(ctx context.Context, in *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
 	if code, ok := c.checkHealthy(); !ok {
-		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]), nil
+		ret := &commonpb.Status{}
+		setNotServingStatus(ret, code)
+		return ret, nil
 	}
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("CreateAlias", metrics.TotalLabel).Inc()
@@ -1569,7 +1582,9 @@ func (c *Core) CreateAlias(ctx context.Context, in *milvuspb.CreateAliasRequest)
 // DropAlias drop collection alias
 func (c *Core) DropAlias(ctx context.Context, in *milvuspb.DropAliasRequest) (*commonpb.Status, error) {
 	if code, ok := c.checkHealthy(); !ok {
-		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]), nil
+		ret := &commonpb.Status{}
+		setNotServingStatus(ret, code)
+		return ret, nil
 	}
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("DropAlias", metrics.TotalLabel).Inc()
@@ -1622,7 +1637,9 @@ func (c *Core) DropAlias(ctx context.Context, in *milvuspb.DropAliasRequest) (*c
 // AlterAlias alter collection alias
 func (c *Core) AlterAlias(ctx context.Context, in *milvuspb.AlterAliasRequest) (*commonpb.Status, error) {
 	if code, ok := c.checkHealthy(); !ok {
-		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]), nil
+		ret := &commonpb.Status{}
+		setNotServingStatus(ret, code)
+		return ret, nil
 	}
 
 	metrics.RootCoordDDLReqCounter.WithLabelValues("DropAlias", metrics.TotalLabel).Inc()
@@ -1679,9 +1696,9 @@ func (c *Core) AlterAlias(ctx context.Context, in *milvuspb.AlterAliasRequest) (
 // Import imports large files (json, numpy, etc.) on MinIO/S3 storage into Milvus storage.
 func (c *Core) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
 	if code, ok := c.checkHealthy(); !ok {
-		return &milvuspb.ImportResponse{
-			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]),
-		}, nil
+		ret := &milvuspb.ImportResponse{Status: &commonpb.Status{}}
+		setNotServingStatus(ret.GetStatus(), code)
+		return ret, nil
 	}
 
 	// Get collection/partition ID from collection/partition name.
@@ -1720,9 +1737,9 @@ func (c *Core) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvus
 // GetImportState returns the current state of an import task.
 func (c *Core) GetImportState(ctx context.Context, req *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error) {
 	if code, ok := c.checkHealthy(); !ok {
-		return &milvuspb.GetImportStateResponse{
-			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]),
-		}, nil
+		ret := &milvuspb.GetImportStateResponse{Status: &commonpb.Status{}}
+		setNotServingStatus(ret.GetStatus(), code)
+		return ret, nil
 	}
 	return c.importManager.getTaskState(req.GetTask()), nil
 }
@@ -1730,9 +1747,9 @@ func (c *Core) GetImportState(ctx context.Context, req *milvuspb.GetImportStateR
 // ListImportTasks returns id array of all import tasks.
 func (c *Core) ListImportTasks(ctx context.Context, req *milvuspb.ListImportTasksRequest) (*milvuspb.ListImportTasksResponse, error) {
 	if code, ok := c.checkHealthy(); !ok {
-		return &milvuspb.ListImportTasksResponse{
-			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]),
-		}, nil
+		ret := &milvuspb.ListImportTasksResponse{Status: &commonpb.Status{}}
+		setNotServingStatus(ret.GetStatus(), code)
+		return ret, nil
 	}
 
 	colID := int64(-1)
@@ -1776,7 +1793,9 @@ func (c *Core) ReportImport(ctx context.Context, ir *rootcoordpb.ImportResult) (
 		zap.Int64("task ID", ir.GetTaskId()),
 		zap.Any("import state", ir.GetState()))
 	if code, ok := c.checkHealthy(); !ok {
-		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]), nil
+		ret := &commonpb.Status{}
+		setNotServingStatus(ret, code)
+		return ret, nil
 	}
 
 	// This method update a busy node to idle node, and send import task to idle node
@@ -1878,6 +1897,12 @@ func (c *Core) CreateCredential(ctx context.Context, credInfo *internalpb.Creden
 	log.Debug("CreateCredential", zap.String("role", typeutil.RootCoordRole),
 		zap.String("username", credInfo.Username))
 
+	if code, ok := c.checkHealthy(); !ok {
+		ret := &commonpb.Status{}
+		setNotServingStatus(ret, code)
+		return ret, nil
+	}
+
 	// insert to db
 	err := c.meta.AddCredential(credInfo)
 	if err != nil {
@@ -1910,6 +1935,12 @@ func (c *Core) GetCredential(ctx context.Context, in *rootcoordpb.GetCredentialR
 	log.Debug("GetCredential", zap.String("role", typeutil.RootCoordRole),
 		zap.String("username", in.Username))
 
+	if code, ok := c.checkHealthy(); !ok {
+		ret := &rootcoordpb.GetCredentialResponse{Status: &commonpb.Status{}}
+		setNotServingStatus(ret.GetStatus(), code)
+		return ret, nil
+	}
+
 	credInfo, err := c.meta.GetCredential(in.Username)
 	if err != nil {
 		log.Error("GetCredential query credential failed", zap.String("role", typeutil.RootCoordRole),
@@ -1938,6 +1969,13 @@ func (c *Core) UpdateCredential(ctx context.Context, credInfo *internalpb.Creden
 	tr := timerecord.NewTimeRecorder(method)
 	log.Debug("UpdateCredential", zap.String("role", typeutil.RootCoordRole),
 		zap.String("username", credInfo.Username))
+
+	if code, ok := c.checkHealthy(); !ok {
+		ret := &commonpb.Status{}
+		setNotServingStatus(ret, code)
+		return ret, nil
+	}
+
 	// update data on storage
 	err := c.meta.AlterCredential(credInfo)
 	if err != nil {
@@ -1967,6 +2005,12 @@ func (c *Core) DeleteCredential(ctx context.Context, in *milvuspb.DeleteCredenti
 	method := "DeleteCredential"
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder(method)
+
+	if code, ok := c.checkHealthy(); !ok {
+		ret := &commonpb.Status{}
+		setNotServingStatus(ret, code)
+		return ret, nil
+	}
 
 	// delete data on storage
 	err := c.meta.DeleteCredential(in.Username)
@@ -1998,6 +2042,12 @@ func (c *Core) ListCredUsers(ctx context.Context, in *milvuspb.ListCredUsersRequ
 	method := "ListCredUsers"
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder(method)
+
+	if code, ok := c.checkHealthy(); !ok {
+		ret := &milvuspb.ListCredUsersResponse{Status: &commonpb.Status{}}
+		setNotServingStatus(ret.GetStatus(), code)
+		return ret, nil
+	}
 
 	credInfo, err := c.meta.ListCredentialUsernames()
 	if err != nil {
@@ -2031,7 +2081,9 @@ func (c *Core) CreateRole(ctx context.Context, in *milvuspb.CreateRoleRequest) (
 	logger.Debug(method, zap.Any("in", in))
 
 	if code, ok := c.checkHealthy(); !ok {
-		return errorutil.UnhealthyStatus(code), errorutil.UnhealthyError()
+		ret := &commonpb.Status{}
+		setNotServingStatus(ret, code)
+		return ret, nil
 	}
 	entity := in.Entity
 
@@ -2064,7 +2116,9 @@ func (c *Core) DropRole(ctx context.Context, in *milvuspb.DropRoleRequest) (*com
 	logger.Debug(method, zap.Any("in", in))
 
 	if code, ok := c.checkHealthy(); !ok {
-		return errorutil.UnhealthyStatus(code), errorutil.UnhealthyError()
+		ret := &commonpb.Status{}
+		setNotServingStatus(ret, code)
+		return ret, nil
 	}
 	if _, err := c.meta.SelectRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: in.RoleName}, false); err != nil {
 		errMsg := "not found the role, maybe the role isn't existed or internal system error"
@@ -2132,7 +2186,9 @@ func (c *Core) OperateUserRole(ctx context.Context, in *milvuspb.OperateUserRole
 	logger.Debug(method, zap.Any("in", in))
 
 	if code, ok := c.checkHealthy(); !ok {
-		return errorutil.UnhealthyStatus(code), errorutil.UnhealthyError()
+		ret := &commonpb.Status{}
+		setNotServingStatus(ret, code)
+		return ret, nil
 	}
 
 	if _, err := c.meta.SelectRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: in.RoleName}, false); err != nil {
@@ -2194,7 +2250,9 @@ func (c *Core) SelectRole(ctx context.Context, in *milvuspb.SelectRoleRequest) (
 	logger.Debug(method, zap.Any("in", in))
 
 	if code, ok := c.checkHealthy(); !ok {
-		return &milvuspb.SelectRoleResponse{Status: errorutil.UnhealthyStatus(code)}, errorutil.UnhealthyError()
+		ret := &milvuspb.SelectRoleResponse{Status: &commonpb.Status{}}
+		setNotServingStatus(ret.GetStatus(), code)
+		return ret, nil
 	}
 
 	if in.Role != nil {
@@ -2240,7 +2298,9 @@ func (c *Core) SelectUser(ctx context.Context, in *milvuspb.SelectUserRequest) (
 	logger.Debug(method, zap.Any("in", in))
 
 	if code, ok := c.checkHealthy(); !ok {
-		return &milvuspb.SelectUserResponse{Status: errorutil.UnhealthyStatus(code)}, errorutil.UnhealthyError()
+		ret := &milvuspb.SelectUserResponse{Status: &commonpb.Status{}}
+		setNotServingStatus(ret.Status, code)
+		return ret, nil
 	}
 
 	if in.User != nil {
@@ -2348,7 +2408,9 @@ func (c *Core) OperatePrivilege(ctx context.Context, in *milvuspb.OperatePrivile
 	logger.Debug(method, zap.Any("in", in))
 
 	if code, ok := c.checkHealthy(); !ok {
-		return errorutil.UnhealthyStatus(code), errorutil.UnhealthyError()
+		ret := &commonpb.Status{}
+		setNotServingStatus(ret, code)
+		return ret, nil
 	}
 	if in.Type != milvuspb.OperatePrivilegeType_Grant && in.Type != milvuspb.OperatePrivilegeType_Revoke {
 		errMsg := fmt.Sprintf("invalid operate privilege type, current type: %s, valid value: [%s, %s]", in.Type, milvuspb.OperatePrivilegeType_Grant, milvuspb.OperatePrivilegeType_Revoke)
@@ -2431,9 +2493,9 @@ func (c *Core) SelectGrant(ctx context.Context, in *milvuspb.SelectGrantRequest)
 	logger.Debug(method, zap.Any("in", in))
 
 	if code, ok := c.checkHealthy(); !ok {
-		return &milvuspb.SelectGrantResponse{
-			Status: errorutil.UnhealthyStatus(code),
-		}, errorutil.UnhealthyError()
+		ret := &milvuspb.SelectGrantResponse{Status: &commonpb.Status{}}
+		setNotServingStatus(ret.GetStatus(), code)
+		return ret, nil
 	}
 	if in.Entity == nil {
 		errMsg := "the grant entity in the request is nil"
@@ -2487,9 +2549,9 @@ func (c *Core) ListPolicy(ctx context.Context, in *internalpb.ListPolicyRequest)
 	logger.Debug(method, zap.Any("in", in))
 
 	if code, ok := c.checkHealthy(); !ok {
-		return &internalpb.ListPolicyResponse{
-			Status: errorutil.UnhealthyStatus(code),
-		}, errorutil.UnhealthyError()
+		ret := &internalpb.ListPolicyResponse{Status: &commonpb.Status{}}
+		setNotServingStatus(ret.GetStatus(), code)
+		return ret, nil
 	}
 
 	policies, err := c.meta.ListPolicy(util.DefaultTenant)
@@ -2521,7 +2583,9 @@ func (c *Core) ListPolicy(ctx context.Context, in *internalpb.ListPolicyRequest)
 
 func (c *Core) RenameCollection(ctx context.Context, req *milvuspb.RenameCollectionRequest) (*commonpb.Status, error) {
 	if code, ok := c.checkHealthy(); !ok {
-		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]), nil
+		ret := &commonpb.Status{}
+		setNotServingStatus(ret, code)
+		return ret, nil
 	}
 
 	log := log.Ctx(ctx).With(zap.String("oldCollectionName", req.GetOldName()), zap.String("newCollectionName", req.GetNewName()))

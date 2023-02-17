@@ -171,7 +171,7 @@ func (s *DataNodeServicesSuite) TestGetCompactionState() {
 		node := &DataNode{}
 		node.UpdateStateCode(commonpb.StateCode_Abnormal)
 		resp, _ := node.GetCompactionState(s.ctx, nil)
-		s.Assert().Equal("DataNode is unhealthy", resp.GetStatus().GetReason())
+		s.Assert().Equal(commonpb.ErrorCode_NotReadyServe, resp.GetStatus().GetErrorCode())
 	})
 }
 
@@ -319,7 +319,7 @@ func (s *DataNodeServicesSuite) TestShowConfigurations() {
 
 	resp, err := node.ShowConfigurations(s.ctx, req)
 	s.Assert().NoError(err)
-	s.Assert().Equal(commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+	s.Assert().Equal(commonpb.ErrorCode_NotReadyServe, resp.GetStatus().GetErrorCode())
 
 	node.stateCode.Store(commonpb.StateCode_Healthy)
 	resp, err = node.ShowConfigurations(s.ctx, req)
@@ -546,7 +546,7 @@ func (s *DataNodeServicesSuite) TestImport() {
 		s.node.stateCode.Store(commonpb.StateCode_Abnormal)
 		stat, err = s.node.Import(context.WithValue(s.ctx, ctxKey{}, ""), req)
 		s.Assert().NoError(err)
-		s.Assert().Equal(commonpb.ErrorCode_UnexpectedError, stat.GetErrorCode())
+		s.Assert().Equal(commonpb.ErrorCode_NotReadyServe, stat.GetErrorCode())
 	})
 }
 

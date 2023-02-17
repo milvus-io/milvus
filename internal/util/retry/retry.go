@@ -15,11 +15,11 @@ import (
 	"context"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/cockroachdb/errors"
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/errutil"
+	"go.uber.org/zap"
 )
 
 // Do will run function with retry mechanism.
@@ -35,6 +35,10 @@ func Do(ctx context.Context, fn func() error, opts ...Option) error {
 	}
 
 	var el error
+
+	if c.attempts < 1 {
+		c.attempts = 1
+	}
 
 	for i := uint(0); i < c.attempts; i++ {
 		if err := fn(); err != nil {
@@ -79,4 +83,49 @@ func Unrecoverable(err error) error {
 // IsRecoverable is used to judge whether the error is wrapped by unrecoverableError.
 func IsRecoverable(err error) bool {
 	return !errors.Is(err, errUnrecoverable)
+}
+
+func DoGrpc(ctx context.Context, times uint, rpcFunc func() (any, error)) (any, error) {
+	innerCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var (
+		result     any
+		innerError error
+	)
+
+	err := Do(innerCtx, func() error {
+		result, innerError = rpcFunc()
+		if innerError != nil {
+			result = nil
+			cancel()
+			return innerError
+		}
+
+		var errorCode commonpb.ErrorCode
+		var reason string
+		switch res := result.(type) {
+		case *commonpb.Status:
+			errorCode = res.GetErrorCode()
+			reason = res.GetReason()
+		case interface{ GetStatus() *commonpb.Status }:
+			errorCode = res.GetStatus().GetErrorCode()
+			reason = res.GetStatus().GetReason()
+		default:
+			cancel()
+			return innerError
+		}
+
+		if errorCode == commonpb.ErrorCode_Success {
+			return nil
+		}
+		innerError = errors.New(reason)
+		if errorCode != commonpb.ErrorCode_NotReadyServe {
+			cancel()
+		}
+		return innerError
+	}, Attempts(times), Sleep(50*time.Millisecond), MaxSleepTime(time.Second))
+	if result != nil {
+		return result, nil
+	}
+	return result, err
 }

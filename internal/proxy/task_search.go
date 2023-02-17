@@ -8,34 +8,30 @@ import (
 	"strconv"
 
 	"github.com/cockroachdb/errors"
-
-	"github.com/milvus-io/milvus/internal/common"
-	"github.com/milvus-io/milvus/internal/parser/planparserv2"
-	"github.com/milvus-io/milvus/internal/querynode"
-
 	"github.com/golang/protobuf/proto"
-	"go.opentelemetry.io/otel"
-	"go.uber.org/zap"
-
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
+	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/planpb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/querynode"
 	"github.com/milvus-io/milvus/internal/types"
-
 	"github.com/milvus-io/milvus/internal/util/autoindex"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/distance"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-
-	"github.com/milvus-io/milvus-proto/go-api/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/schemapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/planpb"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"go.opentelemetry.io/otel"
+	"go.uber.org/zap"
 )
 
 const (
@@ -408,8 +404,8 @@ func (t *searchTask) Execute(ctx context.Context) error {
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute search %d", t.ID()))
 	defer tr.CtxElapse(ctx, "done")
 
-	executeSearch := func(withCache bool) error {
-		shard2Leaders, err := globalMetaCache.GetShards(ctx, withCache, t.collectionName)
+	executeSearch := func() error {
+		shard2Leaders, err := globalMetaCache.GetShards(ctx, true, t.collectionName)
 		if err != nil {
 			return err
 		}
@@ -422,14 +418,20 @@ func (t *searchTask) Execute(ctx context.Context) error {
 		return nil
 	}
 
-	err := executeSearch(WithCache)
-	if err != nil {
-		log.Warn("first search failed, updating shardleader caches and retry search",
-			zap.Error(err))
-		// invalidate cache first, since ctx may be canceled or timeout here
-		globalMetaCache.ClearShards(t.collectionName)
-		err = executeSearch(WithoutCache)
-	}
+	retryCtx, cancel := context.WithCancel(ctx)
+	err := retry.Do(retryCtx, func() error {
+		searchErr := executeSearch()
+		if !common.IsTriableError(searchErr) {
+			cancel()
+		}
+		if searchErr != nil {
+			log.Warn("first search failed, updating shardleader caches and retry search",
+				zap.Error(searchErr))
+			globalMetaCache.ClearShards(t.collectionName)
+		}
+		return searchErr
+	}, retry.Attempts(uint(Params.CommonCfg.GrpcRetryTimes.GetAsInt())))
+	cancel()
 	if err != nil {
 		return fmt.Errorf("fail to search on all shard leaders, err=%v", err)
 	}
@@ -519,19 +521,20 @@ func (t *searchTask) searchShard(ctx context.Context, nodeID int64, qn types.Que
 			zap.Int64("nodeID", nodeID),
 			zap.Strings("channels", channelIDs),
 			zap.Error(err))
-		return err
+		return common.NewCodeError(commonpb.ErrorCode_NotReadyServe, err)
 	}
-	if result.GetStatus().GetErrorCode() == commonpb.ErrorCode_NotShardLeader {
+	errCode := result.GetStatus().GetErrorCode()
+	if errCode == commonpb.ErrorCode_NotShardLeader {
 		log.Ctx(ctx).Warn("QueryNode is not shardLeader",
 			zap.Int64("nodeID", nodeID),
 			zap.Strings("channels", channelIDs))
-		return errInvalidShardLeaders
+		return common.NewCodeError(errCode, errInvalidShardLeaders)
 	}
-	if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+	if errCode != commonpb.ErrorCode_Success {
 		log.Ctx(ctx).Warn("QueryNode search result error",
 			zap.Int64("nodeID", nodeID),
 			zap.String("reason", result.GetStatus().GetReason()))
-		return fmt.Errorf("fail to Search, QueryNode ID=%d, reason=%s", nodeID, result.GetStatus().GetReason())
+		return common.NewCodeError(errCode, fmt.Errorf("fail to Search, QueryNode ID=%d, reason=%s", nodeID, result.GetStatus().GetReason()))
 	}
 	t.resultBuf <- result
 

@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -162,4 +164,8 @@ func (c *GRPCClientBase[T]) GetNodeID() int64 {
 
 func (c *GRPCClientBase[T]) SetNodeID(nodeID int64) {
 	c.nodeID = nodeID
+}
+
+func SuccessStatus() *commonpb.Status {
+	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
 }

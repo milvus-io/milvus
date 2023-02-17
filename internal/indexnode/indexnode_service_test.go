@@ -361,27 +361,27 @@ func TestAbnormalIndexNode(t *testing.T) {
 	ctx := context.TODO()
 	status, err := in.CreateJob(ctx, &indexpb.CreateJobRequest{})
 	assert.Nil(t, err)
-	assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_UnexpectedError)
+	assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_NotReadyServe)
 
 	qresp, err := in.QueryJobs(ctx, &indexpb.QueryJobsRequest{})
 	assert.Nil(t, err)
-	assert.Equal(t, qresp.Status.ErrorCode, commonpb.ErrorCode_UnexpectedError)
+	assert.Equal(t, qresp.Status.ErrorCode, commonpb.ErrorCode_NotReadyServe)
 
 	status, err = in.DropJobs(ctx, &indexpb.DropJobsRequest{})
 	assert.Nil(t, err)
-	assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_UnexpectedError)
+	assert.Equal(t, status.ErrorCode, commonpb.ErrorCode_NotReadyServe)
 
 	jobNumRsp, err := in.GetJobStats(ctx, &indexpb.GetJobStatsRequest{})
 	assert.Nil(t, err)
-	assert.Equal(t, jobNumRsp.Status.ErrorCode, commonpb.ErrorCode_UnexpectedError)
+	assert.Equal(t, jobNumRsp.Status.ErrorCode, commonpb.ErrorCode_NotReadyServe)
 
 	metricsResp, err := in.GetMetrics(ctx, &milvuspb.GetMetricsRequest{})
 	assert.Nil(t, err)
-	assert.Equal(t, metricsResp.Status.ErrorCode, commonpb.ErrorCode_UnexpectedError)
+	assert.Equal(t, metricsResp.Status.ErrorCode, commonpb.ErrorCode_NotReadyServe)
 
 	configurationResp, err := in.ShowConfigurations(ctx, &internalpb.ShowConfigurationsRequest{})
 	assert.Nil(t, err)
-	assert.Equal(t, configurationResp.Status.ErrorCode, commonpb.ErrorCode_UnexpectedError)
+	assert.Equal(t, configurationResp.Status.ErrorCode, commonpb.ErrorCode_NotReadyServe)
 }
 
 func TestGetMetrics(t *testing.T) {

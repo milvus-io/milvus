@@ -339,6 +339,8 @@ grpc:
     backoffMultiplier: 2
   clientMaxSendSize: 268435456
   clientMaxRecvSize: 268435456
+  server:
+    retryTimes: 5 # retry times when receiving a grpc return value with a failure and retryable state code
 
 # Configure the proxy tls enable.
 tls:

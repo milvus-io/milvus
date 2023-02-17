@@ -19,6 +19,8 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/lingdor/stackerror"
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -131,4 +133,67 @@ func TestContextCancel(t *testing.T) {
 	err := Do(ctx, testFn)
 	assert.NotNil(t, err)
 	fmt.Println(err)
+}
+
+func TestDoGrpc(t *testing.T) {
+	var (
+		result any
+		err    error
+		times  uint = 5
+		ctx         = context.Background()
+	)
+
+	_, err = DoGrpc(ctx, times, func() (any, error) {
+		return nil, errors.New("foo")
+	})
+	assert.Error(t, err)
+
+	successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
+	result, err = DoGrpc(ctx, times, func() (any, error) {
+		return successStatus, nil
+	})
+	assert.Equal(t, successStatus, result)
+	assert.NoError(t, err)
+	unExpectStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}
+	result, err = DoGrpc(ctx, times, func() (any, error) {
+		return unExpectStatus, nil
+	})
+	assert.Equal(t, unExpectStatus, result)
+	assert.NoError(t, err)
+	notReadyStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_NotReadyServe, Reason: "fo"}
+	result, err = DoGrpc(ctx, times, func() (any, error) {
+		return notReadyStatus, nil
+	})
+	assert.Equal(t, notReadyStatus, result)
+	assert.NoError(t, err)
+
+	showCollectionsResp := &milvuspb.ShowCollectionsResponse{Status: successStatus}
+	result, err = DoGrpc(ctx, times, func() (any, error) {
+		return showCollectionsResp, nil
+	})
+	assert.Equal(t, showCollectionsResp, result)
+	assert.NoError(t, err)
+
+	ctx2, cancel := context.WithCancel(ctx)
+	testDone := make(chan struct{})
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+	go func() {
+		time.Sleep(time.Second)
+		cancel()
+	}()
+	go func() {
+		result, err = DoGrpc(ctx2, 100, func() (any, error) {
+			return notReadyStatus, nil
+		})
+		assert.Equal(t, notReadyStatus, result)
+		assert.NoError(t, err)
+		testDone <- struct{}{}
+	}()
+	select {
+	case <-testDone:
+		return
+	case <-timer.C:
+		t.FailNow()
+	}
 }
