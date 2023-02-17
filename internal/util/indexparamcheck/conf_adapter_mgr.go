@@ -49,17 +49,10 @@ func (mgr *ConfAdapterMgrImpl) registerConfAdapter() {
 	mgr.adapters[IndexFaissIvfFlat] = newIVFConfAdapter()
 	mgr.adapters[IndexFaissIvfPQ] = newIVFPQConfAdapter()
 	mgr.adapters[IndexFaissIvfSQ8] = newIVFSQConfAdapter()
-	mgr.adapters[IndexFaissIvfSQ8H] = newIVFSQConfAdapter()
 	mgr.adapters[IndexFaissBinIDMap] = newBinIDMAPConfAdapter()
 	mgr.adapters[IndexFaissBinIvfFlat] = newBinIVFConfAdapter()
-	mgr.adapters[IndexNSG] = newNSGConfAdapter()
 	mgr.adapters[IndexHNSW] = newHNSWConfAdapter()
 	mgr.adapters[IndexANNOY] = newANNOYConfAdapter()
-	mgr.adapters[IndexRHNSWFlat] = newRHNSWFlatConfAdapter()
-	mgr.adapters[IndexRHNSWPQ] = newRHNSWPQConfAdapter()
-	mgr.adapters[IndexRHNSWSQ] = newRHNSWSQConfAdapter()
-	mgr.adapters[IndexNGTPANNG] = newNGTPANNGConfAdapter()
-	mgr.adapters[IndexNGTONNG] = newNGTONNGConfAdapter()
 	mgr.adapters[IndexDISKANN] = newDISKANNConfAdapter()
 }
 
