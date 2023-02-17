@@ -139,6 +139,8 @@ service RootCoord {
     rpc ListPolicy(internal.ListPolicyRequest) returns (internal.ListPolicyResponse) {}
 
     rpc CheckHealth(milvus.CheckHealthRequest) returns (milvus.CheckHealthResponse) {}
+
+    rpc RenameCollection(milvus.RenameCollectionRequest) returns (common.Status) {}
 }
 
 message AllocTimestampRequest {

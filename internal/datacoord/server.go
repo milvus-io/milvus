@@ -864,12 +864,13 @@ func (s *Server) Stop() error {
 	s.cluster.Close()
 	s.garbageCollector.close()
 	s.stopServerLoop()
-	s.session.Revoke(time.Second)
 
 	if Params.DataCoordCfg.EnableCompaction {
 		s.stopCompactionTrigger()
 		s.stopCompactionHandler()
 	}
+
+	s.session.Revoke(time.Second)
 	return nil
 }
 
