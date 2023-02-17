@@ -31,11 +31,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 
-	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/types"
@@ -75,25 +72,6 @@ type Server struct {
 	newQueryCoordClient func(string, *clientv3.Client) types.QueryCoord
 
 	closer io.Closer
-}
-
-func (s *Server) CheckHealth(ctx context.Context, request *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
-	return s.rootCoord.CheckHealth(ctx, request)
-}
-
-// CreateAlias creates an alias for specified collection.
-func (s *Server) CreateAlias(ctx context.Context, request *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
-	return s.rootCoord.CreateAlias(ctx, request)
-}
-
-// DropAlias drops the specified alias.
-func (s *Server) DropAlias(ctx context.Context, request *milvuspb.DropAliasRequest) (*commonpb.Status, error) {
-	return s.rootCoord.DropAlias(ctx, request)
-}
-
-// AlterAlias alters the alias for the specified collection.
-func (s *Server) AlterAlias(ctx context.Context, request *milvuspb.AlterAliasRequest) (*commonpb.Status, error) {
-	return s.rootCoord.AlterAlias(ctx, request)
 }
 
 // NewServer create a new RootCoord grpc server.
@@ -317,183 +295,6 @@ func (s *Server) Stop() error {
 	return nil
 }
 
-// GetComponentStates gets the component states of RootCoord.
-func (s *Server) GetComponentStates(ctx context.Context, req *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
-	return s.rootCoord.GetComponentStates(ctx)
-}
-
-// GetTimeTickChannel receiver time tick from proxy service, and put it into this channel
-func (s *Server) GetTimeTickChannel(ctx context.Context, req *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error) {
-	return s.rootCoord.GetTimeTickChannel(ctx)
-}
-
-// GetStatisticsChannel just define a channel, not used currently
-func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
-	return s.rootCoord.GetStatisticsChannel(ctx)
-}
-
-// CreateCollection creates a collection
-func (s *Server) CreateCollection(ctx context.Context, in *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
-	return s.rootCoord.CreateCollection(ctx, in)
-}
-
-// DropCollection drops a collection
-func (s *Server) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
-	return s.rootCoord.DropCollection(ctx, in)
-}
-
-// HasCollection checks whether a collection is created
-func (s *Server) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
-	return s.rootCoord.HasCollection(ctx, in)
-}
-
-// DescribeCollection gets meta info of a collection
-func (s *Server) DescribeCollection(ctx context.Context, in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
-	return s.rootCoord.DescribeCollection(ctx, in)
-}
-
-// DescribeCollectionInternal gets meta info of a collection
-func (s *Server) DescribeCollectionInternal(ctx context.Context, in *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
-	return s.rootCoord.DescribeCollectionInternal(ctx, in)
-}
-
-// ShowCollections gets all collections
-func (s *Server) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
-	return s.rootCoord.ShowCollections(ctx, in)
-}
-
-// CreatePartition creates a partition in a collection
-func (s *Server) CreatePartition(ctx context.Context, in *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
-	return s.rootCoord.CreatePartition(ctx, in)
-}
-
-// DropPartition drops the specified partition.
-func (s *Server) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
-	return s.rootCoord.DropPartition(ctx, in)
-}
-
-// HasPartition checks whether a partition is created.
-func (s *Server) HasPartition(ctx context.Context, in *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error) {
-	return s.rootCoord.HasPartition(ctx, in)
-}
-
-// ShowPartitions gets all partitions for the specified collection.
-func (s *Server) ShowPartitions(ctx context.Context, in *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
-	return s.rootCoord.ShowPartitions(ctx, in)
-}
-
-// ShowPartitionsInternal gets all partitions for the specified collection.
-func (s *Server) ShowPartitionsInternal(ctx context.Context, in *milvuspb.ShowPartitionsRequest) (*milvuspb.ShowPartitionsResponse, error) {
-	return s.rootCoord.ShowPartitionsInternal(ctx, in)
-}
-
-// AllocTimestamp global timestamp allocator
-func (s *Server) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error) {
-	return s.rootCoord.AllocTimestamp(ctx, in)
-}
-
-// AllocID allocates an ID
-func (s *Server) AllocID(ctx context.Context, in *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error) {
-	return s.rootCoord.AllocID(ctx, in)
-}
-
-// UpdateChannelTimeTick used to handle ChannelTimeTickMsg
-func (s *Server) UpdateChannelTimeTick(ctx context.Context, in *internalpb.ChannelTimeTickMsg) (*commonpb.Status, error) {
-	return s.rootCoord.UpdateChannelTimeTick(ctx, in)
-}
-
-// ShowSegments gets all segments
-func (s *Server) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsRequest) (*milvuspb.ShowSegmentsResponse, error) {
-	return s.rootCoord.ShowSegments(ctx, in)
-}
-
-// InvalidateCollectionMetaCache notifies RootCoord to release the collection cache in Proxies.
-func (s *Server) InvalidateCollectionMetaCache(ctx context.Context, in *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
-	return s.rootCoord.InvalidateCollectionMetaCache(ctx, in)
-}
-
-// ShowConfigurations gets specified configurations para of RootCoord
-func (s *Server) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
-	return s.rootCoord.ShowConfigurations(ctx, req)
-}
-
-// GetMetrics gets the metrics of RootCoord.
-func (s *Server) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	return s.rootCoord.GetMetrics(ctx, in)
-}
-
-// Import data files(json, numpy, etc.) on MinIO/S3 storage, read and parse them into sealed segments
-func (s *Server) Import(ctx context.Context, in *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
-	return s.rootCoord.Import(ctx, in)
-}
-
-// Check import task state from datanode
-func (s *Server) GetImportState(ctx context.Context, in *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error) {
-	return s.rootCoord.GetImportState(ctx, in)
-}
-
-// Returns id array of all import tasks
-func (s *Server) ListImportTasks(ctx context.Context, in *milvuspb.ListImportTasksRequest) (*milvuspb.ListImportTasksResponse, error) {
-	return s.rootCoord.ListImportTasks(ctx, in)
-}
-
-// Report impot task state to datacoord
-func (s *Server) ReportImport(ctx context.Context, in *rootcoordpb.ImportResult) (*commonpb.Status, error) {
-	return s.rootCoord.ReportImport(ctx, in)
-}
-
-func (s *Server) CreateCredential(ctx context.Context, request *internalpb.CredentialInfo) (*commonpb.Status, error) {
-	return s.rootCoord.CreateCredential(ctx, request)
-}
-
-func (s *Server) GetCredential(ctx context.Context, request *rootcoordpb.GetCredentialRequest) (*rootcoordpb.GetCredentialResponse, error) {
-	return s.rootCoord.GetCredential(ctx, request)
-}
-
-func (s *Server) UpdateCredential(ctx context.Context, request *internalpb.CredentialInfo) (*commonpb.Status, error) {
-	return s.rootCoord.UpdateCredential(ctx, request)
-}
-
-func (s *Server) DeleteCredential(ctx context.Context, request *milvuspb.DeleteCredentialRequest) (*commonpb.Status, error) {
-	return s.rootCoord.DeleteCredential(ctx, request)
-}
-
-func (s *Server) ListCredUsers(ctx context.Context, request *milvuspb.ListCredUsersRequest) (*milvuspb.ListCredUsersResponse, error) {
-	return s.rootCoord.ListCredUsers(ctx, request)
-}
-
-func (s *Server) CreateRole(ctx context.Context, request *milvuspb.CreateRoleRequest) (*commonpb.Status, error) {
-	return s.rootCoord.CreateRole(ctx, request)
-}
-
-func (s *Server) DropRole(ctx context.Context, request *milvuspb.DropRoleRequest) (*commonpb.Status, error) {
-	return s.rootCoord.DropRole(ctx, request)
-}
-
-func (s *Server) OperateUserRole(ctx context.Context, request *milvuspb.OperateUserRoleRequest) (*commonpb.Status, error) {
-	return s.rootCoord.OperateUserRole(ctx, request)
-}
-
-func (s *Server) SelectRole(ctx context.Context, request *milvuspb.SelectRoleRequest) (*milvuspb.SelectRoleResponse, error) {
-	return s.rootCoord.SelectRole(ctx, request)
-}
-
-func (s *Server) SelectUser(ctx context.Context, request *milvuspb.SelectUserRequest) (*milvuspb.SelectUserResponse, error) {
-	return s.rootCoord.SelectUser(ctx, request)
-}
-
-func (s *Server) OperatePrivilege(ctx context.Context, request *milvuspb.OperatePrivilegeRequest) (*commonpb.Status, error) {
-	return s.rootCoord.OperatePrivilege(ctx, request)
-}
-
-func (s *Server) SelectGrant(ctx context.Context, request *milvuspb.SelectGrantRequest) (*milvuspb.SelectGrantResponse, error) {
-	return s.rootCoord.SelectGrant(ctx, request)
-}
-
-func (s *Server) ListPolicy(ctx context.Context, request *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
-	return s.rootCoord.ListPolicy(ctx, request)
-}
-
-func (s *Server) AlterCollection(ctx context.Context, request *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
-	return s.rootCoord.AlterCollection(ctx, request)
+func (s *Server) CheckHealth(ctx context.Context, request *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
+	return s.rootCoord.CheckHealth(ctx, request)
 }

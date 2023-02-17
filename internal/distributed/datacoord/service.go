@@ -27,15 +27,14 @@ import (
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	ot "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
-	icc "github.com/milvus-io/milvus/internal/distributed/indexcoord/client"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 
-	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/datacoord"
+	icc "github.com/milvus-io/milvus/internal/distributed/indexcoord/client"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -265,160 +264,6 @@ func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetSt
 	return s.dataCoord.GetStatisticsChannel(ctx)
 }
 
-// GetSegmentInfo gets segment information according to segment id
-func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
-	return s.dataCoord.GetSegmentInfo(ctx, req)
-}
-
-// Flush flushes a collection's data
-func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.FlushResponse, error) {
-	return s.dataCoord.Flush(ctx, req)
-}
-
-// AssignSegmentID requests to allocate segment space for insert
-func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentIDRequest) (*datapb.AssignSegmentIDResponse, error) {
-	return s.dataCoord.AssignSegmentID(ctx, req)
-}
-
-// GetSegmentStates gets states of segments
-func (s *Server) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error) {
-	return s.dataCoord.GetSegmentStates(ctx, req)
-}
-
-// GetInsertBinlogPaths gets insert binlog paths of a segment
-func (s *Server) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsertBinlogPathsRequest) (*datapb.GetInsertBinlogPathsResponse, error) {
-	return s.dataCoord.GetInsertBinlogPaths(ctx, req)
-}
-
-// GetCollectionStatistics gets statistics of a collection
-func (s *Server) GetCollectionStatistics(ctx context.Context, req *datapb.GetCollectionStatisticsRequest) (*datapb.GetCollectionStatisticsResponse, error) {
-	return s.dataCoord.GetCollectionStatistics(ctx, req)
-}
-
-// GetPartitionStatistics gets statistics of a partition
-func (s *Server) GetPartitionStatistics(ctx context.Context, req *datapb.GetPartitionStatisticsRequest) (*datapb.GetPartitionStatisticsResponse, error) {
-	return s.dataCoord.GetPartitionStatistics(ctx, req)
-}
-
-// GetSegmentInfoChannel gets channel to which datacoord sends segment information
-func (s *Server) GetSegmentInfoChannel(ctx context.Context, req *datapb.GetSegmentInfoChannelRequest) (*milvuspb.StringResponse, error) {
-	return s.dataCoord.GetSegmentInfoChannel(ctx)
-}
-
-// SaveBinlogPaths implement DataCoordServer, saves segment, collection binlog according to datanode request
-func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) (*commonpb.Status, error) {
-	return s.dataCoord.SaveBinlogPaths(ctx, req)
-}
-
-// GetRecoveryInfo gets information for recovering channels
-func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInfoRequest) (*datapb.GetRecoveryInfoResponse, error) {
-	return s.dataCoord.GetRecoveryInfo(ctx, req)
-}
-
-// GetFlushedSegments get all flushed segments of a partition
-func (s *Server) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error) {
-	return s.dataCoord.GetFlushedSegments(ctx, req)
-}
-
-// GetSegmentsByStates get all segments of a partition by given states
-func (s *Server) GetSegmentsByStates(ctx context.Context, req *datapb.GetSegmentsByStatesRequest) (*datapb.GetSegmentsByStatesResponse, error) {
-	return s.dataCoord.GetSegmentsByStates(ctx, req)
-}
-
-// ShowConfigurations gets specified configurations para of DataCoord
-func (s *Server) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
-	return s.dataCoord.ShowConfigurations(ctx, req)
-}
-
-// GetMetrics gets metrics of data coordinator and datanodes
-func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	return s.dataCoord.GetMetrics(ctx, req)
-}
-
-// ManualCompaction triggers a compaction for a collection
-func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompactionRequest) (*milvuspb.ManualCompactionResponse, error) {
-	return s.dataCoord.ManualCompaction(ctx, req)
-}
-
-// GetCompactionState gets the state of a compaction
-func (s *Server) GetCompactionState(ctx context.Context, req *milvuspb.GetCompactionStateRequest) (*milvuspb.GetCompactionStateResponse, error) {
-	return s.dataCoord.GetCompactionState(ctx, req)
-}
-
-// GetCompactionStateWithPlans gets the state of a compaction by plan
-func (s *Server) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.GetCompactionPlansRequest) (*milvuspb.GetCompactionPlansResponse, error) {
-	return s.dataCoord.GetCompactionStateWithPlans(ctx, req)
-}
-
-// WatchChannels starts watch channels by give request
-func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsRequest) (*datapb.WatchChannelsResponse, error) {
-	return s.dataCoord.WatchChannels(ctx, req)
-}
-
-// GetFlushState gets the flush state of multiple segments
-func (s *Server) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
-	return s.dataCoord.GetFlushState(ctx, req)
-}
-
-// DropVirtualChannel drop virtual channel in datacoord
-func (s *Server) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtualChannelRequest) (*datapb.DropVirtualChannelResponse, error) {
-	return s.dataCoord.DropVirtualChannel(ctx, req)
-}
-
-// SetSegmentState sets the state of a segment.
-func (s *Server) SetSegmentState(ctx context.Context, req *datapb.SetSegmentStateRequest) (*datapb.SetSegmentStateResponse, error) {
-	return s.dataCoord.SetSegmentState(ctx, req)
-}
-
-// Import data files(json, numpy, etc.) on MinIO/S3 storage, read and parse them into sealed segments
-func (s *Server) Import(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
-	return s.dataCoord.Import(ctx, req)
-}
-
-// UpdateSegmentStatistics is the dataCoord service caller of UpdateSegmentStatistics.
-func (s *Server) UpdateSegmentStatistics(ctx context.Context, req *datapb.UpdateSegmentStatisticsRequest) (*commonpb.Status, error) {
-	return s.dataCoord.UpdateSegmentStatistics(ctx, req)
-}
-
-// UpdateChannelCheckpoint updates channel checkpoint in dataCoord.
-func (s *Server) UpdateChannelCheckpoint(ctx context.Context, req *datapb.UpdateChannelCheckpointRequest) (*commonpb.Status, error) {
-	return s.dataCoord.UpdateChannelCheckpoint(ctx, req)
-}
-
-// AcquireSegmentLock acquire the reference lock of the segments.
-func (s *Server) AcquireSegmentLock(ctx context.Context, req *datapb.AcquireSegmentLockRequest) (*commonpb.Status, error) {
-	return s.dataCoord.AcquireSegmentLock(ctx, req)
-}
-
-// ReleaseSegmentLock release the reference lock of the segments.
-func (s *Server) ReleaseSegmentLock(ctx context.Context, req *datapb.ReleaseSegmentLockRequest) (*commonpb.Status, error) {
-	return s.dataCoord.ReleaseSegmentLock(ctx, req)
-}
-
-// SaveImportSegment saves the import segment binlog paths data and then looks for the right DataNode to add the
-// segment to that DataNode.
-func (s *Server) SaveImportSegment(ctx context.Context, request *datapb.SaveImportSegmentRequest) (*commonpb.Status, error) {
-	return s.dataCoord.SaveImportSegment(ctx, request)
-}
-
-// UnsetIsImportingState is the distributed caller of UnsetIsImportingState.
-func (s *Server) UnsetIsImportingState(ctx context.Context, request *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error) {
-	return s.dataCoord.UnsetIsImportingState(ctx, request)
-}
-
-// MarkSegmentsDropped is the distributed caller of MarkSegmentsDropped.
-func (s *Server) MarkSegmentsDropped(ctx context.Context, req *datapb.MarkSegmentsDroppedRequest) (*commonpb.Status, error) {
-	return s.dataCoord.MarkSegmentsDropped(ctx, req)
-}
-
-func (s *Server) BroadcastAlteredCollection(ctx context.Context, request *datapb.AlterCollectionRequest) (*commonpb.Status, error) {
-	return s.dataCoord.BroadcastAlteredCollection(ctx, request)
-}
-
 func (s *Server) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
 	return s.dataCoord.CheckHealth(ctx, req)
-}
-
-func (s *Server) GcConfirm(ctx context.Context, request *datapb.GcConfirmRequest) (*datapb.GcConfirmResponse, error) {
-	return s.dataCoord.GcConfirm(ctx, request)
 }

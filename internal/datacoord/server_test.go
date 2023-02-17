@@ -30,12 +30,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/util/metautil"
-
-	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/util/funcutil"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -48,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/internal/common"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
@@ -56,9 +51,13 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/errorutil"
 	"github.com/milvus-io/milvus/internal/util/etcd"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/metautil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 func TestMain(m *testing.M) {
@@ -162,7 +161,7 @@ func TestAssignSegmentID(t *testing.T) {
 		})
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-		assert.Equal(t, serverNotServingErrMsg, resp.GetStatus().GetReason())
+		assert.Equal(t, errorutil.MsgUnhealthyNodeState(svr.session.ServerID, commonpb.StateCode_Abnormal), resp.GetStatus().GetReason())
 	})
 
 	t.Run("assign segment with invalid collection", func(t *testing.T) {
@@ -302,7 +301,7 @@ func TestFlush(t *testing.T) {
 		resp, err := svr.Flush(context.Background(), req)
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-		assert.Equal(t, serverNotServingErrMsg, resp.GetStatus().GetReason())
+		assert.Equal(t, errorutil.MsgUnhealthyNodeState(svr.session.ServerID, commonpb.StateCode_Abnormal), resp.GetStatus().GetReason())
 	})
 }
 
@@ -412,7 +411,7 @@ func TestGetSegmentStates(t *testing.T) {
 		})
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-		assert.Equal(t, serverNotServingErrMsg, resp.GetStatus().GetReason())
+		assert.Equal(t, errorutil.MsgUnhealthyNodeState(svr.session.ServerID, commonpb.StateCode_Abnormal), resp.GetStatus().GetReason())
 	})
 }
 
@@ -489,7 +488,7 @@ func TestGetInsertBinlogPaths(t *testing.T) {
 		})
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-		assert.Equal(t, serverNotServingErrMsg, resp.GetStatus().GetReason())
+		assert.Equal(t, errorutil.MsgUnhealthyNodeState(svr.session.ServerID, commonpb.StateCode_Abnormal), resp.GetStatus().GetReason())
 	})
 }
 
@@ -514,7 +513,7 @@ func TestGetCollectionStatistics(t *testing.T) {
 		})
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-		assert.Equal(t, serverNotServingErrMsg, resp.GetStatus().GetReason())
+		assert.Equal(t, errorutil.MsgUnhealthyNodeState(svr.session.ServerID, commonpb.StateCode_Abnormal), resp.GetStatus().GetReason())
 	})
 }
 
@@ -537,7 +536,7 @@ func TestGetPartitionStatistics(t *testing.T) {
 		resp, err := svr.GetPartitionStatistics(context.Background(), &datapb.GetPartitionStatisticsRequest{})
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-		assert.Equal(t, serverNotServingErrMsg, resp.GetStatus().GetReason())
+		assert.Equal(t, errorutil.MsgUnhealthyNodeState(svr.session.ServerID, commonpb.StateCode_Abnormal), resp.GetStatus().GetReason())
 	})
 }
 
@@ -609,7 +608,7 @@ func TestGetSegmentInfo(t *testing.T) {
 		})
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-		assert.Equal(t, serverNotServingErrMsg, resp.GetStatus().GetReason())
+		assert.Equal(t, errorutil.MsgUnhealthyNodeState(svr.session.ServerID, commonpb.StateCode_Abnormal), resp.GetStatus().GetReason())
 	})
 	t.Run("with dropped segment", func(t *testing.T) {
 		svr := newTestServer(t, nil)
@@ -803,7 +802,7 @@ func TestGetFlushedSegments(t *testing.T) {
 			resp, err := svr.GetFlushedSegments(context.Background(), &datapb.GetFlushedSegmentsRequest{})
 			assert.Nil(t, err)
 			assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-			assert.Equal(t, serverNotServingErrMsg, resp.GetStatus().GetReason())
+			assert.Equal(t, errorutil.MsgUnhealthyNodeState(svr.session.ServerID, commonpb.StateCode_Abnormal), resp.GetStatus().GetReason())
 		})
 	})
 }
@@ -908,7 +907,7 @@ func TestGetSegmentsByStates(t *testing.T) {
 			resp, err := svr.GetSegmentsByStates(context.Background(), &datapb.GetSegmentsByStatesRequest{})
 			assert.Nil(t, err)
 			assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-			assert.Equal(t, serverNotServingErrMsg, resp.GetStatus().GetReason())
+			assert.Equal(t, errorutil.MsgUnhealthyNodeState(svr.session.ServerID, commonpb.StateCode_Abnormal), resp.GetStatus().GetReason())
 		})
 	})
 }
@@ -1345,7 +1344,7 @@ func TestSaveBinlogPaths(t *testing.T) {
 		resp, err := svr.SaveBinlogPaths(context.Background(), &datapb.SaveBinlogPathsRequest{})
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
-		assert.Equal(t, serverNotServingErrMsg, resp.GetReason())
+		assert.Equal(t, errorutil.MsgUnhealthyNodeState(svr.session.ServerID, commonpb.StateCode_Abnormal), resp.GetReason())
 	})
 	/*
 		t.Run("test save dropped segment and remove channel", func(t *testing.T) {
@@ -1544,7 +1543,7 @@ func TestDropVirtualChannel(t *testing.T) {
 		resp, err := svr.DropVirtualChannel(context.Background(), &datapb.DropVirtualChannelRequest{})
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-		assert.Equal(t, serverNotServingErrMsg, resp.GetStatus().GetReason())
+		assert.Equal(t, errorutil.MsgUnhealthyNodeState(svr.session.ServerID, commonpb.StateCode_Abnormal), resp.GetStatus().GetReason())
 	})
 }
 
@@ -2719,7 +2718,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		resp, err := svr.GetRecoveryInfo(context.TODO(), &datapb.GetRecoveryInfoRequest{})
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-		assert.Equal(t, serverNotServingErrMsg, resp.GetStatus().GetReason())
+		assert.Equal(t, errorutil.MsgUnhealthyNodeState(svr.session.ServerID, commonpb.StateCode_Abnormal), resp.GetStatus().GetReason())
 	})
 }
 
@@ -2784,7 +2783,7 @@ func TestGetCompactionState(t *testing.T) {
 		resp, err := svr.GetCompactionState(context.Background(), &milvuspb.GetCompactionStateRequest{})
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-		assert.Equal(t, msgDataCoordIsUnhealthy(Params.DataCoordCfg.GetNodeID()), resp.GetStatus().GetReason())
+		assert.Equal(t, errorutil.MsgUnhealthyNodeState(Params.DataCoordCfg.GetNodeID(), commonpb.StateCode_Abnormal), resp.GetStatus().GetReason())
 	})
 }
 
@@ -2845,7 +2844,7 @@ func TestManualCompaction(t *testing.T) {
 		})
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
-		assert.Equal(t, msgDataCoordIsUnhealthy(Params.DataCoordCfg.GetNodeID()), resp.Status.Reason)
+		assert.Equal(t, errorutil.MsgUnhealthyNodeState(Params.DataCoordCfg.GetNodeID(), commonpb.StateCode_Abnormal), resp.Status.Reason)
 	})
 }
 
@@ -2896,7 +2895,7 @@ func TestGetCompactionStateWithPlans(t *testing.T) {
 		})
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
-		assert.Equal(t, msgDataCoordIsUnhealthy(Params.DataCoordCfg.GetNodeID()), resp.Status.Reason)
+		assert.Equal(t, errorutil.MsgUnhealthyNodeState(Params.DataCoordCfg.GetNodeID(), commonpb.StateCode_Abnormal), resp.Status.Reason)
 	})
 }
 
@@ -3255,7 +3254,7 @@ func TestDataCoordServer_SetSegmentState(t *testing.T) {
 		})
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
-		assert.Equal(t, serverNotServingErrMsg, resp.GetStatus().GetReason())
+		assert.Equal(t, errorutil.MsgUnhealthyNodeState(svr.session.ServerID, commonpb.StateCode_Abnormal), resp.GetStatus().GetReason())
 	})
 }
 
@@ -3330,7 +3329,7 @@ func TestDataCoord_Import(t *testing.T) {
 		})
 		assert.Nil(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.GetErrorCode())
-		assert.Equal(t, msgDataCoordIsUnhealthy(Params.DataCoordCfg.GetNodeID()), resp.Status.GetReason())
+		assert.Equal(t, errorutil.MsgUnhealthyNodeState(Params.DataCoordCfg.GetNodeID(), commonpb.StateCode_Abnormal), resp.Status.GetReason())
 	})
 
 	t.Run("test update segment stat", func(t *testing.T) {

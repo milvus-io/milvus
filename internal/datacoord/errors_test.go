@@ -19,7 +19,9 @@ package datacoord
 import (
 	"testing"
 
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/util/errorutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
 )
@@ -27,14 +29,14 @@ import (
 func TestMsgDataCoordIsUnhealthy(t *testing.T) {
 	nodeIDList := []typeutil.UniqueID{1, 2, 3}
 	for _, nodeID := range nodeIDList {
-		log.Info("TestMsgDataCoordIsUnhealthy", zap.String("msg", msgDataCoordIsUnhealthy(nodeID)))
+		log.Info("TestMsgDataCoordIsUnhealthy", zap.String("msg", errorutil.MsgUnhealthyNodeState(nodeID, commonpb.StateCode_Healthy)))
 	}
 }
 
 func TestErrDataCoordIsUnhealthy(t *testing.T) {
 	nodeIDList := []typeutil.UniqueID{1, 2, 3}
 	for _, nodeID := range nodeIDList {
-		log.Info("TestErrDataCoordIsUnhealthy", zap.Error(errDataCoordIsUnhealthy(nodeID)))
+		log.Info("TestErrDataCoordIsUnhealthy", zap.Error(errorutil.ErrUnhealthyNodeState(nodeID, commonpb.StateCode_Abnormal)))
 	}
 }
 

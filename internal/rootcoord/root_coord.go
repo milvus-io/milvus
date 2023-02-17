@@ -784,7 +784,7 @@ func (c *Core) GetStatisticsChannel(ctx context.Context) (*milvuspb.StringRespon
 // CreateCollection create collection
 func (c *Core) CreateCollection(ctx context.Context, in *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
 	if code, ok := c.checkHealthy(); !ok {
-		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]), nil
+		return failStatus(commonpb.ErrorCode_UnexpectedError, errorutil.MsgUnhealthyNodeState(c.session.ServerID, code)), nil
 	}
 
 	method := "CreateCollection"
@@ -832,7 +832,7 @@ func (c *Core) CreateCollection(ctx context.Context, in *milvuspb.CreateCollecti
 // DropCollection drop collection
 func (c *Core) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
 	if code, ok := c.checkHealthy(); !ok {
-		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]), nil
+		return failStatus(commonpb.ErrorCode_UnexpectedError, errorutil.MsgUnhealthyNodeState(c.session.ServerID, code)), nil
 	}
 
 	method := "DropCollection"
@@ -881,7 +881,7 @@ func (c *Core) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRe
 func (c *Core) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
 	if code, ok := c.checkHealthy(); !ok {
 		return &milvuspb.BoolResponse{
-			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]),
+			Status: failStatus(commonpb.ErrorCode_UnexpectedError, errorutil.MsgUnhealthyNodeState(c.session.ServerID, code)),
 			Value:  false,
 		}, nil
 	}
@@ -967,7 +967,7 @@ func convertModelToDesc(collInfo *model.Collection, aliases []string) *milvuspb.
 func (c *Core) describeCollectionImpl(ctx context.Context, in *milvuspb.DescribeCollectionRequest, allowUnavailable bool) (*milvuspb.DescribeCollectionResponse, error) {
 	if code, ok := c.checkHealthy(); !ok {
 		return &milvuspb.DescribeCollectionResponse{
-			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode"+commonpb.StateCode_name[int32(code)]),
+			Status: failStatus(commonpb.ErrorCode_UnexpectedError, errorutil.MsgUnhealthyNodeState(c.session.ServerID, code)),
 		}, nil
 	}
 
@@ -1041,7 +1041,7 @@ func (c *Core) DescribeCollectionInternal(ctx context.Context, in *milvuspb.Desc
 func (c *Core) ShowCollections(ctx context.Context, in *milvuspb.ShowCollectionsRequest) (*milvuspb.ShowCollectionsResponse, error) {
 	if code, ok := c.checkHealthy(); !ok {
 		return &milvuspb.ShowCollectionsResponse{
-			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]),
+			Status: failStatus(commonpb.ErrorCode_UnexpectedError, errorutil.MsgUnhealthyNodeState(c.session.ServerID, code)),
 		}, nil
 	}
 	method := "ShowCollections"
@@ -1086,7 +1086,7 @@ func (c *Core) ShowCollections(ctx context.Context, in *milvuspb.ShowCollections
 
 func (c *Core) AlterCollection(ctx context.Context, in *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
 	if code, ok := c.checkHealthy(); !ok {
-		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]), nil
+		return failStatus(commonpb.ErrorCode_UnexpectedError, errorutil.MsgUnhealthyNodeState(c.session.ServerID, code)), nil
 	}
 
 	method := "AlterCollection"
@@ -1136,7 +1136,7 @@ func (c *Core) AlterCollection(ctx context.Context, in *milvuspb.AlterCollection
 // CreatePartition create partition
 func (c *Core) CreatePartition(ctx context.Context, in *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
 	if code, ok := c.checkHealthy(); !ok {
-		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]), nil
+		return failStatus(commonpb.ErrorCode_UnexpectedError, errorutil.MsgUnhealthyNodeState(c.session.ServerID, code)), nil
 	}
 
 	method := "CreatePartition"
@@ -1185,7 +1185,7 @@ func (c *Core) CreatePartition(ctx context.Context, in *milvuspb.CreatePartition
 // DropPartition drop partition
 func (c *Core) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequest) (*commonpb.Status, error) {
 	if code, ok := c.checkHealthy(); !ok {
-		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]), nil
+		return failStatus(commonpb.ErrorCode_UnexpectedError, errorutil.MsgUnhealthyNodeState(c.session.ServerID, code)), nil
 	}
 
 	method := "DropPartition"
@@ -1234,7 +1234,7 @@ func (c *Core) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequ
 func (c *Core) HasPartition(ctx context.Context, in *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error) {
 	if code, ok := c.checkHealthy(); !ok {
 		return &milvuspb.BoolResponse{
-			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]),
+			Status: failStatus(commonpb.ErrorCode_UnexpectedError, errorutil.MsgUnhealthyNodeState(c.session.ServerID, code)),
 			Value:  false,
 		}, nil
 	}
@@ -1285,7 +1285,7 @@ func (c *Core) HasPartition(ctx context.Context, in *milvuspb.HasPartitionReques
 func (c *Core) showPartitionsImpl(ctx context.Context, in *milvuspb.ShowPartitionsRequest, allowUnavailable bool) (*milvuspb.ShowPartitionsResponse, error) {
 	if code, ok := c.checkHealthy(); !ok {
 		return &milvuspb.ShowPartitionsResponse{
-			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]),
+			Status: failStatus(commonpb.ErrorCode_UnexpectedError, errorutil.MsgUnhealthyNodeState(c.session.ServerID, code)),
 		}, nil
 	}
 
@@ -1355,7 +1355,7 @@ func (c *Core) ShowSegments(ctx context.Context, in *milvuspb.ShowSegmentsReques
 func (c *Core) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error) {
 	if code, ok := c.checkHealthy(); !ok {
 		return &rootcoordpb.AllocTimestampResponse{
-			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]),
+			Status: failStatus(commonpb.ErrorCode_UnexpectedError, errorutil.MsgUnhealthyNodeState(c.session.ServerID, code)),
 		}, nil
 	}
 
@@ -1384,7 +1384,7 @@ func (c *Core) AllocTimestamp(ctx context.Context, in *rootcoordpb.AllocTimestam
 func (c *Core) AllocID(ctx context.Context, in *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error) {
 	if code, ok := c.checkHealthy(); !ok {
 		return &rootcoordpb.AllocIDResponse{
-			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]),
+			Status: failStatus(commonpb.ErrorCode_UnexpectedError, errorutil.MsgUnhealthyNodeState(c.session.ServerID, code)),
 		}, nil
 	}
 	start, _, err := c.idAllocator.Alloc(in.Count)
@@ -1411,7 +1411,7 @@ func (c *Core) AllocID(ctx context.Context, in *rootcoordpb.AllocIDRequest) (*ro
 func (c *Core) UpdateChannelTimeTick(ctx context.Context, in *internalpb.ChannelTimeTickMsg) (*commonpb.Status, error) {
 	if code, ok := c.checkHealthy(); !ok {
 		log.Warn("failed to updateTimeTick because rootcoord is not healthy", zap.Any("state", code))
-		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]), nil
+		return failStatus(commonpb.ErrorCode_UnexpectedError, errorutil.MsgUnhealthyNodeState(c.session.ServerID, code)), nil
 	}
 	if in.Base.MsgType != commonpb.MsgType_TimeTick {
 		log.Warn("failed to updateTimeTick because base messasge is not timetick, state", zap.Any("base message type", in.Base.MsgType))
@@ -1430,7 +1430,7 @@ func (c *Core) UpdateChannelTimeTick(ctx context.Context, in *internalpb.Channel
 // InvalidateCollectionMetaCache notifies RootCoord to release the collection cache in Proxies.
 func (c *Core) InvalidateCollectionMetaCache(ctx context.Context, in *proxypb.InvalidateCollMetaCacheRequest) (*commonpb.Status, error) {
 	if code, ok := c.checkHealthy(); !ok {
-		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]), nil
+		return failStatus(commonpb.ErrorCode_UnexpectedError, errorutil.MsgUnhealthyNodeState(c.session.ServerID, code)), nil
 	}
 	err := c.proxyClientManager.InvalidateCollectionMetaCache(ctx, in)
 	if err != nil {
@@ -1443,7 +1443,7 @@ func (c *Core) InvalidateCollectionMetaCache(ctx context.Context, in *proxypb.In
 func (c *Core) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
 	if code, ok := c.checkHealthy(); !ok {
 		return &internalpb.ShowConfigurationsResponse{
-			Status:        failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]),
+			Status:        failStatus(commonpb.ErrorCode_UnexpectedError, errorutil.MsgUnhealthyNodeState(c.session.ServerID, code)),
 			Configuations: nil,
 		}, nil
 	}
@@ -1459,7 +1459,7 @@ func (c *Core) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) (
 
 	if code, ok := c.checkHealthy(); !ok {
 		return &milvuspb.GetMetricsResponse{
-			Status:   failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]),
+			Status:   failStatus(commonpb.ErrorCode_UnexpectedError, errorutil.MsgUnhealthyNodeState(c.session.ServerID, code)),
 			Response: "",
 		}, nil
 	}
@@ -1504,7 +1504,7 @@ func (c *Core) GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest) (
 // CreateAlias create collection alias
 func (c *Core) CreateAlias(ctx context.Context, in *milvuspb.CreateAliasRequest) (*commonpb.Status, error) {
 	if code, ok := c.checkHealthy(); !ok {
-		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]), nil
+		return failStatus(commonpb.ErrorCode_UnexpectedError, errorutil.MsgUnhealthyNodeState(c.session.ServerID, code)), nil
 	}
 
 	method := "CreateAlias"
@@ -1555,7 +1555,7 @@ func (c *Core) CreateAlias(ctx context.Context, in *milvuspb.CreateAliasRequest)
 // DropAlias drop collection alias
 func (c *Core) DropAlias(ctx context.Context, in *milvuspb.DropAliasRequest) (*commonpb.Status, error) {
 	if code, ok := c.checkHealthy(); !ok {
-		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]), nil
+		return failStatus(commonpb.ErrorCode_UnexpectedError, errorutil.MsgUnhealthyNodeState(c.session.ServerID, code)), nil
 	}
 
 	method := "DropAlias"
@@ -1604,7 +1604,7 @@ func (c *Core) DropAlias(ctx context.Context, in *milvuspb.DropAliasRequest) (*c
 // AlterAlias alter collection alias
 func (c *Core) AlterAlias(ctx context.Context, in *milvuspb.AlterAliasRequest) (*commonpb.Status, error) {
 	if code, ok := c.checkHealthy(); !ok {
-		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]), nil
+		return failStatus(commonpb.ErrorCode_UnexpectedError, errorutil.MsgUnhealthyNodeState(c.session.ServerID, code)), nil
 	}
 
 	method := "AlterAlias"
@@ -1656,7 +1656,7 @@ func (c *Core) AlterAlias(ctx context.Context, in *milvuspb.AlterAliasRequest) (
 func (c *Core) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
 	if code, ok := c.checkHealthy(); !ok {
 		return &milvuspb.ImportResponse{
-			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]),
+			Status: failStatus(commonpb.ErrorCode_UnexpectedError, errorutil.MsgUnhealthyNodeState(c.session.ServerID, code)),
 		}, nil
 	}
 
@@ -1697,7 +1697,7 @@ func (c *Core) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvus
 func (c *Core) GetImportState(ctx context.Context, req *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error) {
 	if code, ok := c.checkHealthy(); !ok {
 		return &milvuspb.GetImportStateResponse{
-			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]),
+			Status: failStatus(commonpb.ErrorCode_UnexpectedError, errorutil.MsgUnhealthyNodeState(c.session.ServerID, code)),
 		}, nil
 	}
 	return c.importManager.getTaskState(req.GetTask()), nil
@@ -1707,7 +1707,7 @@ func (c *Core) GetImportState(ctx context.Context, req *milvuspb.GetImportStateR
 func (c *Core) ListImportTasks(ctx context.Context, req *milvuspb.ListImportTasksRequest) (*milvuspb.ListImportTasksResponse, error) {
 	if code, ok := c.checkHealthy(); !ok {
 		return &milvuspb.ListImportTasksResponse{
-			Status: failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]),
+			Status: failStatus(commonpb.ErrorCode_UnexpectedError, errorutil.MsgUnhealthyNodeState(c.session.ServerID, code)),
 		}, nil
 	}
 
@@ -1752,7 +1752,7 @@ func (c *Core) ReportImport(ctx context.Context, ir *rootcoordpb.ImportResult) (
 		zap.Int64("task ID", ir.GetTaskId()),
 		zap.Any("import state", ir.GetState()))
 	if code, ok := c.checkHealthy(); !ok {
-		return failStatus(commonpb.ErrorCode_UnexpectedError, "StateCode="+commonpb.StateCode_name[int32(code)]), nil
+		return failStatus(commonpb.ErrorCode_UnexpectedError, errorutil.MsgUnhealthyNodeState(c.session.ServerID, code)), nil
 	}
 
 	// This method update a busy node to idle node, and send import task to idle node
@@ -2006,7 +2006,7 @@ func (c *Core) CreateRole(ctx context.Context, in *milvuspb.CreateRoleRequest) (
 	logger.Debug(method, zap.Any("in", in))
 
 	if code, ok := c.checkHealthy(); !ok {
-		return errorutil.UnhealthyStatus(code), errorutil.UnhealthyError()
+		return failStatus(commonpb.ErrorCode_UnexpectedError, errorutil.MsgUnhealthyNodeState(c.session.ServerID, code)), errorutil.UnhealthyError()
 	}
 	entity := in.Entity
 
@@ -2039,7 +2039,7 @@ func (c *Core) DropRole(ctx context.Context, in *milvuspb.DropRoleRequest) (*com
 	logger.Debug(method, zap.Any("in", in))
 
 	if code, ok := c.checkHealthy(); !ok {
-		return errorutil.UnhealthyStatus(code), errorutil.UnhealthyError()
+		return failStatus(commonpb.ErrorCode_UnexpectedError, errorutil.MsgUnhealthyNodeState(c.session.ServerID, code)), errorutil.UnhealthyError()
 	}
 	if _, err := c.meta.SelectRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: in.RoleName}, false); err != nil {
 		errMsg := "not found the role, maybe the role isn't existed or internal system error"
@@ -2107,7 +2107,7 @@ func (c *Core) OperateUserRole(ctx context.Context, in *milvuspb.OperateUserRole
 	logger.Debug(method, zap.Any("in", in))
 
 	if code, ok := c.checkHealthy(); !ok {
-		return errorutil.UnhealthyStatus(code), errorutil.UnhealthyError()
+		return failStatus(commonpb.ErrorCode_UnexpectedError, errorutil.MsgUnhealthyNodeState(c.session.ServerID, code)), errorutil.UnhealthyError()
 	}
 
 	if _, err := c.meta.SelectRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: in.RoleName}, false); err != nil {
@@ -2169,7 +2169,9 @@ func (c *Core) SelectRole(ctx context.Context, in *milvuspb.SelectRoleRequest) (
 	logger.Debug(method, zap.Any("in", in))
 
 	if code, ok := c.checkHealthy(); !ok {
-		return &milvuspb.SelectRoleResponse{Status: errorutil.UnhealthyStatus(code)}, errorutil.UnhealthyError()
+		return &milvuspb.SelectRoleResponse{
+			Status: failStatus(commonpb.ErrorCode_UnexpectedError, errorutil.MsgUnhealthyNodeState(c.session.ServerID, code)),
+		}, errorutil.UnhealthyError()
 	}
 
 	if in.Role != nil {
@@ -2215,7 +2217,9 @@ func (c *Core) SelectUser(ctx context.Context, in *milvuspb.SelectUserRequest) (
 	logger.Debug(method, zap.Any("in", in))
 
 	if code, ok := c.checkHealthy(); !ok {
-		return &milvuspb.SelectUserResponse{Status: errorutil.UnhealthyStatus(code)}, errorutil.UnhealthyError()
+		return &milvuspb.SelectUserResponse{
+			Status: failStatus(commonpb.ErrorCode_UnexpectedError, errorutil.MsgUnhealthyNodeState(c.session.ServerID, code)),
+		}, errorutil.UnhealthyError()
 	}
 
 	if in.User != nil {
@@ -2323,7 +2327,7 @@ func (c *Core) OperatePrivilege(ctx context.Context, in *milvuspb.OperatePrivile
 	logger.Debug(method, zap.Any("in", in))
 
 	if code, ok := c.checkHealthy(); !ok {
-		return errorutil.UnhealthyStatus(code), errorutil.UnhealthyError()
+		return failStatus(commonpb.ErrorCode_UnexpectedError, errorutil.MsgUnhealthyNodeState(c.session.ServerID, code)), errorutil.UnhealthyError()
 	}
 	if in.Type != milvuspb.OperatePrivilegeType_Grant && in.Type != milvuspb.OperatePrivilegeType_Revoke {
 		errMsg := fmt.Sprintf("invalid operate privilege type, current type: %s, valid value: [%s, %s]", in.Type, milvuspb.OperatePrivilegeType_Grant, milvuspb.OperatePrivilegeType_Revoke)
@@ -2407,7 +2411,7 @@ func (c *Core) SelectGrant(ctx context.Context, in *milvuspb.SelectGrantRequest)
 
 	if code, ok := c.checkHealthy(); !ok {
 		return &milvuspb.SelectGrantResponse{
-			Status: errorutil.UnhealthyStatus(code),
+			Status: failStatus(commonpb.ErrorCode_UnexpectedError, errorutil.MsgUnhealthyNodeState(c.session.ServerID, code)),
 		}, errorutil.UnhealthyError()
 	}
 	if in.Entity == nil {
@@ -2463,7 +2467,7 @@ func (c *Core) ListPolicy(ctx context.Context, in *internalpb.ListPolicyRequest)
 
 	if code, ok := c.checkHealthy(); !ok {
 		return &internalpb.ListPolicyResponse{
-			Status: errorutil.UnhealthyStatus(code),
+			Status: failStatus(commonpb.ErrorCode_UnexpectedError, errorutil.MsgUnhealthyNodeState(c.session.ServerID, code)),
 		}, errorutil.UnhealthyError()
 	}
 

@@ -210,7 +210,9 @@ func (sc *ShardCluster) getLogger() *log.MLogger {
 func (sc *ShardCluster) serviceable() bool {
 	sc.mutVersion.RLock()
 	defer sc.mutVersion.RUnlock()
-
+	log.Debug("wayblink serviceable",
+		zap.Bool("not nil", sc.distribution != nil),
+		zap.Bool("distribution.Serviceable()", sc.distribution.Serviceable()))
 	return sc.distribution != nil && sc.distribution.Serviceable()
 }
 

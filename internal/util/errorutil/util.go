@@ -10,6 +10,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
+const StandbyStateReason = "stateCode=standBy"
+
 // ErrorList for print error log
 type ErrorList []error
 
@@ -64,4 +66,12 @@ func UnHealthReasonWithComponentStatesOrErr(role string, nodeID typeutil.UniqueI
 	}
 
 	return true, ""
+}
+
+func MsgUnhealthyNodeState(nodeID typeutil.UniqueID, code commonpb.StateCode) string {
+	return fmt.Sprintf("nodeID=%d,StateCode=%s", nodeID, code.String())
+}
+
+func ErrUnhealthyNodeState(nodeID typeutil.UniqueID, code commonpb.StateCode) error {
+	return errors.New(MsgUnhealthyNodeState(nodeID, code))
 }

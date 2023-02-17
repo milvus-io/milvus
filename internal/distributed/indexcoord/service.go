@@ -31,7 +31,6 @@ import (
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	ot "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
-	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	dcc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
 	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
@@ -251,51 +250,6 @@ func (s *Server) GetComponentStates(ctx context.Context, req *milvuspb.GetCompon
 // GetStatisticsChannel gets the statistics channel of IndexCoord.
 func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error) {
 	return s.indexcoord.GetStatisticsChannel(ctx)
-}
-
-// CreateIndex sends the build index request to IndexCoord.
-func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error) {
-	return s.indexcoord.CreateIndex(ctx, req)
-}
-
-// GetIndexState gets the index states from IndexCoord.
-// Deprecated: use DescribeIndex instead
-func (s *Server) GetIndexState(ctx context.Context, req *indexpb.GetIndexStateRequest) (*indexpb.GetIndexStateResponse, error) {
-	return s.indexcoord.GetIndexState(ctx, req)
-}
-
-func (s *Server) GetSegmentIndexState(ctx context.Context, req *indexpb.GetSegmentIndexStateRequest) (*indexpb.GetSegmentIndexStateResponse, error) {
-	return s.indexcoord.GetSegmentIndexState(ctx, req)
-}
-
-// GetIndexInfos gets the index file paths from IndexCoord.
-func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoRequest) (*indexpb.GetIndexInfoResponse, error) {
-	return s.indexcoord.GetIndexInfos(ctx, req)
-}
-
-// DescribeIndex gets all indexes of the collection.
-func (s *Server) DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRequest) (*indexpb.DescribeIndexResponse, error) {
-	return s.indexcoord.DescribeIndex(ctx, req)
-}
-
-// DropIndex sends the drop index request to IndexCoord.
-func (s *Server) DropIndex(ctx context.Context, request *indexpb.DropIndexRequest) (*commonpb.Status, error) {
-	return s.indexcoord.DropIndex(ctx, request)
-}
-
-// Deprecated: use DescribeIndex instead
-func (s *Server) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetIndexBuildProgressRequest) (*indexpb.GetIndexBuildProgressResponse, error) {
-	return s.indexcoord.GetIndexBuildProgress(ctx, req)
-}
-
-// ShowConfigurations gets specified configurations para of IndexCoord
-func (s *Server) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
-	return s.indexcoord.ShowConfigurations(ctx, req)
-}
-
-// GetMetrics gets the metrics info of IndexCoord.
-func (s *Server) GetMetrics(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	return s.indexcoord.GetMetrics(ctx, request)
 }
 
 func (s *Server) CheckHealth(ctx context.Context, request *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {

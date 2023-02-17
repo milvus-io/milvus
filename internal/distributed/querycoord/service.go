@@ -31,7 +31,6 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 
-	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	dcc "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
 	icc "github.com/milvus-io/milvus/internal/distributed/indexcoord/client"
@@ -346,95 +345,6 @@ func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetSt
 	return s.queryCoord.GetStatisticsChannel(ctx)
 }
 
-// ShowCollections shows the collections in the QueryCoord.
-func (s *Server) ShowCollections(ctx context.Context, req *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
-	return s.queryCoord.ShowCollections(ctx, req)
-}
-
-// LoadCollection loads the data of the specified collection in QueryCoord.
-func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollectionRequest) (*commonpb.Status, error) {
-	return s.queryCoord.LoadCollection(ctx, req)
-}
-
-// ReleaseCollection releases the data of the specified collection in QueryCoord.
-func (s *Server) ReleaseCollection(ctx context.Context, req *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
-	return s.queryCoord.ReleaseCollection(ctx, req)
-}
-
-// ShowPartitions shows the partitions in the QueryCoord.
-func (s *Server) ShowPartitions(ctx context.Context, req *querypb.ShowPartitionsRequest) (*querypb.ShowPartitionsResponse, error) {
-	return s.queryCoord.ShowPartitions(ctx, req)
-}
-
-// GetPartitionStates gets the states of the specified partition.
-func (s *Server) GetPartitionStates(ctx context.Context, req *querypb.GetPartitionStatesRequest) (*querypb.GetPartitionStatesResponse, error) {
-	return s.queryCoord.GetPartitionStates(ctx, req)
-}
-
-// LoadPartitions loads the data of the specified partition in QueryCoord.
-func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitionsRequest) (*commonpb.Status, error) {
-	return s.queryCoord.LoadPartitions(ctx, req)
-}
-
-// ReleasePartitions releases the data of the specified partition in QueryCoord.
-func (s *Server) ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error) {
-	return s.queryCoord.ReleasePartitions(ctx, req)
-}
-
-// GetSegmentInfo gets the information of the specified segment from QueryCoord.
-func (s *Server) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
-	return s.queryCoord.GetSegmentInfo(ctx, req)
-}
-
-// LoadBalance migrate the sealed segments on the source node to the dst nodes
-func (s *Server) LoadBalance(ctx context.Context, req *querypb.LoadBalanceRequest) (*commonpb.Status, error) {
-	return s.queryCoord.LoadBalance(ctx, req)
-}
-
-// ShowConfigurations gets specified configurations para of QueryCoord
-func (s *Server) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
-	return s.queryCoord.ShowConfigurations(ctx, req)
-}
-
-// GetMetrics gets the metrics information of QueryCoord.
-func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
-	return s.queryCoord.GetMetrics(ctx, req)
-}
-
-// GetReplicas returns the shard leaders of a certain collection.
-func (s *Server) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasRequest) (*milvuspb.GetReplicasResponse, error) {
-	return s.queryCoord.GetReplicas(ctx, req)
-}
-
-// GetShardLeaders returns the shard leaders of a certain collection.
-func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeadersRequest) (*querypb.GetShardLeadersResponse, error) {
-	return s.queryCoord.GetShardLeaders(ctx, req)
-}
-
 func (s *Server) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
 	return s.queryCoord.CheckHealth(ctx, req)
-}
-
-func (s *Server) CreateResourceGroup(ctx context.Context, req *milvuspb.CreateResourceGroupRequest) (*commonpb.Status, error) {
-	return s.queryCoord.CreateResourceGroup(ctx, req)
-}
-
-func (s *Server) DropResourceGroup(ctx context.Context, req *milvuspb.DropResourceGroupRequest) (*commonpb.Status, error) {
-	return s.queryCoord.DropResourceGroup(ctx, req)
-}
-
-func (s *Server) TransferNode(ctx context.Context, req *milvuspb.TransferNodeRequest) (*commonpb.Status, error) {
-	return s.queryCoord.TransferNode(ctx, req)
-}
-
-func (s *Server) TransferReplica(ctx context.Context, req *querypb.TransferReplicaRequest) (*commonpb.Status, error) {
-	return s.queryCoord.TransferReplica(ctx, req)
-}
-
-func (s *Server) ListResourceGroups(ctx context.Context, req *milvuspb.ListResourceGroupsRequest) (*milvuspb.ListResourceGroupsResponse, error) {
-	return s.queryCoord.ListResourceGroups(ctx, req)
-}
-
-func (s *Server) DescribeResourceGroup(ctx context.Context, req *querypb.DescribeResourceGroupRequest) (*querypb.DescribeResourceGroupResponse, error) {
-	return s.queryCoord.DescribeResourceGroup(ctx, req)
 }

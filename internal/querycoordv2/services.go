@@ -60,11 +60,13 @@ func (s *Server) ShowCollections(ctx context.Context, req *querypb.ShowCollectio
 
 	log.Info("show collections request received", zap.Int64s("collections", req.GetCollectionIDs()))
 
-	if s.status.Load() != commonpb.StateCode_Healthy {
-		msg := "failed to show collections"
-		log.Warn(msg, zap.Error(ErrNotHealthy))
+	if code, ok := s.checkHealthy(); !ok {
+		log.Warn("failed to show collections")
 		return &querypb.ShowCollectionsResponse{
-			Status: utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg, ErrNotHealthy),
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    errorutil.MsgUnhealthyNodeState(Params.QueryCoordCfg.GetNodeID(), code),
+			},
 		}, nil
 	}
 	defer meta.GlobalFailedLoadCache.TryExpire()
@@ -127,11 +129,14 @@ func (s *Server) ShowPartitions(ctx context.Context, req *querypb.ShowPartitions
 
 	log.Info("show partitions request received", zap.Int64s("partitions", req.GetPartitionIDs()))
 
-	if s.status.Load() != commonpb.StateCode_Healthy {
+	if code, ok := s.checkHealthy(); !ok {
 		msg := "failed to show partitions"
 		log.Warn(msg, zap.Error(ErrNotHealthy))
 		return &querypb.ShowPartitionsResponse{
-			Status: utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg, ErrNotHealthy),
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    errorutil.MsgUnhealthyNodeState(Params.QueryCoordCfg.GetNodeID(), code),
+			},
 		}, nil
 	}
 	defer meta.GlobalFailedLoadCache.TryExpire()
@@ -219,11 +224,14 @@ func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 	)
 	metrics.QueryCoordLoadCount.WithLabelValues(metrics.TotalLabel).Inc()
 
-	if s.status.Load() != commonpb.StateCode_Healthy {
+	if code, ok := s.checkHealthy(); !ok {
 		msg := "failed to load collection"
 		log.Warn(msg, zap.Error(ErrNotHealthy))
 		metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
-		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg, ErrNotHealthy), nil
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    errorutil.MsgUnhealthyNodeState(Params.QueryCoordCfg.GetNodeID(), code),
+		}, nil
 	}
 
 	// If refresh mode is ON.
@@ -268,11 +276,14 @@ func (s *Server) ReleaseCollection(ctx context.Context, req *querypb.ReleaseColl
 	metrics.QueryCoordReleaseCount.WithLabelValues(metrics.TotalLabel).Inc()
 	tr := timerecord.NewTimeRecorder("release-collection")
 
-	if s.status.Load() != commonpb.StateCode_Healthy {
+	if code, ok := s.checkHealthy(); !ok {
 		msg := "failed to release collection"
 		log.Warn(msg, zap.Error(ErrNotHealthy))
 		metrics.QueryCoordReleaseCount.WithLabelValues(metrics.FailLabel).Inc()
-		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg, ErrNotHealthy), nil
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    errorutil.MsgUnhealthyNodeState(Params.QueryCoordCfg.GetNodeID(), code),
+		}, nil
 	}
 
 	releaseJob := job.NewReleaseCollectionJob(ctx,
@@ -314,7 +325,7 @@ func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitions
 		zap.Int64s("partitions", req.GetPartitionIDs()))
 	metrics.QueryCoordLoadCount.WithLabelValues(metrics.TotalLabel).Inc()
 
-	if s.status.Load() != commonpb.StateCode_Healthy {
+	if s.stateCode.Load() != commonpb.StateCode_Healthy {
 		msg := "failed to load partitions"
 		log.Warn(msg, zap.Error(ErrNotHealthy))
 		metrics.QueryCoordLoadCount.WithLabelValues(metrics.FailLabel).Inc()
@@ -375,11 +386,14 @@ func (s *Server) ReleasePartitions(ctx context.Context, req *querypb.ReleasePart
 	log.Info("release partitions", zap.Int64s("partitions", req.GetPartitionIDs()))
 	metrics.QueryCoordReleaseCount.WithLabelValues(metrics.TotalLabel).Inc()
 
-	if s.status.Load() != commonpb.StateCode_Healthy {
+	if code, ok := s.checkHealthy(); !ok {
 		msg := "failed to release partitions"
 		log.Warn(msg, zap.Error(ErrNotHealthy))
 		metrics.QueryCoordReleaseCount.WithLabelValues(metrics.FailLabel).Inc()
-		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg, ErrNotHealthy), nil
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    errorutil.MsgUnhealthyNodeState(Params.QueryCoordCfg.GetNodeID(), code),
+		}, nil
 	}
 
 	if len(req.GetPartitionIDs()) == 0 {
@@ -421,11 +435,14 @@ func (s *Server) GetPartitionStates(ctx context.Context, req *querypb.GetPartiti
 
 	log.Info("get partition states", zap.Int64s("partitions", req.GetPartitionIDs()))
 
-	if s.status.Load() != commonpb.StateCode_Healthy {
+	if code, ok := s.checkHealthy(); !ok {
 		msg := "failed to get partition states"
 		log.Warn(msg, zap.Error(ErrNotHealthy))
 		return &querypb.GetPartitionStatesResponse{
-			Status: utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg, ErrNotHealthy),
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    errorutil.MsgUnhealthyNodeState(Params.QueryCoordCfg.GetNodeID(), code),
+			},
 		}, nil
 	}
 
@@ -490,11 +507,14 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfo
 
 	log.Info("get segment info", zap.Int64s("segments", req.GetSegmentIDs()))
 
-	if s.status.Load() != commonpb.StateCode_Healthy {
+	if code, ok := s.checkHealthy(); !ok {
 		msg := "failed to get segment info"
 		log.Warn(msg, zap.Error(ErrNotHealthy))
 		return &querypb.GetSegmentInfoResponse{
-			Status: utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg, ErrNotHealthy),
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    errorutil.MsgUnhealthyNodeState(Params.QueryCoordCfg.GetNodeID(), code),
+			},
 		}, nil
 	}
 
@@ -534,7 +554,7 @@ func (s *Server) refreshCollection(ctx context.Context, collID int64) (*commonpb
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", collID),
 	)
-	if s.status.Load() != commonpb.StateCode_Healthy {
+	if s.stateCode.Load() != commonpb.StateCode_Healthy {
 		msg := "failed to refresh collection"
 		log.Warn(msg, zap.Error(ErrNotHealthy))
 		metrics.QueryCoordReleaseCount.WithLabelValues(metrics.FailLabel).Inc()
@@ -588,7 +608,7 @@ func (s *Server) refreshPartitions(ctx context.Context, collID int64, partIDs []
 		zap.Int64("collectionID", collID),
 		zap.Int64s("partitionIDs", partIDs),
 	)
-	if s.status.Load() != commonpb.StateCode_Healthy {
+	if s.stateCode.Load() != commonpb.StateCode_Healthy {
 		msg := "failed to refresh partitions"
 		log.Warn(msg, zap.Error(ErrNotHealthy))
 		metrics.QueryCoordReleaseCount.WithLabelValues(metrics.FailLabel).Inc()
@@ -655,10 +675,13 @@ func (s *Server) LoadBalance(ctx context.Context, req *querypb.LoadBalanceReques
 		zap.Int64s("dest", req.GetDstNodeIDs()),
 		zap.Int64s("segments", req.GetSealedSegmentIDs()))
 
-	if s.status.Load() != commonpb.StateCode_Healthy {
+	if code, ok := s.checkHealthy(); !ok {
 		msg := "failed to load balance"
 		log.Warn(msg, zap.Error(ErrNotHealthy))
-		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg, ErrNotHealthy), nil
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    errorutil.MsgUnhealthyNodeState(Params.QueryCoordCfg.GetNodeID(), code),
+		}, nil
 	}
 
 	// Verify request
@@ -711,11 +734,14 @@ func (s *Server) ShowConfigurations(ctx context.Context, req *internalpb.ShowCon
 
 	log.Info("show configurations request received", zap.String("pattern", req.GetPattern()))
 
-	if s.status.Load() != commonpb.StateCode_Healthy {
+	if code, ok := s.checkHealthy(); !ok {
 		msg := "failed to show configurations"
 		log.Warn(msg, zap.Error(ErrNotHealthy))
 		return &internalpb.ShowConfigurationsResponse{
-			Status: utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg, ErrNotHealthy),
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    errorutil.MsgUnhealthyNodeState(Params.QueryCoordCfg.GetNodeID(), code),
+			},
 		}, nil
 	}
 
@@ -746,11 +772,14 @@ func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 
 	log.RatedDebug(60, "get metrics request received")
 
-	if s.status.Load() != commonpb.StateCode_Healthy {
+	if code, ok := s.checkHealthy(); !ok {
 		msg := "failed to get metrics"
 		log.Warn(msg, zap.Error(ErrNotHealthy))
 		return &milvuspb.GetMetricsResponse{
-			Status: utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg, ErrNotHealthy),
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    errorutil.MsgUnhealthyNodeState(Params.QueryCoordCfg.GetNodeID(), code),
+			},
 		}, nil
 	}
 
@@ -795,11 +824,14 @@ func (s *Server) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasReque
 
 	log.Info("get replicas request received", zap.Bool("with-shard-nodes", req.GetWithShardNodes()))
 
-	if s.status.Load() != commonpb.StateCode_Healthy {
+	if code, ok := s.checkHealthy(); !ok {
 		msg := "failed to get replicas"
 		log.Warn(msg, zap.Error(ErrNotHealthy))
 		return &milvuspb.GetReplicasResponse{
-			Status: utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg, ErrNotHealthy),
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    errorutil.MsgUnhealthyNodeState(Params.QueryCoordCfg.GetNodeID(), code),
+			},
 		}, nil
 	}
 
@@ -837,11 +869,14 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 	)
 
 	log.Info("get shard leaders request received")
-	if s.status.Load() != commonpb.StateCode_Healthy {
+	if code, ok := s.checkHealthy(); !ok {
 		msg := "failed to get shard leaders"
 		log.Warn(msg, zap.Error(ErrNotHealthy))
 		return &querypb.GetShardLeadersResponse{
-			Status: utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg, ErrNotHealthy),
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    errorutil.MsgUnhealthyNodeState(Params.QueryCoordCfg.GetNodeID(), code),
+			},
 		}, nil
 	}
 
@@ -943,7 +978,7 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 }
 
 func (s *Server) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
-	if s.status.Load() != commonpb.StateCode_Healthy {
+	if _, ok := s.checkHealthy(); !ok {
 		reason := errorutil.UnHealthReason("querycoord", s.session.ServerID, "querycoord is unhealthy")
 		return &milvuspb.CheckHealthResponse{IsHealthy: false, Reasons: []string{reason}}, nil
 	}
@@ -980,9 +1015,12 @@ func (s *Server) CreateResourceGroup(ctx context.Context, req *milvuspb.CreateRe
 	)
 
 	log.Info("create resource group request received")
-	if s.status.Load() != commonpb.StateCode_Healthy {
+	if code, ok := s.checkHealthy(); !ok {
 		log.Warn(ErrCreateResourceGroupFailed.Error(), zap.Error(ErrNotHealthy))
-		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, ErrCreateResourceGroupFailed.Error(), ErrNotHealthy), nil
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    errorutil.MsgUnhealthyNodeState(Params.QueryCoordCfg.GetNodeID(), code),
+		}, nil
 	}
 
 	err := s.meta.ResourceManager.AddResourceGroup(req.GetResourceGroup())
@@ -999,9 +1037,12 @@ func (s *Server) DropResourceGroup(ctx context.Context, req *milvuspb.DropResour
 	)
 
 	log.Info("drop resource group request received")
-	if s.status.Load() != commonpb.StateCode_Healthy {
+	if code, ok := s.checkHealthy(); !ok {
 		log.Warn(ErrDropResourceGroupFailed.Error(), zap.Error(ErrNotHealthy))
-		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, ErrDropResourceGroupFailed.Error(), ErrNotHealthy), nil
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    errorutil.MsgUnhealthyNodeState(Params.QueryCoordCfg.GetNodeID(), code),
+		}, nil
 	}
 
 	err := s.meta.ResourceManager.RemoveResourceGroup(req.GetResourceGroup())
@@ -1019,9 +1060,12 @@ func (s *Server) TransferNode(ctx context.Context, req *milvuspb.TransferNodeReq
 	)
 
 	log.Info("transfer node between resource group request received")
-	if s.status.Load() != commonpb.StateCode_Healthy {
+	if code, ok := s.checkHealthy(); !ok {
 		log.Warn(ErrTransferNodeFailed.Error(), zap.Error(ErrNotHealthy))
-		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, ErrTransferNodeFailed.Error(), ErrNotHealthy), nil
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    errorutil.MsgUnhealthyNodeState(Params.QueryCoordCfg.GetNodeID(), code),
+		}, nil
 	}
 
 	if ok := s.meta.ResourceManager.ContainResourceGroup(req.GetSourceResourceGroup()); !ok {
@@ -1051,9 +1095,12 @@ func (s *Server) TransferReplica(ctx context.Context, req *querypb.TransferRepli
 	)
 
 	log.Info("transfer replica request received")
-	if s.status.Load() != commonpb.StateCode_Healthy {
+	if code, ok := s.checkHealthy(); !ok {
 		log.Warn(ErrTransferReplicaFailed.Error(), zap.Error(ErrNotHealthy))
-		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, ErrTransferReplicaFailed.Error(), ErrNotHealthy), nil
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    errorutil.MsgUnhealthyNodeState(Params.QueryCoordCfg.GetNodeID(), code),
+		}, nil
 	}
 
 	if ok := s.meta.ResourceManager.ContainResourceGroup(req.GetSourceResourceGroup()); !ok {
@@ -1105,9 +1152,12 @@ func (s *Server) ListResourceGroups(ctx context.Context, req *milvuspb.ListResou
 	resp := &milvuspb.ListResourceGroupsResponse{
 		Status: successStatus,
 	}
-	if s.status.Load() != commonpb.StateCode_Healthy {
+	if code, ok := s.checkHealthy(); !ok {
 		log.Warn(ErrListResourceGroupsFailed.Error(), zap.Error(ErrNotHealthy))
-		resp.Status = utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, ErrListResourceGroupsFailed.Error(), ErrNotHealthy)
+		resp.Status = &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    errorutil.MsgUnhealthyNodeState(Params.QueryCoordCfg.GetNodeID(), code),
+		}
 		return resp, nil
 	}
 
@@ -1124,9 +1174,12 @@ func (s *Server) DescribeResourceGroup(ctx context.Context, req *querypb.Describ
 	resp := &querypb.DescribeResourceGroupResponse{
 		Status: successStatus,
 	}
-	if s.status.Load() != commonpb.StateCode_Healthy {
+	if code, ok := s.checkHealthy(); !ok {
 		log.Warn(ErrDescribeResourceGroupFailed.Error(), zap.Error(ErrNotHealthy))
-		resp.Status = utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, ErrDescribeResourceGroupFailed.Error(), ErrNotHealthy)
+		resp.Status = &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    errorutil.MsgUnhealthyNodeState(Params.QueryCoordCfg.GetNodeID(), code),
+		}
 		return resp, nil
 	}
 

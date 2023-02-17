@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/util/errorutil"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -224,7 +225,7 @@ func (suite *ServiceSuite) TestShowCollections() {
 	server.UpdateStateCode(commonpb.StateCode_Initializing)
 	resp, err = server.ShowCollections(ctx, req)
 	suite.NoError(err)
-	suite.Contains(resp.Status.Reason, ErrNotHealthy.Error())
+	suite.Contains(resp.Status.Reason, errorutil.MsgUnhealthyNodeState(server.session.ServerID, commonpb.StateCode_Initializing))
 }
 
 func (suite *ServiceSuite) TestShowPartitions() {
@@ -295,7 +296,7 @@ func (suite *ServiceSuite) TestShowPartitions() {
 	server.UpdateStateCode(commonpb.StateCode_Initializing)
 	resp, err := server.ShowPartitions(ctx, req)
 	suite.NoError(err)
-	suite.Contains(resp.Status.Reason, ErrNotHealthy.Error())
+	suite.Contains(resp.Status.Reason, errorutil.MsgUnhealthyNodeState(server.session.ServerID, commonpb.StateCode_Initializing))
 }
 
 func (suite *ServiceSuite) TestLoadCollection() {
@@ -333,7 +334,7 @@ func (suite *ServiceSuite) TestLoadCollection() {
 	}
 	resp, err := server.LoadCollection(ctx, req)
 	suite.NoError(err)
-	suite.Contains(resp.Reason, ErrNotHealthy.Error())
+	suite.Contains(resp.Reason, errorutil.MsgUnhealthyNodeState(server.session.ServerID, commonpb.StateCode_Initializing))
 }
 
 func (suite *ServiceSuite) TestResourceGroup() {
@@ -427,7 +428,7 @@ func (suite *ServiceSuite) TestResourceGroupFailed() {
 	suite.Equal(commonpb.ErrorCode_IllegalArgument, resp.Status.ErrorCode)
 
 	// server unhealthy
-	server.status.Store(commonpb.StateCode_Abnormal)
+	server.stateCode.Store(commonpb.StateCode_Abnormal)
 
 	createRG := &milvuspb.CreateResourceGroupRequest{
 		ResourceGroup: "rg1",
@@ -499,7 +500,7 @@ func (suite *ServiceSuite) TestTransferNode() {
 	suite.Equal(commonpb.ErrorCode_IllegalArgument, resp.ErrorCode)
 
 	// server unhealthy
-	server.status.Store(commonpb.StateCode_Abnormal)
+	server.stateCode.Store(commonpb.StateCode_Abnormal)
 	resp, err = server.TransferNode(ctx, &milvuspb.TransferNodeRequest{
 		SourceResourceGroup: meta.DefaultResourceGroupName,
 		TargetResourceGroup: "rg1",
@@ -578,7 +579,7 @@ func (suite *ServiceSuite) TestTransferReplica() {
 	suite.Len(suite.server.meta.GetByResourceGroup("rg3"), 2)
 
 	// server unhealthy
-	server.status.Store(commonpb.StateCode_Abnormal)
+	server.stateCode.Store(commonpb.StateCode_Abnormal)
 	resp, err = suite.server.TransferReplica(ctx, &querypb.TransferReplicaRequest{
 		SourceResourceGroup: meta.DefaultResourceGroupName,
 		TargetResourceGroup: "rg3",
@@ -673,7 +674,7 @@ func (suite *ServiceSuite) TestLoadPartition() {
 	}
 	resp, err := server.LoadPartitions(ctx, req)
 	suite.NoError(err)
-	suite.Contains(resp.Reason, ErrNotHealthy.Error())
+	suite.Contains(resp.Reason, errorutil.MsgUnhealthyNodeState(server.session.ServerID, commonpb.StateCode_Initializing))
 }
 
 func (suite *ServiceSuite) TestLoadPartitionFailed() {
@@ -758,7 +759,7 @@ func (suite *ServiceSuite) TestReleaseCollection() {
 	}
 	resp, err := server.ReleaseCollection(ctx, req)
 	suite.NoError(err)
-	suite.Contains(resp.Reason, ErrNotHealthy.Error())
+	suite.Contains(resp.Reason, errorutil.MsgUnhealthyNodeState(server.session.ServerID, commonpb.StateCode_Initializing))
 }
 
 func (suite *ServiceSuite) TestReleasePartition() {
@@ -806,7 +807,7 @@ func (suite *ServiceSuite) TestReleasePartition() {
 	}
 	resp, err := server.ReleasePartitions(ctx, req)
 	suite.NoError(err)
-	suite.Contains(resp.Reason, ErrNotHealthy.Error())
+	suite.Contains(resp.Reason, errorutil.MsgUnhealthyNodeState(server.session.ServerID, commonpb.StateCode_Initializing))
 }
 
 func (suite *ServiceSuite) TestRefreshCollection() {
@@ -872,7 +873,7 @@ func (suite *ServiceSuite) TestRefreshCollection() {
 	server.UpdateStateCode(commonpb.StateCode_Initializing)
 	resp, err := server.refreshCollection(ctx, suite.collections[0])
 	suite.NoError(err)
-	suite.Contains(resp.Reason, ErrNotHealthy.Error())
+	suite.Contains(resp.Reason, errorutil.MsgUnhealthyNodeState(server.session.ServerID, commonpb.StateCode_Initializing))
 }
 
 func (suite *ServiceSuite) TestRefreshPartitions() {
@@ -948,7 +949,7 @@ func (suite *ServiceSuite) TestRefreshPartitions() {
 	server.UpdateStateCode(commonpb.StateCode_Initializing)
 	resp, err := server.refreshPartitions(ctx, suite.collections[0], []int64{})
 	suite.NoError(err)
-	suite.Contains(resp.Reason, ErrNotHealthy.Error())
+	suite.Contains(resp.Reason, errorutil.MsgUnhealthyNodeState(server.session.ServerID, commonpb.StateCode_Initializing))
 }
 
 func (suite *ServiceSuite) TestGetPartitionStates() {
@@ -975,7 +976,7 @@ func (suite *ServiceSuite) TestGetPartitionStates() {
 	}
 	resp, err := server.GetPartitionStates(ctx, req)
 	suite.NoError(err)
-	suite.Contains(resp.Status.Reason, ErrNotHealthy.Error())
+	suite.Contains(resp.Status.Reason, errorutil.MsgUnhealthyNodeState(server.session.ServerID, commonpb.StateCode_Initializing))
 }
 
 func (suite *ServiceSuite) TestGetSegmentInfo() {
@@ -1014,7 +1015,7 @@ func (suite *ServiceSuite) TestGetSegmentInfo() {
 	}
 	resp, err := server.GetSegmentInfo(ctx, req)
 	suite.NoError(err)
-	suite.Contains(resp.Status.Reason, ErrNotHealthy.Error())
+	suite.Contains(resp.Status.Reason, errorutil.MsgUnhealthyNodeState(server.session.ServerID, commonpb.StateCode_Initializing))
 }
 
 func (suite *ServiceSuite) TestLoadBalance() {
@@ -1061,7 +1062,7 @@ func (suite *ServiceSuite) TestLoadBalance() {
 	}
 	resp, err := server.LoadBalance(ctx, req)
 	suite.NoError(err)
-	suite.Contains(resp.Reason, ErrNotHealthy.Error())
+	suite.Contains(resp.Reason, errorutil.MsgUnhealthyNodeState(server.session.ServerID, commonpb.StateCode_Initializing))
 }
 
 func (suite *ServiceSuite) TestLoadBalanceWithEmptySegmentList() {
@@ -1261,7 +1262,7 @@ func (suite *ServiceSuite) TestShowConfigurations() {
 	}
 	resp, err = server.ShowConfigurations(ctx, req)
 	suite.NoError(err)
-	suite.Contains(resp.Status.Reason, ErrNotHealthy.Error())
+	suite.Contains(resp.Status.Reason, errorutil.MsgUnhealthyNodeState(server.session.ServerID, commonpb.StateCode_Initializing))
 }
 
 func (suite *ServiceSuite) TestGetMetrics() {
@@ -1293,7 +1294,7 @@ func (suite *ServiceSuite) TestGetMetrics() {
 		Request: string(req),
 	})
 	suite.NoError(err)
-	suite.Contains(resp.Status.Reason, ErrNotHealthy.Error())
+	suite.Contains(resp.Status.Reason, errorutil.MsgUnhealthyNodeState(server.session.ServerID, commonpb.StateCode_Initializing))
 }
 
 func (suite *ServiceSuite) TestGetReplicas() {
@@ -1336,7 +1337,7 @@ func (suite *ServiceSuite) TestGetReplicas() {
 	}
 	resp, err := server.GetReplicas(ctx, req)
 	suite.NoError(err)
-	suite.Contains(resp.Status.Reason, ErrNotHealthy.Error())
+	suite.Contains(resp.Status.Reason, errorutil.MsgUnhealthyNodeState(server.session.ServerID, commonpb.StateCode_Initializing))
 }
 
 func (suite *ServiceSuite) TestCheckHealth() {
@@ -1408,7 +1409,7 @@ func (suite *ServiceSuite) TestGetShardLeaders() {
 	}
 	resp, err := server.GetShardLeaders(ctx, req)
 	suite.NoError(err)
-	suite.Contains(resp.Status.Reason, ErrNotHealthy.Error())
+	suite.Contains(resp.Status.Reason, errorutil.MsgUnhealthyNodeState(server.session.ServerID, commonpb.StateCode_Initializing))
 }
 
 func (suite *ServiceSuite) TestGetShardLeadersFailed() {

@@ -66,7 +66,7 @@ type Server struct {
 	ctx                 context.Context
 	cancel              context.CancelFunc
 	wg                  sync.WaitGroup
-	status              atomic.Value
+	stateCode           atomic.Value
 	etcdCli             *clientv3.Client
 	session             *sessionutil.Session
 	kv                  kv.MetaKv
@@ -276,7 +276,7 @@ func (s *Server) initQueryCoord() error {
 	// Init observers
 	s.initObserver()
 
-	// Init load status cache
+	// Init load stateCode cache
 	meta.GlobalFailedLoadCache = meta.NewFailedLoadCache()
 
 	log.Info("QueryCoord init success")
@@ -467,9 +467,9 @@ func (s *Server) Stop() error {
 	return nil
 }
 
-// UpdateStateCode updates the status of the coord, including healthy, unhealthy
+// UpdateStateCode updates the stateCode of the coord, including healthy, unhealthy
 func (s *Server) UpdateStateCode(code commonpb.StateCode) {
-	s.status.Store(code)
+	s.stateCode.Store(code)
 }
 
 func (s *Server) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
@@ -480,7 +480,7 @@ func (s *Server) GetComponentStates(ctx context.Context) (*milvuspb.ComponentSta
 	serviceComponentInfo := &milvuspb.ComponentInfo{
 		// NodeID:    Params.QueryCoordID, // will race with QueryCoord.Register()
 		NodeID:    nodeID,
-		StateCode: s.status.Load().(commonpb.StateCode),
+		StateCode: s.stateCode.Load().(commonpb.StateCode),
 	}
 
 	return &milvuspb.ComponentStates{
@@ -749,4 +749,10 @@ func (s *Server) checkReplicas() {
 			}
 		}
 	}
+}
+
+func (s *Server) checkHealthy() (commonpb.StateCode, bool) {
+	code := s.stateCode.Load().(commonpb.StateCode)
+	ok := code == commonpb.StateCode_Healthy
+	return code, ok
 }
