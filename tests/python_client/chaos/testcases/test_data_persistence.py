@@ -8,8 +8,9 @@ from common.common_type import CaseLabel
 from utils.util_log import test_log as log
 
 
-class TestDataPersistence(TestcaseBase):    
+class TestDataPersistence(TestcaseBase):
     """ Test case of end to end"""
+
     def teardown_method(self, method):
         log.info(("*" * 35) + " teardown " + ("*" * 35))
         log.info("[teardown_method] Start teardown test case %s..." %

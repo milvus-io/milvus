@@ -8,8 +8,10 @@ from common.common_type import CaseLabel
 from utils.util_log import test_log as log
 from utils.util_common import get_collections
 
+
 class TestAllCollection(TestcaseBase):
     """ Test case of end to end"""
+
     @pytest.fixture(scope="function", params=get_collections())
     def collection_name(self, request):
         if request.param == [] or request.param == "":
@@ -21,7 +23,6 @@ class TestAllCollection(TestcaseBase):
         log.info("[teardown_method] Start teardown test case %s..." %
                  method.__name__)
         log.info("skip drop collection")
-
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_default(self, collection_name):
@@ -67,7 +68,7 @@ class TestAllCollection(TestcaseBase):
                                                  index_name=cf.gen_unique_str())
             tt = time.time() - t0
             log.info(f"assert index: {tt}")
-        
+
         # show index infos
         index_infos = [index.to_dict() for index in collection_w.indexes]
         log.info(f"index info: {index_infos}")
@@ -117,4 +118,3 @@ class TestAllCollection(TestcaseBase):
         tt = time.time() - t0
         log.info(f"assert query result {len(res)}: {tt}")
         assert len(res) >= 4
-
