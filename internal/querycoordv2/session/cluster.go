@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/sourcegraph/conc"
 	"go.uber.org/zap"
 )
 
@@ -64,7 +65,7 @@ type Cluster interface {
 type QueryCluster struct {
 	*clients
 	nodeManager *NodeManager
-	wg          sync.WaitGroup
+	wg          conc.WaitGroup
 	ch          chan struct{}
 	stopOnce    sync.Once
 }
@@ -85,8 +86,7 @@ func NewCluster(nodeManager *NodeManager, queryNodeCreator QueryNodeCreator) *Qu
 }
 
 func (c *QueryCluster) Start(ctx context.Context) {
-	c.wg.Add(1)
-	go c.updateLoop()
+	c.wg.Go(c.updateLoop)
 }
 
 func (c *QueryCluster) Stop() {
@@ -98,7 +98,6 @@ func (c *QueryCluster) Stop() {
 }
 
 func (c *QueryCluster) updateLoop() {
-	defer c.wg.Done()
 	ticker := time.NewTicker(updateTickerDuration)
 	for {
 		select {

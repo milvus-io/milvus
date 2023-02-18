@@ -1,6 +1,6 @@
 module github.com/milvus-io/milvus
 
-go 1.18
+go 1.19
 
 require (
 	github.com/99designs/keyring v1.2.1 // indirect
@@ -182,6 +182,7 @@ require (
 require github.com/ianlancetaylor/cgosymbolizer v0.0.0-20221217025313-27d3c9f66b6a // indirect
 
 require (
+	github.com/sourcegraph/conc v0.2.0
 	github.com/uber/jaeger-client-go v2.30.0+incompatible
 	go.opentelemetry.io/otel/exporters/jaeger v1.11.2
 	go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.11.2

@@ -22,13 +22,13 @@ import (
 	"fmt"
 	"os"
 	"sort"
-	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
+	"github.com/sourcegraph/conc"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
@@ -64,7 +64,7 @@ var (
 type Server struct {
 	ctx                 context.Context
 	cancel              context.CancelFunc
-	wg                  sync.WaitGroup
+	wg                  conc.WaitGroup
 	status              atomic.Value
 	etcdCli             *clientv3.Client
 	address             string
@@ -376,8 +376,9 @@ func (s *Server) startQueryCoord() error {
 	for _, node := range sessions {
 		s.handleNodeUp(node.ServerID)
 	}
-	s.wg.Add(1)
-	go s.watchNodes(revision)
+	s.wg.Go(func() {
+		s.watchNodes(revision)
+	})
 
 	log.Info("start recovering dist and target")
 	err = s.recover()
@@ -575,8 +576,6 @@ func (s *Server) recoverCollectionTargets(ctx context.Context, collection int64)
 }
 
 func (s *Server) watchNodes(revision int64) {
-	defer s.wg.Done()
-
 	eventChan := s.session.WatchServices(typeutil.QueryNodeRole, revision+1, nil)
 	for {
 		select {

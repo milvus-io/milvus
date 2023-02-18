@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
+	"github.com/sourcegraph/conc"
 	"go.uber.org/zap"
 )
 
@@ -35,7 +36,7 @@ const interval = 1 * time.Second
 
 // LeaderObserver is to sync the distribution with leader
 type LeaderObserver struct {
-	wg      sync.WaitGroup
+	wg      conc.WaitGroup
 	closeCh chan struct{}
 	dist    *meta.DistributionManager
 	meta    *meta.Meta
@@ -46,9 +47,7 @@ type LeaderObserver struct {
 }
 
 func (o *LeaderObserver) Start(ctx context.Context) {
-	o.wg.Add(1)
-	go func() {
-		defer o.wg.Done()
+	o.wg.Go(func() {
 		ticker := time.NewTicker(interval)
 		for {
 			select {
@@ -62,7 +61,7 @@ func (o *LeaderObserver) Start(ctx context.Context) {
 				o.observe(ctx)
 			}
 		}
-	}()
+	})
 }
 
 func (o *LeaderObserver) Stop() {

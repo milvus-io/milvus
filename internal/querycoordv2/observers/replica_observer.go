@@ -26,12 +26,13 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
+	"github.com/sourcegraph/conc"
 )
 
 // check replica, find outbound nodes and remove it from replica if all segment/channel has been moved
 type ReplicaObserver struct {
 	c       chan struct{}
-	wg      sync.WaitGroup
+	wg      conc.WaitGroup
 	meta    *meta.Meta
 	distMgr *meta.DistributionManager
 
@@ -47,8 +48,9 @@ func NewReplicaObserver(meta *meta.Meta, distMgr *meta.DistributionManager) *Rep
 }
 
 func (ob *ReplicaObserver) Start(ctx context.Context) {
-	ob.wg.Add(1)
-	go ob.schedule(ctx)
+	ob.wg.Go(func() {
+		ob.schedule(ctx)
+	})
 }
 
 func (ob *ReplicaObserver) Stop() {
@@ -59,7 +61,6 @@ func (ob *ReplicaObserver) Stop() {
 }
 
 func (ob *ReplicaObserver) schedule(ctx context.Context) {
-	defer ob.wg.Done()
 	log.Info("Start check replica loop")
 
 	ticker := time.NewTicker(params.Params.QueryCoordCfg.CheckNodeInReplicaInterval.GetAsDuration(time.Second))

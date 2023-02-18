@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
+	"github.com/sourcegraph/conc"
 	"go.uber.org/zap"
 )
 
@@ -43,7 +44,7 @@ const (
 type distHandler struct {
 	nodeID      int64
 	c           chan struct{}
-	wg          sync.WaitGroup
+	wg          conc.WaitGroup
 	client      session.Cluster
 	nodeManager *session.NodeManager
 	scheduler   task.Scheduler
@@ -54,7 +55,6 @@ type distHandler struct {
 }
 
 func (dh *distHandler) start(ctx context.Context) {
-	defer dh.wg.Done()
 	logger := log.Ctx(ctx).With(zap.Int64("nodeID", dh.nodeID)).WithRateGroup("qnv2.distHandler", 1, 60)
 	logger.Info("start dist handler")
 	ticker := time.NewTicker(Params.QueryCoordCfg.DistPullInterval.GetAsDuration(time.Millisecond))
@@ -255,7 +255,8 @@ func newDistHandler(
 		dist:        dist,
 		target:      targetMgr,
 	}
-	h.wg.Add(1)
-	go h.start(ctx)
+	h.wg.Go(func() {
+		h.start(ctx)
+	})
 	return h
 }

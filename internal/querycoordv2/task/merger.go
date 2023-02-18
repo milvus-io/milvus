@@ -23,6 +23,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/log"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
+	"github.com/sourcegraph/conc"
 	"go.uber.org/zap"
 )
 
@@ -31,7 +32,7 @@ const waitQueueCap = 256
 
 type Merger[K comparable, R any] struct {
 	stopCh    chan struct{}
-	wg        sync.WaitGroup
+	wg        conc.WaitGroup
 	queues    map[K][]MergeableTask[K, R] // TaskID -> Queue
 	waitQueue chan MergeableTask[K, R]
 	outCh     chan MergeableTask[K, R]
@@ -64,9 +65,7 @@ func (merger *Merger[K, R]) Chan() <-chan MergeableTask[K, R] {
 }
 
 func (merger *Merger[K, R]) schedule(ctx context.Context) {
-	merger.wg.Add(1)
-	go func() {
-		defer merger.wg.Done()
+	merger.wg.Go(func() {
 		ticker := time.NewTicker(500 * time.Millisecond)
 		defer ticker.Stop()
 		for {
@@ -88,7 +87,7 @@ func (merger *Merger[K, R]) schedule(ctx context.Context) {
 				}
 			}
 		}
-	}()
+	})
 }
 
 func (merger *Merger[K, R]) isStopped() bool {

@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
+	"github.com/sourcegraph/conc"
 	"go.uber.org/zap"
 )
 
@@ -61,13 +62,12 @@ func (dc *Controller) SyncAll(ctx context.Context) {
 	dc.mu.RLock()
 	defer dc.mu.RUnlock()
 
-	wg := sync.WaitGroup{}
+	wg := conc.WaitGroup{}
 	for _, h := range dc.handlers {
-		wg.Add(1)
-		go func(handler *distHandler) {
-			defer wg.Done()
-			handler.getDistribution(ctx, nil)
-		}(h)
+		h := h
+		wg.Go(func() {
+			h.getDistribution(ctx, nil)
+		})
 	}
 	wg.Wait()
 }

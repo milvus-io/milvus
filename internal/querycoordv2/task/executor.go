@@ -31,13 +31,14 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
+	"github.com/sourcegraph/conc"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 )
 
 type Executor struct {
 	doneCh    chan struct{}
-	wg        sync.WaitGroup
+	wg        conc.WaitGroup
 	meta      *meta.Meta
 	dist      *meta.DistributionManager
 	broker    meta.Broker
@@ -124,9 +125,7 @@ func (ex *Executor) Exist(taskID int64) bool {
 }
 
 func (ex *Executor) scheduleRequests() {
-	ex.wg.Add(1)
-	go func() {
-		defer ex.wg.Done()
+	ex.wg.Go(func() {
 		for mergeTask := range ex.merger.Chan() {
 			task := mergeTask.(*LoadSegmentsTask)
 			log.Info("get merge task, process it",
@@ -138,7 +137,7 @@ func (ex *Executor) scheduleRequests() {
 			)
 			go ex.processMergeTask(mergeTask.(*LoadSegmentsTask))
 		}
-	}()
+	})
 }
 
 func (ex *Executor) processMergeTask(mergeTask *LoadSegmentsTask) {

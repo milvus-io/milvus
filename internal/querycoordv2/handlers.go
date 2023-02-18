@@ -20,10 +20,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/samber/lo"
+	"github.com/sourcegraph/conc"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -276,15 +276,12 @@ type metricResp struct {
 }
 
 func (s *Server) tryGetNodesMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, nodes ...*session.NodeInfo) []*metricResp {
-	wg := sync.WaitGroup{}
+	wg := conc.WaitGroup{}
 	ret := make([]*metricResp, 0, len(nodes))
 	retCh := make(chan *metricResp, len(nodes))
 	for _, node := range nodes {
 		node := node
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-
+		wg.Go(func() {
 			resp, err := s.cluster.GetMetrics(ctx, node.ID(), req)
 			if err != nil {
 				log.Warn("failed to get metric from QueryNode",
@@ -295,7 +292,7 @@ func (s *Server) tryGetNodesMetrics(ctx context.Context, req *milvuspb.GetMetric
 				resp: resp,
 				err:  err,
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	close(retCh)

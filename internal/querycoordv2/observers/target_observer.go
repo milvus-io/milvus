@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/sourcegraph/conc"
 )
 
 type checkRequest struct {
@@ -43,7 +44,7 @@ type targetUpdateRequest struct {
 
 type TargetObserver struct {
 	c         chan struct{}
-	wg        sync.WaitGroup
+	wg        conc.WaitGroup
 	meta      *meta.Meta
 	targetMgr *meta.TargetManager
 	distMgr   *meta.DistributionManager
@@ -73,8 +74,9 @@ func NewTargetObserver(meta *meta.Meta, targetMgr *meta.TargetManager, distMgr *
 }
 
 func (ob *TargetObserver) Start(ctx context.Context) {
-	ob.wg.Add(1)
-	go ob.schedule(ctx)
+	ob.wg.Go(func() {
+		ob.schedule(ctx)
+	})
 }
 
 func (ob *TargetObserver) Stop() {
@@ -85,7 +87,6 @@ func (ob *TargetObserver) Stop() {
 }
 
 func (ob *TargetObserver) schedule(ctx context.Context) {
-	defer ob.wg.Done()
 	log.Info("Start update next target loop")
 
 	ticker := time.NewTicker(params.Params.QueryCoordCfg.UpdateNextTargetInterval.GetAsDuration(time.Second))

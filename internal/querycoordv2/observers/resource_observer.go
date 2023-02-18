@@ -24,13 +24,14 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
+	"github.com/sourcegraph/conc"
 	"go.uber.org/zap"
 )
 
 // check whether rg lack of node, try to transfer node from default rg
 type ResourceObserver struct {
 	c    chan struct{}
-	wg   sync.WaitGroup
+	wg   conc.WaitGroup
 	meta *meta.Meta
 
 	stopOnce sync.Once
@@ -44,8 +45,9 @@ func NewResourceObserver(meta *meta.Meta) *ResourceObserver {
 }
 
 func (ob *ResourceObserver) Start(ctx context.Context) {
-	ob.wg.Add(1)
-	go ob.schedule(ctx)
+	ob.wg.Go(func() {
+		ob.schedule(ctx)
+	})
 }
 
 func (ob *ResourceObserver) Stop() {
@@ -56,7 +58,6 @@ func (ob *ResourceObserver) Stop() {
 }
 
 func (ob *ResourceObserver) schedule(ctx context.Context) {
-	defer ob.wg.Done()
 	log.Info("Start check resource group loop")
 
 	ticker := time.NewTicker(params.Params.QueryCoordCfg.CheckResourceGroupInterval.GetAsDuration(time.Second))

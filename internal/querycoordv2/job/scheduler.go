@@ -23,6 +23,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/sourcegraph/conc"
 	"go.uber.org/zap"
 )
 
@@ -37,7 +38,7 @@ type jobQueue chan Job
 
 type Scheduler struct {
 	stopCh chan struct{}
-	wg     sync.WaitGroup
+	wg     conc.WaitGroup
 
 	processors *typeutil.ConcurrentSet[int64] // Collections of having processor
 	queues     map[int64]jobQueue             // CollectionID -> Queue
@@ -67,9 +68,7 @@ func (scheduler *Scheduler) Stop() {
 }
 
 func (scheduler *Scheduler) schedule(ctx context.Context) {
-	scheduler.wg.Add(1)
-	go func() {
-		defer scheduler.wg.Done()
+	scheduler.wg.Go(func() {
 		ticker := time.NewTicker(500 * time.Millisecond)
 		for {
 			select {
@@ -105,7 +104,7 @@ func (scheduler *Scheduler) schedule(ctx context.Context) {
 				}
 			}
 		}
-	}()
+	})
 }
 
 func (scheduler *Scheduler) isStopped() bool {
@@ -129,15 +128,15 @@ func (scheduler *Scheduler) startProcessor(collection int64, queue jobQueue) {
 		return
 	}
 
-	scheduler.wg.Add(1)
-	go scheduler.processQueue(collection, queue)
+	scheduler.wg.Go(func() {
+		scheduler.processQueue(collection, queue)
+	})
 }
 
 // processQueue processes jobs in the given queue,
 // it only processes jobs with the number of the length of queue at the time,
 // to avoid leaking goroutines
 func (scheduler *Scheduler) processQueue(collection int64, queue jobQueue) {
-	defer scheduler.wg.Done()
 	defer scheduler.processors.Remove(collection)
 
 	len := len(queue)
