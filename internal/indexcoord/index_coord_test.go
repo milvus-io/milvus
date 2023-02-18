@@ -649,7 +649,7 @@ func TestIndexCoord_UnHealthy(t *testing.T) {
 		}
 		resp, err := ic.CreateIndex(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.ErrorCode)
 	})
 
 	t.Run("GetIndexState", func(t *testing.T) {
@@ -659,7 +659,7 @@ func TestIndexCoord_UnHealthy(t *testing.T) {
 		}
 		resp, err := ic.GetIndexState(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.Status.ErrorCode)
 	})
 
 	t.Run("GetSegmentIndexState", func(t *testing.T) {
@@ -670,7 +670,7 @@ func TestIndexCoord_UnHealthy(t *testing.T) {
 		}
 		resp, err := ic.GetSegmentIndexState(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.Status.ErrorCode)
 	})
 
 	t.Run("GetIndexInfos", func(t *testing.T) {
@@ -681,7 +681,7 @@ func TestIndexCoord_UnHealthy(t *testing.T) {
 		}
 		resp, err := ic.GetIndexInfos(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.Status.ErrorCode)
 	})
 
 	t.Run("DescribeIndex", func(t *testing.T) {
@@ -691,7 +691,7 @@ func TestIndexCoord_UnHealthy(t *testing.T) {
 		}
 		resp, err := ic.DescribeIndex(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.Status.ErrorCode)
 	})
 
 	t.Run("GetIndexBuildProgress", func(t *testing.T) {
@@ -701,7 +701,7 @@ func TestIndexCoord_UnHealthy(t *testing.T) {
 		}
 		resp, err := ic.GetIndexBuildProgress(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.Status.ErrorCode)
 	})
 
 	t.Run("DropIndex", func(t *testing.T) {
@@ -711,7 +711,7 @@ func TestIndexCoord_UnHealthy(t *testing.T) {
 		}
 		resp, err := ic.DropIndex(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.ErrorCode)
 	})
 
 	t.Run("ShowConfigurations when indexcoord is not healthy", func(t *testing.T) {
@@ -726,7 +726,7 @@ func TestIndexCoord_UnHealthy(t *testing.T) {
 
 		resp, err := ic.ShowConfigurations(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.Status.ErrorCode)
 	})
 
 	t.Run("GetMetrics", func(t *testing.T) {
@@ -734,7 +734,7 @@ func TestIndexCoord_UnHealthy(t *testing.T) {
 		assert.NoError(t, err)
 		resp, err := ic.GetMetrics(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.Status.ErrorCode)
 	})
 
 }

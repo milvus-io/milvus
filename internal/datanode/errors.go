@@ -19,6 +19,10 @@ package datanode
 import (
 	"errors"
 	"fmt"
+
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus/internal/util/errorutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 var (
@@ -32,4 +36,10 @@ func msgDataNodeIsUnhealthy(nodeID UniqueID) string {
 
 func errDataNodeIsUnhealthy(nodeID UniqueID) error {
 	return errors.New(msgDataNodeIsUnhealthy(nodeID))
+}
+
+func setNotServingStatus(status *commonpb.Status, stateCode commonpb.StateCode) {
+	reason := fmt.Sprintf("sate code: %s", stateCode.String())
+	status.Reason = errorutil.NotServingReason(typeutil.DataNodeRole, Params.DataCoordCfg.GetNodeID(), reason)
+	status.ErrorCode = commonpb.ErrorCode_NotReadyServe
 }

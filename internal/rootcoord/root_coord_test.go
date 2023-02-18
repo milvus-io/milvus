@@ -38,7 +38,7 @@ func TestRootCoord_CreateCollection(t *testing.T) {
 		ctx := context.Background()
 		resp, err := c.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{})
 		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetErrorCode())
 	})
 
 	t.Run("failed to add task", func(t *testing.T) {
@@ -78,7 +78,7 @@ func TestRootCoord_DropCollection(t *testing.T) {
 		ctx := context.Background()
 		resp, err := c.DropCollection(ctx, &milvuspb.DropCollectionRequest{})
 		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetErrorCode())
 	})
 
 	t.Run("failed to add task", func(t *testing.T) {
@@ -118,7 +118,7 @@ func TestRootCoord_CreatePartition(t *testing.T) {
 		ctx := context.Background()
 		resp, err := c.CreatePartition(ctx, &milvuspb.CreatePartitionRequest{})
 		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetErrorCode())
 	})
 
 	t.Run("failed to add task", func(t *testing.T) {
@@ -158,7 +158,7 @@ func TestRootCoord_DropPartition(t *testing.T) {
 		ctx := context.Background()
 		resp, err := c.DropPartition(ctx, &milvuspb.DropPartitionRequest{})
 		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetErrorCode())
 	})
 
 	t.Run("failed to add task", func(t *testing.T) {
@@ -198,7 +198,7 @@ func TestRootCoord_CreateAlias(t *testing.T) {
 		ctx := context.Background()
 		resp, err := c.CreateAlias(ctx, &milvuspb.CreateAliasRequest{})
 		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetErrorCode())
 	})
 
 	t.Run("failed to add task", func(t *testing.T) {
@@ -236,7 +236,7 @@ func TestRootCoord_DropAlias(t *testing.T) {
 		ctx := context.Background()
 		resp, err := c.DropAlias(ctx, &milvuspb.DropAliasRequest{})
 		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetErrorCode())
 	})
 
 	t.Run("failed to add task", func(t *testing.T) {
@@ -274,7 +274,7 @@ func TestRootCoord_AlterAlias(t *testing.T) {
 		ctx := context.Background()
 		resp, err := c.AlterAlias(ctx, &milvuspb.AlterAliasRequest{})
 		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetErrorCode())
 	})
 
 	t.Run("failed to add task", func(t *testing.T) {
@@ -312,10 +312,10 @@ func TestRootCoord_DescribeCollection(t *testing.T) {
 		ctx := context.Background()
 		resp, err := c.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{})
 		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetStatus().GetErrorCode())
 		resp, err = c.DescribeCollectionInternal(ctx, &milvuspb.DescribeCollectionRequest{})
 		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetStatus().GetErrorCode())
 	})
 
 	t.Run("failed to add task", func(t *testing.T) {
@@ -364,7 +364,7 @@ func TestRootCoord_HasCollection(t *testing.T) {
 		ctx := context.Background()
 		resp, err := c.HasCollection(ctx, &milvuspb.HasCollectionRequest{})
 		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetStatus().GetErrorCode())
 	})
 
 	t.Run("failed to add task", func(t *testing.T) {
@@ -404,7 +404,7 @@ func TestRootCoord_ShowCollections(t *testing.T) {
 		ctx := context.Background()
 		resp, err := c.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
 		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetStatus().GetErrorCode())
 	})
 
 	t.Run("failed to add task", func(t *testing.T) {
@@ -444,7 +444,7 @@ func TestRootCoord_HasPartition(t *testing.T) {
 		ctx := context.Background()
 		resp, err := c.HasPartition(ctx, &milvuspb.HasPartitionRequest{})
 		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetStatus().GetErrorCode())
 	})
 
 	t.Run("failed to add task", func(t *testing.T) {
@@ -484,10 +484,10 @@ func TestRootCoord_ShowPartitions(t *testing.T) {
 		ctx := context.Background()
 		resp, err := c.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{})
 		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetStatus().GetErrorCode())
 		resp, err = c.ShowPartitionsInternal(ctx, &milvuspb.ShowPartitionsRequest{})
 		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetStatus().GetErrorCode())
 	})
 
 	t.Run("failed to add task", func(t *testing.T) {
@@ -534,7 +534,7 @@ func TestRootCoord_AllocTimestamp(t *testing.T) {
 		c := newTestCore(withAbnormalCode())
 		resp, err := c.AllocTimestamp(ctx, &rootcoordpb.AllocTimestampRequest{})
 		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetStatus().GetErrorCode())
 	})
 
 	t.Run("failed to allocate ts", func(t *testing.T) {
@@ -572,7 +572,7 @@ func TestRootCoord_AllocID(t *testing.T) {
 		c := newTestCore(withAbnormalCode())
 		resp, err := c.AllocID(ctx, &rootcoordpb.AllocIDRequest{})
 		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetStatus().GetErrorCode())
 	})
 
 	t.Run("failed to allocate id", func(t *testing.T) {
@@ -608,7 +608,7 @@ func TestRootCoord_UpdateChannelTimeTick(t *testing.T) {
 		c := newTestCore(withAbnormalCode())
 		resp, err := c.UpdateChannelTimeTick(ctx, &internalpb.ChannelTimeTickMsg{})
 		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetErrorCode())
 	})
 
 	t.Run("invalid msg type", func(t *testing.T) {
@@ -674,7 +674,7 @@ func TestRootCoord_InvalidateCollectionMetaCache(t *testing.T) {
 		c := newTestCore(withAbnormalCode())
 		resp, err := c.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{})
 		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetErrorCode())
 	})
 
 	t.Run("failed to invalidate cache", func(t *testing.T) {
@@ -702,7 +702,7 @@ func TestRootCoord_RenameCollection(t *testing.T) {
 		c := newTestCore(withAbnormalCode())
 		resp, err := c.RenameCollection(ctx, &milvuspb.RenameCollectionRequest{})
 		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetErrorCode())
 	})
 
 	t.Run("add task failed", func(t *testing.T) {
@@ -742,7 +742,7 @@ func TestRootCoord_ShowConfigurations(t *testing.T) {
 		c := newTestCore(withAbnormalCode())
 		resp, err := c.ShowConfigurations(ctx, &internalpb.ShowConfigurationsRequest{})
 		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetStatus().GetErrorCode())
 	})
 
 	t.Run("normal case", func(t *testing.T) {
@@ -772,7 +772,7 @@ func TestRootCoord_GetMetrics(t *testing.T) {
 		c := newTestCore(withAbnormalCode())
 		resp, err := c.GetMetrics(ctx, &milvuspb.GetMetricsRequest{})
 		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetStatus().GetErrorCode())
 	})
 
 	t.Run("failed to parse metric type", func(t *testing.T) {
@@ -867,7 +867,7 @@ func TestCore_Import(t *testing.T) {
 		c := newTestCore(withAbnormalCode())
 		resp, err := c.Import(ctx, &milvuspb.ImportRequest{})
 		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetStatus().GetErrorCode())
 	})
 
 	t.Run("bad collection name", func(t *testing.T) {
@@ -960,7 +960,7 @@ func TestCore_GetImportState(t *testing.T) {
 			Task: 100,
 		})
 		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetStatus().GetErrorCode())
 	})
 
 	t.Run("normal case", func(t *testing.T) {
@@ -1023,7 +1023,7 @@ func TestCore_ListImportTasks(t *testing.T) {
 		c := newTestCore(withAbnormalCode())
 		resp, err := c.ListImportTasks(ctx, &milvuspb.ListImportTasksRequest{})
 		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetStatus().GetErrorCode())
 	})
 
 	verifyTaskFunc := func(task *milvuspb.GetImportStateResponse, taskID int64, colID int64, state commonpb.ImportState) {
@@ -1204,7 +1204,7 @@ func TestCore_ReportImport(t *testing.T) {
 		c := newTestCore(withAbnormalCode())
 		resp, err := c.ReportImport(ctx, &rootcoordpb.ImportResult{})
 		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetErrorCode())
 	})
 
 	t.Run("report complete import with task not found", func(t *testing.T) {
@@ -1271,50 +1271,50 @@ func TestCore_Rbac(t *testing.T) {
 
 	{
 		resp, err := c.CreateRole(ctx, &milvuspb.CreateRoleRequest{})
-		assert.NotNil(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.ErrorCode)
 	}
 
 	{
 		resp, err := c.DropRole(ctx, &milvuspb.DropRoleRequest{})
-		assert.NotNil(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.ErrorCode)
 	}
 
 	{
 		resp, err := c.OperateUserRole(ctx, &milvuspb.OperateUserRoleRequest{})
-		assert.NotNil(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.ErrorCode)
 	}
 
 	{
 		resp, err := c.SelectRole(ctx, &milvuspb.SelectRoleRequest{})
-		assert.NotNil(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.Status.ErrorCode)
 	}
 
 	{
 		resp, err := c.SelectUser(ctx, &milvuspb.SelectUserRequest{})
-		assert.NotNil(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.Status.ErrorCode)
 	}
 
 	{
 		resp, err := c.OperatePrivilege(ctx, &milvuspb.OperatePrivilegeRequest{})
-		assert.NotNil(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.ErrorCode)
 	}
 
 	{
 		resp, err := c.SelectGrant(ctx, &milvuspb.SelectGrantRequest{})
-		assert.NotNil(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.Status.ErrorCode)
 	}
 
 	{
 		resp, err := c.ListPolicy(ctx, &internalpb.ListPolicyRequest{})
-		assert.NotNil(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.Status.ErrorCode)
 	}
 }
 
@@ -1483,7 +1483,7 @@ func TestRootCoord_AlterCollection(t *testing.T) {
 		c := newTestCore(withAbnormalCode())
 		resp, err := c.AlterCollection(ctx, &milvuspb.AlterCollectionRequest{})
 		assert.NoError(t, err)
-		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetErrorCode())
 	})
 
 	t.Run("add task failed", func(t *testing.T) {

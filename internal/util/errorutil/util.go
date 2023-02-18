@@ -50,6 +50,10 @@ func UnHealthReason(role string, nodeID typeutil.UniqueID, reason string) string
 	return fmt.Sprintf("role %s[nodeID: %d] is unhealthy, reason: %s", role, nodeID, reason)
 }
 
+func NotServingReason(role string, nodeID typeutil.UniqueID, reason string) string {
+	return fmt.Sprintf("role %s[nodeID: %d] is not serving, reason: %s", role, nodeID, reason)
+}
+
 func UnHealthReasonWithComponentStatesOrErr(role string, nodeID typeutil.UniqueID, cs *milvuspb.ComponentStates, err error) (bool, string) {
 	if err != nil {
 		return false, UnHealthReason(role, nodeID, fmt.Sprintf("inner error: %s", err.Error()))

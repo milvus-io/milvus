@@ -193,7 +193,7 @@ func TestDataNode(t *testing.T) {
 	t.Run("Test GetCompactionState unhealthy", func(t *testing.T) {
 		node.UpdateStateCode(commonpb.StateCode_Abnormal)
 		resp, _ := node.GetCompactionState(ctx, nil)
-		assert.Equal(t, "DataNode is unhealthy", resp.GetStatus().GetReason())
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetStatus().GetErrorCode())
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
 	})
 
@@ -392,7 +392,7 @@ func TestDataNode(t *testing.T) {
 
 		resp, err := node.ShowConfigurations(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetStatus().GetErrorCode())
 		node.stateCode.Store(commonpb.StateCode_Healthy)
 
 		resp, err = node.ShowConfigurations(ctx, req)
@@ -624,7 +624,7 @@ func TestDataNode(t *testing.T) {
 		node.stateCode.Store(commonpb.StateCode_Abnormal)
 		stat, err = node.Import(context.WithValue(ctx, ctxKey{}, ""), req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, stat.GetErrorCode())
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, stat.GetErrorCode())
 	})
 
 	t.Run("Test BackGroundGC", func(t *testing.T) {

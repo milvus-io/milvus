@@ -22,6 +22,8 @@ import (
 	"strconv"
 
 	"github.com/golang/protobuf/proto"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/common"
@@ -32,17 +34,15 @@ import (
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/trace"
-	"go.uber.org/zap"
 )
 
 func (i *IndexNode) CreateJob(ctx context.Context, req *indexpb.CreateJobRequest) (*commonpb.Status, error) {
 	if !commonpbutil.IsHealthy(i.stateCode) {
 		stateCode := i.stateCode.Load().(commonpb.StateCode)
 		log.Ctx(ctx).Warn("index node not ready", zap.Int32("state", int32(stateCode)), zap.String("ClusterID", req.ClusterID), zap.Int64("IndexBuildID", req.BuildID))
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    "state code is not healthy",
-		}, nil
+		ret := &commonpb.Status{}
+		setNotServingStatus(ret, stateCode)
+		return ret, nil
 	}
 	log.Ctx(ctx).Info("IndexNode building index ...",
 		zap.String("ClusterID", req.ClusterID),
@@ -117,12 +117,9 @@ func (i *IndexNode) QueryJobs(ctx context.Context, req *indexpb.QueryJobsRequest
 	if !commonpbutil.IsHealthyOrStopping(i.stateCode) {
 		stateCode := i.stateCode.Load().(commonpb.StateCode)
 		log.Ctx(ctx).Warn("index node not ready", zap.Int32("state", int32(stateCode)), zap.String("ClusterID", req.ClusterID))
-		return &indexpb.QueryJobsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    "state code is not healthy",
-			},
-		}, nil
+		ret := &indexpb.QueryJobsResponse{Status: &commonpb.Status{}}
+		setNotServingStatus(ret.GetStatus(), stateCode)
+		return ret, nil
 	}
 	infos := make(map[UniqueID]*taskInfo)
 	i.foreachTaskInfo(func(ClusterID string, buildID UniqueID, info *taskInfo) {
@@ -168,10 +165,9 @@ func (i *IndexNode) DropJobs(ctx context.Context, req *indexpb.DropJobsRequest) 
 	if !commonpbutil.IsHealthyOrStopping(i.stateCode) {
 		stateCode := i.stateCode.Load().(commonpb.StateCode)
 		log.Ctx(ctx).Warn("index node not ready", zap.Int32("state", int32(stateCode)), zap.String("ClusterID", req.ClusterID))
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    "state code is not healthy",
-		}, nil
+		ret := &commonpb.Status{}
+		setNotServingStatus(ret, stateCode)
+		return ret, nil
 	}
 	keys := make([]taskKey, 0, len(req.BuildIDs))
 	for _, buildID := range req.BuildIDs {
@@ -195,12 +191,9 @@ func (i *IndexNode) GetJobStats(ctx context.Context, req *indexpb.GetJobStatsReq
 	if !commonpbutil.IsHealthyOrStopping(i.stateCode) {
 		stateCode := i.stateCode.Load().(commonpb.StateCode)
 		log.Ctx(ctx).Warn("index node not ready", zap.Int32("state", int32(stateCode)))
-		return &indexpb.GetJobStatsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    "state code is not healthy",
-			},
-		}, nil
+		ret := &indexpb.GetJobStatsResponse{Status: &commonpb.Status{}}
+		setNotServingStatus(ret.GetStatus(), stateCode)
+		return ret, nil
 	}
 	unissued, active := i.sched.IndexBuildQueue.GetTaskNum()
 	jobInfos := make([]*indexpb.JobInfo, 0)
@@ -238,14 +231,13 @@ func (i *IndexNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequ
 	if !commonpbutil.IsHealthyOrStopping(i.stateCode) {
 		log.Warn("IndexNode.GetMetrics failed",
 			zap.Error(errIndexNodeIsUnhealthy(Params.IndexNodeCfg.GetNodeID())))
-
-		return &milvuspb.GetMetricsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    msgIndexNodeIsUnhealthy(Params.IndexNodeCfg.GetNodeID()),
-			},
+		stateCode := i.stateCode.Load().(commonpb.StateCode)
+		ret := &milvuspb.GetMetricsResponse{
+			Status:   &commonpb.Status{},
 			Response: "",
-		}, nil
+		}
+		setNotServingStatus(ret.GetStatus(), stateCode)
+		return ret, nil
 	}
 
 	metricType, err := metricsinfo.ParseMetricType(req.Request)
