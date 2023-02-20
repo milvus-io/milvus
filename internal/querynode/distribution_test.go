@@ -29,7 +29,7 @@ type DistributionSuite struct {
 }
 
 func (s *DistributionSuite) SetupTest() {
-	s.dist = NewDistribution()
+	s.dist = NewDistribution(0)
 }
 
 func (s *DistributionSuite) TearDownTest() {
@@ -151,7 +151,6 @@ func (s *DistributionSuite) TestRemoveDistribution() {
 	type testCase struct {
 		tag           string
 		presetSealed  []SegmentEntry
-		presetGrowing []SegmentEntry
 		removalSealed []SegmentEntry
 
 		withMockRead bool
@@ -165,10 +164,6 @@ func (s *DistributionSuite) TestRemoveDistribution() {
 				{NodeID: 1, SegmentID: 1},
 				{NodeID: 2, SegmentID: 2},
 				{NodeID: 1, SegmentID: 3},
-			},
-			presetGrowing: []SegmentEntry{
-				{SegmentID: 4},
-				{SegmentID: 5},
 			},
 
 			removalSealed: []SegmentEntry{
@@ -198,10 +193,6 @@ func (s *DistributionSuite) TestRemoveDistribution() {
 				{NodeID: 1, SegmentID: 1},
 				{NodeID: 2, SegmentID: 2},
 				{NodeID: 1, SegmentID: 3},
-			},
-			presetGrowing: []SegmentEntry{
-				{SegmentID: 4},
-				{SegmentID: 5},
 			},
 
 			removalSealed: []SegmentEntry{
@@ -233,10 +224,6 @@ func (s *DistributionSuite) TestRemoveDistribution() {
 				{NodeID: 2, SegmentID: 2},
 				{NodeID: 1, SegmentID: 3},
 			},
-			presetGrowing: []SegmentEntry{
-				{SegmentID: 4},
-				{SegmentID: 5},
-			},
 
 			removalSealed: []SegmentEntry{
 				{NodeID: wildcardNodeID, SegmentID: 1},
@@ -265,10 +252,6 @@ func (s *DistributionSuite) TestRemoveDistribution() {
 				{NodeID: 1, SegmentID: 1},
 				{NodeID: 2, SegmentID: 2},
 				{NodeID: 1, SegmentID: 3},
-			},
-			presetGrowing: []SegmentEntry{
-				{SegmentID: 4},
-				{SegmentID: 5},
 			},
 
 			removalSealed: []SegmentEntry{
@@ -330,6 +313,80 @@ func (s *DistributionSuite) TestRemoveDistribution() {
 			sealed, version := s.dist.GetCurrent()
 			defer s.dist.FinishUsage(version)
 			s.compareSnapshotItems(tc.expectSealed, sealed)
+		})
+	}
+}
+
+func (s *DistributionSuite) TestNodeDown() {
+	type testCase struct {
+		tag          string
+		presetSealed []SegmentEntry
+		nodesDown    []int64
+
+		modification []SegmentEntry
+		ok           bool
+	}
+
+	cases := []testCase{
+		{
+			tag:          "no_segment",
+			presetSealed: []SegmentEntry{},
+			nodesDown:    []int64{1},
+			modification: []SegmentEntry{},
+			ok:           true,
+		},
+		{
+			tag: "normal_node_down",
+			presetSealed: []SegmentEntry{
+				{NodeID: 1, SegmentID: 1, State: segmentStateLoaded},
+				{NodeID: 2, SegmentID: 2, State: segmentStateLoaded},
+				{NodeID: 1, SegmentID: 3, State: segmentStateLoaded},
+			},
+			nodesDown:    []int64{1},
+			modification: []SegmentEntry{},
+			ok:           false,
+		},
+		{
+			tag: "normal_node_recover",
+			presetSealed: []SegmentEntry{
+				{NodeID: 1, SegmentID: 1, State: segmentStateLoaded},
+				{NodeID: 2, SegmentID: 2, State: segmentStateLoaded},
+				{NodeID: 1, SegmentID: 3, State: segmentStateLoaded},
+			},
+			nodesDown: []int64{2},
+			modification: []SegmentEntry{
+				{NodeID: 1, SegmentID: 2, State: segmentStateLoaded},
+			},
+			ok: true,
+		},
+		{
+			tag: "multiple_down_recover",
+			presetSealed: []SegmentEntry{
+				{NodeID: 1, SegmentID: 1, State: segmentStateLoaded},
+				{NodeID: 2, SegmentID: 2, State: segmentStateLoaded},
+				{NodeID: 1, SegmentID: 3, State: segmentStateLoaded},
+			},
+			nodesDown: []int64{2, 2, 2, 2},
+			modification: []SegmentEntry{
+				{NodeID: 2, SegmentID: 2, State: segmentStateLoaded},
+			},
+			ok: true,
+		},
+	}
+	for _, tc := range cases {
+		s.Run(tc.tag, func() {
+			s.SetupTest()
+			defer s.TearDownTest()
+
+			s.dist.AddDistributions(tc.presetSealed...)
+
+			for _, nodeID := range tc.nodesDown {
+				s.dist.NodeDown(nodeID)
+			}
+			s.dist.Serviceable()
+			s.dist.UpdateDistribution(tc.modification...)
+
+			s.Equal(tc.ok, s.dist.Serviceable())
 		})
 	}
 }

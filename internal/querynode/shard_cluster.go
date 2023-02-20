@@ -146,13 +146,7 @@ type ShardCluster struct {
 	leader *shardNode           // shard leader node instance
 	nodes  map[int64]*shardNode // online nodes
 
-	mutVersion sync.RWMutex
-	/*
-		versions       sync.Map             // version id to version
-		currentVersion *ShardClusterVersion // current serving segment state version
-		nextVersionID  *atomic.Int64
-		segmentCond    *sync.Cond // segment state change condition
-	*/
+	mutVersion   sync.RWMutex
 	distribution *distribution
 
 	closeOnce sync.Once
@@ -281,7 +275,7 @@ func (sc *ShardCluster) updateSegment(evts ...shardSegmentInfo) {
 // SetupFirstVersion initialized first version for shard cluster.
 func (sc *ShardCluster) SetupFirstVersion() {
 	sc.mutVersion.Lock()
-	sc.distribution = NewDistribution()
+	sc.distribution = NewDistribution(sc.replicaID)
 	sc.mutVersion.Unlock()
 	sc.init()
 	sc.updateShardClusterState(available)
@@ -307,7 +301,7 @@ func (sc *ShardCluster) SyncSegments(info []*querypb.ReplicaSegmentsInfo, state 
 			nodeID := line.GetNodeId()
 			version := line.GetVersions()[i]
 			// if node id not in replica node list, this line shall be placeholder for segment offline
-			_, ok := sc.nodes[nodeID]
+			_, ok := sc.getNode(nodeID)
 			if !ok {
 				log.Warn("Sync segment with invalid nodeID", zap.Int64("segmentID", segmentID), zap.Int64("nodeID", line.NodeId))
 				nodeID = common.InvalidNodeID
@@ -560,35 +554,7 @@ func (sc *ShardCluster) ReleaseSegments(ctx context.Context, req *querypb.Releas
 
 	var err error
 	func() {
-		/*
-			var allocations SegmentsStatus
-			if sc.currentVersion != nil {
-				allocations = sc.currentVersion.segments.Clone(func(segmentID UniqueID, nodeID UniqueID) bool {
-					return (nodeID == req.NodeID || force) && offlineSegments.Contain(segmentID)
-				})
-			}
-
-			// generate a new version
-			versionID := sc.nextVersionID.Inc()
-			// remove offline segments in next version
-			// so incoming request will not have allocation of these segments
-			version := NewShardClusterVersion(versionID, allocations, sc.currentVersion)
-			sc.versions.Store(versionID, version)
-
-			// force release means current distribution has error
-			if !force {
-				// currentVersion shall be not nil
-				if sc.currentVersion != nil {
-					// wait for last version search done
-					<-sc.currentVersion.Expire()
-					lastVersion = sc.currentVersion
-				}
-			}
-
-			// set current version to new one
-			sc.currentVersion = version*/
 		var entries []SegmentEntry
-		//shardCluster.forceRemoveSegment(action.GetSegmentID())
 		if req.Scope != querypb.DataScope_Streaming {
 			entries = lo.Map(req.GetSegmentIDs(), func(segmentID int64, _ int) SegmentEntry {
 				nodeID := req.GetNodeID()
