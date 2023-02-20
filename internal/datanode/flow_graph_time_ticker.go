@@ -66,12 +66,6 @@ func (mt *mergedTimeTickerSender) bufferTs(ts Timestamp, segmentIDs []int64) {
 	for _, sid := range segmentIDs {
 		mt.segmentIDs[sid] = struct{}{}
 	}
-
-	if !mt.lastSent.IsZero() && time.Since(mt.lastSent) > time.Millisecond*100 {
-		mt.cond.L.Lock()
-		defer mt.cond.L.Unlock()
-		mt.cond.Signal()
-	}
 }
 
 func (mt *mergedTimeTickerSender) tick() {
@@ -118,13 +112,19 @@ func (mt *mergedTimeTickerSender) work() {
 			for sid := range mt.segmentIDs {
 				sids = append(sids, sid)
 			}
-			mt.segmentIDs = make(map[int64]struct{})
+
+			// we will reset the timer but not the segmentIDs, since if we sent the timetick fail we may block forever due to flush stuck
 			lastTs = mt.ts
 			mt.lastSent = time.Now()
 
 			if err := mt.send(mt.ts, sids); err != nil {
 				log.Error("send hard time tick failed", zap.Error(err))
+				mt.mu.Unlock()
+				continue
 			}
+
+			mt.segmentIDs = make(map[int64]struct{})
+
 		}
 		mt.mu.Unlock()
 	}

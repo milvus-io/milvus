@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/metautil"
+	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -440,10 +441,6 @@ func (m *meta) UpdateFlushSegmentsInfo(
 	defer m.Unlock()
 
 	segment := m.segments.GetSegment(segmentID)
-	if importing {
-		m.segments.SetRowCount(segmentID, segment.currRows)
-		segment = m.segments.GetSegment(segmentID)
-	}
 	if segment == nil || !isSegmentHealthy(segment) {
 		log.Warn("meta update: update flush segments info - segment not found",
 			zap.Int64("segment ID", segmentID),
@@ -532,20 +529,46 @@ func (m *meta) UpdateFlushSegmentsInfo(
 		s.StartPosition = pos.GetStartPosition()
 		modSegments[pos.GetSegmentID()] = s
 	}
-	for _, cp := range checkpoints {
-		s := getClonedSegment(cp.GetSegmentID())
-		if s == nil {
-			continue
-		}
 
-		if s.DmlPosition != nil && s.DmlPosition.Timestamp >= cp.Position.Timestamp {
-			// segment position in etcd is larger than checkpoint, then dont change it
-			continue
+	if importing {
+		s := clonedSegment
+		count := segmentutil.CalcRowCountFromBinLog(s.SegmentInfo)
+		if count != segment.currRows {
+			log.Info("check point reported inconsistent with bin log row count",
+				zap.Int64("segment ID", segment.GetID()),
+				zap.Int64("current rows (wrong)", segment.currRows),
+				zap.Int64("segment bin log row count (correct)", count))
 		}
+		s.NumOfRows = count
+		modSegments[segmentID] = s
+	} else {
+		for _, cp := range checkpoints {
+			if cp.SegmentID != segmentID {
+				// Don't think this is gonna to happen, ignore for now.
+				log.Warn("checkpoint in segment is not same as flush segment to update, igreo", zap.Int64("current", segmentID), zap.Int64("checkpoint segment", cp.SegmentID))
+				continue
+			}
+			s := clonedSegment
 
-		s.DmlPosition = cp.GetPosition()
-		s.NumOfRows = cp.GetNumOfRows()
-		modSegments[cp.GetSegmentID()] = s
+			if s.DmlPosition != nil && s.DmlPosition.Timestamp >= cp.Position.Timestamp {
+				log.Warn("checkpoint in segment is larger than reported", zap.Any("current", s.GetDmlPosition()), zap.Any("reported", cp.GetPosition()))
+				// segment position in etcd is larger than checkpoint, then dont change it
+				continue
+			}
+
+			count := segmentutil.CalcRowCountFromBinLog(s.SegmentInfo)
+			// count should smaller than or equal to cp reported
+			if count != cp.NumOfRows {
+				log.Info("check point reported inconsistent with bin log row count",
+					zap.Int64("segment ID", segment.GetID()),
+					zap.Int64("check point (wrong)", cp.NumOfRows),
+					zap.Int64("segment bin log row count (correct)", count))
+			}
+			s.NumOfRows = count
+
+			s.DmlPosition = cp.GetPosition()
+			modSegments[cp.GetSegmentID()] = s
+		}
 	}
 	segments := make([]*datapb.SegmentInfo, 0, len(modSegments))
 	for _, seg := range modSegments {

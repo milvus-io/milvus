@@ -35,9 +35,8 @@ import (
 const (
 	flushTimeout = 15 * time.Second
 	// TODO: evaluate and update import timeout.
-	importTimeout     = 3 * time.Hour
-	reCollectTimeout  = 5 * time.Second
-	addSegmentTimeout = 30 * time.Second
+	importTimeout    = 3 * time.Hour
+	reCollectTimeout = 5 * time.Second
 )
 
 // SessionManager provides the grpc interfaces of cluster
@@ -207,15 +206,11 @@ func (c *SessionManager) execImport(ctx context.Context, nodeID int64, itr *data
 }
 
 // ReCollectSegmentStats collects segment stats info from DataNodes, after DataCoord reboots.
-func (c *SessionManager) ReCollectSegmentStats(ctx context.Context, nodeID int64) {
-	go c.execReCollectSegmentStats(ctx, nodeID)
-}
-
-func (c *SessionManager) execReCollectSegmentStats(ctx context.Context, nodeID int64) {
+func (c *SessionManager) ReCollectSegmentStats(ctx context.Context, nodeID int64) error {
 	cli, err := c.getClient(ctx, nodeID)
 	if err != nil {
 		log.Warn("failed to get dataNode client", zap.Int64("DataNode ID", nodeID), zap.Error(err))
-		return
+		return err
 	}
 	ctx, cancel := context.WithTimeout(ctx, reCollectTimeout)
 	defer cancel()
@@ -226,13 +221,14 @@ func (c *SessionManager) execReCollectSegmentStats(ctx context.Context, nodeID i
 		),
 	})
 	if err := VerifyResponse(resp, err); err != nil {
-		log.Error("re-collect segment stats call failed",
+		log.Warn("re-collect segment stats call failed",
 			zap.Int64("DataNode ID", nodeID), zap.Error(err))
-	} else {
-		log.Info("re-collect segment stats call succeeded",
-			zap.Int64("DataNode ID", nodeID),
-			zap.Int64s("segment stat collected", resp.GetSegResent()))
+		return err
 	}
+	log.Info("re-collect segment stats call succeeded",
+		zap.Int64("DataNode ID", nodeID),
+		zap.Int64s("segment stat collected", resp.GetSegResent()))
+	return nil
 }
 
 func (c *SessionManager) GetCompactionState() map[int64]*datapb.CompactionStateResult {
