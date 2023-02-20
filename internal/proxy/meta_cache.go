@@ -651,7 +651,7 @@ func (m *MetaCache) GetShards(ctx context.Context, withCache bool, collectionNam
 
 		if shardLeaders != nil {
 			metrics.ProxyCacheStatsCounter.WithLabelValues(strconv.FormatInt(Params.ProxyCfg.GetNodeID(), 10), method, metrics.CacheHitLabel).Inc()
-			iterator := info.shardLeaders.GetReader()
+			iterator := shardLeaders.GetReader()
 			return iterator.Shuffle(), nil
 		}
 
