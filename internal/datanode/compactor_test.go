@@ -56,6 +56,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 
 		task := &compactionTask{
 			Channel: channel,
+			done:    make(chan struct{}, 1),
 		}
 
 		_, _, _, err = task.getSegmentMeta(100)
@@ -174,7 +175,9 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			}
 
 			for _, test := range tests {
-				task := &compactionTask{}
+				task := &compactionTask{
+					done: make(chan struct{}, 1),
+				}
 				t.Run(test.description, func(t *testing.T) {
 					if test.isvalid {
 						pk2ts, db, err := task.mergeDeltalogs(test.dBlobs, test.timetravel)
@@ -250,7 +253,9 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 						dBlobs[test.segIDC] = d
 					}
 
-					task := &compactionTask{}
+					task := &compactionTask{
+						done: make(chan struct{}, 1),
+					}
 					pk2ts, db, err := task.mergeDeltalogs(dBlobs, test.timetravel)
 					assert.NoError(t, err)
 					assert.Equal(t, test.expectedpk2ts, len(pk2ts))
@@ -296,7 +301,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 				1: 10000,
 			}
 
-			ct := &compactionTask{Channel: channel, downloader: mockbIO, uploader: mockbIO}
+			ct := &compactionTask{Channel: channel, downloader: mockbIO, uploader: mockbIO, done: make(chan struct{}, 1)}
 			inPaths, statsPaths, numOfRow, err := ct.merge(context.Background(), allPaths, 2, 0, meta, dm)
 			assert.NoError(t, err)
 			assert.Equal(t, int64(2), numOfRow)
@@ -332,7 +337,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 
 			dm := map[interface{}]Timestamp{}
 
-			ct := &compactionTask{Channel: channel, downloader: mockbIO, uploader: mockbIO}
+			ct := &compactionTask{Channel: channel, downloader: mockbIO, uploader: mockbIO, done: make(chan struct{}, 1)}
 			inPaths, statsPaths, numOfRow, err := ct.merge(context.Background(), allPaths, 2, 0, meta, dm)
 			assert.NoError(t, err)
 			assert.Equal(t, int64(2), numOfRow)
@@ -375,6 +380,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 				plan: &datapb.CompactionPlan{
 					CollectionTtl: 864000,
 				},
+				done: make(chan struct{}, 1),
 			}
 			inPaths, statsPaths, numOfRow, err := ct.merge(context.Background(), allPaths, 2, 0, meta, dm)
 			assert.NoError(t, err)
@@ -409,7 +415,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 				1: 10000,
 			}
 
-			ct := &compactionTask{Channel: channel, downloader: mockbIO, uploader: mockbIO}
+			ct := &compactionTask{Channel: channel, downloader: mockbIO, uploader: mockbIO, done: make(chan struct{}, 1)}
 			_, _, _, err = ct.merge(context.Background(), allPaths, 2, 0, &etcdpb.CollectionMeta{
 				Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 					{DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{
@@ -446,7 +452,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 				1: 10000,
 			}
 
-			ct := &compactionTask{Channel: channel, downloader: mockbIO, uploader: mockbIO}
+			ct := &compactionTask{Channel: channel, downloader: mockbIO, uploader: mockbIO, done: make(chan struct{}, 1)}
 
 			_, _, _, err = ct.merge(context.Background(), allPaths, 2, 0, &etcdpb.CollectionMeta{
 				Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
@@ -464,6 +470,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 				plan: &datapb.CompactionPlan{
 					CollectionTtl: math.MaxInt64,
 				},
+				done: make(chan struct{}, 1),
 			}
 
 			res := ct.isExpiredEntity(0, genTimestamp())
@@ -487,6 +494,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 				plan: &datapb.CompactionPlan{
 					CollectionTtl: 0,
 				},
+				done: make(chan struct{}, 1),
 			}
 			res := ct.isExpiredEntity(0, genTimestamp())
 			assert.Equal(t, false, res)
@@ -509,6 +517,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 				plan: &datapb.CompactionPlan{
 					CollectionTtl: 864000,
 				},
+				done: make(chan struct{}, 1),
 			}
 			res := ct.isExpiredEntity(0, genTimestamp())
 			assert.Equal(t, true, res)
@@ -570,6 +579,7 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 		emptyTask := &compactionTask{
 			ctx:    ctx,
 			cancel: cancel,
+			done:   make(chan struct{}, 1),
 		}
 
 		plan := &datapb.CompactionPlan{
@@ -591,6 +601,7 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 		_, err = emptyTask.compact()
 		assert.Error(t, err)
 
+		emptyTask.complete()
 		emptyTask.stop()
 	})
 
