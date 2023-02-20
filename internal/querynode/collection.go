@@ -101,6 +101,7 @@ func (c *Collection) removePartitionID(partitionID UniqueID) {
 	c.partitionIDs = tmpIDs
 }
 
+// not used
 // addVChannels adds virtual channels to collection
 func (c *Collection) addVChannels(channels []Channel) {
 	c.channelMu.Lock()
@@ -151,7 +152,7 @@ func (c *Collection) removeVChannel(channel Channel) {
 		zap.String("channel", channel),
 	)
 
-	metrics.QueryNodeNumDmlChannels.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Sub(float64(len(c.vChannels)))
+	metrics.QueryNodeNumDmlChannels.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(len(c.vChannels)))
 }
 
 // addPChannels add physical channels to physical channels of collection
@@ -240,6 +241,8 @@ func (c *Collection) AddChannels(toLoadChannels []Channel, VPChannels map[string
 			}
 		}
 	}
+
+	metrics.QueryNodeNumDmlChannels.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(len(c.vChannels)))
 	return retVChannels
 }
 
@@ -261,6 +264,7 @@ func (c *Collection) isPChannelExist(channel string) bool {
 	return false
 }
 
+// not used
 // addVChannels add virtual channels to collection
 func (c *Collection) addVDeltaChannels(channels []Channel) {
 	c.channelMu.Lock()
@@ -301,7 +305,7 @@ func (c *Collection) removeVDeltaChannel(channel Channel) {
 		zap.String("channel", channel),
 	)
 
-	metrics.QueryNodeNumDeltaChannels.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Sub(float64(len(c.vDeltaChannels)))
+	metrics.QueryNodeNumDeltaChannels.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(len(c.vDeltaChannels)))
 }
 
 func (c *Collection) AddVDeltaChannels(toLoadChannels []Channel, VPChannels map[string]string) []Channel {
@@ -318,6 +322,8 @@ func (c *Collection) AddVDeltaChannels(toLoadChannels []Channel, VPChannels map[
 			}
 		}
 	}
+
+	metrics.QueryNodeNumDeltaChannels.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID())).Set(float64(len(c.vDeltaChannels)))
 	return retVDeltaChannels
 }
 
