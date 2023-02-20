@@ -34,6 +34,7 @@ class MilvusConan(ConanFile):
         "bison/3.5.3",
         "flex/2.6.4",
         "xsimd/9.0.1",
+        "xz_utils/5.4.0",
         "folly/2022.10.31.01@milvus/dev",
         "velox/2023.02.07.01@milvus/dev",
     )
