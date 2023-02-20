@@ -134,7 +134,7 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
 
     segment->mask_with_delete(bitset_holder, active_count, timestamp_);
     // if bitset_holder is all 1's, we got empty result
-    if (bitset_holder.count() == bitset_holder.size()) {
+    if (bitset_holder.all()) {
         retrieve_result_opt_ = std::move(retrieve_result);
         return;
     }
