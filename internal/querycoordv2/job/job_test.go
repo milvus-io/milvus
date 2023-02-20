@@ -343,7 +343,7 @@ func (suite *JobSuite) TestLoadCollectionWithReplicas() {
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
-		suite.ErrorIs(err, ErrNoEnoughNode)
+		suite.ErrorContains(err, meta.ErrNodeNotEnough.Error())
 	}
 }
 
@@ -605,7 +605,7 @@ func (suite *JobSuite) TestLoadPartitionWithReplicas() {
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
-		suite.ErrorIs(err, ErrNoEnoughNode)
+		suite.ErrorContains(err, meta.ErrNodeNotEnough.Error())
 	}
 }
 

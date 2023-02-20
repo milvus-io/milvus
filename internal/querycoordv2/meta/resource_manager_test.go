@@ -111,16 +111,37 @@ func (suite *ResourceManagerSuite) TestManipulateNode() {
 	err = suite.manager.AssignNode("rg1", 1)
 	suite.NoError(err)
 	err = suite.manager.AssignNode("rg2", 1)
-	println(err.Error())
 	suite.ErrorIs(err, ErrNodeAlreadyAssign)
 
 	// transfer node between rgs
-	err = suite.manager.TransferNode("rg1", "rg2")
+	err = suite.manager.TransferNode("rg1", "rg2", 1)
 	suite.NoError(err)
 
 	// transfer meet non exist rg
-	err = suite.manager.TransferNode("rgggg", "rg2")
+	err = suite.manager.TransferNode("rgggg", "rg2", 1)
 	suite.ErrorIs(err, ErrRGNotExist)
+
+	err = suite.manager.TransferNode("rg1", "rg2", 5)
+	suite.ErrorIs(err, ErrNodeNotEnough)
+
+	suite.manager.nodeMgr.Add(session.NewNodeInfo(11, "localhost"))
+	suite.manager.nodeMgr.Add(session.NewNodeInfo(12, "localhost"))
+	suite.manager.nodeMgr.Add(session.NewNodeInfo(13, "localhost"))
+	suite.manager.nodeMgr.Add(session.NewNodeInfo(14, "localhost"))
+	suite.manager.AssignNode("rg1", 11)
+	suite.manager.AssignNode("rg1", 12)
+	suite.manager.AssignNode("rg1", 13)
+	suite.manager.AssignNode("rg1", 14)
+
+	rg1, err := suite.manager.GetResourceGroup("rg1")
+	suite.NoError(err)
+	rg2, err := suite.manager.GetResourceGroup("rg2")
+	suite.NoError(err)
+	suite.Equal(rg1.GetCapacity(), 4)
+	suite.Equal(rg2.GetCapacity(), 1)
+	suite.manager.TransferNode("rg1", "rg2", 3)
+	suite.Equal(rg1.GetCapacity(), 1)
+	suite.Equal(rg2.GetCapacity(), 4)
 }
 
 func (suite *ResourceManagerSuite) TestHandleNodeUp() {
@@ -153,14 +174,14 @@ func (suite *ResourceManagerSuite) TestHandleNodeUp() {
 	suite.NoError(err)
 	defaultRG, err := suite.manager.GetResourceGroup(DefaultResourceGroupName)
 	suite.NoError(err)
-	suite.Equal(0, defaultRG.GetCapacity())
+	suite.Equal(DefaultResourceGroupCapacity, defaultRG.GetCapacity())
 	suite.manager.HandleNodeUp(101)
 	rg, err = suite.manager.GetResourceGroup("rg1")
 	suite.NoError(err)
 	suite.Equal(rg.GetCapacity(), 3)
 	suite.Equal(len(rg.GetNodes()), 2)
 	suite.False(suite.manager.ContainsNode("rg1", 101))
-	suite.Equal(1, defaultRG.GetCapacity())
+	suite.Equal(DefaultResourceGroupCapacity, defaultRG.GetCapacity())
 }
 
 func (suite *ResourceManagerSuite) TestRecover() {
@@ -281,6 +302,42 @@ func (suite *ResourceManagerSuite) TestAutoRecover() {
 	suite.manager.AutoRecoverResourceGroup("rg")
 	lackNodes = suite.manager.CheckLackOfNode("rg")
 	suite.Equal(lackNodes, 0)
+}
+
+func (suite *ResourceManagerSuite) TestDefaultResourceGroup() {
+	for i := 0; i < 10; i++ {
+		suite.manager.nodeMgr.Add(session.NewNodeInfo(int64(i), "localhost"))
+	}
+	defaultRG, err := suite.manager.GetResourceGroup(DefaultResourceGroupName)
+	suite.NoError(err)
+	suite.Equal(defaultRG.GetCapacity(), DefaultResourceGroupCapacity)
+	suite.Len(defaultRG.GetNodes(), 0)
+
+	suite.manager.HandleNodeUp(1)
+	suite.manager.HandleNodeUp(2)
+	suite.manager.HandleNodeUp(3)
+	suite.Equal(defaultRG.GetCapacity(), DefaultResourceGroupCapacity)
+	suite.Len(defaultRG.GetNodes(), 3)
+
+	// shutdown node 1 and 2
+	suite.manager.nodeMgr.Remove(1)
+	suite.manager.nodeMgr.Remove(2)
+
+	defaultRG, err = suite.manager.GetResourceGroup(DefaultResourceGroupName)
+	suite.NoError(err)
+	suite.Equal(defaultRG.GetCapacity(), DefaultResourceGroupCapacity)
+	suite.Len(defaultRG.GetNodes(), 1)
+
+	suite.manager.HandleNodeUp(4)
+	suite.manager.HandleNodeUp(5)
+	suite.Equal(defaultRG.GetCapacity(), DefaultResourceGroupCapacity)
+	suite.Len(defaultRG.GetNodes(), 3)
+
+	suite.manager.HandleNodeUp(7)
+	suite.manager.HandleNodeUp(8)
+	suite.manager.HandleNodeUp(9)
+	suite.Equal(defaultRG.GetCapacity(), DefaultResourceGroupCapacity)
+	suite.Len(defaultRG.GetNodes(), 6)
 }
 
 func (suite *ResourceManagerSuite) TearDownSuite() {

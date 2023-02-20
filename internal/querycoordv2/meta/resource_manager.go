@@ -51,6 +51,7 @@ var (
 )
 
 var DefaultResourceGroupName = "__default_resource_group"
+var DefaultResourceGroupCapacity = 1000000
 
 type ResourceGroup struct {
 	nodes    UniqueSet
@@ -67,50 +68,27 @@ func NewResourceGroup(capacity int) *ResourceGroup {
 }
 
 // assign node to resource group
-func (rg *ResourceGroup) assignNode(id int64) error {
+func (rg *ResourceGroup) assignNode(id int64, deltaCapacity int) error {
 	if rg.containsNode(id) {
 		return ErrNodeAlreadyAssign
 	}
 
 	rg.nodes.Insert(id)
-	rg.capacity++
+	rg.capacity += deltaCapacity
 
 	return nil
 }
 
 // unassign node from resource group
-func (rg *ResourceGroup) unassignNode(id int64) error {
+func (rg *ResourceGroup) unassignNode(id int64, deltaCapacity int) error {
 	if !rg.containsNode(id) {
 		// remove non exist node should be tolerable
 		return nil
 	}
 
 	rg.nodes.Remove(id)
-	rg.capacity--
+	rg.capacity += deltaCapacity
 
-	return nil
-}
-
-func (rg *ResourceGroup) handleNodeUp(id int64) error {
-	if rg.LackOfNodes() == 0 {
-		return ErrRGIsFull
-	}
-
-	if rg.containsNode(id) {
-		return ErrNodeAlreadyAssign
-	}
-
-	rg.nodes.Insert(id)
-	return nil
-}
-
-func (rg *ResourceGroup) handleNodeDown(id int64) error {
-	if !rg.containsNode(id) {
-		// remove non exist node should be tolerable
-		return nil
-	}
-
-	rg.nodes.Remove(id)
 	return nil
 }
 
@@ -140,7 +118,7 @@ type ResourceManager struct {
 
 func NewResourceManager(store Store, nodeMgr *session.NodeManager) *ResourceManager {
 	groupMap := make(map[string]*ResourceGroup)
-	groupMap[DefaultResourceGroupName] = NewResourceGroup(0)
+	groupMap[DefaultResourceGroupName] = NewResourceGroup(DefaultResourceGroupCapacity)
 	return &ResourceManager{
 		groups:  groupMap,
 		store:   store,
@@ -240,9 +218,14 @@ func (rm *ResourceManager) assignNode(rgName string, node int64) error {
 
 	newNodes := rm.groups[rgName].GetNodes()
 	newNodes = append(newNodes, node)
+	deltaCapacity := 1
+	if rgName == DefaultResourceGroupName {
+		// default rg capacity won't be changed
+		deltaCapacity = 0
+	}
 	err := rm.store.SaveResourceGroup(&querypb.ResourceGroup{
 		Name:     rgName,
-		Capacity: int32(rm.groups[rgName].GetCapacity()) + 1,
+		Capacity: int32(rm.groups[rgName].GetCapacity() + deltaCapacity),
 		Nodes:    newNodes,
 	})
 	if err != nil {
@@ -254,7 +237,7 @@ func (rm *ResourceManager) assignNode(rgName string, node int64) error {
 		return err
 	}
 
-	err = rm.groups[rgName].assignNode(node)
+	err = rm.groups[rgName].assignNode(node, deltaCapacity)
 	if err != nil {
 		return err
 	}
@@ -289,7 +272,7 @@ func (rm *ResourceManager) unassignNode(rgName string, node int64) error {
 		return ErrRGNotExist
 	}
 
-	if rm.nodeMgr.Get(node) == nil {
+	if rm.nodeMgr.Get(node) == nil || !rm.groups[rgName].containsNode(node) {
 		// remove non exist node should be tolerable
 		return nil
 	}
@@ -301,9 +284,15 @@ func (rm *ResourceManager) unassignNode(rgName string, node int64) error {
 		}
 	}
 
+	deltaCapacity := -1
+	if rgName == DefaultResourceGroupName {
+		// default rg capacity won't be changed
+		deltaCapacity = 0
+	}
+
 	err := rm.store.SaveResourceGroup(&querypb.ResourceGroup{
 		Name:     rgName,
-		Capacity: int32(rm.groups[rgName].GetCapacity()) - 1,
+		Capacity: int32(rm.groups[rgName].GetCapacity() + deltaCapacity),
 		Nodes:    newNodes,
 	})
 	if err != nil {
@@ -316,7 +305,7 @@ func (rm *ResourceManager) unassignNode(rgName string, node int64) error {
 	}
 
 	rm.checkRGNodeStatus(rgName)
-	err = rm.groups[rgName].unassignNode(node)
+	err = rm.groups[rgName].unassignNode(node, deltaCapacity)
 	if err != nil {
 		return err
 	}
@@ -460,8 +449,8 @@ func (rm *ResourceManager) HandleNodeUp(node int64) (string, error) {
 	}
 
 	// assign new node to default rg
-	rm.groups[DefaultResourceGroupName].assignNode(node)
-	log.Info("HandleNodeUp: assign node to default resource group",
+	rm.groups[DefaultResourceGroupName].assignNode(node, 0)
+	log.Info("HandleNodeUp: add node to default resource group",
 		zap.String("rgName", DefaultResourceGroupName),
 		zap.Int64("node", node),
 	)
@@ -482,13 +471,13 @@ func (rm *ResourceManager) HandleNodeDown(node int64) (string, error) {
 			zap.String("rgName", rgName),
 			zap.Int64("node", node),
 		)
-		return rgName, rm.groups[rgName].handleNodeDown(node)
+		return rgName, rm.groups[rgName].unassignNode(node, 0)
 	}
 
 	return "", ErrNodeNotAssignToRG
 }
 
-func (rm *ResourceManager) TransferNode(from, to string) error {
+func (rm *ResourceManager) TransferNode(from string, to string, numNode int) error {
 	rm.rwmutex.Lock()
 	defer rm.rwmutex.Unlock()
 
@@ -496,57 +485,87 @@ func (rm *ResourceManager) TransferNode(from, to string) error {
 		return ErrRGNotExist
 	}
 
-	if len(rm.groups[from].nodes) == 0 {
-		return ErrRGIsEmpty
-	}
-
 	rm.checkRGNodeStatus(from)
 	rm.checkRGNodeStatus(to)
+	if len(rm.groups[from].nodes) < numNode {
+		return ErrNodeNotEnough
+	}
 
 	//todo: a better way to choose a node with least balance cost
-	node := rm.groups[from].GetNodes()[0]
-	if err := rm.transferNodeInStore(from, to, node); err != nil {
+	movedNodes, err := rm.transferNodeInStore(from, to, numNode)
+	if err != nil {
 		return err
 	}
 
-	err := rm.groups[from].unassignNode(node)
-	if err != nil {
-		// interrupt transfer, unreachable logic path
-		return err
+	deltaFromCapacity := -1
+	if from == DefaultResourceGroupName {
+		deltaFromCapacity = 0
+	}
+	deltaToCapacity := 1
+	if to == DefaultResourceGroupName {
+		deltaToCapacity = 0
 	}
 
-	err = rm.groups[to].assignNode(node)
-	if err != nil {
-		// interrupt transfer, unreachable logic path
-		return err
+	for _, node := range movedNodes {
+		err := rm.groups[from].unassignNode(node, deltaFromCapacity)
+		if err != nil {
+			// interrupt transfer, unreachable logic path
+			return err
+		}
+
+		err = rm.groups[to].assignNode(node, deltaToCapacity)
+		if err != nil {
+			// interrupt transfer, unreachable logic path
+			return err
+		}
 	}
 
 	return nil
 }
 
-func (rm *ResourceManager) transferNodeInStore(from string, to string, node int64) error {
+func (rm *ResourceManager) transferNodeInStore(from string, to string, numNode int) ([]int64, error) {
+	availableNodes := rm.groups[from].GetNodes()
+	if len(availableNodes) < numNode {
+		return nil, ErrNodeNotEnough
+	}
+
+	movedNodes := make([]int64, 0, numNode)
 	fromNodeList := make([]int64, 0)
-	for nid := range rm.groups[from].nodes {
-		if nid != node {
-			fromNodeList = append(fromNodeList, nid)
+	toNodeList := rm.groups[to].GetNodes()
+	for i := 0; i < len(availableNodes); i++ {
+		if i < numNode {
+			movedNodes = append(movedNodes, availableNodes[i])
+			toNodeList = append(toNodeList, availableNodes[i])
+		} else {
+			fromNodeList = append(fromNodeList, availableNodes[i])
 		}
 	}
-	toNodeList := rm.groups[to].GetNodes()
-	toNodeList = append(toNodeList, node)
+
+	fromCapacity := rm.groups[from].GetCapacity()
+	if from != DefaultResourceGroupName {
+		// default rg capacity won't be changed
+		fromCapacity = rm.groups[from].GetCapacity() - numNode
+	}
 
 	fromRG := &querypb.ResourceGroup{
 		Name:     from,
-		Capacity: int32(rm.groups[from].GetCapacity()) - 1,
+		Capacity: int32(fromCapacity),
 		Nodes:    fromNodeList,
+	}
+
+	toCapacity := rm.groups[to].GetCapacity()
+	if from != DefaultResourceGroupName {
+		// default rg capacity won't be changed
+		toCapacity = rm.groups[to].GetCapacity() + numNode
 	}
 
 	toRG := &querypb.ResourceGroup{
 		Name:     to,
-		Capacity: int32(rm.groups[to].GetCapacity()) + 1,
+		Capacity: int32(toCapacity),
 		Nodes:    toNodeList,
 	}
 
-	return rm.store.SaveResourceGroup(fromRG, toRG)
+	return movedNodes, rm.store.SaveResourceGroup(fromRG, toRG)
 }
 
 // auto recover rg, return recover used node num
@@ -570,7 +589,7 @@ func (rm *ResourceManager) AutoRecoverResourceGroup(rgName string) (int, error) 
 			return i + 1, err
 		}
 
-		err = rm.groups[rgName].handleNodeUp(node)
+		err = rm.groups[rgName].assignNode(node, 0)
 		if err != nil {
 			// roll back, unreachable logic path
 			rm.assignNode(DefaultResourceGroupName, node)
@@ -589,10 +608,18 @@ func (rm *ResourceManager) Recover() error {
 	}
 
 	for _, rg := range rgs {
-		rm.groups[rg.GetName()] = NewResourceGroup(0)
-		for _, node := range rg.GetNodes() {
-			rm.groups[rg.GetName()].assignNode(node)
+		if rg.GetName() == DefaultResourceGroupName {
+			rm.groups[rg.GetName()] = NewResourceGroup(DefaultResourceGroupCapacity)
+			for _, node := range rg.GetNodes() {
+				rm.groups[rg.GetName()].assignNode(node, 0)
+			}
+		} else {
+			rm.groups[rg.GetName()] = NewResourceGroup(0)
+			for _, node := range rg.GetNodes() {
+				rm.groups[rg.GetName()].assignNode(node, 1)
+			}
 		}
+
 		rm.checkRGNodeStatus(rg.GetName())
 		log.Info("Recover resource group",
 			zap.String("rgName", rg.GetName()),
@@ -613,7 +640,7 @@ func (rm *ResourceManager) checkRGNodeStatus(rgName string) {
 				zap.Int64("nodeID", node),
 			)
 
-			rm.groups[rgName].handleNodeDown(node)
+			rm.groups[rgName].unassignNode(node, 0)
 		}
 	}
 }
