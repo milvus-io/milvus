@@ -65,22 +65,10 @@ const (
 	DiskAnnMinDim = 32
 	DiskAnnMaxDim = 1024
 
-	NgtMinEdgeSize = 1
-	NgtMaxEdgeSize = 200
-
 	HNSWMinEfConstruction = 8
 	HNSWMaxEfConstruction = 512
 	HNSWMinM              = 4
 	HNSWMaxM              = 64
-
-	MinKNNG              = 5
-	MaxKNNG              = 300
-	MinSearchLength      = 10
-	MaxSearchLength      = 300
-	MinOutDegree         = 5
-	MaxOutDegree         = 300
-	MinCandidatePoolSize = 50
-	MaxCandidatePoolSize = 1000
 
 	MinNTrees = 1
 	// too large of n_trees takes much time, if there is real requirement, change this threshold.
@@ -95,23 +83,11 @@ const (
 	NBITS = "nbits"
 	IVFM  = "m"
 
-	KNNG         = "knng"
-	SearchLength = "search_length"
-	OutDegree    = "out_degree"
-	CANDIDATE    = "candidate_pool_size"
-
 	EFConstruction = "efConstruction"
 	HNSWM          = "M"
 
 	PQM    = "PQM"
 	NTREES = "n_trees"
-
-	EdgeSize                  = "edge_size"
-	ForcedlyPrunedEdgeSize    = "forcedly_pruned_edge_size"
-	SelectivelyPrunedEdgeSize = "selectively_pruned_edge_size"
-
-	OutgoingEdgeSize = "outgoing_edge_size"
-	IncomingEdgeSize = "incoming_edge_size"
 
 	IndexMode = "index_mode"
 	CPUMode   = "CPU"
@@ -324,41 +300,6 @@ func newBinIVFConfAdapter() *BinIVFConfAdapter {
 	return &BinIVFConfAdapter{}
 }
 
-type NSGConfAdapter struct {
-	BaseConfAdapter
-}
-
-// CheckTrain checks if a nsg index can be built with specific parameters.
-func (adapter *NSGConfAdapter) CheckTrain(params map[string]string) bool {
-	if !CheckStrByValues(params, Metric, METRICS) {
-		return false
-	}
-
-	if !CheckIntByRange(params, KNNG, MinKNNG, MaxKNNG) {
-		return false
-	}
-
-	if !CheckIntByRange(params, SearchLength, MinSearchLength, MaxSearchLength) {
-		return false
-	}
-
-	if !CheckIntByRange(params, OutDegree, MinOutDegree, MaxOutDegree) {
-		return false
-	}
-
-	if !CheckIntByRange(params, CANDIDATE, MinCandidatePoolSize, MaxCandidatePoolSize) {
-		return false
-	}
-
-	// skip checking the number of rows
-
-	return true
-}
-
-func newNSGConfAdapter() *NSGConfAdapter {
-	return &NSGConfAdapter{}
-}
-
 // HNSWConfAdapter checks if a hnsw index can be built.
 type HNSWConfAdapter struct {
 	BaseConfAdapter
@@ -397,143 +338,6 @@ func (adapter *ANNOYConfAdapter) CheckTrain(params map[string]string) bool {
 
 func newANNOYConfAdapter() *ANNOYConfAdapter {
 	return &ANNOYConfAdapter{}
-}
-
-// RHNSWFlatConfAdapter checks if a rhnsw flat index can be built.
-type RHNSWFlatConfAdapter struct {
-	BaseConfAdapter
-}
-
-// CheckTrain checks if a rhnsw flat index can be built with specific parameters.
-func (adapter *RHNSWFlatConfAdapter) CheckTrain(params map[string]string) bool {
-	if !CheckIntByRange(params, EFConstruction, HNSWMinEfConstruction, HNSWMaxEfConstruction) {
-		return false
-	}
-
-	if !CheckIntByRange(params, HNSWM, HNSWMinM, HNSWMaxM) {
-		return false
-	}
-
-	return adapter.BaseConfAdapter.CheckTrain(params)
-}
-
-func newRHNSWFlatConfAdapter() *RHNSWFlatConfAdapter {
-	return &RHNSWFlatConfAdapter{}
-}
-
-// RHNSWPQConfAdapter checks if a rhnsw pq index can be built.
-type RHNSWPQConfAdapter struct {
-	BaseConfAdapter
-	IVFPQConfAdapter
-}
-
-// CheckTrain checks if a rhnsw pq index can be built with specific parameters.
-func (adapter *RHNSWPQConfAdapter) CheckTrain(params map[string]string) bool {
-	if !adapter.BaseConfAdapter.CheckTrain(params) {
-		return false
-	}
-
-	if !CheckIntByRange(params, EFConstruction, HNSWMinEfConstruction, HNSWMaxEfConstruction) {
-		return false
-	}
-
-	if !CheckIntByRange(params, HNSWM, HNSWMinM, HNSWMaxM) {
-		return false
-	}
-
-	dimension, _ := strconv.Atoi(params[DIM])
-	pqmStr, ok := params[PQM]
-	if !ok {
-		return false
-	}
-	pqm, err := strconv.Atoi(pqmStr)
-	if err != nil || pqm == 0 {
-		return false
-	}
-
-	return adapter.IVFPQConfAdapter.checkCPUPQParams(dimension, pqm)
-}
-
-func newRHNSWPQConfAdapter() *RHNSWPQConfAdapter {
-	return &RHNSWPQConfAdapter{}
-}
-
-// RHNSWSQConfAdapter checks if a rhnsw sq index can be built.
-type RHNSWSQConfAdapter struct {
-	BaseConfAdapter
-}
-
-// CheckTrain checks if a rhnsw sq index can be built with specific parameters.
-func (adapter *RHNSWSQConfAdapter) CheckTrain(params map[string]string) bool {
-	if !CheckIntByRange(params, EFConstruction, HNSWMinEfConstruction, HNSWMaxEfConstruction) {
-		return false
-	}
-
-	if !CheckIntByRange(params, HNSWM, HNSWMinM, HNSWMaxM) {
-		return false
-	}
-
-	return adapter.BaseConfAdapter.CheckTrain(params)
-}
-
-func newRHNSWSQConfAdapter() *RHNSWSQConfAdapter {
-	return &RHNSWSQConfAdapter{}
-}
-
-// NGTPANNGConfAdapter checks if a NGT_PANNG index can be built.
-type NGTPANNGConfAdapter struct {
-	BaseConfAdapter
-}
-
-func (adapter *NGTPANNGConfAdapter) CheckTrain(params map[string]string) bool {
-	if !CheckIntByRange(params, EdgeSize, NgtMinEdgeSize, NgtMaxEdgeSize) {
-		return false
-	}
-
-	if !CheckIntByRange(params, ForcedlyPrunedEdgeSize, NgtMinEdgeSize, NgtMaxEdgeSize) {
-		return false
-	}
-
-	if !CheckIntByRange(params, SelectivelyPrunedEdgeSize, NgtMinEdgeSize, NgtMaxEdgeSize) {
-		return false
-	}
-
-	selectivelyPrunedEdgeSize, _ := strconv.Atoi(params[SelectivelyPrunedEdgeSize])
-	forcedlyPrunedEdgeSize, _ := strconv.Atoi(params[ForcedlyPrunedEdgeSize])
-	if selectivelyPrunedEdgeSize >= forcedlyPrunedEdgeSize {
-		return false
-	}
-
-	return adapter.BaseConfAdapter.CheckTrain(params)
-}
-
-func newNGTPANNGConfAdapter() *NGTPANNGConfAdapter {
-	return &NGTPANNGConfAdapter{}
-}
-
-// NGTONNGConfAdapter checks if a NGT_ONNG index can be built.
-type NGTONNGConfAdapter struct {
-	BaseConfAdapter
-}
-
-func (adapter *NGTONNGConfAdapter) CheckTrain(params map[string]string) bool {
-	if !CheckIntByRange(params, EdgeSize, NgtMinEdgeSize, NgtMaxEdgeSize) {
-		return false
-	}
-
-	if !CheckIntByRange(params, OutgoingEdgeSize, NgtMinEdgeSize, NgtMaxEdgeSize) {
-		return false
-	}
-
-	if !CheckIntByRange(params, IncomingEdgeSize, NgtMinEdgeSize, NgtMaxEdgeSize) {
-		return false
-	}
-
-	return adapter.BaseConfAdapter.CheckTrain(params)
-}
-
-func newNGTONNGConfAdapter() *NGTONNGConfAdapter {
-	return &NGTONNGConfAdapter{}
 }
 
 type DISKANNConfAdapter struct {

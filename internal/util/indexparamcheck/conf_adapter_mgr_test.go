@@ -53,12 +53,6 @@ func Test_GetConfAdapterMgrInstance(t *testing.T) {
 	_, ok = adapter.(*IVFSQConfAdapter)
 	assert.Equal(t, true, ok)
 
-	adapter, err = adapterMgr.GetAdapter(IndexFaissIvfSQ8H)
-	assert.Equal(t, nil, err)
-	assert.NotEqual(t, nil, adapter)
-	_, ok = adapter.(*IVFSQConfAdapter)
-	assert.Equal(t, true, ok)
-
 	adapter, err = adapterMgr.GetAdapter(IndexFaissBinIDMap)
 	assert.Equal(t, nil, err)
 	assert.NotEqual(t, nil, adapter)
@@ -71,52 +65,16 @@ func Test_GetConfAdapterMgrInstance(t *testing.T) {
 	_, ok = adapter.(*BinIVFConfAdapter)
 	assert.Equal(t, true, ok)
 
-	adapter, err = adapterMgr.GetAdapter(IndexNSG)
-	assert.Equal(t, nil, err)
-	assert.NotEqual(t, nil, adapter)
-	_, ok = adapter.(*NSGConfAdapter)
-	assert.Equal(t, true, ok)
-
 	adapter, err = adapterMgr.GetAdapter(IndexHNSW)
 	assert.Equal(t, nil, err)
 	assert.NotEqual(t, nil, adapter)
 	_, ok = adapter.(*HNSWConfAdapter)
 	assert.Equal(t, true, ok)
 
-	adapter, err = adapterMgr.GetAdapter(IndexRHNSWFlat)
-	assert.Equal(t, nil, err)
-	assert.NotEqual(t, nil, adapter)
-	_, ok = adapter.(*RHNSWFlatConfAdapter)
-	assert.Equal(t, true, ok)
-
-	adapter, err = adapterMgr.GetAdapter(IndexRHNSWPQ)
-	assert.Equal(t, nil, err)
-	assert.NotEqual(t, nil, adapter)
-	_, ok = adapter.(*RHNSWPQConfAdapter)
-	assert.Equal(t, true, ok)
-
-	adapter, err = adapterMgr.GetAdapter(IndexRHNSWSQ)
-	assert.Equal(t, nil, err)
-	assert.NotEqual(t, nil, adapter)
-	_, ok = adapter.(*RHNSWSQConfAdapter)
-	assert.Equal(t, true, ok)
-
 	adapter, err = adapterMgr.GetAdapter(IndexANNOY)
 	assert.Equal(t, nil, err)
 	assert.NotEqual(t, nil, adapter)
 	_, ok = adapter.(*ANNOYConfAdapter)
-	assert.Equal(t, true, ok)
-
-	adapter, err = adapterMgr.GetAdapter(IndexNGTPANNG)
-	assert.Equal(t, nil, err)
-	assert.NotEqual(t, nil, adapter)
-	_, ok = adapter.(*NGTPANNGConfAdapter)
-	assert.Equal(t, true, ok)
-
-	adapter, err = adapterMgr.GetAdapter(IndexNGTONNG)
-	assert.Equal(t, nil, err)
-	assert.NotEqual(t, nil, adapter)
-	_, ok = adapter.(*NGTONNGConfAdapter)
 	assert.Equal(t, true, ok)
 }
 
@@ -155,12 +113,6 @@ func TestConfAdapterMgrImpl_GetAdapter(t *testing.T) {
 	_, ok = adapter.(*IVFSQConfAdapter)
 	assert.Equal(t, true, ok)
 
-	adapter, err = adapterMgr.GetAdapter(IndexFaissIvfSQ8H)
-	assert.Equal(t, nil, err)
-	assert.NotEqual(t, nil, adapter)
-	_, ok = adapter.(*IVFSQConfAdapter)
-	assert.Equal(t, true, ok)
-
 	adapter, err = adapterMgr.GetAdapter(IndexFaissBinIDMap)
 	assert.Equal(t, nil, err)
 	assert.NotEqual(t, nil, adapter)
@@ -173,52 +125,16 @@ func TestConfAdapterMgrImpl_GetAdapter(t *testing.T) {
 	_, ok = adapter.(*BinIVFConfAdapter)
 	assert.Equal(t, true, ok)
 
-	adapter, err = adapterMgr.GetAdapter(IndexNSG)
-	assert.Equal(t, nil, err)
-	assert.NotEqual(t, nil, adapter)
-	_, ok = adapter.(*NSGConfAdapter)
-	assert.Equal(t, true, ok)
-
 	adapter, err = adapterMgr.GetAdapter(IndexHNSW)
 	assert.Equal(t, nil, err)
 	assert.NotEqual(t, nil, adapter)
 	_, ok = adapter.(*HNSWConfAdapter)
 	assert.Equal(t, true, ok)
 
-	adapter, err = adapterMgr.GetAdapter(IndexRHNSWFlat)
-	assert.Equal(t, nil, err)
-	assert.NotEqual(t, nil, adapter)
-	_, ok = adapter.(*RHNSWFlatConfAdapter)
-	assert.Equal(t, true, ok)
-
-	adapter, err = adapterMgr.GetAdapter(IndexRHNSWPQ)
-	assert.Equal(t, nil, err)
-	assert.NotEqual(t, nil, adapter)
-	_, ok = adapter.(*RHNSWPQConfAdapter)
-	assert.Equal(t, true, ok)
-
-	adapter, err = adapterMgr.GetAdapter(IndexRHNSWSQ)
-	assert.Equal(t, nil, err)
-	assert.NotEqual(t, nil, adapter)
-	_, ok = adapter.(*RHNSWSQConfAdapter)
-	assert.Equal(t, true, ok)
-
 	adapter, err = adapterMgr.GetAdapter(IndexANNOY)
 	assert.Equal(t, nil, err)
 	assert.NotEqual(t, nil, adapter)
 	_, ok = adapter.(*ANNOYConfAdapter)
-	assert.Equal(t, true, ok)
-
-	adapter, err = adapterMgr.GetAdapter(IndexNGTPANNG)
-	assert.Equal(t, nil, err)
-	assert.NotEqual(t, nil, adapter)
-	_, ok = adapter.(*NGTPANNGConfAdapter)
-	assert.Equal(t, true, ok)
-
-	adapter, err = adapterMgr.GetAdapter(IndexNGTONNG)
-	assert.Equal(t, nil, err)
-	assert.NotEqual(t, nil, adapter)
-	_, ok = adapter.(*NGTONNGConfAdapter)
 	assert.Equal(t, true, ok)
 }
 
