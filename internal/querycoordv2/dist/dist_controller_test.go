@@ -37,7 +37,7 @@ import (
 
 type DistControllerTestSuite struct {
 	suite.Suite
-	controller    *Controller
+	controller    *ControllerImpl
 	mockCluster   *session.MockCluster
 	mockScheduler *task.MockScheduler
 

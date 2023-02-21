@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
+	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"go.uber.org/zap"
 )
 
@@ -93,14 +94,16 @@ func (ob *ResourceObserver) checkResourceGroup() {
 			)
 
 			if enableRGAutoRecover {
-				usedNodeNum, err := manager.AutoRecoverResourceGroup(rgName)
+				nodes, err := manager.AutoRecoverResourceGroup(rgName)
 				if err != nil {
 					log.Warn("failed to recover resource group",
 						zap.String("rgName", rgName),
-						zap.Int("lackNodeNum", lackNodeNum-usedNodeNum),
+						zap.Int("lackNodeNum", lackNodeNum-len(nodes)),
 						zap.Error(err),
 					)
 				}
+
+				utils.AddNodesToCollectionsInRG(ob.meta, rgName, nodes...)
 			}
 		}
 	}

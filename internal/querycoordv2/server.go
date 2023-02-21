@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"sort"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -95,7 +94,7 @@ type Server struct {
 	taskScheduler task.Scheduler
 
 	// HeartBeat
-	distController *dist.Controller
+	distController dist.Controller
 
 	// Checkers
 	checkerController *checkers.CheckerController
@@ -650,29 +649,10 @@ func (s *Server) handleNodeUp(node int64) {
 		zap.String("resourceGroup", rgName),
 	)
 
-	for _, collection := range s.meta.CollectionManager.GetAll() {
-		log := log.With(zap.Int64("collectionID", collection))
-		replica := s.meta.ReplicaManager.GetByCollectionAndNode(collection, node)
-		if replica == nil {
-			replicas := s.meta.ReplicaManager.GetByCollectionAndRG(collection, rgName)
-			if len(replicas) == 0 {
-				continue
-			}
-			sort.Slice(replicas, func(i, j int) bool {
-				return replicas[i].Len() < replicas[j].Len()
-			})
-			replica := replicas[0]
-			// TODO(yah01): this may fail, need a component to check whether a node is assigned
-			err = s.meta.ReplicaManager.AddNode(replica.GetID(), node)
-			if err != nil {
-				log.Warn("failed to assign node to replicas",
-					zap.Int64("replicaID", replica.GetID()),
-					zap.Error(err),
-				)
-			}
-			log.Info("assign node to replica",
-				zap.Int64("replicaID", replica.GetID()))
-		}
+	rgs := s.meta.ResourceManager.ListResourceGroups()
+	if len(rgs) == 1 {
+		// only __default_resource_group exists
+		utils.AddNodesToCollectionsInRG(s.meta, meta.DefaultResourceGroupName, node)
 	}
 }
 

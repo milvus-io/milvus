@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"sort"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -144,6 +145,39 @@ func AssignNodesToReplicas(m *meta.Meta, rgName string, replicas ...*meta.Replic
 	}
 
 	return nil
+}
+
+// add nodes to all collections in rgName
+// for each collection, add node to replica with least number of nodes
+func AddNodesToCollectionsInRG(m *meta.Meta, rgName string, nodes ...int64) {
+	for _, node := range nodes {
+		for _, collection := range m.CollectionManager.GetAll() {
+			log := log.With(zap.Int64("collectionID", collection))
+			replica := m.ReplicaManager.GetByCollectionAndNode(collection, node)
+			if replica == nil {
+				replicas := m.ReplicaManager.GetByCollectionAndRG(collection, rgName)
+				if len(replicas) == 0 {
+					continue
+				}
+				sort.Slice(replicas, func(i, j int) bool {
+					return replicas[i].Len() < replicas[j].Len()
+				})
+				replica := replicas[0]
+				// TODO(yah01): this may fail, need a component to check whether a node is assigned
+				err := m.ReplicaManager.AddNode(replica.GetID(), node)
+				if err != nil {
+					log.Warn("failed to assign node to replicas",
+						zap.Int64("replicaID", replica.GetID()),
+						zap.Int64("nodeId", node),
+						zap.Error(err),
+					)
+					continue
+				}
+				log.Info("assign node to replica",
+					zap.Int64("replicaID", replica.GetID()))
+			}
+		}
+	}
 }
 
 // SpawnReplicas spawns replicas for given collection, assign nodes to them, and save them
