@@ -1044,11 +1044,29 @@ func (s *Server) TransferNode(ctx context.Context, req *milvuspb.TransferNodeReq
 			fmt.Sprintf("transfer node num can't be [%d]", req.GetNumNode()), nil), nil
 	}
 
-	err := s.meta.ResourceManager.TransferNode(req.GetSourceResourceGroup(), req.GetTargetResourceGroup(), int(req.GetNumNode()))
+	replicasInSource := s.meta.ReplicaManager.GetByResourceGroup(req.GetSourceResourceGroup())
+	replicasInTarget := s.meta.ReplicaManager.GetByResourceGroup(req.GetTargetResourceGroup())
+	loadSameCollection := false
+	for _, r1 := range replicasInSource {
+		for _, r2 := range replicasInTarget {
+			if r1.GetCollectionID() == r2.GetCollectionID() {
+				loadSameCollection = true
+			}
+		}
+	}
+	if loadSameCollection {
+		return utils.WrapStatus(commonpb.ErrorCode_IllegalArgument,
+			fmt.Sprintf("can't transfer node, cause the resource group[%s] and the resource group[%s] loaded same collection",
+				req.GetSourceResourceGroup(), req.GetTargetResourceGroup()), meta.ErrRGNotExist), nil
+	}
+
+	nodes, err := s.meta.ResourceManager.TransferNode(req.GetSourceResourceGroup(), req.GetTargetResourceGroup(), int(req.GetNumNode()))
 	if err != nil {
 		log.Warn(ErrTransferNodeFailed.Error(), zap.Error(err))
 		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, ErrTransferNodeFailed.Error(), err), nil
 	}
+
+	utils.AddNodesToCollectionsInRG(s.meta, req.GetTargetResourceGroup(), nodes...)
 
 	return successStatus, nil
 }

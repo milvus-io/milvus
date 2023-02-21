@@ -16,6 +16,7 @@
 package meta
 
 import (
+	"errors"
 	"testing"
 
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -24,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -114,14 +116,14 @@ func (suite *ResourceManagerSuite) TestManipulateNode() {
 	suite.ErrorIs(err, ErrNodeAlreadyAssign)
 
 	// transfer node between rgs
-	err = suite.manager.TransferNode("rg1", "rg2", 1)
+	_, err = suite.manager.TransferNode("rg1", "rg2", 1)
 	suite.NoError(err)
 
 	// transfer meet non exist rg
-	err = suite.manager.TransferNode("rgggg", "rg2", 1)
+	_, err = suite.manager.TransferNode("rgggg", "rg2", 1)
 	suite.ErrorIs(err, ErrRGNotExist)
 
-	err = suite.manager.TransferNode("rg1", "rg2", 5)
+	_, err = suite.manager.TransferNode("rg1", "rg2", 5)
 	suite.ErrorIs(err, ErrNodeNotEnough)
 
 	suite.manager.nodeMgr.Add(session.NewNodeInfo(11, "localhost"))
@@ -188,26 +190,42 @@ func (suite *ResourceManagerSuite) TestRecover() {
 	suite.manager.nodeMgr.Add(session.NewNodeInfo(1, "localhost"))
 	suite.manager.nodeMgr.Add(session.NewNodeInfo(2, "localhost"))
 	suite.manager.nodeMgr.Add(session.NewNodeInfo(3, "localhost"))
-	err := suite.manager.AddResourceGroup("rg")
+	suite.manager.nodeMgr.Add(session.NewNodeInfo(4, "localhost"))
+	err := suite.manager.AddResourceGroup("rg1")
+	suite.NoError(err)
+	err = suite.manager.AddResourceGroup("rg2")
 	suite.NoError(err)
 
-	suite.manager.AssignNode("rg", 1)
-	suite.manager.AssignNode("rg", 2)
-	suite.manager.AssignNode("rg", 3)
+	suite.manager.AssignNode("rg1", 1)
+	suite.manager.AssignNode("rg2", 2)
+	suite.manager.AssignNode(DefaultResourceGroupName, 3)
+	suite.manager.AssignNode(DefaultResourceGroupName, 4)
 
-	suite.manager.UnassignNode("rg", 3)
+	suite.manager.HandleNodeDown(2)
+	suite.manager.HandleNodeDown(3)
 
 	// clear resource manager in hack way
-	delete(suite.manager.groups, "rg")
+	delete(suite.manager.groups, "rg1")
+	delete(suite.manager.groups, "rg2")
 	delete(suite.manager.groups, DefaultResourceGroupName)
 	suite.manager.Recover()
 
-	rg, err := suite.manager.GetResourceGroup("rg")
+	rg, err := suite.manager.GetResourceGroup("rg1")
 	suite.NoError(err)
-	suite.Equal(2, rg.GetCapacity())
-	suite.True(suite.manager.ContainsNode("rg", 1))
-	suite.True(suite.manager.ContainsNode("rg", 2))
-	suite.False(suite.manager.ContainsNode("rg", 3))
+	suite.Equal(1, rg.GetCapacity())
+	suite.True(suite.manager.ContainsNode("rg1", 1))
+	print(suite.manager.GetNodes("rg1"))
+
+	rg, err = suite.manager.GetResourceGroup("rg2")
+	suite.NoError(err)
+	suite.Equal(1, rg.GetCapacity())
+	suite.False(suite.manager.ContainsNode("rg2", 2))
+
+	rg, err = suite.manager.GetResourceGroup(DefaultResourceGroupName)
+	suite.NoError(err)
+	suite.Equal(DefaultResourceGroupCapacity, rg.GetCapacity())
+	suite.False(suite.manager.ContainsNode(DefaultResourceGroupName, 3))
+	suite.True(suite.manager.ContainsNode(DefaultResourceGroupName, 4))
 }
 
 func (suite *ResourceManagerSuite) TestCheckOutboundNodes() {
@@ -338,6 +356,46 @@ func (suite *ResourceManagerSuite) TestDefaultResourceGroup() {
 	suite.manager.HandleNodeUp(9)
 	suite.Equal(defaultRG.GetCapacity(), DefaultResourceGroupCapacity)
 	suite.Len(defaultRG.GetNodes(), 6)
+}
+
+func (suite *ResourceManagerSuite) TestStoreFailed() {
+	store := NewMockStore(suite.T())
+	nodeMgr := session.NewNodeManager()
+	manager := NewResourceManager(store, nodeMgr)
+
+	nodeMgr.Add(session.NewNodeInfo(1, "localhost"))
+	nodeMgr.Add(session.NewNodeInfo(2, "localhost"))
+	nodeMgr.Add(session.NewNodeInfo(3, "localhost"))
+	storeErr := errors.New("store error")
+	store.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything).Return(storeErr)
+	store.EXPECT().RemoveResourceGroup(mock.Anything).Return(storeErr)
+
+	err := manager.AddResourceGroup("rg")
+	suite.ErrorIs(err, storeErr)
+
+	manager.groups["rg"] = &ResourceGroup{
+		nodes:    typeutil.NewUniqueSet(),
+		capacity: 0,
+	}
+
+	err = manager.RemoveResourceGroup("rg")
+	suite.ErrorIs(err, storeErr)
+
+	err = manager.AssignNode("rg", 1)
+	suite.ErrorIs(err, storeErr)
+
+	manager.groups["rg"].assignNode(1, 1)
+	err = manager.UnassignNode("rg", 1)
+	suite.ErrorIs(err, storeErr)
+
+	_, err = manager.TransferNode("rg", DefaultResourceGroupName, 1)
+	suite.ErrorIs(err, storeErr)
+
+	_, err = manager.HandleNodeUp(2)
+	suite.ErrorIs(err, storeErr)
+
+	_, err = manager.HandleNodeDown(1)
+	suite.ErrorIs(err, storeErr)
 }
 
 func (suite *ResourceManagerSuite) TearDownSuite() {

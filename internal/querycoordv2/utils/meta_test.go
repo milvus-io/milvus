@@ -17,13 +17,18 @@
 package utils
 
 import (
+	"errors"
 	"testing"
 
 	etcdKV "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/util/etcd"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 )
 
 func TestSpawnReplicasWithRG(t *testing.T) {
@@ -107,4 +112,126 @@ func TestSpawnReplicasWithRG(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestAddNodesToCollectionsInRGFailed(t *testing.T) {
+	Params.Init()
+
+	store := meta.NewMockStore(t)
+	store.EXPECT().SaveCollection(mock.Anything).Return(nil)
+	store.EXPECT().SaveReplica(mock.Anything).Return(nil).Times(4)
+	store.EXPECT().SaveResourceGroup(mock.Anything).Return(nil)
+	nodeMgr := session.NewNodeManager()
+	m := meta.NewMeta(RandomIncrementIDAllocator(), store, nodeMgr)
+	m.ResourceManager.AddResourceGroup("rg")
+	m.CollectionManager.PutCollection(CreateTestCollection(1, 2))
+	m.CollectionManager.PutCollection(CreateTestCollection(2, 2))
+	m.ReplicaManager.Put(meta.NewReplica(
+		&querypb.Replica{
+			ID:            1,
+			CollectionID:  1,
+			Nodes:         []int64{},
+			ResourceGroup: "rg",
+		},
+		typeutil.NewUniqueSet(),
+	))
+
+	m.ReplicaManager.Put(meta.NewReplica(
+		&querypb.Replica{
+			ID:            2,
+			CollectionID:  1,
+			Nodes:         []int64{},
+			ResourceGroup: "rg",
+		},
+		typeutil.NewUniqueSet(),
+	))
+
+	m.ReplicaManager.Put(meta.NewReplica(
+		&querypb.Replica{
+			ID:            3,
+			CollectionID:  2,
+			Nodes:         []int64{},
+			ResourceGroup: "rg",
+		},
+		typeutil.NewUniqueSet(),
+	))
+
+	m.ReplicaManager.Put(meta.NewReplica(
+		&querypb.Replica{
+			ID:            4,
+			CollectionID:  2,
+			Nodes:         []int64{},
+			ResourceGroup: "rg",
+		},
+		typeutil.NewUniqueSet(),
+	))
+
+	storeErr := errors.New("store error")
+	store.EXPECT().SaveReplica(mock.Anything).Return(storeErr)
+	AddNodesToCollectionsInRG(m, "rg", []int64{1, 2, 3, 4}...)
+
+	assert.Len(t, m.ReplicaManager.Get(1).GetNodes(), 0)
+	assert.Len(t, m.ReplicaManager.Get(2).GetNodes(), 0)
+	assert.Len(t, m.ReplicaManager.Get(3).GetNodes(), 0)
+	assert.Len(t, m.ReplicaManager.Get(4).GetNodes(), 0)
+}
+
+func TestAddNodesToCollectionsInRG(t *testing.T) {
+	Params.Init()
+
+	store := meta.NewMockStore(t)
+	store.EXPECT().SaveCollection(mock.Anything).Return(nil)
+	store.EXPECT().SaveReplica(mock.Anything).Return(nil)
+	store.EXPECT().SaveResourceGroup(mock.Anything).Return(nil)
+	nodeMgr := session.NewNodeManager()
+	m := meta.NewMeta(RandomIncrementIDAllocator(), store, nodeMgr)
+	m.ResourceManager.AddResourceGroup("rg")
+	m.CollectionManager.PutCollection(CreateTestCollection(1, 2))
+	m.CollectionManager.PutCollection(CreateTestCollection(2, 2))
+	m.ReplicaManager.Put(meta.NewReplica(
+		&querypb.Replica{
+			ID:            1,
+			CollectionID:  1,
+			Nodes:         []int64{},
+			ResourceGroup: "rg",
+		},
+		typeutil.NewUniqueSet(),
+	))
+
+	m.ReplicaManager.Put(meta.NewReplica(
+		&querypb.Replica{
+			ID:            2,
+			CollectionID:  1,
+			Nodes:         []int64{},
+			ResourceGroup: "rg",
+		},
+		typeutil.NewUniqueSet(),
+	))
+
+	m.ReplicaManager.Put(meta.NewReplica(
+		&querypb.Replica{
+			ID:            3,
+			CollectionID:  2,
+			Nodes:         []int64{},
+			ResourceGroup: "rg",
+		},
+		typeutil.NewUniqueSet(),
+	))
+
+	m.ReplicaManager.Put(meta.NewReplica(
+		&querypb.Replica{
+			ID:            4,
+			CollectionID:  2,
+			Nodes:         []int64{},
+			ResourceGroup: "rg",
+		},
+		typeutil.NewUniqueSet(),
+	))
+
+	AddNodesToCollectionsInRG(m, "rg", []int64{1, 2, 3, 4}...)
+
+	assert.Len(t, m.ReplicaManager.Get(1).GetNodes(), 2)
+	assert.Len(t, m.ReplicaManager.Get(2).GetNodes(), 2)
+	assert.Len(t, m.ReplicaManager.Get(3).GetNodes(), 2)
+	assert.Len(t, m.ReplicaManager.Get(4).GetNodes(), 2)
 }
