@@ -47,6 +47,15 @@ BuildScalarIndex(CIndex c_index, int64_t size, const void* field_data);
 CStatus
 SerializeIndexToBinarySet(CIndex index, CBinarySet* c_binary_set);
 
+void
+GetBinarySetKeys(CIndex index, void* datas);
+
+int
+GetBinarySetSize(CIndex index);
+
+int
+GetBinarySetValueSize(CIndex index, const char* key);
+
 CStatus
 LoadIndexFromBinarySet(CIndex index, CBinarySet c_binary_set);
 

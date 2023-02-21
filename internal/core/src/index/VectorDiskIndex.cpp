@@ -82,14 +82,80 @@ VectorDiskAnnIndex<T>::BuildWithDataset(const DatasetPtr& dataset, const Config&
     local_chunk_manager.Write(local_data_path, offset, &dim, sizeof(dim));
     offset += sizeof(dim);
 
+    {
+        FILE* file = fopen("/proc/self/status", "r");
+        int result = -1;
+        char line[128];
+
+        while (fgets(line, 128, file) != nullptr) {
+            if (strncmp(line, "VmRSS:", 6) == 0) {
+                int len = strlen(line);
+
+                const char* p = line;
+                for (; std::isdigit(*p) == false; ++p) {}
+
+                line[len - 3] = 0;
+                result = atoi(p);
+                break;
+            }
+        }
+
+        fclose(file);
+
+        std::cout << "debug zcccccc" << result << std::endl;
+    }
     auto data_size = num * dim * sizeof(float);
     auto raw_data = const_cast<void*>(milvus::GetDatasetTensor(dataset));
     local_chunk_manager.Write(local_data_path, offset, raw_data, data_size);
 
     knowhere::Config cfg;
     knowhere::DiskANNBuildConfig::Set(cfg, build_config);
+    {
+        FILE* file = fopen("/proc/self/status", "r");
+        int result = -1;
+        char line[128];
+
+        while (fgets(line, 128, file) != nullptr) {
+            if (strncmp(line, "VmRSS:", 6) == 0) {
+                int len = strlen(line);
+
+                const char* p = line;
+                for (; std::isdigit(*p) == false; ++p) {}
+
+                line[len - 3] = 0;
+                result = atoi(p);
+                break;
+            }
+        }
+
+        fclose(file);
+
+        std::cout << "debug zcccccc" << result << std::endl;
+    }
 
     index_->BuildAll(nullptr, cfg);
+    {
+        FILE* file = fopen("/proc/self/status", "r");
+        int result = -1;
+        char line[128];
+
+        while (fgets(line, 128, file) != nullptr) {
+            if (strncmp(line, "VmRSS:", 6) == 0) {
+                int len = strlen(line);
+
+                const char* p = line;
+                for (; std::isdigit(*p) == false; ++p) {}
+
+                line[len - 3] = 0;
+                result = atoi(p);
+                break;
+            }
+        }
+
+        fclose(file);
+
+        std::cout << "debug zcccccc" << result << std::endl;
+    }
 
     local_chunk_manager.RemoveDir(storage::GetSegmentRawDataPathPrefix(segment_id));
     // TODO ::

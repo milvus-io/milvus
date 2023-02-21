@@ -13,6 +13,9 @@ import (
 	"runtime"
 	"unsafe"
 
+	"github.com/milvus-io/milvus/internal/util/hardware"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 
 	"github.com/golang/protobuf/proto"
@@ -231,72 +234,103 @@ func (index *CgoIndex) buildStringIndex(dataset *Dataset) error {
 }
 
 func (index *CgoIndex) Serialize() ([]*Blob, error) {
-	var cBinarySet C.CBinarySet
-
-	status := C.SerializeIndexToBinarySet(index.indexPtr, &cBinarySet)
-	defer func() {
-		if cBinarySet != nil {
-			C.DeleteBinarySet(cBinarySet)
-		}
-	}()
-	if err := HandleCStatus(&status, "failed to serialize index to binary set"); err != nil {
-		return nil, err
-	}
-
-	keys, err := GetBinarySetKeys(cBinarySet)
-	if err != nil {
-		return nil, err
-	}
+	//var cBinarySet C.CBinarySet
+	//
+	//status := C.SerializeIndexToBinarySet(index.indexPtr, &cBinarySet)
+	//defer func() {
+	//	if cBinarySet != nil {
+	//		C.DeleteBinarySet(cBinarySet)
+	//	}
+	//}()
+	//if err := HandleCStatus(&status, "failed to serialize index to binary set"); err != nil {
+	//	return nil, err
+	//}
+	//
+	//size := int(C.GetBinarySetSize(cBinarySet))
+	//if size == 0 {
+	//	return nil, fmt.Errorf("BinarySet size is zero!")
+	//}
+	//datas := make([]unsafe.Pointer, size)
+	//
+	//C.GetBinarySetKeys(index.indexPtr, unsafe.Pointer(&datas[0]))
+	//keys := make([]string, size)
+	//for i := 0; i < size; i++ {
+	//	keys[i] = C.GoString((*C.char)(datas[i]))
+	//}
+	//keys, err := GetBinarySetKeys(cBinarySet)
+	//if err != nil {
+	//	return nil, err
+	//}
 	ret := make([]*Blob, 0)
-	for _, key := range keys {
-		value, err := GetBinarySetValue(cBinarySet, key)
-		if err != nil {
-			return nil, err
-		}
-		size, err := GetBinarySetSize(cBinarySet, key)
-		if err != nil {
-			return nil, err
-		}
-		blob := &Blob{
-			Key:   key,
-			Value: value,
-			Size:  size,
-		}
-		ret = append(ret, blob)
-	}
+	//for _, key := range keys {
+	//	value, err := GetBinarySetValue(cBinarySet, key)
+	//	if err != nil {
+	//		return nil, err
+	//	}
+	//	size, err := GetBinarySetSize(index.indexPtr, key)
+	//	if err != nil {
+	//		return nil, err
+	//	}
+	//	blob := &Blob{
+	//		Key:   key,
+	//		Value: value,
+	//		Size:  size,
+	//	}
+	//	ret = append(ret, blob)
+	//}
 
 	return ret, nil
 }
 
 func (index *CgoIndex) GetIndexFileInfo() ([]*IndexFileInfo, error) {
-	var cBinarySet C.CBinarySet
+	log.Debug("debug zcccccccc", zap.Any("Memory", hardware.GetMemoryCount()), zap.Any("MemoryUsage", hardware.GetUsedMemoryCount()))
 
-	status := C.SerializeIndexToBinarySet(index.indexPtr, &cBinarySet)
-	defer func() {
-		if cBinarySet != nil {
-			C.DeleteBinarySet(cBinarySet)
-		}
-	}()
-	if err := HandleCStatus(&status, "failed to serialize index to binary set"); err != nil {
-		return nil, err
-	}
+	//var cBinarySet C.CBinarySet
+	//
+	//status := C.SerializeIndexToBinarySet(index.indexPtr, &cBinarySet)
+	//defer func() {
+	//	if cBinarySet != nil {
+	//		C.DeleteBinarySet(cBinarySet)
+	//	}
+	//}()
+	//if err := HandleCStatus(&status, "failed to serialize index to binary set"); err != nil {
+	//	return nil, err
+	//}
 
-	keys, err := GetBinarySetKeys(cBinarySet)
-	if err != nil {
-		return nil, err
+	size := int(C.GetBinarySetSize(index.indexPtr))
+	if size == 0 {
+		return nil, fmt.Errorf("BinarySet size is zero!")
 	}
+	log.Debug("debug zcccccccc", zap.Any("Memory", hardware.GetMemoryCount()), zap.Any("MemoryUsage", hardware.GetUsedMemoryCount()))
+	datas := make([]unsafe.Pointer, size)
+
+	C.GetBinarySetKeys(index.indexPtr, unsafe.Pointer(&datas[0]))
+	log.Debug("debug zcccccccc", zap.Any("Memory", hardware.GetMemoryCount()), zap.Any("MemoryUsage", hardware.GetUsedMemoryCount()))
+	keys := make([]string, size)
+	for i := 0; i < size; i++ {
+		keys[i] = C.GoString((*C.char)(datas[i]))
+	}
+	//keys, err := GetBinarySetKeys(cBinarySet)
+	//if err != nil {
+	//	return nil, err
+	//}
 	ret := make([]*IndexFileInfo, 0)
 	for _, key := range keys {
-		size, err := GetBinarySetSize(cBinarySet, key)
-		if err != nil {
-			return nil, err
-		}
+		cIndexKey := C.CString(key)
+		//defer C.free(unsafe.Pointer(cIndexKey))
+		size2 := C.GetBinarySetValueSize(index.indexPtr, cIndexKey)
+		C.free(unsafe.Pointer(cIndexKey))
+		//size, err := GetBinarySetSize(index.indexPtr, key)
+		//if err != nil {
+		//	return nil, err
+		//}
 		info := &IndexFileInfo{
 			FileName: key,
-			FileSize: size,
+			FileSize: int64(size2),
 		}
 		ret = append(ret, info)
 	}
+	log.Debug("debug zcccccccc", zap.Any("Memory", hardware.GetMemoryCount()), zap.Any("MemoryUsage", hardware.GetUsedMemoryCount()))
 
 	return ret, nil
 }
@@ -332,6 +366,7 @@ func (index *CgoIndex) Delete() error {
 	}
 	status := C.DeleteIndex(index.indexPtr)
 	index.close = true
+	C.free(unsafe.Pointer(index.indexPtr))
 	return HandleCStatus(&status, "failed to delete index")
 }
 

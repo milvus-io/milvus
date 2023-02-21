@@ -19,6 +19,9 @@ package indexnode
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/internal/log"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -79,6 +82,10 @@ func getSystemInfoMetrics(
 			SimdType:        Params.CommonCfg.SimdType,
 		},
 	}
+
+	log.Debug("debug zccc", zap.Any("CPUCoreCount", nodeInfos.HardwareInfos.CPUCoreCount), zap.Any("CPUCoreUsage", nodeInfos.HardwareInfos.CPUCoreUsage),
+		zap.Any("Memory", nodeInfos.HardwareInfos.Memory), zap.Any("MemoryUsage", nodeInfos.HardwareInfos.MemoryUsage),
+		zap.Any("Disk", nodeInfos.HardwareInfos.Disk), zap.Any("DiskUsage", nodeInfos.HardwareInfos.DiskUsage))
 
 	metricsinfo.FillDeployMetricsWithEnv(&nodeInfos.SystemInfo)
 

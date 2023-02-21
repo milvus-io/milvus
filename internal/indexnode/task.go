@@ -26,6 +26,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/hardware"
+
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -183,6 +185,7 @@ func (it *indexBuildTask) Prepare(ctx context.Context) error {
 }
 
 func (it *indexBuildTask) LoadData(ctx context.Context) error {
+	log.Debug("debug zcccccccc", zap.Any("Memory", hardware.GetMemoryCount()), zap.Any("MemoryUsage", hardware.GetUsedMemoryCount()))
 	getValueByPath := func(path string) ([]byte, error) {
 		data, err := it.cm.Read(ctx, path)
 		if err != nil {
@@ -235,6 +238,7 @@ func (it *indexBuildTask) LoadData(ctx context.Context) error {
 	} else {
 		logutil.Logger(ctx).Info("Successfully load data", zap.Int64("buildID", it.BuildID), zap.Int64("Collection", it.collectionID), zap.Int64("SegmentIf", it.segmentID))
 	}
+	log.Debug("debug zcccccccc", zap.Any("Memory", hardware.GetMemoryCount()), zap.Any("MemoryUsage", hardware.GetUsedMemoryCount()))
 	return err
 }
 
@@ -306,6 +310,7 @@ func (it *indexBuildTask) BuildIndex(ctx context.Context) error {
 }
 
 func (it *indexBuildTask) BuildDiskAnnIndex(ctx context.Context) error {
+	log.Debug("debug zcccccccc", zap.Any("Memory", hardware.GetMemoryCount()), zap.Any("MemoryUsage", hardware.GetUsedMemoryCount()))
 	// check index node support disk index
 	if !Params.IndexNodeCfg.EnableDisk {
 		log.Ctx(ctx).Error("IndexNode don't support build disk index",
@@ -374,6 +379,7 @@ func (it *indexBuildTask) BuildDiskAnnIndex(ctx context.Context) error {
 			return err
 		}
 	}
+	log.Debug("debug zcccccccc", zap.Any("Memory", hardware.GetMemoryCount()), zap.Any("MemoryUsage", hardware.GetUsedMemoryCount()))
 
 	buildIndexLatency := it.tr.Record("build index done")
 	metrics.IndexNodeKnowhereBuildIndexLatency.WithLabelValues(strconv.FormatInt(Params.IndexNodeCfg.GetNodeID(), 10)).Observe(float64(buildIndexLatency.Milliseconds()))
@@ -394,11 +400,12 @@ func (it *indexBuildTask) BuildDiskAnnIndex(ctx context.Context) error {
 			Size: info.FileSize,
 		})
 	}
-
+	log.Debug("debug zcccccccc", zap.Any("Memory", hardware.GetMemoryCount()), zap.Any("MemoryUsage", hardware.GetUsedMemoryCount()))
 	// early release index for gc, and we can ensure that Delete is idempotent.
 	if err := it.index.Delete(); err != nil {
 		log.Ctx(it.ctx).Error("IndexNode indexBuildTask Execute CIndexDelete failed", zap.Error(err))
 	}
+	log.Debug("debug zcccccccc", zap.Any("Memory", hardware.GetMemoryCount()), zap.Any("MemoryUsage", hardware.GetUsedMemoryCount()))
 
 	encodeIndexFileDur := it.tr.Record("index codec serialize done")
 	metrics.IndexNodeEncodeIndexFileLatency.WithLabelValues(strconv.FormatInt(Params.IndexNodeCfg.GetNodeID(), 10)).Observe(float64(encodeIndexFileDur.Milliseconds()))
@@ -450,12 +457,12 @@ func (it *indexBuildTask) SaveIndexFiles(ctx context.Context) error {
 }
 
 func (it *indexBuildTask) SaveDiskAnnIndexFiles(ctx context.Context) error {
+	log.Debug("debug zcccccccc", zap.Any("Memory", hardware.GetMemoryCount()), zap.Any("MemoryUsage", hardware.GetUsedMemoryCount()))
 	savePaths := make([]string, len(it.indexBlobs))
 	saveFileKeys := make([]string, len(it.indexBlobs))
 
 	for i, blob := range it.indexBlobs {
-		savePath := blob.Key
-		savePaths[i] = savePath
+		savePaths[i] = blob.Key
 
 		// TODO: unify blob key to file key instead of full path
 		parts := strings.Split(blob.Key, "/")
@@ -465,7 +472,7 @@ func (it *indexBuildTask) SaveDiskAnnIndexFiles(ctx context.Context) error {
 		fileKey := parts[len(parts)-1]
 		saveFileKeys[i] = fileKey
 	}
-
+	log.Debug("debug zcccccccc", zap.Any("Memory", hardware.GetMemoryCount()), zap.Any("MemoryUsage", hardware.GetUsedMemoryCount()))
 	// add indexparams file
 	codec := storage.NewIndexFileBinlogCodec()
 	indexParamBlob, err := codec.SerializeIndexParams(
@@ -482,7 +489,7 @@ func (it *indexBuildTask) SaveDiskAnnIndexFiles(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-
+	log.Debug("debug zcccccccc", zap.Any("Memory", hardware.GetMemoryCount()), zap.Any("MemoryUsage", hardware.GetUsedMemoryCount()))
 	indexParamPath := metautil.BuildSegmentIndexFilePath(it.cm.RootPath(), it.req.BuildID, it.req.IndexVersion,
 		it.partitionID, it.segmentID, indexParamBlob.Key)
 
@@ -493,7 +500,7 @@ func (it *indexBuildTask) SaveDiskAnnIndexFiles(ctx context.Context) error {
 		log.Ctx(ctx).Warn("index node save index param file failed", zap.Error(err), zap.String("savePath", indexParamPath))
 		return err
 	}
-
+	log.Debug("debug zcccccccc", zap.Any("Memory", hardware.GetMemoryCount()), zap.Any("MemoryUsage", hardware.GetUsedMemoryCount()))
 	saveFileKeys = append(saveFileKeys, indexParamBlob.Key)
 	savePaths = append(savePaths, indexParamPath)
 	it.savePaths = savePaths
@@ -506,6 +513,7 @@ func (it *indexBuildTask) SaveDiskAnnIndexFiles(ctx context.Context) error {
 	it.tr.Elapse("index building all done")
 	log.Ctx(ctx).Info("IndexNode CreateIndex successfully ", zap.Int64("collect", it.collectionID),
 		zap.Int64("partition", it.partitionID), zap.Int64("segment", it.segmentID))
+	log.Debug("debug zcccccccc", zap.Any("Memory", hardware.GetMemoryCount()), zap.Any("MemoryUsage", hardware.GetUsedMemoryCount()))
 	return nil
 }
 

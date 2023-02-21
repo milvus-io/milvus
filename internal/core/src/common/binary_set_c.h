@@ -34,14 +34,14 @@ DeleteBinarySet(CBinarySet c_binary_set);
 CStatus
 AppendIndexBinary(CBinarySet c_binary_set, void* index_binary, int64_t index_size, const char* c_index_key);
 
-int
-GetBinarySetSize(CBinarySet c_binary_set);
+//int
+//GetBinarySetSize(CBinarySet c_binary_set);
+//
+//void
+//GetBinarySetKeys(CBinarySet c_binary_set, void* datas);
 
-void
-GetBinarySetKeys(CBinarySet c_binary_set, void* datas);
-
-int
-GetBinarySetValueSize(CBinarySet c_set, const char* key);
+//int
+//GetBinarySetValueSize(CBinarySet c_set, const char* key);
 
 // Note: the memory of data has been allocated outside
 CStatus

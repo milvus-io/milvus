@@ -72,6 +72,7 @@ DiskFileManagerImpl::DiskFileManagerImpl(const FieldDataMeta& field_mata,
 DiskFileManagerImpl::~DiskFileManagerImpl() {
     auto& local_chunk_manager = LocalChunkManager::GetInstance();
     local_chunk_manager.RemoveDir(GetLocalIndexPathPrefixWithBuildID(index_meta_.build_id));
+//    rcm_.reset();
 }
 
 bool

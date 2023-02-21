@@ -48,4 +48,4 @@ echo "Starting indexcoord..."
 nohup ./bin/milvus run indexcoord > /tmp/indexcoord.log 2>&1 &
 
 echo "Starting indexnode..."
-nohup ./bin/milvus run indexnode > /tmp/indexnode.log 2>&1 &
+nohup /home/zc/work/heaptrack/build/bin/heaptrack ./bin/milvus run indexnode > /tmp/indexnode.log 2>&1 &

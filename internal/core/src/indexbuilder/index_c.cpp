@@ -71,6 +71,28 @@ DeleteIndex(CIndex index) {
         delete cIndex;
         status.error_code = Success;
         status.error_msg = "";
+        {
+            FILE* file = fopen("/proc/self/status", "r");
+            int result = -1;
+            char line[128];
+
+            while (fgets(line, 128, file) != nullptr) {
+                if (strncmp(line, "VmRSS:", 6) == 0) {
+                    int len = strlen(line);
+
+                    const char* p = line;
+                    for (; std::isdigit(*p) == false; ++p) {}
+
+                    line[len - 3] = 0;
+                    result = atoi(p);
+                    break;
+                }
+            }
+
+            fclose(file);
+
+            std::cout << "debug zcccccc" << result << std::endl;
+        }
     } catch (std::exception& e) {
         status.error_code = UnexpectedError;
         status.error_msg = strdup(e.what());
@@ -87,7 +109,51 @@ BuildFloatVecIndex(CIndex index, int64_t float_value_num, const float* vectors) 
         auto cIndex = dynamic_cast<milvus::indexbuilder::VecIndexCreator*>(real_index);
         auto dim = cIndex->dim();
         auto row_nums = float_value_num / dim;
+        {
+            FILE* file = fopen("/proc/self/status", "r");
+            int result = -1;
+            char line[128];
+
+            while (fgets(line, 128, file) != nullptr) {
+                if (strncmp(line, "VmRSS:", 6) == 0) {
+                    int len = strlen(line);
+
+                    const char* p = line;
+                    for (; std::isdigit(*p) == false; ++p) {}
+
+                    line[len - 3] = 0;
+                    result = atoi(p);
+                    break;
+                }
+            }
+
+            fclose(file);
+
+            std::cout << "debug zcccccc" << result << std::endl;
+        }
         auto ds = knowhere::GenDataset(row_nums, dim, vectors);
+        {
+            FILE* file = fopen("/proc/self/status", "r");
+            int result = -1;
+            char line[128];
+
+            while (fgets(line, 128, file) != nullptr) {
+                if (strncmp(line, "VmRSS:", 6) == 0) {
+                    int len = strlen(line);
+
+                    const char* p = line;
+                    for (; std::isdigit(*p) == false; ++p) {}
+
+                    line[len - 3] = 0;
+                    result = atoi(p);
+                    break;
+                }
+            }
+
+            fclose(file);
+
+            std::cout << "debug zcccccc" << result << std::endl;
+        }
         cIndex->Build(ds);
         status.error_code = Success;
         status.error_msg = "";
@@ -158,6 +224,45 @@ SerializeIndexToBinarySet(CIndex index, CBinarySet* c_binary_set) {
         status.error_msg = strdup(e.what());
     }
     return status;
+}
+
+void
+GetBinarySetKeys(CIndex index, void* datas) {
+    AssertInfo(index, "failed to serialize index to binary set, passed index was null");
+    auto real_index = reinterpret_cast<milvus::indexbuilder::IndexCreatorBase*>(index);
+    auto binary = std::make_unique<knowhere::BinarySet>(real_index->Serialize());
+    auto binary_set = binary.release();
+    auto& map_ = binary_set->binary_map_;
+    const char** datas_ = (const char**)datas;
+    std::size_t i = 0;
+    for (auto it = map_.begin(); it != map_.end(); ++it, i++) {
+        datas_[i] = it->first.c_str();
+    }
+}
+
+int
+GetBinarySetSize(CIndex index) {
+    AssertInfo(index, "failed to serialize index to binary set, passed index was null");
+    auto real_index = reinterpret_cast<milvus::indexbuilder::IndexCreatorBase*>(index);
+    auto binary = std::make_unique<knowhere::BinarySet>(real_index->Serialize());
+    auto binary_set = binary.release();
+    return binary_set->binary_map_.size();
+}
+
+int
+GetBinarySetValueSize(CIndex index, const char* key) {
+    AssertInfo(index, "failed to serialize index to binary set, passed index was null");
+    auto real_index = reinterpret_cast<milvus::indexbuilder::IndexCreatorBase*>(index);
+    auto binary = std::make_unique<knowhere::BinarySet>(real_index->Serialize());
+    auto binary_set = binary.release();
+    int64_t ret_ = 0;
+    try {
+        std::string key_(key);
+        auto b = binary_set->GetByName(key_);
+        ret_ = b->size;
+    } catch (std::exception& e) {
+    }
+    return ret_;
 }
 
 CStatus

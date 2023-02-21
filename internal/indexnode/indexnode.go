@@ -30,6 +30,8 @@ import (
 	"errors"
 	"io"
 	"math/rand"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"path"
 	"strconv"
@@ -221,6 +223,22 @@ func (i *IndexNode) Start() error {
 	var startErr error = nil
 	i.once.Do(func() {
 		startErr = i.sched.Start()
+		go func() {
+			ticker := time.NewTicker(time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-i.loopCtx.Done():
+					return
+				case <-ticker.C:
+					getSystemInfoMetrics(context.Background(), nil, i)
+				}
+			}
+		}()
+
+		go func() {
+			http.ListenAndServe("0.0.0.0:7070", nil)
+		}()
 
 		Params.IndexNodeCfg.CreatedTime = time.Now()
 		Params.IndexNodeCfg.UpdatedTime = time.Now()

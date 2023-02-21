@@ -61,35 +61,35 @@ AppendIndexBinary(CBinarySet c_binary_set, void* index_binary, int64_t index_siz
     return status;
 }
 
-int
-GetBinarySetSize(CBinarySet c_binary_set) {
-    auto binary_set = (knowhere::BinarySet*)c_binary_set;
-    return binary_set->binary_map_.size();
-}
+//int
+//GetBinarySetSize(CBinarySet c_binary_set) {
+//    auto binary_set = (knowhere::BinarySet*)c_binary_set;
+//    return binary_set->binary_map_.size();
+//}
 
-void
-GetBinarySetKeys(CBinarySet c_binary_set, void* datas) {
-    auto binary_set = (knowhere::BinarySet*)c_binary_set;
-    auto& map_ = binary_set->binary_map_;
-    const char** datas_ = (const char**)datas;
-    std::size_t i = 0;
-    for (auto it = map_.begin(); it != map_.end(); ++it, i++) {
-        datas_[i] = it->first.c_str();
-    }
-}
+//void
+//GetBinarySetKeys(CBinarySet c_binary_set, void* datas) {
+//    auto binary_set = (knowhere::BinarySet*)c_binary_set;
+//    auto& map_ = binary_set->binary_map_;
+//    const char** datas_ = (const char**)datas;
+//    std::size_t i = 0;
+//    for (auto it = map_.begin(); it != map_.end(); ++it, i++) {
+//        datas_[i] = it->first.c_str();
+//    }
+//}
 
-int
-GetBinarySetValueSize(CBinarySet c_binary_set, const char* key) {
-    auto binary_set = (knowhere::BinarySet*)c_binary_set;
-    int64_t ret_ = 0;
-    try {
-        std::string key_(key);
-        auto binary = binary_set->GetByName(key_);
-        ret_ = binary->size;
-    } catch (std::exception& e) {
-    }
-    return ret_;
-}
+//int
+//GetBinarySetValueSize(CBinarySet c_binary_set, const char* key) {
+//    auto binary_set = (knowhere::BinarySet*)c_binary_set;
+//    int64_t ret_ = 0;
+//    try {
+//        std::string key_(key);
+//        auto binary = binary_set->GetByName(key_);
+//        ret_ = binary->size;
+//    } catch (std::exception& e) {
+//    }
+//    return ret_;
+//}
 
 CStatus
 CopyBinarySetValue(void* data, const char* key, CBinarySet c_binary_set) {

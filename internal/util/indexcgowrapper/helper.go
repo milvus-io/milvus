@@ -17,46 +17,46 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 )
 
-func GetBinarySetKeys(cBinarySet C.CBinarySet) ([]string, error) {
-	size := int(C.GetBinarySetSize(cBinarySet))
-	if size == 0 {
-		return nil, fmt.Errorf("BinarySet size is zero!")
-	}
-	datas := make([]unsafe.Pointer, size)
+//func GetBinarySetKeys(cBinarySet C.CBinarySet) ([]string, error) {
+//	size := int(C.GetBinarySetSize(cBinarySet))
+//	if size == 0 {
+//		return nil, fmt.Errorf("BinarySet size is zero!")
+//	}
+//	datas := make([]unsafe.Pointer, size)
+//
+//	C.GetBinarySetKeys(cBinarySet, unsafe.Pointer(&datas[0]))
+//	ret := make([]string, size)
+//	for i := 0; i < size; i++ {
+//		ret[i] = C.GoString((*C.char)(datas[i]))
+//	}
+//
+//	return ret, nil
+//}
 
-	C.GetBinarySetKeys(cBinarySet, unsafe.Pointer(&datas[0]))
-	ret := make([]string, size)
-	for i := 0; i < size; i++ {
-		ret[i] = C.GoString((*C.char)(datas[i]))
-	}
+//func GetBinarySetValue(index C.CIndex, key string) ([]byte, error) {
+//	cIndexKey := C.CString(key)
+//	defer C.free(unsafe.Pointer(cIndexKey))
+//	ret := C.GetBinarySetValueSize(index, cIndexKey)
+//	size := int(ret)
+//	if size == 0 {
+//		return nil, fmt.Errorf("GetBinarySetValueSize size is zero!")
+//	}
+//	value := make([]byte, size)
+//	status := C.CopyBinarySetValue(unsafe.Pointer(&value[0]), cIndexKey, cBinarySet)
+//
+//	if err := HandleCStatus(&status, "CopyBinarySetValue failed"); err != nil {
+//		return nil, err
+//	}
+//
+//	return value, nil
+//}
 
-	return ret, nil
-}
-
-func GetBinarySetValue(cBinarySet C.CBinarySet, key string) ([]byte, error) {
-	cIndexKey := C.CString(key)
-	defer C.free(unsafe.Pointer(cIndexKey))
-	ret := C.GetBinarySetValueSize(cBinarySet, cIndexKey)
-	size := int(ret)
-	if size == 0 {
-		return nil, fmt.Errorf("GetBinarySetValueSize size is zero!")
-	}
-	value := make([]byte, size)
-	status := C.CopyBinarySetValue(unsafe.Pointer(&value[0]), cIndexKey, cBinarySet)
-
-	if err := HandleCStatus(&status, "CopyBinarySetValue failed"); err != nil {
-		return nil, err
-	}
-
-	return value, nil
-}
-
-func GetBinarySetSize(cBinarySet C.CBinarySet, key string) (int64, error) {
-	cIndexKey := C.CString(key)
-	defer C.free(unsafe.Pointer(cIndexKey))
-	ret := C.GetBinarySetValueSize(cBinarySet, cIndexKey)
-	return int64(ret), nil
-}
+//func GetBinarySetSize(index C.CIndex, key string) (int64, error) {
+//	cIndexKey := C.CString(key)
+//	defer C.free(unsafe.Pointer(cIndexKey))
+//	ret := C.GetBinarySetValueSize(index, cIndexKey)
+//	return int64(ret), nil
+//}
 
 // HandleCStatus deal with the error returned from CGO
 func HandleCStatus(status *C.CStatus, extraInfo string) error {
