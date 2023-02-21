@@ -644,7 +644,7 @@ func (m *MetaCache) GetShards(ctx context.Context, withCache bool, collectionNam
 		info.leaderMutex.RUnlock()
 
 		if shardLeaders != nil {
-			iterator := info.shardLeaders.GetReader()
+			iterator := shardLeaders.GetReader()
 			return iterator.Shuffle(), nil
 		}
 
