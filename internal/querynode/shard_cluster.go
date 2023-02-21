@@ -863,7 +863,14 @@ func (sc *ShardCluster) Query(ctx context.Context, req *querypb.QueryRequest, wi
 }
 
 func (sc *ShardCluster) GetSegmentInfos() []SegmentEntry {
-	items, version := sc.distribution.GetCurrent()
+	sc.mutVersion.RLock()
+	distribution := sc.distribution
+	sc.mutVersion.RUnlock()
+	// before setup version
+	if distribution == nil {
+		return nil
+	}
+	items, version := distribution.GetCurrent()
 	sc.finishUsage(version)
 
 	var result []SegmentEntry
