@@ -148,7 +148,8 @@ func (b *RowCountBasedBalancer) balanceReplica(replica *meta.Replica) ([]Segment
 	}
 
 	if len(nodes) == len(stoppingNodesSegments) {
-		return b.handleStoppingNodes(replica, stoppingNodesSegments)
+		// no available nodes to balance
+		return nil, nil
 	}
 
 	if len(nodesSegments) == 0 {
@@ -235,35 +236,6 @@ outer:
 		queue.push(node)
 	}
 	return plans, b.getChannelPlan(replica, lo.Keys(nodesSegments), lo.Keys(stoppingNodesSegments))
-}
-
-func (b *RowCountBasedBalancer) handleStoppingNodes(replica *meta.Replica, nodeSegments map[int64][]*meta.Segment) ([]SegmentAssignPlan, []ChannelAssignPlan) {
-	segmentPlans := make([]SegmentAssignPlan, 0, len(nodeSegments))
-	channelPlans := make([]ChannelAssignPlan, 0, len(nodeSegments))
-	for nodeID, segments := range nodeSegments {
-		for _, segment := range segments {
-			segmentPlan := SegmentAssignPlan{
-				ReplicaID: replica.ID,
-				From:      nodeID,
-				To:        -1,
-				Segment:   segment,
-				Weight:    GetWeight(1),
-			}
-			segmentPlans = append(segmentPlans, segmentPlan)
-		}
-		for _, dmChannel := range b.dist.ChannelDistManager.GetByCollectionAndNode(replica.GetCollectionID(), nodeID) {
-			channelPlan := ChannelAssignPlan{
-				ReplicaID: replica.ID,
-				From:      nodeID,
-				To:        -1,
-				Channel:   dmChannel,
-				Weight:    GetWeight(1),
-			}
-			channelPlans = append(channelPlans, channelPlan)
-		}
-	}
-
-	return segmentPlans, channelPlans
 }
 
 func (b *RowCountBasedBalancer) collectionStoppingSegments(stoppingNodesSegments map[int64][]*meta.Segment) ([]*meta.Segment, int) {

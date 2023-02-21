@@ -533,11 +533,20 @@ func (suite *ServiceSuite) TestTransferNode() {
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.ErrorCode)
 
+	resp, err = server.TransferNode(ctx, &milvuspb.TransferNodeRequest{
+		SourceResourceGroup: meta.DefaultResourceGroupName,
+		TargetResourceGroup: "rg1",
+		NumNode:             -1,
+	})
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_IllegalArgument, resp.ErrorCode)
+
 	// server unhealthy
 	server.status.Store(commonpb.StateCode_Abnormal)
 	resp, err = server.TransferNode(ctx, &milvuspb.TransferNodeRequest{
 		SourceResourceGroup: meta.DefaultResourceGroupName,
 		TargetResourceGroup: "rg1",
+		NumNode:             3,
 	})
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.ErrorCode)
@@ -577,6 +586,15 @@ func (suite *ServiceSuite) TestTransferReplica() {
 		TargetResourceGroup: "rgg",
 		CollectionID:        1,
 		NumReplica:          2,
+	})
+	suite.NoError(err)
+	suite.Equal(resp.ErrorCode, commonpb.ErrorCode_IllegalArgument)
+
+	resp, err = suite.server.TransferReplica(ctx, &querypb.TransferReplicaRequest{
+		SourceResourceGroup: meta.DefaultResourceGroupName,
+		TargetResourceGroup: "rg1",
+		CollectionID:        1,
+		NumReplica:          0,
 	})
 	suite.NoError(err)
 	suite.Equal(resp.ErrorCode, commonpb.ErrorCode_IllegalArgument)
@@ -655,6 +673,15 @@ func (suite *ServiceSuite) TestLoadCollectionFailed() {
 		suite.Contains(resp.Reason, job.ErrLoadParameterMismatched.Error())
 	}
 
+	req := &querypb.LoadCollectionRequest{
+		CollectionID:   0,
+		ReplicaNumber:  2,
+		ResourceGroups: []string{meta.DefaultResourceGroupName, "rg"},
+	}
+	resp, err := server.LoadCollection(ctx, req)
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_IllegalArgument, resp.ErrorCode)
+
 	// Test load with partitions loaded
 	for _, collection := range suite.collections {
 		if suite.loadTypes[collection] != querypb.LoadType_LoadPartition {
@@ -713,13 +740,22 @@ func (suite *ServiceSuite) TestLoadPartition() {
 		suite.Equal(commonpb.ErrorCode_Success, resp.ErrorCode)
 	}
 
+	req := &querypb.LoadPartitionsRequest{
+		CollectionID:   suite.collections[0],
+		PartitionIDs:   suite.partitions[suite.collections[0]],
+		ResourceGroups: []string{meta.DefaultResourceGroupName, "rg"},
+	}
+	resp, err := server.LoadPartitions(ctx, req)
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_IllegalArgument, resp.ErrorCode)
+
 	// Test when server is not healthy
 	server.UpdateStateCode(commonpb.StateCode_Initializing)
-	req := &querypb.LoadPartitionsRequest{
+	req = &querypb.LoadPartitionsRequest{
 		CollectionID: suite.collections[0],
 		PartitionIDs: suite.partitions[suite.collections[0]],
 	}
-	resp, err := server.LoadPartitions(ctx, req)
+	resp, err = server.LoadPartitions(ctx, req)
 	suite.NoError(err)
 	suite.Contains(resp.Reason, ErrNotHealthy.Error())
 }
