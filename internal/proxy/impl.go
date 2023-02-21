@@ -25,7 +25,6 @@ import (
 	"sync"
 
 	"github.com/golang/protobuf/proto"
-	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"golang.org/x/sync/errgroup"
@@ -4735,8 +4734,8 @@ func (node *Proxy) CheckHealth(ctx context.Context, request *milvuspb.CheckHealt
 }
 
 func (node *Proxy) RenameCollection(ctx context.Context, req *milvuspb.RenameCollectionRequest) (*commonpb.Status, error) {
-	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-RefreshPolicyInfoCache")
-	defer sp.End()
+	sp, ctx := trace.StartSpanFromContextWithOperationName(ctx, "Proxy-RenameCollection")
+	defer sp.Finish()
 
 	log := log.Ctx(ctx).With(
 		zap.String("role", typeutil.ProxyRole),
