@@ -53,7 +53,8 @@ class TestChaosRG(TestcaseBase):
                 log.info(f"[ResourceGroup] Create rg {rg_name} done")
                 self.utility_wrap.transfer_node(source=ct.default_resource_group_name, target=rg_name,
                                                 num_node=rg_info["available_node"])
-                log.info(f'[ResourceGroup] Transfer {rg_info["available_node"]} nodes from {ct.default_resource_group_name} to {rg_name} done')
+                log.info(
+                    f'[ResourceGroup] Transfer {rg_info["available_node"]} nodes from {ct.default_resource_group_name} to {rg_name} done')
 
         # verify RGs
         resource_groups, _ = self.utility_wrap.list_resource_groups()
@@ -173,9 +174,18 @@ class TestChaosRG(TestcaseBase):
             log.info(f'[ResourceGroup] Rg of {rg_info["name"]} info is: {desc_rg_info}')
 
         # search
-        for coll_name in coll_name_1, coll_name_2:
+        for coll_name in coll_name_2, coll_name_1:
+            # get query segment info
+            segment, _ = self.utility_wrap.get_query_segment_info(coll_name)
+            log.info(f"{coll_name} query segment info: {segment}")
+
+            # get replicas
             collection_w = self.init_collection_wrap(name=coll_name, active_trace=True)
-            for i in range(10):
+            replicas, _ = collection_w.get_replicas(check_task=ct.CheckTasks.check_nothing)
+            log.info(f"{coll_name} replicas: {replicas}")
+
+            # search
+            for i in range(100):
                 search_vectors = cf.gen_vectors(ct.default_nq, ct.default_dim)
                 search_params = {"metric_type": "L2", "params": {"ef": 64}}
                 search_res, _ = collection_w.search(data=search_vectors,
@@ -183,3 +193,11 @@ class TestChaosRG(TestcaseBase):
                                                     param=search_params, limit=ct.default_limit, expr="int64 >= 0")
                 assert len(search_res) == ct.default_nq
                 assert len(search_res[0]) == ct.default_limit
+
+            # show query segment info finally
+            segment_2, _ = self.utility_wrap.get_query_segment_info(coll_name)
+            log.info(f"{coll_name} query segment info: {segment_2}")
+
+            # show replicas finally
+            replicas_2, _ = collection_w.get_replicas(check_task=ct.CheckTasks.check_nothing)
+            log.info(f"{coll_name} replicas: {replicas_2}")
