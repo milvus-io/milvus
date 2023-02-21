@@ -1324,6 +1324,57 @@ class TestResourceGroupMultiNodes(TestcaseBase):
         collection_w.get_replicas()
 
     @pytest.mark.tags(CaseLabel.L0)
+    def test_transfer_nodes_back(self):
+        self._connect()
+
+        rgA_name = "rgA"
+        self.init_resource_group(name=rgA_name)
+
+        self.utility_wrap.transfer_node(source=ct.default_resource_group_name,
+                                        target=rgA_name,
+                                        num_node=2)
+        dim = 128
+        collection_w = self.init_collection_wrap(shards_num=1)
+        insert_ids = []
+        nb = 500
+        for i in range(5):
+            res, _ = collection_w.insert(cf.gen_default_list_data(nb=nb, dim=dim, start=i * nb))
+            collection_w.flush()
+            insert_ids.extend(res.primary_keys)
+        collection_w.create_index(ct.default_float_vec_field_name, ct.default_flat_index)
+
+        collection_w.load(replica_number=2, _resource_groups=[rgA_name, ct.default_resource_group_name])
+
+        nq = 5
+        vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
+        # verify search succ
+        collection_w.search(vectors[:nq],
+                            ct.default_float_vec_field_name,
+                            ct.default_search_params,
+                            ct.default_limit,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": nq,
+                                         "ids": insert_ids.copy(),
+                                         "limit": ct.default_limit}
+                            )
+        self.utility_wrap.transfer_node(source=rgA_name,
+                                        target=ct.default_resource_group_name,
+                                        num_node=2)
+        
+        time.sleep(10)
+        collection_w.search(vectors[:nq],
+                            ct.default_float_vec_field_name,
+                            ct.default_search_params,
+                            ct.default_limit,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": nq,
+                                         "ids": insert_ids.copy(),
+                                         "limit": ct.default_limit}
+                            )
+        
+        collection_w.get_replicas()
+
+    @pytest.mark.tags(CaseLabel.L0)
     def test_transfer_replica_not_enough_replicas_to_transfer(self):
         """
         Method：

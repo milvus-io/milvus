@@ -172,11 +172,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalance() {
 					{SegmentInfo: &datapb.SegmentInfo{ID: 3, CollectionID: 1, NumOfRows: 30}, Node: 2},
 				},
 			},
-			expectPlans: []SegmentAssignPlan{
-				{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 2, CollectionID: 1, NumOfRows: 20}, Node: 2}, From: 2, To: -1, ReplicaID: 1, Weight: weightHigh},
-				{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 3, CollectionID: 1, NumOfRows: 30}, Node: 2}, From: 2, To: -1, ReplicaID: 1, Weight: weightHigh},
-				{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 1, CollectionID: 1, NumOfRows: 10}, Node: 1}, From: 1, To: -1, ReplicaID: 1, Weight: weightHigh},
-			},
+			expectPlans:        []SegmentAssignPlan{},
 			expectChannelPlans: []ChannelAssignPlan{},
 		},
 		{

@@ -53,6 +53,7 @@ var (
 	ErrListResourceGroupsFailed    = errors.New("failed to list resource group")
 	ErrDescribeResourceGroupFailed = errors.New("failed to describe resource group")
 	ErrLoadUseWrongRG              = errors.New("load operation should use collection's resource group")
+	ErrLoadWithDefaultRG           = errors.New("load operation can't use default resource group and other resource group together")
 )
 
 func (s *Server) ShowCollections(ctx context.Context, req *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
@@ -359,6 +360,10 @@ func (s *Server) checkResourceGroup(collectionID int64, resourceGroups []string)
 		for _, rgName := range resourceGroups {
 			if len(collectionUsedRG) > 0 && !collectionUsedRG.Contain(rgName) {
 				return ErrLoadUseWrongRG
+			}
+
+			if len(resourceGroups) > 1 && rgName == meta.DefaultResourceGroupName {
+				return ErrLoadWithDefaultRG
 			}
 		}
 	}
@@ -1004,6 +1009,12 @@ func (s *Server) DropResourceGroup(ctx context.Context, req *milvuspb.DropResour
 		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, ErrDropResourceGroupFailed.Error(), ErrNotHealthy), nil
 	}
 
+	replicas := s.meta.ReplicaManager.GetByResourceGroup(req.GetResourceGroup())
+	if len(replicas) > 0 {
+		return utils.WrapStatus(commonpb.ErrorCode_IllegalArgument,
+			fmt.Sprintf("some replicas still loaded in resource group[%s], release it first", req.GetResourceGroup()), meta.ErrDeleteNonEmptyRG), nil
+	}
+
 	err := s.meta.ResourceManager.RemoveResourceGroup(req.GetResourceGroup())
 	if err != nil {
 		log.Warn(ErrDropResourceGroupFailed.Error(), zap.Error(err))
@@ -1033,6 +1044,11 @@ func (s *Server) TransferNode(ctx context.Context, req *milvuspb.TransferNodeReq
 	if ok := s.meta.ResourceManager.ContainResourceGroup(req.GetTargetResourceGroup()); !ok {
 		return utils.WrapStatus(commonpb.ErrorCode_IllegalArgument,
 			fmt.Sprintf("the target resource group[%s] doesn't exist", req.GetTargetResourceGroup()), meta.ErrRGNotExist), nil
+	}
+
+	if req.GetNumNode() <= 0 {
+		return utils.WrapStatus(commonpb.ErrorCode_IllegalArgument,
+			fmt.Sprintf("transfer node num can't be [%d]", req.GetNumNode()), nil), nil
 	}
 
 	err := s.meta.ResourceManager.TransferNode(req.GetSourceResourceGroup(), req.GetTargetResourceGroup(), int(req.GetNumNode()))
@@ -1071,7 +1087,12 @@ func (s *Server) TransferReplica(ctx context.Context, req *querypb.TransferRepli
 	if len(replicas) > 0 {
 		return utils.WrapStatus(commonpb.ErrorCode_IllegalArgument,
 			fmt.Sprintf("found [%d] replicas of same collection in target resource group[%s], dynamically increase replica num is unsupported",
-				len(replicas), req.GetSourceResourceGroup())), nil
+				len(replicas), req.GetTargetResourceGroup())), nil
+	}
+
+	if req.GetNumReplica() <= 0 {
+		return utils.WrapStatus(commonpb.ErrorCode_IllegalArgument,
+			fmt.Sprintf("transfer replica num can't be [%d]", req.GetNumReplica()), nil), nil
 	}
 
 	// for now, we don't support to transfer replica of same collection to same resource group
