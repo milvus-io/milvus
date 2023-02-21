@@ -289,7 +289,7 @@ def gen_dataframe_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0):
     int32_values = pd.Series(data=[np.int32(i) for i in range(start, start + nb)], dtype="int32")
     int16_values = pd.Series(data=[np.int16(i) for i in range(start, start + nb)], dtype="int16")
     int8_values = pd.Series(data=[np.int8(i) for i in range(start, start + nb)], dtype="int8")
-    bool_values = pd.Series(data=[np.bool(i) for i in range(start, start + nb)], dtype="bool")
+    bool_values = pd.Series(data=[np.bool_(i) for i in range(start, start + nb)], dtype="bool")
     float_values = pd.Series(data=[np.float32(i) for i in range(start, start + nb)], dtype="float32")
     double_values = pd.Series(data=[np.double(i) for i in range(start, start + nb)], dtype="double")
     string_values = pd.Series(data=[str(i) for i in range(start, start + nb)], dtype="string")
@@ -352,7 +352,7 @@ def gen_default_tuple_data(nb=ct.default_nb, dim=ct.default_dim):
 def gen_numpy_data(nb=ct.default_nb, dim=ct.default_dim):
     int_values = np.arange(nb, dtype='int64')
     float_values = np.arange(nb, dtype='float32')
-    string_values = [np.str(i) for i in range(nb)]
+    string_values = [np.str_(i) for i in range(nb)]
     float_vec_values = gen_vectors(nb, dim)
     data = [int_values, float_values, string_values, float_vec_values]
     return data
@@ -574,20 +574,20 @@ def ip(x, y):
 
 
 def jaccard(x, y):
-    x = np.asarray(x, np.bool)
-    y = np.asarray(y, np.bool)
+    x = np.asarray(x, np.bool_)
+    y = np.asarray(y, np.bool_)
     return 1 - np.double(np.bitwise_and(x, y).sum()) / np.double(np.bitwise_or(x, y).sum())
 
 
 def hamming(x, y):
-    x = np.asarray(x, np.bool)
-    y = np.asarray(y, np.bool)
+    x = np.asarray(x, np.bool_)
+    y = np.asarray(y, np.bool_)
     return np.bitwise_xor(x, y).sum()
 
 
 def tanimoto(x, y):
-    x = np.asarray(x, np.bool)
-    y = np.asarray(y, np.bool)
+    x = np.asarray(x, np.bool_)
+    y = np.asarray(y, np.bool_)
     res = np.double(np.bitwise_and(x, y).sum()) / np.double(np.bitwise_or(x, y).sum())
     if res == 0:
         value = 0
@@ -597,20 +597,20 @@ def tanimoto(x, y):
 
 
 def tanimoto_calc(x, y):
-    x = np.asarray(x, np.bool)
-    y = np.asarray(y, np.bool)
+    x = np.asarray(x, np.bool_)
+    y = np.asarray(y, np.bool_)
     return np.double((len(x) - np.bitwise_xor(x, y).sum())) / (len(y) + np.bitwise_xor(x, y).sum())
 
 
 def substructure(x, y):
-    x = np.asarray(x, np.bool)
-    y = np.asarray(y, np.bool)
+    x = np.asarray(x, np.bool_)
+    y = np.asarray(y, np.bool_)
     return 1 - np.double(np.bitwise_and(x, y).sum()) / np.count_nonzero(y)
 
 
 def superstructure(x, y):
-    x = np.asarray(x, np.bool)
-    y = np.asarray(y, np.bool)
+    x = np.asarray(x, np.bool_)
+    y = np.asarray(y, np.bool_)
     return 1 - np.double(np.bitwise_and(x, y).sum()) / np.count_nonzero(x)
 
 
