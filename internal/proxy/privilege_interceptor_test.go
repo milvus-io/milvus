@@ -53,6 +53,8 @@ func TestPrivilegeInterceptor(t *testing.T) {
 				},
 				PolicyInfos: []string{
 					funcutil.PolicyForPrivilege("role1", commonpb.ObjectType_Collection.String(), "col1", commonpb.ObjectPrivilege_PrivilegeLoad.String()),
+					funcutil.PolicyForPrivilege("role1", commonpb.ObjectType_Collection.String(), "col1", commonpb.ObjectPrivilege_PrivilegeGetLoadState.String()),
+					funcutil.PolicyForPrivilege("role1", commonpb.ObjectType_Collection.String(), "col1", commonpb.ObjectPrivilege_PrivilegeGetLoadingProgress.String()),
 					funcutil.PolicyForPrivilege("role1", commonpb.ObjectType_Collection.String(), "col1", commonpb.ObjectPrivilege_PrivilegeFlush.String()),
 					funcutil.PolicyForPrivilege("role2", commonpb.ObjectType_Global.String(), "*", commonpb.ObjectPrivilege_PrivilegeAll.String()),
 				},
@@ -87,12 +89,35 @@ func TestPrivilegeInterceptor(t *testing.T) {
 			CollectionName: "col1",
 		})
 		assert.Nil(t, err)
+		_, err = PrivilegeInterceptor(ctx, &milvuspb.LoadCollectionRequest{
+			DbName:         "db_test",
+			CollectionName: "col1",
+		})
+		assert.Nil(t, err)
+		_, err = PrivilegeInterceptor(ctx, &milvuspb.GetLoadingProgressRequest{
+			CollectionName: "col1",
+		})
+		assert.Nil(t, err)
+		_, err = PrivilegeInterceptor(ctx, &milvuspb.GetLoadStateRequest{
+			CollectionName: "col1",
+		})
+		assert.Nil(t, err)
 
-		_, err = PrivilegeInterceptor(GetContext(context.Background(), "foo:123456"), &milvuspb.LoadCollectionRequest{
+		fooCtx := GetContext(context.Background(), "foo:123456")
+		_, err = PrivilegeInterceptor(fooCtx, &milvuspb.LoadCollectionRequest{
 			DbName:         "db_test",
 			CollectionName: "col1",
 		})
 		assert.NotNil(t, err)
+		_, err = PrivilegeInterceptor(fooCtx, &milvuspb.GetLoadingProgressRequest{
+			CollectionName: "col1",
+		})
+		assert.NotNil(t, err)
+		_, err = PrivilegeInterceptor(fooCtx, &milvuspb.GetLoadStateRequest{
+			CollectionName: "col1",
+		})
+		assert.NotNil(t, err)
+
 		_, err = PrivilegeInterceptor(ctx, &milvuspb.InsertRequest{
 			DbName:         "db_test",
 			CollectionName: "col1",
