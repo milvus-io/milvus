@@ -18,7 +18,6 @@ package datanode
 
 import (
 	"context"
-	"sync"
 	"testing"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -124,6 +123,7 @@ func newMockCompactor(isvalid bool) *mockCompactor {
 		ctx:     ctx,
 		cancel:  cancel,
 		isvalid: isvalid,
+		done:    make(chan struct{}, 1),
 	}
 }
 
@@ -133,22 +133,13 @@ type mockCompactor struct {
 	isvalid       bool
 	alwaysWorking bool
 
-	mu sync.Mutex
-	wg sync.WaitGroup
+	done chan struct{}
 }
 
 var _ compactor = (*mockCompactor)(nil)
 
-func (mc *mockCompactor) start() {
-	mc.mu.Lock()
-	defer mc.mu.Unlock()
-	mc.wg.Add(1)
-}
-
 func (mc *mockCompactor) complete() {
-	mc.mu.Lock()
-	defer mc.mu.Unlock()
-	mc.wg.Done()
+	mc.done <- struct{}{}
 }
 
 func (mc *mockCompactor) compact() (*datapb.CompactionResult, error) {
@@ -169,9 +160,7 @@ func (mc *mockCompactor) getPlanID() UniqueID {
 func (mc *mockCompactor) stop() {
 	if mc.cancel != nil {
 		mc.cancel()
-		mc.mu.Lock()
-		defer mc.mu.Unlock()
-		mc.wg.Wait()
+		<-mc.done
 	}
 }
 

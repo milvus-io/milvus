@@ -56,7 +56,6 @@ var (
 type iterator = storage.Iterator
 
 type compactor interface {
-	start()
 	complete()
 	compact() (*datapb.CompactionResult, error)
 	stop()
@@ -81,7 +80,7 @@ type compactionTask struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	wg           sync.WaitGroup
+	done         chan struct{}
 	tr           *timerecord.TimeRecorder
 	chunkManager storage.ChunkManager
 }
@@ -112,20 +111,17 @@ func newCompactionTask(
 		plan:               plan,
 		tr:                 timerecord.NewTimeRecorder("compactionTask"),
 		chunkManager:       chunkManager,
+		done:               make(chan struct{}, 1),
 	}
 }
 
-func (t *compactionTask) start() {
-	t.wg.Add(1)
-}
-
 func (t *compactionTask) complete() {
-	t.wg.Done()
+	t.done <- struct{}{}
 }
 
 func (t *compactionTask) stop() {
 	t.cancel()
-	t.wg.Wait()
+	<-t.done
 }
 
 func (t *compactionTask) getPlanID() UniqueID {
