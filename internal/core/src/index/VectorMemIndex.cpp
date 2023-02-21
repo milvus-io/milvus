@@ -26,6 +26,7 @@
 #include "common/Slice.h"
 #include "common/Consts.h"
 #include "common/RangeSearchHelper.h"
+#include "common/Utils.h"
 
 namespace milvus::index {
 
@@ -41,7 +42,7 @@ VectorMemIndex::Serialize(const Config& config) {
     knowhere::BinarySet ret;
     auto stat = index_.Serialize(ret);
     if (stat != knowhere::Status::success)
-        PanicCodeInfo(ErrorCodeEnum::UnexpectedError, "failed to serialize index");
+        PanicCodeInfo(ErrorCodeEnum::UnexpectedError, "failed to serialize index, " + MatchKnowhereError(stat));
     milvus::Disassemble(ret);
 
     return ret;
@@ -52,7 +53,7 @@ VectorMemIndex::Load(const BinarySet& binary_set, const Config& config) {
     milvus::Assemble(const_cast<BinarySet&>(binary_set));
     auto stat = index_.Deserialize(binary_set);
     if (stat != knowhere::Status::success)
-        PanicCodeInfo(ErrorCodeEnum::UnexpectedError, "failed to Deserialize index");
+        PanicCodeInfo(ErrorCodeEnum::UnexpectedError, "failed to Deserialize index, " + MatchKnowhereError(stat));
     SetDim(index_.Dim());
 }
 
@@ -66,7 +67,7 @@ VectorMemIndex::BuildWithDataset(const DatasetPtr& dataset, const Config& config
     knowhere::TimeRecorder rc("BuildWithoutIds", 1);
     auto stat = index_.Build(*dataset, index_config);
     if (stat != knowhere::Status::success)
-        PanicCodeInfo(ErrorCodeEnum::BuildIndexError, "failed to build index");
+        PanicCodeInfo(ErrorCodeEnum::BuildIndexError, "failed to build index, " + MatchKnowhereError(stat));
     rc.ElapseFromBegin("Done");
     SetDim(index_.Dim());
 }
@@ -93,7 +94,7 @@ VectorMemIndex::Query(const DatasetPtr dataset, const SearchInfo& search_info, c
         } else {
             auto res = index_.Search(*dataset, search_conf, bitset);
             if (!res.has_value()) {
-                PanicCodeInfo(ErrorCodeEnum::UnexpectedError, "failed to search");
+                PanicCodeInfo(ErrorCodeEnum::UnexpectedError, "failed to search, " + MatchKnowhereError(res.error()));
             }
             return res.value();
         }

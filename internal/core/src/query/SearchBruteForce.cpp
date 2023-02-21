@@ -14,6 +14,7 @@
 
 #include "common/Consts.h"
 #include "common/RangeSearchHelper.h"
+#include "common/Utils.h"
 #include "SearchBruteForce.h"
 #include "SubSearchResult.h"
 #include "knowhere/comp/brute_force.h"
@@ -72,7 +73,7 @@ BruteForceSearch(const dataset::SearchDataset& dataset,
                                                             sub_result.mutable_distances().data(), config, bitset);
 
             if (stat != knowhere::Status::success) {
-                throw std::invalid_argument("invalid metric type");
+                throw std::invalid_argument("invalid metric type, " + MatchKnowhereError(stat));
             }
         }
     } catch (std::exception& e) {

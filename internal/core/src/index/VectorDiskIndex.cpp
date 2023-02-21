@@ -161,7 +161,7 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset, const SearchInfo& search_
         } else {
             auto res = index_.Search(*dataset, search_config, bitset);
             if (!res.has_value()) {
-                PanicCodeInfo(ErrorCodeEnum::UnexpectedError, "failed to search");
+                PanicCodeInfo(ErrorCodeEnum::UnexpectedError, "failed to search, " + MatchKnowhereError(res.error()));
             }
             return res.value();
         }
