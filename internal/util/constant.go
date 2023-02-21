@@ -81,6 +81,9 @@ var (
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeQuery.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeLoadBalance.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeImport.String()),
+
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGetLoadingProgress.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeGetLoadState.String()),
 		},
 		commonpb.ObjectType_Global.String(): {
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeAll.String()),
