@@ -12,6 +12,8 @@
 #include <string>
 #include <vector>
 
+#include "common/Consts.h"
+#include "common/RangeSearchHelper.h"
 #include "SearchBruteForce.h"
 #include "SubSearchResult.h"
 #include "knowhere/comp/brute_force.h"
@@ -34,6 +36,7 @@ SubSearchResult
 BruteForceSearch(const dataset::SearchDataset& dataset,
                  const void* chunk_data_raw,
                  int64_t chunk_rows,
+                 const knowhere::Json& conf,
                  const BitsetView& bitset) {
     SubSearchResult sub_result(dataset.num_queries, dataset.topk, dataset.metric_type, dataset.round_decimal);
     try {
@@ -48,15 +51,29 @@ BruteForceSearch(const dataset::SearchDataset& dataset,
             {knowhere::meta::DIM, dim},
             {knowhere::meta::TOPK, topk},
         };
+
         sub_result.mutable_seg_offsets().resize(nq * topk);
         sub_result.mutable_distances().resize(nq * topk);
 
-        auto stat =
-            knowhere::BruteForce::SearchWithBuf(base_dataset, query_dataset, sub_result.mutable_seg_offsets().data(),
-                                                sub_result.mutable_distances().data(), config, bitset);
+        if (conf.contains(RADIUS)) {
+            config[RADIUS] = conf[RADIUS];
+            if (conf.contains(RANGE_FILTER)) {
+                config[RANGE_FILTER] = conf[RANGE_FILTER];
+                CheckRangeSearchParam(config[RADIUS], config[RANGE_FILTER], dataset.metric_type);
+            }
+            auto result = SortRangeSearchResult(
+                knowhere::BruteForce::RangeSearch(base_dataset, query_dataset, config, bitset).value(), topk, nq,
+                dataset.metric_type);
+            std::copy_n(GetDatasetIDs(result), nq * topk, sub_result.get_seg_offsets());
+            std::copy_n(GetDatasetDistance(result), nq * topk, sub_result.get_distances());
+        } else {
+            auto stat = knowhere::BruteForce::SearchWithBuf(base_dataset, query_dataset,
+                                                            sub_result.mutable_seg_offsets().data(),
+                                                            sub_result.mutable_distances().data(), config, bitset);
 
-        if (stat != knowhere::Status::success) {
-            throw std::invalid_argument("invalid metric type");
+            if (stat != knowhere::Status::success) {
+                throw std::invalid_argument("invalid metric type");
+            }
         }
     } catch (std::exception& e) {
         PanicInfo(e.what());

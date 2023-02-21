@@ -43,3 +43,6 @@ const int64_t DEFAULT_THREAD_CORE_COEFFICIENT = 50;
 const int64_t DEFAULT_INDEX_FILE_SLICE_SIZE = 4;  // megabytes
 
 const int DEFAULT_CPU_NUM = 1;
+
+constexpr const char* RADIUS = "radius";
+constexpr const char* RANGE_FILTER = "range_filter";

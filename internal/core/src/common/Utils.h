@@ -51,6 +51,11 @@ GetDatasetDim(const DatasetPtr& dataset) {
     return dataset->GetDim();
 }
 
+inline const size_t*
+GetDatasetLims(const DatasetPtr& dataset) {
+    return dataset->GetLims();
+}
+
 inline bool
 PrefixMatch(const std::string& str, const std::string& prefix) {
     auto ret = strncmp(str.c_str(), prefix.c_str(), prefix.length());
@@ -59,6 +64,17 @@ PrefixMatch(const std::string& str, const std::string& prefix) {
     }
 
     return true;
+}
+
+inline DatasetPtr
+GenResultDataset(const int64_t nq, const int64_t topk, const int64_t* ids, const float* distance) {
+    auto ret_ds = std::make_shared<Dataset>();
+    ret_ds->SetRows(nq);
+    ret_ds->SetDim(topk);
+    ret_ds->SetIds(ids);
+    ret_ds->SetDistance(distance);
+    ret_ds->SetIsOwner(true);
+    return ret_ds;
 }
 
 inline bool

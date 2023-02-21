@@ -24,6 +24,8 @@
 #include "knowhere/comp/Timer.h"
 #include "common/BitsetView.h"
 #include "common/Slice.h"
+#include "common/Consts.h"
+#include "common/RangeSearchHelper.h"
 
 namespace milvus::index {
 
@@ -82,13 +84,24 @@ VectorMemIndex::Query(const DatasetPtr dataset, const SearchInfo& search_info, c
         search_conf[knowhere::meta::TOPK] = topk;
         search_conf[knowhere::meta::METRIC_TYPE] = GetMetricType();
         auto index_type = GetIndexType();
-        return index_.Search(*dataset, search_conf, bitset);
+        if (CheckKeyInConfig(search_conf, RADIUS)) {
+            if (CheckKeyInConfig(search_conf, RANGE_FILTER)) {
+                CheckRangeSearchParam(search_conf[RADIUS], search_conf[RANGE_FILTER], GetMetricType());
+            }
+            auto res = index_.RangeSearch(*dataset, search_conf, bitset);
+            return SortRangeSearchResult(res.value(), topk, num_queries, GetMetricType());
+        } else {
+            auto res = index_.Search(*dataset, search_conf, bitset);
+            if (!res.has_value()) {
+                PanicCodeInfo(ErrorCodeEnum::UnexpectedError, "failed to search");
+            }
+            return res.value();
+        }
     }();
-    if (!final.has_value())
-        PanicCodeInfo(ErrorCodeEnum::UnexpectedError, "failed to search");
-    auto ids = final.value()->GetIds();
-    float* distances = const_cast<float*>(final.value()->GetDistance());
-    final.value()->SetIsOwner(true);
+
+    auto ids = final->GetIds();
+    float* distances = const_cast<float*>(final->GetDistance());
+    final->SetIsOwner(true);
     auto round_decimal = search_info.round_decimal_;
     auto total_num = num_queries * topk;
 

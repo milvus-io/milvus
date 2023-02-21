@@ -84,8 +84,8 @@ TEST(Sealed, without_predicate) {
     auto indexing = milvus::index::IndexFactory::GetInstance().CreateIndex(create_index_info, nullptr);
 
     auto build_conf = knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
-                                       {knowhere::meta::DIM, std::to_string(dim)},
-                                       {knowhere::indexparam::NLIST, "100"}};
+                                     {knowhere::meta::DIM, std::to_string(dim)},
+                                     {knowhere::indexparam::NLIST, "100"}};
 
     auto search_conf = knowhere::Json{{knowhere::indexparam::NPROBE, 10}};
 
@@ -190,8 +190,8 @@ TEST(Sealed, with_predicate) {
     auto indexing = milvus::index::IndexFactory::GetInstance().CreateIndex(create_index_info, nullptr);
 
     auto build_conf = knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
-                                       {knowhere::meta::DIM, std::to_string(dim)},
-                                       {knowhere::indexparam::NLIST, "100"}};
+                                     {knowhere::meta::DIM, std::to_string(dim)},
+                                     {knowhere::indexparam::NLIST, "100"}};
 
     auto database = knowhere::GenDataSet(N, dim, vec_col.data());
     indexing->BuildWithDataset(database, build_conf);
@@ -288,8 +288,8 @@ TEST(Sealed, with_predicate_filter_all) {
     auto ivf_indexing = milvus::index::IndexFactory::GetInstance().CreateIndex(create_index_info, nullptr);
 
     auto ivf_build_conf = knowhere::Json{{knowhere::meta::DIM, std::to_string(dim)},
-                                           {knowhere::indexparam::NLIST, "100"},
-                                           {knowhere::meta::METRIC_TYPE, knowhere::metric::L2}};
+                                         {knowhere::indexparam::NLIST, "100"},
+                                         {knowhere::meta::METRIC_TYPE, knowhere::metric::L2}};
 
     auto database = knowhere::GenDataSet(N, dim, vec_col.data());
     ivf_indexing->BuildWithDataset(database, ivf_build_conf);
@@ -312,10 +312,10 @@ TEST(Sealed, with_predicate_filter_all) {
     EXPECT_EQ(sr->get_total_result_count(), 0);
 
     auto hnsw_conf = knowhere::Json{{knowhere::meta::DIM, std::to_string(dim)},
-                                      {knowhere::indexparam::HNSW_M, "16"},
-                                      {knowhere::indexparam::EFCONSTRUCTION, "200"},
-                                      {knowhere::indexparam::EF, "200"},
-                                      {knowhere::meta::METRIC_TYPE, knowhere::metric::L2}};
+                                    {knowhere::indexparam::HNSW_M, "16"},
+                                    {knowhere::indexparam::EFCONSTRUCTION, "200"},
+                                    {knowhere::indexparam::EF, "200"},
+                                    {knowhere::meta::METRIC_TYPE, knowhere::metric::L2}};
 
     create_index_info.field_type = DataType::VECTOR_FLOAT;
     create_index_info.metric_type = knowhere::metric::L2;
@@ -437,7 +437,7 @@ TEST(Sealed, LoadFieldData) {
     //    ASSERT_EQ(json.dump(-2), json2.dump(-2));
     //    segment->DropFieldData(double_id);
     //    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get(), time));
-    //#ifdef __linux__
+    // #ifdef __linux__
     //    auto std_json = Json::parse(R"(
     //[
     //	[
@@ -448,7 +448,7 @@ TEST(Sealed, LoadFieldData) {
     //		["66353->5.696000", "30664->5.881000", "41087->5.917000", "10393->6.633000", "90215->7.202000"]
     //	]
     //])");
-    //#else  // for mac
+    // #else  // for mac
     //    auto std_json = Json::parse(R"(
     //[
     //	[
@@ -459,7 +459,7 @@ TEST(Sealed, LoadFieldData) {
     //        ["37759->3.581000", "31292->5.780000", "98124->6.216000", "63535->6.439000", "11707->6.553000"]
     //    ]
     //])");
-    //#endif
+    // #endif
     //    ASSERT_EQ(std_json.dump(-2), json.dump(-2));
 }
 

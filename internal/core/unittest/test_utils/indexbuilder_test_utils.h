@@ -293,6 +293,32 @@ generate_search_conf(const milvus::IndexType& index_type, const milvus::MetricTy
 }
 
 auto
+generate_range_search_conf(const milvus::IndexType& index_type, const milvus::MetricType& metric_type) {
+    auto conf = milvus::Config{
+        {knowhere::meta::METRIC_TYPE, metric_type},
+    };
+
+    if (metric_type == knowhere::metric::IP) {
+        conf[knowhere::meta::RADIUS] = 0.1;
+        conf[knowhere::meta::RANGE_FILTER] = 0.2;
+    } else {
+        conf[knowhere::meta::RADIUS] = 0.2;
+        conf[knowhere::meta::RANGE_FILTER] = 0.1;
+    }
+
+    if (milvus::index::is_in_list<milvus::IndexType>(index_type, search_with_nprobe_list)) {
+        conf[knowhere::indexparam::NPROBE] = 4;
+    } else if (index_type == knowhere::IndexEnum::INDEX_HNSW) {
+        conf[knowhere::indexparam::EF] = 200;
+    } else if (index_type == knowhere::IndexEnum::INDEX_ANNOY) {
+        conf[knowhere::indexparam::SEARCH_K] = 100;
+    } else if (index_type == knowhere::IndexEnum::INDEX_DISKANN) {
+        conf[milvus::index::DISK_ANN_QUERY_LIST] = K * 2;
+    }
+    return conf;
+}
+
+auto
 generate_params(const knowhere::IndexType& index_type, const knowhere::MetricType& metric_type) {
     namespace indexcgo = milvus::proto::indexcgo;
 

@@ -18,6 +18,7 @@ set(COMMON_SRC
         binary_set_c.cpp
         init_c.cpp
         Common.cpp
+        RangeSearchHelper.cpp
         )
 
 add_library(milvus_common SHARED ${COMMON_SRC})
