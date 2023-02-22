@@ -37,7 +37,7 @@ class CustomResourceOperations(object):
         try:
             api_response = api_instance.create_namespaced_custom_object(self.group, self.version, self.namespace,
                                                                         plural=self.plural, body=body, pretty=pretty)
-            log.debug(f"create custom resource response: {api_response}")
+            log.info(f"create custom resource response: {api_response}")
         except ApiException as e:
             log.error("Exception when calling CustomObjectsApi->create_namespaced_custom_object: %s\n" % e)
             raise Exception(str(e))
@@ -51,7 +51,7 @@ class CustomResourceOperations(object):
             api_response = api_instance.delete_namespaced_custom_object(self.group, self.version, self.namespace,
                                                                         self.plural,
                                                                         metadata_name)
-            log.debug(f"delete custom resource response: {api_response}")
+            log.info(f"delete custom resource response: {api_response}")
         except ApiException as e:
             if raise_ex:
                 log.error("Exception when calling CustomObjectsApi->delete_namespaced_custom_object: %s\n" % e)
