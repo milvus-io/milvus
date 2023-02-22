@@ -110,7 +110,21 @@ func getValidSearchParams() []*commonpb.KeyValuePair {
 		{
 			Key:   RoundDecimalKey,
 			Value: "-1",
+		},
+		{
+			Key:   IgnoreGrowingKey,
+			Value: "false",
 		}}
+}
+
+func getInvalidSearchParams(invalidName string) []*commonpb.KeyValuePair {
+	kvs := getValidSearchParams()
+	for _, kv := range kvs {
+		if kv.GetKey() == invalidName {
+			kv.Value = "invalid"
+		}
+	}
+	return kvs
 }
 
 func TestSearchTask_PreExecute(t *testing.T) {
@@ -182,6 +196,24 @@ func TestSearchTask_PreExecute(t *testing.T) {
 
 	t.Run("collection not exist", func(t *testing.T) {
 		task := getSearchTask(t, collectionName)
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+	})
+
+	t.Run("invalid IgnoreGrowing param", func(t *testing.T) {
+		collName := "test_invalid_param" + funcutil.GenRandomStr()
+		createColl(t, collName, rc)
+		collID, err := globalMetaCache.GetCollectionID(context.TODO(), collName)
+		require.NoError(t, err)
+		qc.EXPECT().ShowCollections(
+			mock.Anything, mock.MatchedBy(func(req *querypb.ShowCollectionsRequest) bool { return req.CollectionIDs[0] == collID })).Return(&querypb.ShowCollectionsResponse{
+			Status:              &successStatus,
+			CollectionIDs:       []int64{collID},
+			InMemoryPercentages: []int64{100},
+		}, nil).Times(1)
+
+		task := getSearchTask(t, collName)
+		task.request.SearchParams = getInvalidSearchParams(IgnoreGrowingKey)
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 	})

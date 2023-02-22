@@ -789,6 +789,15 @@ func TestImpl_searchWithDmlChannel(t *testing.T) {
 		DmlChannels:     []string{defaultDMLChannel},
 	}, defaultDMLChannel)
 	assert.NoError(t, err)
+	// search with ignore growing segment
+	req.IgnoreGrowing = true
+	_, err = node.searchWithDmlChannel(ctx, &queryPb.SearchRequest{
+		Req:             req,
+		FromShardLeader: false,
+		DmlChannels:     []string{defaultDMLChannel},
+	}, defaultDMLChannel)
+	assert.NoError(t, err)
+	req.IgnoreGrowing = false
 
 	// search for wrong dml channel
 	_, err = node.searchWithDmlChannel(ctx, &queryPb.SearchRequest{
@@ -909,6 +918,16 @@ func TestImpl_queryWithDmlChannel(t *testing.T) {
 		DmlChannels:     []string{defaultDMLChannel},
 	}, defaultDMLChannel)
 	assert.NoError(t, err)
+
+	// query with ignore growing
+	req.IgnoreGrowing = true
+	_, err = node.queryWithDmlChannel(ctx, &queryPb.QueryRequest{
+		Req:             req,
+		FromShardLeader: false,
+		DmlChannels:     []string{defaultDMLChannel},
+	}, defaultDMLChannel)
+	assert.NoError(t, err)
+	req.IgnoreGrowing = false
 
 	// query for wrong dml channel
 	_, err = node.queryWithDmlChannel(ctx, &queryPb.QueryRequest{
