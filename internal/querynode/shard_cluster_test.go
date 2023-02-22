@@ -1351,6 +1351,58 @@ func TestShardCluster_Search(t *testing.T) {
 		}, streamingDoNothing)
 		assert.Error(t, err)
 	})
+
+	t.Run("search empty segments", func(t *testing.T) {
+		nodeEvents := []nodeEvent{
+			{
+				nodeID:   1,
+				nodeAddr: "addr_1",
+			},
+			{
+				nodeID:   2,
+				nodeAddr: "addr_2",
+			},
+		}
+
+		segmentEvents := []segmentEvent{
+			{
+				segmentID:   1,
+				nodeIDs:     []int64{1},
+				partitionID: 1,
+				state:       segmentStateLoaded,
+			},
+			{
+				segmentID:   2,
+				nodeIDs:     []int64{2},
+				partitionID: 2,
+				state:       segmentStateLoaded,
+			},
+		}
+
+		sc := NewShardCluster(collectionID, replicaID, vchannelName, version,
+			&mockNodeDetector{
+				initNodes: nodeEvents,
+			}, &mockSegmentDetector{
+				initSegments: segmentEvents,
+			}, buildMockQueryNode)
+
+		defer sc.Close()
+		// setup first version
+		sc.SetupFirstVersion()
+		setupSegmentForShardCluster(sc, segmentEvents)
+
+		require.True(t, sc.serviceable())
+
+		result, err := sc.Search(ctx, &querypb.SearchRequest{
+			Req: &internalpb.SearchRequest{
+				Base:         &commonpb.MsgBase{},
+				PartitionIDs: []int64{1},
+			},
+			DmlChannels: []string{vchannelName},
+		}, streamingDoNothing)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(result))
+	})
 }
 
 func TestShardCluster_Query(t *testing.T) {
@@ -1650,6 +1702,55 @@ func TestShardCluster_Query(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	t.Run("query empty segments", func(t *testing.T) {
+		nodeEvents := []nodeEvent{
+			{
+				nodeID:   1,
+				nodeAddr: "addr_1",
+			},
+			{
+				nodeID:   2,
+				nodeAddr: "addr_2",
+			},
+		}
+		segmentEvents := []segmentEvent{
+			{
+				segmentID:   1,
+				nodeIDs:     []int64{1},
+				partitionID: 1,
+				state:       segmentStateLoaded,
+			},
+			{
+				segmentID:   2,
+				partitionID: 2,
+				nodeIDs:     []int64{2},
+				state:       segmentStateLoaded,
+			},
+		}
+
+		sc := NewShardCluster(collectionID, replicaID, vchannelName, version,
+			&mockNodeDetector{
+				initNodes: nodeEvents,
+			}, &mockSegmentDetector{
+				initSegments: segmentEvents,
+			}, buildMockQueryNode)
+
+		defer sc.Close()
+		// setup first version
+		sc.SetupFirstVersion()
+		setupSegmentForShardCluster(sc, segmentEvents)
+
+		require.EqualValues(t, available, sc.state.Load())
+		result, err := sc.Query(ctx, &querypb.QueryRequest{
+			Req: &internalpb.RetrieveRequest{
+				Base:         &commonpb.MsgBase{},
+				PartitionIDs: []int64{1},
+			},
+			DmlChannels: []string{vchannelName},
+		}, streamingDoNothing)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(result))
+	})
 }
 
 func TestShardCluster_GetStatistics(t *testing.T) {

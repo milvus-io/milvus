@@ -619,6 +619,7 @@ func (replica *metaReplica) addSegmentPrivate(segment *Segment) error {
 		zap.String("segment type", segType.String()),
 		zap.Int64("row count", rowCount),
 		zap.Uint64("segment indexed fields", segment.indexedFieldInfos.Len()),
+		zap.String("vchannel", segment.vChannelID),
 	)
 	metrics.QueryNodeNumSegments.WithLabelValues(
 		fmt.Sprint(Params.QueryNodeCfg.GetNodeID()),
