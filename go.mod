@@ -160,7 +160,7 @@ require (
 	go.etcd.io/etcd/pkg/v3 v3.5.5 // indirect
 	go.etcd.io/etcd/raft/v3 v3.5.5 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.25.0 // indirect
-	go.opentelemetry.io/otel v1.0.1
+	go.opentelemetry.io/otel v1.0.1 // indirect
 	go.opentelemetry.io/otel/sdk v1.0.1 // indirect
 	go.opentelemetry.io/otel/trace v1.0.1 // indirect
 	go.opentelemetry.io/proto/otlp v0.9.0 // indirect
