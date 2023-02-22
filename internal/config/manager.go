@@ -111,6 +111,19 @@ func (m *Manager) Configs() map[string]string {
 	return config
 }
 
+func (m *Manager) FileConfigs() map[string]string {
+	m.RLock()
+	defer m.RUnlock()
+	config := make(map[string]string)
+	for _, source := range m.sources {
+		if s, ok := source.(*FileSource); ok {
+			config, _ = s.GetConfigurations()
+			break
+		}
+	}
+	return config
+}
+
 // For compatible reason, only visiable for Test
 func (m *Manager) SetConfig(key, value string) {
 	m.Lock()

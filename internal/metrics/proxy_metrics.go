@@ -224,6 +224,14 @@ var (
 			Name:      "limiter_rate",
 			Help:      "",
 		}, []string{nodeIDLabelName, msgTypeLabelName})
+
+	ProxyHookFunc = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "hook_func_count",
+			Help:      "the hook function count",
+		}, []string{functionLabelName, fullMethodLabelName})
 )
 
 //RegisterProxy registers Proxy metrics
@@ -258,6 +266,7 @@ func RegisterProxy(registry *prometheus.Registry) {
 	registry.MustRegister(ProxyReadReqSendBytes)
 
 	registry.MustRegister(ProxyLimiterRate)
+	registry.MustRegister(ProxyHookFunc)
 }
 
 // SetRateGaugeByRateType sets ProxyLimiterRate metrics.
