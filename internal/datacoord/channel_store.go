@@ -25,9 +25,11 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/kv"
+	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 
+	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
 
@@ -88,6 +90,8 @@ type ROChannelStore interface {
 	GetBufferChannelInfo() *NodeChannelInfo
 	// GetNodes gets all node ids in store.
 	GetNodes() []int64
+	// GetNodeChannelCount
+	GetNodeChannelCount(nodeID int64) int
 }
 
 // RWChannelStore is the read write channel store for channels and nodes.
@@ -158,6 +162,8 @@ func (c *ChannelStore) Reload() error {
 			Schema:       cw.GetSchema(),
 		}
 		c.channelsInfo[nodeID].Channels = append(c.channelsInfo[nodeID].Channels, channel)
+		log.Info("channel store reload channel",
+			zap.Int64("nodeID", nodeID), zap.String("channel", channel.Name))
 		metrics.DataCoordDmlChannelNum.WithLabelValues(strconv.FormatInt(nodeID, 10)).Set(float64(len(c.channelsInfo[nodeID].Channels)))
 	}
 	return nil
@@ -310,6 +316,15 @@ func (c *ChannelStore) GetNode(nodeID int64) *NodeChannelInfo {
 		}
 	}
 	return nil
+}
+
+func (c *ChannelStore) GetNodeChannelCount(nodeID int64) int {
+	for id, info := range c.channelsInfo {
+		if id == nodeID {
+			return len(info.Channels)
+		}
+	}
+	return 0
 }
 
 // Delete removes the given node from the channel store and returns its channels.
