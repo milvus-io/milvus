@@ -158,6 +158,8 @@ enum ErrorCode : int {
   MemoryQuotaExhausted = 53,
   DiskQuotaExhausted = 54,
   TimeTickLongDelay = 55,
+  NotReadyServe = 56,
+  NotReadyCoordActivating = 57,
   DataCoordNA = 100,
   DDRequestRace = 1000,
   ErrorCode_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::min(),
@@ -548,12 +550,14 @@ enum ObjectPrivilege : int {
   PrivilegeListResourceGroups = 29,
   PrivilegeTransferNode = 30,
   PrivilegeTransferReplica = 31,
+  PrivilegeGetLoadingProgress = 32,
+  PrivilegeGetLoadState = 33,
   ObjectPrivilege_INT_MIN_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::min(),
   ObjectPrivilege_INT_MAX_SENTINEL_DO_NOT_USE_ = std::numeric_limits<int32_t>::max()
 };
 bool ObjectPrivilege_IsValid(int value);
 constexpr ObjectPrivilege ObjectPrivilege_MIN = PrivilegeAll;
-constexpr ObjectPrivilege ObjectPrivilege_MAX = PrivilegeTransferReplica;
+constexpr ObjectPrivilege ObjectPrivilege_MAX = PrivilegeGetLoadState;
 constexpr int ObjectPrivilege_ARRAYSIZE = ObjectPrivilege_MAX + 1;
 
 const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* ObjectPrivilege_descriptor();
