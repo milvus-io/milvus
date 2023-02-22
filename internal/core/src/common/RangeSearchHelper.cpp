@@ -46,7 +46,10 @@ SortRangeSearchResult(DatasetPtr data_set, int64_t topk, int64_t nq, std::string
 
     // use p_id and p_dist to GenResultDataset after sorted
     auto p_id = new int64_t[topk * nq];
+    memset(p_id, -1, sizeof(int64_t) * topk * nq);
     auto p_dist = new float[topk * nq];
+    std::fill_n(p_dist, topk * nq, std::numeric_limits<float>::max());
+
     // cnt means the subscript of p_id and p_dist
     int cnt = 0;
 
