@@ -1060,7 +1060,6 @@ func TestShardCluster_SyncSegments(t *testing.T) {
 	})
 }
 
-var streamingDoNothing = func(context.Context) error { return nil }
 var streamingError = func(context.Context) error { return errors.New("mock streaming error") }
 
 func TestShardCluster_Search(t *testing.T) {
@@ -1114,7 +1113,7 @@ func TestShardCluster_Search(t *testing.T) {
 
 		_, err := sc.Search(ctx, &querypb.SearchRequest{
 			DmlChannels: []string{vchannelName},
-		}, streamingDoNothing)
+		}, nil)
 		assert.Error(t, err)
 	})
 
@@ -1127,7 +1126,7 @@ func TestShardCluster_Search(t *testing.T) {
 
 		_, err := sc.Search(ctx, &querypb.SearchRequest{
 			DmlChannels: []string{vchannelName + "_suffix"},
-		}, streamingDoNothing)
+		}, nil)
 		assert.Error(t, err)
 	})
 
@@ -1180,7 +1179,7 @@ func TestShardCluster_Search(t *testing.T) {
 				Base: &commonpb.MsgBase{},
 			},
 			DmlChannels: []string{vchannelName},
-		}, streamingDoNothing)
+		}, nil)
 		assert.NoError(t, err)
 		assert.Equal(t, len(nodeEvents), len(result))
 	})
@@ -1234,7 +1233,7 @@ func TestShardCluster_Search(t *testing.T) {
 				Base: &commonpb.MsgBase{},
 			},
 			DmlChannels: []string{vchannelName},
-		}, func(ctx context.Context) error { return errors.New("mocked") })
+		}, func(ctx context.Context) (error, *internalpb.SearchResults) { return errors.New("mocked"), nil })
 		assert.Error(t, err)
 	})
 
@@ -1295,7 +1294,7 @@ func TestShardCluster_Search(t *testing.T) {
 				Base: &commonpb.MsgBase{},
 			},
 			DmlChannels: []string{vchannelName},
-		}, streamingDoNothing)
+		}, nil)
 		assert.Error(t, err)
 	})
 
@@ -1348,7 +1347,7 @@ func TestShardCluster_Search(t *testing.T) {
 				Base: &commonpb.MsgBase{},
 			},
 			DmlChannels: []string{vchannelName},
-		}, streamingDoNothing)
+		}, nil)
 		assert.Error(t, err)
 	})
 
@@ -1399,7 +1398,7 @@ func TestShardCluster_Search(t *testing.T) {
 				PartitionIDs: []int64{1},
 			},
 			DmlChannels: []string{vchannelName},
-		}, streamingDoNothing)
+		}, nil)
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(result))
 	})
@@ -1462,7 +1461,7 @@ func TestShardCluster_Query(t *testing.T) {
 				Base: &commonpb.MsgBase{},
 			},
 			DmlChannels: []string{vchannelName},
-		}, streamingDoNothing)
+		}, nil)
 		assert.Error(t, err)
 	})
 	t.Run("query wrong channel", func(t *testing.T) {
@@ -1478,7 +1477,7 @@ func TestShardCluster_Query(t *testing.T) {
 				Base: &commonpb.MsgBase{},
 			},
 			DmlChannels: []string{vchannelName + "_suffix"},
-		}, streamingDoNothing)
+		}, nil)
 		assert.Error(t, err)
 	})
 	t.Run("normal query", func(t *testing.T) {
@@ -1530,7 +1529,7 @@ func TestShardCluster_Query(t *testing.T) {
 				Base: &commonpb.MsgBase{},
 			},
 			DmlChannels: []string{vchannelName},
-		}, streamingDoNothing)
+		}, nil)
 		assert.NoError(t, err)
 		assert.Equal(t, len(nodeEvents), len(result))
 	})
@@ -1583,7 +1582,7 @@ func TestShardCluster_Query(t *testing.T) {
 				Base: &commonpb.MsgBase{},
 			},
 			DmlChannels: []string{vchannelName},
-		}, func(ctx context.Context) error { return errors.New("mocked") })
+		}, func(ctx context.Context) (error, *internalpb.RetrieveResults) { return errors.New("mocked"), nil })
 		assert.Error(t, err)
 	})
 
@@ -1644,7 +1643,7 @@ func TestShardCluster_Query(t *testing.T) {
 				Base: &commonpb.MsgBase{},
 			},
 			DmlChannels: []string{vchannelName},
-		}, streamingDoNothing)
+		}, nil)
 		assert.Error(t, err)
 	})
 	t.Run("test meta error", func(t *testing.T) {
@@ -1698,7 +1697,7 @@ func TestShardCluster_Query(t *testing.T) {
 				Base: &commonpb.MsgBase{},
 			},
 			DmlChannels: []string{vchannelName},
-		}, streamingDoNothing)
+		}, nil)
 		assert.Error(t, err)
 	})
 
@@ -1747,7 +1746,7 @@ func TestShardCluster_Query(t *testing.T) {
 				PartitionIDs: []int64{1},
 			},
 			DmlChannels: []string{vchannelName},
-		}, streamingDoNothing)
+		}, nil)
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(result))
 	})
@@ -1804,7 +1803,7 @@ func TestShardCluster_GetStatistics(t *testing.T) {
 
 		_, err := sc.GetStatistics(ctx, &querypb.GetStatisticsRequest{
 			DmlChannels: []string{vchannelName},
-		}, streamingDoNothing)
+		}, nil)
 		assert.Error(t, err)
 	})
 
@@ -1816,7 +1815,7 @@ func TestShardCluster_GetStatistics(t *testing.T) {
 
 		_, err := sc.GetStatistics(ctx, &querypb.GetStatisticsRequest{
 			DmlChannels: []string{vchannelName + "_suffix"},
-		}, streamingDoNothing)
+		}, nil)
 		assert.Error(t, err)
 	})
 
@@ -1866,7 +1865,7 @@ func TestShardCluster_GetStatistics(t *testing.T) {
 
 		result, err := sc.GetStatistics(ctx, &querypb.GetStatisticsRequest{
 			DmlChannels: []string{vchannelName},
-		}, streamingDoNothing)
+		}, nil)
 		assert.NoError(t, err)
 		assert.Equal(t, len(nodeEvents), len(result))
 	})
@@ -1917,7 +1916,7 @@ func TestShardCluster_GetStatistics(t *testing.T) {
 
 		_, err := sc.GetStatistics(ctx, &querypb.GetStatisticsRequest{
 			DmlChannels: []string{vchannelName},
-		}, func(ctx context.Context) error { return errors.New("mocked") })
+		}, func(ctx context.Context) (error, *internalpb.GetStatisticsResponse) { return errors.New("mocked"), nil })
 		assert.Error(t, err)
 	})
 
@@ -1976,7 +1975,7 @@ func TestShardCluster_GetStatistics(t *testing.T) {
 
 		_, err := sc.GetStatistics(ctx, &querypb.GetStatisticsRequest{
 			DmlChannels: []string{vchannelName},
-		}, streamingDoNothing)
+		}, nil)
 		assert.Error(t, err)
 	})
 
@@ -2024,7 +2023,7 @@ func TestShardCluster_GetStatistics(t *testing.T) {
 
 		_, err := sc.GetStatistics(ctx, &querypb.GetStatisticsRequest{
 			DmlChannels: []string{vchannelName},
-		}, streamingDoNothing)
+		}, nil)
 		assert.Error(t, err)
 	})
 }

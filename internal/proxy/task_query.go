@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -217,6 +218,20 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	}
 	log.Ctx(ctx).Debug("Get partitions in collection.", zap.Any("collectionName", collectionName),
 		zap.Int64("msgID", t.ID()), zap.Any("requestType", "query"), zap.Int64s("partitionIDs", t.RetrieveRequest.GetPartitionIDs()))
+
+	//fetch search_growing from search param
+	var ignoreGrowing bool
+	for i, kv := range t.request.GetQueryParams() {
+		if kv.GetKey() == IgnoreGrowingKey {
+			ignoreGrowing, err = strconv.ParseBool(kv.Value)
+			if err != nil {
+				return errors.New("parse search growing failed")
+			}
+			t.request.QueryParams = append(t.request.GetQueryParams()[:i], t.request.GetQueryParams()[i+1:]...)
+			break
+		}
+	}
+	t.RetrieveRequest.IgnoreGrowing = ignoreGrowing
 
 	queryParams, err := parseQueryParams(t.request.GetQueryParams())
 	if err != nil {

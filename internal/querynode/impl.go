@@ -255,17 +255,15 @@ func (node *QueryNode) getStatisticsWithDmlChannel(ctx context.Context, req *que
 	defer cancel()
 
 	var results []*internalpb.GetStatisticsResponse
-	var streamingResult *internalpb.GetStatisticsResponse
 	var errCluster error
 
-	withStreaming := func(ctx context.Context) error {
+	withStreaming := func(ctx context.Context) (error, *internalpb.GetStatisticsResponse) {
 		streamingTask := newStatistics(ctx, req, querypb.DataScope_Streaming, qs, waitCanDo)
 		err := streamingTask.Execute(ctx)
 		if err != nil {
-			return err
+			return err, nil
 		}
-		streamingResult = streamingTask.Ret
-		return nil
+		return nil, streamingTask.Ret
 	}
 
 	// shard leader dispatches request to its shard cluster
@@ -279,7 +277,6 @@ func (node *QueryNode) getStatisticsWithDmlChannel(ctx context.Context, req *que
 	tr.Elapse(fmt.Sprintf("start reduce statistic result, msgID = %d, fromSharedLeader = %t, vChannel = %s, segmentIDs = %v",
 		msgID, req.GetFromShardLeader(), dmlChannel, req.GetSegmentIDs()))
 
-	results = append(results, streamingResult)
 	ret, err := reduceStatisticResponse(results)
 	if err != nil {
 		failRet.Status.Reason = err.Error()
@@ -891,38 +888,17 @@ func (node *QueryNode) searchWithDmlChannel(ctx context.Context, req *querypb.Se
 
 	var (
 		searchCtx, cancel = context.WithCancel(ctx)
-
-		results         []*internalpb.SearchResults
-		streamingResult *internalpb.SearchResults
-		errCluster      error
+		results           []*internalpb.SearchResults
+		errCluster        error
 	)
 	defer cancel()
 
-	withStreaming := func(ctx context.Context) error {
-		streamingTask, err := newSearchTask(searchCtx, req)
-		if err != nil {
-			return err
-		}
-		streamingTask.QS = qs
-		streamingTask.DataScope = querypb.DataScope_Streaming
-		err = node.scheduler.AddReadTask(searchCtx, streamingTask)
-		if err != nil {
-			return err
-		}
-		err = streamingTask.WaitToFinish()
-		if err != nil {
-			return err
-		}
-		metrics.QueryNodeSQLatencyInQueue.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()),
-			metrics.SearchLabel).Observe(float64(streamingTask.queueDur.Milliseconds()))
-		metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()),
-			metrics.SearchLabel).Observe(float64(streamingTask.reduceDur.Milliseconds()))
-		streamingResult = streamingTask.Ret
-		return nil
-	}
-
 	// shard leader dispatches request to its shard cluster
-	results, errCluster = cluster.Search(searchCtx, req, withStreaming)
+	var withStreamingFunc searchWithStreaming
+	if !req.Req.IgnoreGrowing {
+		withStreamingFunc = getSearchWithStreamingFunc(searchCtx, req, node, qs, Params.QueryNodeCfg.GetNodeID())
+	}
+	results, errCluster = cluster.Search(searchCtx, req, withStreamingFunc)
 	if errCluster != nil {
 		log.Ctx(ctx).Warn("search shard cluster failed", zap.String("vChannel", dmlChannel), zap.Error(errCluster))
 		failRet.Status.Reason = errCluster.Error()
@@ -931,7 +907,6 @@ func (node *QueryNode) searchWithDmlChannel(ctx context.Context, req *querypb.Se
 
 	tr.CtxElapse(ctx, fmt.Sprintf("do search done in shard cluster, vChannel = %s, segmentIDs = %v", dmlChannel, req.GetSegmentIDs()))
 
-	results = append(results, streamingResult)
 	ret, err2 := reduceSearchResults(ctx, results, req.Req.GetNq(), req.Req.GetTopk(), req.Req.GetMetricType())
 	if err2 != nil {
 		failRet.Status.Reason = err2.Error()
@@ -1041,32 +1016,14 @@ func (node *QueryNode) queryWithDmlChannel(ctx context.Context, req *querypb.Que
 	defer cancel()
 
 	var results []*internalpb.RetrieveResults
-	var streamingResult *internalpb.RetrieveResults
-
-	withStreaming := func(ctx context.Context) error {
-		streamingTask := newQueryTask(queryCtx, req)
-		streamingTask.DataScope = querypb.DataScope_Streaming
-		streamingTask.QS = qs
-		err := node.scheduler.AddReadTask(queryCtx, streamingTask)
-
-		if err != nil {
-			return err
-		}
-		err = streamingTask.WaitToFinish()
-		if err != nil {
-			return err
-		}
-		metrics.QueryNodeSQLatencyInQueue.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()),
-			metrics.QueryLabel).Observe(float64(streamingTask.queueDur.Milliseconds()))
-		metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()),
-			metrics.QueryLabel).Observe(float64(streamingTask.reduceDur.Milliseconds()))
-		streamingResult = streamingTask.Ret
-		return nil
-	}
-
 	var errCluster error
+	var withStreamingFunc queryWithStreaming
+
+	if !req.Req.IgnoreGrowing {
+		withStreamingFunc = getQueryWithStreamingFunc(queryCtx, req, node, qs, Params.QueryNodeCfg.GetNodeID())
+	}
 	// shard leader dispatches request to its shard cluster
-	results, errCluster = cluster.Query(queryCtx, req, withStreaming)
+	results, errCluster = cluster.Query(queryCtx, req, withStreamingFunc)
 	if errCluster != nil {
 		log.Ctx(ctx).Warn("failed to query cluster", zap.Int64("msgID", msgID), zap.Int64("collectionID", req.Req.GetCollectionID()), zap.Error(errCluster))
 		failRet.Status.Reason = errCluster.Error()
@@ -1076,7 +1033,6 @@ func (node *QueryNode) queryWithDmlChannel(ctx context.Context, req *querypb.Que
 	tr.CtxElapse(ctx, fmt.Sprintf("start reduce query result, msgID = %d, fromSharedLeader = %t, vChannel = %s, segmentIDs = %v",
 		msgID, req.GetFromShardLeader(), dmlChannel, req.GetSegmentIDs()))
 
-	results = append(results, streamingResult)
 	ret, err2 := mergeInternalRetrieveResultsAndFillIfEmpty(ctx, results, req.Req.GetLimit(), req.GetReq().GetOutputFieldsId(), qs.collection.Schema())
 	if err2 != nil {
 		failRet.Status.Reason = err2.Error()
