@@ -2128,3 +2128,15 @@ func (suite *ShardClusterSuite) TestReleaseSegments() {
 func TestShardClusterSuite(t *testing.T) {
 	suite.Run(t, new(ShardClusterSuite))
 }
+
+// ut for https://github.com/milvus-io/milvus/issues/22312
+func TestGetSegmentInfoBeforeSetup(t *testing.T) {
+
+	sc := NewShardCluster(100, 1000, "testChannel", 0,
+		&mockNodeDetector{}, &mockSegmentDetector{}, buildMockQueryNode)
+
+	assert.NotPanics(t, func() {
+		result := sc.GetSegmentInfos()
+		assert.Nil(t, result)
+	})
+}
