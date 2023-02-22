@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include "common/Slice.h"
+#include "common/Utils.h"
 #include "common/BitsetView.h"
 #include "index/VectorMemNMIndex.h"
 #include "log/Log.h"
@@ -30,7 +31,7 @@ VectorMemNMIndex::Serialize(const Config& config) {
     knowhere::BinarySet ret;
     auto stat = index_.Serialize(ret);
     if (stat != knowhere::Status::success)
-        PanicCodeInfo(ErrorCodeEnum::UnexpectedError, "failed to serialize index");
+        PanicCodeInfo(ErrorCodeEnum::UnexpectedError, "failed to serialize index, " + MatchKnowhereError(stat));
 
     auto deleter = [&](uint8_t*) {};  // avoid repeated deconstruction
     auto raw_data = std::shared_ptr<uint8_t[]>(static_cast<uint8_t*>(raw_data_.data()), deleter);
@@ -87,7 +88,7 @@ VectorMemNMIndex::LoadRawData() {
     knowhere::BinarySet bs;
     auto stat = index_.Serialize(bs);
     if (stat != knowhere::Status::success)
-        PanicCodeInfo(ErrorCodeEnum::UnexpectedError, "failed to Serialize index");
+        PanicCodeInfo(ErrorCodeEnum::UnexpectedError, "failed to Serialize index, " + MatchKnowhereError(stat));
 
     auto bptr = std::make_shared<knowhere::Binary>();
     auto deleter = [&](uint8_t*) {};  // avoid repeated deconstruction
@@ -96,7 +97,7 @@ VectorMemNMIndex::LoadRawData() {
     bs.Append(RAW_DATA, bptr);
     stat = index_.Deserialize(bs);
     if (stat != knowhere::Status::success)
-        PanicCodeInfo(ErrorCodeEnum::UnexpectedError, "failed to Deserialize index");
+        PanicCodeInfo(ErrorCodeEnum::UnexpectedError, "failed to Deserialize index, " + MatchKnowhereError(stat));
 }
 
 }  // namespace milvus::index

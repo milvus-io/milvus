@@ -19,6 +19,7 @@
 #include "config/ConfigChunkManager.h"
 #include "exceptions/EasyAssert.h"
 #include "knowhere/dataset.h"
+#include "knowhere/expected.h"
 
 namespace milvus {
 inline DatasetPtr
@@ -121,6 +122,48 @@ IsMetricType(const std::string& str, const knowhere::MetricType& metric_type) {
 inline bool
 PositivelyRelated(const knowhere::MetricType& metric_type) {
     return IsMetricType(metric_type, knowhere::metric::IP);
+}
+
+inline std::string
+MatchKnowhereError(knowhere::Status status) {
+    switch (status) {
+        case knowhere::Status::invalid_args:
+            return "err: invalid args";
+        case knowhere::Status::invalid_param_in_json:
+            return "err: invalid param in json";
+        case knowhere::Status::out_of_range_in_json:
+            return "err: out of range in json";
+        case knowhere::Status::type_conflict_in_json:
+            return "err: type conflict in json";
+        case knowhere::Status::invalid_metric_type:
+            return "err: invalid metric type";
+        case knowhere::Status::empty_index:
+            return "err: empty index";
+        case knowhere::Status::not_implemented:
+            return "err: not implemented";
+        case knowhere::Status::index_not_trained:
+            return "err: index not trained";
+        case knowhere::Status::index_already_trained:
+            return "err: index already trained";
+        case knowhere::Status::faiss_inner_error:
+            return "err: faiss inner error";
+        case knowhere::Status::annoy_inner_error:
+            return "err: annoy inner error";
+        case knowhere::Status::hnsw_inner_error:
+            return "err: hnsw inner error";
+        case knowhere::Status::malloc_error:
+            return "err: malloc error";
+        case knowhere::Status::diskann_inner_error:
+            return "err: diskann inner error";
+        case knowhere::Status::diskann_file_error:
+            return "err: diskann file error";
+        case knowhere::Status::invalid_value_in_json:
+            return "err: invalid value in json";
+        case knowhere::Status::arithmetic_overflow:
+            return "err: arithmetic overflow";
+        default:
+            return "not match the error type in knowhere";
+    }
 }
 
 }  // namespace milvus
