@@ -1100,7 +1100,9 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 		zap.Strings("vChannels", req.GetDmlChannels()),
 		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
 		zap.Uint64("guaranteeTimestamp", req.Req.GetGuaranteeTimestamp()),
-		zap.Uint64("timeTravel", req.GetReq().GetTravelTimestamp()))
+		zap.Uint64("timeTravel", req.GetReq().GetTravelTimestamp()),
+		zap.Int64s("partitionIDs", req.GetReq().GetPartitionIDs()),
+	)
 
 	if req.GetReq().GetBase().GetTargetID() != node.session.ServerID {
 		return &internalpb.RetrieveResults{

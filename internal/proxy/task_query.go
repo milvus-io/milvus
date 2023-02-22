@@ -216,7 +216,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	log.Ctx(ctx).Debug("Get partitions in collection.", zap.Any("collectionName", collectionName),
-		zap.Int64("msgID", t.ID()), zap.Any("requestType", "query"))
+		zap.Int64("msgID", t.ID()), zap.Any("requestType", "query"), zap.Int64s("partitionIDs", t.RetrieveRequest.GetPartitionIDs()))
 
 	queryParams, err := parseQueryParams(t.request.GetQueryParams())
 	if err != nil {

@@ -187,7 +187,9 @@ func newSegment(collection *Collection,
 		zap.Int64("collectionID", collectionID),
 		zap.Int64("partitionID", partitionID),
 		zap.Int64("segmentID", segmentID),
-		zap.String("segmentType", segType.String()))
+		zap.String("segmentType", segType.String()),
+		zap.String("vchannel", vChannelID),
+	)
 
 	var segment = &Segment{
 		segmentPtr:        segmentPtr,

@@ -736,6 +736,9 @@ func (sc *ShardCluster) Search(ctx context.Context, req *querypb.SearchRequest, 
 
 	// dispatch request to followers
 	for nodeID, segments := range segAllocs {
+		if len(segments) == 0 {
+			continue
+		}
 		internalReq := typeutil.Clone(req.GetReq())
 		internalReq.GetBase().TargetID = nodeID
 		nodeReq := &querypb.SearchRequest{
@@ -825,6 +828,9 @@ func (sc *ShardCluster) Query(ctx context.Context, req *querypb.QueryRequest, wi
 
 	// dispatch request to followers
 	for nodeID, segments := range segAllocs {
+		if len(segments) == 0 {
+			continue
+		}
 		internalReq := typeutil.Clone(req.GetReq())
 		internalReq.GetBase().TargetID = nodeID
 		nodeReq := &querypb.QueryRequest{
