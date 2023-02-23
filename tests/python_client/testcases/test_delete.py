@@ -469,6 +469,40 @@ class TestDeleteOperation(TestcaseBase):
         # since the search requests arrived query nodes earlier than query nodes consume the delete requests.
         assert len(inter) == 0
 
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_delete_search_rename_collection(self):
+        """
+        target: test delete and search in the renamed collection
+        method: search entities after it was deleted
+        expected: deleted entity is not in the search result
+        """
+        # init collection with nb default data
+        collection_w, _, _, ids = self.init_collection_general(prefix, insert_data=True)[0:4]
+        entity, _ = collection_w.query(tmp_expr, output_fields=["%"])
+        search_res, _ = collection_w.search([entity[0][ct.default_float_vec_field_name]],
+                                            ct.default_float_vec_field_name,
+                                            ct.default_search_params, ct.default_limit)
+        # assert search results contains entity
+        assert 0 in search_res[0].ids
+        # rename collection
+        old_collection_name = collection_w.name
+        new_collection_name = cf.gen_unique_str(prefix + "new")
+        self.utility_wrap.rename_collection(old_collection_name, new_collection_name)
+        collection_w = self.init_collection_wrap(name=new_collection_name)
+        # delete entities
+        expr = f'{ct.default_int64_field_name} in {ids[:ct.default_nb // 2]}'
+        collection_w.delete(expr)
+        search_res_2, _ = collection_w.search([entity[0][ct.default_float_vec_field_name]],
+                                              ct.default_float_vec_field_name,
+                                              ct.default_search_params, ct.default_limit)
+        # assert search result is not equal to entity
+        log.debug(f"Second search result ids: {search_res_2[0].ids}")
+        inter = set(ids[:ct.default_nb // 2]
+                    ).intersection(set(search_res_2[0].ids))
+        # Using bounded staleness, we could still search the "deleted" entities,
+        # since the search requests arrived query nodes earlier than query nodes consume the delete requests.
+        assert len(inter) == 0
+
     @pytest.mark.tags(CaseLabel.L1)
     def test_delete_expr_repeated_values(self):
         """
