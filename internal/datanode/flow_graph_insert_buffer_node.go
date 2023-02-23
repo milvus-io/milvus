@@ -179,8 +179,8 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 
 	ibNode.lastTimestamp = endPositions[0].Timestamp
 
-	// Updating segment statistics in channel
-	seg2Upload, err := ibNode.updateSegmentStates(fgMsg.insertMessages, startPositions[0], endPositions[0])
+	// Add segment in channel if need and updating segment row number
+	seg2Upload, err := ibNode.addSegmentAndUpdateRowNum(fgMsg.insertMessages, startPositions[0], endPositions[0])
 	if err != nil {
 		// Occurs only if the collectionID is mismatch, should not happen
 		err = fmt.Errorf("update segment states in channel meta wrong, err = %s", err)
@@ -199,6 +199,7 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 		}
 	}
 
+	ibNode.updateSegmentsMemorySize(seg2Upload)
 	ibNode.DisplayStatistics(seg2Upload)
 
 	segmentsToSync := ibNode.Sync(fgMsg, seg2Upload, endPositions[0])
@@ -285,7 +286,17 @@ func (ibNode *insertBufferNode) DisplayStatistics(seg2Upload []UniqueID) {
 				zap.Int64("segmentID", segID),
 				zap.String("channel", ibNode.channelName),
 				zap.Int64("size", bd.size),
-				zap.Int64("limit", bd.limit))
+				zap.Int64("limit", bd.limit),
+				zap.Int64("memorySize", bd.memorySize()))
+		}
+	}
+}
+
+// updateSegmentsMemorySize updates segments' memory size in channel meta
+func (ibNode *insertBufferNode) updateSegmentsMemorySize(seg2Upload []UniqueID) {
+	for _, segID := range seg2Upload {
+		if bd, ok := ibNode.channel.getCurInsertBuffer(segID); ok {
+			ibNode.channel.updateSegmentMemorySize(segID, bd.memorySize())
 		}
 	}
 }
@@ -495,11 +506,11 @@ func (ibNode *insertBufferNode) Sync(fgMsg *flowGraphMsg, seg2Upload []UniqueID,
 	return segmentsToSync
 }
 
-// updateSegmentStates updates statistics in channel meta for the segments in insertMsgs.
+//	 addSegmentAndUpdateRowNum updates row number in channel meta for the segments in insertMsgs.
 //
-//	If the segment doesn't exist, a new segment will be created.
-//	The segment number of rows will be updated in mem, waiting to be uploaded to DataCoord.
-func (ibNode *insertBufferNode) updateSegmentStates(insertMsgs []*msgstream.InsertMsg, startPos, endPos *internalpb.MsgPosition) (seg2Upload []UniqueID, err error) {
+//		If the segment doesn't exist, a new segment will be created.
+//		The segment number of rows will be updated in mem, waiting to be uploaded to DataCoord.
+func (ibNode *insertBufferNode) addSegmentAndUpdateRowNum(insertMsgs []*msgstream.InsertMsg, startPos, endPos *internalpb.MsgPosition) (seg2Upload []UniqueID, err error) {
 	uniqueSeg := make(map[UniqueID]int64)
 	for _, msg := range insertMsgs {
 
@@ -535,7 +546,7 @@ func (ibNode *insertBufferNode) updateSegmentStates(insertMsgs []*msgstream.Inse
 	seg2Upload = make([]UniqueID, 0, len(uniqueSeg))
 	for id, num := range uniqueSeg {
 		seg2Upload = append(seg2Upload, id)
-		ibNode.channel.updateStatistics(id, num)
+		ibNode.channel.updateSegmentRowNumber(id, num)
 	}
 
 	return

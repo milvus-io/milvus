@@ -17,25 +17,60 @@
 package datanode
 
 import (
+	"math"
+	"sort"
 	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/util/hardware"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"go.uber.org/zap"
 )
 
-// segmentSyncPolicy sync policy applies to segment
-type segmentSyncPolicy func(segment *Segment, ts Timestamp) bool
+// segmentsSyncPolicy sync policy applies to segments
+type segmentSyncPolicy func(segments []*Segment, ts Timestamp) []UniqueID
 
-// syncPeriodically get segmentSyncPolicy with segment sync periodically.
+// syncPeriodically get segmentSyncPolicy with segments sync periodically.
 func syncPeriodically() segmentSyncPolicy {
-	return func(segment *Segment, ts Timestamp) bool {
-		endTime := tsoutil.PhysicalTime(ts)
-		lastSyncTime := tsoutil.PhysicalTime(segment.lastSyncTs)
-		shouldSync := endTime.Sub(lastSyncTime) >= Params.DataNodeCfg.SyncPeriod.GetAsDuration(time.Second) && !segment.isBufferEmpty()
-		if shouldSync {
-			log.Info("sync segment periodically ", zap.Time("now", endTime), zap.Time("last sync", lastSyncTime))
+	return func(segments []*Segment, ts Timestamp) []UniqueID {
+		segsToSync := make([]UniqueID, 0)
+		for _, seg := range segments {
+			endTime := tsoutil.PhysicalTime(ts)
+			lastSyncTime := tsoutil.PhysicalTime(seg.lastSyncTs)
+			shouldSync := endTime.Sub(lastSyncTime) >= Params.DataNodeCfg.SyncPeriod.GetAsDuration(time.Second) && !seg.isBufferEmpty()
+			if shouldSync {
+				segsToSync = append(segsToSync, seg.segmentID)
+			}
 		}
-		return shouldSync
+		if len(segsToSync) > 0 {
+			log.Debug("sync segment periodically",
+				zap.Int64s("segmentID", segsToSync))
+		}
+		return segsToSync
+	}
+}
+
+// syncMemoryTooHigh force sync the largest segment.
+func syncMemoryTooHigh() segmentSyncPolicy {
+	return func(segments []*Segment, ts Timestamp) []UniqueID {
+		if Params.DataNodeCfg.MemoryForceSyncEnable.GetAsBool() &&
+			hardware.GetMemoryUseRatio() >= Params.DataNodeCfg.MemoryForceSyncThreshold.GetAsFloat() &&
+			len(segments) >= 1 {
+			toSyncSegmentNum := int(math.Max(float64(len(segments))*Params.DataNodeCfg.MemoryForceSyncSegmentRatio.GetAsFloat(), 1.0))
+			toSyncSegmentIDs := make([]UniqueID, 0)
+			sort.Slice(segments, func(i, j int) bool {
+				return segments[i].memorySize > segments[j].memorySize
+			})
+			for i := 0; i < toSyncSegmentNum; i++ {
+				toSyncSegmentIDs = append(toSyncSegmentIDs, segments[i].segmentID)
+			}
+			log.Debug("sync segment due to memory usage is too high",
+				zap.Int64s("toSyncSegmentIDs", toSyncSegmentIDs),
+				zap.Int("inputSegmentNum", len(segments)),
+				zap.Int("toSyncSegmentNum", len(toSyncSegmentIDs)),
+				zap.Float64("memoryUsageRatio", hardware.GetMemoryUseRatio()))
+			return toSyncSegmentIDs
+		}
+		return []UniqueID{}
 	}
 }

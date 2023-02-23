@@ -307,6 +307,10 @@ dataNode:
     serverMaxRecvSize: 536870912
     clientMaxSendSize: 268435456
     clientMaxRecvSize: 268435456
+  memory:
+    forceSyncEnable: true # `true` to force sync if memory usage is too high
+    forceSyncThreshold: 0.6 # forceSync only take effects when memory usage ratio > forceSyncThreshold. note that should set it a small value like 0.2 for standalone deployment 
+    forceSyncSegmentRatio: 0.3 # ratio of segments to sync, top largest forceSyncSegmentRatio segments will be synced
 
 # Configures the system log output.
 log:
