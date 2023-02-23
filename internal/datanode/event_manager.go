@@ -122,8 +122,9 @@ func (t *tickler) watch() {
 	}
 
 	t.closeWg.Add(1)
-	ticker := time.NewTicker(t.interval)
 	go func() {
+		ticker := time.NewTicker(t.interval)
+		defer ticker.Stop()
 		for {
 			select {
 			case <-ticker.C:

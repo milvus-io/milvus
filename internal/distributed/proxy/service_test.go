@@ -882,7 +882,6 @@ func withCredential(clientPemPath, clientKeyPath, clientCaPath string) (credenti
 // waitForGrpcReady block until service available or panic after times out.
 func waitForGrpcReady(opt *WaitOption) {
 	Params := &paramtable.Get().ProxyGrpcServerCfg
-	ticker := time.NewTicker(opt.Duration)
 	ch := make(chan error, 1)
 
 	go func() {
@@ -910,6 +909,8 @@ func waitForGrpcReady(opt *WaitOption) {
 		}
 	}()
 
+	timer := time.NewTimer(opt.Duration)
+
 	select {
 	case err := <-ch:
 		if err != nil {
@@ -918,7 +919,7 @@ func waitForGrpcReady(opt *WaitOption) {
 				zap.Any("option", opt))
 			panic(err)
 		}
-	case <-ticker.C:
+	case <-timer.C:
 		log.Error("grpc service not ready",
 			zap.Any("option", opt))
 		panic("grpc service not ready")

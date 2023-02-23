@@ -115,12 +115,13 @@ func TestIndexNodeSimple(t *testing.T) {
 			ClusterID: clusterID,
 			BuildIDs:  []int64{buildID},
 		}
-		timeout := time.After(time.Second * 10)
 		var idxInfo *indexpb.IndexTaskInfo
+		timeoutCtx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+		defer cancel()
 	Loop:
 		for {
 			select {
-			case <-timeout:
+			case <-timeoutCtx.Done():
 				t.Fatal("timeout for querying jobs")
 			default:
 				time.Sleep(1 * time.Millisecond)
@@ -302,11 +303,12 @@ func TestIndexNodeComplex(t *testing.T) {
 		}(i)
 	}
 	testwg.Wait()
-	timeout := time.After(time.Second * 30)
+	timeoutCtx, cancel := context.WithTimeout(ctx, time.Second*30)
+	defer cancel()
 Loop:
 	for {
 		select {
-		case <-timeout:
+		case <-timeoutCtx.Done():
 			t.Fatal("timeout testing")
 		default:
 			jobNumRet, err := in.GetJobStats(ctx, &indexpb.GetJobStatsRequest{})

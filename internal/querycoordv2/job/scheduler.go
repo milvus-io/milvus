@@ -71,6 +71,7 @@ func (scheduler *Scheduler) schedule(ctx context.Context) {
 	go func() {
 		defer scheduler.wg.Done()
 		ticker := time.NewTicker(500 * time.Millisecond)
+		defer ticker.Stop()
 		for {
 			select {
 			case <-ctx.Done():

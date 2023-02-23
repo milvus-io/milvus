@@ -58,9 +58,11 @@ func getSeekPositions(factory msgstream.Factory, pchannel string, maxNum int) ([
 	defer stream.Close()
 	stream.AsConsumer([]string{pchannel}, fmt.Sprintf("%d", rand.Int()), mqwrapper.SubscriptionPositionEarliest)
 	positions := make([]*msgstream.MsgPosition, 0)
+	timeoutCtx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
 	for {
 		select {
-		case <-time.After(100 * time.Millisecond): // no message to consume
+		case <-timeoutCtx.Done(): // no message to consume
 			return positions, nil
 		case pack := <-stream.Chan():
 			positions = append(positions, pack.EndPositions[0])

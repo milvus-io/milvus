@@ -89,6 +89,7 @@ func (ob *TargetObserver) schedule(ctx context.Context) {
 	log.Info("Start update next target loop")
 
 	ticker := time.NewTicker(params.Params.QueryCoordCfg.UpdateNextTargetInterval.GetAsDuration(time.Second))
+	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():

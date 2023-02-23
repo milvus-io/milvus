@@ -248,12 +248,13 @@ func (c *ChannelManager) unwatchDroppedChannels() {
 
 // NOT USED.
 func (c *ChannelManager) bgCheckChannelsWork(ctx context.Context) {
-	timer := time.NewTicker(bgCheckInterval)
+	ticker := time.NewTicker(bgCheckInterval)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-timer.C:
+		case <-ticker.C:
 			c.mu.Lock()
 
 			channels := c.store.GetNodesChannels()

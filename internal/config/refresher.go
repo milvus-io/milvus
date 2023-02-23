@@ -54,6 +54,7 @@ func (r refresher) stop() {
 
 func (r refresher) refreshPeriodically(name string) {
 	ticker := time.NewTicker(r.refreshInterval)
+	defer ticker.Stop()
 	log.Info("start refreshing configurations", zap.String("source", name))
 	for {
 		select {

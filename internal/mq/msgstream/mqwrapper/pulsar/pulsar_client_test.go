@@ -526,7 +526,8 @@ func TestPulsarClient_SeekLatest(t *testing.T) {
 	defer consumer.Close()
 
 	msgChan := consumer.Chan()
-
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
 	loop := true
 	for loop {
 		select {
@@ -536,7 +537,7 @@ func TestPulsarClient_SeekLatest(t *testing.T) {
 			log.Info("RECV", zap.Any("v", v))
 			assert.Equal(t, v, 4)
 			loop = false
-		case <-time.After(2 * time.Second):
+		case <-ticker.C:
 			log.Info("after 2 seconds")
 			msg := &mqwrapper.ProducerMessage{
 				Payload:    IntToBytes(4),

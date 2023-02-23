@@ -344,9 +344,8 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 			fm.startDropping()
 			delNode.Operate([]flowgraph.Msg{&msg})
 		})
-		timer := time.NewTimer(time.Millisecond)
 		select {
-		case <-timer.C:
+		case <-time.After(time.Millisecond):
 			t.FailNow()
 		case <-sig:
 		}

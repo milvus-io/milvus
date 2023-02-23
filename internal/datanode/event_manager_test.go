@@ -68,7 +68,7 @@ func TestChannelEventManager(t *testing.T) {
 
 		select {
 		case <-ch:
-		case <-time.NewTimer(time.Second).C:
+		case <-time.After(time.Second):
 			t.FailNow()
 		}
 		close(em.eventChan)

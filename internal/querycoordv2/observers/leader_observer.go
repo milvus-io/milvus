@@ -50,6 +50,7 @@ func (o *LeaderObserver) Start(ctx context.Context) {
 	go func() {
 		defer o.wg.Done()
 		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
 		for {
 			select {
 			case <-o.closeCh:

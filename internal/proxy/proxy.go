@@ -268,14 +268,14 @@ func (node *Proxy) sendChannelsTimeTickLoop() {
 	go func() {
 		defer node.wg.Done()
 
-		timer := time.NewTicker(Params.ProxyCfg.TimeTickInterval.GetAsDuration(time.Millisecond))
-
+		ticker := time.NewTicker(Params.ProxyCfg.TimeTickInterval.GetAsDuration(time.Millisecond))
+		defer ticker.Stop()
 		for {
 			select {
 			case <-node.ctx.Done():
 				log.Info("send channels time tick loop exit")
 				return
-			case <-timer.C:
+			case <-ticker.C:
 				stats, ts, err := node.chTicker.getMinTsStatistics()
 				if err != nil {
 					log.Warn("sendChannelsTimeTickLoop.getMinTsStatistics", zap.Error(err))

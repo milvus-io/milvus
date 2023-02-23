@@ -44,8 +44,10 @@ import (
 
 // CheckGrpcReady wait for context timeout, or wait 100ms then send nil to targetCh
 func CheckGrpcReady(ctx context.Context, targetCh chan error) {
+	timer := time.NewTimer(100 * time.Millisecond)
+	defer timer.Stop()
 	select {
-	case <-time.After(100 * time.Millisecond):
+	case <-timer.C:
 		targetCh <- nil
 	case <-ctx.Done():
 		return

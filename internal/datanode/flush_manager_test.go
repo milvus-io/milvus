@@ -378,9 +378,8 @@ func TestRendezvousFlushManager_waitForAllFlushQueue(t *testing.T) {
 		})
 	}
 
-	timeout := time.NewTimer(time.Second)
 	select {
-	case <-timeout.C:
+	case <-time.After(time.Second):
 		t.FailNow()
 	case <-signal:
 	}

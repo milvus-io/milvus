@@ -61,6 +61,7 @@ func (ob *ResourceObserver) schedule(ctx context.Context) {
 	log.Info("Start check resource group loop")
 
 	ticker := time.NewTicker(params.Params.QueryCoordCfg.CheckResourceGroupInterval.GetAsDuration(time.Second))
+	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
