@@ -27,7 +27,14 @@ import (
 	"go.uber.org/zap"
 )
 
-type Controller struct {
+type Controller interface {
+	StartDistInstance(ctx context.Context, nodeID int64)
+	Remove(nodeID int64)
+	SyncAll(ctx context.Context)
+	Stop()
+}
+
+type ControllerImpl struct {
 	mu          sync.RWMutex
 	handlers    map[int64]*distHandler
 	client      session.Cluster
@@ -37,7 +44,7 @@ type Controller struct {
 	scheduler   task.Scheduler
 }
 
-func (dc *Controller) StartDistInstance(ctx context.Context, nodeID int64) {
+func (dc *ControllerImpl) StartDistInstance(ctx context.Context, nodeID int64) {
 	dc.mu.Lock()
 	defer dc.mu.Unlock()
 	if _, ok := dc.handlers[nodeID]; ok {
@@ -48,7 +55,7 @@ func (dc *Controller) StartDistInstance(ctx context.Context, nodeID int64) {
 	dc.handlers[nodeID] = h
 }
 
-func (dc *Controller) Remove(nodeID int64) {
+func (dc *ControllerImpl) Remove(nodeID int64) {
 	dc.mu.Lock()
 	defer dc.mu.Unlock()
 	if h, ok := dc.handlers[nodeID]; ok {
@@ -57,7 +64,7 @@ func (dc *Controller) Remove(nodeID int64) {
 	}
 }
 
-func (dc *Controller) SyncAll(ctx context.Context) {
+func (dc *ControllerImpl) SyncAll(ctx context.Context) {
 	dc.mu.RLock()
 	defer dc.mu.RUnlock()
 
@@ -72,7 +79,7 @@ func (dc *Controller) SyncAll(ctx context.Context) {
 	wg.Wait()
 }
 
-func (dc *Controller) Stop() {
+func (dc *ControllerImpl) Stop() {
 	dc.mu.Lock()
 	defer dc.mu.Unlock()
 	for _, h := range dc.handlers {
@@ -86,8 +93,8 @@ func NewDistController(
 	dist *meta.DistributionManager,
 	targetMgr *meta.TargetManager,
 	scheduler task.Scheduler,
-) *Controller {
-	return &Controller{
+) *ControllerImpl {
+	return &ControllerImpl{
 		handlers:    make(map[int64]*distHandler),
 		client:      client,
 		nodeManager: nodeManager,
