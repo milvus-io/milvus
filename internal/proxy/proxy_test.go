@@ -35,8 +35,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/common"
-	"github.com/milvus-io/milvus/internal/datacoord"
-	"github.com/milvus-io/milvus/internal/datanode"
 	grpcdatacoordclient "github.com/milvus-io/milvus/internal/distributed/datacoord"
 	grpcdatacoordclient2 "github.com/milvus-io/milvus/internal/distributed/datacoord/client"
 	grpcdatanode "github.com/milvus-io/milvus/internal/distributed/datanode"
@@ -46,16 +44,12 @@ import (
 	grpcquerynode "github.com/milvus-io/milvus/internal/distributed/querynode"
 	grpcrootcoord "github.com/milvus-io/milvus/internal/distributed/rootcoord"
 	rcc "github.com/milvus-io/milvus/internal/distributed/rootcoord/client"
-	"github.com/milvus-io/milvus/internal/indexnode"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
-	querycoord "github.com/milvus-io/milvus/internal/querycoordv2"
-	"github.com/milvus-io/milvus/internal/querynode"
-	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/tracer"
 	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
@@ -65,7 +59,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/importutil"
-	"github.com/milvus-io/milvus/internal/util/logutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
@@ -97,11 +90,6 @@ func runRootCoord(ctx context.Context, localMsg bool) *grpcrootcoord.Server {
 
 	wg.Add(1)
 	go func() {
-		if !localMsg {
-			logutil.SetupLogger(&rootcoord.Params.Log)
-			defer log.Sync()
-		}
-
 		factory := dependency.NewDefaultFactory(localMsg)
 		var err error
 		rc, err = grpcrootcoord.NewServer(ctx, factory)
@@ -126,11 +114,6 @@ func runQueryCoord(ctx context.Context, localMsg bool) *grpcquerycoord.Server {
 
 	wg.Add(1)
 	go func() {
-		if !localMsg {
-			logutil.SetupLogger(&querycoord.Params.Log)
-			defer log.Sync()
-		}
-
 		factory := dependency.NewDefaultFactory(localMsg)
 		var err error
 		qs, err = grpcquerycoord.NewServer(ctx, factory)
@@ -155,11 +138,6 @@ func runQueryNode(ctx context.Context, localMsg bool, alias string) *grpcqueryno
 
 	wg.Add(1)
 	go func() {
-		if !localMsg {
-			logutil.SetupLogger(&querynode.Params.Log)
-			defer log.Sync()
-		}
-
 		factory := dependency.NewDefaultFactory(localMsg)
 		var err error
 		qn, err = grpcquerynode.NewServer(ctx, factory)
@@ -184,11 +162,6 @@ func runDataCoord(ctx context.Context, localMsg bool) *grpcdatacoordclient.Serve
 
 	wg.Add(1)
 	go func() {
-		if !localMsg {
-			logutil.SetupLogger(&datacoord.Params.Log)
-			defer log.Sync()
-		}
-
 		factory := dependency.NewDefaultFactory(localMsg)
 		ds = grpcdatacoordclient.NewServer(ctx, factory)
 		wg.Done()
@@ -209,11 +182,6 @@ func runDataNode(ctx context.Context, localMsg bool, alias string) *grpcdatanode
 
 	wg.Add(1)
 	go func() {
-		if !localMsg {
-			logutil.SetupLogger(&datanode.Params.Log)
-			defer log.Sync()
-		}
-
 		factory := dependency.NewDefaultFactory(localMsg)
 		var err error
 		dn, err = grpcdatanode.NewServer(ctx, factory)
@@ -238,11 +206,6 @@ func runIndexNode(ctx context.Context, localMsg bool, alias string) *grpcindexno
 
 	wg.Add(1)
 	go func() {
-		if !localMsg {
-			logutil.SetupLogger(&indexnode.Params.Log)
-			defer log.Sync()
-		}
-
 		factory := dependency.NewDefaultFactory(localMsg)
 		var err error
 		in, err = grpcindexnode.NewServer(ctx, factory)

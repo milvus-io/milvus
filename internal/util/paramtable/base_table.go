@@ -15,7 +15,6 @@ import (
 	"os"
 	"path"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -63,8 +62,6 @@ type BaseTable struct {
 
 	configDir string
 	YamlFile  string
-
-	Log log.Config
 }
 
 // NewBaseTableFromYamlOnly only used in migration tool.
@@ -109,7 +106,6 @@ func (gp *BaseTable) init(refreshInterval int) {
 	}
 	gp.initConfigsFromLocal(refreshInterval)
 	gp.initConfigsFromRemote(refreshInterval)
-	gp.initLog()
 }
 
 func (gp *BaseTable) initConfigsFromLocal(refreshInterval int) {
@@ -213,31 +209,4 @@ func (gp *BaseTable) Save(key, value string) error {
 func (gp *BaseTable) Reset(key string) error {
 	gp.mgr.ResetConfig(key)
 	return nil
-}
-
-// initLog init log of the base table
-func (gp *BaseTable) initLog() {
-	gp.Log = log.Config{}
-	format := gp.GetWithDefault("log.format", DefaultLogFormat)
-	gp.Log.Format = format
-	level := gp.GetWithDefault("log.level", DefaultLogLevelForBase)
-	gp.Log.Level = level
-	gp.Log.File.MaxSize, _ = strconv.Atoi(gp.GetWithDefault("log.file.maxSize", "300"))
-	gp.Log.File.MaxBackups, _ = strconv.Atoi(gp.GetWithDefault("log.file.maxBackups", "10"))
-	gp.Log.File.MaxDays, _ = strconv.Atoi(gp.GetWithDefault("log.file.maxAge", "20"))
-	gp.Log.File.RootPath = gp.GetWithDefault("log.file.rootPath", DefaultRootPath)
-	stdout, err := strconv.ParseBool(gp.GetWithDefault("log.stdout", "true"))
-	if err != nil {
-		gp.Log.Stdout = true
-	} else {
-		gp.Log.Stdout = stdout
-	}
-
-	grpclog, err := gp.Load("grpc.log.level")
-	if err != nil {
-		gp.Log.GrpcLevel = DefaultLogLevel
-	} else {
-		gp.Log.GrpcLevel = strings.ToUpper(grpclog)
-	}
-
 }

@@ -106,6 +106,8 @@ func (p *quotaConfig) init(base *BaseTable) {
 		Key:          "quotaAndLimits.enabled",
 		Version:      "2.2.0",
 		DefaultValue: "false",
+		Doc:          "`true` to enable quota and limits, `false` to disable.",
+		Export:       true,
 	}
 	p.QuotaAndLimitsEnabled.Init(base.mgr)
 
@@ -121,6 +123,10 @@ func (p *quotaConfig) init(base *BaseTable) {
 			}
 			return v
 		},
+		Doc: `quotaCenterCollectInterval is the time interval that quotaCenter
+collects metrics from Proxies, Query cluster and Data cluster.
+seconds, (0 ~ 65536)`,
+		Export: true,
 	}
 	p.QuotaCenterCollectInterval.Init(base.mgr)
 
@@ -131,6 +137,7 @@ func (p *quotaConfig) init(base *BaseTable) {
 		Key:          "quotaAndLimits.ddl.enabled",
 		Version:      "2.2.0",
 		DefaultValue: "false",
+		Export:       true,
 	}
 	p.DDLLimitEnabled.Init(base.mgr)
 
@@ -148,6 +155,8 @@ func (p *quotaConfig) init(base *BaseTable) {
 			}
 			return v
 		},
+		Doc:    "qps, default no limit, rate for CreateCollection, DropCollection, LoadCollection, ReleaseCollection",
+		Export: true,
 	}
 	p.DDLCollectionRate.Init(base.mgr)
 
@@ -165,6 +174,8 @@ func (p *quotaConfig) init(base *BaseTable) {
 			}
 			return v
 		},
+		Doc:    "qps, default no limit, rate for CreatePartition, DropPartition, LoadPartition, ReleasePartition",
+		Export: true,
 	}
 	p.DDLPartitionRate.Init(base.mgr)
 
@@ -172,6 +183,7 @@ func (p *quotaConfig) init(base *BaseTable) {
 		Key:          "quotaAndLimits.indexRate.enabled",
 		Version:      "2.2.0",
 		DefaultValue: "false",
+		Export:       true,
 	}
 	p.IndexLimitEnabled.Init(base.mgr)
 
@@ -189,6 +201,8 @@ func (p *quotaConfig) init(base *BaseTable) {
 			}
 			return v
 		},
+		Doc:    "qps, default no limit, rate for CreateIndex, DropIndex",
+		Export: true,
 	}
 	p.MaxIndexRate.Init(base.mgr)
 
@@ -196,6 +210,7 @@ func (p *quotaConfig) init(base *BaseTable) {
 		Key:          "quotaAndLimits.flushRate.enabled",
 		Version:      "2.2.0",
 		DefaultValue: "false",
+		Export:       true,
 	}
 	p.FlushLimitEnabled.Init(base.mgr)
 
@@ -213,6 +228,8 @@ func (p *quotaConfig) init(base *BaseTable) {
 			}
 			return v
 		},
+		Doc:    "qps, default no limit, rate for flush",
+		Export: true,
 	}
 	p.MaxFlushRate.Init(base.mgr)
 
@@ -220,6 +237,7 @@ func (p *quotaConfig) init(base *BaseTable) {
 		Key:          "quotaAndLimits.compactionRate.enabled",
 		Version:      "2.2.0",
 		DefaultValue: "false",
+		Export:       true,
 	}
 	p.CompactionLimitEnabled.Init(base.mgr)
 
@@ -237,6 +255,8 @@ func (p *quotaConfig) init(base *BaseTable) {
 			}
 			return v
 		},
+		Doc:    "qps, default no limit, rate for manualCompaction",
+		Export: true,
 	}
 	p.MaxCompactionRate.Init(base.mgr)
 
@@ -245,6 +265,9 @@ func (p *quotaConfig) init(base *BaseTable) {
 		Key:          "quotaAndLimits.dml.enabled",
 		Version:      "2.2.0",
 		DefaultValue: "false",
+		Doc: `dml limit rates, default no limit.
+The maximum rate will not be greater than ` + "max" + `.`,
+		Export: true,
 	}
 	p.DMLLimitEnabled.Init(base.mgr)
 
@@ -265,6 +288,8 @@ func (p *quotaConfig) init(base *BaseTable) {
 			}
 			return v
 		},
+		Doc:    "MB/s, default no limit",
+		Export: true,
 	}
 	p.DMLMaxInsertRate.Init(base.mgr)
 
@@ -307,6 +332,8 @@ func (p *quotaConfig) init(base *BaseTable) {
 			}
 			return v
 		},
+		Doc:    "MB/s, default no limit",
+		Export: true,
 	}
 	p.DMLMaxDeleteRate.Init(base.mgr)
 
@@ -349,6 +376,8 @@ func (p *quotaConfig) init(base *BaseTable) {
 			}
 			return v
 		},
+		Doc:    "MB/s, default no limit, not support yet. TODO: limit bulkLoad rate",
+		Export: true,
 	}
 	p.DMLMaxBulkLoadRate.Init(base.mgr)
 
@@ -378,6 +407,9 @@ func (p *quotaConfig) init(base *BaseTable) {
 		Key:          "quotaAndLimits.dql.enabled",
 		Version:      "2.2.0",
 		DefaultValue: "false",
+		Doc: `dql limit rates, default no limit.
+The maximum rate will not be greater than ` + "max" + `.`,
+		Export: true,
 	}
 	p.DQLLimitEnabled.Init(base.mgr)
 
@@ -395,6 +427,8 @@ func (p *quotaConfig) init(base *BaseTable) {
 			}
 			return v
 		},
+		Doc:    "vps (vectors per second), default no limit",
+		Export: true,
 	}
 	p.DQLMaxSearchRate.Init(base.mgr)
 
@@ -433,6 +467,8 @@ func (p *quotaConfig) init(base *BaseTable) {
 			}
 			return v
 		},
+		Doc:    "qps, default no limit",
+		Export: true,
 	}
 	p.DQLMaxQueryRate.Init(base.mgr)
 
@@ -470,13 +506,17 @@ func (p *quotaConfig) init(base *BaseTable) {
 		Key:          "quotaAndLimits.limitWriting.forceDeny",
 		Version:      "2.2.0",
 		DefaultValue: "false",
+		Doc: `forceDeny ` + "false" + ` means dml requests are allowed (except for some
+specific conditions, such as memory of nodes to water marker), ` + "true" + ` means always reject all dml requests.`,
+		Export: true,
 	}
 	p.ForceDenyWriting.Init(base.mgr)
 
 	p.TtProtectionEnabled = ParamItem{
 		Key:          "quotaAndLimits.limitWriting.ttProtection.enabled",
 		Version:      "2.2.0",
-		DefaultValue: "true",
+		DefaultValue: "false",
+		Export:       true,
 	}
 	p.TtProtectionEnabled.Init(base.mgr)
 
@@ -496,6 +536,11 @@ func (p *quotaConfig) init(base *BaseTable) {
 			}
 			return fmt.Sprintf("%f", delay)
 		},
+		Doc: `maxTimeTickDelay indicates the backpressure for DML Operations.
+DML rates would be reduced according to the ratio of time tick delay to maxTimeTickDelay,
+if time tick delay is greater than maxTimeTickDelay, all DML requests would be rejected.
+seconds`,
+		Export: true,
 	}
 	p.MaxTimeTickDelay.Init(base.mgr)
 
@@ -503,6 +548,10 @@ func (p *quotaConfig) init(base *BaseTable) {
 		Key:          "quotaAndLimits.limitWriting.memProtection.enabled",
 		Version:      "2.2.0",
 		DefaultValue: "true",
+		Doc: `When memory usage > memoryHighWaterLevel, all dml requests would be rejected;
+When memoryLowWaterLevel < memory usage < memoryHighWaterLevel, reduce the dml rate;
+When memory usage < memoryLowWaterLevel, no action.`,
+		Export: true,
 	}
 	p.MemProtectionEnabled.Init(base.mgr)
 
@@ -524,6 +573,8 @@ func (p *quotaConfig) init(base *BaseTable) {
 			}
 			return v
 		},
+		Doc:    "(0, 1], memoryLowWaterLevel in DataNodes",
+		Export: true,
 	}
 	p.DataNodeMemoryLowWaterLevel.Init(base.mgr)
 
@@ -546,6 +597,8 @@ func (p *quotaConfig) init(base *BaseTable) {
 			}
 			return v
 		},
+		Doc:    "(0, 1], memoryHighWaterLevel in DataNodes",
+		Export: true,
 	}
 	p.DataNodeMemoryHighWaterLevel.Init(base.mgr)
 
@@ -565,6 +618,8 @@ func (p *quotaConfig) init(base *BaseTable) {
 			}
 			return v
 		},
+		Doc:    "(0, 1], memoryLowWaterLevel in QueryNodes",
+		Export: true,
 	}
 	p.QueryNodeMemoryLowWaterLevel.Init(base.mgr)
 
@@ -587,6 +642,8 @@ func (p *quotaConfig) init(base *BaseTable) {
 			}
 			return v
 		},
+		Doc:    "(0, 1], memoryHighWaterLevel in QueryNodes",
+		Export: true,
 	}
 	p.QueryNodeMemoryHighWaterLevel.Init(base.mgr)
 
@@ -594,6 +651,8 @@ func (p *quotaConfig) init(base *BaseTable) {
 		Key:          "quotaAndLimits.limitWriting.diskProtection.enabled",
 		Version:      "2.2.0",
 		DefaultValue: "true",
+		Doc:          "When the total file size of object storage is greater than `diskQuota`, all dml requests would be rejected;",
+		Export:       true,
 	}
 	p.DiskProtectionEnabled.Init(base.mgr)
 
@@ -614,6 +673,8 @@ func (p *quotaConfig) init(base *BaseTable) {
 			// megabytes to bytes
 			return fmt.Sprintf("%f", megaBytes2Bytes(level))
 		},
+		Doc:    "MB, (0, +inf), default no limit",
+		Export: true,
 	}
 	p.DiskQuota.Init(base.mgr)
 
@@ -622,6 +683,9 @@ func (p *quotaConfig) init(base *BaseTable) {
 		Key:          "quotaAndLimits.limitReading.forceDeny",
 		Version:      "2.2.0",
 		DefaultValue: "false",
+		Doc: `forceDeny ` + "false" + ` means dql requests are allowed (except for some
+specific conditions, such as collection has been dropped), ` + "true" + ` means always reject all dql requests.`,
+		Export: true,
 	}
 	p.ForceDenyReading.Init(base.mgr)
 
@@ -629,6 +693,7 @@ func (p *quotaConfig) init(base *BaseTable) {
 		Key:          "quotaAndLimits.limitReading.queueProtection.enabled",
 		Version:      "2.2.0",
 		DefaultValue: "false",
+		Export:       true,
 	}
 	p.QueueProtectionEnabled.Init(base.mgr)
 
@@ -647,6 +712,11 @@ func (p *quotaConfig) init(base *BaseTable) {
 			}
 			return v
 		},
+		Doc: `nqInQueueThreshold indicated that the system was under backpressure for Search/Query path.
+If NQ in any QueryNode's queue is greater than nqInQueueThreshold, search&query rates would gradually cool off
+until the NQ in queue no longer exceeds nqInQueueThreshold. We think of the NQ of query request as 1.
+int, default no limit`,
+		Export: true,
 	}
 	p.NQInQueueThreshold.Init(base.mgr)
 
@@ -665,6 +735,12 @@ func (p *quotaConfig) init(base *BaseTable) {
 			}
 			return v
 		},
+		Doc: `queueLatencyThreshold indicated that the system was under backpressure for Search/Query path.
+If dql latency of queuing is greater than queueLatencyThreshold, search&query rates would gradually cool off
+until the latency of queuing no longer exceeds queueLatencyThreshold.
+The latency here refers to the averaged latency over a period of time.
+milliseconds, default no limit`,
+		Export: true,
 	}
 	p.QueueLatencyThreshold.Init(base.mgr)
 
@@ -672,6 +748,7 @@ func (p *quotaConfig) init(base *BaseTable) {
 		Key:          "quotaAndLimits.limitReading.resultProtection.enabled",
 		Version:      "2.2.0",
 		DefaultValue: "false",
+		Export:       true,
 	}
 	p.ResultProtectionEnabled.Init(base.mgr)
 
@@ -693,6 +770,11 @@ func (p *quotaConfig) init(base *BaseTable) {
 			}
 			return v
 		},
+		Doc: `maxReadResultRate indicated that the system was under backpressure for Search/Query path.
+If dql result rate is greater than maxReadResultRate, search&query rates would gradually cool off
+until the read result rate no longer exceeds maxReadResultRate.
+MB/s, default no limit`,
+		Export: true,
 	}
 	p.MaxReadResultRate.Init(base.mgr)
 
@@ -710,6 +792,9 @@ func (p *quotaConfig) init(base *BaseTable) {
 			}
 			return v
 		},
+		Doc: `colOffSpeed is the speed of search&query rates cool off.
+(0, 1]`,
+		Export: true,
 	}
 	p.CoolOffSpeed.Init(base.mgr)
 

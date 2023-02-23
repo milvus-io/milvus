@@ -106,7 +106,9 @@ func (p *EtcdConfig) Init(base *BaseTable) {
 	p.Endpoints = ParamItem{
 		Key:          "etcd.endpoints",
 		Version:      "2.0.0",
+		DefaultValue: "localhost:2379",
 		PanicIfEmpty: true,
+		Export:       true,
 	}
 	p.Endpoints.Init(base.mgr)
 
@@ -114,6 +116,8 @@ func (p *EtcdConfig) Init(base *BaseTable) {
 		Key:          "etcd.use.embed",
 		DefaultValue: "false",
 		Version:      "2.1.0",
+		Doc:          "Whether to enable embedded Etcd (an in-process EtcdServer).",
+		Export:       true,
 	}
 	p.UseEmbedEtcd.Init(base.mgr)
 
@@ -122,9 +126,9 @@ func (p *EtcdConfig) Init(base *BaseTable) {
 	}
 
 	p.ConfigPath = ParamItem{
-		Key:          "etcd.config.path",
-		DefaultValue: "",
-		Version:      "2.1.0",
+		Key:     "etcd.config.path",
+		Version: "2.1.0",
+		Export:  false,
 	}
 	p.ConfigPath.Init(base.mgr)
 
@@ -132,20 +136,28 @@ func (p *EtcdConfig) Init(base *BaseTable) {
 		Key:          "etcd.data.dir",
 		DefaultValue: "default.etcd",
 		Version:      "2.1.0",
+		Doc:          `Embedded Etcd only. please adjust in embedded Milvus: /tmp/milvus/etcdData/`,
+		Export:       true,
 	}
 	p.DataDir.Init(base.mgr)
 
 	p.RootPath = ParamItem{
 		Key:          "etcd.rootPath",
 		Version:      "2.0.0",
+		DefaultValue: "by-dev",
 		PanicIfEmpty: true,
+		Doc:          "The root path where data is stored in etcd",
+		Export:       true,
 	}
 	p.RootPath.Init(base.mgr)
 
 	p.MetaSubPath = ParamItem{
 		Key:          "etcd.metaSubPath",
 		Version:      "2.0.0",
+		DefaultValue: "meta",
 		PanicIfEmpty: true,
+		Doc:          "metaRootPath = rootPath + '/' + metaSubPath",
+		Export:       true,
 	}
 	p.MetaSubPath.Init(base.mgr)
 
@@ -159,7 +171,10 @@ func (p *EtcdConfig) Init(base *BaseTable) {
 	p.KvSubPath = ParamItem{
 		Key:          "etcd.kvSubPath",
 		Version:      "2.0.0",
+		DefaultValue: "kv",
 		PanicIfEmpty: true,
+		Doc:          "kvRootPath = rootPath + '/' + kvSubPath",
+		Export:       true,
 	}
 	p.KvSubPath.Init(base.mgr)
 
@@ -174,6 +189,8 @@ func (p *EtcdConfig) Init(base *BaseTable) {
 		Key:          "etcd.log.level",
 		DefaultValue: defaultEtcdLogLevel,
 		Version:      "2.0.0",
+		Doc:          "Only supports debug, info, warn, error, panic, or fatal. Default 'info'.",
+		Export:       true,
 	}
 	p.EtcdLogLevel.Init(base.mgr)
 
@@ -181,6 +198,13 @@ func (p *EtcdConfig) Init(base *BaseTable) {
 		Key:          "etcd.log.path",
 		DefaultValue: defaultEtcdLogPath,
 		Version:      "2.0.0",
+		Doc: `path is one of:
+ - "default" as os.Stderr,
+ - "stderr" as os.Stderr,
+ - "stdout" as os.Stdout,
+ - file path to append server logs to.
+please adjust in embedded Milvus: /tmp/milvus/logs/etcd.log`,
+		Export: true,
 	}
 	p.EtcdLogPath.Init(base.mgr)
 
@@ -188,24 +212,32 @@ func (p *EtcdConfig) Init(base *BaseTable) {
 		Key:          "etcd.ssl.enabled",
 		DefaultValue: "false",
 		Version:      "2.0.0",
+		Doc:          "Whether to support ETCD secure connection mode",
+		Export:       true,
 	}
 	p.EtcdUseSSL.Init(base.mgr)
 
 	p.EtcdTLSCert = ParamItem{
 		Key:     "etcd.ssl.tlsCert",
 		Version: "2.0.0",
+		Doc:     "path to your cert file",
+		Export:  true,
 	}
 	p.EtcdTLSCert.Init(base.mgr)
 
 	p.EtcdTLSKey = ParamItem{
 		Key:     "etcd.ssl.tlsKey",
 		Version: "2.0.0",
+		Doc:     "path to your key file",
+		Export:  true,
 	}
 	p.EtcdTLSKey.Init(base.mgr)
 
 	p.EtcdTLSCACert = ParamItem{
 		Key:     "etcd.ssl.tlsCACert",
 		Version: "2.0.0",
+		Doc:     "path to your CACert file",
+		Export:  true,
 	}
 	p.EtcdTLSCACert.Init(base.mgr)
 
@@ -213,6 +245,10 @@ func (p *EtcdConfig) Init(base *BaseTable) {
 		Key:          "etcd.ssl.tlsMinVersion",
 		DefaultValue: "1.3",
 		Version:      "2.0.0",
+		Doc: `TLS min version
+Optional values: 1.0, 1.1, 1.2, 1.3。
+We recommend using version 1.2 and above.`,
+		Export: true,
 	}
 	p.EtcdTLSMinVersion.Init(base.mgr)
 }
@@ -226,6 +262,8 @@ func (p *LocalStorageConfig) Init(base *BaseTable) {
 		Key:          "localStorage.path",
 		Version:      "2.0.0",
 		DefaultValue: "/var/lib/milvus/data",
+		Doc:          "please adjust in embedded Milvus: /tmp/milvus/data/",
+		Export:       true,
 	}
 	p.Path.Init(base.mgr)
 }
@@ -239,6 +277,9 @@ func (p *MetaStoreConfig) Init(base *BaseTable) {
 		Key:          "metastore.type",
 		Version:      "2.2.0",
 		DefaultValue: util.MetaStoreTypeEtcd,
+		Doc: `Default value: etcd
+Valid values: [etcd, mysql]`,
+		Export: true,
 	}
 	p.MetaStoreType.Init(base.mgr)
 }
@@ -253,7 +294,6 @@ type MetaDBConfig struct {
 	DBName       ParamItem `refreshable:"false"`
 	MaxOpenConns ParamItem `refreshable:"false"`
 	MaxIdleConns ParamItem `refreshable:"false"`
-	LogLevel     ParamItem `refreshable:"false"`
 }
 
 func (p *MetaDBConfig) Init(base *BaseTable) {
@@ -261,6 +301,7 @@ func (p *MetaDBConfig) Init(base *BaseTable) {
 		Key:          "mysql.username",
 		Version:      "2.2.0",
 		PanicIfEmpty: true,
+		Export:       true,
 	}
 	p.Username.Init(base.mgr)
 
@@ -268,6 +309,7 @@ func (p *MetaDBConfig) Init(base *BaseTable) {
 		Key:          "mysql.password",
 		Version:      "2.2.0",
 		PanicIfEmpty: true,
+		Export:       true,
 	}
 	p.Password.Init(base.mgr)
 
@@ -275,6 +317,7 @@ func (p *MetaDBConfig) Init(base *BaseTable) {
 		Key:          "mysql.address",
 		Version:      "2.2.0",
 		PanicIfEmpty: true,
+		Export:       true,
 	}
 	p.Address.Init(base.mgr)
 
@@ -282,6 +325,7 @@ func (p *MetaDBConfig) Init(base *BaseTable) {
 		Key:          "mysql.port",
 		Version:      "2.2.0",
 		DefaultValue: "3306",
+		Export:       true,
 	}
 	p.Port.Init(base.mgr)
 
@@ -289,6 +333,7 @@ func (p *MetaDBConfig) Init(base *BaseTable) {
 		Key:          "mysql.dbName",
 		Version:      "2.2.0",
 		PanicIfEmpty: true,
+		Export:       true,
 	}
 	p.DBName.Init(base.mgr)
 
@@ -296,6 +341,7 @@ func (p *MetaDBConfig) Init(base *BaseTable) {
 		Key:          "mysql.maxOpenConns",
 		Version:      "2.2.0",
 		DefaultValue: "20",
+		Export:       true,
 	}
 	p.MaxOpenConns.Init(base.mgr)
 
@@ -303,15 +349,10 @@ func (p *MetaDBConfig) Init(base *BaseTable) {
 		Key:          "mysql.maxIdleConns",
 		Version:      "2.2.0",
 		DefaultValue: "5",
+		Export:       true,
 	}
 	p.MaxIdleConns.Init(base.mgr)
 
-	p.LogLevel = ParamItem{
-		Key:          "log.level",
-		Version:      "2.0.0",
-		DefaultValue: "debug",
-	}
-	p.LogLevel.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -337,6 +378,8 @@ func (p *PulsarConfig) Init(base *BaseTable) {
 		Key:          "pulsar.port",
 		Version:      "2.0.0",
 		DefaultValue: "6650",
+		Doc:          "Port of Pulsar",
+		Export:       true,
 	}
 	p.Port.Init(base.mgr)
 
@@ -355,6 +398,8 @@ func (p *PulsarConfig) Init(base *BaseTable) {
 			port, _ := p.Port.get()
 			return "pulsar://" + addr + ":" + port
 		},
+		Doc:    "Address of pulsar",
+		Export: true,
 	}
 	p.Address.Init(base.mgr)
 
@@ -362,6 +407,8 @@ func (p *PulsarConfig) Init(base *BaseTable) {
 		Key:          "pulsar.webport",
 		Version:      "2.0.0",
 		DefaultValue: "80",
+		Doc:          "Web port of pulsar, if you connect direcly without proxy, should use 8080",
+		Export:       true,
 	}
 	p.WebPort.Init(base.mgr)
 
@@ -384,6 +431,8 @@ func (p *PulsarConfig) Init(base *BaseTable) {
 		Key:          "pulsar.maxMessageSize",
 		Version:      "2.0.0",
 		DefaultValue: strconv.Itoa(SuggestPulsarMaxMessageSize),
+		Doc:          "5 * 1024 * 1024 Bytes, Maximum size of each message in pulsar.",
+		Export:       true,
 	}
 	p.MaxMessageSize.Init(base.mgr)
 
@@ -391,6 +440,7 @@ func (p *PulsarConfig) Init(base *BaseTable) {
 		Key:          "pulsar.tenant",
 		Version:      "2.2.0",
 		DefaultValue: "public",
+		Export:       true,
 	}
 	p.Tenant.Init(base.mgr)
 
@@ -398,6 +448,7 @@ func (p *PulsarConfig) Init(base *BaseTable) {
 		Key:          "pulsar.namespace",
 		Version:      "2.2.0",
 		DefaultValue: "default",
+		Export:       true,
 	}
 	p.Namespace.Init(base.mgr)
 
@@ -445,6 +496,7 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 		Key:          "kafka.brokerList",
 		DefaultValue: "",
 		Version:      "2.1.0",
+		Export:       true,
 	}
 	k.Address.Init(base.mgr)
 
@@ -452,6 +504,7 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 		Key:          "kafka.saslUsername",
 		DefaultValue: "",
 		Version:      "2.1.0",
+		Export:       true,
 	}
 	k.SaslUsername.Init(base.mgr)
 
@@ -459,6 +512,7 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 		Key:          "kafka.saslPassword",
 		DefaultValue: "",
 		Version:      "2.1.0",
+		Export:       true,
 	}
 	k.SaslPassword.Init(base.mgr)
 
@@ -466,6 +520,7 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 		Key:          "kafka.saslMechanisms",
 		DefaultValue: "PLAIN",
 		Version:      "2.1.0",
+		Export:       true,
 	}
 	k.SaslMechanisms.Init(base.mgr)
 
@@ -473,6 +528,7 @@ func (k *KafkaConfig) Init(base *BaseTable) {
 		Key:          "kafka.securityProtocol",
 		DefaultValue: "SASL_SSL",
 		Version:      "2.1.0",
+		Export:       true,
 	}
 	k.SecurityProtocol.Init(base.mgr)
 
@@ -509,6 +565,9 @@ func (r *RocksmqConfig) Init(base *BaseTable) {
 	r.Path = ParamItem{
 		Key:     "rocksmq.path",
 		Version: "2.0.0",
+		Doc: `The path where the message is stored in rocksmq
+please adjust in embedded Milvus: /tmp/milvus/rdb_data`,
+		Export: true,
 	}
 	r.Path.Init(base.mgr)
 
@@ -516,6 +575,8 @@ func (r *RocksmqConfig) Init(base *BaseTable) {
 		Key:          "rocksmq.lrucacheratio",
 		DefaultValue: "0.0.6",
 		Version:      "2.0.0",
+		Doc:          "rocksdb cache memory ratio",
+		Export:       true,
 	}
 	r.LRUCacheRatio.Init(base.mgr)
 
@@ -523,6 +584,8 @@ func (r *RocksmqConfig) Init(base *BaseTable) {
 		Key:          "rocksmq.rocksmqPageSize",
 		DefaultValue: strconv.FormatInt(256<<20, 10),
 		Version:      "2.0.0",
+		Doc:          "2 GB, 2 * 1024 * 1024 * 1024 bytes, The size of each page of messages in rocksmq",
+		Export:       true,
 	}
 	r.PageSize.Init(base.mgr)
 
@@ -530,6 +593,8 @@ func (r *RocksmqConfig) Init(base *BaseTable) {
 		Key:          "rocksmq.retentionTimeInMinutes",
 		DefaultValue: "7200",
 		Version:      "2.0.0",
+		Doc:          "5 days, 5 * 24 * 60 minutes, The retention time of the message in rocksmq.",
+		Export:       true,
 	}
 	r.RetentionTimeInMinutes.Init(base.mgr)
 
@@ -537,6 +602,8 @@ func (r *RocksmqConfig) Init(base *BaseTable) {
 		Key:          "rocksmq.retentionSizeInMB",
 		DefaultValue: "7200",
 		Version:      "2.0.0",
+		Doc:          "8 GB, 8 * 1024 MB, The retention size of the message in rocksmq.",
+		Export:       true,
 	}
 	r.RetentionSizeInMB.Init(base.mgr)
 
@@ -544,6 +611,8 @@ func (r *RocksmqConfig) Init(base *BaseTable) {
 		Key:          "rocksmq.compactionInterval",
 		DefaultValue: "86400",
 		Version:      "2.0.0",
+		Doc:          "1 day, trigger rocksdb compaction every day to remove deleted data",
+		Export:       true,
 	}
 	r.CompactionInterval.Init(base.mgr)
 
@@ -575,6 +644,8 @@ func (p *MinioConfig) Init(base *BaseTable) {
 		Key:          "minio.port",
 		DefaultValue: "9000",
 		Version:      "2.0.0",
+		Doc:          "Port of MinIO/S3",
+		Export:       true,
 	}
 	p.Port.Init(base.mgr)
 
@@ -592,34 +663,48 @@ func (p *MinioConfig) Init(base *BaseTable) {
 			port, _ := p.Port.get()
 			return addr + ":" + port
 		},
+		Doc:    "Address of MinIO/S3",
+		Export: true,
 	}
 	p.Address.Init(base.mgr)
 
 	p.AccessKeyID = ParamItem{
 		Key:          "minio.accessKeyID",
 		Version:      "2.0.0",
+		DefaultValue: "minioadmin",
 		PanicIfEmpty: false, // tmp fix, need to be conditional
+		Doc:          "accessKeyID of MinIO/S3",
+		Export:       true,
 	}
 	p.AccessKeyID.Init(base.mgr)
 
 	p.SecretAccessKey = ParamItem{
 		Key:          "minio.secretAccessKey",
 		Version:      "2.0.0",
+		DefaultValue: "minioadmin",
 		PanicIfEmpty: false, // tmp fix, need to be conditional
+		Doc:          "MinIO/S3 encryption string",
+		Export:       true,
 	}
 	p.SecretAccessKey.Init(base.mgr)
 
 	p.UseSSL = ParamItem{
 		Key:          "minio.useSSL",
 		Version:      "2.0.0",
+		DefaultValue: "false",
 		PanicIfEmpty: true,
+		Doc:          "Access to MinIO/S3 with SSL",
+		Export:       true,
 	}
 	p.UseSSL.Init(base.mgr)
 
 	p.BucketName = ParamItem{
 		Key:          "minio.bucketName",
 		Version:      "2.0.0",
+		DefaultValue: "a-bucket",
 		PanicIfEmpty: true,
+		Doc:          "Bucket name in MinIO/S3",
+		Export:       true,
 	}
 	p.BucketName.Init(base.mgr)
 
@@ -627,6 +712,8 @@ func (p *MinioConfig) Init(base *BaseTable) {
 		Key:          "minio.rootPath",
 		Version:      "2.0.0",
 		PanicIfEmpty: true,
+		Doc:          "The root path where the message is stored in MinIO/S3",
+		Export:       true,
 	}
 	p.RootPath.Init(base.mgr)
 
@@ -634,6 +721,11 @@ func (p *MinioConfig) Init(base *BaseTable) {
 		Key:          "minio.useIAM",
 		DefaultValue: DefaultMinioUseIAM,
 		Version:      "2.0.0",
+		Doc: `Whether to ` + "useIAM" + ` role to access S3/GCS instead of access/secret keys
+For more information, refer to
+aws: https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_use.html
+gcp: https://cloud.google.com/storage/docs/access-control/iam`,
+		Export: true,
 	}
 	p.UseIAM.Init(base.mgr)
 
@@ -641,6 +733,11 @@ func (p *MinioConfig) Init(base *BaseTable) {
 		Key:          "minio.cloudProvider",
 		DefaultValue: DefaultMinioCloudProvider,
 		Version:      "2.2.0",
+		Doc: `Cloud Provider of S3. Supports: "aws", "gcp". 
+You can use "aws" for other cloud provider supports S3 API with signature v4, e.g.: minio
+You can use "gcp" for other cloud provider supports S3 API with signature v2
+When ` + "useIAM" + ` enabled, only "aws" & "gcp" is supported for now`,
+		Export: true,
 	}
 	p.CloudProvider.Init(base.mgr)
 
@@ -648,6 +745,9 @@ func (p *MinioConfig) Init(base *BaseTable) {
 		Key:          "minio.iamEndpoint",
 		DefaultValue: DefaultMinioIAMEndpoint,
 		Version:      "2.0.0",
+		Doc: `Custom endpoint for fetch IAM role credentials. when useIAM is true & cloudProvider is "aws".
+Leave it empty if you want to use AWS default endpoint`,
+		Export: true,
 	}
 	p.IAMEndpoint.Init(base.mgr)
 }

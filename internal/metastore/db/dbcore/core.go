@@ -23,7 +23,7 @@ func Connect(cfg *paramtable.MetaDBConfig) error {
 		cfg.Username.GetValue(), cfg.Password.GetValue(), cfg.Address.GetValue(), cfg.Port.GetAsInt(), cfg.DBName.GetValue())
 
 	var ormLogger logger.Interface
-	if cfg.LogLevel.GetValue() == "debug" {
+	if log.Level().String() == "debug" {
 		ormLogger = logger.Default.LogMode(logger.Info)
 	} else {
 		ormLogger = logger.Default

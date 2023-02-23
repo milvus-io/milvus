@@ -132,10 +132,11 @@ func TestConfigFromRemote(t *testing.T) {
 		mgr.Close()
 
 		client.KV.Put(ctx, "test/config/test/etcd", "value2")
-		time.Sleep(100)
+		assert.Eventually(t, func() bool {
+			_, err = mgr.GetConfig("test.etcd")
+			return err.Error() == "key not found: test.etcd"
+		}, 300*time.Millisecond, 10*time.Millisecond)
 
-		_, err = mgr.GetConfig("test.etcd")
-		assert.EqualError(t, err, "key not found: test.etcd")
 	})
 
 }

@@ -30,16 +30,6 @@ func TestComponentParam(t *testing.T) {
 	Init()
 	params := Get()
 
-	t.Run("test kafkaConfig", func(t *testing.T) {
-
-		params := params.ServiceParam.KafkaCfg
-		producerConfig := params.ProducerExtraConfig.GetValue()
-		assert.Equal(t, "dc", producerConfig["client.id"])
-
-		consumerConfig := params.ConsumerExtraConfig.GetValue()
-		assert.Equal(t, "dc1", consumerConfig["client.id"])
-	})
-
 	t.Run("test commonConfig", func(t *testing.T) {
 		Params := params.CommonCfg
 
