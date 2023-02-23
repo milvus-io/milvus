@@ -175,6 +175,10 @@ func (gp *BaseTable) initConfPath() string {
 	return configDir
 }
 
+func (gp *BaseTable) FileConfigs() map[string]string {
+	return gp.mgr.FileConfigs()
+}
+
 // Load loads an object with @key.
 func (gp *BaseTable) Load(key string) (string, error) {
 	return gp.mgr.GetConfig(key)
