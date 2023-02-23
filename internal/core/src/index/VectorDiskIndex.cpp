@@ -157,6 +157,11 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset, const SearchInfo& search_
                 CheckRangeSearchParam(search_config[RADIUS], search_config[RANGE_FILTER], GetMetricType());
             }
             auto res = index_.RangeSearch(*dataset, search_config, bitset);
+
+            if (!res.has_value()) {
+                PanicCodeInfo(ErrorCodeEnum::UnexpectedError,
+                              "failed to range search, " + MatchKnowhereError(res.error()));
+            }
             return SortRangeSearchResult(res.value(), topk, num_queries, GetMetricType());
         } else {
             auto res = index_.Search(*dataset, search_config, bitset);

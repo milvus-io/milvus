@@ -57,14 +57,18 @@ BruteForceSearch(const dataset::SearchDataset& dataset,
         sub_result.mutable_distances().resize(nq * topk);
 
         if (conf.contains(RADIUS)) {
-            config[RADIUS] = conf[RADIUS];
+            config[RADIUS] = conf[RADIUS].get<float>();
             if (conf.contains(RANGE_FILTER)) {
-                config[RANGE_FILTER] = conf[RANGE_FILTER];
+                config[RANGE_FILTER] = conf[RANGE_FILTER].get<float>();
                 CheckRangeSearchParam(config[RADIUS], config[RANGE_FILTER], dataset.metric_type);
             }
-            auto result = SortRangeSearchResult(
-                knowhere::BruteForce::RangeSearch(base_dataset, query_dataset, config, bitset).value(), topk, nq,
-                dataset.metric_type);
+            auto res = knowhere::BruteForce::RangeSearch(base_dataset, query_dataset, config, bitset);
+
+            if (!res.has_value()) {
+                PanicCodeInfo(ErrorCodeEnum::UnexpectedError,
+                              "failed to range search, " + MatchKnowhereError(res.error()));
+            }
+            auto result = SortRangeSearchResult(res.value(), topk, nq, dataset.metric_type);
             std::copy_n(GetDatasetIDs(result), nq * topk, sub_result.get_seg_offsets());
             std::copy_n(GetDatasetDistance(result), nq * topk, sub_result.get_distances());
         } else {
