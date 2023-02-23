@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -235,6 +236,8 @@ func (it *indexBuildTask) LoadData(ctx context.Context) error {
 	} else {
 		logutil.Logger(ctx).Info("Successfully load data", zap.Int64("buildID", it.BuildID), zap.Int64("Collection", it.collectionID), zap.Int64("SegmentIf", it.segmentID))
 	}
+	blobs = nil
+	debug.FreeOSMemory()
 	return err
 }
 
