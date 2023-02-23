@@ -1424,7 +1424,7 @@ TEST(CApiTest, LoadIndexInfo) {
     std::string index_param_value1 = "IVF_PQ";
     status = AppendIndexParam(c_load_index_info, index_param_key1.data(), index_param_value1.data());
     std::string index_param_key2 = "index_mode";
-    std::string index_param_value2 = "cpu";
+    std::string index_param_value2 = "CPU";
     status = AppendIndexParam(c_load_index_info, index_param_key2.data(), index_param_value2.data());
     ASSERT_EQ(status.error_code, Success);
     std::string index_param_key3 = knowhere::meta::METRIC_TYPE;
@@ -1578,7 +1578,7 @@ TEST(CApiTest, Indexing_Without_Predicate) {
     std::string index_type_key = "index_type";
     std::string index_type_value = "IVF_PQ";
     std::string index_mode_key = "index_mode";
-    std::string index_mode_value = "cpu";
+    std::string index_mode_value = "CPU";
     std::string metric_type_key = "metric_type";
     std::string metric_type_value = "L2";
 
@@ -1699,7 +1699,7 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
     std::string index_type_key = "index_type";
     std::string index_type_value = "IVF_PQ";
     std::string index_mode_key = "index_mode";
-    std::string index_mode_value = "cpu";
+    std::string index_mode_value = "CPU";
     std::string metric_type_key = "metric_type";
     std::string metric_type_value = "L2";
 
@@ -1837,7 +1837,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
     std::string index_type_key = "index_type";
     std::string index_type_value = "IVF_PQ";
     std::string index_mode_key = "index_mode";
-    std::string index_mode_value = "cpu";
+    std::string index_mode_value = "CPU";
     std::string metric_type_key = "metric_type";
     std::string metric_type_value = "L2";
 
@@ -1989,7 +1989,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
     std::string index_type_key = "index_type";
     std::string index_type_value = "IVF_PQ";
     std::string index_mode_key = "index_mode";
-    std::string index_mode_value = "cpu";
+    std::string index_mode_value = "CPU";
     std::string metric_type_key = "metric_type";
     std::string metric_type_value = "L2";
 
@@ -2125,7 +2125,7 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
     std::string index_type_key = "index_type";
     std::string index_type_value = "IVF_PQ";
     std::string index_mode_key = "index_mode";
-    std::string index_mode_value = "cpu";
+    std::string index_mode_value = "CPU";
     std::string metric_type_key = "metric_type";
     std::string metric_type_value = "L2";
 
@@ -2270,7 +2270,7 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
     std::string index_type_key = "index_type";
     std::string index_type_value = "IVF_PQ";
     std::string index_mode_key = "index_mode";
-    std::string index_mode_value = "cpu";
+    std::string index_mode_value = "CPU";
     std::string metric_type_key = "metric_type";
     std::string metric_type_value = "L2";
 
@@ -2408,7 +2408,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
     std::string index_type_key = "index_type";
     std::string index_type_value = "BIN_IVF_FLAT";
     std::string index_mode_key = "index_mode";
-    std::string index_mode_value = "cpu";
+    std::string index_mode_value = "CPU";
     std::string metric_type_key = "metric_type";
     std::string metric_type_value = "JACCARD";
 
@@ -2558,7 +2558,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
     std::string index_type_key = "index_type";
     std::string index_type_value = "BIN_IVF_FLAT";
     std::string index_mode_key = "index_mode";
-    std::string index_mode_value = "cpu";
+    std::string index_mode_value = "CPU";
     std::string metric_type_key = "metric_type";
     std::string metric_type_value = "JACCARD";
 
@@ -2695,7 +2695,7 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
     std::string index_type_key = "index_type";
     std::string index_type_value = "BIN_IVF_FLAT";
     std::string index_mode_key = "index_mode";
-    std::string index_mode_value = "cpu";
+    std::string index_mode_value = "CPU";
     std::string metric_type_key = "metric_type";
     std::string metric_type_value = "JACCARD";
 
@@ -2856,7 +2856,7 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     std::string index_type_key = "index_type";
     std::string index_type_value = "BIN_IVF_FLAT";
     std::string index_mode_key = "index_mode";
-    std::string index_mode_value = "cpu";
+    std::string index_mode_value = "CPU";
     std::string metric_type_key = "metric_type";
     std::string metric_type_value = "JACCARD";
 
@@ -3016,7 +3016,7 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     std::string index_type_key = "index_type";
     std::string index_type_value = "IVF_PQ";
     std::string index_mode_key = "index_mode";
-    std::string index_mode_value = "cpu";
+    std::string index_mode_value = "CPU";
     std::string metric_type_key = "metric_type";
     std::string metric_type_value = "L2";
 
@@ -3295,7 +3295,7 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     std::string index_type_key = "index_type";
     std::string index_type_value = "IVF_PQ";
     std::string index_mode_key = "index_mode";
-    std::string index_mode_value = "cpu";
+    std::string index_mode_value = "CPU";
     std::string metric_type_key = "metric_type";
     std::string metric_type_value = "L2";
 
