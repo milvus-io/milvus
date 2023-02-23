@@ -1566,6 +1566,63 @@ class TestUtilityBase(TestcaseBase):
         assert collection_w_1.aliases[0] == alias_2
         assert collection_w_2.aliases[0] == alias_1
 
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_rename_back_old_collection(self):
+        """
+        target: test rename collection function to single collection
+        method: rename back to old collection name
+        expected: collection renamed successfully without any change on aliases
+        """
+        # 1. connect
+        self._connect()
+        # 2. create a collection
+        collection_w, vectors, _, insert_ids, _ = self.init_collection_general(prefix)
+        old_collection_name = collection_w.name
+        new_collection_name = cf.gen_unique_str(prefix + "new")
+        alias = cf.gen_unique_str(prefix + "alias")
+        # 3. create an alias
+        self.utility_wrap.create_alias(old_collection_name, alias)
+        collection_alias = collection_w.aliases
+        # 4. rename collection
+        self.utility_wrap.rename_collection(old_collection_name, new_collection_name)
+        # 5. rename back to old collection name
+        self.utility_wrap.rename_collection(new_collection_name, old_collection_name)
+        collection_w = self.init_collection_wrap(name=old_collection_name,
+                                                 check_task=CheckTasks.check_collection_property,
+                                                 check_items={exp_name: old_collection_name,
+                                                              exp_schema: default_schema})
+        collections = self.utility_wrap.list_collections()[0]
+        assert old_collection_name in collections
+        assert new_collection_name not in collections
+        assert collection_alias == collection_w.aliases
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_rename_back_old_alias(self):
+        """
+        target: test rename collection function to single collection
+        method: rename back to old collection alias
+        expected: collection renamed successfully without any change on aliases
+        """
+        # 1. connect
+        self._connect()
+        # 2. create a collection
+        collection_w, vectors, _, insert_ids, _ = self.init_collection_general(prefix)
+        old_collection_name = collection_w.name
+        alias = cf.gen_unique_str(prefix + "alias")
+        # 3. create an alias
+        self.utility_wrap.create_alias(old_collection_name, alias)
+        collection_alias = collection_w.aliases
+        # 4. drop the alias
+        self.utility_wrap.drop_alias(collection_alias[0])
+        # 5. rename collection to the dropped alias name
+        self.utility_wrap.rename_collection(old_collection_name, collection_alias[0])
+        self.init_collection_wrap(name=collection_alias[0],
+                                  check_task=CheckTasks.check_collection_property,
+                                  check_items={exp_name: collection_alias[0],
+                                               exp_schema: default_schema})
+        collections = self.utility_wrap.list_collections()[0]
+        assert collection_alias[0] in collections
+        assert old_collection_name not in collections
 
 class TestUtilityAdvanced(TestcaseBase):
     """ Test case of index interface """
