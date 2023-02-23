@@ -27,6 +27,7 @@ loading_progress = "loading_progress"
 num_loaded_partitions = "num_loaded_partitions"
 not_loaded_partitions = "not_loaded_partitions"
 exp_name = "name"
+exp_schema = "schema"
 
 
 class TestUtilityParams(TestcaseBase):
@@ -63,6 +64,14 @@ class TestUtilityParams(TestcaseBase):
                 pytest.skip("empty is valid for partition")
         if request.param is None:
             pytest.skip("None is valid for partition")
+        yield request.param
+
+    @pytest.fixture(scope="function", params=ct.get_not_string)
+    def get_invalid_type_collection_name(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=ct.get_not_string_value)
+    def get_invalid_value_collection_name(self, request):
         yield request.param
 
     """
@@ -510,6 +519,123 @@ class TestUtilityParams(TestcaseBase):
                                         check_items={"err_code": 1,
                                                      "err_msg": "collection {} was not "
                                                                 "loaded into memory)".format(collection_w.name)})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_rename_collection_old_invalid_type(self, get_invalid_type_collection_name):
+        """
+        target: test rename_collection when the type of old collection name is not valid
+        method: input not invalid collection name
+        expected: raise exception
+        """
+        self._connect()
+        collection_w, vectors, _, insert_ids, _ = self.init_collection_general(prefix)
+        old_collection_name = get_invalid_type_collection_name
+        new_collection_name = cf.gen_unique_str(prefix)
+        self.utility_wrap.rename_collection(old_collection_name, new_collection_name,
+                                            check_task=CheckTasks.err_res,
+                                            check_items={"err_code": 1,
+                                                         "err_msg": "`collection_name` value {} is illegal".format(old_collection_name)})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_rename_collection_old_invalid_value(self, get_invalid_value_collection_name):
+        """
+        target: test rename_collection when the value of old collection name is not valid
+        method: input not invalid collection name
+        expected: raise exception
+        """
+        self._connect()
+        collection_w, vectors, _, insert_ids, _ = self.init_collection_general(prefix)
+        old_collection_name = get_invalid_value_collection_name
+        new_collection_name = cf.gen_unique_str(prefix)
+        self.utility_wrap.rename_collection(old_collection_name, new_collection_name,
+                                            check_task=CheckTasks.err_res,
+                                            check_items={"err_code": 1,
+                                                         "err_msg": "collection {} was not "
+                                                                    "loaded into memory)".format(collection_w.name)})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_rename_collection_new_invalid_type(self, get_invalid_type_collection_name):
+        """
+        target: test rename_collection when the type of new collection name is not valid
+        method: input not invalid collection name
+        expected: raise exception
+        """
+        self._connect()
+        collection_w, vectors, _, insert_ids, _ = self.init_collection_general(prefix)
+        old_collection_name = collection_w.name
+        new_collection_name = get_invalid_type_collection_name
+        self.utility_wrap.rename_collection(old_collection_name, new_collection_name,
+                                            check_task=CheckTasks.err_res,
+                                            check_items={"err_code": 1,
+                                                         "err_msg": "`collection_name` value {} is "
+                                                                    "illegal".format(new_collection_name)})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_rename_collection_new_invalid_value(self, get_invalid_value_collection_name):
+        """
+        target: test rename_collection when the value of new collection name is not valid
+        method: input not invalid collection name
+        expected: raise exception
+        """
+        self._connect()
+        collection_w, vectors, _, insert_ids, _ = self.init_collection_general(prefix)
+        old_collection_name = collection_w.name
+        new_collection_name = get_invalid_value_collection_name
+        self.utility_wrap.rename_collection(old_collection_name, new_collection_name,
+                                            check_task=CheckTasks.err_res,
+                                            check_items={"err_code": 9,
+                                                         "err_msg": "collection {} was not "
+                                                                    "loaded into memory)".format(collection_w.name)})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_rename_collection_not_existed_collection(self):
+        """
+        target: test rename_collection when the collection name is not existed
+        method: input not existing collection name
+        expected: raise exception
+        """
+        self._connect()
+        collection_w, vectors, _, insert_ids, _ = self.init_collection_general(prefix)
+        old_collection_name = "test_collection_non_exist"
+        new_collection_name = cf.gen_unique_str(prefix)
+        self.utility_wrap.rename_collection(old_collection_name, new_collection_name,
+                                            check_task=CheckTasks.err_res,
+                                            check_items={"err_code": 1,
+                                                         "err_msg": "can't find collection: {}".format(collection_w.name)})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_rename_collection_existed_collection_name(self):
+        """
+        target: test rename_collection when the collection name is existed
+        method: input existing collection name
+        expected: raise exception
+        """
+        self._connect()
+        collection_w, vectors, _, insert_ids, _ = self.init_collection_general(prefix)
+        old_collection_name = collection_w.name
+        self.utility_wrap.rename_collection(old_collection_name, old_collection_name,
+                                            check_task=CheckTasks.err_res,
+                                            check_items={"err_code": 1,
+                                                         "err_msg": "duplicated new collection name :{} with other "
+                                                                    "collection name or alias".format(collection_w.name)})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_rename_collection_existed_collection_alias(self):
+        """
+        target: test rename_collection when the collection alias is existed
+        method: input existing collection alias
+        expected: raise exception
+        """
+        self._connect()
+        collection_w, vectors, _, insert_ids, _ = self.init_collection_general(prefix)
+        old_collection_name = collection_w.name
+        alias = "test_alias"
+        self.utility_wrap.create_alias(old_collection_name, alias)
+        self.utility_wrap.rename_collection(old_collection_name, alias,
+                                            check_task=CheckTasks.err_res,
+                                            check_items={"err_code": 1,
+                                                         "err_msg": "duplicated new collection name :{} with "
+                                                                    "other collection name or alias".format(alias)})
 
 
 class TestUtilityBase(TestcaseBase):
@@ -1375,6 +1501,70 @@ class TestUtilityBase(TestcaseBase):
                                                          "vectors_r": vectors_r,
                                                          "metric": metric,
                                                          "sqrt": sqrt})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_rename_collection(self):
+        """
+        target: test rename collection function to single collection
+        method: call rename_collection API to rename collection
+        expected: collection renamed successfully without any change on aliases
+        """
+        self._connect()
+        collection_w, vectors, _, insert_ids, _ = self.init_collection_general(prefix)
+        old_collection_name = collection_w.name
+        new_collection_name = cf.gen_unique_str(prefix + "new")
+        alias = cf.gen_unique_str(prefix + "alias")
+        self.utility_wrap.create_alias(old_collection_name, alias)
+        collection_alias = collection_w.aliases
+        self.utility_wrap.rename_collection(old_collection_name, new_collection_name)
+        collection_w = self.init_collection_wrap(name=new_collection_name,
+                                                 check_task=CheckTasks.check_collection_property,
+                                                 check_items={exp_name: new_collection_name,
+                                                              exp_schema: default_schema})
+        collections = self.utility_wrap.list_collections()[0]
+        assert new_collection_name in collections
+        assert old_collection_name not in collections
+        assert collection_alias == collection_w.aliases
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_rename_collections(self):
+        """
+        target: test rename collection function to multiple collections
+        method: call rename_collection API to rename collections
+        expected: collections renamed successfully without any change on aliases
+        """
+        self._connect()
+        # create two collections
+        collection_w_1 = self.init_collection_general(prefix)[0]
+        old_collection_name_1 = collection_w_1.name
+        collection_w_2 = self.init_collection_general(prefix)[0]
+        old_collection_name_2 = collection_w_2.name
+        tmp_collection_name = cf.gen_unique_str(prefix + "tmp")
+        # create alias to each collection
+        alias_1 = cf.gen_unique_str(prefix + "alias1")
+        alias_2 = cf.gen_unique_str(prefix + "alias2")
+        self.utility_wrap.create_alias(old_collection_name_1, alias_1)
+        self.utility_wrap.create_alias(old_collection_name_2, alias_2)
+        # switch name of the existing collections
+        self.utility_wrap.rename_collection(old_collection_name_1, tmp_collection_name)
+        self.utility_wrap.rename_collection(old_collection_name_2, old_collection_name_1)
+        self.utility_wrap.rename_collection(tmp_collection_name, old_collection_name_2)
+        # check collection renamed successfully
+        collection_w_1 = self.init_collection_wrap(name=old_collection_name_1,
+                                                   check_task=CheckTasks.check_collection_property,
+                                                   check_items={exp_name: old_collection_name_1,
+                                                                exp_schema: default_schema})
+        collection_w_2 = self.init_collection_wrap(name=old_collection_name_2,
+                                                   check_task=CheckTasks.check_collection_property,
+                                                   check_items={exp_name: old_collection_name_2,
+                                                                exp_schema: default_schema})
+        collections = self.utility_wrap.list_collections()[0]
+        assert old_collection_name_1 in collections
+        assert old_collection_name_2 in collections
+        assert tmp_collection_name not in collections
+        # check alias not changed
+        assert collection_w_1.aliases[0] == alias_2
+        assert collection_w_2.aliases[0] == alias_1
 
 
 class TestUtilityAdvanced(TestcaseBase):

@@ -1139,7 +1139,11 @@ class TestCollectionSearch(TestcaseBase):
         # 1. initialize with data
         collection_w, _, _, insert_ids = \
             self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim)[0:4]
-        # 2. search
+        # 2. rename collection
+        new_collection_name = cf.gen_unique_str(prefix + "new")
+        self.utility_wrap.rename_collection(collection_w.name, new_collection_name)
+        collection_w = self.init_collection_general(auto_id=auto_id, dim=dim, name=new_collection_name)[0]
+        # 3. search
         log.info("test_search_normal_default_params: searching collection %s" % collection_w.name)
         vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
         collection_w.search(vectors[:default_nq], default_search_field,
@@ -1455,12 +1459,20 @@ class TestCollectionSearch(TestcaseBase):
         expected: search successfully with the non_default shards_num
         """
         self._connect()
+        # 1. create collection
         name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=name, shards_num=shards_num)
+        # 2. rename collection
+        new_collection_name = cf.gen_unique_str(prefix + "new")
+        self.utility_wrap.rename_collection(collection_w.name, new_collection_name)
+        collection_w = self.init_collection_wrap(name=new_collection_name, shards_num=shards_num)
+        # 3. insert
         dataframe = cf.gen_default_dataframe_data()
         collection_w.insert(dataframe)
+        # 4. create index and load
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
+        # 5. search
         vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, default_limit,

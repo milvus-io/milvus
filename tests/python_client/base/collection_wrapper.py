@@ -71,6 +71,10 @@ class ApiCollectionWrapper:
     def _shards_num(self):
         return self.collection._shards_num
 
+    @property
+    def aliases(self):
+        return self.collection.aliases
+
     @trace()
     def construct_from_dataframe(self, name, dataframe, check_task=None, check_items=None, **kwargs):
         func_name = sys._getframe().f_code.co_name

@@ -104,6 +104,16 @@ get_not_string = [
     [1, "2", 3]
 ]
 
+get_not_string_value = [
+    " ",
+    "12-s",
+    "12 s",
+    "(mn)",
+    "中文",
+    "%$#",
+    "a".join("a" for i in range(256))
+]
+
 get_invalid_vectors = [
     "1*2",
     [1],
