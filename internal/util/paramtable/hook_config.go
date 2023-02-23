@@ -8,25 +8,33 @@ import (
 const hookYamlFile = "hook.yaml"
 
 type hookConfig struct {
-	SoPath   ParamItem  `refreshable:"false"`
-	SoConfig ParamGroup `refreshable:"false"`
+	SoPath                ParamItem  `refreshable:"false"`
+	SoConfig              ParamGroup `refreshable:"false"`
+	QueryNodePluginConfig ParamItem  `refreshable:"true"`
 }
 
-func (h *hookConfig) init() {
-	base := &BaseTable{YamlFiles: []string{hookYamlFile}}
-	base.init(0)
-	log.Info("hook config", zap.Any("hook", base.FileConfigs()))
+func (h *hookConfig) init(base *BaseTable) {
+	hookBase := &BaseTable{YamlFiles: []string{hookYamlFile}}
+	hookBase.init(0)
+
+	log.Info("hook config", zap.Any("hook", hookBase.FileConfigs()))
 
 	h.SoPath = ParamItem{
 		Key:          "soPath",
 		Version:      "2.0.0",
 		DefaultValue: "",
 	}
-	h.SoPath.Init(base.mgr)
+	h.SoPath.Init(hookBase.mgr)
 
 	h.SoConfig = ParamGroup{
 		KeyPrefix: "",
 		Version:   "2.2.0",
 	}
-	h.SoConfig.Init(base.mgr)
+	h.SoConfig.Init(hookBase.mgr)
+
+	h.QueryNodePluginConfig = ParamItem{
+		Key:     "autoindex.params.search",
+		Version: "2.3.0",
+	}
+	h.QueryNodePluginConfig.Init(base.mgr)
 }

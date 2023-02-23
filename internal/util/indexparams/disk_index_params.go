@@ -17,11 +17,12 @@
 package indexparams
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"unsafe"
 
-	"github.com/milvus-io/milvus/internal/util/autoindex"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/hardware"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
@@ -52,6 +53,97 @@ func getRowDataSizeOfFloatVector(numRows int64, dim int64) int64 {
 	return int64(unsafe.Sizeof(floatValue)) * dim * numRows
 }
 
+type BigDataIndexExtraParams struct {
+	PQCodeBudgetGBRatio      float64
+	BuildNumThreadsRatio     float64
+	SearchCacheBudgetGBRatio float64
+	LoadNumThreadRatio       float64
+	BeamWidthRatio           float64
+}
+
+const (
+	BuildRatioKey                   = "build_ratio"
+	PrepareRatioKey                 = "prepare_ratio"
+	DefaultPQCodeBudgetGBRatio      = 0.125
+	DefaultBuildNumThreadsRatio     = 1.0
+	DefaultSearchCacheBudgetGBRatio = 0.10
+	DefaultLoadNumThreadRatio       = 8.0
+	DefaultBeamWidthRatio           = 4.0
+)
+
+func NewBigDataExtraParamsFromJSON(jsonStr string) (*BigDataIndexExtraParams, error) {
+	buffer, err := funcutil.JSONToMap(jsonStr)
+	if err != nil {
+		return nil, err
+	}
+	return NewBigDataExtraParamsFromMap(buffer)
+}
+
+func NewBigDataExtraParamsFromMap(value map[string]string) (*BigDataIndexExtraParams, error) {
+	ret := &BigDataIndexExtraParams{}
+	var err error
+	buildRatio, ok := value[BuildRatioKey]
+	if !ok {
+		ret.PQCodeBudgetGBRatio = DefaultPQCodeBudgetGBRatio
+		ret.BuildNumThreadsRatio = DefaultBuildNumThreadsRatio
+	} else {
+		valueMap1 := make(map[string]float64)
+		err = json.Unmarshal([]byte(buildRatio), &valueMap1)
+		if err != nil {
+			return ret, err
+		}
+
+		PQCodeBudgetGBRatio, ok := valueMap1["pq_code_budget_gb"]
+		if !ok {
+			ret.PQCodeBudgetGBRatio = DefaultPQCodeBudgetGBRatio
+		} else {
+			ret.PQCodeBudgetGBRatio = PQCodeBudgetGBRatio
+		}
+		BuildNumThreadsRatio, ok := valueMap1["num_threads"]
+		if !ok {
+			ret.BuildNumThreadsRatio = DefaultBuildNumThreadsRatio
+		} else {
+			ret.BuildNumThreadsRatio = BuildNumThreadsRatio
+		}
+	}
+
+	prepareRatio, ok := value[PrepareRatioKey]
+	if !ok {
+		ret.SearchCacheBudgetGBRatio = DefaultSearchCacheBudgetGBRatio
+		ret.LoadNumThreadRatio = DefaultLoadNumThreadRatio
+	} else {
+		valueMap2 := make(map[string]float64)
+		err = json.Unmarshal([]byte(prepareRatio), &valueMap2)
+		if err != nil {
+			return ret, err
+		}
+		SearchCacheBudgetGBRatio, ok := valueMap2["search_cache_budget_gb"]
+		if !ok {
+			ret.SearchCacheBudgetGBRatio = DefaultSearchCacheBudgetGBRatio
+		} else {
+			ret.SearchCacheBudgetGBRatio = SearchCacheBudgetGBRatio
+		}
+		LoadNumThreadRatio, ok := valueMap2["num_threads"]
+		if !ok {
+			ret.LoadNumThreadRatio = DefaultLoadNumThreadRatio
+		} else {
+			ret.LoadNumThreadRatio = LoadNumThreadRatio
+		}
+	}
+	beamWidthRatioStr, ok := value[BeamWidthRatioKey]
+	if !ok {
+		ret.BeamWidthRatio = DefaultBeamWidthRatio
+	} else {
+		beamWidthRatio, err := strconv.ParseFloat(beamWidthRatioStr, 64)
+		if err != nil {
+			ret.BeamWidthRatio = DefaultBeamWidthRatio
+		} else {
+			ret.BeamWidthRatio = beamWidthRatio
+		}
+	}
+	return ret, nil
+}
+
 // FillDiskIndexParams fill ratio params to index param on proxy node
 // Which will be used to calculate build and load params
 func FillDiskIndexParams(params *paramtable.ComponentParam, indexParams map[string]string) error {
@@ -75,7 +167,7 @@ func FillDiskIndexParams(params *paramtable.ComponentParam, indexParams map[stri
 		if !ok {
 			return fmt.Errorf("index param search_list_size not exist")
 		}
-		extraParams, err := autoindex.NewBigDataExtraParamsFromJSON(params.AutoIndexConfig.ExtraParams.GetValue())
+		extraParams, err := NewBigDataExtraParamsFromJSON(params.AutoIndexConfig.ExtraParams.GetValue())
 		if err != nil {
 			return err
 		}

@@ -32,6 +32,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"plugin"
 	"runtime"
 	"runtime/debug"
 	"sync"
@@ -39,11 +40,11 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/milvus-io/milvus/internal/mq/msgdispatcher"
-
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus/internal/config"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/conc"
@@ -127,12 +128,47 @@ type QueryNode struct {
 	taskPool *conc.Pool
 
 	IsStandAlone bool
+
+	queryHook Hook
 }
 
 var queryNode *QueryNode = nil
 
 func GetQueryNode() *QueryNode {
 	return queryNode
+}
+
+type Hook interface {
+	Run(map[string]interface{}) error
+	Init(string) error
+}
+
+func initHook() (Hook, error) {
+	path := Params.QueryNodeCfg.SoPath.GetValue()
+	if path == "" {
+		return nil, fmt.Errorf("fail to set the plugin path")
+	}
+	log.Debug("start to load plugin", zap.String("path", path))
+
+	p, err := plugin.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("fail to open the plugin, error: %s", err.Error())
+	}
+	log.Debug("plugin open")
+
+	h, err := p.Lookup("QueryNodePlugin")
+	if err != nil {
+		return nil, fmt.Errorf("fail to find the 'QueryNodePlugin' object in the plugin, error: %s", err.Error())
+	}
+
+	hoo, ok := h.(Hook)
+	if !ok {
+		return nil, fmt.Errorf("fail to convert the `Hook` interface")
+	}
+	if err = hoo.Init(Params.HookCfg.QueryNodePluginConfig.GetValue()); err != nil {
+		return nil, fmt.Errorf("fail to init configs for the hook, error: %s", err.Error())
+	}
+	return hoo, nil
 }
 
 // NewQueryNode will return a QueryNode with abnormal state.
@@ -147,6 +183,26 @@ func NewQueryNode(ctx context.Context, factory dependency.Factory) *QueryNode {
 		lifetime:            lifetime.NewLifetime(commonpb.StateCode_Abnormal),
 	}
 
+	// init querynode plugin
+	var err error
+	queryNode.queryHook, err = initHook()
+	if err != nil {
+		log.Error(err.Error())
+		if Params.AutoIndexConfig.Enable.GetAsBool() {
+			panic(err)
+		}
+	}
+	onEvent := func() func(*config.Event) {
+		return func(event *config.Event) {
+			if queryNode.queryHook != nil {
+				if err := queryNode.queryHook.Init(event.Value); err != nil {
+					// refresh error, we could still use old config
+					log.Error("fail to refresh config, error: %s", zap.Error(err))
+				}
+			}
+		}
+	}()
+	Params.Watch(Params.HookCfg.QueryNodePluginConfig.Key, config.NewHandler("hook", onEvent))
 	queryNode.tSafeReplica = newTSafeReplica()
 	queryNode.scheduler = newTaskScheduler(ctx1, queryNode.tSafeReplica)
 

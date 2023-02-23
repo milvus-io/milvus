@@ -1121,6 +1121,13 @@ func (sc *ShardCluster) GetSegmentInfos() []shardSegmentInfo {
 	return ret
 }
 
+func (sc *ShardCluster) GetSegmentNum() int {
+	sc.mut.RLock()
+	defer sc.mut.RUnlock()
+	ret := len(sc.segments)
+	return ret
+}
+
 func (sc *ShardCluster) getVersion() int64 {
 	return sc.version
 }

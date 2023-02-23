@@ -155,14 +155,14 @@ func TestStatisticTask_all(t *testing.T) {
 	assert.Greater(t, task.TimeoutTimestamp, typeutil.ZeroTimestamp)
 
 	task.ctx = ctx
-	task.statisticShardPolicy = func(context.Context, *shardClientMgr, func(context.Context, int64, types.QueryNode, []string) error, map[string][]nodeInfo) error {
+	task.statisticShardPolicy = func(context.Context, *shardClientMgr, func(context.Context, int64, types.QueryNode, []string, int) error, map[string][]nodeInfo) error {
 		return fmt.Errorf("fake error")
 	}
 	task.fromQueryNode = true
 	assert.Error(t, task.Execute(ctx))
 	assert.NoError(t, task.PostExecute(ctx))
 
-	task.statisticShardPolicy = func(context.Context, *shardClientMgr, func(context.Context, int64, types.QueryNode, []string) error, map[string][]nodeInfo) error {
+	task.statisticShardPolicy = func(context.Context, *shardClientMgr, func(context.Context, int64, types.QueryNode, []string, int) error, map[string][]nodeInfo) error {
 		return errInvalidShardLeaders
 	}
 	task.fromQueryNode = true
