@@ -464,11 +464,13 @@ SegmentSealedImpl::bulk_subscript_impl(
     int64_t element_sizeof, const void* src_raw, const int64_t* seg_offsets, int64_t count, void* dst_raw) {
     auto src_vec = reinterpret_cast<const char*>(src_raw);
     auto dst_vec = reinterpret_cast<char*>(dst_raw);
-    std::vector<char> none(element_sizeof, 0);
     for (int64_t i = 0; i < count; ++i) {
         auto offset = seg_offsets[i];
         auto dst = dst_vec + i * element_sizeof;
-        const char* src = (offset == INVALID_SEG_OFFSET ? none.data() : (src_vec + element_sizeof * offset));
+        const char* src = (offset == INVALID_SEG_OFFSET ? nullptr : (src_vec + element_sizeof * offset));
+        if (!src) {
+            continue;
+        }
         memcpy(dst, src, element_sizeof);
     }
 }
