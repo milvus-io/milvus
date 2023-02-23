@@ -631,6 +631,13 @@ func TestMetaTable_GetIndexStates(t *testing.T) {
 	assert.Equal(t, 1, stateCnt.Finished)
 }
 
+func TestMetaTable_GetIndexStates_Filter(t *testing.T) {
+	mt := constructMetaTable(&indexcoord.Catalog{})
+	states, stateCnt := mt.GetIndexStates(indexID, 11, func(_ *model.SegmentIndex) bool { return false })
+	assert.Equal(t, 0, len(states))
+	assert.Equal(t, 0, stateCnt.Finished)
+}
+
 func TestMetaTable_GetSegmentIndexes(t *testing.T) {
 	mt := constructMetaTable(&indexcoord.Catalog{})
 	segIdxes := mt.GetSegmentIndexes(segID)
