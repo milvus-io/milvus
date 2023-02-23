@@ -95,3 +95,9 @@ TEST(Util, GetDeleteBitmap) {
     res_bitmap = get_deleted_bitmap(del_barrier, N, delete_record, insert_record, query_timestamp);
     ASSERT_EQ(res_bitmap->bitmap_ptr->count(), 0);
 }
+
+TEST(Util, Format) {
+    using namespace milvus;
+    auto result = format("test format int %d", 5);
+    EXPECT_EQ(result, std::string("test format int 5"));
+}

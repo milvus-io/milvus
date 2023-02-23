@@ -14,6 +14,7 @@
 #include <google/protobuf/text_format.h>
 
 #include <string>
+#include <string_view>
 
 #include "common/Consts.h"
 #include "config/ConfigChunkManager.h"
@@ -164,6 +165,20 @@ MatchKnowhereError(knowhere::Status status) {
         default:
             return "not match the error type in knowhere";
     }
+}
+
+template <typename... Args>
+inline std::string
+format(std::string_view str, Args... args) {
+    int written = std::snprintf(nullptr, 0, str.data(), args...);
+    if (written <= 0) {
+        throw std::runtime_error("Error during formatting " + std::string(str));
+    }
+    size_t size = written;
+    std::string result;
+    result.resize(size);
+    std::sprintf(result.data(), str.data(), args...);
+    return result;
 }
 
 }  // namespace milvus
