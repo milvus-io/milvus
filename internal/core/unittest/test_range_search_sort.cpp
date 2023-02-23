@@ -37,7 +37,9 @@ RangeSearchSortResultBF(milvus::DatasetPtr data_set, int64_t topk, size_t nq, st
     auto id = milvus::GetDatasetIDs(data_set);
     auto dist = milvus::GetDatasetDistance(data_set);
     auto p_id = new int64_t[topk * nq];
+    memset(p_id, -1, sizeof(int64_t) * topk * nq);
     auto p_dist = new float[topk * nq];
+    std::fill_n(p_dist, topk * nq, std::numeric_limits<float>::max());
     //  cnt means the subscript of p_id and p_dist
     int cnt = 0;
     for (int i = 0; i < nq; i++) {
