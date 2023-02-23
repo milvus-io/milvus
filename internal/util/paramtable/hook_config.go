@@ -15,7 +15,7 @@ type hookConfig struct {
 func (h *hookConfig) init() {
 	base := &BaseTable{YamlFile: hookYamlFile}
 	base.init(0)
-	log.Info("hook config", zap.Any("hook", base.mgr.GetConfigs()))
+	log.Info("hook config", zap.Any("hook", base.FileConfigs()))
 
 	h.SoPath = ParamItem{
 		Key:          "soPath",

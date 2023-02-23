@@ -147,6 +147,19 @@ func (m *Manager) GetBy(filters ...Filter) map[string]string {
 	return matchedConfig
 }
 
+func (m *Manager) FileConfigs() map[string]string {
+	m.RLock()
+	defer m.RUnlock()
+	config := make(map[string]string)
+	for _, source := range m.sources {
+		if s, ok := source.(*FileSource); ok {
+			config, _ = s.GetConfigurations()
+			break
+		}
+	}
+	return config
+}
+
 func (m *Manager) Close() {
 	for _, s := range m.sources {
 		s.Close()
