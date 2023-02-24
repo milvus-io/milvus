@@ -238,6 +238,74 @@ func TestServer_GetIndexState(t *testing.T) {
 		resp, err := s.GetIndexState(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, commonpb.IndexState_InProgress, resp.GetState())
+	})
+
+	s.meta = &meta{
+		catalog: &datacoord.Catalog{MetaKv: mocks.NewMetaKv(t)},
+		indexes: map[UniqueID]map[UniqueID]*model.Index{
+			collID: {
+				indexID: {
+					TenantID:        "",
+					CollectionID:    collID,
+					FieldID:         fieldID,
+					IndexID:         indexID,
+					IndexName:       indexName,
+					IsDeleted:       false,
+					CreateTime:      createTS,
+					TypeParams:      typeParams,
+					IndexParams:     indexParams,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
+				},
+			},
+		},
+		segments: &SegmentsInfo{map[UniqueID]*SegmentInfo{
+			segID: {
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:             segID,
+					CollectionID:   collID,
+					PartitionID:    partID,
+					InsertChannel:  "",
+					NumOfRows:      10250,
+					State:          commonpb.SegmentState_Flushed,
+					MaxRowNum:      65536,
+					LastExpireTime: createTS - 1,
+				},
+				segmentIndexes: map[UniqueID]*model.SegmentIndex{
+					indexID: {
+						SegmentID:     segID,
+						CollectionID:  collID,
+						PartitionID:   partID,
+						NumRows:       3000,
+						IndexID:       indexID,
+						BuildID:       buildID,
+						NodeID:        0,
+						IndexVersion:  1,
+						IndexState:    commonpb.IndexState_IndexStateNone,
+						FailReason:    "",
+						IsDeleted:     false,
+						CreateTime:    0,
+						IndexFileKeys: nil,
+						IndexSize:     0,
+						WriteHandoff:  false,
+					},
+				},
+				currRows:        0,
+				allocations:     nil,
+				lastFlushTime:   time.Time{},
+				isCompacting:    false,
+				size:            0,
+				lastWrittenTime: time.Time{},
+			},
+		}},
+	}
+
+	t.Run("index state is node", func(t *testing.T) {
+		resp, err := s.GetIndexState(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, commonpb.IndexState_IndexStateNone, resp.GetState())
 	})
 
 	t.Run("ambiguous index name", func(t *testing.T) {
