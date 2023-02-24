@@ -36,7 +36,7 @@ const (
 	DefaultGracefulStopTimeout   = 30   // s
 	DefaultThreadCoreCoefficient = 10
 
-	DefaultSessionTTL        = 60 //s
+	DefaultSessionTTL        = 20 //s
 	DefaultSessionRetryTimes = 30
 
 	DefaultMaxDegree                = 56
@@ -480,7 +480,7 @@ func (p *commonConfig) initClusterName() {
 }
 
 func (p *commonConfig) initSessionTTL() {
-	p.SessionTTL = p.Base.ParseInt64WithDefault("common.session.ttl", 60)
+	p.SessionTTL = p.Base.ParseInt64WithDefault("common.session.ttl", 20)
 }
 
 func (p *commonConfig) initSessionRetryTimes() {
