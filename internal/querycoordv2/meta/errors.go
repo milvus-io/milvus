@@ -17,8 +17,9 @@
 package meta
 
 import (
-	"errors"
 	"fmt"
+
+	"github.com/cockroachdb/errors"
 )
 
 var (

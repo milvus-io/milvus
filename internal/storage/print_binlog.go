@@ -18,9 +18,10 @@ package storage
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
+
+	"github.com/cockroachdb/errors"
 
 	"golang.org/x/exp/mmap"
 

@@ -18,12 +18,13 @@ package grpcrootcoordclient
 
 import (
 	"context"
-	"errors"
 	"math/rand"
 	"os"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"

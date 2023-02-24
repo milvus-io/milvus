@@ -12,8 +12,9 @@
 package milvuserrors
 
 import (
-	"errors"
 	"fmt"
+
+	"github.com/cockroachdb/errors"
 )
 
 const (

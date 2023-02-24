@@ -18,11 +18,12 @@ package proxy
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/funcutil"

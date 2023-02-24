@@ -2,9 +2,10 @@ package proxy
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strconv"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"

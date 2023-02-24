@@ -94,7 +94,7 @@ var (
 		}, []string{})
 )
 
-//RegisterQueryCoord registers QueryCoord metrics
+// RegisterQueryCoord registers QueryCoord metrics
 func RegisterQueryCoord(registry *prometheus.Registry) {
 	registry.MustRegister(QueryCoordNumCollections)
 	registry.MustRegister(QueryCoordNumEntities)

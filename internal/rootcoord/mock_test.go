@@ -18,9 +18,10 @@ package rootcoord
 
 import (
 	"context"
-	"errors"
 	"math/rand"
 	"os"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/stretchr/testify/mock"

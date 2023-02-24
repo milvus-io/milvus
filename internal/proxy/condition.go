@@ -18,7 +18,8 @@ package proxy
 
 import (
 	"context"
-	"errors"
+
+	"github.com/cockroachdb/errors"
 )
 
 // Condition defines the interface of variable condition.

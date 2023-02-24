@@ -18,8 +18,9 @@ package datanode
 
 import (
 	"context"
-	"errors"
 	"sync"
+
+	"github.com/cockroachdb/errors"
 
 	"go.uber.org/zap"
 
@@ -46,7 +47,8 @@ type flushDeleteTask interface {
 
 // flushTaskRunner controls a single flush task lifetime
 // this runner will wait insert data flush & del data flush done
-//  then call the notifyFunc
+//
+//	then call the notifyFunc
 type flushTaskRunner struct {
 	sync.WaitGroup
 	kv.BaseKV

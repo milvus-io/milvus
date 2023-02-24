@@ -17,11 +17,12 @@
 package cache
 
 import (
-	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"go.uber.org/zap"
 	"golang.org/x/sync/singleflight"

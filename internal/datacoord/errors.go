@@ -17,8 +17,9 @@
 package datacoord
 
 import (
-	"errors"
 	"fmt"
+
+	"github.com/cockroachdb/errors"
 )
 
 // errNilKvClient stands for a nil kv client is detected when initialized

@@ -1,8 +1,9 @@
 package dao
 
 import (
-	"errors"
 	"testing"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/metastore/db/dbmodel"
 

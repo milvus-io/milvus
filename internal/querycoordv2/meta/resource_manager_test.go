@@ -16,9 +16,9 @@
 package meta
 
 import (
-	"errors"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"

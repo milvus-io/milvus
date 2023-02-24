@@ -18,9 +18,10 @@ package importutil
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strconv"
+
+	"github.com/cockroachdb/errors"
 
 	"go.uber.org/zap"
 

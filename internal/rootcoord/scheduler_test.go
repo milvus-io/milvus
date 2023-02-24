@@ -18,11 +18,12 @@ package rootcoord
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math/rand"
 	"testing"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"go.uber.org/atomic"
 

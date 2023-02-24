@@ -11,7 +11,7 @@
 
 package metricsinfo
 
-import "errors"
+import "github.com/cockroachdb/errors"
 
 const (
 	// MsgUnimplementedMetric represents that user requests an unimplemented metric type

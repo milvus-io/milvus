@@ -34,7 +34,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"errors"
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
@@ -42,8 +42,9 @@ import (
 	"go.uber.org/zap"
 )
 
-//go:generate mockery --name=Allocator --outpkg=mocktso
 // Allocator is a Timestamp Oracle allocator.
+//
+//go:generate mockery --name=Allocator --outpkg=mocktso
 type Allocator interface {
 	// Initialize is used to initialize a TSO allocator.
 	// It will synchronize TSO with etcd and initialize the

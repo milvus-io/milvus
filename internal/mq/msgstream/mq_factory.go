@@ -18,8 +18,9 @@ package msgstream
 
 import (
 	"context"
-	"errors"
 	"strings"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/milvus-io/milvus/internal/log"

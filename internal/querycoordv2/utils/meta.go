@@ -18,10 +18,11 @@ package utils
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math/rand"
 	"sort"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"

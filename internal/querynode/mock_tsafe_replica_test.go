@@ -77,7 +77,7 @@ type MockTSafeReplicaInterface_WatchChannel_Call struct {
 }
 
 // WatchChannel is a helper method to define mock.On call
-//  - channel string
+//   - channel string
 func (_e *MockTSafeReplicaInterface_Expecter) WatchChannel(channel interface{}) *MockTSafeReplicaInterface_WatchChannel_Call {
 	return &MockTSafeReplicaInterface_WatchChannel_Call{Call: _e.mock.On("WatchChannel", channel)}
 }
@@ -105,7 +105,7 @@ type MockTSafeReplicaInterface_addTSafe_Call struct {
 }
 
 // addTSafe is a helper method to define mock.On call
-//  - vChannel string
+//   - vChannel string
 func (_e *MockTSafeReplicaInterface_Expecter) addTSafe(vChannel interface{}) *MockTSafeReplicaInterface_addTSafe_Call {
 	return &MockTSafeReplicaInterface_addTSafe_Call{Call: _e.mock.On("addTSafe", vChannel)}
 }
@@ -149,7 +149,7 @@ type MockTSafeReplicaInterface_getTSafe_Call struct {
 }
 
 // getTSafe is a helper method to define mock.On call
-//  - vChannel string
+//   - vChannel string
 func (_e *MockTSafeReplicaInterface_Expecter) getTSafe(vChannel interface{}) *MockTSafeReplicaInterface_getTSafe_Call {
 	return &MockTSafeReplicaInterface_getTSafe_Call{Call: _e.mock.On("getTSafe", vChannel)}
 }
@@ -177,7 +177,7 @@ type MockTSafeReplicaInterface_removeTSafe_Call struct {
 }
 
 // removeTSafe is a helper method to define mock.On call
-//  - vChannel string
+//   - vChannel string
 func (_e *MockTSafeReplicaInterface_Expecter) removeTSafe(vChannel interface{}) *MockTSafeReplicaInterface_removeTSafe_Call {
 	return &MockTSafeReplicaInterface_removeTSafe_Call{Call: _e.mock.On("removeTSafe", vChannel)}
 }
@@ -214,8 +214,8 @@ type MockTSafeReplicaInterface_setTSafe_Call struct {
 }
 
 // setTSafe is a helper method to define mock.On call
-//  - vChannel string
-//  - timestamp uint64
+//   - vChannel string
+//   - timestamp uint64
 func (_e *MockTSafeReplicaInterface_Expecter) setTSafe(vChannel interface{}, timestamp interface{}) *MockTSafeReplicaInterface_setTSafe_Call {
 	return &MockTSafeReplicaInterface_setTSafe_Call{Call: _e.mock.On("setTSafe", vChannel, timestamp)}
 }

@@ -13,7 +13,6 @@ package server
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"path"
 	"runtime"
@@ -22,6 +21,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/tecbot/gorocksdb"
 	"go.uber.org/zap"

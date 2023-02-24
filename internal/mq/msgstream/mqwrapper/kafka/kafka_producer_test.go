@@ -2,11 +2,12 @@ package kafka
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math/rand"
 	"testing"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 

@@ -17,12 +17,13 @@
 package funcutil
 
 import (
-	"errors"
 	"math/rand"
 	"runtime"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/stretchr/testify/assert"
 )

@@ -18,8 +18,9 @@ package querynode
 
 import (
 	"context"
-	"errors"
 	"sync"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/log"

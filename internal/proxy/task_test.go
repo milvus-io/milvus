@@ -21,11 +21,12 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
-	"errors"
 	"math/rand"
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"

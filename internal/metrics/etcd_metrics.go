@@ -24,7 +24,7 @@ var (
 		})
 )
 
-//RegisterEtcdMetrics registers etcd metrics
+// RegisterEtcdMetrics registers etcd metrics
 func RegisterEtcdMetrics(registry *prometheus.Registry) {
 	registry.MustRegister(EtcdPutKvSize)
 	registry.MustRegister(EtcdRequestLatency)

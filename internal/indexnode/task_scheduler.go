@@ -19,9 +19,10 @@ package indexnode
 import (
 	"container/list"
 	"context"
-	"errors"
 	"runtime/debug"
 	"sync"
+
+	"github.com/cockroachdb/errors"
 
 	"go.uber.org/zap"
 

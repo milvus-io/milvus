@@ -18,8 +18,9 @@ package rootcoord
 
 import (
 	"context"
-	"errors"
 	"fmt"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"go.uber.org/zap"

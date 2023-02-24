@@ -20,11 +20,12 @@ import (
 	"bytes"
 	"container/list"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"strings"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/storage/gcp"

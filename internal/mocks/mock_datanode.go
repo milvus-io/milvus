@@ -58,8 +58,8 @@ type DataNode_AddImportSegment_Call struct {
 }
 
 // AddImportSegment is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *datapb.AddImportSegmentRequest
+//   - ctx context.Context
+//   - req *datapb.AddImportSegmentRequest
 func (_e *DataNode_Expecter) AddImportSegment(ctx interface{}, req interface{}) *DataNode_AddImportSegment_Call {
 	return &DataNode_AddImportSegment_Call{Call: _e.mock.On("AddImportSegment", ctx, req)}
 }
@@ -105,8 +105,8 @@ type DataNode_Compaction_Call struct {
 }
 
 // Compaction is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *datapb.CompactionPlan
+//   - ctx context.Context
+//   - req *datapb.CompactionPlan
 func (_e *DataNode_Expecter) Compaction(ctx interface{}, req interface{}) *DataNode_Compaction_Call {
 	return &DataNode_Compaction_Call{Call: _e.mock.On("Compaction", ctx, req)}
 }
@@ -152,8 +152,8 @@ type DataNode_FlushSegments_Call struct {
 }
 
 // FlushSegments is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *datapb.FlushSegmentsRequest
+//   - ctx context.Context
+//   - req *datapb.FlushSegmentsRequest
 func (_e *DataNode_Expecter) FlushSegments(ctx interface{}, req interface{}) *DataNode_FlushSegments_Call {
 	return &DataNode_FlushSegments_Call{Call: _e.mock.On("FlushSegments", ctx, req)}
 }
@@ -199,8 +199,8 @@ type DataNode_GetCompactionState_Call struct {
 }
 
 // GetCompactionState is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *datapb.CompactionStateRequest
+//   - ctx context.Context
+//   - req *datapb.CompactionStateRequest
 func (_e *DataNode_Expecter) GetCompactionState(ctx interface{}, req interface{}) *DataNode_GetCompactionState_Call {
 	return &DataNode_GetCompactionState_Call{Call: _e.mock.On("GetCompactionState", ctx, req)}
 }
@@ -246,7 +246,7 @@ type DataNode_GetComponentStates_Call struct {
 }
 
 // GetComponentStates is a helper method to define mock.On call
-//  - ctx context.Context
+//   - ctx context.Context
 func (_e *DataNode_Expecter) GetComponentStates(ctx interface{}) *DataNode_GetComponentStates_Call {
 	return &DataNode_GetComponentStates_Call{Call: _e.mock.On("GetComponentStates", ctx)}
 }
@@ -292,8 +292,8 @@ type DataNode_GetMetrics_Call struct {
 }
 
 // GetMetrics is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *milvuspb.GetMetricsRequest
+//   - ctx context.Context
+//   - req *milvuspb.GetMetricsRequest
 func (_e *DataNode_Expecter) GetMetrics(ctx interface{}, req interface{}) *DataNode_GetMetrics_Call {
 	return &DataNode_GetMetrics_Call{Call: _e.mock.On("GetMetrics", ctx, req)}
 }
@@ -339,7 +339,7 @@ type DataNode_GetStatisticsChannel_Call struct {
 }
 
 // GetStatisticsChannel is a helper method to define mock.On call
-//  - ctx context.Context
+//   - ctx context.Context
 func (_e *DataNode_Expecter) GetStatisticsChannel(ctx interface{}) *DataNode_GetStatisticsChannel_Call {
 	return &DataNode_GetStatisticsChannel_Call{Call: _e.mock.On("GetStatisticsChannel", ctx)}
 }
@@ -385,8 +385,8 @@ type DataNode_Import_Call struct {
 }
 
 // Import is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *datapb.ImportTaskRequest
+//   - ctx context.Context
+//   - req *datapb.ImportTaskRequest
 func (_e *DataNode_Expecter) Import(ctx interface{}, req interface{}) *DataNode_Import_Call {
 	return &DataNode_Import_Call{Call: _e.mock.On("Import", ctx, req)}
 }
@@ -504,8 +504,8 @@ type DataNode_ResendSegmentStats_Call struct {
 }
 
 // ResendSegmentStats is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *datapb.ResendSegmentStatsRequest
+//   - ctx context.Context
+//   - req *datapb.ResendSegmentStatsRequest
 func (_e *DataNode_Expecter) ResendSegmentStats(ctx interface{}, req interface{}) *DataNode_ResendSegmentStats_Call {
 	return &DataNode_ResendSegmentStats_Call{Call: _e.mock.On("ResendSegmentStats", ctx, req)}
 }
@@ -551,8 +551,8 @@ type DataNode_ShowConfigurations_Call struct {
 }
 
 // ShowConfigurations is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *internalpb.ShowConfigurationsRequest
+//   - ctx context.Context
+//   - req *internalpb.ShowConfigurationsRequest
 func (_e *DataNode_Expecter) ShowConfigurations(ctx interface{}, req interface{}) *DataNode_ShowConfigurations_Call {
 	return &DataNode_ShowConfigurations_Call{Call: _e.mock.On("ShowConfigurations", ctx, req)}
 }
@@ -670,8 +670,8 @@ type DataNode_SyncSegments_Call struct {
 }
 
 // SyncSegments is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *datapb.SyncSegmentsRequest
+//   - ctx context.Context
+//   - req *datapb.SyncSegmentsRequest
 func (_e *DataNode_Expecter) SyncSegments(ctx interface{}, req interface{}) *DataNode_SyncSegments_Call {
 	return &DataNode_SyncSegments_Call{Call: _e.mock.On("SyncSegments", ctx, req)}
 }
@@ -717,8 +717,8 @@ type DataNode_WatchDmChannels_Call struct {
 }
 
 // WatchDmChannels is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *datapb.WatchDmChannelsRequest
+//   - ctx context.Context
+//   - req *datapb.WatchDmChannelsRequest
 func (_e *DataNode_Expecter) WatchDmChannels(ctx interface{}, req interface{}) *DataNode_WatchDmChannels_Call {
 	return &DataNode_WatchDmChannels_Call{Call: _e.mock.On("WatchDmChannels", ctx, req)}
 }

@@ -12,7 +12,7 @@
 package hardware
 
 import (
-	"errors"
+	"github.com/cockroachdb/errors"
 )
 
 // inContainer checks if the service is running inside a container

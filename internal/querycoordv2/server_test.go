@@ -18,10 +18,11 @@ package querycoordv2
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"

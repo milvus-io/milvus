@@ -240,10 +240,10 @@ func (h *ServerHandler) getCollectionStartPos(channel *channel) *internalpb.MsgP
 }
 
 // GetChannelSeekPosition gets channel seek position from:
-//	1. Channel checkpoint meta;
-//	2. Segments earliest dml position;
-//	3. Collection start position;
-//  And would return if any position is valid.
+//  1. Channel checkpoint meta;
+//  2. Segments earliest dml position;
+//  3. Collection start position;
+//     And would return if any position is valid.
 func (h *ServerHandler) GetChannelSeekPosition(channel *channel, partitionID UniqueID) *internalpb.MsgPosition {
 	var seekPosition *internalpb.MsgPosition
 	seekPosition = h.s.meta.GetChannelCheckpoint(channel.Name)

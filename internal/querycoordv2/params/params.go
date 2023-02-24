@@ -17,11 +17,12 @@
 package params
 
 import (
-	"errors"
 	"math/rand"
 	"strconv"
 	"sync/atomic"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 )

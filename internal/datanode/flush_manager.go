@@ -18,11 +18,12 @@ package datanode
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"path"
 	"strconv"
 	"sync"
+
+	"github.com/cockroachdb/errors"
 
 	"go.uber.org/atomic"
 	"go.uber.org/zap"

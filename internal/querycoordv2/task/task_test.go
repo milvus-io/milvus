@@ -18,10 +18,11 @@ package task
 
 import (
 	"context"
-	"errors"
 	"math/rand"
 	"testing"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"

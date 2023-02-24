@@ -18,7 +18,6 @@ package grpcclient
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -26,6 +25,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"google.golang.org/grpc/examples/helloworld/helloworld"
 	"google.golang.org/grpc/keepalive"

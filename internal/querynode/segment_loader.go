@@ -18,7 +18,6 @@ package querynode
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math/rand"
 	"path"
@@ -26,6 +25,8 @@ import (
 	"runtime/debug"
 	"strconv"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"go.uber.org/multierr"
 	"go.uber.org/zap"

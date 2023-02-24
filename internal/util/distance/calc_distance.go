@@ -17,9 +17,10 @@
 package distance
 
 import (
-	"errors"
 	"strings"
 	"sync"
+
+	"github.com/cockroachdb/errors"
 )
 
 const (

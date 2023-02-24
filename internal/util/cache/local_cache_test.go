@@ -17,12 +17,13 @@
 package cache
 
 import (
-	"errors"
 	"fmt"
 	"math/rand"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/stretchr/testify/assert"
 )

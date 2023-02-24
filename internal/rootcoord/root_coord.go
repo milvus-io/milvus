@@ -18,7 +18,6 @@ package rootcoord
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math/rand"
 	"os"
@@ -26,6 +25,8 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/samber/lo"
 

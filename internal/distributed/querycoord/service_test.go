@@ -18,9 +18,10 @@ package grpcquerycoord
 
 import (
 	"context"
-	"errors"
 	"os"
 	"testing"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/paramtable"

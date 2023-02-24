@@ -19,13 +19,14 @@ package datacoord
 import (
 	"bytes"
 	"context"
-	"errors"
 	"path"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"

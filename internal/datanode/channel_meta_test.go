@@ -19,10 +19,11 @@ package datanode
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"math/rand"
 	"testing"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/bits-and-blooms/bloom/v3"
 	"github.com/samber/lo"

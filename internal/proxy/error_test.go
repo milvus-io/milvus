@@ -17,9 +17,10 @@
 package proxy
 
 import (
-	"errors"
 	"fmt"
 	"testing"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"

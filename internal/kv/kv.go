@@ -50,8 +50,9 @@ type BaseKV interface {
 	Close()
 }
 
-//go:generate mockery --name=TxnKV --with-expecter
 // TxnKV contains extra txn operations of kv. The extra operations is transactional.
+//
+//go:generate mockery --name=TxnKV --with-expecter
 type TxnKV interface {
 	BaseKV
 	MultiSaveAndRemove(saves map[string]string, removals []string) error
@@ -59,8 +60,9 @@ type TxnKV interface {
 	MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string) error
 }
 
-//go:generate mockery --name=MetaKv --with-expecter
 // MetaKv is TxnKV for metadata. It should save data with lease.
+//
+//go:generate mockery --name=MetaKv --with-expecter
 type MetaKv interface {
 	TxnKV
 	GetPath(key string) string
@@ -80,8 +82,9 @@ type MetaKv interface {
 	WalkWithPrefix(prefix string, paginationSize int, fn func([]byte, []byte) error) error
 }
 
-//go:generate mockery --name=SnapShotKV --with-expecter
 // SnapShotKV is TxnKV for snapshot data. It must save timestamp.
+//
+//go:generate mockery --name=SnapShotKV --with-expecter
 type SnapShotKV interface {
 	Save(key string, value string, ts typeutil.Timestamp) error
 	Load(key string, ts typeutil.Timestamp) (string, error)

@@ -18,7 +18,6 @@ package datacoord
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math/rand"
 	"os"
@@ -30,6 +29,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -3130,7 +3131,7 @@ func TestPostFlush(t *testing.T) {
 		defer closeTestServer(t, svr)
 
 		err := svr.postFlush(context.Background(), 1)
-		assert.EqualValues(t, errors.New("segment not found, might be a faked segemnt, ignore post flush"), err)
+		assert.EqualValues(t, "segment not found, might be a faked segemnt, ignore post flush", err.Error())
 	})
 
 	t.Run("success post flush", func(t *testing.T) {

@@ -18,8 +18,9 @@ package flowgraph
 
 import (
 	"context"
-	"errors"
 	"sync"
+
+	"github.com/cockroachdb/errors"
 )
 
 // Flow Graph is no longer a graph rather than a simple pipeline, this simplified our code and increase recovery speed - xiaofan.

@@ -17,9 +17,10 @@
 package datacoord
 
 import (
-	"errors"
 	"sort"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"

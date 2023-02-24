@@ -2,11 +2,12 @@ package querynode
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"path"
 	"strconv"
 	"sync"
+
+	"github.com/cockroachdb/errors"
 
 	grpcquerynodeclient "github.com/milvus-io/milvus/internal/distributed/querynode/client"
 	"github.com/milvus-io/milvus/internal/log"

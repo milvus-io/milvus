@@ -21,6 +21,7 @@ linters:
     - revive
     - durationcheck
     - unconvert
+    - depguard
       #    - gocritic
 
 linters-settings:
@@ -32,7 +33,16 @@ linters-settings:
     settings:
       ruleguard:
         failOnError: true
-        rules: "rules.go"
+        rules: 'rules.go'
+  depguard:
+    list-type: denylist
+    include-go-root: true
+    packages:
+      - errors
+      - github.com/pkg/errors
+      - github.com/pingcap/errors
+      - golang.org/x/xerrors
+      - github.com/go-errors/errors
 
 issues:
   exclude-use-default: false
@@ -51,7 +61,7 @@ issues:
     - G302
     # Potential file inclusion via variable
     - G304
-    # Deferring unsafe method like *os.File Close 
+    # Deferring unsafe method like *os.File Close
     - G307
     # Use of weak random number generator math/rand
     - G404
@@ -64,4 +74,3 @@ issues:
 
 service:
   golangci-lint-version: 1.27.0 # use the fixed version to not introduce new linters unexpectedly
-

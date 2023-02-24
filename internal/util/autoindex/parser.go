@@ -86,7 +86,7 @@ func (p *Parser) GetMethodByLevel(level int) (Calculator, bool) {
 	return m.(Calculator), true
 }
 
-//GetSearchParamStrCalculator return a method which can calculate searchParams
+// GetSearchParamStrCalculator return a method which can calculate searchParams
 func GetSearchCalculator(paramsStr string, level int) Calculator {
 	parser := NewParser()
 	err := parser.InitFromJSONStr(paramsStr)

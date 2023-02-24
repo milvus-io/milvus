@@ -18,10 +18,11 @@ package datanode
 
 import (
 	"context"
-	"errors"
 	"path"
 	"strconv"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"

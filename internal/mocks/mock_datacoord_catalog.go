@@ -46,8 +46,8 @@ type DataCoordCatalog_AddSegment_Call struct {
 }
 
 // AddSegment is a helper method to define mock.On call
-//  - ctx context.Context
-//  - segment *datapb.SegmentInfo
+//   - ctx context.Context
+//   - segment *datapb.SegmentInfo
 func (_e *DataCoordCatalog_Expecter) AddSegment(ctx interface{}, segment interface{}) *DataCoordCatalog_AddSegment_Call {
 	return &DataCoordCatalog_AddSegment_Call{Call: _e.mock.On("AddSegment", ctx, segment)}
 }
@@ -84,8 +84,8 @@ type DataCoordCatalog_AlterIndex_Call struct {
 }
 
 // AlterIndex is a helper method to define mock.On call
-//  - ctx context.Context
-//  - newIndex *model.Index
+//   - ctx context.Context
+//   - newIndex *model.Index
 func (_e *DataCoordCatalog_Expecter) AlterIndex(ctx interface{}, newIndex interface{}) *DataCoordCatalog_AlterIndex_Call {
 	return &DataCoordCatalog_AlterIndex_Call{Call: _e.mock.On("AlterIndex", ctx, newIndex)}
 }
@@ -122,8 +122,8 @@ type DataCoordCatalog_AlterIndexes_Call struct {
 }
 
 // AlterIndexes is a helper method to define mock.On call
-//  - ctx context.Context
-//  - newIndexes []*model.Index
+//   - ctx context.Context
+//   - newIndexes []*model.Index
 func (_e *DataCoordCatalog_Expecter) AlterIndexes(ctx interface{}, newIndexes interface{}) *DataCoordCatalog_AlterIndexes_Call {
 	return &DataCoordCatalog_AlterIndexes_Call{Call: _e.mock.On("AlterIndexes", ctx, newIndexes)}
 }
@@ -160,9 +160,9 @@ type DataCoordCatalog_AlterSegment_Call struct {
 }
 
 // AlterSegment is a helper method to define mock.On call
-//  - ctx context.Context
-//  - newSegment *datapb.SegmentInfo
-//  - oldSegment *datapb.SegmentInfo
+//   - ctx context.Context
+//   - newSegment *datapb.SegmentInfo
+//   - oldSegment *datapb.SegmentInfo
 func (_e *DataCoordCatalog_Expecter) AlterSegment(ctx interface{}, newSegment interface{}, oldSegment interface{}) *DataCoordCatalog_AlterSegment_Call {
 	return &DataCoordCatalog_AlterSegment_Call{Call: _e.mock.On("AlterSegment", ctx, newSegment, oldSegment)}
 }
@@ -199,8 +199,8 @@ type DataCoordCatalog_AlterSegmentIndex_Call struct {
 }
 
 // AlterSegmentIndex is a helper method to define mock.On call
-//  - ctx context.Context
-//  - newSegIndex *model.SegmentIndex
+//   - ctx context.Context
+//   - newSegIndex *model.SegmentIndex
 func (_e *DataCoordCatalog_Expecter) AlterSegmentIndex(ctx interface{}, newSegIndex interface{}) *DataCoordCatalog_AlterSegmentIndex_Call {
 	return &DataCoordCatalog_AlterSegmentIndex_Call{Call: _e.mock.On("AlterSegmentIndex", ctx, newSegIndex)}
 }
@@ -237,8 +237,8 @@ type DataCoordCatalog_AlterSegmentIndexes_Call struct {
 }
 
 // AlterSegmentIndexes is a helper method to define mock.On call
-//  - ctx context.Context
-//  - newSegIdxes []*model.SegmentIndex
+//   - ctx context.Context
+//   - newSegIdxes []*model.SegmentIndex
 func (_e *DataCoordCatalog_Expecter) AlterSegmentIndexes(ctx interface{}, newSegIdxes interface{}) *DataCoordCatalog_AlterSegmentIndexes_Call {
 	return &DataCoordCatalog_AlterSegmentIndexes_Call{Call: _e.mock.On("AlterSegmentIndexes", ctx, newSegIdxes)}
 }
@@ -275,8 +275,8 @@ type DataCoordCatalog_AlterSegments_Call struct {
 }
 
 // AlterSegments is a helper method to define mock.On call
-//  - ctx context.Context
-//  - newSegments []*datapb.SegmentInfo
+//   - ctx context.Context
+//   - newSegments []*datapb.SegmentInfo
 func (_e *DataCoordCatalog_Expecter) AlterSegments(ctx interface{}, newSegments interface{}) *DataCoordCatalog_AlterSegments_Call {
 	return &DataCoordCatalog_AlterSegments_Call{Call: _e.mock.On("AlterSegments", ctx, newSegments)}
 }
@@ -313,9 +313,9 @@ type DataCoordCatalog_AlterSegmentsAndAddNewSegment_Call struct {
 }
 
 // AlterSegmentsAndAddNewSegment is a helper method to define mock.On call
-//  - ctx context.Context
-//  - segments []*datapb.SegmentInfo
-//  - newSegment *datapb.SegmentInfo
+//   - ctx context.Context
+//   - segments []*datapb.SegmentInfo
+//   - newSegment *datapb.SegmentInfo
 func (_e *DataCoordCatalog_Expecter) AlterSegmentsAndAddNewSegment(ctx interface{}, segments interface{}, newSegment interface{}) *DataCoordCatalog_AlterSegmentsAndAddNewSegment_Call {
 	return &DataCoordCatalog_AlterSegmentsAndAddNewSegment_Call{Call: _e.mock.On("AlterSegmentsAndAddNewSegment", ctx, segments, newSegment)}
 }
@@ -352,8 +352,8 @@ type DataCoordCatalog_CreateIndex_Call struct {
 }
 
 // CreateIndex is a helper method to define mock.On call
-//  - ctx context.Context
-//  - index *model.Index
+//   - ctx context.Context
+//   - index *model.Index
 func (_e *DataCoordCatalog_Expecter) CreateIndex(ctx interface{}, index interface{}) *DataCoordCatalog_CreateIndex_Call {
 	return &DataCoordCatalog_CreateIndex_Call{Call: _e.mock.On("CreateIndex", ctx, index)}
 }
@@ -390,8 +390,8 @@ type DataCoordCatalog_CreateSegmentIndex_Call struct {
 }
 
 // CreateSegmentIndex is a helper method to define mock.On call
-//  - ctx context.Context
-//  - segIdx *model.SegmentIndex
+//   - ctx context.Context
+//   - segIdx *model.SegmentIndex
 func (_e *DataCoordCatalog_Expecter) CreateSegmentIndex(ctx interface{}, segIdx interface{}) *DataCoordCatalog_CreateSegmentIndex_Call {
 	return &DataCoordCatalog_CreateSegmentIndex_Call{Call: _e.mock.On("CreateSegmentIndex", ctx, segIdx)}
 }
@@ -428,8 +428,8 @@ type DataCoordCatalog_DropChannel_Call struct {
 }
 
 // DropChannel is a helper method to define mock.On call
-//  - ctx context.Context
-//  - channel string
+//   - ctx context.Context
+//   - channel string
 func (_e *DataCoordCatalog_Expecter) DropChannel(ctx interface{}, channel interface{}) *DataCoordCatalog_DropChannel_Call {
 	return &DataCoordCatalog_DropChannel_Call{Call: _e.mock.On("DropChannel", ctx, channel)}
 }
@@ -466,8 +466,8 @@ type DataCoordCatalog_DropChannelCheckpoint_Call struct {
 }
 
 // DropChannelCheckpoint is a helper method to define mock.On call
-//  - ctx context.Context
-//  - vChannel string
+//   - ctx context.Context
+//   - vChannel string
 func (_e *DataCoordCatalog_Expecter) DropChannelCheckpoint(ctx interface{}, vChannel interface{}) *DataCoordCatalog_DropChannelCheckpoint_Call {
 	return &DataCoordCatalog_DropChannelCheckpoint_Call{Call: _e.mock.On("DropChannelCheckpoint", ctx, vChannel)}
 }
@@ -504,9 +504,9 @@ type DataCoordCatalog_DropIndex_Call struct {
 }
 
 // DropIndex is a helper method to define mock.On call
-//  - ctx context.Context
-//  - collID int64
-//  - dropIdxID int64
+//   - ctx context.Context
+//   - collID int64
+//   - dropIdxID int64
 func (_e *DataCoordCatalog_Expecter) DropIndex(ctx interface{}, collID interface{}, dropIdxID interface{}) *DataCoordCatalog_DropIndex_Call {
 	return &DataCoordCatalog_DropIndex_Call{Call: _e.mock.On("DropIndex", ctx, collID, dropIdxID)}
 }
@@ -543,8 +543,8 @@ type DataCoordCatalog_DropSegment_Call struct {
 }
 
 // DropSegment is a helper method to define mock.On call
-//  - ctx context.Context
-//  - segment *datapb.SegmentInfo
+//   - ctx context.Context
+//   - segment *datapb.SegmentInfo
 func (_e *DataCoordCatalog_Expecter) DropSegment(ctx interface{}, segment interface{}) *DataCoordCatalog_DropSegment_Call {
 	return &DataCoordCatalog_DropSegment_Call{Call: _e.mock.On("DropSegment", ctx, segment)}
 }
@@ -581,11 +581,11 @@ type DataCoordCatalog_DropSegmentIndex_Call struct {
 }
 
 // DropSegmentIndex is a helper method to define mock.On call
-//  - ctx context.Context
-//  - collID int64
-//  - partID int64
-//  - segID int64
-//  - buildID int64
+//   - ctx context.Context
+//   - collID int64
+//   - partID int64
+//   - segID int64
+//   - buildID int64
 func (_e *DataCoordCatalog_Expecter) DropSegmentIndex(ctx interface{}, collID interface{}, partID interface{}, segID interface{}, buildID interface{}) *DataCoordCatalog_DropSegmentIndex_Call {
 	return &DataCoordCatalog_DropSegmentIndex_Call{Call: _e.mock.On("DropSegmentIndex", ctx, collID, partID, segID, buildID)}
 }
@@ -622,9 +622,9 @@ type DataCoordCatalog_GcConfirm_Call struct {
 }
 
 // GcConfirm is a helper method to define mock.On call
-//  - ctx context.Context
-//  - collectionID int64
-//  - partitionID int64
+//   - ctx context.Context
+//   - collectionID int64
+//   - partitionID int64
 func (_e *DataCoordCatalog_Expecter) GcConfirm(ctx interface{}, collectionID interface{}, partitionID interface{}) *DataCoordCatalog_GcConfirm_Call {
 	return &DataCoordCatalog_GcConfirm_Call{Call: _e.mock.On("GcConfirm", ctx, collectionID, partitionID)}
 }
@@ -661,8 +661,8 @@ type DataCoordCatalog_IsChannelDropped_Call struct {
 }
 
 // IsChannelDropped is a helper method to define mock.On call
-//  - ctx context.Context
-//  - channel string
+//   - ctx context.Context
+//   - channel string
 func (_e *DataCoordCatalog_Expecter) IsChannelDropped(ctx interface{}, channel interface{}) *DataCoordCatalog_IsChannelDropped_Call {
 	return &DataCoordCatalog_IsChannelDropped_Call{Call: _e.mock.On("IsChannelDropped", ctx, channel)}
 }
@@ -708,7 +708,7 @@ type DataCoordCatalog_ListChannelCheckpoint_Call struct {
 }
 
 // ListChannelCheckpoint is a helper method to define mock.On call
-//  - ctx context.Context
+//   - ctx context.Context
 func (_e *DataCoordCatalog_Expecter) ListChannelCheckpoint(ctx interface{}) *DataCoordCatalog_ListChannelCheckpoint_Call {
 	return &DataCoordCatalog_ListChannelCheckpoint_Call{Call: _e.mock.On("ListChannelCheckpoint", ctx)}
 }
@@ -754,7 +754,7 @@ type DataCoordCatalog_ListIndexes_Call struct {
 }
 
 // ListIndexes is a helper method to define mock.On call
-//  - ctx context.Context
+//   - ctx context.Context
 func (_e *DataCoordCatalog_Expecter) ListIndexes(ctx interface{}) *DataCoordCatalog_ListIndexes_Call {
 	return &DataCoordCatalog_ListIndexes_Call{Call: _e.mock.On("ListIndexes", ctx)}
 }
@@ -800,7 +800,7 @@ type DataCoordCatalog_ListSegmentIndexes_Call struct {
 }
 
 // ListSegmentIndexes is a helper method to define mock.On call
-//  - ctx context.Context
+//   - ctx context.Context
 func (_e *DataCoordCatalog_Expecter) ListSegmentIndexes(ctx interface{}) *DataCoordCatalog_ListSegmentIndexes_Call {
 	return &DataCoordCatalog_ListSegmentIndexes_Call{Call: _e.mock.On("ListSegmentIndexes", ctx)}
 }
@@ -846,7 +846,7 @@ type DataCoordCatalog_ListSegments_Call struct {
 }
 
 // ListSegments is a helper method to define mock.On call
-//  - ctx context.Context
+//   - ctx context.Context
 func (_e *DataCoordCatalog_Expecter) ListSegments(ctx interface{}) *DataCoordCatalog_ListSegments_Call {
 	return &DataCoordCatalog_ListSegments_Call{Call: _e.mock.On("ListSegments", ctx)}
 }
@@ -883,8 +883,8 @@ type DataCoordCatalog_MarkChannelDeleted_Call struct {
 }
 
 // MarkChannelDeleted is a helper method to define mock.On call
-//  - ctx context.Context
-//  - channel string
+//   - ctx context.Context
+//   - channel string
 func (_e *DataCoordCatalog_Expecter) MarkChannelDeleted(ctx interface{}, channel interface{}) *DataCoordCatalog_MarkChannelDeleted_Call {
 	return &DataCoordCatalog_MarkChannelDeleted_Call{Call: _e.mock.On("MarkChannelDeleted", ctx, channel)}
 }
@@ -921,9 +921,9 @@ type DataCoordCatalog_RevertAlterSegmentsAndAddNewSegment_Call struct {
 }
 
 // RevertAlterSegmentsAndAddNewSegment is a helper method to define mock.On call
-//  - ctx context.Context
-//  - segments []*datapb.SegmentInfo
-//  - removalSegment *datapb.SegmentInfo
+//   - ctx context.Context
+//   - segments []*datapb.SegmentInfo
+//   - removalSegment *datapb.SegmentInfo
 func (_e *DataCoordCatalog_Expecter) RevertAlterSegmentsAndAddNewSegment(ctx interface{}, segments interface{}, removalSegment interface{}) *DataCoordCatalog_RevertAlterSegmentsAndAddNewSegment_Call {
 	return &DataCoordCatalog_RevertAlterSegmentsAndAddNewSegment_Call{Call: _e.mock.On("RevertAlterSegmentsAndAddNewSegment", ctx, segments, removalSegment)}
 }
@@ -960,9 +960,9 @@ type DataCoordCatalog_SaveChannelCheckpoint_Call struct {
 }
 
 // SaveChannelCheckpoint is a helper method to define mock.On call
-//  - ctx context.Context
-//  - vChannel string
-//  - pos *internalpb.MsgPosition
+//   - ctx context.Context
+//   - vChannel string
+//   - pos *internalpb.MsgPosition
 func (_e *DataCoordCatalog_Expecter) SaveChannelCheckpoint(ctx interface{}, vChannel interface{}, pos interface{}) *DataCoordCatalog_SaveChannelCheckpoint_Call {
 	return &DataCoordCatalog_SaveChannelCheckpoint_Call{Call: _e.mock.On("SaveChannelCheckpoint", ctx, vChannel, pos)}
 }
@@ -999,8 +999,8 @@ type DataCoordCatalog_SaveDroppedSegmentsInBatch_Call struct {
 }
 
 // SaveDroppedSegmentsInBatch is a helper method to define mock.On call
-//  - ctx context.Context
-//  - segments []*datapb.SegmentInfo
+//   - ctx context.Context
+//   - segments []*datapb.SegmentInfo
 func (_e *DataCoordCatalog_Expecter) SaveDroppedSegmentsInBatch(ctx interface{}, segments interface{}) *DataCoordCatalog_SaveDroppedSegmentsInBatch_Call {
 	return &DataCoordCatalog_SaveDroppedSegmentsInBatch_Call{Call: _e.mock.On("SaveDroppedSegmentsInBatch", ctx, segments)}
 }

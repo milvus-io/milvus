@@ -18,12 +18,13 @@ package grpcdatanode
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net"
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	clientv3 "go.etcd.io/etcd/client/v3"

@@ -18,10 +18,11 @@ package querynode
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"runtime"
 	"sync"
+
+	"github.com/cockroachdb/errors"
 
 	"go.uber.org/atomic"
 	"go.uber.org/zap"

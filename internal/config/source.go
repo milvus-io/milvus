@@ -6,7 +6,7 @@
 // "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -53,32 +53,32 @@ type FileInfo struct {
 	RefreshInterval time.Duration
 }
 
-//Options hold options
+// Options hold options
 type Options struct {
 	File            *FileInfo
 	EtcdInfo        *EtcdInfo
 	EnvKeyFormatter func(string) string
 }
 
-//Option is a func
+// Option is a func
 type Option func(options *Options)
 
-//WithRequiredFiles tell archaius to manage files, if not exist will return error
+// WithRequiredFiles tell archaius to manage files, if not exist will return error
 func WithFilesSource(fi *FileInfo) Option {
 	return func(options *Options) {
 		options.File = fi
 	}
 }
 
-//WithEtcdSource accept the information for initiating a remote source
+// WithEtcdSource accept the information for initiating a remote source
 func WithEtcdSource(ri *EtcdInfo) Option {
 	return func(options *Options) {
 		options.EtcdInfo = ri
 	}
 }
 
-//WithEnvSource enable env source
-//archaius will read ENV as key value
+// WithEnvSource enable env source
+// archaius will read ENV as key value
 func WithEnvSource(keyFormatter func(string) string) Option {
 	return func(options *Options) {
 		options.EnvKeyFormatter = keyFormatter

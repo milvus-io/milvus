@@ -17,8 +17,9 @@
 package proxy
 
 import (
-	"errors"
 	"fmt"
+
+	"github.com/cockroachdb/errors"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"

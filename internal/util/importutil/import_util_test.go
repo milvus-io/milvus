@@ -18,9 +18,10 @@ package importutil
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"math"
 	"testing"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"

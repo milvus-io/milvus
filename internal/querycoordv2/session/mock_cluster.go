@@ -56,8 +56,8 @@ type MockCluster_GetComponentStates_Call struct {
 }
 
 // GetComponentStates is a helper method to define mock.On call
-//  - ctx context.Context
-//  - nodeID int64
+//   - ctx context.Context
+//   - nodeID int64
 func (_e *MockCluster_Expecter) GetComponentStates(ctx interface{}, nodeID interface{}) *MockCluster_GetComponentStates_Call {
 	return &MockCluster_GetComponentStates_Call{Call: _e.mock.On("GetComponentStates", ctx, nodeID)}
 }
@@ -103,9 +103,9 @@ type MockCluster_GetDataDistribution_Call struct {
 }
 
 // GetDataDistribution is a helper method to define mock.On call
-//  - ctx context.Context
-//  - nodeID int64
-//  - req *querypb.GetDataDistributionRequest
+//   - ctx context.Context
+//   - nodeID int64
+//   - req *querypb.GetDataDistributionRequest
 func (_e *MockCluster_Expecter) GetDataDistribution(ctx interface{}, nodeID interface{}, req interface{}) *MockCluster_GetDataDistribution_Call {
 	return &MockCluster_GetDataDistribution_Call{Call: _e.mock.On("GetDataDistribution", ctx, nodeID, req)}
 }
@@ -151,9 +151,9 @@ type MockCluster_GetMetrics_Call struct {
 }
 
 // GetMetrics is a helper method to define mock.On call
-//  - ctx context.Context
-//  - nodeID int64
-//  - req *milvuspb.GetMetricsRequest
+//   - ctx context.Context
+//   - nodeID int64
+//   - req *milvuspb.GetMetricsRequest
 func (_e *MockCluster_Expecter) GetMetrics(ctx interface{}, nodeID interface{}, req interface{}) *MockCluster_GetMetrics_Call {
 	return &MockCluster_GetMetrics_Call{Call: _e.mock.On("GetMetrics", ctx, nodeID, req)}
 }
@@ -199,9 +199,9 @@ type MockCluster_LoadSegments_Call struct {
 }
 
 // LoadSegments is a helper method to define mock.On call
-//  - ctx context.Context
-//  - nodeID int64
-//  - req *querypb.LoadSegmentsRequest
+//   - ctx context.Context
+//   - nodeID int64
+//   - req *querypb.LoadSegmentsRequest
 func (_e *MockCluster_Expecter) LoadSegments(ctx interface{}, nodeID interface{}, req interface{}) *MockCluster_LoadSegments_Call {
 	return &MockCluster_LoadSegments_Call{Call: _e.mock.On("LoadSegments", ctx, nodeID, req)}
 }
@@ -247,9 +247,9 @@ type MockCluster_ReleaseSegments_Call struct {
 }
 
 // ReleaseSegments is a helper method to define mock.On call
-//  - ctx context.Context
-//  - nodeID int64
-//  - req *querypb.ReleaseSegmentsRequest
+//   - ctx context.Context
+//   - nodeID int64
+//   - req *querypb.ReleaseSegmentsRequest
 func (_e *MockCluster_Expecter) ReleaseSegments(ctx interface{}, nodeID interface{}, req interface{}) *MockCluster_ReleaseSegments_Call {
 	return &MockCluster_ReleaseSegments_Call{Call: _e.mock.On("ReleaseSegments", ctx, nodeID, req)}
 }
@@ -277,7 +277,7 @@ type MockCluster_Start_Call struct {
 }
 
 // Start is a helper method to define mock.On call
-//  - ctx context.Context
+//   - ctx context.Context
 func (_e *MockCluster_Expecter) Start(ctx interface{}) *MockCluster_Start_Call {
 	return &MockCluster_Start_Call{Call: _e.mock.On("Start", ctx)}
 }
@@ -350,9 +350,9 @@ type MockCluster_SyncDistribution_Call struct {
 }
 
 // SyncDistribution is a helper method to define mock.On call
-//  - ctx context.Context
-//  - nodeID int64
-//  - req *querypb.SyncDistributionRequest
+//   - ctx context.Context
+//   - nodeID int64
+//   - req *querypb.SyncDistributionRequest
 func (_e *MockCluster_Expecter) SyncDistribution(ctx interface{}, nodeID interface{}, req interface{}) *MockCluster_SyncDistribution_Call {
 	return &MockCluster_SyncDistribution_Call{Call: _e.mock.On("SyncDistribution", ctx, nodeID, req)}
 }
@@ -398,9 +398,9 @@ type MockCluster_UnsubDmChannel_Call struct {
 }
 
 // UnsubDmChannel is a helper method to define mock.On call
-//  - ctx context.Context
-//  - nodeID int64
-//  - req *querypb.UnsubDmChannelRequest
+//   - ctx context.Context
+//   - nodeID int64
+//   - req *querypb.UnsubDmChannelRequest
 func (_e *MockCluster_Expecter) UnsubDmChannel(ctx interface{}, nodeID interface{}, req interface{}) *MockCluster_UnsubDmChannel_Call {
 	return &MockCluster_UnsubDmChannel_Call{Call: _e.mock.On("UnsubDmChannel", ctx, nodeID, req)}
 }
@@ -446,9 +446,9 @@ type MockCluster_WatchDmChannels_Call struct {
 }
 
 // WatchDmChannels is a helper method to define mock.On call
-//  - ctx context.Context
-//  - nodeID int64
-//  - req *querypb.WatchDmChannelsRequest
+//   - ctx context.Context
+//   - nodeID int64
+//   - req *querypb.WatchDmChannelsRequest
 func (_e *MockCluster_Expecter) WatchDmChannels(ctx interface{}, nodeID interface{}, req interface{}) *MockCluster_WatchDmChannels_Call {
 	return &MockCluster_WatchDmChannels_Call{Call: _e.mock.On("WatchDmChannels", ctx, nodeID, req)}
 }

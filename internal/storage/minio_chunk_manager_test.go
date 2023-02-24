@@ -18,13 +18,14 @@ package storage
 
 import (
 	"context"
-	"errors"
 	"io"
 	"math/rand"
 	"path"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 

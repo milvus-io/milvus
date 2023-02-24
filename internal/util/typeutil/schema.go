@@ -17,10 +17,11 @@
 package typeutil
 
 import (
-	"errors"
 	"fmt"
 	"math"
 	"strconv"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/common"

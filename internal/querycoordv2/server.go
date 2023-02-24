@@ -18,13 +18,14 @@ package querycoordv2
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/util/timerecord"

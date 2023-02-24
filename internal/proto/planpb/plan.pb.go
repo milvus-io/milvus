@@ -5,9 +5,10 @@ package planpb
 
 import (
 	fmt "fmt"
+	math "math"
+
 	proto "github.com/golang/protobuf/proto"
 	schemapb "github.com/milvus-io/milvus-proto/go-api/schemapb"
-	math "math"
 )
 
 // Reference imports to suppress errors if they are not otherwise used.

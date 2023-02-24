@@ -18,9 +18,10 @@ package datacoord
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"testing"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"

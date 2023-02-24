@@ -18,10 +18,11 @@ package datacoord
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"go.opentelemetry.io/otel"
 

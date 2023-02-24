@@ -17,8 +17,9 @@
 package indexparamcheck
 
 import (
-	"errors"
 	"sync"
+
+	"github.com/cockroachdb/errors"
 )
 
 // ConfAdapterMgr manages the conf adapter.

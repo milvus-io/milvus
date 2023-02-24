@@ -18,9 +18,10 @@ package datacoord
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/types"
 )

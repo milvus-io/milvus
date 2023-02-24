@@ -18,10 +18,11 @@ package datacoord
 
 import (
 	"context"
-	"errors"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"go.uber.org/zap"
 
