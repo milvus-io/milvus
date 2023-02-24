@@ -310,6 +310,7 @@ func testIndexCoord(t *testing.T) {
 		indexs := getSegmentIndexes()
 		mockIndexs := make(map[UniqueID]map[UniqueID]*model.SegmentIndex)
 		progressIndex := &model.SegmentIndex{
+			SegmentID:  222,
 			IndexState: commonpb.IndexState_InProgress,
 		}
 		failedIndex := &model.SegmentIndex{
@@ -318,6 +319,7 @@ func testIndexCoord(t *testing.T) {
 			FailReason: "mock fail",
 		}
 		finishedIndex := &model.SegmentIndex{
+			SegmentID:  111,
 			IndexState: commonpb.IndexState_Finished,
 			NumRows:    2048,
 		}
@@ -397,9 +399,9 @@ func testIndexCoord(t *testing.T) {
 			dcm.CallGetSegmentInfo = func(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
 				return &datapb.GetSegmentInfoResponse{
 					Infos: []*datapb.SegmentInfo{
-						{State: commonpb.SegmentState_Flushed, NumOfRows: 2048},
-						{State: commonpb.SegmentState_Flushed, NumOfRows: 2048},
-						{State: commonpb.SegmentState_Flushed, NumOfRows: 2048},
+						{ID: 222, State: commonpb.SegmentState_Flushed, NumOfRows: 2048},
+						{ID: 333, State: commonpb.SegmentState_Flushed, NumOfRows: 2048},
+						{ID: 444, State: commonpb.SegmentState_Flushed, NumOfRows: 2048},
 					},
 				}, nil
 			}

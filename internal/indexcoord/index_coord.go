@@ -616,7 +616,11 @@ func (i *IndexCoord) completeIndexInfo(indexInfo *indexpb.IndexInfo, segIDs []Un
 		break
 	}
 
-	indexStates, indexStateCnt := i.metaTable.GetIndexStates(indexID, createTs)
+	segSet := typeutil.NewSet(segIDs...)
+
+	indexStates, indexStateCnt := i.metaTable.GetIndexStates(indexID, createTs, func(segIdx *model.SegmentIndex) bool {
+		return segSet.Contain(segIdx.SegmentID)
+	})
 	allCnt := len(indexStates)
 	switch {
 	case indexStateCnt.Failed > 0:
