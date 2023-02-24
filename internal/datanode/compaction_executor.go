@@ -60,7 +60,6 @@ func (c *compactionExecutor) toCompleteState(task compactor) {
 
 // These two func are bounded for waitGroup
 func (c *compactionExecutor) executeWithState(task compactor) {
-	task.start()
 	go c.executeTask(task)
 }
 
