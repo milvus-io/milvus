@@ -11,15 +11,16 @@
 
 #pragma once
 
+#include <tbb/concurrent_priority_queue.h>
+#include <tbb/concurrent_vector.h>
+
 #include <deque>
-#include <unordered_map>
 #include <map>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
-#include <tbb/concurrent_priority_queue.h>
-#include <tbb/concurrent_vector.h>
 
 #include "ConcurrentVector.h"
 #include "DeletedRecord.h"
@@ -27,13 +28,24 @@
 #include "SealedIndexingRecord.h"
 #include "SegmentSealed.h"
 #include "TimestampIndex.h"
+#include "VariableField.h"
 #include "index/ScalarIndex.h"
+#include "sys/mman.h"
 
 namespace milvus::segcore {
 
 class SegmentSealedImpl : public SegmentSealed {
  public:
     explicit SegmentSealedImpl(SchemaPtr schema, int64_t segment_id);
+    ~SegmentSealedImpl() {
+        for (auto& [field_id, data] : fixed_fields_) {
+            auto field_meta = schema_->operator[](field_id);
+            auto data_type = field_meta.get_data_type();
+            if (munmap(data, field_meta.get_sizeof() * get_row_count())) {
+                AssertInfo(true, "failed to unmap field " + std::to_string(field_id.get()) + " err=" + strerror(errno));
+            }
+        }
+    }
     void
     LoadIndex(const LoadIndexInfo& info) override;
     void
@@ -122,6 +134,10 @@ class SegmentSealedImpl : public SegmentSealed {
     static void
     bulk_subscript_impl(const void* src_raw, const int64_t* seg_offsets, int64_t count, void* dst_raw);
 
+    template <typename T>
+    static void
+    bulk_subscript_impl(const VariableField& field, const int64_t* seg_offsets, int64_t count, void* dst_raw);
+
     static void
     bulk_subscript_impl(
         int64_t element_sizeof, const void* src_raw, const int64_t* seg_offsets, int64_t count, void* dst_raw);
@@ -131,11 +147,11 @@ class SegmentSealedImpl : public SegmentSealed {
 
     void
     update_row_count(int64_t row_count) {
-        if (row_count_opt_.has_value()) {
-            AssertInfo(row_count_opt_.value() == row_count, "load data has different row count from other columns");
-        } else {
-            row_count_opt_ = row_count;
-        }
+        // if (row_count_opt_.has_value()) {
+        //     AssertInfo(row_count_opt_.value() == row_count, "load data has different row count from other columns");
+        // } else {
+        row_count_opt_ = row_count;
+        // }
     }
 
     void
@@ -200,6 +216,8 @@ class SegmentSealedImpl : public SegmentSealed {
 
     SchemaPtr schema_;
     int64_t id_;
+    std::unordered_map<FieldId, void*> fixed_fields_;
+    std::unordered_map<FieldId, VariableField> variable_fields_;
 };
 
 inline SegmentSealedPtr

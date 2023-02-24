@@ -11,6 +11,11 @@
 
 #include "SegmentSealedImpl.h"
 
+#include <fcntl.h>
+#include <fmt/core.h>
+
+#include <filesystem>
+
 #include "Utils.h"
 #include "common/Consts.h"
 #include "common/FieldMeta.h"
@@ -195,20 +200,28 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& info) {
 
         // Don't allow raw data and index exist at the same time
         AssertInfo(!get_bit(index_ready_bitset_, field_id), "field data can't be loaded when indexing exists");
-        auto field_data = insert_record_.get_field_data_base(field_id);
-        AssertInfo(field_data->empty(), "already exists");
 
-        // insert data to insertRecord
-        field_data->fill_chunk_data(size, info.field_data, field_meta);
-        AssertInfo(field_data->num_chunk() == 1, "num chunk not equal to 1 for sealed segment");
+        void* field_data = nullptr;
+        size_t size = 0;
+        if (datatype_is_variable(data_type)) {
+            VariableField field(get_segment_id(), field_meta, info);
+            size = field.size();
+            field_data = reinterpret_cast<void*>(field.data());
+            variable_fields_.emplace(field_id, std::move(field));
+        } else {
+            field_data = CreateMap(get_segment_id(), field_meta, info);
+            fixed_fields_[field_id] = field_data;
+            size = field_meta.get_sizeof() * info.row_count;
+        }
 
         // set pks to offset
         if (schema_->get_primary_field_id() == field_id) {
             AssertInfo(field_id.get() != -1, "Primary key is -1");
             AssertInfo(insert_record_.empty_pks(), "already exists");
-            std::vector<PkType> pks(size);
+            std::vector<PkType> pks(info.row_count);
             ParsePksFromFieldData(pks, *info.field_data);
-            for (int i = 0; i < size; ++i) {
+
+            for (int i = 0; i < info.row_count; ++i) {
                 insert_record_.insert_pk(pks[i], i);
             }
             insert_record_.seal_pks();
@@ -216,6 +229,7 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& info) {
 
         set_bit(field_data_ready_bitset_, field_id, true);
     }
+    std::unique_lock lck(mutex_);
     update_row_count(info.row_count);
 }
 
@@ -253,9 +267,7 @@ SegmentSealedImpl::num_chunk_index(FieldId field_id) const {
 
 int64_t
 SegmentSealedImpl::num_chunk_data(FieldId field_id) const {
-    auto field_data = insert_record_.get_field_data_base(field_id);
-    AssertInfo(field_data != nullptr, "null field data ptr");
-    return field_data->num_chunk();
+    return get_bit(field_data_ready_bitset_, field_id) ? 1 : 0;
 }
 
 int64_t
@@ -275,6 +287,14 @@ SegmentSealedImpl::chunk_data_impl(FieldId field_id, int64_t chunk_id) const {
                "Can't get bitset element at " + std::to_string(field_id.get()));
     auto& field_meta = schema_->operator[](field_id);
     auto element_sizeof = field_meta.get_sizeof();
+    if (auto it = fixed_fields_.find(field_id); it != fixed_fields_.end()) {
+        auto field_data = it->second;
+        return SpanBase(field_data, get_row_count(), element_sizeof);
+    }
+    if (auto it = variable_fields_.find(field_id); it != variable_fields_.end()) {
+        auto& field = it->second;
+        return SpanBase(field.views().data(), field.views().size(), sizeof(std::string_view));
+    }
     auto field_data = insert_record_.get_field_data_base(field_id);
     AssertInfo(field_data->num_chunk() == 1, "num chunk not equal to 1 for sealed segment");
     return field_data->get_span_base(0);
@@ -349,8 +369,8 @@ SegmentSealedImpl::vector_search(SearchInfo& search_info,
                    "Field Data is not loaded: " + std::to_string(field_id.get()));
         AssertInfo(row_count_opt_.has_value(), "Can't get row count value");
         auto row_count = row_count_opt_.value();
-        query::SearchOnSealed(*schema_, insert_record_, search_info, query_data, query_count, row_count, bitset,
-                              output);
+        auto vec_data = fixed_fields_.at(field_id);
+        query::SearchOnSealed(*schema_, vec_data, search_info, query_data, query_count, row_count, bitset, output);
     }
 }
 
@@ -458,6 +478,22 @@ SegmentSealedImpl::bulk_subscript_impl(const void* src_raw, const int64_t* seg_o
     }
 }
 
+template <typename T>
+void
+SegmentSealedImpl::bulk_subscript_impl(const VariableField& field,
+                                       const int64_t* seg_offsets,
+                                       int64_t count,
+                                       void* dst_raw) {
+    auto dst = reinterpret_cast<T*>(dst_raw);
+    for (int64_t i = 0; i < count; ++i) {
+        auto offset = seg_offsets[i];
+        if (offset != INVALID_SEG_OFFSET) {
+            auto entry = field[offset];
+            dst[i] = std::move(T(entry.data(), entry.row_count()));
+        }
+    }
+}
+
 // for vector
 void
 SegmentSealedImpl::bulk_subscript_impl(
@@ -506,10 +542,22 @@ SegmentSealedImpl::bulk_subscript(FieldId field_id, const int64_t* seg_offsets, 
     }
 
     Assert(get_bit(field_data_ready_bitset_, field_id));
-    auto field_data = insert_record_.get_field_data_base(field_id);
-    AssertInfo(field_data->num_chunk() == 1, std::string("num chunk not equal to 1 for sealed segment, num_chunk: ") +
-                                                 std::to_string(field_data->num_chunk()));
-    auto src_vec = field_data->get_chunk_data(0);
+
+    if (datatype_is_variable(field_meta.get_data_type())) {
+        switch (field_meta.get_data_type()) {
+            case DataType::VARCHAR:
+            case DataType::STRING: {
+                FixedVector<std::string> output(count);
+                bulk_subscript_impl<std::string>(variable_fields_.at(field_id), seg_offsets, count, output.data());
+                return CreateScalarDataArrayFrom(output.data(), count, field_meta);
+            }
+
+            default:
+                PanicInfo(fmt::format("unsupported data type: {}", datatype_name(field_meta.get_data_type())));
+        }
+    }
+
+    auto src_vec = fixed_fields_.at(field_id);
     switch (field_meta.get_data_type()) {
         case DataType::BOOL: {
             FixedVector<bool> output(count);
@@ -544,11 +592,6 @@ SegmentSealedImpl::bulk_subscript(FieldId field_id, const int64_t* seg_offsets, 
         case DataType::DOUBLE: {
             FixedVector<double> output(count);
             bulk_subscript_impl<double>(src_vec, seg_offsets, count, output.data());
-            return CreateScalarDataArrayFrom(output.data(), count, field_meta);
-        }
-        case DataType::VARCHAR: {
-            FixedVector<std::string> output(count);
-            bulk_subscript_impl<std::string>(src_vec, seg_offsets, count, output.data());
             return CreateScalarDataArrayFrom(output.data(), count, field_meta);
         }
 

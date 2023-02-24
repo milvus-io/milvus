@@ -16,13 +16,14 @@
 
 #pragma once
 
+#include <boost/dynamic_bitset.hpp>
 #include <map>
 #include <memory>
 #include <string>
-#include <boost/dynamic_bitset.hpp>
-#include "index/Index.h"
+
 #include "common/Types.h"
 #include "exceptions/EasyAssert.h"
+#include "index/Index.h"
 
 namespace milvus::index {
 

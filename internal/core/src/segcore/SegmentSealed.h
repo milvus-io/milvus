@@ -33,6 +33,11 @@ class SegmentSealed : public SegmentInternalInterface {
     DropIndex(const FieldId field_id) = 0;
     virtual void
     DropFieldData(const FieldId field_id) = 0;
+
+    virtual SegmentType
+    type() const override {
+        return SegmentType::Sealed;
+    }
 };
 
 using SegmentSealedPtr = std::unique_ptr<SegmentSealed>;

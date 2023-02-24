@@ -9,15 +9,16 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include "PlanProto.h"
+
 #include <google/protobuf/text_format.h>
 
 #include <string>
 
 #include "ExprImpl.h"
-#include "PlanProto.h"
+#include "common/VectorTrait.h"
 #include "generated/ExtractInfoExprVisitor.h"
 #include "generated/ExtractInfoPlanNodeVisitor.h"
-#include "common/VectorTrait.h"
 
 namespace milvus::query {
 namespace planpb = milvus::proto::plan;

@@ -10,11 +10,13 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "SegmentInterface.h"
+
 #include <cstdint>
+
+#include "Utils.h"
 #include "common/SystemProperty.h"
 #include "common/Types.h"
 #include "query/generated/ExecPlanNodeVisitor.h"
-#include "Utils.h"
 
 namespace milvus::segcore {
 
@@ -72,7 +74,6 @@ SegmentInternalInterface::Retrieve(const query::RetrievePlan* plan, Timestamp ti
     query::ExecPlanNodeVisitor visitor(*this, timestamp);
     auto retrieve_results = visitor.get_retrieve_result(*plan->plan_node_);
     retrieve_results.segment_ = (void*)this;
-
     results->mutable_offset()->Add(retrieve_results.result_offsets_.begin(), retrieve_results.result_offsets_.end());
 
     auto fields_data = results->mutable_fields_data();

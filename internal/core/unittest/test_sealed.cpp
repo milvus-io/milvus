@@ -352,6 +352,9 @@ TEST(Sealed, LoadFieldData) {
     auto double_id = schema->AddDebugField("double", DataType::DOUBLE);
     auto nothing_id = schema->AddDebugField("nothing", DataType::INT32);
     auto str_id = schema->AddDebugField("str", DataType::VARCHAR);
+    schema->AddDebugField("int8", DataType::INT8);
+    schema->AddDebugField("int16", DataType::INT16);
+    schema->AddDebugField("float", DataType::FLOAT);
     schema->set_primary_field_id(counter_id);
 
     auto dataset = DataGen(schema, N);
@@ -398,7 +401,6 @@ TEST(Sealed, LoadFieldData) {
     ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get(), time));
 
     SealedLoadFieldData(dataset, *segment);
-    segment->DropFieldData(nothing_id);
     segment->Search(plan.get(), ph_group.get(), time);
 
     segment->DropFieldData(fakevec_id);
@@ -415,7 +417,7 @@ TEST(Sealed, LoadFieldData) {
     ASSERT_EQ(segment->num_chunk_index(str_id), 0);
     auto chunk_span1 = segment->chunk_data<int64_t>(counter_id, 0);
     auto chunk_span2 = segment->chunk_data<double>(double_id, 0);
-    auto chunk_span3 = segment->chunk_data<std::string>(str_id, 0);
+    auto chunk_span3 = segment->chunk_data<std::string_view>(str_id, 0);
     auto ref1 = dataset.get_col<int64_t>(counter_id);
     auto ref2 = dataset.get_col<double>(double_id);
     auto ref3 = dataset.get_col(str_id)->scalars().string_data().data();
@@ -431,36 +433,100 @@ TEST(Sealed, LoadFieldData) {
 
     segment->DropIndex(fakevec_id);
     ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get(), time));
-    //    segment->LoadIndex(vec_info);
-    //    auto sr2 = segment->Search(plan.get(), ph_group.get(), time);
-    //    auto json2 = SearchResultToJson(*sr);
-    //    ASSERT_EQ(json.dump(-2), json2.dump(-2));
-    //    segment->DropFieldData(double_id);
-    //    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get(), time));
-    // #ifdef __linux__
-    //    auto std_json = Json::parse(R"(
-    //[
-    //	[
-    //		["982->0.000000", "25315->4.742000", "57893->4.758000", "48201->6.075000", "53853->6.223000"],
-    //		["41772->10.111000", "74859->11.790000", "79777->11.842000", "3785->11.983000", "35888->12.193000"],
-    //		["59251->2.543000", "65551->4.454000", "72204->5.332000", "96905->5.479000", "87833->5.765000"],
-    //		["59219->5.458000", "21995->6.078000", "97922->6.764000", "25710->7.158000", "14048->7.294000"],
-    //		["66353->5.696000", "30664->5.881000", "41087->5.917000", "10393->6.633000", "90215->7.202000"]
-    //	]
-    //])");
-    // #else  // for mac
-    //    auto std_json = Json::parse(R"(
-    //[
-    //	[
-    //        ["982->0.000000", "31864->4.270000", "18916->4.651000", "71547->5.125000", "86706->5.991000"],
-    //        ["96984->4.192000", "65514->6.011000", "89328->6.138000", "80284->6.526000", "68218->6.563000"],
-    //        ["30119->2.464000", "82365->4.725000", "74834->5.009000", "79995->5.725000", "33359->5.816000"],
-    //        ["99625->6.129000", "86582->6.900000", "85934->7.792000", "60450->8.087000", "19257->8.530000"],
-    //        ["37759->3.581000", "31292->5.780000", "98124->6.216000", "63535->6.439000", "11707->6.553000"]
-    //    ]
-    //])");
-    // #endif
-    //    ASSERT_EQ(std_json.dump(-2), json.dump(-2));
+}
+
+TEST(Sealed, LoadFieldDataMmap) {
+    auto dim = 16;
+    auto topK = 5;
+    auto N = ROW_COUNT;
+    auto metric_type = knowhere::metric::L2;
+    auto schema = std::make_shared<Schema>();
+    auto fakevec_id = schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, dim, metric_type);
+    auto counter_id = schema->AddDebugField("counter", DataType::INT64);
+    auto double_id = schema->AddDebugField("double", DataType::DOUBLE);
+    auto nothing_id = schema->AddDebugField("nothing", DataType::INT32);
+    auto str_id = schema->AddDebugField("str", DataType::VARCHAR);
+    schema->AddDebugField("int8", DataType::INT8);
+    schema->AddDebugField("int16", DataType::INT16);
+    schema->AddDebugField("float", DataType::FLOAT);
+    schema->set_primary_field_id(counter_id);
+
+    auto dataset = DataGen(schema, N);
+
+    auto fakevec = dataset.get_col<float>(fakevec_id);
+
+    auto indexing = GenVecIndexing(N, dim, fakevec.data());
+
+    auto segment = CreateSealedSegment(schema);
+    std::string dsl = R"({
+        "bool": {
+            "must": [
+            {
+                "range": {
+                    "double": {
+                        "GE": -1,
+                        "LT": 1
+                    }
+                }
+            },
+            {
+                "vector": {
+                    "fakevec": {
+                        "metric_type": "L2",
+                        "params": {
+                            "nprobe": 10
+                        },
+                        "query": "$0",
+                        "topk": 5,
+                        "round_decimal": 3
+                    }
+                }
+            } 
+            ]
+        }
+    })";
+
+    Timestamp time = 1000000;
+    auto plan = CreatePlan(*schema, dsl);
+    auto num_queries = 5;
+    auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
+    auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+
+    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get(), time));
+
+    SealedLoadFieldData(dataset, *segment, {}, true);
+    segment->Search(plan.get(), ph_group.get(), time);
+
+    segment->DropFieldData(fakevec_id);
+    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get(), time));
+
+    LoadIndexInfo vec_info;
+    vec_info.field_id = fakevec_id.get();
+    vec_info.index = std::move(indexing);
+    vec_info.index_params["metric_type"] = knowhere::metric::L2;
+    segment->LoadIndex(vec_info);
+
+    ASSERT_EQ(segment->num_chunk(), 1);
+    ASSERT_EQ(segment->num_chunk_index(double_id), 0);
+    ASSERT_EQ(segment->num_chunk_index(str_id), 0);
+    auto chunk_span1 = segment->chunk_data<int64_t>(counter_id, 0);
+    auto chunk_span2 = segment->chunk_data<double>(double_id, 0);
+    auto chunk_span3 = segment->chunk_data<std::string_view>(str_id, 0);
+    auto ref1 = dataset.get_col<int64_t>(counter_id);
+    auto ref2 = dataset.get_col<double>(double_id);
+    auto ref3 = dataset.get_col(str_id)->scalars().string_data().data();
+    for (int i = 0; i < N; ++i) {
+        ASSERT_EQ(chunk_span1[i], ref1[i]);
+        ASSERT_EQ(chunk_span2[i], ref2[i]);
+        ASSERT_EQ(chunk_span3[i], ref3[i]);
+    }
+
+    auto sr = segment->Search(plan.get(), ph_group.get(), time);
+    auto json = SearchResultToJson(*sr);
+    std::cout << json.dump(1);
+
+    segment->DropIndex(fakevec_id);
+    ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get(), time));
 }
 
 TEST(Sealed, LoadScalarIndex) {

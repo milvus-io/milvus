@@ -38,6 +38,11 @@ class SegmentGrowing : public SegmentInternalInterface {
            const Timestamp* timestamps,
            const InsertData* insert_data) = 0;
 
+    virtual SegmentType
+    type() const override {
+        return SegmentType::Growing;
+    }
+
     // virtual int64_t
     // PreDelete(int64_t size) = 0;
 

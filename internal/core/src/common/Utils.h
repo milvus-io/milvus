@@ -11,11 +11,18 @@
 
 #pragma once
 
+#include <fcntl.h>
+#include <fmt/core.h>
 #include <google/protobuf/text_format.h>
+#include <sys/mman.h>
 
+#include <filesystem>
 #include <string>
+#include <string_view>
 
 #include "common/Consts.h"
+#include "common/FieldMeta.h"
+#include "common/LoadInfo.h"
 #include "config/ConfigChunkManager.h"
 #include "exceptions/EasyAssert.h"
 #include "knowhere/dataset.h"
@@ -58,8 +65,8 @@ GetDatasetLims(const DatasetPtr& dataset) {
 }
 
 inline bool
-PrefixMatch(const std::string& str, const std::string& prefix) {
-    auto ret = strncmp(str.c_str(), prefix.c_str(), prefix.length());
+PrefixMatch(const std::string_view str, const std::string_view prefix) {
+    auto ret = strncmp(str.data(), prefix.data(), prefix.length());
     if (ret != 0) {
         return false;
     }
@@ -79,13 +86,13 @@ GenResultDataset(const int64_t nq, const int64_t topk, const int64_t* ids, const
 }
 
 inline bool
-PostfixMatch(const std::string& str, const std::string& postfix) {
+PostfixMatch(const std::string_view str, const std::string& postfix) {
     if (postfix.length() > str.length()) {
         return false;
     }
 
     int offset = str.length() - postfix.length();
-    auto ret = strncmp(str.c_str() + offset, postfix.c_str(), postfix.length());
+    auto ret = strncmp(str.data() + offset, postfix.c_str(), postfix.length());
     if (ret != 0) {
         return false;
     }
@@ -164,6 +171,212 @@ MatchKnowhereError(knowhere::Status status) {
         default:
             return "not match the error type in knowhere";
     }
+}
+
+inline size_t
+GetDataSize(const FieldMeta& field, size_t row_count, const DataArray* data) {
+    auto data_type = field.get_data_type();
+    if (datatype_is_variable(data_type)) {
+        switch (data_type) {
+            case DataType::VARCHAR:
+            case DataType::STRING: {
+                auto begin = data->scalars().string_data().data().begin();
+                auto end = data->scalars().string_data().data().end();
+
+                ssize_t size{0};
+                while (begin != end) {
+                    size += begin->size();
+                    begin++;
+                }
+                return size;
+            }
+
+            default:
+                PanicInfo(fmt::format("not supported data type {}", datatype_name(data_type)));
+        }
+    }
+
+    return field.get_sizeof() * row_count;
+}
+
+inline void*
+FillField(DataType data_type, size_t size, const LoadFieldDataInfo& info, void* dst) {
+    auto data = info.field_data;
+    switch (data_type) {
+        case DataType::BOOL: {
+            return memcpy(dst, data->scalars().bool_data().data().data(), size);
+        }
+        case DataType::INT8: {
+            auto src_data = data->scalars().int_data().data();
+            std::vector<int8_t> data_raw(src_data.size());
+            std::copy_n(src_data.data(), src_data.size(), data_raw.data());
+            return memcpy(dst, data_raw.data(), size);
+        }
+        case DataType::INT16: {
+            auto src_data = data->scalars().int_data().data();
+            std::vector<int16_t> data_raw(src_data.size());
+            std::copy_n(src_data.data(), src_data.size(), data_raw.data());
+            return memcpy(dst, data_raw.data(), size);
+        }
+        case DataType::INT32: {
+            return memcpy(dst, data->scalars().int_data().data().data(), size);
+        }
+        case DataType::INT64: {
+            return memcpy(dst, data->scalars().long_data().data().data(), size);
+        }
+        case DataType::FLOAT: {
+            return memcpy(dst, data->scalars().float_data().data().data(), size);
+        }
+        case DataType::DOUBLE: {
+            return memcpy(dst, data->scalars().double_data().data().data(), size);
+        }
+        case DataType::VARCHAR: {
+            char* dest = reinterpret_cast<char*>(dst);
+            auto begin = data->scalars().string_data().data().begin();
+            auto end = data->scalars().string_data().data().end();
+
+            while (begin != end) {
+                memcpy(dest, begin->data(), begin->size());
+                dest += begin->size();
+                begin++;
+            }
+            return dst;
+        }
+        case DataType::VECTOR_FLOAT:
+            return memcpy(dst, data->vectors().float_vector().data().data(), size);
+
+        case DataType::VECTOR_BINARY:
+            return memcpy(dst, data->vectors().binary_vector().data(), size);
+
+        default: {
+            PanicInfo("unsupported");
+        }
+    }
+}
+
+inline ssize_t
+WriteFieldData(int fd, DataType data_type, const DataArray* data, size_t size) {
+    switch (data_type) {
+        case DataType::BOOL: {
+            return write(fd, data->scalars().bool_data().data().data(), size);
+        }
+        case DataType::INT8: {
+            auto src_data = data->scalars().int_data().data();
+            std::vector<int8_t> data_raw(src_data.size());
+            std::copy_n(src_data.data(), src_data.size(), data_raw.data());
+            return write(fd, data_raw.data(), size);
+        }
+        case DataType::INT16: {
+            auto src_data = data->scalars().int_data().data();
+            std::vector<int16_t> data_raw(src_data.size());
+            std::copy_n(src_data.data(), src_data.size(), data_raw.data());
+            return write(fd, data_raw.data(), size);
+        }
+        case DataType::INT32: {
+            return write(fd, data->scalars().int_data().data().data(), size);
+        }
+        case DataType::INT64: {
+            return write(fd, data->scalars().long_data().data().data(), size);
+        }
+        case DataType::FLOAT: {
+            return write(fd, data->scalars().float_data().data().data(), size);
+        }
+        case DataType::DOUBLE: {
+            return write(fd, data->scalars().double_data().data().data(), size);
+        }
+        case DataType::VARCHAR: {
+            auto begin = data->scalars().string_data().data().begin();
+            auto end = data->scalars().string_data().data().end();
+
+            ssize_t total_written{0};
+            while (begin != end) {
+                ssize_t written = write(fd, begin->data(), begin->size());
+                if (written < begin->size()) {
+                    break;
+                }
+                total_written += written;
+                begin++;
+            }
+            return total_written;
+        }
+        case DataType::VECTOR_FLOAT:
+            return write(fd, data->vectors().float_vector().data().data(), size);
+
+        case DataType::VECTOR_BINARY:
+            return write(fd, data->vectors().binary_vector().data(), size);
+
+        default: {
+            PanicInfo("unsupported");
+        }
+    }
+}
+
+// CreateMap creates a memory mapping,
+// if mmap enabled, this writes field data to disk and create a map to the file,
+// otherwise this just alloc memory
+inline void*
+CreateMap(int64_t segment_id, const FieldMeta& field_meta, const LoadFieldDataInfo& info) {
+    static int mmap_flags = MAP_PRIVATE;
+#ifdef MAP_POPULATE
+    // macOS doesn't support MAP_POPULATE
+    mmap_flags |= MAP_POPULATE;
+#endif
+    // Allocate memory
+    if (info.mmap_dir_path == nullptr) {
+        auto data_type = field_meta.get_data_type();
+        auto data_size = GetDataSize(field_meta, info.row_count, info.field_data);
+        if (data_size == 0)
+            return nullptr;
+
+        // Use anon mapping so we are able to free these memory with munmap only
+        void* map = mmap(NULL, data_size, PROT_READ | PROT_WRITE, mmap_flags | MAP_ANON, -1, 0);
+        AssertInfo(map != MAP_FAILED, fmt::format("failed to create anon map, err: {}", strerror(errno)));
+        FillField(data_type, data_size, info, map);
+        return map;
+    }
+
+    auto filepath =
+        std::filesystem::path(info.mmap_dir_path) / std::to_string(segment_id) / std::to_string(info.field_id);
+    auto dir = filepath.parent_path();
+    std::filesystem::create_directories(dir);
+
+    int fd = open(filepath.c_str(), O_CREAT | O_TRUNC | O_RDWR, S_IRUSR | S_IWUSR);
+    AssertInfo(fd != -1, fmt::format("failed to create mmap file {}", filepath.c_str()));
+
+    auto data_type = field_meta.get_data_type();
+    size_t size = field_meta.get_sizeof() * info.row_count;
+    auto written = WriteFieldData(fd, data_type, info.field_data, size);
+    AssertInfo(written == size || written != -1 && datatype_is_variable(field_meta.get_data_type()),
+               fmt::format("failed to write data file {}, written {} but total {}, err: {}", filepath.c_str(), written,
+                           size, strerror(errno)));
+    int ok = fsync(fd);
+    AssertInfo(ok == 0, fmt::format("failed to fsync mmap data file {}, err: {}", filepath.c_str(), strerror(errno)));
+
+    // Empty field
+    if (written == 0) {
+        return nullptr;
+    }
+
+    auto map = mmap(NULL, written, PROT_READ, mmap_flags, fd, 0);
+    AssertInfo(map != MAP_FAILED,
+               fmt::format("failed to create map for data file {}, err: {}", filepath.c_str(), strerror(errno)));
+
+#ifndef MAP_POPULATE
+    // Manually access the mapping to populate it
+    const size_t PAGE_SIZE = 4 << 10;  // 4KiB
+    char* begin = (char*)map;
+    char* end = begin + written;
+    for (char* page = begin; page < end; page += PAGE_SIZE) {
+        char value = page[0];
+    }
+#endif
+    // unlink this data file so
+    // then it will be auto removed after we don't need it again
+    ok = unlink(filepath.c_str());
+    AssertInfo(ok == 0, fmt::format("failed to unlink mmap data file {}, err: {}", filepath.c_str(), strerror(errno)));
+    ok = close(fd);
+    AssertInfo(ok == 0, fmt::format("failed to close data file {}, err: {}", filepath.c_str(), strerror(errno)));
+    return map;
 }
 
 }  // namespace milvus
