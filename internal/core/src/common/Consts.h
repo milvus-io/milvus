@@ -19,6 +19,8 @@
 #include <stdint.h>
 #include "Types.h"
 
+#include "knowhere/comp/index_param.h"
+
 const int64_t INVALID_FIELD_ID = -1;
 const int64_t INVALID_SEG_OFFSET = -1;
 const milvus::PkType INVALID_PK;  // of std::monostate if not set.
@@ -44,5 +46,5 @@ const int64_t DEFAULT_INDEX_FILE_SLICE_SIZE = 4;  // megabytes
 
 const int DEFAULT_CPU_NUM = 1;
 
-constexpr const char* RADIUS = "radius";
-constexpr const char* RANGE_FILTER = "range_filter";
+constexpr const char* RADIUS = knowhere::meta::RADIUS;
+constexpr const char* RANGE_FILTER = knowhere::meta::RANGE_FILTER;
