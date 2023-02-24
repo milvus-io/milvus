@@ -6,25 +6,23 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/milvus-io/milvus/internal/common"
-	"github.com/milvus-io/milvus/internal/parser/planparserv2"
-
 	"github.com/golang/protobuf/proto"
-	"go.uber.org/zap"
-
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/metrics"
-	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/funcutil"
-	"github.com/milvus-io/milvus/internal/util/timerecord"
-	"github.com/milvus-io/milvus/internal/util/tsoutil"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
-
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
+	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/retry"
+	"github.com/milvus-io/milvus/internal/util/timerecord"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"go.uber.org/zap"
 )
 
 const (
@@ -308,8 +306,8 @@ func (t *queryTask) Execute(ctx context.Context) error {
 	defer tr.CtxElapse(ctx, "done")
 	log := log.Ctx(ctx)
 
-	executeQuery := func(withCache bool) error {
-		shards, err := globalMetaCache.GetShards(ctx, withCache, t.collectionName)
+	executeQuery := func() error {
+		shards, err := globalMetaCache.GetShards(ctx, true, t.collectionName)
 		if err != nil {
 			return err
 		}
@@ -322,14 +320,20 @@ func (t *queryTask) Execute(ctx context.Context) error {
 		return nil
 	}
 
-	err := executeQuery(WithCache)
-	if err != nil {
-		log.Warn("invalid shard leaders cache, updating shardleader caches and retry query",
-			zap.Error(err))
-		// invalidate cache first, since ctx may be canceled or timeout here
-		globalMetaCache.ClearShards(t.collectionName)
-		err = executeQuery(WithoutCache)
-	}
+	retryCtx, cancel := context.WithCancel(ctx)
+	err := retry.Do(retryCtx, func() error {
+		queryError := executeQuery()
+		if !common.IsTriableError(queryError) {
+			cancel()
+		}
+		if queryError != nil {
+			log.Warn("invalid shard leaders cache, updating shardleader caches and retry query",
+				zap.Error(queryError))
+			globalMetaCache.ClearShards(t.collectionName)
+		}
+		return queryError
+	}, retry.Attempts(Params.CommonCfg.GrpcRetryTimes))
+	cancel()
 	if err != nil {
 		return fmt.Errorf("fail to query on all shard leaders, err=%s", err.Error())
 	}
@@ -426,14 +430,16 @@ func (t *queryTask) queryShard(ctx context.Context, nodeID int64, qn types.Query
 			zap.Int64("nodeID", nodeID), zap.Strings("channels", channelIDs), zap.Error(err))
 		return err
 	}
-	if result.GetStatus().GetErrorCode() == commonpb.ErrorCode_NotShardLeader {
+	errCode := result.GetStatus().GetErrorCode()
+	if errCode == commonpb.ErrorCode_NotShardLeader {
 		log.Ctx(ctx).Warn("QueryNode is not shardLeader", zap.Int64("nodeID", nodeID), zap.Strings("channels", channelIDs))
-		return errInvalidShardLeaders
+		return common.NewCodeError(errCode, errInvalidShardLeaders)
 	}
-	if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+	if errCode != commonpb.ErrorCode_Success {
 		log.Ctx(ctx).Warn("QueryNode query result error", zap.Int64("msgID", t.ID()), zap.Int64("nodeID", nodeID),
 			zap.String("reason", result.GetStatus().GetReason()))
-		return fmt.Errorf("fail to Query, QueryNode ID = %d, reason=%s", nodeID, result.GetStatus().GetReason())
+		return common.NewCodeError(errCode,
+			fmt.Errorf("fail to Query, QueryNode ID = %d, reason=%s", nodeID, result.GetStatus().GetReason()))
 	}
 
 	log.Ctx(ctx).Debug("get query result", zap.Int64("msgID", t.ID()), zap.Int64("nodeID", nodeID), zap.Strings("channelIDs", channelIDs))

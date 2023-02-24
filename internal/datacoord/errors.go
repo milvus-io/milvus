@@ -19,6 +19,10 @@ package datacoord
 import (
 	"errors"
 	"fmt"
+
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus/internal/util/errorutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 // errNilKvClient stands for a nil kv client is detected when initialized
@@ -42,4 +46,10 @@ func errDataCoordIsUnhealthy(coordID UniqueID) error {
 
 func msgSegmentNotFound(segID UniqueID) string {
 	return fmt.Sprintf("failed to get segment %d", segID)
+}
+
+func setNotServingStatus(status *commonpb.Status, stateCode commonpb.StateCode) {
+	reason := fmt.Sprintf("sate code: %s", stateCode.String())
+	status.Reason = errorutil.NotServingReason(typeutil.DataCoordRole, Params.DataCoordCfg.GetNodeID(), reason)
+	status.ErrorCode = commonpb.ErrorCode_NotReadyServe
 }

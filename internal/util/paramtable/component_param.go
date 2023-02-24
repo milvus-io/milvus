@@ -46,6 +46,8 @@ const (
 	DefaultSearchCacheBudgetGBRatio = 0.10
 	DefaultLoadNumThreadRatio       = 8.0
 	DefaultBeamWidthRatio           = 4.0
+
+	DefaultGrpcRetryTimes = 5
 )
 
 // ComponentParam is used to quickly and easily access all components' configurations.
@@ -170,6 +172,8 @@ type commonConfig struct {
 
 	SessionTTL        int64
 	SessionRetryTimes int64
+
+	GrpcRetryTimes uint
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -223,6 +227,7 @@ func (p *commonConfig) init(base *BaseTable) {
 
 	p.initSessionTTL()
 	p.initSessionRetryTimes()
+	p.initGrpcRetryTimes()
 }
 
 func (p *commonConfig) initClusterPrefix() {
@@ -485,6 +490,10 @@ func (p *commonConfig) initSessionTTL() {
 
 func (p *commonConfig) initSessionRetryTimes() {
 	p.SessionRetryTimes = p.Base.ParseInt64WithDefault("common.session.retryTimes", 30)
+}
+
+func (p *commonConfig) initGrpcRetryTimes() {
+	p.GrpcRetryTimes = uint(p.Base.ParseIntWithDefault("grpc.server.retryTimes", DefaultGrpcRetryTimes))
 }
 
 // /////////////////////////////////////////////////////////////////////////////

@@ -25,26 +25,25 @@ import (
 	"github.com/milvus-io/milvus/internal/util/mock"
 	"google.golang.org/grpc"
 
-	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/stretchr/testify/assert"
 )
 
 func Test_NewClient(t *testing.T) {
-	proxy.Params.InitOnce()
+	Params.InitOnce()
 
 	ctx := context.Background()
 
 	etcdCli, err := etcd.GetEtcdClient(
-		proxy.Params.EtcdCfg.UseEmbedEtcd,
-		proxy.Params.EtcdCfg.EtcdUseSSL,
-		proxy.Params.EtcdCfg.Endpoints,
-		proxy.Params.EtcdCfg.EtcdTLSCert,
-		proxy.Params.EtcdCfg.EtcdTLSKey,
-		proxy.Params.EtcdCfg.EtcdTLSCACert,
-		proxy.Params.EtcdCfg.EtcdTLSMinVersion)
+		Params.EtcdCfg.UseEmbedEtcd,
+		Params.EtcdCfg.EtcdUseSSL,
+		Params.EtcdCfg.Endpoints,
+		Params.EtcdCfg.EtcdTLSCert,
+		Params.EtcdCfg.EtcdTLSKey,
+		Params.EtcdCfg.EtcdTLSCACert,
+		Params.EtcdCfg.EtcdTLSMinVersion)
 	assert.NoError(t, err)
-	client, err := NewClient(ctx, proxy.Params.EtcdCfg.MetaRootPath, etcdCli)
+	client, err := NewClient(ctx, Params.EtcdCfg.MetaRootPath, etcdCli)
 	assert.Nil(t, err)
 	assert.NotNil(t, client)
 

@@ -134,6 +134,11 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, Params.SessionRetryTimes, int64(DefaultSessionRetryTimes))
 		t.Logf("default session retry times = %d", Params.SessionRetryTimes)
 
+		assert.Equal(t, Params.GrpcRetryTimes, uint(DefaultGrpcRetryTimes))
+		Params.Base.Save("grpc.server.retryTimes", "6")
+		Params.initGrpcRetryTimes()
+		assert.Equal(t, Params.GrpcRetryTimes, uint(6))
+
 		Params.Base.Save("common.security.superUsers", "super1,super2,super3")
 		Params.initSuperUsers()
 		assert.Equal(t, []string{"super1", "super2", "super3"}, Params.SuperUsers)

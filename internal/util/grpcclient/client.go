@@ -23,19 +23,19 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/backoff"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/keepalive"
-
 	grpcopentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/crypto"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/generic"
+	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/trace"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/backoff"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/keepalive"
 )
 
 // GrpcClient abstracts client of grpc
@@ -249,7 +249,15 @@ func (c *ClientBase[T]) callOnce(ctx context.Context, caller func(client T) (any
 		return generic.Zero[T](), err
 	}
 
-	ret, err2 := caller(client)
+	var (
+		ret  any
+		err2 error
+	)
+
+	_, _ = retry.DoGrpc(ctx, uint(c.MaxAttempts*2), func() (any, error) {
+		ret, err2 = caller(client)
+		return ret, err2
+	})
 	if err2 == nil {
 		return ret, nil
 	}

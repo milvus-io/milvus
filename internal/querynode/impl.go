@@ -25,6 +25,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/util/commonpbutil"
+	"github.com/milvus-io/milvus/internal/util/errorutil"
+
 	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -43,15 +46,17 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
-// isHealthy checks if QueryNode is healthy
-func (node *QueryNode) isHealthy() bool {
-	code := node.stateCode.Load().(commonpb.StateCode)
-	return code == commonpb.StateCode_Healthy
+func (node *QueryNode) GetStateCode() commonpb.StateCode {
+	code := node.stateCode.Load()
+	if code == nil {
+		return commonpb.StateCode_Abnormal
+	}
+	return code.(commonpb.StateCode)
 }
 
-func (node *QueryNode) isHealthyOrStopping() bool {
-	code := node.stateCode.Load().(commonpb.StateCode)
-	return code == commonpb.StateCode_Healthy || code == commonpb.StateCode_Stopping
+func (node *QueryNode) NotReadyServeResp(status *commonpb.Status) {
+	status.ErrorCode = commonpb.ErrorCode_NotReadyServe
+	status.Reason = errorutil.NotServingReason(typeutil.QueryNodeRole, Params.QueryNodeCfg.GetNodeID(), node.GetStateCode().String())
 }
 
 // GetComponentStates returns information about whether the node is healthy
@@ -169,8 +174,8 @@ func (node *QueryNode) getStatisticsWithDmlChannel(ctx context.Context, req *que
 		},
 	}
 
-	if !node.isHealthyOrStopping() {
-		failRet.Status.Reason = msgQueryNodeIsUnhealthy(Params.QueryNodeCfg.GetNodeID())
+	if !commonpbutil.IsHealthyOrStopping(node.stateCode) {
+		node.NotReadyServeResp(failRet.Status)
 		return failRet, nil
 	}
 	node.wg.Add(1)
@@ -297,12 +302,9 @@ func (node *QueryNode) getStatisticsWithDmlChannel(ctx context.Context, req *que
 // WatchDmChannels create consumers on dmChannels to receive Incremental data，which is the important part of real-time query
 func (node *QueryNode) WatchDmChannels(ctx context.Context, in *querypb.WatchDmChannelsRequest) (*commonpb.Status, error) {
 	// check node healthy
-	if !node.isHealthy() {
-		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeCfg.GetNodeID())
-		status := &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}
+	if !commonpbutil.IsHealthy(node.stateCode) {
+		status := &commonpb.Status{}
+		node.NotReadyServeResp(status)
 		return status, nil
 	}
 	node.wg.Add(1)
@@ -387,12 +389,9 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, in *querypb.WatchDmC
 
 func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmChannelRequest) (*commonpb.Status, error) {
 	// check node healthy
-	if !node.isHealthyOrStopping() {
-		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeCfg.GetNodeID())
-		status := &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}
+	if !commonpbutil.IsHealthyOrStopping(node.stateCode) {
+		status := &commonpb.Status{}
+		node.NotReadyServeResp(status)
 		return status, nil
 	}
 	node.wg.Add(1)
@@ -446,12 +445,9 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 // LoadSegments load historical data into query node, historical data can be vector data or index
 func (node *QueryNode) LoadSegments(ctx context.Context, in *querypb.LoadSegmentsRequest) (*commonpb.Status, error) {
 	// check node healthy
-	if !node.isHealthy() {
-		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeCfg.GetNodeID())
-		status := &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}
+	if !commonpbutil.IsHealthy(node.stateCode) {
+		status := &commonpb.Status{}
+		node.NotReadyServeResp(status)
 		return status, nil
 	}
 	node.wg.Add(1)
@@ -532,12 +528,9 @@ func (node *QueryNode) LoadSegments(ctx context.Context, in *querypb.LoadSegment
 
 // ReleaseCollection clears all data related to this collection on the querynode
 func (node *QueryNode) ReleaseCollection(ctx context.Context, in *querypb.ReleaseCollectionRequest) (*commonpb.Status, error) {
-	if !node.isHealthyOrStopping() {
-		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeCfg.GetNodeID())
-		status := &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}
+	if !commonpbutil.IsHealthyOrStopping(node.stateCode) {
+		status := &commonpb.Status{}
+		node.NotReadyServeResp(status)
 		return status, nil
 	}
 	node.wg.Add(1)
@@ -580,12 +573,9 @@ func (node *QueryNode) ReleaseCollection(ctx context.Context, in *querypb.Releas
 
 // ReleasePartitions clears all data related to this partition on the querynode
 func (node *QueryNode) ReleasePartitions(ctx context.Context, in *querypb.ReleasePartitionsRequest) (*commonpb.Status, error) {
-	if !node.isHealthyOrStopping() {
-		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeCfg.GetNodeID())
-		status := &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}
+	if !commonpbutil.IsHealthyOrStopping(node.stateCode) {
+		status := &commonpb.Status{}
+		node.NotReadyServeResp(status)
 		return status, nil
 	}
 	node.wg.Add(1)
@@ -628,12 +618,9 @@ func (node *QueryNode) ReleasePartitions(ctx context.Context, in *querypb.Releas
 
 // ReleaseSegments remove the specified segments from query node according segmentIDs, partitionIDs, and collectionID
 func (node *QueryNode) ReleaseSegments(ctx context.Context, in *querypb.ReleaseSegmentsRequest) (*commonpb.Status, error) {
-	if !node.isHealthyOrStopping() {
-		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeCfg.GetNodeID())
-		status := &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}
+	if !commonpbutil.IsHealthyOrStopping(node.stateCode) {
+		status := &commonpb.Status{}
+		node.NotReadyServeResp(status)
 		return status, nil
 	}
 	node.wg.Add(1)
@@ -677,14 +664,11 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, in *querypb.ReleaseS
 
 // GetSegmentInfo returns segment information of the collection on the queryNode, and the information includes memSize, numRow, indexName, indexID ...
 func (node *QueryNode) GetSegmentInfo(ctx context.Context, in *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
-	if !node.isHealthyOrStopping() {
-		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeCfg.GetNodeID())
+	if !commonpbutil.IsHealthyOrStopping(node.stateCode) {
 		res := &querypb.GetSegmentInfoResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    err.Error(),
-			},
+			Status: &commonpb.Status{},
 		}
+		node.NotReadyServeResp(res.GetStatus())
 		return res, nil
 	}
 	node.wg.Add(1)
@@ -815,8 +799,8 @@ func (node *QueryNode) searchWithDmlChannel(ctx context.Context, req *querypb.Se
 			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()), metrics.SearchLabel, metrics.FailLabel).Inc()
 		}
 	}()
-	if !node.isHealthyOrStopping() {
-		failRet.Status.Reason = msgQueryNodeIsUnhealthy(Params.QueryNodeCfg.GetNodeID())
+	if !commonpbutil.IsHealthyOrStopping(node.stateCode) {
+		node.NotReadyServeResp(failRet.GetStatus())
 		return failRet, nil
 	}
 	node.wg.Add(1)
@@ -963,8 +947,8 @@ func (node *QueryNode) queryWithDmlChannel(ctx context.Context, req *querypb.Que
 			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(Params.QueryNodeCfg.GetNodeID()), metrics.SearchLabel, metrics.FailLabel).Inc()
 		}
 	}()
-	if !node.isHealthyOrStopping() {
-		failRet.Status.Reason = msgQueryNodeIsUnhealthy(Params.QueryNodeCfg.GetNodeID())
+	if !commonpbutil.IsHealthyOrStopping(node.stateCode) {
+		node.NotReadyServeResp(failRet.GetStatus())
 		return failRet, nil
 	}
 	node.wg.Add(1)
@@ -1177,11 +1161,10 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 
 // SyncReplicaSegments syncs replica node & segments states
 func (node *QueryNode) SyncReplicaSegments(ctx context.Context, req *querypb.SyncReplicaSegmentsRequest) (*commonpb.Status, error) {
-	if !node.isHealthy() {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    msgQueryNodeIsUnhealthy(Params.QueryNodeCfg.GetNodeID()),
-		}, nil
+	if !commonpbutil.IsHealthy(node.stateCode) {
+		status := &commonpb.Status{}
+		node.NotReadyServeResp(status)
+		return status, nil
 	}
 	node.wg.Add(1)
 	defer node.wg.Done()
@@ -1204,19 +1187,17 @@ func (node *QueryNode) SyncReplicaSegments(ctx context.Context, req *querypb.Syn
 
 // ShowConfigurations returns the configurations of queryNode matching req.Pattern
 func (node *QueryNode) ShowConfigurations(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error) {
-	if !node.isHealthyOrStopping() {
+	if !commonpbutil.IsHealthyOrStopping(node.stateCode) {
 		log.Warn("QueryNode.ShowConfigurations failed",
 			zap.Int64("nodeID", node.session.ServerID),
 			zap.String("req", req.Pattern),
 			zap.Error(errQueryNodeIsUnhealthy(Params.QueryNodeCfg.GetNodeID())))
 
-		return &internalpb.ShowConfigurationsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    msgQueryNodeIsUnhealthy(Params.QueryNodeCfg.GetNodeID()),
-			},
-			Configuations: nil,
-		}, nil
+		resp := &internalpb.ShowConfigurationsResponse{
+			Status: &commonpb.Status{},
+		}
+		node.NotReadyServeResp(resp.GetStatus())
+		return resp, nil
 	}
 	node.wg.Add(1)
 	defer node.wg.Done()
@@ -1230,17 +1211,14 @@ func (node *QueryNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsR
 		zap.Int64("nodeID", Params.QueryNodeCfg.GetNodeID()),
 		zap.String("req", req.GetRequest()))
 
-	if !node.isHealthyOrStopping() {
+	if !commonpbutil.IsHealthyOrStopping(node.stateCode) {
 		log.Warn("QueryNode.GetMetrics failed",
 			zap.Error(errQueryNodeIsUnhealthy(Params.QueryNodeCfg.GetNodeID())))
-
-		return &milvuspb.GetMetricsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    msgQueryNodeIsUnhealthy(Params.QueryNodeCfg.GetNodeID()),
-			},
-			Response: "",
-		}, nil
+		resp := &milvuspb.GetMetricsResponse{
+			Status: &commonpb.Status{},
+		}
+		node.NotReadyServeResp(resp.GetStatus())
+		return resp, nil
 	}
 	node.wg.Add(1)
 	defer node.wg.Done()
@@ -1291,16 +1269,14 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 		zap.Int64("msg-id", req.GetBase().GetMsgID()),
 		zap.Int64("node-id", Params.QueryNodeCfg.GetNodeID()),
 	)
-	if !node.isHealthyOrStopping() {
+	if !commonpbutil.IsHealthyOrStopping(node.stateCode) {
 		log.Warn("QueryNode.GetMetrics failed",
 			zap.Error(errQueryNodeIsUnhealthy(Params.QueryNodeCfg.GetNodeID())))
-
-		return &querypb.GetDataDistributionResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    msgQueryNodeIsUnhealthy(Params.QueryNodeCfg.GetNodeID()),
-			},
-		}, nil
+		resp := &querypb.GetDataDistributionResponse{
+			Status: &commonpb.Status{},
+		}
+		node.NotReadyServeResp(resp.GetStatus())
+		return resp, nil
 	}
 	node.wg.Add(1)
 	defer node.wg.Done()
@@ -1383,12 +1359,9 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDistributionRequest) (*commonpb.Status, error) {
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", req.GetCollectionID()), zap.String("channel", req.GetChannel()))
 	// check node healthy
-	if !node.isHealthyOrStopping() {
-		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeCfg.GetNodeID())
-		status := &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    err.Error(),
-		}
+	if !commonpbutil.IsHealthyOrStopping(node.stateCode) {
+		status := &commonpb.Status{}
+		node.NotReadyServeResp(status)
 		return status, nil
 	}
 	node.wg.Add(1)

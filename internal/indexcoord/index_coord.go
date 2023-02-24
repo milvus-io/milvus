@@ -29,7 +29,6 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
-
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	v3rpc "go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -390,6 +389,10 @@ func (i *IndexCoord) isHealthy() bool {
 	return code == commonpb.StateCode_Healthy
 }
 
+func (i *IndexCoord) GetStateCode() commonpb.StateCode {
+	return i.stateCode.Load().(commonpb.StateCode)
+}
+
 // GetComponentStates gets the component states of IndexCoord.
 func (i *IndexCoord) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
 	log.Debug("get IndexCoord component states ...")
@@ -433,21 +436,19 @@ func (i *IndexCoord) GetStatisticsChannel(ctx context.Context) (*milvuspb.String
 // will get all flushed segments from DataCoord and record tasks with these segments. The background process
 // indexBuilder will find this task and assign it to IndexNode for execution.
 func (i *IndexCoord) CreateIndex(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error) {
+	ret := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+	}
+
 	if !i.isHealthy() {
 		log.Warn(msgIndexCoordIsUnhealthy(i.serverID))
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    msgIndexCoordIsUnhealthy(i.serverID),
-		}, nil
+		setNotServingStatus(ret, i.GetStateCode())
+		return ret, nil
 	}
 	log.Info("IndexCoord receive create index request", zap.Int64("CollectionID", req.CollectionID),
 		zap.String("IndexName", req.IndexName), zap.Int64("fieldID", req.FieldID),
 		zap.Any("TypeParams", req.TypeParams),
 		zap.Any("IndexParams", req.IndexParams))
-
-	ret := &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_UnexpectedError,
-	}
 
 	ok, err := i.metaTable.CanCreateIndex(req)
 	if !ok {
@@ -496,12 +497,9 @@ func (i *IndexCoord) GetIndexState(ctx context.Context, req *indexpb.GetIndexSta
 
 	if !i.isHealthy() {
 		log.Warn(msgIndexCoordIsUnhealthy(i.serverID))
-		return &indexpb.GetIndexStateResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    msgIndexCoordIsUnhealthy(i.serverID),
-			},
-		}, nil
+		ret := &indexpb.GetIndexStateResponse{Status: &commonpb.Status{}}
+		setNotServingStatus(ret.GetStatus(), i.GetStateCode())
+		return ret, nil
 	}
 
 	indexID2CreateTs := i.metaTable.GetIndexIDByName(req.CollectionID, req.IndexName)
@@ -556,12 +554,9 @@ func (i *IndexCoord) GetSegmentIndexState(ctx context.Context, req *indexpb.GetS
 
 	if !i.isHealthy() {
 		log.Warn(msgIndexCoordIsUnhealthy(i.serverID))
-		return &indexpb.GetSegmentIndexStateResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    msgIndexCoordIsUnhealthy(i.serverID),
-			},
-		}, nil
+		ret := &indexpb.GetSegmentIndexStateResponse{Status: &commonpb.Status{}}
+		setNotServingStatus(ret.GetStatus(), i.GetStateCode())
+		return ret, nil
 	}
 
 	ret := &indexpb.GetSegmentIndexStateResponse{
@@ -646,12 +641,9 @@ func (i *IndexCoord) GetIndexBuildProgress(ctx context.Context, req *indexpb.Get
 		zap.String("indexName", req.IndexName))
 	if !i.isHealthy() {
 		log.Warn(msgIndexCoordIsUnhealthy(i.serverID))
-		return &indexpb.GetIndexBuildProgressResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    msgIndexCoordIsUnhealthy(i.serverID),
-			},
-		}, nil
+		ret := &indexpb.GetIndexBuildProgressResponse{Status: &commonpb.Status{}}
+		setNotServingStatus(ret.GetStatus(), i.GetStateCode())
+		return ret, nil
 	}
 
 	indexID2CreateTs := i.metaTable.GetIndexIDByName(req.CollectionID, req.IndexName)
@@ -731,10 +723,9 @@ func (i *IndexCoord) DropIndex(ctx context.Context, req *indexpb.DropIndexReques
 		zap.Int64s("partitionIDs", req.PartitionIDs), zap.String("indexName", req.IndexName))
 	if !i.isHealthy() {
 		log.Warn(msgIndexCoordIsUnhealthy(i.serverID))
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    msgIndexCoordIsUnhealthy(i.serverID),
-		}, nil
+		ret := &commonpb.Status{}
+		setNotServingStatus(ret, i.GetStateCode())
+		return ret, nil
 	}
 
 	ret := &commonpb.Status{
@@ -798,14 +789,11 @@ func (i *IndexCoord) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInf
 		zap.String("indexName", req.GetIndexName()), zap.Int64s("segIDs", req.GetSegmentIDs()))
 	if !i.isHealthy() {
 		log.Warn(msgIndexCoordIsUnhealthy(i.serverID))
-		return &indexpb.GetIndexInfoResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    msgIndexCoordIsUnhealthy(i.serverID),
-			},
-			SegmentInfo: nil,
-		}, nil
+		ret := &indexpb.GetIndexInfoResponse{Status: &commonpb.Status{}}
+		setNotServingStatus(ret.GetStatus(), i.GetStateCode())
+		return ret, nil
 	}
+
 	ret := &indexpb.GetIndexInfoResponse{
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
@@ -854,13 +842,9 @@ func (i *IndexCoord) DescribeIndex(ctx context.Context, req *indexpb.DescribeInd
 	log.Info("IndexCoord DescribeIndex", zap.Int64("collectionID", req.CollectionID), zap.String("indexName", req.GetIndexName()))
 	if !i.isHealthy() {
 		log.Warn(msgIndexCoordIsUnhealthy(i.serverID))
-		return &indexpb.DescribeIndexResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    msgIndexCoordIsUnhealthy(i.serverID),
-			},
-			IndexInfos: nil,
-		}, nil
+		ret := &indexpb.DescribeIndexResponse{Status: &commonpb.Status{}}
+		setNotServingStatus(ret.GetStatus(), i.GetStateCode())
+		return ret, nil
 	}
 
 	indexes := i.metaTable.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName())
@@ -959,13 +943,9 @@ func (i *IndexCoord) ShowConfigurations(ctx context.Context, req *internalpb.Sho
 			zap.String("req", req.Pattern),
 			zap.Error(errIndexCoordIsUnhealthy(Params.QueryNodeCfg.GetNodeID())))
 
-		return &internalpb.ShowConfigurationsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    msgIndexCoordIsUnhealthy(Params.QueryNodeCfg.GetNodeID()),
-			},
-			Configuations: nil,
-		}, nil
+		ret := &internalpb.ShowConfigurationsResponse{Status: &commonpb.Status{}}
+		setNotServingStatus(ret.GetStatus(), i.GetStateCode())
+		return ret, nil
 	}
 
 	return getComponentConfigurations(ctx, req), nil
@@ -980,14 +960,12 @@ func (i *IndexCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReq
 
 	if !i.isHealthy() {
 		log.Warn(msgIndexCoordIsUnhealthy(i.serverID))
-
-		return &milvuspb.GetMetricsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    msgIndexCoordIsUnhealthy(i.serverID),
-			},
+		ret := &milvuspb.GetMetricsResponse{
+			Status:   &commonpb.Status{},
 			Response: "",
-		}, nil
+		}
+		setNotServingStatus(ret.GetStatus(), i.GetStateCode())
+		return ret, nil
 	}
 
 	metricType, err := metricsinfo.ParseMetricType(req.Request)

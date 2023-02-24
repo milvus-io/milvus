@@ -296,19 +296,25 @@ func testIndexCoord(t *testing.T) {
 		}
 
 		updateSegmentIndexes := func(i map[UniqueID]map[UniqueID]*model.SegmentIndex) {
-			ic.metaTable.indexLock.Lock()
+			ic.metaTable.segmentIndexLock.Lock()
+			defer ic.metaTable.segmentIndexLock.Unlock()
 			ic.metaTable.segmentIndexes = i
-			ic.metaTable.indexLock.Unlock()
 		}
 
 		getSegmentIndexes := func() map[UniqueID]map[UniqueID]*model.SegmentIndex {
-			ic.metaTable.indexLock.RLock()
-			defer ic.metaTable.indexLock.RUnlock()
+			ic.metaTable.segmentIndexLock.Lock()
+			defer ic.metaTable.segmentIndexLock.Unlock()
 			return ic.metaTable.segmentIndexes
 		}
 
 		indexs := getSegmentIndexes()
 		mockIndexs := make(map[UniqueID]map[UniqueID]*model.SegmentIndex)
+		updateMockIndexs := func(f func()) {
+			ic.metaTable.segmentIndexLock.Lock()
+			defer ic.metaTable.segmentIndexLock.Unlock()
+			f()
+		}
+
 		progressIndex := &model.SegmentIndex{
 			SegmentID:  222,
 			IndexState: commonpb.IndexState_InProgress,
@@ -329,8 +335,10 @@ func testIndexCoord(t *testing.T) {
 			updateSegmentIndexes(indexs)
 		}()
 
-		mockIndexs[111] = make(map[UniqueID]*model.SegmentIndex)
-		mockIndexs[111][indexIDTest] = finishedIndex
+		updateMockIndexs(func() {
+			mockIndexs[111] = make(map[UniqueID]*model.SegmentIndex)
+			mockIndexs[111][indexIDTest] = finishedIndex
+		})
 
 		resp, err := ic.DescribeIndex(ctx, req)
 		assert.NoError(t, err)
@@ -349,8 +357,10 @@ func testIndexCoord(t *testing.T) {
 			return nil, errors.New("mock error")
 		}
 
-		mockIndexs[222] = make(map[UniqueID]*model.SegmentIndex)
-		mockIndexs[222][indexIDTest] = progressIndex
+		updateMockIndexs(func() {
+			mockIndexs[222] = make(map[UniqueID]*model.SegmentIndex)
+			mockIndexs[222][indexIDTest] = progressIndex
+		})
 		resp, err = ic.DescribeIndex(ctx, req)
 		assert.Error(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
@@ -413,8 +423,10 @@ func testIndexCoord(t *testing.T) {
 		assert.Equal(t, int64(2048), resp.IndexInfos[0].IndexedRows)
 		assert.Equal(t, int64(2048*3), resp.IndexInfos[0].TotalRows)
 
-		mockIndexs[333] = make(map[UniqueID]*model.SegmentIndex)
-		mockIndexs[333][indexIDTest] = failedIndex
+		updateMockIndexs(func() {
+			mockIndexs[333] = make(map[UniqueID]*model.SegmentIndex)
+			mockIndexs[333][indexIDTest] = failedIndex
+		})
 		resp, err = ic.DescribeIndex(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
@@ -651,7 +663,7 @@ func TestIndexCoord_UnHealthy(t *testing.T) {
 		}
 		resp, err := ic.CreateIndex(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.ErrorCode)
 	})
 
 	t.Run("GetIndexState", func(t *testing.T) {
@@ -661,7 +673,7 @@ func TestIndexCoord_UnHealthy(t *testing.T) {
 		}
 		resp, err := ic.GetIndexState(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.Status.ErrorCode)
 	})
 
 	t.Run("GetSegmentIndexState", func(t *testing.T) {
@@ -672,7 +684,7 @@ func TestIndexCoord_UnHealthy(t *testing.T) {
 		}
 		resp, err := ic.GetSegmentIndexState(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.Status.ErrorCode)
 	})
 
 	t.Run("GetIndexInfos", func(t *testing.T) {
@@ -683,7 +695,7 @@ func TestIndexCoord_UnHealthy(t *testing.T) {
 		}
 		resp, err := ic.GetIndexInfos(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.Status.ErrorCode)
 	})
 
 	t.Run("DescribeIndex", func(t *testing.T) {
@@ -693,7 +705,7 @@ func TestIndexCoord_UnHealthy(t *testing.T) {
 		}
 		resp, err := ic.DescribeIndex(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.Status.ErrorCode)
 	})
 
 	t.Run("GetIndexBuildProgress", func(t *testing.T) {
@@ -703,7 +715,7 @@ func TestIndexCoord_UnHealthy(t *testing.T) {
 		}
 		resp, err := ic.GetIndexBuildProgress(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.Status.ErrorCode)
 	})
 
 	t.Run("DropIndex", func(t *testing.T) {
@@ -713,7 +725,7 @@ func TestIndexCoord_UnHealthy(t *testing.T) {
 		}
 		resp, err := ic.DropIndex(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.ErrorCode)
 	})
 
 	t.Run("ShowConfigurations when indexcoord is not healthy", func(t *testing.T) {
@@ -728,7 +740,7 @@ func TestIndexCoord_UnHealthy(t *testing.T) {
 
 		resp, err := ic.ShowConfigurations(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.Status.ErrorCode)
 	})
 
 	t.Run("GetMetrics", func(t *testing.T) {
@@ -736,7 +748,7 @@ func TestIndexCoord_UnHealthy(t *testing.T) {
 		assert.NoError(t, err)
 		resp, err := ic.GetMetrics(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.Status.ErrorCode)
 	})
 
 }

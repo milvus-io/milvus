@@ -354,6 +354,8 @@ grpc:
     initialBackOff: 1.0
     maxBackoff: 60.0
     backoffMultiplier: 2.0
+  server:
+    retryTimes: 5 # retry times when receiving a grpc return value with a failure and retryable state code
 
 # Configure the proxy tls enable.
 tls:

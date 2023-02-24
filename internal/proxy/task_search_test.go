@@ -1830,18 +1830,22 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 	assert.Error(t, task.Execute(ctx))
 
 	qn.searchError = nil
-	qn.withSearchResult = &internalpb.SearchResults{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_NotShardLeader,
-		},
+	qn.getSearchResult = func() *internalpb.SearchResults {
+		return &internalpb.SearchResults{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_NotShardLeader,
+			},
+		}
 	}
 	err = task.Execute(ctx)
 	assert.True(t, strings.Contains(err.Error(), errInvalidShardLeaders.Error()))
 
-	qn.withSearchResult = &internalpb.SearchResults{
-		Status: &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		},
+	qn.getSearchResult = func() *internalpb.SearchResults {
+		return &internalpb.SearchResults{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			},
+		}
 	}
 	assert.Error(t, task.Execute(ctx))
 
@@ -1850,7 +1854,19 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
 	}
-	qn.withSearchResult = result1
+	result0 := &internalpb.SearchResults{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_NotShardLeader,
+		},
+	}
+	i := 0
+	qn.getSearchResult = func() *internalpb.SearchResults {
+		i++
+		if i < 3 {
+			return result0
+		}
+		return result1
+	}
 	assert.NoError(t, task.Execute(ctx))
 }
 

@@ -594,7 +594,7 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 	}
 
 	if !node.isHealthy() {
-		errStatus.Reason = "dataNode not in HEALTHY state"
+		setNotServingStatus(errStatus, node.GetStateCode())
 		return errStatus, nil
 	}
 
@@ -747,13 +747,9 @@ func (node *DataNode) ShowConfigurations(ctx context.Context, req *internalpb.Sh
 			zap.String("req", req.Pattern),
 			zap.Error(errDataNodeIsUnhealthy(Params.QueryNodeCfg.GetNodeID())))
 
-		return &internalpb.ShowConfigurationsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    msgDataNodeIsUnhealthy(Params.QueryNodeCfg.GetNodeID()),
-			},
-			Configuations: nil,
-		}, nil
+		resp := &internalpb.ShowConfigurationsResponse{Status: &commonpb.Status{}}
+		setNotServingStatus(resp.Status, node.GetStateCode())
+		return resp, nil
 	}
 
 	return getComponentConfigurations(ctx, req), nil
@@ -769,12 +765,9 @@ func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 		log.Warn("DataNode.GetMetrics failed",
 			zap.Error(errDataNodeIsUnhealthy(node.session.ServerID)))
 
-		return &milvuspb.GetMetricsResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    msgDataNodeIsUnhealthy(node.session.ServerID),
-			},
-		}, nil
+		resp := &milvuspb.GetMetricsResponse{Status: &commonpb.Status{}}
+		setNotServingStatus(resp.Status, node.GetStateCode())
+		return resp, nil
 	}
 
 	metricType, err := metricsinfo.ParseMetricType(req.Request)
@@ -858,12 +851,9 @@ func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan
 // return status of all compaction plans
 func (node *DataNode) GetCompactionState(ctx context.Context, req *datapb.CompactionStateRequest) (*datapb.CompactionStateResponse, error) {
 	if !node.isHealthy() {
-		return &datapb.CompactionStateResponse{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    "DataNode is unhealthy",
-			},
-		}, nil
+		resp := &datapb.CompactionStateResponse{Status: &commonpb.Status{}}
+		setNotServingStatus(resp.Status, node.GetStateCode())
+		return resp, nil
 	}
 	results := make([]*datapb.CompactionStateResult, 0)
 	node.compactionExecutor.executing.Range(func(k, v any) bool {
@@ -903,7 +893,7 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 	status := &commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}
 
 	if !node.isHealthy() {
-		status.Reason = "DataNode is unhealthy"
+		setNotServingStatus(status, node.GetStateCode())
 		return status, nil
 	}
 
@@ -1012,10 +1002,9 @@ func (node *DataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest)
 			zap.Int64("task ID", req.GetImportTask().GetTaskId()),
 			zap.Error(errDataNodeIsUnhealthy(Params.DataNodeCfg.GetNodeID())))
 
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    msgDataNodeIsUnhealthy(Params.DataNodeCfg.GetNodeID()),
-		}, nil
+		resp := &commonpb.Status{}
+		setNotServingStatus(resp, node.GetStateCode())
+		return resp, nil
 	}
 
 	// get a timestamp for all the rows
@@ -1360,9 +1349,9 @@ func saveSegmentFunc(node *DataNode, req *datapb.ImportTaskRequest, res *rootcoo
 			if err != nil {
 				return fmt.Errorf(err.Error())
 			}
-			if resp.ErrorCode != commonpb.ErrorCode_Success && resp.ErrorCode != commonpb.ErrorCode_DataCoordNA {
+			if resp.ErrorCode != commonpb.ErrorCode_Success && resp.ErrorCode != commonpb.ErrorCode_NotReadyServe {
 				return retry.Unrecoverable(fmt.Errorf("failed to save import segment, reason = %s", resp.Reason))
-			} else if resp.ErrorCode == commonpb.ErrorCode_DataCoordNA {
+			} else if resp.ErrorCode == commonpb.ErrorCode_NotReadyServe {
 				return fmt.Errorf("failed to save import segment: %s", resp.GetReason())
 			}
 			return nil
