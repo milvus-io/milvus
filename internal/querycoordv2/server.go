@@ -25,7 +25,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"syscall"
-	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
@@ -416,7 +415,7 @@ func (s *Server) startServerLoop() {
 func (s *Server) Stop() error {
 	s.cancel()
 	if s.session != nil {
-		s.session.Revoke(time.Second)
+		s.session.Stop()
 	}
 
 	if s.session != nil {

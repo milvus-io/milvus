@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -83,6 +84,7 @@ type Session struct {
 	etcdCli           *clientv3.Client
 	leaseID           *clientv3.LeaseID
 	watchSessionKeyCh clientv3.WatchChan
+	wg                sync.WaitGroup
 
 	metaRoot string
 
@@ -241,6 +243,7 @@ func (s *Session) Register() {
 		panic(err)
 	}
 	s.liveCh = s.processKeepAliveResponse(ch)
+	s.initWatchSessionCh()
 	s.UpdateRegistered(true)
 }
 
@@ -310,6 +313,14 @@ func (s *Session) getSessionKey() string {
 	return path.Join(s.metaRoot, DefaultServiceRoot, key)
 }
 
+func (s *Session) initWatchSessionCh() {
+	getResp, err := s.etcdCli.Get(context.Background(), s.getSessionKey())
+	if err != nil {
+		panic(err)
+	}
+	s.watchSessionKeyCh = s.etcdCli.Watch(context.Background(), s.getSessionKey(), clientv3.WithRev(getResp.Header.Revision))
+}
+
 // registerService registers the service to etcd so that other services
 // can find that the service is online and issue subsequent operations
 // RegisterService will save a key-value in etcd
@@ -372,7 +383,6 @@ func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, er
 
 		keepAliveCtx, keepAliveCancel := context.WithCancel(context.Background())
 		s.keepAliveCancel = func() {
-			s.Revoke(time.Second)
 			keepAliveCancel()
 		}
 		ch, err = s.etcdCli.KeepAlive(keepAliveCtx, resp.ID)
@@ -394,7 +404,9 @@ func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, er
 // If keepAlive fails for unexpected error, it will send a signal to the channel.
 func (s *Session) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveResponse) (failChannel <-chan bool) {
 	failCh := make(chan bool)
+	s.wg.Add(1)
 	go func() {
+		defer s.wg.Done()
 		for {
 			select {
 			case <-s.ctx.Done():
@@ -664,12 +676,9 @@ func (w *sessionWatcher) handleWatchErr(err error) error {
 // ch is the liveness signal channel, ch is closed only when the session is expired
 // callback is the function to call when ch is closed, note that callback will not be invoked when loop exits due to context
 func (s *Session) LivenessCheck(ctx context.Context, callback func()) {
-	getResp, err := s.etcdCli.Get(context.Background(), s.getSessionKey())
-	if err != nil {
-		panic(err)
-	}
-	s.watchSessionKeyCh = s.etcdCli.Watch(context.Background(), s.getSessionKey(), clientv3.WithRev(getResp.Header.Revision))
+	s.wg.Add(1)
 	go func() {
+		defer s.wg.Done()
 		for {
 			select {
 			case _, ok := <-s.liveCh:
@@ -733,7 +742,14 @@ func (s *Session) LivenessCheck(ctx context.Context, callback func()) {
 			}
 		}
 	}()
+}
 
+func (s *Session) Stop() {
+	s.Revoke(time.Second)
+	if s.keepAliveCancel != nil {
+		s.keepAliveCancel()
+	}
+	s.wg.Wait()
 }
 
 // Revoke revokes the internal leaseID for the session key

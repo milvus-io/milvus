@@ -259,7 +259,9 @@ func (i *IndexNode) Stop() error {
 		if i.sched != nil {
 			i.sched.Close()
 		}
-		i.session.Revoke(time.Second)
+		if i.session != nil {
+			i.session.Stop()
+		}
 
 		log.Info("Index node stopped.")
 	})

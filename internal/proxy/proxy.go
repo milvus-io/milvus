@@ -409,7 +409,9 @@ func (node *Proxy) Stop() error {
 		cb()
 	}
 
-	node.session.Revoke(time.Second)
+	if node.session != nil {
+		node.session.Stop()
+	}
 
 	if node.shardMgr != nil {
 		node.shardMgr.Close()
