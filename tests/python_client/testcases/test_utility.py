@@ -637,6 +637,24 @@ class TestUtilityParams(TestcaseBase):
                                                          "err_msg": "duplicated new collection name :{} with "
                                                                     "other collection name or alias".format(alias)})
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_rename_collection_using_alias(self):
+        """
+        target: test rename_collection using alias
+        method: rename collection using alias name
+        expected: raise exception
+        """
+        self._connect()
+        collection_w = self.init_collection_general(prefix)[0]
+        old_collection_name = collection_w.name
+        alias = cf.gen_unique_str(prefix + "alias")
+        new_collection_name = cf.gen_unique_str(prefix + "new")
+        self.utility_wrap.create_alias(old_collection_name, alias)
+        self.utility_wrap.rename_collection(alias, new_collection_name,
+                                            check_task=CheckTasks.err_res,
+                                            check_items={"err_code": 1,
+                                                         "err_msg": "unsupported use an alias to "
+                                                                    "rename collection, alias:{}".format(alias)})
 
 class TestUtilityBase(TestcaseBase):
     """ Test case of index interface """
