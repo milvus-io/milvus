@@ -47,7 +47,7 @@ type DistControllerTestSuite struct {
 }
 
 func (suite *DistControllerTestSuite) SetupTest() {
-	Params.Init()
+	Params.InitOnce()
 
 	var err error
 	config := GenerateEtcdConfig()

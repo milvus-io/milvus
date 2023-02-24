@@ -67,7 +67,7 @@ type CollectionObserverSuite struct {
 }
 
 func (suite *CollectionObserverSuite) SetupSuite() {
-	Params.Init()
+	Params.InitOnce()
 
 	suite.collections = []int64{100, 101, 102}
 	suite.partitions = map[int64][]int64{

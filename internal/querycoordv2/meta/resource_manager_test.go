@@ -37,7 +37,7 @@ type ResourceManagerSuite struct {
 }
 
 func (suite *ResourceManagerSuite) SetupSuite() {
-	Params.Init()
+	Params.InitOnce()
 }
 
 func (suite *ResourceManagerSuite) SetupTest() {

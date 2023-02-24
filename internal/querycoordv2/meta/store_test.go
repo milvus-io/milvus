@@ -36,7 +36,7 @@ type StoreTestSuite struct {
 }
 
 func (suite *StoreTestSuite) SetupSuite() {
-	Params.Init()
+	Params.InitOnce()
 }
 
 func (suite *StoreTestSuite) SetupTest() {

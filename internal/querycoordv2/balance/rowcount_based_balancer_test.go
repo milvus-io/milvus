@@ -42,7 +42,7 @@ type RowCountBasedBalancerTestSuite struct {
 }
 
 func (suite *RowCountBasedBalancerTestSuite) SetupSuite() {
-	Params.Init()
+	Params.InitOnce()
 }
 
 func (suite *RowCountBasedBalancerTestSuite) SetupTest() {

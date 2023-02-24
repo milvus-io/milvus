@@ -65,7 +65,7 @@ type JobSuite struct {
 }
 
 func (suite *JobSuite) SetupSuite() {
-	Params.Init()
+	Params.InitOnce()
 
 	suite.collections = []int64{1000, 1001}
 	suite.partitions = map[int64][]int64{

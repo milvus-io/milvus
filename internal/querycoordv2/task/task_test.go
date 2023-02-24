@@ -75,7 +75,7 @@ type TaskSuite struct {
 }
 
 func (suite *TaskSuite) SetupSuite() {
-	Params.Init()
+	Params.InitOnce()
 	suite.collection = 1000
 	suite.replica = 10
 	suite.subChannels = []string{

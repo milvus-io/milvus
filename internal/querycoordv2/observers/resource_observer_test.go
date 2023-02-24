@@ -48,7 +48,7 @@ type ResourceObserverSuite struct {
 }
 
 func (suite *ResourceObserverSuite) SetupSuite() {
-	Params.Init()
+	Params.InitOnce()
 	Params.QueryCoordCfg.CheckResourceGroupInterval = 3 * time.Second
 }
 

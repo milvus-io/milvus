@@ -48,7 +48,7 @@ type CollectionManagerSuite struct {
 }
 
 func (suite *CollectionManagerSuite) SetupSuite() {
-	Params.Init()
+	Params.InitOnce()
 
 	suite.collections = []int64{100, 101, 102}
 	suite.partitions = map[int64][]int64{
