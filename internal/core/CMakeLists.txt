@@ -25,6 +25,10 @@ add_definitions(-DELPP_THREAD_SAFE)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 message( STATUS "Building using CMake version: ${CMAKE_VERSION}" )
 
+if ( MILVUS_GPU_VERSION )
+    add_definitions(-DMILVUS_GPU_VERSION)
+endif ()
+
 project(core)
 include(CheckCXXCompilerFlag)
 if ( APPLE )

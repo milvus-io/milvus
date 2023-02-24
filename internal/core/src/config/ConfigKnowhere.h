@@ -26,6 +26,9 @@ std::string
 KnowhereSetSimdType(const char*);
 
 void
+KnowhereInitGPU(const int32_t, const int32_t);
+
+void
 KnowhereInitThreadPool(const uint32_t);
 
 }  // namespace milvus::config

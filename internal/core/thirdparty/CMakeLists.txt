@@ -12,7 +12,7 @@
 #-------------------------------------------------------------------------------
 # Using default c and cxx compiler in our build tree
 # Thirdpart cxx and c flags
-add_compile_options(-O3 -fPIC -Wno-error -fopenmp)
+append_flags(CMAKE_CXX_FLAGS FLAGS "-O3 -fPIC -Wno-error -fopenmp")
 
 if (NOT KNOWHERE_VERBOSE_THIRDPARTY_BUILD)
     set(EP_LOG_OPTIONS LOG_CONFIGURE 1 LOG_BUILD 1 LOG_INSTALL 1 LOG_DOWNLOAD 1)

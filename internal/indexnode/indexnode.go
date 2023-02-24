@@ -156,6 +156,11 @@ func (i *IndexNode) initKnowhere() {
 	cCPUNum := C.int(hardware.GetCPUNum())
 	C.InitCpuNum(cCPUNum)
 
+	// init GPU resource
+	cGpuId := C.int32_t(0)
+	cResNum := C.int32_t(1)
+	C.IndexBuilderInitGPU(cGpuId, cResNum)
+
 	initcore.InitLocalStorageConfig(Params)
 }
 

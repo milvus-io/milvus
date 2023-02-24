@@ -32,6 +32,9 @@ char*
 SegcoreSetSimdType(const char*);
 
 void
+SegcoreInitGPU(const int32_t, const int32_t);
+
+void
 SegcoreSetThreadPoolNum(const uint32_t num_threads);
 
 #ifdef __cplusplus

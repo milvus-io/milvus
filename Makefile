@@ -35,6 +35,13 @@ milvus: build-cpp print-build-info
 		GO111MODULE=on $(GO) build -ldflags="-r $${RPATH} -X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)'" \
 		${AARCH64_FLAG} -o $(INSTALL_PATH)/milvus $(PWD)/cmd/main.go 1>/dev/null
 
+milvus-gpu: build-cpp-gpu print-build-info
+	@echo "Building Milvus-gpu ..."
+	@source $(PWD)/scripts/setenv.sh && \
+		mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && \
+		GO111MODULE=on $(GO) build -ldflags="-r $${RPATH} -X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)'" \
+		${AARCH64_FLAG} -o $(INSTALL_PATH)/milvus-gpu $(PWD)/cmd/main.go 1>/dev/null
+
 get-build-deps:
 	@(env bash $(PWD)/scripts/install_deps.sh)
 
@@ -154,6 +161,10 @@ download-milvus-proto:
 build-cpp: download-milvus-proto
 	@echo "Building Milvus cpp library ..."
 	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -f "$(CUSTOM_THIRDPARTY_PATH)" -n ${disk_index})
+
+build-cpp-gpu: download-milvus-proto
+	@echo "Building Milvus cpp gpu library ..."
+	@(env bash $(PWD)/scripts/core_build.sh -t ${mode} -g -f "$(CUSTOM_THIRDPARTY_PATH)" -n ${disk_index})
 
 build-cpp-embd: download-milvus-proto
 	@echo "Building **Embedded** Milvus cpp library ..."
