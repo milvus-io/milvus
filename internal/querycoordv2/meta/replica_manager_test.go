@@ -41,7 +41,7 @@ type ReplicaManagerSuite struct {
 }
 
 func (suite *ReplicaManagerSuite) SetupSuite() {
-	Params.Init()
+	Params.InitOnce()
 
 	suite.nodes = []int64{1, 2, 3}
 	suite.collections = []int64{100, 101, 102}

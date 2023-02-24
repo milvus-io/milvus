@@ -44,7 +44,7 @@ type ReplicaObserverSuite struct {
 }
 
 func (suite *ReplicaObserverSuite) SetupSuite() {
-	Params.Init()
+	Params.InitOnce()
 	Params.QueryCoordCfg.CheckNodeInReplicaInterval = 1 * time.Second
 }
 

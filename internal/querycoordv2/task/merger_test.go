@@ -39,7 +39,7 @@ type MergerSuite struct {
 }
 
 func (suite *MergerSuite) SetupSuite() {
-	Params.Init()
+	Params.InitOnce()
 	Params.QueryCoordCfg.TaskMergeCap = 3
 	suite.collectionID = 1000
 	suite.replicaID = 100

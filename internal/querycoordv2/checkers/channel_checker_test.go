@@ -45,7 +45,7 @@ type ChannelCheckerTestSuite struct {
 }
 
 func (suite *ChannelCheckerTestSuite) SetupSuite() {
-	Params.Init()
+	Params.InitOnce()
 }
 
 func (suite *ChannelCheckerTestSuite) SetupTest() {

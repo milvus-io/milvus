@@ -47,7 +47,7 @@ type LeaderObserverTestSuite struct {
 }
 
 func (suite *LeaderObserverTestSuite) SetupSuite() {
-	Params.Init()
+	Params.InitOnce()
 }
 
 func (suite *LeaderObserverTestSuite) SetupTest() {

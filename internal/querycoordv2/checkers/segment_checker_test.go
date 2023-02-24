@@ -46,7 +46,7 @@ type SegmentCheckerTestSuite struct {
 }
 
 func (suite *SegmentCheckerTestSuite) SetupSuite() {
-	Params.Init()
+	Params.InitOnce()
 }
 
 func (suite *SegmentCheckerTestSuite) SetupTest() {

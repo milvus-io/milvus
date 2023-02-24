@@ -32,7 +32,7 @@ import (
 )
 
 func TestSpawnReplicasWithRG(t *testing.T) {
-	Params.Init()
+	Params.InitOnce()
 	config := GenerateEtcdConfig()
 	cli, err := etcd.GetEtcdClient(
 		config.UseEmbedEtcd,
@@ -116,7 +116,7 @@ func TestSpawnReplicasWithRG(t *testing.T) {
 }
 
 func TestAddNodesToCollectionsInRGFailed(t *testing.T) {
-	Params.Init()
+	Params.InitOnce()
 
 	store := meta.NewMockStore(t)
 	store.EXPECT().SaveCollection(mock.Anything).Return(nil)
@@ -178,7 +178,7 @@ func TestAddNodesToCollectionsInRGFailed(t *testing.T) {
 }
 
 func TestAddNodesToCollectionsInRG(t *testing.T) {
-	Params.Init()
+	Params.InitOnce()
 
 	store := meta.NewMockStore(t)
 	store.EXPECT().SaveCollection(mock.Anything).Return(nil)

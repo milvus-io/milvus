@@ -53,7 +53,7 @@ type TargetObserverSuite struct {
 }
 
 func (suite *TargetObserverSuite) SetupSuite() {
-	Params.Init()
+	Params.InitOnce()
 	Params.QueryCoordCfg.UpdateNextTargetInterval = 3 * time.Second
 }
 
