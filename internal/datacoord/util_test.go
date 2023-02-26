@@ -18,9 +18,10 @@ package datacoord
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/common"
@@ -110,7 +111,7 @@ func (suite *UtilSuite) TestVerifyResponse() {
 	for _, c := range cases {
 		r := VerifyResponse(c.resp, c.err)
 		if c.equalValue {
-			suite.EqualValues(c.expected, r)
+			suite.EqualValues(c.expected.Error(), r.Error())
 		} else {
 			suite.Equal(c.expected, r)
 		}

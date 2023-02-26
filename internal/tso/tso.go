@@ -36,11 +36,11 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/pkg/errors"
 )
 
 const (
@@ -159,10 +159,10 @@ func (t *timestampOracle) ResetUserTimestamp(tso uint64) error {
 
 // UpdateTimestamp is used to update the timestamp.
 // This function will do two things:
-// 1. When the logical time is going to be used up, increase the current physical time.
-// 2. When the time window is not big enough, which means the saved etcd time minus the next physical time
-//    will be less than or equal to `updateTimestampGuard`, then the time window needs to be updated and
-//    we also need to save the next physical time plus `TsoSaveInterval` into etcd.
+//  1. When the logical time is going to be used up, increase the current physical time.
+//  2. When the time window is not big enough, which means the saved etcd time minus the next physical time
+//     will be less than or equal to `updateTimestampGuard`, then the time window needs to be updated and
+//     we also need to save the next physical time plus `TsoSaveInterval` into etcd.
 //
 // Here is some constraints that this function must satisfy:
 // 1. The saved time is monotonically increasing.

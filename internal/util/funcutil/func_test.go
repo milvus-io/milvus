@@ -20,12 +20,13 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/jarcoal/httpmock"
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"

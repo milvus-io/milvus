@@ -35,7 +35,7 @@ const megabyte = 1024 * 1024
 var CheckBucketRetryAttempts uint = 20
 var timeFormat = ".2006-01-02T15-04-05.000"
 
-//a rotated file logger for zap.log and could upload sealed log file to minIO
+// a rotated file logger for zap.log and could upload sealed log file to minIO
 type RotateLogger struct {
 	//local path is the path to save log before update to minIO
 	//use os.TempDir()/accesslog if empty
@@ -273,7 +273,7 @@ func (l *RotateLogger) timeRotating() {
 	}
 }
 
-//start rotate log file by time
+// start rotate log file by time
 func (l *RotateLogger) start() {
 	l.closeCh = make(chan struct{})
 	l.closeWg = sync.WaitGroup{}

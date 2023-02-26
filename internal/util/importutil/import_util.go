@@ -19,13 +19,14 @@ package importutil
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"math"
 	"path"
 	"runtime/debug"
 	"strconv"
 	"strings"
+
+	"github.com/cockroachdb/errors"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"

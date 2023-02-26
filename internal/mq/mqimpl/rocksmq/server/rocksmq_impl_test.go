@@ -12,7 +12,6 @@
 package server
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path"
@@ -22,6 +21,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/common"

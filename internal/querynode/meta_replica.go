@@ -24,10 +24,11 @@ package querynode
 */
 import "C"
 import (
-	"errors"
 	"fmt"
 	"strconv"
 	"sync"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/common"

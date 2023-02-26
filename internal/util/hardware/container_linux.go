@@ -12,8 +12,9 @@
 package hardware
 
 import (
-	"errors"
 	"strings"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/containerd/cgroups"
 )

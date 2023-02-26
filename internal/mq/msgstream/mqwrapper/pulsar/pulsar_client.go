@@ -17,11 +17,12 @@
 package pulsar
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/apache/pulsar-client-go/pulsar"
 	"github.com/milvus-io/milvus/internal/log"

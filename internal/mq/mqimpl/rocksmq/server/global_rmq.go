@@ -17,9 +17,10 @@
 package server
 
 import (
-	"errors"
 	"os"
 	"sync"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/log"

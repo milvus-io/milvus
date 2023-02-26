@@ -17,8 +17,9 @@
 package config
 
 import (
-	"errors"
 	"strings"
+
+	"github.com/cockroachdb/errors"
 )
 
 var (

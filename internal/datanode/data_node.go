@@ -21,7 +21,6 @@ package datanode
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"math/rand"
@@ -32,6 +31,8 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"

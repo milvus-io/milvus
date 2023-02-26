@@ -18,8 +18,9 @@ package meta
 
 import (
 	"context"
-	"errors"
 	"testing"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 

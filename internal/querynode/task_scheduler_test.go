@@ -18,8 +18,9 @@ package querynode
 
 import (
 	"context"
-	"errors"
 	"testing"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/stretchr/testify/assert"

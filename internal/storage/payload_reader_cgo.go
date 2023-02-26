@@ -8,9 +8,10 @@ package storage
 */
 import "C"
 import (
-	"errors"
 	"fmt"
 	"unsafe"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
@@ -36,11 +37,14 @@ func NewPayloadReaderCgo(colType schemapb.DataType, buf []byte) (*PayloadReaderC
 
 // GetDataFromPayload returns data,length from payload, returns err if failed
 // Params:
-//      `idx`: String index
+//
+//	`idx`: String index
+//
 // Return:
-//      `interface{}`: all types.
-//      `int`: length, only meaningful to FLOAT/BINARY VECTOR type.
-//      `error`: error.
+//
+//	`interface{}`: all types.
+//	`int`: length, only meaningful to FLOAT/BINARY VECTOR type.
+//	`error`: error.
 func (r *PayloadReaderCgo) GetDataFromPayload() (interface{}, int, error) {
 	switch r.colType {
 	case schemapb.DataType_Bool:

@@ -18,7 +18,6 @@ package proxy
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math/rand"
 	"os"
@@ -27,6 +26,8 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"

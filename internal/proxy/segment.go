@@ -19,9 +19,10 @@ package proxy
 import (
 	"container/list"
 	"context"
-	"errors"
 	"fmt"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"go.uber.org/zap"
 

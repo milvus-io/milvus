@@ -9,9 +9,10 @@ package indexcgowrapper
 */
 import "C"
 import (
-	"errors"
 	"fmt"
 	"unsafe"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/log"

@@ -18,9 +18,10 @@ package grpcproxyclient
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proxy"

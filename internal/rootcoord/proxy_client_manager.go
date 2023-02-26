@@ -18,9 +18,10 @@ package rootcoord
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
+
+	"github.com/cockroachdb/errors"
 
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"

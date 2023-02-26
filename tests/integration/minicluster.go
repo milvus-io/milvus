@@ -18,11 +18,12 @@ package integration
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math/rand"
 	"sync"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/datacoord"
 	"github.com/milvus-io/milvus/internal/datanode"

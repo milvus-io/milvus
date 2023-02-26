@@ -54,8 +54,8 @@ type ChunkManager_Exist_Call struct {
 }
 
 // Exist is a helper method to define mock.On call
-//  - ctx context.Context
-//  - filePath string
+//   - ctx context.Context
+//   - filePath string
 func (_e *ChunkManager_Expecter) Exist(ctx interface{}, filePath interface{}) *ChunkManager_Exist_Call {
 	return &ChunkManager_Exist_Call{Call: _e.mock.On("Exist", ctx, filePath)}
 }
@@ -110,9 +110,9 @@ type ChunkManager_ListWithPrefix_Call struct {
 }
 
 // ListWithPrefix is a helper method to define mock.On call
-//  - ctx context.Context
-//  - prefix string
-//  - recursive bool
+//   - ctx context.Context
+//   - prefix string
+//   - recursive bool
 func (_e *ChunkManager_Expecter) ListWithPrefix(ctx interface{}, prefix interface{}, recursive interface{}) *ChunkManager_ListWithPrefix_Call {
 	return &ChunkManager_ListWithPrefix_Call{Call: _e.mock.On("ListWithPrefix", ctx, prefix, recursive)}
 }
@@ -158,8 +158,8 @@ type ChunkManager_Mmap_Call struct {
 }
 
 // Mmap is a helper method to define mock.On call
-//  - ctx context.Context
-//  - filePath string
+//   - ctx context.Context
+//   - filePath string
 func (_e *ChunkManager_Expecter) Mmap(ctx interface{}, filePath interface{}) *ChunkManager_Mmap_Call {
 	return &ChunkManager_Mmap_Call{Call: _e.mock.On("Mmap", ctx, filePath)}
 }
@@ -205,8 +205,8 @@ type ChunkManager_MultiRead_Call struct {
 }
 
 // MultiRead is a helper method to define mock.On call
-//  - ctx context.Context
-//  - filePaths []string
+//   - ctx context.Context
+//   - filePaths []string
 func (_e *ChunkManager_Expecter) MultiRead(ctx interface{}, filePaths interface{}) *ChunkManager_MultiRead_Call {
 	return &ChunkManager_MultiRead_Call{Call: _e.mock.On("MultiRead", ctx, filePaths)}
 }
@@ -243,8 +243,8 @@ type ChunkManager_MultiRemove_Call struct {
 }
 
 // MultiRemove is a helper method to define mock.On call
-//  - ctx context.Context
-//  - filePaths []string
+//   - ctx context.Context
+//   - filePaths []string
 func (_e *ChunkManager_Expecter) MultiRemove(ctx interface{}, filePaths interface{}) *ChunkManager_MultiRemove_Call {
 	return &ChunkManager_MultiRemove_Call{Call: _e.mock.On("MultiRemove", ctx, filePaths)}
 }
@@ -281,8 +281,8 @@ type ChunkManager_MultiWrite_Call struct {
 }
 
 // MultiWrite is a helper method to define mock.On call
-//  - ctx context.Context
-//  - contents map[string][]byte
+//   - ctx context.Context
+//   - contents map[string][]byte
 func (_e *ChunkManager_Expecter) MultiWrite(ctx interface{}, contents interface{}) *ChunkManager_MultiWrite_Call {
 	return &ChunkManager_MultiWrite_Call{Call: _e.mock.On("MultiWrite", ctx, contents)}
 }
@@ -326,8 +326,8 @@ type ChunkManager_Path_Call struct {
 }
 
 // Path is a helper method to define mock.On call
-//  - ctx context.Context
-//  - filePath string
+//   - ctx context.Context
+//   - filePath string
 func (_e *ChunkManager_Expecter) Path(ctx interface{}, filePath interface{}) *ChunkManager_Path_Call {
 	return &ChunkManager_Path_Call{Call: _e.mock.On("Path", ctx, filePath)}
 }
@@ -373,8 +373,8 @@ type ChunkManager_Read_Call struct {
 }
 
 // Read is a helper method to define mock.On call
-//  - ctx context.Context
-//  - filePath string
+//   - ctx context.Context
+//   - filePath string
 func (_e *ChunkManager_Expecter) Read(ctx interface{}, filePath interface{}) *ChunkManager_Read_Call {
 	return &ChunkManager_Read_Call{Call: _e.mock.On("Read", ctx, filePath)}
 }
@@ -420,10 +420,10 @@ type ChunkManager_ReadAt_Call struct {
 }
 
 // ReadAt is a helper method to define mock.On call
-//  - ctx context.Context
-//  - filePath string
-//  - off int64
-//  - length int64
+//   - ctx context.Context
+//   - filePath string
+//   - off int64
+//   - length int64
 func (_e *ChunkManager_Expecter) ReadAt(ctx interface{}, filePath interface{}, off interface{}, length interface{}) *ChunkManager_ReadAt_Call {
 	return &ChunkManager_ReadAt_Call{Call: _e.mock.On("ReadAt", ctx, filePath, off, length)}
 }
@@ -478,8 +478,8 @@ type ChunkManager_ReadWithPrefix_Call struct {
 }
 
 // ReadWithPrefix is a helper method to define mock.On call
-//  - ctx context.Context
-//  - prefix string
+//   - ctx context.Context
+//   - prefix string
 func (_e *ChunkManager_Expecter) ReadWithPrefix(ctx interface{}, prefix interface{}) *ChunkManager_ReadWithPrefix_Call {
 	return &ChunkManager_ReadWithPrefix_Call{Call: _e.mock.On("ReadWithPrefix", ctx, prefix)}
 }
@@ -525,8 +525,8 @@ type ChunkManager_Reader_Call struct {
 }
 
 // Reader is a helper method to define mock.On call
-//  - ctx context.Context
-//  - filePath string
+//   - ctx context.Context
+//   - filePath string
 func (_e *ChunkManager_Expecter) Reader(ctx interface{}, filePath interface{}) *ChunkManager_Reader_Call {
 	return &ChunkManager_Reader_Call{Call: _e.mock.On("Reader", ctx, filePath)}
 }
@@ -563,8 +563,8 @@ type ChunkManager_Remove_Call struct {
 }
 
 // Remove is a helper method to define mock.On call
-//  - ctx context.Context
-//  - filePath string
+//   - ctx context.Context
+//   - filePath string
 func (_e *ChunkManager_Expecter) Remove(ctx interface{}, filePath interface{}) *ChunkManager_Remove_Call {
 	return &ChunkManager_Remove_Call{Call: _e.mock.On("Remove", ctx, filePath)}
 }
@@ -601,8 +601,8 @@ type ChunkManager_RemoveWithPrefix_Call struct {
 }
 
 // RemoveWithPrefix is a helper method to define mock.On call
-//  - ctx context.Context
-//  - prefix string
+//   - ctx context.Context
+//   - prefix string
 func (_e *ChunkManager_Expecter) RemoveWithPrefix(ctx interface{}, prefix interface{}) *ChunkManager_RemoveWithPrefix_Call {
 	return &ChunkManager_RemoveWithPrefix_Call{Call: _e.mock.On("RemoveWithPrefix", ctx, prefix)}
 }
@@ -682,8 +682,8 @@ type ChunkManager_Size_Call struct {
 }
 
 // Size is a helper method to define mock.On call
-//  - ctx context.Context
-//  - filePath string
+//   - ctx context.Context
+//   - filePath string
 func (_e *ChunkManager_Expecter) Size(ctx interface{}, filePath interface{}) *ChunkManager_Size_Call {
 	return &ChunkManager_Size_Call{Call: _e.mock.On("Size", ctx, filePath)}
 }
@@ -720,9 +720,9 @@ type ChunkManager_Write_Call struct {
 }
 
 // Write is a helper method to define mock.On call
-//  - ctx context.Context
-//  - filePath string
-//  - content []byte
+//   - ctx context.Context
+//   - filePath string
+//   - content []byte
 func (_e *ChunkManager_Expecter) Write(ctx interface{}, filePath interface{}, content interface{}) *ChunkManager_Write_Call {
 	return &ChunkManager_Write_Call{Call: _e.mock.On("Write", ctx, filePath, content)}
 }

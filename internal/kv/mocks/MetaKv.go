@@ -82,10 +82,10 @@ type MetaKv_CompareValueAndSwap_Call struct {
 }
 
 // CompareValueAndSwap is a helper method to define mock.On call
-//  - key string
-//  - value string
-//  - target string
-//  - opts ...clientv3.OpOption
+//   - key string
+//   - value string
+//   - target string
+//   - opts ...clientv3.OpOption
 func (_e *MetaKv_Expecter) CompareValueAndSwap(key interface{}, value interface{}, target interface{}, opts ...interface{}) *MetaKv_CompareValueAndSwap_Call {
 	return &MetaKv_CompareValueAndSwap_Call{Call: _e.mock.On("CompareValueAndSwap",
 		append([]interface{}{key, value, target}, opts...)...)}
@@ -143,10 +143,10 @@ type MetaKv_CompareVersionAndSwap_Call struct {
 }
 
 // CompareVersionAndSwap is a helper method to define mock.On call
-//  - key string
-//  - version int64
-//  - target string
-//  - opts ...clientv3.OpOption
+//   - key string
+//   - version int64
+//   - target string
+//   - opts ...clientv3.OpOption
 func (_e *MetaKv_Expecter) CompareVersionAndSwap(key interface{}, version interface{}, target interface{}, opts ...interface{}) *MetaKv_CompareVersionAndSwap_Call {
 	return &MetaKv_CompareVersionAndSwap_Call{Call: _e.mock.On("CompareVersionAndSwap",
 		append([]interface{}{key, version, target}, opts...)...)}
@@ -190,7 +190,7 @@ type MetaKv_GetPath_Call struct {
 }
 
 // GetPath is a helper method to define mock.On call
-//  - key string
+//   - key string
 func (_e *MetaKv_Expecter) GetPath(key interface{}) *MetaKv_GetPath_Call {
 	return &MetaKv_GetPath_Call{Call: _e.mock.On("GetPath", key)}
 }
@@ -234,7 +234,7 @@ type MetaKv_Grant_Call struct {
 }
 
 // Grant is a helper method to define mock.On call
-//  - ttl int64
+//   - ttl int64
 func (_e *MetaKv_Expecter) Grant(ttl interface{}) *MetaKv_Grant_Call {
 	return &MetaKv_Grant_Call{Call: _e.mock.On("Grant", ttl)}
 }
@@ -280,7 +280,7 @@ type MetaKv_KeepAlive_Call struct {
 }
 
 // KeepAlive is a helper method to define mock.On call
-//  - id clientv3.LeaseID
+//   - id clientv3.LeaseID
 func (_e *MetaKv_Expecter) KeepAlive(id interface{}) *MetaKv_KeepAlive_Call {
 	return &MetaKv_KeepAlive_Call{Call: _e.mock.On("KeepAlive", id)}
 }
@@ -324,7 +324,7 @@ type MetaKv_Load_Call struct {
 }
 
 // Load is a helper method to define mock.On call
-//  - key string
+//   - key string
 func (_e *MetaKv_Expecter) Load(key interface{}) *MetaKv_Load_Call {
 	return &MetaKv_Load_Call{Call: _e.mock.On("Load", key)}
 }
@@ -379,7 +379,7 @@ type MetaKv_LoadWithPrefix_Call struct {
 }
 
 // LoadWithPrefix is a helper method to define mock.On call
-//  - key string
+//   - key string
 func (_e *MetaKv_Expecter) LoadWithPrefix(key interface{}) *MetaKv_LoadWithPrefix_Call {
 	return &MetaKv_LoadWithPrefix_Call{Call: _e.mock.On("LoadWithPrefix", key)}
 }
@@ -443,7 +443,7 @@ type MetaKv_LoadWithPrefix2_Call struct {
 }
 
 // LoadWithPrefix2 is a helper method to define mock.On call
-//  - key string
+//   - key string
 func (_e *MetaKv_Expecter) LoadWithPrefix2(key interface{}) *MetaKv_LoadWithPrefix2_Call {
 	return &MetaKv_LoadWithPrefix2_Call{Call: _e.mock.On("LoadWithPrefix2", key)}
 }
@@ -505,7 +505,7 @@ type MetaKv_LoadWithRevision_Call struct {
 }
 
 // LoadWithRevision is a helper method to define mock.On call
-//  - key string
+//   - key string
 func (_e *MetaKv_Expecter) LoadWithRevision(key interface{}) *MetaKv_LoadWithRevision_Call {
 	return &MetaKv_LoadWithRevision_Call{Call: _e.mock.On("LoadWithRevision", key)}
 }
@@ -576,7 +576,7 @@ type MetaKv_LoadWithRevisionAndVersions_Call struct {
 }
 
 // LoadWithRevisionAndVersions is a helper method to define mock.On call
-//  - key string
+//   - key string
 func (_e *MetaKv_Expecter) LoadWithRevisionAndVersions(key interface{}) *MetaKv_LoadWithRevisionAndVersions_Call {
 	return &MetaKv_LoadWithRevisionAndVersions_Call{Call: _e.mock.On("LoadWithRevisionAndVersions", key)}
 }
@@ -622,7 +622,7 @@ type MetaKv_MultiLoad_Call struct {
 }
 
 // MultiLoad is a helper method to define mock.On call
-//  - keys []string
+//   - keys []string
 func (_e *MetaKv_Expecter) MultiLoad(keys interface{}) *MetaKv_MultiLoad_Call {
 	return &MetaKv_MultiLoad_Call{Call: _e.mock.On("MultiLoad", keys)}
 }
@@ -659,7 +659,7 @@ type MetaKv_MultiRemove_Call struct {
 }
 
 // MultiRemove is a helper method to define mock.On call
-//  - keys []string
+//   - keys []string
 func (_e *MetaKv_Expecter) MultiRemove(keys interface{}) *MetaKv_MultiRemove_Call {
 	return &MetaKv_MultiRemove_Call{Call: _e.mock.On("MultiRemove", keys)}
 }
@@ -696,7 +696,7 @@ type MetaKv_MultiRemoveWithPrefix_Call struct {
 }
 
 // MultiRemoveWithPrefix is a helper method to define mock.On call
-//  - keys []string
+//   - keys []string
 func (_e *MetaKv_Expecter) MultiRemoveWithPrefix(keys interface{}) *MetaKv_MultiRemoveWithPrefix_Call {
 	return &MetaKv_MultiRemoveWithPrefix_Call{Call: _e.mock.On("MultiRemoveWithPrefix", keys)}
 }
@@ -733,7 +733,7 @@ type MetaKv_MultiSave_Call struct {
 }
 
 // MultiSave is a helper method to define mock.On call
-//  - kvs map[string]string
+//   - kvs map[string]string
 func (_e *MetaKv_Expecter) MultiSave(kvs interface{}) *MetaKv_MultiSave_Call {
 	return &MetaKv_MultiSave_Call{Call: _e.mock.On("MultiSave", kvs)}
 }
@@ -770,8 +770,8 @@ type MetaKv_MultiSaveAndRemove_Call struct {
 }
 
 // MultiSaveAndRemove is a helper method to define mock.On call
-//  - saves map[string]string
-//  - removals []string
+//   - saves map[string]string
+//   - removals []string
 func (_e *MetaKv_Expecter) MultiSaveAndRemove(saves interface{}, removals interface{}) *MetaKv_MultiSaveAndRemove_Call {
 	return &MetaKv_MultiSaveAndRemove_Call{Call: _e.mock.On("MultiSaveAndRemove", saves, removals)}
 }
@@ -808,8 +808,8 @@ type MetaKv_MultiSaveAndRemoveWithPrefix_Call struct {
 }
 
 // MultiSaveAndRemoveWithPrefix is a helper method to define mock.On call
-//  - saves map[string]string
-//  - removals []string
+//   - saves map[string]string
+//   - removals []string
 func (_e *MetaKv_Expecter) MultiSaveAndRemoveWithPrefix(saves interface{}, removals interface{}) *MetaKv_MultiSaveAndRemoveWithPrefix_Call {
 	return &MetaKv_MultiSaveAndRemoveWithPrefix_Call{Call: _e.mock.On("MultiSaveAndRemoveWithPrefix", saves, removals)}
 }
@@ -846,7 +846,7 @@ type MetaKv_Remove_Call struct {
 }
 
 // Remove is a helper method to define mock.On call
-//  - key string
+//   - key string
 func (_e *MetaKv_Expecter) Remove(key interface{}) *MetaKv_Remove_Call {
 	return &MetaKv_Remove_Call{Call: _e.mock.On("Remove", key)}
 }
@@ -883,7 +883,7 @@ type MetaKv_RemoveWithPrefix_Call struct {
 }
 
 // RemoveWithPrefix is a helper method to define mock.On call
-//  - key string
+//   - key string
 func (_e *MetaKv_Expecter) RemoveWithPrefix(key interface{}) *MetaKv_RemoveWithPrefix_Call {
 	return &MetaKv_RemoveWithPrefix_Call{Call: _e.mock.On("RemoveWithPrefix", key)}
 }
@@ -920,8 +920,8 @@ type MetaKv_Save_Call struct {
 }
 
 // Save is a helper method to define mock.On call
-//  - key string
-//  - value string
+//   - key string
+//   - value string
 func (_e *MetaKv_Expecter) Save(key interface{}, value interface{}) *MetaKv_Save_Call {
 	return &MetaKv_Save_Call{Call: _e.mock.On("Save", key, value)}
 }
@@ -958,8 +958,8 @@ type MetaKv_SaveWithIgnoreLease_Call struct {
 }
 
 // SaveWithIgnoreLease is a helper method to define mock.On call
-//  - key string
-//  - value string
+//   - key string
+//   - value string
 func (_e *MetaKv_Expecter) SaveWithIgnoreLease(key interface{}, value interface{}) *MetaKv_SaveWithIgnoreLease_Call {
 	return &MetaKv_SaveWithIgnoreLease_Call{Call: _e.mock.On("SaveWithIgnoreLease", key, value)}
 }
@@ -996,9 +996,9 @@ type MetaKv_SaveWithLease_Call struct {
 }
 
 // SaveWithLease is a helper method to define mock.On call
-//  - key string
-//  - value string
-//  - id clientv3.LeaseID
+//   - key string
+//   - value string
+//   - id clientv3.LeaseID
 func (_e *MetaKv_Expecter) SaveWithLease(key interface{}, value interface{}, id interface{}) *MetaKv_SaveWithLease_Call {
 	return &MetaKv_SaveWithLease_Call{Call: _e.mock.On("SaveWithLease", key, value, id)}
 }
@@ -1035,9 +1035,9 @@ type MetaKv_WalkWithPrefix_Call struct {
 }
 
 // WalkWithPrefix is a helper method to define mock.On call
-//  - prefix string
-//  - paginationSize int
-//  - fn func([]byte , []byte) error
+//   - prefix string
+//   - paginationSize int
+//   - fn func([]byte , []byte) error
 func (_e *MetaKv_Expecter) WalkWithPrefix(prefix interface{}, paginationSize interface{}, fn interface{}) *MetaKv_WalkWithPrefix_Call {
 	return &MetaKv_WalkWithPrefix_Call{Call: _e.mock.On("WalkWithPrefix", prefix, paginationSize, fn)}
 }
@@ -1076,7 +1076,7 @@ type MetaKv_Watch_Call struct {
 }
 
 // Watch is a helper method to define mock.On call
-//  - key string
+//   - key string
 func (_e *MetaKv_Expecter) Watch(key interface{}) *MetaKv_Watch_Call {
 	return &MetaKv_Watch_Call{Call: _e.mock.On("Watch", key)}
 }
@@ -1115,7 +1115,7 @@ type MetaKv_WatchWithPrefix_Call struct {
 }
 
 // WatchWithPrefix is a helper method to define mock.On call
-//  - key string
+//   - key string
 func (_e *MetaKv_Expecter) WatchWithPrefix(key interface{}) *MetaKv_WatchWithPrefix_Call {
 	return &MetaKv_WatchWithPrefix_Call{Call: _e.mock.On("WatchWithPrefix", key)}
 }
@@ -1154,8 +1154,8 @@ type MetaKv_WatchWithRevision_Call struct {
 }
 
 // WatchWithRevision is a helper method to define mock.On call
-//  - key string
-//  - revision int64
+//   - key string
+//   - revision int64
 func (_e *MetaKv_Expecter) WatchWithRevision(key interface{}, revision interface{}) *MetaKv_WatchWithRevision_Call {
 	return &MetaKv_WatchWithRevision_Call{Call: _e.mock.On("WatchWithRevision", key, revision)}
 }

@@ -17,9 +17,10 @@
 package querynode
 
 import (
-	"errors"
 	"fmt"
 	"time"
+
+	"github.com/cockroachdb/errors"
 )
 
 var (

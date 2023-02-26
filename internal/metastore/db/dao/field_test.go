@@ -1,9 +1,10 @@
 package dao
 
 import (
-	"errors"
 	"testing"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"

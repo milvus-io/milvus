@@ -2,7 +2,8 @@ package proxy
 
 import (
 	"context"
-	"errors"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 )

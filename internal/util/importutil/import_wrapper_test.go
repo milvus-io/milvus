@@ -21,13 +21,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"math"
 	"os"
 	"path"
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/stretchr/testify/assert"
 	"golang.org/x/exp/mmap"

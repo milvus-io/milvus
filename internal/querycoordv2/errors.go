@@ -17,9 +17,10 @@
 package querycoordv2
 
 import (
-	"errors"
 	"fmt"
 	"time"
+
+	"github.com/cockroachdb/errors"
 )
 
 var (

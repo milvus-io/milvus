@@ -4,11 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"

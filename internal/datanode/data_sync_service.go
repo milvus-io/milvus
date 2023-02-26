@@ -18,9 +18,10 @@ package datanode
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
+
+	"github.com/cockroachdb/errors"
 
 	"go.uber.org/zap"
 

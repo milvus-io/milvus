@@ -21,7 +21,6 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"net"
@@ -30,6 +29,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"go.uber.org/zap"
 	grpcStatus "google.golang.org/grpc/status"

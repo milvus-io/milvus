@@ -18,10 +18,11 @@ package storage
 
 import (
 	"context"
-	"errors"
 	"io"
 	"sync"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"go.uber.org/zap"
 	"golang.org/x/exp/mmap"

@@ -18,9 +18,10 @@ package querynode
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math"
+
+	"github.com/cockroachdb/errors"
 
 	"go.uber.org/zap"
 

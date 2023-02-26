@@ -18,9 +18,10 @@ package querynode
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/storage"

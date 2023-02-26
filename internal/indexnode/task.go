@@ -19,12 +19,13 @@ package indexnode
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"runtime"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"go.uber.org/zap"
 

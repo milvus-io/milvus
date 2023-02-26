@@ -17,8 +17,9 @@
 package common
 
 import (
-	"errors"
 	"fmt"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 )

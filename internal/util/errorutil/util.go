@@ -1,9 +1,10 @@
 package errorutil
 
 import (
-	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"

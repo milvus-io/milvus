@@ -18,9 +18,10 @@ package proxy
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strconv"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 

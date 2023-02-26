@@ -3,9 +3,10 @@ package httpserver
 import (
 	"encoding/binary"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"math"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"

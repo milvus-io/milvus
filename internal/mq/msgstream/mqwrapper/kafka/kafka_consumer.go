@@ -1,9 +1,10 @@
 package kafka
 
 import (
-	"errors"
 	"sync"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"github.com/milvus-io/milvus/internal/log"

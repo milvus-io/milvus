@@ -18,7 +18,6 @@ package msgstream
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"math/rand"
@@ -28,6 +27,8 @@ import (
 	"testing"
 	"time"
 	"unsafe"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 

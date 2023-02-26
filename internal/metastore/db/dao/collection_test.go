@@ -4,10 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
-	"errors"
 	"os"
 	"testing"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/common"
 

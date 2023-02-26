@@ -17,10 +17,11 @@
 package config
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"sync"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/spf13/cast"

@@ -1,7 +1,7 @@
 package funcutil
 
 import (
-	"errors"
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 )

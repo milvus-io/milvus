@@ -18,10 +18,11 @@ package querycoordv2
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"

@@ -24,10 +24,11 @@ package storage
 */
 import "C"
 import (
-	"errors"
 	"fmt"
 	"reflect"
 	"unsafe"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/util/typeutil"

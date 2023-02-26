@@ -18,9 +18,10 @@ package datacoord
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"testing"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/indexnode"

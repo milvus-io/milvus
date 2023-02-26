@@ -16,7 +16,7 @@
 
 package job
 
-import "errors"
+import "github.com/cockroachdb/errors"
 
 var (
 	// Common errors

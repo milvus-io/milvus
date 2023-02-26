@@ -18,7 +18,6 @@ package rootcoord
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"path"
 	"regexp"
@@ -27,6 +26,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"go.uber.org/zap"
 

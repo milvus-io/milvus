@@ -18,10 +18,11 @@ package storage
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path"
 	"testing"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/stretchr/testify/assert"
 

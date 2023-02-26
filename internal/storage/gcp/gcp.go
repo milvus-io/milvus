@@ -4,9 +4,9 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/cockroachdb/errors"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
-	"github.com/pkg/errors"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 )

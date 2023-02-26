@@ -18,7 +18,6 @@ package datacoord
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math/rand"
 	"os"
@@ -26,6 +25,8 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/blang/semver/v4"
 	clientv3 "go.etcd.io/etcd/client/v3"

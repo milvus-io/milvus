@@ -2,9 +2,10 @@ package proxy
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
+
+	"github.com/cockroachdb/errors"
 
 	qnClient "github.com/milvus-io/milvus/internal/distributed/querynode/client"
 	"github.com/milvus-io/milvus/internal/types"

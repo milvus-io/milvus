@@ -1,8 +1,9 @@
 package querycoord
 
 import (
-	"errors"
 	"fmt"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"

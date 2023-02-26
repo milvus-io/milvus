@@ -17,8 +17,9 @@
 package grpcclient
 
 import (
-	"errors"
 	"fmt"
+
+	"github.com/cockroachdb/errors"
 )
 
 // ErrConnect is the instance for errors.Is target usage.

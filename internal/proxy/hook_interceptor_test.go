@@ -2,8 +2,9 @@ package proxy
 
 import (
 	"context"
-	"errors"
 	"testing"
+
+	"github.com/cockroachdb/errors"
 
 	"google.golang.org/grpc"
 

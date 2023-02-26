@@ -234,7 +234,7 @@ var (
 		}, []string{functionLabelName, fullMethodLabelName})
 )
 
-//RegisterProxy registers Proxy metrics
+// RegisterProxy registers Proxy metrics
 func RegisterProxy(registry *prometheus.Registry) {
 	registry.MustRegister(ProxySearchVectors)
 	registry.MustRegister(ProxyInsertVectors)

@@ -17,11 +17,12 @@
 package datacoord
 
 import (
-	"errors"
 	"fmt"
 	"math"
 	"strconv"
 	"strings"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 

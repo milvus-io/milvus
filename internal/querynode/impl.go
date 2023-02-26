@@ -18,12 +18,13 @@ package querynode
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sort"
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"

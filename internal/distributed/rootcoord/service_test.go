@@ -18,12 +18,13 @@ package grpcrootcoord
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math/rand"
 	"path"
 	"testing"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 

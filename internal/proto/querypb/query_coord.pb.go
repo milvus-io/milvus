@@ -6,6 +6,8 @@ package querypb
 import (
 	context "context"
 	fmt "fmt"
+	math "math"
+
 	proto "github.com/golang/protobuf/proto"
 	commonpb "github.com/milvus-io/milvus-proto/go-api/commonpb"
 	milvuspb "github.com/milvus-io/milvus-proto/go-api/milvuspb"
@@ -15,7 +17,6 @@ import (
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
-	math "math"
 )
 
 // Reference imports to suppress errors if they are not otherwise used.
@@ -215,7 +216,7 @@ func (SyncType) EnumDescriptor() ([]byte, []int) {
 	return fileDescriptor_aab7cc9a69ed26e8, []int{5}
 }
 
-//--------------------QueryCoord grpc request and response proto------------------
+// --------------------QueryCoord grpc request and response proto------------------
 type ShowCollectionsRequest struct {
 	Base *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
 	// Not useful for now
@@ -1221,7 +1222,7 @@ func (m *ShardLeadersList) GetNodeAddrs() []string {
 	return nil
 }
 
-//-----------------query node grpc request and response proto----------------
+// -----------------query node grpc request and response proto----------------
 type LoadMetaInfo struct {
 	LoadType             LoadType `protobuf:"varint,1,opt,name=load_type,json=loadType,proto3,enum=milvus.proto.query.LoadType" json:"load_type,omitempty"`
 	CollectionID         int64    `protobuf:"varint,2,opt,name=collectionID,proto3" json:"collectionID,omitempty"`
@@ -2207,7 +2208,7 @@ func (m *ReplicaSegmentsInfo) GetVersions() []int64 {
 	return nil
 }
 
-//----------------request auto triggered by QueryCoord-----------------
+// ----------------request auto triggered by QueryCoord-----------------
 type HandoffSegmentsRequest struct {
 	Base                 *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
 	SegmentInfos         []*SegmentInfo    `protobuf:"bytes,2,rep,name=segmentInfos,proto3" json:"segmentInfos,omitempty"`
@@ -2904,7 +2905,7 @@ func (m *UnsubscribeChannelInfo) GetCollectionChannels() []*UnsubscribeChannels 
 	return nil
 }
 
-//---- synchronize messages proto between QueryCoord and QueryNode -----
+// ---- synchronize messages proto between QueryCoord and QueryNode -----
 type SegmentChangeInfo struct {
 	OnlineNodeID         int64          `protobuf:"varint,1,opt,name=online_nodeID,json=onlineNodeID,proto3" json:"online_nodeID,omitempty"`
 	OnlineSegments       []*SegmentInfo `protobuf:"bytes,2,rep,name=online_segments,json=onlineSegments,proto3" json:"online_segments,omitempty"`

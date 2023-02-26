@@ -18,9 +18,10 @@ package querynode
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/common"

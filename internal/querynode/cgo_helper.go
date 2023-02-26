@@ -27,9 +27,10 @@ package querynode
 import "C"
 
 import (
-	"errors"
 	"fmt"
 	"unsafe"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/golang/protobuf/proto"
 

@@ -2,7 +2,7 @@ package indexcoord
 
 //import (
 //	"context"
-//	"errors"
+//	"github.com/cockroachdb/errors"
 //	"github.com/milvus-io/milvus/internal/metastore/db/dbmodel"
 //	"os"
 //	"testing"

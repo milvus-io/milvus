@@ -18,9 +18,10 @@ package querynode
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
+
+	"github.com/cockroachdb/errors"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"

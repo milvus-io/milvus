@@ -18,11 +18,12 @@ package proxy
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"strconv"
 	"sync"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/golang/protobuf/proto"
 	"go.opentelemetry.io/otel"

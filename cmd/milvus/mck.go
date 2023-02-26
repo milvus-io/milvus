@@ -3,7 +3,6 @@ package milvus
 import (
 	"bytes"
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -11,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/storage"
 

@@ -17,12 +17,13 @@
 package rootcoord
 
 import (
-	"errors"
 	"fmt"
 	"math/rand"
 	"os"
 	"testing"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"

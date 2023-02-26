@@ -1,9 +1,10 @@
 package httpserver
 
 import (
-	"errors"
 	"io"
 	"net/http"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"

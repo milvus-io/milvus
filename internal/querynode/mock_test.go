@@ -19,13 +19,14 @@ package querynode
 import (
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"math"
 	"math/rand"
 	"path"
 	"path/filepath"
 	"strconv"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"

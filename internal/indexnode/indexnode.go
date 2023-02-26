@@ -27,7 +27,6 @@ package indexnode
 import "C"
 import (
 	"context"
-	"errors"
 	"math/rand"
 	"os"
 	"path"
@@ -35,6 +34,8 @@ import (
 	"syscall"
 	"time"
 	"unsafe"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"

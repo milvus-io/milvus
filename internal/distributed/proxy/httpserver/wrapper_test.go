@@ -1,10 +1,11 @@
 package httpserver
 
 import (
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"

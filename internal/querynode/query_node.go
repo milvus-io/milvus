@@ -30,7 +30,6 @@ import "C"
 import (
 	"context"
 	"fmt"
-	"github.com/milvus-io/milvus/internal/mq/msgdispatcher"
 	"os"
 	"path"
 	"runtime"
@@ -39,6 +38,8 @@ import (
 	"syscall"
 	"time"
 	"unsafe"
+
+	"github.com/milvus-io/milvus/internal/mq/msgdispatcher"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"

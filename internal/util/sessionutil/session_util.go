@@ -19,13 +19,14 @@ package sessionutil
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"path"
 	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/blang/semver/v4"
 	"github.com/milvus-io/milvus/internal/common"
@@ -772,7 +773,8 @@ func (s *Session) updateStandby(b bool) {
 // 2, Try to register to active key.
 // 3, If 2. return true, this service becomes ACTIVE. Exit STANDBY mode.
 // 4, If 2. return false, which means an ACTIVE service already exist.
-//    Start watching the active key. Whenever active key disappears, STANDBY node will go backup to 2.
+//
+//	Start watching the active key. Whenever active key disappears, STANDBY node will go backup to 2.
 //
 // activateFunc is the function to re-active the service.
 func (s *Session) ProcessActiveStandBy(activateFunc func() error) error {

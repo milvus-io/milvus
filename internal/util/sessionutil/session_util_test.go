@@ -3,7 +3,6 @@ package sessionutil
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"math/rand"
@@ -15,6 +14,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/blang/semver/v4"
 	"github.com/milvus-io/milvus/internal/common"

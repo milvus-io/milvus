@@ -18,7 +18,7 @@ package indexnode
 
 // import (
 // 	"context"
-// 	"errors"
+// 	"github.com/cockroachdb/errors"
 // 	"math/rand"
 // 	"path"
 // 	"strconv"

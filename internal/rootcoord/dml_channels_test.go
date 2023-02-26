@@ -19,10 +19,11 @@ package rootcoord
 import (
 	"container/heap"
 	"context"
-	"errors"
 	"math/rand"
 	"sync"
 	"testing"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"

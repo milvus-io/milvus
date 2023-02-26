@@ -37,7 +37,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"errors"
+	"github.com/cockroachdb/errors"
 
 	"github.com/uber/jaeger-client-go/utils"
 	"go.uber.org/zap"

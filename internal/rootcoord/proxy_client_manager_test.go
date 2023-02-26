@@ -18,10 +18,11 @@ package rootcoord
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 	"testing"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 

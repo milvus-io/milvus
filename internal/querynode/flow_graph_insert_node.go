@@ -19,13 +19,14 @@ package querynode
 import (
 	"bytes"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 	"reflect"
 	"sort"
 	"strconv"
 	"sync"
+
+	"github.com/cockroachdb/errors"
 
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"

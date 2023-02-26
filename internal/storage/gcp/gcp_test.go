@@ -1,9 +1,10 @@
 package gcp
 
 import (
-	"errors"
 	"net/http"
 	"testing"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"

@@ -18,9 +18,10 @@ package rootcoord
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/common"
 

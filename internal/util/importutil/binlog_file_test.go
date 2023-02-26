@@ -17,9 +17,10 @@ package importutil
 
 import (
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"testing"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"

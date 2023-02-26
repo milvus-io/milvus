@@ -17,10 +17,11 @@
 package querynode
 
 import (
-	"errors"
 	"fmt"
 	"reflect"
 	"sync"
+
+	"github.com/cockroachdb/errors"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"

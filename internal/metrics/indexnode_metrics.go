@@ -76,7 +76,7 @@ var (
 		}, []string{nodeIDLabelName})
 )
 
-//RegisterIndexNode registers IndexNode metrics
+// RegisterIndexNode registers IndexNode metrics
 func RegisterIndexNode(registry *prometheus.Registry) {
 	registry.MustRegister(IndexNodeBuildIndexTaskCounter)
 	registry.MustRegister(IndexNodeLoadFieldLatency)

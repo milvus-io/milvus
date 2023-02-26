@@ -19,10 +19,11 @@ package datanode
 import (
 	"context"
 	"crypto/rand"
-	"errors"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"

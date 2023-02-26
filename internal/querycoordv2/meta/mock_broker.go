@@ -56,8 +56,8 @@ type MockBroker_GetCollectionSchema_Call struct {
 }
 
 // GetCollectionSchema is a helper method to define mock.On call
-//  - ctx context.Context
-//  - collectionID int64
+//   - ctx context.Context
+//   - collectionID int64
 func (_e *MockBroker_Expecter) GetCollectionSchema(ctx interface{}, collectionID interface{}) *MockBroker_GetCollectionSchema_Call {
 	return &MockBroker_GetCollectionSchema_Call{Call: _e.mock.On("GetCollectionSchema", ctx, collectionID)}
 }
@@ -103,9 +103,9 @@ type MockBroker_GetIndexInfo_Call struct {
 }
 
 // GetIndexInfo is a helper method to define mock.On call
-//  - ctx context.Context
-//  - collectionID int64
-//  - segmentID int64
+//   - ctx context.Context
+//   - collectionID int64
+//   - segmentID int64
 func (_e *MockBroker_Expecter) GetIndexInfo(ctx interface{}, collectionID interface{}, segmentID interface{}) *MockBroker_GetIndexInfo_Call {
 	return &MockBroker_GetIndexInfo_Call{Call: _e.mock.On("GetIndexInfo", ctx, collectionID, segmentID)}
 }
@@ -151,8 +151,8 @@ type MockBroker_GetPartitions_Call struct {
 }
 
 // GetPartitions is a helper method to define mock.On call
-//  - ctx context.Context
-//  - collectionID int64
+//   - ctx context.Context
+//   - collectionID int64
 func (_e *MockBroker_Expecter) GetPartitions(ctx interface{}, collectionID interface{}) *MockBroker_GetPartitions_Call {
 	return &MockBroker_GetPartitions_Call{Call: _e.mock.On("GetPartitions", ctx, collectionID)}
 }
@@ -207,9 +207,9 @@ type MockBroker_GetRecoveryInfo_Call struct {
 }
 
 // GetRecoveryInfo is a helper method to define mock.On call
-//  - ctx context.Context
-//  - collectionID int64
-//  - partitionID int64
+//   - ctx context.Context
+//   - collectionID int64
+//   - partitionID int64
 func (_e *MockBroker_Expecter) GetRecoveryInfo(ctx interface{}, collectionID interface{}, partitionID interface{}) *MockBroker_GetRecoveryInfo_Call {
 	return &MockBroker_GetRecoveryInfo_Call{Call: _e.mock.On("GetRecoveryInfo", ctx, collectionID, partitionID)}
 }
@@ -262,8 +262,8 @@ type MockBroker_GetSegmentInfo_Call struct {
 }
 
 // GetSegmentInfo is a helper method to define mock.On call
-//  - ctx context.Context
-//  - segmentID ...int64
+//   - ctx context.Context
+//   - segmentID ...int64
 func (_e *MockBroker_Expecter) GetSegmentInfo(ctx interface{}, segmentID ...interface{}) *MockBroker_GetSegmentInfo_Call {
 	return &MockBroker_GetSegmentInfo_Call{Call: _e.mock.On("GetSegmentInfo",
 		append([]interface{}{ctx}, segmentID...)...)}

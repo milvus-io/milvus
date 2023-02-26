@@ -17,7 +17,7 @@
 package task
 
 import (
-	"errors"
+	"github.com/cockroachdb/errors"
 
 	"github.com/samber/lo"
 	"go.uber.org/atomic"

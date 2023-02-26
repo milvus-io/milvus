@@ -18,11 +18,12 @@ package distributed
 
 import (
 	"context"
-	"errors"
 	"os"
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/cockroachdb/errors"
 
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_retry "github.com/grpc-ecosystem/go-grpc-middleware/retry"
@@ -207,10 +208,11 @@ func (cm *ConnectionManager) Stop() {
 	}
 }
 
-//go:norace
 // fix datarace in unittest
 // startWatchService will only be invoked at start procedure
 // otherwise, remove the annotation and add atomic protection
+//
+//go:norace
 func (cm *ConnectionManager) processEvent(channel <-chan *sessionutil.SessionEvent) {
 	for {
 		select {

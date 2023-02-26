@@ -1,8 +1,9 @@
 package dao
 
 import (
-	"errors"
 	"fmt"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/common"
 
