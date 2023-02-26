@@ -39,8 +39,9 @@ func NewPool(cap int, opts ...ants.Option) (*Pool, error) {
 // Submit a task into the pool,
 // executes it asynchronously.
 // This will block if the pool has finite workers and no idle worker.
-func (pool *Pool) Submit(method func() (interface{}, error)) *Future {
-	future := newFuture()
+// NOTE: As now golang doesn't support the member method being generic, we use Future[any]
+func (pool *Pool) Submit(method func() (any, error)) *Future[any] {
+	future := newFuture[any]()
 	err := pool.inner.Submit(func() {
 		defer close(future.ch)
 		res, err := method()

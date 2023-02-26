@@ -319,7 +319,7 @@ func (loader *segmentLoader) loadGrowingSegmentFields(ctx context.Context, segme
 	iCodec := storage.InsertCodec{}
 
 	// change all field bin log loading into concurrent
-	loadFutures := make([]*concurrency.Future, 0, len(fieldBinlogs))
+	loadFutures := make([]*concurrency.Future[any], 0, len(fieldBinlogs))
 	for _, fieldBinlog := range fieldBinlogs {
 		futures := loader.loadFieldBinlogsAsync(ctx, fieldBinlog)
 		loadFutures = append(loadFutures, futures...)
@@ -427,8 +427,8 @@ func (loader *segmentLoader) loadSealedField(ctx context.Context, segment *Segme
 }
 
 // Load binlogs concurrently into memory from KV storage asyncly
-func (loader *segmentLoader) loadFieldBinlogsAsync(ctx context.Context, field *datapb.FieldBinlog) []*concurrency.Future {
-	futures := make([]*concurrency.Future, 0, len(field.Binlogs))
+func (loader *segmentLoader) loadFieldBinlogsAsync(ctx context.Context, field *datapb.FieldBinlog) []*concurrency.Future[any] {
+	futures := make([]*concurrency.Future[any], 0, len(field.Binlogs))
 	for i := range field.Binlogs {
 		path := field.Binlogs[i].GetLogPath()
 		future := loader.ioPool.Submit(func() (interface{}, error) {
@@ -473,7 +473,7 @@ func (loader *segmentLoader) loadFieldIndexData(ctx context.Context, segment *Se
 	log := log.With(zap.Int64("segment", segment.ID()))
 	indexBuffer := make([][]byte, 0, len(indexInfo.IndexFilePaths))
 	filteredPaths := make([]string, 0, len(indexInfo.IndexFilePaths))
-	futures := make([]*concurrency.Future, 0, len(indexInfo.IndexFilePaths))
+	futures := make([]*concurrency.Future[any], 0, len(indexInfo.IndexFilePaths))
 	indexCodec := storage.NewIndexFileBinlogCodec()
 
 	// TODO, remove the load index info froam

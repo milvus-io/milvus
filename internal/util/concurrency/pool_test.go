@@ -29,7 +29,7 @@ func TestPool(t *testing.T) {
 	assert.NoError(t, err)
 
 	taskNum := pool.Cap() * 2
-	futures := make([]*Future, 0, taskNum)
+	futures := make([]*Future[any], 0, taskNum)
 	for i := 0; i < taskNum; i++ {
 		res := i
 		future := pool.Submit(func() (interface{}, error) {
