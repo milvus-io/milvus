@@ -1696,11 +1696,7 @@ func genSimpleQueryNodeWithMQFactory(ctx context.Context, fac dependency.Factory
 	node.etcdCli = etcdCli
 	node.initSession()
 
-	node.taskPool, err = concurrency.NewPool(2, ants.WithPreAlloc(true))
-	if err != nil {
-		log.Error("QueryNode init channel pool failed", zap.Error(err))
-		return nil, err
-	}
+	node.taskPool = concurrency.NewPool(2, ants.WithPreAlloc(true))
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath.GetValue())
 	node.etcdKV = etcdKV
 

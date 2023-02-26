@@ -985,17 +985,8 @@ func newSegmentLoader(
 	if ioPoolSize > 256 {
 		ioPoolSize = 256
 	}
-	ioPool, err := concurrency.NewPool(ioPoolSize, ants.WithPreAlloc(true))
-	if err != nil {
-		log.Error("failed to create goroutine pool for segment loader",
-			zap.Error(err))
-		panic(err)
-	}
-	cpuPool, err := concurrency.NewPool(cpuNum, ants.WithPreAlloc(true))
-	if err != nil {
-		log.Error("failed to create cpu goroutine pool for segment loader", zap.Error(err))
-		panic(err)
-	}
+	ioPool := concurrency.NewPool(ioPoolSize, ants.WithPreAlloc(true))
+	cpuPool := concurrency.NewPool(cpuNum, ants.WithPreAlloc(true))
 
 	log.Info("SegmentLoader created",
 		zap.Int("ioPoolSize", ioPoolSize),
