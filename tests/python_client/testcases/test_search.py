@@ -1081,7 +1081,8 @@ class TestCollectionSearch(TestcaseBase):
         # 2. rename collection
         new_collection_name = cf.gen_unique_str(prefix + "new")
         self.utility_wrap.rename_collection(collection_w.name, new_collection_name)
-        collection_w = self.init_collection_general(auto_id=auto_id, dim=dim, name=new_collection_name)[0]
+        collection_w = self.init_collection_general(auto_id=auto_id, is_index=True,
+                                                    dim=dim, name=new_collection_name)[0]
         # 3. search
         log.info("test_search_normal_default_params: searching collection %s" % collection_w.name)
         vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
