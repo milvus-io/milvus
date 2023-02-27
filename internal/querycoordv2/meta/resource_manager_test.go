@@ -196,8 +196,10 @@ func (suite *ResourceManagerSuite) TestRecover() {
 	err = suite.manager.AddResourceGroup("rg2")
 	suite.NoError(err)
 
-	suite.manager.AssignNode("rg1", 1)
-	suite.manager.AssignNode("rg2", 2)
+	suite.manager.AssignNode(DefaultResourceGroupName, 1)
+	suite.manager.TransferNode(DefaultResourceGroupName, "rg1", 1)
+	suite.manager.AssignNode(DefaultResourceGroupName, 2)
+	suite.manager.TransferNode(DefaultResourceGroupName, "rg2", 1)
 	suite.manager.AssignNode(DefaultResourceGroupName, 3)
 	suite.manager.AssignNode(DefaultResourceGroupName, 4)
 
@@ -214,7 +216,6 @@ func (suite *ResourceManagerSuite) TestRecover() {
 	suite.NoError(err)
 	suite.Equal(1, rg.GetCapacity())
 	suite.True(suite.manager.ContainsNode("rg1", 1))
-	print(suite.manager.GetNodes("rg1"))
 
 	rg, err = suite.manager.GetResourceGroup("rg2")
 	suite.NoError(err)
