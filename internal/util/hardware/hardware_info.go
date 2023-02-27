@@ -149,3 +149,12 @@ func GetDiskCount() uint64 {
 func GetDiskUsage() uint64 {
 	return 2 * 1024 * 1024
 }
+
+func GetMemoryUseRatio() float64 {
+	usedMemory := GetUsedMemoryCount()
+	totalMemory := GetMemoryCount()
+	if usedMemory > 0 && totalMemory > 0 {
+		return float64(usedMemory) / float64(totalMemory)
+	}
+	return 0
+}

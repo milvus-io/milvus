@@ -1545,6 +1545,11 @@ type dataNodeConfig struct {
 
 	CreatedTime time.Time
 	UpdatedTime time.Time
+
+	// memory management
+	MemoryForceSyncEnable       bool
+	MemoryForceSyncThreshold    float64
+	MemoryForceSyncSegmentRatio float64
 }
 
 func (p *dataNodeConfig) init(base *BaseTable) {
@@ -1559,6 +1564,9 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	p.initIOConcurrency()
 
 	p.initChannelWatchPath()
+	p.initMemoryForceSyncEnable()
+	p.initMemoryForceSyncRatio()
+	p.initMemoryForceSyncSegmentRatio()
 }
 
 // InitAlias init this DataNode alias
@@ -1625,6 +1633,18 @@ func (p *dataNodeConfig) GetNodeID() UniqueID {
 		return val.(UniqueID)
 	}
 	return 0
+}
+
+func (p *dataNodeConfig) initMemoryForceSyncEnable() {
+	p.MemoryForceSyncEnable = p.Base.ParseBool("datanode.memory.forceSyncEnable", true)
+}
+
+func (p *dataNodeConfig) initMemoryForceSyncRatio() {
+	p.MemoryForceSyncThreshold = p.Base.ParseFloatWithDefault("datanode.memory.forceSyncThreshold", 0.7)
+}
+
+func (p *dataNodeConfig) initMemoryForceSyncSegmentRatio() {
+	p.MemoryForceSyncSegmentRatio = p.Base.ParseFloatWithDefault("datanode.memory.forceSyncSegmentRatio", 0.3)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
