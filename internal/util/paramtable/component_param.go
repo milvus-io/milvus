@@ -35,7 +35,7 @@ const (
 	DefaultGracefulStopTimeout   = 30   // s
 	DefaultThreadCoreCoefficient = 10
 
-	DefaultSessionTTL        = 60 //s
+	DefaultSessionTTL        = 20 //s
 	DefaultSessionRetryTimes = 30
 
 	DefaultMaxDegree                = 56
@@ -594,7 +594,7 @@ like the old password verification when updating the credential`,
 	p.SessionTTL = ParamItem{
 		Key:          "common.session.ttl",
 		Version:      "2.0.0",
-		DefaultValue: "60",
+		DefaultValue: "20",
 		Doc:          "ttl value when session granting a lease to register service",
 		Export:       true,
 	}
