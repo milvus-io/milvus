@@ -388,7 +388,9 @@ func (node *QueryNode) Stop() error {
 			node.queryShardService.close()
 		}
 
-		node.session.Revoke(time.Second)
+		if node.session != nil {
+			node.session.Stop()
+		}
 	})
 	return nil
 }

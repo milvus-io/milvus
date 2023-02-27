@@ -710,7 +710,7 @@ func (c *Core) cancelIfNotNil() {
 func (c *Core) revokeSession() {
 	if c.session != nil {
 		// wait at most one second to revoke
-		c.session.Revoke(time.Second)
+		c.session.Stop()
 		log.Info("revoke rootcoord session")
 	}
 }

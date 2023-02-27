@@ -350,7 +350,9 @@ func (i *IndexCoord) Stop() error {
 	for _, cb := range i.closeCallbacks {
 		cb()
 	}
-	i.session.Revoke(time.Second)
+	if i.session != nil {
+		i.session.Stop()
+	}
 
 	return nil
 }

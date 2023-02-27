@@ -884,7 +884,9 @@ func (s *Server) Stop() error {
 		s.stopCompactionHandler()
 	}
 
-	s.session.Revoke(time.Second)
+	if s.session != nil {
+		s.session.Stop()
+	}
 	return nil
 }
 
