@@ -34,7 +34,7 @@ func TestLoadIndexInfo(t *testing.T) {
 	})
 	indexParams = append(indexParams, &commonpb.KeyValuePair{
 		Key:   "index_mode",
-		Value: "cpu",
+		Value: "CPU",
 	})
 	indexParams = append(indexParams, &commonpb.KeyValuePair{
 		Key:   "metric_type",
