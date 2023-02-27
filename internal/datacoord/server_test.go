@@ -1266,24 +1266,26 @@ func TestSaveBinlogPaths(t *testing.T) {
 					FieldID: 1,
 					Binlogs: []*datapb.Binlog{
 						{
-							LogPath: "/by-dev/test/0/1/1/1/Allo1",
+							LogPath:    "/by-dev/test/0/1/1/1/Allo1",
+							EntriesNum: 5,
 						},
 						{
-							LogPath: "/by-dev/test/0/1/1/1/Allo2",
+							LogPath:    "/by-dev/test/0/1/1/1/Allo2",
+							EntriesNum: 5,
 						},
 					},
 				},
 			},
 			CheckPoints: []*datapb.CheckPoint{
 				{
-					SegmentID: 0,
+					SegmentID: 1,
 					Position: &internalpb.MsgPosition{
 						ChannelName: "ch1",
 						MsgID:       []byte{1, 2, 3},
 						MsgGroup:    "",
 						Timestamp:   0,
 					},
-					NumOfRows: 10,
+					NumOfRows: 12,
 				},
 			},
 			Flushed: false,
@@ -1302,11 +1304,9 @@ func TestSaveBinlogPaths(t *testing.T) {
 		assert.EqualValues(t, "/by-dev/test/0/1/1/1/Allo1", fieldBinlogs.GetBinlogs()[0].GetLogPath())
 		assert.EqualValues(t, "/by-dev/test/0/1/1/1/Allo2", fieldBinlogs.GetBinlogs()[1].GetLogPath())
 
-		segmentInfo := svr.meta.GetSegment(0)
-		assert.NotNil(t, segmentInfo)
-		assert.EqualValues(t, segmentInfo.DmlPosition.ChannelName, "ch1")
-		assert.EqualValues(t, segmentInfo.DmlPosition.MsgID, []byte{1, 2, 3})
-		assert.EqualValues(t, segmentInfo.NumOfRows, 10)
+		assert.EqualValues(t, segment.DmlPosition.ChannelName, "ch1")
+		assert.EqualValues(t, segment.DmlPosition.MsgID, []byte{1, 2, 3})
+		assert.EqualValues(t, segment.NumOfRows, 10)
 	})
 
 	t.Run("with channel not matched", func(t *testing.T) {

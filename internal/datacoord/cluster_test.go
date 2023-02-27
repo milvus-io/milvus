@@ -617,7 +617,7 @@ func TestCluster_ReCollectSegmentStats(t *testing.T) {
 		assert.NoError(t, err)
 
 		assert.NotPanics(t, func() {
-			cluster.ReCollectSegmentStats(ctx, 1)
+			cluster.ReCollectSegmentStats(ctx)
 		})
 		time.Sleep(500 * time.Millisecond)
 	})
@@ -643,7 +643,7 @@ func TestCluster_ReCollectSegmentStats(t *testing.T) {
 		assert.NoError(t, err)
 
 		assert.NotPanics(t, func() {
-			cluster.ReCollectSegmentStats(ctx, 1)
+			cluster.ReCollectSegmentStats(ctx)
 		})
 		time.Sleep(500 * time.Millisecond)
 	})
