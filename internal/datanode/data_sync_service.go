@@ -203,7 +203,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo, tick
 		return err
 	}
 
-	futures := make([]*concurrency.Future, 0, len(unflushedSegmentInfos)+len(flushedSegmentInfos))
+	futures := make([]*concurrency.Future[any], 0, len(unflushedSegmentInfos)+len(flushedSegmentInfos))
 
 	for _, us := range unflushedSegmentInfos {
 		if us.CollectionID != dsService.collectionID ||

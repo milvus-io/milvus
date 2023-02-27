@@ -23,7 +23,7 @@ func Test_getOrCreateIOPool(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			p := getOrCreateIOPool()
-			futures := make([]*concurrency.Future, 0, nTask)
+			futures := make([]*concurrency.Future[any], 0, nTask)
 			for j := 0; j < nTask; j++ {
 				future := p.Submit(func() (interface{}, error) {
 					return nil, nil
