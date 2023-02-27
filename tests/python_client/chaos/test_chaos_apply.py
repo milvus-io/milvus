@@ -96,10 +96,19 @@ class TestChaosApply:
         # delete chaos
         chaos_res.delete(meta_name)
         log.info("chaos deleted")
-        res = chaos_res.list_all()
-        chaos_list = [r['metadata']['name'] for r in res['items']]
-        # verify the chaos is deleted
-        assert meta_name not in chaos_list
+
+        wait_chaos_deleted = 120  # wait 2m for chaos object deleted
+        wait_start = time.time()
+        while True:
+            res = chaos_res.list_all()
+            chaos_list = [r['metadata']['name'] for r in res['items']]
+            # if the chaos is deleted
+            if meta_name not in chaos_list:
+                break
+            if time.time() - wait_start > wait_chaos_deleted:
+                raise Exception(f"Failed to delete chaos {meta_name} within {wait_chaos_deleted}s, all chaos: {chaos_list}")
+            sleep(1.0)
+
         sleep(2)
         # wait all pods ready
         log.info(f"wait for pods in namespace {constants.CHAOS_NAMESPACE} with label app.kubernetes.io/instance={meta_name}")
