@@ -155,10 +155,9 @@ SegmentSealedImpl::LoadFieldData(const LoadFieldDataInfo& info) {
     AssertInfo(info.field_data != nullptr, "Field info blob is null");
     auto size = info.row_count;
     if (row_count_opt_.has_value()) {
-        AssertInfo(row_count_opt_.value() == size, "field (" + std::to_string(field_id.get()) +
-                                                       ") data has different row count (" + std::to_string(size) +
-                                                       ") than other column's row count (" +
-                                                       std::to_string(row_count_opt_.value()) + ")");
+        AssertInfo(row_count_opt_.value() == size,
+                   fmt::format("field {} has different row count {} to other column's {}", field_id.get(), size,
+                               row_count_opt_.value()));
     }
 
     if (SystemProperty::Instance().IsSystem(field_id)) {

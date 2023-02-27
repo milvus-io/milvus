@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <fmt/core.h>
 #include <tbb/concurrent_vector.h>
 
 #include <atomic>
@@ -284,8 +285,9 @@ class ConcurrentVectorImpl : public VectorBase {
         if (element_count <= 0) {
             return;
         }
-        auto chunk_max_size = chunks_.size();
-        AssertInfo(chunk_id < chunk_max_size, "chunk_id=" + std::to_string(chunk_id));
+        auto chunk_num = chunks_.size();
+        AssertInfo(chunk_id < chunk_num,
+                   fmt::format("chunk_id out of chunk num, chunk_id={}, chunk_num={}", chunk_id, chunk_num));
         Chunk& chunk = chunks_[chunk_id];
         auto ptr = chunk.data();
         std::copy_n(source + source_offset * Dim, element_count * Dim, ptr + chunk_offset * Dim);
