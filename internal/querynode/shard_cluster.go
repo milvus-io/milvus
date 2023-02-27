@@ -328,7 +328,7 @@ func (sc *ShardCluster) removeSegment(evt shardSegmentInfo) {
 	log := sc.getLogger()
 	log.Info("ShardCluster remove segment", zap.Int64("nodeID", evt.nodeID), zap.Int64("segmentID", evt.segmentID), zap.Int32("state", int32(evt.state)))
 
-	sc.distribution.RemoveDistributions(SegmentEntry{
+	sc.distribution.RemoveDistributions(func() {}, SegmentEntry{
 		SegmentID: evt.segmentID,
 		NodeID:    evt.nodeID,
 	})
@@ -556,30 +556,22 @@ func (sc *ShardCluster) ReleaseSegments(ctx context.Context, req *querypb.Releas
 		zap.Bool("force", force))
 
 	var err error
-	func() {
-		var entries []SegmentEntry
-		if req.Scope != querypb.DataScope_Streaming {
-			entries = lo.Map(req.GetSegmentIDs(), func(segmentID int64, _ int) SegmentEntry {
-				nodeID := req.GetNodeID()
-				if force {
-					nodeID = wildcardNodeID
-				}
-				return SegmentEntry{
-					SegmentID: segmentID,
-					NodeID:    nodeID,
-				}
-			})
-		}
-		signal := sc.distribution.RemoveDistributions(entries...)
+	var entries []SegmentEntry
+	if req.Scope != querypb.DataScope_Streaming {
+		entries = lo.Map(req.GetSegmentIDs(), func(segmentID int64, _ int) SegmentEntry {
+			nodeID := req.GetNodeID()
+			if force {
+				nodeID = wildcardNodeID
+			}
+			return SegmentEntry{
+				SegmentID: segmentID,
+				NodeID:    nodeID,
+			}
+		})
+	}
 
-		//wait signal done
-		<-signal
-
-		// force release skips the release call
-		if force {
-			return
-		}
-
+	// release operation,
+	releaseFn := func() {
 		// try to release segments from nodes
 		node, ok := sc.getNode(req.GetNodeID())
 		if !ok {
@@ -591,8 +583,8 @@ func (sc *ShardCluster) ReleaseSegments(ctx context.Context, req *querypb.Releas
 		req = proto.Clone(req).(*querypb.ReleaseSegmentsRequest)
 		req.Base.TargetID = req.GetNodeID()
 		resp, rerr := node.client.ReleaseSegments(ctx, req)
-		if err != nil {
-			log.Warn("failed to dispatch release segment request", zap.Error(err))
+		if rerr != nil {
+			log.Warn("failed to dispatch release segment request", zap.Error(rerr))
 			err = rerr
 			return
 		}
@@ -600,7 +592,9 @@ func (sc *ShardCluster) ReleaseSegments(ctx context.Context, req *querypb.Releas
 			log.Warn("follower release segment failed", zap.String("reason", resp.GetReason()))
 			err = fmt.Errorf("follower %d failed to release segment, reason %s", req.NodeID, resp.GetReason())
 		}
-	}()
+	}
+
+	sc.distribution.RemoveDistributions(releaseFn, entries...)
 
 	return err
 }

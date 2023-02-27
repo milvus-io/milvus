@@ -289,8 +289,11 @@ func (s *DistributionSuite) TestRemoveDistribution() {
 				_, version = s.dist.GetCurrent()
 			}
 
-			ch := s.dist.RemoveDistributions(tc.removalSealed...)
-
+			ch := make(chan struct{})
+			go func() {
+				s.dist.RemoveDistributions(func() {}, tc.removalSealed...)
+				close(ch)
+			}()
 			if tc.withMockRead {
 				// check ch not closed
 				select {

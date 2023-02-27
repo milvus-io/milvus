@@ -191,12 +191,11 @@ func (d *distribution) updateSegment(old, new SegmentEntry) {
 }
 
 // RemoveDistributions remove segments distributions and returns the clear signal channel.
-func (d *distribution) RemoveDistributions(sealedSegments ...SegmentEntry) chan struct{} {
+func (d *distribution) RemoveDistributions(releaseFn func(), sealedSegments ...SegmentEntry) {
 	d.mut.Lock()
 	defer d.mut.Unlock()
 
 	var delta int32
-	changed := false
 	for _, sealed := range sealedSegments {
 		entry, ok := d.sealedSegments[sealed.SegmentID]
 		if !ok {
@@ -207,20 +206,13 @@ func (d *distribution) RemoveDistributions(sealedSegments ...SegmentEntry) chan 
 				delta--
 			}
 			delete(d.sealedSegments, sealed.SegmentID)
-			changed = true
 		}
 	}
 
 	d.offlines.Add(delta)
 
-	if !changed {
-		// no change made, return closed signal channel
-		ch := make(chan struct{})
-		close(ch)
-		return ch
-	}
-
-	return d.genSnapshot()
+	<-d.genSnapshot()
+	releaseFn()
 }
 
 // getSnapshot converts current distribution to snapshot format.
