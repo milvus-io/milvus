@@ -37,8 +37,6 @@ import (
 	"stathat.com/c/consistent"
 )
 
-const bgCheckInterval = 3 * time.Second
-
 // ChannelManager manages the allocation and the balance between channels and data nodes.
 type ChannelManager struct {
 	ctx              context.Context
@@ -51,11 +49,14 @@ type ChannelManager struct {
 	assignPolicy     ChannelAssignPolicy
 	reassignPolicy   ChannelReassignPolicy
 	bgChecker        ChannelBGChecker
+	balancePolicy    BalanceChannelPolicy
 	msgstreamFactory msgstream.Factory
 
 	stateChecker channelStateChecker
 	stopChecker  context.CancelFunc
 	stateTimer   *channelStateTimer
+
+	lastActiveTimestamp time.Time
 }
 
 type channel struct {
@@ -90,6 +91,10 @@ func withStateChecker() ChannelManagerOpt {
 	return func(c *ChannelManager) { c.stateChecker = c.watchChannelStatesLoop }
 }
 
+func withBgChecker() ChannelManagerOpt {
+	return func(c *ChannelManager) { c.bgChecker = c.bgCheckChannelsWork }
+}
+
 // NewChannelManager creates and returns a new ChannelManager instance.
 func NewChannelManager(
 	kv kv.MetaKv, // for TxnKv and MetaKv
@@ -116,7 +121,8 @@ func NewChannelManager(
 	c.deregisterPolicy = c.factory.NewDeregisterPolicy()
 	c.assignPolicy = c.factory.NewAssignPolicy()
 	c.reassignPolicy = c.factory.NewReassignPolicy()
-	c.bgChecker = c.factory.NewBgChecker()
+	c.balancePolicy = c.factory.NewBalancePolicy()
+	c.lastActiveTimestamp = time.Now()
 	return c, nil
 }
 
@@ -155,11 +161,16 @@ func (c *ChannelManager) Startup(ctx context.Context, nodes []int64) error {
 	// Unwatch and drop channel with drop flag.
 	c.unwatchDroppedChannels()
 
+	checkerContext, cancel := context.WithCancel(ctx)
+	c.stopChecker = cancel
 	if c.stateChecker != nil {
-		ctx1, cancel := context.WithCancel(ctx)
-		c.stopChecker = cancel
-		go c.stateChecker(ctx1)
+		go c.stateChecker(checkerContext)
 		log.Info("starting etcd states checker")
+	}
+
+	if c.bgChecker != nil {
+		go c.bgChecker(checkerContext)
+		log.Info("starting background balance checker")
 	}
 
 	log.Info("cluster start up",
@@ -246,38 +257,25 @@ func (c *ChannelManager) unwatchDroppedChannels() {
 	}
 }
 
-// NOT USED.
 func (c *ChannelManager) bgCheckChannelsWork(ctx context.Context) {
-	ticker := time.NewTicker(bgCheckInterval)
+	ticker := time.NewTicker(Params.DataCoordCfg.ChannelBalanceInterval.GetAsDuration(time.Second))
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
+			log.Info("background checking channels loop quit")
 			return
 		case <-ticker.C:
 			c.mu.Lock()
-
-			channels := c.store.GetNodesChannels()
-			reallocates, err := c.bgChecker(channels, time.Now())
-			if err != nil {
-				log.Warn("channel manager bg check failed", zap.Error(err))
-
-				c.mu.Unlock()
-				continue
-			}
-
-			updates := c.reassignPolicy(c.store, reallocates)
-			log.Info("channel manager bg check reassign", zap.Array("updates", updates))
-			for _, update := range updates {
-				if update.Type == Add {
-					c.fillChannelWatchInfo(update)
+			if !c.isSilent() {
+				log.Info("ChannelManager is not silent, skip channel balance this round")
+			} else {
+				toReleases := c.balancePolicy(c.store, time.Now())
+				log.Info("channel manager bg check balance", zap.Array("toReleases", toReleases))
+				if err := c.updateWithTimer(toReleases, datapb.ChannelWatchState_ToRelease); err != nil {
+					log.Warn("channel store update error", zap.Error(err))
 				}
 			}
-
-			if err := c.store.Update(updates); err != nil {
-				log.Warn("channel store update error", zap.Error(err))
-			}
-
 			c.mu.Unlock()
 		}
 	}
@@ -610,6 +608,7 @@ func (c *ChannelManager) updateWithTimer(updates ChannelOpSet, state datapb.Chan
 		log.Warn("fail to update", zap.Array("updates", updates), zap.Error(err))
 		c.stateTimer.removeTimers(channelsWithTimer)
 	}
+	c.lastActiveTimestamp = time.Now()
 	return err
 }
 
@@ -623,14 +622,17 @@ func (c *ChannelManager) processAck(e *ackEvent) {
 	case watchSuccessAck:
 		log.Info("datanode successfully watched channel", zap.Int64("nodeID", e.nodeID), zap.String("channel name", e.channelName))
 	case watchFailAck, watchTimeoutAck: // failure acks from toWatch
+		log.Warn("datanode watch channel failed or timeout, will release", zap.Int64("nodeID", e.nodeID),
+			zap.String("channel", e.channelName))
 		err := c.Release(e.nodeID, e.channelName)
 		if err != nil {
 			log.Warn("fail to set channels to release for watch failure ACKs",
 				zap.Int64("nodeID", e.nodeID), zap.String("channel name", e.channelName), zap.Error(err))
 		}
-
 	case releaseFailAck, releaseTimeoutAck: // failure acks from toRelease
 		// Cleanup, Delete and Reassign
+		log.Warn("datanode release channel failed or timeout, will cleanup and reassign", zap.Int64("nodeID", e.nodeID),
+			zap.String("channel", e.channelName))
 		err := c.CleanupAndReassign(e.nodeID, e.channelName)
 		if err != nil {
 			log.Warn("fail to clean and reassign channels for release failure ACKs",
@@ -639,6 +641,8 @@ func (c *ChannelManager) processAck(e *ackEvent) {
 
 	case releaseSuccessAck:
 		// Delete and Reassign
+		log.Info("datanode release channel successfully, will reassign", zap.Int64("nodeID", e.nodeID),
+			zap.String("channel", e.channelName))
 		err := c.Reassign(e.nodeID, e.channelName)
 		if err != nil {
 			log.Warn("fail to response to release success ACK",
@@ -739,19 +743,19 @@ func (c *ChannelManager) Release(nodeID UniqueID, channelName string) error {
 }
 
 // Reassign reassigns a channel to another DataNode.
-func (c *ChannelManager) Reassign(nodeID UniqueID, channelName string) error {
+func (c *ChannelManager) Reassign(originNodeID UniqueID, channelName string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	ch := c.getChannelByNodeAndName(nodeID, channelName)
+	ch := c.getChannelByNodeAndName(originNodeID, channelName)
 	if ch == nil {
-		return fmt.Errorf("fail to find matching nodeID: %d with channelName: %s", nodeID, channelName)
+		return fmt.Errorf("fail to find matching nodeID: %d with channelName: %s", originNodeID, channelName)
 	}
 
-	reallocates := &NodeChannelInfo{nodeID, []*channel{ch}}
+	reallocates := &NodeChannelInfo{originNodeID, []*channel{ch}}
 
 	if c.isMarkedDrop(channelName) {
-		if err := c.remove(nodeID, ch); err != nil {
+		if err := c.remove(originNodeID, ch); err != nil {
 			return fmt.Errorf("failed to remove watch info: %v,%s", ch, err.Error())
 		}
 		if err := c.h.FinishDropChannel(channelName); err != nil {
@@ -766,13 +770,13 @@ func (c *ChannelManager) Reassign(nodeID UniqueID, channelName string) error {
 	if len(updates) <= 0 {
 		// Skip the remove if reassign to the original node.
 		log.Warn("failed to reassign channel to other nodes, assigning to the original DataNode",
-			zap.Int64("nodeID", nodeID),
+			zap.Int64("nodeID", originNodeID),
 			zap.String("channel name", channelName))
-		updates.Add(nodeID, []*channel{ch})
+		updates.Add(originNodeID, []*channel{ch})
 	}
 
 	log.Info("channel manager reassigning channels",
-		zap.Int64("old node ID", nodeID),
+		zap.Int64("old node ID", originNodeID),
 		zap.Array("updates", updates))
 	return c.updateWithTimer(updates, datapb.ChannelWatchState_ToWatch)
 }
@@ -863,4 +867,11 @@ func getReleaseOp(nodeID UniqueID, ch *channel) ChannelOpSet {
 	var op ChannelOpSet
 	op.Add(nodeID, []*channel{ch})
 	return op
+}
+
+func (c *ChannelManager) isSilent() bool {
+	if c.stateTimer.hasRunningTimers() {
+		return false
+	}
+	return time.Since(c.lastActiveTimestamp) >= Params.DataCoordCfg.ChannelBalanceSilentDuration.GetAsDuration(time.Second)
 }
