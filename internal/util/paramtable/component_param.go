@@ -1277,7 +1277,9 @@ type dataCoordConfig struct {
 	ChannelWatchSubPath string
 
 	// --- CHANNEL ---
-	WatchTimeoutInterval time.Duration
+	WatchTimeoutInterval         time.Duration
+	ChannelBalanceSilentDuration time.Duration
+	ChannelBalanceInterval       time.Duration
 
 	// --- SEGMENTS ---
 	SegmentMaxSize                 float64
@@ -1321,6 +1323,8 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	p.initChannelWatchPrefix()
 
 	p.initWatchTimeoutInterval()
+	p.initChannelBalanceSilentDuration()
+	p.initChannelBalanceInterval()
 
 	p.initSegmentMaxSize()
 	p.initDiskSegmentMaxSize()
@@ -1354,6 +1358,14 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 
 func (p *dataCoordConfig) initWatchTimeoutInterval() {
 	p.WatchTimeoutInterval = time.Duration(p.Base.ParseInt64WithDefault("dataCoord.channel.watchTimeoutInterval", 30)) * time.Second
+}
+
+func (p *dataCoordConfig) initChannelBalanceSilentDuration() {
+	p.ChannelBalanceSilentDuration = time.Duration(p.Base.ParseInt64WithDefault("dataCoord.channel.balanceSilentDuration", 300)) * time.Second
+}
+
+func (p *dataCoordConfig) initChannelBalanceInterval() {
+	p.ChannelBalanceInterval = time.Duration(p.Base.ParseInt64WithDefault("dataCoord.channel.balanceInterval", 360)) * time.Second
 }
 
 func (p *dataCoordConfig) initSegmentMaxSize() {
