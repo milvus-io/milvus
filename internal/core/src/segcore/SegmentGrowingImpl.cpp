@@ -46,8 +46,13 @@ SegmentGrowingImpl::mask_with_delete(BitsetType& bitset, int64_t ins_barrier, Ti
         return;
     }
     auto& delete_bitset = *bitmap_holder->bitmap_ptr;
-    AssertInfo(delete_bitset.size() == bitset.size(), "Deleted bitmap size not equal to filtered bitmap size");
-    bitset |= delete_bitset;
+    AssertInfo(bitset.empty() || delete_bitset.size() == bitset.size(),
+               "Deleted bitmap size not equal to filtered bitmap size");
+    if (bitset.empty()) {
+        bitset = std::move(delete_bitset);
+    } else {
+        bitset |= delete_bitset;
+    }
 }
 
 void

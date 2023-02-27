@@ -94,17 +94,22 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
             ExecExprVisitor(*segment, active_count, timestamp_).call_child(*node.predicate_.value()));
         bitset_holder->flip();
     } else {
-        bitset_holder = std::make_unique<BitsetType>(active_count, false);
+        bitset_holder = std::make_unique<BitsetType>();
     }
     segment->mask_with_timestamps(*bitset_holder, timestamp_);
 
     segment->mask_with_delete(*bitset_holder, active_count, timestamp_);
     // if bitset_holder is all 1's, we got empty result
-    if (bitset_holder->all()) {
+    if (!bitset_holder->empty() && bitset_holder->all()) {
         search_result_opt_ = empty_search_result(num_queries, node.search_info_);
         return;
     }
-    BitsetView final_view = *bitset_holder;
+    BitsetView final_view;
+    if (bitset_holder->empty()) {
+        final_view = nullptr;
+    } else {
+        final_view = *bitset_holder;
+    }
     segment->vector_search(node.search_info_, src_data, num_queries, timestamp_, final_view, search_result);
 
     search_result_opt_ = std::move(search_result);
