@@ -56,7 +56,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/panjf2000/ants/v2"
 	"github.com/samber/lo"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
@@ -272,17 +271,8 @@ func (node *QueryNode) Init() error {
 		node.etcdKV = etcdkv.NewEtcdKV(node.etcdCli, Params.EtcdCfg.MetaRootPath.GetValue())
 		log.Info("queryNode try to connect etcd success", zap.Any("MetaRootPath", Params.EtcdCfg.MetaRootPath))
 
-		cpuNum := runtime.GOMAXPROCS(0)
-
-		node.taskPool, err = concurrency.NewPool(cpuNum, ants.WithPreAlloc(true))
-		if err != nil {
-			log.Error("QueryNode init channel pool failed", zap.Error(err))
-			initError = err
-			return
-		}
-
+		node.taskPool = concurrency.NewDefaultPool()
 		node.metaReplica = newCollectionReplica()
-
 		node.loader = newSegmentLoader(
 			node.metaReplica,
 			node.etcdKV,

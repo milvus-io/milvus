@@ -15,7 +15,7 @@ func initIOPool() {
 		capacity = 32
 	}
 	// error only happens with negative expiry duration or with negative pre-alloc size.
-	ioPool, _ = concurrency.NewPool(capacity)
+	ioPool = concurrency.NewPool(capacity)
 }
 
 func getOrCreateIOPool() *concurrency.Pool {

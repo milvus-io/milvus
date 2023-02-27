@@ -16,24 +16,35 @@
 
 package concurrency
 
-import "github.com/panjf2000/ants/v2"
+import (
+	"runtime"
+
+	"github.com/panjf2000/ants/v2"
+)
 
 // A goroutine pool
 type Pool struct {
 	inner *ants.Pool
 }
 
-// Return error if provides invalid parameters
-// cap: the number of workers
-func NewPool(cap int, opts ...ants.Option) (*Pool, error) {
+// NewPool returns a goroutine pool.
+// cap: the number of workers.
+// This panic if provide any invalid option.
+func NewPool(cap int, opts ...ants.Option) *Pool {
 	pool, err := ants.NewPool(cap, opts...)
 	if err != nil {
-		return nil, err
+		panic(err)
 	}
 
 	return &Pool{
 		inner: pool,
-	}, nil
+	}
+}
+
+// NewDefaultPool returns a pool with cap of the number of logical CPU,
+// and pre-alloced goroutines.
+func NewDefaultPool() *Pool {
+	return NewPool(runtime.GOMAXPROCS(0), ants.WithPreAlloc(true))
 }
 
 // Submit a task into the pool,

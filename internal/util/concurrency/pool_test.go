@@ -17,7 +17,6 @@
 package concurrency
 
 import (
-	"runtime"
 	"testing"
 	"time"
 
@@ -25,8 +24,7 @@ import (
 )
 
 func TestPool(t *testing.T) {
-	pool, err := NewPool(runtime.NumCPU())
-	assert.NoError(t, err)
+	pool := NewDefaultPool()
 
 	taskNum := pool.Cap() * 2
 	futures := make([]*Future[any], 0, taskNum)
