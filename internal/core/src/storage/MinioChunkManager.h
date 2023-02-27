@@ -17,7 +17,19 @@
 #pragma once
 
 #include <aws/core/Aws.h>
+#include <aws/core/http/HttpClientFactory.h>
+#include <aws/core/http/HttpRequest.h>
+#include <aws/core/http/HttpTypes.h>
+#include <aws/core/http/URI.h>
+#include <aws/core/http/curl/CurlHttpClient.h>
+#include <aws/core/http/standard/StandardHttpRequest.h>
 #include <aws/s3/S3Client.h>
+#include <google/cloud/credentials.h>
+#include <google/cloud/internal/oauth2_credentials.h>
+#include <google/cloud/internal/oauth2_google_credentials.h>
+#include <google/cloud/storage/oauth2/compute_engine_credentials.h>
+#include <google/cloud/storage/oauth2/google_credentials.h>
+#include <google/cloud/status_or.h>
 #include <map>
 #include <memory>
 #include <string>
@@ -29,6 +41,9 @@
 #include "storage/Types.h"
 
 namespace milvus::storage {
+
+enum RemoteStorageType { STORAGE_S3 = 0, STORAGE_GOOGLE_CLOUD = 1 };
+typedef enum RemoteStorageType RemoteStorageType;
 
 /**
  * @brief This MinioChunkManager is responsible for read and write file in S3.
@@ -113,12 +128,16 @@ class MinioChunkManager : public RemoteChunkManager {
     std::vector<std::string>
     ListObjects(const char* bucket_name, const char* prefix = NULL);
     void
-    InitSDKAPI();
+    InitSDKAPI(RemoteStorageType type);
     void
     ShutdownSDKAPI();
+    void
+    BuildS3Client(const StorageConfig& storage_config, const Aws::Client::ClientConfiguration& config);
+    void
+    BuildGoogleCloudClient(const StorageConfig& storage_config, const Aws::Client::ClientConfiguration& config);
 
  private:
-    const Aws::SDKOptions sdk_options_;
+    Aws::SDKOptions sdk_options_;
     static std::atomic<size_t> init_count_;
     static std::mutex client_mutex_;
     std::shared_ptr<Aws::S3::S3Client> client_;
@@ -126,5 +145,51 @@ class MinioChunkManager : public RemoteChunkManager {
 };
 
 using MinioChunkManagerPtr = std::unique_ptr<MinioChunkManager>;
+
+static const char* GOOGLE_CLIENT_FACTORY_ALLOCATION_TAG = "GoogleHttpClientFactory";
+
+class GoogleHttpClientFactory : public Aws::Http::HttpClientFactory {
+ public:
+    explicit GoogleHttpClientFactory(std::shared_ptr<google::cloud::oauth2_internal::Credentials> credentials) {
+        credentials_ = credentials;
+    }
+
+    void
+    SetCredentials(std::shared_ptr<google::cloud::oauth2_internal::Credentials> credentials) {
+        credentials_ = credentials;
+    }
+
+    std::shared_ptr<Aws::Http::HttpClient>
+    CreateHttpClient(const Aws::Client::ClientConfiguration& clientConfiguration) const override {
+        return Aws::MakeShared<Aws::Http::CurlHttpClient>(GOOGLE_CLIENT_FACTORY_ALLOCATION_TAG, clientConfiguration);
+    }
+
+    std::shared_ptr<Aws::Http::HttpRequest>
+    CreateHttpRequest(const Aws::String& uri,
+                      Aws::Http::HttpMethod method,
+                      const Aws::IOStreamFactory& streamFactory) const override {
+        return CreateHttpRequest(Aws::Http::URI(uri), method, streamFactory);
+    }
+
+    std::shared_ptr<Aws::Http::HttpRequest>
+    CreateHttpRequest(const Aws::Http::URI& uri,
+                      Aws::Http::HttpMethod method,
+                      const Aws::IOStreamFactory& streamFactory) const override {
+        auto request = Aws::MakeShared<Aws::Http::Standard::StandardHttpRequest>(GOOGLE_CLIENT_FACTORY_ALLOCATION_TAG,
+                                                                                 uri, method);
+        request->SetResponseStreamFactory(streamFactory);
+        auto auth_header = credentials_->AuthorizationHeader();
+        if (!auth_header.ok()) {
+            throw std::runtime_error("get authorization failed, errcode:" +
+                                     StatusCodeToString(auth_header.status().code()));
+        }
+        request->SetHeaderValue(auth_header->first.c_str(), auth_header->second.c_str());
+
+        return request;
+    }
+
+ private:
+    std::shared_ptr<google::cloud::oauth2_internal::Credentials> credentials_;
+};
 
 }  // namespace milvus::storage
