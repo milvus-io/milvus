@@ -25,5 +25,6 @@ const (
 	ChannelRemovePrefix       = MetaPrefix + "/channel-removal"
 	ChannelCheckpointPrefix   = MetaPrefix + "/channel-cp"
 
-	RemoveFlagTomestone = "removed"
+	NonRemoveFlagTomestone = "non-removed"
+	RemoveFlagTomestone    = "removed"
 )
