@@ -29,6 +29,7 @@ ROOT_DIR="$( cd -P "$( dirname "$SOURCE" )/.." && pwd )"
 
 MILVUS_CORE_DIR="${ROOT_DIR}/internal/core/"
 MILVUS_CORE_UNITTEST_DIR="${MILVUS_CORE_DIR}/output/unittest/"
+MILVUS_CORE_LIB_DIR="${MILVUS_CORE_DIR}/output/lib/"
 
 echo "ROOT_DIR = ${ROOT_DIR}"
 echo "MILVUS_CORE_DIR = ${MILVUS_CORE_DIR}"
@@ -56,6 +57,10 @@ ${LCOV_CMD} -c -i -d ${DIR_GCNO} -o ${FILE_INFO_BASE}
 if [ $? -ne 0 ]; then
     echo "Failed to generate coverage baseline"
     exit -1
+fi
+
+if [ -d "${MILVUS_CORE_LIB_DIR}" ]; then
+    export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:${MILVUS_CORE_LIB_DIR}
 fi
 
 # run unittest
