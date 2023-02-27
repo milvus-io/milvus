@@ -591,7 +591,7 @@ func (rm *ResourceManager) transferNodeInStore(from string, to string, numNode i
 	}
 
 	toCapacity := rm.groups[to].GetCapacity()
-	if from != DefaultResourceGroupName {
+	if to != DefaultResourceGroupName {
 		// default rg capacity won't be changed
 		toCapacity = rm.groups[to].GetCapacity() + numNode
 	}
