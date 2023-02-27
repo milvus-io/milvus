@@ -284,6 +284,14 @@ func (bd *BufferData) updateStartAndEndPosition(startPos *internalpb.MsgPosition
 	}
 }
 
+func (bd *BufferData) memorySize() int64 {
+	var size int64
+	for _, field := range bd.buffer.Data {
+		size += int64(field.GetMemorySize())
+	}
+	return size
+}
+
 // DelDataBuf buffers delete data, monitoring buffer size and limit
 // size and limit both indicate numOfRows
 type DelDataBuf struct {

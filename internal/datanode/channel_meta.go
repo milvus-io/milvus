@@ -69,7 +69,8 @@ type Channel interface {
 	listSegmentIDsToSync(ts Timestamp) []UniqueID
 	setSegmentLastSyncTs(segID UniqueID, ts Timestamp)
 
-	updateStatistics(segID UniqueID, numRows int64)
+	updateSegmentRowNumber(segID UniqueID, numRows int64)
+	updateSegmentMemorySize(segID UniqueID, memorySize int64)
 	InitPKstats(ctx context.Context, s *Segment, statsBinlogs []*datapb.FieldBinlog, ts Timestamp) error
 	RollPKstats(segID UniqueID, stats []*storage.PrimaryKeyStats)
 	getSegmentStatisticsUpdates(segID UniqueID) (*datapb.SegmentStats, error)
@@ -128,6 +129,7 @@ func newChannel(channelName string, collID UniqueID, schema *schemapb.Collection
 
 		syncPolicies: []segmentSyncPolicy{
 			syncPeriodically(),
+			syncMemoryTooHigh(),
 		},
 
 		metaService:  metaService,
@@ -251,15 +253,24 @@ func (c *ChannelMeta) listSegmentIDsToSync(ts Timestamp) []UniqueID {
 	c.segMu.RLock()
 	defer c.segMu.RUnlock()
 
-	segIDsToSync := make([]UniqueID, 0)
-	for segID, seg := range c.segments {
+	validSegs := make([]*Segment, 0)
+	for _, seg := range c.segments {
 		if !seg.isValid() {
 			continue
 		}
-		for _, policy := range c.syncPolicies {
-			if policy(seg, ts) {
+		validSegs = append(validSegs, seg)
+	}
+
+	segIDsToSync := make([]UniqueID, 0)
+	toSyncSegIDDict := make(map[UniqueID]bool, 0)
+	for _, policy := range c.syncPolicies {
+		toSyncSegments := policy(validSegs, ts)
+		for _, segID := range toSyncSegments {
+			if _, ok := toSyncSegIDDict[segID]; ok {
+				continue
+			} else {
+				toSyncSegIDDict[segID] = true
 				segIDsToSync = append(segIDsToSync, segID)
-				break
 			}
 		}
 	}
@@ -465,11 +476,11 @@ func (c *ChannelMeta) hasSegment(segID UniqueID, countFlushed bool) bool {
 }
 
 // updateStatistics updates the number of rows of a segment in channel.
-func (c *ChannelMeta) updateStatistics(segID UniqueID, numRows int64) {
+func (c *ChannelMeta) updateSegmentRowNumber(segID UniqueID, numRows int64) {
 	c.segMu.Lock()
 	defer c.segMu.Unlock()
 
-	log.Info("updating segment", zap.Int64("Segment ID", segID), zap.Int64("numRows", numRows))
+	log.Info("updating segment num row", zap.Int64("Segment ID", segID), zap.Int64("numRows", numRows))
 	seg, ok := c.segments[segID]
 	if ok && seg.notFlushed() {
 		seg.numRows += numRows
@@ -477,6 +488,21 @@ func (c *ChannelMeta) updateStatistics(segID UniqueID, numRows int64) {
 	}
 
 	log.Warn("update segment num row not exist", zap.Int64("segID", segID))
+}
+
+// updateStatistics updates the number of rows of a segment in channel.
+func (c *ChannelMeta) updateSegmentMemorySize(segID UniqueID, memorySize int64) {
+	c.segMu.Lock()
+	defer c.segMu.Unlock()
+
+	log.Info("updating segment memorySize", zap.Int64("Segment ID", segID), zap.Int64("memorySize", memorySize))
+	seg, ok := c.segments[segID]
+	if ok && seg.notFlushed() {
+		seg.memorySize = memorySize
+		return
+	}
+
+	log.Warn("update segment memorySize not exist", zap.Int64("segID", segID))
 }
 
 // getSegmentStatisticsUpdates gives current segment's statistics updates.

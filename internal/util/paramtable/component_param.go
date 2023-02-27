@@ -1951,6 +1951,11 @@ type dataNodeConfig struct {
 
 	// io concurrency to fetch stats logs
 	IOConcurrency ParamItem `refreshable:"false"`
+
+	// memory management
+	MemoryForceSyncEnable       ParamItem `refreshable:"true"`
+	MemoryForceSyncThreshold    ParamItem `refreshable:"true"`
+	MemoryForceSyncSegmentRatio ParamItem `refreshable:"true"`
 }
 
 func (p *dataNodeConfig) init(base *BaseTable) {
@@ -1982,6 +1987,27 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.FlushInsertBufferSize.Init(base.mgr)
+
+	p.MemoryForceSyncEnable = ParamItem{
+		Key:          "datanode.memory.forceSyncEnable",
+		Version:      "2.2.4",
+		DefaultValue: "true",
+	}
+	p.MemoryForceSyncEnable.Init(base.mgr)
+
+	p.MemoryForceSyncThreshold = ParamItem{
+		Key:          "datanode.memory.forceSyncThreshold",
+		Version:      "2.2.4",
+		DefaultValue: "0.6",
+	}
+	p.MemoryForceSyncThreshold.Init(base.mgr)
+
+	p.MemoryForceSyncSegmentRatio = ParamItem{
+		Key:          "datanode.memory.forceSyncSegmentRatio",
+		Version:      "2.2.4",
+		DefaultValue: "0.3",
+	}
+	p.MemoryForceSyncSegmentRatio.Init(base.mgr)
 
 	p.FlushDeleteBufferBytes = ParamItem{
 		Key:          "dataNode.segment.deleteBufBytes",

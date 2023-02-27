@@ -146,8 +146,10 @@ func TestChannelMeta_InnerFunction(t *testing.T) {
 	assert.Equal(t, int64(0), seg.numRows)
 	assert.Equal(t, datapb.SegmentType_New, seg.getType())
 
-	channel.updateStatistics(0, 10)
+	channel.updateSegmentRowNumber(0, 10)
 	assert.Equal(t, int64(10), seg.numRows)
+	channel.updateSegmentMemorySize(0, 10)
+	assert.Equal(t, int64(10), seg.memorySize)
 
 	segPos := channel.listNewSegmentsStartPositions()
 	assert.Equal(t, 1, len(segPos))

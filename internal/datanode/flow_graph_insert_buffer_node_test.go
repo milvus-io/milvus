@@ -256,7 +256,7 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 	assert.Panics(t, func() { iBNode.Operate([]flowgraph.Msg{&inMsg}) })
 	iBNode.lastTimestamp = timestampBak
 
-	// test updateSegmentStates failed
+	// test addSegmentAndUpdateRowNum failed
 	inMsg = genFlowGraphInsertMsg(insertChannelName)
 	inMsg.insertMessages[0].CollectionID = UniqueID(-1)
 	inMsg.insertMessages[0].SegmentID = UniqueID(-1)
@@ -1054,7 +1054,7 @@ func TestInsertBufferNode_updateSegmentStates(te *testing.T) {
 			},
 		}
 
-		seg, err := ibNode.updateSegmentStates(im, &internalpb.MsgPosition{}, &internalpb.MsgPosition{})
+		seg, err := ibNode.addSegmentAndUpdateRowNum(im, &internalpb.MsgPosition{}, &internalpb.MsgPosition{})
 
 		assert.Error(te, err)
 		assert.Empty(te, seg)
