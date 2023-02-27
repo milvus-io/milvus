@@ -472,7 +472,6 @@ func (c *ChannelMeta) updateStatistics(segID UniqueID, numRows int64) {
 	log.Info("updating segment", zap.Int64("Segment ID", segID), zap.Int64("numRows", numRows))
 	seg, ok := c.segments[segID]
 	if ok && seg.notFlushed() {
-		seg.memorySize = 0
 		seg.numRows += numRows
 		return
 	}

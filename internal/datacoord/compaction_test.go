@@ -910,3 +910,14 @@ func getFieldBinlogPaths(id int64, paths ...string) *datapb.FieldBinlog {
 	}
 	return l
 }
+
+func getFieldBinlogPathsWithEntry(id int64, entry int64, paths ...string) *datapb.FieldBinlog {
+	l := &datapb.FieldBinlog{
+		FieldID: id,
+		Binlogs: make([]*datapb.Binlog, 0, len(paths)),
+	}
+	for _, path := range paths {
+		l.Binlogs = append(l.Binlogs, &datapb.Binlog{LogPath: path, EntriesNum: entry})
+	}
+	return l
+}

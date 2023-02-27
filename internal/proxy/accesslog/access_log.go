@@ -116,7 +116,7 @@ func PrintAccessInfo(ctx context.Context, resp interface{}, err error, rpcInfo *
 	//get trace ID of task
 	traceID, ok := getTraceID(ctx)
 	if !ok {
-		log.Warn("access log print failed: cloud not get trace ID")
+		log.Warn("access log print failed: could not get trace ID")
 		return false
 	}
 	fields = append(fields, zap.String("traceId", traceID))
@@ -124,7 +124,7 @@ func PrintAccessInfo(ctx context.Context, resp interface{}, err error, rpcInfo *
 	//get response size of task
 	responseSize, ok := getResponseSize(resp)
 	if !ok {
-		log.Warn("access log print failed: cloud not get response size")
+		log.Warn("access log print failed: could not get response size")
 		return false
 	}
 	fields = append(fields, zap.Int("responseSize", responseSize))
@@ -132,8 +132,8 @@ func PrintAccessInfo(ctx context.Context, resp interface{}, err error, rpcInfo *
 	//get err code of task
 	errCode, ok := getErrCode(resp)
 	if !ok {
-		log.Warn("access log print failed: cloud not get error code")
-		return false
+		// unknown error code
+		errCode = -1
 	}
 	fields = append(fields, zap.Int("errorCode", errCode))
 

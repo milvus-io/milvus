@@ -662,7 +662,7 @@ func (s *Server) handleTimetickMessage(ctx context.Context, ttMsg *msgstream.Dat
 	}
 	err = s.cluster.Flush(s.ctx, ttMsg.GetBase().GetSourceID(), ch, finfo)
 	if err != nil {
-		log.Warn("handle")
+		log.Warn("failed to handle flush", zap.Any("source", ttMsg.GetBase().GetSourceID()), zap.Error(err))
 		return err
 	}
 
@@ -671,16 +671,30 @@ func (s *Server) handleTimetickMessage(ctx context.Context, ttMsg *msgstream.Dat
 
 func (s *Server) updateSegmentStatistics(stats []*datapb.SegmentStats) {
 	for _, stat := range stats {
+		segment := s.meta.GetSegmentUnsafe(stat.GetSegmentID())
+		if segment == nil {
+			log.Warn("skip updating row number for not exist segment",
+				zap.Int64("segment ID", stat.GetSegmentID()),
+				zap.Int64("new value", stat.GetNumRows()))
+			continue
+		}
+
+		if isFlushState(segment.GetState()) {
+			log.Warn("skip updating row number for flushed segment",
+				zap.Int64("segment ID", stat.GetSegmentID()),
+				zap.Int64("new value", stat.GetNumRows()))
+			continue
+		}
+
 		// Log if # of rows is updated.
-		if s.meta.GetSegmentUnsafe(stat.GetSegmentID()) != nil &&
-			s.meta.GetSegmentUnsafe(stat.GetSegmentID()).GetNumOfRows() != stat.GetNumRows() {
+		if segment.currRows < stat.GetNumRows() {
 			log.Info("Updating segment number of rows",
 				zap.Int64("segment ID", stat.GetSegmentID()),
 				zap.Int64("old value", s.meta.GetSegmentUnsafe(stat.GetSegmentID()).GetNumOfRows()),
 				zap.Int64("new value", stat.GetNumRows()),
 			)
+			s.meta.SetCurrentRows(stat.GetSegmentID(), stat.GetNumRows())
 		}
-		s.meta.SetCurrentRows(stat.GetSegmentID(), stat.GetNumRows())
 	}
 }
 
@@ -995,7 +1009,16 @@ func (s *Server) reCollectSegmentStats(ctx context.Context) {
 	nodes := s.sessionManager.getLiveNodeIDs()
 	log.Info("re-collecting segment stats from DataNodes",
 		zap.Int64s("DataNode IDs", nodes))
-	for _, node := range nodes {
-		s.cluster.ReCollectSegmentStats(ctx, node)
+
+	reCollectFunc := func() error {
+		err := s.cluster.ReCollectSegmentStats(ctx)
+		if err != nil {
+			return err
+		}
+		return nil
+	}
+
+	if err := retry.Do(ctx, reCollectFunc, retry.Attempts(20), retry.Sleep(time.Millisecond*100), retry.MaxSleepTime(5*time.Second)); err != nil {
+		panic(err)
 	}
 }

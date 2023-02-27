@@ -1286,24 +1286,26 @@ func TestSaveBinlogPaths(t *testing.T) {
 					FieldID: 1,
 					Binlogs: []*datapb.Binlog{
 						{
-							LogPath: "/by-dev/test/0/1/1/1/Allo1",
+							LogPath:    "/by-dev/test/0/1/1/1/Allo1",
+							EntriesNum: 5,
 						},
 						{
-							LogPath: "/by-dev/test/0/1/1/1/Allo2",
+							LogPath:    "/by-dev/test/0/1/1/1/Allo2",
+							EntriesNum: 5,
 						},
 					},
 				},
 			},
 			CheckPoints: []*datapb.CheckPoint{
 				{
-					SegmentID: 0,
+					SegmentID: 1,
 					Position: &internalpb.MsgPosition{
 						ChannelName: "ch1",
 						MsgID:       []byte{1, 2, 3},
 						MsgGroup:    "",
 						Timestamp:   0,
 					},
-					NumOfRows: 10,
+					NumOfRows: 12,
 				},
 			},
 			Flushed: false,
@@ -1322,11 +1324,9 @@ func TestSaveBinlogPaths(t *testing.T) {
 		assert.EqualValues(t, "/by-dev/test/0/1/1/1/Allo1", fieldBinlogs.GetBinlogs()[0].GetLogPath())
 		assert.EqualValues(t, "/by-dev/test/0/1/1/1/Allo2", fieldBinlogs.GetBinlogs()[1].GetLogPath())
 
-		segmentInfo := svr.meta.GetSegment(0)
-		assert.NotNil(t, segmentInfo)
-		assert.EqualValues(t, segmentInfo.DmlPosition.ChannelName, "ch1")
-		assert.EqualValues(t, segmentInfo.DmlPosition.MsgID, []byte{1, 2, 3})
-		assert.EqualValues(t, segmentInfo.NumOfRows, 10)
+		assert.EqualValues(t, segment.DmlPosition.ChannelName, "ch1")
+		assert.EqualValues(t, segment.DmlPosition.MsgID, []byte{1, 2, 3})
+		assert.EqualValues(t, segment.NumOfRows, 10)
 	})
 
 	t.Run("with channel not matched", func(t *testing.T) {
@@ -3429,7 +3429,62 @@ func TestDataCoord_Import(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
 	})
+}
 
+func TestDataCoord_SegmentStatistics(t *testing.T) {
+	t.Run("test update imported segment stat", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+
+		seg1 := &datapb.SegmentInfo{
+			ID:        100,
+			Binlogs:   []*datapb.FieldBinlog{getFieldBinlogPathsWithEntry(101, 1, getInsertLogPath("log1", 100))},
+			Statslogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, getStatsLogPath("log2", 100))},
+			Deltalogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, getDeltaLogPath("log3", 100))},
+			State:     commonpb.SegmentState_Importing,
+		}
+
+		info := NewSegmentInfo(seg1)
+		svr.meta.AddSegment(info)
+
+		status, err := svr.UpdateSegmentStatistics(context.TODO(), &datapb.UpdateSegmentStatisticsRequest{
+			Stats: []*datapb.SegmentStats{{
+				SegmentID: 100,
+				NumRows:   int64(1),
+			}},
+		})
+		assert.NoError(t, err)
+
+		assert.Equal(t, svr.meta.GetSegment(100).currRows, int64(1))
+		assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
+		closeTestServer(t, svr)
+	})
+
+	t.Run("test update flushed segment stat", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+
+		seg1 := &datapb.SegmentInfo{
+			ID:        100,
+			Binlogs:   []*datapb.FieldBinlog{getFieldBinlogPathsWithEntry(101, 1, getInsertLogPath("log1", 100))},
+			Statslogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, getStatsLogPath("log2", 100))},
+			Deltalogs: []*datapb.FieldBinlog{getFieldBinlogPaths(101, getDeltaLogPath("log3", 100))},
+			State:     commonpb.SegmentState_Flushed,
+		}
+
+		info := NewSegmentInfo(seg1)
+		svr.meta.AddSegment(info)
+
+		status, err := svr.UpdateSegmentStatistics(context.TODO(), &datapb.UpdateSegmentStatisticsRequest{
+			Stats: []*datapb.SegmentStats{{
+				SegmentID: 100,
+				NumRows:   int64(1),
+			}},
+		})
+		assert.NoError(t, err)
+
+		assert.Equal(t, svr.meta.GetSegment(100).currRows, int64(0))
+		assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
+		closeTestServer(t, svr)
+	})
 }
 
 func TestDataCoord_SaveImportSegment(t *testing.T) {

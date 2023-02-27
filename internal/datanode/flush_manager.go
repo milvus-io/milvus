@@ -781,6 +781,7 @@ func flushNotifyFunc(dsService *dataSyncService, opts ...retry.Option) notifyMet
 		updates, _ := dsService.channel.getSegmentStatisticsUpdates(pack.segmentID)
 		checkPoints = append(checkPoints, &datapb.CheckPoint{
 			SegmentID: pack.segmentID,
+			// this shouldn't be used because we are not sure this is aligned
 			NumOfRows: updates.GetNumRows(),
 			Position:  pack.pos,
 		})
