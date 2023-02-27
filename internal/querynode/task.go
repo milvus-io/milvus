@@ -238,14 +238,16 @@ type unsubDmChannelTask struct {
 }
 
 func (t *unsubDmChannelTask) Execute(ctx context.Context) error {
-	log.Info("start to execute unsubscribe dmchannel task", zap.Int64("collectionID", t.collectionID), zap.String("channel", t.channel))
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", t.collectionID),
+		zap.String("channel", t.channel),
+	)
+
+	log.Info("start to execute unsubscribe dmchannel task")
 	collection, err := t.node.metaReplica.getCollectionByID(t.collectionID)
 	if err != nil {
 		if errors.Is(err, ErrCollectionNotFound) {
-			log.Info("collection has been released",
-				zap.Int64("collectionID", t.collectionID),
-				zap.Error(err),
-			)
+			log.Info("collection has been released", zap.Error(err))
 			return nil
 		}
 		return err
@@ -261,9 +263,11 @@ func (t *unsubDmChannelTask) Execute(ctx context.Context) error {
 	}
 
 	if !find {
-		return ErrChannelNotFound
+		log.Info("channel unsubscribed")
+		return nil
 	}
 
+	log.Info("unsubscribe channel...")
 	if err := t.releaseChannelResources(collection); err != nil {
 		return err
 	}
@@ -272,7 +276,10 @@ func (t *unsubDmChannelTask) Execute(ctx context.Context) error {
 }
 
 func (t *unsubDmChannelTask) releaseChannelResources(collection *Collection) error {
-	log := log.With(zap.Int64("collectionID", t.collectionID), zap.String("channel", t.channel))
+	log := log.With(
+		zap.Int64("collectionID", t.collectionID),
+		zap.String("channel", t.channel),
+	)
 	log.Info("start to release channel resources")
 
 	collection.removeVChannel(t.channel)
