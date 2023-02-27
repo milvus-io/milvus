@@ -33,6 +33,7 @@ timeout-decorator==0.5.0
 
 # for bulk insert test
 minio==7.1.5
+npy-append-array==0.9.15
 
 # for benchmark
 h5py==3.7.0
