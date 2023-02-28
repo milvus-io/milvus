@@ -69,6 +69,11 @@ if ( LINUX AND BUILD_DISK_ANN STREQUAL "ON" )
     add_subdirectory( aws_sdk )
 endif()
 
+# ******************************* Thirdparty google cloud sdk ********************************
+if ( LINUX AND BUILD_DISK_ANN STREQUAL "ON" )
+    add_subdirectory( google_cloud_sdk )
+endif()
+
 # ******************************* Thirdparty marisa ********************************
 # TODO: support win.
 if ( LINUX OR APPLE)
