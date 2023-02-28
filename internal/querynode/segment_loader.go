@@ -45,7 +45,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/concurrency"
+	"github.com/milvus-io/milvus/internal/util/conc"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/hardware"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
@@ -73,8 +73,8 @@ type segmentLoader struct {
 	cm     storage.ChunkManager // minio cm
 	etcdKV *etcdkv.EtcdKV
 
-	ioPool  *concurrency.Pool
-	cpuPool *concurrency.Pool
+	ioPool  *conc.Pool
+	cpuPool *conc.Pool
 
 	factory msgstream.Factory
 }
@@ -319,7 +319,7 @@ func (loader *segmentLoader) loadGrowingSegmentFields(ctx context.Context, segme
 	iCodec := storage.InsertCodec{}
 
 	// change all field bin log loading into concurrent
-	loadFutures := make([]*concurrency.Future[any], 0, len(fieldBinlogs))
+	loadFutures := make([]*conc.Future[any], 0, len(fieldBinlogs))
 	for _, fieldBinlog := range fieldBinlogs {
 		futures := loader.loadFieldBinlogsAsync(ctx, fieldBinlog)
 		loadFutures = append(loadFutures, futures...)
@@ -402,7 +402,7 @@ func (loader *segmentLoader) loadSealedField(ctx context.Context, segment *Segme
 	// acquire a CPU worker before load field binlogs
 	futures := loader.loadFieldBinlogsAsync(ctx, field)
 
-	err := concurrency.AwaitAll(futures...)
+	err := conc.AwaitAll(futures...)
 	if err != nil {
 		return err
 	}
@@ -427,8 +427,8 @@ func (loader *segmentLoader) loadSealedField(ctx context.Context, segment *Segme
 }
 
 // Load binlogs concurrently into memory from KV storage asyncly
-func (loader *segmentLoader) loadFieldBinlogsAsync(ctx context.Context, field *datapb.FieldBinlog) []*concurrency.Future[any] {
-	futures := make([]*concurrency.Future[any], 0, len(field.Binlogs))
+func (loader *segmentLoader) loadFieldBinlogsAsync(ctx context.Context, field *datapb.FieldBinlog) []*conc.Future[any] {
+	futures := make([]*conc.Future[any], 0, len(field.Binlogs))
 	for i := range field.Binlogs {
 		path := field.Binlogs[i].GetLogPath()
 		future := loader.ioPool.Submit(func() (interface{}, error) {
@@ -473,7 +473,7 @@ func (loader *segmentLoader) loadFieldIndexData(ctx context.Context, segment *Se
 	log := log.With(zap.Int64("segment", segment.ID()))
 	indexBuffer := make([][]byte, 0, len(indexInfo.IndexFilePaths))
 	filteredPaths := make([]string, 0, len(indexInfo.IndexFilePaths))
-	futures := make([]*concurrency.Future[any], 0, len(indexInfo.IndexFilePaths))
+	futures := make([]*conc.Future[any], 0, len(indexInfo.IndexFilePaths))
 	indexCodec := storage.NewIndexFileBinlogCodec()
 
 	// TODO, remove the load index info froam
@@ -552,7 +552,7 @@ func (loader *segmentLoader) loadFieldIndexData(ctx context.Context, segment *Se
 		futures = append(futures, indexFuture)
 	}
 
-	err = concurrency.AwaitAll(futures...)
+	err = conc.AwaitAll(futures...)
 	if err != nil {
 		return err
 	}
@@ -985,8 +985,8 @@ func newSegmentLoader(
 	if ioPoolSize > 256 {
 		ioPoolSize = 256
 	}
-	ioPool := concurrency.NewPool(ioPoolSize, ants.WithPreAlloc(true))
-	cpuPool := concurrency.NewPool(cpuNum, ants.WithPreAlloc(true))
+	ioPool := conc.NewPool(ioPoolSize, ants.WithPreAlloc(true))
+	cpuPool := conc.NewPool(cpuNum, ants.WithPreAlloc(true))
 
 	log.Info("SegmentLoader created",
 		zap.Int("ioPoolSize", ioPoolSize),
