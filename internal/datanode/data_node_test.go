@@ -628,9 +628,6 @@ func TestDataNode(t *testing.T) {
 	})
 
 	t.Run("Test BackGroundGC", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
-		node := newIDLEDataNodeMock(ctx, schemapb.DataType_Int64)
-
 		vchanNameCh := make(chan string)
 		node.clearSignal = vchanNameCh
 		go node.BackGroundGC(vchanNameCh)
