@@ -69,7 +69,6 @@ class TestChaos(TestChaosBase):
             Op.load_balance: LoadBalanceChecker()
         }
         self.health_checkers = checkers
-        ms = MilvusSys()
         self.prepare_bulk_insert()
 
     def prepare_bulk_insert(self, nb=30000, row_based=True):

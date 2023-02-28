@@ -54,7 +54,7 @@ class TestChaosApply:
         chaos_res.delete(meta_name, raise_ex=False)
         sleep(2)
 
-    def test_chaos_apply(self, chaos_type, target_component, chaos_duration, chaos_interval):
+    def test_chaos_apply(self, chaos_type, target_component, target_number, chaos_duration, chaos_interval):
         # start the monitor threads to check the milvus ops
         log.info("*********************Chaos Test Start**********************")
         log.info(connections.get_connection_addr('default'))
@@ -67,6 +67,7 @@ class TestChaosApply:
         update_key_value(chaos_config, "release", release_name)
         update_key_value(chaos_config, "app.kubernetes.io/instance", release_name)
         update_key_value(chaos_config, "namespaces", [self.milvus_ns])
+        update_key_value(chaos_config, "value", target_number)
         self.chaos_config = chaos_config
         if "s" in chaos_interval:
             schedule = f"*/{chaos_interval[:-1]} * * * * *"
@@ -76,6 +77,7 @@ class TestChaosApply:
         # update chaos_duration from string to int with unit second
         chaos_duration = chaos_duration.replace('h', '*3600+').replace('m', '*60+').replace('s', '*1+') + '+0'
         chaos_duration = eval(chaos_duration)
+        update_key_value(chaos_config, "duration", f"{chaos_duration//60}m")
         if self.deploy_by == "milvus-operator":
             update_key_name(chaos_config, "component", "app.kubernetes.io/component")
         self._chaos_config = chaos_config  # cache the chaos config for tear down
@@ -111,12 +113,24 @@ class TestChaosApply:
 
         sleep(2)
         # wait all pods ready
+        t0 = time.time()
         log.info(f"wait for pods in namespace {constants.CHAOS_NAMESPACE} with label app.kubernetes.io/instance={meta_name}")
         wait_pods_ready(constants.CHAOS_NAMESPACE, f"app.kubernetes.io/instance={meta_name}")
         log.info(f"wait for pods in namespace {constants.CHAOS_NAMESPACE} with label release={meta_name}")
         wait_pods_ready(constants.CHAOS_NAMESPACE, f"release={meta_name}")
         log.info("all pods are ready")
+        pods_ready_time = time.time() - t0
+        log.info(f"pods ready time: {pods_ready_time}")
         # reconnect to test the service healthy
-        sleep(20)
-        self.reconnect()
+        start_time = time.time()
+        end_time = start_time + 120
+        while time.time() < end_time:
+            try:
+                self.reconnect()
+                break
+            except Exception as e:
+                log.error(e)
+                sleep(2)
+        recovery_time = time.time() - start_time
+        log.info(f"recovery time: {recovery_time}")
         log.info("*********************Chaos Test Completed**********************")

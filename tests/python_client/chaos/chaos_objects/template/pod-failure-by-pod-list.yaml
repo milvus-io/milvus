@@ -1,15 +1,17 @@
 apiVersion: chaos-mesh.org/v1alpha1
 kind: PodChaos
 metadata:
-  name: test-datacoord-pod-failure
+  name: test-querynode-pod-failure
   namespace: chaos-testing
 spec:
   selector:
     pods:
       chaos-testing:
-        - datacoord-standby-test-milvus-datacoord-b664b98df-c42d4
+        - milvus-multi-querynode-querynode-bcdc595d9-7vmcj
+        - milvus-multi-querynode-querynode-bcdc595d9-ccxls
+        - milvus-multi-querynode-querynode-bcdc595d9-dpwgp
 
   mode: all
   action: pod-failure
-  duration: 3m
+  duration: 2m
   gracePeriod: 0

@@ -87,7 +87,7 @@ def reconnect(connections, alias='default', timeout=360):
     return connections.connect(alias)
 
 
-def assert_statistic(checkers, expectations={}):
+def assert_statistic(checkers, expectations={}, succ_rate_threshold=0.95, fail_rate_threshold=0.49):
     for k in checkers.keys():
         # expect succ if no expectations
         succ_rate = checkers[k].succ_rate()
@@ -95,9 +95,9 @@ def assert_statistic(checkers, expectations={}):
         average_time = checkers[k].average_time
         if expectations.get(k, '') == constants.FAIL:
             log.info(f"Expect Fail: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}")
-            expect(succ_rate < 0.49 or total < 2,
+            expect(succ_rate < fail_rate_threshold or total < 2,
                    f"Expect Fail: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}")
         else:
             log.info(f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}")
-            expect(succ_rate > 0.90 and total > 2,
+            expect(succ_rate > succ_rate_threshold and total > 2,
                    f"Expect Succ: {str(k)} succ rate {succ_rate}, total: {total}, average time: {average_time:.4f}")
