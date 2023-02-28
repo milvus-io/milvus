@@ -113,6 +113,9 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 	}()
 
 	unFlushedSegmentIDs, err := w.LoadGrowingSegments(ctx, collectionID)
+	if err != nil {
+		return errors.Wrap(err, "failed to load growing segments")
+	}
 
 	// remove growing segment if watch dmChannels failed
 	defer func() {
@@ -125,7 +128,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 
 	channel2FlowGraph, err := w.initFlowGraph(collectionID, vChannels)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "failed to init flowgraph")
 	}
 
 	coll.setLoadType(lType)
@@ -139,6 +142,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 
 	// add tsafe watch in query shard if exists
 	for _, dmlChannel := range vChannels {
+		// Here this error could be ignored
 		w.node.queryShardService.addQueryShard(collectionID, dmlChannel, w.req.GetReplicaID())
 	}
 
