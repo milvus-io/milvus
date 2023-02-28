@@ -52,7 +52,7 @@ struct SearchResult {
     std::vector<float> distances_;
     std::vector<int64_t> seg_offsets_;
 
-    // fist fill data during fillPrimaryKey, and then update data after reducing search results
+    // first fill data during fillPrimaryKey, and then update data after reducing search results
     std::vector<PkType> primary_keys_;
     DataType pk_type_;
 

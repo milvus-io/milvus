@@ -3971,10 +3971,19 @@ class TestsearchPagination(TestcaseBase):
         res = collection_w.search(binary_vectors[:default_nq], "binary_vector", search_binary_param,
                                   default_limit + offset)[0]
 
-        assert res[0].distances == sorted(res[0].distances)
-        assert search_res[0].distances == sorted(search_res[0].distances)
-        assert search_res[0].distances == res[0].distances[offset:]
-        assert set(search_res[0].ids) == set(res[0].ids[offset:])
+        assert len(search_res[0].ids) == len(res[0].ids[offset:])
+        assert sorted(search_res[0].distances, key=numpy.float32) == sorted(res[0].distances[offset:], key=numpy.float32)
+        unique_a, unique_b = set(search_res[0].ids), set(res[0].ids[offset:])
+        diff = unique_a ^ unique_b
+
+        assert len(diff) <= 2
+
+        if len(diff) == 2:
+            i = search_res[0].ids.index((unique_a-unique_b).pop())
+            i2 = res[0].ids[offset:].index((unique_b-unique_a).pop())
+
+            assert search_res[0].distances[i] == res[0].distances[offset:][i2]
+
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("limit", [100, 3000, 10000])
