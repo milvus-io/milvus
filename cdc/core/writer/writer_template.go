@@ -18,7 +18,6 @@ package writer
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
 	"sync"
 	"time"
@@ -205,7 +204,11 @@ func (c *CdcWriterTemplate) bufferInit() {
 							continue
 						}
 						// combine the data
-						insertParam.Columns = append(insertParam.Columns, columns...)
+						if err := c.preCombineColumn(insertParam.Columns, columns); err != nil {
+							c.fail("fail to combine the data", err, data, callback)
+							continue
+						}
+						c.combineColumn(insertParam.Columns, columns)
 						lastCombineData.successes = append(lastCombineData.successes, newCombineData.successes...)
 						lastCombineData.fails = append(lastCombineData.fails, newCombineData.fails...)
 					case *api.DeleteMsg:
@@ -303,10 +306,6 @@ func (c *CdcWriterTemplate) bufferInit() {
 									collectChannelInfo(msg)
 									if msgsValue := data.Extra[model.DropCollectionMsgsKey]; msgsValue != nil {
 										msgs := msgsValue.([]*api.DropCollectionMsg)
-										//if err := json.Unmarshal(util.ToBytes(msgsValue), &msgs); err != nil {
-										//	c.fail("fail to drop collection, unmarshal error", err, data, callback)
-										//	return
-										//}
 										for _, tsMsg := range msgs {
 											collectChannelInfo(tsMsg)
 										}
@@ -665,53 +664,85 @@ func (c *CdcWriterTemplate) clearBufferFunc() {
 	c.currentBufferSize = 0
 }
 
-func SizeColumn(column entity.Column) int64 {
-	var data any
-	switch column.(type) {
-	case *entity.ColumnBool:
-		data = column.(*entity.ColumnBool).Data()
-	case *entity.ColumnInt8:
-		data = column.(*entity.ColumnInt8).Data()
-	case *entity.ColumnInt16:
-		data = column.(*entity.ColumnInt16).Data()
-	case *entity.ColumnInt32:
-		data = column.(*entity.ColumnInt32).Data()
-	case *entity.ColumnInt64:
-		data = column.(*entity.ColumnInt64).Data()
-	case *entity.ColumnFloat:
-		data = column.(*entity.ColumnFloat).Data()
-	case *entity.ColumnDouble:
-		data = column.(*entity.ColumnDouble).Data()
-	case *entity.ColumnString:
-		strArr := column.(*entity.ColumnString).Data()
-		total := 0
-		for _, s := range strArr {
-			total += binary.Size(util.ToBytes(s))
+func (c *CdcWriterTemplate) isSupportType(fieldType entity.FieldType) bool {
+	return fieldType == entity.FieldTypeBool ||
+		fieldType == entity.FieldTypeInt8 ||
+		fieldType == entity.FieldTypeInt16 ||
+		fieldType == entity.FieldTypeInt32 ||
+		fieldType == entity.FieldTypeInt64 ||
+		fieldType == entity.FieldTypeFloat ||
+		fieldType == entity.FieldTypeDouble ||
+		fieldType == entity.FieldTypeString ||
+		fieldType == entity.FieldTypeVarChar ||
+		fieldType == entity.FieldTypeBinaryVector ||
+		fieldType == entity.FieldTypeFloatVector
+}
+
+func (c *CdcWriterTemplate) preCombineColumn(a []entity.Column, b []entity.Column) error {
+	for i := range a {
+		if a[i].Type() != b[i].Type() || !c.isSupportType(b[i].Type()) {
+			log.Warn("fail to combine the column",
+				zap.Any("a", a[i].Type()), zap.Any("b", b[i].Type()))
+			return errors.New("fail to combine the column")
 		}
-		return int64(total)
-	case *entity.ColumnVarChar:
-		strArr := column.(*entity.ColumnVarChar).Data()
-		total := 0
-		for _, s := range strArr {
-			total += binary.Size(util.ToBytes(s))
-		}
-		return int64(total)
-	case *entity.ColumnBinaryVector:
-		byteArr := column.(*entity.ColumnBinaryVector).Data()
-		total := 0
-		for _, s := range byteArr {
-			total += binary.Size(s)
-		}
-		return int64(total)
-	case *entity.ColumnFloatVector:
-		floatArr := column.(*entity.ColumnFloatVector).Data()
-		total := 0
-		for _, f := range floatArr {
-			total += binary.Size(f)
-		}
-		return int64(total)
-	default:
-		return -1
 	}
-	return int64(binary.Size(data))
+	return nil
+}
+
+// combineColumn the b will be added to a. before execute the method, MUST execute the preCombineColumn
+func (c *CdcWriterTemplate) combineColumn(a []entity.Column, b []entity.Column) {
+	for i := range a {
+		var values []interface{}
+		switch columnValue := b[i].(type) {
+		case *entity.ColumnBool:
+			for _, id := range columnValue.Data() {
+				values = append(values, id)
+			}
+		case *entity.ColumnInt8:
+			for _, id := range columnValue.Data() {
+				values = append(values, id)
+			}
+		case *entity.ColumnInt16:
+			for _, id := range columnValue.Data() {
+				values = append(values, id)
+			}
+		case *entity.ColumnInt32:
+			for _, id := range columnValue.Data() {
+				values = append(values, id)
+			}
+		case *entity.ColumnInt64:
+			for _, id := range columnValue.Data() {
+				values = append(values, id)
+			}
+		case *entity.ColumnFloat:
+			for _, id := range columnValue.Data() {
+				values = append(values, id)
+			}
+		case *entity.ColumnDouble:
+			for _, id := range columnValue.Data() {
+				values = append(values, id)
+			}
+		case *entity.ColumnString:
+			for _, id := range columnValue.Data() {
+				values = append(values, id)
+			}
+		case *entity.ColumnVarChar:
+			for _, varchar := range columnValue.Data() {
+				values = append(values, varchar)
+			}
+		case *entity.ColumnBinaryVector:
+			for _, id := range columnValue.Data() {
+				values = append(values, id)
+			}
+		case *entity.ColumnFloatVector:
+			for _, id := range columnValue.Data() {
+				values = append(values, id)
+			}
+		default:
+			log.Fatal("not support column type", zap.Any("value", columnValue))
+		}
+		for _, value := range values {
+			_ = a[i].AppendValue(value)
+		}
+	}
 }

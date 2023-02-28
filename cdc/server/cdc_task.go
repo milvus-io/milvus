@@ -43,7 +43,6 @@ type CDCTask struct {
 	factory     CDCFactory
 	callback    writer.WriteCallback
 	signaler    chan *signal
-	dataChan    <-chan *model.CDCData
 	current     util.Value[meta.TaskState]
 	workingLock sync.Mutex
 }
@@ -179,7 +178,7 @@ func (c *CDCTask) work(done <-chan struct{}, cdcReader reader.CDCReader, cdcWrit
 			return
 		default:
 			select {
-			case data := <-c.dataChan:
+			case data := <-dataChan:
 				writeData(data)
 			case <-done:
 				quit()
