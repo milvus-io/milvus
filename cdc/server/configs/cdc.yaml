@@ -1,0 +1,26 @@
+---
+address: localhost
+port: 8444
+etcd.endpoints: [localhost:2379] # etcd endpoints
+etcd.rootpath: cdc
+source:
+  etcd.endpoints: [localhost:2379]  # etcd endpoints
+  etcd.rootpath: by-dev  # etcd rootpath
+  etcd.meta.path: meta  # etcd meta sub path
+  reader.buffer.len: 10
+  mqtype: puslar
+  pulsar:
+      address: localhost
+      port: 6550
+      web.address:
+      web.port: 80
+      max.message.size: 5242880
+      tenant: public
+      namespace: default
+  kafka:
+      brokerList: localhost:9092
+
+
+
+
+

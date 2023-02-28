@@ -17,36 +17,89 @@
 package main
 
 import (
-	"github.com/milvus-io/milvus/cdc/core/config"
+	"fmt"
+
+	"github.com/golobby/config/v3/pkg/feeder"
+	coreconf "github.com/milvus-io/milvus/cdc/core/config"
+
 	"github.com/milvus-io/milvus/cdc/server"
 )
 
+type config struct {
+	Address   string
+	Port      int
+	Endpoints []string `yaml:"etcd.endpoints"`
+	RootPath  string   `yaml:"etcd.rootpath"`
+	Source    struct {
+		Endpoints       []string `yaml:"etcd.endpoints"`
+		RootPath        string   `yaml:"etcd.rootpath"`
+		MetaPath        string   `yaml:"etcd.meta.path""`
+		ReaderBufferLen int      `yaml:"reader.buffer.len""`
+		MQType          string   `yaml:"mqtype"`
+		Pulsar          struct {
+			Address        string
+			Port           int
+			WebAddress     string `yaml:"web.address"`
+			WebPort        int    `yaml:"web.port"`
+			MaxMessageSize int64  `yaml:"max.message.size"`
+			Tenant         string
+			Namespace      string
+		}
+		Kafka struct {
+			BrokerList string
+		}
+	}
+}
+
 func main() {
 	s := &server.CdcServer{}
+
+	// parse config file
+	conf := config{}
+	f := feeder.Yaml{Path: "./configs/cdc.yaml"}
+	if err := f.Feed(&conf); err != nil {
+		panic(err)
+	}
+
+	// build mq configs
+	var pulsarConfig coreconf.PulsarConfig
+	var kafkaConfig coreconf.KafkaConfig
+	if conf.Source.MQType == "pulsar" {
+		pulsarConf := conf.Source.Pulsar
+		pulsarConfig = coreconf.NewPulsarConfig(
+			coreconf.PulsarAddressOption(fmt.Sprintf("pulsar://%s:%d", pulsarConf.Address, pulsarConf.Port)),
+			coreconf.PulsarWebAddressOption(pulsarConf.WebAddress, 80),
+			coreconf.PulsarMaxMessageSizeOption(pulsarConf.MaxMessageSize),
+			coreconf.PulsarTenantOption(pulsarConf.Tenant, pulsarConf.Namespace),
+		)
+	} else if conf.Source.MQType == "kakfa" {
+		kafkaConf := conf.Source.Kafka
+		kafkaConfig = coreconf.NewKafkaConfig(
+			coreconf.KafkaAddressOption(kafkaConf.BrokerList))
+	} else {
+		panic("Unknown mq type:" + conf.Source.MQType)
+	}
+
 	s.Run(&server.CdcServerConfig{
-		Address: "localhost:8444",
+		Address: fmt.Sprintf("%s:%d", conf.Address, conf.Port),
 		EtcdConfig: struct {
 			Endpoints []string
 			RootPath  string
-		}{Endpoints: []string{"localhost:2379"}, RootPath: "cdc"},
+		}{Endpoints: conf.Endpoints, RootPath: conf.RootPath},
 		SourceConfig: struct {
 			EtcdAddress     []string
 			EtcdRootPath    string
 			EtcdMetaSubPath string
 			ReadChanLen     int
-			Pulsar          config.PulsarConfig
-			Kafka           config.KafkaConfig
+			Pulsar          coreconf.PulsarConfig
+			Kafka           coreconf.KafkaConfig
 		}{
-			EtcdAddress:     []string{"localhost:2379"},
-			EtcdRootPath:    "by-dev",
-			EtcdMetaSubPath: "meta",
-			ReadChanLen:     10,
-			Pulsar: config.NewPulsarConfig(
-				config.PulsarAddressOption("pulsar://localhost:6650", "6650"),
-				config.PulsarWebAddressOption("", "80"),
-				config.PulsarMaxMessageSizeOption(5242880),
-				config.PulsarTenantOption("public", "default"),
-			),
+			EtcdAddress:     conf.Source.Endpoints,
+			EtcdRootPath:    conf.Source.RootPath,
+			EtcdMetaSubPath: conf.Source.MetaPath,
+			ReadChanLen:     conf.Source.ReaderBufferLen,
+			Pulsar:          pulsarConfig,
+			Kafka:           kafkaConfig,
 		},
 		MaxNameLength: 256,
 	})

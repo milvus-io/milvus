@@ -19,19 +19,12 @@ package config
 import "strconv"
 
 var (
-	// TODO fubang remove
 	Kafka  *KafkaConfig
 	Pulsar *PulsarConfig
 )
 
 type KafkaConfig struct {
-	Address             string
-	SaslUsername        string
-	SaslPassword        string
-	SaslMechanisms      string
-	SecurityProtocol    string
-	ConsumerExtraConfig map[string]string
-	ProducerExtraConfig map[string]string
+	Address string
 }
 
 func NewKafkaConfig(options ...Option[*KafkaConfig]) KafkaConfig {
@@ -48,42 +41,12 @@ func KafkaAddressOption(address string) Option[*KafkaConfig] {
 	})
 }
 
-func KafkaSaslOption(username string, password string, mechanisms string) Option[*KafkaConfig] {
-	return OptionFunc[*KafkaConfig](func(object *KafkaConfig) {
-		object.SaslUsername = username
-		object.SaslPassword = password
-		object.SaslMechanisms = mechanisms
-	})
-}
-
-func KafkaSecurityProtocolOption(protocol string) Option[*KafkaConfig] {
-	return OptionFunc[*KafkaConfig](func(object *KafkaConfig) {
-		object.SecurityProtocol = protocol
-	})
-}
-
-func KafkaConsumerExtraConfigOption(extraConfig map[string]string) Option[*KafkaConfig] {
-	return OptionFunc[*KafkaConfig](func(object *KafkaConfig) {
-		object.ConsumerExtraConfig = extraConfig
-	})
-}
-
-func KafkaProducerExtraConfigOption(extraConfig map[string]string) Option[*KafkaConfig] {
-	return OptionFunc[*KafkaConfig](func(object *KafkaConfig) {
-		object.ProducerExtraConfig = extraConfig
-	})
-}
-
 type PulsarConfig struct {
 	Address        string
 	Port           string
 	WebAddress     string
-	WebPort        string
+	WebPort        int
 	MaxMessageSize string
-
-	// support auth
-	AuthPlugin string
-	AuthParams string
 
 	// support tenant
 	Tenant    string
@@ -91,26 +54,23 @@ type PulsarConfig struct {
 }
 
 func NewPulsarConfig(options ...Option[*PulsarConfig]) PulsarConfig {
-	p := PulsarConfig{
-		AuthParams: "{}",
-	}
+	p := PulsarConfig{}
 	for _, option := range options {
 		option.Apply(&p)
 	}
 	return p
 }
 
-func PulsarAddressOption(address string, port string) Option[*PulsarConfig] {
+func PulsarAddressOption(address string) Option[*PulsarConfig] {
 	return OptionFunc[*PulsarConfig](func(object *PulsarConfig) {
 		object.Address = address
-		object.Port = port
 	})
 }
 
-func PulsarWebAddressOption(address string, port string) Option[*PulsarConfig] {
+func PulsarWebAddressOption(address string, port int) Option[*PulsarConfig] {
 	return OptionFunc[*PulsarConfig](func(object *PulsarConfig) {
 		object.WebAddress = address
-		object.Port = port
+		object.WebPort = port
 	})
 }
 
@@ -121,25 +81,9 @@ func PulsarMaxMessageSizeOption(size int64) Option[*PulsarConfig] {
 	})
 }
 
-func PulsarAuthOption(plugin string, param string) Option[*PulsarConfig] {
-	return OptionFunc[*PulsarConfig](func(object *PulsarConfig) {
-		object.AuthPlugin = plugin
-		// TODO fubang param should be json format
-		object.AuthParams = param
-	})
-}
-
 func PulsarTenantOption(tenant string, namespace string) Option[*PulsarConfig] {
 	return OptionFunc[*PulsarConfig](func(object *PulsarConfig) {
 		object.Tenant = tenant
 		object.Namespace = namespace
 	})
-}
-
-func PulsarEnable() bool {
-	return Pulsar.Address != ""
-}
-
-func KafkaEnable() bool {
-	return Kafka.Address != ""
 }

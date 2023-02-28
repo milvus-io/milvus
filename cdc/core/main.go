@@ -211,12 +211,10 @@ func getMsgChan(vchannel string, position *pb.MsgPosition) (string, <-chan *api.
 	pulsarStream := func() {
 		cfg := &config.PulsarConfig{
 			Address:        "pulsar://localhost:6650",
-			Port:           "6650",
-			WebPort:        "80",
+			WebPort:        80,
 			MaxMessageSize: "5242880",
 			Tenant:         "public",
 			Namespace:      "default",
-			AuthParams:     "{}",
 		}
 		factory := mq.NewPmsFactory(cfg)
 		steam, err = factory.NewMsgStream(context.Background())
