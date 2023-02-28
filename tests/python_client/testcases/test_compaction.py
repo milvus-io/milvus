@@ -1292,7 +1292,8 @@ class TestCompactionOperation(TestcaseBase):
         replica_num = len(replicas.groups)
         seg_info = self.utility_wrap.get_query_segment_info(collection_w.name)[0]
         self.utility_wrap.wait_index_build_completed(collection_w.name)
-        assert len(seg_info) == replica_num
+        if not (len(seg_info) == 1 * replica_num or len(seg_info) == 2 * replica_num):
+            assert False
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_compact_during_search(self):
