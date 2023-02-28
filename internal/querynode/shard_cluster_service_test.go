@@ -29,11 +29,10 @@ func TestShardClusterService(t *testing.T) {
 	_, ok = clusterService.getShardCluster("non-exist-channel")
 	assert.False(t, ok)
 
-	err := clusterService.releaseShardCluster(defaultDMLChannel)
-	assert.NoError(t, err)
-
-	err = clusterService.releaseShardCluster("non-exist-channel")
-	assert.Error(t, err)
+	clusterService.releaseShardCluster(defaultDMLChannel)
+	shardCluster, ok = clusterService.getShardCluster(defaultDMLChannel)
+	assert.False(t, ok)
+	assert.Nil(t, shardCluster)
 }
 
 func TestShardClusterService_SyncReplicaSegments(t *testing.T) {
