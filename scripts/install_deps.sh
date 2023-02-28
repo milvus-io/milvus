@@ -53,6 +53,7 @@ function install_linux_deps() {
       echo "Error Install Dependencies ..."
       exit 1
   fi
+
 }
 
 function install_mac_deps() {
