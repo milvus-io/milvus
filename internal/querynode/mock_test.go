@@ -46,7 +46,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util"
-	"github.com/milvus-io/milvus/internal/util/concurrency"
+	"github.com/milvus-io/milvus/internal/util/conc"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
@@ -1696,7 +1696,7 @@ func genSimpleQueryNodeWithMQFactory(ctx context.Context, fac dependency.Factory
 	node.etcdCli = etcdCli
 	node.initSession()
 
-	node.taskPool = concurrency.NewPool(2, ants.WithPreAlloc(true))
+	node.taskPool = conc.NewPool(2, ants.WithPreAlloc(true))
 	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath.GetValue())
 	node.etcdKV = etcdKV
 

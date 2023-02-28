@@ -35,7 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
-	"github.com/milvus-io/milvus/internal/util/concurrency"
+	"github.com/milvus-io/milvus/internal/util/conc"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
@@ -203,7 +203,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo, tick
 		return err
 	}
 
-	futures := make([]*concurrency.Future[any], 0, len(unflushedSegmentInfos)+len(flushedSegmentInfos))
+	futures := make([]*conc.Future[any], 0, len(unflushedSegmentInfos)+len(flushedSegmentInfos))
 
 	for _, us := range unflushedSegmentInfos {
 		if us.CollectionID != dsService.collectionID ||
@@ -283,7 +283,7 @@ func (dsService *dataSyncService) initNodes(vchanInfo *datapb.VchannelInfo, tick
 	tickler.watch()
 	defer tickler.stop()
 
-	err = concurrency.AwaitAll(futures...)
+	err = conc.AwaitAll(futures...)
 	if err != nil {
 		return err
 	}

@@ -14,43 +14,38 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package concurrency
+package conc
 
 import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/suite"
 )
 
-func TestPool(t *testing.T) {
-	pool := NewDefaultPool()
+type FutureSuite struct {
+	suite.Suite
+}
 
-	taskNum := pool.Cap() * 2
-	futures := make([]*Future[any], 0, taskNum)
-	for i := 0; i < taskNum; i++ {
-		res := i
-		future := pool.Submit(func() (interface{}, error) {
-			time.Sleep(500 * time.Millisecond)
-			return res, nil
-		})
-		futures = append(futures, future)
-	}
+func (s *FutureSuite) TestFuture() {
+	const sleepDuration = 200 * time.Millisecond
+	errFuture := Go(func() (any, error) {
+		time.Sleep(sleepDuration)
+		return nil, errors.New("errFuture")
+	})
 
-	assert.Greater(t, pool.Running(), 0)
-	AwaitAll(futures...)
-	for i, future := range futures {
-		res, err := future.Await()
-		assert.NoError(t, err)
-		assert.Equal(t, err, future.Err())
-		assert.True(t, future.OK())
-		assert.Equal(t, res, future.Value())
-		assert.Equal(t, i, res.(int))
+	resultFuture := Go(func() (int, error) {
+		time.Sleep(sleepDuration)
+		return 10, nil
+	})
 
-		// Await() should be idempotent
-		<-future.Inner()
-		resDup, errDup := future.Await()
-		assert.Equal(t, res, resDup)
-		assert.Equal(t, err, errDup)
-	}
+	s.False(errFuture.OK())
+	s.True(resultFuture.OK())
+	s.Error(errFuture.Err())
+	s.Equal(10, resultFuture.Value())
+}
+
+func TestFuture(t *testing.T) {
+	suite.Run(t, new(FutureSuite))
 }

@@ -46,7 +46,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/concurrency"
+	"github.com/milvus-io/milvus/internal/util/conc"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/gc"
 	"github.com/milvus-io/milvus/internal/util/hardware"
@@ -124,7 +124,7 @@ type QueryNode struct {
 	queryShardService *queryShardService
 
 	// pool for load/release channel
-	taskPool *concurrency.Pool
+	taskPool *conc.Pool
 
 	IsStandAlone bool
 }
@@ -271,7 +271,7 @@ func (node *QueryNode) Init() error {
 		node.etcdKV = etcdkv.NewEtcdKV(node.etcdCli, Params.EtcdCfg.MetaRootPath.GetValue())
 		log.Info("queryNode try to connect etcd success", zap.Any("MetaRootPath", Params.EtcdCfg.MetaRootPath))
 
-		node.taskPool = concurrency.NewDefaultPool()
+		node.taskPool = conc.NewDefaultPool()
 		node.metaReplica = newCollectionReplica()
 		node.loader = newSegmentLoader(
 			node.metaReplica,
