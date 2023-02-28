@@ -18,6 +18,7 @@
 #include <tuple>
 #include <vector>
 #include <functional>
+#include <iostream>
 
 #include "index/Utils.h"
 #include "index/Meta.h"
@@ -127,11 +128,11 @@ GetIndexModeFromConfig(const Config& config) {
 
 IndexMode
 GetIndexMode(const std::string index_mode) {
-    if (index_mode.compare("CPU") != 0) {
+    if (index_mode.compare("CPU") == 0 || index_mode.compare("cpu") == 0) {
         return IndexMode::MODE_CPU;
     }
 
-    if (index_mode.compare("GPU") != 0) {
+    if (index_mode.compare("GPU") == 0 || index_mode.compare("gpu") == 0) {
         return IndexMode::MODE_GPU;
     }
 
