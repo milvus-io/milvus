@@ -11,6 +11,7 @@ image:
 etcd:
   replicaCount: 3
   image:
+    debug: true
     repository: milvusdb/etcd
     tag: 3.5.5-r2
 
