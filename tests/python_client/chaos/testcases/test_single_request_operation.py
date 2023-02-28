@@ -1,7 +1,8 @@
 import pytest
 from time import sleep
 from pymilvus import connections
-from chaos.checker import (InsertChecker,
+from chaos.checker import (CreateChecker,
+                           InsertChecker,
                            FlushChecker, 
                            SearchChecker,
                            QueryChecker,
@@ -48,6 +49,7 @@ class TestOperations(TestBase):
     def init_health_checkers(self, collection_name=None):
         c_name = collection_name
         checkers = {
+            Op.create: CreateChecker(collection_name=c_name),
             Op.insert: InsertChecker(collection_name=c_name),
             Op.flush: FlushChecker(collection_name=c_name),
             Op.index: IndexChecker(collection_name=c_name),
@@ -67,15 +69,15 @@ class TestOperations(TestBase):
         cc.start_monitor_threads(self.health_checkers)
         log.info("*********************Load Start**********************")
         # wait request_duration
-        request_duration = request_duration.replace("h", "*3600+").replace("m", "*60+").replace("s", "")
+        request_duration = request_duration.replace("h","*3600+").replace("m","*60+").replace("s","")
         if request_duration[-1] == "+":
             request_duration = request_duration[:-1]
         request_duration = eval(request_duration)
         for i in range(10):
             sleep(request_duration//10)
-            for k, v in self.health_checkers.items():
+            for k,v in self.health_checkers.items():
                 v.check_result()
         if is_check:
-            assert_statistic(self.health_checkers)
+            assert_statistic(self.health_checkers, succ_rate_threshold=0.98)
             assert_expectations()
         log.info("*********************Chaos Test Completed**********************")

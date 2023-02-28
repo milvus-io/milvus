@@ -8,8 +8,10 @@ from common.common_type import CaseLabel
 from utils.util_log import test_log as log
 from utils.util_common import get_collections
 
+
 class TestAllCollection(TestcaseBase):
     """ Test case of end to end"""
+
     @pytest.fixture(scope="function", params=get_collections())
     def collection_name(self, request):
         if request.param == [] or request.param == "":
@@ -22,7 +24,6 @@ class TestAllCollection(TestcaseBase):
                  method.__name__)
         log.info("skip drop collection")
 
-
     @pytest.mark.tags(CaseLabel.L1)
     def test_milvus_default(self, collection_name):
         # create
@@ -31,6 +32,11 @@ class TestAllCollection(TestcaseBase):
         collection_w = self.init_collection_wrap(name=name, active_trace=True)
         tt = time.time() - t0
         assert collection_w.name == name
+        # compact collection before getting num_entities
+        collection_w.flush(timeout=180)
+        collection_w.compact()
+        collection_w.wait_for_compaction_completed(timeout=720)
+
         entities = collection_w.num_entities
         log.info(f"assert create collection: {tt}, init_entities: {entities}")
 
@@ -51,15 +57,26 @@ class TestAllCollection(TestcaseBase):
         entities = collection_w.num_entities
         log.info(f"assert flush: {tt}, entities: {entities}")
 
-        # search
-        _index_params = {"index_type": "HNSW", "metric_type": "L2", "params": {"M": 48, "efConstruction": 500}}
-        t0 = time.time()
-        index, _ = collection_w.create_index(field_name=ct.default_float_vec_field_name,
-                                             index_params=_index_params,
-                                             name=cf.gen_unique_str())
-        tt = time.time() - t0
-        log.info(f"assert index: {tt}")
+        # create index if not have
+        index_infos = [index.to_dict() for index in collection_w.indexes]
+        index_params = {"index_type": "HNSW", "metric_type": "L2", "params": {"M": 48, "efConstruction": 500}}
+        if len(index_infos) == 0:
+            log.info("collection {name} does not have index, create index for it")
+            t0 = time.time()
+            index, _ = collection_w.create_index(field_name=ct.default_float_vec_field_name,
+                                                 index_params=index_params,
+                                                 index_name=cf.gen_unique_str())
+            tt = time.time() - t0
+            log.info(f"assert index: {tt}")
+
+        # show index infos
+        index_infos = [index.to_dict() for index in collection_w.indexes]
+        log.info(f"index info: {index_infos}")
+
+        # load
         collection_w.load()
+
+        # search
         search_vectors = cf.gen_vectors(1, ct.default_dim)
         search_params = {"metric_type": "L2", "params": {"ef": 64}}
         t0 = time.time()
@@ -71,35 +88,33 @@ class TestAllCollection(TestcaseBase):
         assert len(res_1) == 1
         collection_w.release()
 
-        # index
+        # insert data
         d = cf.gen_default_list_data()
         collection_w.insert(d)
-        log.info(f"assert index entities: {collection_w.num_entities}")
-        _index_params = {"index_type": "HNSW", "metric_type": "L2", "params": {"M": 48, "efConstruction": 500}}
-        t0 = time.time()
-        index, _ = collection_w.create_index(field_name=ct.default_float_vec_field_name,
-                                             index_params=_index_params,
-                                             name=cf.gen_unique_str())
-        tt = time.time() - t0
-        log.info(f"assert index: {tt}")
-        assert len(collection_w.indexes) == 1
 
-        # search
+        # load
         t0 = time.time()
         collection_w.load()
         tt = time.time() - t0
         log.info(f"assert load: {tt}")
-        search_vectors = cf.gen_vectors(1, ct.default_dim)
+
+        # search
+        nq = 5
+        topk = 5
+        search_vectors = cf.gen_vectors(nq, ct.default_dim)
         t0 = time.time()
-        res_1, _ = collection_w.search(data=search_vectors,
-                                       anns_field=ct.default_float_vec_field_name,
-                                       param=search_params, limit=1)
+        res, _ = collection_w.search(data=search_vectors,
+                                     anns_field=ct.default_float_vec_field_name,
+                                     param=search_params, limit=topk)
         tt = time.time() - t0
         log.info(f"assert search: {tt}")
+        assert len(res) == nq
+        assert len(res[0]) <= topk
 
         # query
-        term_expr = f'{ct.default_int64_field_name} in [1001,1201,4999,2999]'
+        term_expr = f'{ct.default_int64_field_name} in [1, 2, 3, 4]'
         t0 = time.time()
         res, _ = collection_w.query(term_expr)
         tt = time.time() - t0
         log.info(f"assert query result {len(res)}: {tt}")
+        assert len(res) >= 4
