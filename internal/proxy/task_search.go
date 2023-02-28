@@ -418,7 +418,7 @@ func (t *searchTask) Execute(ctx context.Context) error {
 	retryCtx, cancel := context.WithCancel(ctx)
 	err := retry.Do(retryCtx, func() error {
 		searchErr := executeSearch()
-		if !common.IsTriableError(searchErr) {
+		if !common.IsRetryableError(searchErr) {
 			cancel()
 		}
 		if searchErr != nil {

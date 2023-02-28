@@ -2,16 +2,18 @@ package querynode
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/suite"
 )
 
 type baseReadTaskSuite struct {
@@ -119,9 +121,25 @@ func (s *baseReadTaskSuite) TestReady() {
 	defer cancel()
 
 	s.task.ctx = ctx
+	s.Run("get serviceable time fail", func() {
+		s.task.DataScope = querypb.DataScope_Historical
+		mockedErr := errors.New("test")
+		s.tsafe.EXPECT().
+			getTSafe(mock.AnythingOfType("string")).
+			Return(0, mockedErr).
+			Times(1)
+		ready, err := s.task.Ready()
+		s.Error(err)
+		s.False(ready)
+		s.ErrorIs(err, mockedErr)
+	})
+
 	baseTime := time.Now()
 	serviceable := tsoutil.ComposeTSByTime(baseTime, 0)
-	s.tsafe.EXPECT().getTSafe(mock.AnythingOfType("string")).Return(serviceable, nil)
+	s.tsafe.EXPECT().
+		getTSafe(mock.AnythingOfType("string")).
+		Return(serviceable, nil)
+
 	s.Run("lag too large", func() {
 		tooLargeGuarantee := baseTime.Add(Params.QueryNodeCfg.MaxTimestampLag).Add(time.Second)
 		guaranteeTs := tsoutil.ComposeTSByTime(tooLargeGuarantee, 0)

@@ -946,6 +946,7 @@ func (node *QueryNode) queryWithDmlChannel(ctx context.Context, req *querypb.Que
 	qs, err := node.queryShardService.getQueryShard(dmlChannel)
 	if err != nil {
 		log.Ctx(ctx).Warn("Query failed, failed to get query shard", zap.Int64("msgID", msgID), zap.String("dml channel", dmlChannel), zap.Error(err))
+		failRet.Status.ErrorCode = commonpb.ErrorCode_NotShardLeader
 		failRet.Status.Reason = err.Error()
 		return failRet, nil
 	}
