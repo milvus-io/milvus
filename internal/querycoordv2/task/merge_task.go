@@ -24,6 +24,7 @@ import (
 type MergeableTask[K comparable, R any] interface {
 	ID() K
 	Merge(other MergeableTask[K, R])
+	Priority() int64
 }
 
 var _ MergeableTask[segmentIndex, *querypb.LoadSegmentsRequest] = (*LoadSegmentsTask)(nil)
@@ -80,4 +81,12 @@ func (task *LoadSegmentsTask) Merge(other MergeableTask[segmentIndex, *querypb.L
 
 func (task *LoadSegmentsTask) Result() *querypb.LoadSegmentsRequest {
 	return task.req
+}
+
+func (task *LoadSegmentsTask) Priority() int64 {
+	size := int64(0)
+	for _, info := range task.req.Infos {
+		size += info.GetSegmentSize()
+	}
+	return size
 }
