@@ -18,6 +18,7 @@ package task
 
 import (
 	"context"
+	"sort"
 	"sync"
 	"time"
 
@@ -123,6 +124,12 @@ func (merger *Merger[K, R]) drain() {
 func (merger *Merger[K, R]) triggerExecution(id K) {
 	tasks := merger.queues[id]
 	delete(merger.queues, id)
+
+	// Merge the tasks with higher priority first,
+	// for now the priority is the size of segments of the task
+	sort.Slice(tasks, func(i, j int) bool {
+		return tasks[i].Priority() > tasks[j].Priority()
+	})
 
 	var task MergeableTask[K, R]
 	merged := 0
