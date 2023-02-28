@@ -386,6 +386,10 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, in *querypb.WatchDmC
 }
 
 func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmChannelRequest) (*commonpb.Status, error) {
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", req.GetCollectionID()),
+		zap.String("channel", req.GetChannelName()),
+	)
 	// check node healthy
 	if !node.isHealthyOrStopping() {
 		err := fmt.Errorf("query node %d is not ready", Params.QueryNodeCfg.GetNodeID())
@@ -407,6 +411,8 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 		return status, nil
 	}
 
+	log.Info("unsubscribe channel request received")
+
 	unsubTask := &unsubDmChannelTask{
 		baseTask: baseTask{
 			ctx:  ctx,
@@ -426,7 +432,7 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 		log.Warn("failed to enqueue subscribe channel task", zap.Error(err))
 		return status, nil
 	}
-	log.Info("unsubDmChannelTask enqueue done", zap.Int64("collectionID", req.GetCollectionID()))
+	log.Info("unsubDmChannelTask enqueue done")
 
 	err = unsubTask.WaitToFinish()
 	if err != nil {
@@ -437,7 +443,7 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 		}, nil
 	}
 
-	log.Info("unsubDmChannelTask WaitToFinish done", zap.Int64("collectionID", req.GetCollectionID()))
+	log.Info("unsubDmChannelTask WaitToFinish done")
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}, nil
