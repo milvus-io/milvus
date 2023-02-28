@@ -198,6 +198,8 @@ func (ex *Executor) processMergeTask(mergeTask *LoadSegmentsTask) {
 	}
 	if status.ErrorCode != commonpb.ErrorCode_Success {
 		log.Warn("failed to load segment", zap.String("reason", status.GetReason()))
+		task.SetErr(errors.Newf("failed to load segments, reason=%s", status.GetReason()))
+		task.Cancel()
 		return
 	}
 	elapsed := time.Since(startTs)

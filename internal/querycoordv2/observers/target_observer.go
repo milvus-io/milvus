@@ -23,6 +23,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
@@ -201,7 +202,7 @@ func (ob *TargetObserver) clean() {
 }
 
 func (ob *TargetObserver) shouldUpdateNextTarget(collectionID int64) bool {
-	return !ob.targetMgr.IsNextTargetExist(collectionID) || ob.isNextTargetExpired(collectionID)
+	return !ob.targetMgr.IsNextTargetExist(collectionID) || ob.isNextTargetExpired(collectionID) && meta.GlobalFailedLoadCache.Get(collectionID).ErrorCode != commonpb.ErrorCode_Success
 }
 
 func (ob *TargetObserver) isNextTargetExpired(collectionID int64) bool {
@@ -218,6 +219,7 @@ func (ob *TargetObserver) updateNextTarget(collectionID int64) error {
 			zap.Error(err))
 		return err
 	}
+	meta.GlobalFailedLoadCache.Remove(collectionID)
 	ob.updateNextTargetTimestamp(collectionID)
 	return nil
 }

@@ -66,8 +66,11 @@ func (l *FailedLoadCache) Get(collectionID UniqueID) *commonpb.Status {
 			status.Reason = info.err.Error()
 		}
 	}
-	log.Warn("FailedLoadCache hits failed record", zap.Int64("collectionID", collectionID),
-		zap.String("errCode", status.GetErrorCode().String()), zap.String("reason", status.GetReason()))
+	log.Warn("FailedLoadCache hits failed record",
+		zap.Int64("collectionID", collectionID),
+		zap.String("errCode", status.GetErrorCode().String()),
+		zap.String("reason", status.GetReason()),
+	)
 	return status
 }
 
@@ -87,8 +90,11 @@ func (l *FailedLoadCache) Put(collectionID UniqueID, errCode commonpb.ErrorCode,
 	l.records[collectionID][errCode].count++
 	l.records[collectionID][errCode].err = err
 	l.records[collectionID][errCode].lastTime = time.Now()
-	log.Warn("FailedLoadCache put failed record", zap.Int64("collectionID", collectionID),
-		zap.String("errCode", errCode.String()), zap.Error(err))
+	log.Warn("FailedLoadCache put failed record",
+		zap.Int64("collectionID", collectionID),
+		zap.String("errCode", errCode.String()),
+		zap.Error(err),
+	)
 }
 
 func (l *FailedLoadCache) Remove(collectionID UniqueID) {
