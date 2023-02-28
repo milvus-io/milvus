@@ -18,7 +18,6 @@ package querynode
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math"
 
@@ -33,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
+	"github.com/pkg/errors"
 )
 
 type watchDmChannelsTask struct {
@@ -114,6 +114,9 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 	}()
 
 	unFlushedSegmentIDs, err := w.LoadGrowingSegments(ctx, collectionID)
+	if err != nil {
+		return fmt.Errorf("failed to load growing segments, err: %w", err)
+	}
 
 	// remove growing segment if watch dmChannels failed
 	defer func() {
@@ -126,7 +129,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 
 	channel2FlowGraph, err := w.initFlowGraph(ctx, collectionID, vChannels, VPChannels)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to init flowgraph, err: %w", err)
 	}
 
 	coll.setLoadType(lType)
@@ -140,6 +143,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 
 	// add tsafe watch in query shard if exists
 	for _, dmlChannel := range vChannels {
+		// Here this error could be ignored
 		w.node.queryShardService.addQueryShard(collectionID, dmlChannel, w.req.GetReplicaID())
 	}
 
