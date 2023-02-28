@@ -150,8 +150,8 @@ func (pc *pulsarClient) Close() {
 func NewAdminClient(address, authPlugin, authParams string) (pulsarctl.Client, error) {
 	config := common.Config{
 		WebServiceURL: address,
-		AuthPlugin:    authPlugin,
-		AuthParams:    authParams,
+		//AuthPlugin:    authPlugin,
+		//AuthParams:    authParams,
 	}
 	admin, err := pulsarctl.New(&config)
 	if err != nil {

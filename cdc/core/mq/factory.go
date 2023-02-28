@@ -18,7 +18,6 @@ package mq
 
 import (
 	"context"
-	"errors"
 	"strings"
 
 	"github.com/streamnative/pulsarctl/pkg/cli"
@@ -51,13 +50,13 @@ func NewPmsFactory(cfg *config.PulsarConfig) *PmsFactory {
 }
 
 func (f *PmsFactory) NewMsgStream(ctx context.Context) (api.MsgStream, error) {
-	auth, err := f.getAuthentication()
-	if err != nil {
-		return nil, err
-	}
+	//auth, err := f.getAuthentication()
+	//if err != nil {
+	//	return nil, err
+	//}
 	clientOpts := pulsar_client.ClientOptions{
-		URL:            f.PulsarConfig.Address,
-		Authentication: auth,
+		URL: f.PulsarConfig.Address,
+		//Authentication: auth,
 	}
 
 	pulsarClient, err := pulsar.NewClient(f.PulsarConfig.Tenant, f.PulsarConfig.Namespace, clientOpts)
@@ -67,22 +66,22 @@ func (f *PmsFactory) NewMsgStream(ctx context.Context) (api.MsgStream, error) {
 	return NewMqTtMsgStream(ctx, f.ReceiveBufSize, f.PulsarBufSize, pulsarClient, f.dispatcherFactory.NewUnmarshalDispatcher())
 }
 
-func (f *PmsFactory) getAuthentication() (pulsar_client.Authentication, error) {
-	auth, err := pulsar_client.NewAuthentication(f.PulsarConfig.AuthPlugin, f.PulsarConfig.AuthParams)
-
-	if err != nil {
-		util.Log.Error("build authencation from config failed, please check it!",
-			zap.String("authPlugin", f.PulsarConfig.AuthPlugin),
-			zap.Error(err))
-		return nil, errors.New("build authencation from config failed")
-	}
-	return auth, nil
-}
+//func (f *PmsFactory) getAuthentication() (pulsar_client.Authentication, error) {
+//	auth, err := pulsar_client.NewAuthentication(f.PulsarConfig.AuthPlugin, f.PulsarConfig.AuthParams)
+//
+//	if err != nil {
+//		util.Log.Error("build authencation from config failed, please check it!",
+//			zap.String("authPlugin", f.PulsarConfig.AuthPlugin),
+//			zap.Error(err))
+//		return nil, errors.New("build authencation from config failed")
+//	}
+//	return auth, nil
+//}
 
 func (f *PmsFactory) NewMsgStreamDisposer(ctx context.Context) func([]string, string) error {
 	return func(channels []string, subname string) error {
 		// try to delete the old subscription
-		admin, err := pulsar.NewAdminClient(f.PulsarConfig.WebAddress, f.PulsarConfig.AuthPlugin, f.PulsarConfig.AuthParams)
+		admin, err := pulsar.NewAdminClient(f.PulsarConfig.WebAddress, "", "")
 		if err != nil {
 			return err
 		}
@@ -146,20 +145,20 @@ func (f *KmsFactory) NewMsgStreamDisposer(ctx context.Context) func([]string, st
 	}
 }
 
-func NewFactory(mqType string) (api.Factory, error) {
-	switch mqType {
-	case "kafka":
-		if !config.KafkaEnable() {
-			util.Log.Panic("kafka not configured")
-		}
-		return NewKmsFactory(config.Kafka), nil
-	case "pulsar":
-		if !config.PulsarEnable() {
-			util.Log.Panic("pulsar not configured")
-		}
-		return NewPmsFactory(config.Pulsar), nil
-	default:
-		util.Log.Panic("unknown mq type:" + mqType)
-	}
-	return nil, nil
-}
+//func NewFactory(mqType string) (api.Factory, error) {
+//	switch mqType {
+//	case "kafka":
+//		if !config.KafkaEnable() {
+//			util.Log.Panic("kafka not configured")
+//		}
+//		return NewKmsFactory(config.Kafka), nil
+//	case "pulsar":
+//		if !config.PulsarEnable() {
+//			util.Log.Panic("pulsar not configured")
+//		}
+//		return NewPmsFactory(config.Pulsar), nil
+//	default:
+//		util.Log.Panic("unknown mq type:" + mqType)
+//	}
+//	return nil, nil
+//}

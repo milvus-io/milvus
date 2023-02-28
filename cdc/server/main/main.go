@@ -48,7 +48,7 @@ type config struct {
 		Kafka struct {
 			BrokerList string
 		}
-	}
+	} `yaml:"source"`
 }
 
 func main() {

@@ -64,27 +64,28 @@ func NewKafkaClientInstanceWithConfigMap(config kafka.ConfigMap, extraConsumerCo
 func NewKafkaClientInstanceWithConfig(config *config.KafkaConfig) *kafkaClient {
 	kafkaConfig := getBasicConfig(config.Address)
 
-	if (config.SaslUsername == "" && config.SaslPassword != "") ||
-		(config.SaslUsername != "" && config.SaslPassword == "") {
-		panic("enable security mode need config username and password at the same time!")
-	}
+	//if (config.SaslUsername == "" && config.SaslPassword != "") ||
+	//	(config.SaslUsername != "" && config.SaslPassword == "") {
+	//	panic("enable security mode need config username and password at the same time!")
+	//}
+	//
+	//if config.SaslUsername != "" && config.SaslPassword != "" {
+	//	kafkaConfig.SetKey("sasl.mechanisms", config.SaslMechanisms)
+	//	kafkaConfig.SetKey("security.protocol", config.SecurityProtocol)
+	//	kafkaConfig.SetKey("sasl.username", config.SaslUsername)
+	//	kafkaConfig.SetKey("sasl.password", config.SaslPassword)
+	//}
 
-	if config.SaslUsername != "" && config.SaslPassword != "" {
-		kafkaConfig.SetKey("sasl.mechanisms", config.SaslMechanisms)
-		kafkaConfig.SetKey("security.protocol", config.SecurityProtocol)
-		kafkaConfig.SetKey("sasl.username", config.SaslUsername)
-		kafkaConfig.SetKey("sasl.password", config.SaslPassword)
-	}
+	//specExtraConfig := func(config map[string]string) kafka.ConfigMap {
+	//	kafkaConfigMap := make(kafka.ConfigMap, len(config))
+	//	for k, v := range config {
+	//		kafkaConfigMap.SetKey(k, v)
+	//	}
+	//	return kafkaConfigMap
+	//}
 
-	specExtraConfig := func(config map[string]string) kafka.ConfigMap {
-		kafkaConfigMap := make(kafka.ConfigMap, len(config))
-		for k, v := range config {
-			kafkaConfigMap.SetKey(k, v)
-		}
-		return kafkaConfigMap
-	}
-
-	return NewKafkaClientInstanceWithConfigMap(kafkaConfig, specExtraConfig(config.ConsumerExtraConfig), specExtraConfig(config.ProducerExtraConfig))
+	//return NewKafkaClientInstanceWithConfigMap(kafkaConfig, specExtraConfig(config.ConsumerExtraConfig), specExtraConfig(config.ProducerExtraConfig))
+	return NewKafkaClientInstanceWithConfigMap(kafkaConfig, nil, nil)
 
 }
 
