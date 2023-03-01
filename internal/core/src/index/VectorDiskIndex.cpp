@@ -43,8 +43,14 @@ VectorDiskAnnIndex<T>::VectorDiskAnnIndex(const IndexType& index_type,
     file_manager_ = std::dynamic_pointer_cast<storage::DiskFileManagerImpl>(file_manager);
     auto& local_chunk_manager = storage::LocalChunkManager::GetInstance();
     auto local_index_path_prefix = file_manager_->GetLocalIndexObjectPrefix();
-    AssertInfo(!local_chunk_manager.Exist(local_index_path_prefix),
-               "local index path " + local_index_path_prefix + " has been exist");
+
+    // As we have guarded dup-load in QueryNode,
+    // this assertion failed only if the Milvus rebooted in the same pod,
+    // need to remove these files then re-load the segment
+    if (local_chunk_manager.Exist(local_index_path_prefix)) {
+        local_chunk_manager.RemoveDir(local_index_path_prefix);
+    }
+
     local_chunk_manager.CreateDir(local_index_path_prefix);
     auto diskann_index_pack = knowhere::Pack(std::shared_ptr<knowhere::FileManager>(file_manager));
     index_ = knowhere::IndexFactory::Instance().Create(GetIndexType(), diskann_index_pack);
