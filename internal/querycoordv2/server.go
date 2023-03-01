@@ -649,11 +649,7 @@ func (s *Server) handleNodeUp(node int64) {
 		zap.String("resourceGroup", rgName),
 	)
 
-	rgs := s.meta.ResourceManager.ListResourceGroups()
-	if len(rgs) == 1 {
-		// only __default_resource_group exists
-		utils.AddNodesToCollectionsInRG(s.meta, meta.DefaultResourceGroupName, node)
-	}
+	utils.AddNodesToCollectionsInRG(s.meta, meta.DefaultResourceGroupName, node)
 }
 
 func (s *Server) handleNodeDown(node int64) {
