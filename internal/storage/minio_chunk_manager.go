@@ -445,10 +445,9 @@ func (mcm *MinioChunkManager) getMinioObject(ctx context.Context, bucketName, ob
 	start := timerecord.NewTimeRecorder("getMinioObject")
 
 	reader, err := mcm.Client.GetObject(ctx, bucketName, objectName, opts)
-	elapsed := start.Elapse("getMinioObject done")
 	metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataGetLabel, metrics.TotalLabel).Inc()
 	if err == nil && reader != nil {
-		metrics.PersistentDataRequestLatency.WithLabelValues(metrics.DataGetLabel).Observe(float64(elapsed.Milliseconds()))
+		metrics.PersistentDataRequestLatency.WithLabelValues(metrics.DataGetLabel).Observe(float64(start.ElapseSpan().Milliseconds()))
 		metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataGetLabel, metrics.SuccessLabel).Inc()
 	} else {
 		metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataGetLabel, metrics.FailLabel).Inc()
@@ -462,10 +461,9 @@ func (mcm *MinioChunkManager) putMinioObject(ctx context.Context, bucketName, ob
 	start := timerecord.NewTimeRecorder("putMinioObject")
 
 	info, err := mcm.Client.PutObject(ctx, bucketName, objectName, reader, objectSize, opts)
-	elapsed := start.Elapse("putMinioObject done")
 	metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataPutLabel, metrics.TotalLabel).Inc()
 	if err == nil {
-		metrics.PersistentDataRequestLatency.WithLabelValues(metrics.DataPutLabel).Observe(float64(elapsed.Milliseconds()))
+		metrics.PersistentDataRequestLatency.WithLabelValues(metrics.DataPutLabel).Observe(float64(start.ElapseSpan().Milliseconds()))
 		metrics.PersistentDataOpCounter.WithLabelValues(metrics.MetaPutLabel, metrics.SuccessLabel).Inc()
 	} else {
 		metrics.PersistentDataOpCounter.WithLabelValues(metrics.MetaPutLabel, metrics.FailLabel).Inc()
@@ -479,10 +477,9 @@ func (mcm *MinioChunkManager) statMinioObject(ctx context.Context, bucketName, o
 	start := timerecord.NewTimeRecorder("statMinioObject")
 
 	info, err := mcm.Client.StatObject(ctx, bucketName, objectName, opts)
-	elapsed := start.Elapse("statMinioObject")
 	metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataStatLabel, metrics.TotalLabel).Inc()
 	if err == nil {
-		metrics.PersistentDataRequestLatency.WithLabelValues(metrics.DataStatLabel).Observe(float64(elapsed.Milliseconds()))
+		metrics.PersistentDataRequestLatency.WithLabelValues(metrics.DataStatLabel).Observe(float64(start.ElapseSpan().Milliseconds()))
 		metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataStatLabel, metrics.SuccessLabel).Inc()
 	} else {
 		metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataStatLabel, metrics.FailLabel).Inc()
@@ -496,8 +493,7 @@ func (mcm *MinioChunkManager) listMinioObjects(ctx context.Context, bucketName s
 	start := timerecord.NewTimeRecorder("listMinioObjects")
 
 	res := mcm.Client.ListObjects(ctx, bucketName, opts)
-	elapsed := start.Elapse("listMinioObjects done")
-	metrics.PersistentDataRequestLatency.WithLabelValues(metrics.DataListLabel).Observe(float64(elapsed.Milliseconds()))
+	metrics.PersistentDataRequestLatency.WithLabelValues(metrics.DataListLabel).Observe(float64(start.ElapseSpan().Milliseconds()))
 	metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataListLabel, metrics.TotalLabel).Inc()
 	metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataListLabel, metrics.SuccessLabel).Inc()
 
@@ -509,8 +505,7 @@ func (mcm *MinioChunkManager) removeMinioObjects(ctx context.Context, bucketName
 	start := timerecord.NewTimeRecorder("removeMinioObjects")
 
 	res := mcm.Client.RemoveObjects(ctx, bucketName, objectsCh, opts)
-	elapsed := start.Elapse("removeMinioObjects done")
-	metrics.PersistentDataRequestLatency.WithLabelValues(metrics.DataRemoveLabel).Observe(float64(elapsed.Milliseconds()))
+	metrics.PersistentDataRequestLatency.WithLabelValues(metrics.DataRemoveLabel).Observe(float64(start.ElapseSpan().Milliseconds()))
 	metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataRemoveLabel, metrics.TotalLabel).Inc()
 	metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataRemoveLabel, metrics.SuccessLabel).Inc()
 
@@ -522,10 +517,9 @@ func (mcm *MinioChunkManager) removeMinioObject(ctx context.Context, bucketName,
 	start := timerecord.NewTimeRecorder("removeMinioObject")
 
 	err := mcm.Client.RemoveObject(ctx, bucketName, objectName, opts)
-	elapsed := start.Elapse("removeMinioObject done")
 	metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataRemoveLabel, metrics.TotalLabel).Inc()
 	if err == nil {
-		metrics.PersistentDataRequestLatency.WithLabelValues(metrics.DataRemoveLabel).Observe(float64(elapsed.Milliseconds()))
+		metrics.PersistentDataRequestLatency.WithLabelValues(metrics.DataRemoveLabel).Observe(float64(start.ElapseSpan().Milliseconds()))
 		metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataRemoveLabel, metrics.SuccessLabel).Inc()
 	} else {
 		metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataRemoveLabel, metrics.FailLabel).Inc()

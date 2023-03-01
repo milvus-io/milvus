@@ -49,8 +49,7 @@ func (pp *pulsarProducer) Send(ctx context.Context, message *mqwrapper.ProducerM
 		return &pulsarID{messageID: pmID}, err
 	}
 
-	elapsed := start.Elapse("send msg to stream")
-	metrics.MsgStreamRequestLatency.WithLabelValues(metrics.SendMsgLabel).Observe(float64(elapsed.Milliseconds()))
+	metrics.MsgStreamRequestLatency.WithLabelValues(metrics.SendMsgLabel).Observe(float64(start.ElapseSpan().Milliseconds()))
 	metrics.MsgStreamOpCounter.WithLabelValues(metrics.SendMsgLabel, metrics.SuccessLabel).Inc()
 	return &pulsarID{messageID: pmID}, nil
 }
