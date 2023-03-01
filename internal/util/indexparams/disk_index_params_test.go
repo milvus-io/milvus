@@ -65,9 +65,8 @@ func TestDiskIndexParams(t *testing.T) {
 		mapString := make(map[string]string)
 		mapString[autoindex.BuildRatioKey] = "{\"pq_code_budget_gb\": 0.125, \"num_threads\": 1}"
 		mapString[autoindex.PrepareRatioKey] = "{\"search_cache_budget_gb\": 0.225, \"num_threads\": 4}"
-		extraParams, err := autoindex.NewBigDataExtraParamsFromMap(mapString)
-		assert.NoError(t, err)
-		str, err := json.Marshal(extraParams)
+
+		str, err := json.Marshal(mapString)
 		assert.NoError(t, err)
 		params.Save(params.AutoIndexConfig.ExtraParams.Key, string(str))
 		indexParams := make(map[string]string)
@@ -101,6 +100,46 @@ func TestDiskIndexParams(t *testing.T) {
 		beamWidthRatio, err := strconv.ParseFloat(indexParams[BeamWidthRatioKey], 64)
 		assert.NoError(t, err)
 		assert.Equal(t, 4.0, beamWidthRatio)
+	})
+
+	t.Run("fill index params with wrong auto index param", func(t *testing.T) {
+		var params paramtable.ComponentParam
+		params.Init()
+		params.Save(params.AutoIndexConfig.Enable.Key, "true")
+		// ExtraParams wrong
+		params.Save(params.AutoIndexConfig.ExtraParams.Key, "")
+		indexParams := make(map[string]string)
+		indexParams["max_degree"] = "56"
+		indexParams["search_list_size"] = "100"
+		indexParams["index_type"] = "DISKANN"
+		str, err := json.Marshal(indexParams)
+		assert.NoError(t, err)
+		params.Save(params.AutoIndexConfig.IndexParams.Key, string(str))
+
+		indexParams = make(map[string]string)
+		err = FillDiskIndexParams(&params, indexParams)
+		assert.Error(t, err)
+
+		// IndexParams wrong
+		mapString := make(map[string]string)
+		mapString[autoindex.BuildRatioKey] = "{\"pq_code_budget_gb\": 0.125, \"num_threads\": 1}"
+		mapString[autoindex.PrepareRatioKey] = "{\"search_cache_budget_gb\": 0.225, \"num_threads\": 4}"
+
+		str, err = json.Marshal(mapString)
+		assert.NoError(t, err)
+		params.Save(params.AutoIndexConfig.ExtraParams.Key, string(str))
+
+		indexParams = make(map[string]string)
+		indexParams["max_degree"] = "56"
+		indexParams["search_list"] = "100" // should be search_list_size
+		indexParams["index_type"] = "DISKANN"
+		str, err = json.Marshal(indexParams)
+		assert.NoError(t, err)
+		params.Save(params.AutoIndexConfig.IndexParams.Key, string(str))
+
+		indexParams = make(map[string]string)
+		err = FillDiskIndexParams(&params, indexParams)
+		assert.Error(t, err)
 	})
 
 	t.Run("set disk index build params", func(t *testing.T) {
