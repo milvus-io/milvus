@@ -400,6 +400,7 @@ message GetFlushedSegmentsRequest {
   int64 collectionID = 2;
   int64 partitionID = 3;
   bool includeUnhealthy = 4;
+  uint64 timeBefore = 5;
 }
 
 message GetFlushedSegmentsResponse {
