@@ -23,7 +23,9 @@ macro(build_google_sdk_s3)
 
     set(GOOGLE_ABSEIL_BUILD_COMMAND make -j $(nproc))
     set(GOOGLE_ABSEIL_INSTALL_COMMAND make install)
-    set(GOOGLE_PATCH_COMMAND sed -i "s/^#define ABSL_OPTION_USE_\\(.*\\) 2/#define ABSL_OPTION_USE_\\1 0/" "absl/base/options.h")
+    if (LINUX)
+        set(GOOGLE_PATCH_COMMAND sed -i "s/^#define ABSL_OPTION_USE_\\(.*\\) 2/#define ABSL_OPTION_USE_\\1 0/" "absl/base/options.h")
+    endif()
 
     set(GOOGLE_ABSEIL_CMAKE_ARGS
         "-DCMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX}"
@@ -92,15 +94,33 @@ macro(build_google_sdk_s3)
     set(GOOGLE_SDK_BUILD_COMMAND make)
     set(GOOGLE_SDK_INSTALL_COMMAND make install)
 
-    set(GOOGLE_SDK_CMAKE_ARGS
-        "-DCMAKE_BUILD_TYPE=Release"
-        "-DBUILD_DEPS=OFF"
-        "-DBUILD_TESTING=OFF"
-        "-DBUILD_SHARED_LIBS=ON"
-        "-DGOOGLE_CLOUD_CPP_ENABLE=storage"
-        "-DGOOGLE_CLOUD_CPP_ENABLE_EXAMPLES=OFF"
-        "-DCMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX}")
+    if (APPLE)
+        if(EXISTS "/usr/local/opt/openssl")
+            set(OPENSSL_DIR "/usr/local/opt/openssl")
+        else()
+            set(OPENSSL_DIR "/opt/homebrew/opt/openssl")
+        endif()
+        set(GOOGLE_SDK_CMAKE_ARGS
+            "-DCMAKE_BUILD_TYPE=Release"
+            "-DBUILD_DEPS=OFF"
+            "-DBUILD_TESTING=OFF"
+            "-DBUILD_SHARED_LIBS=ON"
+            "-DGOOGLE_CLOUD_CPP_ENABLE=storage"
+            "-DOPENSSL_ROOT_DIR=${OPENSSL_DIR}"
+            "-DGOOGLE_CLOUD_CPP_ENABLE_EXAMPLES=OFF"
+            "-DCMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX}")
+    else() 
+        set(GOOGLE_SDK_CMAKE_ARGS
+            "-DCMAKE_BUILD_TYPE=Release"
+            "-DBUILD_DEPS=OFF"
+            "-DBUILD_TESTING=OFF"
+            "-DBUILD_SHARED_LIBS=ON"
+            "-DGOOGLE_CLOUD_CPP_ENABLE=storage"
+            "-DGOOGLE_CLOUD_CPP_ENABLE_EXAMPLES=OFF"
+            "-DCMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX}")
+   endif()
 
+    message(STATUS "GOOGLE_SDK_CMAKE_ARGS: ${GOOGLE_SDK_CMAKE_ARGS}")
     ExternalProject_Add(google_sdk_ep
         GIT_REPOSITORY https://github.com/googleapis/google-cloud-cpp.git
         GIT_TAG ${GOOGLE_SDK_VERSION}
