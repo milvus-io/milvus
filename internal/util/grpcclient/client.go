@@ -338,7 +338,7 @@ func (c *ClientBase[T]) bgHealthCheck(client T) {
 
 		_, err := client.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
 		if err != nil {
-			c.resetConnection(c.grpcClient)
+			c.resetConnection(client)
 		}
 
 		return struct{}{}, nil
