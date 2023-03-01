@@ -117,7 +117,8 @@ integration-test:
 
 BUILD_TAGS = $(shell git describe --tags --always --dirty="-dev")
 BUILD_TIME = $(shell date -u)
-GIT_COMMIT = $(shell git rev-parse --short HEAD)
+GIT_BRANCH = $(shell git rev-parse --abbrev-ref HEAD)
+GIT_COMMIT = $(GIT_BRANCH)_$(shell git rev-parse --short HEAD)
 GO_VERSION = $(shell go version)
 ifeq ($(OS),Darwin)
 ifeq ($(ARCH),arm64)
