@@ -17,8 +17,8 @@
 #pragma once
 
 #include <cassert>
-#include <type_traits>
 #include <string>
+#include <type_traits>
 
 #include "Types.h"
 #include "VectorTrait.h"

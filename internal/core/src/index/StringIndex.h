@@ -16,12 +16,14 @@
 
 #pragma once
 
-#include "index/ScalarIndex.h"
-#include <string>
-#include <memory>
-#include <vector>
-#include "index/Meta.h"
 #include <pb/schema.pb.h>
+
+#include <memory>
+#include <string>
+#include <vector>
+
+#include "index/Meta.h"
+#include "index/ScalarIndex.h"
 
 namespace milvus::index {
 

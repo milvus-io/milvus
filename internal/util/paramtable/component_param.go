@@ -1305,6 +1305,7 @@ type queryNodeConfig struct {
 	// cache limit
 	CacheEnabled     ParamItem `refreshable:"false"`
 	CacheMemoryLimit ParamItem `refreshable:"false"`
+	MmapDirPath      ParamItem `refreshable:"false"`
 
 	GroupEnabled         ParamItem `refreshable:"true"`
 	MaxReceiveChanSize   ParamItem `refreshable:"false"`
@@ -1448,6 +1449,14 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.CacheEnabled.Init(base.mgr)
+
+	p.MmapDirPath = ParamItem{
+		Key:          "queryNode.mmapDirPath",
+		Version:      "2.3.0",
+		DefaultValue: "",
+		Doc:          "The folder that storing data files for mmap, setting to a path will enable Milvus to load data with mmap",
+	}
+	p.MmapDirPath.Init(base.mgr)
 
 	p.GroupEnabled = ParamItem{
 		Key:          "queryNode.grouping.enabled",

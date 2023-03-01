@@ -9,18 +9,18 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include "segcore/segment_c.h"
+
 #include "common/CGoHelper.h"
 #include "common/LoadInfo.h"
 #include "common/Types.h"
 #include "common/type_c.h"
+#include "google/protobuf/text_format.h"
+#include "index/IndexInfo.h"
 #include "log/Log.h"
-
 #include "segcore/Collection.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegmentSealedImpl.h"
-#include "segcore/segment_c.h"
-#include "index/IndexInfo.h"
-#include "google/protobuf/text_format.h"
 
 //////////////////////////////    common interfaces    //////////////////////////////
 CSegmentInterface
@@ -206,8 +206,8 @@ LoadFieldData(CSegmentInterface c_segment, CLoadFieldDataInfo load_field_data_in
         auto field_data = std::make_unique<milvus::DataArray>();
         auto suc = field_data->ParseFromArray(load_field_data_info.blob, load_field_data_info.blob_size);
         AssertInfo(suc, "unmarshal field data string failed");
-        auto load_info =
-            LoadFieldDataInfo{load_field_data_info.field_id, field_data.get(), load_field_data_info.row_count};
+        auto load_info = LoadFieldDataInfo{load_field_data_info.field_id, field_data.get(),
+                                           load_field_data_info.row_count, load_field_data_info.mmap_dir_path};
         segment->LoadFieldData(load_info);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {

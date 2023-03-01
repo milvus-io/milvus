@@ -9,17 +9,18 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include "query/generated/ExecExprVisitor.h"
+
+#include <boost/variant.hpp>
 #include <deque>
 #include <optional>
 #include <unordered_set>
 #include <utility>
-#include <boost/variant.hpp>
 
 #include "query/ExprImpl.h"
-#include "query/generated/ExecExprVisitor.h"
-#include "segcore/SegmentGrowingImpl.h"
-#include "query/Utils.h"
 #include "query/Relational.h"
+#include "query/Utils.h"
+#include "segcore/SegmentGrowingImpl.h"
 
 namespace milvus::query {
 // THIS CONTAINS EXTRA BODY FOR VISITOR
@@ -158,9 +159,10 @@ ExecExprVisitor::ExecRangeVisitorImpl(FieldId field_id, IndexFunc index_func, El
     auto num_chunk = upper_div(row_count_, size_per_chunk);
     std::deque<BitsetType> results;
 
-    using Index = index::ScalarIndex<T>;
+    typedef std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T> IndexInnerType;
+    using Index = index::ScalarIndex<IndexInnerType>;
     for (auto chunk_id = 0; chunk_id < indexing_barrier; ++chunk_id) {
-        const Index& indexing = segment_.chunk_scalar_index<T>(field_id, chunk_id);
+        const Index& indexing = segment_.chunk_scalar_index<IndexInnerType>(field_id, chunk_id);
         // NOTE: knowhere is not const-ready
         // This is a dirty workaround
         auto data = index_func(const_cast<Index*>(&indexing));
@@ -173,7 +175,8 @@ ExecExprVisitor::ExecRangeVisitorImpl(FieldId field_id, IndexFunc index_func, El
         auto chunk = segment_.chunk_data<T>(field_id, chunk_id);
         const T* data = chunk.data();
         for (int index = 0; index < this_size; ++index) {
-            result[index] = element_func(data[index]);
+            auto x = data[index];
+            result[index] = element_func(x);
         }
         AssertInfo(result.size() == this_size, "");
         results.emplace_back(std::move(result));
@@ -215,9 +218,10 @@ ExecExprVisitor::ExecDataRangeVisitorImpl(FieldId field_id, IndexFunc index_func
 
     // if sealed segment has loaded scalar index for this field, then index_barrier = 1 and data_barrier = 0
     // in this case, sealed segment execute expr plan using scalar index
-    using Index = index::ScalarIndex<T>;
+    typedef std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T> IndexInnerType;
+    using Index = index::ScalarIndex<IndexInnerType>;
     for (auto chunk_id = data_barrier; chunk_id < indexing_barrier; ++chunk_id) {
-        auto& indexing = segment_.chunk_scalar_index<T>(field_id, chunk_id);
+        auto& indexing = segment_.chunk_scalar_index<IndexInnerType>(field_id, chunk_id);
         auto this_size = const_cast<Index*>(&indexing)->Count();
         BitsetType result(this_size);
         for (int offset = 0; offset < this_size; ++offset) {
@@ -236,10 +240,12 @@ ExecExprVisitor::ExecDataRangeVisitorImpl(FieldId field_id, IndexFunc index_func
 template <typename T>
 auto
 ExecExprVisitor::ExecUnaryRangeVisitorDispatcher(UnaryRangeExpr& expr_raw) -> BitsetType {
-    auto& expr = static_cast<UnaryRangeExprImpl<T>&>(expr_raw);
-    using Index = index::ScalarIndex<T>;
+    typedef std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T> IndexInnerType;
+    using Index = index::ScalarIndex<IndexInnerType>;
+    auto& expr = static_cast<UnaryRangeExprImpl<IndexInnerType>&>(expr_raw);
+
     auto op = expr.op_type_;
-    auto val = expr.value_;
+    auto val = IndexInnerType(expr.value_);
     switch (op) {
         case OpType::Equal: {
             auto index_func = [val](Index* index) { return index->In(1, &val); };
@@ -412,12 +418,14 @@ ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcher(BinaryArithOpEvalRa
 template <typename T>
 auto
 ExecExprVisitor::ExecBinaryRangeVisitorDispatcher(BinaryRangeExpr& expr_raw) -> BitsetType {
-    auto& expr = static_cast<BinaryRangeExprImpl<T>&>(expr_raw);
-    using Index = index::ScalarIndex<T>;
+    typedef std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T> IndexInnerType;
+    using Index = index::ScalarIndex<IndexInnerType>;
+    auto& expr = static_cast<BinaryRangeExprImpl<IndexInnerType>&>(expr_raw);
+
     bool lower_inclusive = expr.lower_inclusive_;
     bool upper_inclusive = expr.upper_inclusive_;
-    T val1 = expr.lower_value_;
-    T val2 = expr.upper_value_;
+    IndexInnerType val1 = IndexInnerType(expr.lower_value_);
+    IndexInnerType val2 = IndexInnerType(expr.upper_value_);
 
     auto index_func = [=](Index* index) { return index->Range(val1, lower_inclusive, val2, upper_inclusive); };
     if (lower_inclusive && upper_inclusive) {
@@ -472,7 +480,11 @@ ExecExprVisitor::visit(UnaryRangeExpr& expr) {
             break;
         }
         case DataType::VARCHAR: {
-            res = ExecUnaryRangeVisitorDispatcher<std::string>(expr);
+            if (segment_.type() == SegmentType::Growing) {
+                res = ExecUnaryRangeVisitorDispatcher<std::string>(expr);
+            } else {
+                res = ExecUnaryRangeVisitorDispatcher<std::string_view>(expr);
+            }
             break;
         }
         default:
@@ -556,7 +568,11 @@ ExecExprVisitor::visit(BinaryRangeExpr& expr) {
             break;
         }
         case DataType::VARCHAR: {
-            res = ExecBinaryRangeVisitorDispatcher<std::string>(expr);
+            if (segment_.type() == SegmentType::Growing) {
+                res = ExecBinaryRangeVisitorDispatcher<std::string>(expr);
+            } else {
+                res = ExecBinaryRangeVisitorDispatcher<std::string_view>(expr);
+            }
             break;
         }
         default:
@@ -676,8 +692,13 @@ ExecExprVisitor::ExecCompareExprDispatcher(CompareExpr& expr, Op op) -> BitsetTy
                 }
                 case DataType::VARCHAR: {
                     if (chunk_id < data_barrier) {
-                        auto chunk_data = segment_.chunk_data<std::string>(field_id, chunk_id).data();
-                        return [chunk_data](int i) -> const number { return chunk_data[i]; };
+                        if (segment_.type() == SegmentType::Growing) {
+                            auto chunk_data = segment_.chunk_data<std::string>(field_id, chunk_id).data();
+                            return [chunk_data](int i) -> const number { return chunk_data[i]; };
+                        } else {
+                            auto chunk_data = segment_.chunk_data<std::string_view>(field_id, chunk_id).data();
+                            return [chunk_data](int i) -> const number { return std::string(chunk_data[i]); };
+                        }
                     } else {
                         // for case, sealed segment has loaded index for scalar field instead of raw data
                         auto& indexing = segment_.chunk_scalar_index<std::string>(field_id, chunk_id);
@@ -808,12 +829,19 @@ ExecExprVisitor::ExecTermVisitorImpl<std::string>(TermExpr& expr_raw) -> BitsetT
     return ExecTermVisitorImplTemplate<std::string>(expr_raw);
 }
 
+template <>
+auto
+ExecExprVisitor::ExecTermVisitorImpl<std::string_view>(TermExpr& expr_raw) -> BitsetType {
+    return ExecTermVisitorImplTemplate<std::string_view>(expr_raw);
+}
+
 template <typename T>
 auto
 ExecExprVisitor::ExecTermVisitorImplTemplate(TermExpr& expr_raw) -> BitsetType {
-    auto& expr = static_cast<TermExprImpl<T>&>(expr_raw);
-    using Index = index::ScalarIndex<T>;
-    const auto& terms = expr.terms_;
+    typedef std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T> IndexInnerType;
+    using Index = index::ScalarIndex<IndexInnerType>;
+    auto& expr = static_cast<TermExprImpl<IndexInnerType>&>(expr_raw);
+    const std::vector<IndexInnerType> terms(expr.terms_.begin(), expr.terms_.end());
     auto n = terms.size();
     std::unordered_set<T> term_set(expr.terms_.begin(), expr.terms_.end());
 
@@ -894,7 +922,11 @@ ExecExprVisitor::visit(TermExpr& expr) {
             break;
         }
         case DataType::VARCHAR: {
-            res = ExecTermVisitorImpl<std::string>(expr);
+            if (segment_.type() == SegmentType::Growing) {
+                res = ExecTermVisitorImpl<std::string>(expr);
+            } else {
+                res = ExecTermVisitorImpl<std::string_view>(expr);
+            }
             break;
         }
         default:

@@ -295,6 +295,7 @@ func (it *indexBuildTask) BuildIndex(ctx context.Context) error {
 		indexBlobs,
 	)
 	if err != nil {
+		log.Warn("failed to serialize index", zap.Error(err))
 		return err
 	}
 	encodeIndexFileDur := it.tr.Record("index codec serialize done")

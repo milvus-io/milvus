@@ -9,27 +9,27 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <boost/format.hpp>
-#include <chrono>
 #include <google/protobuf/text_format.h>
 #include <gtest/gtest.h>
+
+#include <boost/format.hpp>
+#include <chrono>
 #include <iostream>
 #include <random>
 #include <string>
 #include <unordered_set>
 
-#include "knowhere/comp/index_param.h"
-
 #include "common/LoadInfo.h"
+#include "index/IndexFactory.h"
+#include "knowhere/comp/index_param.h"
 #include "pb/plan.pb.h"
 #include "query/ExprImpl.h"
 #include "segcore/Collection.h"
-#include "segcore/reduce_c.h"
 #include "segcore/Reduce.h"
+#include "segcore/reduce_c.h"
 #include "test_utils/DataGen.h"
-#include "index/IndexFactory.h"
-#include "test_utils/indexbuilder_test_utils.h"
 #include "test_utils/PbHelper.h"
+#include "test_utils/indexbuilder_test_utils.h"
 
 namespace chrono = std::chrono;
 

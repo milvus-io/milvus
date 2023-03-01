@@ -26,7 +26,7 @@
 
 namespace milvus {
 
-inline int
+inline size_t
 datatype_sizeof(DataType data_type, int dim = 1) {
     switch (data_type) {
         case DataType::BOOL:
@@ -94,6 +94,17 @@ datatype_is_vector(DataType datatype) {
 
 inline bool
 datatype_is_string(DataType datatype) {
+    switch (datatype) {
+        case DataType::VARCHAR:
+        case DataType::STRING:
+            return true;
+        default:
+            return false;
+    }
+}
+
+inline bool
+datatype_is_variable(DataType datatype) {
     switch (datatype) {
         case DataType::VARCHAR:
         case DataType::STRING:
@@ -200,7 +211,7 @@ class FieldMeta {
         return type_;
     }
 
-    int64_t
+    size_t
     get_sizeof() const {
         if (is_vector()) {
             return datatype_sizeof(type_, get_dim());

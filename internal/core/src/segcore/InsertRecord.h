@@ -11,18 +11,19 @@
 
 #pragma once
 
-#include <memory>
-#include <vector>
-#include <string>
 #include <algorithm>
+#include <memory>
+#include <string>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
+#include "TimestampIndex.h"
 #include "common/Schema.h"
+#include "easylogging++.h"
 #include "segcore/AckResponder.h"
 #include "segcore/ConcurrentVector.h"
 #include "segcore/Record.h"
-#include "TimestampIndex.h"
 
 namespace milvus::segcore {
 
@@ -310,8 +311,8 @@ struct InsertRecord {
 
  private:
     //    std::vector<std::unique_ptr<VectorBase>> fields_data_;
-    std::unordered_map<FieldId, std::unique_ptr<VectorBase>> fields_data_;
-    mutable std::shared_mutex shared_mutex_;
+    std::unordered_map<FieldId, std::unique_ptr<VectorBase>> fields_data_{};
+    mutable std::shared_mutex shared_mutex_{};
 };
 
 }  // namespace milvus::segcore

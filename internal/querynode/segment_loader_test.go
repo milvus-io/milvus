@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
 
 func TestSegmentLoader_loadSegment(t *testing.T) {
@@ -52,6 +53,40 @@ func TestSegmentLoader_loadSegment(t *testing.T) {
 	assert.NoError(t, err)
 
 	t.Run("test load segment", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		require.NoError(t, err)
+		defer node.Stop()
+
+		node.metaReplica.removeSegment(defaultSegmentID, segmentTypeSealed)
+		loader := node.loader
+		assert.NotNil(t, loader)
+
+		req := &querypb.LoadSegmentsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_LoadSegments,
+				MsgID:   rand.Int63(),
+			},
+			DstNodeID: 0,
+			Schema:    schema,
+			Infos: []*querypb.SegmentLoadInfo{
+				{
+					SegmentID:    defaultSegmentID,
+					PartitionID:  defaultPartitionID,
+					CollectionID: defaultCollectionID,
+					BinlogPaths:  fieldBinlog,
+					Statslogs:    statsLog,
+				},
+			},
+		}
+
+		_, err = loader.LoadSegment(ctx, req, segmentTypeSealed)
+		assert.NoError(t, err)
+	})
+
+	t.Run("test load segment with mmap", func(t *testing.T) {
+		key := paramtable.Get().QueryNodeCfg.MmapDirPath.Key
+		paramtable.Get().Save(key, "/tmp/mmap-test")
+		defer paramtable.Get().Reset(key)
 		node, err := genSimpleQueryNode(ctx)
 		require.NoError(t, err)
 		defer node.Stop()

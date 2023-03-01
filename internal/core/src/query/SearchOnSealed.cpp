@@ -71,7 +71,7 @@ SearchOnSealedIndex(const Schema& schema,
 
 void
 SearchOnSealed(const Schema& schema,
-               const segcore::InsertRecord<true>& record,
+               const void* vec_data,
                const SearchInfo& search_info,
                const void* query_data,
                int64_t num_queries,
@@ -83,11 +83,9 @@ SearchOnSealed(const Schema& schema,
 
     query::dataset::SearchDataset dataset{search_info.metric_type_,   num_queries,     search_info.topk_,
                                           search_info.round_decimal_, field.get_dim(), query_data};
-    auto vec_data = record.get_field_data_base(field_id);
-    AssertInfo(vec_data->num_chunk() == 1, "num chunk not equal to 1 for sealed segment");
-    auto chunk_data = vec_data->get_chunk_data(0);
+
     CheckBruteForceSearchParam(field, search_info);
-    auto sub_qr = BruteForceSearch(dataset, chunk_data, row_count, search_info.search_params_, bitset);
+    auto sub_qr = BruteForceSearch(dataset, vec_data, row_count, search_info.search_params_, bitset);
 
     result.distances_ = std::move(sub_qr.mutable_distances());
     result.seg_offsets_ = std::move(sub_qr.mutable_seg_offsets());
