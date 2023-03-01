@@ -1753,7 +1753,7 @@ the number of binlog file reaches to max value.`,
 	p.EnableAutoCompaction = ParamItem{
 		Key:          "dataCoord.compaction.enableAutoCompaction",
 		Version:      "2.0.0",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		Export:       true,
 	}
 	p.EnableAutoCompaction.Init(base.mgr)
