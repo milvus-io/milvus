@@ -1,0 +1,19 @@
+repos:
+  - repo: https://github.com/dnephin/pre-commit-golang
+    rev: v0.5.0
+    hooks:
+      - id: golangci-lint
+        args: [--config=.golangci.yml, --timeout=3m]
+  - repo: https://github.com/crate-ci/typos
+    rev: v1.13.10
+    hooks:
+      - id: typos
+  - repo: https://github.com/zhuwenxing/trufflehog
+    rev: v3.28.5
+    hooks:
+      - id: trufflehog
+        name: TruffleHog
+        description: Detect secrets in your data.
+        entry: bash -c 'trufflehog git file://. --max-depth 1  --since-commit HEAD --only-verified --fail'
+        language: system
+        stages: ["commit", "push"]
