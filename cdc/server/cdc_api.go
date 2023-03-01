@@ -37,7 +37,7 @@ type BaseCDC struct {
 	util.CDCMark
 }
 
-func NewBaseCdc() *BaseCDC {
+func NewBaseCDC() *BaseCDC {
 	return &BaseCDC{}
 }
 
@@ -69,6 +69,6 @@ func (b *BaseCDC) List(request *request.ListRequest) (*request.ListResponse, err
 	return nil, nil
 }
 
-func GetCDCApi(config *CdcServerConfig) CDCApi {
+func GetCDCApi(config *CDCServerConfig) CDCApi {
 	return NewMetaCDC(config)
 }

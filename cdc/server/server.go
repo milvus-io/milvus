@@ -30,24 +30,24 @@ import (
 	"go.uber.org/zap"
 )
 
-type CdcServer struct {
-	cdcApi          CDCApi
-	cdcServerConfig *CdcServerConfig
+type CDCServer struct {
+	api          CDCApi
+	serverConfig *CDCServerConfig
 }
 
-func (c *CdcServer) Run(config *CdcServerConfig) {
+func (c *CDCServer) Run(config *CDCServerConfig) {
 	registerMetric()
 
-	c.cdcServerConfig = config
-	c.cdcApi = GetCDCApi(c.cdcServerConfig)
-	c.cdcApi.ReloadTask()
-	cdcHandler := c.getCdcHandler()
+	c.serverConfig = config
+	c.api = GetCDCApi(c.serverConfig)
+	c.api.ReloadTask()
+	cdcHandler := c.getCDCHandler()
 	http.Handle("/cdc", cdcHandler)
-	err := http.ListenAndServe(c.cdcServerConfig.Address, nil)
-	log.Fatal("cdc server down", zap.Error(err))
+	err := http.ListenAndServe(c.serverConfig.Address, nil)
+	log.Panic("cdc server down", zap.Error(err))
 }
 
-func (c *CdcServer) getCdcHandler() http.Handler {
+func (c *CDCServer) getCDCHandler() http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		startTime := time.Now()
 		if request.Method != http.MethodPost {
@@ -62,7 +62,7 @@ func (c *CdcServer) getCdcHandler() http.Handler {
 			taskRequestCountVec.WithLabelValues(unknownTypeLabel, readErrorStatusLabel).Inc()
 			return
 		}
-		cdcRequest := &modelrequest.CdcRequest{}
+		cdcRequest := &modelrequest.CDCRequest{}
 		err = json.Unmarshal(bodyBytes, cdcRequest)
 		if err != nil {
 			c.handleError(writer, "fail to unmarshal the request, error: "+err.Error(), http.StatusInternalServerError)
@@ -81,12 +81,12 @@ func (c *CdcServer) getCdcHandler() http.Handler {
 	})
 }
 
-func (c *CdcServer) handleError(w http.ResponseWriter, error string, code int, fields ...zap.Field) {
+func (c *CDCServer) handleError(w http.ResponseWriter, error string, code int, fields ...zap.Field) {
 	log.Warn(error, fields...)
 	http.Error(w, error, code)
 }
 
-func (c *CdcServer) handleRequest(cdcRequest *modelrequest.CdcRequest, writer http.ResponseWriter) any {
+func (c *CDCServer) handleRequest(cdcRequest *modelrequest.CDCRequest, writer http.ResponseWriter) any {
 	requestType := cdcRequest.RequestType
 	handler, ok := requestHandlers[requestType]
 	if !ok {
@@ -99,7 +99,7 @@ func (c *CdcServer) handleRequest(cdcRequest *modelrequest.CdcRequest, writer ht
 		c.handleError(writer, fmt.Sprintf("fail to decode the %s request, error: %s", requestType, err.Error()), http.StatusInternalServerError)
 		return nil
 	}
-	response, err := handler.handle(c.cdcApi, requestModel)
+	response, err := handler.handle(c.api, requestModel)
 	if err != nil {
 		code := http.StatusInternalServerError
 		if errors.Is(err, ClientErr) {

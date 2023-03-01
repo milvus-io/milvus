@@ -19,7 +19,6 @@ package request
 import "github.com/milvus-io/milvus/cdc/server/model"
 
 //go:generate easytags $GOFILE json,mapstructure
-
 type CreateRequest struct {
 	MilvusConnectParam model.MilvusConnectParam `json:"milvus_connect_param" mapstructure:"milvus_connect_param"`
 	CollectionInfos    []model.CollectionInfo   `json:"collection_infos" mapstructure:"collection_infos"`

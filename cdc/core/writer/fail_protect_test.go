@@ -14,12 +14,45 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package request
+package writer
 
-//go:generate easytags $GOFILE json,mapstructure
-type ResumeRequest struct {
-	TaskID string `json:"task_id" mapstructure:"task_id"`
-}
+import (
+	"testing"
+	"time"
 
-type ResumeResponse struct {
+	"github.com/stretchr/testify/assert"
+)
+
+func TestErrorProtect(t *testing.T) {
+	protect := FastFail()
+	protect.Inc()
+	select {
+	case <-protect.Chan():
+	case <-time.Tick(time.Second):
+		assert.Fail(t, "should trigger err protect")
+	}
+
+	protect = NewErrorProtect(10, time.Second)
+	assert.Contains(t, protect.Info(), "per: 10")
+	go func() {
+		for i := 0; i < 5; i++ {
+			protect.Inc()
+		}
+	}()
+	select {
+	case <-protect.Chan():
+		assert.Fail(t, "should trigger err protect")
+	case <-time.Tick(1500 * time.Millisecond):
+	}
+	assert.Equal(t, int32(0), protect.current)
+	go func() {
+		for i := 0; i < 20; i++ {
+			protect.Inc()
+		}
+	}()
+	select {
+	case <-protect.Chan():
+	case <-time.Tick(time.Second):
+		assert.Fail(t, "should trigger err protect")
+	}
 }

@@ -22,17 +22,17 @@ import (
 )
 
 const (
-	RequestTypeCreate = "create"
-	RequestTypeDelete = "delete"
-	RequestTypePause  = "pause"
-	RequestTypeResume = "resume"
-	RequestTypeGet    = "get"
-	RequestTypeList   = "list"
+	Create = "create"
+	Delete = "delete"
+	Pause  = "pause"
+	Resume = "resume"
+	Get    = "get"
+	List   = "list"
 )
 
 //go:generate easytags $GOFILE json,mapstructure
 
-type CdcRequest struct {
+type CDCRequest struct {
 	RequestType string         `json:"request_type" mapstructure:"request_type"`
 	RequestData map[string]any `json:"request_data" mapstructure:"request_data"`
 }

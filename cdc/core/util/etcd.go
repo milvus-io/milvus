@@ -30,6 +30,7 @@ const (
 	EtcdOpRetryTime = 5
 )
 
+//go:generate mockery --name=KVApi --filename=kv_api_mock.go --output=../mocks
 type KVApi interface {
 	clientv3.KV
 	clientv3.Watcher
@@ -38,19 +39,33 @@ type KVApi interface {
 	Endpoints() []string
 }
 
-// retry times
+var newEtcdClient = func(cfg clientv3.Config) (KVApi, error) {
+	return clientv3.New(cfg)
+}
+
+func MockEtcdClient(new func(cfg clientv3.Config) (KVApi, error), f func()) {
+	origin := newEtcdClient
+	newEtcdClient = new
+	defer func() {
+		newEtcdClient = origin
+	}()
+	f()
+}
+
 func GetEtcdClient(endpoints []string) (KVApi, error) {
-	etcdCli, err := clientv3.New(clientv3.Config{
+	etcdCli, err := newEtcdClient(clientv3.Config{
 		Endpoints:   endpoints,
 		DialTimeout: 5 * time.Second,
 		Logger:      Log,
 	})
+	errLog := Log.With(zap.Strings("endpoints", endpoints), zap.Error(err))
 	if err != nil {
-		Log.Warn("fail to etcd client", zap.Error(err))
+		errLog.Warn("fail to etcd client")
+		return nil, err
 	}
 	err = EtcdStatus(etcdCli)
 	if err != nil {
-		Log.Warn("unavailable etcd server, please check it", zap.Error(err))
+		errLog.Warn("unavailable etcd server, please check it")
 		return nil, err
 	}
 	return etcdCli, err

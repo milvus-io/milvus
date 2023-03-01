@@ -14,27 +14,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package server
+package util
 
-import "github.com/milvus-io/milvus/cdc/core/config"
+import (
+	"testing"
 
-type CDCServerConfig struct {
-	Address       string             // like: "localhost:8080"
-	EtcdConfig    CDCEtcdConfig      // cdc meta data save
-	SourceConfig  MilvusSourceConfig // cdc source
-	MaxNameLength int
-}
+	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
+	clientv3 "go.etcd.io/etcd/client/v3"
+)
 
-type CDCEtcdConfig struct {
-	Endpoints []string
-	RootPath  string
-}
-
-type MilvusSourceConfig struct {
-	EtcdAddress     []string
-	EtcdRootPath    string
-	EtcdMetaSubPath string
-	ReadChanLen     int
-	Pulsar          config.PulsarConfig
-	Kafka           config.KafkaConfig
+func TestMockEtcdClient(t *testing.T) {
+	newEtcdClient = func(cfg clientv3.Config) (KVApi, error) {
+		return nil, errors.New("foo")
+	}
+	_, err := newEtcdClient(clientv3.Config{})
+	assert.Error(t, err)
+	MockEtcdClient(func(cfg clientv3.Config) (KVApi, error) {
+		return nil, nil
+	}, func() {
+		_, err := newEtcdClient(clientv3.Config{})
+		assert.NoError(t, err)
+	})
+	_, err = newEtcdClient(clientv3.Config{})
+	assert.Error(t, err)
 }

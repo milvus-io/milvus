@@ -23,6 +23,7 @@ import (
 	. "github.com/milvus-io/milvus/cdc/core/util"
 )
 
+//go:generate mockery --name=CDCReader --filename=cdc_reader_mock.go --output=../mocks
 type CDCReader interface {
 	CDCMark
 

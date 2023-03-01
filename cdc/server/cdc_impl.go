@@ -41,7 +41,7 @@ type MetaCDC struct {
 	BaseCDC
 	etcdCli  util.KVApi
 	rootPath string
-	config   *CdcServerConfig
+	config   *CDCServerConfig
 
 	// collectionNames are used to make sure no duplicate task for a collection.
 	// key -> milvus ip:port, value -> collection names
@@ -55,17 +55,17 @@ type MetaCDC struct {
 	}
 }
 
-func NewMetaCDC(serverConfig *CdcServerConfig) *MetaCDC {
+func NewMetaCDC(serverConfig *CDCServerConfig) *MetaCDC {
 	if serverConfig.MaxNameLength == 0 {
 		serverConfig.MaxNameLength = 256
 	}
 	cli, err := util.GetEtcdClient(serverConfig.EtcdConfig.Endpoints)
 	if err != nil {
-		log.Fatal("fail to get etcd client for saving cdc meta data", zap.Error(err))
+		log.Panic("fail to get etcd client for saving cdc meta data", zap.Error(err))
 	}
 	_, err = util.GetEtcdClient(serverConfig.SourceConfig.EtcdAddress)
 	if err != nil {
-		log.Fatal("fail to get etcd client for connect the source etcd data", zap.Error(err))
+		log.Panic("fail to get etcd client for connect the source etcd data", zap.Error(err))
 	}
 	// TODO check mq status
 
@@ -83,14 +83,14 @@ func (e *MetaCDC) ReloadTask() {
 	taskPrefixKey := getTaskInfoPrefix(e.rootPath)
 	taskResp, err := util.EtcdGet(e.etcdCli, taskPrefixKey, clientv3.WithPrefix())
 	if err != nil {
-		log.Fatal("fail to get all task info", zap.String("key", taskPrefixKey), zap.Error(err))
+		log.Panic("fail to get all task info", zap.String("key", taskPrefixKey), zap.Error(err))
 	}
 	taskInfos := make(map[string]*meta.TaskInfo)
 	for _, kv := range taskResp.Kvs {
 		info := &meta.TaskInfo{}
 		err = json.Unmarshal(kv.Value, info)
 		if err != nil {
-			log.Fatal("fail to unmarshal the task byte", zap.String("key", util.ToString(kv.Key)), zap.Error(err))
+			log.Panic("fail to unmarshal the task byte", zap.String("key", util.ToString(kv.Key)), zap.Error(err))
 		}
 		taskInfos[info.TaskID] = info
 		milvusAddress := fmt.Sprintf("%s:%d", info.MilvusConnectParam.Host, info.MilvusConnectParam.Port)

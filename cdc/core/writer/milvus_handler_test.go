@@ -14,27 +14,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package server
+package writer
 
-import "github.com/milvus-io/milvus/cdc/core/config"
+import (
+	"testing"
 
-type CDCServerConfig struct {
-	Address       string             // like: "localhost:8080"
-	EtcdConfig    CDCEtcdConfig      // cdc meta data save
-	SourceConfig  MilvusSourceConfig // cdc source
-	MaxNameLength int
-}
+	"github.com/stretchr/testify/assert"
+)
 
-type CDCEtcdConfig struct {
-	Endpoints []string
-	RootPath  string
-}
-
-type MilvusSourceConfig struct {
-	EtcdAddress     []string
-	EtcdRootPath    string
-	EtcdMetaSubPath string
-	ReadChanLen     int
-	Pulsar          config.PulsarConfig
-	Kafka           config.KafkaConfig
+func TestNewMilvusDataHandler(t *testing.T) {
+	_, err := NewMilvusDataHandler()
+	assert.Error(t, err)
 }

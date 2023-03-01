@@ -25,15 +25,7 @@ import (
 	"github.com/milvus-io/milvus/cdc/core/model"
 )
 
-type WriteType string
-
-const (
-	CreateCollection WriteType = "CreateCollection"
-	DropCollection   WriteType = "DropCollection"
-	Insert           WriteType = "Insert"
-	Delete           WriteType = "Delete"
-)
-
+//go:generate mockery --name=CDCWriter --filename=cdc_writer_mock.go --output=../mocks
 type CDCWriter interface {
 	util.CDCMark
 
@@ -58,6 +50,7 @@ type CallbackChannelInfo struct {
 	Ts       uint64
 }
 
+//go:generate mockery --name=WriteCallback --filename=write_callbakc_mock.go --output=../mocks
 type WriteCallback interface {
 	util.CDCMark
 

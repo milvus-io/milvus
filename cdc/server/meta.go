@@ -183,6 +183,9 @@ func updateTaskCollectionPosition(etcdCli util.KVApi, rootPath string, taskID st
 		log.Warn("fail to unmarshal the collection position", zap.String("key", key), zap.Error(err))
 		return err
 	}
+	if metaPosition.Positions == nil {
+		metaPosition.Positions = make(map[string]*commonpb.KeyDataPair)
+	}
 	metaPosition.Positions[pChannelName] = position
 	return saveCollectionPosition(metaPosition)
 }

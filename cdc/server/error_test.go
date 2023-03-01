@@ -16,25 +16,32 @@
 
 package server
 
-import "github.com/milvus-io/milvus/cdc/core/config"
+import (
+	"testing"
 
-type CDCServerConfig struct {
-	Address       string             // like: "localhost:8080"
-	EtcdConfig    CDCEtcdConfig      // cdc meta data save
-	SourceConfig  MilvusSourceConfig // cdc source
-	MaxNameLength int
+	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
+)
+
+func TestClientError(t *testing.T) {
+	err := NewClientError("foo")
+	assert.Equal(t, "foo", err.Error())
+	assert.True(t, errors.Is(err, ClientErr))
+	assert.False(t, errors.Is(err, ServerErr))
 }
 
-type CDCEtcdConfig struct {
-	Endpoints []string
-	RootPath  string
+func TestServerError(t *testing.T) {
+	fooErr := errors.New("foo")
+	err := NewServerError(fooErr)
+	assert.Equal(t, "foo", err.Error())
+	assert.True(t, errors.Is(err, ServerErr))
+	assert.False(t, errors.Is(err, ClientErr))
 }
 
-type MilvusSourceConfig struct {
-	EtcdAddress     []string
-	EtcdRootPath    string
-	EtcdMetaSubPath string
-	ReadChanLen     int
-	Pulsar          config.PulsarConfig
-	Kafka           config.KafkaConfig
+func TestNotFoundError(t *testing.T) {
+	err := NewNotFoundError("foo")
+	assert.Contains(t, err.Error(), "not found the key")
+	assert.Contains(t, err.Error(), "foo")
+	assert.True(t, errors.Is(err, NotFoundErr))
+	assert.False(t, errors.Is(err, ClientErr))
 }

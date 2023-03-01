@@ -569,7 +569,7 @@ func (ms *MqTtMsgStream) Seek(msgPositions []*pb.MsgPosition) error {
 
 		seekMsgID, err := ms.client.BytesToMsgID(mp.MsgID)
 		if err != nil {
-			util.Log.Warn("fubang error", zap.Error(err))
+			util.Log.Warn("fail byte to msg id", zap.Error(err))
 			return err
 		}
 		util.Log.Info("MsgStream begin to seek start msg: ", zap.String("channel", mp.ChannelName), zap.Any("MessageID", mp.MsgID))

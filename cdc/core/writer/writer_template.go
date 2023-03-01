@@ -77,7 +77,7 @@ type CdcWriterTemplate struct {
 func NewCdcWriterTemplate(options ...config.Option[*CdcWriterTemplate]) CDCWriter {
 	c := &CdcWriterTemplate{
 		bufferConfig: DefaultBufferConfig,
-		errProtect:   FastFail,
+		errProtect:   FastFail(),
 	}
 	for _, option := range options {
 		option.Apply(c)
@@ -121,16 +121,6 @@ func (c *CdcWriterTemplate) bufferInit() {
 				}
 				collectionPositions[pChannelName] = position
 			})
-			//for _, bufferOp := range bufferOps {
-			//	bufferOp.Apply(context.Background(), positionFunc)
-			//}
-			//if c.bufferUpdatePositionFunc != nil {
-			//	for collectionID, collectionPositions := range latestPositions {
-			//		for pChannelName, position := range collectionPositions {
-			//			c.bufferUpdatePositionFunc(collectionID, collectionNames[collectionID], pChannelName, position)
-			//		}
-			//	}
-			//}
 
 			bufferData := <-c.bufferDataChan
 			type CombineData struct {
@@ -462,51 +452,8 @@ func (c *CdcWriterTemplate) handleCreateCollection(ctx context.Context, data *mo
 }
 
 func (c *CdcWriterTemplate) handleDropCollection(ctx context.Context, data *model.CDCData, callback WriteCallback) {
-	//msg := data.Msg.(*api.DropCollectionMsg)
-
-	//dropCollectionFunc := BufferOpFunc(func(ctx context.Context, positionFunc NotifyCollectionPositionChangeFunc) {
-	//	err := c.handler.DropCollection(ctx, &DropCollectionParam{msg.CollectionName})
-	//	if err != nil {
-	//		c.fail("fail to drop collection", err, data, callback)
-	//		return
-	//	}
-	//
-	//	var channelInfos map[string]CallbackChannelInfo
-	//
-	//	collectChannelInfo := func(dropCollectionMsg *api.DropCollectionMsg) {
-	//		position := dropCollectionMsg.Position()
-	//		kd := &commonpb.KeyDataPair{
-	//			Key:  position.ChannelName,
-	//			Data: position.MsgID,
-	//		}
-	//		channelInfos[position.ChannelName] = CallbackChannelInfo{
-	//			Position: kd,
-	//			Ts:       dropCollectionMsg.EndTs(),
-	//		}
-	//	}
-	//	collectChannelInfo(msg)
-	//	if msgsValue := data.Extra[model.DropCollectionMsgsKey]; msgsValue != "" {
-	//		var msgs []api.TsMsg
-	//		if err = json.Unmarshal(util.ToBytes(msgsValue), &msgs); err != nil {
-	//			c.fail("fail to drop collection, unmarshal error", err, data, callback)
-	//			return
-	//		}
-	//		for _, tsMsg := range msgs {
-	//			otherDropMsg := tsMsg.(*api.DropCollectionMsg)
-	//			collectChannelInfo(otherDropMsg)
-	//		}
-	//	}
-	//
-	//	callback.OnSuccess(msg.CollectionID, channelInfos)
-	//	if positionFunc != nil {
-	//		for _, info := range channelInfos {
-	//			positionFunc(msg.CollectionID, msg.CollectionName, info.Position.Key, info.Position)
-	//		}
-	//	}
-	//})
 	c.bufferLock.Lock()
 	defer c.bufferLock.Unlock()
-	//c.bufferOps = append(c.bufferOps, dropCollectionFunc)
 	c.bufferData = append(c.bufferData, lo.T2(data, callback))
 	c.clearBufferFunc()
 }
@@ -519,54 +466,9 @@ func (c *CdcWriterTemplate) handleInsert(ctx context.Context, data *model.CDCDat
 		return
 	}
 
-	//var columns []entity.Column
-	//var totalSize int64
-	//sizeFunc := func(column entity.Column) bool {
-	//	size := SizeColumn(column)
-	//	if size < 0 {
-	//		c.fail("fail to get the data size", errors.New("invalid column type"), data, callback, zap.String("column_name", column.Name()), zap.String("partition_name", msg.PartitionName))
-	//		return false
-	//	}
-	//	totalSize += SizeColumn(column)
-	//	return true
-	//}
-	//
-	//for _, fieldData := range msg.FieldsData {
-	//	if column, err := entity.FieldDataColumn(fieldData, 0, -1); err == nil {
-	//		columns = append(columns, column)
-	//		if !sizeFunc(column) {
-	//			return
-	//		}
-	//	} else {
-	//		column, err := entity.FieldDataVector(fieldData)
-	//		if err != nil {
-	//			c.fail("fail to parse the data", err, data, callback, zap.String("partition_name", msg.PartitionName))
-	//			return
-	//		}
-	//		columns = append(columns, column)
-	//		if !sizeFunc(column) {
-	//			return
-	//		}
-	//	}
-	//}
-
-	//insertFunc := BufferOpFunc(func(insertCtx context.Context, positionFunc NotifyCollectionPositionChangeFunc) {
-	//	err := c.handler.Insert(insertCtx, &InsertParam{
-	//		CollectionName: msg.CollectionName,
-	//		PartitionName:  msg.PartitionName,
-	//		Columns:        columns,
-	//	})
-	//	if err != nil {
-	//		c.fail("fail to insert the data", err, data, callback, zap.String("partition_name", msg.PartitionName))
-	//		return
-	//	}
-	//	c.success(msg.CollectionID, msg.CollectionName, data, callback, positionFunc)
-	//})
-
 	c.bufferLock.Lock()
 	defer c.bufferLock.Unlock()
 	c.currentBufferSize += totalSize
-	//c.bufferOps = append(c.bufferOps, insertFunc)
 	c.bufferData = append(c.bufferData, lo.T2(data, callback))
 	c.checkBufferSize()
 }
@@ -575,32 +477,9 @@ func (c *CdcWriterTemplate) handleDelete(ctx context.Context, data *model.CDCDat
 	msg := data.Msg.(*api.DeleteMsg)
 	totalSize := mqutil.SizeOfDeleteMsg(msg)
 
-	//var totalSize int64
-	//column, err := entity.IDColumns(msg.PrimaryKeys, 0, -1)
-	//if err != nil {
-	//	c.fail("fail to get the id columns", err, data, callback, zap.String("partition_name", msg.PartitionName))
-	//}
-	//if totalSize = SizeColumn(column); totalSize < 0 {
-	//	c.fail("fail to get the data size", errors.New("invalid column type"), data, callback, zap.String("column_name", column.Name()), zap.String("partition_name", msg.PartitionName))
-	//	return
-	//}
-	//
-	//deleteFunc := BufferOpFunc(func(deleteCtx context.Context, positionFunc NotifyCollectionPositionChangeFunc) {
-	//	err = c.handler.Delete(deleteCtx, &DeleteParam{
-	//		CollectionName: msg.CollectionName,
-	//		PartitionName:  msg.PartitionName,
-	//		Column:         column,
-	//	})
-	//	if err != nil {
-	//		c.fail("fail to delete the column", err, data, callback, zap.String("partition_name", msg.PartitionName))
-	//		return
-	//	}
-	//	c.success(msg.CollectionID, msg.CollectionName, data, callback, positionFunc)
-	//})
 	c.bufferLock.Lock()
 	defer c.bufferLock.Unlock()
 	c.currentBufferSize += totalSize
-	//c.bufferOps = append(c.bufferOps, deleteFunc)
 	c.bufferData = append(c.bufferData, lo.T2(data, callback))
 	c.checkBufferSize()
 }
@@ -657,9 +536,7 @@ func (c *CdcWriterTemplate) checkBufferSize() {
 
 func (c *CdcWriterTemplate) clearBufferFunc() {
 	// no copy, is a shallow copy
-	//c.bufferOpsChan <- c.bufferOps[:]
 	c.bufferDataChan <- c.bufferData[:]
-	//c.bufferOps = []BufferOp{}
 	c.bufferData = []lo.Tuple2[*model.CDCData, WriteCallback]{}
 	c.currentBufferSize = 0
 }
@@ -739,7 +616,7 @@ func (c *CdcWriterTemplate) combineColumn(a []entity.Column, b []entity.Column) 
 				values = append(values, id)
 			}
 		default:
-			log.Fatal("not support column type", zap.Any("value", columnValue))
+			log.Panic("not support column type", zap.Any("value", columnValue))
 		}
 		for _, value := range values {
 			_ = a[i].AppendValue(value)

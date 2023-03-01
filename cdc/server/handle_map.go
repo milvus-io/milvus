@@ -33,7 +33,7 @@ type requestHandler struct {
 
 func init() {
 	requestHandlers = map[string]*requestHandler{
-		modelrequest.RequestTypeCreate: {
+		modelrequest.Create: {
 			generateModel: func() any {
 				return &modelrequest.CreateRequest{}
 			},
@@ -45,7 +45,7 @@ func init() {
 				return api.Create(createRequest)
 			},
 		},
-		modelrequest.RequestTypeDelete: {
+		modelrequest.Delete: {
 			generateModel: func() any {
 				return &modelrequest.DeleteRequest{}
 			},
@@ -57,7 +57,7 @@ func init() {
 				return api.Delete(deleteRequest)
 			},
 		},
-		modelrequest.RequestTypePause: {
+		modelrequest.Pause: {
 			generateModel: func() any {
 				return &modelrequest.PauseRequest{}
 			},
@@ -69,7 +69,7 @@ func init() {
 				return api.Pause(pauseRequest)
 			},
 		},
-		modelrequest.RequestTypeResume: {
+		modelrequest.Resume: {
 			generateModel: func() any {
 				return &modelrequest.ResumeRequest{}
 			},
@@ -81,7 +81,7 @@ func init() {
 				return api.Resume(resumeRequest)
 			},
 		},
-		modelrequest.RequestTypeGet: {
+		modelrequest.Get: {
 			generateModel: func() any {
 				return &modelrequest.GetRequest{}
 			},
@@ -93,7 +93,7 @@ func init() {
 				return api.Get(getRequest)
 			},
 		},
-		modelrequest.RequestTypeList: {
+		modelrequest.List: {
 			generateModel: func() any {
 				return &modelrequest.ListRequest{}
 			},

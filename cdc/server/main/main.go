@@ -52,7 +52,7 @@ type config struct {
 }
 
 func main() {
-	s := &server.CdcServer{}
+	s := &server.CDCServer{}
 
 	// parse config file
 	conf := config{}
@@ -80,20 +80,13 @@ func main() {
 		panic("Unknown mq type:" + conf.Source.MQType)
 	}
 
-	s.Run(&server.CdcServerConfig{
+	s.Run(&server.CDCServerConfig{
 		Address: fmt.Sprintf("%s:%d", conf.Address, conf.Port),
-		EtcdConfig: struct {
-			Endpoints []string
-			RootPath  string
-		}{Endpoints: conf.Endpoints, RootPath: conf.RootPath},
-		SourceConfig: struct {
-			EtcdAddress     []string
-			EtcdRootPath    string
-			EtcdMetaSubPath string
-			ReadChanLen     int
-			Pulsar          coreconf.PulsarConfig
-			Kafka           coreconf.KafkaConfig
-		}{
+		EtcdConfig: server.CDCEtcdConfig{
+			Endpoints: conf.Endpoints,
+			RootPath:  conf.RootPath,
+		},
+		SourceConfig: server.MilvusSourceConfig{
 			EtcdAddress:     conf.Source.Endpoints,
 			EtcdRootPath:    conf.Source.RootPath,
 			EtcdMetaSubPath: conf.Source.MetaPath,
@@ -101,6 +94,5 @@ func main() {
 			Pulsar:          pulsarConfig,
 			Kafka:           kafkaConfig,
 		},
-		MaxNameLength: 256,
 	})
 }

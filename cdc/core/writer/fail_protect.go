@@ -22,7 +22,9 @@ import (
 	"time"
 )
 
-var FastFail = NewErrorProtect(1, time.Minute)
+var FastFail = func() *ErrorProtect {
+	return NewErrorProtect(1, time.Minute)
+}
 
 // ErrorProtect avoid to occur a lot of errors in the short time
 type ErrorProtect struct {
@@ -72,7 +74,7 @@ func (e *ErrorProtect) close() {
 
 func (e *ErrorProtect) Inc() {
 	atomic.AddInt32(&e.current, 1)
-	if e.current > e.per {
+	if e.current >= e.per {
 		e.close()
 	}
 }

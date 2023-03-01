@@ -17,7 +17,6 @@
 package request
 
 //go:generate easytags $GOFILE json,mapstructure
-
 type ListRequest struct {
 }
 

@@ -17,7 +17,6 @@
 package request
 
 //go:generate easytags $GOFILE json,mapstructure
-
 type PauseRequest struct {
 	TaskID string `json:"task_id" mapstructure:"task_id"`
 }

@@ -17,7 +17,6 @@
 package model
 
 //go:generate easytags $GOFILE json,mapstructure
-
 type MilvusConnectParam struct {
 	Host            string `json:"host" mapstructure:"host"`
 	Port            int    `json:"port" mapstructure:"port"`
