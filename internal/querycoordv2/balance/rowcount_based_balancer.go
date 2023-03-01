@@ -153,6 +153,10 @@ func (b *RowCountBasedBalancer) balanceReplica(replica *meta.Replica) ([]Segment
 		return nil, nil
 	}
 
+	if len(nodesSegments) == 0 {
+		return nil, nil
+	}
+
 	average := totalCnt / len(nodesSegments)
 	neededRowCnt := 0
 	for nodeID := range nodesSegments {
