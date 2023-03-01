@@ -113,9 +113,9 @@ class TestChaos(TestChaosBase):
         Path(data_dir).mkdir(parents=True, exist_ok=True)
         files = []
         if file_type == "json":
-            files = cf.gen_json_files_for_bulk_insert(data, schema, data_dir)
+            files = cf.gen_json_files_for_bulk_insert(data, schema, data_dir, nb=nb, dim=dim)
         if file_type == "npy":
-            files = cf.gen_npy_files_for_bulk_insert(data, schema, data_dir)
+            files = cf.gen_npy_files_for_bulk_insert(data, schema, data_dir, nb=nb, dim=dim)
         log.info("upload file to minio")
         client = Minio(minio_endpoint, access_key="minioadmin", secret_key="minioadmin", secure=False)
         for file_name in files:
