@@ -62,7 +62,7 @@ func (s *stepStack) Execute(ctx context.Context) *stepStack {
 		_, isConfirmGCStep := todo.(*confirmGCStep)
 		skipLog := isWaitForTsSyncedStep || isConfirmGCStep
 
-		if retry.IsUnRecoverable(err) {
+		if !retry.IsRecoverable(err) {
 			if !skipLog {
 				log.Warn("failed to execute step, not able to reschedule", zap.Error(err), zap.String("step", todo.Desc()))
 			}

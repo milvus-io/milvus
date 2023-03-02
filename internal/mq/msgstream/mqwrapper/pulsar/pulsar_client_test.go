@@ -668,7 +668,7 @@ func TestPulsarClient_SubscribeExclusiveFail(t *testing.T) {
 
 		_, err := pc.Subscribe(mqwrapper.ConsumerOptions{Topic: "test_topic_name"})
 		assert.Error(t, err)
-		assert.True(t, retry.IsUnRecoverable(err))
+		assert.False(t, retry.IsRecoverable(err))
 	})
 }
 
