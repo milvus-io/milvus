@@ -16,10 +16,13 @@
 
 #pragma once
 
-#include <deque>
+#include <fmt/core.h>
+
 #include <boost_ext/dynamic_bitset_ext.hpp>
-#include "exceptions/EasyAssert.h"
+#include <deque>
+
 #include "common/Types.h"
+#include "exceptions/EasyAssert.h"
 #include "knowhere/bitsetview.h"
 
 namespace milvus {
@@ -52,9 +55,8 @@ class BitsetView : public knowhere::BitsetView {
         }
 
         AssertInfo((offset & 0x7) == 0, "offset is not divisible by 8");
-        AssertInfo((offset + size) <= this->size(), "offset + size cross the border.[offset=" + std::to_string(offset) +
-                                                        "][size=" + std::to_string(size) +
-                                                        "][this.size()=" + std::to_string(this->size()) + "]");
+        AssertInfo(offset + size <= this->size(),
+                   fmt::format("index out of range, offset={}, size={}, bitset.size={}", offset, size, this->size()));
         return {data() + (offset >> 3), size};
     }
 };
