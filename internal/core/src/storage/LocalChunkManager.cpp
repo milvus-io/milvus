@@ -15,12 +15,13 @@
 // limitations under the License.
 
 #include "LocalChunkManager.h"
-#include "Exception.h"
 
-#include <sstream>
-#include <fstream>
 #include <boost/filesystem.hpp>
 #include <boost/system/error_code.hpp>
+#include <fstream>
+#include <sstream>
+
+#include "Exception.h"
 
 #define THROWLOCALERROR(FUNCTION)                                 \
     do {                                                          \
@@ -178,7 +179,7 @@ void
 LocalChunkManager::RemoveDir(const std::string& dir) {
     boost::filesystem::path dirPath(dir);
     boost::system::error_code err;
-    boost::filesystem::remove_all(dirPath);
+    boost::filesystem::remove_all(dirPath, err);
     if (err) {
         THROWLOCALERROR(RemoveDir);
     }
