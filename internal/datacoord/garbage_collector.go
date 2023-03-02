@@ -358,7 +358,7 @@ func (gc *garbageCollector) recycleUnusedIndexes() {
 func (gc *garbageCollector) recycleUnusedSegIndexes() {
 	segIndexes := gc.meta.GetAllSegIndexes()
 	for _, segIdx := range segIndexes {
-		if gc.meta.GetSegmentUnsafe(segIdx.SegmentID) == nil || !gc.meta.IsIndexExist(segIdx.CollectionID, segIdx.IndexID) {
+		if gc.meta.GetSegment(segIdx.SegmentID) == nil || !gc.meta.IsIndexExist(segIdx.CollectionID, segIdx.IndexID) {
 			if err := gc.meta.RemoveSegmentIndex(segIdx.CollectionID, segIdx.PartitionID, segIdx.SegmentID, segIdx.IndexID, segIdx.BuildID); err != nil {
 				log.Warn("delete index meta from etcd failed, wait to retry", zap.Int64("buildID", segIdx.BuildID),
 					zap.Int64("segID", segIdx.SegmentID), zap.Int64("nodeID", segIdx.NodeID), zap.Error(err))

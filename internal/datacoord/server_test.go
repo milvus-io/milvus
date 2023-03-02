@@ -1313,7 +1313,7 @@ func TestSaveBinlogPaths(t *testing.T) {
 		assert.Nil(t, err)
 		assert.EqualValues(t, resp.ErrorCode, commonpb.ErrorCode_Success)
 
-		segment := svr.meta.GetSegment(1)
+		segment := svr.meta.GetHealthySegment(1)
 		assert.NotNil(t, segment)
 		binlogs := segment.GetBinlogs()
 		assert.EqualValues(t, 1, len(binlogs))
@@ -1327,6 +1327,210 @@ func TestSaveBinlogPaths(t *testing.T) {
 		assert.EqualValues(t, segment.DmlPosition.ChannelName, "ch1")
 		assert.EqualValues(t, segment.DmlPosition.MsgID, []byte{1, 2, 3})
 		assert.EqualValues(t, segment.NumOfRows, 10)
+	})
+
+	t.Run("SaveDroppedSegment", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+
+		// vecFieldID := int64(201)
+		svr.meta.AddCollection(&collectionInfo{
+			ID: 0,
+		})
+
+		segments := []struct {
+			id           UniqueID
+			collectionID UniqueID
+		}{
+			{0, 0},
+			{1, 0},
+		}
+		for _, segment := range segments {
+			s := &datapb.SegmentInfo{
+				ID:            segment.id,
+				CollectionID:  segment.collectionID,
+				InsertChannel: "ch1",
+				State:         commonpb.SegmentState_Dropped,
+			}
+			err := svr.meta.AddSegment(NewSegmentInfo(s))
+			assert.Nil(t, err)
+		}
+
+		err := svr.channelManager.AddNode(0)
+		assert.Nil(t, err)
+		err = svr.channelManager.Watch(&channel{Name: "ch1", CollectionID: 0})
+		assert.Nil(t, err)
+
+		ctx := context.Background()
+		resp, err := svr.SaveBinlogPaths(ctx, &datapb.SaveBinlogPathsRequest{
+			Base: &commonpb.MsgBase{
+				Timestamp: uint64(time.Now().Unix()),
+			},
+			SegmentID:    1,
+			CollectionID: 0,
+			Field2BinlogPaths: []*datapb.FieldBinlog{
+				{
+					FieldID: 1,
+					Binlogs: []*datapb.Binlog{
+						{
+							LogPath:    "/by-dev/test/0/1/1/1/Allo1",
+							EntriesNum: 5,
+						},
+						{
+							LogPath:    "/by-dev/test/0/1/1/1/Allo2",
+							EntriesNum: 5,
+						},
+					},
+				},
+			},
+			CheckPoints: []*datapb.CheckPoint{
+				{
+					SegmentID: 1,
+					Position: &internalpb.MsgPosition{
+						ChannelName: "ch1",
+						MsgID:       []byte{1, 2, 3},
+						MsgGroup:    "",
+						Timestamp:   0,
+					},
+					NumOfRows: 12,
+				},
+			},
+			Flushed: false,
+		})
+		assert.Nil(t, err)
+		assert.EqualValues(t, resp.ErrorCode, commonpb.ErrorCode_Success)
+
+		segment := svr.meta.GetSegment(1)
+		assert.NotNil(t, segment)
+		binlogs := segment.GetBinlogs()
+		assert.EqualValues(t, 0, len(binlogs))
+		assert.EqualValues(t, segment.NumOfRows, 0)
+	})
+
+	t.Run("SaveUnhealthySegment", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+
+		// vecFieldID := int64(201)
+		svr.meta.AddCollection(&collectionInfo{
+			ID: 0,
+		})
+
+		segments := []struct {
+			id           UniqueID
+			collectionID UniqueID
+		}{
+			{0, 0},
+			{1, 0},
+		}
+		for _, segment := range segments {
+			s := &datapb.SegmentInfo{
+				ID:            segment.id,
+				CollectionID:  segment.collectionID,
+				InsertChannel: "ch1",
+				State:         commonpb.SegmentState_NotExist,
+			}
+			err := svr.meta.AddSegment(NewSegmentInfo(s))
+			assert.Nil(t, err)
+		}
+
+		err := svr.channelManager.AddNode(0)
+		assert.Nil(t, err)
+		err = svr.channelManager.Watch(&channel{Name: "ch1", CollectionID: 0})
+		assert.Nil(t, err)
+
+		ctx := context.Background()
+		resp, err := svr.SaveBinlogPaths(ctx, &datapb.SaveBinlogPathsRequest{
+			Base: &commonpb.MsgBase{
+				Timestamp: uint64(time.Now().Unix()),
+			},
+			SegmentID:    1,
+			CollectionID: 0,
+			Field2BinlogPaths: []*datapb.FieldBinlog{
+				{
+					FieldID: 1,
+					Binlogs: []*datapb.Binlog{
+						{
+							LogPath:    "/by-dev/test/0/1/1/1/Allo1",
+							EntriesNum: 5,
+						},
+						{
+							LogPath:    "/by-dev/test/0/1/1/1/Allo2",
+							EntriesNum: 5,
+						},
+					},
+				},
+			},
+			CheckPoints: []*datapb.CheckPoint{
+				{
+					SegmentID: 1,
+					Position: &internalpb.MsgPosition{
+						ChannelName: "ch1",
+						MsgID:       []byte{1, 2, 3},
+						MsgGroup:    "",
+						Timestamp:   0,
+					},
+					NumOfRows: 12,
+				},
+			},
+			Flushed: false,
+		})
+		assert.Nil(t, err)
+		assert.EqualValues(t, resp.ErrorCode, commonpb.ErrorCode_SegmentNotFound)
+	})
+
+	t.Run("SaveNotExistSegment", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+
+		// vecFieldID := int64(201)
+		svr.meta.AddCollection(&collectionInfo{
+			ID: 0,
+		})
+
+		err := svr.channelManager.AddNode(0)
+		assert.Nil(t, err)
+		err = svr.channelManager.Watch(&channel{Name: "ch1", CollectionID: 0})
+		assert.Nil(t, err)
+
+		ctx := context.Background()
+		resp, err := svr.SaveBinlogPaths(ctx, &datapb.SaveBinlogPathsRequest{
+			Base: &commonpb.MsgBase{
+				Timestamp: uint64(time.Now().Unix()),
+			},
+			SegmentID:    1,
+			CollectionID: 0,
+			Field2BinlogPaths: []*datapb.FieldBinlog{
+				{
+					FieldID: 1,
+					Binlogs: []*datapb.Binlog{
+						{
+							LogPath:    "/by-dev/test/0/1/1/1/Allo1",
+							EntriesNum: 5,
+						},
+						{
+							LogPath:    "/by-dev/test/0/1/1/1/Allo2",
+							EntriesNum: 5,
+						},
+					},
+				},
+			},
+			CheckPoints: []*datapb.CheckPoint{
+				{
+					SegmentID: 1,
+					Position: &internalpb.MsgPosition{
+						ChannelName: "ch1",
+						MsgID:       []byte{1, 2, 3},
+						MsgGroup:    "",
+						Timestamp:   0,
+					},
+					NumOfRows: 12,
+				},
+			},
+			Flushed: false,
+		})
+		assert.Nil(t, err)
+		assert.EqualValues(t, resp.ErrorCode, commonpb.ErrorCode_SegmentNotFound)
 	})
 
 	t.Run("with channel not matched", func(t *testing.T) {
@@ -1764,7 +1968,7 @@ func TestDataNodeTtChannel(t *testing.T) {
 		assert.EqualValues(t, 1, len(resp.SegIDAssignments))
 
 		assignedSegmentID := resp.SegIDAssignments[0].SegID
-		segment := svr.meta.GetSegment(assignedSegmentID)
+		segment := svr.meta.GetHealthySegment(assignedSegmentID)
 		assert.EqualValues(t, 1, len(segment.allocations))
 
 		msgPack := msgstream.MsgPack{}
@@ -1774,7 +1978,7 @@ func TestDataNodeTtChannel(t *testing.T) {
 		assert.Nil(t, err)
 
 		<-ch
-		segment = svr.meta.GetSegment(assignedSegmentID)
+		segment = svr.meta.GetHealthySegment(assignedSegmentID)
 		assert.EqualValues(t, 0, len(segment.allocations))
 	})
 }
@@ -3454,7 +3658,7 @@ func TestDataCoord_SegmentStatistics(t *testing.T) {
 		})
 		assert.NoError(t, err)
 
-		assert.Equal(t, svr.meta.GetSegment(100).currRows, int64(1))
+		assert.Equal(t, svr.meta.GetHealthySegment(100).currRows, int64(1))
 		assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
 		closeTestServer(t, svr)
 	})
@@ -3481,7 +3685,7 @@ func TestDataCoord_SegmentStatistics(t *testing.T) {
 		})
 		assert.NoError(t, err)
 
-		assert.Equal(t, svr.meta.GetSegment(100).currRows, int64(0))
+		assert.Equal(t, svr.meta.GetHealthySegment(100).currRows, int64(0))
 		assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
 		closeTestServer(t, svr)
 	})

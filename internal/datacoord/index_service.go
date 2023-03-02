@@ -108,7 +108,7 @@ func (s *Server) createIndexForSegmentLoop(ctx context.Context) {
 			}
 		case segID := <-s.buildIndexCh:
 			log.Info("receive new flushed segment", zap.Int64("segID", segID))
-			segment := s.meta.GetSegmentUnsafe(segID)
+			segment := s.meta.GetSegment(segID)
 			if segment == nil {
 				log.Warn("segment is not exist, no need to build index", zap.Int64("segID", segID))
 				continue
