@@ -443,7 +443,7 @@ func (t *queryTask) queryShard(ctx context.Context, nodeID int64, qn types.Query
 	if err != nil {
 		log.Ctx(ctx).Warn("QueryNode query return error", zap.Int64("msgID", t.ID()),
 			zap.Int64("nodeID", nodeID), zap.Strings("channels", channelIDs), zap.Error(err))
-		return err
+		return common.NewCodeError(commonpb.ErrorCode_NotReadyServe, err)
 	}
 	errCode := result.GetStatus().GetErrorCode()
 	if errCode == commonpb.ErrorCode_NotShardLeader {
