@@ -56,7 +56,9 @@ def gen_unique_str(str_value=None):
     return "test_" + prefix if str_value is None else str_value + "_" + prefix
 
 
-def gen_str_by_length(length=8):
+def gen_str_by_length(length=8, letters_only=False):
+    if letters_only:
+        return "".join(random.choice(string.ascii_letters) for _ in range(length))
     return "".join(random.choice(string.ascii_letters + string.digits) for _ in range(length))
 
 
