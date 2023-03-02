@@ -21,13 +21,12 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
-
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus/internal/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -69,25 +68,31 @@ type mockTtMsgStream struct {
 }
 
 func (mtm *mockTtMsgStream) Close() {}
+
 func (mtm *mockTtMsgStream) Chan() <-chan *msgstream.MsgPack {
 	return make(chan *msgstream.MsgPack, 100)
 }
 
 func (mtm *mockTtMsgStream) AsProducer(channels []string) {}
+
 func (mtm *mockTtMsgStream) AsConsumer(channels []string, subName string, position mqwrapper.SubscriptionInitialPosition) {
 }
+
 func (mtm *mockTtMsgStream) SetRepackFunc(repackFunc msgstream.RepackFunc) {}
 
 func (mtm *mockTtMsgStream) GetProduceChannels() []string {
 	return make([]string, 0)
 }
+
 func (mtm *mockTtMsgStream) Produce(*msgstream.MsgPack) error {
 	return nil
 }
+
 func (mtm *mockTtMsgStream) Broadcast(*msgstream.MsgPack) (map[string][]msgstream.MessageID, error) {
 	return nil, nil
 }
-func (mtm *mockTtMsgStream) Seek(offset []*internalpb.MsgPosition) error {
+
+func (mtm *mockTtMsgStream) Seek(offset []*msgpb.MsgPosition) error {
 	return nil
 }
 
@@ -97,7 +102,7 @@ func (mtm *mockTtMsgStream) GetLatestMsgID(channel string) (msgstream.MessageID,
 
 func TestNewDmInputNode(t *testing.T) {
 	client := msgdispatcher.NewClient(&mockMsgStreamFactory{}, typeutil.DataNodeRole, paramtable.GetNodeID())
-	_, err := newDmInputNode(client, new(internalpb.MsgPosition), &nodeConfig{
+	_, err := newDmInputNode(client, new(msgpb.MsgPosition), &nodeConfig{
 		msFactory:    &mockMsgStreamFactory{},
 		vChannelName: "mock_vchannel_0",
 	})

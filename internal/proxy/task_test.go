@@ -27,27 +27,26 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
-	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
-
 	"github.com/golang/protobuf/proto"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/util/distance"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/internal/util/uniquegenerator"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 )
 
 // TODO(dragondriver): add more test cases
@@ -1280,6 +1279,7 @@ func TestShowPartitionsTask(t *testing.T) {
 	assert.NotNil(t, err)
 
 }
+
 func TestTask_Int64PrimaryKey(t *testing.T) {
 	var err error
 
@@ -1389,7 +1389,7 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 				BaseMsg: msgstream.BaseMsg{
 					HashValues: hash,
 				},
-				InsertRequest: internalpb.InsertRequest{
+				InsertRequest: msgpb.InsertRequest{
 					Base: &commonpb.MsgBase{
 						MsgType:  commonpb.MsgType_Insert,
 						MsgID:    0,
@@ -1399,7 +1399,7 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 					CollectionName: collectionName,
 					PartitionName:  partitionName,
 					NumRows:        uint64(nb),
-					Version:        internalpb.InsertDataVersion_ColumnBased,
+					Version:        msgpb.InsertDataVersion_ColumnBased,
 				},
 			},
 
@@ -1443,7 +1443,7 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 			Condition: NewTaskCondition(ctx),
 			deleteMsg: &msgstream.DeleteMsg{
 				BaseMsg: msgstream.BaseMsg{},
-				DeleteRequest: internalpb.DeleteRequest{
+				DeleteRequest: msgpb.DeleteRequest{
 					Base: &commonpb.MsgBase{
 						MsgType:   commonpb.MsgType_Delete,
 						MsgID:     0,
@@ -1497,7 +1497,7 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 			Condition: NewTaskCondition(ctx),
 			deleteMsg: &msgstream.DeleteMsg{
 				BaseMsg: msgstream.BaseMsg{},
-				DeleteRequest: internalpb.DeleteRequest{
+				DeleteRequest: msgpb.DeleteRequest{
 					Base: &commonpb.MsgBase{
 						MsgType:   commonpb.MsgType_Delete,
 						MsgID:     0,
@@ -1642,7 +1642,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 				BaseMsg: msgstream.BaseMsg{
 					HashValues: hash,
 				},
-				InsertRequest: internalpb.InsertRequest{
+				InsertRequest: msgpb.InsertRequest{
 					Base: &commonpb.MsgBase{
 						MsgType:  commonpb.MsgType_Insert,
 						MsgID:    0,
@@ -1652,7 +1652,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 					CollectionName: collectionName,
 					PartitionName:  partitionName,
 					NumRows:        uint64(nb),
-					Version:        internalpb.InsertDataVersion_ColumnBased,
+					Version:        msgpb.InsertDataVersion_ColumnBased,
 				},
 			},
 
@@ -1701,7 +1701,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 					BaseMsg: msgstream.BaseMsg{
 						HashValues: hash,
 					},
-					InsertRequest: internalpb.InsertRequest{
+					InsertRequest: msgpb.InsertRequest{
 						Base: &commonpb.MsgBase{
 							MsgType:  commonpb.MsgType_Insert,
 							MsgID:    0,
@@ -1711,14 +1711,14 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 						CollectionName: collectionName,
 						PartitionName:  partitionName,
 						NumRows:        uint64(nb),
-						Version:        internalpb.InsertDataVersion_ColumnBased,
+						Version:        msgpb.InsertDataVersion_ColumnBased,
 					},
 				},
 				DeleteMsg: &msgstream.DeleteMsg{
 					BaseMsg: msgstream.BaseMsg{
 						HashValues: hash,
 					},
-					DeleteRequest: internalpb.DeleteRequest{
+					DeleteRequest: msgpb.DeleteRequest{
 						Base: &commonpb.MsgBase{
 							MsgType:   commonpb.MsgType_Delete,
 							MsgID:     0,
@@ -1786,7 +1786,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 			Condition: NewTaskCondition(ctx),
 			deleteMsg: &msgstream.DeleteMsg{
 				BaseMsg: msgstream.BaseMsg{},
-				DeleteRequest: internalpb.DeleteRequest{
+				DeleteRequest: msgpb.DeleteRequest{
 					Base: &commonpb.MsgBase{
 						MsgType:   commonpb.MsgType_Delete,
 						MsgID:     0,
@@ -1840,7 +1840,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 			Condition: NewTaskCondition(ctx),
 			deleteMsg: &msgstream.DeleteMsg{
 				BaseMsg: msgstream.BaseMsg{},
-				DeleteRequest: internalpb.DeleteRequest{
+				DeleteRequest: msgpb.DeleteRequest{
 					Base: &commonpb.MsgBase{
 						MsgType:   commonpb.MsgType_Delete,
 						MsgID:     0,

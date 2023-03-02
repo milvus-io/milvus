@@ -19,14 +19,15 @@ package datacoord
 import (
 	"context"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"go.uber.org/zap"
 )
 
 // Handler handles some channel method for ChannelManager
@@ -172,8 +173,8 @@ func (h *ServerHandler) GetQueryVChanPositions(channel *channel, partitionID Uni
 
 // getEarliestSegmentDMLPos returns the earliest dml position of segments,
 // this is mainly for COMPATIBILITY with old version <=2.1.x
-func (h *ServerHandler) getEarliestSegmentDMLPos(channel *channel, partitionID UniqueID) *internalpb.MsgPosition {
-	var minPos *internalpb.MsgPosition
+func (h *ServerHandler) getEarliestSegmentDMLPos(channel *channel, partitionID UniqueID) *msgpb.MsgPosition {
+	var minPos *msgpb.MsgPosition
 	var minPosSegID int64
 	var minPosTs uint64
 	segments := h.s.meta.SelectSegments(func(s *SegmentInfo) bool {
@@ -192,7 +193,7 @@ func (h *ServerHandler) getEarliestSegmentDMLPos(channel *channel, partitionID U
 			continue
 		}
 
-		var segmentPosition *internalpb.MsgPosition
+		var segmentPosition *msgpb.MsgPosition
 		if s.GetDmlPosition() != nil {
 			segmentPosition = s.GetDmlPosition()
 		} else {
@@ -214,9 +215,9 @@ func (h *ServerHandler) getEarliestSegmentDMLPos(channel *channel, partitionID U
 }
 
 // getCollectionStartPos returns collection start position.
-func (h *ServerHandler) getCollectionStartPos(channel *channel) *internalpb.MsgPosition {
+func (h *ServerHandler) getCollectionStartPos(channel *channel) *msgpb.MsgPosition {
 	// use collection start position when segment position is not found
-	var startPosition *internalpb.MsgPosition
+	var startPosition *msgpb.MsgPosition
 	if channel.StartPositions == nil {
 		collection, err := h.GetCollection(h.s.ctx, channel.CollectionID)
 		if collection != nil && err == nil {
@@ -244,8 +245,8 @@ func (h *ServerHandler) getCollectionStartPos(channel *channel) *internalpb.MsgP
 //  2. Segments earliest dml position;
 //  3. Collection start position;
 //     And would return if any position is valid.
-func (h *ServerHandler) GetChannelSeekPosition(channel *channel, partitionID UniqueID) *internalpb.MsgPosition {
-	var seekPosition *internalpb.MsgPosition
+func (h *ServerHandler) GetChannelSeekPosition(channel *channel, partitionID UniqueID) *msgpb.MsgPosition {
+	var seekPosition *msgpb.MsgPosition
 	seekPosition = h.s.meta.GetChannelCheckpoint(channel.Name)
 	if seekPosition != nil {
 		log.Info("channel seek position set from channel checkpoint meta",
@@ -278,16 +279,16 @@ func (h *ServerHandler) GetChannelSeekPosition(channel *channel, partitionID Uni
 	return nil
 }
 
-func getCollectionStartPosition(channel string, collectionInfo *collectionInfo) *internalpb.MsgPosition {
+func getCollectionStartPosition(channel string, collectionInfo *collectionInfo) *msgpb.MsgPosition {
 	return toMsgPosition(channel, collectionInfo.StartPositions)
 }
 
-func toMsgPosition(channel string, startPositions []*commonpb.KeyDataPair) *internalpb.MsgPosition {
+func toMsgPosition(channel string, startPositions []*commonpb.KeyDataPair) *msgpb.MsgPosition {
 	for _, sp := range startPositions {
 		if sp.GetKey() != funcutil.ToPhysicalChannel(channel) {
 			continue
 		}
-		return &internalpb.MsgPosition{
+		return &msgpb.MsgPosition{
 			ChannelName: channel,
 			MsgID:       sp.GetData(),
 		}

@@ -17,7 +17,7 @@
 package task
 
 import (
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 )
 
@@ -61,7 +61,7 @@ func (task *LoadSegmentsTask) Merge(other MergeableTask[segmentIndex, *querypb.L
 	task.tasks = append(task.tasks, otherTask.tasks...)
 	task.steps = append(task.steps, otherTask.steps...)
 	task.req.Infos = append(task.req.Infos, otherTask.req.GetInfos()...)
-	positions := make(map[string]*internalpb.MsgPosition)
+	positions := make(map[string]*msgpb.MsgPosition)
 	for _, position := range task.req.DeltaPositions {
 		positions[position.GetChannelName()] = position
 	}
@@ -72,7 +72,7 @@ func (task *LoadSegmentsTask) Merge(other MergeableTask[segmentIndex, *querypb.L
 		}
 		positions[position.GetChannelName()] = merged
 	}
-	task.req.DeltaPositions = make([]*internalpb.MsgPosition, 0, len(positions))
+	task.req.DeltaPositions = make([]*msgpb.MsgPosition, 0, len(positions))
 	for _, position := range positions {
 		task.req.DeltaPositions = append(task.req.DeltaPositions, position)
 	}

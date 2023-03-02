@@ -24,9 +24,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 )
 
@@ -184,7 +184,7 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 				UnflushedSegmentIds: []int64{100},
 				FlushedSegmentIds:   []int64{101},
 				DroppedSegmentIds:   []int64{102},
-				SeekPosition: &internalpb.MsgPosition{
+				SeekPosition: &msgpb.MsgPosition{
 					ChannelName: defaultDMLChannel,
 					MsgID:       []byte{235, 50, 164, 248, 255, 255, 255, 255},
 					Timestamp:   Timestamp(999),
@@ -194,21 +194,21 @@ func TestTask_watchDmChannelsTask(t *testing.T) {
 		task.req.SegmentInfos = map[int64]*datapb.SegmentInfo{
 			100: {
 				ID: 100,
-				DmlPosition: &internalpb.MsgPosition{
+				DmlPosition: &msgpb.MsgPosition{
 					ChannelName: defaultDMLChannel,
 					Timestamp:   Timestamp(1000),
 				},
 			},
 			101: {
 				ID: 101,
-				DmlPosition: &internalpb.MsgPosition{
+				DmlPosition: &msgpb.MsgPosition{
 					ChannelName: defaultDMLChannel,
 					Timestamp:   Timestamp(1001),
 				},
 			},
 			102: {
 				ID: 102,
-				DmlPosition: &internalpb.MsgPosition{
+				DmlPosition: &msgpb.MsgPosition{
 					ChannelName: defaultDMLChannel,
 					Timestamp:   Timestamp(1002),
 				},

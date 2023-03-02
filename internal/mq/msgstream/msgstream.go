@@ -19,8 +19,8 @@ package msgstream
 import (
 	"context"
 
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -34,7 +34,7 @@ type Timestamp = typeutil.Timestamp
 type IntPrimaryKey = typeutil.IntPrimaryKey
 
 // MsgPosition is an alias for short
-type MsgPosition = internalpb.MsgPosition
+type MsgPosition = msgpb.MsgPosition
 
 // MessageID is an alias for short
 type MessageID = mqwrapper.MessageID

@@ -23,17 +23,19 @@ import (
 	"sync"
 	"time"
 
+	"github.com/samber/lo"
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/samber/lo"
-	"go.uber.org/zap"
 )
 
 type (
@@ -73,20 +75,20 @@ type Channel interface {
 	updateSegmentMemorySize(segID UniqueID, memorySize int64)
 	InitPKstats(ctx context.Context, s *Segment, statsBinlogs []*datapb.FieldBinlog, ts Timestamp) error
 	RollPKstats(segID UniqueID, stats []*storage.PrimaryKeyStats)
-	getSegmentStatisticsUpdates(segID UniqueID) (*datapb.SegmentStats, error)
+	getSegmentStatisticsUpdates(segID UniqueID) (*commonpb.SegmentStats, error)
 	segmentFlushed(segID UniqueID)
 
-	getChannelCheckpoint(ttPos *internalpb.MsgPosition) *internalpb.MsgPosition
+	getChannelCheckpoint(ttPos *msgpb.MsgPosition) *msgpb.MsgPosition
 
 	getCurInsertBuffer(segmentID UniqueID) (*BufferData, bool)
 	setCurInsertBuffer(segmentID UniqueID, buf *BufferData)
 	rollInsertBuffer(segmentID UniqueID)
-	evictHistoryInsertBuffer(segmentID UniqueID, endPos *internalpb.MsgPosition)
+	evictHistoryInsertBuffer(segmentID UniqueID, endPos *msgpb.MsgPosition)
 
 	getCurDeleteBuffer(segmentID UniqueID) (*DelDataBuf, bool)
 	setCurDeleteBuffer(segmentID UniqueID, buf *DelDataBuf)
 	rollDeleteBuffer(segmentID UniqueID)
-	evictHistoryDeleteBuffer(segmentID UniqueID, endPos *internalpb.MsgPosition)
+	evictHistoryDeleteBuffer(segmentID UniqueID, endPos *msgpb.MsgPosition)
 }
 
 // ChannelMeta contains channel meta and the latest segments infos of the channel.
@@ -109,7 +111,7 @@ type addSegmentReq struct {
 	segType                    datapb.SegmentType
 	segID, collID, partitionID UniqueID
 	numOfRows                  int64
-	startPos, endPos           *internalpb.MsgPosition
+	startPos, endPos           *msgpb.MsgPosition
 	statsBinLogs               []*datapb.FieldBinlog
 	recoverTs                  Timestamp
 	importing                  bool
@@ -506,12 +508,12 @@ func (c *ChannelMeta) updateSegmentMemorySize(segID UniqueID, memorySize int64) 
 }
 
 // getSegmentStatisticsUpdates gives current segment's statistics updates.
-func (c *ChannelMeta) getSegmentStatisticsUpdates(segID UniqueID) (*datapb.SegmentStats, error) {
+func (c *ChannelMeta) getSegmentStatisticsUpdates(segID UniqueID) (*commonpb.SegmentStats, error) {
 	c.segMu.RLock()
 	defer c.segMu.RUnlock()
 
 	if seg, ok := c.segments[segID]; ok && seg.isValid() {
-		return &datapb.SegmentStats{SegmentID: segID, NumRows: seg.numRows}, nil
+		return &commonpb.SegmentStats{SegmentID: segID, NumRows: seg.numRows}, nil
 	}
 
 	return nil, fmt.Errorf("error, there's no segment %d", segID)
@@ -672,10 +674,10 @@ func (c *ChannelMeta) listNotFlushedSegmentIDs() []UniqueID {
 	return segIDs
 }
 
-func (c *ChannelMeta) getChannelCheckpoint(ttPos *internalpb.MsgPosition) *internalpb.MsgPosition {
+func (c *ChannelMeta) getChannelCheckpoint(ttPos *msgpb.MsgPosition) *msgpb.MsgPosition {
 	c.segMu.RLock()
 	defer c.segMu.RUnlock()
-	channelCP := &internalpb.MsgPosition{Timestamp: math.MaxUint64}
+	channelCP := &msgpb.MsgPosition{Timestamp: math.MaxUint64}
 	// 1. find the earliest startPos in current buffer and history buffer
 	for _, seg := range c.segments {
 		if seg.curInsertBuf != nil && seg.curInsertBuf.startPos != nil && seg.curInsertBuf.startPos.Timestamp < channelCP.Timestamp {
@@ -742,7 +744,7 @@ func (c *ChannelMeta) rollInsertBuffer(segmentID UniqueID) {
 	log.Warn("cannot find segment when rollInsertBuffer", zap.Int64("segmentID", segmentID))
 }
 
-func (c *ChannelMeta) evictHistoryInsertBuffer(segmentID UniqueID, endPos *internalpb.MsgPosition) {
+func (c *ChannelMeta) evictHistoryInsertBuffer(segmentID UniqueID, endPos *msgpb.MsgPosition) {
 	c.segMu.Lock()
 	defer c.segMu.Unlock()
 
@@ -789,7 +791,7 @@ func (c *ChannelMeta) rollDeleteBuffer(segmentID UniqueID) {
 	log.Warn("cannot find segment when rollDeleteBuffer", zap.Int64("segmentID", segmentID))
 }
 
-func (c *ChannelMeta) evictHistoryDeleteBuffer(segmentID UniqueID, endPos *internalpb.MsgPosition) {
+func (c *ChannelMeta) evictHistoryDeleteBuffer(segmentID UniqueID, endPos *msgpb.MsgPosition) {
 	c.segMu.Lock()
 	defer c.segMu.Unlock()
 

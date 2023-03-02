@@ -23,9 +23,8 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 )
 
 func TestBaseMsg(t *testing.T) {
@@ -84,7 +83,7 @@ func generateBaseMsg() BaseMsg {
 func TestInsertMsg(t *testing.T) {
 	insertMsg := &InsertMsg{
 		BaseMsg: generateBaseMsg(),
-		InsertRequest: internalpb.InsertRequest{
+		InsertRequest: msgpb.InsertRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Insert,
 				MsgID:     1,
@@ -137,8 +136,8 @@ func TestInsertMsg_Unmarshal_IllegalParameter(t *testing.T) {
 
 func TestInsertMsg_RowBasedFormat(t *testing.T) {
 	msg := &InsertMsg{
-		InsertRequest: internalpb.InsertRequest{
-			Version: internalpb.InsertDataVersion_RowBased,
+		InsertRequest: msgpb.InsertRequest{
+			Version: msgpb.InsertDataVersion_RowBased,
 		},
 	}
 	assert.True(t, msg.IsRowBased())
@@ -146,8 +145,8 @@ func TestInsertMsg_RowBasedFormat(t *testing.T) {
 
 func TestInsertMsg_ColumnBasedFormat(t *testing.T) {
 	msg := &InsertMsg{
-		InsertRequest: internalpb.InsertRequest{
-			Version: internalpb.InsertDataVersion_ColumnBased,
+		InsertRequest: msgpb.InsertRequest{
+			Version: msgpb.InsertDataVersion_ColumnBased,
 		},
 	}
 	assert.True(t, msg.IsColumnBased())
@@ -155,24 +154,24 @@ func TestInsertMsg_ColumnBasedFormat(t *testing.T) {
 
 func TestInsertMsg_NRows(t *testing.T) {
 	msg1 := &InsertMsg{
-		InsertRequest: internalpb.InsertRequest{
+		InsertRequest: msgpb.InsertRequest{
 			RowData: []*commonpb.Blob{
 				{},
 				{},
 			},
 			FieldsData: nil,
-			Version:    internalpb.InsertDataVersion_RowBased,
+			Version:    msgpb.InsertDataVersion_RowBased,
 		},
 	}
 	assert.Equal(t, uint64(2), msg1.NRows())
 	msg2 := &InsertMsg{
-		InsertRequest: internalpb.InsertRequest{
+		InsertRequest: msgpb.InsertRequest{
 			RowData: nil,
 			FieldsData: []*schemapb.FieldData{
 				{},
 			},
 			NumRows: 2,
-			Version: internalpb.InsertDataVersion_ColumnBased,
+			Version: msgpb.InsertDataVersion_ColumnBased,
 		},
 	}
 	assert.Equal(t, uint64(2), msg2.NRows())
@@ -180,14 +179,14 @@ func TestInsertMsg_NRows(t *testing.T) {
 
 func TestInsertMsg_CheckAligned(t *testing.T) {
 	msg1 := &InsertMsg{
-		InsertRequest: internalpb.InsertRequest{
+		InsertRequest: msgpb.InsertRequest{
 			Timestamps: []uint64{1},
 			RowIDs:     []int64{1},
 			RowData: []*commonpb.Blob{
 				{},
 			},
 			FieldsData: nil,
-			Version:    internalpb.InsertDataVersion_RowBased,
+			Version:    msgpb.InsertDataVersion_RowBased,
 		},
 	}
 	msg1.InsertRequest.NumRows = 1
@@ -208,7 +207,7 @@ func TestInsertMsg_CheckAligned(t *testing.T) {
 		},
 	}
 
-	msg1.Version = internalpb.InsertDataVersion_ColumnBased
+	msg1.Version = msgpb.InsertDataVersion_ColumnBased
 	assert.NoError(t, msg1.CheckAligned())
 }
 
@@ -218,7 +217,7 @@ func TestInsertMsg_IndexMsg(t *testing.T) {
 			BeginTimestamp: 1,
 			EndTimestamp:   2,
 		},
-		InsertRequest: internalpb.InsertRequest{
+		InsertRequest: msgpb.InsertRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Insert,
 				MsgID:     3,
@@ -239,7 +238,7 @@ func TestInsertMsg_IndexMsg(t *testing.T) {
 					Value: []byte{1},
 				},
 			},
-			Version: internalpb.InsertDataVersion_RowBased,
+			Version: msgpb.InsertDataVersion_RowBased,
 		},
 	}
 	indexMsg := msg.IndexMsg(0)
@@ -247,7 +246,7 @@ func TestInsertMsg_IndexMsg(t *testing.T) {
 	assert.Equal(t, int64(11), indexMsg.GetRowIDs()[0])
 	assert.Equal(t, []byte{1}, indexMsg.GetRowData()[0].Value)
 
-	msg.Version = internalpb.InsertDataVersion_ColumnBased
+	msg.Version = msgpb.InsertDataVersion_ColumnBased
 	msg.FieldsData = []*schemapb.FieldData{
 		{
 			Type:      schemapb.DataType_Int64,
@@ -273,7 +272,7 @@ func TestInsertMsg_IndexMsg(t *testing.T) {
 func TestDeleteMsg(t *testing.T) {
 	deleteMsg := &DeleteMsg{
 		BaseMsg: generateBaseMsg(),
-		DeleteRequest: internalpb.DeleteRequest{
+		DeleteRequest: msgpb.DeleteRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Delete,
 				MsgID:     1,
@@ -322,7 +321,7 @@ func TestDeleteMsg_Unmarshal_IllegalParameter(t *testing.T) {
 func TestTimeTickMsg(t *testing.T) {
 	timeTickMsg := &TimeTickMsg{
 		BaseMsg: generateBaseMsg(),
-		TimeTickMsg: internalpb.TimeTickMsg{
+		TimeTickMsg: msgpb.TimeTickMsg{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_TimeTick,
 				MsgID:     1,
@@ -365,7 +364,7 @@ func TestTimeTickMsg_Unmarshal_IllegalParameter(t *testing.T) {
 func TestCreateCollectionMsg(t *testing.T) {
 	createCollectionMsg := &CreateCollectionMsg{
 		BaseMsg: generateBaseMsg(),
-		CreateCollectionRequest: internalpb.CreateCollectionRequest{
+		CreateCollectionRequest: msgpb.CreateCollectionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_CreateCollection,
 				MsgID:     1,
@@ -417,7 +416,7 @@ func TestCreateCollectionMsg_Unmarshal_IllegalParameter(t *testing.T) {
 func TestDropCollectionMsg(t *testing.T) {
 	dropCollectionMsg := &DropCollectionMsg{
 		BaseMsg: generateBaseMsg(),
-		DropCollectionRequest: internalpb.DropCollectionRequest{
+		DropCollectionRequest: msgpb.DropCollectionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_DropCollection,
 				MsgID:     1,
@@ -464,7 +463,7 @@ func TestDropCollectionMsg_Unmarshal_IllegalParameter(t *testing.T) {
 func TestCreatePartitionMsg(t *testing.T) {
 	createPartitionMsg := &CreatePartitionMsg{
 		BaseMsg: generateBaseMsg(),
-		CreatePartitionRequest: internalpb.CreatePartitionRequest{
+		CreatePartitionRequest: msgpb.CreatePartitionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_CreatePartition,
 				MsgID:     1,
@@ -513,7 +512,7 @@ func TestCreatePartitionMsg_Unmarshal_IllegalParameter(t *testing.T) {
 func TestDropPartitionMsg(t *testing.T) {
 	dropPartitionMsg := &DropPartitionMsg{
 		BaseMsg: generateBaseMsg(),
-		DropPartitionRequest: internalpb.DropPartitionRequest{
+		DropPartitionRequest: msgpb.DropPartitionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_DropPartition,
 				MsgID:     1,
@@ -562,7 +561,7 @@ func TestDropPartitionMsg_Unmarshal_IllegalParameter(t *testing.T) {
 func TestDataNodeTtMsg(t *testing.T) {
 	dataNodeTtMsg := &DataNodeTtMsg{
 		BaseMsg: generateBaseMsg(),
-		DataNodeTtMsg: datapb.DataNodeTtMsg{
+		DataNodeTtMsg: msgpb.DataNodeTtMsg{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_DataNodeTt,
 				MsgID:     1,

@@ -27,11 +27,11 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/kv"
@@ -41,7 +41,6 @@ import (
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	s "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
@@ -55,6 +54,7 @@ import (
 )
 
 const ctxTimeInMillisecond = 5000
+
 const debug = false
 
 // As used in data_sync_service_test.go
@@ -781,7 +781,7 @@ func (df *DataFactory) GenMsgStreamInsertMsg(idx int, chanName string) *msgstrea
 		BaseMsg: msgstream.BaseMsg{
 			HashValues: []uint32{uint32(idx)},
 		},
-		InsertRequest: internalpb.InsertRequest{
+		InsertRequest: msgpb.InsertRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Insert,
 				MsgID:     0,
@@ -797,7 +797,7 @@ func (df *DataFactory) GenMsgStreamInsertMsg(idx int, chanName string) *msgstrea
 			RowIDs:         []UniqueID{UniqueID(idx)},
 			// RowData:        []*commonpb.Blob{{Value: df.rawData}},
 			FieldsData: df.columnData,
-			Version:    internalpb.InsertDataVersion_ColumnBased,
+			Version:    msgpb.InsertDataVersion_ColumnBased,
 			NumRows:    1,
 		},
 	}
@@ -811,7 +811,7 @@ func (df *DataFactory) GenMsgStreamInsertMsgWithTs(idx int, chanName string, ts 
 			BeginTimestamp: ts,
 			EndTimestamp:   ts,
 		},
-		InsertRequest: internalpb.InsertRequest{
+		InsertRequest: msgpb.InsertRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Insert,
 				MsgID:     0,
@@ -827,7 +827,7 @@ func (df *DataFactory) GenMsgStreamInsertMsgWithTs(idx int, chanName string, ts 
 			RowIDs:         []UniqueID{UniqueID(idx)},
 			// RowData:        []*commonpb.Blob{{Value: df.rawData}},
 			FieldsData: df.columnData,
-			Version:    internalpb.InsertDataVersion_ColumnBased,
+			Version:    msgpb.InsertDataVersion_ColumnBased,
 			NumRows:    1,
 		},
 	}
@@ -861,7 +861,7 @@ func (df *DataFactory) GenMsgStreamDeleteMsg(pks []primaryKey, chanName string) 
 		BaseMsg: msgstream.BaseMsg{
 			HashValues: []uint32{uint32(idx)},
 		},
-		DeleteRequest: internalpb.DeleteRequest{
+		DeleteRequest: msgpb.DeleteRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Delete,
 				MsgID:     0,
@@ -887,7 +887,7 @@ func (df *DataFactory) GenMsgStreamDeleteMsgWithTs(idx int, pks []primaryKey, ch
 			BeginTimestamp: ts,
 			EndTimestamp:   ts,
 		},
-		DeleteRequest: internalpb.DeleteRequest{
+		DeleteRequest: msgpb.DeleteRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Delete,
 				MsgID:     1,
@@ -913,7 +913,7 @@ func genFlowGraphInsertMsg(chanName string) flowGraphMsg {
 		timestampMax: math.MaxUint64,
 	}
 
-	startPos := []*internalpb.MsgPosition{
+	startPos := []*msgpb.MsgPosition{
 		{
 			ChannelName: chanName,
 			MsgID:       make([]byte, 0),
@@ -943,7 +943,7 @@ func genFlowGraphDeleteMsg(pks []primaryKey, chanName string) flowGraphMsg {
 		timestampMax: math.MaxUint64,
 	}
 
-	startPos := []*internalpb.MsgPosition{
+	startPos := []*msgpb.MsgPosition{
 		{
 			ChannelName: chanName,
 			MsgID:       make([]byte, 0),

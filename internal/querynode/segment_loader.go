@@ -27,12 +27,13 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-
+	ants "github.com/panjf2000/ants/v2"
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/common"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -41,7 +42,6 @@ import (
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
@@ -53,7 +53,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/panjf2000/ants/v2"
 )
 
 const (
@@ -594,13 +593,13 @@ func (loader *segmentLoader) loadGrowingSegments(segment *Segment,
 		return err
 	}
 	tmpInsertMsg := &msgstream.InsertMsg{
-		InsertRequest: internalpb.InsertRequest{
+		InsertRequest: msgpb.InsertRequest{
 			CollectionID: segment.collectionID,
 			Timestamps:   timestamps,
 			RowIDs:       ids,
 			NumRows:      uint64(numRows),
 			FieldsData:   insertRecord.FieldsData,
-			Version:      internalpb.InsertDataVersion_ColumnBased,
+			Version:      msgpb.InsertDataVersion_ColumnBased,
 		},
 	}
 	pks, err := getPrimaryKeys(tmpInsertMsg, loader.metaReplica)
@@ -703,7 +702,7 @@ func (loader *segmentLoader) loadDeltaLogs(ctx context.Context, segment *Segment
 	return nil
 }
 
-func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collectionID int64, position *internalpb.MsgPosition,
+func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collectionID int64, position *msgpb.MsgPosition,
 	segmentIDs []int64) error {
 	startTs := time.Now()
 	stream, err := loader.factory.NewTtMsgStream(ctx)
@@ -743,7 +742,7 @@ func (loader *segmentLoader) FromDmlCPLoadDelete(ctx context.Context, collection
 	}
 
 	metrics.QueryNodeNumConsumers.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Inc()
-	err = stream.Seek([]*internalpb.MsgPosition{position})
+	err = stream.Seek([]*msgpb.MsgPosition{position})
 	if err != nil {
 		return err
 	}

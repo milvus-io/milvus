@@ -29,13 +29,13 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/etcd"
@@ -45,6 +45,7 @@ import (
 )
 
 var maxEtcdTxnNum = 128
+
 var paginationSize = 2000
 
 type Catalog struct {
@@ -497,16 +498,16 @@ func (kc *Catalog) DropChannel(ctx context.Context, channel string) error {
 	return kc.MetaKv.Remove(key)
 }
 
-func (kc *Catalog) ListChannelCheckpoint(ctx context.Context) (map[string]*internalpb.MsgPosition, error) {
+func (kc *Catalog) ListChannelCheckpoint(ctx context.Context) (map[string]*msgpb.MsgPosition, error) {
 	keys, values, err := kc.MetaKv.LoadWithPrefix(ChannelCheckpointPrefix)
 	if err != nil {
 		return nil, err
 	}
 
-	channelCPs := make(map[string]*internalpb.MsgPosition)
+	channelCPs := make(map[string]*msgpb.MsgPosition)
 	for i, key := range keys {
 		value := values[i]
-		channelCP := &internalpb.MsgPosition{}
+		channelCP := &msgpb.MsgPosition{}
 		err = proto.Unmarshal([]byte(value), channelCP)
 		if err != nil {
 			log.Error("unmarshal channelCP failed when ListChannelCheckpoint", zap.Error(err))
@@ -520,7 +521,7 @@ func (kc *Catalog) ListChannelCheckpoint(ctx context.Context) (map[string]*inter
 	return channelCPs, nil
 }
 
-func (kc *Catalog) SaveChannelCheckpoint(ctx context.Context, vChannel string, pos *internalpb.MsgPosition) error {
+func (kc *Catalog) SaveChannelCheckpoint(ctx context.Context, vChannel string, pos *msgpb.MsgPosition) error {
 	k := buildChannelCPKey(vChannel)
 	v, err := proto.Marshal(pos)
 	if err != nil {

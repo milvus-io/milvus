@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-
 	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
@@ -35,6 +34,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
@@ -1293,10 +1293,10 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 	sealedSegments := node.metaReplica.getSealedSegments()
 	shardClusters := node.ShardClusterService.GetShardClusters()
 
-	channelGrowingsMap := make(map[string]map[int64]*internalpb.MsgPosition)
+	channelGrowingsMap := make(map[string]map[int64]*msgpb.MsgPosition)
 	for _, s := range growingSegments {
 		if _, ok := channelGrowingsMap[s.vChannelID]; !ok {
-			channelGrowingsMap[s.vChannelID] = make(map[int64]*internalpb.MsgPosition)
+			channelGrowingsMap[s.vChannelID] = make(map[int64]*msgpb.MsgPosition)
 		}
 
 		channelGrowingsMap[s.vChannelID][s.ID()] = s.startPosition

@@ -26,9 +26,9 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 )
 
@@ -39,7 +39,7 @@ func generateMsgPack() msgstream.MsgPack {
 		EndTimestamp:   uint64(time.Now().Unix() + 1),
 		HashValues:     []uint32{0},
 	}
-	timeTickResult := internalpb.TimeTickMsg{
+	timeTickResult := msgpb.TimeTickMsg{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_TimeTick,
 			MsgID:     0,

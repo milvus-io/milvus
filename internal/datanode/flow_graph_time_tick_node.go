@@ -24,9 +24,9 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
@@ -84,7 +84,7 @@ func (ttn *ttNode) Operate(in []Msg) []Msg {
 	return []Msg{}
 }
 
-func (ttn *ttNode) updateChannelCP(ttPos *internalpb.MsgPosition) {
+func (ttn *ttNode) updateChannelCP(ttPos *msgpb.MsgPosition) {
 	channelPos := ttn.channel.getChannelCheckpoint(ttPos)
 	if channelPos == nil || channelPos.MsgID == nil {
 		log.Warn("updateChannelCP failed, get nil check point", zap.String("vChannel", ttn.vChannelName))

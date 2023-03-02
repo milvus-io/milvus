@@ -21,28 +21,20 @@ import (
 	"fmt"
 
 	"github.com/cockroachdb/errors"
-
-	ms "github.com/milvus-io/milvus/internal/mq/msgstream"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-
-	"github.com/milvus-io/milvus/internal/util/commonpbutil"
-	"github.com/milvus-io/milvus/internal/util/funcutil"
-
-	"github.com/milvus-io/milvus-proto/go-api/commonpb"
-
-	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
-
-	"github.com/milvus-io/milvus/internal/metastore/model"
-
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
-	"github.com/golang/protobuf/proto"
-
-	"github.com/milvus-io/milvus-proto/go-api/schemapb"
-
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metastore/model"
+	ms "github.com/milvus-io/milvus/internal/mq/msgstream"
+	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"github.com/milvus-io/milvus/internal/util/commonpbutil"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 type collectionChannels struct {
@@ -216,7 +208,7 @@ func (t *createCollectionTask) genCreateCollectionMsg(ctx context.Context) *ms.M
 	}
 	msg := &ms.CreateCollectionMsg{
 		BaseMsg: baseMsg,
-		CreateCollectionRequest: internalpb.CreateCollectionRequest{
+		CreateCollectionRequest: msgpb.CreateCollectionRequest{
 			Base: commonpbutil.NewMsgBase(
 				commonpbutil.WithMsgType(commonpb.MsgType_CreateCollection),
 				commonpbutil.WithTimeStamp(ts),

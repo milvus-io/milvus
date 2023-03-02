@@ -27,11 +27,12 @@ import (
 	"strconv"
 
 	"github.com/cockroachdb/errors"
-
 	"github.com/golang/protobuf/proto"
+	ants "github.com/panjf2000/ants/v2"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/common"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -53,12 +54,12 @@ import (
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/panjf2000/ants/v2"
 )
 
 // ---------- unittest util functions ----------
 // common definitions
 const ctxTimeInMillisecond = 500
+
 const debugUT = false
 
 const (
@@ -96,7 +97,7 @@ const (
 	defaultChannelName = "default-channel"
 )
 
-var defaultSegmentStartPosition = &internalpb.MsgPosition{
+var defaultSegmentStartPosition = &msgpb.MsgPosition{
 	ChannelName: defaultChannelName,
 	MsgID:       []byte{},
 	Timestamp:   0,
@@ -952,7 +953,7 @@ func genSimpleInsertMsg(schema *schemapb.CollectionSchema, numRows int) (*msgstr
 
 	return &msgstream.InsertMsg{
 		BaseMsg: genMsgStreamBaseMsg(),
-		InsertRequest: internalpb.InsertRequest{
+		InsertRequest: msgpb.InsertRequest{
 			Base:           genCommonMsgBase(commonpb.MsgType_Insert, 0),
 			CollectionName: defaultCollectionName,
 			PartitionName:  defaultPartitionName,
@@ -964,7 +965,7 @@ func genSimpleInsertMsg(schema *schemapb.CollectionSchema, numRows int) (*msgstr
 			RowIDs:         genSimpleRowIDField(numRows),
 			FieldsData:     fieldsData,
 			NumRows:        uint64(numRows),
-			Version:        internalpb.InsertDataVersion_ColumnBased,
+			Version:        msgpb.InsertDataVersion_ColumnBased,
 		},
 	}, nil
 }
@@ -1190,7 +1191,7 @@ func genMsgStreamBaseMsg() msgstream.BaseMsg {
 		BeginTimestamp: 0,
 		EndTimestamp:   0,
 		HashValues:     []uint32{0},
-		MsgPosition: &internalpb.MsgPosition{
+		MsgPosition: &msgpb.MsgPosition{
 			ChannelName: "",
 			MsgID:       []byte{},
 			MsgGroup:    "",
@@ -1210,7 +1211,7 @@ func genCommonMsgBase(msgType commonpb.MsgType, targetID int64) *commonpb.MsgBas
 func genDeleteMsg(collectionID int64, pkType schemapb.DataType, numRows int) *msgstream.DeleteMsg {
 	return &msgstream.DeleteMsg{
 		BaseMsg: genMsgStreamBaseMsg(),
-		DeleteRequest: internalpb.DeleteRequest{
+		DeleteRequest: msgpb.DeleteRequest{
 			Base:           genCommonMsgBase(commonpb.MsgType_Delete, 0),
 			CollectionName: defaultCollectionName,
 			PartitionName:  defaultPartitionName,
@@ -1897,14 +1898,17 @@ func (mm *mockMsgStreamFactory) NewTtMsgStream(ctx context.Context) (msgstream.M
 func (mm *mockMsgStreamFactory) NewQueryMsgStream(ctx context.Context) (msgstream.MsgStream, error) {
 	return nil, nil
 }
+
 func (mm *mockMsgStreamFactory) NewCacheStorageChunkManager(ctx context.Context) (storage.ChunkManager, error) {
 	return nil, nil
 }
+
 func (mm *mockMsgStreamFactory) NewPersistentStorageChunkManager(ctx context.Context) (storage.ChunkManager, error) {
 	return nil, nil
 }
 
 type readAtFunc func(path string, offset int64, length int64) ([]byte, error)
+
 type readFunc func(path string) ([]byte, error)
 
 type mockChunkManager struct {

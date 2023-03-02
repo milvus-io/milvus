@@ -19,14 +19,14 @@ package datacoord
 import (
 	"time"
 
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 )
 
 // SegmentsInfo wraps a map, which maintains ID to SegmentInfo relation
@@ -148,7 +148,7 @@ func (s *SegmentsInfo) SetIsImporting(segmentID UniqueID, isImporting bool) {
 
 // SetDmlPosition sets DmlPosition info (checkpoint for recovery) for SegmentInfo with provided segmentID
 // if SegmentInfo not found, do nothing
-func (s *SegmentsInfo) SetDmlPosition(segmentID UniqueID, pos *internalpb.MsgPosition) {
+func (s *SegmentsInfo) SetDmlPosition(segmentID UniqueID, pos *msgpb.MsgPosition) {
 	if segment, ok := s.segments[segmentID]; ok {
 		s.segments[segmentID] = segment.Clone(SetDmlPosition(pos))
 	}
@@ -156,7 +156,7 @@ func (s *SegmentsInfo) SetDmlPosition(segmentID UniqueID, pos *internalpb.MsgPos
 
 // SetStartPosition sets StartPosition info (recovery info when no checkout point found) for SegmentInfo with provided segmentID
 // if SegmentInfo not found, do nothing
-func (s *SegmentsInfo) SetStartPosition(segmentID UniqueID, pos *internalpb.MsgPosition) {
+func (s *SegmentsInfo) SetStartPosition(segmentID UniqueID, pos *msgpb.MsgPosition) {
 	if segment, ok := s.segments[segmentID]; ok {
 		s.segments[segmentID] = segment.Clone(SetStartPosition(pos))
 	}
@@ -301,14 +301,14 @@ func SetIsImporting(isImporting bool) SegmentInfoOption {
 }
 
 // SetDmlPosition is the option to set dml position for segment info
-func SetDmlPosition(pos *internalpb.MsgPosition) SegmentInfoOption {
+func SetDmlPosition(pos *msgpb.MsgPosition) SegmentInfoOption {
 	return func(segment *SegmentInfo) {
 		segment.DmlPosition = pos
 	}
 }
 
 // SetStartPosition is the option to set start position for segment info
-func SetStartPosition(pos *internalpb.MsgPosition) SegmentInfoOption {
+func SetStartPosition(pos *msgpb.MsgPosition) SegmentInfoOption {
 	return func(segment *SegmentInfo) {
 		segment.StartPosition = pos
 	}

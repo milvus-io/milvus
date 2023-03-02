@@ -22,25 +22,24 @@ import (
 	"reflect"
 	"sync/atomic"
 
-	"github.com/milvus-io/milvus/internal/util/timerecord"
-	"go.opentelemetry.io/otel/trace"
-
 	"github.com/golang/protobuf/proto"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
+	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 )
 
@@ -146,8 +145,8 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 			timestampMin: msMsg.TimestampMin(),
 			timestampMax: msMsg.TimestampMax(),
 		},
-		startPositions: make([]*internalpb.MsgPosition, 0),
-		endPositions:   make([]*internalpb.MsgPosition, 0),
+		startPositions: make([]*msgpb.MsgPosition, 0),
+		endPositions:   make([]*msgpb.MsgPosition, 0),
 		dropCollection: false,
 	}
 
@@ -333,7 +332,7 @@ func (ddn *ddNode) sendDeltaTimeTick(ts Timestamp) error {
 		EndTimestamp:   ts,
 		HashValues:     []uint32{0},
 	}
-	timeTickResult := internalpb.TimeTickMsg{
+	timeTickResult := msgpb.TimeTickMsg{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_TimeTick),
 			commonpbutil.WithMsgID(0),

@@ -27,21 +27,19 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
-
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"golang.org/x/exp/maps"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/metautil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
@@ -669,7 +667,7 @@ func TestChannelCP(t *testing.T) {
 	mockVChannel := "fake-by-dev-rootcoord-dml-1-testchannelcp-v0"
 	mockPChannel := "fake-by-dev-rootcoord-dml-1"
 
-	pos := &internalpb.MsgPosition{
+	pos := &msgpb.MsgPosition{
 		ChannelName: mockPChannel,
 		MsgID:       []byte{},
 		Timestamp:   1000,
@@ -711,7 +709,7 @@ func TestChannelCP(t *testing.T) {
 		txn := mocks.NewMetaKv(t)
 		catalog := NewCatalog(txn, rootPath, "")
 		txn.EXPECT().Save(mock.Anything, mock.Anything).Return(errors.New("mock error"))
-		err = catalog.SaveChannelCheckpoint(context.TODO(), mockVChannel, &internalpb.MsgPosition{})
+		err = catalog.SaveChannelCheckpoint(context.TODO(), mockVChannel, &msgpb.MsgPosition{})
 		assert.Error(t, err)
 	})
 

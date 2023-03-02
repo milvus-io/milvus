@@ -27,15 +27,14 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
-
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
@@ -150,7 +149,7 @@ func (iNode *insertNode) Operate(in []Msg) []Msg {
 				zap.Int64("segmentID", insertMsg.SegmentID),
 				zap.Uint64("startPosition", insertMsg.BeginTs()),
 			)
-			startPosition := &internalpb.MsgPosition{
+			startPosition := &msgpb.MsgPosition{
 				ChannelName: insertMsg.ShardName,
 				Timestamp:   insertMsg.BeginTs(),
 			}

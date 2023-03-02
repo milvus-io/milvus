@@ -20,12 +20,12 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/bits-and-blooms/bloom/v3"
+	bloom "github.com/bits-and-blooms/bloom/v3"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 )
@@ -51,7 +51,7 @@ type Segment struct {
 	historyStats []*storage.PkStatistics
 
 	lastSyncTs Timestamp
-	startPos   *internalpb.MsgPosition // TODO readonly
+	startPos   *msgpb.MsgPosition // TODO readonly
 }
 
 func (s *Segment) isValid() bool {
@@ -115,7 +115,7 @@ func (s *Segment) rollInsertBuffer() {
 }
 
 // evictHistoryInsertBuffer removes flushed buffer from historyInsertBuf after saveBinlogPath.
-func (s *Segment) evictHistoryInsertBuffer(endPos *internalpb.MsgPosition) {
+func (s *Segment) evictHistoryInsertBuffer(endPos *msgpb.MsgPosition) {
 	tmpBuffers := make([]*BufferData, 0)
 	for _, buf := range s.historyInsertBuf {
 		if buf.endPos.Timestamp > endPos.Timestamp {
@@ -138,7 +138,7 @@ func (s *Segment) rollDeleteBuffer() {
 }
 
 // evictHistoryDeleteBuffer removes flushed buffer from historyDeleteBuf after saveBinlogPath.
-func (s *Segment) evictHistoryDeleteBuffer(endPos *internalpb.MsgPosition) {
+func (s *Segment) evictHistoryDeleteBuffer(endPos *msgpb.MsgPosition) {
 	tmpBuffers := make([]*DelDataBuf, 0)
 	for _, buf := range s.historyDeleteBuf {
 		if buf.endPos.Timestamp > endPos.Timestamp {

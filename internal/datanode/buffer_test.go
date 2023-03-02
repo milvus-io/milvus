@@ -27,8 +27,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
 
@@ -166,12 +166,12 @@ func Test_CompactSegBuff(t *testing.T) {
 	//2. set up deleteDataBuf for seg1 and seg2
 	delDataBuf1 := newDelDataBuf()
 	delDataBuf1.EntriesNum++
-	delDataBuf1.updateStartAndEndPosition(nil, &internalpb.MsgPosition{Timestamp: 50})
+	delDataBuf1.updateStartAndEndPosition(nil, &msgpb.MsgPosition{Timestamp: 50})
 	delBufferManager.Store(segID1, delDataBuf1)
 	heap.Push(delBufferManager.delBufHeap, delDataBuf1.item)
 	delDataBuf2 := newDelDataBuf()
 	delDataBuf2.EntriesNum++
-	delDataBuf2.updateStartAndEndPosition(nil, &internalpb.MsgPosition{Timestamp: 50})
+	delDataBuf2.updateStartAndEndPosition(nil, &msgpb.MsgPosition{Timestamp: 50})
 	delBufferManager.Store(segID2, delDataBuf2)
 	heap.Push(delBufferManager.delBufHeap, delDataBuf2.item)
 
@@ -191,10 +191,10 @@ func Test_CompactSegBuff(t *testing.T) {
 	delBufferManager.channel.rollDeleteBuffer(compactedToSegID)
 	_, segCompactedToExist := delBufferManager.Load(compactedToSegID)
 	assert.False(t, segCompactedToExist)
-	delBufferManager.channel.evictHistoryDeleteBuffer(compactedToSegID, &internalpb.MsgPosition{
+	delBufferManager.channel.evictHistoryDeleteBuffer(compactedToSegID, &msgpb.MsgPosition{
 		Timestamp: 100,
 	})
-	cp := delBufferManager.channel.getChannelCheckpoint(&internalpb.MsgPosition{
+	cp := delBufferManager.channel.getChannelCheckpoint(&msgpb.MsgPosition{
 		Timestamp: 200,
 	})
 	assert.Equal(t, Timestamp(200), cp.Timestamp) // evict all buffer, use ttPos as cp

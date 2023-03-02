@@ -24,9 +24,9 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
@@ -214,7 +214,7 @@ func (suite *SegmentCheckerTestSuite) TestReleaseGrowingSegments() {
 		{
 			CollectionID: 1,
 			ChannelName:  "test-insert-channel",
-			SeekPosition: &internalpb.MsgPosition{Timestamp: 10},
+			SeekPosition: &msgpb.MsgPosition{Timestamp: 10},
 		},
 	}
 	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, int64(1), int64(1)).Return(
@@ -224,11 +224,11 @@ func (suite *SegmentCheckerTestSuite) TestReleaseGrowingSegments() {
 
 	growingSegments := make(map[int64]*meta.Segment)
 	growingSegments[2] = utils.CreateTestSegment(1, 1, 2, 2, 0, "test-insert-channel")
-	growingSegments[2].SegmentInfo.StartPosition = &internalpb.MsgPosition{Timestamp: 2}
+	growingSegments[2].SegmentInfo.StartPosition = &msgpb.MsgPosition{Timestamp: 2}
 	growingSegments[3] = utils.CreateTestSegment(1, 1, 3, 2, 1, "test-insert-channel")
-	growingSegments[3].SegmentInfo.StartPosition = &internalpb.MsgPosition{Timestamp: 3}
+	growingSegments[3].SegmentInfo.StartPosition = &msgpb.MsgPosition{Timestamp: 3}
 	growingSegments[4] = utils.CreateTestSegment(1, 1, 4, 2, 1, "test-insert-channel")
-	growingSegments[4].SegmentInfo.StartPosition = &internalpb.MsgPosition{Timestamp: 11}
+	growingSegments[4].SegmentInfo.StartPosition = &msgpb.MsgPosition{Timestamp: 11}
 
 	dmChannel := utils.CreateTestChannel(1, 2, 1, "test-insert-channel")
 	dmChannel.UnflushedSegmentIds = []int64{2, 3}
