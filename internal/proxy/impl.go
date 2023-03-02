@@ -2341,6 +2341,11 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 			zap.Error(err))
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 			metrics.FailLabel).Inc()
+		// Not every error case changes the status internally
+		// change status there to handle it
+		if it.result.Status.ErrorCode == commonpb.ErrorCode_Success {
+			it.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		}
 		return constructFailedResponse(err, it.result.Status.ErrorCode), nil
 	}
 
