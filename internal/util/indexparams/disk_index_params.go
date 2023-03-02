@@ -17,7 +17,6 @@
 package indexparams
 
 import (
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"unsafe"
@@ -76,8 +75,10 @@ func FillDiskIndexParams(params *paramtable.ComponentParam, indexParams map[stri
 		if !ok {
 			return fmt.Errorf("index param search_list_size not exist")
 		}
-		extraParams := autoindex.BigDataIndexExtraParams{}
-		json.Unmarshal([]byte(params.AutoIndexConfig.ExtraParams.GetValue()), &extraParams)
+		extraParams, err := autoindex.NewBigDataExtraParamsFromJSON(params.AutoIndexConfig.ExtraParams.GetValue())
+		if err != nil {
+			return err
+		}
 		pqCodeBudgetGBRatio = fmt.Sprintf("%f", extraParams.PQCodeBudgetGBRatio)
 		buildNumThreadsRatio = fmt.Sprintf("%f", extraParams.BuildNumThreadsRatio)
 		searchCacheBudgetGBRatio = fmt.Sprintf("%f", extraParams.SearchCacheBudgetGBRatio)
