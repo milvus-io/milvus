@@ -238,6 +238,20 @@ def gen_default_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, start=0):
     return df
 
 
+def gen_default_data_for_upsert(nb=ct.default_nb, dim=ct.default_dim, start=0, size=10000):
+    int_values = pd.Series(data=[i for i in range(start, start + nb)])
+    float_values = pd.Series(data=[np.float32(i + size) for i in range(start, start + nb)], dtype="float32")
+    string_values = pd.Series(data=[str(i + size) for i in range(start, start + nb)], dtype="string")
+    float_vec_values = gen_vectors(nb, dim)
+    df = pd.DataFrame({
+        ct.default_int64_field_name: int_values,
+        ct.default_float_field_name: float_values,
+        ct.default_string_field_name: string_values,
+        ct.default_float_vec_field_name: float_vec_values
+    })
+    return df, float_values
+
+
 def gen_dataframe_multi_vec_fields(vec_fields, nb=ct.default_nb):
     """
     gen dataframe data for fields: int64, float, float_vec and vec_fields
@@ -844,6 +858,7 @@ def gen_grant_list(collection_name):
                   {"object": "User", "object_name": "*", "privilege": "UpdateUser"},
                   {"object": "User", "object_name": "*", "privilege": "SelectUser"}]
     return grant_list
+
 
 def install_milvus_operator_specific_config(namespace, milvus_mode, release_name, image,
                                             rate_limit_enable, collection_rate_limit):
