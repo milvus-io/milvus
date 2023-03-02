@@ -59,11 +59,11 @@ RangeSearchSortResultBF(milvus::DatasetPtr data_set, int64_t topk, size_t nq, st
             }
             std::sort(list.begin(), list.end(), cmp2);
         }
-        for (int k = 0; k < capacity; k++) {
-            p_dist[cnt] = list[k].first;
-            p_id[cnt] = list[k].second;
-            cnt++;
+        for (int k = cnt; k < capacity + cnt; k++) {
+            p_dist[k] = list[k - cnt].first;
+            p_id[k] = list[k - cnt].second;
         }
+        cnt += topk;
     }
     return std::make_tuple(cnt, p_id, p_dist);
 }
