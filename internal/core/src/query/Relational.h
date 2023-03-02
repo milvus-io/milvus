@@ -50,7 +50,10 @@ struct Relational {
     template <typename T, typename U>
     bool
     operator()(const T& t, const U& u) const {
-        return RelationalImpl<Op, T, U>(t, u, typename TagDispatchTrait<T>::Tag{}, typename TagDispatchTrait<U>::Tag{});
+        return RelationalImpl<Op, T, U>(t,
+                                        u,
+                                        typename TagDispatchTrait<T>::Tag{},
+                                        typename TagDispatchTrait<U>::Tag{});
     }
 
     template <typename... T>

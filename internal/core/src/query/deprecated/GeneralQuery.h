@@ -131,9 +131,10 @@ using QueryPtr = std::shared_ptr<Query>;
 
 namespace query {
 struct QueryDeprecated {
-    int64_t num_queries;                //
-    int topK;                           // topK of queries
-    std::string field_name;             // must be fakevec, whose data_type must be VEC_FLOAT(DIM)
+    int64_t num_queries;  //
+    int topK;             // topK of queries
+    std::string
+        field_name;  // must be fakevec, whose data_type must be VEC_FLOAT(DIM)
     std::vector<float> query_raw_data;  // must be size of num_queries * DIM
 };
 

@@ -38,7 +38,9 @@ Match<std::string>(const std::string& str, const std::string& val, OpType op) {
 
 template <>
 inline bool
-Match<std::string_view>(const std::string_view& str, const std::string& val, OpType op) {
+Match<std::string_view>(const std::string_view& str,
+                        const std::string& val,
+                        OpType op) {
     switch (op) {
         case OpType::PrefixMatch:
             return PrefixMatch(str, val);

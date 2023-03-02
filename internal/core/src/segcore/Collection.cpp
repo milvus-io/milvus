@@ -16,7 +16,8 @@
 
 namespace milvus::segcore {
 
-Collection::Collection(const std::string& collection_proto) : schema_proto_(collection_proto) {
+Collection::Collection(const std::string& collection_proto)
+    : schema_proto_(collection_proto) {
     parse();
 }
 
@@ -35,7 +36,8 @@ Collection::parse() {
 
     Assert(!schema_proto_.empty());
     milvus::proto::schema::CollectionSchema collection_schema;
-    auto suc = google::protobuf::TextFormat::ParseFromString(schema_proto_, &collection_schema);
+    auto suc = google::protobuf::TextFormat::ParseFromString(
+        schema_proto_, &collection_schema);
 
     if (!suc) {
         std::cerr << "unmarshal schema string failed" << std::endl;

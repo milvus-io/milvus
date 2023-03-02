@@ -50,7 +50,8 @@ class OffsetHashMap : public OffsetMap {
     std::vector<int64_t>
     find(const PkType pk) const {
         auto offset_vector = map_.find(std::get<T>(pk));
-        return offset_vector != map_.end() ? offset_vector->second : std::vector<int64_t>();
+        return offset_vector != map_.end() ? offset_vector->second
+                                           : std::vector<int64_t>();
     }
 
     void
@@ -60,7 +61,8 @@ class OffsetHashMap : public OffsetMap {
 
     void
     seal() {
-        PanicInfo("OffsetHashMap used for growing segment could not be sealed.");
+        PanicInfo(
+            "OffsetHashMap used for growing segment could not be sealed.");
     }
 
     bool
@@ -138,26 +140,32 @@ struct InsertRecord {
     // pks to row offset
     std::unique_ptr<OffsetMap> pk2offset_;
 
-    InsertRecord(const Schema& schema, int64_t size_per_chunk) : row_ids_(size_per_chunk), timestamps_(size_per_chunk) {
+    InsertRecord(const Schema& schema, int64_t size_per_chunk)
+        : row_ids_(size_per_chunk), timestamps_(size_per_chunk) {
         std::optional<FieldId> pk_field_id = schema.get_primary_field_id();
 
         for (auto& field : schema) {
             auto field_id = field.first;
             auto& field_meta = field.second;
-            if (pk2offset_ == nullptr && pk_field_id.has_value() && pk_field_id.value() == field_id) {
+            if (pk2offset_ == nullptr && pk_field_id.has_value() &&
+                pk_field_id.value() == field_id) {
                 switch (field_meta.get_data_type()) {
                     case DataType::INT64: {
                         if (is_sealed)
-                            pk2offset_ = std::make_unique<OffsetOrderedArray<int64_t>>();
+                            pk2offset_ =
+                                std::make_unique<OffsetOrderedArray<int64_t>>();
                         else
-                            pk2offset_ = std::make_unique<OffsetHashMap<int64_t>>();
+                            pk2offset_ =
+                                std::make_unique<OffsetHashMap<int64_t>>();
                         break;
                     }
                     case DataType::VARCHAR: {
                         if (is_sealed)
-                            pk2offset_ = std::make_unique<OffsetOrderedArray<std::string>>();
+                            pk2offset_ = std::make_unique<
+                                OffsetOrderedArray<std::string>>();
                         else
-                            pk2offset_ = std::make_unique<OffsetHashMap<std::string>>();
+                            pk2offset_ =
+                                std::make_unique<OffsetHashMap<std::string>>();
                         break;
                     }
                     default: {
@@ -167,10 +175,13 @@ struct InsertRecord {
             }
             if (field_meta.is_vector()) {
                 if (field_meta.get_data_type() == DataType::VECTOR_FLOAT) {
-                    this->append_field_data<FloatVector>(field_id, field_meta.get_dim(), size_per_chunk);
+                    this->append_field_data<FloatVector>(
+                        field_id, field_meta.get_dim(), size_per_chunk);
                     continue;
-                } else if (field_meta.get_data_type() == DataType::VECTOR_BINARY) {
-                    this->append_field_data<BinaryVector>(field_id, field_meta.get_dim(), size_per_chunk);
+                } else if (field_meta.get_data_type() ==
+                           DataType::VECTOR_BINARY) {
+                    this->append_field_data<BinaryVector>(
+                        field_id, field_meta.get_dim(), size_per_chunk);
                     continue;
                 } else {
                     PanicInfo("unsupported");
@@ -206,7 +217,8 @@ struct InsertRecord {
                     break;
                 }
                 case DataType::VARCHAR: {
-                    this->append_field_data<std::string>(field_id, size_per_chunk);
+                    this->append_field_data<std::string>(field_id,
+                                                         size_per_chunk);
                     break;
                 }
                 default: {
@@ -263,7 +275,8 @@ struct InsertRecord {
     VectorBase*
     get_field_data_base(FieldId field_id) const {
         AssertInfo(fields_data_.find(field_id) != fields_data_.end(),
-                   "Cannot find field_data with field_id: " + std::to_string(field_id.get()));
+                   "Cannot find field_data with field_id: " +
+                       std::to_string(field_id.get()));
         auto ptr = fields_data_.at(field_id).get();
         return ptr;
     }
@@ -293,7 +306,8 @@ struct InsertRecord {
     void
     append_field_data(FieldId field_id, int64_t size_per_chunk) {
         static_assert(IsScalar<Type>);
-        fields_data_.emplace(field_id, std::make_unique<ConcurrentVector<Type>>(size_per_chunk));
+        fields_data_.emplace(
+            field_id, std::make_unique<ConcurrentVector<Type>>(size_per_chunk));
     }
 
     // append a column of vector type
@@ -301,7 +315,9 @@ struct InsertRecord {
     void
     append_field_data(FieldId field_id, int64_t dim, int64_t size_per_chunk) {
         static_assert(std::is_base_of_v<VectorTrait, VectorType>);
-        fields_data_.emplace(field_id, std::make_unique<ConcurrentVector<VectorType>>(dim, size_per_chunk));
+        fields_data_.emplace(field_id,
+                             std::make_unique<ConcurrentVector<VectorType>>(
+                                 dim, size_per_chunk));
     }
 
     void

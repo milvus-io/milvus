@@ -62,7 +62,8 @@ DISK_LIST() {
 std::vector<std::tuple<IndexType, MetricType>>
 unsupported_index_combinations() {
     static std::vector<std::tuple<IndexType, MetricType>> ret{
-        std::make_tuple(knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT, knowhere::metric::L2),
+        std::make_tuple(knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT,
+                        knowhere::metric::L2),
     };
     return ret;
 }
@@ -84,8 +85,9 @@ is_in_disk_list(const IndexType& index_type) {
 
 bool
 is_unsupported(const IndexType& index_type, const MetricType& metric_type) {
-    return is_in_list<std::tuple<IndexType, MetricType>>(std::make_tuple(index_type, metric_type),
-                                                         unsupported_index_combinations);
+    return is_in_list<std::tuple<IndexType, MetricType>>(
+        std::make_tuple(index_type, metric_type),
+        unsupported_index_combinations);
 }
 
 bool
@@ -123,7 +125,8 @@ GetIndexTypeFromConfig(const Config& config) {
 IndexMode
 GetIndexModeFromConfig(const Config& config) {
     auto mode = GetValueFromConfig<std::string>(config, INDEX_MODE);
-    return mode.has_value() ? GetIndexMode(mode.value()) : knowhere::IndexMode::MODE_CPU;
+    return mode.has_value() ? GetIndexMode(mode.value())
+                            : knowhere::IndexMode::MODE_CPU;
 }
 
 IndexMode
@@ -144,22 +147,28 @@ storage::FieldDataMeta
 GetFieldDataMetaFromConfig(const Config& config) {
     storage::FieldDataMeta field_data_meta;
     // set collection id
-    auto collection_id = index::GetValueFromConfig<std::string>(config, index::COLLECTION_ID);
-    AssertInfo(collection_id.has_value(), "collection id not exist in index config");
+    auto collection_id =
+        index::GetValueFromConfig<std::string>(config, index::COLLECTION_ID);
+    AssertInfo(collection_id.has_value(),
+               "collection id not exist in index config");
     field_data_meta.collection_id = std::stol(collection_id.value());
 
     // set partition id
-    auto partition_id = index::GetValueFromConfig<std::string>(config, index::PARTITION_ID);
-    AssertInfo(partition_id.has_value(), "partition id not exist in index config");
+    auto partition_id =
+        index::GetValueFromConfig<std::string>(config, index::PARTITION_ID);
+    AssertInfo(partition_id.has_value(),
+               "partition id not exist in index config");
     field_data_meta.partition_id = std::stol(partition_id.value());
 
     // set segment id
-    auto segment_id = index::GetValueFromConfig<std::string>(config, index::SEGMENT_ID);
+    auto segment_id =
+        index::GetValueFromConfig<std::string>(config, index::SEGMENT_ID);
     AssertInfo(segment_id.has_value(), "segment id not exist in index config");
     field_data_meta.segment_id = std::stol(segment_id.value());
 
     // set field id
-    auto field_id = index::GetValueFromConfig<std::string>(config, index::FIELD_ID);
+    auto field_id =
+        index::GetValueFromConfig<std::string>(config, index::FIELD_ID);
     AssertInfo(field_id.has_value(), "field id not exist in index config");
     field_data_meta.field_id = std::stol(field_id.value());
 
@@ -170,22 +179,27 @@ storage::IndexMeta
 GetIndexMetaFromConfig(const Config& config) {
     storage::IndexMeta index_meta;
     // set segment id
-    auto segment_id = index::GetValueFromConfig<std::string>(config, index::SEGMENT_ID);
+    auto segment_id =
+        index::GetValueFromConfig<std::string>(config, index::SEGMENT_ID);
     AssertInfo(segment_id.has_value(), "segment id not exist in index config");
     index_meta.segment_id = std::stol(segment_id.value());
 
     // set field id
-    auto field_id = index::GetValueFromConfig<std::string>(config, index::FIELD_ID);
+    auto field_id =
+        index::GetValueFromConfig<std::string>(config, index::FIELD_ID);
     AssertInfo(field_id.has_value(), "field id not exist in index config");
     index_meta.field_id = std::stol(field_id.value());
 
     // set index version
-    auto index_version = index::GetValueFromConfig<std::string>(config, index::INDEX_VERSION);
-    AssertInfo(index_version.has_value(), "index_version id not exist in index config");
+    auto index_version =
+        index::GetValueFromConfig<std::string>(config, index::INDEX_VERSION);
+    AssertInfo(index_version.has_value(),
+               "index_version id not exist in index config");
     index_meta.index_version = std::stol(index_version.value());
 
     // set index id
-    auto build_id = index::GetValueFromConfig<std::string>(config, index::INDEX_BUILD_ID);
+    auto build_id =
+        index::GetValueFromConfig<std::string>(config, index::INDEX_BUILD_ID);
     AssertInfo(build_id.has_value(), "build id not exist in index config");
     index_meta.build_id = std::stol(build_id.value());
 
@@ -193,7 +207,8 @@ GetIndexMetaFromConfig(const Config& config) {
 }
 
 Config
-ParseConfigFromIndexParams(const std::map<std::string, std::string>& index_params) {
+ParseConfigFromIndexParams(
+    const std::map<std::string, std::string>& index_params) {
     Config config;
     for (auto& p : index_params) {
         config[p.first] = p.second;

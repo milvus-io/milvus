@@ -31,7 +31,8 @@ class FieldData {
  public:
     explicit FieldData(const Payload& payload);
 
-    explicit FieldData(std::shared_ptr<arrow::Array> raw_data, DataType data_type);
+    explicit FieldData(std::shared_ptr<arrow::Array> raw_data,
+                       DataType data_type);
 
     explicit FieldData(const uint8_t* data, int length);
 

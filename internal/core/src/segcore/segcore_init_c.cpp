@@ -23,19 +23,22 @@ SegcoreInit(const char* conf_file) {
 // TODO merge small index config into one config map, including enable/disable small_index
 extern "C" void
 SegcoreSetChunkRows(const int64_t value) {
-    milvus::segcore::SegcoreConfig& config = milvus::segcore::SegcoreConfig::default_config();
+    milvus::segcore::SegcoreConfig& config =
+        milvus::segcore::SegcoreConfig::default_config();
     config.set_chunk_rows(value);
 }
 
 extern "C" void
 SegcoreSetNlist(const int64_t value) {
-    milvus::segcore::SegcoreConfig& config = milvus::segcore::SegcoreConfig::default_config();
+    milvus::segcore::SegcoreConfig& config =
+        milvus::segcore::SegcoreConfig::default_config();
     config.set_nlist(value);
 }
 
 extern "C" void
 SegcoreSetNprobe(const int64_t value) {
-    milvus::segcore::SegcoreConfig& config = milvus::segcore::SegcoreConfig::default_config();
+    milvus::segcore::SegcoreConfig& config =
+        milvus::segcore::SegcoreConfig::default_config();
     config.set_nprobe(value);
 }
 

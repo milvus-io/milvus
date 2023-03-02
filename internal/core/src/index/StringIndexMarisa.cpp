@@ -63,7 +63,8 @@ StringIndexMarisa::Serialize(const Config& config) {
     auto uuid_string = boost::uuids::to_string(uuid);
     auto file = std::string("/tmp/") + uuid_string;
 
-    auto fd = open(file.c_str(), O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR | S_IXUSR);
+    auto fd = open(
+        file.c_str(), O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR | S_IXUSR);
     trie_.write(fd);
 
     auto size = get_file_size(fd);
@@ -101,7 +102,8 @@ StringIndexMarisa::Load(const BinarySet& set, const Config& config) {
     auto index = set.GetByName(MARISA_TRIE_INDEX);
     auto len = index->size;
 
-    auto fd = open(file.c_str(), O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR | S_IXUSR);
+    auto fd = open(
+        file.c_str(), O_RDWR | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR | S_IXUSR);
     lseek(fd, 0, SEEK_SET);
     while (write(fd, index->data.get(), len) != len) {
         lseek(fd, 0, SEEK_SET);
@@ -182,7 +184,9 @@ StringIndexMarisa::Range(std::string value, OpType op) {
                 set = raw_data.compare(value) >= 0;
                 break;
             default:
-                throw std::invalid_argument(std::string("Invalid OperatorType: ") + std::to_string((int)op) + "!");
+                throw std::invalid_argument(
+                    std::string("Invalid OperatorType: ") +
+                    std::to_string((int)op) + "!");
         }
         if (set) {
             bitset->set(offset);
@@ -199,7 +203,8 @@ StringIndexMarisa::Range(std::string lower_bound_value,
     auto count = Count();
     TargetBitmapPtr bitset = std::make_unique<TargetBitmap>(count);
     if (lower_bound_value.compare(upper_bound_value) > 0 ||
-        (lower_bound_value.compare(upper_bound_value) == 0 && !(lb_inclusive && ub_inclusive))) {
+        (lower_bound_value.compare(upper_bound_value) == 0 &&
+         !(lb_inclusive && ub_inclusive))) {
         return bitset;
     }
     marisa::Agent agent;

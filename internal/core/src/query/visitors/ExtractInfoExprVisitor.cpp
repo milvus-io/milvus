@@ -19,7 +19,8 @@ namespace impl {
 // WILL BE USED BY GENERATOR UNDER suvlim/core_gen/
 class ExtractInfoExprVisitor : ExprVisitor {
  public:
-    explicit ExtractInfoExprVisitor(ExtractedPlanInfo& plan_info) : plan_info_(plan_info) {
+    explicit ExtractInfoExprVisitor(ExtractedPlanInfo& plan_info)
+        : plan_info_(plan_info) {
     }
 
  private:

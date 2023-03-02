@@ -26,10 +26,13 @@ namespace milvus {
 
 using std::string;
 static std::map<string, string>
-RepeatedKeyValToMap(const google::protobuf::RepeatedPtrField<proto::common::KeyValuePair>& kvs) {
+RepeatedKeyValToMap(
+    const google::protobuf::RepeatedPtrField<proto::common::KeyValuePair>&
+        kvs) {
     std::map<string, string> mapping;
     for (auto& kv : kvs) {
-        AssertInfo(!mapping.count(kv.key()), "repeat key(" + kv.key() + ") in protobuf");
+        AssertInfo(!mapping.count(kv.key()),
+                   "repeat key(" + kv.key() + ") in protobuf");
         mapping.emplace(kv.key(), kv.value());
     }
     return mapping;
@@ -42,15 +45,18 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
 
     // NOTE: only two system
 
-    for (const milvus::proto::schema::FieldSchema& child : schema_proto.fields()) {
+    for (const milvus::proto::schema::FieldSchema& child :
+         schema_proto.fields()) {
         auto field_id = FieldId(child.fieldid());
         auto name = FieldName(child.name());
 
         if (field_id.get() < 100) {
             // system field id
-            auto is_system = SystemProperty::Instance().SystemFieldVerify(name, field_id);
+            auto is_system =
+                SystemProperty::Instance().SystemFieldVerify(name, field_id);
             AssertInfo(is_system,
-                       "invalid system type: name(" + name.get() + "), id(" + std::to_string(field_id.get()) + ")");
+                       "invalid system type: name(" + name.get() + "), id(" +
+                           std::to_string(field_id.get()) + ")");
             continue;
         }
 
@@ -71,23 +77,28 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
         } else if (datatype_is_string(data_type)) {
             auto type_map = RepeatedKeyValToMap(child.type_params());
             AssertInfo(type_map.count(MAX_LENGTH), "max_length not found");
-            auto max_len = boost::lexical_cast<int64_t>(type_map.at(MAX_LENGTH));
+            auto max_len =
+                boost::lexical_cast<int64_t>(type_map.at(MAX_LENGTH));
             schema->AddField(name, field_id, data_type, max_len);
         } else {
             schema->AddField(name, field_id, data_type);
         }
 
         if (child.is_primary_key()) {
-            AssertInfo(!schema->get_primary_field_id().has_value(), "repetitive primary key");
+            AssertInfo(!schema->get_primary_field_id().has_value(),
+                       "repetitive primary key");
             schema->set_primary_field_id(field_id);
         }
     }
 
-    AssertInfo(schema->get_primary_field_id().has_value(), "primary key should be specified");
+    AssertInfo(schema->get_primary_field_id().has_value(),
+               "primary key should be specified");
 
     return schema;
 }
 
-const FieldMeta FieldMeta::RowIdMeta(FieldName("RowID"), RowFieldID, DataType::INT64);
+const FieldMeta FieldMeta::RowIdMeta(FieldName("RowID"),
+                                     RowFieldID,
+                                     DataType::INT64);
 
 }  // namespace milvus

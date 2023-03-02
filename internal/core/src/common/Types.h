@@ -90,7 +90,8 @@ template <class...>
 constexpr std::false_type always_false{};
 
 template <typename T>
-using aligned_vector = std::vector<T, boost::alignment::aligned_allocator<T, 64>>;
+using aligned_vector =
+    std::vector<T, boost::alignment::aligned_allocator<T, 64>>;
 
 namespace impl {
 // hide identifier name to make auto-completion happy
@@ -100,10 +101,15 @@ struct FieldOffsetTag;
 struct SegOffsetTag;
 };  // namespace impl
 
-using FieldId = fluent::NamedType<int64_t, impl::FieldIdTag, fluent::Comparable, fluent::Hashable>;
-using FieldName = fluent::NamedType<std::string, impl::FieldNameTag, fluent::Comparable, fluent::Hashable>;
+using FieldId = fluent::
+    NamedType<int64_t, impl::FieldIdTag, fluent::Comparable, fluent::Hashable>;
+using FieldName = fluent::NamedType<std::string,
+                                    impl::FieldNameTag,
+                                    fluent::Comparable,
+                                    fluent::Hashable>;
 // using FieldOffset = fluent::NamedType<int64_t, impl::FieldOffsetTag, fluent::Comparable, fluent::Hashable>;
-using SegOffset = fluent::NamedType<int64_t, impl::SegOffsetTag, fluent::Arithmetic>;
+using SegOffset =
+    fluent::NamedType<int64_t, impl::SegOffsetTag, fluent::Arithmetic>;
 
 using BitsetType = boost::dynamic_bitset<>;
 using BitsetTypePtr = std::shared_ptr<boost::dynamic_bitset<>>;

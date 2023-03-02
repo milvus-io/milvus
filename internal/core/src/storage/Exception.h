@@ -24,7 +24,8 @@ namespace milvus::storage {
 
 class NotImplementedException : public std::exception {
  public:
-    explicit NotImplementedException(const std::string& msg) : std::exception(), exception_message_(msg) {
+    explicit NotImplementedException(const std::string& msg)
+        : std::exception(), exception_message_(msg) {
     }
     const char*
     what() const noexcept {
@@ -39,7 +40,8 @@ class NotImplementedException : public std::exception {
 
 class LocalChunkManagerException : public std::runtime_error {
  public:
-    explicit LocalChunkManagerException(const std::string& msg) : std::runtime_error(msg) {
+    explicit LocalChunkManagerException(const std::string& msg)
+        : std::runtime_error(msg) {
     }
     virtual ~LocalChunkManagerException() {
     }
@@ -47,7 +49,8 @@ class LocalChunkManagerException : public std::runtime_error {
 
 class InvalidPathException : public LocalChunkManagerException {
  public:
-    explicit InvalidPathException(const std::string& msg) : LocalChunkManagerException(msg) {
+    explicit InvalidPathException(const std::string& msg)
+        : LocalChunkManagerException(msg) {
     }
     virtual ~InvalidPathException() {
     }
@@ -55,7 +58,8 @@ class InvalidPathException : public LocalChunkManagerException {
 
 class OpenFileException : public LocalChunkManagerException {
  public:
-    explicit OpenFileException(const std::string& msg) : LocalChunkManagerException(msg) {
+    explicit OpenFileException(const std::string& msg)
+        : LocalChunkManagerException(msg) {
     }
     virtual ~OpenFileException() {
     }
@@ -63,7 +67,8 @@ class OpenFileException : public LocalChunkManagerException {
 
 class CreateFileException : public LocalChunkManagerException {
  public:
-    explicit CreateFileException(const std::string& msg) : LocalChunkManagerException(msg) {
+    explicit CreateFileException(const std::string& msg)
+        : LocalChunkManagerException(msg) {
     }
     virtual ~CreateFileException() {
     }
@@ -71,7 +76,8 @@ class CreateFileException : public LocalChunkManagerException {
 
 class ReadFileException : public LocalChunkManagerException {
  public:
-    explicit ReadFileException(const std::string& msg) : LocalChunkManagerException(msg) {
+    explicit ReadFileException(const std::string& msg)
+        : LocalChunkManagerException(msg) {
     }
     virtual ~ReadFileException() {
     }
@@ -79,7 +85,8 @@ class ReadFileException : public LocalChunkManagerException {
 
 class WriteFileException : public LocalChunkManagerException {
  public:
-    explicit WriteFileException(const std::string& msg) : LocalChunkManagerException(msg) {
+    explicit WriteFileException(const std::string& msg)
+        : LocalChunkManagerException(msg) {
     }
     virtual ~WriteFileException() {
     }
@@ -87,7 +94,8 @@ class WriteFileException : public LocalChunkManagerException {
 
 class PathAlreadyExistException : public LocalChunkManagerException {
  public:
-    explicit PathAlreadyExistException(const std::string& msg) : LocalChunkManagerException(msg) {
+    explicit PathAlreadyExistException(const std::string& msg)
+        : LocalChunkManagerException(msg) {
     }
     virtual ~PathAlreadyExistException() {
     }
@@ -95,7 +103,8 @@ class PathAlreadyExistException : public LocalChunkManagerException {
 
 class DirNotExistException : public LocalChunkManagerException {
  public:
-    explicit DirNotExistException(const std::string& msg) : LocalChunkManagerException(msg) {
+    explicit DirNotExistException(const std::string& msg)
+        : LocalChunkManagerException(msg) {
     }
     virtual ~DirNotExistException() {
     }
@@ -111,7 +120,8 @@ class MinioException : public std::runtime_error {
 
 class InvalidBucketNameException : public MinioException {
  public:
-    explicit InvalidBucketNameException(const std::string& msg) : MinioException(msg) {
+    explicit InvalidBucketNameException(const std::string& msg)
+        : MinioException(msg) {
     }
     virtual ~InvalidBucketNameException() {
     }
@@ -119,7 +129,8 @@ class InvalidBucketNameException : public MinioException {
 
 class ObjectNotExistException : public MinioException {
  public:
-    explicit ObjectNotExistException(const std::string& msg) : MinioException(msg) {
+    explicit ObjectNotExistException(const std::string& msg)
+        : MinioException(msg) {
     }
     virtual ~ObjectNotExistException() {
     }
@@ -134,7 +145,8 @@ class S3ErrorException : public MinioException {
 
 class DiskANNFileManagerException : public std::runtime_error {
  public:
-    explicit DiskANNFileManagerException(const std::string& msg) : std::runtime_error(msg) {
+    explicit DiskANNFileManagerException(const std::string& msg)
+        : std::runtime_error(msg) {
     }
     virtual ~DiskANNFileManagerException() {
     }

@@ -53,7 +53,8 @@ class ScalarIndexVector : public ScalarIndexBase {
     debug() const override {
         std::string dbg_str;
         for (auto pr : mapping_) {
-            dbg_str += "<" + std::to_string(pr.first) + "->" + std::to_string(pr.second.get()) + ">";
+            dbg_str += "<" + std::to_string(pr.first) + "->" +
+                       std::to_string(pr.second.get()) + ">";
         }
         return dbg_str;
     }

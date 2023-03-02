@@ -53,7 +53,7 @@ CopyRowRecords(const RepeatedPtrField<proto::service::PlaceholderValue>& grpc_re
         memcpy(id_array.data(), grpc_id_array.data(), grpc_id_array.size() * sizeof(int64_t));
     }
 
-    // step 3: contruct vectors
+    // step 3: construct vectors
     vectors.vector_count_ = grpc_records.size();
     vectors.float_data_.swap(float_array);
     vectors.binary_data_.swap(binary_array);
@@ -62,7 +62,9 @@ CopyRowRecords(const RepeatedPtrField<proto::service::PlaceholderValue>& grpc_re
 #endif
 
 Status
-ProcessLeafQueryJson(const milvus::json& query_json, query_old::BooleanQueryPtr& query, std::string& field_name) {
+ProcessLeafQueryJson(const milvus::json& query_json,
+                     query_old::BooleanQueryPtr& query,
+                     std::string& field_name) {
 #if 1
     if (query_json.contains("term")) {
         auto leaf_query = std::make_shared<query_old::LeafQuery>();
@@ -120,12 +122,15 @@ ProcessBooleanQueryJson(const milvus::json& query_json,
 
             for (auto& json : must_json) {
                 auto must_query = std::make_shared<query_old::BooleanQuery>();
-                if (json.contains("must") || json.contains("should") || json.contains("must_not")) {
-                    STATUS_CHECK(ProcessBooleanQueryJson(json, must_query, query_ptr));
+                if (json.contains("must") || json.contains("should") ||
+                    json.contains("must_not")) {
+                    STATUS_CHECK(
+                        ProcessBooleanQueryJson(json, must_query, query_ptr));
                     boolean_query->AddBooleanQuery(must_query);
                 } else {
                     std::string field_name;
-                    STATUS_CHECK(ProcessLeafQueryJson(json, boolean_query, field_name));
+                    STATUS_CHECK(
+                        ProcessLeafQueryJson(json, boolean_query, field_name));
                     if (!field_name.empty()) {
                         query_ptr->index_fields.insert(field_name);
                     }
@@ -141,12 +146,15 @@ ProcessBooleanQueryJson(const milvus::json& query_json,
 
             for (auto& json : should_json) {
                 auto should_query = std::make_shared<query_old::BooleanQuery>();
-                if (json.contains("must") || json.contains("should") || json.contains("must_not")) {
-                    STATUS_CHECK(ProcessBooleanQueryJson(json, should_query, query_ptr));
+                if (json.contains("must") || json.contains("should") ||
+                    json.contains("must_not")) {
+                    STATUS_CHECK(
+                        ProcessBooleanQueryJson(json, should_query, query_ptr));
                     boolean_query->AddBooleanQuery(should_query);
                 } else {
                     std::string field_name;
-                    STATUS_CHECK(ProcessLeafQueryJson(json, boolean_query, field_name));
+                    STATUS_CHECK(
+                        ProcessLeafQueryJson(json, boolean_query, field_name));
                     if (!field_name.empty()) {
                         query_ptr->index_fields.insert(field_name);
                     }
@@ -161,20 +169,25 @@ ProcessBooleanQueryJson(const milvus::json& query_json,
             }
 
             for (auto& json : should_json) {
-                if (json.contains("must") || json.contains("should") || json.contains("must_not")) {
-                    auto must_not_query = std::make_shared<query_old::BooleanQuery>();
-                    STATUS_CHECK(ProcessBooleanQueryJson(json, must_not_query, query_ptr));
+                if (json.contains("must") || json.contains("should") ||
+                    json.contains("must_not")) {
+                    auto must_not_query =
+                        std::make_shared<query_old::BooleanQuery>();
+                    STATUS_CHECK(ProcessBooleanQueryJson(
+                        json, must_not_query, query_ptr));
                     boolean_query->AddBooleanQuery(must_not_query);
                 } else {
                     std::string field_name;
-                    STATUS_CHECK(ProcessLeafQueryJson(json, boolean_query, field_name));
+                    STATUS_CHECK(
+                        ProcessLeafQueryJson(json, boolean_query, field_name));
                     if (!field_name.empty()) {
                         query_ptr->index_fields.insert(field_name);
                     }
                 }
             }
         } else {
-            std::string msg = "BoolQuery json string does not include bool query";
+            std::string msg =
+                "BoolQuery json string does not include bool query";
             return Status{SERVER_INVALID_DSL_PARAMETER, msg};
         }
     }
@@ -183,7 +196,8 @@ ProcessBooleanQueryJson(const milvus::json& query_json,
 }
 
 Status
-DeserializeJsonToBoolQuery(const google::protobuf::RepeatedPtrField<::milvus::grpc::VectorParam>& vector_params,
+DeserializeJsonToBoolQuery(const google::protobuf::RepeatedPtrField<
+                               ::milvus::grpc::VectorParam>& vector_params,
                            const std::string& dsl_string,
                            query_old::BooleanQueryPtr& boolean_query,
                            query_old::QueryPtr& query_ptr) {
@@ -196,7 +210,8 @@ DeserializeJsonToBoolQuery(const google::protobuf::RepeatedPtrField<::milvus::gr
         }
         auto status = Status::OK();
         if (vector_params.empty()) {
-            return Status(SERVER_INVALID_DSL_PARAMETER, "DSL must include vector query");
+            return Status(SERVER_INVALID_DSL_PARAMETER,
+                          "DSL must include vector query");
         }
         for (const auto& vector_param : vector_params) {
             const std::string& vector_string = vector_param.json();
@@ -216,32 +231,41 @@ DeserializeJsonToBoolQuery(const google::protobuf::RepeatedPtrField<::milvus::gr
                 if (param_json.contains("metric_type")) {
                     std::string metric_type = param_json["metric_type"];
                     vector_query->metric_type = metric_type;
-                    query_ptr->metric_types.insert({field_name, param_json["metric_type"]});
+                    query_ptr->metric_types.insert(
+                        {field_name, param_json["metric_type"]});
                 }
                 if (!vector_param_it.value()["params"].empty()) {
-                    vector_query->extra_params = vector_param_it.value()["params"];
+                    vector_query->extra_params =
+                        vector_param_it.value()["params"];
                 }
                 query_ptr->index_fields.insert(field_name);
             }
 
             engine::VectorsData vector_data;
-            CopyRowRecords(vector_param.row_record().records(),
-                           google::protobuf::RepeatedField<google::protobuf::int64>(), vector_data);
+            CopyRowRecords(
+                vector_param.row_record().records(),
+                google::protobuf::RepeatedField<google::protobuf::int64>(),
+                vector_data);
             vector_query->query_vector.vector_count = vector_data.vector_count_;
-            vector_query->query_vector.binary_data.swap(vector_data.binary_data_);
+            vector_query->query_vector.binary_data.swap(
+                vector_data.binary_data_);
             vector_query->query_vector.float_data.swap(vector_data.float_data_);
 
-            query_ptr->vectors.insert(std::make_pair(placeholder, vector_query));
+            query_ptr->vectors.insert(
+                std::make_pair(placeholder, vector_query));
         }
         if (dsl_json.contains("bool")) {
             auto boolean_query_json = dsl_json["bool"];
             JSON_NULL_CHECK(boolean_query_json);
-            status = ProcessBooleanQueryJson(boolean_query_json, boolean_query, query_ptr);
+            status = ProcessBooleanQueryJson(
+                boolean_query_json, boolean_query, query_ptr);
             if (!status.ok()) {
-                return Status(SERVER_INVALID_DSL_PARAMETER, "DSL does not include bool");
+                return Status(SERVER_INVALID_DSL_PARAMETER,
+                              "DSL does not include bool");
             }
         } else {
-            return Status(SERVER_INVALID_DSL_PARAMETER, "DSL does not include bool query");
+            return Status(SERVER_INVALID_DSL_PARAMETER,
+                          "DSL does not include bool query");
         }
         return Status::OK();
     } catch (std::exception& e) {
@@ -254,7 +278,8 @@ DeserializeJsonToBoolQuery(const google::protobuf::RepeatedPtrField<::milvus::gr
 #endif
 query_old::QueryPtr
 Transformer(proto::service::Query* request) {
-    query_old::BooleanQueryPtr boolean_query = std::make_shared<query_old::BooleanQuery>();
+    query_old::BooleanQueryPtr boolean_query =
+        std::make_shared<query_old::BooleanQuery>();
     query_old::QueryPtr query_ptr = std::make_shared<query_old::Query>();
 #if 0
     query_ptr->collection_id = request->collection_name();

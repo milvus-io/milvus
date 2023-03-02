@@ -27,9 +27,12 @@ namespace milvus::storage {
 
 int
 GetFixPartSize(DescriptorEventData& data) {
-    return sizeof(data.fix_part.collection_id) + sizeof(data.fix_part.partition_id) + sizeof(data.fix_part.segment_id) +
-           sizeof(data.fix_part.field_id) + sizeof(data.fix_part.start_timestamp) +
-           sizeof(data.fix_part.end_timestamp) + sizeof(data.fix_part.data_type);
+    return sizeof(data.fix_part.collection_id) +
+           sizeof(data.fix_part.partition_id) +
+           sizeof(data.fix_part.segment_id) + sizeof(data.fix_part.field_id) +
+           sizeof(data.fix_part.start_timestamp) +
+           sizeof(data.fix_part.end_timestamp) +
+           sizeof(data.fix_part.data_type);
 }
 int
 GetFixPartSize(BaseEventData& data) {
@@ -38,8 +41,8 @@ GetFixPartSize(BaseEventData& data) {
 
 int
 GetEventHeaderSize(EventHeader& header) {
-    return sizeof(header.event_type_) + sizeof(header.timestamp_) + sizeof(header.event_length_) +
-           sizeof(header.next_position_);
+    return sizeof(header.event_type_) + sizeof(header.timestamp_) +
+           sizeof(header.event_length_) + sizeof(header.next_position_);
 }
 
 int
@@ -77,7 +80,8 @@ EventHeader::EventHeader(PayloadInputStream* input) {
 
 std::vector<uint8_t>
 EventHeader::Serialize() {
-    auto header_size = sizeof(timestamp_) + sizeof(event_type_) + sizeof(event_length_) + sizeof(next_position_);
+    auto header_size = sizeof(timestamp_) + sizeof(event_type_) +
+                       sizeof(event_length_) + sizeof(next_position_);
     std::vector<uint8_t> res(header_size);
     int offset = 0;
     memcpy(res.data() + offset, &timestamp_, sizeof(timestamp_));
@@ -91,7 +95,8 @@ EventHeader::Serialize() {
     return res;
 }
 
-DescriptorEventDataFixPart::DescriptorEventDataFixPart(PayloadInputStream* input) {
+DescriptorEventDataFixPart::DescriptorEventDataFixPart(
+    PayloadInputStream* input) {
     auto ast = input->Read(sizeof(collection_id), &collection_id);
     assert(ast.ok());
     ast = input->Read(sizeof(partition_id), &partition_id);
@@ -110,8 +115,10 @@ DescriptorEventDataFixPart::DescriptorEventDataFixPart(PayloadInputStream* input
 
 std::vector<uint8_t>
 DescriptorEventDataFixPart::Serialize() {
-    auto fix_part_size = sizeof(collection_id) + sizeof(partition_id) + sizeof(segment_id) + sizeof(field_id) +
-                         sizeof(start_timestamp) + sizeof(end_timestamp) + sizeof(data_type);
+    auto fix_part_size = sizeof(collection_id) + sizeof(partition_id) +
+                         sizeof(segment_id) + sizeof(field_id) +
+                         sizeof(start_timestamp) + sizeof(end_timestamp) +
+                         sizeof(data_type);
     std::vector<uint8_t> res(fix_part_size);
     int offset = 0;
     memcpy(res.data() + offset, &collection_id, sizeof(collection_id));
@@ -133,10 +140,13 @@ DescriptorEventDataFixPart::Serialize() {
 
 DescriptorEventData::DescriptorEventData(PayloadInputStream* input) {
     fix_part = DescriptorEventDataFixPart(input);
-    for (auto i = int8_t(EventType::DescriptorEvent); i < int8_t(EventType::EventTypeEnd); i++) {
+    for (auto i = int8_t(EventType::DescriptorEvent);
+         i < int8_t(EventType::EventTypeEnd);
+         i++) {
         post_header_lengths.push_back(GetEventFixPartSize(EventType(i)));
     }
-    auto ast = input->Read(post_header_lengths.size(), post_header_lengths.data());
+    auto ast =
+        input->Read(post_header_lengths.size(), post_header_lengths.data());
     assert(ast.ok());
     ast = input->Read(sizeof(extra_length), &extra_length);
     assert(ast.ok());
@@ -144,7 +154,8 @@ DescriptorEventData::DescriptorEventData(PayloadInputStream* input) {
     ast = input->Read(extra_length, extra_bytes.data());
     assert(ast.ok());
 
-    milvus::json json = milvus::json::parse(extra_bytes.begin(), extra_bytes.end());
+    milvus::json json =
+        milvus::json::parse(extra_bytes.begin(), extra_bytes.end());
     if (json.contains(ORIGIN_SIZE_KEY)) {
         extras[ORIGIN_SIZE_KEY] = json[ORIGIN_SIZE_KEY];
     }
@@ -162,13 +173,17 @@ DescriptorEventData::Serialize() {
     }
     std::string extras_string = extras_json.dump();
     extra_length = extras_string.size();
-    extra_bytes = std::vector<uint8_t>(extras_string.begin(), extras_string.end());
-    auto len = fix_part_data.size() + post_header_lengths.size() + sizeof(extra_length) + extra_length;
+    extra_bytes =
+        std::vector<uint8_t>(extras_string.begin(), extras_string.end());
+    auto len = fix_part_data.size() + post_header_lengths.size() +
+               sizeof(extra_length) + extra_length;
     std::vector<uint8_t> res(len);
     int offset = 0;
     memcpy(res.data() + offset, fix_part_data.data(), fix_part_data.size());
     offset += fix_part_data.size();
-    memcpy(res.data() + offset, post_header_lengths.data(), post_header_lengths.size());
+    memcpy(res.data() + offset,
+           post_header_lengths.data(),
+           post_header_lengths.size());
     offset += post_header_lengths.size();
     memcpy(res.data() + offset, &extra_length, sizeof(extra_length));
     offset += sizeof(extra_length);
@@ -177,15 +192,19 @@ DescriptorEventData::Serialize() {
     return res;
 }
 
-BaseEventData::BaseEventData(PayloadInputStream* input, int event_length, DataType data_type) {
+BaseEventData::BaseEventData(PayloadInputStream* input,
+                             int event_length,
+                             DataType data_type) {
     auto ast = input->Read(sizeof(start_timestamp), &start_timestamp);
     AssertInfo(ast.ok(), "read start timestamp failed");
     ast = input->Read(sizeof(end_timestamp), &end_timestamp);
     AssertInfo(ast.ok(), "read end timestamp failed");
 
-    int payload_length = event_length - sizeof(start_timestamp) - sizeof(end_timestamp);
+    int payload_length =
+        event_length - sizeof(start_timestamp) - sizeof(end_timestamp);
     auto res = input->Read(payload_length);
-    auto payload_reader = std::make_shared<PayloadReader>(res.ValueOrDie()->data(), payload_length, data_type);
+    auto payload_reader = std::make_shared<PayloadReader>(
+        res.ValueOrDie()->data(), payload_length, data_type);
     field_data = payload_reader->get_field_data();
 }
 
@@ -196,14 +215,16 @@ BaseEventData::Serialize() {
     std::shared_ptr<PayloadWriter> payload_writer;
     if (milvus::datatype_is_vector(payload->data_type)) {
         AssertInfo(payload->dimension.has_value(), "empty dimension");
-        payload_writer = std::make_unique<PayloadWriter>(payload->data_type, payload->dimension.value());
+        payload_writer = std::make_unique<PayloadWriter>(
+            payload->data_type, payload->dimension.value());
     } else {
         payload_writer = std::make_unique<PayloadWriter>(payload->data_type);
     }
     payload_writer->add_payload(*payload.get());
     payload_writer->finish();
     auto payload_buffer = payload_writer->get_payload_buffer();
-    auto len = sizeof(start_timestamp) + sizeof(end_timestamp) + payload_buffer.size();
+    auto len =
+        sizeof(start_timestamp) + sizeof(end_timestamp) + payload_buffer.size();
     std::vector<uint8_t> res(len);
     int offset = 0;
     memcpy(res.data() + offset, &start_timestamp, sizeof(start_timestamp));
@@ -217,7 +238,8 @@ BaseEventData::Serialize() {
 
 BaseEvent::BaseEvent(PayloadInputStream* input, DataType data_type) {
     event_header = EventHeader(input);
-    auto event_data_length = event_header.event_length_ - event_header.next_position_;
+    auto event_data_length =
+        event_header.event_length_ - event_header.next_position_;
     event_data = BaseEventData(input, event_data_length, data_type);
 }
 
@@ -269,14 +291,16 @@ DescriptorEvent::Serialize() {
     return res;
 }
 
-LocalInsertEvent::LocalInsertEvent(PayloadInputStream* input, DataType data_type) {
+LocalInsertEvent::LocalInsertEvent(PayloadInputStream* input,
+                                   DataType data_type) {
     auto ret = input->Read(sizeof(row_num), &row_num);
     AssertInfo(ret.ok(), "read input stream failed");
     ret = input->Read(sizeof(dimension), &dimension);
     AssertInfo(ret.ok(), "read input stream failed");
     int data_size = milvus::datatype_sizeof(data_type) * row_num;
     auto insert_data_bytes = input->Read(data_size);
-    auto insert_data = reinterpret_cast<const uint8_t*>(insert_data_bytes.ValueOrDie()->data());
+    auto insert_data = reinterpret_cast<const uint8_t*>(
+        insert_data_bytes.ValueOrDie()->data());
     std::shared_ptr<arrow::ArrayBuilder> builder = nullptr;
     if (milvus::datatype_is_vector(data_type)) {
         builder = CreateArrowBuilder(data_type, dimension);
@@ -323,9 +347,11 @@ LocalIndexEvent::LocalIndexEvent(PayloadInputStream* input) {
     AssertInfo(ret.ok(), "read input stream failed");
     auto binary_index = input->Read(index_size);
 
-    auto binary_index_data = reinterpret_cast<const int8_t*>(binary_index.ValueOrDie()->data());
+    auto binary_index_data =
+        reinterpret_cast<const int8_t*>(binary_index.ValueOrDie()->data());
     auto builder = std::make_shared<arrow::Int8Builder>();
-    auto append_ret = builder->AppendValues(binary_index_data, binary_index_data + index_size);
+    auto append_ret = builder->AppendValues(binary_index_data,
+                                            binary_index_data + index_size);
     AssertInfo(append_ret.ok(), "append data to arrow builder failed");
 
     std::shared_ptr<arrow::Array> array;

@@ -29,7 +29,11 @@ void
 InitLocalRootPath(const char* root_path) {
     std::string local_path_root(root_path);
     std::call_once(
-        flag1, [](std::string path) { milvus::ChunkMangerConfig::SetLocalRootPath(path); }, local_path_root);
+        flag1,
+        [](std::string path) {
+            milvus::ChunkMangerConfig::SetLocalRootPath(path);
+        },
+        local_path_root);
 }
 
 void
@@ -41,7 +45,9 @@ InitIndexSliceSize(const int64_t size) {
 void
 InitThreadCoreCoefficient(const int64_t value) {
     std::call_once(
-        flag3, [](int64_t value) { milvus::SetThreadCoreCoefficient(value); }, value);
+        flag3,
+        [](int64_t value) { milvus::SetThreadCoreCoefficient(value); },
+        value);
 }
 
 void

@@ -77,43 +77,57 @@ AddValuesToPayload(CPayloadWriter payloadWriter, const Payload& info) {
 
 extern "C" CStatus
 AddBooleanToPayload(CPayloadWriter payloadWriter, bool* values, int length) {
-    auto raw_data_info = Payload{milvus::DataType::BOOL, reinterpret_cast<const uint8_t*>(values), length};
+    auto raw_data_info = Payload{milvus::DataType::BOOL,
+                                 reinterpret_cast<const uint8_t*>(values),
+                                 length};
     return AddValuesToPayload(payloadWriter, raw_data_info);
 }
 
 extern "C" CStatus
 AddInt8ToPayload(CPayloadWriter payloadWriter, int8_t* values, int length) {
-    auto raw_data_info = Payload{milvus::DataType::INT8, reinterpret_cast<const uint8_t*>(values), length};
+    auto raw_data_info = Payload{milvus::DataType::INT8,
+                                 reinterpret_cast<const uint8_t*>(values),
+                                 length};
     return AddValuesToPayload(payloadWriter, raw_data_info);
 }
 
 extern "C" CStatus
 AddInt16ToPayload(CPayloadWriter payloadWriter, int16_t* values, int length) {
-    auto raw_data_info = Payload{milvus::DataType::INT16, reinterpret_cast<const uint8_t*>(values), length};
+    auto raw_data_info = Payload{milvus::DataType::INT16,
+                                 reinterpret_cast<const uint8_t*>(values),
+                                 length};
     return AddValuesToPayload(payloadWriter, raw_data_info);
 }
 
 extern "C" CStatus
 AddInt32ToPayload(CPayloadWriter payloadWriter, int32_t* values, int length) {
-    auto raw_data_info = Payload{milvus::DataType::INT32, reinterpret_cast<const uint8_t*>(values), length};
+    auto raw_data_info = Payload{milvus::DataType::INT32,
+                                 reinterpret_cast<const uint8_t*>(values),
+                                 length};
     return AddValuesToPayload(payloadWriter, raw_data_info);
 }
 
 extern "C" CStatus
 AddInt64ToPayload(CPayloadWriter payloadWriter, int64_t* values, int length) {
-    auto raw_data_info = Payload{milvus::DataType::INT64, reinterpret_cast<const uint8_t*>(values), length};
+    auto raw_data_info = Payload{milvus::DataType::INT64,
+                                 reinterpret_cast<const uint8_t*>(values),
+                                 length};
     return AddValuesToPayload(payloadWriter, raw_data_info);
 }
 
 extern "C" CStatus
 AddFloatToPayload(CPayloadWriter payloadWriter, float* values, int length) {
-    auto raw_data_info = Payload{milvus::DataType::FLOAT, reinterpret_cast<const uint8_t*>(values), length};
+    auto raw_data_info = Payload{milvus::DataType::FLOAT,
+                                 reinterpret_cast<const uint8_t*>(values),
+                                 length};
     return AddValuesToPayload(payloadWriter, raw_data_info);
 }
 
 extern "C" CStatus
 AddDoubleToPayload(CPayloadWriter payloadWriter, double* values, int length) {
-    auto raw_data_info = Payload{milvus::DataType::DOUBLE, reinterpret_cast<const uint8_t*>(values), length};
+    auto raw_data_info = Payload{milvus::DataType::DOUBLE,
+                                 reinterpret_cast<const uint8_t*>(values),
+                                 length};
     return AddValuesToPayload(payloadWriter, raw_data_info);
 }
 
@@ -129,10 +143,14 @@ AddOneStringToPayload(CPayloadWriter payloadWriter, char* cstr, int str_size) {
 }
 
 extern "C" CStatus
-AddBinaryVectorToPayload(CPayloadWriter payloadWriter, uint8_t* values, int dimension, int length) {
+AddBinaryVectorToPayload(CPayloadWriter payloadWriter,
+                         uint8_t* values,
+                         int dimension,
+                         int length) {
     try {
         auto p = reinterpret_cast<PayloadWriter*>(payloadWriter);
-        auto raw_data_info = Payload{milvus::DataType::VECTOR_BINARY, values, length, dimension};
+        auto raw_data_info =
+            Payload{milvus::DataType::VECTOR_BINARY, values, length, dimension};
         p->add_payload(raw_data_info);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
@@ -141,11 +159,16 @@ AddBinaryVectorToPayload(CPayloadWriter payloadWriter, uint8_t* values, int dime
 }
 
 extern "C" CStatus
-AddFloatVectorToPayload(CPayloadWriter payloadWriter, float* values, int dimension, int length) {
+AddFloatVectorToPayload(CPayloadWriter payloadWriter,
+                        float* values,
+                        int dimension,
+                        int length) {
     try {
         auto p = reinterpret_cast<PayloadWriter*>(payloadWriter);
-        auto raw_data_info =
-            Payload{milvus::DataType::VECTOR_FLOAT, reinterpret_cast<const uint8_t*>(values), length, dimension};
+        auto raw_data_info = Payload{milvus::DataType::VECTOR_FLOAT,
+                                     reinterpret_cast<const uint8_t*>(values),
+                                     length,
+                                     dimension};
         p->add_payload(raw_data_info);
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
@@ -247,7 +270,9 @@ GetInt8FromPayload(CPayloadReader payloadReader, int8_t** values, int* length) {
 }
 
 extern "C" CStatus
-GetInt16FromPayload(CPayloadReader payloadReader, int16_t** values, int* length) {
+GetInt16FromPayload(CPayloadReader payloadReader,
+                    int16_t** values,
+                    int* length) {
     try {
         auto p = reinterpret_cast<PayloadReader*>(payloadReader);
         auto ret = p->get_payload();
@@ -261,7 +286,9 @@ GetInt16FromPayload(CPayloadReader payloadReader, int16_t** values, int* length)
 }
 
 extern "C" CStatus
-GetInt32FromPayload(CPayloadReader payloadReader, int32_t** values, int* length) {
+GetInt32FromPayload(CPayloadReader payloadReader,
+                    int32_t** values,
+                    int* length) {
     try {
         auto p = reinterpret_cast<PayloadReader*>(payloadReader);
         auto ret = p->get_payload();
@@ -275,7 +302,9 @@ GetInt32FromPayload(CPayloadReader payloadReader, int32_t** values, int* length)
 }
 
 extern "C" CStatus
-GetInt64FromPayload(CPayloadReader payloadReader, int64_t** values, int* length) {
+GetInt64FromPayload(CPayloadReader payloadReader,
+                    int64_t** values,
+                    int* length) {
     try {
         auto p = reinterpret_cast<PayloadReader*>(payloadReader);
         auto ret = p->get_payload();
@@ -303,7 +332,9 @@ GetFloatFromPayload(CPayloadReader payloadReader, float** values, int* length) {
 }
 
 extern "C" CStatus
-GetDoubleFromPayload(CPayloadReader payloadReader, double** values, int* length) {
+GetDoubleFromPayload(CPayloadReader payloadReader,
+                     double** values,
+                     int* length) {
     try {
         auto p = reinterpret_cast<PayloadReader*>(payloadReader);
         auto ret = p->get_payload();
@@ -317,7 +348,10 @@ GetDoubleFromPayload(CPayloadReader payloadReader, double** values, int* length)
 }
 
 extern "C" CStatus
-GetOneStringFromPayload(CPayloadReader payloadReader, int idx, char** cstr, int* str_size) {
+GetOneStringFromPayload(CPayloadReader payloadReader,
+                        int idx,
+                        char** cstr,
+                        int* str_size) {
     try {
         auto p = reinterpret_cast<PayloadReader*>(payloadReader);
         p->get_one_string_Payload(idx, cstr, str_size);
@@ -328,7 +362,10 @@ GetOneStringFromPayload(CPayloadReader payloadReader, int idx, char** cstr, int*
 }
 
 extern "C" CStatus
-GetBinaryVectorFromPayload(CPayloadReader payloadReader, uint8_t** values, int* dimension, int* length) {
+GetBinaryVectorFromPayload(CPayloadReader payloadReader,
+                           uint8_t** values,
+                           int* dimension,
+                           int* length) {
     try {
         auto p = reinterpret_cast<PayloadReader*>(payloadReader);
         auto ret = p->get_payload();
@@ -342,7 +379,10 @@ GetBinaryVectorFromPayload(CPayloadReader payloadReader, uint8_t** values, int* 
 }
 
 extern "C" CStatus
-GetFloatVectorFromPayload(CPayloadReader payloadReader, float** values, int* dimension, int* length) {
+GetFloatVectorFromPayload(CPayloadReader payloadReader,
+                          float** values,
+                          int* dimension,
+                          int* length) {
     try {
         auto p = reinterpret_cast<PayloadReader*>(payloadReader);
         auto ret = p->get_payload();

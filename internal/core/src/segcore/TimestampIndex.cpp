@@ -29,7 +29,8 @@ TimestampIndex::build_with(const Timestamp* timestamps, int64_t size) {
     Timestamp last_max_v = 0;
     for (int slice_id = 0; slice_id < num_slice; ++slice_id) {
         auto length = lengths_[slice_id];
-        auto [min_v, max_v] = std::minmax_element(timestamps + offset, timestamps + offset + length);
+        auto [min_v, max_v] = std::minmax_element(timestamps + offset,
+                                                  timestamps + offset + length);
         Assert(last_max_v <= *min_v);
         offset += length;
         prefix_sums.push_back(offset);
@@ -37,7 +38,8 @@ TimestampIndex::build_with(const Timestamp* timestamps, int64_t size) {
         last_max_v = *max_v;
     }
     timestamp_barriers.push_back(last_max_v);
-    Assert(std::is_sorted(timestamp_barriers.begin(), timestamp_barriers.end()));
+    Assert(
+        std::is_sorted(timestamp_barriers.begin(), timestamp_barriers.end()));
     Assert(offset == size);
     auto min_ts = timestamp_barriers[0];
 
@@ -57,7 +59,9 @@ TimestampIndex::get_active_range(Timestamp query_timestamp) const {
     if (query_timestamp < min_timestamp_) {
         return {0, 0};
     }
-    auto iter = std::upper_bound(timestamp_barriers_.begin(), timestamp_barriers_.end(), query_timestamp);
+    auto iter = std::upper_bound(timestamp_barriers_.begin(),
+                                 timestamp_barriers_.end(),
+                                 query_timestamp);
     int block_id = (iter - timestamp_barriers_.begin()) - 1;
     Assert(0 <= block_id && block_id < lengths_.size());
     return {start_locs_[block_id], start_locs_[block_id + 1]};
@@ -81,7 +85,9 @@ TimestampIndex::GenerateBitset(Timestamp query_timestamp,
 }
 
 std::vector<int64_t>
-GenerateFakeSlices(const Timestamp* timestamps, int64_t size, int min_slice_length) {
+GenerateFakeSlices(const Timestamp* timestamps,
+                   int64_t size,
+                   int min_slice_length) {
     assert(min_slice_length >= 1);
     std::vector<int64_t> results;
     std::vector<int64_t> min_values(size);

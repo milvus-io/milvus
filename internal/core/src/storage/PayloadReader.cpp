@@ -18,11 +18,16 @@
 #include "exceptions/EasyAssert.h"
 
 namespace milvus::storage {
-PayloadReader::PayloadReader(std::shared_ptr<PayloadInputStream> input, DataType data_type) : column_type_(data_type) {
+PayloadReader::PayloadReader(std::shared_ptr<PayloadInputStream> input,
+                             DataType data_type)
+    : column_type_(data_type) {
     init(input);
 }
 
-PayloadReader::PayloadReader(const uint8_t* data, int length, DataType data_type) : column_type_(data_type) {
+PayloadReader::PayloadReader(const uint8_t* data,
+                             int length,
+                             DataType data_type)
+    : column_type_(data_type) {
     auto input = std::make_shared<storage::PayloadInputStream>(data, length);
     init(input);
 }
@@ -39,7 +44,8 @@ PayloadReader::init(std::shared_ptr<PayloadInputStream> input) {
     AssertInfo(st.ok(), "failed to get reader data to arrow table");
     auto column = table->column(0);
     AssertInfo(column != nullptr, "returned arrow column is null");
-    AssertInfo(column->chunks().size() == 1, "arrow chunk size in arrow column should be 1");
+    AssertInfo(column->chunks().size() == 1,
+               "arrow chunk size in arrow column should be 1");
     auto array = column->chunk(0);
     AssertInfo(array != nullptr, "empty arrow array of PayloadReader");
     field_data_ = std::make_shared<FieldData>(array, column_type_);
@@ -52,7 +58,9 @@ PayloadReader::get_bool_payload(int idx) const {
 }
 
 void
-PayloadReader::get_one_string_Payload(int idx, char** cstr, int* str_size) const {
+PayloadReader::get_one_string_Payload(int idx,
+                                      char** cstr,
+                                      int* str_size) const {
     AssertInfo(field_data_ != nullptr, "empty payload");
     return field_data_->get_one_string_payload(idx, cstr, str_size);
 }

@@ -22,7 +22,9 @@ namespace milvus {
 namespace query_old {
 
 BinaryQueryPtr
-ConstructBinTree(std::vector<BooleanQueryPtr> queries, QueryRelation relation, uint64_t idx) {
+ConstructBinTree(std::vector<BooleanQueryPtr> queries,
+                 QueryRelation relation,
+                 uint64_t idx) {
     if (idx == queries.size()) {
         return nullptr;
     } else if (idx == queries.size() - 1) {
@@ -40,7 +42,9 @@ ConstructBinTree(std::vector<BooleanQueryPtr> queries, QueryRelation relation, u
 }
 
 Status
-ConstructLeafBinTree(std::vector<LeafQueryPtr> leaf_queries, BinaryQueryPtr binary_query, uint64_t idx) {
+ConstructLeafBinTree(std::vector<LeafQueryPtr> leaf_queries,
+                     BinaryQueryPtr binary_query,
+                     uint64_t idx) {
     if (idx == leaf_queries.size()) {
         return Status::OK();
     }
@@ -58,23 +62,27 @@ ConstructLeafBinTree(std::vector<LeafQueryPtr> leaf_queries, BinaryQueryPtr bina
         binary_query->left_query->bin->relation = binary_query->relation;
         binary_query->right_query->leaf = leaf_queries[idx];
         ++idx;
-        return ConstructLeafBinTree(leaf_queries, binary_query->left_query->bin, idx);
+        return ConstructLeafBinTree(
+            leaf_queries, binary_query->left_query->bin, idx);
     }
 }
 
 Status
 GenBinaryQuery(BooleanQueryPtr query, BinaryQueryPtr& binary_query) {
     if (query->getBooleanQueries().size() == 0) {
-        if (binary_query->relation == QueryRelation::AND || binary_query->relation == QueryRelation::OR) {
+        if (binary_query->relation == QueryRelation::AND ||
+            binary_query->relation == QueryRelation::OR) {
             // Put VectorQuery to the end of leaf queries
             auto query_size = query->getLeafQueries().size();
             for (uint64_t i = 0; i < query_size; ++i) {
                 if (query->getLeafQueries()[i]->vector_placeholder.size() > 0) {
-                    std::swap(query->getLeafQueries()[i], query->getLeafQueries()[0]);
+                    std::swap(query->getLeafQueries()[i],
+                              query->getLeafQueries()[0]);
                     break;
                 }
             }
-            return ConstructLeafBinTree(query->getLeafQueries(), binary_query, 0);
+            return ConstructLeafBinTree(
+                query->getLeafQueries(), binary_query, 0);
         } else {
             switch (query->getOccur()) {
                 case Occur::MUST: {
@@ -154,7 +162,8 @@ GenBinaryQuery(BooleanQueryPtr query, BinaryQueryPtr& binary_query) {
 
     if (must_not_queries.size() > 1) {
         // Construct a must_not binary tree
-        must_not_bquery = ConstructBinTree(must_not_queries, QueryRelation::R1, 0);
+        must_not_bquery =
+            ConstructBinTree(must_not_queries, QueryRelation::R1, 0);
         ++bquery_num;
     } else if (must_not_queries.size() == 1) {
         must_not_bquery = must_not_queries[0]->getBinaryQuery();
@@ -228,7 +237,8 @@ BinaryQueryHeight(BinaryQueryPtr& binary_query) {
  */
 
 Status
-rule_1(BooleanQueryPtr& boolean_query, std::stack<BooleanQueryPtr>& path_stack) {
+rule_1(BooleanQueryPtr& boolean_query,
+       std::stack<BooleanQueryPtr>& path_stack) {
     auto status = Status::OK();
     if (boolean_query != nullptr) {
         path_stack.push(boolean_query);
@@ -236,9 +246,11 @@ rule_1(BooleanQueryPtr& boolean_query, std::stack<BooleanQueryPtr>& path_stack) 
             if (!leaf_query->vector_placeholder.empty()) {
                 while (!path_stack.empty()) {
                     auto query = path_stack.top();
-                    if (query->getOccur() == Occur::SHOULD || query->getOccur() == Occur::MUST_NOT) {
+                    if (query->getOccur() == Occur::SHOULD ||
+                        query->getOccur() == Occur::MUST_NOT) {
                         std::string msg =
-                            "The child node of 'should' and 'must_not' can only be 'term query' and 'range query'.";
+                            "The child node of 'should' and 'must_not' can "
+                            "only be 'term query' and 'range query'.";
                         return Status{SERVER_INVALID_DSL_PARAMETER, msg};
                     }
                     path_stack.pop();
@@ -259,8 +271,10 @@ Status
 rule_2(BooleanQueryPtr& boolean_query) {
     auto status = Status::OK();
     if (boolean_query != nullptr) {
-        if (!boolean_query->getBooleanQueries().empty() && !boolean_query->getLeafQueries().empty()) {
-            std::string msg = "One layer cannot include bool query and leaf query.";
+        if (!boolean_query->getBooleanQueries().empty() &&
+            !boolean_query->getLeafQueries().empty()) {
+            std::string msg =
+                "One layer cannot include bool query and leaf query.";
             return Status{SERVER_INVALID_DSL_PARAMETER, msg};
         } else {
             for (auto query : boolean_query->getBooleanQueries()) {
@@ -279,8 +293,11 @@ ValidateBooleanQuery(BooleanQueryPtr& boolean_query) {
     auto status = Status::OK();
     if (boolean_query != nullptr) {
         for (auto& query : boolean_query->getBooleanQueries()) {
-            if (query->getOccur() == Occur::SHOULD || query->getOccur() == Occur::MUST_NOT) {
-                std::string msg = "The direct child node of 'bool' node cannot be 'should' node or 'must_not' node.";
+            if (query->getOccur() == Occur::SHOULD ||
+                query->getOccur() == Occur::MUST_NOT) {
+                std::string msg =
+                    "The direct child node of 'bool' node cannot be 'should' "
+                    "node or 'must_not' node.";
                 return Status{SERVER_INVALID_DSL_PARAMETER, msg};
             }
         }

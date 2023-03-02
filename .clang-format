@@ -18,7 +18,7 @@
 # Below is copied from milvus project
 BasedOnStyle:  Google
 DerivePointerAlignment: false
-ColumnLimit: 120
+ColumnLimit: 80
 IndentWidth: 4
 AccessModifierOffset: -3
 AlwaysBreakAfterReturnType: All
@@ -28,7 +28,9 @@ AllowShortIfStatementsOnASingleLine: false
 AlignTrailingComments: true
 
 # Appended Options
-SortIncludes: false 
+SortIncludes: false
 Standard: Latest
 AlignAfterOpenBracket: Align
 BinPackParameters: false
+BinPackArguments: false
+ReflowComments: false

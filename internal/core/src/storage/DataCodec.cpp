@@ -28,33 +28,45 @@ namespace milvus::storage {
 std::unique_ptr<DataCodec>
 DeserializeRemoteFileData(PayloadInputStream* input_stream) {
     DescriptorEvent descriptor_event(input_stream);
-    DataType data_type = DataType(descriptor_event.event_data.fix_part.data_type);
+    DataType data_type =
+        DataType(descriptor_event.event_data.fix_part.data_type);
     auto descriptor_fix_part = descriptor_event.event_data.fix_part;
-    FieldDataMeta data_meta{descriptor_fix_part.collection_id, descriptor_fix_part.partition_id,
-                            descriptor_fix_part.segment_id, descriptor_fix_part.field_id};
+    FieldDataMeta data_meta{descriptor_fix_part.collection_id,
+                            descriptor_fix_part.partition_id,
+                            descriptor_fix_part.segment_id,
+                            descriptor_fix_part.field_id};
     EventHeader header(input_stream);
     switch (header.event_type_) {
         case EventType::InsertEvent: {
-            auto event_data_length = header.event_length_ - header.next_position_;
-            auto insert_event_data = InsertEventData(input_stream, event_data_length, data_type);
-            auto insert_data = std::make_unique<InsertData>(insert_event_data.field_data);
+            auto event_data_length =
+                header.event_length_ - header.next_position_;
+            auto insert_event_data =
+                InsertEventData(input_stream, event_data_length, data_type);
+            auto insert_data =
+                std::make_unique<InsertData>(insert_event_data.field_data);
             insert_data->SetFieldDataMeta(data_meta);
-            insert_data->SetTimestamps(insert_event_data.start_timestamp, insert_event_data.end_timestamp);
+            insert_data->SetTimestamps(insert_event_data.start_timestamp,
+                                       insert_event_data.end_timestamp);
             return insert_data;
         }
         case EventType::IndexFileEvent: {
-            auto event_data_length = header.event_length_ - header.next_position_;
-            auto index_event_data = IndexEventData(input_stream, event_data_length, data_type);
-            auto index_data = std::make_unique<IndexData>(index_event_data.field_data);
+            auto event_data_length =
+                header.event_length_ - header.next_position_;
+            auto index_event_data =
+                IndexEventData(input_stream, event_data_length, data_type);
+            auto index_data =
+                std::make_unique<IndexData>(index_event_data.field_data);
             index_data->SetFieldDataMeta(data_meta);
             IndexMeta index_meta;
             index_meta.segment_id = data_meta.segment_id;
             index_meta.field_id = data_meta.field_id;
             auto& extras = descriptor_event.event_data.extras;
-            AssertInfo(extras.find(INDEX_BUILD_ID_KEY) != extras.end(), "index build id not exist");
+            AssertInfo(extras.find(INDEX_BUILD_ID_KEY) != extras.end(),
+                       "index build id not exist");
             index_meta.build_id = std::stol(extras[INDEX_BUILD_ID_KEY]);
             index_data->set_index_meta(index_meta);
-            index_data->SetTimestamps(index_event_data.start_timestamp, index_event_data.end_timestamp);
+            index_data->SetTimestamps(index_event_data.start_timestamp,
+                                      index_event_data.end_timestamp);
             return index_data;
         }
         default:
@@ -70,7 +82,8 @@ DeserializeLocalFileData(PayloadInputStream* input_stream) {
 
 std::unique_ptr<DataCodec>
 DeserializeFileData(const uint8_t* input_data, int64_t length) {
-    auto input_stream = std::make_shared<PayloadInputStream>(input_data, length);
+    auto input_stream =
+        std::make_shared<PayloadInputStream>(input_data, length);
     auto medium_type = ReadMediumType(input_stream.get());
     switch (medium_type) {
         case StorageType::Remote: {
@@ -91,8 +104,11 @@ DeserializeFileData(const uint8_t* input_data, int64_t length) {
 // | Rows(int) | Dim(int) | InsertData |
 // -------------------------------------
 std::unique_ptr<DataCodec>
-DeserializeLocalInsertFileData(const uint8_t* input_data, int64_t length, DataType data_type) {
-    auto input_stream = std::make_shared<PayloadInputStream>(input_data, length);
+DeserializeLocalInsertFileData(const uint8_t* input_data,
+                               int64_t length,
+                               DataType data_type) {
+    auto input_stream =
+        std::make_shared<PayloadInputStream>(input_data, length);
     LocalInsertEvent event(input_stream.get(), data_type);
     return std::make_unique<InsertData>(event.field_data);
 }
@@ -103,7 +119,8 @@ DeserializeLocalInsertFileData(const uint8_t* input_data, int64_t length, DataTy
 // --------------------------------------------------
 std::unique_ptr<DataCodec>
 DeserializeLocalIndexFileData(const uint8_t* input_data, int64_t length) {
-    auto input_stream = std::make_shared<PayloadInputStream>(input_data, length);
+    auto input_stream =
+        std::make_shared<PayloadInputStream>(input_data, length);
     LocalIndexEvent event(input_stream.get());
     return std::make_unique<IndexData>(event.field_data);
 }

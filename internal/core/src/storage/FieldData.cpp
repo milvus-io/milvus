@@ -38,10 +38,12 @@ FieldData::FieldData(const Payload& payload) {
 }
 
 // TODO ::Check arrow type with data_type
-FieldData::FieldData(std::shared_ptr<arrow::Array> array, DataType data_type) : array_(array), data_type_(data_type) {
+FieldData::FieldData(std::shared_ptr<arrow::Array> array, DataType data_type)
+    : array_(array), data_type_(data_type) {
 }
 
-FieldData::FieldData(const uint8_t* data, int length) : data_type_(DataType::INT8) {
+FieldData::FieldData(const uint8_t* data, int length)
+    : data_type_(DataType::INT8) {
     auto builder = std::make_shared<arrow::Int8Builder>();
     auto ret = builder->AppendValues(data, data + length);
     AssertInfo(ret.ok(), "append value to builder failed");
@@ -52,7 +54,8 @@ FieldData::FieldData(const uint8_t* data, int length) : data_type_(DataType::INT
 bool
 FieldData::get_bool_payload(int idx) const {
     AssertInfo(array_ != nullptr, "null arrow array");
-    AssertInfo(array_->type()->id() == arrow::Type::type::BOOL, "inconsistent data type");
+    AssertInfo(array_->type()->id() == arrow::Type::type::BOOL,
+               "inconsistent data type");
     auto array = std::dynamic_pointer_cast<arrow::BooleanArray>(array_);
     AssertInfo(idx < array_->length(), "out range of bool array");
     return array->Value(idx);
@@ -61,7 +64,8 @@ FieldData::get_bool_payload(int idx) const {
 void
 FieldData::get_one_string_payload(int idx, char** cstr, int* str_size) const {
     AssertInfo(array_ != nullptr, "null arrow array");
-    AssertInfo(array_->type()->id() == arrow::Type::type::STRING, "inconsistent data type");
+    AssertInfo(array_->type()->id() == arrow::Type::type::STRING,
+               "inconsistent data type");
     auto array = std::dynamic_pointer_cast<arrow::StringArray>(array_);
     AssertInfo(idx < array->length(), "index out of range array.length");
     arrow::StringArray::offset_type length;
@@ -77,7 +81,8 @@ FieldData::get_payload() const {
     raw_data_info->data_type = data_type_;
     raw_data_info->raw_data = GetRawValuesFromArrowArray(array_, data_type_);
     if (milvus::datatype_is_vector(data_type_)) {
-        raw_data_info->dimension = GetDimensionFromArrowArray(array_, data_type_);
+        raw_data_info->dimension =
+            GetDimensionFromArrowArray(array_, data_type_);
     }
 
     return raw_data_info;

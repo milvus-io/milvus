@@ -20,10 +20,14 @@ namespace milvus {
 namespace query_old {
 
 BinaryQueryPtr
-ConstructBinTree(std::vector<BooleanQueryPtr> clauses, QueryRelation relation, uint64_t idx);
+ConstructBinTree(std::vector<BooleanQueryPtr> clauses,
+                 QueryRelation relation,
+                 uint64_t idx);
 
 Status
-ConstructLeafBinTree(std::vector<LeafQueryPtr> leaf_clauses, BinaryQueryPtr binary_query, uint64_t idx);
+ConstructLeafBinTree(std::vector<LeafQueryPtr> leaf_clauses,
+                     BinaryQueryPtr binary_query,
+                     uint64_t idx);
 
 Status
 GenBinaryQuery(BooleanQueryPtr clause, BinaryQueryPtr& binary_query);

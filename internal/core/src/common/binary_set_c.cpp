@@ -41,7 +41,10 @@ DeleteBinarySet(CBinarySet c_binary_set) {
 }
 
 CStatus
-AppendIndexBinary(CBinarySet c_binary_set, void* index_binary, int64_t index_size, const char* c_index_key) {
+AppendIndexBinary(CBinarySet c_binary_set,
+                  void* index_binary,
+                  int64_t index_size,
+                  const char* c_index_key) {
     auto status = CStatus();
     try {
         auto binary_set = (knowhere::BinarySet*)c_binary_set;
@@ -68,13 +71,13 @@ GetBinarySetSize(CBinarySet c_binary_set) {
 }
 
 void
-GetBinarySetKeys(CBinarySet c_binary_set, void* datas) {
+GetBinarySetKeys(CBinarySet c_binary_set, void* data) {
     auto binary_set = (knowhere::BinarySet*)c_binary_set;
     auto& map_ = binary_set->binary_map_;
-    const char** datas_ = (const char**)datas;
+    const char** data_ = (const char**)data;
     std::size_t i = 0;
     for (auto it = map_.begin(); it != map_.end(); ++it, i++) {
-        datas_[i] = it->first.c_str();
+        data_[i] = it->first.c_str();
     }
 }
 

@@ -49,7 +49,8 @@ struct BinaryExprBase : Expr {
 
     BinaryExprBase() = delete;
 
-    BinaryExprBase(ExprPtr& left, ExprPtr& right) : left_(std::move(left)), right_(std::move(right)) {
+    BinaryExprBase(ExprPtr& left, ExprPtr& right)
+        : left_(std::move(left)), right_(std::move(right)) {
     }
 };
 
@@ -66,7 +67,8 @@ struct LogicalUnaryExpr : UnaryExprBase {
     enum class OpType { Invalid = 0, LogicalNot = 1 };
     const OpType op_type_;
 
-    LogicalUnaryExpr(const OpType op_type, ExprPtr& child) : UnaryExprBase(child), op_type_(op_type) {
+    LogicalUnaryExpr(const OpType op_type, ExprPtr& child)
+        : UnaryExprBase(child), op_type_(op_type) {
     }
 
  public:
@@ -76,7 +78,13 @@ struct LogicalUnaryExpr : UnaryExprBase {
 
 struct LogicalBinaryExpr : BinaryExprBase {
     // Note: bitA - bitB == bitA & ~bitB, alias to LogicalMinus
-    enum class OpType { Invalid = 0, LogicalAnd = 1, LogicalOr = 2, LogicalXor = 3, LogicalMinus = 4 };
+    enum class OpType {
+        Invalid = 0,
+        LogicalAnd = 1,
+        LogicalOr = 2,
+        LogicalXor = 3,
+        LogicalMinus = 4
+    };
     const OpType op_type_;
 
     LogicalBinaryExpr(const OpType op_type, ExprPtr& left, ExprPtr& right)
@@ -93,10 +101,11 @@ struct TermExpr : Expr {
     const DataType data_type_;
 
  protected:
-    // prevent accidential instantiation
+    // prevent accidental instantiation
     TermExpr() = delete;
 
-    TermExpr(const FieldId field_id, const DataType data_type) : field_id_(field_id), data_type_(data_type) {
+    TermExpr(const FieldId field_id, const DataType data_type)
+        : field_id_(field_id), data_type_(data_type) {
     }
 
  public:
@@ -106,14 +115,20 @@ struct TermExpr : Expr {
 
 static const std::map<std::string, ArithOpType> arith_op_mapping_ = {
     // arith_op_name -> arith_op
-    {"add", ArithOpType::Add}, {"sub", ArithOpType::Sub}, {"mul", ArithOpType::Mul},
-    {"div", ArithOpType::Div}, {"mod", ArithOpType::Mod},
+    {"add", ArithOpType::Add},
+    {"sub", ArithOpType::Sub},
+    {"mul", ArithOpType::Mul},
+    {"div", ArithOpType::Div},
+    {"mod", ArithOpType::Mod},
 };
 
 static const std::map<ArithOpType, std::string> mapping_arith_op_ = {
     // arith_op_name -> arith_op
-    {ArithOpType::Add, "add"}, {ArithOpType::Sub, "sub"}, {ArithOpType::Mul, "mul"},
-    {ArithOpType::Div, "div"}, {ArithOpType::Mod, "mod"},
+    {ArithOpType::Add, "add"},
+    {ArithOpType::Sub, "sub"},
+    {ArithOpType::Mul, "mul"},
+    {ArithOpType::Div, "div"},
+    {ArithOpType::Mod, "mod"},
 };
 
 struct BinaryArithOpEvalRangeExpr : Expr {
@@ -123,14 +138,17 @@ struct BinaryArithOpEvalRangeExpr : Expr {
     const ArithOpType arith_op_;
 
  protected:
-    // prevent accidential instantiation
+    // prevent accidental instantiation
     BinaryArithOpEvalRangeExpr() = delete;
 
     BinaryArithOpEvalRangeExpr(const FieldId field_id,
                                const DataType data_type,
                                const OpType op_type,
                                const ArithOpType arith_op)
-        : field_id_(field_id), data_type_(data_type), op_type_(op_type), arith_op_(arith_op) {
+        : field_id_(field_id),
+          data_type_(data_type),
+          op_type_(op_type),
+          arith_op_(arith_op) {
     }
 
  public:
@@ -140,9 +158,14 @@ struct BinaryArithOpEvalRangeExpr : Expr {
 
 static const std::map<std::string, OpType> mapping_ = {
     // op_name -> op
-    {"lt", OpType::LessThan},    {"le", OpType::LessEqual},    {"lte", OpType::LessEqual},
-    {"gt", OpType::GreaterThan}, {"ge", OpType::GreaterEqual}, {"gte", OpType::GreaterEqual},
-    {"eq", OpType::Equal},       {"ne", OpType::NotEqual},
+    {"lt", OpType::LessThan},
+    {"le", OpType::LessEqual},
+    {"lte", OpType::LessEqual},
+    {"gt", OpType::GreaterThan},
+    {"ge", OpType::GreaterEqual},
+    {"gte", OpType::GreaterEqual},
+    {"eq", OpType::Equal},
+    {"ne", OpType::NotEqual},
 };
 
 struct UnaryRangeExpr : Expr {
@@ -151,10 +174,12 @@ struct UnaryRangeExpr : Expr {
     const OpType op_type_;
 
  protected:
-    // prevent accidential instantiation
+    // prevent accidental instantiation
     UnaryRangeExpr() = delete;
 
-    UnaryRangeExpr(const FieldId field_id, const DataType data_type, const OpType op_type)
+    UnaryRangeExpr(const FieldId field_id,
+                   const DataType data_type,
+                   const OpType op_type)
         : field_id_(field_id), data_type_(data_type), op_type_(op_type) {
     }
 
@@ -170,7 +195,7 @@ struct BinaryRangeExpr : Expr {
     const bool upper_inclusive_;
 
  protected:
-    // prevent accidential instantiation
+    // prevent accidental instantiation
     BinaryRangeExpr() = delete;
 
     BinaryRangeExpr(const FieldId field_id,

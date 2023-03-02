@@ -31,10 +31,12 @@ VectorMemNMIndex::Serialize(const Config& config) {
     knowhere::BinarySet ret;
     auto stat = index_.Serialize(ret);
     if (stat != knowhere::Status::success)
-        PanicCodeInfo(ErrorCodeEnum::UnexpectedError, "failed to serialize index, " + MatchKnowhereError(stat));
+        PanicCodeInfo(ErrorCodeEnum::UnexpectedError,
+                      "failed to serialize index, " + MatchKnowhereError(stat));
 
     auto deleter = [&](uint8_t*) {};  // avoid repeated deconstruction
-    auto raw_data = std::shared_ptr<uint8_t[]>(static_cast<uint8_t*>(raw_data_.data()), deleter);
+    auto raw_data = std::shared_ptr<uint8_t[]>(
+        static_cast<uint8_t*>(raw_data_.data()), deleter);
     ret.Append(RAW_DATA, raw_data, raw_data_.size());
     milvus::Disassemble(ret);
 
@@ -42,7 +44,8 @@ VectorMemNMIndex::Serialize(const Config& config) {
 }
 
 void
-VectorMemNMIndex::BuildWithDataset(const DatasetPtr& dataset, const Config& config) {
+VectorMemNMIndex::BuildWithDataset(const DatasetPtr& dataset,
+                                   const Config& config) {
     VectorMemIndex::BuildWithDataset(dataset, config);
     knowhere::TimeRecorder rc("store_raw_data", 1);
     store_raw_data(dataset);
@@ -53,12 +56,16 @@ void
 VectorMemNMIndex::Load(const BinarySet& binary_set, const Config& config) {
     VectorMemIndex::Load(binary_set, config);
     if (binary_set.Contains(RAW_DATA)) {
-        std::call_once(raw_data_loaded_, [&]() { LOG_SEGCORE_INFO_C << "NM index load raw data done!"; });
+        std::call_once(raw_data_loaded_, [&]() {
+            LOG_SEGCORE_INFO_C << "NM index load raw data done!";
+        });
     }
 }
 
 std::unique_ptr<SearchResult>
-VectorMemNMIndex::Query(const DatasetPtr dataset, const SearchInfo& search_info, const BitsetView& bitset) {
+VectorMemNMIndex::Query(const DatasetPtr dataset,
+                        const SearchInfo& search_info,
+                        const BitsetView& bitset) {
     auto load_raw_data_closure = [&]() { LoadRawData(); };  // hide this pointer
     // load -> query, raw data has been loaded
     // build -> query, this case just for test, should load raw data before query
@@ -88,16 +95,20 @@ VectorMemNMIndex::LoadRawData() {
     knowhere::BinarySet bs;
     auto stat = index_.Serialize(bs);
     if (stat != knowhere::Status::success)
-        PanicCodeInfo(ErrorCodeEnum::UnexpectedError, "failed to Serialize index, " + MatchKnowhereError(stat));
+        PanicCodeInfo(ErrorCodeEnum::UnexpectedError,
+                      "failed to Serialize index, " + MatchKnowhereError(stat));
 
     auto bptr = std::make_shared<knowhere::Binary>();
     auto deleter = [&](uint8_t*) {};  // avoid repeated deconstruction
-    bptr->data = std::shared_ptr<uint8_t[]>(static_cast<uint8_t*>(raw_data_.data()), deleter);
+    bptr->data = std::shared_ptr<uint8_t[]>(
+        static_cast<uint8_t*>(raw_data_.data()), deleter);
     bptr->size = raw_data_.size();
     bs.Append(RAW_DATA, bptr);
     stat = index_.Deserialize(bs);
     if (stat != knowhere::Status::success)
-        PanicCodeInfo(ErrorCodeEnum::UnexpectedError, "failed to Deserialize index, " + MatchKnowhereError(stat));
+        PanicCodeInfo(
+            ErrorCodeEnum::UnexpectedError,
+            "failed to Deserialize index, " + MatchKnowhereError(stat));
 }
 
 }  // namespace milvus::index

@@ -31,7 +31,8 @@ namespace milvus::segcore {
 // All concurrent
 class FieldIndexing {
  public:
-    explicit FieldIndexing(const FieldMeta& field_meta, const SegcoreConfig& segcore_config)
+    explicit FieldIndexing(const FieldMeta& field_meta,
+                           const SegcoreConfig& segcore_config)
         : field_meta_(field_meta), segcore_config_(segcore_config) {
     }
     FieldIndexing(const FieldIndexing&) = delete;
@@ -41,7 +42,9 @@ class FieldIndexing {
 
     // Do this in parallel
     virtual void
-    BuildIndexRange(int64_t ack_beg, int64_t ack_end, const VectorBase* vec_base) = 0;
+    BuildIndexRange(int64_t ack_beg,
+                    int64_t ack_end,
+                    const VectorBase* vec_base) = 0;
 
     const FieldMeta&
     get_field_meta() {
@@ -68,7 +71,9 @@ class ScalarFieldIndexing : public FieldIndexing {
     using FieldIndexing::FieldIndexing;
 
     void
-    BuildIndexRange(int64_t ack_beg, int64_t ack_end, const VectorBase* vec_base) override;
+    BuildIndexRange(int64_t ack_beg,
+                    int64_t ack_end,
+                    const VectorBase* vec_base) override;
 
     // concurrent
     index::ScalarIndex<T>*
@@ -86,7 +91,9 @@ class VectorFieldIndexing : public FieldIndexing {
     using FieldIndexing::FieldIndexing;
 
     void
-    BuildIndexRange(int64_t ack_beg, int64_t ack_end, const VectorBase* vec_base) override;
+    BuildIndexRange(int64_t ack_beg,
+                    int64_t ack_end,
+                    const VectorBase* vec_base) override;
 
     // concurrent
     index::IndexBase*
@@ -110,7 +117,8 @@ CreateIndex(const FieldMeta& field_meta, const SegcoreConfig& segcore_config);
 
 class IndexingRecord {
  public:
-    explicit IndexingRecord(const Schema& schema, const SegcoreConfig& segcore_config)
+    explicit IndexingRecord(const Schema& schema,
+                            const SegcoreConfig& segcore_config)
         : schema_(schema), segcore_config_(segcore_config) {
         Initialize();
     }
@@ -132,7 +140,8 @@ class IndexingRecord {
                 }
             }
 
-            field_indexings_.try_emplace(field_id, CreateIndex(field_meta, segcore_config_));
+            field_indexings_.try_emplace(
+                field_id, CreateIndex(field_meta, segcore_config_));
         }
         assert(offset_id == schema_.size());
     }
@@ -140,7 +149,8 @@ class IndexingRecord {
     // concurrent, reentrant
     template <bool is_sealed>
     void
-    UpdateResourceAck(int64_t chunk_ack, const InsertRecord<is_sealed>& record) {
+    UpdateResourceAck(int64_t chunk_ack,
+                      const InsertRecord<is_sealed>& record) {
         if (resource_ack_ >= chunk_ack) {
             return;
         }
@@ -189,7 +199,8 @@ class IndexingRecord {
 
     template <typename T>
     auto
-    get_scalar_field_indexing(FieldId field_id) const -> const ScalarFieldIndexing<T>& {
+    get_scalar_field_indexing(FieldId field_id) const
+        -> const ScalarFieldIndexing<T>& {
         auto& entry = get_field_indexing(field_id);
         auto ptr = dynamic_cast<const ScalarFieldIndexing<T>*>(&entry);
         AssertInfo(ptr, "invalid indexing");

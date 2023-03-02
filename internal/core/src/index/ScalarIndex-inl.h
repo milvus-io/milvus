@@ -38,9 +38,14 @@ ScalarIndex<T>::Query(const DatasetPtr& dataset) {
         case OpType::Range: {
             auto lower_bound_value = dataset->Get<T>(LOWER_BOUND_VALUE);
             auto upper_bound_value = dataset->Get<T>(UPPER_BOUND_VALUE);
-            auto lower_bound_inclusive = dataset->Get<bool>(LOWER_BOUND_INCLUSIVE);
-            auto upper_bound_inclusive = dataset->Get<bool>(UPPER_BOUND_INCLUSIVE);
-            return Range(lower_bound_value, lower_bound_inclusive, upper_bound_value, upper_bound_inclusive);
+            auto lower_bound_inclusive =
+                dataset->Get<bool>(LOWER_BOUND_INCLUSIVE);
+            auto upper_bound_inclusive =
+                dataset->Get<bool>(UPPER_BOUND_INCLUSIVE);
+            return Range(lower_bound_value,
+                         lower_bound_inclusive,
+                         upper_bound_value,
+                         upper_bound_inclusive);
         }
 
         case OpType::In: {
@@ -58,13 +63,16 @@ ScalarIndex<T>::Query(const DatasetPtr& dataset) {
         case OpType::PrefixMatch:
         case OpType::PostfixMatch:
         default:
-            throw std::invalid_argument(std::string("unsupported operator type: " + std::to_string(op)));
+            throw std::invalid_argument(std::string(
+                "unsupported operator type: " + std::to_string(op)));
     }
 }
 
 template <>
 inline void
-ScalarIndex<std::string>::BuildWithRawData(size_t n, const void* values, const Config& config) {
+ScalarIndex<std::string>::BuildWithRawData(size_t n,
+                                           const void* values,
+                                           const Config& config) {
     // TODO :: use arrow
     proto::schema::StringArray arr;
     auto ok = arr.ParseFromArray(values, n);
@@ -77,7 +85,9 @@ ScalarIndex<std::string>::BuildWithRawData(size_t n, const void* values, const C
 
 template <>
 inline void
-ScalarIndex<bool>::BuildWithRawData(size_t n, const void* values, const Config& config) {
+ScalarIndex<bool>::BuildWithRawData(size_t n,
+                                    const void* values,
+                                    const Config& config) {
     proto::schema::BoolArray arr;
     auto ok = arr.ParseFromArray(values, n);
     Assert(ok);
@@ -86,42 +96,54 @@ ScalarIndex<bool>::BuildWithRawData(size_t n, const void* values, const Config& 
 
 template <>
 inline void
-ScalarIndex<int8_t>::BuildWithRawData(size_t n, const void* values, const Config& config) {
+ScalarIndex<int8_t>::BuildWithRawData(size_t n,
+                                      const void* values,
+                                      const Config& config) {
     auto data = reinterpret_cast<int8_t*>(const_cast<void*>(values));
     Build(n, data);
 }
 
 template <>
 inline void
-ScalarIndex<int16_t>::BuildWithRawData(size_t n, const void* values, const Config& config) {
+ScalarIndex<int16_t>::BuildWithRawData(size_t n,
+                                       const void* values,
+                                       const Config& config) {
     auto data = reinterpret_cast<int16_t*>(const_cast<void*>(values));
     Build(n, data);
 }
 
 template <>
 inline void
-ScalarIndex<int32_t>::BuildWithRawData(size_t n, const void* values, const Config& config) {
+ScalarIndex<int32_t>::BuildWithRawData(size_t n,
+                                       const void* values,
+                                       const Config& config) {
     auto data = reinterpret_cast<int32_t*>(const_cast<void*>(values));
     Build(n, data);
 }
 
 template <>
 inline void
-ScalarIndex<int64_t>::BuildWithRawData(size_t n, const void* values, const Config& config) {
+ScalarIndex<int64_t>::BuildWithRawData(size_t n,
+                                       const void* values,
+                                       const Config& config) {
     auto data = reinterpret_cast<int64_t*>(const_cast<void*>(values));
     Build(n, data);
 }
 
 template <>
 inline void
-ScalarIndex<float>::BuildWithRawData(size_t n, const void* values, const Config& config) {
+ScalarIndex<float>::BuildWithRawData(size_t n,
+                                     const void* values,
+                                     const Config& config) {
     auto data = reinterpret_cast<float*>(const_cast<void*>(values));
     Build(n, data);
 }
 
 template <>
 inline void
-ScalarIndex<double>::BuildWithRawData(size_t n, const void* values, const Config& config) {
+ScalarIndex<double>::BuildWithRawData(size_t n,
+                                      const void* values,
+                                      const Config& config) {
     auto data = reinterpret_cast<double*>(const_cast<void*>(values));
     Build(n, data);
 }

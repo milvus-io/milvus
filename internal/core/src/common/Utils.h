@@ -75,7 +75,10 @@ PrefixMatch(const std::string_view str, const std::string_view prefix) {
 }
 
 inline DatasetPtr
-GenResultDataset(const int64_t nq, const int64_t topk, const int64_t* ids, const float* distance) {
+GenResultDataset(const int64_t nq,
+                 const int64_t topk,
+                 const int64_t* ids,
+                 const float* distance) {
     auto ret_ds = std::make_shared<Dataset>();
     ret_ds->SetRows(nq);
     ret_ds->SetDim(topk);
@@ -192,7 +195,8 @@ GetDataSize(const FieldMeta& field, size_t row_count, const DataArray* data) {
             }
 
             default:
-                PanicInfo(fmt::format("not supported data type {}", datatype_name(data_type)));
+                PanicInfo(fmt::format("not supported data type {}",
+                                      datatype_name(data_type)));
         }
     }
 
@@ -200,7 +204,10 @@ GetDataSize(const FieldMeta& field, size_t row_count, const DataArray* data) {
 }
 
 inline void*
-FillField(DataType data_type, size_t size, const LoadFieldDataInfo& info, void* dst) {
+FillField(DataType data_type,
+          size_t size,
+          const LoadFieldDataInfo& info,
+          void* dst) {
     auto data = info.field_data;
     switch (data_type) {
         case DataType::BOOL: {
@@ -225,10 +232,12 @@ FillField(DataType data_type, size_t size, const LoadFieldDataInfo& info, void* 
             return memcpy(dst, data->scalars().long_data().data().data(), size);
         }
         case DataType::FLOAT: {
-            return memcpy(dst, data->scalars().float_data().data().data(), size);
+            return memcpy(
+                dst, data->scalars().float_data().data().data(), size);
         }
         case DataType::DOUBLE: {
-            return memcpy(dst, data->scalars().double_data().data().data(), size);
+            return memcpy(
+                dst, data->scalars().double_data().data().data(), size);
         }
         case DataType::VARCHAR: {
             char* dest = reinterpret_cast<char*>(dst);
@@ -243,7 +252,8 @@ FillField(DataType data_type, size_t size, const LoadFieldDataInfo& info, void* 
             return dst;
         }
         case DataType::VECTOR_FLOAT:
-            return memcpy(dst, data->vectors().float_vector().data().data(), size);
+            return memcpy(
+                dst, data->vectors().float_vector().data().data(), size);
 
         case DataType::VECTOR_BINARY:
             return memcpy(dst, data->vectors().binary_vector().data(), size);
@@ -300,7 +310,8 @@ WriteFieldData(int fd, DataType data_type, const DataArray* data, size_t size) {
             return total_written;
         }
         case DataType::VECTOR_FLOAT:
-            return write(fd, data->vectors().float_vector().data().data(), size);
+            return write(
+                fd, data->vectors().float_vector().data().data(), size);
 
         case DataType::VECTOR_BINARY:
             return write(fd, data->vectors().binary_vector().data(), size);
@@ -315,7 +326,9 @@ WriteFieldData(int fd, DataType data_type, const DataArray* data, size_t size) {
 // if mmap enabled, this writes field data to disk and create a map to the file,
 // otherwise this just alloc memory
 inline void*
-CreateMap(int64_t segment_id, const FieldMeta& field_meta, const LoadFieldDataInfo& info) {
+CreateMap(int64_t segment_id,
+          const FieldMeta& field_meta,
+          const LoadFieldDataInfo& info) {
     static int mmap_flags = MAP_PRIVATE;
 #ifdef MAP_POPULATE
     // macOS doesn't support MAP_POPULATE
@@ -324,33 +337,52 @@ CreateMap(int64_t segment_id, const FieldMeta& field_meta, const LoadFieldDataIn
     // Allocate memory
     if (info.mmap_dir_path == nullptr) {
         auto data_type = field_meta.get_data_type();
-        auto data_size = GetDataSize(field_meta, info.row_count, info.field_data);
+        auto data_size =
+            GetDataSize(field_meta, info.row_count, info.field_data);
         if (data_size == 0)
             return nullptr;
 
         // Use anon mapping so we are able to free these memory with munmap only
-        void* map = mmap(NULL, data_size, PROT_READ | PROT_WRITE, mmap_flags | MAP_ANON, -1, 0);
-        AssertInfo(map != MAP_FAILED, fmt::format("failed to create anon map, err: {}", strerror(errno)));
+        void* map = mmap(NULL,
+                         data_size,
+                         PROT_READ | PROT_WRITE,
+                         mmap_flags | MAP_ANON,
+                         -1,
+                         0);
+        AssertInfo(
+            map != MAP_FAILED,
+            fmt::format("failed to create anon map, err: {}", strerror(errno)));
         FillField(data_type, data_size, info, map);
         return map;
     }
 
-    auto filepath =
-        std::filesystem::path(info.mmap_dir_path) / std::to_string(segment_id) / std::to_string(info.field_id);
+    auto filepath = std::filesystem::path(info.mmap_dir_path) /
+                    std::to_string(segment_id) / std::to_string(info.field_id);
     auto dir = filepath.parent_path();
     std::filesystem::create_directories(dir);
 
-    int fd = open(filepath.c_str(), O_CREAT | O_TRUNC | O_RDWR, S_IRUSR | S_IWUSR);
-    AssertInfo(fd != -1, fmt::format("failed to create mmap file {}", filepath.c_str()));
+    int fd =
+        open(filepath.c_str(), O_CREAT | O_TRUNC | O_RDWR, S_IRUSR | S_IWUSR);
+    AssertInfo(fd != -1,
+               fmt::format("failed to create mmap file {}", filepath.c_str()));
 
     auto data_type = field_meta.get_data_type();
     size_t size = field_meta.get_sizeof() * info.row_count;
     auto written = WriteFieldData(fd, data_type, info.field_data, size);
-    AssertInfo(written == size || written != -1 && datatype_is_variable(field_meta.get_data_type()),
-               fmt::format("failed to write data file {}, written {} but total {}, err: {}", filepath.c_str(), written,
-                           size, strerror(errno)));
+    AssertInfo(
+        written == size ||
+            written != -1 && datatype_is_variable(field_meta.get_data_type()),
+        fmt::format(
+            "failed to write data file {}, written {} but total {}, err: {}",
+            filepath.c_str(),
+            written,
+            size,
+            strerror(errno)));
     int ok = fsync(fd);
-    AssertInfo(ok == 0, fmt::format("failed to fsync mmap data file {}, err: {}", filepath.c_str(), strerror(errno)));
+    AssertInfo(ok == 0,
+               fmt::format("failed to fsync mmap data file {}, err: {}",
+                           filepath.c_str(),
+                           strerror(errno)));
 
     // Empty field
     if (written == 0) {
@@ -359,7 +391,9 @@ CreateMap(int64_t segment_id, const FieldMeta& field_meta, const LoadFieldDataIn
 
     auto map = mmap(NULL, written, PROT_READ, mmap_flags, fd, 0);
     AssertInfo(map != MAP_FAILED,
-               fmt::format("failed to create map for data file {}, err: {}", filepath.c_str(), strerror(errno)));
+               fmt::format("failed to create map for data file {}, err: {}",
+                           filepath.c_str(),
+                           strerror(errno)));
 
 #ifndef MAP_POPULATE
     // Manually access the mapping to populate it
@@ -373,9 +407,15 @@ CreateMap(int64_t segment_id, const FieldMeta& field_meta, const LoadFieldDataIn
     // unlink this data file so
     // then it will be auto removed after we don't need it again
     ok = unlink(filepath.c_str());
-    AssertInfo(ok == 0, fmt::format("failed to unlink mmap data file {}, err: {}", filepath.c_str(), strerror(errno)));
+    AssertInfo(ok == 0,
+               fmt::format("failed to unlink mmap data file {}, err: {}",
+                           filepath.c_str(),
+                           strerror(errno)));
     ok = close(fd);
-    AssertInfo(ok == 0, fmt::format("failed to close data file {}, err: {}", filepath.c_str(), strerror(errno)));
+    AssertInfo(ok == 0,
+               fmt::format("failed to close data file {}, err: {}",
+                           filepath.c_str(),
+                           strerror(errno)));
     return map;
 }
 

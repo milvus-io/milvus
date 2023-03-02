@@ -22,15 +22,19 @@
 namespace milvus::query {
 
 void
-CheckBruteForceSearchParam(const FieldMeta& field, const SearchInfo& search_info) {
+CheckBruteForceSearchParam(const FieldMeta& field,
+                           const SearchInfo& search_info) {
     auto data_type = field.get_data_type();
     auto& metric_type = search_info.metric_type_;
 
-    AssertInfo(datatype_is_vector(data_type), "[BruteForceSearch] Data type isn't vector type");
+    AssertInfo(datatype_is_vector(data_type),
+               "[BruteForceSearch] Data type isn't vector type");
     bool is_float_data_type = (data_type == DataType::VECTOR_FLOAT);
     bool is_float_metric_type =
-        IsMetricType(metric_type, knowhere::metric::IP) || IsMetricType(metric_type, knowhere::metric::L2);
-    AssertInfo(is_float_data_type == is_float_metric_type, "[BruteForceSearch] Data type and metric type mis-match");
+        IsMetricType(metric_type, knowhere::metric::IP) ||
+        IsMetricType(metric_type, knowhere::metric::L2);
+    AssertInfo(is_float_data_type == is_float_metric_type,
+               "[BruteForceSearch] Data type and metric type miss-match");
 }
 
 SubSearchResult
@@ -39,13 +43,17 @@ BruteForceSearch(const dataset::SearchDataset& dataset,
                  int64_t chunk_rows,
                  const knowhere::Json& conf,
                  const BitsetView& bitset) {
-    SubSearchResult sub_result(dataset.num_queries, dataset.topk, dataset.metric_type, dataset.round_decimal);
+    SubSearchResult sub_result(dataset.num_queries,
+                               dataset.topk,
+                               dataset.metric_type,
+                               dataset.round_decimal);
     try {
         auto nq = dataset.num_queries;
         auto dim = dataset.dim;
         auto topk = dataset.topk;
 
-        auto base_dataset = knowhere::GenDataSet(chunk_rows, dim, chunk_data_raw);
+        auto base_dataset =
+            knowhere::GenDataSet(chunk_rows, dim, chunk_data_raw);
         auto query_dataset = knowhere::GenDataSet(nq, dim, dataset.query_data);
         auto config = knowhere::Json{
             {knowhere::meta::METRIC_TYPE, dataset.metric_type},
@@ -60,24 +68,36 @@ BruteForceSearch(const dataset::SearchDataset& dataset,
             config[RADIUS] = conf[RADIUS].get<float>();
             if (conf.contains(RANGE_FILTER)) {
                 config[RANGE_FILTER] = conf[RANGE_FILTER].get<float>();
-                CheckRangeSearchParam(config[RADIUS], config[RANGE_FILTER], dataset.metric_type);
+                CheckRangeSearchParam(
+                    config[RADIUS], config[RANGE_FILTER], dataset.metric_type);
             }
-            auto res = knowhere::BruteForce::RangeSearch(base_dataset, query_dataset, config, bitset);
+            auto res = knowhere::BruteForce::RangeSearch(
+                base_dataset, query_dataset, config, bitset);
 
             if (!res.has_value()) {
                 PanicCodeInfo(ErrorCodeEnum::UnexpectedError,
-                              "failed to range search, " + MatchKnowhereError(res.error()));
+                              "failed to range search, " +
+                                  MatchKnowhereError(res.error()));
             }
-            auto result = SortRangeSearchResult(res.value(), topk, nq, dataset.metric_type);
-            std::copy_n(GetDatasetIDs(result), nq * topk, sub_result.get_seg_offsets());
-            std::copy_n(GetDatasetDistance(result), nq * topk, sub_result.get_distances());
+            auto result = SortRangeSearchResult(
+                res.value(), topk, nq, dataset.metric_type);
+            std::copy_n(
+                GetDatasetIDs(result), nq * topk, sub_result.get_seg_offsets());
+            std::copy_n(GetDatasetDistance(result),
+                        nq * topk,
+                        sub_result.get_distances());
         } else {
-            auto stat = knowhere::BruteForce::SearchWithBuf(base_dataset, query_dataset,
-                                                            sub_result.mutable_seg_offsets().data(),
-                                                            sub_result.mutable_distances().data(), config, bitset);
+            auto stat = knowhere::BruteForce::SearchWithBuf(
+                base_dataset,
+                query_dataset,
+                sub_result.mutable_seg_offsets().data(),
+                sub_result.mutable_distances().data(),
+                config,
+                bitset);
 
             if (stat != knowhere::Status::success) {
-                throw std::invalid_argument("invalid metric type, " + MatchKnowhereError(stat));
+                throw std::invalid_argument("invalid metric type, " +
+                                            MatchKnowhereError(stat));
             }
         }
     } catch (std::exception& e) {

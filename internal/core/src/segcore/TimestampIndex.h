@@ -53,6 +53,8 @@ class TimestampIndex {
 };
 
 std::vector<int64_t>
-GenerateFakeSlices(const Timestamp* timestamps, int64_t size, int min_slice_length = 1);
+GenerateFakeSlices(const Timestamp* timestamps,
+                   int64_t size,
+                   int min_slice_length = 1);
 
 }  // namespace milvus::segcore

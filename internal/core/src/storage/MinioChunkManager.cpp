@@ -31,12 +31,13 @@
 #include "exceptions/EasyAssert.h"
 #include "log/Log.h"
 
-#define THROWS3ERROR(FUNCTION)                                                                         \
-    do {                                                                                               \
-        auto& err = outcome.GetError();                                                                \
-        std::stringstream err_msg;                                                                     \
-        err_msg << "Error:" << #FUNCTION << ":" << err.GetExceptionName() << "  " << err.GetMessage(); \
-        throw S3ErrorException(err_msg.str());                                                         \
+#define THROWS3ERROR(FUNCTION)                                            \
+    do {                                                                  \
+        auto& err = outcome.GetError();                                   \
+        std::stringstream err_msg;                                        \
+        err_msg << "Error:" << #FUNCTION << ":" << err.GetExceptionName() \
+                << "  " << err.GetMessage();                              \
+        throw S3ErrorException(err_msg.str());                            \
     } while (0)
 
 #define S3NoSuchBucket "NoSuchBucket"
@@ -101,22 +102,34 @@ MinioChunkManager::MinioChunkManager(const StorageConfig& storage_config)
     }
 
     if (storage_config.useIAM) {
-        auto provider = std::make_shared<Aws::Auth::DefaultAWSCredentialsProviderChain>();
+        auto provider =
+            std::make_shared<Aws::Auth::DefaultAWSCredentialsProviderChain>();
         auto aws_credentials = provider->GetAWSCredentials();
-        AssertInfo(!aws_credentials.GetAWSAccessKeyId().empty(), "if use iam, access key id should not be empty");
-        AssertInfo(!aws_credentials.GetAWSSecretKey().empty(), "if use iam, secret key should not be empty");
-        AssertInfo(!aws_credentials.GetSessionToken().empty(), "if use iam, token should not be empty");
-
-        client_ = std::make_shared<Aws::S3::S3Client>(provider, config,
-                                                      Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never, false);
-    } else {
-        AssertInfo(!storage_config.access_key_id.empty(), "if not use iam, access key should not be empty");
-        AssertInfo(!storage_config.access_key_value.empty(), "if not use iam, access value should not be empty");
+        AssertInfo(!aws_credentials.GetAWSAccessKeyId().empty(),
+                   "if use iam, access key id should not be empty");
+        AssertInfo(!aws_credentials.GetAWSSecretKey().empty(),
+                   "if use iam, secret key should not be empty");
+        AssertInfo(!aws_credentials.GetSessionToken().empty(),
+                   "if use iam, token should not be empty");
 
         client_ = std::make_shared<Aws::S3::S3Client>(
-            Aws::Auth::AWSCredentials(ConvertToAwsString(storage_config.access_key_id),
-                                      ConvertToAwsString(storage_config.access_key_value)),
-            config, Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never, false);
+            provider,
+            config,
+            Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,
+            false);
+    } else {
+        AssertInfo(!storage_config.access_key_id.empty(),
+                   "if not use iam, access key should not be empty");
+        AssertInfo(!storage_config.access_key_value.empty(),
+                   "if not use iam, access value should not be empty");
+
+        client_ = std::make_shared<Aws::S3::S3Client>(
+            Aws::Auth::AWSCredentials(
+                ConvertToAwsString(storage_config.access_key_id),
+                ConvertToAwsString(storage_config.access_key_value)),
+            config,
+            Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,
+            false);
     }
 
     // TODO ::BucketExist and CreateBucket func not work, should be fixed
@@ -126,8 +139,9 @@ MinioChunkManager::MinioChunkManager(const StorageConfig& storage_config)
     //     CreateBucket(storage_config.bucket_name);
     // }
 
-    LOG_SEGCORE_INFO_C << "init MinioChunkManager with parameter[endpoint: '" << storage_config.address
-                       << "', default_bucket_name:'" << storage_config.bucket_name << "', use_secure:'"
+    LOG_SEGCORE_INFO_C << "init MinioChunkManager with parameter[endpoint: '"
+                       << storage_config.address << "', default_bucket_name:'"
+                       << storage_config.bucket_name << "', use_secure:'"
                        << std::boolalpha << storage_config.useSSL << "']";
 }
 
@@ -160,14 +174,17 @@ uint64_t
 MinioChunkManager::Read(const std::string& filepath, void* buf, uint64_t size) {
     if (!ObjectExists(default_bucket_name_, filepath)) {
         std::stringstream err_msg;
-        err_msg << "object('" << default_bucket_name_ << "', " << filepath << "') not exists";
+        err_msg << "object('" << default_bucket_name_ << "', " << filepath
+                << "') not exists";
         throw ObjectNotExistException(err_msg.str());
     }
     return GetObjectBuffer(default_bucket_name_, filepath, buf, size);
 }
 
 void
-MinioChunkManager::Write(const std::string& filepath, void* buf, uint64_t size) {
+MinioChunkManager::Write(const std::string& filepath,
+                         void* buf,
+                         uint64_t size) {
     PutObjectBuffer(default_bucket_name_, filepath, buf, size);
 }
 
@@ -192,7 +209,8 @@ MinioChunkManager::BucketExists(const std::string& bucket_name) {
         auto error = outcome.GetError();
         if (!error.GetExceptionName().empty()) {
             std::stringstream err_msg;
-            err_msg << "Error: BucketExists: " << error.GetExceptionName() + " - " + error.GetMessage();
+            err_msg << "Error: BucketExists: "
+                    << error.GetExceptionName() + " - " + error.GetMessage();
             throw S3ErrorException(err_msg.str());
         }
         return false;
@@ -222,7 +240,8 @@ MinioChunkManager::CreateBucket(const std::string& bucket_name) {
     auto outcome = client_->CreateBucket(request);
 
     if (!outcome.IsSuccess() &&
-        Aws::S3::S3Errors(outcome.GetError().GetErrorType()) != Aws::S3::S3Errors::BUCKET_ALREADY_OWNED_BY_YOU) {
+        Aws::S3::S3Errors(outcome.GetError().GetErrorType()) !=
+            Aws::S3::S3Errors::BUCKET_ALREADY_OWNED_BY_YOU) {
         THROWS3ERROR(CreateBucket);
     }
     return true;
@@ -246,7 +265,8 @@ MinioChunkManager::DeleteBucket(const std::string& bucket_name) {
 }
 
 bool
-MinioChunkManager::ObjectExists(const std::string& bucket_name, const std::string& object_name) {
+MinioChunkManager::ObjectExists(const std::string& bucket_name,
+                                const std::string& object_name) {
     Aws::S3::Model::HeadObjectRequest request;
     request.SetBucket(bucket_name.c_str());
     request.SetKey(object_name.c_str());
@@ -266,7 +286,8 @@ MinioChunkManager::ObjectExists(const std::string& bucket_name, const std::strin
 }
 
 int64_t
-MinioChunkManager::GetObjectSize(const std::string& bucket_name, const std::string& object_name) {
+MinioChunkManager::GetObjectSize(const std::string& bucket_name,
+                                 const std::string& object_name) {
     Aws::S3::Model::HeadObjectRequest request;
     request.SetBucket(bucket_name.c_str());
     request.SetKey(object_name.c_str());
@@ -279,7 +300,8 @@ MinioChunkManager::GetObjectSize(const std::string& bucket_name, const std::stri
 }
 
 bool
-MinioChunkManager::DeleteObject(const std::string& bucket_name, const std::string& object_name) {
+MinioChunkManager::DeleteObject(const std::string& bucket_name,
+                                const std::string& object_name) {
     Aws::S3::Model::DeleteObjectRequest request;
     request.SetBucket(bucket_name.c_str());
     request.SetKey(object_name.c_str());
@@ -305,7 +327,8 @@ MinioChunkManager::PutObjectBuffer(const std::string& bucket_name,
     request.SetBucket(bucket_name.c_str());
     request.SetKey(object_name.c_str());
 
-    const std::shared_ptr<Aws::IOStream> input_data = Aws::MakeShared<Aws::StringStream>("");
+    const std::shared_ptr<Aws::IOStream> input_data =
+        Aws::MakeShared<Aws::StringStream>("");
 
     input_data->write(reinterpret_cast<char*>(buf), size);
     request.SetBody(input_data);

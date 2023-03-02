@@ -28,7 +28,8 @@ class ExtractInfoPlanNodeVisitor : public PlanNodeVisitor {
     visit(RetrievePlanNode& node) override;
 
  public:
-    explicit ExtractInfoPlanNodeVisitor(ExtractedPlanInfo& plan_info) : plan_info_(plan_info) {
+    explicit ExtractInfoPlanNodeVisitor(ExtractedPlanInfo& plan_info)
+        : plan_info_(plan_info) {
     }
 
  private:

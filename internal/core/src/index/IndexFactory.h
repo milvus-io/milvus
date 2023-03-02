@@ -53,10 +53,12 @@ class IndexFactory {
     }
 
     IndexBasePtr
-    CreateIndex(const CreateIndexInfo& create_index_info, storage::FileManagerImplPtr file_manager);
+    CreateIndex(const CreateIndexInfo& create_index_info,
+                storage::FileManagerImplPtr file_manager);
 
     IndexBasePtr
-    CreateVectorIndex(const CreateIndexInfo& create_index_info, storage::FileManagerImplPtr file_manager);
+    CreateVectorIndex(const CreateIndexInfo& create_index_info,
+                      storage::FileManagerImplPtr file_manager);
 
     IndexBasePtr
     CreateScalarIndex(const CreateIndexInfo& create_index_info);

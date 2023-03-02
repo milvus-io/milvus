@@ -22,20 +22,23 @@
 namespace milvus::storage {
 
 // create payload writer for numeric data type
-PayloadWriter::PayloadWriter(const DataType column_type) : column_type_(column_type) {
+PayloadWriter::PayloadWriter(const DataType column_type)
+    : column_type_(column_type) {
     builder_ = CreateArrowBuilder(column_type);
     schema_ = CreateArrowSchema(column_type);
 }
 
 // create payload writer for vector data type
-PayloadWriter::PayloadWriter(const DataType column_type, int dim) : column_type_(column_type) {
+PayloadWriter::PayloadWriter(const DataType column_type, int dim)
+    : column_type_(column_type) {
     init_dimension(dim);
 }
 
 void
 PayloadWriter::init_dimension(int dim) {
     if (dimension_.has_value()) {
-        AssertInfo(dimension_ == dim, "init dimension with diff values repeatedly");
+        AssertInfo(dimension_ == dim,
+                   "init dimension with diff values repeatedly");
         return;
     }
 
@@ -76,9 +79,14 @@ PayloadWriter::finish() {
     auto table = arrow::Table::Make(schema_, {array});
     output_ = std::make_shared<storage::PayloadOutputStream>();
     auto mem_pool = arrow::default_memory_pool();
-    ast = parquet::arrow::WriteTable(
-        *table, mem_pool, output_, 1024 * 1024 * 1024,
-        parquet::WriterProperties::Builder().compression(arrow::Compression::ZSTD)->compression_level(3)->build());
+    ast = parquet::arrow::WriteTable(*table,
+                                     mem_pool,
+                                     output_,
+                                     1024 * 1024 * 1024,
+                                     parquet::WriterProperties::Builder()
+                                         .compression(arrow::Compression::ZSTD)
+                                         ->compression_level(3)
+                                         ->build());
     AssertInfo(ast.ok(), ast.ToString());
 }
 

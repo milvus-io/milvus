@@ -76,7 +76,8 @@ class SegcoreConfig {
     }
 
     void
-    set_small_index_config(const MetricType& metric_type, const SmallIndexConf& small_index_conf) {
+    set_small_index_config(const MetricType& metric_type,
+                           const SmallIndexConf& small_index_conf) {
         table_[metric_type] = small_index_conf;
     }
 

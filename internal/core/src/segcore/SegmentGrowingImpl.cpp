@@ -36,17 +36,21 @@ SegmentGrowingImpl::PreDelete(int64_t size) {
 }
 
 void
-SegmentGrowingImpl::mask_with_delete(BitsetType& bitset, int64_t ins_barrier, Timestamp timestamp) const {
+SegmentGrowingImpl::mask_with_delete(BitsetType& bitset,
+                                     int64_t ins_barrier,
+                                     Timestamp timestamp) const {
     auto del_barrier = get_barrier(get_deleted_record(), timestamp);
     if (del_barrier == 0) {
         return;
     }
-    auto bitmap_holder = get_deleted_bitmap(del_barrier, ins_barrier, deleted_record_, insert_record_, timestamp);
+    auto bitmap_holder = get_deleted_bitmap(
+        del_barrier, ins_barrier, deleted_record_, insert_record_, timestamp);
     if (!bitmap_holder || !bitmap_holder->bitmap_ptr) {
         return;
     }
     auto& delete_bitset = *bitmap_holder->bitmap_ptr;
-    AssertInfo(delete_bitset.size() == bitset.size(), "Deleted bitmap size not equal to filtered bitmap size");
+    AssertInfo(delete_bitset.size() == bitset.size(),
+               "Deleted bitmap size not equal to filtered bitmap size");
     bitset |= delete_bitset;
 }
 
@@ -56,7 +60,8 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
                            const int64_t* row_ids,
                            const Timestamp* timestamps_raw,
                            const InsertData* insert_data) {
-    AssertInfo(insert_data->num_rows() == size, "Entities_raw count not equal to insert size");
+    AssertInfo(insert_data->num_rows() == size,
+               "Entities_raw count not equal to insert size");
     //    AssertInfo(insert_data->fields_data_size() == schema_->size(),
     //               "num fields of insert data not equal to num of schema fields");
     // step 1: check insert data if valid
@@ -72,34 +77,45 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
     // query node already guarantees that the timestamp is ordered, avoid field data copy in c++
 
     // step 3: fill into Segment.ConcurrentVector
-    insert_record_.timestamps_.set_data_raw(reserved_offset, timestamps_raw, size);
+    insert_record_.timestamps_.set_data_raw(
+        reserved_offset, timestamps_raw, size);
     insert_record_.row_ids_.set_data_raw(reserved_offset, row_ids, size);
     for (auto [field_id, field_meta] : schema_->get_fields()) {
         AssertInfo(field_id_to_offset.count(field_id), "Cannot find field_id");
         auto data_offset = field_id_to_offset[field_id];
-        insert_record_.get_field_data_base(field_id)->set_data_raw(reserved_offset, size,
-                                                                   &insert_data->fields_data(data_offset), field_meta);
+        insert_record_.get_field_data_base(field_id)->set_data_raw(
+            reserved_offset,
+            size,
+            &insert_data->fields_data(data_offset),
+            field_meta);
     }
 
     // step 4: set pks to offset
     auto field_id = schema_->get_primary_field_id().value_or(FieldId(-1));
     AssertInfo(field_id.get() != INVALID_FIELD_ID, "Primary key is -1");
     std::vector<PkType> pks(size);
-    ParsePksFromFieldData(pks, insert_data->fields_data(field_id_to_offset[field_id]));
+    ParsePksFromFieldData(
+        pks, insert_data->fields_data(field_id_to_offset[field_id]));
     for (int i = 0; i < size; ++i) {
         insert_record_.insert_pk(pks[i], reserved_offset + i);
     }
 
     // step 5: update small indexes
-    insert_record_.ack_responder_.AddSegment(reserved_offset, reserved_offset + size);
+    insert_record_.ack_responder_.AddSegment(reserved_offset,
+                                             reserved_offset + size);
     if (enable_small_index_) {
         int64_t chunk_rows = segcore_config_.get_chunk_rows();
-        indexing_record_.UpdateResourceAck(insert_record_.ack_responder_.GetAck() / chunk_rows, insert_record_);
+        indexing_record_.UpdateResourceAck(
+            insert_record_.ack_responder_.GetAck() / chunk_rows,
+            insert_record_);
     }
 }
 
 Status
-SegmentGrowingImpl::Delete(int64_t reserved_begin, int64_t size, const IdArray* ids, const Timestamp* timestamps_raw) {
+SegmentGrowingImpl::Delete(int64_t reserved_begin,
+                           int64_t size,
+                           const IdArray* ids,
+                           const Timestamp* timestamps_raw) {
     auto field_id = schema_->get_primary_field_id().value_or(FieldId(-1));
     AssertInfo(field_id.get() != -1, "Primary key is -1");
     auto& field_meta = schema_->operator[](field_id);
@@ -122,9 +138,11 @@ SegmentGrowingImpl::Delete(int64_t reserved_begin, int64_t size, const IdArray* 
     }
 
     // step 2: fill delete record
-    deleted_record_.timestamps_.set_data_raw(reserved_begin, sort_timestamps.data(), size);
+    deleted_record_.timestamps_.set_data_raw(
+        reserved_begin, sort_timestamps.data(), size);
     deleted_record_.pks_.set_data_raw(reserved_begin, sort_pks.data(), size);
-    deleted_record_.ack_responder_.AddSegment(reserved_begin, reserved_begin + size);
+    deleted_record_.ack_responder_.AddSegment(reserved_begin,
+                                              reserved_begin + size);
     return Status::OK();
 }
 
@@ -145,8 +163,10 @@ SegmentGrowingImpl::LoadDeletedRecord(const LoadDeletedRecordInfo& info) {
     AssertInfo(info.primary_keys, "Deleted primary keys is null");
     AssertInfo(info.timestamps, "Deleted timestamps is null");
     // step 1: get pks and timestamps
-    auto field_id = schema_->get_primary_field_id().value_or(FieldId(INVALID_FIELD_ID));
-    AssertInfo(field_id.get() != INVALID_FIELD_ID, "Primary key has invalid field id");
+    auto field_id =
+        schema_->get_primary_field_id().value_or(FieldId(INVALID_FIELD_ID));
+    AssertInfo(field_id.get() != INVALID_FIELD_ID,
+               "Primary key has invalid field id");
     auto& field_meta = schema_->operator[](field_id);
     int64_t size = info.row_count;
     std::vector<PkType> pks(size);
@@ -157,7 +177,8 @@ SegmentGrowingImpl::LoadDeletedRecord(const LoadDeletedRecordInfo& info) {
     auto reserved_begin = deleted_record_.reserved.fetch_add(size);
     deleted_record_.pks_.set_data_raw(reserved_begin, pks.data(), size);
     deleted_record_.timestamps_.set_data_raw(reserved_begin, timestamps, size);
-    deleted_record_.ack_responder_.AddSegment(reserved_begin, reserved_begin + size);
+    deleted_record_.ack_responder_.AddSegment(reserved_begin,
+                                              reserved_begin + size);
 }
 
 SpanBase
@@ -181,70 +202,100 @@ SegmentGrowingImpl::vector_search(SearchInfo& search_info,
                                   SearchResult& output) const {
     auto& sealed_indexing = this->get_sealed_indexing_record();
     if (sealed_indexing.is_ready(search_info.field_id_)) {
-        query::SearchOnSealedIndex(this->get_schema(), sealed_indexing, search_info, query_data, query_count, bitset,
+        query::SearchOnSealedIndex(this->get_schema(),
+                                   sealed_indexing,
+                                   search_info,
+                                   query_data,
+                                   query_count,
+                                   bitset,
                                    output);
     } else {
-        query::SearchOnGrowing(*this, search_info, query_data, query_count, timestamp, bitset, output);
+        query::SearchOnGrowing(*this,
+                               search_info,
+                               query_data,
+                               query_count,
+                               timestamp,
+                               bitset,
+                               output);
     }
 }
 
 std::unique_ptr<DataArray>
-SegmentGrowingImpl::bulk_subscript(FieldId field_id, const int64_t* seg_offsets, int64_t count) const {
+SegmentGrowingImpl::bulk_subscript(FieldId field_id,
+                                   const int64_t* seg_offsets,
+                                   int64_t count) const {
     // TODO: support more types
     auto vec_ptr = insert_record_.get_field_data_base(field_id);
     auto& field_meta = schema_->operator[](field_id);
     if (field_meta.is_vector()) {
         aligned_vector<char> output(field_meta.get_sizeof() * count);
         if (field_meta.get_data_type() == DataType::VECTOR_FLOAT) {
-            bulk_subscript_impl<FloatVector>(field_meta.get_sizeof(), *vec_ptr, seg_offsets, count, output.data());
+            bulk_subscript_impl<FloatVector>(field_meta.get_sizeof(),
+                                             *vec_ptr,
+                                             seg_offsets,
+                                             count,
+                                             output.data());
         } else if (field_meta.get_data_type() == DataType::VECTOR_BINARY) {
-            bulk_subscript_impl<BinaryVector>(field_meta.get_sizeof(), *vec_ptr, seg_offsets, count, output.data());
+            bulk_subscript_impl<BinaryVector>(field_meta.get_sizeof(),
+                                              *vec_ptr,
+                                              seg_offsets,
+                                              count,
+                                              output.data());
         } else {
             PanicInfo("logical error");
         }
         return CreateVectorDataArrayFrom(output.data(), count, field_meta);
     }
 
-    AssertInfo(!field_meta.is_vector(), "Scalar field meta type is vector type");
+    AssertInfo(!field_meta.is_vector(),
+               "Scalar field meta type is vector type");
     switch (field_meta.get_data_type()) {
         case DataType::BOOL: {
             FixedVector<bool> output(count);
-            bulk_subscript_impl<bool>(*vec_ptr, seg_offsets, count, output.data());
+            bulk_subscript_impl<bool>(
+                *vec_ptr, seg_offsets, count, output.data());
             return CreateScalarDataArrayFrom(output.data(), count, field_meta);
         }
         case DataType::INT8: {
             FixedVector<bool> output(count);
-            bulk_subscript_impl<int8_t>(*vec_ptr, seg_offsets, count, output.data());
+            bulk_subscript_impl<int8_t>(
+                *vec_ptr, seg_offsets, count, output.data());
             return CreateScalarDataArrayFrom(output.data(), count, field_meta);
         }
         case DataType::INT16: {
             FixedVector<int16_t> output(count);
-            bulk_subscript_impl<int16_t>(*vec_ptr, seg_offsets, count, output.data());
+            bulk_subscript_impl<int16_t>(
+                *vec_ptr, seg_offsets, count, output.data());
             return CreateScalarDataArrayFrom(output.data(), count, field_meta);
         }
         case DataType::INT32: {
             FixedVector<int32_t> output(count);
-            bulk_subscript_impl<int32_t>(*vec_ptr, seg_offsets, count, output.data());
+            bulk_subscript_impl<int32_t>(
+                *vec_ptr, seg_offsets, count, output.data());
             return CreateScalarDataArrayFrom(output.data(), count, field_meta);
         }
         case DataType::INT64: {
             FixedVector<int64_t> output(count);
-            bulk_subscript_impl<int64_t>(*vec_ptr, seg_offsets, count, output.data());
+            bulk_subscript_impl<int64_t>(
+                *vec_ptr, seg_offsets, count, output.data());
             return CreateScalarDataArrayFrom(output.data(), count, field_meta);
         }
         case DataType::FLOAT: {
             FixedVector<float> output(count);
-            bulk_subscript_impl<float>(*vec_ptr, seg_offsets, count, output.data());
+            bulk_subscript_impl<float>(
+                *vec_ptr, seg_offsets, count, output.data());
             return CreateScalarDataArrayFrom(output.data(), count, field_meta);
         }
         case DataType::DOUBLE: {
             FixedVector<double> output(count);
-            bulk_subscript_impl<double>(*vec_ptr, seg_offsets, count, output.data());
+            bulk_subscript_impl<double>(
+                *vec_ptr, seg_offsets, count, output.data());
             return CreateScalarDataArrayFrom(output.data(), count, field_meta);
         }
         case DataType::VARCHAR: {
             FixedVector<std::string> output(count);
-            bulk_subscript_impl<std::string>(*vec_ptr, seg_offsets, count, output.data());
+            bulk_subscript_impl<std::string>(
+                *vec_ptr, seg_offsets, count, output.data());
             return CreateScalarDataArrayFrom(output.data(), count, field_meta);
         }
         default: {
@@ -269,7 +320,9 @@ SegmentGrowingImpl::bulk_subscript_impl(int64_t element_sizeof,
     for (int i = 0; i < count; ++i) {
         auto dst = output_base + i * element_sizeof;
         auto offset = seg_offsets[i];
-        const uint8_t* src = (offset == INVALID_SEG_OFFSET ? empty.data() : (const uint8_t*)vec.get_element(offset));
+        const uint8_t* src = (offset == INVALID_SEG_OFFSET
+                                  ? empty.data()
+                                  : (const uint8_t*)vec.get_element(offset));
         memcpy(dst, src, element_sizeof);
     }
 }
@@ -300,10 +353,12 @@ SegmentGrowingImpl::bulk_subscript(SystemFieldType system_type,
                                    void* output) const {
     switch (system_type) {
         case SystemFieldType::Timestamp:
-            bulk_subscript_impl<Timestamp>(this->insert_record_.timestamps_, seg_offsets, count, output);
+            bulk_subscript_impl<Timestamp>(
+                this->insert_record_.timestamps_, seg_offsets, count, output);
             break;
         case SystemFieldType::RowId:
-            bulk_subscript_impl<int64_t>(this->insert_record_.row_ids_, seg_offsets, count, output);
+            bulk_subscript_impl<int64_t>(
+                this->insert_record_.row_ids_, seg_offsets, count, output);
             break;
         default:
             PanicInfo("unknown subscript fields");
@@ -311,7 +366,8 @@ SegmentGrowingImpl::bulk_subscript(SystemFieldType system_type,
 }
 
 std::vector<SegOffset>
-SegmentGrowingImpl::search_ids(const BitsetType& bitset, Timestamp timestamp) const {
+SegmentGrowingImpl::search_ids(const BitsetType& bitset,
+                               Timestamp timestamp) const {
     std::vector<SegOffset> res_offsets;
 
     for (int i = 0; i < bitset.size(); i++) {
@@ -326,7 +382,8 @@ SegmentGrowingImpl::search_ids(const BitsetType& bitset, Timestamp timestamp) co
 }
 
 std::vector<SegOffset>
-SegmentGrowingImpl::search_ids(const BitsetView& bitset, Timestamp timestamp) const {
+SegmentGrowingImpl::search_ids(const BitsetView& bitset,
+                               Timestamp timestamp) const {
     std::vector<SegOffset> res_offsets;
 
     for (int i = 0; i < bitset.size(); ++i) {
@@ -341,7 +398,8 @@ SegmentGrowingImpl::search_ids(const BitsetView& bitset, Timestamp timestamp) co
 }
 
 std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
-SegmentGrowingImpl::search_ids(const IdArray& id_array, Timestamp timestamp) const {
+SegmentGrowingImpl::search_ids(const IdArray& id_array,
+                               Timestamp timestamp) const {
     AssertInfo(id_array.has_int_id(), "Id array doesn't have int_id element");
     auto field_id = schema_->get_primary_field_id().value_or(FieldId(-1));
     AssertInfo(field_id.get() != -1, "Primary key is -1");
@@ -358,11 +416,13 @@ SegmentGrowingImpl::search_ids(const IdArray& id_array, Timestamp timestamp) con
         for (auto offset : segOffsets) {
             switch (data_type) {
                 case DataType::INT64: {
-                    res_id_arr->mutable_int_id()->add_data(std::get<int64_t>(pk));
+                    res_id_arr->mutable_int_id()->add_data(
+                        std::get<int64_t>(pk));
                     break;
                 }
                 case DataType::VARCHAR: {
-                    res_id_arr->mutable_str_id()->add_data(std::get<std::string>(pk));
+                    res_id_arr->mutable_str_id()->add_data(
+                        std::get<std::string>(pk));
                     break;
                 }
                 default: {
@@ -384,13 +444,17 @@ int64_t
 SegmentGrowingImpl::get_active_count(Timestamp ts) const {
     auto row_count = this->get_row_count();
     auto& ts_vec = this->get_insert_record().timestamps_;
-    auto iter = std::upper_bound(boost::make_counting_iterator((int64_t)0), boost::make_counting_iterator(row_count),
-                                 ts, [&](Timestamp ts, int64_t index) { return ts < ts_vec[index]; });
+    auto iter = std::upper_bound(
+        boost::make_counting_iterator((int64_t)0),
+        boost::make_counting_iterator(row_count),
+        ts,
+        [&](Timestamp ts, int64_t index) { return ts < ts_vec[index]; });
     return *iter;
 }
 
 void
-SegmentGrowingImpl::mask_with_timestamps(BitsetType& bitset_chunk, Timestamp timestamp) const {
+SegmentGrowingImpl::mask_with_timestamps(BitsetType& bitset_chunk,
+                                         Timestamp timestamp) const {
     // DO NOTHING
 }
 

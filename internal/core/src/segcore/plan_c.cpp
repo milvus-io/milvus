@@ -45,11 +45,15 @@ CreateSearchPlan(CCollection c_col, const char* dsl, CSearchPlan* res_plan) {
 
 // Note: serialized_expr_plan is of binary format
 CStatus
-CreateSearchPlanByExpr(CCollection c_col, const void* serialized_expr_plan, const int64_t size, CSearchPlan* res_plan) {
+CreateSearchPlanByExpr(CCollection c_col,
+                       const void* serialized_expr_plan,
+                       const int64_t size,
+                       CSearchPlan* res_plan) {
     auto col = (milvus::segcore::Collection*)c_col;
 
     try {
-        auto res = milvus::query::CreateSearchPlanByExpr(*col->get_schema(), serialized_expr_plan, size);
+        auto res = milvus::query::CreateSearchPlanByExpr(
+            *col->get_schema(), serialized_expr_plan, size);
 
         auto status = CStatus();
         status.error_code = Success;
@@ -80,7 +84,8 @@ ParsePlaceholderGroup(CSearchPlan c_plan,
     auto plan = (milvus::query::Plan*)c_plan;
 
     try {
-        auto res = milvus::query::ParsePlaceholderGroup(plan, (const uint8_t*)(placeholder_group_blob), blob_size);
+        auto res = milvus::query::ParsePlaceholderGroup(
+            plan, (const uint8_t*)(placeholder_group_blob), blob_size);
 
         auto status = CStatus();
         status.error_code = Success;
@@ -99,7 +104,8 @@ ParsePlaceholderGroup(CSearchPlan c_plan,
 
 int64_t
 GetNumOfQueries(CPlaceholderGroup placeholder_group) {
-    auto res = milvus::query::GetNumOfQueries((milvus::query::PlaceholderGroup*)placeholder_group);
+    auto res = milvus::query::GetNumOfQueries(
+        (milvus::query::PlaceholderGroup*)placeholder_group);
     return res;
 }
 
@@ -135,7 +141,8 @@ DeleteSearchPlan(CSearchPlan cPlan) {
 
 void
 DeletePlaceholderGroup(CPlaceholderGroup cPlaceholder_group) {
-    auto placeHolder_group = (milvus::query::PlaceholderGroup*)cPlaceholder_group;
+    auto placeHolder_group =
+        (milvus::query::PlaceholderGroup*)cPlaceholder_group;
     delete placeHolder_group;
 }
 
@@ -147,7 +154,8 @@ CreateRetrievePlanByExpr(CCollection c_col,
     auto col = (milvus::segcore::Collection*)c_col;
 
     try {
-        auto res = milvus::query::CreateRetrievePlanByExpr(*col->get_schema(), serialized_expr_plan, size);
+        auto res = milvus::query::CreateRetrievePlanByExpr(
+            *col->get_schema(), serialized_expr_plan, size);
 
         auto status = CStatus();
         status.error_code = Success;

@@ -74,12 +74,16 @@ LocalChunkManager::Read(const std::string& filepath, void* buf, uint64_t size) {
 }
 
 uint64_t
-LocalChunkManager::Read(const std::string& filepath, uint64_t offset, void* buf, uint64_t size) {
+LocalChunkManager::Read(const std::string& filepath,
+                        uint64_t offset,
+                        void* buf,
+                        uint64_t size) {
     std::ifstream infile;
     infile.open(filepath, std::ios_base::binary);
     if (infile.fail()) {
         std::stringstream err_msg;
-        err_msg << "Error: open local file '" << filepath << " failed, " << strerror(errno);
+        err_msg << "Error: open local file '" << filepath << " failed, "
+                << strerror(errno);
         throw OpenFileException(err_msg.str());
     }
 
@@ -87,7 +91,8 @@ LocalChunkManager::Read(const std::string& filepath, uint64_t offset, void* buf,
     if (!infile.read(reinterpret_cast<char*>(buf), size)) {
         if (!infile.eof()) {
             std::stringstream err_msg;
-            err_msg << "Error: read local file '" << filepath << " failed, " << strerror(errno);
+            err_msg << "Error: read local file '" << filepath << " failed, "
+                    << strerror(errno);
             throw ReadFileException(err_msg.str());
         }
     }
@@ -95,42 +100,54 @@ LocalChunkManager::Read(const std::string& filepath, uint64_t offset, void* buf,
 }
 
 void
-LocalChunkManager::Write(const std::string& absPathStr, void* buf, uint64_t size) {
+LocalChunkManager::Write(const std::string& absPathStr,
+                         void* buf,
+                         uint64_t size) {
     std::ofstream outfile;
     outfile.open(absPathStr, std::ios_base::binary);
     if (outfile.fail()) {
         std::stringstream err_msg;
-        err_msg << "Error: open local file '" << absPathStr << " failed, " << strerror(errno);
+        err_msg << "Error: open local file '" << absPathStr << " failed, "
+                << strerror(errno);
         throw OpenFileException(err_msg.str());
     }
     if (!outfile.write(reinterpret_cast<char*>(buf), size)) {
         std::stringstream err_msg;
-        err_msg << "Error: write local file '" << absPathStr << " failed, " << strerror(errno);
+        err_msg << "Error: write local file '" << absPathStr << " failed, "
+                << strerror(errno);
         throw WriteFileException(err_msg.str());
     }
 }
 
 void
-LocalChunkManager::Write(const std::string& absPathStr, uint64_t offset, void* buf, uint64_t size) {
+LocalChunkManager::Write(const std::string& absPathStr,
+                         uint64_t offset,
+                         void* buf,
+                         uint64_t size) {
     std::ofstream outfile;
-    outfile.open(absPathStr, std::ios_base::in | std::ios_base::out | std::ios_base::binary);
+    outfile.open(
+        absPathStr,
+        std::ios_base::in | std::ios_base::out | std::ios_base::binary);
     if (outfile.fail()) {
         std::stringstream err_msg;
-        err_msg << "Error: open local file '" << absPathStr << " failed, " << strerror(errno);
+        err_msg << "Error: open local file '" << absPathStr << " failed, "
+                << strerror(errno);
         throw OpenFileException(err_msg.str());
     }
 
     outfile.seekp(offset, std::ios::beg);
     if (!outfile.write(reinterpret_cast<char*>(buf), size)) {
         std::stringstream err_msg;
-        err_msg << "Error: write local file '" << absPathStr << " failed, " << strerror(errno);
+        err_msg << "Error: write local file '" << absPathStr << " failed, "
+                << strerror(errno);
         throw WriteFileException(err_msg.str());
     }
 }
 
 std::vector<std::string>
 LocalChunkManager::ListWithPrefix(const std::string& filepath) {
-    throw NotImplementedException(GetName() + "::ListWithPrefix" + " not implement now");
+    throw NotImplementedException(GetName() + "::ListWithPrefix" +
+                                  " not implement now");
 }
 
 bool
@@ -144,7 +161,8 @@ LocalChunkManager::CreateFile(const std::string& filepath) {
     file.open(absPathStr, std::ios_base::out);
     if (!file.is_open()) {
         std::stringstream err_msg;
-        err_msg << "Error: create new local file '" << absPathStr << " failed, " << strerror(errno);
+        err_msg << "Error: create new local file '" << absPathStr << " failed, "
+                << strerror(errno);
         throw CreateFileException(err_msg.str());
     }
     file.close();
@@ -166,7 +184,7 @@ void
 LocalChunkManager::CreateDir(const std::string& dir) {
     bool isExist = DirExist(dir);
     if (isExist) {
-        throw PathAlreadyExistException("dir:" + dir + " alreay exists");
+        throw PathAlreadyExistException("dir:" + dir + " already exists");
     }
     boost::filesystem::path dirPath(dir);
     auto create_success = boost::filesystem::create_directories(dirPath);
@@ -199,7 +217,9 @@ LocalChunkManager::GetSizeOfDir(const std::string& dir) {
     copy(directory_iterator(dirPath), directory_iterator(), back_inserter(v));
 
     int64_t total_file_size = 0;
-    for (std::vector<directory_entry>::const_iterator it = v.begin(); it != v.end(); ++it) {
+    for (std::vector<directory_entry>::const_iterator it = v.begin();
+         it != v.end();
+         ++it) {
         if (boost::filesystem::is_regular_file(it->path())) {
             total_file_size += boost::filesystem::file_size(it->path());
         }

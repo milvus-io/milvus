@@ -56,7 +56,10 @@ class ScalarIndexSort : public ScalarIndex<T> {
     Range(T value, OpType op) override;
 
     const TargetBitmapPtr
-    Range(T lower_bound_value, bool lb_inclusive, T upper_bound_value, bool ub_inclusive) override;
+    Range(T lower_bound_value,
+          bool lb_inclusive,
+          T upper_bound_value,
+          bool ub_inclusive) override;
 
     T
     Reverse_Lookup(size_t offset) const override;
