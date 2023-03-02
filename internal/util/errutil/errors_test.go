@@ -26,6 +26,18 @@ func (s *ErrSuite) TestCombine() {
 	s.Equal("first: second", err.Error())
 }
 
+func (s *ErrSuite) TestCombineWithNil() {
+	err := errors.New("non-nil")
+
+	err = Combine(nil, err)
+	s.NotNil(err)
+}
+
+func (s *ErrSuite) TestCombineOnlyNil() {
+	err := Combine(nil, nil)
+	s.Nil(err)
+}
+
 func TestErrors(t *testing.T) {
 	suite.Run(t, new(ErrSuite))
 }

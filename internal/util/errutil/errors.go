@@ -1,6 +1,9 @@
 package errutil
 
-import "github.com/cockroachdb/errors"
+import (
+	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
+)
 
 type multiErrors struct {
 	errs []error
@@ -24,10 +27,16 @@ func (e multiErrors) Error() string {
 }
 
 func (e multiErrors) Is(err error) bool {
-	return errors.IsAny(err, e.errs...)
+	for _, item := range e.errs {
+		if errors.Is(item, err) {
+			return true
+		}
+	}
+	return false
 }
 
 func Combine(errs ...error) error {
+	errs = lo.Filter(errs, func(err error, _ int) bool { return err != nil })
 	if len(errs) == 0 {
 		return nil
 	}
