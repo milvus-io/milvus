@@ -1125,6 +1125,28 @@ class TestQueryParams(TestcaseBase):
                                         ct.err_msg: "offset [%s] is invalid, should be in range "
                                                     "[1, 16384], but got %s" % (offset, offset)})
 
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_query_during_upsert(self):
+        """
+        target: test query during upsert
+        method: 1. create a collection and query
+                2. query during upsert
+                3. compare two query results
+        expected: the two query results is the same
+        """
+        collection_w = self.init_collection_general(prefix, True, auto_id=True)[0]
+        res1 = collection_w.query(default_term_expr, output_fields=[ct.default_string_field_name])
+
+        def do_upsert():
+            data = cf.gen_default_dataframe_data(nb=2)
+            collection_w.upsert(data=data)
+
+        t = threading.Thread(target=do_upsert, args=())
+        t.start()
+        res2 = collection_w.query(default_term_expr, output_fields=[ct.default_string_field_name])
+        t.join()
+        assert res1 == res2
+
 
 class TestQueryOperation(TestcaseBase):
     """

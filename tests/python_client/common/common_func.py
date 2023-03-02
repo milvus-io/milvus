@@ -823,6 +823,7 @@ def gen_grant_list(collection_name):
                   {"object": "User", "object_name": "*", "privilege": "SelectUser"}]
     return grant_list
 
+
 def install_milvus_operator_specific_config(namespace, milvus_mode, release_name, image,
                                             rate_limit_enable, collection_rate_limit):
     """
