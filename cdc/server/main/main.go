@@ -68,7 +68,7 @@ func main() {
 		pulsarConf := conf.Source.Pulsar
 		pulsarConfig = coreconf.NewPulsarConfig(
 			coreconf.PulsarAddressOption(fmt.Sprintf("pulsar://%s:%d", pulsarConf.Address, pulsarConf.Port)),
-			coreconf.PulsarWebAddressOption(pulsarConf.WebAddress, 80),
+			coreconf.PulsarWebAddressOption(pulsarConf.WebAddress, pulsarConf.WebPort),
 			coreconf.PulsarMaxMessageSizeOption(pulsarConf.MaxMessageSize),
 			coreconf.PulsarTenantOption(pulsarConf.Tenant, pulsarConf.Namespace),
 		)

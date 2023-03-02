@@ -38,13 +38,15 @@ type MilvusDataHandler struct {
 	ignorePartition bool // sometimes the has partition api is a deny api
 	connectTimeout  int
 
-	milvus client.Client
+	factory MilvusClientFactory
+	milvus  MilvusClientApi
 }
 
 // NewMilvusDataHandler options must include AddressOption
 func NewMilvusDataHandler(options ...config.Option[*MilvusDataHandler]) (*MilvusDataHandler, error) {
 	handler := &MilvusDataHandler{
 		connectTimeout: 5,
+		factory:        NewDefaultMilvusClientFactory(),
 	}
 	for _, option := range options {
 		option.Apply(handler)
@@ -59,13 +61,13 @@ func NewMilvusDataHandler(options ...config.Option[*MilvusDataHandler]) (*Milvus
 
 	switch {
 	case handler.username != "" && handler.enableTls:
-		handler.milvus, err = client.NewDefaultGrpcClientWithTLSAuth(timeoutContext,
+		handler.milvus, err = handler.factory.NewGrpcClientWithTLSAuth(timeoutContext,
 			handler.address, handler.username, handler.password)
 	case handler.username != "":
-		handler.milvus, err = client.NewDefaultGrpcClientWithAuth(timeoutContext,
+		handler.milvus, err = handler.factory.NewGrpcClientWithAuth(timeoutContext,
 			handler.address, handler.username, handler.password)
 	default:
-		handler.milvus, err = client.NewDefaultGrpcClient(timeoutContext, handler.address)
+		handler.milvus, err = handler.factory.NewGrpcClient(timeoutContext, handler.address)
 	}
 	if err != nil {
 		log.Warn("fail to new the milvus client", zap.Error(err))

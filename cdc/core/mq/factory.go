@@ -40,7 +40,7 @@ type PmsFactory struct {
 	PulsarBufSize     int64
 }
 
-func NewPmsFactory(cfg *config.PulsarConfig) *PmsFactory {
+func NewPmsFactory(cfg *config.PulsarConfig) api.Factory {
 	return &PmsFactory{
 		dispatcherFactory: &api.ProtoUDFactory{},
 		PulsarBufSize:     1024,
@@ -63,7 +63,7 @@ func (f *PmsFactory) NewMsgStream(ctx context.Context) (api.MsgStream, error) {
 	if err != nil {
 		return nil, err
 	}
-	return NewMqTtMsgStream(ctx, f.ReceiveBufSize, f.PulsarBufSize, pulsarClient, f.dispatcherFactory.NewUnmarshalDispatcher())
+	return NewMqMsgStream(ctx, f.ReceiveBufSize, f.PulsarBufSize, pulsarClient, f.dispatcherFactory.NewUnmarshalDispatcher())
 }
 
 //func (f *PmsFactory) getAuthentication() (pulsar_client.Authentication, error) {
@@ -130,7 +130,7 @@ func NewKmsFactory(config *config.KafkaConfig) api.Factory {
 
 func (f *KmsFactory) NewMsgStream(ctx context.Context) (api.MsgStream, error) {
 	kafkaClient := kafka.NewKafkaClientInstanceWithConfig(f.config)
-	return NewMqTtMsgStream(ctx, f.ReceiveBufSize, -1, kafkaClient, f.dispatcherFactory.NewUnmarshalDispatcher())
+	return NewMqMsgStream(ctx, f.ReceiveBufSize, -1, kafkaClient, f.dispatcherFactory.NewUnmarshalDispatcher())
 }
 
 func (f *KmsFactory) NewMsgStreamDisposer(ctx context.Context) func([]string, string) error {

@@ -30,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/cdc/core/config"
 	"github.com/milvus-io/milvus/cdc/core/model"
-	"github.com/milvus-io/milvus/cdc/core/mq"
 	"github.com/milvus-io/milvus/cdc/core/mq/api"
 	"github.com/milvus-io/milvus/cdc/core/pb"
 	"github.com/milvus-io/milvus/cdc/core/util"
@@ -56,6 +55,7 @@ type MilvusCollectionReader struct {
 	dataChanLen int
 
 	etcdCli            util.KVApi
+	factoryCreator     FactoryCreator
 	allCollectionNames []string
 	dataChan           chan *model.CDCData
 	cancelWatch        context.CancelFunc
@@ -63,7 +63,7 @@ type MilvusCollectionReader struct {
 	startOnce sync.Once
 	quitOnce  sync.Once
 	// only read it, CAN'T write it excluding in the QuitRead
-	isQuit bool
+	isQuit util.Value[bool]
 
 	// Please no read or write it excluding in the beginning of readStreamData method
 	readingSteamCollection []int64
@@ -72,8 +72,9 @@ type MilvusCollectionReader struct {
 
 func NewMilvusCollectionReader(options ...config.Option[*MilvusCollectionReader]) (*MilvusCollectionReader, error) {
 	reader := &MilvusCollectionReader{
-		monitor:     NewDefaultMonitor(),
-		dataChanLen: 10,
+		monitor:        NewDefaultMonitor(),
+		factoryCreator: NewDefaultFactoryCreator(),
+		dataChanLen:    10,
 	}
 	for _, option := range options {
 		option.Apply(reader)
@@ -88,6 +89,7 @@ func NewMilvusCollectionReader(options ...config.Option[*MilvusCollectionReader]
 	reader.allCollectionNames = lo.Map(reader.collections, func(t CollectionInfo, _ int) string {
 		return t.collectionName
 	})
+	reader.isQuit.Store(false)
 	return reader, nil
 }
 
@@ -100,17 +102,17 @@ func (reader *MilvusCollectionReader) StartRead(ctx context.Context) <-chan *mod
 		reader.cancelWatch = cancel
 
 		wg.Add(len(reader.allCollectionNames))
-		reader.goWatchCollection(watchCtx, wg)
+		reader.goWatchCollection(watchCtx)
 		reader.goGetAllCollections(wg)
-		reader.goCancelWatch(wg)
 	})
 
 	return reader.dataChan
 }
 
-func (reader *MilvusCollectionReader) goWatchCollection(watchCtx context.Context, wg *sync.WaitGroup) {
+func (reader *MilvusCollectionReader) goWatchCollection(watchCtx context.Context) {
 	go func() {
 		// watch collection prefix to avoid new collection while getting the all collection
+		// TODO improvement watch single instance
 		watchChan := reader.etcdCli.Watch(watchCtx, reader.collectionPrefix()+"/", clientv3.WithPrefix())
 		for {
 			select {
@@ -132,7 +134,6 @@ func (reader *MilvusCollectionReader) goWatchCollection(watchCtx context.Context
 						getCollectionState := func(i *pb.CollectionInfo) pb.CollectionState {
 							return i.State
 						}
-						log.Info("collection put", zap.Any("state", getCollectionState(info)), zap.String("key", collectionKey))
 						if getCollectionState(info) == pb.CollectionState_CollectionCreated {
 							go func() {
 								if lo.Contains(reader.allCollectionNames, reader.collectionName(info)) {
@@ -148,8 +149,6 @@ func (reader *MilvusCollectionReader) goWatchCollection(watchCtx context.Context
 										reader.monitor.OnFailGetCollectionInfo(info.ID, reader.collectionName(info), err)
 										return
 									}
-									// TODO fubang how to deal, delete collection a and then recreate collection a
-									wg.Done()
 									reader.readStreamData(info, true)
 								}
 							}()
@@ -171,6 +170,7 @@ func (reader *MilvusCollectionReader) goGetAllCollections(wg *sync.WaitGroup) {
 		)
 
 		existedCollectionInfos, err = reader.getCollectionInfo(reader.allCollectionNames)
+		log.Info("err result", zap.Error(err))
 		if err != nil {
 			log.Warn("fail to get collection", zap.Error(err))
 			reader.monitor.OnFailUnKnowCollection(reader.collectionPrefix(), err)
@@ -181,12 +181,8 @@ func (reader *MilvusCollectionReader) goGetAllCollections(wg *sync.WaitGroup) {
 			go reader.readStreamData(info, false)
 		}
 	}()
-}
-
-func (reader *MilvusCollectionReader) goCancelWatch(wg *sync.WaitGroup) {
 	go func() {
 		wg.Wait()
-		reader.cancelWatch()
 		reader.monitor.OnSuccessGetAllCollectionInfo()
 	}()
 }
@@ -236,10 +232,10 @@ func (reader *MilvusCollectionReader) getCollectionInfo(collectionNames []string
 
 func (reader *MilvusCollectionReader) fillCollectionField(info *pb.CollectionInfo) error {
 	filedPrefix := reader.fieldPrefix()
-	resp, err := util.EtcdGet(reader.etcdCli,
-		path.Join(filedPrefix, strconv.FormatInt(info.ID, 10))+"/", clientv3.WithPrefix())
+	prefix := path.Join(filedPrefix, strconv.FormatInt(info.ID, 10)) + "/"
+	resp, err := util.EtcdGet(reader.etcdCli, prefix, clientv3.WithPrefix())
 	if err != nil {
-		log.Warn("fail to get the collection field data", zap.String("prefix", filedPrefix), zap.Error(err))
+		log.Warn("fail to get the collection field data", zap.String("prefix", prefix), zap.Error(err))
 		return err
 	}
 	if len(resp.Kvs) == 0 {
@@ -299,6 +295,7 @@ func (reader *MilvusCollectionReader) readStreamData(info *pb.CollectionInfo, se
 					MsgType: commonpb.MsgType_CreateCollection,
 				},
 				CollectionName: reader.collectionName(info),
+				CollectionID:   info.ID,
 				Schema:         schemaByte,
 			},
 		}
@@ -315,14 +312,14 @@ func (reader *MilvusCollectionReader) readStreamData(info *pb.CollectionInfo, se
 
 	vchannels := info.VirtualChannelNames
 	w := &sync.WaitGroup{}
-	dropCollectionDataMap := make(map[string]*model.CDCData)
+	dropCollectionDataMap := &sync.Map{}
 	w.Add(len(vchannels))
 	for _, vchannel := range vchannels {
 		position, err := reader.collectionPosition(info, vchannel)
 		handleError := func() {
 			reader.monitor.OnFailReadStream(info.ID, reader.collectionName(info), vchannel, err)
 			w.Done()
-			reader.isQuit = true
+			reader.isQuit.Store(true)
 			dropCollectionDataMap = nil
 		}
 		if err != nil {
@@ -346,19 +343,24 @@ func (reader *MilvusCollectionReader) readStreamData(info *pb.CollectionInfo, se
 	}
 	go func() {
 		w.Wait()
-		if len(dropCollectionDataMap) != len(vchannels) {
-			return
-		}
+
 		dropCollectionCdcData := &model.CDCData{
 			Extra: make(map[string]any),
 		}
 		var otherDropData []*api.DropCollectionMsg
-		for _, data := range dropCollectionDataMap {
+		i := 0
+		dropCollectionDataMap.Range(func(_, value any) bool {
+			data := value.(*model.CDCData)
 			if dropCollectionCdcData.Msg == nil {
 				dropCollectionCdcData.Msg = data.Msg
 			} else {
 				otherDropData = append(otherDropData, data.Msg.(*api.DropCollectionMsg))
 			}
+			i++
+			return true
+		})
+		if i != len(vchannels) {
+			return
 		}
 
 		dropCollectionCdcData.Extra[model.DropCollectionMsgsKey] = otherDropData
@@ -367,10 +369,11 @@ func (reader *MilvusCollectionReader) readStreamData(info *pb.CollectionInfo, se
 }
 
 func (reader *MilvusCollectionReader) collectionPosition(info *pb.CollectionInfo, vchannelName string) (*pb.MsgPosition, error) {
+	pchannel := util.ToPhysicalChannel(vchannelName)
 	for _, collection := range reader.collections {
 		if collection.collectionName == reader.collectionName(info) &&
 			collection.positions != nil {
-			if pair, ok := collection.positions[util.ToPhysicalChannel(vchannelName)]; ok {
+			if pair, ok := collection.positions[pchannel]; ok {
 				return &pb.MsgPosition{
 					ChannelName: vchannelName,
 					MsgID:       pair.GetData(),
@@ -384,9 +387,9 @@ func (reader *MilvusCollectionReader) collectionPosition(info *pb.CollectionInfo
 func (reader *MilvusCollectionReader) msgStream() (api.MsgStream, error) {
 	var factory api.Factory
 	if reader.mqConfig.Pulsar.Address != "" {
-		factory = mq.NewPmsFactory(&reader.mqConfig.Pulsar)
+		factory = reader.factoryCreator.NewPmsFactory(&reader.mqConfig.Pulsar)
 	} else if reader.mqConfig.Kafka.Address != "" {
-		factory = mq.NewKmsFactory(&reader.mqConfig.Kafka)
+		factory = reader.factoryCreator.NewKmsFactory(&reader.mqConfig.Kafka)
 	} else {
 		return nil, errors.New("fail to get the msg stream, check the mqConfig param")
 	}
@@ -413,11 +416,16 @@ func (reader *MilvusCollectionReader) msgStreamChan(vchannel string, position *p
 }
 
 func (reader *MilvusCollectionReader) goReadMsg(collectionName string, vchannelName string, c <-chan *api.MsgPack,
-	w *sync.WaitGroup, dropCollectionDataMap map[string]*model.CDCData) {
+	w *sync.WaitGroup, dropCollectionDataMap *sync.Map) {
 	go func() {
+		defer w.Done()
 		for {
-			if reader.isQuit && len(dropCollectionDataMap) == 0 {
-				w.Done()
+			empty := true
+			dropCollectionDataMap.Range(func(_, _ any) bool {
+				empty = false
+				return false
+			})
+			if reader.isQuit.Load() && empty {
 				return
 			}
 			msgPack := <-c
@@ -430,11 +438,10 @@ func (reader *MilvusCollectionReader) goReadMsg(collectionName string, vchannelN
 					continue
 				}
 				if _, ok := msg.(*api.DropCollectionMsg); ok {
-					w.Done()
 					if dropCollectionDataMap != nil {
-						dropCollectionDataMap[vchannelName] = &model.CDCData{
+						dropCollectionDataMap.Store(vchannelName, &model.CDCData{
 							Msg: msg,
-						}
+						})
 					}
 					return
 				}
@@ -474,7 +481,7 @@ func (reader *MilvusCollectionReader) CancelWatchCollection() {
 
 func (reader *MilvusCollectionReader) QuitRead(ctx context.Context) {
 	reader.quitOnce.Do(func() {
-		reader.isQuit = true
+		reader.isQuit.Store(true)
 		reader.CancelWatchCollection()
 	})
 }

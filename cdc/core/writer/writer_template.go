@@ -23,16 +23,13 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-
-	"github.com/milvus-io/milvus/cdc/core/config"
-
 	"github.com/goccy/go-json"
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus-sdk-go/v2/entity"
+	"github.com/milvus-io/milvus/cdc/core/config"
 	"github.com/milvus-io/milvus/cdc/core/model"
 	"github.com/milvus-io/milvus/cdc/core/mq/api"
-	mqutil "github.com/milvus-io/milvus/cdc/core/mq/util"
 	"github.com/milvus-io/milvus/cdc/core/util"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -55,7 +52,7 @@ var NoBufferConfig = BufferConfig{
 	Size:   -1,
 }
 
-type CdcWriterTemplate struct {
+type CDCWriterTemplate struct {
 	DefaultWriter
 
 	handler    CDCDataHandler
@@ -73,9 +70,9 @@ type CdcWriterTemplate struct {
 	bufferDataChan chan []lo.Tuple2[*model.CDCData, WriteCallback]
 }
 
-// NewCdcWriterTemplate options must include HandlerOption
-func NewCdcWriterTemplate(options ...config.Option[*CdcWriterTemplate]) CDCWriter {
-	c := &CdcWriterTemplate{
+// NewCDCWriterTemplate options must include HandlerOption
+func NewCDCWriterTemplate(options ...config.Option[*CDCWriterTemplate]) CDCWriter {
+	c := &CDCWriterTemplate{
 		bufferConfig: DefaultBufferConfig,
 		errProtect:   FastFail(),
 	}
@@ -88,12 +85,12 @@ func NewCdcWriterTemplate(options ...config.Option[*CdcWriterTemplate]) CDCWrite
 		commonpb.MsgType_Insert:           c.handleInsert,
 		commonpb.MsgType_Delete:           c.handleDelete,
 	}
-	c.bufferInit()
+	c.initBuffer()
+	c.periodFlush()
 	return c
 }
 
-func (c *CdcWriterTemplate) bufferInit() {
-	//c.bufferOpsChan = make(chan []BufferOp)
+func (c *CDCWriterTemplate) initBuffer() {
 	c.bufferDataChan = make(chan []lo.Tuple2[*model.CDCData, WriteCallback])
 
 	// execute buffer ops
@@ -123,204 +120,8 @@ func (c *CdcWriterTemplate) bufferInit() {
 			})
 
 			bufferData := <-c.bufferDataChan
-			type CombineData struct {
-				param     any
-				fails     []func(err error)
-				successes []func()
-			}
 			combineDataMap := make(map[string][]*CombineData)
-			combineDataFunc := func(dataArr []lo.Tuple2[*model.CDCData, WriteCallback]) {
-				generateKey := func(a string, b string) string {
-					return a + ":" + b
-				}
-				for _, tuple := range dataArr {
-					data := tuple.A
-					callback := tuple.B
-					switch msg := data.Msg.(type) {
-					case *api.InsertMsg:
-						collectionName := msg.CollectionName
-						partitionName := msg.PartitionName
-						dataKey := generateKey(collectionName, partitionName)
-						// construct columns
-						var columns []entity.Column
-						isForFail := false
-						for _, fieldData := range msg.FieldsData {
-							if column, err := entity.FieldDataColumn(fieldData, 0, -1); err == nil {
-								columns = append(columns, column)
-							} else {
-								column, err := entity.FieldDataVector(fieldData)
-								if err != nil {
-									c.fail("fail to parse the data", err, data, callback)
-									isForFail = true
-									break
-								}
-								columns = append(columns, column)
-							}
-						}
-						if isForFail {
-							continue
-						}
-						// new combine data for convenient usage below
-						newCombineData := &CombineData{
-							param: &InsertParam{
-								CollectionName: collectionName,
-								PartitionName:  partitionName,
-								Columns:        columns,
-							},
-							successes: []func(){
-								func() {
-									c.success(msg.CollectionID, collectionName, data, callback, positionFunc)
-								},
-							},
-							fails: []func(err error){
-								func(err error) {
-									c.fail("fail to insert the data", err, data, callback)
-								},
-							},
-						}
-						combineDataArr, ok := combineDataMap[dataKey]
-						// check whether the combineDataMap contains the key, if not, add the data
-						if !ok {
-							combineDataMap[dataKey] = []*CombineData{
-								newCombineData,
-							}
-							continue
-						}
-						lastCombineData := combineDataArr[len(combineDataArr)-1]
-						insertParam, ok := lastCombineData.param.(*InsertParam)
-						// check whether the last data is insert, if not, add the data to array
-						if !ok {
-							combineDataMap[dataKey] = append(combineDataMap[dataKey], newCombineData)
-							continue
-						}
-						// combine the data
-						if err := c.preCombineColumn(insertParam.Columns, columns); err != nil {
-							c.fail("fail to combine the data", err, data, callback)
-							continue
-						}
-						c.combineColumn(insertParam.Columns, columns)
-						lastCombineData.successes = append(lastCombineData.successes, newCombineData.successes...)
-						lastCombineData.fails = append(lastCombineData.fails, newCombineData.fails...)
-					case *api.DeleteMsg:
-						collectionName := msg.CollectionName
-						partitionName := msg.PartitionName
-						dataKey := generateKey(collectionName, partitionName)
-						// get the id column
-						column, err := entity.IDColumns(msg.PrimaryKeys, 0, -1)
-						if err != nil {
-							c.fail("fail to get the id columns", err, data, callback)
-							continue
-						}
-						newCombineData := &CombineData{
-							param: &DeleteParam{
-								CollectionName: collectionName,
-								PartitionName:  partitionName,
-								Column:         column,
-							},
-							successes: []func(){
-								func() {
-									c.success(msg.CollectionID, collectionName, data, callback, positionFunc)
-								},
-							},
-							fails: []func(err error){
-								func(err error) {
-									c.fail("fail to delete the column", err, data, callback)
-								},
-							},
-						}
-						combineDataArr, ok := combineDataMap[dataKey]
-						// check whether the combineDataMap contains the key, if not, add the data
-						if !ok {
-							combineDataMap[dataKey] = []*CombineData{
-								newCombineData,
-							}
-							continue
-						}
-						lastCombineData := combineDataArr[len(combineDataArr)-1]
-						deleteParam, ok := lastCombineData.param.(*DeleteParam)
-						// check whether the last data is insert, if not, add the data to array
-						if !ok {
-							combineDataMap[dataKey] = append(combineDataMap[dataKey], newCombineData)
-							continue
-						}
-						// combine the data
-						var values []interface{}
-						switch columnValue := column.(type) {
-						case *entity.ColumnInt64:
-							for _, id := range columnValue.Data() {
-								values = append(values, id)
-							}
-						case *entity.ColumnVarChar:
-							for _, varchar := range columnValue.Data() {
-								values = append(values, varchar)
-							}
-						default:
-							c.fail("fail to combine the delete data", err, data, callback)
-						}
-						isForFail := false
-						for _, value := range values {
-							err = deleteParam.Column.AppendValue(value)
-							if err != nil {
-								c.fail("fail to combine the delete data", err, data, callback)
-								isForFail = true
-								break
-							}
-						}
-						if isForFail {
-							continue
-						}
-						lastCombineData.successes = append(lastCombineData.successes, newCombineData.successes...)
-						lastCombineData.fails = append(lastCombineData.fails, newCombineData.fails...)
-					case *api.DropCollectionMsg:
-						collectionName := msg.CollectionName
-						dataKey := generateKey(collectionName, "")
-						newCombineData := &CombineData{
-							param: &DropCollectionParam{
-								CollectionName: collectionName,
-							},
-							successes: []func(){
-								func() {
-									channelInfos := make(map[string]CallbackChannelInfo)
-
-									collectChannelInfo := func(dropCollectionMsg *api.DropCollectionMsg) {
-										position := dropCollectionMsg.Position()
-										kd := &commonpb.KeyDataPair{
-											Key:  position.ChannelName,
-											Data: position.MsgID,
-										}
-										channelInfos[position.ChannelName] = CallbackChannelInfo{
-											Position: kd,
-											Ts:       dropCollectionMsg.EndTs(),
-										}
-									}
-									collectChannelInfo(msg)
-									if msgsValue := data.Extra[model.DropCollectionMsgsKey]; msgsValue != nil {
-										msgs := msgsValue.([]*api.DropCollectionMsg)
-										for _, tsMsg := range msgs {
-											collectChannelInfo(tsMsg)
-										}
-									}
-
-									callback.OnSuccess(msg.CollectionID, channelInfos)
-									if positionFunc != nil {
-										for _, info := range channelInfos {
-											positionFunc(msg.CollectionID, msg.CollectionName, info.Position.Key, info.Position)
-										}
-									}
-								},
-							},
-							fails: []func(err error){
-								func(err error) {
-									c.fail("fail to drop collection", err, data, callback)
-								},
-							},
-						}
-						combineDataMap[dataKey] = append(combineDataMap[dataKey], newCombineData)
-					}
-				}
-			}
-			combineDataFunc(bufferData)
-
+			c.combineDataFunc(bufferData, combineDataMap, positionFunc)
 			executeSuccesses := func(successes []func()) {
 				for _, success := range successes {
 					success()
@@ -363,8 +164,225 @@ func (c *CdcWriterTemplate) bufferInit() {
 			}
 		}
 	}()
+}
 
-	// period flush
+type CombineData struct {
+	param     any
+	fails     []func(err error)
+	successes []func()
+}
+
+func (c *CDCWriterTemplate) combineDataFunc(dataArr []lo.Tuple2[*model.CDCData, WriteCallback],
+	combineDataMap map[string][]*CombineData,
+	positionFunc NotifyCollectionPositionChangeFunc) {
+
+	for _, tuple := range dataArr {
+		data := tuple.A
+		callback := tuple.B
+		switch msg := data.Msg.(type) {
+		case *api.InsertMsg:
+			c.handleInsertBuffer(msg, data, callback, combineDataMap, positionFunc)
+		case *api.DeleteMsg:
+			c.handleDeleteBuffer(msg, data, callback, combineDataMap, positionFunc)
+		case *api.DropCollectionMsg:
+			c.handleDropCollectionBuffer(msg, data, callback, combineDataMap, positionFunc)
+		}
+	}
+}
+
+func (c *CDCWriterTemplate) generateBufferKey(a string, b string) string {
+	return a + ":" + b
+}
+
+func (c *CDCWriterTemplate) handleInsertBuffer(msg *api.InsertMsg,
+	data *model.CDCData, callback WriteCallback,
+	combineDataMap map[string][]*CombineData,
+	positionFunc NotifyCollectionPositionChangeFunc,
+) {
+
+	collectionName := msg.CollectionName
+	partitionName := msg.PartitionName
+	dataKey := c.generateBufferKey(collectionName, partitionName)
+	// construct columns
+	var columns []entity.Column
+	for _, fieldData := range msg.FieldsData {
+		if column, err := entity.FieldDataColumn(fieldData, 0, -1); err == nil {
+			columns = append(columns, column)
+		} else {
+			column, err := entity.FieldDataVector(fieldData)
+			if err != nil {
+				c.fail("fail to parse the data", err, data, callback)
+				return
+			}
+			columns = append(columns, column)
+		}
+	}
+	// new combine data for convenient usage below
+	newCombineData := &CombineData{
+		param: &InsertParam{
+			CollectionName: collectionName,
+			PartitionName:  partitionName,
+			Columns:        columns,
+		},
+		successes: []func(){
+			func() {
+				c.success(msg.CollectionID, collectionName, data, callback, positionFunc)
+			},
+		},
+		fails: []func(err error){
+			func(err error) {
+				c.fail("fail to insert the data", err, data, callback)
+			},
+		},
+	}
+	combineDataArr, ok := combineDataMap[dataKey]
+	// check whether the combineDataMap contains the key, if not, add the data
+	if !ok {
+		combineDataMap[dataKey] = []*CombineData{
+			newCombineData,
+		}
+		return
+	}
+	lastCombineData := combineDataArr[len(combineDataArr)-1]
+	insertParam, ok := lastCombineData.param.(*InsertParam)
+	// check whether the last data is insert, if not, add the data to array
+	if !ok {
+		combineDataMap[dataKey] = append(combineDataMap[dataKey], newCombineData)
+		return
+	}
+	// combine the data
+	if err := c.preCombineColumn(insertParam.Columns, columns); err != nil {
+		c.fail("fail to combine the data", err, data, callback)
+		return
+	}
+	c.combineColumn(insertParam.Columns, columns)
+	lastCombineData.successes = append(lastCombineData.successes, newCombineData.successes...)
+	lastCombineData.fails = append(lastCombineData.fails, newCombineData.fails...)
+}
+
+func (c *CDCWriterTemplate) handleDeleteBuffer(msg *api.DeleteMsg,
+	data *model.CDCData, callback WriteCallback,
+	combineDataMap map[string][]*CombineData,
+	positionFunc NotifyCollectionPositionChangeFunc,
+) {
+	collectionName := msg.CollectionName
+	partitionName := msg.PartitionName
+	dataKey := c.generateBufferKey(collectionName, partitionName)
+	// get the id column
+	column, err := entity.IDColumns(msg.PrimaryKeys, 0, -1)
+	if err != nil {
+		c.fail("fail to get the id columns", err, data, callback)
+		return
+	}
+	newCombineData := &CombineData{
+		param: &DeleteParam{
+			CollectionName: collectionName,
+			PartitionName:  partitionName,
+			Column:         column,
+		},
+		successes: []func(){
+			func() {
+				c.success(msg.CollectionID, collectionName, data, callback, positionFunc)
+			},
+		},
+		fails: []func(err error){
+			func(err error) {
+				c.fail("fail to delete the column", err, data, callback)
+			},
+		},
+	}
+	combineDataArr, ok := combineDataMap[dataKey]
+	// check whether the combineDataMap contains the key, if not, add the data
+	if !ok {
+		combineDataMap[dataKey] = []*CombineData{
+			newCombineData,
+		}
+		return
+	}
+	lastCombineData := combineDataArr[len(combineDataArr)-1]
+	deleteParam, ok := lastCombineData.param.(*DeleteParam)
+	// check whether the last data is insert, if not, add the data to array
+	if !ok {
+		combineDataMap[dataKey] = append(combineDataMap[dataKey], newCombineData)
+		return
+	}
+	// combine the data
+	var values []interface{}
+	switch columnValue := column.(type) {
+	case *entity.ColumnInt64:
+		for _, id := range columnValue.Data() {
+			values = append(values, id)
+		}
+	case *entity.ColumnVarChar:
+		for _, varchar := range columnValue.Data() {
+			values = append(values, varchar)
+		}
+	default:
+		c.fail("fail to combine the delete data", err, data, callback)
+	}
+	for _, value := range values {
+		err = deleteParam.Column.AppendValue(value)
+		if err != nil {
+			c.fail("fail to combine the delete data", err, data, callback)
+			return
+		}
+	}
+	lastCombineData.successes = append(lastCombineData.successes, newCombineData.successes...)
+	lastCombineData.fails = append(lastCombineData.fails, newCombineData.fails...)
+}
+
+func (c *CDCWriterTemplate) handleDropCollectionBuffer(msg *api.DropCollectionMsg,
+	data *model.CDCData, callback WriteCallback,
+	combineDataMap map[string][]*CombineData,
+	positionFunc NotifyCollectionPositionChangeFunc,
+) {
+	collectionName := msg.CollectionName
+	dataKey := c.generateBufferKey(collectionName, "")
+	newCombineData := &CombineData{
+		param: &DropCollectionParam{
+			CollectionName: collectionName,
+		},
+		successes: []func(){
+			func() {
+				channelInfos := make(map[string]CallbackChannelInfo)
+
+				collectChannelInfo := func(dropCollectionMsg *api.DropCollectionMsg) {
+					position := dropCollectionMsg.Position()
+					kd := &commonpb.KeyDataPair{
+						Key:  position.ChannelName,
+						Data: position.MsgID,
+					}
+					channelInfos[position.ChannelName] = CallbackChannelInfo{
+						Position: kd,
+						Ts:       dropCollectionMsg.EndTs(),
+					}
+				}
+				collectChannelInfo(msg)
+				if msgsValue := data.Extra[model.DropCollectionMsgsKey]; msgsValue != nil {
+					msgs := msgsValue.([]*api.DropCollectionMsg)
+					for _, tsMsg := range msgs {
+						collectChannelInfo(tsMsg)
+					}
+				}
+
+				callback.OnSuccess(msg.CollectionID, channelInfos)
+				if positionFunc != nil {
+					for _, info := range channelInfos {
+						positionFunc(msg.CollectionID, msg.CollectionName, info.Position.Key, info.Position)
+					}
+				}
+			},
+		},
+		fails: []func(err error){
+			func(err error) {
+				c.fail("fail to drop collection", err, data, callback)
+			},
+		},
+	}
+	combineDataMap[dataKey] = append(combineDataMap[dataKey], newCombineData)
+}
+
+func (c *CDCWriterTemplate) periodFlush() {
 	go func() {
 		if c.bufferConfig.Period <= 0 {
 			return
@@ -379,7 +397,7 @@ func (c *CdcWriterTemplate) bufferInit() {
 	}()
 }
 
-func (c *CdcWriterTemplate) Write(ctx context.Context, data *model.CDCData, callback WriteCallback) error {
+func (c *CDCWriterTemplate) Write(ctx context.Context, data *model.CDCData, callback WriteCallback) error {
 	select {
 	case <-c.errProtect.Chan():
 		log.Warn("the error protection is triggered", zap.String("protect", c.errProtect.Info()))
@@ -389,6 +407,7 @@ func (c *CdcWriterTemplate) Write(ctx context.Context, data *model.CDCData, call
 
 	handleFunc, ok := c.funcMap[data.Msg.Type()]
 	if !ok {
+		// don't execute the fail callback, because the future messages will be ignored and don't trigger the error protection
 		log.Warn("not support message type", zap.Any("data", data))
 		return fmt.Errorf("not support message type, type: %s", data.Msg.Type().String())
 	}
@@ -396,13 +415,13 @@ func (c *CdcWriterTemplate) Write(ctx context.Context, data *model.CDCData, call
 	return nil
 }
 
-func (c *CdcWriterTemplate) Flush(context context.Context) {
+func (c *CDCWriterTemplate) Flush(context context.Context) {
 	c.bufferLock.Lock()
 	defer c.bufferLock.Unlock()
 	c.clearBufferFunc()
 }
 
-func (c *CdcWriterTemplate) handleCreateCollection(ctx context.Context, data *model.CDCData, callback WriteCallback) {
+func (c *CDCWriterTemplate) handleCreateCollection(ctx context.Context, data *model.CDCData, callback WriteCallback) {
 	msg := data.Msg.(*api.CreateCollectionMsg)
 	schema := &schemapb.CollectionSchema{}
 	err := json.Unmarshal(msg.Schema, schema)
@@ -423,24 +442,11 @@ func (c *CdcWriterTemplate) handleCreateCollection(ctx context.Context, data *mo
 		properties = value.([]*commonpb.KeyValuePair)
 	}
 
-	var fields []*entity.Field
-	lo.ForEach(schema.Fields, func(schema *schemapb.FieldSchema, _ int) {
-		fields = append(fields, &entity.Field{
-			Name:        schema.Name,
-			DataType:    entity.FieldType(schema.DataType),
-			PrimaryKey:  schema.IsPrimaryKey,
-			AutoID:      schema.AutoID,
-			Description: schema.Description,
-			TypeParams:  util.ConvertKVPairToMap(schema.TypeParams),
-			IndexParams: util.ConvertKVPairToMap(schema.IndexParams),
-		})
-	})
-
 	entitySchema := &entity.Schema{}
 	entitySchema = entitySchema.ReadProto(schema)
 	err = c.handler.CreateCollection(ctx, &CreateCollectionParam{
 		Schema:           entitySchema,
-		ShardsNum:        int32(shardNum),
+		ShardsNum:        shardNum,
 		ConsistencyLevel: level,
 		Properties:       properties,
 	})
@@ -451,16 +457,16 @@ func (c *CdcWriterTemplate) handleCreateCollection(ctx context.Context, data *mo
 	callback.OnSuccess(msg.CollectionID, nil)
 }
 
-func (c *CdcWriterTemplate) handleDropCollection(ctx context.Context, data *model.CDCData, callback WriteCallback) {
+func (c *CDCWriterTemplate) handleDropCollection(ctx context.Context, data *model.CDCData, callback WriteCallback) {
 	c.bufferLock.Lock()
 	defer c.bufferLock.Unlock()
 	c.bufferData = append(c.bufferData, lo.T2(data, callback))
 	c.clearBufferFunc()
 }
 
-func (c *CdcWriterTemplate) handleInsert(ctx context.Context, data *model.CDCData, callback WriteCallback) {
+func (c *CDCWriterTemplate) handleInsert(ctx context.Context, data *model.CDCData, callback WriteCallback) {
 	msg := data.Msg.(*api.InsertMsg)
-	totalSize := mqutil.SizeOfInsertMsg(msg)
+	totalSize := SizeOfInsertMsg(msg)
 	if totalSize < 0 {
 		c.fail("fail to get the data size", errors.New("invalid column type"), data, callback)
 		return
@@ -473,9 +479,9 @@ func (c *CdcWriterTemplate) handleInsert(ctx context.Context, data *model.CDCDat
 	c.checkBufferSize()
 }
 
-func (c *CdcWriterTemplate) handleDelete(ctx context.Context, data *model.CDCData, callback WriteCallback) {
+func (c *CDCWriterTemplate) handleDelete(ctx context.Context, data *model.CDCData, callback WriteCallback) {
 	msg := data.Msg.(*api.DeleteMsg)
-	totalSize := mqutil.SizeOfDeleteMsg(msg)
+	totalSize := SizeOfDeleteMsg(msg)
 
 	c.bufferLock.Lock()
 	defer c.bufferLock.Unlock()
@@ -484,7 +490,7 @@ func (c *CdcWriterTemplate) handleDelete(ctx context.Context, data *model.CDCDat
 	c.checkBufferSize()
 }
 
-func (c *CdcWriterTemplate) collectionName(data *model.CDCData) string {
+func (c *CDCWriterTemplate) collectionName(data *model.CDCData) string {
 	f, ok := data.Msg.(interface{ GetCollectionName() string })
 	if ok {
 		return f.GetCollectionName()
@@ -492,7 +498,7 @@ func (c *CdcWriterTemplate) collectionName(data *model.CDCData) string {
 	return ""
 }
 
-func (c *CdcWriterTemplate) partitionName(data *model.CDCData) string {
+func (c *CDCWriterTemplate) partitionName(data *model.CDCData) string {
 	f, ok := data.Msg.(interface{ GetPartitionName() string })
 	if ok {
 		return f.GetPartitionName()
@@ -500,7 +506,7 @@ func (c *CdcWriterTemplate) partitionName(data *model.CDCData) string {
 	return ""
 }
 
-func (c *CdcWriterTemplate) fail(msg string, err error, data *model.CDCData,
+func (c *CDCWriterTemplate) fail(msg string, err error, data *model.CDCData,
 	callback WriteCallback, field ...zap.Field) {
 
 	log.Warn(msg, append(field,
@@ -511,7 +517,7 @@ func (c *CdcWriterTemplate) fail(msg string, err error, data *model.CDCData,
 	c.errProtect.Inc()
 }
 
-func (c *CdcWriterTemplate) success(collectionID int64, collectionName string, data *model.CDCData, callback WriteCallback, positionFunc NotifyCollectionPositionChangeFunc) {
+func (c *CDCWriterTemplate) success(collectionID int64, collectionName string, data *model.CDCData, callback WriteCallback, positionFunc NotifyCollectionPositionChangeFunc) {
 	position := data.Msg.Position()
 	kd := &commonpb.KeyDataPair{
 		Key:  position.ChannelName,
@@ -528,20 +534,20 @@ func (c *CdcWriterTemplate) success(collectionID int64, collectionName string, d
 	}
 }
 
-func (c *CdcWriterTemplate) checkBufferSize() {
+func (c *CDCWriterTemplate) checkBufferSize() {
 	if c.currentBufferSize >= c.bufferConfig.Size {
 		c.clearBufferFunc()
 	}
 }
 
-func (c *CdcWriterTemplate) clearBufferFunc() {
+func (c *CDCWriterTemplate) clearBufferFunc() {
 	// no copy, is a shallow copy
 	c.bufferDataChan <- c.bufferData[:]
 	c.bufferData = []lo.Tuple2[*model.CDCData, WriteCallback]{}
 	c.currentBufferSize = 0
 }
 
-func (c *CdcWriterTemplate) isSupportType(fieldType entity.FieldType) bool {
+func (c *CDCWriterTemplate) isSupportType(fieldType entity.FieldType) bool {
 	return fieldType == entity.FieldTypeBool ||
 		fieldType == entity.FieldTypeInt8 ||
 		fieldType == entity.FieldTypeInt16 ||
@@ -555,7 +561,7 @@ func (c *CdcWriterTemplate) isSupportType(fieldType entity.FieldType) bool {
 		fieldType == entity.FieldTypeFloatVector
 }
 
-func (c *CdcWriterTemplate) preCombineColumn(a []entity.Column, b []entity.Column) error {
+func (c *CDCWriterTemplate) preCombineColumn(a []entity.Column, b []entity.Column) error {
 	for i := range a {
 		if a[i].Type() != b[i].Type() || !c.isSupportType(b[i].Type()) {
 			log.Warn("fail to combine the column",
@@ -567,7 +573,7 @@ func (c *CdcWriterTemplate) preCombineColumn(a []entity.Column, b []entity.Colum
 }
 
 // combineColumn the b will be added to a. before execute the method, MUST execute the preCombineColumn
-func (c *CdcWriterTemplate) combineColumn(a []entity.Column, b []entity.Column) {
+func (c *CDCWriterTemplate) combineColumn(a []entity.Column, b []entity.Column) {
 	for i := range a {
 		var values []interface{}
 		switch columnValue := b[i].(type) {

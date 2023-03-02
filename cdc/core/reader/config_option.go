@@ -68,3 +68,11 @@ func ChanLenOption(l int) config.Option[*MilvusCollectionReader] {
 		}
 	})
 }
+
+func FactoryCreatorOption(f FactoryCreator) config.Option[*MilvusCollectionReader] {
+	return config.OptionFunc[*MilvusCollectionReader](func(object *MilvusCollectionReader) {
+		if f != nil {
+			object.factoryCreator = f
+		}
+	})
+}

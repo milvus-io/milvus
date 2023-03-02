@@ -25,12 +25,12 @@ import (
 	"go.uber.org/zap"
 )
 
-const (
-	EtcdOpTimeout   = 5 * time.Second
-	EtcdOpRetryTime = 5
+var (
+	EtcdOpTimeout        = 5 * time.Second
+	EtcdOpRetryTime uint = 5
 )
 
-//go:generate mockery --name=KVApi --filename=kv_api_mock.go --output=../mocks
+//go:generate mockery --name=KVApi --filename=kv_api_mock.go --output=../mocks --with-expecter
 type KVApi interface {
 	clientv3.KV
 	clientv3.Watcher

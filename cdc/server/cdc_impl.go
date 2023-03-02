@@ -326,7 +326,7 @@ func (e *MetaCDC) newCdcTask(info *meta.TaskInfo) (*CDCTask, error) {
 		}
 
 		cacheConfig := info.WriterCacheConfig
-		writer := cdcwriter.NewCdcWriterTemplate(cdcwriter.HandlerOption(dataHandler),
+		writer := cdcwriter.NewCDCWriterTemplate(cdcwriter.HandlerOption(dataHandler),
 			cdcwriter.BufferOption(time.Duration(cacheConfig.Period)*time.Second,
 				int64(cacheConfig.Size), writeCallback.UpdateTaskCollectionPosition))
 		return writer, nil

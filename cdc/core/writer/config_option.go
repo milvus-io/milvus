@@ -55,20 +55,28 @@ func IgnorePartitionOption(ignore bool) config.Option[*MilvusDataHandler] {
 	})
 }
 
-func HandlerOption(handler CDCDataHandler) config.Option[*CdcWriterTemplate] {
-	return config.OptionFunc[*CdcWriterTemplate](func(object *CdcWriterTemplate) {
+func MilvusFactoryOption(f MilvusClientFactory) config.Option[*MilvusDataHandler] {
+	return config.OptionFunc[*MilvusDataHandler](func(object *MilvusDataHandler) {
+		if f != nil {
+			object.factory = f
+		}
+	})
+}
+
+func HandlerOption(handler CDCDataHandler) config.Option[*CDCWriterTemplate] {
+	return config.OptionFunc[*CDCWriterTemplate](func(object *CDCWriterTemplate) {
 		object.handler = handler
 	})
 }
 
-func NoBufferOption() config.Option[*CdcWriterTemplate] {
-	return config.OptionFunc[*CdcWriterTemplate](func(object *CdcWriterTemplate) {
+func NoBufferOption() config.Option[*CDCWriterTemplate] {
+	return config.OptionFunc[*CDCWriterTemplate](func(object *CDCWriterTemplate) {
 		object.bufferConfig = NoBufferConfig
 	})
 }
 
-func BufferOption(period time.Duration, size int64, positionFunc NotifyCollectionPositionChangeFunc) config.Option[*CdcWriterTemplate] {
-	return config.OptionFunc[*CdcWriterTemplate](func(object *CdcWriterTemplate) {
+func BufferOption(period time.Duration, size int64, positionFunc NotifyCollectionPositionChangeFunc) config.Option[*CDCWriterTemplate] {
+	return config.OptionFunc[*CDCWriterTemplate](func(object *CDCWriterTemplate) {
 		if period > 0 {
 			object.bufferConfig.Period = period
 		}
@@ -79,8 +87,8 @@ func BufferOption(period time.Duration, size int64, positionFunc NotifyCollectio
 	})
 }
 
-func ErrorProtectOption(per int32, unit time.Duration) config.Option[*CdcWriterTemplate] {
-	return config.OptionFunc[*CdcWriterTemplate](func(object *CdcWriterTemplate) {
+func ErrorProtectOption(per int32, unit time.Duration) config.Option[*CDCWriterTemplate] {
+	return config.OptionFunc[*CDCWriterTemplate](func(object *CDCWriterTemplate) {
 		object.errProtect = NewErrorProtect(per, unit)
 	})
 }

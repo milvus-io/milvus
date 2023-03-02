@@ -67,11 +67,10 @@ type CollectionInfo struct {
 	StartPositions             []*commonpb.KeyDataPair   `protobuf:"bytes,11,rep,name=start_positions,json=startPositions,proto3" json:"start_positions,omitempty"`
 	ConsistencyLevel           commonpb.ConsistencyLevel `protobuf:"varint,12,opt,name=consistency_level,json=consistencyLevel,proto3,enum=milvus.proto.common.ConsistencyLevel" json:"consistency_level,omitempty"`
 	State                      CollectionState           `protobuf:"varint,13,opt,name=state,proto3,enum=milvus.proto.etcd.CollectionState" json:"state,omitempty"`
-	//State                      CollectionState           `protobuf:"varint,13,opt,name=state,proto3" json:"state,omitempty"`
-	Properties           []*commonpb.KeyValuePair `protobuf:"bytes,14,rep,name=properties,proto3" json:"properties,omitempty"`
-	XXX_NoUnkeyedLiteral struct{}                 `json:"-"`
-	XXX_unrecognized     []byte                   `json:"-"`
-	XXX_sizecache        int32                    `json:"-"`
+	Properties                 []*commonpb.KeyValuePair  `protobuf:"bytes,14,rep,name=properties,proto3" json:"properties,omitempty"`
+	XXX_NoUnkeyedLiteral       struct{}                  `json:"-"`
+	XXX_unrecognized           []byte                    `json:"-"`
+	XXX_sizecache              int32                     `json:"-"`
 }
 
 func (m *CollectionInfo) Reset()         { *m = CollectionInfo{} }

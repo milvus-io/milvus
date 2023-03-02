@@ -30,6 +30,6 @@ func (value *Value[T]) Store(t T) {
 	value.v.Store(t)
 }
 
-func (value *Value[T]) name(old T, new T) {
-	value.v.CompareAndSwap(old, new)
+func (value *Value[T]) CompareAndSwap(old T, new T) bool {
+	return value.v.CompareAndSwap(old, new)
 }

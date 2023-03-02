@@ -75,6 +75,7 @@ type MsgPack struct {
 type RepackFunc func(msgs []TsMsg, hashKeys [][]int32) (map[int32]*MsgPack, error)
 
 // MsgStream is an interface that can be used to produce and consume message on message queue
+//go:generate mockery --name=MsgStream --filename=msg_stream_mock.go --output=../../mocks --with-expecter
 type MsgStream interface {
 	util.CDCMark
 	Close()
@@ -92,6 +93,7 @@ type MsgStream interface {
 	GetLatestMsgID(channel string) (MessageID, error)
 }
 
+//go:generate mockery --name=Factory --filename=factory_mock.go --output=../../mocks --with-expecter
 type Factory interface {
 	util.CDCMark
 	NewMsgStream(ctx context.Context) (MsgStream, error)

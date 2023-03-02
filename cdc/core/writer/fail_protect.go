@@ -18,8 +18,9 @@ package writer
 
 import (
 	"fmt"
-	"sync/atomic"
 	"time"
+
+	"github.com/milvus-io/milvus/cdc/core/util"
 )
 
 var FastFail = func() *ErrorProtect {
@@ -30,7 +31,7 @@ var FastFail = func() *ErrorProtect {
 type ErrorProtect struct {
 	per     int32
 	unit    time.Duration
-	current int32
+	current util.Value[int32]
 	ticker  *time.Ticker
 	c       chan struct{}
 }
@@ -42,6 +43,7 @@ func NewErrorProtect(per int32, unit time.Duration) *ErrorProtect {
 		ticker: time.NewTicker(unit),
 		c:      make(chan struct{}),
 	}
+	protect.current.Store(0)
 	protect.startTicker()
 
 	return protect
@@ -55,7 +57,7 @@ func (e *ErrorProtect) startTicker() {
 		for {
 			select {
 			case <-e.ticker.C:
-				atomic.StoreInt32(&e.current, 0)
+				e.current.Store(0)
 			case <-e.c:
 				return
 			}
@@ -73,8 +75,15 @@ func (e *ErrorProtect) close() {
 }
 
 func (e *ErrorProtect) Inc() {
-	atomic.AddInt32(&e.current, 1)
-	if e.current >= e.per {
+	for {
+		old := e.current.Load()
+		ok := e.current.CompareAndSwap(old, old+1)
+		if ok {
+			break
+		}
+	}
+
+	if e.current.Load() >= e.per {
 		e.close()
 	}
 }
@@ -84,5 +93,5 @@ func (e *ErrorProtect) Chan() <-chan struct{} {
 }
 
 func (e *ErrorProtect) Info() string {
-	return fmt.Sprintf("current: %d, per: %d, unit: %s", e.current, e.per, e.unit.String())
+	return fmt.Sprintf("current: %d, per: %d, unit: %s", e.current.Load(), e.per, e.unit.String())
 }

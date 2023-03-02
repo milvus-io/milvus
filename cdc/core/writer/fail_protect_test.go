@@ -44,7 +44,7 @@ func TestErrorProtect(t *testing.T) {
 		assert.Fail(t, "should trigger err protect")
 	case <-time.Tick(1500 * time.Millisecond):
 	}
-	assert.Equal(t, int32(0), protect.current)
+	assert.Equal(t, int32(0), protect.current.Load())
 	go func() {
 		for i := 0; i < 20; i++ {
 			protect.Inc()

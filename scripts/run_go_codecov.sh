@@ -40,6 +40,22 @@ for d in $(go list ./internal/... | grep -v -e vendor -e kafka -e planparserv2/g
         rm profile.out
     fi
 done
+
+function go_test() {
+    pushd $1
+    for d in $(go list ./... | grep -v -e mocks); do
+        go test -race ${APPLE_SILICON_FLAG} -v -coverpkg=./... -coverprofile=profile.out -covermode=atomic "$d"
+        if [ -f profile.out ]; then
+            grep -v mocks profile.out | sed '1d' >> ${FILE_COVERAGE_INFO}
+            rm profile.out
+        fi
+    done
+    popd
+}
+
+go_test ./cdc/core
+go_test ./cdc/server
+
 endTime=`date +%s`
 
 echo "Total time for go unittest:" $(($endTime-$beginTime)) "s"
