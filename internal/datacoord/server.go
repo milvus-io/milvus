@@ -416,6 +416,16 @@ func (s *Server) initGarbageCollection(cli storage.ChunkManager) {
 		checkInterval:    Params.DataCoordCfg.GCInterval,
 		missingTolerance: Params.DataCoordCfg.GCMissingTolerance,
 		dropTolerance:    Params.DataCoordCfg.GCDropTolerance,
+		collValidator: func(collID int64) bool {
+			resp, err := s.rootCoordClient.DescribeCollectionInternal(context.Background(), &milvuspb.DescribeCollectionRequest{
+				Base:         commonpbutil.NewMsgBase(),
+				CollectionID: collID,
+			})
+			if err != nil {
+				log.Warn("failed to check collection id", zap.Int64("collID", collID), zap.Error(err))
+			}
+			return resp.GetStatus().GetErrorCode() == commonpb.ErrorCode_Success
+		},
 	})
 }
 
