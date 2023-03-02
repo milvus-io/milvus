@@ -347,8 +347,8 @@ def gen_json_files_for_bulk_insert(data, schema, data_dir, **kwargs):
     nb = kwargs.get("nb", ct.default_nb)
     dim = kwargs.get("dim", ct.default_dim)
     fields_name = [field.name for field in schema.fields]
-    file_name = "bulk_insert_data_source.json"
-    files = ["bulk_insert_data_source.json"]
+    file_name = f"bulk_insert_data_source_dim_{dim}_nb_{nb}.json"
+    files = [file_name]
     data_source = os.path.join(data_dir, file_name)
     with open(data_source, "w") as f:
         f.write("{")

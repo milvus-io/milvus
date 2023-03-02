@@ -148,7 +148,8 @@ class TestChaos(TestChaosBase):
         self.prepare_bulk_insert(file_type=file_type, nb=nb, dim=int(dim))
         cc.start_monitor_threads(self.health_checkers)
         # wait 600s
-        sleep(constants.WAIT_PER_OP * 30)
+        while self.health_checkers[Op.bulk_insert].total() <= 10:
+            sleep(constants.WAIT_PER_OP)
         assert_statistic(self.health_checkers)
 
         assert_expectations()
