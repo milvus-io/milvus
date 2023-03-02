@@ -28,7 +28,9 @@ template <typename T>
 struct TermExprImpl : TermExpr {
     const std::vector<T> terms_;
 
-    TermExprImpl(const FieldId field_id, const DataType data_type, const std::vector<T>& terms)
+    TermExprImpl(const FieldId field_id,
+                 const DataType data_type,
+                 const std::vector<T>& terms)
         : TermExpr(field_id, data_type), terms_(terms) {
     }
 };
@@ -54,7 +56,10 @@ template <typename T>
 struct UnaryRangeExprImpl : UnaryRangeExpr {
     const T value_;
 
-    UnaryRangeExprImpl(const FieldId field_id, const DataType data_type, const OpType op_type, const T value)
+    UnaryRangeExprImpl(const FieldId field_id,
+                       const DataType data_type,
+                       const OpType op_type,
+                       const T value)
         : UnaryRangeExpr(field_id, data_type, op_type), value_(value) {
     }
 };
@@ -70,7 +75,8 @@ struct BinaryRangeExprImpl : BinaryRangeExpr {
                         const bool upper_inclusive,
                         const T lower_value,
                         const T upper_value)
-        : BinaryRangeExpr(field_id, data_type, lower_inclusive, upper_inclusive),
+        : BinaryRangeExpr(
+              field_id, data_type, lower_inclusive, upper_inclusive),
           lower_value_(lower_value),
           upper_value_(upper_value) {
     }

@@ -24,13 +24,16 @@ extern "C" {
 typedef void* CLoadIndexInfo;
 
 CStatus
-NewLoadIndexInfo(CLoadIndexInfo* c_load_index_info, CStorageConfig c_storage_config);
+NewLoadIndexInfo(CLoadIndexInfo* c_load_index_info,
+                 CStorageConfig c_storage_config);
 
 void
 DeleteLoadIndexInfo(CLoadIndexInfo c_load_index_info);
 
 CStatus
-AppendIndexParam(CLoadIndexInfo c_load_index_info, const char* index_key, const char* index_value);
+AppendIndexParam(CLoadIndexInfo c_load_index_info,
+                 const char* index_key,
+                 const char* index_value);
 
 CStatus
 AppendFieldInfo(CLoadIndexInfo c_load_index_info,
@@ -41,7 +44,10 @@ AppendFieldInfo(CLoadIndexInfo c_load_index_info,
                 enum CDataType field_type);
 
 CStatus
-AppendIndexInfo(CLoadIndexInfo c_load_index_info, int64_t index_id, int64_t build_id, int64_t version);
+AppendIndexInfo(CLoadIndexInfo c_load_index_info,
+                int64_t index_id,
+                int64_t build_id,
+                int64_t version);
 
 CStatus
 AppendIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set);

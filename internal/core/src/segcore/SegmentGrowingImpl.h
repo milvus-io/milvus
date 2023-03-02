@@ -53,7 +53,10 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
     // TODO: add id into delete log, possibly bitmap
     Status
-    Delete(int64_t reserverd_offset, int64_t size, const IdArray* pks, const Timestamp* timestamps) override;
+    Delete(int64_t reserved_offset,
+           int64_t size,
+           const IdArray* pks,
+           const Timestamp* timestamps) override;
 
     int64_t
     GetMemoryUsageInBytes() const override;
@@ -111,7 +114,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
     // deprecated
     const index::IndexBase*
     chunk_index_impl(FieldId field_id, int64_t chunk_id) const final {
-        return indexing_record_.get_field_indexing(field_id).get_chunk_indexing(chunk_id);
+        return indexing_record_.get_field_indexing(field_id).get_chunk_indexing(
+            chunk_id);
     }
 
     int64_t
@@ -142,7 +146,10 @@ class SegmentGrowingImpl : public SegmentGrowing {
     // for scalar vectors
     template <typename T>
     void
-    bulk_subscript_impl(const VectorBase& vec_raw, const int64_t* seg_offsets, int64_t count, void* output_raw) const;
+    bulk_subscript_impl(const VectorBase& vec_raw,
+                        const int64_t* seg_offsets,
+                        int64_t count,
+                        void* output_raw) const;
 
     template <typename T>
     void
@@ -153,16 +160,25 @@ class SegmentGrowingImpl : public SegmentGrowing {
                         void* output_raw) const;
 
     void
-    bulk_subscript(SystemFieldType system_type, const int64_t* seg_offsets, int64_t count, void* output) const override;
+    bulk_subscript(SystemFieldType system_type,
+                   const int64_t* seg_offsets,
+                   int64_t count,
+                   void* output) const override;
 
     std::unique_ptr<DataArray>
-    bulk_subscript(FieldId field_id, const int64_t* seg_offsets, int64_t count) const override;
+    bulk_subscript(FieldId field_id,
+                   const int64_t* seg_offsets,
+                   int64_t count) const override;
 
  public:
     friend std::unique_ptr<SegmentGrowing>
-    CreateGrowingSegment(SchemaPtr schema, const SegcoreConfig& segcore_config, int64_t segment_id);
+    CreateGrowingSegment(SchemaPtr schema,
+                         const SegcoreConfig& segcore_config,
+                         int64_t segment_id);
 
-    explicit SegmentGrowingImpl(SchemaPtr schema, const SegcoreConfig& segcore_config, int64_t segment_id)
+    explicit SegmentGrowingImpl(SchemaPtr schema,
+                                const SegcoreConfig& segcore_config,
+                                int64_t segment_id)
         : segcore_config_(segcore_config),
           schema_(std::move(schema)),
           insert_record_(*schema_, segcore_config.get_chunk_rows()),
@@ -171,7 +187,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
     void
-    mask_with_timestamps(BitsetType& bitset_chunk, Timestamp timestamp) const override;
+    mask_with_timestamps(BitsetType& bitset_chunk,
+                         Timestamp timestamp) const override;
 
     void
     vector_search(SearchInfo& search_info,
@@ -183,7 +200,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
  public:
     void
-    mask_with_delete(BitsetType& bitset, int64_t ins_barrier, Timestamp timestamp) const override;
+    mask_with_delete(BitsetType& bitset,
+                     int64_t ins_barrier,
+                     Timestamp timestamp) const override;
 
     std::pair<std::unique_ptr<IdArray>, std::vector<SegOffset>>
     search_ids(const IdArray& id_array, Timestamp timestamp) const override;
@@ -237,9 +256,10 @@ class SegmentGrowingImpl : public SegmentGrowing {
 };
 
 inline SegmentGrowingPtr
-CreateGrowingSegment(SchemaPtr schema,
-                     int64_t segment_id = -1,
-                     const SegcoreConfig& conf = SegcoreConfig::default_config()) {
+CreateGrowingSegment(
+    SchemaPtr schema,
+    int64_t segment_id = -1,
+    const SegcoreConfig& conf = SegcoreConfig::default_config()) {
     return std::make_unique<SegmentGrowingImpl>(schema, conf, segment_id);
 }
 

@@ -34,7 +34,9 @@ class IndexBase {
     Load(const BinarySet& binary_set, const Config& config = {}) = 0;
 
     virtual void
-    BuildWithRawData(size_t n, const void* values, const Config& config = {}) = 0;
+    BuildWithRawData(size_t n,
+                     const void* values,
+                     const Config& config = {}) = 0;
 
     virtual void
     BuildWithDataset(const DatasetPtr& dataset, const Config& config = {}) = 0;

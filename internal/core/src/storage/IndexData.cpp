@@ -78,11 +78,16 @@ IndexData::serialize_to_remote_file() {
     des_fix_part.start_timestamp = time_range_.first;
     des_fix_part.end_timestamp = time_range_.second;
     des_fix_part.data_type = milvus::proto::schema::DataType(data_type);
-    for (auto i = int8_t(EventType::DescriptorEvent); i < int8_t(EventType::EventTypeEnd); i++) {
-        des_event_data.post_header_lengths.push_back(GetEventFixPartSize(EventType(i)));
+    for (auto i = int8_t(EventType::DescriptorEvent);
+         i < int8_t(EventType::EventTypeEnd);
+         i++) {
+        des_event_data.post_header_lengths.push_back(
+            GetEventFixPartSize(EventType(i)));
     }
-    des_event_data.extras[ORIGIN_SIZE_KEY] = std::to_string(field_data_->get_data_size());
-    des_event_data.extras[INDEX_BUILD_ID_KEY] = std::to_string(index_meta_->build_id);
+    des_event_data.extras[ORIGIN_SIZE_KEY] =
+        std::to_string(field_data_->get_data_size());
+    des_event_data.extras[INDEX_BUILD_ID_KEY] =
+        std::to_string(index_meta_->build_id);
 
     auto& des_event_header = descriptor_event.event_header;
     // TODO :: set timestamp
@@ -91,7 +96,9 @@ IndexData::serialize_to_remote_file() {
     // serialize descriptor event data
     auto des_event_bytes = descriptor_event.Serialize();
 
-    des_event_bytes.insert(des_event_bytes.end(), index_event_bytes.begin(), index_event_bytes.end());
+    des_event_bytes.insert(des_event_bytes.end(),
+                           index_event_bytes.begin(),
+                           index_event_bytes.end());
 
     return des_event_bytes;
 }

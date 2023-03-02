@@ -81,7 +81,9 @@ struct BaseEventData {
 
     BaseEventData() {
     }
-    explicit BaseEventData(PayloadInputStream* input, int event_length, DataType data_type);
+    explicit BaseEventData(PayloadInputStream* input,
+                           int event_length,
+                           DataType data_type);
 
     std::vector<uint8_t>
     Serialize();
@@ -118,7 +120,7 @@ using IndexEventData = BaseEventData;
 using DeleteEvent = BaseEvent;
 using DeleteEventData = BaseEventData;
 using CreateCollectionEvent = BaseEvent;
-using CreateColectionEventData = BaseEventData;
+using CreateCollectionEventData = BaseEventData;
 using CreatePartitionEvent = BaseEvent;
 using CreatePartitionEventData = BaseEventData;
 using DropCollectionEvent = BaseEvent;

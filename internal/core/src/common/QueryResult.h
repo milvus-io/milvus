@@ -38,7 +38,8 @@ struct SearchResult {
         if (topk_per_nq_prefix_sum_.empty()) {
             return 0;
         }
-        AssertInfo(topk_per_nq_prefix_sum_.size() == total_nq_ + 1, "wrong topk_per_nq_prefix_sum_ size");
+        AssertInfo(topk_per_nq_prefix_sum_.size() == total_nq_ + 1,
+                   "wrong topk_per_nq_prefix_sum_ size");
         return topk_per_nq_prefix_sum_[total_nq_];
     }
 

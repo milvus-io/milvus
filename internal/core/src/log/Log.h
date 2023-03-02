@@ -42,33 +42,44 @@
 
 // Use this macro whenever possible
 // Depends variables: context Context
-#define MLOG(level, module, error_code)                                                                                \
-    LOG(level) << " | " << VAR_REQUEST_ID << " | " << #level << " | " << VAR_COLLECTION_NAME << " | " << VAR_CLIENT_ID \
-               << " | " << VAR_CLIENT_TAG << " | " << VAR_CLIENT_IPPORT << " | " << VAR_THREAD_ID << " | "             \
-               << VAR_THREAD_START_TIMESTAMP << " | " << VAR_COMMAND_TAG << " | " << #module << " | " << error_code    \
-               << " | "
+#define MLOG(level, module, error_code)                                  \
+    LOG(level) << " | " << VAR_REQUEST_ID << " | " << #level << " | "    \
+               << VAR_COLLECTION_NAME << " | " << VAR_CLIENT_ID << " | " \
+               << VAR_CLIENT_TAG << " | " << VAR_CLIENT_IPPORT << " | "  \
+               << VAR_THREAD_ID << " | " << VAR_THREAD_START_TIMESTAMP   \
+               << " | " << VAR_COMMAND_TAG << " | " << #module << " | "  \
+               << error_code << " | "
 
 // Use in some background process only
-#define MLOG_(level, module, error_code)                                                 \
-    LOG(level) << " | "                                                                  \
-               << ""                                                                     \
-               << " | " << #level << " | "                                               \
-               << ""                                                                     \
-               << " | "                                                                  \
-               << ""                                                                     \
-               << " | "                                                                  \
-               << ""                                                                     \
-               << " | "                                                                  \
-               << ""                                                                     \
-               << " | " << VAR_THREAD_ID << " | " << VAR_THREAD_START_TIMESTAMP << " | " \
-               << ""                                                                     \
+#define MLOG_(level, module, error_code)              \
+    LOG(level) << " | "                               \
+               << ""                                  \
+               << " | " << #level << " | "            \
+               << ""                                  \
+               << " | "                               \
+               << ""                                  \
+               << " | "                               \
+               << ""                                  \
+               << " | "                               \
+               << ""                                  \
+               << " | " << VAR_THREAD_ID << " | "     \
+               << VAR_THREAD_START_TIMESTAMP << " | " \
+               << ""                                  \
                << " | " << #module << " | " << error_code << " | "
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 #define SEGCORE_MODULE_NAME "SEGCORE"
 #define SEGCORE_MODULE_CLASS_FUNCTION \
-    LogOut("[%s][%s::%s][%s] ", SEGCORE_MODULE_NAME, (typeid(*this).name()), __FUNCTION__, GetThreadName().c_str())
-#define SEGCORE_MODULE_FUNCTION LogOut("[%s][%s][%s] ", SEGCORE_MODULE_NAME, __FUNCTION__, GetThreadName().c_str())
+    LogOut("[%s][%s::%s][%s] ",       \
+           SEGCORE_MODULE_NAME,       \
+           (typeid(*this).name()),    \
+           __FUNCTION__,              \
+           GetThreadName().c_str())
+#define SEGCORE_MODULE_FUNCTION \
+    LogOut("[%s][%s][%s] ",     \
+           SEGCORE_MODULE_NAME, \
+           __FUNCTION__,        \
+           GetThreadName().c_str())
 
 #define LOG_SEGCORE_TRACE_C LOG(TRACE) << SEGCORE_MODULE_CLASS_FUNCTION
 #define LOG_SEGCORE_DEBUG_C LOG(DEBUG) << SEGCORE_MODULE_CLASS_FUNCTION
@@ -87,8 +98,16 @@
 /////////////////////////////////////////////////////////////////////////////////////////////////
 #define SERVER_MODULE_NAME "SERVER"
 #define SERVER_MODULE_CLASS_FUNCTION \
-    LogOut("[%s][%s::%s][%s] ", SERVER_MODULE_NAME, (typeid(*this).name()), __FUNCTION__, GetThreadName().c_str())
-#define SERVER_MODULE_FUNCTION LogOut("[%s][%s][%s] ", SERVER_MODULE_NAME, __FUNCTION__, GetThreadName().c_str())
+    LogOut("[%s][%s::%s][%s] ",      \
+           SERVER_MODULE_NAME,       \
+           (typeid(*this).name()),   \
+           __FUNCTION__,             \
+           GetThreadName().c_str())
+#define SERVER_MODULE_FUNCTION \
+    LogOut("[%s][%s][%s] ",    \
+           SERVER_MODULE_NAME, \
+           __FUNCTION__,       \
+           GetThreadName().c_str())
 
 #define LOG_SERVER_TRACE_C LOG(TRACE) << SERVER_MODULE_CLASS_FUNCTION
 #define LOG_SERVER_DEBUG_C LOG(DEBUG) << SERVER_MODULE_CLASS_FUNCTION

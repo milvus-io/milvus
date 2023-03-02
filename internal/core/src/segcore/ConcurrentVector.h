@@ -81,7 +81,8 @@ class ThreadSafeVector {
 
 class VectorBase {
  public:
-    explicit VectorBase(int64_t size_per_chunk) : size_per_chunk_(size_per_chunk) {
+    explicit VectorBase(int64_t size_per_chunk)
+        : size_per_chunk_(size_per_chunk) {
     }
     virtual ~VectorBase() = default;
 
@@ -89,16 +90,23 @@ class VectorBase {
     grow_to_at_least(int64_t element_count) = 0;
 
     virtual void
-    set_data_raw(ssize_t element_offset, const void* source, ssize_t element_count) = 0;
+    set_data_raw(ssize_t element_offset,
+                 const void* source,
+                 ssize_t element_count) = 0;
 
     void
-    set_data_raw(ssize_t element_offset, ssize_t element_count, const DataArray* data, const FieldMeta& field_meta);
+    set_data_raw(ssize_t element_offset,
+                 ssize_t element_count,
+                 const DataArray* data,
+                 const FieldMeta& field_meta);
 
     virtual void
     fill_chunk_data(const void* source, ssize_t element_count) = 0;
 
     void
-    fill_chunk_data(ssize_t element_count, const DataArray* data, const FieldMeta& field_meta);
+    fill_chunk_data(ssize_t element_count,
+                    const DataArray* data,
+                    const FieldMeta& field_meta);
 
     virtual SpanBase
     get_span_base(int64_t chunk_id) const = 0;
@@ -135,7 +143,11 @@ class ConcurrentVectorImpl : public VectorBase {
     operator=(const ConcurrentVectorImpl&) = delete;
 
     using TraitType =
-        std::conditional_t<is_scalar, Type, std::conditional_t<std::is_same_v<Type, float>, FloatVector, BinaryVector>>;
+        std::conditional_t<is_scalar,
+                           Type,
+                           std::conditional_t<std::is_same_v<Type, float>,
+                                              FloatVector,
+                                              BinaryVector>>;
 
  public:
     explicit ConcurrentVectorImpl(ssize_t dim, int64_t size_per_chunk)
@@ -160,11 +172,13 @@ class ConcurrentVectorImpl : public VectorBase {
         auto& chunk = get_chunk(chunk_id);
         if constexpr (is_scalar) {
             return Span<TraitType>(chunk.data(), chunk.size());
-        } else if constexpr (std::is_same_v<Type, int64_t> || std::is_same_v<Type, int>) {
+        } else if constexpr (std::is_same_v<Type, int64_t> ||
+                             std::is_same_v<Type, int>) {
             // only for testing
             PanicInfo("unimplemented");
         } else {
-            static_assert(std::is_same_v<typename TraitType::embedded_type, Type>);
+            static_assert(
+                std::is_same_v<typename TraitType::embedded_type, Type>);
             return Span<TraitType>(chunk.data(), chunk.size(), Dim);
         }
     }
@@ -185,23 +199,29 @@ class ConcurrentVectorImpl : public VectorBase {
     }
 
     void
-    set_data_raw(ssize_t element_offset, const void* source, ssize_t element_count) override {
+    set_data_raw(ssize_t element_offset,
+                 const void* source,
+                 ssize_t element_count) override {
         if (element_count == 0) {
             return;
         }
         this->grow_to_at_least(element_offset + element_count);
-        set_data(element_offset, static_cast<const Type*>(source), element_count);
+        set_data(
+            element_offset, static_cast<const Type*>(source), element_count);
     }
 
     void
-    set_data(ssize_t element_offset, const Type* source, ssize_t element_count) {
+    set_data(ssize_t element_offset,
+             const Type* source,
+             ssize_t element_count) {
         auto chunk_id = element_offset / size_per_chunk_;
         auto chunk_offset = element_offset % size_per_chunk_;
         ssize_t source_offset = 0;
         // first partition:
         if (chunk_offset + element_count <= size_per_chunk_) {
             // only first
-            fill_chunk(chunk_id, chunk_offset, element_count, source, source_offset);
+            fill_chunk(
+                chunk_id, chunk_offset, element_count, source, source_offset);
             return;
         }
 
@@ -280,17 +300,25 @@ class ConcurrentVectorImpl : public VectorBase {
 
  private:
     void
-    fill_chunk(
-        ssize_t chunk_id, ssize_t chunk_offset, ssize_t element_count, const Type* source, ssize_t source_offset) {
+    fill_chunk(ssize_t chunk_id,
+               ssize_t chunk_offset,
+               ssize_t element_count,
+               const Type* source,
+               ssize_t source_offset) {
         if (element_count <= 0) {
             return;
         }
         auto chunk_num = chunks_.size();
-        AssertInfo(chunk_id < chunk_num,
-                   fmt::format("chunk_id out of chunk num, chunk_id={}, chunk_num={}", chunk_id, chunk_num));
+        AssertInfo(
+            chunk_id < chunk_num,
+            fmt::format("chunk_id out of chunk num, chunk_id={}, chunk_num={}",
+                        chunk_id,
+                        chunk_num));
         Chunk& chunk = chunks_[chunk_id];
         auto ptr = chunk.data();
-        std::copy_n(source + source_offset * Dim, element_count * Dim, ptr + chunk_offset * Dim);
+        std::copy_n(source + source_offset * Dim,
+                    element_count * Dim,
+                    ptr + chunk_offset * Dim);
     }
 
     const ssize_t Dim;
@@ -304,20 +332,24 @@ class ConcurrentVector : public ConcurrentVectorImpl<Type, true> {
  public:
     static_assert(IsScalar<Type> || std::is_same_v<Type, PkType>);
     explicit ConcurrentVector(int64_t size_per_chunk)
-        : ConcurrentVectorImpl<Type, true>::ConcurrentVectorImpl(1, size_per_chunk) {
+        : ConcurrentVectorImpl<Type, true>::ConcurrentVectorImpl(
+              1, size_per_chunk) {
     }
 };
 
 template <>
-class ConcurrentVector<FloatVector> : public ConcurrentVectorImpl<float, false> {
+class ConcurrentVector<FloatVector>
+    : public ConcurrentVectorImpl<float, false> {
  public:
     ConcurrentVector(int64_t dim, int64_t size_per_chunk)
-        : ConcurrentVectorImpl<float, false>::ConcurrentVectorImpl(dim, size_per_chunk) {
+        : ConcurrentVectorImpl<float, false>::ConcurrentVectorImpl(
+              dim, size_per_chunk) {
     }
 };
 
 template <>
-class ConcurrentVector<BinaryVector> : public ConcurrentVectorImpl<uint8_t, false> {
+class ConcurrentVector<BinaryVector>
+    : public ConcurrentVectorImpl<uint8_t, false> {
  public:
     explicit ConcurrentVector(int64_t dim, int64_t size_per_chunk)
         : binary_dim_(dim), ConcurrentVectorImpl(dim / 8, size_per_chunk) {

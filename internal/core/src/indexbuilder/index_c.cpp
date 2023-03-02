@@ -39,18 +39,23 @@ CreateIndex(enum CDataType dtype,
         std::string remote_root_path(c_storage_config.remote_root_path);
         std::string storage_type(c_storage_config.storage_type);
         std::string iam_endpoint(c_storage_config.iam_endpoint);
-        auto storage_config = milvus::storage::StorageConfig{address,
-                                                             bucket_name,
-                                                             access_key,
-                                                             access_value,
-                                                             remote_root_path,
-                                                             storage_type,
-                                                             iam_endpoint,
-                                                             c_storage_config.useSSL,
-                                                             c_storage_config.useIAM};
+        auto storage_config =
+            milvus::storage::StorageConfig{address,
+                                           bucket_name,
+                                           access_key,
+                                           access_value,
+                                           remote_root_path,
+                                           storage_type,
+                                           iam_endpoint,
+                                           c_storage_config.useSSL,
+                                           c_storage_config.useIAM};
 
-        auto index = milvus::indexbuilder::IndexFactory::GetInstance().CreateIndex(
-            dtype, serialized_type_params, serialized_index_params, storage_config);
+        auto index =
+            milvus::indexbuilder::IndexFactory::GetInstance().CreateIndex(
+                dtype,
+                serialized_type_params,
+                serialized_index_params,
+                storage_config);
         *res_index = index.release();
         status.error_code = Success;
         status.error_msg = "";
@@ -66,7 +71,8 @@ DeleteIndex(CIndex index) {
     auto status = CStatus();
     try {
         AssertInfo(index, "failed to delete index, passed index was null");
-        auto cIndex = reinterpret_cast<milvus::indexbuilder::IndexCreatorBase*>(index);
+        auto cIndex =
+            reinterpret_cast<milvus::indexbuilder::IndexCreatorBase*>(index);
         delete cIndex;
         status.error_code = Success;
         status.error_msg = "";
@@ -78,12 +84,17 @@ DeleteIndex(CIndex index) {
 }
 
 CStatus
-BuildFloatVecIndex(CIndex index, int64_t float_value_num, const float* vectors) {
+BuildFloatVecIndex(CIndex index,
+                   int64_t float_value_num,
+                   const float* vectors) {
     auto status = CStatus();
     try {
-        AssertInfo(index, "failed to build float vector index, passed index was null");
-        auto real_index = reinterpret_cast<milvus::indexbuilder::IndexCreatorBase*>(index);
-        auto cIndex = dynamic_cast<milvus::indexbuilder::VecIndexCreator*>(real_index);
+        AssertInfo(index,
+                   "failed to build float vector index, passed index was null");
+        auto real_index =
+            reinterpret_cast<milvus::indexbuilder::IndexCreatorBase*>(index);
+        auto cIndex =
+            dynamic_cast<milvus::indexbuilder::VecIndexCreator*>(real_index);
         auto dim = cIndex->dim();
         auto row_nums = float_value_num / dim;
         auto ds = knowhere::GenDataSet(row_nums, dim, vectors);
@@ -101,9 +112,13 @@ CStatus
 BuildBinaryVecIndex(CIndex index, int64_t data_size, const uint8_t* vectors) {
     auto status = CStatus();
     try {
-        AssertInfo(index, "failed to build binary vector index, passed index was null");
-        auto real_index = reinterpret_cast<milvus::indexbuilder::IndexCreatorBase*>(index);
-        auto cIndex = dynamic_cast<milvus::indexbuilder::VecIndexCreator*>(real_index);
+        AssertInfo(
+            index,
+            "failed to build binary vector index, passed index was null");
+        auto real_index =
+            reinterpret_cast<milvus::indexbuilder::IndexCreatorBase*>(index);
+        auto cIndex =
+            dynamic_cast<milvus::indexbuilder::VecIndexCreator*>(real_index);
         auto dim = cIndex->dim();
         auto row_nums = (data_size * 8) / dim;
         auto ds = knowhere::GenDataSet(row_nums, dim, vectors);
@@ -126,9 +141,11 @@ CStatus
 BuildScalarIndex(CIndex c_index, int64_t size, const void* field_data) {
     auto status = CStatus();
     try {
-        AssertInfo(c_index, "failed to build scalar index, passed index was null");
+        AssertInfo(c_index,
+                   "failed to build scalar index, passed index was null");
 
-        auto real_index = reinterpret_cast<milvus::indexbuilder::IndexCreatorBase*>(c_index);
+        auto real_index =
+            reinterpret_cast<milvus::indexbuilder::IndexCreatorBase*>(c_index);
         const int64_t dim = 8;  // not important here
         auto dataset = knowhere::GenDataSet(size, dim, field_data);
         real_index->Build(dataset);
@@ -146,9 +163,13 @@ CStatus
 SerializeIndexToBinarySet(CIndex index, CBinarySet* c_binary_set) {
     auto status = CStatus();
     try {
-        AssertInfo(index, "failed to serialize index to binary set, passed index was null");
-        auto real_index = reinterpret_cast<milvus::indexbuilder::IndexCreatorBase*>(index);
-        auto binary = std::make_unique<knowhere::BinarySet>(real_index->Serialize());
+        AssertInfo(
+            index,
+            "failed to serialize index to binary set, passed index was null");
+        auto real_index =
+            reinterpret_cast<milvus::indexbuilder::IndexCreatorBase*>(index);
+        auto binary =
+            std::make_unique<knowhere::BinarySet>(real_index->Serialize());
         *c_binary_set = binary.release();
         status.error_code = Success;
         status.error_msg = "";
@@ -163,8 +184,11 @@ CStatus
 LoadIndexFromBinarySet(CIndex index, CBinarySet c_binary_set) {
     auto status = CStatus();
     try {
-        AssertInfo(index, "failed to load index from binary set, passed index was null");
-        auto real_index = reinterpret_cast<milvus::indexbuilder::IndexCreatorBase*>(index);
+        AssertInfo(
+            index,
+            "failed to load index from binary set, passed index was null");
+        auto real_index =
+            reinterpret_cast<milvus::indexbuilder::IndexCreatorBase*>(index);
         auto binary_set = reinterpret_cast<knowhere::BinarySet*>(c_binary_set);
         real_index->Load(*binary_set);
         status.error_code = Success;
@@ -180,9 +204,12 @@ CStatus
 CleanLocalData(CIndex index) {
     auto status = CStatus();
     try {
-        AssertInfo(index, "failed to build float vector index, passed index was null");
-        auto real_index = reinterpret_cast<milvus::indexbuilder::IndexCreatorBase*>(index);
-        auto cIndex = dynamic_cast<milvus::indexbuilder::VecIndexCreator*>(real_index);
+        AssertInfo(index,
+                   "failed to build float vector index, passed index was null");
+        auto real_index =
+            reinterpret_cast<milvus::indexbuilder::IndexCreatorBase*>(index);
+        auto cIndex =
+            dynamic_cast<milvus::indexbuilder::VecIndexCreator*>(real_index);
         cIndex->CleanLocalData();
         status.error_code = Success;
         status.error_msg = "";

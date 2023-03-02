@@ -42,13 +42,16 @@ extern Status
 ValidateStructuredIndexType(std::string& index_type);
 
 extern Status
-ValidateIndexParams(const milvus::json& index_params, int64_t dimension, const std::string& index_type);
+ValidateIndexParams(const milvus::json& index_params,
+                    int64_t dimension,
+                    const std::string& index_type);
 
 extern Status
 ValidateSegmentRowCount(int64_t segment_row_count);
 
 extern Status
-ValidateIndexMetricType(const std::string& metric_type, const std::string& index_type);
+ValidateIndexMetricType(const std::string& metric_type,
+                        const std::string& index_type);
 
 extern Status
 ValidateSearchMetricType(const std::string& metric_type, bool is_binary);

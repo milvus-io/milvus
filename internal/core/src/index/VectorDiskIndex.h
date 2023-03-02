@@ -49,13 +49,17 @@ class VectorDiskAnnIndex : public VectorIndex {
     }
 
     void
-    Load(const BinarySet& binary_set /* not used */, const Config& config = {}) override;
+    Load(const BinarySet& binary_set /* not used */,
+         const Config& config = {}) override;
 
     void
-    BuildWithDataset(const DatasetPtr& dataset, const Config& config = {}) override;
+    BuildWithDataset(const DatasetPtr& dataset,
+                     const Config& config = {}) override;
 
     std::unique_ptr<SearchResult>
-    Query(const DatasetPtr dataset, const SearchInfo& search_info, const BitsetView& bitset) override;
+    Query(const DatasetPtr dataset,
+          const SearchInfo& search_info,
+          const BitsetView& bitset) override;
 
     void
     CleanLocalData() override;

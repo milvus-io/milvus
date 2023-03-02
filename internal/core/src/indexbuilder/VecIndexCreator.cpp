@@ -30,8 +30,10 @@ VecIndexCreator::VecIndexCreator(DataType data_type,
     : data_type_(data_type) {
     proto::indexcgo::TypeParams type_params_;
     proto::indexcgo::IndexParams index_params_;
-    milvus::index::ParseFromString(type_params_, std::string(serialized_type_params));
-    milvus::index::ParseFromString(index_params_, std::string(serialized_index_params));
+    milvus::index::ParseFromString(type_params_,
+                                   std::string(serialized_type_params));
+    milvus::index::ParseFromString(index_params_,
+                                   std::string(serialized_index_params));
 
     for (auto i = 0; i < type_params_.params_size(); ++i) {
         const auto& param = type_params_.params(i);
@@ -54,12 +56,16 @@ VecIndexCreator::VecIndexCreator(DataType data_type,
     if (index::is_in_disk_list(index_info.index_type)) {
         // For now, only support diskann index
         file_manager = std::make_shared<storage::DiskFileManagerImpl>(
-            index::GetFieldDataMetaFromConfig(config_), index::GetIndexMetaFromConfig(config_), storage_config);
+            index::GetFieldDataMetaFromConfig(config_),
+            index::GetIndexMetaFromConfig(config_),
+            storage_config);
     }
 #endif
 
-    index_ = index::IndexFactory::GetInstance().CreateIndex(index_info, file_manager);
-    AssertInfo(index_ != nullptr, "[VecIndexCreator]Index is null after create index");
+    index_ = index::IndexFactory::GetInstance().CreateIndex(index_info,
+                                                            file_manager);
+    AssertInfo(index_ != nullptr,
+               "[VecIndexCreator]Index is null after create index");
 }
 
 int64_t
@@ -83,7 +89,9 @@ VecIndexCreator::Load(const milvus::BinarySet& binary_set) {
 }
 
 std::unique_ptr<SearchResult>
-VecIndexCreator::Query(const milvus::DatasetPtr& dataset, const SearchInfo& search_info, const BitsetView& bitset) {
+VecIndexCreator::Query(const milvus::DatasetPtr& dataset,
+                       const SearchInfo& search_info,
+                       const BitsetView& bitset) {
     auto vector_index = dynamic_cast<index::VectorIndex*>(index_.get());
     return vector_index->Query(dataset, search_info, bitset);
 }

@@ -20,7 +20,8 @@ namespace impl {
 // WILL BE USED BY GENERATOR UNDER suvlim/core_gen/
 class ExtractInfoPlanNodeVisitor : PlanNodeVisitor {
  public:
-    explicit ExtractInfoPlanNodeVisitor(ExtractedPlanInfo& plan_info) : plan_info_(plan_info) {
+    explicit ExtractInfoPlanNodeVisitor(ExtractedPlanInfo& plan_info)
+        : plan_info_(plan_info) {
     }
 
  private:

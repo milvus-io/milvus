@@ -30,9 +30,12 @@
 
 namespace milvus::index {
 
-VectorMemIndex::VectorMemIndex(const IndexType& index_type, const MetricType& metric_type, const IndexMode& index_mode)
+VectorMemIndex::VectorMemIndex(const IndexType& index_type,
+                               const MetricType& metric_type,
+                               const IndexMode& index_mode)
     : VectorIndex(index_type, index_mode, metric_type) {
-    AssertInfo(!is_unsupported(index_type, metric_type), index_type + " doesn't support metric: " + metric_type);
+    AssertInfo(!is_unsupported(index_type, metric_type),
+               index_type + " doesn't support metric: " + metric_type);
 
     index_ = knowhere::IndexFactory::Instance().Create(GetIndexType());
 }
@@ -42,7 +45,8 @@ VectorMemIndex::Serialize(const Config& config) {
     knowhere::BinarySet ret;
     auto stat = index_.Serialize(ret);
     if (stat != knowhere::Status::success)
-        PanicCodeInfo(ErrorCodeEnum::UnexpectedError, "failed to serialize index, " + MatchKnowhereError(stat));
+        PanicCodeInfo(ErrorCodeEnum::UnexpectedError,
+                      "failed to serialize index, " + MatchKnowhereError(stat));
     milvus::Disassemble(ret);
 
     return ret;
@@ -53,12 +57,15 @@ VectorMemIndex::Load(const BinarySet& binary_set, const Config& config) {
     milvus::Assemble(const_cast<BinarySet&>(binary_set));
     auto stat = index_.Deserialize(binary_set);
     if (stat != knowhere::Status::success)
-        PanicCodeInfo(ErrorCodeEnum::UnexpectedError, "failed to Deserialize index, " + MatchKnowhereError(stat));
+        PanicCodeInfo(
+            ErrorCodeEnum::UnexpectedError,
+            "failed to Deserialize index, " + MatchKnowhereError(stat));
     SetDim(index_.Dim());
 }
 
 void
-VectorMemIndex::BuildWithDataset(const DatasetPtr& dataset, const Config& config) {
+VectorMemIndex::BuildWithDataset(const DatasetPtr& dataset,
+                                 const Config& config) {
     knowhere::Json index_config;
     index_config.update(config);
 
@@ -67,13 +74,16 @@ VectorMemIndex::BuildWithDataset(const DatasetPtr& dataset, const Config& config
     knowhere::TimeRecorder rc("BuildWithoutIds", 1);
     auto stat = index_.Build(*dataset, index_config);
     if (stat != knowhere::Status::success)
-        PanicCodeInfo(ErrorCodeEnum::BuildIndexError, "failed to build index, " + MatchKnowhereError(stat));
+        PanicCodeInfo(ErrorCodeEnum::BuildIndexError,
+                      "failed to build index, " + MatchKnowhereError(stat));
     rc.ElapseFromBegin("Done");
     SetDim(index_.Dim());
 }
 
 std::unique_ptr<SearchResult>
-VectorMemIndex::Query(const DatasetPtr dataset, const SearchInfo& search_info, const BitsetView& bitset) {
+VectorMemIndex::Query(const DatasetPtr dataset,
+                      const SearchInfo& search_info,
+                      const BitsetView& bitset) {
     //    AssertInfo(GetMetricType() == search_info.metric_type_,
     //               "Metric type of field index isn't the same with search info");
 
@@ -87,18 +97,24 @@ VectorMemIndex::Query(const DatasetPtr dataset, const SearchInfo& search_info, c
         auto index_type = GetIndexType();
         if (CheckKeyInConfig(search_conf, RADIUS)) {
             if (CheckKeyInConfig(search_conf, RANGE_FILTER)) {
-                CheckRangeSearchParam(search_conf[RADIUS], search_conf[RANGE_FILTER], GetMetricType());
+                CheckRangeSearchParam(search_conf[RADIUS],
+                                      search_conf[RANGE_FILTER],
+                                      GetMetricType());
             }
             auto res = index_.RangeSearch(*dataset, search_conf, bitset);
             if (!res.has_value()) {
                 PanicCodeInfo(ErrorCodeEnum::UnexpectedError,
-                              "failed to range search, " + MatchKnowhereError(res.error()));
+                              "failed to range search, " +
+                                  MatchKnowhereError(res.error()));
             }
-            return SortRangeSearchResult(res.value(), topk, num_queries, GetMetricType());
+            return SortRangeSearchResult(
+                res.value(), topk, num_queries, GetMetricType());
         } else {
             auto res = index_.Search(*dataset, search_conf, bitset);
             if (!res.has_value()) {
-                PanicCodeInfo(ErrorCodeEnum::UnexpectedError, "failed to search, " + MatchKnowhereError(res.error()));
+                PanicCodeInfo(
+                    ErrorCodeEnum::UnexpectedError,
+                    "failed to search, " + MatchKnowhereError(res.error()));
             }
             return res.value();
         }

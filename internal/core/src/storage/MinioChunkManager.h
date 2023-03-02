@@ -51,13 +51,21 @@ class MinioChunkManager : public RemoteChunkManager {
     Size(const std::string& filepath);
 
     virtual uint64_t
-    Read(const std::string& filepath, uint64_t offset, void* buf, uint64_t len) {
-        throw NotImplementedException(GetName() + "Read with offset not implement");
+    Read(const std::string& filepath,
+         uint64_t offset,
+         void* buf,
+         uint64_t len) {
+        throw NotImplementedException(GetName() +
+                                      "Read with offset not implement");
     }
 
     virtual void
-    Write(const std::string& filepath, uint64_t offset, void* buf, uint64_t len) {
-        throw NotImplementedException(GetName() + "Write with offset not implement");
+    Write(const std::string& filepath,
+          uint64_t offset,
+          void* buf,
+          uint64_t len) {
+        throw NotImplementedException(GetName() +
+                                      "Write with offset not implement");
     }
 
     virtual uint64_t
@@ -101,15 +109,24 @@ class MinioChunkManager : public RemoteChunkManager {
 
  private:
     bool
-    ObjectExists(const std::string& bucket_name, const std::string& object_name);
+    ObjectExists(const std::string& bucket_name,
+                 const std::string& object_name);
     int64_t
-    GetObjectSize(const std::string& bucket_name, const std::string& object_name);
+    GetObjectSize(const std::string& bucket_name,
+                  const std::string& object_name);
     bool
-    DeleteObject(const std::string& bucket_name, const std::string& object_name);
+    DeleteObject(const std::string& bucket_name,
+                 const std::string& object_name);
     bool
-    PutObjectBuffer(const std::string& bucket_name, const std::string& object_name, void* buf, uint64_t size);
+    PutObjectBuffer(const std::string& bucket_name,
+                    const std::string& object_name,
+                    void* buf,
+                    uint64_t size);
     uint64_t
-    GetObjectBuffer(const std::string& bucket_name, const std::string& object_name, void* buf, uint64_t size);
+    GetObjectBuffer(const std::string& bucket_name,
+                    const std::string& object_name,
+                    void* buf,
+                    uint64_t size);
     std::vector<std::string>
     ListObjects(const char* bucket_name, const char* prefix = NULL);
     void

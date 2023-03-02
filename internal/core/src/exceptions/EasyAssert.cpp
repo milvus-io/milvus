@@ -45,7 +45,8 @@ EasyAssertInfo(bool value,
     if (!value) {
         std::string info;
         info += "Assert \"" + std::string(expr_str) + "\"";
-        info += " at " + std::string(filename) + ":" + std::to_string(lineno) + "\n";
+        info += " at " + std::string(filename) + ":" + std::to_string(lineno) +
+                "\n";
         if (!extra_info.empty()) {
             info += " => " + std::string(extra_info);
         }

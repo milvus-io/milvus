@@ -31,10 +31,13 @@ template <typename T>
 class ScalarIndex : public IndexBase {
  public:
     void
-    BuildWithRawData(size_t n, const void* values, const Config& config = {}) override;
+    BuildWithRawData(size_t n,
+                     const void* values,
+                     const Config& config = {}) override;
 
     void
-    BuildWithDataset(const DatasetPtr& dataset, const Config& config = {}) override {
+    BuildWithDataset(const DatasetPtr& dataset,
+                     const Config& config = {}) override {
         PanicInfo("scalar index don't support build index with dataset");
     };
 
@@ -52,7 +55,10 @@ class ScalarIndex : public IndexBase {
     Range(T value, OpType op) = 0;
 
     virtual const TargetBitmapPtr
-    Range(T lower_bound_value, bool lb_inclusive, T upper_bound_value, bool ub_inclusive) = 0;
+    Range(T lower_bound_value,
+          bool lb_inclusive,
+          T upper_bound_value,
+          bool ub_inclusive) = 0;
 
     virtual T
     Reverse_Lookup(size_t offset) const = 0;

@@ -31,8 +31,12 @@ ScalarIndexVector::do_search_ids(const IdArray& ids) const {
     for (auto id : src_ids.data()) {
         using Pair = std::pair<T, SegOffset>;
         auto [iter_beg, iter_end] =
-            std::equal_range(mapping_.begin(), mapping_.end(), std::make_pair(id, SegOffset(0)),
-                             [](const Pair& left, const Pair& right) { return left.first < right.first; });
+            std::equal_range(mapping_.begin(),
+                             mapping_.end(),
+                             std::make_pair(id, SegOffset(0)),
+                             [](const Pair& left, const Pair& right) {
+                                 return left.first < right.first;
+                             });
 
         for (auto& iter = iter_beg; iter != iter_end; iter++) {
             auto [entry_id, entry_offset] = *iter;
@@ -51,8 +55,12 @@ ScalarIndexVector::do_search_ids(const std::vector<idx_t>& ids) const {
     for (auto id : ids) {
         using Pair = std::pair<T, SegOffset>;
         auto [iter_beg, iter_end] =
-            std::equal_range(mapping_.begin(), mapping_.end(), std::make_pair(id, SegOffset(0)),
-                             [](const Pair& left, const Pair& right) { return left.first < right.first; });
+            std::equal_range(mapping_.begin(),
+                             mapping_.end(),
+                             std::make_pair(id, SegOffset(0)),
+                             [](const Pair& left, const Pair& right) {
+                                 return left.first < right.first;
+                             });
 
         for (auto& iter = iter_beg; iter != iter_end; iter++) {
             auto [entry_id, entry_offset] = *iter_beg;
@@ -64,7 +72,9 @@ ScalarIndexVector::do_search_ids(const std::vector<idx_t>& ids) const {
 }
 
 void
-ScalarIndexVector::append_data(const ScalarIndexVector::T* ids, int64_t count, SegOffset base) {
+ScalarIndexVector::append_data(const ScalarIndexVector::T* ids,
+                               int64_t count,
+                               SegOffset base) {
     for (int64_t i = 0; i < count; ++i) {
         auto offset = base + SegOffset(i);
         mapping_.emplace_back(ids[i], offset);

@@ -20,9 +20,13 @@ VectorBase::set_data_raw(ssize_t element_offset,
                          const FieldMeta& field_meta) {
     if (field_meta.is_vector()) {
         if (field_meta.get_data_type() == DataType::VECTOR_FLOAT) {
-            return set_data_raw(element_offset, data->vectors().float_vector().data().data(), element_count);
+            return set_data_raw(element_offset,
+                                data->vectors().float_vector().data().data(),
+                                element_count);
         } else if (field_meta.get_data_type() == DataType::VECTOR_BINARY) {
-            return set_data_raw(element_offset, data->vectors().binary_vector().data(), element_count);
+            return set_data_raw(element_offset,
+                                data->vectors().binary_vector().data(),
+                                element_count);
         } else {
             PanicInfo("unsupported");
         }
@@ -30,7 +34,9 @@ VectorBase::set_data_raw(ssize_t element_offset,
 
     switch (field_meta.get_data_type()) {
         case DataType::BOOL: {
-            return set_data_raw(element_offset, data->scalars().bool_data().data().data(), element_count);
+            return set_data_raw(element_offset,
+                                data->scalars().bool_data().data().data(),
+                                element_count);
         }
         case DataType::INT8: {
             auto src_data = data->scalars().int_data().data();
@@ -45,16 +51,24 @@ VectorBase::set_data_raw(ssize_t element_offset,
             return set_data_raw(element_offset, data_raw.data(), element_count);
         }
         case DataType::INT32: {
-            return set_data_raw(element_offset, data->scalars().int_data().data().data(), element_count);
+            return set_data_raw(element_offset,
+                                data->scalars().int_data().data().data(),
+                                element_count);
         }
         case DataType::INT64: {
-            return set_data_raw(element_offset, data->scalars().long_data().data().data(), element_count);
+            return set_data_raw(element_offset,
+                                data->scalars().long_data().data().data(),
+                                element_count);
         }
         case DataType::FLOAT: {
-            return set_data_raw(element_offset, data->scalars().float_data().data().data(), element_count);
+            return set_data_raw(element_offset,
+                                data->scalars().float_data().data().data(),
+                                element_count);
         }
         case DataType::DOUBLE: {
-            return set_data_raw(element_offset, data->scalars().double_data().data().data(), element_count);
+            return set_data_raw(element_offset,
+                                data->scalars().double_data().data().data(),
+                                element_count);
         }
         case DataType::VARCHAR: {
             auto begin = data->scalars().string_data().data().begin();
@@ -69,12 +83,16 @@ VectorBase::set_data_raw(ssize_t element_offset,
 }
 
 void
-VectorBase::fill_chunk_data(ssize_t element_count, const DataArray* data, const FieldMeta& field_meta) {
+VectorBase::fill_chunk_data(ssize_t element_count,
+                            const DataArray* data,
+                            const FieldMeta& field_meta) {
     if (field_meta.is_vector()) {
         if (field_meta.get_data_type() == DataType::VECTOR_FLOAT) {
-            return fill_chunk_data(data->vectors().float_vector().data().data(), element_count);
+            return fill_chunk_data(data->vectors().float_vector().data().data(),
+                                   element_count);
         } else if (field_meta.get_data_type() == DataType::VECTOR_BINARY) {
-            return fill_chunk_data(data->vectors().binary_vector().data(), element_count);
+            return fill_chunk_data(data->vectors().binary_vector().data(),
+                                   element_count);
         } else {
             PanicInfo("unsupported");
         }
@@ -82,7 +100,8 @@ VectorBase::fill_chunk_data(ssize_t element_count, const DataArray* data, const 
 
     switch (field_meta.get_data_type()) {
         case DataType::BOOL: {
-            return fill_chunk_data(data->scalars().bool_data().data().data(), element_count);
+            return fill_chunk_data(data->scalars().bool_data().data().data(),
+                                   element_count);
         }
         case DataType::INT8: {
             auto src_data = data->scalars().int_data().data();
@@ -97,16 +116,20 @@ VectorBase::fill_chunk_data(ssize_t element_count, const DataArray* data, const 
             return fill_chunk_data(data_raw.data(), element_count);
         }
         case DataType::INT32: {
-            return fill_chunk_data(data->scalars().int_data().data().data(), element_count);
+            return fill_chunk_data(data->scalars().int_data().data().data(),
+                                   element_count);
         }
         case DataType::INT64: {
-            return fill_chunk_data(data->scalars().long_data().data().data(), element_count);
+            return fill_chunk_data(data->scalars().long_data().data().data(),
+                                   element_count);
         }
         case DataType::FLOAT: {
-            return fill_chunk_data(data->scalars().float_data().data().data(), element_count);
+            return fill_chunk_data(data->scalars().float_data().data().data(),
+                                   element_count);
         }
         case DataType::DOUBLE: {
-            return fill_chunk_data(data->scalars().double_data().data().data(), element_count);
+            return fill_chunk_data(data->scalars().double_data().data().data(),
+                                   element_count);
         }
         case DataType::VARCHAR: {
             auto vec = static_cast<ConcurrentVector<std::string>*>(this);

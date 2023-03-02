@@ -28,7 +28,8 @@ namespace milvus::storage {
 
 class DataCodec {
  public:
-    explicit DataCodec(std::shared_ptr<FieldData> data, CodecType type) : field_data_(data), codec_type_(type) {
+    explicit DataCodec(std::shared_ptr<FieldData> data, CodecType type)
+        : field_data_(data), codec_type_(type) {
     }
 
     virtual ~DataCodec() = default;
@@ -77,7 +78,9 @@ std::unique_ptr<DataCodec>
 DeserializeFileData(const uint8_t* input, int64_t length);
 
 std::unique_ptr<DataCodec>
-DeserializeLocalInsertFileData(const uint8_t* input_data, int64_t length, DataType data_type);
+DeserializeLocalInsertFileData(const uint8_t* input_data,
+                               int64_t length,
+                               DataType data_type);
 
 std::unique_ptr<DataCodec>
 DeserializeLocalIndexFileData(const uint8_t* input_data, int64_t length);

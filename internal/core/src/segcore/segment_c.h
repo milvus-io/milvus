@@ -48,7 +48,10 @@ void
 DeleteRetrieveResult(CRetrieveResult* retrieve_result);
 
 CStatus
-Retrieve(CSegmentInterface c_segment, CRetrievePlan c_plan, uint64_t timestamp, CRetrieveResult* result);
+Retrieve(CSegmentInterface c_segment,
+         CRetrievePlan c_plan,
+         uint64_t timestamp,
+         CRetrieveResult* result);
 
 int64_t
 GetMemoryUsageInBytes(CSegmentInterface c_segment);
@@ -77,13 +80,16 @@ PreInsert(CSegmentInterface c_segment, int64_t size, int64_t* offset);
 
 //////////////////////////////    interfaces for sealed segment    //////////////////////////////
 CStatus
-LoadFieldData(CSegmentInterface c_segment, CLoadFieldDataInfo load_field_data_info);
+LoadFieldData(CSegmentInterface c_segment,
+              CLoadFieldDataInfo load_field_data_info);
 
 CStatus
-LoadDeletedRecord(CSegmentInterface c_segment, CLoadDeletedRecordInfo deleted_record_info);
+LoadDeletedRecord(CSegmentInterface c_segment,
+                  CLoadDeletedRecordInfo deleted_record_info);
 
 CStatus
-UpdateSealedSegmentIndex(CSegmentInterface c_segment, CLoadIndexInfo c_load_index_info);
+UpdateSealedSegmentIndex(CSegmentInterface c_segment,
+                         CLoadIndexInfo c_load_index_info);
 
 CStatus
 DropFieldData(CSegmentInterface c_segment, int64_t field_id);

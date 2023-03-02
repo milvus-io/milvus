@@ -31,20 +31,27 @@ CreatePlan(const Schema& schema, const std::string& dsl);
 
 // Note: serialized_expr_plan is of binary format
 std::unique_ptr<Plan>
-CreateSearchPlanByExpr(const Schema& schema, const void* serialized_expr_plan, const int64_t size);
+CreateSearchPlanByExpr(const Schema& schema,
+                       const void* serialized_expr_plan,
+                       const int64_t size);
 
 std::unique_ptr<PlaceholderGroup>
-ParsePlaceholderGroup(const Plan* plan, const uint8_t* blob, const int64_t blob_len);
+ParsePlaceholderGroup(const Plan* plan,
+                      const uint8_t* blob,
+                      const int64_t blob_len);
 
 // deprecated
 std::unique_ptr<PlaceholderGroup>
-ParsePlaceholderGroup(const Plan* plan, const std::string& placeholder_group_blob);
+ParsePlaceholderGroup(const Plan* plan,
+                      const std::string& placeholder_group_blob);
 
 int64_t
 GetNumOfQueries(const PlaceholderGroup*);
 
 std::unique_ptr<RetrievePlan>
-CreateRetrievePlanByExpr(const Schema& schema, const void* serialized_expr_plan, const int64_t size);
+CreateRetrievePlanByExpr(const Schema& schema,
+                         const void* serialized_expr_plan,
+                         const int64_t size);
 
 // Query Overall TopK from Plan
 // Used to alloc result memory at Go side

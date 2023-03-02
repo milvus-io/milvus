@@ -30,10 +30,13 @@ StorageType
 ReadMediumType(PayloadInputStream* input_stream);
 
 void
-AddPayloadToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder, const Payload& payload);
+AddPayloadToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder,
+                         const Payload& payload);
 
 void
-AddOneStringToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder, const char* str, int str_size);
+AddOneStringToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder,
+                           const char* str,
+                           int str_size);
 
 std::shared_ptr<arrow::ArrayBuilder>
 CreateArrowBuilder(DataType data_type);
@@ -51,10 +54,12 @@ int64_t
 GetPayloadSize(const Payload* payload);
 
 const uint8_t*
-GetRawValuesFromArrowArray(std::shared_ptr<arrow::Array> array, DataType data_type);
+GetRawValuesFromArrowArray(std::shared_ptr<arrow::Array> array,
+                           DataType data_type);
 
 int
-GetDimensionFromArrowArray(std::shared_ptr<arrow::Array> array, DataType data_type);
+GetDimensionFromArrowArray(std::shared_ptr<arrow::Array> array,
+                           DataType data_type);
 
 std::string
 GetLocalIndexPathPrefixWithBuildID(int64_t build_id);

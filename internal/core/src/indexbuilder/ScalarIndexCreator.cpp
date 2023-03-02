@@ -20,7 +20,9 @@
 
 namespace milvus::indexbuilder {
 
-ScalarIndexCreator::ScalarIndexCreator(DataType dtype, const char* type_params, const char* index_params)
+ScalarIndexCreator::ScalarIndexCreator(DataType dtype,
+                                       const char* type_params,
+                                       const char* index_params)
     : dtype_(dtype) {
     // TODO: move parse-related logic to a common interface.
     proto::indexcgo::TypeParams type_params_;
@@ -42,7 +44,8 @@ ScalarIndexCreator::ScalarIndexCreator(DataType dtype, const char* type_params, 
     index_info.field_type = dtype_;
     index_info.index_type = index_type();
     index_info.index_mode = IndexMode::MODE_CPU;
-    index_ = index::IndexFactory::GetInstance().CreateIndex(index_info, nullptr);
+    index_ =
+        index::IndexFactory::GetInstance().CreateIndex(index_info, nullptr);
 }
 
 void

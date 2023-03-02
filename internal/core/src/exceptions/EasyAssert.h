@@ -54,13 +54,14 @@ class SegcoreError : public std::runtime_error {
 
 }  // namespace milvus
 
-#define AssertInfo(expr, info)                                                          \
-    do {                                                                                \
-        auto _expr_res = bool(expr);                                                    \
-        /* call func only when needed */                                                \
-        if (!_expr_res) {                                                               \
-            milvus::impl::EasyAssertInfo(_expr_res, #expr, __FILE__, __LINE__, (info)); \
-        }                                                                               \
+#define AssertInfo(expr, info)                                 \
+    do {                                                       \
+        auto _expr_res = bool(expr);                           \
+        /* call func only when needed */                       \
+        if (!_expr_res) {                                      \
+            milvus::impl::EasyAssertInfo(                      \
+                _expr_res, #expr, __FILE__, __LINE__, (info)); \
+        }                                                      \
     } while (0)
 
 #define Assert(expr) AssertInfo((expr), "")
@@ -70,8 +71,9 @@ class SegcoreError : public std::runtime_error {
         __builtin_unreachable();                                             \
     } while (0)
 
-#define PanicCodeInfo(errcode, info)                                                  \
-    do {                                                                              \
-        milvus::impl::EasyAssertInfo(false, (info), __FILE__, __LINE__, "", errcode); \
-        __builtin_unreachable();                                                      \
+#define PanicCodeInfo(errcode, info)                         \
+    do {                                                     \
+        milvus::impl::EasyAssertInfo(                        \
+            false, (info), __FILE__, __LINE__, "", errcode); \
+        __builtin_unreachable();                             \
     } while (0)

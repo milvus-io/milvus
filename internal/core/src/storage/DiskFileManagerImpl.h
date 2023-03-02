@@ -33,7 +33,7 @@ namespace milvus::storage {
 
 class DiskFileManagerImpl : public FileManagerImpl {
  public:
-    explicit DiskFileManagerImpl(const FieldDataMeta& field_mata,
+    explicit DiskFileManagerImpl(const FieldDataMeta& field_meta,
                                  const IndexMeta& index_meta,
                                  const StorageConfig& storage_config);
 

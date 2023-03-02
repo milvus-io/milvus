@@ -32,18 +32,26 @@ namespace milvus::index {
 
 class VectorIndex : public IndexBase {
  public:
-    explicit VectorIndex(const IndexType& index_type, const IndexMode& index_mode, const MetricType& metric_type)
-        : index_type_(index_type), index_mode_(index_mode), metric_type_(metric_type) {
+    explicit VectorIndex(const IndexType& index_type,
+                         const IndexMode& index_mode,
+                         const MetricType& metric_type)
+        : index_type_(index_type),
+          index_mode_(index_mode),
+          metric_type_(metric_type) {
     }
 
  public:
     void
-    BuildWithRawData(size_t n, const void* values, const Config& config = {}) override {
+    BuildWithRawData(size_t n,
+                     const void* values,
+                     const Config& config = {}) override {
         PanicInfo("vector index don't support build index with raw data");
     };
 
     virtual std::unique_ptr<SearchResult>
-    Query(const DatasetPtr dataset, const SearchInfo& search_info, const BitsetView& bitset) = 0;
+    Query(const DatasetPtr dataset,
+          const SearchInfo& search_info,
+          const BitsetView& bitset) = 0;
 
     IndexType
     GetIndexType() const {

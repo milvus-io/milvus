@@ -20,11 +20,14 @@ namespace {
 using ResultPair = std::pair<float, int64_t>;
 }
 DatasetPtr
-SortRangeSearchResult(DatasetPtr data_set, int64_t topk, int64_t nq, std::string metric_type) {
+SortRangeSearchResult(DatasetPtr data_set,
+                      int64_t topk,
+                      int64_t nq,
+                      std::string metric_type) {
     /**
-     * nq: number of querys;
-     * lims: the size of lims is nq + 1, lims[i+1] - lims[i] refers to the size of RangeSearch result querys[i]
-     *          for example, the nq is 5. In the seleted range,
+     * nq: number of queries;
+     * lims: the size of lims is nq + 1, lims[i+1] - lims[i] refers to the size of RangeSearch result queries[i]
+     *          for example, the nq is 5. In the selected range,
      *          the size of RangeSearch result for each nq is [1, 2, 3, 4, 5],
      *          the lims will be [0, 1, 3, 6, 10, 15];
      * ids: the size of ids is lim[nq],
@@ -32,13 +35,13 @@ SortRangeSearchResult(DatasetPtr data_set, int64_t topk, int64_t nq, std::string
      *        i(1,0), i(1,1), …, i(1,k1-1),
      *          …,
      *        i(n-1,0), i(n-1,1), …, i(n-1,kn-1)},
-     *      i(0,0), i(0,1), …, i(0,k0-1) means the ids of RangeSearch result querys[0], k0 equals lim[1] - lim[0];
+     *      i(0,0), i(0,1), …, i(0,k0-1) means the ids of RangeSearch result queries[0], k0 equals lim[1] - lim[0];
      * dist: the size of ids is lim[nq],
      *      { d(0,0), d(0,1), …, d(0,k0-1),
      *        d(1,0), d(1,1), …, d(1,k1-1),
      *          …,
      *        d(n-1,0), d(n-1,1), …, d(n-1,kn-1)},
-     *      d(0,0), d(0,1), …, d(0,k0-1) means the distances of RangeSearch result querys[0], k0 equals lim[1] - lim[0];
+     *      d(0,0), d(0,1), …, d(0,k0-1) means the distances of RangeSearch result queries[0], k0 equals lim[1] - lim[0];
      */
     auto lims = GetDatasetLims(data_set);
     auto id = GetDatasetIDs(data_set);
@@ -65,11 +68,14 @@ SortRangeSearchResult(DatasetPtr data_set, int64_t topk, int64_t nq, std::string
          *          |------------+---------------|       max_heap   ascending_order
          *
          */
-        std::function<bool(const ResultPair&, const ResultPair&)> cmp = std::less<std::pair<float, int64_t>>();
+        std::function<bool(const ResultPair&, const ResultPair&)> cmp =
+            std::less<std::pair<float, int64_t>>();
         if (IsMetricType(metric_type, knowhere::metric::IP)) {
             cmp = std::greater<std::pair<float, int64_t>>();
         }
-        std::priority_queue<std::pair<float, int64_t>, std::vector<std::pair<float, int64_t>>, decltype(cmp)>
+        std::priority_queue<std::pair<float, int64_t>,
+                            std::vector<std::pair<float, int64_t>>,
+                            decltype(cmp)>
             sub_result(cmp);
 
         for (int j = lims[i]; j < lims[i + 1]; j++) {
@@ -94,7 +100,9 @@ SortRangeSearchResult(DatasetPtr data_set, int64_t topk, int64_t nq, std::string
 }
 
 void
-CheckRangeSearchParam(float radius, float range_filter, std::string metric_type) {
+CheckRangeSearchParam(float radius,
+                      float range_filter,
+                      std::string metric_type) {
     /*
      *   IP:   1.0        range_filter     radius
      *          |------------+---------------|       min_heap   descending_order

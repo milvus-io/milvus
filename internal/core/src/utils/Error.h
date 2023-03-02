@@ -78,7 +78,8 @@ constexpr ErrorCode SERVER_CANNOT_READ_FILE = ToServerErrorCode(16);
 
 constexpr ErrorCode SERVER_COLLECTION_NOT_EXIST = ToServerErrorCode(100);
 constexpr ErrorCode SERVER_INVALID_COLLECTION_NAME = ToServerErrorCode(101);
-constexpr ErrorCode SERVER_INVALID_COLLECTION_DIMENSION = ToServerErrorCode(102);
+constexpr ErrorCode SERVER_INVALID_COLLECTION_DIMENSION =
+    ToServerErrorCode(102);
 constexpr ErrorCode SERVER_INVALID_VECTOR_DIMENSION = ToServerErrorCode(104);
 constexpr ErrorCode SERVER_INVALID_INDEX_TYPE = ToServerErrorCode(105);
 constexpr ErrorCode SERVER_INVALID_ROWRECORD = ToServerErrorCode(106);
@@ -131,14 +132,14 @@ constexpr ErrorCode WAL_PATH_ERROR = ToWalErrorCode(4);
 constexpr ErrorCode SS_ERROR = ToSSErrorCode(1);
 constexpr ErrorCode SS_STALE_ERROR = ToSSErrorCode(2);
 constexpr ErrorCode SS_NOT_FOUND_ERROR = ToSSErrorCode(3);
-constexpr ErrorCode SS_INVALID_CONTEX_ERROR = ToSSErrorCode(4);
+constexpr ErrorCode SS_INVALID_CONTEXT_ERROR = ToSSErrorCode(4);
 constexpr ErrorCode SS_DUPLICATED_ERROR = ToSSErrorCode(5);
 constexpr ErrorCode SS_NOT_ACTIVE_ERROR = ToSSErrorCode(6);
 constexpr ErrorCode SS_CONSTRAINT_CHECK_ERROR = ToSSErrorCode(7);
 constexpr ErrorCode SS_INVALID_ARGUMENT_ERROR = ToSSErrorCode(8);
 constexpr ErrorCode SS_OPERATION_PENDING = ToSSErrorCode(9);
 constexpr ErrorCode SS_TIMEOUT = ToSSErrorCode(10);
-constexpr ErrorCode SS_NOT_COMMITED = ToSSErrorCode(11);
+constexpr ErrorCode SS_NOT_COMMITTED = ToSSErrorCode(11);
 constexpr ErrorCode SS_COLLECTION_DROPPED = ToSSErrorCode(12);
 constexpr ErrorCode SS_EMPTY_HOLDER = ToSSErrorCode(13);
 

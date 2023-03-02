@@ -18,7 +18,9 @@ struct Entry {
 // TODO(yah01): make this generic
 class VariableField {
  public:
-    explicit VariableField(int64_t segment_id, const FieldMeta& field_meta, const LoadFieldDataInfo& info) {
+    explicit VariableField(int64_t segment_id,
+                           const FieldMeta& field_meta,
+                           const LoadFieldDataInfo& info) {
         auto begin = info.field_data->scalars().string_data().data().begin();
         auto end = info.field_data->scalars().string_data().data().end();
 
@@ -34,14 +36,19 @@ class VariableField {
     }
 
     VariableField(VariableField&& field)
-        : indices_(std::move(field.indices_)), size_(field.size_), data_(field.data_), views_(std::move(field.views_)) {
+        : indices_(std::move(field.indices_)),
+          size_(field.size_),
+          data_(field.data_),
+          views_(std::move(field.views_)) {
         field.data_ = nullptr;
     }
 
     ~VariableField() {
         if (data_ != MAP_FAILED && data_ != nullptr) {
             if (munmap(data_, size_)) {
-                AssertInfo(true, std::string("failed to unmap variable field err=") + strerror(errno));
+                AssertInfo(true,
+                           std::string("failed to unmap variable field err=") +
+                               strerror(errno));
             }
         }
     }
@@ -73,7 +80,8 @@ class VariableField {
     construct_views() {
         views_.reserve(indices_.size());
         for (size_t i = 0; i < indices_.size() - 1; i++) {
-            views_.emplace_back(data_ + indices_[i], indices_[i + 1] - indices_[i]);
+            views_.emplace_back(data_ + indices_[i],
+                                indices_[i + 1] - indices_[i]);
         }
         views_.emplace_back(data_ + indices_.back(), size_ - indices_.back());
     }

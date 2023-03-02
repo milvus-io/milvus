@@ -40,7 +40,8 @@ class ExtractInfoExprVisitor : public ExprVisitor {
     visit(CompareExpr& expr) override;
 
  public:
-    explicit ExtractInfoExprVisitor(ExtractedPlanInfo& plan_info) : plan_info_(plan_info) {
+    explicit ExtractInfoExprVisitor(ExtractedPlanInfo& plan_info)
+        : plan_info_(plan_info) {
     }
 
  private:

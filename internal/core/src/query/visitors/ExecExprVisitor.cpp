@@ -28,15 +28,19 @@ namespace milvus::query {
 namespace impl {
 class ExecExprVisitor : ExprVisitor {
  public:
-    ExecExprVisitor(const segcore::SegmentInternalInterface& segment, int64_t row_count, Timestamp timestamp)
+    ExecExprVisitor(const segcore::SegmentInternalInterface& segment,
+                    int64_t row_count,
+                    Timestamp timestamp)
         : segment_(segment), row_count_(row_count), timestamp_(timestamp) {
     }
 
     BitsetType
     call_child(Expr& expr) {
-        AssertInfo(!bitset_opt_.has_value(), "[ExecExprVisitor]Bitset already has value before accept");
+        AssertInfo(!bitset_opt_.has_value(),
+                   "[ExecExprVisitor]Bitset already has value before accept");
         expr.accept(*this);
-        AssertInfo(bitset_opt_.has_value(), "[ExecExprVisitor]Bitset doesn't have value after accept");
+        AssertInfo(bitset_opt_.has_value(),
+                   "[ExecExprVisitor]Bitset doesn't have value after accept");
         auto res = std::move(bitset_opt_);
         bitset_opt_ = std::nullopt;
         return std::move(res.value());
@@ -45,7 +49,9 @@ class ExecExprVisitor : ExprVisitor {
  public:
     template <typename T, typename IndexFunc, typename ElementFunc>
     auto
-    ExecRangeVisitorImpl(FieldId field_id, IndexFunc func, ElementFunc element_func) -> BitsetType;
+    ExecRangeVisitorImpl(FieldId field_id,
+                         IndexFunc func,
+                         ElementFunc element_func) -> BitsetType;
 
     template <typename T>
     auto
@@ -53,7 +59,8 @@ class ExecExprVisitor : ExprVisitor {
 
     template <typename T>
     auto
-    ExecBinaryArithOpEvalRangeVisitorDispatcher(BinaryArithOpEvalRangeExpr& expr_raw) -> BitsetType;
+    ExecBinaryArithOpEvalRangeVisitorDispatcher(
+        BinaryArithOpEvalRangeExpr& expr_raw) -> BitsetType;
 
     template <typename T>
     auto
@@ -69,7 +76,8 @@ class ExecExprVisitor : ExprVisitor {
 
     template <typename CmpFunc>
     auto
-    ExecCompareExprDispatcher(CompareExpr& expr, CmpFunc cmp_func) -> BitsetType;
+    ExecCompareExprDispatcher(CompareExpr& expr, CmpFunc cmp_func)
+        -> BitsetType;
 
  private:
     const segcore::SegmentInternalInterface& segment_;
@@ -93,7 +101,8 @@ ExecExprVisitor::visit(LogicalUnaryExpr& expr) {
             PanicInfo("Invalid Unary Op");
         }
     }
-    AssertInfo(res.size() == row_count_, "[ExecExprVisitor]Size of results not equal row count");
+    AssertInfo(res.size() == row_count_,
+               "[ExecExprVisitor]Size of results not equal row count");
     bitset_opt_ = std::move(res);
 }
 
@@ -102,7 +111,8 @@ ExecExprVisitor::visit(LogicalBinaryExpr& expr) {
     using OpType = LogicalBinaryExpr::OpType;
     auto left = call_child(*expr.left_);
     auto right = call_child(*expr.right_);
-    AssertInfo(left.size() == right.size(), "[ExecExprVisitor]Left size not equal to right size");
+    AssertInfo(left.size() == right.size(),
+               "[ExecExprVisitor]Left size not equal to right size");
     auto res = std::move(left);
     switch (expr.op_type_) {
         case OpType::LogicalAnd: {
@@ -125,7 +135,8 @@ ExecExprVisitor::visit(LogicalBinaryExpr& expr) {
             PanicInfo("Invalid Binary Op");
         }
     }
-    AssertInfo(res.size() == row_count_, "[ExecExprVisitor]Size of results not equal row count");
+    AssertInfo(res.size() == row_count_,
+               "[ExecExprVisitor]Size of results not equal row count");
     bitset_opt_ = std::move(res);
 }
 
@@ -151,7 +162,9 @@ Assemble(const std::deque<BitsetType>& srcs) -> BitsetType {
 
 template <typename T, typename IndexFunc, typename ElementFunc>
 auto
-ExecExprVisitor::ExecRangeVisitorImpl(FieldId field_id, IndexFunc index_func, ElementFunc element_func) -> BitsetType {
+ExecExprVisitor::ExecRangeVisitorImpl(FieldId field_id,
+                                      IndexFunc index_func,
+                                      ElementFunc element_func) -> BitsetType {
     auto& schema = segment_.get_schema();
     auto& field_meta = schema[field_id];
     auto indexing_barrier = segment_.num_chunk_index(field_id);
@@ -159,18 +172,24 @@ ExecExprVisitor::ExecRangeVisitorImpl(FieldId field_id, IndexFunc index_func, El
     auto num_chunk = upper_div(row_count_, size_per_chunk);
     std::deque<BitsetType> results;
 
-    typedef std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T> IndexInnerType;
+    typedef std::
+        conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
+            IndexInnerType;
     using Index = index::ScalarIndex<IndexInnerType>;
     for (auto chunk_id = 0; chunk_id < indexing_barrier; ++chunk_id) {
-        const Index& indexing = segment_.chunk_scalar_index<IndexInnerType>(field_id, chunk_id);
+        const Index& indexing =
+            segment_.chunk_scalar_index<IndexInnerType>(field_id, chunk_id);
         // NOTE: knowhere is not const-ready
         // This is a dirty workaround
         auto data = index_func(const_cast<Index*>(&indexing));
-        AssertInfo(data->size() == size_per_chunk, "[ExecExprVisitor]Data size not equal to size_per_chunk");
+        AssertInfo(data->size() == size_per_chunk,
+                   "[ExecExprVisitor]Data size not equal to size_per_chunk");
         results.emplace_back(std::move(*data));
     }
     for (auto chunk_id = indexing_barrier; chunk_id < num_chunk; ++chunk_id) {
-        auto this_size = chunk_id == num_chunk - 1 ? row_count_ - chunk_id * size_per_chunk : size_per_chunk;
+        auto this_size = chunk_id == num_chunk - 1
+                             ? row_count_ - chunk_id * size_per_chunk
+                             : size_per_chunk;
         BitsetType result(this_size);
         auto chunk = segment_.chunk_data<T>(field_id, chunk_id);
         const T* data = chunk.data();
@@ -182,13 +201,16 @@ ExecExprVisitor::ExecRangeVisitorImpl(FieldId field_id, IndexFunc index_func, El
         results.emplace_back(std::move(result));
     }
     auto final_result = Assemble(results);
-    AssertInfo(final_result.size() == row_count_, "[ExecExprVisitor]Final result size not equal to row count");
+    AssertInfo(final_result.size() == row_count_,
+               "[ExecExprVisitor]Final result size not equal to row count");
     return final_result;
 }
 
 template <typename T, typename IndexFunc, typename ElementFunc>
 auto
-ExecExprVisitor::ExecDataRangeVisitorImpl(FieldId field_id, IndexFunc index_func, ElementFunc element_func)
+ExecExprVisitor::ExecDataRangeVisitorImpl(FieldId field_id,
+                                          IndexFunc index_func,
+                                          ElementFunc element_func)
     -> BitsetType {
     auto& schema = segment_.get_schema();
     auto& field_meta = schema[field_id];
@@ -205,23 +227,31 @@ ExecExprVisitor::ExecDataRangeVisitorImpl(FieldId field_id, IndexFunc index_func
     // if sealed segment has loaded raw data on this field, then index_barrier = 0 and data_barrier = 1
     // in this case, sealed segment execute expr plan using raw data
     for (auto chunk_id = 0; chunk_id < data_barrier; ++chunk_id) {
-        auto this_size = chunk_id == num_chunk - 1 ? row_count_ - chunk_id * size_per_chunk : size_per_chunk;
+        auto this_size = chunk_id == num_chunk - 1
+                             ? row_count_ - chunk_id * size_per_chunk
+                             : size_per_chunk;
         BitsetType result(this_size);
         auto chunk = segment_.chunk_data<T>(field_id, chunk_id);
         const T* data = chunk.data();
         for (int index = 0; index < this_size; ++index) {
             result[index] = element_func(data[index]);
         }
-        AssertInfo(result.size() == this_size, "[ExecExprVisitor]Chunk result size not equal to expected size");
+        AssertInfo(
+            result.size() == this_size,
+            "[ExecExprVisitor]Chunk result size not equal to expected size");
         results.emplace_back(std::move(result));
     }
 
     // if sealed segment has loaded scalar index for this field, then index_barrier = 1 and data_barrier = 0
     // in this case, sealed segment execute expr plan using scalar index
-    typedef std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T> IndexInnerType;
+    typedef std::
+        conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
+            IndexInnerType;
     using Index = index::ScalarIndex<IndexInnerType>;
-    for (auto chunk_id = data_barrier; chunk_id < indexing_barrier; ++chunk_id) {
-        auto& indexing = segment_.chunk_scalar_index<IndexInnerType>(field_id, chunk_id);
+    for (auto chunk_id = data_barrier; chunk_id < indexing_barrier;
+         ++chunk_id) {
+        auto& indexing =
+            segment_.chunk_scalar_index<IndexInnerType>(field_id, chunk_id);
         auto this_size = const_cast<Index*>(&indexing)->Count();
         BitsetType result(this_size);
         for (int offset = 0; offset < this_size; ++offset) {
@@ -231,7 +261,8 @@ ExecExprVisitor::ExecDataRangeVisitorImpl(FieldId field_id, IndexFunc index_func
     }
 
     auto final_result = Assemble(results);
-    AssertInfo(final_result.size() == row_count_, "[ExecExprVisitor]Final result size not equal to row count");
+    AssertInfo(final_result.size() == row_count_,
+               "[ExecExprVisitor]Final result size not equal to row count");
     return final_result;
 }
 
@@ -239,8 +270,11 @@ ExecExprVisitor::ExecDataRangeVisitorImpl(FieldId field_id, IndexFunc index_func
 #pragma ide diagnostic ignored "Simplify"
 template <typename T>
 auto
-ExecExprVisitor::ExecUnaryRangeVisitorDispatcher(UnaryRangeExpr& expr_raw) -> BitsetType {
-    typedef std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T> IndexInnerType;
+ExecExprVisitor::ExecUnaryRangeVisitorDispatcher(UnaryRangeExpr& expr_raw)
+    -> BitsetType {
+    typedef std::
+        conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
+            IndexInnerType;
     using Index = index::ScalarIndex<IndexInnerType>;
     auto& expr = static_cast<UnaryRangeExprImpl<IndexInnerType>&>(expr_raw);
 
@@ -248,34 +282,52 @@ ExecExprVisitor::ExecUnaryRangeVisitorDispatcher(UnaryRangeExpr& expr_raw) -> Bi
     auto val = IndexInnerType(expr.value_);
     switch (op) {
         case OpType::Equal: {
-            auto index_func = [val](Index* index) { return index->In(1, &val); };
+            auto index_func = [val](Index* index) {
+                return index->In(1, &val);
+            };
             auto elem_func = [val](T x) { return (x == val); };
-            return ExecRangeVisitorImpl<T>(expr.field_id_, index_func, elem_func);
+            return ExecRangeVisitorImpl<T>(
+                expr.field_id_, index_func, elem_func);
         }
         case OpType::NotEqual: {
-            auto index_func = [val](Index* index) { return index->NotIn(1, &val); };
+            auto index_func = [val](Index* index) {
+                return index->NotIn(1, &val);
+            };
             auto elem_func = [val](T x) { return (x != val); };
-            return ExecRangeVisitorImpl<T>(expr.field_id_, index_func, elem_func);
+            return ExecRangeVisitorImpl<T>(
+                expr.field_id_, index_func, elem_func);
         }
         case OpType::GreaterEqual: {
-            auto index_func = [val](Index* index) { return index->Range(val, OpType::GreaterEqual); };
+            auto index_func = [val](Index* index) {
+                return index->Range(val, OpType::GreaterEqual);
+            };
             auto elem_func = [val](T x) { return (x >= val); };
-            return ExecRangeVisitorImpl<T>(expr.field_id_, index_func, elem_func);
+            return ExecRangeVisitorImpl<T>(
+                expr.field_id_, index_func, elem_func);
         }
         case OpType::GreaterThan: {
-            auto index_func = [val](Index* index) { return index->Range(val, OpType::GreaterThan); };
+            auto index_func = [val](Index* index) {
+                return index->Range(val, OpType::GreaterThan);
+            };
             auto elem_func = [val](T x) { return (x > val); };
-            return ExecRangeVisitorImpl<T>(expr.field_id_, index_func, elem_func);
+            return ExecRangeVisitorImpl<T>(
+                expr.field_id_, index_func, elem_func);
         }
         case OpType::LessEqual: {
-            auto index_func = [val](Index* index) { return index->Range(val, OpType::LessEqual); };
+            auto index_func = [val](Index* index) {
+                return index->Range(val, OpType::LessEqual);
+            };
             auto elem_func = [val](T x) { return (x <= val); };
-            return ExecRangeVisitorImpl<T>(expr.field_id_, index_func, elem_func);
+            return ExecRangeVisitorImpl<T>(
+                expr.field_id_, index_func, elem_func);
         }
         case OpType::LessThan: {
-            auto index_func = [val](Index* index) { return index->Range(val, OpType::LessThan); };
+            auto index_func = [val](Index* index) {
+                return index->Range(val, OpType::LessThan);
+            };
             auto elem_func = [val](T x) { return (x < val); };
-            return ExecRangeVisitorImpl<T>(expr.field_id_, index_func, elem_func);
+            return ExecRangeVisitorImpl<T>(
+                expr.field_id_, index_func, elem_func);
         }
         case OpType::PrefixMatch: {
             auto index_func = [val](Index* index) {
@@ -285,7 +337,8 @@ ExecExprVisitor::ExecUnaryRangeVisitorDispatcher(UnaryRangeExpr& expr_raw) -> Bi
                 return index->Query(std::move(dataset));
             };
             auto elem_func = [val, op](T x) { return Match(x, val, op); };
-            return ExecRangeVisitorImpl<T>(expr.field_id_, index_func, elem_func);
+            return ExecRangeVisitorImpl<T>(
+                expr.field_id_, index_func, elem_func);
         }
         // TODO: PostfixMatch
         default: {
@@ -299,7 +352,8 @@ ExecExprVisitor::ExecUnaryRangeVisitorDispatcher(UnaryRangeExpr& expr_raw) -> Bi
 #pragma ide diagnostic ignored "Simplify"
 template <typename T>
 auto
-ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcher(BinaryArithOpEvalRangeExpr& expr_raw) -> BitsetType {
+ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcher(
+    BinaryArithOpEvalRangeExpr& expr_raw) -> BitsetType {
     auto& expr = static_cast<BinaryArithOpEvalRangeExprImpl<T>&>(expr_raw);
     using Index = index::ScalarIndex<T>;
     auto arith_op = expr.arith_op_;
@@ -311,46 +365,64 @@ ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcher(BinaryArithOpEvalRa
         case OpType::Equal: {
             switch (arith_op) {
                 case ArithOpType::Add: {
-                    auto index_func = [val, right_operand](Index* index, size_t offset) {
+                    auto index_func = [val, right_operand](Index* index,
+                                                           size_t offset) {
                         auto x = index->Reverse_Lookup(offset);
                         return (x + right_operand) == val;
                     };
-                    auto elem_func = [val, right_operand](T x) { return ((x + right_operand) == val); };
-                    return ExecDataRangeVisitorImpl<T>(expr.field_id_, index_func, elem_func);
+                    auto elem_func = [val, right_operand](T x) {
+                        return ((x + right_operand) == val);
+                    };
+                    return ExecDataRangeVisitorImpl<T>(
+                        expr.field_id_, index_func, elem_func);
                 }
                 case ArithOpType::Sub: {
-                    auto index_func = [val, right_operand](Index* index, size_t offset) {
+                    auto index_func = [val, right_operand](Index* index,
+                                                           size_t offset) {
                         auto x = index->Reverse_Lookup(offset);
                         return (x - right_operand) == val;
                     };
-                    auto elem_func = [val, right_operand](T x) { return ((x - right_operand) == val); };
-                    return ExecDataRangeVisitorImpl<T>(expr.field_id_, index_func, elem_func);
+                    auto elem_func = [val, right_operand](T x) {
+                        return ((x - right_operand) == val);
+                    };
+                    return ExecDataRangeVisitorImpl<T>(
+                        expr.field_id_, index_func, elem_func);
                 }
                 case ArithOpType::Mul: {
-                    auto index_func = [val, right_operand](Index* index, size_t offset) {
+                    auto index_func = [val, right_operand](Index* index,
+                                                           size_t offset) {
                         auto x = index->Reverse_Lookup(offset);
                         return (x * right_operand) == val;
                     };
-                    auto elem_func = [val, right_operand](T x) { return ((x * right_operand) == val); };
-                    return ExecDataRangeVisitorImpl<T>(expr.field_id_, index_func, elem_func);
+                    auto elem_func = [val, right_operand](T x) {
+                        return ((x * right_operand) == val);
+                    };
+                    return ExecDataRangeVisitorImpl<T>(
+                        expr.field_id_, index_func, elem_func);
                 }
                 case ArithOpType::Div: {
-                    auto index_func = [val, right_operand](Index* index, size_t offset) {
+                    auto index_func = [val, right_operand](Index* index,
+                                                           size_t offset) {
                         auto x = index->Reverse_Lookup(offset);
                         return (x / right_operand) == val;
                     };
-                    auto elem_func = [val, right_operand](T x) { return ((x / right_operand) == val); };
-                    return ExecDataRangeVisitorImpl<T>(expr.field_id_, index_func, elem_func);
+                    auto elem_func = [val, right_operand](T x) {
+                        return ((x / right_operand) == val);
+                    };
+                    return ExecDataRangeVisitorImpl<T>(
+                        expr.field_id_, index_func, elem_func);
                 }
                 case ArithOpType::Mod: {
-                    auto index_func = [val, right_operand](Index* index, size_t offset) {
+                    auto index_func = [val, right_operand](Index* index,
+                                                           size_t offset) {
                         auto x = index->Reverse_Lookup(offset);
                         return static_cast<T>(fmod(x, right_operand)) == val;
                     };
                     auto elem_func = [val, right_operand](T x) {
                         return (static_cast<T>(fmod(x, right_operand)) == val);
                     };
-                    return ExecDataRangeVisitorImpl<T>(expr.field_id_, index_func, elem_func);
+                    return ExecDataRangeVisitorImpl<T>(
+                        expr.field_id_, index_func, elem_func);
                 }
                 default: {
                     PanicInfo("unsupported arithmetic operation");
@@ -360,46 +432,64 @@ ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcher(BinaryArithOpEvalRa
         case OpType::NotEqual: {
             switch (arith_op) {
                 case ArithOpType::Add: {
-                    auto index_func = [val, right_operand](Index* index, size_t offset) {
+                    auto index_func = [val, right_operand](Index* index,
+                                                           size_t offset) {
                         auto x = index->Reverse_Lookup(offset);
                         return (x + right_operand) != val;
                     };
-                    auto elem_func = [val, right_operand](T x) { return ((x + right_operand) != val); };
-                    return ExecDataRangeVisitorImpl<T>(expr.field_id_, index_func, elem_func);
+                    auto elem_func = [val, right_operand](T x) {
+                        return ((x + right_operand) != val);
+                    };
+                    return ExecDataRangeVisitorImpl<T>(
+                        expr.field_id_, index_func, elem_func);
                 }
                 case ArithOpType::Sub: {
-                    auto index_func = [val, right_operand](Index* index, size_t offset) {
+                    auto index_func = [val, right_operand](Index* index,
+                                                           size_t offset) {
                         auto x = index->Reverse_Lookup(offset);
                         return (x - right_operand) != val;
                     };
-                    auto elem_func = [val, right_operand](T x) { return ((x - right_operand) != val); };
-                    return ExecDataRangeVisitorImpl<T>(expr.field_id_, index_func, elem_func);
+                    auto elem_func = [val, right_operand](T x) {
+                        return ((x - right_operand) != val);
+                    };
+                    return ExecDataRangeVisitorImpl<T>(
+                        expr.field_id_, index_func, elem_func);
                 }
                 case ArithOpType::Mul: {
-                    auto index_func = [val, right_operand](Index* index, size_t offset) {
+                    auto index_func = [val, right_operand](Index* index,
+                                                           size_t offset) {
                         auto x = index->Reverse_Lookup(offset);
                         return (x * right_operand) != val;
                     };
-                    auto elem_func = [val, right_operand](T x) { return ((x * right_operand) != val); };
-                    return ExecDataRangeVisitorImpl<T>(expr.field_id_, index_func, elem_func);
+                    auto elem_func = [val, right_operand](T x) {
+                        return ((x * right_operand) != val);
+                    };
+                    return ExecDataRangeVisitorImpl<T>(
+                        expr.field_id_, index_func, elem_func);
                 }
                 case ArithOpType::Div: {
-                    auto index_func = [val, right_operand](Index* index, size_t offset) {
+                    auto index_func = [val, right_operand](Index* index,
+                                                           size_t offset) {
                         auto x = index->Reverse_Lookup(offset);
                         return (x / right_operand) != val;
                     };
-                    auto elem_func = [val, right_operand](T x) { return ((x / right_operand) != val); };
-                    return ExecDataRangeVisitorImpl<T>(expr.field_id_, index_func, elem_func);
+                    auto elem_func = [val, right_operand](T x) {
+                        return ((x / right_operand) != val);
+                    };
+                    return ExecDataRangeVisitorImpl<T>(
+                        expr.field_id_, index_func, elem_func);
                 }
                 case ArithOpType::Mod: {
-                    auto index_func = [val, right_operand](Index* index, size_t offset) {
+                    auto index_func = [val, right_operand](Index* index,
+                                                           size_t offset) {
                         auto x = index->Reverse_Lookup(offset);
                         return static_cast<T>(fmod(x, right_operand)) != val;
                     };
                     auto elem_func = [val, right_operand](T x) {
                         return (static_cast<T>(fmod(x, right_operand)) != val);
                     };
-                    return ExecDataRangeVisitorImpl<T>(expr.field_id_, index_func, elem_func);
+                    return ExecDataRangeVisitorImpl<T>(
+                        expr.field_id_, index_func, elem_func);
                 }
                 default: {
                     PanicInfo("unsupported arithmetic operation");
@@ -417,8 +507,11 @@ ExecExprVisitor::ExecBinaryArithOpEvalRangeVisitorDispatcher(BinaryArithOpEvalRa
 #pragma ide diagnostic ignored "Simplify"
 template <typename T>
 auto
-ExecExprVisitor::ExecBinaryRangeVisitorDispatcher(BinaryRangeExpr& expr_raw) -> BitsetType {
-    typedef std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T> IndexInnerType;
+ExecExprVisitor::ExecBinaryRangeVisitorDispatcher(BinaryRangeExpr& expr_raw)
+    -> BitsetType {
+    typedef std::
+        conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
+            IndexInnerType;
     using Index = index::ScalarIndex<IndexInnerType>;
     auto& expr = static_cast<BinaryRangeExprImpl<IndexInnerType>&>(expr_raw);
 
@@ -427,7 +520,9 @@ ExecExprVisitor::ExecBinaryRangeVisitorDispatcher(BinaryRangeExpr& expr_raw) -> 
     IndexInnerType val1 = IndexInnerType(expr.lower_value_);
     IndexInnerType val2 = IndexInnerType(expr.upper_value_);
 
-    auto index_func = [=](Index* index) { return index->Range(val1, lower_inclusive, val2, upper_inclusive); };
+    auto index_func = [=](Index* index) {
+        return index->Range(val1, lower_inclusive, val2, upper_inclusive);
+    };
     if (lower_inclusive && upper_inclusive) {
         auto elem_func = [val1, val2](T x) { return (val1 <= x && x <= val2); };
         return ExecRangeVisitorImpl<T>(expr.field_id_, index_func, elem_func);
@@ -490,7 +585,8 @@ ExecExprVisitor::visit(UnaryRangeExpr& expr) {
         default:
             PanicInfo("unsupported");
     }
-    AssertInfo(res.size() == row_count_, "[ExecExprVisitor]Size of results not equal row count");
+    AssertInfo(res.size() == row_count_,
+               "[ExecExprVisitor]Size of results not equal row count");
     bitset_opt_ = std::move(res);
 }
 
@@ -528,7 +624,8 @@ ExecExprVisitor::visit(BinaryArithOpEvalRangeExpr& expr) {
         default:
             PanicInfo("unsupported");
     }
-    AssertInfo(res.size() == row_count_, "[ExecExprVisitor]Size of results not equal row count");
+    AssertInfo(res.size() == row_count_,
+               "[ExecExprVisitor]Size of results not equal row count");
     bitset_opt_ = std::move(res);
 }
 
@@ -578,7 +675,8 @@ ExecExprVisitor::visit(BinaryRangeExpr& expr) {
         default:
             PanicInfo("unsupported");
     }
-    AssertInfo(res.size() == row_count_, "[ExecExprVisitor]Size of results not equal row count");
+    AssertInfo(res.size() == row_count_,
+               "[ExecExprVisitor]Size of results not equal row count");
     bitset_opt_ = std::move(res);
 }
 
@@ -598,8 +696,16 @@ struct relational {
 
 template <typename Op>
 auto
-ExecExprVisitor::ExecCompareExprDispatcher(CompareExpr& expr, Op op) -> BitsetType {
-    using number = boost::variant<bool, int8_t, int16_t, int32_t, int64_t, float, double, std::string>;
+ExecExprVisitor::ExecCompareExprDispatcher(CompareExpr& expr, Op op)
+    -> BitsetType {
+    using number = boost::variant<bool,
+                                  int8_t,
+                                  int16_t,
+                                  int32_t,
+                                  int64_t,
+                                  float,
+                                  double,
+                                  std::string>;
     auto size_per_chunk = segment_.size_per_chunk();
     auto num_chunk = upper_div(row_count_, size_per_chunk);
     std::deque<BitsetType> bitsets;
@@ -607,120 +713,194 @@ ExecExprVisitor::ExecCompareExprDispatcher(CompareExpr& expr, Op op) -> BitsetTy
     // check for sealed segment, load either raw field data or index
     auto left_indexing_barrier = segment_.num_chunk_index(expr.left_field_id_);
     auto left_data_barrier = segment_.num_chunk_data(expr.left_field_id_);
-    AssertInfo(std::max(left_data_barrier, left_indexing_barrier) == num_chunk,
-               "max(left_data_barrier, left_indexing_barrier) not equal to num_chunk");
+    AssertInfo(
+        std::max(left_data_barrier, left_indexing_barrier) == num_chunk,
+        "max(left_data_barrier, left_indexing_barrier) not equal to num_chunk");
 
-    auto right_indexing_barrier = segment_.num_chunk_index(expr.right_field_id_);
+    auto right_indexing_barrier =
+        segment_.num_chunk_index(expr.right_field_id_);
     auto right_data_barrier = segment_.num_chunk_data(expr.right_field_id_);
-    AssertInfo(std::max(right_data_barrier, right_indexing_barrier) == num_chunk,
-               "max(right_data_barrier, right_indexing_barrier) not equal to num_chunk");
+    AssertInfo(
+        std::max(right_data_barrier, right_indexing_barrier) == num_chunk,
+        "max(right_data_barrier, right_indexing_barrier) not equal to "
+        "num_chunk");
 
     for (int64_t chunk_id = 0; chunk_id < num_chunk; ++chunk_id) {
-        auto size = chunk_id == num_chunk - 1 ? row_count_ - chunk_id * size_per_chunk : size_per_chunk;
-        auto getChunkData = [&, chunk_id](DataType type, FieldId field_id,
-                                          int64_t data_barrier) -> std::function<const number(int)> {
+        auto size = chunk_id == num_chunk - 1
+                        ? row_count_ - chunk_id * size_per_chunk
+                        : size_per_chunk;
+        auto getChunkData =
+            [&, chunk_id](DataType type, FieldId field_id, int64_t data_barrier)
+            -> std::function<const number(int)> {
             switch (type) {
                 case DataType::BOOL: {
                     if (chunk_id < data_barrier) {
-                        auto chunk_data = segment_.chunk_data<bool>(field_id, chunk_id).data();
-                        return [chunk_data](int i) -> const number { return chunk_data[i]; };
+                        auto chunk_data =
+                            segment_.chunk_data<bool>(field_id, chunk_id)
+                                .data();
+                        return [chunk_data](int i) -> const number {
+                            return chunk_data[i];
+                        };
                     } else {
                         // for case, sealed segment has loaded index for scalar field instead of raw data
-                        auto& indexing = segment_.chunk_scalar_index<bool>(field_id, chunk_id);
-                        return [&indexing](int i) -> const number { return indexing.Reverse_Lookup(i); };
+                        auto& indexing = segment_.chunk_scalar_index<bool>(
+                            field_id, chunk_id);
+                        return [&indexing](int i) -> const number {
+                            return indexing.Reverse_Lookup(i);
+                        };
                     }
                 }
                 case DataType::INT8: {
                     if (chunk_id < data_barrier) {
-                        auto chunk_data = segment_.chunk_data<int8_t>(field_id, chunk_id).data();
-                        return [chunk_data](int i) -> const number { return chunk_data[i]; };
+                        auto chunk_data =
+                            segment_.chunk_data<int8_t>(field_id, chunk_id)
+                                .data();
+                        return [chunk_data](int i) -> const number {
+                            return chunk_data[i];
+                        };
                     } else {
                         // for case, sealed segment has loaded index for scalar field instead of raw data
-                        auto& indexing = segment_.chunk_scalar_index<int8_t>(field_id, chunk_id);
-                        return [&indexing](int i) -> const number { return indexing.Reverse_Lookup(i); };
+                        auto& indexing = segment_.chunk_scalar_index<int8_t>(
+                            field_id, chunk_id);
+                        return [&indexing](int i) -> const number {
+                            return indexing.Reverse_Lookup(i);
+                        };
                     }
                 }
                 case DataType::INT16: {
                     if (chunk_id < data_barrier) {
-                        auto chunk_data = segment_.chunk_data<int16_t>(field_id, chunk_id).data();
-                        return [chunk_data](int i) -> const number { return chunk_data[i]; };
+                        auto chunk_data =
+                            segment_.chunk_data<int16_t>(field_id, chunk_id)
+                                .data();
+                        return [chunk_data](int i) -> const number {
+                            return chunk_data[i];
+                        };
                     } else {
                         // for case, sealed segment has loaded index for scalar field instead of raw data
-                        auto& indexing = segment_.chunk_scalar_index<int16_t>(field_id, chunk_id);
-                        return [&indexing](int i) -> const number { return indexing.Reverse_Lookup(i); };
+                        auto& indexing = segment_.chunk_scalar_index<int16_t>(
+                            field_id, chunk_id);
+                        return [&indexing](int i) -> const number {
+                            return indexing.Reverse_Lookup(i);
+                        };
                     }
                 }
                 case DataType::INT32: {
                     if (chunk_id < data_barrier) {
-                        auto chunk_data = segment_.chunk_data<int32_t>(field_id, chunk_id).data();
-                        return [chunk_data](int i) -> const number { return chunk_data[i]; };
+                        auto chunk_data =
+                            segment_.chunk_data<int32_t>(field_id, chunk_id)
+                                .data();
+                        return [chunk_data](int i) -> const number {
+                            return chunk_data[i];
+                        };
                     } else {
                         // for case, sealed segment has loaded index for scalar field instead of raw data
-                        auto& indexing = segment_.chunk_scalar_index<int32_t>(field_id, chunk_id);
-                        return [&indexing](int i) -> const number { return indexing.Reverse_Lookup(i); };
+                        auto& indexing = segment_.chunk_scalar_index<int32_t>(
+                            field_id, chunk_id);
+                        return [&indexing](int i) -> const number {
+                            return indexing.Reverse_Lookup(i);
+                        };
                     }
                 }
                 case DataType::INT64: {
                     if (chunk_id < data_barrier) {
-                        auto chunk_data = segment_.chunk_data<int64_t>(field_id, chunk_id).data();
-                        return [chunk_data](int i) -> const number { return chunk_data[i]; };
+                        auto chunk_data =
+                            segment_.chunk_data<int64_t>(field_id, chunk_id)
+                                .data();
+                        return [chunk_data](int i) -> const number {
+                            return chunk_data[i];
+                        };
                     } else {
                         // for case, sealed segment has loaded index for scalar field instead of raw data
-                        auto& indexing = segment_.chunk_scalar_index<int64_t>(field_id, chunk_id);
-                        return [&indexing](int i) -> const number { return indexing.Reverse_Lookup(i); };
+                        auto& indexing = segment_.chunk_scalar_index<int64_t>(
+                            field_id, chunk_id);
+                        return [&indexing](int i) -> const number {
+                            return indexing.Reverse_Lookup(i);
+                        };
                     }
                 }
                 case DataType::FLOAT: {
                     if (chunk_id < data_barrier) {
-                        auto chunk_data = segment_.chunk_data<float>(field_id, chunk_id).data();
-                        return [chunk_data](int i) -> const number { return chunk_data[i]; };
+                        auto chunk_data =
+                            segment_.chunk_data<float>(field_id, chunk_id)
+                                .data();
+                        return [chunk_data](int i) -> const number {
+                            return chunk_data[i];
+                        };
                     } else {
                         // for case, sealed segment has loaded index for scalar field instead of raw data
-                        auto& indexing = segment_.chunk_scalar_index<float>(field_id, chunk_id);
-                        return [&indexing](int i) -> const number { return indexing.Reverse_Lookup(i); };
+                        auto& indexing = segment_.chunk_scalar_index<float>(
+                            field_id, chunk_id);
+                        return [&indexing](int i) -> const number {
+                            return indexing.Reverse_Lookup(i);
+                        };
                     }
                 }
                 case DataType::DOUBLE: {
                     if (chunk_id < data_barrier) {
-                        auto chunk_data = segment_.chunk_data<double>(field_id, chunk_id).data();
-                        return [chunk_data](int i) -> const number { return chunk_data[i]; };
+                        auto chunk_data =
+                            segment_.chunk_data<double>(field_id, chunk_id)
+                                .data();
+                        return [chunk_data](int i) -> const number {
+                            return chunk_data[i];
+                        };
                     } else {
                         // for case, sealed segment has loaded index for scalar field instead of raw data
-                        auto& indexing = segment_.chunk_scalar_index<double>(field_id, chunk_id);
-                        return [&indexing](int i) -> const number { return indexing.Reverse_Lookup(i); };
+                        auto& indexing = segment_.chunk_scalar_index<double>(
+                            field_id, chunk_id);
+                        return [&indexing](int i) -> const number {
+                            return indexing.Reverse_Lookup(i);
+                        };
                     }
                 }
                 case DataType::VARCHAR: {
                     if (chunk_id < data_barrier) {
                         if (segment_.type() == SegmentType::Growing) {
-                            auto chunk_data = segment_.chunk_data<std::string>(field_id, chunk_id).data();
-                            return [chunk_data](int i) -> const number { return chunk_data[i]; };
+                            auto chunk_data =
+                                segment_
+                                    .chunk_data<std::string>(field_id, chunk_id)
+                                    .data();
+                            return [chunk_data](int i) -> const number {
+                                return chunk_data[i];
+                            };
                         } else {
-                            auto chunk_data = segment_.chunk_data<std::string_view>(field_id, chunk_id).data();
-                            return [chunk_data](int i) -> const number { return std::string(chunk_data[i]); };
+                            auto chunk_data = segment_
+                                                  .chunk_data<std::string_view>(
+                                                      field_id, chunk_id)
+                                                  .data();
+                            return [chunk_data](int i) -> const number {
+                                return std::string(chunk_data[i]);
+                            };
                         }
                     } else {
                         // for case, sealed segment has loaded index for scalar field instead of raw data
-                        auto& indexing = segment_.chunk_scalar_index<std::string>(field_id, chunk_id);
-                        return [&indexing](int i) -> const number { return indexing.Reverse_Lookup(i); };
+                        auto& indexing =
+                            segment_.chunk_scalar_index<std::string>(field_id,
+                                                                     chunk_id);
+                        return [&indexing](int i) -> const number {
+                            return indexing.Reverse_Lookup(i);
+                        };
                     }
                 }
                 default:
                     PanicInfo("unsupported datatype");
             }
         };
-        auto left = getChunkData(expr.left_data_type_, expr.left_field_id_, left_data_barrier);
-        auto right = getChunkData(expr.right_data_type_, expr.right_field_id_, right_data_barrier);
+        auto left = getChunkData(
+            expr.left_data_type_, expr.left_field_id_, left_data_barrier);
+        auto right = getChunkData(
+            expr.right_data_type_, expr.right_field_id_, right_data_barrier);
 
         BitsetType bitset(size);
         for (int i = 0; i < size; ++i) {
-            bool is_in = boost::apply_visitor(Relational<decltype(op)>{}, left(i), right(i));
+            bool is_in = boost::apply_visitor(
+                Relational<decltype(op)>{}, left(i), right(i));
             bitset[i] = is_in;
         }
         bitsets.emplace_back(std::move(bitset));
     }
     auto final_result = Assemble(bitsets);
-    AssertInfo(final_result.size() == row_count_, "[ExecExprVisitor]Size of results not equal row count");
+    AssertInfo(final_result.size() == row_count_,
+               "[ExecExprVisitor]Size of results not equal row count");
     return final_result;
 }
 
@@ -729,10 +909,12 @@ ExecExprVisitor::visit(CompareExpr& expr) {
     auto& schema = segment_.get_schema();
     auto& left_field_meta = schema[expr.left_field_id_];
     auto& right_field_meta = schema[expr.right_field_id_];
-    AssertInfo(expr.left_data_type_ == left_field_meta.get_data_type(),
-               "[ExecExprVisitor]Left data type not equal to left field mata type");
-    AssertInfo(expr.right_data_type_ == right_field_meta.get_data_type(),
-               "[ExecExprVisitor]right data type not equal to right field mata type");
+    AssertInfo(
+        expr.left_data_type_ == left_field_meta.get_data_type(),
+        "[ExecExprVisitor]Left data type not equal to left field meta type");
+    AssertInfo(
+        expr.right_data_type_ == right_field_meta.get_data_type(),
+        "[ExecExprVisitor]right data type not equal to right field meta type");
 
     BitsetType res;
     switch (expr.op_type_) {
@@ -761,7 +943,8 @@ ExecExprVisitor::visit(CompareExpr& expr) {
             break;
         }
         case OpType::PrefixMatch: {
-            res = ExecCompareExprDispatcher(expr, MatchOp<OpType::PrefixMatch>{});
+            res =
+                ExecCompareExprDispatcher(expr, MatchOp<OpType::PrefixMatch>{});
             break;
         }
             // case OpType::PostfixMatch: {
@@ -770,7 +953,8 @@ ExecExprVisitor::visit(CompareExpr& expr) {
             PanicInfo("unsupported optype");
         }
     }
-    AssertInfo(res.size() == row_count_, "[ExecExprVisitor]Size of results not equal row count");
+    AssertInfo(res.size() == row_count_,
+               "[ExecExprVisitor]Size of results not equal row count");
     bitset_opt_ = std::move(res);
 }
 
@@ -785,7 +969,8 @@ ExecExprVisitor::ExecTermVisitorImpl(TermExpr& expr_raw) -> BitsetType {
 
     bool use_pk_index = false;
     if (primary_filed_id.has_value()) {
-        use_pk_index = primary_filed_id.value() == field_id && IsPrimaryKeyDataType(field_meta.get_data_type());
+        use_pk_index = primary_filed_id.value() == field_id &&
+                       IsPrimaryKeyDataType(field_meta.get_data_type());
     }
 
     if (use_pk_index) {
@@ -816,7 +1001,8 @@ ExecExprVisitor::ExecTermVisitorImpl(TermExpr& expr_raw) -> BitsetType {
             auto _offset = (int64_t)offset.get();
             bitset[_offset] = true;
         }
-        AssertInfo(bitset.size() == row_count_, "[ExecExprVisitor]Size of results not equal row count");
+        AssertInfo(bitset.size() == row_count_,
+                   "[ExecExprVisitor]Size of results not equal row count");
         return bitset;
     }
 
@@ -825,27 +1011,34 @@ ExecExprVisitor::ExecTermVisitorImpl(TermExpr& expr_raw) -> BitsetType {
 
 template <>
 auto
-ExecExprVisitor::ExecTermVisitorImpl<std::string>(TermExpr& expr_raw) -> BitsetType {
+ExecExprVisitor::ExecTermVisitorImpl<std::string>(TermExpr& expr_raw)
+    -> BitsetType {
     return ExecTermVisitorImplTemplate<std::string>(expr_raw);
 }
 
 template <>
 auto
-ExecExprVisitor::ExecTermVisitorImpl<std::string_view>(TermExpr& expr_raw) -> BitsetType {
+ExecExprVisitor::ExecTermVisitorImpl<std::string_view>(TermExpr& expr_raw)
+    -> BitsetType {
     return ExecTermVisitorImplTemplate<std::string_view>(expr_raw);
 }
 
 template <typename T>
 auto
 ExecExprVisitor::ExecTermVisitorImplTemplate(TermExpr& expr_raw) -> BitsetType {
-    typedef std::conditional_t<std::is_same_v<T, std::string_view>, std::string, T> IndexInnerType;
+    typedef std::
+        conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
+            IndexInnerType;
     using Index = index::ScalarIndex<IndexInnerType>;
     auto& expr = static_cast<TermExprImpl<IndexInnerType>&>(expr_raw);
-    const std::vector<IndexInnerType> terms(expr.terms_.begin(), expr.terms_.end());
+    const std::vector<IndexInnerType> terms(expr.terms_.begin(),
+                                            expr.terms_.end());
     auto n = terms.size();
     std::unordered_set<T> term_set(expr.terms_.begin(), expr.terms_.end());
 
-    auto index_func = [&terms, n](Index* index) { return index->In(n, terms.data()); };
+    auto index_func = [&terms, n](Index* index) {
+        return index->In(n, terms.data());
+    };
     auto elem_func = [&terms, &term_set](T x) {
         //// terms has already been sorted.
         // return std::binary_search(terms.begin(), terms.end(), x);
@@ -858,7 +1051,8 @@ ExecExprVisitor::ExecTermVisitorImplTemplate(TermExpr& expr_raw) -> BitsetType {
 // TODO: bool is so ugly here.
 template <>
 auto
-ExecExprVisitor::ExecTermVisitorImplTemplate<bool>(TermExpr& expr_raw) -> BitsetType {
+ExecExprVisitor::ExecTermVisitorImplTemplate<bool>(TermExpr& expr_raw)
+    -> BitsetType {
     using T = bool;
     auto& expr = static_cast<TermExprImpl<T>&>(expr_raw);
     using Index = index::ScalarIndex<T>;
@@ -932,7 +1126,8 @@ ExecExprVisitor::visit(TermExpr& expr) {
         default:
             PanicInfo("unsupported");
     }
-    AssertInfo(res.size() == row_count_, "[ExecExprVisitor]Size of results not equal row count");
+    AssertInfo(res.size() == row_count_,
+               "[ExecExprVisitor]Size of results not equal row count");
     bitset_opt_ = std::move(res);
 }
 }  // namespace milvus::query
