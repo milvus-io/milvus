@@ -2,7 +2,7 @@ import multiprocessing
 import numbers
 import random
 import numpy
-
+import threading
 import pytest
 import pandas as pd
 from time import sleep
@@ -2901,7 +2901,7 @@ class TestCollectionSearch(TestcaseBase):
                                                  check_items={"name": collection_name, "schema": schema})
         collection_w.create_index(field_name1, default_index_params, index_name=index_name)
         int_values = pd.Series(data=[i for i in range(0, nb)])
-        float_vec_values = gen_vectors(nb, dim)
+        float_vec_values = cf.gen_vectors(nb, dim)
         dataframe = pd.DataFrame({ct.default_int64_field_name: int_values,
                                   field_name1: int_values, field_name2: float_vec_values})
         collection_w.insert(dataframe)
@@ -2974,6 +2974,31 @@ class TestCollectionSearch(TestcaseBase):
                             check_items={"nq": nq,
                                          "ids": insert_ids,
                                          "limit": default_limit})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_search_during_upsert(self):
+        """
+        target: test search during upsert
+        method: 1. create a collection and search
+                2. search during upsert
+                3. compare two search results
+        expected: the two search results is the same
+        """
+        nq = 5
+        upsert_nb = 1000
+        collection_w = self.init_collection_general(prefix, True)[0]
+        vectors = [[random.random() for _ in range(default_dim)] for _ in range(nq)]
+        res1 = collection_w.search(vectors[:nq], default_search_field, default_search_params, default_limit)[0]
+
+        def do_upsert():
+            data = cf.gen_default_data_for_upsert(upsert_nb)[0]
+            collection_w.upsert(data=data)
+
+        t = threading.Thread(target=do_upsert, args=())
+        t.start()
+        res2 = collection_w.search(vectors[:nq], default_search_field, default_search_params, default_limit)[0]
+        t.join()
+        assert [res1[i].ids for i in range(nq)] == [res2[i].ids for i in range(nq)]
 
 
 class TestSearchBase(TestcaseBase):
