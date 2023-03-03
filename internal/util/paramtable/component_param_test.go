@@ -354,6 +354,13 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, Params.GracefulStopTimeout.GetAsInt64(), int64(50))
 	})
 
+	t.Run("channel config priority", func(t *testing.T) {
+		Params := params.CommonCfg
+		params.Save(Params.RootCoordDml.Key, "dml1")
+		params.Save(Params.RootCoordDml.FallbackKeys[0], "dml2")
+
+		assert.Equal(t, "by-dev-dml1", Params.RootCoordDml.GetValue())
+	})
 }
 
 func TestForbiddenItem(t *testing.T) {
