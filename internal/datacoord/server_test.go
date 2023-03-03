@@ -1293,7 +1293,7 @@ func TestSaveBinlogPaths(t *testing.T) {
 		assert.Nil(t, err)
 		assert.EqualValues(t, resp.ErrorCode, commonpb.ErrorCode_Success)
 
-		segment := svr.meta.GetSegment(1)
+		segment := svr.meta.GetHealthySegment(1)
 		assert.NotNil(t, segment)
 		binlogs := segment.GetBinlogs()
 		assert.EqualValues(t, 1, len(binlogs))
@@ -1745,7 +1745,7 @@ func TestDataNodeTtChannel(t *testing.T) {
 		assert.EqualValues(t, 1, len(resp.SegIDAssignments))
 
 		assignedSegmentID := resp.SegIDAssignments[0].SegID
-		segment := svr.meta.GetSegment(assignedSegmentID)
+		segment := svr.meta.GetHealthySegment(assignedSegmentID)
 		assert.EqualValues(t, 1, len(segment.allocations))
 
 		msgPack := msgstream.MsgPack{}
@@ -1755,7 +1755,7 @@ func TestDataNodeTtChannel(t *testing.T) {
 		assert.Nil(t, err)
 
 		<-ch
-		segment = svr.meta.GetSegment(assignedSegmentID)
+		segment = svr.meta.GetHealthySegment(assignedSegmentID)
 		assert.EqualValues(t, 0, len(segment.allocations))
 	})
 }

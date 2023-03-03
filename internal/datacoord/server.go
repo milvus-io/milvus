@@ -630,7 +630,7 @@ func (s *Server) handleTimetickMessage(ctx context.Context, ttMsg *msgstream.Dat
 
 func (s *Server) updateSegmentStatistics(stats []*datapb.SegmentStats) {
 	for _, stat := range stats {
-		segment := s.meta.GetSegmentUnsafe(stat.GetSegmentID())
+		segment := s.meta.GetSegment(stat.GetSegmentID())
 		if segment == nil {
 			log.Warn("skip updating row number for not exist segment",
 				zap.Int64("segment ID", stat.GetSegmentID()),
@@ -649,7 +649,7 @@ func (s *Server) updateSegmentStatistics(stats []*datapb.SegmentStats) {
 		if segment.currRows < stat.GetNumRows() {
 			log.Info("Updating segment number of rows",
 				zap.Int64("segment ID", stat.GetSegmentID()),
-				zap.Int64("old value", s.meta.GetSegmentUnsafe(stat.GetSegmentID()).GetNumOfRows()),
+				zap.Int64("old value", s.meta.GetSegment(stat.GetSegmentID()).GetNumOfRows()),
 				zap.Int64("new value", stat.GetNumRows()),
 			)
 			s.meta.SetCurrentRows(stat.GetSegmentID(), stat.GetNumRows())
@@ -660,7 +660,7 @@ func (s *Server) updateSegmentStatistics(stats []*datapb.SegmentStats) {
 func (s *Server) getFlushableSegmentsInfo(flushableIDs []int64) []*SegmentInfo {
 	res := make([]*SegmentInfo, 0, len(flushableIDs))
 	for _, id := range flushableIDs {
-		sinfo := s.meta.GetSegment(id)
+		sinfo := s.meta.GetHealthySegment(id)
 		if sinfo == nil {
 			log.Error("get segment from meta error", zap.Int64("id", id))
 			continue
@@ -821,7 +821,7 @@ func (s *Server) startFlushLoop(ctx context.Context) {
 // 2. notify RootCoord segment is flushed
 // 3. change segment state to `Flushed` in meta
 func (s *Server) postFlush(ctx context.Context, segmentID UniqueID) error {
-	segment := s.meta.GetSegment(segmentID)
+	segment := s.meta.GetHealthySegment(segmentID)
 	if segment == nil {
 		return errors.New("segment not found, might be a faked segemnt, ignore post flush")
 	}

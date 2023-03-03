@@ -490,7 +490,7 @@ func Test_AlterSegmentsAndAddNewSegment(t *testing.T) {
 		err := catalog.AlterSegmentsAndAddNewSegment(context.TODO(), []*datapb.SegmentInfo{droppedSegment}, segment1)
 		assert.NoError(t, err)
 
-		assert.Equal(t, 8, len(savedKvs))
+		assert.Equal(t, 9, len(savedKvs))
 		verifySavedKvsForDroppedSegment(t, savedKvs)
 		verifySavedKvsForSegment(t, savedKvs)
 

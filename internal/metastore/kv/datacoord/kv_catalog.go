@@ -393,24 +393,22 @@ func (kc *Catalog) AlterSegmentsAndAddNewSegment(ctx context.Context, segments [
 	}
 
 	if newSegment != nil {
-		if newSegment.GetNumOfRows() > 0 {
-			segmentKvs, err := buildSegmentAndBinlogsKvs(newSegment)
-			if err != nil {
-				return err
-			}
-			maps.Copy(kvs, segmentKvs)
-			kc.collectMetrics(newSegment)
-		} else {
-			// should be a faked segment, we create flush path directly here
-			flushSegKey := buildFlushedSegmentPath(newSegment.GetCollectionID(), newSegment.GetPartitionID(), newSegment.GetID())
-			clonedSegment := proto.Clone(newSegment).(*datapb.SegmentInfo)
-			clonedSegment.IsFake = true
-			segBytes, err := marshalSegmentInfo(clonedSegment)
-			if err != nil {
-				return err
-			}
-			kvs[flushSegKey] = segBytes
+		segmentKvs, err := buildSegmentAndBinlogsKvs(newSegment)
+		if err != nil {
+			return err
 		}
+		maps.Copy(kvs, segmentKvs)
+		kc.collectMetrics(newSegment)
+
+		flushSegKey := buildFlushedSegmentPath(newSegment.GetCollectionID(), newSegment.GetPartitionID(), newSegment.GetID())
+		clonedSegment := proto.Clone(newSegment).(*datapb.SegmentInfo)
+		// Set to fake if it's empty
+		clonedSegment.IsFake = newSegment.GetNumOfRows() == 0
+		segBytes, err := marshalSegmentInfo(clonedSegment)
+		if err != nil {
+			return err
+		}
+		kvs[flushSegKey] = segBytes
 	}
 
 	return kc.MetaKv.MultiSave(kvs)

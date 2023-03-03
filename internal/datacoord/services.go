@@ -224,7 +224,7 @@ func (s *Server) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentSta
 		state := &datapb.SegmentStateInfo{
 			SegmentID: segmentID,
 		}
-		segmentInfo := s.meta.GetSegment(segmentID)
+		segmentInfo := s.meta.GetHealthySegment(segmentID)
 		if segmentInfo == nil {
 			state.State = commonpb.SegmentState_NotExist
 		} else {
@@ -249,7 +249,7 @@ func (s *Server) GetInsertBinlogPaths(ctx context.Context, req *datapb.GetInsert
 		setNotServingStatus(resp.Status, s.GetStateCode())
 		return resp, nil
 	}
-	segment := s.meta.GetSegment(req.GetSegmentID())
+	segment := s.meta.GetHealthySegment(req.GetSegmentID())
 	if segment == nil {
 		resp.Status.Reason = "segment not found"
 		return resp, nil
@@ -347,7 +347,7 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 	for _, id := range req.SegmentIDs {
 		var info *SegmentInfo
 		if req.IncludeUnHealthy {
-			info = s.meta.GetSegmentUnsafe(id)
+			info = s.meta.GetSegment(id)
 
 			if info == nil {
 				log.Warn("failed to get segment, this may have been cleaned", zap.Int64("segmentID", id))
@@ -364,7 +364,7 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 			segmentutil.ReCalcRowCount(info.SegmentInfo, clonedInfo.SegmentInfo)
 			infos = append(infos, clonedInfo.SegmentInfo)
 		} else {
-			info = s.meta.GetSegment(id)
+			info = s.meta.GetHealthySegment(id)
 			if info == nil {
 				resp.Status.Reason = msgSegmentNotFound(id)
 				return resp, nil
@@ -410,6 +410,16 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 
 	if segment == nil {
 		log.Error("failed to get segment", zap.Int64("segmentID", segmentID))
+		failResponseWithCode(resp, commonpb.ErrorCode_SegmentNotFound, fmt.Sprintf("failed to get segment %d", segmentID))
+		return resp, nil
+	}
+
+	if segment.State == commonpb.SegmentState_Dropped {
+		log.Info("save to dropped segment, ignore this request")
+		resp.ErrorCode = commonpb.ErrorCode_Success
+		return resp, nil
+	} else if !isSegmentHealthy(segment) {
+		log.Error("failed to get segment")
 		failResponseWithCode(resp, commonpb.ErrorCode_SegmentNotFound, fmt.Sprintf("failed to get segment %d", segmentID))
 		return resp, nil
 	}
@@ -639,7 +649,7 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 	segment2InsertChannel := make(map[UniqueID]string)
 	segmentsNumOfRows := make(map[UniqueID]int64)
 	for id := range flushedIDs {
-		segment := s.meta.GetSegmentUnsafe(id)
+		segment := s.meta.GetSegment(id)
 		if segment == nil {
 			errMsg := fmt.Sprintf("failed to get segment %d", id)
 			log.Error(errMsg)
@@ -749,7 +759,7 @@ func (s *Server) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedS
 	}
 	ret := make([]UniqueID, 0, len(segmentIDs))
 	for _, id := range segmentIDs {
-		segment := s.meta.GetSegmentUnsafe(id)
+		segment := s.meta.GetSegment(id)
 		// if this segment == nil, we assume this segment has been gc
 		if segment == nil ||
 			(segment.GetState() != commonpb.SegmentState_Dropped &&
@@ -800,7 +810,7 @@ func (s *Server) GetSegmentsByStates(ctx context.Context, req *datapb.GetSegment
 		statesDict[state] = true
 	}
 	for _, id := range segmentIDs {
-		segment := s.meta.GetSegment(id)
+		segment := s.meta.GetHealthySegment(id)
 		if segment != nil && statesDict[segment.GetState()] {
 			ret = append(ret, id)
 		}
@@ -1103,7 +1113,7 @@ func (s *Server) GetFlushState(ctx context.Context, req *milvuspb.GetFlushStateR
 
 	var unflushed []UniqueID
 	for _, sid := range req.GetSegmentIDs() {
-		segment := s.meta.GetSegment(sid)
+		segment := s.meta.GetHealthySegment(sid)
 		// segment is nil if it was compacted or it's a empty segment and is set to dropped
 		if segment == nil || segment.GetState() == commonpb.SegmentState_Flushing ||
 			segment.GetState() == commonpb.SegmentState_Flushed {
