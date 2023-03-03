@@ -43,6 +43,10 @@ def gen_unique_str(str_value=None):
     return "test_" + prefix if str_value is None else str_value + "_" + prefix
 
 
+def gen_str_by_length(length=8, letters_only=False):
+    if letters_only:
+        return "".join(random.choice(string.ascii_letters) for _ in range(length))
+
 def gen_unique_unicode_str(str_value=None):
     s = "test_" if str_value is None else str_value
     for i in range(8):

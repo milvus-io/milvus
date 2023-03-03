@@ -256,3 +256,4 @@ class CaseLabel:
     L3 = "L3"
     Loadbalance = "Loadbalance"  # loadbalance testcases which need to be run in multi query nodes
     ClusterOnly = "ClusterOnly"  # For functions only suitable to cluster mode
+    MultiQueryNodes = "MultiQueryNodes"  # for 8 query nodes configs tests, such as resource group
