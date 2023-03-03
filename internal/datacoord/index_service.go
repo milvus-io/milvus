@@ -329,15 +329,19 @@ func (s *Server) completeIndexInfo(indexInfo *indexpb.IndexInfo, index *model.In
 	for _, seg := range segments {
 		totalRows += seg.NumOfRows
 		segIdx, ok := seg.segmentIndexes[index.IndexID]
+
 		if !ok {
-			if seg.LastExpireTime <= index.CreateTime {
+			if seg.GetStartPosition().GetTimestamp() <= index.CreateTime {
 				cntUnissued++
 			}
 			continue
 		}
-		if segIdx.CreateTime > index.CreateTime {
+
+		//data before index create time should create complete
+		if seg.GetStartPosition().GetTimestamp() > index.CreateTime {
 			continue
 		}
+
 		switch segIdx.IndexState {
 		case commonpb.IndexState_IndexStateNone:
 			// can't to here
