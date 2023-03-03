@@ -23,6 +23,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
+
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/log"
 	querypb "github.com/milvus-io/milvus/internal/proto/querypb"
@@ -111,6 +113,15 @@ func (node *MockQueryNode) Start() error {
 			segment.GetSegmentID())
 		node.segmentVersion[segment.GetSegmentID()] = req.GetVersion()
 	}).Return(successStatus, nil).Maybe()
+	node.EXPECT().GetComponentStates(mock.Anything, mock.Anything).
+		Return(&milvuspb.ComponentStates{
+			Status: successStatus,
+			State: &milvuspb.ComponentInfo{
+				NodeID:    node.ID,
+				Role:      "querynode",
+				StateCode: commonpb.StateCode_Healthy,
+			},
+		}, nil).Maybe()
 
 	// Register
 	node.session.Init(typeutil.QueryNodeRole, node.addr, false, true)
