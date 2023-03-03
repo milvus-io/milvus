@@ -23,10 +23,12 @@ import (
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 )
 
@@ -162,9 +164,13 @@ func (ob *CollectionObserver) observeCollectionLoadStatus(collection *meta.Colle
 
 	segmentTargets := ob.targetMgr.GetHistoricalSegmentsByCollection(collection.GetCollectionID(), meta.NextTarget)
 	channelTargets := ob.targetMgr.GetDmChannelsByCollection(collection.GetCollectionID(), meta.NextTarget)
+	segmentTargetIDs := lo.MapToSlice(segmentTargets, func(k int64, _ *datapb.SegmentInfo) int64 {
+		return k
+	})
 	targetNum := len(segmentTargets) + len(channelTargets)
 	log.Info("collection targets",
 		zap.Int("segmentTargetNum", len(segmentTargets)),
+		zap.Int64s("segmentTargetIDs", segmentTargetIDs),
 		zap.Int("channelTargetNum", len(channelTargets)),
 		zap.Int("totalTargetNum", targetNum),
 		zap.Int32("replicaNum", collection.GetReplicaNumber()),
