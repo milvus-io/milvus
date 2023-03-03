@@ -370,7 +370,7 @@ func TestWriterTemplateInsertDeleteDrop(t *testing.T) {
 		err = cdcWriter.Write(context.Background(), generateInsertData(int64(1001), "coll", "a", "part", "d"), writerCallback)
 		assert.NoError(t, err)
 		cdcWriter.Flush(context.Background())
-		time.Sleep(time.Second)
+		time.Sleep(2 * time.Second)
 		writerCallback.AssertCalled(t, "OnSuccess", int64(1001), mock.Anything) // 3
 		writerCallback.AssertCalled(t, "OnSuccess", int64(1002), mock.Anything) // 1
 		writerCallback.AssertNumberOfCalls(t, "OnSuccess", 4)
@@ -421,7 +421,7 @@ func TestWriterTemplateInsertDeleteDrop(t *testing.T) {
 		err = cdcWriter.Write(context.Background(), generateDeleteData(int64(1001), "col1", "a", "part", "d", []int64{10, 11, 12}), writerCallback)
 		assert.NoError(t, err)
 		cdcWriter.Flush(context.Background())
-		time.Sleep(time.Second)
+		time.Sleep(2 * time.Second)
 		writerCallback.AssertCalled(t, "OnSuccess", int64(1001), mock.Anything) // 3
 		writerCallback.AssertCalled(t, "OnSuccess", int64(1002), mock.Anything) // 1
 		writerCallback.AssertNumberOfCalls(t, "OnSuccess", 4)
@@ -470,7 +470,7 @@ func TestWriterTemplateInsertDeleteDrop(t *testing.T) {
 		err = cdcWriter.Write(context.Background(), generateDropData(int64(1001), "coll", "a", "e", "b", "f"), writerCallback)
 		assert.NoError(t, err)
 
-		time.Sleep(time.Second)
+		time.Sleep(2 * time.Second)
 		writerCallback.AssertCalled(t, "OnSuccess", int64(1001), mock.Anything)
 		writerCallback.AssertNumberOfCalls(t, "OnSuccess", 5)
 		mockMilvusClient.AssertNumberOfCalls(t, "Insert", 2)

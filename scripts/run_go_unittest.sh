@@ -156,6 +156,16 @@ function test_metastore()
 go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/metastore/..." -failfast
 }
 
+function test_cdc()
+{
+pushd "${ROOT_DIR}/cdc/core"
+go test -race -cover ${APPLE_SILICON_FLAG} "./..." -failfast
+popd
+pushd "${ROOT_DIR}/cdc/server"
+go test -race -cover ${APPLE_SILICON_FLAG} "./..." -failfast
+popd
+}
+
 function test_all()
 {
 test_proxy
@@ -174,6 +184,7 @@ test_tso
 test_config
 test_util
 test_metastore
+test_cdc
 }
 
 
@@ -226,6 +237,9 @@ case "${TEST_TAG}" in
         ;;
     metastore)
 	test_metastore
+        ;;
+    cdc)
+  test_cdc
         ;;
     *)   echo "Test All";
 	test_all
