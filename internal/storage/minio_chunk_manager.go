@@ -29,7 +29,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/storage/gcp"
-	"github.com/milvus-io/milvus/internal/util/errorutil"
+	"github.com/milvus-io/milvus/internal/util/errutil"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
@@ -201,15 +201,12 @@ func (mcm *MinioChunkManager) Write(ctx context.Context, filePath string, conten
 // MultiWrite saves multiple objects, the path is the key of @kvs.
 // The object value is the value of @kvs.
 func (mcm *MinioChunkManager) MultiWrite(ctx context.Context, kvs map[string][]byte) error {
-	var el errorutil.ErrorList
+	var el error
 	for key, value := range kvs {
 		err := mcm.Write(ctx, key, value)
 		if err != nil {
-			el = append(el, err)
+			el = errutil.Combine(el, errors.Wrapf(err, "failed to write %s", key))
 		}
-	}
-	if len(el) == 0 {
-		return nil
 	}
 	return el
 }
@@ -272,19 +269,16 @@ func (mcm *MinioChunkManager) Read(ctx context.Context, filePath string) ([]byte
 }
 
 func (mcm *MinioChunkManager) MultiRead(ctx context.Context, keys []string) ([][]byte, error) {
-	var el errorutil.ErrorList
+	var el error
 	var objectsValues [][]byte
 	for _, key := range keys {
 		objectValue, err := mcm.Read(ctx, key)
 		if err != nil {
-			el = append(el, err)
+			el = errutil.Combine(el, errors.Wrapf(err, "failed to read %s", key))
 		}
 		objectsValues = append(objectsValues, objectValue)
 	}
 
-	if len(el) == 0 {
-		return objectsValues, nil
-	}
 	return objectsValues, el
 }
 
@@ -349,15 +343,12 @@ func (mcm *MinioChunkManager) Remove(ctx context.Context, filePath string) error
 
 // MultiRemove deletes a objects with @keys.
 func (mcm *MinioChunkManager) MultiRemove(ctx context.Context, keys []string) error {
-	var el errorutil.ErrorList
+	var el error
 	for _, key := range keys {
 		err := mcm.Remove(ctx, key)
 		if err != nil {
-			el = append(el, err)
+			el = errutil.Combine(el, errors.Wrapf(err, "failed to remove %s", key))
 		}
-	}
-	if len(el) == 0 {
-		return nil
 	}
 	return el
 }
