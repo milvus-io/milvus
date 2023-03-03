@@ -69,10 +69,10 @@ func TestNormalOpCDCTask(t *testing.T) {
 	readerChan <- &model.CDCData{}
 	err = <-task.Pause(nil)
 	assert.NoError(t, err)
-	readerMock.AssertCalled(t, "StartRead", mock.Anything)
-	readerMock.AssertCalled(t, "QuitRead", mock.Anything)
 	task.workingLock.Lock()
 	task.workingLock.Unlock()
+	readerMock.AssertCalled(t, "StartRead", mock.Anything)
+	readerMock.AssertCalled(t, "QuitRead", mock.Anything)
 	writerMock.AssertCalled(t, "Write", mock.Anything, mock.Anything, mock.Anything)
 	writerMock.AssertCalled(t, "Flush", mock.Anything)
 	err = <-task.Terminate(nil)
