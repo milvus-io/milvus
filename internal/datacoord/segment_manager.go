@@ -237,7 +237,7 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 	// filter segments
 	segments := make([]*SegmentInfo, 0)
 	for _, segmentID := range s.segments {
-		segment := s.meta.GetSegment(segmentID)
+		segment := s.meta.GetHealthySegment(segmentID)
 		if segment == nil {
 			log.Warn("Failed to get seginfo from meta", zap.Int64("id", segmentID))
 			continue
@@ -404,7 +404,7 @@ func (s *SegmentManager) DropSegment(ctx context.Context, segmentID UniqueID) {
 			break
 		}
 	}
-	segment := s.meta.GetSegment(segmentID)
+	segment := s.meta.GetHealthySegment(segmentID)
 	if segment == nil {
 		log.Warn("Failed to get segment", zap.Int64("id", segmentID))
 		return
@@ -427,7 +427,7 @@ func (s *SegmentManager) SealAllSegments(ctx context.Context, collectionID Uniqu
 		segCandidates = segIDs
 	}
 	for _, id := range segCandidates {
-		info := s.meta.GetSegment(id)
+		info := s.meta.GetHealthySegment(id)
 		if info == nil {
 			log.Warn("failed to get seg info from meta", zap.Int64("segment ID", id))
 			continue
@@ -465,7 +465,7 @@ func (s *SegmentManager) GetFlushableSegments(ctx context.Context, channel strin
 
 	ret := make([]UniqueID, 0, len(s.segments))
 	for _, id := range s.segments {
-		info := s.meta.GetSegment(id)
+		info := s.meta.GetHealthySegment(id)
 		if info == nil || info.InsertChannel != channel {
 			continue
 		}
@@ -482,7 +482,7 @@ func (s *SegmentManager) ExpireAllocations(channel string, ts Timestamp) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, id := range s.segments {
-		segment := s.meta.GetSegment(id)
+		segment := s.meta.GetHealthySegment(id)
 		if segment == nil || segment.InsertChannel != channel {
 			continue
 		}
@@ -503,7 +503,7 @@ func (s *SegmentManager) ExpireAllocations(channel string, ts Timestamp) error {
 func (s *SegmentManager) cleanupSealedSegment(ts Timestamp, channel string) {
 	valids := make([]int64, 0, len(s.segments))
 	for _, id := range s.segments {
-		segment := s.meta.GetSegment(id)
+		segment := s.meta.GetHealthySegment(id)
 		if segment == nil || segment.InsertChannel != channel {
 			valids = append(valids, id)
 			continue
@@ -534,7 +534,7 @@ func isEmptySealedSegment(segment *SegmentInfo, ts Timestamp) bool {
 func (s *SegmentManager) tryToSealSegment(ts Timestamp, channel string) error {
 	channelInfo := make(map[string][]*SegmentInfo)
 	for _, id := range s.segments {
-		info := s.meta.GetSegment(id)
+		info := s.meta.GetHealthySegment(id)
 		if info == nil || info.InsertChannel != channel {
 			continue
 		}
@@ -577,7 +577,7 @@ func (s *SegmentManager) DropSegmentsOfChannel(ctx context.Context, channel stri
 
 	validSegments := make([]int64, 0, len(s.segments))
 	for _, sid := range s.segments {
-		segment := s.meta.GetSegment(sid)
+		segment := s.meta.GetHealthySegment(sid)
 		if segment == nil {
 			continue
 		}
