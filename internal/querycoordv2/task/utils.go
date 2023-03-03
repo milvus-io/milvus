@@ -66,6 +66,12 @@ func SetPriorityWithFunc(f func(t Task) Priority, tasks ...Task) {
 	}
 }
 
+func SetReason(reason string, tasks ...Task) {
+	for i := range tasks {
+		tasks[i].SetReason(reason)
+	}
+}
+
 // GetTaskType returns the task's type,
 // for now, only 3 types;
 // - only 1 grow action -> Grow
