@@ -129,22 +129,22 @@ func (kc *Catalog) parseBinlogKey(key string, prefixIdx int) (int64, int64, int6
 	remainedKey := key[prefixIdx:]
 	keyWordGroup := strings.Split(remainedKey, "/")
 	if len(keyWordGroup) < 3 {
-		return 0, 0, 0, fmt.Errorf("parse key: %s faild, trimed key:%s", key, remainedKey)
+		return 0, 0, 0, fmt.Errorf("parse key: %s failed, trimmed key:%s", key, remainedKey)
 	}
 
 	collectionID, err := strconv.ParseInt(keyWordGroup[0], 10, 64)
 	if err != nil {
-		return 0, 0, 0, fmt.Errorf("parse key: %s faild, trimed key:%s, %w", key, remainedKey, err)
+		return 0, 0, 0, fmt.Errorf("parse key: %s failed, trimmed key:%s, %w", key, remainedKey, err)
 	}
 
 	partitionID, err := strconv.ParseInt(keyWordGroup[1], 10, 64)
 	if err != nil {
-		return 0, 0, 0, fmt.Errorf("parse key: %s faild, trimed key:%s, %w", key, remainedKey, err)
+		return 0, 0, 0, fmt.Errorf("parse key: %s failed, trimmed key:%s, %w", key, remainedKey, err)
 	}
 
 	segmentID, err := strconv.ParseInt(keyWordGroup[2], 10, 64)
 	if err != nil {
-		return 0, 0, 0, fmt.Errorf("parse key: %s faild, trimed key:%s, %w", key, remainedKey, err)
+		return 0, 0, 0, fmt.Errorf("parse key: %s failed, trimmed key:%s, %w", key, remainedKey, err)
 	}
 
 	return collectionID, partitionID, segmentID, nil
@@ -386,12 +386,12 @@ func (kc *Catalog) AlterSegmentsAndAddNewSegment(ctx context.Context, segments [
 	}
 
 	if newSegment != nil {
-		if newSegment.GetNumOfRows() > 0 {
-			segmentKvs, err := buildSegmentAndBinlogsKvs(newSegment)
-			if err != nil {
-				return err
-			}
-			maps.Copy(kvs, segmentKvs)
+		segmentKvs, err := buildSegmentAndBinlogsKvs(newSegment)
+		if err != nil {
+			return err
+		}
+		maps.Copy(kvs, segmentKvs)
+		if newSegment.NumOfRows > 0 {
 			kc.collectMetrics(newSegment)
 		}
 	}

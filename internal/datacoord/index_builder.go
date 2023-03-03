@@ -220,7 +220,7 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 
 	switch state {
 	case indexTaskInit:
-		segment := ib.meta.GetSegmentUnsafe(meta.SegmentID)
+		segment := ib.meta.GetSegment(meta.SegmentID)
 		if !isSegmentHealthy(segment) || !ib.meta.IsIndexExist(meta.CollectionID, meta.IndexID) {
 			log.Ctx(ib.ctx).Info("task is no need to build index, remove it", zap.Int64("buildID", buildID))
 			deleteFunc(buildID)
