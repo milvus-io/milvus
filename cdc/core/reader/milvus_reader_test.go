@@ -302,14 +302,6 @@ func TestReaderWatchCollectionInfo(t *testing.T) {
 	collectionName1 := "coll1"
 	collectionID1 := int64(100)
 	factoryCreator := mocks.NewFactoryCreator(t)
-	//info1 := &pb.CollectionInfo{
-	//	ID: collectionID1,
-	//	Schema: &schemapb.CollectionSchema{
-	//		Name: collectionName1,
-	//	},
-	//	State: pb.CollectionState_CollectionCreated,
-	//}
-	//byte1, _ := proto.Marshal(info1)
 	field := &schemapb.FieldSchema{
 		FieldID: 101,
 	}
@@ -368,7 +360,7 @@ func TestReaderWatchCollectionInfo(t *testing.T) {
 		return mockEtcdCli, nil
 	}, func() {
 		monitor := mocks.NewMonitor(t)
-		t.Run("send create msg", func(t *testing.T) {
+		t.Run("send msg", func(t *testing.T) {
 			msgStream1 := mocks.NewMsgStream(t)
 			msgStream2 := mocks.NewMsgStream(t)
 			factory := mocks.NewFactory(t)
@@ -500,8 +492,8 @@ func TestReaderWatchCollectionInfo(t *testing.T) {
 							CollectionName: "xxxxx",
 						},
 					},
-					&api.InsertMsg{
-						InsertRequest: pb.InsertRequest{
+					&api.DeleteMsg{
+						DeleteRequest: pb.DeleteRequest{
 							Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_Delete},
 							CollectionName: collectionName1,
 						},
@@ -546,6 +538,31 @@ func TestReaderWatchCollectionInfo(t *testing.T) {
 			}
 			schemaByte, _ := json.Marshal(schema)
 			assert.EqualValues(t, schemaByte, createCollectionMsg.Schema)
+
+			hasInsert, hasDelete := false, false
+			checkInsertOrDelete := func(d *model.CDCData) {
+				if insertMsg, ok := d.Msg.(*api.InsertMsg); ok {
+					hasInsert = true
+					assert.Equal(t, collectionName1, insertMsg.CollectionName)
+					return
+				}
+				if deleteMsg, ok := d.Msg.(*api.DeleteMsg); ok {
+					hasDelete = true
+					assert.Equal(t, collectionName1, deleteMsg.CollectionName)
+					return
+				}
+			}
+			cdcData = <-cdcChan
+			checkInsertOrDelete(cdcData)
+			cdcData = <-cdcChan
+			checkInsertOrDelete(cdcData)
+			assert.True(t, hasInsert)
+			assert.True(t, hasDelete)
+
+			cdcData = <-cdcChan
+			dropMsg := cdcData.Msg.(*api.DropCollectionMsg)
+			assert.Equal(t, collectionName1, dropMsg.CollectionName)
+			assert.Len(t, cdcData.Extra[model.DropCollectionMsgsKey], 1)
 		})
 	})
 }

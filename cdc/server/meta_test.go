@@ -19,22 +19,16 @@ package server
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus/cdc/core/util"
-
-	"github.com/milvus-io/milvus-proto/go-api/commonpb"
-
-	"github.com/stretchr/testify/mock"
-
 	"github.com/cockroachdb/errors"
-
 	"github.com/goccy/go-json"
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus/cdc/core/mocks"
+	"github.com/milvus-io/milvus/cdc/core/util"
 	"github.com/milvus-io/milvus/cdc/server/model/meta"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
-
-	"github.com/milvus-io/milvus/cdc/core/mocks"
-
-	"github.com/stretchr/testify/assert"
 )
 
 func TestGetTaskInfoPrefix(t *testing.T) {
@@ -146,6 +140,11 @@ func TestGetTaskInfo(t *testing.T) {
 
 func TestGetAllTaskInfo(t *testing.T) {
 	mockEtcdCli := mocks.NewKVApi(t)
+	util.EtcdOpRetryTime = 1
+	defer func() {
+		util.EtcdOpRetryTime = 5
+	}()
+
 	rootPath := "/tasks"
 	key := getTaskInfoPrefix(rootPath)
 	taskID1 := "123"
@@ -229,6 +228,11 @@ func TestGetAllTaskInfo(t *testing.T) {
 
 func TestUpdateTaskState(t *testing.T) {
 	mockEtcdCli := mocks.NewKVApi(t)
+	util.EtcdOpRetryTime = 1
+	defer func() {
+		util.EtcdOpRetryTime = 5
+	}()
+
 	rootPath := "/tasks"
 	taskID := "123"
 	key := getTaskInfoKey(rootPath, taskID)
@@ -284,6 +288,11 @@ func TestUpdateTaskState(t *testing.T) {
 
 func TestUpdateTaskFailedReason(t *testing.T) {
 	mockEtcdCli := mocks.NewKVApi(t)
+	util.EtcdOpRetryTime = 1
+	defer func() {
+		util.EtcdOpRetryTime = 5
+	}()
+
 	rootPath := "/tasks"
 	taskID := "123"
 	key := getTaskInfoKey(rootPath, taskID)
@@ -335,6 +344,11 @@ func TestUpdateTaskFailedReason(t *testing.T) {
 
 func TestUpdateTaskCollectionPosition(t *testing.T) {
 	mockEtcdCli := mocks.NewKVApi(t)
+	util.EtcdOpRetryTime = 1
+	defer func() {
+		util.EtcdOpRetryTime = 5
+	}()
+
 	rootPath := "/tasks"
 	taskID := "123"
 	collectionName := "col1"
@@ -446,6 +460,11 @@ func TestUpdateTaskCollectionPosition(t *testing.T) {
 
 func TestDeleteTaskCollectionPosition(t *testing.T) {
 	mockEtcdCli := mocks.NewKVApi(t)
+	util.EtcdOpRetryTime = 1
+	defer func() {
+		util.EtcdOpRetryTime = 5
+	}()
+
 	rootPath := "/tasks"
 	taskID := "123"
 	var collectionID int64 = 1000
@@ -490,6 +509,11 @@ func (m *MockTxn) Commit() (*clientv3.TxnResponse, error) {
 
 func TestDeleteTask(t *testing.T) {
 	mockEtcdCli := mocks.NewKVApi(t)
+	util.EtcdOpRetryTime = 1
+	defer func() {
+		util.EtcdOpRetryTime = 5
+	}()
+
 	rootPath := "/tasks"
 	taskID := "123"
 	key := getTaskInfoKey(rootPath, taskID)

@@ -29,19 +29,16 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-
-	"google.golang.org/grpc/examples/helloworld/helloworld"
-	"google.golang.org/grpc/keepalive"
-
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/reflection"
-
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/examples/helloworld/helloworld"
+	"google.golang.org/grpc/keepalive"
+	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/status"
 )
 

@@ -21,7 +21,6 @@ import (
 
 	"github.com/golobby/config/v3/pkg/feeder"
 	coreconf "github.com/milvus-io/milvus/cdc/core/config"
-
 	"github.com/milvus-io/milvus/cdc/server"
 )
 
@@ -33,8 +32,8 @@ type config struct {
 	Source    struct {
 		Endpoints       []string `yaml:"etcd.endpoints"`
 		RootPath        string   `yaml:"etcd.rootpath"`
-		MetaPath        string   `yaml:"etcd.meta.path""`
-		ReaderBufferLen int      `yaml:"reader.buffer.len""`
+		MetaPath        string   `yaml:"etcd.meta.path"`
+		ReaderBufferLen int      `yaml:"reader.buffer.len"`
 		MQType          string   `yaml:"mqtype"`
 		Pulsar          struct {
 			Address        string

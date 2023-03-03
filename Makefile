@@ -235,6 +235,10 @@ test-metastore:
 	@echo "Running go unittests..."
 	@(env bash $(PWD)/scripts/run_go_unittest.sh -t metastore)
 
+test-cdc:
+	@echo "Running go unittests..."
+	@(env bash $(PWD)/scripts/run_go_unittest.sh -t cdc)
+
 test-go: build-cpp-with-unittest
 	@echo "Running go unittests..."
 	@(env bash $(PWD)/scripts/run_go_unittest.sh)

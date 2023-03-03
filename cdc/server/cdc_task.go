@@ -219,21 +219,25 @@ func (c *CDCTask) sendSignal(s *signal) {
 	}
 }
 
+//go:generate mockery --name=CDCFactory --filename=cdc_factory_mock.go --output=./mocks
 type CDCFactory interface {
+	util.CDCMark
 	NewReader() (reader.CDCReader, error)
 	NewWriter() (writer.CDCWriter, error)
 }
 
 type NewReaderFunc func() (reader.CDCReader, error)
 type NewWriterFunc func() (writer.CDCWriter, error)
+type FactoryCreator func(readerFunc NewReaderFunc, writerFunc NewWriterFunc) CDCFactory
 
 type DefaultCDCFactory struct {
+	util.CDCMark
 	newReader NewReaderFunc
 	newWriter NewWriterFunc
 }
 
 func NewDefaultCDCFactory(r NewReaderFunc, w NewWriterFunc) CDCFactory {
-	return &DefaultCDCFactory{r, w}
+	return &DefaultCDCFactory{newReader: r, newWriter: w}
 }
 
 func (d *DefaultCDCFactory) NewReader() (reader.CDCReader, error) {
@@ -245,5 +249,5 @@ func (d *DefaultCDCFactory) NewWriter() (writer.CDCWriter, error) {
 }
 
 func NewCDCFactory(readerFunc NewReaderFunc, writerFunc NewWriterFunc) CDCFactory {
-	return &DefaultCDCFactory{readerFunc, writerFunc}
+	return NewDefaultCDCFactory(readerFunc, writerFunc)
 }

@@ -53,6 +53,7 @@ type MetaCDC struct {
 		sync.RWMutex
 		data map[string]*CDCTask
 	}
+	factoryCreator FactoryCreator
 }
 
 func NewMetaCDC(serverConfig *CDCServerConfig) *MetaCDC {
@@ -76,6 +77,7 @@ func NewMetaCDC(serverConfig *CDCServerConfig) *MetaCDC {
 	}
 	cdc.collectionNames.data = make(map[string][]string)
 	cdc.cdcTasks.data = make(map[string]*CDCTask)
+	cdc.factoryCreator = NewCDCFactory
 	return cdc
 }
 
@@ -123,6 +125,9 @@ func (e *MetaCDC) Create(req *request.CreateRequest) (resp *request.CreateRespon
 		return nil, err
 	}
 	milvusAddress := fmt.Sprintf("%s:%d", req.MilvusConnectParam.Host, req.MilvusConnectParam.Port)
+	newCollectionNames := lo.Map(req.CollectionInfos, func(t model.CollectionInfo, _ int) string {
+		return t.Name
+	})
 	e.collectionNames.Lock()
 	if names, ok := e.collectionNames.data[milvusAddress]; ok {
 		duplicateCollections := lo.Filter(req.CollectionInfos, func(info model.CollectionInfo, _ int) bool {
@@ -133,11 +138,7 @@ func (e *MetaCDC) Create(req *request.CreateRequest) (resp *request.CreateRespon
 			return nil, NewClientError(fmt.Sprintf("some collections are duplicate with existing tasks, %v", duplicateCollections))
 		}
 	}
-
 	// release lock early to accept other requests
-	newCollectionNames := lo.Map(req.CollectionInfos, func(t model.CollectionInfo, _ int) string {
-		return t.Name
-	})
 	e.collectionNames.data[milvusAddress] = append(e.collectionNames.data[milvusAddress], newCollectionNames...)
 	e.collectionNames.Unlock()
 
@@ -334,7 +335,7 @@ func (e *MetaCDC) newCdcTask(info *meta.TaskInfo) (*CDCTask, error) {
 
 	e.cdcTasks.Lock()
 	defer e.cdcTasks.Unlock()
-	task := NewCdcTask(NewCDCFactory(newReaderFunc, newWriterFunc), writeCallback)
+	task := NewCdcTask(e.factoryCreator(newReaderFunc, newWriterFunc), writeCallback)
 	e.cdcTasks.data[info.TaskID] = task
 	return task, nil
 }
