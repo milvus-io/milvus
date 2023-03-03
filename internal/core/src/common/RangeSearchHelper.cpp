@@ -94,7 +94,7 @@ SortRangeSearchResult(DatasetPtr data_set,
             p_id[i] = sub_result.top().second;
             sub_result.pop();
         }
-        cnt += capacity;
+        cnt += topk;
     }
     return GenResultDataset(nq, topk, p_id, p_dist);
 }
