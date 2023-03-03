@@ -158,16 +158,26 @@ func (t *codeError) Is(err error) bool {
 	return ok
 }
 
-func IsRetryErrorCode(code commonpb.ErrorCode) bool {
-	return code == commonpb.ErrorCode_NotReadyServe ||
-		code == commonpb.ErrorCode_NotShardLeader ||
-		code == commonpb.ErrorCode_NodeIDNotMatch
+func GetErrorCode(e error) (commonpb.ErrorCode, bool) {
+	codeErr, ok := e.(*codeError)
+	if !ok {
+		return -1, false
+	}
+	return codeErr.code, true
 }
 
-func IsTriableError(err error) bool {
-	if is := errors.Is(err, CodeErr); is {
+func IsRetryableErrorCode(code commonpb.ErrorCode) bool {
+	return code == commonpb.ErrorCode_NotReadyServe ||
+		code == commonpb.ErrorCode_NotShardLeader ||
+		code == commonpb.ErrorCode_NodeIDNotMatch ||
+		code == commonpb.ErrorCode_NoReplicaAvailable ||
+		code == commonpb.ErrorCode_NotFoundTSafer
+}
+
+func IsRetryableError(err error) bool {
+	if ok := errors.Is(err, CodeErr); ok {
 		codeErr := err.(*codeError)
-		return IsRetryErrorCode(codeErr.code)
+		return IsRetryableErrorCode(codeErr.code)
 	}
 	return false
 }

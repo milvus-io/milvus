@@ -163,8 +163,13 @@ func (b *baseReadTask) Ready() (bool, error) {
 
 	serviceTime, err := b.QS.getServiceableTime(channel)
 	if err != nil {
-		return false, fmt.Errorf("failed to get service timestamp, taskID = %d, collectionID = %d, err=%w", b.ID(), b.CollectionID, err)
+		log.Error("failed to get service timestamp",
+			zap.Int64("taskID", b.ID()),
+			zap.Int64("collectionID", b.CollectionID),
+			zap.Error(err))
+		return false, err
 	}
+
 	guaranteeTs := b.GuaranteeTimestamp
 	gt, _ := tsoutil.ParseTS(guaranteeTs)
 	st, _ := tsoutil.ParseTS(serviceTime)

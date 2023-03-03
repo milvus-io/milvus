@@ -21,9 +21,9 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/milvus-io/milvus-proto/go-api/commonpb"
-
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 )
 
 func TestIgnorableError(t *testing.T) {
@@ -81,7 +81,21 @@ func TestStatusFromError(t *testing.T) {
 }
 
 func TestCodeError(t *testing.T) {
-	assert.False(t, IsTriableError(nil))
-	assert.True(t, IsTriableError(NewCodeError(commonpb.ErrorCode_NotReadyServe, nil)))
-	assert.False(t, IsTriableError(NewCodeError(commonpb.ErrorCode_UnexpectedError, nil)))
+	assert.False(t, IsRetryableError(nil))
+	assert.True(t, IsRetryableError(NewCodeError(commonpb.ErrorCode_NotReadyServe, nil)))
+	assert.False(t, IsRetryableError(NewCodeError(commonpb.ErrorCode_UnexpectedError, nil)))
+
+	{
+		err := NewCodeError(commonpb.ErrorCode_NotReadyServe, nil)
+		code, ret := GetErrorCode(err)
+		assert.True(t, ret)
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, code)
+	}
+
+	{
+		err := errors.New("test")
+		code, ret := GetErrorCode(err)
+		assert.False(t, ret)
+		assert.Equal(t, commonpb.ErrorCode(-1), code)
+	}
 }

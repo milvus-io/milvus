@@ -24,7 +24,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus/internal/common"
 )
 
 func genSimpleQueryShard(ctx context.Context) (*queryShard, error) {
@@ -123,6 +125,12 @@ func TestQueryShard_getServiceableTime(t *testing.T) {
 	deltaTimestamp, err := qs.getServiceableTime(qs.deltaChannel)
 	assert.NoError(t, err)
 	assert.Equal(t, timestamp, deltaTimestamp)
+
+	_, err = qs.getServiceableTime("unknown-channel")
+	assert.Error(t, err)
+	code, ret := common.GetErrorCode(err)
+	assert.True(t, ret)
+	assert.Equal(t, commonpb.ErrorCode_NotFoundTSafer, code)
 }
 
 func genSearchResultData(nq int64, topk int64, ids []int64, scores []float32, topks []int64) *schemapb.SearchResultData {

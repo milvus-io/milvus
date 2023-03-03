@@ -22,6 +22,8 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -127,7 +129,8 @@ func (t *tSafeReplica) setTSafe(vChannel Channel, timestamp Timestamp) error {
 
 func (t *tSafeReplica) getTSafePrivate(vChannel Channel) (*tSafe, error) {
 	if _, ok := t.tSafes[vChannel]; !ok {
-		return nil, fmt.Errorf("cannot found tSafer, vChannel = %s", vChannel)
+		return nil, common.NewCodeError(commonpb.ErrorCode_NotFoundTSafer,
+			fmt.Errorf("cannot found tSafer, vChannel = %s", vChannel))
 	}
 	return t.tSafes[vChannel], nil
 }

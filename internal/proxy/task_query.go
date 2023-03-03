@@ -338,7 +338,7 @@ func (t *queryTask) Execute(ctx context.Context) error {
 	retryCtx, cancel := context.WithCancel(ctx)
 	err := retry.Do(retryCtx, func() error {
 		queryError := executeQuery()
-		if !common.IsTriableError(queryError) {
+		if !common.IsRetryableError(queryError) {
 			cancel()
 		}
 		if queryError != nil {
