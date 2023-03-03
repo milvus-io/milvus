@@ -99,6 +99,14 @@ func TestMockEtcd(t *testing.T) {
 
 }
 
+func getFlushedSegmentsMock(segments []int64) func(ctx context.Context, req *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error) {
+	return func(ctx context.Context, req *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error) {
+		return &datapb.GetFlushedSegmentsResponse{
+			Segments: segments,
+		}, nil
+	}
+}
+
 func testIndexCoord(t *testing.T) {
 	ctx := context.Background()
 	Params.EtcdCfg.MetaRootPath = "indexcoord-ut"
@@ -334,6 +342,7 @@ func testIndexCoord(t *testing.T) {
 		defer func() {
 			updateSegmentIndexes(indexs)
 		}()
+		dcm.CallGetFlushedSegment = getFlushedSegmentsMock([]int64{111})
 
 		updateMockIndexs(func() {
 			mockIndexs[111] = make(map[UniqueID]*model.SegmentIndex)
@@ -377,11 +386,7 @@ func testIndexCoord(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 
-		dcm.CallGetFlushedSegment = func(ctx context.Context, req *datapb.GetFlushedSegmentsRequest) (*datapb.GetFlushedSegmentsResponse, error) {
-			return &datapb.GetFlushedSegmentsResponse{
-				Segments: []int64{111, 222, 333},
-			}, nil
-		}
+		dcm.CallGetFlushedSegment = getFlushedSegmentsMock([]int64{111, 222, 333})
 		dcm.SetFunc(func() {
 			dcm.CallGetSegmentInfo = func(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
 				return nil, errors.New("mock error")

@@ -590,35 +590,35 @@ func (i *IndexCoord) GetSegmentIndexState(ctx context.Context, req *indexpb.GetS
 	return ret, nil
 }
 
+// getIndexIDAndCreateTime get index ID and create time by collectionID and indexName
+func (i *IndexCoord) getIndexIDAndCreateTime(collectionID int64, indexName string) (int64, uint64, error) {
+	indexID2CreateTs := i.metaTable.GetIndexIDByName(collectionID, indexName)
+	// the size of `indexID2CreateTs` map is one
+	// and we need to get key and value through the `for` statement
+	for k, v := range indexID2CreateTs {
+		return k, v, nil
+	}
+
+	// len ndexID2CreateTs == 0
+	log.Error("there is no index on collection", zap.Int64("collectionID", collectionID), zap.String("indexName", indexName))
+	return 0, 0, errors.New("get index id by name failed, there is no index on collection")
+}
+
 // completeIndexInfo get the building index row count and index task state
-func (i *IndexCoord) completeIndexInfo(indexInfo *indexpb.IndexInfo, segIDs []UniqueID) error {
+func (i *IndexCoord) completeIndexInfo(indexInfo *indexpb.IndexInfo, indexID int64, segIDs []UniqueID) error {
 	collectionID := indexInfo.CollectionID
 	indexName := indexInfo.IndexName
 	log.Info("IndexCoord completeIndexInfo", zap.Int64("collID", collectionID),
 		zap.String("indexName", indexName))
 
-	indexID2CreateTs := i.metaTable.GetIndexIDByName(collectionID, indexName)
-	if len(indexID2CreateTs) == 0 {
-		log.Error("there is no index on collection", zap.Int64("collectionID", collectionID), zap.String("indexName", indexName))
-		return nil
-	}
-
-	var indexID int64
-	var createTs uint64
-	// the size of `indexID2CreateTs` map is one
-	// and we need to get key and value through the `for` statement
-	for k, v := range indexID2CreateTs {
-		indexID = k
-		createTs = v
-		break
-	}
-
 	segSet := typeutil.NewSet(segIDs...)
 
-	indexStates, indexStateCnt := i.metaTable.GetIndexStates(indexID, createTs, func(segIdx *model.SegmentIndex) bool {
+	//get index status of segSet
+	_, indexStateCnt := i.metaTable.GetIndexStates(indexID, typeutil.MaxTimestamp, func(segIdx *model.SegmentIndex) bool {
 		return segSet.Contain(segIdx.SegmentID)
 	})
-	allCnt := len(indexStates)
+	allCnt := len(segIDs)
+
 	switch {
 	case indexStateCnt.Failed > 0:
 		indexInfo.State = commonpb.IndexState_Failed
@@ -866,41 +866,47 @@ func (i *IndexCoord) DescribeIndex(ctx context.Context, req *indexpb.DescribeInd
 		},
 	}
 
-	// The total rows of all indexes should be based on the current perspective
-	flushedSegmentR, err := i.dataCoordClient.GetFlushedSegments(ctx, &datapb.GetFlushedSegmentsRequest{
-		CollectionID:     req.GetCollectionID(),
-		PartitionID:      -1,
-		IncludeUnhealthy: false,
-	})
-	if err != nil {
-		return ret, err
-	}
-	if flushedSegmentR.Status.GetErrorCode() != commonpb.ErrorCode_Success {
-		ret.Status.ErrorCode = flushedSegmentR.Status.GetErrorCode()
-		ret.Status.Reason = flushedSegmentR.Status.GetReason()
-		return ret, nil
-	}
-
-	resp, err := i.dataCoordClient.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{
-		SegmentIDs:       flushedSegmentR.Segments,
-		IncludeUnHealthy: true,
-	})
-	if err != nil {
-		return ret, err
-	}
-	if resp.Status.GetErrorCode() != commonpb.ErrorCode_Success {
-		ret.Status.ErrorCode = resp.Status.GetErrorCode()
-		ret.Status.Reason = resp.Status.GetReason()
-		return ret, nil
-	}
-
-	totalRows := int64(0)
-	for _, seg := range resp.Infos {
-		totalRows += seg.NumOfRows
-	}
-
 	indexInfos := make([]*indexpb.IndexInfo, 0)
 	for _, index := range indexes {
+		indexID, createTime, err := i.getIndexIDAndCreateTime(index.CollectionID, index.IndexName)
+		if err != nil {
+			continue
+		}
+
+		// The total rows of all indexes should be based on the current perspective
+		flushedSegmentR, err := i.dataCoordClient.GetFlushedSegments(ctx, &datapb.GetFlushedSegmentsRequest{
+			CollectionID:     req.GetCollectionID(),
+			PartitionID:      -1,
+			IncludeUnhealthy: false,
+			TimeBefore:       createTime,
+		})
+		if err != nil {
+			return ret, err
+		}
+		if flushedSegmentR.Status.GetErrorCode() != commonpb.ErrorCode_Success {
+			ret.Status.ErrorCode = flushedSegmentR.Status.GetErrorCode()
+			ret.Status.Reason = flushedSegmentR.Status.GetReason()
+			return ret, nil
+		}
+
+		resp, err := i.dataCoordClient.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{
+			SegmentIDs:       flushedSegmentR.Segments,
+			IncludeUnHealthy: true,
+		})
+		if err != nil {
+			return ret, err
+		}
+		if resp.Status.GetErrorCode() != commonpb.ErrorCode_Success {
+			ret.Status.ErrorCode = resp.Status.GetErrorCode()
+			ret.Status.Reason = resp.Status.GetReason()
+			return ret, nil
+		}
+
+		totalRows := int64(0)
+		for _, seg := range resp.Infos {
+			totalRows += seg.NumOfRows
+		}
+
 		indexInfo := &indexpb.IndexInfo{
 			CollectionID:    index.CollectionID,
 			FieldID:         index.FieldID,
@@ -912,7 +918,8 @@ func (i *IndexCoord) DescribeIndex(ctx context.Context, req *indexpb.DescribeInd
 			IndexID:         index.IndexID,
 			TotalRows:       totalRows,
 		}
-		if err := i.completeIndexInfo(indexInfo, flushedSegmentR.Segments); err != nil {
+
+		if err := i.completeIndexInfo(indexInfo, indexID, flushedSegmentR.Segments); err != nil {
 			log.Error("IndexCoord describe index fail", zap.Int64("collectionID", req.CollectionID),
 				zap.String("indexName", req.IndexName), zap.Error(err))
 			return &indexpb.DescribeIndexResponse{
@@ -924,7 +931,8 @@ func (i *IndexCoord) DescribeIndex(ctx context.Context, req *indexpb.DescribeInd
 		}
 		log.Info("IndexCoord describe index success", zap.Int64("collectionID", req.CollectionID),
 			zap.Int64("indexID", indexInfo.IndexID), zap.Int64("total rows", indexInfo.TotalRows),
-			zap.Int64("index rows", indexInfo.IndexedRows), zap.String("index state", indexInfo.State.String()))
+			zap.Int64("index rows", indexInfo.IndexedRows), zap.String("index state", indexInfo.State.String()),
+			zap.Int64s("segments", flushedSegmentR.Segments))
 		indexInfos = append(indexInfos, indexInfo)
 	}
 

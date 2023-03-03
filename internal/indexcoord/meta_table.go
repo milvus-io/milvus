@@ -623,9 +623,6 @@ func (mt *metaTable) GetIndexStates(indexID int64, createTs uint64, filters ...f
 		if !ok {
 			continue
 		}
-		if segIdx.CreateTime > createTs {
-			continue
-		}
 		if segIdx.IsDeleted {
 			// skip deleted index, deleted by compaction
 			continue

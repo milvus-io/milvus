@@ -757,7 +757,12 @@ func (s *Server) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedS
 				segment.GetState() != commonpb.SegmentState_Flushing) {
 			continue
 		}
+
 		if !req.GetIncludeUnhealthy() && segment.GetState() == commonpb.SegmentState_Dropped {
+			continue
+		}
+
+		if req.GetTimeBefore() != typeutil.ZeroTimestamp && segment.StartPosition.Timestamp > req.TimeBefore {
 			continue
 		}
 		ret = append(ret, id)

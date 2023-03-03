@@ -789,6 +789,39 @@ func TestGetFlushedSegments(t *testing.T) {
 		}
 	})
 
+	t.Run("with TimeBefore", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+
+		collectionID := int64(111)
+		partationID := int64(222)
+		flushedSegments := []int64{21, 22, 23}
+
+		timeBefore := uint64(22)
+		expected := []int64{21, 22}
+		for _, fs := range flushedSegments {
+			segInfo := &datapb.SegmentInfo{
+				ID:           fs,
+				CollectionID: collectionID,
+				PartitionID:  partationID,
+				State:        commonpb.SegmentState_Flushed,
+				StartPosition: &internalpb.MsgPosition{
+					Timestamp: uint64(fs),
+				},
+			}
+			assert.Nil(t, svr.meta.AddSegment(NewSegmentInfo(segInfo)))
+		}
+
+		resp, err := svr.GetFlushedSegments(context.Background(), &datapb.GetFlushedSegmentsRequest{
+			CollectionID: collectionID,
+			PartitionID:  partationID,
+			TimeBefore:   timeBefore,
+		})
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+
+		assert.ElementsMatch(t, expected, resp.GetSegments())
+	})
 	t.Run("with closed server", func(t *testing.T) {
 		t.Run("with closed server", func(t *testing.T) {
 			svr := newTestServer(t, nil)
