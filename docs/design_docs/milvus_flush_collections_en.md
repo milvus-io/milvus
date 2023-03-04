@@ -117,10 +117,10 @@ message SegmentInfo {
   string insert_channel = 4;
   int64 num_of_rows = 5;
   common.SegmentState state = 6;
-  internal.MsgPosition dml_position = 7;
+  msgpb.MsgPosition dml_position = 7;
   int64 max_row_num = 8;
   uint64 last_expire_time = 9;
-  internal.MsgPosition start_position = 10;
+  msgpb.MsgPosition start_position = 10;
 }
 
 enum SegmentState {

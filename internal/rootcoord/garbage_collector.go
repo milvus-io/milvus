@@ -20,11 +20,10 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
-	ms "github.com/milvus-io/milvus/internal/mq/msgstream"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/util/commonpbutil"
-
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	ms "github.com/milvus-io/milvus/internal/mq/msgstream"
+	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 )
 
 //go:generate mockery --name=GarbageCollector --outpkg=mockrootcoord
@@ -163,7 +162,7 @@ func (c *bgGarbageCollector) notifyCollectionGc(ctx context.Context, coll *model
 	}
 	msg := &ms.DropCollectionMsg{
 		BaseMsg: baseMsg,
-		DropCollectionRequest: internalpb.DropCollectionRequest{
+		DropCollectionRequest: msgpb.DropCollectionRequest{
 			Base: commonpbutil.NewMsgBase(
 				commonpbutil.WithMsgType(commonpb.MsgType_DropCollection),
 				commonpbutil.WithTimeStamp(ts),
@@ -196,7 +195,7 @@ func (c *bgGarbageCollector) notifyPartitionGc(ctx context.Context, pChannels []
 	}
 	msg := &ms.DropPartitionMsg{
 		BaseMsg: baseMsg,
-		DropPartitionRequest: internalpb.DropPartitionRequest{
+		DropPartitionRequest: msgpb.DropPartitionRequest{
 			Base: commonpbutil.NewMsgBase(
 				commonpbutil.WithMsgType(commonpb.MsgType_DropPartition),
 				commonpbutil.WithTimeStamp(ts),

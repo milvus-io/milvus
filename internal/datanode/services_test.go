@@ -24,10 +24,14 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/stretchr/testify/suite"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
-
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
@@ -40,10 +44,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-
-	"github.com/stretchr/testify/suite"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 )
 
 type DataNodeServicesSuite struct {
@@ -196,8 +196,8 @@ func (s *DataNodeServicesSuite) TestFlushSegments() {
 		segID:       0,
 		collID:      1,
 		partitionID: 1,
-		startPos:    &internalpb.MsgPosition{},
-		endPos:      &internalpb.MsgPosition{},
+		startPos:    &msgpb.MsgPosition{},
+		endPos:      &msgpb.MsgPosition{},
 	})
 	s.Require().NoError(err)
 
@@ -231,7 +231,7 @@ func (s *DataNodeServicesSuite) TestFlushSegments() {
 				EndTimestamp:   Timestamp(0),
 				HashValues:     []uint32{0},
 			},
-			TimeTickMsg: internalpb.TimeTickMsg{
+			TimeTickMsg: msgpb.TimeTickMsg{
 				Base: &commonpb.MsgBase{
 					MsgType:   commonpb.MsgType_TimeTick,
 					MsgID:     UniqueID(0),
@@ -707,8 +707,8 @@ func (s *DataNodeServicesSuite) TestResendSegmentStats() {
 		segID:       0,
 		collID:      1,
 		partitionID: 1,
-		startPos:    &internalpb.MsgPosition{},
-		endPos:      &internalpb.MsgPosition{},
+		startPos:    &msgpb.MsgPosition{},
+		endPos:      &msgpb.MsgPosition{},
 	})
 	s.Assert().Nil(err)
 	err = fgService.channel.addSegment(addSegmentReq{
@@ -716,8 +716,8 @@ func (s *DataNodeServicesSuite) TestResendSegmentStats() {
 		segID:       1,
 		collID:      1,
 		partitionID: 2,
-		startPos:    &internalpb.MsgPosition{},
-		endPos:      &internalpb.MsgPosition{},
+		startPos:    &msgpb.MsgPosition{},
+		endPos:      &msgpb.MsgPosition{},
 	})
 	s.Assert().Nil(err)
 	err = fgService.channel.addSegment(addSegmentReq{
@@ -725,8 +725,8 @@ func (s *DataNodeServicesSuite) TestResendSegmentStats() {
 		segID:       2,
 		collID:      1,
 		partitionID: 3,
-		startPos:    &internalpb.MsgPosition{},
-		endPos:      &internalpb.MsgPosition{},
+		startPos:    &msgpb.MsgPosition{},
+		endPos:      &msgpb.MsgPosition{},
 	})
 	s.Assert().Nil(err)
 

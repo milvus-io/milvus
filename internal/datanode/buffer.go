@@ -23,14 +23,13 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
-
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -71,7 +70,7 @@ func (bm *DelBufferManager) Store(segID UniqueID, delDataBuf *DelDataBuf) {
 }
 
 func (bm *DelBufferManager) StoreNewDeletes(segID UniqueID, pks []primaryKey,
-	tss []Timestamp, tr TimeRange, startPos, endPos *internalpb.MsgPosition) {
+	tss []Timestamp, tr TimeRange, startPos, endPos *msgpb.MsgPosition) {
 	//1. load or create delDataBuf
 	var delDataBuf *DelDataBuf
 	buffer, loaded := bm.channel.getCurDeleteBuffer(segID)
@@ -253,8 +252,8 @@ type BufferData struct {
 	limit    int64
 	tsFrom   Timestamp
 	tsTo     Timestamp
-	startPos *internalpb.MsgPosition
-	endPos   *internalpb.MsgPosition
+	startPos *msgpb.MsgPosition
+	endPos   *msgpb.MsgPosition
 }
 
 func (bd *BufferData) effectiveCap() int64 {
@@ -275,7 +274,7 @@ func (bd *BufferData) updateTimeRange(tr TimeRange) {
 	}
 }
 
-func (bd *BufferData) updateStartAndEndPosition(startPos *internalpb.MsgPosition, endPos *internalpb.MsgPosition) {
+func (bd *BufferData) updateStartAndEndPosition(startPos *msgpb.MsgPosition, endPos *msgpb.MsgPosition) {
 	if bd.startPos == nil || startPos.Timestamp < bd.startPos.Timestamp {
 		bd.startPos = startPos
 	}
@@ -298,8 +297,8 @@ type DelDataBuf struct {
 	datapb.Binlog
 	delData  *DeleteData
 	item     *Item
-	startPos *internalpb.MsgPosition
-	endPos   *internalpb.MsgPosition
+	startPos *msgpb.MsgPosition
+	endPos   *msgpb.MsgPosition
 }
 
 func (ddb *DelDataBuf) accumulateEntriesNum(entryNum int64) {
@@ -327,7 +326,7 @@ func (ddb *DelDataBuf) mergeDelDataBuf(buf *DelDataBuf) {
 	ddb.item.memorySize += buf.item.memorySize
 }
 
-func (ddb *DelDataBuf) updateStartAndEndPosition(startPos *internalpb.MsgPosition, endPos *internalpb.MsgPosition) {
+func (ddb *DelDataBuf) updateStartAndEndPosition(startPos *msgpb.MsgPosition, endPos *msgpb.MsgPosition) {
 	if ddb.startPos == nil || startPos.Timestamp < ddb.startPos.Timestamp {
 		ddb.startPos = startPos
 	}

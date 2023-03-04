@@ -26,9 +26,8 @@ import (
 	"syscall"
 	"time"
 
+	semver "github.com/blang/semver/v4"
 	"github.com/cockroachdb/errors"
-
-	"github.com/blang/semver/v4"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
@@ -81,7 +80,9 @@ type (
 )
 
 type dataNodeCreatorFunc func(ctx context.Context, addr string) (types.DataNode, error)
+
 type indexNodeCreatorFunc func(ctx context.Context, addr string) (types.IndexNode, error)
+
 type rootCoordCreatorFunc func(ctx context.Context, metaRootPath string, etcdClient *clientv3.Client) (types.RootCoord, error)
 
 // makes sure Server implements `DataCoord`
@@ -679,7 +680,7 @@ func (s *Server) handleTimetickMessage(ctx context.Context, ttMsg *msgstream.Dat
 	return nil
 }
 
-func (s *Server) updateSegmentStatistics(stats []*datapb.SegmentStats) {
+func (s *Server) updateSegmentStatistics(stats []*commonpb.SegmentStats) {
 	for _, stat := range stats {
 		segment := s.meta.GetSegment(stat.GetSegmentID())
 		if segment == nil {

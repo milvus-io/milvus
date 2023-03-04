@@ -20,18 +20,17 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-
-	"github.com/bits-and-blooms/bloom/v3"
+	bloom "github.com/bits-and-blooms/bloom/v3"
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
-	"go.uber.org/atomic"
 )
 
 func getInsertNode() (*insertNode, error) {
@@ -341,7 +340,7 @@ func TestFlowGraphInsertNode_operate(t *testing.T) {
 		}
 
 		iMsg := genInsertMsg()
-		iMsg.insertMessages[0].Version = internalpb.InsertDataVersion_RowBased
+		iMsg.insertMessages[0].Version = msgpb.InsertDataVersion_RowBased
 		msg := []flowgraph.Msg{iMsg}
 		assert.Panics(t, func() {
 			insertNode.Operate(msg)

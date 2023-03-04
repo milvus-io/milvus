@@ -21,15 +21,15 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
 
 type (
-	Pos     = internalpb.MsgPosition
+	Pos     = msgpb.MsgPosition
 	MsgPack = msgstream.MsgPack
 	SubPos  = mqwrapper.SubscriptionInitialPosition
 )

@@ -20,13 +20,13 @@ import (
 	"context"
 	"testing"
 
-	"github.com/milvus-io/milvus-proto/go-api/schemapb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/util/etcd"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/util/etcd"
 )
 
 func TestFlowGraphManager(t *testing.T) {
@@ -107,8 +107,8 @@ func TestFlowGraphManager(t *testing.T) {
 			segID:       100,
 			collID:      1,
 			partitionID: 10,
-			startPos:    &internalpb.MsgPosition{},
-			endPos:      &internalpb.MsgPosition{},
+			startPos:    &msgpb.MsgPosition{},
+			endPos:      &msgpb.MsgPosition{},
 		})
 		require.NoError(t, err)
 
@@ -156,8 +156,8 @@ func TestFlowGraphManager(t *testing.T) {
 			segID:       100,
 			collID:      1,
 			partitionID: 10,
-			startPos:    &internalpb.MsgPosition{},
-			endPos:      &internalpb.MsgPosition{},
+			startPos:    &msgpb.MsgPosition{},
+			endPos:      &msgpb.MsgPosition{},
 		})
 		require.NoError(t, err)
 

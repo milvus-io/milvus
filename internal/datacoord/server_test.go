@@ -31,7 +31,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -40,6 +39,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/indexnode"
@@ -371,7 +371,7 @@ func TestGetSegmentStates(t *testing.T) {
 			InsertChannel: "c1",
 			NumOfRows:     0,
 			State:         commonpb.SegmentState_Growing,
-			StartPosition: &internalpb.MsgPosition{
+			StartPosition: &msgpb.MsgPosition{
 				ChannelName: "c1",
 				MsgID:       []byte{},
 				MsgGroup:    "",
@@ -657,7 +657,7 @@ func TestGetSegmentInfo(t *testing.T) {
 		mockVChannel := "fake-by-dev-rootcoord-dml-1-testgetsegmentinfo-v0"
 		mockPChannel := "fake-by-dev-rootcoord-dml-1"
 
-		pos := &internalpb.MsgPosition{
+		pos := &msgpb.MsgPosition{
 			ChannelName: mockPChannel,
 			MsgID:       []byte{},
 			Timestamp:   1000,
@@ -1299,7 +1299,7 @@ func TestSaveBinlogPaths(t *testing.T) {
 			CheckPoints: []*datapb.CheckPoint{
 				{
 					SegmentID: 1,
-					Position: &internalpb.MsgPosition{
+					Position: &msgpb.MsgPosition{
 						ChannelName: "ch1",
 						MsgID:       []byte{1, 2, 3},
 						MsgGroup:    "",
@@ -1386,7 +1386,7 @@ func TestSaveBinlogPaths(t *testing.T) {
 			CheckPoints: []*datapb.CheckPoint{
 				{
 					SegmentID: 1,
-					Position: &internalpb.MsgPosition{
+					Position: &msgpb.MsgPosition{
 						ChannelName: "ch1",
 						MsgID:       []byte{1, 2, 3},
 						MsgGroup:    "",
@@ -1464,7 +1464,7 @@ func TestSaveBinlogPaths(t *testing.T) {
 			CheckPoints: []*datapb.CheckPoint{
 				{
 					SegmentID: 1,
-					Position: &internalpb.MsgPosition{
+					Position: &msgpb.MsgPosition{
 						ChannelName: "ch1",
 						MsgID:       []byte{1, 2, 3},
 						MsgGroup:    "",
@@ -1518,7 +1518,7 @@ func TestSaveBinlogPaths(t *testing.T) {
 			CheckPoints: []*datapb.CheckPoint{
 				{
 					SegmentID: 1,
-					Position: &internalpb.MsgPosition{
+					Position: &msgpb.MsgPosition{
 						ChannelName: "ch1",
 						MsgID:       []byte{1, 2, 3},
 						MsgGroup:    "",
@@ -1706,13 +1706,13 @@ func TestDropVirtualChannel(t *testing.T) {
 						},
 					},
 				},
-				CheckPoint: &internalpb.MsgPosition{
+				CheckPoint: &msgpb.MsgPosition{
 					ChannelName: "ch1",
 					MsgID:       []byte{1, 2, 3},
 					MsgGroup:    "",
 					Timestamp:   0,
 				},
-				StartPosition: &internalpb.MsgPosition{
+				StartPosition: &msgpb.MsgPosition{
 					ChannelName: "ch1",
 					MsgID:       []byte{1, 2, 3},
 					MsgGroup:    "",
@@ -1769,7 +1769,7 @@ func TestDataNodeTtChannel(t *testing.T) {
 			BaseMsg: msgstream.BaseMsg{
 				HashValues: []uint32{0},
 			},
-			DataNodeTtMsg: datapb.DataNodeTtMsg{
+			DataNodeTtMsg: msgpb.DataNodeTtMsg{
 				Base: &commonpb.MsgBase{
 					MsgType:   msgType,
 					MsgID:     0,
@@ -1836,7 +1836,7 @@ func TestDataNodeTtChannel(t *testing.T) {
 
 		msgPack := msgstream.MsgPack{}
 		msg := genMsg(commonpb.MsgType_DataNodeTt, "ch-1", assign.ExpireTime)
-		msg.SegmentsStats = append(msg.SegmentsStats, &datapb.SegmentStats{
+		msg.SegmentsStats = append(msg.SegmentsStats, &commonpb.SegmentStats{
 			SegmentID: assign.GetSegID(),
 			NumRows:   1,
 		})
@@ -1913,7 +1913,7 @@ func TestDataNodeTtChannel(t *testing.T) {
 
 		msgPack := msgstream.MsgPack{}
 		msg := genMsg(commonpb.MsgType_DataNodeTt, "ch-1", assign.ExpireTime)
-		msg.SegmentsStats = append(msg.SegmentsStats, &datapb.SegmentStats{
+		msg.SegmentsStats = append(msg.SegmentsStats, &commonpb.SegmentStats{
 			SegmentID: assign.GetSegID(),
 			NumRows:   1,
 		})
@@ -1999,29 +1999,29 @@ func TestGetChannelSeekPosition(t *testing.T) {
 
 	tests := []struct {
 		testName     string
-		channelCP    *internalpb.MsgPosition
-		segDMLPos    []*internalpb.MsgPosition
+		channelCP    *msgpb.MsgPosition
+		segDMLPos    []*msgpb.MsgPosition
 		collStartPos []*commonpb.KeyDataPair
 		channelName  string
-		expectedPos  *internalpb.MsgPosition
+		expectedPos  *msgpb.MsgPosition
 	}{
 		{"test-with-channelCP",
-			&internalpb.MsgPosition{ChannelName: "ch1", Timestamp: 100},
-			[]*internalpb.MsgPosition{{ChannelName: "ch1", Timestamp: 50}, {ChannelName: "ch1", Timestamp: 200}},
+			&msgpb.MsgPosition{ChannelName: "ch1", Timestamp: 100},
+			[]*msgpb.MsgPosition{{ChannelName: "ch1", Timestamp: 50}, {ChannelName: "ch1", Timestamp: 200}},
 			startPos1,
-			"ch1", &internalpb.MsgPosition{ChannelName: "ch1", Timestamp: 100}},
+			"ch1", &msgpb.MsgPosition{ChannelName: "ch1", Timestamp: 100}},
 
 		{"test-with-segmentDMLPos",
 			nil,
-			[]*internalpb.MsgPosition{{ChannelName: "ch1", Timestamp: 50}, {ChannelName: "ch1", Timestamp: 200}},
+			[]*msgpb.MsgPosition{{ChannelName: "ch1", Timestamp: 50}, {ChannelName: "ch1", Timestamp: 200}},
 			startPos1,
-			"ch1", &internalpb.MsgPosition{ChannelName: "ch1", Timestamp: 50}},
+			"ch1", &msgpb.MsgPosition{ChannelName: "ch1", Timestamp: 50}},
 
 		{"test-with-collStartPos",
 			nil,
 			nil,
 			startPos1,
-			"ch1", &internalpb.MsgPosition{ChannelName: "ch1", MsgID: startPos1[0].Data}},
+			"ch1", &msgpb.MsgPosition{ChannelName: "ch1", MsgID: startPos1[0].Data}},
 
 		{"test-non-exist-channel-1",
 			nil,
@@ -2108,7 +2108,7 @@ func TestGetDataVChanPositions(t *testing.T) {
 		PartitionID:   0,
 		InsertChannel: "ch1",
 		State:         commonpb.SegmentState_Flushed,
-		DmlPosition: &internalpb.MsgPosition{
+		DmlPosition: &msgpb.MsgPosition{
 			ChannelName: "ch1",
 			MsgID:       []byte{1, 2, 3},
 		},
@@ -2121,11 +2121,11 @@ func TestGetDataVChanPositions(t *testing.T) {
 		PartitionID:   0,
 		InsertChannel: "ch1",
 		State:         commonpb.SegmentState_Growing,
-		StartPosition: &internalpb.MsgPosition{
+		StartPosition: &msgpb.MsgPosition{
 			ChannelName: "ch1",
 			MsgID:       []byte{8, 9, 10},
 		},
-		DmlPosition: &internalpb.MsgPosition{
+		DmlPosition: &msgpb.MsgPosition{
 			ChannelName: "ch1",
 			MsgID:       []byte{1, 2, 3},
 			Timestamp:   1,
@@ -2139,11 +2139,11 @@ func TestGetDataVChanPositions(t *testing.T) {
 		PartitionID:   1,
 		InsertChannel: "ch1",
 		State:         commonpb.SegmentState_Growing,
-		StartPosition: &internalpb.MsgPosition{
+		StartPosition: &msgpb.MsgPosition{
 			ChannelName: "ch1",
 			MsgID:       []byte{8, 9, 10},
 		},
-		DmlPosition: &internalpb.MsgPosition{
+		DmlPosition: &msgpb.MsgPosition{
 			ChannelName: "ch1",
 			MsgID:       []byte{11, 12, 13},
 			Timestamp:   2,
@@ -2232,7 +2232,7 @@ func TestGetQueryVChanPositions(t *testing.T) {
 		PartitionID:   0,
 		InsertChannel: "ch1",
 		State:         commonpb.SegmentState_Flushed,
-		DmlPosition: &internalpb.MsgPosition{
+		DmlPosition: &msgpb.MsgPosition{
 			ChannelName: "ch1",
 			MsgID:       []byte{1, 2, 3},
 			MsgGroup:    "",
@@ -2258,12 +2258,12 @@ func TestGetQueryVChanPositions(t *testing.T) {
 		PartitionID:   0,
 		InsertChannel: "ch1",
 		State:         commonpb.SegmentState_Growing,
-		StartPosition: &internalpb.MsgPosition{
+		StartPosition: &msgpb.MsgPosition{
 			ChannelName: "ch1",
 			MsgID:       []byte{8, 9, 10},
 			MsgGroup:    "",
 		},
-		DmlPosition: &internalpb.MsgPosition{
+		DmlPosition: &msgpb.MsgPosition{
 			ChannelName: "ch1",
 			MsgID:       []byte{1, 2, 3},
 			MsgGroup:    "",
@@ -2278,12 +2278,12 @@ func TestGetQueryVChanPositions(t *testing.T) {
 		PartitionID:   1,
 		InsertChannel: "ch1",
 		State:         commonpb.SegmentState_Growing,
-		StartPosition: &internalpb.MsgPosition{
+		StartPosition: &msgpb.MsgPosition{
 			ChannelName: "ch1",
 			MsgID:       []byte{8, 9, 10},
 			MsgGroup:    "",
 		},
-		DmlPosition: &internalpb.MsgPosition{
+		DmlPosition: &msgpb.MsgPosition{
 			ChannelName: "ch1",
 			MsgID:       []byte{11, 12, 13},
 			MsgGroup:    "",
@@ -2381,13 +2381,13 @@ func TestShouldDropChannel(t *testing.T) {
 			PartitionID:   0,
 			InsertChannel: "ch1",
 			State:         commonpb.SegmentState_Dropped,
-			StartPosition: &internalpb.MsgPosition{
+			StartPosition: &msgpb.MsgPosition{
 				ChannelName: "ch1",
 				MsgID:       []byte{8, 9, 10},
 				MsgGroup:    "",
 				Timestamp:   0,
 			},
-			DmlPosition: &internalpb.MsgPosition{
+			DmlPosition: &msgpb.MsgPosition{
 				ChannelName: "ch1",
 				MsgID:       []byte{1, 2, 3},
 				MsgGroup:    "",
@@ -2401,12 +2401,12 @@ func TestShouldDropChannel(t *testing.T) {
 			InsertChannel:  "ch1",
 			State:          commonpb.SegmentState_Flushed,
 			CompactionFrom: []int64{4, 5},
-			StartPosition: &internalpb.MsgPosition{
+			StartPosition: &msgpb.MsgPosition{
 				ChannelName: "ch1",
 				MsgID:       []byte{8, 9, 10},
 				MsgGroup:    "",
 			},
-			DmlPosition: &internalpb.MsgPosition{
+			DmlPosition: &msgpb.MsgPosition{
 				ChannelName: "ch1",
 				MsgID:       []byte{1, 2, 3},
 				MsgGroup:    "",
@@ -2419,12 +2419,12 @@ func TestShouldDropChannel(t *testing.T) {
 			PartitionID:   1,
 			InsertChannel: "ch1",
 			State:         commonpb.SegmentState_Growing,
-			StartPosition: &internalpb.MsgPosition{
+			StartPosition: &msgpb.MsgPosition{
 				ChannelName: "ch1",
 				MsgID:       []byte{8, 9, 10},
 				MsgGroup:    "",
 			},
-			DmlPosition: &internalpb.MsgPosition{
+			DmlPosition: &msgpb.MsgPosition{
 				ChannelName: "ch1",
 				MsgID:       []byte{11, 12, 13},
 				MsgGroup:    "",
@@ -2528,12 +2528,12 @@ func TestGetRecoveryInfo(t *testing.T) {
 			InsertChannel: channel,
 			NumOfRows:     numOfRows,
 			State:         state,
-			DmlPosition: &internalpb.MsgPosition{
+			DmlPosition: &msgpb.MsgPosition{
 				ChannelName: channel,
 				MsgID:       []byte{},
 				Timestamp:   posTs,
 			},
-			StartPosition: &internalpb.MsgPosition{
+			StartPosition: &msgpb.MsgPosition{
 				ChannelName: "",
 				MsgID:       []byte{},
 				MsgGroup:    "",
@@ -2554,7 +2554,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 			Schema: newTestSchema(),
 		})
 
-		err := svr.meta.UpdateChannelCheckpoint("vchan1", &internalpb.MsgPosition{
+		err := svr.meta.UpdateChannelCheckpoint("vchan1", &msgpb.MsgPosition{
 			ChannelName: "vchan1",
 			Timestamp:   10,
 		})
@@ -2659,7 +2659,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 			Schema: newTestSchema(),
 		})
 
-		err := svr.meta.UpdateChannelCheckpoint("vchan1", &internalpb.MsgPosition{
+		err := svr.meta.UpdateChannelCheckpoint("vchan1", &msgpb.MsgPosition{
 			ChannelName: "vchan1",
 			Timestamp:   0,
 		})
@@ -2834,7 +2834,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 			Schema: newTestSchema(),
 		})
 
-		err := svr.meta.UpdateChannelCheckpoint("vchan1", &internalpb.MsgPosition{
+		err := svr.meta.UpdateChannelCheckpoint("vchan1", &msgpb.MsgPosition{
 			ChannelName: "vchan1",
 			Timestamp:   0,
 		})
@@ -2875,7 +2875,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 			Schema: newTestSchema(),
 		})
 
-		err := svr.meta.UpdateChannelCheckpoint("vchan1", &internalpb.MsgPosition{
+		err := svr.meta.UpdateChannelCheckpoint("vchan1", &msgpb.MsgPosition{
 			ChannelName: "vchan1",
 			Timestamp:   0,
 		})
@@ -2915,7 +2915,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 			Schema: newTestSchema(),
 		})
 
-		err := svr.meta.UpdateChannelCheckpoint("vchan1", &internalpb.MsgPosition{
+		err := svr.meta.UpdateChannelCheckpoint("vchan1", &msgpb.MsgPosition{
 			ChannelName: "vchan1",
 			Timestamp:   0,
 		})
@@ -3462,7 +3462,7 @@ func TestDataCoordServer_SetSegmentState(t *testing.T) {
 			InsertChannel: "c1",
 			NumOfRows:     0,
 			State:         commonpb.SegmentState_Growing,
-			StartPosition: &internalpb.MsgPosition{
+			StartPosition: &msgpb.MsgPosition{
 				ChannelName: "c1",
 				MsgID:       []byte{},
 				MsgGroup:    "",
@@ -3610,7 +3610,7 @@ func TestDataCoord_Import(t *testing.T) {
 		svr := newTestServer(t, nil)
 
 		status, err := svr.UpdateSegmentStatistics(context.TODO(), &datapb.UpdateSegmentStatisticsRequest{
-			Stats: []*datapb.SegmentStats{{
+			Stats: []*commonpb.SegmentStats{{
 				SegmentID: 100,
 				NumRows:   int64(1),
 			}},
@@ -3625,7 +3625,7 @@ func TestDataCoord_Import(t *testing.T) {
 		closeTestServer(t, svr)
 
 		status, err := svr.UpdateSegmentStatistics(context.TODO(), &datapb.UpdateSegmentStatisticsRequest{
-			Stats: []*datapb.SegmentStats{{
+			Stats: []*commonpb.SegmentStats{{
 				SegmentID: 100,
 				NumRows:   int64(1),
 			}},
@@ -3651,7 +3651,7 @@ func TestDataCoord_SegmentStatistics(t *testing.T) {
 		svr.meta.AddSegment(info)
 
 		status, err := svr.UpdateSegmentStatistics(context.TODO(), &datapb.UpdateSegmentStatisticsRequest{
-			Stats: []*datapb.SegmentStats{{
+			Stats: []*commonpb.SegmentStats{{
 				SegmentID: 100,
 				NumRows:   int64(1),
 			}},
@@ -3678,7 +3678,7 @@ func TestDataCoord_SegmentStatistics(t *testing.T) {
 		svr.meta.AddSegment(info)
 
 		status, err := svr.UpdateSegmentStatistics(context.TODO(), &datapb.UpdateSegmentStatisticsRequest{
-			Stats: []*datapb.SegmentStats{{
+			Stats: []*commonpb.SegmentStats{{
 				SegmentID: 100,
 				NumRows:   int64(1),
 			}},
@@ -3724,7 +3724,7 @@ func TestDataCoord_SaveImportSegment(t *testing.T) {
 				Importing:    true,
 				StartPositions: []*datapb.SegmentStartPosition{
 					{
-						StartPosition: &internalpb.MsgPosition{
+						StartPosition: &msgpb.MsgPosition{
 							ChannelName: "ch1",
 							Timestamp:   1,
 						},
@@ -3802,7 +3802,7 @@ func TestDataCoordServer_UpdateChannelCheckpoint(t *testing.T) {
 				SourceID: paramtable.GetNodeID(),
 			},
 			VChannel: mockVChannel,
-			Position: &internalpb.MsgPosition{
+			Position: &msgpb.MsgPosition{
 				ChannelName: mockPChannel,
 				Timestamp:   1000,
 			},

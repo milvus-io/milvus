@@ -23,16 +23,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/util/funcutil"
-	"github.com/milvus-io/milvus/internal/util/uniquegenerator"
-
 	"github.com/golang/protobuf/proto"
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
-	"github.com/stretchr/testify/assert"
+	"github.com/milvus-io/milvus/internal/util/uniquegenerator"
 )
 
 func TestPrintBinlogFilesInt64(t *testing.T) {
@@ -316,7 +316,7 @@ func TestPrintDDFiles(t *testing.T) {
 	partitionID := int64(1)
 	collName := "test"
 	partitionName := "test"
-	createCollReq := internalpb.CreateCollectionRequest{
+	createCollReq := msgpb.CreateCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_CreateCollection,
 			MsgID:     1,
@@ -332,7 +332,7 @@ func TestPrintDDFiles(t *testing.T) {
 	createCollString, err := proto.Marshal(&createCollReq)
 	assert.Nil(t, err)
 
-	dropCollReq := internalpb.DropCollectionRequest{
+	dropCollReq := msgpb.DropCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_DropCollection,
 			MsgID:     2,
@@ -347,7 +347,7 @@ func TestPrintDDFiles(t *testing.T) {
 	dropCollString, err := proto.Marshal(&dropCollReq)
 	assert.Nil(t, err)
 
-	createPartitionReq := internalpb.CreatePartitionRequest{
+	createPartitionReq := msgpb.CreatePartitionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_CreatePartition,
 			MsgID:     3,
@@ -364,7 +364,7 @@ func TestPrintDDFiles(t *testing.T) {
 	createPartitionString, err := proto.Marshal(&createPartitionReq)
 	assert.Nil(t, err)
 
-	dropPartitionReq := internalpb.DropPartitionRequest{
+	dropPartitionReq := msgpb.DropPartitionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_DropPartition,
 			MsgID:     4,

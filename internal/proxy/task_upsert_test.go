@@ -18,13 +18,14 @@ package proxy
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestUpsertTask_CheckAligned(t *testing.T) {
@@ -37,11 +38,11 @@ func TestUpsertTask_CheckAligned(t *testing.T) {
 		},
 		upsertMsg: &msgstream.UpsertMsg{
 			InsertMsg: &msgstream.InsertMsg{
-				InsertRequest: internalpb.InsertRequest{},
+				InsertRequest: msgpb.InsertRequest{},
 			},
 		},
 	}
-	case1.upsertMsg.InsertMsg.InsertRequest = internalpb.InsertRequest{
+	case1.upsertMsg.InsertMsg.InsertRequest = msgpb.InsertRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_Insert),
 		),
@@ -49,7 +50,7 @@ func TestUpsertTask_CheckAligned(t *testing.T) {
 		PartitionName:  case1.req.PartitionName,
 		FieldsData:     case1.req.FieldsData,
 		NumRows:        uint64(case1.req.NumRows),
-		Version:        internalpb.InsertDataVersion_ColumnBased,
+		Version:        msgpb.InsertDataVersion_ColumnBased,
 	}
 
 	err = case1.upsertMsg.InsertMsg.CheckAligned()
@@ -96,7 +97,7 @@ func TestUpsertTask_CheckAligned(t *testing.T) {
 		},
 		upsertMsg: &msgstream.UpsertMsg{
 			InsertMsg: &msgstream.InsertMsg{
-				InsertRequest: internalpb.InsertRequest{},
+				InsertRequest: msgpb.InsertRequest{},
 			},
 		},
 	}
@@ -114,7 +115,7 @@ func TestUpsertTask_CheckAligned(t *testing.T) {
 		newBinaryVectorFieldData("BinaryVector", numRows, dim),
 		newScalarFieldData(varCharFieldSchema, "VarChar", numRows),
 	}
-	case2.upsertMsg.InsertMsg.InsertRequest = internalpb.InsertRequest{
+	case2.upsertMsg.InsertMsg.InsertRequest = msgpb.InsertRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_Insert),
 		),
@@ -124,7 +125,7 @@ func TestUpsertTask_CheckAligned(t *testing.T) {
 		NumRows:        uint64(case2.req.NumRows),
 		RowIDs:         case2.rowIDs,
 		Timestamps:     case2.timestamps,
-		Version:        internalpb.InsertDataVersion_ColumnBased,
+		Version:        msgpb.InsertDataVersion_ColumnBased,
 	}
 	err = case2.upsertMsg.InsertMsg.CheckAligned()
 	assert.NoError(t, err)

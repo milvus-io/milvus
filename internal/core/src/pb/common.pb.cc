@@ -180,10 +180,24 @@ struct PrivilegeExtDefaultTypeInternal {
   };
 };
 PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 PrivilegeExtDefaultTypeInternal _PrivilegeExt_default_instance_;
+PROTOBUF_CONSTEXPR SegmentStats::SegmentStats(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.segmentid_)*/int64_t{0}
+  , /*decltype(_impl_.numrows_)*/int64_t{0}
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct SegmentStatsDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR SegmentStatsDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~SegmentStatsDefaultTypeInternal() {}
+  union {
+    SegmentStats _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 SegmentStatsDefaultTypeInternal _SegmentStats_default_instance_;
 }  // namespace common
 }  // namespace proto
 }  // namespace milvus
-static ::_pb::Metadata file_level_metadata_common_2eproto[11];
+static ::_pb::Metadata file_level_metadata_common_2eproto[12];
 static const ::_pb::EnumDescriptor* file_level_enum_descriptors_common_2eproto[13];
 static constexpr ::_pb::ServiceDescriptor const** file_level_service_descriptors_common_2eproto = nullptr;
 
@@ -279,6 +293,14 @@ const uint32_t TableStruct_common_2eproto::offsets[] PROTOBUF_SECTION_VARIABLE(p
   PROTOBUF_FIELD_OFFSET(::milvus::proto::common::PrivilegeExt, _impl_.object_privilege_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::common::PrivilegeExt, _impl_.object_name_index_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::common::PrivilegeExt, _impl_.object_name_indexs_),
+  ~0u,  // no _has_bits_
+  PROTOBUF_FIELD_OFFSET(::milvus::proto::common::SegmentStats, _internal_metadata_),
+  ~0u,  // no _extensions_
+  ~0u,  // no _oneof_case_
+  ~0u,  // no _weak_field_map_
+  ~0u,  // no _inlined_string_donated_
+  PROTOBUF_FIELD_OFFSET(::milvus::proto::common::SegmentStats, _impl_.segmentid_),
+  PROTOBUF_FIELD_OFFSET(::milvus::proto::common::SegmentStats, _impl_.numrows_),
 };
 static const ::_pbi::MigrationSchema schemas[] PROTOBUF_SECTION_VARIABLE(protodesc_cold) = {
   { 0, -1, -1, sizeof(::milvus::proto::common::Status)},
@@ -292,6 +314,7 @@ static const ::_pbi::MigrationSchema schemas[] PROTOBUF_SECTION_VARIABLE(protode
   { 66, -1, -1, sizeof(::milvus::proto::common::MsgHeader)},
   { 73, -1, -1, sizeof(::milvus::proto::common::DMLMsgHeader)},
   { 81, -1, -1, sizeof(::milvus::proto::common::PrivilegeExt)},
+  { 91, -1, -1, sizeof(::milvus::proto::common::SegmentStats)},
 };
 
 static const ::_pb::Message* const file_default_instances[] = {
@@ -306,6 +329,7 @@ static const ::_pb::Message* const file_default_instances[] = {
   &::milvus::proto::common::_MsgHeader_default_instance_._instance,
   &::milvus::proto::common::_DMLMsgHeader_default_instance_._instance,
   &::milvus::proto::common::_PrivilegeExt_default_instance_._instance,
+  &::milvus::proto::common::_SegmentStats_default_instance_._instance,
 };
 
 const char descriptor_table_protodef_common_2eproto[] PROTOBUF_SECTION_VARIABLE(protodesc_cold) =
@@ -332,146 +356,148 @@ const char descriptor_table_protodef_common_2eproto[] PROTOBUF_SECTION_VARIABLE(
   ".ObjectType\022>\n\020object_privilege\030\002 \001(\0162$."
   "milvus.proto.common.ObjectPrivilege\022\031\n\021o"
   "bject_name_index\030\003 \001(\005\022\032\n\022object_name_in"
-  "dexs\030\004 \001(\005*\303\n\n\tErrorCode\022\013\n\007Success\020\000\022\023\n"
-  "\017UnexpectedError\020\001\022\021\n\rConnectFailed\020\002\022\024\n"
-  "\020PermissionDenied\020\003\022\027\n\023CollectionNotExis"
-  "ts\020\004\022\023\n\017IllegalArgument\020\005\022\024\n\020IllegalDime"
-  "nsion\020\007\022\024\n\020IllegalIndexType\020\010\022\031\n\025Illegal"
-  "CollectionName\020\t\022\017\n\013IllegalTOPK\020\n\022\024\n\020Ill"
-  "egalRowRecord\020\013\022\023\n\017IllegalVectorID\020\014\022\027\n\023"
-  "IllegalSearchResult\020\r\022\020\n\014FileNotFound\020\016\022"
-  "\016\n\nMetaFailed\020\017\022\017\n\013CacheFailed\020\020\022\026\n\022Cann"
-  "otCreateFolder\020\021\022\024\n\020CannotCreateFile\020\022\022\026"
-  "\n\022CannotDeleteFolder\020\023\022\024\n\020CannotDeleteFi"
-  "le\020\024\022\023\n\017BuildIndexError\020\025\022\020\n\014IllegalNLIS"
-  "T\020\026\022\025\n\021IllegalMetricType\020\027\022\017\n\013OutOfMemor"
-  "y\020\030\022\021\n\rIndexNotExist\020\031\022\023\n\017EmptyCollectio"
-  "n\020\032\022\033\n\027UpdateImportTaskFailure\020\033\022\032\n\026Coll"
-  "ectionNameNotFound\020\034\022\033\n\027CreateCredential"
-  "Failure\020\035\022\033\n\027UpdateCredentialFailure\020\036\022\033"
-  "\n\027DeleteCredentialFailure\020\037\022\030\n\024GetCreden"
-  "tialFailure\020 \022\030\n\024ListCredUsersFailure\020!\022"
-  "\022\n\016GetUserFailure\020\"\022\025\n\021CreateRoleFailure"
-  "\020#\022\023\n\017DropRoleFailure\020$\022\032\n\026OperateUserRo"
-  "leFailure\020%\022\025\n\021SelectRoleFailure\020&\022\025\n\021Se"
-  "lectUserFailure\020\'\022\031\n\025SelectResourceFailu"
-  "re\020(\022\033\n\027OperatePrivilegeFailure\020)\022\026\n\022Sel"
-  "ectGrantFailure\020*\022!\n\035RefreshPolicyInfoCa"
-  "cheFailure\020+\022\025\n\021ListPolicyFailure\020,\022\022\n\016N"
-  "otShardLeader\020-\022\026\n\022NoReplicaAvailable\020.\022"
-  "\023\n\017SegmentNotFound\020/\022\r\n\tForceDeny\0200\022\r\n\tR"
-  "ateLimit\0201\022\022\n\016NodeIDNotMatch\0202\022\024\n\020Upsert"
-  "AutoIDTrue\0203\022\034\n\030InsufficientMemoryToLoad"
-  "\0204\022\030\n\024MemoryQuotaExhausted\0205\022\026\n\022DiskQuot"
-  "aExhausted\0206\022\025\n\021TimeTickLongDelay\0207\022\021\n\rN"
-  "otReadyServe\0208\022\033\n\027NotReadyCoordActivatin"
-  "g\0209\022\017\n\013DataCoordNA\020d\022\022\n\rDDRequestRace\020\350\007"
-  "*c\n\nIndexState\022\022\n\016IndexStateNone\020\000\022\014\n\010Un"
-  "issued\020\001\022\016\n\nInProgress\020\002\022\014\n\010Finished\020\003\022\n"
-  "\n\006Failed\020\004\022\t\n\005Retry\020\005*\202\001\n\014SegmentState\022\024"
-  "\n\020SegmentStateNone\020\000\022\014\n\010NotExist\020\001\022\013\n\007Gr"
-  "owing\020\002\022\n\n\006Sealed\020\003\022\013\n\007Flushed\020\004\022\014\n\010Flus"
-  "hing\020\005\022\013\n\007Dropped\020\006\022\r\n\tImporting\020\007*>\n\017Pl"
-  "aceholderType\022\010\n\004None\020\000\022\020\n\014BinaryVector\020"
-  "d\022\017\n\013FloatVector\020e*\300\016\n\007MsgType\022\r\n\tUndefi"
-  "ned\020\000\022\024\n\020CreateCollection\020d\022\022\n\016DropColle"
-  "ction\020e\022\021\n\rHasCollection\020f\022\026\n\022DescribeCo"
-  "llection\020g\022\023\n\017ShowCollections\020h\022\024\n\020GetSy"
-  "stemConfigs\020i\022\022\n\016LoadCollection\020j\022\025\n\021Rel"
-  "easeCollection\020k\022\017\n\013CreateAlias\020l\022\r\n\tDro"
-  "pAlias\020m\022\016\n\nAlterAlias\020n\022\023\n\017AlterCollect"
-  "ion\020o\022\024\n\020RenameCollection\020p\022\024\n\017CreatePar"
-  "tition\020\310\001\022\022\n\rDropPartition\020\311\001\022\021\n\014HasPart"
-  "ition\020\312\001\022\026\n\021DescribePartition\020\313\001\022\023\n\016Show"
-  "Partitions\020\314\001\022\023\n\016LoadPartitions\020\315\001\022\026\n\021Re"
-  "leasePartitions\020\316\001\022\021\n\014ShowSegments\020\372\001\022\024\n"
-  "\017DescribeSegment\020\373\001\022\021\n\014LoadSegments\020\374\001\022\024"
-  "\n\017ReleaseSegments\020\375\001\022\024\n\017HandoffSegments\020"
-  "\376\001\022\030\n\023LoadBalanceSegments\020\377\001\022\025\n\020Describe"
-  "Segments\020\200\002\022\020\n\013CreateIndex\020\254\002\022\022\n\rDescrib"
-  "eIndex\020\255\002\022\016\n\tDropIndex\020\256\002\022\013\n\006Insert\020\220\003\022\013"
-  "\n\006Delete\020\221\003\022\n\n\005Flush\020\222\003\022\027\n\022ResendSegment"
-  "Stats\020\223\003\022\013\n\006Upsert\020\224\003\022\013\n\006Search\020\364\003\022\021\n\014Se"
-  "archResult\020\365\003\022\022\n\rGetIndexState\020\366\003\022\032\n\025Get"
-  "IndexBuildProgress\020\367\003\022\034\n\027GetCollectionSt"
-  "atistics\020\370\003\022\033\n\026GetPartitionStatistics\020\371\003"
-  "\022\r\n\010Retrieve\020\372\003\022\023\n\016RetrieveResult\020\373\003\022\024\n\017"
-  "WatchDmChannels\020\374\003\022\025\n\020RemoveDmChannels\020\375"
-  "\003\022\027\n\022WatchQueryChannels\020\376\003\022\030\n\023RemoveQuer"
-  "yChannels\020\377\003\022\035\n\030SealedSegmentsChangeInfo"
-  "\020\200\004\022\027\n\022WatchDeltaChannels\020\201\004\022\024\n\017GetShard"
-  "Leaders\020\202\004\022\020\n\013GetReplicas\020\203\004\022\023\n\016UnsubDmC"
-  "hannel\020\204\004\022\024\n\017GetDistribution\020\205\004\022\025\n\020SyncD"
-  "istribution\020\206\004\022\020\n\013SegmentInfo\020\330\004\022\017\n\nSyst"
-  "emInfo\020\331\004\022\024\n\017GetRecoveryInfo\020\332\004\022\024\n\017GetSe"
-  "gmentState\020\333\004\022\r\n\010TimeTick\020\260\t\022\023\n\016QueryNod"
-  "eStats\020\261\t\022\016\n\tLoadIndex\020\262\t\022\016\n\tRequestID\020\263"
-  "\t\022\017\n\nRequestTSO\020\264\t\022\024\n\017AllocateSegment\020\265\t"
-  "\022\026\n\021SegmentStatistics\020\266\t\022\025\n\020SegmentFlush"
-  "Done\020\267\t\022\017\n\nDataNodeTt\020\270\t\022\025\n\020CreateCreden"
-  "tial\020\334\013\022\022\n\rGetCredential\020\335\013\022\025\n\020DeleteCre"
-  "dential\020\336\013\022\025\n\020UpdateCredential\020\337\013\022\026\n\021Lis"
-  "tCredUsernames\020\340\013\022\017\n\nCreateRole\020\300\014\022\r\n\010Dr"
-  "opRole\020\301\014\022\024\n\017OperateUserRole\020\302\014\022\017\n\nSelec"
-  "tRole\020\303\014\022\017\n\nSelectUser\020\304\014\022\023\n\016SelectResou"
-  "rce\020\305\014\022\025\n\020OperatePrivilege\020\306\014\022\020\n\013SelectG"
-  "rant\020\307\014\022\033\n\026RefreshPolicyInfoCache\020\310\014\022\017\n\n"
-  "ListPolicy\020\311\014\022\030\n\023CreateResourceGroup\020\244\r\022"
-  "\026\n\021DropResourceGroup\020\245\r\022\027\n\022ListResourceG"
-  "roups\020\246\r\022\032\n\025DescribeResourceGroup\020\247\r\022\021\n\014"
-  "TransferNode\020\250\r\022\024\n\017TransferReplica\020\251\r*\"\n"
-  "\007DslType\022\007\n\003Dsl\020\000\022\016\n\nBoolExprV1\020\001*B\n\017Com"
-  "pactionState\022\021\n\rUndefiedState\020\000\022\r\n\tExecu"
-  "ting\020\001\022\r\n\tCompleted\020\002*X\n\020ConsistencyLeve"
-  "l\022\n\n\006Strong\020\000\022\013\n\007Session\020\001\022\013\n\007Bounded\020\002\022"
-  "\016\n\nEventually\020\003\022\016\n\nCustomized\020\004*\236\001\n\013Impo"
-  "rtState\022\021\n\rImportPending\020\000\022\020\n\014ImportFail"
-  "ed\020\001\022\021\n\rImportStarted\020\002\022\023\n\017ImportPersist"
-  "ed\020\005\022\021\n\rImportFlushed\020\010\022\023\n\017ImportComplet"
-  "ed\020\006\022\032\n\026ImportFailedAndCleaned\020\007*2\n\nObje"
-  "ctType\022\016\n\nCollection\020\000\022\n\n\006Global\020\001\022\010\n\004Us"
-  "er\020\002*\227\007\n\017ObjectPrivilege\022\020\n\014PrivilegeAll"
-  "\020\000\022\035\n\031PrivilegeCreateCollection\020\001\022\033\n\027Pri"
-  "vilegeDropCollection\020\002\022\037\n\033PrivilegeDescr"
-  "ibeCollection\020\003\022\034\n\030PrivilegeShowCollecti"
-  "ons\020\004\022\021\n\rPrivilegeLoad\020\005\022\024\n\020PrivilegeRel"
-  "ease\020\006\022\027\n\023PrivilegeCompaction\020\007\022\023\n\017Privi"
-  "legeInsert\020\010\022\023\n\017PrivilegeDelete\020\t\022\032\n\026Pri"
-  "vilegeGetStatistics\020\n\022\030\n\024PrivilegeCreate"
-  "Index\020\013\022\030\n\024PrivilegeIndexDetail\020\014\022\026\n\022Pri"
-  "vilegeDropIndex\020\r\022\023\n\017PrivilegeSearch\020\016\022\022"
-  "\n\016PrivilegeFlush\020\017\022\022\n\016PrivilegeQuery\020\020\022\030"
-  "\n\024PrivilegeLoadBalance\020\021\022\023\n\017PrivilegeImp"
-  "ort\020\022\022\034\n\030PrivilegeCreateOwnership\020\023\022\027\n\023P"
-  "rivilegeUpdateUser\020\024\022\032\n\026PrivilegeDropOwn"
-  "ership\020\025\022\034\n\030PrivilegeSelectOwnership\020\026\022\034"
-  "\n\030PrivilegeManageOwnership\020\027\022\027\n\023Privileg"
-  "eSelectUser\020\030\022\023\n\017PrivilegeUpsert\020\031\022 \n\034Pr"
-  "ivilegeCreateResourceGroup\020\032\022\036\n\032Privileg"
-  "eDropResourceGroup\020\033\022\"\n\036PrivilegeDescrib"
-  "eResourceGroup\020\034\022\037\n\033PrivilegeListResourc"
-  "eGroups\020\035\022\031\n\025PrivilegeTransferNode\020\036\022\034\n\030"
-  "PrivilegeTransferReplica\020\037\022\037\n\033PrivilegeG"
-  "etLoadingProgress\020 \022\031\n\025PrivilegeGetLoadS"
-  "tate\020!*S\n\tStateCode\022\020\n\014Initializing\020\000\022\013\n"
-  "\007Healthy\020\001\022\014\n\010Abnormal\020\002\022\013\n\007StandBy\020\003\022\014\n"
-  "\010Stopping\020\004*c\n\tLoadState\022\025\n\021LoadStateNot"
-  "Exist\020\000\022\024\n\020LoadStateNotLoad\020\001\022\024\n\020LoadSta"
-  "teLoading\020\002\022\023\n\017LoadStateLoaded\020\003:^\n\021priv"
-  "ilege_ext_obj\022\037.google.protobuf.MessageO"
-  "ptions\030\351\007 \001(\0132!.milvus.proto.common.Priv"
-  "ilegeExtBf\n\016io.milvus.grpcB\013CommonProtoP"
-  "\001Z1github.com/milvus-io/milvus-proto/go-"
-  "api/commonpb\240\001\001\252\002\016IO.Milvus.Grpcb\006proto3"
+  "dexs\030\004 \001(\005\"2\n\014SegmentStats\022\021\n\tSegmentID\030"
+  "\001 \001(\003\022\017\n\007NumRows\030\002 \001(\003*\303\n\n\tErrorCode\022\013\n\007"
+  "Success\020\000\022\023\n\017UnexpectedError\020\001\022\021\n\rConnec"
+  "tFailed\020\002\022\024\n\020PermissionDenied\020\003\022\027\n\023Colle"
+  "ctionNotExists\020\004\022\023\n\017IllegalArgument\020\005\022\024\n"
+  "\020IllegalDimension\020\007\022\024\n\020IllegalIndexType\020"
+  "\010\022\031\n\025IllegalCollectionName\020\t\022\017\n\013IllegalT"
+  "OPK\020\n\022\024\n\020IllegalRowRecord\020\013\022\023\n\017IllegalVe"
+  "ctorID\020\014\022\027\n\023IllegalSearchResult\020\r\022\020\n\014Fil"
+  "eNotFound\020\016\022\016\n\nMetaFailed\020\017\022\017\n\013CacheFail"
+  "ed\020\020\022\026\n\022CannotCreateFolder\020\021\022\024\n\020CannotCr"
+  "eateFile\020\022\022\026\n\022CannotDeleteFolder\020\023\022\024\n\020Ca"
+  "nnotDeleteFile\020\024\022\023\n\017BuildIndexError\020\025\022\020\n"
+  "\014IllegalNLIST\020\026\022\025\n\021IllegalMetricType\020\027\022\017"
+  "\n\013OutOfMemory\020\030\022\021\n\rIndexNotExist\020\031\022\023\n\017Em"
+  "ptyCollection\020\032\022\033\n\027UpdateImportTaskFailu"
+  "re\020\033\022\032\n\026CollectionNameNotFound\020\034\022\033\n\027Crea"
+  "teCredentialFailure\020\035\022\033\n\027UpdateCredentia"
+  "lFailure\020\036\022\033\n\027DeleteCredentialFailure\020\037\022"
+  "\030\n\024GetCredentialFailure\020 \022\030\n\024ListCredUse"
+  "rsFailure\020!\022\022\n\016GetUserFailure\020\"\022\025\n\021Creat"
+  "eRoleFailure\020#\022\023\n\017DropRoleFailure\020$\022\032\n\026O"
+  "perateUserRoleFailure\020%\022\025\n\021SelectRoleFai"
+  "lure\020&\022\025\n\021SelectUserFailure\020\'\022\031\n\025SelectR"
+  "esourceFailure\020(\022\033\n\027OperatePrivilegeFail"
+  "ure\020)\022\026\n\022SelectGrantFailure\020*\022!\n\035Refresh"
+  "PolicyInfoCacheFailure\020+\022\025\n\021ListPolicyFa"
+  "ilure\020,\022\022\n\016NotShardLeader\020-\022\026\n\022NoReplica"
+  "Available\020.\022\023\n\017SegmentNotFound\020/\022\r\n\tForc"
+  "eDeny\0200\022\r\n\tRateLimit\0201\022\022\n\016NodeIDNotMatch"
+  "\0202\022\024\n\020UpsertAutoIDTrue\0203\022\034\n\030Insufficient"
+  "MemoryToLoad\0204\022\030\n\024MemoryQuotaExhausted\0205"
+  "\022\026\n\022DiskQuotaExhausted\0206\022\025\n\021TimeTickLong"
+  "Delay\0207\022\021\n\rNotReadyServe\0208\022\033\n\027NotReadyCo"
+  "ordActivating\0209\022\017\n\013DataCoordNA\020d\022\022\n\rDDRe"
+  "questRace\020\350\007*c\n\nIndexState\022\022\n\016IndexState"
+  "None\020\000\022\014\n\010Unissued\020\001\022\016\n\nInProgress\020\002\022\014\n\010"
+  "Finished\020\003\022\n\n\006Failed\020\004\022\t\n\005Retry\020\005*\202\001\n\014Se"
+  "gmentState\022\024\n\020SegmentStateNone\020\000\022\014\n\010NotE"
+  "xist\020\001\022\013\n\007Growing\020\002\022\n\n\006Sealed\020\003\022\013\n\007Flush"
+  "ed\020\004\022\014\n\010Flushing\020\005\022\013\n\007Dropped\020\006\022\r\n\tImpor"
+  "ting\020\007*>\n\017PlaceholderType\022\010\n\004None\020\000\022\020\n\014B"
+  "inaryVector\020d\022\017\n\013FloatVector\020e*\300\016\n\007MsgTy"
+  "pe\022\r\n\tUndefined\020\000\022\024\n\020CreateCollection\020d\022"
+  "\022\n\016DropCollection\020e\022\021\n\rHasCollection\020f\022\026"
+  "\n\022DescribeCollection\020g\022\023\n\017ShowCollection"
+  "s\020h\022\024\n\020GetSystemConfigs\020i\022\022\n\016LoadCollect"
+  "ion\020j\022\025\n\021ReleaseCollection\020k\022\017\n\013CreateAl"
+  "ias\020l\022\r\n\tDropAlias\020m\022\016\n\nAlterAlias\020n\022\023\n\017"
+  "AlterCollection\020o\022\024\n\020RenameCollection\020p\022"
+  "\024\n\017CreatePartition\020\310\001\022\022\n\rDropPartition\020\311"
+  "\001\022\021\n\014HasPartition\020\312\001\022\026\n\021DescribePartitio"
+  "n\020\313\001\022\023\n\016ShowPartitions\020\314\001\022\023\n\016LoadPartiti"
+  "ons\020\315\001\022\026\n\021ReleasePartitions\020\316\001\022\021\n\014ShowSe"
+  "gments\020\372\001\022\024\n\017DescribeSegment\020\373\001\022\021\n\014LoadS"
+  "egments\020\374\001\022\024\n\017ReleaseSegments\020\375\001\022\024\n\017Hand"
+  "offSegments\020\376\001\022\030\n\023LoadBalanceSegments\020\377\001"
+  "\022\025\n\020DescribeSegments\020\200\002\022\020\n\013CreateIndex\020\254"
+  "\002\022\022\n\rDescribeIndex\020\255\002\022\016\n\tDropIndex\020\256\002\022\013\n"
+  "\006Insert\020\220\003\022\013\n\006Delete\020\221\003\022\n\n\005Flush\020\222\003\022\027\n\022R"
+  "esendSegmentStats\020\223\003\022\013\n\006Upsert\020\224\003\022\013\n\006Sea"
+  "rch\020\364\003\022\021\n\014SearchResult\020\365\003\022\022\n\rGetIndexSta"
+  "te\020\366\003\022\032\n\025GetIndexBuildProgress\020\367\003\022\034\n\027Get"
+  "CollectionStatistics\020\370\003\022\033\n\026GetPartitionS"
+  "tatistics\020\371\003\022\r\n\010Retrieve\020\372\003\022\023\n\016RetrieveR"
+  "esult\020\373\003\022\024\n\017WatchDmChannels\020\374\003\022\025\n\020Remove"
+  "DmChannels\020\375\003\022\027\n\022WatchQueryChannels\020\376\003\022\030"
+  "\n\023RemoveQueryChannels\020\377\003\022\035\n\030SealedSegmen"
+  "tsChangeInfo\020\200\004\022\027\n\022WatchDeltaChannels\020\201\004"
+  "\022\024\n\017GetShardLeaders\020\202\004\022\020\n\013GetReplicas\020\203\004"
+  "\022\023\n\016UnsubDmChannel\020\204\004\022\024\n\017GetDistribution"
+  "\020\205\004\022\025\n\020SyncDistribution\020\206\004\022\020\n\013SegmentInf"
+  "o\020\330\004\022\017\n\nSystemInfo\020\331\004\022\024\n\017GetRecoveryInfo"
+  "\020\332\004\022\024\n\017GetSegmentState\020\333\004\022\r\n\010TimeTick\020\260\t"
+  "\022\023\n\016QueryNodeStats\020\261\t\022\016\n\tLoadIndex\020\262\t\022\016\n"
+  "\tRequestID\020\263\t\022\017\n\nRequestTSO\020\264\t\022\024\n\017Alloca"
+  "teSegment\020\265\t\022\026\n\021SegmentStatistics\020\266\t\022\025\n\020"
+  "SegmentFlushDone\020\267\t\022\017\n\nDataNodeTt\020\270\t\022\025\n\020"
+  "CreateCredential\020\334\013\022\022\n\rGetCredential\020\335\013\022"
+  "\025\n\020DeleteCredential\020\336\013\022\025\n\020UpdateCredenti"
+  "al\020\337\013\022\026\n\021ListCredUsernames\020\340\013\022\017\n\nCreateR"
+  "ole\020\300\014\022\r\n\010DropRole\020\301\014\022\024\n\017OperateUserRole"
+  "\020\302\014\022\017\n\nSelectRole\020\303\014\022\017\n\nSelectUser\020\304\014\022\023\n"
+  "\016SelectResource\020\305\014\022\025\n\020OperatePrivilege\020\306"
+  "\014\022\020\n\013SelectGrant\020\307\014\022\033\n\026RefreshPolicyInfo"
+  "Cache\020\310\014\022\017\n\nListPolicy\020\311\014\022\030\n\023CreateResou"
+  "rceGroup\020\244\r\022\026\n\021DropResourceGroup\020\245\r\022\027\n\022L"
+  "istResourceGroups\020\246\r\022\032\n\025DescribeResource"
+  "Group\020\247\r\022\021\n\014TransferNode\020\250\r\022\024\n\017TransferR"
+  "eplica\020\251\r*\"\n\007DslType\022\007\n\003Dsl\020\000\022\016\n\nBoolExp"
+  "rV1\020\001*B\n\017CompactionState\022\021\n\rUndefiedStat"
+  "e\020\000\022\r\n\tExecuting\020\001\022\r\n\tCompleted\020\002*X\n\020Con"
+  "sistencyLevel\022\n\n\006Strong\020\000\022\013\n\007Session\020\001\022\013"
+  "\n\007Bounded\020\002\022\016\n\nEventually\020\003\022\016\n\nCustomize"
+  "d\020\004*\236\001\n\013ImportState\022\021\n\rImportPending\020\000\022\020"
+  "\n\014ImportFailed\020\001\022\021\n\rImportStarted\020\002\022\023\n\017I"
+  "mportPersisted\020\005\022\021\n\rImportFlushed\020\010\022\023\n\017I"
+  "mportCompleted\020\006\022\032\n\026ImportFailedAndClean"
+  "ed\020\007*2\n\nObjectType\022\016\n\nCollection\020\000\022\n\n\006Gl"
+  "obal\020\001\022\010\n\004User\020\002*\227\007\n\017ObjectPrivilege\022\020\n\014"
+  "PrivilegeAll\020\000\022\035\n\031PrivilegeCreateCollect"
+  "ion\020\001\022\033\n\027PrivilegeDropCollection\020\002\022\037\n\033Pr"
+  "ivilegeDescribeCollection\020\003\022\034\n\030Privilege"
+  "ShowCollections\020\004\022\021\n\rPrivilegeLoad\020\005\022\024\n\020"
+  "PrivilegeRelease\020\006\022\027\n\023PrivilegeCompactio"
+  "n\020\007\022\023\n\017PrivilegeInsert\020\010\022\023\n\017PrivilegeDel"
+  "ete\020\t\022\032\n\026PrivilegeGetStatistics\020\n\022\030\n\024Pri"
+  "vilegeCreateIndex\020\013\022\030\n\024PrivilegeIndexDet"
+  "ail\020\014\022\026\n\022PrivilegeDropIndex\020\r\022\023\n\017Privile"
+  "geSearch\020\016\022\022\n\016PrivilegeFlush\020\017\022\022\n\016Privil"
+  "egeQuery\020\020\022\030\n\024PrivilegeLoadBalance\020\021\022\023\n\017"
+  "PrivilegeImport\020\022\022\034\n\030PrivilegeCreateOwne"
+  "rship\020\023\022\027\n\023PrivilegeUpdateUser\020\024\022\032\n\026Priv"
+  "ilegeDropOwnership\020\025\022\034\n\030PrivilegeSelectO"
+  "wnership\020\026\022\034\n\030PrivilegeManageOwnership\020\027"
+  "\022\027\n\023PrivilegeSelectUser\020\030\022\023\n\017PrivilegeUp"
+  "sert\020\031\022 \n\034PrivilegeCreateResourceGroup\020\032"
+  "\022\036\n\032PrivilegeDropResourceGroup\020\033\022\"\n\036Priv"
+  "ilegeDescribeResourceGroup\020\034\022\037\n\033Privileg"
+  "eListResourceGroups\020\035\022\031\n\025PrivilegeTransf"
+  "erNode\020\036\022\034\n\030PrivilegeTransferReplica\020\037\022\037"
+  "\n\033PrivilegeGetLoadingProgress\020 \022\031\n\025Privi"
+  "legeGetLoadState\020!*S\n\tStateCode\022\020\n\014Initi"
+  "alizing\020\000\022\013\n\007Healthy\020\001\022\014\n\010Abnormal\020\002\022\013\n\007"
+  "StandBy\020\003\022\014\n\010Stopping\020\004*c\n\tLoadState\022\025\n\021"
+  "LoadStateNotExist\020\000\022\024\n\020LoadStateNotLoad\020"
+  "\001\022\024\n\020LoadStateLoading\020\002\022\023\n\017LoadStateLoad"
+  "ed\020\003:^\n\021privilege_ext_obj\022\037.google.proto"
+  "buf.MessageOptions\030\351\007 \001(\0132!.milvus.proto"
+  ".common.PrivilegeExtBf\n\016io.milvus.grpcB\013"
+  "CommonProtoP\001Z1github.com/milvus-io/milv"
+  "us-proto/go-api/commonpb\240\001\001\252\002\016IO.Milvus."
+  "Grpcb\006proto3"
   ;
 static const ::_pbi::DescriptorTable* const descriptor_table_common_2eproto_deps[1] = {
   &::descriptor_table_google_2fprotobuf_2fdescriptor_2eproto,
 };
 static ::_pbi::once_flag descriptor_table_common_2eproto_once;
 const ::_pbi::DescriptorTable descriptor_table_common_2eproto = {
-    false, false, 6160, descriptor_table_protodef_common_2eproto,
+    false, false, 6212, descriptor_table_protodef_common_2eproto,
     "common.proto",
-    &descriptor_table_common_2eproto_once, descriptor_table_common_2eproto_deps, 1, 11,
+    &descriptor_table_common_2eproto_once, descriptor_table_common_2eproto_deps, 1, 12,
     schemas, file_default_instances, TableStruct_common_2eproto::offsets,
     file_level_metadata_common_2eproto, file_level_enum_descriptors_common_2eproto,
     file_level_service_descriptors_common_2eproto,
@@ -3472,6 +3498,217 @@ void PrivilegeExt::InternalSwap(PrivilegeExt* other) {
       &descriptor_table_common_2eproto_getter, &descriptor_table_common_2eproto_once,
       file_level_metadata_common_2eproto[10]);
 }
+
+// ===================================================================
+
+class SegmentStats::_Internal {
+ public:
+};
+
+SegmentStats::SegmentStats(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::Message(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:milvus.proto.common.SegmentStats)
+}
+SegmentStats::SegmentStats(const SegmentStats& from)
+  : ::PROTOBUF_NAMESPACE_ID::Message() {
+  SegmentStats* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.segmentid_){}
+    , decltype(_impl_.numrows_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(from._internal_metadata_);
+  ::memcpy(&_impl_.segmentid_, &from._impl_.segmentid_,
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.numrows_) -
+    reinterpret_cast<char*>(&_impl_.segmentid_)) + sizeof(_impl_.numrows_));
+  // @@protoc_insertion_point(copy_constructor:milvus.proto.common.SegmentStats)
+}
+
+inline void SegmentStats::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.segmentid_){int64_t{0}}
+    , decltype(_impl_.numrows_){int64_t{0}}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+}
+
+SegmentStats::~SegmentStats() {
+  // @@protoc_insertion_point(destructor:milvus.proto.common.SegmentStats)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void SegmentStats::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+}
+
+void SegmentStats::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void SegmentStats::Clear() {
+// @@protoc_insertion_point(message_clear_start:milvus.proto.common.SegmentStats)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  ::memset(&_impl_.segmentid_, 0, static_cast<size_t>(
+      reinterpret_cast<char*>(&_impl_.numrows_) -
+      reinterpret_cast<char*>(&_impl_.segmentid_)) + sizeof(_impl_.numrows_));
+  _internal_metadata_.Clear<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>();
+}
+
+const char* SegmentStats::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // int64 SegmentID = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
+          _impl_.segmentid_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // int64 NumRows = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 16)) {
+          _impl_.numrows_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* SegmentStats::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:milvus.proto.common.SegmentStats)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // int64 SegmentID = 1;
+  if (this->_internal_segmentid() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteInt64ToArray(1, this->_internal_segmentid(), target);
+  }
+
+  // int64 NumRows = 2;
+  if (this->_internal_numrows() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteInt64ToArray(2, this->_internal_numrows(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = ::_pbi::WireFormat::InternalSerializeUnknownFieldsToArray(
+        _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance), target, stream);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:milvus.proto.common.SegmentStats)
+  return target;
+}
+
+size_t SegmentStats::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:milvus.proto.common.SegmentStats)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // int64 SegmentID = 1;
+  if (this->_internal_segmentid() != 0) {
+    total_size += ::_pbi::WireFormatLite::Int64SizePlusOne(this->_internal_segmentid());
+  }
+
+  // int64 NumRows = 2;
+  if (this->_internal_numrows() != 0) {
+    total_size += ::_pbi::WireFormatLite::Int64SizePlusOne(this->_internal_numrows());
+  }
+
+  return MaybeComputeUnknownFieldsSize(total_size, &_impl_._cached_size_);
+}
+
+const ::PROTOBUF_NAMESPACE_ID::Message::ClassData SegmentStats::_class_data_ = {
+    ::PROTOBUF_NAMESPACE_ID::Message::CopyWithSourceCheck,
+    SegmentStats::MergeImpl
+};
+const ::PROTOBUF_NAMESPACE_ID::Message::ClassData*SegmentStats::GetClassData() const { return &_class_data_; }
+
+
+void SegmentStats::MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROTOBUF_NAMESPACE_ID::Message& from_msg) {
+  auto* const _this = static_cast<SegmentStats*>(&to_msg);
+  auto& from = static_cast<const SegmentStats&>(from_msg);
+  // @@protoc_insertion_point(class_specific_merge_from_start:milvus.proto.common.SegmentStats)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (from._internal_segmentid() != 0) {
+    _this->_internal_set_segmentid(from._internal_segmentid());
+  }
+  if (from._internal_numrows() != 0) {
+    _this->_internal_set_numrows(from._internal_numrows());
+  }
+  _this->_internal_metadata_.MergeFrom<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(from._internal_metadata_);
+}
+
+void SegmentStats::CopyFrom(const SegmentStats& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:milvus.proto.common.SegmentStats)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool SegmentStats::IsInitialized() const {
+  return true;
+}
+
+void SegmentStats::InternalSwap(SegmentStats* other) {
+  using std::swap;
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  ::PROTOBUF_NAMESPACE_ID::internal::memswap<
+      PROTOBUF_FIELD_OFFSET(SegmentStats, _impl_.numrows_)
+      + sizeof(SegmentStats::_impl_.numrows_)
+      - PROTOBUF_FIELD_OFFSET(SegmentStats, _impl_.segmentid_)>(
+          reinterpret_cast<char*>(&_impl_.segmentid_),
+          reinterpret_cast<char*>(&other->_impl_.segmentid_));
+}
+
+::PROTOBUF_NAMESPACE_ID::Metadata SegmentStats::GetMetadata() const {
+  return ::_pbi::AssignDescriptors(
+      &descriptor_table_common_2eproto_getter, &descriptor_table_common_2eproto_once,
+      file_level_metadata_common_2eproto[11]);
+}
 PROTOBUF_ATTRIBUTE_INIT_PRIORITY2 ::PROTOBUF_NAMESPACE_ID::internal::ExtensionIdentifier< ::PROTOBUF_NAMESPACE_ID::MessageOptions,
     ::PROTOBUF_NAMESPACE_ID::internal::MessageTypeTraits< ::milvus::proto::common::PrivilegeExt >, 11, false>
   privilege_ext_obj(kPrivilegeExtObjFieldNumber, ::milvus::proto::common::PrivilegeExt::default_instance(), nullptr);
@@ -3524,6 +3761,10 @@ Arena::CreateMaybeMessage< ::milvus::proto::common::DMLMsgHeader >(Arena* arena)
 template<> PROTOBUF_NOINLINE ::milvus::proto::common::PrivilegeExt*
 Arena::CreateMaybeMessage< ::milvus::proto::common::PrivilegeExt >(Arena* arena) {
   return Arena::CreateMessageInternal< ::milvus::proto::common::PrivilegeExt >(arena);
+}
+template<> PROTOBUF_NOINLINE ::milvus::proto::common::SegmentStats*
+Arena::CreateMaybeMessage< ::milvus::proto::common::SegmentStats >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::milvus::proto::common::SegmentStats >(arena);
 }
 PROTOBUF_NAMESPACE_CLOSE
 

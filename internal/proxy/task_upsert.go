@@ -20,21 +20,22 @@ import (
 	"fmt"
 	"strconv"
 
+	"go.opentelemetry.io/otel"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"go.opentelemetry.io/otel"
-	"go.uber.org/zap"
 )
 
 type upsertTask struct {
@@ -260,7 +261,7 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 
 	it.upsertMsg = &msgstream.UpsertMsg{
 		InsertMsg: &msgstream.InsertMsg{
-			InsertRequest: internalpb.InsertRequest{
+			InsertRequest: msgpb.InsertRequest{
 				Base: commonpbutil.NewMsgBase(
 					commonpbutil.WithMsgType(commonpb.MsgType_Insert),
 					commonpbutil.WithSourceID(paramtable.GetNodeID()),
@@ -269,11 +270,11 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 				PartitionName:  it.req.PartitionName,
 				FieldsData:     it.req.FieldsData,
 				NumRows:        uint64(it.req.NumRows),
-				Version:        internalpb.InsertDataVersion_ColumnBased,
+				Version:        msgpb.InsertDataVersion_ColumnBased,
 			},
 		},
 		DeleteMsg: &msgstream.DeleteMsg{
-			DeleteRequest: internalpb.DeleteRequest{
+			DeleteRequest: msgpb.DeleteRequest{
 				Base: commonpbutil.NewMsgBase(
 					commonpbutil.WithMsgType(commonpb.MsgType_Delete),
 					commonpbutil.WithSourceID(paramtable.GetNodeID()),
@@ -414,7 +415,7 @@ func (it *upsertTask) deleteExecute(ctx context.Context, msgPack *msgstream.MsgP
 		ts := it.upsertMsg.DeleteMsg.Timestamps[index]
 		_, ok := result[key]
 		if !ok {
-			sliceRequest := internalpb.DeleteRequest{
+			sliceRequest := msgpb.DeleteRequest{
 				Base: commonpbutil.NewMsgBase(
 					commonpbutil.WithMsgType(commonpb.MsgType_Delete),
 					commonpbutil.WithTimeStamp(ts),

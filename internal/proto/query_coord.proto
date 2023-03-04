@@ -8,6 +8,7 @@ import "common.proto";
 import "milvus.proto";
 import "internal.proto";
 import "schema.proto";
+import "msg.proto";
 import "data_coord.proto";
 
 service QueryCoord {
@@ -233,7 +234,7 @@ message SegmentLoadInfo {
   repeated FieldIndexInfo index_infos = 11;
   int64 segment_size = 12;
   string insert_channel = 13;
-  internal.MsgPosition start_position = 14;
+  msg.MsgPosition start_position = 14;
 }
 
 message FieldIndexInfo {
@@ -259,7 +260,7 @@ message LoadSegmentsRequest {
   int64 collectionID = 6;
   LoadMetaInfo load_meta = 7;
   int64 replicaID = 8;
-  repeated internal.MsgPosition delta_positions = 9;
+  repeated msg.MsgPosition delta_positions = 9;
   int64 version = 10;
   bool need_transfer = 11;
 }
@@ -368,7 +369,7 @@ message QueryChannelInfo {
   string query_channel = 2;
   string query_result_channel = 3;
   repeated SegmentInfo global_sealed_segments = 4;
-  internal.MsgPosition seek_position = 5;
+  msg.MsgPosition seek_position = 5;
 }
 
 message PartitionStates {
@@ -450,7 +451,7 @@ message LeaderView {
   string channel = 2;
   map<int64, SegmentDist> segment_dist = 3;
   repeated int64 growing_segmentIDs = 4;
-  map<int64, internal.MsgPosition> growing_segments = 5;
+  map<int64, msg.MsgPosition> growing_segments = 5;
 }
 
 message SegmentDist {

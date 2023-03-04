@@ -21,11 +21,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/stretchr/testify/suite"
+
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
-	"github.com/stretchr/testify/suite"
 )
 
 type MergerSuite struct {
@@ -55,7 +56,7 @@ func (suite *MergerSuite) SetupSuite() {
 					InsertChannel: "dmc0",
 				},
 			},
-			DeltaPositions: []*internalpb.MsgPosition{
+			DeltaPositions: []*msgpb.MsgPosition{
 				{
 					ChannelName: "dmc0",
 					Timestamp:   2,
@@ -75,7 +76,7 @@ func (suite *MergerSuite) SetupSuite() {
 					InsertChannel: "dmc0",
 				},
 			},
-			DeltaPositions: []*internalpb.MsgPosition{
+			DeltaPositions: []*msgpb.MsgPosition{
 				{
 					ChannelName: "dmc0",
 					Timestamp:   3,
@@ -95,7 +96,7 @@ func (suite *MergerSuite) SetupSuite() {
 					InsertChannel: "dmc0",
 				},
 			},
-			DeltaPositions: []*internalpb.MsgPosition{
+			DeltaPositions: []*msgpb.MsgPosition{
 				{
 					ChannelName: "dmc0",
 					Timestamp:   1,

@@ -25,14 +25,18 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -41,10 +45,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/samber/lo"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-	"github.com/stretchr/testify/suite"
 )
 
 var insertNodeTestDir = "/tmp/milvus_test/insert_node"
@@ -89,8 +89,8 @@ func TestFlowGraphInsertBufferNodeCreate(t *testing.T) {
 			segID:       1,
 			collID:      collMeta.ID,
 			partitionID: 0,
-			startPos:    &internalpb.MsgPosition{},
-			endPos:      &internalpb.MsgPosition{},
+			startPos:    &msgpb.MsgPosition{},
+			endPos:      &msgpb.MsgPosition{},
 		})
 	require.NoError(t, err)
 
@@ -193,8 +193,8 @@ func TestFlowGraphInsertBufferNode_Operate(t *testing.T) {
 			segID:       1,
 			collID:      collMeta.ID,
 			partitionID: 0,
-			startPos:    &internalpb.MsgPosition{},
-			endPos:      &internalpb.MsgPosition{},
+			startPos:    &msgpb.MsgPosition{},
+			endPos:      &msgpb.MsgPosition{},
 		})
 	require.NoError(t, err)
 
@@ -408,8 +408,8 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 		for i := range inMsg.insertMessages {
 			inMsg.insertMessages[i].SegmentID = int64(i%2) + 1
 		}
-		inMsg.startPositions = []*internalpb.MsgPosition{{Timestamp: 100}}
-		inMsg.endPositions = []*internalpb.MsgPosition{{Timestamp: 123}}
+		inMsg.startPositions = []*msgpb.MsgPosition{{Timestamp: 100}}
+		inMsg.endPositions = []*msgpb.MsgPosition{{Timestamp: 123}}
 
 		type Test struct {
 			expectedSegID       UniqueID
@@ -443,8 +443,8 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 		for i := range inMsg.insertMessages {
 			inMsg.insertMessages[i].SegmentID = int64(i%2) + 2
 		}
-		inMsg.startPositions = []*internalpb.MsgPosition{{Timestamp: 200}}
-		inMsg.endPositions = []*internalpb.MsgPosition{{Timestamp: 234}}
+		inMsg.startPositions = []*msgpb.MsgPosition{{Timestamp: 200}}
+		inMsg.endPositions = []*msgpb.MsgPosition{{Timestamp: 234}}
 		iMsg = &inMsg
 
 		// Triger auto flush
@@ -507,8 +507,8 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 		for i := range inMsg.insertMessages {
 			inMsg.insertMessages[i].SegmentID = UniqueID(10 + i)
 		}
-		inMsg.startPositions = []*internalpb.MsgPosition{{Timestamp: 300}}
-		inMsg.endPositions = []*internalpb.MsgPosition{{Timestamp: 323}}
+		inMsg.startPositions = []*msgpb.MsgPosition{{Timestamp: 300}}
+		inMsg.endPositions = []*msgpb.MsgPosition{{Timestamp: 323}}
 		var iMsg flowgraph.Msg = &inMsg
 
 		type Test struct {
@@ -540,8 +540,8 @@ func TestFlowGraphInsertBufferNode_AutoFlush(t *testing.T) {
 			assert.Equal(t, test.expectedStartPosTs, seg.startPos.GetTimestamp())
 		}
 
-		inMsg.startPositions = []*internalpb.MsgPosition{{Timestamp: 400}}
-		inMsg.endPositions = []*internalpb.MsgPosition{{Timestamp: 434}}
+		inMsg.startPositions = []*msgpb.MsgPosition{{Timestamp: 400}}
+		inMsg.endPositions = []*msgpb.MsgPosition{{Timestamp: 434}}
 
 		// trigger manual flush
 		flushChan <- flushMsg{segmentID: 10}
@@ -644,8 +644,8 @@ func TestRollBF(t *testing.T) {
 			Params.DataNodeCfg.FlushInsertBufferSize = tmp
 		}()
 
-		inMsg.startPositions = []*internalpb.MsgPosition{{Timestamp: 100}}
-		inMsg.endPositions = []*internalpb.MsgPosition{{Timestamp: 123}}
+		inMsg.startPositions = []*msgpb.MsgPosition{{Timestamp: 100}}
+		inMsg.endPositions = []*msgpb.MsgPosition{{Timestamp: 123}}
 
 		type Test struct {
 			expectedSegID       UniqueID
@@ -671,8 +671,8 @@ func TestRollBF(t *testing.T) {
 		// because this is the origincal
 		assert.True(t, seg.currentStat.PkFilter.Cap() > uint(1000000))
 
-		inMsg.startPositions = []*internalpb.MsgPosition{{Timestamp: 200}}
-		inMsg.endPositions = []*internalpb.MsgPosition{{Timestamp: 234}}
+		inMsg.startPositions = []*msgpb.MsgPosition{{Timestamp: 200}}
+		inMsg.endPositions = []*msgpb.MsgPosition{{Timestamp: 234}}
 		iMsg = &inMsg
 
 		// Triger auto flush
@@ -760,8 +760,8 @@ func (s *InsertBufferNodeSuite) SetupTest() {
 			segID:       seg.segID,
 			collID:      s.collID,
 			partitionID: s.partID,
-			startPos:    new(internalpb.MsgPosition),
-			endPos:      new(internalpb.MsgPosition),
+			startPos:    new(msgpb.MsgPosition),
+			endPos:      new(msgpb.MsgPosition),
 		})
 		s.Require().NoError(err)
 	}
@@ -809,7 +809,7 @@ func (s *InsertBufferNodeSuite) TestFillInSyncTasks() {
 		}
 		node.channel.setCurInsertBuffer(UniqueID(1), &buffer)
 
-		syncTasks := node.FillInSyncTasks(&flowGraphMsg{endPositions: []*internalpb.MsgPosition{{Timestamp: 100}}}, segToFlush)
+		syncTasks := node.FillInSyncTasks(&flowGraphMsg{endPositions: []*msgpb.MsgPosition{{Timestamp: 100}}}, segToFlush)
 		s.Assert().NotEmpty(syncTasks)
 		s.Assert().Equal(1, len(syncTasks))
 
@@ -822,7 +822,7 @@ func (s *InsertBufferNodeSuite) TestFillInSyncTasks() {
 	})
 
 	s.Run("drop partition", func() {
-		fgMsg := flowGraphMsg{dropPartitions: []UniqueID{s.partID}, endPositions: []*internalpb.MsgPosition{{Timestamp: 100}}}
+		fgMsg := flowGraphMsg{dropPartitions: []UniqueID{s.partID}, endPositions: []*msgpb.MsgPosition{{Timestamp: 100}}}
 		node := &insertBufferNode{
 			channelName:      s.channel.channelName,
 			channel:          s.channel,
@@ -859,7 +859,7 @@ func (s *InsertBufferNodeSuite) TestFillInSyncTasks() {
 			flushCh <- msg
 		}
 
-		syncTasks := node.FillInSyncTasks(&flowGraphMsg{endPositions: []*internalpb.MsgPosition{{Timestamp: 100}}}, nil)
+		syncTasks := node.FillInSyncTasks(&flowGraphMsg{endPositions: []*msgpb.MsgPosition{{Timestamp: 100}}}, nil)
 		s.Assert().NotEmpty(syncTasks)
 
 		for _, task := range syncTasks {
@@ -887,7 +887,7 @@ func (s *InsertBufferNodeSuite) TestFillInSyncTasks() {
 			flushCh <- msg
 		}
 
-		syncTasks := node.FillInSyncTasks(&flowGraphMsg{endPositions: []*internalpb.MsgPosition{{Timestamp: 100}}}, nil)
+		syncTasks := node.FillInSyncTasks(&flowGraphMsg{endPositions: []*msgpb.MsgPosition{{Timestamp: 100}}}, nil)
 		s.Assert().NotEmpty(syncTasks)
 		s.Assert().Equal(10, len(syncTasks)) // 10 is max batch
 
@@ -982,8 +982,8 @@ func TestInsertBufferNode_bufferInsertMsg(t *testing.T) {
 				segID:       1,
 				collID:      collMeta.ID,
 				partitionID: 0,
-				startPos:    &internalpb.MsgPosition{},
-				endPos:      &internalpb.MsgPosition{Timestamp: 101},
+				startPos:    &msgpb.MsgPosition{},
+				endPos:      &msgpb.MsgPosition{Timestamp: 101},
 			})
 		require.NoError(t, err)
 
@@ -1010,14 +1010,14 @@ func TestInsertBufferNode_bufferInsertMsg(t *testing.T) {
 		inMsg := genFlowGraphInsertMsg(insertChannelName)
 		for _, msg := range inMsg.insertMessages {
 			msg.EndTimestamp = 101 // ts valid
-			err = iBNode.bufferInsertMsg(msg, &internalpb.MsgPosition{}, &internalpb.MsgPosition{})
+			err = iBNode.bufferInsertMsg(msg, &msgpb.MsgPosition{}, &msgpb.MsgPosition{})
 			assert.Nil(t, err)
 		}
 
 		for _, msg := range inMsg.insertMessages {
 			msg.EndTimestamp = 101 // ts valid
 			msg.RowIDs = []int64{} //misaligned data
-			err = iBNode.bufferInsertMsg(msg, &internalpb.MsgPosition{}, &internalpb.MsgPosition{})
+			err = iBNode.bufferInsertMsg(msg, &msgpb.MsgPosition{}, &msgpb.MsgPosition{})
 			assert.NotNil(t, err)
 		}
 	}
@@ -1047,14 +1047,14 @@ func TestInsertBufferNode_updateSegmentStates(te *testing.T) {
 
 		im := []*msgstream.InsertMsg{
 			{
-				InsertRequest: internalpb.InsertRequest{
+				InsertRequest: msgpb.InsertRequest{
 					CollectionID: test.inCollID,
 					SegmentID:    test.segID,
 				},
 			},
 		}
 
-		seg, err := ibNode.addSegmentAndUpdateRowNum(im, &internalpb.MsgPosition{}, &internalpb.MsgPosition{})
+		seg, err := ibNode.addSegmentAndUpdateRowNum(im, &msgpb.MsgPosition{}, &msgpb.MsgPosition{})
 
 		assert.Error(te, err)
 		assert.Empty(te, seg)

@@ -27,28 +27,25 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/samber/lo"
-
-	"github.com/minio/minio-go/v7"
+	minio "github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/suite"
-
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-
-	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	kvmocks "github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
@@ -921,7 +918,7 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 
 	m := &meta{
 		catalog: catalog,
-		channelCPs: map[string]*internalpb.MsgPosition{
+		channelCPs: map[string]*msgpb.MsgPosition{
 			"dmlChannel": {
 				Timestamp: 1000,
 			},
@@ -1044,7 +1041,7 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 						MaxRowNum:      65535,
 						DroppedAt:      0,
 						CompactionFrom: nil,
-						DmlPosition: &internalpb.MsgPosition{
+						DmlPosition: &msgpb.MsgPosition{
 							Timestamp: 1200,
 						},
 					},

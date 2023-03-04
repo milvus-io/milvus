@@ -4,9 +4,9 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -115,8 +115,8 @@ type DataCoordCatalog interface {
 	IsChannelDropped(ctx context.Context, channel string) bool
 	DropChannel(ctx context.Context, channel string) error
 
-	ListChannelCheckpoint(ctx context.Context) (map[string]*internalpb.MsgPosition, error)
-	SaveChannelCheckpoint(ctx context.Context, vChannel string, pos *internalpb.MsgPosition) error
+	ListChannelCheckpoint(ctx context.Context) (map[string]*msgpb.MsgPosition, error)
+	SaveChannelCheckpoint(ctx context.Context, vChannel string, pos *msgpb.MsgPosition) error
 	DropChannelCheckpoint(ctx context.Context, vChannel string) error
 
 	CreateIndex(ctx context.Context, index *model.Index) error

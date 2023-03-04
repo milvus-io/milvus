@@ -116,8 +116,8 @@ const (
 type SegmentStateInfo struct {
 	SegmentID     UniqueID
 	State         commonpb.SegmentState
-	StartPosition *internalpb.MsgPosition
-	EndPosition   *internalpb.MsgPosition
+	StartPosition *msgpb.MsgPosition
+	EndPosition   *msgpb.MsgPosition
 	Status        *commonpb.Status
 }
 
@@ -188,11 +188,11 @@ type SegmentInfo struct {
 	InsertChannel        string
 	NumOfRows            int64
 	State                commonpb.SegmentState
-	DmlPosition          *internalpb.MsgPosition
+	DmlPosition          *msgpb.MsgPosition
 	MaxRowNum            int64
 	LastExpireTime       uint64
-	StartPosition        *internalpb.MsgPosition
-  DmlPosition          *internalpb.MsgPosition
+	StartPosition        *msgpb.MsgPosition
+  DmlPosition          *msgpb.MsgPosition
   Binlogs              []*FieldBinlog
 }
 
@@ -215,7 +215,7 @@ type GetRecoveryInfoRequest struct {
 type VchannelInfo struct {
 	CollectionID         int64
 	ChannelName          string
-	SeekPosition         *internalpb.MsgPosition
+	SeekPosition         *msgpb.MsgPosition
 	UnflushedSegments    []*SegmentInfo
 	FlushedSegments      []int64
 }
@@ -236,7 +236,7 @@ type GetRecoveryInfoResponse struct {
 
 ```go
 type SegmentStartPosition struct {
-	StartPosition        *internalpb.MsgPosition
+	StartPosition        *msgpb.MsgPosition
 	SegmentID            int64
 }
 
@@ -325,8 +325,8 @@ type SegmentStatisticsUpdates struct {
 	NumRows       int64
 	CreateTime    uint64
 	EndTime       uint64
-	StartPosition *internalpb.MsgPosition
-	EndPosition   *internalpb.MsgPosition
+	StartPosition *msgpb.MsgPosition
+	EndPosition   *msgpb.MsgPosition
 }
 
 type SegmentStatistics struct {

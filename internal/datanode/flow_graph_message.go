@@ -17,8 +17,8 @@
 package datanode
 
 import (
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 )
@@ -47,8 +47,8 @@ type flowGraphMsg struct {
 	insertMessages []*msgstream.InsertMsg
 	deleteMessages []*msgstream.DeleteMsg
 	timeRange      TimeRange
-	startPositions []*internalpb.MsgPosition
-	endPositions   []*internalpb.MsgPosition
+	startPositions []*msgpb.MsgPosition
+	endPositions   []*msgpb.MsgPosition
 	//segmentsToSync is the signal used by insertBufferNode to notify deleteNode to flush
 	segmentsToSync []UniqueID
 	dropCollection bool

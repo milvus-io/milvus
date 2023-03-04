@@ -25,10 +25,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
 	"github.com/milvus-io/milvus/internal/util/retry"
@@ -144,7 +143,7 @@ func TestFlowGraph_DDNode_Operate(t *testing.T) {
 				}
 
 				var dropCollMsg msgstream.TsMsg = &msgstream.DropCollectionMsg{
-					DropCollectionRequest: internalpb.DropCollectionRequest{
+					DropCollectionRequest: msgpb.DropCollectionRequest{
 						Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection},
 						CollectionID: test.msgCollID,
 					},
@@ -197,7 +196,7 @@ func TestFlowGraph_DDNode_Operate(t *testing.T) {
 				}
 
 				var dropPartMsg msgstream.TsMsg = &msgstream.DropPartitionMsg{
-					DropPartitionRequest: internalpb.DropPartitionRequest{
+					DropPartitionRequest: msgpb.DropPartitionRequest{
 						Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_DropPartition},
 						CollectionID: test.msgCollID,
 						PartitionID:  test.msgPartID,
@@ -276,7 +275,7 @@ func TestFlowGraph_DDNode_Operate(t *testing.T) {
 						EndTimestamp: test.MsgEndTs,
 						HashValues:   []uint32{0},
 					},
-					DeleteRequest: internalpb.DeleteRequest{
+					DeleteRequest: msgpb.DeleteRequest{
 						Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_Delete},
 						ShardName:    "by-dev-rootcoord-dml-mock-0",
 						CollectionID: test.inMsgCollID,
@@ -310,7 +309,7 @@ func TestFlowGraph_DDNode_Operate(t *testing.T) {
 				EndTimestamp: 2000,
 				HashValues:   []uint32{0},
 			},
-			DeleteRequest: internalpb.DeleteRequest{
+			DeleteRequest: msgpb.DeleteRequest{
 				Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_Delete},
 				CollectionID: 1,
 			},
@@ -590,7 +589,7 @@ func TestFlowGraph_DDNode_isDropped(t *testing.T) {
 func getSegmentInfo(segmentID UniqueID, ts Timestamp) *datapb.SegmentInfo {
 	return &datapb.SegmentInfo{
 		ID:          segmentID,
-		DmlPosition: &internalpb.MsgPosition{Timestamp: ts},
+		DmlPosition: &msgpb.MsgPosition{Timestamp: ts},
 	}
 }
 
@@ -601,7 +600,7 @@ func getInsertMsg(segmentID UniqueID, ts Timestamp) *msgstream.InsertMsg {
 func getInsertMsgWithChannel(segmentID UniqueID, ts Timestamp, vChannelName string) *msgstream.InsertMsg {
 	return &msgstream.InsertMsg{
 		BaseMsg: msgstream.BaseMsg{EndTimestamp: ts},
-		InsertRequest: internalpb.InsertRequest{
+		InsertRequest: msgpb.InsertRequest{
 			Base:         &commonpb.MsgBase{MsgType: commonpb.MsgType_Insert},
 			SegmentID:    segmentID,
 			CollectionID: 1,
