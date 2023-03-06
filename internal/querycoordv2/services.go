@@ -1095,11 +1095,16 @@ func (s *Server) TransferReplica(ctx context.Context, req *querypb.TransferRepli
 			fmt.Sprintf("the target resource group[%s] doesn't exist", req.GetTargetResourceGroup()), meta.ErrRGNotExist), nil
 	}
 
-	replicas := s.meta.ReplicaManager.GetByCollection(req.GetCollectionID())
-	if (req.GetSourceResourceGroup() == meta.DefaultResourceGroupName || req.GetTargetResourceGroup() == meta.DefaultResourceGroupName) &&
-		len(replicas) != int(req.GetNumReplica()) {
+	if req.GetNumReplica() <= 0 {
 		return utils.WrapStatus(commonpb.ErrorCode_IllegalArgument,
-			"transfer replica will cause replica loaded in both default rg and other rg", nil), nil
+			fmt.Sprintf("transfer replica num can't be [%d]", req.GetNumReplica()), nil), nil
+	}
+
+	replicas := s.meta.ReplicaManager.GetByCollectionAndRG(req.GetCollectionID(), req.GetSourceResourceGroup())
+	if len(replicas) < int(req.GetNumReplica()) {
+		return utils.WrapStatus(commonpb.ErrorCode_IllegalArgument,
+			fmt.Sprintf("only found [%d] replicas in source resource group[%s]",
+				len(replicas), req.GetSourceResourceGroup())), nil
 	}
 
 	replicas = s.meta.ReplicaManager.GetByCollectionAndRG(req.GetCollectionID(), req.GetTargetResourceGroup())
@@ -1109,17 +1114,11 @@ func (s *Server) TransferReplica(ctx context.Context, req *querypb.TransferRepli
 				len(replicas), req.GetTargetResourceGroup())), nil
 	}
 
-	if req.GetNumReplica() <= 0 {
+	replicas = s.meta.ReplicaManager.GetByCollection(req.GetCollectionID())
+	if (req.GetSourceResourceGroup() == meta.DefaultResourceGroupName || req.GetTargetResourceGroup() == meta.DefaultResourceGroupName) &&
+		len(replicas) != int(req.GetNumReplica()) {
 		return utils.WrapStatus(commonpb.ErrorCode_IllegalArgument,
-			fmt.Sprintf("transfer replica num can't be [%d]", req.GetNumReplica()), nil), nil
-	}
-
-	// for now, we don't support to transfer replica of same collection to same resource group
-	replicas = s.meta.ReplicaManager.GetByCollectionAndRG(req.GetCollectionID(), req.GetSourceResourceGroup())
-	if len(replicas) < int(req.GetNumReplica()) {
-		return utils.WrapStatus(commonpb.ErrorCode_IllegalArgument,
-			fmt.Sprintf("only found [%d] replicas in source resource group[%s]",
-				len(replicas), req.GetSourceResourceGroup())), nil
+			"transfer replica will cause replica loaded in both default rg and other rg", nil), nil
 	}
 
 	err := s.transferReplica(req.GetTargetResourceGroup(), replicas[:req.GetNumReplica()])
