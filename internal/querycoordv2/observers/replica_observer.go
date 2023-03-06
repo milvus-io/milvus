@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
+	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 )
 
 // check replica, find outbound nodes and remove it from replica if all segment/channel has been moved
@@ -82,14 +83,15 @@ func (ob *ReplicaObserver) schedule(ctx context.Context) {
 func (ob *ReplicaObserver) checkNodesInReplica() {
 	collections := ob.meta.GetAll()
 	for _, collectionID := range collections {
+		removedNodes := make([]int64, 0)
+		// remove nodes from replica which has been transferred to other rg
 		replicas := ob.meta.ReplicaManager.GetByCollection(collectionID)
-
 		for _, replica := range replicas {
 			outboundNodes := ob.meta.ResourceManager.CheckOutboundNodes(replica)
 			if len(outboundNodes) > 0 {
 				log.RatedInfo(10, "found outbound nodes in replica",
 					zap.Int64("collectionID", replica.GetCollectionID()),
-					zap.Int64("replicaID", replica.GetCollectionID()),
+					zap.Int64("replicaID", replica.GetID()),
 					zap.Int64s("allOutboundNodes", outboundNodes.Collect()),
 				)
 
@@ -99,15 +101,28 @@ func (ob *ReplicaObserver) checkNodesInReplica() {
 
 					if len(channels) == 0 && len(segments) == 0 {
 						replica.RemoveNode(node)
+						removedNodes = append(removedNodes, node)
 						log.Info("all segment/channel has been removed from outbound node, remove it from replica",
 							zap.Int64("collectionID", replica.GetCollectionID()),
-							zap.Int64("replicaID", replica.GetCollectionID()),
+							zap.Int64("replicaID", replica.GetID()),
 							zap.Int64("removedNodes", node),
 							zap.Int64s("availableNodes", replica.GetNodes()),
 						)
 					}
 				}
 			}
+		}
+
+		// assign removed nodes to other replicas in current rg
+		for _, node := range removedNodes {
+			rg, err := ob.meta.ResourceManager.FindResourceGroupByNode(node)
+			if err != nil {
+				// unreachable logic path
+				log.Warn("found node which does not belong to any resource group", zap.Int64("nodeID", node))
+				continue
+			}
+			replicas := ob.meta.ReplicaManager.GetByCollectionAndRG(collectionID, rg)
+			utils.AddNodesToReplicas(ob.meta, replicas, node)
 		}
 	}
 }
