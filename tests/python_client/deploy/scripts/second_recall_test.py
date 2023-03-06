@@ -6,7 +6,7 @@ from pathlib import Path
 from pymilvus import connections, Collection
 
 
-all_index_types = ["IVF_FLAT", "IVF_SQ8", "IVF_PQ", "HNSW", "ANNOY"]
+all_index_types = ["IVF_FLAT", "IVF_SQ8", "HNSW"]
 
 
 def read_benchmark_hdf5(file_path):
