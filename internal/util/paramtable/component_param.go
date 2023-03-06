@@ -845,6 +845,7 @@ type proxyConfig struct {
 	MaxRoleNum               ParamItem `refreshable:"true"`
 	MaxTaskNum               ParamItem `refreshable:"false"`
 	AccessLog                AccessLogConfig
+	ShardLeaderCacheInterval ParamItem `refreshable:"false"`
 }
 
 func (p *proxyConfig) init(base *BaseTable) {
@@ -1046,6 +1047,14 @@ please adjust in embedded Milvus: false`,
 		Doc:          "Max time for log file in minIO, in hours",
 	}
 	p.AccessLog.RemoteMaxTime.Init(base.mgr)
+
+	p.ShardLeaderCacheInterval = ParamItem{
+		Key:          "proxy.shardLeaderCacheInterval",
+		Version:      "2.2.4",
+		DefaultValue: "30",
+		Doc:          "time interval to update shard leader cache, in seconds",
+	}
+	p.ShardLeaderCacheInterval.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
