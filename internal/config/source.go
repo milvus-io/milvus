@@ -49,13 +49,13 @@ type EtcdInfo struct {
 
 // FileInfo has attribute for file source
 type FileInfo struct {
-	Filepath        string
+	Files           []string
 	RefreshInterval time.Duration
 }
 
 // Options hold options
 type Options struct {
-	File            *FileInfo
+	FileInfo        *FileInfo
 	EtcdInfo        *EtcdInfo
 	EnvKeyFormatter func(string) string
 }
@@ -66,7 +66,7 @@ type Option func(options *Options)
 // WithRequiredFiles tell archaius to manage files, if not exist will return error
 func WithFilesSource(fi *FileInfo) Option {
 	return func(options *Options) {
-		options.File = fi
+		options.FileInfo = fi
 	}
 }
 
