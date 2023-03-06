@@ -183,6 +183,7 @@ func TestComponentParam(t *testing.T) {
 		t.Logf("MaxShardNum: %d", Params.MaxShardNum)
 
 		t.Logf("MaxDimension: %d", Params.MaxDimension)
+		t.Logf("MinDimension: %d", Params.MinDimension)
 
 		t.Logf("MaxTaskNum: %d", Params.MaxTaskNum)
 
@@ -235,6 +236,11 @@ func TestComponentParam(t *testing.T) {
 		shouldPanic(t, "proxy.maxDimension", func() {
 			Params.Base.Save("proxy.maxDimension", "-asdf")
 			Params.initMaxDimension()
+		})
+
+		shouldPanic(t, "proxy.minDimension", func() {
+			Params.Base.Save("proxy.minDimension", "-asdf")
+			Params.initMinDimension()
 		})
 
 		shouldPanic(t, "proxy.maxTaskNum", func() {

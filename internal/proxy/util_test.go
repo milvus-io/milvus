@@ -150,7 +150,7 @@ func TestValidateDimension(t *testing.T) {
 		TypeParams: []*commonpb.KeyValuePair{
 			{
 				Key:   "dim",
-				Value: "1",
+				Value: strconv.Itoa(int(Params.ProxyCfg.MinDimension)),
 			},
 		},
 	}
@@ -167,7 +167,7 @@ func TestValidateDimension(t *testing.T) {
 	fieldSchema.TypeParams = []*commonpb.KeyValuePair{
 		{
 			Key:   "dim",
-			Value: "-1",
+			Value: strconv.Itoa(int(Params.ProxyCfg.MinDimension) - 1),
 		},
 	}
 	assert.NotNil(t, validateDimension(fieldSchema))
@@ -183,7 +183,7 @@ func TestValidateDimension(t *testing.T) {
 	fieldSchema.TypeParams = []*commonpb.KeyValuePair{
 		{
 			Key:   "dim",
-			Value: "8",
+			Value: strconv.Itoa(int(Params.ProxyCfg.MinDimension)),
 		},
 	}
 	assert.Nil(t, validateDimension(fieldSchema))
@@ -197,7 +197,14 @@ func TestValidateDimension(t *testing.T) {
 	fieldSchema.TypeParams = []*commonpb.KeyValuePair{
 		{
 			Key:   "dim",
-			Value: "9",
+			Value: strconv.Itoa(int(Params.ProxyCfg.MinDimension) - 1),
+		},
+	}
+	assert.NotNil(t, validateDimension(fieldSchema))
+	fieldSchema.TypeParams = []*commonpb.KeyValuePair{
+		{
+			Key:   "dim",
+			Value: strconv.Itoa(int(Params.ProxyCfg.MaxDimension + 1)),
 		},
 	}
 	assert.NotNil(t, validateDimension(fieldSchema))

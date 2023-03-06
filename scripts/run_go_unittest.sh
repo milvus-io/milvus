@@ -106,14 +106,15 @@ go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/config/..." -failfast
 
 function test_util()
 {
-go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/util/autoindex/..." -failfast
-go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/util/funcutil/..." -failfast
-go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/util/paramtable/..." -failfast
-go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/util/retry/..." -failfast
-go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/util/sessionutil/..." -failfast
-go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/util/trace/..." -failfast
-go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/util/typeutil/..." -failfast
-go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/util/importutil/..." -failfast
+go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/util/..." -failfast -v
+#go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/util/autoindex/..." -failfast
+#go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/util/funcutil/..." -failfast
+#go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/util/paramtable/..." -failfast
+#go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/util/retry/..." -failfast
+#go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/util/sessionutil/..." -failfast
+#go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/util/trace/..." -failfast
+#go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/util/typeutil/..." -failfast
+#go test -race -cover ${APPLE_SILICON_FLAG} "${MILVUS_DIR}/util/importutil/..." -failfast
 }
 
 function test_datanode

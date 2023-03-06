@@ -702,6 +702,25 @@ func TestCreateCollectionTask(t *testing.T) {
 				schema.Fields[idx].TypeParams = []*commonpb.KeyValuePair{
 					{
 						Key:   "dim",
+						Value: strconv.Itoa(int(Params.ProxyCfg.MinDimension) - 1),
+					},
+				}
+			}
+		}
+
+		tooSmallDimSchema, err := proto.Marshal(schema)
+		assert.NoError(t, err)
+		task.CreateCollectionRequest.Schema = tooSmallDimSchema
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+
+		schema = proto.Clone(schemaBackup).(*schemapb.CollectionSchema)
+		for idx := range schema.Fields {
+			if schema.Fields[idx].DataType == schemapb.DataType_FloatVector ||
+				schema.Fields[idx].DataType == schemapb.DataType_BinaryVector {
+				schema.Fields[idx].TypeParams = []*commonpb.KeyValuePair{
+					{
+						Key:   "dim",
 						Value: strconv.Itoa(int(Params.ProxyCfg.MaxDimension) + 1),
 					},
 				}

@@ -402,7 +402,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         """
         # 1. create a collection
         nb = 1000
-        dim = 1
+        dim = 8
         fields = [cf.gen_int64_field("int64_1"), cf.gen_int64_field("int64_2"),
                   cf.gen_float_vec_field(dim=dim)]
         schema = cf.gen_collection_schema(fields=fields, primary_field="int64_1")
@@ -1373,7 +1373,7 @@ class TestCollectionSearch(TestcaseBase):
     def test_search_min_dim(self, auto_id, _async):
         """
         target: test search with min configuration
-        method: create connection, collection, insert and search with dim=1
+        method: create connection, collection, insert and search with dim=8
         expected: search successfully
         """
         # 1. initialize with data
@@ -1561,7 +1561,7 @@ class TestCollectionSearch(TestcaseBase):
     def test_search_after_different_index_with_min_dim(self, index, params, auto_id, _async):
         """
         target: test search after different index with min dim
-        method: test search after different index and corresponding search params with dim = 1
+        method: test search after different index and corresponding search params with dim = 8
         expected: search successfully with limit(topK)
         """
         # 1. initialize with data
@@ -2322,7 +2322,7 @@ class TestCollectionSearch(TestcaseBase):
         """
         #1. create a collection
         nb = 10
-        dim = 1
+        dim = 8
         fields = [cf.gen_int64_field("int64_1"), cf.gen_int64_field("int64_2"),
                   cf.gen_float_vec_field(dim=dim)]
         schema = cf.gen_collection_schema(fields=fields, primary_field="int64_1")

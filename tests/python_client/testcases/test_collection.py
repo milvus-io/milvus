@@ -1541,12 +1541,12 @@ class TestCollectionCountBinary(TestcaseBase):
     @pytest.mark.parametrize("auto_id", [True, False])
     def test_binary_collection_with_min_dim(self, auto_id):
         """
-        target: test binary collection when dim=1
-        method: creat collection and set dim=1
+        target: test binary collection when dim=9
+        method: creat collection and set dim=9
         expected: check error message successfully
         """
         self._connect()
-        dim = 1
+        dim = 9
         c_schema = cf.gen_default_binary_collection_schema(auto_id=auto_id, dim=dim)
         collection_w = self.init_collection_wrap(schema=c_schema,
                                                  check_task=CheckTasks.err_res,

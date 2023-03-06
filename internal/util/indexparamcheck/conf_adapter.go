@@ -17,6 +17,7 @@
 package indexparamcheck
 
 import (
+	"math"
 	"strconv"
 
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
@@ -55,15 +56,19 @@ const (
 	MaxNList = 65536
 
 	// DefaultMinDim is the smallest dimension supported in Milvus
+	// Keep it 1 here, and the proxy.minDimension configuration item defaults to 8.
+	// TODO: @czs This piece of logic needs to be aligned.
 	DefaultMinDim = 1
 	// DefaultMaxDim is the largest dimension supported in Milvus
 	DefaultMaxDim = 32768
 
 	// If Dim = 32 and raw vector data = 2G, query node need 24G disk space When loading the vectors' disk index
 	// If Dim = 2, and raw vector data = 2G, query node need 240G disk space When loading the vectors' disk index
-	// So DiskAnnMinDim should be greater than or equal to 32 to avoid running out of disk space
-	DiskAnnMinDim = 32
-	DiskAnnMaxDim = 1024
+	// So DiskAnnMinDim should be greater than or equal to 8 to avoid running out of disk space
+	DiskAnnMinDim                      = 8
+	DiskAnnMaxDegreeMinValue           = 1
+	DiskAnnMaxDegreeMaxValue           = 512
+	DiskAnnBuildSearchListSizeMinValue = 1
 
 	NgtMinEdgeSize = 1
 	NgtMaxEdgeSize = 200
@@ -112,6 +117,9 @@ const (
 
 	OutgoingEdgeSize = "outgoing_edge_size"
 	IncomingEdgeSize = "incoming_edge_size"
+
+	DiskAnnMaxDegree           = "max_degree"
+	DiskAnnBuildSearchListSize = "search_list_size"
 
 	IndexMode = "index_mode"
 	CPUMode   = "CPU"
@@ -541,7 +549,13 @@ type DISKANNConfAdapter struct {
 }
 
 func (adapter *DISKANNConfAdapter) CheckTrain(params map[string]string) bool {
-	if !CheckIntByRange(params, DIM, DiskAnnMinDim, DiskAnnMaxDim) {
+	if !CheckIntByRange(params, DIM, DiskAnnMinDim, DefaultMaxDim) {
+		return false
+	}
+	if !CheckIntByRange(params, DiskAnnMaxDegree, DiskAnnMaxDegreeMinValue, DiskAnnMaxDegreeMaxValue) {
+		return false
+	}
+	if !CheckIntByRange(params, DiskAnnBuildSearchListSize, DiskAnnBuildSearchListSizeMinValue, math.MaxInt) {
 		return false
 	}
 	return adapter.BaseConfAdapter.CheckTrain(params)

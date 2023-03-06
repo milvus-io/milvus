@@ -638,3 +638,46 @@ func TestNGTONNGConfAdapter_CheckTrain(t *testing.T) {
 		}
 	}
 }
+
+func TestDiskAnnConfAdapter_CheckTrain(t *testing.T) {
+	validParams := map[string]string{
+		DIM:                        strconv.Itoa(128),
+		Metric:                     L2,
+		DiskAnnMaxDegree:           strconv.Itoa(DiskAnnMaxDegreeMinValue),
+		DiskAnnBuildSearchListSize: strconv.Itoa(DiskAnnBuildSearchListSizeMinValue),
+	}
+	validParamsBigDim := copyParams(validParams)
+	validParamsBigDim[DIM] = strconv.Itoa(2048)
+
+	invalidParamsWithoutDim := map[string]string{
+		Metric: L2,
+	}
+
+	invalidParamsSmallDim := copyParams(validParams)
+	invalidParamsSmallDim[DIM] = strconv.Itoa(15)
+
+	invalidParamsBigDegree := copyParams(validParams)
+	invalidParamsBigDegree[DiskAnnMaxDegree] = strconv.Itoa(DiskAnnMaxDegreeMaxValue + 1)
+
+	invalidParamsSmallDegree := copyParams(validParams)
+	invalidParamsSmallDegree[DiskAnnMaxDegree] = strconv.Itoa(DiskAnnMaxDegreeMinValue - 1)
+
+	cases := []struct {
+		params map[string]string
+		want   bool
+	}{
+		{validParams, true},
+		{validParamsBigDim, true},
+		{invalidParamsWithoutDim, false},
+		{invalidParamsSmallDim, false},
+		{invalidParamsBigDegree, false},
+		{invalidParamsSmallDegree, false},
+	}
+
+	adapter := newDISKANNConfAdapter()
+	for _, test := range cases {
+		if got := adapter.CheckTrain(test.params); got != test.want {
+			t.Errorf("DiskAnnConfAdapter.CheckTrain(%v) = %v", test.params, test.want)
+		}
+	}
+}

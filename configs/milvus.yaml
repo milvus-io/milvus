@@ -161,6 +161,7 @@ proxy:
   # As of today (2.2.0 and after) it is strongly DISCOURAGED to set maxFieldNum >= 64.
   # So adjust at your risk!
   maxDimension: 32768 # Maximum dimension of a vector
+  minDimension: 8 # Minimum dimension of a vector
   # It's strongly DISCOURAGED to set `maxShardNum` > 64.
   maxShardNum: 64 # Maximum number of shards in a collection
   maxTaskNum: 1024 # max task number of proxy task queue

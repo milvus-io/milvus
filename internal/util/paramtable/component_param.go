@@ -574,6 +574,7 @@ type proxyConfig struct {
 	MaxFieldNum              int64
 	MaxShardNum              int32
 	MaxDimension             int64
+	MinDimension             int64
 	GinLogging               bool
 	MaxUserNum               int
 	MaxRoleNum               int
@@ -601,6 +602,8 @@ func (p *proxyConfig) init(base *BaseTable) {
 	p.initMaxPasswordLength()
 	p.initMaxFieldNum()
 	p.initMaxShardNum()
+
+	p.initMinDimension()
 	p.initMaxDimension()
 
 	p.initMaxTaskNum()
@@ -691,6 +694,15 @@ func (p *proxyConfig) initMaxDimension() {
 		panic(err)
 	}
 	p.MaxDimension = maxDimension
+}
+
+func (p *proxyConfig) initMinDimension() {
+	str := p.Base.LoadWithDefault("proxy.minDimension", "8")
+	minDimension, err := strconv.ParseInt(str, 10, 64)
+	if err != nil {
+		panic(err)
+	}
+	p.MinDimension = minDimension
 }
 
 func (p *proxyConfig) initMaxTaskNum() {

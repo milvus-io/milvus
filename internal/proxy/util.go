@@ -228,8 +228,8 @@ func validateDimension(field *schemapb.FieldSchema) error {
 		return errors.New("dimension is not defined in field type params, check type param `dim` for vector field")
 	}
 
-	if dim <= 0 || dim > Params.ProxyCfg.MaxDimension {
-		return fmt.Errorf("invalid dimension: %d. should be in range 1 ~ %d", dim, Params.ProxyCfg.MaxDimension)
+	if dim < Params.ProxyCfg.MinDimension || dim > Params.ProxyCfg.MaxDimension {
+		return fmt.Errorf("invalid dimension: %d. should be in range %d ~ %d", dim, Params.ProxyCfg.MinDimension, Params.ProxyCfg.MaxDimension)
 	}
 	if field.DataType == schemapb.DataType_BinaryVector && dim%8 != 0 {
 		return fmt.Errorf("invalid dimension: %d. should be multiple of 8. ", dim)
