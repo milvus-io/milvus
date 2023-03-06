@@ -185,6 +185,8 @@ func TestComponentParam(t *testing.T) {
 		t.Logf("MaxDimension: %d", Params.MaxDimension)
 
 		t.Logf("MaxTaskNum: %d", Params.MaxTaskNum)
+
+		t.Logf("ShardLeaderCacheInterval: %d", Params.ShardLeaderCacheInterval.Load())
 	})
 
 	t.Run("test proxyConfig panic", func(t *testing.T) {

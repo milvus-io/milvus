@@ -582,8 +582,9 @@ type proxyConfig struct {
 
 	MaxTaskNum int64
 
-	CreatedTime time.Time
-	UpdatedTime time.Time
+	CreatedTime              time.Time
+	UpdatedTime              time.Time
+	ShardLeaderCacheInterval atomic.Value
 }
 
 func (p *proxyConfig) init(base *BaseTable) {
@@ -606,6 +607,7 @@ func (p *proxyConfig) init(base *BaseTable) {
 	p.initMaxRoleNum()
 
 	p.initSoPath()
+	p.initShardLeaderCacheInterval()
 }
 
 // InitAlias initialize Alias member.
@@ -726,6 +728,11 @@ func (p *proxyConfig) initMaxRoleNum() {
 		panic(err)
 	}
 	p.MaxRoleNum = int(maxRoleNum)
+}
+
+func (p *proxyConfig) initShardLeaderCacheInterval() {
+	interval := p.Base.ParseIntWithDefault("proxy.shardLeaderCacheInterval", 30)
+	p.ShardLeaderCacheInterval.Store(time.Duration(interval) * time.Second)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

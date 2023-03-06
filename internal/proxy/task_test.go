@@ -2126,7 +2126,7 @@ func Test_checkTrain(t *testing.T) {
 func Test_createIndexTask_PreExecute(t *testing.T) {
 	collectionName := "test"
 	fieldName := "test"
-	Params.Init()
+	Params.InitOnce()
 
 	cit := &createIndexTask{
 		req: &milvuspb.CreateIndexRequest{

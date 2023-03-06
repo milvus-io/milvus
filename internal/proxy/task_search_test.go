@@ -439,7 +439,7 @@ func TestSearchTask_Reduce(t *testing.T) {
 func TestSearchTaskWithInvalidRoundDecimal(t *testing.T) {
 	// var err error
 	//
-	// Params.Init()
+	// Params.InitOnce()
 	// Params.ProxyCfg.SearchResultChannelNames = []string{funcutil.GenRandomStr()}
 	//
 	// rc := NewRootCoordMock()
@@ -682,7 +682,7 @@ func TestSearchTaskWithInvalidRoundDecimal(t *testing.T) {
 func TestSearchTaskV2_all(t *testing.T) {
 	// var err error
 	//
-	// Params.Init()
+	// Params.InitOnce()
 	// Params.ProxyCfg.SearchResultChannelNames = []string{funcutil.GenRandomStr()}
 	//
 	// rc := NewRootCoordMock()
@@ -927,7 +927,7 @@ func TestSearchTaskV2_all(t *testing.T) {
 func TestSearchTaskV2_7803_reduce(t *testing.T) {
 	// var err error
 	//
-	// Params.Init()
+	// Params.InitOnce()
 	// Params.ProxyCfg.SearchResultChannelNames = []string{funcutil.GenRandomStr()}
 	//
 	// rc := NewRootCoordMock()
@@ -1742,7 +1742,7 @@ func Test_checkIfLoaded(t *testing.T) {
 }
 
 func TestSearchTask_ErrExecute(t *testing.T) {
-	Params.Init()
+	Params.InitOnce()
 
 	var (
 		err error

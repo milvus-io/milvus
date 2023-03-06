@@ -27,7 +27,7 @@ import (
 )
 
 func TestQueryTask_all(t *testing.T) {
-	Params.Init()
+	Params.InitOnce()
 
 	var (
 		err error
@@ -376,7 +376,7 @@ func Test_translateToOutputFieldIDs(t *testing.T) {
 }
 
 func TestTaskQuery_functions(t *testing.T) {
-	Params.Init()
+	Params.InitOnce()
 	t.Run("test parseQueryParams", func(t *testing.T) {
 		tests := []struct {
 			description string
