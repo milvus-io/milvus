@@ -77,6 +77,7 @@ type Task interface {
 	Step() int
 	StepUp() int
 	IsFinished(dist *meta.DistributionManager) bool
+	SetReason(reason string)
 	String() string
 }
 
@@ -98,6 +99,7 @@ type baseTask struct {
 	err      error
 	actions  []Action
 	step     int
+	reason   string
 }
 
 func newBaseTask(ctx context.Context, sourceID, collectionID, replicaID UniqueID, shard string) *baseTask {
@@ -202,6 +204,10 @@ func (task *baseTask) IsFinished(distMgr *meta.DistributionManager) bool {
 	return task.Step() >= len(task.Actions())
 }
 
+func (task *baseTask) SetReason(reason string) {
+	task.reason = reason
+}
+
 func (task *baseTask) String() string {
 	var actionsStr string
 	for i, action := range task.actions {
@@ -215,9 +221,10 @@ func (task *baseTask) String() string {
 		}
 	}
 	return fmt.Sprintf(
-		"[id=%d] [type=%v] [collectionID=%d] [replicaID=%d] [priority=%d] [actionsCount=%d] [actions=%s]",
+		"[id=%d] [type=%v] [reason=%s] [collectionID=%d] [replicaID=%d] [priority=%d] [actionsCount=%d] [actions=%s]",
 		task.id,
 		GetTaskType(task),
+		task.reason,
 		task.collectionID,
 		task.replicaID,
 		task.priority,
