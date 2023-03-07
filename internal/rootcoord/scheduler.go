@@ -22,11 +22,10 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
-
-	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/tso"
+	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/internal/allocator"
 )
@@ -70,6 +69,9 @@ func newScheduler(ctx context.Context, idAllocator allocator.Interface, tsoAlloc
 func (s *scheduler) Start() {
 	s.wg.Add(1)
 	go s.taskLoop()
+
+	s.wg.Add(1)
+	go s.syncTsLoop()
 }
 
 func (s *scheduler) Stop() {
@@ -89,6 +91,20 @@ func (s *scheduler) execute(task task) {
 
 func (s *scheduler) taskLoop() {
 	defer s.wg.Done()
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case task := <-s.taskChan:
+			s.execute(task)
+		}
+	}
+}
+
+// syncTsLoop send a base task into queue periodically, the base task will gain the latest ts which is bigger than
+// everyone in the queue. The scheduler will update the ts after the task is finished.
+func (s *scheduler) syncTsLoop() {
+	defer s.wg.Done()
 	ticker := time.NewTicker(Params.ProxyCfg.TimeTickInterval.GetAsDuration(time.Millisecond))
 	defer ticker.Stop()
 	for {
@@ -97,22 +113,14 @@ func (s *scheduler) taskLoop() {
 			return
 		case <-ticker.C:
 			s.updateLatestTsoAsMinDdlTs()
-		case task := <-s.taskChan:
-			s.execute(task)
 		}
 	}
 }
 
 func (s *scheduler) updateLatestTsoAsMinDdlTs() {
-	if len(s.taskChan) > 0 {
-		return
-	}
-
-	ts, err := s.tsoAllocator.GenerateTSO(1)
-	if err != nil {
-		log.Warn("failed to generate tso, ignore to update min ddl ts", zap.Error(err))
-	} else {
-		s.setMinDdlTs(ts)
+	t := newBaseTask(context.Background(), nil)
+	if err := s.AddTask(&t); err != nil {
+		log.Warn("failed to update latest ddl ts", zap.Error(err))
 	}
 }
 
