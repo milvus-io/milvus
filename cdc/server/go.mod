@@ -148,5 +148,5 @@ replace (
 	github.com/milvus-io/milvus/cdc/core => ../core
 	github.com/milvus-io/milvus/pkg => ./../../../../milvus/pkg
 	github.com/streamnative/pulsarctl => github.com/xiaofan-luan/pulsarctl v0.5.1
-	github.com/tecbot/gorocksdb => github.com/milvus-io/gorocksdb v0.0.0-20220624081344-8c5f4212846b // indirect
+	github.com/tecbot/gorocksdb => ./../rocksdb
 )
