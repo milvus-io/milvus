@@ -43,6 +43,7 @@ func (c *CDCServer) Run(config *CDCServerConfig) {
 	c.api.ReloadTask()
 	cdcHandler := c.getCDCHandler()
 	http.Handle("/cdc", cdcHandler)
+	log.Info("start server...")
 	err := http.ListenAndServe(c.serverConfig.Address, nil)
 	log.Panic("cdc server down", zap.Error(err))
 }

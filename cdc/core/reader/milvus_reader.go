@@ -27,12 +27,14 @@ import (
 	"github.com/goccy/go-json"
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/cdc/core/config"
 	"github.com/milvus-io/milvus/cdc/core/model"
-	"github.com/milvus-io/milvus/cdc/core/mq/api"
 	"github.com/milvus-io/milvus/cdc/core/pb"
 	"github.com/milvus-io/milvus/cdc/core/util"
+	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	"github.com/samber/lo"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
@@ -59,11 +61,11 @@ type MilvusCollectionReader struct {
 	allCollectionNames []string
 	dataChan           chan *model.CDCData
 	cancelWatch        context.CancelFunc
+	closeStreamFuncs   []func()
 
 	startOnce sync.Once
 	quitOnce  sync.Once
-	// only read it, CAN'T write it excluding in the QuitRead
-	isQuit util.Value[bool]
+	isQuit    util.Value[bool]
 
 	// Please no read or write it excluding in the beginning of readStreamData method
 	readingSteamCollection []int64
@@ -170,7 +172,6 @@ func (reader *MilvusCollectionReader) goGetAllCollections(wg *sync.WaitGroup) {
 		)
 
 		existedCollectionInfos, err = reader.getCollectionInfo(reader.allCollectionNames)
-		log.Info("err result", zap.Error(err))
 		if err != nil {
 			log.Warn("fail to get collection", zap.Error(err))
 			reader.monitor.OnFailUnKnowCollection(reader.collectionPrefix(), err)
@@ -271,15 +272,13 @@ func (reader *MilvusCollectionReader) readStreamData(info *pb.CollectionInfo, se
 		reader.readingSteamCollection = append(reader.readingSteamCollection, id)
 		return false
 	}
-
 	if isRepeatCollection(info.ID) {
 		return
 	}
-
 	reader.monitor.OnSuccessGetACollectionInfo(info.ID, reader.collectionName(info))
 
 	if sendCreateMsg {
-		baseMsg := api.BaseMsg{
+		baseMsg := msgstream.BaseMsg{
 			HashValues: []uint32{0},
 		}
 		schemaByte, err := json.Marshal(info.Schema)
@@ -288,9 +287,9 @@ func (reader *MilvusCollectionReader) readStreamData(info *pb.CollectionInfo, se
 			reader.monitor.OnFailReadStream(info.ID, reader.collectionName(info), "unknown", err)
 			return
 		}
-		createCollectionMsg := &api.CreateCollectionMsg{
+		createCollectionMsg := &msgstream.CreateCollectionMsg{
 			BaseMsg: baseMsg,
-			CreateCollectionRequest: pb.CreateCollectionRequest{
+			CreateCollectionRequest: msgpb.CreateCollectionRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_CreateCollection,
 				},
@@ -299,7 +298,6 @@ func (reader *MilvusCollectionReader) readStreamData(info *pb.CollectionInfo, se
 				Schema:         schemaByte,
 			},
 		}
-
 		reader.sendData(&model.CDCData{
 			Msg: createCollectionMsg,
 			Extra: map[string]any{
@@ -335,10 +333,12 @@ func (reader *MilvusCollectionReader) readStreamData(info *pb.CollectionInfo, se
 		}
 		msgChan, err := reader.msgStreamChan(vchannel, position, stream)
 		if err != nil {
+			stream.Close()
 			log.Warn("fail to get message stream chan", zap.String("vchannel", vchannel), zap.Error(err))
 			handleError()
 			return
 		}
+		reader.closeStreamFuncs = append(reader.closeStreamFuncs, stream.Close)
 		reader.goReadMsg(reader.collectionName(info), vchannel, msgChan, w, dropCollectionDataMap)
 	}
 	go func() {
@@ -347,14 +347,14 @@ func (reader *MilvusCollectionReader) readStreamData(info *pb.CollectionInfo, se
 		dropCollectionCdcData := &model.CDCData{
 			Extra: make(map[string]any),
 		}
-		var otherDropData []*api.DropCollectionMsg
+		var otherDropData []*msgstream.DropCollectionMsg
 		i := 0
 		dropCollectionDataMap.Range(func(_, value any) bool {
 			data := value.(*model.CDCData)
 			if dropCollectionCdcData.Msg == nil {
 				dropCollectionCdcData.Msg = data.Msg
 			} else {
-				otherDropData = append(otherDropData, data.Msg.(*api.DropCollectionMsg))
+				otherDropData = append(otherDropData, data.Msg.(*msgstream.DropCollectionMsg))
 			}
 			i++
 			return true
@@ -368,13 +368,13 @@ func (reader *MilvusCollectionReader) readStreamData(info *pb.CollectionInfo, se
 	}()
 }
 
-func (reader *MilvusCollectionReader) collectionPosition(info *pb.CollectionInfo, vchannelName string) (*pb.MsgPosition, error) {
+func (reader *MilvusCollectionReader) collectionPosition(info *pb.CollectionInfo, vchannelName string) (*msgstream.MsgPosition, error) {
 	pchannel := util.ToPhysicalChannel(vchannelName)
 	for _, collection := range reader.collections {
 		if collection.collectionName == reader.collectionName(info) &&
 			collection.positions != nil {
 			if pair, ok := collection.positions[pchannel]; ok {
-				return &pb.MsgPosition{
+				return &msgstream.MsgPosition{
 					ChannelName: vchannelName,
 					MsgID:       pair.GetData(),
 				}, nil
@@ -384,8 +384,8 @@ func (reader *MilvusCollectionReader) collectionPosition(info *pb.CollectionInfo
 	return util.GetChannelStartPosition(vchannelName, info.StartPositions)
 }
 
-func (reader *MilvusCollectionReader) msgStream() (api.MsgStream, error) {
-	var factory api.Factory
+func (reader *MilvusCollectionReader) msgStream() (msgstream.MsgStream, error) {
+	var factory msgstream.Factory
 	if reader.mqConfig.Pulsar.Address != "" {
 		factory = reader.factoryCreator.NewPmsFactory(&reader.mqConfig.Pulsar)
 	} else if reader.mqConfig.Kafka.Address != "" {
@@ -400,13 +400,12 @@ func (reader *MilvusCollectionReader) msgStream() (api.MsgStream, error) {
 	return stream, err
 }
 
-func (reader *MilvusCollectionReader) msgStreamChan(vchannel string, position *pb.MsgPosition, stream api.MsgStream) (<-chan *api.MsgPack, error) {
+func (reader *MilvusCollectionReader) msgStreamChan(vchannel string, position *msgstream.MsgPosition, stream msgstream.MsgStream) (<-chan *msgstream.MsgPack, error) {
 	consumeSubName := vchannel + string(rand.Int31())
-
 	pchannelName := util.ToPhysicalChannel(vchannel)
-	stream.AsConsumer([]string{pchannelName}, consumeSubName, api.SubscriptionPositionUnknown)
+	stream.AsConsumer([]string{pchannelName}, consumeSubName, mqwrapper.SubscriptionPositionUnknown)
 	position.ChannelName = pchannelName
-	err := stream.Seek([]*pb.MsgPosition{position})
+	err := stream.Seek([]*msgstream.MsgPosition{position})
 	if err != nil {
 		log.Warn("fail to seek the msg position", zap.String("vchannel", vchannel), zap.Error(err))
 		return nil, err
@@ -415,7 +414,7 @@ func (reader *MilvusCollectionReader) msgStreamChan(vchannel string, position *p
 	return stream.Chan(), nil
 }
 
-func (reader *MilvusCollectionReader) goReadMsg(collectionName string, vchannelName string, c <-chan *api.MsgPack,
+func (reader *MilvusCollectionReader) goReadMsg(collectionName string, vchannelName string, c <-chan *msgstream.MsgPack,
 	w *sync.WaitGroup, dropCollectionDataMap *sync.Map) {
 	go func() {
 		defer w.Done()
@@ -429,6 +428,9 @@ func (reader *MilvusCollectionReader) goReadMsg(collectionName string, vchannelN
 				return
 			}
 			msgPack := <-c
+			if msgPack == nil {
+				return
+			}
 			for _, msg := range msgPack.Msgs {
 				msgType := msg.Type().String()
 				if reader.filterMsgType(msgType) {
@@ -437,7 +439,7 @@ func (reader *MilvusCollectionReader) goReadMsg(collectionName string, vchannelN
 				if reader.filterMsg(collectionName, msg) {
 					continue
 				}
-				if _, ok := msg.(*api.DropCollectionMsg); ok {
+				if _, ok := msg.(*msgstream.DropCollectionMsg); ok {
 					if dropCollectionDataMap != nil {
 						dropCollectionDataMap.Store(vchannelName, &model.CDCData{
 							Msg: msg,
@@ -457,7 +459,7 @@ func (reader *MilvusCollectionReader) filterMsgType(msgType string) bool {
 	return msgType == "TimeTick"
 }
 
-func (reader *MilvusCollectionReader) filterMsg(collectionName string, msg api.TsMsg) bool {
+func (reader *MilvusCollectionReader) filterMsg(collectionName string, msg msgstream.TsMsg) bool {
 	if x, ok := msg.(interface{ GetCollectionName() string }); ok {
 		notEqual := x.GetCollectionName() != collectionName
 		if notEqual {
@@ -483,6 +485,9 @@ func (reader *MilvusCollectionReader) QuitRead(ctx context.Context) {
 	reader.quitOnce.Do(func() {
 		reader.isQuit.Store(true)
 		reader.CancelWatchCollection()
+		for _, closeFunc := range reader.closeStreamFuncs {
+			closeFunc()
+		}
 	})
 }
 

@@ -16,10 +16,12 @@
 
 package model
 
-import "github.com/milvus-io/milvus/cdc/core/mq/api"
+import (
+	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+)
 
 type CDCData struct {
-	Msg   api.TsMsg
+	Msg   msgstream.TsMsg
 	Extra map[string]any
 }
 

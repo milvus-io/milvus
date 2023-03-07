@@ -29,8 +29,8 @@ import (
 	"github.com/milvus-io/milvus-sdk-go/v2/entity"
 	"github.com/milvus-io/milvus/cdc/core/config"
 	"github.com/milvus-io/milvus/cdc/core/model"
-	"github.com/milvus-io/milvus/cdc/core/mq/api"
 	"github.com/milvus-io/milvus/cdc/core/util"
+	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 )
@@ -57,7 +57,7 @@ type CDCWriterTemplate struct {
 
 	handler    CDCDataHandler
 	errProtect *ErrorProtect
-	funcMap    map[api.MsgType]func(context.Context, *model.CDCData, WriteCallback)
+	funcMap    map[msgstream.MsgType]func(context.Context, *model.CDCData, WriteCallback)
 
 	bufferConfig             BufferConfig
 	bufferLock               sync.Mutex
@@ -79,7 +79,7 @@ func NewCDCWriterTemplate(options ...config.Option[*CDCWriterTemplate]) CDCWrite
 	for _, option := range options {
 		option.Apply(c)
 	}
-	c.funcMap = map[api.MsgType]func(context.Context, *model.CDCData, WriteCallback){
+	c.funcMap = map[msgstream.MsgType]func(context.Context, *model.CDCData, WriteCallback){
 		commonpb.MsgType_CreateCollection: c.handleCreateCollection,
 		commonpb.MsgType_DropCollection:   c.handleDropCollection,
 		commonpb.MsgType_Insert:           c.handleInsert,
@@ -103,7 +103,6 @@ func (c *CDCWriterTemplate) initBuffer() {
 			default:
 			}
 
-			//bufferOps := <-c.bufferOpsChan
 			latestPositions := make(map[int64]map[string]*commonpb.KeyDataPair)
 			collectionNames := make(map[int64]string)
 			positionFunc := NotifyCollectionPositionChangeFunc(func(collectionID int64, collectionName string, pChannelName string, position *commonpb.KeyDataPair) {
@@ -180,11 +179,11 @@ func (c *CDCWriterTemplate) combineDataFunc(dataArr []lo.Tuple2[*model.CDCData, 
 		data := tuple.A
 		callback := tuple.B
 		switch msg := data.Msg.(type) {
-		case *api.InsertMsg:
+		case *msgstream.InsertMsg:
 			c.handleInsertBuffer(msg, data, callback, combineDataMap, positionFunc)
-		case *api.DeleteMsg:
+		case *msgstream.DeleteMsg:
 			c.handleDeleteBuffer(msg, data, callback, combineDataMap, positionFunc)
-		case *api.DropCollectionMsg:
+		case *msgstream.DropCollectionMsg:
 			c.handleDropCollectionBuffer(msg, data, callback, combineDataMap, positionFunc)
 		}
 	}
@@ -194,7 +193,7 @@ func (c *CDCWriterTemplate) generateBufferKey(a string, b string) string {
 	return a + ":" + b
 }
 
-func (c *CDCWriterTemplate) handleInsertBuffer(msg *api.InsertMsg,
+func (c *CDCWriterTemplate) handleInsertBuffer(msg *msgstream.InsertMsg,
 	data *model.CDCData, callback WriteCallback,
 	combineDataMap map[string][]*CombineData,
 	positionFunc NotifyCollectionPositionChangeFunc,
@@ -260,7 +259,7 @@ func (c *CDCWriterTemplate) handleInsertBuffer(msg *api.InsertMsg,
 	lastCombineData.fails = append(lastCombineData.fails, newCombineData.fails...)
 }
 
-func (c *CDCWriterTemplate) handleDeleteBuffer(msg *api.DeleteMsg,
+func (c *CDCWriterTemplate) handleDeleteBuffer(msg *msgstream.DeleteMsg,
 	data *model.CDCData, callback WriteCallback,
 	combineDataMap map[string][]*CombineData,
 	positionFunc NotifyCollectionPositionChangeFunc,
@@ -331,7 +330,7 @@ func (c *CDCWriterTemplate) handleDeleteBuffer(msg *api.DeleteMsg,
 	lastCombineData.fails = append(lastCombineData.fails, newCombineData.fails...)
 }
 
-func (c *CDCWriterTemplate) handleDropCollectionBuffer(msg *api.DropCollectionMsg,
+func (c *CDCWriterTemplate) handleDropCollectionBuffer(msg *msgstream.DropCollectionMsg,
 	data *model.CDCData, callback WriteCallback,
 	combineDataMap map[string][]*CombineData,
 	positionFunc NotifyCollectionPositionChangeFunc,
@@ -346,7 +345,7 @@ func (c *CDCWriterTemplate) handleDropCollectionBuffer(msg *api.DropCollectionMs
 			func() {
 				channelInfos := make(map[string]CallbackChannelInfo)
 
-				collectChannelInfo := func(dropCollectionMsg *api.DropCollectionMsg) {
+				collectChannelInfo := func(dropCollectionMsg *msgstream.DropCollectionMsg) {
 					position := dropCollectionMsg.Position()
 					kd := &commonpb.KeyDataPair{
 						Key:  position.ChannelName,
@@ -359,7 +358,7 @@ func (c *CDCWriterTemplate) handleDropCollectionBuffer(msg *api.DropCollectionMs
 				}
 				collectChannelInfo(msg)
 				if msgsValue := data.Extra[model.DropCollectionMsgsKey]; msgsValue != nil {
-					msgs := msgsValue.([]*api.DropCollectionMsg)
+					msgs := msgsValue.([]*msgstream.DropCollectionMsg)
 					for _, tsMsg := range msgs {
 						collectChannelInfo(tsMsg)
 					}
@@ -422,7 +421,7 @@ func (c *CDCWriterTemplate) Flush(context context.Context) {
 }
 
 func (c *CDCWriterTemplate) handleCreateCollection(ctx context.Context, data *model.CDCData, callback WriteCallback) {
-	msg := data.Msg.(*api.CreateCollectionMsg)
+	msg := data.Msg.(*msgstream.CreateCollectionMsg)
 	schema := &schemapb.CollectionSchema{}
 	err := json.Unmarshal(msg.Schema, schema)
 	if err != nil {
@@ -465,7 +464,7 @@ func (c *CDCWriterTemplate) handleDropCollection(ctx context.Context, data *mode
 }
 
 func (c *CDCWriterTemplate) handleInsert(ctx context.Context, data *model.CDCData, callback WriteCallback) {
-	msg := data.Msg.(*api.InsertMsg)
+	msg := data.Msg.(*msgstream.InsertMsg)
 	totalSize := SizeOfInsertMsg(msg)
 	if totalSize < 0 {
 		c.fail("fail to get the data size", errors.New("invalid column type"), data, callback)
@@ -480,7 +479,7 @@ func (c *CDCWriterTemplate) handleInsert(ctx context.Context, data *model.CDCDat
 }
 
 func (c *CDCWriterTemplate) handleDelete(ctx context.Context, data *model.CDCData, callback WriteCallback) {
-	msg := data.Msg.(*api.DeleteMsg)
+	msg := data.Msg.(*msgstream.DeleteMsg)
 	totalSize := SizeOfDeleteMsg(msg)
 
 	c.bufferLock.Lock()

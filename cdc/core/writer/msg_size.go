@@ -20,12 +20,12 @@ import (
 	"encoding/binary"
 
 	"github.com/milvus-io/milvus-sdk-go/v2/entity"
-	"github.com/milvus-io/milvus/cdc/core/mq/api"
 	"github.com/milvus-io/milvus/cdc/core/util"
+	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"go.uber.org/zap"
 )
 
-func SizeOfInsertMsg(msg *api.InsertMsg) int64 {
+func SizeOfInsertMsg(msg *msgstream.InsertMsg) int64 {
 	var totalSize int64
 	sizeFunc := func(column entity.Column) bool {
 		size := SizeColumn(column)
@@ -57,7 +57,7 @@ func SizeOfInsertMsg(msg *api.InsertMsg) int64 {
 	return totalSize
 }
 
-func SizeOfDeleteMsg(msg *api.DeleteMsg) int64 {
+func SizeOfDeleteMsg(msg *msgstream.DeleteMsg) int64 {
 	var totalSize int64
 	column, err := entity.IDColumns(msg.PrimaryKeys, 0, -1)
 	if err != nil {

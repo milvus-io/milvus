@@ -37,7 +37,7 @@ func TestInvalidOpCDCTask(t *testing.T) {
 	}, func() (writer.CDCWriter, error) {
 		return &writer.DefaultWriter{}, nil
 	})
-	task := NewCdcTask(factory, &writer.DefaultWriteCallBack{})
+	task := NewCdcTask(factory, &writer.DefaultWriteCallBack{}, nil)
 	err := <-task.Pause(nil)
 	assert.Error(t, err)
 	err = <-task.Terminate(nil)
@@ -63,7 +63,7 @@ func TestNormalOpCDCTask(t *testing.T) {
 	}, func() (writer.CDCWriter, error) {
 		return writerMock, nil
 	})
-	task := NewCdcTask(factory, &writer.DefaultWriteCallBack{})
+	task := NewCdcTask(factory, &writer.DefaultWriteCallBack{}, nil)
 	err := <-task.Resume(nil)
 	assert.NoError(t, err)
 	readerChan <- &model.CDCData{}
@@ -78,7 +78,7 @@ func TestNormalOpCDCTask(t *testing.T) {
 	err = <-task.Terminate(nil)
 	assert.NoError(t, err)
 
-	task = NewCdcTask(factory, &writer.DefaultWriteCallBack{})
+	task = NewCdcTask(factory, &writer.DefaultWriteCallBack{}, nil)
 	err = <-task.Resume(nil)
 	assert.NoError(t, err)
 	err = <-task.Terminate(nil)
@@ -90,13 +90,13 @@ func TestNormalOpCDCTask(t *testing.T) {
 	writerMock.AssertNumberOfCalls(t, "Write", 1)
 	writerMock.AssertNumberOfCalls(t, "Flush", 2)
 
-	task = NewCdcTask(factory, &writer.DefaultWriteCallBack{})
+	task = NewCdcTask(factory, &writer.DefaultWriteCallBack{}, nil)
 	err = <-task.Terminate(nil)
 	assert.NoError(t, err)
 
 	writerCall.Unset()
 	writerMock.On("Write", mock.Anything, mock.Anything, mock.Anything).Return(errors.New("foo"))
-	task = NewCdcTask(factory, &writer.DefaultWriteCallBack{})
+	task = NewCdcTask(factory, &writer.DefaultWriteCallBack{}, nil)
 	err = <-task.Resume(nil)
 	assert.NoError(t, err)
 	readerChan <- &model.CDCData{}
@@ -111,7 +111,7 @@ func TestFactoryErrorCDCTask(t *testing.T) {
 	}, func() (writer.CDCWriter, error) {
 		return &writer.DefaultWriter{}, nil
 	})
-	task := NewCdcTask(factory, &writer.DefaultWriteCallBack{})
+	task := NewCdcTask(factory, &writer.DefaultWriteCallBack{}, nil)
 	err := <-task.Resume(nil)
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, readerErr)
@@ -122,7 +122,7 @@ func TestFactoryErrorCDCTask(t *testing.T) {
 	}, func() (writer.CDCWriter, error) {
 		return nil, writerErr
 	})
-	task = NewCdcTask(factory, &writer.DefaultWriteCallBack{})
+	task = NewCdcTask(factory, &writer.DefaultWriteCallBack{}, nil)
 	err = <-task.Resume(nil)
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, writerErr)
@@ -134,7 +134,7 @@ func TestOpErrorCDCTask(t *testing.T) {
 	}, func() (writer.CDCWriter, error) {
 		return &writer.DefaultWriter{}, nil
 	})
-	task := NewCdcTask(factory, &writer.DefaultWriteCallBack{})
+	task := NewCdcTask(factory, &writer.DefaultWriteCallBack{}, nil)
 	opErr := errors.New("foo")
 
 	err := <-task.Resume(func() error {

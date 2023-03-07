@@ -17,23 +17,19 @@
 package util
 
 import (
+	"github.com/milvus-io/milvus/pkg/log"
 	"go.uber.org/zap"
 )
 
 var (
-	IsDebug bool
-	Log     *zap.Logger
+	Log *zap.Logger
 )
 
 func init() {
-	var err error
-	// TODO fubang
-	if IsDebug {
-		Log, err = zap.NewDevelopment(zap.AddCallerSkip(1))
-	} else {
-		Log, err = zap.NewProduction(zap.AddCallerSkip(1))
-	}
-	if err != nil {
-		panic(err)
-	}
+	conf := &log.Config{Level: "info", Stdout: true, File: log.FileLogConfig{
+		RootPath: "/tmp/cdc_log",
+		Filename: "cdc.log",
+	}}
+	Log, _, _ = log.InitLogger(conf)
+	Log = Log.WithOptions(zap.AddCallerSkip(-1))
 }

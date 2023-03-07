@@ -4,9 +4,8 @@ package mocks
 
 import (
 	config "github.com/milvus-io/milvus/cdc/core/config"
-	api "github.com/milvus-io/milvus/cdc/core/mq/api"
 	"github.com/milvus-io/milvus/cdc/core/util"
-
+	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -25,15 +24,15 @@ func (_m *FactoryCreator) EXPECT() *FactoryCreator_Expecter {
 }
 
 // NewKmsFactory provides a mock function with given fields: cfg
-func (_m *FactoryCreator) NewKmsFactory(cfg *config.KafkaConfig) api.Factory {
+func (_m *FactoryCreator) NewKmsFactory(cfg *config.KafkaConfig) msgstream.Factory {
 	ret := _m.Called(cfg)
 
-	var r0 api.Factory
-	if rf, ok := ret.Get(0).(func(*config.KafkaConfig) api.Factory); ok {
+	var r0 msgstream.Factory
+	if rf, ok := ret.Get(0).(func(*config.KafkaConfig) msgstream.Factory); ok {
 		r0 = rf(cfg)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(api.Factory)
+			r0 = ret.Get(0).(msgstream.Factory)
 		}
 	}
 
@@ -58,26 +57,26 @@ func (_c *FactoryCreator_NewKmsFactory_Call) Run(run func(cfg *config.KafkaConfi
 	return _c
 }
 
-func (_c *FactoryCreator_NewKmsFactory_Call) Return(_a0 api.Factory) *FactoryCreator_NewKmsFactory_Call {
+func (_c *FactoryCreator_NewKmsFactory_Call) Return(_a0 msgstream.Factory) *FactoryCreator_NewKmsFactory_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *FactoryCreator_NewKmsFactory_Call) RunAndReturn(run func(*config.KafkaConfig) api.Factory) *FactoryCreator_NewKmsFactory_Call {
+func (_c *FactoryCreator_NewKmsFactory_Call) RunAndReturn(run func(*config.KafkaConfig) msgstream.Factory) *FactoryCreator_NewKmsFactory_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // NewPmsFactory provides a mock function with given fields: cfg
-func (_m *FactoryCreator) NewPmsFactory(cfg *config.PulsarConfig) api.Factory {
+func (_m *FactoryCreator) NewPmsFactory(cfg *config.PulsarConfig) msgstream.Factory {
 	ret := _m.Called(cfg)
 
-	var r0 api.Factory
-	if rf, ok := ret.Get(0).(func(*config.PulsarConfig) api.Factory); ok {
+	var r0 msgstream.Factory
+	if rf, ok := ret.Get(0).(func(*config.PulsarConfig) msgstream.Factory); ok {
 		r0 = rf(cfg)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(api.Factory)
+			r0 = ret.Get(0).(msgstream.Factory)
 		}
 	}
 
@@ -102,12 +101,12 @@ func (_c *FactoryCreator_NewPmsFactory_Call) Run(run func(cfg *config.PulsarConf
 	return _c
 }
 
-func (_c *FactoryCreator_NewPmsFactory_Call) Return(_a0 api.Factory) *FactoryCreator_NewPmsFactory_Call {
+func (_c *FactoryCreator_NewPmsFactory_Call) Return(_a0 msgstream.Factory) *FactoryCreator_NewPmsFactory_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *FactoryCreator_NewPmsFactory_Call) RunAndReturn(run func(*config.PulsarConfig) api.Factory) *FactoryCreator_NewPmsFactory_Call {
+func (_c *FactoryCreator_NewPmsFactory_Call) RunAndReturn(run func(*config.PulsarConfig) msgstream.Factory) *FactoryCreator_NewPmsFactory_Call {
 	_c.Call.Return(run)
 	return _c
 }

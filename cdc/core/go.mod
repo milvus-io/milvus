@@ -3,18 +3,14 @@ module github.com/milvus-io/milvus/cdc/core
 go 1.18
 
 require (
-	github.com/apache/pulsar-client-go v0.6.1-0.20210728062540-29414db801a7
 	github.com/cockroachdb/errors v1.9.1
-	github.com/confluentinc/confluent-kafka-go v1.9.1
 	github.com/goccy/go-json v0.10.0
 	github.com/golang/protobuf v1.5.2
-	github.com/milvus-io/milvus-proto/go-api v0.0.0-20230220081023-3cf200738ae7
 	github.com/milvus-io/milvus-sdk-go/v2 v2.2.1-0.20230228025743-8fff5cdd8006
 	github.com/samber/lo v1.27.0
-	github.com/streamnative/pulsarctl v0.5.0
 	github.com/stretchr/testify v1.8.1
-	go.etcd.io/etcd/client/v3 v3.5.5
 	go.uber.org/zap v1.17.0
+	github.com/milvus-io/milvus/pkg v0.0.1
 )
 
 require (
@@ -77,6 +73,7 @@ require (
 replace (
 	github.com/apache/pulsar-client-go => github.com/milvus-io/pulsar-client-go v0.6.10
 	github.com/streamnative/pulsarctl => github.com/xiaofan-luan/pulsarctl v0.5.1
+	github.com/milvus-io/milvus/pkg => ./../../../../milvus/pkg
 )
 
 exclude github.com/apache/pulsar-client-go/oauth2 v0.0.0-20211108044248-fe3b7c4e445b

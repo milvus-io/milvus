@@ -335,7 +335,15 @@ func (e *MetaCDC) newCdcTask(info *meta.TaskInfo) (*CDCTask, error) {
 
 	e.cdcTasks.Lock()
 	defer e.cdcTasks.Unlock()
-	task := NewCdcTask(e.factoryCreator(newReaderFunc, newWriterFunc), writeCallback)
+	task := NewCdcTask(e.factoryCreator(newReaderFunc, newWriterFunc), writeCallback, func() error {
+		// update the meta task state
+		err := updateTaskState(e.etcdCli, e.rootPath, info.TaskID,
+			meta.TaskStatePaused, []meta.TaskState{meta.TaskStateRunning})
+		if err != nil {
+			log.Warn("fail to update the task meta state", zap.String("task_id", info.TaskID), zap.Error(err))
+		}
+		return err
+	})
 	e.cdcTasks.data[info.TaskID] = task
 	return task, nil
 }

@@ -40,18 +40,20 @@ type signal struct {
 }
 
 type CDCTask struct {
-	factory     CDCFactory
-	callback    writer.WriteCallback
-	signaler    chan *signal
-	current     util.Value[meta.TaskState]
-	workingLock sync.Mutex
+	factory       CDCFactory
+	callback      writer.WriteCallback
+	writeFailFunc func() error
+	signaler      chan *signal
+	current       util.Value[meta.TaskState]
+	workingLock   sync.Mutex
 }
 
-func NewCdcTask(f CDCFactory, c writer.WriteCallback) *CDCTask {
+func NewCdcTask(f CDCFactory, c writer.WriteCallback, w func() error) *CDCTask {
 	task := &CDCTask{
-		factory:  f,
-		callback: c,
-		signaler: make(chan *signal),
+		factory:       f,
+		callback:      c,
+		writeFailFunc: w,
+		signaler:      make(chan *signal),
 	}
 	task.current.Store(meta.TaskStateInitial)
 	go task.handle()
@@ -152,7 +154,7 @@ func (c *CDCTask) work(done <-chan struct{}, cdcReader reader.CDCReader, cdcWrit
 	writeData := func(data *model.CDCData) {
 		if err := cdcWriter.Write(context.Background(), data, c.callback); err != nil {
 			log.Warn("fail to write the data", zap.Any("data", data), zap.Error(err))
-			err = <-c.Pause(nil)
+			err = <-c.Pause(c.writeFailFunc)
 			if err != nil {
 				log.Warn("fail to pause inner", zap.Error(err))
 			}

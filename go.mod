@@ -180,7 +180,6 @@ require github.com/ianlancetaylor/cgosymbolizer v0.0.0-20221217025313-27d3c9f66b
 
 require (
 	github.com/cockroachdb/errors v1.9.1
-	github.com/milvus-io/milvus/api v0.0.0-20221016011724-a92b242ecdd8
 	github.com/uber/jaeger-client-go v2.30.0+incompatible
 	go.opentelemetry.io/otel/exporters/jaeger v1.11.2
 	go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.11.2

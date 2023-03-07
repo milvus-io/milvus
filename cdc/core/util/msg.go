@@ -21,18 +21,19 @@ import (
 	"fmt"
 	"reflect"
 
+	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
-	"github.com/milvus-io/milvus/cdc/core/pb"
 	"go.uber.org/zap"
 )
 
-func GetChannelStartPosition(vchannel string, startPositions []*commonpb.KeyDataPair) (*pb.MsgPosition, error) {
+func GetChannelStartPosition(vchannel string, startPositions []*commonpb.KeyDataPair) (*msgstream.MsgPosition, error) {
 	for _, sp := range startPositions {
 		if sp.GetKey() != ToPhysicalChannel(vchannel) {
 			continue
 		}
-		return &pb.MsgPosition{
+		return &msgstream.MsgPosition{
 			ChannelName: vchannel,
 			MsgID:       sp.GetData(),
 		}, nil

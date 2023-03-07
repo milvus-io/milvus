@@ -22,6 +22,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
+	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+
 	"github.com/cockroachdb/errors"
 	"github.com/goccy/go-json"
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -31,8 +34,6 @@ import (
 	"github.com/milvus-io/milvus-sdk-go/v2/entity"
 	"github.com/milvus-io/milvus/cdc/core/mocks"
 	"github.com/milvus-io/milvus/cdc/core/model"
-	"github.com/milvus-io/milvus/cdc/core/mq/api"
-	"github.com/milvus-io/milvus/cdc/core/pb"
 	"github.com/milvus-io/milvus/cdc/core/writer"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -86,8 +87,8 @@ func TestWriterTemplateCreateCollection(t *testing.T) {
 
 	t.Run("msg type error", func(t *testing.T) {
 		err = cdcWriter.Write(context.Background(), &model.CDCData{
-			Msg: &api.CreateCollectionMsg{
-				CreateCollectionRequest: pb.CreateCollectionRequest{
+			Msg: &msgstream.CreateCollectionMsg{
+				CreateCollectionRequest: msgpb.CreateCollectionRequest{
 					Base: &commonpb.MsgBase{
 						MsgType: commonpb.MsgType_TimeTick,
 					},
@@ -128,8 +129,8 @@ func TestWriterTemplateCreateCollection(t *testing.T) {
 	pbSchemaByte, _ := json.Marshal(pbSchema)
 
 	data := &model.CDCData{
-		Msg: &api.CreateCollectionMsg{
-			CreateCollectionRequest: pb.CreateCollectionRequest{
+		Msg: &msgstream.CreateCollectionMsg{
+			CreateCollectionRequest: msgpb.CreateCollectionRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_CreateCollection,
 				},
@@ -212,8 +213,8 @@ func TestWriterTemplateInsertDeleteDrop(t *testing.T) {
 	binaryVector := []byte{255, 255, 255, 0}
 	generateInsertData := func(collectionID int64, collectionName string, channelName string, partitionName string, msgID string) *model.CDCData {
 		return &model.CDCData{
-			Msg: &api.InsertMsg{
-				InsertRequest: pb.InsertRequest{
+			Msg: &msgstream.InsertMsg{
+				InsertRequest: msgpb.InsertRequest{
 					Base: &commonpb.MsgBase{
 						MsgType: commonpb.MsgType_Insert,
 					},
@@ -264,9 +265,9 @@ func TestWriterTemplateInsertDeleteDrop(t *testing.T) {
 						},
 					},
 				},
-				BaseMsg: api.BaseMsg{
+				BaseMsg: msgstream.BaseMsg{
 					EndTimestamp: 1000,
-					MsgPosition: &pb.MsgPosition{
+					MsgPosition: &msgstream.MsgPosition{
 						ChannelName: channelName,
 						MsgID:       []byte(msgID),
 					},
@@ -277,8 +278,8 @@ func TestWriterTemplateInsertDeleteDrop(t *testing.T) {
 
 	generateDeleteData := func(collectionID int64, collectionName string, channelName string, partitionName string, msgID string, ids []int64) *model.CDCData {
 		return &model.CDCData{
-			Msg: &api.DeleteMsg{
-				DeleteRequest: pb.DeleteRequest{
+			Msg: &msgstream.DeleteMsg{
+				DeleteRequest: msgpb.DeleteRequest{
 					Base: &commonpb.MsgBase{
 						MsgType: commonpb.MsgType_Delete,
 					},
@@ -293,9 +294,9 @@ func TestWriterTemplateInsertDeleteDrop(t *testing.T) {
 						},
 					},
 				},
-				BaseMsg: api.BaseMsg{
+				BaseMsg: msgstream.BaseMsg{
 					EndTimestamp: 1000,
-					MsgPosition: &pb.MsgPosition{
+					MsgPosition: &msgstream.MsgPosition{
 						ChannelName: channelName,
 						MsgID:       []byte(msgID),
 					},
@@ -306,28 +307,28 @@ func TestWriterTemplateInsertDeleteDrop(t *testing.T) {
 
 	generateDropData := func(collectionID int64, collectionName string, channelName, msgID, channelName2, msgID2 string) *model.CDCData {
 		return &model.CDCData{
-			Msg: &api.DropCollectionMsg{
-				DropCollectionRequest: pb.DropCollectionRequest{
+			Msg: &msgstream.DropCollectionMsg{
+				DropCollectionRequest: msgpb.DropCollectionRequest{
 					Base: &commonpb.MsgBase{
 						MsgType: commonpb.MsgType_DropCollection,
 					},
 					CollectionName: collectionName,
 					CollectionID:   collectionID,
 				},
-				BaseMsg: api.BaseMsg{
+				BaseMsg: msgstream.BaseMsg{
 					EndTimestamp: 1000,
-					MsgPosition: &pb.MsgPosition{
+					MsgPosition: &msgstream.MsgPosition{
 						ChannelName: channelName,
 						MsgID:       []byte(msgID),
 					},
 				},
 			},
 			Extra: map[string]any{
-				model.DropCollectionMsgsKey: []*api.DropCollectionMsg{
+				model.DropCollectionMsgsKey: []*msgstream.DropCollectionMsg{
 					{
-						BaseMsg: api.BaseMsg{
+						BaseMsg: msgstream.BaseMsg{
 							EndTimestamp: 2000,
-							MsgPosition: &pb.MsgPosition{
+							MsgPosition: &msgpb.MsgPosition{
 								ChannelName: channelName2,
 								MsgID:       []byte(msgID2),
 							},

@@ -106,16 +106,16 @@ pulsar:
 #   saslPassword: 
 #   saslMechanisms: PLAIN
 #   securityProtocol: SASL_SSL
-
-rocksmq:
-  # The path where the message is stored in rocksmq
-  # please adjust in embedded Milvus: /tmp/milvus/rdb_data
-  path: /var/lib/milvus/rdb_data
-  lrucacheratio: 0.06 # rocksdb cache memory ratio
-  rocksmqPageSize: 268435456 # 256 MB, 256 * 1024 * 1024 bytes, The size of each page of messages in rocksmq
-  retentionTimeInMinutes: 7200 # 5 days, 5 * 24 * 60 minutes, The retention time of the message in rocksmq.
-  retentionSizeInMB: 8192 # 8 GB, 8 * 1024 MB, The retention size of the message in rocksmq.
-  compactionInterval: 86400 # 1 day, trigger rocksdb compaction every day to remove deleted data
+#
+#rocksmq:
+#  # The path where the message is stored in rocksmq
+#  # please adjust in embedded Milvus: /tmp/milvus/rdb_data
+#  path: /var/lib/milvus/rdb_data
+#  lrucacheratio: 0.06 # rocksdb cache memory ratio
+#  rocksmqPageSize: 268435456 # 256 MB, 256 * 1024 * 1024 bytes, The size of each page of messages in rocksmq
+#  retentionTimeInMinutes: 7200 # 5 days, 5 * 24 * 60 minutes, The retention time of the message in rocksmq.
+#  retentionSizeInMB: 8192 # 8 GB, 8 * 1024 MB, The retention size of the message in rocksmq.
+#  compactionInterval: 86400 # 1 day, trigger rocksdb compaction every day to remove deleted data
 
 # Related configuration of rootCoord, used to handle data definition language (DDL) and data control language (DCL) requests
 rootCoord:
@@ -408,7 +408,7 @@ common:
 #   4. DQL result rate protection;
 # If necessary, you can also manually force to deny RW requests.
 quotaAndLimits:
-  enabled: true # `true` to enable quota and limits, `false` to disable.
+  enabled: false # `true` to enable quota and limits, `false` to disable.
   # quotaCenterCollectInterval is the time interval that quotaCenter
   # collects metrics from Proxies, Query cluster and Data cluster.
   # seconds, (0 ~ 65536)

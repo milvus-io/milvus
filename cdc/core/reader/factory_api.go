@@ -17,17 +17,19 @@
 package reader
 
 import (
+	"strconv"
+
 	"github.com/milvus-io/milvus/cdc/core/config"
-	"github.com/milvus-io/milvus/cdc/core/mq"
-	"github.com/milvus-io/milvus/cdc/core/mq/api"
 	"github.com/milvus-io/milvus/cdc/core/util"
+	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 //go:generate mockery --name=FactoryCreator --filename=factory_creator_mock.go --output=../mocks --with-expecter
 type FactoryCreator interface {
 	util.CDCMark
-	NewPmsFactory(cfg *config.PulsarConfig) api.Factory
-	NewKmsFactory(cfg *config.KafkaConfig) api.Factory
+	NewPmsFactory(cfg *config.PulsarConfig) msgstream.Factory
+	NewKmsFactory(cfg *config.KafkaConfig) msgstream.Factory
 }
 
 type DefaultFactoryCreator struct {
@@ -38,10 +40,27 @@ func NewDefaultFactoryCreator() FactoryCreator {
 	return &DefaultFactoryCreator{}
 }
 
-func (d *DefaultFactoryCreator) NewPmsFactory(cfg *config.PulsarConfig) api.Factory {
-	return mq.NewPmsFactory(cfg)
+func (d *DefaultFactoryCreator) NewPmsFactory(cfg *config.PulsarConfig) msgstream.Factory {
+	return msgstream.NewPmsFactory(&paramtable.PulsarConfig{
+		Address:        config.NewParamItem(cfg.Address),
+		WebAddress:     config.NewParamItem(cfg.WebAddress),
+		WebPort:        config.NewParamItem(strconv.Itoa(cfg.WebPort)),
+		MaxMessageSize: config.NewParamItem(cfg.MaxMessageSize),
+		AuthPlugin:     config.NewParamItem(""),
+		AuthParams:     config.NewParamItem("{}"),
+		Tenant:         config.NewParamItem(cfg.Tenant),
+		Namespace:      config.NewParamItem(cfg.Namespace),
+	})
 }
 
-func (d *DefaultFactoryCreator) NewKmsFactory(cfg *config.KafkaConfig) api.Factory {
-	return mq.NewKmsFactory(cfg)
+func (d *DefaultFactoryCreator) NewKmsFactory(cfg *config.KafkaConfig) msgstream.Factory {
+	return msgstream.NewKmsFactory(&paramtable.KafkaConfig{
+		Address:             config.NewParamItem(cfg.Address),
+		SaslUsername:        config.NewParamItem(""),
+		SaslPassword:        config.NewParamItem(""),
+		SaslMechanisms:      config.NewParamItem(""),
+		SecurityProtocol:    config.NewParamItem(""),
+		ConsumerExtraConfig: config.NewParamGroup(),
+		ProducerExtraConfig: config.NewParamGroup(),
+	})
 }

@@ -16,12 +16,33 @@
 
 package config
 
-import "strconv"
+import (
+	"strconv"
 
-var (
-	Kafka  *KafkaConfig
-	Pulsar *PulsarConfig
+	"github.com/milvus-io/milvus/pkg/config"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
+
+var configManager = config.NewManager()
+
+func NewParamItem(value string) paramtable.ParamItem {
+	item := paramtable.ParamItem{
+		Formatter: func(_ string) string {
+			return value
+		},
+	}
+	item.Init(configManager)
+	return item
+}
+
+func NewParamGroup() paramtable.ParamGroup {
+	group := paramtable.ParamGroup{
+		GetFunc: func() map[string]string {
+			return map[string]string{}
+		},
+	}
+	return group
+}
 
 type KafkaConfig struct {
 	Address string

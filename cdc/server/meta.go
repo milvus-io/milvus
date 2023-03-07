@@ -63,6 +63,7 @@ func getTaskInfo(etcdCli util.KVApi, rootPath string, taskID string) (*meta.Task
 		return nil, err
 	}
 	if len(resp.Kvs) == 0 {
+		log.Warn("not found the key", zap.String("key", key), zap.Error(err))
 		return nil, NewNotFoundError(key)
 	}
 	info := &meta.TaskInfo{}

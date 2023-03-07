@@ -23,10 +23,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
+	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+
 	"github.com/goccy/go-json"
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/cdc/core/model"
-	"github.com/milvus-io/milvus/cdc/core/mq/api"
 
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"go.etcd.io/etcd/api/v3/mvccpb"
@@ -364,12 +366,12 @@ func TestReaderWatchCollectionInfo(t *testing.T) {
 			msgStream1 := mocks.NewMsgStream(t)
 			msgStream2 := mocks.NewMsgStream(t)
 			factory := mocks.NewFactory(t)
-			pmsCall := factoryCreator.EXPECT().NewPmsFactory(mock.Anything).RunAndReturn(func(c *config.PulsarConfig) api.Factory {
+			pmsCall := factoryCreator.EXPECT().NewPmsFactory(mock.Anything).RunAndReturn(func(c *config.PulsarConfig) msgstream.Factory {
 				return factory
 			})
 			defer pmsCall.Unset()
 			i := 0
-			factory.EXPECT().NewMsgStream(mock.Anything).RunAndReturn(func(ctx context.Context) (api.MsgStream, error) {
+			factory.EXPECT().NewMsgStream(mock.Anything).RunAndReturn(func(ctx context.Context) (msgstream.MsgStream, error) {
 				if i == 0 {
 					i++
 					return msgStream1, nil
@@ -428,22 +430,22 @@ func TestReaderWatchCollectionInfo(t *testing.T) {
 			filterCall := monitor.On("OnFilterReadMsg", "Delete").Return()
 			msgStream1.EXPECT().AsConsumer(mock.Anything, mock.Anything, mock.Anything).Return()
 			msgStream2.EXPECT().AsConsumer(mock.Anything, mock.Anything, mock.Anything).Return()
-			msgStream1.EXPECT().Seek(mock.Anything).RunAndReturn(func(positions []*pb.MsgPosition) error {
+			msgStream1.EXPECT().Seek(mock.Anything).RunAndReturn(func(positions []*msgstream.MsgPosition) error {
 				if positions[0].ChannelName == "p1" {
 					assert.EqualValues(t, []byte("hello"), positions[0].MsgID)
 					return nil
 				}
 				return errors.New("consume error")
 			})
-			msgStream2.EXPECT().Seek(mock.Anything).RunAndReturn(func(positions []*pb.MsgPosition) error {
+			msgStream2.EXPECT().Seek(mock.Anything).RunAndReturn(func(positions []*msgstream.MsgPosition) error {
 				if positions[0].ChannelName == "p2" {
 					assert.EqualValues(t, []byte("foo2"), positions[0].MsgID)
 					return nil
 				}
 				return errors.New("consume error")
 			})
-			ch1 := make(chan *api.MsgPack, 10)
-			ch2 := make(chan *api.MsgPack, 10)
+			ch1 := make(chan *msgstream.MsgPack, 10)
+			ch2 := make(chan *msgstream.MsgPack, 10)
 			msgStream1.EXPECT().Chan().Return(ch1)
 			msgStream2.EXPECT().Chan().Return(ch2)
 			defer func() {
@@ -465,41 +467,41 @@ func TestReaderWatchCollectionInfo(t *testing.T) {
 				reader.ChanLenOption(10))...)
 			assert.NoError(t, err)
 			cdcChan := collectionReader.StartRead(context.Background())
-			ch1 <- &api.MsgPack{
-				Msgs: []api.TsMsg{
-					&api.TimeTickMsg{
-						TimeTickMsg: pb.TimeTickMsg{Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_TimeTick}},
+			ch1 <- &msgstream.MsgPack{
+				Msgs: []msgstream.TsMsg{
+					&msgstream.TimeTickMsg{
+						TimeTickMsg: msgpb.TimeTickMsg{Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_TimeTick}},
 					},
-					&api.InsertMsg{
-						InsertRequest: pb.InsertRequest{
+					&msgstream.InsertMsg{
+						InsertRequest: msgpb.InsertRequest{
 							Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_Insert},
 							CollectionName: collectionName1,
 						},
 					},
-					&api.DropCollectionMsg{
-						DropCollectionRequest: pb.DropCollectionRequest{
+					&msgstream.DropCollectionMsg{
+						DropCollectionRequest: msgpb.DropCollectionRequest{
 							Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection},
 							CollectionName: collectionName1,
 						},
 					},
 				},
 			}
-			ch2 <- &api.MsgPack{
-				Msgs: []api.TsMsg{
-					&api.InsertMsg{
-						InsertRequest: pb.InsertRequest{
+			ch2 <- &msgstream.MsgPack{
+				Msgs: []msgstream.TsMsg{
+					&msgstream.InsertMsg{
+						InsertRequest: msgpb.InsertRequest{
 							Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_Delete},
 							CollectionName: "xxxxx",
 						},
 					},
-					&api.DeleteMsg{
-						DeleteRequest: pb.DeleteRequest{
+					&msgstream.DeleteMsg{
+						DeleteRequest: msgpb.DeleteRequest{
 							Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_Delete},
 							CollectionName: collectionName1,
 						},
 					},
-					&api.DropCollectionMsg{
-						DropCollectionRequest: pb.DropCollectionRequest{
+					&msgstream.DropCollectionMsg{
+						DropCollectionRequest: msgpb.DropCollectionRequest{
 							Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection},
 							CollectionName: collectionName1,
 						},
@@ -529,7 +531,7 @@ func TestReaderWatchCollectionInfo(t *testing.T) {
 			receiveKv := cdcData.Extra[model.CollectionPropertiesKey].([]*commonpb.KeyValuePair)[0]
 			assert.EqualValues(t, kv.Key, receiveKv.Key)
 			assert.EqualValues(t, kv.Value, receiveKv.Value)
-			createCollectionMsg := cdcData.Msg.(*api.CreateCollectionMsg)
+			createCollectionMsg := cdcData.Msg.(*msgstream.CreateCollectionMsg)
 			assert.EqualValues(t, collectionID1, createCollectionMsg.CollectionID)
 			assert.EqualValues(t, collectionName1, createCollectionMsg.CollectionName)
 			schema := &schemapb.CollectionSchema{
@@ -541,12 +543,12 @@ func TestReaderWatchCollectionInfo(t *testing.T) {
 
 			hasInsert, hasDelete := false, false
 			checkInsertOrDelete := func(d *model.CDCData) {
-				if insertMsg, ok := d.Msg.(*api.InsertMsg); ok {
+				if insertMsg, ok := d.Msg.(*msgstream.InsertMsg); ok {
 					hasInsert = true
 					assert.Equal(t, collectionName1, insertMsg.CollectionName)
 					return
 				}
-				if deleteMsg, ok := d.Msg.(*api.DeleteMsg); ok {
+				if deleteMsg, ok := d.Msg.(*msgstream.DeleteMsg); ok {
 					hasDelete = true
 					assert.Equal(t, collectionName1, deleteMsg.CollectionName)
 					return
@@ -560,7 +562,7 @@ func TestReaderWatchCollectionInfo(t *testing.T) {
 			assert.True(t, hasDelete)
 
 			cdcData = <-cdcChan
-			dropMsg := cdcData.Msg.(*api.DropCollectionMsg)
+			dropMsg := cdcData.Msg.(*msgstream.DropCollectionMsg)
 			assert.Equal(t, collectionName1, dropMsg.CollectionName)
 			assert.Len(t, cdcData.Extra[model.DropCollectionMsgsKey], 1)
 		})
