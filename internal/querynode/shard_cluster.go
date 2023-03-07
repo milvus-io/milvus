@@ -453,6 +453,10 @@ func (sc *ShardCluster) watchSegments(evtCh <-chan segmentEvent) {
 func (sc *ShardCluster) getNode(nodeID int64) (*shardNode, bool) {
 	sc.mut.RLock()
 	defer sc.mut.RUnlock()
+	return sc.getNodeImpl(nodeID)
+}
+
+func (sc *ShardCluster) getNodeImpl(nodeID int64) (*shardNode, bool) {
 	node, ok := sc.nodes[nodeID]
 	if !ok {
 		return nil, false
@@ -571,9 +575,10 @@ func (sc *ShardCluster) ReleaseSegments(ctx context.Context, req *querypb.Releas
 	}
 
 	// release operation,
+	// requires sc.mut read lock held
 	releaseFn := func() {
 		// try to release segments from nodes
-		node, ok := sc.getNode(req.GetNodeID())
+		node, ok := sc.getNodeImpl(req.GetNodeID())
 		if !ok {
 			log.Warn("node not in cluster", zap.Int64("nodeID", req.NodeID))
 			err = fmt.Errorf("node %d not in cluster ", req.NodeID)
@@ -594,6 +599,8 @@ func (sc *ShardCluster) ReleaseSegments(ctx context.Context, req *querypb.Releas
 		}
 	}
 
+	sc.mut.RLock()
+	defer sc.mut.RUnlock()
 	sc.distribution.RemoveDistributions(releaseFn, entries...)
 
 	return err
