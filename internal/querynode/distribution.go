@@ -190,7 +190,8 @@ func (d *distribution) updateSegment(old, new SegmentEntry) {
 	}
 }
 
-// RemoveDistributions remove segments distributions and returns the clear signal channel.
+// RemoveDistributions remove segments distributions and returns the clear signal channel,
+// requires the read lock of shard cluster mut held
 func (d *distribution) RemoveDistributions(releaseFn func(), sealedSegments ...SegmentEntry) {
 	d.mut.Lock()
 	defer d.mut.Unlock()
