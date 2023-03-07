@@ -394,10 +394,13 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		return resp, nil
 	}
 
-	log.Info("receive SaveBinlogPaths request",
-		zap.Int64("nodeID", req.GetBase().GetSourceID()),
+	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.Int64("segmentID", req.GetSegmentID()),
+		zap.Int64("nodeID", req.GetBase().GetSourceID()),
+	)
+
+	log.Info("receive SaveBinlogPaths request",
 		zap.Bool("isFlush", req.GetFlushed()),
 		zap.Bool("isDropped", req.GetDropped()),
 		zap.Any("startPositions", req.GetStartPositions()),
@@ -409,18 +412,20 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	segment := s.meta.GetSegment(segmentID)
 
 	if segment == nil {
-		log.Error("failed to get segment", zap.Int64("segmentID", segmentID))
-		failResponseWithCode(resp, commonpb.ErrorCode_SegmentNotFound, fmt.Sprintf("failed to get segment %d", segmentID))
+		log.Error("failed to get segment, segment not exists")
+		failResponseWithCode(resp, commonpb.ErrorCode_SegmentNotFound,
+			fmt.Sprintf("failed to get segment %d", segmentID))
 		return resp, nil
 	}
 
 	if segment.State == commonpb.SegmentState_Dropped {
-		log.Info("save to dropped segment, ignore this request")
+		log.Warn("save to dropped segment, ignore this request")
 		resp.ErrorCode = commonpb.ErrorCode_Success
 		return resp, nil
 	} else if !isSegmentHealthy(segment) {
-		log.Error("failed to get segment")
-		failResponseWithCode(resp, commonpb.ErrorCode_SegmentNotFound, fmt.Sprintf("failed to get segment %d", segmentID))
+		log.Error("failed to get segment, segment is not healthy")
+		failResponseWithCode(resp, commonpb.ErrorCode_SegmentNotFound,
+			fmt.Sprintf("failed to get segment %d", segmentID))
 		return resp, nil
 	}
 
@@ -430,7 +435,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		if !s.channelManager.Match(nodeID, channel) {
 			failResponse(resp, fmt.Sprintf("channel %s is not watched on node %d", channel, nodeID))
 			resp.ErrorCode = commonpb.ErrorCode_MetaFailed
-			log.Warn("node is not matched with channel", zap.String("channel", channel), zap.Int64("nodeID", nodeID))
+			log.Warn("node is not matched with channel", zap.String("channel", channel))
 			return resp, nil
 		}
 	}
@@ -451,15 +456,12 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		req.GetCheckPoints(),
 		req.GetStartPositions())
 	if err != nil {
-		log.Error("save binlog and checkpoints failed",
-			zap.Int64("segmentID", req.GetSegmentID()),
-			zap.Error(err))
+		log.Error("save binlog and checkpoints failed", zap.Error(err))
 		resp.Reason = err.Error()
 		return resp, nil
 	}
 
-	log.Info("flush segment with meta", zap.Int64("segment id", req.SegmentID),
-		zap.Any("meta", req.GetField2BinlogPaths()))
+	log.Info("flush segment with meta", zap.Any("meta", req.GetField2BinlogPaths()))
 
 	if req.GetFlushed() {
 		s.segmentManager.DropSegment(ctx, req.SegmentID)
@@ -469,9 +471,9 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 			err = s.compactionTrigger.triggerSingleCompaction(segment.GetCollectionID(), segment.GetPartitionID(),
 				segmentID, segment.GetInsertChannel())
 			if err != nil {
-				log.Warn("failed to trigger single compaction", zap.Int64("segment ID", segmentID))
+				log.Warn("failed to trigger single compaction")
 			} else {
-				log.Info("compaction triggered for segment", zap.Int64("segment ID", segmentID))
+				log.Info("compaction triggered for segment")
 			}
 		}
 	}
@@ -772,7 +774,10 @@ func (s *Server) GetFlushedSegments(ctx context.Context, req *datapb.GetFlushedS
 			continue
 		}
 
-		if req.GetTimeBefore() != typeutil.ZeroTimestamp && segment.StartPosition.Timestamp > req.TimeBefore {
+		if req.GetTimeBefore() != typeutil.ZeroTimestamp && segment.GetStartPosition().GetTimestamp() > req.TimeBefore {
+			if segment.GetStartPosition() == nil {
+				log.Warn("nil start position", zap.Int64("segmentID", segment.GetID()))
+			}
 			continue
 		}
 		ret = append(ret, id)
