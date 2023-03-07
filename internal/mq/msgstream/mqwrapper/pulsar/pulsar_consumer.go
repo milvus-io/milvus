@@ -124,6 +124,13 @@ func (pc *Consumer) Close() {
 						zap.Error(err))
 					return nil
 				}
+				// Pulsar will automatically clean up subscriptions without consumers, so we can ignore this type of error.
+				if strings.Contains(err.Error(), "connection closed") {
+					log.Warn("connection closed, skip unsubscribe",
+						zap.String("subscription", pc.Subscription()),
+						zap.Error(err))
+					return nil
+				}
 				return err
 			}
 			// only close if unsubscribe successfully
