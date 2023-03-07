@@ -13,7 +13,7 @@ type hookConfig struct {
 }
 
 func (h *hookConfig) init() {
-	base := &BaseTable{YamlFile: hookYamlFile}
+	base := &BaseTable{YamlFiles: []string{hookYamlFile}}
 	base.init(0)
 	log.Info("hook config", zap.Any("hook", base.FileConfigs()))
 
