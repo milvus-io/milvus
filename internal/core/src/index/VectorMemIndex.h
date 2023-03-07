@@ -28,7 +28,9 @@ namespace milvus::index {
 
 class VectorMemIndex : public VectorIndex {
  public:
-    explicit VectorMemIndex(const IndexType& index_type, const MetricType& metric_type, const IndexMode& index_mode);
+    explicit VectorMemIndex(const IndexType& index_type,
+                            const MetricType& metric_type,
+                            const IndexMode& index_mode);
 
     BinarySet
     Serialize(const Config& config) override;
@@ -37,7 +39,8 @@ class VectorMemIndex : public VectorIndex {
     Load(const BinarySet& binary_set, const Config& config = {}) override;
 
     void
-    BuildWithDataset(const DatasetPtr& dataset, const Config& config = {}) override;
+    BuildWithDataset(const DatasetPtr& dataset,
+                     const Config& config = {}) override;
 
     int64_t
     Count() override {
@@ -45,7 +48,9 @@ class VectorMemIndex : public VectorIndex {
     }
 
     std::unique_ptr<SearchResult>
-    Query(const DatasetPtr dataset, const SearchInfo& search_info, const BitsetView& bitset) override;
+    Query(const DatasetPtr dataset,
+          const SearchInfo& search_info,
+          const BitsetView& bitset) override;
 
  protected:
     Config config_;

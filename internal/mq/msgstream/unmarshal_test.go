@@ -24,11 +24,11 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 )
 
 func newInsertMsgUnmarshal(input []byte) (TsMsg, error) {
-	insertRequest := internalpb.InsertRequest{}
+	insertRequest := msgpb.InsertRequest{}
 	err := proto.Unmarshal(input, &insertRequest)
 	insertMsg := &InsertMsg{InsertRequest: insertRequest}
 	fmt.Println("use func newInsertMsgUnmarshal unmarshal")
@@ -47,7 +47,7 @@ func Test_ProtoUnmarshalDispatcher(t *testing.T) {
 			EndTimestamp:   0,
 			HashValues:     []uint32{1},
 		},
-		InsertRequest: internalpb.InsertRequest{
+		InsertRequest: msgpb.InsertRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Insert,
 				MsgID:     1,

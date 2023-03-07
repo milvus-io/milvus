@@ -111,9 +111,9 @@ pipeline {
                                                 clusterEnabled = "true"
                                             } else if ("${MILVUS_SERVER_TYPE}" == "distributed-kafka") {
                                                 clusterEnabled = "true"
-                                                mysqlEnabled = "true"
+//                                                 mysqlEnabled = "true"
                                                 mqMode='kafka'
-                                                mysql_architecture = "replication"
+//                                                 mysql_architecture = "replication"
                                             }
                                             if ("${MILVUS_CLIENT}" == "pymilvus") {
                                                 if ("${imageTag}"==''){

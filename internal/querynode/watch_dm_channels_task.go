@@ -22,13 +22,12 @@ import (
 	"math"
 
 	"github.com/cockroachdb/errors"
-
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	queryPb "github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
@@ -113,6 +112,9 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 	}()
 
 	unFlushedSegmentIDs, err := w.LoadGrowingSegments(ctx, collectionID)
+	if err != nil {
+		return errors.Wrap(err, "failed to load growing segments")
+	}
 
 	// remove growing segment if watch dmChannels failed
 	defer func() {
@@ -125,7 +127,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 
 	channel2FlowGraph, err := w.initFlowGraph(collectionID, vChannels)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "failed to init flowgraph")
 	}
 
 	coll.setLoadType(lType)
@@ -139,6 +141,7 @@ func (w *watchDmChannelsTask) Execute(ctx context.Context) (err error) {
 
 	// add tsafe watch in query shard if exists
 	for _, dmlChannel := range vChannels {
+		// Here this error could be ignored
 		w.node.queryShardService.addQueryShard(collectionID, dmlChannel, w.req.GetReplicaID())
 	}
 
@@ -249,7 +252,7 @@ func (w *watchDmChannelsTask) initFlowGraph(collectionID UniqueID, vChannels []C
 	consumeSubName := funcutil.GenChannelSubName(Params.CommonCfg.QueryNodeSubName.GetValue(), collectionID, paramtable.GetNodeID())
 
 	// group channels by to seeking
-	channel2SeekPosition := make(map[string]*internalpb.MsgPosition)
+	channel2SeekPosition := make(map[string]*msgpb.MsgPosition)
 	for _, info := range w.req.Infos {
 		if info.SeekPosition != nil && len(info.SeekPosition.MsgID) != 0 {
 			info.SeekPosition.MsgGroup = consumeSubName
@@ -311,7 +314,7 @@ func (w *watchDmChannelsTask) initFlowGraph(collectionID UniqueID, vChannels []C
 				ID:            droppedSegmentID,
 				CollectionID:  collectionID,
 				InsertChannel: info.GetChannelName(),
-				DmlPosition: &internalpb.MsgPosition{
+				DmlPosition: &msgpb.MsgPosition{
 					ChannelName: info.GetChannelName(),
 					Timestamp:   math.MaxUint64,
 				},

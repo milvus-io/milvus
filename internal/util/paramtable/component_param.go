@@ -35,7 +35,7 @@ const (
 	DefaultGracefulStopTimeout   = 30   // s
 	DefaultThreadCoreCoefficient = 10
 
-	DefaultSessionTTL        = 60 //s
+	DefaultSessionTTL        = 20 //s
 	DefaultSessionRetryTimes = 30
 
 	DefaultMaxDegree                = 56
@@ -212,10 +212,10 @@ type commonConfig struct {
 func (p *commonConfig) init(base *BaseTable) {
 	// must init cluster prefix first
 	p.ClusterPrefix = ParamItem{
-		Key:          "common.chanNamePrefix.cluster",
+		Key:          "msgChannel.chanNamePrefix.cluster",
 		Version:      "2.1.0",
+		FallbackKeys: []string{"common.chanNamePrefix.cluster"},
 		DefaultValue: "by-dev",
-		FallbackKeys: []string{"msgChannel.chanNamePrefix.cluster"},
 		PanicIfEmpty: true,
 		Forbidden:    true,
 		Export:       true,
@@ -226,9 +226,9 @@ func (p *commonConfig) init(base *BaseTable) {
 		return strings.Join([]string{p.ClusterPrefix.GetValue(), prefix}, "-")
 	}
 	p.ProxySubName = ParamItem{
-		Key:          "common.subNamePrefix.proxySubNamePrefix",
+		Key:          "msgChannel.subNamePrefix.proxySubNamePrefix",
 		Version:      "2.1.0",
-		FallbackKeys: []string{"msgChannel.subNamePrefix.proxySubNamePrefix"},
+		FallbackKeys: []string{"common.subNamePrefix.proxySubNamePrefix"},
 		PanicIfEmpty: true,
 		Formatter:    chanNamePrefix,
 		Export:       true,
@@ -237,9 +237,9 @@ func (p *commonConfig) init(base *BaseTable) {
 
 	// --- rootcoord ---
 	p.RootCoordTimeTick = ParamItem{
-		Key:          "common.chanNamePrefix.rootCoordTimeTick",
+		Key:          "msgChannel.chanNamePrefix.rootCoordTimeTick",
 		Version:      "2.1.0",
-		FallbackKeys: []string{"msgChannel.chanNamePrefix.rootCoordTimeTick"},
+		FallbackKeys: []string{"common.chanNamePrefix.rootCoordTimeTick"},
 		PanicIfEmpty: true,
 		Formatter:    chanNamePrefix,
 		Export:       true,
@@ -247,9 +247,9 @@ func (p *commonConfig) init(base *BaseTable) {
 	p.RootCoordTimeTick.Init(base.mgr)
 
 	p.RootCoordStatistics = ParamItem{
-		Key:          "common.chanNamePrefix.rootCoordStatistics",
+		Key:          "msgChannel.chanNamePrefix.rootCoordStatistics",
 		Version:      "2.1.0",
-		FallbackKeys: []string{"msgChannel.chanNamePrefix.rootCoordStatistics"},
+		FallbackKeys: []string{"common.chanNamePrefix.rootCoordStatistics"},
 		PanicIfEmpty: true,
 		Formatter:    chanNamePrefix,
 		Export:       true,
@@ -257,9 +257,9 @@ func (p *commonConfig) init(base *BaseTable) {
 	p.RootCoordStatistics.Init(base.mgr)
 
 	p.RootCoordDml = ParamItem{
-		Key:          "common.chanNamePrefix.rootCoordDml",
+		Key:          "msgChannel.chanNamePrefix.rootCoordDml",
 		Version:      "2.1.0",
-		FallbackKeys: []string{"msgChannel.chanNamePrefix.rootCoordDml"},
+		FallbackKeys: []string{"common.chanNamePrefix.rootCoordDml"},
 		PanicIfEmpty: true,
 		Formatter:    chanNamePrefix,
 		Export:       true,
@@ -267,9 +267,9 @@ func (p *commonConfig) init(base *BaseTable) {
 	p.RootCoordDml.Init(base.mgr)
 
 	p.RootCoordDelta = ParamItem{
-		Key:          "common.chanNamePrefix.rootCoordDelta",
+		Key:          "msgChannel.chanNamePrefix.rootCoordDelta",
 		Version:      "2.1.0",
-		FallbackKeys: []string{"msgChannel.chanNamePrefix.rootCoordDelta"},
+		FallbackKeys: []string{"common.chanNamePrefix.rootCoordDelta"},
 		PanicIfEmpty: true,
 		Formatter:    chanNamePrefix,
 		Export:       true,
@@ -277,9 +277,9 @@ func (p *commonConfig) init(base *BaseTable) {
 	p.RootCoordDelta.Init(base.mgr)
 
 	p.RootCoordSubName = ParamItem{
-		Key:          "common.subNamePrefix.rootCoordSubNamePrefix",
+		Key:          "msgChannel.subNamePrefix.rootCoordSubNamePrefix",
 		Version:      "2.1.0",
-		FallbackKeys: []string{"msgChannel.subNamePrefix.rootCoordSubNamePrefix"},
+		FallbackKeys: []string{"common.subNamePrefix.rootCoordSubNamePrefix"},
 		PanicIfEmpty: true,
 		Formatter:    chanNamePrefix,
 		Export:       true,
@@ -287,9 +287,9 @@ func (p *commonConfig) init(base *BaseTable) {
 	p.RootCoordSubName.Init(base.mgr)
 
 	p.QueryCoordSearch = ParamItem{
-		Key:          "common.chanNamePrefix.search",
+		Key:          "msgChannel.chanNamePrefix.search",
 		Version:      "2.1.0",
-		FallbackKeys: []string{"msgChannel.chanNamePrefix.search"},
+		FallbackKeys: []string{"common.chanNamePrefix.search"},
 		PanicIfEmpty: true,
 		Formatter:    chanNamePrefix,
 		Export:       true,
@@ -297,9 +297,9 @@ func (p *commonConfig) init(base *BaseTable) {
 	p.QueryCoordSearch.Init(base.mgr)
 
 	p.QueryCoordSearchResult = ParamItem{
-		Key:          "common.chanNamePrefix.searchResult",
+		Key:          "msgChannel.chanNamePrefix.searchResult",
 		Version:      "2.1.0",
-		FallbackKeys: []string{"msgChannel.chanNamePrefix.searchResult"},
+		FallbackKeys: []string{"common.chanNamePrefix.searchResult"},
 		PanicIfEmpty: true,
 		Formatter:    chanNamePrefix,
 		Export:       true,
@@ -307,9 +307,9 @@ func (p *commonConfig) init(base *BaseTable) {
 	p.QueryCoordSearchResult.Init(base.mgr)
 
 	p.QueryCoordTimeTick = ParamItem{
-		Key:          "common.chanNamePrefix.queryTimeTick",
+		Key:          "msgChannel.chanNamePrefix.queryTimeTick",
 		Version:      "2.1.0",
-		FallbackKeys: []string{"msgChannel.chanNamePrefix.queryTimeTick"},
+		FallbackKeys: []string{"common.chanNamePrefix.queryTimeTick"},
 		PanicIfEmpty: true,
 		Formatter:    chanNamePrefix,
 		Export:       true,
@@ -317,9 +317,9 @@ func (p *commonConfig) init(base *BaseTable) {
 	p.QueryCoordTimeTick.Init(base.mgr)
 
 	p.QueryNodeSubName = ParamItem{
-		Key:          "common.subNamePrefix.queryNodeSubNamePrefix",
+		Key:          "msgChannel.subNamePrefix.queryNodeSubNamePrefix",
 		Version:      "2.1.0",
-		FallbackKeys: []string{"msgChannel.subNamePrefix.queryNodeSubNamePrefix"},
+		FallbackKeys: []string{"common.subNamePrefix.queryNodeSubNamePrefix"},
 		PanicIfEmpty: true,
 		Formatter:    chanNamePrefix,
 		Export:       true,
@@ -327,9 +327,9 @@ func (p *commonConfig) init(base *BaseTable) {
 	p.QueryNodeSubName.Init(base.mgr)
 
 	p.DataCoordStatistic = ParamItem{
-		Key:          "common.chanNamePrefix.dataCoordStatistic",
+		Key:          "msgChannel.chanNamePrefix.dataCoordStatistic",
 		Version:      "2.1.0",
-		FallbackKeys: []string{"msgChannel.chanNamePrefix.dataCoordStatistic"},
+		FallbackKeys: []string{"common.chanNamePrefix.dataCoordStatistic"},
 		PanicIfEmpty: true,
 		Formatter:    chanNamePrefix,
 		Export:       true,
@@ -337,9 +337,9 @@ func (p *commonConfig) init(base *BaseTable) {
 	p.DataCoordStatistic.Init(base.mgr)
 
 	p.DataCoordTimeTick = ParamItem{
-		Key:          "common.chanNamePrefix.dataCoordTimeTick",
+		Key:          "msgChannel.chanNamePrefix.dataCoordTimeTick",
 		Version:      "2.1.0",
-		FallbackKeys: []string{"msgChannel.chanNamePrefix.dataCoordTimeTick"},
+		FallbackKeys: []string{"common.chanNamePrefix.dataCoordTimeTick"},
 		PanicIfEmpty: true,
 		Formatter:    chanNamePrefix,
 		Export:       true,
@@ -347,9 +347,9 @@ func (p *commonConfig) init(base *BaseTable) {
 	p.DataCoordTimeTick.Init(base.mgr)
 
 	p.DataCoordSegmentInfo = ParamItem{
-		Key:          "common.chanNamePrefix.dataCoordSegmentInfo",
+		Key:          "msgChannel.chanNamePrefix.dataCoordSegmentInfo",
 		Version:      "2.1.0",
-		FallbackKeys: []string{"msgChannel.chanNamePrefix.dataCoordSegmentInfo"},
+		FallbackKeys: []string{"common.chanNamePrefix.dataCoordSegmentInfo"},
 		PanicIfEmpty: true,
 		Formatter:    chanNamePrefix,
 		Export:       true,
@@ -357,9 +357,9 @@ func (p *commonConfig) init(base *BaseTable) {
 	p.DataCoordSegmentInfo.Init(base.mgr)
 
 	p.DataCoordSubName = ParamItem{
-		Key:          "common.subNamePrefix.dataCoordSubNamePrefix",
+		Key:          "msgChannel.subNamePrefix.dataCoordSubNamePrefix",
 		Version:      "2.1.0",
-		FallbackKeys: []string{"msgChannel.subNamePrefix.dataCoordSubNamePrefix"},
+		FallbackKeys: []string{"common.subNamePrefix.dataCoordSubNamePrefix"},
 		PanicIfEmpty: true,
 		Formatter:    chanNamePrefix,
 		Export:       true,
@@ -383,9 +383,9 @@ func (p *commonConfig) init(base *BaseTable) {
 	p.DataCoordTicklePath.Init(base.mgr)
 
 	p.DataNodeSubName = ParamItem{
-		Key:          "common.subNamePrefix.dataNodeSubNamePrefix",
+		Key:          "msgChannel.subNamePrefix.dataNodeSubNamePrefix",
 		Version:      "2.1.0",
-		FallbackKeys: []string{"msgChannel.subNamePrefix.dataNodeSubNamePrefix"},
+		FallbackKeys: []string{"common.subNamePrefix.dataNodeSubNamePrefix"},
 		PanicIfEmpty: true,
 		Formatter:    chanNamePrefix,
 		Export:       true,
@@ -594,7 +594,7 @@ like the old password verification when updating the credential`,
 	p.SessionTTL = ParamItem{
 		Key:          "common.session.ttl",
 		Version:      "2.0.0",
-		DefaultValue: "60",
+		DefaultValue: "20",
 		Doc:          "ttl value when session granting a lease to register service",
 		Export:       true,
 	}
@@ -747,6 +747,7 @@ func (p *rootCoordConfig) init(base *BaseTable) {
 		Key:          "rootCoord.dmlChannelNum",
 		Version:      "2.0.0",
 		DefaultValue: "256",
+		Forbidden:    true,
 		Doc:          "The number of dml channels created at system startup",
 		Export:       true,
 	}
@@ -1305,6 +1306,7 @@ type queryNodeConfig struct {
 	// cache limit
 	CacheEnabled     ParamItem `refreshable:"false"`
 	CacheMemoryLimit ParamItem `refreshable:"false"`
+	MmapDirPath      ParamItem `refreshable:"false"`
 
 	GroupEnabled         ParamItem `refreshable:"true"`
 	MaxReceiveChanSize   ParamItem `refreshable:"false"`
@@ -1448,6 +1450,14 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.CacheEnabled.Init(base.mgr)
+
+	p.MmapDirPath = ParamItem{
+		Key:          "queryNode.mmapDirPath",
+		Version:      "2.3.0",
+		DefaultValue: "",
+		Doc:          "The folder that storing data files for mmap, setting to a path will enable Milvus to load data with mmap",
+	}
+	p.MmapDirPath.Init(base.mgr)
 
 	p.GroupEnabled = ParamItem{
 		Key:          "queryNode.grouping.enabled",
@@ -1744,7 +1754,7 @@ the number of binlog file reaches to max value.`,
 	p.EnableAutoCompaction = ParamItem{
 		Key:          "dataCoord.compaction.enableAutoCompaction",
 		Version:      "2.0.0",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		Export:       true,
 	}
 	p.EnableAutoCompaction.Init(base.mgr)
@@ -1951,6 +1961,11 @@ type dataNodeConfig struct {
 
 	// io concurrency to fetch stats logs
 	IOConcurrency ParamItem `refreshable:"false"`
+
+	// memory management
+	MemoryForceSyncEnable       ParamItem `refreshable:"true"`
+	MemoryForceSyncThreshold    ParamItem `refreshable:"true"`
+	MemoryForceSyncSegmentRatio ParamItem `refreshable:"true"`
 }
 
 func (p *dataNodeConfig) init(base *BaseTable) {
@@ -1982,6 +1997,27 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.FlushInsertBufferSize.Init(base.mgr)
+
+	p.MemoryForceSyncEnable = ParamItem{
+		Key:          "datanode.memory.forceSyncEnable",
+		Version:      "2.2.4",
+		DefaultValue: "true",
+	}
+	p.MemoryForceSyncEnable.Init(base.mgr)
+
+	p.MemoryForceSyncThreshold = ParamItem{
+		Key:          "datanode.memory.forceSyncThreshold",
+		Version:      "2.2.4",
+		DefaultValue: "0.6",
+	}
+	p.MemoryForceSyncThreshold.Init(base.mgr)
+
+	p.MemoryForceSyncSegmentRatio = ParamItem{
+		Key:          "datanode.memory.forceSyncSegmentRatio",
+		Version:      "2.2.4",
+		DefaultValue: "0.3",
+	}
+	p.MemoryForceSyncSegmentRatio.Init(base.mgr)
 
 	p.FlushDeleteBufferBytes = ParamItem{
 		Key:          "dataNode.segment.deleteBufBytes",

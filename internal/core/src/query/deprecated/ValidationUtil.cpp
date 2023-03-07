@@ -43,8 +43,10 @@ CheckParameterRange(const milvus::json& json_params,
         bool min_err = min_close ? value < min : value <= min;
         bool max_err = max_closed ? value > max : value >= max;
         if (min_err || max_err) {
-            std::string msg = "Invalid " + param_name + " value: " + std::to_string(value) + ". Valid range is " +
-                              (min_close ? "[" : "(") + std::to_string(min) + ", " + std::to_string(max) +
+            std::string msg = "Invalid " + param_name +
+                              " value: " + std::to_string(value) +
+                              ". Valid range is " + (min_close ? "[" : "(") +
+                              std::to_string(min) + ", " + std::to_string(max) +
                               (max_closed ? "]" : ")");
             LOG_SERVER_ERROR_ << msg;
             return Status(SERVER_INVALID_ARGUMENT, msg);
@@ -60,7 +62,8 @@ CheckParameterRange(const milvus::json& json_params,
 }
 
 Status
-CheckParameterExistence(const milvus::json& json_params, const std::string& param_name) {
+CheckParameterExistence(const milvus::json& json_params,
+                        const std::string& param_name) {
     if (json_params.find(param_name) == json_params.end()) {
         std::string msg = "Parameter list must contain: ";
         msg += param_name;
@@ -71,7 +74,8 @@ CheckParameterExistence(const milvus::json& json_params, const std::string& para
     try {
         int64_t value = json_params[param_name];
         if (value < 0) {
-            std::string msg = "Invalid " + param_name + " value: " + std::to_string(value);
+            std::string msg =
+                "Invalid " + param_name + " value: " + std::to_string(value);
             LOG_SERVER_ERROR_ << msg;
             return Status(SERVER_INVALID_ARGUMENT, msg);
         }
@@ -96,11 +100,13 @@ ValidateCollectionName(const std::string& collection_name) {
         return Status(SERVER_INVALID_COLLECTION_NAME, msg);
     }
 
-    std::string invalid_msg = "Invalid collection name: " + collection_name + ". ";
+    std::string invalid_msg =
+        "Invalid collection name: " + collection_name + ". ";
     // Collection name size shouldn't exceed engine::MAX_NAME_LENGTH.
     if (collection_name.size() > engine::MAX_NAME_LENGTH) {
-        std::string msg = invalid_msg + "The length of a collection name must be less than " +
-                          std::to_string(engine::MAX_NAME_LENGTH) + " characters.";
+        std::string msg =
+            invalid_msg + "The length of a collection name must be less than " +
+            std::to_string(engine::MAX_NAME_LENGTH) + " characters.";
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_COLLECTION_NAME, msg);
     }
@@ -108,7 +114,9 @@ ValidateCollectionName(const std::string& collection_name) {
     // Collection name first character should be underscore or character.
     char first_char = collection_name[0];
     if (first_char != '_' && std::isalpha(first_char) == 0) {
-        std::string msg = invalid_msg + "The first character of a collection name must be an underscore or letter.";
+        std::string msg = invalid_msg +
+                          "The first character of a collection name must be an "
+                          "underscore or letter.";
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_COLLECTION_NAME, msg);
     }
@@ -116,8 +124,11 @@ ValidateCollectionName(const std::string& collection_name) {
     int64_t table_name_size = collection_name.size();
     for (int64_t i = 1; i < table_name_size; ++i) {
         char name_char = collection_name[i];
-        if (name_char != '_' && name_char != '$' && std::isalnum(name_char) == 0) {
-            std::string msg = invalid_msg + "Collection name can only contain numbers, letters, and underscores.";
+        if (name_char != '_' && name_char != '$' &&
+            std::isalnum(name_char) == 0) {
+            std::string msg = invalid_msg +
+                              "Collection name can only contain numbers, "
+                              "letters, and underscores.";
             LOG_SERVER_ERROR_ << msg;
             return Status(SERVER_INVALID_COLLECTION_NAME, msg);
         }
@@ -138,8 +149,9 @@ ValidateFieldName(const std::string& field_name) {
     std::string invalid_msg = "Invalid field name: " + field_name + ". ";
     // Field name size shouldn't exceed engine::MAX_NAME_LENGTH.
     if (field_name.size() > engine::MAX_NAME_LENGTH) {
-        std::string msg = invalid_msg + "The length of a field name must be less than " +
-                          std::to_string(engine::MAX_NAME_LENGTH) + " characters.";
+        std::string msg =
+            invalid_msg + "The length of a field name must be less than " +
+            std::to_string(engine::MAX_NAME_LENGTH) + " characters.";
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_FIELD_NAME, msg);
     }
@@ -147,7 +159,9 @@ ValidateFieldName(const std::string& field_name) {
     // Field name first character should be underscore or character.
     char first_char = field_name[0];
     if (first_char != '_' && std::isalpha(first_char) == 0) {
-        std::string msg = invalid_msg + "The first character of a field name must be an underscore or letter.";
+        std::string msg = invalid_msg +
+                          "The first character of a field name must be an "
+                          "underscore or letter.";
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_FIELD_NAME, msg);
     }
@@ -156,7 +170,9 @@ ValidateFieldName(const std::string& field_name) {
     for (int64_t i = 1; i < field_name_size; ++i) {
         char name_char = field_name[i];
         if (name_char != '_' && std::isalnum(name_char) == 0) {
-            std::string msg = invalid_msg + "Field name cannot only contain numbers, letters, and underscores.";
+            std::string msg = invalid_msg +
+                              "Field name cannot only contain numbers, "
+                              "letters, and underscores.";
             LOG_SERVER_ERROR_ << msg;
             return Status(SERVER_INVALID_FIELD_NAME, msg);
         }
@@ -175,7 +191,8 @@ ValidateVectorIndexType(std::string& index_type, bool is_binary) {
     }
 
     // string case insensitive
-    std::transform(index_type.begin(), index_type.end(), index_type.begin(), ::toupper);
+    std::transform(
+        index_type.begin(), index_type.end(), index_type.begin(), ::toupper);
 
     static std::set<std::string> s_vector_index_type = {
         knowhere::IndexEnum::INVALID,
@@ -192,7 +209,8 @@ ValidateVectorIndexType(std::string& index_type, bool is_binary) {
         knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT,
     };
 
-    std::set<std::string>& index_types = is_binary ? s_binary_index_types : s_vector_index_type;
+    std::set<std::string>& index_types =
+        is_binary ? s_binary_index_types : s_vector_index_type;
     if (index_types.find(index_type) == index_types.end()) {
         std::string msg = "Invalid index type: " + index_type;
         LOG_SERVER_ERROR_ << msg;
@@ -212,7 +230,8 @@ ValidateStructuredIndexType(std::string& index_type) {
     }
 
     // string case insensitive
-    std::transform(index_type.begin(), index_type.end(), index_type.begin(), ::toupper);
+    std::transform(
+        index_type.begin(), index_type.end(), index_type.begin(), ::toupper);
 
     static std::set<std::string> s_index_types = {
         engine::DEFAULT_STRUCTURED_INDEX,
@@ -230,14 +249,16 @@ ValidateStructuredIndexType(std::string& index_type) {
 Status
 ValidateDimension(int64_t dim, bool is_binary) {
     if (dim <= 0 || dim > engine::MAX_DIMENSION) {
-        std::string msg = "Invalid dimension: " + std::to_string(dim) + ". Should be in range 1 ~ " +
+        std::string msg = "Invalid dimension: " + std::to_string(dim) +
+                          ". Should be in range 1 ~ " +
                           std::to_string(engine::MAX_DIMENSION) + ".";
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_VECTOR_DIMENSION, msg);
     }
 
     if (is_binary && (dim % 8) != 0) {
-        std::string msg = "Invalid dimension: " + std::to_string(dim) + ". Should be multiple of 8.";
+        std::string msg = "Invalid dimension: " + std::to_string(dim) +
+                          ". Should be multiple of 8.";
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_VECTOR_DIMENSION, msg);
     }
@@ -246,30 +267,36 @@ ValidateDimension(int64_t dim, bool is_binary) {
 }
 
 Status
-ValidateIndexParams(const milvus::json& index_params, int64_t dimension, const std::string& index_type) {
+ValidateIndexParams(const milvus::json& index_params,
+                    int64_t dimension,
+                    const std::string& index_type) {
     if (engine::utils::IsFlatIndexType(index_type)) {
         return Status::OK();
     } else if (index_type == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT ||
                index_type == knowhere::IndexEnum::INDEX_FAISS_IVFSQ8 ||
                index_type == knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT) {
-        auto status = CheckParameterRange(index_params, knowhere::IndexParams::nlist, 1, 65536);
+        auto status = CheckParameterRange(
+            index_params, knowhere::IndexParams::nlist, 1, 65536);
         if (!status.ok()) {
             return status;
         }
     } else if (index_type == knowhere::IndexEnum::INDEX_FAISS_IVFPQ) {
-        auto status = CheckParameterRange(index_params, knowhere::IndexParams::nlist, 1, 65536);
+        auto status = CheckParameterRange(
+            index_params, knowhere::IndexParams::nlist, 1, 65536);
         if (!status.ok()) {
             return status;
         }
 
-        status = CheckParameterExistence(index_params, knowhere::IndexParams::m);
+        status =
+            CheckParameterExistence(index_params, knowhere::IndexParams::m);
         if (!status.ok()) {
             return status;
         }
 
         // special check for 'm' parameter
         int64_t m_value = index_params[knowhere::IndexParams::m];
-        if (!milvus::knowhere::IVFPQConfAdapter::GetValidCPUM(dimension, m_value)) {
+        if (!milvus::knowhere::IVFPQConfAdapter::GetValidCPUM(dimension,
+                                                              m_value)) {
             std::string msg = "Invalid m, dimension can't not be divided by m ";
             LOG_SERVER_ERROR_ << msg;
             return Status(SERVER_INVALID_ARGUMENT, msg);
@@ -298,16 +325,19 @@ ValidateIndexParams(const milvus::json& index_params, int64_t dimension, const s
             return Status(SERVER_INVALID_ARGUMENT, msg);
         }*/
     } else if (index_type == knowhere::IndexEnum::INDEX_HNSW) {
-        auto status = CheckParameterRange(index_params, knowhere::IndexParams::M, 4, 64);
+        auto status =
+            CheckParameterRange(index_params, knowhere::IndexParams::M, 4, 64);
         if (!status.ok()) {
             return status;
         }
-        status = CheckParameterRange(index_params, knowhere::IndexParams::efConstruction, 8, 512);
+        status = CheckParameterRange(
+            index_params, knowhere::IndexParams::efConstruction, 8, 512);
         if (!status.ok()) {
             return status;
         }
     } else if (index_type == knowhere::IndexEnum::INDEX_ANNOY) {
-        auto status = CheckParameterRange(index_params, knowhere::IndexParams::n_trees, 1, 1024);
+        auto status = CheckParameterRange(
+            index_params, knowhere::IndexParams::n_trees, 1, 1024);
         if (!status.ok()) {
             return status;
         }
@@ -321,8 +351,10 @@ ValidateSegmentRowCount(int64_t segment_row_count) {
     int64_t min = config.engine.build_index_threshold();
     int max = engine::MAX_SEGMENT_ROW_COUNT;
     if (segment_row_count < min || segment_row_count > max) {
-        std::string msg = "Invalid segment row count: " + std::to_string(segment_row_count) + ". " +
-                          "Should be in range " + std::to_string(min) + " ~ " + std::to_string(max) + ".";
+        std::string msg =
+            "Invalid segment row count: " + std::to_string(segment_row_count) +
+            ". " + "Should be in range " + std::to_string(min) + " ~ " +
+            std::to_string(max) + ".";
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_SEGMENT_ROW_COUNT, msg);
     }
@@ -330,21 +362,26 @@ ValidateSegmentRowCount(int64_t segment_row_count) {
 }
 
 Status
-ValidateIndexMetricType(const std::string& metric_type, const std::string& index_type) {
+ValidateIndexMetricType(const std::string& metric_type,
+                        const std::string& index_type) {
     if (engine::utils::IsFlatIndexType(index_type)) {
         // pass
     } else if (index_type == knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT) {
         // binary
-        if (metric_type != knowhere::Metric::HAMMING && metric_type != knowhere::Metric::JACCARD &&
+        if (metric_type != knowhere::Metric::HAMMING &&
+            metric_type != knowhere::Metric::JACCARD &&
             metric_type != knowhere::Metric::TANIMOTO) {
-            std::string msg = "Index metric type " + metric_type + " does not match index type " + index_type;
+            std::string msg = "Index metric type " + metric_type +
+                              " does not match index type " + index_type;
             LOG_SERVER_ERROR_ << msg;
             return Status(SERVER_INVALID_ARGUMENT, msg);
         }
     } else {
         // float
-        if (metric_type != knowhere::Metric::L2 && metric_type != knowhere::Metric::IP) {
-            std::string msg = "Index metric type " + metric_type + " does not match index type " + index_type;
+        if (metric_type != knowhere::Metric::L2 &&
+            metric_type != knowhere::Metric::IP) {
+            std::string msg = "Index metric type " + metric_type +
+                              " does not match index type " + index_type;
             LOG_SERVER_ERROR_ << msg;
             return Status(SERVER_INVALID_ARGUMENT, msg);
         }
@@ -357,16 +394,22 @@ Status
 ValidateSearchMetricType(const std::string& metric_type, bool is_binary) {
     if (is_binary) {
         // binary
-        if (metric_type == knowhere::Metric::L2 || metric_type == knowhere::Metric::IP) {
-            std::string msg = "Cannot search binary entities with index metric type " + metric_type;
+        if (metric_type == knowhere::Metric::L2 ||
+            metric_type == knowhere::Metric::IP) {
+            std::string msg =
+                "Cannot search binary entities with index metric type " +
+                metric_type;
             LOG_SERVER_ERROR_ << msg;
             return Status(SERVER_INVALID_ARGUMENT, msg);
         }
     } else {
         // float
-        if (metric_type == knowhere::Metric::HAMMING || metric_type == knowhere::Metric::JACCARD ||
+        if (metric_type == knowhere::Metric::HAMMING ||
+            metric_type == knowhere::Metric::JACCARD ||
             metric_type == knowhere::Metric::TANIMOTO) {
-            std::string msg = "Cannot search float entities with index metric type " + metric_type;
+            std::string msg =
+                "Cannot search float entities with index metric type " +
+                metric_type;
             LOG_SERVER_ERROR_ << msg;
             return Status(SERVER_INVALID_ARGUMENT, msg);
         }
@@ -378,8 +421,8 @@ ValidateSearchMetricType(const std::string& metric_type, bool is_binary) {
 Status
 ValidateSearchTopk(int64_t top_k) {
     if (top_k <= 0 || top_k > QUERY_MAX_TOPK) {
-        std::string msg =
-            "Invalid topk: " + std::to_string(top_k) + ". " + "The topk must be within the range of 1 ~ 16384.";
+        std::string msg = "Invalid topk: " + std::to_string(top_k) + ". " +
+                          "The topk must be within the range of 1 ~ 16384.";
         LOG_SERVER_ERROR_ << msg;
         return Status(SERVER_INVALID_TOPK, msg);
     }
@@ -400,7 +443,9 @@ ValidatePartitionTags(const std::vector<std::string>& partition_tags) {
         std::string invalid_msg = "Invalid partition tag: " + tag + ". ";
         // Partition tag size shouldn't exceed 255.
         if (tag.size() > engine::MAX_NAME_LENGTH) {
-            std::string msg = invalid_msg + "The length of a partition tag must be less than 255 characters.";
+            std::string msg = invalid_msg +
+                              "The length of a partition tag must be less than "
+                              "255 characters.";
             LOG_SERVER_ERROR_ << msg;
             return Status(SERVER_INVALID_PARTITION_TAG, msg);
         }
@@ -408,7 +453,9 @@ ValidatePartitionTags(const std::vector<std::string>& partition_tags) {
         // Partition tag first character should be underscore or character.
         char first_char = tag[0];
         if (first_char != '_' && std::isalnum(first_char) == 0) {
-            std::string msg = invalid_msg + "The first character of a partition tag must be an underscore or letter.";
+            std::string msg = invalid_msg +
+                              "The first character of a partition tag must be "
+                              "an underscore or letter.";
             LOG_SERVER_ERROR_ << msg;
             return Status(SERVER_INVALID_PARTITION_TAG, msg);
         }
@@ -416,8 +463,11 @@ ValidatePartitionTags(const std::vector<std::string>& partition_tags) {
         int64_t tag_size = tag.size();
         for (int64_t i = 1; i < tag_size; ++i) {
             char name_char = tag[i];
-            if (name_char != '_' && name_char != '$' && std::isalnum(name_char) == 0) {
-                std::string msg = invalid_msg + "Partition tag can only contain numbers, letters, and underscores.";
+            if (name_char != '_' && name_char != '$' &&
+                std::isalnum(name_char) == 0) {
+                std::string msg = invalid_msg +
+                                  "Partition tag can only contain numbers, "
+                                  "letters, and underscores.";
                 LOG_SERVER_ERROR_ << msg;
                 return Status(SERVER_INVALID_PARTITION_TAG, msg);
             }
@@ -457,8 +507,9 @@ ValidateInsertDataSize(const InsertParam& insert_param) {
     }
 
     if (chunk_size > engine::MAX_INSERT_DATA_SIZE) {
-        std::string msg = "The amount of data inserted each time cannot exceed " +
-                          std::to_string(engine::MAX_INSERT_DATA_SIZE / engine::MB) + " MB";
+        std::string msg =
+            "The amount of data inserted each time cannot exceed " +
+            std::to_string(engine::MAX_INSERT_DATA_SIZE / engine::MB) + " MB";
         return Status(SERVER_INVALID_ROWRECORD_ARRAY, msg);
     }
 
@@ -468,7 +519,9 @@ ValidateInsertDataSize(const InsertParam& insert_param) {
 Status
 ValidateCompactThreshold(double threshold) {
     if (threshold > 1.0 || threshold < 0.0) {
-        std::string msg = "Invalid compact threshold: " + std::to_string(threshold) + ". Should be in range [0.0, 1.0]";
+        std::string msg =
+            "Invalid compact threshold: " + std::to_string(threshold) +
+            ". Should be in range [0.0, 1.0]";
         return Status(SERVER_INVALID_ROWRECORD_ARRAY, msg);
     }
 

@@ -73,7 +73,10 @@ class ChunkManager {
      * @return uint64_t
      */
     virtual uint64_t
-    Read(const std::string& filepath, uint64_t offset, void* buf, uint64_t len) = 0;
+    Read(const std::string& filepath,
+         uint64_t offset,
+         void* buf,
+         uint64_t len) = 0;
 
     /**
      * @brief Write buffer to file with offset
@@ -82,7 +85,10 @@ class ChunkManager {
      * @param len
      */
     virtual void
-    Write(const std::string& filepath, uint64_t offset, void* buf, uint64_t len) = 0;
+    Write(const std::string& filepath,
+          uint64_t offset,
+          void* buf,
+          uint64_t len) = 0;
 
     /**
      * @brief List files with same prefix

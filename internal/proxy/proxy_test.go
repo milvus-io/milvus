@@ -3333,6 +3333,21 @@ func TestProxy(t *testing.T) {
 		}
 	}
 
+	constructPartitionReqUpsertRequestInvalid := func() *milvuspb.UpsertRequest {
+		pkFieldData := newScalarFieldData(schema.Fields[0], int64Field, rowNum)
+		fVecColumn := newFloatVectorFieldData(floatVecField, rowNum, dim)
+		hashKeys := generateHashKeys(rowNum)
+		return &milvuspb.UpsertRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+			PartitionName:  "%$@",
+			FieldsData:     []*schemapb.FieldData{pkFieldData, fVecColumn},
+			HashKeys:       hashKeys,
+			NumRows:        uint32(rowNum),
+		}
+	}
+
 	constructCollectionUpsertRequestValid := func() *milvuspb.UpsertRequest {
 		pkFieldData := newScalarFieldData(schema.Fields[0], int64Field, rowNum)
 		fVecColumn := newFloatVectorFieldData(floatVecField, rowNum, dim)
@@ -3407,6 +3422,19 @@ func TestProxy(t *testing.T) {
 		assert.Equal(t, rowNum, len(resp.SuccIndex))
 		assert.Equal(t, 0, len(resp.ErrIndex))
 		assert.Equal(t, int64(rowNum), resp.UpsertCnt)
+	})
+
+	wg.Add(1)
+	t.Run("upsert when occurs unexpected error like illegal partition name", func(t *testing.T) {
+		defer wg.Done()
+		req := constructPartitionReqUpsertRequestInvalid()
+
+		resp, err := proxy.Upsert(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+		assert.Equal(t, 0, len(resp.SuccIndex))
+		assert.Equal(t, rowNum, len(resp.ErrIndex))
+		assert.Equal(t, int64(0), resp.UpsertCnt)
 	})
 
 	wg.Add(1)

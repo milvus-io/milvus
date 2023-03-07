@@ -55,10 +55,29 @@ services:
       MINIO_ADDRESS: minio:9000
       PULSAR_ADDRESS: pulsar://pulsar:6650
       ROOT_COORD_ADDRESS: rootcoord:53100
+      # add ROOT_COORD_ENABLE_ACTIVE_STANDBY to enable active standby
+      ROOT_COORD_ENABLE_ACTIVE_STANDBY: true
     depends_on:
       - "etcd"
       - "pulsar"
       - "minio"
+
+  # enable active standby with rootcoord with multiple containers
+  #rootcoord-1:
+  #  container_name: milvus-rootcoord-1
+  #  image: milvusdb/milvus:v2.2.3
+  #  command: ["milvus", "run", "rootcoord"]
+  #  environment:
+  #    ETCD_ENDPOINTS: etcd:2379
+  #    MINIO_ADDRESS: minio:9000
+  #    PULSAR_ADDRESS: pulsar://pulsar:6650
+  #    ROOT_COORD_ADDRESS: rootcoord-1:53100
+  #    # add ROOT_COORD_ENABLE_ACTIVE_STANDBY to enable active standby
+  #    ROOT_COORD_ENABLE_ACTIVE_STANDBY: true
+  #  depends_on:
+  #    - "etcd"
+  #    - "pulsar"
+  #    - "minio"
 
   proxy:
     container_name: milvus-proxy
@@ -81,10 +100,28 @@ services:
       MINIO_ADDRESS: minio:9000
       PULSAR_ADDRESS: pulsar://pulsar:6650
       QUERY_COORD_ADDRESS: querycoord:19531
+      # add QUERY_COORD_ENABLE_ACTIVE_STANDBY to enable active standby
+      QUERY_COORD_ENABLE_ACTIVE_STANDBY: true
     depends_on:
       - "etcd"
       - "pulsar"
       - "minio"
+
+  # enable active standby with querycoord with multiple containers
+  #querycoord-1:
+  #  container_name: milvus-querycoord-1
+  #  image: milvusdb/milvus:v2.2.3
+  #  command: ["milvus", "run", "querycoord"]
+  #  environment:
+  #    ETCD_ENDPOINTS: etcd:2379
+  #    MINIO_ADDRESS: minio:9000
+  #    PULSAR_ADDRESS: pulsar://pulsar:6650
+  #    QUERY_COORD_ADDRESS: querycoord-1:19531
+  #    QUERY_COORD_ENABLE_ACTIVE_STANDBY: true
+  #  depends_on:
+  #    - "etcd"
+  #    - "pulsar"
+  #    - "minio"
 
   querynode:
     container_name: milvus-querynode
@@ -106,10 +143,28 @@ services:
       MINIO_ADDRESS: minio:9000
       PULSAR_ADDRESS: pulsar://pulsar:6650
       INDEX_COORD_ADDRESS: indexcoord:31000
+      # add INDEX_COORD_ENABLE_ACTIVE_STANDBY to enable active standby
+      INDEX_COORD_ENABLE_ACTIVE_STANDBY: true
     depends_on:
       - "etcd"
       - "pulsar"
       - "minio"
+
+  # enable active standby with indexcoord with multiple containers
+  #indexcoord-1:
+  #  container_name: milvus-indexcoord-1
+  #  image: milvusdb/milvus:v2.2.3
+  #  command: ["milvus", "run", "indexcoord"]
+  #  environment:
+  #    ETCD_ENDPOINTS: etcd:2379
+  #    MINIO_ADDRESS: minio:9000
+  #    PULSAR_ADDRESS: pulsar://pulsar:6650
+  #    INDEX_COORD_ADDRESS: indexcoord-1:31000
+  #    INDEX_COORD_ENABLE_ACTIVE_STANDBY: true
+  #  depends_on:
+  #    - "etcd"
+  #    - "pulsar"
+  #    - "minio"
 
   indexnode:
     container_name: milvus-indexnode
@@ -132,10 +187,28 @@ services:
       MINIO_ADDRESS: minio:9000
       PULSAR_ADDRESS: pulsar://pulsar:6650
       DATA_COORD_ADDRESS: datacoord:13333
+      # add DATA_COORD_ENABLE_ACTIVE_STANDBY to enable active standby
+      DATA_COORD_ENABLE_ACTIVE_STANDBY: true
     depends_on:
       - "etcd"
       - "pulsar"
       - "minio"
+
+  # enable active standby with indexcoord with multiple containers
+  #datacoord-1:
+  #  container_name: milvus-datacoord-1
+  #  image: milvusdb/milvus:v2.2.3
+  #  command: ["milvus", "run", "datacoord"]
+  #  environment:
+  #    ETCD_ENDPOINTS: etcd:2379
+  #    MINIO_ADDRESS: minio:9000
+  #    PULSAR_ADDRESS: pulsar://pulsar:6650
+  #    DATA_COORD_ADDRESS: datacoord-1:13333
+  #    DATA_COORD_ENABLE_ACTIVE_STANDBY: true
+  #  depends_on:
+  #    - "etcd"
+  #    - "pulsar"
+  #    - "minio"
 
   datanode:
     container_name: milvus-datanode

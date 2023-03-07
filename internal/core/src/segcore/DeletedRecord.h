@@ -32,7 +32,9 @@ struct DeletedRecord {
     };
     static constexpr int64_t deprecated_size_per_chunk = 32 * 1024;
     DeletedRecord()
-        : lru_(std::make_shared<TmpBitmap>()), timestamps_(deprecated_size_per_chunk), pks_(deprecated_size_per_chunk) {
+        : lru_(std::make_shared<TmpBitmap>()),
+          timestamps_(deprecated_size_per_chunk),
+          pks_(deprecated_size_per_chunk) {
         lru_->bitmap_ptr = std::make_shared<BitsetType>();
     }
 
@@ -43,12 +45,16 @@ struct DeletedRecord {
     }
 
     std::shared_ptr<TmpBitmap>
-    clone_lru_entry(int64_t insert_barrier, int64_t del_barrier, int64_t& old_del_barrier, bool& hit_cache) {
+    clone_lru_entry(int64_t insert_barrier,
+                    int64_t del_barrier,
+                    int64_t& old_del_barrier,
+                    bool& hit_cache) {
         std::shared_lock lck(shared_mutex_);
         auto res = lru_->clone(insert_barrier);
         old_del_barrier = lru_->del_barrier;
 
-        if (lru_->bitmap_ptr->size() == insert_barrier && lru_->del_barrier == del_barrier) {
+        if (lru_->bitmap_ptr->size() == insert_barrier &&
+            lru_->del_barrier == del_barrier) {
             hit_cache = true;
         } else {
             res->del_barrier = del_barrier;
@@ -61,7 +67,8 @@ struct DeletedRecord {
     insert_lru_entry(std::shared_ptr<TmpBitmap> new_entry, bool force = false) {
         std::lock_guard lck(shared_mutex_);
         if (new_entry->del_barrier <= lru_->del_barrier) {
-            if (!force || new_entry->bitmap_ptr->size() <= lru_->bitmap_ptr->size()) {
+            if (!force ||
+                new_entry->bitmap_ptr->size() <= lru_->bitmap_ptr->size()) {
                 // DO NOTHING
                 return;
             }
@@ -81,7 +88,8 @@ struct DeletedRecord {
 };
 
 inline auto
-DeletedRecord::TmpBitmap::clone(int64_t capacity) -> std::shared_ptr<TmpBitmap> {
+DeletedRecord::TmpBitmap::clone(int64_t capacity)
+    -> std::shared_ptr<TmpBitmap> {
     auto res = std::make_shared<TmpBitmap>();
     res->del_barrier = this->del_barrier;
     res->bitmap_ptr = std::make_shared<BitsetType>();

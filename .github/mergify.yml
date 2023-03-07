@@ -3,6 +3,7 @@ pull_request_rules:
     conditions:
       - or:
         - base=master
+        - base=sql_beta
         - base~=^2(\.\d+){2}$
       - -status-success=DCO
     actions:
@@ -20,6 +21,7 @@ pull_request_rules:
       - or:
         - base=master
         - base~=^2(\.\d+){2}$
+        - base=sql_beta
       - status-success=DCO
     actions:
       label:
@@ -30,7 +32,9 @@ pull_request_rules:
 
   - name: Test passed for code changed-master
     conditions:
-      - base=master
+      - or:
+        - base=sql_beta
+        - base=master
       - "status-success=Code Checker AMD64 Ubuntu 20.04"
       - "status-success=Build and test AMD64 Ubuntu 20.04"
       - "status-success=Code Checker MacOS 12"
@@ -60,6 +64,7 @@ pull_request_rules:
     conditions:
       - or:
         - base=master
+        - base=sql_beta
         - base~=^2(\.\d+){2}$
       - -files~=^(?!tests\/python_client).+
       - "status-success=cpu-e2e"
@@ -72,6 +77,7 @@ pull_request_rules:
     conditions:
       - or:
         - base=master
+        - base=sql_beta
         - base~=^2(\.\d+){2}$
       - -files~=^(?!.*\.(md)).*$ 
     actions:
@@ -84,6 +90,7 @@ pull_request_rules:
     conditions:
       - or:
         - base=master
+        - base=sql_beta
         - base~=^2(\.\d+){2}$
       - -files~=^(?=.*((\.(go|h|cpp)|CMakeLists.txt|conanfile\.*))).*$
       - "status-success=cpu-e2e"
@@ -94,7 +101,9 @@ pull_request_rules:
 
   - name: Test passed for go unittest code changed-master
     conditions:
-      - base=master
+      - or:
+        - base=master
+        - base=sql_beta
       - "status-success=Code Checker AMD64 Ubuntu 20.04"
       - "status-success=Build and test AMD64 Ubuntu 20.04"
       - "status-success=Code Checker MacOS 12"
@@ -121,6 +130,7 @@ pull_request_rules:
     conditions:
       - or:
         - base=master
+        - base=sql_beta
         - base~=^2(\.\d+){2}$
       - -files~=^(?!\.github\/mergify\.yml).*$
     actions:
@@ -132,6 +142,7 @@ pull_request_rules:
     conditions:
       - or:
         - base=master
+        - base=sql_beta
         - base~=^2(\.\d+){2}$
       - title~=\[skip e2e\]
       - label=kind/improvement
@@ -146,6 +157,7 @@ pull_request_rules:
     conditions:
       - or:
         - base=master
+        - base=sql_beta
         - base~=^2(\.\d+){2}$
       - and:
         - -body~=\#[0-9]{1,6}(\s+|$)
@@ -167,6 +179,7 @@ pull_request_rules:
         - and:
           - or:
             - base=master
+            - base=sql_beta
             - base~=^2(\.\d+){2}$
           - or:
             - body~=\#[0-9]{1,6}(\s+|$)
@@ -174,6 +187,7 @@ pull_request_rules:
         - and:
           - or:
             - base=master
+            - base=sql_beta
             - base~=^2(\.\d+){2}$
           - label=kind/improvement
     actions:
@@ -185,6 +199,7 @@ pull_request_rules:
     conditions:
       - or:
         - base=master
+        - base=sql_beta
         - base~=^2(\.\d+){2}$
       - title~=\[automated\]
     actions:
@@ -194,7 +209,9 @@ pull_request_rules:
 
   - name: Test passed for skip e2e-master
     conditions:
-      - base=master
+      - or:
+        - base=master
+        - base=sql_beta
       - title~=\[skip e2e\]
       - "status-success=Code Checker AMD64 Ubuntu 20.04"
       - "status-success=Build and test AMD64 Ubuntu 20.04"
@@ -223,7 +240,9 @@ pull_request_rules:
   - name: Remove ci-passed label when status for code checker or ut  is not success-master
     conditions:
       - label!=manual-pass
-      - base=master
+      - or:
+        - base=master
+        - base=sql_beta
       - files~=^(?=.*((\.(go|h|cpp)|CMakeLists.txt))).*$
       - or:
         - "status-success!=Code Checker AMD64 Ubuntu 20.04"
@@ -253,6 +272,7 @@ pull_request_rules:
       - label!=manual-pass
       - or:
         - base=master
+        - base=sql_beta
         - base~=^2(\.\d+){2}$
       - -title~=\[skip e2e\]
       - files~=^(?!(internal\/.*_test\.go|.*\.md)).*$
@@ -267,6 +287,7 @@ pull_request_rules:
     conditions:
       - or:
         - base=master
+        - base=sql_beta
         - base~=^2(\.\d+){2}$
       - "check-failure=cpu-e2e"        
     actions:
@@ -276,7 +297,9 @@ pull_request_rules:
 
   - name: Add comment when code checker or ut failed -master
     conditions:
-      - base=master
+      - or:
+        - base=master
+        - base=sql_beta
       - or:
         - "check-failure=Code Checker AMD64 Ubuntu 20.04"
         - "check-failure=Build and test AMD64 Ubuntu 20.04"       
@@ -301,6 +324,7 @@ pull_request_rules:
     conditions:
       - or:
         - base=master
+        - base=sql_beta
         - base~=^2(\.\d+){2}$
       - "#commits>1"
     actions:
@@ -315,6 +339,7 @@ pull_request_rules:
     conditions:
       - or:
         - base=master
+        - base=sql_beta
         - base~=^2(\.\d+){2}$
       - "#commits=1"
     actions:

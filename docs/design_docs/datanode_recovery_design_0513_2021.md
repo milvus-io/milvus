@@ -67,7 +67,7 @@ message ID2PathList {
 
 message CheckPoint {
     int64 segmentID = 1;
-    internal.MsgPosition position = 2;
+    msgpb.MsgPosition position = 2;
     int64 num_of_rows = 3;
 }
 
@@ -97,7 +97,7 @@ Change `WatchDmChannelsRequest` proto.
 message VchannelInfo {
   int64 collectionID = 1;
   string channelName = 2;
-  internal.MsgPosition seek_position = 3;
+  msgpb.MsgPosition seek_position = 3;
   repeated SegmentInfo unflushedSegments = 4;
   repeated int64 flushedSegments = 5;
 }

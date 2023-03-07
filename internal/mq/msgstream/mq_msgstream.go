@@ -25,14 +25,13 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
@@ -393,8 +392,8 @@ func (ms *mqMsgStream) receiveMsg(consumer mqwrapper.Consumer) {
 
 			msgPack := MsgPack{
 				Msgs:           []TsMsg{tsMsg},
-				StartPositions: []*internalpb.MsgPosition{tsMsg.Position()},
-				EndPositions:   []*internalpb.MsgPosition{tsMsg.Position()},
+				StartPositions: []*msgpb.MsgPosition{tsMsg.Position()},
+				EndPositions:   []*msgpb.MsgPosition{tsMsg.Position()},
 			}
 			select {
 			case ms.receiveBuf <- &msgPack:
@@ -419,7 +418,7 @@ func (ms *mqMsgStream) Chan() <-chan *MsgPack {
 
 // Seek reset the subscription associated with this consumer to a specific position, the seek position is exclusive
 // User has to ensure mq_msgstream is not closed before seek, and the seek position is already written.
-func (ms *mqMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
+func (ms *mqMsgStream) Seek(msgPositions []*msgpb.MsgPosition) error {
 	for _, mp := range msgPositions {
 		consumer, ok := ms.consumers[mp.ChannelName]
 		if !ok {
@@ -447,7 +446,7 @@ var _ MsgStream = (*MqTtMsgStream)(nil)
 type MqTtMsgStream struct {
 	mqMsgStream
 	chanMsgBuf         map[mqwrapper.Consumer][]TsMsg
-	chanMsgPos         map[mqwrapper.Consumer]*internalpb.MsgPosition
+	chanMsgPos         map[mqwrapper.Consumer]*msgpb.MsgPosition
 	chanStopChan       map[mqwrapper.Consumer]chan bool
 	chanTtMsgTime      map[mqwrapper.Consumer]Timestamp
 	chanMsgBufMutex    *sync.Mutex
@@ -468,7 +467,7 @@ func NewMqTtMsgStream(ctx context.Context,
 		return nil, err
 	}
 	chanMsgBuf := make(map[mqwrapper.Consumer][]TsMsg)
-	chanMsgPos := make(map[mqwrapper.Consumer]*internalpb.MsgPosition)
+	chanMsgPos := make(map[mqwrapper.Consumer]*msgpb.MsgPosition)
 	chanStopChan := make(map[mqwrapper.Consumer]chan bool)
 	chanTtMsgTime := make(map[mqwrapper.Consumer]Timestamp)
 	syncConsumer := make(chan int, 1)
@@ -493,7 +492,7 @@ func (ms *MqTtMsgStream) addConsumer(consumer mqwrapper.Consumer, channel string
 	ms.consumers[channel] = consumer
 	ms.consumerChannels = append(ms.consumerChannels, channel)
 	ms.chanMsgBuf[consumer] = make([]TsMsg, 0)
-	ms.chanMsgPos[consumer] = &internalpb.MsgPosition{
+	ms.chanMsgPos[consumer] = &msgpb.MsgPosition{
 		ChannelName: channel,
 		MsgID:       make([]byte, 0),
 		Timestamp:   ms.lastTimeStamp,
@@ -584,8 +583,8 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 			}
 
 			timeTickBuf := make([]TsMsg, 0)
-			startMsgPosition := make([]*internalpb.MsgPosition, 0)
-			endMsgPositions := make([]*internalpb.MsgPosition, 0)
+			startMsgPosition := make([]*msgpb.MsgPosition, 0)
+			endMsgPositions := make([]*msgpb.MsgPosition, 0)
 			ms.chanMsgBufMutex.Lock()
 			for consumer, msgs := range ms.chanMsgBuf {
 				if len(msgs) == 0 {
@@ -607,11 +606,11 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 				}
 				ms.chanMsgBuf[consumer] = tempBuffer
 
-				startMsgPosition = append(startMsgPosition, proto.Clone(ms.chanMsgPos[consumer]).(*internalpb.MsgPosition))
-				var newPos *internalpb.MsgPosition
+				startMsgPosition = append(startMsgPosition, proto.Clone(ms.chanMsgPos[consumer]).(*msgpb.MsgPosition))
+				var newPos *msgpb.MsgPosition
 				if len(tempBuffer) > 0 {
 					// if tempBuffer is not empty, use tempBuffer[0] to seek
-					newPos = &internalpb.MsgPosition{
+					newPos = &msgpb.MsgPosition{
 						ChannelName: tempBuffer[0].Position().ChannelName,
 						MsgID:       tempBuffer[0].Position().MsgID,
 						Timestamp:   currTs,
@@ -620,7 +619,7 @@ func (ms *MqTtMsgStream) bufMsgPackToChannel() {
 					endMsgPositions = append(endMsgPositions, newPos)
 				} else if timeTickMsg != nil {
 					// if tempBuffer is empty, use timeTickMsg to seek
-					newPos = &internalpb.MsgPosition{
+					newPos = &msgpb.MsgPosition{
 						ChannelName: timeTickMsg.Position().ChannelName,
 						MsgID:       timeTickMsg.Position().MsgID,
 						Timestamp:   currTs,
@@ -737,7 +736,7 @@ func (ms *MqTtMsgStream) allChanReachSameTtMsg(chanTtMsgSync map[mqwrapper.Consu
 }
 
 // Seek to the specified position
-func (ms *MqTtMsgStream) Seek(msgPositions []*internalpb.MsgPosition) error {
+func (ms *MqTtMsgStream) Seek(msgPositions []*msgpb.MsgPosition) error {
 	var consumer mqwrapper.Consumer
 	var mp *MsgPosition
 	var err error

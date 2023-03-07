@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"runtime"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -234,6 +235,8 @@ func (it *indexBuildTask) LoadData(ctx context.Context) error {
 		log.Ctx(ctx).Info("Successfully load data", zap.Int64("buildID", it.BuildID),
 			zap.Int64("Collection", it.collectionID), zap.Int64("SegmentIf", it.segmentID))
 	}
+	blobs = nil
+	debug.FreeOSMemory()
 	return err
 }
 
@@ -295,6 +298,7 @@ func (it *indexBuildTask) BuildIndex(ctx context.Context) error {
 		indexBlobs,
 	)
 	if err != nil {
+		log.Warn("failed to serialize index", zap.Error(err))
 		return err
 	}
 	encodeIndexFileDur := it.tr.Record("index codec serialize done")

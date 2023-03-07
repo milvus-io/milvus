@@ -48,7 +48,9 @@ class SegmentInterface {
     FillTargetEntry(const query::Plan* plan, SearchResult& results) const = 0;
 
     virtual std::unique_ptr<SearchResult>
-    Search(const query::Plan* Plan, const query::PlaceholderGroup* placeholder_group, Timestamp timestamp) const = 0;
+    Search(const query::Plan* Plan,
+           const query::PlaceholderGroup* placeholder_group,
+           Timestamp timestamp) const = 0;
 
     virtual std::unique_ptr<proto::segcore::RetrieveResults>
     Retrieve(const query::RetrievePlan* Plan, Timestamp timestamp) const = 0;
@@ -73,13 +75,19 @@ class SegmentInterface {
     PreDelete(int64_t size) = 0;
 
     virtual Status
-    Delete(int64_t reserved_offset, int64_t size, const IdArray* pks, const Timestamp* timestamps) = 0;
+    Delete(int64_t reserved_offset,
+           int64_t size,
+           const IdArray* pks,
+           const Timestamp* timestamps) = 0;
 
     virtual void
     LoadDeletedRecord(const LoadDeletedRecordInfo& info) = 0;
 
     virtual int64_t
     get_segment_id() const = 0;
+
+    virtual SegmentType
+    type() const = 0;
 };
 
 // internal API for DSL calculation
@@ -109,13 +117,16 @@ class SegmentInternalInterface : public SegmentInterface {
            Timestamp timestamp) const override;
 
     void
-    FillPrimaryKeys(const query::Plan* plan, SearchResult& results) const override;
+    FillPrimaryKeys(const query::Plan* plan,
+                    SearchResult& results) const override;
 
     void
-    FillTargetEntry(const query::Plan* plan, SearchResult& results) const override;
+    FillTargetEntry(const query::Plan* plan,
+                    SearchResult& results) const override;
 
     std::unique_ptr<proto::segcore::RetrieveResults>
-    Retrieve(const query::RetrievePlan* plan, Timestamp timestamp) const override;
+    Retrieve(const query::RetrievePlan* plan,
+             Timestamp timestamp) const override;
 
     virtual bool
     HasIndex(FieldId field_id) const = 0;
@@ -139,7 +150,9 @@ class SegmentInternalInterface : public SegmentInterface {
                   SearchResult& output) const = 0;
 
     virtual void
-    mask_with_delete(BitsetType& bitset, int64_t ins_barrier, Timestamp timestamp) const = 0;
+    mask_with_delete(BitsetType& bitset,
+                     int64_t ins_barrier,
+                     Timestamp timestamp) const = 0;
 
     // count of chunk that has index available
     virtual int64_t
@@ -150,7 +163,8 @@ class SegmentInternalInterface : public SegmentInterface {
     num_chunk_data(FieldId field_id) const = 0;
 
     virtual void
-    mask_with_timestamps(BitsetType& bitset_chunk, Timestamp timestamp) const = 0;
+    mask_with_timestamps(BitsetType& bitset_chunk,
+                         Timestamp timestamp) const = 0;
 
     // count of chunks
     virtual int64_t
@@ -183,11 +197,16 @@ class SegmentInternalInterface : public SegmentInterface {
 
     // calculate output[i] = Vec[seg_offsets[i]}, where Vec binds to system_type
     virtual void
-    bulk_subscript(SystemFieldType system_type, const int64_t* seg_offsets, int64_t count, void* output) const = 0;
+    bulk_subscript(SystemFieldType system_type,
+                   const int64_t* seg_offsets,
+                   int64_t count,
+                   void* output) const = 0;
 
     // calculate output[i] = Vec[seg_offsets[i]}, where Vec binds to field_offset
     virtual std::unique_ptr<DataArray>
-    bulk_subscript(FieldId field_id, const int64_t* seg_offsets, int64_t count) const = 0;
+    bulk_subscript(FieldId field_id,
+                   const int64_t* seg_offsets,
+                   int64_t count) const = 0;
 
     virtual void
     check_search(const query::Plan* plan) const = 0;

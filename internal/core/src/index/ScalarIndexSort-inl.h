@@ -32,7 +32,8 @@ inline ScalarIndexSort<T>::ScalarIndexSort() : is_built_(false), data_() {
 }
 
 template <typename T>
-inline ScalarIndexSort<T>::ScalarIndexSort(const size_t n, const T* values) : is_built_(false) {
+inline ScalarIndexSort<T>::ScalarIndexSort(const size_t n, const T* values)
+    : is_built_(false) {
     ScalarIndexSort<T>::BuildWithDataset(n, values);
 }
 
@@ -43,7 +44,8 @@ ScalarIndexSort<T>::Build(const size_t n, const T* values) {
         return;
     if (n == 0) {
         // todo: throw an exception
-        throw std::invalid_argument("ScalarIndexSort cannot build null values!");
+        throw std::invalid_argument(
+            "ScalarIndexSort cannot build null values!");
     }
     data_.reserve(n);
     idx_to_offsets_.resize(n);
@@ -104,12 +106,15 @@ ScalarIndexSort<T>::In(const size_t n, const T* values) {
     AssertInfo(is_built_, "index has not been built");
     TargetBitmapPtr bitset = std::make_unique<TargetBitmap>(data_.size());
     for (size_t i = 0; i < n; ++i) {
-        auto lb = std::lower_bound(data_.begin(), data_.end(), IndexStructure<T>(*(values + i)));
-        auto ub = std::upper_bound(data_.begin(), data_.end(), IndexStructure<T>(*(values + i)));
+        auto lb = std::lower_bound(
+            data_.begin(), data_.end(), IndexStructure<T>(*(values + i)));
+        auto ub = std::upper_bound(
+            data_.begin(), data_.end(), IndexStructure<T>(*(values + i)));
         for (; lb < ub; ++lb) {
             if (lb->a_ != *(values + i)) {
-                std::cout << "error happens in ScalarIndexSort<T>::In, experted value is: " << *(values + i)
-                          << ", but real value is: " << lb->a_;
+                std::cout << "error happens in ScalarIndexSort<T>::In, "
+                             "experted value is: "
+                          << *(values + i) << ", but real value is: " << lb->a_;
             }
             bitset->set(lb->idx_);
         }
@@ -124,12 +129,15 @@ ScalarIndexSort<T>::NotIn(const size_t n, const T* values) {
     TargetBitmapPtr bitset = std::make_unique<TargetBitmap>(data_.size());
     bitset->set();
     for (size_t i = 0; i < n; ++i) {
-        auto lb = std::lower_bound(data_.begin(), data_.end(), IndexStructure<T>(*(values + i)));
-        auto ub = std::upper_bound(data_.begin(), data_.end(), IndexStructure<T>(*(values + i)));
+        auto lb = std::lower_bound(
+            data_.begin(), data_.end(), IndexStructure<T>(*(values + i)));
+        auto ub = std::upper_bound(
+            data_.begin(), data_.end(), IndexStructure<T>(*(values + i)));
         for (; lb < ub; ++lb) {
             if (lb->a_ != *(values + i)) {
-                std::cout << "error happens in ScalarIndexSort<T>::NotIn, experted value is: " << *(values + i)
-                          << ", but real value is: " << lb->a_;
+                std::cout << "error happens in ScalarIndexSort<T>::NotIn, "
+                             "experted value is: "
+                          << *(values + i) << ", but real value is: " << lb->a_;
             }
             bitset->reset(lb->idx_);
         }
@@ -146,19 +154,24 @@ ScalarIndexSort<T>::Range(const T value, const OpType op) {
     auto ub = data_.end();
     switch (op) {
         case OpType::LessThan:
-            ub = std::lower_bound(data_.begin(), data_.end(), IndexStructure<T>(value));
+            ub = std::lower_bound(
+                data_.begin(), data_.end(), IndexStructure<T>(value));
             break;
         case OpType::LessEqual:
-            ub = std::upper_bound(data_.begin(), data_.end(), IndexStructure<T>(value));
+            ub = std::upper_bound(
+                data_.begin(), data_.end(), IndexStructure<T>(value));
             break;
         case OpType::GreaterThan:
-            lb = std::upper_bound(data_.begin(), data_.end(), IndexStructure<T>(value));
+            lb = std::upper_bound(
+                data_.begin(), data_.end(), IndexStructure<T>(value));
             break;
         case OpType::GreaterEqual:
-            lb = std::lower_bound(data_.begin(), data_.end(), IndexStructure<T>(value));
+            lb = std::lower_bound(
+                data_.begin(), data_.end(), IndexStructure<T>(value));
             break;
         default:
-            throw std::invalid_argument(std::string("Invalid OperatorType: ") + std::to_string((int)op) + "!");
+            throw std::invalid_argument(std::string("Invalid OperatorType: ") +
+                                        std::to_string((int)op) + "!");
     }
     for (; lb < ub; ++lb) {
         bitset->set(lb->idx_);
@@ -168,24 +181,32 @@ ScalarIndexSort<T>::Range(const T value, const OpType op) {
 
 template <typename T>
 inline const TargetBitmapPtr
-ScalarIndexSort<T>::Range(T lower_bound_value, bool lb_inclusive, T upper_bound_value, bool ub_inclusive) {
+ScalarIndexSort<T>::Range(T lower_bound_value,
+                          bool lb_inclusive,
+                          T upper_bound_value,
+                          bool ub_inclusive) {
     AssertInfo(is_built_, "index has not been built");
     TargetBitmapPtr bitset = std::make_unique<TargetBitmap>(data_.size());
     if (lower_bound_value > upper_bound_value ||
-        (lower_bound_value == upper_bound_value && !(lb_inclusive && ub_inclusive))) {
+        (lower_bound_value == upper_bound_value &&
+         !(lb_inclusive && ub_inclusive))) {
         return bitset;
     }
     auto lb = data_.begin();
     auto ub = data_.end();
     if (lb_inclusive) {
-        lb = std::lower_bound(data_.begin(), data_.end(), IndexStructure<T>(lower_bound_value));
+        lb = std::lower_bound(
+            data_.begin(), data_.end(), IndexStructure<T>(lower_bound_value));
     } else {
-        lb = std::upper_bound(data_.begin(), data_.end(), IndexStructure<T>(lower_bound_value));
+        lb = std::upper_bound(
+            data_.begin(), data_.end(), IndexStructure<T>(lower_bound_value));
     }
     if (ub_inclusive) {
-        ub = std::upper_bound(data_.begin(), data_.end(), IndexStructure<T>(upper_bound_value));
+        ub = std::upper_bound(
+            data_.begin(), data_.end(), IndexStructure<T>(upper_bound_value));
     } else {
-        ub = std::lower_bound(data_.begin(), data_.end(), IndexStructure<T>(upper_bound_value));
+        ub = std::lower_bound(
+            data_.begin(), data_.end(), IndexStructure<T>(upper_bound_value));
     }
     for (; lb < ub; ++lb) {
         bitset->set(lb->idx_);

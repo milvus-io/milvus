@@ -34,10 +34,13 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
     ExecPlanNodeVisitor(const segcore::SegmentInterface& segment,
                         Timestamp timestamp,
                         const PlaceholderGroup* placeholder_group)
-        : segment_(segment), timestamp_(timestamp), placeholder_group_(placeholder_group) {
+        : segment_(segment),
+          timestamp_(timestamp),
+          placeholder_group_(placeholder_group) {
     }
 
-    ExecPlanNodeVisitor(const segcore::SegmentInterface& segment, Timestamp timestamp)
+    ExecPlanNodeVisitor(const segcore::SegmentInterface& segment,
+                        Timestamp timestamp)
         : segment_(segment), timestamp_(timestamp) {
         placeholder_group_ = nullptr;
     }

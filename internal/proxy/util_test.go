@@ -25,13 +25,13 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"google.golang.org/grpc/metadata"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -1014,7 +1014,7 @@ func Test_InsertTaskCheckLengthOfFieldsData(t *testing.T) {
 			Fields:      []*schemapb.FieldSchema{},
 		},
 		insertMsg: &BaseInsertTask{
-			InsertRequest: internalpb.InsertRequest{
+			InsertRequest: msgpb.InsertRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_Insert,
 				},
@@ -1046,7 +1046,7 @@ func Test_InsertTaskCheckLengthOfFieldsData(t *testing.T) {
 			},
 		},
 		insertMsg: &BaseInsertTask{
-			InsertRequest: internalpb.InsertRequest{
+			InsertRequest: msgpb.InsertRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_Insert,
 				},
@@ -1055,7 +1055,7 @@ func Test_InsertTaskCheckLengthOfFieldsData(t *testing.T) {
 	}
 	// passed fields is empty
 	// case2.BaseInsertTask = BaseInsertTask{
-	// 	InsertRequest: internalpb.insertRequest{
+	// 	InsertRequest: msgpb.InsertRequest{
 	// 		Base: &commonpb.MsgBase{
 	// 			MsgType:  commonpb.MsgType_Insert,
 	// 			MsgID:    0,
@@ -1103,7 +1103,7 @@ func Test_InsertTaskCheckLengthOfFieldsData(t *testing.T) {
 			},
 		},
 		insertMsg: &BaseInsertTask{
-			InsertRequest: internalpb.InsertRequest{
+			InsertRequest: msgpb.InsertRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_Insert,
 				},
@@ -1137,7 +1137,7 @@ func Test_InsertTaskCheckLengthOfFieldsData(t *testing.T) {
 			},
 		},
 		insertMsg: &BaseInsertTask{
-			InsertRequest: internalpb.InsertRequest{
+			InsertRequest: msgpb.InsertRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_Insert,
 				},
@@ -1162,7 +1162,7 @@ func Test_InsertTaskCheckPrimaryFieldData(t *testing.T) {
 			Fields:      []*schemapb.FieldSchema{},
 		},
 		insertMsg: &BaseInsertTask{
-			InsertRequest: internalpb.InsertRequest{
+			InsertRequest: msgpb.InsertRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_Insert,
 				},
@@ -1199,7 +1199,7 @@ func Test_InsertTaskCheckPrimaryFieldData(t *testing.T) {
 			},
 		},
 		insertMsg: &BaseInsertTask{
-			InsertRequest: internalpb.InsertRequest{
+			InsertRequest: msgpb.InsertRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_Insert,
 				},
@@ -1212,7 +1212,7 @@ func Test_InsertTaskCheckPrimaryFieldData(t *testing.T) {
 						Type: schemapb.DataType_Int64,
 					},
 				},
-				Version: internalpb.InsertDataVersion_RowBased,
+				Version: msgpb.InsertDataVersion_RowBased,
 			},
 		},
 		result: &milvuspb.MutationResult{
@@ -1243,7 +1243,7 @@ func Test_InsertTaskCheckPrimaryFieldData(t *testing.T) {
 			},
 		},
 		insertMsg: &BaseInsertTask{
-			InsertRequest: internalpb.InsertRequest{
+			InsertRequest: msgpb.InsertRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_Insert,
 				},
@@ -1287,7 +1287,7 @@ func Test_InsertTaskCheckPrimaryFieldData(t *testing.T) {
 			},
 		},
 		insertMsg: &BaseInsertTask{
-			InsertRequest: internalpb.InsertRequest{
+			InsertRequest: msgpb.InsertRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_Insert,
 				},
@@ -1335,7 +1335,7 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 			Fields:      []*schemapb.FieldSchema{},
 		},
 		insertMsg: &BaseInsertTask{
-			InsertRequest: internalpb.InsertRequest{
+			InsertRequest: msgpb.InsertRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_Insert,
 				},
@@ -1373,7 +1373,7 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 			},
 		},
 		insertMsg: &BaseInsertTask{
-			InsertRequest: internalpb.InsertRequest{
+			InsertRequest: msgpb.InsertRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_Insert,
 				},
@@ -1417,7 +1417,7 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 			},
 		},
 		insertMsg: &BaseInsertTask{
-			InsertRequest: internalpb.InsertRequest{
+			InsertRequest: msgpb.InsertRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_Insert,
 				},
@@ -1460,7 +1460,7 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 			},
 		},
 		insertMsg: &BaseInsertTask{
-			InsertRequest: internalpb.InsertRequest{
+			InsertRequest: msgpb.InsertRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_Insert,
 				},
@@ -1508,7 +1508,7 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 			},
 		},
 		insertMsg: &BaseInsertTask{
-			InsertRequest: internalpb.InsertRequest{
+			InsertRequest: msgpb.InsertRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_Insert,
 				},
@@ -1553,7 +1553,7 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 			},
 		},
 		insertMsg: &BaseInsertTask{
-			InsertRequest: internalpb.InsertRequest{
+			InsertRequest: msgpb.InsertRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_Insert,
 				},

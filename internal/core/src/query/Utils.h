@@ -35,4 +35,19 @@ Match<std::string>(const std::string& str, const std::string& val, OpType op) {
             PanicInfo("not supported");
     }
 }
+
+template <>
+inline bool
+Match<std::string_view>(const std::string_view& str,
+                        const std::string& val,
+                        OpType op) {
+    switch (op) {
+        case OpType::PrefixMatch:
+            return PrefixMatch(str, val);
+        case OpType::PostfixMatch:
+            return PostfixMatch(str, val);
+        default:
+            PanicInfo("not supported");
+    }
+}
 }  // namespace milvus::query

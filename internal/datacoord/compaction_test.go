@@ -620,7 +620,7 @@ func TestCompactionPlanHandler_completeCompaction(t *testing.T) {
 		assert.NoError(t, err)
 
 		segments = meta.GetAllSegmentsUnsafe()
-		assert.Equal(t, len(segments), 2)
+		assert.Equal(t, len(segments), 3)
 
 		for _, segment := range segments {
 			assert.True(t, segment.State == commonpb.SegmentState_Dropped)

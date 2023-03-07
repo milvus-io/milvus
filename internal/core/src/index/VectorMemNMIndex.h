@@ -28,7 +28,9 @@ namespace milvus::index {
 
 class VectorMemNMIndex : public VectorMemIndex {
  public:
-    explicit VectorMemNMIndex(const IndexType& index_type, const MetricType& metric_type, const IndexMode& index_mode)
+    explicit VectorMemNMIndex(const IndexType& index_type,
+                              const MetricType& metric_type,
+                              const IndexMode& index_mode)
         : VectorMemIndex(index_type, metric_type, index_mode) {
         AssertInfo(is_in_nm_list(index_type), "not valid nm index type");
     }
@@ -37,13 +39,16 @@ class VectorMemNMIndex : public VectorMemIndex {
     Serialize(const Config& config) override;
 
     void
-    BuildWithDataset(const DatasetPtr& dataset, const Config& config = {}) override;
+    BuildWithDataset(const DatasetPtr& dataset,
+                     const Config& config = {}) override;
 
     void
     Load(const BinarySet& binary_set, const Config& config = {}) override;
 
     std::unique_ptr<SearchResult>
-    Query(const DatasetPtr dataset, const SearchInfo& search_info, const BitsetView& bitset) override;
+    Query(const DatasetPtr dataset,
+          const SearchInfo& search_info,
+          const BitsetView& bitset) override;
 
  private:
     void

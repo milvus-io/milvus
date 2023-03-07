@@ -49,7 +49,9 @@ template <typename T>
 constexpr bool IsVector = std::is_base_of_v<VectorTrait, T>;
 
 template <typename T>
-constexpr bool IsScalar = std::is_fundamental_v<T> || std::is_same_v<T, std::string>;
+constexpr bool IsScalar =
+    std::is_fundamental_v<T> || std::is_same_v<T, std::string> ||
+    std::is_same_v<T, std::string_view>;
 
 template <typename T, typename Enabled = void>
 struct EmbeddedTypeImpl;
@@ -61,7 +63,8 @@ struct EmbeddedTypeImpl<T, std::enable_if_t<IsScalar<T>>> {
 
 template <typename T>
 struct EmbeddedTypeImpl<T, std::enable_if_t<IsVector<T>>> {
-    using type = std::conditional_t<std::is_same_v<T, FloatVector>, float, uint8_t>;
+    using type =
+        std::conditional_t<std::is_same_v<T, FloatVector>, float, uint8_t>;
 };
 
 template <typename T>

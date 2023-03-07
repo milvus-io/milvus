@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/json"
 	"math/rand"
-	"runtime"
 	"sync"
 	"testing"
 
@@ -31,11 +30,10 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	queryPb "github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/util/concurrency"
+	"github.com/milvus-io/milvus/internal/util/conc"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/panjf2000/ants/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -118,7 +116,7 @@ func TestImpl_WatchDmChannels(t *testing.T) {
 		defer func() {
 			node.taskPool = originPool
 		}()
-		node.taskPool, _ = concurrency.NewPool(runtime.GOMAXPROCS(0), ants.WithPreAlloc(true))
+		node.taskPool = conc.NewDefaultPool()
 		node.taskPool.Release()
 		status, err = node.WatchDmChannels(ctx, req)
 		assert.NoError(t, err)

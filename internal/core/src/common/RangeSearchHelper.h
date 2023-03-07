@@ -17,8 +17,13 @@
 namespace milvus {
 
 DatasetPtr
-SortRangeSearchResult(DatasetPtr data_set, int64_t topk, int64_t nq, std::string metric_type);
+SortRangeSearchResult(DatasetPtr data_set,
+                      int64_t topk,
+                      int64_t nq,
+                      std::string metric_type);
 
 void
-CheckRangeSearchParam(float radius, float range_filter, std::string metric_type);
+CheckRangeSearchParam(float radius,
+                      float range_filter,
+                      std::string metric_type);
 }  // namespace milvus

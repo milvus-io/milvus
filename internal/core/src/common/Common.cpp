@@ -26,13 +26,15 @@ int cpu_num = DEFAULT_CPU_NUM;
 void
 SetIndexSliceSize(const int64_t size) {
     index_file_slice_size = size;
-    LOG_SEGCORE_DEBUG_ << "set config index slice size: " << index_file_slice_size;
+    LOG_SEGCORE_DEBUG_ << "set config index slice size: "
+                       << index_file_slice_size;
 }
 
 void
 SetThreadCoreCoefficient(const int64_t coefficient) {
     thread_core_coefficient = coefficient;
-    LOG_SEGCORE_DEBUG_ << "set thread pool core coefficient: " << thread_core_coefficient;
+    LOG_SEGCORE_DEBUG_ << "set thread pool core coefficient: "
+                       << thread_core_coefficient;
 }
 
 void

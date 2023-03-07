@@ -18,8 +18,8 @@
 
 #include <map>
 #include <string>
-#include "Types.h"
 
+#include "Types.h"
 #include "common/CDataType.h"
 
 // NOTE: field_id can be system field
@@ -29,11 +29,8 @@ struct LoadFieldDataInfo {
     int64_t field_id;
     //    const void* blob = nullptr;
     const milvus::DataArray* field_data;
-    int64_t row_count = -1;
-
-    // ~LoadFieldDataInfo() {
-    //     delete field_data;
-    // }
+    int64_t row_count{-1};
+    const char* mmap_dir_path{nullptr};
 };
 
 struct LoadDeletedRecordInfo {

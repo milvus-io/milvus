@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 )
 
@@ -30,7 +31,6 @@ import (
 type UniqueID = typeutil.UniqueID
 
 const (
-	DefaultMilvusYaml           = "milvus.yaml"
 	DefaultEasyloggingYaml      = "easylogging.yaml"
 	DefaultMinioHost            = "localhost"
 	DefaultMinioPort            = "9000"
@@ -53,7 +53,7 @@ func globalConfigPrefixs() []string {
 	return []string{"metastore.", "localStorage.", "etcd.", "mysql.", "minio.", "pulsar.", "kafka.", "rocksmq.", "log.", "grpc.", "common.", "quotaAndLimits."}
 }
 
-var defaultYaml = DefaultMilvusYaml
+var defaultYaml = []string{"milvus.yaml", "default.yaml", "user.yaml"}
 
 // BaseTable the basics of paramtable
 type BaseTable struct {
@@ -61,17 +61,17 @@ type BaseTable struct {
 	mgr  *config.Manager
 
 	configDir string
-	YamlFile  string
+	YamlFiles []string
 }
 
 // NewBaseTableFromYamlOnly only used in migration tool.
 // Maybe we shouldn't limit the configDir internally.
 func NewBaseTableFromYamlOnly(yaml string) *BaseTable {
 	mgr, _ := config.Init(config.WithFilesSource(&config.FileInfo{
-		Filepath:        yaml,
+		Files:           []string{yaml},
 		RefreshInterval: 10 * time.Second,
 	}))
-	gp := &BaseTable{mgr: mgr, YamlFile: yaml}
+	gp := &BaseTable{mgr: mgr, YamlFiles: []string{yaml}}
 	return gp
 }
 
@@ -81,7 +81,7 @@ func NewBaseTableFromYamlOnly(yaml string) *BaseTable {
 // GlobalInitWithYaml should be called only in standalone and embedded Milvus.
 func (gp *BaseTable) GlobalInitWithYaml(yaml string) {
 	gp.once.Do(func() {
-		defaultYaml = yaml
+		defaultYaml = []string{yaml}
 	})
 }
 
@@ -96,8 +96,8 @@ func (gp *BaseTable) init(refreshInterval int) {
 		ret = strings.ReplaceAll(ret, ".", "")
 		return ret
 	}
-	if gp.YamlFile == "" {
-		gp.YamlFile = DefaultMilvusYaml
+	if len(gp.YamlFiles) == 0 {
+		gp.YamlFiles = defaultYaml
 	}
 	var err error
 	gp.mgr, err = config.Init(config.WithEnvSource(formatter))
@@ -110,13 +110,14 @@ func (gp *BaseTable) init(refreshInterval int) {
 
 func (gp *BaseTable) initConfigsFromLocal(refreshInterval int) {
 	gp.configDir = gp.initConfPath()
-	configFilePath := gp.configDir + "/" + gp.YamlFile
 	err := gp.mgr.AddSource(config.NewFileSource(&config.FileInfo{
-		Filepath:        configFilePath,
+		Files: lo.Map(gp.YamlFiles, func(file string, _ int) string {
+			return path.Join(gp.configDir, file)
+		}),
 		RefreshInterval: time.Duration(refreshInterval) * time.Second,
 	}))
 	if err != nil {
-		log.Warn("init baseTable with file failed", zap.String("configFile", configFilePath), zap.Error(err))
+		log.Warn("init baseTable with file failed", zap.Strings("configFile", gp.YamlFiles), zap.Error(err))
 		return
 	}
 }

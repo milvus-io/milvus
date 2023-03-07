@@ -51,3 +51,9 @@ func Test_GetDiskUsage(t *testing.T) {
 	log.Info("TestGetDiskUsage",
 		zap.Uint64("DiskUsage", GetDiskUsage()))
 }
+
+func Test_GetMemoryUsageRatio(t *testing.T) {
+	log.Info("TestGetMemoryUsageRatio",
+		zap.Float64("Memory usage ratio", GetMemoryUseRatio()))
+	assert.True(t, GetMemoryUseRatio() > 0)
+}

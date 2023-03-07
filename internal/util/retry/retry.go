@@ -17,21 +17,24 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/util/errorutil"
+	"github.com/milvus-io/milvus/internal/util/errutil"
 )
 
 // Do will run function with retry mechanism.
 // fn is the func to run.
 // Option can control the retry times and timeout.
 func Do(ctx context.Context, fn func() error, opts ...Option) error {
+	log := log.Ctx(ctx)
 
 	c := newDefaultConfig()
 
 	for _, opt := range opts {
 		opt(c)
 	}
-	var el errorutil.ErrorList
+
+	var el error
 
 	for i := uint(0); i < c.attempts; i++ {
 		if err := fn(); err != nil {
@@ -39,16 +42,17 @@ func Do(ctx context.Context, fn func() error, opts ...Option) error {
 				log.Error("retry func failed", zap.Uint("retry time", i), zap.Error(err))
 			}
 
-			el = append(el, err)
+			err = errors.Wrapf(err, "attempt #%d", i)
+			el = errutil.Combine(el, err)
 
-			if ok := IsUnRecoverable(err); ok {
+			if !IsRecoverable(err) {
 				return el
 			}
 
 			select {
 			case <-time.After(c.sleep):
 			case <-ctx.Done():
-				el = append(el, ctx.Err())
+				el = errutil.Combine(el, errors.Wrapf(ctx.Err(), "context done during sleep after run#%d", i))
 				return el
 			}
 
@@ -63,18 +67,16 @@ func Do(ctx context.Context, fn func() error, opts ...Option) error {
 	return el
 }
 
-type unrecoverableError struct {
-	error
-}
+// errUnrecoverable is error instance for unrecoverable.
+var errUnrecoverable = errors.New("unrecoverable error")
 
 // Unrecoverable method wrap an error to unrecoverableError. This will make retry
 // quick return.
 func Unrecoverable(err error) error {
-	return unrecoverableError{err}
+	return errutil.Combine(err, errUnrecoverable)
 }
 
-// IsUnRecoverable is used to judge whether the error is wrapped by unrecoverableError.
-func IsUnRecoverable(err error) bool {
-	_, isUnrecoverable := err.(unrecoverableError)
-	return isUnrecoverable
+// IsRecoverable is used to judge whether the error is wrapped by unrecoverableError.
+func IsRecoverable(err error) bool {
+	return !errors.Is(err, errUnrecoverable)
 }

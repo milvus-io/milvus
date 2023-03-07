@@ -113,9 +113,9 @@ class TestChaos(TestChaosBase):
         Path(data_dir).mkdir(parents=True, exist_ok=True)
         files = []
         if file_type == "json":
-            files = cf.gen_json_files_for_bulk_insert(data, schema, data_dir)
+            files = cf.gen_json_files_for_bulk_insert(data, schema, data_dir, nb=nb, dim=dim)
         if file_type == "npy":
-            files = cf.gen_npy_files_for_bulk_insert(data, schema, data_dir)
+            files = cf.gen_npy_files_for_bulk_insert(data, schema, data_dir, nb=nb, dim=dim)
         log.info("upload file to minio")
         client = Minio(minio_endpoint, access_key="minioadmin", secret_key="minioadmin", secure=False)
         for file_name in files:
@@ -148,7 +148,8 @@ class TestChaos(TestChaosBase):
         self.prepare_bulk_insert(file_type=file_type, nb=nb, dim=int(dim))
         cc.start_monitor_threads(self.health_checkers)
         # wait 600s
-        sleep(constants.WAIT_PER_OP * 30)
+        while self.health_checkers[Op.bulk_insert].total() <= 10:
+            sleep(constants.WAIT_PER_OP)
         assert_statistic(self.health_checkers)
 
         assert_expectations()

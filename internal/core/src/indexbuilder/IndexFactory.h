@@ -45,7 +45,8 @@ class IndexFactory {
                 const char* index_params,
                 const storage::StorageConfig& storage_config) {
         auto real_dtype = DataType(dtype);
-        auto invalid_dtype_msg = std::string("invalid data type: ") + std::to_string(int(real_dtype));
+        auto invalid_dtype_msg = std::string("invalid data type: ") +
+                                 std::to_string(int(real_dtype));
 
         switch (real_dtype) {
             case DataType::BOOL:
@@ -61,7 +62,8 @@ class IndexFactory {
 
             case DataType::VECTOR_FLOAT:
             case DataType::VECTOR_BINARY:
-                return std::make_unique<VecIndexCreator>(real_dtype, type_params, index_params, storage_config);
+                return std::make_unique<VecIndexCreator>(
+                    real_dtype, type_params, index_params, storage_config);
             default:
                 throw std::invalid_argument(invalid_dtype_msg);
         }

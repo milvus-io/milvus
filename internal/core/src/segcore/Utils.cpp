@@ -19,7 +19,8 @@ void
 ParsePksFromFieldData(std::vector<PkType>& pks, const DataArray& data) {
     switch (DataType(data.type())) {
         case DataType::INT64: {
-            auto source_data = reinterpret_cast<const int64_t*>(data.scalars().long_data().data().data());
+            auto source_data = reinterpret_cast<const int64_t*>(
+                data.scalars().long_data().data().data());
             std::copy_n(source_data, pks.size(), pks.data());
             break;
         }
@@ -35,10 +36,13 @@ ParsePksFromFieldData(std::vector<PkType>& pks, const DataArray& data) {
 }
 
 void
-ParsePksFromIDs(std::vector<PkType>& pks, DataType data_type, const IdArray& data) {
+ParsePksFromIDs(std::vector<PkType>& pks,
+                DataType data_type,
+                const IdArray& data) {
     switch (data_type) {
         case DataType::INT64: {
-            auto source_data = reinterpret_cast<const int64_t*>(data.int_id().data().data());
+            auto source_data =
+                reinterpret_cast<const int64_t*>(data.int_id().data().data());
             std::copy_n(source_data, pks.size(), pks.data());
             break;
         }
@@ -74,7 +78,8 @@ CreateScalarDataArray(int64_t count, const FieldMeta& field_meta) {
     auto data_type = field_meta.get_data_type();
     auto data_array = std::make_unique<DataArray>();
     data_array->set_field_id(field_meta.get_id().get());
-    data_array->set_type(milvus::proto::schema::DataType(field_meta.get_data_type()));
+    data_array->set_type(
+        milvus::proto::schema::DataType(field_meta.get_data_type()));
 
     auto scalar_array = data_array->mutable_scalars();
     switch (data_type) {
@@ -116,7 +121,8 @@ CreateScalarDataArray(int64_t count, const FieldMeta& field_meta) {
         case DataType::VARCHAR: {
             auto obj = scalar_array->mutable_string_data();
             obj->mutable_data()->Reserve(count);
-            for (auto i = 0; i < count; i++) *(obj->mutable_data()->Add()) = std::string();
+            for (auto i = 0; i < count; i++)
+                *(obj->mutable_data()->Add()) = std::string();
             break;
         }
         default: {
@@ -132,7 +138,8 @@ CreateVectorDataArray(int64_t count, const FieldMeta& field_meta) {
     auto data_type = field_meta.get_data_type();
     auto data_array = std::make_unique<DataArray>();
     data_array->set_field_id(field_meta.get_id().get());
-    data_array->set_type(milvus::proto::schema::DataType(field_meta.get_data_type()));
+    data_array->set_type(
+        milvus::proto::schema::DataType(field_meta.get_data_type()));
 
     auto vector_array = data_array->mutable_vectors();
     auto dim = field_meta.get_dim();
@@ -145,7 +152,8 @@ CreateVectorDataArray(int64_t count, const FieldMeta& field_meta) {
             break;
         }
         case DataType::VECTOR_BINARY: {
-            AssertInfo(dim % 8 == 0, "Binary vector field dimension is not a multiple of 8");
+            AssertInfo(dim % 8 == 0,
+                       "Binary vector field dimension is not a multiple of 8");
             auto num_bytes = count * dim / 8;
             auto obj = vector_array->mutable_binary_vector();
             obj->resize(num_bytes);
@@ -159,11 +167,14 @@ CreateVectorDataArray(int64_t count, const FieldMeta& field_meta) {
 }
 
 std::unique_ptr<DataArray>
-CreateScalarDataArrayFrom(const void* data_raw, int64_t count, const FieldMeta& field_meta) {
+CreateScalarDataArrayFrom(const void* data_raw,
+                          int64_t count,
+                          const FieldMeta& field_meta) {
     auto data_type = field_meta.get_data_type();
     auto data_array = std::make_unique<DataArray>();
     data_array->set_field_id(field_meta.get_id().get());
-    data_array->set_type(milvus::proto::schema::DataType(field_meta.get_data_type()));
+    data_array->set_type(
+        milvus::proto::schema::DataType(field_meta.get_data_type()));
 
     auto scalar_array = data_array->mutable_scalars();
     switch (data_type) {
@@ -212,7 +223,8 @@ CreateScalarDataArrayFrom(const void* data_raw, int64_t count, const FieldMeta& 
         case DataType::VARCHAR: {
             auto data = reinterpret_cast<const std::string*>(data_raw);
             auto obj = scalar_array->mutable_string_data();
-            for (auto i = 0; i < count; i++) *(obj->mutable_data()->Add()) = data[i];
+            for (auto i = 0; i < count; i++)
+                *(obj->mutable_data()->Add()) = data[i];
             break;
         }
         default: {
@@ -224,11 +236,14 @@ CreateScalarDataArrayFrom(const void* data_raw, int64_t count, const FieldMeta& 
 }
 
 std::unique_ptr<DataArray>
-CreateVectorDataArrayFrom(const void* data_raw, int64_t count, const FieldMeta& field_meta) {
+CreateVectorDataArrayFrom(const void* data_raw,
+                          int64_t count,
+                          const FieldMeta& field_meta) {
     auto data_type = field_meta.get_data_type();
     auto data_array = std::make_unique<DataArray>();
     data_array->set_field_id(field_meta.get_id().get());
-    data_array->set_type(milvus::proto::schema::DataType(field_meta.get_data_type()));
+    data_array->set_type(
+        milvus::proto::schema::DataType(field_meta.get_data_type()));
 
     auto vector_array = data_array->mutable_vectors();
     auto dim = field_meta.get_dim();
@@ -242,7 +257,8 @@ CreateVectorDataArrayFrom(const void* data_raw, int64_t count, const FieldMeta& 
             break;
         }
         case DataType::VECTOR_BINARY: {
-            AssertInfo(dim % 8 == 0, "Binary vector field dimension is not a multiple of 8");
+            AssertInfo(dim % 8 == 0,
+                       "Binary vector field dimension is not a multiple of 8");
             auto num_bytes = count * dim / 8;
             auto data = reinterpret_cast<const char*>(data_raw);
             auto obj = vector_array->mutable_binary_vector();
@@ -257,7 +273,9 @@ CreateVectorDataArrayFrom(const void* data_raw, int64_t count, const FieldMeta& 
 }
 
 std::unique_ptr<DataArray>
-CreateDataArrayFrom(const void* data_raw, int64_t count, const FieldMeta& field_meta) {
+CreateDataArrayFrom(const void* data_raw,
+                    int64_t count,
+                    const FieldMeta& field_meta) {
     auto data_type = field_meta.get_data_type();
 
     if (!datatype_is_vector(data_type)) {
@@ -269,26 +287,35 @@ CreateDataArrayFrom(const void* data_raw, int64_t count, const FieldMeta& field_
 
 // TODO remove merge dataArray, instead fill target entity when get data slice
 std::unique_ptr<DataArray>
-MergeDataArray(std::vector<std::pair<milvus::SearchResult*, int64_t>>& result_offsets, const FieldMeta& field_meta) {
+MergeDataArray(
+    std::vector<std::pair<milvus::SearchResult*, int64_t>>& result_offsets,
+    const FieldMeta& field_meta) {
     auto data_type = field_meta.get_data_type();
     auto data_array = std::make_unique<DataArray>();
     data_array->set_field_id(field_meta.get_id().get());
-    data_array->set_type(milvus::proto::schema::DataType(field_meta.get_data_type()));
+    data_array->set_type(
+        milvus::proto::schema::DataType(field_meta.get_data_type()));
 
     for (auto& result_pair : result_offsets) {
-        auto src_field_data = result_pair.first->output_fields_data_[field_meta.get_id()].get();
+        auto src_field_data =
+            result_pair.first->output_fields_data_[field_meta.get_id()].get();
         auto src_offset = result_pair.second;
-        AssertInfo(data_type == DataType(src_field_data->type()), "merge field data type not consistent");
+        AssertInfo(data_type == DataType(src_field_data->type()),
+                   "merge field data type not consistent");
         if (field_meta.is_vector()) {
             auto vector_array = data_array->mutable_vectors();
             auto dim = field_meta.get_dim();
             vector_array->set_dim(dim);
             if (field_meta.get_data_type() == DataType::VECTOR_FLOAT) {
-                auto data = src_field_data->vectors().float_vector().data().data();
+                auto data =
+                    src_field_data->vectors().float_vector().data().data();
                 auto obj = vector_array->mutable_float_vector();
-                obj->mutable_data()->Add(data + src_offset * dim, data + (src_offset + 1) * dim);
+                obj->mutable_data()->Add(data + src_offset * dim,
+                                         data + (src_offset + 1) * dim);
             } else if (field_meta.get_data_type() == DataType::VECTOR_BINARY) {
-                AssertInfo(dim % 8 == 0, "Binary vector field dimension is not a multiple of 8");
+                AssertInfo(
+                    dim % 8 == 0,
+                    "Binary vector field dimension is not a multiple of 8");
                 auto num_bytes = dim / 8;
                 auto data = src_field_data->vectors().binary_vector().data();
                 auto obj = vector_array->mutable_binary_vector();
@@ -322,13 +349,15 @@ MergeDataArray(std::vector<std::pair<milvus::SearchResult*, int64_t>>& result_of
                 continue;
             }
             case DataType::FLOAT: {
-                auto data = src_field_data->scalars().float_data().data().data();
+                auto data =
+                    src_field_data->scalars().float_data().data().data();
                 auto obj = scalar_array->mutable_float_data();
                 *(obj->mutable_data()->Add()) = data[src_offset];
                 continue;
             }
             case DataType::DOUBLE: {
-                auto data = src_field_data->scalars().double_data().data().data();
+                auto data =
+                    src_field_data->scalars().double_data().data().data();
                 auto obj = scalar_array->mutable_double_data();
                 *(obj->mutable_data()->Add()) = data[src_offset];
                 continue;
@@ -357,7 +386,8 @@ ReverseDataFromIndex(const index::IndexBase* index,
     auto data_type = field_meta.get_data_type();
     auto data_array = std::make_unique<DataArray>();
     data_array->set_field_id(field_meta.get_id().get());
-    data_array->set_type(milvus::proto::schema::DataType(field_meta.get_data_type()));
+    data_array->set_type(
+        milvus::proto::schema::DataType(field_meta.get_data_type()));
 
     auto scalar_array = data_array->mutable_scalars();
     switch (data_type) {

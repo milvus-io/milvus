@@ -23,10 +23,10 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
@@ -66,6 +66,12 @@ func SetPriorityWithFunc(f func(t Task) Priority, tasks ...Task) {
 	}
 }
 
+func SetReason(reason string, tasks ...Task) {
+	for i := range tasks {
+		tasks[i].SetReason(reason)
+	}
+}
+
 // GetTaskType returns the task's type,
 // for now, only 3 types;
 // - only 1 grow action -> Grow
@@ -89,7 +95,7 @@ func packLoadSegmentRequest(
 	loadInfo *querypb.SegmentLoadInfo,
 	resp *datapb.GetSegmentInfoResponse,
 ) *querypb.LoadSegmentsRequest {
-	var deltaPosition *internalpb.MsgPosition
+	var deltaPosition *msgpb.MsgPosition
 	segment := resp.GetInfos()[0]
 
 	var posSrcStr string
@@ -130,7 +136,7 @@ func packLoadSegmentRequest(
 		LoadMeta:       loadMeta,
 		CollectionID:   task.CollectionID(),
 		ReplicaID:      task.ReplicaID(),
-		DeltaPositions: []*internalpb.MsgPosition{deltaPosition},
+		DeltaPositions: []*msgpb.MsgPosition{deltaPosition},
 		DstNodeID:      action.Node(),
 		Version:        time.Now().UnixNano(),
 		NeedTransfer:   true,

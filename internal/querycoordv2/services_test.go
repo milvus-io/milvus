@@ -600,13 +600,22 @@ func (suite *ServiceSuite) TestTransferReplica() {
 	suite.NoError(err)
 
 	resp, err := suite.server.TransferReplica(ctx, &querypb.TransferReplicaRequest{
-		SourceResourceGroup: meta.DefaultResourceGroupName,
+		SourceResourceGroup: "rg2",
 		TargetResourceGroup: "rg1",
 		CollectionID:        1,
 		NumReplica:          2,
 	})
 	suite.NoError(err)
 	suite.Contains(resp.Reason, "only found [0] replicas in source resource group")
+
+	resp, err = suite.server.TransferReplica(ctx, &querypb.TransferReplicaRequest{
+		SourceResourceGroup: meta.DefaultResourceGroupName,
+		TargetResourceGroup: "rg1",
+		CollectionID:        1,
+		NumReplica:          2,
+	})
+	suite.NoError(err)
+	suite.Contains(resp.Reason, "transfer replica will cause replica loaded in both default rg and other rg")
 
 	resp, err = suite.server.TransferReplica(ctx, &querypb.TransferReplicaRequest{
 		SourceResourceGroup: "rgg",
@@ -655,26 +664,29 @@ func (suite *ServiceSuite) TestTransferReplica() {
 	suite.server.nodeMgr.Add(session.NewNodeInfo(1002, "localhost"))
 	suite.server.nodeMgr.Add(session.NewNodeInfo(1003, "localhost"))
 	suite.server.nodeMgr.Add(session.NewNodeInfo(1004, "localhost"))
+	suite.server.nodeMgr.Add(session.NewNodeInfo(1005, "localhost"))
 	suite.server.meta.AssignNode("rg1", 1001)
 	suite.server.meta.AssignNode("rg2", 1002)
 	suite.server.meta.AssignNode("rg3", 1003)
 	suite.server.meta.AssignNode("rg3", 1004)
+	suite.server.meta.AssignNode("rg3", 1005)
 
+	replicaNum := len(suite.server.meta.ReplicaManager.GetByCollection(1))
 	resp, err = suite.server.TransferReplica(ctx, &querypb.TransferReplicaRequest{
 		SourceResourceGroup: meta.DefaultResourceGroupName,
 		TargetResourceGroup: "rg3",
 		CollectionID:        1,
-		NumReplica:          2,
+		NumReplica:          int64(replicaNum),
 	})
 
 	suite.NoError(err)
 	suite.Equal(resp.ErrorCode, commonpb.ErrorCode_Success)
-	suite.Len(suite.server.meta.GetByResourceGroup("rg3"), 2)
+	suite.Len(suite.server.meta.GetByResourceGroup("rg3"), 3)
 	resp, err = suite.server.TransferReplica(ctx, &querypb.TransferReplicaRequest{
 		SourceResourceGroup: meta.DefaultResourceGroupName,
 		TargetResourceGroup: "rg3",
 		CollectionID:        1,
-		NumReplica:          2,
+		NumReplica:          int64(replicaNum),
 	})
 	suite.NoError(err)
 	suite.Contains(resp.Reason, "dynamically increase replica num is unsupported")
@@ -1604,8 +1616,9 @@ func (suite *ServiceSuite) TestHandleNodeUp() {
 	suite.nodeMgr.Add(session.NewNodeInfo(222, "localhost"))
 	server.handleNodeUp(222)
 	nodes = suite.server.meta.ReplicaManager.Get(1).GetNodes()
-	suite.Len(nodes, 1)
-	suite.Equal(int64(111), nodes[0])
+	suite.Len(nodes, 2)
+	suite.Contains(nodes, int64(111))
+	suite.Contains(nodes, int64(222))
 }
 
 func (suite *ServiceSuite) loadAll() {

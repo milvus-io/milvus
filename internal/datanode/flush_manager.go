@@ -24,32 +24,31 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
-
+	"github.com/samber/lo"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/metautil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
-	"github.com/samber/lo"
 )
 
 // flushManager defines a flush manager signature
 type flushManager interface {
 	// notify flush manager insert buffer data
-	flushBufferData(data *BufferData, segmentID UniqueID, flushed bool, dropped bool, pos *internalpb.MsgPosition) ([]*Blob, error)
+	flushBufferData(data *BufferData, segmentID UniqueID, flushed bool, dropped bool, pos *msgpb.MsgPosition) ([]*Blob, error)
 	// notify flush manager del buffer data
-	flushDelData(data *DelDataBuf, segmentID UniqueID, pos *internalpb.MsgPosition) error
+	flushDelData(data *DelDataBuf, segmentID UniqueID, pos *msgpb.MsgPosition) error
 	// injectFlush injects compaction or other blocking task before flush sync
 	injectFlush(injection *taskInjection, segments ...UniqueID)
 	// startDropping changes flush manager into dropping mode
@@ -66,7 +65,7 @@ type segmentFlushPack struct {
 	insertLogs map[UniqueID]*datapb.Binlog
 	statsLogs  map[UniqueID]*datapb.Binlog
 	deltaLogs  []*datapb.Binlog
-	pos        *internalpb.MsgPosition
+	pos        *msgpb.MsgPosition
 	flushed    bool
 	dropped    bool
 	err        error // task execution error, if not nil, notify func should stop datanode
@@ -124,7 +123,7 @@ func (q *orderFlushQueue) init() {
 	})
 }
 
-func (q *orderFlushQueue) getFlushTaskRunner(pos *internalpb.MsgPosition) *flushTaskRunner {
+func (q *orderFlushQueue) getFlushTaskRunner(pos *msgpb.MsgPosition) *flushTaskRunner {
 	actual, loaded := q.working.LoadOrStore(getSyncTaskID(pos), newFlushTaskRunner(q.segmentID, q.injectCh))
 	t := actual.(*flushTaskRunner)
 	// not loaded means the task runner is new, do initializtion
@@ -174,12 +173,12 @@ func (q *orderFlushQueue) postTask(pack *segmentFlushPack, postInjection postInj
 }
 
 // enqueueInsertBuffer put insert buffer data into queue
-func (q *orderFlushQueue) enqueueInsertFlush(task flushInsertTask, binlogs, statslogs map[UniqueID]*datapb.Binlog, flushed bool, dropped bool, pos *internalpb.MsgPosition) {
+func (q *orderFlushQueue) enqueueInsertFlush(task flushInsertTask, binlogs, statslogs map[UniqueID]*datapb.Binlog, flushed bool, dropped bool, pos *msgpb.MsgPosition) {
 	q.getFlushTaskRunner(pos).runFlushInsert(task, binlogs, statslogs, flushed, dropped, pos)
 }
 
 // enqueueDelBuffer put delete buffer data into queue
-func (q *orderFlushQueue) enqueueDelFlush(task flushDeleteTask, deltaLogs *DelDataBuf, pos *internalpb.MsgPosition) {
+func (q *orderFlushQueue) enqueueDelFlush(task flushDeleteTask, deltaLogs *DelDataBuf, pos *msgpb.MsgPosition) {
 	q.getFlushTaskRunner(pos).runFlushDel(task, deltaLogs)
 }
 
@@ -285,7 +284,7 @@ func (m *rendezvousFlushManager) getFlushQueue(segmentID UniqueID) *orderFlushQu
 	return queue
 }
 
-func (m *rendezvousFlushManager) handleInsertTask(segmentID UniqueID, task flushInsertTask, binlogs, statslogs map[UniqueID]*datapb.Binlog, flushed bool, dropped bool, pos *internalpb.MsgPosition) {
+func (m *rendezvousFlushManager) handleInsertTask(segmentID UniqueID, task flushInsertTask, binlogs, statslogs map[UniqueID]*datapb.Binlog, flushed bool, dropped bool, pos *msgpb.MsgPosition) {
 	log.Info("handling insert task",
 		zap.Int64("segment ID", segmentID),
 		zap.Bool("flushed", flushed),
@@ -312,7 +311,7 @@ func (m *rendezvousFlushManager) handleInsertTask(segmentID UniqueID, task flush
 	m.getFlushQueue(segmentID).enqueueInsertFlush(task, binlogs, statslogs, flushed, dropped, pos)
 }
 
-func (m *rendezvousFlushManager) handleDeleteTask(segmentID UniqueID, task flushDeleteTask, deltaLogs *DelDataBuf, pos *internalpb.MsgPosition) {
+func (m *rendezvousFlushManager) handleDeleteTask(segmentID UniqueID, task flushDeleteTask, deltaLogs *DelDataBuf, pos *msgpb.MsgPosition) {
 	log.Info("handling delete task", zap.Int64("segment ID", segmentID))
 	// in dropping mode
 	if m.dropping.Load() {
@@ -342,7 +341,7 @@ func (m *rendezvousFlushManager) handleDeleteTask(segmentID UniqueID, task flush
 
 // flushBufferData notifies flush manager insert buffer data.
 // This method will be retired on errors. Final errors will be propagated upstream and logged.
-func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segmentID UniqueID, flushed bool, dropped bool, pos *internalpb.MsgPosition) ([]*Blob, error) {
+func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segmentID UniqueID, flushed bool, dropped bool, pos *msgpb.MsgPosition) ([]*Blob, error) {
 	tr := timerecord.NewTimeRecorder("flushDuration")
 	// empty flush
 	if data == nil || data.buffer == nil {
@@ -439,7 +438,7 @@ func (m *rendezvousFlushManager) flushBufferData(data *BufferData, segmentID Uni
 
 // notify flush manager del buffer data
 func (m *rendezvousFlushManager) flushDelData(data *DelDataBuf, segmentID UniqueID,
-	pos *internalpb.MsgPosition) error {
+	pos *msgpb.MsgPosition) error {
 
 	// del signal with empty data
 	if data == nil || data.delData == nil {
@@ -487,7 +486,7 @@ func (m *rendezvousFlushManager) injectFlush(injection *taskInjection, segments 
 }
 
 // fetch meta info for segment
-func (m *rendezvousFlushManager) getSegmentMeta(segmentID UniqueID, pos *internalpb.MsgPosition) (UniqueID, UniqueID, *etcdpb.CollectionMeta, error) {
+func (m *rendezvousFlushManager) getSegmentMeta(segmentID UniqueID, pos *msgpb.MsgPosition) (UniqueID, UniqueID, *etcdpb.CollectionMeta, error) {
 	if !m.hasSegment(segmentID, true) {
 		return -1, -1, nil, fmt.Errorf("no such segment %d in the channel", segmentID)
 	}
@@ -552,7 +551,7 @@ func (m *rendezvousFlushManager) notifyAllFlushed() {
 	close(m.dropHandler.allFlushed)
 }
 
-func getSyncTaskID(pos *internalpb.MsgPosition) string {
+func getSyncTaskID(pos *msgpb.MsgPosition) string {
 	// use msgID & timestamp to generate unique taskID, see also #20926
 	return fmt.Sprintf("%s%d", string(pos.GetMsgID()), pos.GetTimestamp())
 }

@@ -8,6 +8,7 @@ import "common.proto";
 import "internal.proto";
 import "milvus.proto";
 import "schema.proto";
+import "msg.proto";
 import "index_coord.proto";
 
 // TODO: import google/protobuf/empty.proto
@@ -159,8 +160,8 @@ message GetSegmentStatesRequest {
 message SegmentStateInfo {
   int64 segmentID = 1;
   common.SegmentState state = 2;
-  internal.MsgPosition start_position = 3;
-  internal.MsgPosition end_position = 4;
+  msg.MsgPosition start_position = 3;
+  msg.MsgPosition end_position = 4;
   common.Status status = 5;
 }
 
@@ -178,7 +179,7 @@ message GetSegmentInfoRequest {
 message GetSegmentInfoResponse {
   common.Status status = 1;
   repeated SegmentInfo infos = 2;
-  map<string, internal.MsgPosition> channel_checkpoint = 3;
+  map<string, msg.MsgPosition> channel_checkpoint = 3;
 }
 
 message GetInsertBinlogPathsRequest {
@@ -221,7 +222,7 @@ message GetSegmentInfoChannelRequest {
 message VchannelInfo {
   int64 collectionID = 1;
   string channelName = 2;
-  internal.MsgPosition seek_position = 3;
+  msg.MsgPosition seek_position = 3;
   repeated SegmentInfo unflushedSegments = 4; // deprecated, keep it for compatibility
   repeated SegmentInfo flushedSegments = 5; // deprecated, keep it for compatibility
   repeated SegmentInfo dropped_segments = 6; // deprecated, keep it for compatibility
@@ -258,8 +259,8 @@ message SegmentInfo {
   common.SegmentState state = 6;
   int64 max_row_num = 7;
   uint64 last_expire_time = 8;
-  internal.MsgPosition start_position = 9;
-  internal.MsgPosition dml_position = 10;
+  msg.MsgPosition start_position = 9;
+  msg.MsgPosition dml_position = 10;
   // binlogs consist of insert binlogs
   repeated FieldBinlog binlogs = 11;
   repeated FieldBinlog statslogs = 12;
@@ -276,7 +277,7 @@ message SegmentInfo {
 }
 
 message SegmentStartPosition {
-  internal.MsgPosition start_position = 1;
+  msg.MsgPosition start_position = 1;
   int64 segmentID = 2;
 }
 
@@ -296,7 +297,7 @@ message SaveBinlogPathsRequest {
 
 message CheckPoint {
   int64 segmentID = 1;
-  internal.MsgPosition position = 2;
+  msg.MsgPosition position = 2;
   int64 num_of_rows = 3;
 }
 
@@ -306,18 +307,6 @@ message DeltaLogInfo {
   uint64 timestamp_to = 3;
   string delta_log_path = 4;
   int64 delta_log_size = 5;
-}
-
-message DataNodeTtMsg {
-    common.MsgBase base =1;
-    string channel_name = 2;
-    uint64 timestamp = 3;
-    repeated SegmentStats segments_stats = 4;
-}
-
-message SegmentStats {
-  int64 SegmentID = 1;
-  int64 NumRows = 2;
 }
 
 enum ChannelWatchState {
@@ -520,8 +509,8 @@ message DropVirtualChannelSegment {
   repeated FieldBinlog field2BinlogPaths = 3;
   repeated FieldBinlog field2StatslogPaths = 4;
   repeated FieldBinlog deltalogs = 5;
-  internal.MsgPosition startPosition = 6;
-  internal.MsgPosition checkPoint = 7;
+  msg.MsgPosition startPosition = 6;
+  msg.MsgPosition checkPoint = 7;
   int64 numOfRows = 8;
 }
 
@@ -579,13 +568,13 @@ message ImportTaskRequest {
 
 message UpdateSegmentStatisticsRequest {
   common.MsgBase base = 1;
-  repeated SegmentStats stats = 2;
+  repeated common.SegmentStats stats = 2;
 }
 
 message UpdateChannelCheckpointRequest {
   common.MsgBase base = 1;
   string vChannel = 2;
-  internal.MsgPosition position = 3;
+  msg.MsgPosition position = 3;
 }
 
 message ResendSegmentStatsRequest {

@@ -24,23 +24,23 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
 
 func TestSegmentLoader_loadSegment(t *testing.T) {
@@ -52,6 +52,40 @@ func TestSegmentLoader_loadSegment(t *testing.T) {
 	assert.NoError(t, err)
 
 	t.Run("test load segment", func(t *testing.T) {
+		node, err := genSimpleQueryNode(ctx)
+		require.NoError(t, err)
+		defer node.Stop()
+
+		node.metaReplica.removeSegment(defaultSegmentID, segmentTypeSealed)
+		loader := node.loader
+		assert.NotNil(t, loader)
+
+		req := &querypb.LoadSegmentsRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_LoadSegments,
+				MsgID:   rand.Int63(),
+			},
+			DstNodeID: 0,
+			Schema:    schema,
+			Infos: []*querypb.SegmentLoadInfo{
+				{
+					SegmentID:    defaultSegmentID,
+					PartitionID:  defaultPartitionID,
+					CollectionID: defaultCollectionID,
+					BinlogPaths:  fieldBinlog,
+					Statslogs:    statsLog,
+				},
+			},
+		}
+
+		_, err = loader.LoadSegment(ctx, req, segmentTypeSealed)
+		assert.NoError(t, err)
+	})
+
+	t.Run("test load segment with mmap", func(t *testing.T) {
+		key := paramtable.Get().QueryNodeCfg.MmapDirPath.Key
+		paramtable.Get().Save(key, "/tmp/mmap-test")
+		defer paramtable.Get().Reset(key)
 		node, err := genSimpleQueryNode(ctx)
 		require.NoError(t, err)
 		defer node.Stop()
@@ -851,8 +885,8 @@ func testConsumingDeltaMsg(ctx context.Context, t *testing.T, position *msgstrea
 		deleteMsg1 := genDeleteMsg(defaultCollectionID+1, schemapb.DataType_Int64, defaultDelLength)
 		deleteMsg2 := genDeleteMsg(defaultCollectionID, schemapb.DataType_Int64, defaultDelLength)
 		msgChan <- &msgstream.MsgPack{Msgs: []msgstream.TsMsg{deleteMsg1, deleteMsg2},
-			StartPositions: []*internalpb.MsgPosition{genMsgStreamBaseMsg().MsgPosition},
-			EndPositions:   []*internalpb.MsgPosition{genMsgStreamBaseMsg().MsgPosition}}
+			StartPositions: []*msgpb.MsgPosition{genMsgStreamBaseMsg().MsgPosition},
+			EndPositions:   []*msgpb.MsgPosition{genMsgStreamBaseMsg().MsgPosition}}
 	}
 	if closedStream {
 		close(msgChan)
@@ -914,7 +948,7 @@ func (ms *LoadDeleteMsgStream) Chan() <-chan *msgstream.MsgPack {
 	return args.Get(0).(chan *msgstream.MsgPack)
 }
 
-func (ms *LoadDeleteMsgStream) Seek(offset []*internalpb.MsgPosition) error {
+func (ms *LoadDeleteMsgStream) Seek(offset []*msgpb.MsgPosition) error {
 	args := ms.Called()
 	if args.Get(0) == nil {
 		return nil

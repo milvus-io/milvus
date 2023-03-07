@@ -121,6 +121,7 @@ storage::IndexMeta
 GetIndexMetaFromConfig(const Config& config);
 
 Config
-ParseConfigFromIndexParams(const std::map<std::string, std::string>& index_params);
+ParseConfigFromIndexParams(
+    const std::map<std::string, std::string>& index_params);
 
 }  // namespace milvus::index

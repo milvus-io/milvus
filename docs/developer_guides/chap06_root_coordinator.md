@@ -363,7 +363,7 @@ type CreateCollectionRequest struct {
 
 type CreateCollectionMsg struct {
 	BaseMsg
-	internalpb.CreateCollectionRequest
+	msgpb.CreateCollectionRequest
 }
 ```
 
@@ -450,16 +450,16 @@ type Core struct {
 	SendTimeTick func(t typeutil.Timestamp) error
 
 	//setMsgStreams, send create collection into dd channel
-	SendDdCreateCollectionReq func(ctx context.Context, req *internalpb.CreateCollectionRequest, channelNames []string) error
+	SendDdCreateCollectionReq func(ctx context.Context, req *msgpb.CreateCollectionRequest, channelNames []string) error
 
 	//setMsgStreams, send drop collection into dd channel, and notify the proxy to delete this collection
-	SendDdDropCollectionReq func(ctx context.Context, req *internalpb.DropCollectionRequest, channelNames []string) error
+	SendDdDropCollectionReq func(ctx context.Context, req *msgpb.DropCollectionRequest, channelNames []string) error
 
 	//setMsgStreams, send create partition into dd channel
-	SendDdCreatePartitionReq func(ctx context.Context, req *internalpb.CreatePartitionRequest, channelNames []string) error
+	SendDdCreatePartitionReq func(ctx context.Context, req *msgpb.CreatePartitionRequest, channelNames []string) error
 
 	//setMsgStreams, send drop partition into dd channel
-	SendDdDropPartitionReq func(ctx context.Context, req *internalpb.DropPartitionRequest, channelNames []string) error
+	SendDdDropPartitionReq func(ctx context.Context, req *msgpb.DropPartitionRequest, channelNames []string) error
 
 	// if RootCoord create segment, DataCoord will put segment msg into this channel
 	DataCoordSegmentChan <-chan *ms.MsgPack

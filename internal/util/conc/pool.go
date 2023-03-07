@@ -14,33 +14,45 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package concurrency
+package conc
 
-import "github.com/panjf2000/ants/v2"
+import (
+	"runtime"
+
+	"github.com/panjf2000/ants/v2"
+)
 
 // A goroutine pool
 type Pool struct {
 	inner *ants.Pool
 }
 
-// Return error if provides invalid parameters
-// cap: the number of workers
-func NewPool(cap int, opts ...ants.Option) (*Pool, error) {
+// NewPool returns a goroutine pool.
+// cap: the number of workers.
+// This panic if provide any invalid option.
+func NewPool(cap int, opts ...ants.Option) *Pool {
 	pool, err := ants.NewPool(cap, opts...)
 	if err != nil {
-		return nil, err
+		panic(err)
 	}
 
 	return &Pool{
 		inner: pool,
-	}, nil
+	}
+}
+
+// NewDefaultPool returns a pool with cap of the number of logical CPU,
+// and pre-alloced goroutines.
+func NewDefaultPool() *Pool {
+	return NewPool(runtime.GOMAXPROCS(0), ants.WithPreAlloc(true))
 }
 
 // Submit a task into the pool,
 // executes it asynchronously.
 // This will block if the pool has finite workers and no idle worker.
-func (pool *Pool) Submit(method func() (interface{}, error)) *Future {
-	future := newFuture()
+// NOTE: As now golang doesn't support the member method being generic, we use Future[any]
+func (pool *Pool) Submit(method func() (any, error)) *Future[any] {
+	future := newFuture[any]()
 	err := pool.inner.Submit(func() {
 		defer close(future.ch)
 		res, err := method()

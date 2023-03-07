@@ -29,7 +29,9 @@ void
 ParsePksFromFieldData(std::vector<PkType>& pks, const DataArray& data);
 
 void
-ParsePksFromIDs(std::vector<PkType>& pks, DataType data_type, const IdArray& data);
+ParsePksFromIDs(std::vector<PkType>& pks,
+                DataType data_type,
+                const IdArray& data);
 
 int64_t
 GetSizeOfIdArray(const IdArray& data);
@@ -43,17 +45,25 @@ std::unique_ptr<DataArray>
 CreateVectorDataArray(int64_t count, const FieldMeta& field_meta);
 
 std::unique_ptr<DataArray>
-CreateScalarDataArrayFrom(const void* data_raw, int64_t count, const FieldMeta& field_meta);
+CreateScalarDataArrayFrom(const void* data_raw,
+                          int64_t count,
+                          const FieldMeta& field_meta);
 
 std::unique_ptr<DataArray>
-CreateVectorDataArrayFrom(const void* data_raw, int64_t count, const FieldMeta& field_meta);
+CreateVectorDataArrayFrom(const void* data_raw,
+                          int64_t count,
+                          const FieldMeta& field_meta);
 
 std::unique_ptr<DataArray>
-CreateDataArrayFrom(const void* data_raw, int64_t count, const FieldMeta& field_meta);
+CreateDataArrayFrom(const void* data_raw,
+                    int64_t count,
+                    const FieldMeta& field_meta);
 
 // TODO remove merge dataArray, instead fill target entity when get data slice
 std::unique_ptr<DataArray>
-MergeDataArray(std::vector<std::pair<milvus::SearchResult*, int64_t>>& result_offsets, const FieldMeta& field_meta);
+MergeDataArray(
+    std::vector<std::pair<milvus::SearchResult*, int64_t>>& result_offsets,
+    const FieldMeta& field_meta);
 
 template <bool is_sealed>
 std::shared_ptr<DeletedRecord::TmpBitmap>
@@ -65,7 +75,8 @@ get_deleted_bitmap(int64_t del_barrier,
     // if insert_barrier and del_barrier have not changed, use cache data directly
     bool hit_cache = false;
     int64_t old_del_barrier = 0;
-    auto current = delete_record.clone_lru_entry(insert_barrier, del_barrier, old_del_barrier, hit_cache);
+    auto current = delete_record.clone_lru_entry(
+        insert_barrier, del_barrier, old_del_barrier, hit_cache);
     if (hit_cache) {
         return current;
     }
@@ -76,7 +87,7 @@ get_deleted_bitmap(int64_t del_barrier,
     if (del_barrier < old_del_barrier) {
         // in this case, ts of delete record[current_del_barrier : old_del_barrier] > query_timestamp
         // so these deletion records do not take effect in query/search
-        // so bitmap corresponding to those pks in delete record[current_del_barrier:old_del_barrier] wil be reset to 0
+        // so bitmap corresponding to those pks in delete record[current_del_barrier:old_del_barrier] will be reset to 0
         // for example, current_del_barrier = 2, query_time = 120, the bitmap will be reset to [0, 1, 1, 0, 0, 0, 0, 0]
         start = del_barrier;
         end = old_del_barrier;
@@ -93,21 +104,26 @@ get_deleted_bitmap(int64_t del_barrier,
         auto pk = delete_record.pks_[del_index];
         auto timestamp = delete_record.timestamps_[del_index];
 
-        delete_timestamps[pk] = timestamp > delete_timestamps[pk] ? timestamp : delete_timestamps[pk];
+        delete_timestamps[pk] = timestamp > delete_timestamps[pk]
+                                    ? timestamp
+                                    : delete_timestamps[pk];
     }
 
-    for (auto iter = delete_timestamps.begin(); iter != delete_timestamps.end(); iter++) {
+    for (auto iter = delete_timestamps.begin(); iter != delete_timestamps.end();
+         iter++) {
         auto pk = iter->first;
         auto delete_timestamp = iter->second;
         auto segOffsets = insert_record.search_pk(pk, insert_barrier);
         for (auto offset : segOffsets) {
             int64_t insert_row_offset = offset.get();
             // for now, insert_barrier == insert count of segment, so this Assert will always work
-            AssertInfo(insert_row_offset < insert_barrier, "Timestamp offset is larger than insert barrier");
+            AssertInfo(insert_row_offset < insert_barrier,
+                       "Timestamp offset is larger than insert barrier");
 
             // insert after delete with same pk, delete will not task effect on this insert record
             // and reset bitmap to 0
-            if (insert_record.timestamps_[insert_row_offset] >= delete_timestamp) {
+            if (insert_record.timestamps_[insert_row_offset] >=
+                delete_timestamp) {
                 bitmap->reset(insert_row_offset);
                 continue;
             }

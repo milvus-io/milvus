@@ -92,15 +92,10 @@ func (s *ShardClusterService) getShardCluster(vchannelName string) (*ShardCluste
 }
 
 // releaseShardCluster removes shardCluster from service and stops it.
-func (s *ShardClusterService) releaseShardCluster(vchannelName string) error {
-	raw, ok := s.clusters.LoadAndDelete(vchannelName)
-	if !ok {
-		return fmt.Errorf("ShardCluster of channel: %s does not exists", vchannelName)
+func (s *ShardClusterService) releaseShardCluster(vchannelName string) {
+	if raw, ok := s.clusters.LoadAndDelete(vchannelName); ok {
+		raw.(*ShardCluster).Close()
 	}
-
-	cs := raw.(*ShardCluster)
-	cs.Close()
-	return nil
 }
 
 func (s *ShardClusterService) close() error {

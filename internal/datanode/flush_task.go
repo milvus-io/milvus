@@ -21,13 +21,12 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
-
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 )
@@ -65,7 +64,7 @@ type flushTaskRunner struct {
 	insertLogs map[UniqueID]*datapb.Binlog
 	statsLogs  map[UniqueID]*datapb.Binlog
 	deltaLogs  []*datapb.Binlog //[]*DelDataBuf
-	pos        *internalpb.MsgPosition
+	pos        *msgpb.MsgPosition
 	flushed    bool
 	dropped    bool
 
@@ -126,7 +125,7 @@ func (t *flushTaskRunner) init(f notifyMetaFunc, postFunc taskPostFunc, signal <
 
 // runFlushInsert executes flush insert task with once and retry
 func (t *flushTaskRunner) runFlushInsert(task flushInsertTask,
-	binlogs, statslogs map[UniqueID]*datapb.Binlog, flushed bool, dropped bool, pos *internalpb.MsgPosition, opts ...retry.Option) {
+	binlogs, statslogs map[UniqueID]*datapb.Binlog, flushed bool, dropped bool, pos *msgpb.MsgPosition, opts ...retry.Option) {
 	t.insertOnce.Do(func() {
 		t.insertLogs = binlogs
 		t.statsLogs = statslogs

@@ -24,16 +24,16 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-
-	"github.com/milvus-io/milvus-proto/go-api/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/schemapb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
+
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/schemapb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/retry"
 )
 
 var flushTestDir = "/tmp/milvus_test/flush"
@@ -81,13 +81,13 @@ func TestOrderFlushQueue_Execute(t *testing.T) {
 	wg.Add(2 * size)
 	for i := 0; i < size; i++ {
 		go func(id []byte) {
-			q.enqueueDelFlush(&emptyFlushTask{}, &DelDataBuf{}, &internalpb.MsgPosition{
+			q.enqueueDelFlush(&emptyFlushTask{}, &DelDataBuf{}, &msgpb.MsgPosition{
 				MsgID: id,
 			})
 			wg.Done()
 		}(ids[i])
 		go func(id []byte) {
-			q.enqueueInsertFlush(&emptyFlushTask{}, map[UniqueID]*datapb.Binlog{}, map[UniqueID]*datapb.Binlog{}, false, false, &internalpb.MsgPosition{
+			q.enqueueInsertFlush(&emptyFlushTask{}, map[UniqueID]*datapb.Binlog{}, map[UniqueID]*datapb.Binlog{}, false, false, &msgpb.MsgPosition{
 				MsgID: id,
 			})
 			wg.Done()
@@ -98,6 +98,7 @@ func TestOrderFlushQueue_Execute(t *testing.T) {
 
 	assert.EqualValues(t, size, counter.Load())
 }
+
 func TestOrderFlushQueue_Order(t *testing.T) {
 	counter := atomic.Int64{}
 	finish := sync.WaitGroup{}
@@ -122,10 +123,10 @@ func TestOrderFlushQueue_Order(t *testing.T) {
 	wg := sync.WaitGroup{}
 	wg.Add(size)
 	for i := 0; i < size; i++ {
-		q.enqueueDelFlush(&emptyFlushTask{}, &DelDataBuf{}, &internalpb.MsgPosition{
+		q.enqueueDelFlush(&emptyFlushTask{}, &DelDataBuf{}, &msgpb.MsgPosition{
 			MsgID: ids[i],
 		})
-		q.enqueueInsertFlush(&emptyFlushTask{}, map[UniqueID]*datapb.Binlog{}, map[UniqueID]*datapb.Binlog{}, false, false, &internalpb.MsgPosition{
+		q.enqueueInsertFlush(&emptyFlushTask{}, map[UniqueID]*datapb.Binlog{}, map[UniqueID]*datapb.Binlog{}, false, false, &msgpb.MsgPosition{
 			MsgID: ids[i],
 		})
 		wg.Done()
@@ -172,10 +173,10 @@ func TestRendezvousFlushManager(t *testing.T) {
 	wg := sync.WaitGroup{}
 	wg.Add(size)
 	for i := 0; i < size; i++ {
-		m.flushDelData(nil, 1, &internalpb.MsgPosition{
+		m.flushDelData(nil, 1, &msgpb.MsgPosition{
 			MsgID: ids[i],
 		})
-		m.flushBufferData(nil, 1, true, false, &internalpb.MsgPosition{
+		m.flushBufferData(nil, 1, true, false, &msgpb.MsgPosition{
 			MsgID: ids[i],
 		})
 		wg.Done()
@@ -221,10 +222,10 @@ func TestRendezvousFlushManager_Inject(t *testing.T) {
 	wg := sync.WaitGroup{}
 	wg.Add(size)
 	for i := 0; i < size; i++ {
-		m.flushDelData(nil, 1, &internalpb.MsgPosition{
+		m.flushDelData(nil, 1, &msgpb.MsgPosition{
 			MsgID: ids[i],
 		})
-		m.flushBufferData(nil, 1, true, false, &internalpb.MsgPosition{
+		m.flushBufferData(nil, 1, true, false, &msgpb.MsgPosition{
 			MsgID: ids[i],
 		})
 		wg.Done()
@@ -239,10 +240,10 @@ func TestRendezvousFlushManager_Inject(t *testing.T) {
 	rand.Read(id)
 	id2 := make([]byte, 10)
 	rand.Read(id2)
-	m.flushBufferData(nil, 2, true, false, &internalpb.MsgPosition{
+	m.flushBufferData(nil, 2, true, false, &msgpb.MsgPosition{
 		MsgID: id,
 	})
-	m.flushBufferData(nil, 3, true, false, &internalpb.MsgPosition{
+	m.flushBufferData(nil, 3, true, false, &msgpb.MsgPosition{
 		MsgID: id2,
 	})
 
@@ -251,10 +252,10 @@ func TestRendezvousFlushManager_Inject(t *testing.T) {
 	})
 	m.injectFlush(ti, 2, 3)
 
-	m.flushDelData(nil, 2, &internalpb.MsgPosition{
+	m.flushDelData(nil, 2, &msgpb.MsgPosition{
 		MsgID: id,
 	})
-	m.flushDelData(nil, 3, &internalpb.MsgPosition{
+	m.flushDelData(nil, 3, &msgpb.MsgPosition{
 		MsgID: id2,
 	})
 	<-ti.Injected()
@@ -267,7 +268,7 @@ func TestRendezvousFlushManager_Inject(t *testing.T) {
 	finish.Add(1)
 	rand.Read(id)
 
-	m.flushBufferData(nil, 2, false, false, &internalpb.MsgPosition{
+	m.flushBufferData(nil, 2, false, false, &msgpb.MsgPosition{
 		MsgID: id,
 	})
 	ti = newTaskInjection(1, func(pack *segmentFlushPack) {
@@ -279,7 +280,7 @@ func TestRendezvousFlushManager_Inject(t *testing.T) {
 	}()
 	m.injectFlush(ti, 2)
 
-	m.flushDelData(nil, 2, &internalpb.MsgPosition{
+	m.flushDelData(nil, 2, &msgpb.MsgPosition{
 		MsgID: id,
 	})
 	finish.Wait()
@@ -300,7 +301,7 @@ func TestRendezvousFlushManager_getSegmentMeta(t *testing.T) {
 	}, emptyFlushAndDropFunc)
 
 	// non exists segment
-	_, _, _, err := fm.getSegmentMeta(-1, &internalpb.MsgPosition{})
+	_, _, _, err := fm.getSegmentMeta(-1, &msgpb.MsgPosition{})
 	assert.Error(t, err)
 
 	seg0 := Segment{segmentID: -1}
@@ -312,10 +313,10 @@ func TestRendezvousFlushManager_getSegmentMeta(t *testing.T) {
 	channel.segments[1] = &seg1
 
 	// // injected get part/coll id error
-	// _, _, _, err = fm.getSegmentMeta(-1, &internalpb.MsgPosition{})
+	// _, _, _, err = fm.getSegmentMeta(-1, &msgpb.MsgPosition{})
 	// assert.Error(t, err)
 	// // injected get schema  error
-	// _, _, _, err = fm.getSegmentMeta(1, &internalpb.MsgPosition{})
+	// _, _, _, err = fm.getSegmentMeta(1, &msgpb.MsgPosition{})
 	// assert.Error(t, err)
 }
 
@@ -342,7 +343,7 @@ func TestRendezvousFlushManager_waitForAllFlushQueue(t *testing.T) {
 	}
 
 	for i := 0; i < size; i++ {
-		m.flushDelData(nil, 1, &internalpb.MsgPosition{
+		m.flushDelData(nil, 1, &msgpb.MsgPosition{
 			MsgID: ids[i],
 		})
 	}
@@ -364,7 +365,7 @@ func TestRendezvousFlushManager_waitForAllFlushQueue(t *testing.T) {
 	mut.RUnlock()
 
 	for i := 0; i < size/2; i++ {
-		m.flushBufferData(nil, 1, true, false, &internalpb.MsgPosition{
+		m.flushBufferData(nil, 1, true, false, &msgpb.MsgPosition{
 			MsgID: ids[i],
 		})
 	}
@@ -374,7 +375,7 @@ func TestRendezvousFlushManager_waitForAllFlushQueue(t *testing.T) {
 	mut.RUnlock()
 
 	for i := size / 2; i < size; i++ {
-		m.flushBufferData(nil, 1, true, false, &internalpb.MsgPosition{
+		m.flushBufferData(nil, 1, true, false, &msgpb.MsgPosition{
 			MsgID: ids[i],
 		})
 	}
@@ -410,23 +411,23 @@ func TestRendezvousFlushManager_dropMode(t *testing.T) {
 		})
 
 		halfMsgID := []byte{1, 1, 1}
-		m.flushBufferData(nil, -1, true, false, &internalpb.MsgPosition{
+		m.flushBufferData(nil, -1, true, false, &msgpb.MsgPosition{
 			MsgID: halfMsgID,
 		})
 
 		m.startDropping()
 		// half normal, half drop mode, should not appear in final packs
-		m.flushDelData(nil, -1, &internalpb.MsgPosition{
+		m.flushDelData(nil, -1, &msgpb.MsgPosition{
 			MsgID: halfMsgID,
 		})
 
 		target := make(map[int64]struct{})
 		for i := 1; i < 11; i++ {
 			target[int64(i)] = struct{}{}
-			m.flushBufferData(nil, int64(i), true, false, &internalpb.MsgPosition{
+			m.flushBufferData(nil, int64(i), true, false, &msgpb.MsgPosition{
 				MsgID: []byte{byte(i)},
 			})
-			m.flushDelData(nil, int64(i), &internalpb.MsgPosition{
+			m.flushDelData(nil, int64(i), &msgpb.MsgPosition{
 				MsgID: []byte{byte(i)},
 			})
 			t.Log(i)
@@ -464,7 +465,7 @@ func TestRendezvousFlushManager_dropMode(t *testing.T) {
 		})
 
 		halfMsgID := []byte{1, 1, 1}
-		m.flushBufferData(nil, -1, true, false, &internalpb.MsgPosition{
+		m.flushBufferData(nil, -1, true, false, &msgpb.MsgPosition{
 			MsgID: halfMsgID,
 		})
 
@@ -480,15 +481,15 @@ func TestRendezvousFlushManager_dropMode(t *testing.T) {
 
 		m.startDropping()
 		// half normal, half drop mode, should not appear in final packs
-		m.flushDelData(nil, -1, &internalpb.MsgPosition{
+		m.flushDelData(nil, -1, &msgpb.MsgPosition{
 			MsgID: halfMsgID,
 		})
 
 		for i := 1; i < 11; i++ {
-			m.flushBufferData(nil, int64(i), true, false, &internalpb.MsgPosition{
+			m.flushBufferData(nil, int64(i), true, false, &msgpb.MsgPosition{
 				MsgID: []byte{byte(i)},
 			})
-			m.flushDelData(nil, int64(i), &internalpb.MsgPosition{
+			m.flushDelData(nil, int64(i), &msgpb.MsgPosition{
 				MsgID: []byte{byte(i)},
 			})
 		}
@@ -532,10 +533,10 @@ func TestRendezvousFlushManager_close(t *testing.T) {
 	wg := sync.WaitGroup{}
 	wg.Add(size)
 	for i := 0; i < size; i++ {
-		m.flushDelData(nil, 1, &internalpb.MsgPosition{
+		m.flushDelData(nil, 1, &msgpb.MsgPosition{
 			MsgID: ids[i],
 		})
-		m.flushBufferData(nil, 1, true, false, &internalpb.MsgPosition{
+		m.flushBufferData(nil, 1, true, false, &msgpb.MsgPosition{
 			MsgID: ids[i],
 		})
 		wg.Done()
@@ -648,7 +649,7 @@ func TestDropVirtualChannelFunc(t *testing.T) {
 				segID:       2,
 				collID:      1,
 				partitionID: 10,
-				startPos: &internalpb.MsgPosition{
+				startPos: &msgpb.MsgPosition{
 					ChannelName: vchanName,
 					MsgID:       []byte{1, 2, 3},
 					Timestamp:   10,
@@ -660,7 +661,7 @@ func TestDropVirtualChannelFunc(t *testing.T) {
 					insertLogs: map[UniqueID]*datapb.Binlog{1: {LogPath: "/dev/test/id"}},
 					statsLogs:  map[UniqueID]*datapb.Binlog{1: {LogPath: "/dev/test/id-stats"}},
 					deltaLogs:  []*datapb.Binlog{{LogPath: "/dev/test/del"}},
-					pos: &internalpb.MsgPosition{
+					pos: &msgpb.MsgPosition{
 						ChannelName: vchanName,
 						MsgID:       []byte{1, 2, 3},
 						Timestamp:   10,
@@ -671,7 +672,7 @@ func TestDropVirtualChannelFunc(t *testing.T) {
 					insertLogs: map[UniqueID]*datapb.Binlog{1: {LogPath: "/dev/test/idi_2"}},
 					statsLogs:  map[UniqueID]*datapb.Binlog{1: {LogPath: "/dev/test/id-stats-2"}},
 					deltaLogs:  []*datapb.Binlog{{LogPath: "/dev/test/del-2"}},
-					pos: &internalpb.MsgPosition{
+					pos: &msgpb.MsgPosition{
 						ChannelName: vchanName,
 						MsgID:       []byte{1, 2, 3},
 						Timestamp:   30,

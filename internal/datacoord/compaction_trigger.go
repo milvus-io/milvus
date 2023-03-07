@@ -216,9 +216,9 @@ func (t *compactionTrigger) triggerCompaction() error {
 	return nil
 }
 
-// triggerSingleCompaction triger a compaction bundled with collection-partiiton-channel-segment
+// triggerSingleCompaction triger a compaction bundled with collection-partition-channel-segment
 func (t *compactionTrigger) triggerSingleCompaction(collectionID, partitionID, segmentID int64, channel string) error {
-	// If AutoCompaction diabled, flush request will not trigger compaction
+	// If AutoCompaction disabled, flush request will not trigger compaction
 	if !Params.DataCoordCfg.EnableAutoCompaction.GetAsBool() {
 		return nil
 	}
@@ -424,7 +424,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 		return
 	}
 
-	segment := t.meta.GetSegment(signal.segmentID)
+	segment := t.meta.GetHealthySegment(signal.segmentID)
 	if segment == nil {
 		log.Warn("segment in compaction signal not found in meta", zap.Int64("segmentID", signal.segmentID))
 		return

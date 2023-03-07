@@ -1095,7 +1095,14 @@ func (s *Server) TransferReplica(ctx context.Context, req *querypb.TransferRepli
 			fmt.Sprintf("the target resource group[%s] doesn't exist", req.GetTargetResourceGroup()), meta.ErrRGNotExist), nil
 	}
 
-	replicas := s.meta.ReplicaManager.GetByCollectionAndRG(req.GetCollectionID(), req.GetTargetResourceGroup())
+	replicas := s.meta.ReplicaManager.GetByCollection(req.GetCollectionID())
+	if (req.GetSourceResourceGroup() == meta.DefaultResourceGroupName || req.GetTargetResourceGroup() == meta.DefaultResourceGroupName) &&
+		len(replicas) != int(req.GetNumReplica()) {
+		return utils.WrapStatus(commonpb.ErrorCode_IllegalArgument,
+			"transfer replica will cause replica loaded in both default rg and other rg", nil), nil
+	}
+
+	replicas = s.meta.ReplicaManager.GetByCollectionAndRG(req.GetCollectionID(), req.GetTargetResourceGroup())
 	if len(replicas) > 0 {
 		return utils.WrapStatus(commonpb.ErrorCode_IllegalArgument,
 			fmt.Sprintf("found [%d] replicas of same collection in target resource group[%s], dynamically increase replica num is unsupported",

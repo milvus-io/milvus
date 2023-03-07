@@ -52,7 +52,7 @@ func (s *Server) createIndexForSegment(segment *SegmentInfo, indexID UniqueID) e
 		NumRows:      segment.NumOfRows,
 		IndexID:      indexID,
 		BuildID:      buildID,
-		CreateTime:   segment.LastExpireTime,
+		CreateTime:   uint64(segment.ID),
 		WriteHandoff: false,
 	}
 	if err = s.meta.AddSegmentIndex(segIndex); err != nil {
@@ -108,7 +108,7 @@ func (s *Server) createIndexForSegmentLoop(ctx context.Context) {
 			}
 		case segID := <-s.buildIndexCh:
 			log.Info("receive new flushed segment", zap.Int64("segID", segID))
-			segment := s.meta.GetSegmentUnsafe(segID)
+			segment := s.meta.GetSegment(segID)
 			if segment == nil {
 				log.Warn("segment is not exist, no need to build index", zap.Int64("segID", segID))
 				continue
@@ -255,7 +255,7 @@ func (s *Server) GetIndexState(ctx context.Context, req *indexpb.GetIndexStateRe
 		IndexStateFailReason: "",
 	}
 	s.completeIndexInfo(indexInfo, indexes[0], s.meta.SelectSegments(func(info *SegmentInfo) bool {
-		return isSegmentHealthy(info) && info.CollectionID == req.GetCollectionID()
+		return isFlush(info) && info.CollectionID == req.GetCollectionID()
 	}))
 	ret.State = indexInfo.State
 	ret.FailReason = indexInfo.IndexStateFailReason
@@ -341,6 +341,7 @@ func (s *Server) completeIndexInfo(indexInfo *indexpb.IndexInfo, index *model.In
 		switch segIdx.IndexState {
 		case commonpb.IndexState_IndexStateNone:
 			// can't to here
+			log.Warn("receive unexpected index state: IndexStateNone", zap.Int64("segmentID", segIdx.SegmentID))
 			cntNone++
 		case commonpb.IndexState_Unissued:
 			cntUnissued++
@@ -355,17 +356,18 @@ func (s *Server) completeIndexInfo(indexInfo *indexpb.IndexInfo, index *model.In
 		}
 	}
 
-	allCnt := len(segments)
 	indexInfo.TotalRows = totalRows
 	indexInfo.IndexedRows = indexedRows
 	switch {
 	case cntFailed > 0:
 		indexInfo.State = commonpb.IndexState_Failed
 		indexInfo.IndexStateFailReason = failReason
-	case cntFinished == allCnt:
-		indexInfo.State = commonpb.IndexState_Finished
-	default:
+	case cntInProgress > 0 || cntUnissued > 0:
 		indexInfo.State = commonpb.IndexState_InProgress
+	case cntNone > 0:
+		indexInfo.State = commonpb.IndexState_IndexStateNone
+	default:
+		indexInfo.State = commonpb.IndexState_Finished
 	}
 
 	log.Info("completeIndexInfo success", zap.Int64("collID", index.CollectionID), zap.Int64("indexID", index.IndexID),
@@ -418,7 +420,7 @@ func (s *Server) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetInde
 		State:       0,
 	}
 	s.completeIndexInfo(indexInfo, indexes[0], s.meta.SelectSegments(func(info *SegmentInfo) bool {
-		return isSegmentHealthy(info) && info.CollectionID == req.GetCollectionID()
+		return isFlush(info) && info.CollectionID == req.GetCollectionID()
 	}))
 	log.Info("GetIndexBuildProgress success", zap.Int64("collectionID", req.GetCollectionID()),
 		zap.String("indexName", req.GetIndexName()))

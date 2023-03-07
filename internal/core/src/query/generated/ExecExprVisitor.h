@@ -45,7 +45,9 @@ class ExecExprVisitor : public ExprVisitor {
     visit(CompareExpr& expr) override;
 
  public:
-    ExecExprVisitor(const segcore::SegmentInternalInterface& segment, int64_t row_count, Timestamp timestamp)
+    ExecExprVisitor(const segcore::SegmentInternalInterface& segment,
+                    int64_t row_count,
+                    Timestamp timestamp)
         : segment_(segment), row_count_(row_count), timestamp_(timestamp) {
     }
 
@@ -62,11 +64,15 @@ class ExecExprVisitor : public ExprVisitor {
  public:
     template <typename T, typename IndexFunc, typename ElementFunc>
     auto
-    ExecRangeVisitorImpl(FieldId field_id, IndexFunc func, ElementFunc element_func) -> BitsetType;
+    ExecRangeVisitorImpl(FieldId field_id,
+                         IndexFunc func,
+                         ElementFunc element_func) -> BitsetType;
 
     template <typename T, typename IndexFunc, typename ElementFunc>
     auto
-    ExecDataRangeVisitorImpl(FieldId field_id, IndexFunc index_func, ElementFunc element_func) -> BitsetType;
+    ExecDataRangeVisitorImpl(FieldId field_id,
+                             IndexFunc index_func,
+                             ElementFunc element_func) -> BitsetType;
 
     template <typename T>
     auto
@@ -74,7 +80,8 @@ class ExecExprVisitor : public ExprVisitor {
 
     template <typename T>
     auto
-    ExecBinaryArithOpEvalRangeVisitorDispatcher(BinaryArithOpEvalRangeExpr& expr_raw) -> BitsetType;
+    ExecBinaryArithOpEvalRangeVisitorDispatcher(
+        BinaryArithOpEvalRangeExpr& expr_raw) -> BitsetType;
 
     template <typename T>
     auto
@@ -90,7 +97,8 @@ class ExecExprVisitor : public ExprVisitor {
 
     template <typename CmpFunc>
     auto
-    ExecCompareExprDispatcher(CompareExpr& expr, CmpFunc cmp_func) -> BitsetType;
+    ExecCompareExprDispatcher(CompareExpr& expr, CmpFunc cmp_func)
+        -> BitsetType;
 
  private:
     const segcore::SegmentInternalInterface& segment_;

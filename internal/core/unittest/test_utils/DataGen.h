@@ -425,7 +425,10 @@ SearchResultToJson(const SearchResult& sr) {
 };
 
 inline void
-SealedLoadFieldData(const GeneratedData& dataset, SegmentSealed& seg, const std::set<int64_t>& exclude_fields = {}) {
+SealedLoadFieldData(const GeneratedData& dataset,
+                    SegmentSealed& seg,
+                    const std::set<int64_t>& exclude_fields = {},
+                    bool with_mmap = false) {
     auto row_count = dataset.row_ids_.size();
     {
         LoadFieldDataInfo info;
@@ -451,6 +454,9 @@ SealedLoadFieldData(const GeneratedData& dataset, SegmentSealed& seg, const std:
             continue;
         }
         LoadFieldDataInfo info;
+        if (with_mmap) {
+            info.mmap_dir_path = "./data/mmap-test";
+        }
         info.field_id = field_data.field_id();
         info.row_count = row_count;
         info.field_data = &field_data;

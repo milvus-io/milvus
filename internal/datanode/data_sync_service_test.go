@@ -30,13 +30,13 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
@@ -60,7 +60,7 @@ func getVchanInfo(info *testInfo) *datapb.VchannelInfo {
 			InsertChannel: info.ufchanName,
 			ID:            info.ufSegID,
 			NumOfRows:     info.ufNor,
-			DmlPosition:   &internalpb.MsgPosition{},
+			DmlPosition:   &msgpb.MsgPosition{},
 		}}
 		fs = []*datapb.SegmentInfo{{
 			CollectionID:  info.fCollID,
@@ -68,7 +68,7 @@ func getVchanInfo(info *testInfo) *datapb.VchannelInfo {
 			InsertChannel: info.fchanName,
 			ID:            info.fSegID,
 			NumOfRows:     info.fNor,
-			DmlPosition:   &internalpb.MsgPosition{},
+			DmlPosition:   &msgpb.MsgPosition{},
 		}}
 	} else {
 		ufs = []*datapb.SegmentInfo{}
@@ -85,7 +85,7 @@ func getVchanInfo(info *testInfo) *datapb.VchannelInfo {
 	vi := &datapb.VchannelInfo{
 		CollectionID:        info.collID,
 		ChannelName:         info.chanName,
-		SeekPosition:        &internalpb.MsgPosition{},
+		SeekPosition:        &msgpb.MsgPosition{},
 		UnflushedSegmentIds: ufsIds,
 		FlushedSegmentIds:   fsIds,
 	}
@@ -236,7 +236,7 @@ func TestDataSyncService_Start(t *testing.T) {
 		InsertChannel: insertChannelName,
 		ID:            0,
 		NumOfRows:     0,
-		DmlPosition:   &internalpb.MsgPosition{},
+		DmlPosition:   &msgpb.MsgPosition{},
 	}}
 	fs := []*datapb.SegmentInfo{{
 		CollectionID:  collMeta.ID,
@@ -244,7 +244,7 @@ func TestDataSyncService_Start(t *testing.T) {
 		InsertChannel: insertChannelName,
 		ID:            1,
 		NumOfRows:     0,
-		DmlPosition:   &internalpb.MsgPosition{},
+		DmlPosition:   &msgpb.MsgPosition{},
 	}}
 	var ufsIds []int64
 	var fsIds []int64
@@ -299,10 +299,10 @@ func TestDataSyncService_Start(t *testing.T) {
 		BeginTs: timeRange.timestampMin,
 		EndTs:   timeRange.timestampMax,
 		Msgs:    insertMessages,
-		StartPositions: []*internalpb.MsgPosition{{
+		StartPositions: []*msgpb.MsgPosition{{
 			ChannelName: insertChannelName,
 		}},
-		EndPositions: []*internalpb.MsgPosition{{
+		EndPositions: []*msgpb.MsgPosition{{
 			ChannelName: insertChannelName,
 		}},
 	}
@@ -316,7 +316,7 @@ func TestDataSyncService_Start(t *testing.T) {
 			EndTimestamp:   Timestamp(0),
 			HashValues:     []uint32{0},
 		},
-		TimeTickMsg: internalpb.TimeTickMsg{
+		TimeTickMsg: msgpb.TimeTickMsg{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_TimeTick,
 				MsgID:     UniqueID(0),
@@ -377,7 +377,7 @@ func TestDataSyncService_Close(t *testing.T) {
 		InsertChannel: insertChannelName,
 		ID:            1,
 		NumOfRows:     1,
-		DmlPosition:   &internalpb.MsgPosition{},
+		DmlPosition:   &msgpb.MsgPosition{},
 	}}
 	fs := []*datapb.SegmentInfo{{
 		CollectionID:  collMeta.ID,
@@ -385,7 +385,7 @@ func TestDataSyncService_Close(t *testing.T) {
 		InsertChannel: insertChannelName,
 		ID:            0,
 		NumOfRows:     1,
-		DmlPosition:   &internalpb.MsgPosition{},
+		DmlPosition:   &msgpb.MsgPosition{},
 	}}
 	var ufsIds []int64
 	var fsIds []int64
@@ -449,10 +449,10 @@ func TestDataSyncService_Close(t *testing.T) {
 		BeginTs: ts,
 		EndTs:   ts,
 		Msgs:    insertMessages,
-		StartPositions: []*internalpb.MsgPosition{{
+		StartPositions: []*msgpb.MsgPosition{{
 			ChannelName: insertChannelName,
 		}},
-		EndPositions: []*internalpb.MsgPosition{{
+		EndPositions: []*msgpb.MsgPosition{{
 			ChannelName: insertChannelName,
 		}},
 	}
@@ -467,10 +467,10 @@ func TestDataSyncService_Close(t *testing.T) {
 		BeginTs: ts + 1,
 		EndTs:   ts + 1,
 		Msgs:    inMsgs,
-		StartPositions: []*internalpb.MsgPosition{{
+		StartPositions: []*msgpb.MsgPosition{{
 			ChannelName: insertChannelName,
 		}},
-		EndPositions: []*internalpb.MsgPosition{{
+		EndPositions: []*msgpb.MsgPosition{{
 			ChannelName: insertChannelName,
 		}},
 	}
@@ -482,7 +482,7 @@ func TestDataSyncService_Close(t *testing.T) {
 			EndTimestamp:   ts + 2,
 			HashValues:     []uint32{0},
 		},
-		TimeTickMsg: internalpb.TimeTickMsg{
+		TimeTickMsg: msgpb.TimeTickMsg{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_TimeTick,
 				MsgID:     UniqueID(2),
@@ -495,10 +495,10 @@ func TestDataSyncService_Close(t *testing.T) {
 	timeTickMsgPack := msgstream.MsgPack{
 		BeginTs: ts + 2,
 		EndTs:   ts + 2,
-		StartPositions: []*internalpb.MsgPosition{{
+		StartPositions: []*msgpb.MsgPosition{{
 			ChannelName: insertChannelName,
 		}},
-		EndPositions: []*internalpb.MsgPosition{{
+		EndPositions: []*msgpb.MsgPosition{{
 			ChannelName: insertChannelName,
 		}},
 	}
@@ -667,8 +667,8 @@ func TestClearGlobalFlushingCache(t *testing.T) {
 			segID:       1,
 			collID:      1,
 			partitionID: 1,
-			startPos:    &internalpb.MsgPosition{},
-			endPos:      &internalpb.MsgPosition{}})
+			startPos:    &msgpb.MsgPosition{},
+			endPos:      &msgpb.MsgPosition{}})
 	assert.NoError(t, err)
 
 	err = channel.addSegment(

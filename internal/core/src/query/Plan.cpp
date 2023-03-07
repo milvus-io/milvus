@@ -23,16 +23,21 @@ namespace milvus::query {
 
 // deprecated
 std::unique_ptr<PlaceholderGroup>
-ParsePlaceholderGroup(const Plan* plan, const std::string& placeholder_group_blob) {
-    return ParsePlaceholderGroup(plan, reinterpret_cast<const uint8_t*>(placeholder_group_blob.c_str()),
-                                 placeholder_group_blob.size());
+ParsePlaceholderGroup(const Plan* plan,
+                      const std::string& placeholder_group_blob) {
+    return ParsePlaceholderGroup(
+        plan,
+        reinterpret_cast<const uint8_t*>(placeholder_group_blob.c_str()),
+        placeholder_group_blob.size());
 }
 
 std::unique_ptr<PlaceholderGroup>
-ParsePlaceholderGroup(const Plan* plan, const uint8_t* blob, const int64_t blob_len) {
-    namespace ser = milvus::proto::common;
+ParsePlaceholderGroup(const Plan* plan,
+                      const uint8_t* blob,
+                      const int64_t blob_len) {
+    namespace set = milvus::proto::common;
     auto result = std::make_unique<PlaceholderGroup>();
-    ser::PlaceholderGroup ph_group;
+    set::PlaceholderGroup ph_group;
     auto ok = ph_group.ParseFromArray(blob, blob_len);
     Assert(ok);
     for (auto& info : ph_group.placeholders()) {
@@ -45,7 +50,8 @@ ParsePlaceholderGroup(const Plan* plan, const uint8_t* blob, const int64_t blob_
         AssertInfo(element.num_of_queries_, "must have queries");
         Assert(element.num_of_queries_ > 0);
         element.line_sizeof_ = info.values().Get(0).size();
-        AssertInfo(field_meta.get_sizeof() == element.line_sizeof_, "vector dimension mismatch");
+        AssertInfo(field_meta.get_sizeof() == element.line_sizeof_,
+                   "vector dimension mismatch");
         auto& target = element.blob_;
         target.reserve(element.line_sizeof_ * element.num_of_queries_);
         for (auto& line : info.values()) {
@@ -66,7 +72,9 @@ CreatePlan(const Schema& schema, const std::string& dsl_str) {
 }
 
 std::unique_ptr<Plan>
-CreateSearchPlanByExpr(const Schema& schema, const void* serialized_expr_plan, const int64_t size) {
+CreateSearchPlanByExpr(const Schema& schema,
+                       const void* serialized_expr_plan,
+                       const int64_t size) {
     // Note: serialized_expr_plan is of binary format
     proto::plan::PlanNode plan_node;
     plan_node.ParseFromArray(serialized_expr_plan, size);
@@ -74,7 +82,9 @@ CreateSearchPlanByExpr(const Schema& schema, const void* serialized_expr_plan, c
 }
 
 std::unique_ptr<RetrievePlan>
-CreateRetrievePlanByExpr(const Schema& schema, const void* serialized_expr_plan, const int64_t size) {
+CreateRetrievePlanByExpr(const Schema& schema,
+                         const void* serialized_expr_plan,
+                         const int64_t size) {
     proto::plan::PlanNode plan_node;
     plan_node.ParseFromArray(serialized_expr_plan, size);
     return ProtoParser(schema).CreateRetrievePlan(plan_node);
@@ -111,9 +121,11 @@ Plan::check_identical(Plan& other) {
     auto json = ShowPlanNodeVisitor().call_child(*this->plan_node_);
     auto other_json = ShowPlanNodeVisitor().call_child(*other.plan_node_);
     Assert(json.dump(2) == other_json.dump(2));
-    Assert(this->extra_info_opt_.has_value() == other.extra_info_opt_.has_value());
+    Assert(this->extra_info_opt_.has_value() ==
+           other.extra_info_opt_.has_value());
     if (this->extra_info_opt_.has_value()) {
-        Assert(this->extra_info_opt_->involved_fields_ == other.extra_info_opt_->involved_fields_);
+        Assert(this->extra_info_opt_->involved_fields_ ==
+               other.extra_info_opt_->involved_fields_);
     }
     Assert(this->tag2field_ == other.tag2field_);
     Assert(this->target_entries_ == other.target_entries_);

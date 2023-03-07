@@ -74,6 +74,9 @@ typedef struct CLoadFieldDataInfo {
     const uint8_t* blob;
     uint64_t blob_size;
     int64_t row_count;
+    // Set null to disable mmap,
+    // mmap file path will be {mmap_dir_path}/{segment_id}/{field_id}
+    const char* mmap_dir_path;
 } CLoadFieldDataInfo;
 
 typedef struct CLoadDeletedRecordInfo {

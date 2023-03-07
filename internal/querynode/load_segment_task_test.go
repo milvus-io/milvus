@@ -27,11 +27,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/mq/msgstream/mqwrapper/rmq"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/hardware"
@@ -213,7 +213,7 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 			Base:   genCommonMsgBase(commonpb.MsgType_LoadSegments, node.GetSession().ServerID),
 			Schema: schema,
 			Infos:  []*querypb.SegmentLoadInfo{segmentLoadInfo},
-			DeltaPositions: []*internalpb.MsgPosition{
+			DeltaPositions: []*msgpb.MsgPosition{
 				{
 					ChannelName: testVChannel,
 					MsgID:       rmq.SerializeRmqID(0),
@@ -248,7 +248,7 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 		BaseMsg: msgstream.BaseMsg{
 			HashValues: []uint32{1},
 		},
-		TimeTickMsg: internalpb.TimeTickMsg{
+		TimeTickMsg: msgpb.TimeTickMsg{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_TimeTick,
 				Timestamp: 100,
@@ -260,7 +260,7 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 		BaseMsg: msgstream.BaseMsg{
 			HashValues: []uint32{1, 1, 1},
 		},
-		DeleteRequest: internalpb.DeleteRequest{
+		DeleteRequest: msgpb.DeleteRequest{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Delete,
 				Timestamp: 110,
@@ -318,7 +318,7 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 					InsertChannel: testVChannel,
 				},
 			},
-			DeltaPositions: []*internalpb.MsgPosition{
+			DeltaPositions: []*msgpb.MsgPosition{
 				{
 					ChannelName: testVChannel,
 					MsgID:       msgIDs[0].Serialize(),
@@ -382,7 +382,7 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 					InsertChannel: testVChannel,
 				},
 			},
-			DeltaPositions: []*internalpb.MsgPosition{
+			DeltaPositions: []*msgpb.MsgPosition{
 				{
 					ChannelName: testVChannel,
 					MsgID:       msgIDs[0].Serialize(),
@@ -431,7 +431,7 @@ func TestTask_loadSegmentsTaskLoadDelta(t *testing.T) {
 			Base:   genCommonMsgBase(commonpb.MsgType_LoadSegments, node.GetSession().ServerID),
 			Schema: schema,
 			Infos:  []*querypb.SegmentLoadInfo{segmentLoadInfo},
-			DeltaPositions: []*internalpb.MsgPosition{
+			DeltaPositions: []*msgpb.MsgPosition{
 				{
 					ChannelName: vDmChannel,
 					MsgID:       rmq.SerializeRmqID(0),
@@ -467,7 +467,7 @@ func TestTask_loadSegmentsTaskLoadDelta(t *testing.T) {
 					CollectionID: defaultCollectionID,
 				},
 			},
-			DeltaPositions: []*internalpb.MsgPosition{
+			DeltaPositions: []*msgpb.MsgPosition{
 				{
 					ChannelName: vDmChannel,
 					MsgID:       rmq.SerializeRmqID(0),

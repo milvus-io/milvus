@@ -29,11 +29,11 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
@@ -119,16 +119,16 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 	fgMsg := in[0].(*flowGraphMsg)
 
 	// replace pchannel with vchannel
-	startPositions := make([]*internalpb.MsgPosition, 0, len(fgMsg.startPositions))
+	startPositions := make([]*msgpb.MsgPosition, 0, len(fgMsg.startPositions))
 	for idx := range fgMsg.startPositions {
-		pos := proto.Clone(fgMsg.startPositions[idx]).(*internalpb.MsgPosition)
+		pos := proto.Clone(fgMsg.startPositions[idx]).(*msgpb.MsgPosition)
 		pos.ChannelName = ibNode.channelName
 		startPositions = append(startPositions, pos)
 	}
 	fgMsg.startPositions = startPositions
-	endPositions := make([]*internalpb.MsgPosition, 0, len(fgMsg.endPositions))
+	endPositions := make([]*msgpb.MsgPosition, 0, len(fgMsg.endPositions))
 	for idx := range fgMsg.endPositions {
-		pos := proto.Clone(fgMsg.endPositions[idx]).(*internalpb.MsgPosition)
+		pos := proto.Clone(fgMsg.endPositions[idx]).(*msgpb.MsgPosition)
 		pos.ChannelName = ibNode.channelName
 		endPositions = append(endPositions, pos)
 	}
@@ -179,8 +179,8 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 
 	ibNode.lastTimestamp = endPositions[0].Timestamp
 
-	// Updating segment statistics in channel
-	seg2Upload, err := ibNode.updateSegmentStates(fgMsg.insertMessages, startPositions[0], endPositions[0])
+	// Add segment in channel if need and updating segment row number
+	seg2Upload, err := ibNode.addSegmentAndUpdateRowNum(fgMsg.insertMessages, startPositions[0], endPositions[0])
 	if err != nil {
 		// Occurs only if the collectionID is mismatch, should not happen
 		err = fmt.Errorf("update segment states in channel meta wrong, err = %s", err)
@@ -199,6 +199,7 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 		}
 	}
 
+	ibNode.updateSegmentsMemorySize(seg2Upload)
 	ibNode.DisplayStatistics(seg2Upload)
 
 	segmentsToSync := ibNode.Sync(fgMsg, seg2Upload, endPositions[0])
@@ -285,7 +286,17 @@ func (ibNode *insertBufferNode) DisplayStatistics(seg2Upload []UniqueID) {
 				zap.Int64("segmentID", segID),
 				zap.String("channel", ibNode.channelName),
 				zap.Int64("size", bd.size),
-				zap.Int64("limit", bd.limit))
+				zap.Int64("limit", bd.limit),
+				zap.Int64("memorySize", bd.memorySize()))
+		}
+	}
+}
+
+// updateSegmentsMemorySize updates segments' memory size in channel meta
+func (ibNode *insertBufferNode) updateSegmentsMemorySize(seg2Upload []UniqueID) {
+	for _, segID := range seg2Upload {
+		if bd, ok := ibNode.channel.getCurInsertBuffer(segID); ok {
+			ibNode.channel.updateSegmentMemorySize(segID, bd.memorySize())
 		}
 	}
 }
@@ -438,7 +449,7 @@ func (ibNode *insertBufferNode) FillInSyncTasks(fgMsg *flowGraphMsg, seg2Upload 
 	return syncTasks
 }
 
-func (ibNode *insertBufferNode) Sync(fgMsg *flowGraphMsg, seg2Upload []UniqueID, endPosition *internalpb.MsgPosition) []UniqueID {
+func (ibNode *insertBufferNode) Sync(fgMsg *flowGraphMsg, seg2Upload []UniqueID, endPosition *msgpb.MsgPosition) []UniqueID {
 	syncTasks := ibNode.FillInSyncTasks(fgMsg, seg2Upload)
 	segmentsToSync := make([]UniqueID, 0, len(syncTasks))
 
@@ -495,11 +506,11 @@ func (ibNode *insertBufferNode) Sync(fgMsg *flowGraphMsg, seg2Upload []UniqueID,
 	return segmentsToSync
 }
 
-// updateSegmentStates updates statistics in channel meta for the segments in insertMsgs.
+//	 addSegmentAndUpdateRowNum updates row number in channel meta for the segments in insertMsgs.
 //
-//	If the segment doesn't exist, a new segment will be created.
-//	The segment number of rows will be updated in mem, waiting to be uploaded to DataCoord.
-func (ibNode *insertBufferNode) updateSegmentStates(insertMsgs []*msgstream.InsertMsg, startPos, endPos *internalpb.MsgPosition) (seg2Upload []UniqueID, err error) {
+//		If the segment doesn't exist, a new segment will be created.
+//		The segment number of rows will be updated in mem, waiting to be uploaded to DataCoord.
+func (ibNode *insertBufferNode) addSegmentAndUpdateRowNum(insertMsgs []*msgstream.InsertMsg, startPos, endPos *msgpb.MsgPosition) (seg2Upload []UniqueID, err error) {
 	uniqueSeg := make(map[UniqueID]int64)
 	for _, msg := range insertMsgs {
 
@@ -535,7 +546,7 @@ func (ibNode *insertBufferNode) updateSegmentStates(insertMsgs []*msgstream.Inse
 	seg2Upload = make([]UniqueID, 0, len(uniqueSeg))
 	for id, num := range uniqueSeg {
 		seg2Upload = append(seg2Upload, id)
-		ibNode.channel.updateStatistics(id, num)
+		ibNode.channel.updateSegmentRowNumber(id, num)
 	}
 
 	return
@@ -547,7 +558,7 @@ func (ibNode *insertBufferNode) updateSegmentStates(insertMsgs []*msgstream.Inse
 // 	1.2 Get buffer data and put data into each field buffer
 // 	1.3 Put back into buffer
 // 	1.4 Update related statistics
-func (ibNode *insertBufferNode) bufferInsertMsg(msg *msgstream.InsertMsg, startPos, endPos *internalpb.MsgPosition) error {
+func (ibNode *insertBufferNode) bufferInsertMsg(msg *msgstream.InsertMsg, startPos, endPos *msgpb.MsgPosition) error {
 	if err := msg.CheckAligned(); err != nil {
 		return err
 	}
@@ -662,7 +673,7 @@ func newInsertBufferNode(ctx context.Context, collID UniqueID, delBufManager *De
 	var wTtMsgStream msgstream.MsgStream = wTt
 
 	mt := newMergedTimeTickerSender(func(ts Timestamp, segmentIDs []int64) error {
-		stats := make([]*datapb.SegmentStats, 0, len(segmentIDs))
+		stats := make([]*commonpb.SegmentStats, 0, len(segmentIDs))
 		for _, sid := range segmentIDs {
 			stat, err := config.channel.getSegmentStatisticsUpdates(sid)
 			if err != nil {
@@ -678,7 +689,7 @@ func newInsertBufferNode(ctx context.Context, collID UniqueID, delBufManager *De
 				EndTimestamp:   ts,
 				HashValues:     []uint32{0},
 			},
-			DataNodeTtMsg: datapb.DataNodeTtMsg{
+			DataNodeTtMsg: msgpb.DataNodeTtMsg{
 				Base: commonpbutil.NewMsgBase(
 					commonpbutil.WithMsgType(commonpb.MsgType_DataNodeTt),
 					commonpbutil.WithMsgID(0),

@@ -46,7 +46,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/concurrency"
+	"github.com/milvus-io/milvus/internal/util/conc"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/gc"
 	"github.com/milvus-io/milvus/internal/util/hardware"
@@ -56,7 +56,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/panjf2000/ants/v2"
 	"github.com/samber/lo"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
@@ -125,7 +124,7 @@ type QueryNode struct {
 	queryShardService *queryShardService
 
 	// pool for load/release channel
-	taskPool *concurrency.Pool
+	taskPool *conc.Pool
 
 	IsStandAlone bool
 }
@@ -272,17 +271,8 @@ func (node *QueryNode) Init() error {
 		node.etcdKV = etcdkv.NewEtcdKV(node.etcdCli, Params.EtcdCfg.MetaRootPath.GetValue())
 		log.Info("queryNode try to connect etcd success", zap.Any("MetaRootPath", Params.EtcdCfg.MetaRootPath))
 
-		cpuNum := runtime.GOMAXPROCS(0)
-
-		node.taskPool, err = concurrency.NewPool(cpuNum, ants.WithPreAlloc(true))
-		if err != nil {
-			log.Error("QueryNode init channel pool failed", zap.Error(err))
-			initError = err
-			return
-		}
-
+		node.taskPool = conc.NewDefaultPool()
 		node.metaReplica = newCollectionReplica()
-
 		node.loader = newSegmentLoader(
 			node.metaReplica,
 			node.etcdKV,

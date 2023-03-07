@@ -24,8 +24,8 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 )
 
@@ -41,11 +41,11 @@ func Test_packLoadSegmentRequest(t *testing.T) {
 	segmentInfo := &datapb.SegmentInfo{
 		ID:            0,
 		InsertChannel: mockVChannel,
-		StartPosition: &internalpb.MsgPosition{
+		StartPosition: &msgpb.MsgPosition{
 			ChannelName: mockPChannel,
 			Timestamp:   t1,
 		},
-		DmlPosition: &internalpb.MsgPosition{
+		DmlPosition: &msgpb.MsgPosition{
 			ChannelName: mockPChannel,
 			Timestamp:   t2,
 		},
@@ -60,7 +60,7 @@ func Test_packLoadSegmentRequest(t *testing.T) {
 			Infos: []*datapb.SegmentInfo{
 				proto.Clone(segmentInfo).(*datapb.SegmentInfo),
 			},
-			ChannelCheckpoint: map[string]*internalpb.MsgPosition{
+			ChannelCheckpoint: map[string]*msgpb.MsgPosition{
 				mockVChannel: {
 					ChannelName: mockPChannel,
 					Timestamp:   t3,

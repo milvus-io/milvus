@@ -24,6 +24,7 @@ package querynode
 #include "segcore/plan_c.h"
 */
 import "C"
+
 import (
 	"fmt"
 	"unsafe"

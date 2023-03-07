@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus/internal/util/concurrency"
+	"github.com/milvus-io/milvus/internal/util/conc"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
 
@@ -23,14 +23,14 @@ func Test_getOrCreateIOPool(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			p := getOrCreateIOPool()
-			futures := make([]*concurrency.Future, 0, nTask)
+			futures := make([]*conc.Future[any], 0, nTask)
 			for j := 0; j < nTask; j++ {
 				future := p.Submit(func() (interface{}, error) {
 					return nil, nil
 				})
 				futures = append(futures, future)
 			}
-			err := concurrency.AwaitAll(futures...)
+			err := conc.AwaitAll(futures...)
 			assert.NoError(t, err)
 		}()
 	}

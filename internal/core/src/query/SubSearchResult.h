@@ -22,7 +22,10 @@ namespace milvus::query {
 
 class SubSearchResult {
  public:
-    SubSearchResult(int64_t num_queries, int64_t topk, const MetricType& metric_type, int64_t round_decimal)
+    SubSearchResult(int64_t num_queries,
+                    int64_t topk,
+                    const MetricType& metric_type,
+                    int64_t round_decimal)
         : num_queries_(num_queries),
           topk_(topk),
           round_decimal_(round_decimal),
@@ -43,7 +46,8 @@ class SubSearchResult {
  public:
     static float
     init_value(const MetricType& metric_type) {
-        return (PositivelyRelated(metric_type) ? -1 : 1) * std::numeric_limits<float>::max();
+        return (PositivelyRelated(metric_type) ? -1 : 1) *
+               std::numeric_limits<float>::max();
     }
 
  public:

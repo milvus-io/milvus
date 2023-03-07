@@ -11,15 +11,16 @@
 
 #pragma once
 
+#include <tbb/concurrent_priority_queue.h>
+#include <tbb/concurrent_vector.h>
+
 #include <deque>
-#include <unordered_map>
 #include <map>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
-#include <tbb/concurrent_priority_queue.h>
-#include <tbb/concurrent_vector.h>
 
 #include "ConcurrentVector.h"
 #include "DeletedRecord.h"
@@ -27,13 +28,27 @@
 #include "SealedIndexingRecord.h"
 #include "SegmentSealed.h"
 #include "TimestampIndex.h"
+#include "VariableField.h"
 #include "index/ScalarIndex.h"
+#include "sys/mman.h"
 
 namespace milvus::segcore {
 
 class SegmentSealedImpl : public SegmentSealed {
  public:
     explicit SegmentSealedImpl(SchemaPtr schema, int64_t segment_id);
+    ~SegmentSealedImpl() {
+        for (auto& [field_id, data] : fixed_fields_) {
+            auto field_meta = schema_->operator[](field_id);
+            auto data_type = field_meta.get_data_type();
+            if (munmap(data, field_meta.get_sizeof() * get_row_count())) {
+                AssertInfo(true,
+                           "failed to unmap field " +
+                               std::to_string(field_id.get()) +
+                               " err=" + strerror(errno));
+            }
+        }
+    }
     void
     LoadIndex(const LoadIndexInfo& info) override;
     void
@@ -41,7 +56,8 @@ class SegmentSealedImpl : public SegmentSealed {
     void
     LoadDeletedRecord(const LoadDeletedRecordInfo& info) override;
     void
-    LoadSegmentMeta(const milvus::proto::segcore::LoadSegmentMeta& segment_meta) override;
+    LoadSegmentMeta(
+        const milvus::proto::segcore::LoadSegmentMeta& segment_meta) override;
     void
     DropIndex(const FieldId field_id) override;
     void
@@ -91,7 +107,10 @@ class SegmentSealedImpl : public SegmentSealed {
     PreDelete(int64_t size) override;
 
     Status
-    Delete(int64_t reserved_offset, int64_t size, const IdArray* pks, const Timestamp* timestamps) override;
+    Delete(int64_t reserved_offset,
+           int64_t size,
+           const IdArray* pks,
+           const Timestamp* timestamps) override;
 
  protected:
     // blob and row_count
@@ -104,12 +123,17 @@ class SegmentSealedImpl : public SegmentSealed {
     // Calculate: output[i] = Vec[seg_offset[i]],
     // where Vec is determined from field_offset
     void
-    bulk_subscript(SystemFieldType system_type, const int64_t* seg_offsets, int64_t count, void* output) const override;
+    bulk_subscript(SystemFieldType system_type,
+                   const int64_t* seg_offsets,
+                   int64_t count,
+                   void* output) const override;
 
     // Calculate: output[i] = Vec[seg_offset[i]]
     // where Vec is determined from field_offset
     std::unique_ptr<DataArray>
-    bulk_subscript(FieldId field_id, const int64_t* seg_offsets, int64_t count) const override;
+    bulk_subscript(FieldId field_id,
+                   const int64_t* seg_offsets,
+                   int64_t count) const override;
 
     void
     check_search(const query::Plan* plan) const override;
@@ -120,26 +144,40 @@ class SegmentSealedImpl : public SegmentSealed {
  private:
     template <typename T>
     static void
-    bulk_subscript_impl(const void* src_raw, const int64_t* seg_offsets, int64_t count, void* dst_raw);
+    bulk_subscript_impl(const void* src_raw,
+                        const int64_t* seg_offsets,
+                        int64_t count,
+                        void* dst_raw);
+
+    template <typename T>
+    static void
+    bulk_subscript_impl(const VariableField& field,
+                        const int64_t* seg_offsets,
+                        int64_t count,
+                        void* dst_raw);
 
     static void
-    bulk_subscript_impl(
-        int64_t element_sizeof, const void* src_raw, const int64_t* seg_offsets, int64_t count, void* dst_raw);
+    bulk_subscript_impl(int64_t element_sizeof,
+                        const void* src_raw,
+                        const int64_t* seg_offsets,
+                        int64_t count,
+                        void* dst_raw);
 
     std::unique_ptr<DataArray>
     fill_with_empty(FieldId field_id, int64_t count) const;
 
     void
     update_row_count(int64_t row_count) {
-        if (row_count_opt_.has_value()) {
-            AssertInfo(row_count_opt_.value() == row_count, "load data has different row count from other columns");
-        } else {
-            row_count_opt_ = row_count;
-        }
+        // if (row_count_opt_.has_value()) {
+        //     AssertInfo(row_count_opt_.value() == row_count, "load data has different row count from other columns");
+        // } else {
+        row_count_opt_ = row_count;
+        // }
     }
 
     void
-    mask_with_timestamps(BitsetType& bitset_chunk, Timestamp timestamp) const override;
+    mask_with_timestamps(BitsetType& bitset_chunk,
+                         Timestamp timestamp) const override;
 
     void
     vector_search(SearchInfo& search_info,
@@ -150,7 +188,9 @@ class SegmentSealedImpl : public SegmentSealed {
                   SearchResult& output) const override;
 
     void
-    mask_with_delete(BitsetType& bitset, int64_t ins_barrier, Timestamp timestamp) const override;
+    mask_with_delete(BitsetType& bitset,
+                     int64_t ins_barrier,
+                     Timestamp timestamp) const override;
 
     bool
     is_system_field_ready() const {
@@ -182,7 +222,7 @@ class SegmentSealedImpl : public SegmentSealed {
     BitsetType field_data_ready_bitset_;
     BitsetType index_ready_bitset_;
     std::atomic<int> system_ready_count_ = 0;
-    // segment datas
+    // segment data
 
     // TODO: generate index for scalar
     std::optional<int64_t> row_count_opt_;
@@ -200,6 +240,8 @@ class SegmentSealedImpl : public SegmentSealed {
 
     SchemaPtr schema_;
     int64_t id_;
+    std::unordered_map<FieldId, void*> fixed_fields_;
+    std::unordered_map<FieldId, VariableField> variable_fields_;
 };
 
 inline SegmentSealedPtr

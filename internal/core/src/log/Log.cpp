@@ -64,7 +64,7 @@ SetThreadName(const std::string& name) {
 
 std::string
 GetThreadName() {
-    std::string thread_name = "unamed";
+    std::string thread_name = "unnamed";
     char name[16];
     size_t len = 16;
     auto err = pthread_getname_np(pthread_self(), name, len);
@@ -108,12 +108,17 @@ get_thread_starttime() {
 
     int64_t pid = getpid();
     char filename[256];
-    snprintf(filename, sizeof(filename), "/proc/%lld/task/%lld/stat", (long long)pid, (long long)tid);  // NOLINT
+    snprintf(filename,
+             sizeof(filename),
+             "/proc/%lld/task/%lld/stat",
+             (long long)pid,
+             (long long)tid);  // NOLINT
 
     int64_t val = 0;
     char comm[16], state;
     FILE* thread_stat = fopen(filename, "r");
-    auto ret = fscanf(thread_stat, "%lld %s %s ", (long long*)&val, comm, &state);  // NOLINT
+    auto ret = fscanf(
+        thread_stat, "%lld %s %s ", (long long*)&val, comm, &state);  // NOLINT
 
     for (auto i = 4; i < 23; i++) {
         ret = fscanf(thread_stat, "%lld ", (long long*)&val);  // NOLINT
@@ -131,7 +136,8 @@ get_thread_starttime() {
 int64_t
 get_thread_start_timestamp() {
     try {
-        return get_now_timestamp() - get_system_boottime() + get_thread_starttime();
+        return get_now_timestamp() - get_system_boottime() +
+               get_thread_starttime();
     } catch (...) {
         return 0;
     }

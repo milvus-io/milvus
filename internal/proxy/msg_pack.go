@@ -19,17 +19,18 @@ package proxy
 import (
 	"context"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/mq/msgstream"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"go.uber.org/zap"
 )
 
 func assignSegmentID(ctx context.Context, insertMsg *msgstream.InsertMsg, result *milvuspb.MutationResult, channelNames []string, idAllocator *allocator.IDAllocator, segIDAssigner *segIDAssigner) (*msgstream.MsgPack, error) {
@@ -91,7 +92,7 @@ func assignSegmentID(ctx context.Context, insertMsg *msgstream.InsertMsg, result
 
 	// create empty insert message
 	createInsertMsg := func(segmentID UniqueID, channelName string, msgID int64) *msgstream.InsertMsg {
-		insertReq := internalpb.InsertRequest{
+		insertReq := msgpb.InsertRequest{
 			Base: commonpbutil.NewMsgBase(
 				commonpbutil.WithMsgType(commonpb.MsgType_Insert),
 				commonpbutil.WithMsgID(msgID),
@@ -104,7 +105,7 @@ func assignSegmentID(ctx context.Context, insertMsg *msgstream.InsertMsg, result
 			PartitionName:  insertMsg.PartitionName,
 			SegmentID:      segmentID,
 			ShardName:      channelName,
-			Version:        internalpb.InsertDataVersion_ColumnBased,
+			Version:        msgpb.InsertDataVersion_ColumnBased,
 		}
 		insertReq.FieldsData = make([]*schemapb.FieldData, len(insertMsg.GetFieldsData()))
 

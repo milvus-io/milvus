@@ -78,7 +78,7 @@ func TestManagerOptions(t *testing.T) {
 	t.Run("test withChannelSealPolicies", func(t *testing.T) {
 		opt := withChannelSealPolices(getChannelOpenSegCapacityPolicy(1000))
 		assert.NotNil(t, opt)
-		// manaul set nil
+		// manual set nil
 		segmentManager.channelSealPolicies = []channelSealPolicy{}
 		opt.apply(segmentManager)
 		assert.True(t, len(segmentManager.channelSealPolicies) > 0)
@@ -249,7 +249,7 @@ func TestSaveSegmentsToMeta(t *testing.T) {
 	assert.EqualValues(t, 1, len(allocations))
 	_, err = segmentManager.SealAllSegments(context.Background(), collID, nil, false)
 	assert.Nil(t, err)
-	segment := meta.GetSegment(allocations[0].SegmentID)
+	segment := meta.GetHealthySegment(allocations[0].SegmentID)
 	assert.NotNil(t, segment)
 	assert.EqualValues(t, segment.LastExpireTime, allocations[0].ExpireTime)
 	assert.EqualValues(t, commonpb.SegmentState_Sealed, segment.State)
@@ -271,7 +271,7 @@ func TestSaveSegmentsToMetaWithSpecificSegments(t *testing.T) {
 	assert.EqualValues(t, 1, len(allocations))
 	_, err = segmentManager.SealAllSegments(context.Background(), collID, []int64{allocations[0].SegmentID}, false)
 	assert.Nil(t, err)
-	segment := meta.GetSegment(allocations[0].SegmentID)
+	segment := meta.GetHealthySegment(allocations[0].SegmentID)
 	assert.NotNil(t, segment)
 	assert.EqualValues(t, segment.LastExpireTime, allocations[0].ExpireTime)
 	assert.EqualValues(t, commonpb.SegmentState_Sealed, segment.State)
@@ -292,11 +292,11 @@ func TestDropSegment(t *testing.T) {
 	assert.Nil(t, err)
 	assert.EqualValues(t, 1, len(allocations))
 	segID := allocations[0].SegmentID
-	segment := meta.GetSegment(segID)
+	segment := meta.GetHealthySegment(segID)
 	assert.NotNil(t, segment)
 
 	segmentManager.DropSegment(context.Background(), segID)
-	segment = meta.GetSegment(segID)
+	segment = meta.GetHealthySegment(segID)
 	assert.NotNil(t, segment)
 }
 
@@ -354,12 +354,12 @@ func TestExpireAllocation(t *testing.T) {
 		}
 	}
 
-	segment := meta.GetSegment(id)
+	segment := meta.GetHealthySegment(id)
 	assert.NotNil(t, segment)
 	assert.EqualValues(t, 100, len(segment.allocations))
 	err = segmentManager.ExpireAllocations("ch1", maxts)
 	assert.Nil(t, err)
-	segment = meta.GetSegment(id)
+	segment = meta.GetHealthySegment(id)
 	assert.NotNil(t, segment)
 	assert.EqualValues(t, 0, len(segment.allocations))
 }
@@ -437,7 +437,7 @@ func TestGetFlushableSegments(t *testing.T) {
 		ids, err = segmentManager.GetFlushableSegments(context.TODO(), "c1", allocations[0].ExpireTime)
 		assert.Nil(t, err)
 		assert.Empty(t, ids)
-		assert.Nil(t, meta.GetSegment(allocations[0].SegmentID))
+		assert.Nil(t, meta.GetHealthySegment(allocations[0].SegmentID))
 	})
 }
 

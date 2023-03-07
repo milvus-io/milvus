@@ -16,10 +16,13 @@
 
 #pragma once
 
-#include <deque>
+#include <fmt/core.h>
+
 #include <boost_ext/dynamic_bitset_ext.hpp>
-#include "exceptions/EasyAssert.h"
+#include <deque>
+
 #include "common/Types.h"
+#include "exceptions/EasyAssert.h"
 #include "knowhere/bitsetview.h"
 
 namespace milvus {
@@ -29,14 +32,17 @@ class BitsetView : public knowhere::BitsetView {
     BitsetView() = default;
     ~BitsetView() = default;
 
-    BitsetView(const std::nullptr_t value) : knowhere::BitsetView(value) {  // NOLINT
+    BitsetView(const std::nullptr_t value)
+        : knowhere::BitsetView(value) {  // NOLINT
     }
 
-    BitsetView(const uint8_t* data, size_t num_bits) : knowhere::BitsetView(data, num_bits) {  // NOLINT
+    BitsetView(const uint8_t* data, size_t num_bits)
+        : knowhere::BitsetView(data, num_bits) {  // NOLINT
     }
 
     BitsetView(const BitsetType& bitset)  // NOLINT
-        : BitsetView((uint8_t*)boost_ext::get_data(bitset), size_t(bitset.size())) {
+        : BitsetView((uint8_t*)boost_ext::get_data(bitset),
+                     size_t(bitset.size())) {
     }
 
     BitsetView(const BitsetTypePtr& bitset_ptr) {  // NOLINT
@@ -52,9 +58,12 @@ class BitsetView : public knowhere::BitsetView {
         }
 
         AssertInfo((offset & 0x7) == 0, "offset is not divisible by 8");
-        AssertInfo((offset + size) <= this->size(), "offset + size cross the border.[offset=" + std::to_string(offset) +
-                                                        "][size=" + std::to_string(size) +
-                                                        "][this.size()=" + std::to_string(this->size()) + "]");
+        AssertInfo(offset + size <= this->size(),
+                   fmt::format(
+                       "index out of range, offset={}, size={}, bitset.size={}",
+                       offset,
+                       size,
+                       this->size()));
         return {data() + (offset >> 3), size};
     }
 };

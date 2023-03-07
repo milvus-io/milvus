@@ -73,7 +73,9 @@ class ReduceHelper {
     FillEntryData();
 
     int64_t
-    ReduceSearchResultForOneNQ(int64_t qi, int64_t topk, int64_t& result_offset);
+    ReduceSearchResultForOneNQ(int64_t qi,
+                               int64_t topk,
+                               int64_t& result_offset);
 
     void
     ReduceResultData();
@@ -102,7 +104,10 @@ class ReduceHelper {
     // Used for merge results,
     // define these here to avoid allocating them for each query
     std::vector<SearchResultPair> pairs_;
-    std::priority_queue<SearchResultPair*, std::vector<SearchResultPair*>, SearchResultPairComparator> heap_;
+    std::priority_queue<SearchResultPair*,
+                        std::vector<SearchResultPair*>,
+                        SearchResultPairComparator>
+        heap_;
     std::unordered_set<milvus::PkType> pk_set_;
 };
 

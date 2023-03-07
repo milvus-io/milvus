@@ -25,21 +25,26 @@ import (
 
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.uber.org/zap"
+	"golang.org/x/sync/singleflight"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
 
+	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/tracer"
 	"github.com/milvus-io/milvus/internal/util"
 	"github.com/milvus-io/milvus/internal/util/crypto"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/generic"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
 
 // GrpcClient abstracts client of grpc
-type GrpcClient[T any] interface {
+type GrpcClient[T interface {
+	GetComponentStates(ctx context.Context, in *milvuspb.GetComponentStatesRequest, opts ...grpc.CallOption) (*milvuspb.ComponentStates, error)
+}] interface {
 	SetRole(string)
 	GetRole() string
 	SetGetAddrFunc(func() (string, error))
@@ -54,7 +59,9 @@ type GrpcClient[T any] interface {
 }
 
 // ClientBase is a base of grpc client
-type ClientBase[T any] struct {
+type ClientBase[T interface {
+	GetComponentStates(ctx context.Context, in *milvuspb.GetComponentStatesRequest, opts ...grpc.CallOption) (*milvuspb.ComponentStates, error)
+}] struct {
 	getAddrFunc   func() (string, error)
 	newGrpcClient func(cc *grpc.ClientConn) T
 
@@ -77,6 +84,8 @@ type ClientBase[T any] struct {
 	MaxBackoff        float32
 	BackoffMultiplier float32
 	NodeID            int64
+
+	sf singleflight.Group
 }
 
 // SetRole sets role of client
@@ -255,21 +264,26 @@ func (c *ClientBase[T]) callOnce(ctx context.Context, caller func(client T) (any
 		return generic.Zero[T](), err
 	}
 
-	ret, err2 := caller(client)
-	if err2 == nil {
+	ret, err := caller(client)
+	if err == nil {
 		return ret, nil
 	}
 
 	if !funcutil.CheckCtxValid(ctx) {
-		return generic.Zero[T](), err2
+		// start bg check in case of https://github.com/milvus-io/milvus/issues/22435
+		go c.bgHealthCheck(client)
+		return generic.Zero[T](), err
 	}
-	if !funcutil.IsGrpcErr(err2) {
-		log.Debug("ClientBase:isNotGrpcErr", zap.Error(err2))
-		return generic.Zero[T](), err2
+	if !funcutil.IsGrpcErr(err) {
+		log.Warn("ClientBase:isNotGrpcErr", zap.Error(err))
+		return generic.Zero[T](), err
 	}
-	log.Debug(c.GetRole()+" ClientBase grpc error, start to reset connection", zap.Error(err2))
+	log.Info("ClientBase grpc error, start to reset connection",
+		zap.String("role", c.GetRole()),
+		zap.Error(err),
+	)
 	c.resetConnection(client)
-	return ret, err2
+	return ret, err
 }
 
 // Call does a grpc call
@@ -281,7 +295,10 @@ func (c *ClientBase[T]) Call(ctx context.Context, caller func(client T) (any, er
 	ret, err := c.callOnce(ctx, caller)
 	if err != nil {
 		traceErr := fmt.Errorf("err: %w\n, %s", err, tracer.StackTrace())
-		log.Warn("ClientBase Call grpc first call get error", zap.String("role", c.GetRole()), zap.Error(traceErr))
+		log.Warn("ClientBase Call grpc first call get error",
+			zap.String("role", c.GetRole()),
+			zap.Error(traceErr),
+		)
 		return generic.Zero[T](), traceErr
 	}
 	return ret, err
@@ -312,6 +329,20 @@ func (c *ClientBase[T]) ReCall(ctx context.Context, caller func(client T) (any, 
 		return generic.Zero[T](), traceErr
 	}
 	return ret, err
+}
+
+func (c *ClientBase[T]) bgHealthCheck(client T) {
+	c.sf.Do("healthcheck", func() (any, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), paramtable.Get().CommonCfg.SessionTTL.GetAsDuration(time.Second))
+		defer cancel()
+
+		_, err := client.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
+		if err != nil {
+			c.resetConnection(client)
+		}
+
+		return struct{}{}, nil
+	})
 }
 
 // Close close the client connection

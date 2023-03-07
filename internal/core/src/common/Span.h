@@ -17,8 +17,8 @@
 #pragma once
 
 #include <cassert>
-#include <type_traits>
 #include <string>
+#include <type_traits>
 
 #include "Types.h"
 #include "VectorTrait.h"
@@ -27,7 +27,9 @@ namespace milvus {
 // type erasure to work around virtual restriction
 class SpanBase {
  public:
-    explicit SpanBase(const void* data, int64_t row_count, int64_t element_sizeof)
+    explicit SpanBase(const void* data,
+                      int64_t row_count,
+                      int64_t element_sizeof)
         : data_(data), row_count_(row_count), element_sizeof_(element_sizeof) {
     }
 
@@ -57,17 +59,21 @@ class Span;
 
 // TODO: refine Span to support T=FloatVector
 template <typename T>
-class Span<T, typename std::enable_if_t<IsScalar<T> || std::is_same_v<T, PkType>>> {
+class Span<
+    T,
+    typename std::enable_if_t<IsScalar<T> || std::is_same_v<T, PkType>>> {
  public:
-    using embeded_type = T;
-    explicit Span(const T* data, int64_t row_count) : data_(data), row_count_(row_count) {
+    using embedded_type = T;
+    explicit Span(const T* data, int64_t row_count)
+        : data_(data), row_count_(row_count) {
     }
 
     operator SpanBase() const {
         return SpanBase(data_, row_count_, sizeof(T));
     }
 
-    explicit Span(const SpanBase& base) : Span(reinterpret_cast<const T*>(base.data()), base.row_count()) {
+    explicit Span(const SpanBase& base)
+        : Span(reinterpret_cast<const T*>(base.data()), base.row_count()) {
         assert(base.element_sizeof() == sizeof(T));
     }
 
@@ -97,7 +103,9 @@ class Span<T, typename std::enable_if_t<IsScalar<T> || std::is_same_v<T, PkType>
 };
 
 template <typename VectorType>
-class Span<VectorType, typename std::enable_if_t<std::is_base_of_v<VectorTrait, VectorType>>> {
+class Span<
+    VectorType,
+    typename std::enable_if_t<std::is_base_of_v<VectorTrait, VectorType>>> {
  public:
     using embedded_type = typename VectorType::embedded_type;
 

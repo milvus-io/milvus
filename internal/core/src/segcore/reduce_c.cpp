@@ -37,7 +37,8 @@ ReduceSearchResultsAndFillData(CSearchResultDataBlobs* cSearchResultDataBlobs,
             search_results[i] = static_cast<SearchResult*>(c_search_results[i]);
         }
 
-        auto reduce_helper = milvus::segcore::ReduceHelper(search_results, plan, slice_nqs, slice_topKs, num_slices);
+        auto reduce_helper = milvus::segcore::ReduceHelper(
+            search_results, plan, slice_nqs, slice_topKs, num_slices);
         reduce_helper.Reduce();
         reduce_helper.Marshal();
 
@@ -55,10 +56,14 @@ GetSearchResultDataBlob(CProto* searchResultDataBlob,
                         int32_t blob_index) {
     try {
         auto search_result_data_blobs =
-            reinterpret_cast<milvus::segcore::SearchResultDataBlobs*>(cSearchResultDataBlobs);
-        AssertInfo(blob_index < search_result_data_blobs->blobs.size(), "blob_index out of range");
-        searchResultDataBlob->proto_blob = search_result_data_blobs->blobs[blob_index].data();
-        searchResultDataBlob->proto_size = search_result_data_blobs->blobs[blob_index].size();
+            reinterpret_cast<milvus::segcore::SearchResultDataBlobs*>(
+                cSearchResultDataBlobs);
+        AssertInfo(blob_index < search_result_data_blobs->blobs.size(),
+                   "blob_index out of range");
+        searchResultDataBlob->proto_blob =
+            search_result_data_blobs->blobs[blob_index].data();
+        searchResultDataBlob->proto_size =
+            search_result_data_blobs->blobs[blob_index].size();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         searchResultDataBlob->proto_blob = nullptr;
@@ -72,6 +77,8 @@ DeleteSearchResultDataBlobs(CSearchResultDataBlobs cSearchResultDataBlobs) {
     if (cSearchResultDataBlobs == nullptr) {
         return;
     }
-    auto search_result_data_blobs = reinterpret_cast<milvus::segcore::SearchResultDataBlobs*>(cSearchResultDataBlobs);
+    auto search_result_data_blobs =
+        reinterpret_cast<milvus::segcore::SearchResultDataBlobs*>(
+            cSearchResultDataBlobs);
     delete search_result_data_blobs;
 }

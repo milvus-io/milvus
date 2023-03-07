@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/log"
 	querypb "github.com/milvus-io/milvus/internal/proto/querypb"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
@@ -111,6 +112,22 @@ func (node *MockQueryNode) Start() error {
 			segment.GetSegmentID())
 		node.segmentVersion[segment.GetSegmentID()] = req.GetVersion()
 	}).Return(successStatus, nil).Maybe()
+	node.EXPECT().GetComponentStates(mock.Anything, mock.AnythingOfType("*milvuspb.GetComponentStatesRequest")).
+		Call.Return(func(context.Context, *milvuspb.GetComponentStatesRequest) *milvuspb.ComponentStates {
+		select {
+		case <-node.ctx.Done():
+			return nil
+		default:
+			return &milvuspb.ComponentStates{}
+		}
+	}, func(context.Context, *milvuspb.GetComponentStatesRequest) error {
+		select {
+		case <-node.ctx.Done():
+			return grpc.ErrServerStopped
+		default:
+			return nil
+		}
+	}).Maybe()
 
 	// Register
 	node.session.Init(typeutil.QueryNodeRole, node.addr, false, true)

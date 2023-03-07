@@ -27,30 +27,172 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-
-	"github.com/minio/minio-go/v7"
+	minio "github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
-
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-
-	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	kvmocks "github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 )
 
+type GarbageCollectorSuite struct {
+	suite.Suite
+
+	mockChunkManager *mocks.ChunkManager
+	gc               *garbageCollector
+}
+
+func (s *GarbageCollectorSuite) SetupTest() {
+	meta, err := newMemoryMeta()
+	s.Require().NoError(err)
+	s.mockChunkManager = &mocks.ChunkManager{}
+	s.gc = newGarbageCollector(
+		meta, newMockHandler(), GcOption{
+			cli:              s.mockChunkManager,
+			enabled:          true,
+			checkInterval:    time.Millisecond * 10,
+			missingTolerance: time.Hour * 24,
+			dropTolerance:    time.Hour * 24,
+		},
+	)
+}
+
+func (s *GarbageCollectorSuite) TearDownTest() {
+	s.mockChunkManager = nil
+	s.gc.close()
+	s.gc = nil
+}
+
+func (s *GarbageCollectorSuite) TestBasicOperation() {
+	s.Run("normal_gc", func() {
+		gc := s.gc
+		s.mockChunkManager.EXPECT().RootPath().Return("files")
+		s.mockChunkManager.EXPECT().ListWithPrefix(mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("bool")).
+			Return([]string{}, []time.Time{}, nil)
+		gc.start()
+		// make ticker run at least once
+		time.Sleep(time.Millisecond * 20)
+
+		s.NotPanics(func() {
+			gc.close()
+		})
+	})
+
+	s.Run("nil_client", func() {
+		// initial a new garbageCollector here
+		gc := newGarbageCollector(nil, newMockHandler(), GcOption{
+			cli:     nil,
+			enabled: true,
+		})
+
+		s.NotPanics(func() {
+			gc.start()
+		})
+
+		s.NotPanics(func() {
+			gc.close()
+		})
+	})
+}
+
+func (s *GarbageCollectorSuite) TestScan() {
+	s.Run("listCollectionPrefix_fails", func() {
+		s.mockChunkManager.ExpectedCalls = nil
+		s.mockChunkManager.EXPECT().RootPath().Return("files")
+		s.mockChunkManager.EXPECT().ListWithPrefix(mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("bool")).
+			Return(nil, nil, errors.New("mocked"))
+
+		s.gc.scan()
+		s.mockChunkManager.AssertNotCalled(s.T(), "Remove", mock.Anything, mock.Anything)
+	})
+
+	s.Run("collectionPrefix_invalid", func() {
+		s.mockChunkManager.ExpectedCalls = nil
+		s.mockChunkManager.EXPECT().RootPath().Return("files")
+		/*
+			s.mockChunkManager.EXPECT().ListWithPrefix(mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("bool")).
+				Return([]string{"files/insert_log/1/", "files/bad_prefix", "files/insert_log/string/"}, lo.RepeatBy(3, func(_ int) time.Time {
+					return time.Now().Add(-time.Hour)
+				}), nil)*/
+
+		logTypes := []string{"files/insert_log/", "files/stats_log/", "files/delta_log/"}
+		for _, logType := range logTypes {
+			validSubPath := "1/2/3/100/2000"
+			if logType == "files/delta_log/" {
+				validSubPath = "1/2/3/2000"
+			}
+			s.mockChunkManager.EXPECT().ListWithPrefix(mock.Anything, logType, false).
+				Return([]string{path.Join(logType, "1") + "/", path.Join(logType, "2") + "/", path.Join(logType, "string") + "/", "files/badprefix/"}, lo.RepeatBy(4, func(_ int) time.Time { return time.Now() }), nil)
+			s.mockChunkManager.EXPECT().ListWithPrefix(mock.Anything, path.Join(logType, "1")+"/", true).
+				Return([]string{path.Join(logType, validSubPath)}, []time.Time{time.Now().Add(time.Hour * -48)}, nil)
+			s.mockChunkManager.EXPECT().Remove(mock.Anything, path.Join(logType, validSubPath)).Return(nil)
+		}
+
+		s.gc.option.collValidator = func(collID int64) bool {
+			return collID == 1
+		}
+
+		s.gc.scan()
+		//s.mockChunkManager.AssertNotCalled(s.T(), "Remove", mock.Anything, mock.Anything)
+		s.mockChunkManager.AssertExpectations(s.T())
+	})
+
+	s.Run("fileScan_fails", func() {
+		s.mockChunkManager.ExpectedCalls = nil
+		s.mockChunkManager.Calls = nil
+		s.mockChunkManager.EXPECT().RootPath().Return("files")
+		isCollPrefix := func(prefix string) bool {
+			return lo.Contains([]string{"files/insert_log/", "files/stats_log/", "files/delta_log/"}, prefix)
+		}
+		s.mockChunkManager.EXPECT().ListWithPrefix(mock.Anything, mock.AnythingOfType("string"), mock.AnythingOfType("bool")).Call.Return(
+			func(_ context.Context, prefix string, recursive bool) []string {
+				if isCollPrefix(prefix) {
+					return []string{path.Join(prefix, "1")}
+				}
+				return nil
+			},
+			func(_ context.Context, prefix string, recursive bool) []time.Time {
+				if isCollPrefix(prefix) {
+					return []time.Time{time.Now()}
+				}
+				return nil
+			},
+			func(_ context.Context, prefix string, recursive bool) error {
+				if isCollPrefix(prefix) {
+					return nil
+				}
+				return errors.New("mocked")
+			},
+		)
+		s.gc.option.collValidator = func(collID int64) bool {
+			return true
+		}
+
+		s.gc.scan()
+		s.mockChunkManager.AssertNotCalled(s.T(), "Remove", mock.Anything, mock.Anything)
+	})
+}
+
+func TestGarbageCollectorSuite(t *testing.T) {
+	suite.Run(t, new(GarbageCollectorSuite))
+}
+
+/*
 func Test_garbageCollector_basic(t *testing.T) {
 	bucketName := `datacoord-ut` + strings.ToLower(funcutil.RandomString(8))
 	rootPath := `gc` + funcutil.RandomString(8)
@@ -94,7 +236,7 @@ func Test_garbageCollector_basic(t *testing.T) {
 		})
 	})
 
-}
+}*/
 
 func validateMinioPrefixElements(t *testing.T, cli *minio.Client, bucketName string, prefix string, elements []string) {
 	var current []string
@@ -776,7 +918,7 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 
 	m := &meta{
 		catalog: catalog,
-		channelCPs: map[string]*internalpb.MsgPosition{
+		channelCPs: map[string]*msgpb.MsgPosition{
 			"dmlChannel": {
 				Timestamp: 1000,
 			},
@@ -899,7 +1041,7 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 						MaxRowNum:      65535,
 						DroppedAt:      0,
 						CompactionFrom: nil,
-						DmlPosition: &internalpb.MsgPosition{
+						DmlPosition: &msgpb.MsgPosition{
 							Timestamp: 1200,
 						},
 					},
@@ -998,17 +1140,17 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 	}
 	gc.clearEtcd()
 
-	segA := gc.meta.GetSegmentUnsafe(segID)
+	segA := gc.meta.GetSegment(segID)
 	assert.NotNil(t, segA)
-	segB := gc.meta.GetSegmentUnsafe(segID + 1)
+	segB := gc.meta.GetSegment(segID + 1)
 	assert.NotNil(t, segB)
-	segC := gc.meta.GetSegmentUnsafe(segID + 2)
+	segC := gc.meta.GetSegment(segID + 2)
 	assert.NotNil(t, segC)
-	segD := gc.meta.GetSegmentUnsafe(segID + 3)
+	segD := gc.meta.GetSegment(segID + 3)
 	assert.NotNil(t, segD)
-	segE := gc.meta.GetSegmentUnsafe(segID + 4)
+	segE := gc.meta.GetSegment(segID + 4)
 	assert.NotNil(t, segE)
-	segF := gc.meta.GetSegmentUnsafe(segID + 5)
+	segF := gc.meta.GetSegment(segID + 5)
 	assert.NotNil(t, segF)
 
 	err := gc.meta.AddSegmentIndex(&model.SegmentIndex{
@@ -1035,21 +1177,21 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 	//assert.NotNil(t, segA)
 	//segB := gc.meta.GetSegmentUnsafe(segID + 1)
 	//assert.NotNil(t, segB)
-	segC = gc.meta.GetSegmentUnsafe(segID + 2)
+	segC = gc.meta.GetSegment(segID + 2)
 	assert.Nil(t, segC)
-	segD = gc.meta.GetSegmentUnsafe(segID + 3)
+	segD = gc.meta.GetSegment(segID + 3)
 	assert.Nil(t, segD)
-	segE = gc.meta.GetSegmentUnsafe(segID + 4)
+	segE = gc.meta.GetSegment(segID + 4)
 	assert.NotNil(t, segE)
-	segF = gc.meta.GetSegmentUnsafe(segID + 5)
+	segF = gc.meta.GetSegment(segID + 5)
 	assert.NotNil(t, segF)
 
 	gc.clearEtcd()
-	segA = gc.meta.GetSegmentUnsafe(segID)
+	segA = gc.meta.GetSegment(segID)
 	assert.Nil(t, segA)
-	segB = gc.meta.GetSegmentUnsafe(segID + 1)
+	segB = gc.meta.GetSegment(segID + 1)
 	assert.Nil(t, segB)
-	segF = gc.meta.GetSegmentUnsafe(segID + 5)
+	segF = gc.meta.GetSegment(segID + 5)
 	assert.NotNil(t, segF)
 
 }

@@ -4,9 +4,9 @@ package mocks
 
 import (
 	context "context"
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 
 	datapb "github.com/milvus-io/milvus/internal/proto/datapb"
-	internalpb "github.com/milvus-io/milvus/internal/proto/internalpb"
 
 	mock "github.com/stretchr/testify/mock"
 
@@ -680,15 +680,15 @@ func (_c *DataCoordCatalog_IsChannelDropped_Call) Return(_a0 bool) *DataCoordCat
 }
 
 // ListChannelCheckpoint provides a mock function with given fields: ctx
-func (_m *DataCoordCatalog) ListChannelCheckpoint(ctx context.Context) (map[string]*internalpb.MsgPosition, error) {
+func (_m *DataCoordCatalog) ListChannelCheckpoint(ctx context.Context) (map[string]*msgpb.MsgPosition, error) {
 	ret := _m.Called(ctx)
 
-	var r0 map[string]*internalpb.MsgPosition
-	if rf, ok := ret.Get(0).(func(context.Context) map[string]*internalpb.MsgPosition); ok {
+	var r0 map[string]*msgpb.MsgPosition
+	if rf, ok := ret.Get(0).(func(context.Context) map[string]*msgpb.MsgPosition); ok {
 		r0 = rf(ctx)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(map[string]*internalpb.MsgPosition)
+			r0 = ret.Get(0).(map[string]*msgpb.MsgPosition)
 		}
 	}
 
@@ -720,7 +720,7 @@ func (_c *DataCoordCatalog_ListChannelCheckpoint_Call) Run(run func(ctx context.
 	return _c
 }
 
-func (_c *DataCoordCatalog_ListChannelCheckpoint_Call) Return(_a0 map[string]*internalpb.MsgPosition, _a1 error) *DataCoordCatalog_ListChannelCheckpoint_Call {
+func (_c *DataCoordCatalog_ListChannelCheckpoint_Call) Return(_a0 map[string]*msgpb.MsgPosition, _a1 error) *DataCoordCatalog_ListChannelCheckpoint_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
@@ -941,11 +941,11 @@ func (_c *DataCoordCatalog_RevertAlterSegmentsAndAddNewSegment_Call) Return(_a0 
 }
 
 // SaveChannelCheckpoint provides a mock function with given fields: ctx, vChannel, pos
-func (_m *DataCoordCatalog) SaveChannelCheckpoint(ctx context.Context, vChannel string, pos *internalpb.MsgPosition) error {
+func (_m *DataCoordCatalog) SaveChannelCheckpoint(ctx context.Context, vChannel string, pos *msgpb.MsgPosition) error {
 	ret := _m.Called(ctx, vChannel, pos)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, *internalpb.MsgPosition) error); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string, *msgpb.MsgPosition) error); ok {
 		r0 = rf(ctx, vChannel, pos)
 	} else {
 		r0 = ret.Error(0)
@@ -962,14 +962,14 @@ type DataCoordCatalog_SaveChannelCheckpoint_Call struct {
 // SaveChannelCheckpoint is a helper method to define mock.On call
 //   - ctx context.Context
 //   - vChannel string
-//   - pos *internalpb.MsgPosition
+//   - pos *msgpb.MsgPosition
 func (_e *DataCoordCatalog_Expecter) SaveChannelCheckpoint(ctx interface{}, vChannel interface{}, pos interface{}) *DataCoordCatalog_SaveChannelCheckpoint_Call {
 	return &DataCoordCatalog_SaveChannelCheckpoint_Call{Call: _e.mock.On("SaveChannelCheckpoint", ctx, vChannel, pos)}
 }
 
-func (_c *DataCoordCatalog_SaveChannelCheckpoint_Call) Run(run func(ctx context.Context, vChannel string, pos *internalpb.MsgPosition)) *DataCoordCatalog_SaveChannelCheckpoint_Call {
+func (_c *DataCoordCatalog_SaveChannelCheckpoint_Call) Run(run func(ctx context.Context, vChannel string, pos *msgpb.MsgPosition)) *DataCoordCatalog_SaveChannelCheckpoint_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(string), args[2].(*internalpb.MsgPosition))
+		run(args[0].(context.Context), args[1].(string), args[2].(*msgpb.MsgPosition))
 	})
 	return _c
 }

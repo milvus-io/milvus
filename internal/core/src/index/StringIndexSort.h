@@ -37,7 +37,7 @@ class StringIndexSort : public ScalarIndexSort<std::string> {
     }
 
     const TargetBitmapPtr
-    PrefixMatch(std::string prefix) {
+    PrefixMatch(std::string_view prefix) {
         auto data = GetData();
         TargetBitmapPtr bitset = std::make_unique<TargetBitmap>(data.size());
         for (size_t i = 0; i < data.size(); i++) {

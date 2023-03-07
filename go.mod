@@ -27,7 +27,7 @@ require (
 	github.com/klauspost/compress v1.14.4
 	github.com/lingdor/stackerror v0.0.0-20191119040541-976d8885ed76
 	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d
-	github.com/milvus-io/milvus-proto/go-api v0.0.0-20230220081023-3cf200738ae7
+	github.com/milvus-io/milvus-proto/go-api v0.0.0-20230303054144-16f081962572
 	github.com/minio/minio-go/v7 v7.0.17
 	github.com/panjf2000/ants/v2 v2.4.8
 	github.com/prometheus/client_golang v1.11.1
@@ -179,8 +179,8 @@ require (
 require github.com/ianlancetaylor/cgosymbolizer v0.0.0-20221217025313-27d3c9f66b6a // indirect
 
 require (
-	github.com/golang/mock v1.5.0
 	github.com/cockroachdb/errors v1.9.1
+	github.com/golang/mock v1.5.0
 	github.com/uber/jaeger-client-go v2.30.0+incompatible
 	go.opentelemetry.io/otel/exporters/jaeger v1.11.2
 	go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.11.2

@@ -42,7 +42,8 @@ class LocalChunkManager : public ChunkManager {
     static LocalChunkManager&
     GetInstance() {
         // thread-safe enough after c++ 11
-        static LocalChunkManager instance(ChunkMangerConfig::GetLocalRootPath());
+        static LocalChunkManager instance(
+            ChunkMangerConfig::GetLocalRootPath());
         return instance;
     }
 
@@ -88,7 +89,10 @@ class LocalChunkManager : public ChunkManager {
     Read(const std::string& filepath, uint64_t offset, void* buf, uint64_t len);
 
     virtual void
-    Write(const std::string& filepath, uint64_t offset, void* buf, uint64_t len);
+    Write(const std::string& filepath,
+          uint64_t offset,
+          void* buf,
+          uint64_t len);
 
     virtual std::vector<std::string>
     ListWithPrefix(const std::string& filepath);
@@ -147,6 +151,7 @@ class LocalChunkManager : public ChunkManager {
     std::string path_prefix_;
 };
 
-using LocalChunkManagerSPtr = std::shared_ptr<milvus::storage::LocalChunkManager>;
+using LocalChunkManagerSPtr =
+    std::shared_ptr<milvus::storage::LocalChunkManager>;
 
 }  // namespace milvus::storage

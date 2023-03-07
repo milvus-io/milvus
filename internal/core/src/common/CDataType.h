@@ -16,7 +16,9 @@
 
 namespace milvus {
 
-template <typename T, typename = std::enable_if_t<std::is_fundamental_v<T> || std::is_same_v<T, std::string>>>
+template <typename T,
+          typename = std::enable_if_t<std::is_fundamental_v<T> ||
+                                      std::is_same_v<T, std::string>>>
 inline CDataType
 GetDType() {
     return None;

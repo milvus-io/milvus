@@ -26,20 +26,19 @@ import (
 	"strconv"
 
 	"github.com/cockroachdb/errors"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
-	"go.uber.org/zap"
-
+	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
-
-	"github.com/milvus-io/milvus/internal/common"
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/importutil"
@@ -645,12 +644,12 @@ func (node *DataNode) AddImportSegment(ctx context.Context, req *datapb.AddImpor
 				partitionID:  req.GetPartitionId(),
 				numOfRows:    req.GetRowNum(),
 				statsBinLogs: req.GetStatsLog(),
-				startPos: &internalpb.MsgPosition{
+				startPos: &msgpb.MsgPosition{
 					ChannelName: req.GetChannelName(),
 					MsgID:       posID,
 					Timestamp:   req.GetBase().GetTimestamp(),
 				},
-				endPos: &internalpb.MsgPosition{
+				endPos: &msgpb.MsgPosition{
 					ChannelName: req.GetChannelName(),
 					MsgID:       posID,
 					Timestamp:   req.GetBase().GetTimestamp(),
@@ -825,7 +824,7 @@ func saveSegmentFunc(node *DataNode, req *datapb.ImportTaskRequest, res *rootcoo
 					// Set start positions of a SaveBinlogPathRequest explicitly.
 					StartPositions: []*datapb.SegmentStartPosition{
 						{
-							StartPosition: &internalpb.MsgPosition{
+							StartPosition: &msgpb.MsgPosition{
 								ChannelName: targetChName,
 								Timestamp:   ts,
 							},
@@ -899,7 +898,7 @@ func createBinLogs(rowNum int, schema *schemapb.CollectionSchema, ts Timestamp,
 	}
 
 	if status, _ := node.dataCoord.UpdateSegmentStatistics(context.TODO(), &datapb.UpdateSegmentStatisticsRequest{
-		Stats: []*datapb.SegmentStats{{
+		Stats: []*commonpb.SegmentStats{{
 			SegmentID: segmentID,
 			NumRows:   int64(rowNum),
 		}},

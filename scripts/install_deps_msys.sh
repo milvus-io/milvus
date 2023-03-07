@@ -23,7 +23,7 @@ pacmanInstall()
     mingw-w64-x86_64-diffutils \
     mingw-w64-x86_64-go 
 
-  pip3 install conan
+  pip3 install conan==1.58.0
 }
 
 updateKey()

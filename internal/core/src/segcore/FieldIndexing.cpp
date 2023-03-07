@@ -21,8 +21,11 @@
 namespace milvus::segcore {
 
 void
-VectorFieldIndexing::BuildIndexRange(int64_t ack_beg, int64_t ack_end, const VectorBase* vec_base) {
-    AssertInfo(field_meta_.get_data_type() == DataType::VECTOR_FLOAT, "Data type of vector field is not VECTOR_FLOAT");
+VectorFieldIndexing::BuildIndexRange(int64_t ack_beg,
+                                     int64_t ack_end,
+                                     const VectorBase* vec_base) {
+    AssertInfo(field_meta_.get_data_type() == DataType::VECTOR_FLOAT,
+               "Data type of vector field is not VECTOR_FLOAT");
     auto dim = field_meta_.get_dim();
 
     auto source = dynamic_cast<const ConcurrentVector<FloatVector>*>(vec_base);
@@ -33,9 +36,12 @@ VectorFieldIndexing::BuildIndexRange(int64_t ack_beg, int64_t ack_end, const Vec
     data_.grow_to_at_least(ack_end);
     for (int chunk_id = ack_beg; chunk_id < ack_end; chunk_id++) {
         const auto& chunk = source->get_chunk(chunk_id);
-        auto indexing = std::make_unique<index::VectorMemNMIndex>(knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
-                                                                  knowhere::metric::L2, IndexMode::MODE_CPU);
-        auto dataset = knowhere::GenDataSet(source->get_size_per_chunk(), dim, chunk.data());
+        auto indexing = std::make_unique<index::VectorMemNMIndex>(
+            knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+            knowhere::metric::L2,
+            IndexMode::MODE_CPU);
+        auto dataset = knowhere::GenDataSet(
+            source->get_size_per_chunk(), dim, chunk.data());
         indexing->BuildWithDataset(dataset, conf);
         data_[chunk_id] = std::move(indexing);
     }
@@ -45,7 +51,8 @@ knowhere::Json
 VectorFieldIndexing::get_build_params() const {
     // TODO
     auto type_opt = field_meta_.get_metric_type();
-    AssertInfo(type_opt.has_value(), "Metric type of field meta doesn't have value");
+    AssertInfo(type_opt.has_value(),
+               "Metric type of field meta doesn't have value");
     auto& metric_type = type_opt.value();
     auto& config = segcore_config_.at(metric_type);
     auto base_params = config.build_params;
@@ -61,12 +68,14 @@ knowhere::Json
 VectorFieldIndexing::get_search_params(int top_K) const {
     // TODO
     auto type_opt = field_meta_.get_metric_type();
-    AssertInfo(type_opt.has_value(), "Metric type of field meta doesn't have value");
+    AssertInfo(type_opt.has_value(),
+               "Metric type of field meta doesn't have value");
     auto& metric_type = type_opt.value();
     auto& config = segcore_config_.at(metric_type);
 
     auto base_params = config.search_params;
-    AssertInfo(base_params.count("nprobe"), "Can't get nprobe from base params");
+    AssertInfo(base_params.count("nprobe"),
+               "Can't get nprobe from base params");
     base_params[knowhere::meta::TOPK] = top_K;
     base_params[knowhere::meta::METRIC_TYPE] = metric_type;
 
@@ -75,7 +84,9 @@ VectorFieldIndexing::get_search_params(int top_K) const {
 
 template <typename T>
 void
-ScalarFieldIndexing<T>::BuildIndexRange(int64_t ack_beg, int64_t ack_end, const VectorBase* vec_base) {
+ScalarFieldIndexing<T>::BuildIndexRange(int64_t ack_beg,
+                                        int64_t ack_end,
+                                        const VectorBase* vec_base) {
     auto source = dynamic_cast<const ConcurrentVector<T>*>(vec_base);
     AssertInfo(source, "vec_base can't cast to ConcurrentVector type");
     auto num_chunk = source->num_chunk();
@@ -101,7 +112,8 @@ std::unique_ptr<FieldIndexing>
 CreateIndex(const FieldMeta& field_meta, const SegcoreConfig& segcore_config) {
     if (field_meta.is_vector()) {
         if (field_meta.get_data_type() == DataType::VECTOR_FLOAT) {
-            return std::make_unique<VectorFieldIndexing>(field_meta, segcore_config);
+            return std::make_unique<VectorFieldIndexing>(field_meta,
+                                                         segcore_config);
         } else {
             // TODO
             PanicInfo("unsupported");
@@ -109,21 +121,29 @@ CreateIndex(const FieldMeta& field_meta, const SegcoreConfig& segcore_config) {
     }
     switch (field_meta.get_data_type()) {
         case DataType::BOOL:
-            return std::make_unique<ScalarFieldIndexing<bool>>(field_meta, segcore_config);
+            return std::make_unique<ScalarFieldIndexing<bool>>(field_meta,
+                                                               segcore_config);
         case DataType::INT8:
-            return std::make_unique<ScalarFieldIndexing<int8_t>>(field_meta, segcore_config);
+            return std::make_unique<ScalarFieldIndexing<int8_t>>(
+                field_meta, segcore_config);
         case DataType::INT16:
-            return std::make_unique<ScalarFieldIndexing<int16_t>>(field_meta, segcore_config);
+            return std::make_unique<ScalarFieldIndexing<int16_t>>(
+                field_meta, segcore_config);
         case DataType::INT32:
-            return std::make_unique<ScalarFieldIndexing<int32_t>>(field_meta, segcore_config);
+            return std::make_unique<ScalarFieldIndexing<int32_t>>(
+                field_meta, segcore_config);
         case DataType::INT64:
-            return std::make_unique<ScalarFieldIndexing<int64_t>>(field_meta, segcore_config);
+            return std::make_unique<ScalarFieldIndexing<int64_t>>(
+                field_meta, segcore_config);
         case DataType::FLOAT:
-            return std::make_unique<ScalarFieldIndexing<float>>(field_meta, segcore_config);
+            return std::make_unique<ScalarFieldIndexing<float>>(field_meta,
+                                                                segcore_config);
         case DataType::DOUBLE:
-            return std::make_unique<ScalarFieldIndexing<double>>(field_meta, segcore_config);
+            return std::make_unique<ScalarFieldIndexing<double>>(
+                field_meta, segcore_config);
         case DataType::VARCHAR:
-            return std::make_unique<ScalarFieldIndexing<std::string>>(field_meta, segcore_config);
+            return std::make_unique<ScalarFieldIndexing<std::string>>(
+                field_meta, segcore_config);
         default:
             PanicInfo("unsupported");
     }

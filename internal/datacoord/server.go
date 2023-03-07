@@ -26,9 +26,8 @@ import (
 	"syscall"
 	"time"
 
+	semver "github.com/blang/semver/v4"
 	"github.com/cockroachdb/errors"
-
-	"github.com/blang/semver/v4"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
@@ -61,7 +60,7 @@ import (
 
 const (
 	connEtcdMaxRetryTime = 100
-	allPartitionID       = 0 // paritionID means no filtering
+	allPartitionID       = 0 // partitionID means no filtering
 )
 
 var (
@@ -81,7 +80,9 @@ type (
 )
 
 type dataNodeCreatorFunc func(ctx context.Context, addr string) (types.DataNode, error)
+
 type indexNodeCreatorFunc func(ctx context.Context, addr string) (types.IndexNode, error)
+
 type rootCoordCreatorFunc func(ctx context.Context, metaRootPath string, etcdClient *clientv3.Client) (types.RootCoord, error)
 
 // makes sure Server implements `DataCoord`
@@ -453,6 +454,16 @@ func (s *Server) initGarbageCollection(cli storage.ChunkManager) {
 		checkInterval:    Params.DataCoordCfg.GCInterval.GetAsDuration(time.Second),
 		missingTolerance: Params.DataCoordCfg.GCMissingTolerance.GetAsDuration(time.Second),
 		dropTolerance:    Params.DataCoordCfg.GCDropTolerance.GetAsDuration(time.Second),
+		collValidator: func(collID int64) bool {
+			resp, err := s.rootCoordClient.DescribeCollectionInternal(context.Background(), &milvuspb.DescribeCollectionRequest{
+				Base:         commonpbutil.NewMsgBase(),
+				CollectionID: collID,
+			})
+			if err != nil {
+				log.Warn("failed to check collection id", zap.Int64("collID", collID), zap.Error(err))
+			}
+			return resp.GetStatus().GetErrorCode() == commonpb.ErrorCode_Success
+		},
 	})
 }
 
@@ -669,9 +680,9 @@ func (s *Server) handleTimetickMessage(ctx context.Context, ttMsg *msgstream.Dat
 	return nil
 }
 
-func (s *Server) updateSegmentStatistics(stats []*datapb.SegmentStats) {
+func (s *Server) updateSegmentStatistics(stats []*commonpb.SegmentStats) {
 	for _, stat := range stats {
-		segment := s.meta.GetSegmentUnsafe(stat.GetSegmentID())
+		segment := s.meta.GetSegment(stat.GetSegmentID())
 		if segment == nil {
 			log.Warn("skip updating row number for not exist segment",
 				zap.Int64("segment ID", stat.GetSegmentID()),
@@ -690,7 +701,7 @@ func (s *Server) updateSegmentStatistics(stats []*datapb.SegmentStats) {
 		if segment.currRows < stat.GetNumRows() {
 			log.Info("Updating segment number of rows",
 				zap.Int64("segment ID", stat.GetSegmentID()),
-				zap.Int64("old value", s.meta.GetSegmentUnsafe(stat.GetSegmentID()).GetNumOfRows()),
+				zap.Int64("old value", s.meta.GetSegment(stat.GetSegmentID()).GetNumOfRows()),
 				zap.Int64("new value", stat.GetNumRows()),
 			)
 			s.meta.SetCurrentRows(stat.GetSegmentID(), stat.GetNumRows())
@@ -701,7 +712,7 @@ func (s *Server) updateSegmentStatistics(stats []*datapb.SegmentStats) {
 func (s *Server) getFlushableSegmentsInfo(flushableIDs []int64) []*SegmentInfo {
 	res := make([]*SegmentInfo, 0, len(flushableIDs))
 	for _, id := range flushableIDs {
-		sinfo := s.meta.GetSegment(id)
+		sinfo := s.meta.GetHealthySegment(id)
 		if sinfo == nil {
 			log.Error("get segment from meta error", zap.Int64("id", id))
 			continue
@@ -868,7 +879,7 @@ func (s *Server) startFlushLoop(ctx context.Context) {
 // 2. notify RootCoord segment is flushed
 // 3. change segment state to `Flushed` in meta
 func (s *Server) postFlush(ctx context.Context, segmentID UniqueID) error {
-	segment := s.meta.GetSegment(segmentID)
+	segment := s.meta.GetHealthySegment(segmentID)
 	if segment == nil {
 		return errors.New("segment not found, might be a faked segemnt, ignore post flush")
 	}

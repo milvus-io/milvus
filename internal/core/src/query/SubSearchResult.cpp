@@ -19,10 +19,13 @@ namespace milvus::query {
 template <bool is_desc>
 void
 SubSearchResult::merge_impl(const SubSearchResult& right) {
-    AssertInfo(num_queries_ == right.num_queries_, "[SubSearchResult]Nq check failed");
+    AssertInfo(num_queries_ == right.num_queries_,
+               "[SubSearchResult]Nq check failed");
     AssertInfo(topk_ == right.topk_, "[SubSearchResult]Topk check failed");
-    AssertInfo(metric_type_ == right.metric_type_, "[SubSearchResult]Metric type check failed");
-    AssertInfo(is_desc == PositivelyRelated(metric_type_), "[SubSearchResult]Metric type isn't desc");
+    AssertInfo(metric_type_ == right.metric_type_,
+               "[SubSearchResult]Metric type check failed");
+    AssertInfo(is_desc == PositivelyRelated(metric_type_),
+               "[SubSearchResult]Metric type isn't desc");
 
     for (int64_t qn = 0; qn < num_queries_; ++qn) {
         auto offset = qn * topk_;
@@ -72,7 +75,8 @@ SubSearchResult::merge_impl(const SubSearchResult& right) {
 
 void
 SubSearchResult::merge(const SubSearchResult& sub_result) {
-    AssertInfo(metric_type_ == sub_result.metric_type_, "[SubSearchResult]Metric type check failed when merge");
+    AssertInfo(metric_type_ == sub_result.metric_type_,
+               "[SubSearchResult]Metric type check failed when merge");
     if (PositivelyRelated(metric_type_)) {
         this->merge_impl<true>(sub_result);
     } else {
@@ -85,7 +89,8 @@ SubSearchResult::round_values() {
     if (round_decimal_ == -1)
         return;
     const float multiplier = pow(10.0, round_decimal_);
-    for (auto it = this->distances_.begin(); it != this->distances_.end(); it++) {
+    for (auto it = this->distances_.begin(); it != this->distances_.end();
+         it++) {
         *it = round(*it * multiplier) / multiplier;
     }
 }

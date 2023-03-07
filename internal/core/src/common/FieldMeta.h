@@ -26,7 +26,7 @@
 
 namespace milvus {
 
-inline int
+inline size_t
 datatype_sizeof(DataType data_type, int dim = 1) {
     switch (data_type) {
         case DataType::BOOL:
@@ -81,7 +81,8 @@ datatype_name(DataType data_type) {
             return "vector_binary";
         }
         default: {
-            auto err_msg = "Unsupported DataType(" + std::to_string((int)data_type) + ")";
+            auto err_msg =
+                "Unsupported DataType(" + std::to_string((int)data_type) + ")";
             PanicInfo(err_msg);
         }
     }
@@ -89,11 +90,23 @@ datatype_name(DataType data_type) {
 
 inline bool
 datatype_is_vector(DataType datatype) {
-    return datatype == DataType::VECTOR_BINARY || datatype == DataType::VECTOR_FLOAT;
+    return datatype == DataType::VECTOR_BINARY ||
+           datatype == DataType::VECTOR_FLOAT;
 }
 
 inline bool
 datatype_is_string(DataType datatype) {
+    switch (datatype) {
+        case DataType::VARCHAR:
+        case DataType::STRING:
+            return true;
+        default:
+            return false;
+    }
+}
+
+inline bool
+datatype_is_variable(DataType datatype) {
     switch (datatype) {
         case DataType::VARCHAR:
         case DataType::STRING:
@@ -137,25 +150,39 @@ class FieldMeta {
     FieldMeta&
     operator=(FieldMeta&&) = default;
 
-    FieldMeta(const FieldName& name, FieldId id, DataType type) : name_(name), id_(id), type_(type) {
+    FieldMeta(const FieldName& name, FieldId id, DataType type)
+        : name_(name), id_(id), type_(type) {
         Assert(!is_vector());
     }
 
-    FieldMeta(const FieldName& name, FieldId id, DataType type, int64_t max_length)
-        : name_(name), id_(id), type_(type), string_info_(StringInfo{max_length}) {
+    FieldMeta(const FieldName& name,
+              FieldId id,
+              DataType type,
+              int64_t max_length)
+        : name_(name),
+          id_(id),
+          type_(type),
+          string_info_(StringInfo{max_length}) {
         Assert(is_string());
     }
 
-    FieldMeta(
-        const FieldName& name, FieldId id, DataType type, int64_t dim, std::optional<knowhere::MetricType> metric_type)
-        : name_(name), id_(id), type_(type), vector_info_(VectorInfo{dim, metric_type}) {
+    FieldMeta(const FieldName& name,
+              FieldId id,
+              DataType type,
+              int64_t dim,
+              std::optional<knowhere::MetricType> metric_type)
+        : name_(name),
+          id_(id),
+          type_(type),
+          vector_info_(VectorInfo{dim, metric_type}) {
         Assert(is_vector());
     }
 
     bool
     is_vector() const {
         Assert(type_ != DataType::NONE);
-        return type_ == DataType::VECTOR_BINARY || type_ == DataType::VECTOR_FLOAT;
+        return type_ == DataType::VECTOR_BINARY ||
+               type_ == DataType::VECTOR_FLOAT;
     }
 
     bool
@@ -200,7 +227,7 @@ class FieldMeta {
         return type_;
     }
 
-    int64_t
+    size_t
     get_sizeof() const {
         if (is_vector()) {
             return datatype_sizeof(type_, get_dim());

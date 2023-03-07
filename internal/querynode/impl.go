@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-
 	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
@@ -35,6 +34,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
@@ -369,6 +369,10 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, in *querypb.WatchDmC
 }
 
 func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmChannelRequest) (*commonpb.Status, error) {
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", req.GetCollectionID()),
+		zap.String("channel", req.GetChannelName()),
+	)
 	// check node healthy
 	nodeID := paramtable.GetNodeID()
 	if !node.lifetime.Add(commonpbutil.IsHealthyOrStopping) {
@@ -390,6 +394,8 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 		return status, nil
 	}
 
+	log.Info("unsubscribe channel request received")
+
 	unsubTask := &unsubDmChannelTask{
 		baseTask: baseTask{
 			ctx:  ctx,
@@ -409,7 +415,7 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 		log.Warn("failed to enqueue subscribe channel task", zap.Error(err))
 		return status, nil
 	}
-	log.Info("unsubDmChannelTask enqueue done", zap.Int64("collectionID", req.GetCollectionID()))
+	log.Info("unsubDmChannelTask enqueue done")
 
 	err = unsubTask.WaitToFinish()
 	if err != nil {
@@ -420,7 +426,7 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 		}, nil
 	}
 
-	log.Info("unsubDmChannelTask WaitToFinish done", zap.Int64("collectionID", req.GetCollectionID()))
+	log.Info("unsubDmChannelTask WaitToFinish done")
 	return &commonpb.Status{
 		ErrorCode: commonpb.ErrorCode_Success,
 	}, nil
@@ -1287,10 +1293,10 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 	sealedSegments := node.metaReplica.getSealedSegments()
 	shardClusters := node.ShardClusterService.GetShardClusters()
 
-	channelGrowingsMap := make(map[string]map[int64]*internalpb.MsgPosition)
+	channelGrowingsMap := make(map[string]map[int64]*msgpb.MsgPosition)
 	for _, s := range growingSegments {
 		if _, ok := channelGrowingsMap[s.vChannelID]; !ok {
-			channelGrowingsMap[s.vChannelID] = make(map[int64]*internalpb.MsgPosition)
+			channelGrowingsMap[s.vChannelID] = make(map[int64]*msgpb.MsgPosition)
 		}
 
 		channelGrowingsMap[s.vChannelID][s.ID()] = s.startPosition

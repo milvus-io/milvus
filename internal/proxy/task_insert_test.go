@@ -3,10 +3,11 @@ package proxy
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus-proto/go-api/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/schemapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 )
 
 func TestInsertTask_CheckAligned(t *testing.T) {
@@ -15,7 +16,7 @@ func TestInsertTask_CheckAligned(t *testing.T) {
 	// passed NumRows is less than 0
 	case1 := insertTask{
 		insertMsg: &BaseInsertTask{
-			InsertRequest: internalpb.InsertRequest{
+			InsertRequest: msgpb.InsertRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_Insert,
 				},
@@ -43,11 +44,11 @@ func TestInsertTask_CheckAligned(t *testing.T) {
 	dim := 128
 	case2 := insertTask{
 		insertMsg: &BaseInsertTask{
-			InsertRequest: internalpb.InsertRequest{
+			InsertRequest: msgpb.InsertRequest{
 				Base: &commonpb.MsgBase{
 					MsgType: commonpb.MsgType_Insert,
 				},
-				Version:    internalpb.InsertDataVersion_ColumnBased,
+				Version:    msgpb.InsertDataVersion_ColumnBased,
 				RowIDs:     generateInt64Array(numRows),
 				Timestamps: generateUint64Array(numRows),
 			},

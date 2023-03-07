@@ -14,10 +14,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package concurrency
+package conc
 
 import (
-	"runtime"
 	"testing"
 	"time"
 
@@ -25,11 +24,10 @@ import (
 )
 
 func TestPool(t *testing.T) {
-	pool, err := NewPool(runtime.NumCPU())
-	assert.NoError(t, err)
+	pool := NewDefaultPool()
 
 	taskNum := pool.Cap() * 2
-	futures := make([]*Future, 0, taskNum)
+	futures := make([]*Future[any], 0, taskNum)
 	for i := 0; i < taskNum; i++ {
 		res := i
 		future := pool.Submit(func() (interface{}, error) {

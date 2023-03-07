@@ -232,7 +232,8 @@ Parser::ParseTermNodeImpl(const FieldName& field_name, const Json& body) {
         terms[i] = value;
     }
     std::sort(terms.begin(), terms.end());
-    return std::make_unique<TermExprImpl<T>>(schema.get_field_id(field_name), schema[field_name].get_data_type(),
+    return std::make_unique<TermExprImpl<T>>(schema.get_field_id(field_name),
+                                             schema[field_name].get_data_type(),
                                              terms);
 }
 
@@ -277,8 +278,10 @@ Parser::ParseRangeNodeImpl(const FieldName& field_name, const Json& body) {
             auto arith = item.value();
             auto arith_body = arith.begin();
 
-            auto arith_op_name = boost::algorithm::to_lower_copy(std::string(arith_body.key()));
-            AssertInfo(arith_op_mapping_.count(arith_op_name), "arith op(" + arith_op_name + ") not found");
+            auto arith_op_name =
+                boost::algorithm::to_lower_copy(std::string(arith_body.key()));
+            AssertInfo(arith_op_mapping_.count(arith_op_name),
+                       "arith op(" + arith_op_name + ") not found");
 
             auto& arith_op_body = arith_body.value();
             Assert(arith_op_body.is_object());
@@ -299,8 +302,12 @@ Parser::ParseRangeNodeImpl(const FieldName& field_name, const Json& body) {
             }
 
             return std::make_unique<BinaryArithOpEvalRangeExprImpl<T>>(
-                schema.get_field_id(field_name), schema[field_name].get_data_type(),
-                arith_op_mapping_.at(arith_op_name), right_operand, mapping_.at(op_name), value);
+                schema.get_field_id(field_name),
+                schema[field_name].get_data_type(),
+                arith_op_mapping_.at(arith_op_name),
+                right_operand,
+                mapping_.at(op_name),
+                value);
         }
 
         if constexpr (std::is_same_v<T, bool>) {
@@ -313,7 +320,10 @@ Parser::ParseRangeNodeImpl(const FieldName& field_name, const Json& body) {
             static_assert(always_false<T>, "unsupported type");
         }
         return std::make_unique<UnaryRangeExprImpl<T>>(
-            schema.get_field_id(field_name), schema[field_name].get_data_type(), mapping_.at(op_name), item.value());
+            schema.get_field_id(field_name),
+            schema[field_name].get_data_type(),
+            mapping_.at(op_name),
+            item.value());
     } else if (body.size() == 2) {
         bool has_lower_value = false;
         bool has_upper_value = false;
@@ -322,8 +332,10 @@ Parser::ParseRangeNodeImpl(const FieldName& field_name, const Json& body) {
         T lower_value;
         T upper_value;
         for (auto& item : body.items()) {
-            auto op_name = boost::algorithm::to_lower_copy(std::string(item.key()));
-            AssertInfo(mapping_.count(op_name), "op(" + op_name + ") not found");
+            auto op_name =
+                boost::algorithm::to_lower_copy(std::string(item.key()));
+            AssertInfo(mapping_.count(op_name),
+                       "op(" + op_name + ") not found");
             if constexpr (std::is_same_v<T, bool>) {
                 Assert(item.value().is_boolean());
             } else if constexpr (std::is_integral_v<T>) {
@@ -351,10 +363,15 @@ Parser::ParseRangeNodeImpl(const FieldName& field_name, const Json& body) {
                     PanicInfo("unsupported operator in binary-range node");
             }
         }
-        AssertInfo(has_lower_value && has_upper_value, "illegal binary-range node");
-        return std::make_unique<BinaryRangeExprImpl<T>>(schema.get_field_id(field_name),
-                                                        schema[field_name].get_data_type(), lower_inclusive,
-                                                        upper_inclusive, lower_value, upper_value);
+        AssertInfo(has_lower_value && has_upper_value,
+                   "illegal binary-range node");
+        return std::make_unique<BinaryRangeExprImpl<T>>(
+            schema.get_field_id(field_name),
+            schema[field_name].get_data_type(),
+            lower_inclusive,
+            upper_inclusive,
+            lower_value,
+            upper_value);
     } else {
         PanicInfo("illegal range node, too more or too few ops");
     }
@@ -377,7 +394,10 @@ Parser::ParseItemList(const Json& body) {
     }
     auto old_size = results.size();
 
-    auto new_end = std::remove_if(results.begin(), results.end(), [](const ExprPtr& x) { return x == nullptr; });
+    auto new_end =
+        std::remove_if(results.begin(), results.end(), [](const ExprPtr& x) {
+            return x == nullptr;
+        });
 
     results.resize(new_end - results.begin());
 
@@ -421,7 +441,8 @@ Parser::ParseMustNode(const Json& body) {
     auto item_list = ParseItemList(body);
     auto merger = [](ExprPtr left, ExprPtr right) {
         using OpType = LogicalBinaryExpr::OpType;
-        return std::make_unique<LogicalBinaryExpr>(OpType::LogicalAnd, left, right);
+        return std::make_unique<LogicalBinaryExpr>(
+            OpType::LogicalAnd, left, right);
     };
     return ConstructTree(merger, std::move(item_list));
 }
@@ -432,7 +453,8 @@ Parser::ParseShouldNode(const Json& body) {
     Assert(item_list.size() >= 1);
     auto merger = [](ExprPtr left, ExprPtr right) {
         using OpType = LogicalBinaryExpr::OpType;
-        return std::make_unique<LogicalBinaryExpr>(OpType::LogicalOr, left, right);
+        return std::make_unique<LogicalBinaryExpr>(
+            OpType::LogicalOr, left, right);
     };
     return ConstructTree(merger, std::move(item_list));
 }
@@ -443,7 +465,8 @@ Parser::ParseMustNotNode(const Json& body) {
     Assert(item_list.size() >= 1);
     auto merger = [](ExprPtr left, ExprPtr right) {
         using OpType = LogicalBinaryExpr::OpType;
-        return std::make_unique<LogicalBinaryExpr>(OpType::LogicalAnd, left, right);
+        return std::make_unique<LogicalBinaryExpr>(
+            OpType::LogicalAnd, left, right);
     };
     auto subtree = ConstructTree(merger, std::move(item_list));
 

@@ -7,7 +7,7 @@ from functools import singledispatch
 import numpy as np
 import pandas as pd
 from sklearn import preprocessing
-
+from npy_append_array import NpyAppendArray
 from pymilvus import DataType
 from base.schema_wrapper import ApiCollectionSchemaWrapper, ApiFieldSchemaWrapper
 from common import common_type as ct
@@ -56,7 +56,9 @@ def gen_unique_str(str_value=None):
     return "test_" + prefix if str_value is None else str_value + "_" + prefix
 
 
-def gen_str_by_length(length=8):
+def gen_str_by_length(length=8, letters_only=False):
+    if letters_only:
+        return "".join(random.choice(string.ascii_letters) for _ in range(length))
     return "".join(random.choice(string.ascii_letters + string.digits) for _ in range(length))
 
 
@@ -236,6 +238,20 @@ def gen_default_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, start=0):
     return df
 
 
+def gen_default_data_for_upsert(nb=ct.default_nb, dim=ct.default_dim, start=0, size=10000):
+    int_values = pd.Series(data=[i for i in range(start, start + nb)])
+    float_values = pd.Series(data=[np.float32(i + size) for i in range(start, start + nb)], dtype="float32")
+    string_values = pd.Series(data=[str(i + size) for i in range(start, start + nb)], dtype="string")
+    float_vec_values = gen_vectors(nb, dim)
+    df = pd.DataFrame({
+        ct.default_int64_field_name: int_values,
+        ct.default_float_field_name: float_values,
+        ct.default_string_field_name: string_values,
+        ct.default_float_vec_field_name: float_vec_values
+    })
+    return df, float_values
+
+
 def gen_dataframe_multi_vec_fields(vec_fields, nb=ct.default_nb):
     """
     gen dataframe data for fields: int64, float, float_vec and vec_fields
@@ -336,36 +352,56 @@ def gen_default_list_data_for_bulk_insert(nb=ct.default_nb, dim=ct.default_dim):
     int_values = [i for i in range(nb)]
     float_values = [np.float32(i) for i in range(nb)]
     string_values = [str(i) for i in range(nb)]
-    float_vec_values = gen_vectors(nb, dim)
+    float_vec_values = []  # placeholder for float_vec
     data = [int_values, float_values, string_values, float_vec_values]
     return data
 
 
-def gen_json_files_for_bulk_insert(data, schema, data_dir):
-    nb = len(data[0])
+def gen_json_files_for_bulk_insert(data, schema, data_dir, **kwargs):
+    nb = kwargs.get("nb", ct.default_nb)
+    dim = kwargs.get("dim", ct.default_dim)
     fields_name = [field.name for field in schema.fields]
-    entities = []
-    for i in range(nb):
-        entity_value = [field_values[i] for field_values in data]
-        entity = dict(zip(fields_name, entity_value))
-        entities.append(entity)
-    data_dict = {"rows": entities}
-    file_name = "bulk_insert_data_source.json"
-    files = ["bulk_insert_data_source.json"]
+    file_name = f"bulk_insert_data_source_dim_{dim}_nb_{nb}.json"
+    files = [file_name]
     data_source = os.path.join(data_dir, file_name)
     with open(data_source, "w") as f:
-        f.write(json.dumps(data_dict, indent=4, default=to_serializable))
+        f.write("{")
+        f.write("\n")
+        f.write('"rows":[')
+        f.write("\n")
+        for i in range(nb):
+            entity_value = [field_values[i] for field_values in data[:-1]]
+            vector = [random.random() for _ in range(dim)]
+            entity_value.append(vector)
+            entity = dict(zip(fields_name, entity_value))
+            f.write(json.dumps(entity, indent=4, default=to_serializable))
+            if i != nb - 1:
+                f.write(",")
+            f.write("\n")
+        f.write("]")
+        f.write("\n")
+        f.write("}")
     return files
 
 
-def gen_npy_files_for_bulk_insert(data, schema, data_dir):
+def gen_npy_files_for_bulk_insert(data, schema, data_dir, **kwargs):
+    nb = kwargs.get("nb", ct.default_nb)
+    dim = kwargs.get("dim", ct.default_dim)
     fields_name = [field.name for field in schema.fields]
     files = []
     for field in fields_name:
         files.append(f"{field}.npy")
     for i, file in enumerate(files):
         data_source = os.path.join(data_dir, file)
-        np.save(data_source, np.array(data[i]))
+        if "vector" in file:
+            log.info(f"generate {nb} vectors with dim {dim} for {data_source}")
+            with NpyAppendArray(data_source, "wb") as npaa:
+                for j in range(nb):
+                    vector = np.array([[random.random() for _ in range(dim)]])
+                    npaa.append(vector)
+
+        else:
+            np.save(data_source, np.array(data[i]))
     return files
 
 
@@ -822,6 +858,7 @@ def gen_grant_list(collection_name):
                   {"object": "User", "object_name": "*", "privilege": "UpdateUser"},
                   {"object": "User", "object_name": "*", "privilege": "SelectUser"}]
     return grant_list
+
 
 def install_milvus_operator_specific_config(namespace, milvus_mode, release_name, image,
                                             rate_limit_enable, collection_rate_limit):

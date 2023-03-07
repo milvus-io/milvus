@@ -24,6 +24,7 @@ package querynode
 #include "segcore/reduce_c.h"
 */
 import "C"
+
 import (
 	"bytes"
 	"context"
@@ -33,29 +34,26 @@ import (
 	"sync"
 	"unsafe"
 
+	bloom "github.com/bits-and-blooms/bloom/v3"
 	"github.com/cockroachdb/errors"
-
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/util/funcutil"
-	"github.com/milvus-io/milvus/internal/util/paramtable"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
-
-	"github.com/bits-and-blooms/bloom/v3"
-	"github.com/milvus-io/milvus/internal/metrics"
-	"github.com/milvus-io/milvus/internal/util/timerecord"
-
 	"github.com/golang/protobuf/proto"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
+	"github.com/milvus-io/milvus/internal/util/timerecord"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 type segmentType = commonpb.SegmentState
@@ -84,7 +82,7 @@ type Segment struct {
 	partitionID   UniqueID
 	collectionID  UniqueID
 	version       UniqueID
-	startPosition *internalpb.MsgPosition // for growing segment release
+	startPosition *msgpb.MsgPosition // for growing segment release
 
 	vChannelID   Channel
 	lastMemSize  int64
@@ -162,7 +160,7 @@ func newSegment(collection *Collection,
 	vChannelID Channel,
 	segType segmentType,
 	version UniqueID,
-	startPosition *internalpb.MsgPosition) (*Segment, error) {
+	startPosition *msgpb.MsgPosition) (*Segment, error) {
 	/*
 		CSegmentInterface
 		NewSegment(CCollection collection, uint64_t segment_id, SegmentType seg_type);
@@ -780,6 +778,7 @@ func (s *Segment) segmentDelete(offset int64, entityIDs []primaryKey, timestamps
 }
 
 // -------------------------------------------------------------------------------------- interfaces for sealed segment
+
 func (s *Segment) segmentLoadFieldData(fieldID int64, rowCount int64, data *schemapb.FieldData) error {
 	/*
 		CStatus
@@ -800,11 +799,18 @@ func (s *Segment) segmentLoadFieldData(fieldID int64, rowCount int64, data *sche
 		return err
 	}
 
+	var mmapDirPath *C.char = nil
+	path := paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue()
+	if len(path) > 0 {
+		mmapDirPath = C.CString(path)
+		defer C.free(unsafe.Pointer(mmapDirPath))
+	}
 	loadInfo := C.CLoadFieldDataInfo{
-		field_id:  C.int64_t(fieldID),
-		blob:      (*C.uint8_t)(unsafe.Pointer(&dataBlob[0])),
-		blob_size: C.uint64_t(len(dataBlob)),
-		row_count: C.int64_t(rowCount),
+		field_id:      C.int64_t(fieldID),
+		blob:          (*C.uint8_t)(unsafe.Pointer(&dataBlob[0])),
+		blob_size:     C.uint64_t(len(dataBlob)),
+		row_count:     C.int64_t(rowCount),
+		mmap_dir_path: mmapDirPath,
 	}
 
 	status := C.LoadFieldData(s.segmentPtr, loadInfo)

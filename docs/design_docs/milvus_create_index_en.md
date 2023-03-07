@@ -213,8 +213,8 @@ message SegmentInfo {
   common.SegmentState state = 6;
   int64 max_row_num = 7;
   uint64 last_expire_time = 8;
-  internal.MsgPosition start_position = 9;
-  internal.MsgPosition dml_position = 10;
+  msgpb.MsgPosition start_position = 9;
+  msgpb.MsgPosition dml_position = 10;
   repeated FieldBinlog binlogs = 11;
 }
 

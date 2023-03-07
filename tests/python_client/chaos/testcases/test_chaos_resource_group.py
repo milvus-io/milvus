@@ -1,4 +1,3 @@
-import time
 import pytest
 
 from base.client_base import TestcaseBase
@@ -199,5 +198,5 @@ class TestChaosRG(TestcaseBase):
             log.info(f"{coll_name} query segment info: {segment_2}")
 
             # show replicas finally
-            replicas_2, _ = collection_w.get_replicas(check_task=ct.CheckTasks.check_nothing)
+            replicas_2, _ = collection_w.get_replicas()
             log.info(f"{coll_name} replicas: {replicas_2}")
