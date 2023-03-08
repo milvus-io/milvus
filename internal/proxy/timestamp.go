@@ -32,24 +32,23 @@ import (
 
 // timestampAllocator implements tsoAllocator.
 type timestampAllocator struct {
-	ctx    context.Context
 	tso    timestampAllocatorInterface
 	peerID UniqueID
 }
 
 // newTimestampAllocator creates a new timestampAllocator
-func newTimestampAllocator(ctx context.Context, tso timestampAllocatorInterface, peerID UniqueID) (*timestampAllocator, error) {
+func newTimestampAllocator(tso timestampAllocatorInterface, peerID UniqueID) (*timestampAllocator, error) {
 	a := &timestampAllocator{
-		ctx:    ctx,
 		peerID: peerID,
 		tso:    tso,
 	}
 	return a, nil
 }
 
-func (ta *timestampAllocator) alloc(count uint32) ([]Timestamp, error) {
+func (ta *timestampAllocator) alloc(ctx context.Context, count uint32) ([]Timestamp, error) {
 	tr := timerecord.NewTimeRecorder("applyTimestamp")
-	ctx, cancel := context.WithTimeout(ta.ctx, 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 	req := &rootcoordpb.AllocTimestampRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_RequestTSO),
@@ -61,7 +60,6 @@ func (ta *timestampAllocator) alloc(count uint32) ([]Timestamp, error) {
 
 	resp, err := ta.tso.AllocTimestamp(ctx, req)
 	defer func() {
-		cancel()
 		metrics.ProxyApplyTimestampLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	}()
 
@@ -81,8 +79,8 @@ func (ta *timestampAllocator) alloc(count uint32) ([]Timestamp, error) {
 }
 
 // AllocOne allocates a timestamp.
-func (ta *timestampAllocator) AllocOne() (Timestamp, error) {
-	ret, err := ta.alloc(1)
+func (ta *timestampAllocator) AllocOne(ctx context.Context) (Timestamp, error) {
+	ret, err := ta.alloc(ctx, 1)
 	if err != nil {
 		return 0, err
 	}

@@ -169,7 +169,7 @@ func (queue *baseTaskQueue) Enqueue(t task) error {
 		return err
 	}
 
-	ts, err := queue.tsoAllocatorIns.AllocOne()
+	ts, err := queue.tsoAllocatorIns.AllocOne(t.TraceCtx())
 	if err != nil {
 		return err
 	}
