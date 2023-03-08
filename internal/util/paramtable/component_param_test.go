@@ -164,6 +164,8 @@ func TestComponentParam(t *testing.T) {
 		t.Logf("AccessLog.MaxBackups: %d", Params.AccessLog.MaxBackups.GetAsInt64())
 
 		t.Logf("AccessLog.MaxDays: %d", Params.AccessLog.RotatedTime.GetAsInt64())
+
+		t.Logf("ShardLeaderCacheInterval: %d", Params.ShardLeaderCacheInterval.GetAsInt64())
 	})
 
 	// t.Run("test proxyConfig panic", func(t *testing.T) {

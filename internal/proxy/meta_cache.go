@@ -24,7 +24,9 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 
+	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
@@ -66,6 +68,7 @@ type Cache interface {
 	GetCollectionSchema(ctx context.Context, collectionName string) (*schemapb.CollectionSchema, error)
 	GetShards(ctx context.Context, withCache bool, collectionName string) (map[string][]nodeInfo, error)
 	ClearShards(collectionName string)
+	expireShardLeaderCache(ctx context.Context)
 	RemoveCollection(ctx context.Context, collectionName string)
 	RemoveCollectionsByID(ctx context.Context, collectionID UniqueID) []string
 	RemovePartition(ctx context.Context, collectionName string, partitionName string)
@@ -174,6 +177,7 @@ func InitMetaCache(ctx context.Context, rootCoord types.RootCoord, queryCoord ty
 	}
 	globalMetaCache.InitPolicyInfo(resp.PolicyInfos, resp.UserRoles)
 	log.Info("success to init meta cache", zap.Strings("policy_infos", resp.PolicyInfos))
+	globalMetaCache.expireShardLeaderCache(ctx)
 	return nil
 }
 
@@ -734,14 +738,51 @@ func (m *MetaCache) ClearShards(collectionName string) {
 	log.Info("clearing shard cache for collection", zap.String("collectionName", collectionName))
 	m.mu.Lock()
 	info, ok := m.collInfo[collectionName]
-	if ok {
-		m.collInfo[collectionName].shardLeaders = nil
-	}
 	m.mu.Unlock()
-	// delete refcnt in shardClientMgr
-	if ok && info.shardLeaders != nil {
-		_ = m.shardMgr.UpdateShardLeaders(info.shardLeaders.shardLeaders, nil)
+	var shardLeaders *shardLeaders
+	if ok {
+		info.leaderMutex.Lock()
+		m.collInfo[collectionName].shardLeaders = nil
+		shardLeaders = info.shardLeaders
+		info.leaderMutex.Unlock()
 	}
+	// delete refcnt in shardClientMgr
+	if ok && shardLeaders != nil {
+		_ = m.shardMgr.UpdateShardLeaders(shardLeaders.shardLeaders, nil)
+	}
+}
+
+func (m *MetaCache) expireShardLeaderCache(ctx context.Context) {
+	go func() {
+		ticker := time.NewTicker(params.Params.ProxyCfg.ShardLeaderCacheInterval.GetAsDuration(time.Second))
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				log.Info("stop periodically update meta cache")
+				return
+			case <-ticker.C:
+				m.mu.Lock()
+				log.Info("expire all shard leader cache",
+					zap.Strings("collections", lo.Keys(m.collInfo)))
+				for _, info := range m.collInfo {
+					info.leaderMutex.Lock()
+					shardLeaders := info.shardLeaders
+					info.shardLeaders = nil
+					info.leaderMutex.Unlock()
+					if shardLeaders != nil {
+						err := m.shardMgr.UpdateShardLeaders(shardLeaders.shardLeaders, nil)
+						if err != nil {
+							// unreachable logic path
+							log.Warn("failed to update shard leaders reference", zap.Error(err))
+						}
+					}
+				}
+				m.mu.Unlock()
+			}
+		}
+	}()
 }
 
 func (m *MetaCache) InitPolicyInfo(info []string, userRoles []string) {
