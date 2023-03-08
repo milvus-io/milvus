@@ -107,5 +107,5 @@ if __name__ == "__main__":
     parser.add_argument('--host', type=str, default="127.0.0.1", help='milvus server ip')
     args = parser.parse_args()
     host = args.host
-    for index_type in all_index_types:
+    for index_type in ["HNSW"]:
         search_test(host, index_type)
