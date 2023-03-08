@@ -1567,6 +1567,7 @@ type dataNodeConfig struct {
 func (p *dataNodeConfig) init(base *BaseTable) {
 	p.Base = base
 	p.NodeID.Store(UniqueID(0))
+	p.initWatchEventTicklerInterval()
 	p.initFlowGraphMaxQueueLength()
 	p.initFlowGraphMaxParallelism()
 	p.initFlushInsertBufferSize()
