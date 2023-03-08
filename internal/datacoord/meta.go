@@ -76,6 +76,7 @@ type collectionInfo struct {
 	Partitions     []int64
 	StartPositions []*commonpb.KeyDataPair
 	Properties     map[string]string
+	CreatedAt      Timestamp
 }
 
 // NewMeta creates meta from provided `kv.TxnKV`
