@@ -36,17 +36,17 @@ type config struct {
 		ReaderBufferLen int      `yaml:"reader.buffer.len"`
 		MQType          string   `yaml:"mqtype"`
 		Pulsar          struct {
-			Address        string
-			Port           int
+			Address        string `yaml:"address"`
+			Port           int    `yaml:"port"`
 			WebAddress     string `yaml:"web.address"`
 			WebPort        int    `yaml:"web.port"`
 			MaxMessageSize int64  `yaml:"max.message.size"`
-			Tenant         string
-			Namespace      string
-		}
+			Tenant         string `yaml:"tenant"`
+			Namespace      string `yaml:"namespace"`
+		} `yaml:"pulsar"`
 		Kafka struct {
-			BrokerList string
-		}
+			BrokerList string `yaml:"broker_list"`
+		} `yaml:"kafka"`
 	} `yaml:"source"`
 }
 
@@ -71,7 +71,7 @@ func main() {
 			coreconf.PulsarMaxMessageSizeOption(pulsarConf.MaxMessageSize),
 			coreconf.PulsarTenantOption(pulsarConf.Tenant, pulsarConf.Namespace),
 		)
-	} else if conf.Source.MQType == "kakfa" {
+	} else if conf.Source.MQType == "kafka" {
 		kafkaConf := conf.Source.Kafka
 		kafkaConfig = coreconf.NewKafkaConfig(
 			coreconf.KafkaAddressOption(kafkaConf.BrokerList))
