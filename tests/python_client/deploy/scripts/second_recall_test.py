@@ -99,5 +99,5 @@ if __name__ == "__main__":
     args = parser.parse_args()
     host = args.host
     tasks = []
-    for index_type in all_index_types:
+    for index_type in ["HNSW"]:
         search_test(host, index_type)

@@ -8,6 +8,15 @@ image:
     tag: master-latest
     pullPolicy: IfNotPresent
 
+standalone:
+  resources:
+    limits:
+      cpu: 4
+      memory: 10Gi
+    requests:
+      cpu: 2
+      memory: 8Gi
+
 kafka:
   enabled: false
   name: kafka
