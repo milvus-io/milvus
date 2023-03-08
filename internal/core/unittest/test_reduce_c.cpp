@@ -23,3 +23,13 @@ TEST(SearchResultPair, Greater) {
     ASSERT_EQ(pair1 > pair2, true);
     ASSERT_EQ(pair2.primary_key_, INVALID_PK);
 }
+
+TEST(SearchResultPair, SameDistance) {
+    auto pair1 = SearchResultPair(0, 1.0, nullptr, 0, 0, 1);
+    auto pair2 = SearchResultPair(1, 1.0, nullptr, 1, 0, 1);
+    ASSERT_EQ(pair1 > pair2, true);
+
+    pair1.advance();
+    ASSERT_EQ(pair2 > pair1, true);
+    ASSERT_EQ(pair1.primary_key_, INVALID_PK);
+}
