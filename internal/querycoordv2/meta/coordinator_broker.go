@@ -36,6 +36,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
+	"github.com/milvus-io/milvus/internal/util/merr"
 	. "github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -180,7 +181,7 @@ func (broker *CoordinatorBroker) GetIndexInfo(ctx context.Context, collectionID 
 
 	segmentInfo, ok := resp.SegmentInfo[segmentID]
 	if !ok || len(segmentInfo.GetIndexInfos()) == 0 {
-		return nil, WrapErrIndexNotExist(segmentID)
+		return nil, merr.WrapErrIndexNotFound()
 	}
 
 	indexes := make([]*querypb.FieldIndexInfo, 0)

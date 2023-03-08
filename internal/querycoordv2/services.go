@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/errorutil"
+	"github.com/milvus-io/milvus/internal/util/merr"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
@@ -852,8 +853,9 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 	channels := s.targetMgr.GetDmChannelsByCollection(req.GetCollectionID(), meta.CurrentTarget)
 	if len(channels) == 0 {
 		msg := "failed to get channels"
-		log.Warn(msg, zap.Error(meta.ErrCollectionNotFound))
-		resp.Status = utils.WrapStatus(commonpb.ErrorCode_MetaFailed, msg, meta.ErrCollectionNotFound)
+		err := merr.WrapErrCollectionNotFound(req.GetCollectionID())
+		log.Warn(msg, zap.Error(err))
+		resp.Status = utils.WrapStatus(commonpb.ErrorCode_MetaFailed, msg, err)
 		return resp, nil
 	}
 

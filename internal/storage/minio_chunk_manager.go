@@ -29,7 +29,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/storage/gcp"
-	"github.com/milvus-io/milvus/internal/util/errutil"
+	"github.com/milvus-io/milvus/internal/util/merr"
 	"github.com/milvus-io/milvus/internal/util/retry"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
@@ -205,7 +205,7 @@ func (mcm *MinioChunkManager) MultiWrite(ctx context.Context, kvs map[string][]b
 	for key, value := range kvs {
 		err := mcm.Write(ctx, key, value)
 		if err != nil {
-			el = errutil.Combine(el, errors.Wrapf(err, "failed to write %s", key))
+			el = merr.Combine(el, errors.Wrapf(err, "failed to write %s", key))
 		}
 	}
 	return el
@@ -274,7 +274,7 @@ func (mcm *MinioChunkManager) MultiRead(ctx context.Context, keys []string) ([][
 	for _, key := range keys {
 		objectValue, err := mcm.Read(ctx, key)
 		if err != nil {
-			el = errutil.Combine(el, errors.Wrapf(err, "failed to read %s", key))
+			el = merr.Combine(el, errors.Wrapf(err, "failed to read %s", key))
 		}
 		objectsValues = append(objectsValues, objectValue)
 	}
@@ -347,7 +347,7 @@ func (mcm *MinioChunkManager) MultiRemove(ctx context.Context, keys []string) er
 	for _, key := range keys {
 		err := mcm.Remove(ctx, key)
 		if err != nil {
-			el = errutil.Combine(el, errors.Wrapf(err, "failed to remove %s", key))
+			el = merr.Combine(el, errors.Wrapf(err, "failed to remove %s", key))
 		}
 	}
 	return el

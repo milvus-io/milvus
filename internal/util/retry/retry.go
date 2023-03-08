@@ -19,7 +19,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/util/errutil"
+	"github.com/milvus-io/milvus/internal/util/merr"
 )
 
 // Do will run function with retry mechanism.
@@ -43,7 +43,7 @@ func Do(ctx context.Context, fn func() error, opts ...Option) error {
 			}
 
 			err = errors.Wrapf(err, "attempt #%d", i)
-			el = errutil.Combine(el, err)
+			el = merr.Combine(el, err)
 
 			if !IsRecoverable(err) {
 				return el
@@ -52,7 +52,7 @@ func Do(ctx context.Context, fn func() error, opts ...Option) error {
 			select {
 			case <-time.After(c.sleep):
 			case <-ctx.Done():
-				el = errutil.Combine(el, errors.Wrapf(ctx.Err(), "context done during sleep after run#%d", i))
+				el = merr.Combine(el, errors.Wrapf(ctx.Err(), "context done during sleep after run#%d", i))
 				return el
 			}
 
@@ -73,7 +73,7 @@ var errUnrecoverable = errors.New("unrecoverable error")
 // Unrecoverable method wrap an error to unrecoverableError. This will make retry
 // quick return.
 func Unrecoverable(err error) error {
-	return errutil.Combine(err, errUnrecoverable)
+	return merr.Combine(err, errUnrecoverable)
 }
 
 // IsRecoverable is used to judge whether the error is wrapped by unrecoverableError.

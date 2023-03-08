@@ -23,6 +23,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/merr"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	. "github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/zap"
@@ -282,7 +283,7 @@ func (m *ReplicaManager) AddNode(replicaID UniqueID, nodes ...UniqueID) error {
 
 	replica, ok := m.replicas[replicaID]
 	if !ok {
-		return ErrReplicaNotFound
+		return merr.WrapErrReplicaNotFound(replicaID)
 	}
 
 	replica = replica.Clone()
@@ -296,7 +297,7 @@ func (m *ReplicaManager) RemoveNode(replicaID UniqueID, nodes ...UniqueID) error
 
 	replica, ok := m.replicas[replicaID]
 	if !ok {
-		return ErrReplicaNotFound
+		return merr.WrapErrReplicaNotFound(replicaID)
 	}
 
 	replica = replica.Clone()

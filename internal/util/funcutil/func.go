@@ -22,9 +22,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"net"
-	"net/http"
 	"reflect"
 	"strconv"
 	"strings"
@@ -32,15 +30,12 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"go.uber.org/zap"
 	grpcStatus "google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
-	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/util/retry"
 )
 
 // CheckGrpcReady wait for context timeout, or wait 100ms then send nil to targetCh
@@ -88,49 +83,6 @@ const (
 	// PulsarMaxMessageSizeKey is the key of config item
 	PulsarMaxMessageSizeKey = "maxMessageSize"
 )
-
-// GetPulsarConfig get pulsar configuration using pulsar admin api
-func GetPulsarConfig(protocol, ip, port, url string, args ...int64) (map[string]interface{}, error) {
-	var resp *http.Response
-	var err error
-
-	getResp := func() error {
-		log.Debug("function util", zap.String("url", protocol+"://"+ip+":"+port+url))
-		resp, err = http.Get(protocol + "://" + ip + ":" + port + url)
-		return err
-	}
-
-	var attempt uint = 10
-	var interval = time.Second
-	if len(args) > 0 && args[0] > 0 {
-		attempt = uint(args[0])
-	}
-	if len(args) > 1 && args[1] > 0 {
-		interval = time.Duration(args[1])
-	}
-
-	err = retry.Do(context.TODO(), getResp, retry.Attempts(attempt), retry.Sleep(interval))
-	if err != nil {
-		log.Debug("failed to get config", zap.String("error", err.Error()))
-		return nil, err
-	}
-
-	defer resp.Body.Close()
-
-	body, err := ioutil.ReadAll(resp.Body)
-	log.Debug("get config", zap.String("config", string(body)))
-	if err != nil {
-		return nil, err
-	}
-
-	ret := make(map[string]interface{})
-	err = json.Unmarshal(body, &ret)
-	if err != nil {
-		return nil, err
-	}
-
-	return ret, nil
-}
 
 // GetAttrByKeyFromRepeatedKV return the value corresponding to key in kv pair
 func GetAttrByKeyFromRepeatedKV(key string, kvs []*commonpb.KeyValuePair) (string, error) {

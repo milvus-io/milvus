@@ -33,7 +33,7 @@ import (
 	"golang.org/x/exp/mmap"
 
 	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/util/errutil"
+	"github.com/milvus-io/milvus/internal/util/merr"
 )
 
 // LocalChunkManager is responsible for read and write local file.
@@ -107,7 +107,7 @@ func (lcm *LocalChunkManager) MultiWrite(ctx context.Context, contents map[strin
 	for filePath, content := range contents {
 		err := lcm.Write(ctx, filePath, content)
 		if err != nil {
-			el = errutil.Combine(el, errors.Wrapf(err, "write %s failed", filePath))
+			el = merr.Combine(el, errors.Wrapf(err, "write %s failed", filePath))
 		}
 	}
 	return el
@@ -145,7 +145,7 @@ func (lcm *LocalChunkManager) MultiRead(ctx context.Context, filePaths []string)
 	for i, filePath := range filePaths {
 		content, err := lcm.Read(ctx, filePath)
 		if err != nil {
-			el = errutil.Combine(el, errors.Wrapf(err, "failed to read %s", filePath))
+			el = merr.Combine(el, errors.Wrapf(err, "failed to read %s", filePath))
 		}
 		results[i] = content
 	}
@@ -252,7 +252,7 @@ func (lcm *LocalChunkManager) MultiRemove(ctx context.Context, filePaths []strin
 	for _, filePath := range filePaths {
 		err := lcm.Remove(ctx, filePath)
 		if err != nil {
-			el = errutil.Combine(err, errors.Wrapf(err, "failed to remove %s", filePath))
+			el = merr.Combine(err, errors.Wrapf(err, "failed to remove %s", filePath))
 		}
 	}
 	return el
