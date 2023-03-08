@@ -277,7 +277,11 @@ func (h *ServerHandler) GetChannelSeekPosition(channel *channel, partitionID Uni
 }
 
 func getCollectionStartPosition(channel string, collectionInfo *collectionInfo) *internalpb.MsgPosition {
-	return toMsgPosition(channel, collectionInfo.StartPositions)
+	position := toMsgPosition(channel, collectionInfo.StartPositions)
+	if position != nil {
+		position.Timestamp = collectionInfo.CreatedAt
+	}
+	return position
 }
 
 func toMsgPosition(channel string, startPositions []*commonpb.KeyDataPair) *internalpb.MsgPosition {

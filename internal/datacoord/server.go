@@ -969,6 +969,7 @@ func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID i
 		Partitions:     presp.PartitionIDs,
 		StartPositions: resp.GetStartPositions(),
 		Properties:     properties,
+		CreatedAt:      resp.GetCreatedTimestamp(),
 	}
 	s.meta.AddCollection(collInfo)
 	return nil
