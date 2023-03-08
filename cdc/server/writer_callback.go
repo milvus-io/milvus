@@ -52,7 +52,7 @@ func (w *WriteCallback) OnFail(data *model.CDCData, err error) {
 
 func (w *WriteCallback) OnSuccess(collectionID int64, channelInfos map[string]writer.CallbackChannelInfo) {
 	for channelName, info := range channelInfos {
-		sub := util.SubByNow(info.Ts) // TODO should be the latest message time
+		sub := util.SubByNow(info.Ts)
 		writerTimeDifferenceVec.WithLabelValues(w.taskID, strconv.FormatInt(collectionID, 10), channelName).Set(float64(sub))
 	}
 	// means it's drop collection message

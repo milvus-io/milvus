@@ -61,7 +61,7 @@ type MilvusCollectionReader struct {
 	allCollectionNames []string
 	dataChan           chan *model.CDCData
 	cancelWatch        context.CancelFunc
-	closeStreamFuncs   []func()
+	closeStreamFuncs   util.Value[[]func()]
 
 	startOnce sync.Once
 	quitOnce  sync.Once
@@ -92,6 +92,7 @@ func NewMilvusCollectionReader(options ...config.Option[*MilvusCollectionReader]
 		return t.collectionName
 	})
 	reader.isQuit.Store(false)
+	reader.closeStreamFuncs.Store([]func(){})
 	return reader, nil
 }
 
@@ -338,7 +339,9 @@ func (reader *MilvusCollectionReader) readStreamData(info *pb.CollectionInfo, se
 			handleError()
 			return
 		}
-		reader.closeStreamFuncs = append(reader.closeStreamFuncs, stream.Close)
+		funcs := reader.closeStreamFuncs.Load()
+		funcs = append(funcs, stream.Close)
+		reader.closeStreamFuncs.Store(funcs)
 		reader.goReadMsg(reader.collectionName(info), vchannel, msgChan, w, dropCollectionDataMap)
 	}
 	go func() {
@@ -463,7 +466,6 @@ func (reader *MilvusCollectionReader) filterMsg(collectionName string, msg msgst
 	if x, ok := msg.(interface{ GetCollectionName() string }); ok {
 		notEqual := x.GetCollectionName() != collectionName
 		if notEqual {
-			// TODO fubang look it
 			log.Warn("filter msg",
 				zap.String("current_collection_name", collectionName),
 				zap.String("msg_collection_name", x.GetCollectionName()),
@@ -485,7 +487,7 @@ func (reader *MilvusCollectionReader) QuitRead(ctx context.Context) {
 	reader.quitOnce.Do(func() {
 		reader.isQuit.Store(true)
 		reader.CancelWatchCollection()
-		for _, closeFunc := range reader.closeStreamFuncs {
+		for _, closeFunc := range reader.closeStreamFuncs.Load() {
 			closeFunc()
 		}
 	})

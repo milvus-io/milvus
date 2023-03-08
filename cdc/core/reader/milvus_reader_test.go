@@ -430,6 +430,8 @@ func TestReaderWatchCollectionInfo(t *testing.T) {
 			filterCall := monitor.On("OnFilterReadMsg", "Delete").Return()
 			msgStream1.EXPECT().AsConsumer(mock.Anything, mock.Anything, mock.Anything).Return()
 			msgStream2.EXPECT().AsConsumer(mock.Anything, mock.Anything, mock.Anything).Return()
+			msgStream1.EXPECT().Close().Return()
+			msgStream2.EXPECT().Close().Return()
 			msgStream1.EXPECT().Seek(mock.Anything).RunAndReturn(func(positions []*msgstream.MsgPosition) error {
 				if positions[0].ChannelName == "p1" {
 					assert.EqualValues(t, []byte("hello"), positions[0].MsgID)
