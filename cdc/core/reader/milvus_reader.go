@@ -22,6 +22,7 @@ import (
 	"math/rand"
 	"path"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/goccy/go-json"
@@ -98,15 +99,11 @@ func NewMilvusCollectionReader(options ...config.Option[*MilvusCollectionReader]
 
 func (reader *MilvusCollectionReader) StartRead(ctx context.Context) <-chan *model.CDCData {
 	reader.startOnce.Do(func() {
-		var (
-			watchCtx, cancel = context.WithCancel(context.Background())
-			wg               = &sync.WaitGroup{}
-		)
+		watchCtx, cancel := context.WithCancel(context.Background())
 		reader.cancelWatch = cancel
 
-		wg.Add(len(reader.allCollectionNames))
 		reader.goWatchCollection(watchCtx)
-		reader.goGetAllCollections(wg)
+		reader.goGetAllCollections()
 	})
 
 	return reader.dataChan
@@ -127,17 +124,17 @@ func (reader *MilvusCollectionReader) goWatchCollection(watchCtx context.Context
 				lo.ForEach(watchResp.Events, func(event *clientv3.Event, _ int) {
 					if event.Type == clientv3.EventTypePut {
 						collectionKey := util.ToString(event.Kv.Key)
+						if !strings.HasPrefix(collectionKey, reader.collectionPrefix()) {
+							return
+						}
 						info := &pb.CollectionInfo{}
 						err := proto.Unmarshal(event.Kv.Value, info)
 						if err != nil {
-							log.Warn("fail to unmarshal the collection info", zap.String("key", collectionKey), zap.Error(err))
+							log.Warn("fail to unmarshal the collection info", zap.String("key", collectionKey), zap.String("value", util.Base64Encode(event.Kv.Value)), zap.Error(err))
 							reader.monitor.OnFailUnKnowCollection(collectionKey, err)
 							return
 						}
-						getCollectionState := func(i *pb.CollectionInfo) pb.CollectionState {
-							return i.State
-						}
-						if getCollectionState(info) == pb.CollectionState_CollectionCreated {
+						if info.State == pb.CollectionState_CollectionCreated {
 							go func() {
 								if lo.Contains(reader.allCollectionNames, reader.collectionName(info)) {
 									err := util.Do(context.Background(), func() error {
@@ -165,7 +162,9 @@ func (reader *MilvusCollectionReader) goWatchCollection(watchCtx context.Context
 	}()
 }
 
-func (reader *MilvusCollectionReader) goGetAllCollections(wg *sync.WaitGroup) {
+func (reader *MilvusCollectionReader) goGetAllCollections() {
+	wg := &sync.WaitGroup{}
+	wg.Add(len(reader.allCollectionNames))
 	go func() {
 		var (
 			existedCollectionInfos []*pb.CollectionInfo
@@ -177,9 +176,10 @@ func (reader *MilvusCollectionReader) goGetAllCollections(wg *sync.WaitGroup) {
 			log.Warn("fail to get collection", zap.Error(err))
 			reader.monitor.OnFailUnKnowCollection(reader.collectionPrefix(), err)
 		}
-
 		for _, info := range existedCollectionInfos {
-			wg.Done()
+			if info.State == pb.CollectionState_CollectionCreated {
+				wg.Done()
+			}
 			go reader.readStreamData(info, false)
 		}
 	}()
@@ -218,10 +218,11 @@ func (reader *MilvusCollectionReader) getCollectionInfo(collectionNames []string
 		info := &pb.CollectionInfo{}
 		err = proto.Unmarshal(kv.Value, info)
 		if err != nil {
-			log.Warn("fail to unmarshal collection info", zap.String("key", util.ToString(kv.Key)), zap.Error(err))
+			log.Warn("fail to unmarshal collection info", zap.String("key", util.ToString(kv.Key)), zap.String("value", util.Base64Encode(kv.Value)), zap.Error(err))
 			return existedCollectionInfos, err
 		}
 		if lo.Contains(collectionNames, info.Schema.Name) {
+			log.Info("get the collection that it need to be replicated", zap.String("name", info.Schema.Name), zap.String("key", util.ToString(kv.Key)))
 			err = reader.fillCollectionField(info)
 			if err != nil {
 				return existedCollectionInfos, err
@@ -251,7 +252,7 @@ func (reader *MilvusCollectionReader) fillCollectionField(info *pb.CollectionInf
 		err = proto.Unmarshal(kv.Value, field)
 		if err != nil {
 			log.Warn("fail to unmarshal filed schema info",
-				zap.String("key", util.ToString(kv.Key)), zap.Error(err))
+				zap.String("key", util.ToString(kv.Key)), zap.String("value", util.Base64Encode(kv.Value)), zap.Error(err))
 			return err
 		}
 		if field.FieldID >= 100 {
