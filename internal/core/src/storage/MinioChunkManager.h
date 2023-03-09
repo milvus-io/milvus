@@ -30,6 +30,8 @@
 
 namespace milvus::storage {
 
+enum class RemoteStorageType { S3 = 0, GOOGLE_CLOUD = 1, ALIYUN_CLOUD = 2 };
+
 /**
  * @brief This MinioChunkManager is responsible for read and write file in S3.
  */
@@ -107,7 +109,7 @@ class MinioChunkManager : public RemoteChunkManager {
     std::vector<std::string>
     ListBuckets();
 
- private:
+ public:
     bool
     ObjectExists(const std::string& bucket_name,
                  const std::string& object_name);
@@ -130,9 +132,15 @@ class MinioChunkManager : public RemoteChunkManager {
     std::vector<std::string>
     ListObjects(const char* bucket_name, const char* prefix = nullptr);
     void
-    InitSDKAPI();
+    InitSDKAPI(RemoteStorageType type);
     void
     ShutdownSDKAPI();
+    void
+    BuildS3Client(const StorageConfig& storage_config,
+                  const Aws::Client::ClientConfiguration& config);
+    void
+    BuildAliyunCloudClient(const StorageConfig& storage_config,
+                           const Aws::Client::ClientConfiguration& config);
 
  private:
     const Aws::SDKOptions sdk_options_;

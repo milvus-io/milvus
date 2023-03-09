@@ -30,6 +30,8 @@
 
 #include <fstream>
 
+#include "storage/AliyunSTSClient.h"
+#include "storage/AliyunCredentialsProvider.h"
 #include "exceptions/EasyAssert.h"
 #include "log/Log.h"
 
@@ -72,7 +74,7 @@ ConvertFromAwsString(const Aws::String& aws_str) {
 }
 
 void
-MinioChunkManager::InitSDKAPI() {
+MinioChunkManager::InitSDKAPI(RemoteStorageType type) {
     std::scoped_lock lock{client_mutex_};
     const size_t initCount = init_count_++;
     if (initCount == 0) {
@@ -89,20 +91,10 @@ MinioChunkManager::ShutdownSDKAPI() {
     }
 }
 
-MinioChunkManager::MinioChunkManager(const StorageConfig& storage_config)
-    : default_bucket_name_(storage_config.bucket_name) {
-    InitSDKAPI();
-    Aws::Client::ClientConfiguration config;
-    config.endpointOverride = ConvertToAwsString(storage_config.address);
-
-    if (storage_config.useSSL) {
-        config.scheme = Aws::Http::Scheme::HTTPS;
-        config.verifySSL = true;
-    } else {
-        config.scheme = Aws::Http::Scheme::HTTP;
-        config.verifySSL = false;
-    }
-
+void
+MinioChunkManager::BuildS3Client(
+    const StorageConfig& storage_config,
+    const Aws::Client::ClientConfiguration& config) {
     if (storage_config.useIAM) {
         auto provider =
             std::make_shared<Aws::Auth::DefaultAWSCredentialsProviderChain>();
@@ -132,6 +124,60 @@ MinioChunkManager::MinioChunkManager(const StorageConfig& storage_config)
             config,
             Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,
             false);
+    }
+}
+
+void
+MinioChunkManager::BuildAliyunCloudClient(
+    const StorageConfig& storage_config,
+    const Aws::Client::ClientConfiguration& config) {
+    if (storage_config.useIAM) {
+        auto aliyun_provider = Aws::MakeShared<
+            Aws::Auth::AliyunSTSAssumeRoleWebIdentityCredentialsProvider>(
+            "AliyunSTSAssumeRoleWebIdentityCredentialsProvider");
+        auto aliyun_credentials = aliyun_provider->GetAWSCredentials();
+        AssertInfo(!aliyun_credentials.GetAWSAccessKeyId().empty(),
+                   "if use iam, access key id should not be empty");
+        AssertInfo(!aliyun_credentials.GetAWSSecretKey().empty(),
+                   "if use iam, secret key should not be empty");
+        AssertInfo(!aliyun_credentials.GetSessionToken().empty(),
+                   "if use iam, token should not be empty");
+        client_ = std::make_shared<Aws::S3::S3Client>(
+            aliyun_provider,
+            config,
+            Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,
+            true);
+    } else {
+        throw std::runtime_error("aliyun cloud only support iam mode now");
+    }
+}
+
+MinioChunkManager::MinioChunkManager(const StorageConfig& storage_config)
+    : default_bucket_name_(storage_config.bucket_name) {
+    RemoteStorageType storageType;
+    if (storage_config.address.find("aliyun") != std::string::npos) {
+        storageType = RemoteStorageType::ALIYUN_CLOUD;
+    } else {
+        storageType = RemoteStorageType::S3;
+    }
+
+    InitSDKAPI(storageType);
+
+    Aws::Client::ClientConfiguration config;
+    config.endpointOverride = ConvertToAwsString(storage_config.address);
+
+    if (storage_config.useSSL) {
+        config.scheme = Aws::Http::Scheme::HTTPS;
+        config.verifySSL = true;
+    } else {
+        config.scheme = Aws::Http::Scheme::HTTP;
+        config.verifySSL = false;
+    }
+
+    if (storageType == RemoteStorageType::S3) {
+        BuildS3Client(storage_config, config);
+    } else if (storageType == RemoteStorageType::ALIYUN_CLOUD) {
+        BuildAliyunCloudClient(storage_config, config);
     }
 
     // TODO ::BucketExist and CreateBucket func not work, should be fixed
