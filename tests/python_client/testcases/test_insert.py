@@ -496,6 +496,27 @@ class TestInsertOperation(TestcaseBase):
         error = {ct.err_code: 1, ct.err_msg: "The type of data should be list or pandas.DataFrame"}
         collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_insert_exceed_varchar_limit(self):
+        """
+        target: test insert exceed varchar limit
+        method: create a collection with varchar limit=2 and insert invalid data
+        expected: error raised
+        """
+        fields = [
+            cf.gen_int64_field(is_primary=True),
+            cf.gen_float_vec_field(),
+            cf.gen_string_field(name='small_limit', max_length=2),
+            cf.gen_string_field(name='big_limit', max_length=65530)
+        ]
+        schema = cf.gen_collection_schema(fields, auto_id=True)
+        name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name, schema)
+        vectors = cf.gen_vectors(2, ct.default_dim)
+        data = [vectors, ["limit_1___________", "limit_2___________"], ['1', '2']]
+        error = {ct.err_code: 1, ct.err_msg: "invalid input, length of string exceeds max length"}
+        collection_w.insert(data, check_task=CheckTasks.err_res, check_items=error)
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_with_lack_vector_field(self):
         """
