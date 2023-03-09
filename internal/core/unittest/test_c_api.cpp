@@ -85,9 +85,13 @@ generate_data(int N) {
         for (auto& x : vec) {
             x = dis(e);
         }
-        raw_data.insert(raw_data.end(), (const char*)std::begin(vec), (const char*)std::end(vec));
+        raw_data.insert(raw_data.end(),
+                        (const char*)std::begin(vec),
+                        (const char*)std::end(vec));
         int age = e() % 100;
-        raw_data.insert(raw_data.end(), (const char*)&age, ((const char*)&age) + sizeof(age));
+        raw_data.insert(raw_data.end(),
+                        (const char*)&age,
+                        ((const char*)&age) + sizeof(age));
     }
     return std::make_tuple(raw_data, timestamps, uids);
 }
@@ -171,7 +175,8 @@ generate_collection_schema(std::string metric_type, int dim, bool is_binary) {
     other_field_schema2->set_data_type(schema::DataType::Double);
 
     std::string schema_string;
-    auto marshal = google::protobuf::TextFormat::PrintToString(collection_schema, &schema_string);
+    auto marshal = google::protobuf::TextFormat::PrintToString(
+        collection_schema, &schema_string);
     assert(marshal);
     return schema_string;
 }
@@ -195,10 +200,15 @@ generate_collection_schema(std::string metric_type, int dim, bool is_binary) {
 //}  // namespace
 
 IndexBasePtr
-generate_index(
-    void* raw_data, DataType field_type, MetricType metric_type, IndexType index_type, int64_t dim, int64_t N) {
+generate_index(void* raw_data,
+               DataType field_type,
+               MetricType metric_type,
+               IndexType index_type,
+               int64_t dim,
+               int64_t N) {
     CreateIndexInfo create_index_info{field_type, index_type, metric_type};
-    auto indexing = milvus::index::IndexFactory::GetInstance().CreateIndex(create_index_info, nullptr);
+    auto indexing = milvus::index::IndexFactory::GetInstance().CreateIndex(
+        create_index_info, nullptr);
 
     auto database = knowhere::GenDataSet(N, dim, raw_data);
     auto build_config = generate_build_conf(index_type, metric_type);
@@ -233,7 +243,8 @@ TEST(CApiTest, SegmentTest) {
 }
 
 TEST(CApiTest, CPlan) {
-    std::string schema_string = generate_collection_schema("JACCARD", DIM, true);
+    std::string schema_string =
+        generate_collection_schema("JACCARD", DIM, true);
     auto collection = NewCollection(schema_string.c_str());
 
     const char* dsl_string = R"(
@@ -262,7 +273,8 @@ TEST(CApiTest, CPlan) {
     ASSERT_EQ(status.error_code, Success);
 
     auto col = static_cast<Collection*>(collection);
-    for (auto& [target_field_id, field_meta] : col->get_schema()->get_fields()) {
+    for (auto& [target_field_id, field_meta] :
+         col->get_schema()->get_fields()) {
         if (field_meta.is_vector()) {
             ASSERT_EQ(field_id, target_field_id.get());
         }
@@ -285,7 +297,12 @@ TEST(CApiTest, InsertTest) {
     PreInsert(segment, N, &offset);
 
     auto insert_data = serialize(dataset.raw_);
-    auto res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
+    auto res = Insert(segment,
+                      offset,
+                      N,
+                      dataset.row_ids_.data(),
+                      dataset.timestamps_.data(),
+                      insert_data.data(),
                       insert_data.size());
     ASSERT_EQ(res.error_code, Success);
 
@@ -299,13 +316,19 @@ TEST(CApiTest, DeleteTest) {
 
     std::vector<int64_t> delete_row_ids = {100000, 100001, 100002};
     auto ids = std::make_unique<IdArray>();
-    ids->mutable_int_id()->mutable_data()->Add(delete_row_ids.begin(), delete_row_ids.end());
+    ids->mutable_int_id()->mutable_data()->Add(delete_row_ids.begin(),
+                                               delete_row_ids.end());
     auto delete_data = serialize(ids.get());
     uint64_t delete_timestamps[] = {0, 0, 0};
 
     auto offset = PreDelete(segment, 3);
 
-    auto del_res = Delete(segment, offset, 3, delete_data.data(), delete_data.size(), delete_timestamps);
+    auto del_res = Delete(segment,
+                          offset,
+                          3,
+                          delete_data.data(),
+                          delete_data.size(),
+                          delete_timestamps);
     ASSERT_EQ(del_res.error_code, Success);
 
     DeleteCollection(collection);
@@ -324,46 +347,63 @@ TEST(CApiTest, MultiDeleteGrowingSegment) {
     // insert, pks= {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
     int64_t offset;
     PreInsert(segment, N, &offset);
-    auto res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
+    auto res = Insert(segment,
+                      offset,
+                      N,
+                      dataset.row_ids_.data(),
+                      dataset.timestamps_.data(),
+                      insert_data.data(),
                       insert_data.size());
     ASSERT_EQ(res.error_code, Success);
 
     // delete data pks = {1}
     std::vector<int64_t> delete_pks = {1};
     auto ids = std::make_unique<IdArray>();
-    ids->mutable_int_id()->mutable_data()->Add(delete_pks.begin(), delete_pks.end());
+    ids->mutable_int_id()->mutable_data()->Add(delete_pks.begin(),
+                                               delete_pks.end());
     auto delete_data = serialize(ids.get());
     std::vector<uint64_t> delete_timestamps(1, dataset.timestamps_[N - 1]);
     offset = PreDelete(segment, 1);
-    auto del_res = Delete(segment, offset, 1, delete_data.data(), delete_data.size(), delete_timestamps.data());
+    auto del_res = Delete(segment,
+                          offset,
+                          1,
+                          delete_data.data(),
+                          delete_data.size(),
+                          delete_timestamps.data());
     ASSERT_EQ(del_res.error_code, Success);
 
     // retrieve pks = {1}
     std::vector<int64_t> retrive_pks = {1};
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
-    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(FieldId(101), DataType::INT64, retrive_pks);
+    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(
+        FieldId(101), DataType::INT64, retrive_pks);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
     plan->plan_node_->predicate_ = std::move(term_expr);
     std::vector<FieldId> target_field_ids{FieldId(100), FieldId(101)};
     plan->field_ids_ = target_field_ids;
 
     CRetrieveResult retrieve_result;
-    res = Retrieve(segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
+    res = Retrieve(
+        segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
     auto query_result = std::make_unique<proto::segcore::RetrieveResults>();
-    auto suc = query_result->ParseFromArray(retrieve_result.proto_blob, retrieve_result.proto_size);
+    auto suc = query_result->ParseFromArray(retrieve_result.proto_blob,
+                                            retrieve_result.proto_size);
     ASSERT_TRUE(suc);
     ASSERT_EQ(query_result->ids().int_id().data().size(), 0);
     DeleteRetrieveResult(&retrieve_result);
 
     // retrieve pks = {2}
     retrive_pks = {2};
-    term_expr = std::make_unique<query::TermExprImpl<int64_t>>(FieldId(101), DataType::INT64, retrive_pks);
+    term_expr = std::make_unique<query::TermExprImpl<int64_t>>(
+        FieldId(101), DataType::INT64, retrive_pks);
     plan->plan_node_->predicate_ = std::move(term_expr);
-    res = Retrieve(segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
+    res = Retrieve(
+        segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
-    suc = query_result->ParseFromArray(retrieve_result.proto_blob, retrieve_result.proto_size);
+    suc = query_result->ParseFromArray(retrieve_result.proto_blob,
+                                       retrieve_result.proto_size);
     ASSERT_TRUE(suc);
     ASSERT_EQ(query_result->ids().int_id().data().size(), 1);
     DeleteRetrieveResult(&retrieve_result);
@@ -371,16 +411,24 @@ TEST(CApiTest, MultiDeleteGrowingSegment) {
     // delete pks = {2}
     delete_pks = {2};
     ids = std::make_unique<IdArray>();
-    ids->mutable_int_id()->mutable_data()->Add(delete_pks.begin(), delete_pks.end());
+    ids->mutable_int_id()->mutable_data()->Add(delete_pks.begin(),
+                                               delete_pks.end());
     delete_data = serialize(ids.get());
     offset = PreDelete(segment, 1);
-    del_res = Delete(segment, offset, 1, delete_data.data(), delete_data.size(), delete_timestamps.data());
+    del_res = Delete(segment,
+                     offset,
+                     1,
+                     delete_data.data(),
+                     delete_data.size(),
+                     delete_timestamps.data());
     ASSERT_EQ(del_res.error_code, Success);
 
     // retrieve pks in {2}
-    res = Retrieve(segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
+    res = Retrieve(
+        segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
-    suc = query_result->ParseFromArray(retrieve_result.proto_blob, retrieve_result.proto_size);
+    suc = query_result->ParseFromArray(retrieve_result.proto_blob,
+                                       retrieve_result.proto_size);
     ASSERT_TRUE(suc);
     ASSERT_EQ(query_result->ids().int_id().data().size(), 0);
 
@@ -404,7 +452,8 @@ TEST(CApiTest, MultiDeleteSealedSegment) {
         auto array = dataset.get_col(field_id);
         auto data = serialize(array.get());
 
-        auto load_info = CLoadFieldDataInfo{field_id.get(), data.data(), data.size(), N};
+        auto load_info =
+            CLoadFieldDataInfo{field_id.get(), data.data(), data.size(), N};
 
         auto res = LoadFieldData(segment, load_info);
         ASSERT_EQ(res.error_code, Success);
@@ -413,20 +462,26 @@ TEST(CApiTest, MultiDeleteSealedSegment) {
     }
 
     // load timestamps
-    FieldMeta ts_field_meta(FieldName("Timestamp"), TimestampFieldID, DataType::INT64);
-    auto ts_array = CreateScalarDataArrayFrom(dataset.timestamps_.data(), N, ts_field_meta);
+    FieldMeta ts_field_meta(
+        FieldName("Timestamp"), TimestampFieldID, DataType::INT64);
+    auto ts_array =
+        CreateScalarDataArrayFrom(dataset.timestamps_.data(), N, ts_field_meta);
     auto ts_data = serialize(ts_array.get());
-    auto load_info = CLoadFieldDataInfo{TimestampFieldID.get(), ts_data.data(), ts_data.size(), N};
+    auto load_info = CLoadFieldDataInfo{
+        TimestampFieldID.get(), ts_data.data(), ts_data.size(), N};
     auto res = LoadFieldData(segment, load_info);
     ASSERT_EQ(res.error_code, Success);
     auto count = GetRowCount(segment);
     ASSERT_EQ(count, N);
 
     // load rowID
-    FieldMeta row_id_field_meta(FieldName("RowID"), RowFieldID, DataType::INT64);
-    auto row_id_array = CreateScalarDataArrayFrom(dataset.row_ids_.data(), N, row_id_field_meta);
+    FieldMeta row_id_field_meta(
+        FieldName("RowID"), RowFieldID, DataType::INT64);
+    auto row_id_array = CreateScalarDataArrayFrom(
+        dataset.row_ids_.data(), N, row_id_field_meta);
     auto row_id_data = serialize(row_id_array.get());
-    load_info = CLoadFieldDataInfo{RowFieldID.get(), row_id_data.data(), row_id_data.size(), N};
+    load_info = CLoadFieldDataInfo{
+        RowFieldID.get(), row_id_data.data(), row_id_data.size(), N};
     res = LoadFieldData(segment, load_info);
     ASSERT_EQ(res.error_code, Success);
     count = GetRowCount(segment);
@@ -435,39 +490,51 @@ TEST(CApiTest, MultiDeleteSealedSegment) {
     // delete data pks = {1}
     std::vector<int64_t> delete_pks = {1};
     auto ids = std::make_unique<IdArray>();
-    ids->mutable_int_id()->mutable_data()->Add(delete_pks.begin(), delete_pks.end());
+    ids->mutable_int_id()->mutable_data()->Add(delete_pks.begin(),
+                                               delete_pks.end());
     auto delete_data = serialize(ids.get());
     std::vector<uint64_t> delete_timestamps(1, dataset.timestamps_[N - 1]);
     auto offset = PreDelete(segment, 1);
-    auto del_res = Delete(segment, offset, 1, delete_data.data(), delete_data.size(), delete_timestamps.data());
+    auto del_res = Delete(segment,
+                          offset,
+                          1,
+                          delete_data.data(),
+                          delete_data.size(),
+                          delete_timestamps.data());
     ASSERT_EQ(del_res.error_code, Success);
 
     // retrieve pks = {1}
     std::vector<int64_t> retrive_pks = {1};
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
-    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(FieldId(101), DataType::INT64, retrive_pks);
+    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(
+        FieldId(101), DataType::INT64, retrive_pks);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
     plan->plan_node_->predicate_ = std::move(term_expr);
     std::vector<FieldId> target_field_ids{FieldId(100), FieldId(101)};
     plan->field_ids_ = target_field_ids;
 
     CRetrieveResult retrieve_result;
-    res = Retrieve(segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
+    res = Retrieve(
+        segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
     auto query_result = std::make_unique<proto::segcore::RetrieveResults>();
-    auto suc = query_result->ParseFromArray(retrieve_result.proto_blob, retrieve_result.proto_size);
+    auto suc = query_result->ParseFromArray(retrieve_result.proto_blob,
+                                            retrieve_result.proto_size);
     ASSERT_TRUE(suc);
     ASSERT_EQ(query_result->ids().int_id().data().size(), 0);
     DeleteRetrieveResult(&retrieve_result);
 
     // retrieve pks = {2}
     retrive_pks = {2};
-    term_expr = std::make_unique<query::TermExprImpl<int64_t>>(FieldId(101), DataType::INT64, retrive_pks);
+    term_expr = std::make_unique<query::TermExprImpl<int64_t>>(
+        FieldId(101), DataType::INT64, retrive_pks);
     plan->plan_node_->predicate_ = std::move(term_expr);
-    res = Retrieve(segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
+    res = Retrieve(
+        segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
-    suc = query_result->ParseFromArray(retrieve_result.proto_blob, retrieve_result.proto_size);
+    suc = query_result->ParseFromArray(retrieve_result.proto_blob,
+                                       retrieve_result.proto_size);
     ASSERT_TRUE(suc);
     ASSERT_EQ(query_result->ids().int_id().data().size(), 1);
     DeleteRetrieveResult(&retrieve_result);
@@ -475,16 +542,24 @@ TEST(CApiTest, MultiDeleteSealedSegment) {
     // delete pks = {2}
     delete_pks = {2};
     ids = std::make_unique<IdArray>();
-    ids->mutable_int_id()->mutable_data()->Add(delete_pks.begin(), delete_pks.end());
+    ids->mutable_int_id()->mutable_data()->Add(delete_pks.begin(),
+                                               delete_pks.end());
     delete_data = serialize(ids.get());
     offset = PreDelete(segment, 1);
-    del_res = Delete(segment, offset, 1, delete_data.data(), delete_data.size(), delete_timestamps.data());
+    del_res = Delete(segment,
+                     offset,
+                     1,
+                     delete_data.data(),
+                     delete_data.size(),
+                     delete_timestamps.data());
     ASSERT_EQ(del_res.error_code, Success);
 
     // retrieve pks in {2}
-    res = Retrieve(segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
+    res = Retrieve(
+        segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
-    suc = query_result->ParseFromArray(retrieve_result.proto_blob, retrieve_result.proto_size);
+    suc = query_result->ParseFromArray(retrieve_result.proto_blob,
+                                       retrieve_result.proto_size);
     ASSERT_TRUE(suc);
     ASSERT_EQ(query_result->ids().int_id().data().size(), 0);
 
@@ -508,13 +583,23 @@ TEST(CApiTest, DeleteRepeatedPksFromGrowingSegment) {
     // first insert, pks= {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
     int64_t offset;
     PreInsert(segment, N, &offset);
-    auto res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
+    auto res = Insert(segment,
+                      offset,
+                      N,
+                      dataset.row_ids_.data(),
+                      dataset.timestamps_.data(),
+                      insert_data.data(),
                       insert_data.size());
     ASSERT_EQ(res.error_code, Success);
 
     // second insert, pks= {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
     PreInsert(segment, N, &offset);
-    res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
+    res = Insert(segment,
+                 offset,
+                 N,
+                 dataset.row_ids_.data(),
+                 dataset.timestamps_.data(),
+                 insert_data.data(),
                  insert_data.size());
     ASSERT_EQ(res.error_code, Success);
 
@@ -522,17 +607,20 @@ TEST(CApiTest, DeleteRepeatedPksFromGrowingSegment) {
     std::vector<int64_t> retrive_row_ids = {1, 2, 3};
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
-    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(FieldId(101), DataType::INT64, retrive_row_ids);
+    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(
+        FieldId(101), DataType::INT64, retrive_row_ids);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
     plan->plan_node_->predicate_ = std::move(term_expr);
     std::vector<FieldId> target_field_ids{FieldId(100), FieldId(101)};
     plan->field_ids_ = target_field_ids;
 
     CRetrieveResult retrieve_result;
-    res = Retrieve(segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
+    res = Retrieve(
+        segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
     auto query_result = std::make_unique<proto::segcore::RetrieveResults>();
-    auto suc = query_result->ParseFromArray(retrieve_result.proto_blob, retrieve_result.proto_size);
+    auto suc = query_result->ParseFromArray(retrieve_result.proto_blob,
+                                            retrieve_result.proto_size);
     ASSERT_TRUE(suc);
     ASSERT_EQ(query_result->ids().int_id().data().size(), 6);
     DeleteRetrieveResult(&retrieve_result);
@@ -540,20 +628,28 @@ TEST(CApiTest, DeleteRepeatedPksFromGrowingSegment) {
     // delete data pks = {1, 2, 3}
     std::vector<int64_t> delete_row_ids = {1, 2, 3};
     auto ids = std::make_unique<IdArray>();
-    ids->mutable_int_id()->mutable_data()->Add(delete_row_ids.begin(), delete_row_ids.end());
+    ids->mutable_int_id()->mutable_data()->Add(delete_row_ids.begin(),
+                                               delete_row_ids.end());
     auto delete_data = serialize(ids.get());
     std::vector<uint64_t> delete_timestamps(3, dataset.timestamps_[N - 1]);
 
     offset = PreDelete(segment, 3);
-    auto del_res = Delete(segment, offset, 3, delete_data.data(), delete_data.size(), delete_timestamps.data());
+    auto del_res = Delete(segment,
+                          offset,
+                          3,
+                          delete_data.data(),
+                          delete_data.size(),
+                          delete_timestamps.data());
     ASSERT_EQ(del_res.error_code, Success);
 
     // retrieve pks in {1, 2, 3}
-    res = Retrieve(segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
+    res = Retrieve(
+        segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
 
     query_result = std::make_unique<proto::segcore::RetrieveResults>();
-    suc = query_result->ParseFromArray(retrieve_result.proto_blob, retrieve_result.proto_size);
+    suc = query_result->ParseFromArray(retrieve_result.proto_blob,
+                                       retrieve_result.proto_size);
     ASSERT_TRUE(suc);
     ASSERT_EQ(query_result->ids().int_id().data().size(), 0);
 
@@ -576,7 +672,8 @@ TEST(CApiTest, DeleteRepeatedPksFromSealedSegment) {
         auto array = dataset.get_col(field_id);
         auto data = serialize(array.get());
 
-        auto load_info = CLoadFieldDataInfo{field_id.get(), data.data(), data.size(), N};
+        auto load_info =
+            CLoadFieldDataInfo{field_id.get(), data.data(), data.size(), N};
 
         auto res = LoadFieldData(segment, load_info);
         ASSERT_EQ(res.error_code, Success);
@@ -584,19 +681,25 @@ TEST(CApiTest, DeleteRepeatedPksFromSealedSegment) {
         ASSERT_EQ(count, N);
     }
 
-    FieldMeta ts_field_meta(FieldName("Timestamp"), TimestampFieldID, DataType::INT64);
-    auto ts_array = CreateScalarDataArrayFrom(dataset.timestamps_.data(), N, ts_field_meta);
+    FieldMeta ts_field_meta(
+        FieldName("Timestamp"), TimestampFieldID, DataType::INT64);
+    auto ts_array =
+        CreateScalarDataArrayFrom(dataset.timestamps_.data(), N, ts_field_meta);
     auto ts_data = serialize(ts_array.get());
-    auto load_info = CLoadFieldDataInfo{TimestampFieldID.get(), ts_data.data(), ts_data.size(), N};
+    auto load_info = CLoadFieldDataInfo{
+        TimestampFieldID.get(), ts_data.data(), ts_data.size(), N};
     auto res = LoadFieldData(segment, load_info);
     ASSERT_EQ(res.error_code, Success);
     auto count = GetRowCount(segment);
     ASSERT_EQ(count, N);
 
-    FieldMeta row_id_field_meta(FieldName("RowID"), RowFieldID, DataType::INT64);
-    auto row_id_array = CreateScalarDataArrayFrom(dataset.row_ids_.data(), N, row_id_field_meta);
+    FieldMeta row_id_field_meta(
+        FieldName("RowID"), RowFieldID, DataType::INT64);
+    auto row_id_array = CreateScalarDataArrayFrom(
+        dataset.row_ids_.data(), N, row_id_field_meta);
     auto row_id_data = serialize(row_id_array.get());
-    load_info = CLoadFieldDataInfo{RowFieldID.get(), row_id_data.data(), row_id_data.size(), N};
+    load_info = CLoadFieldDataInfo{
+        RowFieldID.get(), row_id_data.data(), row_id_data.size(), N};
     res = LoadFieldData(segment, load_info);
     ASSERT_EQ(res.error_code, Success);
     count = GetRowCount(segment);
@@ -606,17 +709,20 @@ TEST(CApiTest, DeleteRepeatedPksFromSealedSegment) {
     std::vector<int64_t> retrive_row_ids = {1, 2, 3};
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
-    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(FieldId(101), DataType::INT64, retrive_row_ids);
+    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(
+        FieldId(101), DataType::INT64, retrive_row_ids);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
     plan->plan_node_->predicate_ = std::move(term_expr);
     std::vector<FieldId> target_field_ids{FieldId(100), FieldId(101)};
     plan->field_ids_ = target_field_ids;
 
     CRetrieveResult retrieve_result;
-    res = Retrieve(segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
+    res = Retrieve(
+        segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
     auto query_result = std::make_unique<proto::segcore::RetrieveResults>();
-    auto suc = query_result->ParseFromArray(retrieve_result.proto_blob, retrieve_result.proto_size);
+    auto suc = query_result->ParseFromArray(retrieve_result.proto_blob,
+                                            retrieve_result.proto_size);
     ASSERT_TRUE(suc);
     ASSERT_EQ(query_result->ids().int_id().data().size(), 6);
     DeleteRetrieveResult(&retrieve_result);
@@ -624,21 +730,29 @@ TEST(CApiTest, DeleteRepeatedPksFromSealedSegment) {
     // delete data pks = {1, 2, 3}
     std::vector<int64_t> delete_row_ids = {1, 2, 3};
     auto ids = std::make_unique<IdArray>();
-    ids->mutable_int_id()->mutable_data()->Add(delete_row_ids.begin(), delete_row_ids.end());
+    ids->mutable_int_id()->mutable_data()->Add(delete_row_ids.begin(),
+                                               delete_row_ids.end());
     auto delete_data = serialize(ids.get());
     std::vector<uint64_t> delete_timestamps(3, dataset.timestamps_[N - 1]);
 
     auto offset = PreDelete(segment, 3);
 
-    auto del_res = Delete(segment, offset, 3, delete_data.data(), delete_data.size(), delete_timestamps.data());
+    auto del_res = Delete(segment,
+                          offset,
+                          3,
+                          delete_data.data(),
+                          delete_data.size(),
+                          delete_timestamps.data());
     ASSERT_EQ(del_res.error_code, Success);
 
     // retrieve pks in {1, 2, 3}
-    res = Retrieve(segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
+    res = Retrieve(
+        segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
 
     query_result = std::make_unique<proto::segcore::RetrieveResults>();
-    suc = query_result->ParseFromArray(retrieve_result.proto_blob, retrieve_result.proto_size);
+    suc = query_result->ParseFromArray(retrieve_result.proto_blob,
+                                       retrieve_result.proto_size);
     ASSERT_TRUE(suc);
     ASSERT_EQ(query_result->ids().int_id().data().size(), 0);
 
@@ -662,37 +776,51 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnGrowingSegment) {
     // insert data with pks = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9} , timestamps = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
     int64_t offset;
     PreInsert(segment, N, &offset);
-    auto res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
+    auto res = Insert(segment,
+                      offset,
+                      N,
+                      dataset.row_ids_.data(),
+                      dataset.timestamps_.data(),
+                      insert_data.data(),
                       insert_data.size());
     ASSERT_EQ(res.error_code, Success);
 
     // delete data pks = {1, 2, 3}, timestamps = {9, 9, 9}
     std::vector<int64_t> delete_row_ids = {1, 2, 3};
     auto ids = std::make_unique<IdArray>();
-    ids->mutable_int_id()->mutable_data()->Add(delete_row_ids.begin(), delete_row_ids.end());
+    ids->mutable_int_id()->mutable_data()->Add(delete_row_ids.begin(),
+                                               delete_row_ids.end());
     auto delete_data = serialize(ids.get());
     std::vector<uint64_t> delete_timestamps(3, dataset.timestamps_[N - 1]);
 
     offset = PreDelete(segment, 3);
 
-    auto del_res = Delete(segment, offset, 3, delete_data.data(), delete_data.size(), delete_timestamps.data());
+    auto del_res = Delete(segment,
+                          offset,
+                          3,
+                          delete_data.data(),
+                          delete_data.size(),
+                          delete_timestamps.data());
     ASSERT_EQ(del_res.error_code, Success);
 
     // create retrieve plan pks in {1, 2, 3}, timestamp = 9
     std::vector<int64_t> retrive_row_ids = {1, 2, 3};
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
-    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(FieldId(101), DataType::INT64, retrive_row_ids);
+    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(
+        FieldId(101), DataType::INT64, retrive_row_ids);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
     plan->plan_node_->predicate_ = std::move(term_expr);
     std::vector<FieldId> target_field_ids{FieldId(100), FieldId(101)};
     plan->field_ids_ = target_field_ids;
 
     CRetrieveResult retrieve_result;
-    res = Retrieve(segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
+    res = Retrieve(
+        segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
     auto query_result = std::make_unique<proto::segcore::RetrieveResults>();
-    auto suc = query_result->ParseFromArray(retrieve_result.proto_blob, retrieve_result.proto_size);
+    auto suc = query_result->ParseFromArray(retrieve_result.proto_blob,
+                                            retrieve_result.proto_size);
     ASSERT_TRUE(suc);
     ASSERT_EQ(query_result->ids().int_id().data().size(), 0);
     DeleteRetrieveResult(&retrieve_result);
@@ -702,16 +830,23 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnGrowingSegment) {
     dataset = DataGen(col->get_schema(), N, 42, N);
     insert_data = serialize(dataset.raw_);
     PreInsert(segment, N, &offset);
-    res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
+    res = Insert(segment,
+                 offset,
+                 N,
+                 dataset.row_ids_.data(),
+                 dataset.timestamps_.data(),
+                 insert_data.data(),
                  insert_data.size());
     ASSERT_EQ(res.error_code, Success);
 
     // retrieve pks in {1, 2, 3}, timestamp = 19
-    res = Retrieve(segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
+    res = Retrieve(
+        segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
 
     query_result = std::make_unique<proto::segcore::RetrieveResults>();
-    suc = query_result->ParseFromArray(retrieve_result.proto_blob, retrieve_result.proto_size);
+    suc = query_result->ParseFromArray(retrieve_result.proto_blob,
+                                       retrieve_result.proto_size);
     ASSERT_TRUE(suc);
     ASSERT_EQ(query_result->ids().int_id().data().size(), 3);
 
@@ -735,7 +870,8 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnSealedSegment) {
         auto array = dataset.get_col(field_id);
         auto data = serialize(array.get());
 
-        auto load_info = CLoadFieldDataInfo{field_id.get(), data.data(), data.size(), N};
+        auto load_info =
+            CLoadFieldDataInfo{field_id.get(), data.data(), data.size(), N};
 
         auto res = LoadFieldData(segment, load_info);
         ASSERT_EQ(res.error_code, Success);
@@ -743,19 +879,25 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnSealedSegment) {
         ASSERT_EQ(count, N);
     }
 
-    FieldMeta ts_field_meta(FieldName("Timestamp"), TimestampFieldID, DataType::INT64);
-    auto ts_array = CreateScalarDataArrayFrom(dataset.timestamps_.data(), N, ts_field_meta);
+    FieldMeta ts_field_meta(
+        FieldName("Timestamp"), TimestampFieldID, DataType::INT64);
+    auto ts_array =
+        CreateScalarDataArrayFrom(dataset.timestamps_.data(), N, ts_field_meta);
     auto ts_data = serialize(ts_array.get());
-    auto load_info = CLoadFieldDataInfo{TimestampFieldID.get(), ts_data.data(), ts_data.size(), N};
+    auto load_info = CLoadFieldDataInfo{
+        TimestampFieldID.get(), ts_data.data(), ts_data.size(), N};
     auto res = LoadFieldData(segment, load_info);
     ASSERT_EQ(res.error_code, Success);
     auto count = GetRowCount(segment);
     ASSERT_EQ(count, N);
 
-    FieldMeta row_id_field_meta(FieldName("RowID"), RowFieldID, DataType::INT64);
-    auto row_id_array = CreateScalarDataArrayFrom(dataset.row_ids_.data(), N, row_id_field_meta);
+    FieldMeta row_id_field_meta(
+        FieldName("RowID"), RowFieldID, DataType::INT64);
+    auto row_id_array = CreateScalarDataArrayFrom(
+        dataset.row_ids_.data(), N, row_id_field_meta);
     auto row_id_data = serialize(row_id_array.get());
-    load_info = CLoadFieldDataInfo{RowFieldID.get(), row_id_data.data(), row_id_data.size(), N};
+    load_info = CLoadFieldDataInfo{
+        RowFieldID.get(), row_id_data.data(), row_id_data.size(), N};
     res = LoadFieldData(segment, load_info);
     ASSERT_EQ(res.error_code, Success);
     count = GetRowCount(segment);
@@ -764,30 +906,39 @@ TEST(CApiTest, InsertSamePkAfterDeleteOnSealedSegment) {
     // delete data pks = {1, 2, 3}, timestamps = {4, 4, 4}
     std::vector<int64_t> delete_row_ids = {1, 2, 3};
     auto ids = std::make_unique<IdArray>();
-    ids->mutable_int_id()->mutable_data()->Add(delete_row_ids.begin(), delete_row_ids.end());
+    ids->mutable_int_id()->mutable_data()->Add(delete_row_ids.begin(),
+                                               delete_row_ids.end());
     auto delete_data = serialize(ids.get());
     std::vector<uint64_t> delete_timestamps(3, dataset.timestamps_[4]);
 
     auto offset = PreDelete(segment, 3);
 
-    auto del_res = Delete(segment, offset, 3, delete_data.data(), delete_data.size(), delete_timestamps.data());
+    auto del_res = Delete(segment,
+                          offset,
+                          3,
+                          delete_data.data(),
+                          delete_data.size(),
+                          delete_timestamps.data());
     ASSERT_EQ(del_res.error_code, Success);
 
     // create retrieve plan pks in {1, 2, 3}, timestamp = 9
     std::vector<int64_t> retrive_row_ids = {1, 2, 3};
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
-    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(FieldId(101), DataType::INT64, retrive_row_ids);
+    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(
+        FieldId(101), DataType::INT64, retrive_row_ids);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
     plan->plan_node_->predicate_ = std::move(term_expr);
     std::vector<FieldId> target_field_ids{FieldId(100), FieldId(101)};
     plan->field_ids_ = target_field_ids;
 
     CRetrieveResult retrieve_result;
-    res = Retrieve(segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
+    res = Retrieve(
+        segment, plan.get(), dataset.timestamps_[N - 1], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
     auto query_result = std::make_unique<proto::segcore::RetrieveResults>();
-    auto suc = query_result->ParseFromArray(retrieve_result.proto_blob, retrieve_result.proto_size);
+    auto suc = query_result->ParseFromArray(retrieve_result.proto_blob,
+                                            retrieve_result.proto_size);
     ASSERT_TRUE(suc);
     ASSERT_EQ(query_result->ids().int_id().data().size(), 4);
 
@@ -811,7 +962,12 @@ TEST(CApiTest, SearchTest) {
     PreInsert(segment, N, &offset);
 
     auto insert_data = serialize(dataset.raw_);
-    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
+    auto ins_res = Insert(segment,
+                          offset,
+                          N,
+                          dataset.row_ids_.data(),
+                          dataset.timestamps_.data(),
+                          insert_data.data(),
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
@@ -840,18 +996,21 @@ TEST(CApiTest, SearchTest) {
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
-    status = ParsePlaceholderGroup(plan, blob.data(), blob.length(), &placeholderGroup);
+    status = ParsePlaceholderGroup(
+        plan, blob.data(), blob.length(), &placeholderGroup);
     ASSERT_EQ(status.error_code, Success);
 
     std::vector<CPlaceholderGroup> placeholderGroups;
     placeholderGroups.push_back(placeholderGroup);
 
     CSearchResult search_result;
-    auto res = Search(segment, plan, placeholderGroup, N + ts_offset, &search_result);
+    auto res =
+        Search(segment, plan, placeholderGroup, N + ts_offset, &search_result);
     ASSERT_EQ(res.error_code, Success);
 
     CSearchResult search_result2;
-    auto res2 = Search(segment, plan, placeholderGroup, ts_offset, &search_result2);
+    auto res2 =
+        Search(segment, plan, placeholderGroup, ts_offset, &search_result2);
     ASSERT_EQ(res2.error_code, Success);
 
     DeleteSearchPlan(plan);
@@ -874,7 +1033,12 @@ TEST(CApiTest, SearchTestWithExpr) {
     PreInsert(segment, N, &offset);
 
     auto insert_data = serialize(dataset.raw_);
-    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
+    auto ins_res = Insert(segment,
+                          offset,
+                          N,
+                          dataset.row_ids_.data(),
+                          dataset.timestamps_.data(),
+                          insert_data.data(),
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
@@ -893,11 +1057,13 @@ TEST(CApiTest, SearchTestWithExpr) {
 
     void* plan = nullptr;
     auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
-    auto status = CreateSearchPlanByExpr(c_collection, binary_plan.data(), binary_plan.size(), &plan);
+    auto status = CreateSearchPlanByExpr(
+        c_collection, binary_plan.data(), binary_plan.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
-    status = ParsePlaceholderGroup(plan, blob.data(), blob.length(), &placeholderGroup);
+    status = ParsePlaceholderGroup(
+        plan, blob.data(), blob.length(), &placeholderGroup);
     ASSERT_EQ(status.error_code, Success);
 
     std::vector<CPlaceholderGroup> placeholderGroups;
@@ -906,7 +1072,11 @@ TEST(CApiTest, SearchTestWithExpr) {
     dataset.timestamps_.push_back(1);
 
     CSearchResult search_result;
-    auto res = Search(segment, plan, placeholderGroup, dataset.timestamps_[0], &search_result);
+    auto res = Search(segment,
+                      plan,
+                      placeholderGroup,
+                      dataset.timestamps_[0],
+                      &search_result);
     ASSERT_EQ(res.error_code, Success);
 
     DeleteSearchPlan(plan);
@@ -929,13 +1099,19 @@ TEST(CApiTest, RetrieveTestWithExpr) {
     PreInsert(segment, N, &offset);
 
     auto insert_data = serialize(dataset.raw_);
-    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
+    auto ins_res = Insert(segment,
+                          offset,
+                          N,
+                          dataset.row_ids_.data(),
+                          dataset.timestamps_.data(),
+                          insert_data.data(),
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
     // create retrieve plan "age in [0]"
     std::vector<int64_t> values(1, 0);
-    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(FieldId(101), DataType::INT64, values);
+    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(
+        FieldId(101), DataType::INT64, values);
 
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
     plan->plan_node_->predicate_ = std::move(term_expr);
@@ -943,7 +1119,8 @@ TEST(CApiTest, RetrieveTestWithExpr) {
     plan->field_ids_ = target_field_ids;
 
     CRetrieveResult retrieve_result;
-    auto res = Retrieve(segment, plan.get(), dataset.timestamps_[0], &retrieve_result);
+    auto res =
+        Retrieve(segment, plan.get(), dataset.timestamps_[0], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
 
     DeleteRetrievePlan(plan.release());
@@ -968,7 +1145,12 @@ TEST(CApiTest, GetMemoryUsageInBytesTest) {
     PreInsert(segment, N, &offset);
 
     auto insert_data = serialize(dataset.raw_);
-    auto res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
+    auto res = Insert(segment,
+                      offset,
+                      N,
+                      dataset.row_ids_.data(),
+                      dataset.timestamps_.data(),
+                      insert_data.data(),
                       insert_data.size());
     ASSERT_EQ(res.error_code, Success);
 
@@ -987,13 +1169,19 @@ TEST(CApiTest, GetDeletedCountTest) {
 
     std::vector<int64_t> delete_row_ids = {100000, 100001, 100002};
     auto ids = std::make_unique<IdArray>();
-    ids->mutable_int_id()->mutable_data()->Add(delete_row_ids.begin(), delete_row_ids.end());
+    ids->mutable_int_id()->mutable_data()->Add(delete_row_ids.begin(),
+                                               delete_row_ids.end());
     auto delete_data = serialize(ids.get());
     uint64_t delete_timestamps[] = {0, 0, 0};
 
     auto offset = PreDelete(segment, 3);
 
-    auto del_res = Delete(segment, offset, 3, delete_data.data(), delete_data.size(), delete_timestamps);
+    auto del_res = Delete(segment,
+                          offset,
+                          3,
+                          delete_data.data(),
+                          delete_data.size(),
+                          delete_timestamps);
     ASSERT_EQ(del_res.error_code, Success);
 
     // TODO: assert(deleted_count == len(delete_row_ids))
@@ -1016,7 +1204,12 @@ TEST(CApiTest, GetRowCountTest) {
     PreInsert(segment, N, &offset);
 
     auto insert_data = serialize(dataset.raw_);
-    auto res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
+    auto res = Insert(segment,
+                      offset,
+                      N,
+                      dataset.row_ids_.data(),
+                      dataset.timestamps_.data(),
+                      insert_data.data(),
                       insert_data.size());
     ASSERT_EQ(res.error_code, Success);
 
@@ -1039,21 +1232,33 @@ TEST(CApiTest, GetRealCount) {
     PreInsert(segment, N, &offset);
 
     auto insert_data = serialize(dataset.raw_);
-    auto res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
+    auto res = Insert(segment,
+                      offset,
+                      N,
+                      dataset.row_ids_.data(),
+                      dataset.timestamps_.data(),
+                      insert_data.data(),
                       insert_data.size());
     ASSERT_EQ(res.error_code, Success);
 
     auto pks = dataset.get_col<int64_t>(schema->get_primary_field_id().value());
     std::vector<int64_t> delete_row_ids(pks.begin(), pks.begin() + 3);
     auto ids = std::make_unique<IdArray>();
-    ids->mutable_int_id()->mutable_data()->Add(delete_row_ids.begin(), delete_row_ids.end());
+    ids->mutable_int_id()->mutable_data()->Add(delete_row_ids.begin(),
+                                               delete_row_ids.end());
     auto delete_data = serialize(ids.get());
-    uint64_t delete_timestamps[] = {dataset.timestamps_[N - 1] + 1, dataset.timestamps_[N - 1] + 2,
+    uint64_t delete_timestamps[] = {dataset.timestamps_[N - 1] + 1,
+                                    dataset.timestamps_[N - 1] + 2,
                                     dataset.timestamps_[N - 1] + 3};
 
     auto del_offset = PreDelete(segment, 3);
 
-    auto del_res = Delete(segment, del_offset, 3, delete_data.data(), delete_data.size(), delete_timestamps);
+    auto del_res = Delete(segment,
+                          del_offset,
+                          3,
+                          delete_data.data(),
+                          delete_data.size(),
+                          delete_timestamps);
     ASSERT_EQ(del_res.error_code, Success);
 
     auto real_count = GetRealCount(segment);
@@ -1107,7 +1312,12 @@ TEST(CApiTest, ReudceNullResult) {
 
     PreInsert(segment, N, &offset);
     auto insert_data = serialize(dataset.raw_);
-    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
+    auto ins_res = Insert(segment,
+                          offset,
+                          N,
+                          dataset.row_ids_.data(),
+                          dataset.timestamps_.data(),
+                          insert_data.data(),
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
@@ -1138,7 +1348,8 @@ TEST(CApiTest, ReudceNullResult) {
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
-    status = ParsePlaceholderGroup(plan, blob.data(), blob.length(), &placeholderGroup);
+    status = ParsePlaceholderGroup(
+        plan, blob.data(), blob.length(), &placeholderGroup);
     ASSERT_EQ(status.error_code, Success);
 
     std::vector<CPlaceholderGroup> placeholderGroups;
@@ -1151,12 +1362,18 @@ TEST(CApiTest, ReudceNullResult) {
         auto slice_topKs = std::vector<int64_t>{1};
         std::vector<CSearchResult> results;
         CSearchResult res;
-        status = Search(segment, plan, placeholderGroup, dataset.timestamps_[0], &res);
+        status = Search(
+            segment, plan, placeholderGroup, dataset.timestamps_[0], &res);
         ASSERT_EQ(status.error_code, Success);
         results.push_back(res);
         CSearchResultDataBlobs cSearchResultData;
-        status = ReduceSearchResultsAndFillData(&cSearchResultData, plan, results.data(), results.size(),
-                                                slice_nqs.data(), slice_topKs.data(), slice_nqs.size());
+        status = ReduceSearchResultsAndFillData(&cSearchResultData,
+                                                plan,
+                                                results.data(),
+                                                results.size(),
+                                                slice_nqs.data(),
+                                                slice_topKs.data(),
+                                                slice_nqs.size());
         ASSERT_EQ(status.error_code, Success);
 
         auto search_result = (SearchResult*)results[0];
@@ -1185,7 +1402,12 @@ TEST(CApiTest, ReduceRemoveDuplicates) {
     PreInsert(segment, N, &offset);
 
     auto insert_data = serialize(dataset.raw_);
-    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
+    auto ins_res = Insert(segment,
+                          offset,
+                          N,
+                          dataset.row_ids_.data(),
+                          dataset.timestamps_.data(),
+                          insert_data.data(),
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
@@ -1216,7 +1438,8 @@ TEST(CApiTest, ReduceRemoveDuplicates) {
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
-    status = ParsePlaceholderGroup(plan, blob.data(), blob.length(), &placeholderGroup);
+    status = ParsePlaceholderGroup(
+        plan, blob.data(), blob.length(), &placeholderGroup);
     ASSERT_EQ(status.error_code, Success);
 
     std::vector<CPlaceholderGroup> placeholderGroups;
@@ -1229,16 +1452,23 @@ TEST(CApiTest, ReduceRemoveDuplicates) {
         auto slice_topKs = std::vector<int64_t>{topK / 2, topK};
         std::vector<CSearchResult> results;
         CSearchResult res1, res2;
-        status = Search(segment, plan, placeholderGroup, dataset.timestamps_[0], &res1);
+        status = Search(
+            segment, plan, placeholderGroup, dataset.timestamps_[0], &res1);
         ASSERT_EQ(status.error_code, Success);
-        status = Search(segment, plan, placeholderGroup, dataset.timestamps_[0], &res2);
+        status = Search(
+            segment, plan, placeholderGroup, dataset.timestamps_[0], &res2);
         ASSERT_EQ(status.error_code, Success);
         results.push_back(res1);
         results.push_back(res2);
 
         CSearchResultDataBlobs cSearchResultData;
-        status = ReduceSearchResultsAndFillData(&cSearchResultData, plan, results.data(), results.size(),
-                                                slice_nqs.data(), slice_topKs.data(), slice_nqs.size());
+        status = ReduceSearchResultsAndFillData(&cSearchResultData,
+                                                plan,
+                                                results.data(),
+                                                results.size(),
+                                                slice_nqs.data(),
+                                                slice_topKs.data(),
+                                                slice_nqs.size());
         ASSERT_EQ(status.error_code, Success);
         // TODO:: insert no duplicate pks and check reduce results
         CheckSearchResultDuplicate(results);
@@ -1255,18 +1485,26 @@ TEST(CApiTest, ReduceRemoveDuplicates) {
         auto slice_topKs = std::vector<int64_t>{topK / 2, topK, topK};
         std::vector<CSearchResult> results;
         CSearchResult res1, res2, res3;
-        status = Search(segment, plan, placeholderGroup, dataset.timestamps_[0], &res1);
+        status = Search(
+            segment, plan, placeholderGroup, dataset.timestamps_[0], &res1);
         ASSERT_EQ(status.error_code, Success);
-        status = Search(segment, plan, placeholderGroup, dataset.timestamps_[0], &res2);
+        status = Search(
+            segment, plan, placeholderGroup, dataset.timestamps_[0], &res2);
         ASSERT_EQ(status.error_code, Success);
-        status = Search(segment, plan, placeholderGroup, dataset.timestamps_[0], &res3);
+        status = Search(
+            segment, plan, placeholderGroup, dataset.timestamps_[0], &res3);
         ASSERT_EQ(status.error_code, Success);
         results.push_back(res1);
         results.push_back(res2);
         results.push_back(res3);
         CSearchResultDataBlobs cSearchResultData;
-        status = ReduceSearchResultsAndFillData(&cSearchResultData, plan, results.data(), results.size(),
-                                                slice_nqs.data(), slice_topKs.data(), slice_nqs.size());
+        status = ReduceSearchResultsAndFillData(&cSearchResultData,
+                                                plan,
+                                                results.data(),
+                                                results.size(),
+                                                slice_nqs.data(),
+                                                slice_topKs.data(),
+                                                slice_nqs.size());
         ASSERT_EQ(status.error_code, Success);
         // TODO:: insert no duplicate pks and check reduce results
         CheckSearchResultDuplicate(results);
@@ -1285,7 +1523,8 @@ TEST(CApiTest, ReduceRemoveDuplicates) {
 
 void
 testReduceSearchWithExpr(int N, int topK, int num_queries) {
-    std::cerr << "testReduceSearchWithExpr(" << N << ", " << topK << ", " << num_queries << ")" << std::endl;
+    std::cerr << "testReduceSearchWithExpr(" << N << ", " << topK << ", "
+              << num_queries << ")" << std::endl;
 
     auto collection = NewCollection(get_default_schema_config());
     auto segment = NewSegment(collection, Growing, -1);
@@ -1297,7 +1536,12 @@ testReduceSearchWithExpr(int N, int topK, int num_queries) {
     PreInsert(segment, N, &offset);
 
     auto insert_data = serialize(dataset.raw_);
-    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
+    auto ins_res = Insert(segment,
+                          offset,
+                          N,
+                          dataset.row_ids_.data(),
+                          dataset.timestamps_.data(),
+                          insert_data.data(),
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
@@ -1316,12 +1560,15 @@ testReduceSearchWithExpr(int N, int topK, int num_queries) {
     auto blob = generate_query_data(num_queries);
 
     void* plan = nullptr;
-    auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan.data());
-    auto status = CreateSearchPlanByExpr(collection, binary_plan.data(), binary_plan.size(), &plan);
+    auto binary_plan =
+        translate_text_plan_to_binary_plan(serialized_expr_plan.data());
+    auto status = CreateSearchPlanByExpr(
+        collection, binary_plan.data(), binary_plan.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
-    status = ParsePlaceholderGroup(plan, blob.data(), blob.length(), &placeholderGroup);
+    status = ParsePlaceholderGroup(
+        plan, blob.data(), blob.length(), &placeholderGroup);
     ASSERT_EQ(status.error_code, Success);
 
     std::vector<CPlaceholderGroup> placeholderGroups;
@@ -1332,9 +1579,11 @@ testReduceSearchWithExpr(int N, int topK, int num_queries) {
     std::vector<CSearchResult> results;
     CSearchResult res1;
     CSearchResult res2;
-    auto res = Search(segment, plan, placeholderGroup, dataset.timestamps_[N - 1], &res1);
+    auto res = Search(
+        segment, plan, placeholderGroup, dataset.timestamps_[N - 1], &res1);
     ASSERT_EQ(res.error_code, Success);
-    res = Search(segment, plan, placeholderGroup, dataset.timestamps_[N - 1], &res2);
+    res = Search(
+        segment, plan, placeholderGroup, dataset.timestamps_[N - 1], &res2);
     ASSERT_EQ(res.error_code, Success);
     results.push_back(res1);
     results.push_back(res2);
@@ -1350,22 +1599,32 @@ testReduceSearchWithExpr(int N, int topK, int num_queries) {
 
     // 1. reduce
     CSearchResultDataBlobs cSearchResultData;
-    status = ReduceSearchResultsAndFillData(&cSearchResultData, plan, results.data(), results.size(), slice_nqs.data(),
-                                            slice_topKs.data(), slice_nqs.size());
+    status = ReduceSearchResultsAndFillData(&cSearchResultData,
+                                            plan,
+                                            results.data(),
+                                            results.size(),
+                                            slice_nqs.data(),
+                                            slice_topKs.data(),
+                                            slice_nqs.size());
     ASSERT_EQ(status.error_code, Success);
 
-    auto search_result_data_blobs = reinterpret_cast<milvus::segcore::SearchResultDataBlobs*>(cSearchResultData);
+    auto search_result_data_blobs =
+        reinterpret_cast<milvus::segcore::SearchResultDataBlobs*>(
+            cSearchResultData);
 
     // check result
     for (int i = 0; i < slice_nqs.size(); i++) {
         milvus::proto::schema::SearchResultData search_result_data;
-        auto suc = search_result_data.ParseFromArray(search_result_data_blobs->blobs[i].data(),
-                                                     search_result_data_blobs->blobs[i].size());
+        auto suc = search_result_data.ParseFromArray(
+            search_result_data_blobs->blobs[i].data(),
+            search_result_data_blobs->blobs[i].size());
         ASSERT_TRUE(suc);
         ASSERT_EQ(search_result_data.num_queries(), slice_nqs[i]);
         ASSERT_EQ(search_result_data.top_k(), slice_topKs[i]);
-        ASSERT_EQ(search_result_data.ids().int_id().data_size(), search_result_data.topks().at(0) * slice_nqs[i]);
-        ASSERT_EQ(search_result_data.scores().size(), search_result_data.topks().at(0) * slice_nqs[i]);
+        ASSERT_EQ(search_result_data.ids().int_id().data_size(),
+                  search_result_data.topks().at(0) * slice_nqs[i]);
+        ASSERT_EQ(search_result_data.scores().size(),
+                  search_result_data.topks().at(0) * slice_nqs[i]);
 
         // check real topks
         ASSERT_EQ(search_result_data.topks().size(), slice_nqs[i]);
@@ -1398,15 +1657,17 @@ TEST(CApiTest, LoadIndexInfo) {
 
     auto N = 1024 * 10;
     auto [raw_data, timestamps, uids] = generate_data(N);
-    auto indexing = knowhere::IndexFactory::Instance().Create(knowhere::IndexEnum::INDEX_FAISS_IVFPQ);
-    auto conf = knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
-                               {knowhere::meta::DIM, DIM},
-                               {knowhere::meta::TOPK, TOPK},
-                               {knowhere::indexparam::NLIST, 100},
-                               {knowhere::indexparam::NPROBE, 4},
-                               {knowhere::indexparam::M, 4},
-                               {knowhere::indexparam::NBITS, 8},
-                               {knowhere::meta::DEVICE_ID, 0}};
+    auto indexing = knowhere::IndexFactory::Instance().Create(
+        knowhere::IndexEnum::INDEX_FAISS_IVFPQ);
+    auto conf =
+        knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
+                       {knowhere::meta::DIM, DIM},
+                       {knowhere::meta::TOPK, TOPK},
+                       {knowhere::indexparam::NLIST, 100},
+                       {knowhere::indexparam::NPROBE, 4},
+                       {knowhere::indexparam::M, 4},
+                       {knowhere::indexparam::NBITS, 8},
+                       {knowhere::meta::DEVICE_ID, 0}};
 
     auto database = knowhere::GenDataSet(N, DIM, raw_data.data());
     indexing.Train(*database, conf);
@@ -1422,17 +1683,21 @@ TEST(CApiTest, LoadIndexInfo) {
     ASSERT_EQ(status.error_code, Success);
     std::string index_param_key1 = "index_type";
     std::string index_param_value1 = "IVF_PQ";
-    status = AppendIndexParam(c_load_index_info, index_param_key1.data(), index_param_value1.data());
+    status = AppendIndexParam(
+        c_load_index_info, index_param_key1.data(), index_param_value1.data());
     std::string index_param_key2 = "index_mode";
     std::string index_param_value2 = "CPU";
-    status = AppendIndexParam(c_load_index_info, index_param_key2.data(), index_param_value2.data());
+    status = AppendIndexParam(
+        c_load_index_info, index_param_key2.data(), index_param_value2.data());
     ASSERT_EQ(status.error_code, Success);
     std::string index_param_key3 = knowhere::meta::METRIC_TYPE;
     std::string index_param_value3 = knowhere::metric::L2;
-    status = AppendIndexParam(c_load_index_info, index_param_key3.data(), index_param_value3.data());
+    status = AppendIndexParam(
+        c_load_index_info, index_param_key3.data(), index_param_value3.data());
     ASSERT_EQ(status.error_code, Success);
     std::string field_name = "field0";
-    status = AppendFieldInfo(c_load_index_info, 0, 0, 0, 0, CDataType::FloatVector);
+    status =
+        AppendFieldInfo(c_load_index_info, 0, 0, 0, 0, CDataType::FloatVector);
     ASSERT_EQ(status.error_code, Success);
     status = AppendIndex(c_load_index_info, c_binary_set);
     ASSERT_EQ(status.error_code, Success);
@@ -1447,14 +1712,15 @@ TEST(CApiTest, LoadIndex_Search) {
     auto num_query = 100;
     auto [raw_data, timestamps, uids] = generate_data(N);
     auto indexing = knowhere::IndexFactory::Instance().Create("IVFPQ");
-    auto conf = knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
-                               {knowhere::meta::DIM, DIM},
-                               {knowhere::meta::TOPK, TOPK},
-                               {knowhere::indexparam::NLIST, 100},
-                               {knowhere::indexparam::NPROBE, 4},
-                               {knowhere::indexparam::M, 4},
-                               {knowhere::indexparam::NBITS, 8},
-                               {knowhere::meta::DEVICE_ID, 0}};
+    auto conf =
+        knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
+                       {knowhere::meta::DIM, DIM},
+                       {knowhere::meta::TOPK, TOPK},
+                       {knowhere::indexparam::NLIST, 100},
+                       {knowhere::indexparam::NPROBE, 4},
+                       {knowhere::indexparam::M, 4},
+                       {knowhere::indexparam::NBITS, 8},
+                       {knowhere::meta::DEVICE_ID, 0}};
 
     auto database = knowhere::GenDataSet(N, DIM, raw_data.data());
     indexing.Train(*database, conf);
@@ -1473,11 +1739,13 @@ TEST(CApiTest, LoadIndex_Search) {
     index_params["index_type"] = "IVF_PQ";
     index_params["index_mode"] = "CPU";
     auto mode = knowhere::IndexMode::MODE_CPU;
-    load_index_info.index = std::make_unique<VectorMemIndex>(index_params["index_type"], knowhere::metric::L2, mode);
+    load_index_info.index = std::make_unique<VectorMemIndex>(
+        index_params["index_type"], knowhere::metric::L2, mode);
     load_index_info.index->Load(binary_set);
 
     // search
-    auto query_dataset = knowhere::GenDataSet(num_query, DIM, raw_data.data() + DIM * 4200);
+    auto query_dataset =
+        knowhere::GenDataSet(num_query, DIM, raw_data.data() + DIM * 4200);
 
     auto result = indexing.Search(*query_dataset, conf, nullptr);
 
@@ -1506,7 +1774,12 @@ TEST(CApiTest, Indexing_Without_Predicate) {
     PreInsert(segment, N, &offset);
 
     auto insert_data = serialize(dataset.raw_);
-    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
+    auto ins_res = Insert(segment,
+                          offset,
+                          N,
+                          dataset.row_ids_.data(),
+                          dataset.timestamps_.data(),
+                          insert_data.data(),
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
@@ -1529,7 +1802,8 @@ TEST(CApiTest, Indexing_Without_Predicate) {
 
     // create place_holder_group
     int num_queries = 5;
-    auto raw_group = CreatePlaceholderGroupFromBlob(num_queries, DIM, query_ptr);
+    auto raw_group =
+        CreatePlaceholderGroupFromBlob(num_queries, DIM, query_ptr);
     auto blob = raw_group.SerializeAsString();
 
     // search on segment's small index
@@ -1538,7 +1812,8 @@ TEST(CApiTest, Indexing_Without_Predicate) {
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
-    status = ParsePlaceholderGroup(plan, blob.data(), blob.length(), &placeholderGroup);
+    status = ParsePlaceholderGroup(
+        plan, blob.data(), blob.length(), &placeholderGroup);
     ASSERT_EQ(status.error_code, Success);
 
     std::vector<CPlaceholderGroup> placeholderGroups;
@@ -1546,19 +1821,25 @@ TEST(CApiTest, Indexing_Without_Predicate) {
     Timestamp time = 10000000;
 
     CSearchResult c_search_result_on_smallIndex;
-    auto res_before_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_smallIndex);
+    auto res_before_load_index = Search(
+        segment, plan, placeholderGroup, time, &c_search_result_on_smallIndex);
     ASSERT_EQ(res_before_load_index.error_code, Success);
 
     // load index to segment
-    auto indexing = generate_index(vec_col.data(), DataType::VECTOR_FLOAT, knowhere::metric::L2,
-                                   IndexEnum::INDEX_FAISS_IVFPQ, DIM, N);
+    auto indexing = generate_index(vec_col.data(),
+                                   DataType::VECTOR_FLOAT,
+                                   knowhere::metric::L2,
+                                   IndexEnum::INDEX_FAISS_IVFPQ,
+                                   DIM,
+                                   N);
 
     // gen query dataset
     auto query_dataset = knowhere::GenDataSet(num_queries, DIM, query_ptr);
     auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
     SearchInfo search_info = search_plan->plan_node_->search_info_;
-    auto result_on_index = vec_index->Query(query_dataset, search_info, nullptr);
+    auto result_on_index =
+        vec_index->Query(query_dataset, search_info, nullptr);
     auto ids = result_on_index->seg_offsets_.data();
     auto dis = result_on_index->distances_.data();
     std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
@@ -1567,7 +1848,8 @@ TEST(CApiTest, Indexing_Without_Predicate) {
         vec_dis.push_back(dis[j] * -1);
     }
 
-    auto search_result_on_raw_index = (SearchResult*)c_search_result_on_smallIndex;
+    auto search_result_on_raw_index =
+        (SearchResult*)c_search_result_on_smallIndex;
     search_result_on_raw_index->seg_offsets_ = vec_ids;
     search_result_on_raw_index->distances_ = vec_dis;
 
@@ -1582,9 +1864,12 @@ TEST(CApiTest, Indexing_Without_Predicate) {
     std::string metric_type_key = "metric_type";
     std::string metric_type_value = "L2";
 
-    AppendIndexParam(c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
-    AppendIndexParam(c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
-    AppendIndexParam(c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
+    AppendIndexParam(
+        c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
+    AppendIndexParam(
+        c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
+    AppendIndexParam(
+        c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector);
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
@@ -1594,16 +1879,22 @@ TEST(CApiTest, Indexing_Without_Predicate) {
     sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
 
     CSearchResult c_search_result_on_bigIndex;
-    auto res_after_load_index =
-        Search(sealed_segment.get(), plan, placeholderGroup, time, &c_search_result_on_bigIndex);
+    auto res_after_load_index = Search(sealed_segment.get(),
+                                       plan,
+                                       placeholderGroup,
+                                       time,
+                                       &c_search_result_on_bigIndex);
     ASSERT_EQ(res_after_load_index.error_code, Success);
 
-    auto search_result_on_raw_index_json = SearchResultToJson(*search_result_on_raw_index);
-    auto search_result_on_bigIndex_json = SearchResultToJson((*(SearchResult*)c_search_result_on_bigIndex));
+    auto search_result_on_raw_index_json =
+        SearchResultToJson(*search_result_on_raw_index);
+    auto search_result_on_bigIndex_json =
+        SearchResultToJson((*(SearchResult*)c_search_result_on_bigIndex));
     // std::cout << search_result_on_raw_index_json.dump(1) << std::endl;
     // std::cout << search_result_on_bigIndex_json.dump(1) << std::endl;
 
-    ASSERT_EQ(search_result_on_raw_index_json.dump(1), search_result_on_bigIndex_json.dump(1));
+    ASSERT_EQ(search_result_on_raw_index_json.dump(1),
+              search_result_on_bigIndex_json.dump(1));
 
     DeleteLoadIndexInfo(c_load_index_info);
     DeleteSearchPlan(plan);
@@ -1632,7 +1923,12 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
     PreInsert(segment, N, &offset);
 
     auto insert_data = serialize(dataset.raw_);
-    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
+    auto ins_res = Insert(segment,
+                          offset,
+                          N,
+                          dataset.row_ids_.data(),
+                          dataset.timestamps_.data(),
+                          insert_data.data(),
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
@@ -1649,17 +1945,20 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
 
     // create place_holder_group
     int num_queries = 5;
-    auto raw_group = CreatePlaceholderGroupFromBlob(num_queries, DIM, query_ptr);
+    auto raw_group =
+        CreatePlaceholderGroupFromBlob(num_queries, DIM, query_ptr);
     auto blob = raw_group.SerializeAsString();
 
     // search on segment's small index
     void* plan = nullptr;
     auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
-    auto status = CreateSearchPlanByExpr(collection, binary_plan.data(), binary_plan.size(), &plan);
+    auto status = CreateSearchPlanByExpr(
+        collection, binary_plan.data(), binary_plan.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
-    status = ParsePlaceholderGroup(plan, blob.data(), blob.length(), &placeholderGroup);
+    status = ParsePlaceholderGroup(
+        plan, blob.data(), blob.length(), &placeholderGroup);
     ASSERT_EQ(status.error_code, Success);
 
     std::vector<CPlaceholderGroup> placeholderGroups;
@@ -1667,19 +1966,25 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
     Timestamp time = 10000000;
 
     CSearchResult c_search_result_on_smallIndex;
-    auto res_before_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_smallIndex);
+    auto res_before_load_index = Search(
+        segment, plan, placeholderGroup, time, &c_search_result_on_smallIndex);
     ASSERT_EQ(res_before_load_index.error_code, Success);
 
     // load index to segment
-    auto indexing = generate_index(vec_col.data(), DataType::VECTOR_FLOAT, knowhere::metric::L2,
-                                   IndexEnum::INDEX_FAISS_IVFPQ, DIM, N);
+    auto indexing = generate_index(vec_col.data(),
+                                   DataType::VECTOR_FLOAT,
+                                   knowhere::metric::L2,
+                                   IndexEnum::INDEX_FAISS_IVFPQ,
+                                   DIM,
+                                   N);
 
     // gen query dataset
     auto query_dataset = knowhere::GenDataSet(num_queries, DIM, query_ptr);
     auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
     SearchInfo search_info = search_plan->plan_node_->search_info_;
-    auto result_on_index = vec_index->Query(query_dataset, search_info, nullptr);
+    auto result_on_index =
+        vec_index->Query(query_dataset, search_info, nullptr);
     auto ids = result_on_index->seg_offsets_.data();
     auto dis = result_on_index->distances_.data();
     std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
@@ -1688,7 +1993,8 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
         vec_dis.push_back(dis[j] * -1);
     }
 
-    auto search_result_on_raw_index = (SearchResult*)c_search_result_on_smallIndex;
+    auto search_result_on_raw_index =
+        (SearchResult*)c_search_result_on_smallIndex;
     search_result_on_raw_index->seg_offsets_ = vec_ids;
     search_result_on_raw_index->distances_ = vec_dis;
 
@@ -1703,9 +2009,12 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
     std::string metric_type_key = "metric_type";
     std::string metric_type_value = "L2";
 
-    AppendIndexParam(c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
-    AppendIndexParam(c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
-    AppendIndexParam(c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
+    AppendIndexParam(
+        c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
+    AppendIndexParam(
+        c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
+    AppendIndexParam(
+        c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector);
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
@@ -1715,16 +2024,22 @@ TEST(CApiTest, Indexing_Expr_Without_Predicate) {
     sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
 
     CSearchResult c_search_result_on_bigIndex;
-    auto res_after_load_index =
-        Search(sealed_segment.get(), plan, placeholderGroup, time, &c_search_result_on_bigIndex);
+    auto res_after_load_index = Search(sealed_segment.get(),
+                                       plan,
+                                       placeholderGroup,
+                                       time,
+                                       &c_search_result_on_bigIndex);
     ASSERT_EQ(res_after_load_index.error_code, Success);
 
-    auto search_result_on_raw_index_json = SearchResultToJson(*search_result_on_raw_index);
-    auto search_result_on_bigIndex_json = SearchResultToJson((*(SearchResult*)c_search_result_on_bigIndex));
+    auto search_result_on_raw_index_json =
+        SearchResultToJson(*search_result_on_raw_index);
+    auto search_result_on_bigIndex_json =
+        SearchResultToJson((*(SearchResult*)c_search_result_on_bigIndex));
     // std::cout << search_result_on_raw_index_json.dump(1) << std::endl;
     // std::cout << search_result_on_bigIndex_json.dump(1) << std::endl;
 
-    ASSERT_EQ(search_result_on_raw_index_json.dump(1), search_result_on_bigIndex_json.dump(1));
+    ASSERT_EQ(search_result_on_raw_index_json.dump(1),
+              search_result_on_bigIndex_json.dump(1));
 
     DeleteLoadIndexInfo(c_load_index_info);
     DeleteSearchPlan(plan);
@@ -1753,7 +2068,12 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
     PreInsert(segment, N, &offset);
 
     auto insert_data = serialize(dataset.raw_);
-    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
+    auto ins_res = Insert(segment,
+                          offset,
+                          N,
+                          dataset.row_ids_.data(),
+                          dataset.timestamps_.data(),
+                          insert_data.data(),
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
@@ -1788,7 +2108,8 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
 
     // create place_holder_group
     int num_queries = 10;
-    auto raw_group = CreatePlaceholderGroupFromBlob(num_queries, DIM, query_ptr);
+    auto raw_group =
+        CreatePlaceholderGroupFromBlob(num_queries, DIM, query_ptr);
     auto blob = raw_group.SerializeAsString();
 
     // search on segment's small index
@@ -1797,7 +2118,8 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
-    status = ParsePlaceholderGroup(plan, blob.data(), blob.length(), &placeholderGroup);
+    status = ParsePlaceholderGroup(
+        plan, blob.data(), blob.length(), &placeholderGroup);
     ASSERT_EQ(status.error_code, Success);
 
     std::vector<CPlaceholderGroup> placeholderGroups;
@@ -1805,19 +2127,25 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
     Timestamp time = 10000000;
 
     CSearchResult c_search_result_on_smallIndex;
-    auto res_before_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_smallIndex);
+    auto res_before_load_index = Search(
+        segment, plan, placeholderGroup, time, &c_search_result_on_smallIndex);
     ASSERT_EQ(res_before_load_index.error_code, Success);
 
     // load index to segment
-    auto indexing = generate_index(vec_col.data(), DataType::VECTOR_FLOAT, knowhere::metric::L2,
-                                   IndexEnum::INDEX_FAISS_IVFPQ, DIM, N);
+    auto indexing = generate_index(vec_col.data(),
+                                   DataType::VECTOR_FLOAT,
+                                   knowhere::metric::L2,
+                                   IndexEnum::INDEX_FAISS_IVFPQ,
+                                   DIM,
+                                   N);
 
     // gen query dataset
     auto query_dataset = knowhere::GenDataSet(num_queries, DIM, query_ptr);
     auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
     SearchInfo search_info = search_plan->plan_node_->search_info_;
-    auto result_on_index = vec_index->Query(query_dataset, search_info, nullptr);
+    auto result_on_index =
+        vec_index->Query(query_dataset, search_info, nullptr);
     auto ids = result_on_index->seg_offsets_.data();
     auto dis = result_on_index->distances_.data();
     std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
@@ -1826,7 +2154,8 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
         vec_dis.push_back(dis[j] * -1);
     }
 
-    auto search_result_on_raw_index = (SearchResult*)c_search_result_on_smallIndex;
+    auto search_result_on_raw_index =
+        (SearchResult*)c_search_result_on_smallIndex;
     search_result_on_raw_index->seg_offsets_ = vec_ids;
     search_result_on_raw_index->distances_ = vec_dis;
 
@@ -1841,9 +2170,12 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
     std::string metric_type_key = "metric_type";
     std::string metric_type_value = "L2";
 
-    AppendIndexParam(c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
-    AppendIndexParam(c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
-    AppendIndexParam(c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
+    AppendIndexParam(
+        c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
+    AppendIndexParam(
+        c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
+    AppendIndexParam(
+        c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector);
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
@@ -1853,15 +2185,19 @@ TEST(CApiTest, Indexing_With_float_Predicate_Range) {
     sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
 
     CSearchResult c_search_result_on_bigIndex;
-    auto res_after_load_index =
-        Search(sealed_segment.get(), plan, placeholderGroup, time, &c_search_result_on_bigIndex);
+    auto res_after_load_index = Search(sealed_segment.get(),
+                                       plan,
+                                       placeholderGroup,
+                                       time,
+                                       &c_search_result_on_bigIndex);
     ASSERT_EQ(res_after_load_index.error_code, Success);
 
     auto search_result_on_bigIndex = (SearchResult*)c_search_result_on_bigIndex;
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * TOPK;
         ASSERT_EQ(search_result_on_bigIndex->seg_offsets_[offset], 42000 + i);
-        ASSERT_EQ(search_result_on_bigIndex->distances_[offset], search_result_on_raw_index->distances_[offset]);
+        ASSERT_EQ(search_result_on_bigIndex->distances_[offset],
+                  search_result_on_raw_index->distances_[offset]);
     }
 
     DeleteLoadIndexInfo(c_load_index_info);
@@ -1892,8 +2228,13 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
         PreInsert(segment, N, &offset);
 
         auto insert_data = serialize(dataset.raw_);
-        auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(),
-                              insert_data.data(), insert_data.size());
+        auto ins_res = Insert(segment,
+                              offset,
+                              N,
+                              dataset.row_ids_.data(),
+                              dataset.timestamps_.data(),
+                              insert_data.data(),
+                              insert_data.size());
         ASSERT_EQ(ins_res.error_code, Success);
     }
 
@@ -1939,17 +2280,20 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
 
     // create place_holder_group
     int num_queries = 10;
-    auto raw_group = CreatePlaceholderGroupFromBlob(num_queries, DIM, query_ptr);
+    auto raw_group =
+        CreatePlaceholderGroupFromBlob(num_queries, DIM, query_ptr);
     auto blob = raw_group.SerializeAsString();
 
     // search on segment's small index
     void* plan = nullptr;
     auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
-    auto status = CreateSearchPlanByExpr(collection, binary_plan.data(), binary_plan.size(), &plan);
+    auto status = CreateSearchPlanByExpr(
+        collection, binary_plan.data(), binary_plan.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
-    status = ParsePlaceholderGroup(plan, blob.data(), blob.length(), &placeholderGroup);
+    status = ParsePlaceholderGroup(
+        plan, blob.data(), blob.length(), &placeholderGroup);
     ASSERT_EQ(status.error_code, Success);
 
     std::vector<CPlaceholderGroup> placeholderGroups;
@@ -1957,19 +2301,25 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
     Timestamp time = 10000000;
 
     CSearchResult c_search_result_on_smallIndex;
-    auto res_before_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_smallIndex);
+    auto res_before_load_index = Search(
+        segment, plan, placeholderGroup, time, &c_search_result_on_smallIndex);
     ASSERT_EQ(res_before_load_index.error_code, Success);
 
     // load index to segment
-    auto indexing = generate_index(vec_col.data(), DataType::VECTOR_FLOAT, knowhere::metric::L2,
-                                   IndexEnum::INDEX_FAISS_IVFPQ, DIM, N);
+    auto indexing = generate_index(vec_col.data(),
+                                   DataType::VECTOR_FLOAT,
+                                   knowhere::metric::L2,
+                                   IndexEnum::INDEX_FAISS_IVFPQ,
+                                   DIM,
+                                   N);
 
     // gen query dataset
     auto query_dataset = knowhere::GenDataSet(num_queries, DIM, query_ptr);
     auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
     SearchInfo search_info = search_plan->plan_node_->search_info_;
-    auto result_on_index = vec_index->Query(query_dataset, search_info, nullptr);
+    auto result_on_index =
+        vec_index->Query(query_dataset, search_info, nullptr);
     auto ids = result_on_index->seg_offsets_.data();
     auto dis = result_on_index->distances_.data();
     std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
@@ -1978,7 +2328,8 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
         vec_dis.push_back(dis[j] * -1);
     }
 
-    auto search_result_on_raw_index = (SearchResult*)c_search_result_on_smallIndex;
+    auto search_result_on_raw_index =
+        (SearchResult*)c_search_result_on_smallIndex;
     search_result_on_raw_index->seg_offsets_ = vec_ids;
     search_result_on_raw_index->distances_ = vec_dis;
 
@@ -1993,9 +2344,12 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
     std::string metric_type_key = "metric_type";
     std::string metric_type_value = "L2";
 
-    AppendIndexParam(c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
-    AppendIndexParam(c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
-    AppendIndexParam(c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
+    AppendIndexParam(
+        c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
+    AppendIndexParam(
+        c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
+    AppendIndexParam(
+        c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector);
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
@@ -2005,15 +2359,19 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Range) {
     sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
 
     CSearchResult c_search_result_on_bigIndex;
-    auto res_after_load_index =
-        Search(sealed_segment.get(), plan, placeholderGroup, time, &c_search_result_on_bigIndex);
+    auto res_after_load_index = Search(sealed_segment.get(),
+                                       plan,
+                                       placeholderGroup,
+                                       time,
+                                       &c_search_result_on_bigIndex);
     ASSERT_EQ(res_after_load_index.error_code, Success);
 
     auto search_result_on_bigIndex = (SearchResult*)c_search_result_on_bigIndex;
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * TOPK;
         ASSERT_EQ(search_result_on_bigIndex->seg_offsets_[offset], 420000 + i);
-        ASSERT_EQ(search_result_on_bigIndex->distances_[offset], search_result_on_raw_index->distances_[offset]);
+        ASSERT_EQ(search_result_on_bigIndex->distances_[offset],
+                  search_result_on_raw_index->distances_[offset]);
     }
 
     DeleteLoadIndexInfo(c_load_index_info);
@@ -2043,7 +2401,12 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
     PreInsert(segment, N, &offset);
 
     auto insert_data = serialize(dataset.raw_);
-    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
+    auto ins_res = Insert(segment,
+                          offset,
+                          N,
+                          dataset.row_ids_.data(),
+                          dataset.timestamps_.data(),
+                          insert_data.data(),
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
@@ -2076,7 +2439,8 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
 
     // create place_holder_group
     int num_queries = 5;
-    auto raw_group = CreatePlaceholderGroupFromBlob(num_queries, DIM, query_ptr);
+    auto raw_group =
+        CreatePlaceholderGroupFromBlob(num_queries, DIM, query_ptr);
     auto blob = raw_group.SerializeAsString();
 
     // search on segment's small index
@@ -2085,7 +2449,8 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
-    status = ParsePlaceholderGroup(plan, blob.data(), blob.length(), &placeholderGroup);
+    status = ParsePlaceholderGroup(
+        plan, blob.data(), blob.length(), &placeholderGroup);
     ASSERT_EQ(status.error_code, Success);
 
     std::vector<CPlaceholderGroup> placeholderGroups;
@@ -2093,19 +2458,25 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
     Timestamp time = 10000000;
 
     CSearchResult c_search_result_on_smallIndex;
-    auto res_before_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_smallIndex);
+    auto res_before_load_index = Search(
+        segment, plan, placeholderGroup, time, &c_search_result_on_smallIndex);
     ASSERT_EQ(res_before_load_index.error_code, Success);
 
     // load index to segment
-    auto indexing = generate_index(vec_col.data(), DataType::VECTOR_FLOAT, knowhere::metric::L2,
-                                   IndexEnum::INDEX_FAISS_IVFPQ, DIM, N);
+    auto indexing = generate_index(vec_col.data(),
+                                   DataType::VECTOR_FLOAT,
+                                   knowhere::metric::L2,
+                                   IndexEnum::INDEX_FAISS_IVFPQ,
+                                   DIM,
+                                   N);
 
     // gen query dataset
     auto query_dataset = knowhere::GenDataSet(num_queries, DIM, query_ptr);
     auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
     SearchInfo search_info = search_plan->plan_node_->search_info_;
-    auto result_on_index = vec_index->Query(query_dataset, search_info, nullptr);
+    auto result_on_index =
+        vec_index->Query(query_dataset, search_info, nullptr);
     auto ids = result_on_index->seg_offsets_.data();
     auto dis = result_on_index->distances_.data();
     std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
@@ -2114,7 +2485,8 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
         vec_dis.push_back(dis[j] * -1);
     }
 
-    auto search_result_on_raw_index = (SearchResult*)c_search_result_on_smallIndex;
+    auto search_result_on_raw_index =
+        (SearchResult*)c_search_result_on_smallIndex;
     search_result_on_raw_index->seg_offsets_ = vec_ids;
     search_result_on_raw_index->distances_ = vec_dis;
 
@@ -2129,9 +2501,12 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
     std::string metric_type_key = "metric_type";
     std::string metric_type_value = "L2";
 
-    AppendIndexParam(c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
-    AppendIndexParam(c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
-    AppendIndexParam(c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
+    AppendIndexParam(
+        c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
+    AppendIndexParam(
+        c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
+    AppendIndexParam(
+        c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector);
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
@@ -2141,15 +2516,19 @@ TEST(CApiTest, Indexing_With_float_Predicate_Term) {
     sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
 
     CSearchResult c_search_result_on_bigIndex;
-    auto res_after_load_index =
-        Search(sealed_segment.get(), plan, placeholderGroup, time, &c_search_result_on_bigIndex);
+    auto res_after_load_index = Search(sealed_segment.get(),
+                                       plan,
+                                       placeholderGroup,
+                                       time,
+                                       &c_search_result_on_bigIndex);
     ASSERT_EQ(res_after_load_index.error_code, Success);
 
     auto search_result_on_bigIndex = (SearchResult*)c_search_result_on_bigIndex;
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * TOPK;
         ASSERT_EQ(search_result_on_bigIndex->seg_offsets_[offset], 42000 + i);
-        ASSERT_EQ(search_result_on_bigIndex->distances_[offset], search_result_on_raw_index->distances_[offset]);
+        ASSERT_EQ(search_result_on_bigIndex->distances_[offset],
+                  search_result_on_raw_index->distances_[offset]);
     }
 
     DeleteLoadIndexInfo(c_load_index_info);
@@ -2179,7 +2558,12 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
     PreInsert(segment, N, &offset);
 
     auto insert_data = serialize(dataset.raw_);
-    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
+    auto ins_res = Insert(segment,
+                          offset,
+                          N,
+                          dataset.row_ids_.data(),
+                          dataset.timestamps_.data(),
+                          insert_data.data(),
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
@@ -2220,17 +2604,20 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
 
     // create place_holder_group
     int num_queries = 5;
-    auto raw_group = CreatePlaceholderGroupFromBlob(num_queries, DIM, query_ptr);
+    auto raw_group =
+        CreatePlaceholderGroupFromBlob(num_queries, DIM, query_ptr);
     auto blob = raw_group.SerializeAsString();
 
     // search on segment's small index
     void* plan = nullptr;
     auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
-    auto status = CreateSearchPlanByExpr(collection, binary_plan.data(), binary_plan.size(), &plan);
+    auto status = CreateSearchPlanByExpr(
+        collection, binary_plan.data(), binary_plan.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
-    status = ParsePlaceholderGroup(plan, blob.data(), blob.length(), &placeholderGroup);
+    status = ParsePlaceholderGroup(
+        plan, blob.data(), blob.length(), &placeholderGroup);
     ASSERT_EQ(status.error_code, Success);
 
     std::vector<CPlaceholderGroup> placeholderGroups;
@@ -2238,19 +2625,25 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
     Timestamp time = 10000000;
 
     CSearchResult c_search_result_on_smallIndex;
-    auto res_before_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_smallIndex);
+    auto res_before_load_index = Search(
+        segment, plan, placeholderGroup, time, &c_search_result_on_smallIndex);
     ASSERT_EQ(res_before_load_index.error_code, Success);
 
     // load index to segment
-    auto indexing = generate_index(vec_col.data(), DataType::VECTOR_FLOAT, knowhere::metric::L2,
-                                   IndexEnum::INDEX_FAISS_IVFPQ, DIM, N);
+    auto indexing = generate_index(vec_col.data(),
+                                   DataType::VECTOR_FLOAT,
+                                   knowhere::metric::L2,
+                                   IndexEnum::INDEX_FAISS_IVFPQ,
+                                   DIM,
+                                   N);
 
     // gen query dataset
     auto query_dataset = knowhere::GenDataSet(num_queries, DIM, query_ptr);
     auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
     SearchInfo search_info = search_plan->plan_node_->search_info_;
-    auto result_on_index = vec_index->Query(query_dataset, search_info, nullptr);
+    auto result_on_index =
+        vec_index->Query(query_dataset, search_info, nullptr);
     auto ids = result_on_index->seg_offsets_.data();
     auto dis = result_on_index->distances_.data();
     std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
@@ -2259,7 +2652,8 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
         vec_dis.push_back(dis[j] * -1);
     }
 
-    auto search_result_on_raw_index = (SearchResult*)c_search_result_on_smallIndex;
+    auto search_result_on_raw_index =
+        (SearchResult*)c_search_result_on_smallIndex;
     search_result_on_raw_index->seg_offsets_ = vec_ids;
     search_result_on_raw_index->distances_ = vec_dis;
 
@@ -2274,9 +2668,12 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
     std::string metric_type_key = "metric_type";
     std::string metric_type_value = "L2";
 
-    AppendIndexParam(c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
-    AppendIndexParam(c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
-    AppendIndexParam(c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
+    AppendIndexParam(
+        c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
+    AppendIndexParam(
+        c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
+    AppendIndexParam(
+        c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector);
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
@@ -2286,15 +2683,19 @@ TEST(CApiTest, Indexing_Expr_With_float_Predicate_Term) {
     sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
 
     CSearchResult c_search_result_on_bigIndex;
-    auto res_after_load_index =
-        Search(sealed_segment.get(), plan, placeholderGroup, time, &c_search_result_on_bigIndex);
+    auto res_after_load_index = Search(sealed_segment.get(),
+                                       plan,
+                                       placeholderGroup,
+                                       time,
+                                       &c_search_result_on_bigIndex);
     ASSERT_EQ(res_after_load_index.error_code, Success);
 
     auto search_result_on_bigIndex = (SearchResult*)c_search_result_on_bigIndex;
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * TOPK;
         ASSERT_EQ(search_result_on_bigIndex->seg_offsets_[offset], 420000 + i);
-        ASSERT_EQ(search_result_on_bigIndex->distances_[offset], search_result_on_raw_index->distances_[offset]);
+        ASSERT_EQ(search_result_on_bigIndex->distances_[offset],
+                  search_result_on_raw_index->distances_[offset]);
     }
 
     DeleteLoadIndexInfo(c_load_index_info);
@@ -2310,7 +2711,8 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
     // insert data to segment
     constexpr auto TOPK = 5;
 
-    std::string schema_string = generate_collection_schema("JACCARD", DIM, true);
+    std::string schema_string =
+        generate_collection_schema("JACCARD", DIM, true);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, Growing, -1);
@@ -2324,7 +2726,12 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
     PreInsert(segment, N, &offset);
 
     auto insert_data = serialize(dataset.raw_);
-    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
+    auto ins_res = Insert(segment,
+                          offset,
+                          N,
+                          dataset.row_ids_.data(),
+                          dataset.timestamps_.data(),
+                          insert_data.data(),
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
@@ -2358,7 +2765,8 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
 
     // create place_holder_group
     int num_queries = 5;
-    auto raw_group = CreateBinaryPlaceholderGroupFromBlob(num_queries, DIM, query_ptr);
+    auto raw_group =
+        CreateBinaryPlaceholderGroupFromBlob(num_queries, DIM, query_ptr);
     auto blob = raw_group.SerializeAsString();
 
     // search on segment's small index
@@ -2367,7 +2775,8 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
-    status = ParsePlaceholderGroup(plan, blob.data(), blob.length(), &placeholderGroup);
+    status = ParsePlaceholderGroup(
+        plan, blob.data(), blob.length(), &placeholderGroup);
     ASSERT_EQ(status.error_code, Success);
 
     std::vector<CPlaceholderGroup> placeholderGroups;
@@ -2375,20 +2784,26 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
     Timestamp time = 10000000;
 
     CSearchResult c_search_result_on_smallIndex;
-    auto res_before_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_smallIndex);
+    auto res_before_load_index = Search(
+        segment, plan, placeholderGroup, time, &c_search_result_on_smallIndex);
     ASSERT_EQ(res_before_load_index.error_code, Success);
 
     // load index to segment
 
-    auto indexing = generate_index(vec_col.data(), DataType::VECTOR_BINARY, knowhere::metric::JACCARD,
-                                   IndexEnum::INDEX_FAISS_BIN_IVFFLAT, DIM, N);
+    auto indexing = generate_index(vec_col.data(),
+                                   DataType::VECTOR_BINARY,
+                                   knowhere::metric::JACCARD,
+                                   IndexEnum::INDEX_FAISS_BIN_IVFFLAT,
+                                   DIM,
+                                   N);
 
     // gen query dataset
     auto query_dataset = knowhere::GenDataSet(num_queries, DIM, query_ptr);
     auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
     SearchInfo search_info = search_plan->plan_node_->search_info_;
-    auto result_on_index = vec_index->Query(query_dataset, search_info, nullptr);
+    auto result_on_index =
+        vec_index->Query(query_dataset, search_info, nullptr);
     auto ids = result_on_index->seg_offsets_.data();
     auto dis = result_on_index->distances_.data();
     std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
@@ -2397,7 +2812,8 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
         vec_dis.push_back(dis[j] * -1);
     }
 
-    auto search_result_on_raw_index = (SearchResult*)c_search_result_on_smallIndex;
+    auto search_result_on_raw_index =
+        (SearchResult*)c_search_result_on_smallIndex;
     search_result_on_raw_index->seg_offsets_ = vec_ids;
     search_result_on_raw_index->distances_ = vec_dis;
 
@@ -2412,9 +2828,12 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
     std::string metric_type_key = "metric_type";
     std::string metric_type_value = "JACCARD";
 
-    AppendIndexParam(c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
-    AppendIndexParam(c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
-    AppendIndexParam(c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
+    AppendIndexParam(
+        c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
+    AppendIndexParam(
+        c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
+    AppendIndexParam(
+        c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(c_load_index_info, 0, 0, 0, 100, CDataType::BinaryVector);
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
@@ -2424,15 +2843,19 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Range) {
     sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
 
     CSearchResult c_search_result_on_bigIndex;
-    auto res_after_load_index =
-        Search(sealed_segment.get(), plan, placeholderGroup, time, &c_search_result_on_bigIndex);
+    auto res_after_load_index = Search(sealed_segment.get(),
+                                       plan,
+                                       placeholderGroup,
+                                       time,
+                                       &c_search_result_on_bigIndex);
     ASSERT_EQ(res_after_load_index.error_code, Success);
 
     auto search_result_on_bigIndex = (SearchResult*)c_search_result_on_bigIndex;
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * TOPK;
         ASSERT_EQ(search_result_on_bigIndex->seg_offsets_[offset], 420000 + i);
-        ASSERT_EQ(search_result_on_bigIndex->distances_[offset], search_result_on_raw_index->distances_[offset]);
+        ASSERT_EQ(search_result_on_bigIndex->distances_[offset],
+                  search_result_on_raw_index->distances_[offset]);
     }
 
     DeleteLoadIndexInfo(c_load_index_info);
@@ -2448,7 +2871,8 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
     // insert data to segment
     constexpr auto TOPK = 5;
 
-    std::string schema_string = generate_collection_schema("JACCARD", DIM, true);
+    std::string schema_string =
+        generate_collection_schema("JACCARD", DIM, true);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, Growing, -1);
@@ -2462,7 +2886,12 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
     PreInsert(segment, N, &offset);
 
     auto insert_data = serialize(dataset.raw_);
-    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
+    auto ins_res = Insert(segment,
+                          offset,
+                          N,
+                          dataset.row_ids_.data(),
+                          dataset.timestamps_.data(),
+                          insert_data.data(),
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
@@ -2508,17 +2937,20 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
 
     // create place_holder_group
     int num_queries = 5;
-    auto raw_group = CreateBinaryPlaceholderGroupFromBlob(num_queries, DIM, query_ptr);
+    auto raw_group =
+        CreateBinaryPlaceholderGroupFromBlob(num_queries, DIM, query_ptr);
     auto blob = raw_group.SerializeAsString();
 
     // search on segment's small index
     void* plan = nullptr;
     auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
-    auto status = CreateSearchPlanByExpr(collection, binary_plan.data(), binary_plan.size(), &plan);
+    auto status = CreateSearchPlanByExpr(
+        collection, binary_plan.data(), binary_plan.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
-    status = ParsePlaceholderGroup(plan, blob.data(), blob.length(), &placeholderGroup);
+    status = ParsePlaceholderGroup(
+        plan, blob.data(), blob.length(), &placeholderGroup);
     ASSERT_EQ(status.error_code, Success);
 
     std::vector<CPlaceholderGroup> placeholderGroups;
@@ -2526,19 +2958,26 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
     Timestamp time = 10000000;
 
     CSearchResult c_search_result_on_smallIndex;
-    auto res_before_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_smallIndex);
-    ASSERT_TRUE(res_before_load_index.error_code == Success) << res_before_load_index.error_msg;
+    auto res_before_load_index = Search(
+        segment, plan, placeholderGroup, time, &c_search_result_on_smallIndex);
+    ASSERT_TRUE(res_before_load_index.error_code == Success)
+        << res_before_load_index.error_msg;
 
     // load index to segment
-    auto indexing = generate_index(vec_col.data(), DataType::VECTOR_BINARY, knowhere::metric::JACCARD,
-                                   IndexEnum::INDEX_FAISS_BIN_IVFFLAT, DIM, N);
+    auto indexing = generate_index(vec_col.data(),
+                                   DataType::VECTOR_BINARY,
+                                   knowhere::metric::JACCARD,
+                                   IndexEnum::INDEX_FAISS_BIN_IVFFLAT,
+                                   DIM,
+                                   N);
 
     // gen query dataset
     auto query_dataset = knowhere::GenDataSet(num_queries, DIM, query_ptr);
     auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
     SearchInfo search_info = search_plan->plan_node_->search_info_;
-    auto result_on_index = vec_index->Query(query_dataset, search_info, nullptr);
+    auto result_on_index =
+        vec_index->Query(query_dataset, search_info, nullptr);
     auto ids = result_on_index->seg_offsets_.data();
     auto dis = result_on_index->distances_.data();
     std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
@@ -2547,7 +2986,8 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
         vec_dis.push_back(dis[j] * -1);
     }
 
-    auto search_result_on_raw_index = (SearchResult*)c_search_result_on_smallIndex;
+    auto search_result_on_raw_index =
+        (SearchResult*)c_search_result_on_smallIndex;
     search_result_on_raw_index->seg_offsets_ = vec_ids;
     search_result_on_raw_index->distances_ = vec_dis;
 
@@ -2562,9 +3002,12 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
     std::string metric_type_key = "metric_type";
     std::string metric_type_value = "JACCARD";
 
-    AppendIndexParam(c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
-    AppendIndexParam(c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
-    AppendIndexParam(c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
+    AppendIndexParam(
+        c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
+    AppendIndexParam(
+        c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
+    AppendIndexParam(
+        c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(c_load_index_info, 0, 0, 0, 100, CDataType::BinaryVector);
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
@@ -2574,15 +3017,19 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Range) {
     sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
 
     CSearchResult c_search_result_on_bigIndex;
-    auto res_after_load_index =
-        Search(sealed_segment.get(), plan, placeholderGroup, time, &c_search_result_on_bigIndex);
+    auto res_after_load_index = Search(sealed_segment.get(),
+                                       plan,
+                                       placeholderGroup,
+                                       time,
+                                       &c_search_result_on_bigIndex);
     ASSERT_EQ(res_after_load_index.error_code, Success);
 
     auto search_result_on_bigIndex = (SearchResult*)c_search_result_on_bigIndex;
     for (int i = 0; i < num_queries; ++i) {
         auto offset = i * TOPK;
         ASSERT_EQ(search_result_on_bigIndex->seg_offsets_[offset], 42000 + i);
-        ASSERT_EQ(search_result_on_bigIndex->distances_[offset], search_result_on_raw_index->distances_[offset]);
+        ASSERT_EQ(search_result_on_bigIndex->distances_[offset],
+                  search_result_on_raw_index->distances_[offset]);
     }
 
     DeleteLoadIndexInfo(c_load_index_info);
@@ -2598,7 +3045,8 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
     // insert data to segment
     constexpr auto TOPK = 5;
 
-    std::string schema_string = generate_collection_schema("JACCARD", DIM, true);
+    std::string schema_string =
+        generate_collection_schema("JACCARD", DIM, true);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, Growing, -1);
@@ -2612,7 +3060,12 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
     PreInsert(segment, N, &offset);
 
     auto insert_data = serialize(dataset.raw_);
-    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
+    auto ins_res = Insert(segment,
+                          offset,
+                          N,
+                          dataset.row_ids_.data(),
+                          dataset.timestamps_.data(),
+                          insert_data.data(),
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
@@ -2646,7 +3099,8 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
     // create place_holder_group
     int num_queries = 5;
     int topK = 5;
-    auto raw_group = CreateBinaryPlaceholderGroupFromBlob(num_queries, DIM, query_ptr);
+    auto raw_group =
+        CreateBinaryPlaceholderGroupFromBlob(num_queries, DIM, query_ptr);
     auto blob = raw_group.SerializeAsString();
 
     // search on segment's small index
@@ -2655,7 +3109,8 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
-    status = ParsePlaceholderGroup(plan, blob.data(), blob.length(), &placeholderGroup);
+    status = ParsePlaceholderGroup(
+        plan, blob.data(), blob.length(), &placeholderGroup);
     ASSERT_EQ(status.error_code, Success);
 
     std::vector<CPlaceholderGroup> placeholderGroups;
@@ -2663,19 +3118,25 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
     Timestamp time = 10000000;
 
     CSearchResult c_search_result_on_smallIndex;
-    auto res_before_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_smallIndex);
+    auto res_before_load_index = Search(
+        segment, plan, placeholderGroup, time, &c_search_result_on_smallIndex);
     ASSERT_EQ(res_before_load_index.error_code, Success);
 
     // load index to segment
-    auto indexing = generate_index(vec_col.data(), DataType::VECTOR_BINARY, knowhere::metric::JACCARD,
-                                   IndexEnum::INDEX_FAISS_BIN_IVFFLAT, DIM, N);
+    auto indexing = generate_index(vec_col.data(),
+                                   DataType::VECTOR_BINARY,
+                                   knowhere::metric::JACCARD,
+                                   IndexEnum::INDEX_FAISS_BIN_IVFFLAT,
+                                   DIM,
+                                   N);
 
     // gen query dataset
     auto query_dataset = knowhere::GenDataSet(num_queries, DIM, query_ptr);
     auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
     SearchInfo search_info = search_plan->plan_node_->search_info_;
-    auto result_on_index = vec_index->Query(query_dataset, search_info, nullptr);
+    auto result_on_index =
+        vec_index->Query(query_dataset, search_info, nullptr);
     auto ids = result_on_index->seg_offsets_.data();
     auto dis = result_on_index->distances_.data();
     std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
@@ -2684,7 +3145,8 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
         vec_dis.push_back(dis[j] * -1);
     }
 
-    auto search_result_on_raw_index = (SearchResult*)c_search_result_on_smallIndex;
+    auto search_result_on_raw_index =
+        (SearchResult*)c_search_result_on_smallIndex;
     search_result_on_raw_index->seg_offsets_ = vec_ids;
     search_result_on_raw_index->distances_ = vec_dis;
 
@@ -2699,9 +3161,12 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
     std::string metric_type_key = "metric_type";
     std::string metric_type_value = "JACCARD";
 
-    AppendIndexParam(c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
-    AppendIndexParam(c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
-    AppendIndexParam(c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
+    AppendIndexParam(
+        c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
+    AppendIndexParam(
+        c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
+    AppendIndexParam(
+        c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(c_load_index_info, 0, 0, 0, 100, CDataType::BinaryVector);
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
@@ -2711,8 +3176,11 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
     sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
 
     CSearchResult c_search_result_on_bigIndex;
-    auto res_after_load_index =
-        Search(sealed_segment.get(), plan, placeholderGroup, time, &c_search_result_on_bigIndex);
+    auto res_after_load_index = Search(sealed_segment.get(),
+                                       plan,
+                                       placeholderGroup,
+                                       time,
+                                       &c_search_result_on_bigIndex);
     ASSERT_EQ(res_after_load_index.error_code, Success);
 
     std::vector<CSearchResult> results;
@@ -2722,8 +3190,13 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
     auto slice_topKs = std::vector<int64_t>{topK};
 
     CSearchResultDataBlobs cSearchResultData;
-    status = ReduceSearchResultsAndFillData(&cSearchResultData, plan, results.data(), results.size(), slice_nqs.data(),
-                                            slice_topKs.data(), slice_nqs.size());
+    status = ReduceSearchResultsAndFillData(&cSearchResultData,
+                                            plan,
+                                            results.data(),
+                                            results.size(),
+                                            slice_nqs.data(),
+                                            slice_topKs.data(),
+                                            slice_nqs.size());
     ASSERT_EQ(status.error_code, Success);
 
     //    status = ReduceSearchResultsAndFillData(plan, results.data(), results.size());
@@ -2731,10 +3204,12 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
 
     auto search_result_on_bigIndex = (SearchResult*)c_search_result_on_bigIndex;
     for (int i = 0; i < num_queries; ++i) {
-        ASSERT_EQ(search_result_on_bigIndex->topk_per_nq_prefix_sum_.size(), search_result_on_bigIndex->total_nq_ + 1);
+        ASSERT_EQ(search_result_on_bigIndex->topk_per_nq_prefix_sum_.size(),
+                  search_result_on_bigIndex->total_nq_ + 1);
         auto offset = search_result_on_bigIndex->topk_per_nq_prefix_sum_[i];
         ASSERT_EQ(search_result_on_bigIndex->seg_offsets_[offset], 42000 + i);
-        ASSERT_EQ(search_result_on_bigIndex->distances_[offset], search_result_on_raw_index->distances_[i * TOPK]);
+        ASSERT_EQ(search_result_on_bigIndex->distances_[offset],
+                  search_result_on_raw_index->distances_[i * TOPK]);
     }
 
     DeleteLoadIndexInfo(c_load_index_info);
@@ -2751,7 +3226,8 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     // insert data to segment
     constexpr auto TOPK = 5;
 
-    std::string schema_string = generate_collection_schema("JACCARD", DIM, true);
+    std::string schema_string =
+        generate_collection_schema("JACCARD", DIM, true);
     auto collection = NewCollection(schema_string.c_str());
     auto schema = ((segcore::Collection*)collection)->get_schema();
     auto segment = NewSegment(collection, Growing, -1);
@@ -2765,7 +3241,12 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     PreInsert(segment, N, &offset);
 
     auto insert_data = serialize(dataset.raw_);
-    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
+    auto ins_res = Insert(segment,
+                          offset,
+                          N,
+                          dataset.row_ids_.data(),
+                          dataset.timestamps_.data(),
+                          insert_data.data(),
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
@@ -2806,17 +3287,20 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     // create place_holder_group
     int num_queries = 5;
     int topK = 5;
-    auto raw_group = CreateBinaryPlaceholderGroupFromBlob(num_queries, DIM, query_ptr);
+    auto raw_group =
+        CreateBinaryPlaceholderGroupFromBlob(num_queries, DIM, query_ptr);
     auto blob = raw_group.SerializeAsString();
 
     // search on segment's small index
     void* plan = nullptr;
     auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
-    auto status = CreateSearchPlanByExpr(collection, binary_plan.data(), binary_plan.size(), &plan);
+    auto status = CreateSearchPlanByExpr(
+        collection, binary_plan.data(), binary_plan.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
-    status = ParsePlaceholderGroup(plan, blob.data(), blob.length(), &placeholderGroup);
+    status = ParsePlaceholderGroup(
+        plan, blob.data(), blob.length(), &placeholderGroup);
     ASSERT_EQ(status.error_code, Success);
 
     std::vector<CPlaceholderGroup> placeholderGroups;
@@ -2824,19 +3308,25 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     Timestamp time = 10000000;
 
     CSearchResult c_search_result_on_smallIndex;
-    auto res_before_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_smallIndex);
+    auto res_before_load_index = Search(
+        segment, plan, placeholderGroup, time, &c_search_result_on_smallIndex);
     ASSERT_EQ(res_before_load_index.error_code, Success);
 
     // load index to segment
-    auto indexing = generate_index(vec_col.data(), DataType::VECTOR_BINARY, knowhere::metric::JACCARD,
-                                   IndexEnum::INDEX_FAISS_BIN_IVFFLAT, DIM, N);
+    auto indexing = generate_index(vec_col.data(),
+                                   DataType::VECTOR_BINARY,
+                                   knowhere::metric::JACCARD,
+                                   IndexEnum::INDEX_FAISS_BIN_IVFFLAT,
+                                   DIM,
+                                   N);
 
     // gen query dataset
     auto query_dataset = knowhere::GenDataSet(num_queries, DIM, query_ptr);
     auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
     SearchInfo search_info = search_plan->plan_node_->search_info_;
-    auto result_on_index = vec_index->Query(query_dataset, search_info, nullptr);
+    auto result_on_index =
+        vec_index->Query(query_dataset, search_info, nullptr);
     auto ids = result_on_index->seg_offsets_.data();
     auto dis = result_on_index->distances_.data();
     std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
@@ -2845,7 +3335,8 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
         vec_dis.push_back(dis[j] * -1);
     }
 
-    auto search_result_on_raw_index = (SearchResult*)c_search_result_on_smallIndex;
+    auto search_result_on_raw_index =
+        (SearchResult*)c_search_result_on_smallIndex;
     search_result_on_raw_index->seg_offsets_ = vec_ids;
     search_result_on_raw_index->distances_ = vec_dis;
 
@@ -2860,9 +3351,12 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     std::string metric_type_key = "metric_type";
     std::string metric_type_value = "JACCARD";
 
-    AppendIndexParam(c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
-    AppendIndexParam(c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
-    AppendIndexParam(c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
+    AppendIndexParam(
+        c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
+    AppendIndexParam(
+        c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
+    AppendIndexParam(
+        c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(c_load_index_info, 0, 0, 0, 100, CDataType::BinaryVector);
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
@@ -2872,8 +3366,11 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
 
     CSearchResult c_search_result_on_bigIndex;
-    auto res_after_load_index =
-        Search(sealed_segment.get(), plan, placeholderGroup, time, &c_search_result_on_bigIndex);
+    auto res_after_load_index = Search(sealed_segment.get(),
+                                       plan,
+                                       placeholderGroup,
+                                       time,
+                                       &c_search_result_on_bigIndex);
     ASSERT_EQ(res_after_load_index.error_code, Success);
 
     std::vector<CSearchResult> results;
@@ -2883,8 +3380,13 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     auto slice_topKs = std::vector<int64_t>{topK};
 
     CSearchResultDataBlobs cSearchResultData;
-    status = ReduceSearchResultsAndFillData(&cSearchResultData, plan, results.data(), results.size(), slice_nqs.data(),
-                                            slice_topKs.data(), slice_nqs.size());
+    status = ReduceSearchResultsAndFillData(&cSearchResultData,
+                                            plan,
+                                            results.data(),
+                                            results.size(),
+                                            slice_nqs.data(),
+                                            slice_topKs.data(),
+                                            slice_nqs.size());
     ASSERT_EQ(status.error_code, Success);
 
     //    status = ReduceSearchResultsAndFillData(plan, results.data(), results.size());
@@ -2892,10 +3394,12 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
 
     auto search_result_on_bigIndex = (SearchResult*)c_search_result_on_bigIndex;
     for (int i = 0; i < num_queries; ++i) {
-        ASSERT_EQ(search_result_on_bigIndex->topk_per_nq_prefix_sum_.size(), search_result_on_bigIndex->total_nq_ + 1);
+        ASSERT_EQ(search_result_on_bigIndex->topk_per_nq_prefix_sum_.size(),
+                  search_result_on_bigIndex->total_nq_ + 1);
         auto offset = search_result_on_bigIndex->topk_per_nq_prefix_sum_[i];
         ASSERT_EQ(search_result_on_bigIndex->seg_offsets_[offset], 42000 + i);
-        ASSERT_EQ(search_result_on_bigIndex->distances_[offset], search_result_on_raw_index->distances_[i * TOPK]);
+        ASSERT_EQ(search_result_on_bigIndex->distances_[offset],
+                  search_result_on_raw_index->distances_[i * TOPK]);
     }
 
     DeleteLoadIndexInfo(c_load_index_info);
@@ -2923,7 +3427,8 @@ TEST(CApiTest, SealedSegmentTest) {
     auto array = CreateScalarDataArrayFrom(ages.data(), N, field_meta);
     auto age_data = serialize(array.get());
 
-    auto load_info = CLoadFieldDataInfo{101, age_data.data(), age_data.size(), N};
+    auto load_info =
+        CLoadFieldDataInfo{101, age_data.data(), age_data.size(), N};
 
     auto res = LoadFieldData(segment, load_info);
     ASSERT_EQ(res.error_code, Success);
@@ -2948,16 +3453,22 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     auto query_ptr = vec_col.data() + 42000 * DIM;
 
     auto counter_col = dataset.get_col<int64_t>(FieldId(101));
-    FieldMeta counter_field_meta(FieldName("counter"), FieldId(101), DataType::INT64);
-    auto count_array = CreateScalarDataArrayFrom(counter_col.data(), N, counter_field_meta);
+    FieldMeta counter_field_meta(
+        FieldName("counter"), FieldId(101), DataType::INT64);
+    auto count_array =
+        CreateScalarDataArrayFrom(counter_col.data(), N, counter_field_meta);
     auto counter_data = serialize(count_array.get());
 
-    FieldMeta row_id_field_meta(FieldName("RowID"), RowFieldID, DataType::INT64);
-    auto row_ids_array = CreateScalarDataArrayFrom(dataset.row_ids_.data(), N, row_id_field_meta);
+    FieldMeta row_id_field_meta(
+        FieldName("RowID"), RowFieldID, DataType::INT64);
+    auto row_ids_array = CreateScalarDataArrayFrom(
+        dataset.row_ids_.data(), N, row_id_field_meta);
     auto row_ids_data = serialize(row_ids_array.get());
 
-    FieldMeta timestamp_field_meta(FieldName("Timestamp"), TimestampFieldID, DataType::INT64);
-    auto timestamps_array = CreateScalarDataArrayFrom(dataset.timestamps_.data(), N, timestamp_field_meta);
+    FieldMeta timestamp_field_meta(
+        FieldName("Timestamp"), TimestampFieldID, DataType::INT64);
+    auto timestamps_array = CreateScalarDataArrayFrom(
+        dataset.timestamps_.data(), N, timestamp_field_meta);
     auto timestamps_data = serialize(timestamps_array.get());
 
     const char* dsl_string = R"({
@@ -2990,7 +3501,8 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
 
     // create place_holder_group
     int num_queries = 10;
-    auto raw_group = CreatePlaceholderGroupFromBlob(num_queries, DIM, query_ptr);
+    auto raw_group =
+        CreatePlaceholderGroupFromBlob(num_queries, DIM, query_ptr);
     auto blob = raw_group.SerializeAsString();
 
     // search on segment's small index
@@ -2999,7 +3511,8 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
-    status = ParsePlaceholderGroup(plan, blob.data(), blob.length(), &placeholderGroup);
+    status = ParsePlaceholderGroup(
+        plan, blob.data(), blob.length(), &placeholderGroup);
     ASSERT_EQ(status.error_code, Success);
 
     std::vector<CPlaceholderGroup> placeholderGroups;
@@ -3007,8 +3520,12 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     Timestamp time = 10000000;
 
     // load index to segment
-    auto indexing = generate_index(vec_col.data(), DataType::VECTOR_FLOAT, knowhere::metric::L2,
-                                   IndexEnum::INDEX_FAISS_IVFPQ, DIM, N);
+    auto indexing = generate_index(vec_col.data(),
+                                   DataType::VECTOR_FLOAT,
+                                   knowhere::metric::L2,
+                                   IndexEnum::INDEX_FAISS_IVFPQ,
+                                   DIM,
+                                   N);
     auto binary_set = indexing->Serialize(milvus::Config{});
     void* c_load_index_info = nullptr;
     status = NewLoadIndexInfo(&c_load_index_info, c_storage_config);
@@ -3020,9 +3537,12 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     std::string metric_type_key = "metric_type";
     std::string metric_type_value = "L2";
 
-    AppendIndexParam(c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
-    AppendIndexParam(c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
-    AppendIndexParam(c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
+    AppendIndexParam(
+        c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
+    AppendIndexParam(
+        c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
+    AppendIndexParam(
+        c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector);
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
@@ -3032,8 +3552,10 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     SearchInfo search_info;
     search_info.topk_ = TOPK;
     search_info.metric_type_ = knowhere::metric::L2;
-    search_info.search_params_ = generate_search_conf(IndexEnum::INDEX_FAISS_IVFPQ, knowhere::metric::L2);
-    auto result_on_index = vec_index->Query(query_dataset, search_info, nullptr);
+    search_info.search_params_ = generate_search_conf(
+        IndexEnum::INDEX_FAISS_IVFPQ, knowhere::metric::L2);
+    auto result_on_index =
+        vec_index->Query(query_dataset, search_info, nullptr);
     EXPECT_EQ(result_on_index->distances_.size(), num_queries * TOPK);
 
     auto c_counter_field_data = CLoadFieldDataInfo{
@@ -3069,8 +3591,11 @@ TEST(CApiTest, SealedSegment_search_float_Predicate_Range) {
     sealed_segment->LoadIndex(*(LoadIndexInfo*)c_load_index_info);
 
     CSearchResult c_search_result_on_bigIndex;
-    auto res_after_load_index =
-        Search(sealed_segment.get(), plan, placeholderGroup, time, &c_search_result_on_bigIndex);
+    auto res_after_load_index = Search(sealed_segment.get(),
+                                       plan,
+                                       placeholderGroup,
+                                       time,
+                                       &c_search_result_on_bigIndex);
     ASSERT_EQ(res_after_load_index.error_code, Success);
 
     auto search_result_on_bigIndex = (SearchResult*)c_search_result_on_bigIndex;
@@ -3104,16 +3629,22 @@ TEST(CApiTest, SealedSegment_search_without_predicates) {
     auto vec_data = serialize(vec_array.get());
 
     auto counter_col = dataset.get_col<int64_t>(FieldId(101));
-    FieldMeta counter_field_meta(FieldName("counter"), FieldId(101), DataType::INT64);
-    auto count_array = CreateScalarDataArrayFrom(counter_col.data(), N, counter_field_meta);
+    FieldMeta counter_field_meta(
+        FieldName("counter"), FieldId(101), DataType::INT64);
+    auto count_array =
+        CreateScalarDataArrayFrom(counter_col.data(), N, counter_field_meta);
     auto counter_data = serialize(count_array.get());
 
-    FieldMeta row_id_field_meta(FieldName("RowID"), RowFieldID, DataType::INT64);
-    auto row_ids_array = CreateScalarDataArrayFrom(dataset.row_ids_.data(), N, row_id_field_meta);
+    FieldMeta row_id_field_meta(
+        FieldName("RowID"), RowFieldID, DataType::INT64);
+    auto row_ids_array = CreateScalarDataArrayFrom(
+        dataset.row_ids_.data(), N, row_id_field_meta);
     auto row_ids_data = serialize(row_ids_array.get());
 
-    FieldMeta timestamp_field_meta(FieldName("Timestamp"), TimestampFieldID, DataType::INT64);
-    auto timestamps_array = CreateScalarDataArrayFrom(dataset.timestamps_.data(), N, timestamp_field_meta);
+    FieldMeta timestamp_field_meta(
+        FieldName("Timestamp"), TimestampFieldID, DataType::INT64);
+    auto timestamps_array = CreateScalarDataArrayFrom(
+        dataset.timestamps_.data(), N, timestamp_field_meta);
     auto timestamps_data = serialize(timestamps_array.get());
 
     const char* dsl_string = R"(
@@ -3177,18 +3708,21 @@ TEST(CApiTest, SealedSegment_search_without_predicates) {
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
-    status = ParsePlaceholderGroup(plan, blob.data(), blob.length(), &placeholderGroup);
+    status = ParsePlaceholderGroup(
+        plan, blob.data(), blob.length(), &placeholderGroup);
     ASSERT_EQ(status.error_code, Success);
 
     std::vector<CPlaceholderGroup> placeholderGroups;
     placeholderGroups.push_back(placeholderGroup);
     CSearchResult search_result;
-    auto res = Search(segment, plan, placeholderGroup, N + ts_offset, &search_result);
+    auto res =
+        Search(segment, plan, placeholderGroup, N + ts_offset, &search_result);
     std::cout << res.error_msg << std::endl;
     ASSERT_EQ(res.error_code, Success);
 
     CSearchResult search_result2;
-    auto res2 = Search(segment, plan, placeholderGroup, ts_offset, &search_result2);
+    auto res2 =
+        Search(segment, plan, placeholderGroup, ts_offset, &search_result2);
     ASSERT_EQ(res2.error_code, Success);
 
     DeleteSearchPlan(plan);
@@ -3213,16 +3747,22 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     auto query_ptr = vec_col.data() + 42000 * DIM;
 
     auto counter_col = dataset.get_col<int64_t>(FieldId(101));
-    FieldMeta counter_field_meta(FieldName("counter"), FieldId(101), DataType::INT64);
-    auto count_array = CreateScalarDataArrayFrom(counter_col.data(), N, counter_field_meta);
+    FieldMeta counter_field_meta(
+        FieldName("counter"), FieldId(101), DataType::INT64);
+    auto count_array =
+        CreateScalarDataArrayFrom(counter_col.data(), N, counter_field_meta);
     auto counter_data = serialize(count_array.get());
 
-    FieldMeta row_id_field_meta(FieldName("RowID"), RowFieldID, DataType::INT64);
-    auto row_ids_array = CreateScalarDataArrayFrom(dataset.row_ids_.data(), N, row_id_field_meta);
+    FieldMeta row_id_field_meta(
+        FieldName("RowID"), RowFieldID, DataType::INT64);
+    auto row_ids_array = CreateScalarDataArrayFrom(
+        dataset.row_ids_.data(), N, row_id_field_meta);
     auto row_ids_data = serialize(row_ids_array.get());
 
-    FieldMeta timestamp_field_meta(FieldName("Timestamp"), TimestampFieldID, DataType::INT64);
-    auto timestamps_array = CreateScalarDataArrayFrom(dataset.timestamps_.data(), N, timestamp_field_meta);
+    FieldMeta timestamp_field_meta(
+        FieldName("Timestamp"), TimestampFieldID, DataType::INT64);
+    auto timestamps_array = CreateScalarDataArrayFrom(
+        dataset.timestamps_.data(), N, timestamp_field_meta);
     auto timestamps_data = serialize(timestamps_array.get());
 
     const char* serialized_expr_plan = R"(vector_anns: <
@@ -3267,17 +3807,20 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
 
     // create place_holder_group
     int num_queries = 10;
-    auto raw_group = CreatePlaceholderGroupFromBlob(num_queries, DIM, query_ptr);
+    auto raw_group =
+        CreatePlaceholderGroupFromBlob(num_queries, DIM, query_ptr);
     auto blob = raw_group.SerializeAsString();
 
     // search on segment's small index
     void* plan = nullptr;
     auto binary_plan = translate_text_plan_to_binary_plan(serialized_expr_plan);
-    auto status = CreateSearchPlanByExpr(collection, binary_plan.data(), binary_plan.size(), &plan);
+    auto status = CreateSearchPlanByExpr(
+        collection, binary_plan.data(), binary_plan.size(), &plan);
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
-    status = ParsePlaceholderGroup(plan, blob.data(), blob.length(), &placeholderGroup);
+    status = ParsePlaceholderGroup(
+        plan, blob.data(), blob.length(), &placeholderGroup);
     ASSERT_EQ(status.error_code, Success);
 
     std::vector<CPlaceholderGroup> placeholderGroups;
@@ -3285,8 +3828,12 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     Timestamp time = 10000000;
 
     // load index to segment
-    auto indexing = generate_index(vec_col.data(), DataType::VECTOR_FLOAT, knowhere::metric::L2,
-                                   IndexEnum::INDEX_FAISS_IVFPQ, DIM, N);
+    auto indexing = generate_index(vec_col.data(),
+                                   DataType::VECTOR_FLOAT,
+                                   knowhere::metric::L2,
+                                   IndexEnum::INDEX_FAISS_IVFPQ,
+                                   DIM,
+                                   N);
 
     auto binary_set = indexing->Serialize(milvus::Config{});
     void* c_load_index_info = nullptr;
@@ -3299,9 +3846,12 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     std::string metric_type_key = "metric_type";
     std::string metric_type_value = "L2";
 
-    AppendIndexParam(c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
-    AppendIndexParam(c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
-    AppendIndexParam(c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
+    AppendIndexParam(
+        c_load_index_info, index_type_key.c_str(), index_type_value.c_str());
+    AppendIndexParam(
+        c_load_index_info, index_mode_key.c_str(), index_mode_value.c_str());
+    AppendIndexParam(
+        c_load_index_info, metric_type_key.c_str(), metric_type_value.c_str());
     AppendFieldInfo(c_load_index_info, 0, 0, 0, 100, CDataType::FloatVector);
     AppendIndex(c_load_index_info, (CBinarySet)&binary_set);
 
@@ -3342,7 +3892,8 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     auto vec_index = dynamic_cast<VectorIndex*>(indexing.get());
     auto search_plan = reinterpret_cast<milvus::query::Plan*>(plan);
     SearchInfo search_info = search_plan->plan_node_->search_info_;
-    auto result_on_index = vec_index->Query(query_dataset, search_info, nullptr);
+    auto result_on_index =
+        vec_index->Query(query_dataset, search_info, nullptr);
     auto ids = result_on_index->seg_offsets_.data();
     auto dis = result_on_index->distances_.data();
     std::vector<int64_t> vec_ids(ids, ids + TOPK * num_queries);
@@ -3352,7 +3903,8 @@ TEST(CApiTest, SealedSegment_search_float_With_Expr_Predicate_Range) {
     }
 
     CSearchResult c_search_result_on_bigIndex;
-    auto res_after_load_index = Search(segment, plan, placeholderGroup, time, &c_search_result_on_bigIndex);
+    auto res_after_load_index = Search(
+        segment, plan, placeholderGroup, time, &c_search_result_on_bigIndex);
     ASSERT_EQ(res_after_load_index.error_code, Success);
 
     auto search_result_on_bigIndex = (SearchResult*)c_search_result_on_bigIndex;
@@ -3386,20 +3938,26 @@ TEST(CApiTest, RetriveScalarFieldFromSealedSegmentWithIndex) {
     LoadIndexInfo load_index_info;
 
     // load timestamp field
-    FieldMeta ts_field_meta(FieldName("Timestamp"), TimestampFieldID, DataType::INT64);
-    auto ts_array = CreateScalarDataArrayFrom(raw_data.timestamps_.data(), N, ts_field_meta);
+    FieldMeta ts_field_meta(
+        FieldName("Timestamp"), TimestampFieldID, DataType::INT64);
+    auto ts_array = CreateScalarDataArrayFrom(
+        raw_data.timestamps_.data(), N, ts_field_meta);
     auto ts_data = serialize(ts_array.get());
-    auto load_info = CLoadFieldDataInfo{TimestampFieldID.get(), ts_data.data(), ts_data.size(), N};
+    auto load_info = CLoadFieldDataInfo{
+        TimestampFieldID.get(), ts_data.data(), ts_data.size(), N};
     auto res = LoadFieldData(segment, load_info);
     ASSERT_EQ(res.error_code, Success);
     auto count = GetRowCount(segment);
     ASSERT_EQ(count, N);
 
     // load rowid field
-    FieldMeta row_id_field_meta(FieldName("RowID"), RowFieldID, DataType::INT64);
-    auto row_id_array = CreateScalarDataArrayFrom(raw_data.row_ids_.data(), N, row_id_field_meta);
+    FieldMeta row_id_field_meta(
+        FieldName("RowID"), RowFieldID, DataType::INT64);
+    auto row_id_array = CreateScalarDataArrayFrom(
+        raw_data.row_ids_.data(), N, row_id_field_meta);
     auto row_id_data = serialize(row_id_array.get());
-    load_info = CLoadFieldDataInfo{RowFieldID.get(), row_id_data.data(), row_id_data.size(), N};
+    load_info = CLoadFieldDataInfo{
+        RowFieldID.get(), row_id_data.data(), row_id_data.size(), N};
     res = LoadFieldData(segment, load_info);
     ASSERT_EQ(res.error_code, Success);
     count = GetRowCount(segment);
@@ -3469,19 +4027,23 @@ TEST(CApiTest, RetriveScalarFieldFromSealedSegmentWithIndex) {
     auto plan = std::make_unique<query::RetrievePlan>(*schema);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
     std::vector<int64_t> retrive_row_ids = {age64_col[0]};
-    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(i64_fid, DataType::INT64, retrive_row_ids);
+    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(
+        i64_fid, DataType::INT64, retrive_row_ids);
     plan->plan_node_->predicate_ = std::move(term_expr);
     std::vector<FieldId> target_field_ids;
 
     // retrieve value
-    target_field_ids = {i8_fid, i16_fid, i32_fid, i64_fid, float_fid, double_fid};
+    target_field_ids = {
+        i8_fid, i16_fid, i32_fid, i64_fid, float_fid, double_fid};
     plan->field_ids_ = target_field_ids;
 
     CRetrieveResult retrieve_result;
-    res = Retrieve(segment, plan.get(), raw_data.timestamps_[N - 1], &retrieve_result);
+    res = Retrieve(
+        segment, plan.get(), raw_data.timestamps_[N - 1], &retrieve_result);
     ASSERT_EQ(res.error_code, Success);
     auto query_result = std::make_unique<proto::segcore::RetrieveResults>();
-    auto suc = query_result->ParseFromArray(retrieve_result.proto_blob, retrieve_result.proto_size);
+    auto suc = query_result->ParseFromArray(retrieve_result.proto_blob,
+                                            retrieve_result.proto_size);
     ASSERT_TRUE(suc);
     ASSERT_EQ(query_result->fields_data().size(), 6);
     auto fields_data = query_result->fields_data();
@@ -3504,11 +4066,13 @@ TEST(CApiTest, RetriveScalarFieldFromSealedSegmentWithIndex) {
                 break;
             }
             case proto::schema::DataType::Float: {
-                ASSERT_EQ(iter->scalars().float_data().data(0), age_float_col[0]);
+                ASSERT_EQ(iter->scalars().float_data().data(0),
+                          age_float_col[0]);
                 break;
             }
             case proto::schema::DataType::Double: {
-                ASSERT_EQ(iter->scalars().double_data().data(0), age_double_col[0]);
+                ASSERT_EQ(iter->scalars().double_data().data(0),
+                          age_double_col[0]);
                 break;
             }
             default: {
@@ -3536,7 +4100,12 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_WHEN_IP) {
     PreInsert(segment, N, &offset);
 
     auto insert_data = serialize(dataset.raw_);
-    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
+    auto ins_res = Insert(segment,
+                          offset,
+                          N,
+                          dataset.row_ids_.data(),
+                          dataset.timestamps_.data(),
+                          insert_data.data(),
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
@@ -3566,14 +4135,16 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_WHEN_IP) {
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
-    status = ParsePlaceholderGroup(plan, blob.data(), blob.length(), &placeholderGroup);
+    status = ParsePlaceholderGroup(
+        plan, blob.data(), blob.length(), &placeholderGroup);
     ASSERT_EQ(status.error_code, Success);
 
     std::vector<CPlaceholderGroup> placeholderGroups;
     placeholderGroups.push_back(placeholderGroup);
 
     CSearchResult search_result;
-    auto res = Search(segment, plan, placeholderGroup, ts_offset, &search_result);
+    auto res =
+        Search(segment, plan, placeholderGroup, ts_offset, &search_result);
     ASSERT_EQ(res.error_code, Success);
 
     DeleteSearchPlan(plan);
@@ -3596,7 +4167,12 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_IP) {
     PreInsert(segment, N, &offset);
 
     auto insert_data = serialize(dataset.raw_);
-    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
+    auto ins_res = Insert(segment,
+                          offset,
+                          N,
+                          dataset.row_ids_.data(),
+                          dataset.timestamps_.data(),
+                          insert_data.data(),
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
@@ -3627,14 +4203,16 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_IP) {
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
-    status = ParsePlaceholderGroup(plan, blob.data(), blob.length(), &placeholderGroup);
+    status = ParsePlaceholderGroup(
+        plan, blob.data(), blob.length(), &placeholderGroup);
     ASSERT_EQ(status.error_code, Success);
 
     std::vector<CPlaceholderGroup> placeholderGroups;
     placeholderGroups.push_back(placeholderGroup);
 
     CSearchResult search_result;
-    auto res = Search(segment, plan, placeholderGroup, ts_offset, &search_result);
+    auto res =
+        Search(segment, plan, placeholderGroup, ts_offset, &search_result);
     ASSERT_EQ(res.error_code, Success);
 
     DeleteSearchPlan(plan);
@@ -3657,7 +4235,12 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_WHEN_L2) {
     PreInsert(segment, N, &offset);
 
     auto insert_data = serialize(dataset.raw_);
-    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
+    auto ins_res = Insert(segment,
+                          offset,
+                          N,
+                          dataset.row_ids_.data(),
+                          dataset.timestamps_.data(),
+                          insert_data.data(),
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
@@ -3687,14 +4270,16 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_WHEN_L2) {
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
-    status = ParsePlaceholderGroup(plan, blob.data(), blob.length(), &placeholderGroup);
+    status = ParsePlaceholderGroup(
+        plan, blob.data(), blob.length(), &placeholderGroup);
     ASSERT_EQ(status.error_code, Success);
 
     std::vector<CPlaceholderGroup> placeholderGroups;
     placeholderGroups.push_back(placeholderGroup);
 
     CSearchResult search_result;
-    auto res = Search(segment, plan, placeholderGroup, ts_offset, &search_result);
+    auto res =
+        Search(segment, plan, placeholderGroup, ts_offset, &search_result);
     ASSERT_EQ(res.error_code, Success);
 
     DeleteSearchPlan(plan);
@@ -3717,7 +4302,12 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_L2) {
     PreInsert(segment, N, &offset);
 
     auto insert_data = serialize(dataset.raw_);
-    auto ins_res = Insert(segment, offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), insert_data.data(),
+    auto ins_res = Insert(segment,
+                          offset,
+                          N,
+                          dataset.row_ids_.data(),
+                          dataset.timestamps_.data(),
+                          insert_data.data(),
                           insert_data.size());
     ASSERT_EQ(ins_res.error_code, Success);
 
@@ -3748,14 +4338,16 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_L2) {
     ASSERT_EQ(status.error_code, Success);
 
     void* placeholderGroup = nullptr;
-    status = ParsePlaceholderGroup(plan, blob.data(), blob.length(), &placeholderGroup);
+    status = ParsePlaceholderGroup(
+        plan, blob.data(), blob.length(), &placeholderGroup);
     ASSERT_EQ(status.error_code, Success);
 
     std::vector<CPlaceholderGroup> placeholderGroups;
     placeholderGroups.push_back(placeholderGroup);
 
     CSearchResult search_result;
-    auto res = Search(segment, plan, placeholderGroup, ts_offset, &search_result);
+    auto res =
+        Search(segment, plan, placeholderGroup, ts_offset, &search_result);
     ASSERT_EQ(res.error_code, Success);
 
     DeleteSearchPlan(plan);

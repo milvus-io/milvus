@@ -32,7 +32,10 @@ cmp2(std::pair<float, int64_t> a, std::pair<float, int64_t> b) {
 }
 
 auto
-RangeSearchSortResultBF(milvus::DatasetPtr data_set, int64_t topk, size_t nq, std::string metric_type) {
+RangeSearchSortResultBF(milvus::DatasetPtr data_set,
+                        int64_t topk,
+                        size_t nq,
+                        std::string metric_type) {
     auto lims = milvus::GetDatasetLims(data_set);
     auto id = milvus::GetDatasetIDs(data_set);
     auto dist = milvus::GetDatasetDistance(data_set);
@@ -69,7 +72,10 @@ RangeSearchSortResultBF(milvus::DatasetPtr data_set, int64_t topk, size_t nq, st
 }
 
 milvus::DatasetPtr
-genResultDataset(const int64_t nq, const int64_t* ids, const float* distance, const size_t* lims) {
+genResultDataset(const int64_t nq,
+                 const int64_t* ids,
+                 const float* distance,
+                 const size_t* lims) {
     auto ret_ds = std::make_shared<milvus::Dataset>();
     ret_ds->SetRows(nq);
     ret_ds->SetIds(ids);
@@ -80,12 +86,17 @@ genResultDataset(const int64_t nq, const int64_t* ids, const float* distance, co
 }
 
 void
-CheckRangeSearchSortResult(int64_t* p_id, float* p_dist, milvus::DatasetPtr dataset, int64_t n) {
+CheckRangeSearchSortResult(int64_t* p_id,
+                           float* p_dist,
+                           milvus::DatasetPtr dataset,
+                           int64_t n) {
     auto id = milvus::GetDatasetIDs(dataset);
     auto dist = milvus::GetDatasetDistance(dataset);
     for (int i = 0; i < n; i++) {
-        AssertInfo(id[i] == p_id[i], "id of range search result are not the same");
-        AssertInfo(dist[i] == p_dist[i], "distance of range search result are not the same");
+        AssertInfo(id[i] == p_id[i],
+                   "id of range search result are not the same");
+        AssertInfo(dist[i] == p_dist[i],
+                   "distance of range search result are not the same");
     }
 }
 
@@ -102,7 +113,8 @@ GenRangeSearchResult(int64_t* ids,
     std::mt19937 e(seed);
     std::uniform_int_distribution<> uniform_num(0, N);
     std::uniform_int_distribution<> uniform_ids(id_min, id_max);
-    std::uniform_real_distribution<> uniform_distance(distance_min, distance_max);
+    std::uniform_real_distribution<> uniform_distance(distance_min,
+                                                      distance_max);
 
     lims = new size_t[N + 1];
     // alloc max memory
@@ -122,12 +134,14 @@ GenRangeSearchResult(int64_t* ids,
     return genResultDataset(N, ids, distances, lims);
 }
 
-class RangeSearchSortTest : public ::testing::TestWithParam<knowhere::MetricType> {
+class RangeSearchSortTest
+    : public ::testing::TestWithParam<knowhere::MetricType> {
  protected:
     void
     SetUp() override {
         metric_type = GetParam();
-        dataset = GenRangeSearchResult(ids, distances, lims, N, id_min, id_max, dist_min, dist_max);
+        dataset = GenRangeSearchResult(
+            ids, distances, lims, N, id_min, id_max, dist_min, dist_max);
     }
 
     void
@@ -160,7 +174,8 @@ INSTANTIATE_TEST_CASE_P(RangeSearchSortParameters,
 
 TEST_P(RangeSearchSortTest, CheckRangeSearchSort) {
     auto res = milvus::SortRangeSearchResult(dataset, TOPK, N, metric_type);
-    auto [real_num, p_id, p_dist] = RangeSearchSortResultBF(dataset, TOPK, N, metric_type);
+    auto [real_num, p_id, p_dist] =
+        RangeSearchSortResultBF(dataset, TOPK, N, metric_type);
     CheckRangeSearchSortResult(p_id, p_dist, res, real_num);
     delete[] p_id;
     delete[] p_dist;

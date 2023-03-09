@@ -48,7 +48,8 @@ TEST(Retrieve, AutoID) {
     auto schema = std::make_shared<Schema>();
     auto fid_64 = schema->AddDebugField("i64", DataType::INT64);
     auto DIM = 16;
-    auto fid_vec = schema->AddDebugField("vector_64", DataType::VECTOR_FLOAT, DIM, knowhere::metric::L2);
+    auto fid_vec = schema->AddDebugField(
+        "vector_64", DataType::VECTOR_FLOAT, DIM, knowhere::metric::L2);
     schema->set_primary_field_id(fid_64);
 
     int64_t N = 100;
@@ -65,7 +66,8 @@ TEST(Retrieve, AutoID) {
     for (int i = 0; i < req_size; ++i) {
         values.emplace_back(i64_col[choose(i)]);
     }
-    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(fid_64, DataType::INT64, values);
+    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(
+        fid_64, DataType::INT64, values);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
     plan->plan_node_->predicate_ = std::move(term_expr);
     std::vector<FieldId> target_fields_id{fid_64, fid_vec};
@@ -98,7 +100,8 @@ TEST(Retrieve, AutoID2) {
     auto schema = std::make_shared<Schema>();
     auto fid_64 = schema->AddDebugField("i64", DataType::INT64);
     auto DIM = 16;
-    auto fid_vec = schema->AddDebugField("vector_64", DataType::VECTOR_FLOAT, DIM, knowhere::metric::L2);
+    auto fid_vec = schema->AddDebugField(
+        "vector_64", DataType::VECTOR_FLOAT, DIM, knowhere::metric::L2);
     schema->set_primary_field_id(fid_64);
 
     int64_t N = 100;
@@ -115,7 +118,8 @@ TEST(Retrieve, AutoID2) {
     for (int i = 0; i < req_size; ++i) {
         values.emplace_back(i64_col[choose(i)]);
     }
-    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(fid_64, DataType::INT64, values);
+    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(
+        fid_64, DataType::INT64, values);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
     plan->plan_node_->predicate_ = std::move(term_expr);
     std::vector<FieldId> target_offsets{fid_64, fid_vec};
@@ -143,7 +147,8 @@ TEST(Retrieve, NotExist) {
     auto schema = std::make_shared<Schema>();
     auto fid_64 = schema->AddDebugField("i64", DataType::INT64);
     auto DIM = 16;
-    auto fid_vec = schema->AddDebugField("vector_64", DataType::VECTOR_FLOAT, DIM, knowhere::metric::L2);
+    auto fid_vec = schema->AddDebugField(
+        "vector_64", DataType::VECTOR_FLOAT, DIM, knowhere::metric::L2);
     schema->set_primary_field_id(fid_64);
 
     int64_t N = 100;
@@ -163,7 +168,8 @@ TEST(Retrieve, NotExist) {
         values.emplace_back(choose2(i));
     }
 
-    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(fid_64, DataType::INT64, values);
+    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(
+        fid_64, DataType::INT64, values);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
     plan->plan_node_->predicate_ = std::move(term_expr);
     std::vector<FieldId> target_offsets{fid_64, fid_vec};
@@ -191,7 +197,8 @@ TEST(Retrieve, Empty) {
     auto schema = std::make_shared<Schema>();
     auto fid_64 = schema->AddDebugField("i64", DataType::INT64);
     auto DIM = 16;
-    auto fid_vec = schema->AddDebugField("vector_64", DataType::VECTOR_FLOAT, DIM, knowhere::metric::L2);
+    auto fid_vec = schema->AddDebugField(
+        "vector_64", DataType::VECTOR_FLOAT, DIM, knowhere::metric::L2);
     schema->set_primary_field_id(fid_64);
 
     int64_t N = 100;
@@ -205,7 +212,8 @@ TEST(Retrieve, Empty) {
     for (int i = 0; i < req_size; ++i) {
         values.emplace_back(choose(i));
     }
-    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(fid_64, DataType::INT64, values);
+    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(
+        fid_64, DataType::INT64, values);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
     plan->plan_node_->predicate_ = std::move(term_expr);
     std::vector<FieldId> target_offsets{fid_64, fid_vec};
@@ -226,7 +234,8 @@ TEST(Retrieve, LargeTimestamp) {
     auto schema = std::make_shared<Schema>();
     auto fid_64 = schema->AddDebugField("i64", DataType::INT64);
     auto DIM = 16;
-    auto fid_vec = schema->AddDebugField("vector_64", DataType::VECTOR_FLOAT, DIM, knowhere::metric::L2);
+    auto fid_vec = schema->AddDebugField(
+        "vector_64", DataType::VECTOR_FLOAT, DIM, knowhere::metric::L2);
     schema->set_primary_field_id(fid_64);
 
     int64_t N = 100;
@@ -244,7 +253,8 @@ TEST(Retrieve, LargeTimestamp) {
     for (int i = 0; i < req_size; ++i) {
         values.emplace_back(i64_col[choose(i)]);
     }
-    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(fid_64, DataType::INT64, values);
+    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(
+        fid_64, DataType::INT64, values);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
     plan->plan_node_->predicate_ = std::move(term_expr);
     std::vector<FieldId> target_offsets{fid_64, fid_vec};
@@ -253,7 +263,8 @@ TEST(Retrieve, LargeTimestamp) {
     std::vector<int> filter_timestamps{-1, 0, 1, 10, 20};
     filter_timestamps.push_back(N / 2);
     for (const auto& f_ts : filter_timestamps) {
-        auto retrieve_results = segment->Retrieve(plan.get(), ts_offset + 1 + f_ts);
+        auto retrieve_results =
+            segment->Retrieve(plan.get(), ts_offset + 1 + f_ts);
         Assert(retrieve_results->fields_data_size() == 2);
 
         int target_num = (f_ts + choose_sep) / choose_sep;
@@ -263,10 +274,12 @@ TEST(Retrieve, LargeTimestamp) {
 
         for (auto field_data : retrieve_results->fields_data()) {
             if (DataType(field_data.type()) == DataType::INT64) {
-                Assert(field_data.scalars().long_data().data_size() == target_num);
+                Assert(field_data.scalars().long_data().data_size() ==
+                       target_num);
             }
             if (DataType(field_data.type()) == DataType::VECTOR_FLOAT) {
-                Assert(field_data.vectors().float_vector().data_size() == target_num * DIM);
+                Assert(field_data.vectors().float_vector().data_size() ==
+                       target_num * DIM);
             }
         }
     }
@@ -276,7 +289,8 @@ TEST(Retrieve, Delete) {
     auto schema = std::make_shared<Schema>();
     auto fid_64 = schema->AddDebugField("i64", DataType::INT64);
     auto DIM = 16;
-    auto fid_vec = schema->AddDebugField("vector_64", DataType::VECTOR_FLOAT, DIM, knowhere::metric::L2);
+    auto fid_vec = schema->AddDebugField(
+        "vector_64", DataType::VECTOR_FLOAT, DIM, knowhere::metric::L2);
     schema->set_primary_field_id(fid_64);
 
     auto fid_ts = schema->AddDebugField("Timestamp", DataType::INT64);
@@ -300,7 +314,8 @@ TEST(Retrieve, Delete) {
     for (int i = 0; i < req_size; ++i) {
         values.emplace_back(i64_col[choose(i)]);
     }
-    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(fid_64, DataType::INT64, values);
+    auto term_expr = std::make_unique<query::TermExprImpl<int64_t>>(
+        fid_64, DataType::INT64, values);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
     plan->plan_node_->predicate_ = std::move(term_expr);
     std::vector<FieldId> target_offsets{fid_ts, fid_64, fid_vec};
@@ -357,7 +372,10 @@ TEST(Retrieve, Delete) {
     std::vector<idx_t> new_timestamps{10, 10, 10, 10, 10, 10};
     auto reserved_offset = segment->PreDelete(new_count);
     ASSERT_EQ(reserved_offset, row_count);
-    segment->Delete(reserved_offset, new_count, ids.get(), reinterpret_cast<const Timestamp*>(new_timestamps.data()));
+    segment->Delete(reserved_offset,
+                    new_count,
+                    ids.get(),
+                    reinterpret_cast<const Timestamp*>(new_timestamps.data()));
 
     {
         auto retrieve_results = segment->Retrieve(plan.get(), 100);

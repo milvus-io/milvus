@@ -18,11 +18,16 @@ using namespace milvus::segcore;
 TEST(Binary, Insert) {
     int64_t N = 100000;
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField("vecbin", DataType::VECTOR_BINARY, 128, knowhere::metric::JACCARD);
+    auto vec_fid = schema->AddDebugField(
+        "vecbin", DataType::VECTOR_BINARY, 128, knowhere::metric::JACCARD);
     auto i64_fid = schema->AddDebugField("age", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
     auto dataset = DataGen(schema, N, 10);
     auto segment = CreateGrowingSegment(schema);
     auto offset = segment->PreInsert(N);
-    segment->Insert(offset, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_);
+    segment->Insert(offset,
+                    N,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
 }

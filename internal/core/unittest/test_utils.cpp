@@ -21,12 +21,16 @@ TEST(Util, StringMatch) {
     using namespace milvus::query;
 
     ASSERT_ANY_THROW(Match(1, 2, OpType::PrefixMatch));
-    ASSERT_ANY_THROW(Match(std::string("not_match_operation"), std::string("not_match"), OpType::LessEqual));
+    ASSERT_ANY_THROW(Match(std::string("not_match_operation"),
+                           std::string("not_match"),
+                           OpType::LessEqual));
 
     ASSERT_TRUE(PrefixMatch("prefix1", "prefix"));
     ASSERT_TRUE(PostfixMatch("1postfix", "postfix"));
-    ASSERT_TRUE(Match(std::string("prefix1"), std::string("prefix"), OpType::PrefixMatch));
-    ASSERT_TRUE(Match(std::string("1postfix"), std::string("postfix"), OpType::PostfixMatch));
+    ASSERT_TRUE(Match(
+        std::string("prefix1"), std::string("prefix"), OpType::PrefixMatch));
+    ASSERT_TRUE(Match(
+        std::string("1postfix"), std::string("postfix"), OpType::PostfixMatch));
 
     ASSERT_FALSE(PrefixMatch("", "longer"));
     ASSERT_FALSE(PostfixMatch("", "longer"));
@@ -41,7 +45,8 @@ TEST(Util, GetDeleteBitmap) {
     using namespace milvus::segcore;
 
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto vec_fid = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     auto i64_fid = schema->AddDebugField("age", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
     auto N = 10;
@@ -74,7 +79,11 @@ TEST(Util, GetDeleteBitmap) {
     auto query_timestamp = tss[N - 1];
     auto del_barrier = get_barrier(delete_record, query_timestamp);
     auto insert_barrier = get_barrier(insert_record, query_timestamp);
-    auto res_bitmap = get_deleted_bitmap(del_barrier, insert_barrier, delete_record, insert_record, query_timestamp);
+    auto res_bitmap = get_deleted_bitmap(del_barrier,
+                                         insert_barrier,
+                                         delete_record,
+                                         insert_record,
+                                         query_timestamp);
     ASSERT_EQ(res_bitmap->bitmap_ptr->count(), 0);
 
     // test case insert repeated pk1 (ts = {1 ... N}) -> delete pk1 (ts = N) -> query (ts = N)
@@ -86,12 +95,17 @@ TEST(Util, GetDeleteBitmap) {
     delete_record.ack_responder_.AddSegment(offset, offset + 1);
 
     del_barrier = get_barrier(delete_record, query_timestamp);
-    res_bitmap = get_deleted_bitmap(del_barrier, insert_barrier, delete_record, insert_record, query_timestamp);
+    res_bitmap = get_deleted_bitmap(del_barrier,
+                                    insert_barrier,
+                                    delete_record,
+                                    insert_record,
+                                    query_timestamp);
     ASSERT_EQ(res_bitmap->bitmap_ptr->count(), N - 1);
 
     // test case insert repeated pk1 (ts = {1 ... N}) -> delete pk1 (ts = N) -> query (ts = N/2)
     query_timestamp = tss[N - 1] / 2;
     del_barrier = get_barrier(delete_record, query_timestamp);
-    res_bitmap = get_deleted_bitmap(del_barrier, N, delete_record, insert_record, query_timestamp);
+    res_bitmap = get_deleted_bitmap(
+        del_barrier, N, delete_record, insert_record, query_timestamp);
     ASSERT_EQ(res_bitmap->bitmap_ptr->count(), 0);
 }

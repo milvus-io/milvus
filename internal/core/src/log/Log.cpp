@@ -111,7 +111,7 @@ get_thread_starttime() {
     snprintf(filename,
              sizeof(filename),
              "/proc/%lld/task/%lld/stat",
-             (long long)pid,
+             (long long)pid,   // NOLINT, TODO: How to solve this?
              (long long)tid);  // NOLINT
 
     int64_t val = 0;

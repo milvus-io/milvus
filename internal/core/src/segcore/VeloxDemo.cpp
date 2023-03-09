@@ -23,9 +23,21 @@
 #include "velox/exec/tests/utils/TempDirectoryPath.h"
 #include "velox/vector/BaseVector.h"
 
-using namespace facebook::velox;
-using namespace facebook::velox::dwio::common;
-using namespace facebook::velox::dwrf;
+namespace filesystems = facebook::velox::filesystems;
+namespace dwio = facebook::velox::dwio;
+namespace dwrf = facebook::velox::dwrf;
+
+using facebook::velox::LocalReadFile;
+using facebook::velox::RowVector;
+using facebook::velox::vector_size_t;
+using facebook::velox::VectorPtr;
+
+using dwio::common::BufferedInput;
+using dwio::common::FileFormat;
+using dwio::common::ReaderOptions;
+using dwio::common::RowReaderOptions;
+
+using dwrf::DwrfReader;
 
 // A temporary program that reads from ORC file and prints its content
 // Used to compare the ORC data read by DWRFReader against apache-orc repo.

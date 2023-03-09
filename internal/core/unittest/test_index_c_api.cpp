@@ -27,12 +27,15 @@ TEST(FloatVecIndex, All) {
     auto metric_type = knowhere::metric::L2;
     indexcgo::TypeParams type_params;
     indexcgo::IndexParams index_params;
-    std::tie(type_params, index_params) = generate_params(index_type, metric_type);
+    std::tie(type_params, index_params) =
+        generate_params(index_type, metric_type);
     std::string type_params_str, index_params_str;
     bool ok;
-    ok = google::protobuf::TextFormat::PrintToString(type_params, &type_params_str);
+    ok = google::protobuf::TextFormat::PrintToString(type_params,
+                                                     &type_params_str);
     assert(ok);
-    ok = google::protobuf::TextFormat::PrintToString(index_params, &index_params_str);
+    ok = google::protobuf::TextFormat::PrintToString(index_params,
+                                                     &index_params_str);
     assert(ok);
     auto dataset = GenDataset(NB, metric_type, false);
     auto xb_data = dataset.get_col<float>(milvus::FieldId(100));
@@ -44,7 +47,11 @@ TEST(FloatVecIndex, All) {
     CIndex copy_index;
 
     {
-        status = CreateIndex(dtype, type_params_str.c_str(), index_params_str.c_str(), &index, c_storage_config);
+        status = CreateIndex(dtype,
+                             type_params_str.c_str(),
+                             index_params_str.c_str(),
+                             &index,
+                             c_storage_config);
         ASSERT_EQ(Success, status.error_code);
     }
     {
@@ -56,7 +63,11 @@ TEST(FloatVecIndex, All) {
         ASSERT_EQ(Success, status.error_code);
     }
     {
-        status = CreateIndex(dtype, type_params_str.c_str(), index_params_str.c_str(), &copy_index, c_storage_config);
+        status = CreateIndex(dtype,
+                             type_params_str.c_str(),
+                             index_params_str.c_str(),
+                             &copy_index,
+                             c_storage_config);
         ASSERT_EQ(Success, status.error_code);
     }
     {
@@ -79,12 +90,15 @@ TEST(BinaryVecIndex, All) {
     auto metric_type = knowhere::metric::JACCARD;
     indexcgo::TypeParams type_params;
     indexcgo::IndexParams index_params;
-    std::tie(type_params, index_params) = generate_params(index_type, metric_type);
+    std::tie(type_params, index_params) =
+        generate_params(index_type, metric_type);
     std::string type_params_str, index_params_str;
     bool ok;
-    ok = google::protobuf::TextFormat::PrintToString(type_params, &type_params_str);
+    ok = google::protobuf::TextFormat::PrintToString(type_params,
+                                                     &type_params_str);
     assert(ok);
-    ok = google::protobuf::TextFormat::PrintToString(index_params, &index_params_str);
+    ok = google::protobuf::TextFormat::PrintToString(index_params,
+                                                     &index_params_str);
     assert(ok);
     auto dataset = GenDataset(NB, metric_type, true);
     auto xb_data = dataset.get_col<uint8_t>(milvus::FieldId(100));
@@ -96,7 +110,11 @@ TEST(BinaryVecIndex, All) {
     CIndex copy_index;
 
     {
-        status = CreateIndex(dtype, type_params_str.c_str(), index_params_str.c_str(), &index, c_storage_config);
+        status = CreateIndex(dtype,
+                             type_params_str.c_str(),
+                             index_params_str.c_str(),
+                             &index,
+                             c_storage_config);
         ASSERT_EQ(Success, status.error_code);
     }
     {
@@ -108,7 +126,11 @@ TEST(BinaryVecIndex, All) {
         ASSERT_EQ(Success, status.error_code);
     }
     {
-        status = CreateIndex(dtype, type_params_str.c_str(), index_params_str.c_str(), &copy_index, c_storage_config);
+        status = CreateIndex(dtype,
+                             type_params_str.c_str(),
+                             index_params_str.c_str(),
+                             &copy_index,
+                             c_storage_config);
         ASSERT_EQ(Success, status.error_code);
     }
     {
@@ -149,11 +171,16 @@ TEST(CBoolIndexTest, All) {
         CIndex copy_index;
 
         {
-            status = CreateIndex(dtype, type_params_str.c_str(), index_params_str.c_str(), &index, c_storage_config);
+            status = CreateIndex(dtype,
+                                 type_params_str.c_str(),
+                                 index_params_str.c_str(),
+                                 &index,
+                                 c_storage_config);
             ASSERT_EQ(Success, status.error_code);
         }
         {
-            status = BuildScalarIndex(index, half_ds->GetRows(), half_ds->GetTensor());
+            status = BuildScalarIndex(
+                index, half_ds->GetRows(), half_ds->GetTensor());
             ASSERT_EQ(Success, status.error_code);
         }
         {
@@ -161,8 +188,11 @@ TEST(CBoolIndexTest, All) {
             ASSERT_EQ(Success, status.error_code);
         }
         {
-            status =
-                CreateIndex(dtype, type_params_str.c_str(), index_params_str.c_str(), &copy_index, c_storage_config);
+            status = CreateIndex(dtype,
+                                 type_params_str.c_str(),
+                                 index_params_str.c_str(),
+                                 &copy_index,
+                                 c_storage_config);
             ASSERT_EQ(Success, status.error_code);
         }
         {
@@ -201,7 +231,11 @@ TEST(CInt64IndexTest, All) {
         CIndex copy_index;
 
         {
-            status = CreateIndex(dtype, type_params_str.c_str(), index_params_str.c_str(), &index, c_storage_config);
+            status = CreateIndex(dtype,
+                                 type_params_str.c_str(),
+                                 index_params_str.c_str(),
+                                 &index,
+                                 c_storage_config);
             ASSERT_EQ(Success, status.error_code);
         }
         {
@@ -213,8 +247,11 @@ TEST(CInt64IndexTest, All) {
             ASSERT_EQ(Success, status.error_code);
         }
         {
-            status =
-                CreateIndex(dtype, type_params_str.c_str(), index_params_str.c_str(), &copy_index, c_storage_config);
+            status = CreateIndex(dtype,
+                                 type_params_str.c_str(),
+                                 index_params_str.c_str(),
+                                 &copy_index,
+                                 c_storage_config);
             ASSERT_EQ(Success, status.error_code);
         }
         {
@@ -255,11 +292,16 @@ TEST(CStringIndexTest, All) {
         CIndex copy_index;
 
         {
-            status = CreateIndex(dtype, type_params_str.c_str(), index_params_str.c_str(), &index, c_storage_config);
+            status = CreateIndex(dtype,
+                                 type_params_str.c_str(),
+                                 index_params_str.c_str(),
+                                 &index,
+                                 c_storage_config);
             ASSERT_EQ(Success, status.error_code);
         }
         {
-            status = BuildScalarIndex(index, (str_ds->GetRows()), (str_ds->GetTensor()));
+            status = BuildScalarIndex(
+                index, (str_ds->GetRows()), (str_ds->GetTensor()));
             ASSERT_EQ(Success, status.error_code);
         }
         {
@@ -267,8 +309,11 @@ TEST(CStringIndexTest, All) {
             ASSERT_EQ(Success, status.error_code);
         }
         {
-            status =
-                CreateIndex(dtype, type_params_str.c_str(), index_params_str.c_str(), &copy_index, c_storage_config);
+            status = CreateIndex(dtype,
+                                 type_params_str.c_str(),
+                                 index_params_str.c_str(),
+                                 &copy_index,
+                                 c_storage_config);
             ASSERT_EQ(Success, status.error_code);
         }
         {

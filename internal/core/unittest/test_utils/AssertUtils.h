@@ -34,7 +34,8 @@ compare_double(double x, double y, double epsilon = 0.000001f) {
 }
 
 inline void
-assert_order(const milvus::SearchResult& result, const knowhere::MetricType& metric_type) {
+assert_order(const milvus::SearchResult& result,
+             const knowhere::MetricType& metric_type) {
     bool dsc = milvus::PositivelyRelated(metric_type);
     auto& ids = result.seg_offsets_;
     auto& dist = result.distances_;
@@ -143,7 +144,8 @@ assert_reverse(ScalarIndex<double>* index, const std::vector<double>& arr) {
 
 template <>
 inline void
-assert_reverse(ScalarIndex<std::string>* index, const std::vector<std::string>& arr) {
+assert_reverse(ScalarIndex<std::string>* index,
+               const std::vector<std::string>& arr) {
     for (size_t offset = 0; offset < arr.size(); ++offset) {
         ASSERT_TRUE(arr[offset].compare(index->Reverse_Lookup(offset)) == 0);
     }
@@ -151,7 +153,8 @@ assert_reverse(ScalarIndex<std::string>* index, const std::vector<std::string>& 
 
 template <>
 inline void
-assert_in(ScalarIndex<std::string>* index, const std::vector<std::string>& arr) {
+assert_in(ScalarIndex<std::string>* index,
+          const std::vector<std::string>& arr) {
     auto bitset1 = index->In(arr.size(), arr.data());
     ASSERT_EQ(arr.size(), bitset1->size());
     ASSERT_TRUE(bitset1->any());
@@ -159,7 +162,8 @@ assert_in(ScalarIndex<std::string>* index, const std::vector<std::string>& arr) 
 
 template <>
 inline void
-assert_not_in(ScalarIndex<std::string>* index, const std::vector<std::string>& arr) {
+assert_not_in(ScalarIndex<std::string>* index,
+              const std::vector<std::string>& arr) {
     auto bitset1 = index->NotIn(arr.size(), arr.data());
     ASSERT_EQ(arr.size(), bitset1->size());
     ASSERT_TRUE(bitset1->none());
@@ -167,7 +171,8 @@ assert_not_in(ScalarIndex<std::string>* index, const std::vector<std::string>& a
 
 template <>
 inline void
-assert_range(ScalarIndex<std::string>* index, const std::vector<std::string>& arr) {
+assert_range(ScalarIndex<std::string>* index,
+             const std::vector<std::string>& arr) {
     auto test_min = arr[0];
     auto test_max = arr[arr.size() - 1];
 

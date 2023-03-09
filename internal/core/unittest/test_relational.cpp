@@ -23,22 +23,36 @@ TEST(Relational, Basic) {
     std::string s = "str4";
     std::string another_s = "str5";
 
-    ASSERT_EQ(Relational<decltype(std::equal_to<>{})>()(i64, another_i64), i64 == another_i64);
-    ASSERT_EQ(Relational<decltype(std::not_equal_to<>{})>()(i64, another_i64), i64 != another_i64);
-    ASSERT_EQ(Relational<decltype(std::greater_equal<>{})>()(i64, another_i64), i64 >= another_i64);
-    ASSERT_EQ(Relational<decltype(std::greater<>{})>()(i64, another_i64), i64 > another_i64);
-    ASSERT_EQ(Relational<decltype(std::less_equal<>{})>()(i64, another_i64), i64 <= another_i64);
-    ASSERT_EQ(Relational<decltype(std::less<>{})>()(i64, another_i64), i64 < another_i64);
+    ASSERT_EQ(Relational<decltype(std::equal_to<>{})>()(i64, another_i64),
+              i64 == another_i64);
+    ASSERT_EQ(Relational<decltype(std::not_equal_to<>{})>()(i64, another_i64),
+              i64 != another_i64);
+    ASSERT_EQ(Relational<decltype(std::greater_equal<>{})>()(i64, another_i64),
+              i64 >= another_i64);
+    ASSERT_EQ(Relational<decltype(std::greater<>{})>()(i64, another_i64),
+              i64 > another_i64);
+    ASSERT_EQ(Relational<decltype(std::less_equal<>{})>()(i64, another_i64),
+              i64 <= another_i64);
+    ASSERT_EQ(Relational<decltype(std::less<>{})>()(i64, another_i64),
+              i64 < another_i64);
 
-    ASSERT_EQ(Relational<decltype(std::equal_to<>{})>()(s, another_s), s == another_s);
-    ASSERT_EQ(Relational<decltype(std::not_equal_to<>{})>()(s, another_s), s != another_s);
-    ASSERT_EQ(Relational<decltype(std::greater_equal<>{})>()(s, another_s), s >= another_s);
-    ASSERT_EQ(Relational<decltype(std::greater<>{})>()(s, another_s), s > another_s);
-    ASSERT_EQ(Relational<decltype(std::less_equal<>{})>()(s, another_s), s <= another_s);
-    ASSERT_EQ(Relational<decltype(std::less<>{})>()(s, another_s), s < another_s);
-    ASSERT_EQ(Relational<decltype(MatchOp<milvus::OpType::PrefixMatch>{})>()(s, another_s),
+    ASSERT_EQ(Relational<decltype(std::equal_to<>{})>()(s, another_s),
+              s == another_s);
+    ASSERT_EQ(Relational<decltype(std::not_equal_to<>{})>()(s, another_s),
+              s != another_s);
+    ASSERT_EQ(Relational<decltype(std::greater_equal<>{})>()(s, another_s),
+              s >= another_s);
+    ASSERT_EQ(Relational<decltype(std::greater<>{})>()(s, another_s),
+              s > another_s);
+    ASSERT_EQ(Relational<decltype(std::less_equal<>{})>()(s, another_s),
+              s <= another_s);
+    ASSERT_EQ(Relational<decltype(std::less<>{})>()(s, another_s),
+              s < another_s);
+    ASSERT_EQ(Relational<decltype(MatchOp<milvus::OpType::PrefixMatch>{})>()(
+                  s, another_s),
               milvus::PrefixMatch(s, another_s));
-    ASSERT_EQ(Relational<decltype(MatchOp<milvus::OpType::PostfixMatch>{})>()(s, another_s),
+    ASSERT_EQ(Relational<decltype(MatchOp<milvus::OpType::PostfixMatch>{})>()(
+                  s, another_s),
               milvus::PostfixMatch(s, another_s));
 }
 
@@ -49,10 +63,13 @@ TEST(Relational, DifferentFundamentalType) {
     int64_t i64 = 4;
 
     ASSERT_EQ(Relational<decltype(std::equal_to<>{})>()(i64, i32), i64 == i32);
-    ASSERT_EQ(Relational<decltype(std::not_equal_to<>{})>()(i64, i32), i64 != i32);
-    ASSERT_EQ(Relational<decltype(std::greater_equal<>{})>()(i64, i32), i64 >= i32);
+    ASSERT_EQ(Relational<decltype(std::not_equal_to<>{})>()(i64, i32),
+              i64 != i32);
+    ASSERT_EQ(Relational<decltype(std::greater_equal<>{})>()(i64, i32),
+              i64 >= i32);
     ASSERT_EQ(Relational<decltype(std::greater<>{})>()(i64, i32), i64 > i32);
-    ASSERT_EQ(Relational<decltype(std::less_equal<>{})>()(i64, i32), i64 <= i32);
+    ASSERT_EQ(Relational<decltype(std::less_equal<>{})>()(i64, i32),
+              i64 <= i32);
     ASSERT_EQ(Relational<decltype(std::less<>{})>()(i64, i32), i64 < i32);
 }
 
@@ -68,8 +85,11 @@ TEST(Relational, DifferentInCompatibleType) {
     ASSERT_ANY_THROW(Relational<decltype(std::greater<>{})>()(s, i64));
     ASSERT_ANY_THROW(Relational<decltype(std::less_equal<>{})>()(s, i64));
     ASSERT_ANY_THROW(Relational<decltype(std::less<>{})>()(s, i64));
-    ASSERT_ANY_THROW(Relational<decltype(MatchOp<milvus::OpType::PrefixMatch>{})>()(s, i64));
-    ASSERT_ANY_THROW(Relational<decltype(MatchOp<milvus::OpType::PostfixMatch>{})>()(s, i64));
+    ASSERT_ANY_THROW(
+        Relational<decltype(MatchOp<milvus::OpType::PrefixMatch>{})>()(s, i64));
+    ASSERT_ANY_THROW(
+        Relational<decltype(MatchOp<milvus::OpType::PostfixMatch>{})>()(s,
+                                                                        i64));
 
     ASSERT_ANY_THROW(Relational<decltype(std::equal_to<>{})>()(i64, s));
     ASSERT_ANY_THROW(Relational<decltype(std::not_equal_to<>{})>()(i64, s));
@@ -77,6 +97,9 @@ TEST(Relational, DifferentInCompatibleType) {
     ASSERT_ANY_THROW(Relational<decltype(std::greater<>{})>()(i64, s));
     ASSERT_ANY_THROW(Relational<decltype(std::less_equal<>{})>()(i64, s));
     ASSERT_ANY_THROW(Relational<decltype(std::less<>{})>()(i64, s));
-    ASSERT_ANY_THROW(Relational<decltype(MatchOp<milvus::OpType::PrefixMatch>{})>()(i64, s));
-    ASSERT_ANY_THROW(Relational<decltype(MatchOp<milvus::OpType::PostfixMatch>{})>()(i64, s));
+    ASSERT_ANY_THROW(
+        Relational<decltype(MatchOp<milvus::OpType::PrefixMatch>{})>()(i64, s));
+    ASSERT_ANY_THROW(
+        Relational<decltype(MatchOp<milvus::OpType::PostfixMatch>{})>()(i64,
+                                                                        s));
 }

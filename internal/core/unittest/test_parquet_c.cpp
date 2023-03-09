@@ -25,7 +25,8 @@ namespace wrapper = milvus::storage;
 
 static void
 WriteToFile(CBuffer cb) {
-    auto data_file = std::ofstream("/tmp/wrapper_test_data.dat", std::ios::binary);
+    auto data_file =
+        std::ofstream("/tmp/wrapper_test_data.dat", std::ios::binary);
     data_file.write(cb.data, cb.length);
     data_file.close();
 }
@@ -40,7 +41,8 @@ ReadFromFile() {
 
     std::shared_ptr<arrow::Table> table;
     std::unique_ptr<parquet::arrow::FileReader> reader;
-    auto st = parquet::arrow::OpenFile(infile, arrow::default_memory_pool(), &reader);
+    auto st =
+        parquet::arrow::OpenFile(infile, arrow::default_memory_pool(), &reader);
     if (!st.ok())
         return nullptr;
     st = reader->ReadTable(&table);
@@ -64,12 +66,14 @@ TEST(storage, inoutstream) {
     ASSERT_NE(table, nullptr);
 
     auto os = std::make_shared<milvus::storage::PayloadOutputStream>();
-    st = parquet::arrow::WriteTable(*table, arrow::default_memory_pool(), os, 1024);
+    st = parquet::arrow::WriteTable(
+        *table, arrow::default_memory_pool(), os, 1024);
     ASSERT_TRUE(st.ok());
 
     const uint8_t* buf = os->Buffer().data();
     int64_t buf_size = os->Buffer().size();
-    auto is = std::make_shared<milvus::storage::PayloadInputStream>(buf, buf_size);
+    auto is =
+        std::make_shared<milvus::storage::PayloadInputStream>(buf, buf_size);
 
     std::shared_ptr<arrow::Table> intable;
     std::unique_ptr<parquet::arrow::FileReader> reader;
@@ -104,7 +108,8 @@ TEST(storage, boolean) {
     auto nums = GetPayloadLengthFromWriter(payload);
     ASSERT_EQ(nums, 4);
 
-    auto reader = NewPayloadReader(int(milvus::DataType::BOOL), (uint8_t*)cb.data, cb.length);
+    auto reader = NewPayloadReader(
+        int(milvus::DataType::BOOL), (uint8_t*)cb.data, cb.length);
     bool* values;
     int length = GetPayloadLengthFromReader(reader);
     ASSERT_EQ(length, 4);
@@ -119,46 +124,77 @@ TEST(storage, boolean) {
     ReleasePayloadReader(reader);
 }
 
-#define NUMERIC_TEST(TEST_NAME, COLUMN_TYPE, DATA_TYPE, ADD_FUNC, GET_FUNC, ARRAY_TYPE) \
-    TEST(wrapper, TEST_NAME) {                                                          \
-        auto payload = NewPayloadWriter(COLUMN_TYPE);                                   \
-        DATA_TYPE data[] = {-1, 1, -100, 100};                                          \
-                                                                                        \
-        auto st = ADD_FUNC(payload, data, 4);                                           \
-        ASSERT_EQ(st.error_code, ErrorCode::Success);                                   \
-        st = FinishPayloadWriter(payload);                                              \
-        ASSERT_EQ(st.error_code, ErrorCode::Success);                                   \
-        auto cb = GetPayloadBufferFromWriter(payload);                                  \
-        ASSERT_GT(cb.length, 0);                                                        \
-        ASSERT_NE(cb.data, nullptr);                                                    \
-        auto nums = GetPayloadLengthFromWriter(payload);                                \
-        ASSERT_EQ(nums, 4);                                                             \
-                                                                                        \
-        auto reader = NewPayloadReader(COLUMN_TYPE, (uint8_t*)cb.data, cb.length);      \
-        DATA_TYPE* values;                                                              \
-        int length;                                                                     \
-        st = GET_FUNC(reader, &values, &length);                                        \
-        ASSERT_EQ(st.error_code, ErrorCode::Success);                                   \
-        ASSERT_NE(values, nullptr);                                                     \
-        ASSERT_EQ(length, 4);                                                           \
-        length = GetPayloadLengthFromReader(reader);                                    \
-        ASSERT_EQ(length, 4);                                                           \
-                                                                                        \
-        for (int i = 0; i < length; i++) {                                              \
-            ASSERT_EQ(data[i], values[i]);                                              \
-        }                                                                               \
-                                                                                        \
-        ReleasePayloadWriter(payload);                                                  \
-        ReleasePayloadReader(reader);                                                   \
+#define NUMERIC_TEST(                                                    \
+    TEST_NAME, COLUMN_TYPE, DATA_TYPE, ADD_FUNC, GET_FUNC, ARRAY_TYPE)   \
+    TEST(wrapper, TEST_NAME) {                                           \
+        auto payload = NewPayloadWriter(COLUMN_TYPE);                    \
+        DATA_TYPE data[] = {-1, 1, -100, 100};                           \
+                                                                         \
+        auto st = ADD_FUNC(payload, data, 4);                            \
+        ASSERT_EQ(st.error_code, ErrorCode::Success);                    \
+        st = FinishPayloadWriter(payload);                               \
+        ASSERT_EQ(st.error_code, ErrorCode::Success);                    \
+        auto cb = GetPayloadBufferFromWriter(payload);                   \
+        ASSERT_GT(cb.length, 0);                                         \
+        ASSERT_NE(cb.data, nullptr);                                     \
+        auto nums = GetPayloadLengthFromWriter(payload);                 \
+        ASSERT_EQ(nums, 4);                                              \
+                                                                         \
+        auto reader =                                                    \
+            NewPayloadReader(COLUMN_TYPE, (uint8_t*)cb.data, cb.length); \
+        DATA_TYPE* values;                                               \
+        int length;                                                      \
+        st = GET_FUNC(reader, &values, &length);                         \
+        ASSERT_EQ(st.error_code, ErrorCode::Success);                    \
+        ASSERT_NE(values, nullptr);                                      \
+        ASSERT_EQ(length, 4);                                            \
+        length = GetPayloadLengthFromReader(reader);                     \
+        ASSERT_EQ(length, 4);                                            \
+                                                                         \
+        for (int i = 0; i < length; i++) {                               \
+            ASSERT_EQ(data[i], values[i]);                               \
+        }                                                                \
+                                                                         \
+        ReleasePayloadWriter(payload);                                   \
+        ReleasePayloadReader(reader);                                    \
     }
 
-NUMERIC_TEST(int8, int(milvus::DataType::INT8), int8_t, AddInt8ToPayload, GetInt8FromPayload, arrow::Int8Array)
-NUMERIC_TEST(int16, int(milvus::DataType::INT16), int16_t, AddInt16ToPayload, GetInt16FromPayload, arrow::Int16Array)
-NUMERIC_TEST(int32, int(milvus::DataType::INT32), int32_t, AddInt32ToPayload, GetInt32FromPayload, arrow::Int32Array)
-NUMERIC_TEST(int64, int(milvus::DataType::INT64), int64_t, AddInt64ToPayload, GetInt64FromPayload, arrow::Int64Array)
-NUMERIC_TEST(float32, int(milvus::DataType::FLOAT), float, AddFloatToPayload, GetFloatFromPayload, arrow::FloatArray)
-NUMERIC_TEST(
-    float64, int(milvus::DataType::DOUBLE), double, AddDoubleToPayload, GetDoubleFromPayload, arrow::DoubleArray)
+NUMERIC_TEST(int8,
+             int(milvus::DataType::INT8),
+             int8_t,
+             AddInt8ToPayload,
+             GetInt8FromPayload,
+             arrow::Int8Array)
+NUMERIC_TEST(int16,
+             int(milvus::DataType::INT16),
+             int16_t,
+             AddInt16ToPayload,
+             GetInt16FromPayload,
+             arrow::Int16Array)
+NUMERIC_TEST(int32,
+             int(milvus::DataType::INT32),
+             int32_t,
+             AddInt32ToPayload,
+             GetInt32FromPayload,
+             arrow::Int32Array)
+NUMERIC_TEST(int64,
+             int(milvus::DataType::INT64),
+             int64_t,
+             AddInt64ToPayload,
+             GetInt64FromPayload,
+             arrow::Int64Array)
+NUMERIC_TEST(float32,
+             int(milvus::DataType::FLOAT),
+             float,
+             AddFloatToPayload,
+             GetFloatFromPayload,
+             arrow::FloatArray)
+NUMERIC_TEST(float64,
+             int(milvus::DataType::DOUBLE),
+             double,
+             AddDoubleToPayload,
+             GetDoubleFromPayload,
+             arrow::DoubleArray)
 
 TEST(storage, stringarray) {
     auto payload = NewPayloadWriter(int(milvus::DataType::VARCHAR));
@@ -179,7 +215,8 @@ TEST(storage, stringarray) {
     auto nums = GetPayloadLengthFromWriter(payload);
     ASSERT_EQ(nums, 3);
 
-    auto reader = NewPayloadReader(int(milvus::DataType::VARCHAR), (uint8_t*)cb.data, cb.length);
+    auto reader = NewPayloadReader(
+        int(milvus::DataType::VARCHAR), (uint8_t*)cb.data, cb.length);
     int length = GetPayloadLengthFromReader(reader);
     ASSERT_EQ(length, 3);
     char *v0, *v1, *v2;
@@ -214,7 +251,8 @@ TEST(storage, stringarray) {
 
 TEST(storage, binary_vector) {
     int DIM = 16;
-    auto payload = NewVectorPayloadWriter(int(milvus::DataType::VECTOR_BINARY), DIM);
+    auto payload =
+        NewVectorPayloadWriter(int(milvus::DataType::VECTOR_BINARY), DIM);
     uint8_t data[] = {0xF1, 0xF2, 0xF3, 0xF4, 0xF5, 0xF6, 0xF7, 0xF8};
 
     auto st = AddBinaryVectorToPayload(payload, data, 16, 4);
@@ -227,7 +265,8 @@ TEST(storage, binary_vector) {
     auto nums = GetPayloadLengthFromWriter(payload);
     ASSERT_EQ(nums, 4);
 
-    auto reader = NewPayloadReader(int(milvus::DataType::VECTOR_BINARY), (uint8_t*)cb.data, cb.length);
+    auto reader = NewPayloadReader(
+        int(milvus::DataType::VECTOR_BINARY), (uint8_t*)cb.data, cb.length);
     uint8_t* values;
     int length;
     int dim;
@@ -249,7 +288,8 @@ TEST(storage, binary_vector) {
 
 TEST(storage, binary_vector_empty) {
     int DIM = 16;
-    auto payload = NewVectorPayloadWriter(int(milvus::DataType::VECTOR_BINARY), DIM);
+    auto payload =
+        NewVectorPayloadWriter(int(milvus::DataType::VECTOR_BINARY), DIM);
     auto st = FinishPayloadWriter(payload);
     ASSERT_EQ(st.error_code, ErrorCode::Success);
     auto cb = GetPayloadBufferFromWriter(payload);
@@ -257,7 +297,8 @@ TEST(storage, binary_vector_empty) {
     //    ASSERT_EQ(cb.data, nullptr);
     auto nums = GetPayloadLengthFromWriter(payload);
     ASSERT_EQ(nums, 0);
-    auto reader = NewPayloadReader(int(milvus::DataType::VECTOR_BINARY), (uint8_t*)cb.data, cb.length);
+    auto reader = NewPayloadReader(
+        int(milvus::DataType::VECTOR_BINARY), (uint8_t*)cb.data, cb.length);
     ASSERT_EQ(0, GetPayloadLengthFromReader(reader));
     //    ASSERT_EQ(reader, nullptr);
     ReleasePayloadWriter(payload);
@@ -266,7 +307,8 @@ TEST(storage, binary_vector_empty) {
 
 TEST(storage, float_vector) {
     int DIM = 2;
-    auto payload = NewVectorPayloadWriter(int(milvus::DataType::VECTOR_FLOAT), DIM);
+    auto payload =
+        NewVectorPayloadWriter(int(milvus::DataType::VECTOR_FLOAT), DIM);
     float data[] = {1, 2, 3, 4, 5, 6, 7, 8};
 
     auto st = AddFloatVectorToPayload(payload, data, DIM, 4);
@@ -279,7 +321,8 @@ TEST(storage, float_vector) {
     auto nums = GetPayloadLengthFromWriter(payload);
     ASSERT_EQ(nums, 4);
 
-    auto reader = NewPayloadReader(int(milvus::DataType::VECTOR_FLOAT), (uint8_t*)cb.data, cb.length);
+    auto reader = NewPayloadReader(
+        int(milvus::DataType::VECTOR_FLOAT), (uint8_t*)cb.data, cb.length);
     float* values;
     int length;
     int dim;
@@ -301,7 +344,8 @@ TEST(storage, float_vector) {
 
 TEST(storage, float_vector_empty) {
     int DIM = 2;
-    auto payload = NewVectorPayloadWriter(int(milvus::DataType::VECTOR_FLOAT), DIM);
+    auto payload =
+        NewVectorPayloadWriter(int(milvus::DataType::VECTOR_FLOAT), DIM);
     auto st = FinishPayloadWriter(payload);
     ASSERT_EQ(st.error_code, ErrorCode::Success);
     auto cb = GetPayloadBufferFromWriter(payload);
@@ -309,7 +353,8 @@ TEST(storage, float_vector_empty) {
     //    ASSERT_EQ(cb.data, nullptr);
     auto nums = GetPayloadLengthFromWriter(payload);
     ASSERT_EQ(nums, 0);
-    auto reader = NewPayloadReader(int(milvus::DataType::VECTOR_FLOAT), (uint8_t*)cb.data, cb.length);
+    auto reader = NewPayloadReader(
+        int(milvus::DataType::VECTOR_FLOAT), (uint8_t*)cb.data, cb.length);
     ASSERT_EQ(0, GetPayloadLengthFromReader(reader));
     //    ASSERT_EQ(reader, nullptr);
     ReleasePayloadWriter(payload);
