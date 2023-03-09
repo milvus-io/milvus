@@ -804,7 +804,7 @@ func TestPasswordVerify(t *testing.T) {
 }
 
 func TestValidateTravelTimestamp(t *testing.T) {
-	Params.Init()
+	Params.InitOnce()
 	originalRetentionDuration := Params.CommonCfg.RetentionDuration
 	defer func() {
 		Params.CommonCfg.RetentionDuration = originalRetentionDuration

@@ -151,7 +151,7 @@ func TestProxy_CheckHealth(t *testing.T) {
 }
 
 func TestProxy_ResourceGroup(t *testing.T) {
-	Params.Init()
+	Params.InitOnce()
 
 	factory := dependency.NewDefaultFactory(true)
 	ctx := context.Background()

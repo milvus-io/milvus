@@ -15,6 +15,7 @@ import (
 // validAuth validates the authentication
 func TestValidAuth(t *testing.T) {
 	ctx := context.Background()
+	Params.InitOnce()
 	// no metadata
 	res := validAuth(ctx, nil)
 	assert.False(t, res)

@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
@@ -742,4 +743,102 @@ func TestMetaCache_RemoveCollection(t *testing.T) {
 	assert.True(t, info.isLoaded)
 	// shouldn't access RootCoord again
 	assert.Equal(t, rootCoord.GetAccessCount(), 3)
+}
+
+func TestMetaCache_ExpireShardLeaderCache(t *testing.T) {
+	ctx := context.Background()
+	rootCoord := &MockRootCoordClientInterface{}
+	queryCoord := &types.MockQueryCoord{}
+	shardMgr := newShardClientMgr()
+
+	Params.InitOnce()
+	Params.ProxyCfg.ShardLeaderCacheInterval.Store(time.Duration(1) * time.Second)
+	err := InitMetaCache(ctx, rootCoord, queryCoord, shardMgr)
+	assert.Nil(t, err)
+
+	queryCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		CollectionIDs:       []UniqueID{1},
+		InMemoryPercentages: []int64{100},
+	}, nil)
+
+	queryCoord.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		Shards: []*querypb.ShardLeadersList{
+			{
+				ChannelName: "channel-1",
+				NodeIds:     []int64{1, 2, 3},
+				NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
+			},
+		},
+	}, nil).Times(1)
+	nodeInfos, err := globalMetaCache.GetShards(ctx, true, "collection1")
+	assert.NoError(t, err)
+	assert.Len(t, nodeInfos["channel-1"], 3)
+
+	queryCoord.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		Shards: []*querypb.ShardLeadersList{
+			{
+				ChannelName: "channel-1",
+				NodeIds:     []int64{1, 2},
+				NodeAddrs:   []string{"localhost:9000", "localhost:9001"},
+			},
+		},
+	}, nil).Times(1)
+
+	assert.Eventually(t, func() bool {
+		nodeInfos, err := globalMetaCache.GetShards(ctx, true, "collection1")
+		assert.NoError(t, err)
+		return assert.Len(t, nodeInfos["channel-1"], 2)
+	}, 3*time.Second, 1*time.Second)
+
+	queryCoord.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		Shards: []*querypb.ShardLeadersList{
+			{
+				ChannelName: "channel-1",
+				NodeIds:     []int64{1, 2, 3},
+				NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
+			},
+		},
+	}, nil).Times(1)
+
+	assert.Eventually(t, func() bool {
+		nodeInfos, err := globalMetaCache.GetShards(ctx, true, "collection1")
+		assert.NoError(t, err)
+		return assert.Len(t, nodeInfos["channel-1"], 3)
+	}, 3*time.Second, 1*time.Second)
+
+	queryCoord.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		Shards: []*querypb.ShardLeadersList{
+			{
+				ChannelName: "channel-1",
+				NodeIds:     []int64{1, 2, 3},
+				NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
+			},
+			{
+				ChannelName: "channel-2",
+				NodeIds:     []int64{1, 2, 3},
+				NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
+			},
+		},
+	}, nil).Times(1)
+
+	assert.Eventually(t, func() bool {
+		nodeInfos, err := globalMetaCache.GetShards(ctx, true, "collection1")
+		assert.NoError(t, err)
+		return assert.Len(t, nodeInfos["channel-1"], 3) && assert.Len(t, nodeInfos["channel-2"], 3)
+	}, 3*time.Second, 1*time.Second)
 }
