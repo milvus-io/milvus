@@ -145,9 +145,9 @@ func (h *ServerHandler) GetQueryVChanPositions(channel *channel, partitionID Uni
 		for id := range unIndexedIDs {
 			// Indexed segments are compacted to a raw segment,
 			// replace it with the indexed ones
-			if len(segmentInfos[id].GetCompactionFrom()) > 0 {
+			if segment, ok := segmentInfos[id]; ok && len(segment.GetCompactionFrom()) > 0 {
 				unIndexedIDs.Remove(id)
-				for _, segID := range segmentInfos[id].GetCompactionFrom() {
+				for _, segID := range segment.GetCompactionFrom() {
 					if indexed.Contain(segID) {
 						indexedIDs.Insert(segID)
 					} else {
@@ -155,7 +155,7 @@ func (h *ServerHandler) GetQueryVChanPositions(channel *channel, partitionID Uni
 						hasUnIndexed = true
 					}
 				}
-				droppedIDs.Remove(segmentInfos[id].GetCompactionFrom()...)
+				droppedIDs.Remove(segment.GetCompactionFrom()...)
 			}
 		}
 	}
