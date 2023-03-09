@@ -42,7 +42,7 @@
 
 namespace milvus::storage {
 
-enum RemoteStorageType { STORAGE_S3 = 0, STORAGE_GOOGLE_CLOUD = 1 };
+enum class RemoteStorageType { S3 = 0, GOOGLE_CLOUD = 1, ALIYUN_CLOUD = 2 };
 typedef enum RemoteStorageType RemoteStorageType;
 
 /**
@@ -114,7 +114,7 @@ class MinioChunkManager : public RemoteChunkManager {
     std::vector<std::string>
     ListBuckets();
 
- private:
+ public:
     bool
     ObjectExists(const std::string& bucket_name, const std::string& object_name);
     int64_t
@@ -135,6 +135,8 @@ class MinioChunkManager : public RemoteChunkManager {
     BuildS3Client(const StorageConfig& storage_config, const Aws::Client::ClientConfiguration& config);
     void
     BuildGoogleCloudClient(const StorageConfig& storage_config, const Aws::Client::ClientConfiguration& config);
+    void
+    BuildAliyunCloudClient(const StorageConfig& storage_config, const Aws::Client::ClientConfiguration& config);
 
  private:
     Aws::SDKOptions sdk_options_;
