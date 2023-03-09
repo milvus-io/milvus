@@ -19,15 +19,17 @@ package server
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"sync"
 
 	"github.com/cockroachdb/errors"
-
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/cdc/core/model"
 	"github.com/milvus-io/milvus/cdc/core/reader"
 	"github.com/milvus-io/milvus/cdc/core/util"
 	"github.com/milvus-io/milvus/cdc/core/writer"
 	"github.com/milvus-io/milvus/cdc/server/model/meta"
+	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"go.uber.org/zap"
 )
 
@@ -40,6 +42,7 @@ type signal struct {
 }
 
 type CDCTask struct {
+	id            string
 	factory       CDCFactory
 	callback      writer.WriteCallback
 	writeFailFunc func() error
@@ -48,8 +51,9 @@ type CDCTask struct {
 	workingLock   sync.Mutex
 }
 
-func NewCdcTask(f CDCFactory, c writer.WriteCallback, w func() error) *CDCTask {
+func NewCdcTask(taskID string, f CDCFactory, c writer.WriteCallback, w func() error) *CDCTask {
 	task := &CDCTask{
+		id:            taskID,
 		factory:       f,
 		callback:      c,
 		writeFailFunc: w,
@@ -152,6 +156,24 @@ func (c *CDCTask) work(done <-chan struct{}, cdcReader reader.CDCReader, cdcWrit
 
 	dataChan := cdcReader.StartRead(context.Background())
 	writeData := func(data *model.CDCData) {
+		var msgType string
+		var count int
+		var collectionID int64
+		if data.Msg.Type() == commonpb.MsgType_Insert {
+			msg := data.Msg.(*msgstream.InsertMsg)
+			msgType = commonpb.MsgType_Insert.String()
+			count = len(msg.RowIDs)
+			collectionID = msg.CollectionID
+		} else if data.Msg.Type() == commonpb.MsgType_Delete {
+			msg := data.Msg.(*msgstream.DeleteMsg)
+			msgType = commonpb.MsgType_Delete.String()
+			count = int(msg.NumRows)
+			collectionID = msg.CollectionID
+		}
+		if msgType != "" {
+			readMsgRowCountVec.WithLabelValues(c.id, strconv.FormatInt(collectionID, 10), msgType).Add(float64(count))
+		}
+
 		if err := cdcWriter.Write(context.Background(), data, c.callback); err != nil {
 			log.Warn("fail to write the data", zap.Any("data", data), zap.Error(err))
 			err = <-c.Pause(c.writeFailFunc)
@@ -197,6 +219,9 @@ func (c *CDCTask) handleDone(d chan error, err error) {
 
 func (c *CDCTask) stateCheck(state meta.TaskState) error {
 	currentState := c.current.Load()
+	if currentState == state {
+		return fmt.Errorf("the current task state is similar to the target state, current state: %s", currentState.String())
+	}
 	if state == meta.TaskStatePaused && currentState != meta.TaskStateRunning {
 		return fmt.Errorf("the task state isn't running, current state: %s", currentState.String())
 	}

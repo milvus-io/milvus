@@ -19,10 +19,10 @@ package writer
 import (
 	"context"
 
-	"github.com/milvus-io/milvus/cdc/core/util"
-
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/cdc/core/model"
+	"github.com/milvus-io/milvus/cdc/core/util"
+	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 )
 
 //go:generate mockery --name=CDCWriter --filename=cdc_writer_mock.go --output=../mocks
@@ -46,8 +46,10 @@ func (d *DefaultWriter) Flush(context context.Context) {
 }
 
 type CallbackChannelInfo struct {
-	Position *commonpb.KeyDataPair
-	Ts       uint64
+	Position    *commonpb.KeyDataPair
+	MsgType     msgstream.MsgType
+	MsgRowCount int
+	Ts          uint64
 }
 
 //go:generate mockery --name=WriteCallback --filename=write_callbakc_mock.go --output=../mocks

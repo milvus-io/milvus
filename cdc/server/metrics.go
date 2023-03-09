@@ -57,6 +57,7 @@ const (
 	vchannelLabelName                  = "vchannel_name"
 	readFailFuncLabelName              = "read_fail_func"
 	streamingCollectionStatusLabelName = "streaming_collection_status"
+	messageTypeLabelName               = "msg_type"
 )
 
 var (
@@ -106,7 +107,6 @@ var (
 		Help:      "the fail count when the writer executes the callback function",
 	}, []string{taskIDLabelName, writeFailFuncLabelName})
 
-	// TODO fubang
 	writerTimeDifferenceVec = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
@@ -114,7 +114,18 @@ var (
 			Name:      "writer_tt_lag_ms",
 			Help:      "the time difference between the current time and the current message timestamp",
 		}, []string{taskIDLabelName, collectionIDLabelName, vchannelLabelName})
-	// TODO fubang diff offset
+	readMsgRowCountVec = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: milvusNamespace,
+		Subsystem: systemName,
+		Name:      "read_msg_row_total",
+		Help:      "the counter of messages that the reader has read",
+	}, []string{taskIDLabelName, collectionIDLabelName, messageTypeLabelName})
+	writeMsgRowCountVec = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: milvusNamespace,
+		Subsystem: systemName,
+		Name:      "write_msg_row_total",
+		Help:      "the counter of messages that the writer has written",
+	}, []string{taskIDLabelName, collectionIDLabelName, messageTypeLabelName})
 )
 
 func init() {
@@ -126,6 +137,8 @@ func init() {
 	registry.MustRegister(readerFailCountVec)
 	registry.MustRegister(writerFailCountVec)
 	registry.MustRegister(writerTimeDifferenceVec)
+	registry.MustRegister(readMsgRowCountVec)
+	registry.MustRegister(writeMsgRowCountVec)
 }
 
 func registerMetric() {

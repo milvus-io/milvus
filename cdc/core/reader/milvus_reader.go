@@ -18,6 +18,7 @@ package reader
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"math/rand"
 	"path"
@@ -25,7 +26,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/goccy/go-json"
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/msgpb"
@@ -179,8 +179,8 @@ func (reader *MilvusCollectionReader) goGetAllCollections() {
 		for _, info := range existedCollectionInfos {
 			if info.State == pb.CollectionState_CollectionCreated {
 				wg.Done()
+				go reader.readStreamData(info, false)
 			}
-			go reader.readStreamData(info, false)
 		}
 	}()
 	go func() {

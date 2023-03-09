@@ -225,7 +225,7 @@ func (c *CDCWriterTemplate) handleInsertBuffer(msg *msgstream.InsertMsg,
 		},
 		successes: []func(){
 			func() {
-				c.success(msg.CollectionID, collectionName, data, callback, positionFunc)
+				c.success(msg.CollectionID, collectionName, len(msg.RowIDs), data, callback, positionFunc)
 			},
 		},
 		fails: []func(err error){
@@ -281,7 +281,7 @@ func (c *CDCWriterTemplate) handleDeleteBuffer(msg *msgstream.DeleteMsg,
 		},
 		successes: []func(){
 			func() {
-				c.success(msg.CollectionID, collectionName, data, callback, positionFunc)
+				c.success(msg.CollectionID, collectionName, column.Len(), data, callback, positionFunc)
 			},
 		},
 		fails: []func(err error){
@@ -516,7 +516,8 @@ func (c *CDCWriterTemplate) fail(msg string, err error, data *model.CDCData,
 	c.errProtect.Inc()
 }
 
-func (c *CDCWriterTemplate) success(collectionID int64, collectionName string, data *model.CDCData, callback WriteCallback, positionFunc NotifyCollectionPositionChangeFunc) {
+func (c *CDCWriterTemplate) success(collectionID int64, collectionName string, rowCount int,
+	data *model.CDCData, callback WriteCallback, positionFunc NotifyCollectionPositionChangeFunc) {
 	position := data.Msg.Position()
 	kd := &commonpb.KeyDataPair{
 		Key:  position.ChannelName,
@@ -524,8 +525,10 @@ func (c *CDCWriterTemplate) success(collectionID int64, collectionName string, d
 	}
 	callback.OnSuccess(collectionID, map[string]CallbackChannelInfo{
 		position.ChannelName: {
-			Position: kd,
-			Ts:       data.Msg.EndTs(),
+			Position:    kd,
+			MsgType:     data.Msg.Type(),
+			MsgRowCount: rowCount,
+			Ts:          data.Msg.EndTs(),
 		},
 	})
 	if positionFunc != nil {

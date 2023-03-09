@@ -335,7 +335,7 @@ func (e *MetaCDC) newCdcTask(info *meta.TaskInfo) (*CDCTask, error) {
 
 	e.cdcTasks.Lock()
 	defer e.cdcTasks.Unlock()
-	task := NewCdcTask(e.factoryCreator(newReaderFunc, newWriterFunc), writeCallback, func() error {
+	task := NewCdcTask(info.TaskID, e.factoryCreator(newReaderFunc, newWriterFunc), writeCallback, func() error {
 		// update the meta task state
 		err := updateTaskState(e.etcdCli, e.rootPath, info.TaskID,
 			meta.TaskStatePaused, []meta.TaskState{meta.TaskStateRunning})
@@ -356,10 +356,7 @@ func (e *MetaCDC) Delete(req *request.DeleteRequest) (*request.DeleteResponse, e
 		return nil, NewClientError("not found the task, task_id: " + req.TaskID)
 	}
 
-	var (
-		resp *request.DeleteResponse
-		err  error
-	)
+	var err error
 
 	err = <-cdcTask.Terminate(func() error {
 		var info *meta.TaskInfo
@@ -376,7 +373,6 @@ func (e *MetaCDC) Delete(req *request.DeleteRequest) (*request.DeleteResponse, e
 		e.cdcTasks.Lock()
 		delete(e.cdcTasks.data, req.TaskID)
 		e.cdcTasks.Unlock()
-		resp = &request.DeleteResponse{}
 		return err
 	})
 
@@ -384,7 +380,7 @@ func (e *MetaCDC) Delete(req *request.DeleteRequest) (*request.DeleteResponse, e
 		return nil, NewServerError(errors.WithMessage(err, "fail to terminate the task, task_id: "+req.TaskID))
 	}
 
-	return resp, err
+	return &request.DeleteResponse{}, err
 }
 
 func (e *MetaCDC) Pause(req *request.PauseRequest) (*request.PauseResponse, error) {
@@ -395,10 +391,7 @@ func (e *MetaCDC) Pause(req *request.PauseRequest) (*request.PauseResponse, erro
 		return nil, NewClientError("not found the task, task_id: " + req.TaskID)
 	}
 
-	var (
-		resp *request.PauseResponse
-		err  error
-	)
+	var err error
 
 	err = <-cdcTask.Pause(func() error {
 		err = updateTaskState(e.etcdCli, e.rootPath, req.TaskID,
@@ -406,14 +399,13 @@ func (e *MetaCDC) Pause(req *request.PauseRequest) (*request.PauseResponse, erro
 		if err != nil {
 			return NewServerError(errors.WithMessage(err, "fail to update the task meta, task_id: "+req.TaskID))
 		}
-		resp = &request.PauseResponse{}
 		return nil
 	})
 	if err != nil {
 		return nil, NewServerError(errors.WithMessage(err, "fail to pause the task state, task_id: "+req.TaskID))
 	}
 
-	return resp, err
+	return &request.PauseResponse{}, err
 }
 
 func (e *MetaCDC) Resume(req *request.ResumeRequest) (*request.ResumeResponse, error) {
@@ -424,10 +416,7 @@ func (e *MetaCDC) Resume(req *request.ResumeRequest) (*request.ResumeResponse, e
 		return nil, NewClientError("not found the task, task_id: " + req.TaskID)
 	}
 
-	var (
-		resp *request.ResumeResponse
-		err  error
-	)
+	var err error
 
 	err = <-cdcTask.Resume(func() error {
 		err = updateTaskState(e.etcdCli, e.rootPath, req.TaskID,
@@ -435,14 +424,13 @@ func (e *MetaCDC) Resume(req *request.ResumeRequest) (*request.ResumeResponse, e
 		if err != nil {
 			return NewServerError(errors.WithMessage(err, "fail to update the task meta, task_id: "+req.TaskID))
 		}
-		resp = &request.ResumeResponse{}
 		return nil
 	})
 	if err != nil {
 		return nil, NewServerError(errors.WithMessage(err, "fail to resume the task state, task_id: "+req.TaskID))
 	}
 
-	return resp, err
+	return &request.ResumeResponse{}, err
 }
 
 func (e *MetaCDC) Get(req *request.GetRequest) (*request.GetResponse, error) {

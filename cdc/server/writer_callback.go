@@ -51,9 +51,20 @@ func (w *WriteCallback) OnFail(data *model.CDCData, err error) {
 }
 
 func (w *WriteCallback) OnSuccess(collectionID int64, channelInfos map[string]writer.CallbackChannelInfo) {
+	var msgType string
+	var count int
 	for channelName, info := range channelInfos {
+		if info.MsgType == commonpb.MsgType_Insert {
+			msgType = commonpb.MsgType_Insert.String()
+		} else if info.MsgType == commonpb.MsgType_Delete {
+			msgType = commonpb.MsgType_Delete.String()
+		}
+		count += info.MsgRowCount
 		sub := util.SubByNow(info.Ts)
 		writerTimeDifferenceVec.WithLabelValues(w.taskID, strconv.FormatInt(collectionID, 10), channelName).Set(float64(sub))
+	}
+	if msgType != "" {
+		writeMsgRowCountVec.WithLabelValues(w.taskID, strconv.FormatInt(collectionID, 10), msgType).Add(float64(count))
 	}
 	// means it's drop collection message
 	if len(channelInfos) > 1 {
