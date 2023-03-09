@@ -18,7 +18,6 @@ package task
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
@@ -31,6 +30,7 @@ import (
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/internal/util/merr"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
@@ -190,9 +190,10 @@ func (ex *Executor) processMergeTask(mergeTask *LoadSegmentsTask) {
 		log.Warn("failed to load segment, it may be a false failure", zap.Error(err))
 		return
 	}
-	if status.ErrorCode == commonpb.ErrorCode_InsufficientMemoryToLoad {
-		log.Warn("insufficient memory to load segment", zap.String("err", status.GetReason()))
-		task.SetErr(fmt.Errorf("%w, err:%s", ErrInsufficientMemory, status.GetReason()))
+	err = merr.Error(status)
+	if errors.Is(err, merr.ErrServiceMemoryLimitExceeded) {
+		log.Warn("insufficient memory to load segment", zap.Error(err))
+		task.SetErr(err)
 		task.Cancel()
 		return
 	}

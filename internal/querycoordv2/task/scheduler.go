@@ -24,7 +24,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -661,13 +660,7 @@ func (scheduler *taskScheduler) RemoveByNode(node int64) {
 }
 
 func (scheduler *taskScheduler) recordSegmentTaskError(task *SegmentTask) {
-	var errCode commonpb.ErrorCode
-	if errors.Is(task.Err(), ErrInsufficientMemory) {
-		errCode = commonpb.ErrorCode_InsufficientMemoryToLoad
-	} else {
-		errCode = commonpb.ErrorCode_UnexpectedError
-	}
-	meta.GlobalFailedLoadCache.Put(task.collectionID, errCode, task.Err())
+	meta.GlobalFailedLoadCache.Put(task.collectionID, task.Err())
 }
 
 func (scheduler *taskScheduler) remove(task Task) {

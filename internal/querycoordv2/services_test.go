@@ -19,7 +19,6 @@ package querycoordv2
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"testing"
 	"time"
 
@@ -41,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/etcd"
+	"github.com/milvus-io/milvus/internal/util/merr"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -199,7 +199,7 @@ func (suite *ServiceSuite) TestShowCollections() {
 	req := &querypb.ShowCollectionsRequest{}
 	resp, err := server.ShowCollections(ctx, req)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	suite.Equal(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	suite.Len(resp.CollectionIDs, collectionNum)
 	for _, collection := range suite.collections {
 		suite.Contains(resp.CollectionIDs, collection)
@@ -210,7 +210,7 @@ func (suite *ServiceSuite) TestShowCollections() {
 	req.CollectionIDs = []int64{collection}
 	resp, err = server.ShowCollections(ctx, req)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	suite.Equal(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	suite.Len(resp.CollectionIDs, 1)
 	suite.Equal(collection, resp.CollectionIDs[0])
 
@@ -218,7 +218,7 @@ func (suite *ServiceSuite) TestShowCollections() {
 	colBak := suite.meta.CollectionManager.GetCollection(collection)
 	err = suite.meta.CollectionManager.RemoveCollection(collection)
 	suite.NoError(err)
-	meta.GlobalFailedLoadCache.Put(collection, commonpb.ErrorCode_InsufficientMemoryToLoad, fmt.Errorf("mock insufficient memory reason"))
+	meta.GlobalFailedLoadCache.Put(collection, merr.WrapErrServiceMemoryLimitExceeded(100, 10))
 	resp, err = server.ShowCollections(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_InsufficientMemoryToLoad, resp.GetStatus().GetErrorCode())
@@ -230,7 +230,7 @@ func (suite *ServiceSuite) TestShowCollections() {
 	server.UpdateStateCode(commonpb.StateCode_Initializing)
 	resp, err = server.ShowCollections(ctx, req)
 	suite.NoError(err)
-	suite.Contains(resp.Status.Reason, ErrNotHealthy.Error())
+	suite.Contains(resp.GetStatus().GetReason(), ErrNotHealthy.Error())
 }
 
 func (suite *ServiceSuite) TestShowPartitions() {
@@ -248,7 +248,7 @@ func (suite *ServiceSuite) TestShowPartitions() {
 		}
 		resp, err := server.ShowPartitions(ctx, req)
 		suite.NoError(err)
-		suite.Equal(commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		suite.Equal(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		suite.Len(resp.PartitionIDs, partitionNum)
 		for _, partition := range partitions {
 			suite.Contains(resp.PartitionIDs, partition)
@@ -261,7 +261,7 @@ func (suite *ServiceSuite) TestShowPartitions() {
 		}
 		resp, err = server.ShowPartitions(ctx, req)
 		suite.NoError(err)
-		suite.Equal(commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		suite.Equal(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		suite.Len(resp.PartitionIDs, 1)
 		for _, partition := range partitions[0:1] {
 			suite.Contains(resp.PartitionIDs, partition)
@@ -272,7 +272,7 @@ func (suite *ServiceSuite) TestShowPartitions() {
 			colBak := suite.meta.CollectionManager.GetCollection(collection)
 			err = suite.meta.CollectionManager.RemoveCollection(collection)
 			suite.NoError(err)
-			meta.GlobalFailedLoadCache.Put(collection, commonpb.ErrorCode_InsufficientMemoryToLoad, fmt.Errorf("mock insufficient memory reason"))
+			meta.GlobalFailedLoadCache.Put(collection, merr.WrapErrServiceMemoryLimitExceeded(100, 10))
 			resp, err = server.ShowPartitions(ctx, req)
 			suite.NoError(err)
 			suite.Equal(commonpb.ErrorCode_InsufficientMemoryToLoad, resp.GetStatus().GetErrorCode())
@@ -284,7 +284,7 @@ func (suite *ServiceSuite) TestShowPartitions() {
 			parBak := suite.meta.CollectionManager.GetPartition(partitionID)
 			err = suite.meta.CollectionManager.RemovePartition(partitionID)
 			suite.NoError(err)
-			meta.GlobalFailedLoadCache.Put(collection, commonpb.ErrorCode_InsufficientMemoryToLoad, fmt.Errorf("mock insufficient memory reason"))
+			meta.GlobalFailedLoadCache.Put(collection, merr.WrapErrServiceMemoryLimitExceeded(100, 10))
 			resp, err = server.ShowPartitions(ctx, req)
 			suite.NoError(err)
 			suite.Equal(commonpb.ErrorCode_InsufficientMemoryToLoad, resp.GetStatus().GetErrorCode())
@@ -301,7 +301,7 @@ func (suite *ServiceSuite) TestShowPartitions() {
 	server.UpdateStateCode(commonpb.StateCode_Initializing)
 	resp, err := server.ShowPartitions(ctx, req)
 	suite.NoError(err)
-	suite.Contains(resp.Status.Reason, ErrNotHealthy.Error())
+	suite.Contains(resp.GetStatus().GetReason(), ErrNotHealthy.Error())
 }
 
 func (suite *ServiceSuite) TestLoadCollection() {
@@ -363,7 +363,7 @@ func (suite *ServiceSuite) TestResourceGroup() {
 	listRG := &milvuspb.ListResourceGroupsRequest{}
 	resp1, err := server.ListResourceGroups(ctx, listRG)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_Success, resp1.Status.ErrorCode)
+	suite.Equal(commonpb.ErrorCode_Success, resp1.GetStatus().GetErrorCode())
 	suite.Len(resp1.ResourceGroups, 2)
 
 	server.nodeMgr.Add(session.NewNodeInfo(1011, "localhost"))
@@ -398,7 +398,7 @@ func (suite *ServiceSuite) TestResourceGroup() {
 	}
 	resp2, err := server.DescribeResourceGroup(ctx, describeRG)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_Success, resp2.Status.ErrorCode)
+	suite.Equal(commonpb.ErrorCode_Success, resp2.GetStatus().GetErrorCode())
 	suite.Equal("rg11", resp2.GetResourceGroup().GetName())
 	suite.Equal(int32(2), resp2.GetResourceGroup().GetCapacity())
 	suite.Equal(int32(2), resp2.GetResourceGroup().GetNumAvailableNode())
@@ -416,7 +416,7 @@ func (suite *ServiceSuite) TestResourceGroup() {
 
 	resp4, err := server.ListResourceGroups(ctx, listRG)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_Success, resp4.Status.ErrorCode)
+	suite.Equal(commonpb.ErrorCode_Success, resp4.GetStatus().GetErrorCode())
 	suite.Len(resp4.GetResourceGroups(), 3)
 }
 
@@ -430,7 +430,7 @@ func (suite *ServiceSuite) TestResourceGroupFailed() {
 	}
 	resp, err := server.DescribeResourceGroup(ctx, describeRG)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_IllegalArgument, resp.Status.ErrorCode)
+	suite.Equal(commonpb.ErrorCode_IllegalArgument, resp.GetStatus().GetErrorCode())
 
 	// server unhealthy
 	server.status.Store(commonpb.StateCode_Abnormal)
@@ -446,14 +446,14 @@ func (suite *ServiceSuite) TestResourceGroupFailed() {
 	listRG := &milvuspb.ListResourceGroupsRequest{}
 	resp2, err := server.ListResourceGroups(ctx, listRG)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_UnexpectedError, resp2.Status.ErrorCode)
+	suite.Equal(commonpb.ErrorCode_UnexpectedError, resp2.GetStatus().GetErrorCode())
 
 	describeRG = &querypb.DescribeResourceGroupRequest{
 		ResourceGroup: "rg1",
 	}
 	resp3, err := server.DescribeResourceGroup(ctx, describeRG)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_UnexpectedError, resp3.Status.ErrorCode)
+	suite.Equal(commonpb.ErrorCode_UnexpectedError, resp3.GetStatus().GetErrorCode())
 
 	dropRG := &milvuspb.DropResourceGroupRequest{
 		ResourceGroup: "rg1",
@@ -464,7 +464,7 @@ func (suite *ServiceSuite) TestResourceGroupFailed() {
 
 	resp5, err := server.ListResourceGroups(ctx, listRG)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_UnexpectedError, resp5.Status.ErrorCode)
+	suite.Equal(commonpb.ErrorCode_UnexpectedError, resp5.GetStatus().GetErrorCode())
 }
 
 func (suite *ServiceSuite) TestTransferNode() {
@@ -1106,7 +1106,7 @@ func (suite *ServiceSuite) TestGetPartitionStates() {
 		}
 		resp, err := server.GetPartitionStates(ctx, req)
 		suite.NoError(err)
-		suite.Equal(commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		suite.Equal(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		suite.Len(resp.PartitionDescriptions, len(suite.partitions[collection]))
 	}
 
@@ -1117,7 +1117,7 @@ func (suite *ServiceSuite) TestGetPartitionStates() {
 	}
 	resp, err := server.GetPartitionStates(ctx, req)
 	suite.NoError(err)
-	suite.Contains(resp.Status.Reason, ErrNotHealthy.Error())
+	suite.Contains(resp.GetStatus().GetReason(), ErrNotHealthy.Error())
 }
 
 func (suite *ServiceSuite) TestGetSegmentInfo() {
@@ -1133,7 +1133,7 @@ func (suite *ServiceSuite) TestGetSegmentInfo() {
 		}
 		resp, err := server.GetSegmentInfo(ctx, req)
 		suite.NoError(err)
-		suite.Equal(commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		suite.Equal(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		suite.assertSegments(collection, resp.GetInfos())
 	}
 
@@ -1145,7 +1145,7 @@ func (suite *ServiceSuite) TestGetSegmentInfo() {
 		}
 		resp, err := server.GetSegmentInfo(ctx, req)
 		suite.NoError(err)
-		suite.Equal(commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		suite.Equal(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		suite.assertSegments(collection, resp.GetInfos())
 	}
 
@@ -1156,7 +1156,7 @@ func (suite *ServiceSuite) TestGetSegmentInfo() {
 	}
 	resp, err := server.GetSegmentInfo(ctx, req)
 	suite.NoError(err)
-	suite.Contains(resp.Status.Reason, ErrNotHealthy.Error())
+	suite.Contains(resp.GetStatus().GetReason(), ErrNotHealthy.Error())
 }
 
 func (suite *ServiceSuite) TestLoadBalance() {
@@ -1392,7 +1392,7 @@ func (suite *ServiceSuite) TestShowConfigurations() {
 	}
 	resp, err := server.ShowConfigurations(ctx, req)
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	suite.Equal(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	suite.Len(resp.Configuations, 1)
 	suite.Equal("querycoord.port", resp.Configuations[0].Key)
 
@@ -1403,7 +1403,7 @@ func (suite *ServiceSuite) TestShowConfigurations() {
 	}
 	resp, err = server.ShowConfigurations(ctx, req)
 	suite.NoError(err)
-	suite.Contains(resp.Status.Reason, ErrNotHealthy.Error())
+	suite.Contains(resp.GetStatus().GetReason(), ErrNotHealthy.Error())
 }
 
 func (suite *ServiceSuite) TestGetMetrics() {
@@ -1412,7 +1412,7 @@ func (suite *ServiceSuite) TestGetMetrics() {
 
 	for _, node := range suite.nodes {
 		suite.cluster.EXPECT().GetMetrics(ctx, node, mock.Anything).Return(&milvuspb.GetMetricsResponse{
-			Status:        successStatus,
+			Status:        merr.Status(nil),
 			ComponentName: "QueryNode",
 		}, nil)
 	}
@@ -1426,7 +1426,7 @@ func (suite *ServiceSuite) TestGetMetrics() {
 		Request: string(req),
 	})
 	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	suite.Equal(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 
 	// Test when server is not healthy
 	server.UpdateStateCode(commonpb.StateCode_Initializing)
@@ -1435,7 +1435,7 @@ func (suite *ServiceSuite) TestGetMetrics() {
 		Request: string(req),
 	})
 	suite.NoError(err)
-	suite.Contains(resp.Status.Reason, ErrNotHealthy.Error())
+	suite.Contains(resp.GetStatus().GetReason(), ErrNotHealthy.Error())
 }
 
 func (suite *ServiceSuite) TestGetReplicas() {
@@ -1450,7 +1450,7 @@ func (suite *ServiceSuite) TestGetReplicas() {
 		}
 		resp, err := server.GetReplicas(ctx, req)
 		suite.NoError(err)
-		suite.Equal(commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		suite.Equal(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		suite.EqualValues(suite.replicaNumber[collection], len(resp.Replicas))
 	}
 
@@ -1467,7 +1467,7 @@ func (suite *ServiceSuite) TestGetReplicas() {
 		}
 		resp, err := server.GetReplicas(ctx, req)
 		suite.NoError(err)
-		suite.Equal(commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		suite.Equal(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		suite.EqualValues(suite.replicaNumber[collection], len(resp.Replicas))
 	}
 
@@ -1478,7 +1478,7 @@ func (suite *ServiceSuite) TestGetReplicas() {
 	}
 	resp, err := server.GetReplicas(ctx, req)
 	suite.NoError(err)
-	suite.Contains(resp.Status.Reason, ErrNotHealthy.Error())
+	suite.Contains(resp.GetStatus().GetReason(), ErrNotHealthy.Error())
 }
 
 func (suite *ServiceSuite) TestCheckHealth() {
@@ -1537,7 +1537,7 @@ func (suite *ServiceSuite) TestGetShardLeaders() {
 		suite.fetchHeartbeats(time.Now())
 		resp, err := server.GetShardLeaders(ctx, req)
 		suite.NoError(err)
-		suite.Equal(commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+		suite.Equal(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		suite.Len(resp.Shards, len(suite.channels[collection]))
 		for _, shard := range resp.Shards {
 			suite.Len(shard.NodeIds, int(suite.replicaNumber[collection]))
@@ -1551,7 +1551,7 @@ func (suite *ServiceSuite) TestGetShardLeaders() {
 	}
 	resp, err := server.GetShardLeaders(ctx, req)
 	suite.NoError(err)
-	suite.Contains(resp.Status.Reason, ErrNotHealthy.Error())
+	suite.Contains(resp.GetStatus().GetReason(), ErrNotHealthy.Error())
 }
 
 func (suite *ServiceSuite) TestGetShardLeadersFailed() {
@@ -1573,7 +1573,7 @@ func (suite *ServiceSuite) TestGetShardLeadersFailed() {
 		}
 		resp, err := server.GetShardLeaders(ctx, req)
 		suite.NoError(err)
-		suite.Equal(commonpb.ErrorCode_NoReplicaAvailable, resp.Status.ErrorCode)
+		suite.Equal(commonpb.ErrorCode_NoReplicaAvailable, resp.GetStatus().GetErrorCode())
 		for _, node := range suite.nodes {
 			suite.nodeMgr.Add(session.NewNodeInfo(node, "localhost"))
 		}
@@ -1582,7 +1582,7 @@ func (suite *ServiceSuite) TestGetShardLeadersFailed() {
 		suite.fetchHeartbeats(time.Now().Add(-Params.QueryCoordCfg.HeartbeatAvailableInterval.GetAsDuration(time.Millisecond) - 1))
 		resp, err = server.GetShardLeaders(ctx, req)
 		suite.NoError(err)
-		suite.Equal(commonpb.ErrorCode_NoReplicaAvailable, resp.Status.ErrorCode)
+		suite.Equal(commonpb.ErrorCode_NoReplicaAvailable, resp.GetStatus().GetErrorCode())
 
 		// Segment not fully loaded
 		for _, node := range suite.nodes {
@@ -1594,7 +1594,7 @@ func (suite *ServiceSuite) TestGetShardLeadersFailed() {
 		suite.fetchHeartbeats(time.Now())
 		resp, err = server.GetShardLeaders(ctx, req)
 		suite.NoError(err)
-		suite.Equal(commonpb.ErrorCode_NoReplicaAvailable, resp.Status.ErrorCode)
+		suite.Equal(commonpb.ErrorCode_NoReplicaAvailable, resp.GetStatus().GetErrorCode())
 	}
 }
 

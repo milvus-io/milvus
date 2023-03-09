@@ -49,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/hardware"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
+	"github.com/milvus-io/milvus/internal/util/merr"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
@@ -947,14 +948,16 @@ func (loader *segmentLoader) checkSegmentSize(collectionID UniqueID, segmentLoad
 		zap.Uint64("diskUsageAfterLoad", toMB(usedLocalSizeAfterLoad)))
 
 	if memLoadingUsage > uint64(float64(totalMem)*Params.QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat()) {
-		return fmt.Errorf("%w, load segment failed, OOM if load, collectionID = %d, maxSegmentSize = %v MB, concurrency = %d, usedMemAfterLoad = %v MB, totalMem = %v MB, thresholdFactor = %f",
-			ErrInsufficientMemory,
-			collectionID,
-			toMB(maxSegmentSize),
-			concurrency,
-			toMB(usedMemAfterLoad),
-			toMB(totalMem),
-			Params.QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat())
+		err := merr.WrapErrServiceMemoryLimitExceeded(float32(usedMemAfterLoad), float32(totalMem), "failed to load segment, no enough memory")
+		log.Warn("load segment failed, OOM if load",
+			zap.Int64("collectionID", collectionID),
+			zap.Uint64("maxSegmentSize", toMB(maxSegmentSize)),
+			zap.Int("concurrency", concurrency),
+			zap.Uint64("usedMemAfterLoad", toMB(usedMemAfterLoad)),
+			zap.Uint64("totalMem", toMB(totalMem)),
+			zap.Float64("thresholdFactor", Params.QueryNodeCfg.OverloadedMemoryThresholdPercentage.GetAsFloat()),
+		)
+		return err
 	}
 
 	if usedLocalSizeAfterLoad > uint64(Params.QueryNodeCfg.DiskCapacityLimit.GetAsFloat()*Params.QueryNodeCfg.MaxDiskUsagePercentage.GetAsFloat()) {
