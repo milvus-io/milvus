@@ -223,10 +223,10 @@ func (i *IndexNode) Stop() error {
 		} else {
 			i.waitTaskFinish()
 		}
-		i.lifetime.Wait()
 
 		// https://github.com/milvus-io/milvus/issues/12282
 		i.UpdateStateCode(commonpb.StateCode_Abnormal)
+		i.lifetime.Wait()
 		log.Info("Index node abnormal")
 		// cleanup all running tasks
 		deletedTasks := i.deleteAllTasks()
