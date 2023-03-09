@@ -114,6 +114,9 @@ func Test_NewClient(t *testing.T) {
 		r7, err := client.ReleasePartitions(ctx, nil)
 		retCheck(retNotNil, r7, err)
 
+		r7, err = client.SyncNewCreatedPartition(ctx, nil)
+		retCheck(retNotNil, r7, err)
+
 		r8, err := client.ShowCollections(ctx, nil)
 		retCheck(retNotNil, r8, err)
 

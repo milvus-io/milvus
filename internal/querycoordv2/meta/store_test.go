@@ -81,6 +81,39 @@ func (suite *StoreTestSuite) TestCollection() {
 	suite.Len(collections, 1)
 }
 
+func (suite *StoreTestSuite) TestCollectionWithPartition() {
+	suite.store.SaveCollection(&querypb.CollectionLoadInfo{
+		CollectionID: 1,
+	})
+
+	suite.store.SaveCollection(&querypb.CollectionLoadInfo{
+		CollectionID: 2,
+	}, &querypb.PartitionLoadInfo{
+		CollectionID: 2,
+		PartitionID:  102,
+	})
+
+	suite.store.SaveCollection(&querypb.CollectionLoadInfo{
+		CollectionID: 3,
+	}, &querypb.PartitionLoadInfo{
+		CollectionID: 3,
+		PartitionID:  103,
+	})
+
+	suite.store.ReleaseCollection(1)
+	suite.store.ReleaseCollection(2)
+
+	collections, err := suite.store.GetCollections()
+	suite.NoError(err)
+	suite.Len(collections, 1)
+	suite.Equal(int64(3), collections[0].GetCollectionID())
+	partitions, err := suite.store.GetPartitions()
+	suite.NoError(err)
+	suite.Len(partitions, 1)
+	suite.Len(partitions[int64(3)], 1)
+	suite.Equal(int64(103), partitions[int64(3)][0].GetPartitionID())
+}
+
 func (suite *StoreTestSuite) TestPartition() {
 	suite.store.SavePartition(&querypb.PartitionLoadInfo{
 		PartitionID: 1,

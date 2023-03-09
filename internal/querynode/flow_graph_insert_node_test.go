@@ -288,7 +288,7 @@ func TestFlowGraphInsertNode_operate(t *testing.T) {
 			},
 		}
 		msg := []flowgraph.Msg{&iMsg}
-		assert.Panics(t, func() { insertNode.Operate(msg) })
+		insertNode.Operate(msg)
 	})
 
 	t.Run("test partition not exist", func(t *testing.T) {

@@ -500,10 +500,18 @@ func withValidQueryCoord() Opt {
 		succStatus(), nil,
 	)
 
+	qc.EXPECT().ReleasePartitions(mock.Anything, mock.Anything).Return(
+		succStatus(), nil,
+	)
+
 	qc.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).Return(
 		&querypb.GetSegmentInfoResponse{
 			Status: succStatus(),
 		}, nil,
+	)
+
+	qc.EXPECT().SyncNewCreatedPartition(mock.Anything, mock.Anything).Return(
+		succStatus(), nil,
 	)
 
 	return withQueryCoord(qc)
@@ -779,8 +787,10 @@ func withMetricsCacheManager() Opt {
 type mockBroker struct {
 	Broker
 
-	ReleaseCollectionFunc   func(ctx context.Context, collectionID UniqueID) error
-	GetQuerySegmentInfoFunc func(ctx context.Context, collectionID int64, segIDs []int64) (retResp *querypb.GetSegmentInfoResponse, retErr error)
+	ReleaseCollectionFunc       func(ctx context.Context, collectionID UniqueID) error
+	ReleasePartitionsFunc       func(ctx context.Context, collectionID UniqueID, partitionIDs ...UniqueID) error
+	SyncNewCreatedPartitionFunc func(ctx context.Context, collectionID UniqueID, partitionID UniqueID) error
+	GetQuerySegmentInfoFunc     func(ctx context.Context, collectionID int64, segIDs []int64) (retResp *querypb.GetSegmentInfoResponse, retErr error)
 
 	WatchChannelsFunc     func(ctx context.Context, info *watchInfo) error
 	UnwatchChannelsFunc   func(ctx context.Context, info *watchInfo) error
@@ -812,6 +822,14 @@ func (b mockBroker) UnwatchChannels(ctx context.Context, info *watchInfo) error 
 
 func (b mockBroker) ReleaseCollection(ctx context.Context, collectionID UniqueID) error {
 	return b.ReleaseCollectionFunc(ctx, collectionID)
+}
+
+func (b mockBroker) ReleasePartitions(ctx context.Context, collectionID UniqueID, partitionIDs ...UniqueID) error {
+	return b.ReleasePartitionsFunc(ctx, collectionID)
+}
+
+func (b mockBroker) SyncNewCreatedPartition(ctx context.Context, collectionID UniqueID, partitionID UniqueID) error {
+	return b.SyncNewCreatedPartitionFunc(ctx, collectionID, partitionID)
 }
 
 func (b mockBroker) DropCollectionIndex(ctx context.Context, collID UniqueID, partIDs []UniqueID) error {

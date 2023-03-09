@@ -162,12 +162,12 @@ func (fdmNode *filterDmNode) filterInvalidDeleteMessage(msg *msgstream.DeleteMsg
 		return nil, nil
 	}
 
-	if loadType == loadTypePartition {
-		if !fdmNode.metaReplica.hasPartition(msg.PartitionID) {
-			// filter out msg which not belongs to the loaded partitions
-			return nil, nil
-		}
-	}
+	//if loadType == loadTypePartition {
+	//	if !fdmNode.metaReplica.hasPartition(msg.PartitionID) {
+	//		// filter out msg which not belongs to the loaded partitions
+	//		return nil, nil
+	//	}
+	//}
 
 	return msg, nil
 }
@@ -198,12 +198,12 @@ func (fdmNode *filterDmNode) filterInvalidInsertMessage(msg *msgstream.InsertMsg
 		return nil, nil
 	}
 
-	if loadType == loadTypePartition {
-		if !fdmNode.metaReplica.hasPartition(msg.PartitionID) {
-			// filter out msg which not belongs to the loaded partitions
-			return nil, nil
-		}
-	}
+	//if loadType == loadTypePartition {
+	//	if !fdmNode.metaReplica.hasPartition(msg.PartitionID) {
+	//		// filter out msg which not belongs to the loaded partitions
+	//		return nil, nil
+	//	}
+	//}
 
 	// Check if the segment is in excluded segments,
 	// messages after seekPosition may contain the redundant data from flushed slice of segment,

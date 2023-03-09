@@ -213,6 +213,24 @@ func (c *Client) ReleaseCollection(ctx context.Context, req *querypb.ReleaseColl
 	return ret.(*commonpb.Status), err
 }
 
+// LoadPartitions updates partitions meta info in QueryNode.
+func (c *Client) LoadPartitions(ctx context.Context, req *querypb.LoadPartitionsRequest) (*commonpb.Status, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID()))
+	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryNodeClient) (any, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.LoadPartitions(ctx, req)
+	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
+	return ret.(*commonpb.Status), err
+}
+
 // ReleasePartitions releases the data of the specified partitions in QueryNode.
 func (c *Client) ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error) {
 	req = typeutil.Clone(req)

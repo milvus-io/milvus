@@ -200,6 +200,7 @@ func TestStreaming_search(t *testing.T) {
 
 		collection, err := streaming.getCollectionByID(defaultCollectionID)
 		assert.NoError(t, err)
+		collection.setLoadType(loadTypeCollection)
 		searchReq, err := genSearchPlanAndRequests(collection, IndexFaissIDMap, defaultNQ)
 		assert.NoError(t, err)
 

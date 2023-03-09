@@ -126,7 +126,7 @@ func (suite *TargetManagerSuite) SetupTest() {
 			}
 			suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, collection, partition).Return(dmChannels, allSegments, nil)
 		}
-
+		suite.broker.EXPECT().GetPartitions(mock.Anything, collection).Return(suite.partitions[collection], nil)
 		suite.mgr.UpdateCollectionNextTargetWithPartitions(collection, suite.partitions[collection]...)
 	}
 }
@@ -192,6 +192,7 @@ func (suite *TargetManagerSuite) TestUpdateNextTarget() {
 		},
 	}
 
+	suite.broker.EXPECT().GetPartitions(mock.Anything, collectionID).Return([]int64{1}, nil)
 	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, collectionID, int64(1)).Return(nextTargetChannels, nextTargetSegments, nil)
 	suite.mgr.UpdateCollectionNextTargetWithPartitions(collectionID, int64(1))
 	suite.assertSegments([]int64{11, 12}, suite.mgr.GetHistoricalSegmentsByCollection(collectionID, NextTarget))

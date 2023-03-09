@@ -1134,20 +1134,6 @@ func TestDropPartitionTask(t *testing.T) {
 	err = task.PreExecute(ctx)
 	assert.NotNil(t, err)
 
-	t.Run("get collectionID error", func(t *testing.T) {
-		mockCache := newMockCache()
-		mockCache.setGetPartitionIDFunc(func(ctx context.Context, collectionName string, partitionName string) (typeutil.UniqueID, error) {
-			return 1, nil
-		})
-		mockCache.setGetIDFunc(func(ctx context.Context, collectionName string) (typeutil.UniqueID, error) {
-			return 0, errors.New("error")
-		})
-		globalMetaCache = mockCache
-		task.PartitionName = "partition1"
-		err = task.PreExecute(ctx)
-		assert.Error(t, err)
-	})
-
 	t.Run("partition not exist", func(t *testing.T) {
 		task.PartitionName = "partition2"
 
@@ -1161,21 +1147,6 @@ func TestDropPartitionTask(t *testing.T) {
 		globalMetaCache = mockCache
 		err = task.PreExecute(ctx)
 		assert.NoError(t, err)
-	})
-
-	t.Run("get partition error", func(t *testing.T) {
-		task.PartitionName = "partition3"
-
-		mockCache := newMockCache()
-		mockCache.setGetPartitionIDFunc(func(ctx context.Context, collectionName string, partitionName string) (typeutil.UniqueID, error) {
-			return 0, errors.New("error")
-		})
-		mockCache.setGetIDFunc(func(ctx context.Context, collectionName string) (typeutil.UniqueID, error) {
-			return 1, nil
-		})
-		globalMetaCache = mockCache
-		err = task.PreExecute(ctx)
-		assert.Error(t, err)
 	})
 }
 

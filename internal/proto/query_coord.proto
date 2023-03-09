@@ -23,6 +23,7 @@ service QueryCoord {
   rpc ReleasePartitions(ReleasePartitionsRequest) returns (common.Status) {}
   rpc LoadCollection(LoadCollectionRequest) returns (common.Status) {}
   rpc ReleaseCollection(ReleaseCollectionRequest) returns (common.Status) {}
+  rpc SyncNewCreatedPartition(SyncNewCreatedPartitionRequest) returns (common.Status) {}
 
   rpc GetPartitionStates(GetPartitionStatesRequest) returns (GetPartitionStatesResponse) {}
   rpc GetSegmentInfo(GetSegmentInfoRequest) returns (GetSegmentInfoResponse) {}
@@ -55,6 +56,7 @@ service QueryNode {
   rpc UnsubDmChannel(UnsubDmChannelRequest) returns (common.Status) {}
   rpc LoadSegments(LoadSegmentsRequest) returns (common.Status) {}
   rpc ReleaseCollection(ReleaseCollectionRequest) returns (common.Status) {}
+  rpc LoadPartitions(LoadPartitionsRequest) returns (common.Status) {}
   rpc ReleasePartitions(ReleasePartitionsRequest) returns (common.Status) {}
   rpc ReleaseSegments(ReleaseSegmentsRequest) returns (common.Status) {}
   rpc GetSegmentInfo(GetSegmentInfoRequest) returns (GetSegmentInfoResponse) {}
@@ -187,6 +189,12 @@ message ShardLeadersList {  // All leaders of all replicas of one shard
   string channel_name = 1;
   repeated int64 node_ids = 2;
   repeated string node_addrs = 3;
+}
+
+message SyncNewCreatedPartitionRequest {
+  common.MsgBase base = 1;
+  int64 collectionID = 2;
+  int64 partitionID = 3;
 }
 
 //-----------------query node grpc request and response proto----------------
@@ -482,18 +490,19 @@ enum LoadStatus {
 
 message CollectionLoadInfo {
   int64 collectionID = 1;
-  repeated int64 released_partitions = 2;
+  repeated int64 released_partitions = 2; // Deprecated: No longer used; kept for compatibility.
   int32 replica_number = 3;
   LoadStatus status = 4;
   map<int64, int64> field_indexID = 5;
+  LoadType load_type = 6;
 }
 
 message PartitionLoadInfo {
   int64 collectionID = 1;
   int64 partitionID = 2;
-  int32 replica_number = 3;
+  int32 replica_number = 3; // Deprecated: No longer used; kept for compatibility.
   LoadStatus status = 4;
-  map<int64, int64> field_indexID = 5;
+  map<int64, int64> field_indexID = 5; // Deprecated: No longer used; kept for compatibility.
 }
 
 message Replica {

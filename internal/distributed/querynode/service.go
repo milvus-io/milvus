@@ -276,6 +276,11 @@ func (s *Server) ReleaseCollection(ctx context.Context, req *querypb.ReleaseColl
 	return s.querynode.ReleaseCollection(ctx, req)
 }
 
+// LoadPartitions updates partitions meta info in QueryNode.
+func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitionsRequest) (*commonpb.Status, error) {
+	return s.querynode.LoadPartitions(ctx, req)
+}
+
 // ReleasePartitions releases the data of the specified partitions in QueryNode.
 func (s *Server) ReleasePartitions(ctx context.Context, req *querypb.ReleasePartitionsRequest) (*commonpb.Status, error) {
 	// ignore ctx

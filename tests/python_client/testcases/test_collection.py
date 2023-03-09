@@ -1116,9 +1116,7 @@ class TestCollectionOperation(TestcaseBase):
         partition_w1.insert(cf.gen_default_list_data())
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
-        error = {ct.err_code: 5, ct.err_msg: f'load the partition after load collection is not supported'}
-        partition_w1.load(check_task=CheckTasks.err_res,
-                          check_items=error)
+        partition_w1.load()
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_collection_release_partition(self):
@@ -1133,9 +1131,7 @@ class TestCollectionOperation(TestcaseBase):
         partition_w1.insert(cf.gen_default_list_data())
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
-        error = {ct.err_code: 1, ct.err_msg: f'releasing the partition after load collection is not supported'}
-        partition_w1.release(check_task=CheckTasks.err_res,
-                             check_items=error)
+        partition_w1.release()
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_load_collection_after_release_collection(self):

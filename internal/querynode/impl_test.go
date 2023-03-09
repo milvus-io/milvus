@@ -23,6 +23,10 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/common"
@@ -33,10 +37,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/conc"
 	"github.com/milvus-io/milvus/internal/util/etcd"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/require"
 )
 
 func TestImpl_GetComponentStates(t *testing.T) {
@@ -360,6 +362,36 @@ func TestImpl_ReleaseCollection(t *testing.T) {
 	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
 }
 
+func TestImpl_LoadPartitions(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	node, err := genSimpleQueryNode(ctx)
+	assert.NoError(t, err)
+
+	req := &queryPb.LoadPartitionsRequest{
+		Base: &commonpb.MsgBase{
+			TargetID: paramtable.GetNodeID(),
+		},
+		CollectionID: defaultCollectionID,
+		PartitionIDs: []UniqueID{defaultPartitionID},
+	}
+
+	status, err := node.LoadPartitions(ctx, req)
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, status.ErrorCode)
+
+	node.UpdateStateCode(commonpb.StateCode_Abnormal)
+	status, err = node.LoadPartitions(ctx, req)
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
+
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+	req.Base.TargetID = -1
+	status, err = node.LoadPartitions(ctx, req)
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_NodeIDNotMatch, status.ErrorCode)
+}
+
 func TestImpl_ReleasePartitions(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -368,8 +400,9 @@ func TestImpl_ReleasePartitions(t *testing.T) {
 
 	req := &queryPb.ReleasePartitionsRequest{
 		Base: &commonpb.MsgBase{
-			MsgType: commonpb.MsgType_WatchQueryChannels,
-			MsgID:   rand.Int63(),
+			MsgType:  commonpb.MsgType_WatchQueryChannels,
+			MsgID:    rand.Int63(),
+			TargetID: paramtable.GetNodeID(),
 		},
 		NodeID:       0,
 		CollectionID: defaultCollectionID,
@@ -384,6 +417,12 @@ func TestImpl_ReleasePartitions(t *testing.T) {
 	status, err = node.ReleasePartitions(ctx, req)
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.ErrorCode)
+
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+	req.Base.TargetID = -1
+	status, err = node.ReleasePartitions(ctx, req)
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_NodeIDNotMatch, status.ErrorCode)
 }
 
 func TestImpl_GetSegmentInfo(t *testing.T) {

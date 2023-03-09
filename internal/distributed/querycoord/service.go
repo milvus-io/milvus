@@ -329,6 +329,11 @@ func (s *Server) ReleasePartitions(ctx context.Context, req *querypb.ReleasePart
 	return s.queryCoord.ReleasePartitions(ctx, req)
 }
 
+// SyncNewCreatedPartition notifies QueryCoord to sync new created partition if collection is loaded.
+func (s *Server) SyncNewCreatedPartition(ctx context.Context, req *querypb.SyncNewCreatedPartitionRequest) (*commonpb.Status, error) {
+	return s.queryCoord.SyncNewCreatedPartition(ctx, req)
+}
+
 // GetSegmentInfo gets the information of the specified segment from QueryCoord.
 func (s *Server) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfoRequest) (*querypb.GetSegmentInfoResponse, error) {
 	return s.queryCoord.GetSegmentInfo(ctx, req)

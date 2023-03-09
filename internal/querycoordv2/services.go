@@ -76,9 +76,6 @@ func (s *Server) ShowCollections(ctx context.Context, req *querypb.ShowCollectio
 		for _, collection := range s.meta.GetAllCollections() {
 			collectionSet.Insert(collection.GetCollectionID())
 		}
-		for _, partition := range s.meta.GetAllPartitions() {
-			collectionSet.Insert(partition.GetCollectionID())
-		}
 		isGetAll = true
 	}
 	collections := collectionSet.Collect()
@@ -92,7 +89,7 @@ func (s *Server) ShowCollections(ctx context.Context, req *querypb.ShowCollectio
 	for _, collectionID := range collections {
 		log := log.With(zap.Int64("collectionID", collectionID))
 
-		percentage := s.meta.CollectionManager.GetLoadPercentage(collectionID)
+		percentage := s.meta.CollectionManager.GetCollectionLoadPercentage(collectionID)
 		if percentage < 0 {
 			if isGetAll {
 				// The collection is released during this,
@@ -139,67 +136,33 @@ func (s *Server) ShowPartitions(ctx context.Context, req *querypb.ShowPartitions
 	}
 	defer meta.GlobalFailedLoadCache.TryExpire()
 
-	// TODO(yah01): now, for load collection, the percentage of partition is equal to the percentage of collection,
-	// we can calculates the real percentage of partitions
 	partitions := req.GetPartitionIDs()
 	percentages := make([]int64, 0)
-	isReleased := false
-	switch s.meta.GetLoadType(req.GetCollectionID()) {
-	case querypb.LoadType_LoadCollection:
-		percentage := s.meta.GetLoadPercentage(req.GetCollectionID())
-		if percentage < 0 {
-			isReleased = true
-			break
-		}
 
-		if len(partitions) == 0 {
-			var err error
-			partitions, err = s.broker.GetPartitions(ctx, req.GetCollectionID())
+	if len(partitions) == 0 {
+		partitions = lo.Map(s.meta.GetPartitionsByCollection(req.GetCollectionID()), func(partition *meta.Partition, _ int) int64 {
+			return partition.GetPartitionID()
+		})
+	}
+	for _, partitionID := range partitions {
+		percentage := s.meta.GetPartitionLoadPercentage(partitionID)
+		if percentage < 0 {
+			err := meta.GlobalFailedLoadCache.Get(req.GetCollectionID())
 			if err != nil {
-				msg := "failed to show partitions"
-				log.Warn(msg, zap.Error(err))
+				status := merr.Status(err)
+				status.ErrorCode = commonpb.ErrorCode_InsufficientMemoryToLoad
+				log.Warn("show partition failed", zap.Error(err))
 				return &querypb.ShowPartitionsResponse{
-					Status: utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg, err),
+					Status: status,
 				}, nil
 			}
-		}
-		for range partitions {
-			percentages = append(percentages, int64(percentage))
-		}
-
-	case querypb.LoadType_LoadPartition:
-		if len(partitions) == 0 {
-			partitions = lo.Map(s.meta.GetPartitionsByCollection(req.GetCollectionID()), func(partition *meta.Partition, _ int) int64 {
-				return partition.GetPartitionID()
-			})
-		}
-		for _, partitionID := range partitions {
-			partition := s.meta.GetPartition(partitionID)
-			if partition == nil {
-				isReleased = true
-				break
-			}
-			percentages = append(percentages, int64(partition.LoadPercentage))
-		}
-
-	default:
-		isReleased = true
-	}
-
-	if isReleased {
-		err := meta.GlobalFailedLoadCache.Get(req.GetCollectionID())
-		if err != nil {
-			status := merr.Status(err)
-			status.ErrorCode = commonpb.ErrorCode_InsufficientMemoryToLoad
+			msg := fmt.Sprintf("partition %d has not been loaded to memory or load failed", partitionID)
+			log.Warn(msg)
 			return &querypb.ShowPartitionsResponse{
-				Status: status,
+				Status: utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg),
 			}, nil
 		}
-		msg := fmt.Sprintf("collection %v has not been loaded into QueryNode", req.GetCollectionID())
-		log.Warn(msg)
-		return &querypb.ShowPartitionsResponse{
-			Status: utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg),
-		}, nil
+		percentages = append(percentages, int64(percentage))
 	}
 
 	return &querypb.ShowPartitionsResponse{
@@ -246,7 +209,9 @@ func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 		req,
 		s.dist,
 		s.meta,
+		s.cluster,
 		s.targetMgr,
+		s.targetObserver,
 		s.broker,
 		s.nodeMgr,
 	)
@@ -340,7 +305,9 @@ func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitions
 		req,
 		s.dist,
 		s.meta,
+		s.cluster,
 		s.targetMgr,
+		s.targetObserver,
 		s.broker,
 		s.nodeMgr,
 	)
@@ -401,6 +368,7 @@ func (s *Server) ReleasePartitions(ctx context.Context, req *querypb.ReleasePart
 		req,
 		s.dist,
 		s.meta,
+		s.cluster,
 		s.targetMgr,
 		s.targetObserver,
 	)
@@ -528,6 +496,31 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *querypb.GetSegmentInfo
 	}, nil
 }
 
+func (s *Server) SyncNewCreatedPartition(ctx context.Context, req *querypb.SyncNewCreatedPartitionRequest) (*commonpb.Status, error) {
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", req.GetCollectionID()),
+		zap.Int64("partitionID", req.GetPartitionID()),
+	)
+
+	log.Info("received sync new created partition request")
+
+	failedMsg := "failed to sync new created partition"
+	if s.status.Load() != commonpb.StateCode_Healthy {
+		log.Warn(failedMsg, zap.Error(ErrNotHealthy))
+		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, failedMsg, ErrNotHealthy), nil
+	}
+
+	syncJob := job.NewSyncNewCreatedPartitionJob(ctx, req, s.meta, s.cluster)
+	s.jobScheduler.Add(syncJob)
+	err := syncJob.Wait()
+	if err != nil && !errors.Is(err, job.ErrPartitionNotInTarget) {
+		log.Warn(failedMsg, zap.Error(err))
+		return utils.WrapStatus(errCode(err), failedMsg, err), nil
+	}
+
+	return merr.Status(nil), nil
+}
+
 // refreshCollection must be called after loading a collection. It looks for new segments that are not loaded yet and
 // tries to load them up. It returns when all segments of the given collection are loaded, or when error happens.
 // Note that a collection's loading progress always stays at 100% after a successful load and will not get updated
@@ -547,7 +540,7 @@ func (s *Server) refreshCollection(ctx context.Context, collID int64) (*commonpb
 	}
 
 	// Check that collection is fully loaded.
-	if s.meta.CollectionManager.GetLoadPercentage(collID) != 100 {
+	if s.meta.CollectionManager.GetCurrentLoadPercentage(collID) != 100 {
 		errMsg := "a collection must be fully loaded before refreshing"
 		log.Warn(errMsg)
 		return &commonpb.Status{
@@ -601,7 +594,7 @@ func (s *Server) refreshPartitions(ctx context.Context, collID int64, partIDs []
 	}
 
 	// Check that all partitions are fully loaded.
-	if s.meta.CollectionManager.GetLoadPercentage(collID) != 100 {
+	if s.meta.CollectionManager.GetCurrentLoadPercentage(collID) != 100 {
 		errMsg := "partitions must be fully loaded before refreshing"
 		log.Warn(errMsg)
 		return &commonpb.Status{
@@ -671,7 +664,7 @@ func (s *Server) LoadBalance(ctx context.Context, req *querypb.LoadBalanceReques
 		log.Warn(msg, zap.Int("source-nodes-num", len(req.GetSourceNodeIDs())))
 		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg), nil
 	}
-	if s.meta.CollectionManager.GetLoadPercentage(req.GetCollectionID()) < 100 {
+	if s.meta.CollectionManager.GetCurrentLoadPercentage(req.GetCollectionID()) < 100 {
 		msg := "can't balance segments of not fully loaded collection"
 		log.Warn(msg)
 		return utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, msg), nil
@@ -845,7 +838,7 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 		Status: merr.Status(nil),
 	}
 
-	if s.meta.CollectionManager.GetLoadPercentage(req.GetCollectionID()) < 100 {
+	if s.meta.CollectionManager.GetCurrentLoadPercentage(req.GetCollectionID()) < 100 {
 		msg := fmt.Sprintf("collection %v is not fully loaded", req.GetCollectionID())
 		log.Warn(msg)
 		resp.Status = utils.WrapStatus(commonpb.ErrorCode_NoReplicaAvailable, msg)
