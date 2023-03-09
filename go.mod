@@ -22,7 +22,6 @@ require (
 	github.com/golang/protobuf v1.5.2
 	github.com/google/btree v1.0.1
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
-	github.com/jarcoal/httpmock v1.0.8
 	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/klauspost/compress v1.14.4
 	github.com/lingdor/stackerror v0.0.0-20191119040541-976d8885ed76
@@ -159,7 +158,7 @@ require (
 	go.opentelemetry.io/proto/otlp v0.19.0 // indirect
 	go.uber.org/multierr v1.6.0
 	golang.org/x/mod v0.6.0-dev.0.20220419223038-86c51ed26bb4 // indirect
-	golang.org/x/net v0.6.0 // indirect
+	golang.org/x/net v0.7.0 // indirect
 	golang.org/x/oauth2 v0.5.0
 	golang.org/x/sys v0.5.0 // indirect
 	golang.org/x/term v0.5.0 // indirect
@@ -172,7 +171,7 @@ require (
 	google.golang.org/genproto v0.0.0-20220503193339-ba3ae3f07e29 // indirect
 	gopkg.in/ini.v1 v1.62.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
-	gopkg.in/yaml.v3 v3.0.1
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 	sigs.k8s.io/yaml v1.2.0 // indirect
 )
 
@@ -181,7 +180,6 @@ require github.com/ianlancetaylor/cgosymbolizer v0.0.0-20221217025313-27d3c9f66b
 require (
 	github.com/aliyun/credentials-go v1.2.6
 	github.com/cockroachdb/errors v1.9.1
-	github.com/pkg/errors v0.9.1
 	github.com/uber/jaeger-client-go v2.30.0+incompatible
 	go.opentelemetry.io/otel/exporters/jaeger v1.11.2
 	go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.11.2
@@ -202,6 +200,7 @@ require (
 	github.com/kr/pretty v0.3.0 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/olekukonko/tablewriter v0.0.5 // indirect
+	github.com/pkg/errors v0.9.1 // indirect
 	github.com/rogpeppe/go-internal v1.8.1 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/internal/retry v1.11.2 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.11.2 // indirect
