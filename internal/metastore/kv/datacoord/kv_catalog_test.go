@@ -749,6 +749,27 @@ func Test_MarkChannelDeleted_SaveError(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func Test_MarkChannelAdded_SaveError(t *testing.T) {
+	txn := mocks.NewMetaKv(t)
+	txn.EXPECT().
+		Save(mock.Anything, mock.Anything).
+		Return(errors.New("mock error"))
+
+	catalog := NewCatalog(txn, rootPath, "")
+	err := catalog.MarkChannelAdded(context.TODO(), "test_channel_1")
+	assert.Error(t, err)
+}
+
+func Test_ChannelExists_SaveError(t *testing.T) {
+	txn := mocks.NewMetaKv(t)
+	txn.EXPECT().
+		Load(mock.Anything).
+		Return("", errors.New("mock error"))
+
+	catalog := NewCatalog(txn, rootPath, "")
+	assert.False(t, catalog.ChannelExists(context.TODO(), "test_channel_1"))
+}
+
 func Test_parseBinlogKey(t *testing.T) {
 	catalog := NewCatalog(nil, "", "")
 

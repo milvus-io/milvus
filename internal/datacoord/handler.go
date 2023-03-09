@@ -348,7 +348,7 @@ func (h *ServerHandler) CheckShouldDropChannel(channel string) bool {
 			}
 		}
 		return false*/
-	return h.s.meta.catalog.IsChannelDropped(h.s.ctx, channel)
+	return h.s.meta.catalog.ShouldDropChannel(h.s.ctx, channel)
 }
 
 // FinishDropChannel cleans up the remove flag for channels
@@ -359,10 +359,7 @@ func (h *ServerHandler) FinishDropChannel(channel string) error {
 		log.Warn("DropChannel failed", zap.String("vChannel", channel), zap.Error(err))
 		return err
 	}
-	err = h.s.meta.DropChannelCheckpoint(channel)
-	if err != nil {
-		log.Warn("DropChannelCheckpoint failed", zap.String("vChannel", channel), zap.Error(err))
-		return err
-	}
+	log.Info("DropChannel succeeded", zap.String("vChannel", channel))
+	// Channel checkpoints are cleaned up during garbage collection.
 	return nil
 }
