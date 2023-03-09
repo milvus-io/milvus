@@ -2103,13 +2103,15 @@ func TestGetQueryVChanPositions(t *testing.T) {
 	svr.indexCoord.(*mocks.MockIndexCoord).EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(mockResp, nil)
 
 	t.Run("get unexisted channel", func(t *testing.T) {
-		vchan := svr.handler.GetQueryVChanPositions(&channel{Name: "chx1", CollectionID: 0}, allPartitionID)
+		vchan, err := svr.handler.GetQueryVChanPositions(&channel{Name: "chx1", CollectionID: 0}, allPartitionID)
+		assert.NoError(t, err)
 		assert.Empty(t, vchan.UnflushedSegmentIds)
 		assert.Empty(t, vchan.FlushedSegmentIds)
 	})
 
 	t.Run("get existed channel", func(t *testing.T) {
-		vchan := svr.handler.GetQueryVChanPositions(&channel{Name: "ch1", CollectionID: 0}, allPartitionID)
+		vchan, err := svr.handler.GetQueryVChanPositions(&channel{Name: "ch1", CollectionID: 0}, allPartitionID)
+		assert.NoError(t, err)
 		assert.EqualValues(t, 1, len(vchan.FlushedSegmentIds))
 		assert.EqualValues(t, 1, vchan.FlushedSegmentIds[0])
 		assert.EqualValues(t, 2, len(vchan.UnflushedSegmentIds))
@@ -2117,14 +2119,16 @@ func TestGetQueryVChanPositions(t *testing.T) {
 	})
 
 	t.Run("empty collection", func(t *testing.T) {
-		infos := svr.handler.GetQueryVChanPositions(&channel{Name: "ch0_suffix", CollectionID: 1}, allPartitionID)
+		infos, err := svr.handler.GetQueryVChanPositions(&channel{Name: "ch0_suffix", CollectionID: 1}, allPartitionID)
+		assert.NoError(t, err)
 		assert.EqualValues(t, 1, infos.CollectionID)
 		assert.EqualValues(t, 0, len(infos.FlushedSegmentIds))
 		assert.EqualValues(t, 0, len(infos.UnflushedSegmentIds))
 	})
 
 	t.Run("filter partition", func(t *testing.T) {
-		infos := svr.handler.GetQueryVChanPositions(&channel{Name: "ch1", CollectionID: 0}, 1)
+		infos, err := svr.handler.GetQueryVChanPositions(&channel{Name: "ch1", CollectionID: 0}, 1)
+		assert.NoError(t, err)
 		assert.EqualValues(t, 0, infos.CollectionID)
 		assert.EqualValues(t, 0, len(infos.FlushedSegmentIds))
 		assert.EqualValues(t, 1, len(infos.UnflushedSegmentIds))
@@ -2133,11 +2137,13 @@ func TestGetQueryVChanPositions(t *testing.T) {
 	t.Run("empty collection with passed positions", func(t *testing.T) {
 		vchannel := "ch_no_segment_1"
 		pchannel := funcutil.ToPhysicalChannel(vchannel)
-		infos := svr.handler.GetQueryVChanPositions(&channel{
+		infos, err := svr.handler.GetQueryVChanPositions(&channel{
 			Name:           vchannel,
 			CollectionID:   0,
 			StartPositions: []*commonpb.KeyDataPair{{Key: pchannel, Data: []byte{14, 15, 16}}},
 		}, allPartitionID)
+
+		assert.NoError(t, err)
 		assert.EqualValues(t, 0, infos.CollectionID)
 		assert.EqualValues(t, vchannel, infos.ChannelName)
 	})
@@ -2147,7 +2153,8 @@ func TestGetQueryVChanPositions(t *testing.T) {
 		svr.indexCoord.(*mocks.MockIndexCoord).EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(
 			&indexpb.GetIndexInfoResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}}, nil)
 
-		vchan := svr.handler.GetQueryVChanPositions(&channel{Name: "ch1", CollectionID: 0}, allPartitionID)
+		vchan, err := svr.handler.GetQueryVChanPositions(&channel{Name: "ch1", CollectionID: 0}, allPartitionID)
+		assert.NoError(t, err)
 		assert.EqualValues(t, 0, len(vchan.FlushedSegmentIds))
 		assert.EqualValues(t, 3, len(vchan.UnflushedSegmentIds))
 		assert.ElementsMatch(t, []int64{s1.ID, s2.ID, s3.ID}, vchan.UnflushedSegmentIds)

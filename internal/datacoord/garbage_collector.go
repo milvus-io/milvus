@@ -265,7 +265,11 @@ func (gc *garbageCollector) clearEtcd() {
 			droppedCompactTo[to] = struct{}{}
 		}
 	}
-	indexedSegments := FilterInIndexedSegments(gc.handler, gc.indexCoord, lo.Keys(droppedCompactTo)...)
+	indexedSegments, err := FilterInIndexedSegments(gc.handler, gc.indexCoord, lo.Keys(droppedCompactTo)...)
+	if err != nil {
+		log.Warn("failed to get indexed segments doing garbage collection", zap.Error(err))
+		return
+	}
 	indexedSet := make(typeutil.UniqueSet)
 	for _, segment := range indexedSegments {
 		indexedSet.Insert(segment.GetID())

@@ -32,7 +32,7 @@ import (
 // Handler handles some channel method for ChannelManager
 type Handler interface {
 	// GetQueryVChanPositions gets the information recovery needed of a channel for QueryCoord
-	GetQueryVChanPositions(channel *channel, partitionID UniqueID) *datapb.VchannelInfo
+	GetQueryVChanPositions(channel *channel, partitionID UniqueID) (*datapb.VchannelInfo, error)
 	// GetDataVChanPositions gets the information recovery needed of a channel for DataNode
 	GetDataVChanPositions(channel *channel, partitionID UniqueID) *datapb.VchannelInfo
 	CheckShouldDropChannel(channel string) bool
@@ -98,13 +98,17 @@ func (h *ServerHandler) GetDataVChanPositions(channel *channel, partitionID Uniq
 // GetQueryVChanPositions gets vchannel latest postitions with provided dml channel names for QueryCoord,
 // we expect QueryCoord gets the indexed segments to load, so the flushed segments below are actually the indexed segments,
 // the unflushed segments are actually the segments without index, even they are flushed.
-func (h *ServerHandler) GetQueryVChanPositions(channel *channel, partitionID UniqueID) *datapb.VchannelInfo {
+func (h *ServerHandler) GetQueryVChanPositions(channel *channel, partitionID UniqueID) (*datapb.VchannelInfo, error) {
 	// cannot use GetSegmentsByChannel since dropped segments are needed here
 	segments := h.s.meta.SelectSegments(func(s *SegmentInfo) bool {
 		return s.InsertChannel == channel.Name
 	})
 	segmentInfos := make(map[int64]*SegmentInfo)
-	indexedSegments := FilterInIndexedSegments(h, h.s.indexCoord, segments...)
+	indexedSegments, err := FilterInIndexedSegments(h, h.s.indexCoord, segments...)
+	if err != nil {
+		log.Warn("filter indexed segment failed", zap.String("channel", channel.Name), zap.Error(err))
+		return nil, err
+	}
 	indexed := make(typeutil.UniqueSet)
 	for _, segment := range indexedSegments {
 		indexed.Insert(segment.GetID())
@@ -165,7 +169,7 @@ func (h *ServerHandler) GetQueryVChanPositions(channel *channel, partitionID Uni
 		FlushedSegmentIds:   indexedIDs.Collect(),
 		UnflushedSegmentIds: unIndexedIDs.Collect(),
 		DroppedSegmentIds:   droppedIDs.Collect(),
-	}
+	}, nil
 }
 
 // getEarliestSegmentDMLPos returns the earliest dml position of segments,
