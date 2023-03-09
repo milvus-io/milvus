@@ -3979,8 +3979,8 @@ class TestsearchPagination(TestcaseBase):
         assert len(diff) <= 2
 
         if len(diff) == 2:
-            i = search_res[0].ids.index((unique_a-unique_b).pop())
-            i2 = res[0].ids[offset:].index((unique_b-unique_a).pop())
+            i = list(search_res[0].ids).index((unique_a-unique_b).pop())
+            i2 = list(res[0].ids[offset:]).index((unique_b-unique_a).pop())
 
             assert search_res[0].distances[i] == res[0].distances[offset:][i2]
 
