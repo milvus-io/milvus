@@ -3069,7 +3069,7 @@ class TestSearchBase(TestcaseBase):
                                                                                   partition_num=1,
                                                                                   dim=dim, is_index=False)[0:5]
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
-        # 2. create patition
+        # 2. create partition
         partition_name = "search_partition_empty"
         collection_w.create_partition(partition_name=partition_name, description="search partition empty")
         par = collection_w.partitions
@@ -3235,7 +3235,7 @@ class TestSearchBase(TestcaseBase):
                                                                                   partition_num=1,
                                                                                   dim=dim, is_index=False)[0:5]
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
-        # 2. create patition
+        # 2. create partition
         partition_name = "search_partition_empty"
         collection_w.create_partition(partition_name=partition_name, description="search partition empty")
         par = collection_w.partitions
@@ -3278,7 +3278,7 @@ class TestSearchBase(TestcaseBase):
                                                                                   partition_num=1,
                                                                                   dim=dim, is_index=False)[0:5]
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
-        # 2. create patition
+        # 2. create partition
         par_name = collection_w.partitions[0].name
         # collection_w.load()
         # 3. create different index
@@ -3398,7 +3398,7 @@ class TestSearchDSL(TestcaseBase):
                                          "limit": ct.default_top_k})
 
 
-class  TestsearchString(TestcaseBase):
+class TestsearchString(TestcaseBase):
     """
     ******************************************************************
       The following cases are used to test search about string
@@ -3454,7 +3454,6 @@ class  TestsearchString(TestcaseBase):
                                          "limit": default_limit,
                                          "_async": _async})
 
-
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_string_field_is_primary_true(self, dim, _async):
         """
@@ -3504,7 +3503,7 @@ class  TestsearchString(TestcaseBase):
                             default_search_params, default_limit,
                             default_search_mix_exp,
                             output_fields=output_fields,
-                             _async=_async,
+                            _async=_async,
                             travel_timestamp=0,
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
@@ -3521,7 +3520,6 @@ class  TestsearchString(TestcaseBase):
                 collection search uses invalid string expr
         expected: Raise exception
         """
-
         # 1. initialize with data
         collection_w, _, _, insert_ids = \
             self.init_collection_general(prefix, True, auto_id=auto_id, dim=default_dim)[0:4]
@@ -3535,8 +3533,6 @@ class  TestsearchString(TestcaseBase):
                             check_items={"err_code": 1,
                                          "err_msg": "failed to create query plan: type mismatch"}
                             )
-
-
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("expression", cf.gen_normal_string_expressions(ct.default_string_field_name))
@@ -3630,8 +3626,7 @@ class  TestsearchString(TestcaseBase):
                 collection search uses string expr in string field, string field is not primary
         expected: Search successfully
         """
-         # 1. initialize with binary data
-
+        # 1. initialize with binary data
         collection_w, _, binary_raw_vector, insert_ids = self.init_collection_general(prefix, True, 2,
                                                                                       is_binary=True,
                                                                                       auto_id=auto_id,
@@ -3679,7 +3674,7 @@ class  TestsearchString(TestcaseBase):
                             search_params, default_limit,
                             default_search_mix_exp,
                             output_fields=output_fields,
-                             _async=_async,
+                            _async=_async,
                             travel_timestamp=0,
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
@@ -3785,7 +3780,7 @@ class  TestsearchString(TestcaseBase):
 
 
         search_string_exp = "varchar >= \"\""
-        limit =1
+        limit = 1
 
         # 2. search
         log.info("test_search_string_field_is_primary_true: searching collection %s" % collection_w.name)

@@ -538,6 +538,40 @@ class TestPartitionParams(TestcaseBase):
         assert not partition_w.is_empty
         assert partition_w.num_entities == (nums + nums)
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_partition_upsert(self):
+        """
+        target: verify upsert entities multiple times
+        method: 1. create a collection and a partition
+                2. partition.upsert(data)
+                3. upsert data again
+        expected: upsert data successfully
+        """
+        # create collection and a partition
+        collection_w = self.init_collection_wrap()
+        partition_name = cf.gen_unique_str(prefix)
+        partition_w = self.init_partition_wrap(collection_w, partition_name)
+
+        # insert data and load
+        cf.insert_data(collection_w)
+        collection_w.create_index(ct.default_float_vec_field_name, ct.default_index)
+        collection_w.load()
+
+        # upsert data
+        upsert_nb = 1000
+        data, values = cf.gen_default_data_for_upsert(nb=upsert_nb, start=2000)
+        partition_w.upsert(data)
+        res = partition_w.query("int64 >= 2000 && int64 < 3000", [ct.default_float_field_name])[0]
+        assert partition_w.num_entities == upsert_nb + ct.default_nb // 2
+        assert [res[i][ct.default_float_field_name] for i in range(upsert_nb)] == values.to_list()
+
+        # upsert data
+        data, values = cf.gen_default_data_for_upsert(nb=upsert_nb, start=ct.default_nb)
+        partition_w.upsert(data)
+        res = partition_w.query("int64 >= 3000 && int64 < 4000", [ct.default_float_field_name])[0]
+        assert partition_w.num_entities == upsert_nb * 2 + ct.default_nb // 2
+        assert [res[i][ct.default_float_field_name] for i in range(upsert_nb)] == values.to_list()
+
 
 class TestPartitionOperations(TestcaseBase):
     """ Test case of partition interface in operations """
@@ -1011,6 +1045,128 @@ class TestPartitionOperations(TestcaseBase):
         expr = "int64 in [0,1]"
         res = partition_w.delete(expr)
         assert len(res) == 2
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_partition_upsert_empty_partition(self):
+        """
+        target: verify upsert data in empty partition
+        method: 1. create a collection
+                2. upsert some data in empty partition
+        expected: upsert successfully
+        """
+        # create collection
+        collection_w = self.init_collection_wrap()
+
+        # get the default partition
+        partition_name = ct.default_partition_name
+        partition_w = self.init_partition_wrap(collection_w, partition_name)
+        assert partition_w.num_entities == 0
+
+        # upsert data to the empty partition
+        data = cf.gen_default_data_for_upsert()[0]
+        partition_w.upsert(data)
+        assert partition_w.num_entities == ct.default_nb
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_partition_upsert_dropped_partition(self):
+        """
+        target: verify upsert data in a dropped partition
+        method: 1. create a partition and drop
+                2. upsert some data into the dropped partition
+        expected: raise exception
+        """
+        # create partition
+        partition_w = self.init_partition_wrap()
+
+        # drop partition
+        partition_w.drop()
+
+        # insert data to partition
+        partition_w.upsert(cf.gen_default_dataframe_data(),
+                           check_task=CheckTasks.err_res,
+                           check_items={ct.err_code: 1, ct.err_msg: "Partition not exist"})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_partition_upsert_mismatched_data(self):
+        """
+        target: test upsert mismatched data in partition
+        method: 1. create a partition
+                2. insert some data
+                3. upsert with mismatched data
+        expected: raise exception
+        """
+        # create a partition
+        partition_w = self.init_partition_wrap()
+
+        # insert data
+        data = cf.gen_default_dataframe_data()
+        partition_w.insert(data)
+
+        # upsert mismatched data
+        upsert_data = cf.gen_default_data_for_upsert(dim=ct.default_dim-1)[0]
+        error = {ct.err_code: 1, ct.err_msg: "Collection field dim is 128, but entities field dim is 127"}
+        partition_w.upsert(upsert_data, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_partition_upsert_with_auto_id(self):
+        """
+        target: test upsert data in partition when auto_id=True
+        method: 1. create a partition
+                2. insert some data
+                3. upsert data
+        expected: raise exception
+        """
+        # create a partition
+        schema = cf.gen_default_collection_schema(auto_id=True)
+        collection_w = self.init_collection_wrap(schema=schema)
+        partition_w = self.init_partition_wrap(collection_w)
+
+        # insert data
+        data = cf.gen_default_dataframe_data()
+        data.drop(ct.default_int64_field_name, axis=1, inplace=True)
+        partition_w.insert(data)
+
+        # upsert data
+        upsert_data = cf.gen_default_data_for_upsert()[0]
+        upsert_data.drop(ct.default_int64_field_name, axis=1, inplace=True)
+        error = {ct.err_code: 1, ct.err_msg: "Upsert don't support autoid == true"}
+        partition_w.upsert(upsert_data, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_partition_upsert_same_pk_in_different_partitions(self):
+        """
+        target: test upsert same pk in different partitions
+        method: 1. create 2 partitions
+                2. insert some data
+                3. upsert data
+        expected: raise exception
+        """
+        # create 2 partitions
+        collection_w = self.init_collection_wrap()
+        partition_1 = self.init_partition_wrap(collection_w)
+        partition_2 = self.init_partition_wrap(collection_w)
+
+        # insert data
+        nb = 1000
+        data = cf.gen_default_dataframe_data(nb)
+        partition_1.insert(data)
+        data = cf.gen_default_dataframe_data(nb, start=nb)
+        partition_2.insert(data)
+
+        # upsert data in 2 partitions
+        upsert_data, values = cf.gen_default_data_for_upsert(1)
+        partition_1.upsert(upsert_data)
+        partition_2.upsert(upsert_data)
+
+        # load
+        collection_w.create_index(ct.default_float_vec_field_name, ct.default_flat_index)
+        collection_w.load()
+
+        # query and check the results
+        expr = "int64 == 0"
+        res1 = partition_1.query(expr, [ct.default_float_field_name])[0]
+        res2 = partition_2.query(expr, [ct.default_float_field_name])[0]
+        assert res1 == res2
 
     @pytest.mark.tags(CaseLabel.L0)
     def test_create_partition_repeat(self):
