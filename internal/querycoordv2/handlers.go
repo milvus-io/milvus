@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/hardware"
+	"github.com/milvus-io/milvus/internal/util/merr"
 	"github.com/milvus-io/milvus/internal/util/metricsinfo"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
@@ -319,7 +320,7 @@ func (s *Server) fillReplicaInfo(replica *meta.Replica, withShardNodes bool) (*m
 	if len(channels) == 0 {
 		msg := "failed to get channels, collection not loaded"
 		log.Warn(msg)
-		return nil, utils.WrapError(msg, meta.ErrCollectionNotFound)
+		return nil, merr.WrapErrCollectionNotFound(replica.GetCollectionID(), msg)
 	}
 	var segments []*meta.Segment
 	if withShardNodes {

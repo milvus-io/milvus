@@ -21,14 +21,12 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"strconv"
 	"testing"
 	"time"
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/jarcoal/httpmock"
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/stretchr/testify/assert"
@@ -80,43 +78,6 @@ func Test_ParseIndexParamsMap(t *testing.T) {
 	invalidStr := "invalid string"
 	_, err = JSONToMap(invalidStr)
 	assert.NotEqual(t, err, nil)
-}
-
-func TestGetPulsarConfig(t *testing.T) {
-	httpmock.Activate()
-	defer httpmock.DeactivateAndReset()
-
-	runtimeConfig := make(map[string]interface{})
-	runtimeConfig[PulsarMaxMessageSizeKey] = strconv.FormatInt(5*1024*1024, 10)
-
-	protocol := "http"
-	ip := "pulsar"
-	port := "18080"
-	url := "/admin/v2/brokers/configuration/runtime"
-	httpmock.RegisterResponder("GET", protocol+"://"+ip+":"+port+url,
-		func(req *http.Request) (*http.Response, error) {
-			return httpmock.NewJsonResponse(200, runtimeConfig)
-		},
-	)
-
-	ret, err := GetPulsarConfig(protocol, ip, port, url)
-	assert.Equal(t, nil, err)
-	assert.Equal(t, len(ret), len(runtimeConfig))
-	assert.Equal(t, len(ret), 1)
-	for key, value := range ret {
-		assert.Equal(t, fmt.Sprintf("%v", value), fmt.Sprintf("%v", runtimeConfig[key]))
-	}
-}
-
-func TestGetPulsarConfig_Error(t *testing.T) {
-	protocol := "http"
-	ip := "pulsar"
-	port := "17777"
-	url := "/admin/v2/brokers/configuration/runtime"
-
-	ret, err := GetPulsarConfig(protocol, ip, port, url, 1, 1)
-	assert.NotNil(t, err)
-	assert.Nil(t, ret)
 }
 
 func TestGetAttrByKeyFromRepeatedKV(t *testing.T) {
