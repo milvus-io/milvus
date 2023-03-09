@@ -124,7 +124,7 @@ class ApiCollectionWrapper:
         func_name = sys._getframe().f_code.co_name
         res, check = api_request([self.collection.insert, data, partition_name], **kwargs)
         check_result = ResponseChecker(res, func_name, check_task, check_items, check,
-                                       dat=data, partition_name=partition_name,
+                                       data=data, partition_name=partition_name,
                                        **kwargs).run()
         return res, check_result
 
