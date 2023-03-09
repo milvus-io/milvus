@@ -12,10 +12,10 @@ image:
 standalone:
   resources:
     limits:
-      cpu: 4
-      memory: 10Gi
+      cpu: 8
+      memory: 16Gi
     requests:
-      cpu: 2
+      cpu: 4
       memory: 8Gi
 
 kafka:
