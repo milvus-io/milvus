@@ -18,13 +18,66 @@
 package merr
 
 import (
+	"context"
 	"strings"
 
 	"github.com/cockroachdb/errors"
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 )
+
+// Declare a success status, avoid create it every time
+var successStatus = &commonpb.Status{}
+
+// Code returns the error code of the given error,
+// WARN: DO NOT use this for now
+func Code(err error) int32 {
+	if err == nil {
+		return 0
+	}
+
+	cause := errors.Cause(err)
+	switch cause := cause.(type) {
+	case milvusError:
+		return cause.code()
+
+	default:
+		if errors.Is(cause, context.Canceled) {
+			return CanceledCode
+		} else if errors.Is(cause, context.DeadlineExceeded) {
+			return TimeoutCode
+		} else {
+			return errUnexpected.code()
+		}
+	}
+}
 
 func IsRetriable(err error) bool {
 	return Code(err)&retriableFlag != 0
+}
+
+// Status returns a status according to the given err,
+// returns Success status if err is nil
+func Status(err error) *commonpb.Status {
+	if err == nil {
+		return successStatus
+	}
+
+	return &commonpb.Status{
+		Code:   Code(err),
+		Reason: err.Error(),
+		// Deprecated, for compatibility, set it to UnexpectedError
+		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+	}
+}
+
+// Error returns a error according to the given status,
+// returns nil if the status is a success status
+func Error(status *commonpb.Status) error {
+	if status.Code == 0 {
+		return nil
+	}
+
+	return newMilvusError(status.GetReason(), status.Code, status.Code&retriableFlag != 0)
 }
 
 // Service related

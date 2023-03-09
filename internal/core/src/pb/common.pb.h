@@ -758,6 +758,7 @@ class Status final :
   enum : int {
     kReasonFieldNumber = 2,
     kErrorCodeFieldNumber = 1,
+    kCodeFieldNumber = 3,
   };
   // string reason = 2;
   void clear_reason();
@@ -782,6 +783,15 @@ class Status final :
   void _internal_set_error_code(::milvus::proto::common::ErrorCode value);
   public:
 
+  // int32 code = 3;
+  void clear_code();
+  int32_t code() const;
+  void set_code(int32_t value);
+  private:
+  int32_t _internal_code() const;
+  void _internal_set_code(int32_t value);
+  public:
+
   // @@protoc_insertion_point(class_scope:milvus.proto.common.Status)
  private:
   class _Internal;
@@ -792,6 +802,7 @@ class Status final :
   struct Impl_ {
     ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr reason_;
     int error_code_;
+    int32_t code_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   };
   union { Impl_ _impl_; };
@@ -2744,6 +2755,26 @@ inline void Status::set_allocated_reason(std::string* reason) {
   }
 #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
   // @@protoc_insertion_point(field_set_allocated:milvus.proto.common.Status.reason)
+}
+
+// int32 code = 3;
+inline void Status::clear_code() {
+  _impl_.code_ = 0;
+}
+inline int32_t Status::_internal_code() const {
+  return _impl_.code_;
+}
+inline int32_t Status::code() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.common.Status.code)
+  return _internal_code();
+}
+inline void Status::_internal_set_code(int32_t value) {
+  
+  _impl_.code_ = value;
+}
+inline void Status::set_code(int32_t value) {
+  _internal_set_code(value);
+  // @@protoc_insertion_point(field_set:milvus.proto.common.Status.code)
 }
 
 // -------------------------------------------------------------------

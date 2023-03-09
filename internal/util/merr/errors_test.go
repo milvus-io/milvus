@@ -46,6 +46,16 @@ func (s *ErrSuite) TestCode() {
 	s.True(sameCodeErr.Is(ErrCollectionNotFound))
 }
 
+func (s *ErrSuite) TestStatus() {
+	err := WrapErrCollectionNotFound(1)
+	status := Status(err)
+	restoredErr := Error(status)
+
+	s.ErrorIs(err, restoredErr)
+	s.Equal(int32(0), Status(nil).Code)
+	s.Nil(Error(successStatus))
+}
+
 func (s *ErrSuite) TestWrap() {
 	// Service related
 	s.ErrorIs(WrapErrServiceNotReady("init", "test init..."), ErrServiceNotReady)

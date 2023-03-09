@@ -18,8 +18,6 @@
 package merr
 
 import (
-	"context"
-
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 
@@ -151,29 +149,6 @@ func (e milvusError) Is(err error) bool {
 		return e.errCode == cause.errCode
 	}
 	return false
-}
-
-// Code returns the error code of the given error,
-// WARN: DO NOT use this for now
-func Code(err error) int32 {
-	if err == nil {
-		return 0
-	}
-
-	cause := errors.Cause(err)
-	switch cause := cause.(type) {
-	case milvusError:
-		return cause.code()
-
-	default:
-		if errors.Is(cause, context.Canceled) {
-			return CanceledCode
-		} else if errors.Is(cause, context.DeadlineExceeded) {
-			return TimeoutCode
-		} else {
-			return errUnexpected.code()
-		}
-	}
 }
 
 type multiErrors struct {
