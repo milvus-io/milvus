@@ -28,6 +28,7 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/storage/aliyun"
 	"github.com/milvus-io/milvus/internal/storage/gcp"
 	"github.com/milvus-io/milvus/internal/util/merr"
 	"github.com/milvus-io/milvus/internal/util/retry"
@@ -42,8 +43,9 @@ var (
 )
 
 const (
-	CloudProviderGCP = "gcp"
-	CloudProviderAWS = "aws"
+	CloudProviderGCP    = "gcp"
+	CloudProviderAWS    = "aws"
+	CloudProviderAliyun = "aliyun"
 )
 
 func WrapErrNoSuchKey(key string) error {
@@ -77,8 +79,17 @@ func NewMinioChunkManager(ctx context.Context, opts ...Option) (*MinioChunkManag
 func newMinioChunkManagerWithConfig(ctx context.Context, c *config) (*MinioChunkManager, error) {
 	var creds *credentials.Credentials
 	var newMinioFn = minio.New
+	var bucketLookupType = minio.BucketLookupAuto
 
 	switch c.cloudProvider {
+	case CloudProviderAliyun:
+		// auto doesn't work for aliyun, so we set to dns deliberately
+		bucketLookupType = minio.BucketLookupDNS
+		if c.useIAM {
+			newMinioFn = aliyun.NewMinioClient
+		} else {
+			creds = credentials.NewStaticV4(c.accessKeyID, c.secretAccessKeyID, "")
+		}
 	case CloudProviderGCP:
 		newMinioFn = gcp.NewMinioClient
 		if !c.useIAM {
@@ -92,8 +103,9 @@ func newMinioChunkManagerWithConfig(ctx context.Context, c *config) (*MinioChunk
 		}
 	}
 	minioOpts := &minio.Options{
-		Creds:  creds,
-		Secure: c.useSSL,
+		BucketLookup: bucketLookupType,
+		Creds:        creds,
+		Secure:       c.useSSL,
 	}
 	minIOClient, err := newMinioFn(c.address, minioOpts)
 	// options nil or invalid formatted endpoint, don't need to retry
