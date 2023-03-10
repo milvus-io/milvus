@@ -10,6 +10,7 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License.
 
 FROM milvusdb/openblas:ubuntu20.04-20220914-179ea77 AS openblas
+FROM milvusdb/milvus-env:amd64-ubuntu20.04-20221214-66bf02d As milvus-env
 
 #FROM alpine
 FROM ubuntu:focal-20220426
@@ -23,6 +24,7 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=openblas /usr/local/lib/libopenblasp-r0.3.21.so /usr/lib/
+COPY --from=milvus-env /usr/local/lib/libabsl_* /usr/lib/
 
 RUN ln -s /usr/lib/libopenblasp-r0.3.21.so /usr/lib/libopenblas.so.3 && \
     ln -s /usr/lib/libopenblas.so.3 /usr/lib/libopenblas.so
