@@ -184,17 +184,6 @@ func (m *mockDmlTask) getChannels() ([]vChan, error) {
 	return m.vchans, nil
 }
 
-func (m *mockDmlTask) getPChanStats() (map[pChan]pChanStatistics, error) {
-	ret := make(map[pChan]pChanStatistics)
-	for _, pchan := range m.pchans {
-		ret[pchan] = pChanStatistics{
-			minTs: m.ts,
-			maxTs: m.ts,
-		}
-	}
-	return ret, nil
-}
-
 func newMockDmlTask(ctx context.Context) *mockDmlTask {
 	shardNum := 2
 
