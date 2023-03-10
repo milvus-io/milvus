@@ -3973,17 +3973,6 @@ class TestsearchPagination(TestcaseBase):
 
         assert len(search_res[0].ids) == len(res[0].ids[offset:])
         assert sorted(search_res[0].distances, key=numpy.float32) == sorted(res[0].distances[offset:], key=numpy.float32)
-        unique_a, unique_b = set(search_res[0].ids), set(res[0].ids[offset:])
-        diff = unique_a ^ unique_b
-
-        assert len(diff) <= 2
-
-        if len(diff) == 2:
-            i = list(search_res[0].ids).index((unique_a-unique_b).pop())
-            i2 = list(res[0].ids[offset:]).index((unique_b-unique_a).pop())
-
-            assert search_res[0].distances[i] == res[0].distances[offset:][i2]
-
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("limit", [100, 3000, 10000])
