@@ -17,8 +17,10 @@
 #include <sys/mman.h>
 
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "common/Consts.h"
 #include "common/FieldMeta.h"

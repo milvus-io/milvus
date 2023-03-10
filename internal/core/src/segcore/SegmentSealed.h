@@ -34,7 +34,7 @@ class SegmentSealed : public SegmentInternalInterface {
     virtual void
     DropFieldData(const FieldId field_id) = 0;
 
-    virtual SegmentType
+    SegmentType
     type() const override {
         return SegmentType::Sealed;
     }

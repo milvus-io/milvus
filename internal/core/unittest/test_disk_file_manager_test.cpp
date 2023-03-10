@@ -71,13 +71,15 @@ TEST_F(DiskAnnFileManagerTest, AddFilePositive) {
     IndexMeta index_meta = {3, 100, 1000, 1, "index"};
 
     int64_t slice_size = milvus::index_file_slice_size << 20;
-    auto diskAnnFileManager = std::make_shared<DiskFileManagerImpl>(filed_data_meta, index_meta, storage_config_);
+    auto diskAnnFileManager = std::make_shared<DiskFileManagerImpl>(
+        filed_data_meta, index_meta, storage_config_);
     auto ok = diskAnnFileManager->AddFile(indexFilePath);
     EXPECT_EQ(ok, true);
 
     auto remote_files_to_size = diskAnnFileManager->GetRemotePathsToFileSize();
     auto num_slice = index_size / slice_size;
-    EXPECT_EQ(remote_files_to_size.size(), index_size % slice_size == 0 ? num_slice : num_slice + 1);
+    EXPECT_EQ(remote_files_to_size.size(),
+              index_size % slice_size == 0 ? num_slice : num_slice + 1);
 
     std::vector<std::string> remote_files;
     for (auto& file2size : remote_files_to_size) {
@@ -125,13 +127,15 @@ TEST_F(DiskAnnFileManagerTest, AddFilePositiveParallel) {
     IndexMeta index_meta = {3, 100, 1000, 1, "index"};
 
     int64_t slice_size = milvus::index_file_slice_size << 20;
-    auto diskAnnFileManager = std::make_shared<DiskFileManagerImpl>(filed_data_meta, index_meta, storage_config_);
+    auto diskAnnFileManager = std::make_shared<DiskFileManagerImpl>(
+        filed_data_meta, index_meta, storage_config_);
     auto ok = diskAnnFileManager->AddFile(indexFilePath);
     EXPECT_EQ(ok, true);
 
     auto remote_files_to_size = diskAnnFileManager->GetRemotePathsToFileSize();
     auto num_slice = index_size / slice_size;
-    EXPECT_EQ(remote_files_to_size.size(), index_size % slice_size == 0 ? num_slice : num_slice + 1);
+    EXPECT_EQ(remote_files_to_size.size(),
+              index_size % slice_size == 0 ? num_slice : num_slice + 1);
 
     std::vector<std::string> remote_files;
     for (auto& file2size : remote_files_to_size) {
@@ -169,14 +173,16 @@ TEST_F(DiskAnnFileManagerTest, TestThreadPool) {
     std::vector<std::future<int>> futures;
     auto start = chrono::system_clock::now();
     for (int i = 0; i < 100; i++) {
-        futures.push_back(thread_pool->Submit(test_worker, "test_id" + std::to_string(i)));
+        futures.push_back(
+            thread_pool->Submit(test_worker, "test_id" + std::to_string(i)));
     }
     for (auto& future : futures) {
         EXPECT_EQ(future.get(), 1);
     }
     auto end = chrono::system_clock::now();
     auto duration = chrono::duration_cast<chrono::microseconds>(end - start);
-    auto second = double(duration.count()) * chrono::microseconds::period::num / chrono::microseconds::period::den;
+    auto second = double(duration.count()) * chrono::microseconds::period::num /
+                  chrono::microseconds::period::den;
     EXPECT_LT(second, 4 * 100);
 }
 
@@ -193,7 +199,8 @@ TEST_F(DiskAnnFileManagerTest, TestThreadPoolException) {
         auto thread_pool = new milvus::ThreadPool(50);
         std::vector<std::future<int>> futures;
         for (int i = 0; i < 100; i++) {
-            futures.push_back(thread_pool->Submit(test_exception, "test_id" + std::to_string(i)));
+            futures.push_back(thread_pool->Submit(
+                test_exception, "test_id" + std::to_string(i)));
         }
         for (auto& future : futures) {
             future.get();

@@ -20,7 +20,7 @@
 
 #include "TimestampIndex.h"
 #include "common/Schema.h"
-#include "easylogging++.h"
+#include "easyloggingpp/easylogging++.h"
 #include "segcore/AckResponder.h"
 #include "segcore/ConcurrentVector.h"
 #include "segcore/Record.h"

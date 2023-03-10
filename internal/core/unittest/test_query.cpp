@@ -37,7 +37,8 @@ TEST(Query, ShowExecutor) {
     auto metric_type = knowhere::metric::L2;
     auto node = std::make_unique<FloatVectorANNS>();
     auto schema = std::make_shared<Schema>();
-    auto field_id = schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, metric_type);
+    auto field_id = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, metric_type);
     int64_t num_queries = 100L;
     auto raw_data = DataGen(schema, num_queries);
     auto& info = node->search_info_;
@@ -79,7 +80,8 @@ TEST(Query, DSL) {
 })";
 
     auto schema = std::make_shared<Schema>();
-    schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
 
     auto plan = CreatePlan(*schema, dsl_string);
     auto res = shower.call_child(*plan->plan_node_);
@@ -126,7 +128,8 @@ TEST(Query, ParsePlaceholderGroup) {
 })";
 
     auto schema = std::make_shared<Schema>();
-    schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     auto plan = CreatePlan(*schema, dsl_string);
     int64_t num_queries = 100000;
     int dim = 16;
@@ -139,7 +142,8 @@ TEST(Query, ExecWithPredicateLoader) {
     using namespace milvus::query;
     using namespace milvus::segcore;
     auto schema = std::make_shared<Schema>();
-    schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     schema->AddDebugField("age", DataType::FLOAT);
     auto counter_fid = schema->AddDebugField("counter", DataType::INT64);
     schema->set_primary_field_id(counter_fid);
@@ -174,12 +178,17 @@ TEST(Query, ExecWithPredicateLoader) {
     auto dataset = DataGen(schema, N);
     auto segment = CreateGrowingSegment(schema);
     segment->PreInsert(N);
-    segment->Insert(0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_);
+    segment->Insert(0,
+                    N,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
 
     auto plan = CreatePlan(*schema, dsl);
     auto num_queries = 5;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
-    auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
     Timestamp time = 1000000;
 
     auto sr = segment->Search(plan.get(), ph_group.get(), time);
@@ -217,7 +226,8 @@ TEST(Query, ExecWithPredicateSmallN) {
     using namespace milvus::query;
     using namespace milvus::segcore;
     auto schema = std::make_shared<Schema>();
-    schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 7, knowhere::metric::L2);
+    schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 7, knowhere::metric::L2);
     schema->AddDebugField("age", DataType::FLOAT);
     auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
@@ -252,12 +262,17 @@ TEST(Query, ExecWithPredicateSmallN) {
     auto dataset = DataGen(schema, N);
     auto segment = CreateGrowingSegment(schema);
     segment->PreInsert(N);
-    segment->Insert(0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_);
+    segment->Insert(0,
+                    N,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
 
     auto plan = CreatePlan(*schema, dsl);
     auto num_queries = 5;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 7, 1024);
-    auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
     Timestamp time = 1000000;
 
     auto sr = segment->Search(plan.get(), ph_group.get(), time);
@@ -271,7 +286,8 @@ TEST(Query, ExecWithPredicate) {
     using namespace milvus::query;
     using namespace milvus::segcore;
     auto schema = std::make_shared<Schema>();
-    schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     schema->AddDebugField("age", DataType::FLOAT);
     auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
@@ -306,12 +322,17 @@ TEST(Query, ExecWithPredicate) {
     auto dataset = DataGen(schema, N);
     auto segment = CreateGrowingSegment(schema);
     segment->PreInsert(N);
-    segment->Insert(0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_);
+    segment->Insert(0,
+                    N,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
 
     auto plan = CreatePlan(*schema, dsl);
     auto num_queries = 5;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
-    auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
     Timestamp time = 1000000;
 
     auto sr = segment->Search(plan.get(), ph_group.get(), time);
@@ -349,7 +370,8 @@ TEST(Query, ExecTerm) {
     using namespace milvus::query;
     using namespace milvus::segcore;
     auto schema = std::make_shared<Schema>();
-    schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     schema->AddDebugField("age", DataType::FLOAT);
     auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
@@ -383,12 +405,17 @@ TEST(Query, ExecTerm) {
     auto dataset = DataGen(schema, N);
     auto segment = CreateGrowingSegment(schema);
     segment->PreInsert(N);
-    segment->Insert(0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_);
+    segment->Insert(0,
+                    N,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
 
     auto plan = CreatePlan(*schema, dsl);
     auto num_queries = 3;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
-    auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
     Timestamp time = 1000000;
 
     auto sr = segment->Search(plan.get(), ph_group.get(), time);
@@ -405,7 +432,8 @@ TEST(Query, ExecEmpty) {
     using namespace milvus::segcore;
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField("age", DataType::FLOAT);
-    schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     std::string dsl = R"({
         "bool": {
             "must": [
@@ -430,7 +458,8 @@ TEST(Query, ExecEmpty) {
     auto plan = CreatePlan(*schema, dsl);
     auto num_queries = 5;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
-    auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
     Timestamp time = 1000000;
 
     auto sr = segment->Search(plan.get(), ph_group.get(), time);
@@ -477,11 +506,16 @@ TEST(Query, ExecWithoutPredicateFlat) {
     auto dataset = DataGen(schema, N);
     auto segment = CreateGrowingSegment(schema);
     segment->PreInsert(N);
-    segment->Insert(0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_);
+    segment->Insert(0,
+                    N,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
 
     auto num_queries = 5;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
-    auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
     Timestamp time = 1000000;
 
     auto sr = segment->Search(plan.get(), ph_group.get(), time);
@@ -495,7 +529,8 @@ TEST(Query, ExecWithoutPredicate) {
     using namespace milvus::query;
     using namespace milvus::segcore;
     auto schema = std::make_shared<Schema>();
-    schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     schema->AddDebugField("age", DataType::FLOAT);
     auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
@@ -523,11 +558,16 @@ TEST(Query, ExecWithoutPredicate) {
     auto dataset = DataGen(schema, N);
     auto segment = CreateGrowingSegment(schema);
     segment->PreInsert(N);
-    segment->Insert(0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_);
+    segment->Insert(0,
+                    N,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
 
     auto num_queries = 5;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, 16, 1024);
-    auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
     Timestamp time = 1000000;
 
     auto sr = segment->Search(plan.get(), ph_group.get(), time);
@@ -587,18 +627,25 @@ TEST(Query, InnerProduct) {
             ]
         }
     })";
-    auto vec_fid = schema->AddDebugField("normalized", DataType::VECTOR_FLOAT, dim, knowhere::metric::IP);
+    auto vec_fid = schema->AddDebugField(
+        "normalized", DataType::VECTOR_FLOAT, dim, knowhere::metric::IP);
     auto i64_fid = schema->AddDebugField("age", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
     auto dataset = DataGen(schema, N);
     auto segment = CreateGrowingSegment(schema);
     auto plan = CreatePlan(*schema, dsl);
     segment->PreInsert(N);
-    segment->Insert(0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_);
+    segment->Insert(0,
+                    N,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
     auto col = dataset.get_col<float>(vec_fid);
 
-    auto ph_group_raw = CreatePlaceholderGroupFromBlob(num_queries, 16, col.data());
-    auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+    auto ph_group_raw =
+        CreatePlaceholderGroupFromBlob(num_queries, 16, col.data());
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
     Timestamp ts = N * 2;
     auto sr = segment->Search(plan.get(), ph_group.get(), ts);
     assert_order(*sr, "ip");
@@ -651,15 +698,21 @@ TEST(Query, FillSegment) {
     // dispatch here
     int N = 100000;
     auto dataset = DataGen(schema, N);
-    const auto std_vec = dataset.get_col<int64_t>(FieldId(101));       // ids field
-    const auto std_vfloat_vec = dataset.get_col<float>(FieldId(100));  // vector field
-    const auto std_i32_vec = dataset.get_col<int32_t>(FieldId(102));   // scalar field
+    const auto std_vec = dataset.get_col<int64_t>(FieldId(101));  // ids field
+    const auto std_vfloat_vec =
+        dataset.get_col<float>(FieldId(100));  // vector field
+    const auto std_i32_vec =
+        dataset.get_col<int32_t>(FieldId(102));  // scalar field
 
     std::vector<std::unique_ptr<SegmentInternalInterface>> segments;
     segments.emplace_back([&] {
         auto segment = CreateGrowingSegment(schema);
         segment->PreInsert(N);
-        segment->Insert(0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_);
+        segment->Insert(0,
+                        N,
+                        dataset.row_ids_.data(),
+                        dataset.timestamps_.data(),
+                        dataset.raw_);
         return segment;
     }());
     segments.emplace_back([&] {
@@ -708,8 +761,10 @@ TEST(Query, FillSegment) {
 
     for (auto& segment : segments) {
         plan->target_entries_.clear();
-        plan->target_entries_.push_back(schema->get_field_id(FieldName("fakevec")));
-        plan->target_entries_.push_back(schema->get_field_id(FieldName("the_value")));
+        plan->target_entries_.push_back(
+            schema->get_field_id(FieldName("fakevec")));
+        plan->target_entries_.push_back(
+            schema->get_field_id(FieldName("the_value")));
         auto result = segment->Search(plan.get(), ph.get(), ts);
         // std::cout << SearchResultToJson(result).dump(2);
         result->result_offsets_.resize(topk * num_queries);
@@ -723,11 +778,13 @@ TEST(Query, FillSegment) {
         }
 
         auto vec_field_id = schema->get_field_id(FieldName("fakevec"));
-        auto output_vec_field_data = fields_data.at(vec_field_id)->vectors().float_vector().data();
+        auto output_vec_field_data =
+            fields_data.at(vec_field_id)->vectors().float_vector().data();
         ASSERT_EQ(output_vec_field_data.size(), topk * num_queries * dim);
 
         auto i32_field_id = schema->get_field_id(FieldName("the_value"));
-        auto output_i32_field_data = fields_data.at(i32_field_id)->scalars().int_data().data();
+        auto output_i32_field_data =
+            fields_data.at(i32_field_id)->scalars().int_data().data();
         ASSERT_EQ(output_i32_field_data.size(), topk * num_queries);
 
         for (int i = 0; i < topk * num_queries; i++) {
@@ -737,13 +794,17 @@ TEST(Query, FillSegment) {
             auto std_val = std_vec[internal_offset];
             auto std_i32 = std_i32_vec[internal_offset];
             std::vector<float> std_vfloat(dim);
-            std::copy_n(std_vfloat_vec.begin() + dim * internal_offset, dim, std_vfloat.begin());
+            std::copy_n(std_vfloat_vec.begin() + dim * internal_offset,
+                        dim,
+                        std_vfloat.begin());
 
             ASSERT_EQ(val, std_val) << "io:" << internal_offset;
             if (val != -1) {
                 // check vector field
                 std::vector<float> vfloat(dim);
-                memcpy(vfloat.data(), &output_vec_field_data[i * dim], dim * sizeof(float));
+                memcpy(vfloat.data(),
+                       &output_vec_field_data[i * dim],
+                       dim * sizeof(float));
                 ASSERT_EQ(vfloat, std_vfloat);
 
                 // check int32 field
@@ -759,7 +820,8 @@ TEST(Query, ExecWithPredicateBinary) {
     using namespace milvus::query;
     using namespace milvus::segcore;
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField("fakevec", DataType::VECTOR_BINARY, 512, knowhere::metric::JACCARD);
+    auto vec_fid = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_BINARY, 512, knowhere::metric::JACCARD);
     auto float_fid = schema->AddDebugField("age", DataType::FLOAT);
     auto i64_fid = schema->AddDebugField("counter", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
@@ -794,13 +856,19 @@ TEST(Query, ExecWithPredicateBinary) {
     auto dataset = DataGen(schema, N);
     auto segment = CreateGrowingSegment(schema);
     segment->PreInsert(N);
-    segment->Insert(0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_);
+    segment->Insert(0,
+                    N,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
     auto vec_ptr = dataset.get_col<uint8_t>(vec_fid);
 
     auto plan = CreatePlan(*schema, dsl);
     auto num_queries = 5;
-    auto ph_group_raw = CreateBinaryPlaceholderGroupFromBlob(num_queries, 512, vec_ptr.data() + 1024 * 512 / 8);
-    auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+    auto ph_group_raw = CreateBinaryPlaceholderGroupFromBlob(
+        num_queries, 512, vec_ptr.data() + 1024 * 512 / 8);
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
     Timestamp time = 1000000;
 
     auto sr = segment->Search(plan.get(), ph_group.get(), time);

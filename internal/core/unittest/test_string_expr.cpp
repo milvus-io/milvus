@@ -46,7 +46,10 @@ GenGenericValue(T value) {
 }
 
 auto
-GenColumnInfo(int64_t field_id, proto::schema::DataType field_type, bool auto_id, bool is_pk) {
+GenColumnInfo(int64_t field_id,
+              proto::schema::DataType field_type,
+              bool auto_id,
+              bool is_pk) {
     auto column_info = new proto::plan::ColumnInfo();
     column_info->set_field_id(field_id);
     column_info->set_data_type(field_type);
@@ -56,7 +59,10 @@ GenColumnInfo(int64_t field_id, proto::schema::DataType field_type, bool auto_id
 }
 
 auto
-GenQueryInfo(int64_t topk, std::string metric_type, std::string search_params, int64_t round_decimal = -1) {
+GenQueryInfo(int64_t topk,
+             std::string metric_type,
+             std::string search_params,
+             int64_t round_decimal = -1) {
     auto query_info = new proto::plan::QueryInfo();
     query_info->set_topk(topk);
     query_info->set_metric_type(metric_type);
@@ -66,7 +72,10 @@ GenQueryInfo(int64_t topk, std::string metric_type, std::string search_params, i
 }
 
 auto
-GenAnns(proto::plan::Expr* predicate, bool is_binary, int64_t field_id, std::string placeholder_tag = "$0") {
+GenAnns(proto::plan::Expr* predicate,
+        bool is_binary,
+        int64_t field_id,
+        std::string placeholder_tag = "$0") {
     auto query_info = GenQueryInfo(10, "L2", "{\"nprobe\": 10}", -1);
     auto anns = new proto::plan::VectorANNS();
     anns->set_is_binary(is_binary);
@@ -146,23 +155,32 @@ GenPlanNode() {
 }
 
 void
-SetTargetEntry(std::unique_ptr<proto::plan::PlanNode>& plan_node, const std::vector<int64_t>& output_fields) {
+SetTargetEntry(std::unique_ptr<proto::plan::PlanNode>& plan_node,
+               const std::vector<int64_t>& output_fields) {
     for (auto id : output_fields) {
         plan_node->add_output_field_ids(id);
     }
 }
 
 auto
-GenTermPlan(const FieldMeta& fvec_meta, const FieldMeta& str_meta, const std::vector<std::string>& strs)
+GenTermPlan(const FieldMeta& fvec_meta,
+            const FieldMeta& str_meta,
+            const std::vector<std::string>& strs)
     -> std::unique_ptr<proto::plan::PlanNode> {
-    auto column_info = GenColumnInfo(str_meta.get_id().get(), proto::schema::DataType::VarChar, false, false);
+    auto column_info = GenColumnInfo(str_meta.get_id().get(),
+                                     proto::schema::DataType::VarChar,
+                                     false,
+                                     false);
     auto term_expr = GenTermExpr<std::string>(strs);
     term_expr->set_allocated_column_info(column_info);
 
     auto expr = GenExpr().release();
     expr->set_allocated_term_expr(term_expr);
 
-    auto anns = GenAnns(expr, fvec_meta.get_data_type() == DataType::VECTOR_BINARY, fvec_meta.get_id().get(), "$0");
+    auto anns = GenAnns(expr,
+                        fvec_meta.get_data_type() == DataType::VECTOR_BINARY,
+                        fvec_meta.get_id().get(),
+                        "$0");
 
     auto plan_node = GenPlanNode();
     plan_node->set_allocated_vector_anns(anns);
@@ -171,8 +189,12 @@ GenTermPlan(const FieldMeta& fvec_meta, const FieldMeta& str_meta, const std::ve
 
 auto
 GenAlwaysFalseExpr(const FieldMeta& fvec_meta, const FieldMeta& str_meta) {
-    auto column_info = GenColumnInfo(str_meta.get_id().get(), proto::schema::DataType::VarChar, false, false);
-    auto term_expr = GenTermExpr<std::string>({});  // in empty set, always false.
+    auto column_info = GenColumnInfo(str_meta.get_id().get(),
+                                     proto::schema::DataType::VarChar,
+                                     false,
+                                     false);
+    auto term_expr =
+        GenTermExpr<std::string>({});  // in empty set, always false.
     term_expr->set_allocated_column_info(column_info);
 
     auto expr = GenExpr().release();
@@ -193,8 +215,10 @@ GenAlwaysTrueExpr(const FieldMeta& fvec_meta, const FieldMeta& str_meta) {
 auto
 GenAlwaysFalsePlan(const FieldMeta& fvec_meta, const FieldMeta& str_meta) {
     auto always_false_expr = GenAlwaysFalseExpr(fvec_meta, str_meta);
-    auto anns = GenAnns(always_false_expr, fvec_meta.get_data_type() == DataType::VECTOR_BINARY,
-                        fvec_meta.get_id().get(), "$0");
+    auto anns = GenAnns(always_false_expr,
+                        fvec_meta.get_data_type() == DataType::VECTOR_BINARY,
+                        fvec_meta.get_id().get(),
+                        "$0");
 
     auto plan_node = GenPlanNode();
     plan_node->set_allocated_vector_anns(anns);
@@ -204,8 +228,10 @@ GenAlwaysFalsePlan(const FieldMeta& fvec_meta, const FieldMeta& str_meta) {
 auto
 GenAlwaysTruePlan(const FieldMeta& fvec_meta, const FieldMeta& str_meta) {
     auto always_true_expr = GenAlwaysTrueExpr(fvec_meta, str_meta);
-    auto anns =
-        GenAnns(always_true_expr, fvec_meta.get_data_type() == DataType::VECTOR_BINARY, fvec_meta.get_id().get(), "$0");
+    auto anns = GenAnns(always_true_expr,
+                        fvec_meta.get_data_type() == DataType::VECTOR_BINARY,
+                        fvec_meta.get_id().get(),
+                        "$0");
 
     auto plan_node = GenPlanNode();
     plan_node->set_allocated_vector_anns(anns);
@@ -217,7 +243,8 @@ GenTestSchema() {
     auto schema = std::make_shared<Schema>();
     schema->AddDebugField("str", DataType::VARCHAR);
     schema->AddDebugField("another_str", DataType::VARCHAR);
-    schema->AddDebugField("fvec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    schema->AddDebugField(
+        "fvec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     auto pk = schema->AddDebugField("int64", DataType::INT64);
     schema->set_primary_field_id(pk);
     return schema;
@@ -228,7 +255,8 @@ GenStrPKSchema() {
     auto schema = std::make_shared<Schema>();
     auto pk = schema->AddDebugField("str", DataType::VARCHAR);
     schema->AddDebugField("another_str", DataType::VARCHAR);
-    schema->AddDebugField("fvec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    schema->AddDebugField(
+        "fvec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
     schema->AddDebugField("int64", DataType::INT64);
     schema->set_primary_field_id(pk);
     return schema;
@@ -252,7 +280,11 @@ TEST(StringExpr, Term) {
     }();
 
     std::map<int, std::vector<std::string>> terms = {
-        {0, {"2000", "3000"}}, {1, {"2000"}}, {2, {"3000"}}, {3, {}}, {4, {vec_2k_3k}},
+        {0, {"2000", "3000"}},
+        {1, {"2000"}},
+        {2, {"3000"}},
+        {3, {}},
+        {4, {vec_2k_3k}},
     };
 
     auto seg = CreateGrowingSegment(schema);
@@ -266,11 +298,16 @@ TEST(StringExpr, Term) {
         auto end = new_str_col->scalars().string_data().data().end();
         str_col.insert(str_col.end(), begin, end);
         seg->PreInsert(N);
-        seg->Insert(iter * N, N, raw_data.row_ids_.data(), raw_data.timestamps_.data(), raw_data.raw_);
+        seg->Insert(iter * N,
+                    N,
+                    raw_data.row_ids_.data(),
+                    raw_data.timestamps_.data(),
+                    raw_data.raw_);
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
-    ExecExprVisitor visitor(*seg_promote, seg_promote->get_row_count(), MAX_TIMESTAMP);
+    ExecExprVisitor visitor(
+        *seg_promote, seg_promote->get_row_count(), MAX_TIMESTAMP);
     for (const auto& [_, term] : terms) {
         auto plan_proto = GenTermPlan(fvec_meta, str_meta, term);
         auto plan = ProtoParser(*schema).CreatePlan(*plan_proto);
@@ -296,11 +333,18 @@ TEST(StringExpr, Compare) {
     const auto& str_meta = schema->operator[](FieldName("str"));
     const auto& another_str_meta = schema->operator[](FieldName("another_str"));
 
-    auto gen_compare_plan = [&, fvec_meta, str_meta,
-                             another_str_meta](proto::plan::OpType op) -> std::unique_ptr<proto::plan::PlanNode> {
-        auto str_col_info = GenColumnInfo(str_meta.get_id().get(), proto::schema::DataType::VarChar, false, false);
+    auto gen_compare_plan =
+        [&, fvec_meta, str_meta, another_str_meta](
+            proto::plan::OpType op) -> std::unique_ptr<proto::plan::PlanNode> {
+        auto str_col_info = GenColumnInfo(str_meta.get_id().get(),
+                                          proto::schema::DataType::VarChar,
+                                          false,
+                                          false);
         auto another_str_col_info =
-            GenColumnInfo(another_str_meta.get_id().get(), proto::schema::DataType::VarChar, false, false);
+            GenColumnInfo(another_str_meta.get_id().get(),
+                          proto::schema::DataType::VarChar,
+                          false,
+                          false);
 
         auto compare_expr = GenCompareExpr(op);
         compare_expr->set_allocated_left_column_info(str_col_info);
@@ -309,22 +353,37 @@ TEST(StringExpr, Compare) {
         auto expr = GenExpr().release();
         expr->set_allocated_compare_expr(compare_expr);
 
-        auto anns = GenAnns(expr, fvec_meta.get_data_type() == DataType::VECTOR_BINARY, fvec_meta.get_id().get(), "$0");
+        auto anns =
+            GenAnns(expr,
+                    fvec_meta.get_data_type() == DataType::VECTOR_BINARY,
+                    fvec_meta.get_id().get(),
+                    "$0");
 
         auto plan_node = std::make_unique<proto::plan::PlanNode>();
         plan_node->set_allocated_vector_anns(anns);
         return std::move(plan_node);
     };
 
-    std::vector<std::tuple<proto::plan::OpType, std::function<bool(std::string, std::string)>>> testcases{
-        {proto::plan::OpType::GreaterThan, [](std::string v1, std::string v2) { return v1 > v2; }},
-        {proto::plan::OpType::GreaterEqual, [](std::string v1, std::string v2) { return v1 >= v2; }},
-        {proto::plan::OpType::LessThan, [](std::string v1, std::string v2) { return v1 < v2; }},
-        {proto::plan::OpType::LessEqual, [](std::string v1, std::string v2) { return v1 <= v2; }},
-        {proto::plan::OpType::Equal, [](std::string v1, std::string v2) { return v1 == v2; }},
-        {proto::plan::OpType::NotEqual, [](std::string v1, std::string v2) { return v1 != v2; }},
-        {proto::plan::OpType::PrefixMatch, [](std::string v1, std::string v2) { return PrefixMatch(v1, v2); }},
-    };
+    std::vector<std::tuple<proto::plan::OpType,
+                           std::function<bool(std::string, std::string)>>>
+        testcases{
+            {proto::plan::OpType::GreaterThan,
+             [](std::string v1, std::string v2) { return v1 > v2; }},
+            {proto::plan::OpType::GreaterEqual,
+             [](std::string v1, std::string v2) { return v1 >= v2; }},
+            {proto::plan::OpType::LessThan,
+             [](std::string v1, std::string v2) { return v1 < v2; }},
+            {proto::plan::OpType::LessEqual,
+             [](std::string v1, std::string v2) { return v1 <= v2; }},
+            {proto::plan::OpType::Equal,
+             [](std::string v1, std::string v2) { return v1 == v2; }},
+            {proto::plan::OpType::NotEqual,
+             [](std::string v1, std::string v2) { return v1 != v2; }},
+            {proto::plan::OpType::PrefixMatch,
+             [](std::string v1, std::string v2) {
+                 return PrefixMatch(v1, v2);
+             }},
+        };
 
     auto seg = CreateGrowingSegment(schema);
     int N = 1000;
@@ -334,7 +393,8 @@ TEST(StringExpr, Compare) {
     for (int iter = 0; iter < num_iters; ++iter) {
         auto raw_data = DataGen(schema, N, iter);
 
-        auto reserve_col = [&, raw_data](const FieldMeta& field_meta, std::vector<std::string>& str_col) {
+        auto reserve_col = [&, raw_data](const FieldMeta& field_meta,
+                                         std::vector<std::string>& str_col) {
             auto new_str_col = raw_data.get_col(field_meta.get_id());
             auto begin = new_str_col->scalars().string_data().data().begin();
             auto end = new_str_col->scalars().string_data().data().end();
@@ -346,12 +406,17 @@ TEST(StringExpr, Compare) {
 
         {
             seg->PreInsert(N);
-            seg->Insert(iter * N, N, raw_data.row_ids_.data(), raw_data.timestamps_.data(), raw_data.raw_);
+            seg->Insert(iter * N,
+                        N,
+                        raw_data.row_ids_.data(),
+                        raw_data.timestamps_.data(),
+                        raw_data.raw_);
         }
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
-    ExecExprVisitor visitor(*seg_promote, seg_promote->get_row_count(), MAX_TIMESTAMP);
+    ExecExprVisitor visitor(
+        *seg_promote, seg_promote->get_row_count(), MAX_TIMESTAMP);
     for (const auto& [op, ref_func] : testcases) {
         auto plan_proto = gen_compare_plan(op);
         auto plan = ProtoParser(*schema).CreatePlan(*plan_proto);
@@ -377,29 +442,51 @@ TEST(StringExpr, UnaryRange) {
     const auto& fvec_meta = schema->operator[](FieldName("fvec"));
     const auto& str_meta = schema->operator[](FieldName("str"));
 
-    auto gen_unary_range_plan = [&, fvec_meta, str_meta](proto::plan::OpType op,
-                                                         std::string value) -> std::unique_ptr<proto::plan::PlanNode> {
-        auto column_info = GenColumnInfo(str_meta.get_id().get(), proto::schema::DataType::VarChar, false, false);
+    auto gen_unary_range_plan =
+        [&, fvec_meta, str_meta](
+            proto::plan::OpType op,
+            std::string value) -> std::unique_ptr<proto::plan::PlanNode> {
+        auto column_info = GenColumnInfo(str_meta.get_id().get(),
+                                         proto::schema::DataType::VarChar,
+                                         false,
+                                         false);
         auto unary_range_expr = GenUnaryRangeExpr(op, value);
         unary_range_expr->set_allocated_column_info(column_info);
 
         auto expr = GenExpr().release();
         expr->set_allocated_unary_range_expr(unary_range_expr);
 
-        auto anns = GenAnns(expr, fvec_meta.get_data_type() == DataType::VECTOR_BINARY, fvec_meta.get_id().get(), "$0");
+        auto anns =
+            GenAnns(expr,
+                    fvec_meta.get_data_type() == DataType::VECTOR_BINARY,
+                    fvec_meta.get_id().get(),
+                    "$0");
 
         auto plan_node = std::make_unique<proto::plan::PlanNode>();
         plan_node->set_allocated_vector_anns(anns);
         return std::move(plan_node);
     };
 
-    std::vector<std::tuple<proto::plan::OpType, std::string, std::function<bool(std::string)>>> testcases{
-        {proto::plan::OpType::GreaterThan, "2000", [](std::string val) { return val > "2000"; }},
-        {proto::plan::OpType::GreaterEqual, "2000", [](std::string val) { return val >= "2000"; }},
-        {proto::plan::OpType::LessThan, "3000", [](std::string val) { return val < "3000"; }},
-        {proto::plan::OpType::LessEqual, "3000", [](std::string val) { return val <= "3000"; }},
-        {proto::plan::OpType::PrefixMatch, "a", [](std::string val) { return PrefixMatch(val, "a"); }},
-    };
+    std::vector<std::tuple<proto::plan::OpType,
+                           std::string,
+                           std::function<bool(std::string)>>>
+        testcases{
+            {proto::plan::OpType::GreaterThan,
+             "2000",
+             [](std::string val) { return val > "2000"; }},
+            {proto::plan::OpType::GreaterEqual,
+             "2000",
+             [](std::string val) { return val >= "2000"; }},
+            {proto::plan::OpType::LessThan,
+             "3000",
+             [](std::string val) { return val < "3000"; }},
+            {proto::plan::OpType::LessEqual,
+             "3000",
+             [](std::string val) { return val <= "3000"; }},
+            {proto::plan::OpType::PrefixMatch,
+             "a",
+             [](std::string val) { return PrefixMatch(val, "a"); }},
+        };
 
     auto seg = CreateGrowingSegment(schema);
     int N = 1000;
@@ -412,11 +499,16 @@ TEST(StringExpr, UnaryRange) {
         auto end = new_str_col->scalars().string_data().data().end();
         str_col.insert(str_col.end(), begin, end);
         seg->PreInsert(N);
-        seg->Insert(iter * N, N, raw_data.row_ids_.data(), raw_data.timestamps_.data(), raw_data.raw_);
+        seg->Insert(iter * N,
+                    N,
+                    raw_data.row_ids_.data(),
+                    raw_data.timestamps_.data(),
+                    raw_data.raw_);
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
-    ExecExprVisitor visitor(*seg_promote, seg_promote->get_row_count(), MAX_TIMESTAMP);
+    ExecExprVisitor visitor(
+        *seg_promote, seg_promote->get_row_count(), MAX_TIMESTAMP);
     for (const auto& [op, value, ref_func] : testcases) {
         auto plan_proto = gen_unary_range_plan(op, value);
         auto plan = ProtoParser(*schema).CreatePlan(*plan_proto);
@@ -428,7 +520,8 @@ TEST(StringExpr, UnaryRange) {
 
             auto val = str_col[i];
             auto ref = ref_func(val);
-            ASSERT_EQ(ans, ref) << "@" << op << "@" << value << "@" << i << "!!" << val;
+            ASSERT_EQ(ans, ref)
+                << "@" << op << "@" << value << "@" << i << "!!" << val;
         }
     }
 }
@@ -441,16 +534,28 @@ TEST(StringExpr, BinaryRange) {
     const auto& fvec_meta = schema->operator[](FieldName("fvec"));
     const auto& str_meta = schema->operator[](FieldName("str"));
 
-    auto gen_binary_range_plan = [&, fvec_meta, str_meta](bool lb_inclusive, bool ub_inclusive, std::string lb,
-                                                          std::string ub) -> std::unique_ptr<proto::plan::PlanNode> {
-        auto column_info = GenColumnInfo(str_meta.get_id().get(), proto::schema::DataType::VarChar, false, false);
-        auto binary_range_expr = GenBinaryRangeExpr(lb_inclusive, ub_inclusive, lb, ub);
+    auto gen_binary_range_plan =
+        [&, fvec_meta, str_meta](
+            bool lb_inclusive,
+            bool ub_inclusive,
+            std::string lb,
+            std::string ub) -> std::unique_ptr<proto::plan::PlanNode> {
+        auto column_info = GenColumnInfo(str_meta.get_id().get(),
+                                         proto::schema::DataType::VarChar,
+                                         false,
+                                         false);
+        auto binary_range_expr =
+            GenBinaryRangeExpr(lb_inclusive, ub_inclusive, lb, ub);
         binary_range_expr->set_allocated_column_info(column_info);
 
         auto expr = GenExpr().release();
         expr->set_allocated_binary_range_expr(binary_range_expr);
 
-        auto anns = GenAnns(expr, fvec_meta.get_data_type() == DataType::VECTOR_BINARY, fvec_meta.get_id().get(), "$0");
+        auto anns =
+            GenAnns(expr,
+                    fvec_meta.get_data_type() == DataType::VECTOR_BINARY,
+                    fvec_meta.get_id().get(),
+                    "$0");
 
         auto plan_node = std::make_unique<proto::plan::PlanNode>();
         plan_node->set_allocated_vector_anns(anns);
@@ -458,13 +563,34 @@ TEST(StringExpr, BinaryRange) {
     };
 
     // bool lb_inclusive, bool ub_inclusive, std::string lb, std::string ub
-    std::vector<std::tuple<bool, bool, std::string, std::string, std::function<bool(std::string)>>> testcases{
-        {false, false, "2000", "3000", [](std::string val) { return val > "2000" && val < "3000"; }},
-        {false, true, "2000", "3000", [](std::string val) { return val > "2000" && val <= "3000"; }},
-        {true, false, "2000", "3000", [](std::string val) { return val >= "2000" && val < "3000"; }},
-        {true, true, "2000", "3000", [](std::string val) { return val >= "2000" && val <= "3000"; }},
-        {true, true, "2000", "1000", [](std::string val) { return false; }},
-    };
+    std::vector<std::tuple<bool,
+                           bool,
+                           std::string,
+                           std::string,
+                           std::function<bool(std::string)>>>
+        testcases{
+            {false,
+             false,
+             "2000",
+             "3000",
+             [](std::string val) { return val > "2000" && val < "3000"; }},
+            {false,
+             true,
+             "2000",
+             "3000",
+             [](std::string val) { return val > "2000" && val <= "3000"; }},
+            {true,
+             false,
+             "2000",
+             "3000",
+             [](std::string val) { return val >= "2000" && val < "3000"; }},
+            {true,
+             true,
+             "2000",
+             "3000",
+             [](std::string val) { return val >= "2000" && val <= "3000"; }},
+            {true, true, "2000", "1000", [](std::string val) { return false; }},
+        };
 
     auto seg = CreateGrowingSegment(schema);
     int N = 1000;
@@ -477,13 +603,20 @@ TEST(StringExpr, BinaryRange) {
         auto end = new_str_col->scalars().string_data().data().end();
         str_col.insert(str_col.end(), begin, end);
         seg->PreInsert(N);
-        seg->Insert(iter * N, N, raw_data.row_ids_.data(), raw_data.timestamps_.data(), raw_data.raw_);
+        seg->Insert(iter * N,
+                    N,
+                    raw_data.row_ids_.data(),
+                    raw_data.timestamps_.data(),
+                    raw_data.raw_);
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
-    ExecExprVisitor visitor(*seg_promote, seg_promote->get_row_count(), MAX_TIMESTAMP);
-    for (const auto& [lb_inclusive, ub_inclusive, lb, ub, ref_func] : testcases) {
-        auto plan_proto = gen_binary_range_plan(lb_inclusive, ub_inclusive, lb, ub);
+    ExecExprVisitor visitor(
+        *seg_promote, seg_promote->get_row_count(), MAX_TIMESTAMP);
+    for (const auto& [lb_inclusive, ub_inclusive, lb, ub, ref_func] :
+         testcases) {
+        auto plan_proto =
+            gen_binary_range_plan(lb_inclusive, ub_inclusive, lb, ub);
         auto plan = ProtoParser(*schema).CreatePlan(*plan_proto);
         auto final = visitor.call_child(*plan->plan_node_->predicate_.value());
         EXPECT_EQ(final.size(), N * num_iters);
@@ -493,8 +626,9 @@ TEST(StringExpr, BinaryRange) {
 
             auto val = str_col[i];
             auto ref = ref_func(val);
-            ASSERT_EQ(ans, ref) << "@" << lb_inclusive << "@" << ub_inclusive << "@" << lb << "@" << ub << "@" << i
-                                << "!!" << val;
+            ASSERT_EQ(ans, ref)
+                << "@" << lb_inclusive << "@" << ub_inclusive << "@" << lb
+                << "@" << ub << "@" << i << "!!" << val;
         }
     }
 }
@@ -512,20 +646,27 @@ TEST(AlwaysTrueStringPlan, SearchWithOutputFields) {
     auto round_decimal = -1;
     auto dataset = DataGen(schema, N);
     auto vec_col = dataset.get_col<float>(fvec_meta.get_id());
-    auto str_col = dataset.get_col(str_meta.get_id())->scalars().string_data().data();
+    auto str_col =
+        dataset.get_col(str_meta.get_id())->scalars().string_data().data();
     auto query_ptr = vec_col.data();
     auto segment = CreateGrowingSegment(schema);
     segment->disable_small_index();  // brute-force search.
     segment->PreInsert(N);
-    segment->Insert(0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_);
+    segment->Insert(0,
+                    N,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
 
     auto plan_proto = GenAlwaysTruePlan(fvec_meta, str_meta);
     SetTargetEntry(plan_proto, {str_meta.get_id().get()});
     auto plan = ProtoParser(*schema).CreatePlan(*plan_proto);
     auto num_queries = 5;
     auto topk = 10;
-    auto ph_group_raw = CreatePlaceholderGroupFromBlob(num_queries, 16, query_ptr);
-    auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+    auto ph_group_raw =
+        CreatePlaceholderGroupFromBlob(num_queries, 16, query_ptr);
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
 
     Timestamp time = MAX_TIMESTAMP;
     std::vector<const PlaceholderGroup*> ph_group_arr = {ph_group.get()};
@@ -538,19 +679,25 @@ TEST(AlwaysTrueStringPlan, SearchWithOutputFields) {
         dim,       //
         query_ptr  //
     };
-    auto sub_result = BruteForceSearch(search_dataset, vec_col.data(), N, knowhere::Json(), nullptr);
+    auto sub_result = BruteForceSearch(
+        search_dataset, vec_col.data(), N, knowhere::Json(), nullptr);
 
     auto sr = segment->Search(plan.get(), ph_group.get(), time);
     segment->FillPrimaryKeys(plan.get(), *sr);
     segment->FillTargetEntry(plan.get(), *sr);
     ASSERT_EQ(sr->pk_type_, DataType::VARCHAR);
-    ASSERT_TRUE(sr->output_fields_data_.find(str_meta.get_id()) != sr->output_fields_data_.end());
-    auto retrieved_str_col = sr->output_fields_data_[str_meta.get_id()]->scalars().string_data().data();
+    ASSERT_TRUE(sr->output_fields_data_.find(str_meta.get_id()) !=
+                sr->output_fields_data_.end());
+    auto retrieved_str_col = sr->output_fields_data_[str_meta.get_id()]
+                                 ->scalars()
+                                 .string_data()
+                                 .data();
     for (auto q = 0; q < num_queries; q++) {
         for (auto k = 0; k < topk; k++) {
             auto offset = q * topk + k;
             auto seg_offset = sub_result.get_seg_offsets()[offset];
-            ASSERT_EQ(std::get<std::string>(sr->primary_keys_[offset]), str_col[seg_offset]);
+            ASSERT_EQ(std::get<std::string>(sr->primary_keys_[offset]),
+                      str_col[seg_offset]);
             ASSERT_EQ(retrieved_str_col[offset], str_col[seg_offset]);
         }
     }
@@ -567,11 +714,16 @@ TEST(AlwaysTrueStringPlan, QueryWithOutputFields) {
     auto N = 100000;
     auto dataset = DataGen(schema, N);
     auto vec_col = dataset.get_col<float>(fvec_meta.get_id());
-    auto str_col = dataset.get_col(str_meta.get_id())->scalars().string_data().data();
+    auto str_col =
+        dataset.get_col(str_meta.get_id())->scalars().string_data().data();
     auto segment = CreateGrowingSegment(schema);
     segment->disable_small_index();  // brute-force search.
     segment->PreInsert(N);
-    segment->Insert(0, N, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_);
+    segment->Insert(0,
+                    N,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
 
     auto expr_proto = GenAlwaysTrueExpr(fvec_meta, str_meta);
     auto plan_proto = GenPlanNode();
@@ -585,5 +737,6 @@ TEST(AlwaysTrueStringPlan, QueryWithOutputFields) {
     ASSERT_EQ(retrieved->ids().str_id().data().size(), N);
     ASSERT_EQ(retrieved->offset().size(), N);
     ASSERT_EQ(retrieved->fields_data().size(), 1);
-    ASSERT_EQ(retrieved->fields_data(0).scalars().string_data().data().size(), N);
+    ASSERT_EQ(retrieved->fields_data(0).scalars().string_data().data().size(),
+              N);
 }

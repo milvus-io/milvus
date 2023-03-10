@@ -111,7 +111,8 @@ TEST_F(StringIndexMarisaTest, Range) {
 TEST_F(StringIndexMarisaTest, Reverse) {
     auto index_types = GetIndexTypes<std::string>();
     for (const auto& index_type : index_types) {
-        auto index = milvus::index::IndexFactory::GetInstance().CreateScalarIndex<std::string>(index_type);
+        auto index = milvus::index::IndexFactory::GetInstance()
+                         .CreateScalarIndex<std::string>(index_type);
         index->Build(nb, strs.data());
         assert_reverse<std::string>(index.get(), strs);
     }
@@ -135,21 +136,24 @@ TEST_F(StringIndexMarisaTest, Query) {
 
     {
         auto ds = knowhere::GenDataSet(strs.size(), 8, strs.data());
-        ds->Set<milvus::OpType>(milvus::index::OPERATOR_TYPE, milvus::OpType::In);
+        ds->Set<milvus::OpType>(milvus::index::OPERATOR_TYPE,
+                                milvus::OpType::In);
         auto bitset = index->Query(ds);
         ASSERT_TRUE(bitset->any());
     }
 
     {
         auto ds = knowhere::GenDataSet(strs.size(), 8, strs.data());
-        ds->Set<milvus::OpType>(milvus::index::OPERATOR_TYPE, milvus::OpType::NotIn);
+        ds->Set<milvus::OpType>(milvus::index::OPERATOR_TYPE,
+                                milvus::OpType::NotIn);
         auto bitset = index->Query(ds);
         ASSERT_TRUE(bitset->none());
     }
 
     {
         auto ds = std::make_shared<knowhere::DataSet>();
-        ds->Set<milvus::OpType>(milvus::index::OPERATOR_TYPE, milvus::OpType::GreaterEqual);
+        ds->Set<milvus::OpType>(milvus::index::OPERATOR_TYPE,
+                                milvus::OpType::GreaterEqual);
         ds->Set<std::string>(milvus::index::RANGE_VALUE, "0");
         auto bitset = index->Query(ds);
         ASSERT_EQ(bitset->size(), strs.size());
@@ -158,7 +162,8 @@ TEST_F(StringIndexMarisaTest, Query) {
 
     {
         auto ds = std::make_shared<knowhere::DataSet>();
-        ds->Set<milvus::OpType>(milvus::index::OPERATOR_TYPE, milvus::OpType::Range);
+        ds->Set<milvus::OpType>(milvus::index::OPERATOR_TYPE,
+                                milvus::OpType::Range);
         ds->Set<std::string>(milvus::index::LOWER_BOUND_VALUE, "0");
         ds->Set<std::string>(milvus::index::UPPER_BOUND_VALUE, "range");
         ds->Set<bool>(milvus::index::LOWER_BOUND_INCLUSIVE, true);
@@ -170,8 +175,10 @@ TEST_F(StringIndexMarisaTest, Query) {
     {
         for (size_t i = 0; i < strs.size(); i++) {
             auto ds = std::make_shared<knowhere::DataSet>();
-            ds->Set<milvus::OpType>(milvus::index::OPERATOR_TYPE, milvus::OpType::PrefixMatch);
-            ds->Set<std::string>(milvus::index::PREFIX_VALUE, std::move(strs[i]));
+            ds->Set<milvus::OpType>(milvus::index::OPERATOR_TYPE,
+                                    milvus::OpType::PrefixMatch);
+            ds->Set<std::string>(milvus::index::PREFIX_VALUE,
+                                 std::move(strs[i]));
             auto bitset = index->Query(ds);
             ASSERT_EQ(bitset->size(), strs.size());
             ASSERT_TRUE(bitset->test(i));
@@ -255,7 +262,8 @@ TEST_F(StringIndexMarisaTest, Codec) {
 }
 
 TEST_F(StringIndexMarisaTest, BaseIndexCodec) {
-    milvus::index::IndexBasePtr index = milvus::index::CreateStringIndexMarisa();
+    milvus::index::IndexBasePtr index =
+        milvus::index::CreateStringIndexMarisa();
     std::vector<std::string> strings(nb);
     for (int i = 0; i < nb; ++i) {
         strings[i] = std::to_string(std::rand() % 10);

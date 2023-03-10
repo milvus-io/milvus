@@ -51,7 +51,11 @@ TEST(Growing, RealCount) {
     ASSERT_EQ(offset, 0);
     auto dataset = DataGen(schema, c);
     auto pks = dataset.get_col<int64_t>(pk);
-    segment->Insert(offset, c, dataset.row_ids_.data(), dataset.timestamps_.data(), dataset.raw_);
+    segment->Insert(offset,
+                    c,
+                    dataset.row_ids_.data(),
+                    dataset.timestamps_.data(),
+                    dataset.raw_);
 
     // no delete.
     ASSERT_EQ(c, segment->get_real_count());
@@ -62,7 +66,8 @@ TEST(Growing, RealCount) {
     ASSERT_EQ(del_offset1, 0);
     auto del_ids1 = GenPKs(pks.begin(), pks.begin() + half);
     auto del_tss1 = GenTss(half, c);
-    auto status = segment->Delete(del_offset1, half, del_ids1.get(), del_tss1.data());
+    auto status =
+        segment->Delete(del_offset1, half, del_ids1.get(), del_tss1.data());
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(c - half, segment->get_real_count());
 
@@ -70,7 +75,8 @@ TEST(Growing, RealCount) {
     auto del_offset2 = segment->PreDelete(half);
     ASSERT_EQ(del_offset2, half);
     auto del_tss2 = GenTss(half, c + half);
-    status = segment->Delete(del_offset2, half, del_ids1.get(), del_tss2.data());
+    status =
+        segment->Delete(del_offset2, half, del_ids1.get(), del_tss2.data());
     ASSERT_TRUE(status.ok());
     ASSERT_EQ(c - half, segment->get_real_count());
 

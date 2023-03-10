@@ -92,12 +92,17 @@ struct GeneratedData {
                     int len = raw_->num_rows() * field_meta.get_dim();
                     ret.resize(len);
                     auto src_data =
-                        reinterpret_cast<const T*>(target_field_data.vectors().float_vector().data().data());
+                        reinterpret_cast<const T*>(target_field_data.vectors()
+                                                       .float_vector()
+                                                       .data()
+                                                       .data());
                     std::copy_n(src_data, len, ret.data());
-                } else if (field_meta.get_data_type() == DataType::VECTOR_BINARY) {
+                } else if (field_meta.get_data_type() ==
+                           DataType::VECTOR_BINARY) {
                     int len = raw_->num_rows() * (field_meta.get_dim() / 8);
                     ret.resize(len);
-                    auto src_data = reinterpret_cast<const T*>(target_field_data.vectors().binary_vector().data());
+                    auto src_data = reinterpret_cast<const T*>(
+                        target_field_data.vectors().binary_vector().data());
                     std::copy_n(src_data, len, ret.data());
                 } else {
                     PanicInfo("unsupported");
@@ -107,36 +112,44 @@ struct GeneratedData {
             }
             switch (field_meta.get_data_type()) {
                 case DataType::BOOL: {
-                    auto src_data = reinterpret_cast<const T*>(target_field_data.scalars().bool_data().data().data());
+                    auto src_data = reinterpret_cast<const T*>(
+                        target_field_data.scalars().bool_data().data().data());
                     std::copy_n(src_data, raw_->num_rows(), ret.data());
                     break;
                 }
                 case DataType::INT8:
                 case DataType::INT16:
                 case DataType::INT32: {
-                    auto src_data =
-                        reinterpret_cast<const int32_t*>(target_field_data.scalars().int_data().data().data());
+                    auto src_data = reinterpret_cast<const int32_t*>(
+                        target_field_data.scalars().int_data().data().data());
                     std::copy_n(src_data, raw_->num_rows(), ret.data());
                     break;
                 }
                 case DataType::INT64: {
-                    auto src_data = reinterpret_cast<const T*>(target_field_data.scalars().long_data().data().data());
+                    auto src_data = reinterpret_cast<const T*>(
+                        target_field_data.scalars().long_data().data().data());
                     std::copy_n(src_data, raw_->num_rows(), ret.data());
                     break;
                 }
                 case DataType::FLOAT: {
-                    auto src_data = reinterpret_cast<const T*>(target_field_data.scalars().float_data().data().data());
+                    auto src_data = reinterpret_cast<const T*>(
+                        target_field_data.scalars().float_data().data().data());
                     std::copy_n(src_data, raw_->num_rows(), ret.data());
                     break;
                 }
                 case DataType::DOUBLE: {
-                    auto src_data = reinterpret_cast<const T*>(target_field_data.scalars().double_data().data().data());
+                    auto src_data =
+                        reinterpret_cast<const T*>(target_field_data.scalars()
+                                                       .double_data()
+                                                       .data()
+                                                       .data());
                     std::copy_n(src_data, raw_->num_rows(), ret.data());
                     break;
                 }
                 case DataType::VARCHAR: {
                     auto ret_data = reinterpret_cast<std::string*>(ret.data());
-                    auto src_data = target_field_data.scalars().string_data().data();
+                    auto src_data =
+                        target_field_data.scalars().string_data().data();
                     std::copy(src_data.begin(), src_data.end(), ret_data);
 
                     break;
@@ -163,19 +176,29 @@ struct GeneratedData {
  private:
     GeneratedData() = default;
     friend GeneratedData
-    DataGen(SchemaPtr schema, int64_t N, uint64_t seed, uint64_t ts_offset, int repeat_count);
+    DataGen(SchemaPtr schema,
+            int64_t N,
+            uint64_t seed,
+            uint64_t ts_offset,
+            int repeat_count);
 };
 
 inline GeneratedData
-DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42, uint64_t ts_offset = 0, int repeat_count = 1) {
+DataGen(SchemaPtr schema,
+        int64_t N,
+        uint64_t seed = 42,
+        uint64_t ts_offset = 0,
+        int repeat_count = 1) {
     using std::vector;
     std::default_random_engine er(seed);
     std::normal_distribution<> distr(0, 1);
     int offset = 0;
 
     auto insert_data = std::make_unique<InsertData>();
-    auto insert_cols = [&insert_data](auto& data, int64_t count, auto& field_meta) {
-        auto array = milvus::segcore::CreateDataArrayFrom(data.data(), count, field_meta);
+    auto insert_cols = [&insert_data](
+                           auto& data, int64_t count, auto& field_meta) {
+        auto array = milvus::segcore::CreateDataArrayFrom(
+            data.data(), count, field_meta);
         insert_data->mutable_fields_data()->AddAllocated(array.release());
     };
 
@@ -185,7 +208,8 @@ DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42, uint64_t ts_offset = 0,
             case DataType::VECTOR_FLOAT: {
                 auto dim = field_meta.get_dim();
                 vector<float> final(dim * N);
-                bool is_ip = starts_with(field_meta.get_name().get(), "normalized");
+                bool is_ip =
+                    starts_with(field_meta.get_name().get(), "normalized");
 #pragma omp parallel for
                 for (int n = 0; n < N; ++n) {
                     vector<float> data(dim);
@@ -204,7 +228,8 @@ DataGen(SchemaPtr schema, int64_t N, uint64_t seed = 42, uint64_t ts_offset = 0,
                         }
                     }
 
-                    std::copy(data.begin(), data.end(), final.begin() + dim * n);
+                    std::copy(
+                        data.begin(), data.end(), final.begin() + dim * n);
                 }
                 insert_cols(final, N, field_meta);
                 break;
@@ -318,7 +343,9 @@ CreatePlaceholderGroup(int64_t num_queries, int dim, int64_t seed = 42) {
 }
 
 inline auto
-CreatePlaceholderGroup(int64_t num_queries, int dim, const std::vector<float>& vecs) {
+CreatePlaceholderGroup(int64_t num_queries,
+                       int dim,
+                       const std::vector<float>& vecs) {
     namespace ser = milvus::proto::common;
     ser::PlaceholderGroup raw_group;
     auto value = raw_group.add_placeholders();
@@ -355,7 +382,9 @@ CreatePlaceholderGroupFromBlob(int64_t num_queries, int dim, const float* src) {
 }
 
 inline auto
-CreateBinaryPlaceholderGroup(int64_t num_queries, int64_t dim, int64_t seed = 42) {
+CreateBinaryPlaceholderGroup(int64_t num_queries,
+                             int64_t dim,
+                             int64_t seed = 42) {
     assert(dim % 8 == 0);
     namespace ser = milvus::proto::common;
     ser::PlaceholderGroup raw_group;
@@ -375,7 +404,9 @@ CreateBinaryPlaceholderGroup(int64_t num_queries, int64_t dim, int64_t seed = 42
 }
 
 inline auto
-CreateBinaryPlaceholderGroupFromBlob(int64_t num_queries, int64_t dim, const uint8_t* ptr) {
+CreateBinaryPlaceholderGroupFromBlob(int64_t num_queries,
+                                     int64_t dim,
+                                     const uint8_t* ptr) {
     assert(dim % 8 == 0);
     namespace ser = milvus::proto::common;
     ser::PlaceholderGroup raw_group;
@@ -402,7 +433,8 @@ SearchResultToVector(const SearchResult& sr) {
     for (int q = 0; q < num_queries; ++q) {
         for (int k = 0; k < topk; ++k) {
             int index = q * topk + k;
-            result.emplace_back(std::make_pair(sr.seg_offsets_[index], sr.distances_[index]));
+            result.emplace_back(
+                std::make_pair(sr.seg_offsets_[index], sr.distances_[index]));
         }
     }
     return result;
@@ -417,7 +449,8 @@ SearchResultToJson(const SearchResult& sr) {
         std::vector<std::string> result;
         for (int k = 0; k < topk; ++k) {
             int index = q * topk + k;
-            result.emplace_back(std::to_string(sr.seg_offsets_[index]) + "->" + std::to_string(sr.distances_[index]));
+            result.emplace_back(std::to_string(sr.seg_offsets_[index]) + "->" +
+                                std::to_string(sr.distances_[index]));
         }
         results.emplace_back(std::move(result));
     }
@@ -433,7 +466,8 @@ SealedLoadFieldData(const GeneratedData& dataset,
     {
         LoadFieldDataInfo info;
         FieldMeta field_meta(FieldName("RowID"), RowFieldID, DataType::INT64);
-        auto array = CreateScalarDataArrayFrom(dataset.row_ids_.data(), row_count, field_meta);
+        auto array = CreateScalarDataArrayFrom(
+            dataset.row_ids_.data(), row_count, field_meta);
         info.field_data = array.get();
         info.row_count = dataset.row_ids_.size();
         info.field_id = RowFieldID.get();  // field id for RowId
@@ -441,8 +475,10 @@ SealedLoadFieldData(const GeneratedData& dataset,
     }
     {
         LoadFieldDataInfo info;
-        FieldMeta field_meta(FieldName("Timestamp"), TimestampFieldID, DataType::INT64);
-        auto array = CreateScalarDataArrayFrom(dataset.timestamps_.data(), row_count, field_meta);
+        FieldMeta field_meta(
+            FieldName("Timestamp"), TimestampFieldID, DataType::INT64);
+        auto array = CreateScalarDataArrayFrom(
+            dataset.timestamps_.data(), row_count, field_meta);
         info.field_data = array.get();
         info.row_count = dataset.timestamps_.size();
         info.field_id = TimestampFieldID.get();
@@ -474,13 +510,16 @@ SealedCreator(SchemaPtr schema, const GeneratedData& dataset) {
 inline std::unique_ptr<milvus::index::VectorIndex>
 GenVecIndexing(int64_t N, int64_t dim, const float* vec) {
     // {knowhere::IndexParams::nprobe, 10},
-    auto conf = knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
-                               {knowhere::meta::DIM, std::to_string(dim)},
-                               {knowhere::indexparam::NLIST, "1024"},
-                               {knowhere::meta::DEVICE_ID, 0}};
+    auto conf =
+        knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
+                       {knowhere::meta::DIM, std::to_string(dim)},
+                       {knowhere::indexparam::NLIST, "1024"},
+                       {knowhere::meta::DEVICE_ID, 0}};
     auto database = knowhere::GenDataSet(N, dim, vec);
-    auto indexing = std::make_unique<index::VectorMemNMIndex>(knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
-                                                              knowhere::metric::L2, IndexMode::MODE_CPU);
+    auto indexing = std::make_unique<index::VectorMemNMIndex>(
+        knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+        knowhere::metric::L2,
+        IndexMode::MODE_CPU);
     indexing->BuildWithDataset(database, conf);
     return indexing;
 }
@@ -502,7 +541,8 @@ GenScalarIndexing(int64_t N, const T* data) {
 inline std::vector<char>
 translate_text_plan_to_binary_plan(const char* text_plan) {
     proto::plan::PlanNode plan_node;
-    auto ok = google::protobuf::TextFormat::ParseFromString(text_plan, &plan_node);
+    auto ok =
+        google::protobuf::TextFormat::ParseFromString(text_plan, &plan_node);
     AssertInfo(ok, "Failed to parse");
 
     std::string binary_plan;

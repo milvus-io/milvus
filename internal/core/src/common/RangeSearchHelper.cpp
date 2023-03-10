@@ -11,9 +11,11 @@
 
 #include <queue>
 #include <vector>
-#include "common/Utils.h"
 #include <functional>
 #include <iostream>
+
+#include "common/Utils.h"
+#include "common/RangeSearchHelper.h"
 
 namespace milvus {
 namespace {

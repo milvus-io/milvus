@@ -31,7 +31,8 @@ GenSubSearchResult(const int64_t nq,
                    const int64_t round_decimal) {
     constexpr int64_t limit = 1000000L;
     bool is_ip = (metric_type == knowhere::metric::IP);
-    SubSearchResultUniq sub_result = std::make_unique<SubSearchResult>(nq, topk, metric_type, round_decimal);
+    SubSearchResultUniq sub_result =
+        std::make_unique<SubSearchResult>(nq, topk, metric_type, round_decimal);
     std::vector<int64_t> ids;
     std::vector<float> distances;
     for (auto n = 0; n < nq; ++n) {
@@ -41,11 +42,16 @@ GenSubSearchResult(const int64_t nq,
             distances.push_back(gen_x);
         }
         if (is_ip) {
-            std::sort(ids.begin() + n * topk, ids.begin() + (n + 1) * topk, std::greater<int64_t>());
-            std::sort(distances.begin() + n * topk, distances.begin() + (n + 1) * topk, std::greater<float>());
+            std::sort(ids.begin() + n * topk,
+                      ids.begin() + (n + 1) * topk,
+                      std::greater<int64_t>());
+            std::sort(distances.begin() + n * topk,
+                      distances.begin() + (n + 1) * topk,
+                      std::greater<float>());
         } else {
             std::sort(ids.begin() + n * topk, ids.begin() + (n + 1) * topk);
-            std::sort(distances.begin() + n * topk, distances.begin() + (n + 1) * topk);
+            std::sort(distances.begin() + n * topk,
+                      distances.begin() + (n + 1) * topk);
         }
     }
     sub_result->mutable_distances() = std::move(distances);
@@ -86,7 +92,8 @@ TestSubSearchResultMerge(const knowhere::MetricType& metric_type,
 
     SubSearchResult final_result(nq, topk, metric_type, round_decimal);
     for (int i = 0; i < iteration; ++i) {
-        SubSearchResultUniq sub_result = GenSubSearchResult(nq, topk, metric_type, round_decimal);
+        SubSearchResultUniq sub_result =
+            GenSubSearchResult(nq, topk, metric_type, round_decimal);
         auto ids = sub_result->get_ids();
         for (int n = 0; n < nq; ++n) {
             for (int k = 0; k < topk; ++k) {
@@ -103,8 +110,10 @@ TestSubSearchResultMerge(const knowhere::MetricType& metric_type,
 }
 
 TEST(Reduce, SubSearchResult) {
-    using queue_type_l2 = std::priority_queue<int64_t, std::vector<int64_t>, std::less<int64_t>>;
-    using queue_type_ip = std::priority_queue<int64_t, std::vector<int64_t>, std::greater<int64_t>>;
+    using queue_type_l2 =
+        std::priority_queue<int64_t, std::vector<int64_t>, std::less<int64_t>>;
+    using queue_type_ip = std::
+        priority_queue<int64_t, std::vector<int64_t>, std::greater<int64_t>>;
 
     TestSubSearchResultMerge<queue_type_l2>(knowhere::metric::L2, 1, 1, 1);
     TestSubSearchResultMerge<queue_type_l2>(knowhere::metric::L2, 1, 1, 10);

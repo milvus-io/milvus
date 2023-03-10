@@ -32,8 +32,8 @@ class BitsetView : public knowhere::BitsetView {
     BitsetView() = default;
     ~BitsetView() = default;
 
-    BitsetView(const std::nullptr_t value)
-        : knowhere::BitsetView(value) {  // NOLINT
+    BitsetView(const std::nullptr_t value)  // NOLINT
+        : knowhere::BitsetView(value) {     // NOLINT
     }
 
     BitsetView(const uint8_t* data, size_t num_bits)

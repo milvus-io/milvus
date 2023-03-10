@@ -30,7 +30,8 @@ class MinioChunkManagerTest : public testing::Test {
 
     virtual void
     SetUp() {
-        chunk_manager_ = std::make_unique<MinioChunkManager>(get_default_storage_config());
+        chunk_manager_ =
+            std::make_unique<MinioChunkManager>(get_default_storage_config());
     }
 
  protected:
@@ -58,7 +59,8 @@ TEST_F(MinioChunkManagerTest, BucketNegtive) {
     try {
         chunk_manager_->CreateBucket(testBucketName);
     } catch (S3ErrorException& e) {
-        EXPECT_TRUE(std::string(e.what()).find("BucketAlreadyOwnedByYou") != string::npos);
+        EXPECT_TRUE(std::string(e.what()).find("BucketAlreadyOwnedByYou") !=
+                    string::npos);
     }
     chunk_manager_->DeleteBucket(testBucketName);
 }

@@ -24,7 +24,8 @@ static int dim = 768;
 
 const auto schema = []() {
     auto schema = std::make_shared<Schema>();
-    schema->AddDebugField("fakevec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
+    schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
     auto i64_fid = schema->AddDebugField("age", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
     return schema;
@@ -56,7 +57,8 @@ const auto plan = [] {
 auto ph_group = [] {
     auto num_queries = 10;
     auto ph_group_raw = CreatePlaceholderGroup(num_queries, dim, 1024);
-    auto ph_group = ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
+    auto ph_group =
+        ParsePlaceholderGroup(plan.get(), ph_group_raw.SerializeAsString());
     return ph_group;
 }();
 
@@ -79,7 +81,11 @@ Search_SmallIndex(benchmark::State& state) {
         segment->disable_small_index();
     }
     segment->PreInsert(N);
-    segment->Insert(0, N, dataset_.row_ids_.data(), dataset_.timestamps_.data(), dataset_.raw_);
+    segment->Insert(0,
+                    N,
+                    dataset_.row_ids_.data(),
+                    dataset_.timestamps_.data(),
+                    dataset_.raw_);
 
     Timestamp time = 10000000;
 
@@ -88,7 +94,9 @@ Search_SmallIndex(benchmark::State& state) {
     }
 }
 
-BENCHMARK(Search_SmallIndex)->MinTime(5)->ArgsProduct({{true, false}, {8, 16, 32}});
+BENCHMARK(Search_SmallIndex)
+    ->MinTime(5)
+    ->ArgsProduct({{true, false}, {8, 16, 32}});
 
 static void
 Search_Sealed(benchmark::State& state) {
