@@ -765,7 +765,7 @@ func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 
 	if !node.isHealthy() {
 		log.Warn("DataNode.GetMetrics failed",
-			zap.Error(errDataNodeIsUnhealthy(node.session.ServerID)))
+			zap.Error(errDataNodeIsUnhealthy(Params.DataNodeCfg.GetNodeID())))
 
 		resp := &milvuspb.GetMetricsResponse{Status: &commonpb.Status{}}
 		setNotServingStatus(resp.Status, node.GetStateCode())

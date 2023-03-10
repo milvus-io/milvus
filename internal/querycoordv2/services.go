@@ -68,7 +68,7 @@ func (s *Server) GetStateCode() commonpb.StateCode {
 
 func (s *Server) NotReadyServeResp(status *commonpb.Status) {
 	status.ErrorCode = commonpb.ErrorCode_NotReadyServe
-	status.Reason = errorutil.NotServingReason(typeutil.QueryCoordRole, Params.QueryNodeCfg.GetNodeID(), s.GetStateCode().String())
+	status.Reason = errorutil.NotServingReason(typeutil.QueryCoordRole, Params.QueryCoordCfg.GetNodeID(), s.GetStateCode().String())
 }
 
 func (s *Server) ShowCollections(ctx context.Context, req *querypb.ShowCollectionsRequest) (*querypb.ShowCollectionsResponse, error) {
@@ -964,7 +964,7 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 
 func (s *Server) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
 	if s.status.Load() != commonpb.StateCode_Healthy {
-		reason := errorutil.UnHealthReason("querycoord", s.session.ServerID, "querycoord is unhealthy")
+		reason := errorutil.UnHealthReason("querycoord", Params.QueryCoordCfg.GetNodeID(), "querycoord is unhealthy")
 		return &milvuspb.CheckHealthResponse{IsHealthy: false, Reasons: []string{reason}}, nil
 	}
 
