@@ -400,15 +400,16 @@ func (kc *Catalog) AlterSegmentsAndAddNewSegment(ctx context.Context, segments [
 		maps.Copy(kvs, segmentKvs)
 		kc.collectMetrics(newSegment)
 
-		flushSegKey := buildFlushedSegmentPath(newSegment.GetCollectionID(), newSegment.GetPartitionID(), newSegment.GetID())
-		clonedSegment := proto.Clone(newSegment).(*datapb.SegmentInfo)
-		// Set to fake if it's empty
-		clonedSegment.IsFake = newSegment.GetNumOfRows() == 0
-		segBytes, err := marshalSegmentInfo(clonedSegment)
-		if err != nil {
-			return err
-		}
-		kvs[flushSegKey] = segBytes
+		// postFlush will save the flushed segment key, skip here.
+		//flushSegKey := buildFlushedSegmentPath(newSegment.GetCollectionID(), newSegment.GetPartitionID(), newSegment.GetID())
+		//clonedSegment := proto.Clone(newSegment).(*datapb.SegmentInfo)
+		//// Set to fake if it's empty
+		//clonedSegment.IsFake = newSegment.GetNumOfRows() == 0
+		//segBytes, err := marshalSegmentInfo(clonedSegment)
+		//if err != nil {
+		//	return err
+		//}
+		//kvs[flushSegKey] = segBytes
 	}
 
 	return kc.MetaKv.MultiSave(kvs)
