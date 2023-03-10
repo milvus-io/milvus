@@ -11,7 +11,7 @@ require (
 	github.com/antonmedv/expr v1.8.9
 	github.com/apache/arrow/go/v8 v8.0.0-20220322092137-778b1772fd20
 	github.com/apache/pulsar-client-go v0.6.1-0.20210728062540-29414db801a7
-	github.com/apache/thrift v0.15.0
+	github.com/apache/thrift v0.15.0 // indirect
 	github.com/bits-and-blooms/bloom/v3 v3.0.1
 	github.com/casbin/casbin/v2 v2.44.2
 	github.com/casbin/json-adapter/v2 v2.0.0
@@ -182,8 +182,6 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	sigs.k8s.io/yaml v1.2.0 // indirect
 )
-
-require github.com/golang/mock v1.5.0
 
 require (
 	github.com/cenkalti/backoff/v4 v4.1.2 // indirect

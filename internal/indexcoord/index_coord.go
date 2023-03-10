@@ -165,6 +165,7 @@ func (i *IndexCoord) initSession() error {
 	i.session.SetEnableActiveStandBy(i.enableActiveStandBy)
 	Params.SetLogger(i.session.ServerID)
 	i.serverID = i.session.ServerID
+	Params.IndexCoordCfg.SetNodeID(i.serverID)
 	return nil
 }
 
@@ -951,7 +952,7 @@ func (i *IndexCoord) ShowConfigurations(ctx context.Context, req *internalpb.Sho
 		log.Warn("IndexCoord.ShowConfigurations failed",
 			zap.Int64("nodeId", i.serverID),
 			zap.String("req", req.Pattern),
-			zap.Error(errIndexCoordIsUnhealthy(Params.QueryNodeCfg.GetNodeID())))
+			zap.Error(errIndexCoordIsUnhealthy(i.serverID)))
 
 		ret := &internalpb.ShowConfigurationsResponse{Status: &commonpb.Status{}}
 		setNotServingStatus(ret.GetStatus(), i.GetStateCode())
@@ -1024,7 +1025,7 @@ func (i *IndexCoord) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsReq
 
 func (i *IndexCoord) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
 	if !i.isHealthy() {
-		reason := errorutil.UnHealthReason("indexcoord", i.session.ServerID, "indexcoord is unhealthy")
+		reason := errorutil.UnHealthReason("indexcoord", i.serverID, "indexcoord is unhealthy")
 		return &milvuspb.CheckHealthResponse{IsHealthy: false, Reasons: []string{reason}}, nil
 	}
 

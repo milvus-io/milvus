@@ -1472,7 +1472,7 @@ func (s *Server) BroadcastAlteredCollection(ctx context.Context, req *datapb.Alt
 
 func (s *Server) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
 	if s.isClosed() {
-		reason := errorutil.UnHealthReason("datacoord", s.session.ServerID, "datacoord is closed")
+		reason := errorutil.UnHealthReason("datacoord", Params.DataCoordCfg.GetNodeID(), "datacoord is closed")
 		return &milvuspb.CheckHealthResponse{IsHealthy: false, Reasons: []string{reason}}, nil
 	}
 
