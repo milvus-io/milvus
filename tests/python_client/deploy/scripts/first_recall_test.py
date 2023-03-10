@@ -17,7 +17,7 @@ pymilvus_version = pymilvus.__version__
 
 
 all_index_types = ["IVF_FLAT", "IVF_SQ8", "HNSW"]
-default_index_params = [{"nlist": 128}, {"nlist": 128}, {"M": 48, "efConstruction": 100}]
+default_index_params = [{"nlist": 128}, {"nlist": 128}, {"M": 48, "efConstruction": 200}]
 index_params_map = dict(zip(all_index_types, default_index_params))
 
 
@@ -42,7 +42,7 @@ def gen_search_param(index_type, metric_type="L2"):
             bin_search_params = {"metric_type": "HAMMING", "params": {"nprobe": nprobe}}
             search_params.append(bin_search_params)
     elif index_type in ["HNSW"]:
-        for ef in [50]:
+        for ef in [150]:
             hnsw_search_param = {"metric_type": metric_type, "params": {"ef": ef}}
             search_params.append(hnsw_search_param)
     elif index_type == "ANNOY":
@@ -173,7 +173,7 @@ def milvus_recall_test(host='127.0.0.1', index_type="HNSW"):
             assert len(item) == len(true_ids[index])
             tmp = set(true_ids[index]).intersection(set(item))
             sum_radio = sum_radio + len(tmp) / len(item)
-        recall = round(sum_radio / len(result_ids), 3)
+        recall = round(sum_radio / len(result_ids), 6)
         logger.info(f"recall={recall}")
         if index_type in ["IVF_PQ", "ANNOY"]:
             assert recall >= 0.6, f"recall={recall} < 0.6"

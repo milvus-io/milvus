@@ -32,7 +32,7 @@ def gen_search_param(index_type, metric_type="L2"):
             bin_search_params = {"metric_type": "HAMMING", "params": {"nprobe": nprobe}}
             search_params.append(bin_search_params)
     elif index_type in ["HNSW"]:
-        for ef in [50]:
+        for ef in [150]:
             hnsw_search_param = {"metric_type": metric_type, "params": {"ef": ef}}
             search_params.append(hnsw_search_param)
     elif index_type == "ANNOY":
@@ -82,7 +82,7 @@ def search_test(host="127.0.0.1", index_type="HNSW"):
             assert len(item) == len(true_ids[index]), f"get {len(item)} but expect {len(true_ids[index])}"
             tmp = set(true_ids[index]).intersection(set(item))
             sum_radio = sum_radio + len(tmp) / len(item)
-        recall = round(sum_radio / len(result_ids), 3)
+        recall = round(sum_radio / len(result_ids), 6)
         logger.info(f"recall={recall}")
         if index_type in ["IVF_PQ", "ANNOY"]:
             assert recall >= 0.6, f"recall={recall} < 0.6"
