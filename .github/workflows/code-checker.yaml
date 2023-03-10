@@ -22,6 +22,8 @@ on:
       # FIXME(wxyu): not need to run code check, update the ci-passed rules and remove these two lines
       - go.mod
       - go.sum
+      - .golangci.yml
+      - rules.go
 
 jobs:
   ubuntu:
