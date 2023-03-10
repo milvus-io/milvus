@@ -91,6 +91,9 @@ var (
 	// Parameter related
 	ErrParameterInvalid = newMilvusError("invalid parameter", 1100, false)
 
+	// Metrics related
+	ErrMetricNotFound = newMilvusError("MetricNotFound", 1200, false)
+
 	// Do NOT export this,
 	// never allow programmer using this, keep only for converting unknown error to milvusError
 	errUnexpected = newMilvusError("unexpected error", (1<<16)-1, false)

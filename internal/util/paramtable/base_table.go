@@ -191,6 +191,10 @@ func (gp *BaseTable) Get(key string) string {
 
 // GetWithDefault loads an object with @key. If the object does not exist, @defaultValue will be returned.
 func (gp *BaseTable) GetWithDefault(key, defaultValue string) string {
+	if gp.mgr == nil {
+		return defaultValue
+	}
+
 	str, err := gp.mgr.GetConfig(key)
 	if err != nil {
 		return defaultValue
