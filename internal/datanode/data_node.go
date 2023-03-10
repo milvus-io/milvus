@@ -182,15 +182,15 @@ func (node *DataNode) SetDataCoord(ds types.DataCoord) error {
 // Register register datanode to etcd
 func (node *DataNode) Register() error {
 	node.session.Register()
-	metrics.NumNodes.WithLabelValues(strconv.FormatInt(node.session.ServerID, 10), typeutil.DataNodeRole).Inc()
+	metrics.NumNodes.WithLabelValues(strconv.FormatInt(Params.DataNodeCfg.GetNodeID(), 10), typeutil.DataNodeRole).Inc()
 	log.Info("DataNode Register Finished")
 	// Start liveness check
 	node.session.LivenessCheck(node.ctx, func() {
-		log.Error("Data Node disconnected from etcd, process will exit", zap.Int64("Server Id", node.session.ServerID))
+		log.Error("Data Node disconnected from etcd, process will exit", zap.Int64("Server Id", Params.DataNodeCfg.GetNodeID()))
 		if err := node.Stop(); err != nil {
 			log.Fatal("failed to stop server", zap.Error(err))
 		}
-		metrics.NumNodes.WithLabelValues(strconv.FormatInt(node.session.ServerID, 10), typeutil.DataNodeRole).Dec()
+		metrics.NumNodes.WithLabelValues(strconv.FormatInt(Params.DataNodeCfg.GetNodeID(), 10), typeutil.DataNodeRole).Dec()
 		// manually send signal to starter goroutine
 		if node.session.TriggerKill {
 			if p, err := os.FindProcess(os.Getpid()); err == nil {
@@ -208,7 +208,7 @@ func (node *DataNode) initSession() error {
 		return errors.New("failed to initialize session")
 	}
 	node.session.Init(typeutil.DataNodeRole, Params.DataNodeCfg.IP+":"+strconv.Itoa(Params.DataNodeCfg.Port), false, true)
-	Params.DataNodeCfg.SetNodeID(node.session.ServerID)
+	Params.DataNodeCfg.SetNodeID(Params.DataNodeCfg.GetNodeID())
 	Params.SetLogger(Params.DataNodeCfg.GetNodeID())
 	return nil
 }
@@ -555,7 +555,7 @@ func (node *DataNode) GetComponentStates(ctx context.Context) (*milvuspb.Compone
 	log.Debug("DataNode current state", zap.Any("State", node.stateCode.Load()))
 	nodeID := common.NotRegisteredID
 	if node.session != nil && node.session.Registered() {
-		nodeID = node.session.ServerID
+		nodeID = Params.DataNodeCfg.GetNodeID()
 	}
 	states := &milvuspb.ComponentStates{
 		State: &milvuspb.ComponentInfo{
@@ -598,14 +598,14 @@ func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmen
 		return errStatus, nil
 	}
 
-	if req.GetBase().GetTargetID() != node.session.ServerID {
+	if req.GetBase().GetTargetID() != Params.DataNodeCfg.GetNodeID() {
 		log.Warn("flush segment target id not matched",
 			zap.Int64("targetID", req.GetBase().GetTargetID()),
-			zap.Int64("serverID", node.session.ServerID),
+			zap.Int64("serverID", Params.DataNodeCfg.GetNodeID()),
 		)
 		status := &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_NodeIDNotMatch,
-			Reason:    common.WrapNodeIDNotMatchMsg(req.GetBase().GetTargetID(), node.session.ServerID),
+			Reason:    common.WrapNodeIDNotMatchMsg(req.GetBase().GetTargetID(), Params.DataNodeCfg.GetNodeID()),
 		}
 		return status, nil
 	}
@@ -765,7 +765,7 @@ func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 
 	if !node.isHealthy() {
 		log.Warn("DataNode.GetMetrics failed",
-			zap.Error(errDataNodeIsUnhealthy(node.session.ServerID)))
+			zap.Error(errDataNodeIsUnhealthy(Params.DataNodeCfg.GetNodeID())))
 
 		resp := &milvuspb.GetMetricsResponse{Status: &commonpb.Status{}}
 		setNotServingStatus(resp.Status, node.GetStateCode())
@@ -780,7 +780,7 @@ func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 		return &milvuspb.GetMetricsResponse{
 			Status: &commonpb.Status{
 				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    fmt.Sprintf("datanode GetMetrics failed, nodeID=%d, err=%s", node.session.ServerID, err.Error()),
+				Reason:    fmt.Sprintf("datanode GetMetrics failed, nodeID=%d, err=%s", Params.DataNodeCfg.GetNodeID(), err.Error()),
 			},
 		}, nil
 	}
@@ -792,7 +792,7 @@ func (node *DataNode) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRe
 			return &milvuspb.GetMetricsResponse{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_UnexpectedError,
-					Reason:    fmt.Sprintf("datanode GetMetrics failed, nodeID=%d, err=%s", node.session.ServerID, err.Error()),
+					Reason:    fmt.Sprintf("datanode GetMetrics failed, nodeID=%d, err=%s", Params.DataNodeCfg.GetNodeID(), err.Error()),
 				},
 			}, nil
 		}
