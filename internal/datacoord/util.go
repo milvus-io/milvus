@@ -19,11 +19,12 @@ package datacoord
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strconv"
-	"sync"
 	"time"
 
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
@@ -103,9 +104,9 @@ func GetCompactTime(ctx context.Context, allocator allocator) (*compactTime, err
 	return &compactTime{ttRetentionLogic, 0, 0}, nil
 }
 
-func FilterInIndexedSegments(handler Handler, indexCoord types.IndexCoord, segments ...*SegmentInfo) []*SegmentInfo {
+func FilterInIndexedSegments(handler Handler, indexCoord types.IndexCoord, segments ...*SegmentInfo) ([]*SegmentInfo, error) {
 	if len(segments) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	segmentMap := make(map[int64]*SegmentInfo)
@@ -124,7 +125,7 @@ func FilterInIndexedSegments(handler Handler, indexCoord types.IndexCoord, segme
 		cancel()
 		if err != nil {
 			log.Warn("failed to get collection schema", zap.Error(err))
-			continue
+			return nil, err
 		}
 		for _, field := range coll.Schema.GetFields() {
 			if field.GetDataType() == schemapb.DataType_BinaryVector ||
@@ -135,33 +136,50 @@ func FilterInIndexedSegments(handler Handler, indexCoord types.IndexCoord, segme
 		}
 	}
 
-	wg := sync.WaitGroup{}
 	indexedSegmentCh := make(chan []int64, len(segments))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	group, ctx := errgroup.WithContext(ctx)
 	for _, segment := range segments {
 		segment := segment
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+
+		group.Go(func() error {
+			ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 			defer cancel()
+
 			resp, err := indexCoord.GetIndexInfos(ctx, &indexpb.GetIndexInfoRequest{
 				CollectionID: segment.GetCollectionID(),
 				SegmentIDs:   []int64{segment.GetID()},
 			})
-			if err != nil || resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+			if err != nil {
 				log.Warn("failed to get index of collection",
 					zap.Int64("collectionID", segment.GetCollectionID()),
-					zap.Int64("segmentID", segment.GetID()))
-				return
+					zap.Int64("segmentID", segment.GetID()),
+					zap.Error(err),
+				)
+				return err
+			}
+			if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+				log.Warn("indexcoord return error when get index",
+					zap.Int64("collectionID", segment.GetCollectionID()),
+					zap.Int64("segmentID", segment.GetID()),
+					zap.String("status", resp.GetStatus().String()),
+					zap.String("reason", resp.GetStatus().GetReason()),
+				)
+				return fmt.Errorf("GetIndex failed for segment %d, status: %s, reason: %s", segment.GetID(), resp.GetStatus().GetErrorCode().String(), resp.GetStatus().GetReason())
 			}
 			indexed := extractSegmentsWithVectorIndex(vecFieldID, resp.GetSegmentInfo())
-			if len(indexed) == 0 {
-				return
+			if len(indexed) > 0 {
+				indexedSegmentCh <- indexed
 			}
-			indexedSegmentCh <- indexed
-		}()
+			return nil
+		})
 	}
-	wg.Wait()
+	err := group.Wait()
+	if err != nil {
+		return nil, err
+	}
+
 	close(indexedSegmentCh)
 
 	indexedSegments := make([]*SegmentInfo, 0)
@@ -174,7 +192,7 @@ func FilterInIndexedSegments(handler Handler, indexCoord types.IndexCoord, segme
 		}
 	}
 
-	return indexedSegments
+	return indexedSegments, nil
 }
 
 func extractSegmentsWithVectorIndex(vecFieldID map[int64]int64, segentIndexInfo map[int64]*indexpb.SegmentInfo) []int64 {

@@ -630,7 +630,11 @@ func reverseGreedySelect(candidates []*SegmentInfo, free int64, maxSegment int) 
 
 func (t *compactionTrigger) getCandidateSegments(channel string, partitionID UniqueID) []*SegmentInfo {
 	segments := t.meta.GetSegmentsByChannel(channel)
-	segments = FilterInIndexedSegments(t.handler, t.indexCoord, segments...)
+	segments, err := FilterInIndexedSegments(t.handler, t.indexCoord, segments...)
+	if err != nil {
+		log.Warn("failed to get indexed segments getting compaction candidates", zap.Error(err))
+		return nil
+	}
 	var res []*SegmentInfo
 	for _, s := range segments {
 		if !isSegmentHealthy(s) ||
