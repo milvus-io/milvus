@@ -796,7 +796,7 @@ func TestMetaCache_ExpireShardLeaderCache(t *testing.T) {
 	assert.Eventually(t, func() bool {
 		nodeInfos, err := globalMetaCache.GetShards(ctx, true, "collection1")
 		assert.NoError(t, err)
-		return assert.Len(t, nodeInfos["channel-1"], 2)
+		return len(nodeInfos["channel-1"]) == 2
 	}, 3*time.Second, 1*time.Second)
 
 	queryCoord.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
@@ -815,7 +815,7 @@ func TestMetaCache_ExpireShardLeaderCache(t *testing.T) {
 	assert.Eventually(t, func() bool {
 		nodeInfos, err := globalMetaCache.GetShards(ctx, true, "collection1")
 		assert.NoError(t, err)
-		return assert.Len(t, nodeInfos["channel-1"], 3)
+		return len(nodeInfos["channel-1"]) == 3
 	}, 3*time.Second, 1*time.Second)
 
 	queryCoord.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
@@ -839,6 +839,6 @@ func TestMetaCache_ExpireShardLeaderCache(t *testing.T) {
 	assert.Eventually(t, func() bool {
 		nodeInfos, err := globalMetaCache.GetShards(ctx, true, "collection1")
 		assert.NoError(t, err)
-		return assert.Len(t, nodeInfos["channel-1"], 3) && assert.Len(t, nodeInfos["channel-2"], 3)
+		return len(nodeInfos["channel-1"]) == 3 && len(nodeInfos["channel-2"]) == 3
 	}, 3*time.Second, 1*time.Second)
 }
