@@ -21,6 +21,7 @@ linters:
     - revive
     - durationcheck
     - unconvert
+    - forbidigo
     - depguard
       #    - gocritic
 
@@ -43,6 +44,10 @@ linters-settings:
       - github.com/pingcap/errors
       - golang.org/x/xerrors
       - github.com/go-errors/errors
+  forbidigo:
+    forbid:
+      - '^time\.Tick$'
+      #- 'fmt\.Print.*' WIP
 
 issues:
   exclude-use-default: false
