@@ -22,9 +22,8 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/log"
-	. "github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/milvus-io/milvus/internal/util/merr"
 )
 
 const expireTime = 24 * time.Hour
@@ -38,60 +37,70 @@ type failInfo struct {
 }
 
 type FailedLoadCache struct {
-	mu      sync.RWMutex
-	records map[UniqueID]map[commonpb.ErrorCode]*failInfo
+	mu sync.RWMutex
+	// CollectionID, ErrorCode -> error
+	records map[int64]map[int32]*failInfo
 }
 
 func NewFailedLoadCache() *FailedLoadCache {
 	return &FailedLoadCache{
-		records: make(map[UniqueID]map[commonpb.ErrorCode]*failInfo),
+		records: make(map[int64]map[int32]*failInfo),
 	}
 }
 
-func (l *FailedLoadCache) Get(collectionID UniqueID) *commonpb.Status {
+func (l *FailedLoadCache) Get(collectionID int64) error {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
-	status := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
+
 	if _, ok := l.records[collectionID]; !ok {
-		return status
+		return nil
 	}
 	if len(l.records[collectionID]) == 0 {
-		return status
+		return nil
 	}
-	var max = 0
-	for code, info := range l.records[collectionID] {
+
+	var (
+		max = 0
+		err error
+	)
+	for _, info := range l.records[collectionID] {
 		if info.count > max {
 			max = info.count
-			status.ErrorCode = code
-			status.Reason = info.err.Error()
+			err = info.err
 		}
 	}
-	log.Warn("FailedLoadCache hits failed record", zap.Int64("collectionID", collectionID),
-		zap.String("errCode", status.GetErrorCode().String()), zap.String("reason", status.GetReason()))
-	return status
+	log.Warn("FailedLoadCache hits failed record",
+		zap.Int64("collectionID", collectionID),
+		zap.Error(err),
+	)
+	return err
 }
 
-func (l *FailedLoadCache) Put(collectionID UniqueID, errCode commonpb.ErrorCode, err error) {
-	if errCode == commonpb.ErrorCode_Success {
+func (l *FailedLoadCache) Put(collectionID int64, err error) {
+	if err == nil {
 		return
 	}
+
+	code := merr.Code(err)
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if _, ok := l.records[collectionID]; !ok {
-		l.records[collectionID] = make(map[commonpb.ErrorCode]*failInfo)
+		l.records[collectionID] = make(map[int32]*failInfo)
 	}
-	if _, ok := l.records[collectionID][errCode]; !ok {
-		l.records[collectionID][errCode] = &failInfo{}
+	if _, ok := l.records[collectionID][code]; !ok {
+		l.records[collectionID][code] = &failInfo{}
 	}
-	l.records[collectionID][errCode].count++
-	l.records[collectionID][errCode].err = err
-	l.records[collectionID][errCode].lastTime = time.Now()
-	log.Warn("FailedLoadCache put failed record", zap.Int64("collectionID", collectionID),
-		zap.String("errCode", errCode.String()), zap.Error(err))
+	l.records[collectionID][code].count++
+	l.records[collectionID][code].err = err
+	l.records[collectionID][code].lastTime = time.Now()
+	log.Warn("FailedLoadCache put failed record",
+		zap.Int64("collectionID", collectionID),
+		zap.Error(err),
+	)
 }
 
-func (l *FailedLoadCache) Remove(collectionID UniqueID) {
+func (l *FailedLoadCache) Remove(collectionID int64) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	delete(l.records, collectionID)

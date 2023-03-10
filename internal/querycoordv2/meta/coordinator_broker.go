@@ -103,8 +103,8 @@ func (broker *CoordinatorBroker) GetPartitions(ctx context.Context, collectionID
 		return nil, err
 	}
 
-	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
-		err = errors.New(resp.Status.Reason)
+	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+		err = errors.New(resp.GetStatus().GetReason())
 		log.Warn("showPartition failed", zap.Int64("collectionID", collectionID), zap.Error(err))
 		return nil, err
 	}
@@ -129,8 +129,8 @@ func (broker *CoordinatorBroker) GetRecoveryInfo(ctx context.Context, collection
 		return nil, nil, err
 	}
 
-	if recoveryInfo.Status.ErrorCode != commonpb.ErrorCode_Success {
-		err = errors.New(recoveryInfo.Status.Reason)
+	if recoveryInfo.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+		err = errors.New(recoveryInfo.GetStatus().GetReason())
 		log.Error("get recovery info failed", zap.Int64("collectionID", collectionID), zap.Int64("partitionID", partitionID), zap.Error(err))
 		return nil, nil, err
 	}

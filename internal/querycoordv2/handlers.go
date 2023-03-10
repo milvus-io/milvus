@@ -238,14 +238,14 @@ func (s *Server) fillMetricsWithNodes(topo *metricsinfo.QueryClusterTopology, no
 			continue
 		}
 
-		if metric.resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+		if metric.resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 			log.Warn("invalid metrics of query node was found",
-				zap.Any("error_code", metric.resp.Status.ErrorCode),
-				zap.Any("error_reason", metric.resp.Status.Reason))
+				zap.Any("error_code", metric.resp.GetStatus().GetErrorCode()),
+				zap.Any("error_reason", metric.resp.GetStatus().GetReason()))
 			topo.ConnectedNodes = append(topo.ConnectedNodes, metricsinfo.QueryNodeInfos{
 				BaseComponentInfos: metricsinfo.BaseComponentInfos{
 					HasError:    true,
-					ErrorReason: metric.resp.Status.Reason,
+					ErrorReason: metric.resp.GetStatus().GetReason(),
 					Name:        metric.resp.ComponentName,
 					ID:          int64(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
 				},

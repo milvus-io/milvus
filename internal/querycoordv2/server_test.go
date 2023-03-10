@@ -44,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/etcd"
+	"github.com/milvus-io/milvus/internal/util/merr"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 )
 
@@ -171,7 +172,7 @@ func (suite *ServerSuite) TestRecoverFailed() {
 
 func (suite *ServerSuite) TestNodeUp() {
 	newNode := mocks.NewMockQueryNode(suite.T(), suite.server.etcdCli, 100)
-	newNode.EXPECT().GetDataDistribution(mock.Anything, mock.Anything).Return(&querypb.GetDataDistributionResponse{}, nil)
+	newNode.EXPECT().GetDataDistribution(mock.Anything, mock.Anything).Return(&querypb.GetDataDistributionResponse{Status: merr.Status(nil)}, nil)
 	err := newNode.Start()
 	suite.NoError(err)
 	defer newNode.Stop()
@@ -254,7 +255,7 @@ func (suite *ServerSuite) TestEnableActiveStandby() {
 	mockDataCoord := coordMocks.NewDataCoord(suite.T())
 
 	mockRootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-		Status: successStatus,
+		Status: merr.Status(nil),
 		Schema: &schemapb.CollectionSchema{},
 	}, nil).Maybe()
 	for _, collection := range suite.collections {
@@ -266,7 +267,7 @@ func (suite *ServerSuite) TestEnableActiveStandby() {
 				CollectionID: collection,
 			}
 			mockRootCoord.EXPECT().ShowPartitionsInternal(mock.Anything, req).Return(&milvuspb.ShowPartitionsResponse{
-				Status:       successStatus,
+				Status:       merr.Status(nil),
 				PartitionIDs: suite.partitions[collection],
 			}, nil).Maybe()
 		}
@@ -414,7 +415,7 @@ func (suite *ServerSuite) expectGetRecoverInfoByMockDataCoord(collection int64, 
 			})
 		}
 		dataCoord.EXPECT().GetRecoveryInfo(mock.Anything, getRecoveryInfoRequest).Maybe().Return(&datapb.GetRecoveryInfoResponse{
-			Status:   successStatus,
+			Status:   merr.Status(nil),
 			Channels: vChannels,
 			Binlogs:  segmentBinlogs,
 		}, nil)

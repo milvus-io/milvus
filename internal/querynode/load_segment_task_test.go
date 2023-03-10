@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	"github.com/milvus-io/milvus/internal/util/hardware"
+	"github.com/milvus-io/milvus/internal/util/merr"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
@@ -189,8 +190,7 @@ func TestTask_loadSegmentsTask(t *testing.T) {
 			task.req.Infos[0].SegmentSize *= 2
 		}
 		err = task.Execute(ctx)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "OOM")
+		assert.ErrorIs(t, err, merr.ErrServiceMemoryLimitExceeded)
 	})
 
 	factory := node.loader.factory

@@ -17,39 +17,38 @@
 package meta
 
 import (
-	"fmt"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus/internal/util/merr"
 )
 
 func TestFailedLoadCache(t *testing.T) {
 	GlobalFailedLoadCache = NewFailedLoadCache()
 
 	colID := int64(0)
-	errCode := commonpb.ErrorCode_InsufficientMemoryToLoad
-	mockErr := fmt.Errorf("mock insufficient memory reason")
+	mockErr := merr.WrapErrServiceMemoryLimitExceeded(0, 0)
 
-	GlobalFailedLoadCache.Put(colID, commonpb.ErrorCode_Success, nil)
-	res := GlobalFailedLoadCache.Get(colID)
-	assert.Equal(t, commonpb.ErrorCode_Success, res.GetErrorCode())
+	GlobalFailedLoadCache.Put(colID, nil)
+	err := GlobalFailedLoadCache.Get(colID)
+	assert.NoError(t, err)
 
-	GlobalFailedLoadCache.Put(colID, errCode, mockErr)
-	res = GlobalFailedLoadCache.Get(colID)
-	assert.Equal(t, errCode, res.GetErrorCode())
+	GlobalFailedLoadCache.Put(colID, mockErr)
+	err = GlobalFailedLoadCache.Get(colID)
+	assert.Equal(t, merr.Code(merr.ErrServiceMemoryLimitExceeded), merr.Code(err))
 
 	GlobalFailedLoadCache.Remove(colID)
-	res = GlobalFailedLoadCache.Get(colID)
-	assert.Equal(t, commonpb.ErrorCode_Success, res.GetErrorCode())
+	err = GlobalFailedLoadCache.Get(colID)
+	assert.Equal(t, commonpb.ErrorCode_Success, merr.Status(err).ErrorCode)
 
-	GlobalFailedLoadCache.Put(colID, errCode, mockErr)
+	GlobalFailedLoadCache.Put(colID, mockErr)
 	GlobalFailedLoadCache.mu.Lock()
-	GlobalFailedLoadCache.records[colID][errCode].lastTime = time.Now().Add(-expireTime * 2)
+	GlobalFailedLoadCache.records[colID][merr.Code(mockErr)].lastTime = time.Now().Add(-expireTime * 2)
 	GlobalFailedLoadCache.mu.Unlock()
 	GlobalFailedLoadCache.TryExpire()
-	res = GlobalFailedLoadCache.Get(colID)
-	assert.Equal(t, commonpb.ErrorCode_Success, res.GetErrorCode())
+	err = GlobalFailedLoadCache.Get(colID)
+	assert.Equal(t, commonpb.ErrorCode_Success, merr.Status(err).ErrorCode)
 }
