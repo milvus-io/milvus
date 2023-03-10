@@ -26,6 +26,16 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func TestMiniClusterStartAndStop(t *testing.T) {
+	ctx := context.Background()
+	c, err := StartMiniCluster(ctx)
+	assert.NoError(t, err)
+	err = c.Start()
+	assert.NoError(t, err)
+	err = c.Stop()
+	assert.NoError(t, err)
+}
+
 func TestAddRemoveDataNode(t *testing.T) {
 	ctx := context.Background()
 	c, err := StartMiniCluster(ctx)

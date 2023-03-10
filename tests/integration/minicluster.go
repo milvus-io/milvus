@@ -33,6 +33,7 @@ import (
 	querycoord "github.com/milvus-io/milvus/internal/querycoordv2"
 	"github.com/milvus-io/milvus/internal/querynode"
 	"github.com/milvus-io/milvus/internal/rootcoord"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/etcd"
@@ -97,7 +98,8 @@ type MiniCluster struct {
 	params        map[string]string
 	clusterConfig ClusterConfig
 
-	factory dependency.Factory
+	factory      dependency.Factory
+	chunkManager storage.ChunkManager
 
 	etcdCli *clientv3.Client
 
@@ -135,6 +137,11 @@ func StartMiniCluster(ctx context.Context, opts ...Option) (cluster *MiniCluster
 
 	if cluster.factory == nil {
 		cluster.factory = dependency.NewDefaultFactory(true)
+		chunkManager, err := cluster.factory.NewPersistentStorageChunkManager(cluster.ctx)
+		if err != nil {
+			return nil, err
+		}
+		cluster.chunkManager = chunkManager
 	}
 
 	if cluster.etcdCli == nil {
@@ -417,29 +424,40 @@ func (cluster *MiniCluster) Start() error {
 func (cluster *MiniCluster) Stop() error {
 	log.Info("mini cluster stop")
 	cluster.proxy.Stop()
+	log.Info("mini cluster proxy stopped")
 	cluster.rootCoord.Stop()
+	log.Info("mini cluster rootCoord stopped")
 	cluster.dataCoord.Stop()
+	log.Info("mini cluster dataCoord stopped")
 	//cluster.indexCoord.Stop()
 	cluster.queryCoord.Stop()
+	log.Info("mini cluster queryCoord stopped")
 
 	for _, dataNode := range cluster.dataNodes {
 		dataNode.Stop()
 	}
+	log.Info("mini cluster datanodes stopped")
 	for _, queryNode := range cluster.queryNodes {
 		queryNode.Stop()
 	}
+	log.Info("mini cluster indexnodes stopped")
 	for _, indexNode := range cluster.indexNodes {
 		indexNode.Stop()
 	}
+	log.Info("mini cluster querynodes stopped")
 
 	cluster.etcdCli.KV.Delete(cluster.ctx, Params.EtcdCfg.RootPath.GetValue(), clientv3.WithPrefix())
 	defer cluster.etcdCli.Close()
-	chunkManager, err := cluster.factory.NewPersistentStorageChunkManager(cluster.ctx)
-	if err != nil {
-		log.Warn("fail to create chunk manager to clean test data", zap.Error(err))
-	} else {
-		chunkManager.RemoveWithPrefix(cluster.ctx, chunkManager.RootPath())
+
+	if cluster.chunkManager == nil {
+		chunkManager, err := cluster.factory.NewPersistentStorageChunkManager(cluster.ctx)
+		if err != nil {
+			log.Warn("fail to create chunk manager to clean test data", zap.Error(err))
+		} else {
+			cluster.chunkManager = chunkManager
+		}
 	}
+	cluster.chunkManager.RemoveWithPrefix(cluster.ctx, cluster.chunkManager.RootPath())
 	return nil
 }
 
@@ -451,6 +469,7 @@ func DefaultParams() map[string]string {
 		//"runtime.role": typeutil.StandaloneRole,
 		Params.IntegrationTestCfg.IntegrationMode.Key: "true",
 		Params.CommonCfg.StorageType.Key:              "local",
+		Params.DataNodeCfg.MemoryForceSyncEnable.Key:  "false", // local execution will print too many logs
 	}
 }
 

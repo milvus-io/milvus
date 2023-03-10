@@ -50,7 +50,7 @@ func (watcher *EtcdMetaWatcher) ShowSessions() ([]*sessionutil.Session, error) {
 }
 
 func (watcher *EtcdMetaWatcher) ShowSegments() ([]*datapb.SegmentInfo, error) {
-	metaBasePath := path.Join(watcher.rootPath, "/meta/datacoord-meta/s/")
+	metaBasePath := path.Join(watcher.rootPath, "/meta/datacoord-meta/s/") + "/"
 	return listSegments(watcher.etcdCli, metaBasePath, func(s *datapb.SegmentInfo) bool {
 		return true
 	})
