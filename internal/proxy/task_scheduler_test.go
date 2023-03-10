@@ -193,11 +193,15 @@ func TestDmTaskQueue_Basic(t *testing.T) {
 	assert.True(t, queue.utEmpty())
 	assert.False(t, queue.utFull())
 
+	//test wrong task type
+	dqlTask := newDefaultMockDqlTask()
+	err = queue.Enqueue(dqlTask)
+	assert.NotNil(t, err)
+
 	st := newDefaultMockDmlTask()
 	stID := st.ID()
 
 	// no task in queue
-
 	unissuedTask = queue.FrontUnissuedTask()
 	assert.Nil(t, unissuedTask)
 
