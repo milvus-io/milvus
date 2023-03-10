@@ -19,6 +19,7 @@ package merr
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/cockroachdb/errors"
@@ -73,11 +74,17 @@ func Status(err error) *commonpb.Status {
 // Error returns a error according to the given status,
 // returns nil if the status is a success status
 func Error(status *commonpb.Status) error {
-	if status.Code == 0 {
+	if status.GetCode() == 0 && status.GetErrorCode() == commonpb.ErrorCode_Success {
 		return nil
 	}
 
-	return newMilvusError(status.GetReason(), status.Code, status.Code&retriableFlag != 0)
+	// use code first
+	code := status.GetCode()
+	if code == 0 {
+		return newMilvusError(fmt.Sprintf("legacy error code:%d, reason: %s", status.GetErrorCode(), status.GetReason()), errUnexpected.errCode, false)
+	}
+
+	return newMilvusError(status.GetReason(), code, code&retriableFlag != 0)
 }
 
 // Service related
