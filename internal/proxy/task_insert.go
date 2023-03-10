@@ -101,6 +101,30 @@ func (it *insertTask) OnEnqueue() error {
 	return nil
 }
 
+func (it *insertTask) checkVectorFieldData() error {
+	fields := it.insertMsg.GetFieldsData()
+	for _, field := range fields {
+		if field.GetType() != schemapb.DataType_FloatVector {
+			continue
+		}
+
+		vectorField := field.GetVectors()
+		if vectorField == nil || vectorField.GetFloatVector() == nil {
+			log.Error("float vector field is illegal, array type mismatch", zap.String("field name", field.GetFieldName()))
+			return fmt.Errorf("float vector field '%v' is illegal, array type mismatch", field.GetFieldName())
+		}
+
+		floatArray := vectorField.GetFloatVector()
+		err := typeutil.VerifyFloats32(floatArray.GetData())
+		if err != nil {
+			log.Error("float vector field data is illegal", zap.String("field name", field.GetFieldName()), zap.Error(err))
+			return fmt.Errorf("float vector field data is illegal, error: %w", err)
+		}
+	}
+
+	return nil
+}
+
 func (it *insertTask) PreExecute(ctx context.Context) error {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Insert-PreExecute")
 	defer sp.End()
@@ -184,6 +208,13 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	if err = it.insertMsg.CheckAligned(); err != nil {
 		log.Error("field data is not aligned",
 			zap.Error(err))
+		return err
+	}
+
+	// check vector field data
+	err = it.checkVectorFieldData()
+	if err != nil {
+		log.Error("vector field data is illegal", zap.Error(err))
 		return err
 	}
 
