@@ -266,6 +266,48 @@ func Test_InitSegmentData(t *testing.T) {
 	assert.Nil(t, data)
 }
 
+func Test_VerifyFloat(t *testing.T) {
+	var value = math.NaN()
+	err := verifyFloat(value)
+	assert.Error(t, err)
+
+	value = math.Inf(1)
+	err = verifyFloat(value)
+	assert.Error(t, err)
+
+	value = math.Inf(-1)
+	err = verifyFloat(value)
+	assert.Error(t, err)
+}
+
+func Test_VerifyFloats32(t *testing.T) {
+	data := []float32{2.5, 32.2, 53.254}
+	err := verifyFloats32(data)
+	assert.NoError(t, err)
+
+	data = []float32{2.5, 32.2, 53.254, float32(math.NaN())}
+	err = verifyFloats32(data)
+	assert.Error(t, err)
+
+	data = []float32{2.5, 32.2, 53.254, float32(math.Inf(1))}
+	err = verifyFloats32(data)
+	assert.Error(t, err)
+}
+
+func Test_VerifyFloats64(t *testing.T) {
+	data := []float64{2.5, 32.2, 53.254}
+	err := verifyFloats64(data)
+	assert.NoError(t, err)
+
+	data = []float64{2.5, 32.2, 53.254, math.NaN()}
+	err = verifyFloats64(data)
+	assert.Error(t, err)
+
+	data = []float64{2.5, 32.2, 53.254, math.Inf(-1)}
+	err = verifyFloats64(data)
+	assert.Error(t, err)
+}
+
 func Test_parseFloat(t *testing.T) {
 	value, err := parseFloat("dummy", 32, "")
 	assert.Zero(t, value)
@@ -298,6 +340,14 @@ func Test_parseFloat(t *testing.T) {
 	value, err = parseFloat("2.718281828459045", 64, "")
 	assert.True(t, math.Abs(value-2.718281828459045) < 0.0000000000000001)
 	assert.Nil(t, err)
+
+	value, err = parseFloat("Inf", 32, "")
+	assert.Zero(t, value)
+	assert.Error(t, err)
+
+	value, err = parseFloat("NaN", 64, "")
+	assert.Zero(t, value)
+	assert.Error(t, err)
 }
 
 func Test_InitValidators(t *testing.T) {

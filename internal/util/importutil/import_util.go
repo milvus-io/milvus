@@ -113,15 +113,46 @@ func initSegmentData(collectionSchema *schemapb.CollectionSchema) map[storage.Fi
 	return segmentData
 }
 
+func verifyFloat(value float64) error {
+	// not allow not-a-number and infinity
+	if math.IsNaN(value) || math.IsInf(value, -1) || math.IsInf(value, 1) {
+		return fmt.Errorf("value is not a number or infinity")
+	}
+
+	return nil
+}
+
+func verifyFloats32(values []float32) error {
+	for _, f := range values {
+		err := verifyFloat(float64(f))
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func verifyFloats64(values []float64) error {
+	for _, f := range values {
+		err := verifyFloat(f)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func parseFloat(s string, bitsize int, fieldName string) (float64, error) {
 	value, err := strconv.ParseFloat(s, bitsize)
 	if err != nil {
 		return 0, fmt.Errorf("failed to parse value '%s' for field '%s', error: %w", s, fieldName, err)
 	}
 
-	// not allow not-a-number and infinity
-	if math.IsNaN(value) || math.IsInf(value, -1) || math.IsInf(value, 1) {
-		return 0, fmt.Errorf("value '%s' is not a number or infinity, field '%s', error: %w", s, fieldName, err)
+	err = verifyFloat(value)
+	if err != nil {
+		return 0, fmt.Errorf("illegal value '%s' for field '%s', error: %w", s, fieldName, err)
 	}
 
 	return value, nil
