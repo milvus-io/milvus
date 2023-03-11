@@ -372,7 +372,7 @@ MinioChunkManager::ListObjects(const char* bucket_name, const char* prefix) {
     std::vector<std::string> objects_vec;
     Aws::S3::Model::ListObjectsRequest request;
     request.WithBucket(bucket_name);
-    if (prefix != NULL) {
+    if (prefix != nullptr) {
         request.SetPrefix(prefix);
     }
 
