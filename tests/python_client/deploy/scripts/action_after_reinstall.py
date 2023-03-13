@@ -45,10 +45,3 @@ if __name__ == '__main__':
     logger.info(f"data size: {data_size}")
     task_1(data_size, host)
     task_2(data_size, host)
-    tasks = []
-    # tasks.append(threading.Thread(target=task_1, args=(data_size, host)))
-    # tasks.append(threading.Thread(target=task_2, args=(data_size, host)))
-    # for task in tasks:
-    #     task.start()
-    # for task in tasks:
-    #     task.join()    
