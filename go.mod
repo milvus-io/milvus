@@ -43,7 +43,7 @@ require (
 	go.etcd.io/etcd/api/v3 v3.5.5
 	go.etcd.io/etcd/client/v3 v3.5.5
 	go.etcd.io/etcd/server/v3 v3.5.5
-	go.uber.org/atomic v1.7.0
+	go.uber.org/atomic v1.10.0
 	go.uber.org/automaxprocs v1.4.0
 	go.uber.org/zap v1.17.0
 	golang.org/x/crypto v0.0.0-20220411220226-7b82a4e95df4

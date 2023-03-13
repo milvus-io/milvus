@@ -75,7 +75,7 @@ func TestGCPWrappedHTTPTransport_RoundTrip(t *testing.T) {
 	})
 
 	t.Run("invalid token, refresh failed", func(t *testing.T) {
-		ts.currentToken = nil
+		ts.currentToken.Store(nil)
 		ts.tokenSrc = &mockTokenSource{err: errors.New("mock error")}
 		req, err := http.NewRequest("GET", "http://example.com", nil)
 		assert.NoError(t, err)
@@ -84,7 +84,7 @@ func TestGCPWrappedHTTPTransport_RoundTrip(t *testing.T) {
 	})
 
 	t.Run("invalid token, refresh ok", func(t *testing.T) {
-		ts.currentToken = nil
+		ts.currentToken.Store(nil)
 		ts.tokenSrc = &mockTokenSource{err: nil}
 		req, err := http.NewRequest("GET", "http://example.com", nil)
 		assert.NoError(t, err)
@@ -92,7 +92,7 @@ func TestGCPWrappedHTTPTransport_RoundTrip(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	ts.currentToken = &oauth2.Token{}
+	ts.currentToken.Store(&oauth2.Token{})
 	t.Run("valid token, call failed", func(t *testing.T) {
 		ts.backend = &mockTransport{err: errors.New("mock error")}
 		req, err := http.NewRequest("GET", "http://example.com", nil)
