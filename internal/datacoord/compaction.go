@@ -28,7 +28,6 @@ import (
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
-
 	"go.uber.org/zap"
 )
 
@@ -258,21 +257,15 @@ func (c *compactionPlanHandler) completeCompaction(result *datapb.CompactionResu
 
 func (c *compactionPlanHandler) handleMergeCompactionResult(plan *datapb.CompactionPlan, result *datapb.CompactionResult) error {
 	// Also prepare metric updates.
-	oldSegments, modSegments, newSegment, metricMutation, err := c.meta.PrepareCompleteCompactionMutation(plan.GetSegmentBinlogs(), result)
+	_, modSegments, newSegment, metricMutation, err := c.meta.PrepareCompleteCompactionMutation(plan.GetSegmentBinlogs(), result)
 	if err != nil {
 		return err
 	}
 	log := log.With(zap.Int64("planID", plan.GetPlanID()))
 
-	modInfos := make([]*datapb.SegmentInfo, len(modSegments))
-	for i := range modSegments {
-		modInfos[i] = modSegments[i].SegmentInfo
-	}
-
-	log.Info("handleCompactionResult: altering metastore after compaction")
-	if err := c.meta.alterMetaStoreAfterCompaction(modInfos, newSegment.SegmentInfo); err != nil {
-		log.Warn("handleCompactionResult: fail to alter metastore after compaction", zap.Error(err))
-		return fmt.Errorf("fail to alter metastore after compaction, err=%w", err)
+	if err := c.meta.alterMetaStoreAfterCompaction(newSegment, modSegments); err != nil {
+		log.Warn("fail to alert meta store", zap.Error(err))
+		return err
 	}
 
 	var nodeID = c.plans[plan.GetPlanID()].dataNodeID
@@ -287,13 +280,11 @@ func (c *compactionPlanHandler) handleMergeCompactionResult(plan *datapb.Compact
 	log.Info("handleCompactionResult: syncing segments with node", zap.Int64("nodeID", nodeID))
 	if err := c.sessions.SyncSegments(nodeID, req); err != nil {
 		log.Warn("handleCompactionResult: fail to sync segments with node, reverting metastore",
-			zap.Int64("nodeID", nodeID), zap.String("reason", err.Error()))
-		return c.meta.revertAlterMetaStoreAfterCompaction(oldSegments, newSegment.SegmentInfo)
+			zap.Int64("nodeID", nodeID), zap.Error(err))
+		return err
 	}
 	// Apply metrics after successful meta update.
 	metricMutation.commit()
-
-	c.meta.alterInMemoryMetaAfterCompaction(newSegment, modSegments)
 	log.Info("handleCompactionResult: success to handle merge compaction result")
 	return nil
 }

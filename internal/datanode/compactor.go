@@ -58,6 +58,7 @@ type compactor interface {
 	start()
 	complete()
 	compact() (*datapb.CompactionResult, error)
+	injectDone()
 	stop()
 	getPlanID() UniqueID
 	getCollection() UniqueID
@@ -83,6 +84,7 @@ type compactionTask struct {
 	wg           sync.WaitGroup
 	tr           *timerecord.TimeRecorder
 	chunkManager storage.ChunkManager
+	inject       *taskInjection
 }
 
 // check if compactionTask implements compactor
@@ -125,6 +127,7 @@ func (t *compactionTask) complete() {
 func (t *compactionTask) stop() {
 	t.cancel()
 	t.wg.Wait()
+	t.injectDone()
 }
 
 func (t *compactionTask) getPlanID() UniqueID {
@@ -553,7 +556,12 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 			statsLog.LogPath = blobPath
 		}
 	})
-	defer close(ti.injectOver)
+	defer func() {
+		// the injection will be closed if fail to compact
+		if t.inject == nil {
+			close(ti.injectOver)
+		}
+	}()
 
 	t.injectFlush(ti, segIDs...)
 	<-ti.Injected()
@@ -666,12 +674,7 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 		Channel:             t.plan.GetChannel(),
 	}
 
-	uninjectStart := time.Now()
-	ti.injectDone(true)
-	uninjectEnd := time.Now()
-	defer func() {
-		log.Info("uninject elapse in ms", zap.Int64("planID", t.plan.GetPlanID()), zap.Float64("elapse", nano2Milli(uninjectEnd.Sub(uninjectStart))))
-	}()
+	t.inject = ti
 
 	log.Info("compaction done",
 		zap.Int64("planID", t.plan.GetPlanID()),
@@ -687,6 +690,15 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 	metrics.DataNodeCompactionLatencyInQueue.WithLabelValues(fmt.Sprint(Params.DataNodeCfg.GetNodeID())).Observe(float64(durInQueue.Milliseconds()))
 
 	return pack, nil
+}
+
+func (t *compactionTask) injectDone() {
+	if t.inject != nil {
+		uninjectStart := time.Now()
+		t.inject.injectDone(true)
+		uninjectEnd := time.Now()
+		log.Info("uninject elapse in ms", zap.Int64("planID", t.plan.GetPlanID()), zap.Float64("elapse", nano2Milli(uninjectEnd.Sub(uninjectStart))))
+	}
 }
 
 // TODO copy maybe expensive, but this seems to be the only convinent way.

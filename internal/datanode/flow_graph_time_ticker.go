@@ -20,9 +20,8 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus/internal/log"
+	"go.uber.org/zap"
 )
 
 type sendTimeTick func(Timestamp, []int64) error
@@ -102,6 +101,8 @@ func (mt *mergedTimeTickerSender) isClosed() bool {
 
 func (mt *mergedTimeTickerSender) work() {
 	defer mt.wg.Done()
+	var sids []int64
+	var isDiffTs bool
 	lastTs := uint64(0)
 	for {
 		mt.cond.L.Lock()
@@ -113,20 +114,23 @@ func (mt *mergedTimeTickerSender) work() {
 		mt.cond.L.Unlock()
 
 		mt.mu.Lock()
-		if mt.ts != lastTs {
-			var sids []int64
+		isDiffTs = mt.ts != lastTs
+		if isDiffTs {
 			for sid := range mt.segmentIDs {
 				sids = append(sids, sid)
 			}
-			mt.segmentIDs = make(map[int64]struct{})
+			// we will reset the timer but not the segmentIDs, since if we sent the timetick fail we may block forever due to flush stuck
 			lastTs = mt.ts
 			mt.lastSent = time.Now()
+			mt.segmentIDs = make(map[int64]struct{})
+		}
+		mt.mu.Unlock()
 
-			if err := mt.send(mt.ts, sids); err != nil {
+		if isDiffTs {
+			if err := mt.send(lastTs, sids); err != nil {
 				log.Error("send hard time tick failed", zap.Error(err))
 			}
 		}
-		mt.mu.Unlock()
 	}
 }
 

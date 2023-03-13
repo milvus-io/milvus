@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"sync"
 
 	//	"math"
 	"testing"
@@ -751,6 +752,11 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 			assert.Equal(t, int64(4), result.GetNumOfRows())
 			assert.NotEmpty(t, result.InsertLogs)
 			assert.NotEmpty(t, result.Field2StatslogPaths)
+
+			assert.Equal(t, 0, mockfm.injectCount())
+			task.injectDone()
+			time.Sleep(500 * time.Millisecond)
+			assert.Equal(t, 1, mockfm.injectCount())
 		}
 	})
 
@@ -834,6 +840,11 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 		assert.Equal(t, int64(2), result.GetNumOfRows())
 		assert.NotEmpty(t, result.InsertLogs)
 		assert.NotEmpty(t, result.Field2StatslogPaths)
+
+		assert.Equal(t, 0, mockfm.injectCount())
+		task.injectDone()
+		time.Sleep(500 * time.Millisecond)
+		assert.Equal(t, 1, mockfm.injectCount())
 	})
 }
 
@@ -842,6 +853,10 @@ type mockFlushManager struct {
 	returnError      bool
 	recordFlushedSeg bool
 	flushedSegIDs    []UniqueID
+	injectOverCount  struct {
+		sync.RWMutex
+		value int
+	}
 }
 
 var _ flushManager = (*mockFlushManager)(nil)
@@ -869,7 +884,16 @@ func (mfm *mockFlushManager) injectFlush(injection *taskInjection, segments ...U
 		//injection.injected <- struct{}{}
 		close(injection.injected)
 		<-injection.injectOver
+		mfm.injectOverCount.Lock()
+		defer mfm.injectOverCount.Unlock()
+		mfm.injectOverCount.value++
 	}()
+}
+
+func (mfm *mockFlushManager) injectCount() int {
+	mfm.injectOverCount.RLock()
+	defer mfm.injectOverCount.RUnlock()
+	return mfm.injectOverCount.value
 }
 
 func (mfm *mockFlushManager) notifyAllFlushed() {}
