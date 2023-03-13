@@ -206,8 +206,8 @@ func (node *Proxy) Init() error {
 	node.rowIDAllocator = idAllocator
 	log.Info("create id allocator done", zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", Params.ProxyCfg.GetNodeID()))
 
-	log.Info("create timestamp allocator", zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", Params.ProxyCfg.GetNodeID()))
-	tsoAllocator, err := newTimestampAllocator(node.ctx, node.rootCoord, Params.ProxyCfg.GetNodeID())
+	log.Debug("create timestamp allocator", zap.String("role", typeutil.ProxyRole), zap.Int64("ProxyID", Params.ProxyCfg.GetNodeID()))
+	tsoAllocator, err := newTimestampAllocator(node.rootCoord, Params.ProxyCfg.GetNodeID())
 	if err != nil {
 		log.Warn("failed to create timestamp allocator",
 			zap.Error(err),

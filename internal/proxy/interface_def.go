@@ -25,7 +25,7 @@ import (
 // use interface tsoAllocator to keep other components testable
 // include: channelsTimeTickerImpl, baseTaskQueue, taskScheduler
 type tsoAllocator interface {
-	AllocOne() (Timestamp, error)
+	AllocOne(ctx context.Context) (Timestamp, error)
 }
 
 // use timestampAllocatorInterface to keep other components testable

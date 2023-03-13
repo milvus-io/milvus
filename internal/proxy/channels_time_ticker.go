@@ -90,7 +90,7 @@ func (ticker *channelsTimeTickerImpl) initCurrents(current Timestamp) {
 }
 
 func (ticker *channelsTimeTickerImpl) tick() error {
-	now, err := ticker.tso.AllocOne()
+	now, err := ticker.tso.AllocOne(ticker.ctx)
 	if err != nil {
 		log.Warn("Proxy channelsTimeTickerImpl failed to get ts from tso", zap.Error(err))
 		return err
@@ -168,7 +168,7 @@ func (ticker *channelsTimeTickerImpl) tickLoop() {
 func (ticker *channelsTimeTickerImpl) start() error {
 	ticker.initStatistics()
 
-	current, err := ticker.tso.AllocOne()
+	current, err := ticker.tso.AllocOne(ticker.ctx)
 	if err != nil {
 		return err
 	}
