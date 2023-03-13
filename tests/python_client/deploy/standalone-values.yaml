@@ -24,7 +24,7 @@ kafka:
   defaultReplicationFactor: 2
 
 etcd:
-  replicaCount: 1
+  replicaCount: 3
   image:
     debug: true
     repository: milvusdb/etcd
