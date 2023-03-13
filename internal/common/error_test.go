@@ -17,7 +17,7 @@
 package common
 
 import (
-	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -28,7 +28,7 @@ import (
 )
 
 func TestIgnorableError(t *testing.T) {
-	err := fmt.Errorf("test err")
+	err := errors.New("test err")
 	iErr := NewIgnorableError(err)
 	assert.True(t, IsIgnorableError(iErr))
 	assert.False(t, IsIgnorableError(err))
@@ -42,7 +42,8 @@ func TestNotExistError(t *testing.T) {
 
 func TestStatusError_Error(t *testing.T) {
 	err := NewCollectionNotExistError("collection not exist")
-	fmt.Println("test status error: ", err.Error())
+	assert.True(t, IsStatusError(err))
+	assert.True(t, strings.Contains(err.Error(), "collection not exist"))
 }
 
 func TestIsStatusError(t *testing.T) {

@@ -18,7 +18,6 @@ package storage
 
 import (
 	"encoding/json"
-	"fmt"
 	"testing"
 
 	"github.com/bits-and-blooms/bloom/v3"
@@ -70,7 +69,7 @@ func TestStatsWriter_BF(t *testing.T) {
 	data := &Int64FieldData{
 		Data: value,
 	}
-	fmt.Println(data.RowNum())
+	t.Log(data.RowNum())
 	sw := &StatsWriter{}
 	err := sw.GeneratePrimaryKeyStats(common.RowIDField, schemapb.DataType_Int64, data)
 	assert.NoError(t, err)

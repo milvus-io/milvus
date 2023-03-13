@@ -418,7 +418,7 @@ func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, er
 		}
 		ch, err = s.etcdCli.KeepAlive(keepAliveCtx, resp.ID)
 		if err != nil {
-			fmt.Printf("got error during keeping alive with etcd, err: %s\n", err)
+			log.Warn("go error during keeping alive with etcd", zap.Error(err))
 			return err
 		}
 		log.Info("Service registered successfully", zap.String("ServerName", s.ServerName), zap.Int64("serverID", s.ServerID))

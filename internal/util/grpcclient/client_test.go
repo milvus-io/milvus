@@ -18,7 +18,6 @@ package grpcclient
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"math/rand"
 	"net"
@@ -353,7 +352,6 @@ func TestClientBase_RetryPolicy(t *testing.T) {
 	ctx := context.Background()
 	randID := rand.Int63()
 	res, err := clientBase.Call(ctx, func(client rootcoordpb.RootCoordClient) (any, error) {
-		fmt.Println("client base...")
 		return &milvuspb.ComponentStates{State: &milvuspb.ComponentInfo{
 			NodeID: randID,
 		}}, nil
@@ -416,7 +414,6 @@ func TestClientBase_Compression(t *testing.T) {
 	ctx := context.Background()
 	randID := rand.Int63()
 	res, err := clientBase.Call(ctx, func(client rootcoordpb.RootCoordClient) (any, error) {
-		fmt.Println("client base...")
 		return &milvuspb.ComponentStates{State: &milvuspb.ComponentInfo{
 			NodeID: randID,
 		}}, nil

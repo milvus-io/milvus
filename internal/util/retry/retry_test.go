@@ -48,7 +48,7 @@ func TestAttempts(t *testing.T) {
 
 	err := Do(ctx, testFn, Attempts(1))
 	assert.NotNil(t, err)
-	fmt.Println(err)
+	t.Log(err)
 }
 
 func TestMaxSleepTime(t *testing.T) {
@@ -60,7 +60,7 @@ func TestMaxSleepTime(t *testing.T) {
 
 	err := Do(ctx, testFn, Attempts(3), MaxSleepTime(200*time.Millisecond))
 	assert.NotNil(t, err)
-	fmt.Println(err)
+	t.Log(err)
 }
 
 func TestSleep(t *testing.T) {
@@ -72,7 +72,7 @@ func TestSleep(t *testing.T) {
 
 	err := Do(ctx, testFn, Attempts(3), Sleep(500*time.Millisecond))
 	assert.NotNil(t, err)
-	fmt.Println(err)
+	t.Log(err)
 }
 
 func TestAllError(t *testing.T) {
@@ -84,7 +84,7 @@ func TestAllError(t *testing.T) {
 
 	err := Do(ctx, testFn, Attempts(3))
 	assert.NotNil(t, err)
-	fmt.Println(err)
+	t.Log(err)
 }
 
 func TestUnRecoveryError(t *testing.T) {
@@ -113,7 +113,7 @@ func TestContextDeadline(t *testing.T) {
 
 	err := Do(ctx, testFn)
 	assert.NotNil(t, err)
-	fmt.Println(err)
+	t.Log(err)
 }
 
 func TestContextCancel(t *testing.T) {
@@ -130,5 +130,5 @@ func TestContextCancel(t *testing.T) {
 
 	err := Do(ctx, testFn)
 	assert.NotNil(t, err)
-	fmt.Println(err)
+	t.Log(err)
 }

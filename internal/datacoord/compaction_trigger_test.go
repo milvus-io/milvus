@@ -17,7 +17,6 @@
 package datacoord
 
 import (
-	"fmt"
 	"sort"
 	"testing"
 	"time"
@@ -39,7 +38,6 @@ type spyCompactionHandler struct {
 
 // execCompactionPlan start to execute plan and return immediately
 func (h *spyCompactionHandler) execCompactionPlan(signal *compactionSignal, plan *datapb.CompactionPlan) error {
-	fmt.Println("plan ", plan.SegmentBinlogs)
 	h.spyChan <- plan
 	return nil
 }
@@ -1492,7 +1490,6 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 				for _, log := range plan.SegmentBinlogs {
 					size += log.FieldBinlogs[0].GetBinlogs()[0].LogSize
 				}
-				fmt.Println("target ", len(plan.SegmentBinlogs))
 			}
 			assert.Equal(t, 4, len(plans))
 			// plan 1: 250 + 20 * 10 + 3 * 20

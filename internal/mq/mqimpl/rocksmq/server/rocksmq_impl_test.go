@@ -1049,7 +1049,7 @@ func TestRocksmq_SeekWithNoConsumerError(t *testing.T) {
 
 	rmq.CreateTopic("test")
 	err = rmq.Seek("test", "", 0)
-	fmt.Println(err)
+	t.Log(err)
 	assert.Error(t, err)
 	assert.Error(t, rmq.ForceSeek("test", "", 0))
 }

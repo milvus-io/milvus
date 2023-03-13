@@ -17,46 +17,45 @@
 package tracer
 
 import (
-	"fmt"
 	"testing"
 )
 
-func testStackTrace() {
-	fmt.Println(StackTraceMsg(1))
-	fmt.Println(StackTraceMsg(5))
-	fmt.Println(StackTraceMsg(10))
+func testStackTrace(t *testing.T) {
+	t.Log(StackTraceMsg(1))
+	t.Log(StackTraceMsg(5))
+	t.Log(StackTraceMsg(10))
 
-	fmt.Println(StackTrace())
+	t.Log(StackTrace())
 }
 
 func TestStackTraceMsg(t *testing.T) {
-	fmt.Println(StackTraceMsg(1))
-	fmt.Println(StackTraceMsg(5))
-	fmt.Println(StackTraceMsg(10))
+	t.Log(StackTraceMsg(1))
+	t.Log(StackTraceMsg(5))
+	t.Log(StackTraceMsg(10))
 
 	func() {
-		fmt.Println(StackTraceMsg(10))
+		t.Log(StackTraceMsg(10))
 	}()
 
 	func() {
 		func() {
-			fmt.Println(StackTraceMsg(10))
+			t.Log(StackTraceMsg(10))
 		}()
 	}()
 
-	testStackTrace()
+	testStackTrace(t)
 }
 
 func TestStackTrace(t *testing.T) {
-	fmt.Println(StackTrace())
+	t.Log(StackTrace())
 
 	func() {
-		fmt.Println(StackTrace())
+		t.Log(StackTrace())
 	}()
 
 	func() {
 		func() {
-			fmt.Println(StackTrace())
+			t.Log(StackTrace())
 		}()
 	}()
 }

@@ -17,7 +17,6 @@
 package msgstream
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/golang/protobuf/proto"
@@ -26,18 +25,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 )
-
-func newInsertMsgUnmarshal(input []byte) (TsMsg, error) {
-	insertRequest := msgpb.InsertRequest{}
-	err := proto.Unmarshal(input, &insertRequest)
-	insertMsg := &InsertMsg{InsertRequest: insertRequest}
-	fmt.Println("use func newInsertMsgUnmarshal unmarshal")
-	if err != nil {
-		return nil, err
-	}
-
-	return insertMsg, nil
-}
 
 func Test_ProtoUnmarshalDispatcher(t *testing.T) {
 	msgPack := MsgPack{}
@@ -68,9 +55,6 @@ func Test_ProtoUnmarshalDispatcher(t *testing.T) {
 	factory := &ProtoUDFactory{}
 	unmarshalDispatcher := factory.NewUnmarshalDispatcher()
 
-	// FIXME(wxyu): Maybe we dont need this interface
-	//unmarshalDispatcher.AddMsgTemplate(commonpb.MsgType_kInsert, newInsertMsgUnmarshal)
-
 	for _, v := range msgPack.Msgs {
 		headerMsg := commonpb.MsgHeader{}
 		payload, err := v.Marshal(v)
@@ -81,6 +65,6 @@ func Test_ProtoUnmarshalDispatcher(t *testing.T) {
 		assert.Nil(t, err)
 		msg, err := unmarshalDispatcher.Unmarshal(p, headerMsg.Base.MsgType)
 		assert.Nil(t, err)
-		fmt.Println("msg type: ", msg.Type(), ", msg value: ", msg, "msg tag: ")
+		t.Log("msg type: ", msg.Type(), ", msg value: ", msg, "msg tag: ")
 	}
 }

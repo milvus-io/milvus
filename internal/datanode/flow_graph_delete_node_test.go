@@ -19,7 +19,6 @@ package datanode
 import (
 	"container/heap"
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
@@ -233,7 +232,7 @@ func TestFlowGraphDeleteNode_Operate(t *testing.T) {
 		assert.Nil(t, err)
 
 		segID2Pks, _ := dn.filterSegmentByPK(0, int64Pks, tss)
-		fmt.Println(segID2Pks)
+		t.Log(segID2Pks)
 		expected := map[int64][]primaryKey{
 			segIDs[0]: int64Pks[0:3],
 			segIDs[1]: int64Pks[0:3],

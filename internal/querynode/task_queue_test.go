@@ -18,7 +18,6 @@ package querynode
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -50,10 +49,10 @@ func TestBaseTaskQueue_addUnissuedTask(t *testing.T) {
 			timestamp: 1000,
 		}
 		err := taskQueue.addUnissuedTask(mt)
-		fmt.Println(taskQueue.unissuedTasks.Back().Value.(task).Timestamp())
+		t.Log(taskQueue.unissuedTasks.Back().Value.(task).Timestamp())
 		assert.NoError(t, err)
 		err = taskQueue.addUnissuedTask(mt)
-		fmt.Println(taskQueue.unissuedTasks.Back().Value.(task).Timestamp())
+		t.Log(taskQueue.unissuedTasks.Back().Value.(task).Timestamp())
 		assert.NoError(t, err)
 		mt2 := &mockTask{
 			timestamp: 0,

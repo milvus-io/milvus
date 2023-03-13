@@ -17,7 +17,6 @@
 package storage
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -371,7 +370,7 @@ func TestPayload_CGO_ReaderandWriter(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, 8, dim)
 		assert.Equal(t, 24, len(binVecs))
-		fmt.Println(binVecs)
+		t.Log(binVecs)
 
 		ibinVecs, dim, err := r.GetDataFromPayload()
 		assert.Nil(t, err)

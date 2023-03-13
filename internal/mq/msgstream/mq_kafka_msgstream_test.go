@@ -18,7 +18,6 @@ package msgstream
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"sync"
 	"testing"
@@ -424,7 +423,7 @@ func TestStream_KafkaTtMsgStream_DataNodeTimetickMsgstream(t *testing.T) {
 				assert.NotNil(t, msgPack)
 
 				if len(msgPack.Msgs) > 0 {
-					fmt.Println("msg===:", msgPack.Msgs[0])
+					t.Log("msg===:", msgPack.Msgs[0])
 					wg.Done()
 					return
 				}

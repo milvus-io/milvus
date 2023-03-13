@@ -18,7 +18,6 @@ package datacoord
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -451,8 +450,6 @@ func TestUpdateFlushSegmentsInfo(t *testing.T) {
 			Deltalogs:     []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 1, TimestampFrom: 100, TimestampTo: 200, LogSize: 1000}}}},
 		}}
 
-		fmt.Println(updated)
-		fmt.Println(expected)
 		assert.Equal(t, updated.StartPosition, expected.StartPosition)
 		assert.Equal(t, updated.DmlPosition, expected.DmlPosition)
 		assert.Equal(t, updated.DmlPosition, expected.DmlPosition)

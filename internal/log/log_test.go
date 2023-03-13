@@ -34,7 +34,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -57,7 +56,7 @@ func TestExport(t *testing.T) {
 	Error("Testing")
 	Sync()
 	ts.assertMessagesContains("log_test.go:")
-	logPanic()
+	logPanic(t)
 
 	ts = newTestLogSpy(t)
 	logger, _, _ = InitTestLogger(ts, conf)
@@ -71,10 +70,10 @@ func TestExport(t *testing.T) {
 	ts.assertMessagesContains(`age=42`)
 }
 
-func logPanic() {
+func logPanic(t *testing.T) {
 	defer func() {
 		if err := recover(); err != nil {
-			fmt.Println("logPanic recover")
+			t.Log("logPanic recover")
 		}
 	}()
 	Panic("Testing")
@@ -264,7 +263,7 @@ func TestStdAndFileLogger(t *testing.T) {
 		RootPath: tmpDir,
 		Filename: "TestStdAndFileLogger",
 	}
-	fmt.Println(tmpDir)
+	t.Log(tmpDir)
 	conf := &Config{Level: "debug", Stdout: true, File: fileConf}
 
 	logger, _, err := InitLogger(conf)
