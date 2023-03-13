@@ -128,7 +128,7 @@ class MinioChunkManager : public RemoteChunkManager {
                     void* buf,
                     uint64_t size);
     std::vector<std::string>
-    ListObjects(const char* bucket_name, const char* prefix = NULL);
+    ListObjects(const char* bucket_name, const char* prefix = nullptr);
     void
     InitSDKAPI();
     void

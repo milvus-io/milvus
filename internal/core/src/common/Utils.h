@@ -345,7 +345,7 @@ CreateMap(int64_t segment_id,
             return nullptr;
 
         // Use anon mapping so we are able to free these memory with munmap only
-        void* map = mmap(NULL,
+        void* map = mmap(nullptr,
                          data_size,
                          PROT_READ | PROT_WRITE,
                          mmap_flags | MAP_ANON,
@@ -391,7 +391,7 @@ CreateMap(int64_t segment_id,
         return nullptr;
     }
 
-    auto map = mmap(NULL, written, PROT_READ, mmap_flags, fd, 0);
+    auto map = mmap(nullptr, written, PROT_READ, mmap_flags, fd, 0);
     AssertInfo(map != MAP_FAILED,
                fmt::format("failed to create map for data file {}, err: {}",
                            filepath.c_str(),
