@@ -79,7 +79,7 @@ LocalChunkManager::Read(const std::string& filepath,
                         void* buf,
                         uint64_t size) {
     std::ifstream infile;
-    infile.open(filepath, std::ios_base::binary);
+    infile.open(filepath.data(), std::ios_base::binary);
     if (infile.fail()) {
         std::stringstream err_msg;
         err_msg << "Error: open local file '" << filepath << " failed, "
@@ -104,7 +104,7 @@ LocalChunkManager::Write(const std::string& absPathStr,
                          void* buf,
                          uint64_t size) {
     std::ofstream outfile;
-    outfile.open(absPathStr, std::ios_base::binary);
+    outfile.open(absPathStr.data(), std::ios_base::binary);
     if (outfile.fail()) {
         std::stringstream err_msg;
         err_msg << "Error: open local file '" << absPathStr << " failed, "
@@ -126,7 +126,7 @@ LocalChunkManager::Write(const std::string& absPathStr,
                          uint64_t size) {
     std::ofstream outfile;
     outfile.open(
-        absPathStr,
+        absPathStr.data(),
         std::ios_base::in | std::ios_base::out | std::ios_base::binary);
     if (outfile.fail()) {
         std::stringstream err_msg;

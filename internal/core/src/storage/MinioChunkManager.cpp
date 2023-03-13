@@ -14,20 +14,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <fstream>
+#include "storage/MinioChunkManager.h"
+
 #include <aws/core/auth/AWSCredentials.h>
 #include <aws/core/auth/AWSCredentialsProviderChain.h>
 #include <aws/core/auth/STSCredentialsProvider.h>
 #include <aws/s3/model/CreateBucketRequest.h>
 #include <aws/s3/model/DeleteBucketRequest.h>
-#include <aws/s3/model/HeadBucketRequest.h>
 #include <aws/s3/model/DeleteObjectRequest.h>
+#include <aws/s3/model/GetObjectRequest.h>
+#include <aws/s3/model/HeadBucketRequest.h>
 #include <aws/s3/model/HeadObjectRequest.h>
 #include <aws/s3/model/ListObjectsRequest.h>
-#include <aws/s3/model/GetObjectRequest.h>
 #include <aws/s3/model/PutObjectRequest.h>
 
-#include "storage/MinioChunkManager.h"
+#include <fstream>
+
 #include "exceptions/EasyAssert.h"
 #include "log/Log.h"
 

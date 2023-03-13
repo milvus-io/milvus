@@ -21,7 +21,7 @@
 namespace milvus::ChunkMangerConfig {
 
 void
-SetLocalRootPath(const std::string& path_prefix);
+SetLocalRootPath(const std::string_view path_prefix);
 
 std::string
 GetLocalRootPath();

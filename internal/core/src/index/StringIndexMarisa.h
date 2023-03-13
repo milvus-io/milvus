@@ -64,7 +64,7 @@ class StringIndexMarisa : public StringIndex {
           bool ub_inclusive) override;
 
     const TargetBitmapPtr
-    PrefixMatch(std::string prefix) override;
+    PrefixMatch(const std::string_view prefix) override;
 
     std::string
     Reverse_Lookup(size_t offset) const override;
@@ -78,10 +78,10 @@ class StringIndexMarisa : public StringIndex {
 
     // get str_id by str, if str not found, -1 was returned.
     size_t
-    lookup(const std::string& str);
+    lookup(const std::string_view str);
 
     std::vector<size_t>
-    prefix_match(const std::string& prefix);
+    prefix_match(const std::string_view prefix);
 
  private:
     Config config_;

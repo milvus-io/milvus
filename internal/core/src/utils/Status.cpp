@@ -18,7 +18,7 @@ namespace milvus {
 
 constexpr int CODE_WIDTH = sizeof(StatusCode);
 
-Status::Status(StatusCode code, const std::string& msg) {
+Status::Status(StatusCode code, const std::string_view msg) {
     // 4 bytes store code
     // 4 bytes store message length
     // the left bytes store message string

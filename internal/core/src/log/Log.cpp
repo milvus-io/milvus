@@ -51,12 +51,12 @@ LogOut(const char* pattern, ...) {
 }
 
 void
-SetThreadName(const std::string& name) {
+SetThreadName(const std::string_view name) {
     // Note: the name cannot exceed 16 bytes
 #ifdef __APPLE__
-    pthread_setname_np(name.c_str());
+    pthread_setname_np(name.data());
 #elif defined(__linux__) || defined(__MINGW64__)
-    pthread_setname_np(pthread_self(), name.c_str());
+    pthread_setname_np(pthread_self(), name.data());
 #else
 #error "Unsupported SetThreadName";
 #endif

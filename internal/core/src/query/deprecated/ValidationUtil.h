@@ -27,10 +27,10 @@ constexpr int64_t GPU_QUERY_MAX_TOPK = 2048;
 constexpr int64_t GPU_QUERY_MAX_NPROBE = 2048;
 
 extern Status
-ValidateCollectionName(const std::string& collection_name);
+ValidateCollectionName(const std::string_view collection_name);
 
 extern Status
-ValidateFieldName(const std::string& field_name);
+ValidateFieldName(const std::string_view field_name);
 
 extern Status
 ValidateDimension(int64_t dimension, bool is_binary);
@@ -44,17 +44,17 @@ ValidateStructuredIndexType(std::string& index_type);
 extern Status
 ValidateIndexParams(const milvus::json& index_params,
                     int64_t dimension,
-                    const std::string& index_type);
+                    const std::string_view index_type);
 
 extern Status
 ValidateSegmentRowCount(int64_t segment_row_count);
 
 extern Status
-ValidateIndexMetricType(const std::string& metric_type,
-                        const std::string& index_type);
+ValidateIndexMetricType(const std::string_view metric_type,
+                        const std::string_view index_type);
 
 extern Status
-ValidateSearchMetricType(const std::string& metric_type, bool is_binary);
+ValidateSearchMetricType(const std::string_view metric_type, bool is_binary);
 
 extern Status
 ValidateSearchTopk(int64_t top_k);

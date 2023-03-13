@@ -112,7 +112,7 @@ IndexMode
 GetIndexModeFromConfig(const Config& config);
 
 IndexMode
-GetIndexMode(const std::string index_mode);
+GetIndexMode(const std::string_view index_mode);
 
 storage::FieldDataMeta
 GetFieldDataMetaFromConfig(const Config& config);

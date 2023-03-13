@@ -91,13 +91,13 @@ GenResultDataset(const int64_t nq,
 }
 
 inline bool
-PostfixMatch(const std::string_view str, const std::string& postfix) {
+PostfixMatch(const std::string_view str, const std::string_view postfix) {
     if (postfix.length() > str.length()) {
         return false;
     }
 
     int offset = str.length() - postfix.length();
-    auto ret = strncmp(str.data() + offset, postfix.c_str(), postfix.length());
+    auto ret = strncmp(str.data() + offset, postfix.data(), postfix.length());
     if (ret != 0) {
         return false;
     }
@@ -127,8 +127,9 @@ upper_div(int64_t value, int64_t align) {
 }
 
 inline bool
-IsMetricType(const std::string& str, const knowhere::MetricType& metric_type) {
-    return !strcasecmp(str.c_str(), metric_type.c_str());
+IsMetricType(const std::string_view str,
+             const knowhere::MetricType& metric_type) {
+    return !strcasecmp(str.data(), metric_type.c_str());
 }
 
 inline bool

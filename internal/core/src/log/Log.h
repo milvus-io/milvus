@@ -129,7 +129,7 @@ std::string
 LogOut(const char* pattern, ...);
 
 void
-SetThreadName(const std::string& name);
+SetThreadName(const std::string_view name);
 
 std::string
 GetThreadName();

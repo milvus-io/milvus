@@ -24,10 +24,10 @@ namespace milvus::query {
 // deprecated
 std::unique_ptr<PlaceholderGroup>
 ParsePlaceholderGroup(const Plan* plan,
-                      const std::string& placeholder_group_blob) {
+                      const std::string_view placeholder_group_blob) {
     return ParsePlaceholderGroup(
         plan,
-        reinterpret_cast<const uint8_t*>(placeholder_group_blob.c_str()),
+        reinterpret_cast<const uint8_t*>(placeholder_group_blob.data()),
         placeholder_group_blob.size());
 }
 
@@ -64,7 +64,7 @@ ParsePlaceholderGroup(const Plan* plan,
 }
 
 std::unique_ptr<Plan>
-CreatePlan(const Schema& schema, const std::string& dsl_str) {
+CreatePlan(const Schema& schema, const std::string_view dsl_str) {
     Json dsl;
     dsl = json::parse(dsl_str);
     auto plan = Parser(schema).CreatePlanImpl(dsl);

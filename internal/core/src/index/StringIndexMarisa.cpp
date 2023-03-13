@@ -231,7 +231,7 @@ StringIndexMarisa::Range(std::string lower_bound_value,
 }
 
 const TargetBitmapPtr
-StringIndexMarisa::PrefixMatch(std::string prefix) {
+StringIndexMarisa::PrefixMatch(std::string_view prefix) {
     TargetBitmapPtr bitset = std::make_unique<TargetBitmap>(str_ids_.size());
     auto matched = prefix_match(prefix);
     for (const auto str_id : matched) {
@@ -266,9 +266,9 @@ StringIndexMarisa::fill_offsets() {
 }
 
 size_t
-StringIndexMarisa::lookup(const std::string& str) {
+StringIndexMarisa::lookup(const std::string_view str) {
     marisa::Agent agent;
-    agent.set_query(str.c_str());
+    agent.set_query(str.data());
     if (trie_.lookup(agent)) {
         return agent.key().id();
     }
@@ -278,10 +278,10 @@ StringIndexMarisa::lookup(const std::string& str) {
 }
 
 std::vector<size_t>
-StringIndexMarisa::prefix_match(const std::string& prefix) {
+StringIndexMarisa::prefix_match(const std::string_view prefix) {
     std::vector<size_t> ret;
     marisa::Agent agent;
-    agent.set_query(prefix.c_str());
+    agent.set_query(prefix.data());
     while (trie_.predictive_search(agent)) {
         ret.push_back(agent.key().id());
     }

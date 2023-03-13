@@ -26,7 +26,7 @@ namespace {
 
 Status
 CheckParameterRange(const milvus::json& json_params,
-                    const std::string& param_name,
+                    const std::string_view param_name,
                     int64_t min,
                     int64_t max,
                     bool min_close = true,
@@ -63,7 +63,7 @@ CheckParameterRange(const milvus::json& json_params,
 
 Status
 CheckParameterExistence(const milvus::json& json_params,
-                        const std::string& param_name) {
+                        const std::string_view param_name) {
     if (json_params.find(param_name) == json_params.end()) {
         std::string msg = "Parameter list must contain: ";
         msg += param_name;
@@ -92,7 +92,7 @@ CheckParameterExistence(const milvus::json& json_params,
 }  // namespace
 
 Status
-ValidateCollectionName(const std::string& collection_name) {
+ValidateCollectionName(const std::string_view collection_name) {
     // Collection name shouldn't be empty.
     if (collection_name.empty()) {
         std::string msg = "Collection name should not be empty.";
@@ -138,7 +138,7 @@ ValidateCollectionName(const std::string& collection_name) {
 }
 
 Status
-ValidateFieldName(const std::string& field_name) {
+ValidateFieldName(const std::string_view field_name) {
     // Field name shouldn't be empty.
     if (field_name.empty()) {
         std::string msg = "Field name should not be empty.";
@@ -269,7 +269,7 @@ ValidateDimension(int64_t dim, bool is_binary) {
 Status
 ValidateIndexParams(const milvus::json& index_params,
                     int64_t dimension,
-                    const std::string& index_type) {
+                    const std::string_view index_type) {
     if (engine::utils::IsFlatIndexType(index_type)) {
         return Status::OK();
     } else if (index_type == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT ||
@@ -362,8 +362,8 @@ ValidateSegmentRowCount(int64_t segment_row_count) {
 }
 
 Status
-ValidateIndexMetricType(const std::string& metric_type,
-                        const std::string& index_type) {
+ValidateIndexMetricType(const std::string_view metric_type,
+                        const std::string_view index_type) {
     if (engine::utils::IsFlatIndexType(index_type)) {
         // pass
     } else if (index_type == knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT) {
@@ -391,7 +391,7 @@ ValidateIndexMetricType(const std::string& metric_type,
 }
 
 Status
-ValidateSearchMetricType(const std::string& metric_type, bool is_binary) {
+ValidateSearchMetricType(const std::string_view metric_type, bool is_binary) {
     if (is_binary) {
         // binary
         if (metric_type == knowhere::Metric::L2 ||
@@ -432,7 +432,7 @@ ValidateSearchTopk(int64_t top_k) {
 
 Status
 ValidatePartitionTags(const std::vector<std::string>& partition_tags) {
-    for (const std::string& tag : partition_tags) {
+    for (const std::string_view tag : partition_tags) {
         // Partition nametag shouldn't be empty.
         if (tag.empty()) {
             std::string msg = "Partition tag should not be empty.";

@@ -29,8 +29,8 @@ SuccessCStatus() {
 }
 
 inline CStatus
-FailureCStatus(ErrorCode error_code, const std::string& str) {
-    auto str_dup = strdup(str.c_str());
+FailureCStatus(ErrorCode error_code, const std::string_view str) {
+    auto str_dup = strdup(str.data());
     return CStatus{error_code, str_dup};
 }
 
