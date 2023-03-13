@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
+	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/stretchr/testify/suite"
 )
@@ -53,7 +54,7 @@ func (s *ErrSuite) TestStatus() {
 
 	s.ErrorIs(err, restoredErr)
 	s.Equal(int32(0), Status(nil).Code)
-	s.Nil(Error(successStatus))
+	s.Nil(Error(&commonpb.Status{}))
 }
 
 func (s *ErrSuite) TestWrap() {
@@ -100,6 +101,9 @@ func (s *ErrSuite) TestWrap() {
 	// Parameter related
 	s.ErrorIs(WrapErrParameterInvalid(8, 1, "failed to create"), ErrParameterInvalid)
 	s.ErrorIs(WrapErrParameterInvalidRange(1, 1<<16, 0, "topk should be in range"), ErrParameterInvalid)
+
+	// Metrics related
+	s.ErrorIs(WrapErrMetricNotFound("unknown", "failed to get metric"), ErrMetricNotFound)
 }
 
 func (s *ErrSuite) TestCombine() {

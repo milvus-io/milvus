@@ -26,8 +26,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 )
 
-// Declare a success status, avoid create it every time
-var successStatus = &commonpb.Status{}
+var (
+	// For compatibility
+	oldErrCodes = map[int32]commonpb.ErrorCode{
+		ErrServiceNotReady.code():    commonpb.ErrorCode_NotReadyServe,
+		ErrCollectionNotFound.code(): commonpb.ErrorCode_CollectionNotExists,
+	}
+)
 
 // Code returns the error code of the given error,
 // WARN: DO NOT use this for now
@@ -60,7 +65,7 @@ func IsRetriable(err error) bool {
 // returns Success status if err is nil
 func Status(err error) *commonpb.Status {
 	if err == nil {
-		return successStatus
+		return &commonpb.Status{}
 	}
 
 	return &commonpb.Status{
@@ -268,6 +273,15 @@ func WrapErrParameterInvalid[T any](expected, actual T, msg ...string) error {
 
 func WrapErrParameterInvalidRange[T any](lower, upper, actual T, msg ...string) error {
 	err := errors.Wrapf(ErrParameterInvalid, "expected in (%v, %v), actual=%v", lower, upper, actual)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
+// Metrics related
+func WrapErrMetricNotFound(name string, msg ...string) error {
+	err := errors.Wrapf(ErrMetricNotFound, "metric=%s", name)
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "; "))
 	}
