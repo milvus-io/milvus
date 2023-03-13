@@ -189,6 +189,16 @@ func (t *timetickSync) updateTimeTick(in *internalpb.ChannelTimeTickMsg, reason 
 		return fmt.Errorf("skip ChannelTimeTickMsg from un-recognized session %d", in.Base.SourceID)
 	}
 
+	if in.Base.SourceID == t.sourceID {
+		if prev != nil && in.DefaultTimestamp < prev.defaultTs {
+			log.Warn("timestamp go back", zap.Int64("source id", in.Base.SourceID),
+				zap.Uint64("curr ts", in.DefaultTimestamp),
+				zap.Uint64("prev ts", prev.defaultTs),
+				zap.String("reason", reason))
+			return nil
+		}
+	}
+
 	if prev == nil {
 		t.sess2ChanTsMap[in.Base.SourceID] = newChanTsMsg(in, 1)
 	} else {
