@@ -25,7 +25,7 @@ DatasetPtr
 SortRangeSearchResult(DatasetPtr data_set,
                       int64_t topk,
                       int64_t nq,
-                      std::string metric_type) {
+                      const std::string_view metric_type) {
     /**
      * nq: number of queries;
      * lims: the size of lims is nq + 1, lims[i+1] - lims[i] refers to the size of RangeSearch result queries[i]
@@ -104,7 +104,7 @@ SortRangeSearchResult(DatasetPtr data_set,
 void
 CheckRangeSearchParam(float radius,
                       float range_filter,
-                      std::string metric_type) {
+                      const std::string_view metric_type) {
     /*
      *   IP:   1.0        range_filter     radius
      *          |------------+---------------|       min_heap   descending_order

@@ -16,7 +16,7 @@
 
 namespace milvus::segcore {
 
-Collection::Collection(const std::string& collection_proto)
+Collection::Collection(const std::string_view collection_proto)
     : schema_proto_(collection_proto) {
     parse();
 }

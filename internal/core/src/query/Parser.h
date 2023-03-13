@@ -28,7 +28,7 @@ namespace milvus::query {
 class Parser {
  public:
     friend std::unique_ptr<Plan>
-    CreatePlan(const Schema& schema, const std::string& dsl_str);
+    CreatePlan(const Schema& schema, const std::string_view dsl_str);
 
  private:
     std::unique_ptr<Plan>

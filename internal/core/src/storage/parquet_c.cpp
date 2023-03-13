@@ -39,11 +39,11 @@ ReleaseArrowUnused() {
 }
 
 static const char*
-ErrorMsg(const std::string& msg) {
+ErrorMsg(const std::string_view msg) {
     if (msg.empty())
         return nullptr;
     auto ret = (char*)malloc(msg.size() + 1);
-    std::memcpy(ret, msg.c_str(), msg.size());
+    std::memcpy(ret, msg.data(), msg.size());
     ret[msg.size()] = '\0';
     return ret;
 }

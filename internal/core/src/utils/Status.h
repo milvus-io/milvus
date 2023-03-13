@@ -30,7 +30,7 @@ using StatusCode = ErrorCode;
 
 class Status {
  public:
-    Status(StatusCode code, const std::string& msg);
+    Status(StatusCode code, const std::string_view msg);
     Status() = default;
     virtual ~Status();
 

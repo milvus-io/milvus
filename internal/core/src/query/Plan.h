@@ -27,7 +27,7 @@ struct PlaceholderGroup;
 struct RetrievePlan;
 
 std::unique_ptr<Plan>
-CreatePlan(const Schema& schema, const std::string& dsl);
+CreatePlan(const Schema& schema, const std::string_view dsl);
 
 // Note: serialized_expr_plan is of binary format
 std::unique_ptr<Plan>
@@ -43,7 +43,7 @@ ParsePlaceholderGroup(const Plan* plan,
 // deprecated
 std::unique_ptr<PlaceholderGroup>
 ParsePlaceholderGroup(const Plan* plan,
-                      const std::string& placeholder_group_blob);
+                      const std::string_view placeholder_group_blob);
 
 int64_t
 GetNumOfQueries(const PlaceholderGroup*);

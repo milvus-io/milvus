@@ -40,7 +40,7 @@ class StringIndex : public ScalarIndex<std::string> {
     }
 
     virtual const TargetBitmapPtr
-    PrefixMatch(std::string prefix) = 0;
+    PrefixMatch(const std::string_view prefix) = 0;
 };
 using StringIndexPtr = std::unique_ptr<StringIndex>;
 }  // namespace milvus::index

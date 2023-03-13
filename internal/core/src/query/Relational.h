@@ -11,14 +11,14 @@
 
 #pragma once
 
+#include <functional>
+#include <string>
+
+#include "common/Utils.h"
 #include "common/VectorTrait.h"
 #include "exceptions/EasyAssert.h"
 #include "query/Expr.h"
-#include "common/Utils.h"
 #include "query/Utils.h"
-
-#include <functional>
-#include <string>
 
 namespace milvus::query {
 template <typename Op, typename T, typename U>

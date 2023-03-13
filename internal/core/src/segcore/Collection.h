@@ -20,7 +20,7 @@ namespace milvus::segcore {
 
 class Collection {
  public:
-    explicit Collection(const std::string& collection_proto);
+    explicit Collection(const std::string_view collection_proto);
 
     void
     parse();
@@ -31,7 +31,7 @@ class Collection {
         return schema_;
     }
 
-    const std::string&
+    const std::string_view
     get_collection_name() {
         return collection_name_;
     }

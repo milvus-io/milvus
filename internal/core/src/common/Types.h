@@ -16,27 +16,28 @@
 
 #pragma once
 
-#include <memory>
-#include <limits>
-#include <string>
-#include <utility>
-#include <vector>
-#include <unordered_map>
 #include <tbb/concurrent_unordered_map.h>
 #include <tbb/concurrent_unordered_set.h>
+
+#include <NamedType/named_type.hpp>
 #include <boost/align/aligned_allocator.hpp>
 #include <boost/container/vector.hpp>
 #include <boost/dynamic_bitset.hpp>
-#include <NamedType/named_type.hpp>
+#include <limits>
+#include <memory>
+#include <string>
+#include <unordered_map>
+#include <utility>
 #include <variant>
+#include <vector>
 
-#include "nlohmann/json.hpp"
-#include "knowhere/comp/index_param.h"
 #include "knowhere/binaryset.h"
+#include "knowhere/comp/index_param.h"
 #include "knowhere/dataset.h"
+#include "nlohmann/json.hpp"
+#include "pb/plan.pb.h"
 #include "pb/schema.pb.h"
 #include "pb/segcore.pb.h"
-#include "pb/plan.pb.h"
 
 namespace milvus {
 
@@ -131,5 +132,24 @@ using MetricType = knowhere::MetricType;
 using IndexType = knowhere::IndexType;
 // TODO :: type define milvus index mode, add transfer func from milvus index mode to knowhere index mode
 using IndexMode = knowhere::IndexMode;
+
+// Plus 1 because we can't use greater(>) symbol
+constexpr size_t REF_SIZE_THRESHOLD = 16 + 1;
+template <typename T>
+using MayRef = std::conditional_t<!std::is_trivially_copyable_v<T> ||
+                                      sizeof(T) >= REF_SIZE_THRESHOLD,
+                                  T&,
+                                  T>;
+template <typename T>
+using Parameter = std::
+    conditional_t<std::is_same_v<T, std::string>, std::string_view, MayRef<T>>;
+
+static_assert(std::is_same_v<int64_t, Parameter<int64_t>>);
+static_assert(std::is_same_v<std::string_view, Parameter<std::string>>);
+
+struct LargeType {
+    int64_t x, y, z;
+};
+static_assert(std::is_same_v<LargeType&, Parameter<LargeType>>);
 
 }  // namespace milvus

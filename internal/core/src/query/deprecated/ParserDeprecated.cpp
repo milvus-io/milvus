@@ -198,7 +198,7 @@ ProcessBooleanQueryJson(const milvus::json& query_json,
 Status
 DeserializeJsonToBoolQuery(const google::protobuf::RepeatedPtrField<
                                ::milvus::grpc::VectorParam>& vector_params,
-                           const std::string& dsl_string,
+                           const std::string_view dsl_string,
                            query_old::BooleanQueryPtr& boolean_query,
                            query_old::QueryPtr& query_ptr) {
 #if 1
@@ -214,7 +214,7 @@ DeserializeJsonToBoolQuery(const google::protobuf::RepeatedPtrField<
                           "DSL must include vector query");
         }
         for (const auto& vector_param : vector_params) {
-            const std::string& vector_string = vector_param.json();
+            const std::string_view vector_string = vector_param.json();
             milvus::json vector_json = Json::parse(vector_string);
             milvus::json::iterator it = vector_json.begin();
             std::string placeholder = it.key();
@@ -222,7 +222,7 @@ DeserializeJsonToBoolQuery(const google::protobuf::RepeatedPtrField<
             auto vector_query = std::make_shared<query_old::VectorQuery>();
             milvus::json::iterator vector_param_it = it.value().begin();
             if (vector_param_it != it.value().end()) {
-                const std::string& field_name = vector_param_it.key();
+                const std::string_view field_name = vector_param_it.key();
                 vector_query->field_name = field_name;
                 milvus::json param_json = vector_param_it.value();
                 int64_t topk = param_json["topk"];

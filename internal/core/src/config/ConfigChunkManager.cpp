@@ -21,7 +21,7 @@ namespace milvus::ChunkMangerConfig {
 std::string LOCAL_ROOT_PATH = "/tmp/milvus";  // NOLINT
 
 void
-SetLocalRootPath(const std::string& path_prefix) {
+SetLocalRootPath(const std::string_view path_prefix) {
     LOCAL_ROOT_PATH = path_prefix;
 }
 
