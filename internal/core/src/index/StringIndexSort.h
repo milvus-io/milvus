@@ -17,6 +17,7 @@
 #include <memory>
 #include <vector>
 #include <string>
+#include <string_view>
 
 #include "common/Utils.h"
 #include "index/ScalarIndexSort.h"
@@ -40,10 +41,17 @@ class StringIndexSort : public ScalarIndexSort<std::string> {
     PrefixMatch(std::string_view prefix) {
         auto data = GetData();
         TargetBitmapPtr bitset = std::make_unique<TargetBitmap>(data.size());
-        for (size_t i = 0; i < data.size(); i++) {
-            if (milvus::PrefixMatch(data[i].a_, prefix)) {
-                bitset->set(data[i].idx_);
+        auto it = std::lower_bound(
+            data.begin(),
+            data.end(),
+            prefix,
+            [](const IndexStructure<std::string>& value,
+               std::string_view prefix) { return value.a_ < prefix; });
+        for (; it != data.end(); ++it) {
+            if (!milvus::PrefixMatch(it->a_, prefix)) {
+                break;
             }
+            bitset->set(it->idx_);
         }
         return bitset;
     }
