@@ -3,22 +3,28 @@ module github.com/milvus-io/milvus
 go 1.18
 
 require (
+	github.com/99designs/keyring v1.2.1 // indirect
+	github.com/BurntSushi/toml v1.0.0 // indirect
 	github.com/DATA-DOG/go-sqlmock v1.5.0
 	github.com/aliyun/credentials-go v1.2.6
 	github.com/antlr/antlr4/runtime/Go/antlr v0.0.0-20210826220005-b48c857c3a0e
 	github.com/antonmedv/expr v1.8.9
 	github.com/apache/arrow/go/v8 v8.0.0-20220322092137-778b1772fd20
 	github.com/apache/pulsar-client-go v0.6.1-0.20210728062540-29414db801a7
+	github.com/apache/thrift v0.15.0 // indirect
+	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b
 	github.com/bits-and-blooms/bloom/v3 v3.0.1
 	github.com/blang/semver/v4 v4.0.0
 	github.com/casbin/casbin/v2 v2.44.2
 	github.com/casbin/json-adapter/v2 v2.0.0
 	github.com/cockroachdb/errors v1.9.1
 	github.com/confluentinc/confluent-kafka-go v1.9.1
+	github.com/containerd/cgroups v1.0.4
 	github.com/gin-gonic/gin v1.7.7
 	github.com/gofrs/flock v0.8.1
 	github.com/golang/protobuf v1.5.3
 	github.com/klauspost/compress v1.14.4
+	github.com/lingdor/stackerror v0.0.0-20191119040541-976d8885ed76
 	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d
 	github.com/milvus-io/milvus-proto/go-api v0.0.0-20230411174625-2c86533465fb
 	github.com/milvus-io/milvus/pkg v0.0.0-00010101000000-000000000000
@@ -28,8 +34,13 @@ require (
 	github.com/quasilyte/go-ruleguard/dsl v0.3.21
 	github.com/samber/lo v1.27.0
 	github.com/sbinet/npyio v0.6.0
+	github.com/shirou/gopsutil/v3 v3.22.9
+	github.com/spaolacci/murmur3 v1.1.0
+	github.com/spf13/cast v1.3.1
 	github.com/spf13/viper v1.8.1
+	github.com/streamnative/pulsarctl v0.5.0
 	github.com/stretchr/testify v1.8.1
+	github.com/tecbot/gorocksdb v0.0.0-20191217155057-f0fad39f321c
 	go.etcd.io/etcd/api/v3 v3.5.5
 	go.etcd.io/etcd/client/v3 v3.5.5
 	go.etcd.io/etcd/server/v3 v3.5.5
@@ -76,6 +87,7 @@ require (
 	github.com/ardielle/ardielle-go v1.5.2 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bits-and-blooms/bitset v1.2.0 // indirect
+	github.com/blang/semver/v4 v4.0.0
 	github.com/campoy/embedmd v1.0.0 // indirect
 	github.com/cenkalti/backoff/v4 v4.2.0 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
@@ -203,6 +215,39 @@ require (
 	sigs.k8s.io/yaml v1.2.0 // indirect
 )
 
+require github.com/ianlancetaylor/cgosymbolizer v0.0.0-20221217025313-27d3c9f66b6a // indirect
+
+require (
+	github.com/aliyun/credentials-go v1.2.6
+	github.com/cockroachdb/errors v1.9.1
+	github.com/uber/jaeger-client-go v2.30.0+incompatible
+	go.opentelemetry.io/otel/exporters/jaeger v1.11.2
+	go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.11.2
+)
+
+require (
+	github.com/alibabacloud-go/debug v0.0.0-20190504072949-9472017b5c68 // indirect
+	github.com/alibabacloud-go/tea v1.1.8 // indirect
+	github.com/cenkalti/backoff/v4 v4.2.0 // indirect
+	github.com/cockroachdb/logtags v0.0.0-20211118104740-dabe8e521a4f // indirect
+	github.com/cockroachdb/redact v1.1.3 // indirect
+	github.com/form3tech-oss/jwt-go v3.2.3+incompatible // indirect
+	github.com/getsentry/sentry-go v0.12.0 // indirect
+	github.com/go-logr/logr v1.2.3 // indirect
+	github.com/go-logr/stdr v1.2.2 // indirect
+	github.com/golang-jwt/jwt v3.2.2+incompatible // indirect
+	github.com/grpc-ecosystem/grpc-gateway/v2 v2.7.0 // indirect
+	github.com/kr/pretty v0.3.0 // indirect
+	github.com/kr/text v0.2.0 // indirect
+	github.com/olekukonko/tablewriter v0.0.5 // indirect
+	github.com/pkg/errors v0.9.1 // indirect
+	github.com/rogpeppe/go-internal v1.8.1 // indirect
+	go.opentelemetry.io/otel/exporters/otlp/internal/retry v1.11.2 // indirect
+	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.11.2 // indirect
+	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.11.2 // indirect
+	go.opentelemetry.io/otel/metric v0.34.0 // indirect
+)
+
 replace (
 	github.com/apache/pulsar-client-go => github.com/milvus-io/pulsar-client-go v0.6.10
 	github.com/bketelsen/crypt => github.com/bketelsen/crypt v0.0.4 // Fix security alert for core-os/etcd
@@ -210,6 +255,7 @@ replace (
 	github.com/milvus-io/milvus/pkg => ./pkg
 	github.com/streamnative/pulsarctl => github.com/xiaofan-luan/pulsarctl v0.5.1
 	github.com/tecbot/gorocksdb => github.com/milvus-io/gorocksdb v0.0.0-20220624081344-8c5f4212846b // indirect
+	github.com/xelabs/go-mysqlstack => github.com/longjiquan/go-mysqlstack v0.0.0-20210512092920-666657c8bdb5
 )
 
 exclude github.com/apache/pulsar-client-go/oauth2 v0.0.0-20211108044248-fe3b7c4e445b
