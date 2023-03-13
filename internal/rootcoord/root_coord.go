@@ -238,15 +238,12 @@ func (c *Core) tsLoop() {
 		select {
 		case <-tsoTicker.C:
 			if err := c.tsoAllocator.UpdateTSO(); err != nil {
-				log.Warn("failed to update timestamp: ", zap.Error(err))
+				log.Warn("failed to update tso", zap.Error(err))
 				continue
 			}
 			ts := c.tsoAllocator.GetLastSavedTime()
 			metrics.RootCoordTimestampSaved.Set(float64(ts.Unix()))
-			if err := c.tsoAllocator.UpdateTSO(); err != nil {
-				log.Warn("failed to update id: ", zap.Error(err))
-				continue
-			}
+
 		case <-ctx.Done():
 			return
 		}
