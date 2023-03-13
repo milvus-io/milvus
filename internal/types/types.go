@@ -837,6 +837,7 @@ type Proxy interface {
 }
 
 // ProxyComponent defines the interface of proxy component.
+//go:generate mockery --name=ProxyComponent --output=../mocks --filename=mock_proxy.go --with-expecter
 type ProxyComponent interface {
 	Proxy
 
