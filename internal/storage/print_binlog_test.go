@@ -181,7 +181,7 @@ func TestPrintBinlogFiles(t *testing.T) {
 			},
 		},
 	}
-	insertCodec := NewInsertCodec(Schema)
+	insertCodec := NewInsertCodecWithSchema(Schema)
 	insertDataFirst := &InsertData{
 		Data: map[int64]FieldData{
 			0: &Int64FieldData{

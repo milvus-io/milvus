@@ -36,6 +36,7 @@ type PrimaryKey interface {
 	SetValue(interface{}) error
 	GetValue() interface{}
 	Type() schemapb.DataType
+	Size() int64
 }
 
 type Int64PrimaryKey struct {
@@ -150,6 +151,11 @@ func (ip *Int64PrimaryKey) Type() schemapb.DataType {
 
 func (ip *Int64PrimaryKey) GetValue() interface{} {
 	return ip.Value
+}
+
+func (ip *Int64PrimaryKey) Size() int64 {
+	// 8 + reflect.ValueOf(Int64PrimaryKey).Type().Size()
+	return 16
 }
 
 type BaseStringPrimaryKey struct {
@@ -274,6 +280,10 @@ func (vcp *VarCharPrimaryKey) Type() schemapb.DataType {
 	return schemapb.DataType_VarChar
 }
 
+func (vcp *VarCharPrimaryKey) Size() int64 {
+	return int64(8*len(vcp.Value) + 8)
+}
+
 func GenPrimaryKeyByRawData(data interface{}, pkType schemapb.DataType) (PrimaryKey, error) {
 	var result PrimaryKey
 	switch pkType {
@@ -292,6 +302,30 @@ func GenPrimaryKeyByRawData(data interface{}, pkType schemapb.DataType) (Primary
 	}
 
 	return result, nil
+}
+
+func GenInt64PrimaryKeys(data ...int64) ([]PrimaryKey, error) {
+	pks := make([]PrimaryKey, len(data))
+	var err error
+	for i := range data {
+		pks[i], err = GenPrimaryKeyByRawData(data[i], schemapb.DataType_Int64)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return pks, nil
+}
+
+func GenVarcharPrimaryKeys(data ...string) ([]PrimaryKey, error) {
+	pks := make([]PrimaryKey, len(data))
+	var err error
+	for i := range data {
+		pks[i], err = GenPrimaryKeyByRawData(data[i], schemapb.DataType_VarChar)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return pks, nil
 }
 
 func ParseFieldData2PrimaryKeys(data *schemapb.FieldData) ([]PrimaryKey, error) {

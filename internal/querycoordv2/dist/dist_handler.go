@@ -23,6 +23,7 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -119,14 +120,16 @@ func (dh *distHandler) updateSegmentsDistribution(resp *querypb.GetDataDistribut
 					PartitionID:   s.GetPartition(),
 					InsertChannel: s.GetChannel(),
 				},
-				Node:    resp.GetNodeID(),
-				Version: s.GetVersion(),
+				Node:               resp.GetNodeID(),
+				Version:            s.GetVersion(),
+				LastDeltaTimestamp: s.GetLastDeltaTimestamp(),
 			}
 		} else {
 			segment = &meta.Segment{
-				SegmentInfo: proto.Clone(segmentInfo).(*datapb.SegmentInfo),
-				Node:        resp.GetNodeID(),
-				Version:     s.GetVersion(),
+				SegmentInfo:        proto.Clone(segmentInfo).(*datapb.SegmentInfo),
+				Node:               resp.GetNodeID(),
+				Version:            s.GetVersion(),
+				LastDeltaTimestamp: s.GetLastDeltaTimestamp(),
 			}
 		}
 		updates = append(updates, segment)
@@ -200,12 +203,24 @@ func (dh *distHandler) updateLeaderView(resp *querypb.GetDataDistributionRespons
 func (dh *distHandler) getDistribution(ctx context.Context) error {
 	dh.mu.Lock()
 	defer dh.mu.Unlock()
+
+	channels := make(map[string]*msgpb.MsgPosition)
+	for _, channel := range dh.dist.ChannelDistManager.GetByNode(dh.nodeID) {
+		targetChannel := dh.target.GetDmChannel(channel.GetCollectionID(), channel.GetChannelName(), meta.CurrentTarget)
+		if targetChannel == nil {
+			continue
+		}
+
+		channels[channel.GetChannelName()] = targetChannel.GetSeekPosition()
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, distReqTimeout)
 	defer cancel()
 	resp, err := dh.client.GetDataDistribution(ctx, dh.nodeID, &querypb.GetDataDistributionRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_GetDistribution),
 		),
+		Checkpoints: channels,
 	})
 
 	if err != nil {

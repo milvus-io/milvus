@@ -15,11 +15,12 @@
 // limitations under the License.
 
 #include "index/VectorDiskIndex.h"
+
+#include "common/Utils.h"
+#include "config/ConfigKnowhere.h"
 #include "index/Meta.h"
 #include "index/Utils.h"
-
 #include "storage/LocalChunkManager.h"
-#include "config/ConfigKnowhere.h"
 #include "storage/Util.h"
 #include "common/Consts.h"
 #include "common/Utils.h"

@@ -33,6 +33,18 @@ const (
 	DeleteConsumeThroughput RateMetricLabel = "DeleteConsumeThroughput"
 )
 
+const (
+	SearchQueueMetric string = "SearchQueue"
+	QueryQueueMetric  string = "QueryQueue"
+)
+
+const (
+	UnsolvedQueueType string = "Unsolved"
+	ReadyQueueType    string = "Ready"
+	ReceiveQueueType  string = "Receive"
+	ExecuteQueueType  string = "Execute"
+)
+
 // RateMetric contains a RateMetricLabel and a float rate.
 type RateMetric struct {
 	Label RateMetricLabel

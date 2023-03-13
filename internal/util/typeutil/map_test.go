@@ -57,7 +57,6 @@ func (suite *MapUtilSuite) TestGetMapKeys() {
 func (suite *MapUtilSuite) TestConcurrentMap() {
 	currMap := NewConcurrentMap[int64, string]()
 
-	suite.EqualValues(0, currMap.Len())
 	v, loaded := currMap.GetOrInsert(100, "v-100")
 	suite.Equal("v-100", v)
 	suite.Equal(false, loaded)
@@ -67,14 +66,10 @@ func (suite *MapUtilSuite) TestConcurrentMap() {
 	v, loaded = currMap.GetOrInsert(100, "v-100")
 	suite.Equal("v-100", v)
 	suite.Equal(true, loaded)
-	suite.Equal(uint64(1), currMap.Len())
-	suite.EqualValues(1, currMap.Len())
 
-	currMap.InsertIfNotPresent(100, "v-100-new")
-	currMap.InsertIfNotPresent(200, "v-200")
-	currMap.InsertIfNotPresent(300, "v-300")
-	suite.Equal(uint64(3), currMap.Len())
-	suite.EqualValues(3, currMap.Len())
+	currMap.GetOrInsert(100, "v-100-new")
+	currMap.GetOrInsert(200, "v-200")
+	currMap.GetOrInsert(300, "v-300")
 
 	var exist bool
 	v, exist = currMap.Get(100)
@@ -86,7 +81,6 @@ func (suite *MapUtilSuite) TestConcurrentMap() {
 	v, exist = currMap.Get(300)
 	suite.Equal("v-300", v)
 	suite.Equal(true, exist)
-	suite.EqualValues(3, currMap.Len())
 
 	v, exist = currMap.GetOrInsert(100, "new-v")
 	suite.Equal("v-100", v)
@@ -100,7 +94,6 @@ func (suite *MapUtilSuite) TestConcurrentMap() {
 	v, exist = currMap.GetOrInsert(400, "new-v")
 	suite.Equal("new-v", v)
 	suite.Equal(false, exist)
-	suite.EqualValues(4, currMap.Len())
 
 	currMap.Range(func(k int64, value string) bool {
 		suite.Contains([]int64{100, 200, 300, 400}, k)
@@ -125,7 +118,6 @@ func (suite *MapUtilSuite) TestConcurrentMap() {
 	v, loaded = currMap.GetAndRemove(500)
 	suite.Equal("", v)
 	suite.Equal(false, loaded)
-	suite.EqualValues(0, currMap.Len())
 
 	currMap.Range(func(k int64, value string) bool {
 		suite.FailNow("empty map range")

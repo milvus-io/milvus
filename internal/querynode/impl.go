@@ -1499,3 +1499,10 @@ func (node *QueryNode) GetSession() *sessionutil.Session {
 	defer node.sessionMu.Unlock()
 	return node.session
 }
+
+func (node *QueryNode) Delete(ctx context.Context, req *querypb.DeleteRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		Reason:    "not implemented in qnv1",
+	}, nil
+}

@@ -160,7 +160,8 @@ func (c *SegmentChecker) getStreamingSegmentsDist(distMgr *meta.DistributionMana
 }
 
 // GetHistoricalSegmentDiff get historical segment diff between target and dist
-func (c *SegmentChecker) getHistoricalSegmentDiff(targetMgr *meta.TargetManager,
+func (c *SegmentChecker) getHistoricalSegmentDiff(
+	targetMgr *meta.TargetManager,
 	distMgr *meta.DistributionManager,
 	metaInfo *meta.Meta,
 	collectionID int64,
@@ -179,7 +180,7 @@ func (c *SegmentChecker) getHistoricalSegmentDiff(targetMgr *meta.TargetManager,
 	nextTargetMap := targetMgr.GetHistoricalSegmentsByCollection(collectionID, meta.NextTarget)
 	currentTargetMap := targetMgr.GetHistoricalSegmentsByCollection(collectionID, meta.CurrentTarget)
 
-	//get segment which exist on next target, but not on dist
+	// Segment which exist on next target, but not on dist
 	for segmentID, segment := range nextTargetMap {
 		if !distMap.Contain(segmentID) {
 			toLoad = append(toLoad, segment)
