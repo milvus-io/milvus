@@ -397,6 +397,7 @@ func TestWatchChannel(t *testing.T) {
 		)
 		node.eventManagerMap.Store(ch, m)
 		m.Run()
+		defer m.Close()
 
 		info = datapb.ChannelWatchInfo{
 			Vchan: &datapb.VchannelInfo{ChannelName: ch},
@@ -433,6 +434,7 @@ func TestWatchChannel(t *testing.T) {
 		)
 		node.eventManagerMap.Store(ch, m)
 		m.Run()
+		defer m.Close()
 		e := &event{
 			eventType: putEventType,
 			version:   10000,
