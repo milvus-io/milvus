@@ -3,7 +3,7 @@ package planparserv2
 import (
 	"sync"
 
-	"github.com/antlr/antlr4/runtime/Go/antlr"
+	"github.com/antlr/antlr4/runtime/Go/antlr/v4"
 	antlrparser "github.com/milvus-io/milvus/internal/parser/planparserv2/generated"
 )
 
