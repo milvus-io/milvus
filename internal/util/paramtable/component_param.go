@@ -85,6 +85,8 @@ type ComponentParam struct {
 	IndexNodeGrpcClientCfg  GrpcClientConfig
 
 	IntegrationTestCfg integrationTestConfig
+
+	MysqldConfig mysqldConfig
 }
 
 // Init initialize once
@@ -133,6 +135,8 @@ func (p *ComponentParam) init() {
 	p.IndexNodeGrpcClientCfg.Init("indexNode", &p.BaseTable)
 
 	p.IntegrationTestCfg.init(&p.BaseTable)
+
+	p.MysqldConfig.init(&p.BaseTable)
 }
 
 func (p *ComponentParam) GetComponentConfigurations(componentName string, sub string) map[string]string {
@@ -2170,4 +2174,18 @@ func (p *integrationTestConfig) init(base *BaseTable) {
 		PanicIfEmpty: true,
 	}
 	p.IntegrationMode.Init(base.mgr)
+}
+
+type mysqldConfig struct {
+	TCPPort ParamItem `refreshable:"false"`
+}
+
+func (p *mysqldConfig) init(base *BaseTable) {
+	p.TCPPort = ParamItem{
+		Key:          "mysqld.tcpPort",
+		Version:      "2.3",
+		DefaultValue: "3306",
+		PanicIfEmpty: false,
+	}
+	p.TCPPort.Init(base.mgr)
 }

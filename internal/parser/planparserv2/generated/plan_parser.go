@@ -1,105 +1,125 @@
-// Code generated from Plan.g4 by ANTLR 4.9. DO NOT EDIT.
+// Code generated from java-escape by ANTLR 4.11.1. DO NOT EDIT.
 
 package planparserv2 // Plan
 import (
 	"fmt"
-	"reflect"
 	"strconv"
+	"sync"
 
-	"github.com/antlr/antlr4/runtime/Go/antlr"
+	"github.com/antlr/antlr4/runtime/Go/antlr/v4"
 )
 
 // Suppress unused import errors
 var _ = fmt.Printf
-var _ = reflect.Copy
 var _ = strconv.Itoa
-
-var parserATN = []uint16{
-	3, 24715, 42794, 33075, 47597, 16764, 15335, 30598, 22884, 3, 39, 89, 4,
-	2, 9, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3,
-	2, 3, 2, 5, 2, 17, 10, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3,
-	2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3,
-	2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3,
-	2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3,
-	2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3, 2, 7, 2, 71, 10, 2, 12,
-	2, 14, 2, 74, 11, 2, 3, 2, 5, 2, 77, 10, 2, 3, 2, 3, 2, 3, 2, 3, 2, 3,
-	2, 7, 2, 84, 10, 2, 12, 2, 14, 2, 87, 11, 2, 3, 2, 2, 3, 2, 3, 2, 2, 11,
-	4, 2, 15, 16, 28, 29, 3, 2, 17, 19, 3, 2, 15, 16, 3, 2, 21, 22, 3, 2, 8,
-	9, 3, 2, 10, 11, 3, 2, 8, 11, 3, 2, 12, 13, 3, 2, 30, 31, 2, 111, 2, 16,
-	3, 2, 2, 2, 4, 5, 8, 2, 1, 2, 5, 17, 7, 34, 2, 2, 6, 17, 7, 35, 2, 2, 7,
-	17, 7, 33, 2, 2, 8, 17, 7, 37, 2, 2, 9, 17, 7, 36, 2, 2, 10, 11, 7, 3,
-	2, 2, 11, 12, 5, 2, 2, 2, 12, 13, 7, 4, 2, 2, 13, 17, 3, 2, 2, 2, 14, 15,
-	9, 2, 2, 2, 15, 17, 5, 2, 2, 17, 16, 4, 3, 2, 2, 2, 16, 6, 3, 2, 2, 2,
-	16, 7, 3, 2, 2, 2, 16, 8, 3, 2, 2, 2, 16, 9, 3, 2, 2, 2, 16, 10, 3, 2,
-	2, 2, 16, 14, 3, 2, 2, 2, 17, 85, 3, 2, 2, 2, 18, 19, 12, 18, 2, 2, 19,
-	20, 7, 20, 2, 2, 20, 84, 5, 2, 2, 19, 21, 22, 12, 16, 2, 2, 22, 23, 9,
-	3, 2, 2, 23, 84, 5, 2, 2, 17, 24, 25, 12, 15, 2, 2, 25, 26, 9, 4, 2, 2,
-	26, 84, 5, 2, 2, 16, 27, 28, 12, 14, 2, 2, 28, 29, 9, 5, 2, 2, 29, 84,
-	5, 2, 2, 15, 30, 31, 12, 11, 2, 2, 31, 32, 9, 6, 2, 2, 32, 33, 7, 36, 2,
-	2, 33, 34, 9, 6, 2, 2, 34, 84, 5, 2, 2, 12, 35, 36, 12, 10, 2, 2, 36, 37,
-	9, 7, 2, 2, 37, 38, 7, 36, 2, 2, 38, 39, 9, 7, 2, 2, 39, 84, 5, 2, 2, 11,
-	40, 41, 12, 9, 2, 2, 41, 42, 9, 8, 2, 2, 42, 84, 5, 2, 2, 10, 43, 44, 12,
-	8, 2, 2, 44, 45, 9, 9, 2, 2, 45, 84, 5, 2, 2, 9, 46, 47, 12, 7, 2, 2, 47,
-	48, 7, 23, 2, 2, 48, 84, 5, 2, 2, 8, 49, 50, 12, 6, 2, 2, 50, 51, 7, 25,
-	2, 2, 51, 84, 5, 2, 2, 7, 52, 53, 12, 5, 2, 2, 53, 54, 7, 24, 2, 2, 54,
-	84, 5, 2, 2, 6, 55, 56, 12, 4, 2, 2, 56, 57, 7, 26, 2, 2, 57, 84, 5, 2,
-	2, 5, 58, 59, 12, 3, 2, 2, 59, 60, 7, 27, 2, 2, 60, 84, 5, 2, 2, 4, 61,
-	62, 12, 19, 2, 2, 62, 63, 7, 14, 2, 2, 63, 84, 7, 37, 2, 2, 64, 65, 12,
-	13, 2, 2, 65, 66, 9, 10, 2, 2, 66, 67, 7, 5, 2, 2, 67, 72, 5, 2, 2, 2,
-	68, 69, 7, 6, 2, 2, 69, 71, 5, 2, 2, 2, 70, 68, 3, 2, 2, 2, 71, 74, 3,
-	2, 2, 2, 72, 70, 3, 2, 2, 2, 72, 73, 3, 2, 2, 2, 73, 76, 3, 2, 2, 2, 74,
-	72, 3, 2, 2, 2, 75, 77, 7, 6, 2, 2, 76, 75, 3, 2, 2, 2, 76, 77, 3, 2, 2,
-	2, 77, 78, 3, 2, 2, 2, 78, 79, 7, 7, 2, 2, 79, 84, 3, 2, 2, 2, 80, 81,
-	12, 12, 2, 2, 81, 82, 9, 10, 2, 2, 82, 84, 7, 32, 2, 2, 83, 18, 3, 2, 2,
-	2, 83, 21, 3, 2, 2, 2, 83, 24, 3, 2, 2, 2, 83, 27, 3, 2, 2, 2, 83, 30,
-	3, 2, 2, 2, 83, 35, 3, 2, 2, 2, 83, 40, 3, 2, 2, 2, 83, 43, 3, 2, 2, 2,
-	83, 46, 3, 2, 2, 2, 83, 49, 3, 2, 2, 2, 83, 52, 3, 2, 2, 2, 83, 55, 3,
-	2, 2, 2, 83, 58, 3, 2, 2, 2, 83, 61, 3, 2, 2, 2, 83, 64, 3, 2, 2, 2, 83,
-	80, 3, 2, 2, 2, 84, 87, 3, 2, 2, 2, 85, 83, 3, 2, 2, 2, 85, 86, 3, 2, 2,
-	2, 86, 3, 3, 2, 2, 2, 87, 85, 3, 2, 2, 2, 7, 16, 72, 76, 83, 85,
-}
-var literalNames = []string{
-	"", "'('", "')'", "'['", "','", "']'", "'<'", "'<='", "'>'", "'>='", "'=='",
-	"'!='", "", "'+'", "'-'", "'*'", "'/'", "'%'", "'**'", "'<<'", "'>>'",
-	"'&'", "'|'", "'^'", "", "", "'~'", "", "'in'", "'not in'",
-}
-var symbolicNames = []string{
-	"", "", "", "", "", "", "LT", "LE", "GT", "GE", "EQ", "NE", "LIKE", "ADD",
-	"SUB", "MUL", "DIV", "MOD", "POW", "SHL", "SHR", "BAND", "BOR", "BXOR",
-	"AND", "OR", "BNOT", "NOT", "IN", "NIN", "EmptyTerm", "BooleanConstant",
-	"IntegerConstant", "FloatingConstant", "Identifier", "StringLiteral", "Whitespace",
-	"Newline",
-}
-
-var ruleNames = []string{
-	"expr",
-}
+var _ = sync.Once{}
 
 type PlanParser struct {
 	*antlr.BaseParser
 }
 
-// NewPlanParser produces a new parser instance for the optional input antlr.TokenStream.
-//
-// The *PlanParser instance produced may be reused by calling the SetInputStream method.
-// The initial parser configuration is expensive to construct, and the object is not thread-safe;
-// however, if used within a Golang sync.Pool, the construction cost amortizes well and the
-// objects can be used in a thread-safe manner.
-func NewPlanParser(input antlr.TokenStream) *PlanParser {
-	this := new(PlanParser)
-	deserializer := antlr.NewATNDeserializer(nil)
-	deserializedATN := deserializer.DeserializeFromUInt16(parserATN)
-	decisionToDFA := make([]*antlr.DFA, len(deserializedATN.DecisionToState))
-	for index, ds := range deserializedATN.DecisionToState {
-		decisionToDFA[index] = antlr.NewDFA(ds, index)
-	}
-	this.BaseParser = antlr.NewBaseParser(input)
+var planParserStaticData struct {
+	once                   sync.Once
+	serializedATN          []int32
+	literalNames           []string
+	symbolicNames          []string
+	ruleNames              []string
+	predictionContextCache *antlr.PredictionContextCache
+	atn                    *antlr.ATN
+	decisionToDFA          []*antlr.DFA
+}
 
-	this.Interpreter = antlr.NewParserATNSimulator(this, deserializedATN, decisionToDFA, antlr.NewPredictionContextCache())
-	this.RuleNames = ruleNames
-	this.LiteralNames = literalNames
-	this.SymbolicNames = symbolicNames
-	this.GrammarFileName = "Plan.g4"
+func planParserInit() {
+	staticData := &planParserStaticData
+	staticData.literalNames = []string{
+		"", "'('", "')'", "'['", "','", "']'", "'<'", "'<='", "'>'", "'>='",
+		"'=='", "'!='", "", "'+'", "'-'", "'*'", "'/'", "'%'", "'**'", "'<<'",
+		"'>>'", "'&'", "'|'", "'^'", "", "", "'~'", "", "'in'", "'not in'",
+	}
+	staticData.symbolicNames = []string{
+		"", "", "", "", "", "", "LT", "LE", "GT", "GE", "EQ", "NE", "LIKE",
+		"ADD", "SUB", "MUL", "DIV", "MOD", "POW", "SHL", "SHR", "BAND", "BOR",
+		"BXOR", "AND", "OR", "BNOT", "NOT", "IN", "NIN", "EmptyTerm", "BooleanConstant",
+		"IntegerConstant", "FloatingConstant", "Identifier", "StringLiteral",
+		"Whitespace", "Newline",
+	}
+	staticData.ruleNames = []string{
+		"expr",
+	}
+	staticData.predictionContextCache = antlr.NewPredictionContextCache()
+	staticData.serializedATN = []int32{
+		4, 1, 37, 87, 2, 0, 7, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1,
+		0, 1, 0, 1, 0, 1, 0, 1, 0, 3, 0, 15, 8, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,
+		1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,
+		1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,
+		1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,
+		1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 5, 0,
+		69, 8, 0, 10, 0, 12, 0, 72, 9, 0, 1, 0, 3, 0, 75, 8, 0, 1, 0, 1, 0, 1,
+		0, 1, 0, 1, 0, 5, 0, 82, 8, 0, 10, 0, 12, 0, 85, 9, 0, 1, 0, 0, 1, 0, 1,
+		0, 0, 9, 2, 0, 13, 14, 26, 27, 1, 0, 15, 17, 1, 0, 13, 14, 1, 0, 19, 20,
+		1, 0, 6, 7, 1, 0, 8, 9, 1, 0, 6, 9, 1, 0, 10, 11, 1, 0, 28, 29, 109, 0,
+		14, 1, 0, 0, 0, 2, 3, 6, 0, -1, 0, 3, 15, 5, 32, 0, 0, 4, 15, 5, 33, 0,
+		0, 5, 15, 5, 31, 0, 0, 6, 15, 5, 35, 0, 0, 7, 15, 5, 34, 0, 0, 8, 9, 5,
+		1, 0, 0, 9, 10, 3, 0, 0, 0, 10, 11, 5, 2, 0, 0, 11, 15, 1, 0, 0, 0, 12,
+		13, 7, 0, 0, 0, 13, 15, 3, 0, 0, 15, 14, 2, 1, 0, 0, 0, 14, 4, 1, 0, 0,
+		0, 14, 5, 1, 0, 0, 0, 14, 6, 1, 0, 0, 0, 14, 7, 1, 0, 0, 0, 14, 8, 1, 0,
+		0, 0, 14, 12, 1, 0, 0, 0, 15, 83, 1, 0, 0, 0, 16, 17, 10, 16, 0, 0, 17,
+		18, 5, 18, 0, 0, 18, 82, 3, 0, 0, 17, 19, 20, 10, 14, 0, 0, 20, 21, 7,
+		1, 0, 0, 21, 82, 3, 0, 0, 15, 22, 23, 10, 13, 0, 0, 23, 24, 7, 2, 0, 0,
+		24, 82, 3, 0, 0, 14, 25, 26, 10, 12, 0, 0, 26, 27, 7, 3, 0, 0, 27, 82,
+		3, 0, 0, 13, 28, 29, 10, 9, 0, 0, 29, 30, 7, 4, 0, 0, 30, 31, 5, 34, 0,
+		0, 31, 32, 7, 4, 0, 0, 32, 82, 3, 0, 0, 10, 33, 34, 10, 8, 0, 0, 34, 35,
+		7, 5, 0, 0, 35, 36, 5, 34, 0, 0, 36, 37, 7, 5, 0, 0, 37, 82, 3, 0, 0, 9,
+		38, 39, 10, 7, 0, 0, 39, 40, 7, 6, 0, 0, 40, 82, 3, 0, 0, 8, 41, 42, 10,
+		6, 0, 0, 42, 43, 7, 7, 0, 0, 43, 82, 3, 0, 0, 7, 44, 45, 10, 5, 0, 0, 45,
+		46, 5, 21, 0, 0, 46, 82, 3, 0, 0, 6, 47, 48, 10, 4, 0, 0, 48, 49, 5, 23,
+		0, 0, 49, 82, 3, 0, 0, 5, 50, 51, 10, 3, 0, 0, 51, 52, 5, 22, 0, 0, 52,
+		82, 3, 0, 0, 4, 53, 54, 10, 2, 0, 0, 54, 55, 5, 24, 0, 0, 55, 82, 3, 0,
+		0, 3, 56, 57, 10, 1, 0, 0, 57, 58, 5, 25, 0, 0, 58, 82, 3, 0, 0, 2, 59,
+		60, 10, 17, 0, 0, 60, 61, 5, 12, 0, 0, 61, 82, 5, 35, 0, 0, 62, 63, 10,
+		11, 0, 0, 63, 64, 7, 8, 0, 0, 64, 65, 5, 3, 0, 0, 65, 70, 3, 0, 0, 0, 66,
+		67, 5, 4, 0, 0, 67, 69, 3, 0, 0, 0, 68, 66, 1, 0, 0, 0, 69, 72, 1, 0, 0,
+		0, 70, 68, 1, 0, 0, 0, 70, 71, 1, 0, 0, 0, 71, 74, 1, 0, 0, 0, 72, 70,
+		1, 0, 0, 0, 73, 75, 5, 4, 0, 0, 74, 73, 1, 0, 0, 0, 74, 75, 1, 0, 0, 0,
+		75, 76, 1, 0, 0, 0, 76, 77, 5, 5, 0, 0, 77, 82, 1, 0, 0, 0, 78, 79, 10,
+		10, 0, 0, 79, 80, 7, 8, 0, 0, 80, 82, 5, 30, 0, 0, 81, 16, 1, 0, 0, 0,
+		81, 19, 1, 0, 0, 0, 81, 22, 1, 0, 0, 0, 81, 25, 1, 0, 0, 0, 81, 28, 1,
+		0, 0, 0, 81, 33, 1, 0, 0, 0, 81, 38, 1, 0, 0, 0, 81, 41, 1, 0, 0, 0, 81,
+		44, 1, 0, 0, 0, 81, 47, 1, 0, 0, 0, 81, 50, 1, 0, 0, 0, 81, 53, 1, 0, 0,
+		0, 81, 56, 1, 0, 0, 0, 81, 59, 1, 0, 0, 0, 81, 62, 1, 0, 0, 0, 81, 78,
+		1, 0, 0, 0, 82, 85, 1, 0, 0, 0, 83, 81, 1, 0, 0, 0, 83, 84, 1, 0, 0, 0,
+		84, 1, 1, 0, 0, 0, 85, 83, 1, 0, 0, 0, 5, 14, 70, 74, 81, 83,
+	}
+	deserializer := antlr.NewATNDeserializer(nil)
+	staticData.atn = deserializer.Deserialize(staticData.serializedATN)
+	atn := staticData.atn
+	staticData.decisionToDFA = make([]*antlr.DFA, len(atn.DecisionToState))
+	decisionToDFA := staticData.decisionToDFA
+	for index, state := range atn.DecisionToState {
+		decisionToDFA[index] = antlr.NewDFA(state, index)
+	}
+}
+
+// PlanParserInit initializes any static state used to implement PlanParser. By default the
+// static state used to implement the parser is lazily initialized during the first call to
+// NewPlanParser(). You can call this function if you wish to initialize the static state ahead
+// of time.
+func PlanParserInit() {
+	staticData := &planParserStaticData
+	staticData.once.Do(planParserInit)
+}
+
+// NewPlanParser produces a new parser instance for the optional input antlr.TokenStream.
+func NewPlanParser(input antlr.TokenStream) *PlanParser {
+	PlanParserInit()
+	this := new(PlanParser)
+	this.BaseParser = antlr.NewBaseParser(input)
+	staticData := &planParserStaticData
+	this.Interpreter = antlr.NewParserATNSimulator(this, staticData.atn, staticData.decisionToDFA, staticData.predictionContextCache)
+	this.RuleNames = staticData.ruleNames
+	this.LiteralNames = staticData.literalNames
+	this.SymbolicNames = staticData.symbolicNames
+	this.GrammarFileName = "java-escape"
 
 	return this
 }
@@ -223,12 +243,20 @@ func (s *ShiftContext) GetRuleContext() antlr.RuleContext {
 }
 
 func (s *ShiftContext) AllExpr() []IExprContext {
-	var ts = s.GetTypedRuleContexts(reflect.TypeOf((*IExprContext)(nil)).Elem())
-	var tst = make([]IExprContext, len(ts))
+	children := s.GetChildren()
+	len := 0
+	for _, ctx := range children {
+		if _, ok := ctx.(IExprContext); ok {
+			len++
+		}
+	}
 
-	for i, t := range ts {
-		if t != nil {
+	tst := make([]IExprContext, len)
+	i := 0
+	for _, ctx := range children {
+		if t, ok := ctx.(IExprContext); ok {
 			tst[i] = t.(IExprContext)
+			i++
 		}
 	}
 
@@ -236,7 +264,17 @@ func (s *ShiftContext) AllExpr() []IExprContext {
 }
 
 func (s *ShiftContext) Expr(i int) IExprContext {
-	var t = s.GetTypedRuleContext(reflect.TypeOf((*IExprContext)(nil)).Elem(), i)
+	var t antlr.RuleContext
+	j := 0
+	for _, ctx := range s.GetChildren() {
+		if _, ok := ctx.(IExprContext); ok {
+			if j == i {
+				t = ctx.(antlr.RuleContext)
+				break
+			}
+			j++
+		}
+	}
 
 	if t == nil {
 		return nil
@@ -292,12 +330,20 @@ func (s *ReverseRangeContext) GetRuleContext() antlr.RuleContext {
 }
 
 func (s *ReverseRangeContext) AllExpr() []IExprContext {
-	var ts = s.GetTypedRuleContexts(reflect.TypeOf((*IExprContext)(nil)).Elem())
-	var tst = make([]IExprContext, len(ts))
+	children := s.GetChildren()
+	len := 0
+	for _, ctx := range children {
+		if _, ok := ctx.(IExprContext); ok {
+			len++
+		}
+	}
 
-	for i, t := range ts {
-		if t != nil {
+	tst := make([]IExprContext, len)
+	i := 0
+	for _, ctx := range children {
+		if t, ok := ctx.(IExprContext); ok {
 			tst[i] = t.(IExprContext)
+			i++
 		}
 	}
 
@@ -305,7 +351,17 @@ func (s *ReverseRangeContext) AllExpr() []IExprContext {
 }
 
 func (s *ReverseRangeContext) Expr(i int) IExprContext {
-	var t = s.GetTypedRuleContext(reflect.TypeOf((*IExprContext)(nil)).Elem(), i)
+	var t antlr.RuleContext
+	j := 0
+	for _, ctx := range s.GetChildren() {
+		if _, ok := ctx.(IExprContext); ok {
+			if j == i {
+				t = ctx.(antlr.RuleContext)
+				break
+			}
+			j++
+		}
+	}
 
 	if t == nil {
 		return nil
@@ -363,12 +419,20 @@ func (s *BitOrContext) GetRuleContext() antlr.RuleContext {
 }
 
 func (s *BitOrContext) AllExpr() []IExprContext {
-	var ts = s.GetTypedRuleContexts(reflect.TypeOf((*IExprContext)(nil)).Elem())
-	var tst = make([]IExprContext, len(ts))
+	children := s.GetChildren()
+	len := 0
+	for _, ctx := range children {
+		if _, ok := ctx.(IExprContext); ok {
+			len++
+		}
+	}
 
-	for i, t := range ts {
-		if t != nil {
+	tst := make([]IExprContext, len)
+	i := 0
+	for _, ctx := range children {
+		if t, ok := ctx.(IExprContext); ok {
 			tst[i] = t.(IExprContext)
+			i++
 		}
 	}
 
@@ -376,7 +440,17 @@ func (s *BitOrContext) AllExpr() []IExprContext {
 }
 
 func (s *BitOrContext) Expr(i int) IExprContext {
-	var t = s.GetTypedRuleContext(reflect.TypeOf((*IExprContext)(nil)).Elem(), i)
+	var t antlr.RuleContext
+	j := 0
+	for _, ctx := range s.GetChildren() {
+		if _, ok := ctx.(IExprContext); ok {
+			if j == i {
+				t = ctx.(antlr.RuleContext)
+				break
+			}
+			j++
+		}
+	}
 
 	if t == nil {
 		return nil
@@ -423,12 +497,20 @@ func (s *AddSubContext) GetRuleContext() antlr.RuleContext {
 }
 
 func (s *AddSubContext) AllExpr() []IExprContext {
-	var ts = s.GetTypedRuleContexts(reflect.TypeOf((*IExprContext)(nil)).Elem())
-	var tst = make([]IExprContext, len(ts))
+	children := s.GetChildren()
+	len := 0
+	for _, ctx := range children {
+		if _, ok := ctx.(IExprContext); ok {
+			len++
+		}
+	}
 
-	for i, t := range ts {
-		if t != nil {
+	tst := make([]IExprContext, len)
+	i := 0
+	for _, ctx := range children {
+		if t, ok := ctx.(IExprContext); ok {
 			tst[i] = t.(IExprContext)
+			i++
 		}
 	}
 
@@ -436,7 +518,17 @@ func (s *AddSubContext) AllExpr() []IExprContext {
 }
 
 func (s *AddSubContext) Expr(i int) IExprContext {
-	var t = s.GetTypedRuleContext(reflect.TypeOf((*IExprContext)(nil)).Elem(), i)
+	var t antlr.RuleContext
+	j := 0
+	for _, ctx := range s.GetChildren() {
+		if _, ok := ctx.(IExprContext); ok {
+			if j == i {
+				t = ctx.(antlr.RuleContext)
+				break
+			}
+			j++
+		}
+	}
 
 	if t == nil {
 		return nil
@@ -482,7 +574,13 @@ func (s *ParensContext) GetRuleContext() antlr.RuleContext {
 }
 
 func (s *ParensContext) Expr() IExprContext {
-	var t = s.GetTypedRuleContext(reflect.TypeOf((*IExprContext)(nil)).Elem(), 0)
+	var t antlr.RuleContext
+	for _, ctx := range s.GetChildren() {
+		if _, ok := ctx.(IExprContext); ok {
+			t = ctx.(antlr.RuleContext)
+			break
+		}
+	}
 
 	if t == nil {
 		return nil
@@ -525,12 +623,20 @@ func (s *RelationalContext) GetRuleContext() antlr.RuleContext {
 }
 
 func (s *RelationalContext) AllExpr() []IExprContext {
-	var ts = s.GetTypedRuleContexts(reflect.TypeOf((*IExprContext)(nil)).Elem())
-	var tst = make([]IExprContext, len(ts))
+	children := s.GetChildren()
+	len := 0
+	for _, ctx := range children {
+		if _, ok := ctx.(IExprContext); ok {
+			len++
+		}
+	}
 
-	for i, t := range ts {
-		if t != nil {
+	tst := make([]IExprContext, len)
+	i := 0
+	for _, ctx := range children {
+		if t, ok := ctx.(IExprContext); ok {
 			tst[i] = t.(IExprContext)
+			i++
 		}
 	}
 
@@ -538,7 +644,17 @@ func (s *RelationalContext) AllExpr() []IExprContext {
 }
 
 func (s *RelationalContext) Expr(i int) IExprContext {
-	var t = s.GetTypedRuleContext(reflect.TypeOf((*IExprContext)(nil)).Elem(), i)
+	var t antlr.RuleContext
+	j := 0
+	for _, ctx := range s.GetChildren() {
+		if _, ok := ctx.(IExprContext); ok {
+			if j == i {
+				t = ctx.(antlr.RuleContext)
+				break
+			}
+			j++
+		}
+	}
 
 	if t == nil {
 		return nil
@@ -629,12 +745,20 @@ func (s *TermContext) GetRuleContext() antlr.RuleContext {
 }
 
 func (s *TermContext) AllExpr() []IExprContext {
-	var ts = s.GetTypedRuleContexts(reflect.TypeOf((*IExprContext)(nil)).Elem())
-	var tst = make([]IExprContext, len(ts))
+	children := s.GetChildren()
+	len := 0
+	for _, ctx := range children {
+		if _, ok := ctx.(IExprContext); ok {
+			len++
+		}
+	}
 
-	for i, t := range ts {
-		if t != nil {
+	tst := make([]IExprContext, len)
+	i := 0
+	for _, ctx := range children {
+		if t, ok := ctx.(IExprContext); ok {
 			tst[i] = t.(IExprContext)
+			i++
 		}
 	}
 
@@ -642,7 +766,17 @@ func (s *TermContext) AllExpr() []IExprContext {
 }
 
 func (s *TermContext) Expr(i int) IExprContext {
-	var t = s.GetTypedRuleContext(reflect.TypeOf((*IExprContext)(nil)).Elem(), i)
+	var t antlr.RuleContext
+	j := 0
+	for _, ctx := range s.GetChildren() {
+		if _, ok := ctx.(IExprContext); ok {
+			if j == i {
+				t = ctx.(antlr.RuleContext)
+				break
+			}
+			j++
+		}
+	}
 
 	if t == nil {
 		return nil
@@ -730,12 +864,20 @@ func (s *RangeContext) GetRuleContext() antlr.RuleContext {
 }
 
 func (s *RangeContext) AllExpr() []IExprContext {
-	var ts = s.GetTypedRuleContexts(reflect.TypeOf((*IExprContext)(nil)).Elem())
-	var tst = make([]IExprContext, len(ts))
+	children := s.GetChildren()
+	len := 0
+	for _, ctx := range children {
+		if _, ok := ctx.(IExprContext); ok {
+			len++
+		}
+	}
 
-	for i, t := range ts {
-		if t != nil {
+	tst := make([]IExprContext, len)
+	i := 0
+	for _, ctx := range children {
+		if t, ok := ctx.(IExprContext); ok {
 			tst[i] = t.(IExprContext)
+			i++
 		}
 	}
 
@@ -743,7 +885,17 @@ func (s *RangeContext) AllExpr() []IExprContext {
 }
 
 func (s *RangeContext) Expr(i int) IExprContext {
-	var t = s.GetTypedRuleContext(reflect.TypeOf((*IExprContext)(nil)).Elem(), i)
+	var t antlr.RuleContext
+	j := 0
+	for _, ctx := range s.GetChildren() {
+		if _, ok := ctx.(IExprContext); ok {
+			if j == i {
+				t = ctx.(antlr.RuleContext)
+				break
+			}
+			j++
+		}
+	}
 
 	if t == nil {
 		return nil
@@ -806,7 +958,13 @@ func (s *UnaryContext) GetRuleContext() antlr.RuleContext {
 }
 
 func (s *UnaryContext) Expr() IExprContext {
-	var t = s.GetTypedRuleContext(reflect.TypeOf((*IExprContext)(nil)).Elem(), 0)
+	var t antlr.RuleContext
+	for _, ctx := range s.GetChildren() {
+		if _, ok := ctx.(IExprContext); ok {
+			t = ctx.(antlr.RuleContext)
+			break
+		}
+	}
 
 	if t == nil {
 		return nil
@@ -860,12 +1018,20 @@ func (s *LogicalOrContext) GetRuleContext() antlr.RuleContext {
 }
 
 func (s *LogicalOrContext) AllExpr() []IExprContext {
-	var ts = s.GetTypedRuleContexts(reflect.TypeOf((*IExprContext)(nil)).Elem())
-	var tst = make([]IExprContext, len(ts))
+	children := s.GetChildren()
+	len := 0
+	for _, ctx := range children {
+		if _, ok := ctx.(IExprContext); ok {
+			len++
+		}
+	}
 
-	for i, t := range ts {
-		if t != nil {
+	tst := make([]IExprContext, len)
+	i := 0
+	for _, ctx := range children {
+		if t, ok := ctx.(IExprContext); ok {
 			tst[i] = t.(IExprContext)
+			i++
 		}
 	}
 
@@ -873,7 +1039,17 @@ func (s *LogicalOrContext) AllExpr() []IExprContext {
 }
 
 func (s *LogicalOrContext) Expr(i int) IExprContext {
-	var t = s.GetTypedRuleContext(reflect.TypeOf((*IExprContext)(nil)).Elem(), i)
+	var t antlr.RuleContext
+	j := 0
+	for _, ctx := range s.GetChildren() {
+		if _, ok := ctx.(IExprContext); ok {
+			if j == i {
+				t = ctx.(antlr.RuleContext)
+				break
+			}
+			j++
+		}
+	}
 
 	if t == nil {
 		return nil
@@ -952,12 +1128,20 @@ func (s *MulDivModContext) GetRuleContext() antlr.RuleContext {
 }
 
 func (s *MulDivModContext) AllExpr() []IExprContext {
-	var ts = s.GetTypedRuleContexts(reflect.TypeOf((*IExprContext)(nil)).Elem())
-	var tst = make([]IExprContext, len(ts))
+	children := s.GetChildren()
+	len := 0
+	for _, ctx := range children {
+		if _, ok := ctx.(IExprContext); ok {
+			len++
+		}
+	}
 
-	for i, t := range ts {
-		if t != nil {
+	tst := make([]IExprContext, len)
+	i := 0
+	for _, ctx := range children {
+		if t, ok := ctx.(IExprContext); ok {
 			tst[i] = t.(IExprContext)
+			i++
 		}
 	}
 
@@ -965,7 +1149,17 @@ func (s *MulDivModContext) AllExpr() []IExprContext {
 }
 
 func (s *MulDivModContext) Expr(i int) IExprContext {
-	var t = s.GetTypedRuleContext(reflect.TypeOf((*IExprContext)(nil)).Elem(), i)
+	var t antlr.RuleContext
+	j := 0
+	for _, ctx := range s.GetChildren() {
+		if _, ok := ctx.(IExprContext); ok {
+			if j == i {
+				t = ctx.(antlr.RuleContext)
+				break
+			}
+			j++
+		}
+	}
 
 	if t == nil {
 		return nil
@@ -1047,12 +1241,20 @@ func (s *BitXorContext) GetRuleContext() antlr.RuleContext {
 }
 
 func (s *BitXorContext) AllExpr() []IExprContext {
-	var ts = s.GetTypedRuleContexts(reflect.TypeOf((*IExprContext)(nil)).Elem())
-	var tst = make([]IExprContext, len(ts))
+	children := s.GetChildren()
+	len := 0
+	for _, ctx := range children {
+		if _, ok := ctx.(IExprContext); ok {
+			len++
+		}
+	}
 
-	for i, t := range ts {
-		if t != nil {
+	tst := make([]IExprContext, len)
+	i := 0
+	for _, ctx := range children {
+		if t, ok := ctx.(IExprContext); ok {
 			tst[i] = t.(IExprContext)
+			i++
 		}
 	}
 
@@ -1060,7 +1262,17 @@ func (s *BitXorContext) AllExpr() []IExprContext {
 }
 
 func (s *BitXorContext) Expr(i int) IExprContext {
-	var t = s.GetTypedRuleContext(reflect.TypeOf((*IExprContext)(nil)).Elem(), i)
+	var t antlr.RuleContext
+	j := 0
+	for _, ctx := range s.GetChildren() {
+		if _, ok := ctx.(IExprContext); ok {
+			if j == i {
+				t = ctx.(antlr.RuleContext)
+				break
+			}
+			j++
+		}
+	}
 
 	if t == nil {
 		return nil
@@ -1102,7 +1314,13 @@ func (s *LikeContext) GetRuleContext() antlr.RuleContext {
 }
 
 func (s *LikeContext) Expr() IExprContext {
-	var t = s.GetTypedRuleContext(reflect.TypeOf((*IExprContext)(nil)).Elem(), 0)
+	var t antlr.RuleContext
+	for _, ctx := range s.GetChildren() {
+		if _, ok := ctx.(IExprContext); ok {
+			t = ctx.(antlr.RuleContext)
+			break
+		}
+	}
 
 	if t == nil {
 		return nil
@@ -1148,12 +1366,20 @@ func (s *BitAndContext) GetRuleContext() antlr.RuleContext {
 }
 
 func (s *BitAndContext) AllExpr() []IExprContext {
-	var ts = s.GetTypedRuleContexts(reflect.TypeOf((*IExprContext)(nil)).Elem())
-	var tst = make([]IExprContext, len(ts))
+	children := s.GetChildren()
+	len := 0
+	for _, ctx := range children {
+		if _, ok := ctx.(IExprContext); ok {
+			len++
+		}
+	}
 
-	for i, t := range ts {
-		if t != nil {
+	tst := make([]IExprContext, len)
+	i := 0
+	for _, ctx := range children {
+		if t, ok := ctx.(IExprContext); ok {
 			tst[i] = t.(IExprContext)
+			i++
 		}
 	}
 
@@ -1161,7 +1387,17 @@ func (s *BitAndContext) AllExpr() []IExprContext {
 }
 
 func (s *BitAndContext) Expr(i int) IExprContext {
-	var t = s.GetTypedRuleContext(reflect.TypeOf((*IExprContext)(nil)).Elem(), i)
+	var t antlr.RuleContext
+	j := 0
+	for _, ctx := range s.GetChildren() {
+		if _, ok := ctx.(IExprContext); ok {
+			if j == i {
+				t = ctx.(antlr.RuleContext)
+				break
+			}
+			j++
+		}
+	}
 
 	if t == nil {
 		return nil
@@ -1203,12 +1439,20 @@ func (s *LogicalAndContext) GetRuleContext() antlr.RuleContext {
 }
 
 func (s *LogicalAndContext) AllExpr() []IExprContext {
-	var ts = s.GetTypedRuleContexts(reflect.TypeOf((*IExprContext)(nil)).Elem())
-	var tst = make([]IExprContext, len(ts))
+	children := s.GetChildren()
+	len := 0
+	for _, ctx := range children {
+		if _, ok := ctx.(IExprContext); ok {
+			len++
+		}
+	}
 
-	for i, t := range ts {
-		if t != nil {
+	tst := make([]IExprContext, len)
+	i := 0
+	for _, ctx := range children {
+		if t, ok := ctx.(IExprContext); ok {
 			tst[i] = t.(IExprContext)
+			i++
 		}
 	}
 
@@ -1216,7 +1460,17 @@ func (s *LogicalAndContext) AllExpr() []IExprContext {
 }
 
 func (s *LogicalAndContext) Expr(i int) IExprContext {
-	var t = s.GetTypedRuleContext(reflect.TypeOf((*IExprContext)(nil)).Elem(), i)
+	var t antlr.RuleContext
+	j := 0
+	for _, ctx := range s.GetChildren() {
+		if _, ok := ctx.(IExprContext); ok {
+			if j == i {
+				t = ctx.(antlr.RuleContext)
+				break
+			}
+			j++
+		}
+	}
 
 	if t == nil {
 		return nil
@@ -1263,7 +1517,13 @@ func (s *EmptyTermContext) GetRuleContext() antlr.RuleContext {
 }
 
 func (s *EmptyTermContext) Expr() IExprContext {
-	var t = s.GetTypedRuleContext(reflect.TypeOf((*IExprContext)(nil)).Elem(), 0)
+	var t antlr.RuleContext
+	for _, ctx := range s.GetChildren() {
+		if _, ok := ctx.(IExprContext); ok {
+			t = ctx.(antlr.RuleContext)
+			break
+		}
+	}
 
 	if t == nil {
 		return nil
@@ -1318,12 +1578,20 @@ func (s *EqualityContext) GetRuleContext() antlr.RuleContext {
 }
 
 func (s *EqualityContext) AllExpr() []IExprContext {
-	var ts = s.GetTypedRuleContexts(reflect.TypeOf((*IExprContext)(nil)).Elem())
-	var tst = make([]IExprContext, len(ts))
+	children := s.GetChildren()
+	len := 0
+	for _, ctx := range children {
+		if _, ok := ctx.(IExprContext); ok {
+			len++
+		}
+	}
 
-	for i, t := range ts {
-		if t != nil {
+	tst := make([]IExprContext, len)
+	i := 0
+	for _, ctx := range children {
+		if t, ok := ctx.(IExprContext); ok {
 			tst[i] = t.(IExprContext)
+			i++
 		}
 	}
 
@@ -1331,7 +1599,17 @@ func (s *EqualityContext) AllExpr() []IExprContext {
 }
 
 func (s *EqualityContext) Expr(i int) IExprContext {
-	var t = s.GetTypedRuleContext(reflect.TypeOf((*IExprContext)(nil)).Elem(), i)
+	var t antlr.RuleContext
+	j := 0
+	for _, ctx := range s.GetChildren() {
+		if _, ok := ctx.(IExprContext); ok {
+			if j == i {
+				t = ctx.(antlr.RuleContext)
+				break
+			}
+			j++
+		}
+	}
 
 	if t == nil {
 		return nil
@@ -1409,12 +1687,20 @@ func (s *PowerContext) GetRuleContext() antlr.RuleContext {
 }
 
 func (s *PowerContext) AllExpr() []IExprContext {
-	var ts = s.GetTypedRuleContexts(reflect.TypeOf((*IExprContext)(nil)).Elem())
-	var tst = make([]IExprContext, len(ts))
+	children := s.GetChildren()
+	len := 0
+	for _, ctx := range children {
+		if _, ok := ctx.(IExprContext); ok {
+			len++
+		}
+	}
 
-	for i, t := range ts {
-		if t != nil {
+	tst := make([]IExprContext, len)
+	i := 0
+	for _, ctx := range children {
+		if t, ok := ctx.(IExprContext); ok {
 			tst[i] = t.(IExprContext)
+			i++
 		}
 	}
 
@@ -1422,7 +1708,17 @@ func (s *PowerContext) AllExpr() []IExprContext {
 }
 
 func (s *PowerContext) Expr(i int) IExprContext {
-	var t = s.GetTypedRuleContext(reflect.TypeOf((*IExprContext)(nil)).Elem(), i)
+	var t antlr.RuleContext
+	j := 0
+	for _, ctx := range s.GetChildren() {
+		if _, ok := ctx.(IExprContext); ok {
+			if j == i {
+				t = ctx.(antlr.RuleContext)
+				break
+			}
+			j++
+		}
+	}
 
 	if t == nil {
 		return nil
@@ -1450,6 +1746,9 @@ func (p *PlanParser) Expr() (localctx IExprContext) {
 }
 
 func (p *PlanParser) expr(_p int) (localctx IExprContext) {
+	this := p
+	_ = this
+
 	var _parentctx antlr.ParserRuleContext = p.GetParserRuleContext()
 	_parentState := p.GetState()
 	localctx = NewExprContext(p, p.GetParserRuleContext(), _parentState)
@@ -1558,7 +1857,7 @@ func (p *PlanParser) expr(_p int) (localctx IExprContext) {
 
 			_la = p.GetTokenStream().LA(1)
 
-			if !(((_la)&-(0x1f+1)) == 0 && ((1<<uint(_la))&((1<<PlanParserADD)|(1<<PlanParserSUB)|(1<<PlanParserBNOT)|(1<<PlanParserNOT))) != 0) {
+			if !((int64(_la) & ^0x3f) == 0 && ((int64(1)<<_la)&201351168) != 0) {
 				var _ri = p.GetErrorHandler().RecoverInline(p)
 
 				localctx.(*UnaryContext).op = _ri
@@ -1623,7 +1922,7 @@ func (p *PlanParser) expr(_p int) (localctx IExprContext) {
 
 					_la = p.GetTokenStream().LA(1)
 
-					if !(((_la)&-(0x1f+1)) == 0 && ((1<<uint(_la))&((1<<PlanParserMUL)|(1<<PlanParserDIV)|(1<<PlanParserMOD))) != 0) {
+					if !((int64(_la) & ^0x3f) == 0 && ((int64(1)<<_la)&229376) != 0) {
 						var _ri = p.GetErrorHandler().RecoverInline(p)
 
 						localctx.(*MulDivModContext).op = _ri
@@ -1822,7 +2121,7 @@ func (p *PlanParser) expr(_p int) (localctx IExprContext) {
 
 					_la = p.GetTokenStream().LA(1)
 
-					if !(((_la)&-(0x1f+1)) == 0 && ((1<<uint(_la))&((1<<PlanParserLT)|(1<<PlanParserLE)|(1<<PlanParserGT)|(1<<PlanParserGE))) != 0) {
+					if !((int64(_la) & ^0x3f) == 0 && ((int64(1)<<_la)&960) != 0) {
 						var _ri = p.GetErrorHandler().RecoverInline(p)
 
 						localctx.(*RelationalContext).op = _ri
@@ -2097,6 +2396,9 @@ func (p *PlanParser) Sempred(localctx antlr.RuleContext, ruleIndex, predIndex in
 }
 
 func (p *PlanParser) Expr_Sempred(localctx antlr.RuleContext, predIndex int) bool {
+	this := p
+	_ = this
+
 	switch predIndex {
 	case 0:
 		return p.Precpred(p.GetParserRuleContext(), 16)

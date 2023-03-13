@@ -121,7 +121,7 @@ func TestGlobalMethods(t *testing.T) {
 	err = ZstdCompress(strings.NewReader(data), compressed, zstd.WithWindowSize(3))
 	assert.Error(t, err)
 
-	err = ZstdDecompress(compressed, origin, zstd.WithDecoderConcurrency(0))
+	err = ZstdDecompress(compressed, origin, zstd.WithDecoderConcurrency(-1))
 	assert.Error(t, err)
 }
 
