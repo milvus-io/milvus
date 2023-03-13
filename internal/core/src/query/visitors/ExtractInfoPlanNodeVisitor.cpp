@@ -51,7 +51,9 @@ void
 ExtractInfoPlanNodeVisitor::visit(RetrievePlanNode& node) {
     // Assert(node.predicate_.has_value());
     ExtractInfoExprVisitor expr_visitor(plan_info_);
-    node.predicate_->accept(expr_visitor);
+    if (node.predicate_.has_value()) {
+        node.predicate_.value()->accept(expr_visitor);
+    }
 }
 
 }  // namespace milvus::query

@@ -83,6 +83,14 @@ SegmentInternalInterface::Retrieve(const query::RetrievePlan* plan,
     query::ExecPlanNodeVisitor visitor(*this, timestamp);
     auto retrieve_results = visitor.get_retrieve_result(*plan->plan_node_);
     retrieve_results.segment_ = (void*)this;
+
+    if (plan->plan_node_->is_count) {
+        AssertInfo(retrieve_results.field_data_.size() == 1,
+                   "count result should only have one column");
+        *results->add_fields_data() = retrieve_results.field_data_[0];
+        return results;
+    }
+
     results->mutable_offset()->Add(retrieve_results.result_offsets_.begin(),
                                    retrieve_results.result_offsets_.end());
 
@@ -148,11 +156,26 @@ SegmentInternalInterface::Retrieve(const query::RetrievePlan* plan,
 
 int64_t
 SegmentInternalInterface::get_real_count() const {
+#if 0
     auto insert_cnt = get_row_count();
     BitsetType bitset_holder;
     bitset_holder.resize(insert_cnt, false);
     mask_with_delete(bitset_holder, insert_cnt, MAX_TIMESTAMP);
     return bitset_holder.size() - bitset_holder.count();
+#endif
+    auto plan = std::make_unique<query::RetrievePlan>(get_schema());
+    plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
+    plan->plan_node_->is_count = true;
+    auto res = Retrieve(plan.get(), MAX_TIMESTAMP);
+    AssertInfo(res->fields_data().size() == 1,
+               "count result should only have one column");
+    AssertInfo(res->fields_data()[0].has_scalars(),
+               "count result should match scalar");
+    AssertInfo(res->fields_data()[0].scalars().has_long_data(),
+               "count result should match long data");
+    AssertInfo(res->fields_data()[0].scalars().long_data().data_size() == 1,
+               "count result should only have one row");
+    return res->fields_data()[0].scalars().long_data().data(0);
 }
 
 }  // namespace milvus::segcore

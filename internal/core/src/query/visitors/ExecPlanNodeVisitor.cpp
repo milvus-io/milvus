@@ -125,6 +125,17 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
     search_result_opt_ = std::move(search_result);
 }
 
+std::unique_ptr<RetrieveResult>
+wrap_num_entities(int64_t cnt) {
+    auto retrieve_result = std::make_unique<RetrieveResult>();
+    DataArray arr;
+    arr.set_type(milvus::proto::schema::Int64);
+    auto scalar = arr.mutable_scalars();
+    scalar->mutable_long_data()->mutable_data()->Add(cnt);
+    retrieve_result->field_data_ = {arr};
+    return retrieve_result;
+}
+
 void
 ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
     assert(!retrieve_result_opt_.has_value());
@@ -135,15 +146,26 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
 
     auto active_count = segment->get_active_count(timestamp_);
 
-    if (active_count == 0) {
+    if (active_count == 0 && !node.is_count) {
+        retrieve_result_opt_ = std::move(retrieve_result);
+        return;
+    }
+
+    if (active_count == 0 && node.is_count) {
+        retrieve_result = *(wrap_num_entities(0));
         retrieve_result_opt_ = std::move(retrieve_result);
         return;
     }
 
     BitsetType bitset_holder;
-    if (node.predicate_ != nullptr) {
+    // For case that retrieve by expression, bitset will be allocated when expression is being executed.
+    if (node.is_count) {
+        bitset_holder.resize(active_count);
+    }
+
+    if (node.predicate_.has_value() && node.predicate_.value() != nullptr) {
         bitset_holder = ExecExprVisitor(*segment, active_count, timestamp_)
-                            .call_child(*(node.predicate_));
+                            .call_child(*(node.predicate_.value()));
         bitset_holder.flip();
     }
 
@@ -151,7 +173,14 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
 
     segment->mask_with_delete(bitset_holder, active_count, timestamp_);
     // if bitset_holder is all 1's, we got empty result
-    if (bitset_holder.all()) {
+    if (bitset_holder.all() && !node.is_count) {
+        retrieve_result_opt_ = std::move(retrieve_result);
+        return;
+    }
+
+    if (node.is_count) {
+        auto cnt = bitset_holder.size() - bitset_holder.count();
+        retrieve_result = *(wrap_num_entities(cnt));
         retrieve_result_opt_ = std::move(retrieve_result);
         return;
     }

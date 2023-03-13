@@ -85,7 +85,10 @@ func (q *queryTask) queryOnStreaming() error {
 	}
 
 	q.tr.RecordSpan()
-	mergedResult, err := mergeSegcoreRetrieveResultsAndFillIfEmpty(ctx, sResults, q.iReq.GetLimit(), q.iReq.GetOutputFieldsId(), coll.Schema())
+
+	reducer := createSegCoreReducer(ctx, q.req, coll.Schema())
+
+	mergedResult, err := reducer.Reduce(sResults)
 	if err != nil {
 		return err
 	}
@@ -128,7 +131,9 @@ func (q *queryTask) queryOnHistorical() error {
 		return err
 	}
 
-	mergedResult, err := mergeSegcoreRetrieveResultsAndFillIfEmpty(ctx, retrieveResults, q.req.GetReq().GetLimit(), q.iReq.GetOutputFieldsId(), coll.Schema())
+	reducer := createSegCoreReducer(ctx, q.req, coll.Schema())
+
+	mergedResult, err := reducer.Reduce(retrieveResults)
 	if err != nil {
 		return err
 	}

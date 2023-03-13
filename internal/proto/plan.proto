@@ -148,10 +148,16 @@ message VectorANNS {
   string placeholder_tag = 5;  // always be "$0"
 }
 
+message QueryPlanNode {
+  Expr predicates = 1;
+  bool is_count = 2;
+};
+
 message PlanNode {
   oneof node {
     VectorANNS vector_anns = 1;
-    Expr predicates = 2;
+    Expr predicates = 2; // deprecated, use query instead.
+    QueryPlanNode query = 4;
   }
   repeated int64 output_field_ids = 3;
 }

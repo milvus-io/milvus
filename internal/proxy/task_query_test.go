@@ -695,3 +695,179 @@ func Test_filterSystemFields(t *testing.T) {
 	filtered := filterSystemFields(outputFieldIDs)
 	assert.ElementsMatch(t, []UniqueID{common.StartOfUserFieldID}, filtered)
 }
+
+func Test_matchCountRule(t *testing.T) {
+	type args struct {
+		outputs []string
+	}
+	tests := []struct {
+		name string
+		args args
+		want bool
+	}{
+		{
+			args: args{
+				outputs: nil,
+			},
+			want: false,
+		},
+		{
+			args: args{
+				outputs: []string{"count(*)", "count(*)"},
+			},
+			want: false,
+		},
+		{
+			args: args{
+				outputs: []string{"not count(*)"},
+			},
+			want: false,
+		},
+		{
+			args: args{
+				outputs: []string{"count(*)"},
+			},
+			want: true,
+		},
+		{
+			args: args{
+				outputs: []string{"COUNT(*)"},
+			},
+			want: true,
+		},
+		{
+			args: args{
+				outputs: []string{"      count(*)"},
+			},
+			want: true,
+		},
+		{
+			args: args{
+				outputs: []string{"      COUNT(*)"},
+			},
+			want: true,
+		},
+		{
+			args: args{
+				outputs: []string{"count(*)     "},
+			},
+			want: true,
+		},
+		{
+			args: args{
+				outputs: []string{"COUNT(*)     "},
+			},
+			want: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equalf(t, tt.want, matchCountRule(tt.args.outputs), "matchCountRule(%v)", tt.args.outputs)
+		})
+	}
+}
+
+func Test_createCntPlan(t *testing.T) {
+	t.Run("plan without filter", func(t *testing.T) {
+		plan, err := createCntPlan("", nil)
+		assert.NoError(t, err)
+		assert.True(t, plan.GetQuery().GetIsCount())
+		assert.Nil(t, plan.GetQuery().GetPredicates())
+	})
+
+	t.Run("invalid schema", func(t *testing.T) {
+		_, err := createCntPlan("a > b", nil)
+		assert.Error(t, err)
+	})
+
+	t.Run("invalid schema", func(t *testing.T) {
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         "a",
+					IsPrimaryKey: true,
+					DataType:     schemapb.DataType_Int64,
+				},
+			},
+		}
+		plan, err := createCntPlan("a > 4", schema)
+		assert.NoError(t, err)
+		assert.True(t, plan.GetQuery().GetIsCount())
+		assert.NotNil(t, plan.GetQuery().GetPredicates())
+	})
+}
+
+func Test_queryTask_createPlan(t *testing.T) {
+	t.Run("match count rule", func(t *testing.T) {
+		tsk := &queryTask{
+			request: &milvuspb.QueryRequest{
+				OutputFields: []string{"count(*)"},
+			},
+		}
+		err := tsk.createPlan(context.TODO())
+		assert.NoError(t, err)
+		plan := tsk.plan
+		assert.True(t, plan.GetQuery().GetIsCount())
+		assert.Nil(t, plan.GetQuery().GetPredicates())
+	})
+
+	t.Run("query without expression", func(t *testing.T) {
+
+		tsk := &queryTask{
+			request: &milvuspb.QueryRequest{
+				OutputFields: []string{"a"},
+			},
+		}
+		err := tsk.createPlan(context.TODO())
+		assert.Error(t, err)
+	})
+
+	t.Run("invalid expression", func(t *testing.T) {
+
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         "a",
+					IsPrimaryKey: true,
+					DataType:     schemapb.DataType_Int64,
+				},
+			},
+		}
+
+		tsk := &queryTask{
+			schema: schema,
+			request: &milvuspb.QueryRequest{
+				OutputFields: []string{"a"},
+				Expr:         "b > 2",
+			},
+		}
+		err := tsk.createPlan(context.TODO())
+		assert.Error(t, err)
+	})
+
+	t.Run("invalid output fields", func(t *testing.T) {
+
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         "a",
+					IsPrimaryKey: true,
+					DataType:     schemapb.DataType_Int64,
+				},
+			},
+		}
+
+		tsk := &queryTask{
+			schema: schema,
+			request: &milvuspb.QueryRequest{
+				OutputFields: []string{"b"},
+				Expr:         "a > 2",
+			},
+		}
+		err := tsk.createPlan(context.TODO())
+		assert.Error(t, err)
+	})
+}

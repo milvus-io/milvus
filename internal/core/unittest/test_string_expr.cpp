@@ -727,7 +727,7 @@ TEST(AlwaysTrueStringPlan, QueryWithOutputFields) {
 
     auto expr_proto = GenAlwaysTrueExpr(fvec_meta, str_meta);
     auto plan_proto = GenPlanNode();
-    plan_proto->set_allocated_predicates(expr_proto);
+    plan_proto->mutable_query()->set_allocated_predicates(expr_proto);
     SetTargetEntry(plan_proto, {str_meta.get_id().get()});
     auto plan = ProtoParser(*schema).CreateRetrievePlan(*plan_proto);
 

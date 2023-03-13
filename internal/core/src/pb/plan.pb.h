@@ -85,6 +85,9 @@ extern PlanNodeDefaultTypeInternal _PlanNode_default_instance_;
 class QueryInfo;
 struct QueryInfoDefaultTypeInternal;
 extern QueryInfoDefaultTypeInternal _QueryInfo_default_instance_;
+class QueryPlanNode;
+struct QueryPlanNodeDefaultTypeInternal;
+extern QueryPlanNodeDefaultTypeInternal _QueryPlanNode_default_instance_;
 class TermExpr;
 struct TermExprDefaultTypeInternal;
 extern TermExprDefaultTypeInternal _TermExpr_default_instance_;
@@ -116,6 +119,7 @@ template<> ::milvus::proto::plan::Expr* Arena::CreateMaybeMessage<::milvus::prot
 template<> ::milvus::proto::plan::GenericValue* Arena::CreateMaybeMessage<::milvus::proto::plan::GenericValue>(Arena*);
 template<> ::milvus::proto::plan::PlanNode* Arena::CreateMaybeMessage<::milvus::proto::plan::PlanNode>(Arena*);
 template<> ::milvus::proto::plan::QueryInfo* Arena::CreateMaybeMessage<::milvus::proto::plan::QueryInfo>(Arena*);
+template<> ::milvus::proto::plan::QueryPlanNode* Arena::CreateMaybeMessage<::milvus::proto::plan::QueryPlanNode>(Arena*);
 template<> ::milvus::proto::plan::TermExpr* Arena::CreateMaybeMessage<::milvus::proto::plan::TermExpr>(Arena*);
 template<> ::milvus::proto::plan::UnaryExpr* Arena::CreateMaybeMessage<::milvus::proto::plan::UnaryExpr>(Arena*);
 template<> ::milvus::proto::plan::UnaryRangeExpr* Arena::CreateMaybeMessage<::milvus::proto::plan::UnaryRangeExpr>(Arena*);
@@ -3527,6 +3531,174 @@ class VectorANNS final :
 };
 // -------------------------------------------------------------------
 
+class QueryPlanNode final :
+    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.plan.QueryPlanNode) */ {
+ public:
+  inline QueryPlanNode() : QueryPlanNode(nullptr) {}
+  ~QueryPlanNode() override;
+  explicit PROTOBUF_CONSTEXPR QueryPlanNode(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  QueryPlanNode(const QueryPlanNode& from);
+  QueryPlanNode(QueryPlanNode&& from) noexcept
+    : QueryPlanNode() {
+    *this = ::std::move(from);
+  }
+
+  inline QueryPlanNode& operator=(const QueryPlanNode& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline QueryPlanNode& operator=(QueryPlanNode&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
+    return GetDescriptor();
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
+    return default_instance().GetMetadata().descriptor;
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
+    return default_instance().GetMetadata().reflection;
+  }
+  static const QueryPlanNode& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const QueryPlanNode* internal_default_instance() {
+    return reinterpret_cast<const QueryPlanNode*>(
+               &_QueryPlanNode_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    16;
+
+  friend void swap(QueryPlanNode& a, QueryPlanNode& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(QueryPlanNode* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(QueryPlanNode* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  QueryPlanNode* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<QueryPlanNode>(arena);
+  }
+  using ::PROTOBUF_NAMESPACE_ID::Message::CopyFrom;
+  void CopyFrom(const QueryPlanNode& from);
+  using ::PROTOBUF_NAMESPACE_ID::Message::MergeFrom;
+  void MergeFrom( const QueryPlanNode& from) {
+    QueryPlanNode::MergeImpl(*this, from);
+  }
+  private:
+  static void MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROTOBUF_NAMESPACE_ID::Message& from_msg);
+  public:
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const final;
+  void InternalSwap(QueryPlanNode* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "milvus.proto.plan.QueryPlanNode";
+  }
+  protected:
+  explicit QueryPlanNode(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  static const ClassData _class_data_;
+  const ::PROTOBUF_NAMESPACE_ID::Message::ClassData*GetClassData() const final;
+
+  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kPredicatesFieldNumber = 1,
+    kIsCountFieldNumber = 2,
+  };
+  // .milvus.proto.plan.Expr predicates = 1;
+  bool has_predicates() const;
+  private:
+  bool _internal_has_predicates() const;
+  public:
+  void clear_predicates();
+  const ::milvus::proto::plan::Expr& predicates() const;
+  PROTOBUF_NODISCARD ::milvus::proto::plan::Expr* release_predicates();
+  ::milvus::proto::plan::Expr* mutable_predicates();
+  void set_allocated_predicates(::milvus::proto::plan::Expr* predicates);
+  private:
+  const ::milvus::proto::plan::Expr& _internal_predicates() const;
+  ::milvus::proto::plan::Expr* _internal_mutable_predicates();
+  public:
+  void unsafe_arena_set_allocated_predicates(
+      ::milvus::proto::plan::Expr* predicates);
+  ::milvus::proto::plan::Expr* unsafe_arena_release_predicates();
+
+  // bool is_count = 2;
+  void clear_is_count();
+  bool is_count() const;
+  void set_is_count(bool value);
+  private:
+  bool _internal_is_count() const;
+  void _internal_set_is_count(bool value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:milvus.proto.plan.QueryPlanNode)
+ private:
+  class _Internal;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    ::milvus::proto::plan::Expr* predicates_;
+    bool is_count_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_plan_2eproto;
+};
+// -------------------------------------------------------------------
+
 class PlanNode final :
     public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:milvus.proto.plan.PlanNode) */ {
  public:
@@ -3573,6 +3745,7 @@ class PlanNode final :
   enum NodeCase {
     kVectorAnns = 1,
     kPredicates = 2,
+    kQuery = 4,
     NODE_NOT_SET = 0,
   };
 
@@ -3581,7 +3754,7 @@ class PlanNode final :
                &_PlanNode_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    16;
+    17;
 
   friend void swap(PlanNode& a, PlanNode& b) {
     a.Swap(&b);
@@ -3657,6 +3830,7 @@ class PlanNode final :
     kOutputFieldIdsFieldNumber = 3,
     kVectorAnnsFieldNumber = 1,
     kPredicatesFieldNumber = 2,
+    kQueryFieldNumber = 4,
   };
   // repeated int64 output_field_ids = 3;
   int output_field_ids_size() const;
@@ -3716,6 +3890,24 @@ class PlanNode final :
       ::milvus::proto::plan::Expr* predicates);
   ::milvus::proto::plan::Expr* unsafe_arena_release_predicates();
 
+  // .milvus.proto.plan.QueryPlanNode query = 4;
+  bool has_query() const;
+  private:
+  bool _internal_has_query() const;
+  public:
+  void clear_query();
+  const ::milvus::proto::plan::QueryPlanNode& query() const;
+  PROTOBUF_NODISCARD ::milvus::proto::plan::QueryPlanNode* release_query();
+  ::milvus::proto::plan::QueryPlanNode* mutable_query();
+  void set_allocated_query(::milvus::proto::plan::QueryPlanNode* query);
+  private:
+  const ::milvus::proto::plan::QueryPlanNode& _internal_query() const;
+  ::milvus::proto::plan::QueryPlanNode* _internal_mutable_query();
+  public:
+  void unsafe_arena_set_allocated_query(
+      ::milvus::proto::plan::QueryPlanNode* query);
+  ::milvus::proto::plan::QueryPlanNode* unsafe_arena_release_query();
+
   void clear_node();
   NodeCase node_case() const;
   // @@protoc_insertion_point(class_scope:milvus.proto.plan.PlanNode)
@@ -3723,6 +3915,7 @@ class PlanNode final :
   class _Internal;
   void set_has_vector_anns();
   void set_has_predicates();
+  void set_has_query();
 
   inline bool has_node() const;
   inline void clear_has_node();
@@ -3738,6 +3931,7 @@ class PlanNode final :
         ::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized _constinit_;
       ::milvus::proto::plan::VectorANNS* vector_anns_;
       ::milvus::proto::plan::Expr* predicates_;
+      ::milvus::proto::plan::QueryPlanNode* query_;
     } node_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
     uint32_t _oneof_case_[1];
@@ -7298,6 +7492,120 @@ inline void VectorANNS::set_allocated_placeholder_tag(std::string* placeholder_t
 
 // -------------------------------------------------------------------
 
+// QueryPlanNode
+
+// .milvus.proto.plan.Expr predicates = 1;
+inline bool QueryPlanNode::_internal_has_predicates() const {
+  return this != internal_default_instance() && _impl_.predicates_ != nullptr;
+}
+inline bool QueryPlanNode::has_predicates() const {
+  return _internal_has_predicates();
+}
+inline void QueryPlanNode::clear_predicates() {
+  if (GetArenaForAllocation() == nullptr && _impl_.predicates_ != nullptr) {
+    delete _impl_.predicates_;
+  }
+  _impl_.predicates_ = nullptr;
+}
+inline const ::milvus::proto::plan::Expr& QueryPlanNode::_internal_predicates() const {
+  const ::milvus::proto::plan::Expr* p = _impl_.predicates_;
+  return p != nullptr ? *p : reinterpret_cast<const ::milvus::proto::plan::Expr&>(
+      ::milvus::proto::plan::_Expr_default_instance_);
+}
+inline const ::milvus::proto::plan::Expr& QueryPlanNode::predicates() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.plan.QueryPlanNode.predicates)
+  return _internal_predicates();
+}
+inline void QueryPlanNode::unsafe_arena_set_allocated_predicates(
+    ::milvus::proto::plan::Expr* predicates) {
+  if (GetArenaForAllocation() == nullptr) {
+    delete reinterpret_cast<::PROTOBUF_NAMESPACE_ID::MessageLite*>(_impl_.predicates_);
+  }
+  _impl_.predicates_ = predicates;
+  if (predicates) {
+    
+  } else {
+    
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:milvus.proto.plan.QueryPlanNode.predicates)
+}
+inline ::milvus::proto::plan::Expr* QueryPlanNode::release_predicates() {
+  
+  ::milvus::proto::plan::Expr* temp = _impl_.predicates_;
+  _impl_.predicates_ = nullptr;
+#ifdef PROTOBUF_FORCE_COPY_IN_RELEASE
+  auto* old =  reinterpret_cast<::PROTOBUF_NAMESPACE_ID::MessageLite*>(temp);
+  temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+  if (GetArenaForAllocation() == nullptr) { delete old; }
+#else  // PROTOBUF_FORCE_COPY_IN_RELEASE
+  if (GetArenaForAllocation() != nullptr) {
+    temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+  }
+#endif  // !PROTOBUF_FORCE_COPY_IN_RELEASE
+  return temp;
+}
+inline ::milvus::proto::plan::Expr* QueryPlanNode::unsafe_arena_release_predicates() {
+  // @@protoc_insertion_point(field_release:milvus.proto.plan.QueryPlanNode.predicates)
+  
+  ::milvus::proto::plan::Expr* temp = _impl_.predicates_;
+  _impl_.predicates_ = nullptr;
+  return temp;
+}
+inline ::milvus::proto::plan::Expr* QueryPlanNode::_internal_mutable_predicates() {
+  
+  if (_impl_.predicates_ == nullptr) {
+    auto* p = CreateMaybeMessage<::milvus::proto::plan::Expr>(GetArenaForAllocation());
+    _impl_.predicates_ = p;
+  }
+  return _impl_.predicates_;
+}
+inline ::milvus::proto::plan::Expr* QueryPlanNode::mutable_predicates() {
+  ::milvus::proto::plan::Expr* _msg = _internal_mutable_predicates();
+  // @@protoc_insertion_point(field_mutable:milvus.proto.plan.QueryPlanNode.predicates)
+  return _msg;
+}
+inline void QueryPlanNode::set_allocated_predicates(::milvus::proto::plan::Expr* predicates) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  if (message_arena == nullptr) {
+    delete _impl_.predicates_;
+  }
+  if (predicates) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+        ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(predicates);
+    if (message_arena != submessage_arena) {
+      predicates = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, predicates, submessage_arena);
+    }
+    
+  } else {
+    
+  }
+  _impl_.predicates_ = predicates;
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.plan.QueryPlanNode.predicates)
+}
+
+// bool is_count = 2;
+inline void QueryPlanNode::clear_is_count() {
+  _impl_.is_count_ = false;
+}
+inline bool QueryPlanNode::_internal_is_count() const {
+  return _impl_.is_count_;
+}
+inline bool QueryPlanNode::is_count() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.plan.QueryPlanNode.is_count)
+  return _internal_is_count();
+}
+inline void QueryPlanNode::_internal_set_is_count(bool value) {
+  
+  _impl_.is_count_ = value;
+}
+inline void QueryPlanNode::set_is_count(bool value) {
+  _internal_set_is_count(value);
+  // @@protoc_insertion_point(field_set:milvus.proto.plan.QueryPlanNode.is_count)
+}
+
+// -------------------------------------------------------------------
+
 // PlanNode
 
 // .milvus.proto.plan.VectorANNS vector_anns = 1;
@@ -7448,6 +7756,80 @@ inline ::milvus::proto::plan::Expr* PlanNode::mutable_predicates() {
   return _msg;
 }
 
+// .milvus.proto.plan.QueryPlanNode query = 4;
+inline bool PlanNode::_internal_has_query() const {
+  return node_case() == kQuery;
+}
+inline bool PlanNode::has_query() const {
+  return _internal_has_query();
+}
+inline void PlanNode::set_has_query() {
+  _impl_._oneof_case_[0] = kQuery;
+}
+inline void PlanNode::clear_query() {
+  if (_internal_has_query()) {
+    if (GetArenaForAllocation() == nullptr) {
+      delete _impl_.node_.query_;
+    }
+    clear_has_node();
+  }
+}
+inline ::milvus::proto::plan::QueryPlanNode* PlanNode::release_query() {
+  // @@protoc_insertion_point(field_release:milvus.proto.plan.PlanNode.query)
+  if (_internal_has_query()) {
+    clear_has_node();
+    ::milvus::proto::plan::QueryPlanNode* temp = _impl_.node_.query_;
+    if (GetArenaForAllocation() != nullptr) {
+      temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+    }
+    _impl_.node_.query_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline const ::milvus::proto::plan::QueryPlanNode& PlanNode::_internal_query() const {
+  return _internal_has_query()
+      ? *_impl_.node_.query_
+      : reinterpret_cast< ::milvus::proto::plan::QueryPlanNode&>(::milvus::proto::plan::_QueryPlanNode_default_instance_);
+}
+inline const ::milvus::proto::plan::QueryPlanNode& PlanNode::query() const {
+  // @@protoc_insertion_point(field_get:milvus.proto.plan.PlanNode.query)
+  return _internal_query();
+}
+inline ::milvus::proto::plan::QueryPlanNode* PlanNode::unsafe_arena_release_query() {
+  // @@protoc_insertion_point(field_unsafe_arena_release:milvus.proto.plan.PlanNode.query)
+  if (_internal_has_query()) {
+    clear_has_node();
+    ::milvus::proto::plan::QueryPlanNode* temp = _impl_.node_.query_;
+    _impl_.node_.query_ = nullptr;
+    return temp;
+  } else {
+    return nullptr;
+  }
+}
+inline void PlanNode::unsafe_arena_set_allocated_query(::milvus::proto::plan::QueryPlanNode* query) {
+  clear_node();
+  if (query) {
+    set_has_query();
+    _impl_.node_.query_ = query;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:milvus.proto.plan.PlanNode.query)
+}
+inline ::milvus::proto::plan::QueryPlanNode* PlanNode::_internal_mutable_query() {
+  if (!_internal_has_query()) {
+    clear_node();
+    set_has_query();
+    _impl_.node_.query_ = CreateMaybeMessage< ::milvus::proto::plan::QueryPlanNode >(GetArenaForAllocation());
+  }
+  return _impl_.node_.query_;
+}
+inline ::milvus::proto::plan::QueryPlanNode* PlanNode::mutable_query() {
+  ::milvus::proto::plan::QueryPlanNode* _msg = _internal_mutable_query();
+  // @@protoc_insertion_point(field_mutable:milvus.proto.plan.PlanNode.query)
+  return _msg;
+}
+
 // repeated int64 output_field_ids = 3;
 inline int PlanNode::_internal_output_field_ids_size() const {
   return _impl_.output_field_ids_.size();
@@ -7507,6 +7889,8 @@ inline PlanNode::NodeCase PlanNode::node_case() const {
 #ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif  // __GNUC__
+// -------------------------------------------------------------------
+
 // -------------------------------------------------------------------
 
 // -------------------------------------------------------------------

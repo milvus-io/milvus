@@ -263,6 +263,20 @@ struct VectorANNSDefaultTypeInternal {
   };
 };
 PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 VectorANNSDefaultTypeInternal _VectorANNS_default_instance_;
+PROTOBUF_CONSTEXPR QueryPlanNode::QueryPlanNode(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.predicates_)*/nullptr
+  , /*decltype(_impl_.is_count_)*/false
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct QueryPlanNodeDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR QueryPlanNodeDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~QueryPlanNodeDefaultTypeInternal() {}
+  union {
+    QueryPlanNode _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 QueryPlanNodeDefaultTypeInternal _QueryPlanNode_default_instance_;
 PROTOBUF_CONSTEXPR PlanNode::PlanNode(
     ::_pbi::ConstantInitialized): _impl_{
     /*decltype(_impl_.output_field_ids_)*/{}
@@ -282,7 +296,7 @@ PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORIT
 }  // namespace plan
 }  // namespace proto
 }  // namespace milvus
-static ::_pb::Metadata file_level_metadata_plan_2eproto[17];
+static ::_pb::Metadata file_level_metadata_plan_2eproto[18];
 static const ::_pb::EnumDescriptor* file_level_enum_descriptors_plan_2eproto[4];
 static constexpr ::_pb::ServiceDescriptor const** file_level_service_descriptors_plan_2eproto = nullptr;
 
@@ -444,11 +458,20 @@ const uint32_t TableStruct_plan_2eproto::offsets[] PROTOBUF_SECTION_VARIABLE(pro
   PROTOBUF_FIELD_OFFSET(::milvus::proto::plan::VectorANNS, _impl_.query_info_),
   PROTOBUF_FIELD_OFFSET(::milvus::proto::plan::VectorANNS, _impl_.placeholder_tag_),
   ~0u,  // no _has_bits_
+  PROTOBUF_FIELD_OFFSET(::milvus::proto::plan::QueryPlanNode, _internal_metadata_),
+  ~0u,  // no _extensions_
+  ~0u,  // no _oneof_case_
+  ~0u,  // no _weak_field_map_
+  ~0u,  // no _inlined_string_donated_
+  PROTOBUF_FIELD_OFFSET(::milvus::proto::plan::QueryPlanNode, _impl_.predicates_),
+  PROTOBUF_FIELD_OFFSET(::milvus::proto::plan::QueryPlanNode, _impl_.is_count_),
+  ~0u,  // no _has_bits_
   PROTOBUF_FIELD_OFFSET(::milvus::proto::plan::PlanNode, _internal_metadata_),
   ~0u,  // no _extensions_
   PROTOBUF_FIELD_OFFSET(::milvus::proto::plan::PlanNode, _impl_._oneof_case_[0]),
   ~0u,  // no _weak_field_map_
   ~0u,  // no _inlined_string_donated_
+  ::_pbi::kInvalidFieldOffsetTag,
   ::_pbi::kInvalidFieldOffsetTag,
   ::_pbi::kInvalidFieldOffsetTag,
   PROTOBUF_FIELD_OFFSET(::milvus::proto::plan::PlanNode, _impl_.output_field_ids_),
@@ -471,7 +494,8 @@ static const ::_pbi::MigrationSchema schemas[] PROTOBUF_SECTION_VARIABLE(protode
   { 117, -1, -1, sizeof(::milvus::proto::plan::BinaryArithOpEvalRangeExpr)},
   { 128, -1, -1, sizeof(::milvus::proto::plan::Expr)},
   { 145, -1, -1, sizeof(::milvus::proto::plan::VectorANNS)},
-  { 156, -1, -1, sizeof(::milvus::proto::plan::PlanNode)},
+  { 156, -1, -1, sizeof(::milvus::proto::plan::QueryPlanNode)},
+  { 164, -1, -1, sizeof(::milvus::proto::plan::PlanNode)},
 };
 
 static const ::_pb::Message* const file_default_instances[] = {
@@ -491,6 +515,7 @@ static const ::_pb::Message* const file_default_instances[] = {
   &::milvus::proto::plan::_BinaryArithOpEvalRangeExpr_default_instance_._instance,
   &::milvus::proto::plan::_Expr_default_instance_._instance,
   &::milvus::proto::plan::_VectorANNS_default_instance_._instance,
+  &::milvus::proto::plan::_QueryPlanNode_default_instance_._instance,
   &::milvus::proto::plan::_PlanNode_default_instance_._instance,
 };
 
@@ -567,27 +592,31 @@ const char descriptor_table_protodef_plan_2eproto[] PROTOBUF_SECTION_VARIABLE(pr
   "\030\002 \001(\003\022+\n\npredicates\030\003 \001(\0132\027.milvus.prot"
   "o.plan.Expr\0220\n\nquery_info\030\004 \001(\0132\034.milvus"
   ".proto.plan.QueryInfo\022\027\n\017placeholder_tag"
-  "\030\005 \001(\t\"\221\001\n\010PlanNode\0224\n\013vector_anns\030\001 \001(\013"
+  "\030\005 \001(\t\"N\n\rQueryPlanNode\022+\n\npredicates\030\001 "
+  "\001(\0132\027.milvus.proto.plan.Expr\022\020\n\010is_count"
+  "\030\002 \001(\010\"\304\001\n\010PlanNode\0224\n\013vector_anns\030\001 \001(\013"
   "2\035.milvus.proto.plan.VectorANNSH\000\022-\n\npre"
   "dicates\030\002 \001(\0132\027.milvus.proto.plan.ExprH\000"
-  "\022\030\n\020output_field_ids\030\003 \003(\003B\006\n\004node*\272\001\n\006O"
-  "pType\022\013\n\007Invalid\020\000\022\017\n\013GreaterThan\020\001\022\020\n\014G"
-  "reaterEqual\020\002\022\014\n\010LessThan\020\003\022\r\n\tLessEqual"
-  "\020\004\022\t\n\005Equal\020\005\022\014\n\010NotEqual\020\006\022\017\n\013PrefixMat"
-  "ch\020\007\022\020\n\014PostfixMatch\020\010\022\t\n\005Match\020\t\022\t\n\005Ran"
-  "ge\020\n\022\006\n\002In\020\013\022\t\n\005NotIn\020\014*G\n\013ArithOpType\022\013"
-  "\n\007Unknown\020\000\022\007\n\003Add\020\001\022\007\n\003Sub\020\002\022\007\n\003Mul\020\003\022\007"
-  "\n\003Div\020\004\022\007\n\003Mod\020\005B3Z1github.com/milvus-io"
-  "/milvus/internal/proto/planpbb\006proto3"
+  "\0221\n\005query\030\004 \001(\0132 .milvus.proto.plan.Quer"
+  "yPlanNodeH\000\022\030\n\020output_field_ids\030\003 \003(\003B\006\n"
+  "\004node*\272\001\n\006OpType\022\013\n\007Invalid\020\000\022\017\n\013Greater"
+  "Than\020\001\022\020\n\014GreaterEqual\020\002\022\014\n\010LessThan\020\003\022\r"
+  "\n\tLessEqual\020\004\022\t\n\005Equal\020\005\022\014\n\010NotEqual\020\006\022\017"
+  "\n\013PrefixMatch\020\007\022\020\n\014PostfixMatch\020\010\022\t\n\005Mat"
+  "ch\020\t\022\t\n\005Range\020\n\022\006\n\002In\020\013\022\t\n\005NotIn\020\014*G\n\013Ar"
+  "ithOpType\022\013\n\007Unknown\020\000\022\007\n\003Add\020\001\022\007\n\003Sub\020\002"
+  "\022\007\n\003Mul\020\003\022\007\n\003Div\020\004\022\007\n\003Mod\020\005B3Z1github.co"
+  "m/milvus-io/milvus/internal/proto/planpb"
+  "b\006proto3"
   ;
 static const ::_pbi::DescriptorTable* const descriptor_table_plan_2eproto_deps[1] = {
   &::descriptor_table_schema_2eproto,
 };
 static ::_pbi::once_flag descriptor_table_plan_2eproto_once;
 const ::_pbi::DescriptorTable descriptor_table_plan_2eproto = {
-    false, false, 3357, descriptor_table_protodef_plan_2eproto,
+    false, false, 3488, descriptor_table_protodef_plan_2eproto,
     "plan.proto",
-    &descriptor_table_plan_2eproto_once, descriptor_table_plan_2eproto_deps, 1, 17,
+    &descriptor_table_plan_2eproto_once, descriptor_table_plan_2eproto_deps, 1, 18,
     schemas, file_default_instances, TableStruct_plan_2eproto::offsets,
     file_level_metadata_plan_2eproto, file_level_enum_descriptors_plan_2eproto,
     file_level_service_descriptors_plan_2eproto,
@@ -5555,10 +5584,235 @@ void VectorANNS::InternalSwap(VectorANNS* other) {
 
 // ===================================================================
 
+class QueryPlanNode::_Internal {
+ public:
+  static const ::milvus::proto::plan::Expr& predicates(const QueryPlanNode* msg);
+};
+
+const ::milvus::proto::plan::Expr&
+QueryPlanNode::_Internal::predicates(const QueryPlanNode* msg) {
+  return *msg->_impl_.predicates_;
+}
+QueryPlanNode::QueryPlanNode(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::Message(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:milvus.proto.plan.QueryPlanNode)
+}
+QueryPlanNode::QueryPlanNode(const QueryPlanNode& from)
+  : ::PROTOBUF_NAMESPACE_ID::Message() {
+  QueryPlanNode* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.predicates_){nullptr}
+    , decltype(_impl_.is_count_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(from._internal_metadata_);
+  if (from._internal_has_predicates()) {
+    _this->_impl_.predicates_ = new ::milvus::proto::plan::Expr(*from._impl_.predicates_);
+  }
+  _this->_impl_.is_count_ = from._impl_.is_count_;
+  // @@protoc_insertion_point(copy_constructor:milvus.proto.plan.QueryPlanNode)
+}
+
+inline void QueryPlanNode::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.predicates_){nullptr}
+    , decltype(_impl_.is_count_){false}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+}
+
+QueryPlanNode::~QueryPlanNode() {
+  // @@protoc_insertion_point(destructor:milvus.proto.plan.QueryPlanNode)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void QueryPlanNode::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+  if (this != internal_default_instance()) delete _impl_.predicates_;
+}
+
+void QueryPlanNode::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void QueryPlanNode::Clear() {
+// @@protoc_insertion_point(message_clear_start:milvus.proto.plan.QueryPlanNode)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  if (GetArenaForAllocation() == nullptr && _impl_.predicates_ != nullptr) {
+    delete _impl_.predicates_;
+  }
+  _impl_.predicates_ = nullptr;
+  _impl_.is_count_ = false;
+  _internal_metadata_.Clear<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>();
+}
+
+const char* QueryPlanNode::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // .milvus.proto.plan.Expr predicates = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 10)) {
+          ptr = ctx->ParseMessage(_internal_mutable_predicates(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // bool is_count = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 16)) {
+          _impl_.is_count_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* QueryPlanNode::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:milvus.proto.plan.QueryPlanNode)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // .milvus.proto.plan.Expr predicates = 1;
+  if (this->_internal_has_predicates()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(1, _Internal::predicates(this),
+        _Internal::predicates(this).GetCachedSize(), target, stream);
+  }
+
+  // bool is_count = 2;
+  if (this->_internal_is_count() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteBoolToArray(2, this->_internal_is_count(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = ::_pbi::WireFormat::InternalSerializeUnknownFieldsToArray(
+        _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance), target, stream);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:milvus.proto.plan.QueryPlanNode)
+  return target;
+}
+
+size_t QueryPlanNode::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:milvus.proto.plan.QueryPlanNode)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // .milvus.proto.plan.Expr predicates = 1;
+  if (this->_internal_has_predicates()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+        *_impl_.predicates_);
+  }
+
+  // bool is_count = 2;
+  if (this->_internal_is_count() != 0) {
+    total_size += 1 + 1;
+  }
+
+  return MaybeComputeUnknownFieldsSize(total_size, &_impl_._cached_size_);
+}
+
+const ::PROTOBUF_NAMESPACE_ID::Message::ClassData QueryPlanNode::_class_data_ = {
+    ::PROTOBUF_NAMESPACE_ID::Message::CopyWithSourceCheck,
+    QueryPlanNode::MergeImpl
+};
+const ::PROTOBUF_NAMESPACE_ID::Message::ClassData*QueryPlanNode::GetClassData() const { return &_class_data_; }
+
+
+void QueryPlanNode::MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROTOBUF_NAMESPACE_ID::Message& from_msg) {
+  auto* const _this = static_cast<QueryPlanNode*>(&to_msg);
+  auto& from = static_cast<const QueryPlanNode&>(from_msg);
+  // @@protoc_insertion_point(class_specific_merge_from_start:milvus.proto.plan.QueryPlanNode)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (from._internal_has_predicates()) {
+    _this->_internal_mutable_predicates()->::milvus::proto::plan::Expr::MergeFrom(
+        from._internal_predicates());
+  }
+  if (from._internal_is_count() != 0) {
+    _this->_internal_set_is_count(from._internal_is_count());
+  }
+  _this->_internal_metadata_.MergeFrom<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(from._internal_metadata_);
+}
+
+void QueryPlanNode::CopyFrom(const QueryPlanNode& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:milvus.proto.plan.QueryPlanNode)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool QueryPlanNode::IsInitialized() const {
+  return true;
+}
+
+void QueryPlanNode::InternalSwap(QueryPlanNode* other) {
+  using std::swap;
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  ::PROTOBUF_NAMESPACE_ID::internal::memswap<
+      PROTOBUF_FIELD_OFFSET(QueryPlanNode, _impl_.is_count_)
+      + sizeof(QueryPlanNode::_impl_.is_count_)
+      - PROTOBUF_FIELD_OFFSET(QueryPlanNode, _impl_.predicates_)>(
+          reinterpret_cast<char*>(&_impl_.predicates_),
+          reinterpret_cast<char*>(&other->_impl_.predicates_));
+}
+
+::PROTOBUF_NAMESPACE_ID::Metadata QueryPlanNode::GetMetadata() const {
+  return ::_pbi::AssignDescriptors(
+      &descriptor_table_plan_2eproto_getter, &descriptor_table_plan_2eproto_once,
+      file_level_metadata_plan_2eproto[16]);
+}
+
+// ===================================================================
+
 class PlanNode::_Internal {
  public:
   static const ::milvus::proto::plan::VectorANNS& vector_anns(const PlanNode* msg);
   static const ::milvus::proto::plan::Expr& predicates(const PlanNode* msg);
+  static const ::milvus::proto::plan::QueryPlanNode& query(const PlanNode* msg);
 };
 
 const ::milvus::proto::plan::VectorANNS&
@@ -5568,6 +5822,10 @@ PlanNode::_Internal::vector_anns(const PlanNode* msg) {
 const ::milvus::proto::plan::Expr&
 PlanNode::_Internal::predicates(const PlanNode* msg) {
   return *msg->_impl_.node_.predicates_;
+}
+const ::milvus::proto::plan::QueryPlanNode&
+PlanNode::_Internal::query(const PlanNode* msg) {
+  return *msg->_impl_.node_.query_;
 }
 void PlanNode::set_allocated_vector_anns(::milvus::proto::plan::VectorANNS* vector_anns) {
   ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
@@ -5599,6 +5857,21 @@ void PlanNode::set_allocated_predicates(::milvus::proto::plan::Expr* predicates)
   }
   // @@protoc_insertion_point(field_set_allocated:milvus.proto.plan.PlanNode.predicates)
 }
+void PlanNode::set_allocated_query(::milvus::proto::plan::QueryPlanNode* query) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_node();
+  if (query) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(query);
+    if (message_arena != submessage_arena) {
+      query = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, query, submessage_arena);
+    }
+    set_has_query();
+    _impl_.node_.query_ = query;
+  }
+  // @@protoc_insertion_point(field_set_allocated:milvus.proto.plan.PlanNode.query)
+}
 PlanNode::PlanNode(::PROTOBUF_NAMESPACE_ID::Arena* arena,
                          bool is_message_owned)
   : ::PROTOBUF_NAMESPACE_ID::Message(arena, is_message_owned) {
@@ -5626,6 +5899,11 @@ PlanNode::PlanNode(const PlanNode& from)
     case kPredicates: {
       _this->_internal_mutable_predicates()->::milvus::proto::plan::Expr::MergeFrom(
           from._internal_predicates());
+      break;
+    }
+    case kQuery: {
+      _this->_internal_mutable_query()->::milvus::proto::plan::QueryPlanNode::MergeFrom(
+          from._internal_query());
       break;
     }
     case NODE_NOT_SET: {
@@ -5685,6 +5963,12 @@ void PlanNode::clear_node() {
       }
       break;
     }
+    case kQuery: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.node_.query_;
+      }
+      break;
+    }
     case NODE_NOT_SET: {
       break;
     }
@@ -5733,6 +6017,14 @@ const char* PlanNode::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx)
           CHK_(ptr);
         } else if (static_cast<uint8_t>(tag) == 24) {
           _internal_add_output_field_ids(::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr));
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // .milvus.proto.plan.QueryPlanNode query = 4;
+      case 4:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 34)) {
+          ptr = ctx->ParseMessage(_internal_mutable_query(), ptr);
           CHK_(ptr);
         } else
           goto handle_unusual;
@@ -5789,6 +6081,13 @@ uint8_t* PlanNode::_InternalSerialize(
     }
   }
 
+  // .milvus.proto.plan.QueryPlanNode query = 4;
+  if (_internal_has_query()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(4, _Internal::query(this),
+        _Internal::query(this).GetCachedSize(), target, stream);
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = ::_pbi::WireFormat::InternalSerializeUnknownFieldsToArray(
         _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance), target, stream);
@@ -5834,6 +6133,13 @@ size_t PlanNode::ByteSizeLong() const {
           *_impl_.node_.predicates_);
       break;
     }
+    // .milvus.proto.plan.QueryPlanNode query = 4;
+    case kQuery: {
+      total_size += 1 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.node_.query_);
+      break;
+    }
     case NODE_NOT_SET: {
       break;
     }
@@ -5868,6 +6174,11 @@ void PlanNode::MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROTO
           from._internal_predicates());
       break;
     }
+    case kQuery: {
+      _this->_internal_mutable_query()->::milvus::proto::plan::QueryPlanNode::MergeFrom(
+          from._internal_query());
+      break;
+    }
     case NODE_NOT_SET: {
       break;
     }
@@ -5897,7 +6208,7 @@ void PlanNode::InternalSwap(PlanNode* other) {
 ::PROTOBUF_NAMESPACE_ID::Metadata PlanNode::GetMetadata() const {
   return ::_pbi::AssignDescriptors(
       &descriptor_table_plan_2eproto_getter, &descriptor_table_plan_2eproto_once,
-      file_level_metadata_plan_2eproto[16]);
+      file_level_metadata_plan_2eproto[17]);
 }
 
 // @@protoc_insertion_point(namespace_scope)
@@ -5968,6 +6279,10 @@ Arena::CreateMaybeMessage< ::milvus::proto::plan::Expr >(Arena* arena) {
 template<> PROTOBUF_NOINLINE ::milvus::proto::plan::VectorANNS*
 Arena::CreateMaybeMessage< ::milvus::proto::plan::VectorANNS >(Arena* arena) {
   return Arena::CreateMessageInternal< ::milvus::proto::plan::VectorANNS >(arena);
+}
+template<> PROTOBUF_NOINLINE ::milvus::proto::plan::QueryPlanNode*
+Arena::CreateMaybeMessage< ::milvus::proto::plan::QueryPlanNode >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::milvus::proto::plan::QueryPlanNode >(arena);
 }
 template<> PROTOBUF_NOINLINE ::milvus::proto::plan::PlanNode*
 Arena::CreateMaybeMessage< ::milvus::proto::plan::PlanNode >(Arena* arena) {

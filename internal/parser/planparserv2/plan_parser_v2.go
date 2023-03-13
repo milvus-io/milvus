@@ -76,8 +76,10 @@ func CreateRetrievePlan(schemaPb *schemapb.CollectionSchema, exprStr string) (*p
 	}
 
 	planNode := &planpb.PlanNode{
-		Node: &planpb.PlanNode_Predicates{
-			Predicates: expr,
+		Node: &planpb.PlanNode_Query{
+			Query: &planpb.QueryPlanNode{
+				Predicates: expr,
+			},
 		},
 	}
 	return planNode, nil

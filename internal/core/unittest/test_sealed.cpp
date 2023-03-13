@@ -935,6 +935,8 @@ TEST(Sealed, RealCount) {
     schema->set_primary_field_id(pk);
     auto segment = CreateSealedSegment(schema);
 
+    ASSERT_EQ(0, segment->get_real_count());
+
     int64_t c = 10;
     auto dataset = DataGen(schema, c);
     auto pks = dataset.get_col<int64_t>(pk);
