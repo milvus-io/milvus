@@ -871,7 +871,6 @@ func (node *DataNode) GetCompactionState(ctx context.Context, req *datapb.Compac
 			PlanID: k.(UniqueID),
 			Result: v.(*datapb.CompactionResult),
 		})
-		node.compactionExecutor.completed.Delete(k)
 		return true
 	})
 
@@ -904,28 +903,31 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 		return status, nil
 	}
 
-	oneSegment := req.GetCompactedFrom()[0]
-	channel, err := node.flowgraphManager.getChannel(oneSegment)
-	if err != nil {
-		status.Reason = fmt.Sprintf("invalid request, err=%s", err.Error())
-		return status, nil
-	}
+	var (
+		oneSegment int64
+		channel    Channel
+		err        error
+		ds         *dataSyncService
+		ok         bool
+	)
 
-	ds, ok := node.flowgraphManager.getFlowgraphService(channel.getChannelName(oneSegment))
-	if !ok {
-		status.Reason = fmt.Sprintf("failed to find flow graph service, err=%s", err.Error())
-		return status, nil
-	}
-
-	// check if all compactedFrom segments are valid
-	var invalidSegIDs []UniqueID
-	for _, segID := range req.GetCompactedFrom() {
-		if !channel.hasSegment(segID, true) {
-			invalidSegIDs = append(invalidSegIDs, segID)
+	for _, fromSegment := range req.GetCompactedFrom() {
+		channel, err = node.flowgraphManager.getChannel(fromSegment)
+		if err != nil {
+			log.Ctx(ctx).Warn("fail to get the channel", zap.Int64("segment", fromSegment), zap.Error(err))
+			continue
 		}
+		ds, ok = node.flowgraphManager.getFlowgraphService(channel.getChannelName(fromSegment))
+		if !ok {
+			log.Ctx(ctx).Warn("fail to find flow graph service", zap.Int64("segment", fromSegment))
+			continue
+		}
+		oneSegment = fromSegment
+		break
 	}
-	if len(invalidSegIDs) > 0 {
-		status.Reason = fmt.Sprintf("invalid request, some segments are not in the same channel: %v", invalidSegIDs)
+	if oneSegment == 0 {
+		log.Ctx(ctx).Warn("no valid segment, maybe the request is a retry")
+		status.ErrorCode = commonpb.ErrorCode_Success
 		return status, nil
 	}
 
@@ -940,6 +942,7 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 
 	err = channel.InitPKstats(ctx, targetSeg, req.GetStatsLogs(), tsoutil.GetCurrentTime())
 	if err != nil {
+		log.Ctx(ctx).Warn("init pk stats fail", zap.Error(err))
 		status.Reason = fmt.Sprintf("init pk stats fail, err=%s", err.Error())
 		return status, nil
 	}
@@ -947,11 +950,12 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 	// block all flow graph so it's safe to remove segment
 	ds.fg.Blockall()
 	defer ds.fg.Unblock()
-	if err := channel.mergeFlushedSegments(targetSeg, req.GetPlanID(), req.GetCompactedFrom()); err != nil {
+	if err = channel.mergeFlushedSegments(ctx, targetSeg, req.GetPlanID(), req.GetCompactedFrom()); err != nil {
+		log.Ctx(ctx).Warn("fail to merge flushed segments", zap.Error(err))
 		status.Reason = err.Error()
 		return status, nil
 	}
-
+	node.compactionExecutor.injectDone(req.GetPlanID())
 	status.ErrorCode = commonpb.ErrorCode_Success
 	return status, nil
 }

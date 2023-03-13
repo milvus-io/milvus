@@ -18,6 +18,7 @@ package datanode
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"sync"
@@ -32,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 )
 
@@ -61,7 +63,7 @@ type Channel interface {
 	listNewSegmentsStartPositions() []*datapb.SegmentStartPosition
 	transferNewSegments(segmentIDs []UniqueID)
 	updateSegmentPKRange(segID UniqueID, ids storage.FieldData)
-	mergeFlushedSegments(seg *Segment, planID UniqueID, compactedFrom []UniqueID) error
+	mergeFlushedSegments(ctx context.Context, seg *Segment, planID UniqueID, compactedFrom []UniqueID) error
 	hasSegment(segID UniqueID, countFlushed bool) bool
 	removeSegments(segID ...UniqueID)
 	listCompactedSegmentIDs() map[UniqueID][]UniqueID
@@ -541,8 +543,8 @@ func (c *ChannelMeta) getCollectionSchema(collID UniqueID, ts Timestamp) (*schem
 	return c.collSchema, nil
 }
 
-func (c *ChannelMeta) mergeFlushedSegments(seg *Segment, planID UniqueID, compactedFrom []UniqueID) error {
-	log := log.With(
+func (c *ChannelMeta) mergeFlushedSegments(ctx context.Context, seg *Segment, planID UniqueID, compactedFrom []UniqueID) error {
+	log := log.Ctx(ctx).With(
 		zap.Int64("segment ID", seg.segmentID),
 		zap.Int64("collection ID", seg.collectionID),
 		zap.Int64("partition ID", seg.partitionID),
@@ -567,12 +569,18 @@ func (c *ChannelMeta) mergeFlushedSegments(seg *Segment, planID UniqueID, compac
 
 	if len(inValidSegments) > 0 {
 		log.Warn("no match flushed segments to merge from", zap.Int64s("invalid segmentIDs", inValidSegments))
-		return fmt.Errorf("invalid compactedFrom segments: %v", inValidSegments)
+		compactedFrom = lo.Without(compactedFrom, inValidSegments...)
 	}
 
 	log.Info("merge flushed segments")
 	c.segMu.Lock()
 	defer c.segMu.Unlock()
+	select {
+	case <-ctx.Done():
+		log.Warn("the context has been closed", zap.Error(ctx.Err()))
+		return errors.New("invalid context")
+	default:
+	}
 	for _, ID := range compactedFrom {
 		// the existent of the segments are already checked
 		s := c.segments[ID]
