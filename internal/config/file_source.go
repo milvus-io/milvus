@@ -98,7 +98,6 @@ func (fs *FileSource) loadFromFile() error {
 	newConfig := make(map[string]string)
 	for _, configFile := range fs.files {
 		if _, err := os.Stat(configFile); err != nil {
-			log.Info("cannot access config file", zap.String("configFile", configFile))
 			continue
 		}
 
