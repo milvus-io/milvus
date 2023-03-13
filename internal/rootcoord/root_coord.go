@@ -514,15 +514,13 @@ func (c *Core) initCredentials() error {
 	return nil
 }
 
-func (c *Core) initRbac() (initError error) {
+func (c *Core) initRbac() error {
+	var err error
 	// create default roles, including admin, public
 	for _, role := range util.DefaultRoles {
-		if initError = c.meta.CreateRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: role}); initError != nil {
-			if common.IsIgnorableError(initError) {
-				initError = nil
-				continue
-			}
-			return
+		err = c.meta.CreateRole(util.DefaultTenant, &milvuspb.RoleEntity{Name: role})
+		if err != nil && !common.IsIgnorableError(err) {
+			return errors.Wrap(err, "failed to create role")
 		}
 	}
 
@@ -536,7 +534,7 @@ func (c *Core) initRbac() (initError error) {
 	}
 
 	for _, globalPrivilege := range globalPrivileges {
-		if initError = c.meta.OperatePrivilege(util.DefaultTenant, &milvuspb.GrantEntity{
+		err = c.meta.OperatePrivilege(util.DefaultTenant, &milvuspb.GrantEntity{
 			Role:       &milvuspb.RoleEntity{Name: util.RolePublic},
 			Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Global.String()},
 			ObjectName: util.AnyWord,
@@ -544,16 +542,13 @@ func (c *Core) initRbac() (initError error) {
 				User:      &milvuspb.UserEntity{Name: util.UserRoot},
 				Privilege: &milvuspb.PrivilegeEntity{Name: globalPrivilege},
 			},
-		}, milvuspb.OperatePrivilegeType_Grant); initError != nil {
-			if common.IsIgnorableError(initError) {
-				initError = nil
-				continue
-			}
-			return
+		}, milvuspb.OperatePrivilegeType_Grant)
+		if err != nil && !common.IsIgnorableError(err) {
+			return errors.Wrap(err, "failed to grant global privilege")
 		}
 	}
 	for _, collectionPrivilege := range collectionPrivileges {
-		if initError = c.meta.OperatePrivilege(util.DefaultTenant, &milvuspb.GrantEntity{
+		err = c.meta.OperatePrivilege(util.DefaultTenant, &milvuspb.GrantEntity{
 			Role:       &milvuspb.RoleEntity{Name: util.RolePublic},
 			Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Collection.String()},
 			ObjectName: util.AnyWord,
@@ -561,12 +556,9 @@ func (c *Core) initRbac() (initError error) {
 				User:      &milvuspb.UserEntity{Name: util.UserRoot},
 				Privilege: &milvuspb.PrivilegeEntity{Name: collectionPrivilege},
 			},
-		}, milvuspb.OperatePrivilegeType_Grant); initError != nil {
-			if common.IsIgnorableError(initError) {
-				initError = nil
-				continue
-			}
-			return
+		}, milvuspb.OperatePrivilegeType_Grant)
+		if err != nil && !common.IsIgnorableError(err) {
+			return errors.Wrap(err, "failed to grant collection privilege")
 		}
 	}
 	return nil
