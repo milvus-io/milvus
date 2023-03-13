@@ -22,12 +22,13 @@
 
 #include "storage/PayloadStream.h"
 #include "storage/FileManager.h"
+#include "storage/BinlogReader.h"
 #include "knowhere/comp/index_param.h"
 
 namespace milvus::storage {
 
 StorageType
-ReadMediumType(PayloadInputStream* input_stream);
+ReadMediumType(BinlogReaderPtr reader);
 
 void
 AddPayloadToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder,
@@ -49,13 +50,6 @@ CreateArrowSchema(DataType data_type);
 
 std::shared_ptr<arrow::Schema>
 CreateArrowSchema(DataType data_type, int dim);
-
-int64_t
-GetPayloadSize(const Payload* payload);
-
-const uint8_t*
-GetRawValuesFromArrowArray(std::shared_ptr<arrow::Array> array,
-                           DataType data_type);
 
 int
 GetDimensionFromArrowArray(std::shared_ptr<arrow::Array> array,

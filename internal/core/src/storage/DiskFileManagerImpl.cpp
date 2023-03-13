@@ -30,6 +30,7 @@
 #include "storage/IndexData.h"
 #include "storage/ThreadPool.h"
 #include "storage/Util.h"
+#include "storage/FieldDataFactory.h"
 
 #define FILEMANAGER_TRY try {
 #define FILEMANAGER_CATCH                                                      \
@@ -91,9 +92,12 @@ EncodeAndUploadIndexSlice(RemoteChunkManager* remote_chunk_manager,
     auto& local_chunk_manager = LocalChunkManager::GetInstance();
     auto buf = std::unique_ptr<uint8_t[]>(new uint8_t[batch_size]);
     local_chunk_manager.Read(file, offset, buf.get(), batch_size);
-    auto fieldData = std::make_shared<FieldData>(buf.get(), batch_size);
-    auto indexData = std::make_shared<IndexData>(fieldData);
 
+    auto field_data =
+        milvus::storage::FieldDataFactory::GetInstance().CreateFieldData(
+            DataType::INT8);
+    field_data->FillFieldData(buf.get(), batch_size);
+    auto indexData = std::make_shared<IndexData>(field_data);
     indexData->set_index_meta(index_meta);
     indexData->SetFieldDataMeta(field_meta);
     auto serialized_index_data = indexData->serialize_to_remote_file();
@@ -217,7 +221,7 @@ DownloadAndDecodeRemoteIndexfile(RemoteChunkManager* remote_chunk_manager,
     auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[fileSize]);
     remote_chunk_manager->Read(file, buf.get(), fileSize);
 
-    return DeserializeFileData(buf.get(), fileSize);
+    return DeserializeFileData(buf, fileSize);
 }
 
 uint64_t
@@ -238,12 +242,13 @@ DiskFileManagerImpl::CacheBatchIndexFilesToDisk(
     uint64_t offset = local_file_init_offfset;
     for (int i = 0; i < batch_size; ++i) {
         auto res = futures[i].get();
-        auto index_payload = res->GetPayload();
-        auto index_size = index_payload->rows * sizeof(uint8_t);
-        local_chunk_manager.Write(local_file_name,
-                                  offset,
-                                  const_cast<uint8_t*>(index_payload->raw_data),
-                                  index_size);
+        auto index_data = res->GetFieldData();
+        auto index_size = index_data->Size();
+        local_chunk_manager.Write(
+            local_file_name,
+            offset,
+            reinterpret_cast<uint8_t*>(const_cast<void*>(index_data->Data())),
+            index_size);
         offset += index_size;
     }
 

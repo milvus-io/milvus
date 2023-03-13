@@ -21,8 +21,8 @@
 #include "storage/MinioChunkManager.h"
 #include "storage/DiskFileManagerImpl.h"
 #include "storage/ThreadPool.h"
+#include "storage/FieldDataFactory.h"
 #include "config/ConfigChunkManager.h"
-#include "config/ConfigKnowhere.h"
 #include "test_utils/indexbuilder_test_utils.h"
 
 using namespace std;
@@ -50,9 +50,9 @@ class DiskAnnFileManagerTest : public testing::Test {
 
 TEST_F(DiskAnnFileManagerTest, AddFilePositive) {
     auto& lcm = LocalChunkManager::GetInstance();
-    auto rcm = std::make_unique<MinioChunkManager>(storage_config_);
     string testBucketName = "test-diskann";
     storage_config_.bucket_name = testBucketName;
+    auto rcm = std::make_unique<MinioChunkManager>(storage_config_);
     if (!rcm->BucketExists(testBucketName)) {
         rcm->CreateBucket(testBucketName);
     }
@@ -83,7 +83,6 @@ TEST_F(DiskAnnFileManagerTest, AddFilePositive) {
 
     std::vector<std::string> remote_files;
     for (auto& file2size : remote_files_to_size) {
-        std::cout << file2size.first << std::endl;
         remote_files.emplace_back(file2size.first);
     }
     diskAnnFileManager->CacheIndexToDisk(remote_files);
@@ -93,22 +92,32 @@ TEST_F(DiskAnnFileManagerTest, AddFilePositive) {
         auto buf = std::unique_ptr<uint8_t[]>(new uint8_t[file_size]);
         lcm.Read(file, buf.get(), file_size);
 
-        auto index = FieldData(buf.get(), file_size);
-        auto payload = index.get_payload();
-        auto rows = payload->rows;
-        auto rawData = payload->raw_data;
+        auto index =
+            milvus::storage::FieldDataFactory::GetInstance().CreateFieldData(
+                storage::DataType::INT8);
+        index->FillFieldData(buf.get(), file_size);
+        auto rows = index->get_num_rows();
+        auto rawData = (uint8_t*)(index->Data());
 
         EXPECT_EQ(rows, index_size);
         EXPECT_EQ(rawData[0], data[0]);
         EXPECT_EQ(rawData[4], data[4]);
     }
+
+    auto objects =
+        rcm->ListWithPrefix(diskAnnFileManager->GetRemoteIndexObjectPrefix());
+    for (auto obj : objects) {
+        rcm->Remove(obj);
+    }
+    ok = rcm->DeleteBucket(testBucketName);
+    EXPECT_EQ(ok, true);
 }
 
 TEST_F(DiskAnnFileManagerTest, AddFilePositiveParallel) {
     auto& lcm = LocalChunkManager::GetInstance();
-    auto rcm = std::make_unique<MinioChunkManager>(storage_config_);
     string testBucketName = "test-diskann";
     storage_config_.bucket_name = testBucketName;
+    auto rcm = std::make_unique<MinioChunkManager>(storage_config_);
     if (!rcm->BucketExists(testBucketName)) {
         rcm->CreateBucket(testBucketName);
     }
@@ -149,15 +158,25 @@ TEST_F(DiskAnnFileManagerTest, AddFilePositiveParallel) {
         auto buf = std::unique_ptr<uint8_t[]>(new uint8_t[file_size]);
         lcm.Read(file, buf.get(), file_size);
 
-        auto index = FieldData(buf.get(), file_size);
-        auto payload = index.get_payload();
-        auto rows = payload->rows;
-        auto rawData = payload->raw_data;
+        auto index =
+            milvus::storage::FieldDataFactory::GetInstance().CreateFieldData(
+                storage::DataType::INT8);
+        index->FillFieldData(buf.get(), file_size);
+        auto rows = index->get_num_rows();
+        auto rawData = (uint8_t*)(index->Data());
 
         EXPECT_EQ(rows, index_size);
         EXPECT_EQ(rawData[0], data[0]);
         EXPECT_EQ(rawData[4], data[4]);
     }
+
+    auto objects =
+        rcm->ListWithPrefix(diskAnnFileManager->GetRemoteIndexObjectPrefix());
+    for (auto obj : objects) {
+        rcm->Remove(obj);
+    }
+    ok = rcm->DeleteBucket(testBucketName);
+    EXPECT_EQ(ok, true);
 }
 
 int

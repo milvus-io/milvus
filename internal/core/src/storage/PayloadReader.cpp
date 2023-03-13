@@ -16,6 +16,8 @@
 
 #include "storage/PayloadReader.h"
 #include "exceptions/EasyAssert.h"
+#include "storage/FieldDataFactory.h"
+#include "storage/Util.h"
 
 namespace milvus::storage {
 PayloadReader::PayloadReader(std::shared_ptr<PayloadInputStream> input,
@@ -48,33 +50,12 @@ PayloadReader::init(std::shared_ptr<PayloadInputStream> input) {
                "arrow chunk size in arrow column should be 1");
     auto array = column->chunk(0);
     AssertInfo(array != nullptr, "empty arrow array of PayloadReader");
-    field_data_ = std::make_shared<FieldData>(array, column_type_);
-}
-
-bool
-PayloadReader::get_bool_payload(int idx) const {
-    AssertInfo(field_data_ != nullptr, "empty payload");
-    return field_data_->get_bool_payload(idx);
-}
-
-void
-PayloadReader::get_one_string_Payload(int idx,
-                                      char** cstr,
-                                      int* str_size) const {
-    AssertInfo(field_data_ != nullptr, "empty payload");
-    return field_data_->get_one_string_payload(idx, cstr, str_size);
-}
-
-std::unique_ptr<Payload>
-PayloadReader::get_payload() const {
-    AssertInfo(field_data_ != nullptr, "empty payload");
-    return field_data_->get_payload();
-}
-
-int
-PayloadReader::get_payload_length() const {
-    AssertInfo(field_data_ != nullptr, "empty payload");
-    return field_data_->get_payload_length();
+    dim_ = datatype_is_vector(column_type_)
+               ? GetDimensionFromArrowArray(array, column_type_)
+               : 1;
+    field_data_ =
+        FieldDataFactory::GetInstance().CreateFieldData(column_type_, dim_);
+    field_data_->FillFieldData(array);
 }
 
 }  // namespace milvus::storage
