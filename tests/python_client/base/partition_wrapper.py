@@ -132,6 +132,17 @@ class ApiPartitionWrapper:
                                        **kwargs).run()
         return res, check_result
 
+    def upsert(self, data, check_task=None, check_items=None, **kwargs):
+        timeout = kwargs.get("timeout", TIMEOUT)
+        kwargs.update({"timeout": timeout})
+
+        func_name = sys._getframe().f_code.co_name
+        res, succ = api_request([self.partition.upsert, data], **kwargs)
+        check_result = ResponseChecker(res, func_name, check_task,
+                                       check_items, is_succ=succ, data=data,
+                                       **kwargs).run()
+        return res, check_result
+
     def get_replicas(self, timeout=None, check_task=None, check_items=None, **kwargs):
         timeout = TIMEOUT if timeout is None else timeout
         func_name = sys._getframe().f_code.co_name
