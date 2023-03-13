@@ -83,15 +83,9 @@ if __name__ == '__main__':
     logger.info(f"data size: {data_size}")
     connections.connect(host=host, port=19530, timeout=60)
     ms = MilvusSys()
-    tasks = []
-    tasks.append(threading.Thread(target=task_1, args=(data_size, host)))
-    tasks.append(threading.Thread(target=task_2, args=(data_size, host)))
+    task_1(data_size, host)
+    task_2(data_size, host)
     if len(ms.query_nodes) >= NUM_REPLICAS:
-        tasks.append(threading.Thread(target=task_3, args=(data_size, host)))
-        tasks.append(threading.Thread(target=task_4, args=(data_size, host)))
-        tasks.append(threading.Thread(target=task_5, args=(data_size, host)))
-    for task in tasks:
-        task.start()
-    for task in tasks:
-        task.join()
-    
+        task_3(data_size, host)
+        task_4(data_size, host)
+        task_5(data_size, host)
