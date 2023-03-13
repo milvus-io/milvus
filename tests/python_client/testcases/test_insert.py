@@ -1403,19 +1403,145 @@ class TestUpsertValid(TestcaseBase):
                 3. upsert in the given partition
         expected: raise no exception
         """
+        # create a collection and 2 partitions
+        c_name = cf.gen_unique_str(pre_upsert)
+        collection_w = self.init_collection_wrap(name=c_name)
+        collection_w.create_partition("partition_new")
+        cf.insert_data(collection_w)
+        collection_w.create_index(ct.default_float_vec_field_name, default_index_params)
+        collection_w.load()
+
+        # check the ids which will be upserted is in partition _default
         upsert_nb = 10
+        expr = f"int64 >= 0 && int64 < {upsert_nb}"
+        res0 = collection_w.query(expr, [default_float_name], ["_default"])[0]
+        assert len(res0) == upsert_nb
+        collection_w.flush()
+        res1 = collection_w.query(expr, [default_float_name], ["partition_new"])[0]
+        assert collection_w.partition('partition_new')[0].num_entities == ct.default_nb // 2
+
+        # upsert ids in partition _default
+        data, float_values = cf.gen_default_data_for_upsert(upsert_nb)
+        collection_w.upsert(data=data, partition_name="_default")
+
+        # check the result in partition _default(upsert successfully) and others(no missing, nothing new)
+        collection_w.flush()
+        res0 = collection_w.query(expr, [default_float_name], ["_default"])[0]
+        res2 = collection_w.query(expr, [default_float_name], ["partition_new"])[0]
+        assert res1 == res2
+        assert [res0[i][default_float_name] for i in range(upsert_nb)] == float_values.to_list()
+        assert collection_w.partition('partition_new')[0].num_entities == ct.default_nb // 2
+
+    @pytest.mark.tags(CaseLabel.L2)
+    # @pytest.mark.skip(reason="issue #22592")
+    def test_upsert_in_mismatched_partitions(self):
+        """
+        target: test upsert in unmatched partition
+        method: 1. create a collection and 2 partitions
+                2. insert data and load
+                3. upsert in unmatched partitions
+        expected: upsert successfully
+        """
+        # create a collection and 2 partitions
         c_name = cf.gen_unique_str(pre_upsert)
         collection_w = self.init_collection_wrap(name=c_name)
         collection_w.create_partition("partition_1")
         collection_w.create_partition("partition_2")
+
+        # insert data and load collection
         cf.insert_data(collection_w)
         collection_w.create_index(ct.default_float_vec_field_name, default_index_params)
         collection_w.load()
+
+        # check the ids which will be upserted is not in partition 'partition_1'
+        upsert_nb = 100
+        expr = f"int64 >= 0 && int64 <= {upsert_nb}"
+        res = collection_w.query(expr, [default_float_name], ["partition_1"])[0]
+        assert len(res) == 0
+
+        # upsert in partition 'partition_1'
         data, float_values = cf.gen_default_data_for_upsert(upsert_nb)
-        collection_w.upsert(data=data, partition_name="partition_2")
-        res = collection_w.query("int64 >= 0 && int64<=20", output_fields=[default_float_name],
-                                 partition_names=["partition_2"])[0]
-        assert [res[i][default_float_name] for i in range(upsert_nb)] == float_values.to_list()
+        collection_w.upsert(data, "partition_1")
+
+        # check the upserted data in 'partition_1'
+        res1 = collection_w.query(expr, [default_float_name], ["partition_1"])[0]
+        assert [res1[i][default_float_name] for i in range(upsert_nb)] == float_values.to_list()
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="issue #22563")
+    def test_upsert_same_pk_concurrently(self):
+        """
+        target: test upsert the same pk concurrently
+        method: 1. create a collection and insert data
+                2. load collection
+                3. upsert the same pk
+        expected: not raise exception
+        """
+        # initialize a collection
+        upsert_nb = 1000
+        collection_w = self.init_collection_general(pre_upsert, True)[0]
+        data1, float_values1 = cf.gen_default_data_for_upsert(upsert_nb, size=1000)
+        data2, float_values2 = cf.gen_default_data_for_upsert(upsert_nb)
+
+        # upsert at the same time
+        def do_upsert():
+            collection_w.upsert(data=data1)
+
+        t = threading.Thread(target=do_upsert, args=())
+        t.start()
+        collection_w.upsert(data=data2)
+        t.join()
+
+        # check the result
+        exp = f"int64 >= 0 && int64 <= {upsert_nb}"
+        res = collection_w.query(exp, output_fields=[default_float_name])[0]
+        res = [res[i][default_float_name] for i in range(upsert_nb)]
+        if not res == float_values1.to_list() or res == float_values2.to_list():
+            assert False
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_upsert_multiple_times(self):
+        """
+        target: test upsert multiple times
+        method: 1. create a collection and insert data
+                2. upsert repeatedly
+        expected: not raise exception
+        """
+        # initialize a collection
+        upsert_nb = 1000
+        collection_w = self.init_collection_general(pre_upsert, True)[0]
+        # upsert
+        for i in range(10):
+            data = cf.gen_default_data_for_upsert(upsert_nb, start=i*500)[0]
+            collection_w.upsert(data)
+        assert collection_w.num_entities == upsert_nb*10 + ct.default_nb
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="Something wrong with get query segment info")
+    def test_upsert_during_index(self):
+        """
+        target: test upsert during index
+        method: 1. create a collection and insert data
+                2. upsert during creating index
+        expected: get query segment info
+        """
+        # initialize a collection
+        upsert_nb = 1000
+        c_name = cf.gen_unique_str(pre_upsert)
+        collection_w = self.init_collection_wrap(name=c_name)
+        cf.insert_data(collection_w)
+
+        def create_index():
+            collection_w.create_index(ct.default_float_vec_field_name, default_index_params)
+
+        t = threading.Thread(target=create_index, args=())
+        t.start()
+        data = cf.gen_default_data_for_upsert(upsert_nb)[0]
+        collection_w.upsert(data=data)
+        t.join()
+
+        res = self.utility_wrap.get_query_segment_info(collection_w.name)
+        assert len(res) >= 1
 
 
 class TestUpsertInvalid(TestcaseBase):
@@ -1485,7 +1611,6 @@ class TestUpsertInvalid(TestcaseBase):
         collection_w.upsert(data=[data], check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="issue #22499")
     @pytest.mark.parametrize("partition_name", ct.get_invalid_strs)
     def test_upsert_partition_name_invalid(self, partition_name):
         """
@@ -1494,18 +1619,19 @@ class TestUpsertInvalid(TestcaseBase):
                 2. upsert with invalid partition name
         expected: raise exception
         """
+        if partition_name is None or partition_name == [] or partition_name == "":
+            pytest.skip("valid")
         c_name = cf.gen_unique_str(pre_upsert)
         collection_w = self.init_collection_wrap(name=c_name)
         p_name = cf.gen_unique_str('partition_')
         collection_w.create_partition(p_name)
         cf.insert_data(collection_w)
         data = cf.gen_default_dataframe_data(nb=100)
-        error = {ct.err_code: 1, ct.err_msg: "The type of partition_name should be .."}
+        error = {ct.err_code: 1, ct.err_msg: "Invalid partition name"}
         collection_w.upsert(data=data, partition_name=partition_name,
                             check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="issue #22499")
     def test_upsert_partition_name_nonexistent(self):
         """
         target: test upsert partition name nonexistent
@@ -1517,7 +1643,7 @@ class TestUpsertInvalid(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         data = cf.gen_default_dataframe_data(nb=2)
         partition_name = "partition1"
-        error = {ct.err_code: 1, ct.err_msg: "The type of partition_name should be .."}
+        error = {ct.err_code: 1, ct.err_msg: "partition is not exist: partition1"}
         collection_w.upsert(data=data, partition_name=partition_name,
                             check_task=CheckTasks.err_res, check_items=error)
 
