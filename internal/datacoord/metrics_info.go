@@ -123,7 +123,7 @@ func (s *Server) getDataCoordMetrics() metricsinfo.DataCoordInfos {
 			CreatedTime: paramtable.GetCreateTime().String(),
 			UpdatedTime: paramtable.GetUpdateTime().String(),
 			Type:        typeutil.DataCoordRole,
-			ID:          s.session.ServerID,
+			ID:          paramtable.GetNodeID(),
 		},
 		SystemConfigurations: metricsinfo.DataCoordConfiguration{
 			SegmentMaxSize: Params.DataCoordCfg.SegmentMaxSize.GetAsFloat(),
