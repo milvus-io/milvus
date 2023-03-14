@@ -394,6 +394,99 @@ func (s *DistributionSuite) TestNodeDown() {
 	}
 }
 
+func (s *DistributionSuite) TestPeek() {
+	type testCase struct {
+		tag      string
+		input    []SegmentEntry
+		expected []SnapshotItem
+	}
+	cases := []testCase{
+		{
+			tag: "one_node",
+			input: []SegmentEntry{
+				{
+					NodeID:    1,
+					SegmentID: 1,
+				},
+				{
+					NodeID:    1,
+					SegmentID: 2,
+				},
+			},
+			expected: []SnapshotItem{
+				{
+					NodeID: 1,
+					Segments: []SegmentEntry{
+						{
+							NodeID:    1,
+							SegmentID: 1,
+						},
+						{
+							NodeID:    1,
+							SegmentID: 2,
+						},
+					},
+				},
+			},
+		},
+		{
+			tag: "multiple_nodes",
+			input: []SegmentEntry{
+				{
+					NodeID:    1,
+					SegmentID: 1,
+				},
+				{
+					NodeID:    2,
+					SegmentID: 2,
+				},
+				{
+					NodeID:    1,
+					SegmentID: 3,
+				},
+			},
+			expected: []SnapshotItem{
+				{
+					NodeID: 1,
+					Segments: []SegmentEntry{
+						{
+							NodeID:    1,
+							SegmentID: 1,
+						},
+
+						{
+							NodeID:    1,
+							SegmentID: 3,
+						},
+					},
+				},
+				{
+					NodeID: 2,
+					Segments: []SegmentEntry{
+						{
+							NodeID:    2,
+							SegmentID: 2,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		s.Run(tc.tag, func() {
+			s.SetupTest()
+			defer s.TearDownTest()
+			s.dist.AddDistributions(tc.input...)
+			// peek during lock
+			s.dist.mut.Lock()
+			sealed := s.dist.Peek()
+			s.compareSnapshotItems(tc.expected, sealed)
+			s.dist.mut.Unlock()
+		})
+	}
+}
+
 func TestDistributionSuite(t *testing.T) {
 	suite.Run(t, new(DistributionSuite))
 }

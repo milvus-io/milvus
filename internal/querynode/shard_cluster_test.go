@@ -2079,14 +2079,14 @@ func TestShardCluster_Version(t *testing.T) {
 		_, version := sc.segmentAllocations(nil)
 
 		sc.mut.RLock()
-		assert.Equal(t, version, sc.distribution.current.version)
-		assert.Equal(t, int64(1), sc.distribution.current.inUse.Load())
+		assert.Equal(t, version, sc.distribution.current.Load().version)
+		assert.Equal(t, int64(1), sc.distribution.current.Load().inUse.Load())
 		sc.mut.RUnlock()
 
 		sc.finishUsage(version)
 		sc.mut.RLock()
 
-		assert.Equal(t, int64(0), sc.distribution.current.inUse.Load())
+		assert.Equal(t, int64(0), sc.distribution.current.Load().inUse.Load())
 		sc.mut.RUnlock()
 	})
 }

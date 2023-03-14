@@ -902,8 +902,7 @@ func (sc *ShardCluster) GetSegmentInfos() []SegmentEntry {
 	if distribution == nil {
 		return nil
 	}
-	items, version := distribution.GetCurrent()
-	sc.finishUsage(version)
+	items := distribution.Peek()
 
 	var result []SegmentEntry
 	for _, item := range items {
