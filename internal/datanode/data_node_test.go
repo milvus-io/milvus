@@ -187,7 +187,7 @@ func TestDataNode(t *testing.T) {
 			cnt++
 			return true
 		})
-		assert.Equal(t, 0, cnt)
+		assert.Equal(t, 1, cnt)
 	})
 
 	t.Run("Test GetCompactionState unhealthy", func(t *testing.T) {
@@ -699,7 +699,6 @@ func TestDataNode(t *testing.T) {
 		t.Run("invalid compacted from", func(t *testing.T) {
 			invalidCompactedFroms := [][]UniqueID{
 				{},
-				{101, 201},
 			}
 			req := &datapb.SyncSegmentsRequest{}
 
@@ -711,19 +710,43 @@ func TestDataNode(t *testing.T) {
 			}
 		})
 
+		t.Run("invalid compacted from", func(t *testing.T) {
+			invalidCompactedFroms := [][]UniqueID{
+				{101, 201},
+			}
+			req := &datapb.SyncSegmentsRequest{}
+
+			for _, invalid := range invalidCompactedFroms {
+				req.CompactedFrom = invalid
+				status, err := node.SyncSegments(ctx, req)
+				assert.NoError(t, err)
+				assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
+			}
+		})
+
 		t.Run("valid request numRows>0", func(t *testing.T) {
 			req := &datapb.SyncSegmentsRequest{
 				CompactedFrom: []int64{100, 200},
 				CompactedTo:   101,
 				NumOfRows:     100,
 			}
-			status, err := node.SyncSegments(ctx, req)
+			cancelCtx, cancel := context.WithCancel(context.Background())
+			cancel()
+			status, err := node.SyncSegments(cancelCtx, req)
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
+
+			status, err = node.SyncSegments(ctx, req)
 			assert.NoError(t, err)
 			assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
 
 			assert.True(t, fg.channel.hasSegment(req.CompactedTo, true))
 			assert.False(t, fg.channel.hasSegment(req.CompactedFrom[0], true))
 			assert.False(t, fg.channel.hasSegment(req.CompactedFrom[1], true))
+
+			status, err = node.SyncSegments(ctx, req)
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
 		})
 
 		t.Run("valid request numRows=0", func(t *testing.T) {
