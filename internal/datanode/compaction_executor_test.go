@@ -157,6 +157,10 @@ func (mc *mockCompactor) compact() (*datapb.CompactionResult, error) {
 	return nil, nil
 }
 
+func (mc *mockCompactor) injectDone() {
+
+}
+
 func (mc *mockCompactor) getPlanID() UniqueID {
 	return 1
 }
