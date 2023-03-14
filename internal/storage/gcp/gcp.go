@@ -7,6 +7,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+	"go.uber.org/atomic"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 )
@@ -15,7 +16,7 @@ import (
 type WrapHTTPTransport struct {
 	tokenSrc     oauth2.TokenSource
 	backend      transport
-	currentToken *oauth2.Token
+	currentToken atomic.Pointer[oauth2.Token]
 }
 
 // transport abstracts http.Transport to simplify test
@@ -41,14 +42,18 @@ func NewWrapHTTPTransport(secure bool) (*WrapHTTPTransport, error) {
 func (t *WrapHTTPTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	// here Valid() means the token won't be expired in 10 sec
 	// so the http client timeout shouldn't be longer, or we need to change the default `expiryDelta` time
-	if !t.currentToken.Valid() {
-		var err error
-		t.currentToken, err = t.tokenSrc.Token()
+	currentToken := t.currentToken.Load()
+	if currentToken.Valid() {
+		req.Header.Set("Authorization", "Bearer "+currentToken.AccessToken)
+	} else {
+		newToken, err := t.tokenSrc.Token()
 		if err != nil {
 			return nil, errors.Wrap(err, "failed to acquire token")
 		}
+		t.currentToken.Store(newToken)
+		req.Header.Set("Authorization", "Bearer "+newToken.AccessToken)
 	}
-	req.Header.Set("Authorization", "Bearer "+t.currentToken.AccessToken)
+
 	return t.backend.RoundTrip(req)
 }
 
