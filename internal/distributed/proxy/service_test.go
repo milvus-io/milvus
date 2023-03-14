@@ -652,6 +652,10 @@ func (m *MockDataCoord) GcConfirm(ctx context.Context, req *datapb.GcConfirmRequ
 	return nil, nil
 }
 
+func (m *MockDataCoord) ListSegmentsInfo(ctx context.Context, req *datapb.ListSegmentsInfoRequest) (*datapb.ListSegmentsInfoResponse, error) {
+	return nil, nil
+}
+
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type MockProxy struct {
 	MockBase

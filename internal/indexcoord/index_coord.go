@@ -684,8 +684,8 @@ func (i *IndexCoord) GetIndexBuildProgress(ctx context.Context, req *indexpb.Get
 		}, err
 	}
 
-	resp, err := i.dataCoordClient.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{
-		SegmentIDs:       flushSegments.Segments,
+	resp, err := i.dataCoordClient.ListSegmentsInfo(ctx, &datapb.ListSegmentsInfoRequest{
+		SegmentIDs:       flushSegments.GetSegments(),
 		IncludeUnHealthy: true,
 	})
 	if err != nil {
@@ -890,8 +890,8 @@ func (i *IndexCoord) DescribeIndex(ctx context.Context, req *indexpb.DescribeInd
 			return ret, nil
 		}
 
-		resp, err := i.dataCoordClient.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{
-			SegmentIDs:       flushedSegmentR.Segments,
+		resp, err := i.dataCoordClient.ListSegmentsInfo(ctx, &datapb.ListSegmentsInfoRequest{
+			SegmentIDs:       flushedSegmentR.GetSegments(),
 			IncludeUnHealthy: true,
 		})
 		if err != nil {

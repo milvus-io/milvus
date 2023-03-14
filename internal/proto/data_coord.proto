@@ -31,6 +31,7 @@ service DataCoord {
   rpc GetSegmentInfo(GetSegmentInfoRequest) returns (GetSegmentInfoResponse) {}
   rpc GetSegmentStates(GetSegmentStatesRequest) returns (GetSegmentStatesResponse) {}
   rpc GetInsertBinlogPaths(GetInsertBinlogPathsRequest) returns (GetInsertBinlogPathsResponse) {}
+  rpc ListSegmentsInfo(ListSegmentsInfoRequest) returns (ListSegmentsInfoResponse) {}
 
   rpc GetCollectionStatistics(GetCollectionStatisticsRequest) returns (GetCollectionStatisticsResponse) {}
   rpc GetPartitionStatistics(GetPartitionStatisticsRequest) returns (GetPartitionStatisticsResponse) {}
@@ -164,13 +165,24 @@ message GetSegmentStatesResponse {
 message GetSegmentInfoRequest {
   common.MsgBase base = 1;
   repeated int64 segmentIDs = 2;
-  bool includeUnHealthy =3;
+  bool includeUnHealthy = 3;
 }
 
 message GetSegmentInfoResponse {
   common.Status status = 1;
   repeated SegmentInfo infos = 2;
   map<string, internal.MsgPosition> channel_checkpoint = 3;
+}
+
+message ListSegmentsInfoRequest {
+  common.MsgBase base = 1;
+  repeated int64 segmentIDs = 2;
+  bool includeUnHealthy = 3;
+}
+
+message ListSegmentsInfoResponse {
+  common.Status status = 1;
+  repeated SegmentInfo infos = 2;
 }
 
 message GetInsertBinlogPathsRequest {

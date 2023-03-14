@@ -384,6 +384,39 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 	return resp, nil
 }
 
+func (s *Server) ListSegmentsInfo(ctx context.Context, req *datapb.ListSegmentsInfoRequest) (*datapb.ListSegmentsInfoResponse, error) {
+	resp := &datapb.ListSegmentsInfoResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		},
+	}
+	if s.isClosed() {
+		setNotServingStatus(resp.Status, s.GetStateCode())
+		return resp, nil
+	}
+	infos := make([]*datapb.SegmentInfo, 0, len(req.GetSegmentIDs()))
+	for _, id := range req.SegmentIDs {
+		var info *SegmentInfo
+		var clonedInfo *SegmentInfo
+		info = s.meta.GetSegment(id)
+		if info == nil || (!req.GetIncludeUnHealthy() && !isSegmentHealthy(info)) {
+			log.Warn("failed to get segment, this may have been cleaned", zap.Int64("segmentID", id))
+			resp.Status.Reason = msgSegmentNotFound(id)
+			return resp, nil
+		}
+		clonedInfo = info.Clone()
+		segmentutil.ReCalcRowCount(info.SegmentInfo, clonedInfo.SegmentInfo)
+		// don't return binlog
+		clonedInfo.Binlogs = nil
+		clonedInfo.Statslogs = nil
+		clonedInfo.Deltalogs = nil
+		infos = append(infos, clonedInfo.SegmentInfo)
+	}
+	resp.Status.ErrorCode = commonpb.ErrorCode_Success
+	resp.Infos = infos
+	return resp, nil
+}
+
 // SaveBinlogPaths updates segment related binlog path
 // works for Checkpoints and Flush
 func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) (*commonpb.Status, error) {

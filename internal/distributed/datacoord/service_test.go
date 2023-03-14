@@ -71,6 +71,7 @@ type MockDataCoord struct {
 	unsetIsImportingStateResp *commonpb.Status
 	markSegmentsDroppedResp   *commonpb.Status
 	broadCastResp             *commonpb.Status
+	listSegmentsInfoResp      *datapb.ListSegmentsInfoResponse
 }
 
 func (m *MockDataCoord) Init() error {
@@ -235,6 +236,10 @@ func (m *MockDataCoord) CheckHealth(ctx context.Context, req *milvuspb.CheckHeal
 	return &milvuspb.CheckHealthResponse{
 		IsHealthy: true,
 	}, nil
+}
+
+func (m *MockDataCoord) ListSegmentsInfo(ctx context.Context, req *datapb.ListSegmentsInfoRequest) (*datapb.ListSegmentsInfoResponse, error) {
+	return m.listSegmentsInfoResp, nil
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -553,6 +558,15 @@ func Test_NewServer(t *testing.T) {
 			broadCastResp: &commonpb.Status{},
 		}
 		resp, err := server.BroadcastAlteredCollection(ctx, nil)
+		assert.Nil(t, err)
+		assert.NotNil(t, resp)
+	})
+
+	t.Run("list segments info", func(t *testing.T) {
+		server.dataCoord = &MockDataCoord{
+			listSegmentsInfoResp: &datapb.ListSegmentsInfoResponse{},
+		}
+		resp, err := server.ListSegmentsInfo(ctx, nil)
 		assert.Nil(t, err)
 		assert.NotNil(t, resp)
 	})
