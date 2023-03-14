@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand"
 	"strconv"
 	"sync"
 	"time"
@@ -120,12 +121,22 @@ type shardLeadersReader struct {
 // Shuffle returns the shuffled shard leader list.
 func (it shardLeadersReader) Shuffle() map[string][]nodeInfo {
 	result := make(map[string][]nodeInfo)
+	rand.Seed(time.Now().UnixNano())
 	for channel, leaders := range it.leaders.shardLeaders {
 		l := len(leaders)
-		shuffled := make([]nodeInfo, 0, len(leaders))
-		for i := 0; i < l; i++ {
-			shuffled = append(shuffled, leaders[(i+int(it.idx))%l])
+		// shuffle all replica at random order
+		shuffled := make([]nodeInfo, l)
+		for i, randIndex := range rand.Perm(l) {
+			shuffled[i] = leaders[randIndex]
 		}
+
+		// make each copy has same probability to be first replica
+		for index, leader := range shuffled {
+			if leader == leaders[int(it.idx)%l] {
+				shuffled[0], shuffled[index] = shuffled[index], shuffled[0]
+			}
+		}
+
 		result[channel] = shuffled
 	}
 	return result
