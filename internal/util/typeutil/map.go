@@ -96,3 +96,13 @@ func (m *ConcurrentMap[K, V]) Range(fn func(K, V) bool) {
 		return fn(key, value)
 	})
 }
+
+// Insert inserts the key-value pair to the concurrent map
+func (m *ConcurrentMap[K, V]) Insert(key K, value V) {
+	_, loaded := m.inner.LoadOrStore(key, value)
+	if !loaded {
+		m.len.Inc()
+	} else {
+		m.inner.Store(key, value)
+	}
+}
