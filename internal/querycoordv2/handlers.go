@@ -161,7 +161,7 @@ func (s *Server) balanceSegments(ctx context.Context, req *querypb.LoadBalanceRe
 		}
 		err = s.taskScheduler.Add(task)
 		if err != nil {
-			task.Cancel()
+			task.Cancel(err)
 			return err
 		}
 		tasks = append(tasks, task)

@@ -63,6 +63,7 @@ func (s *ErrSuite) TestWrap() {
 	s.ErrorIs(WrapErrServiceUnavailable("test", "test init"), ErrServiceUnavailable)
 	s.ErrorIs(WrapErrServiceMemoryLimitExceeded(110, 100, "MLE"), ErrServiceMemoryLimitExceeded)
 	s.ErrorIs(WrapErrServiceRequestLimitExceeded(100, "too many requests"), ErrServiceRequestLimitExceeded)
+	s.ErrorIs(WrapErrServiceInternal("never throw out"), ErrServiceInternal)
 
 	// Collection related
 	s.ErrorIs(WrapErrCollectionNotFound("test_collection", "failed to get collection"), ErrCollectionNotFound)
@@ -80,11 +81,14 @@ func (s *ErrSuite) TestWrap() {
 
 	// Channel related
 	s.ErrorIs(WrapErrChannelNotFound("test_Channel", "failed to get Channel"), ErrChannelNotFound)
+	s.ErrorIs(WrapErrChannelLack("test_Channel", "failed to get Channel"), ErrChannelLack)
+	s.ErrorIs(WrapErrChannelReduplicate("test_Channel", "failed to get Channel"), ErrChannelReduplicate)
 
 	// Segment related
 	s.ErrorIs(WrapErrSegmentNotFound(1, "failed to get Segment"), ErrSegmentNotFound)
 	s.ErrorIs(WrapErrSegmentNotLoaded(1, "failed to query"), ErrSegmentNotLoaded)
 	s.ErrorIs(WrapErrSegmentLack(1, "lack of segment"), ErrSegmentLack)
+	s.ErrorIs(WrapErrSegmentReduplicate(1, "redundancy of segment"), ErrSegmentReduplicate)
 
 	// Index related
 	s.ErrorIs(WrapErrIndexNotFound("failed to get Index"), ErrIndexNotFound)

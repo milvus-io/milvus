@@ -37,7 +37,6 @@ const (
 	TaskStatusStarted
 	TaskStatusSucceeded
 	TaskStatusCanceled
-	TaskStatusStale
 )
 
 const (
@@ -61,11 +60,10 @@ type Task interface {
 	Status() Status
 	SetStatus(status Status)
 	Err() error
-	SetErr(err error)
 	Priority() Priority
 	SetPriority(priority Priority)
 
-	Cancel()
+	Cancel(err error)
 	Wait() error
 	Actions() []Action
 	Step() int
@@ -159,16 +157,21 @@ func (task *baseTask) SetPriority(priority Priority) {
 }
 
 func (task *baseTask) Err() error {
-	return task.err
+	select {
+	case <-task.doneCh:
+		return task.err
+	default:
+		return nil
+	}
 }
 
-func (task *baseTask) SetErr(err error) {
-	task.err = err
-}
-
-func (task *baseTask) Cancel() {
-	if task.canceled.CAS(false, true) {
+func (task *baseTask) Cancel(err error) {
+	if task.canceled.CompareAndSwap(false, true) {
 		task.cancel()
+		if task.Status() != TaskStatusSucceeded {
+			task.SetStatus(TaskStatusCanceled)
+		}
+		task.err = err
 		close(task.doneCh)
 	}
 }
