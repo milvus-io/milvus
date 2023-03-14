@@ -24,6 +24,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 // ticker can update ts only when the minTs are greater than the ts of ticker, we can use maxTs to update current later
@@ -132,6 +133,11 @@ func (ticker *channelsTimeTickerImpl) tick() error {
 	}
 
 	for pchan, value := range stats {
+		if value.minTs == typeutil.ZeroTimestamp {
+			log.Warn("channelsTimeTickerImpl.tick, stats contains physical channel which min ts is zero ",
+				zap.String("pchan", pchan))
+			continue
+		}
 		_, ok := ticker.currents[pchan]
 		if !ok {
 			ticker.minTsStatistics[pchan] = value.minTs - 1
