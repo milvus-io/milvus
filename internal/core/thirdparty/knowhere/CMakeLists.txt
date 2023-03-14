@@ -22,6 +22,10 @@ else ()
     set(WITH_DISKANN OFF CACHE BOOL "" FORCE )
 endif ()
 
+if ( MILVUS_GPU_VERSION STREQUAL "ON" )
+    set(USE_CUDA ON CACHE BOOL "" FORCE )
+endif ()
+
 set( CMAKE_PREFIX_PATH ${CONAN_BOOST_ROOT} )
 FetchContent_Declare(
         knowhere

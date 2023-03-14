@@ -78,6 +78,13 @@ KnowhereSetSimdType(const char* value) {
 }
 
 void
+KnowhereInitGPU(const int32_t gpu_id, const int32_t res_num) {
+#ifdef MILVUS_GPU_VERSION
+    knowhere::KnowhereConfig::InitGPUResource(gpu_id, res_num);
+#endif
+}
+
+void
 KnowhereInitThreadPool(const uint32_t num_threads) {
     knowhere::ThreadPool::InitGlobalThreadPool(num_threads);
 }

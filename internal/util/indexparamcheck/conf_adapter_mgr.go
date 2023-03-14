@@ -46,6 +46,12 @@ func (mgr *ConfAdapterMgrImpl) GetAdapter(indexType string) (ConfAdapter, error)
 }
 
 func (mgr *ConfAdapterMgrImpl) registerConfAdapter() {
+	mgr.adapters[IndexFaissGPUIDMap] = newBaseConfAdapter()
+	mgr.adapters[IndexFaissGPUIvfFlat] = newIVFConfAdapter()
+	mgr.adapters[IndexFaissGPUIvfPQ] = newIVFPQConfAdapter()
+	mgr.adapters[IndexFaissGPUIvfSQ8] = newIVFSQConfAdapter()
+	mgr.adapters[IndexRaftIvfFlat] = newIVFConfAdapter()
+	mgr.adapters[IndexRaftIvfPQ] = newIVFPQConfAdapter()
 	mgr.adapters[IndexFaissIDMap] = newBaseConfAdapter()
 	mgr.adapters[IndexFaissIvfFlat] = newIVFConfAdapter()
 	mgr.adapters[IndexFaissIvfPQ] = newIVFPQConfAdapter()

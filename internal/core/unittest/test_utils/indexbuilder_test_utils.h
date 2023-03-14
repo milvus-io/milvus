@@ -32,9 +32,6 @@
 constexpr int64_t DIM = 16;
 constexpr int64_t NQ = 10;
 constexpr int64_t K = 4;
-#ifdef MILVUS_GPU_VERSION
-int DEVICEID = 0;
-#endif
 
 namespace indexcgo = milvus::proto::indexcgo;
 namespace schemapb = milvus::proto::schema;
