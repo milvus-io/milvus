@@ -67,7 +67,7 @@ func newMockTimestampAllocatorInterface() timestampAllocatorInterface {
 type mockTsoAllocator struct {
 }
 
-func (tso *mockTsoAllocator) AllocOne() (Timestamp, error) {
+func (tso *mockTsoAllocator) AllocOne(ctx context.Context) (Timestamp, error) {
 	return Timestamp(time.Now().UnixNano()), nil
 }
 
