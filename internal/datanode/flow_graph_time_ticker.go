@@ -21,7 +21,9 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
+	"golang.org/x/exp/maps"
 )
 
 type sendTimeTick func(Timestamp, []int64) error
@@ -129,6 +131,11 @@ func (mt *mergedTimeTickerSender) work() {
 		if isDiffTs {
 			if err := mt.send(lastTs, sids); err != nil {
 				log.Error("send hard time tick failed", zap.Error(err))
+				mt.mu.Lock()
+				maps.Copy(mt.segmentIDs, lo.SliceToMap(sids, func(t int64) (int64, struct{}) {
+					return t, struct{}{}
+				}))
+				mt.mu.Unlock()
 			}
 		}
 	}
