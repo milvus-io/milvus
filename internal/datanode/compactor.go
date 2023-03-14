@@ -258,7 +258,10 @@ func (t *compactionTask) merge(
 
 	isDeletedValue := func(v *storage.Value) bool {
 		ts, ok := delta[v.PK.GetValue()]
-		if ok && uint64(v.Timestamp) <= ts {
+		// insert task and delete task has the same ts when upsert
+		// here should be < instead of <=
+		// to avoid the upsert data to be deleted after compact
+		if ok && uint64(v.Timestamp) < ts {
 			return true
 		}
 		return false
