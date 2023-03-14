@@ -206,7 +206,7 @@ func (hd *handoff) process(segID UniqueID) {
 		return
 	}
 	if state.state == commonpb.IndexState_Finished {
-		log.Ctx(hd.ctx).Debug("build index for segment success, write handoff event...", zap.Int64("segID", segID))
+		log.Ctx(hd.ctx).Info("build index for segment success, write handoff event...", zap.Int64("segID", segID))
 		info, err := hd.ic.pullSegmentInfo(hd.ctx, segID)
 		if err != nil {
 			if errors.Is(err, ErrSegmentNotFound) {

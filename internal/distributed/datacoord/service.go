@@ -422,3 +422,7 @@ func (s *Server) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthReque
 func (s *Server) GcConfirm(ctx context.Context, request *datapb.GcConfirmRequest) (*datapb.GcConfirmResponse, error) {
 	return s.dataCoord.GcConfirm(ctx, request)
 }
+
+func (s *Server) ListSegmentsInfo(ctx context.Context, req *datapb.ListSegmentsInfoRequest) (*datapb.ListSegmentsInfoResponse, error) {
+	return s.dataCoord.ListSegmentsInfo(ctx, req)
+}

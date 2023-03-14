@@ -185,6 +185,40 @@ func testIndexCoord(t *testing.T) {
 				ErrorCode: commonpb.ErrorCode_Success,
 			}, nil
 		},
+		CallListSegmentsInfo: func(ctx context.Context, req *datapb.ListSegmentsInfoRequest) (*datapb.ListSegmentsInfoResponse, error) {
+			segmentInfos := make([]*datapb.SegmentInfo, 0)
+			for _, segID := range req.SegmentIDs {
+				segmentInfos = append(segmentInfos, &datapb.SegmentInfo{
+					ID:           segID,
+					CollectionID: collID,
+					PartitionID:  partID,
+					NumOfRows:    10240,
+					State:        commonpb.SegmentState_Flushed,
+					StartPosition: &internalpb.MsgPosition{
+						Timestamp: createTs,
+					},
+					Binlogs: []*datapb.FieldBinlog{
+						{
+							FieldID: fieldID,
+							Binlogs: []*datapb.Binlog{
+								{
+									LogPath: "file1",
+								},
+								{
+									LogPath: "file2",
+								},
+							},
+						},
+					},
+				})
+			}
+			return &datapb.ListSegmentsInfoResponse{
+				Status: &commonpb.Status{
+					ErrorCode: commonpb.ErrorCode_Success,
+				},
+				Infos: segmentInfos,
+			}, nil
+		},
 	}
 	err = ic.SetDataCoord(dcm)
 	assert.Nil(t, err)
@@ -388,7 +422,7 @@ func testIndexCoord(t *testing.T) {
 
 		dcm.CallGetFlushedSegment = getFlushedSegmentsMock([]int64{111, 222, 333})
 		dcm.SetFunc(func() {
-			dcm.CallGetSegmentInfo = func(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
+			dcm.CallListSegmentsInfo = func(ctx context.Context, req *datapb.ListSegmentsInfoRequest) (*datapb.ListSegmentsInfoResponse, error) {
 				return nil, errors.New("mock error")
 			}
 		})
@@ -397,8 +431,8 @@ func testIndexCoord(t *testing.T) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 
 		dcm.SetFunc(func() {
-			dcm.CallGetSegmentInfo = func(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
-				return &datapb.GetSegmentInfoResponse{
+			dcm.CallListSegmentsInfo = func(ctx context.Context, req *datapb.ListSegmentsInfoRequest) (*datapb.ListSegmentsInfoResponse, error) {
+				return &datapb.ListSegmentsInfoResponse{
 					Status: &commonpb.Status{
 						ErrorCode: commonpb.ErrorCode_UnexpectedError,
 						Reason:    "mock fail",
@@ -411,8 +445,8 @@ func testIndexCoord(t *testing.T) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 
 		dcm.SetFunc(func() {
-			dcm.CallGetSegmentInfo = func(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error) {
-				return &datapb.GetSegmentInfoResponse{
+			dcm.CallListSegmentsInfo = func(ctx context.Context, req *datapb.ListSegmentsInfoRequest) (*datapb.ListSegmentsInfoResponse, error) {
+				return &datapb.ListSegmentsInfoResponse{
 					Infos: []*datapb.SegmentInfo{
 						{ID: 222, State: commonpb.SegmentState_Flushed, NumOfRows: 2048},
 						{ID: 333, State: commonpb.SegmentState_Flushed, NumOfRows: 2048},

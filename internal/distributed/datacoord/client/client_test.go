@@ -153,6 +153,9 @@ func Test_NewClient(t *testing.T) {
 		r31, err := client.ShowConfigurations(ctx, nil)
 		retCheck(retNotNil, r31, err)
 
+		r32, err := client.ListSegmentsInfo(ctx, nil)
+		retCheck(retNotNil, r32, err)
+
 		{
 			ret, err := client.BroadcastAlteredCollection(ctx, nil)
 			retCheck(retNotNil, ret, err)

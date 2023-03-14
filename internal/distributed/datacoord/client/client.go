@@ -809,3 +809,16 @@ func (c *Client) GcConfirm(ctx context.Context, req *datapb.GcConfirmRequest) (*
 	}
 	return ret.(*datapb.GcConfirmResponse), err
 }
+
+func (c *Client) ListSegmentsInfo(ctx context.Context, req *datapb.ListSegmentsInfoRequest) (*datapb.ListSegmentsInfoResponse, error) {
+	ret, err := c.grpcClient.ReCall(ctx, func(client datapb.DataCoordClient) (any, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.ListSegmentsInfo(ctx, req)
+	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
+	return ret.(*datapb.ListSegmentsInfoResponse), err
+}

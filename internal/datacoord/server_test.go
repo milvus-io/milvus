@@ -684,6 +684,105 @@ func TestGetSegmentInfo(t *testing.T) {
 	})
 }
 
+func TestServer_ListSegmentsInfo(t *testing.T) {
+	t.Run("normal case", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+
+		segInfo := &datapb.SegmentInfo{
+			ID:        0,
+			State:     commonpb.SegmentState_Flushed,
+			NumOfRows: 100,
+			Binlogs: []*datapb.FieldBinlog{
+				{
+					FieldID: 1,
+					Binlogs: []*datapb.Binlog{
+						{
+							EntriesNum: 20,
+							LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 0, 1, 801),
+						},
+						{
+							EntriesNum: 20,
+							LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 0, 1, 802),
+						},
+						{
+							EntriesNum: 20,
+							LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 0, 1, 803),
+						},
+					},
+				},
+			},
+		}
+		err := svr.meta.AddSegment(NewSegmentInfo(segInfo))
+		assert.Nil(t, err)
+
+		req := &datapb.ListSegmentsInfoRequest{
+			SegmentIDs: []int64{0},
+		}
+		resp, err := svr.ListSegmentsInfo(svr.ctx, req)
+		assert.Equal(t, 1, len(resp.GetInfos()))
+		// Check that # of rows is corrected from 100 to 60.
+		assert.EqualValues(t, 60, resp.GetInfos()[0].GetNumOfRows())
+		assert.Nil(t, err)
+		assert.Equal(t, 0, len(resp.GetInfos()[0].GetBinlogs()))
+		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+	t.Run("with wrong segment id", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+
+		segInfo := &datapb.SegmentInfo{
+			ID:    0,
+			State: commonpb.SegmentState_Flushed,
+		}
+		err := svr.meta.AddSegment(NewSegmentInfo(segInfo))
+		assert.Nil(t, err)
+
+		req := &datapb.ListSegmentsInfoRequest{
+			SegmentIDs: []int64{0, 1},
+		}
+		resp, err := svr.ListSegmentsInfo(svr.ctx, req)
+		assert.Nil(t, err)
+		assert.EqualValues(t, commonpb.ErrorCode_UnexpectedError, resp.Status.ErrorCode)
+	})
+	t.Run("with closed server", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		closeTestServer(t, svr)
+		resp, err := svr.ListSegmentsInfo(context.Background(), &datapb.ListSegmentsInfoRequest{
+			SegmentIDs: []int64{},
+		})
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetStatus().GetErrorCode())
+	})
+	t.Run("with dropped segment", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+
+		segInfo := &datapb.SegmentInfo{
+			ID:    0,
+			State: commonpb.SegmentState_Dropped,
+		}
+		err := svr.meta.AddSegment(NewSegmentInfo(segInfo))
+		assert.Nil(t, err)
+
+		req := &datapb.ListSegmentsInfoRequest{
+			SegmentIDs:       []int64{0},
+			IncludeUnHealthy: false,
+		}
+		resp, err := svr.ListSegmentsInfo(svr.ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, 0, len(resp.Infos))
+
+		req = &datapb.ListSegmentsInfoRequest{
+			SegmentIDs:       []int64{0},
+			IncludeUnHealthy: true,
+		}
+		resp2, err := svr.ListSegmentsInfo(svr.ctx, req)
+		assert.Nil(t, err)
+		assert.Equal(t, 1, len(resp2.Infos))
+	})
+}
+
 func TestGetComponentStates(t *testing.T) {
 	svr := &Server{}
 	resp, err := svr.GetComponentStates(context.Background())

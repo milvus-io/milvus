@@ -227,6 +227,15 @@ type DataCoord interface {
 	// error is returned only when some communication issue occurs
 	GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoRequest) (*datapb.GetSegmentInfoResponse, error)
 
+	// ListSegmentsInfo requests segment info without binlog path
+	//
+	// ctx is the context to control request deadline and cancellation
+	// req contains the list of segment ids to query
+	//
+	// response struct `ListSegmentsInfoResponse` contains the list of segment info
+	// error is returned only when some communication issue occurs
+	ListSegmentsInfo(ctx context.Context, req *datapb.ListSegmentsInfoRequest) (*datapb.ListSegmentsInfoResponse, error)
+
 	// GetRecoveryInfo request segment recovery info of collection/partition
 	//
 	// ctx is the context to control request deadline and cancellation
