@@ -69,26 +69,6 @@ func (it *insertTask) EndTs() Timestamp {
 	return it.insertMsg.EndTimestamp
 }
 
-func (it *insertTask) getPChanStats() (map[pChan]pChanStatistics, error) {
-	ret := make(map[pChan]pChanStatistics)
-
-	channels, err := it.getChannels()
-	if err != nil {
-		return ret, err
-	}
-
-	beginTs := it.BeginTs()
-	endTs := it.EndTs()
-
-	for _, channel := range channels {
-		ret[channel] = pChanStatistics{
-			minTs: beginTs,
-			maxTs: endTs,
-		}
-	}
-	return ret, nil
-}
-
 func (it *insertTask) getChannels() ([]pChan, error) {
 	collID, err := globalMetaCache.GetCollectionID(it.ctx, it.insertMsg.CollectionName)
 	if err != nil {

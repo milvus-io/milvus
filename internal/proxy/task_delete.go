@@ -78,26 +78,6 @@ func (dt *deleteTask) OnEnqueue() error {
 	return nil
 }
 
-func (dt *deleteTask) getPChanStats() (map[pChan]pChanStatistics, error) {
-	ret := make(map[pChan]pChanStatistics)
-
-	channels, err := dt.getChannels()
-	if err != nil {
-		return ret, err
-	}
-
-	beginTs := dt.BeginTs()
-	endTs := dt.EndTs()
-
-	for _, channel := range channels {
-		ret[channel] = pChanStatistics{
-			minTs: beginTs,
-			maxTs: endTs,
-		}
-	}
-	return ret, nil
-}
-
 func (dt *deleteTask) getChannels() ([]pChan, error) {
 	collID, err := globalMetaCache.GetCollectionID(dt.ctx, dt.deleteMsg.CollectionName)
 	if err != nil {
