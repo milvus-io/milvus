@@ -44,10 +44,5 @@ if __name__ == '__main__':
     data_size = args.data_size
     host = args.host
     logger.info(f"data_size: {data_size}")
-    tasks = []
-    tasks.append(threading.Thread(target=task_1, args=(data_size, host)))
-    tasks.append(threading.Thread(target=task_2, args=(data_size, host)))
-    for task in tasks:
-        task.start()
-    for task in tasks:
-        task.join()
+    task_1(data_size, host)
+    task_2(data_size, host)
