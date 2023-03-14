@@ -250,7 +250,7 @@ func (s *Server) Register() error {
 		}
 	}
 	go s.session.LivenessCheck(s.serverLoopCtx, func() {
-		logutil.Logger(s.ctx).Error("disconnected from etcd and exited", zap.Int64("serverID", s.session.ServerID))
+		logutil.Logger(s.ctx).Error("disconnected from etcd and exited", zap.Int64("serverID", paramtable.GetNodeID()))
 		if err := s.Stop(); err != nil {
 			logutil.Logger(s.ctx).Fatal("failed to stop server", zap.Error(err))
 		}
@@ -735,7 +735,7 @@ func (s *Server) startWatchService(ctx context.Context) {
 
 func (s *Server) stopServiceWatch() {
 	// ErrCompacted is handled inside SessionWatcher, which means there is some other error occurred, closing server.
-	logutil.Logger(s.ctx).Error("watch service channel closed", zap.Int64("serverID", s.session.ServerID))
+	logutil.Logger(s.ctx).Error("watch service channel closed", zap.Int64("serverID", paramtable.GetNodeID()))
 	go s.Stop()
 	if s.session.TriggerKill {
 		if p, err := os.FindProcess(os.Getpid()); err == nil {

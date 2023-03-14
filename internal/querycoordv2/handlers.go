@@ -191,7 +191,7 @@ func (s *Server) getSystemInfoMetrics(
 				CreatedTime: paramtable.GetCreateTime().String(),
 				UpdatedTime: paramtable.GetUpdateTime().String(),
 				Type:        typeutil.QueryCoordRole,
-				ID:          s.session.ServerID,
+				ID:          paramtable.GetNodeID(),
 			},
 			SystemConfigurations: metricsinfo.QueryCoordConfiguration{
 				SearchChannelPrefix:       Params.CommonCfg.QueryCoordSearch.GetValue(),

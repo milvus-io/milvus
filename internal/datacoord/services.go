@@ -23,6 +23,8 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/milvus-io/milvus/internal/common"
+
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
@@ -31,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/msgpb"
-	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -588,11 +589,11 @@ func (s *Server) GetStateCode() commonpb.StateCode {
 
 // GetComponentStates returns DataCoord's current state
 func (s *Server) GetComponentStates(ctx context.Context) (*milvuspb.ComponentStates, error) {
+	code := s.GetStateCode()
 	nodeID := common.NotRegisteredID
 	if s.session != nil && s.session.Registered() {
 		nodeID = s.session.ServerID // or Params.NodeID
 	}
-	code := s.GetStateCode()
 	resp := &milvuspb.ComponentStates{
 		State: &milvuspb.ComponentInfo{
 			// NodeID:    Params.NodeID, // will race with Server.Register()
@@ -1432,7 +1433,7 @@ func (s *Server) BroadcastAlteredCollection(ctx context.Context, req *datapb.Alt
 
 func (s *Server) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
 	if s.isClosed() {
-		reason := errorutil.UnHealthReason("datacoord", s.session.ServerID, "datacoord is closed")
+		reason := errorutil.UnHealthReason("datacoord", paramtable.GetNodeID(), "datacoord is closed")
 		return &milvuspb.CheckHealthResponse{IsHealthy: false, Reasons: []string{reason}}, nil
 	}
 
