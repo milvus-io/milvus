@@ -3898,7 +3898,7 @@ class TestsearchPagination(TestcaseBase):
             res.done()
             res = res.result()
         res_distance = res[0].distances[offset:]
-        assert sorted(search_res[0].distances) == sorted(res_distance)
+        assert sorted(search_res[0].distances, key=numpy.float32) == sorted(res_distance, key=numpy.float32)
         assert set(search_res[0].ids) == set(res[0].ids[offset:])
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -3937,7 +3937,7 @@ class TestsearchPagination(TestcaseBase):
             res.done()
             res = res.result()
         res_distance = res[0].distances[offset:]
-        assert sorted(search_res[0].distances) == sorted(res_distance)
+        assert sorted(search_res[0].distances, key=numpy.float32) == sorted(res_distance, key=numpy.float32)
         assert set(search_res[0].ids) == set(res[0].ids[offset:])
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -4004,7 +4004,7 @@ class TestsearchPagination(TestcaseBase):
             res.done()
             res = res.result()
         res_distance = res[0].distances[offset:]
-        assert sorted(search_res[0].distances) == sorted(res_distance)
+        assert sorted(search_res[0].distances, key=numpy.float32) == sorted(res_distance, key=numpy.float32)
         assert set(search_res[0].ids) == set(res[0].ids[offset:])
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -4101,7 +4101,7 @@ class TestsearchPagination(TestcaseBase):
             res.done()
             res = res.result()
         res_distance = res[0].distances[offset:]
-        assert sorted(search_res[0].distances, key=float) == sorted(res_distance, key=float)
+        assert sorted(search_res[0].distances, key=numpy.float32) == sorted(res_distance, key=numpy.float32)
         assert set(search_res[0].ids) == set(res[0].ids[offset:])
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -4272,7 +4272,7 @@ class TestsearchPagination(TestcaseBase):
                 res.done()
                 res = res.result()
             res_distance = res[0].distances[offset:]
-            # assert sorted(search_res[0].distances, key=float) == sorted(res_distance, key=float)
+            assert sorted(search_res[0].distances, key=numpy.float32) == sorted(res_distance, key=numpy.float32)
             assert set(search_res[0].ids) == set(res[0].ids[offset:])
 
 
