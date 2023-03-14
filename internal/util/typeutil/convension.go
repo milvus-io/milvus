@@ -24,6 +24,8 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus/internal/common"
+	"github.com/milvus-io/milvus/internal/log"
+	"go.uber.org/zap"
 )
 
 // Generic Clone for proto message
@@ -98,7 +100,7 @@ func Uint64ToBytes(v uint64) []byte {
 // SliceRemoveDuplicate is used to dedup a Slice
 func SliceRemoveDuplicate(a interface{}) (ret []interface{}) {
 	if reflect.TypeOf(a).Kind() != reflect.Slice {
-		fmt.Printf("input is not slice but %T\n", a)
+		log.Error("input is not slice", zap.String("inputType", fmt.Sprintf("%T", a)))
 		return ret
 	}
 

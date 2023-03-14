@@ -307,7 +307,7 @@ func TestSegmentAllocator6(t *testing.T) {
 		}
 		_, err = segAllocator.GetSegmentID(1, 1, colName, count, 100)
 		if err != nil {
-			fmt.Println(err)
+			t.Log(err)
 			success = false
 		}
 	}

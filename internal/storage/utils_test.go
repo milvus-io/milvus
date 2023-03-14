@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
-	"fmt"
 	"math/rand"
 	"strconv"
 	"testing"
@@ -1206,6 +1205,6 @@ func TestJson(t *testing.T) {
 	assert.NoError(t, err)
 	ExtraLength := int32(len(ExtraBytes))
 
-	fmt.Print(string(ExtraBytes))
-	fmt.Println(ExtraLength)
+	t.Log(string(ExtraBytes))
+	t.Log(ExtraLength)
 }

@@ -195,6 +195,7 @@ func (r *RateCollector) update(now time.Time) {
 	}
 }
 
+// nolint
 // print is a helper function to print values.
 func (r *RateCollector) print() {
 	for k, v := range r.values {

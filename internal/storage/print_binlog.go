@@ -41,6 +41,7 @@ func PrintBinlogFiles(fileList []string) error {
 	return nil
 }
 
+// nolint
 func printBinlogFile(filename string) error {
 	fd, err := os.OpenFile(filename, os.O_RDONLY, 0400)
 	if err != nil {
@@ -218,6 +219,7 @@ func printBinlogFile(filename string) error {
 	return nil
 }
 
+// nolint
 func printPayloadValues(colType schemapb.DataType, reader PayloadReaderInterface) error {
 	fmt.Println("\tpayload values:")
 	switch colType {
@@ -325,6 +327,7 @@ func printPayloadValues(colType schemapb.DataType, reader PayloadReaderInterface
 	return nil
 }
 
+// nolint
 func printDDLPayloadValues(eventType EventTypeCode, colType schemapb.DataType, reader PayloadReaderInterface) error {
 	fmt.Println("\tpayload values:")
 	switch colType {
@@ -384,6 +387,7 @@ func printDDLPayloadValues(eventType EventTypeCode, colType schemapb.DataType, r
 	return nil
 }
 
+// nolint
 // only print slice meta and index params
 func printIndexFilePayloadValues(reader PayloadReaderInterface, key string, dataType schemapb.DataType) error {
 	if dataType == schemapb.DataType_Int8 {

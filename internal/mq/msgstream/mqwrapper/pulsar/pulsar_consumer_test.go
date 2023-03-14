@@ -191,7 +191,7 @@ func TestPulsarClientCloseUnsubscribeError(t *testing.T) {
 
 	err = consumer.Unsubscribe()
 	assert.True(t, strings.Contains(err.Error(), "Consumer not found"))
-	fmt.Println(err)
+	t.Log(err)
 }
 
 func TestPulsarClientUnsubscribeTwice(t *testing.T) {
@@ -216,5 +216,5 @@ func TestPulsarClientUnsubscribeTwice(t *testing.T) {
 	assert.NoError(t, err)
 	err = consumer.Unsubscribe()
 	assert.True(t, strings.Contains(err.Error(), "Consumer not found"))
-	fmt.Println(err)
+	t.Log(err)
 }

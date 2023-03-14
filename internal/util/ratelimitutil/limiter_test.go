@@ -17,7 +17,6 @@
 package ratelimitutil
 
 import (
-	"fmt"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -322,12 +321,12 @@ func TestLongRunningQPS(t *testing.T) {
 	ideal := burst + (limit * float64(elapsed) / float64(time.Second))
 
 	// We should never get more requests than allowed.
-	fmt.Printf("numOK = %d, want %d (ideal %f)\n", numOK, int32(ideal), ideal)
+	t.Log("numOK =", numOK, "want", int32(ideal), "ideal", ideal)
 	if want := int32(ideal); numOK > want {
 		t.Errorf("numOK = %d, want %d (ideal %f)", numOK, want, ideal)
 	}
 	// We should get very close to the number of requests allowed.
-	fmt.Printf("numOK = %d, want %d (ideal %f)\n", numOK, int32(0.999*ideal), ideal)
+	t.Log("numOK =", numOK, "want", int32(0.999*ideal), "ideal", ideal)
 	if want := int32(0.999 * ideal); numOK < want {
 		t.Errorf("numOK = %d, want %d (ideal %f)", numOK, want, ideal)
 	}

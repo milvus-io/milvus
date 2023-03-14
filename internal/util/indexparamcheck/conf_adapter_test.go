@@ -12,7 +12,6 @@
 package indexparamcheck
 
 import (
-	"fmt"
 	"strconv"
 	"testing"
 )
@@ -161,7 +160,7 @@ func TestIVFPQConfAdapter_CheckTrain(t *testing.T) {
 	adapter := newIVFPQConfAdapter()
 	for i, test := range cases {
 		if got := adapter.CheckTrain(test.params); got != test.want {
-			fmt.Printf("i: %d, params: %v\n", i, test.params)
+			t.Log("i:", i, "params", test.params)
 			t.Errorf("IVFPQConfAdapter.CheckTrain(%v) = %v", test.params, test.want)
 		}
 	}

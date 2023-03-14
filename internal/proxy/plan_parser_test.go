@@ -58,12 +58,12 @@ func newTestSchema() *schemapb.CollectionSchema {
 }
 
 func assertValidExpr(t *testing.T, schema *typeutil.SchemaHelper, exprStr string) {
-	// fmt.Println("expr: ", exprStr)
+	// t.Log("expr: ", exprStr)
 
 	_, err := parseExpr(schema, exprStr)
 	assert.Nil(t, err, exprStr)
 
-	// fmt.Println("AST1:")
+	// t.Log("AST1:")
 	// planparserv2.ShowExpr(expr1)
 }
 
@@ -75,12 +75,12 @@ func assertValidExprV2(t *testing.T, schema *typeutil.SchemaHelper, exprStr stri
 	assert.Nil(t, err)
 
 	if !planparserv2.CheckPredicatesIdentical(expr1, expr2) {
-		fmt.Println("expr: ", exprStr)
+		t.Log("expr: ", exprStr)
 
-		fmt.Println("AST1:")
+		t.Log("AST1:")
 		planparserv2.ShowExpr(expr1)
 
-		fmt.Println("AST2:")
+		t.Log("AST2:")
 		planparserv2.ShowExpr(expr2)
 
 		t.Errorf("parsed asts are not identical")
@@ -88,8 +88,6 @@ func assertValidExprV2(t *testing.T, schema *typeutil.SchemaHelper, exprStr stri
 }
 
 func assertInvalidExpr(t *testing.T, schema *typeutil.SchemaHelper, exprStr string) {
-	// fmt.Println("expr: ", exprStr)
-
 	_, err := parseExpr(schema, exprStr)
 	assert.Error(t, err, exprStr)
 
@@ -116,12 +114,12 @@ func assertValidSearchPlanV2(t *testing.T, schema *schemapb.CollectionSchema, ex
 	assert.NotNil(t, expr2)
 
 	if !planparserv2.CheckPredicatesIdentical(expr1, expr2) {
-		fmt.Println("expr: ", exprStr)
+		t.Log("expr: ", exprStr)
 
-		fmt.Println("AST1:")
+		t.Log("AST1:")
 		planparserv2.ShowExpr(expr1)
 
-		fmt.Println("AST2:")
+		t.Log("AST2:")
 		planparserv2.ShowExpr(expr2)
 
 		t.Errorf("parsed asts are not identical")
@@ -632,7 +630,6 @@ func Test_CheckIdentical(t *testing.T) {
 		largeFloatTermExpr,
 	}
 	for _, input := range inputs {
-		// fmt.Println("expr: ", input)
 		expr1, err := parseExpr(helper, input)
 		assert.NoError(t, err)
 		expr2, err := planparserv2.ParseExpr(helper, input)

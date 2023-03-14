@@ -18,7 +18,6 @@ package querynode
 
 import (
 	"context"
-	"fmt"
 	"math"
 	"testing"
 
@@ -291,7 +290,7 @@ func TestSegment_getMemSize(t *testing.T) {
 	var memSize = segment.getMemSize()
 	// assert.Equal(t, memSize, int64(18776064))
 	// not accurate, configuration-dependent.
-	fmt.Printf("memory size of segment: %d\n", memSize)
+	t.Log("memory size of segment: ", memSize)
 
 	deleteSegment(segment)
 	deleteCollection(collection)

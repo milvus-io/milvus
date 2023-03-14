@@ -450,6 +450,7 @@ func (s *Server) init() error {
 		return err
 	}
 	log.Debug("init Proxy done")
+	// nolint
 	// Intentionally print to stdout, which is usually a sign that Milvus is ready to serve.
 	fmt.Println("---Milvus Proxy successfully initialized and ready to serve!---")
 
