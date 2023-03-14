@@ -168,6 +168,30 @@ func (it *insertTask) checkPrimaryFieldData() error {
 	return nil
 }
 
+func (it *insertTask) checkVectorFieldData() error {
+	fields := it.GetFieldsData()
+	for _, field := range fields {
+		if field.GetType() != schemapb.DataType_FloatVector {
+			continue
+		}
+
+		vectorField := field.GetVectors()
+		if vectorField == nil || vectorField.GetFloatVector() == nil {
+			log.Error("float vector field is illegal, array type mismatch", zap.String("field name", field.GetFieldName()))
+			return fmt.Errorf("float vector field '%v' is illegal, array type mismatch", field.GetFieldName())
+		}
+
+		floatArray := vectorField.GetFloatVector()
+		err := typeutil.VerifyFloats32(floatArray.GetData())
+		if err != nil {
+			log.Error("float vector field data is illegal", zap.String("field name", field.GetFieldName()), zap.Error(err))
+			return fmt.Errorf("float vector field data is illegal, error: %w", err)
+		}
+	}
+
+	return nil
+}
+
 func (it *insertTask) PreExecute(ctx context.Context) error {
 	sp, ctx := trace.StartSpanFromContextWithOperationName(it.ctx, "Proxy-Insert-PreExecute")
 	defer sp.Finish()
@@ -246,6 +270,13 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	// check that all field's number rows are equal
 	if err = it.CheckAligned(); err != nil {
 		log.Error("field data is not aligned", zap.Int64("msgID", it.Base.MsgID), zap.String("collection name", collectionName), zap.Error(err))
+		return err
+	}
+
+	// check vector field data
+	err = it.checkVectorFieldData()
+	if err != nil {
+		log.Error("vector field data is illegal", zap.Int64("msgID", it.Base.MsgID), zap.String("collection name", collectionName), zap.Error(err))
 		return err
 	}
 
