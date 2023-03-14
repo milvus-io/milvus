@@ -104,6 +104,12 @@ func packLoadSegmentRequest(
 		posSrcStr = "segmentStartPos"
 	}
 
+	// see also https://github.com/milvus-io/milvus/issues/22683
+	// reset all delta position channel name here
+	if deltaPosition != nil {
+		deltaPosition.ChannelName = loadInfo.GetInsertChannel()
+	}
+
 	posTime := tsoutil.PhysicalTime(deltaPosition.GetTimestamp())
 	tsLag := time.Since(posTime)
 	if tsLag >= 10*time.Minute {
