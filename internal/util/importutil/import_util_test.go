@@ -299,6 +299,14 @@ func Test_parseFloat(t *testing.T) {
 	value, err = parseFloat("2.718281828459045", 64, "")
 	assert.True(t, math.Abs(value-2.718281828459045) < 0.0000000000000001)
 	assert.Nil(t, err)
+
+	value, err = parseFloat("Inf", 32, "")
+	assert.Zero(t, value)
+	assert.Error(t, err)
+
+	value, err = parseFloat("NaN", 64, "")
+	assert.Zero(t, value)
+	assert.Error(t, err)
 }
 
 func Test_InitValidators(t *testing.T) {

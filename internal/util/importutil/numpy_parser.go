@@ -494,6 +494,12 @@ func (p *NumpyParser) readData(columnReader *NumpyColumnReader, rowCount int) (s
 			return nil, fmt.Errorf("failed to read float array: %s", err.Error())
 		}
 
+		err = typeutil.VerifyFloats32(data)
+		if err != nil {
+			log.Error("Numpy parser: illegal value in float array", zap.Error(err))
+			return nil, fmt.Errorf("illegal value in float array: %s", err.Error())
+		}
+
 		return &storage.FloatFieldData{
 			Data: data,
 		}, nil
@@ -502,6 +508,12 @@ func (p *NumpyParser) readData(columnReader *NumpyColumnReader, rowCount int) (s
 		if err != nil {
 			log.Error("Numpy parser: failed to read double array", zap.Error(err))
 			return nil, fmt.Errorf("failed to read double array: %s", err.Error())
+		}
+
+		err = typeutil.VerifyFloats64(data)
+		if err != nil {
+			log.Error("Numpy parser: illegal value in double array", zap.Error(err))
+			return nil, fmt.Errorf("illegal value in double array: %s", err.Error())
 		}
 
 		return &storage.DoubleFieldData{
@@ -542,6 +554,13 @@ func (p *NumpyParser) readData(columnReader *NumpyColumnReader, rowCount int) (s
 				log.Error("Numpy parser: failed to read float vector array", zap.Error(err))
 				return nil, fmt.Errorf("failed to read float vector array: %s", err.Error())
 			}
+
+			err = typeutil.VerifyFloats32(data)
+			if err != nil {
+				log.Error("Numpy parser: illegal value in float vector array", zap.Error(err))
+				return nil, fmt.Errorf("illegal value in float vector array: %s", err.Error())
+			}
+
 		} else if elementType == schemapb.DataType_Double {
 			data = make([]float32, 0, columnReader.rowCount)
 			data64, err := columnReader.reader.ReadFloat64(rowCount * columnReader.dimension)
@@ -551,6 +570,12 @@ func (p *NumpyParser) readData(columnReader *NumpyColumnReader, rowCount int) (s
 			}
 
 			for _, f64 := range data64 {
+				err = typeutil.VerifyFloat(f64)
+				if err != nil {
+					log.Error("Numpy parser: illegal value in float vector array", zap.Error(err))
+					return nil, fmt.Errorf("illegal value in float vector array: %s", err.Error())
+				}
+
 				data = append(data, float32(f64))
 			}
 		}

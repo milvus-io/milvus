@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
 	"path"
 	"runtime/debug"
 	"strconv"
@@ -120,9 +119,9 @@ func parseFloat(s string, bitsize int, fieldName string) (float64, error) {
 		return 0, fmt.Errorf("failed to parse value '%s' for field '%s', error: %w", s, fieldName, err)
 	}
 
-	// not allow not-a-number and infinity
-	if math.IsNaN(value) || math.IsInf(value, -1) || math.IsInf(value, 1) {
-		return 0, fmt.Errorf("value '%s' is not a number or infinity, field '%s', error: %w", s, fieldName, err)
+	err = typeutil.VerifyFloat(value)
+	if err != nil {
+		return 0, fmt.Errorf("illegal value '%s' for field '%s', error: %w", s, fieldName, err)
 	}
 
 	return value, nil

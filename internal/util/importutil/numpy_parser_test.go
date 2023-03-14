@@ -18,6 +18,7 @@ package importutil
 
 import (
 	"context"
+	"math"
 	"os"
 	"testing"
 
@@ -403,6 +404,22 @@ func Test_NumpyParserReadData(t *testing.T) {
 		}
 	}
 
+	readErrorFunc := func(filedName string, data interface{}) {
+		filePath := TempFilesPath + filedName + ".npy"
+		err = CreateNumpyFile(filePath, data)
+		assert.Nil(t, err)
+
+		readers, err := parser.createReaders([]string{filePath})
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(readers))
+		defer closeReaders(readers)
+
+		// encounter error
+		fieldData, err := parser.readData(readers[0], 1000)
+		assert.Error(t, err)
+		assert.Nil(t, fieldData)
+	}
+
 	t.Run("read bool", func(t *testing.T) {
 		readEmptyFunc("FieldBool", []bool{})
 
@@ -443,6 +460,8 @@ func Test_NumpyParserReadData(t *testing.T) {
 
 		data := []float32{2.5, 32.2, 53.254, 3.45, 65.23421, 54.8978}
 		readBatchFunc("FieldFloat", data, len(data), func(k int) interface{} { return data[k] })
+		data = []float32{2.5, 32.2, float32(math.NaN())}
+		readErrorFunc("FieldFloat", data)
 	})
 
 	t.Run("read double", func(t *testing.T) {
@@ -450,6 +469,8 @@ func Test_NumpyParserReadData(t *testing.T) {
 
 		data := []float64{65.24454, 343.4365, 432.6556}
 		readBatchFunc("FieldDouble", data, len(data), func(k int) interface{} { return data[k] })
+		data = []float64{65.24454, math.Inf(1)}
+		readErrorFunc("FieldDouble", data)
 	})
 
 	specialReadEmptyFunc := func(filedName string, data interface{}) {
@@ -482,6 +503,9 @@ func Test_NumpyParserReadData(t *testing.T) {
 	t.Run("read float vector", func(t *testing.T) {
 		specialReadEmptyFunc("FieldFloatVector", [][4]float32{{1, 2, 3, 4}, {3, 4, 5, 6}})
 		specialReadEmptyFunc("FieldFloatVector", [][4]float64{{1, 2, 3, 4}, {3, 4, 5, 6}})
+
+		readErrorFunc("FieldFloatVector", [][4]float32{{1, 2, 3, float32(math.NaN())}, {3, 4, 5, 6}})
+		readErrorFunc("FieldFloatVector", [][4]float64{{1, 2, 3, 4}, {3, 4, math.Inf(1), 6}})
 	})
 }
 
