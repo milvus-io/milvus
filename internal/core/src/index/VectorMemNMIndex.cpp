@@ -74,6 +74,19 @@ VectorMemNMIndex::Query(const DatasetPtr dataset,
     return VectorMemIndex::Query(dataset, search_info, bitset);
 }
 
+std::string
+VectorMemNMIndex::GetIndexData() {
+    knowhere::Json final;
+    auto res = index_.GetIndexMeta(final);
+    if (!res.has_value()) {
+        PanicCodeInfo(
+            ErrorCodeEnum::UnexpectedError,
+            "failed to GetIndexData, " + MatchKnowhereError(res.error()));
+    }
+    auto dataset = res.value();
+    return dataset->GetJsonInfo();
+}
+
 void
 VectorMemNMIndex::store_raw_data(const DatasetPtr& dataset) {
     auto index_type = GetIndexType();

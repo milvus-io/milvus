@@ -19,6 +19,7 @@ package proxy
 import (
 	"context"
 	"fmt"
+	"github.com/milvus-io/milvus-proto/go-api/federpb"
 	"os"
 	"strconv"
 	"sync"
@@ -4853,4 +4854,147 @@ func (node *Proxy) DescribeResourceGroup(ctx context.Context, request *milvuspb.
 		metrics.SuccessLabel).Inc()
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return t.result, nil
+}
+
+func (node *Proxy) ListIndexedSegment(ctx context.Context, req *federpb.ListIndexedSegmentRequest) (*federpb.ListIndexedSegmentResponse, error) {
+	if !node.checkHealthy() {
+		return &federpb.ListIndexedSegmentResponse{
+			Status: unhealthyStatus(),
+		}, nil
+	}
+
+	method := "ListIndexedSegment"
+	GetErrResponse := func(err error) *federpb.ListIndexedSegmentResponse {
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel).Inc()
+
+		return &federpb.ListIndexedSegmentResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+		}
+	}
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-ListIndexedSegment")
+	defer sp.End()
+	tr := timerecord.NewTimeRecorder(method)
+	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
+		metrics.TotalLabel).Inc()
+
+	log.Debug("ListIndexedSegment received", zap.String("collectionName", req.GetCollectionName()),
+		zap.String("indexName", req.GetIndexName()))
+	// construct task and wait for finished
+	listTask := &listIndexedSegmentTask{
+		ctx:                       ctx,
+		Condition:                 NewTaskCondition(ctx),
+		ListIndexedSegmentRequest: req,
+		dataCoord:                 node.dataCoord,
+	}
+
+	if err := node.sched.ddQueue.Enqueue(listTask); err != nil {
+		log.Warn(rpcFailedToEnqueue(method), zap.Error(err))
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
+			metrics.AbandonLabel).Inc()
+		return GetErrResponse(err), nil
+	}
+
+	log.Debug(
+		rpcEnqueued(method),
+		zap.Uint64("BeginTs", listTask.BeginTs()),
+		zap.Uint64("EndTs", listTask.EndTs()))
+
+	if err := listTask.WaitToFinish(); err != nil {
+		log.Warn(rpcFailedToWaitToFinish(method), zap.Error(err), zap.Uint64("BeginTs", listTask.BeginTs()),
+			zap.Uint64("EndTs", listTask.EndTs()))
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
+			metrics.FailLabel).Inc()
+
+		return GetErrResponse(err), nil
+	}
+
+	log.Debug(
+		rpcDone(method),
+		zap.Uint64("BeginTs", listTask.BeginTs()),
+		zap.Uint64("EndTs", listTask.EndTs()))
+
+	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
+		metrics.SuccessLabel).Inc()
+	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+
+	return &federpb.ListIndexedSegmentResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		SegmentIDs: listTask.result,
+	}, nil
+}
+
+func (node *Proxy) DescribeSegmentIndexData(ctx context.Context, req *federpb.DescribeSegmentIndexDataRequest) (*federpb.DescribeSegmentIndexDataResponse, error) {
+	if !node.checkHealthy() {
+		return &federpb.DescribeSegmentIndexDataResponse{
+			Status: unhealthyStatus(),
+		}, nil
+	}
+	method := "DescribeSegmentIndexData"
+	GetErrResponse := func(err error) *federpb.DescribeSegmentIndexDataResponse {
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel).Inc()
+
+		return &federpb.DescribeSegmentIndexDataResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+		}
+	}
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-DescribeSegmentIndexData")
+	defer sp.End()
+	tr := timerecord.NewTimeRecorder(method)
+	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
+		metrics.TotalLabel).Inc()
+
+	log.Debug("DescribeSegmentIndexData received", zap.String("collectionName", req.GetCollectionName()),
+		zap.Int64s("indexName", req.GetSegmentsIDs()))
+	dsidTask := &describeSegmentIndexDataTask{
+		ctx:                             ctx,
+		Condition:                       NewTaskCondition(ctx),
+		DescribeSegmentIndexDataRequest: req,
+		queryCoord:                      node.queryCoord,
+		shardMgr:                        node.shardMgr,
+	}
+
+	if err := node.sched.ddQueue.Enqueue(dsidTask); err != nil {
+		log.Warn(rpcFailedToEnqueue(method), zap.Error(err))
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
+			metrics.AbandonLabel).Inc()
+		return GetErrResponse(err), nil
+	}
+
+	log.Debug(
+		rpcEnqueued(method),
+		zap.Uint64("BeginTs", dsidTask.BeginTs()),
+		zap.Uint64("EndTs", dsidTask.EndTs()))
+
+	if err := dsidTask.WaitToFinish(); err != nil {
+		log.Warn(rpcFailedToWaitToFinish(method), zap.Error(err), zap.Uint64("BeginTs", dsidTask.BeginTs()),
+			zap.Uint64("EndTs", dsidTask.EndTs()))
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
+			metrics.FailLabel).Inc()
+
+		return GetErrResponse(err), nil
+	}
+
+	log.Debug(
+		rpcDone(method),
+		zap.Uint64("BeginTs", dsidTask.BeginTs()),
+		zap.Uint64("EndTs", dsidTask.EndTs()))
+
+	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
+		metrics.SuccessLabel).Inc()
+	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+
+	return &federpb.DescribeSegmentIndexDataResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		IndexData: dsidTask.result,
+	}, nil
 }

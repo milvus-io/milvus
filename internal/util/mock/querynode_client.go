@@ -124,3 +124,7 @@ func (q QueryNodeClient) GetDataDistribution(ctx context.Context, req *querypb.G
 func (q QueryNodeClient) SyncDistribution(ctx context.Context, req *querypb.SyncDistributionRequest) (*commonpb.Status, error) {
 	return q.grpcClient.SyncDistribution(ctx, req)
 }
+
+func (q QueryNodeClient) DescribeSegmentIndexData(ctx context.Context, req *querypb.DescribeSegmentIndexDataRequest) (*querypb.DescribeSegmentIndexDataResponse, error) {
+	return q.grpcClient.DescribeSegmentIndexData(ctx, req)
+}

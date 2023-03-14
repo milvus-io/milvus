@@ -860,26 +860,6 @@ func validateIndexName(indexName string) error {
 	return nil
 }
 
-func isCollectionLoaded(ctx context.Context, qc types.QueryCoord, collID int64) (bool, error) {
-	// get all loading collections
-	resp, err := qc.ShowCollections(ctx, &querypb.ShowCollectionsRequest{
-		CollectionIDs: nil,
-	})
-	if err != nil {
-		return false, err
-	}
-	if resp.Status.ErrorCode != commonpb.ErrorCode_Success {
-		return false, errors.New(resp.Status.Reason)
-	}
-
-	for _, loadedCollID := range resp.GetCollectionIDs() {
-		if collID == loadedCollID {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
 func isPartitionLoaded(ctx context.Context, qc types.QueryCoord, collID int64, partIDs []int64) (bool, error) {
 	// get all loading collections
 	resp, err := qc.ShowPartitions(ctx, &querypb.ShowPartitionsRequest{

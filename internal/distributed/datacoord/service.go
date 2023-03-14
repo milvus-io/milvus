@@ -415,3 +415,7 @@ func (s *Server) DropIndex(ctx context.Context, request *indexpb.DropIndexReques
 func (s *Server) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetIndexBuildProgressRequest) (*indexpb.GetIndexBuildProgressResponse, error) {
 	return s.dataCoord.GetIndexBuildProgress(ctx, req)
 }
+
+func (s *Server) ListIndexedSegment(ctx context.Context, req *datapb.ListIndexedSegmentRequest) (*datapb.ListIndexedSegmentResponse, error) {
+	return s.dataCoord.ListIndexedSegment(ctx, req)
+}

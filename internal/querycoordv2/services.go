@@ -23,6 +23,10 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
+	"go.uber.org/multierr"
+	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
@@ -39,10 +43,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/paramtable"
 	"github.com/milvus-io/milvus/internal/util/timerecord"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
-	"github.com/samber/lo"
-	"go.uber.org/multierr"
-	"go.uber.org/zap"
-	"golang.org/x/sync/errgroup"
 )
 
 var (
@@ -1217,4 +1217,21 @@ func (s *Server) DescribeResourceGroup(ctx context.Context, req *querypb.Describ
 		NumIncomingNode:  incomingNodes,
 	}
 	return resp, nil
+}
+
+func (s *Server) DescribeSegmentIndexData(ctx context.Context, req *querypb.DescribeSegmentIndexDataRequest) (*querypb.DescribeSegmentIndexDataResponse, error) {
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", req.CollectionID),
+	)
+
+	log.Info("describe segment index data request received")
+	resp := &querypb.DescribeSegmentIndexDataResponse{
+		Status: merr.Status(nil),
+	}
+	if s.status.Load() != commonpb.StateCode_Healthy {
+		log.Warn(ErrDescribeResourceGroupFailed.Error(), zap.Error(ErrNotHealthy))
+		resp.Status = utils.WrapStatus(commonpb.ErrorCode_UnexpectedError, ErrDescribeResourceGroupFailed.Error(), ErrNotHealthy)
+		return resp, nil
+	}
+	panic("implement me")
 }

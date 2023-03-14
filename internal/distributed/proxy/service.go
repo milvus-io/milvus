@@ -21,6 +21,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"github.com/milvus-io/milvus-proto/go-api/federpb"
 	"io"
 	"io/ioutil"
 	"net"
@@ -891,4 +892,12 @@ func (s *Server) TransferReplica(ctx context.Context, req *milvuspb.TransferRepl
 
 func (s *Server) ListResourceGroups(ctx context.Context, req *milvuspb.ListResourceGroupsRequest) (*milvuspb.ListResourceGroupsResponse, error) {
 	return s.proxy.ListResourceGroups(ctx, req)
+}
+
+func (s *Server) ListIndexedSegment(ctx context.Context, req *federpb.ListIndexedSegmentRequest) (*federpb.ListIndexedSegmentResponse, error) {
+	return s.proxy.ListIndexedSegment(ctx, req)
+}
+
+func (s *Server) DescribeSegmentIndexData(ctx context.Context, req *federpb.DescribeSegmentIndexDataRequest) (*federpb.DescribeSegmentIndexDataResponse, error) {
+	return s.proxy.DescribeSegmentIndexData(ctx, req)
 }

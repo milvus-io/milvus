@@ -205,6 +205,8 @@ func Test_NewClient(t *testing.T) {
 			ret, err := client.CheckHealth(ctx, nil)
 			retCheck(retNotNil, ret, err)
 		}
+		r40, err := client.ListIndexedSegment(ctx, nil)
+		retCheck(retNotNil, r40, err)
 	}
 
 	client.grpcClient = &mock.GRPCClientBase[datapb.DataCoordClient]{

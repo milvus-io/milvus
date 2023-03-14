@@ -10,6 +10,7 @@ import "internal.proto";
 import "schema.proto";
 import "msg.proto";
 import "data_coord.proto";
+import "feder.proto";
 
 service QueryCoord {
   rpc GetComponentStates(milvus.GetComponentStatesRequest) returns (milvus.ComponentStates) {}
@@ -72,6 +73,8 @@ service QueryNode {
 
   rpc GetDataDistribution(GetDataDistributionRequest) returns (GetDataDistributionResponse) {}
   rpc SyncDistribution(SyncDistributionRequest) returns (common.Status) {}
+
+  rpc DescribeSegmentIndexData(DescribeSegmentIndexDataRequest) returns (DescribeSegmentIndexDataResponse) {}
 }
 
 //--------------------QueryCoord grpc request and response proto------------------
@@ -567,4 +570,19 @@ message ResourceGroupInfo {
   map<int64, int32> num_outgoing_node = 5;
    // collection id -> be accessed node num by other rg
   map<int64, int32> num_incoming_node = 6;
+}
+
+message DescribeSegmentIndexDataRequest {
+  common.MsgBase base = 1;
+  int64 collectionID = 2;
+  int64 fieldID = 3;
+  repeated int64 segmentIDs = 4;
+  repeated string dml_channels = 5;
+  bool from_shard_leader = 6;
+}
+
+message DescribeSegmentIndexDataResponse {
+  common.Status status = 1;
+  // segmentID => segmentIndexData
+  map<int64, feder.SegmentIndexData> index_datas = 2;
 }

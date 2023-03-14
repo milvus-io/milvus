@@ -300,3 +300,20 @@ DropSealedSegmentIndex(CSegmentInterface c_segment, int64_t field_id) {
         return milvus::FailureCStatus(UnexpectedError, e.what());
     }
 }
+
+CStatus
+DescribeSegmentIndexData(CSegmentInterface c_segment,
+                         int64_t field_id,
+                         char** data,
+                         int* str_size) {
+    try {
+        auto segment = (milvus::segcore::SegmentInterface*)c_segment;
+        auto info = segment->GetIndexData(field_id);
+        *data = (char*)info.data();
+        *str_size = info.size();
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        std::cout << "exception" << e.what() << std::endl;
+        return milvus::FailureCStatus(UnexpectedError, e.what());
+    }
+}

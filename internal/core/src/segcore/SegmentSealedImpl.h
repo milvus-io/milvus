@@ -192,6 +192,9 @@ class SegmentSealedImpl : public SegmentSealed {
                      int64_t ins_barrier,
                      Timestamp timestamp) const override;
 
+    std::string
+    get_index_data(FieldId field_id) const override;
+
     bool
     is_system_field_ready() const {
         return system_ready_count_ == 2;

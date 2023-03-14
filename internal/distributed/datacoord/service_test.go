@@ -78,6 +78,7 @@ type MockDataCoord struct {
 	getIndexBuildProgressResp *indexpb.GetIndexBuildProgressResponse
 	getSegmentIndexStateResp  *indexpb.GetSegmentIndexStateResponse
 	getIndexInfosResp         *indexpb.GetIndexInfoResponse
+	listIndexedSegmentResp    *datapb.ListIndexedSegmentResponse
 }
 
 func (m *MockDataCoord) Init() error {
@@ -271,6 +272,10 @@ func (m *MockDataCoord) GetSegmentIndexState(ctx context.Context, req *indexpb.G
 
 func (m *MockDataCoord) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
 	return m.dropIndexResp, m.err
+}
+
+func (m *MockDataCoord) ListIndexedSegment(ctx context.Context, req *datapb.ListIndexedSegmentRequest) (*datapb.ListIndexedSegmentResponse, error) {
+	return m.listIndexedSegmentResp, m.err
 }
 
 func Test_NewServer(t *testing.T) {
@@ -637,6 +642,15 @@ func Test_NewServer(t *testing.T) {
 			getIndexInfosResp: &indexpb.GetIndexInfoResponse{},
 		}
 		ret, err := server.GetIndexInfos(ctx, nil)
+		assert.NoError(t, err)
+		assert.NotNil(t, ret)
+	})
+
+	t.Run("ListIndexedSegment", func(t *testing.T) {
+		server.dataCoord = &MockDataCoord{
+			listIndexedSegmentResp: &datapb.ListIndexedSegmentResponse{},
+		}
+		ret, err := server.ListIndexedSegment(ctx, nil)
 		assert.NoError(t, err)
 		assert.NotNil(t, ret)
 	})

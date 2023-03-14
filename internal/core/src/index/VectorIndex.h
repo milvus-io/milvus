@@ -53,6 +53,9 @@ class VectorIndex : public IndexBase {
           const SearchInfo& search_info,
           const BitsetView& bitset) = 0;
 
+    virtual std::string
+    GetIndexData() = 0;
+
     IndexType
     GetIndexType() const {
         return index_type_;

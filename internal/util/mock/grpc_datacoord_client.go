@@ -19,13 +19,12 @@ package mock
 import (
 	"context"
 
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
-
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 )
 
@@ -202,4 +201,8 @@ func (m *GrpcDataCoordClient) DescribeIndex(ctx context.Context, req *indexpb.De
 // GetIndexBuildProgress get the index building progress by num rows.
 func (m *GrpcDataCoordClient) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetIndexBuildProgressRequest, opts ...grpc.CallOption) (*indexpb.GetIndexBuildProgressResponse, error) {
 	return &indexpb.GetIndexBuildProgressResponse{}, m.Err
+}
+
+func (m *GrpcDataCoordClient) ListIndexedSegment(ctx context.Context, req *datapb.ListIndexedSegmentRequest, opts ...grpc.CallOption) (*datapb.ListIndexedSegmentResponse, error) {
+	return &datapb.ListIndexedSegmentResponse{}, m.Err
 }

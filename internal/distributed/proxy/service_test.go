@@ -22,6 +22,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
+	"github.com/milvus-io/milvus-proto/go-api/federpb"
 	"os"
 	"strconv"
 	"testing"
@@ -475,6 +476,10 @@ func (m *MockDataCoord) GetIndexBuildProgress(ctx context.Context, req *indexpb.
 	return nil, nil
 }
 
+func (m *MockDataCoord) ListIndexedSegment(ctx context.Context, req *datapb.ListIndexedSegmentRequest) (*datapb.ListIndexedSegmentResponse, error) {
+	return nil, nil
+}
+
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 type MockProxy struct {
 	MockBase
@@ -825,6 +830,14 @@ func (m *MockProxy) ListResourceGroups(ctx context.Context, req *milvuspb.ListRe
 }
 
 func (m *MockProxy) RenameCollection(ctx context.Context, req *milvuspb.RenameCollectionRequest) (*commonpb.Status, error) {
+	return nil, nil
+}
+
+func (m *MockProxy) ListIndexedSegment(ctx context.Context, req *federpb.ListIndexedSegmentRequest) (*federpb.ListIndexedSegmentResponse, error) {
+	return nil, nil
+}
+
+func (m *MockProxy) DescribeSegmentIndexData(ctx context.Context, req *federpb.DescribeSegmentIndexDataRequest) (*federpb.DescribeSegmentIndexDataResponse, error) {
 	return nil, nil
 }
 

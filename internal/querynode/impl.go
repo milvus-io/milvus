@@ -33,6 +33,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/federpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus/internal/common"
@@ -1458,4 +1459,205 @@ func (node *QueryNode) GetSession() *sessionutil.Session {
 	node.sessionMu.Lock()
 	defer node.sessionMu.Unlock()
 	return node.session
+}
+
+func (node *QueryNode) DescribeSegmentIndexData(ctx context.Context, req *querypb.DescribeSegmentIndexDataRequest) (*querypb.DescribeSegmentIndexDataResponse, error) {
+	nodeID := node.session.ServerID
+	if !node.IsStandAlone && req.GetBase().GetTargetID() != nodeID {
+		return &querypb.DescribeSegmentIndexDataResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_NodeIDNotMatch,
+				Reason: fmt.Sprintf("QueryNode %d can't serve, recovering: %s",
+					nodeID,
+					common.WrapNodeIDNotMatchMsg(req.GetBase().GetTargetID(), nodeID)),
+			},
+		}, nil
+	}
+
+	ctx, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "QueryNode-DescribeSegmentIndexData")
+	defer sp.End()
+	log := log.Ctx(ctx)
+
+	failRet := &querypb.DescribeSegmentIndexDataResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+	}
+	toReduceResults := make([]*querypb.DescribeSegmentIndexDataResponse, 0)
+	runningGp, runningCtx := errgroup.WithContext(ctx)
+	mu := &sync.Mutex{}
+	for _, ch := range req.GetDmlChannels() {
+		ch := ch
+		req := &querypb.DescribeSegmentIndexDataRequest{
+			Base:            req.GetBase(),
+			FieldID:         req.GetFieldID(),
+			DmlChannels:     []string{ch},
+			SegmentIDs:      req.SegmentIDs,
+			FromShardLeader: req.FromShardLeader,
+		}
+		runningGp.Go(func() error {
+			ret, err := node.describeSegmentIndexDataWithDmlChannel(runningCtx, req, ch)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				failRet.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
+				return err
+			}
+			if ret.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+				failRet.Status.ErrorCode = ret.Status.ErrorCode
+				return fmt.Errorf("%s", ret.Status.Reason)
+			}
+			toReduceResults = append(toReduceResults, ret)
+			return nil
+		})
+	}
+	if err := runningGp.Wait(); err != nil {
+		// make fail reason comes from first err
+		failRet.Status.Reason = err.Error()
+		return failRet, nil
+	}
+
+	log.Info("DescribeSegmentIndexData success, reduce...", zap.Int64("collID", req.GetCollectionID()),
+		zap.Int64("fieldID", req.GetFieldID()), zap.Int64s("segIDs", req.GetSegmentIDs()),
+		zap.Int("toReduceResults", len(toReduceResults)), zap.Strings("channel", req.GetDmlChannels()))
+	result := make(map[int64]*federpb.SegmentIndexData)
+	for _, res := range toReduceResults {
+		for segID, indexData := range res.IndexDatas {
+			if _, ok := result[segID]; ok {
+				log.Warn("there are multiple index data on the segment", zap.Int64("segID", segID))
+				failRet.Status.Reason = fmt.Sprintf("there are multiple index data on the segment: %d", segID)
+				return failRet, nil
+			}
+			result[segID] = indexData
+		}
+	}
+	return &querypb.DescribeSegmentIndexDataResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
+		},
+		IndexDatas: result,
+	}, nil
+}
+
+func (node *QueryNode) describeSegmentIndexDataWithDmlChannel(ctx context.Context, req *querypb.DescribeSegmentIndexDataRequest, dmlChannel string) (*querypb.DescribeSegmentIndexDataResponse, error) {
+	nodeID := node.session.ServerID
+	failRet := &querypb.DescribeSegmentIndexDataResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		},
+	}
+
+	if !node.lifetime.Add(commonpbutil.IsHealthyOrStopping) {
+		failRet.Status.Reason = msgQueryNodeIsUnhealthy(nodeID)
+		return failRet, nil
+	}
+	defer node.lifetime.Done()
+
+	if node.queryShardService == nil {
+		failRet.Status.Reason = "queryShardService is nil"
+		return failRet, nil
+	}
+
+	qs, err := node.queryShardService.getQueryShard(dmlChannel)
+	if err != nil {
+		log.Ctx(ctx).Warn("Search failed, failed to get query shard",
+			zap.String("dml channel", dmlChannel),
+			zap.Error(err))
+		failRet.Status.ErrorCode = commonpb.ErrorCode_NotShardLeader
+		failRet.Status.Reason = err.Error()
+		return failRet, nil
+	}
+
+	if req.FromShardLeader {
+		log.Ctx(ctx).Debug("start do SubDescribeSegmentIndexData",
+			zap.Bool("fromShardLeader", req.GetFromShardLeader()),
+			zap.String("vChannel", dmlChannel),
+			zap.Int64s("segmentIDs", req.GetSegmentIDs()))
+
+		var wg sync.WaitGroup
+		indexDatas := make(map[int64]*federpb.SegmentIndexData, len(req.GetSegmentIDs()))
+		var resultLock sync.Mutex
+		var resErr error
+
+		for i, segID := range req.GetSegmentIDs() {
+			wg.Add(1)
+			go func(segID UniqueID, i int) {
+				defer wg.Done()
+				seg, err := qs.metaReplica.getSegmentByID(segID, segmentTypeSealed)
+				if err != nil {
+					log.Warn("describeSegmentIndexData on segment failed", zap.Int64("segID", segID), zap.Error(err))
+					resErr = err
+					return
+				}
+
+				res, err := seg.describeSegmentIndexData(ctx, req)
+				if err != nil {
+					log.Warn("describeSegmentIndexData on segment failed", zap.Int64("segID", segID), zap.Error(err))
+					resErr = err
+					return
+				}
+				resultLock.Lock()
+				defer resultLock.Unlock()
+				indexDatas[segID] = res
+			}(segID, i)
+		}
+		wg.Wait()
+		if resErr != nil {
+			failRet.Status.Reason = resErr.Error()
+			return failRet, nil
+		}
+		result := &querypb.DescribeSegmentIndexDataResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+			IndexDatas: indexDatas,
+		}
+		return result, nil
+	}
+
+	log.Ctx(ctx).Info("start do describeSegmentIndexData",
+		zap.String("vChannel", dmlChannel),
+		zap.Int64s("segmentIDs", req.GetSegmentIDs()))
+
+	cluster, ok := qs.clusterService.getShardCluster(dmlChannel)
+	if !ok {
+		failRet.Status.ErrorCode = commonpb.ErrorCode_NotShardLeader
+		failRet.Status.Reason = fmt.Sprintf("channel %s leader is not here", dmlChannel)
+		return failRet, nil
+	}
+
+	var (
+		searchCtx, cancel = context.WithCancel(ctx)
+		results           []*querypb.DescribeSegmentIndexDataResponse
+		errCluster        error
+	)
+	defer cancel()
+
+	req.FromShardLeader = true
+	// shard leader dispatches request to its shard cluster
+	results, errCluster = cluster.DescribeSegmentIndexData(searchCtx, req)
+	if errCluster != nil {
+		log.Ctx(ctx).Warn("describeSegmentIndexData shard cluster failed", zap.String("vChannel", dmlChannel), zap.Error(errCluster))
+		failRet.Status.Reason = errCluster.Error()
+		return failRet, nil
+	}
+	indexDatas := make(map[int64]*federpb.SegmentIndexData)
+	for _, result := range results {
+		for segID, indexData := range result.IndexDatas {
+			if _, ok := indexDatas[segID]; ok {
+				log.Warn("describe index data failed, there are multiple datas on the segment", zap.Int64("segID", segID))
+				failRet.Status.Reason = fmt.Sprintf("there are multiple datas on the segment: %d", segID)
+				return failRet, nil
+			}
+			indexDatas[segID] = indexData
+		}
+	}
+
+	return &querypb.DescribeSegmentIndexDataResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+		},
+		IndexDatas: indexDatas,
+	}, nil
 }

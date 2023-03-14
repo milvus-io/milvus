@@ -107,6 +107,9 @@ func Test_NewClient(t *testing.T) {
 
 		r18, err := client.ShowConfigurations(ctx, nil)
 		retCheck(retNotNil, r18, err)
+
+		r19, err := client.DescribeSegmentIndexData(ctx, nil)
+		retCheck(retNotNil, r19, err)
 	}
 
 	client.grpcClient = &mock.GRPCClientBase[querypb.QueryNodeClient]{

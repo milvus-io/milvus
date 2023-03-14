@@ -41,6 +41,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/federpb"
 	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/common"
@@ -927,4 +928,24 @@ func (s *Segment) segmentLoadIndexData(bytesIndex [][]byte, indexInfo *querypb.F
 	log.Info("updateSegmentIndex done", zap.Int64("segmentID", s.ID()), zap.Int64("fieldID", indexInfo.FieldID))
 
 	return nil
+}
+
+func (s *Segment) describeSegmentIndexData(ctx context.Context, req *querypb.DescribeSegmentIndexDataRequest) (*federpb.SegmentIndexData, error) {
+	s.mut.RLock()
+	defer s.mut.RUnlock()
+	if !s.healthy() {
+		return nil, fmt.Errorf("%w(segmentID=%d)", ErrSegmentUnhealthy, s.segmentID)
+	}
+
+	//tr := timerecord.NewTimeRecorder("describeSegmentIndexData")
+	var cStr *C.char
+	var cSize C.int
+	status := C.DescribeSegmentIndexData(s.segmentPtr, C.int64_t(req.GetFieldID()), &cStr, &cSize)
+	if err := HandleCStatus(&status, "describeSegmentIndexData failed"); err != nil {
+		return nil, err
+	}
+	return &federpb.SegmentIndexData{
+		SegmentID: s.segmentID,
+		IndexData: C.GoStringN(cStr, cSize),
+	}, nil
 }

@@ -331,3 +331,7 @@ func (s *Server) GetDataDistribution(ctx context.Context, req *querypb.GetDataDi
 func (s *Server) SyncDistribution(ctx context.Context, req *querypb.SyncDistributionRequest) (*commonpb.Status, error) {
 	return s.querynode.SyncDistribution(ctx, req)
 }
+
+func (s *Server) DescribeSegmentIndexData(ctx context.Context, req *querypb.DescribeSegmentIndexDataRequest) (*querypb.DescribeSegmentIndexDataResponse, error) {
+	return s.querynode.DescribeSegmentIndexData(ctx, req)
+}

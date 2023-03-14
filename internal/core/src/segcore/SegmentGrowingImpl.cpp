@@ -458,4 +458,11 @@ SegmentGrowingImpl::mask_with_timestamps(BitsetType& bitset_chunk,
     // DO NOTHING
 }
 
+std::string
+SegmentGrowingImpl::get_index_data(FieldId field_id) const {
+    PanicCodeInfo(ErrorCodeEnum::UnexpectedError,
+                  "growing segment doesn't have index data!");
+    return "";
+}
+
 }  // namespace milvus::segcore

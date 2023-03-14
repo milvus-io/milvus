@@ -1248,3 +1248,178 @@ func TestServer_GetIndexInfos(t *testing.T) {
 		assert.Equal(t, 1, len(resp.GetSegmentInfo()))
 	})
 }
+
+func TestServer_ListIndexedSegment(t *testing.T) {
+	var (
+		collID     = UniqueID(1)
+		partID     = UniqueID(2)
+		fieldID    = UniqueID(10)
+		indexID    = UniqueID(100)
+		segID      = UniqueID(1000)
+		buildID    = UniqueID(10000)
+		indexName  = "default_idx"
+		typeParams = []*commonpb.KeyValuePair{
+			{
+				Key:   "dim",
+				Value: "128",
+			},
+		}
+		indexParams = []*commonpb.KeyValuePair{
+			{
+				Key:   "index_type",
+				Value: "IVF_FLAT",
+			},
+		}
+		createTS = uint64(1000)
+		ctx      = context.Background()
+		req      = &datapb.ListIndexedSegmentRequest{
+			CollectionID: collID,
+			IndexName:    indexName,
+		}
+	)
+
+	s := &Server{
+		meta: &meta{
+			catalog: &datacoord.Catalog{MetaKv: mocks.NewMetaKv(t)},
+			indexes: map[UniqueID]map[UniqueID]*model.Index{
+				collID: {
+					//finished
+					indexID: {
+						TenantID:        "",
+						CollectionID:    collID,
+						FieldID:         fieldID,
+						IndexID:         indexID,
+						IndexName:       indexName,
+						IsDeleted:       false,
+						CreateTime:      createTS,
+						TypeParams:      typeParams,
+						IndexParams:     indexParams,
+						IsAutoIndex:     false,
+						UserIndexParams: nil,
+					},
+					indexID + 1: {
+						TenantID:        "",
+						CollectionID:    collID,
+						FieldID:         fieldID,
+						IndexID:         indexID + 1,
+						IndexName:       "default_idx_2",
+						IsDeleted:       false,
+						CreateTime:      createTS,
+						TypeParams:      typeParams,
+						IndexParams:     indexParams,
+						IsAutoIndex:     false,
+						UserIndexParams: nil,
+					},
+				},
+			},
+			segments: &SegmentsInfo{
+				map[UniqueID]*SegmentInfo{
+					segID: {
+						SegmentInfo: &datapb.SegmentInfo{
+							ID:             segID,
+							CollectionID:   collID,
+							PartitionID:    partID,
+							NumOfRows:      10000,
+							State:          commonpb.SegmentState_Flushed,
+							MaxRowNum:      65536,
+							LastExpireTime: createTS,
+						},
+						segmentIndexes: map[UniqueID]*model.SegmentIndex{
+							indexID: {
+								SegmentID:     segID,
+								CollectionID:  collID,
+								PartitionID:   partID,
+								NumRows:       10000,
+								IndexID:       indexID,
+								BuildID:       buildID,
+								NodeID:        0,
+								IndexVersion:  1,
+								IndexState:    commonpb.IndexState_Finished,
+								FailReason:    "",
+								IsDeleted:     false,
+								CreateTime:    createTS,
+								IndexFileKeys: nil,
+								IndexSize:     0,
+								WriteHandoff:  false,
+							},
+						},
+					},
+					segID + 1: {
+						SegmentInfo: &datapb.SegmentInfo{
+							ID:             segID + 1,
+							CollectionID:   collID,
+							PartitionID:    partID,
+							NumOfRows:      3000,
+							State:          commonpb.SegmentState_Flushed,
+							MaxRowNum:      65536,
+							LastExpireTime: createTS,
+						},
+					},
+					segID + 2: {
+						SegmentInfo: &datapb.SegmentInfo{
+							ID:             segID + 2,
+							CollectionID:   collID,
+							PartitionID:    partID,
+							NumOfRows:      3000,
+							State:          commonpb.SegmentState_Growing,
+							MaxRowNum:      65536,
+							LastExpireTime: createTS,
+						},
+						segmentIndexes: map[UniqueID]*model.SegmentIndex{
+							indexID: {
+								SegmentID:     segID + 2,
+								CollectionID:  collID,
+								PartitionID:   partID,
+								NumRows:       3000,
+								IndexID:       indexID,
+								BuildID:       buildID + 2,
+								NodeID:        0,
+								IndexVersion:  1,
+								IndexState:    commonpb.IndexState_Finished,
+								FailReason:    "",
+								IsDeleted:     false,
+								CreateTime:    createTS,
+								IndexFileKeys: nil,
+								IndexSize:     0,
+								WriteHandoff:  false,
+							},
+						},
+					},
+				},
+			},
+		},
+		allocator:       newMockAllocator(),
+		notifyIndexChan: make(chan UniqueID, 1),
+	}
+
+	t.Run("server not healthy", func(t *testing.T) {
+		resp, err := s.ListIndexedSegment(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_DataCoordNA, resp.GetStatus().GetErrorCode())
+	})
+
+	s.stateCode.Store(commonpb.StateCode_Healthy)
+	t.Run("list indexed segment", func(t *testing.T) {
+		resp, err := s.ListIndexedSegment(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	t.Run("ambiguous index name", func(t *testing.T) {
+		resp, err := s.ListIndexedSegment(ctx, &datapb.ListIndexedSegmentRequest{
+			CollectionID: collID,
+			IndexName:    "",
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+	})
+
+	t.Run("index not exist", func(t *testing.T) {
+		resp, err := s.ListIndexedSegment(ctx, &datapb.ListIndexedSegmentRequest{
+			CollectionID: collID,
+			IndexName:    "indexName_3",
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_IndexNotExist, resp.GetStatus().GetErrorCode())
+	})
+}

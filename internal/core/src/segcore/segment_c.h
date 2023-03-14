@@ -97,6 +97,12 @@ DropFieldData(CSegmentInterface c_segment, int64_t field_id);
 CStatus
 DropSealedSegmentIndex(CSegmentInterface c_segment, int64_t field_id);
 
+CStatus
+DescribeSegmentIndexData(CSegmentInterface c_segment,
+                         int64_t field_id,
+                         char** data,
+                         int* str_size);
+
 //////////////////////////////    interfaces for SegmentInterface    //////////////////////////////
 CStatus
 Delete(CSegmentInterface c_segment,

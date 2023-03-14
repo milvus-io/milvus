@@ -52,6 +52,9 @@ class VectorMemIndex : public VectorIndex {
           const SearchInfo& search_info,
           const BitsetView& bitset) override;
 
+    std::string
+    GetIndexData() override;
+
  protected:
     Config config_;
     knowhere::Index<knowhere::IndexNode> index_;

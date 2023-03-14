@@ -179,4 +179,9 @@ SegmentInternalInterface::get_real_count() const {
     return res->fields_data()[0].scalars().long_data().data(0);
 }
 
+std::string
+SegmentInternalInterface::GetIndexData(int64_t field_id) const {
+    return this->get_index_data(milvus::FieldId(field_id));
+}
+
 }  // namespace milvus::segcore

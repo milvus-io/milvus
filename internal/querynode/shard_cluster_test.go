@@ -55,16 +55,18 @@ func (m *mockSegmentDetector) watchSegments(collectionID int64, replicaID int64,
 func (m *mockSegmentDetector) Close() {}
 
 type mockShardQueryNode struct {
-	statisticResponse     *internalpb.GetStatisticsResponse
-	statisticErr          error
-	searchResult          *internalpb.SearchResults
-	searchErr             error
-	queryResult           *internalpb.RetrieveResults
-	queryErr              error
-	loadSegmentsResults   *commonpb.Status
-	loadSegmentsErr       error
-	releaseSegmentsResult *commonpb.Status
-	releaseSegmentsErr    error
+	statisticResponse              *internalpb.GetStatisticsResponse
+	statisticErr                   error
+	searchResult                   *internalpb.SearchResults
+	searchErr                      error
+	queryResult                    *internalpb.RetrieveResults
+	queryErr                       error
+	loadSegmentsResults            *commonpb.Status
+	loadSegmentsErr                error
+	releaseSegmentsResult          *commonpb.Status
+	releaseSegmentsErr             error
+	describeSegmentIndexDataResult *querypb.DescribeSegmentIndexDataResponse
+	describeSegmentIndexDataErr    error
 }
 
 func (m *mockShardQueryNode) GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest) (*internalpb.GetStatisticsResponse, error) {
@@ -85,6 +87,10 @@ func (m *mockShardQueryNode) LoadSegments(ctx context.Context, in *querypb.LoadS
 
 func (m *mockShardQueryNode) ReleaseSegments(ctx context.Context, in *querypb.ReleaseSegmentsRequest) (*commonpb.Status, error) {
 	return m.releaseSegmentsResult, m.releaseSegmentsErr
+}
+
+func (m *mockShardQueryNode) DescribeSegmentIndexData(ctx context.Context, in *querypb.DescribeSegmentIndexDataRequest) (*querypb.DescribeSegmentIndexDataResponse, error) {
+	return m.describeSegmentIndexDataResult, m.describeSegmentIndexDataErr
 }
 
 func (m *mockShardQueryNode) Stop() error {

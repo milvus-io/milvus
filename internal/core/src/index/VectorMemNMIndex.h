@@ -50,6 +50,9 @@ class VectorMemNMIndex : public VectorMemIndex {
           const SearchInfo& search_info,
           const BitsetView& bitset) override;
 
+    std::string
+    GetIndexData() override;
+
  private:
     void
     store_raw_data(const DatasetPtr& dataset);

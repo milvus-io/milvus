@@ -99,4 +99,13 @@ SearchOnSealed(const Schema& schema,
     result.total_nq_ = dataset.num_queries;
 }
 
+std::string
+GetIndexData(const segcore::SealedIndexingRecord& record,
+             const milvus::FieldId field_id) {
+    auto field_indexing = record.get_field_indexing(field_id);
+    auto vec_index =
+        dynamic_cast<index::VectorIndex*>(field_indexing->indexing_.get());
+    return vec_index->GetIndexData();
+}
+
 }  // namespace milvus::query

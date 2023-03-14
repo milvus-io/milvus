@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/metrics"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/util/metautil"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
@@ -618,4 +619,66 @@ func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoReq
 		zap.String("indexName", req.GetIndexName()))
 
 	return ret, nil
+}
+
+func (s *Server) ListIndexedSegment(ctx context.Context, req *datapb.ListIndexedSegmentRequest) (*datapb.ListIndexedSegmentResponse, error) {
+	log := log.Ctx(ctx)
+	log.Info("receive GetIndexInfos request", zap.Int64("collectionID", req.GetCollectionID()),
+		zap.String("indexName", req.GetIndexName()))
+	errResp := &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		Reason:    "",
+	}
+	if s.isClosed() {
+		log.Warn(msgDataCoordIsUnhealthy(paramtable.GetNodeID()))
+		errResp.ErrorCode = commonpb.ErrorCode_DataCoordNA
+		errResp.Reason = msgDataCoordIsUnhealthy(paramtable.GetNodeID())
+		return &datapb.ListIndexedSegmentResponse{
+			Status: errResp,
+		}, nil
+	}
+
+	indexes := s.meta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName())
+	if len(indexes) == 0 {
+		errResp.ErrorCode = commonpb.ErrorCode_IndexNotExist
+		errResp.Reason = fmt.Sprintf("there is no index on collection: %d with the index name: %s", req.CollectionID, req.IndexName)
+		log.Error("GetIndexState fail", zap.Int64("collectionID", req.CollectionID),
+			zap.String("indexName", req.IndexName), zap.String("fail reason", errResp.Reason))
+		return &datapb.ListIndexedSegmentResponse{
+			Status: errResp,
+		}, nil
+	}
+	if len(indexes) > 1 {
+		log.Warn(msgAmbiguousIndexName())
+		errResp.ErrorCode = commonpb.ErrorCode_UnexpectedError
+		errResp.Reason = msgAmbiguousIndexName()
+		return &datapb.ListIndexedSegmentResponse{
+			Status: errResp,
+		}, nil
+	}
+
+	segments := s.meta.GetSegmentsOfCollection(req.GetCollectionID())
+	indexedSegmentIDs := make([]UniqueID, 0)
+	for _, s := range segments {
+		if !isFlush(s) {
+			continue
+		}
+		segIdx, ok := s.segmentIndexes[indexes[0].IndexID]
+		if !ok {
+			continue
+		}
+		if segIdx.IndexState == commonpb.IndexState_Finished {
+			indexedSegmentIDs = append(indexedSegmentIDs, s.ID)
+		}
+	}
+	log.Info("ListIndexedSegment success", zap.Int64("collectionID", req.GetCollectionID()), zap.String("indexName", req.GetIndexName()),
+		zap.Int64("indexID", indexes[0].IndexID), zap.Int64s("indexed segmentIDs", indexedSegmentIDs))
+
+	return &datapb.ListIndexedSegmentResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
+		},
+		SegmentIDs: indexedSegmentIDs,
+	}, nil
 }

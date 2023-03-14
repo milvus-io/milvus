@@ -414,3 +414,21 @@ func (c *Client) SyncDistribution(ctx context.Context, req *querypb.SyncDistribu
 	}
 	return ret.(*commonpb.Status), err
 }
+
+func (c *Client) DescribeSegmentIndexData(ctx context.Context, req *querypb.DescribeSegmentIndexDataRequest) (*querypb.DescribeSegmentIndexDataResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID()),
+	)
+	ret, err := c.grpcClient.ReCall(ctx, func(client querypb.QueryNodeClient) (any, error) {
+		if !funcutil.CheckCtxValid(ctx) {
+			return nil, ctx.Err()
+		}
+		return client.DescribeSegmentIndexData(ctx, req)
+	})
+	if err != nil || ret == nil {
+		return nil, err
+	}
+	return ret.(*querypb.DescribeSegmentIndexDataResponse), err
+}

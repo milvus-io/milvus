@@ -135,3 +135,7 @@ func (m *QueryNodeMock) GetDataDistribution(context.Context, *querypb.GetDataDis
 func (m *QueryNodeMock) SyncDistribution(context.Context, *querypb.SyncDistributionRequest) (*commonpb.Status, error) {
 	return nil, nil
 }
+
+func (m *QueryNodeMock) DescribeSegmentIndexData(ctx context.Context, request *querypb.DescribeSegmentIndexDataRequest) (*querypb.DescribeSegmentIndexDataResponse, error) {
+	return nil, nil
+}

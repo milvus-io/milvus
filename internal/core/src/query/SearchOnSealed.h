@@ -16,6 +16,8 @@
 #include "query/SearchOnGrowing.h"
 #include "segcore/SealedIndexingRecord.h"
 
+#include <string>
+
 namespace milvus::query {
 
 void
@@ -36,5 +38,9 @@ SearchOnSealed(const Schema& schema,
                int64_t row_count,
                const BitsetView& bitset,
                SearchResult& result);
+
+std::string
+GetIndexData(const segcore::SealedIndexingRecord& record,
+             const milvus::FieldId field_id);
 
 }  // namespace milvus::query

@@ -232,6 +232,20 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
 }
 
 template <typename T>
+std::string
+VectorDiskAnnIndex<T>::GetIndexData() {
+    knowhere::Json final;
+    auto res = index_.GetIndexMeta(final);
+    if (!res.has_value()) {
+        PanicCodeInfo(
+            ErrorCodeEnum::UnexpectedError,
+            "failed to GetIndexData, " + MatchKnowhereError(res.error()));
+    }
+    auto dataset = res.value();
+    return dataset->GetJsonInfo();
+}
+
+template <typename T>
 void
 VectorDiskAnnIndex<T>::CleanLocalData() {
     auto& local_chunk_manager = storage::LocalChunkManager::GetInstance();

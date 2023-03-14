@@ -89,6 +89,7 @@ type shardQueryNode interface {
 	Query(context.Context, *querypb.QueryRequest) (*internalpb.RetrieveResults, error)
 	LoadSegments(ctx context.Context, in *querypb.LoadSegmentsRequest) (*commonpb.Status, error)
 	ReleaseSegments(ctx context.Context, in *querypb.ReleaseSegmentsRequest) (*commonpb.Status, error)
+	DescribeSegmentIndexData(ctx context.Context, in *querypb.DescribeSegmentIndexDataRequest) (*querypb.DescribeSegmentIndexDataResponse, error)
 	Stop() error
 }
 
@@ -1169,4 +1170,96 @@ func getQueryWithStreamingFunc(queryCtx context.Context, req *querypb.QueryReque
 			metrics.QueryLabel).Observe(float64(streamingTask.reduceDur.Milliseconds()))
 		return nil, streamingTask.Ret
 	}
+}
+
+func (sc *ShardCluster) DescribeSegmentIndexData(ctx context.Context, req *querypb.DescribeSegmentIndexDataRequest) ([]*querypb.DescribeSegmentIndexDataResponse, error) {
+	log := log.Ctx(ctx)
+	if !sc.serviceable() {
+		err := WrapErrShardNotAvailable(sc.replicaID, sc.vchannelName)
+		log.Warn("failed to DescribeSegmentIndexData on shard",
+			zap.Int64("replicaID", sc.replicaID),
+			zap.String("channel", sc.vchannelName),
+			zap.Int32("state", sc.state.Load()),
+			zap.Any("version", sc.currentVersion),
+			zap.Error(err),
+		)
+		return nil, err
+	}
+	if !funcutil.SliceContain(req.GetDmlChannels(), sc.vchannelName) {
+		return nil, fmt.Errorf("ShardCluster for %s does not match request channels :%v", sc.vchannelName, req.GetDmlChannels())
+	}
+
+	// get node allocation and maintains the inUse reference count
+	segAllocs, versionID := sc.segmentAllocations(nil)
+	defer sc.finishUsage(versionID)
+
+	log.Debug("cluster segment distribution", zap.Int("len", len(segAllocs)))
+	for nodeID, segmentIDs := range segAllocs {
+		log.Debug("segments distribution", zap.Int64("nodeID", nodeID), zap.Int64s("segments", segmentIDs))
+		for i := 0; i < len(segmentIDs); i++ {
+			exist := false
+			for _, searchSegID := range req.GetSegmentIDs() {
+				if segmentIDs[i] == searchSegID {
+					exist = true
+					break
+				}
+			}
+			if !exist {
+				segAllocs[nodeID] = append(segAllocs[nodeID][:i], segAllocs[nodeID][i+1:]...)
+				i--
+			}
+		}
+	}
+
+	// concurrent visiting nodes
+	var wg sync.WaitGroup
+	reqCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	var err error
+	var resultMut sync.Mutex
+	results := make([]*querypb.DescribeSegmentIndexDataResponse, 0, len(segAllocs))
+
+	// dispatch request to followers
+	for nodeID, segments := range segAllocs {
+		nodeReq := typeutil.Clone(req)
+		nodeReq.GetBase().TargetID = nodeID
+		nodeReq.SegmentIDs = segments
+		nodeReq.DmlChannels = req.DmlChannels
+		nodeReq.FromShardLeader = true
+		node, ok := sc.getNode(nodeID)
+		if !ok { // meta dismatch, report error
+			return nil, fmt.Errorf("%w, node %d not found",
+				WrapErrShardNotAvailable(sc.replicaID, sc.vchannelName),
+				nodeID,
+			)
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			partialResult, nodeErr := node.client.DescribeSegmentIndexData(reqCtx, nodeReq)
+			resultMut.Lock()
+			defer resultMut.Unlock()
+			if nodeErr != nil || partialResult.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+				if err == nil {
+					err = fmt.Errorf("Search %d failed, reason %s err %w", node.nodeID, partialResult.GetStatus().GetReason(), nodeErr)
+				}
+				cancel()
+				return
+			}
+			results = append(results, partialResult)
+		}()
+	}
+
+	wg.Wait()
+	if err != nil {
+		log.Warn("failed to do DescribeSegmentIndexData",
+			zap.Int64("sourceID", req.GetBase().GetSourceID()),
+			zap.Strings("channels", req.GetDmlChannels()),
+			zap.Int64s("segmentIDs", req.GetSegmentIDs()),
+			zap.Error(err))
+		return nil, err
+	}
+
+	return results, nil
 }

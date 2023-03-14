@@ -198,6 +198,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
                   const BitsetView& bitset,
                   SearchResult& output) const override;
 
+    std::string
+    get_index_data(FieldId field_id) const override;
+
  public:
     void
     mask_with_delete(BitsetType& bitset,

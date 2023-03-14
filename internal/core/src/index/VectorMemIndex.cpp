@@ -146,4 +146,17 @@ VectorMemIndex::Query(const DatasetPtr dataset,
     return result;
 }
 
+std::string
+VectorMemIndex::GetIndexData() {
+    knowhere::Json final;
+    auto res = index_.GetIndexMeta(final);
+    if (!res.has_value()) {
+        PanicCodeInfo(
+            ErrorCodeEnum::UnexpectedError,
+            "failed to GetIndexData, " + MatchKnowhereError(res.error()));
+    }
+    auto dataset = res.value();
+    return dataset->GetJsonInfo();
+}
+
 }  // namespace milvus::index

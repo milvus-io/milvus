@@ -79,6 +79,8 @@ service DataCoord {
   // Deprecated: use DescribeIndex instead
   rpc GetIndexBuildProgress(index.GetIndexBuildProgressRequest) returns (index.GetIndexBuildProgressResponse) {}
 
+  rpc ListIndexedSegment(ListIndexedSegmentRequest) returns (ListIndexedSegmentResponse) {}
+
   rpc GcConfirm(GcConfirmRequest) returns (GcConfirmResponse) {}
 }
 
@@ -645,6 +647,16 @@ message GcConfirmRequest {
 message GcConfirmResponse {
   common.Status status = 1;
   bool gc_finished = 2;
+}
+
+message ListIndexedSegmentRequest {
+  int64 collectionID = 1;
+  string index_name = 2;
+}
+
+message ListIndexedSegmentResponse {
+  common.Status status = 1;
+  repeated int64 segmentIDs = 2;
 }
 
 //message IndexInfo {

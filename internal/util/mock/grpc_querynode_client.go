@@ -108,3 +108,7 @@ func (m *GrpcQueryNodeClient) SyncDistribution(ctx context.Context, in *querypb.
 func (m *GrpcQueryNodeClient) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmChannelRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }
+
+func (m *GrpcQueryNodeClient) DescribeSegmentIndexData(ctx context.Context, req *querypb.DescribeSegmentIndexDataRequest, opts ...grpc.CallOption) (*querypb.DescribeSegmentIndexDataResponse, error) {
+	return &querypb.DescribeSegmentIndexDataResponse{}, m.Err
+}

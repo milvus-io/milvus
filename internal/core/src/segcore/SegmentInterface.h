@@ -55,6 +55,9 @@ class SegmentInterface {
     virtual std::unique_ptr<proto::segcore::RetrieveResults>
     Retrieve(const query::RetrievePlan* Plan, Timestamp timestamp) const = 0;
 
+    virtual std::string
+    GetIndexData(int64_t field_id) const = 0;
+
     // TODO: memory use is not correct when load string or load string index
     virtual int64_t
     GetMemoryUsageInBytes() const = 0;
@@ -116,6 +119,9 @@ class SegmentInternalInterface : public SegmentInterface {
            const query::PlaceholderGroup* placeholder_group,
            Timestamp timestamp) const override;
 
+    std::string
+    GetIndexData(int64_t field_id) const override;
+
     void
     FillPrimaryKeys(const query::Plan* plan,
                     SearchResult& results) const override;
@@ -148,6 +154,9 @@ class SegmentInternalInterface : public SegmentInterface {
                   Timestamp timestamp,
                   const BitsetView& bitset,
                   SearchResult& output) const = 0;
+
+    virtual std::string
+    get_index_data(FieldId field_id) const = 0;
 
     virtual void
     mask_with_delete(BitsetType& bitset,

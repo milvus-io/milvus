@@ -33,6 +33,7 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/federpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/common"
@@ -1139,6 +1140,18 @@ func TestProxy(t *testing.T) {
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	wg.Add(1)
+	t.Run("list indexed segment", func(t *testing.T) {
+		defer wg.Done()
+		resp, err := proxy.ListIndexedSegment(ctx, &federpb.ListIndexedSegmentRequest{
+			Base:           nil,
+			CollectionName: collectionName,
+			IndexName:      indexName,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
 	loaded := true
@@ -2540,6 +2553,18 @@ func TestProxy(t *testing.T) {
 	})
 
 	wg.Add(1)
+	t.Run("ListIndexedSegment fail, unhealthy", func(t *testing.T) {
+		defer wg.Done()
+		resp, err := proxy.ListIndexedSegment(ctx, &federpb.ListIndexedSegmentRequest{
+			Base:           nil,
+			CollectionName: collectionName,
+			IndexName:      indexName,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+	})
+
+	wg.Add(1)
 	t.Run("Insert fail, unhealthy", func(t *testing.T) {
 		defer wg.Done()
 		resp, err := proxy.Insert(ctx, &milvuspb.InsertRequest{})
@@ -2889,6 +2914,18 @@ func TestProxy(t *testing.T) {
 	})
 
 	wg.Add(1)
+	t.Run("ListIndexedSegment fail, dd queue full", func(t *testing.T) {
+		defer wg.Done()
+		resp, err := proxy.ListIndexedSegment(ctx, &federpb.ListIndexedSegmentRequest{
+			Base:           nil,
+			CollectionName: collectionName,
+			IndexName:      indexName,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+	})
+
+	wg.Add(1)
 	t.Run("Flush fail, dd queue full", func(t *testing.T) {
 		defer wg.Done()
 		resp, err := proxy.Flush(ctx, &milvuspb.FlushRequest{})
@@ -3157,6 +3194,18 @@ func TestProxy(t *testing.T) {
 		resp, err := proxy.GetIndexState(shortCtx, &milvuspb.GetIndexStateRequest{})
 		assert.NoError(t, err)
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
+	})
+
+	wg.Add(1)
+	t.Run("ListIndexedSegment fail, timeout", func(t *testing.T) {
+		defer wg.Done()
+		resp, err := proxy.ListIndexedSegment(ctx, &federpb.ListIndexedSegmentRequest{
+			Base:           nil,
+			CollectionName: collectionName,
+			IndexName:      indexName,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
 	})
 
 	wg.Add(1)

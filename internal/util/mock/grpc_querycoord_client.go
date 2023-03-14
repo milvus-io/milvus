@@ -129,3 +129,7 @@ func (m *GrpcQueryCoordClient) ListResourceGroups(ctx context.Context, req *milv
 func (m *GrpcQueryCoordClient) DescribeResourceGroup(ctx context.Context, req *querypb.DescribeResourceGroupRequest, opts ...grpc.CallOption) (*querypb.DescribeResourceGroupResponse, error) {
 	return &querypb.DescribeResourceGroupResponse{}, m.Err
 }
+
+func (m *GrpcQueryCoordClient) DescribeSegmentIndexData(ctx context.Context, req *querypb.DescribeSegmentIndexDataRequest, opts ...grpc.CallOption) (*querypb.DescribeSegmentIndexDataResponse, error) {
+	return &querypb.DescribeSegmentIndexDataResponse{}, m.Err
+}

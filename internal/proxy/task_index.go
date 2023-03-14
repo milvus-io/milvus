@@ -22,16 +22,18 @@ import (
 	"strconv"
 
 	"github.com/cockroachdb/errors"
-
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
-
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/federpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/querynode"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/commonpbutil"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
@@ -42,11 +44,13 @@ import (
 )
 
 const (
-	CreateIndexTaskName           = "CreateIndexTask"
-	DescribeIndexTaskName         = "DescribeIndexTask"
-	DropIndexTaskName             = "DropIndexTask"
-	GetIndexStateTaskName         = "GetIndexStateTask"
-	GetIndexBuildProgressTaskName = "GetIndexBuildProgressTask"
+	CreateIndexTaskName              = "CreateIndexTask"
+	DescribeIndexTaskName            = "DescribeIndexTask"
+	DropIndexTaskName                = "DropIndexTask"
+	GetIndexStateTaskName            = "GetIndexStateTask"
+	GetIndexBuildProgressTaskName    = "GetIndexBuildProgressTask"
+	ListIndexedSegmentTaskName       = "ListIndexedSegment"
+	DescribeSegmentIndexDataTaskName = "DescribeSegmentIndexData"
 
 	AutoIndexName = "AUTOINDEX"
 	DimKey        = common.DimKey
@@ -511,7 +515,7 @@ func (dit *dropIndexTask) PreExecute(ctx context.Context) error {
 	}
 	dit.collectionID = collID
 
-	loaded, err := isCollectionLoaded(ctx, dit.queryCoord, collID)
+	loaded, err := checkIfLoaded(ctx, dit.queryCoord, dit.GetCollectionName(), nil)
 	if err != nil {
 		return err
 	}
@@ -727,5 +731,252 @@ func (gist *getIndexStateTask) Execute(ctx context.Context) error {
 }
 
 func (gist *getIndexStateTask) PostExecute(ctx context.Context) error {
+	return nil
+}
+
+type listIndexedSegmentTask struct {
+	Condition
+	*federpb.ListIndexedSegmentRequest
+	ctx       context.Context
+	dataCoord types.DataCoord
+	result    []int64
+
+	collectionID UniqueID
+}
+
+func (list *listIndexedSegmentTask) TraceCtx() context.Context {
+	return list.ctx
+}
+
+func (list *listIndexedSegmentTask) ID() UniqueID {
+	return list.Base.GetMsgID()
+}
+
+func (list *listIndexedSegmentTask) SetID(uid UniqueID) {
+	list.Base.MsgID = uid
+}
+
+func (list *listIndexedSegmentTask) Name() string {
+	return ListIndexedSegmentTaskName
+}
+
+func (list *listIndexedSegmentTask) Type() commonpb.MsgType {
+	return list.Base.GetMsgType()
+}
+
+func (list *listIndexedSegmentTask) BeginTs() Timestamp {
+	return list.Base.GetTimestamp()
+}
+
+func (list *listIndexedSegmentTask) EndTs() Timestamp {
+	return list.Base.GetTimestamp()
+}
+
+func (list *listIndexedSegmentTask) SetTs(ts Timestamp) {
+	list.Base.Timestamp = ts
+}
+
+func (list *listIndexedSegmentTask) OnEnqueue() error {
+	list.Base = commonpbutil.NewMsgBase()
+	return nil
+}
+
+func (list *listIndexedSegmentTask) PreExecute(ctx context.Context) error {
+	collectionID, err := globalMetaCache.GetCollectionID(ctx, list.GetCollectionName())
+	if err != nil {
+		return err
+	}
+	list.collectionID = collectionID
+	return nil
+}
+
+func (list *listIndexedSegmentTask) Execute(ctx context.Context) error {
+	resp, err := list.dataCoord.ListIndexedSegment(ctx, &datapb.ListIndexedSegmentRequest{
+		CollectionID: list.collectionID,
+		IndexName:    list.GetIndexName(),
+	})
+	if err != nil {
+		return err
+	}
+	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+		return errors.New(resp.GetStatus().GetReason())
+	}
+	list.result = resp.GetSegmentIDs()
+	return nil
+}
+
+func (list *listIndexedSegmentTask) PostExecute(ctx context.Context) error {
+	return nil
+}
+
+type describeSegmentIndexDataTask struct {
+	Condition
+	*federpb.DescribeSegmentIndexDataRequest
+	ctx        context.Context
+	queryCoord types.QueryCoord
+	dataCoord  types.DataCoord
+	result     map[int64]*federpb.SegmentIndexData
+
+	shardMgr          *shardClientMgr
+	collectionID      UniqueID
+	fieldID           UniqueID
+	searchShardPolicy pickShardPolicy
+	resultBuf         chan *querypb.DescribeSegmentIndexDataResponse
+}
+
+func (dsidt *describeSegmentIndexDataTask) TraceCtx() context.Context {
+	return dsidt.ctx
+}
+
+func (dsidt *describeSegmentIndexDataTask) ID() UniqueID {
+	return dsidt.Base.GetMsgID()
+}
+
+func (dsidt *describeSegmentIndexDataTask) SetID(uid UniqueID) {
+	dsidt.Base.MsgID = uid
+}
+
+func (dsidt *describeSegmentIndexDataTask) Name() string {
+	return ListIndexedSegmentTaskName
+}
+
+func (dsidt *describeSegmentIndexDataTask) Type() commonpb.MsgType {
+	return dsidt.Base.GetMsgType()
+}
+
+func (dsidt *describeSegmentIndexDataTask) BeginTs() Timestamp {
+	return dsidt.Base.GetTimestamp()
+}
+
+func (dsidt *describeSegmentIndexDataTask) EndTs() Timestamp {
+	return dsidt.Base.GetTimestamp()
+}
+
+func (dsidt *describeSegmentIndexDataTask) SetTs(ts Timestamp) {
+	dsidt.Base.Timestamp = ts
+}
+
+func (dsidt *describeSegmentIndexDataTask) OnEnqueue() error {
+	dsidt.Base = commonpbutil.NewMsgBase()
+	return nil
+}
+
+func (dsidt *describeSegmentIndexDataTask) PreExecute(ctx context.Context) error {
+	collectionID, err := globalMetaCache.GetCollectionID(ctx, dsidt.GetCollectionName())
+	if err != nil {
+		return err
+	}
+	dsidt.collectionID = collectionID
+	loaded, err := checkIfLoaded(ctx, dsidt.queryCoord, dsidt.GetCollectionName(), nil)
+	if err != nil {
+		return err
+	}
+
+	if !loaded {
+		return errors.New("collection is not loaded, please load collection first")
+	}
+	if dsidt.searchShardPolicy == nil {
+		dsidt.searchShardPolicy = mergeRoundRobinPolicy
+	}
+	describeIndexReq := &indexpb.DescribeIndexRequest{
+		CollectionID: collectionID,
+		IndexName:    dsidt.GetIndexName(),
+	}
+	describeIndexResp, err := dsidt.dataCoord.DescribeIndex(ctx, describeIndexReq)
+	if err != nil {
+		return err
+	}
+	if describeIndexResp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+		return errors.New(describeIndexResp.GetStatus().GetReason())
+	}
+	dsidt.fieldID = describeIndexResp.GetIndexInfos()[0].GetFieldID()
+	return nil
+}
+
+func (dsidt *describeSegmentIndexDataTask) searchShard(ctx context.Context, nodeID int64, qn types.QueryNode, channelIDs []string) error {
+	req := &querypb.DescribeSegmentIndexDataRequest{
+		Base:         dsidt.GetBase(),
+		CollectionID: dsidt.collectionID,
+		FieldID:      dsidt.fieldID,
+		SegmentIDs:   dsidt.GetSegmentsIDs(),
+		DmlChannels:  channelIDs,
+	}
+	req.GetBase().TargetID = nodeID
+
+	queryNode := querynode.GetQueryNode()
+	var resp *querypb.DescribeSegmentIndexDataResponse
+	var err error
+
+	if queryNode != nil && queryNode.IsStandAlone {
+		resp, err = queryNode.DescribeSegmentIndexData(ctx, req)
+	} else {
+		resp, err = qn.DescribeSegmentIndexData(ctx, req)
+	}
+	if err != nil {
+		log.Ctx(ctx).Warn("QueryNode describe segment index data return error",
+			zap.Int64("nodeID", nodeID),
+			zap.Error(err))
+		return err
+	}
+	if resp.GetStatus().GetErrorCode() == commonpb.ErrorCode_NotShardLeader {
+		log.Ctx(ctx).Warn("QueryNode is not shardLeader",
+			zap.Int64("nodeID", nodeID))
+		return errInvalidShardLeaders
+	}
+	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+		log.Ctx(ctx).Warn("QueryNode describe segment index data return error",
+			zap.Int64("nodeID", nodeID),
+			zap.String("reason", resp.GetStatus().GetReason()))
+		return fmt.Errorf("fail to describe segment index data, QueryNode ID=%d, reason=%s", nodeID, resp.GetStatus().GetReason())
+	}
+	dsidt.resultBuf <- resp
+	return nil
+}
+
+func (dsidt *describeSegmentIndexDataTask) Execute(ctx context.Context) error {
+	executeSearch := func(withCache bool) error {
+		shard2Leaders, err := globalMetaCache.GetShards(ctx, withCache, dsidt.GetCollectionName())
+		if err != nil {
+			return err
+		}
+		dsidt.resultBuf = make(chan *querypb.DescribeSegmentIndexDataResponse, len(shard2Leaders))
+		if err := dsidt.searchShardPolicy(ctx, dsidt.shardMgr, dsidt.searchShard, shard2Leaders); err != nil {
+			log.Warn("failed to do search", zap.Error(err), zap.String("Shards", fmt.Sprintf("%v", shard2Leaders)))
+			return err
+		}
+		return nil
+	}
+
+	err := executeSearch(WithCache)
+	if err != nil {
+		log.Warn("first search failed, updating shardleader caches and retry search",
+			zap.Error(err))
+		// invalidate cache first, since ctx may be canceled or timeout here
+		globalMetaCache.DeprecateShardCache(dsidt.GetCollectionName())
+		err = executeSearch(WithoutCache)
+	}
+	return nil
+}
+
+func (dsidt *describeSegmentIndexDataTask) PostExecute(ctx context.Context) error {
+	dsidt.result = make(map[int64]*federpb.SegmentIndexData)
+	select {
+	case <-dsidt.TraceCtx().Done():
+		log.Ctx(ctx).Warn("search task wait to finish timeout!")
+		return fmt.Errorf("describeSegmentIndexData task wait to finish timeout, msgID=%d", dsidt.ID())
+	default:
+		log.Ctx(ctx).Debug("all describeSegmentIndexData requests are finished or canceled")
+		close(dsidt.resultBuf)
+		for res := range dsidt.resultBuf {
+			log.Ctx(ctx).Debug("proxy receives one describeSegmentIndexData result")
+			for segID, indexData := range res.GetIndexDatas() {
+				if _, ok := dsidt.result[segID]; ok {
+					log.Warn("there are multiple index data if the segment", zap.Int64("segID", segID))
+					return fmt.Errorf("there are multiple index data if the segment: %d", segID)
+				}
+				dsidt.result[segID] = indexData
+			}
+		}
+	}
 	return nil
 }

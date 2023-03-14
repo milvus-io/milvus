@@ -427,6 +427,12 @@ SegmentSealedImpl::vector_search(SearchInfo& search_info,
     }
 }
 
+std::string
+SegmentSealedImpl::get_index_data(FieldId field_id) const {
+    AssertInfo(is_system_field_ready(), "System field is not ready");
+    return query::GetIndexData(vector_indexings_, field_id);
+}
+
 void
 SegmentSealedImpl::DropFieldData(const FieldId field_id) {
     if (SystemProperty::Instance().IsSystem(field_id)) {

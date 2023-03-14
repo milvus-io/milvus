@@ -52,6 +52,7 @@ type MockQueryNode struct {
 	searchResp *internalpb.SearchResults
 	queryResp  *internalpb.RetrieveResults
 	distResp   *querypb.GetDataDistributionResponse
+	dsidResp   *querypb.DescribeSegmentIndexDataResponse
 }
 
 func (m *MockQueryNode) Init() error {
@@ -159,6 +160,10 @@ func (m *MockQueryNode) GetDataDistribution(context.Context, *querypb.GetDataDis
 }
 func (m *MockQueryNode) SyncDistribution(context.Context, *querypb.SyncDistributionRequest) (*commonpb.Status, error) {
 	return m.status, m.err
+}
+
+func (m *MockQueryNode) DescribeSegmentIndexData(ctx context.Context, request *querypb.DescribeSegmentIndexDataRequest) (*querypb.DescribeSegmentIndexDataResponse, error) {
+	return m.dsidResp, m.err
 }
 
 type MockRootCoord struct {
@@ -332,6 +337,12 @@ func Test_NewServer(t *testing.T) {
 		resp, err := server.ShowConfigurations(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	t.Run("DescribeSegmentIndexData", func(t *testing.T) {
+		resp, err := server.DescribeSegmentIndexData(ctx, &querypb.DescribeSegmentIndexDataRequest{})
+		assert.Nil(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
 	err = server.Stop()

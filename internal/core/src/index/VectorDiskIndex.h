@@ -17,6 +17,7 @@
 #pragma once
 
 #include <memory>
+#include <string>
 
 #include "index/VectorIndex.h"
 #include "storage/DiskFileManagerImpl.h"
@@ -60,6 +61,9 @@ class VectorDiskAnnIndex : public VectorIndex {
     Query(const DatasetPtr dataset,
           const SearchInfo& search_info,
           const BitsetView& bitset) override;
+
+    std::string
+    GetIndexData() override;
 
     void
     CleanLocalData() override;

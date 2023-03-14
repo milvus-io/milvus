@@ -31,7 +31,6 @@ import (
 	"unsafe"
 
 	"github.com/cockroachdb/errors"
-
 	"github.com/golang/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
