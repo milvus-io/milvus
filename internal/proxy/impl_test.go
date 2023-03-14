@@ -141,7 +141,13 @@ func TestProxy_CheckHealth(t *testing.T) {
 
 		states := []milvuspb.QuotaState{milvuspb.QuotaState_DenyToWrite, milvuspb.QuotaState_DenyToRead}
 		codes := []commonpb.ErrorCode{commonpb.ErrorCode_MemoryQuotaExhausted, commonpb.ErrorCode_ForceDeny}
-		node.multiRateLimiter.SetQuotaStates(states, codes)
+		node.multiRateLimiter.SetRates([]*proxypb.CollectionRate{
+			{
+				Collection: 1,
+				States:     states,
+				Codes:      codes,
+			},
+		})
 		resp, err = node.CheckHealth(context.Background(), &milvuspb.CheckHealthRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, true, resp.IsHealthy)

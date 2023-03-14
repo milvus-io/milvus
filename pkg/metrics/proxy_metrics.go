@@ -222,7 +222,7 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "limiter_rate",
 			Help:      "",
-		}, []string{nodeIDLabelName, msgTypeLabelName})
+		}, []string{nodeIDLabelName, collectionIDLabelName, msgTypeLabelName})
 
 	ProxyHookFunc = prometheus.NewCounterVec(
 		prometheus.CounterOpts{

@@ -26,7 +26,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
-	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -53,7 +52,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/ratelimitutil"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -4453,24 +4451,11 @@ func (node *Proxy) SetRates(ctx context.Context, request *proxypb.SetRatesReques
 		return resp, nil
 	}
 
-	err := node.multiRateLimiter.globalRateLimiter.setRates(request.GetRates())
+	err := node.multiRateLimiter.SetRates(request.GetRates())
 	// TODO: set multiple rate limiter rates
 	if err != nil {
 		resp.Reason = err.Error()
 		return resp, nil
-	}
-	node.multiRateLimiter.SetQuotaStates(request.GetStates(), request.GetCodes())
-	rateStrs := lo.FilterMap(request.GetRates(), func(r *internalpb.Rate, _ int) (string, bool) {
-		return fmt.Sprintf("rateType:%s, rate:%s", r.GetRt().String(), ratelimitutil.Limit(r.GetR()).String()),
-			ratelimitutil.Limit(r.GetR()) != ratelimitutil.Inf
-	})
-	if len(rateStrs) > 0 {
-		log.RatedInfo(30, "current rates in proxy", zap.Int64("proxyNodeID", paramtable.GetNodeID()), zap.Strings("rates", rateStrs))
-	}
-	if len(request.GetStates()) != 0 {
-		for i := range request.GetStates() {
-			log.Warn("Proxy set quota states", zap.String("state", request.GetStates()[i].String()), zap.String("reason", request.GetCodes()[i].String()))
-		}
 	}
 	resp.ErrorCode = commonpb.ErrorCode_Success
 	return resp, nil

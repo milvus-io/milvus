@@ -67,6 +67,12 @@ type ReadInfoInQueue struct {
 	AvgQueueDuration time.Duration
 }
 
+// NodeEffect contains the a node and its effected collection info.
+type NodeEffect struct {
+	NodeID        int64
+	CollectionIDs []int64
+}
+
 // QueryNodeQuotaMetrics are metrics of QueryNode.
 type QueryNodeQuotaMetrics struct {
 	Hms         HardwareMetrics
@@ -74,6 +80,7 @@ type QueryNodeQuotaMetrics struct {
 	Fgm         FlowGraphMetric
 	SearchQueue ReadInfoInQueue
 	QueryQueue  ReadInfoInQueue
+	Effect      NodeEffect
 }
 
 type DataCoordQuotaMetrics struct {
@@ -82,9 +89,10 @@ type DataCoordQuotaMetrics struct {
 
 // DataNodeQuotaMetrics are metrics of DataNode.
 type DataNodeQuotaMetrics struct {
-	Hms HardwareMetrics
-	Rms []RateMetric
-	Fgm FlowGraphMetric
+	Hms    HardwareMetrics
+	Rms    []RateMetric
+	Fgm    FlowGraphMetric
+	Effect NodeEffect
 }
 
 // ProxyQuotaMetrics are metrics of Proxy.
