@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/etcd"
+	"github.com/milvus-io/milvus/internal/util/merr"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	mock "github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -1051,35 +1052,34 @@ func (suite *TaskSuite) TestChannelTaskReplace() {
 
 func (suite *TaskSuite) TestCreateTaskBehavior() {
 	chanelTask, err := NewChannelTask(context.TODO(), 5*time.Second, 0, 0, 0)
-	suite.Error(err)
-	suite.ErrorIs(err, ErrEmptyActions)
+	suite.ErrorIs(err, merr.ErrParameterInvalid)
 	suite.Nil(chanelTask)
 
 	action := NewSegmentAction(0, 0, "", 0)
 	chanelTask, err = NewChannelTask(context.TODO(), 5*time.Second, 0, 0, 0, action)
-	suite.ErrorIs(err, ErrActionsTypeInconsistent)
+	suite.ErrorIs(err, merr.ErrParameterInvalid)
 	suite.Nil(chanelTask)
 
 	action1 := NewChannelAction(0, 0, "fake-channel1")
 	action2 := NewChannelAction(0, 0, "fake-channel2")
 	chanelTask, err = NewChannelTask(context.TODO(), 5*time.Second, 0, 0, 0, action1, action2)
-	suite.ErrorIs(err, ErrActionsTargetInconsistent)
+	suite.ErrorIs(err, merr.ErrParameterInvalid)
 	suite.Nil(chanelTask)
 
 	segmentTask, err := NewSegmentTask(context.TODO(), 5*time.Second, 0, 0, 0)
-	suite.ErrorIs(err, ErrEmptyActions)
+	suite.ErrorIs(err, merr.ErrParameterInvalid)
 	suite.Nil(segmentTask)
 
 	channelAction := NewChannelAction(0, 0, "fake-channel1")
 	segmentTask, err = NewSegmentTask(context.TODO(), 5*time.Second, 0, 0, 0, channelAction)
-	suite.ErrorIs(err, ErrActionsTypeInconsistent)
+	suite.ErrorIs(err, merr.ErrParameterInvalid)
 	suite.Nil(segmentTask)
 
 	segmentAction1 := NewSegmentAction(0, 0, "", 0)
 	segmentAction2 := NewSegmentAction(0, 0, "", 1)
 
 	segmentTask, err = NewSegmentTask(context.TODO(), 5*time.Second, 0, 0, 0, segmentAction1, segmentAction2)
-	suite.ErrorIs(err, ErrActionsTargetInconsistent)
+	suite.ErrorIs(err, merr.ErrParameterInvalid)
 	suite.Nil(segmentTask)
 }
 

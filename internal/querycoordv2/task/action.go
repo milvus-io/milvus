@@ -17,8 +17,6 @@
 package task
 
 import (
-	"github.com/cockroachdb/errors"
-
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
 
@@ -26,12 +24,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
 	. "github.com/milvus-io/milvus/internal/util/typeutil"
-)
-
-var (
-	ErrActionCanceled  = errors.New("ActionCanceled")
-	ErrActionRPCFailed = errors.New("ActionRPCFailed")
-	ErrActionStale     = errors.New("ActionStale")
 )
 
 type ActionType = int32

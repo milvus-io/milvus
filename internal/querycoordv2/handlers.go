@@ -149,12 +149,12 @@ func (s *Server) balanceSegments(ctx context.Context, req *querypb.LoadBalanceRe
 		)
 
 		if err != nil {
-			log.Warn("Create segment task for balance failed",
+			log.Warn("create segment task for balance failed",
 				zap.Int64("collection", req.GetCollectionID()),
 				zap.Int64("replica", replica.GetID()),
 				zap.String("channel", plan.Segment.InsertChannel),
-				zap.Int64("From", srcNode),
-				zap.Int64("To", plan.To),
+				zap.Int64("from", srcNode),
+				zap.Int64("to", plan.To),
 				zap.Error(err),
 			)
 			continue

@@ -22,9 +22,9 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/internal/util/merr"
 	. "github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/atomic"
 )
@@ -44,12 +44,6 @@ const (
 	TaskPriorityLow    int32 = iota // for balance checker
 	TaskPriorityNormal              // for segment checker
 	TaskPriorityHigh                // for channel checker
-)
-
-var (
-	ErrEmptyActions              = errors.New("actions could not be empty")
-	ErrActionsTypeInconsistent   = errors.New("actions have inconsistent type")
-	ErrActionsTargetInconsistent = errors.New("actions have inconsistent target channel/segment")
 )
 
 var (
@@ -249,7 +243,7 @@ func NewSegmentTask(ctx context.Context,
 	replicaID UniqueID,
 	actions ...Action) (*SegmentTask, error) {
 	if len(actions) == 0 {
-		return nil, ErrEmptyActions
+		return nil, errors.WithStack(merr.WrapErrParameterInvalid("non-empty actions", "no action"))
 	}
 
 	segmentID := int64(-1)
@@ -257,13 +251,13 @@ func NewSegmentTask(ctx context.Context,
 	for _, action := range actions {
 		action, ok := action.(*SegmentAction)
 		if !ok {
-			return nil, ErrActionsTypeInconsistent
+			return nil, errors.WithStack(merr.WrapErrParameterInvalid("SegmentAction", "other action", "all actions must be with the same type"))
 		}
 		if segmentID == -1 {
 			segmentID = action.SegmentID()
 			shard = action.Shard()
 		} else if segmentID != action.SegmentID() {
-			return nil, ErrActionsTargetInconsistent
+			return nil, errors.WithStack(merr.WrapErrParameterInvalid(segmentID, action.SegmentID(), "all actions must operate the same segment"))
 		}
 	}
 
@@ -301,19 +295,19 @@ func NewChannelTask(ctx context.Context,
 	replicaID UniqueID,
 	actions ...Action) (*ChannelTask, error) {
 	if len(actions) == 0 {
-		return nil, ErrEmptyActions
+		return nil, errors.WithStack(merr.WrapErrParameterInvalid("non-empty actions", "no action"))
 	}
 
 	channel := ""
 	for _, action := range actions {
-		channelAction, ok := action.(interface{ ChannelName() string })
+		channelAction, ok := action.(*ChannelAction)
 		if !ok {
-			return nil, ErrActionsTypeInconsistent
+			return nil, errors.WithStack(merr.WrapErrParameterInvalid("ChannelAction", "other action", "all actions must be with the same type"))
 		}
 		if channel == "" {
 			channel = channelAction.ChannelName()
 		} else if channel != channelAction.ChannelName() {
-			return nil, ErrActionsTargetInconsistent
+			return nil, errors.WithStack(merr.WrapErrParameterInvalid(channel, channelAction.ChannelName(), "all actions must operate the same segment"))
 		}
 	}
 

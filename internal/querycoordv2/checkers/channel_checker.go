@@ -193,11 +193,11 @@ func (c *ChannelChecker) createChannelReduceTasks(ctx context.Context, channels 
 		action := task.NewChannelAction(ch.Node, task.ActionTypeReduce, ch.GetChannelName())
 		task, err := task.NewChannelTask(ctx, Params.QueryCoordCfg.ChannelTaskTimeout.GetAsDuration(time.Millisecond), c.ID(), ch.GetCollectionID(), replicaID, action)
 		if err != nil {
-			log.Warn("Create channel reduce task failed",
+			log.Warn("create channel reduce task failed",
 				zap.Int64("collection", ch.GetCollectionID()),
 				zap.Int64("replica", replicaID),
 				zap.String("channel", ch.GetChannelName()),
-				zap.Int64("From", ch.Node),
+				zap.Int64("from", ch.Node),
 				zap.Error(err),
 			)
 			continue

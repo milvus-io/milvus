@@ -296,11 +296,11 @@ func (c *SegmentChecker) createSegmentReduceTasks(ctx context.Context, segments 
 		)
 
 		if err != nil {
-			log.Warn("Create segment reduce task failed",
+			log.Warn("create segment reduce task failed",
 				zap.Int64("collection", s.GetCollectionID()),
 				zap.Int64("replica", replicaID),
 				zap.String("channel", s.GetInsertChannel()),
-				zap.Int64("From", s.Node),
+				zap.Int64("from", s.Node),
 				zap.Error(err),
 			)
 			continue
