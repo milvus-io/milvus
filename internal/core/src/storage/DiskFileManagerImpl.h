@@ -58,13 +58,13 @@ class DiskFileManagerImpl : public FileManagerImpl {
     }
 
     std::string
-    GetRemoteIndexObjectPrefix();
+    GetRemoteIndexObjectPrefix() const;
 
     std::string
-    GetLocalIndexObjectPrefix();
+    GetLocalIndexObjectPrefix() const;
 
     std::string
-    GetLocalRawDataObjectPrefix();
+    GetLocalRawDataObjectPrefix() const;
 
     std::map<std::string, int64_t>
     GetRemotePathsToFileSize() const {
@@ -75,6 +75,17 @@ class DiskFileManagerImpl : public FileManagerImpl {
     GetLocalFilePaths() const {
         return local_paths_;
     }
+
+    std::string
+    GenerateRemoteIndexFile(std::string file_name, int64_t slice_num) const {
+        return GetRemoteIndexObjectPrefix() + "/" + file_name + "_" + std::to_string(slice_num);
+    }
+
+    void
+    AddBatchIndexFiles(const std::string& local_file_name,
+                       const std::vector<int64_t>& local_file_offsets,
+                       const std::vector<std::string>& remote_files,
+                       const std::vector<int64_t>& remote_file_sizes);
 
     void
     CacheIndexToDisk(std::vector<std::string> remote_files);
