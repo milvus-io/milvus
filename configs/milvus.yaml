@@ -180,7 +180,7 @@ queryCoord:
   segmentTaskTimeout: 120000 # 2 minute
   distPullInterval: 500
   heartbeatAvailableInterval: 10000 # 10s, Only QueryNodes which fetched heartbeats within the duration are available
-  loadTimeoutSeconds: 600
+  loadTimeoutSeconds: 1800
   checkHandoffInterval: 5000
   enableActiveStandby: false
   port: 19531

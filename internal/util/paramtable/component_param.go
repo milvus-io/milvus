@@ -1214,7 +1214,7 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 	p.LoadTimeoutSeconds = ParamItem{
 		Key:          "queryCoord.loadTimeoutSeconds",
 		Version:      "2.0.0",
-		DefaultValue: "600",
+		DefaultValue: "1800",
 		PanicIfEmpty: true,
 		Export:       true,
 	}
