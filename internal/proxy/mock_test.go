@@ -65,10 +65,16 @@ func newMockTimestampAllocatorInterface() timestampAllocatorInterface {
 }
 
 type mockTsoAllocator struct {
+	mu        sync.Mutex
+	logicPart uint32
 }
 
 func (tso *mockTsoAllocator) AllocOne(ctx context.Context) (Timestamp, error) {
-	return Timestamp(time.Now().UnixNano()), nil
+	tso.mu.Lock()
+	defer tso.mu.Unlock()
+	tso.logicPart++
+	physical := uint64(time.Now().UnixMilli())
+	return (physical << 18) + uint64(tso.logicPart), nil
 }
 
 func newMockTsoAllocator() tsoAllocator {

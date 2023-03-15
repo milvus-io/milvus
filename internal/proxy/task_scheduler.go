@@ -219,13 +219,15 @@ type pChanStatInfo struct {
 
 type dmTaskQueue struct {
 	*baseTaskQueue
-	lock sync.Mutex
 
 	statsLock            sync.RWMutex
 	pChanStatisticsInfos map[pChan]*pChanStatInfo
 }
 
 func (queue *dmTaskQueue) Enqueue(t task) error {
+	// This statsLock has two functions:
+	//	1) Protect member pChanStatisticsInfos
+	//	2) Serialize the timestamp allocation for dml tasks
 	queue.statsLock.Lock()
 	defer queue.statsLock.Unlock()
 	//1. preAdd will check whether provided task is valid or addable
@@ -301,12 +303,12 @@ func (queue *dmTaskQueue) commitPChanStats(dmt dmlTask, pChannels []pChan) {
 			queue.pChanStatisticsInfos[cName] = currentStat
 		} else {
 			if currentStat.minTs > newStat.minTs {
-				queue.pChanStatisticsInfos[cName].minTs = newStat.minTs
+				currentStat.minTs = newStat.minTs
 			}
 			if currentStat.maxTs < newStat.maxTs {
-				queue.pChanStatisticsInfos[cName].maxTs = newStat.maxTs
+				currentStat.maxTs = newStat.maxTs
 			}
-			queue.pChanStatisticsInfos[cName].tsSet[currentStat.minTs] = struct{}{}
+			currentStat.tsSet[newStat.minTs] = struct{}{}
 		}
 	}
 }
@@ -317,20 +319,21 @@ func (queue *dmTaskQueue) popPChanStats(t task) error {
 		if err != nil {
 			return err
 		}
+		taskTs := t.BeginTs()
 		for _, cName := range channels {
 			info, ok := queue.pChanStatisticsInfos[cName]
 			if ok {
-				delete(queue.pChanStatisticsInfos[cName].tsSet, info.minTs)
-				if len(queue.pChanStatisticsInfos[cName].tsSet) <= 0 {
+				delete(info.tsSet, taskTs)
+				if len(info.tsSet) <= 0 {
 					delete(queue.pChanStatisticsInfos, cName)
-				} else if queue.pChanStatisticsInfos[cName].minTs == info.minTs {
-					minTs := info.maxTs
-					for ts := range queue.pChanStatisticsInfos[cName].tsSet {
-						if ts < minTs {
-							minTs = ts
+				} else {
+					newMinTs := info.maxTs
+					for ts := range info.tsSet {
+						if newMinTs > ts {
+							newMinTs = ts
 						}
 					}
-					queue.pChanStatisticsInfos[cName].minTs = minTs
+					info.minTs = newMinTs
 				}
 			}
 		}
