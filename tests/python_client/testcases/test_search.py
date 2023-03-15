@@ -40,7 +40,10 @@ default_bool_field_name = ct.default_bool_field_name
 default_string_field_name = ct.default_string_field_name
 default_index_params = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
 vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
-
+range_search_supported_index = ct.all_index_types[:5]
+range_search_supported_index.append(ct.all_index_types[7])
+range_search_supported_index_params = ct.default_index_params[:5]
+range_search_supported_index_params.append(ct.default_index_params[7])
 uid = "test_search"
 nq = 1
 epsilon = 0.001
@@ -134,6 +137,13 @@ class TestCollectionSearchInvalid(TestcaseBase):
         if request.param == 9999999999:
             pytest.skip("9999999999 is valid for guarantee_timestamp")
         yield request.param
+
+    @pytest.fixture(scope="function", params=ct.get_invalid_strs)
+    def get_invalid_range_search_paras(self, request):
+        if request.param == 1:
+            pytest.skip("number is valid for range search paras")
+        yield request.param
+
 
     """
     ******************************************************************
@@ -917,6 +927,178 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             check_items={"err_code": 1,
                                          "err_msg": f"`round_decimal` value {round_decimal} is illegal"})
 
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_range_search_invalid_radius(self, get_invalid_range_search_paras):
+        """
+        target: test range search with invalid radius
+        method: range search with invalid radius
+        expected: raise exception and report the error
+        """
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix, True, nb=10)[0]
+        # 2. range search
+        log.info("test_range_search_invalid_radius: Range searching collection %s" % collection_w.name)
+        radius = get_invalid_range_search_paras
+        range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "radius": radius, "range_filter": 0}}
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            range_search_params, default_limit,
+                            default_search_exp,
+                            check_task=CheckTasks.err_res,
+                            check_items={"err_code": 1,
+                                         "err_msg": f"type must be number"})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_range_search_invalid_range_filter(self, get_invalid_range_search_paras):
+        """
+        target: test range search with invalid range_filter
+        method: range search with invalid range_filter
+        expected: raise exception and report the error
+        """
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix, True, nb=10)[0]
+        # 2. range search
+        log.info("test_range_search_invalid_range_filter: Range searching collection %s" % collection_w.name)
+        range_filter = get_invalid_range_search_paras
+        range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "radius": 1, "range_filter": range_filter}}
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            range_search_params, default_limit,
+                            default_search_exp,
+                            check_task=CheckTasks.err_res,
+                            check_items={"err_code": 1,
+                                         "err_msg": f"type must be number"})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_range_search_invalid_radius_range_filter_L2(self):
+        """
+        target: test range search with invalid radius and range_filter for L2
+        method: range search with radius smaller than range_filter
+        expected: raise exception and report the error
+        """
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix, True, nb=10)[0]
+        # 2. range search
+        log.info("test_range_search_invalid_radius_range_filter_L2: Range searching collection %s" % collection_w.name)
+        range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "radius": 1, "range_filter": 10}}
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            range_search_params, default_limit,
+                            default_search_exp,
+                            check_task=CheckTasks.err_res,
+                            check_items={"err_code": 1,
+                                         "err_msg": f"range_filter must less than radius except IP"})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_range_search_invalid_radius_range_filter_IP(self):
+        """
+        target: test range search with invalid radius and range_filter for IP
+        method: range search with radius larger than range_filter
+        expected: raise exception and report the error
+        """
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix, True, nb=10)[0]
+        # 2. range search
+        log.info("test_range_search_invalid_radius_range_filter_IP: Range searching collection %s" % collection_w.name)
+        range_search_params = {"metric_type": "IP", "params": {"nprobe": 10, "radius": 10, "range_filter": 1}}
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            range_search_params, default_limit,
+                            default_search_exp,
+                            check_task=CheckTasks.err_res,
+                            check_items={"err_code": 1,
+                                         "err_msg": f"range_filter must more than radius when IP"})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("index, params",
+                             zip(ct.all_index_types[5:5],
+                                 ct.default_index_params[5:5]))
+    def test_range_search_not_support_index(self, index, params):
+        """
+        target: test range search after unsupported index
+        method: test range search after ANNOY index
+        expected: raise exception and report the error
+        """
+        # 1. initialize with data
+        collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, 5000,
+                                                                                  partition_num=1,
+                                                                                  dim=default_dim, is_index=False)[0:5]
+        # 2. create index and load
+        default_index = {"index_type": index, "params": params, "metric_type": "L2"}
+        collection_w.create_index("float_vector", default_index)
+        collection_w.load()
+        # 3. range search
+        search_params = cf.gen_search_param(index)
+        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
+        for search_param in search_params:
+            search_param["params"]["radius"] = 1000
+            search_param["params"]["range_filter"] = 0
+            log.info("Searching with search params: {}".format(search_param))
+            collection_w.search(vectors[:default_nq], default_search_field,
+                                search_param, default_limit,
+                                default_search_exp,
+                                check_task=CheckTasks.err_res,
+                                check_items={"err_code": 1,
+                                             "err_msg": f"not implemented"})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("metric", ["SUPERSTRUCTURE", "SUBSTRUCTURE"])
+    def test_range_search_data_type_metric_type_mismatch(self, metric):
+        """
+        target: test range search after unsupported metrics
+        method: test range search after SUPERSTRUCTURE and SUBSTRUCTURE metrics
+        expected: raise exception and report the error
+        """
+        # 1. initialize with data
+        collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, 5000,
+                                                                                  partition_num=1,
+                                                                                  dim=default_dim, is_index=False)[0:5]
+        # 2. create index and load
+        default_index = {"index_type": "BIN_FLAT", "params": {"nlist": 128}, "metric_type": metric}
+        collection_w.create_index("float_vector", default_index)
+        collection_w.load()
+        # 3. range search
+        search_params = cf.gen_search_param("BIN_FLAT", metric_type=metric)
+        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
+        for search_param in search_params:
+            search_param["params"]["radius"] = 1000
+            search_param["params"]["range_filter"] = 0
+            log.info("Searching with search params: {}".format(search_param))
+            collection_w.search(vectors[:default_nq], default_search_field,
+                                search_param, default_limit,
+                                default_search_exp,
+                                check_task=CheckTasks.err_res,
+                                check_items={"err_code": 1,
+                                             "err_msg": f"Data type and metric type miss-match"})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("metric", ["SUPERSTRUCTURE", "SUBSTRUCTURE"])
+    def test_range_search_binary_not_supported_metrics(self, metric):
+        """
+        target: search binary_collection, and check the result: distance
+        method: compare the return distance value with value computed with SUPERSTRUCTURE
+                (1) The returned limit(topK) are impacted by dimension (dim) of data
+                (2) Searched topK is smaller than set limit when dim is large
+                (3) It does not support "BIN_IVF_FLAT" index
+                (4) Only two values for distance: 0 and 1, 0 means hits, 1 means not
+        expected: the return distance equals to the computed value
+        """
+        # 1. initialize with binary data
+        nq = 1
+        dim = 8
+        collection_w, _, binary_raw_vector, insert_ids, time_stamp \
+            = self.init_collection_general(prefix, True, default_nb, is_binary=True,
+                                           dim=dim, is_index=False)[0:5]
+        # 2. create index
+        default_index = {"index_type": "BIN_FLAT", "params": {"nlist": 128}, "metric_type": metric}
+        collection_w.create_index("binary_vector", default_index)
+        collection_w.load()
+        # 3. generate search vectors
+        binary_vectors = cf.gen_binary_vectors(nq, dim)[1]
+        # 4. search and compare the distance
+        search_params = {"metric_type": metric, "params": {"nprobe": 10, "radius": 10, "range_filter": 1}}
+        collection_w.search(binary_vectors[:nq], "binary_vector",
+                            search_params, default_limit,
+                            check_task=CheckTasks.err_res,
+                            check_items={"err_code": 1,
+                                         "err_msg": f"invalid metric type"})[0]
+
 
 class TestCollectionSearch(TestcaseBase):
     """ Test case of search interface """
@@ -1082,9 +1264,8 @@ class TestCollectionSearch(TestcaseBase):
                             check_items={
                                     "nq": 1,
                                     "limit": 3,
-                                    "ids": [19,9,18]
+                                    "ids": [19, 9, 18]
                                 })
-
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_with_empty_vectors(self, dim, auto_id, _async):
@@ -1157,7 +1338,7 @@ class TestCollectionSearch(TestcaseBase):
                                          "_async": _async})
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue #13611")
+    @pytest.mark.skip(reason="partition load and release constraints")
     def test_search_before_after_delete(self, nq, dim, auto_id, _async):
         """
         target: test search function before and after deletion
@@ -2347,7 +2528,7 @@ class TestCollectionSearch(TestcaseBase):
         method: create a collection, insert data and search with comparative expression
         expected: search successfully
         """
-        #1. create a collection
+        # 1. create a collection
         nb = 10
         dim = 1
         fields = [cf.gen_int64_field("int64_1"), cf.gen_int64_field("int64_2"),
@@ -2355,7 +2536,7 @@ class TestCollectionSearch(TestcaseBase):
         schema = cf.gen_collection_schema(fields=fields, primary_field="int64_1")
         collection_w = self.init_collection_wrap(name=cf.gen_unique_str("comparison"), schema=schema)
 
-        #2. inset data
+        # 2. inset data
         values = pd.Series(data=[i for i in range(0, nb)])
         dataframe = pd.DataFrame({"int64_1": values, "int64_2": values,
                                   ct.default_float_vec_field_name: cf.gen_vectors(nb, dim)})
@@ -2367,7 +2548,7 @@ class TestCollectionSearch(TestcaseBase):
         for _id in enumerate(insert_ids):
             filter_ids.extend(_id)
 
-        #3. search with expression
+        # 3. search with expression
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
         collection_w.load()
         expression = "int64_1 <= int64_2"
@@ -2695,7 +2876,7 @@ class TestCollectionSearch(TestcaseBase):
 
         nums = 5000
         vectors = [[random.random() for _ in range(dim)] for _ in range(nums)]
-        vectors_id = [random.randint(0,nums)for _ in range(nums)]
+        vectors_id = [random.randint(0, nums)for _ in range(nums)]
         expression = f"{default_int64_field_name} in {vectors_id}"
         search_res, _ = collection_w.search(vectors, default_search_field,
                                             default_search_params, default_limit, expression,
@@ -2737,9 +2918,9 @@ class TestCollectionSearch(TestcaseBase):
         kwargs.update({"consistency_level": consistency_level})
 
         nb_new = 400
-        _, _, _, insert_ids_new, _= cf.insert_data(collection_w, nb_new,
-                                                   auto_id=auto_id, dim=dim,
-                                                   insert_offset=nb_old)
+        _, _, _, insert_ids_new, _ = cf.insert_data(collection_w, nb_new,
+                                                    auto_id=auto_id, dim=dim,
+                                                    insert_offset=nb_old)
         insert_ids.extend(insert_ids_new)
 
         collection_w.search(vectors[:nq], default_search_field,
@@ -2817,9 +2998,9 @@ class TestCollectionSearch(TestcaseBase):
                                          "limit": nb_old,
                                          "_async": _async})
         nb_new = 400
-        _, _, _, insert_ids_new, _= cf.insert_data(collection_w, nb_new,
-                                                   auto_id=auto_id, dim=dim,
-                                                   insert_offset=nb_old)
+        _, _, _, insert_ids_new, _ = cf.insert_data(collection_w, nb_new,
+                                                    auto_id=auto_id, dim=dim,
+                                                    insert_offset=nb_old)
         insert_ids.extend(insert_ids_new)
         kwargs = {}
         consistency_level = kwargs.get("consistency_level", CONSISTENCY_EVENTUALLY)
@@ -2860,9 +3041,9 @@ class TestCollectionSearch(TestcaseBase):
         kwargs.update({"consistency_level": consistency_level})
 
         nb_new = 400
-        _, _, _, insert_ids_new, _= cf.insert_data(collection_w, nb_new,
-                                                   auto_id=auto_id, dim=dim,
-                                                   insert_offset=nb_old)
+        _, _, _, insert_ids_new, _ = cf.insert_data(collection_w, nb_new,
+                                                    auto_id=auto_id, dim=dim,
+                                                    insert_offset=nb_old)
         insert_ids.extend(insert_ids_new)
         collection_w.search(vectors[:nq], default_search_field,
                             default_search_params, limit,
@@ -3399,7 +3580,8 @@ class TestSearchDSL(TestcaseBase):
                                          "limit": ct.default_top_k})
 
 
-class TestsearchString(TestcaseBase):
+class TestSearchString(TestcaseBase):
+
     """
     ******************************************************************
       The following cases are used to test search about string
@@ -3483,6 +3665,35 @@ class TestsearchString(TestcaseBase):
                                          "limit": default_limit,
                                          "_async": _async})
 
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_range_search_string_field_is_primary_true(self, dim, _async):
+        """
+        target: test range search with string expr and string field is primary
+        method: create collection and insert data
+                create index and collection load
+                collection search uses string expr in string field ,string field is primary
+        expected: Search successfully
+        """
+        # 1. initialize with data
+        collection_w, _, _, insert_ids = \
+            self.init_collection_general(prefix, True, dim=dim, primary_field=ct.default_string_field_name)[0:4]
+        # 2. search
+        log.info("test_search_string_field_is_primary_true: searching collection %s" % collection_w.name)
+        range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "radius": 1000,
+                                                               "range_filter": 0}}
+        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        output_fields = [default_string_field_name, default_float_field_name]
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            range_search_params, default_limit,
+                            default_search_string_exp,
+                            output_fields=output_fields,
+                            _async=_async,
+                            travel_timestamp=0,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "ids": insert_ids,
+                                         "limit": default_limit,
+                                         "_async": _async})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_search_string_mix_expr(self, dim, auto_id, _async):
@@ -3845,7 +4056,7 @@ class TestsearchString(TestcaseBase):
                                          "_async": _async})
 
 
-class TestsearchPagination(TestcaseBase):
+class TestSearchPagination(TestcaseBase):
     """ Test case of search pagination """
 
     @pytest.fixture(scope="function", params=[0, 10, 100])
@@ -4276,7 +4487,7 @@ class TestsearchPagination(TestcaseBase):
             assert set(search_res[0].ids) == set(res[0].ids[offset:])
 
 
-class TestsearchPaginationInvalid(TestcaseBase):
+class TestSearchPaginationInvalid(TestcaseBase):
     """ Test case of search pagination """
 
     @pytest.fixture(scope="function", params=[0, 10])
@@ -4331,7 +4542,7 @@ class TestsearchPaginationInvalid(TestcaseBase):
                                                     "[1, 16385], but got %d" % (offset, offset)})
 
 
-class  TestsearchDiskann(TestcaseBase):
+class TestSearchDiskann(TestcaseBase):
     """
     ******************************************************************
       The following cases are used to test search about diskann index
@@ -4638,3 +4849,1222 @@ class  TestsearchDiskann(TestcaseBase):
                                             "limit": limit,
                                             "_async": _async}  
                                 )
+
+
+class TestCollectionRangeSearch(TestcaseBase):
+    """ Test case of range search interface """
+
+    @pytest.fixture(scope="function",
+                    params=[default_nb, default_nb_medium])
+    def nb(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=[2, 500])
+    def nq(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=[32, 128])
+    def dim(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=[False, True])
+    def auto_id(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=[False, True])
+    def _async(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=["JACCARD", "HAMMING", "TANIMOTO"])
+    def metrics(self, request):
+        yield request.param
+
+    @pytest.fixture(scope="function", params=[False, True])
+    def is_flush(self, request):
+        yield request.param
+
+    """
+    ******************************************************************
+    #  The followings are valid range search cases
+    ******************************************************************
+    """
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("radius", [1000, 1000.0])
+    @pytest.mark.parametrize("range_filter", [0, 0.0])
+    def test_range_search_normal(self, nq, dim, auto_id, is_flush, radius, range_filter):
+        """
+        target: test range search normal case
+        method: create connection, collection, insert and search
+        expected: search successfully with limit(topK)
+        """
+        # 1. initialize with data
+        collection_w, _vectors, _, insert_ids, time_stamp = \
+            self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim, is_flush=is_flush)[0:5]
+        # 2. get vectors that inserted into collection
+        vectors = np.array(_vectors[0]).tolist()
+        vectors = [vectors[i][-1] for i in range(nq)]
+        # 3. range search
+        range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "radius": radius,
+                                                               "range_filter": range_filter}}
+        search_res = collection_w.search(vectors[:nq], default_search_field,
+                                         range_search_params, default_limit,
+                                         default_search_exp,
+                                         check_task=CheckTasks.check_search_results,
+                                         check_items={"nq": nq,
+                                                      "ids": insert_ids,
+                                                      "limit": default_limit})[0]
+        log.info("test_range_search_normal: checking the distance of top 1")
+        for hits in search_res:
+            # verify that top 1 hit is itself,so min distance is 0
+            assert hits.distances[0] == 0.0
+            distances_tmp = list(hits.distances)
+            assert distances_tmp.count(0.0) == 1
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_range_search_only_range_filter(self):
+        """
+        target: test range search with only range filter
+        method: create connection, collection, insert and search
+        expected: range search successfully as normal search
+        """
+        # 1. initialize with data
+        collection_w, _vectors, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, nb=10)[0:5]
+        # 2. get vectors that inserted into collection
+        vectors = np.array(_vectors[0]).tolist()
+        vectors = [vectors[i][-1] for i in range(default_nq)]
+        # 3. range search with L2
+        range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "range_filter": 1}}
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            range_search_params, default_limit,
+                            default_search_exp,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "ids": insert_ids,
+                                         "limit": default_limit})[0]
+        # 4. range search with IP
+        range_search_params = {"metric_type": "IP", "params": {"nprobe": 10, "range_filter": 1}}
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            range_search_params, default_limit,
+                            default_search_exp,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "ids": insert_ids,
+                                         "limit": default_limit})[0]
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_range_search_only_radius(self):
+        """
+        target: test range search with only radius
+        method: create connection, collection, insert and search
+        expected: search successfully with filtered limit(topK)
+        """
+        # 1. initialize with data
+        collection_w, _vectors, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, nb=10)[0:5]
+        # 2. get vectors that inserted into collection
+        vectors = np.array(_vectors[0]).tolist()
+        vectors = [vectors[i][-1] for i in range(default_nq)]
+        # 3. range search with L2
+        range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "radius": 0}}
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            range_search_params, default_limit,
+                            default_search_exp,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "ids": [],
+                                         "limit": 0})[0]
+        # 4. range search with IP
+        range_search_params = {"metric_type": "IP", "params": {"nprobe": 10, "radius": 1}}
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            range_search_params, default_limit,
+                            default_search_exp,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "ids": [],
+                                         "limit": 0})[0]
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_range_search_radius_range_filter_not_in_params(self):
+        """
+        target: test range search radius and range filter not in params
+        method: create connection, collection, insert and search
+        expected: search successfully as normal search
+        """
+        # 1. initialize with data
+        collection_w, _vectors, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, nb=10)[0:5]
+        # 2. get vectors that inserted into collection
+        vectors = np.array(_vectors[0]).tolist()
+        vectors = [vectors[i][-1] for i in range(default_nq)]
+        # 3. range search with L2
+        range_search_params = {"metric_type": "L2", "params": {"nprobe": 10}, "radius": 0, "range_filter": 1}
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            range_search_params, default_limit,
+                            default_search_exp,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "ids": insert_ids,
+                                         "limit": default_limit})[0]
+        # 4. range search with IP
+        range_search_params = {"metric_type": "IP", "params": {"nprobe": 10}, "radius": 1, "range_filter": 0}
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            range_search_params, default_limit,
+                            default_search_exp,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "ids": insert_ids,
+                                         "limit": default_limit})[0]
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("dup_times", [1, 2])
+    def test_range_search_with_dup_primary_key(self, auto_id, _async, dup_times):
+        """
+        target: test range search with duplicate primary key
+        method: 1.insert same data twice
+                2.range search
+        expected: range search results are de-duplicated
+        """
+        # 1. initialize with data
+        collection_w, insert_data, _, insert_ids = self.init_collection_general(prefix, True, default_nb,
+                                                                                auto_id=auto_id,
+                                                                                dim=default_dim)[0:4]
+        # 2. insert dup data multi times
+        for i in range(dup_times):
+            insert_res, _ = collection_w.insert(insert_data[0])
+            insert_ids.extend(insert_res.primary_keys)
+        # 3. range search
+        vectors = np.array(insert_data[0]).tolist()
+        vectors = [vectors[i][-1] for i in range(default_nq)]
+        log.info(vectors)
+        range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "radius": 1000,
+                                                               "range_filter": 0}}
+        search_res = collection_w.search(vectors[:default_nq], default_search_field,
+                                         range_search_params, default_limit,
+                                         default_search_exp, _async=_async,
+                                         check_task=CheckTasks.check_search_results,
+                                         check_items={"nq": default_nq,
+                                                      "ids": insert_ids,
+                                                      "limit": default_limit,
+                                                      "_async": _async})[0]
+        if _async:
+            search_res.done()
+            search_res = search_res.result()
+        # assert that search results are de-duplicated
+        for hits in search_res:
+            ids = hits.ids
+            assert sorted(list(set(ids))) == sorted(ids)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_accurate_range_search_with_multi_segments(self, dim):
+        """
+        target: range search collection with multi segments accurately
+        method: insert and flush twice
+        expect: result pk should be [19,9,18]
+        """
+        # 1. create a collection
+        nb = 10
+        fields = [cf.gen_int64_field("int64"), cf.gen_float_vec_field(dim=dim)]
+        schema = cf.gen_collection_schema(fields=fields, primary_field="int64")
+        collection_w = self.init_collection_wrap(schema=schema)
+
+        # 2. insert data and flush twice
+        for r in range(2):
+            pks = pd.Series(data=[r * nb + i for i in range(0, nb)])
+            vectors = [[i * 2 + r for _ in range(dim)] for i in range(0, nb)]
+            dataframe = pd.DataFrame({"int64": pks,
+                                      ct.default_float_vec_field_name: vectors})
+            collection_w.insert(dataframe)
+            collection_w.flush()
+
+        # 3. search
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
+        collection_w.load()
+        vectors = [[20 for _ in range(dim)]]
+        range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "radius": 1152.1,
+                                                               "range_filter": 32}}
+        collection_w.search(vectors, default_search_field,
+                            range_search_params, 3,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={
+                                "nq": 1,
+                                "limit": 3,
+                                "ids": [19, 9, 18]
+                            })
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_range_search_with_empty_vectors(self, _async):
+        """
+        target: test range search with empty query vector
+        method: search using empty query vector
+        expected: search successfully with 0 results
+        """
+        # 1. initialize without data
+        collection_w = self.init_collection_general(prefix, True, dim=default_dim)[0]
+        # 2. search collection without data
+        log.info("test_range_search_with_empty_vectors: Range searching collection %s "
+                 "using empty vector" % collection_w.name)
+        range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "radius": 0,
+                                                               "range_filter": 0}}
+        collection_w.search([], default_search_field, range_search_params,
+                            default_limit, default_search_exp, _async=_async,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": 0,
+                                         "_async": _async})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip(reason="partition load and release constraints")
+    def test_range_search_before_after_delete(self, nq, dim, auto_id, _async):
+        """
+        target: test range search before and after deletion
+        method: 1. search the collection
+                2. delete a partition
+                3. search the collection
+        expected: the deleted entities should not be searched
+        """
+        # 1. initialize with data
+        nb = 1000
+        limit = 1000
+        partition_num = 1
+        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, nb,
+                                                                      partition_num,
+                                                                      auto_id=auto_id,
+                                                                      dim=dim)[0:4]
+        # 2. search all the partitions before partition deletion
+        vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
+        log.info("test_range_search_before_after_delete: searching before deleting partitions")
+        range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "radius": 1000,
+                                                               "range_filter": 0}}
+        collection_w.search(vectors[:nq], default_search_field,
+                            range_search_params, limit,
+                            default_search_exp, _async=_async,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": nq,
+                                         "ids": insert_ids,
+                                         "limit": limit,
+                                         "_async": _async})
+        # 3. delete partitions
+        log.info("test_range_search_before_after_delete: deleting a partition")
+        par = collection_w.partitions
+        deleted_entity_num = par[partition_num].num_entities
+        print(deleted_entity_num)
+        entity_num = nb - deleted_entity_num
+        collection_w.release(par[partition_num].name)
+        collection_w.drop_partition(par[partition_num].name)
+        log.info("test_range_search_before_after_delete: deleted a partition")
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
+        collection_w.load()
+        # 4. search non-deleted part after delete partitions
+        log.info("test_range_search_before_after_delete: searching after deleting partitions")
+        range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "radius": 1000,
+                                                               "range_filter": 0}}
+        collection_w.search(vectors[:nq], default_search_field,
+                            range_search_params, limit,
+                            default_search_exp, _async=_async,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": nq,
+                                         "ids": insert_ids[:entity_num],
+                                         "limit": limit - deleted_entity_num,
+                                         "_async": _async})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_range_search_collection_after_release_load(self, auto_id, _async):
+        """
+        target: range search the pre-released collection after load
+        method: 1. create collection
+                2. release collection
+                3. load collection
+                4. range search the pre-released collection
+        expected: search successfully
+        """
+        # 1. initialize without data
+        collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, default_nb,
+                                                                                  1, auto_id=auto_id,
+                                                                                  dim=default_dim)[0:5]
+        # 2. release collection
+        log.info("test_range_search_collection_after_release_load: releasing collection %s" % collection_w.name)
+        collection_w.release()
+        log.info("test_range_search_collection_after_release_load: released collection %s" % collection_w.name)
+        # 3. Search the pre-released collection after load
+        log.info("test_range_search_collection_after_release_load: loading collection %s" % collection_w.name)
+        collection_w.load()
+        log.info("test_range_search_collection_after_release_load: searching after load")
+        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
+        range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "radius": 1000,
+                                                               "range_filter": 0}}
+        collection_w.search(vectors[:default_nq], default_search_field, range_search_params,
+                            default_limit, default_search_exp, _async=_async,
+                            travel_timestamp=0,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "ids": insert_ids,
+                                         "limit": default_limit,
+                                         "_async": _async})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_range_search_load_flush_load(self, dim, _async):
+        """
+        target: test range search when load before flush
+        method: 1. insert data and load
+                2. flush, and load
+                3. search the collection
+        expected: search success with limit(topK)
+        """
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix, dim=dim)[0]
+        # 2. insert data
+        insert_ids = cf.insert_data(collection_w, default_nb, dim=dim)[3]
+        # 3. load data
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
+        collection_w.load()
+        # 4. flush and load
+        collection_w.num_entities
+        collection_w.load()
+        # 5. search
+        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "radius": 1000,
+                                                               "range_filter": 0}}
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            range_search_params, default_limit,
+                            default_search_exp, _async=_async,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "ids": insert_ids,
+                                         "limit": default_limit,
+                                         "_async": _async})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_range_search_new_data(self, nq, dim):
+        """
+        target: test search new inserted data without load
+        method: 1. search the collection
+                2. insert new data
+                3. search the collection without load again
+                4. Use guarantee_timestamp to guarantee data consistency
+        expected: new data should be range searched
+        """
+        # 1. initialize with data
+        limit = 1000
+        nb_old = 500
+        collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, nb_old,
+                                                                                  dim=dim)[0:5]
+        # 2. search for original data after load
+        vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
+        range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "radius": 1000,
+                                                               "range_filter": 0}}
+        log.info("test_range_search_new_data: searching for original data after load")
+        collection_w.search(vectors[:nq], default_search_field,
+                            default_search_params, limit,
+                            default_search_exp,
+                            travel_timestamp=0,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": nq,
+                                         "ids": insert_ids,
+                                         "limit": nb_old})
+        # 3. insert new data
+        nb_new = 300
+        _, _, _, insert_ids_new, time_stamp = cf.insert_data(collection_w, nb_new, dim=dim,
+                                                             insert_offset=nb_old)
+        insert_ids.extend(insert_ids_new)
+        # 4. search for new data without load
+        # Using bounded staleness, maybe we could not search the "inserted" entities,
+        # since the search requests arrived query nodes earlier than query nodes consume the insert requests.
+        range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "radius": 1000,
+                                                               "range_filter": 0}}
+        collection_w.search(vectors[:nq], default_search_field,
+                            range_search_params, limit,
+                            default_search_exp,
+                            guarantee_timestamp=time_stamp,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": nq,
+                                         "ids": insert_ids,
+                                         "limit": nb_old + nb_new})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_range_search_different_data_distribution_with_index(self, dim, _async):
+        """
+        target: test search different data distribution with index
+        method: 1. connect to milvus
+                2. create a collection
+                3. insert data
+                4. create an index
+                5. Load and search
+        expected: Range search successfully
+        """
+        # 1. connect, create collection and insert data
+        self._connect()
+        collection_w = self.init_collection_general(prefix, False, dim=dim, is_index=False)[0]
+        dataframe = cf.gen_default_dataframe_data(dim=dim, start=-1500)
+        collection_w.insert(dataframe)
+
+        # 2. create index
+        index_param = {"index_type": "IVF_FLAT", "metric_type": "L2", "params": {"nlist": 100}}
+        collection_w.create_index("float_vector", index_param)
+
+        # 3. load and range search
+        collection_w.load()
+        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "radius": 1000,
+                                                               "range_filter": 0}}
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            range_search_params, default_limit,
+                            _async=_async,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "limit": default_limit,
+                                         "_async": _async})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("not fixed yet")
+    @pytest.mark.parametrize("shards_num", [-256, 0, 1, 10, 31, 63])
+    def test_range_search_with_non_default_shard_nums(self, shards_num, _async):
+        """
+        target: test range search with non_default shards_num
+        method: connect milvus, create collection with several shard numbers , insert, load and search
+        expected: search successfully with the non_default shards_num
+        """
+        self._connect()
+        # 1. create collection
+        name = cf.gen_unique_str(prefix)
+        collection_w = self.init_collection_wrap(name=name, shards_num=shards_num)
+        # 2. rename collection
+        new_collection_name = cf.gen_unique_str(prefix + "new")
+        self.utility_wrap.rename_collection(collection_w.name, new_collection_name)
+        collection_w = self.init_collection_wrap(name=new_collection_name, shards_num=shards_num)
+        # 3. insert
+        dataframe = cf.gen_default_dataframe_data()
+        collection_w.insert(dataframe)
+        # 4. create index and load
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
+        collection_w.load()
+        # 5. range search
+        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
+        range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "radius": 1000,
+                                                               "range_filter": 0}}
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            range_search_params, default_limit,
+                            default_search_exp, _async=_async,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "limit": default_limit,
+                                         "_async": _async})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("index, params",
+                             zip(range_search_supported_index,
+                                 range_search_supported_index_params))
+    def test_range_search_after_different_index_with_params(self, dim, index, params):
+        """
+        target: test range search after different index
+        method: test range search after different index and corresponding search params
+        expected: search successfully with limit(topK)
+        """
+        # 1. initialize with data
+        collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, 5000,
+                                                                                  partition_num=1,
+                                                                                  dim=dim, is_index=False)[0:5]
+        # 2. create index and load
+        if params.get("m"):
+            if (dim % params["m"]) != 0:
+                params["m"] = dim // 4
+        if params.get("PQM"):
+            if (dim % params["PQM"]) != 0:
+                params["PQM"] = dim // 4
+        default_index = {"index_type": index, "params": params, "metric_type": "L2"}
+        collection_w.create_index("float_vector", default_index)
+        collection_w.load()
+        # 3. range search
+        search_params = cf.gen_search_param(index)
+        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        for search_param in search_params:
+            search_param["params"]["radius"] = 1000
+            search_param["params"]["range_filter"] = 0
+            log.info("Searching with search params: {}".format(search_param))
+            collection_w.search(vectors[:default_nq], default_search_field,
+                                search_param, default_limit,
+                                default_search_exp,
+                                travel_timestamp=0,
+                                check_task=CheckTasks.check_search_results,
+                                check_items={"nq": default_nq,
+                                             "ids": insert_ids,
+                                             "limit": default_limit})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("index, params",
+                             zip(ct.all_index_types[:7],
+                                 ct.default_index_params[:7]))
+    def test_range_search_after_index_different_metric_type(self, dim, index, params):
+        """
+        target: test range search with different metric type
+        method: test range search with different metric type
+        expected: searched successfully
+        """
+        # 1. initialize with data
+        collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, 5000,
+                                                                                  partition_num=1,
+                                                                                  dim=dim, is_index=False)[0:5]
+        # 2. create different index
+        if params.get("m"):
+            if (dim % params["m"]) != 0:
+                params["m"] = dim // 4
+        if params.get("PQM"):
+            if (dim % params["PQM"]) != 0:
+                params["PQM"] = dim // 4
+        log.info("test_range_search_after_index_different_metric_type: Creating index-%s" % index)
+        default_index = {"index_type": index, "params": params, "metric_type": "IP"}
+        collection_w.create_index("float_vector", default_index)
+        log.info("test_range_search_after_index_different_metric_type: Created index-%s" % index)
+        collection_w.load()
+        # 3. search
+        search_params = cf.gen_search_param(index, "IP")
+        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        for search_param in search_params:
+            search_param["params"]["radius"] = 0
+            search_param["params"]["range_filter"] = 1000
+            log.info("Searching with search params: {}".format(search_param))
+            collection_w.search(vectors[:default_nq], default_search_field,
+                                search_param, default_limit,
+                                default_search_exp,
+                                travel_timestamp=0,
+                                check_task=CheckTasks.check_search_results,
+                                check_items={"nq": default_nq,
+                                             "ids": insert_ids,
+                                             "limit": default_limit})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_range_search_index_one_partition(self, nb, auto_id, _async):
+        """
+        target: test range search from partition
+        method: search from one partition
+        expected: searched successfully
+        """
+        # 1. initialize with data
+        collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, nb,
+                                                                                  partition_num=1,
+                                                                                  auto_id=auto_id,
+                                                                                  is_index=False)[0:5]
+
+        # 2. create index
+        default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
+        collection_w.create_index("float_vector", default_index)
+        collection_w.load()
+        # 3. search in one partition
+        log.info("test_range_search_index_one_partition: searching (1000 entities) through one partition")
+        limit = 1000
+        par = collection_w.partitions
+        if limit > par[1].num_entities:
+            limit_check = par[1].num_entities
+        else:
+            limit_check = limit
+        range_search_params = {"metric_type": "L2", "params": {"nprobe": 128, "radius": 1000,
+                                                               "range_filter": 0}}
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            range_search_params, limit, default_search_exp,
+                            [par[1].name], _async=_async,
+                            travel_timestamp=0,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "ids": insert_ids[par[0].num_entities:],
+                                         "limit": limit_check,
+                                         "_async": _async})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("index", ["BIN_FLAT", "BIN_IVF_FLAT"])
+    def test_range_search_binary_jaccard_flat_index(self, nq, dim, auto_id, _async, index, is_flush):
+        """
+        target: range search binary_collection, and check the result: distance
+        method: compare the return distance value with value computed with JACCARD
+        expected: the return distance equals to the computed value
+        """
+        # 1. initialize with binary data
+        collection_w, _, binary_raw_vector, insert_ids, time_stamp = self.init_collection_general(prefix, True, 2,
+                                                                                                  is_binary=True,
+                                                                                                  auto_id=auto_id,
+                                                                                                  dim=dim,
+                                                                                                  is_index=False,
+                                                                                                  is_flush=is_flush)[
+                                                                     0:5]
+        # 2. create index
+        default_index = {"index_type": index, "params": {"nlist": 128}, "metric_type": "JACCARD"}
+        collection_w.create_index("binary_vector", default_index)
+        collection_w.load()
+        # 3. compute the distance
+        query_raw_vector, binary_vectors = cf.gen_binary_vectors(3000, dim)
+        distance_0 = cf.jaccard(query_raw_vector[0], binary_raw_vector[0])
+        distance_1 = cf.jaccard(query_raw_vector[0], binary_raw_vector[1])
+        # 4. search and compare the distance
+        search_params = {"metric_type": "JACCARD", "params": {"nprobe": 10, "radius": 1000,
+                                                              "range_filter": 0}}
+        res = collection_w.search(binary_vectors[:nq], "binary_vector",
+                                  search_params, default_limit, "int64 >= 0",
+                                  _async=_async,
+                                  travel_timestamp=0,
+                                  check_task=CheckTasks.check_search_results,
+                                  check_items={"nq": nq,
+                                               "ids": insert_ids,
+                                               "limit": 2,
+                                               "_async": _async})[0]
+        if _async:
+            res.done()
+            res = res.result()
+        assert abs(res[0].distances[0] - min(distance_0, distance_1)) <= epsilon
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("index", ["BIN_FLAT", "BIN_IVF_FLAT"])
+    def test_range_search_binary_jaccard_invalid_params(self, index):
+        """
+        target: range search binary_collection with out of range params [0, 1]
+        method: range search binary_collection with out of range params
+        expected: return empty
+        """
+        # 1. initialize with binary data
+        collection_w, _, binary_raw_vector, insert_ids, time_stamp = self.init_collection_general(prefix, True, 2,
+                                                                                                  is_binary=True,
+                                                                                                  dim=default_dim,
+                                                                                                  is_index=False,)[0:5]
+        # 2. create index
+        default_index = {"index_type": index, "params": {"nlist": 128}, "metric_type": "JACCARD"}
+        collection_w.create_index("binary_vector", default_index)
+        collection_w.load()
+        # 3. compute the distance
+        query_raw_vector, binary_vectors = cf.gen_binary_vectors(3000, default_dim)
+        # 4. range search
+        search_params = {"metric_type": "JACCARD", "params": {"nprobe": 10, "radius": -1,
+                                                              "range_filter": -10}}
+        collection_w.search(binary_vectors[:default_nq], "binary_vector",
+                            search_params, default_limit,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "ids": [],
+                                         "limit": 0})
+        # 5. range search
+        search_params = {"metric_type": "JACCARD", "params": {"nprobe": 10, "radius": 10,
+                                                              "range_filter": 2}}
+        collection_w.search(binary_vectors[:default_nq], "binary_vector",
+                            search_params, default_limit,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "ids": [],
+                                         "limit": 0})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("index", ["BIN_FLAT", "BIN_IVF_FLAT"])
+    def test_range_search_binary_hamming_flat_index(self, nq, dim, auto_id, _async, index, is_flush):
+        """
+        target: range search binary_collection, and check the result: distance
+        method: compare the return distance value with value computed with HAMMING
+        expected: the return distance equals to the computed value
+        """
+        # 1. initialize with binary data
+        collection_w, _, binary_raw_vector, insert_ids = self.init_collection_general(prefix, True, 2,
+                                                                                      is_binary=True,
+                                                                                      auto_id=auto_id,
+                                                                                      dim=dim,
+                                                                                      is_index=False,
+                                                                                      is_flush=is_flush)[0:4]
+        # 2. create index
+        default_index = {"index_type": index, "params": {"nlist": 128}, "metric_type": "HAMMING"}
+        collection_w.create_index("binary_vector", default_index)
+        # 3. compute the distance
+        collection_w.load()
+        query_raw_vector, binary_vectors = cf.gen_binary_vectors(3000, dim)
+        distance_0 = cf.hamming(query_raw_vector[0], binary_raw_vector[0])
+        distance_1 = cf.hamming(query_raw_vector[0], binary_raw_vector[1])
+        # 4. search and compare the distance
+        search_params = {"metric_type": "HAMMING", "params": {"nprobe": 10, "radius": 1000,
+                                                              "range_filter": 0}}
+        res = collection_w.search(binary_vectors[:nq], "binary_vector",
+                                  search_params, default_limit, "int64 >= 0",
+                                  _async=_async,
+                                  check_task=CheckTasks.check_search_results,
+                                  check_items={"nq": nq,
+                                               "ids": insert_ids,
+                                               "limit": 2,
+                                               "_async": _async})[0]
+        if _async:
+            res.done()
+            res = res.result()
+        assert abs(res[0].distances[0] - min(distance_0, distance_1)) <= epsilon
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("index", ["BIN_FLAT", "BIN_IVF_FLAT"])
+    def test_range_search_binary_hamming_invalid_params(self, index):
+        """
+        target: range search binary_collection with out of range params
+        method: range search binary_collection with out of range params
+        expected: return empty
+        """
+        # 1. initialize with binary data
+        collection_w, _, binary_raw_vector, insert_ids, time_stamp = self.init_collection_general(prefix, True, 2,
+                                                                                                  is_binary=True,
+                                                                                                  dim=default_dim,
+                                                                                                  is_index=False,)[0:5]
+        # 2. create index
+        default_index = {"index_type": index, "params": {"nlist": 128}, "metric_type": "JACCARD"}
+        collection_w.create_index("binary_vector", default_index)
+        collection_w.load()
+        # 3. compute the distance
+        query_raw_vector, binary_vectors = cf.gen_binary_vectors(3000, default_dim)
+        # 4. range search
+        search_params = {"metric_type": "HAMMING", "params": {"nprobe": 10, "radius": -1,
+                                                              "range_filter": -10}}
+        collection_w.search(binary_vectors[:default_nq], "binary_vector",
+                            search_params, default_limit,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "ids": [],
+                                         "limit": 0})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("index", ["BIN_FLAT", "BIN_IVF_FLAT"])
+    def test_range_search_binary_tanimoto_flat_index(self, nq, dim, auto_id, _async, index, is_flush):
+        """
+        target: range search binary_collection, and check the result: distance
+        method: compare the return distance value with value computed with TANIMOTO
+        expected: the return distance equals to the computed value
+        """
+        # 1. initialize with binary data
+        collection_w, _, binary_raw_vector, insert_ids = self.init_collection_general(prefix, True, 2,
+                                                                                      is_binary=True,
+                                                                                      auto_id=auto_id,
+                                                                                      dim=dim,
+                                                                                      is_index=False,
+                                                                                      is_flush=is_flush)[0:4]
+        log.info("auto_id= %s, _async= %s" % (auto_id, _async))
+        # 2. create index
+        default_index = {"index_type": index, "params": {"nlist": 128}, "metric_type": "TANIMOTO"}
+        collection_w.create_index("binary_vector", default_index)
+        collection_w.load()
+        # 3. compute the distance
+        query_raw_vector, binary_vectors = cf.gen_binary_vectors(3000, dim)
+        distance_0 = cf.tanimoto(query_raw_vector[0], binary_raw_vector[0])
+        distance_1 = cf.tanimoto(query_raw_vector[0], binary_raw_vector[1])
+        # 4. search and compare the distance
+        search_params = {"metric_type": "TANIMOTO", "params": {"nprobe": 10, "radius": 1000,
+                                                               "range_filter": 0}}
+        res = collection_w.search(binary_vectors[:nq], "binary_vector",
+                                  search_params, default_limit, "int64 >= 0",
+                                  _async=_async,
+                                  check_task=CheckTasks.check_search_results,
+                                  check_items={"nq": nq,
+                                               "ids": insert_ids,
+                                               "limit": 2,
+                                               "_async": _async})[0]
+        if _async:
+            res.done()
+            res = res.result()
+        assert abs(res[0].distances[0] - min(distance_0, distance_1)) <= epsilon
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("index", ["BIN_FLAT", "BIN_IVF_FLAT"])
+    def test_range_search_binary_tanimoto_invalid_params(self, index):
+        """
+        target: range search binary_collection with out of range params [0,inf)
+        method: range search binary_collection with out of range params
+        expected: return empty
+        """
+        # 1. initialize with binary data
+        collection_w, _, binary_raw_vector, insert_ids, time_stamp = self.init_collection_general(prefix, True, 2,
+                                                                                                  is_binary=True,
+                                                                                                  dim=default_dim,
+                                                                                                  is_index=False,)[0:5]
+        # 2. create index
+        default_index = {"index_type": index, "params": {"nlist": 128}, "metric_type": "JACCARD"}
+        collection_w.create_index("binary_vector", default_index)
+        collection_w.load()
+        # 3. compute the distance
+        query_raw_vector, binary_vectors = cf.gen_binary_vectors(3000, default_dim)
+        # 4. range search
+        search_params = {"metric_type": "TANIMOTO", "params": {"nprobe": 10, "radius": -1,
+                                                               "range_filter": -10}}
+        collection_w.search(binary_vectors[:default_nq], "binary_vector",
+                            search_params, default_limit,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "ids": [],
+                                         "limit": 0})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_range_search_binary_without_flush(self, metrics, auto_id):
+        """
+        target: test range search without flush for binary data (no index)
+        method: create connection, collection, insert, load and search
+        expected: search successfully with limit(topK)
+        """
+        # 1. initialize a collection without data
+        collection_w = self.init_collection_general(prefix, is_binary=True, auto_id=auto_id)[0]
+        # 2. insert data
+        insert_ids = cf.insert_data(collection_w, default_nb, is_binary=True, auto_id=auto_id)[3]
+        # 3. load data
+        collection_w.load()
+        # 4. search
+        log.info("test_range_search_binary_without_flush: searching collection %s" % collection_w.name)
+        binary_vectors = cf.gen_binary_vectors(default_nq, default_dim)[1]
+        search_params = {"metric_type": metrics, "params": {"nprobe": 10, "radius": 1000,
+                                                            "range_filter": 0}}
+        collection_w.search(binary_vectors[:default_nq], "binary_vector",
+                            search_params, default_limit,
+                            default_search_exp,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "ids": insert_ids,
+                                         "limit": default_limit})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("expression", cf.gen_normal_expressions())
+    def test_range_search_with_expression(self, dim, expression, _async):
+        """
+        target: test range search with different expressions
+        method: test range search with different expressions
+        expected: searched successfully with correct limit(topK)
+        """
+        # 1. initialize with data
+        nb = 1000
+        collection_w, _vectors, _, insert_ids = self.init_collection_general(prefix, True,
+                                                                             nb, dim=dim,
+                                                                             is_index=False)[0:4]
+
+        # filter result with expression in collection
+        _vectors = _vectors[0]
+        expression = expression.replace("&&", "and").replace("||", "or")
+        filter_ids = []
+        for i, _id in enumerate(insert_ids):
+            int64 = _vectors.int64[i]
+            float = _vectors.float[i]
+            if not expression or eval(expression):
+                filter_ids.append(_id)
+
+        # 2. create index
+        index_param = {"index_type": "IVF_FLAT", "metric_type": "L2", "params": {"nlist": 100}}
+        collection_w.create_index("float_vector", index_param)
+        collection_w.load()
+
+        # 3. search with expression
+        log.info("test_range_search_with_expression: searching with expression: %s" % expression)
+        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "radius": 1000,
+                                                               "range_filter": 0}}
+        search_res, _ = collection_w.search(vectors[:default_nq], default_search_field,
+                                            range_search_params, nb, expression,
+                                            _async=_async,
+                                            check_task=CheckTasks.check_search_results,
+                                            check_items={"nq": default_nq,
+                                                         "ids": insert_ids,
+                                                         "limit": min(nb, len(filter_ids)),
+                                                         "_async": _async})
+        if _async:
+            search_res.done()
+            search_res = search_res.result()
+
+        filter_ids_set = set(filter_ids)
+        for hits in search_res:
+            ids = hits.ids
+            assert set(ids).issubset(filter_ids_set)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_range_search_with_output_field(self, auto_id, _async):
+        """
+        target: test range search with output fields
+        method: range search with one output_field
+        expected: search success
+        """
+        # 1. initialize with data
+        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True,
+                                                                      auto_id=auto_id)[0:4]
+        # 2. search
+        log.info("test_range_search_with_output_field: Searching collection %s" % collection_w.name)
+        range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "radius": 1000,
+                                                               "range_filter": 0}}
+        res = collection_w.search(vectors[:default_nq], default_search_field,
+                                  range_search_params, default_limit,
+                                  default_search_exp, _async=_async,
+                                  output_fields=[default_int64_field_name],
+                                  check_task=CheckTasks.check_search_results,
+                                  check_items={"nq": default_nq,
+                                               "ids": insert_ids,
+                                               "limit": default_limit,
+                                               "_async": _async})[0]
+        if _async:
+            res.done()
+            res = res.result()
+        assert len(res[0][0].entity._row_data) != 0
+        assert default_int64_field_name in res[0][0].entity._row_data
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_range_search_concurrent_multi_threads(self, nb, nq, dim, auto_id, _async):
+        """
+        target: test concurrent range search with multi-processes
+        method: search with 10 processes, each process uses dependent connection
+        expected: status ok and the returned vectors should be query_records
+        """
+        # 1. initialize with data
+        threads_num = 10
+        threads = []
+        collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, nb,
+                                                                                  auto_id=auto_id,
+                                                                                  dim=dim)[0:5]
+
+        def search(collection_w):
+            vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
+            range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "radius": 1000,
+                                                                   "range_filter": 0}}
+            collection_w.search(vectors[:nq], default_search_field,
+                                range_search_params, default_limit,
+                                default_search_exp, _async=_async,
+                                travel_timestamp=0,
+                                check_task=CheckTasks.check_search_results,
+                                check_items={"nq": nq,
+                                             "ids": insert_ids,
+                                             "limit": default_limit,
+                                             "_async": _async})
+
+        # 2. search with multi-processes
+        log.info("test_search_concurrent_multi_threads: searching with %s processes" % threads_num)
+        for i in range(threads_num):
+            t = threading.Thread(target=search, args=(collection_w,))
+            threads.append(t)
+            t.start()
+            time.sleep(0.2)
+        for t in threads:
+            t.join()
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("round_decimal", [0, 1, 2, 3, 4, 5, 6])
+    def test_range_search_round_decimal(self, round_decimal):
+        """
+        target: test range search with valid round decimal
+        method: range search with valid round decimal
+        expected: search successfully
+        """
+        import math
+        tmp_nb = 500
+        tmp_nq = 1
+        tmp_limit = 5
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix, True, nb=tmp_nb)[0]
+        # 2. search
+        log.info("test_search_round_decimal: Searching collection %s" % collection_w.name)
+        range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "radius": 1000,
+                                                               "range_filter": 0}}
+        res = collection_w.search(vectors[:tmp_nq], default_search_field,
+                                  range_search_params, tmp_limit)[0]
+
+        res_round = collection_w.search(vectors[:tmp_nq], default_search_field,
+                                        range_search_params, tmp_limit, round_decimal=round_decimal)[0]
+
+        abs_tol = pow(10, 1 - round_decimal)
+        # log.debug(f'abs_tol: {abs_tol}')
+        for i in range(tmp_limit):
+            dis_expect = round(res[0][i].distance, round_decimal)
+            dis_actual = res_round[0][i].distance
+            # log.debug(f'actual: {dis_actual}, expect: {dis_expect}')
+            # abs(a-b) <= max(rel_tol * max(abs(a), abs(b)), abs_tol)
+            assert math.isclose(dis_actual, dis_expect, rel_tol=0, abs_tol=abs_tol)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_range_search_with_expression_large(self, dim):
+        """
+        target: test range search with large expression
+        method: test range search with large expression
+        expected: searched successfully
+        """
+        # 1. initialize with data
+        nb = 10000
+        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True,
+                                                                      nb, dim=dim,
+                                                                      is_index=False)[0:4]
+
+        # 2. create index
+        index_param = {"index_type": "IVF_FLAT", "metric_type": "L2", "params": {"nlist": 100}}
+        collection_w.create_index("float_vector", index_param)
+        collection_w.load()
+
+        # 3. search with expression
+        expression = f"0 < {default_int64_field_name} < 5001"
+        log.info("test_search_with_expression: searching with expression: %s" % expression)
+
+        nums = 5000
+        vectors = [[random.random() for _ in range(dim)] for _ in range(nums)]
+        range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "radius": 1000,
+                                                               "range_filter": 0}}
+        search_res, _ = collection_w.search(vectors, default_search_field,
+                                            range_search_params, default_limit, expression,
+                                            check_task=CheckTasks.check_search_results,
+                                            check_items={
+                                                "nq": nums,
+                                                "ids": insert_ids,
+                                                "limit": default_limit,
+                                            })
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_range_search_with_consistency_bounded(self, nq, dim, auto_id, _async):
+        """
+        target: test range search with different consistency level
+        method: 1. create a collection
+                2. insert data
+                3. range search with consistency_level is "bounded"
+        expected: searched successfully
+        """
+        limit = 1000
+        nb_old = 500
+        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, nb_old,
+                                                                      auto_id=auto_id,
+                                                                      dim=dim)[0:4]
+        # 2. search for original data after load
+        vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
+        range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "radius": 1000,
+                                                               "range_filter": 0}}
+        collection_w.search(vectors[:nq], default_search_field,
+                            range_search_params, limit,
+                            default_search_exp, _async=_async,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": nq,
+                                         "ids": insert_ids,
+                                         "limit": nb_old,
+                                         "_async": _async,
+                                         })
+
+        kwargs = {}
+        consistency_level = kwargs.get("consistency_level", CONSISTENCY_BOUNDED)
+        kwargs.update({"consistency_level": consistency_level})
+
+        nb_new = 400
+        _, _, _, insert_ids_new, _ = cf.insert_data(collection_w, nb_new,
+                                                    auto_id=auto_id, dim=dim,
+                                                    insert_offset=nb_old)
+        insert_ids.extend(insert_ids_new)
+
+        collection_w.search(vectors[:nq], default_search_field,
+                            default_search_params, limit,
+                            default_search_exp, _async=_async,
+                            **kwargs,
+                            )
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_range_search_with_consistency_strong(self, nq, dim, auto_id, _async):
+        """
+        target: test range search with different consistency level
+        method: 1. create a collection
+                2. insert data
+                3. range search with consistency_level is "Strong"
+        expected: searched successfully
+        """
+        limit = 1000
+        nb_old = 500
+        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, nb_old,
+                                                                      auto_id=auto_id,
+                                                                      dim=dim)[0:4]
+        # 2. search for original data after load
+        vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
+        range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "radius": 1000,
+                                                               "range_filter": 0}}
+        collection_w.search(vectors[:nq], default_search_field,
+                            range_search_params, limit,
+                            default_search_exp, _async=_async,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": nq,
+                                         "ids": insert_ids,
+                                         "limit": nb_old,
+                                         "_async": _async})
+
+        nb_new = 400
+        _, _, _, insert_ids_new, _ = cf.insert_data(collection_w, nb_new,
+                                                    auto_id=auto_id, dim=dim,
+                                                    insert_offset=nb_old)
+        insert_ids.extend(insert_ids_new)
+        kwargs = {}
+        consistency_level = kwargs.get("consistency_level", CONSISTENCY_STRONG)
+        kwargs.update({"consistency_level": consistency_level})
+        collection_w.search(vectors[:nq], default_search_field,
+                            range_search_params, limit,
+                            default_search_exp, _async=_async,
+                            **kwargs,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": nq,
+                                         "ids": insert_ids,
+                                         "limit": nb_old + nb_new,
+                                         "_async": _async})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_range_search_with_consistency_eventually(self, nq, dim, auto_id, _async):
+        """
+        target: test range search with different consistency level
+        method: 1. create a collection
+                2. insert data
+                3. range search with consistency_level is "eventually"
+        expected: searched successfully
+        """
+        limit = 1000
+        nb_old = 500
+        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, nb_old,
+                                                                      auto_id=auto_id,
+                                                                      dim=dim)[0:4]
+        # 2. search for original data after load
+        vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
+        range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "radius": 1000,
+                                                               "range_filter": 0}}
+        collection_w.search(vectors[:nq], default_search_field,
+                            range_search_params, limit,
+                            default_search_exp, _async=_async,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": nq,
+                                         "ids": insert_ids,
+                                         "limit": nb_old,
+                                         "_async": _async})
+        nb_new = 400
+        _, _, _, insert_ids_new, _ = cf.insert_data(collection_w, nb_new,
+                                                    auto_id=auto_id, dim=dim,
+                                                    insert_offset=nb_old)
+        insert_ids.extend(insert_ids_new)
+        kwargs = {}
+        consistency_level = kwargs.get("consistency_level", CONSISTENCY_EVENTUALLY)
+        kwargs.update({"consistency_level": consistency_level})
+        collection_w.search(vectors[:nq], default_search_field,
+                            range_search_params, limit,
+                            default_search_exp, _async=_async,
+                            **kwargs
+                            )
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_range_search_with_consistency_session(self, nq, dim, auto_id, _async):
+        """
+        target: test range search with different consistency level
+        method: 1. create a collection
+                2. insert data
+                3. range search with consistency_level is "session"
+        expected: searched successfully
+        """
+        limit = 1000
+        nb_old = 500
+        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, nb_old,
+                                                                      auto_id=auto_id,
+                                                                      dim=dim)[0:4]
+        # 2. search for original data after load
+        vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
+        range_search_params = {"metric_type": "L2", "params": {"nprobe": 10, "radius": 1000,
+                                                               "range_filter": 0}}
+        collection_w.search(vectors[:nq], default_search_field,
+                            range_search_params, limit,
+                            default_search_exp, _async=_async,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": nq,
+                                         "ids": insert_ids,
+                                         "limit": nb_old,
+                                         "_async": _async})
+
+        kwargs = {}
+        consistency_level = kwargs.get("consistency_level", CONSISTENCY_SESSION)
+        kwargs.update({"consistency_level": consistency_level})
+
+        nb_new = 400
+        _, _, _, insert_ids_new, _ = cf.insert_data(collection_w, nb_new,
+                                                    auto_id=auto_id, dim=dim,
+                                                    insert_offset=nb_old)
+        insert_ids.extend(insert_ids_new)
+        collection_w.search(vectors[:nq], default_search_field,
+                            range_search_params, limit,
+                            default_search_exp, _async=_async,
+                            **kwargs,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": nq,
+                                         "ids": insert_ids,
+                                         "limit": nb_old + nb_new,
+                                         "_async": _async})
