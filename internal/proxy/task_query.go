@@ -344,7 +344,7 @@ func (t *queryTask) Execute(ctx context.Context) error {
 		if queryError != nil {
 			log.Warn("invalid shard leaders cache, updating shardleader caches and retry query",
 				zap.Error(queryError))
-			globalMetaCache.ClearShards(t.collectionName)
+			globalMetaCache.DeprecateShardCache(t.collectionName)
 		}
 		return queryError
 	}, retry.Attempts(Params.CommonCfg.GrpcRetryTimes))
@@ -443,11 +443,13 @@ func (t *queryTask) queryShard(ctx context.Context, nodeID int64, qn types.Query
 	if err != nil {
 		log.Ctx(ctx).Warn("QueryNode query return error", zap.Int64("msgID", t.ID()),
 			zap.Int64("nodeID", nodeID), zap.Strings("channels", channelIDs), zap.Error(err))
+		globalMetaCache.DeprecateShardCache(t.collectionName)
 		return common.NewCodeError(commonpb.ErrorCode_NotReadyServe, err)
 	}
 	errCode := result.GetStatus().GetErrorCode()
 	if errCode == commonpb.ErrorCode_NotShardLeader {
 		log.Ctx(ctx).Warn("QueryNode is not shardLeader", zap.Int64("nodeID", nodeID), zap.Strings("channels", channelIDs))
+		globalMetaCache.DeprecateShardCache(t.collectionName)
 		return common.NewCodeError(errCode, errInvalidShardLeaders)
 	}
 	if errCode != commonpb.ErrorCode_Success {

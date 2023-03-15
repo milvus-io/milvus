@@ -1467,7 +1467,7 @@ func (rct *releaseCollectionTask) Execute(ctx context.Context) (err error) {
 }
 
 func (rct *releaseCollectionTask) PostExecute(ctx context.Context) error {
-	globalMetaCache.ClearShards(rct.CollectionName)
+	globalMetaCache.DeprecateShardCache(rct.CollectionName)
 	return nil
 }
 
@@ -1687,7 +1687,7 @@ func (rpt *releasePartitionsTask) Execute(ctx context.Context) (err error) {
 }
 
 func (rpt *releasePartitionsTask) PostExecute(ctx context.Context) error {
-	globalMetaCache.ClearShards(rpt.CollectionName)
+	globalMetaCache.DeprecateShardCache(rpt.CollectionName)
 	return nil
 }
 
