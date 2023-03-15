@@ -24,7 +24,7 @@ set( CMAKE_POLICY_DEFAULT_CMP0022 NEW ) # for googletest only
 FetchContent_Declare(
         googletest
         URL             ${GTEST_SOURCE_URL} 
-        URL_MD5         "ad6868782b5952b7476a7c1c72d5a714"
+        URL_MD5         "2648d4138129812611cf6b6b4b497a3b"
         SOURCE_DIR      ${CMAKE_CURRENT_BINARY_DIR}/googletest-src
         BINARY_DIR      ${CMAKE_CURRENT_BINARY_DIR}/googletest-build
         DOWNLOAD_DIR    ${THIRDPARTY_DOWNLOAD_PATH} )

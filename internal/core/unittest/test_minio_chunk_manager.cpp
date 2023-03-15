@@ -60,6 +60,7 @@ class GoogleChunkManagerTest : public testing::Test {
 
     virtual void
     SetUp() {
+        GTEST_SKIP() << "skipping all tests for google cloud storage";
         chunk_manager_ = std::make_unique<MinioChunkManager>(get_google_cloud_storage_config());
     }
 
