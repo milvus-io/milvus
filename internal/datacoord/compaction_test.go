@@ -286,7 +286,7 @@ func getDeltaLogPath(rootPath string, segmentID typeutil.UniqueID) string {
 
 func TestCompactionPlanHandler_handleMergeCompactionResult(t *testing.T) {
 	mockDataNode := &mocks.DataNode{}
-	mockDataNode.EXPECT().SyncSegments(mock.Anything, mock.Anything).Run(func(ctx context.Context, req *datapb.SyncSegmentsRequest) {}).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil)
+	call := mockDataNode.EXPECT().SyncSegments(mock.Anything, mock.Anything).Run(func(ctx context.Context, req *datapb.SyncSegmentsRequest) {}).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil)
 
 	dataNodeID := UniqueID(111)
 
@@ -412,6 +412,11 @@ func TestCompactionPlanHandler_handleMergeCompactionResult(t *testing.T) {
 	has, err = c.meta.HasSegments([]UniqueID{1, 2, 3})
 	require.NoError(t, err)
 	require.True(t, has)
+
+	call.Unset()
+	call = mockDataNode.EXPECT().SyncSegments(mock.Anything, mock.Anything).Run(func(ctx context.Context, req *datapb.SyncSegmentsRequest) {}).Return(&commonpb.Status{ErrorCode: commonpb.ErrorCode_UnexpectedError}, nil)
+	err = c.handleMergeCompactionResult(plan, compactionResult2)
+	assert.Error(t, err)
 }
 
 func TestCompactionPlanHandler_completeCompaction(t *testing.T) {

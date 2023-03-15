@@ -671,7 +671,7 @@ func TestChannelMeta_InterfaceMethod(t *testing.T) {
 				require.False(t, channel.hasSegment(3, true))
 
 				// tests start
-				err := channel.mergeFlushedSegments(test.inSeg, 100, test.inCompactedFrom)
+				err := channel.mergeFlushedSegments(context.Background(), test.inSeg, 100, test.inCompactedFrom)
 				if test.isValid {
 					assert.NoError(t, err)
 				} else {

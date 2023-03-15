@@ -20,6 +20,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/samber/lo"
+	"golang.org/x/exp/maps"
+
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -96,6 +99,8 @@ func (mt *mergedTimeTickerSender) isClosed() bool {
 
 func (mt *mergedTimeTickerSender) work() {
 	defer mt.wg.Done()
+	var sids []int64
+	var isDiffTs bool
 	lastTs := uint64(0)
 	for {
 		mt.cond.L.Lock()
@@ -107,26 +112,28 @@ func (mt *mergedTimeTickerSender) work() {
 		mt.cond.L.Unlock()
 
 		mt.mu.Lock()
-		if mt.ts != lastTs {
-			var sids []int64
+		isDiffTs = mt.ts != lastTs
+		if isDiffTs {
 			for sid := range mt.segmentIDs {
 				sids = append(sids, sid)
 			}
-
 			// we will reset the timer but not the segmentIDs, since if we sent the timetick fail we may block forever due to flush stuck
 			lastTs = mt.ts
 			mt.lastSent = time.Now()
-
-			if err := mt.send(mt.ts, sids); err != nil {
-				log.Error("send hard time tick failed", zap.Error(err))
-				mt.mu.Unlock()
-				continue
-			}
-
 			mt.segmentIDs = make(map[int64]struct{})
-
 		}
 		mt.mu.Unlock()
+
+		if isDiffTs {
+			if err := mt.send(lastTs, sids); err != nil {
+				log.Error("send hard time tick failed", zap.Error(err))
+				mt.mu.Lock()
+				maps.Copy(mt.segmentIDs, lo.SliceToMap(sids, func(t int64) (int64, struct{}) {
+					return t, struct{}{}
+				}))
+				mt.mu.Unlock()
+			}
+		}
 	}
 }
 

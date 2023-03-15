@@ -23,9 +23,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/samber/lo"
-	"go.uber.org/zap"
-
+	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
@@ -36,6 +34,8 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/samber/lo"
+	"go.uber.org/zap"
 )
 
 type (
@@ -64,7 +64,7 @@ type Channel interface {
 	listNewSegmentsStartPositions() []*datapb.SegmentStartPosition
 	transferNewSegments(segmentIDs []UniqueID)
 	updateSegmentPKRange(segID UniqueID, ids storage.FieldData)
-	mergeFlushedSegments(seg *Segment, planID UniqueID, compactedFrom []UniqueID) error
+	mergeFlushedSegments(ctx context.Context, seg *Segment, planID UniqueID, compactedFrom []UniqueID) error
 	hasSegment(segID UniqueID, countFlushed bool) bool
 	removeSegments(segID ...UniqueID)
 	listCompactedSegmentIDs() map[UniqueID][]UniqueID
@@ -554,8 +554,8 @@ func (c *ChannelMeta) getCollectionSchema(collID UniqueID, ts Timestamp) (*schem
 	return c.collSchema, nil
 }
 
-func (c *ChannelMeta) mergeFlushedSegments(seg *Segment, planID UniqueID, compactedFrom []UniqueID) error {
-	log := log.With(
+func (c *ChannelMeta) mergeFlushedSegments(ctx context.Context, seg *Segment, planID UniqueID, compactedFrom []UniqueID) error {
+	log := log.Ctx(ctx).With(
 		zap.Int64("segment ID", seg.segmentID),
 		zap.Int64("collection ID", seg.collectionID),
 		zap.Int64("partition ID", seg.partitionID),
@@ -567,21 +567,31 @@ func (c *ChannelMeta) mergeFlushedSegments(seg *Segment, planID UniqueID, compac
 		log.Warn("failed to mergeFlushedSegments, collection mismatch",
 			zap.Int64("current collection ID", seg.collectionID),
 			zap.Int64("expected collection ID", c.collectionID))
-		return fmt.Errorf("failed to mergeFlushedSegments, mismatch collection, ID=%d", seg.collectionID)
+		return errors.Newf("failed to mergeFlushedSegments, mismatch collection, ID=%d", seg.collectionID)
 	}
 
-	compactedFrom = lo.Filter(compactedFrom, func(segID int64, _ int) bool {
-		// which means the segment is the `flushed` state
-		has := c.hasSegment(segID, true) && !c.hasSegment(segID, false)
-		if !has {
-			log.Warn("invalid segment", zap.Int64("segment_id", segID))
+	var inValidSegments []UniqueID
+	for _, ID := range compactedFrom {
+		// no such segments in channel or the segments are unflushed.
+		if !c.hasSegment(ID, true) || c.hasSegment(ID, false) {
+			inValidSegments = append(inValidSegments, ID)
 		}
-		return has
-	})
+	}
+
+	if len(inValidSegments) > 0 {
+		log.Warn("no match flushed segments to merge from", zap.Int64s("invalid segmentIDs", inValidSegments))
+		compactedFrom = lo.Without(compactedFrom, inValidSegments...)
+	}
 
 	log.Info("merge flushed segments")
 	c.segMu.Lock()
 	defer c.segMu.Unlock()
+	select {
+	case <-ctx.Done():
+		log.Warn("the context has been closed", zap.Error(ctx.Err()))
+		return errors.New("invalid context")
+	default:
+	}
 	for _, ID := range compactedFrom {
 		// the existent of the segments are already checked
 		s := c.segments[ID]
