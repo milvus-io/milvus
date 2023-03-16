@@ -128,3 +128,9 @@ pulsar:
       defaultRetentionSizeInMB: "8192"
       backlogQuotaDefaultLimitGB: "8"
       backlogQuotaDefaultRetentionPolicy: producer_exception
+
+extraConfigFiles:
+  user.yaml: |+
+    dataNode:
+      memory:
+        forceSyncEnable: false
