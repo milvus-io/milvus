@@ -34,3 +34,9 @@ minio:
   mode: standalone
 pulsar:
   enabled: false
+
+extraConfigFiles:
+  user.yaml: |+
+    dataNode:
+      memory:
+        forceSyncEnable: false
