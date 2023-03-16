@@ -78,7 +78,7 @@ minio:
   bucketName: "a-bucket" # Bucket name in MinIO/S3
   rootPath: files # The root path where the message is stored in MinIO/S3
    # Whether to use IAM role to access S3/GCS instead of access/secret keys
-  # For more infomation, refer to
+  # For more information, refer to
   # aws: https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_use.html
   # gcp: https://cloud.google.com/storage/docs/access-control/iam
   useIAM: false
@@ -100,7 +100,7 @@ minio:
 pulsar:
   address: localhost # Address of pulsar
   port: 6650 # Port of pulsar
-  webport: 80 # Web port of pulsar, if you connect direcly without proxy, should use 8080
+  webport: 80 # Web port of pulsar, if you connect directly without proxy, should use 8080
   maxMessageSize: 5242880 # 5 * 1024 * 1024 Bytes, Maximum size of each message in pulsar.
   tenant: public
   namespace: default
@@ -209,7 +209,7 @@ queryNode:
     flowGraph:
       maxQueueLength: 1024 # Maximum length of task queue in flowgraph
       maxParallelism: 1024 # Maximum number of tasks executed in parallel in the flowgraph
-  # Segcore will divide a segment into multiple chunks to enbale small index
+  # Segcore will divide a segment into multiple chunks to enable small index
   segcore:
     chunkRows: 1024 # The number of vectors in a chunk.
     # Note: we have disabled segment small index since @2022.05.12. So below related configurations won't work.
@@ -282,7 +282,7 @@ dataCoord:
 
   segment:
     maxSize: 512 # Maximum size of a segment in MB
-    diskSegmentMaxSize: 2048 # Maximun size of a segment in MB for collection which has Disk index
+    diskSegmentMaxSize: 2048 # Maximum size of a segment in MB for collection which has Disk index
     # Minimum proportion for a segment which can be sealed.
     # Sealing early can prevent producing large growing segments in case these segments might slow down our search/query.
     # Segments that sealed early will be compacted into a larger segment (within maxSize) eventually.
@@ -434,7 +434,7 @@ common:
     tlsMode: 0
 
   session:
-    ttl: 20 # ttl value when session granting a lease to register service
+    ttl: 60 # ttl value when session granting a lease to register service
     retryTimes: 30 # retry times when session sending etcd requests
 
 # QuotaConfig, configurations of Milvus quota and limits.
