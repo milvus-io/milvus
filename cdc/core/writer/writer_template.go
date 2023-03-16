@@ -281,7 +281,7 @@ func (c *CDCWriterTemplate) handleDeleteBuffer(msg *msgstream.DeleteMsg,
 		},
 		successes: []func(){
 			func() {
-				c.success(msg.CollectionID, collectionName, column.Len(), data, callback, positionFunc)
+				c.success(msg.CollectionID, collectionName, int(msg.NumRows), data, callback, positionFunc)
 			},
 		},
 		fails: []func(err error){
