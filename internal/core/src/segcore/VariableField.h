@@ -18,7 +18,12 @@
 #include <string>
 #include <utility>
 
+#include "common/FieldMeta.h"
 #include "common/LoadInfo.h"
+#include "common/Span.h"
+#include "common/Utils.h"
+#include "exceptions/EasyAssert.h"
+#include "fmt/core.h"
 
 namespace milvus::segcore {
 
@@ -44,11 +49,11 @@ class VariableField {
             begin++;
         }
 
-        data_ = (char*)CreateMap(segment_id, field_meta, info);
+        data_ = static_cast<char*>(CreateMap(segment_id, field_meta, info));
         construct_views();
     }
 
-    VariableField(VariableField&& field)
+    VariableField(VariableField&& field) noexcept
         : indices_(std::move(field.indices_)),
           size_(field.size_),
           data_(field.data_),
@@ -60,8 +65,8 @@ class VariableField {
         if (data_ != MAP_FAILED && data_ != nullptr) {
             if (munmap(data_, size_)) {
                 AssertInfo(true,
-                           std::string("failed to unmap variable field err=") +
-                               strerror(errno));
+                           fmt::format("failed to unmap variable field, err={}",
+                                       strerror(errno)));
             }
         }
     }
@@ -71,12 +76,12 @@ class VariableField {
         return data_;
     }
 
-    const std::vector<std::string_view>&
+    [[nodiscard]] const std::vector<std::string_view>&
     views() const {
         return views_;
     }
 
-    size_t
+    [[nodiscard]] size_t
     size() const {
         return size_;
     }
