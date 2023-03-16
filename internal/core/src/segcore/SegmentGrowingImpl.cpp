@@ -67,7 +67,7 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
     // step 1: check insert data if valid
     std::unordered_map<FieldId, int64_t> field_id_to_offset;
     int64_t field_offset = 0;
-    for (auto field : insert_data->fields_data()) {
+    for (const auto& field : insert_data->fields_data()) {
         auto field_id = FieldId(field.field_id());
         AssertInfo(!field_id_to_offset.count(field_id), "duplicate field data");
         field_id_to_offset.emplace(field_id, field_offset++);
@@ -445,7 +445,7 @@ SegmentGrowingImpl::get_active_count(Timestamp ts) const {
     auto row_count = this->get_row_count();
     auto& ts_vec = this->get_insert_record().timestamps_;
     auto iter = std::upper_bound(
-        boost::make_counting_iterator((int64_t)0),
+        boost::make_counting_iterator(static_cast<int64_t>(0)),
         boost::make_counting_iterator(row_count),
         ts,
         [&](Timestamp ts, int64_t index) { return ts < ts_vec[index]; });
