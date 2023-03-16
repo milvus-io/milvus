@@ -5389,8 +5389,8 @@ class TestCollectionRangeSearch(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index, params",
-                             zip(ct.all_index_types[:7],
-                                 ct.default_index_params[:7]))
+                             zip(range_search_supported_index,
+                                 range_search_supported_index_params))
     def test_range_search_after_index_different_metric_type(self, dim, index, params):
         """
         target: test range search with different metric type
@@ -5615,7 +5615,7 @@ class TestCollectionRangeSearch(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("index", ["BIN_FLAT", "BIN_IVF_FLAT"])
-    def test_range_search_binary_tanimoto_flat_index(self, nq, dim, auto_id, _async, index, is_flush):
+    def test_range_search_binary_tanimoto_flat_index(self, dim, auto_id, _async, index, is_flush):
         """
         target: range search binary_collection, and check the result: distance
         method: compare the return distance value with value computed with TANIMOTO
@@ -5637,16 +5637,31 @@ class TestCollectionRangeSearch(TestcaseBase):
         query_raw_vector, binary_vectors = cf.gen_binary_vectors(3000, dim)
         distance_0 = cf.tanimoto(query_raw_vector[0], binary_raw_vector[0])
         distance_1 = cf.tanimoto(query_raw_vector[0], binary_raw_vector[1])
-        # 4. search and compare the distance
-        search_params = {"metric_type": "TANIMOTO", "params": {"nprobe": 10, "radius": 1000,
-                                                               "range_filter": 0}}
-        res = collection_w.search(binary_vectors[:nq], "binary_vector",
+        # 4. search
+        search_params = {"metric_type": "TANIMOTO", "params": {"nprobe": 10}}
+        res = collection_w.search(binary_vectors[:1], "binary_vector",
+                                  search_params, default_limit, "int64 >= 0",
+                                  _async=_async)[0]
+        if _async:
+            res.done()
+            res = res.result()
+        limit = 0
+        radius = 1000
+        range_filter = 0
+        # filter the range search results to be compared
+        for distance_single in res[0].distances:
+            if radius > distance_single >= range_filter:
+                limit += 1
+        # 5. range search and compare the distance
+        search_params = {"metric_type": "TANIMOTO", "params": {"nprobe": 10, "radius": radius,
+                                                               "range_filter": range_filter}}
+        res = collection_w.search(binary_vectors[:1], "binary_vector",
                                   search_params, default_limit, "int64 >= 0",
                                   _async=_async,
                                   check_task=CheckTasks.check_search_results,
-                                  check_items={"nq": nq,
+                                  check_items={"nq": 1,
                                                "ids": insert_ids,
-                                               "limit": 2,
+                                               "limit": limit,
                                                "_async": _async})[0]
         if _async:
             res.done()
