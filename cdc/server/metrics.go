@@ -54,10 +54,13 @@ const (
 	taskIDLabelName                    = "task_id"
 	writeFailFuncLabelName             = "write_fail_func"
 	collectionIDLabelName              = "collection_id"
+	collectionNameLabelName            = "collection_name"
 	vchannelLabelName                  = "vchannel_name"
 	readFailFuncLabelName              = "read_fail_func"
 	streamingCollectionStatusLabelName = "streaming_collection_status"
 	messageTypeLabelName               = "msg_type"
+	apiTypeLabelName                   = "api_type"
+	apiStatusLabelName                 = "api_status"
 )
 
 var (
@@ -126,6 +129,12 @@ var (
 		Name:      "write_msg_row_total",
 		Help:      "the counter of messages that the writer has written",
 	}, []string{taskIDLabelName, collectionIDLabelName, messageTypeLabelName})
+	apiExecuteCountVec = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: milvusNamespace,
+		Subsystem: systemName,
+		Name:      "api_execute_total",
+		Help:      "the counter of executing api",
+	}, []string{taskIDLabelName, collectionNameLabelName, apiTypeLabelName, apiStatusLabelName})
 )
 
 func init() {
@@ -139,6 +148,7 @@ func init() {
 	registry.MustRegister(writerTimeDifferenceVec)
 	registry.MustRegister(readMsgRowCountVec)
 	registry.MustRegister(writeMsgRowCountVec)
+	registry.MustRegister(apiExecuteCountVec)
 }
 
 func registerMetric() {
