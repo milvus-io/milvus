@@ -50,7 +50,7 @@ mkdir -p planpb
 
 mkdir -p ../../cmd/tools/migration/legacy/legacypb
 
-protoc_opt="${protoc} --proto_path=${API_PROTO_DIR} --proto_path=/usr/local/include --proto_path=."
+protoc_opt="${protoc} --proto_path=${API_PROTO_DIR} --proto_path=/usr/local/include --proto_path=/usr/include --proto_path=."
 
 ${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./etcdpb etcd_meta.proto
 ${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./indexcgopb index_cgo_msg.proto

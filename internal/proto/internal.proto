@@ -132,6 +132,7 @@ message RetrieveRequest {
   uint64 timeout_timestamp = 10;
   int64 limit = 11; // Optional
   bool ignoreGrowing = 12;
+  bool is_count = 13;
 }
 
 message RetrieveResults {

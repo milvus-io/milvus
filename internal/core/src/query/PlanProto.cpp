@@ -185,14 +185,31 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
 std::unique_ptr<RetrievePlanNode>
 ProtoParser::RetrievePlanNodeFromProto(
     const planpb::PlanNode& plan_node_proto) {
-    Assert(plan_node_proto.has_predicates());
-    auto& predicate_proto = plan_node_proto.predicates();
-    auto expr_opt = [&]() -> ExprPtr { return ParseExpr(predicate_proto); }();
+    Assert(plan_node_proto.has_predicates() || plan_node_proto.has_query());
 
     auto plan_node = [&]() -> std::unique_ptr<RetrievePlanNode> {
-        return std::make_unique<RetrievePlanNode>();
+        auto node = std::make_unique<RetrievePlanNode>();
+        if (plan_node_proto.has_predicates()) {  // version before 2023.03.30.
+            node->is_count = false;
+            auto& predicate_proto = plan_node_proto.predicates();
+            auto expr_opt = [&]() -> ExprPtr {
+                return ParseExpr(predicate_proto);
+            }();
+            node->predicate_ = std::move(expr_opt);
+        } else {
+            auto& query = plan_node_proto.query();
+            if (query.has_predicates()) {
+                auto& predicate_proto = query.predicates();
+                auto expr_opt = [&]() -> ExprPtr {
+                    return ParseExpr(predicate_proto);
+                }();
+                node->predicate_ = std::move(expr_opt);
+            }
+            node->is_count = query.is_count();
+        }
+        return node;
     }();
-    plan_node->predicate_ = std::move(expr_opt);
+
     return plan_node;
 }
 

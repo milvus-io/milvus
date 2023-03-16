@@ -57,7 +57,8 @@ struct RetrievePlanNode : PlanNode {
     void
     accept(PlanNodeVisitor&) override;
 
-    ExprPtr predicate_;
+    std::optional<ExprPtr> predicate_;
+    bool is_count;
 };
 
 }  // namespace milvus::query

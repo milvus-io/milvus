@@ -945,6 +945,7 @@ func (node *QueryNode) queryWithDmlChannel(ctx context.Context, req *querypb.Que
 		zap.Bool("fromShardLeader", req.GetFromShardLeader()),
 		zap.String("vChannel", dmlChannel),
 		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
+		zap.Bool("is_count", req.GetReq().GetIsCount()),
 		zap.Uint64("guaranteeTimestamp", req.GetReq().GetGuaranteeTimestamp()),
 		zap.Uint64("timeTravel", req.GetReq().GetTravelTimestamp()))
 
@@ -1030,8 +1031,10 @@ func (node *QueryNode) queryWithDmlChannel(ctx context.Context, req *querypb.Que
 	tr.CtxElapse(ctx, fmt.Sprintf("start reduce query result, fromSharedLeader = %t, vChannel = %s, segmentIDs = %v",
 		req.GetFromShardLeader(), dmlChannel, req.GetSegmentIDs()))
 
-	ret, err2 := mergeInternalRetrieveResultsAndFillIfEmpty(ctx, results, req.Req.GetLimit(), req.GetReq().GetOutputFieldsId(), qs.collection.Schema())
-	if err2 != nil {
+	reducer := createInternalReducer(ctx, req, qs.collection.Schema())
+
+	ret, err2 := reducer.Reduce(results)
+	if err != nil {
 		failRet.Status.Reason = err2.Error()
 		return failRet, nil
 	}
@@ -1052,6 +1055,7 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 		zap.Bool("fromShardleader", req.GetFromShardLeader()),
 		zap.Strings("vChannels", req.GetDmlChannels()),
 		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
+		zap.Bool("is_count", req.GetReq().GetIsCount()),
 		zap.Uint64("guaranteeTimestamp", req.Req.GetGuaranteeTimestamp()),
 		zap.Uint64("timeTravel", req.GetReq().GetTravelTimestamp()))
 
@@ -1116,7 +1120,10 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 		failRet.Status.Reason = err.Error()
 		return failRet, nil
 	}
-	ret, err := mergeInternalRetrieveResultsAndFillIfEmpty(ctx, toMergeResults, req.GetReq().GetLimit(), req.GetReq().GetOutputFieldsId(), coll.Schema())
+
+	reducer := createInternalReducer(ctx, req, coll.Schema())
+
+	ret, err := reducer.Reduce(toMergeResults)
 	if err != nil {
 		failRet.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		failRet.Status.Reason = err.Error()

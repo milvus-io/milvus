@@ -665,3 +665,26 @@ vector_anns: <
     auto ref_plan = CreatePlan(*schema, dsl_text);
     plan->check_identical(*ref_plan);
 }
+
+TEST(PlanProtoTest, Predicates) {
+    auto schema = getStandardSchema();
+    auto age_fid = schema->AddDebugField("age1", DataType::INT64);
+
+    planpb::PlanNode plan_node_proto;
+    auto expr =
+        plan_node_proto.mutable_predicates()->mutable_unary_range_expr();
+    expr->set_op(planpb::Equal);
+    auto column_info = expr->mutable_column_info();
+    column_info->set_data_type(proto::schema::DataType::Int64);
+    column_info->set_field_id(age_fid.get());
+    auto value = expr->mutable_value();
+    value->set_int64_val(1000);
+
+    std::string binary;
+    plan_node_proto.SerializeToString(&binary);
+
+    auto plan =
+        CreateRetrievePlanByExpr(*schema, binary.c_str(), binary.size());
+    ASSERT_TRUE(plan->plan_node_->predicate_.has_value());
+    ASSERT_FALSE(plan->plan_node_->is_count);
+}

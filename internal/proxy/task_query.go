@@ -6,11 +6,13 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/golang/protobuf/proto"
+	"github.com/milvus-io/milvus/internal/proto/planpb"
+
 	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus/internal/common"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 
-	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/log"
@@ -57,6 +59,8 @@ type queryTask struct {
 
 	queryShardPolicy pickShardPolicy
 	shardMgr         *shardClientMgr
+
+	plan *planpb.PlanNode
 }
 
 type queryParams struct {
@@ -169,6 +173,74 @@ func parseQueryParams(queryParamsPair []*commonpb.KeyValuePair) (*queryParams, e
 	}, nil
 }
 
+func matchCountRule(outputs []string) bool {
+	return len(outputs) == 1 && strings.ToLower(strings.TrimSpace(outputs[0])) == "count(*)"
+}
+
+func createCntPlan(expr string, schema *schemapb.CollectionSchema) (*planpb.PlanNode, error) {
+	if expr == "" {
+		return &planpb.PlanNode{
+			Node: &planpb.PlanNode_Query{
+				Query: &planpb.QueryPlanNode{
+					Predicates: nil,
+					IsCount:    true,
+				},
+			},
+		}, nil
+	}
+
+	plan, err := planparserv2.CreateRetrievePlan(schema, expr)
+	if err != nil {
+		return nil, err
+	}
+
+	plan.Node.(*planpb.PlanNode_Query).Query.IsCount = true
+
+	return plan, nil
+}
+
+func (t *queryTask) createPlan(ctx context.Context) error {
+	schema := t.schema
+
+	cntMatch := matchCountRule(t.request.GetOutputFields())
+	if cntMatch {
+		var err error
+		t.plan, err = createCntPlan(t.request.GetExpr(), schema)
+		return err
+	}
+
+	if t.request.Expr == "" {
+		return fmt.Errorf("query expression is empty")
+	}
+
+	plan, err := planparserv2.CreateRetrievePlan(schema, t.request.Expr)
+	if err != nil {
+		return err
+	}
+
+	t.request.OutputFields, err = translateOutputFields(t.request.OutputFields, schema, true)
+	if err != nil {
+		return err
+	}
+	log.Ctx(ctx).Debug("translate output fields",
+		zap.Strings("OutputFields", t.request.OutputFields),
+		zap.String("requestType", "query"))
+
+	outputFieldIDs, err := translateToOutputFieldIDs(t.request.GetOutputFields(), schema)
+	if err != nil {
+		return err
+	}
+	outputFieldIDs = append(outputFieldIDs, common.TimeStampField)
+	t.RetrieveRequest.OutputFieldsId = outputFieldIDs
+	plan.OutputFieldIds = outputFieldIDs
+	t.plan = plan
+	log.Ctx(ctx).Debug("translate output fields to field ids",
+		zap.Int64s("OutputFieldsID", t.OutputFieldsId),
+		zap.String("requestType", "query"))
+
+	return nil
+}
+
 func (t *queryTask) PreExecute(ctx context.Context) error {
 	if t.queryShardPolicy == nil {
 		t.queryShardPolicy = mergeRoundRobinPolicy
@@ -268,34 +340,15 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		t.request.Expr = IDs2Expr(pkField, t.ids)
 	}
 
-	if t.request.Expr == "" {
-		return fmt.Errorf("query expression is empty")
-	}
-
-	plan, err := planparserv2.CreateRetrievePlan(schema, t.request.Expr)
-	if err != nil {
+	if err := t.createPlan(ctx); err != nil {
 		return err
 	}
-	t.request.OutputFields, err = translateOutputFields(t.request.OutputFields, schema, true)
-	if err != nil {
-		return err
-	}
-	log.Ctx(ctx).Debug("translate output fields",
-		zap.Any("OutputFields", t.request.OutputFields),
-		zap.Any("requestType", "query"))
 
-	outputFieldIDs, err := translateToOutputFieldIDs(t.request.GetOutputFields(), schema)
-	if err != nil {
-		return err
+	if t.plan.GetQuery().GetIsCount() {
+		t.RetrieveRequest.IsCount = true
 	}
-	outputFieldIDs = append(outputFieldIDs, common.TimeStampField)
-	t.RetrieveRequest.OutputFieldsId = outputFieldIDs
-	plan.OutputFieldIds = outputFieldIDs
-	log.Ctx(ctx).Debug("translate output fields to field ids",
-		zap.Any("OutputFieldsID", t.OutputFieldsId),
-		zap.Any("requestType", "query"))
 
-	t.RetrieveRequest.SerializedExprPlan, err = proto.Marshal(plan)
+	t.RetrieveRequest.SerializedExprPlan, err = proto.Marshal(t.plan)
 	if err != nil {
 		return err
 	}
@@ -387,52 +440,15 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 
 	metrics.ProxyDecodeResultLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.QueryLabel).Observe(0.0)
 	tr.CtxRecord(ctx, "reduceResultStart")
-	t.result, err = reduceRetrieveResultsAndFillIfEmpty(ctx, t.toReduceResults, t.queryParams, t.GetOutputFieldsId(), t.schema)
+
+	reducer := createMilvusReducer(ctx, t.queryParams, t.RetrieveRequest, t.schema, t.plan, t.collectionName)
+
+	t.result, err = reducer.Reduce(t.toReduceResults)
 	if err != nil {
 		return err
 	}
 	metrics.ProxyReduceResultLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.QueryLabel).Observe(float64(tr.RecordSpan().Milliseconds()))
-	t.result.CollectionName = t.collectionName
 
-	if len(t.result.FieldsData) > 0 {
-		t.result.Status = &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_Success,
-		}
-	} else {
-		log.Ctx(ctx).Warn("Query result is nil",
-			zap.Any("requestType", "query"))
-		t.result.Status = &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_EmptyCollection,
-			Reason:    "empty collection", // TODO
-		}
-		return nil
-	}
-
-	schema, err := globalMetaCache.GetCollectionSchema(ctx, t.request.CollectionName)
-	if err != nil {
-		return err
-	}
-	for i := 0; i < len(t.result.FieldsData); i++ {
-		if t.OutputFieldsId[i] == common.TimeStampField {
-			t.result.FieldsData = append(t.result.FieldsData[:i], t.result.FieldsData[(i+1):]...)
-			i--
-			continue
-		}
-		for _, field := range schema.Fields {
-			if field.FieldID == t.OutputFieldsId[i] {
-				// deal with the situation that offset equal to or greater than the number of entities
-				if t.result.FieldsData[i] == nil {
-					t.result.FieldsData[i], err = typeutil.GenEmptyFieldData(field)
-					if err != nil {
-						return err
-					}
-				}
-				t.result.FieldsData[i].FieldName = field.Name
-				t.result.FieldsData[i].FieldId = field.FieldID
-				t.result.FieldsData[i].Type = field.DataType
-			}
-		}
-	}
 	log.Ctx(ctx).Debug("Query PostExecute done",
 		zap.String("requestType", "query"))
 	return nil
