@@ -17,10 +17,12 @@
 package datanode
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/internal/util/tsoutil"
 )
@@ -49,27 +51,47 @@ func TestSyncPeriodically(t *testing.T) {
 			if !test.isBufferEmpty {
 				segment.curInsertBuf = &BufferData{}
 			}
-			res := policy([]*Segment{segment}, tsoutil.ComposeTSByTime(test.ts, 0))
+			res := policy([]*Segment{segment}, tsoutil.ComposeTSByTime(test.ts, 0), nil)
 			assert.Equal(t, test.shouldSyncNum, len(res))
 		})
 	}
 }
 
 func TestSyncMemoryTooHigh(t *testing.T) {
-	s1 := &Segment{segmentID: 1, memorySize: 1}
-	s2 := &Segment{segmentID: 2, memorySize: 2}
-	s3 := &Segment{segmentID: 3, memorySize: 3}
-	s4 := &Segment{segmentID: 4, memorySize: 4}
-	s5 := &Segment{segmentID: 5, memorySize: 5}
+	tests := []struct {
+		testName        string
+		syncSegmentNum  int
+		needToSync      bool
+		memorySizesInMB []float64
+		shouldSyncSegs  []UniqueID
+	}{
+		{"test normal 1", 3, true,
+			[]float64{1, 2, 3, 4, 5}, []UniqueID{5, 4, 3}},
+		{"test normal 2", 2, true,
+			[]float64{1, 2, 3, 4, 5}, []UniqueID{5, 4}},
+		{"test normal 3", 5, true,
+			[]float64{1, 2, 3, 4, 5}, []UniqueID{5, 4, 3, 2, 1}},
+		{"test needToSync false", 3, false,
+			[]float64{1, 2, 3, 4, 5}, []UniqueID{}},
+		{"test syncSegmentNum 1", 1, true,
+			[]float64{1, 2, 3, 4, 5}, []UniqueID{5}},
+		{"test with small segment", 3, true,
+			[]float64{0.1, 0.1, 0.1, 4, 5}, []UniqueID{5, 4}},
+	}
 
-	var baseParams = Params.BaseTable
-	baseParams.Save(Params.DataNodeCfg.MemoryForceSyncEnable.Key, "true")
-	baseParams.Save(Params.DataNodeCfg.MemoryForceSyncThreshold.Key, "0.0")
-	baseParams.Save(Params.DataNodeCfg.MemoryForceSyncSegmentRatio.Key, "0.6")
-	policy := syncMemoryTooHigh()
-	segs := policy([]*Segment{s3, s4, s2, s1, s5}, 0)
-	assert.Equal(t, 3, len(segs))
-	assert.Equal(t, int64(5), segs[0])
-	assert.Equal(t, int64(4), segs[1])
-	assert.Equal(t, int64(3), segs[2])
+	for _, test := range tests {
+		t.Run(test.testName, func(t *testing.T) {
+			var baseParams = Params.BaseTable
+			baseParams.Save(Params.DataNodeCfg.MemoryForceSyncSegmentNum.Key, fmt.Sprintf("%d", test.syncSegmentNum))
+			policy := syncMemoryTooHigh()
+			segments := make([]*Segment, len(test.memorySizesInMB))
+			for i := range segments {
+				segments[i] = &Segment{
+					segmentID: UniqueID(i + 1), memorySize: int64(test.memorySizesInMB[i] * 1024 * 1024),
+				}
+			}
+			segs := policy(segments, 0, atomic.NewBool(test.needToSync))
+			assert.ElementsMatch(t, segs, test.shouldSyncSegs)
+		})
+	}
 }

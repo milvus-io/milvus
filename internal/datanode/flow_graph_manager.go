@@ -18,23 +18,87 @@ package datanode
 
 import (
 	"fmt"
+	"sort"
 	"sync"
+	"time"
+
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/schemapb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/util/hardware"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
-
-	"go.uber.org/zap"
 )
 
 type flowgraphManager struct {
 	flowgraphs sync.Map // vChannelName -> dataSyncService
+
+	closeCh   chan struct{}
+	closeOnce sync.Once
 }
 
 func newFlowgraphManager() *flowgraphManager {
-	return &flowgraphManager{}
+	return &flowgraphManager{
+		closeCh: make(chan struct{}),
+	}
+}
+
+func (fm *flowgraphManager) start() {
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-fm.closeCh:
+			return
+		case <-ticker.C:
+			fm.execute(hardware.GetMemoryCount())
+		}
+	}
+}
+
+func (fm *flowgraphManager) stop() {
+	fm.closeOnce.Do(func() {
+		close(fm.closeCh)
+	})
+}
+
+func (fm *flowgraphManager) execute(totalMemory uint64) {
+	if !Params.DataNodeCfg.MemoryForceSyncEnable.GetAsBool() {
+		return
+	}
+
+	var total int64
+	channels := make([]struct {
+		channel    string
+		bufferSize int64
+	}, 0)
+	fm.flowgraphs.Range(func(key, value interface{}) bool {
+		size := value.(*dataSyncService).channel.getTotalMemorySize()
+		channels = append(channels, struct {
+			channel    string
+			bufferSize int64
+		}{key.(string), size})
+		total += size
+		return true
+	})
+	if len(channels) == 0 {
+		return
+	}
+
+	if float64(total) < float64(totalMemory)*Params.DataNodeCfg.MemoryWatermark.GetAsFloat() {
+		return
+	}
+
+	sort.Slice(channels, func(i, j int) bool {
+		return channels[i].bufferSize > channels[j].bufferSize
+	})
+	if fg, ok := fm.flowgraphs.Load(channels[0].channel); ok { // sync the first channel with the largest memory usage
+		fg.(*dataSyncService).channel.forceToSync()
+		log.Info("notify flowgraph to sync",
+			zap.String("channel", channels[0].channel), zap.Int64("bufferSize", channels[0].bufferSize))
+	}
 }
 
 func (fm *flowgraphManager) addAndStart(dn *DataNode, vchan *datapb.VchannelInfo, schema *schemapb.CollectionSchema, tickler *tickler) error {

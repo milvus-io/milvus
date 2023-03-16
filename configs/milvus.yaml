@@ -314,8 +314,9 @@ dataNode:
     clientMaxRecvSize: 268435456
   memory:
     forceSyncEnable: true # `true` to force sync if memory usage is too high
-    forceSyncThreshold: 0.6 # forceSync only take effects when memory usage ratio > forceSyncThreshold. note that should set it a small value like 0.2 for standalone deployment 
-    forceSyncSegmentRatio: 0.3 # ratio of segments to sync, top largest forceSyncSegmentRatio segments will be synced
+    forceSyncSegmentNum: 1 # number of segments to sync, segments with top largest buffer will be synced.
+    watermarkStandalone: 0.2 # memory watermark for standalone, upon reaching this watermark, segments will be synced.
+    watermarkCluster: 0.5 # memory watermark for cluster, upon reaching this watermark, segments will be synced.
 
 # Configures the system log output.
 log:

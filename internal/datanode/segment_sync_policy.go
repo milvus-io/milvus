@@ -21,18 +21,21 @@ import (
 	"sort"
 	"time"
 
-	"github.com/milvus-io/milvus/internal/log"
-	"github.com/milvus-io/milvus/internal/util/hardware"
-	"github.com/milvus-io/milvus/internal/util/tsoutil"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/util/tsoutil"
 )
 
+const minSyncSize = 0.5 * 1024 * 1024
+
 // segmentsSyncPolicy sync policy applies to segments
-type segmentSyncPolicy func(segments []*Segment, ts Timestamp) []UniqueID
+type segmentSyncPolicy func(segments []*Segment, ts Timestamp, needToSync *atomic.Bool) []UniqueID
 
 // syncPeriodically get segmentSyncPolicy with segments sync periodically.
 func syncPeriodically() segmentSyncPolicy {
-	return func(segments []*Segment, ts Timestamp) []UniqueID {
+	return func(segments []*Segment, ts Timestamp, _ *atomic.Bool) []UniqueID {
 		segsToSync := make([]UniqueID, 0)
 		for _, seg := range segments {
 			endTime := tsoutil.PhysicalTime(ts)
@@ -52,25 +55,24 @@ func syncPeriodically() segmentSyncPolicy {
 
 // syncMemoryTooHigh force sync the largest segment.
 func syncMemoryTooHigh() segmentSyncPolicy {
-	return func(segments []*Segment, ts Timestamp) []UniqueID {
-		if Params.DataNodeCfg.MemoryForceSyncEnable.GetAsBool() &&
-			hardware.GetMemoryUseRatio() >= Params.DataNodeCfg.MemoryForceSyncThreshold.GetAsFloat() &&
-			len(segments) >= 1 {
-			toSyncSegmentNum := int(math.Max(float64(len(segments))*Params.DataNodeCfg.MemoryForceSyncSegmentRatio.GetAsFloat(), 1.0))
-			toSyncSegmentIDs := make([]UniqueID, 0)
-			sort.Slice(segments, func(i, j int) bool {
-				return segments[i].memorySize > segments[j].memorySize
-			})
-			for i := 0; i < toSyncSegmentNum; i++ {
-				toSyncSegmentIDs = append(toSyncSegmentIDs, segments[i].segmentID)
-			}
-			log.Debug("sync segment due to memory usage is too high",
-				zap.Int64s("toSyncSegmentIDs", toSyncSegmentIDs),
-				zap.Int("inputSegmentNum", len(segments)),
-				zap.Int("toSyncSegmentNum", len(toSyncSegmentIDs)),
-				zap.Float64("memoryUsageRatio", hardware.GetMemoryUseRatio()))
-			return toSyncSegmentIDs
+	return func(segments []*Segment, ts Timestamp, needToSync *atomic.Bool) []UniqueID {
+		if len(segments) == 0 || !needToSync.Load() {
+			return nil
 		}
-		return []UniqueID{}
+		sort.Slice(segments, func(i, j int) bool {
+			return segments[i].memorySize > segments[j].memorySize
+		})
+		syncSegments := make([]UniqueID, 0)
+		syncSegmentsNum := math.Min(float64(Params.DataNodeCfg.MemoryForceSyncSegmentNum.GetAsInt()), float64(len(segments)))
+		for i := 0; i < int(syncSegmentsNum); i++ {
+			if segments[i].memorySize < minSyncSize { // prevent generating too many small binlogs
+				break
+			}
+			syncSegments = append(syncSegments, segments[i].segmentID)
+			log.Info("sync segment due to memory usage is too high",
+				zap.Int64("segmentID", segments[i].segmentID),
+				zap.Int64("memorySize", segments[i].memorySize))
+		}
+		return syncSegments
 	}
 }
