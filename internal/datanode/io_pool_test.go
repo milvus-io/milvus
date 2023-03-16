@@ -10,7 +10,6 @@ import (
 )
 
 func Test_getOrCreateIOPool(t *testing.T) {
-	Params.InitOnce()
 	ioConcurrency := Params.DataNodeCfg.IOConcurrency
 	Params.DataNodeCfg.IOConcurrency = 64
 	defer func() { Params.DataNodeCfg.IOConcurrency = ioConcurrency }()

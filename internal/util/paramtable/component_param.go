@@ -22,6 +22,8 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
+	"github.com/milvus-io/milvus/internal/util/metricsinfo"
+
 	"github.com/shirou/gopsutil/v3/disk"
 	"go.uber.org/zap"
 )
@@ -1566,9 +1568,9 @@ type dataNodeConfig struct {
 	UpdatedTime time.Time
 
 	// memory management
-	MemoryForceSyncEnable       bool
-	MemoryForceSyncThreshold    float64
-	MemoryForceSyncSegmentRatio float64
+	MemoryForceSyncEnable     bool
+	MemoryForceSyncSegmentNum int
+	MemoryWatermark           float64
 }
 
 func (p *dataNodeConfig) init(base *BaseTable) {
@@ -1585,8 +1587,8 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 
 	p.initChannelWatchPath()
 	p.initMemoryForceSyncEnable()
-	p.initMemoryForceSyncRatio()
-	p.initMemoryForceSyncSegmentRatio()
+	p.initMemoryWatermark()
+	p.initMemoryForceSyncSegmentNum()
 }
 
 // InitAlias init this DataNode alias
@@ -1659,12 +1661,24 @@ func (p *dataNodeConfig) initMemoryForceSyncEnable() {
 	p.MemoryForceSyncEnable = p.Base.ParseBool("datanode.memory.forceSyncEnable", true)
 }
 
-func (p *dataNodeConfig) initMemoryForceSyncRatio() {
-	p.MemoryForceSyncThreshold = p.Base.ParseFloatWithDefault("datanode.memory.forceSyncThreshold", 0.7)
+func (p *dataNodeConfig) initMemoryWatermark() {
+	if os.Getenv(metricsinfo.DeployModeEnvKey) == metricsinfo.StandaloneDeployMode {
+		p.MemoryWatermark = p.Base.ParseFloatWithDefault("datanode.memory.watermarkStandalone", 0.2)
+		return
+	}
+	if os.Getenv(metricsinfo.DeployModeEnvKey) == metricsinfo.ClusterDeployMode {
+		p.MemoryWatermark = p.Base.ParseFloatWithDefault("datanode.memory.watermarkCluster", 0.5)
+		return
+	}
+	log.Warn("DeployModeEnv is not set, use default", zap.Float64("default", 0.5))
+	p.MemoryWatermark = 0.5
 }
 
-func (p *dataNodeConfig) initMemoryForceSyncSegmentRatio() {
-	p.MemoryForceSyncSegmentRatio = p.Base.ParseFloatWithDefault("datanode.memory.forceSyncSegmentRatio", 0.3)
+func (p *dataNodeConfig) initMemoryForceSyncSegmentNum() {
+	p.MemoryForceSyncSegmentNum = p.Base.ParseIntWithDefault("datanode.memory.forceSyncSegmentNum", 1)
+	if p.MemoryForceSyncSegmentNum < 1 {
+		p.MemoryForceSyncSegmentNum = 1
+	}
 }
 
 // /////////////////////////////////////////////////////////////////////////////
