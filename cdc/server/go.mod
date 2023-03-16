@@ -9,6 +9,7 @@ require (
 	github.com/google/uuid v1.3.0
 	github.com/milvus-io/milvus-proto/go-api v0.0.0-20230303054144-16f081962572
 	github.com/milvus-io/milvus/cdc/core v0.0.1
+	github.com/milvus-io/milvus/pkg v0.0.1
 	github.com/mitchellh/mapstructure v1.5.0
 	github.com/prometheus/client_golang v1.11.1
 	github.com/samber/lo v1.27.0
@@ -35,10 +36,12 @@ require (
 	github.com/cockroachdb/logtags v0.0.0-20211118104740-dabe8e521a4f // indirect
 	github.com/cockroachdb/redact v1.1.3 // indirect
 	github.com/confluentinc/confluent-kafka-go v1.9.1 // indirect
+	github.com/containerd/cgroups v1.0.4 // indirect
 	github.com/coreos/go-semver v0.3.0 // indirect
 	github.com/coreos/go-systemd/v22 v22.3.2 // indirect
 	github.com/danieljoos/wincred v1.1.2 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
+	github.com/docker/go-units v0.4.0 // indirect
 	github.com/dustin/go-humanize v1.0.0 // indirect
 	github.com/dvsekhvalnov/jose2go v1.5.0 // indirect
 	github.com/form3tech-oss/jwt-go v3.2.3+incompatible // indirect
@@ -49,6 +52,7 @@ require (
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
 	github.com/godbus/dbus v0.0.0-20190726142602-4481cbc300e2 // indirect
+	github.com/godbus/dbus/v5 v5.0.4 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang-jwt/jwt v3.2.2+incompatible // indirect
 	github.com/golang/protobuf v1.5.2 // indirect
@@ -75,10 +79,10 @@ require (
 	github.com/mattn/go-runewidth v0.0.9 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.1 // indirect
 	github.com/milvus-io/milvus-sdk-go/v2 v2.2.1-0.20230228025743-8fff5cdd8006 // indirect
-	github.com/milvus-io/milvus/pkg v0.0.1 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.1 // indirect
 	github.com/mtibben/percent v0.2.1 // indirect
+	github.com/opencontainers/runtime-spec v1.0.2 // indirect
 	github.com/pelletier/go-toml v1.9.3 // indirect
 	github.com/pierrec/lz4 v2.5.2+incompatible // indirect
 	github.com/pkg/errors v0.9.1 // indirect
@@ -146,7 +150,7 @@ require (
 replace (
 	github.com/apache/pulsar-client-go => github.com/milvus-io/pulsar-client-go v0.6.10
 	github.com/milvus-io/milvus/cdc/core => ../core
-	github.com/milvus-io/milvus/pkg => ./../../../../milvus/pkg
+	github.com/milvus-io/milvus/pkg => github.com/jaime0815/milvus/pkg v0.0.0-20230306083504-7b3f06609d62
 	github.com/streamnative/pulsarctl => github.com/xiaofan-luan/pulsarctl v0.5.1
 	github.com/tecbot/gorocksdb => ./../rocksdb
 )

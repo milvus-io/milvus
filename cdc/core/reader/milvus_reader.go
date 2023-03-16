@@ -218,8 +218,8 @@ func (reader *MilvusCollectionReader) getCollectionInfo(collectionNames []string
 		info := &pb.CollectionInfo{}
 		err = proto.Unmarshal(kv.Value, info)
 		if err != nil {
-			log.Warn("fail to unmarshal collection info", zap.String("key", util.ToString(kv.Key)), zap.String("value", util.Base64Encode(kv.Value)), zap.Error(err))
-			return existedCollectionInfos, err
+			log.Warn("fail to unmarshal collection info, maybe it's a deleted collection", zap.String("key", util.ToString(kv.Key)), zap.String("value", util.Base64Encode(kv.Value)), zap.Error(err))
+			continue
 		}
 		if lo.Contains(collectionNames, info.Schema.Name) {
 			log.Info("get the collection that it need to be replicated", zap.String("name", info.Schema.Name), zap.String("key", util.ToString(kv.Key)))
