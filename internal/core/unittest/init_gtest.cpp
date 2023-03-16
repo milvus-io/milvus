@@ -12,11 +12,6 @@
 #include <gtest/gtest.h>
 #include "common/SystemProperty.h"
 
-#ifndef MILVUS_TEST_SEGCORE_YAML_PATH
-#error MILVUS_TEST_SEGCORE_YAML_PATH is not defined
-#define MILVUS_TEST_SEGCORE_YAML_PATH ""
-#endif
-
 int
 main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);

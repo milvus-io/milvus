@@ -8,6 +8,7 @@ class MilvusConan(ConanFile):
         "rocksdb/6.29.5",
         "boost/1.81.0",
         "onetbb/2021.7.0",
+        "nlohmann_json/3.11.2",
         "zstd/1.5.2",
         "lz4/1.9.4",
         "snappy/1.1.9",
@@ -51,6 +52,7 @@ class MilvusConan(ConanFile):
         "aws-sdk-cpp:transfer": False,
         "gtest:build_gmock": False,
         "boost:without_locale": False,
+        "glog:with_gflags": False,
     }
 
     def configure(self):

@@ -33,27 +33,27 @@
 #include "storage/FieldDataFactory.h"
 
 #define FILEMANAGER_TRY try {
-#define FILEMANAGER_CATCH                                                      \
-    }                                                                          \
-    catch (LocalChunkManagerException & e) {                                   \
-        LOG_SEGCORE_ERROR_C << "LocalChunkManagerException:" << e.what();      \
-        return false;                                                          \
-    }                                                                          \
-    catch (MinioException & e) {                                               \
-        LOG_SEGCORE_ERROR_C << "milvus::storage::MinioException:" << e.what(); \
-        return false;                                                          \
-    }                                                                          \
-    catch (DiskANNFileManagerException & e) {                                  \
-        LOG_SEGCORE_ERROR_C << "milvus::storage::DiskANNFileManagerException:" \
-                            << e.what();                                       \
-        return false;                                                          \
-    }                                                                          \
-    catch (ArrowException & e) {                                               \
-        LOG_SEGCORE_ERROR_C << "milvus::storage::ArrowException:" << e.what(); \
-        return false;                                                          \
-    }                                                                          \
-    catch (std::exception & e) {                                               \
-        LOG_SEGCORE_ERROR_C << "Exception:" << e.what();                       \
+#define FILEMANAGER_CATCH                                                     \
+    }                                                                         \
+    catch (LocalChunkManagerException & e) {                                  \
+        LOG_SEGCORE_ERROR_ << "LocalChunkManagerException:" << e.what();      \
+        return false;                                                         \
+    }                                                                         \
+    catch (MinioException & e) {                                              \
+        LOG_SEGCORE_ERROR_ << "milvus::storage::MinioException:" << e.what(); \
+        return false;                                                         \
+    }                                                                         \
+    catch (DiskANNFileManagerException & e) {                                 \
+        LOG_SEGCORE_ERROR_ << "milvus::storage::DiskANNFileManagerException:" \
+                           << e.what();                                       \
+        return false;                                                         \
+    }                                                                         \
+    catch (ArrowException & e) {                                              \
+        LOG_SEGCORE_ERROR_ << "milvus::storage::ArrowException:" << e.what(); \
+        return false;                                                         \
+    }                                                                         \
+    catch (std::exception & e) {                                              \
+        LOG_SEGCORE_ERROR_ << "Exception:" << e.what();                       \
         return false;
 #define FILEMANAGER_END }
 
@@ -113,7 +113,7 @@ DiskFileManagerImpl::AddFile(const std::string& file) noexcept {
     auto& pool = ThreadPool::GetInstance();
     FILEMANAGER_TRY
     if (!local_chunk_manager.Exist(file)) {
-        LOG_SEGCORE_ERROR_C << "local file: " << file << " does not exist ";
+        LOG_SEGCORE_ERROR_ << "local file: " << file << " does not exist ";
         return false;
     }
 
