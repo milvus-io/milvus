@@ -187,8 +187,11 @@ func getSystemInfoMetrics(
 		defer wg.Done()
 
 		queryCoordResp, queryCoordErr = node.queryCoord.GetMetrics(ctx, request)
+		if queryCoordErr != nil {
+			return
+		}
 		queryCoordRoleName = queryCoordResp.GetComponentName()
-		queryCoordErr = metricsinfo.UnmarshalTopology(queryCoordResp.Response, &queryCoordTopology)
+		queryCoordErr = metricsinfo.UnmarshalTopology(queryCoordResp.GetResponse(), &queryCoordTopology)
 	}()
 
 	wg.Add(1)
@@ -196,8 +199,11 @@ func getSystemInfoMetrics(
 		defer wg.Done()
 
 		dataCoordResp, dataCoordErr = node.dataCoord.GetMetrics(ctx, request)
+		if dataCoordErr != nil {
+			return
+		}
 		dataCoordRoleName = dataCoordResp.GetComponentName()
-		dataCoordErr = metricsinfo.UnmarshalTopology(dataCoordResp.Response, &dataCoordTopology)
+		dataCoordErr = metricsinfo.UnmarshalTopology(dataCoordResp.GetResponse(), &dataCoordTopology)
 	}()
 
 	wg.Add(1)
@@ -205,8 +211,11 @@ func getSystemInfoMetrics(
 		defer wg.Done()
 
 		indexCoordResp, indexCoordErr = node.indexCoord.GetMetrics(ctx, request)
+		if indexCoordErr != nil {
+			return
+		}
 		indexCoordRoleName = indexCoordResp.GetComponentName()
-		indexCoordErr = metricsinfo.UnmarshalTopology(indexCoordResp.Response, &indexCoordTopology)
+		indexCoordErr = metricsinfo.UnmarshalTopology(indexCoordResp.GetResponse(), &indexCoordTopology)
 	}()
 
 	wg.Add(1)
@@ -214,8 +223,11 @@ func getSystemInfoMetrics(
 		defer wg.Done()
 
 		rootCoordResp, rootCoordErr = node.rootCoord.GetMetrics(ctx, request)
+		if rootCoordErr != nil {
+			return
+		}
 		rootCoordRoleName = rootCoordResp.GetComponentName()
-		rootCoordErr = metricsinfo.UnmarshalTopology(rootCoordResp.Response, &rootCoordTopology)
+		rootCoordErr = metricsinfo.UnmarshalTopology(rootCoordResp.GetResponse(), &rootCoordTopology)
 	}()
 
 	wg.Wait()
