@@ -53,6 +53,7 @@ var (
 	ErrServiceUnavailable          = newMilvusError("service unavailable", 2, true)
 	ErrServiceMemoryLimitExceeded  = newMilvusError("memory limit exceeded", 3, false)
 	ErrServiceRequestLimitExceeded = newMilvusError("request limit exceeded", 4, true)
+	ErrServiceInternal             = newMilvusError("service internal error", 5, false) // Never return this error out of Milvus
 
 	// Collection related
 	ErrCollectionNotFound  = newMilvusError("collection not found", 100, false)
@@ -69,12 +70,15 @@ var (
 	ErrReplicaNotFound = newMilvusError("replica not found", 400, false)
 
 	// Channel related
-	ErrChannelNotFound = newMilvusError("channel not found", 500, false)
+	ErrChannelNotFound    = newMilvusError("channel not found", 500, false)
+	ErrChannelLack        = newMilvusError("channel lacks", 501, false)
+	ErrChannelReduplicate = newMilvusError("channel reduplicates", 502, false)
 
 	// Segment related
-	ErrSegmentNotFound  = newMilvusError("segment not found", 600, false)
-	ErrSegmentNotLoaded = newMilvusError("segment not loaded", 601, false)
-	ErrSegmentLack      = newMilvusError("segment lacks", 602, false)
+	ErrSegmentNotFound    = newMilvusError("segment not found", 600, false)
+	ErrSegmentNotLoaded   = newMilvusError("segment not loaded", 601, false)
+	ErrSegmentLack        = newMilvusError("segment lacks", 602, false)
+	ErrSegmentReduplicate = newMilvusError("segment reduplicates", 603, false)
 
 	// Index related
 	ErrIndexNotFound = newMilvusError("index not found", 700, false)

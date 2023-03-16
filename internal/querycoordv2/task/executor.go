@@ -21,8 +21,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -147,13 +145,14 @@ func (ex *Executor) processMergeTask(mergeTask *LoadSegmentsTask) {
 	task := mergeTask.tasks[0]
 	action := task.Actions()[mergeTask.steps[0]]
 
+	var err error
 	defer func() {
-		canceled := task.canceled.Load()
-		for i := range mergeTask.tasks {
-			mergeTask.tasks[i].SetErr(task.Err())
-			if canceled {
-				mergeTask.tasks[i].Cancel()
+		if err != nil {
+			for i := range mergeTask.tasks {
+				mergeTask.tasks[i].Cancel(err)
 			}
+		}
+		for i := range mergeTask.tasks {
 			ex.removeTask(mergeTask.tasks[i], mergeTask.steps[i])
 		}
 	}()
@@ -178,31 +177,25 @@ func (ex *Executor) processMergeTask(mergeTask *LoadSegmentsTask) {
 	channel := mergeTask.req.GetInfos()[0].GetInsertChannel()
 	leader, ok := getShardLeader(ex.meta.ReplicaManager, ex.dist, task.CollectionID(), action.Node(), channel)
 	if !ok {
-		msg := "no shard leader for the segment to execute loading"
-		task.SetErr(utils.WrapError(msg, ErrTaskStale))
-		log.Warn(msg, zap.String("shard", channel))
+		err = merr.WrapErrChannelNotFound(channel, "shard delegator not found")
+		log.Warn("no shard leader for the segment to execute loading", zap.Error(task.Err()))
 		return
 	}
 
 	log.Info("load segments...")
 	status, err := ex.cluster.LoadSegments(task.Context(), leader, mergeTask.req)
 	if err != nil {
-		log.Warn("failed to load segment, it may be a false failure", zap.Error(err))
+		log.Warn("failed to load segment", zap.Error(err))
 		return
 	}
-	err = merr.Error(status)
-	if errors.Is(err, merr.ErrServiceMemoryLimitExceeded) {
-		log.Warn("insufficient memory to load segment", zap.Error(err))
-		task.SetErr(err)
-		task.Cancel()
+	if !merr.Ok(status) {
+		err = merr.Error(status)
+		log.Warn("failed to load segment", zap.Error(err))
 		return
 	}
-	if status.ErrorCode != commonpb.ErrorCode_Success {
-		log.Warn("failed to load segment", zap.String("reason", status.GetReason()))
-		return
-	}
+
 	elapsed := time.Since(startTs)
-	log.Info("load segments done", zap.Int64("taskID", task.ID()), zap.Duration("timeTaken", elapsed))
+	log.Info("load segments done", zap.Duration("elapsed", elapsed))
 }
 
 func (ex *Executor) removeTask(task Task, step int) {
@@ -243,8 +236,7 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 	var err error
 	defer func() {
 		if err != nil {
-			task.SetErr(err)
-			task.Cancel()
+			task.Cancel(err)
 			ex.removeTask(task, step)
 		}
 	}()
@@ -253,7 +245,6 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 	schema, err := ex.broker.GetCollectionSchema(ctx, task.CollectionID())
 	if err != nil {
 		log.Warn("failed to get schema of collection", zap.Error(err))
-		task.SetErr(err)
 		return err
 	}
 	partitions, err := utils.GetPartitions(ex.meta.CollectionManager, ex.broker, task.CollectionID())
@@ -283,8 +274,8 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 	leader, ok := getShardLeader(ex.meta.ReplicaManager, ex.dist, task.CollectionID(), action.Node(), segment.GetInsertChannel())
 	if !ok {
 		msg := "no shard leader for the segment to execute loading"
-		err = utils.WrapError(msg, ErrTaskStale)
-		log.Warn(msg, zap.String("shard", segment.GetInsertChannel()))
+		err = merr.WrapErrChannelNotFound(segment.GetInsertChannel(), "shard delegator not found")
+		log.Warn(msg, zap.Error(err))
 		return err
 	}
 	log = log.With(zap.Int64("shardLeader", leader))
@@ -386,8 +377,7 @@ func (ex *Executor) subDmChannel(task *ChannelTask, step int) error {
 	var err error
 	defer func() {
 		if err != nil {
-			task.SetErr(err)
-			task.Cancel()
+			task.Cancel(err)
 		}
 	}()
 
@@ -413,12 +403,12 @@ func (ex *Executor) subDmChannel(task *ChannelTask, step int) error {
 	if dmChannel == nil {
 		msg := "channel does not exist in next target, skip it"
 		log.Warn(msg, zap.String("channelName", action.ChannelName()))
-		return errors.New(msg)
+		return merr.WrapErrChannelReduplicate(action.ChannelName())
 	}
-	req := packSubDmChannelRequest(task, action, schema, loadMeta, dmChannel)
-	err = fillSubDmChannelRequest(ctx, req, ex.broker)
+	req := packSubChannelRequest(task, action, schema, loadMeta, dmChannel)
+	err = fillSubChannelRequest(ctx, req, ex.broker)
 	if err != nil {
-		log.Warn("failed to subscribe DmChannel, failed to fill the request with segments",
+		log.Warn("failed to subscribe channel, failed to fill the request with segments",
 			zap.Error(err))
 		return err
 	}
@@ -430,16 +420,16 @@ func (ex *Executor) subDmChannel(task *ChannelTask, step int) error {
 	)
 	status, err := ex.cluster.WatchDmChannels(ctx, action.Node(), req)
 	if err != nil {
-		log.Warn("failed to subscribe DmChannel, it may be a false failure", zap.Error(err))
+		log.Warn("failed to subscribe channel, it may be a false failure", zap.Error(err))
 		return err
 	}
-	if status.ErrorCode != commonpb.ErrorCode_Success {
-		err = utils.WrapError("failed to subscribe DmChannel", ErrFailedResponse)
-		log.Warn("failed to subscribe DmChannel", zap.String("reason", status.GetReason()))
+	if !merr.Ok(status) {
+		err = merr.Error(status)
+		log.Warn("failed to subscribe channel", zap.Error(err))
 		return err
 	}
 	elapsed := time.Since(startTs)
-	log.Info("subscribe DmChannel done", zap.Int64("taskID", task.ID()), zap.Duration("time taken", elapsed))
+	log.Info("subscribe channel done", zap.Int64("taskID", task.ID()), zap.Duration("time taken", elapsed))
 	return nil
 }
 
@@ -459,8 +449,7 @@ func (ex *Executor) unsubDmChannel(task *ChannelTask, step int) error {
 	var err error
 	defer func() {
 		if err != nil {
-			task.SetErr(err)
-			task.Cancel()
+			task.Cancel(err)
 		}
 	}()
 
@@ -470,16 +459,16 @@ func (ex *Executor) unsubDmChannel(task *ChannelTask, step int) error {
 	log.Info("unsubscribe channel...")
 	status, err := ex.cluster.UnsubDmChannel(ctx, action.Node(), req)
 	if err != nil {
-		log.Warn("failed to unsubscribe DmChannel, it may be a false failure", zap.Error(err))
+		log.Warn("failed to unsubscribe channel, it may be a false failure", zap.Error(err))
 		return err
 	}
-	if status.ErrorCode != commonpb.ErrorCode_Success {
-		err = utils.WrapError("failed to unsubscribe DmChannel", ErrFailedResponse)
-		log.Warn("failed to unsubscribe DmChannel", zap.String("reason", status.GetReason()))
+	if !merr.Ok(status) {
+		err = merr.Error(status)
+		log.Warn("failed to unsubscribe channel", zap.Error(err))
 		return err
 	}
 
 	elapsed := time.Since(startTs)
-	log.Info("unsubscribe DmChannel done", zap.Int64("taskID", task.ID()), zap.Duration("time taken", elapsed))
+	log.Info("unsubscribe channel done", zap.Int64("taskID", task.ID()), zap.Duration("time taken", elapsed))
 	return nil
 }

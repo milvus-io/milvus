@@ -91,15 +91,6 @@ func (merger *Merger[K, R]) schedule(ctx context.Context) {
 	}()
 }
 
-func (merger *Merger[K, R]) isStopped() bool {
-	select {
-	case <-merger.stopCh:
-		return true
-	default:
-		return false
-	}
-}
-
 func (merger *Merger[K, R]) Add(task MergeableTask[K, R]) {
 	merger.waitQueue <- task
 }

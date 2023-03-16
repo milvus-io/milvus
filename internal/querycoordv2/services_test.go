@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/milvuspb"
 	"github.com/milvus-io/milvus/internal/kv"
@@ -1186,7 +1187,7 @@ func (suite *ServiceSuite) TestLoadBalance() {
 			growAction, reduceAction := actions[0], actions[1]
 			suite.Equal(dstNode, growAction.Node())
 			suite.Equal(srcNode, reduceAction.Node())
-			task.Cancel()
+			task.Cancel(nil)
 		}).Return(nil)
 		resp, err := server.LoadBalance(ctx, req)
 		suite.NoError(err)
@@ -1262,7 +1263,7 @@ func (suite *ServiceSuite) TestLoadBalanceWithEmptySegmentList() {
 			suite.True(lo.Contains(segmentOnCollection[collection], reduceAction.SegmentID()))
 			suite.Equal(dstNode, growAction.Node())
 			suite.Equal(srcNode, reduceAction.Node())
-			t.Cancel()
+			t.Cancel(nil)
 		}).Return(nil)
 		resp, err := server.LoadBalance(ctx, req)
 		suite.NoError(err)
@@ -1352,14 +1353,13 @@ func (suite *ServiceSuite) TestLoadBalanceFailed() {
 			SealedSegmentIDs: segments,
 		}
 		suite.taskScheduler.EXPECT().Add(mock.Anything).Run(func(balanceTask task.Task) {
-			balanceTask.SetErr(task.ErrTaskCanceled)
-			balanceTask.Cancel()
+			balanceTask.Cancel(errors.New("mock error"))
 		}).Return(nil)
 		resp, err := server.LoadBalance(ctx, req)
 		suite.NoError(err)
 		suite.Equal(commonpb.ErrorCode_UnexpectedError, resp.ErrorCode)
 		suite.Contains(resp.Reason, "failed to balance segments")
-		suite.Contains(resp.Reason, task.ErrTaskCanceled.Error())
+		suite.Contains(resp.Reason, "mock error")
 
 		suite.meta.ReplicaManager.AddNode(replicas[0].ID, 10)
 		req.SourceNodeIDs = []int64{10}

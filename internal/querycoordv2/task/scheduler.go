@@ -21,8 +21,7 @@ import (
 	"fmt"
 	"runtime"
 	"sync"
-
-	"github.com/cockroachdb/errors"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/log"
 	"github.com/milvus-io/milvus/internal/metrics"
@@ -30,8 +29,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
-	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/funcutil"
+	"github.com/milvus-io/milvus/internal/util/merr"
 	. "github.com/milvus-io/milvus/internal/util/typeutil"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
@@ -41,24 +40,6 @@ const (
 	TaskTypeGrow Type = iota + 1
 	TaskTypeReduce
 	TaskTypeMove
-)
-
-var (
-	ErrConflictTaskExisted = errors.New("ConflictTaskExisted")
-
-	// The task is canceled or timeout
-	ErrTaskCanceled = errors.New("TaskCanceled")
-
-	// The target node is offline,
-	// or the target segment is not in TargetManager,
-	// or the target channel is not in TargetManager
-	ErrTaskStale = errors.New("TaskStale")
-
-	// ErrInsufficientMemory returns insufficient memory error.
-	ErrInsufficientMemory = errors.New("InsufficientMemoryToLoad")
-
-	ErrFailedResponse  = errors.New("RpcFailed")
-	ErrTaskAlreadyDone = errors.New("TaskAlreadyDone")
 )
 
 type Type = int32
@@ -167,7 +148,7 @@ func NewScheduler(ctx context.Context,
 	broker meta.Broker,
 	cluster session.Cluster,
 	nodeMgr *session.NodeManager) *taskScheduler {
-	id := int64(0)
+	id := time.Now().UnixMilli()
 	return &taskScheduler{
 		ctx:       ctx,
 		executors: make(map[int64]*Executor),
@@ -276,20 +257,12 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 					zap.Int64("newID", task.ID()),
 					zap.Int32("newPriority", task.Priority()),
 				)
-				old.SetStatus(TaskStatusCanceled)
-				old.SetErr(utils.WrapError("replaced with the other one with higher priority", ErrTaskCanceled))
+				old.Cancel(merr.WrapErrServiceInternal("replaced with the other one with higher priority"))
 				scheduler.remove(old)
 				return nil
 			}
 
-			return ErrConflictTaskExisted
-		}
-		if GetTaskType(task) == TaskTypeGrow {
-			nodesWithSegment := scheduler.distMgr.LeaderViewManager.GetSealedSegmentDist(task.SegmentID())
-			replicaNodeMap := utils.GroupNodesByReplica(scheduler.meta.ReplicaManager, task.CollectionID(), nodesWithSegment)
-			if _, ok := replicaNodeMap[task.ReplicaID()]; ok {
-				return ErrTaskAlreadyDone
-			}
+			return merr.WrapErrServiceInternal("task with the same segment exists")
 		}
 
 	case *ChannelTask:
@@ -302,21 +275,12 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 					zap.Int64("newID", task.ID()),
 					zap.Int32("newPriority", task.Priority()),
 				)
-				old.SetStatus(TaskStatusCanceled)
-				old.SetErr(utils.WrapError("replaced with the other one with higher priority", ErrTaskCanceled))
+				old.Cancel(merr.WrapErrServiceInternal("replaced with the other one with higher priority"))
 				scheduler.remove(old)
 				return nil
 			}
 
-			return ErrConflictTaskExisted
-		}
-
-		if GetTaskType(task) == TaskTypeGrow {
-			nodesWithChannel := scheduler.distMgr.LeaderViewManager.GetChannelDist(task.Channel())
-			replicaNodeMap := utils.GroupNodesByReplica(scheduler.meta.ReplicaManager, task.CollectionID(), nodesWithChannel)
-			if _, ok := replicaNodeMap[task.ReplicaID()]; ok {
-				return ErrTaskAlreadyDone
-			}
+			return merr.WrapErrServiceInternal("task with the same channel exists")
 		}
 
 	default:
@@ -326,43 +290,19 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 	return nil
 }
 
-func (scheduler *taskScheduler) promote(task Task) error {
-	log := log.With(
-		zap.Int64("taskID", task.ID()),
-		zap.Int64("collectionID", task.CollectionID()),
-		zap.Int64("replicaID", task.ReplicaID()),
-		zap.Int64("source", task.SourceID()),
-	)
-	err := scheduler.prePromote(task)
-	if err != nil {
-		log.Info("failed to promote task", zap.Error(err))
-		return err
-	}
-
-	scheduler.processQueue.Add(task)
-	task.SetStatus(TaskStatusStarted)
-	return nil
-}
-
 func (scheduler *taskScheduler) tryPromoteAll() {
 	// Promote waiting tasks
 	toPromote := make([]Task, 0, scheduler.waitQueue.Len())
 	toRemove := make([]Task, 0)
 	scheduler.waitQueue.Range(func(task Task) bool {
 		err := scheduler.promote(task)
-
 		if err != nil {
-			task.SetStatus(TaskStatusCanceled)
-			if errors.Is(err, ErrTaskStale) { // Task canceled or stale
-				task.SetStatus(TaskStatusStale)
-			}
-
+			task.Cancel(err)
+			toRemove = append(toRemove, task)
 			log.Warn("failed to promote task",
 				zap.Int64("taskID", task.ID()),
 				zap.Error(err),
 			)
-			task.SetErr(err)
-			toRemove = append(toRemove, task)
 		} else {
 			toPromote = append(toPromote, task)
 		}
@@ -384,13 +324,21 @@ func (scheduler *taskScheduler) tryPromoteAll() {
 	}
 }
 
-func (scheduler *taskScheduler) prePromote(task Task) error {
-	if scheduler.checkCanceled(task) {
-		return ErrTaskCanceled
-	} else if scheduler.checkStale(task) {
-		return ErrTaskStale
+func (scheduler *taskScheduler) promote(task Task) error {
+	log := log.With(
+		zap.Int64("taskID", task.ID()),
+		zap.Int64("collectionID", task.CollectionID()),
+		zap.Int64("replicaID", task.ReplicaID()),
+		zap.Int64("source", task.SourceID()),
+	)
+
+	if err := scheduler.check(task); err != nil {
+		log.Info("failed to promote task", zap.Error(err))
+		return err
 	}
 
+	scheduler.processQueue.Add(task)
+	task.SetStatus(TaskStatusStarted)
 	return nil
 }
 
@@ -400,6 +348,8 @@ func (scheduler *taskScheduler) Dispatch(node int64) {
 		log.Info("scheduler stopped")
 
 	default:
+		scheduler.rwmutex.Lock()
+		defer scheduler.rwmutex.Unlock()
 		scheduler.schedule(node)
 	}
 }
@@ -458,13 +408,10 @@ func (scheduler *taskScheduler) GetNodeSegmentCntDelta(nodeID int64) int {
 }
 
 // schedule selects some tasks to execute, follow these steps for each started selected tasks:
-// 1. check whether this task is stale, set status to failed if stale
+// 1. check whether this task is stale, set status to canceled if stale
 // 2. step up the task's actions, set status to succeeded if all actions finished
 // 3. execute the current action of task
 func (scheduler *taskScheduler) schedule(node int64) {
-	scheduler.rwmutex.Lock()
-	defer scheduler.rwmutex.Unlock()
-
 	if scheduler.tasks.Len() == 0 {
 		return
 	}
@@ -486,7 +433,7 @@ func (scheduler *taskScheduler) schedule(node int64) {
 	toProcess := make([]Task, 0)
 	toRemove := make([]Task, 0)
 	scheduler.processQueue.Range(func(task Task) bool {
-		if scheduler.isRelated(task, node) && scheduler.preProcess(task) {
+		if scheduler.preProcess(task) && scheduler.isRelated(task, node) {
 			toProcess = append(toProcess, task)
 		}
 		if task.Status() != TaskStatusStarted {
@@ -561,13 +508,9 @@ func (scheduler *taskScheduler) isRelated(task Task, node int64) bool {
 // return true if the task should be executed,
 // false otherwise
 func (scheduler *taskScheduler) preProcess(task Task) bool {
-	log := log.With(
-		zap.Int64("taskID", task.ID()),
-		zap.Int32("type", GetTaskType(task)),
-		zap.Int64("collectionID", task.CollectionID()),
-		zap.Int64("replicaID", task.ReplicaID()),
-		zap.Int64("source", task.SourceID()),
-	)
+	if task.Status() != TaskStatusStarted {
+		return false
+	}
 
 	actions, step := task.Actions(), task.Step()
 	for step < len(actions) && actions[step].IsFinished(scheduler.distMgr) {
@@ -575,31 +518,12 @@ func (scheduler *taskScheduler) preProcess(task Task) bool {
 		step++
 	}
 
-	if step == len(actions) {
-		step--
-	}
-
-	executor, ok := scheduler.executors[actions[step].Node()]
-	if !ok {
-		log.Warn("no executor for QueryNode",
-			zap.Int("step", step),
-			zap.Int64("nodeID", actions[step].Node()))
-		return false
-	}
-
 	if task.IsFinished(scheduler.distMgr) {
-		if !executor.Exist(task.ID()) {
-			task.SetStatus(TaskStatusSucceeded)
+		task.SetStatus(TaskStatusSucceeded)
+	} else {
+		if err := scheduler.check(task); err != nil {
+			task.Cancel(err)
 		}
-		return false
-	} else if scheduler.checkCanceled(task) {
-		task.SetStatus(TaskStatusCanceled)
-		if task.Err() == nil {
-			task.SetErr(ErrTaskCanceled)
-		}
-	} else if scheduler.checkStale(task) {
-		task.SetStatus(TaskStatusStale)
-		task.SetErr(ErrTaskStale)
 	}
 
 	return task.Status() == TaskStatusStarted
@@ -633,7 +557,7 @@ func (scheduler *taskScheduler) process(task Task) bool {
 	case TaskStatusSucceeded:
 		log.Info("task succeeded")
 
-	case TaskStatusCanceled, TaskStatusStale:
+	case TaskStatusCanceled:
 		log.Warn("failed to execute task", zap.Error(task.Err()))
 
 	default:
@@ -641,6 +565,15 @@ func (scheduler *taskScheduler) process(task Task) bool {
 	}
 
 	return false
+}
+
+func (scheduler *taskScheduler) check(task Task) error {
+	err := task.Context().Err()
+	if err == nil {
+		err = scheduler.checkStale(task)
+	}
+
+	return err
 }
 
 func (scheduler *taskScheduler) RemoveByNode(node int64) {
@@ -670,7 +603,7 @@ func (scheduler *taskScheduler) remove(task Task) {
 		zap.Int64("replicaID", task.ReplicaID()),
 		zap.Int32("taskStatus", task.Status()),
 	)
-	task.Cancel()
+	task.Cancel(nil)
 	scheduler.tasks.Remove(task.ID())
 	scheduler.waitQueue.Remove(task)
 	scheduler.processQueue.Remove(task)
@@ -692,28 +625,10 @@ func (scheduler *taskScheduler) remove(task Task) {
 	}
 
 	metrics.QueryCoordTaskNum.WithLabelValues().Set(float64(scheduler.tasks.Len()))
-	log.Debug("task removed")
+	log.Debug("task removed", zap.Stack("stack"))
 }
 
-func (scheduler *taskScheduler) checkCanceled(task Task) bool {
-	log := log.With(
-		zap.Int64("taskID", task.ID()),
-		zap.Int64("collectionID", task.CollectionID()),
-		zap.Int64("replicaID", task.ReplicaID()),
-		zap.Int64("source", task.SourceID()),
-	)
-
-	select {
-	case <-task.Context().Done():
-		log.Warn("the task is timeout or canceled")
-		return true
-
-	default:
-		return false
-	}
-}
-
-func (scheduler *taskScheduler) checkStale(task Task) bool {
+func (scheduler *taskScheduler) checkStale(task Task) error {
 	log := log.With(
 		zap.Int64("taskID", task.ID()),
 		zap.Int64("collectionID", task.CollectionID()),
@@ -723,13 +638,13 @@ func (scheduler *taskScheduler) checkStale(task Task) bool {
 
 	switch task := task.(type) {
 	case *SegmentTask:
-		if scheduler.checkSegmentTaskStale(task) {
-			return true
+		if err := scheduler.checkSegmentTaskStale(task); err != nil {
+			return err
 		}
 
 	case *ChannelTask:
-		if scheduler.checkChannelTaskStale(task) {
-			return true
+		if err := scheduler.checkChannelTaskStale(task); err != nil {
+			return err
 		}
 
 	default:
@@ -743,14 +658,14 @@ func (scheduler *taskScheduler) checkStale(task Task) bool {
 
 		if scheduler.nodeMgr.Get(action.Node()) == nil {
 			log.Warn("the task is stale, the target node is offline")
-			return true
+			return merr.WrapErrNodeNotFound(action.Node())
 		}
 	}
 
-	return false
+	return nil
 }
 
-func (scheduler *taskScheduler) checkSegmentTaskStale(task *SegmentTask) bool {
+func (scheduler *taskScheduler) checkSegmentTaskStale(task *SegmentTask) error {
 	log := log.With(
 		zap.Int64("taskID", task.ID()),
 		zap.Int64("collectionID", task.CollectionID()),
@@ -773,18 +688,18 @@ func (scheduler *taskScheduler) checkSegmentTaskStale(task *SegmentTask) bool {
 					zap.Int64("segment", task.segmentID),
 					zap.Int32("taskType", taskType),
 				)
-				return true
+				return merr.WrapErrSegmentReduplicate(task.SegmentID(), "target doesn't contain this segment")
 			}
 
 			replica := scheduler.meta.ReplicaManager.GetByCollectionAndNode(task.CollectionID(), action.Node())
 			if replica == nil {
 				log.Warn("task stale due to replica not found")
-				return true
+				return merr.WrapErrReplicaNotFound(task.CollectionID(), "by collectionID")
 			}
 			_, ok := scheduler.distMgr.GetShardLeader(replica, segment.GetInsertChannel())
 			if !ok {
 				log.Warn("task stale due to leader not found")
-				return true
+				return merr.WrapErrChannelNotFound(segment.GetInsertChannel(), "failed to get shard delegator")
 			}
 
 		case ActionTypeReduce:
@@ -792,10 +707,10 @@ func (scheduler *taskScheduler) checkSegmentTaskStale(task *SegmentTask) bool {
 			// the task should succeeded if the segment not exists
 		}
 	}
-	return false
+	return nil
 }
 
-func (scheduler *taskScheduler) checkChannelTaskStale(task *ChannelTask) bool {
+func (scheduler *taskScheduler) checkChannelTaskStale(task *ChannelTask) error {
 	log := log.With(
 		zap.Int64("taskID", task.ID()),
 		zap.Int64("collectionID", task.CollectionID()),
@@ -809,7 +724,7 @@ func (scheduler *taskScheduler) checkChannelTaskStale(task *ChannelTask) bool {
 			if scheduler.targetMgr.GetDmChannel(task.collectionID, task.Channel(), meta.NextTarget) == nil {
 				log.Warn("the task is stale, the channel to subscribe not exists in targets",
 					zap.String("channel", task.Channel()))
-				return true
+				return merr.WrapErrChannelReduplicate(task.Channel(), "target doesn't contain this channel")
 			}
 
 		case ActionTypeReduce:
@@ -817,5 +732,5 @@ func (scheduler *taskScheduler) checkChannelTaskStale(task *ChannelTask) bool {
 			// the task should succeeded if the channel not exists
 		}
 	}
-	return false
+	return nil
 }

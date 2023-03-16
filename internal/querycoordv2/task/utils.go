@@ -167,7 +167,7 @@ func packLoadMeta(loadType querypb.LoadType, collectionID int64, partitions ...i
 	}
 }
 
-func packSubDmChannelRequest(
+func packSubChannelRequest(
 	task *ChannelTask,
 	action Action,
 	schema *schemapb.CollectionSchema,
@@ -189,7 +189,7 @@ func packSubDmChannelRequest(
 	}
 }
 
-func fillSubDmChannelRequest(
+func fillSubChannelRequest(
 	ctx context.Context,
 	req *querypb.WatchDmChannelsRequest,
 	broker meta.Broker,

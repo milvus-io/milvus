@@ -68,18 +68,34 @@ func Status(err error) *commonpb.Status {
 		return &commonpb.Status{}
 	}
 
+	code := Code(err)
 	return &commonpb.Status{
-		Code:   Code(err),
+		Code:   code,
 		Reason: err.Error(),
-		// Deprecated, for compatibility, set it to UnexpectedError
-		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+		// Deprecated, for compatibility
+		ErrorCode: oldCode(code),
 	}
+}
+
+func oldCode(code int32) commonpb.ErrorCode {
+	switch code {
+	case ErrServiceNotReady.code():
+		return commonpb.ErrorCode_NotReadyServe
+	case ErrCollectionNotFound.code():
+		return commonpb.ErrorCode_CollectionNotExists
+	default:
+		return commonpb.ErrorCode_UnexpectedError
+	}
+}
+
+func Ok(status *commonpb.Status) bool {
+	return status.ErrorCode == commonpb.ErrorCode_Success && status.Code == 0
 }
 
 // Error returns a error according to the given status,
 // returns nil if the status is a success status
 func Error(status *commonpb.Status) error {
-	if status.GetCode() == 0 && status.GetErrorCode() == commonpb.ErrorCode_Success {
+	if Ok(status) {
 		return nil
 	}
 
@@ -122,6 +138,13 @@ func WrapErrServiceRequestLimitExceeded(limit int32, msg ...string) error {
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "; "))
 	}
+	return err
+}
+
+func WrapErrServiceInternal(msg string, others ...string) error {
+	msg = strings.Join(append([]string{msg}, others...), "; ")
+	err := errors.Wrap(ErrServiceInternal, msg)
+
 	return err
 }
 
@@ -186,6 +209,22 @@ func WrapErrChannelNotFound(name string, msg ...string) error {
 	return err
 }
 
+func WrapErrChannelLack(name string, msg ...string) error {
+	err := wrapWithField(ErrChannelLack, "channel", name)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
+func WrapErrChannelReduplicate(name string, msg ...string) error {
+	err := wrapWithField(ErrChannelReduplicate, "channel", name)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
 // Segment related
 func WrapErrSegmentNotFound(id int64, msg ...string) error {
 	err := wrapWithField(ErrSegmentNotFound, "segment", id)
@@ -205,6 +244,14 @@ func WrapErrSegmentNotLoaded(id int64, msg ...string) error {
 
 func WrapErrSegmentLack(id int64, msg ...string) error {
 	err := wrapWithField(ErrSegmentLack, "segment", id)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "; "))
+	}
+	return err
+}
+
+func WrapErrSegmentReduplicate(id int64, msg ...string) error {
+	err := wrapWithField(ErrSegmentReduplicate, "segment", id)
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "; "))
 	}
