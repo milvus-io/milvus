@@ -34,8 +34,8 @@ minio:
 pulsar:
   enabled: false
 
-extraConfigFiles:
-  user.yaml: |+
-    dataNode:
-      memory:
-        forceSyncEnable: false
+# extraConfigFiles:
+#   user.yaml: |+
+#     dataNode:
+#       memory:
+#         forceSyncEnable: false
