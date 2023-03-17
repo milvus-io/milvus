@@ -41,9 +41,9 @@ default_string_field_name = ct.default_string_field_name
 default_index_params = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
 vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
 range_search_supported_index = ct.all_index_types[:5]
-range_search_supported_index.append(ct.all_index_types[7])
+range_search_supported_index.append(ct.all_index_types[6])
 range_search_supported_index_params = ct.default_index_params[:5]
-range_search_supported_index_params.append(ct.default_index_params[7])
+range_search_supported_index_params.append(ct.default_index_params[6])
 uid = "test_search"
 nq = 1
 epsilon = 0.001
