@@ -14,6 +14,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+if(MILVUS_GPU_VERSION STREQUAL "ON")
+    project(core CXX C CUDA)
+else()
+    project(core CXX C)
+endif()
+
 include_directories(${MILVUS_ENGINE_SRC})
 include_directories(${MILVUS_THIRDPARTY_SRC})
 
