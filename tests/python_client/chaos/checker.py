@@ -30,7 +30,7 @@ class Op(Enum):
     unknown = 'unknown'
 
 
-timeout = 40
+timeout = 120
 enable_traceback = False
 DEFAULT_FMT = '[start time:{start_time}][time cost:{elapsed:0.8f}s][operation_name:{operation_name}][collection name:{collection_name}] -> {result!r}'
 
