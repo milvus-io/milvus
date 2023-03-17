@@ -109,28 +109,20 @@ get_deleted_bitmap(int64_t del_barrier,
                                     : delete_timestamps[pk];
     }
 
-    for (auto iter = delete_timestamps.begin(); iter != delete_timestamps.end();
-         iter++) {
-        auto pk = iter->first;
-        auto delete_timestamp = iter->second;
+    for (auto& [pk, timestamp] : delete_timestamps) {
         auto segOffsets = insert_record.search_pk(pk, insert_barrier);
         for (auto offset : segOffsets) {
             int64_t insert_row_offset = offset.get();
-            // for now, insert_barrier == insert count of segment, so this Assert will always work
-            AssertInfo(insert_row_offset < insert_barrier,
-                       "Timestamp offset is larger than insert barrier");
 
-            // insert after delete with same pk, delete will not task effect on this insert record
+            // The deletion record do not take effect in search/query,
             // and reset bitmap to 0
-            if (insert_record.timestamps_[insert_row_offset] >=
-                delete_timestamp) {
+            if (timestamp > query_timestamp) {
                 bitmap->reset(insert_row_offset);
                 continue;
             }
-
-            // the deletion record do not take effect in search/query
+            // Insert after delete with same pk, delete will not task effect on this insert record,
             // and reset bitmap to 0
-            if (delete_timestamp > query_timestamp) {
+            if (insert_record.timestamps_[insert_row_offset] >= timestamp) {
                 bitmap->reset(insert_row_offset);
                 continue;
             }
