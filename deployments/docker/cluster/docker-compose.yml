@@ -52,7 +52,7 @@ services:
 
   rootcoord:
     container_name: milvus-rootcoord
-    image: milvusdb/milvus:v2.2.3
+    image: milvusdb/milvus:v2.2.4
     command: ["milvus", "run", "rootcoord"]
     environment:
       ETCD_ENDPOINTS: etcd:2379
@@ -69,7 +69,7 @@ services:
   # enable active standby with rootcoord with multiple containers
   #rootcoord-1:
   #  container_name: milvus-rootcoord-1
-  #  image: milvusdb/milvus:v2.2.3
+  #  image: milvusdb/milvus:v2.2.4
   #  command: ["milvus", "run", "rootcoord"]
   #  environment:
   #    ETCD_ENDPOINTS: etcd:2379
@@ -85,7 +85,7 @@ services:
 
   proxy:
     container_name: milvus-proxy
-    image: milvusdb/milvus:v2.2.3
+    image: milvusdb/milvus:v2.2.4
     command: ["milvus", "run", "proxy"]
     environment:
       ETCD_ENDPOINTS: etcd:2379
@@ -97,7 +97,7 @@ services:
 
   querycoord:
     container_name: milvus-querycoord
-    image: milvusdb/milvus:v2.2.3
+    image: milvusdb/milvus:v2.2.4
     command: ["milvus", "run", "querycoord"]
     environment:
       ETCD_ENDPOINTS: etcd:2379
@@ -114,7 +114,7 @@ services:
   # enable active standby with querycoord with multiple containers
   #querycoord-1:
   #  container_name: milvus-querycoord-1
-  #  image: milvusdb/milvus:v2.2.3
+  #  image: milvusdb/milvus:v2.2.4
   #  command: ["milvus", "run", "querycoord"]
   #  environment:
   #    ETCD_ENDPOINTS: etcd:2379
@@ -129,7 +129,7 @@ services:
 
   querynode:
     container_name: milvus-querynode
-    image: milvusdb/milvus:v2.2.3
+    image: milvusdb/milvus:v2.2.4
     command: ["milvus", "run", "querynode"]
     environment:
       ETCD_ENDPOINTS: etcd:2379
@@ -140,7 +140,7 @@ services:
 
   indexcoord:
     container_name: milvus-indexcoord
-    image: milvusdb/milvus:v2.2.3
+    image: milvusdb/milvus:v2.2.4
     command: ["milvus", "run", "indexcoord"]
     environment:
       ETCD_ENDPOINTS: etcd:2379
@@ -157,7 +157,7 @@ services:
   # enable active standby with indexcoord with multiple containers
   #indexcoord-1:
   #  container_name: milvus-indexcoord-1
-  #  image: milvusdb/milvus:v2.2.3
+  #  image: milvusdb/milvus:v2.2.4
   #  command: ["milvus", "run", "indexcoord"]
   #  environment:
   #    ETCD_ENDPOINTS: etcd:2379
@@ -172,7 +172,7 @@ services:
 
   indexnode:
     container_name: milvus-indexnode
-    image: milvusdb/milvus:v2.2.3
+    image: milvusdb/milvus:v2.2.4
     command: ["milvus", "run", "indexnode"]
     environment:
       ETCD_ENDPOINTS: etcd:2379
@@ -184,7 +184,7 @@ services:
 
   datacoord:
     container_name: milvus-datacoord
-    image: milvusdb/milvus:v2.2.3
+    image: milvusdb/milvus:v2.2.4
     command: ["milvus", "run", "datacoord"]
     environment:
       ETCD_ENDPOINTS: etcd:2379
@@ -201,7 +201,7 @@ services:
   # enable active standby with indexcoord with multiple containers
   #datacoord-1:
   #  container_name: milvus-datacoord-1
-  #  image: milvusdb/milvus:v2.2.3
+  #  image: milvusdb/milvus:v2.2.4
   #  command: ["milvus", "run", "datacoord"]
   #  environment:
   #    ETCD_ENDPOINTS: etcd:2379
@@ -216,7 +216,7 @@ services:
 
   datanode:
     container_name: milvus-datanode
-    image: milvusdb/milvus:v2.2.3
+    image: milvusdb/milvus:v2.2.4
     command: ["milvus", "run", "datanode"]
     environment:
       ETCD_ENDPOINTS: etcd:2379
@@ -230,7 +230,7 @@ services:
 # ----------------------------------------------------------------------------------------
 #  datanode-1:
 #    container_name: milvus-datanode-1
-#    image: milvusdb/milvus:v2.2.3
+#    image: milvusdb/milvus:v2.2.4
 #    command: ["milvus", "run", "datanode"]
 #    environment:
 #      ETCD_ENDPOINTS: etcd:2379
@@ -241,7 +241,7 @@ services:
 #
 #  datanode-2:
 #    container_name: milvus-datanode-2
-#    image: milvusdb/milvus:v2.2.3
+#    image: milvusdb/milvus:v2.2.4
 #    command: ["milvus", "run", "datanode"]
 #    environment:
 #      ETCD_ENDPOINTS: etcd:2379
@@ -252,7 +252,7 @@ services:
 #
 #  datanode-3:
 #    container_name: milvus-datanode-3
-#    image: milvusdb/milvus:v2.2.3
+#    image: milvusdb/milvus:v2.2.4
 #    command: ["milvus", "run", "datanode"]
 #    environment:
 #      ETCD_ENDPOINTS: etcd:2379
