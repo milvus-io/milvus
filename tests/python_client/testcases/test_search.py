@@ -4850,6 +4850,41 @@ class TestSearchDiskann(TestcaseBase):
                                             "_async": _async}  
                                 )
 
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("limit", [10, 100, 1000])
+    def test_search_diskann_search_list_equal_to_limit(self, dim, auto_id, limit, _async):
+        """
+        target: test search diskann index when search_list equal to limit
+        method: 1.create collection , insert data, primary_field is int field
+                2.create diskann index ,  then load
+                3.search
+        expected: search successfully
+        """
+        # 1. initialize with data
+        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, auto_id=auto_id,
+                                                                      dim=dim, is_index=False)[0:4]
+
+        # 2. create index
+        default_index = {"index_type": "DISKANN", "metric_type": "L2", "params": {}}
+        collection_w.create_index(ct.default_float_vec_field_name, default_index)
+        collection_w.load()
+
+        search_params = {"metric_type": "L2", "params": {"search_list": limit}}
+        vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
+        output_fields = [default_int64_field_name, default_float_field_name, default_string_field_name]
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            search_params, limit,
+                            default_search_exp,
+                            output_fields=output_fields,
+                            _async=_async,
+                            travel_timestamp=0,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "ids": insert_ids,
+                                         "limit": limit,
+                                         "_async": _async}
+                            )
+
 
 class TestCollectionRangeSearch(TestcaseBase):
     """ Test case of range search interface """
@@ -4941,7 +4976,7 @@ class TestCollectionRangeSearch(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
                                          "ids": insert_ids,
-                                         "limit": default_limit})[0]
+                                         "limit": default_limit})
         # 4. range search with IP
         range_search_params = {"metric_type": "IP", "params": {"nprobe": 10, "range_filter": 1}}
         collection_w.search(vectors[:default_nq], default_search_field,
@@ -4950,7 +4985,7 @@ class TestCollectionRangeSearch(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
                                          "ids": insert_ids,
-                                         "limit": default_limit})[0]
+                                         "limit": default_limit})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_range_search_only_radius(self):
@@ -4972,7 +5007,7 @@ class TestCollectionRangeSearch(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
                                          "ids": [],
-                                         "limit": 0})[0]
+                                         "limit": 0})
         # 4. range search with IP
         range_search_params = {"metric_type": "IP", "params": {"nprobe": 10, "radius": 1}}
         collection_w.search(vectors[:default_nq], default_search_field,
@@ -4981,7 +5016,7 @@ class TestCollectionRangeSearch(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
                                          "ids": [],
-                                         "limit": 0})[0]
+                                         "limit": 0})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_range_search_radius_range_filter_not_in_params(self):
@@ -5003,7 +5038,7 @@ class TestCollectionRangeSearch(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
                                          "ids": insert_ids,
-                                         "limit": default_limit})[0]
+                                         "limit": default_limit})
         # 4. range search with IP
         range_search_params = {"metric_type": "IP", "params": {"nprobe": 10}, "radius": 1, "range_filter": 0}
         collection_w.search(vectors[:default_nq], default_search_field,
@@ -5012,7 +5047,7 @@ class TestCollectionRangeSearch(TestcaseBase):
                             check_task=CheckTasks.check_search_results,
                             check_items={"nq": default_nq,
                                          "ids": insert_ids,
-                                         "limit": default_limit})[0]
+                                         "limit": default_limit})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("dup_times", [1, 2])

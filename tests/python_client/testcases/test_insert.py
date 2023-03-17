@@ -1362,6 +1362,25 @@ class TestUpsertValid(TestcaseBase):
         collection_w.upsert([[" a", "b  "], vectors])
         assert collection_w.num_entities == 4
 
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_upsert_binary_data(self):
+        """
+        target: test upsert binary data
+        method: 1. create a collection and insert data
+                2. upsert data
+                3. check the results
+        expected: raise no exception
+        """
+        nb = 500
+        c_name = cf.gen_unique_str(pre_upsert)
+        collection_w = self.init_collection_general(c_name, True, is_binary=True)[0]
+        binary_vectors = cf.gen_binary_vectors(nb, ct.default_dim)[1]
+        data = [[i for i in range(nb)], [np.float32(i) for i in range(nb)],
+                [str(i) for i in range(nb)], binary_vectors]
+        collection_w.upsert(data)
+        res = collection_w.query("int64 >= 0", [ct.default_binary_vec_field_name])[0]
+        assert binary_vectors[0] == res[0][ct. default_binary_vec_field_name]
+
     @pytest.mark.tags(CaseLabel.L1)
     def test_upsert_same_with_inserted_data(self):
         """
@@ -1494,12 +1513,12 @@ class TestUpsertValid(TestcaseBase):
 
         # check the result
         exp = f"int64 >= 0 && int64 <= {upsert_nb}"
-        res = collection_w.query(exp, output_fields=[default_float_name])[0]
+        res = collection_w.query(exp, [default_float_name], consistency_level="Strong")[0]
         res = [res[i][default_float_name] for i in range(upsert_nb)]
-        if not res == float_values1.to_list() or res == float_values2.to_list():
+        if not (res == float_values1.to_list() or res == float_values2.to_list()):
             assert False
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     def test_upsert_multiple_times(self):
         """
         target: test upsert multiple times
@@ -1517,31 +1536,25 @@ class TestUpsertValid(TestcaseBase):
         assert collection_w.num_entities == upsert_nb*10 + ct.default_nb
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="Something wrong with get query segment info")
-    def test_upsert_during_index(self):
+    def test_upsert_pk_string_multiple_times(self):
         """
-        target: test upsert during index
+        target: test upsert multiple times
         method: 1. create a collection and insert data
-                2. upsert during creating index
-        expected: get query segment info
+                2. upsert repeatedly
+        expected: not raise exception
         """
         # initialize a collection
         upsert_nb = 1000
-        c_name = cf.gen_unique_str(pre_upsert)
-        collection_w = self.init_collection_wrap(name=c_name)
-        cf.insert_data(collection_w)
+        schema = cf.gen_string_pk_default_collection_schema()
+        name = cf.gen_unique_str(pre_upsert)
+        collection_w = self.init_collection_wrap(name, schema)
+        collection_w.insert(cf.gen_default_list_data())
 
-        def create_index():
-            collection_w.create_index(ct.default_float_vec_field_name, default_index_params)
-
-        t = threading.Thread(target=create_index, args=())
-        t.start()
-        data = cf.gen_default_data_for_upsert(upsert_nb)[0]
-        collection_w.upsert(data=data)
-        t.join()
-
-        res = self.utility_wrap.get_query_segment_info(collection_w.name)
-        assert len(res) >= 1
+        # upsert
+        for i in range(10):
+            data = cf.gen_default_list_data(upsert_nb, start=i * 500)
+            collection_w.upsert(data)
+        assert collection_w.num_entities == upsert_nb * 10 + ct.default_nb
 
 
 class TestUpsertInvalid(TestcaseBase):
@@ -1609,6 +1622,35 @@ class TestUpsertInvalid(TestcaseBase):
         error = {ct.err_code: 1, ct.err_msg: "The fields don't match with schema fields, "
                                              "expected: ['int64', 'float', 'varchar', 'float_vector']"}
         collection_w.upsert(data=[data], check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("dim", [127, 129, 200])
+    @pytest.mark.xfail(reason="issue #22777")
+    def test_upsert_binary_dim_unmatch(self, dim):
+        """
+        target: test upsert with unmatched vector dim
+        method: 1. create a collection with default dim 128
+                2. upsert with mismatched dim
+        expected: raise exception
+        """
+        collection_w = self.init_collection_general(pre_upsert, True, is_binary=True)[0]
+        data = cf.gen_default_binary_dataframe_data(dim=dim)[0]
+        error = {ct.err_code: 1, ct.err_msg: f"Collection field dim is 128, but entities field dim is {dim}"}
+        collection_w.upsert(data=data, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("dim", [127, 129, 200])
+    def test_upsert_dim_unmatch(self, dim):
+        """
+        target: test upsert with unmatched vector dim
+        method: 1. create a collection with default dim 128
+                2. upsert with mismatched dim
+        expected: raise exception
+        """
+        collection_w = self.init_collection_general(pre_upsert, True)[0]
+        data = cf.gen_default_data_for_upsert(dim=dim)[0]
+        error = {ct.err_code: 1, ct.err_msg: f"Collection field dim is 128, but entities field dim is {dim}"}
+        collection_w.upsert(data=data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("partition_name", ct.get_invalid_strs)

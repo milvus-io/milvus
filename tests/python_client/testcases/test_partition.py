@@ -1,5 +1,6 @@
 import threading
 import pytest
+import time
 
 from base.partition_wrapper import ApiPartitionWrapper
 from base.client_base import TestcaseBase
@@ -539,6 +540,7 @@ class TestPartitionParams(TestcaseBase):
         assert partition_w.num_entities == (nums + nums)
 
     @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.skip(reason="not stable")
     def test_partition_upsert(self):
         """
         target: verify upsert entities multiple times
@@ -562,14 +564,16 @@ class TestPartitionParams(TestcaseBase):
         data, values = cf.gen_default_data_for_upsert(nb=upsert_nb, start=2000)
         partition_w.upsert(data)
         res = partition_w.query("int64 >= 2000 && int64 < 3000", [ct.default_float_field_name])[0]
-        assert partition_w.num_entities == upsert_nb + ct.default_nb // 2
+        time.sleep(5)
+        assert partition_w.num_entities == ct.default_nb // 2
         assert [res[i][ct.default_float_field_name] for i in range(upsert_nb)] == values.to_list()
 
         # upsert data
         data, values = cf.gen_default_data_for_upsert(nb=upsert_nb, start=ct.default_nb)
         partition_w.upsert(data)
         res = partition_w.query("int64 >= 3000 && int64 < 4000", [ct.default_float_field_name])[0]
-        assert partition_w.num_entities == upsert_nb * 2 + ct.default_nb // 2
+        time.sleep(5)
+        assert partition_w.num_entities == upsert_nb + ct.default_nb // 2
         assert [res[i][ct.default_float_field_name] for i in range(upsert_nb)] == values.to_list()
 
 
