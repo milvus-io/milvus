@@ -142,6 +142,10 @@ func (mc *mockCompactor) complete() {
 	mc.done <- struct{}{}
 }
 
+func (mc *mockCompactor) injectDone() {
+
+}
+
 func (mc *mockCompactor) compact() (*datapb.CompactionResult, error) {
 	if !mc.isvalid {
 		return nil, errStart

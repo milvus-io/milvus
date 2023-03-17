@@ -22,11 +22,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
-	"github.com/samber/lo"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/require"
-
 	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/msgpb"
 	"github.com/milvus-io/milvus/internal/common"
@@ -35,6 +30,10 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/samber/lo"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
 func TestMetaReloadFromKV(t *testing.T) {
@@ -556,14 +555,9 @@ func TestMeta_alterMetaStore(t *testing.T) {
 		}},
 	}
 
-	toAlterInfo := lo.Map(toAlter, func(item *datapb.SegmentInfo, _ int) *SegmentInfo {
-		return &SegmentInfo{SegmentInfo: item}
-	})
-
-	err := m.alterMetaStoreAfterCompaction(toAlterInfo, &SegmentInfo{SegmentInfo: newSeg})
-	assert.NoError(t, err)
-
-	err = m.revertAlterMetaStoreAfterCompaction(toAlterInfo, &SegmentInfo{SegmentInfo: newSeg})
+	err := m.alterMetaStoreAfterCompaction(&SegmentInfo{SegmentInfo: newSeg}, lo.Map(toAlter, func(t *datapb.SegmentInfo, _ int) *SegmentInfo {
+		return &SegmentInfo{SegmentInfo: t}
+	}))
 	assert.NoError(t, err)
 }
 

@@ -1066,8 +1066,14 @@ func (m *meta) copyDeltaFiles(binlogs []*datapb.FieldBinlog, collectionID, parti
 	return ret, nil
 }
 
-func (m *meta) alterMetaStoreAfterCompaction(modSegments []*SegmentInfo, newSegment *SegmentInfo) error {
-	modSegIDs := lo.Map(modSegments, func(segment *SegmentInfo, _ int) int64 { return segment.GetID() })
+func (m *meta) alterMetaStoreAfterCompaction(segmentCompactTo *SegmentInfo, segmentsCompactFrom []*SegmentInfo) error {
+	modInfos := make([]*datapb.SegmentInfo, len(segmentsCompactFrom))
+	for i := range segmentsCompactFrom {
+		modInfos[i] = segmentsCompactFrom[i].SegmentInfo
+	}
+	newSegment := segmentCompactTo.SegmentInfo
+
+	modSegIDs := lo.Map(modInfos, func(segment *datapb.SegmentInfo, _ int) int64 { return segment.GetID() })
 	if newSegment.GetNumOfRows() == 0 {
 		newSegment.State = commonpb.SegmentState_Dropped
 	}
@@ -1080,52 +1086,28 @@ func (m *meta) alterMetaStoreAfterCompaction(modSegments []*SegmentInfo, newSegm
 		zap.Int("delta logs", len(newSegment.GetDeltalogs())),
 		zap.Int64("compact to segment", newSegment.GetID()))
 
-	m.Lock()
-	defer m.Unlock()
-
-	modInfos := lo.Map(modSegments, func(item *SegmentInfo, _ int) *datapb.SegmentInfo {
-		return item.SegmentInfo
-	})
-
-	if err := m.catalog.AlterSegmentsAndAddNewSegment(m.ctx, modInfos, newSegment.SegmentInfo); err != nil {
+	err := m.catalog.AlterSegmentsAndAddNewSegment(m.ctx, modInfos, newSegment)
+	if err != nil {
+		log.Warn("fail to alter segments and new segment", zap.Error(err))
 		return err
 	}
 
-	for _, s := range modSegments {
-		m.segments.SetSegment(s.GetID(), s)
+	var compactFromIDs []int64
+	for _, v := range segmentsCompactFrom {
+		compactFromIDs = append(compactFromIDs, v.GetID())
 	}
-
-	m.segments.SetSegment(newSegment.GetID(), newSegment)
-
-	return nil
-}
-
-func (m *meta) revertAlterMetaStoreAfterCompaction(oldSegments []*SegmentInfo, removalSegment *SegmentInfo) error {
-	log.Info("meta update: revert metastore after compaction failure",
-		zap.Int64("collectionID", removalSegment.CollectionID),
-		zap.Int64("partitionID", removalSegment.PartitionID),
-		zap.Int64("compactedTo (segment to remove)", removalSegment.ID),
-		zap.Int64s("compactedFrom (segments to add back)", removalSegment.GetCompactionFrom()),
-	)
-
+	log.Info("meta update: alter in memory meta after compaction",
+		zap.Int64("compact to segment ID", segmentCompactTo.GetID()),
+		zap.Int64s("compact from segment IDs", compactFromIDs))
 	m.Lock()
 	defer m.Unlock()
-
-	oldSegmentInfos := lo.Map(oldSegments, func(item *SegmentInfo, _ int) *datapb.SegmentInfo {
-		return item.SegmentInfo
-	})
-
-	if err := m.catalog.RevertAlterSegmentsAndAddNewSegment(m.ctx, oldSegmentInfos, removalSegment.SegmentInfo); err != nil {
-		return err
-	}
-
-	for _, s := range oldSegments {
+	for _, s := range segmentsCompactFrom {
 		m.segments.SetSegment(s.GetID(), s)
 	}
-
-	if removalSegment.GetNumOfRows() > 0 {
-		m.segments.DropSegment(removalSegment.GetID())
-	}
+	m.segments.SetSegment(segmentCompactTo.GetID(), segmentCompactTo)
+	log.Info("meta update: alter in memory meta after compaction - complete",
+		zap.Int64("compact to segment ID", segmentCompactTo.GetID()),
+		zap.Int64s("compact from segment IDs", compactFromIDs))
 	return nil
 }
 

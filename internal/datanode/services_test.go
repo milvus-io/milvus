@@ -164,7 +164,7 @@ func (s *DataNodeServicesSuite) TestGetCompactionState() {
 			mu.Unlock()
 			return true
 		})
-		s.Assert().Equal(0, cnt)
+		s.Assert().Equal(1, cnt)
 	})
 
 	s.Run("unhealthy", func() {
@@ -652,13 +652,23 @@ func (s *DataNodeServicesSuite) TestSyncSegments() {
 			CompactedTo:   102,
 			NumOfRows:     100,
 		}
-		status, err := s.node.SyncSegments(s.ctx, req)
+		cancelCtx, cancel := context.WithCancel(context.Background())
+		cancel()
+		status, err := s.node.SyncSegments(cancelCtx, req)
+		s.Assert().NoError(err)
+		s.Assert().Equal(commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
+
+		status, err = s.node.SyncSegments(s.ctx, req)
 		s.Assert().NoError(err)
 		s.Assert().Equal(commonpb.ErrorCode_Success, status.GetErrorCode())
 
 		s.Assert().True(fg.channel.hasSegment(req.CompactedTo, true))
 		s.Assert().False(fg.channel.hasSegment(req.CompactedFrom[0], true))
 		s.Assert().False(fg.channel.hasSegment(req.CompactedFrom[1], true))
+
+		status, err = s.node.SyncSegments(s.ctx, req)
+		s.Assert().NoError(err)
+		s.Assert().Equal(commonpb.ErrorCode_Success, status.GetErrorCode())
 	})
 
 	s.Run("valid request numRows=0", func() {

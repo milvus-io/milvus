@@ -31,10 +31,11 @@ const (
 )
 
 type compactionExecutor struct {
-	executing sync.Map // planID to compactor
-	completed sync.Map // planID to CompactionResult
-	taskCh    chan compactor
-	dropped   sync.Map // vchannel dropped
+	executing          sync.Map // planID to compactor
+	completedCompactor sync.Map // planID to compactor
+	completed          sync.Map // planID to CompactionResult
+	taskCh             chan compactor
+	dropped            sync.Map // vchannel dropped
 }
 
 func newCompactionExecutor() *compactionExecutor {
@@ -56,6 +57,13 @@ func (c *compactionExecutor) toExecutingState(task compactor) {
 func (c *compactionExecutor) toCompleteState(task compactor) {
 	task.complete()
 	c.executing.Delete(task.getPlanID())
+}
+func (c *compactionExecutor) injectDone(planID UniqueID) {
+	c.completed.Delete(planID)
+	task, loaded := c.completedCompactor.LoadAndDelete(planID)
+	if loaded {
+		task.(compactor).injectDone()
+	}
 }
 
 // These two func are bounded for waitGroup
@@ -89,6 +97,7 @@ func (c *compactionExecutor) executeTask(task compactor) {
 		)
 	} else {
 		c.completed.Store(task.getPlanID(), result)
+		c.completedCompactor.Store(task.getPlanID(), task)
 	}
 
 	log.Info("end to execute compaction", zap.Int64("planID", task.getPlanID()))
@@ -119,7 +128,7 @@ func (c *compactionExecutor) stopExecutingtaskByVChannelName(vChannelName string
 	// remove all completed plans for vChannelName
 	c.completed.Range(func(key interface{}, value interface{}) bool {
 		if value.(*datapb.CompactionResult).GetChannel() == vChannelName {
-			c.completed.Delete(key.(UniqueID))
+			c.injectDone(key.(UniqueID))
 			log.Info("remove compaction results for dropped channel",
 				zap.String("channel", vChannelName),
 				zap.Int64("planID", key.(UniqueID)))
