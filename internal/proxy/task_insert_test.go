@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"math"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -245,6 +246,7 @@ func TestInsertTask_CheckVectorFieldData(t *testing.T) {
 					IsPrimaryKey: false,
 					AutoID:       false,
 					DataType:     schemapb.DataType_FloatVector,
+					TypeParams:   []*commonpb.KeyValuePair{{Key: "dim", Value: strconv.Itoa(dim)}},
 				},
 			},
 		},
@@ -297,6 +299,13 @@ func TestInsertTask_CheckVectorFieldData(t *testing.T) {
 				},
 			},
 		},
+	}
+	err = task.checkVectorFieldData()
+	assert.Error(t, err)
+
+	// vector dim not match
+	task.insertMsg.FieldsData = []*schemapb.FieldData{
+		newFloatVectorFieldData(fieldName, numRows, dim+1),
 	}
 	err = task.checkVectorFieldData()
 	assert.Error(t, err)
