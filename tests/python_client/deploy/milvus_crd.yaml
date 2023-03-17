@@ -9,11 +9,13 @@ metadata:
 spec:
   mode: standalone
   config:
+    dataNode:
+      memory:
+        forceSyncEnable: false    
     quotaAndLimits:
       enable: false
-    milvus:
-      log:
-        level: debug
+    log:
+      level: debug
   components:
     enableRollingUpdate: true
     imageUpdateMode: rollingUpgrade
