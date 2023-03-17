@@ -56,7 +56,7 @@ services:
       PULSAR_ADDRESS: pulsar://pulsar:6650
       ROOT_COORD_ADDRESS: rootcoord:53100
       # add ROOT_COORD_ENABLE_ACTIVE_STANDBY to enable active standby
-      ROOT_COORD_ENABLE_ACTIVE_STANDBY: true
+      ROOT_COORD_ENABLE_ACTIVE_STANDBY: "true"
     depends_on:
       - "etcd"
       - "pulsar"
@@ -73,7 +73,7 @@ services:
   #    PULSAR_ADDRESS: pulsar://pulsar:6650
   #    ROOT_COORD_ADDRESS: rootcoord-1:53100
   #    # add ROOT_COORD_ENABLE_ACTIVE_STANDBY to enable active standby
-  #    ROOT_COORD_ENABLE_ACTIVE_STANDBY: true
+  #    ROOT_COORD_ENABLE_ACTIVE_STANDBY: "true"
   #  depends_on:
   #    - "etcd"
   #    - "pulsar"
@@ -101,7 +101,7 @@ services:
       PULSAR_ADDRESS: pulsar://pulsar:6650
       QUERY_COORD_ADDRESS: querycoord:19531
       # add QUERY_COORD_ENABLE_ACTIVE_STANDBY to enable active standby
-      QUERY_COORD_ENABLE_ACTIVE_STANDBY: true
+      QUERY_COORD_ENABLE_ACTIVE_STANDBY: "true"
     depends_on:
       - "etcd"
       - "pulsar"
@@ -117,7 +117,7 @@ services:
   #    MINIO_ADDRESS: minio:9000
   #    PULSAR_ADDRESS: pulsar://pulsar:6650
   #    QUERY_COORD_ADDRESS: querycoord-1:19531
-  #    QUERY_COORD_ENABLE_ACTIVE_STANDBY: true
+  #    QUERY_COORD_ENABLE_ACTIVE_STANDBY: "true"
   #  depends_on:
   #    - "etcd"
   #    - "pulsar"
@@ -144,7 +144,7 @@ services:
       PULSAR_ADDRESS: pulsar://pulsar:6650
       INDEX_COORD_ADDRESS: indexcoord:31000
       # add INDEX_COORD_ENABLE_ACTIVE_STANDBY to enable active standby
-      INDEX_COORD_ENABLE_ACTIVE_STANDBY: true
+      INDEX_COORD_ENABLE_ACTIVE_STANDBY: "true"
     depends_on:
       - "etcd"
       - "pulsar"
@@ -160,7 +160,7 @@ services:
   #    MINIO_ADDRESS: minio:9000
   #    PULSAR_ADDRESS: pulsar://pulsar:6650
   #    INDEX_COORD_ADDRESS: indexcoord-1:31000
-  #    INDEX_COORD_ENABLE_ACTIVE_STANDBY: true
+  #    INDEX_COORD_ENABLE_ACTIVE_STANDBY: "true"
   #  depends_on:
   #    - "etcd"
   #    - "pulsar"
@@ -188,7 +188,7 @@ services:
       PULSAR_ADDRESS: pulsar://pulsar:6650
       DATA_COORD_ADDRESS: datacoord:13333
       # add DATA_COORD_ENABLE_ACTIVE_STANDBY to enable active standby
-      DATA_COORD_ENABLE_ACTIVE_STANDBY: true
+      DATA_COORD_ENABLE_ACTIVE_STANDBY: "true"
     depends_on:
       - "etcd"
       - "pulsar"
@@ -204,7 +204,7 @@ services:
   #    MINIO_ADDRESS: minio:9000
   #    PULSAR_ADDRESS: pulsar://pulsar:6650
   #    DATA_COORD_ADDRESS: datacoord-1:13333
-  #    DATA_COORD_ENABLE_ACTIVE_STANDBY: true
+  #    DATA_COORD_ENABLE_ACTIVE_STANDBY: "true"
   #  depends_on:
   #    - "etcd"
   #    - "pulsar"
