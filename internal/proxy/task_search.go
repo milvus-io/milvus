@@ -363,7 +363,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 
 	travelTimestamp := t.request.TravelTimestamp
 	if travelTimestamp == 0 {
-		travelTimestamp = typeutil.MaxTimestamp
+		travelTimestamp = t.BeginTs()
 	}
 	err = validateTravelTimestamp(travelTimestamp, t.BeginTs())
 	if err != nil {
