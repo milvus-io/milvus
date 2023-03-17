@@ -288,7 +288,7 @@ func (g *getStatisticsTask) getStatisticsFromQueryNode(ctx context.Context) erro
 		log.Warn("first get statistics failed, updating shard leader caches and retry",
 			zap.Error(err))
 		// invalidate cache first, since ctx may be canceled or timeout here
-		globalMetaCache.ClearShards(g.collectionName)
+		globalMetaCache.DeprecateShardCache(g.collectionName)
 		err = executeGetStatistics(WithoutCache)
 	}
 	if err != nil {
@@ -304,24 +304,28 @@ func (g *getStatisticsTask) getStatisticsShard(ctx context.Context, nodeID int64
 		DmlChannels: channelIDs,
 		Scope:       querypb.DataScope_All,
 	}
+	log.Info("xxxx")
 	result, err := qn.GetStatistics(ctx, req)
 	if err != nil {
 		log.Warn("QueryNode statistic return error",
 			zap.Int64("nodeID", nodeID),
 			zap.Strings("channels", channelIDs),
 			zap.Error(err))
+		globalMetaCache.DeprecateShardCache(g.collectionName)
 		return err
 	}
 	if result.GetStatus().GetErrorCode() == commonpb.ErrorCode_NotShardLeader {
 		log.Warn("QueryNode is not shardLeader",
 			zap.Int64("nodeID", nodeID),
 			zap.Strings("channels", channelIDs))
+		globalMetaCache.DeprecateShardCache(g.collectionName)
 		return errInvalidShardLeaders
 	}
 	if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn("QueryNode statistic result error",
 			zap.Int64("nodeID", nodeID),
 			zap.String("reason", result.GetStatus().GetReason()))
+		globalMetaCache.DeprecateShardCache(g.collectionName)
 		return fmt.Errorf("fail to get statistic, QueryNode ID=%d, reason=%s", nodeID, result.GetStatus().GetReason())
 	}
 	g.resultBuf <- result

@@ -559,11 +559,11 @@ func TestMetaCache_ClearShards(t *testing.T) {
 	defer qc.Stop()
 
 	t.Run("Clear with no collection info", func(t *testing.T) {
-		globalMetaCache.ClearShards("collection_not_exist")
+		globalMetaCache.DeprecateShardCache("collection_not_exist")
 	})
 
 	t.Run("Clear valid collection empty cache", func(t *testing.T) {
-		globalMetaCache.ClearShards(collectionName)
+		globalMetaCache.DeprecateShardCache(collectionName)
 	})
 
 	t.Run("Clear valid collection valid cache", func(t *testing.T) {
@@ -589,7 +589,7 @@ func TestMetaCache_ClearShards(t *testing.T) {
 		require.Equal(t, 1, len(shards))
 		require.Equal(t, 3, len(shards["channel-1"]))
 
-		globalMetaCache.ClearShards(collectionName)
+		globalMetaCache.DeprecateShardCache(collectionName)
 
 		qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
 			Status: &commonpb.Status{

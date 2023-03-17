@@ -68,7 +68,7 @@ type Cache interface {
 	// GetCollectionSchema get collection's schema.
 	GetCollectionSchema(ctx context.Context, collectionName string) (*schemapb.CollectionSchema, error)
 	GetShards(ctx context.Context, withCache bool, collectionName string) (map[string][]nodeInfo, error)
-	ClearShards(collectionName string)
+	DeprecateShardCache(collectionName string)
 	expireShardLeaderCache(ctx context.Context)
 	RemoveCollection(ctx context.Context, collectionName string)
 	RemoveCollectionsByID(ctx context.Context, collectionID UniqueID) []string
@@ -754,8 +754,8 @@ func parseShardLeaderList2QueryNode(shardsLeaders []*querypb.ShardLeadersList) m
 	return shard2QueryNodes
 }
 
-// ClearShards clear the shard leader cache of a collection
-func (m *MetaCache) ClearShards(collectionName string) {
+// DeprecateShardCache clear the shard leader cache of a collection
+func (m *MetaCache) DeprecateShardCache(collectionName string) {
 	log.Info("clearing shard cache for collection", zap.String("collectionName", collectionName))
 	m.mu.RLock()
 	info, ok := m.collInfo[collectionName]
