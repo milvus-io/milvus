@@ -304,7 +304,6 @@ func (g *getStatisticsTask) getStatisticsShard(ctx context.Context, nodeID int64
 		DmlChannels: channelIDs,
 		Scope:       querypb.DataScope_All,
 	}
-	log.Info("xxxx")
 	result, err := qn.GetStatistics(ctx, req)
 	if err != nil {
 		log.Warn("QueryNode statistic return error",
