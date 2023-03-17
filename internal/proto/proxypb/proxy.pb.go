@@ -29,8 +29,9 @@ const _ = proto.ProtoPackageIsVersion3 // please upgrade the proto package
 
 type InvalidateCollMetaCacheRequest struct {
 	// MsgType:
-	//  DropCollection    ->  {meta cache, dml channels}
-	//  Other             ->  {meta cache}
+	//
+	//	DropCollection    ->  {meta cache, dml channels}
+	//	Other             ->  {meta cache}
 	Base                 *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
 	DbName               string            `protobuf:"bytes,2,opt,name=db_name,json=dbName,proto3" json:"db_name,omitempty"`
 	CollectionName       string            `protobuf:"bytes,3,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`

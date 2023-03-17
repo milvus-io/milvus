@@ -74,9 +74,6 @@ func (l *loadSegmentsTask) Execute(ctx context.Context) error {
 		return nil
 	}
 
-	segmentIDs := lo.Map(l.req.Infos, func(info *queryPb.SegmentLoadInfo, idx int) UniqueID { return info.SegmentID })
-	l.node.metaReplica.addSegmentsLoadingList(segmentIDs)
-	defer l.node.metaReplica.removeSegmentsLoadingList(segmentIDs)
 	loadDoneSegmentIDs, loadErr := l.node.loader.LoadSegment(l.ctx, l.req, segmentTypeSealed)
 	if len(loadDoneSegmentIDs) > 0 {
 		vchanName := make([]string, 0)

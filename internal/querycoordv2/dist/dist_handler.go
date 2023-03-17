@@ -101,38 +101,49 @@ func (dh *distHandler) handleDistResp(resp *querypb.GetDataDistributionResponse)
 	dh.scheduler.Dispatch(dh.nodeID)
 }
 
-func (dh *distHandler) updateSegmentsDistribution(resp *querypb.GetDataDistributionResponse) {
-	updates := make([]*meta.Segment, 0, len(resp.GetSegments()))
-	for _, s := range resp.GetSegments() {
-		// for collection which is already loaded
-		segmentInfo := dh.target.GetHistoricalSegment(s.GetCollection(), s.GetID(), meta.CurrentTarget)
-		if segmentInfo == nil {
-			// for collection which is loading
-			segmentInfo = dh.target.GetHistoricalSegment(s.GetCollection(), s.GetID(), meta.NextTarget)
-		}
-		var segment *meta.Segment
-		if segmentInfo == nil {
-			segment = &meta.Segment{
-				SegmentInfo: &datapb.SegmentInfo{
-					ID:            s.GetID(),
-					CollectionID:  s.GetCollection(),
-					PartitionID:   s.GetPartition(),
-					InsertChannel: s.GetChannel(),
-				},
-				Node:    resp.GetNodeID(),
-				Version: s.GetVersion(),
-			}
-		} else {
-			segment = &meta.Segment{
-				SegmentInfo: proto.Clone(segmentInfo).(*datapb.SegmentInfo),
-				Node:        resp.GetNodeID(),
-				Version:     s.GetVersion(),
-			}
-		}
-		updates = append(updates, segment)
+func (dh *distHandler) checkAndPackSegmentInfo(segVersionInfo *querypb.SegmentVersionInfo, resp *querypb.GetDataDistributionResponse) *meta.Segment {
+	// for collection which is already loaded
+	segmentInfo := dh.target.GetHistoricalSegment(segVersionInfo.GetCollection(), segVersionInfo.GetID(), meta.CurrentTarget)
+	if segmentInfo == nil {
+		// for collection which is loading
+		segmentInfo = dh.target.GetHistoricalSegment(segVersionInfo.GetCollection(), segVersionInfo.GetID(), meta.NextTarget)
 	}
+	var segment *meta.Segment
+	if segmentInfo == nil {
+		segment = &meta.Segment{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            segVersionInfo.GetID(),
+				CollectionID:  segVersionInfo.GetCollection(),
+				PartitionID:   segVersionInfo.GetPartition(),
+				InsertChannel: segVersionInfo.GetChannel(),
+			},
+			Node:    resp.GetNodeID(),
+			Version: segVersionInfo.GetVersion(),
+		}
+	} else {
+		segment = &meta.Segment{
+			SegmentInfo: proto.Clone(segmentInfo).(*datapb.SegmentInfo),
+			Node:        resp.GetNodeID(),
+			Version:     segVersionInfo.GetVersion(),
+		}
+	}
+	return segment
+}
 
-	dh.dist.SegmentDistManager.Update(resp.GetNodeID(), updates...)
+func (dh *distHandler) updateSegmentsDistribution(resp *querypb.GetDataDistributionResponse) {
+	loadedSealedSegments := make([]*meta.Segment, 0, len(resp.GetSegments()))
+	for _, s := range resp.GetSegments() {
+		segment := dh.checkAndPackSegmentInfo(s, resp)
+		loadedSealedSegments = append(loadedSealedSegments, segment)
+	}
+	dh.dist.SegmentDistManager.Update(resp.GetNodeID(), loadedSealedSegments...)
+
+	loadingSegments := make([]*meta.Segment, 0, len(resp.GetLoadingSegments()))
+	for _, s := range resp.GetLoadingSegments() {
+		segment := dh.checkAndPackSegmentInfo(s, resp)
+		loadingSegments = append(loadingSegments, segment)
+	}
+	dh.dist.SegmentDistManager.UpdateLoadingSegments(resp.GetNodeID(), loadingSegments...)
 }
 
 func (dh *distHandler) updateChannelsDistribution(resp *querypb.GetDataDistributionResponse) {

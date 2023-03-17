@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
+	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 )
@@ -29,11 +30,13 @@ import (
 type BalanceChecker struct {
 	baseChecker
 	balance.Balance
+	distManager *meta.DistributionManager
 }
 
-func NewBalanceChecker(balancer balance.Balance) *BalanceChecker {
+func NewBalanceChecker(dist *meta.DistributionManager, balancer balance.Balance) *BalanceChecker {
 	return &BalanceChecker{
-		Balance: balancer,
+		Balance:     balancer,
+		distManager: dist,
 	}
 }
 

@@ -665,6 +665,7 @@ func (s *Server) handleNodeDown(node int64) {
 	s.dist.LeaderViewManager.Update(node)
 	s.dist.ChannelDistManager.Update(node)
 	s.dist.SegmentDistManager.Update(node)
+	s.dist.SegmentDistManager.UpdateLoadingSegments(node)
 
 	// Clear meta
 	for _, collection := range s.meta.CollectionManager.GetAll() {
