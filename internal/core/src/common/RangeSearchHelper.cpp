@@ -55,30 +55,28 @@ SortRangeSearchResult(DatasetPtr data_set,
     auto p_dist = new float[topk * nq];
     std::fill_n(p_dist, topk * nq, std::numeric_limits<float>::max());
 
-    // cnt means the subscript of p_id and p_dist
-    int cnt = 0;
-
-    for (int i = 0; i < nq; i++) {
-        // if RangeSearch answer size of one nq is less than topk, set the capacity to size
-        int size = lims[i + 1] - lims[i];
-        int capacity = topk > size ? size : topk;
-        /*
+    /*
          *   get result for one nq
          *   IP:   1.0        range_filter     radius
          *          |------------+---------------|       min_heap   descending_order
          *   L2:   0.0        range_filter     radius
          *          |------------+---------------|       max_heap   ascending_order
          *
-         */
-        std::function<bool(const ResultPair&, const ResultPair&)> cmp =
-            std::less<std::pair<float, int64_t>>();
-        if (IsMetricType(metric_type, knowhere::metric::IP)) {
-            cmp = std::greater<std::pair<float, int64_t>>();
-        }
-        std::priority_queue<std::pair<float, int64_t>,
-                            std::vector<std::pair<float, int64_t>>,
-                            decltype(cmp)>
-            sub_result(cmp);
+    */
+    std::function<bool(const ResultPair&, const ResultPair&)> cmp =
+        std::less<>();
+    if (IsMetricType(metric_type, knowhere::metric::IP)) {
+        cmp = std::greater<>();
+    }
+    std::priority_queue<ResultPair, std::vector<ResultPair>, decltype(cmp)>
+        sub_result(cmp);
+
+    // The subscript of p_id and p_dist
+    int cnt = 0;
+    for (int i = 0; i < nq; i++) {
+        // if RangeSearch answer size of one nq is less than topk, set the capacity to size
+        int size = lims[i + 1] - lims[i];
+        int capacity = topk > size ? size : topk;
 
         for (int j = lims[i]; j < lims[i + 1]; j++) {
             auto current = ResultPair(dist[j], id[j]);
