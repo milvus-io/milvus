@@ -164,14 +164,26 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context, req *querypb.LoadS
 		}
 
 		newSegments[segmentID] = segment
+		loader.metaReplica.addSegmentToLoadingList(segment)
+		log.Info("add segment to loading list", zap.Int64("partitionID", partitionID),
+			zap.Int64("segmentID", segmentID), zap.Int64("collectionID", collectionID),
+			zap.String("channel", vChannelID))
 	}
+
+	defer func() {
+		for segID, segment := range newSegments {
+			loader.metaReplica.removeSegmentFromLoading(segID)
+			log.Info("remove segment from loading list", zap.Int64("partitionID", segment.partitionID),
+				zap.Int64("segmentID", segment.ID()), zap.Int64("collectionID", segment.collectionID),
+				zap.String("channel", segment.vChannelID))
+		}
+	}()
 
 	loadFileFunc := func(idx int) error {
 		loadInfo := req.Infos[idx]
 		partitionID := loadInfo.PartitionID
 		segmentID := loadInfo.SegmentID
 		segment := newSegments[segmentID]
-
 		tr := timerecord.NewTimeRecorder("loadDurationPerSegment")
 		err := loader.loadFiles(ctx, segment, loadInfo)
 		if err != nil {
@@ -179,6 +191,7 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context, req *querypb.LoadS
 				zap.Int64("partitionID", partitionID),
 				zap.Int64("segmentID", segmentID),
 				zap.Error(err))
+
 			return err
 		}
 

@@ -18,6 +18,7 @@ package balance
 
 import (
 	"container/heap"
+	"sort"
 )
 
 type item interface {
@@ -82,4 +83,12 @@ func (pq *priorityQueue) push(item item) {
 
 func (pq *priorityQueue) pop() item {
 	return heap.Pop(&pq.heapQueue).(item)
+}
+
+func (pq *priorityQueue) copiedItems() []item {
+	copy := pq.heapQueue
+	sort.Slice(copy, func(i, j int) bool {
+		return copy[i].getPriority() < copy[j].getPriority()
+	})
+	return copy
 }

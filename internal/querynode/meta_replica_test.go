@@ -391,7 +391,10 @@ func TestMetaReplica_BlackList(t *testing.T) {
 	segment3, err := newSegment(collection, UniqueID(3), defaultPartitionID, defaultCollectionID, "channel2", segmentTypeGrowing, defaultSegmentVersion, defaultSegmentStartPosition)
 	assert.NoError(t, err)
 
-	replica.addSegmentsLoadingList([]UniqueID{1, 2, 3})
+	//add loading segments
+	replica.addSegmentToLoadingList(segment1)
+	replica.addSegmentToLoadingList(segment2)
+	replica.addSegmentToLoadingList(segment3)
 
 	segments := replica.getSealedSegments()
 	assert.Equal(t, 0, len(segments))
@@ -399,8 +402,10 @@ func TestMetaReplica_BlackList(t *testing.T) {
 	segments = replica.getGrowingSegments()
 	assert.Equal(t, 0, len(segments))
 
-	// add segments
+	loadingSegments := replica.getLoadingSegments()
+	assert.Equal(t, 3, len(loadingSegments))
 
+	// add sealed segments
 	err = replica.setSegment(segment1)
 	assert.NoError(t, err)
 	err = replica.setSegment(segment2)
@@ -408,7 +413,7 @@ func TestMetaReplica_BlackList(t *testing.T) {
 	err = replica.setSegment(segment3)
 	assert.NoError(t, err)
 
-	// no segments since all in black list
+	// no segments since all in loading list
 	segments = replica.getSealedSegments()
 	assert.Equal(t, 0, len(segments))
 
@@ -416,16 +421,16 @@ func TestMetaReplica_BlackList(t *testing.T) {
 	segments = replica.getGrowingSegments()
 	assert.Equal(t, 1, len(segments))
 
-	replica.removeSegmentsLoadingList([]UniqueID{1, 2, 3})
+	// remove loading segments
+	replica.removeSegmentFromLoading(segment1.segmentID)
+	replica.removeSegmentFromLoading(segment2.segmentID)
+	replica.removeSegmentFromLoading(segment3.segmentID)
 
 	segments = replica.getSealedSegments()
 	assert.Equal(t, 2, len(segments))
 
 	segments = replica.getGrowingSegments()
 	assert.Equal(t, 1, len(segments))
-
-	// try add black list, shall fail since all loaded before
-	replica.addSegmentsLoadingList([]UniqueID{1, 2, 3})
 
 	segments = replica.getSealedSegments()
 	assert.Equal(t, 2, len(segments))

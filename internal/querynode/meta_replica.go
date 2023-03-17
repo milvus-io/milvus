@@ -30,7 +30,6 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
-	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/msgpb"
@@ -42,7 +41,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/util/paramtable"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 )
 
 var (
@@ -135,14 +133,14 @@ type ReplicaInterface interface {
 	// printReplica prints the collections, partitions and segments in the collectionReplica
 	printReplica()
 
-	// addSegmentsLoadingList add segment into black list, so get sealed segments will not return them.
-	addSegmentsLoadingList(segmentIDs []UniqueID)
-	// removeSegmentsLoadingList add segment into black list, so get sealed segments will not return them.
-	removeSegmentsLoadingList(segmentIDs []UniqueID)
+	//addSegmentToLoadingList loading list in order to improve the accuracy of segment info provided to queryCoord
+	addSegmentToLoadingList(segment *Segment)
+	removeSegmentFromLoading(segmentID UniqueID)
 
 	getGrowingSegments() []*Segment
 	getSealedSegments() []*Segment
 	getNoSegmentChan() <-chan struct{}
+	getLoadingSegments() []*Segment
 }
 
 // collectionReplica is the data replication of memory data in query node.
@@ -157,8 +155,8 @@ type metaReplica struct {
 
 	excludedSegments map[UniqueID][]*datapb.SegmentInfo // map[collectionID]segmentIDs
 
-	// segmentsBlackList stores segments which are still loading
-	segmentsBlackList typeutil.UniqueSet
+	// loadingSegments stores segment that are being loaded
+	loadingSegments map[UniqueID]*Segment
 }
 
 // getSegmentsMemSize get the memory size in bytes of all the Segments
@@ -887,24 +885,19 @@ func (replica *metaReplica) freeAll() {
 	replica.partitions = make(map[UniqueID]*Partition)
 	replica.growingSegments = make(map[UniqueID]*Segment)
 	replica.sealedSegments = make(map[UniqueID]*Segment)
+	replica.loadingSegments = make(map[UniqueID]*Segment)
 }
 
-func (replica *metaReplica) addSegmentsLoadingList(segmentIDs []UniqueID) {
+func (replica *metaReplica) addSegmentToLoadingList(segment *Segment) {
 	replica.mu.Lock()
 	defer replica.mu.Unlock()
-
-	// add to black list only segment is not loaded before
-	replica.segmentsBlackList.Insert(lo.Filter(segmentIDs, func(id UniqueID, idx int) bool {
-		_, isSealed := replica.sealedSegments[id]
-		return !isSealed
-	})...)
+	replica.loadingSegments[segment.segmentID] = segment
 }
 
-func (replica *metaReplica) removeSegmentsLoadingList(segmentIDs []UniqueID) {
+func (replica *metaReplica) removeSegmentFromLoading(segmentID UniqueID) {
 	replica.mu.Lock()
 	defer replica.mu.Unlock()
-
-	replica.segmentsBlackList.Remove(segmentIDs...)
+	delete(replica.loadingSegments, segmentID)
 }
 
 func (replica *metaReplica) getGrowingSegments() []*Segment {
@@ -924,9 +917,19 @@ func (replica *metaReplica) getSealedSegments() []*Segment {
 
 	ret := make([]*Segment, 0, len(replica.sealedSegments))
 	for _, s := range replica.sealedSegments {
-		if !replica.segmentsBlackList.Contain(s.segmentID) {
+		if replica.loadingSegments[s.segmentID] == nil {
 			ret = append(ret, s)
 		}
+	}
+	return ret
+}
+
+func (replica *metaReplica) getLoadingSegments() []*Segment {
+	replica.mu.RLock()
+	defer replica.mu.RUnlock()
+	ret := make([]*Segment, 0, len(replica.loadingSegments))
+	for _, segment := range replica.loadingSegments {
+		ret = append(ret, segment)
 	}
 	return ret
 }
@@ -952,10 +955,9 @@ func newCollectionReplica() ReplicaInterface {
 		partitions:      make(map[UniqueID]*Partition),
 		growingSegments: make(map[UniqueID]*Segment),
 		sealedSegments:  make(map[UniqueID]*Segment),
+		loadingSegments: make(map[UniqueID]*Segment),
 
 		excludedSegments: make(map[UniqueID][]*datapb.SegmentInfo),
-
-		segmentsBlackList: make(typeutil.UniqueSet),
 	}
 
 	return replica

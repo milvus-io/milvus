@@ -48,12 +48,14 @@ type SegmentDistManager struct {
 	rwmutex sync.RWMutex
 
 	// nodeID -> []*Segment
-	segments map[UniqueID][]*Segment
+	segments        map[UniqueID][]*Segment
+	loadingSegments map[UniqueID][]*Segment
 }
 
 func NewSegmentDistManager() *SegmentDistManager {
 	return &SegmentDistManager{
-		segments: make(map[UniqueID][]*Segment),
+		segments:        make(map[UniqueID][]*Segment),
+		loadingSegments: make(map[UniqueID][]*Segment),
 	}
 }
 
@@ -65,6 +67,33 @@ func (m *SegmentDistManager) Update(nodeID UniqueID, segments ...*Segment) {
 		segment.Node = nodeID
 	}
 	m.segments[nodeID] = segments
+}
+
+func (m *SegmentDistManager) UpdateLoadingSegments(nodeID UniqueID, segments ...*Segment) {
+	m.rwmutex.Lock()
+	defer m.rwmutex.Unlock()
+	for _, segment := range segments {
+		segment.Node = nodeID
+	}
+	m.loadingSegments[nodeID] = segments
+}
+
+func (m *SegmentDistManager) GetLoadingSegmentsByNode(nodeID UniqueID) []*Segment {
+	m.rwmutex.RLock()
+	defer m.rwmutex.RUnlock()
+	return m.loadingSegments[nodeID]
+}
+
+func (m *SegmentDistManager) GetLoadingSegmentsByCollectionAndNode(collectionID UniqueID, nodeID int64) []*Segment {
+	m.rwmutex.RLock()
+	defer m.rwmutex.RUnlock()
+	ret := make([]*Segment, 0)
+	for _, segment := range m.loadingSegments[nodeID] {
+		if segment.GetCollectionID() == collectionID {
+			ret = append(ret, segment)
+		}
+	}
+	return ret
 }
 
 func (m *SegmentDistManager) Get(id UniqueID) []*Segment {
