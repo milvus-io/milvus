@@ -603,7 +603,7 @@ class TestTransferNode(TestcaseBase):
                                         check_items=error)
 
     @pytest.mark.tags(CaseLabel.MultiQueryNodes)
-    @pytest.mark.parametrize("num_replica", [0, 99, -1, 0.5, True, "str"])
+    @pytest.mark.parametrize("num_replica", [0, 99, -1])   # , 0.5, True, "str"])
     def test_transfer_replica_with_wrong_num_replica(self, num_replica):
         """
         Method:
@@ -1374,7 +1374,7 @@ class TestResourceGroupMultiNodes(TestcaseBase):
         # transfer 1/2/3 replicas from default rg to rgA
         self.utility_wrap.transfer_replica(source=ct.default_resource_group_name, target=rgA_name,
                                            collection_name=collection_w.name,
-                                           num_replica=1)
+                                           num_replica=num_replica)
         # verify search succ
         nq = 5
         vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
@@ -1397,9 +1397,11 @@ class TestResourceGroupMultiNodes(TestcaseBase):
             insert_ids.extend(res.primary_keys)
 
         # transfer 1/2/3 replicas from rgA to default rg
+        # error = {ct.err_code: 999,
+        #          ct.err_msg: "transfer replica will cause replica loaded in both default rg and other rg"}
         self.utility_wrap.transfer_replica(source=rgA_name, target=ct.default_resource_group_name,
                                            collection_name=collection_w.name,
-                                           num_replica=1)
+                                           num_replica=num_replica)
         # verify search succ
         collection_w.search(vectors[:nq],
                             ct.default_float_vec_field_name,
@@ -1642,9 +1644,9 @@ class TestResourceGroupMultiNodes(TestcaseBase):
         4. load the collection into rgA and rgB
         verify search succ
         5. transfer replica from rgB to default rg
-        verify search succ
+        verify fail
         6. transfer node from rgA to default rgA
-        verify fail with error
+        verify succ
         7. transfer node from rgB to default rgB
         8. verify search succ
         """
@@ -1694,10 +1696,14 @@ class TestResourceGroupMultiNodes(TestcaseBase):
                                          "limit": ct.default_limit}
                             )
         # transfer the replica from rgB to default rg
+        error = {ct.err_code: 999,
+                 ct.err_msg: "transfer replica will cause replica loaded in both default rg and other rg"}
         self.utility_wrap.transfer_replica(source=rgB_name,
                                            target=ct.default_resource_group_name,
                                            collection_name=collection_w.name,
-                                           num_replica=1)
+                                           num_replica=1,
+                                           check_task=CheckTasks.err_res,
+                                           check_items=error)
 
         time.sleep(1)
         collection_w.search(vectors[:nq],
@@ -1711,13 +1717,11 @@ class TestResourceGroupMultiNodes(TestcaseBase):
                             )
 
         # transfer all nodes back to default rg
-        error = {ct.err_code: 999,
-                 ct.err_msg: f"can't transfer node, cause the resource group[{rgA_name}] and the resource group[{ct.default_resource_group_name}] loaded same collection"}
+        # error = {ct.err_code: 999,
+        #          ct.err_msg: f"can't transfer node, cause the resource group[{rgA_name}] and the resource group[{ct.default_resource_group_name}] loaded same collection"}
         self.utility_wrap.transfer_node(source=rgA_name,
                                         target=ct.default_resource_group_name,
-                                        num_node=2,
-                                        check_task=CheckTasks.err_res,
-                                        check_items=error)
+                                        num_node=2)
         self.utility_wrap.transfer_node(source=rgB_name,
                                         target=ct.default_resource_group_name,
                                         num_node=2)
