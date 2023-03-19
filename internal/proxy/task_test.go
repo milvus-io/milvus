@@ -1425,8 +1425,9 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 					PartitionName:  partitionName,
 				},
 			},
-			deleteExpr: "int64 in [0, 1]",
-			ctx:        ctx,
+			idAllocator: idAllocator,
+			deleteExpr:  "int64 in [0, 1]",
+			ctx:         ctx,
 			result: &milvuspb.MutationResult{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_Success,
@@ -1479,8 +1480,9 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 					PartitionName:  partitionName,
 				},
 			},
-			deleteExpr: "int64 not in [0, 1]",
-			ctx:        ctx,
+			idAllocator: idAllocator,
+			deleteExpr:  "int64 not in [0, 1]",
+			ctx:         ctx,
 			result: &milvuspb.MutationResult{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_Success,
@@ -1768,8 +1770,9 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 					PartitionName:  partitionName,
 				},
 			},
-			deleteExpr: "varChar in [\"milvus\", \"test\"]",
-			ctx:        ctx,
+			idAllocator: idAllocator,
+			deleteExpr:  "varChar in [\"milvus\", \"test\"]",
+			ctx:         ctx,
 			result: &milvuspb.MutationResult{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_Success,
@@ -1822,8 +1825,9 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 					PartitionName:  partitionName,
 				},
 			},
-			deleteExpr: "varChar not in [\"milvus\", \"test\"]",
-			ctx:        ctx,
+			idAllocator: idAllocator,
+			deleteExpr:  "varChar not in [\"milvus\", \"test\"]",
+			ctx:         ctx,
 			result: &milvuspb.MutationResult{
 				Status: &commonpb.Status{
 					ErrorCode: commonpb.ErrorCode_Success,
