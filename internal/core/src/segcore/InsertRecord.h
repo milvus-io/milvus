@@ -32,10 +32,10 @@ class OffsetMap {
     virtual ~OffsetMap() = default;
 
     virtual std::vector<int64_t>
-    find(const PkType pk) const = 0;
+    find(const PkType& pk) const = 0;
 
     virtual void
-    insert(const PkType pk, int64_t offset) = 0;
+    insert(const PkType& pk, int64_t offset) = 0;
 
     virtual void
     seal() = 0;
@@ -48,25 +48,25 @@ template <typename T>
 class OffsetHashMap : public OffsetMap {
  public:
     std::vector<int64_t>
-    find(const PkType pk) const {
+    find(const PkType& pk) const override {
         auto offset_vector = map_.find(std::get<T>(pk));
         return offset_vector != map_.end() ? offset_vector->second
                                            : std::vector<int64_t>();
     }
 
     void
-    insert(const PkType pk, int64_t offset) {
+    insert(const PkType& pk, int64_t offset) override {
         map_[std::get<T>(pk)].emplace_back(offset);
     }
 
     void
-    seal() {
+    seal() override {
         PanicInfo(
             "OffsetHashMap used for growing segment could not be sealed.");
     }
 
     bool
-    empty() const {
+    empty() const override {
         return map_.empty();
     }
 
@@ -78,45 +78,41 @@ template <typename T>
 class OffsetOrderedArray : public OffsetMap {
  public:
     std::vector<int64_t>
-    find(const PkType pk) const {
-        int left = 0, right = array_.size() - 1;
-        T target = std::get<T>(pk);
+    find(const PkType& pk) const override {
         if (!is_sealed)
             PanicInfo("OffsetOrderedArray could not search before seal");
 
-        while (left < right) {
-            int mid = (left + right) >> 1;
-            if (array_[mid].first < target)
-                left = mid + 1;
-            else
-                right = mid;
-        }
+        const T& target = std::get<T>(pk);
+        auto it =
+            std::lower_bound(array_.begin(),
+                             array_.end(),
+                             target,
+                             [](const std::pair<T, int64_t>& elem,
+                                const T& value) { return elem.first < value; });
 
         std::vector<int64_t> offset_vector;
-        for (int offset_id = right; offset_id < array_.size(); offset_id++) {
-            if (offset_id < 0 || array_[offset_id].first != target)
-                break;
-            offset_vector.push_back(array_[offset_id].second);
+        for (; it != array_.end() && it->first == target; ++it) {
+            offset_vector.push_back(it->second);
         }
 
         return offset_vector;
     }
 
     void
-    insert(const PkType pk, int64_t offset) {
+    insert(const PkType& pk, int64_t offset) override {
         if (is_sealed)
             PanicInfo("OffsetOrderedArray could not insert after seal");
         array_.push_back(std::make_pair(std::get<T>(pk), offset));
     }
 
     void
-    seal() {
+    seal() override {
         sort(array_.begin(), array_.end());
         is_sealed = true;
     }
 
     bool
-    empty() const {
+    empty() const override {
         return array_.empty();
     }
 
@@ -229,33 +225,33 @@ struct InsertRecord {
     }
 
     std::vector<SegOffset>
-    search_pk(const PkType pk, Timestamp timestamp) const {
+    search_pk(const PkType& pk, Timestamp timestamp) const {
         std::shared_lock lck(shared_mutex_);
         std::vector<SegOffset> res_offsets;
         auto offset_iter = pk2offset_->find(pk);
         for (auto offset : offset_iter) {
             if (timestamps_[offset] <= timestamp) {
-                res_offsets.push_back(SegOffset(offset));
+                res_offsets.emplace_back(offset);
             }
         }
         return res_offsets;
     }
 
     std::vector<SegOffset>
-    search_pk(const PkType pk, int64_t insert_barrier) const {
+    search_pk(const PkType& pk, int64_t insert_barrier) const {
         std::shared_lock lck(shared_mutex_);
         std::vector<SegOffset> res_offsets;
         auto offset_iter = pk2offset_->find(pk);
         for (auto offset : offset_iter) {
             if (offset < insert_barrier) {
-                res_offsets.push_back(SegOffset(offset));
+                res_offsets.emplace_back(offset);
             }
         }
         return res_offsets;
     }
 
     void
-    insert_pk(const PkType pk, int64_t offset) {
+    insert_pk(const PkType& pk, int64_t offset) {
         std::lock_guard lck(shared_mutex_);
         pk2offset_->insert(pk, offset);
     }
